@@ -4455,9 +4455,21 @@ export class StoreRentalService {
     if (this.useMysqlDataSource()) {
       return this.storeRentalRepository.refreshStationCapacitySnapshots(stationId);
     }
-    const snapshots = stationId
-      ? this.stationCapacitySnapshots.filter((item) => item.stationId === stationId)
-      : this.stationCapacitySnapshots;
+    this.ensureMemoryFleetRecords();
+    const targetStations = stationId
+      ? this.stations.filter((item) => item.id === stationId)
+      : this.stations;
+    if (stationId && targetStations.length === 0) {
+      throw new NotFoundException(`Station ${stationId} was not found`);
+    }
+    const snapshots = targetStations.map((station) =>
+      this.buildMemoryStationCapacitySnapshot(station)
+    );
+    const refreshedStationIds = new Set(snapshots.map((item) => item.stationId));
+    this.stationCapacitySnapshots = [
+      ...snapshots,
+      ...this.stationCapacitySnapshots.filter((item) => !refreshedStationIds.has(item.stationId))
+    ];
 
     return {
       snapshots,
@@ -5013,6 +5025,158 @@ export class StoreRentalService {
     return this.stationCapacitySnapshots.filter(
       (item) => !stationId || item.stationId === stationId
     );
+  }
+
+  private buildMemoryStationCapacitySnapshot(station: StoreStationSummary): StationCapacitySnapshot {
+    const stationVehicles = this.vehicles.filter(
+      (vehicle) => vehicle.currentStationName === station.name
+    );
+    const controlledVehicles = stationVehicles.filter(
+      (vehicle) => vehicle.operationStatus === "controlled"
+    ).length;
+    const maintenanceVehicles = stationVehicles.filter(
+      (vehicle) => vehicle.operationStatus === "maintenance"
+    ).length;
+    const disabledVehicles = stationVehicles.filter(
+      (vehicle) => !vehicle.enabled || vehicle.operationStatus === "disabled"
+    ).length;
+    const rentingVehicles = stationVehicles.filter(
+      (vehicle) => vehicle.operationStatus === "renting"
+    ).length;
+    const occupiedVehicles = stationVehicles.length - rentingVehicles;
+    const today = new Date().toISOString().slice(0, 10);
+    const calendar = (this.stationCalendarDays.get(station.id) ?? []).find(
+      (item) => item.date === today
+    );
+    const businessStatus = calendar?.businessStatus ?? "open";
+    const closedByCalendar = businessStatus !== "open";
+    const totalSpaces = calendar?.capacityLimit ?? station.parkingTotal ?? stationVehicles.length;
+    const pendingPickupVehicles = this.orders.filter(
+      (order) =>
+        order.pickupStationName === station.name &&
+        [
+          OrderMainStatus.Reserved,
+          OrderMainStatus.PickupOverdue,
+          OrderMainStatus.Inspecting
+        ].includes(order.mainStatus)
+    ).length;
+    const pendingReturnVehicles = this.orders.filter(
+      (order) =>
+        order.returnStationName === station.name &&
+        [
+          OrderMainStatus.Renting,
+          OrderMainStatus.Renewing,
+          OrderMainStatus.Overdue,
+          OrderMainStatus.AccidentProcessing
+        ].includes(order.mainStatus)
+    ).length;
+    const availableSpaces = closedByCalendar
+      ? 0
+      : Math.max(0, totalSpaces - occupiedVehicles - pendingReturnVehicles);
+    const queueMetrics = this.buildStationCapacityQueueMetrics({
+      totalSpaces,
+      availableSpaces,
+      pickupQueueVehicles: pendingPickupVehicles,
+      returnQueueVehicles: pendingReturnVehicles,
+      controlledVehicles,
+      maintenanceVehicles,
+      disabledVehicles,
+      closedByCalendar,
+      turnoverBufferMinutes: this.ruleConfig.pickupReturn.turnaroundMinutes || 60
+    });
+
+    return {
+      id: `cap_${station.id}_${Date.now()}`,
+      stationId: station.id,
+      stationName: station.name,
+      date: today,
+      totalSpaces,
+      capacityLimit: calendar?.capacityLimit,
+      availableSpaces,
+      reservedSpaces: Math.max(0, pendingPickupVehicles + pendingReturnVehicles),
+      occupiedVehicles,
+      controlledVehicles,
+      maintenanceVehicles,
+      disabledVehicles,
+      rentingVehicles,
+      pendingPickupVehicles,
+      pendingReturnVehicles,
+      pickupQueueVehicles: queueMetrics.pickupQueueVehicles,
+      returnQueueVehicles: queueMetrics.returnQueueVehicles,
+      queueVehicles: queueMetrics.queueVehicles,
+      turnoverBufferMinutes: queueMetrics.turnoverBufferMinutes,
+      estimatedWaitMinutes: queueMetrics.estimatedWaitMinutes,
+      pressureLevel: queueMetrics.pressureLevel,
+      pressureReason: queueMetrics.pressureReason,
+      businessStatus,
+      closedByCalendar,
+      source: "system",
+      createdAt: new Date().toISOString()
+    };
+  }
+
+  private buildStationCapacityQueueMetrics(input: {
+    totalSpaces: number;
+    availableSpaces: number;
+    pickupQueueVehicles: number;
+    returnQueueVehicles: number;
+    controlledVehicles: number;
+    maintenanceVehicles: number;
+    disabledVehicles: number;
+    closedByCalendar: boolean;
+    turnoverBufferMinutes?: number;
+  }): Pick<
+    StationCapacitySnapshot,
+    | "pickupQueueVehicles"
+    | "returnQueueVehicles"
+    | "queueVehicles"
+    | "turnoverBufferMinutes"
+    | "estimatedWaitMinutes"
+    | "pressureLevel"
+    | "pressureReason"
+  > {
+    const pickupQueueVehicles = Math.max(0, input.pickupQueueVehicles);
+    const returnQueueVehicles = Math.max(0, input.returnQueueVehicles);
+    const queueVehicles = pickupQueueVehicles + returnQueueVehicles;
+    const totalSpaces = Math.max(0, input.totalSpaces);
+    const turnoverBufferMinutes = Math.max(30, input.turnoverBufferMinutes ?? 60);
+    const counterSlots = Math.max(1, Math.ceil(Math.max(totalSpaces, 1) / 12));
+    const overloadQueue = Math.max(0, queueVehicles - counterSlots);
+    const estimatedWaitMinutes = input.closedByCalendar
+      ? 0
+      : overloadQueue * Math.ceil(turnoverBufferMinutes / 2);
+    const unavailableVehicles =
+      input.controlledVehicles + input.maintenanceVehicles + input.disabledVehicles;
+    const tightCapacity =
+      totalSpaces > 0 && input.availableSpaces <= Math.max(1, Math.ceil(totalSpaces * 0.15));
+
+    let pressureLevel: StationCapacitySnapshot["pressureLevel"] = "normal";
+    let pressureReason = "容量正常";
+    if (input.closedByCalendar) {
+      pressureLevel = "closed";
+      pressureReason = "营业日历关闭或暂停";
+    } else if (input.availableSpaces <= 0 || queueVehicles >= counterSlots * 4) {
+      pressureLevel = "overloaded";
+      pressureReason =
+        input.availableSpaces <= 0 ? "可用车位不足" : "取还车队列高于柜台处理能力";
+    } else if (
+      tightCapacity ||
+      queueVehicles >= counterSlots * 2 ||
+      unavailableVehicles > totalSpaces * 0.2
+    ) {
+      pressureLevel = "busy";
+      pressureReason = tightCapacity ? "可用车位接近预警线" : "高峰队列或异常车辆偏多";
+    }
+
+    return {
+      pickupQueueVehicles,
+      returnQueueVehicles,
+      queueVehicles,
+      turnoverBufferMinutes,
+      estimatedWaitMinutes,
+      pressureLevel,
+      pressureReason
+    };
   }
 
   listValueAddedServices() {
@@ -10395,46 +10559,9 @@ export class StoreRentalService {
     }
 
     if (this.stationCapacitySnapshots.length === 0) {
-      this.stationCapacitySnapshots = this.stations.map((station) => {
-        const stationVehicles = this.vehicles.filter(
-          (vehicle) => vehicle.currentStationName === station.name
-        );
-        const controlledVehicles = stationVehicles.filter(
-          (vehicle) => vehicle.operationStatus === "controlled"
-        ).length;
-        const maintenanceVehicles = stationVehicles.filter(
-          (vehicle) => vehicle.operationStatus === "maintenance"
-        ).length;
-        const disabledVehicles = stationVehicles.filter(
-          (vehicle) => !vehicle.enabled || vehicle.operationStatus === "disabled"
-        ).length;
-        const rentingVehicles = stationVehicles.filter(
-          (vehicle) => vehicle.operationStatus === "renting"
-        ).length;
-        const occupiedVehicles = stationVehicles.length - rentingVehicles;
-        return {
-          id: `cap_${station.id}_${Date.now()}`,
-          stationId: station.id,
-          stationName: station.name,
-          date: new Date().toISOString().slice(0, 10),
-          totalSpaces: station.parkingTotal,
-          availableSpaces: Math.max(0, station.parkingAvailable),
-          reservedSpaces: Math.max(0, station.parkingTotal - station.parkingAvailable),
-          occupiedVehicles,
-          controlledVehicles,
-          maintenanceVehicles,
-          disabledVehicles,
-          rentingVehicles,
-          pendingPickupVehicles: this.orders.filter(
-            (order) => order.pickupStationName === station.name
-          ).length,
-          pendingReturnVehicles: this.orders.filter(
-            (order) => order.returnStationName === station.name
-          ).length,
-          source: "system",
-          createdAt: new Date().toISOString()
-        };
-      });
+      this.stationCapacitySnapshots = this.stations.map((station) =>
+        this.buildMemoryStationCapacitySnapshot(station)
+      );
     }
   }
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ElMessage } from "element-plus";
-import { onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import type {
   SaveStationCalendarDayRequest,
   StationCalendarDay,
@@ -31,13 +31,13 @@ const pageSize = ref(20);
 const total = ref(0);
 const dialogVisible = ref(false);
 const detailDrawerVisible = ref(false);
-const detailActionLoading = ref(false);
 const activeDetailTab = ref("CALENDAR");
 const isEdit = ref(false);
 const rows = ref<StoreStationSummary[]>(structuredClone(stationRows));
 const hierarchyRows = ref<StoreStationHierarchyNode[]>([]);
 const calendarRows = ref<StationCalendarDay[]>([]);
 const capacityRows = ref<StationCapacitySnapshot[]>([]);
+const capacityRefreshing = ref(false);
 const selectedStation = ref<StoreStationSummary | null>(null);
 const currentScope = ref<StoreStationHierarchyNode>({
   id: "all",
@@ -79,6 +79,7 @@ const calendarForm = reactive<SaveStationCalendarDayRequest>({
   operator: "营运端"
 });
 
+const latestCapacity = computed(() => capacityRows.value[0] ?? null);
 async function loadRows() {
   loading.value = true;
   try {
@@ -150,22 +151,25 @@ async function submitCalendarDay() {
     ...calendarForm,
     operator: "营运端"
   });
+  await refreshCapacitySnapshots(false);
   ElMessage.success("营业日历已保存");
 }
 
-async function refreshCapacitySnapshots() {
+async function refreshCapacitySnapshots(showMessage = true) {
   if (!selectedStation.value) {
     return;
   }
-  detailActionLoading.value = true;
+  capacityRefreshing.value = true;
   try {
     const result = await refreshStationCapacitySnapshots(selectedStation.value.id);
     capacityRows.value = result.snapshots;
-    ElMessage.success(result.message);
+    if (showMessage) {
+      ElMessage.success(result.message);
+    }
   } catch {
-    ElMessage.error("容量快照刷新失败");
+    ElMessage.error("容量快照刷新失败，请稍后重试");
   } finally {
-    detailActionLoading.value = false;
+    capacityRefreshing.value = false;
   }
 }
 
@@ -312,6 +316,29 @@ async function saveStation() {
 
 function statusType(status: StoreStationSummary["serviceStatus"]) {
   return status === "normal" ? "success" : status === "maintenance" ? "warning" : "info";
+}
+
+function capacityPressureLabel(level?: StationCapacitySnapshot["pressureLevel"]) {
+  const labels: Record<StationCapacitySnapshot["pressureLevel"], string> = {
+    normal: "正常",
+    busy: "繁忙",
+    overloaded: "超载",
+    closed: "关闭"
+  };
+  return level ? labels[level] : "待刷新";
+}
+
+function capacityPressureType(level?: StationCapacitySnapshot["pressureLevel"]) {
+  if (level === "normal") {
+    return "success";
+  }
+  if (level === "busy") {
+    return "warning";
+  }
+  if (level === "overloaded") {
+    return "danger";
+  }
+  return "info";
 }
 
 onMounted(loadRows);
@@ -583,7 +610,7 @@ onMounted(loadRows);
         <div class="grid grid-cols-12 gap-4 mb-5">
           <div class="rounded-lg border border-slate-200 bg-slate-50 p-4 col-span-12 md:col-span-4">
             <div class="text-xs text-gray-500">车位容量</div>
-            <div class="text-xl font-bold text-gray-800 mt-1">{{ selectedStation.parkingAvailable }} / {{ selectedStation.parkingTotal }}</div>
+            <div class="text-xl font-bold text-gray-800 mt-1">{{ selectedStation?.parkingAvailable ?? 0 }} / {{ selectedStation?.parkingTotal ?? 0 }}</div>
           </div>
           <div class="rounded-lg border border-slate-200 bg-slate-50 p-4 col-span-12 md:col-span-4">
             <div class="text-xs text-gray-500">服务状态</div>
@@ -648,25 +675,54 @@ onMounted(loadRows);
           </el-tab-pane>
 
           <el-tab-pane label="库存/容量" name="CAPACITY" class="h-full overflow-y-auto pr-2">
-            <div class="mb-3 flex justify-between items-center">
-              <div class="text-sm text-gray-500">根据站点营业日历、车位数、站内车辆和待取还订单生成容量快照。</div>
-              <el-button
-                type="primary"
-                plain
-                :loading="detailActionLoading"
-                @click="refreshCapacitySnapshots"
-              >
-                刷新容量快照
+            <div class="flex flex-col gap-4 mb-4 lg:flex-row lg:items-start lg:justify-between">
+              <div class="grid grid-cols-12 gap-3 flex-1">
+                <div class="col-span-12 md:col-span-3 rounded-lg border border-slate-200 bg-slate-50 p-4">
+                  <div class="text-xs text-gray-500">容量压力</div>
+                  <div class="mt-2 flex items-center gap-2">
+                    <el-tag :type="capacityPressureType(latestCapacity?.pressureLevel)" effect="plain">
+                      {{ capacityPressureLabel(latestCapacity?.pressureLevel) }}
+                    </el-tag>
+                    <span class="text-xs text-gray-500">{{ latestCapacity?.pressureReason || "暂无快照" }}</span>
+                  </div>
+                </div>
+                <div class="col-span-12 md:col-span-3 rounded-lg border border-slate-200 bg-slate-50 p-4">
+                  <div class="text-xs text-gray-500">取还车队列</div>
+                  <div class="text-xl font-bold text-gray-800 mt-1">{{ latestCapacity?.queueVehicles ?? 0 }}</div>
+                  <div class="text-xs text-gray-500 mt-1">取 {{ latestCapacity?.pickupQueueVehicles ?? 0 }} / 还 {{ latestCapacity?.returnQueueVehicles ?? 0 }}</div>
+                </div>
+                <div class="col-span-12 md:col-span-3 rounded-lg border border-slate-200 bg-slate-50 p-4">
+                  <div class="text-xs text-gray-500">预计等待</div>
+                  <div class="text-xl font-bold text-gray-800 mt-1">{{ latestCapacity?.estimatedWaitMinutes ?? 0 }} 分钟</div>
+                  <div class="text-xs text-gray-500 mt-1">整备缓冲 {{ latestCapacity?.turnoverBufferMinutes ?? 60 }} 分钟</div>
+                </div>
+                <div class="col-span-12 md:col-span-3 rounded-lg border border-slate-200 bg-slate-50 p-4">
+                  <div class="text-xs text-gray-500">可用车位</div>
+                  <div class="text-xl font-bold text-gray-800 mt-1">{{ latestCapacity?.availableSpaces ?? selectedStation?.parkingAvailable ?? 0 }} / {{ latestCapacity?.totalSpaces ?? selectedStation?.parkingTotal ?? 0 }}</div>
+                  <div class="text-xs text-gray-500 mt-1">站内 {{ latestCapacity?.occupiedVehicles ?? 0 }}，待还 {{ latestCapacity?.pendingReturnVehicles ?? 0 }}</div>
+                </div>
+              </div>
+              <el-button type="primary" color="#00689E" :loading="capacityRefreshing" @click="refreshCapacitySnapshots()">
+                刷新容量
               </el-button>
             </div>
             <el-table :data="capacityRows" stripe border empty-text="暂无容量快照">
               <el-table-column prop="date" label="日期" width="120" />
+              <el-table-column label="压力" width="110">
+                <template #default="{ row }">
+                  <el-tag :type="capacityPressureType(row.pressureLevel)" effect="plain">
+                    {{ capacityPressureLabel(row.pressureLevel) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
               <el-table-column prop="totalSpaces" label="总车位" width="90" />
               <el-table-column prop="availableSpaces" label="可用车位" width="100" />
               <el-table-column prop="reservedSpaces" label="预留/占用" width="110" />
               <el-table-column prop="occupiedVehicles" label="站内车辆" width="100" />
-              <el-table-column prop="pendingPickupVehicles" label="待取车" width="90" />
-              <el-table-column prop="pendingReturnVehicles" label="待还车" width="90" />
+              <el-table-column prop="pickupQueueVehicles" label="取车队列" width="100" />
+              <el-table-column prop="returnQueueVehicles" label="还车队列" width="100" />
+              <el-table-column prop="estimatedWaitMinutes" label="预计等待(分)" width="120" />
+              <el-table-column prop="pressureReason" label="压力原因" min-width="160" />
               <el-table-column prop="source" label="来源" width="90" />
               <el-table-column prop="createdAt" label="快照时间" min-width="180" />
             </el-table>

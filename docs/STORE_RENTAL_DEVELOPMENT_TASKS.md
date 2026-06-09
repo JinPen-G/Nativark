@@ -107,13 +107,13 @@
 | MD-07 | 车辆状态动作 | 启用/停用、维保/结束维保、批量状态操作 | In Progress | 新增后端车辆状态接口，页面启停、维保、结束维保、批量启停已接 API；新增维保/事故记录会回写车辆状态和操作日志 | 补状态动作原因必填、租赁中车辆禁用细则和 MySQL 持久化 |
 | MD-08 | 车型组删除校验 | 车型组被车辆/订单引用时不允许删除 | Done | 新增后端删除接口，删除前校验车辆/订单引用，页面已接 API | 接 MySQL 后迁移为外键/引用查询 |
 | MD-09 | 车辆详情 | 车辆概况、订单记录、出入站、车况照片、操作记录 | In Progress | 已新增后端车辆详情接口和前端详情抽屉，包含车辆概况、订单记录、出入站流水、车况照片、维保/事故、证照、随车物资、操作记录；维保/事故记录新增、维保完成、事故结案、证照/物资新增编辑已接后端并刷新详情；已补出入站流水新增与编辑接口、车况照片补录、详情页占用排程提示和“车辆调拨”快捷入口；设置 `STORE_RENTAL_DATA_SOURCE=mysql` 后出入站、车况照片、维保、事故、证照、物资、操作日志写入 MySQL | 补真实附件上传、流水结案、调度候选联动和取还车交接核验 |
-| MD-10 | 车辆调拨 | 车辆门市/据点调拨、调拨单、交接记录 | Pending | 未开发；原型已存在 `vehicle_transfer.html` | 先做调拨申请/确认、车辆位置变更、操作日志和占用校验 |
-| MD-11 | 车务看板 | 车辆状态列表、整备/维修/受控监控、批量处置入口 | Pending | 未开发；原型已存在 `vehicle_status_list.html`、`vehicle_console.html` | 建状态视图、状态统计、筛选和与车辆详情联动的批量操作 |
-| MD-12 | TBox 设备管理 | 设备绑定、在线状态、远程能力 mock、设备档案 | Reserved | 未开发；原型已存在 `tbox_management.html` | 先做设备台账和 mock 接入，不做真实 IoT 指令链路 |
+| MD-10 | 车辆调拨 | 车辆门市/据点调拨、调拨单、交接记录 | In Progress | 已新增车辆调拨任务列表、创建、流转和 MySQL `VehicleTransferTask`，支持占用校验、位置回写、车辆操作日志；前端已接 `VehicleTransferView.vue` 和车辆详情快捷入口 | 继续补交接附件、调拨审计报表、调度页联动和数据权限过滤 |
+| MD-11 | 车务看板 | 车辆状态列表、整备/维修/受控监控、批量处置入口 | In Progress | 已新增车辆速查表 `VehicleStatusListView.vue`、车辆控制台 `VehicleConsoleView.vue`，可查看状态、TBox 绑定和基础远控 mock；车辆状态动作已写状态变更记录 | 继续补后端聚合 API、批量处置任务、异常关闭和车务审计报表 |
+| MD-12 | TBox 设备管理 | 设备绑定、在线状态、远程能力 mock、设备档案 | In Progress | 已新增 TBox 台账、绑定/解绑和预留指令模拟；MySQL 模式落 `TboxDevice`、`TboxCommandRecord` | 继续接统一 adapter、真实供应商回调、指令幂等和失败重试 |
 | MD-13 | 车辆证照 | 行驶证、保险、年检、保养计划等证照档案 | In Progress | 已新增共享 DTO、后端列表/保存接口、MySQL `VehicleCredentialRecord` 表和车辆详情“证照与物资”页签；支持证照类型、编号、状态、签发/到期、提前提醒天数和附件地址预留 | 继续在车辆详情页内接证照附件引用、到期提醒展示、证照异常调度拦截和取车前核验 |
 | MD-14 | 车辆随车物资 | 钥匙、ETC、充电卡、随车工具、油电量基线 | In Progress | 已新增共享 DTO、后端列表/保存接口、MySQL `VehicleOnboardItem` 表和车辆详情维护入口；支持物资类别、标准/实际数量、缺失/损坏状态、赔付金额和盘点时间 | 继续接取还车交接清单、异常费用生成和物资变更审计 |
-| MD-15 | 站点营业日历 | 节假日、特殊营业时间、临时关闭、夜间规则 | Pending | 当前站点能力只有静态状态，没有营业日历 | 补站点营业日历并联动可用性、取还车时间校验 |
-| MD-16 | 站点容量与排队 | 高峰容量、缓冲时段、柜台忙闲状态 | Pending | 当前只有静态车位容量，没有履约容量模型 | 补站点履约容量和下单/调度冲突提示 |
+| MD-15 | 站点营业日历 | 节假日、特殊营业时间、临时关闭、夜间规则 | In Progress | 已新增站点营业日历维护接口、站点详情页签和 MySQL `StationCalendarDay` | 继续联动新建订单取还车时间校验和调度候选过滤 |
+| MD-16 | 站点容量与排队 | 高峰容量、缓冲时段、柜台忙闲状态 | In Progress | 已新增站点容量快照刷新接口 `/store-rental/stations/capacity-snapshots/refresh`，按站点车辆、订单取还车队列和营业日历生成可用车位、队列量、预计等待、压力等级；MySQL 模式落 `StationCapacitySnapshot` 新增排队压力字段，站点详情“库存/容量”页签可刷新查看 | 继续把容量风险接入新建订单、调度冲突提示、告警关闭和历史趋势报表 |
 | CRM-01 | 个人会员 | 会员列表、搜索、标签、状态管理 | In Progress | 已新增会员列表页和真实后端列表接口，支持关键字、会员状态、审核状态、标签筛选、分页、筛选统计、累计订单/消费展示；会员列表已接入筛选预设；本轮补齐列表页新增/编辑会员弹窗，保存走 `POST/PUT /store-rental/members`，编辑前读取会员详情回填手机号、邮箱、证件、认证、紧急联系人、标签和风控备注；设置 `STORE_RENTAL_DATA_SOURCE=mysql` 后会员列表和保存走 MySQL 查询与仓储分页 | 继续补导入导出、证件附件预览和更多标签来源 |
 | CRM-02 | 个人会员 | 会员详情、资料编辑、认证资料展示 | In Progress | 已新增会员详情页、资料编辑、认证状态、风险备注、时间线与最近订单展示；MySQL 模式下会员保存、资料时间线和最近订单读取已接 repository | 继续补证件附件、驾驶证图片、更多订单关联和操作留痕 |
 | CRM-03 | 个人会员 | 会员审核 | In Progress | 已新增会员审核页和审核处理接口，支持通过/驳回和备注；MySQL 模式下待审会员、审核处理和会员状态回写已接 repository | 继续补审核材料预览、批量审核和审核规则 |
@@ -890,3 +890,4 @@
 | 2026-06-09 | OR-16/PF-06 预授权与押金台账第一版：新增 `FinancePreAuthorization` Prisma 表、migration、共享 DTO、财务 API `/store-rental/finance/pre-authorizations` 和财务结算页“预授权押金” Tab；支持登记/编辑冻结、扣款、释放、剩余金额、渠道凭证、授权码、过期时间和处理人；列表优先显示显式台账，并从订单 `pre_auth_freeze/pre_auth_capture/pre_auth_release` 资金流水派生缺失台账；财务总览按台账剩余额度统计预授权冻结 | `npm run db:generate`、`npm run build -w @rimo/shared`、`npm run build -w @rimo/api`、`npm run build -w @rimo/admin`、`DATABASE_URL=... npx prisma validate --schema apps/api/prisma/schema.prisma` |
 | 2026-06-09 | OR-17 发票与收据重开链路第一版：扩展 `FinanceDocument` Prisma schema/migration、共享 DTO、内存模式和 MySQL repository，支持 `relatedFeeIds` 费用级关联、原单/替换单号链路、作废原因/处理人、重开时间和单据审计轨迹；财务结算页“发票收据” Tab 增加关联费用展示、最近审计、重开入口和重开弹窗字段，重开新单时自动把原单置为作废 | `npm run db:generate`、`npm run build`、`git diff --check`；`npm run db:validate` 被 Windows 沙箱进程权限拦截，提权重试因工作区审批额度不足被系统拒绝，待审批恢复后补跑 |
 | 2026-06-09 | OR-18/OR-22/DP-04：新增订单操作记录和客户通知记录共享 DTO、MySQL 表和 repository；订单关键动作接请求摘要幂等、防重复返回、取车操作锁校验和操作记录；订单动作生成 mock 客户短信通知留痕并写入时间线；调度任务池新增关闭接口和调度页关闭入口，关闭后写 `alert_closed` 并过滤任务 | `npm run build -w @rimo/shared`、`npm run build -w @rimo/api`、`npm run build -w @rimo/admin`、`DATABASE_URL=... npx prisma validate --schema apps/api/prisma/schema.prisma` |
+| 2026-06-09 | MD-16 站点容量与排队第一版：新增容量快照刷新接口 `/store-rental/stations/capacity-snapshots/refresh`，共享 DTO 和 MySQL `StationCapacitySnapshot` 补取车队列、还车队列、总队列、整备缓冲、预计等待、压力等级和压力原因；内存模式和 MySQL 模式均按车辆位置、订单取还车队列和营业日历生成快照；站点详情“库存/容量”页签新增压力摘要和刷新按钮 | `npm run build -w @rimo/shared`、`DATABASE_URL=... npm run db:validate`、`DATABASE_URL=... npm run db:generate`、`npm run build -w @rimo/api`、`npm run build -w @rimo/admin` |

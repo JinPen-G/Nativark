@@ -1312,6 +1312,17 @@ export class StoreRentalRepository {
       const availableSpaces = closedByCalendar
         ? 0
         : Math.max(0, totalSpaces - occupiedVehicles - pendingReturnVehicles);
+      const queueMetrics = this.buildStationCapacityQueueMetrics({
+        totalSpaces,
+        availableSpaces,
+        pickupQueueVehicles: pendingPickupVehicles,
+        returnQueueVehicles: pendingReturnVehicles,
+        controlledVehicles,
+        maintenanceVehicles,
+        disabledVehicles,
+        closedByCalendar,
+        turnoverBufferMinutes: 60
+      });
       const row = await this.prisma.stationCapacitySnapshot.create({
         data: {
           stationId: station.id,
@@ -1319,7 +1330,7 @@ export class StoreRentalRepository {
           totalSpaces,
           capacityLimit: calendar?.capacityLimit,
           availableSpaces,
-          reservedSpaces: Math.max(0, pendingPickupVehicles),
+          reservedSpaces: Math.max(0, pendingPickupVehicles + pendingReturnVehicles),
           occupiedVehicles,
           controlledVehicles,
           maintenanceVehicles,
@@ -1327,6 +1338,13 @@ export class StoreRentalRepository {
           rentingVehicles,
           pendingPickupVehicles,
           pendingReturnVehicles,
+          pickupQueueVehicles: queueMetrics.pickupQueueVehicles,
+          returnQueueVehicles: queueMetrics.returnQueueVehicles,
+          queueVehicles: queueMetrics.queueVehicles,
+          turnoverBufferMinutes: queueMetrics.turnoverBufferMinutes,
+          estimatedWaitMinutes: queueMetrics.estimatedWaitMinutes,
+          pressureLevel: queueMetrics.pressureLevel,
+          pressureReason: queueMetrics.pressureReason,
           businessStatus,
           closedByCalendar,
           source: "system",
@@ -4661,11 +4679,88 @@ export class StoreRentalRepository {
       rentingVehicles: row.rentingVehicles ?? 0,
       pendingPickupVehicles: row.pendingPickupVehicles,
       pendingReturnVehicles: row.pendingReturnVehicles,
+      pickupQueueVehicles: row.pickupQueueVehicles ?? row.pendingPickupVehicles ?? 0,
+      returnQueueVehicles: row.returnQueueVehicles ?? row.pendingReturnVehicles ?? 0,
+      queueVehicles:
+        row.queueVehicles ??
+        (row.pickupQueueVehicles ?? row.pendingPickupVehicles ?? 0) +
+          (row.returnQueueVehicles ?? row.pendingReturnVehicles ?? 0),
+      turnoverBufferMinutes: row.turnoverBufferMinutes ?? 60,
+      estimatedWaitMinutes: row.estimatedWaitMinutes ?? 0,
+      pressureLevel: this.toStationCapacityPressureLevel(row.pressureLevel),
+      pressureReason: row.pressureReason ?? undefined,
       businessStatus: this.toStationBusinessStatus(row.businessStatus ?? "open"),
       closedByCalendar: Boolean(row.closedByCalendar),
       source: row.source === "manual" ? "manual" : "system",
       createdAt: row.createdAt.toISOString()
     };
+  }
+
+  private buildStationCapacityQueueMetrics(input: {
+    totalSpaces: number;
+    availableSpaces: number;
+    pickupQueueVehicles: number;
+    returnQueueVehicles: number;
+    controlledVehicles: number;
+    maintenanceVehicles: number;
+    disabledVehicles: number;
+    closedByCalendar: boolean;
+    turnoverBufferMinutes?: number;
+  }): Pick<
+    StationCapacitySnapshot,
+    | "pickupQueueVehicles"
+    | "returnQueueVehicles"
+    | "queueVehicles"
+    | "turnoverBufferMinutes"
+    | "estimatedWaitMinutes"
+    | "pressureLevel"
+    | "pressureReason"
+  > {
+    const pickupQueueVehicles = Math.max(0, input.pickupQueueVehicles);
+    const returnQueueVehicles = Math.max(0, input.returnQueueVehicles);
+    const queueVehicles = pickupQueueVehicles + returnQueueVehicles;
+    const totalSpaces = Math.max(0, input.totalSpaces);
+    const turnoverBufferMinutes = Math.max(30, input.turnoverBufferMinutes ?? 60);
+    const counterSlots = Math.max(1, Math.ceil(Math.max(totalSpaces, 1) / 12));
+    const overloadQueue = Math.max(0, queueVehicles - counterSlots);
+    const estimatedWaitMinutes = input.closedByCalendar
+      ? 0
+      : overloadQueue * Math.ceil(turnoverBufferMinutes / 2);
+    const unavailableVehicles =
+      input.controlledVehicles + input.maintenanceVehicles + input.disabledVehicles;
+    const tightCapacity =
+      totalSpaces > 0 && input.availableSpaces <= Math.max(1, Math.ceil(totalSpaces * 0.15));
+
+    let pressureLevel: StationCapacitySnapshot["pressureLevel"] = "normal";
+    let pressureReason = "容量正常";
+    if (input.closedByCalendar) {
+      pressureLevel = "closed";
+      pressureReason = "营业日历关闭或暂停";
+    } else if (input.availableSpaces <= 0 || queueVehicles >= counterSlots * 4) {
+      pressureLevel = "overloaded";
+      pressureReason =
+        input.availableSpaces <= 0 ? "可用车位不足" : "取还车队列高于柜台处理能力";
+    } else if (tightCapacity || queueVehicles >= counterSlots * 2 || unavailableVehicles > totalSpaces * 0.2) {
+      pressureLevel = "busy";
+      pressureReason = tightCapacity ? "可用车位接近预警线" : "高峰队列或异常车辆偏多";
+    }
+
+    return {
+      pickupQueueVehicles,
+      returnQueueVehicles,
+      queueVehicles,
+      turnoverBufferMinutes,
+      estimatedWaitMinutes,
+      pressureLevel,
+      pressureReason
+    };
+  }
+
+  private toStationCapacityPressureLevel(value: string): StationCapacitySnapshot["pressureLevel"] {
+    if (["normal", "busy", "overloaded", "closed"].includes(value)) {
+      return value as StationCapacitySnapshot["pressureLevel"];
+    }
+    return "normal";
   }
 
   private toStationSummary(row: {

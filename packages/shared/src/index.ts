@@ -2315,6 +2315,13 @@ export interface StationCapacitySnapshot {
   rentingVehicles: number;
   pendingPickupVehicles: number;
   pendingReturnVehicles: number;
+  pickupQueueVehicles: number;
+  returnQueueVehicles: number;
+  queueVehicles: number;
+  turnoverBufferMinutes: number;
+  estimatedWaitMinutes: number;
+  pressureLevel: "normal" | "busy" | "overloaded" | "closed";
+  pressureReason?: string;
   businessStatus?: "open" | "closed" | "paused";
   closedByCalendar?: boolean;
   source: "system" | "manual";

@@ -668,6 +668,13 @@ model StationCapacitySnapshot {
   rentingVehicles       Int          @default(0)
   pendingPickupVehicles Int          @default(0)
   pendingReturnVehicles Int          @default(0)
+  pickupQueueVehicles   Int          @default(0)
+  returnQueueVehicles   Int          @default(0)
+  queueVehicles         Int          @default(0)
+  turnoverBufferMinutes Int          @default(60)
+  estimatedWaitMinutes  Int          @default(0)
+  pressureLevel         String       @default("normal")
+  pressureReason        String?      @db.VarChar(512)
   businessStatus        String       @default("open")
   closedByCalendar      Boolean      @default(false)
   operator              String?

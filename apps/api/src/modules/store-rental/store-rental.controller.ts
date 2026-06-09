@@ -267,7 +267,7 @@ export class StoreRentalController {
   }
 
   @Post("stations/capacity-snapshots/refresh")
-  refreshStationCapacitySnapshots(@Body("stationId") stationId?: string) {
+  refreshStationCapacitySnapshots(@Query("stationId") stationId?: string) {
     return this.storeRentalService.refreshStationCapacitySnapshots(stationId);
   }
 

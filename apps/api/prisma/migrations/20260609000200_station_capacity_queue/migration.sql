@@ -1,0 +1,8 @@
+ALTER TABLE `StationCapacitySnapshot`
+  ADD COLUMN `pickupQueueVehicles` INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN `returnQueueVehicles` INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN `queueVehicles` INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN `turnoverBufferMinutes` INTEGER NOT NULL DEFAULT 60,
+  ADD COLUMN `estimatedWaitMinutes` INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN `pressureLevel` VARCHAR(191) NOT NULL DEFAULT 'normal',
+  ADD COLUMN `pressureReason` VARCHAR(512) NULL;

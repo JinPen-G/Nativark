@@ -88,3 +88,20 @@
 - 沿用既有 `codex/fleet-ops` 分支，没有新建分支。
 - 已先将分支快进到 `origin/codex/integration/store-rental-mvp@839c7a9`，确保基于最新集成成果继续开发。
 - 本轮补 `MD-13 车辆证照`、`MD-14 车辆随车物资` 的营运端落地：车辆详情页新增证照与物资页签，支持新增/编辑证照、附件地址预留、到期提醒天数、随车物资数量与状态。
+
+## 2026-06-09 MD-16 追加
+
+- 当前分支里 `MD-10 车辆调拨`、`MD-11 车务看板` 已有首版前后端和 MySQL 地基，本轮选择缺口最大的 `MD-16 站点容量与排队` 推进。
+- 共享 DTO `StationCapacitySnapshot` 新增取车队列、还车队列、总队列、整备缓冲分钟、预计等待分钟、压力等级和压力原因。
+- Prisma `StationCapacitySnapshot` 同步新增排队压力字段，并新增 migration `20260609000200_station_capacity_queue`。
+- 后端新增 `POST /store-rental/stations/capacity-snapshots/refresh`，内存模式和 `STORE_RENTAL_DATA_SOURCE=mysql` 均按车辆当前位置、订单取还车队列和站点营业日历生成容量快照。
+- 站点详情“库存/容量”页签新增容量压力摘要、取还车队列、预计等待和刷新按钮；刷新后重新读取快照列表。
+- 开发台账已把 `MD-10/MD-11/MD-12/MD-13/MD-14/MD-15/MD-16` 从旧的 Pending/Reserved 口径同步为当前分支实际 In Progress 状态；技术文档已补接口和 MySQL 落库说明。
+
+验证：
+
+- `npm run build -w @rimo/shared`
+- `DATABASE_URL=... npm run db:validate`
+- `DATABASE_URL=... npm run db:generate`
+- `npm run build -w @rimo/api`
+- `npm run build -w @rimo/admin`

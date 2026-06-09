@@ -47,6 +47,10 @@ rimo-store-rental-platform/
 - `StationsView.vue`：服务站点管理。
 - `VehicleGroupsView.vue`：车型组管理。
 - `VehiclesView.vue`：车辆档案库，包含车辆详情抽屉、维保/事故记录新增、车辆证照与随车物资维护、车辆状态动作和筛选预设。
+- `VehicleTransferView.vue`：车辆调拨管理，包含调拨任务列表、调拨创建和任务流转。
+- `VehicleStatusListView.vue`：车辆速查表，包含车辆状态、TBox 绑定和异常车务筛选。
+- `VehicleConsoleView.vue`：车辆控制台，包含 TBox 预留远控指令 mock。
+- `TboxManagementView.vue`：TBox 设备管理，包含设备台账和车辆绑定。
 - `ValueAddedServicesView.vue`：增值服务管理。
 - `NewOrderView.vue`：新建门市订单。
 - `OrdersView.vue`：门市租赁订单列表，已接入筛选预设保存、设默认、删除和默认视图自动应用。
@@ -56,13 +60,13 @@ rimo-store-rental-platform/
 当前已接入的营运端基础页面：
 
 - 系统通用参数：已按原型 `system_rules.html` 开发，作为平台级配置中心处理。
+- 车辆调拨：已按原型 `vehicle_transfer.html` 开发第一版，作为车辆位置和履约资源调整模块处理。
+- 车务看板：已按原型 `vehicle_status_list.html`、`vehicle_console.html` 开发第一版，作为车辆状态监控和批量处置入口。
+- TBox 设备管理：已按原型 `tbox_management.html` 开发第一版，本期只做设备台账和 mock 集成。
 
 当前未开发、但已纳入正式任务的营运端页面：
 
-- 车辆调拨：按原型 `vehicle_transfer.html` 开发，作为车辆位置和履约资源调整模块处理。
-- 车务看板：按原型 `vehicle_status_list.html`、`vehicle_console.html` 开发，作为车辆状态监控和批量处置入口。
 - 合同与单据：按原型 `official_vehicle_contracts.html` 开发，作为订单合同、打印下载和签署状态模块处理。
-- TBox 设备管理：按原型 `tbox_management.html` 开发，本期只做设备台账和 mock 集成。
 
 这些模块中，会员、等级方案、企业客户、车务看板、车辆调拨、合同与单据、TBox 当前都没有独立 PRD，先以原型字段、列表、详情、状态、审核、等级权益、额度、打印下载和设备档案交互为准，后续如果补 PRD，再回写业务规则和权限颗粒度。
 
@@ -210,7 +214,7 @@ rimo-store-rental-platform/
 - 外部集成预留。
 - 企业端/H5 预留接口说明。
 
-当前门市租赁业务默认仍是内存数据。已新增 `StoreRentalRepository` 和 `STORE_RENTAL_DATA_SOURCE=memory|mysql`：设置为 `mysql` 后，租赁业务规则当前版本/历史版本、站点列表分页/筛选/保存、车型组、车辆列表分页/筛选/保存/删除校验/车辆状态更新、车辆出入站流水、车况照片记录、维保记录、事故/出险记录、车辆操作日志、个人会员列表分页/筛选/详情/保存、会员审核、会员风控、客户等级方案、企业客户列表分页/筛选/详情/保存、企业联系人、企业合同、订单创建/查询、订单费用中心、检查记录、资金流水、预授权押金台账、发票/收据、手工调账、订单时间线、续租快照、改派动作、改还车门市/据点动作、终止类动作、订单事故登记、调度预分配/硬锁/人工改派、调度事件审计和企业月结账单走 Prisma/MySQL。
+当前门市租赁业务默认仍是内存数据。已新增 `StoreRentalRepository` 和 `STORE_RENTAL_DATA_SOURCE=memory|mysql`：设置为 `mysql` 后，租赁业务规则当前版本/历史版本、站点列表分页/筛选/保存、站点营业日历、站点容量/排队快照、车型组、车辆列表分页/筛选/保存/删除校验/车辆状态更新、车辆出入站流水、车况照片记录、维保记录、事故/出险记录、车辆操作日志、车辆调拨任务、车辆证照、随车物资、TBox 台账、个人会员列表分页/筛选/详情/保存、会员审核、会员风控、客户等级方案、企业客户列表分页/筛选/详情/保存、企业联系人、企业合同、订单创建/查询、订单费用中心、检查记录、资金流水、预授权押金台账、发票/收据、手工调账、订单时间线、续租快照、改派动作、改还车门市/据点动作、终止类动作、订单事故登记、调度预分配/硬锁/人工改派、调度事件审计和企业月结账单走 Prisma/MySQL。
 
 租赁业务规则版本实现口径：
 
@@ -351,17 +355,20 @@ system:tenant:manage
 2. 站点层级：`GET /store-rental/stations/hierarchy`
 3. 新增站点：`POST /store-rental/stations`
 4. 编辑站点：`PUT /store-rental/stations/:id`
-5. 车型组列表：`GET /store-rental/vehicle-groups`
-6. 新增车型组：`POST /store-rental/vehicle-groups`
-7. 编辑车型组：`PUT /store-rental/vehicle-groups/:id`
-8. 删除车型组：`DELETE /store-rental/vehicle-groups/:id`
-9. 车辆列表：`GET /store-rental/vehicles`，带查询参数时返回 `VehicleListResult`，无查询参数时兼容返回数组。
-10. 车辆详情：`GET /store-rental/vehicles/:id`
-11. 新增车辆维保记录：`POST /store-rental/vehicles/:id/maintenance-records`
-12. 新增车辆事故/出险记录：`POST /store-rental/vehicles/:id/accident-records`
-13. 新增车辆：`POST /store-rental/vehicles`
-14. 编辑车辆：`PUT /store-rental/vehicles/:id`
-15. 车辆状态动作：`PATCH /store-rental/vehicles/:id/status`
+5. 站点营业日历：`GET/PUT /store-rental/stations/:id/calendar`
+6. 站点容量快照列表：`GET /store-rental/stations/capacity-snapshots`
+7. 站点容量快照刷新：`POST /store-rental/stations/capacity-snapshots/refresh`
+8. 车型组列表：`GET /store-rental/vehicle-groups`
+9. 新增车型组：`POST /store-rental/vehicle-groups`
+10. 编辑车型组：`PUT /store-rental/vehicle-groups/:id`
+11. 删除车型组：`DELETE /store-rental/vehicle-groups/:id`
+12. 车辆列表：`GET /store-rental/vehicles`，带查询参数时返回 `VehicleListResult`，无查询参数时兼容返回数组。
+13. 车辆详情：`GET /store-rental/vehicles/:id`
+14. 新增车辆维保记录：`POST /store-rental/vehicles/:id/maintenance-records`
+15. 新增车辆事故/出险记录：`POST /store-rental/vehicles/:id/accident-records`
+16. 新增车辆：`POST /store-rental/vehicles`
+17. 编辑车辆：`PUT /store-rental/vehicles/:id`
+18. 车辆状态动作：`PATCH /store-rental/vehicles/:id/status`
 
 系统参数接口：
 
@@ -396,6 +403,8 @@ system:tenant:manage
 
 - 站点：据点名称、所属门市必填；可用车位不能大于总车位；本期至少启用一个门市租赁服务能力；24H 自助启用时必须配置自助取还方式。
 - 站点层级接口只返回全部、车行、门市三级范围节点，不返回据点节点；右侧据点列表负责展示、搜索、筛选和编辑。
+- 站点营业日历支持设置营业/暂停/关闭、营业时间和当日容量上限；容量刷新会读取当日营业日历，关闭或暂停时可用车位为 0。
+- 站点容量快照由车辆当前位置、订单取还车队列、站点车位和营业日历生成，返回可用车位、站内车辆、取车队列、还车队列、整备缓冲分钟、预计等待分钟、压力等级和压力原因。当前先用于站点详情页展示，后续接新建订单和调度冲突提示。
 - 车型组：品牌、型号、门市产品组必填；车组标准价必须大于 0；免费里程和超程单价不能为负；删除前校验是否被车辆或订单引用。
 - 车辆：车牌、车型组、当前门市必填；车牌和 VIN 唯一；VIN 为 17 位；当前服务类型必须包含在可服务类型内；空闲/已预约且启用的车辆必须位于已启用对应门市租赁能力的据点。
 - 可用性和自动派车匹配已读取车辆启用状态、营运状态、服务类型和据点服务能力，不再只看车辆状态字段。
@@ -617,14 +626,14 @@ PF-15 当前数据边界：
 当前 Prisma schema 已扩展为 MySQL 主干模型。平台底座已完成 repository 和 `PLATFORM_DATA_SOURCE=memory|mysql` 切换；门市租赁的站点、车辆和客户域已完成 `STORE_RENTAL_DATA_SOURCE=memory|mysql` 第一版切换。schema 已覆盖：
 
 - 平台底座：租户、组织、用户、多角色、角色权限、权限码、系统参数集、筛选预设、平台审计日志、数据字典配置、编号规则配置。
-- 门市租赁主数据：履约站点、车型组、车辆实例、车辆位置流水、车况照片、维保记录、事故/出险记录。
+- 门市租赁主数据：履约站点、站点营业日历、站点容量/排队快照、车型组、车辆实例、车辆位置流水、车况照片、维保记录、事故/出险记录、车辆调拨任务、车辆证照、随车物资、TBox 台账和指令记录。
 - 客户域：会员、会员风控事件、会员时间线、客户等级方案、企业客户、联系人、合同、企业月结账单。
 - 规则与订单域：租赁业务规则版本、订单、取还车检查记录、履约时间线、续租快照、费用项、资金记录、预授权押金台账、发票/收据、人工调账、订单操作记录、客户通知记录、企业月结明细。
 
 下一阶段建议按下面顺序推进真实数据层：
 
 1. 平台基础数据已完成第一版：租户、组织、账号、角色、按钮权限、数据范围、系统参数、数据字典、编号规则、审计日志和租户初始化。
-2. `StoreRentalRepository` 已完成第一版：租赁业务规则版本、站点、车型组、车辆主数据读写；站点列表已补 `StoreStationListQuery/StoreStationListResult`，营运端可按关键字、服务能力、服务状态、据点状态和车行/门市范围分页查询；车辆列表已补 `VehicleListQuery/VehicleListResult`，营运端可按车牌/VIN、营运状态、服务类型、当前位置分页查询；旧数组调用继续兼容订单、调度、TBox 和调拨。
+2. `StoreRentalRepository` 已完成第一版：租赁业务规则版本、站点、站点营业日历、站点容量/排队快照、车型组、车辆主数据读写；站点列表已补 `StoreStationListQuery/StoreStationListResult`，营运端可按关键字、服务能力、服务状态、据点状态和车行/门市范围分页查询；车辆列表已补 `VehicleListQuery/VehicleListResult`，营运端可按车牌/VIN、营运状态、服务类型、当前位置分页查询；旧数组调用继续兼容订单、调度、TBox 和调拨。
 3. 服务层逐步只调用 repository，不直接操作数组。
 4. 门市租赁主数据事件已完成第一版：车辆位置流水、车况照片、维保记录、事故/出险记录、车辆操作日志。
 5. 客户域已完成第一版：会员、客户等级方案、企业客户、企业联系人、企业合同；会员列表已补 `MemberListQuery/MemberListResult`，内存模式和 MySQL 模式都支持关键字、状态、审核状态、标签、分页和筛选统计；客户等级方案已接入报价权益，后续通用租赁改造时可把“会员等级”抽成“客户分层/权益方案”，折扣对象从车辆租金和押金替换为设备租金、押金、耗材或服务包；企业客户列表已补 `CorporateListQuery/CorporateListResult`，内存模式和 MySQL 模式都支持企业简称/全称关键字、企业状态、合同状态、分页和筛选统计。
@@ -665,15 +674,16 @@ npx prisma validate --schema apps/api/prisma/schema.prisma
 - `docs/DATABASE_BOOTSTRAP.md`
 - `apps/api/prisma/migrations/20260608000100_init_store_rental_schema/migration.sql`
 - `apps/api/prisma/migrations/20260608000200_add_dispatch_events/migration.sql`
+- `apps/api/prisma/migrations/20260609000200_station_capacity_queue/migration.sql`
 - `apps/api/prisma/migrations/20260609000200_add_finance_pre_authorizations/migration.sql`
 - `apps/api/prisma/migrations/20260609000300_add_finance_document_reissue_links/migration.sql`
 - `apps/api/prisma/migrations/20260609000100_add_order_operation_notification_records/migration.sql`
 - `apps/api/src/modules/platform/platform.repository.ts`
 - `apps/api/src/modules/store-rental/store-rental.repository.ts`
 
-注意：`db:seed` 初始化的是可验证基础数据。平台模块可通过 `PLATFORM_DATA_SOURCE=mysql` 使用这些数据，包含登录、用户、角色、系统参数、数据字典、编号规则和平台审计；租赁业务规则保存/历史版本、站点分页列表、车型组、车辆分页列表/详情事件、会员列表分页/详情/审核/风控、客户等级方案、企业客户列表分页/详情、订单、费用、检查记录、资金流水、续租、改派、改还车门市/据点、终止动作、事故登记、调度事件和企业月结账单可通过 `STORE_RENTAL_DATA_SOURCE=mysql` 使用这些数据。
+注意：`db:seed` 初始化的是可验证基础数据。平台模块可通过 `PLATFORM_DATA_SOURCE=mysql` 使用这些数据，包含登录、用户、角色、系统参数、数据字典、编号规则和平台审计；租赁业务规则保存/历史版本、站点分页列表、站点营业日历、站点容量/排队快照、车型组、车辆分页列表/详情事件、车辆调拨、车辆证照、随车物资、TBox、会员列表分页/详情/审核/风控、客户等级方案、企业客户列表分页/详情、订单、费用、检查记录、资金流水、预授权押金台账、发票/收据、手工调账、续租、改派、改还车门市/据点、终止动作、事故登记、调度事件、订单操作记录、客户通知记录和企业月结账单可通过 `STORE_RENTAL_DATA_SOURCE=mysql` 使用这些数据。
 
-`PlatformRepository` 已覆盖租户、组织、权限树、角色、用户、系统参数、平台审计、筛选预设、数据字典、编号规则和租户初始化的基础读写和 DTO 映射。`PlatformService` 已增加 `PLATFORM_DATA_SOURCE=memory|mysql` 开关。`StoreRentalRepository` 已覆盖租赁业务规则版本、站点、车型组、车辆基础读写、站点/车辆列表分页筛选、车辆详情事件、客户域、会员/企业客户列表分页筛选、订单域、费用/资金、预授权押金台账、发票/收据费用关联、重开链路、手工调账、检查记录、时间线、续租快照、改派动作、改还车门市/据点动作、转单后续预约快捷改派一期、事故记录、调度事件、订单操作记录、客户通知记录和企业月结基础读写，并通过 `metadata` JSON 保留原型扩展字段。下一步迁事故后续订单联动、统一审计、通知模板和完整幂等。
+`PlatformRepository` 已覆盖租户、组织、权限树、角色、用户、系统参数、平台审计、筛选预设、数据字典、编号规则和租户初始化的基础读写和 DTO 映射。`PlatformService` 已增加 `PLATFORM_DATA_SOURCE=memory|mysql` 开关。`StoreRentalRepository` 已覆盖租赁业务规则版本、站点、站点营业日历、站点容量/排队快照、车型组、车辆基础读写、站点/车辆列表分页筛选、车辆详情事件、车辆调拨、车辆证照、随车物资、TBox、客户域、会员/企业客户列表分页筛选、订单域、费用/资金、预授权押金台账、发票/收据费用关联、重开链路、手工调账、检查记录、时间线、续租快照、改派动作、改还车门市/据点动作、转单后续预约快捷改派一期、事故记录、调度事件、订单操作记录、客户通知记录和企业月结基础读写，并通过 `metadata` JSON 保留原型扩展字段。下一步迁事故后续订单联动、统一审计、通知模板和完整幂等。
 
 操作锁、幂等和通知留痕实现口径：
 

@@ -141,6 +141,7 @@ import type {
   StoreStationSummary,
   StoreValueAddedServiceSummary,
   StationCalendarDay,
+  StationCapacityRefreshResult,
   StationCapacitySnapshot,
   StationCapacityRefreshResult,
   TenantBootstrapPreview,
@@ -1356,7 +1357,8 @@ export async function listStationCapacitySnapshots(stationId?: string) {
 export async function refreshStationCapacitySnapshots(stationId?: string) {
   const response = await http.post<ApiResult<StationCapacityRefreshResult>>(
     "/store-rental/stations/capacity-snapshots/refresh",
-    { stationId }
+    undefined,
+    { params: { stationId } }
   );
   return response.data.data;
 }
