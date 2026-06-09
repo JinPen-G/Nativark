@@ -817,6 +817,10 @@ export interface StoreRentalOrderRemarkRecord {
   id: string;
   category:
     | "general"
+    | "internal_note"
+    | "customer_note"
+    | "return_visit"
+    | "fulfillment_followup"
     | "pickup"
     | "return"
     | "finance"
@@ -826,7 +830,13 @@ export interface StoreRentalOrderRemarkRecord {
   visibility: "internal" | "customer_visible";
   operator: string;
   followUpAt?: string;
+  reminderAt?: string;
+  responsibleUserId?: string;
+  responsibleName?: string;
   status: "open" | "closed";
+  closedAt?: string;
+  closedBy?: string;
+  closeNote?: string;
   createdAt: string;
 }
 
@@ -960,7 +970,15 @@ export interface CreateStoreRentalRemarkRequest {
   visibility?: StoreRentalOrderRemarkRecord["visibility"];
   operator: string;
   followUpAt?: string;
+  reminderAt?: string;
+  responsibleUserId?: string;
+  responsibleName?: string;
   status?: StoreRentalOrderRemarkRecord["status"];
+}
+
+export interface CloseStoreRentalRemarkRequest {
+  operator: string;
+  closeNote?: string;
 }
 
 export interface CreateStoreRentalOperationLockRequest {

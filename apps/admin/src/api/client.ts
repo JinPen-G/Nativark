@@ -13,6 +13,7 @@ import type {
   CorporateMonthlyBillSummary,
   CorporateSummary,
   CreateAsyncJobRequest,
+  CloseStoreRentalRemarkRequest,
   CreateCorporateContractAttachmentRequest,
   CreateDataExchangeJobRequest,
   CreateFileAssetRequest,
@@ -415,6 +416,18 @@ export async function createStoreRentalOrderRemark(
 ) {
   const response = await http.post<ApiResult<StoreRentalOrderRemarkRecord>>(
     `/store-rental/orders/${id}/remarks`,
+    payload
+  );
+  return response.data.data;
+}
+
+export async function closeStoreRentalOrderRemark(
+  id: string,
+  remarkId: string,
+  payload: CloseStoreRentalRemarkRequest
+) {
+  const response = await http.patch<ApiResult<StoreRentalOrderRemarkRecord>>(
+    `/store-rental/orders/${id}/remarks/${remarkId}/close`,
     payload
   );
   return response.data.data;

@@ -18,6 +18,7 @@ import {
   CreateStoreRentalOrderRequest,
   CreateStoreRentalOrderResult,
   CreateStoreRentalRemarkRequest,
+  CloseStoreRentalRemarkRequest,
   CreateStoreRentalTransactionRequest,
   DispatchOptimizationReasonCode,
   DispatchOptimizationResultStatus,
@@ -5792,15 +5793,16 @@ export class StoreRentalService {
     if (!input.content?.trim()) {
       throw new BadRequestException("订单备注不能为空。");
     }
+    const operator = input.operator || "营运端";
     if (this.useMysqlDataSource()) {
       const order = await this.storeRentalRepository.getOrderDetail(id);
       const record = await this.storeRentalRepository.createOrderRemarkRecord(
         order.id,
-        input
+        { ...input, operator }
       );
       await this.storeRentalRepository.appendOrderTimeline(order.id, {
         at: new Date().toISOString(),
-        actor: input.operator || "营运端",
+        actor: operator,
         action: `订单备注：${this.remarkCategoryLabel(record.category)}`
       });
 
@@ -5808,15 +5810,22 @@ export class StoreRentalService {
     }
 
     const order = this.findOrder(id);
+    const status = input.status || "open";
+    const now = new Date().toISOString();
     const record: StoreRentalOrderRemarkRecord = {
       id: `remark_${randomUUID()}`,
       category: input.category || "general",
       content: input.content.trim(),
       visibility: input.visibility || "internal",
-      operator: input.operator || "营运端",
+      operator,
       followUpAt: input.followUpAt,
-      status: input.status || "open",
-      createdAt: new Date().toISOString()
+      reminderAt: input.reminderAt,
+      responsibleUserId: input.responsibleUserId,
+      responsibleName: input.responsibleName || operator,
+      status,
+      closedAt: status === "closed" ? now : undefined,
+      closedBy: status === "closed" ? operator : undefined,
+      createdAt: now
     };
     this.prependMemoryRecord(this.orderRemarks, order.id, record);
     this.appendOrderTimeline(
@@ -5825,6 +5834,56 @@ export class StoreRentalService {
       `订单备注：${this.remarkCategoryLabel(record.category)}`
     );
 
+    return record;
+  }
+
+  async closeOrderRemark(
+    id: string,
+    remarkId: string,
+    input: CloseStoreRentalRemarkRequest
+  ): Promise<StoreRentalOrderRemarkRecord> {
+    const operator = input.operator || "营运端";
+    const closeNote = input.closeNote?.trim() || undefined;
+
+    if (this.useMysqlDataSource()) {
+      const order = await this.storeRentalRepository.getOrderDetail(id);
+      const record = await this.storeRentalRepository.closeOrderRemarkRecord(
+        order.id,
+        remarkId,
+        { operator, closeNote }
+      );
+      if (!record) {
+        throw new BadRequestException("订单备注不存在。");
+      }
+      await this.storeRentalRepository.appendOrderTimeline(order.id, {
+        at: new Date().toISOString(),
+        actor: operator,
+        action: `关闭跟进：${this.remarkCategoryLabel(record.category)}`
+      });
+      return record;
+    }
+
+    const order = this.findOrder(id);
+    const records = this.orderRemarks.get(order.id) ?? [];
+    const recordIndex = records.findIndex((record) => record.id === remarkId);
+    if (recordIndex < 0) {
+      throw new BadRequestException("订单备注不存在。");
+    }
+    const now = new Date().toISOString();
+    const record: StoreRentalOrderRemarkRecord = {
+      ...records[recordIndex],
+      status: "closed",
+      closedAt: records[recordIndex].closedAt || now,
+      closedBy: operator,
+      closeNote
+    };
+    records[recordIndex] = record;
+    this.orderRemarks.set(order.id, records);
+    this.appendOrderTimeline(
+      order,
+      operator,
+      `关闭跟进：${this.remarkCategoryLabel(record.category)}`
+    );
     return record;
   }
 
@@ -9626,6 +9685,10 @@ export class StoreRentalService {
 
   private remarkCategoryLabel(category: StoreRentalOrderRemarkRecord["category"]) {
     const labels: Record<StoreRentalOrderRemarkRecord["category"], string> = {
+      internal_note: "内部备注",
+      customer_note: "客户备注",
+      return_visit: "回访记录",
+      fulfillment_followup: "履约跟进",
       general: "通用",
       pickup: "取车",
       return: "还车",

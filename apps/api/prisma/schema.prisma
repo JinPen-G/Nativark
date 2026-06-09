@@ -1415,12 +1415,20 @@ model OrderRemarkRecord {
   visibility  String
   operator    String?
   followUpAt  DateTime?
+  reminderAt  DateTime?
+  responsibleUserId String?
+  responsibleName   String?
   status      String
+  closedAt    DateTime?
+  closedBy    String?
+  closeNote   String?          @db.Text
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
 
   @@index([orderId, category, createdAt])
   @@index([orderId, status])
+  @@index([orderId, reminderAt])
+  @@index([orderId, responsibleUserId])
 }
 
 model OrderOperationLock {

@@ -229,6 +229,7 @@ rimo-store-rental-platform/
 - `POST /store-rental/orders`：读取 MySQL 会员/企业主档，写入订单本体、价格快照、规则快照、初始费用、资金记录和时间线，并回写会员/企业统计。
 - `GET /store-rental/orders`、`GET /store-rental/orders/:id`、`GET /store-rental/orders/:id/fees`：从订单、费用、资金、检查、时间线、结算摘要表读取。
 - `GET /store-rental/contracts`、`GET /store-rental/contracts/templates`、`POST /store-rental/orders/:id/contracts`、`POST /store-rental/contracts/:id/print-mock`、`POST /store-rental/contracts/:id/sign-mock`：合同与单据中心、模板清单、订单关联生成、打印/下载 mock 和签署 mock。MySQL 模式复用 `OrderContractDocument`，扩展字段写入 `payload` JSON。
+- `POST /store-rental/orders/:id/remarks`、`PATCH /store-rental/orders/:id/remarks/:remarkId/close`：订单备注与跟进第一版，支持内部备注、客户备注、回访记录、履约跟进、责任人、跟进时间、提醒时间和关闭状态。MySQL 模式写入 `OrderRemarkRecord`，关闭动作只更新备注/跟进记录，不改变订单主状态。
 - `POST /store-rental/orders/:id/fees`、`/fees/:feeId/waive`、`/transactions`：人工费用、减免、收退款/月结交易落库。
 - `POST /store-rental/orders/:id/actions/:action`：MySQL 模式已接入主流程动作 `payment-success`、`start-pickup`、`pickup-inspection`、`return-inspection`、`confirm-settlement`，以及 `extend-rental`、`redirect-order`、`change-return-store`、`change-return-station`、`cancel`、`mark-no-show`、`reject-order`、`close-order`、`register-accident`；其中改还车门市/据点已支持后续预约冲突快捷改派一期。本轮新增订单操作记录、请求摘要幂等和取车操作锁校验。
 - `GET /store-rental/orders/:id/operation-records`：订单级操作记录，记录关键动作、请求摘要、幂等键、锁状态、操作人、完成状态和返回结果摘要。
@@ -252,6 +253,7 @@ rimo-store-rental-platform/
 - 主数据：`StoreStationSummary`、`VehicleGroupMaster`、`VehicleInstanceSummary`、`StoreValueAddedServiceSummary`。
 - 订单：`StoreRentalOrderSummary`、`StoreRentalOrderDetail`、`CreateStoreRentalOrderRequest`、`StoreRentalOrderActionResult`。
 - 合同与单据：`StoreRentalContractRecord`、`StoreRentalContractCenter`、`StoreRentalContractCenterRow`、`StoreRentalContractTemplate`、`StoreRentalContractPrintResult`、`StoreRentalContractMockSignResult`。
+- 订单备注与跟进：`StoreRentalOrderRemarkRecord`、`CreateStoreRentalRemarkRequest`、`CloseStoreRentalRemarkRequest`，覆盖内部备注、客户备注、回访/履约跟进、责任人、提醒时间和关闭状态。
 - 费用中心：`StoreRentalFeeCenter`、`StoreRentalFeeLedgerItem`、`StoreRentalTransactionRecord`、`CreateStoreRentalFeeRequest`、`CreateStoreRentalTransactionRequest`、`WaiveStoreRentalFeeRequest`。
 - 财务中心：`FinanceOverviewMetrics`、`FinanceTransactionRow`、`FinancePreAuthorizationRow`、`SaveFinancePreAuthorizationRequest`、`FinanceDocumentRow`、`FinanceDocumentAuditItem`、`SaveFinanceDocumentRequest`、`FinanceManualAdjustmentRow`、`SaveFinanceManualAdjustmentRequest`、`FinanceReconciliationRow`。
 - 调度：`StoreRentalDispatchBoard`、`StoreRentalDispatchOrderRow`、`StoreRentalDispatchCandidate`、`StoreRentalDispatchPlan`、`StoreRentalDispatchResultRow`、`StoreRentalDispatchApplyResult`、`StoreRentalDispatchTaskPool`、`StoreRentalDispatchTask`、`StoreRentalDispatchEvent`。
@@ -339,6 +341,7 @@ system:tenant:manage
 
 - 订单动作：新建、取车、还车、延长、取消/爽约、拒绝/关闭、结算。
 - 合同与单据：合同中心和模板读取使用 `store-rental:order:view`；订单关联生成、打印/下载 mock、mock 签署使用 `store-rental:order:operate`。
+- 订单备注与跟进：新增备注、回访/履约跟进和关闭待跟进使用 `store-rental:order:operate`；终态订单允许新增备注，但不改变订单主状态。
 - 费用动作：新增费用、减免、登记收款/退款/月结。
 - 会员动作：暂停、拉黑、恢复。
 - 车辆动作：启停、调拨/位置流水、维保、事故/出险。
@@ -565,6 +568,14 @@ system:tenant:manage
 - 拒绝履约只允许 `inspecting`，费用由门店按资质/风控结果手工录入，费用代码为 `rejection_fee`；后续分步取车向导完成后，应把入口移入取车资质核验步骤。
 - 关闭订单用于客户无责异常关闭；客户自付订单写入 `close_refund` 和退款流水，企业月结订单不生成企业账单。通用租赁改造时，“车辆资源释放”要替换为对应品类库存实例释放，“预授权”要抽象为保证金/押金/冻结额度。
 
+订单备注与跟进实现口径：
+
+- 依据 `订单详情.md` 和 `order_detail.html`，备注入口对全部订单状态开放，终态订单允许新增备注但不改变订单主状态。
+- 备注/跟进记录使用 `OrderRemarkRecord`：`category` 区分内部备注、客户备注、回访记录、履约跟进、取车/还车/费用/风险和客户跟进；`visibility` 区分内部与客户可见；`responsibleName`、`followUpAt`、`reminderAt` 支撑责任人、跟进时间和提醒时间。
+- 订单详情“通知与跟进”区域展示全部备注/跟进记录，待跟进记录可关闭；关闭动作写入 `status=closed`、`closedAt`、`closedBy`、`closeNote`，同时追加订单时间线，但不触发费用、车辆或主状态变化。
+- MySQL 模式下新增和关闭分别走 `POST /store-rental/orders/:id/remarks`、`PATCH /store-rental/orders/:id/remarks/:remarkId/close`，内存模式保持同样 DTO 和行为。提醒时间当前只作为可查询字段保存，后续接 `PF-12` 通知中心或 `PF-16` 定时作业时再触发站内信/短信。
+- 通用租赁平台改造时，该模型可保留为订单级 `OrderFollowupRecord`；汽车专有上下文只应留在内容和分类展示文案里，不应把车牌、门市、事故等字段写死进备注主表。
+
 这些动作后续应迁移为通用履约动作：
 
 - 支付成功。
@@ -634,7 +645,7 @@ PF-15 当前数据边界：
 - 平台底座：租户、组织、用户、多角色、角色权限、权限码、系统参数集、筛选预设、平台审计日志、数据字典配置、编号规则配置。
 - 门市租赁主数据：履约站点、站点营业日历、站点容量/排队快照、车型组、车辆实例、车辆位置流水、车况照片、维保记录、事故/出险记录、车辆调拨任务、车辆证照、随车物资、TBox 台账和指令记录。
 - 客户域：会员、会员风控事件、会员时间线、客户等级方案、企业客户、联系人、合同、企业月结账单。
-- 规则与订单域：租赁业务规则版本、订单、合同/交接单/结算单、取还车检查记录、履约时间线、续租快照、费用项、资金记录、预授权押金台账、发票/收据、人工调账、订单操作记录、客户通知记录、操作锁、幂等记录、企业月结明细。
+- 规则与订单域：租赁业务规则版本、订单、合同/交接单/结算单、取还车检查记录、履约时间线、续租快照、费用项、资金记录、预授权押金台账、发票/收据、人工调账、订单操作记录、客户通知记录、订单备注/跟进、操作锁、幂等记录、企业月结明细。
 
 下一阶段建议按下面顺序推进真实数据层：
 

@@ -17,6 +17,7 @@ import type {
   CreateStoreRentalOperationLockRequest,
   CreateStoreRentalOrderRequest,
   CreateStoreRentalRemarkRequest,
+  CloseStoreRentalRemarkRequest,
   CreateStoreRentalTransactionRequest,
   StoreRentalDispatchApplyRequest,
   StoreRentalDispatchCloseTaskRequest,
@@ -786,6 +787,15 @@ export class StoreRentalController {
     @Body() body: CreateStoreRentalRemarkRequest
   ) {
     return this.storeRentalService.createOrderRemark(id, body);
+  }
+
+  @Patch("orders/:id/remarks/:remarkId/close")
+  closeOrderRemark(
+    @Param("id") id: string,
+    @Param("remarkId") remarkId: string,
+    @Body() body: CloseStoreRentalRemarkRequest
+  ) {
+    return this.storeRentalService.closeOrderRemark(id, remarkId, body);
   }
 
   @Post("orders/:id/operation-locks")

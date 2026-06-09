@@ -20,6 +20,7 @@ import {
   createStoreRentalOrderFee,
   createStoreRentalOrderNotification,
   createStoreRentalOrderRemark,
+  closeStoreRentalOrderRemark,
   createStoreRentalOrderTransaction,
   getStoreRentalOrder,
   listStations,
@@ -134,10 +135,22 @@ const notificationForm = reactive({
   operator: "营运端"
 });
 const remarkForm = reactive({
-  category: "general" as "general" | "pickup" | "return" | "finance" | "risk" | "customer_followup",
+  category: "internal_note" as
+    | "general"
+    | "internal_note"
+    | "customer_note"
+    | "return_visit"
+    | "fulfillment_followup"
+    | "pickup"
+    | "return"
+    | "finance"
+    | "risk"
+    | "customer_followup",
   content: "",
   visibility: "internal" as "internal" | "customer_visible",
   followUpAt: "",
+  reminderAt: "",
+  responsibleName: "",
   status: "open" as "open" | "closed",
   operator: "营运端"
 });
@@ -1729,12 +1742,14 @@ async function submitNotification() {
 
 function openRemarkDialog() {
   Object.assign(remarkForm, {
-    category: "general",
+    category: "internal_note",
     content: "",
     visibility: "internal",
     followUpAt: "",
+    reminderAt: "",
+    responsibleName: authStore.user?.displayName || "营运端",
     status: "open",
-    operator: "营运端"
+    operator: authStore.user?.displayName || "营运端"
   });
   remarkDialogVisible.value = true;
 }
@@ -1748,12 +1763,33 @@ async function submitRemark() {
   try {
     await createStoreRentalOrderRemark(order.id, {
       ...remarkForm,
-      followUpAt: remarkForm.followUpAt || undefined
+      followUpAt: remarkForm.followUpAt || undefined,
+      reminderAt: remarkForm.reminderAt || undefined,
+      responsibleName: remarkForm.responsibleName || undefined
     });
     remarkDialogVisible.value = false;
     await reloadAfterFulfillmentAction("订单备注已保存");
   } catch (error) {
     ElMessage.error(readErrorMessage(error, "订单备注保存失败"));
+  } finally {
+    fulfillmentActionLoading.value = "";
+  }
+}
+
+async function closeRemark(recordId: string) {
+  const order = detail.value;
+  if (!order) {
+    return;
+  }
+  fulfillmentActionLoading.value = `${recordId}:close`;
+  try {
+    await closeStoreRentalOrderRemark(order.id, recordId, {
+      operator: authStore.user?.displayName || "营运端",
+      closeNote: "跟进已处理"
+    });
+    await reloadAfterFulfillmentAction("跟进记录已关闭");
+  } catch (error) {
+    ElMessage.error(readErrorMessage(error, "跟进记录关闭失败"));
   } finally {
     fulfillmentActionLoading.value = "";
   }
@@ -2341,6 +2377,10 @@ function remarkCategoryLabel(value: string) {
     return: "还车",
     finance: "财务",
     risk: "风险",
+    internal_note: "内部备注",
+    customer_note: "客户备注",
+    return_visit: "回访记录",
+    fulfillment_followup: "履约跟进",
     customer_followup: "客户跟进"
   };
   return map[value] ?? value;
@@ -2689,7 +2729,7 @@ onMounted(loadDetail);
                   <el-button size="small" link type="primary" @click="openRemarkDialog">备注</el-button>
                 </div>
               </div>
-              <div class="divide-y divide-gray-100">
+              <div class="divide-y divide-gray-100 max-h-96 overflow-y-auto">
                 <div v-for="record in detail.notifications.slice(0, 4)" :key="record.id" class="px-5 py-3 text-sm">
                   <div class="flex justify-between gap-3">
                     <div>
@@ -2699,10 +2739,47 @@ onMounted(loadDetail);
                     <el-tag size="small" :type="notificationStatusType(record.status)" effect="plain">{{ record.status }}</el-tag>
                   </div>
                 </div>
-                <div v-for="record in detail.remarks.slice(0, 4)" :key="record.id" class="px-5 py-3 text-sm">
-                  <div class="font-bold text-gray-800">{{ remarkCategoryLabel(record.category) }}</div>
+                <div v-for="record in detail.remarks" :key="record.id" class="px-5 py-3 text-sm">
+                  <div class="flex justify-between gap-3">
+                    <div class="font-bold text-gray-800">
+                      {{ remarkCategoryLabel(record.category) }}
+                      <span class="ml-2 text-xs font-normal text-gray-400">
+                        {{ record.visibility === "customer_visible" ? "客户可见" : "内部" }}
+                      </span>
+                    </div>
+                    <el-tag size="small" :type="record.status === 'closed' ? 'info' : 'warning'" effect="plain">
+                      {{ record.status === "closed" ? "已关闭" : "待跟进" }}
+                    </el-tag>
+                  </div>
                   <div class="text-xs text-gray-500 mt-1">{{ record.content }}</div>
-                  <div class="text-xs text-gray-400 mt-1">{{ record.operator }} · {{ record.createdAt }}</div>
+                  <div class="text-xs text-gray-400 mt-1">
+                    责任人：{{ record.responsibleName || record.operator }}
+                    <span class="mx-1">·</span>
+                    记录人：{{ record.operator }}
+                    <span class="mx-1">·</span>
+                    {{ record.createdAt }}
+                  </div>
+                  <div v-if="record.followUpAt || record.reminderAt" class="text-xs text-gray-400 mt-1">
+                    <span v-if="record.followUpAt">跟进时间：{{ record.followUpAt }}</span>
+                    <span v-if="record.followUpAt && record.reminderAt" class="mx-1">·</span>
+                    <span v-if="record.reminderAt">提醒时间：{{ record.reminderAt }}</span>
+                  </div>
+                  <div v-if="record.status === 'closed'" class="text-xs text-gray-400 mt-1">
+                    关闭人：{{ record.closedBy || "营运端" }}
+                    <span v-if="record.closedAt"> · {{ record.closedAt }}</span>
+                    <span v-if="record.closeNote"> · {{ record.closeNote }}</span>
+                  </div>
+                  <div v-else class="mt-2">
+                    <el-button
+                      size="small"
+                      link
+                      type="primary"
+                      :loading="fulfillmentActionLoading === `${record.id}:close`"
+                      @click="closeRemark(record.id)"
+                    >
+                      关闭跟进
+                    </el-button>
+                  </div>
                 </div>
               </div>
               <el-empty v-if="!detail.notifications.length && !detail.remarks.length" description="暂无通知或备注" :image-size="70" />
@@ -4073,7 +4150,7 @@ onMounted(loadDetail);
       </template>
     </el-dialog>
 
-    <el-dialog v-model="remarkDialogVisible" title="订单备注 / 跟进" width="560px" destroy-on-close>
+    <el-dialog v-model="remarkDialogVisible" title="订单备注 / 跟进" width="640px" destroy-on-close>
       <el-form label-position="top">
         <div class="grid grid-cols-2 gap-4">
           <el-form-item label="分类">
@@ -4083,6 +4160,10 @@ onMounted(loadDetail);
               <el-option label="还车" value="return" />
               <el-option label="财务" value="finance" />
               <el-option label="风险" value="risk" />
+              <el-option label="内部备注" value="internal_note" />
+              <el-option label="客户备注" value="customer_note" />
+              <el-option label="回访记录" value="return_visit" />
+              <el-option label="履约跟进" value="fulfillment_followup" />
               <el-option label="客户跟进" value="customer_followup" />
             </el-select>
           </el-form-item>
@@ -4094,6 +4175,12 @@ onMounted(loadDetail);
           </el-form-item>
           <el-form-item label="跟进时间">
             <el-input v-model="remarkForm.followUpAt" placeholder="YYYY-MM-DD HH:mm" />
+          </el-form-item>
+          <el-form-item label="提醒时间">
+            <el-input v-model="remarkForm.reminderAt" placeholder="YYYY-MM-DD HH:mm" />
+          </el-form-item>
+          <el-form-item label="责任人">
+            <el-input v-model="remarkForm.responsibleName" placeholder="填写跟进责任人" />
           </el-form-item>
           <el-form-item label="状态">
             <el-select v-model="remarkForm.status" class="w-full">

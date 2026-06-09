@@ -85,6 +85,7 @@ import type {
   CreateStoreRentalNotificationRequest,
   CreateStoreRentalOperationLockRequest,
   CreateStoreRentalRemarkRequest,
+  CloseStoreRentalRemarkRequest,
   AdvanceVehicleTransferTaskRequest,
   BindTboxDeviceRequest,
   CreateVehicleTransferTaskRequest,
@@ -2547,14 +2548,20 @@ export class StoreRentalRepository {
       visibility: input.visibility || "internal",
       operator: input.operator || "营运端",
       followUpAt: input.followUpAt,
+      reminderAt: input.reminderAt,
+      responsibleUserId: input.responsibleUserId,
+      responsibleName: input.responsibleName || input.operator || "营运端",
       status: input.status || "open",
+      closedAt: input.status === "closed" ? now.toISOString() : undefined,
+      closedBy: input.status === "closed" ? input.operator || "营运端" : undefined,
       createdAt: now.toISOString()
     };
 
     await this.prisma.$executeRaw`
       INSERT INTO OrderRemarkRecord (
         id, orderId, category, content, visibility, operator, followUpAt,
-        status, createdAt, updatedAt
+        reminderAt, responsibleUserId, responsibleName, status, closedAt,
+        closedBy, closeNote, createdAt, updatedAt
       ) VALUES (
         ${record.id},
         ${orderId},
@@ -2563,13 +2570,49 @@ export class StoreRentalRepository {
         ${record.visibility},
         ${record.operator},
         ${record.followUpAt ? new Date(record.followUpAt) : null},
+        ${record.reminderAt ? new Date(record.reminderAt) : null},
+        ${record.responsibleUserId ?? null},
+        ${record.responsibleName ?? null},
         ${record.status},
+        ${record.closedAt ? new Date(record.closedAt) : null},
+        ${record.closedBy ?? null},
+        ${record.closeNote ?? null},
         ${now},
         ${now}
       )
     `;
 
     return record;
+  }
+
+  async closeOrderRemarkRecord(
+    orderId: string,
+    remarkId: string,
+    input: CloseStoreRentalRemarkRequest
+  ): Promise<StoreRentalOrderRemarkRecord | undefined> {
+    const now = new Date();
+    await this.prisma.$executeRaw`
+      UPDATE OrderRemarkRecord
+      SET
+        status = 'closed',
+        closedAt = COALESCE(closedAt, ${now}),
+        closedBy = ${input.operator || "营运端"},
+        closeNote = ${input.closeNote ?? null},
+        updatedAt = ${now}
+      WHERE id = ${remarkId} AND orderId = ${orderId}
+    `;
+
+    const rows = await this.prisma.$queryRaw<any[]>`
+      SELECT
+        id, category, content, visibility, operator, followUpAt, reminderAt,
+        responsibleUserId, responsibleName, status, closedAt, closedBy,
+        closeNote, createdAt
+      FROM OrderRemarkRecord
+      WHERE id = ${remarkId} AND orderId = ${orderId}
+      LIMIT 1
+    `;
+
+    return rows[0] ? this.toRemarkRecord(rows[0]) : undefined;
   }
 
   async createOrderOperationLockRecord(
@@ -2726,7 +2769,9 @@ export class StoreRentalRepository {
   ): Promise<StoreRentalOrderRemarkRecord[]> {
     const rows = await this.prisma.$queryRaw<any[]>`
       SELECT
-        id, category, content, visibility, operator, followUpAt, status, createdAt
+        id, category, content, visibility, operator, followUpAt, reminderAt,
+        responsibleUserId, responsibleName, status, closedAt, closedBy,
+        closeNote, createdAt
       FROM OrderRemarkRecord
       WHERE orderId = ${orderId}
       ORDER BY createdAt DESC
@@ -5709,7 +5754,13 @@ export class StoreRentalRepository {
       visibility: row.visibility === "customer_visible" ? "customer_visible" : "internal",
       operator: row.operator ?? "营运端",
       followUpAt: row.followUpAt ? row.followUpAt.toISOString() : undefined,
+      reminderAt: row.reminderAt ? row.reminderAt.toISOString() : undefined,
+      responsibleUserId: row.responsibleUserId ?? undefined,
+      responsibleName: row.responsibleName ?? undefined,
       status: row.status === "closed" ? "closed" : "open",
+      closedAt: row.closedAt ? row.closedAt.toISOString() : undefined,
+      closedBy: row.closedBy ?? undefined,
+      closeNote: row.closeNote ?? undefined,
       createdAt: row.createdAt.toISOString()
     };
   }
@@ -6113,7 +6164,18 @@ export class StoreRentalRepository {
   }
 
   private toRemarkCategory(value: string): StoreRentalOrderRemarkRecord["category"] {
-    return ["pickup", "return", "finance", "risk", "customer_followup"].includes(value)
+    return [
+      "general",
+      "internal_note",
+      "customer_note",
+      "return_visit",
+      "fulfillment_followup",
+      "pickup",
+      "return",
+      "finance",
+      "risk",
+      "customer_followup"
+    ].includes(value)
       ? (value as StoreRentalOrderRemarkRecord["category"])
       : "general";
   }
