@@ -4645,6 +4645,13 @@ export class StoreRentalService {
           message: "车辆非空闲状态，不能直接调拨。"
         };
       }
+      if (this.hasBlockingTransferOrder(vehicle)) {
+        return {
+          ...base,
+          result: "failed" as const,
+          message: "车辆存在履约中订单占用，不能直接调拨。"
+        };
+      }
       if (!vehicle.serviceTypes.includes(input.targetServiceType)) {
         return {
           ...base,
@@ -4653,41 +4660,17 @@ export class StoreRentalService {
         };
       }
 
-      vehicle.currentStoreName = input.targetStoreName;
-      vehicle.currentStationName = input.targetStationName;
-      vehicle.currentServiceType = input.targetServiceType;
-      vehicle.lastOperationAt = new Date().toISOString();
-      vehicle.lastOperationBy = operator;
-      const records = this.vehicleLocationEvents.get(vehicle.id) ?? [];
-      records.unshift({
-        id: `loc_transfer_${randomUUID()}`,
-        at: new Date().toISOString(),
-        type: "transfer",
-        storeName: input.targetStoreName,
-        stationName: input.targetStationName,
-        mileage: vehicle.mileage,
-        operator,
-        source: "operation",
-        note: reason
-      });
-      this.vehicleLocationEvents.set(vehicle.id, records.slice(0, 120));
-      this.appendVehicleOperationLog(vehicle, {
-        operator,
-        action: "车辆调拨",
-        reason: `${base.sourceStoreName}/${base.sourceStationName} -> ${input.targetStoreName}/${input.targetStationName}`
-      });
-
       return {
         ...base,
-        result: "completed" as const,
-        message: "调拨完成"
+        result: "pending" as const,
+        message: "调拨申请已创建，待确认。"
       };
     });
     const now = new Date().toISOString();
     const task: VehicleTransferTask = {
       id: `transfer_${randomUUID()}`,
       taskNo: `TR${now.replace(/\D/g, "").slice(0, 14)}`,
-      status: items.some((item) => item.result === "failed") ? "pending" : "completed",
+      status: "pending",
       sourceStoreName: sourceVehicle.currentStoreName,
       sourceStationName: sourceVehicle.currentStationName,
       targetStoreName: input.targetStoreName,
@@ -4697,8 +4680,7 @@ export class StoreRentalService {
       reason,
       operator,
       items,
-      createdAt: now,
-      completedAt: items.some((item) => item.result === "failed") ? undefined : now
+      createdAt: now
     };
     this.vehicleTransferTasks.unshift(task);
 
@@ -4826,9 +4808,24 @@ export class StoreRentalService {
       task.status = "approved";
       task.approvedAt = now;
       task.items.forEach((item) => {
-        if (item.result !== "failed") {
-          item.message = "已确认，待出发。";
+        if (item.result === "failed") {
+          return;
         }
+        const vehicle = this.vehicles.find((row) => row.id === item.vehicleId);
+        if (!vehicle || vehicle.operationStatus !== "idle" || this.hasBlockingTransferOrder(vehicle)) {
+          item.result = "failed";
+          item.message = "确认时车辆已被占用，调拨失败。";
+          return;
+        }
+        vehicle.operationStatus = "controlled";
+        vehicle.lastOperationAt = now;
+        vehicle.lastOperationBy = operator;
+        item.message = "已确认，待出发。";
+        this.appendVehicleOperationLog(vehicle, {
+          operator,
+          action: "调拨申请确认，车辆进入调拨管控",
+          reason
+        });
       });
     } else if (input.action === "depart") {
       if (task.status !== "approved") {
@@ -4839,6 +4836,14 @@ export class StoreRentalService {
       task.items.forEach((item) => {
         if (item.result !== "failed") {
           item.message = "车辆已出发，等待到达确认。";
+          const vehicle = this.vehicles.find((row) => row.id === item.vehicleId);
+          if (vehicle) {
+            this.appendVehicleOperationLog(vehicle, {
+              operator,
+              action: "车辆调拨出发",
+              reason
+            });
+          }
         }
       });
     } else if (input.action === "arrive") {
@@ -4852,18 +4857,33 @@ export class StoreRentalService {
         if (!vehicle || item.result === "failed") {
           continue;
         }
+        const sourceStoreName = vehicle.currentStoreName;
+        const sourceStationName = vehicle.currentStationName;
         vehicle.currentStoreName = task.targetStoreName;
         vehicle.currentStationName = task.targetStationName;
         vehicle.currentServiceType = task.targetServiceType;
         vehicle.operationStatus = vehicle.enabled ? "idle" : "disabled";
         vehicle.lastOperationAt = now;
         vehicle.lastOperationBy = operator;
+        const records = this.vehicleLocationEvents.get(vehicle.id) ?? [];
+        records.unshift({
+          id: `loc_transfer_${randomUUID()}`,
+          at: now,
+          type: "transfer",
+          storeName: task.targetStoreName,
+          stationName: task.targetStationName,
+          mileage: vehicle.mileage,
+          operator,
+          source: "operation",
+          note: reason
+        });
+        this.vehicleLocationEvents.set(vehicle.id, records.slice(0, 120));
         item.result = "completed";
         item.message = "调拨完成";
         this.appendVehicleOperationLog(vehicle, {
           operator,
           action: "车辆调拨到达",
-          reason
+          reason: `${sourceStoreName}/${sourceStationName} -> ${task.targetStoreName}/${task.targetStationName}`
         });
       }
     } else {
@@ -4873,6 +4893,17 @@ export class StoreRentalService {
       task.items.forEach((item) => {
         if (item.result !== "failed") {
           item.message = "调拨已取消。";
+          const vehicle = this.vehicles.find((row) => row.id === item.vehicleId);
+          if (vehicle?.operationStatus === "controlled") {
+            vehicle.operationStatus = vehicle.enabled ? "idle" : "disabled";
+            vehicle.lastOperationAt = now;
+            vehicle.lastOperationBy = operator;
+            this.appendVehicleOperationLog(vehicle, {
+              operator,
+              action: "取消调拨，释放车辆管控",
+              reason
+            });
+          }
         }
       });
     }

@@ -107,7 +107,7 @@
 | MD-07 | 车辆状态动作 | 启用/停用、维保/结束维保、批量状态操作 | In Progress | 新增后端车辆状态接口，页面启停、维保、结束维保、批量启停已接 API；新增维保/事故记录会回写车辆状态和操作日志 | 补状态动作原因必填、租赁中车辆禁用细则和 MySQL 持久化 |
 | MD-08 | 车型组删除校验 | 车型组被车辆/订单引用时不允许删除 | Done | 新增后端删除接口，删除前校验车辆/订单引用，页面已接 API | 接 MySQL 后迁移为外键/引用查询 |
 | MD-09 | 车辆详情 | 车辆概况、订单记录、出入站、车况照片、操作记录 | In Progress | 已新增后端车辆详情接口和前端详情抽屉，包含车辆概况、订单记录、出入站流水、车况照片、维保/事故、证照、随车物资、操作记录；维保/事故记录新增、维保完成、事故结案、证照/物资新增编辑已接后端并刷新详情；已补出入站流水新增与编辑接口、车况照片补录、详情页占用排程提示和“车辆调拨”快捷入口；设置 `STORE_RENTAL_DATA_SOURCE=mysql` 后出入站、车况照片、维保、事故、证照、物资、操作日志写入 MySQL | 补真实附件上传、流水结案、调度候选联动和取还车交接核验 |
-| MD-10 | 车辆调拨 | 车辆门市/据点调拨、调拨单、交接记录 | In Progress | 已新增车辆调拨任务列表、创建、流转和 MySQL `VehicleTransferTask`，支持占用校验、位置回写、车辆操作日志；前端已接 `VehicleTransferView.vue` 和车辆详情快捷入口 | 继续补交接附件、调拨审计报表、调度页联动和数据权限过滤 |
+| MD-10 | 车辆调拨 | 车辆门市/据点调拨、调拨单、交接记录 | In Progress | 已新增车辆调拨任务列表、创建、流转和 MySQL `VehicleTransferTask`，支持申请确认、出发、到达、取消、二次占用校验、位置回写和车辆操作日志；前端已接 `VehicleTransferView.vue` 任务流转和车辆详情快捷入口 | 继续补交接附件、调拨审计报表、调度页联动和数据权限过滤 |
 | MD-11 | 车务看板 | 车辆状态列表、整备/维修/受控监控、批量处置入口 | In Progress | 已新增车辆速查表 `VehicleStatusListView.vue`、车辆控制台 `VehicleConsoleView.vue`，可查看状态、TBox 绑定和基础远控 mock；车辆状态动作已写状态变更记录 | 继续补后端聚合 API、批量处置任务、异常关闭和车务审计报表 |
 | MD-12 | TBox 设备管理 | 设备绑定、在线状态、远程能力 mock、设备档案 | In Progress | 已新增 TBox 台账、绑定/解绑和预留指令模拟；MySQL 模式落 `TboxDevice`、`TboxCommandRecord` | 继续接统一 adapter、真实供应商回调、指令幂等和失败重试 |
 | MD-13 | 车辆证照 | 行驶证、保险、年检、保养计划等证照档案 | In Progress | 已新增共享 DTO、后端列表/保存接口、MySQL `VehicleCredentialRecord` 表和车辆详情“证照与物资”页签；支持证照类型、编号、状态、签发/到期、提前提醒天数和附件地址预留 | 继续在车辆详情页内接证照附件引用、到期提醒展示、证照异常调度拦截和取车前核验 |
@@ -863,6 +863,7 @@
 | 2026-05-20 | MD-09 继续推进：新增 `/store-rental/vehicles/:id/location-events`，支持车辆详情页补录出入站流水；详情头部增加占用排程提示卡片，提示当前/未来订单占用风险 | `npm install`、`npm run build` |
 | 2026-05-20 | MD-09 继续推进：新增 `/store-rental/vehicles/:id/maintenance-records/:recordId`、`/accident-records/:recordId` 更新接口；车辆详情“维保与事故”页签已支持维保记录完成、事故记录结案，并根据未结记录自动回写车辆状态 | `npm run build` |
 | 2026-05-20 | MD-09 继续推进：新增 `/store-rental/vehicles/:id/location-events/:recordId`、`/condition-photos`；车辆详情已支持编辑人工/调拨流水、补录车况照片、车辆调拨快捷入口，并对履约中订单增加调拨阻断校验 | `npm run build` |
+| 2026-06-09 | MD-10 闭环补齐：补 `PATCH /store-rental/vehicles/transfer-tasks/:id`，前端支持调拨申请确认、登记出发、确认到达和取消；MySQL 创建/确认阶段补履约中订单二次占用校验，到达后回写车辆门市/据点、位置流水和操作日志 | `npm run db:generate`、`npm run build -w @rimo/shared`、`npm run build -w @rimo/api`、`npm run build -w @rimo/admin`、`git diff --check` |
 | 2026-05-21 | CRM/COR 第一版：新增会员列表、会员详情、会员审核、客户等级方案、企业客户列表、企业客户详情页面；后端新增 members/member-reviews/membership-plans/corporates 接口，前端菜单、路由、权限同步接入 | `npm run build` |
 | 2026-05-21 | CRM/COR 第二版：企业客户详情补月结配置和合同台账；新建订单页改为接入真实会员/企业客户数据，下单时回写会员/企业最近订单和企业活跃订单数 | `npm run build` |
 | 2026-06-08 | CRM-05/OR-21：新增会员风控动作 `/store-rental/members/:id/risk-actions`，会员列表/详情支持暂停、拉黑、恢复；新建订单增加会员认证、风控标签、企业授信拦截；新增企业月结账单接口和企业详情页账单明细/回款登记 | `npm run build` |

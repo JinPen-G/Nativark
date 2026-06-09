@@ -47,7 +47,7 @@ rimo-store-rental-platform/
 - `StationsView.vue`：服务站点管理。
 - `VehicleGroupsView.vue`：车型组管理。
 - `VehiclesView.vue`：车辆档案库，包含车辆详情抽屉、维保/事故记录新增、车辆证照与随车物资维护、车辆状态动作和筛选预设。
-- `VehicleTransferView.vue`：车辆调拨管理，包含调拨任务列表、调拨创建和任务流转。
+- `VehicleTransferView.vue`：车辆调拨管理，包含调拨任务列表、调拨创建、确认、出发、到达、取消和任务流转。
 - `VehicleStatusListView.vue`：车辆速查表，包含车辆状态、TBox 绑定和异常车务筛选。
 - `VehicleConsoleView.vue`：车辆控制台，包含 TBox 预留远控指令 mock。
 - `TboxManagementView.vue`：TBox 设备管理，包含设备台账和车辆绑定。
@@ -60,7 +60,7 @@ rimo-store-rental-platform/
 当前已接入的营运端基础页面：
 
 - 系统通用参数：已按原型 `system_rules.html` 开发，作为平台级配置中心处理。
-- 车辆调拨：已按原型 `vehicle_transfer.html` 开发第一版，作为车辆位置和履约资源调整模块处理。
+- 车辆调拨：已按原型 `vehicle_transfer.html` 开发第一版，作为车辆位置和履约资源调整模块处理；创建任务只生成调拨申请，到达确认后才回写车辆门市/据点和位置流水。
 - 车务看板：已按原型 `vehicle_status_list.html`、`vehicle_console.html` 开发第一版，作为车辆状态监控和批量处置入口。
 - TBox 设备管理：已按原型 `tbox_management.html` 开发第一版，本期只做设备台账和 mock 集成。
 
@@ -214,7 +214,7 @@ rimo-store-rental-platform/
 - 外部集成预留。
 - 企业端/H5 预留接口说明。
 
-当前门市租赁业务默认仍是内存数据。已新增 `StoreRentalRepository` 和 `STORE_RENTAL_DATA_SOURCE=memory|mysql`：设置为 `mysql` 后，租赁业务规则当前版本/历史版本、站点列表分页/筛选/保存、站点营业日历、站点容量/排队快照、车型组、车辆列表分页/筛选/保存/删除校验/车辆状态更新、车辆出入站流水、车况照片记录、维保记录、事故/出险记录、车辆操作日志、车辆调拨任务、车辆证照、随车物资、TBox 台账、个人会员列表分页/筛选/详情/保存、会员审核、会员风控、客户等级方案、企业客户列表分页/筛选/详情/保存、企业联系人、企业合同、订单创建/查询、订单费用中心、检查记录、资金流水、预授权押金台账、发票/收据、手工调账、订单时间线、续租快照、改派动作、改还车门市/据点动作、终止类动作、订单事故登记、调度预分配/硬锁/人工改派、调度事件审计和企业月结账单走 Prisma/MySQL。
+当前门市租赁业务默认仍是内存数据。已新增 `StoreRentalRepository` 和 `STORE_RENTAL_DATA_SOURCE=memory|mysql`：设置为 `mysql` 后，租赁业务规则当前版本/历史版本、站点列表分页/筛选/保存、站点营业日历、站点容量/排队快照、车型组、车辆列表分页/筛选/保存/删除校验/车辆状态更新、车辆出入站流水、车况照片记录、维保记录、事故/出险记录、车辆操作日志、车辆调拨任务与流转、车辆证照、随车物资、TBox 台账、个人会员列表分页/筛选/详情/保存、会员审核、会员风控、客户等级方案、企业客户列表分页/筛选/详情/保存、企业联系人、企业合同、订单创建/查询、订单费用中心、检查记录、资金流水、预授权押金台账、发票/收据、手工调账、订单时间线、续租快照、改派动作、改还车门市/据点动作、终止类动作、订单事故登记、调度预分配/硬锁/人工改派、调度事件审计和企业月结账单走 Prisma/MySQL。
 
 租赁业务规则版本实现口径：
 
@@ -369,6 +369,7 @@ system:tenant:manage
 16. 新增车辆：`POST /store-rental/vehicles`
 17. 编辑车辆：`PUT /store-rental/vehicles/:id`
 18. 车辆状态动作：`PATCH /store-rental/vehicles/:id/status`
+19. 车辆调拨任务：`GET /store-rental/vehicles/transfer-tasks`、`POST /store-rental/vehicles/transfer-tasks`、`PATCH /store-rental/vehicles/transfer-tasks/:id`
 
 系统参数接口：
 
@@ -411,6 +412,7 @@ system:tenant:manage
 - 车辆详情接口返回车辆概况、关联订单、出入站流水、车况照片、维保记录、事故记录、车辆证照、随车物资和操作日志。设置 `STORE_RENTAL_DATA_SOURCE=mysql` 后，车辆主表、车辆位置流水表、车况照片表、维保表、事故表、证照表、随车物资表和车辆操作日志已走 MySQL；订单关联记录仍来自当前订单内存数据。
 - 已新增 `POST /store-rental/vehicles/:id/location-events`，支持营运端在车辆详情页补录取还车、调拨、人工调整和车机同步流水。当前写入内存 map，并在记录时间晚于当前最近操作时间时回写车辆当前位置、里程、最近操作人和最近操作时间。
 - 已新增 `PATCH /store-rental/vehicles/:id/location-events/:recordId`，支持编辑人工补录和调拨流水。当前会校验门市/站点归属、里程合法性，并对 `transfer` 类型增加“履约中订单阻断调拨”的基础校验。
+- 车辆调拨任务创建后保持 `pending`，前端通过 `PATCH /store-rental/vehicles/transfer-tasks/:id` 推进 `approve`、`depart`、`arrive`、`cancel`。`approve` 会把可调拨车辆转入 `controlled` 管控并二次校验履约中订单占用；`arrive` 才回写车辆当前门市/据点、服务类型、位置流水、操作日志和站点容量快照。
 - 已新增 `POST /store-rental/vehicles/:id/condition-photos`，支持在车辆详情页补录车况照片记录。MySQL 模式下照片记录已落 `VehicleConditionPhotoRecord`，但照片本身仍是 URL 字符串；后续附件中心完成后，应改为附件表 + 引用关系。
 - 已新增 `GET/PUT /store-rental/vehicles/:id/credentials` 和 `GET/PUT /store-rental/vehicles/:id/onboard-items`，支持车辆证照与随车物资列表和保存。车辆详情页已新增“证照与物资”页签，证照支持类型、编号、状态、签发/到期、提醒天数和附件地址预留；随车物资支持类别、标准/实际数量、缺失/损坏状态、赔付金额和盘点时间。后续附件中心完成后，证照附件应从 URL 字符串迁为统一文件资产引用。
 - 新增维保记录会写入 `vehicleMaintenanceRecords`，处理中/待处理记录会把非租赁中车辆切到 `maintenance`，并追加“新增维保记录”操作日志。新增事故/出险记录会写入 `vehicleAccidentRecords`，未结案记录会把非租赁中车辆切到 `controlled`，并追加“新增事故/出险记录”操作日志。MySQL 模式下记录表、车辆当前状态和 `OperationLog` 已同步写入；后续要进一步收敛为显式事务和完整状态变更历史表。

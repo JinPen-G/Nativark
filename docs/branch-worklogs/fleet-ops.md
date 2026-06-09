@@ -105,3 +105,20 @@
 - `DATABASE_URL=... npm run db:generate`
 - `npm run build -w @rimo/api`
 - `npm run build -w @rimo/admin`
+
+## 2026-06-09 MD-10 闭环补齐
+
+- 当前分支保持 `codex/fleet-ops`，本轮未新建分支、未修改 PRD 或 HTML 原型。
+- 抽查发现 `MD-10 车辆调拨` 已有 service/repository 流转逻辑，但 controller、前端 API client 和页面未暴露确认/出发/到达/取消动作，MySQL 模式下创建任务后会停留在 `pending`，前端却显示“已执行”。
+- 后端新增 `PATCH /store-rental/vehicles/transfer-tasks/:id`，支持 `approve`、`depart`、`arrive`、`cancel`。MySQL 创建阶段和确认阶段均校验履约中订单占用；确认时车辆进入 `controlled` 管控，到达时回写车辆当前门市/据点、服务类型、位置流水、操作日志和容量快照。
+- 内存数据源同步改为“创建申请 -> 确认管控 -> 出发 -> 到达回写/取消释放”，避免 memory/mysql 行为分叉。
+- 前端 `VehicleTransferView.vue` 已接调拨任务状态流转按钮，任务状态展示为待确认、已确认、已出发、已完成、已取消，并在到达/取消后刷新车辆位置和任务记录。
+
+验证：
+
+- `npm run build -w @rimo/shared`：通过
+- `npm run db:generate`：通过
+- `npm run build -w @rimo/api`：通过
+- `npm run build -w @rimo/admin`：通过
+- `git diff --check`：通过
+- `npx prisma validate --schema apps/api/prisma/schema.prisma`：未注入 `DATABASE_URL` 时失败；尝试通过单次命令注入临时 `DATABASE_URL` 被本地审批系统因工作区额度不足拒绝，未继续绕路执行。

@@ -720,6 +720,11 @@ export class StoreRentalRepository {
       throw new BadRequestException("调拨车辆不存在或不属于当前租户。");
     }
 
+    const blockingOrderNosByVehicle = await this.listActiveVehicleOrderNosByVehicle(
+      rows.map((row) => row.id),
+      tenantId
+    );
+
     const sourceStoreName = rows[0]?.store?.name || rows[0]?.currentStation?.parentStoreName || "";
     const sourceStationName = rows[0]?.currentStation?.name || "";
     const taskNo = `TR${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}${cryptoRandomId().slice(0, 4).toUpperCase()}`;
@@ -740,6 +745,21 @@ export class StoreRentalRepository {
           targetServiceType: input.targetServiceType,
           result: "failed" as const,
           message: "车辆非空闲状态，不能直接调拨。"
+        });
+        continue;
+      }
+      const blockingOrderNos = blockingOrderNosByVehicle.get(vehicle.id) ?? [];
+      if (blockingOrderNos.length > 0) {
+        items.push({
+          vehicleId: vehicle.id,
+          licensePlate: vehicle.licensePlate,
+          sourceStoreName: vehicle.currentStoreName,
+          sourceStationName: vehicle.currentStationName,
+          targetStoreName: input.targetStoreName,
+          targetStationName: input.targetStationName,
+          targetServiceType: input.targetServiceType,
+          result: "failed" as const,
+          message: `车辆存在履约中订单占用（${blockingOrderNos.join("、")}），不能直接调拨。`
         });
         continue;
       }
@@ -820,20 +840,56 @@ export class StoreRentalRepository {
     const now = new Date();
 
     if (input.action === "approve") {
+      const vehicleById = new Map(vehicles.map((row) => [row.id, row]));
+      const blockingOrderNosByVehicle = await this.listActiveVehicleOrderNosByVehicle(
+        validItems.map((item) => item.vehicleId),
+        tenantId
+      );
+      const nextItems = [];
       for (const row of vehicles) {
         const before = this.toVehicleSummary(row);
-        if (before.operationStatus !== "idle") {
+        const blockingOrderNos = blockingOrderNosByVehicle.get(before.id) ?? [];
+        if (before.operationStatus === "idle" && blockingOrderNos.length === 0) {
+          const saved = await this.updateVehicleForTransferControl(row.id, {
+            operator,
+            reason,
+            action: "调拨申请确认，车辆进入调拨管控"
+          });
+          await this.recordVehicleStatusChange(before, saved, {
+            operator,
+            reason,
+            impactedOrderNos: []
+          });
+        }
+      }
+      for (const item of items) {
+        if (item.result === "failed") {
+          nextItems.push(item);
           continue;
         }
-        const saved = await this.updateVehicleForTransferControl(row.id, {
-          operator,
-          reason,
-          action: "调拨申请确认，车辆进入调拨管控"
-        });
-        await this.recordVehicleStatusChange(before, saved, {
-          operator,
-          reason,
-          impactedOrderNos: []
+        const row = vehicleById.get(item.vehicleId);
+        const vehicle = row ? this.toVehicleSummary(row) : undefined;
+        const blockingOrderNos = blockingOrderNosByVehicle.get(item.vehicleId) ?? [];
+        if (!vehicle || vehicle.operationStatus !== "idle") {
+          nextItems.push({
+            ...item,
+            result: "failed" as const,
+            message: "确认时车辆已被占用，调拨失败。"
+          });
+          continue;
+        }
+        if (blockingOrderNos.length > 0) {
+          nextItems.push({
+            ...item,
+            result: "failed" as const,
+            message: `确认时车辆存在履约中订单占用（${blockingOrderNos.join("、")}），调拨失败。`
+          });
+          continue;
+        }
+        nextItems.push({
+          ...item,
+          result: "pending" as const,
+          message: "已确认，待出发。"
         });
       }
       const savedTask = await this.prisma.vehicleTransferTask.update({
@@ -841,16 +897,12 @@ export class StoreRentalRepository {
         data: {
           status: "approved",
           approvedAt: now,
-          items: validItems.map((item) => ({
-            ...item,
-            result: "pending",
-            message: "已确认，待出发。"
-          })) as Prisma.InputJsonValue
+          items: nextItems as unknown as Prisma.InputJsonValue
         }
       });
       return {
         task: this.toVehicleTransferTask(savedTask),
-        vehicles: await this.listVehiclesByIds(validItems.map((item) => item.vehicleId), tenantId)
+        vehicles: await this.listVehiclesByIds(items.map((item) => item.vehicleId), tenantId)
       };
     }
 
@@ -4410,6 +4462,49 @@ export class StoreRentalRepository {
 
   private transferTaskItems(items: Prisma.JsonValue): VehicleTransferTask["items"] {
     return Array.isArray(items) ? (items as unknown as VehicleTransferTask["items"]) : [];
+  }
+
+  private async listActiveVehicleOrderNosByVehicle(
+    vehicleIds: string[],
+    tenantId = this.defaultTenantId
+  ) {
+    if (vehicleIds.length === 0) {
+      return new Map<string, string[]>();
+    }
+
+    const rows = await this.prisma.storeRentalOrder.findMany({
+      where: {
+        tenantId,
+        assignedVehicleId: { in: vehicleIds },
+        mainStatus: {
+          in: [
+            PrismaOrderMainStatus.INSPECTING,
+            PrismaOrderMainStatus.RENTING,
+            PrismaOrderMainStatus.RENEWING,
+            PrismaOrderMainStatus.OVERDUE,
+            PrismaOrderMainStatus.ACCIDENT_PROCESSING,
+            PrismaOrderMainStatus.SETTLEMENT_PENDING,
+            PrismaOrderMainStatus.PAYMENT_DUE,
+            PrismaOrderMainStatus.REFUND_PENDING
+          ]
+        }
+      },
+      select: {
+        assignedVehicleId: true,
+        orderNo: true
+      }
+    });
+
+    const orderNosByVehicle = new Map<string, string[]>();
+    rows.forEach((row) => {
+      if (!row.assignedVehicleId) {
+        return;
+      }
+      const orderNos = orderNosByVehicle.get(row.assignedVehicleId) ?? [];
+      orderNos.push(row.orderNo);
+      orderNosByVehicle.set(row.assignedVehicleId, orderNos);
+    });
+    return orderNosByVehicle;
   }
 
   private async listVehiclesByIds(

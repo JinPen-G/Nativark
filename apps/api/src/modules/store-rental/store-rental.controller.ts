@@ -6,6 +6,7 @@ import type {
   CreateVehicleAccidentRecordRequest,
   CreateVehicleMaintenanceRecordRequest,
   CreateVehicleTransferTaskRequest,
+  AdvanceVehicleTransferTaskRequest,
   MemberReviewTask,
   CreateStoreRentalFeeRequest,
   CreateStoreRentalContractRequest,
@@ -345,6 +346,14 @@ export class StoreRentalController {
   @Post("vehicles/transfer-tasks")
   createVehicleTransferTask(@Body() body: CreateVehicleTransferTaskRequest) {
     return this.storeRentalService.createVehicleTransferTask(body);
+  }
+
+  @Patch("vehicles/transfer-tasks/:id")
+  advanceVehicleTransferTask(
+    @Param("id") id: string,
+    @Body() body: AdvanceVehicleTransferTaskRequest
+  ) {
+    return this.storeRentalService.advanceVehicleTransferTask(id, body);
   }
 
   @Get("tbox-devices")

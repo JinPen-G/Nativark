@@ -3,6 +3,7 @@ import type {
   AdapterLogSummary,
   ApiResult,
   AsyncJobSummary,
+  AdvanceVehicleTransferTaskRequest,
   AuthUser,
   BindTBoxDeviceRequest,
   CorporateContractAttachmentResult,
@@ -1447,6 +1448,17 @@ export async function createVehicleTransferTask(
 ) {
   const response = await http.post<ApiResult<VehicleTransferTaskResult>>(
     "/store-rental/vehicles/transfer-tasks",
+    payload
+  );
+  return response.data.data;
+}
+
+export async function advanceVehicleTransferTask(
+  id: string,
+  payload: AdvanceVehicleTransferTaskRequest
+) {
+  const response = await http.patch<ApiResult<VehicleTransferTaskResult>>(
+    `/store-rental/vehicles/transfer-tasks/${id}`,
     payload
   );
   return response.data.data;

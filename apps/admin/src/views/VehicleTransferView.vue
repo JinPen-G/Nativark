@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, reactive, ref } from "vue";
 import type {
+  AdvanceVehicleTransferTaskRequest,
   CreateVehicleTransferTaskRequest,
   StoreStationSummary,
   VehicleInstanceSummary,
   VehicleTransferTask
 } from "@rimo/shared";
 import {
+  advanceVehicleTransferTask,
   createVehicleTransferTask,
   listStations,
   listVehicleTransferTasks,
@@ -17,6 +19,7 @@ import AppLayout from "../components/AppLayout.vue";
 
 const loading = ref(false);
 const drawerVisible = ref(false);
+const taskActionLoading = ref("");
 const rows = ref<VehicleInstanceSummary[]>([]);
 const stations = ref<StoreStationSummary[]>([]);
 const transferTasks = ref<VehicleTransferTask[]>([]);
@@ -111,7 +114,7 @@ async function submitTransfer() {
   transferTasks.value.unshift(result.task);
   await loadData();
   drawerVisible.value = false;
-  ElMessage.success(`调拨任务 ${result.task.taskNo} 已执行`);
+  ElMessage.success(`调拨任务 ${result.task.taskNo} 已创建，待确认`);
 }
 
 function statusName(status: VehicleInstanceSummary["operationStatus"]) {
@@ -131,7 +134,99 @@ function serviceTypeName(type: VehicleInstanceSummary["currentServiceType"]) {
 }
 
 function taskStatusName(status: VehicleTransferTask["status"]) {
-  return status === "completed" ? "已完成" : status === "cancelled" ? "已取消" : "待处理";
+  const map = {
+    pending: "待确认",
+    approved: "已确认",
+    departed: "已出发",
+    arrived: "已到达",
+    completed: "已完成",
+    cancelled: "已取消"
+  };
+  return map[status];
+}
+
+function taskStatusTagType(status: VehicleTransferTask["status"]) {
+  if (status === "completed") return "success";
+  if (status === "cancelled") return "info";
+  if (status === "departed") return "warning";
+  return "primary";
+}
+
+function transferActionName(action: AdvanceVehicleTransferTaskRequest["action"]) {
+  const map = {
+    approve: "确认申请",
+    depart: "登记出发",
+    arrive: "确认到达",
+    cancel: "取消任务"
+  };
+  return map[action];
+}
+
+function availableTaskActions(task: VehicleTransferTask) {
+  if (task.status === "pending") {
+    return ["approve", "cancel"] as AdvanceVehicleTransferTaskRequest["action"][];
+  }
+  if (task.status === "approved") {
+    return ["depart", "arrive", "cancel"] as AdvanceVehicleTransferTaskRequest["action"][];
+  }
+  if (task.status === "departed" || task.status === "arrived") {
+    return ["arrive", "cancel"] as AdvanceVehicleTransferTaskRequest["action"][];
+  }
+  return [] as AdvanceVehicleTransferTaskRequest["action"][];
+}
+
+function completedTaskItemCount(task: VehicleTransferTask) {
+  return task.items.filter((item) => item.result === "completed").length;
+}
+
+function failedTaskItemCount(task: VehicleTransferTask) {
+  return task.items.filter((item) => item.result === "failed").length;
+}
+
+async function advanceTask(
+  task: VehicleTransferTask,
+  action: AdvanceVehicleTransferTaskRequest["action"]
+) {
+  const label = transferActionName(action);
+  let reason = "";
+  try {
+    if (action === "cancel") {
+      const result = await ElMessageBox.prompt("请填写取消原因", "取消调拨任务", {
+        confirmButtonText: "确认取消",
+        cancelButtonText: "返回",
+        inputPattern: /\S+/,
+        inputErrorMessage: "取消原因不能为空",
+        type: "warning"
+      });
+      reason = result.value.trim();
+    } else {
+      await ElMessageBox.confirm(
+        `确认对调拨任务 ${task.taskNo} 执行【${label}】吗？`,
+        "车辆调拨流转",
+        {
+          confirmButtonText: "确认",
+          cancelButtonText: "取消",
+          type: action === "arrive" ? "warning" : "info"
+        }
+      );
+    }
+  } catch {
+    return;
+  }
+
+  const loadingKey = `${task.id}:${action}`;
+  taskActionLoading.value = loadingKey;
+  try {
+    await advanceVehicleTransferTask(task.id, {
+      action,
+      operator: "营运端",
+      reason: reason || undefined
+    });
+    await loadData();
+    ElMessage.success(`${label}已完成`);
+  } finally {
+    taskActionLoading.value = "";
+  }
 }
 
 onMounted(loadData);
@@ -229,14 +324,39 @@ onMounted(loadData);
         <el-table-column label="车辆数" width="90" align="center" prop="vehicleCount" />
         <el-table-column label="状态" width="110">
           <template #default="{ row }">
-            <el-tag :type="row.status === 'completed' ? 'success' : 'warning'" effect="plain">
+            <el-tag :type="taskStatusTagType(row.status)" effect="plain">
               {{ taskStatusName(row.status) }}
             </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="车辆结果" width="140">
+          <template #default="{ row }">
+            <div class="text-xs text-gray-500">
+              {{ completedTaskItemCount(row) }} 完成 /
+              {{ failedTaskItemCount(row) }} 失败
+            </div>
           </template>
         </el-table-column>
         <el-table-column prop="operator" label="操作人" width="120" />
         <el-table-column prop="createdAt" label="创建时间" width="190" />
         <el-table-column prop="reason" label="原因" min-width="220" />
+        <el-table-column label="流转操作" width="250" fixed="right">
+          <template #default="{ row }">
+            <div class="flex flex-wrap justify-end gap-2">
+              <el-button
+                v-for="action in availableTaskActions(row)"
+                :key="action"
+                size="small"
+                :type="action === 'cancel' ? 'danger' : action === 'arrive' ? 'success' : 'primary'"
+                plain
+                :loading="taskActionLoading === `${row.id}:${action}`"
+                @click="advanceTask(row, action)"
+              >
+                {{ transferActionName(action) }}
+              </el-button>
+            </div>
+          </template>
+        </el-table-column>
       </el-table>
     </div>
 
