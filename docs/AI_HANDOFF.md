@@ -212,7 +212,7 @@ $env:STORE_RENTAL_DATA_SOURCE="mysql"
 - 财务结算中心：新增 `/finance` 页面，覆盖资金流水、预授权押金、企业月结、发票收据、手工调账和财务对账。
 - 状态机后端有校验，不能任意跨状态操作。
 - MySQL 模式订单一期：`POST /store-rental/orders` 会写订单本体、价格/规则快照、初始费用、资金记录和时间线；订单列表、详情、费用中心从数据库读取；人工费用、减免、资金登记落库；预授权押金台账、发票/收据和人工调账已有独立财务表与接口；主流程动作 `payment-success`、`start-pickup`、`pickup-inspection`、`return-inspection`、`confirm-settlement`，以及 `extend-rental`、`redirect-order`、`change-return-store`、`change-return-station`、`cancel`、`mark-no-show`、`reject-order`、`close-order`、`register-accident` 已持久化；改还车门市/据点的后续预约冲突快捷改派一期已随 `change-return-store/change-return-station` 联动持久化；企业月结账单、明细和回款落库，且只在成功 `monthly_bill` 交易后生成账单行。
-- MySQL 模式尚未完成：事故导致车辆不可用后的后续订单解除占用/自动改派/人工调度队列、独立转单事件表、统一审计、幂等锁和完整附件上传仍需继续接入。调度事件表 `DispatchEvent` 已完成第一版，但还没有任务处理状态表。
+- MySQL 模式尚未完成：独立转单事件表、统一审计、完整通知模板/回执中心和完整附件上传仍需继续接入。事故导致车辆不可用后的后续订单解除占用/自动改派/人工调度队列已完成第一版；订单操作记录/幂等锁和客户通知留痕已完成第一版；调度事件表 `DispatchEvent` 已完成第一版，任务关闭已用 `alert_closed` 事件过滤，仍没有独立任务状态表。
 
 权限深化：
 
@@ -235,7 +235,7 @@ MySQL / Prisma：
 - 已新增 `PlatformRepository`，覆盖租户、组织、权限树、角色、用户、系统参数的基础读写和 shared DTO 映射。
 - 已新增 `PLATFORM_DATA_SOURCE=memory|mysql` 开关。默认 `memory`；设置 `mysql` 后，`PlatformService` 的登录、当前用户、租户、组织、权限树、角色、用户、系统参数接口走 `PlatformRepository/Prisma`。
 - 已新增 `StoreRentalRepository` 和 `STORE_RENTAL_DATA_SOURCE=memory|mysql` 开关。默认 `memory`；设置 `mysql` 后，站点、车型组、车辆主数据、车辆详情事件、客户域、订单/费用/资金/检查/时间线、续租、改派、改还车门市/据点、转单后续预约快捷改派一期、终止动作、事故登记和企业月结接口走 `StoreRentalRepository/Prisma`。
-- 下一步继续补事故后续订单联动、独立转单事件表、调度任务处理状态、统一审计、幂等锁和完整附件上传，不能把当前订单域一期理解为全业务闭环完成。
+- 下一步继续补独立转单事件表、调度任务处理状态、统一审计、通知模板/回执、费用/资金/回调幂等和完整附件上传，不能把当前订单域一期理解为全业务闭环完成。
 
 本轮新增的客户运营/订单联动能力：
 
@@ -285,6 +285,16 @@ MySQL / Prisma：
 - `STORE_RENTAL_DATA_SOURCE=mysql` 下，调度接口复用现有 repository 读订单/车辆/车型组/站点，并写回订单绑定车辆、派车状态、车辆状态和订单时间线；已新增 `DispatchEvent` 表/migration，repository 先用 raw SQL 写入/查询事件，任务池暂从订单状态和车辆有效性实时派生，尚未拆独立任务状态表。
 - 本轮冒烟：`/dispatch/board` 返回 2 笔排程；`/dispatch/optimize` 生成 1 笔可应用优化；`/dispatch/apply` 将 `SR202605060002` 预分配到 `BCP 7315`；`/dispatch/hard-lock` 将该单更新为 `locked`。
 - 追加冒烟：`/dispatch/tasks` 返回 `SR202605060002` 待派车任务；`/dispatch/optimize` 写入 `optimization_preview` 事件；`/dispatch/apply` 后任务池变为 0，事件流出现 `optimization_apply`。
+- 2026-06-09 追加：`/dispatch/tasks/close` 支持关闭调度任务并写 `alert_closed` 事件，任务池刷新时按 `taskKey=orderId:taskType` 过滤已关闭任务；调度页任务卡片新增关闭入口。
+
+本轮新增的操作锁、幂等和通知留痕能力：
+
+- 新增共享 DTO：`StoreRentalOrderOperationRecord`、`StoreRentalOrderNotificationRecord`。
+- 新增 MySQL 表和 migration：`OrderOperationRecord`、`OrderNotificationRecord`。
+- 订单关键动作统一生成请求摘要；同一订单、同一动作、同一幂等键或请求摘要已完成时直接返回保存结果，防止重复推进状态、重复收费或重复通知。
+- `pickup-inspection` 和 `reject-order` 必须持有未过期取车操作锁，非持锁人需显式覆盖。
+- 支付、取车、续租、改派、改还车、还车、结算、事故、取消/爽约/拒绝/关闭等动作会生成 mock 短信通知留痕，并追加订单时间线。
+- 新增查询接口：`GET /store-rental/orders/:id/operation-records`、`GET /store-rental/orders/:id/notifications`。
 
 预留：
 

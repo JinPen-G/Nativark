@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   BillingMode,
   ConfigStatus,
@@ -99,6 +99,8 @@ import {
   StoreRentalDispatchTask,
   StoreRentalDispatchTaskPool,
   StoreRentalDispatchTaskQuery,
+  StoreRentalDispatchCloseTaskRequest,
+  StoreRentalDispatchTaskActionResult,
   StoreRentalDispatchVehicleUnavailableOrderResult,
   StoreRentalDispatchVehicleUnavailableRequest,
   StoreRentalDispatchVehicleUnavailableResult,
@@ -109,6 +111,8 @@ import {
   StoreRentalIdempotencyRecord,
   StoreRentalNotificationRecord,
   StoreRentalOperationLockRecord,
+  StoreRentalOrderNotificationRecord,
+  StoreRentalOrderOperationRecord,
   StoreRentalOrderActionResult,
   StoreRentalOrderDetail,
   StoreRentalOrderFulfillmentRecords,
@@ -236,6 +240,14 @@ export class StoreRentalService {
   private readonly quotes = new Map<string, StoredQuote>();
   private readonly dispatchEvents: StoreRentalDispatchEvent[] = [];
   private ruleVersionHistory: StoreRentalRuleVersionRecord[] = [];
+  private readonly orderOperationRecords = new Map<
+    string,
+    StoreRentalOrderOperationRecord[]
+  >();
+  private readonly orderNotificationRecords = new Map<
+    string,
+    StoreRentalOrderNotificationRecord[]
+  >();
 
   private ruleConfig: StoreRentalRuleConfig = {
     version: "store-rental-rules-v2026.05.01",
@@ -5788,9 +5800,17 @@ export class StoreRentalService {
     ].includes(action);
     let actionTimelineDetail: string | undefined;
     let resultMessage: string | undefined;
+    const operationContext = knownAction
+      ? await this.beginOrderOperation(order, action, body)
+      : undefined;
+
+    if (operationContext?.duplicateResult) {
+      return operationContext.duplicateResult;
+    }
 
     if (knownAction) {
       this.ensureActionAllowed(order, action);
+      this.ensureOrderOperationLock(order, action, body);
     }
 
     switch (action) {
@@ -6071,6 +6091,11 @@ export class StoreRentalService {
     );
     await this.saveOrderActionIdempotencyResult(order.id, action, body, result);
 
+    if (operationContext?.record) {
+      await this.completeOrderOperation(operationContext.record, result, order);
+      await this.recordOrderNotificationForAction(order, action, body, result);
+    }
+
     return result;
   }
 
@@ -6105,9 +6130,17 @@ export class StoreRentalService {
     let actionTimelineDetail: string | undefined;
     let resultMessage: string | undefined;
     let settlementToSave: StoreRentalSettlementSummary | undefined;
+    const operationContext = knownAction
+      ? await this.beginOrderOperation(order, action, body)
+      : undefined;
+
+    if (operationContext?.duplicateResult) {
+      return operationContext.duplicateResult;
+    }
 
     if (knownAction) {
       this.ensureActionAllowed(order, action);
+      this.ensureOrderOperationLock(order, action, body);
     }
 
     this.settlementSummaries.set(order.id, order.settlementSummary);
@@ -6429,6 +6462,11 @@ export class StoreRentalService {
       previousStatus
     );
     await this.saveOrderActionIdempotencyResult(order.id, action, body, result);
+
+    if (operationContext?.record) {
+      await this.completeOrderOperation(operationContext.record, result, order);
+      await this.recordOrderNotificationForAction(order, action, body, result);
+    }
 
     return result;
   }
@@ -6794,6 +6832,12 @@ export class StoreRentalService {
     const windowEnd = new Date(referenceDate);
     windowEnd.setDate(windowEnd.getDate() + windowDays);
     const latestEvents = await this.listDispatchEvents({ limit: 200 });
+    const closedTaskKeys = new Set(
+      latestEvents
+        .filter((event) => event.eventType === "alert_closed")
+        .map((event) => this.optionalString(event.payload?.taskKey))
+        .filter(Boolean)
+    );
     const tasks = orders
       .filter((order) => this.isDispatchBoardOrder(order))
       .filter((order) => this.matchesDispatchScope(order, query))
@@ -6825,6 +6869,7 @@ export class StoreRentalService {
           latestEvent
         );
       })
+      .filter((task) => !closedTaskKeys.has(`${task.orderId}:${task.taskType}`))
       .sort((left, right) => {
         const priorityWeight = { high: 0, medium: 1, low: 2 };
         const priorityDiff =
@@ -6872,6 +6917,78 @@ export class StoreRentalService {
           new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
       )
       .slice(0, limit);
+  }
+
+  async closeDispatchTask(
+    input: StoreRentalDispatchCloseTaskRequest
+  ): Promise<StoreRentalDispatchTaskActionResult> {
+    const reason = this.optionalString(input.reason);
+    if (!reason) {
+      throw new BadRequestException("关闭调度任务必须填写处理说明。");
+    }
+
+    const { orders } = await this.getDispatchDataset();
+    const order = orders.find((item) => item.id === input.orderId);
+    if (!order) {
+      throw new BadRequestException("调度任务关联订单不存在。");
+    }
+
+    const operator = input.operator || "调度员";
+    const highRiskTask = [
+      "manual_required",
+      "vehicle_unavailable",
+      "manual_protected_invalid"
+    ].includes(input.taskType);
+    const event = await this.recordDispatchEvent({
+      eventType: "alert_closed",
+      source: "manual",
+      title: "调度任务关闭",
+      orderId: order.id,
+      orderNo: order.orderNo,
+      beforeVehicle: order.plateNo,
+      reasonCode: "MANUAL_ALERT",
+      reasonText: reason,
+      riskLevel: highRiskTask ? "medium" : "low",
+      operator,
+      payload: {
+        taskId: input.taskId,
+        taskType: input.taskType,
+        taskKey: `${order.id}:${input.taskType}`
+      }
+    });
+
+    return {
+      taskId: input.taskId,
+      orderId: order.id,
+      orderNo: order.orderNo,
+      status: "closed",
+      event,
+      message: `调度任务 ${order.orderNo} 已关闭，后续可在事件流追溯。`
+    };
+  }
+
+  async listOrderOperationRecords(
+    orderId: string
+  ): Promise<StoreRentalOrderOperationRecord[]> {
+    if (this.useMysqlDataSource()) {
+      return this.storeRentalRepository.listOrderOperationRecords(orderId);
+    }
+    return [...(this.orderOperationRecords.get(orderId) ?? [])].sort(
+      (left, right) =>
+        new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
+    );
+  }
+
+  async listOrderNotificationRecords(
+    orderId: string
+  ): Promise<StoreRentalOrderNotificationRecord[]> {
+    if (this.useMysqlDataSource()) {
+      return this.storeRentalRepository.listOrderNotificationRecords(orderId);
+    }
+    return [...(this.orderNotificationRecords.get(orderId) ?? [])].sort(
+      (left, right) =>
+        new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
+    );
   }
 
   async previewDispatchOptimization(
@@ -7846,6 +7963,360 @@ export class StoreRentalService {
       enterprise: ["/api/enterprise/store-rental/orders"],
       userH5: ["/api/h5/store-rental/availability", "/api/h5/store-rental/orders"]
     };
+  }
+
+  private async beginOrderOperation(
+    order: StoreRentalOrderSummary,
+    action: string,
+    body: Record<string, unknown>
+  ): Promise<{
+    record?: StoreRentalOrderOperationRecord;
+    duplicateResult?: StoreRentalOrderActionResult;
+  }> {
+    const idempotencyKey = this.optionalString(
+      body.idempotencyKey ?? body.operationKey ?? body.requestId
+    );
+    const requestHash = this.orderActionRequestHash(action, body);
+    const duplicate = this.useMysqlDataSource()
+      ? await this.storeRentalRepository.findCompletedOrderOperationRecord({
+          orderId: order.id,
+          action,
+          idempotencyKey,
+          requestHash
+        })
+      : this.findMemoryCompletedOrderOperation(order.id, action, idempotencyKey, requestHash);
+    const result = duplicate?.payload?.result as
+      | StoreRentalOrderActionResult
+      | undefined;
+    if (result) {
+      return {
+        duplicateResult: {
+          ...result,
+          message: `幂等命中：${result.message}`
+        }
+      };
+    }
+
+    const now = new Date().toISOString();
+    const record: StoreRentalOrderOperationRecord = {
+      id: `order_operation_${randomUUID()}`,
+      orderId: order.id,
+      orderNo: order.orderNo,
+      action,
+      actionLabel: this.actionLabel(action),
+      status: "processing",
+      idempotencyKey,
+      requestHash,
+      lockStatus: order.operationLockStatus,
+      operator: String(body.operator ?? "门店营运"),
+      expiresAt: order.operationLockExpiresAt,
+      createdAt: now,
+      payload: {
+        request: this.operationRecordPayload(body)
+      }
+    };
+    await this.persistOrderOperationRecord(record);
+    return { record };
+  }
+
+  private async completeOrderOperation(
+    record: StoreRentalOrderOperationRecord,
+    result: StoreRentalOrderActionResult,
+    order: StoreRentalOrderSummary
+  ) {
+    const completed: StoreRentalOrderOperationRecord = {
+      ...record,
+      status: "completed",
+      lockStatus: order.operationLockStatus,
+      expiresAt: order.operationLockExpiresAt,
+      completedAt: new Date().toISOString(),
+      message: result.message,
+      payload: {
+        ...(record.payload ?? {}),
+        result
+      }
+    };
+    await this.persistOrderOperationRecord(completed);
+  }
+
+  private async persistOrderOperationRecord(
+    record: StoreRentalOrderOperationRecord
+  ) {
+    if (this.useMysqlDataSource()) {
+      const existing = record.completedAt || record.status !== "processing";
+      if (existing) {
+        await this.storeRentalRepository.updateOrderOperationRecord(record);
+      } else {
+        await this.storeRentalRepository.createOrderOperationRecord(record);
+      }
+      return;
+    }
+
+    const records = this.orderOperationRecords.get(record.orderId) ?? [];
+    const index = records.findIndex((item) => item.id === record.id);
+    if (index >= 0) {
+      records[index] = record;
+    } else {
+      records.unshift(record);
+    }
+    this.orderOperationRecords.set(record.orderId, records.slice(0, 80));
+  }
+
+  private findMemoryCompletedOrderOperation(
+    orderId: string,
+    action: string,
+    idempotencyKey: string | undefined,
+    requestHash: string
+  ) {
+    return (this.orderOperationRecords.get(orderId) ?? []).find(
+      (record) =>
+        record.action === action &&
+        record.status === "completed" &&
+        (idempotencyKey
+          ? record.idempotencyKey === idempotencyKey
+          : record.requestHash === requestHash)
+    );
+  }
+
+  private ensureOrderOperationLock(
+    order: StoreRentalOrderSummary,
+    action: string,
+    body: Record<string, unknown>
+  ) {
+    if (!this.ruleConfig.pickupReturn.operationLockEnabled) {
+      return;
+    }
+    const operator = String(body.operator ?? "门店营运");
+    const expiresAt = order.operationLockExpiresAt
+      ? new Date(order.operationLockExpiresAt)
+      : undefined;
+    const activeLock =
+      order.operationLockStatus === OperationLockStatus.Active &&
+      expiresAt &&
+      expiresAt.getTime() > Date.now();
+
+    if (action === "start-pickup" && activeLock) {
+      throw new BadRequestException(
+        `订单正在由 ${order.operationLockOperator || "其他同事"} 处理，请等待锁释放或由管理员覆盖。`
+      );
+    }
+
+    if (["pickup-inspection", "reject-order"].includes(action)) {
+      if (!activeLock) {
+        throw new BadRequestException("取车操作锁已失效，请重新开始取车后再提交。");
+      }
+      if (
+        order.operationLockOperator &&
+        order.operationLockOperator !== operator &&
+        body.overrideOperationLock !== true
+      ) {
+        throw new BadRequestException(
+          `订单取车操作锁属于 ${order.operationLockOperator}，当前操作人不能直接提交。`
+        );
+      }
+    }
+  }
+
+  private async recordOrderNotificationForAction(
+    order: StoreRentalOrderSummary,
+    action: string,
+    body: Record<string, unknown>,
+    result: StoreRentalOrderActionResult
+  ) {
+    const spec = this.orderNotificationSpec(action, result);
+    if (!spec) {
+      return;
+    }
+    const record: StoreRentalOrderNotificationRecord = {
+      id: `order_notification_${randomUUID()}`,
+      orderId: order.id,
+      orderNo: order.orderNo,
+      event: spec.event,
+      eventLabel: spec.eventLabel,
+      channel: "sms",
+      targetMasked: order.customerPhoneMasked || "客户联系方式快照",
+      status: "sent",
+      templateCode: spec.templateCode,
+      contentSummary: spec.contentSummary,
+      operator: String(body.operator ?? "系统"),
+      relatedAction: action,
+      idempotencyKey: this.optionalString(
+        body.idempotencyKey ?? body.operationKey ?? body.requestId
+      ),
+      sentAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+      payload: {
+        mockProvider: "notification-mock",
+        nextStatus: result.nextStatus,
+        nextPaymentStatus: result.nextPaymentStatus,
+        nextDispatchStatus: result.nextDispatchStatus
+      }
+    };
+    if (this.useMysqlDataSource()) {
+      await this.storeRentalRepository.createOrderNotificationRecord(record);
+      await this.storeRentalRepository.appendOrderTimeline(order.id, {
+        at: record.createdAt,
+        actor: record.operator || "系统",
+        action: `客户通知：${record.eventLabel}（${record.channel} mock ${record.status}）`
+      });
+      return;
+    }
+    const records = this.orderNotificationRecords.get(order.id) ?? [];
+    records.unshift(record);
+    this.orderNotificationRecords.set(order.id, records.slice(0, 80));
+    this.appendOrderTimeline(
+      order,
+      record.operator || "系统",
+      `客户通知：${record.eventLabel}（${record.channel} mock ${record.status}）`
+    );
+  }
+
+  private orderNotificationSpec(
+    action: string,
+    result: StoreRentalOrderActionResult
+  ):
+    | {
+        event: string;
+        eventLabel: string;
+        templateCode: string;
+        contentSummary: string;
+      }
+    | undefined {
+    const map: Record<
+      string,
+      { event: string; eventLabel: string; templateCode: string; summary: string }
+    > = {
+      "payment-success": {
+        event: "payment_success",
+        eventLabel: "支付/预授权成功通知",
+        templateCode: "store_order_payment_success",
+        summary: "订单已完成支付或预授权，通知客户取车安排。"
+      },
+      "start-pickup": {
+        event: "pickup_started",
+        eventLabel: "开始取车通知",
+        templateCode: "store_order_pickup_started",
+        summary: "门店已开始取车流程，提醒客户配合验车和签署。"
+      },
+      "pickup-inspection": {
+        event: "pickup_confirmed",
+        eventLabel: "取车完成通知",
+        templateCode: "store_order_pickup_confirmed",
+        summary: "取车验车完成，通知客户租期和车辆已生效。"
+      },
+      "extend-rental": {
+        event: "rental_extended",
+        eventLabel: "延长用车通知",
+        templateCode: "store_order_rental_extended",
+        summary: "订单已延长用车，通知客户新的还车安排和费用处理。"
+      },
+      "redirect-order": {
+        event: "vehicle_redirected",
+        eventLabel: "车辆改派通知",
+        templateCode: "store_order_vehicle_redirected",
+        summary: "订单车辆已改派，通知客户以最新车辆信息为准。"
+      },
+      "change-return-store": {
+        event: "return_store_changed",
+        eventLabel: "还车门市变更通知",
+        templateCode: "store_order_return_store_changed",
+        summary: "订单还车门市已变更，通知客户新的还车地点。"
+      },
+      "change-return-station": {
+        event: "return_station_changed",
+        eventLabel: "还车据点变更通知",
+        templateCode: "store_order_return_station_changed",
+        summary: "订单还车据点已变更，通知客户新的还车据点。"
+      },
+      "return-inspection": {
+        event: "return_inspection_done",
+        eventLabel: "还车验车通知",
+        templateCode: "store_order_return_inspection_done",
+        summary: "还车验车已完成，通知客户等待结算。"
+      },
+      "confirm-settlement": {
+        event: "settlement_confirmed",
+        eventLabel: "结算确认通知",
+        templateCode: "store_order_settlement_confirmed",
+        summary: "订单结算已确认，通知客户费用结果。"
+      },
+      "register-accident": {
+        event: "accident_registered",
+        eventLabel: "事故登记通知",
+        templateCode: "store_order_accident_registered",
+        summary: "订单已登记事故/出险，通知客户后续处理口径。"
+      },
+      "mark-no-show": {
+        event: "no_show_marked",
+        eventLabel: "爽约通知",
+        templateCode: "store_order_no_show_marked",
+        summary: "订单已标记爽约，通知客户费用和资源释放结果。"
+      },
+      "reject-order": {
+        event: "fulfillment_rejected",
+        eventLabel: "拒绝履约通知",
+        templateCode: "store_order_fulfillment_rejected",
+        summary: "门店已拒绝履约，通知客户原因和费用处理。"
+      },
+      "close-order": {
+        event: "order_closed",
+        eventLabel: "关闭订单通知",
+        templateCode: "store_order_closed",
+        summary: "订单已关闭，通知客户退款或企业月结处理结果。"
+      },
+      cancel: {
+        event: "order_cancelled",
+        eventLabel: "取消订单通知",
+        templateCode: "store_order_cancelled",
+        summary: "订单已取消，通知客户费用、预授权和资源释放结果。"
+      }
+    };
+    const matched = map[action];
+    if (!matched) {
+      return undefined;
+    }
+    return {
+      event: matched.event,
+      eventLabel: matched.eventLabel,
+      templateCode: matched.templateCode,
+      contentSummary: `${matched.summary} 当前状态：${result.nextStatus}。`
+    };
+  }
+
+  private orderActionRequestHash(action: string, body: Record<string, unknown>) {
+    return createHash("sha256")
+      .update(
+        JSON.stringify({
+          action,
+          payload: this.stableOperationPayload(body)
+        })
+      )
+      .digest("hex");
+  }
+
+  private stableOperationPayload(value: unknown): unknown {
+    if (Array.isArray(value)) {
+      return value.map((item) => this.stableOperationPayload(item));
+    }
+    if (value && typeof value === "object") {
+      const entries = Object.entries(value as Record<string, unknown>)
+        .filter(
+          ([key]) =>
+            !["idempotencyKey", "operationKey", "requestId"].includes(key)
+        )
+        .sort(([left], [right]) => left.localeCompare(right));
+      return Object.fromEntries(
+        entries.map(([key, item]) => [key, this.stableOperationPayload(item)])
+      );
+    }
+    return value;
+  }
+
+  private operationRecordPayload(body: Record<string, unknown>) {
+    const payload = this.stableOperationPayload(body);
+    return payload && typeof payload === "object"
+      ? (payload as Record<string, unknown>)
+      : { value: payload };
   }
 
   private async recordDispatchEvent(

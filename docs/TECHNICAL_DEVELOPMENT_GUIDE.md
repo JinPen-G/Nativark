@@ -224,7 +224,9 @@ rimo-store-rental-platform/
 - `POST /store-rental/orders`：读取 MySQL 会员/企业主档，写入订单本体、价格快照、规则快照、初始费用、资金记录和时间线，并回写会员/企业统计。
 - `GET /store-rental/orders`、`GET /store-rental/orders/:id`、`GET /store-rental/orders/:id/fees`：从订单、费用、资金、检查、时间线、结算摘要表读取。
 - `POST /store-rental/orders/:id/fees`、`/fees/:feeId/waive`、`/transactions`：人工费用、减免、收退款/月结交易落库。
-- `POST /store-rental/orders/:id/actions/:action`：MySQL 模式已接入主流程动作 `payment-success`、`start-pickup`、`pickup-inspection`、`return-inspection`、`confirm-settlement`，以及 `extend-rental`、`redirect-order`、`change-return-store`、`change-return-station`、`cancel`、`mark-no-show`、`reject-order`、`close-order`、`register-accident`；其中改还车门市/据点已支持后续预约冲突快捷改派一期。统一审计和幂等锁仍需继续开发。
+- `POST /store-rental/orders/:id/actions/:action`：MySQL 模式已接入主流程动作 `payment-success`、`start-pickup`、`pickup-inspection`、`return-inspection`、`confirm-settlement`，以及 `extend-rental`、`redirect-order`、`change-return-store`、`change-return-station`、`cancel`、`mark-no-show`、`reject-order`、`close-order`、`register-accident`；其中改还车门市/据点已支持后续预约冲突快捷改派一期。本轮新增订单操作记录、请求摘要幂等和取车操作锁校验。
+- `GET /store-rental/orders/:id/operation-records`：订单级操作记录，记录关键动作、请求摘要、幂等键、锁状态、操作人、完成状态和返回结果摘要。
+- `GET /store-rental/orders/:id/notifications`：订单级客户通知留痕，记录事件、模板、渠道、目标号码快照、mock 发送状态、关联动作和发送时间。
 - `GET/POST /store-rental/corporates/:id/monthly-bills`：企业月结账单、明细和回款记录落库。月结账单行只在成功 `monthly_bill` 交易后生成，避免待挂账订单提前进入账单。
 
 后续通用租赁平台改造时，订单/费用域不要直接绑定“车辆”概念。当前 schema 中 `vehicleGroupSnapshot`、`assignedVehicleSnapshot`、`plateNo`、`mileage`、`fuelLevelPercent`、`batteryLevelPercent` 等字段是汽车租赁特化字段；改造成摄影器材、露营器材等通用租赁时，应抽象为 `AssetGroup`、`AssetInstance`、`AssetInspectionMetric` 和可配置检查项，同时保留订单、费用、资金、结算和月结账单的主结构。
@@ -246,6 +248,7 @@ rimo-store-rental-platform/
 - 费用中心：`StoreRentalFeeCenter`、`StoreRentalFeeLedgerItem`、`StoreRentalTransactionRecord`、`CreateStoreRentalFeeRequest`、`CreateStoreRentalTransactionRequest`、`WaiveStoreRentalFeeRequest`。
 - 财务中心：`FinanceOverviewMetrics`、`FinanceTransactionRow`、`FinancePreAuthorizationRow`、`SaveFinancePreAuthorizationRequest`、`FinanceDocumentRow`、`FinanceDocumentAuditItem`、`SaveFinanceDocumentRequest`、`FinanceManualAdjustmentRow`、`SaveFinanceManualAdjustmentRequest`、`FinanceReconciliationRow`。
 - 调度：`StoreRentalDispatchBoard`、`StoreRentalDispatchOrderRow`、`StoreRentalDispatchCandidate`、`StoreRentalDispatchPlan`、`StoreRentalDispatchResultRow`、`StoreRentalDispatchApplyResult`、`StoreRentalDispatchTaskPool`、`StoreRentalDispatchTask`、`StoreRentalDispatchEvent`。
+- 订单留痕：`StoreRentalOrderOperationRecord`、`StoreRentalOrderNotificationRecord`。
 
 后续通用化时不要直接删除这些类型，应新增通用类型并逐步映射。
 
@@ -516,6 +519,7 @@ system:tenant:manage
 - 优化排序当前按 PRD 口径实现：占用时长长优先、订单金额高优先、取车时间早优先、创建顺序早优先；评分以车型组日租价近似机会成本，后续如果补车辆月成本、调拨成本和历史利用率，应替换为 PRD 算法中的完整成本项。
 - `/dispatch/hard-lock` 用于取车前硬锁具体车辆：已有预分配且仍满足约束时保持原车硬锁，否则重新匹配；无可用车时把订单置为 `dispatch_manual_required` 并进入人工调度队列。
 - `/dispatch/manual-reassign` 是调度页轻量入口，只处理已预订或逾期未取订单，确认时仍复用同车行、车辆状态、时段冲突和服务能力校验；更复杂的差价、免费升等、企业月结调增/调减继续走订单详情的 `redirect-order` 改派流程。
+- `/dispatch/tasks/close` 用于调度员关闭已确认处理的任务。后端写入 `alert_closed` 调度事件，事件 payload 保存 `taskKey=orderId:taskType`；任务池实时派生时读取最近关闭事件并过滤对应任务，调度页右侧任务卡片提供“关闭任务”入口。
 - MySQL 模式下，调度 API 通过现有 repository 读取订单、车辆、车型组和站点，并写回订单绑定车辆、派车状态、车辆状态和订单时间线。已新增 `DispatchEvent` 表和 migration，repository 先用 raw SQL 写入/查询调度事件，避免当前开发服务占用 Prisma Client DLL 时阻断构建。当前任务池从订单、车辆有效性、派车状态、临近硬锁和最新事件实时派生，还没有独立任务状态表；后续 DP-04 应补认领、关闭、处理状态、数据权限过滤和任务报表。
 - 调度事件当前覆盖：智能优化预览、应用优化成功、应用优化失败、硬锁成功、硬锁失败、调度页人工改派。PRD 中 AI 分析请求日志、AI 推荐采纳结果、调度告警关闭、车辆释放和完整改派链路仍需继续补齐。
 - 通用租赁平台改造时，把“调度派车”抽象为 `AssetDispatch`。车辆、车牌、车型组、门市车辆整备缓冲是汽车租赁字段；摄影器材、露营器材等品类应迁移为资产实例候选池、领取/归还地点能力、整备/清洁缓冲、库存实例冲突和可配置评分规则。
@@ -615,7 +619,7 @@ PF-15 当前数据边界：
 - 平台底座：租户、组织、用户、多角色、角色权限、权限码、系统参数集、筛选预设、平台审计日志、数据字典配置、编号规则配置。
 - 门市租赁主数据：履约站点、车型组、车辆实例、车辆位置流水、车况照片、维保记录、事故/出险记录。
 - 客户域：会员、会员风控事件、会员时间线、客户等级方案、企业客户、联系人、合同、企业月结账单。
-- 规则与订单域：租赁业务规则版本、订单、取还车检查记录、履约时间线、续租快照、费用项、资金记录、预授权押金台账、发票/收据、人工调账、企业月结明细。
+- 规则与订单域：租赁业务规则版本、订单、取还车检查记录、履约时间线、续租快照、费用项、资金记录、预授权押金台账、发票/收据、人工调账、订单操作记录、客户通知记录、企业月结明细。
 
 下一阶段建议按下面顺序推进真实数据层：
 
@@ -661,13 +665,22 @@ npx prisma validate --schema apps/api/prisma/schema.prisma
 - `docs/DATABASE_BOOTSTRAP.md`
 - `apps/api/prisma/migrations/20260608000100_init_store_rental_schema/migration.sql`
 - `apps/api/prisma/migrations/20260608000200_add_dispatch_events/migration.sql`
+- `apps/api/prisma/migrations/20260609000200_add_finance_pre_authorizations/migration.sql`
 - `apps/api/prisma/migrations/20260609000300_add_finance_document_reissue_links/migration.sql`
+- `apps/api/prisma/migrations/20260609000100_add_order_operation_notification_records/migration.sql`
 - `apps/api/src/modules/platform/platform.repository.ts`
 - `apps/api/src/modules/store-rental/store-rental.repository.ts`
 
 注意：`db:seed` 初始化的是可验证基础数据。平台模块可通过 `PLATFORM_DATA_SOURCE=mysql` 使用这些数据，包含登录、用户、角色、系统参数、数据字典、编号规则和平台审计；租赁业务规则保存/历史版本、站点分页列表、车型组、车辆分页列表/详情事件、会员列表分页/详情/审核/风控、客户等级方案、企业客户列表分页/详情、订单、费用、检查记录、资金流水、续租、改派、改还车门市/据点、终止动作、事故登记、调度事件和企业月结账单可通过 `STORE_RENTAL_DATA_SOURCE=mysql` 使用这些数据。
 
-`PlatformRepository` 已覆盖租户、组织、权限树、角色、用户、系统参数、平台审计、筛选预设、数据字典、编号规则和租户初始化的基础读写和 DTO 映射。`PlatformService` 已增加 `PLATFORM_DATA_SOURCE=memory|mysql` 开关。`StoreRentalRepository` 已覆盖租赁业务规则版本、站点、车型组、车辆基础读写、站点/车辆列表分页筛选、车辆详情事件、客户域、会员/企业客户列表分页筛选、订单域、费用/资金、预授权押金台账、发票/收据费用关联、重开链路、手工调账、检查记录、时间线、续租快照、改派动作、改还车门市/据点动作、转单后续预约快捷改派一期、事故记录、调度事件和企业月结基础读写，并通过 `metadata` JSON 保留原型扩展字段。下一步迁事故后续订单联动、统一审计和幂等。
+`PlatformRepository` 已覆盖租户、组织、权限树、角色、用户、系统参数、平台审计、筛选预设、数据字典、编号规则和租户初始化的基础读写和 DTO 映射。`PlatformService` 已增加 `PLATFORM_DATA_SOURCE=memory|mysql` 开关。`StoreRentalRepository` 已覆盖租赁业务规则版本、站点、车型组、车辆基础读写、站点/车辆列表分页筛选、车辆详情事件、客户域、会员/企业客户列表分页筛选、订单域、费用/资金、预授权押金台账、发票/收据费用关联、重开链路、手工调账、检查记录、时间线、续租快照、改派动作、改还车门市/据点动作、转单后续预约快捷改派一期、事故记录、调度事件、订单操作记录、客户通知记录和企业月结基础读写，并通过 `metadata` JSON 保留原型扩展字段。下一步迁事故后续订单联动、统一审计、通知模板和完整幂等。
+
+操作锁、幂等和通知留痕实现口径：
+
+- 订单关键动作进入 `runOrderAction/runMysqlOrderAction` 时会生成稳定请求摘要；同一订单、同一动作、同一幂等键或请求摘要已完成时，直接返回已保存的动作结果，防止重复提交造成重复收费、重复状态推进或重复通知。
+- `start-pickup` 继续创建取车操作锁；`pickup-inspection` 和 `reject-order` 必须持有未过期的有效操作锁，且默认只能由持锁操作人提交，管理员覆盖需显式传 `overrideOperationLock=true`。
+- 操作记录落 `OrderOperationRecord`，包含动作、请求摘要、幂等键、锁状态、操作人、完成状态、结果摘要和过期时间；内存模式保留最近 80 条。
+- 客户通知留痕落 `OrderNotificationRecord`，当前为 mock 短信发送记录，覆盖支付、取车、续租、改派、改还车、还车、结算、事故、取消/爽约/拒绝/关闭等动作；同时追加订单时间线，保证现有订单详情页能看到发送状态。
 
 ## 开发约定
 

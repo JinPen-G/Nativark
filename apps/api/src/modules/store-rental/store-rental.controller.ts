@@ -15,6 +15,7 @@ import type {
   CreateStoreRentalRemarkRequest,
   CreateStoreRentalTransactionRequest,
   StoreRentalDispatchApplyRequest,
+  StoreRentalDispatchCloseTaskRequest,
   StoreRentalDispatchEventQuery,
   StoreRentalDispatchHardLockRequest,
   StoreRentalDispatchManualReassignRequest,
@@ -176,6 +177,11 @@ export class StoreRentalController {
       storeName,
       vehicleGroupName
     });
+  }
+
+  @Post("dispatch/tasks/close")
+  closeDispatchTask(@Body() body: StoreRentalDispatchCloseTaskRequest) {
+    return this.storeRentalService.closeDispatchTask(body);
   }
 
   @Get("dispatch/events")
@@ -687,6 +693,16 @@ export class StoreRentalController {
   @Get("orders/:id")
   orderDetail(@Param("id") id: string) {
     return this.storeRentalService.getOrderDetail(id);
+  }
+
+  @Get("orders/:id/operation-records")
+  orderOperationRecords(@Param("id") id: string) {
+    return this.storeRentalService.listOrderOperationRecords(id);
+  }
+
+  @Get("orders/:id/notifications")
+  orderNotifications(@Param("id") id: string) {
+    return this.storeRentalService.listOrderNotificationRecords(id);
   }
 
   @Get("orders/:id/fees")

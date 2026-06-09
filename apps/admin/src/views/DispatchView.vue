@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { useRouter } from "vue-router";
 import type {
   StoreRentalAiDispatchAnalysisResult,
@@ -19,6 +19,7 @@ import type {
 import {
   analyzeDispatchWithAi,
   applyDispatchOptimization,
+  closeDispatchTask,
   getDispatchBoard,
   getDispatchEvents,
   getDispatchTasks,
@@ -244,6 +245,38 @@ function openTask(task: StoreRentalDispatchTask) {
   const row = board.value?.rows.find((item) => item.orderId === task.orderId);
   if (row) {
     openOrderDrawer(row);
+  }
+}
+
+async function closeTask(task: StoreRentalDispatchTask) {
+  try {
+    const { value } = await ElMessageBox.prompt(
+      "请输入关闭说明，系统会写入调度事件流。",
+      "关闭调度任务",
+      {
+        confirmButtonText: "关闭任务",
+        cancelButtonText: "取消",
+        inputType: "textarea",
+        inputPlaceholder: "例如：已电话确认门店人工处理，暂不需要系统继续提醒",
+        inputValidator: (value) => Boolean(value && value.trim()) || "请填写关闭说明"
+      }
+    );
+    actionLoading.value = `close-task-${task.id}`;
+    await closeDispatchTask({
+      taskId: task.id,
+      orderId: task.orderId,
+      taskType: task.taskType,
+      reason: value,
+      operator: "营运端"
+    });
+    ElMessage.success("调度任务已关闭");
+    await loadBoard();
+  } catch (error) {
+    if (error !== "cancel") {
+      ElMessage.error(readErrorMessage(error, "关闭调度任务失败"));
+    }
+  } finally {
+    actionLoading.value = "";
   }
 }
 
@@ -755,12 +788,15 @@ function readErrorMessage(error: unknown, fallback: string) {
           </div>
         </div>
         <div class="space-y-2 max-h-[360px] overflow-auto custom-scroll">
-          <button
+          <div
             v-for="task in dispatchTasks"
             :key="task.id"
-            type="button"
+            role="button"
+            tabindex="0"
             class="w-full text-left rounded-lg border border-gray-200 p-3 hover:border-blue-300 hover:bg-blue-50/40"
             @click="openTask(task)"
+            @keydown.enter.prevent="openTask(task)"
+            @keydown.space.prevent="openTask(task)"
           >
             <div class="flex items-center justify-between gap-2">
               <span class="font-semibold text-sm text-gray-800">{{ task.orderNo }}</span>
@@ -775,7 +811,19 @@ function readErrorMessage(error: unknown, fallback: string) {
               <span>{{ task.currentPlateNo || '未分配车辆' }}</span>
               <span>{{ task.candidates.length }} 辆候选</span>
             </div>
-          </button>
+            <div class="mt-3 flex justify-end gap-2">
+              <el-button size="small" text @click.stop="openTask(task)">查看订单</el-button>
+              <el-button
+                size="small"
+                type="warning"
+                plain
+                :loading="actionLoading === `close-task-${task.id}`"
+                @click.stop="closeTask(task)"
+              >
+                关闭任务
+              </el-button>
+            </div>
+          </div>
           <div v-if="dispatchTasks.length === 0" class="text-center text-sm text-gray-400 py-8">当前无待处理调度订单</div>
         </div>
 

@@ -56,6 +56,8 @@ import type {
   StoreRentalFeeLedgerItem,
   StoreRentalDispatchEvent,
   StoreRentalDispatchEventQuery,
+  StoreRentalOrderNotificationRecord,
+  StoreRentalOrderOperationRecord,
   StoreRentalFinancialOverview,
   StoreRentalContractRecord,
   StoreRentalEventSnapshotRecord,
@@ -2993,6 +2995,226 @@ export class StoreRentalRepository {
     return rows.map((row) => this.toDispatchEvent(row));
   }
 
+  async createOrderOperationRecord(
+    record: StoreRentalOrderOperationRecord,
+    tenantId = this.defaultTenantId
+  ) {
+    await this.prisma.$executeRaw`
+      INSERT INTO OrderOperationRecord (
+        id,
+        tenantId,
+        orderId,
+        orderNo,
+        action,
+        actionLabel,
+        status,
+        idempotencyKey,
+        requestHash,
+        lockStatus,
+        operator,
+        message,
+        payload,
+        expiresAt,
+        completedAt,
+        createdAt
+      ) VALUES (
+        ${record.id},
+        ${tenantId},
+        ${record.orderId},
+        ${record.orderNo},
+        ${record.action},
+        ${record.actionLabel},
+        ${record.status},
+        ${record.idempotencyKey ?? null},
+        ${record.requestHash},
+        ${record.lockStatus ?? null},
+        ${record.operator ?? null},
+        ${record.message ?? null},
+        ${record.payload ? JSON.stringify(record.payload) : null},
+        ${record.expiresAt ? new Date(record.expiresAt) : null},
+        ${record.completedAt ? new Date(record.completedAt) : null},
+        ${new Date(record.createdAt)}
+      )
+    `;
+  }
+
+  async updateOrderOperationRecord(
+    record: StoreRentalOrderOperationRecord,
+    tenantId = this.defaultTenantId
+  ) {
+    await this.prisma.$executeRaw`
+      UPDATE OrderOperationRecord
+      SET
+        status = ${record.status},
+        lockStatus = ${record.lockStatus ?? null},
+        message = ${record.message ?? null},
+        payload = ${record.payload ? JSON.stringify(record.payload) : null},
+        expiresAt = ${record.expiresAt ? new Date(record.expiresAt) : null},
+        completedAt = ${record.completedAt ? new Date(record.completedAt) : null}
+      WHERE tenantId = ${tenantId} AND id = ${record.id}
+    `;
+  }
+
+  async findCompletedOrderOperationRecord(
+    input: {
+      orderId: string;
+      action: string;
+      idempotencyKey?: string;
+      requestHash?: string;
+    },
+    tenantId = this.defaultTenantId
+  ): Promise<StoreRentalOrderOperationRecord | undefined> {
+    const conditions = [
+      Prisma.sql`tenantId = ${tenantId}`,
+      Prisma.sql`orderId = ${input.orderId}`,
+      Prisma.sql`action = ${input.action}`,
+      Prisma.sql`status = 'completed'`
+    ];
+    if (input.idempotencyKey) {
+      conditions.push(Prisma.sql`idempotencyKey = ${input.idempotencyKey}`);
+    } else if (input.requestHash) {
+      conditions.push(Prisma.sql`requestHash = ${input.requestHash}`);
+    } else {
+      return undefined;
+    }
+
+    const rows = await this.prisma.$queryRaw<Array<any>>(
+      Prisma.sql`
+        SELECT
+          id,
+          orderId,
+          orderNo,
+          action,
+          actionLabel,
+          status,
+          idempotencyKey,
+          requestHash,
+          lockStatus,
+          operator,
+          message,
+          payload,
+          expiresAt,
+          completedAt,
+          createdAt
+        FROM OrderOperationRecord
+        WHERE ${Prisma.join(conditions, " AND ")}
+        ORDER BY createdAt DESC
+        LIMIT 1
+      `
+    );
+
+    return rows[0] ? this.toOrderOperationRecord(rows[0]) : undefined;
+  }
+
+  async listOrderOperationRecords(
+    orderId: string,
+    tenantId = this.defaultTenantId
+  ): Promise<StoreRentalOrderOperationRecord[]> {
+    const rows = await this.prisma.$queryRaw<Array<any>>`
+      SELECT
+        id,
+        orderId,
+        orderNo,
+        action,
+        actionLabel,
+        status,
+        idempotencyKey,
+        requestHash,
+        lockStatus,
+        operator,
+        message,
+        payload,
+        expiresAt,
+        completedAt,
+        createdAt
+      FROM OrderOperationRecord
+      WHERE tenantId = ${tenantId} AND orderId = ${orderId}
+      ORDER BY createdAt DESC
+      LIMIT 80
+    `;
+
+    return rows.map((row) => this.toOrderOperationRecord(row));
+  }
+
+  async createOrderNotificationRecord(
+    record: StoreRentalOrderNotificationRecord,
+    tenantId = this.defaultTenantId
+  ) {
+    await this.prisma.$executeRaw`
+      INSERT INTO OrderNotificationRecord (
+        id,
+        tenantId,
+        orderId,
+        orderNo,
+        event,
+        eventLabel,
+        channel,
+        targetMasked,
+        status,
+        templateCode,
+        contentSummary,
+        operator,
+        relatedAction,
+        idempotencyKey,
+        failReason,
+        payload,
+        sentAt,
+        createdAt
+      ) VALUES (
+        ${record.id},
+        ${tenantId},
+        ${record.orderId},
+        ${record.orderNo},
+        ${record.event},
+        ${record.eventLabel},
+        ${record.channel},
+        ${record.targetMasked},
+        ${record.status},
+        ${record.templateCode},
+        ${record.contentSummary},
+        ${record.operator ?? null},
+        ${record.relatedAction ?? null},
+        ${record.idempotencyKey ?? null},
+        ${record.failReason ?? null},
+        ${record.payload ? JSON.stringify(record.payload) : null},
+        ${record.sentAt ? new Date(record.sentAt) : null},
+        ${new Date(record.createdAt)}
+      )
+    `;
+  }
+
+  async listOrderNotificationRecords(
+    orderId: string,
+    tenantId = this.defaultTenantId
+  ): Promise<StoreRentalOrderNotificationRecord[]> {
+    const rows = await this.prisma.$queryRaw<Array<any>>`
+      SELECT
+        id,
+        orderId,
+        orderNo,
+        event,
+        eventLabel,
+        channel,
+        targetMasked,
+        status,
+        templateCode,
+        contentSummary,
+        operator,
+        relatedAction,
+        idempotencyKey,
+        failReason,
+        payload,
+        sentAt,
+        createdAt
+      FROM OrderNotificationRecord
+      WHERE tenantId = ${tenantId} AND orderId = ${orderId}
+      ORDER BY createdAt DESC
+      LIMIT 80
+    `;
+
+    return rows.map((row) => this.toOrderNotificationRecord(row));
+  }
+
   async appendInspectionRecord(orderId: string, record: StoreRentalInspectionRecord) {
     await this.prisma.orderInspectionRecord.create({
       data: {
@@ -5412,6 +5634,82 @@ export class StoreRentalRepository {
     return ["processing", "success", "failed"].includes(value)
       ? (value as StoreRentalIdempotencyRecord["status"])
       : "processing";
+  }
+
+  private toOrderOperationRecord(row: {
+    id: string;
+    orderId: string;
+    orderNo: string;
+    action: string;
+    actionLabel: string;
+    status: string;
+    idempotencyKey: string | null;
+    requestHash: string;
+    lockStatus: string | null;
+    operator: string | null;
+    message: string | null;
+    payload: Prisma.JsonValue | null;
+    expiresAt: Date | null;
+    completedAt: Date | null;
+    createdAt: Date;
+  }): StoreRentalOrderOperationRecord {
+    return {
+      id: row.id,
+      orderId: row.orderId,
+      orderNo: row.orderNo,
+      action: row.action,
+      actionLabel: row.actionLabel,
+      status: row.status as StoreRentalOrderOperationRecord["status"],
+      idempotencyKey: row.idempotencyKey ?? undefined,
+      requestHash: row.requestHash,
+      lockStatus: row.lockStatus as StoreRentalOrderOperationRecord["lockStatus"],
+      operator: row.operator ?? undefined,
+      message: row.message ?? undefined,
+      payload: row.payload ? this.objectMetadata(row.payload) : undefined,
+      expiresAt: row.expiresAt?.toISOString(),
+      completedAt: row.completedAt?.toISOString(),
+      createdAt: row.createdAt.toISOString()
+    };
+  }
+
+  private toOrderNotificationRecord(row: {
+    id: string;
+    orderId: string;
+    orderNo: string;
+    event: string;
+    eventLabel: string;
+    channel: string;
+    targetMasked: string;
+    status: string;
+    templateCode: string;
+    contentSummary: string;
+    operator: string | null;
+    relatedAction: string | null;
+    idempotencyKey: string | null;
+    failReason: string | null;
+    payload: Prisma.JsonValue | null;
+    sentAt: Date | null;
+    createdAt: Date;
+  }): StoreRentalOrderNotificationRecord {
+    return {
+      id: row.id,
+      orderId: row.orderId,
+      orderNo: row.orderNo,
+      event: row.event,
+      eventLabel: row.eventLabel,
+      channel: row.channel as StoreRentalOrderNotificationRecord["channel"],
+      targetMasked: row.targetMasked,
+      status: row.status as StoreRentalOrderNotificationRecord["status"],
+      templateCode: row.templateCode,
+      contentSummary: row.contentSummary,
+      operator: row.operator ?? undefined,
+      relatedAction: row.relatedAction ?? undefined,
+      idempotencyKey: row.idempotencyKey ?? undefined,
+      failReason: row.failReason ?? undefined,
+      payload: row.payload ? this.objectMetadata(row.payload) : undefined,
+      sentAt: row.sentAt?.toISOString(),
+      createdAt: row.createdAt.toISOString()
+    };
   }
 
   private orderSnapshot(value: unknown): Prisma.InputJsonValue {

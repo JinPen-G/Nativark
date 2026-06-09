@@ -65,3 +65,41 @@
 - 调度告警关闭 `alert_closed` 事件已有类型但还没有单独关闭接口。
 - 前端需要继续按 `dispatch.html` 原型微调视觉密度和字段顺序。
 - 非 MySQL 内存数据源事故登记只更新车辆状态，没有自动调用异步后续订单处理；正式开发以 MySQL 为准。
+
+## 2026-06-09 继续推进
+
+### 已实现切片
+
+1. OR-18 操作锁与幂等
+   - 新增共享 DTO：`StoreRentalOrderOperationRecord`。
+   - 新增 MySQL 表：`OrderOperationRecord`，并补 migration `20260609000100_add_order_operation_notification_records`。
+   - 订单关键动作统一生成稳定请求摘要；同一订单、同一动作、同一幂等键或请求摘要命中已完成记录时，直接返回已保存结果。
+   - `pickup-inspection`、`reject-order` 校验未过期取车操作锁；非持锁人默认不能提交，需显式 `overrideOperationLock=true`。
+   - 内存数据源保留最近操作记录；MySQL 数据源通过 repository raw SQL 落库。
+
+2. OR-22 客户通知留痕
+   - 新增共享 DTO：`StoreRentalOrderNotificationRecord`。
+   - 新增 MySQL 表：`OrderNotificationRecord`，记录事件、模板、渠道、目标号码快照、发送状态、关联动作和发送时间。
+   - 支付、开始取车、取车完成、续租、改派、改还车、还车验车、结算、事故、取消、爽约、拒绝履约、关闭订单会生成 mock 短信通知留痕。
+   - 通知记录会同步写入订单时间线，现有订单详情页可直接看到“客户通知：xxx（sms mock sent）”。
+   - 新增查询接口：`GET /store-rental/orders/:id/operation-records`、`GET /store-rental/orders/:id/notifications`。
+
+3. DP-04 调度任务池关闭
+   - 新增共享 DTO：`StoreRentalDispatchCloseTaskRequest`、`StoreRentalDispatchTaskActionResult`。
+   - 新增接口：`POST /store-rental/dispatch/tasks/close`。
+   - 关闭任务写入 `alert_closed` 调度事件，payload 保存 `taskKey=orderId:taskType`。
+   - 任务池实时派生时读取最近关闭事件并过滤对应任务。
+   - 调度页任务卡片新增“关闭任务”入口，关闭说明必填。
+
+### 验证
+
+- `npm run build -w @rimo/shared`
+- `npm run build -w @rimo/api`
+- `npm run build -w @rimo/admin`
+- `DATABASE_URL=... npx prisma validate --schema apps/api/prisma/schema.prisma`
+
+### 待继续
+
+- 通知中心还没有模板配置、失败重试、真实 provider 和发送回执。
+- 下单通知、费用中心/资金流水接口幂等、支付/通知入站回调幂等还未覆盖。
+- 调度任务池仍需补认领、处理中状态、关闭原因筛选和报表。

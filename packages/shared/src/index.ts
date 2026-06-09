@@ -560,6 +560,64 @@ export interface StoreRentalOrderTimelineItem {
   action: string;
 }
 
+export type StoreRentalOrderOperationRecordStatus =
+  | "processing"
+  | "completed"
+  | "failed"
+  | "duplicate"
+  | "locked";
+
+export interface StoreRentalOrderOperationRecord {
+  id: string;
+  orderId: string;
+  orderNo: string;
+  action: string;
+  actionLabel: string;
+  status: StoreRentalOrderOperationRecordStatus;
+  idempotencyKey?: string;
+  requestHash: string;
+  lockStatus?: OperationLockStatus;
+  operator?: string;
+  message?: string;
+  expiresAt?: string;
+  completedAt?: string;
+  payload?: Record<string, unknown>;
+  createdAt: string;
+}
+
+export type StoreRentalOrderNotificationChannel =
+  | "sms"
+  | "email"
+  | "in_app"
+  | "phone"
+  | "system";
+
+export type StoreRentalOrderNotificationStatus =
+  | "pending"
+  | "sent"
+  | "failed"
+  | "skipped";
+
+export interface StoreRentalOrderNotificationRecord {
+  id: string;
+  orderId: string;
+  orderNo: string;
+  event: string;
+  eventLabel: string;
+  channel: StoreRentalOrderNotificationChannel;
+  targetMasked: string;
+  status: StoreRentalOrderNotificationStatus;
+  templateCode: string;
+  contentSummary: string;
+  operator?: string;
+  relatedAction?: string;
+  idempotencyKey?: string;
+  failReason?: string;
+  sentAt?: string;
+  payload?: Record<string, unknown>;
+  createdAt: string;
+}
+
 export interface StoreRentalOrderFeeItem {
   name: string;
   amount: number;
@@ -1652,6 +1710,23 @@ export interface StoreRentalDispatchTaskQuery {
   referenceDate?: string;
   storeName?: string;
   vehicleGroupName?: string;
+}
+
+export interface StoreRentalDispatchCloseTaskRequest {
+  taskId: string;
+  orderId: string;
+  taskType: StoreRentalDispatchTaskType;
+  reason: string;
+  operator?: string;
+}
+
+export interface StoreRentalDispatchTaskActionResult {
+  taskId: string;
+  orderId: string;
+  orderNo: string;
+  status: "closed";
+  event: StoreRentalDispatchEvent;
+  message: string;
 }
 
 export interface StoreRentalDispatchTaskPool {

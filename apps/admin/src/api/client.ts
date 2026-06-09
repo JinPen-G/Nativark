@@ -117,8 +117,12 @@ import type {
   StoreRentalDispatchPlan,
   StoreRentalDispatchTaskPool,
   StoreRentalDispatchTaskQuery,
+  StoreRentalDispatchCloseTaskRequest,
+  StoreRentalDispatchTaskActionResult,
   StoreRentalDispatchVehicleUnavailableRequest,
   StoreRentalDispatchVehicleUnavailableResult,
+  StoreRentalOrderNotificationRecord,
+  StoreRentalOrderOperationRecord,
   StoreRentalFeeCenter,
   StoreRentalContractRecord,
   StoreRentalNotificationRecord,
@@ -700,6 +704,28 @@ export async function getDispatchTasks(params: StoreRentalDispatchTaskQuery = {}
   const response = await http.get<ApiResult<StoreRentalDispatchTaskPool>>(
     "/store-rental/dispatch/tasks",
     { params }
+  );
+  return response.data.data;
+}
+
+export async function closeDispatchTask(payload: StoreRentalDispatchCloseTaskRequest) {
+  const response = await http.post<ApiResult<StoreRentalDispatchTaskActionResult>>(
+    "/store-rental/dispatch/tasks/close",
+    payload
+  );
+  return response.data.data;
+}
+
+export async function getOrderOperationRecords(id: string) {
+  const response = await http.get<ApiResult<StoreRentalOrderOperationRecord[]>>(
+    `/store-rental/orders/${id}/operation-records`
+  );
+  return response.data.data;
+}
+
+export async function getOrderNotifications(id: string) {
+  const response = await http.get<ApiResult<StoreRentalOrderNotificationRecord[]>>(
+    `/store-rental/orders/${id}/notifications`
   );
   return response.data.data;
 }

@@ -1042,6 +1042,7 @@ model StoreRentalOrder {
   idempotencyRecords    OrderIdempotencyRecord[]
   dispatchEvents        DispatchEvent[]
   quoteSnapshots         PricingQuoteSnapshot[]
+  operationRecords      OrderOperationRecord[]
   monthlyBillLines      CorporateMonthlyBillLine[]
   logs                  OperationLog[]
   createdAt             DateTime       @default(now())
@@ -1474,6 +1475,59 @@ model DispatchEvent {
   @@index([tenantId, orderId, createdAt])
   @@index([tenantId, planId, createdAt])
   @@index([tenantId, eventType, createdAt])
+}
+
+model OrderOperationRecord {
+  id             String           @id @default(uuid())
+  tenantId       String
+  orderId        String
+  order          StoreRentalOrder @relation(fields: [orderId], references: [id])
+  orderNo        String
+  action         String
+  actionLabel    String
+  status         String
+  idempotencyKey String?
+  requestHash    String
+  lockStatus     String?
+  operator       String?
+  message        String?
+  payload        Json?
+  expiresAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@unique([tenantId, orderId, action, idempotencyKey])
+  @@index([tenantId, orderId, createdAt])
+  @@index([tenantId, orderId, action, requestHash])
+  @@index([tenantId, action, status, createdAt])
+}
+
+model OrderNotificationRecord {
+  id             String           @id @default(uuid())
+  tenantId       String
+  orderId        String
+  order          StoreRentalOrder @relation(fields: [orderId], references: [id])
+  orderNo        String
+  event          String
+  eventLabel     String
+  channel        String
+  targetMasked   String
+  status         String
+  templateCode   String
+  contentSummary String
+  operator       String?
+  relatedAction  String?
+  idempotencyKey String?
+  failReason     String?
+  payload        Json?
+  sentAt         DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@index([tenantId, orderId, createdAt])
+  @@index([tenantId, event, status, createdAt])
+  @@index([tenantId, relatedAction, createdAt])
 }
 
 model OperationLog {
