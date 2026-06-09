@@ -33,6 +33,7 @@ import {
   FinanceDocumentRow,
   FinanceManualAdjustmentRow,
   FinanceOverviewMetrics,
+  FinancePreAuthorizationRow,
   FinanceReconciliationRow,
   FinanceTransactionRow,
   MarketingPlanDetail,
@@ -62,6 +63,7 @@ import {
   SaveCorporateRequest,
   SaveFinanceDocumentRequest,
   SaveFinanceManualAdjustmentRequest,
+  SaveFinancePreAuthorizationRequest,
   SaveMarketingPlanRequest,
   SaveMemberRequest,
   SaveMembershipPlanRequest,
@@ -711,6 +713,32 @@ export class StoreRentalService {
       createdBy: "中环门市",
       remark: "客户自付收据",
       createdAt: "2026-05-06T16:00:00+08:00"
+    }
+  ];
+  private readonly financePreAuthorizations: FinancePreAuthorizationRow[] = [
+    {
+      id: "finance_preauth_demo_001",
+      preAuthNo: "PA202605060001",
+      orderId: "order_10002",
+      orderNo: "SR202605060002",
+      memberId: "member_002",
+      customerName: "林小姐",
+      status: "frozen",
+      channel: "online",
+      provider: "mock_payment",
+      authorizedAmount: 3000,
+      capturedAmount: 0,
+      releasedAmount: 0,
+      remainingAmount: 3000,
+      currency: "CNY",
+      authCode: "MOCK-AUTH-060002",
+      channelReferenceNo: "GW202605060002",
+      paymentMethod: "信用卡预授权",
+      frozenAt: "2026-05-06T10:10:00+08:00",
+      expiresAt: "2026-05-20T10:10:00+08:00",
+      operator: "中环门市",
+      remark: "下单阶段线上预授权冻结。",
+      createdAt: "2026-05-06T10:10:00+08:00"
     }
   ];
   private readonly financeManualAdjustments: FinanceManualAdjustmentRow[] = [
@@ -2054,6 +2082,7 @@ export class StoreRentalService {
     }
 
     const transactions = this.listMemoryFinanceTransactions();
+    const preAuthorizations = this.listFinancePreAuthorizations() as FinancePreAuthorizationRow[];
     const monthlyBills = this.corporates.flatMap((corporate) =>
       this.buildMemoryCorporateMonthlyBills(corporate)
     );
@@ -2067,16 +2096,14 @@ export class StoreRentalService {
         .reduce((sum, item) => sum + item.amount, 0),
       preAuthFrozenAmount: Math.max(
         0,
-        transactions
-          .filter((item) => item.status === "success" && item.type === "pre_auth_freeze")
-          .reduce((sum, item) => sum + item.amount, 0) -
-          transactions
-            .filter(
-              (item) =>
-                item.status === "success" &&
-                (item.type === "pre_auth_release" || item.type === "pre_auth_capture")
-            )
-            .reduce((sum, item) => sum + item.amount, 0)
+        preAuthorizations
+          .filter(
+            (item) =>
+              item.status === "frozen" ||
+              item.status === "partially_captured" ||
+              item.status === "pending"
+          )
+          .reduce((sum, item) => sum + item.remainingAmount, 0)
       ),
       refundAmount: transactions
         .filter((item) => item.status === "success" && item.type === "refund")
@@ -2173,6 +2200,105 @@ export class StoreRentalService {
       this.financeDocuments.unshift(document);
     }
     return document;
+  }
+
+  listFinancePreAuthorizations():
+    | Promise<FinancePreAuthorizationRow[]>
+    | FinancePreAuthorizationRow[] {
+    if (this.useMysqlDataSource()) {
+      return this.storeRentalRepository.listFinancePreAuthorizations();
+    }
+
+    const explicitOrderIds = new Set(
+      this.financePreAuthorizations
+        .map((item) => item.orderId)
+        .filter((orderId): orderId is string => Boolean(orderId))
+    );
+    const derivedRows = this.buildMemoryFinancePreAuthorizations().filter(
+      (row) => !row.orderId || !explicitOrderIds.has(row.orderId)
+    );
+    return [...this.financePreAuthorizations, ...derivedRows].sort(
+      (a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)
+    );
+  }
+
+  saveFinancePreAuthorization(
+    input: SaveFinancePreAuthorizationRequest
+  ): Promise<FinancePreAuthorizationRow> | FinancePreAuthorizationRow {
+    const authorizedAmount = Number(input.authorizedAmount || 0);
+    const capturedAmount = Number(input.capturedAmount || 0);
+    const releasedAmount = Number(input.releasedAmount || 0);
+    if (authorizedAmount <= 0) {
+      throw new BadRequestException("预授权金额必须大于 0。");
+    }
+    if (capturedAmount < 0 || releasedAmount < 0) {
+      throw new BadRequestException("扣款和释放金额不能小于 0。");
+    }
+    if (capturedAmount + releasedAmount > authorizedAmount) {
+      throw new BadRequestException("扣款和释放金额不能超过预授权金额。");
+    }
+
+    if (this.useMysqlDataSource()) {
+      return this.storeRentalRepository.saveFinancePreAuthorization(input);
+    }
+
+    const order = input.orderId
+      ? this.orders.find((item) => item.id === input.orderId)
+      : input.orderNo
+        ? this.orders.find((item) => item.orderNo === input.orderNo)
+        : undefined;
+    const existingIndex = this.financePreAuthorizations.findIndex(
+      (item) => item.id === input.id
+    );
+    const now = new Date().toISOString();
+    const remainingAmount = Math.max(0, authorizedAmount - capturedAmount - releasedAmount);
+    const row: FinancePreAuthorizationRow = {
+      id: input.id || `finance_preauth_${randomUUID()}`,
+      preAuthNo:
+        input.preAuthNo ||
+        `PA${new Date().toISOString().slice(0, 10).replace(/-/g, "")}${randomUUID()
+          .slice(0, 4)
+          .toUpperCase()}`,
+      orderId: input.orderId ?? order?.id,
+      orderNo: input.orderNo ?? order?.orderNo,
+      memberId: input.memberId ?? order?.memberId,
+      corporateId: input.corporateId ?? order?.corporateId,
+      corporateShortName: input.corporateShortName ?? order?.corporateShortName,
+      customerName: input.customerName ?? order?.customerName,
+      status: input.status,
+      channel: input.channel,
+      provider: input.provider || "mock_payment",
+      authorizedAmount,
+      capturedAmount,
+      releasedAmount,
+      remainingAmount,
+      currency: input.currency || "CNY",
+      authCode: this.optionalString(input.authCode),
+      channelReferenceNo: this.optionalString(input.channelReferenceNo),
+      paymentMethod: this.optionalString(input.paymentMethod),
+      frozenAt:
+        input.frozenAt ||
+        (input.status !== "pending" ? now : undefined),
+      capturedAt:
+        input.capturedAt ||
+        (capturedAmount > 0 ? now : undefined),
+      releasedAt:
+        input.releasedAt ||
+        (releasedAmount > 0 || input.status === "released" ? now : undefined),
+      expiresAt: this.optionalString(input.expiresAt),
+      operator: input.operator || "营运财务",
+      remark: this.optionalString(input.remark),
+      createdAt:
+        existingIndex >= 0
+          ? this.financePreAuthorizations[existingIndex].createdAt
+          : now
+    };
+    if (existingIndex >= 0) {
+      this.financePreAuthorizations[existingIndex] = row;
+    } else {
+      this.financePreAuthorizations.unshift(row);
+    }
+    return row;
   }
 
   listFinanceManualAdjustments():
@@ -9143,6 +9269,75 @@ export class StoreRentalService {
         }))
       )
       .sort((left, right) => right.at.localeCompare(left.at));
+  }
+
+  private buildMemoryFinancePreAuthorizations(): FinancePreAuthorizationRow[] {
+    const rows: FinancePreAuthorizationRow[] = [];
+    for (const order of this.orders) {
+      const transactions = this.buildTransactionRecords(order).filter(
+        (record) =>
+          record.status === "success" &&
+          (record.type === "pre_auth_freeze" ||
+            record.type === "pre_auth_capture" ||
+            record.type === "pre_auth_release")
+      );
+      const authorizedAmount = transactions
+        .filter((record) => record.type === "pre_auth_freeze")
+        .reduce((sum, record) => sum + record.amount, 0);
+      if (authorizedAmount <= 0) {
+        continue;
+      }
+      const capturedAmount = transactions
+        .filter((record) => record.type === "pre_auth_capture")
+        .reduce((sum, record) => sum + record.amount, 0);
+      const releasedAmount = transactions
+        .filter((record) => record.type === "pre_auth_release")
+        .reduce((sum, record) => sum + record.amount, 0);
+      const remainingAmount = Math.max(
+        0,
+        authorizedAmount - capturedAmount - releasedAmount
+      );
+      const transactionAts = transactions.map((record) => record.at).sort();
+      const latestAt = transactionAts[transactionAts.length - 1];
+      const latestTransaction = transactions[transactions.length - 1];
+      const status: FinancePreAuthorizationRow["status"] =
+        remainingAmount <= 0
+          ? capturedAmount > 0 && releasedAmount <= 0
+            ? "captured"
+            : "released"
+          : capturedAmount > 0
+            ? "partially_captured"
+            : "frozen";
+      const freezeTransaction = transactions.find(
+        (record) => record.type === "pre_auth_freeze"
+      );
+      rows.push({
+        id: `finance_preauth_derived_${order.id}`,
+        preAuthNo: `PA-${order.orderNo}`,
+        orderId: order.id,
+        orderNo: order.orderNo,
+        memberId: order.memberId,
+        corporateId: order.corporateId,
+        corporateShortName: order.corporateShortName,
+        customerName: order.customerName,
+        status,
+        channel: "online",
+        provider: "mock_payment",
+        authorizedAmount,
+        capturedAmount,
+        releasedAmount,
+        remainingAmount,
+        currency: "CNY",
+        paymentMethod: "线上预授权",
+        frozenAt: freezeTransaction?.at,
+        capturedAt: capturedAmount > 0 ? latestAt : undefined,
+        releasedAt: releasedAmount > 0 ? latestAt : undefined,
+        operator: latestTransaction?.operator,
+        remark: "由订单预授权资金流水派生",
+        createdAt: freezeTransaction?.at ?? order.pickupAt
+      });
+    }
+    return rows;
   }
 
   private buildMemoryCorporateMonthlyBills(

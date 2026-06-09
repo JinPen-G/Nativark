@@ -12,6 +12,8 @@ import {
   FinanceDocumentType as PrismaFinanceDocumentType,
   FinanceManualAdjustmentDirection as PrismaFinanceManualAdjustmentDirection,
   FinanceManualAdjustmentStatus as PrismaFinanceManualAdjustmentStatus,
+  FinancePreAuthorizationChannel as PrismaFinancePreAuthorizationChannel,
+  FinancePreAuthorizationStatus as PrismaFinancePreAuthorizationStatus,
   MemberReviewStatus as PrismaMemberReviewStatus,
   MemberStatus as PrismaMemberStatus,
   MonthlyBillStatus as PrismaMonthlyBillStatus,
@@ -41,6 +43,7 @@ import type {
   FinanceDocumentRow,
   FinanceManualAdjustmentRow,
   FinanceOverviewMetrics,
+  FinancePreAuthorizationRow,
   FinanceReconciliationRow,
   FinanceTransactionRow,
   MemberDetail,
@@ -83,6 +86,7 @@ import type {
   SaveCorporateRequest,
   SaveFinanceDocumentRequest,
   SaveFinanceManualAdjustmentRequest,
+  SaveFinancePreAuthorizationRequest,
   SaveMemberRequest,
   SaveMembershipPlanRequest,
   SaveStoreRentalRuleConfigRequest,
@@ -3090,13 +3094,14 @@ export class StoreRentalRepository {
   async getFinanceOverview(
     tenantId = this.defaultTenantId
   ): Promise<FinanceOverviewMetrics> {
-    const [transactions, monthlyBills, documents, adjustments] = await Promise.all([
+    const [transactions, monthlyBills, documents, adjustments, preAuthorizations] = await Promise.all([
       this.prisma.transactionRecord.findMany({
         where: { order: { tenantId } }
       }),
       this.prisma.corporateMonthlyBill.findMany({ where: { tenantId } }),
       this.prisma.financeDocument.findMany({ where: { tenantId } }),
-      this.prisma.financeManualAdjustment.findMany({ where: { tenantId } })
+      this.prisma.financeManualAdjustment.findMany({ where: { tenantId } }),
+      this.prisma.financePreAuthorization.findMany({ where: { tenantId } })
     ]);
 
     const successfulTransactions = transactions.filter(
@@ -3105,19 +3110,36 @@ export class StoreRentalRepository {
     const customerReceivedAmount = successfulTransactions
       .filter((item) => item.type === "payment" || item.type === "pre_auth_capture")
       .reduce((sum, item) => sum + Number(item.amount), 0);
-    const preAuthFreezeAmount = successfulTransactions
-      .filter((item) => item.type === "pre_auth_freeze")
-      .reduce((sum, item) => sum + Number(item.amount), 0);
-    const preAuthReleaseAmount = successfulTransactions
-      .filter((item) => item.type === "pre_auth_release" || item.type === "pre_auth_capture")
-      .reduce((sum, item) => sum + Number(item.amount), 0);
+    const preAuthOrderIds = new Set(
+      preAuthorizations
+        .map((item) => item.orderId)
+        .filter((orderId): orderId is string => Boolean(orderId))
+    );
+    const preAuthRows = [
+      ...preAuthorizations.map((item) => this.toFinancePreAuthorizationRow(item)),
+      ...this.buildFinancePreAuthorizationRowsFromTransactions(
+        successfulTransactions.filter(
+          (item) =>
+            item.type === "pre_auth_freeze" ||
+            item.type === "pre_auth_release" ||
+            item.type === "pre_auth_capture"
+        )
+      ).filter((item) => !item.orderId || !preAuthOrderIds.has(item.orderId))
+    ];
     const refundAmount = successfulTransactions
       .filter((item) => item.type === "refund")
       .reduce((sum, item) => sum + Number(item.amount), 0);
 
     return {
       customerReceivedAmount,
-      preAuthFrozenAmount: Math.max(0, preAuthFreezeAmount - preAuthReleaseAmount),
+      preAuthFrozenAmount: preAuthRows
+        .filter(
+          (item) =>
+            item.status === "frozen" ||
+            item.status === "partially_captured" ||
+            item.status === "pending"
+        )
+        .reduce((sum, item) => sum + item.remainingAmount, 0),
       refundAmount,
       monthlyBillingAmount: monthlyBills.reduce(
         (sum, item) => sum + Number(item.totalAmount),
@@ -3267,6 +3289,174 @@ export class StoreRentalRepository {
     });
 
     return this.toFinanceDocumentRow(row);
+  }
+
+  async listFinancePreAuthorizations(
+    tenantId = this.defaultTenantId
+  ): Promise<FinancePreAuthorizationRow[]> {
+    const [explicitRows, transactionRows] = await Promise.all([
+      this.prisma.financePreAuthorization.findMany({
+        where: { tenantId },
+        orderBy: [{ createdAt: "desc" }, { preAuthNo: "desc" }],
+        take: 200
+      }),
+      this.prisma.transactionRecord.findMany({
+        where: {
+          order: { tenantId },
+          type: { in: ["pre_auth_freeze", "pre_auth_release", "pre_auth_capture"] }
+        },
+        include: { order: true },
+        orderBy: { createdAt: "desc" },
+        take: 500
+      })
+    ]);
+
+    const explicitRowsByOrderId = new Set(
+      explicitRows
+        .map((row) => row.orderId)
+        .filter((orderId): orderId is string => Boolean(orderId))
+    );
+    const derivedRows = this.buildFinancePreAuthorizationRowsFromTransactions(
+      transactionRows
+    ).filter((row) => !row.orderId || !explicitRowsByOrderId.has(row.orderId));
+
+    return [...explicitRows.map((row) => this.toFinancePreAuthorizationRow(row)), ...derivedRows]
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+      .slice(0, 200);
+  }
+
+  async saveFinancePreAuthorization(
+    input: SaveFinancePreAuthorizationRequest,
+    tenantId = this.defaultTenantId
+  ): Promise<FinancePreAuthorizationRow> {
+    const authorizedAmount = Number(input.authorizedAmount || 0);
+    const capturedAmount = Number(input.capturedAmount || 0);
+    const releasedAmount = Number(input.releasedAmount || 0);
+    if (authorizedAmount <= 0) {
+      throw new BadRequestException("预授权金额必须大于 0。");
+    }
+    if (capturedAmount < 0 || releasedAmount < 0) {
+      throw new BadRequestException("扣款和释放金额不能小于 0。");
+    }
+    if (capturedAmount + releasedAmount > authorizedAmount) {
+      throw new BadRequestException("扣款和释放金额不能超过预授权金额。");
+    }
+
+    const order = input.orderId
+      ? await this.prisma.storeRentalOrder.findUnique({ where: { id: input.orderId } })
+      : input.orderNo
+        ? await this.prisma.storeRentalOrder.findFirst({
+            where: { tenantId, orderNo: input.orderNo }
+          })
+        : undefined;
+    const id = input.id ?? `finance_preauth_${cryptoRandomId()}`;
+    const preAuthNo =
+      input.preAuthNo?.trim() ||
+      `PA${new Date().toISOString().slice(0, 10).replace(/-/g, "")}${cryptoRandomId()
+        .slice(0, 4)
+        .toUpperCase()}`;
+    const status = this.toPrismaFinancePreAuthorizationStatus(input.status);
+    const remainingAmount = Math.max(0, authorizedAmount - capturedAmount - releasedAmount);
+    const now = new Date();
+    const row = await this.prisma.financePreAuthorization.upsert({
+      where: { id },
+      update: {
+        preAuthNo,
+        orderId: input.orderId ?? order?.id,
+        orderNo: input.orderNo ?? order?.orderNo,
+        memberId: input.memberId ?? order?.memberId,
+        corporateId: input.corporateId ?? order?.corporateId,
+        corporateShortName:
+          input.corporateShortName ?? order?.corporateShortName ?? undefined,
+        customerName: input.customerName ?? order?.customerName,
+        status,
+        channel: this.toPrismaFinancePreAuthorizationChannel(input.channel),
+        provider: input.provider?.trim() || "mock_payment",
+        authorizedAmount,
+        capturedAmount,
+        releasedAmount,
+        remainingAmount,
+        currency: input.currency || "CNY",
+        authCode: input.authCode,
+        channelReferenceNo: input.channelReferenceNo,
+        paymentMethod: input.paymentMethod,
+        frozenAt:
+          input.frozenAt
+            ? new Date(input.frozenAt)
+            : status !== PrismaFinancePreAuthorizationStatus.PENDING
+              ? now
+              : undefined,
+        capturedAt:
+          input.capturedAt
+            ? new Date(input.capturedAt)
+            : capturedAmount > 0
+              ? now
+              : undefined,
+        releasedAt:
+          input.releasedAt
+            ? new Date(input.releasedAt)
+            : releasedAmount > 0 || status === PrismaFinancePreAuthorizationStatus.RELEASED
+              ? now
+              : undefined,
+        expiresAt: input.expiresAt ? new Date(input.expiresAt) : undefined,
+        operator: input.operator,
+        remark: input.remark,
+        metadata: this.metadata({
+          rentalObjectType: "vehicle",
+          source: "finance_center"
+        }) as Prisma.InputJsonValue
+      },
+      create: {
+        id,
+        tenantId,
+        preAuthNo,
+        orderId: input.orderId ?? order?.id,
+        orderNo: input.orderNo ?? order?.orderNo,
+        memberId: input.memberId ?? order?.memberId,
+        corporateId: input.corporateId ?? order?.corporateId,
+        corporateShortName:
+          input.corporateShortName ?? order?.corporateShortName ?? undefined,
+        customerName: input.customerName ?? order?.customerName,
+        status,
+        channel: this.toPrismaFinancePreAuthorizationChannel(input.channel),
+        provider: input.provider?.trim() || "mock_payment",
+        authorizedAmount,
+        capturedAmount,
+        releasedAmount,
+        remainingAmount,
+        currency: input.currency || "CNY",
+        authCode: input.authCode,
+        channelReferenceNo: input.channelReferenceNo,
+        paymentMethod: input.paymentMethod,
+        frozenAt:
+          input.frozenAt
+            ? new Date(input.frozenAt)
+            : status !== PrismaFinancePreAuthorizationStatus.PENDING
+              ? now
+              : undefined,
+        capturedAt:
+          input.capturedAt
+            ? new Date(input.capturedAt)
+            : capturedAmount > 0
+              ? now
+              : undefined,
+        releasedAt:
+          input.releasedAt
+            ? new Date(input.releasedAt)
+            : releasedAmount > 0 || status === PrismaFinancePreAuthorizationStatus.RELEASED
+              ? now
+              : undefined,
+        expiresAt: input.expiresAt ? new Date(input.expiresAt) : undefined,
+        operator: input.operator,
+        remark: input.remark,
+        metadata: this.metadata({
+          rentalObjectType: "vehicle",
+          source: "finance_center"
+        }) as Prisma.InputJsonValue
+      }
+    });
+
+    return this.toFinancePreAuthorizationRow(row);
   }
 
   async listFinanceManualAdjustments(
@@ -5337,6 +5527,137 @@ export class StoreRentalRepository {
     };
   }
 
+  private toFinancePreAuthorizationRow(row: any): FinancePreAuthorizationRow {
+    return {
+      id: row.id,
+      preAuthNo: row.preAuthNo,
+      orderId: row.orderId ?? undefined,
+      orderNo: row.orderNo ?? undefined,
+      memberId: row.memberId ?? undefined,
+      corporateId: row.corporateId ?? undefined,
+      corporateShortName: row.corporateShortName ?? undefined,
+      customerName: row.customerName ?? undefined,
+      status: this.toSharedFinancePreAuthorizationStatus(row.status),
+      channel: this.toSharedFinancePreAuthorizationChannel(row.channel),
+      provider: row.provider,
+      authorizedAmount: Number(row.authorizedAmount),
+      capturedAmount: Number(row.capturedAmount),
+      releasedAmount: Number(row.releasedAmount),
+      remainingAmount: Number(row.remainingAmount),
+      currency: row.currency,
+      authCode: row.authCode ?? undefined,
+      channelReferenceNo: row.channelReferenceNo ?? undefined,
+      paymentMethod: row.paymentMethod ?? undefined,
+      frozenAt: row.frozenAt?.toISOString(),
+      capturedAt: row.capturedAt?.toISOString(),
+      releasedAt: row.releasedAt?.toISOString(),
+      expiresAt: row.expiresAt?.toISOString(),
+      operator: row.operator ?? undefined,
+      remark: row.remark ?? undefined,
+      createdAt: row.createdAt.toISOString()
+    };
+  }
+
+  private buildFinancePreAuthorizationRowsFromTransactions(
+    rows: any[]
+  ): FinancePreAuthorizationRow[] {
+    type FinancePreAuthorizationTransactionGroup = {
+      orderId?: string;
+      orderNo?: string;
+      memberId?: string;
+      corporateId?: string;
+      corporateShortName?: string;
+      customerName?: string;
+      frozenAmount: number;
+      capturedAmount: number;
+      releasedAmount: number;
+      firstAt?: Date;
+      lastAt?: Date;
+      operator?: string;
+      note?: string;
+    };
+    const grouped = new Map<
+      string,
+      FinancePreAuthorizationTransactionGroup
+    >();
+
+    for (const row of rows) {
+      const key = row.orderId || row.order?.orderNo || row.id;
+      const current: FinancePreAuthorizationTransactionGroup =
+        grouped.get(key) ??
+        {
+          orderId: row.orderId ?? row.order?.id,
+          orderNo: row.order?.orderNo,
+          memberId: row.order?.memberId,
+          corporateId: row.order?.corporateId,
+          corporateShortName: row.order?.corporateShortName,
+          customerName: row.order?.customerName,
+          frozenAmount: 0,
+          capturedAmount: 0,
+          releasedAmount: 0
+        };
+      const amount = Number(row.amount);
+      if (row.type === "pre_auth_freeze") {
+        current.frozenAmount += amount;
+      }
+      if (row.type === "pre_auth_capture") {
+        current.capturedAmount += amount;
+      }
+      if (row.type === "pre_auth_release") {
+        current.releasedAmount += amount;
+      }
+      current.firstAt =
+        !current.firstAt || row.createdAt < current.firstAt ? row.createdAt : current.firstAt;
+      current.lastAt =
+        !current.lastAt || row.createdAt > current.lastAt ? row.createdAt : current.lastAt;
+      current.operator = row.operator ?? current.operator;
+      current.note = row.note ?? current.note;
+      grouped.set(key, current);
+    }
+
+    return [...grouped.entries()]
+      .filter(([, item]) => item.frozenAmount > 0)
+      .map(([key, item]) => {
+        const remainingAmount = Math.max(
+          0,
+          item.frozenAmount - item.capturedAmount - item.releasedAmount
+        );
+        const status: FinancePreAuthorizationRow["status"] =
+          remainingAmount <= 0
+            ? item.capturedAmount > 0 && item.releasedAmount <= 0
+              ? "captured"
+              : "released"
+            : item.capturedAmount > 0
+              ? "partially_captured"
+              : "frozen";
+        return {
+          id: `finance_preauth_derived_${key}`,
+          preAuthNo: `PA-${item.orderNo ?? key}`,
+          orderId: item.orderId,
+          orderNo: item.orderNo,
+          memberId: item.memberId,
+          corporateId: item.corporateId,
+          corporateShortName: item.corporateShortName,
+          customerName: item.customerName,
+          status,
+          channel: "online",
+          provider: "mock_payment",
+          authorizedAmount: item.frozenAmount,
+          capturedAmount: item.capturedAmount,
+          releasedAmount: item.releasedAmount,
+          remainingAmount,
+          currency: "CNY",
+          paymentMethod: "线上预授权",
+          frozenAt: item.firstAt?.toISOString(),
+          capturedAt: item.capturedAmount > 0 ? item.lastAt?.toISOString() : undefined,
+          releasedAt: item.releasedAmount > 0 ? item.lastAt?.toISOString() : undefined,
+          operator: item.operator,
+          remark: item.note || "由订单预授权资金流水派生",
+          createdAt: item.firstAt?.toISOString() ?? new Date().toISOString()
+        };
+      });
+  }
+
   private toFinanceReconciliationFromTransaction(row: any): FinanceReconciliationRow {
     const status = this.toTransactionStatus(row.status);
     return {
@@ -5813,6 +6134,70 @@ export class StoreRentalRepository {
       POSTED: "posted"
     };
     return map[status] ?? "pending";
+  }
+
+  private toPrismaFinancePreAuthorizationStatus(
+    status: SaveFinancePreAuthorizationRequest["status"]
+  ): PrismaFinancePreAuthorizationStatus {
+    const map: Record<
+      SaveFinancePreAuthorizationRequest["status"],
+      PrismaFinancePreAuthorizationStatus
+    > = {
+      pending: PrismaFinancePreAuthorizationStatus.PENDING,
+      frozen: PrismaFinancePreAuthorizationStatus.FROZEN,
+      partially_captured: PrismaFinancePreAuthorizationStatus.PARTIALLY_CAPTURED,
+      captured: PrismaFinancePreAuthorizationStatus.CAPTURED,
+      released: PrismaFinancePreAuthorizationStatus.RELEASED,
+      expired: PrismaFinancePreAuthorizationStatus.EXPIRED,
+      failed: PrismaFinancePreAuthorizationStatus.FAILED
+    };
+    return map[status] ?? PrismaFinancePreAuthorizationStatus.PENDING;
+  }
+
+  private toSharedFinancePreAuthorizationStatus(
+    status: PrismaFinancePreAuthorizationStatus
+  ): FinancePreAuthorizationRow["status"] {
+    const map: Record<
+      PrismaFinancePreAuthorizationStatus,
+      FinancePreAuthorizationRow["status"]
+    > = {
+      PENDING: "pending",
+      FROZEN: "frozen",
+      PARTIALLY_CAPTURED: "partially_captured",
+      CAPTURED: "captured",
+      RELEASED: "released",
+      EXPIRED: "expired",
+      FAILED: "failed"
+    };
+    return map[status] ?? "pending";
+  }
+
+  private toPrismaFinancePreAuthorizationChannel(
+    channel: SaveFinancePreAuthorizationRequest["channel"]
+  ): PrismaFinancePreAuthorizationChannel {
+    const map: Record<
+      SaveFinancePreAuthorizationRequest["channel"],
+      PrismaFinancePreAuthorizationChannel
+    > = {
+      online: PrismaFinancePreAuthorizationChannel.ONLINE,
+      offline: PrismaFinancePreAuthorizationChannel.OFFLINE,
+      internal: PrismaFinancePreAuthorizationChannel.INTERNAL
+    };
+    return map[channel] ?? PrismaFinancePreAuthorizationChannel.ONLINE;
+  }
+
+  private toSharedFinancePreAuthorizationChannel(
+    channel: PrismaFinancePreAuthorizationChannel
+  ): FinancePreAuthorizationRow["channel"] {
+    const map: Record<
+      PrismaFinancePreAuthorizationChannel,
+      FinancePreAuthorizationRow["channel"]
+    > = {
+      ONLINE: "online",
+      OFFLINE: "offline",
+      INTERNAL: "internal"
+    };
+    return map[channel] ?? "online";
   }
 
   private toOperationLockStatus(

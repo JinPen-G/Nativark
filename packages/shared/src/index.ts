@@ -2844,6 +2844,17 @@ export type FinanceManualAdjustmentStatus =
   | "rejected"
   | "posted";
 
+export type FinancePreAuthorizationStatus =
+  | "pending"
+  | "frozen"
+  | "partially_captured"
+  | "captured"
+  | "released"
+  | "expired"
+  | "failed";
+
+export type FinancePreAuthorizationChannel = "online" | "offline" | "internal";
+
 export type FinanceReconciliationStatus = "matched" | "pending" | "exception";
 
 export interface FinanceOverviewMetrics {
@@ -2958,6 +2969,62 @@ export interface SaveFinanceManualAdjustmentRequest {
   amount: number;
   reason: string;
   operator?: string;
+}
+
+export interface FinancePreAuthorizationRow {
+  id: string;
+  preAuthNo: string;
+  orderId?: string;
+  orderNo?: string;
+  memberId?: string;
+  corporateId?: string;
+  corporateShortName?: string;
+  customerName?: string;
+  status: FinancePreAuthorizationStatus;
+  channel: FinancePreAuthorizationChannel;
+  provider: string;
+  authorizedAmount: number;
+  capturedAmount: number;
+  releasedAmount: number;
+  remainingAmount: number;
+  currency: string;
+  authCode?: string;
+  channelReferenceNo?: string;
+  paymentMethod?: string;
+  frozenAt?: string;
+  capturedAt?: string;
+  releasedAt?: string;
+  expiresAt?: string;
+  operator?: string;
+  remark?: string;
+  createdAt: string;
+}
+
+export interface SaveFinancePreAuthorizationRequest {
+  id?: string;
+  preAuthNo?: string;
+  orderId?: string;
+  orderNo?: string;
+  memberId?: string;
+  corporateId?: string;
+  corporateShortName?: string;
+  customerName?: string;
+  status: FinancePreAuthorizationStatus;
+  channel: FinancePreAuthorizationChannel;
+  provider?: string;
+  authorizedAmount: number;
+  capturedAmount?: number;
+  releasedAmount?: number;
+  currency?: string;
+  authCode?: string;
+  channelReferenceNo?: string;
+  paymentMethod?: string;
+  frozenAt?: string;
+  capturedAt?: string;
+  releasedAt?: string;
+  expiresAt?: string;
+  operator?: string;
+  remark?: string;
 }
 
 export interface ProcessFinanceManualAdjustmentRequest {

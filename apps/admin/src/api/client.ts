@@ -36,6 +36,7 @@ import type {
   FinanceDocumentRow,
   FinanceManualAdjustmentRow,
   FinanceOverviewMetrics,
+  FinancePreAuthorizationRow,
   FinanceReconciliationRow,
   FinanceTransactionRow,
   FileAssetSummary,
@@ -85,6 +86,7 @@ import type {
   SaveCorporateRequest,
   SaveFinanceDocumentRequest,
   SaveFinanceManualAdjustmentRequest,
+  SaveFinancePreAuthorizationRequest,
   SaveMarketingPlanRequest,
   SaveMemberRequest,
   SaveMembershipPlanRequest,
@@ -607,6 +609,28 @@ export async function saveFinanceDocument(payload: SaveFinanceDocumentRequest) {
       )
     : await http.post<ApiResult<FinanceDocumentRow>>(
         "/store-rental/finance/documents",
+        payload
+      );
+  return response.data.data;
+}
+
+export async function listFinancePreAuthorizations() {
+  const response = await http.get<ApiResult<FinancePreAuthorizationRow[]>>(
+    "/store-rental/finance/pre-authorizations"
+  );
+  return response.data.data;
+}
+
+export async function saveFinancePreAuthorization(
+  payload: SaveFinancePreAuthorizationRequest
+) {
+  const response = payload.id
+    ? await http.put<ApiResult<FinancePreAuthorizationRow>>(
+        `/store-rental/finance/pre-authorizations/${payload.id}`,
+        payload
+      )
+    : await http.post<ApiResult<FinancePreAuthorizationRow>>(
+        "/store-rental/finance/pre-authorizations",
         payload
       );
   return response.data.data;

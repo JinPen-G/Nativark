@@ -27,9 +27,11 @@
 
 - `FinanceDocument`：发票/收据表，支持订单、会员、企业、月结账单快照字段。
 - `FinanceManualAdjustment`：手工调账表，支持补收、退款、减免和客户自付/企业月结口径。
+- `FinancePreAuthorization`：预授权/押金台账表，支持订单、会员、企业快照、冻结/扣款/释放金额、剩余额度、状态、支付渠道、授权码、渠道流水号和过期时间。
 - 财务接口：
   - `GET /store-rental/finance/overview`
   - `GET /store-rental/finance/transactions`
+  - `GET/POST/PUT /store-rental/finance/pre-authorizations`
   - `GET/POST/PUT /store-rental/finance/documents`
   - `GET/POST /store-rental/finance/manual-adjustments`
   - `POST /store-rental/finance/manual-adjustments/:id/process`
@@ -47,7 +49,17 @@
 - 营运端页面：
   - 新增 `/finance` 财务结算页。
   - 左侧导航新增“财务中心 / 财务结算”。
-  - 页面覆盖资金流水、企业月结、发票收据、手工调账、财务对账。
+  - 页面覆盖资金流水、预授权押金、企业月结、发票收据、手工调账、财务对账。
+
+## 2026-06-09 本轮新增
+
+- OR-16 预授权与押金台账第一版：
+  - 新增 `FinancePreAuthorization` Prisma schema 与 migration `20260609000200_add_finance_pre_authorizations`。
+  - 共享包新增 `FinancePreAuthorizationRow`、`SaveFinancePreAuthorizationRequest`、状态与渠道类型。
+  - 后端新增 `/store-rental/finance/pre-authorizations` 列表/新增/更新接口。
+  - MySQL 模式下显式台账落 `FinancePreAuthorization`；列表会从订单 `pre_auth_freeze/pre_auth_capture/pre_auth_release` 资金流水派生缺失台账，避免历史订单无台账展示。
+  - 财务总览“预授权冻结”改为按台账剩余额度统计，显式台账优先于派生台账。
+  - 财务结算页新增“预授权押金” Tab 和登记/编辑弹窗，覆盖订单、客户、状态、渠道、服务商、授权码、渠道流水、冻结/扣款/释放金额、过期时间和处理人。
 
 ## 客户等级字段
 
@@ -72,20 +84,21 @@
 
 ## 通用租赁平台改造点
 
-- 当前 `FinanceDocument` 和 `FinanceManualAdjustment` 已避免直接绑定车辆字段，保留 `orderId/orderNo/memberId/corporateId` 等通用业务键。
+- 当前 `FinanceDocument`、`FinanceManualAdjustment` 和 `FinancePreAuthorization` 已避免直接绑定车辆字段，保留 `orderId/orderNo/memberId/corporateId` 等通用业务键。
 - `FinanceManualAdjustment` 的 `category` 可从车辆租赁的 ETC、停车费、车损，迁移为摄影器材、露营器材等行业的损耗费、清洁费、遗失赔偿。
 - `metadata.rentalObjectType` 当前写为 `vehicle`，后续通用化时应调整为可配置租赁物类型，例如 `camera_equipment`、`camping_gear`。
 - 企业月结线当前仍展示 `vehicleGroupName/pickupStoreName/returnStoreName`，通用化时建议抽象为 `rentalObjectName/pickupLocationName/returnLocationName`，但本期不改订单和账单旧表字段，避免影响门市租赁 PRD 验收。
-- 预授权仍通过订单交易类型表达，外部支付只预留接入；后续通用化时应把押金规则从车辆规则迁到通用租赁规则域。
+- 预授权当前已有显式台账和订单交易派生展示，外部支付仍只预留接入；后续通用化时应把押金规则从车辆规则迁到通用租赁规则域。
 
 ## 验证状态
 
 - `npm install` 已在独立 worktree 成功。
-- `npm run db:generate` 外部执行审批被工作区额度系统拒绝，沙箱内执行也因 Windows 沙箱启动失败未能继续。
-- 待环境恢复后需要运行：
+- 2026-06-09 已运行：
   - `npm run db:generate`
   - `npm run build -w @rimo/shared`
   - `npm run build -w @rimo/api`
   - `npm run build -w @rimo/admin`
-  - `npx prisma validate --schema apps/api/prisma/schema.prisma`
+  - `$env:DATABASE_URL='mysql://root:password@localhost:3306/rimo_store_rental'; npx prisma validate --schema apps/api/prisma/schema.prisma`
+- 仍需在最终提交前运行：
+  - `npm run build`
   - `git diff --check`

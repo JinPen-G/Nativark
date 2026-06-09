@@ -6,20 +6,24 @@ import type {
   FinanceDocumentRow,
   FinanceManualAdjustmentRow,
   FinanceOverviewMetrics,
+  FinancePreAuthorizationRow,
   FinanceReconciliationRow,
   FinanceTransactionRow,
   SaveFinanceDocumentRequest,
-  SaveFinanceManualAdjustmentRequest
+  SaveFinanceManualAdjustmentRequest,
+  SaveFinancePreAuthorizationRequest
 } from "@rimo/shared";
 import {
   createFinanceManualAdjustment,
   getFinanceOverview,
   listFinanceDocuments,
   listFinanceManualAdjustments,
+  listFinancePreAuthorizations,
   listFinanceReconciliationRows,
   listFinanceTransactions,
   processFinanceManualAdjustment,
-  saveFinanceDocument
+  saveFinanceDocument,
+  saveFinancePreAuthorization
 } from "../api/client";
 import AppLayout from "../components/AppLayout.vue";
 
@@ -37,10 +41,12 @@ const overview = ref<FinanceOverviewMetrics>({
 });
 const transactions = ref<FinanceTransactionRow[]>([]);
 const documents = ref<FinanceDocumentRow[]>([]);
+const preAuthorizations = ref<FinancePreAuthorizationRow[]>([]);
 const adjustments = ref<FinanceManualAdjustmentRow[]>([]);
 const reconciliationRows = ref<FinanceReconciliationRow[]>([]);
 const keyword = ref("");
 const documentDialogVisible = ref(false);
+const preAuthDialogVisible = ref(false);
 const adjustmentDialogVisible = ref(false);
 const saving = ref(false);
 
@@ -65,6 +71,20 @@ const adjustmentForm = reactive<SaveFinanceManualAdjustmentRequest>({
   amount: 0,
   reason: "",
   operator: "营运财务"
+});
+const preAuthForm = reactive<SaveFinancePreAuthorizationRequest>({
+  status: "frozen",
+  channel: "online",
+  provider: "mock_payment",
+  orderNo: "",
+  customerName: "",
+  authorizedAmount: 0,
+  capturedAmount: 0,
+  releasedAmount: 0,
+  currency: "CNY",
+  paymentMethod: "信用卡预授权",
+  operator: "营运财务",
+  remark: ""
 });
 
 const monthlyReconciliationRows = computed(() =>
@@ -95,6 +115,26 @@ const filteredDocuments = computed(() => {
   );
 });
 
+const filteredPreAuthorizations = computed(() => {
+  const text = keyword.value.trim().toLowerCase();
+  if (!text) {
+    return preAuthorizations.value;
+  }
+  return preAuthorizations.value.filter((row) =>
+    [
+      row.preAuthNo,
+      row.orderNo,
+      row.customerName,
+      row.corporateShortName,
+      row.authCode,
+      row.channelReferenceNo,
+      row.provider
+    ]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(text))
+  );
+});
+
 const filteredAdjustments = computed(() => {
   const text = keyword.value.trim().toLowerCase();
   if (!text) {
@@ -114,18 +154,21 @@ async function loadData() {
       overviewData,
       transactionData,
       documentData,
+      preAuthData,
       adjustmentData,
       reconciliationData
     ] = await Promise.all([
       getFinanceOverview(),
       listFinanceTransactions(),
       listFinanceDocuments(),
+      listFinancePreAuthorizations(),
       listFinanceManualAdjustments(),
       listFinanceReconciliationRows()
     ]);
     overview.value = overviewData;
     transactions.value = transactionData;
     documents.value = documentData;
+    preAuthorizations.value = preAuthData;
     adjustments.value = adjustmentData;
     reconciliationRows.value = reconciliationData;
   } finally {
@@ -169,6 +212,39 @@ function documentStatusLabel(status: FinanceDocumentRow["status"]) {
     sent: "已发送",
     voided: "已作废"
   }[status];
+}
+
+function preAuthStatusLabel(status: FinancePreAuthorizationRow["status"]) {
+  return {
+    pending: "待冻结",
+    frozen: "已冻结",
+    partially_captured: "部分扣款",
+    captured: "已扣款",
+    released: "已释放",
+    expired: "已过期",
+    failed: "失败"
+  }[status];
+}
+
+function preAuthStatusTag(status: FinancePreAuthorizationRow["status"]) {
+  if (status === "failed" || status === "expired") {
+    return "danger";
+  }
+  if (status === "released") {
+    return "info";
+  }
+  if (status === "pending") {
+    return "warning";
+  }
+  return "success";
+}
+
+function preAuthChannelLabel(channel: FinancePreAuthorizationRow["channel"]) {
+  return {
+    online: "线上",
+    offline: "线下",
+    internal: "内部"
+  }[channel];
 }
 
 function adjustmentStatusLabel(status: FinanceManualAdjustmentRow["status"]) {
@@ -222,6 +298,36 @@ function openDocumentDialog(row?: FinanceDocumentRow) {
   documentDialogVisible.value = true;
 }
 
+function openPreAuthDialog(row?: FinancePreAuthorizationRow) {
+  Object.assign(preAuthForm, {
+    id: row?.id,
+    preAuthNo: row?.preAuthNo,
+    orderId: row?.orderId,
+    orderNo: row?.orderNo ?? "",
+    memberId: row?.memberId,
+    corporateId: row?.corporateId,
+    corporateShortName: row?.corporateShortName,
+    customerName: row?.customerName ?? "",
+    status: row?.status ?? "frozen",
+    channel: row?.channel ?? "online",
+    provider: row?.provider ?? "mock_payment",
+    authorizedAmount: row?.authorizedAmount ?? 0,
+    capturedAmount: row?.capturedAmount ?? 0,
+    releasedAmount: row?.releasedAmount ?? 0,
+    currency: row?.currency ?? "CNY",
+    authCode: row?.authCode,
+    channelReferenceNo: row?.channelReferenceNo,
+    paymentMethod: row?.paymentMethod ?? "信用卡预授权",
+    frozenAt: row?.frozenAt,
+    capturedAt: row?.capturedAt,
+    releasedAt: row?.releasedAt,
+    expiresAt: row?.expiresAt,
+    operator: row?.operator ?? "营运财务",
+    remark: row?.remark ?? ""
+  });
+  preAuthDialogVisible.value = true;
+}
+
 function openAdjustmentDialog() {
   Object.assign(adjustmentForm, {
     orderId: undefined,
@@ -246,6 +352,18 @@ async function submitDocument() {
     await saveFinanceDocument(documentForm);
     ElMessage.success("发票/收据已保存");
     documentDialogVisible.value = false;
+    await loadData();
+  } finally {
+    saving.value = false;
+  }
+}
+
+async function submitPreAuth() {
+  saving.value = true;
+  try {
+    await saveFinancePreAuthorization(preAuthForm);
+    ElMessage.success("预授权台账已保存");
+    preAuthDialogVisible.value = false;
     await loadData();
   } finally {
     saving.value = false;
@@ -291,6 +409,7 @@ onMounted(loadData);
       </div>
       <div class="flex gap-2">
         <el-button @click="loadData">刷新</el-button>
+        <el-button type="primary" plain @click="openPreAuthDialog()">登记预授权</el-button>
         <el-button type="primary" plain @click="openDocumentDialog()">开具发票/收据</el-button>
         <el-button type="primary" color="#00689E" @click="openAdjustmentDialog">新增手工调账</el-button>
       </div>
@@ -338,6 +457,7 @@ onMounted(loadData);
       <div class="flex items-center justify-between mb-4">
         <el-tabs v-model="activeTab" class="finance-tabs">
           <el-tab-pane label="资金流水" name="transactions" />
+          <el-tab-pane label="预授权押金" name="preauth" />
           <el-tab-pane label="企业月结" name="monthly" />
           <el-tab-pane label="发票收据" name="documents" />
           <el-tab-pane label="手工调账" name="adjustments" />
@@ -375,6 +495,47 @@ onMounted(loadData);
         </el-table-column>
         <el-table-column prop="operator" label="处理人" width="120" />
         <el-table-column prop="note" label="备注" min-width="220" />
+      </el-table>
+
+      <el-table v-else-if="activeTab === 'preauth'" v-loading="loading" :data="filteredPreAuthorizations" stripe>
+        <el-table-column prop="preAuthNo" label="预授权单号" min-width="170" />
+        <el-table-column label="订单 / 客户" min-width="240">
+          <template #default="{ row }">
+            <div class="font-semibold text-gray-900">{{ row.orderNo || "未绑定订单" }}</div>
+            <div class="text-xs text-gray-500 mt-1">{{ row.customerName || "-" }} · {{ row.corporateShortName || "个人客户" }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="120">
+          <template #default="{ row }">
+            <el-tag :type="preAuthStatusTag(row.status)" effect="plain">
+              {{ preAuthStatusLabel(row.status) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="冻结金额" width="120" align="right">
+          <template #default="{ row }">{{ money(row.authorizedAmount) }}</template>
+        </el-table-column>
+        <el-table-column label="扣款" width="110" align="right">
+          <template #default="{ row }">{{ money(row.capturedAmount) }}</template>
+        </el-table-column>
+        <el-table-column label="释放" width="110" align="right">
+          <template #default="{ row }">{{ money(row.releasedAmount) }}</template>
+        </el-table-column>
+        <el-table-column label="剩余" width="110" align="right">
+          <template #default="{ row }">{{ money(row.remainingAmount) }}</template>
+        </el-table-column>
+        <el-table-column label="渠道 / 凭证" min-width="220">
+          <template #default="{ row }">
+            <div class="text-gray-900">{{ preAuthChannelLabel(row.channel) }} · {{ row.provider }}</div>
+            <div class="text-xs text-gray-500 mt-1">{{ row.authCode || row.channelReferenceNo || row.paymentMethod || "-" }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column prop="operator" label="处理人" width="120" />
+        <el-table-column label="操作" width="100" align="right" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="openPreAuthDialog(row)">编辑</el-button>
+          </template>
+        </el-table-column>
       </el-table>
 
       <el-table v-else-if="activeTab === 'monthly'" v-loading="loading" :data="monthlyReconciliationRows" stripe>
@@ -528,6 +689,77 @@ onMounted(loadData);
       <template #footer>
         <el-button @click="documentDialogVisible = false">取消</el-button>
         <el-button type="primary" color="#00689E" :loading="saving" @click="submitDocument">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="preAuthDialogVisible" title="预授权 / 押金台账" width="820px">
+      <el-form label-position="top">
+        <div class="grid grid-cols-12 gap-4">
+          <el-form-item label="订单号" class="col-span-12 md:col-span-4">
+            <el-input v-model="preAuthForm.orderNo" placeholder="可选，绑定订单后自动带客户快照" />
+          </el-form-item>
+          <el-form-item label="客户名称" class="col-span-12 md:col-span-4">
+            <el-input v-model="preAuthForm.customerName" />
+          </el-form-item>
+          <el-form-item label="企业简称" class="col-span-12 md:col-span-4">
+            <el-input v-model="preAuthForm.corporateShortName" />
+          </el-form-item>
+          <el-form-item label="状态" class="col-span-12 md:col-span-4">
+            <el-select v-model="preAuthForm.status" class="w-full">
+              <el-option label="待冻结" value="pending" />
+              <el-option label="已冻结" value="frozen" />
+              <el-option label="部分扣款" value="partially_captured" />
+              <el-option label="已扣款" value="captured" />
+              <el-option label="已释放" value="released" />
+              <el-option label="已过期" value="expired" />
+              <el-option label="失败" value="failed" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="渠道" class="col-span-12 md:col-span-4">
+            <el-radio-group v-model="preAuthForm.channel">
+              <el-radio-button label="online">线上</el-radio-button>
+              <el-radio-button label="offline">线下</el-radio-button>
+              <el-radio-button label="internal">内部</el-radio-button>
+            </el-radio-group>
+          </el-form-item>
+          <el-form-item label="支付服务商" class="col-span-12 md:col-span-4">
+            <el-input v-model="preAuthForm.provider" />
+          </el-form-item>
+          <el-form-item label="冻结金额" class="col-span-12 md:col-span-4">
+            <el-input-number v-model="preAuthForm.authorizedAmount" :min="0" class="w-full" />
+          </el-form-item>
+          <el-form-item label="已扣款" class="col-span-12 md:col-span-4">
+            <el-input-number v-model="preAuthForm.capturedAmount" :min="0" class="w-full" />
+          </el-form-item>
+          <el-form-item label="已释放" class="col-span-12 md:col-span-4">
+            <el-input-number v-model="preAuthForm.releasedAmount" :min="0" class="w-full" />
+          </el-form-item>
+          <el-form-item label="授权码" class="col-span-12 md:col-span-4">
+            <el-input v-model="preAuthForm.authCode" placeholder="渠道授权码" />
+          </el-form-item>
+          <el-form-item label="渠道流水号" class="col-span-12 md:col-span-4">
+            <el-input v-model="preAuthForm.channelReferenceNo" />
+          </el-form-item>
+          <el-form-item label="支付方式" class="col-span-12 md:col-span-4">
+            <el-input v-model="preAuthForm.paymentMethod" />
+          </el-form-item>
+          <el-form-item label="冻结时间" class="col-span-12 md:col-span-4">
+            <el-input v-model="preAuthForm.frozenAt" placeholder="2026-05-06T10:10:00+08:00" />
+          </el-form-item>
+          <el-form-item label="过期时间" class="col-span-12 md:col-span-4">
+            <el-input v-model="preAuthForm.expiresAt" placeholder="可选" />
+          </el-form-item>
+          <el-form-item label="处理人" class="col-span-12 md:col-span-4">
+            <el-input v-model="preAuthForm.operator" />
+          </el-form-item>
+          <el-form-item label="备注" class="col-span-12">
+            <el-input v-model="preAuthForm.remark" type="textarea" :rows="3" />
+          </el-form-item>
+        </div>
+      </el-form>
+      <template #footer>
+        <el-button @click="preAuthDialogVisible = false">取消</el-button>
+        <el-button type="primary" color="#00689E" :loading="saving" @click="submitPreAuth">保存</el-button>
       </template>
     </el-dialog>
 

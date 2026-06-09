@@ -51,6 +51,7 @@ rimo-store-rental-platform/
 - `NewOrderView.vue`：新建门市订单。
 - `OrdersView.vue`：门市租赁订单列表，已接入筛选预设保存、设默认、删除和默认视图自动应用。
 - `OrderDetailView.vue`：门市租赁订单详情工作台，包含订单动作、履约信息、费用中心。
+- `FinanceCenterView.vue`：财务结算中心，覆盖资金流水、预授权押金、企业月结、发票收据、手工调账和财务对账。
 
 当前已接入的营运端基础页面：
 
@@ -203,12 +204,13 @@ rimo-store-rental-platform/
 - 订单列表和详情。
 - 订单动作。
 - 费用中心查询、新增费用、费用减免、收款、退款、企业月结登记。
+- 财务结算中心：资金流水、预授权押金台账、发票/收据、手工调账、企业月结和对账异常。
 - 调度看板、候选车辆、预览式智能优化、应用预分配、硬锁和调度页人工改派。
 - 调度任务池和调度事件审计。
 - 外部集成预留。
 - 企业端/H5 预留接口说明。
 
-当前门市租赁业务默认仍是内存数据。已新增 `StoreRentalRepository` 和 `STORE_RENTAL_DATA_SOURCE=memory|mysql`：设置为 `mysql` 后，租赁业务规则当前版本/历史版本、站点列表分页/筛选/保存、车型组、车辆列表分页/筛选/保存/删除校验/车辆状态更新、车辆出入站流水、车况照片记录、维保记录、事故/出险记录、车辆操作日志、个人会员列表分页/筛选/详情/保存、会员审核、会员风控、客户等级方案、企业客户列表分页/筛选/详情/保存、企业联系人、企业合同、订单创建/查询、订单费用中心、检查记录、资金流水、订单时间线、续租快照、改派动作、改还车门市/据点动作、终止类动作、订单事故登记、调度预分配/硬锁/人工改派、调度事件审计和企业月结账单走 Prisma/MySQL。
+当前门市租赁业务默认仍是内存数据。已新增 `StoreRentalRepository` 和 `STORE_RENTAL_DATA_SOURCE=memory|mysql`：设置为 `mysql` 后，租赁业务规则当前版本/历史版本、站点列表分页/筛选/保存、车型组、车辆列表分页/筛选/保存/删除校验/车辆状态更新、车辆出入站流水、车况照片记录、维保记录、事故/出险记录、车辆操作日志、个人会员列表分页/筛选/详情/保存、会员审核、会员风控、客户等级方案、企业客户列表分页/筛选/详情/保存、企业联系人、企业合同、订单创建/查询、订单费用中心、检查记录、资金流水、预授权押金台账、发票/收据、手工调账、订单时间线、续租快照、改派动作、改还车门市/据点动作、终止类动作、订单事故登记、调度预分配/硬锁/人工改派、调度事件审计和企业月结账单走 Prisma/MySQL。
 
 租赁业务规则版本实现口径：
 
@@ -242,6 +244,7 @@ rimo-store-rental-platform/
 - 主数据：`StoreStationSummary`、`VehicleGroupMaster`、`VehicleInstanceSummary`、`StoreValueAddedServiceSummary`。
 - 订单：`StoreRentalOrderSummary`、`StoreRentalOrderDetail`、`CreateStoreRentalOrderRequest`、`StoreRentalOrderActionResult`。
 - 费用中心：`StoreRentalFeeCenter`、`StoreRentalFeeLedgerItem`、`StoreRentalTransactionRecord`、`CreateStoreRentalFeeRequest`、`CreateStoreRentalTransactionRequest`、`WaiveStoreRentalFeeRequest`。
+- 财务中心：`FinanceOverviewMetrics`、`FinanceTransactionRow`、`FinancePreAuthorizationRow`、`SaveFinancePreAuthorizationRequest`、`FinanceDocumentRow`、`SaveFinanceDocumentRequest`、`FinanceManualAdjustmentRow`、`SaveFinanceManualAdjustmentRequest`、`FinanceReconciliationRow`。
 - 调度：`StoreRentalDispatchBoard`、`StoreRentalDispatchOrderRow`、`StoreRentalDispatchCandidate`、`StoreRentalDispatchPlan`、`StoreRentalDispatchResultRow`、`StoreRentalDispatchApplyResult`、`StoreRentalDispatchTaskPool`、`StoreRentalDispatchTask`、`StoreRentalDispatchEvent`。
 
 后续通用化时不要直接删除这些类型，应新增通用类型并逐步映射。
@@ -425,6 +428,13 @@ system:tenant:manage
 17. 应用优化结果：`POST /store-rental/dispatch/apply`
 18. 取车前硬锁：`POST /store-rental/dispatch/hard-lock`
 19. 调度页人工改派：`POST /store-rental/dispatch/manual-reassign`
+20. 财务总览：`GET /store-rental/finance/overview`
+21. 财务资金流水：`GET /store-rental/finance/transactions`
+22. 预授权押金台账：`GET/POST/PUT /store-rental/finance/pre-authorizations`
+23. 发票/收据：`GET/POST/PUT /store-rental/finance/documents`
+24. 手工调账：`GET/POST /store-rental/finance/manual-adjustments`
+25. 调账审核入账：`POST /store-rental/finance/manual-adjustments/:id/process`
+26. 财务对账：`GET /store-rental/finance/reconciliation`
 
 当前支持的动作：
 
@@ -599,7 +609,7 @@ PF-15 当前数据边界：
 - 平台底座：租户、组织、用户、多角色、角色权限、权限码、系统参数集、筛选预设、平台审计日志、数据字典配置、编号规则配置。
 - 门市租赁主数据：履约站点、车型组、车辆实例、车辆位置流水、车况照片、维保记录、事故/出险记录。
 - 客户域：会员、会员风控事件、会员时间线、客户等级方案、企业客户、联系人、合同、企业月结账单。
-- 规则与订单域：租赁业务规则版本、订单、取还车检查记录、履约时间线、续租快照、费用项、资金记录、企业月结明细。
+- 规则与订单域：租赁业务规则版本、订单、取还车检查记录、履约时间线、续租快照、费用项、资金记录、预授权押金台账、发票/收据、人工调账、企业月结明细。
 
 下一阶段建议按下面顺序推进真实数据层：
 

@@ -150,7 +150,7 @@ $env:PLATFORM_DATA_SOURCE="mysql"
 $env:STORE_RENTAL_DATA_SOURCE="mysql"
 ```
 
-该开关目前覆盖站点、车型组、车辆主数据、车辆详情事件、会员、会员审核、会员风控、客户等级方案、企业客户、企业联系人、企业合同、订单创建/查询、费用中心、检查记录、资金流水、订单时间线、续租、改派、改还车门市/据点、终止类动作、事故登记和企业月结账单一期。事故后续订单联动、统一审计、幂等锁、导出打印和附件仍需继续开发。
+该开关目前覆盖站点、车型组、车辆主数据、车辆详情事件、会员、会员审核、会员风控、客户等级方案、企业客户、企业联系人、企业合同、订单创建/查询、费用中心、检查记录、资金流水、预授权押金台账、发票/收据、手工调账、订单时间线、续租、改派、改还车门市/据点、终止类动作、事故登记和企业月结账单一期。事故后续订单联动、统一审计、幂等锁、导出打印和附件仍需继续开发。
 
 不设置时默认 `memory`，无需启动数据库也能跑前后端。
 
@@ -172,7 +172,7 @@ $env:STORE_RENTAL_DATA_SOURCE="mysql"
 - 车型组管理：基础资料、产品组、标准价、免费里程、超程单价、特殊车辆管控、删除引用校验。
 - 车辆档案库：车辆列表、编辑、新增、车型组和据点动态选项、车牌/VIN 校验、服务类型和据点能力校验。
 - 车辆状态动作：启用、停用、发起维保、结束维保、批量启停。
-- 主数据/客户域/订单域 MySQL 第一版：已新增 `StoreRentalRepository` 和 `STORE_RENTAL_DATA_SOURCE=memory|mysql`，站点、车型组、车辆列表/保存/删除校验/车辆状态更新、出入站流水、车况照片、维保、事故、车辆操作日志、会员、会员审核、会员风控、客户等级方案、企业客户、企业联系人、企业合同、订单创建/查询、费用中心、检查记录、资金流水、订单时间线、续租、改派、改还车门市/据点、终止动作、事故登记和企业月结账单可切到 Prisma/MySQL；原型扩展字段存入主表 `metadata` JSON 或领域 JSON 字段。
+- 主数据/客户域/订单域 MySQL 第一版：已新增 `StoreRentalRepository` 和 `STORE_RENTAL_DATA_SOURCE=memory|mysql`，站点、车型组、车辆列表/保存/删除校验/车辆状态更新、出入站流水、车况照片、维保、事故、车辆操作日志、会员、会员审核、会员风控、客户等级方案、企业客户、企业联系人、企业合同、订单创建/查询、费用中心、检查记录、资金流水、预授权押金台账、发票/收据、手工调账、订单时间线、续租、改派、改还车门市/据点、终止动作、事故登记和企业月结账单可切到 Prisma/MySQL；原型扩展字段存入主表 `metadata` JSON 或领域 JSON 字段。
 - 车辆详情抽屉：车辆概况、订单记录、出入站流水、车况照片、维保/事故记录、操作记录。
 - 车辆维保/事故新增记录：已接后端，新增后会刷新详情、回写车辆状态、追加操作日志。
 - 车辆维保记录完成、事故记录结案：已接后端更新接口，详情页可直接完成/结案，并按未结记录自动回写车辆状态。
@@ -209,8 +209,9 @@ $env:STORE_RENTAL_DATA_SOURCE="mysql"
 - 独立订单详情页 `/orders/:id`：摘要、操作栏、客户预约、派车、取还车、履约事件、财务分栏。
 - 订单动作：支付成功、开始取车、取车验车、延长用车/补办续租、订单改派、改还车门市/据点、还车验车、结算确认、取消订单、标记爽约、拒绝履约、关闭订单、事故登记/处理事故。
 - 费用中心：查询、新增费用、费用减免、登记收款、退款、企业月结。
+- 财务结算中心：新增 `/finance` 页面，覆盖资金流水、预授权押金、企业月结、发票收据、手工调账和财务对账。
 - 状态机后端有校验，不能任意跨状态操作。
-- MySQL 模式订单一期：`POST /store-rental/orders` 会写订单本体、价格/规则快照、初始费用、资金记录和时间线；订单列表、详情、费用中心从数据库读取；人工费用、减免、资金登记落库；主流程动作 `payment-success`、`start-pickup`、`pickup-inspection`、`return-inspection`、`confirm-settlement`，以及 `extend-rental`、`redirect-order`、`change-return-store`、`change-return-station`、`cancel`、`mark-no-show`、`reject-order`、`close-order`、`register-accident` 已持久化；改还车门市/据点的后续预约冲突快捷改派一期已随 `change-return-store/change-return-station` 联动持久化；企业月结账单、明细和回款落库，且只在成功 `monthly_bill` 交易后生成账单行。
+- MySQL 模式订单一期：`POST /store-rental/orders` 会写订单本体、价格/规则快照、初始费用、资金记录和时间线；订单列表、详情、费用中心从数据库读取；人工费用、减免、资金登记落库；预授权押金台账、发票/收据和人工调账已有独立财务表与接口；主流程动作 `payment-success`、`start-pickup`、`pickup-inspection`、`return-inspection`、`confirm-settlement`，以及 `extend-rental`、`redirect-order`、`change-return-store`、`change-return-station`、`cancel`、`mark-no-show`、`reject-order`、`close-order`、`register-accident` 已持久化；改还车门市/据点的后续预约冲突快捷改派一期已随 `change-return-store/change-return-station` 联动持久化；企业月结账单、明细和回款落库，且只在成功 `monthly_bill` 交易后生成账单行。
 - MySQL 模式尚未完成：事故导致车辆不可用后的后续订单解除占用/自动改派/人工调度队列、独立转单事件表、统一审计、幂等锁和完整附件上传仍需继续接入。调度事件表 `DispatchEvent` 已完成第一版，但还没有任务处理状态表。
 
 权限深化：
@@ -225,7 +226,7 @@ MySQL / Prisma：
 
 - `apps/api/prisma/schema.prisma` 已是 MySQL provider，并扩展为主干业务模型。
 - 已覆盖平台用户多角色、角色权限、按钮权限/数据范围、系统参数、站点、车型组、车辆台账、会员、企业客户、订单、费用/资金、月结账单、检查记录、订单时间线、续租快照和改派所需车辆/车型组快照字段。
-- `StoreRentalRepository` 已实现订单、费用、资金、检查、时间线、车辆状态更新、还车门市/据点快照更新和企业月结账单第一版 DTO 映射；`StoreRentalService` 已把订单创建/查询、费用中心、资金登记、主流程动作、续租、改派、改还车门市/据点、终止动作、事故登记和企业月结接口接入 `STORE_RENTAL_DATA_SOURCE=mysql`。
+- `StoreRentalRepository` 已实现订单、费用、资金、预授权押金台账、发票/收据、人工调账、检查、时间线、车辆状态更新、还车门市/据点快照更新和企业月结账单第一版 DTO 映射；`StoreRentalService` 已把订单创建/查询、费用中心、财务结算中心、资金登记、主流程动作、续租、改派、改还车门市/据点、终止动作、事故登记和企业月结接口接入 `STORE_RENTAL_DATA_SOURCE=mysql`。
 - 已用临时 `DATABASE_URL=mysql://root:password@localhost:3306/rimo_store_rental` 通过 `npx prisma validate --schema apps/api/prisma/schema.prisma`。
 - 已新增 `apps/api/prisma/seed.ts`，可重复初始化 demo/demo2 租户、组织、用户、角色权限、系统参数、站点、车型组、车辆、会员等级、会员和企业客户。
 - 根脚本已补：`db:generate`、`db:validate`、`db:migrate`、`db:seed`；执行说明见 `docs/DATABASE_BOOTSTRAP.md`。

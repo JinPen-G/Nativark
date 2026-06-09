@@ -166,6 +166,22 @@ enum FinanceManualAdjustmentStatus {
   POSTED   @map("posted")
 }
 
+enum FinancePreAuthorizationStatus {
+  PENDING            @map("pending")
+  FROZEN             @map("frozen")
+  PARTIALLY_CAPTURED @map("partially_captured")
+  CAPTURED           @map("captured")
+  RELEASED           @map("released")
+  EXPIRED            @map("expired")
+  FAILED             @map("failed")
+}
+
+enum FinancePreAuthorizationChannel {
+  ONLINE   @map("online")
+  OFFLINE  @map("offline")
+  INTERNAL @map("internal")
+}
+
 enum FeeStage {
   PICKUP            @map("pickup")
   RENTAL            @map("rental")
@@ -921,6 +937,43 @@ model FinanceManualAdjustment {
   updatedAt           DateTime                         @updatedAt
 
   @@unique([tenantId, adjustmentNo])
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, orderId])
+  @@index([tenantId, corporateId])
+}
+
+model FinancePreAuthorization {
+  id                 String                         @id @default(uuid())
+  tenantId           String
+  preAuthNo          String
+  orderId            String?
+  orderNo            String?
+  memberId           String?
+  corporateId        String?
+  corporateShortName String?
+  customerName       String?
+  status             FinancePreAuthorizationStatus  @default(PENDING)
+  channel            FinancePreAuthorizationChannel @default(ONLINE)
+  provider           String                         @default("mock_payment")
+  authorizedAmount   Decimal                        @db.Decimal(12, 2)
+  capturedAmount     Decimal                        @default(0) @db.Decimal(12, 2)
+  releasedAmount     Decimal                        @default(0) @db.Decimal(12, 2)
+  remainingAmount    Decimal                        @default(0) @db.Decimal(12, 2)
+  currency           String                         @default("CNY")
+  authCode           String?
+  channelReferenceNo String?
+  paymentMethod      String?
+  frozenAt           DateTime?
+  capturedAt         DateTime?
+  releasedAt         DateTime?
+  expiresAt          DateTime?
+  operator           String?
+  remark             String?
+  metadata           Json?
+  createdAt          DateTime                       @default(now())
+  updatedAt          DateTime                       @updatedAt
+
+  @@unique([tenantId, preAuthNo])
   @@index([tenantId, status, createdAt])
   @@index([tenantId, orderId])
   @@index([tenantId, corporateId])

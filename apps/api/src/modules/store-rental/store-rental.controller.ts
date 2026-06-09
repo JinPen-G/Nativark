@@ -36,6 +36,7 @@ import type {
   SaveCorporateRequest,
   SaveFinanceDocumentRequest,
   SaveFinanceManualAdjustmentRequest,
+  SaveFinancePreAuthorizationRequest,
   SaveMarketingPlanRequest,
   SaveMemberRequest,
   SaveMembershipPlanRequest,
@@ -587,6 +588,24 @@ export class StoreRentalController {
     @Body() body: SaveFinanceDocumentRequest
   ) {
     return this.storeRentalService.saveFinanceDocument({ ...body, id });
+  }
+
+  @Get("finance/pre-authorizations")
+  financePreAuthorizations() {
+    return this.storeRentalService.listFinancePreAuthorizations();
+  }
+
+  @Post("finance/pre-authorizations")
+  createFinancePreAuthorization(@Body() body: SaveFinancePreAuthorizationRequest) {
+    return this.storeRentalService.saveFinancePreAuthorization(body);
+  }
+
+  @Put("finance/pre-authorizations/:id")
+  updateFinancePreAuthorization(
+    @Param("id") id: string,
+    @Body() body: SaveFinancePreAuthorizationRequest
+  ) {
+    return this.storeRentalService.saveFinancePreAuthorization({ ...body, id });
   }
 
   @Get("finance/manual-adjustments")
