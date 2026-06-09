@@ -1,8 +1,20 @@
 <script setup lang="ts">
 import { ElMessage } from "element-plus";
 import { computed, onMounted, reactive, ref } from "vue";
-import type { PriceAdjustmentSchedule, PriceVersionRecord } from "@rimo/shared";
-import { cancelPriceSchedule, createPriceSchedule, getPricingPlan, savePricingPlan } from "../api/client";
+import {
+  BillingMode,
+  type PriceAdjustmentSchedule,
+  type PriceVersionRecord,
+  type PricingQuoteResult,
+  type StoreRentalCustomerType
+} from "@rimo/shared";
+import {
+  cancelPriceSchedule,
+  createPriceSchedule,
+  getPricingPlan,
+  quoteStoreRental,
+  savePricingPlan
+} from "../api/client";
 import AppLayout from "../components/AppLayout.vue";
 import { vehicleGroups } from "../data/prototypeSeed";
 
@@ -38,6 +50,8 @@ const currentVersionId = ref("PRICE-STORE-20260501-001");
 const selectedPriceVersion = ref("PRICE-STORE-20260501-001");
 const currentViewPlan = ref<SchedulePlan | null>(null);
 const priceVersions = ref<PriceVersionRecord[]>([]);
+const quoteLoading = ref(false);
+const quoteResult = ref<PricingQuoteResult | null>(null);
 
 const priceRows = ref<PriceRow[]>(
   vehicleGroups.map((group) => ({
@@ -74,6 +88,23 @@ const scheduleForm = reactive({
   }>
 });
 
+const quoteForm = reactive({
+  vehicleGroupCode: "GROUP_ECONOMY",
+  pickupStoreCode: "CENTRAL",
+  returnStoreCode: "CENTRAL",
+  pickupAt: "2026-06-10 10:00:00",
+  returnAt: "2026-06-12 10:00:00",
+  billingMode: BillingMode.CustomerPay,
+  customerType: "personal" as StoreRentalCustomerType,
+  marketingPlanId: ""
+});
+
+const storeOptions = [
+  { code: "CENTRAL", name: "台北中心门市" },
+  { code: "AIRPORT", name: "桃园机场门市" },
+  { code: "TAINAN", name: "台南高铁门市" }
+];
+
 const storePriceVersions = computed(() =>
   priceVersions.value.map((version) => ({
     ...version,
@@ -87,6 +118,10 @@ const storePriceVersions = computed(() =>
     }))
   }))
 );
+
+const quoteExplanationLines = computed(() => quoteResult.value?.explanationLines ?? []);
+const quoteBillingSegments = computed(() => quoteResult.value?.billingSegments ?? []);
+const quoteFeeItems = computed(() => quoteResult.value?.feeItems ?? []);
 
 async function loadPlan() {
   try {
@@ -116,6 +151,57 @@ async function loadPlan() {
     }));
   } catch {
     // Keep prototype seed data when API is not running.
+  }
+}
+
+function formatCurrency(value: number) {
+  return `¥${Math.round(value).toLocaleString("zh-Hans-CN")}`;
+}
+
+function formatSignedCurrency(value: number) {
+  if (value === 0) {
+    return formatCurrency(0);
+  }
+  return `${value > 0 ? "+" : "-"}${formatCurrency(Math.abs(value))}`;
+}
+
+function quoteDayTypeLabel(dayType: PricingQuoteResult["billingSegments"][number]["dayType"]) {
+  const labels: Record<PricingQuoteResult["billingSegments"][number]["dayType"], string> = {
+    weekday: "平日",
+    holiday: "假日",
+    statutory_holiday: "国定假日"
+  };
+  return labels[dayType];
+}
+
+async function runQuoteSimulation() {
+  if (!quoteForm.pickupAt || !quoteForm.returnAt) {
+    ElMessage.warning("请选择取车和还车时间");
+    return;
+  }
+  if (new Date(quoteForm.returnAt).getTime() <= new Date(quoteForm.pickupAt).getTime()) {
+    ElMessage.warning("还车时间必须晚于取车时间");
+    return;
+  }
+
+  try {
+    quoteLoading.value = true;
+    quoteResult.value = await quoteStoreRental({
+      planId: "plan_store_standard",
+      vehicleGroupCode: quoteForm.vehicleGroupCode,
+      pickupStoreCode: quoteForm.pickupStoreCode,
+      returnStoreCode: quoteForm.returnStoreCode,
+      pickupAt: quoteForm.pickupAt,
+      returnAt: quoteForm.returnAt,
+      billingMode: quoteForm.billingMode,
+      customerType: quoteForm.customerType,
+      marketingPlanId: quoteForm.marketingPlanId || undefined
+    });
+    ElMessage.success("调价试算已生成报价命中结果。");
+  } catch {
+    ElMessage.error("调价试算失败，请检查价格计划、门市和车组配置。");
+  } finally {
+    quoteLoading.value = false;
   }
 }
 
@@ -391,6 +477,188 @@ onMounted(loadPlan);
                     <el-button v-if="item.status === 'scheduled'" type="danger" plain size="small" @click="cancelSchedule(index)">取消计划</el-button>
                   </div>
                 </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-8 bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+            <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-5 border-b border-gray-100 pb-4">
+              <div>
+                <h3 class="font-bold text-gray-800 flex items-center gap-2 text-lg">
+                  <el-icon class="text-orange-500"><DataLine /></el-icon>
+                  门市调价试算
+                </h3>
+                <p class="text-xs text-gray-500 mt-1">
+                  使用当前标准价版本发起真实报价，核对新订单会命中的价格版本、行销版本和规则解释。
+                </p>
+              </div>
+              <el-button type="primary" :loading="quoteLoading" @click="runQuoteSimulation">
+                <el-icon class="mr-1"><Refresh /></el-icon>
+                生成试算
+              </el-button>
+            </div>
+
+            <el-form label-position="top" class="grid grid-cols-12 gap-x-4">
+              <el-form-item label="车组" class="col-span-12 md:col-span-4">
+                <el-select v-model="quoteForm.vehicleGroupCode" class="w-full">
+                  <el-option
+                    v-for="row in priceRows"
+                    :key="row.id"
+                    :label="row.name"
+                    :value="row.id"
+                  />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="取车门市" class="col-span-12 md:col-span-4">
+                <el-select v-model="quoteForm.pickupStoreCode" class="w-full">
+                  <el-option
+                    v-for="store in storeOptions"
+                    :key="store.code"
+                    :label="store.name"
+                    :value="store.code"
+                  />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="还车门市" class="col-span-12 md:col-span-4">
+                <el-select v-model="quoteForm.returnStoreCode" class="w-full">
+                  <el-option
+                    v-for="store in storeOptions"
+                    :key="store.code"
+                    :label="store.name"
+                    :value="store.code"
+                  />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="取车时间" class="col-span-12 md:col-span-3">
+                <el-date-picker
+                  v-model="quoteForm.pickupAt"
+                  type="datetime"
+                  format="YYYY-MM-DD HH:mm"
+                  value-format="YYYY-MM-DD HH:mm:ss"
+                  class="w-full"
+                />
+              </el-form-item>
+              <el-form-item label="还车时间" class="col-span-12 md:col-span-3">
+                <el-date-picker
+                  v-model="quoteForm.returnAt"
+                  type="datetime"
+                  format="YYYY-MM-DD HH:mm"
+                  value-format="YYYY-MM-DD HH:mm:ss"
+                  class="w-full"
+                />
+              </el-form-item>
+              <el-form-item label="客户类型" class="col-span-12 md:col-span-3">
+                <el-segmented
+                  v-model="quoteForm.customerType"
+                  :options="[
+                    { label: '个人', value: 'personal' },
+                    { label: '企业', value: 'enterprise' }
+                  ]"
+                  class="w-full"
+                />
+              </el-form-item>
+              <el-form-item label="结算方式" class="col-span-12 md:col-span-3">
+                <el-select v-model="quoteForm.billingMode" class="w-full">
+                  <el-option label="客户自付" :value="BillingMode.CustomerPay" />
+                  <el-option label="企业月结" :value="BillingMode.Monthly" />
+                </el-select>
+              </el-form-item>
+            </el-form>
+
+            <div v-if="quoteResult" class="mt-2 grid grid-cols-12 gap-4">
+              <div class="col-span-12 xl:col-span-4 rounded-lg border border-indigo-100 bg-indigo-50 p-4">
+                <div class="flex items-center justify-between gap-3">
+                  <div>
+                    <div class="text-xs text-indigo-500">报价号</div>
+                    <div class="font-mono text-sm font-bold text-gray-900 mt-1">{{ quoteResult.quoteNo }}</div>
+                  </div>
+                  <el-tag type="primary" effect="plain">{{ quoteResult.billableDays }} 天</el-tag>
+                </div>
+                <div class="grid grid-cols-2 gap-3 mt-4 text-sm">
+                  <div>
+                    <div class="text-xs text-gray-500">租金</div>
+                    <div class="font-bold text-gray-800 mt-1">{{ formatCurrency(quoteResult.rentalAmount) }}</div>
+                  </div>
+                  <div>
+                    <div class="text-xs text-gray-500">优惠</div>
+                    <div class="font-bold text-green-600 mt-1">-{{ formatCurrency(quoteResult.discountAmount) }}</div>
+                  </div>
+                  <div>
+                    <div class="text-xs text-gray-500">押金/预授权</div>
+                    <div class="font-bold text-gray-800 mt-1">{{ formatCurrency(quoteResult.depositAmount) }}</div>
+                  </div>
+                  <div>
+                    <div class="text-xs text-gray-500">应付/入账</div>
+                    <div class="font-bold text-orange-600 mt-1">
+                      {{ formatCurrency(quoteResult.monthlySettlementAmount ?? quoteResult.payableAmount) }}
+                    </div>
+                  </div>
+                </div>
+                <div class="mt-4 rounded border border-white/70 bg-white/70 px-3 py-2 text-xs leading-5 text-gray-600">
+                  价格版本：
+                  <span class="font-mono text-indigo-600">{{ quoteResult.snapshots.priceVersionId }}</span>
+                  <br />
+                  行销版本：
+                  <span class="font-mono text-indigo-600">{{ quoteResult.snapshots.marketingPlanVersionId || "未命中" }}</span>
+                  <br />
+                  规则版本：
+                  <span class="font-mono text-indigo-600">{{ quoteResult.snapshots.ruleVersion }}</span>
+                </div>
+              </div>
+
+              <div class="col-span-12 xl:col-span-4 rounded-lg border border-gray-100 p-4">
+                <div class="text-sm font-bold text-gray-800 mb-3">费用项</div>
+                <div class="space-y-2">
+                  <div
+                    v-for="item in quoteFeeItems"
+                    :key="item.code"
+                    class="flex items-center justify-between gap-3 rounded bg-gray-50 px-3 py-2 text-sm"
+                  >
+                    <div>
+                      <div class="font-medium text-gray-800">{{ item.name }}</div>
+                      <div class="text-xs text-gray-400">{{ item.code }}</div>
+                    </div>
+                    <div :class="item.amount < 0 ? 'text-green-600 font-bold' : 'text-gray-800 font-bold'">
+                      {{ formatSignedCurrency(item.amount) }}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-span-12 xl:col-span-4 rounded-lg border border-gray-100 p-4">
+                <div class="text-sm font-bold text-gray-800 mb-3">命中说明</div>
+                <div class="space-y-2 max-h-[260px] overflow-y-auto pr-1">
+                  <div
+                    v-for="line in quoteExplanationLines"
+                    :key="line.code"
+                    class="rounded border border-gray-100 px-3 py-2 text-xs leading-5"
+                  >
+                    <div class="flex items-center justify-between gap-2">
+                      <span class="font-bold text-gray-800">{{ line.title }}</span>
+                      <span :class="line.amount < 0 ? 'text-green-600 font-bold' : 'text-gray-700 font-bold'">
+                        {{ formatSignedCurrency(line.amount) }}
+                      </span>
+                    </div>
+                    <div class="text-gray-500 mt-1">{{ line.detail }}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-span-12 rounded-lg border border-gray-100 p-4">
+                <div class="text-sm font-bold text-gray-800 mb-3">日历分段</div>
+                <el-table :data="quoteBillingSegments" border size="small">
+                  <el-table-column prop="date" label="日期" width="140" />
+                  <el-table-column label="日型" width="120">
+                    <template #default="{ row }">{{ quoteDayTypeLabel(row.dayType) }}</template>
+                  </el-table-column>
+                  <el-table-column label="标准日租金" width="130" align="right">
+                    <template #default="{ row }">{{ formatCurrency(row.baseDailyAmount) }}</template>
+                  </el-table-column>
+                  <el-table-column prop="marketingActionLabel" label="行销动作" min-width="180" />
+                  <el-table-column label="优惠金额" width="130" align="right">
+                    <template #default="{ row }">{{ formatCurrency(row.discountAmount) }}</template>
+                  </el-table-column>
+                </el-table>
               </div>
             </div>
           </div>

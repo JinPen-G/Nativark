@@ -43,7 +43,7 @@ rimo-store-rental-platform/
 - `PlatformGovernanceView.vue`：平台治理中心，包含审计日志、数据字典、编号规则、租户初始化。
 - `RentalRulesView.vue`：门市租赁规则。
 - `ProductPricingView.vue`：基础产品定价。
-- `DynamicPricingView.vue`：动态调价策略。
+- `DynamicPricingView.vue`：动态调价策略，包含门市标准价版本、定时调价计划和基于真实报价接口的门市调价试算。
 - `StationsView.vue`：服务站点管理。
 - `VehicleGroupsView.vue`：车型组管理。
 - `VehiclesView.vue`：车辆档案库，包含车辆详情抽屉、维保/事故记录新增、车辆证照与随车物资维护、车辆状态动作和筛选预设。
@@ -730,4 +730,5 @@ npx prisma validate --schema apps/api/prisma/schema.prisma
 5. 补车辆调拨、车务看板、合同与单据增强、TBox 设备台账，完善营运侧真实操作闭环。
 6. 完善定价：价格版本、车型组价格、异店还车费、增值服务联动。
 7. 完善新建订单：资源可用性、报价快照、客户/企业信息、预授权 mock。
+8. 定价验证入口：动态调价页已复用 `/store-rental/pricing/quote` 做门市调价试算，展示价格版本、行销版本、规则版本、费用项、报价解释链和日历分段。后续改造成通用租赁平台时，该入口应从 `vehicleGroupCode` 改为通用 `assetGroupCode`，取还门市改为履约网点或仓库，押金/预授权口径改为品类或单品规则。
 8. 完善订单详情：时间线、费用明细、快照、取还车动作、结算动作。

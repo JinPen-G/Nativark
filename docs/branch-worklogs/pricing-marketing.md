@@ -82,3 +82,12 @@
 - 已先将分支快进到 `origin/codex/integration/store-rental-mvp@508ebdd`，确保基于最新集成成果继续开发。
 - 本轮补 `PR-05 报价快照解释` 的营运端展示：新建订单页费用明细增加报价命中说明、规则链金额和每日计费分段。
 - 未完成：订单详情页仍需按 `order_detail.html` 展示下单时的完整报价快照；报价解释后续要继续支持系统参数里的法定节假日日历。
+
+## 2026-06-09 追加二
+
+- 主线程接管 `codex/pricing-marketing` 分支继续推进，没有新建分支。
+- 对照 `动态调价策略（牌价&费率）.md`、`行销方案管理.md` 和 `pricing.html`，本轮补 `PR-03/PR-05` 的营运端验证入口：在动态调价策略页新增“门市调价试算”面板。
+- 试算面板复用真实 `POST /store-rental/pricing/quote` 接口，不做静态假数据；支持选择车组、取还门市、取还时间、客户类型和结算方式。
+- 试算结果展示报价号、计费天数、租金、优惠、押金/预授权、应付/入账金额、命中的 `priceVersionId`、`marketingPlanVersionId`、规则版本、费用项、报价解释链和日历分段。
+- 该入口用于验证调价计划或手动改价后“只影响新订单、历史订单读取快照”的规则；真正的定时作业自动执行计划仍需后续接入后台 runner。
+- 验证：`npm run build -w @rimo/shared`、`npm run db:generate`、`npm run build -w @rimo/api`、`npm run build -w @rimo/admin`、`git diff --check` 已通过；首次 API 构建因本 worktree Prisma Client 过旧失败，执行 `db:generate` 后通过。
