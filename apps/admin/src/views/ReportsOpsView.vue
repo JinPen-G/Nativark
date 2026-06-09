@@ -20,6 +20,7 @@ import {
 } from "@rimo/shared";
 import {
   createStoreRentalReportExport,
+  downloadStoreRentalReportExport,
   getStoreRentalFinanceReport,
   getStoreRentalOpsHealth,
   getStoreRentalOrdersReport,
@@ -34,6 +35,7 @@ import { useAuthStore } from "../stores/auth";
 const authStore = useAuthStore();
 const loading = ref(false);
 const exportLoading = ref(false);
+const downloadLoadingId = ref<string | null>(null);
 const activeTab = ref<StoreRentalReportType>("overview");
 const dateRange = ref<string[]>(defaultDateRange());
 
@@ -136,6 +138,33 @@ async function createExport() {
   } finally {
     exportLoading.value = false;
   }
+}
+
+async function downloadExportJob(job: StoreRentalReportExportJob) {
+  if (job.status !== "completed" || !job.downloadUrl) {
+    ElMessage.warning("导出任务尚未生成可下载文件");
+    return;
+  }
+  downloadLoadingId.value = job.id;
+  try {
+    const blob = await downloadStoreRentalReportExport(job.fileName);
+    triggerBrowserDownload(blob, job.fileName);
+  } catch (error) {
+    ElMessage.error(readErrorMessage(error, "导出文件下载失败"));
+  } finally {
+    downloadLoadingId.value = null;
+  }
+}
+
+function triggerBrowserDownload(blob: Blob, fileName: string) {
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
 }
 
 function applyPeriod(period: StoreRentalReportQuery["period"]) {
@@ -256,6 +285,16 @@ function vehicleStatusLabel(status: string) {
     disabled: "已停用"
   };
   return map[status] ?? status;
+}
+
+function exportStatusTag(status: StoreRentalReportExportJob["status"]) {
+  const map: Record<StoreRentalReportExportJob["status"], "success" | "warning" | "danger" | "info"> = {
+    queued: "info",
+    processing: "warning",
+    completed: "success",
+    failed: "danger"
+  };
+  return map[status];
 }
 
 function formatMoney(value: number) {
@@ -753,9 +792,26 @@ onMounted(loadReports);
                 <el-table-column prop="fileName" label="文件名" min-width="220" />
                 <el-table-column prop="reportType" label="类型" width="90" />
                 <el-table-column prop="rowCount" label="行数" width="80" align="right" />
+                <el-table-column prop="createdAt" label="创建时间" width="150">
+                  <template #default="{ row }">{{ formatDateTime(row.createdAt) }}</template>
+                </el-table-column>
                 <el-table-column prop="status" label="状态" width="100">
                   <template #default="{ row }">
-                    <el-tag size="small" type="success" effect="plain">{{ row.status }}</el-tag>
+                    <el-tag size="small" :type="exportStatusTag(row.status)" effect="plain">{{ row.status }}</el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="操作" width="100" fixed="right">
+                  <template #default="{ row }">
+                    <el-button
+                      link
+                      type="primary"
+                      icon="Download"
+                      :loading="downloadLoadingId === row.id"
+                      :disabled="row.status !== 'completed' || !row.downloadUrl"
+                      @click="downloadExportJob(row)"
+                    >
+                      下载
+                    </el-button>
                   </template>
                 </el-table-column>
               </el-table>

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Query, Res, StreamableFile } from "@nestjs/common";
 import type {
   BillingMode,
   StoreRentalReportExportRequest,
@@ -39,6 +39,21 @@ export class ReportsController {
   @Get("exports")
   exports(@Query() query: ReportQueryDto) {
     return this.reportsService.listExportJobs(toReportQuery(query));
+  }
+
+  @Get("exports/:fileName")
+  async downloadExport(
+    @Param("fileName") fileName: string,
+    @Res({ passthrough: true })
+    response: { setHeader: (name: string, value: string) => void }
+  ) {
+    const file = await this.reportsService.getExportFile(fileName);
+    response.setHeader("Content-Type", "text/csv; charset=utf-8");
+    response.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${file.fileName}"; filename*=UTF-8''${encodeURIComponent(file.fileName)}`
+    );
+    return new StreamableFile(file.content);
   }
 
   @Get("ops/health")

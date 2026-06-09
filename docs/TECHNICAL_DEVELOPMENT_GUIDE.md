@@ -57,6 +57,7 @@ rimo-store-rental-platform/
 - `OrderDetailView.vue`：门市租赁订单详情工作台，包含订单动作、履约信息、费用中心。
 - `FinanceCenterView.vue`：财务结算中心，覆盖资金流水、预授权押金、企业月结、发票收据、手工调账和财务对账。
 - `OfficialVehicleContractsView.vue`：合同与单据中心，包含单据统计、筛选、模板卡片、订单关联生成、打印/下载 mock、mock 签署和单据快照。
+- `ReportsOpsView.vue`：战情分析看板，包含经营概览、订单报表、车辆报表、财务报表、运维日志和导出任务下载。
 
 当前已接入的营运端基础页面：
 
@@ -223,6 +224,27 @@ rimo-store-rental-platform/
 - `GET /store-rental/rules/versions` 和 `GET /store-rental/rules/versions/:version` 用于配置页历史版本列表和只读详情。MySQL 模式写入 `RentalRuleSet`，内容采用 `{ snapshot, metadata }`，其中 `snapshot` 保存完整 `StoreRentalRuleConfig`，`metadata` 保存保存人、保存时间和变更原因。
 - 报价入口会先刷新当前规则版本，确保 `PricingQuoteResult.snapshots.ruleVersion` 和后续订单基线快照绑定真实生效版本。
 - 后续通用租赁平台改造时，应把 `StoreRentalRuleConfig` 抽象为 `RentalRuleConfig`，保留版本、状态、生效时间、押金/保证金、取消、爽约、逾期、履约检查等通用结构；汽车特有的取还车、车辆整备、油电量规则迁移到品类扩展配置。
+
+### 报表与运维模块
+
+文件：
+
+- `modules/reports/reports.controller.ts`
+- `modules/reports/reports.service.ts`
+- `modules/reports/reports.repository.ts`
+
+当前接口：
+
+- `GET /reports/dashboard`：经营概览 KPI、订单漏斗、车辆状态、门市/车组排行、风险趋势。
+- `GET /reports/orders`：订单报表，按预计取车时间和筛选条件统计订单状态、派车、支付、金额和风险标记。
+- `GET /reports/vehicles`：车辆报表，按车辆状态、关联订单、营收、维保和事故记录统计。
+- `GET /reports/finance`：财务报表，按费用项和资金记录拆分应收、已处理、待处理、退款、减免和企业月结。
+- `POST /reports/exports`：创建导出任务，写入 `ReportExportJob`，同步生成 CSV 文件到 `storage/report-exports`，完成后更新 `status=rowCount/downloadUrl/completedAt`。
+- `GET /reports/exports`：查询最近导出任务。
+- `GET /reports/exports/:fileName`：下载已完成的 CSV 导出文件。
+- `GET /reports/ops/health`、`GET /reports/ops/logs`：本地 MySQL、seed、脚本和运维事件日志。
+
+报表模块当前直接面向 MySQL/Prisma 数据，不走内存数据源。导出 CSV 使用 UTF-8 BOM，便于 Excel 打开中文；后续需要补 Excel 模板、异步队列、文件过期清理和附件/对象存储接入。
 
 订单域 MySQL 第一期覆盖：
 
@@ -646,6 +668,7 @@ PF-15 当前数据边界：
 - 门市租赁主数据：履约站点、站点营业日历、站点容量/排队快照、车型组、车辆实例、车辆位置流水、车况照片、维保记录、事故/出险记录、车辆调拨任务、车辆证照、随车物资、TBox 台账和指令记录。
 - 客户域：会员、会员风控事件、会员时间线、客户等级方案、企业客户、联系人、合同、企业月结账单。
 - 规则与订单域：租赁业务规则版本、订单、合同/交接单/结算单、取还车检查记录、履约时间线、续租快照、费用项、资金记录、预授权押金台账、发票/收据、人工调账、订单操作记录、客户通知记录、订单备注/跟进、操作锁、幂等记录、企业月结明细。
+- 报表与运维：报表导出任务 `ReportExportJob`、运维事件 `OpsEventLog`、调度事件 `DispatchEvent`。
 
 下一阶段建议按下面顺序推进真实数据层：
 
@@ -695,12 +718,14 @@ npx prisma validate --schema apps/api/prisma/schema.prisma
 - `apps/api/prisma/migrations/20260609000200_add_finance_pre_authorizations/migration.sql`
 - `apps/api/prisma/migrations/20260609000300_add_finance_document_reissue_links/migration.sql`
 - `apps/api/prisma/migrations/20260609000100_add_order_operation_notification_records/migration.sql`
+- `apps/api/prisma/migrations/20260609000100_add_reports_ops/migration.sql`
 - `apps/api/src/modules/platform/platform.repository.ts`
 - `apps/api/src/modules/store-rental/store-rental.repository.ts`
+- `apps/api/src/modules/reports/reports.repository.ts`
 
 注意：`db:seed` 初始化的是可验证基础数据。平台模块可通过 `PLATFORM_DATA_SOURCE=mysql` 使用这些数据，包含登录、用户、角色、系统参数、数据字典、编号规则和平台审计；租赁业务规则保存/历史版本、站点分页列表、站点营业日历、站点容量/排队快照、车型组、车辆分页列表/详情事件、车辆调拨、车辆证照、随车物资、TBox、会员列表分页/详情/审核/风控、客户等级方案、企业客户列表分页/详情、订单、费用、检查记录、资金流水、预授权押金台账、发票/收据、手工调账、续租、改派、改还车门市/据点、终止动作、事故登记、调度事件、订单操作记录、客户通知记录和企业月结账单可通过 `STORE_RENTAL_DATA_SOURCE=mysql` 使用这些数据。
 
-`PlatformRepository` 已覆盖租户、组织、权限树、角色、用户、系统参数、平台审计、筛选预设、数据字典、编号规则和租户初始化的基础读写和 DTO 映射。`PlatformService` 已增加 `PLATFORM_DATA_SOURCE=memory|mysql` 开关。`StoreRentalRepository` 已覆盖租赁业务规则版本、站点、站点营业日历、站点容量/排队快照、车型组、车辆基础读写、站点/车辆列表分页筛选、车辆详情事件、车辆调拨、车辆证照、随车物资、TBox、客户域、会员/企业客户列表分页筛选、订单域、费用/资金、预授权押金台账、发票/收据费用关联、重开链路、手工调账、检查记录、时间线、续租快照、改派动作、改还车门市/据点动作、转单后续预约快捷改派一期、事故记录、调度事件、订单操作记录、客户通知记录和企业月结基础读写，并通过 `metadata` JSON 保留原型扩展字段。下一步迁事故后续订单联动、统一审计、通知模板和完整幂等。
+`PlatformRepository` 已覆盖租户、组织、权限树、角色、用户、系统参数、平台审计、筛选预设、数据字典、编号规则和租户初始化的基础读写和 DTO 映射。`PlatformService` 已增加 `PLATFORM_DATA_SOURCE=memory|mysql` 开关。`StoreRentalRepository` 已覆盖租赁业务规则版本、站点、站点营业日历、站点容量/排队快照、车型组、车辆基础读写、站点/车辆列表分页筛选、车辆详情事件、车辆调拨、车辆证照、随车物资、TBox、客户域、会员/企业客户列表分页筛选、订单域、费用/资金、预授权押金台账、发票/收据费用关联、重开链路、手工调账、检查记录、时间线、续租快照、改派动作、改还车门市/据点动作、转单后续预约快捷改派一期、事故记录、调度事件、订单操作记录、客户通知记录和企业月结基础读写，并通过 `metadata` JSON 保留原型扩展字段。`ReportsRepository` 已覆盖经营概览、订单/车辆/财务报表、运维日志和真实 CSV 导出任务，导出 job 落 `ReportExportJob`，文件落 `storage/report-exports`。下一步迁事故后续订单联动、统一审计、通知模板、完整幂等、报表数据权限和导出文件生命周期。
 
 操作锁、幂等和通知留痕实现口径：
 

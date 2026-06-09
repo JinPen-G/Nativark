@@ -1309,6 +1309,14 @@ export async function listStoreRentalReportExports(
   return response.data.data;
 }
 
+export async function downloadStoreRentalReportExport(fileName: string) {
+  const response = await http.get<Blob>(
+    `/reports/exports/${encodeURIComponent(fileName)}`,
+    { responseType: "blob" }
+  );
+  return response.data;
+}
+
 export async function getStoreRentalOpsHealth(params: StoreRentalReportQuery = {}) {
   const response = await http.get<ApiResult<StoreRentalOpsHealth>>(
     "/reports/ops/health",

@@ -20,6 +20,7 @@
   - `GET /reports/finance`
   - `POST /reports/exports`
   - `GET /reports/exports`
+  - `GET /reports/exports/:fileName`
   - `GET /reports/ops/health`
   - `GET /reports/ops/logs`
 - 新增 MySQL 表：
@@ -28,6 +29,11 @@
 - 新增营运端页面 `/reports`：
   - 经营概览、订单报表、车辆报表、财务报表、运维日志。
   - 接入现有权限 `store-rental:report:view`，导出按钮受 `system:button:export` 控制。
+  - 导出任务表支持查看创建时间、任务状态和下载已完成 CSV 文件。
+- 新增真实 CSV 导出闭环：
+  - `POST /reports/exports` 先写入 processing 任务，再按当前筛选生成订单、车辆、财务、概览或运维日志 CSV。
+  - 导出文件写入 `storage/report-exports`，任务完成后更新 `ReportExportJob.status=rowCount/downloadUrl/completedAt`。
+  - `GET /reports/exports/:fileName` 按文件名下载已完成导出文件；文件缺失或任务未完成会返回错误。
 - 新增 MySQL 报表演示数据工厂：
   - `npm run db:seed:reports`
   - 覆盖已完成、用车中、出险处理中、待补缴、待退款、逾期未取、企业月结、完成后追缴等场景。
@@ -105,9 +111,15 @@ npm run ops:mysql:restore -- -InputFile backups\rimo-store-rental-YYYYMMDD-HHMMS
 - 门市/据点仍可复用为履约网点，但跨城市、异地还车应改成跨仓/跨门店归还规则。
 - 财务报表口径可以复用，费用类型需要从车损、超里程、油电补差扩展为损耗、缺件、清洁、延迟归还、耗材等通用费用。
 
+## 本轮记录
+
+| 日期 | 完成内容 | 验证 |
+| --- | --- | --- |
+| 2026-06-09 | 报表导出任务从占位升级为真实 CSV 文件生成与下载：导出 job 状态流、文件落地目录、下载接口和营运端任务表下载按钮已接入 | `$env:DATABASE_URL=...; npm run db:validate`、`npm run test:reports`、`npm run build` |
+
 ## 后续未完成
 
-- 导出任务当前只记录任务和下载地址占位，还未生成真实 CSV/Excel 文件。
+- 导出任务已支持真实 CSV 文件；后续继续补 Excel 模板、异步任务队列、文件过期清理和对象存储/附件中心接入。
 - 运维日志已有基础表和页面，定时清理、告警通知、trace 串联仍待补。
 - 车辆出租率当前为 MVP 近似口径，需在订单占用小时和可租小时落表后精确化。
 - 报表权限暂只到查看级，后续可拆 `report:finance:view`、`report:export`、`ops:log:view`。

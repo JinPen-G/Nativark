@@ -1,5 +1,12 @@
-import { Injectable } from "@nestjs/common";
+import {
+  BadRequestException,
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException
+} from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { basename, join, resolve } from "node:path";
 import {
   BillingMode,
   DispatchStatus,
@@ -58,9 +65,17 @@ type VehicleRow = Prisma.VehicleGetPayload<{
   };
 }>;
 
+type CsvCell = string | number | boolean | null | undefined;
+
+interface CsvExportData {
+  headers: string[];
+  rows: CsvCell[][];
+}
+
 @Injectable()
 export class ReportsRepository {
   private readonly defaultTenantId = "tenant_001";
+  private readonly exportDirectory = resolve(process.cwd(), "storage", "report-exports");
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -246,37 +261,92 @@ export class ReportsRepository {
     request: StoreRentalReportExportRequest
   ): Promise<StoreRentalReportExportJob> {
     const normalized = this.normalizeQuery(request.filters);
-    const rowCount = await this.countExportRows(request.reportType, normalized);
-    const fileName = `rimo-${request.reportType}-${normalized.from}-${normalized.to}.csv`;
-    const completedAt = new Date();
-    const row = await this.prisma.reportExportJob.create({
+    const fileName = `rimo-${request.reportType}-${normalized.from}-${normalized.to}-${Date.now()}.csv`;
+    const created = await this.prisma.reportExportJob.create({
       data: {
         tenantId: normalized.tenantId,
         reportType: request.reportType,
         fileName,
-        status: "completed",
+        status: "processing",
         filters: request.filters as Prisma.InputJsonValue,
-        rowCount,
-        downloadUrl: `/api/reports/exports/${fileName}`,
-        operator: request.operator || "营运端",
-        completedAt
+        rowCount: 0,
+        operator: request.operator || "营运端"
       }
     });
 
-    await this.recordOpsLog(
-      normalized.tenantId,
-      "info",
-      "report-export",
-      `导出${request.reportType}报表`,
-      {
-        reportType: request.reportType,
-        rowCount,
-        filters: request.filters,
-        fileName
-      }
-    );
+    try {
+      const exportData = await this.buildExportData(request.reportType, normalized);
+      await this.writeExportFile(fileName, toCsv(exportData));
+      const completedAt = new Date();
+      const row = await this.prisma.reportExportJob.update({
+        where: { id: created.id },
+        data: {
+          status: "completed",
+          rowCount: exportData.rows.length,
+          downloadUrl: `/api/reports/exports/${fileName}`,
+          completedAt
+        }
+      });
 
-    return this.toExportJob(row);
+      await this.recordOpsLog(
+        normalized.tenantId,
+        "info",
+        "report-export",
+        `导出${request.reportType}报表`,
+        {
+          reportType: request.reportType,
+          rowCount: exportData.rows.length,
+          filters: request.filters,
+          fileName,
+          exportPath: "storage/report-exports"
+        }
+      );
+
+      return this.toExportJob(row);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "unknown";
+      await this.prisma.reportExportJob
+        .update({
+          where: { id: created.id },
+          data: {
+            status: "failed",
+            completedAt: new Date()
+          }
+        })
+        .catch(() => undefined);
+      await this.recordOpsLog(
+        normalized.tenantId,
+        "error",
+        "report-export",
+        `导出${request.reportType}报表失败`,
+        {
+          reportType: request.reportType,
+          filters: request.filters,
+          fileName,
+          error: message
+        }
+      ).catch(() => undefined);
+      throw new InternalServerErrorException("导出任务生成失败，请查看运维日志");
+    }
+  }
+
+  async getExportFile(fileName: string): Promise<{ fileName: string; content: Buffer }> {
+    const safeFileName = this.safeExportFileName(fileName);
+    const job = await this.prisma.reportExportJob.findFirst({
+      where: {
+        fileName: safeFileName,
+        status: "completed"
+      }
+    });
+    if (!job || !job.downloadUrl) {
+      throw new NotFoundException("导出任务不存在或尚未完成");
+    }
+    try {
+      const content = await readFile(this.exportFilePath(safeFileName));
+      return { fileName: safeFileName, content };
+    } catch {
+      throw new NotFoundException("导出文件不存在或已被清理");
+    }
   }
 
   async listExportJobs(query: StoreRentalReportQuery = {}) {
@@ -742,20 +812,186 @@ export class ReportsRepository {
     return buckets;
   }
 
-  private async countExportRows(reportType: StoreRentalReportType, query: NormalizedReportQuery) {
+  private async buildExportData(
+    reportType: StoreRentalReportType,
+    query: NormalizedReportQuery
+  ): Promise<CsvExportData> {
     if (reportType === "orders") {
-      return (await this.getOrdersReport(query)).rows.length;
+      const report = await this.getOrdersReport(query);
+      return {
+        headers: [
+          "订单号",
+          "客户",
+          "企业客户",
+          "车型组",
+          "车牌",
+          "取车门市",
+          "还车门市",
+          "预计取车时间",
+          "预计还车时间",
+          "订单状态",
+          "派车状态",
+          "支付状态",
+          "结算方式",
+          "订单金额",
+          "已处理金额",
+          "待处理金额",
+          "风险标记"
+        ],
+        rows: report.rows.map((row) => [
+          row.orderNo,
+          row.customerName,
+          row.corporateShortName ?? "",
+          row.vehicleGroupName,
+          row.plateNo ?? "",
+          row.pickupStoreName,
+          row.returnStoreName,
+          row.pickupAt,
+          row.returnAt,
+          row.mainStatus,
+          row.dispatchStatus,
+          row.paymentStatus,
+          row.billingMode,
+          row.totalAmount,
+          row.settledAmount,
+          row.pendingAmount,
+          row.riskFlags.join("|")
+        ])
+      };
     }
     if (reportType === "vehicles") {
-      return (await this.getVehiclesReport(query)).rows.length;
+      const report = await this.getVehiclesReport(query);
+      return {
+        headers: [
+          "车牌",
+          "车型组",
+          "资产车行",
+          "当前门市",
+          "当前据点",
+          "运营状态",
+          "里程",
+          "订单数",
+          "营收金额",
+          "出租率",
+          "维保成本",
+          "事故数"
+        ],
+        rows: report.rows.map((row) => [
+          row.plateNo,
+          row.vehicleGroupName,
+          row.assetCompanyName,
+          row.currentStoreName,
+          row.currentStationName,
+          row.operationStatus,
+          row.mileage,
+          row.orderCount,
+          row.revenueAmount,
+          row.utilizationPercent,
+          row.maintenanceCostAmount,
+          row.accidentCount
+        ])
+      };
     }
     if (reportType === "finance") {
-      return (await this.getFinanceReport(query)).rows.length;
+      const report = await this.getFinanceReport(query);
+      return {
+        headers: [
+          "订单号",
+          "客户",
+          "企业客户",
+          "结算方式",
+          "应收金额",
+          "已处理金额",
+          "待处理金额",
+          "退款金额",
+          "减免金额",
+          "月结金额",
+          "支付状态",
+          "发生时间"
+        ],
+        rows: report.rows.map((row) => [
+          row.orderNo,
+          row.customerName,
+          row.corporateShortName ?? "",
+          row.billingMode,
+          row.receivableAmount,
+          row.settledAmount,
+          row.pendingAmount,
+          row.refundAmount,
+          row.waiverAmount,
+          row.monthlyBillingAmount,
+          row.paymentStatus,
+          row.occurredAt
+        ])
+      };
     }
     if (reportType === "ops") {
-      return (await this.listOpsLogs(query)).length;
+      const rows = await this.listOpsLogs(query);
+      return {
+        headers: ["时间", "级别", "分类", "内容", "Trace ID", "载荷"],
+        rows: rows.map((row) => [
+          row.createdAt,
+          row.level,
+          row.category,
+          row.message,
+          row.traceId ?? "",
+          row.payload ? JSON.stringify(row.payload) : ""
+        ])
+      };
     }
-    return (await this.getDashboard(query)).metricCards.length;
+
+    const dashboard = await this.getDashboard(query);
+    return {
+      headers: ["板块", "指标", "数值", "单位", "说明"],
+      rows: [
+        ...dashboard.metricCards.map((card) => [
+          "经营指标",
+          card.label,
+          card.value,
+          card.unit,
+          card.trendText
+        ]),
+        ...dashboard.orderFunnel.map((item) => [
+          "订单漏斗",
+          item.name,
+          item.value,
+          "",
+          ""
+        ]),
+        ...dashboard.vehicleStatusDistribution.map((item) => [
+          "车辆状态",
+          item.name,
+          item.value,
+          "%",
+          item.percent ?? ""
+        ]),
+        ...dashboard.topStores.map((item) => ["门市排行", item.name, item.value, "单", ""]),
+        ...dashboard.topVehicleGroups.map((item) => [
+          "车组排行",
+          item.name,
+          item.value,
+          "单",
+          ""
+        ]),
+        ...dashboard.riskTrend.map((item) => ["风险趋势", item.name, item.value, "单", ""])
+      ]
+    };
+  }
+
+  private async writeExportFile(fileName: string, content: string) {
+    await mkdir(this.exportDirectory, { recursive: true });
+    await writeFile(this.exportFilePath(fileName), content, "utf8");
+  }
+
+  private exportFilePath(fileName: string) {
+    return join(this.exportDirectory, this.safeExportFileName(fileName));
+  }
+
+  private safeExportFileName(fileName: string) {
+    if (fileName !== basename(fileName) || !fileName.endsWith(".csv")) {
+      throw new BadRequestException("导出文件名不合法");
+    }
+    return fileName;
   }
 
   private metric(
@@ -942,6 +1178,19 @@ function money(value: Prisma.Decimal | number | string | null | undefined) {
     return 0;
   }
   return Number(value);
+}
+
+function toCsv(data: CsvExportData) {
+  const rows = [data.headers, ...data.rows];
+  return `\uFEFF${rows.map((row) => row.map(csvCell).join(",")).join("\r\n")}\r\n`;
+}
+
+function csvCell(value: CsvCell) {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  const text = String(value).replace(/\r?\n/g, " ");
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, "\"\"")}"` : text;
 }
 
 function dateKey(value: Date) {
