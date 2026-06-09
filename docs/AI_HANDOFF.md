@@ -199,7 +199,7 @@ $env:STORE_RENTAL_DATA_SOURCE="mysql"
 
 - 车辆调拨尚未开发，但已列入正式任务，按原型 `vehicle_transfer.html` 执行。
 - 车务看板/车辆状态看板尚未开发，但已列入正式任务，按原型 `vehicle_status_list.html`、`vehicle_console.html` 执行。
-- 合同与单据尚未开发，但已列入正式任务，按原型 `official_vehicle_contracts.html` 执行。
+- 合同与单据 MVP 已开发：按 `official_vehicle_contracts.html` 和 `order_detail.html` 合同区新增营运端 `/contracts` 页面，支持模板卡片、统计、筛选、订单关联生成、打印/下载 mock、mock 签署和单据快照；真实电子签、PDF、打印和附件中心仍为 provider 预留并自动跳过。
 - TBox 设备管理尚未开发，但已列入正式任务，按原型 `tbox_management.html` 执行；本期只做设备台账和 mock 集成。
 
 订单闭环：
@@ -296,6 +296,16 @@ MySQL / Prisma：
 - 支付、取车、续租、改派、改还车、还车、结算、事故、取消/爽约/拒绝/关闭等动作会生成 mock 短信通知留痕，并追加订单时间线。
 - 新增查询接口：`GET /store-rental/orders/:id/operation-records`、`GET /store-rental/orders/:id/notifications`。
 
+本轮新增的合同与单据能力：
+
+- 新增营运端 `/contracts` 合同与单据页，按 `official_vehicle_contracts.html` 的统计、筛选、模板、列表、新建和详情结构实现；页面读取真实订单和合同记录，不使用本地假列表。
+- 订单详情合同区补打印、下载和 mock 签署入口，与合同中心共用同一组后端接口。
+- 新增共享 DTO：合同中心行、统计、模板、打印结果和 mock 签署结果；合同记录增加模板码、打印状态、打印次数、下载地址、外部 provider 和外部签署状态。
+- 新增接口：`GET /store-rental/contracts`、`GET /store-rental/contracts/templates`、`POST /store-rental/contracts/:id/print-mock`、`POST /store-rental/contracts/:id/sign-mock`。
+- MySQL 模式复用 `OrderContractDocument` 表，扩展信息存入 `payload` JSON；内存模式复用 `orderContracts` map。生成、打印/下载和签署状态会回读到订单详情和合同中心。
+- 打印、PDF、真实电子签和附件中心仍为预留接入，本轮全部自动跳过外部调用并记录 `externalProvider=reserved`、`externalSignStatus=skipped`。
+- 本轮验证：`npm run build -w @rimo/shared`、`npm run build -w @rimo/api`、`npm run build -w @rimo/admin`、`$env:DATABASE_URL='mysql://root:password@localhost:3306/rimo_store_rental'; npm run db:validate`、`npm run build`。
+
 预留：
 
 - 企业端接口边界：`/api/enterprise/store-rental/orders`
@@ -364,6 +374,10 @@ MySQL / Prisma：
 - `POST /store-rental/orders/:id/fees`
 - `POST /store-rental/orders/:id/fees/:feeId/waive`
 - `POST /store-rental/orders/:id/transactions`
+- `GET /store-rental/contracts`
+- `GET /store-rental/contracts/templates`
+- `POST /store-rental/contracts/:id/print-mock`
+- `POST /store-rental/contracts/:id/sign-mock`
 - `GET /store-rental/dispatch/board`
 - `GET /store-rental/dispatch/tasks`
 - `GET /store-rental/dispatch/events`
@@ -382,6 +396,7 @@ Done：
 - MD-08 车型组删除引用校验。
 - OR-01 订单主状态。
 - OR-02 资源可用性。
+- OR-15 合同与单据 MVP。
 
 In Progress：
 
@@ -433,7 +448,6 @@ Pending：
 - CRM-04：客户等级方案、权益规则、升级条件。
 - COR-01/02：企业客户列表、详情、额度、联系人、合同信息。
 - MD-10/11/12：车辆调拨、车务状态看板、TBox 设备管理。
-- OR-15：合同与单据。
 - RP-01：报表中心。
 - INT-01：支付、发票、通知、文件、地图、IoT、AI 统一 adapter 层仅作为底层预留，不能单独暴露无原型营运端页面。
 
@@ -451,7 +465,7 @@ Reserved：
 2. Phase B：`PF-08/PF-10` 优先补系统参数和权限深化；`PF-12/PF-13/INT-01` 只保留底层预留，必须等具体 PRD/原型页面再接入。
 3. Phase C：`CRM-01/02/03/04`、`COR-01/02`，补会员、等级方案、企业客户。
 4. Phase D：`MD-09/MD-10/MD-11/MD-12`，补车辆详情、车辆调拨、车务看板、TBox 台账。
-5. Phase E：`OR-05/06/07/08/09/15`，补订单详情、取还车向导、费用审计、取消关闭、合同单据。
+5. Phase E：`OR-05/06/07/08/09/15`，补订单详情、取还车向导、费用审计、取消关闭、合同单据增强。
 6. Phase F：`DP-01`、`DP-03/04`、`OR-11/12/13`、`PR-03/04`、`RP-01`，调度看板第一版已接入，继续补调度事件、任务池、异常履约、动态调价、行销和报表。
 
 原则：
@@ -466,7 +480,7 @@ Reserved：
 2. Sprint 3-4：系统参数、权限深化、审计、编号中心、数据字典、观测、接口契约、事件入出站、筛选预设、版本发布记录；通知、导出打印、附件、adapter 只做业务页面内接入，不做独立中心页。
 3. Sprint 5-6：会员、等级方案、企业客户、会员风控、企业月结配置、企业合同台账。
 4. Sprint 7-8：车辆照片、证照、随车物资、站点营业日历、站点容量、调拨、车务看板、TBox 台账。
-5. Sprint 9-10：订单详情、取还车向导、报价快照解释、费用审计、合同与单据、预授权、发票、幂等、跟进备注、人工调账、企业月结账单、客户通知留痕。
+5. Sprint 9-10：订单详情、取还车向导、报价快照解释、费用审计、合同与单据增强、预授权、发票、幂等、跟进备注、人工调账、企业月结账单、客户通知留痕。
 6. Sprint 11-12：调度看板第一版已完成；继续补调度事件、改派链路、调度任务池、异常履约、动态调价、行销、报表、对账、风控报表、定时作业、测试、备份恢复、发布回滚、演示数据工厂。
 
 详细 Sprint 定义见 `docs/STORE_RENTAL_DEVELOPMENT_TASKS.md` 的“推荐冲刺清单”。

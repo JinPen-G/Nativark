@@ -107,6 +107,13 @@ import {
   StoreRentalEventSnapshotRecord,
   StoreRentalFeeLedgerItem,
   StoreRentalInspectionRecord,
+  StoreRentalContractCenter,
+  StoreRentalContractCenterQuery,
+  StoreRentalContractCenterRow,
+  StoreRentalContractMockSignRequest,
+  StoreRentalContractMockSignResult,
+  StoreRentalContractPrintRequest,
+  StoreRentalContractPrintResult,
   StoreRentalContractRecord,
   StoreRentalIdempotencyRecord,
   StoreRentalNotificationRecord,
@@ -5555,6 +5562,126 @@ export class StoreRentalService {
     return this.memoryFulfillmentRecords(id);
   }
 
+  listOrderContractCenter(
+    query: StoreRentalContractCenterQuery = {}
+  ): StoreRentalContractCenter | Promise<StoreRentalContractCenter> {
+    if (this.useMysqlDataSource()) {
+      return this.storeRentalRepository.listOrderContractCenter(query);
+    }
+
+    const keyword = query.keyword?.trim().toLowerCase();
+    const rows = this.orders
+      .flatMap((order) =>
+        (this.orderContracts.get(order.id) ?? []).map((record) =>
+          this.toMemoryContractCenterRow(order, record)
+        )
+      )
+      .filter((row) => {
+        const matchedKeyword =
+          !keyword ||
+          [
+            row.documentNo,
+            row.title,
+            row.orderNo,
+            row.customerName,
+            row.corporateShortName,
+            row.vehicleGroupName,
+            row.plateNo
+          ]
+            .filter(Boolean)
+            .some((value) => String(value).toLowerCase().includes(keyword));
+        const matchedType = !query.type || row.type === query.type;
+        const matchedStatus = !query.status || row.status === query.status;
+        const matchedOrderStatus =
+          !query.orderStatus || row.mainStatus === query.orderStatus;
+
+        return matchedKeyword && matchedType && matchedStatus && matchedOrderStatus;
+      });
+
+    return {
+      rows,
+      stats: this.contractCenterStats(rows),
+      templates: this.contractTemplates()
+    };
+  }
+
+  async printOrderContractMock(
+    contractId: string,
+    input: StoreRentalContractPrintRequest
+  ): Promise<StoreRentalContractPrintResult> {
+    if (!input.operator) {
+      throw new BadRequestException("打印/下载单据必须填写操作人。");
+    }
+    if (this.useMysqlDataSource()) {
+      return this.storeRentalRepository.printOrderContractMock(contractId, input);
+    }
+
+    const { orderId, record } = this.findMemoryContractRecord(contractId);
+    const mode = input.mode ?? "print";
+    const now = new Date().toISOString();
+    const downloadUrl =
+      record.downloadUrl ||
+      record.fileUrl ||
+      `/mock/store-rental/contracts/${record.documentNo}.pdf`;
+    const nextRecord: StoreRentalContractRecord = {
+      ...record,
+      printStatus: mode === "download" ? "downloaded" : "printed",
+      printCount: (record.printCount ?? 0) + 1,
+      lastPrintedAt: now,
+      downloadUrl,
+      externalProvider: "reserved",
+      operator: input.operator
+    };
+    this.replaceMemoryContractRecord(orderId, nextRecord);
+
+    return {
+      record: nextRecord,
+      printJobId: `mock_print_${randomUUID()}`,
+      downloadUrl,
+      skippedExternalCall: true,
+      message:
+        mode === "download"
+          ? "PDF 下载已生成 mock 地址，真实打印/文件服务已自动跳过。"
+          : "打印任务已记录，真实打印服务已自动跳过。"
+    };
+  }
+
+  async signOrderContractMock(
+    contractId: string,
+    input: StoreRentalContractMockSignRequest
+  ): Promise<StoreRentalContractMockSignResult> {
+    if (!input.operator) {
+      throw new BadRequestException("mock 签署必须填写操作人。");
+    }
+    if (this.useMysqlDataSource()) {
+      return this.storeRentalRepository.signOrderContractMock(contractId, input);
+    }
+
+    const { orderId, record } = this.findMemoryContractRecord(contractId);
+    const now = new Date().toISOString();
+    const nextRecord: StoreRentalContractRecord = {
+      ...record,
+      status: "signed",
+      signMethod: input.signMethod || record.signMethod || "counter",
+      signerName:
+        input.signerName ||
+        record.signerName ||
+        this.stringValue(record.snapshot.customerName),
+      signedAt: now,
+      fileUrl: input.fileUrl || record.fileUrl,
+      externalProvider: "reserved",
+      externalSignStatus: "skipped",
+      operator: input.operator
+    };
+    this.replaceMemoryContractRecord(orderId, nextRecord);
+
+    return {
+      record: nextRecord,
+      skippedExternalCall: true,
+      message: "签署状态已更新为 mock 已签署，真实电子签平台已自动跳过。"
+    };
+  }
+
   async createOrderContract(
     id: string,
     input: CreateStoreRentalContractRequest
@@ -5593,6 +5720,12 @@ export class StoreRentalService {
       fileUrl: input.fileUrl,
       operator: input.operator,
       createdAt: now,
+      templateCode: input.templateCode || input.type,
+      printStatus: input.printStatus || "not_generated",
+      printCount: 0,
+      downloadUrl: input.downloadUrl,
+      externalProvider: "reserved",
+      externalSignStatus: input.status === "signed" ? "skipped" : "pending",
       snapshot: input.snapshot ?? this.orderFulfillmentSnapshot(order)
     };
     this.prependMemoryRecord(this.orderContracts, order.id, record);
@@ -9322,6 +9455,121 @@ export class StoreRentalService {
     store.set(orderId, [record, ...records].slice(0, 100));
   }
 
+  private findMemoryContractRecord(contractId: string) {
+    for (const [orderId, records] of this.orderContracts.entries()) {
+      const record = records.find((item) => item.id === contractId);
+      if (record) {
+        return { orderId, record };
+      }
+    }
+
+    throw new NotFoundException(`Order contract document ${contractId} was not found`);
+  }
+
+  private replaceMemoryContractRecord(orderId: string, record: StoreRentalContractRecord) {
+    const records = this.orderContracts.get(orderId) ?? [];
+    this.orderContracts.set(
+      orderId,
+      records.map((item) => (item.id === record.id ? record : item))
+    );
+  }
+
+  private toMemoryContractCenterRow(
+    order: StoreRentalOrderSummary,
+    record: StoreRentalContractRecord
+  ): StoreRentalContractCenterRow {
+    return {
+      ...record,
+      orderId: order.id,
+      orderNo: order.orderNo,
+      customerName: order.customerName,
+      customerPhoneMasked: order.customerPhoneMasked,
+      corporateShortName: order.corporateShortName,
+      vehicleGroupName: order.vehicleGroupName,
+      plateNo: order.plateNo,
+      pickupStoreName: order.pickupStoreName,
+      returnStoreName: order.returnStoreName,
+      pickupAt: order.pickupAt,
+      returnAt: order.returnAt,
+      billingMode: order.billingMode,
+      mainStatus: order.mainStatus,
+      paymentStatus: order.paymentStatus
+    };
+  }
+
+  private contractCenterStats(
+    rows: StoreRentalContractCenterRow[]
+  ): StoreRentalContractCenter["stats"] {
+    return {
+      total: rows.length,
+      pending: rows.filter((row) => row.status === "pending").length,
+      signed: rows.filter((row) => row.status === "signed").length,
+      fallbackUploaded: rows.filter((row) => row.status === "fallback_uploaded").length,
+      voided: rows.filter((row) => row.status === "voided").length,
+      printed: rows.filter((row) => ["printed", "downloaded"].includes(row.printStatus ?? "")).length,
+      skippedExternalCalls: rows.filter(
+        (row) => row.externalProvider === "reserved" || row.externalSignStatus === "skipped"
+      ).length
+    };
+  }
+
+  private contractTemplates(): StoreRentalContractCenter["templates"] {
+    return [
+      {
+        code: "rental_contract",
+        name: "门市租赁合约",
+        description: "取车前签署，记录承租人、车辆、费用和租期快照。",
+        defaultSignMethod: "app",
+        autoGenerateScenes: ["pickup", "manual"],
+        mockIntegration: {
+          printProvider: "reserved",
+          signProvider: "reserved",
+          autoSkipExternalCall: true
+        }
+      },
+      {
+        code: "pickup_sheet",
+        name: "取车交接单",
+        description: "发车时生成，记录取车验车、油电/里程和交付信息。",
+        defaultSignMethod: "counter",
+        autoGenerateScenes: ["pickup", "manual"],
+        mockIntegration: {
+          printProvider: "reserved",
+          signProvider: "reserved",
+          autoSkipExternalCall: true
+        }
+      },
+      {
+        code: "return_sheet",
+        name: "还车交接单",
+        description: "还车验车后生成，记录还车车况、里程、照片和异常。",
+        defaultSignMethod: "counter",
+        autoGenerateScenes: ["return", "manual"],
+        mockIntegration: {
+          printProvider: "reserved",
+          signProvider: "reserved",
+          autoSkipExternalCall: true
+        }
+      },
+      {
+        code: "settlement_sheet",
+        name: "还车结算单",
+        description: "结算确认时生成，记录费用、收退款和月结入账摘要。",
+        defaultSignMethod: "system",
+        autoGenerateScenes: ["settlement", "manual"],
+        mockIntegration: {
+          printProvider: "reserved",
+          signProvider: "reserved",
+          autoSkipExternalCall: true
+        }
+      }
+    ];
+  }
+
+  private stringValue(value: unknown) {
+    return typeof value === "string" ? value : undefined;
+  }
+
   private orderFulfillmentSnapshot(order: StoreRentalOrderSummary) {
     return {
       orderNo: order.orderNo,
@@ -9794,6 +10042,12 @@ export class StoreRentalService {
       fileUrl: input.fileUrl,
       operator: input.operator,
       createdAt: now,
+      templateCode: input.templateCode || input.type,
+      printStatus: input.printStatus || "not_generated",
+      printCount: 0,
+      downloadUrl: input.downloadUrl,
+      externalProvider: "reserved",
+      externalSignStatus: input.status === "signed" ? "skipped" : "pending",
       snapshot: input.snapshot ?? this.orderFulfillmentSnapshot(order)
     };
     this.prependMemoryRecord(this.orderContracts, order.id, record);

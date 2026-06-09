@@ -59,6 +59,13 @@ import type {
   StoreRentalOrderNotificationRecord,
   StoreRentalOrderOperationRecord,
   StoreRentalFinancialOverview,
+  StoreRentalContractCenter,
+  StoreRentalContractCenterQuery,
+  StoreRentalContractCenterRow,
+  StoreRentalContractMockSignRequest,
+  StoreRentalContractMockSignResult,
+  StoreRentalContractPrintRequest,
+  StoreRentalContractPrintResult,
   StoreRentalContractRecord,
   StoreRentalEventSnapshotRecord,
   StoreRentalNotificationRecord,
@@ -2312,6 +2319,123 @@ export class StoreRentalRepository {
     };
   }
 
+  async listOrderContractCenter(
+    query: StoreRentalContractCenterQuery = {},
+    tenantId = this.defaultTenantId
+  ): Promise<StoreRentalContractCenter> {
+    const rows = await this.prisma.$queryRaw<any[]>`
+      SELECT
+        d.id, d.orderId, d.documentNo, d.type, d.title, d.status, d.signMethod,
+        d.signerName, d.signedAt, d.fileUrl, d.payload, d.operator, d.createdAt,
+        o.orderNo, o.customerName, o.customerPhoneMasked, o.corporateShortName,
+        o.vehicleGroupSnapshot, o.assignedVehicleSnapshot, o.pickupStoreSnapshot,
+        o.returnStoreSnapshot, o.pickupAt, o.returnAt, o.billingMode, o.mainStatus,
+        o.paymentStatus
+      FROM OrderContractDocument d
+      INNER JOIN StoreRentalOrder o ON o.id = d.orderId
+      WHERE o.tenantId = ${tenantId}
+      ORDER BY d.createdAt DESC
+    `;
+
+    const keyword = query.keyword?.trim().toLowerCase();
+    const filteredRows = rows
+      .map((row) => this.toContractCenterRow(row))
+      .filter((row) => {
+        const matchedKeyword =
+          !keyword ||
+          [
+            row.documentNo,
+            row.title,
+            row.orderNo,
+            row.customerName,
+            row.corporateShortName,
+            row.vehicleGroupName,
+            row.plateNo
+          ]
+            .filter(Boolean)
+            .some((value) => String(value).toLowerCase().includes(keyword));
+        const matchedType = !query.type || row.type === query.type;
+        const matchedStatus = !query.status || row.status === query.status;
+        const matchedOrderStatus =
+          !query.orderStatus || row.mainStatus === query.orderStatus;
+
+        return matchedKeyword && matchedType && matchedStatus && matchedOrderStatus;
+      });
+
+    return {
+      rows: filteredRows,
+      stats: this.contractCenterStats(filteredRows),
+      templates: this.contractTemplates()
+    };
+  }
+
+  async printOrderContractMock(
+    contractId: string,
+    input: StoreRentalContractPrintRequest
+  ): Promise<StoreRentalContractPrintResult> {
+    const current = await this.findOrderContractRecord(contractId);
+    const now = new Date();
+    const mode = input.mode ?? "print";
+    const downloadUrl =
+      current.downloadUrl ||
+      current.fileUrl ||
+      `/mock/store-rental/contracts/${current.documentNo}.pdf`;
+    const nextRecord: StoreRentalContractRecord = {
+      ...current,
+      printStatus: mode === "download" ? "downloaded" : "printed",
+      printCount: (current.printCount ?? 0) + 1,
+      lastPrintedAt: now.toISOString(),
+      downloadUrl,
+      externalProvider: "reserved",
+      operator: input.operator || current.operator
+    };
+
+    await this.updateOrderContractRecord(contractId, nextRecord);
+    const record = await this.findOrderContractRecord(contractId);
+
+    return {
+      record,
+      printJobId: `mock_print_${randomUUID()}`,
+      downloadUrl,
+      skippedExternalCall: true,
+      message:
+        mode === "download"
+          ? "PDF 下载已生成 mock 地址，真实打印/文件服务已自动跳过。"
+          : "打印任务已记录，真实打印服务已自动跳过。"
+    };
+  }
+
+  async signOrderContractMock(
+    contractId: string,
+    input: StoreRentalContractMockSignRequest
+  ): Promise<StoreRentalContractMockSignResult> {
+    const current = await this.findOrderContractRecord(contractId);
+    const now = new Date();
+    const nextRecord: StoreRentalContractRecord = {
+      ...current,
+      status: "signed",
+      signMethod: input.signMethod || current.signMethod || "counter",
+      signerName:
+        input.signerName ||
+        current.signerName ||
+        this.stringValue(current.snapshot.customerName),
+      signedAt: now.toISOString(),
+      fileUrl: input.fileUrl || current.fileUrl,
+      externalProvider: "reserved",
+      externalSignStatus: "skipped",
+      operator: input.operator || current.operator
+    };
+
+    await this.updateOrderContractRecord(contractId, nextRecord);
+    const record = await this.findOrderContractRecord(contractId);
+
+    return {
+      record,
+      skippedExternalCall: true,
+      message: "签署状态已更新为 mock 已签署，真实电子签平台已自动跳过。"
+    };
+  }
+
   async createOrderContractRecord(
     orderId: string,
     input: CreateStoreRentalContractRequest
@@ -2331,6 +2455,12 @@ export class StoreRentalRepository {
       fileUrl: input.fileUrl,
       operator: input.operator || "营运端",
       createdAt: now.toISOString(),
+      templateCode: input.templateCode || input.type,
+      printStatus: input.printStatus || "not_generated",
+      printCount: 0,
+      downloadUrl: input.downloadUrl,
+      externalProvider: "reserved",
+      externalSignStatus: input.status === "signed" ? "skipped" : "pending",
       snapshot: input.snapshot ?? {}
     };
 
@@ -2349,7 +2479,7 @@ export class StoreRentalRepository {
         ${record.signerName ?? null},
         ${record.signedAt ? new Date(record.signedAt) : null},
         ${record.fileUrl ?? null},
-        ${JSON.stringify({ snapshot: record.snapshot })},
+        ${JSON.stringify(this.contractPayload(record))},
         ${record.operator},
         ${now},
         ${now}
@@ -2537,6 +2667,43 @@ export class StoreRentalRepository {
     `;
 
     return rows.map((row) => this.toContractRecord(row));
+  }
+
+  private async findOrderContractRecord(
+    contractId: string
+  ): Promise<StoreRentalContractRecord> {
+    const [row] = await this.prisma.$queryRaw<any[]>`
+      SELECT
+        id, documentNo, type, title, status, signMethod, signerName,
+        signedAt, fileUrl, payload, operator, createdAt
+      FROM OrderContractDocument
+      WHERE id = ${contractId}
+      LIMIT 1
+    `;
+    if (!row) {
+      throw new NotFoundException(`Order contract document ${contractId} was not found`);
+    }
+
+    return this.toContractRecord(row);
+  }
+
+  private async updateOrderContractRecord(
+    contractId: string,
+    record: StoreRentalContractRecord
+  ) {
+    await this.prisma.$executeRaw`
+      UPDATE OrderContractDocument
+      SET
+        status = ${record.status},
+        signMethod = ${record.signMethod ?? null},
+        signerName = ${record.signerName ?? null},
+        signedAt = ${record.signedAt ? new Date(record.signedAt) : null},
+        fileUrl = ${record.fileUrl ?? record.downloadUrl ?? null},
+        payload = ${JSON.stringify(this.contractPayload(record))},
+        operator = ${record.operator},
+        updatedAt = ${new Date()}
+      WHERE id = ${contractId}
+    `;
   }
 
   private async listOrderNotificationRecords(
@@ -5375,8 +5542,128 @@ export class StoreRentalRepository {
       fileUrl: row.fileUrl ?? undefined,
       operator: row.operator ?? "营运端",
       createdAt: row.createdAt.toISOString(),
+      templateCode: this.stringValue(payload.templateCode),
+      printStatus: this.toContractPrintStatus(this.stringValue(payload.printStatus)),
+      printCount: this.numberValue(payload.printCount) ?? 0,
+      lastPrintedAt: this.stringValue(payload.lastPrintedAt),
+      downloadUrl: this.stringValue(payload.downloadUrl),
+      externalProvider:
+        payload.externalProvider === "mock" || payload.externalProvider === "reserved"
+          ? payload.externalProvider
+          : undefined,
+      externalSignStatus: this.toContractExternalSignStatus(
+        this.stringValue(payload.externalSignStatus)
+      ),
       snapshot: this.objectMetadata(payload.snapshot)
     };
+  }
+
+  private toContractCenterRow(row: any): StoreRentalContractCenterRow {
+    const contract = this.toContractRecord(row);
+    const vehicleGroupSnapshot = this.objectMetadata(row.vehicleGroupSnapshot);
+    const assignedVehicleSnapshot = this.objectMetadata(row.assignedVehicleSnapshot);
+    const pickupStoreSnapshot = this.objectMetadata(row.pickupStoreSnapshot);
+    const returnStoreSnapshot = this.objectMetadata(row.returnStoreSnapshot);
+
+    return {
+      ...contract,
+      orderId: row.orderId,
+      orderNo: row.orderNo,
+      customerName: row.customerName,
+      customerPhoneMasked: row.customerPhoneMasked,
+      corporateShortName: row.corporateShortName ?? undefined,
+      vehicleGroupName: this.stringValue(vehicleGroupSnapshot.name) || "",
+      plateNo: this.stringValue(assignedVehicleSnapshot.plateNo),
+      pickupStoreName: this.stringValue(pickupStoreSnapshot.name) || "",
+      returnStoreName: this.stringValue(returnStoreSnapshot.name) || "",
+      pickupAt: row.pickupAt.toISOString(),
+      returnAt: row.returnAt.toISOString(),
+      billingMode: this.toSharedBillingMode(row.billingMode),
+      mainStatus: this.toSharedOrderMainStatus(row.mainStatus),
+      paymentStatus: this.toSharedPaymentStatus(row.paymentStatus)
+    };
+  }
+
+  private contractPayload(record: StoreRentalContractRecord): Prisma.InputJsonValue {
+    return {
+      snapshot: record.snapshot,
+      templateCode: record.templateCode,
+      printStatus: record.printStatus,
+      printCount: record.printCount ?? 0,
+      lastPrintedAt: record.lastPrintedAt,
+      downloadUrl: record.downloadUrl,
+      externalProvider: record.externalProvider,
+      externalSignStatus: record.externalSignStatus
+    } as Prisma.InputJsonValue;
+  }
+
+  private contractCenterStats(
+    rows: StoreRentalContractCenterRow[]
+  ): StoreRentalContractCenter["stats"] {
+    return {
+      total: rows.length,
+      pending: rows.filter((row) => row.status === "pending").length,
+      signed: rows.filter((row) => row.status === "signed").length,
+      fallbackUploaded: rows.filter((row) => row.status === "fallback_uploaded").length,
+      voided: rows.filter((row) => row.status === "voided").length,
+      printed: rows.filter((row) => ["printed", "downloaded"].includes(row.printStatus ?? "")).length,
+      skippedExternalCalls: rows.filter(
+        (row) => row.externalProvider === "reserved" || row.externalSignStatus === "skipped"
+      ).length
+    };
+  }
+
+  private contractTemplates(): StoreRentalContractCenter["templates"] {
+    return [
+      {
+        code: "rental_contract",
+        name: "门市租赁合约",
+        description: "取车前签署，记录承租人、车辆、费用和租期快照。",
+        defaultSignMethod: "app",
+        autoGenerateScenes: ["pickup", "manual"],
+        mockIntegration: {
+          printProvider: "reserved",
+          signProvider: "reserved",
+          autoSkipExternalCall: true
+        }
+      },
+      {
+        code: "pickup_sheet",
+        name: "取车交接单",
+        description: "发车时生成，记录取车验车、油电/里程和交付信息。",
+        defaultSignMethod: "counter",
+        autoGenerateScenes: ["pickup", "manual"],
+        mockIntegration: {
+          printProvider: "reserved",
+          signProvider: "reserved",
+          autoSkipExternalCall: true
+        }
+      },
+      {
+        code: "return_sheet",
+        name: "还车交接单",
+        description: "还车验车后生成，记录还车车况、里程、照片和异常。",
+        defaultSignMethod: "counter",
+        autoGenerateScenes: ["return", "manual"],
+        mockIntegration: {
+          printProvider: "reserved",
+          signProvider: "reserved",
+          autoSkipExternalCall: true
+        }
+      },
+      {
+        code: "settlement_sheet",
+        name: "还车结算单",
+        description: "结算确认时生成，记录费用、收退款和月结入账摘要。",
+        defaultSignMethod: "system",
+        autoGenerateScenes: ["settlement", "manual"],
+        mockIntegration: {
+          printProvider: "reserved",
+          signProvider: "reserved",
+          autoSkipExternalCall: true
+        }
+      }
+    ];
   }
 
   private toEventSnapshotRecord(row: any): StoreRentalEventSnapshotRecord {
@@ -5758,6 +6045,23 @@ export class StoreRentalRepository {
     return ["pending", "signed", "fallback_uploaded", "voided"].includes(value)
       ? (value as StoreRentalContractRecord["status"])
       : "pending";
+  }
+
+  private toContractPrintStatus(
+    value: string | undefined
+  ): StoreRentalContractRecord["printStatus"] {
+    return value &&
+      ["not_generated", "generated", "printed", "downloaded"].includes(value)
+      ? (value as StoreRentalContractRecord["printStatus"])
+      : "not_generated";
+  }
+
+  private toContractExternalSignStatus(
+    value: string | undefined
+  ): StoreRentalContractRecord["externalSignStatus"] {
+    return value && ["skipped", "pending", "signed", "failed"].includes(value)
+      ? (value as StoreRentalContractRecord["externalSignStatus"])
+      : undefined;
   }
 
   private toContractSignMethod(value: string | null): StoreRentalContractRecord["signMethod"] {

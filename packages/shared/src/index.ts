@@ -685,6 +685,12 @@ export type StoreRentalContractStatus =
   | "fallback_uploaded"
   | "voided";
 
+export type StoreRentalContractPrintStatus =
+  | "not_generated"
+  | "generated"
+  | "printed"
+  | "downloaded";
+
 export interface StoreRentalContractRecord {
   id: string;
   documentNo: string;
@@ -697,7 +703,93 @@ export interface StoreRentalContractRecord {
   fileUrl?: string;
   operator: string;
   createdAt: string;
+  templateCode?: string;
+  printStatus?: StoreRentalContractPrintStatus;
+  printCount?: number;
+  lastPrintedAt?: string;
+  downloadUrl?: string;
+  externalProvider?: "reserved" | "mock";
+  externalSignStatus?: "skipped" | "pending" | "signed" | "failed";
   snapshot: Record<string, unknown>;
+}
+
+export interface StoreRentalContractTemplate {
+  code: StoreRentalContractRecord["type"];
+  name: string;
+  description: string;
+  defaultSignMethod: StoreRentalContractRecord["signMethod"];
+  autoGenerateScenes: Array<"pickup" | "return" | "settlement" | "manual">;
+  mockIntegration: {
+    printProvider: "reserved";
+    signProvider: "reserved";
+    autoSkipExternalCall: boolean;
+  };
+}
+
+export interface StoreRentalContractCenterRow extends StoreRentalContractRecord {
+  orderId: string;
+  orderNo: string;
+  customerName: string;
+  customerPhoneMasked: string;
+  corporateShortName?: string;
+  vehicleGroupName: string;
+  plateNo?: string;
+  pickupStoreName: string;
+  returnStoreName: string;
+  pickupAt: string;
+  returnAt: string;
+  billingMode: BillingMode;
+  mainStatus: OrderMainStatus;
+  paymentStatus: PaymentStatus;
+}
+
+export interface StoreRentalContractCenterStats {
+  total: number;
+  pending: number;
+  signed: number;
+  fallbackUploaded: number;
+  voided: number;
+  printed: number;
+  skippedExternalCalls: number;
+}
+
+export interface StoreRentalContractCenter {
+  rows: StoreRentalContractCenterRow[];
+  stats: StoreRentalContractCenterStats;
+  templates: StoreRentalContractTemplate[];
+}
+
+export interface StoreRentalContractCenterQuery {
+  keyword?: string;
+  type?: StoreRentalContractRecord["type"];
+  status?: StoreRentalContractStatus;
+  orderStatus?: OrderMainStatus;
+}
+
+export interface StoreRentalContractPrintRequest {
+  operator: string;
+  mode?: "print" | "download";
+}
+
+export interface StoreRentalContractPrintResult {
+  record: StoreRentalContractRecord;
+  printJobId: string;
+  downloadUrl: string;
+  skippedExternalCall: true;
+  message: string;
+}
+
+export interface StoreRentalContractMockSignRequest {
+  operator: string;
+  signerName?: string;
+  signMethod?: StoreRentalContractRecord["signMethod"];
+  fileUrl?: string;
+}
+
+export interface StoreRentalContractMockSignResult {
+  record: StoreRentalContractRecord;
+  skippedExternalCall: true;
+  message: string;
 }
 
 export interface StoreRentalNotificationRecord {
@@ -844,6 +936,9 @@ export interface CreateStoreRentalContractRequest {
   signerName?: string;
   signedAt?: string;
   fileUrl?: string;
+  templateCode?: string;
+  printStatus?: StoreRentalContractPrintStatus;
+  downloadUrl?: string;
   operator: string;
   snapshot?: Record<string, unknown>;
 }

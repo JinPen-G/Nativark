@@ -26,7 +26,9 @@ import {
   listVehicleGroups,
   listVehicles,
   listStoreRentalOrders,
+  printStoreRentalContractMock,
   runStoreRentalOrderAction,
+  signStoreRentalContractMock,
   waiveStoreRentalOrderFee
 } from "../api/client";
 import AppLayout from "../components/AppLayout.vue";
@@ -1630,6 +1632,8 @@ async function submitContract() {
       ...contractForm,
       signedAt: contractForm.status === "signed" ? new Date().toISOString() : undefined,
       fileUrl: contractForm.fileUrl || undefined,
+      templateCode: contractForm.type,
+      printStatus: "generated",
       snapshot: {
         orderNo: order.orderNo,
         mainStatus: order.mainStatus,
@@ -1643,6 +1647,41 @@ async function submitContract() {
     await reloadAfterFulfillmentAction("单据记录已保存");
   } catch (error) {
     ElMessage.error(readErrorMessage(error, "单据保存失败"));
+  } finally {
+    fulfillmentActionLoading.value = "";
+  }
+}
+
+async function printContractRecord(
+  recordId: string,
+  mode: "print" | "download" = "print"
+) {
+  fulfillmentActionLoading.value = `${recordId}:${mode}`;
+  try {
+    const result = await printStoreRentalContractMock(recordId, {
+      mode,
+      operator: authStore.user?.displayName || "营运端"
+    });
+    await reloadAfterFulfillmentAction(result.message);
+  } catch (error) {
+    ElMessage.error(readErrorMessage(error, mode === "download" ? "单据下载失败" : "单据打印失败"));
+  } finally {
+    fulfillmentActionLoading.value = "";
+  }
+}
+
+async function mockSignContractRecord(recordId: string) {
+  const order = detail.value;
+  fulfillmentActionLoading.value = `${recordId}:sign`;
+  try {
+    const result = await signStoreRentalContractMock(recordId, {
+      operator: authStore.user?.displayName || "营运端",
+      signerName: order?.customerName,
+      signMethod: "counter"
+    });
+    await reloadAfterFulfillmentAction(result.message);
+  } catch (error) {
+    ElMessage.error(readErrorMessage(error, "mock 签署失败"));
   } finally {
     fulfillmentActionLoading.value = "";
   }
@@ -2597,10 +2636,44 @@ onMounted(loadDetail);
                     <div>
                       <div class="font-bold text-gray-800">{{ record.title }}</div>
                       <div class="text-xs text-gray-500 mt-1">{{ record.documentNo }} · {{ contractTypeLabel(record.type) }}</div>
+                      <div class="text-xs text-gray-400 mt-1">
+                        {{ record.printStatus === "printed" ? "已打印" : record.printStatus === "downloaded" ? "已下载" : record.printStatus === "generated" ? "已生成" : "未打印" }}
+                        <span v-if="record.externalSignStatus === 'skipped'"> · 外部签署已跳过</span>
+                      </div>
                     </div>
                     <div class="text-right">
                       <el-tag size="small" effect="plain">{{ contractStatusLabel(record.status) }}</el-tag>
                       <div class="text-xs text-gray-400 mt-1">{{ record.operator }}</div>
+                      <div class="mt-2 flex justify-end gap-1">
+                        <el-button
+                          size="small"
+                          link
+                          type="primary"
+                          :loading="fulfillmentActionLoading === `${record.id}:print`"
+                          @click="printContractRecord(record.id, 'print')"
+                        >
+                          打印
+                        </el-button>
+                        <el-button
+                          size="small"
+                          link
+                          type="primary"
+                          :loading="fulfillmentActionLoading === `${record.id}:download`"
+                          @click="printContractRecord(record.id, 'download')"
+                        >
+                          下载
+                        </el-button>
+                        <el-button
+                          v-if="record.status === 'pending'"
+                          size="small"
+                          link
+                          type="success"
+                          :loading="fulfillmentActionLoading === `${record.id}:sign`"
+                          @click="mockSignContractRecord(record.id)"
+                        >
+                          mock签署
+                        </el-button>
+                      </div>
                     </div>
                   </div>
                 </div>

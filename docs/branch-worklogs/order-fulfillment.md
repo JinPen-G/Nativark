@@ -101,3 +101,36 @@
 - 图片上传仍以数量和说明模拟，尚未接入真实附件中心。
 - 外部支付、预授权、电子签、通知平台仍按 MVP 预留，不调用外部平台。
 - 还车费用当前支持超时、损伤、清洁和减免切片；完整超里程、油电补差、异地还车差额仍需继续扩展规则计算。
+
+## 第三轮：OR-15 合同与单据 MVP
+
+本轮目标分支：`codex/order-fulfillment`。
+
+开发依据：
+- PRD：`门市租赁/订单/新建订单.md`
+- PRD：`门市租赁/订单/订单取车.md`
+- PRD：`门市租赁/订单/订单还车.md`
+- PRD：`门市租赁/订单/费用管理.md`
+- 原型：`03_原型与页面/营运端/official_vehicle_contracts.html`
+- 原型：`03_原型与页面/营运端/order_detail.html`
+
+新增内容：
+- 新增营运端 `OfficialVehicleContractsView.vue` 和 `/contracts` 路由/菜单，按原型复刻统计、筛选、模板卡片、列表、新建和详情抽屉。
+- 合同中心读取真实订单和 `OrderContractDocument` 记录，支持按订单生成租赁合约、取车交接单、还车交接单和还车结算单。
+- 订单详情合同区补打印、下载和 mock 签署入口，与合同中心共用后端接口。
+- 共享类型新增合同中心、合同模板、打印结果和 mock 签署结果 DTO；合同记录扩展模板码、打印状态、打印次数、下载地址和外部签署状态。
+- 后端新增 `GET /store-rental/contracts`、`GET /store-rental/contracts/templates`、`POST /store-rental/contracts/:id/print-mock`、`POST /store-rental/contracts/:id/sign-mock`。
+- MySQL 模式复用 `OrderContractDocument`，扩展字段写入 `payload` JSON；内存模式复用 `orderContracts` map。
+- 打印、PDF、电子签真实 provider 保持预留，本轮自动跳过外部调用，并写入 `externalProvider=reserved`、`externalSignStatus=skipped`。
+
+验证：
+- `npm run build -w @rimo/shared`
+- `npm run build -w @rimo/api`
+- `npm run build -w @rimo/admin`
+- `$env:DATABASE_URL='mysql://root:password@localhost:3306/rimo_store_rental'; npm run db:validate`
+- `npm run build`
+
+未完成项：
+- 租户可编辑合同模板尚未开发，当前模板为后端固定清单。
+- 真实 PDF 生成、附件中心、打印服务和电子签 provider 尚未接入，本轮按要求 mock 跳过。
+- 发票/收据、预授权凭证和合同审计报表仍需后续接入。

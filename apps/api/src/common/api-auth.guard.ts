@@ -91,6 +91,11 @@ function requiredPermissions(method: string, path: string) {
       ? ["store-rental:order:view"]
       : ["store-rental:order:operate", "store-rental:order:create"];
   }
+  if (path.startsWith("/store-rental/contracts")) {
+    return method === "GET"
+      ? ["store-rental:order:view"]
+      : ["store-rental:order:operate"];
+  }
   const orderActionMatch = path.match(/^\/store-rental\/orders\/[^/]+\/actions\/([^/]+)$/);
   if (orderActionMatch) {
     const action = orderActionMatch[1];

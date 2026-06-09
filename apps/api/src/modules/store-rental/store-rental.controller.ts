@@ -10,6 +10,9 @@ import type {
   MemberReviewTask,
   CreateStoreRentalFeeRequest,
   CreateStoreRentalContractRequest,
+  StoreRentalContractCenterQuery,
+  StoreRentalContractMockSignRequest,
+  StoreRentalContractPrintRequest,
   CreateStoreRentalNotificationRequest,
   CreateStoreRentalOperationLockRequest,
   CreateStoreRentalOrderRequest,
@@ -697,6 +700,43 @@ export class StoreRentalController {
   @Get("orders")
   orders(@Query("keyword") keyword?: string, @Query("status") status?: string) {
     return this.storeRentalService.listOrders({ keyword, status });
+  }
+
+  @Get("contracts")
+  contractCenter(
+    @Query("keyword") keyword?: string,
+    @Query("type") type?: StoreRentalContractCenterQuery["type"],
+    @Query("status") status?: StoreRentalContractCenterQuery["status"],
+    @Query("orderStatus") orderStatus?: StoreRentalContractCenterQuery["orderStatus"]
+  ) {
+    return this.storeRentalService.listOrderContractCenter({
+      keyword,
+      type,
+      status,
+      orderStatus
+    });
+  }
+
+  @Get("contracts/templates")
+  async contractTemplates() {
+    const result = await this.storeRentalService.listOrderContractCenter({});
+    return result.templates;
+  }
+
+  @Post("contracts/:id/print-mock")
+  printContractMock(
+    @Param("id") id: string,
+    @Body() body: StoreRentalContractPrintRequest
+  ) {
+    return this.storeRentalService.printOrderContractMock(id, body);
+  }
+
+  @Post("contracts/:id/sign-mock")
+  signContractMock(
+    @Param("id") id: string,
+    @Body() body: StoreRentalContractMockSignRequest
+  ) {
+    return this.storeRentalService.signOrderContractMock(id, body);
   }
 
   @Get("orders/:id")

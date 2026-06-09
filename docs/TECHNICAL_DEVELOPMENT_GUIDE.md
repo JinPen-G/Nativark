@@ -56,6 +56,7 @@ rimo-store-rental-platform/
 - `OrdersView.vue`：门市租赁订单列表，已接入筛选预设保存、设默认、删除和默认视图自动应用。
 - `OrderDetailView.vue`：门市租赁订单详情工作台，包含订单动作、履约信息、费用中心。
 - `FinanceCenterView.vue`：财务结算中心，覆盖资金流水、预授权押金、企业月结、发票收据、手工调账和财务对账。
+- `OfficialVehicleContractsView.vue`：合同与单据中心，包含单据统计、筛选、模板卡片、订单关联生成、打印/下载 mock、mock 签署和单据快照。
 
 当前已接入的营运端基础页面：
 
@@ -64,9 +65,9 @@ rimo-store-rental-platform/
 - 车务看板：已按原型 `vehicle_status_list.html`、`vehicle_console.html` 开发第一版，作为车辆状态监控和批量处置入口。
 - TBox 设备管理：已按原型 `tbox_management.html` 开发第一版，本期只做设备台账和 mock 集成。
 
-当前未开发、但已纳入正式任务的营运端页面：
+当前未完整开发、但已纳入正式任务或后续增强的营运端页面：
 
-- 合同与单据：按原型 `official_vehicle_contracts.html` 开发，作为订单合同、打印下载和签署状态模块处理。
+- 合同与单据：当前 MVP 已按原型 `official_vehicle_contracts.html` 完成页面、订单关联、打印下载 mock 和 mock 签署；后续补租户可编辑模板、真实 PDF/附件中心、真实电子签/打印 provider 和审计报表。
 
 这些模块中，会员、等级方案、企业客户、车务看板、车辆调拨、合同与单据、TBox 当前都没有独立 PRD，先以原型字段、列表、详情、状态、审核、等级权益、额度、打印下载和设备档案交互为准，后续如果补 PRD，再回写业务规则和权限颗粒度。
 
@@ -227,6 +228,7 @@ rimo-store-rental-platform/
 
 - `POST /store-rental/orders`：读取 MySQL 会员/企业主档，写入订单本体、价格快照、规则快照、初始费用、资金记录和时间线，并回写会员/企业统计。
 - `GET /store-rental/orders`、`GET /store-rental/orders/:id`、`GET /store-rental/orders/:id/fees`：从订单、费用、资金、检查、时间线、结算摘要表读取。
+- `GET /store-rental/contracts`、`GET /store-rental/contracts/templates`、`POST /store-rental/orders/:id/contracts`、`POST /store-rental/contracts/:id/print-mock`、`POST /store-rental/contracts/:id/sign-mock`：合同与单据中心、模板清单、订单关联生成、打印/下载 mock 和签署 mock。MySQL 模式复用 `OrderContractDocument`，扩展字段写入 `payload` JSON。
 - `POST /store-rental/orders/:id/fees`、`/fees/:feeId/waive`、`/transactions`：人工费用、减免、收退款/月结交易落库。
 - `POST /store-rental/orders/:id/actions/:action`：MySQL 模式已接入主流程动作 `payment-success`、`start-pickup`、`pickup-inspection`、`return-inspection`、`confirm-settlement`，以及 `extend-rental`、`redirect-order`、`change-return-store`、`change-return-station`、`cancel`、`mark-no-show`、`reject-order`、`close-order`、`register-accident`；其中改还车门市/据点已支持后续预约冲突快捷改派一期。本轮新增订单操作记录、请求摘要幂等和取车操作锁校验。
 - `GET /store-rental/orders/:id/operation-records`：订单级操作记录，记录关键动作、请求摘要、幂等键、锁状态、操作人、完成状态和返回结果摘要。
@@ -249,6 +251,7 @@ rimo-store-rental-platform/
 - 定价：`PricingPlanSummary`、`PricingPlanDetail`、`PricingQuoteRequest`、`PricingQuoteResult`。
 - 主数据：`StoreStationSummary`、`VehicleGroupMaster`、`VehicleInstanceSummary`、`StoreValueAddedServiceSummary`。
 - 订单：`StoreRentalOrderSummary`、`StoreRentalOrderDetail`、`CreateStoreRentalOrderRequest`、`StoreRentalOrderActionResult`。
+- 合同与单据：`StoreRentalContractRecord`、`StoreRentalContractCenter`、`StoreRentalContractCenterRow`、`StoreRentalContractTemplate`、`StoreRentalContractPrintResult`、`StoreRentalContractMockSignResult`。
 - 费用中心：`StoreRentalFeeCenter`、`StoreRentalFeeLedgerItem`、`StoreRentalTransactionRecord`、`CreateStoreRentalFeeRequest`、`CreateStoreRentalTransactionRequest`、`WaiveStoreRentalFeeRequest`。
 - 财务中心：`FinanceOverviewMetrics`、`FinanceTransactionRow`、`FinancePreAuthorizationRow`、`SaveFinancePreAuthorizationRequest`、`FinanceDocumentRow`、`FinanceDocumentAuditItem`、`SaveFinanceDocumentRequest`、`FinanceManualAdjustmentRow`、`SaveFinanceManualAdjustmentRequest`、`FinanceReconciliationRow`。
 - 调度：`StoreRentalDispatchBoard`、`StoreRentalDispatchOrderRow`、`StoreRentalDispatchCandidate`、`StoreRentalDispatchPlan`、`StoreRentalDispatchResultRow`、`StoreRentalDispatchApplyResult`、`StoreRentalDispatchTaskPool`、`StoreRentalDispatchTask`、`StoreRentalDispatchEvent`。
@@ -335,6 +338,7 @@ system:tenant:manage
 按钮级权限当前作为角色的 `buttonPermissions` 保存，登录时会与 `permissions` 合并到 `AuthUser.permissions`，便于前端统一用 `hasPermission` / `hasAnyPermission` 判断。后端 `ApiAuthGuard` 对关键写接口保留原有管理权限兼容，同时增加按钮权限码：
 
 - 订单动作：新建、取车、还车、延长、取消/爽约、拒绝/关闭、结算。
+- 合同与单据：合同中心和模板读取使用 `store-rental:order:view`；订单关联生成、打印/下载 mock、mock 签署使用 `store-rental:order:operate`。
 - 费用动作：新增费用、减免、登记收款/退款/月结。
 - 会员动作：暂停、拉黑、恢复。
 - 车辆动作：启停、调拨/位置流水、维保、事故/出险。
@@ -630,7 +634,7 @@ PF-15 当前数据边界：
 - 平台底座：租户、组织、用户、多角色、角色权限、权限码、系统参数集、筛选预设、平台审计日志、数据字典配置、编号规则配置。
 - 门市租赁主数据：履约站点、站点营业日历、站点容量/排队快照、车型组、车辆实例、车辆位置流水、车况照片、维保记录、事故/出险记录、车辆调拨任务、车辆证照、随车物资、TBox 台账和指令记录。
 - 客户域：会员、会员风控事件、会员时间线、客户等级方案、企业客户、联系人、合同、企业月结账单。
-- 规则与订单域：租赁业务规则版本、订单、取还车检查记录、履约时间线、续租快照、费用项、资金记录、预授权押金台账、发票/收据、人工调账、订单操作记录、客户通知记录、企业月结明细。
+- 规则与订单域：租赁业务规则版本、订单、合同/交接单/结算单、取还车检查记录、履约时间线、续租快照、费用项、资金记录、预授权押金台账、发票/收据、人工调账、订单操作记录、客户通知记录、操作锁、幂等记录、企业月结明细。
 
 下一阶段建议按下面顺序推进真实数据层：
 
@@ -712,7 +716,7 @@ npx prisma validate --schema apps/api/prisma/schema.prisma
 2. 接 MySQL：平台底座、门市租赁主数据、客户域、订单/费用/资金/检查/续租/改派/改还车/转单快捷改派/终止/事故/月结已完成第一版，继续迁事故后续订单联动、统一审计和幂等。
 3. 补系统参数、权限深化和租户初始化；通知、导入导出、打印、附件、异步任务和 adapter 层已恢复历史入口，后续扩展必须依附明确 PRD/原型业务页面或记录用户确认。
 4. 补会员、客户等级方案和企业客户：页面和真实后端接口已完成第一版，会员列表和企业客户列表分页筛选已完成，客户等级权益已接入个人订单报价；继续补附件、审核材料、风控规则、等级自动升级和权益核销。
-5. 补车辆调拨、车务看板、合同与单据、TBox 设备台账，完善营运侧真实操作闭环。
+5. 补车辆调拨、车务看板、合同与单据增强、TBox 设备台账，完善营运侧真实操作闭环。
 6. 完善定价：价格版本、车型组价格、异店还车费、增值服务联动。
 7. 完善新建订单：资源可用性、报价快照、客户/企业信息、预授权 mock。
 8. 完善订单详情：时间线、费用明细、快照、取还车动作、结算动作。

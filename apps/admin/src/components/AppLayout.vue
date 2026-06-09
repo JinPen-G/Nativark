@@ -35,7 +35,8 @@ const navGroups: NavGroup[] = [
     title: "订单中心",
     items: [
       { to: "/new-order", icon: "Plus", label: "新建门市订单", permission: "store-rental:order:operate" },
-      { to: "/orders", icon: "List", label: "门市租赁订单", permission: "store-rental:order:view" }
+      { to: "/orders", icon: "List", label: "门市租赁订单", permission: "store-rental:order:view" },
+      { to: "/contracts", icon: "Document", label: "合同与单据", permission: "store-rental:order:view" }
     ]
   },
   {

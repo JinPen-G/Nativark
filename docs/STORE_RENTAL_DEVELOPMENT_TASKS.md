@@ -142,7 +142,7 @@
 | OR-12 | 改还车门市/据点 | 同车行转单、据点调整 | In Progress | 已按 `订单还车.md` 和 `order_detail.html` 接入订单动作 `change-return-store`、`change-return-station`；订单详情新增改还车门市/据点弹窗，展示当前地点、目标地点、原因、备注、新旧异地费差额和原还车门市后续预约冲突；后端允许状态与 PRD 一致，校验目标门市/据点可用、同车行、服务能力和原还车门市后续预约占用，冲突未处理时阻断确认，点击“快捷改派后续订单”后会按改派规则为后续订单匹配同车组或可升级空闲车辆、释放后续订单对原车辆的预约占用且原车辆按当前订单继续保持占用状态、更新后续订单车辆/费用/结算/时间线，再更新当前订单还车门市/据点、风险标记、费用项、结算汇总和时间线；MySQL 模式下通过 repository 更新还车门市快照、returnStationId、费用、转单时间线和后续订单快捷改派结果 | 继续补独立转单事件表、转单权限数据范围、调度页联动和转单审计报表 |
 | OR-13 | 事故出险 | 事故登记和事故费用 | In Progress | 已按 `事故出险处理.md` 和 `order_detail.html` 接入订单详情“事故登记/处理事故”入口；后端新增 `register-accident` 动作，校验事故描述和责任归属；履约中登记进入 `accident_processing`，结算中/已完成保持主状态；事故记录写入车辆事故记录，客户/第三方/责任待定且有费用时生成 `accident_damage` 或 `accident_post_charge` 费用项；企业月结已完成补录事故费用会生成成功 `monthly_bill` 交易；MySQL 模式下事故记录、费用、订单状态、车辆受控状态和订单时间线落库 | 补事故记录列表/结案入口、照片真实上传、车辆不可用后续订单解除/自动改派/人工调度队列和事故费用调整/减免 |
 | OR-14 | 订单快照 | 订单级基线快照和事件级快照链 | In Progress | 已有基础快照字段 | 补事件级快照链、版本号查看入口 |
-| OR-15 | 合同与单据 | 合同模板、订单合同、打印下载、签署记录 | Pending | 未开发；原型已存在 `official_vehicle_contracts.html` | 先做模板管理、订单关联、打印下载和 mock 签署状态 |
+| OR-15 | 合同与单据 | 合同模板、订单合同、打印下载、签署记录 | Done | 已按 `official_vehicle_contracts.html` 和 `order_detail.html` 合同区完成 MVP：新增 `/contracts` 营运端合同与单据页，支持模板卡片、统计、筛选、订单关联生成合同/取车交接单/还车交接单/结算单、打印/下载 mock、mock 签署和详情快照；订单详情合同区同步支持打印、下载和 mock 签署；后端新增合同中心聚合、打印 mock、签署 mock API，复用 `OrderContractDocument.payload` 记录模板码、打印状态、下载地址和外部签署跳过状态；内存和 `STORE_RENTAL_DATA_SOURCE=mysql` 模式均可用 | 后续补租户可编辑模板、真实 PDF/附件中心、真实电子签/打印 provider、发票/收据联动和完整审计报表 |
 | OR-16 | 预授权与押金 | 预授权冻结、释放、扣款、押金台账 | In Progress | 新增 `FinancePreAuthorization` Prisma 表、共享 DTO 和 `/store-rental/finance/pre-authorizations` 接口；财务结算页新增“预授权押金” Tab，支持登记/编辑订单预授权、状态、冻结/扣款/释放金额、渠道凭证、授权码和过期时间；列表会优先展示显式台账，并从订单 `pre_auth_freeze/pre_auth_capture/pre_auth_release` 资金流水派生缺失台账；财务总览“预授权冻结”改为按台账剩余额度统计；MySQL 模式下台账可落库 | 继续补真实支付/预授权 adapter、支付回调同步、预授权过期释放任务和完整操作审计 |
 | OR-17 | 发票与收据 | 开票记录、收据、作废、重开、关联费用 | In Progress | 本分支已新增 `FinanceDocument` 表、共享 DTO、财务接口和财务结算页“发票收据” Tab，支持订单/会员/企业/月结账单快照、开具/发送/作废状态和 MySQL 落库；本轮补充费用级关联 `relatedFeeIds`、原单/新单重开链路、作废原因/处理人、单据审计轨迹和财务页重开操作 | 继续补真实发票 adapter、费用行开票状态回写、发票平台作废/红冲同步和对账报表 |
 | OR-18 | 操作锁与幂等 | 订单操作锁、重复提交防护、关键动作幂等 | In Progress | 新增订单级 `OrderOperationRecord`/操作记录 DTO 和接口，订单关键动作会生成请求摘要与幂等记录；重复提交同一动作/请求摘要命中已完成结果直接返回；取车验车/拒绝履约校验有效操作锁；MySQL 模式通过 raw SQL repository 落库，内存模式保留最近操作记录 | 继续补 header 级幂等键、费用/资金/外部回调幂等、失败记录补偿和统一操作审计页 |
@@ -329,7 +329,7 @@
 2. `OR-06/OR-07`：把取车、还车升级成分步向导，每一步都提交后端。
 3. `OR-08`：补费用审计、异常校验、发票记录、持久化。
 4. `OR-09`：补取消、关闭、爽约原因和费用处理规则。
-5. `OR-15`：合同与单据，先做模板管理、打印下载、mock 签署状态。
+5. `OR-15`：合同与单据 MVP 已完成，后续只补真实 PDF/附件中心、租户可编辑模板和真实电子签/打印 provider。
 
 阶段目标：
 - 从下单、取车、还车、结算、取消到合同单据，形成完整履约和资金闭环。
@@ -892,3 +892,4 @@
 | 2026-06-09 | OR-17 发票与收据重开链路第一版：扩展 `FinanceDocument` Prisma schema/migration、共享 DTO、内存模式和 MySQL repository，支持 `relatedFeeIds` 费用级关联、原单/替换单号链路、作废原因/处理人、重开时间和单据审计轨迹；财务结算页“发票收据” Tab 增加关联费用展示、最近审计、重开入口和重开弹窗字段，重开新单时自动把原单置为作废 | `npm run db:generate`、`npm run build`、`git diff --check`；`npm run db:validate` 被 Windows 沙箱进程权限拦截，提权重试因工作区审批额度不足被系统拒绝，待审批恢复后补跑 |
 | 2026-06-09 | OR-18/OR-22/DP-04：新增订单操作记录和客户通知记录共享 DTO、MySQL 表和 repository；订单关键动作接请求摘要幂等、防重复返回、取车操作锁校验和操作记录；订单动作生成 mock 客户短信通知留痕并写入时间线；调度任务池新增关闭接口和调度页关闭入口，关闭后写 `alert_closed` 并过滤任务 | `npm run build -w @rimo/shared`、`npm run build -w @rimo/api`、`npm run build -w @rimo/admin`、`DATABASE_URL=... npx prisma validate --schema apps/api/prisma/schema.prisma` |
 | 2026-06-09 | MD-16 站点容量与排队第一版：新增容量快照刷新接口 `/store-rental/stations/capacity-snapshots/refresh`，共享 DTO 和 MySQL `StationCapacitySnapshot` 补取车队列、还车队列、总队列、整备缓冲、预计等待、压力等级和压力原因；内存模式和 MySQL 模式均按车辆位置、订单取还车队列和营业日历生成快照；站点详情“库存/容量”页签新增压力摘要和刷新按钮 | `npm run build -w @rimo/shared`、`DATABASE_URL=... npm run db:validate`、`DATABASE_URL=... npm run db:generate`、`npm run build -w @rimo/api`、`npm run build -w @rimo/admin` |
+| 2026-06-09 | OR-15 合同与单据 MVP：新增 `OfficialVehicleContractsView.vue` 和 `/contracts` 路由/菜单，按原型复刻统计、筛选、模板、列表、新建和详情；订单详情合同区补打印、下载、mock 签署；共享 DTO 增加合同中心、模板、打印和签署结果；后端新增 `/store-rental/contracts`、`/contracts/:id/print-mock`、`/contracts/:id/sign-mock`，内存与 MySQL 共用 `OrderContractDocument` 落库，`payload` 记录模板码、打印状态、下载地址和外部接入跳过状态 | `npm run build -w @rimo/shared`、`npm run build -w @rimo/api`、`npm run build -w @rimo/admin`、`$env:DATABASE_URL='mysql://root:password@localhost:3306/rimo_store_rental'; npm run db:validate`、`npm run build` |

@@ -15,6 +15,7 @@ import MembersView from "./views/MembersView.vue";
 import MembershipPlansView from "./views/MembershipPlansView.vue";
 import NewOrderView from "./views/NewOrderView.vue";
 import NotificationsView from "./views/NotificationsView.vue";
+import OfficialVehicleContractsView from "./views/OfficialVehicleContractsView.vue";
 import OrganizationManagementView from "./views/OrganizationManagementView.vue";
 import OrderDetailView from "./views/OrderDetailView.vue";
 import OrdersView from "./views/OrdersView.vue";
@@ -343,6 +344,15 @@ export const router = createRouter({
       component: OrdersView,
       meta: {
         title: "门市租赁订单",
+        section: "订单中心",
+        permission: "store-rental:order:view"
+      }
+    },
+    {
+      path: "/contracts",
+      component: OfficialVehicleContractsView,
+      meta: {
+        title: "合同与单据",
         section: "订单中心",
         permission: "store-rental:order:view"
       }

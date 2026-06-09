@@ -125,6 +125,12 @@ import type {
   StoreRentalOrderNotificationRecord,
   StoreRentalOrderOperationRecord,
   StoreRentalFeeCenter,
+  StoreRentalContractCenter,
+  StoreRentalContractCenterQuery,
+  StoreRentalContractMockSignRequest,
+  StoreRentalContractMockSignResult,
+  StoreRentalContractPrintRequest,
+  StoreRentalContractPrintResult,
   StoreRentalContractRecord,
   StoreRentalNotificationRecord,
   StoreRentalOrderActionResult,
@@ -349,12 +355,44 @@ export async function getStoreRentalOrderFulfillment(id: string) {
   return response.data.data;
 }
 
+export async function getStoreRentalContractCenter(
+  params: StoreRentalContractCenterQuery = {}
+) {
+  const response = await http.get<ApiResult<StoreRentalContractCenter>>(
+    "/store-rental/contracts",
+    { params }
+  );
+  return response.data.data;
+}
+
 export async function createStoreRentalOrderContract(
   id: string,
   payload: CreateStoreRentalContractRequest
 ) {
   const response = await http.post<ApiResult<StoreRentalContractRecord>>(
     `/store-rental/orders/${id}/contracts`,
+    payload
+  );
+  return response.data.data;
+}
+
+export async function printStoreRentalContractMock(
+  id: string,
+  payload: StoreRentalContractPrintRequest
+) {
+  const response = await http.post<ApiResult<StoreRentalContractPrintResult>>(
+    `/store-rental/contracts/${id}/print-mock`,
+    payload
+  );
+  return response.data.data;
+}
+
+export async function signStoreRentalContractMock(
+  id: string,
+  payload: StoreRentalContractMockSignRequest
+) {
+  const response = await http.post<ApiResult<StoreRentalContractMockSignResult>>(
+    `/store-rental/contracts/${id}/sign-mock`,
     payload
   );
   return response.data.data;
