@@ -692,9 +692,19 @@ export class StoreRentalService {
       title: "ABC Trading Limited",
       amount: 2380,
       issueSource: "monthly_bill",
+      relatedFeeIds: ["fee_rental_10001", "fee_service_10001"],
       issuedAt: "2026-05-08T16:00:00+08:00",
       createdBy: "营运财务",
       remark: "企业月结开票",
+      auditTrail: [
+        {
+          at: "2026-05-08T16:00:00+08:00",
+          operator: "营运财务",
+          action: "issued",
+          remark: "企业月结开票",
+          relatedFeeIds: ["fee_rental_10001", "fee_service_10001"]
+        }
+      ],
       createdAt: "2026-05-08T16:00:00+08:00"
     },
     {
@@ -709,9 +719,19 @@ export class StoreRentalService {
       title: "林小姐",
       amount: 780,
       issueSource: "order",
+      relatedFeeIds: ["fee_rental_10002"],
       issuedAt: "2026-05-06T16:00:00+08:00",
       createdBy: "中环门市",
       remark: "客户自付收据",
+      auditTrail: [
+        {
+          at: "2026-05-06T16:00:00+08:00",
+          operator: "中环门市",
+          action: "sent",
+          remark: "客户自付收据",
+          relatedFeeIds: ["fee_rental_10002"]
+        }
+      ],
       createdAt: "2026-05-06T16:00:00+08:00"
     }
   ];
@@ -2160,14 +2180,53 @@ export class StoreRentalService {
         ? this.orders.find((item) => item.orderNo === input.orderNo)
         : undefined;
     const existingIndex = this.financeDocuments.findIndex((item) => item.id === input.id);
+    const existingDocument =
+      existingIndex >= 0 ? this.financeDocuments[existingIndex] : undefined;
+    const originalIndex = input.originalDocumentId
+      ? this.financeDocuments.findIndex((item) => item.id === input.originalDocumentId)
+      : input.originalDocumentNo
+        ? this.financeDocuments.findIndex(
+            (item) => item.documentNo === input.originalDocumentNo
+          )
+        : -1;
+    const originalDocument =
+      originalIndex >= 0 ? this.financeDocuments[originalIndex] : undefined;
+    const now = new Date().toISOString();
+    const relatedFeeIds = this.uniqueStringList(input.relatedFeeIds);
+    const operator = input.createdBy || "营运财务";
+    const documentNo =
+      input.documentNo ||
+      `${input.type === "receipt" ? "RCT" : "INV"}${new Date()
+        .toISOString()
+        .slice(0, 10)
+        .replace(/-/g, "")}${randomUUID().slice(0, 4).toUpperCase()}`;
+    const auditTrail = this.appendFinanceDocumentAuditTrail(
+      existingDocument?.auditTrail ?? input.auditTrail,
+      {
+        at: now,
+        operator,
+        action: originalDocument
+          ? "reissued"
+          : input.status === "voided"
+            ? "voided"
+            : input.status === "sent"
+              ? "sent"
+              : input.status === "issued"
+                ? "issued"
+                : existingDocument
+                  ? "updated"
+                  : "created",
+        remark:
+          input.voidReason ||
+          input.remark ||
+          (originalDocument ? `重开自 ${originalDocument.documentNo}` : undefined),
+        relatedDocumentNo: originalDocument?.documentNo,
+        relatedFeeIds
+      }
+    );
     const document: FinanceDocumentRow = {
       id: input.id || `finance_doc_${randomUUID()}`,
-      documentNo:
-        input.documentNo ||
-        `${input.type === "receipt" ? "RCT" : "INV"}${new Date()
-          .toISOString()
-          .slice(0, 10)
-          .replace(/-/g, "")}${randomUUID().slice(0, 4).toUpperCase()}`,
+      documentNo,
       type: input.type,
       status: input.status,
       orderId: input.orderId ?? order?.id,
@@ -2182,22 +2241,61 @@ export class StoreRentalService {
       email: this.optionalString(input.email),
       amount,
       issueSource: input.issueSource || "manual",
+      relatedFeeIds,
+      originalDocumentId: input.originalDocumentId ?? originalDocument?.id,
+      originalDocumentNo: input.originalDocumentNo ?? originalDocument?.documentNo,
+      replacementDocumentId: input.replacementDocumentId,
+      replacementDocumentNo: input.replacementDocumentNo,
       issuedAt:
         input.status === "issued" || input.status === "sent"
-          ? input.issuedAt || new Date().toISOString()
+          ? input.issuedAt || now
           : undefined,
-      voidedAt: input.status === "voided" ? new Date().toISOString() : undefined,
-      createdBy: input.createdBy || "营运财务",
+      voidedAt: input.status === "voided" ? now : undefined,
+      voidReason:
+        input.status === "voided" ? this.optionalString(input.voidReason) : undefined,
+      voidedBy: input.status === "voided" ? input.voidedBy || operator : undefined,
+      reissuedAt: originalDocument ? now : input.reissuedAt,
+      createdBy: operator,
       remark: this.optionalString(input.remark),
+      auditTrail,
       createdAt:
         existingIndex >= 0
           ? this.financeDocuments[existingIndex].createdAt
-          : new Date().toISOString()
+          : now
     };
     if (existingIndex >= 0) {
       this.financeDocuments[existingIndex] = document;
     } else {
       this.financeDocuments.unshift(document);
+    }
+    if (originalDocument && originalDocument.id !== document.id) {
+      const originalDocumentIndex = this.financeDocuments.findIndex(
+        (item) => item.id === originalDocument.id
+      );
+      const voidReason =
+        this.optionalString(input.voidReason) ||
+        this.optionalString(input.remark) ||
+        `重开为 ${document.documentNo}`;
+      if (originalDocumentIndex >= 0) {
+        this.financeDocuments[originalDocumentIndex] = {
+        ...originalDocument,
+        status: "voided",
+        voidedAt: originalDocument.voidedAt || now,
+        voidReason,
+        voidedBy: input.voidedBy || operator,
+        replacementDocumentId: document.id,
+        replacementDocumentNo: document.documentNo,
+        reissuedAt: now,
+        auditTrail: this.appendFinanceDocumentAuditTrail(originalDocument.auditTrail, {
+          at: now,
+          operator,
+          action: "voided",
+          remark: voidReason,
+          relatedDocumentNo: document.documentNo,
+          relatedFeeIds: originalDocument.relatedFeeIds
+        })
+      };
+      }
     }
     return document;
   }
@@ -12992,6 +13090,35 @@ export class StoreRentalService {
 
   private optionalString(value: unknown) {
     return typeof value === "string" && value.trim() ? value.trim() : undefined;
+  }
+
+  private uniqueStringList(value: unknown) {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+    return Array.from(
+      new Set(
+        value
+          .map((item) => this.optionalString(item))
+          .filter((item): item is string => Boolean(item))
+      )
+    );
+  }
+
+  private appendFinanceDocumentAuditTrail(
+    value: unknown,
+    item: NonNullable<FinanceDocumentRow["auditTrail"]>[number]
+  ) {
+    const current = Array.isArray(value)
+      ? value.filter((record): record is NonNullable<FinanceDocumentRow["auditTrail"]>[number] => {
+          if (!record || typeof record !== "object") {
+            return false;
+          }
+          const candidate = record as Record<string, unknown>;
+          return Boolean(this.optionalString(candidate.at));
+        })
+      : [];
+    return [...current, item].slice(-20);
   }
 
   private optionalNumber(value: unknown) {

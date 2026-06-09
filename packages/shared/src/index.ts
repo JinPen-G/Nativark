@@ -2833,6 +2833,24 @@ export type FinanceDocumentType = "invoice" | "receipt";
 
 export type FinanceDocumentStatus = "draft" | "issued" | "sent" | "voided";
 
+export type FinanceDocumentAuditAction =
+  | "created"
+  | "updated"
+  | "issued"
+  | "sent"
+  | "voided"
+  | "reissued"
+  | string;
+
+export interface FinanceDocumentAuditItem {
+  at: string;
+  operator?: string;
+  action: FinanceDocumentAuditAction;
+  remark?: string;
+  relatedDocumentNo?: string;
+  relatedFeeIds?: string[];
+}
+
 export type FinanceManualAdjustmentDirection =
   | "charge"
   | "refund"
@@ -2903,10 +2921,19 @@ export interface FinanceDocumentRow {
   email?: string;
   amount: number;
   issueSource: "manual" | "order" | "monthly_bill" | string;
+  relatedFeeIds: string[];
+  originalDocumentId?: string;
+  originalDocumentNo?: string;
+  replacementDocumentId?: string;
+  replacementDocumentNo?: string;
   issuedAt?: string;
   voidedAt?: string;
+  voidReason?: string;
+  voidedBy?: string;
+  reissuedAt?: string;
   createdBy?: string;
   remark?: string;
+  auditTrail: FinanceDocumentAuditItem[];
   createdAt: string;
 }
 
@@ -2927,9 +2954,18 @@ export interface SaveFinanceDocumentRequest {
   email?: string;
   amount: number;
   issueSource?: "manual" | "order" | "monthly_bill" | string;
+  relatedFeeIds?: string[];
+  originalDocumentId?: string;
+  originalDocumentNo?: string;
+  replacementDocumentId?: string;
+  replacementDocumentNo?: string;
   issuedAt?: string;
+  voidReason?: string;
+  voidedBy?: string;
+  reissuedAt?: string;
   createdBy?: string;
   remark?: string;
+  auditTrail?: FinanceDocumentAuditItem[];
 }
 
 export interface FinanceManualAdjustmentRow {

@@ -244,7 +244,7 @@ rimo-store-rental-platform/
 - 主数据：`StoreStationSummary`、`VehicleGroupMaster`、`VehicleInstanceSummary`、`StoreValueAddedServiceSummary`。
 - 订单：`StoreRentalOrderSummary`、`StoreRentalOrderDetail`、`CreateStoreRentalOrderRequest`、`StoreRentalOrderActionResult`。
 - 费用中心：`StoreRentalFeeCenter`、`StoreRentalFeeLedgerItem`、`StoreRentalTransactionRecord`、`CreateStoreRentalFeeRequest`、`CreateStoreRentalTransactionRequest`、`WaiveStoreRentalFeeRequest`。
-- 财务中心：`FinanceOverviewMetrics`、`FinanceTransactionRow`、`FinancePreAuthorizationRow`、`SaveFinancePreAuthorizationRequest`、`FinanceDocumentRow`、`SaveFinanceDocumentRequest`、`FinanceManualAdjustmentRow`、`SaveFinanceManualAdjustmentRequest`、`FinanceReconciliationRow`。
+- 财务中心：`FinanceOverviewMetrics`、`FinanceTransactionRow`、`FinancePreAuthorizationRow`、`SaveFinancePreAuthorizationRequest`、`FinanceDocumentRow`、`FinanceDocumentAuditItem`、`SaveFinanceDocumentRequest`、`FinanceManualAdjustmentRow`、`SaveFinanceManualAdjustmentRequest`、`FinanceReconciliationRow`。
 - 调度：`StoreRentalDispatchBoard`、`StoreRentalDispatchOrderRow`、`StoreRentalDispatchCandidate`、`StoreRentalDispatchPlan`、`StoreRentalDispatchResultRow`、`StoreRentalDispatchApplyResult`、`StoreRentalDispatchTaskPool`、`StoreRentalDispatchTask`、`StoreRentalDispatchEvent`。
 
 后续通用化时不要直接删除这些类型，应新增通用类型并逐步映射。
@@ -435,6 +435,12 @@ system:tenant:manage
 24. 手工调账：`GET/POST /store-rental/finance/manual-adjustments`
 25. 调账审核入账：`POST /store-rental/finance/manual-adjustments/:id/process`
 26. 财务对账：`GET /store-rental/finance/reconciliation`
+
+发票/收据实现口径：
+
+- `FinanceDocument` 保留订单、会员、企业和月结账单快照字段；本轮新增 `relatedFeeIds`、原单/替换单号、作废原因/处理人、重开时间和 `auditTrail`，用于支撑费用级关联、单据重开和操作留痕。
+- 财务结算页“发票收据” Tab 支持录入多个费用 ID、查看最近审计动作、查看“重开自/已重开为”链路，并可对非草稿单据执行重开。重开会创建新单据，同时把原单置为 `voided`，记录作废原因和替换单号。
+- MySQL 模式下以上字段落 `FinanceDocument` 结构化列；旧扩展信息仍兼容 `metadata`。当前不直接接发票平台 SDK，真实开票、红冲、作废同步继续走后续 `InvoiceAdapter`。
 
 当前支持的动作：
 
@@ -655,12 +661,13 @@ npx prisma validate --schema apps/api/prisma/schema.prisma
 - `docs/DATABASE_BOOTSTRAP.md`
 - `apps/api/prisma/migrations/20260608000100_init_store_rental_schema/migration.sql`
 - `apps/api/prisma/migrations/20260608000200_add_dispatch_events/migration.sql`
+- `apps/api/prisma/migrations/20260609000300_add_finance_document_reissue_links/migration.sql`
 - `apps/api/src/modules/platform/platform.repository.ts`
 - `apps/api/src/modules/store-rental/store-rental.repository.ts`
 
 注意：`db:seed` 初始化的是可验证基础数据。平台模块可通过 `PLATFORM_DATA_SOURCE=mysql` 使用这些数据，包含登录、用户、角色、系统参数、数据字典、编号规则和平台审计；租赁业务规则保存/历史版本、站点分页列表、车型组、车辆分页列表/详情事件、会员列表分页/详情/审核/风控、客户等级方案、企业客户列表分页/详情、订单、费用、检查记录、资金流水、续租、改派、改还车门市/据点、终止动作、事故登记、调度事件和企业月结账单可通过 `STORE_RENTAL_DATA_SOURCE=mysql` 使用这些数据。
 
-`PlatformRepository` 已覆盖租户、组织、权限树、角色、用户、系统参数、平台审计、筛选预设、数据字典、编号规则和租户初始化的基础读写和 DTO 映射。`PlatformService` 已增加 `PLATFORM_DATA_SOURCE=memory|mysql` 开关。`StoreRentalRepository` 已覆盖租赁业务规则版本、站点、车型组、车辆基础读写、站点/车辆列表分页筛选、车辆详情事件、客户域、会员/企业客户列表分页筛选、订单域、费用/资金、检查记录、时间线、续租快照、改派动作、改还车门市/据点动作、转单后续预约快捷改派一期、事故记录、调度事件和企业月结基础读写，并通过 `metadata` JSON 保留原型扩展字段。下一步迁事故后续订单联动、统一审计和幂等。
+`PlatformRepository` 已覆盖租户、组织、权限树、角色、用户、系统参数、平台审计、筛选预设、数据字典、编号规则和租户初始化的基础读写和 DTO 映射。`PlatformService` 已增加 `PLATFORM_DATA_SOURCE=memory|mysql` 开关。`StoreRentalRepository` 已覆盖租赁业务规则版本、站点、车型组、车辆基础读写、站点/车辆列表分页筛选、车辆详情事件、客户域、会员/企业客户列表分页筛选、订单域、费用/资金、预授权押金台账、发票/收据费用关联、重开链路、手工调账、检查记录、时间线、续租快照、改派动作、改还车门市/据点动作、转单后续预约快捷改派一期、事故记录、调度事件和企业月结基础读写，并通过 `metadata` JSON 保留原型扩展字段。下一步迁事故后续订单联动、统一审计和幂等。
 
 ## 开发约定
 

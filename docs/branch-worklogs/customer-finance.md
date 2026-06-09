@@ -61,6 +61,12 @@
   - 财务总览“预授权冻结”改为按台账剩余额度统计，显式台账优先于派生台账。
   - 财务结算页新增“预授权押金” Tab 和登记/编辑弹窗，覆盖订单、客户、状态、渠道、服务商、授权码、渠道流水、冻结/扣款/释放金额、过期时间和处理人。
 
+- OR-17 发票与收据重开链路第一版：
+  - 新增 migration `20260609000300_add_finance_document_reissue_links`，扩展 `FinanceDocument` 的 `relatedFeeIds`、原单/替换单据链路、作废原因/处理人、重开时间和审计轨迹字段。
+  - 共享 DTO 新增 `FinanceDocumentAuditItem`，`FinanceDocumentRow` 和 `SaveFinanceDocumentRequest` 支持费用级关联、重开来源和作废留痕。
+  - 后端内存模式和 MySQL repository 支持重开新单时自动把原单置为 `voided`，并写入 `replacementDocumentNo`、`voidReason`、`voidedBy` 和 `auditTrail`。
+  - 财务结算页“发票收据” Tab 增加关联费用展示、原单/替换单链路、最近审计展示和“重开”操作；弹窗支持录入多个费用 ID、作废/重开原因和处理人。
+
 ## 客户等级字段
 
 - 当前客户等级方案字段：
@@ -99,6 +105,7 @@
   - `npm run build -w @rimo/api`
   - `npm run build -w @rimo/admin`
   - `$env:DATABASE_URL='mysql://root:password@localhost:3306/rimo_store_rental'; npx prisma validate --schema apps/api/prisma/schema.prisma`
-- 仍需在最终提交前运行：
   - `npm run build`
   - `git diff --check`
+- 仍需在最终提交前运行：
+  - `npm run db:validate`：本轮执行时被 Windows 沙箱进程权限拦截；按规则提权重试又因工作区审批额度不足被系统拒绝，需在审批恢复后补跑。

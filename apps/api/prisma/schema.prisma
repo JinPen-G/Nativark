@@ -897,10 +897,19 @@ model FinanceDocument {
   email              String?
   amount             Decimal               @db.Decimal(12, 2)
   issueSource        String                @default("manual")
+  relatedFeeIds      Json?
+  originalDocumentId String?
+  originalDocumentNo String?
+  replacementDocumentId String?
+  replacementDocumentNo String?
   issuedAt           DateTime?
   voidedAt           DateTime?
+  voidReason         String?
+  voidedBy           String?
+  reissuedAt         DateTime?
   createdBy          String?
   remark             String?
+  auditTrail         Json?
   metadata           Json?
   createdAt          DateTime              @default(now())
   updatedAt          DateTime              @updatedAt
@@ -909,6 +918,8 @@ model FinanceDocument {
   @@index([tenantId, type, status])
   @@index([tenantId, orderId])
   @@index([tenantId, corporateId])
+  @@index([tenantId, originalDocumentId])
+  @@index([tenantId, replacementDocumentId])
 }
 
 model FinanceManualAdjustment {

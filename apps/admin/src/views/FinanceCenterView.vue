@@ -46,6 +46,8 @@ const adjustments = ref<FinanceManualAdjustmentRow[]>([]);
 const reconciliationRows = ref<FinanceReconciliationRow[]>([]);
 const keyword = ref("");
 const documentDialogVisible = ref(false);
+const documentDialogMode = ref<"create" | "edit" | "reissue">("create");
+const documentRelatedFeeIdsText = ref("");
 const preAuthDialogVisible = ref(false);
 const adjustmentDialogVisible = ref(false);
 const saving = ref(false);
@@ -58,6 +60,7 @@ const documentForm = reactive<SaveFinanceDocumentRequest>({
   title: "",
   amount: 0,
   issueSource: "manual",
+  relatedFeeIds: [],
   createdBy: "营运财务",
   remark: ""
 });
@@ -91,6 +94,10 @@ const monthlyReconciliationRows = computed(() =>
   reconciliationRows.value.filter((row) => row.sourceType === "monthly_bill")
 );
 
+const documentDialogTitle = computed(() =>
+  documentDialogMode.value === "reissue" ? "重开发票 / 收据" : "发票 / 收据"
+);
+
 const filteredTransactions = computed(() => {
   const text = keyword.value.trim().toLowerCase();
   if (!text) {
@@ -109,7 +116,16 @@ const filteredDocuments = computed(() => {
     return documents.value;
   }
   return documents.value.filter((row) =>
-    [row.documentNo, row.orderNo, row.customerName, row.title, row.corporateShortName]
+    [
+      row.documentNo,
+      row.orderNo,
+      row.customerName,
+      row.title,
+      row.corporateShortName,
+      row.originalDocumentNo,
+      row.replacementDocumentNo,
+      ...(row.relatedFeeIds ?? [])
+    ]
       .filter(Boolean)
       .some((value) => String(value).toLowerCase().includes(text))
   );
@@ -214,6 +230,37 @@ function documentStatusLabel(status: FinanceDocumentRow["status"]) {
   }[status];
 }
 
+function documentStatusTag(status: FinanceDocumentRow["status"]) {
+  return status === "voided" ? "danger" : status === "draft" ? "info" : "success";
+}
+
+function normalizeRelatedFeeIds(value: string) {
+  return Array.from(
+    new Set(
+      value
+        .split(/[\s,，、;；]+/)
+        .map((item) => item.trim())
+        .filter(Boolean)
+    )
+  );
+}
+
+function latestDocumentAudit(row: FinanceDocumentRow) {
+  const latest = row.auditTrail?.[row.auditTrail.length - 1];
+  if (!latest) {
+    return "-";
+  }
+  const actionMap: Record<string, string> = {
+    created: "创建",
+    updated: "更新",
+    issued: "开具",
+    sent: "发送",
+    voided: "作废",
+    reissued: "重开"
+  };
+  return `${latest.operator || "系统"} · ${actionMap[latest.action] || latest.action}`;
+}
+
 function preAuthStatusLabel(status: FinancePreAuthorizationRow["status"]) {
   return {
     pending: "待冻结",
@@ -275,6 +322,8 @@ function billingModeLabel(mode?: BillingMode) {
 }
 
 function openDocumentDialog(row?: FinanceDocumentRow) {
+  documentDialogMode.value = row ? "edit" : "create";
+  documentRelatedFeeIdsText.value = (row?.relatedFeeIds ?? []).join("\n");
   Object.assign(documentForm, {
     id: row?.id,
     documentNo: row?.documentNo,
@@ -292,8 +341,52 @@ function openDocumentDialog(row?: FinanceDocumentRow) {
     email: row?.email,
     amount: row?.amount ?? 0,
     issueSource: row?.issueSource ?? "manual",
+    relatedFeeIds: row?.relatedFeeIds ?? [],
+    originalDocumentId: row?.originalDocumentId,
+    originalDocumentNo: row?.originalDocumentNo,
+    replacementDocumentId: row?.replacementDocumentId,
+    replacementDocumentNo: row?.replacementDocumentNo,
+    voidReason: row?.voidReason,
+    voidedBy: row?.voidedBy,
+    reissuedAt: row?.reissuedAt,
     createdBy: row?.createdBy ?? "营运财务",
-    remark: row?.remark ?? ""
+    remark: row?.remark ?? "",
+    auditTrail: row?.auditTrail ?? []
+  });
+  documentDialogVisible.value = true;
+}
+
+function openReissueDocumentDialog(row: FinanceDocumentRow) {
+  documentDialogMode.value = "reissue";
+  documentRelatedFeeIdsText.value = (row.relatedFeeIds ?? []).join("\n");
+  Object.assign(documentForm, {
+    id: undefined,
+    documentNo: undefined,
+    type: row.type,
+    status: "issued",
+    orderId: row.orderId,
+    orderNo: row.orderNo ?? "",
+    memberId: row.memberId,
+    corporateId: row.corporateId,
+    corporateShortName: row.corporateShortName,
+    monthlyBillId: row.monthlyBillId,
+    customerName: row.customerName,
+    title: row.title,
+    taxNo: row.taxNo,
+    email: row.email,
+    amount: row.amount,
+    issueSource: row.issueSource,
+    relatedFeeIds: row.relatedFeeIds ?? [],
+    originalDocumentId: row.id,
+    originalDocumentNo: row.documentNo,
+    replacementDocumentId: undefined,
+    replacementDocumentNo: undefined,
+    voidReason: "",
+    voidedBy: row.createdBy ?? "营运财务",
+    reissuedAt: undefined,
+    createdBy: row.createdBy ?? "营运财务",
+    remark: row.remark ? `重开：${row.remark}` : "单据重开",
+    auditTrail: []
   });
   documentDialogVisible.value = true;
 }
@@ -349,7 +442,14 @@ function openAdjustmentDialog() {
 async function submitDocument() {
   saving.value = true;
   try {
-    await saveFinanceDocument(documentForm);
+    await saveFinanceDocument({
+      ...documentForm,
+      relatedFeeIds: normalizeRelatedFeeIds(documentRelatedFeeIdsText.value),
+      voidReason:
+        documentForm.status === "voided" || documentDialogMode.value === "reissue"
+          ? documentForm.voidReason || documentForm.remark
+          : documentForm.voidReason
+    });
     ElMessage.success("发票/收据已保存");
     documentDialogVisible.value = false;
     await loadData();
@@ -571,15 +671,43 @@ onMounted(loadData);
         </el-table-column>
         <el-table-column label="状态" width="110">
           <template #default="{ row }">
-            <el-tag :type="row.status === 'voided' ? 'danger' : row.status === 'draft' ? 'info' : 'success'" effect="plain">
+            <el-tag :type="documentStatusTag(row.status)" effect="plain">
               {{ documentStatusLabel(row.status) }}
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="关联费用 / 重开链路" min-width="260">
+          <template #default="{ row }">
+            <div class="flex flex-wrap gap-1">
+              <el-tag v-for="feeId in row.relatedFeeIds ?? []" :key="feeId" size="small" effect="plain">{{ feeId }}</el-tag>
+              <span v-if="!row.relatedFeeIds?.length" class="text-xs text-gray-400">未关联费用</span>
+            </div>
+            <div v-if="row.originalDocumentNo" class="text-xs text-gray-500 mt-1">
+              重开自 {{ row.originalDocumentNo }}
+            </div>
+            <div v-if="row.replacementDocumentNo" class="text-xs text-gray-500 mt-1">
+              已重开为 {{ row.replacementDocumentNo }}
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="审计" min-width="180">
+          <template #default="{ row }">
+            <div class="text-sm text-gray-700">{{ latestDocumentAudit(row) }}</div>
+            <div v-if="row.voidReason" class="text-xs text-gray-500 mt-1">{{ row.voidReason }}</div>
+          </template>
+        </el-table-column>
         <el-table-column prop="createdBy" label="开具人" width="120" />
-        <el-table-column label="操作" width="100" align="right">
+        <el-table-column label="操作" width="150" align="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openDocumentDialog(row)">编辑</el-button>
+            <el-button
+              v-if="row.status !== 'draft' && !row.replacementDocumentId"
+              link
+              type="warning"
+              @click="openReissueDocumentDialog(row)"
+            >
+              重开
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -643,7 +771,7 @@ onMounted(loadData);
       </el-table>
     </div>
 
-    <el-dialog v-model="documentDialogVisible" title="发票 / 收据" width="760px">
+    <el-dialog v-model="documentDialogVisible" :title="documentDialogTitle" width="820px">
       <el-form label-position="top">
         <div class="grid grid-cols-12 gap-4">
           <el-form-item label="单据类型" class="col-span-12 md:col-span-3">
@@ -662,6 +790,31 @@ onMounted(loadData);
           </el-form-item>
           <el-form-item label="订单号" class="col-span-12 md:col-span-6">
             <el-input v-model="documentForm.orderNo" placeholder="可选，绑定订单快照" />
+          </el-form-item>
+          <el-form-item label="关联费用ID" class="col-span-12 md:col-span-6">
+            <el-input
+              v-model="documentRelatedFeeIdsText"
+              type="textarea"
+              :rows="2"
+              placeholder="多个费用 ID 可用逗号、空格或换行分隔"
+            />
+          </el-form-item>
+          <el-form-item v-if="documentForm.originalDocumentNo" label="重开来源" class="col-span-12 md:col-span-4">
+            <el-input v-model="documentForm.originalDocumentNo" disabled />
+          </el-form-item>
+          <el-form-item
+            v-if="documentForm.status === 'voided' || documentForm.originalDocumentNo"
+            label="作废/重开原因"
+            class="col-span-12 md:col-span-4"
+          >
+            <el-input v-model="documentForm.voidReason" placeholder="作废、重开或更正说明" />
+          </el-form-item>
+          <el-form-item
+            v-if="documentForm.status === 'voided' || documentForm.originalDocumentNo"
+            label="作废处理人"
+            class="col-span-12 md:col-span-4"
+          >
+            <el-input v-model="documentForm.voidedBy" />
           </el-form-item>
           <el-form-item label="客户名称" class="col-span-12 md:col-span-4">
             <el-input v-model="documentForm.customerName" />

@@ -3219,6 +3219,49 @@ export class StoreRentalRepository {
         .slice(0, 10)
         .replace(/-/g, "")}${cryptoRandomId().slice(0, 4).toUpperCase()}`;
     const id = input.id ?? `finance_doc_${cryptoRandomId()}`;
+    const current = input.id
+      ? await this.prisma.financeDocument.findUnique({ where: { id: input.id } })
+      : undefined;
+    const originalDocument = input.originalDocumentId
+      ? await this.prisma.financeDocument.findUnique({
+          where: { id: input.originalDocumentId }
+        })
+      : input.originalDocumentNo
+        ? await this.prisma.financeDocument.findFirst({
+            where: { tenantId, documentNo: input.originalDocumentNo }
+          })
+        : undefined;
+    const now = new Date();
+    const relatedFeeIds = Array.from(new Set(this.stringArray(input.relatedFeeIds)));
+    const operator = input.createdBy || "营运财务";
+    const voidReason =
+      input.status === "voided"
+        ? input.voidReason || input.remark
+        : input.voidReason || undefined;
+    const auditTrail = this.appendFinanceDocumentAuditTrail(
+      current?.auditTrail ?? input.auditTrail,
+      {
+        at: now.toISOString(),
+        operator,
+        action: originalDocument
+          ? "reissued"
+          : input.status === "voided"
+            ? "voided"
+            : input.status === "sent"
+              ? "sent"
+              : input.status === "issued"
+                ? "issued"
+                : current
+                  ? "updated"
+                  : "created",
+        remark:
+          voidReason ||
+          input.remark ||
+          (originalDocument ? `重开自 ${originalDocument.documentNo}` : undefined),
+        relatedDocumentNo: originalDocument?.documentNo ?? undefined,
+        relatedFeeIds
+      }
+    );
 
     const row = await this.prisma.financeDocument.upsert({
       where: { id },
@@ -3239,18 +3282,33 @@ export class StoreRentalRepository {
         email: input.email,
         amount,
         issueSource: input.issueSource || "manual",
+        relatedFeeIds: relatedFeeIds as Prisma.InputJsonValue,
+        originalDocumentId: input.originalDocumentId ?? originalDocument?.id,
+        originalDocumentNo: input.originalDocumentNo ?? originalDocument?.documentNo,
+        replacementDocumentId: input.replacementDocumentId,
+        replacementDocumentNo: input.replacementDocumentNo,
         issuedAt:
           input.status === "issued" || input.status === "sent"
             ? input.issuedAt
               ? new Date(input.issuedAt)
-              : new Date()
+              : now
             : undefined,
-        voidedAt: input.status === "voided" ? new Date() : undefined,
-        createdBy: input.createdBy,
+        voidedAt: input.status === "voided" ? now : undefined,
+        voidReason,
+        voidedBy: input.status === "voided" ? input.voidedBy || operator : undefined,
+        reissuedAt: originalDocument
+          ? now
+          : input.reissuedAt
+            ? new Date(input.reissuedAt)
+            : undefined,
+        createdBy: operator,
         remark: input.remark,
+        auditTrail: auditTrail as unknown as Prisma.InputJsonValue,
         metadata: this.metadata({
           rentalObjectType: "vehicle",
-          source: input.issueSource || "manual"
+          source: input.issueSource || "manual",
+          relatedFeeIds,
+          originalDocumentNo: input.originalDocumentNo ?? originalDocument?.documentNo
         }) as Prisma.InputJsonValue
       },
       create: {
@@ -3272,21 +3330,64 @@ export class StoreRentalRepository {
         email: input.email,
         amount,
         issueSource: input.issueSource || "manual",
+        relatedFeeIds: relatedFeeIds as Prisma.InputJsonValue,
+        originalDocumentId: input.originalDocumentId ?? originalDocument?.id,
+        originalDocumentNo: input.originalDocumentNo ?? originalDocument?.documentNo,
+        replacementDocumentId: input.replacementDocumentId,
+        replacementDocumentNo: input.replacementDocumentNo,
         issuedAt:
           input.status === "issued" || input.status === "sent"
             ? input.issuedAt
               ? new Date(input.issuedAt)
-              : new Date()
+              : now
             : undefined,
-        voidedAt: input.status === "voided" ? new Date() : undefined,
-        createdBy: input.createdBy,
+        voidedAt: input.status === "voided" ? now : undefined,
+        voidReason,
+        voidedBy: input.status === "voided" ? input.voidedBy || operator : undefined,
+        reissuedAt: originalDocument
+          ? now
+          : input.reissuedAt
+            ? new Date(input.reissuedAt)
+            : undefined,
+        createdBy: operator,
         remark: input.remark,
+        auditTrail: auditTrail as unknown as Prisma.InputJsonValue,
         metadata: this.metadata({
           rentalObjectType: "vehicle",
-          source: input.issueSource || "manual"
+          source: input.issueSource || "manual",
+          relatedFeeIds,
+          originalDocumentNo: input.originalDocumentNo ?? originalDocument?.documentNo
         }) as Prisma.InputJsonValue
       }
     });
+
+    if (originalDocument && originalDocument.id !== row.id) {
+      const originalVoidReason =
+        input.voidReason || input.remark || `重开为 ${row.documentNo}`;
+      await this.prisma.financeDocument.update({
+        where: { id: originalDocument.id },
+        data: {
+          status: PrismaFinanceDocumentStatus.VOIDED,
+          voidedAt: originalDocument.voidedAt ?? now,
+          voidReason: originalVoidReason,
+          voidedBy: input.voidedBy || operator,
+          replacementDocumentId: row.id,
+          replacementDocumentNo: row.documentNo,
+          reissuedAt: now,
+          auditTrail: this.appendFinanceDocumentAuditTrail(
+            originalDocument.auditTrail,
+            {
+              at: now.toISOString(),
+              operator,
+              action: "voided",
+              remark: originalVoidReason,
+              relatedDocumentNo: row.documentNo,
+              relatedFeeIds: this.stringArray(originalDocument.relatedFeeIds)
+            }
+          ) as unknown as Prisma.InputJsonValue
+        }
+      });
+    }
 
     return this.toFinanceDocumentRow(row);
   }
@@ -5476,6 +5577,7 @@ export class StoreRentalRepository {
   }
 
   private toFinanceDocumentRow(row: any): FinanceDocumentRow {
+    const metadata = this.objectMetadata(row.metadata);
     return {
       id: row.id,
       documentNo: row.documentNo,
@@ -5493,10 +5595,25 @@ export class StoreRentalRepository {
       email: row.email ?? undefined,
       amount: Number(row.amount),
       issueSource: row.issueSource,
+      relatedFeeIds: this.stringArray(row.relatedFeeIds ?? metadata.relatedFeeIds),
+      originalDocumentId:
+        row.originalDocumentId ?? this.stringValue(metadata.originalDocumentId),
+      originalDocumentNo:
+        row.originalDocumentNo ?? this.stringValue(metadata.originalDocumentNo),
+      replacementDocumentId:
+        row.replacementDocumentId ?? this.stringValue(metadata.replacementDocumentId),
+      replacementDocumentNo:
+        row.replacementDocumentNo ?? this.stringValue(metadata.replacementDocumentNo),
       issuedAt: row.issuedAt?.toISOString(),
       voidedAt: row.voidedAt?.toISOString(),
+      voidReason: row.voidReason ?? this.stringValue(metadata.voidReason),
+      voidedBy: row.voidedBy ?? this.stringValue(metadata.voidedBy),
+      reissuedAt: row.reissuedAt?.toISOString(),
       createdBy: row.createdBy ?? undefined,
       remark: row.remark ?? undefined,
+      auditTrail: this.financeDocumentAuditTrail(
+        row.auditTrail ?? metadata.auditTrail
+      ),
       createdAt: row.createdAt.toISOString()
     };
   }
@@ -5846,6 +5963,37 @@ export class StoreRentalRepository {
 
   private booleanValue(value: unknown) {
     return typeof value === "boolean" ? value : undefined;
+  }
+
+  private financeDocumentAuditTrail(
+    value: unknown
+  ): FinanceDocumentRow["auditTrail"] {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+    return value
+      .filter((record): record is NonNullable<FinanceDocumentRow["auditTrail"]>[number] => {
+        if (!record || typeof record !== "object") {
+          return false;
+        }
+        const candidate = record as Record<string, unknown>;
+        return Boolean(this.stringValue(candidate.at));
+      })
+      .map((record) => ({
+        at: record.at,
+        operator: record.operator,
+        action: record.action,
+        remark: record.remark,
+        relatedDocumentNo: record.relatedDocumentNo,
+        relatedFeeIds: this.stringArray(record.relatedFeeIds)
+      }));
+  }
+
+  private appendFinanceDocumentAuditTrail(
+    value: unknown,
+    item: NonNullable<FinanceDocumentRow["auditTrail"]>[number]
+  ): FinanceDocumentRow["auditTrail"] {
+    return [...this.financeDocumentAuditTrail(value), item].slice(-20);
   }
 
   private stringArray(value: unknown): string[] {
