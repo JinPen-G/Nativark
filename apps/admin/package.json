@@ -1,0 +1,28 @@
+{
+  "name": "@rimo/admin",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 5173",
+    "dev:5174": "vite --host 127.0.0.1 --port 5174 --strictPort",
+    "build": "vue-tsc -b && vite build",
+    "lint": "vue-tsc -b --noEmit"
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "^2.3.1",
+    "@rimo/shared": "0.1.0",
+    "axios": "^1.7.7",
+    "element-plus": "^2.8.8",
+    "pinia": "^2.2.6",
+    "vue": "^3.5.13",
+    "vue-router": "^4.4.5"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.1.4",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "vite": "^5.4.11",
+    "vue-tsc": "^2.1.10"
+  }
+}

@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+.vite/
+*.tsbuildinfo
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Local environment
+.env
+.env.*
+!.env.example
+
+# Runtime uploads and local database exports
+apps/api/uploads/
+*.sqlite
+
+# OS/editor noise
+.DS_Store
+Thumbs.db

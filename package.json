@@ -1,0 +1,33 @@
+{
+  "name": "rimo-store-rental-platform",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run build -w @rimo/shared && concurrently -n api,admin -c blue,green \"npm run dev -w @rimo/api\" \"npm run dev -w @rimo/admin\"",
+    "dev:api": "npm run build -w @rimo/shared && npm run dev -w @rimo/api",
+    "dev:admin": "npm run build -w @rimo/shared && npm run dev -w @rimo/admin",
+    "dev:admin:5174": "npm run build -w @rimo/shared && npm run dev:5174 -w @rimo/admin",
+    "build": "npm run build -w @rimo/shared && npm run build -w @rimo/api && npm run build -w @rimo/admin",
+    "lint": "npm run lint -w @rimo/shared && npm run lint -w @rimo/api && npm run lint -w @rimo/admin",
+    "db:generate": "npm run prisma:generate -w @rimo/api",
+    "db:validate": "npm run prisma:validate -w @rimo/api",
+    "db:migrate": "npm run prisma:migrate -w @rimo/api",
+    "db:seed": "npm run prisma:seed -w @rimo/api",
+    "db:seed:reports": "npm run prisma:seed:reports -w @rimo/api",
+    "ops:mysql:setup": "powershell -ExecutionPolicy Bypass -File scripts/setup-local-mysql.ps1",
+    "ops:mysql:backup": "powershell -ExecutionPolicy Bypass -File scripts/backup-mysql.ps1",
+    "ops:mysql:restore": "powershell -ExecutionPolicy Bypass -File scripts/restore-mysql.ps1",
+    "test:reports": "node tests/reports-metrics.test.cjs",
+    "contract:validate": "node scripts/validate-api-contracts.cjs",
+    "format": "prettier --write \"apps/**/*.{ts,vue,css}\" \"packages/**/*.ts\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "prettier": "^3.3.3",
+    "typescript": "^5.6.3"
+  }
+}
