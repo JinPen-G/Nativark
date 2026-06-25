@@ -1,18 +1,108 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
+import { ElMessage, ElMessageBox } from "element-plus";
 import type { TboxDeviceSummary, VehicleInstanceSummary } from "@store-rental/shared";
-import { listTboxDevices, listVehicles } from "../api/client";
+import { listTboxDevices, listVehicles, updateVehicleStatus } from "../api/client";
 import AppLayout from "../components/AppLayout.vue";
 
 const loading = ref(false);
 const rows = ref<VehicleInstanceSummary[]>([]);
 const tboxDevices = ref<TboxDeviceSummary[]>([]);
+const selectedVehicles = ref<VehicleInstanceSummary[]>([]);
 const filters = reactive({
   keyword: "",
   station: "",
   operationStatus: "",
   serviceType: ""
 });
+
+function handleSelectionChange(selection: VehicleInstanceSummary[]) {
+  selectedVehicles.value = selection;
+}
+
+async function batchSetMaintenance() {
+  if (selectedVehicles.value.length === 0) {
+    ElMessage.warning("请先选择要操作的车辆");
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确认将 ${selectedVehicles.value.length} 台车辆设置为维保状态？`,
+      "批量维保确认",
+      { type: "warning" }
+    );
+    for (const vehicle of selectedVehicles.value) {
+      await updateVehicleStatus(vehicle.id, {
+        operationStatus: "maintenance",
+        reason: "批量维保操作",
+        operator: "营运端"
+      });
+    }
+    ElMessage.success(`已将 ${selectedVehicles.value.length} 台车辆设置为维保状态`);
+    selectedVehicles.value = [];
+    await loadData();
+  } catch (error) {
+    if (error !== "cancel") {
+      ElMessage.error("批量维保操作失败");
+    }
+  }
+}
+
+async function batchSetDisabled() {
+  if (selectedVehicles.value.length === 0) {
+    ElMessage.warning("请先选择要操作的车辆");
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确认将 ${selectedVehicles.value.length} 台车辆设置为停用状态？`,
+      "批量停用确认",
+      { type: "warning" }
+    );
+    for (const vehicle of selectedVehicles.value) {
+      await updateVehicleStatus(vehicle.id, {
+        operationStatus: "disabled",
+        reason: "批量停用操作",
+        operator: "营运端"
+      });
+    }
+    ElMessage.success(`已将 ${selectedVehicles.value.length} 台车辆设置为停用状态`);
+    selectedVehicles.value = [];
+    await loadData();
+  } catch (error) {
+    if (error !== "cancel") {
+      ElMessage.error("批量停用操作失败");
+    }
+  }
+}
+
+async function batchSetIdle() {
+  if (selectedVehicles.value.length === 0) {
+    ElMessage.warning("请先选择要操作的车辆");
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确认将 ${selectedVehicles.value.length} 台车辆设置为空闲状态？`,
+      "批量启用确认",
+      { type: "warning" }
+    );
+    for (const vehicle of selectedVehicles.value) {
+      await updateVehicleStatus(vehicle.id, {
+        operationStatus: "idle",
+        reason: "批量启用操作",
+        operator: "营运端"
+      });
+    }
+    ElMessage.success(`已将 ${selectedVehicles.value.length} 台车辆设置为空闲状态`);
+    selectedVehicles.value = [];
+    await loadData();
+  } catch (error) {
+    if (error !== "cancel") {
+      ElMessage.error("批量启用操作失败");
+    }
+  }
+}
 
 const stationOptions = computed(() =>
   Array.from(new Set(rows.value.map((row) => row.currentStationName))).filter(Boolean)
@@ -127,10 +217,19 @@ onMounted(loadData);
           <el-option label="门市租赁" value="STORE_STANDARD" />
           <el-option label="24小时自助" value="STORE_24H" />
         </el-select>
-        <div class="ml-auto text-sm text-gray-500">共 {{ filteredRows.length }} 台</div>
+        <div class="ml-auto flex items-center gap-3">
+        <div v-if="selectedVehicles.length > 0" class="flex items-center gap-2">
+          <el-tag type="info" effect="plain">已选 {{ selectedVehicles.length }} 台</el-tag>
+          <el-button size="small" type="warning" plain @click="batchSetMaintenance">批量维保</el-button>
+          <el-button size="small" type="danger" plain @click="batchSetDisabled">批量停用</el-button>
+          <el-button size="small" type="success" plain @click="batchSetIdle">批量启用</el-button>
+        </div>
+        <div class="text-sm text-gray-500">共 {{ filteredRows.length }} 台</div>
+      </div>
       </div>
 
-      <el-table :data="filteredRows" :loading="loading" border stripe>
+      <el-table :data="filteredRows" :loading="loading" border stripe @selection-change="handleSelectionChange">
+        <el-table-column type="selection" width="50" />
         <el-table-column label="车辆基础信息" align="center">
           <el-table-column label="车牌 / 车型组" min-width="220">
             <template #default="{ row }">
