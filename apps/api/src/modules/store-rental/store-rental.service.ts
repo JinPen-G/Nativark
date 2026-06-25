@@ -162,7 +162,7 @@ import {
   RunTboxCommandRequest,
   WaiveStoreRentalFeeRequest,
   WorkflowTransition
-} from "@rimo/shared";
+} from "@store-rental/shared";
 import { IntegrationsService } from "../integrations/integrations.service";
 import { StoreRentalRepository } from "./store-rental.repository";
 
@@ -937,7 +937,7 @@ export class StoreRentalService {
       licensePlate: "RX 7821",
       vin: "AHTLB3JE0R0001234",
       vehicleGroupName: "Toyota Noah / 同级 7座",
-      assetCompanyName: "RIMO 香港租户",
+      assetCompanyName: "演示香港租户",
       currentStoreName: "旺角门市",
       currentStationName: "旺角门市柜台",
       operationStatus: "renting",
@@ -954,7 +954,7 @@ export class StoreRentalService {
       licensePlate: "BCP 7315",
       vin: "JTMBW3FV0R1009012",
       vehicleGroupName: "Honda Jazz / 同级",
-      assetCompanyName: "RIMO 香港租户",
+      assetCompanyName: "演示香港租户",
       currentStoreName: "中环门市",
       currentStationName: "中环门市服务点",
       operationStatus: "idle",
@@ -971,7 +971,7 @@ export class StoreRentalService {
       licensePlate: "EV 9308",
       vin: "LRW3E7FS0PC001122",
       vehicleGroupName: "Tesla Model 3 / 同级",
-      assetCompanyName: "RIMO 香港租户",
+      assetCompanyName: "演示香港租户",
       currentStoreName: "机场门市",
       currentStationName: "机场门市停车区",
       operationStatus: "reserved",
@@ -988,7 +988,7 @@ export class StoreRentalService {
       licensePlate: "HK 6208",
       vin: "JHMGK5850RS004208",
       vehicleGroupName: "Honda Jazz / 同级",
-      assetCompanyName: "RIMO 香港租户",
+      assetCompanyName: "演示香港租户",
       currentStoreName: "旺角门市",
       currentStationName: "旺角门市柜台",
       operationStatus: "idle",
@@ -1005,7 +1005,7 @@ export class StoreRentalService {
       licensePlate: "VN 3312",
       vin: "JTMBW3FV0R1003312",
       vehicleGroupName: "Toyota Noah / 同级 7座",
-      assetCompanyName: "RIMO 香港租户",
+      assetCompanyName: "演示香港租户",
       currentStoreName: "中环门市",
       currentStationName: "中环门市服务点",
       operationStatus: "idle",
@@ -1022,7 +1022,7 @@ export class StoreRentalService {
       licensePlate: "EV 2188",
       vin: "LRW3E7FS0PC002188",
       vehicleGroupName: "Tesla Model 3 / 同级",
-      assetCompanyName: "RIMO 香港租户",
+      assetCompanyName: "演示香港租户",
       currentStoreName: "机场门市",
       currentStationName: "机场门市停车区",
       operationStatus: "idle",
@@ -1680,6 +1680,25 @@ export class StoreRentalService {
             : "恢复租车资格",
       remark: reason
     });
+
+    // 统一审计日志写入
+    await this.appendOperationLog(
+      "member",
+      member.id,
+      input.action === "blacklist"
+        ? "加入黑名单"
+        : input.action === "suspend"
+          ? "暂停租车资格"
+          : "恢复租车资格",
+      operator,
+      `会员 ${member.name}（${member.phoneMasked}）执行风控动作：${
+        input.action === "blacklist"
+          ? "加入黑名单"
+          : input.action === "suspend"
+            ? "暂停租车资格"
+            : "恢复租车资格"
+      }，原因：${reason}，影响订单数：${affectedOrders.length}`
+    );
 
     return {
       member: structuredClone(member),
@@ -3210,7 +3229,7 @@ export class StoreRentalService {
       const scopeMatched =
         scopeType === "all" ||
         !scopeLabel ||
-        (scopeType === "company" && (row.companyName || "RIMO 香港租户") === scopeLabel) ||
+        (scopeType === "company" && (row.companyName || "演示香港租户") === scopeLabel) ||
         (scopeType === "store" && row.parentStoreName === scopeLabel);
       const serviceMatched =
         !serviceCapability || row.serviceCapabilities.includes(serviceCapability);
@@ -3267,7 +3286,7 @@ export class StoreRentalService {
     const companies = new Map<string, StoreStationHierarchyNode>();
 
     for (const station of stations) {
-      const companyName = station.companyName || "RIMO 香港租户";
+      const companyName = station.companyName || "演示香港租户";
       const companyId = `company_${companyName}`;
       const storeId = `store_${companyName}_${station.parentStoreName}`;
 
@@ -5748,7 +5767,7 @@ export class StoreRentalService {
     }
     if (this.useMysqlDataSource()) {
       const order = await this.storeRentalRepository.getOrderDetail(id);
-      const record = await this.storeRentalRepository.createOrderNotificationRecord(
+      const record = await this.storeRentalRepository.createStoreRentalNotificationRecord(
         order.id,
         input
       );
@@ -5991,6 +6010,15 @@ export class StoreRentalService {
       });
     }
 
+    // 统一审计日志写入
+    await this.appendOperationLog(
+      "order_fee",
+      order.id,
+      "新增费用",
+      input.operator || "门店营运",
+      `订单 ${order.orderNo} 新增费用：${fee.name} ${fee.amount} ${fee.direction === "charge" ? "补收" : "退款"}`
+    );
+
     return this.getOrderFeeCenter(order.id);
   }
 
@@ -6077,6 +6105,15 @@ export class StoreRentalService {
       `费用减免：${fee.name} ${amount}`
     );
 
+    // 统一审计日志写入
+    await this.appendOperationLog(
+      "order_fee",
+      order.id,
+      "费用减免",
+      input.operator || "门店营运",
+      `订单 ${order.orderNo} 费用减免：${fee.name} ${amount}，原因：${input.reason || "无"}`
+    );
+
     return this.getOrderFeeCenter(order.id);
   }
 
@@ -6148,6 +6185,15 @@ export class StoreRentalService {
       order,
       input.operator || "门店营运",
       `${this.transactionLabel(input.type)}：${amount}`
+    );
+
+    // 统一审计日志写入
+    await this.appendOperationLog(
+      "order_transaction",
+      order.id,
+      this.transactionLabel(input.type),
+      input.operator || "门店营运",
+      `订单 ${order.orderNo} ${this.transactionLabel(input.type)}：${amount}，渠道：${input.channel}，备注：${input.note || "无"}`
     );
 
     return this.getOrderFeeCenter(order.id);
@@ -6445,6 +6491,15 @@ export class StoreRentalService {
       default:
         break;
     }
+
+    // 统一审计日志写入
+    await this.appendOperationLog(
+      "order",
+      order.id,
+      this.actionLabel(action),
+      String(body.operator ?? "门店营运"),
+      `订单 ${order.orderNo} 执行动作 ${this.actionLabel(action)}，状态从 ${previousStatus} 变更为 ${order.mainStatus}`
+    );
 
     const timeline = this.orderTimelines.get(order.id) ?? this.defaultTimeline(order);
     timeline.push({
@@ -7354,6 +7409,90 @@ export class StoreRentalService {
     };
   }
 
+  async claimDispatchTask(
+    input: { taskId: string; orderId: string; taskType: string; operator: string }
+  ): Promise<StoreRentalDispatchTaskActionResult> {
+    const { orders } = await this.getDispatchDataset();
+    const order = orders.find((item) => item.id === input.orderId);
+    if (!order) {
+      throw new BadRequestException("调度任务关联订单不存在。");
+    }
+
+    const operator = input.operator || "调度员";
+    const event = await this.recordDispatchEvent({
+      eventType: "alert_closed",
+      source: "manual",
+      title: "调度任务认领",
+      orderId: order.id,
+      orderNo: order.orderNo,
+      beforeVehicle: order.plateNo,
+      reasonCode: "MANUAL_ALERT",
+      reasonText: `${operator} 认领了调度任务`,
+      riskLevel: "low",
+      operator,
+      payload: {
+        taskId: input.taskId,
+        taskType: input.taskType,
+        taskKey: `${order.id}:${input.taskType}`,
+        claimedBy: operator,
+        claimedAt: new Date().toISOString(),
+        action: "claim"
+      }
+    });
+
+    return {
+      taskId: input.taskId,
+      orderId: order.id,
+      orderNo: order.orderNo,
+      status: "closed",
+      event,
+      message: `调度任务 ${order.orderNo} 已被 ${operator} 认领。`
+    };
+  }
+
+  async processDispatchTask(
+    input: { taskId: string; orderId: string; taskType: string; status: string; operator: string; memo?: string }
+  ): Promise<StoreRentalDispatchTaskActionResult> {
+    const { orders } = await this.getDispatchDataset();
+    const order = orders.find((item) => item.id === input.orderId);
+    if (!order) {
+      throw new BadRequestException("调度任务关联订单不存在。");
+    }
+
+    const operator = input.operator || "调度员";
+    const event = await this.recordDispatchEvent({
+      eventType: "alert_closed",
+      source: "manual",
+      title: `调度任务处理: ${input.status}`,
+      orderId: order.id,
+      orderNo: order.orderNo,
+      beforeVehicle: order.plateNo,
+      reasonCode: "MANUAL_ALERT",
+      reasonText: input.memo || `${operator} 处理了调度任务`,
+      riskLevel: "low",
+      operator,
+      payload: {
+        taskId: input.taskId,
+        taskType: input.taskType,
+        taskKey: `${order.id}:${input.taskType}`,
+        processedBy: operator,
+        processedAt: new Date().toISOString(),
+        processedStatus: input.status,
+        memo: input.memo,
+        action: "process"
+      }
+    });
+
+    return {
+      taskId: input.taskId,
+      orderId: order.id,
+      orderNo: order.orderNo,
+      status: "closed",
+      event,
+      message: `调度任务 ${order.orderNo} 已处理为 ${input.status}。`
+    };
+  }
+
   async listOrderOperationRecords(
     orderId: string
   ): Promise<StoreRentalOrderOperationRecord[]> {
@@ -7707,6 +7846,15 @@ export class StoreRentalService {
     const appliedCount = rows.filter((row) => row.applied).length;
     const failedCount = rows.filter((row) => row.resultStatus === "failed").length;
 
+    // 统一审计日志写入
+    await this.appendOperationLog(
+      "dispatch",
+      "optimization",
+      "智能优化预分配",
+      operator,
+      `调度智能优化预分配：成功 ${appliedCount} 笔，失败 ${failedCount} 笔`
+    );
+
     return {
       planId: input.planId,
       appliedCount,
@@ -7870,6 +8018,15 @@ export class StoreRentalService {
     const appliedCount = rows.filter((row) => row.applied).length;
     const failedCount = rows.filter((row) => row.resultStatus === "failed").length;
 
+    // 统一审计日志写入
+    await this.appendOperationLog(
+      "dispatch",
+      "hard_lock",
+      "硬锁车辆",
+      operator,
+      `调度硬锁车辆：成功 ${appliedCount} 笔，失败 ${failedCount} 笔`
+    );
+
     return {
       appliedCount,
       failedCount,
@@ -7944,6 +8101,15 @@ export class StoreRentalService {
         memo: input.memo
       }
     });
+
+    // 统一审计日志写入
+    await this.appendOperationLog(
+      "dispatch",
+      order.id,
+      "调度页人工改派",
+      operator,
+      `订单 ${order.orderNo} 调度页人工改派：${beforePlateNo || "未分配"} -> ${targetVehicle.licensePlate}，原因：${input.reason || "无"}，备注：${input.memo || "无"}`
+    );
 
     return {
       orderId: order.id,
@@ -8229,7 +8395,7 @@ export class StoreRentalService {
     const board = await this.getDispatchBoard(input);
     const taskPool = await this.listDispatchTasks(input);
     const analysisId = `ai_dispatch_${Date.now()}`;
-    const promptVersion = "rimo-store-dispatch-agent-v1";
+    const promptVersion = "store-rental-dispatch-agent-v1";
     const packetVersion = "dispatch-packet-v1";
     const highRiskTasks = taskPool.tasks.filter((task) => task.priority === "high");
     const riskRows: StoreRentalAiDispatchRiskRow[] =
@@ -10123,7 +10289,7 @@ export class StoreRentalService {
     input: CreateStoreRentalNotificationRequest
   ) {
     if (this.useMysqlDataSource()) {
-      return this.storeRentalRepository.createOrderNotificationRecord(order.id, input);
+      return this.storeRentalRepository.createStoreRentalNotificationRecord(order.id, input);
     }
 
     const now = new Date().toISOString();
@@ -10255,7 +10421,7 @@ export class StoreRentalService {
     return {
       ...input,
       id: input.id || `station_${randomUUID()}`,
-      companyName: input.companyName || "RIMO 香港租户",
+      companyName: input.companyName || "演示香港租户",
       name: input.name?.trim() || "",
       parentStoreName: input.parentStoreName?.trim() || "",
       address: input.address?.trim() || "",
@@ -10861,7 +11027,7 @@ export class StoreRentalService {
         .map((vehicle, index): TboxDeviceSummary => ({
           id: `tbox_${vehicle.cid}`,
           cid: vehicle.cid!,
-          provider: "RIMO reserved",
+          provider: "store-rental reserved",
           modelNo: index % 2 === 0 ? "RTB-4G-V2" : "RTB-LTE-V1",
           status: "active",
           onlineStatus: vehicle.operationStatus === "maintenance" ? "offline" : "online",
@@ -11007,7 +11173,7 @@ export class StoreRentalService {
         id: `maint_${vehicle.id}_regular`,
         date: "2026-04-18",
         type: "例行保养",
-        vendor: "RIMO 合作保养厂",
+        vendor: "平台合作保养厂",
         mileage: Math.max(vehicle.mileage - 1200, 0),
         costAmount: 680,
         status: "completed" as const,
@@ -13805,6 +13971,30 @@ export class StoreRentalService {
       action
     });
     this.orderTimelines.set(order.id, timeline);
+  }
+
+  private async appendOperationLog(
+    targetType: string,
+    targetId: string,
+    action: string,
+    operator: string,
+    detail?: string
+  ) {
+    if (this.useMysqlDataSource()) {
+      try {
+        await this.storeRentalRepository.createOperationLog({
+          targetType,
+          targetId,
+          action,
+          operator,
+          detail: detail || action,
+          createdAt: new Date().toISOString()
+        });
+      } catch (error) {
+        // 审计日志写入失败不应影响主业务流程
+        console.error("Failed to write operation log:", error);
+      }
+    }
   }
 
   private requiredDate(value: unknown, message: string) {

@@ -33,7 +33,7 @@ import {
   OrderMainStatus,
   PaymentStatus,
   StoreRentalMode
-} from "@rimo/shared";
+} from "@store-rental/shared";
 import type {
   CorporateDetail,
   CorporateListQuery,
@@ -129,7 +129,7 @@ import type {
   VehicleOperationLog,
   VehicleTransferTask,
   VehicleTransferTaskResult
-} from "@rimo/shared";
+} from "@store-rental/shared";
 import { PrismaService } from "../database/prisma.service";
 
 type Metadata = Record<string, unknown>;
@@ -333,7 +333,7 @@ export class StoreRentalRepository {
       const scopeMatched =
         scopeType === "all" ||
         !scopeLabel ||
-        (scopeType === "company" && (row.companyName || "RIMO 香港租户") === scopeLabel) ||
+        (scopeType === "company" && (row.companyName || "演示香港租户") === scopeLabel) ||
         (scopeType === "store" && row.parentStoreName === scopeLabel);
       const serviceMatched =
         !serviceCapability || row.serviceCapabilities.includes(serviceCapability);
@@ -2305,7 +2305,7 @@ export class StoreRentalRepository {
       idempotencyRecords
     ] = await Promise.all([
       this.listOrderContractRecords(orderId),
-      this.listOrderNotificationRecords(orderId),
+      this.listStoreRentalNotificationRecords(orderId),
       this.listOrderRemarkRecords(orderId),
       this.listOrderOperationLockRecords(orderId),
       this.listOrderIdempotencyRecords(orderId)
@@ -2490,11 +2490,20 @@ export class StoreRentalRepository {
     return record;
   }
 
-  async createOrderNotificationRecord(
+  async createStoreRentalNotificationRecord(
     orderId: string,
     input: CreateStoreRentalNotificationRequest
   ): Promise<StoreRentalNotificationRecord> {
     const now = new Date();
+    const [orderRow] = await this.prisma.$queryRaw<Array<{ tenantId: string; orderNo: string }>>`
+      SELECT tenantId, orderNo
+      FROM StoreRentalOrder
+      WHERE id = ${orderId}
+      LIMIT 1
+    `;
+    if (!orderRow) {
+      throw new NotFoundException(`Order ${orderId} was not found`);
+    }
     const sentAt =
       input.status === "skipped" || input.status === "failed"
         ? undefined
@@ -2515,20 +2524,28 @@ export class StoreRentalRepository {
 
     await this.prisma.$executeRaw`
       INSERT INTO OrderNotificationRecord (
-        id, orderId, scene, channel, target, status, content, idempotencyKey,
-        payload, operator, sentAt, createdAt
+        id, tenantId, orderId, orderNo, event, eventLabel, channel, targetMasked,
+        status, templateCode, contentSummary, operator, relatedAction,
+        idempotencyKey, failReason, payload, sentAt, createdAt, updatedAt
       ) VALUES (
         ${record.id},
+        ${orderRow.tenantId},
         ${orderId},
+        ${orderRow.orderNo},
         ${record.scene},
+        ${this.notificationSceneText(record.scene)},
         ${record.channel},
         ${record.target},
         ${record.status},
+        ${"manual_notice"},
         ${record.content},
-        ${record.idempotencyKey ?? null},
-        ${JSON.stringify(record.payload)},
         ${record.operator},
+        ${null},
+        ${record.idempotencyKey ?? null},
+        ${null},
+        ${JSON.stringify({ ...(record.payload ?? {}), manualNotification: record })},
         ${record.sentAt ? new Date(record.sentAt) : null},
+        ${now},
         ${now}
       )
     `;
@@ -2749,13 +2766,22 @@ export class StoreRentalRepository {
     `;
   }
 
-  private async listOrderNotificationRecords(
+  private async listStoreRentalNotificationRecords(
     orderId: string
   ): Promise<StoreRentalNotificationRecord[]> {
     const rows = await this.prisma.$queryRaw<any[]>`
       SELECT
-        id, scene, channel, target, status, content, idempotencyKey,
-        payload, operator, sentAt, createdAt
+        id,
+        event AS scene,
+        channel,
+        targetMasked AS target,
+        status,
+        contentSummary AS content,
+        idempotencyKey,
+        payload,
+        operator,
+        sentAt,
+        createdAt
       FROM OrderNotificationRecord
       WHERE orderId = ${orderId}
       ORDER BY createdAt DESC
@@ -5101,7 +5127,7 @@ export class StoreRentalRepository {
     return {
       id: row.id,
       name: row.name,
-      companyName: this.stringValue(metadata.companyName) || "RIMO 香港租户",
+      companyName: this.stringValue(metadata.companyName) || "演示香港租户",
       storeCode: this.stringValue(metadata.storeCode),
       stationCode: this.stringValue(metadata.stationCode) || row.code,
       parentStoreName: row.parentStoreName,
@@ -5200,7 +5226,7 @@ export class StoreRentalRepository {
       vin: row.vin ?? "",
       vehicleGroupName:
         this.stringValue(metadata.vehicleGroupName) || row.vehicleGroup?.name || "",
-      assetCompanyName: row.assetCompanyName ?? "RIMO 香港租户",
+      assetCompanyName: row.assetCompanyName ?? "演示香港租户",
       currentStoreName:
         this.stringValue(metadata.currentStoreName) ||
         row.store?.name ||
@@ -6149,6 +6175,19 @@ export class StoreRentalRepository {
     ].includes(value)
       ? (value as StoreRentalNotificationRecord["scene"])
       : "manual";
+  }
+
+  private notificationSceneText(scene: StoreRentalNotificationRecord["scene"]) {
+    const labels: Record<StoreRentalNotificationRecord["scene"], string> = {
+      order_created: "订单创建",
+      pickup_completed: "取车完成",
+      return_completed: "还车完成",
+      payment_due: "待支付提醒",
+      post_charge: "后补费用",
+      order_terminal: "订单终止",
+      manual: "手工通知"
+    };
+    return labels[scene] ?? "手工通知";
   }
 
   private toNotificationChannel(value: string): StoreRentalNotificationRecord["channel"] {
@@ -7630,6 +7669,29 @@ export class StoreRentalRepository {
   private nextRentalRuleVersionId(versionNo: number, savedAt: string) {
     const date = savedAt.slice(0, 10).replace(/-/g, "");
     return `RULE-STORE-${date}-${String(versionNo).padStart(3, "0")}`;
+  }
+
+  async createOperationLog(input: {
+    targetType: string;
+    targetId: string;
+    action: string;
+    operator: string;
+    detail: string;
+    createdAt: string;
+  }) {
+    await this.prisma.operationLog.create({
+      data: {
+        tenantId: this.defaultTenantId,
+        action: input.action,
+        detail: {
+          targetType: input.targetType,
+          targetId: input.targetId,
+          operator: input.operator,
+          description: input.detail
+        },
+        createdAt: new Date(input.createdAt)
+      }
+    });
   }
 }
 
