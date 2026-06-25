@@ -6379,6 +6379,8 @@ export class StoreRentalService {
         this.updateVehicleOperationStatus(order.plateNo, "controlled");
         break;
       case "confirm-settlement":
+        // 结算确认校验
+        this.validateConfirmSettlement(order, body);
         {
           const settlementPatch = {
             overtimeFeeAmount: this.optionalNumber(body.overtimeFeeAmount),
@@ -14691,6 +14693,47 @@ export class StoreRentalService {
       throw new BadRequestException(
         `订单当前状态为 ${order.mainStatus}，必须在用车状态才能还车。`
       );
+    }
+  }
+
+  private validateConfirmSettlement(
+    order: StoreRentalOrderSummary,
+    body: Record<string, unknown>
+  ) {
+    // 结算状态校验
+    const allowedStatuses = [
+      OrderMainStatus.SettlementPending,
+      OrderMainStatus.PaymentDue,
+      OrderMainStatus.RefundPending
+    ];
+    if (!allowedStatuses.includes(order.mainStatus)) {
+      throw new BadRequestException(
+        `订单当前状态为 ${order.mainStatus}，必须在待结算/待补缴/待退款状态才能确认还车。`
+      );
+    }
+
+    // 费用项校验
+    const finalReceivableAmount = this.optionalNumber(body.finalReceivableAmount);
+    if (finalReceivableAmount === undefined) {
+      throw new BadRequestException("请填写最终应收金额。");
+    }
+
+    // 企业月结校验
+    if (order.billingMode === BillingMode.Monthly) {
+      if (body.monthlyBillingPosted !== true) {
+        throw new BadRequestException("企业月结订单必须确认月结已挂账。");
+      }
+    }
+
+    // 收款/退款校验（客户自付订单）
+    if (order.billingMode !== BillingMode.Monthly) {
+      const balanceDue = finalReceivableAmount - (this.optionalNumber(body.returnTransactionTotal) ?? 0);
+      if (balanceDue > 0 && order.mainStatus !== OrderMainStatus.PaymentDue) {
+        throw new BadRequestException("有待补缴金额时，订单必须处于待补缴状态。");
+      }
+      if (balanceDue < 0 && order.mainStatus !== OrderMainStatus.RefundPending) {
+        throw new BadRequestException("有待退款金额时，订单必须处于待退款状态。");
+      }
     }
   }
 
