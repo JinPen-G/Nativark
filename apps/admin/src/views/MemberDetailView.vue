@@ -14,6 +14,14 @@ const loading = ref(false);
 const saving = ref(false);
 const member = ref<MemberDetail | null>(null);
 
+const photoLabels: Record<string, string> = {
+  identityFront: "身份证正面",
+  identityBack: "身份证反面",
+  licenseFront: "驾驶证正面",
+  licenseBack: "驾驶证反面",
+  selfie: "自拍照"
+};
+
 const form = reactive<SaveMemberRequest>({
   name: "",
   phone: "",
@@ -281,6 +289,24 @@ onMounted(loadData);
               <el-tag v-for="orderNo in member.recentOrderNos" :key="orderNo" class="mr-2 mb-2" effect="plain">
                 {{ orderNo }}
               </el-tag>
+            </div>
+          </div>
+        </div>
+
+        <div class="sr-card p-5" v-if="member">
+          <div class="text-sm font-semibold text-gray-800 mb-4 flex items-center">
+            <el-icon class="mr-2 text-gray-400"><Picture /></el-icon> 证件照片
+          </div>
+          <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <div v-for="(label, key) in photoLabels" :key="key" class="text-center">
+              <div class="relative w-full aspect-[4/3] bg-gray-50 border border-gray-200 rounded-lg flex flex-col items-center justify-center overflow-hidden">
+                <el-image v-if="member.photos?.[key]" :src="member.photos[key]" fit="cover" class="w-full h-full" />
+                <div v-else class="flex flex-col items-center justify-center text-gray-300 h-full w-full">
+                  <el-icon class="text-2xl mb-1"><Picture /></el-icon>
+                  <span class="text-xs">未上传</span>
+                </div>
+              </div>
+              <div class="text-xs text-gray-500 mt-2">{{ label }}</div>
             </div>
           </div>
         </div>

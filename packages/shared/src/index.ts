@@ -2528,6 +2528,7 @@ export interface MemberDetail extends MemberSummary {
   riskNote?: string;
   recentOrderNos: string[];
   timeline: MemberTimelineRecord[];
+  photos?: Record<string, string>;
 }
 
 export interface SaveMemberRequest {
