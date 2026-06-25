@@ -6254,6 +6254,13 @@ export class StoreRentalService {
         order.riskFlags = this.uniqueFlags(order.riskFlags, ["已预授权", "待取车"]);
         break;
       case "start-pickup":
+        // 黑名单检查（PRD要求：客户命中黑名单时禁止发车）
+        if (order.memberId) {
+          const pickupMember = this.members.find((m) => m.id === order.memberId);
+          if (pickupMember && pickupMember.status === "blacklisted") {
+            throw new BadRequestException("客户已加入黑名单，不能办理取车。请联系风控部门。");
+          }
+        }
         order.mainStatus = OrderMainStatus.Inspecting;
         order.operationLockStatus = OperationLockStatus.Active;
         order.operationLockOperator = String(body.operator ?? "门店营运");
@@ -6597,6 +6604,13 @@ export class StoreRentalService {
         order.riskFlags = this.uniqueFlags(order.riskFlags, ["已预授权", "待取车"]);
         break;
       case "start-pickup":
+        // 黑名单检查（PRD要求：客户命中黑名单时禁止发车）
+        if (order.memberId) {
+          const pickupMember = this.members.find((m) => m.id === order.memberId);
+          if (pickupMember && pickupMember.status === "blacklisted") {
+            throw new BadRequestException("客户已加入黑名单，不能办理取车。请联系风控部门。");
+          }
+        }
         order.mainStatus = OrderMainStatus.Inspecting;
         order.operationLockStatus = OperationLockStatus.Active;
         order.operationLockOperator = String(body.operator ?? "门店营运");
