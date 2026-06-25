@@ -284,6 +284,67 @@ const latestPickupInspection = computed(() =>
     .slice(-1)[0]
 );
 const eventSnapshots = computed(() => detail.value?.snapshots.events ?? []);
+const eventTab = ref("all");
+
+interface FulfillmentEvent {
+  id: string;
+  type: "action" | "dispatch" | "accident" | "fee" | "contract" | "notification" | "remark";
+  title: string;
+  summary: string;
+  operator: string;
+  time: string;
+}
+
+const allEvents = computed<FulfillmentEvent[]>(() => {
+  const order = detail.value;
+  if (!order) return [];
+  const events: FulfillmentEvent[] = [];
+  // Timeline events
+  for (const item of order.timeline) {
+    events.push({
+      id: `timeline-${item.at}-${item.actor}`,
+      type: "action",
+      title: item.action,
+      summary: "",
+      operator: item.actor,
+      time: item.at
+    });
+  }
+  // Event snapshots
+  for (const snap of eventSnapshots.value) {
+    events.push({
+      id: snap.id,
+      type: "dispatch",
+      title: snap.title,
+      summary: snap.settlementTarget || "",
+      operator: snap.operator,
+      time: snap.snapshotRef
+    });
+  }
+  return events.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
+});
+
+const exceptionEvents = computed(() =>
+  allEvents.value.filter((e) => e.title.includes("事故") || e.title.includes("取消") || e.title.includes("爽约") || e.title.includes("拒绝") || e.title.includes("关闭"))
+);
+
+const reassignEvents = computed(() =>
+  allEvents.value.filter((e) => e.title.includes("改派") || e.title.includes("改还车"))
+);
+
+const accidentEvents = computed(() =>
+  allEvents.value.filter((e) => e.title.includes("事故") || e.title.includes("出险"))
+);
+
+function eventTypeLabel(type: string) {
+  const map: Record<string, string> = { action: "操作", dispatch: "调度", accident: "事故", fee: "费用", contract: "合同", notification: "通知", remark: "备注" };
+  return map[type] || type;
+}
+
+function eventTypeTag(type: string) {
+  const map: Record<string, string> = { action: "info", dispatch: "warning", accident: "danger", fee: "success", contract: "", notification: "info", remark: "info" };
+  return map[type] || "";
+}
 const pickupBalanceDue = computed(() => {
   const order = detail.value;
   if (!order || isMonthly.value) {
@@ -2670,25 +2731,96 @@ onMounted(loadDetail);
             </section>
 
             <section class="bg-white rounded-xl border border-gray-200">
-              <div class="px-5 py-3 border-b border-gray-100 font-bold text-gray-800">事件级快照链</div>
-              <div v-if="eventSnapshots.length" class="divide-y divide-gray-100 max-h-80 overflow-y-auto">
-                <div v-for="snapshot in eventSnapshots" :key="snapshot.id" class="px-5 py-3 text-sm">
-                  <div class="flex justify-between gap-3">
-                    <div>
-                      <div class="font-bold text-gray-800">{{ snapshot.title }}</div>
-                      <div class="text-xs text-gray-500 mt-1">
-                        {{ snapshot.triggerReason || "履约事件" }} · {{ snapshot.settlementTarget || "不调整费用" }}
+              <div class="px-5 py-3 border-b border-gray-100 font-bold text-gray-800">履约事件</div>
+              <el-tabs v-model="eventTab" class="px-5 pt-3">
+                <el-tab-pane label="全部" name="all">
+                  <div v-if="allEvents.length" class="divide-y divide-gray-100 max-h-80 overflow-y-auto">
+                    <div v-for="event in allEvents.slice(0, 20)" :key="event.id" class="py-3 text-sm">
+                      <div class="flex justify-between gap-3">
+                        <div>
+                          <el-tag size="small" :type="eventTypeTag(event.type)" effect="plain" class="mr-2">{{ eventTypeLabel(event.type) }}</el-tag>
+                          <span class="font-medium text-gray-800">{{ event.title }}</span>
+                          <div class="text-xs text-gray-500 mt-1">{{ event.summary || "-" }}</div>
+                        </div>
+                        <div class="text-right shrink-0">
+                          <div class="text-xs text-gray-400">{{ event.operator }}</div>
+                          <div class="text-[11px] text-gray-400 font-mono">{{ event.time }}</div>
+                        </div>
                       </div>
-                      <div class="text-[11px] text-gray-400 mt-1 font-mono">{{ snapshot.snapshotRef }}</div>
-                    </div>
-                    <div class="text-right shrink-0">
-                      <div class="font-mono font-bold">{{ snapshot.amount === undefined ? "-" : formatMoney(snapshot.amount) }}</div>
-                      <div class="text-xs text-gray-400 mt-1">{{ snapshot.operator }}</div>
                     </div>
                   </div>
-                </div>
-              </div>
-              <el-empty v-else description="暂无事件级快照" :image-size="70" />
+                  <el-empty v-else description="暂无履约事件" :image-size="60" />
+                </el-tab-pane>
+                <el-tab-pane label="异常" name="exception">
+                  <div v-if="exceptionEvents.length" class="divide-y divide-gray-100 max-h-80 overflow-y-auto">
+                    <div v-for="event in exceptionEvents" :key="event.id" class="py-3 text-sm">
+                      <div class="flex justify-between gap-3">
+                        <div>
+                          <el-tag size="small" type="danger" effect="plain" class="mr-2">{{ eventTypeLabel(event.type) }}</el-tag>
+                          <span class="font-medium text-gray-800">{{ event.title }}</span>
+                          <div class="text-xs text-gray-500 mt-1">{{ event.summary || "-" }}</div>
+                        </div>
+                        <div class="text-right shrink-0">
+                          <div class="text-xs text-gray-400">{{ event.operator }}</div>
+                          <div class="text-[11px] text-gray-400 font-mono">{{ event.time }}</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <el-empty v-else description="暂无异常事件" :image-size="60" />
+                </el-tab-pane>
+                <el-tab-pane label="改派" name="reassign">
+                  <div v-if="reassignEvents.length" class="divide-y divide-gray-100 max-h-80 overflow-y-auto">
+                    <div v-for="event in reassignEvents" :key="event.id" class="py-3 text-sm">
+                      <div class="flex justify-between gap-3">
+                        <div>
+                          <el-tag size="small" type="warning" effect="plain" class="mr-2">改派</el-tag>
+                          <span class="font-medium text-gray-800">{{ event.title }}</span>
+                          <div class="text-xs text-gray-500 mt-1">{{ event.summary || "-" }}</div>
+                        </div>
+                        <div class="text-right shrink-0">
+                          <div class="text-xs text-gray-400">{{ event.operator }}</div>
+                          <div class="text-[11px] text-gray-400 font-mono">{{ event.time }}</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <el-empty v-else description="暂无改派事件" :image-size="60" />
+                </el-tab-pane>
+                <el-tab-pane label="事故" name="accident">
+                  <div v-if="accidentEvents.length" class="divide-y divide-gray-100 max-h-80 overflow-y-auto">
+                    <div v-for="event in accidentEvents" :key="event.id" class="py-3 text-sm">
+                      <div class="flex justify-between gap-3">
+                        <div>
+                          <el-tag size="small" type="danger" effect="plain" class="mr-2">事故</el-tag>
+                          <span class="font-medium text-gray-800">{{ event.title }}</span>
+                          <div class="text-xs text-gray-500 mt-1">{{ event.summary || "-" }}</div>
+                        </div>
+                        <div class="text-right shrink-0">
+                          <div class="text-xs text-gray-400">{{ event.operator }}</div>
+                          <div class="text-[11px] text-gray-400 font-mono">{{ event.time }}</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <el-empty v-else description="暂无事故事件" :image-size="60" />
+                </el-tab-pane>
+                <el-tab-pane label="操作日志" name="log">
+                  <div class="max-h-80 overflow-y-auto">
+                    <el-table :data="detail.timeline" size="small" stripe>
+                      <el-table-column label="时间" width="170">
+                        <template #default="{ row }">
+                          <div class="font-mono text-xs">{{ row.at }}</div>
+                        </template>
+                      </el-table-column>
+                      <el-table-column label="操作" prop="action" min-width="150" />
+                      <el-table-column label="详情" prop="detail" min-width="200" />
+                      <el-table-column label="操作人" prop="actor" width="120" />
+                      <el-table-column label="备注" prop="remark" min-width="150" />
+                    </el-table>
+                  </div>
+                </el-tab-pane>
+              </el-tabs>
             </section>
 
             <section class="bg-white rounded-xl border border-gray-200">
