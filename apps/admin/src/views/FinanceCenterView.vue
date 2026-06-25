@@ -12,7 +12,7 @@ import type {
   SaveFinanceDocumentRequest,
   SaveFinanceManualAdjustmentRequest,
   SaveFinancePreAuthorizationRequest
-} from "@rimo/shared";
+} from "@store-rental/shared";
 import {
   createFinanceManualAdjustment,
   getFinanceOverview,
@@ -516,44 +516,44 @@ onMounted(loadData);
     </div>
 
     <div class="grid grid-cols-4 gap-4 mb-6">
-      <div class="rimo-card p-4">
+      <div class="sr-card p-4">
         <div class="text-xs text-gray-400">客户实收</div>
         <div class="text-2xl font-bold text-emerald-600 mt-2">{{ money(overview.customerReceivedAmount) }}</div>
       </div>
-      <div class="rimo-card p-4">
+      <div class="sr-card p-4">
         <div class="text-xs text-gray-400">预授权冻结</div>
         <div class="text-2xl font-bold text-amber-600 mt-2">{{ money(overview.preAuthFrozenAmount) }}</div>
       </div>
-      <div class="rimo-card p-4">
+      <div class="sr-card p-4">
         <div class="text-xs text-gray-400">企业月结挂账</div>
         <div class="text-2xl font-bold text-purple-600 mt-2">{{ money(overview.monthlyBillingAmount) }}</div>
       </div>
-      <div class="rimo-card p-4">
+      <div class="sr-card p-4">
         <div class="text-xs text-gray-400">待处理异常</div>
         <div class="text-2xl font-bold text-rose-600 mt-2">{{ overview.exceptionCount }}</div>
       </div>
     </div>
 
     <div class="grid grid-cols-4 gap-4 mb-6">
-      <div class="rimo-card p-4">
+      <div class="sr-card p-4">
         <div class="text-xs text-gray-400">退款金额</div>
         <div class="text-xl font-bold text-gray-800 mt-2">{{ money(overview.refundAmount) }}</div>
       </div>
-      <div class="rimo-card p-4">
+      <div class="sr-card p-4">
         <div class="text-xs text-gray-400">月结未回款</div>
         <div class="text-xl font-bold text-gray-800 mt-2">{{ money(overview.monthlyUnpaidAmount) }}</div>
       </div>
-      <div class="rimo-card p-4">
+      <div class="sr-card p-4">
         <div class="text-xs text-gray-400">已开票金额</div>
         <div class="text-xl font-bold text-gray-800 mt-2">{{ money(overview.invoiceIssuedAmount) }}</div>
       </div>
-      <div class="rimo-card p-4">
+      <div class="sr-card p-4">
         <div class="text-xs text-gray-400">待审调账</div>
         <div class="text-xl font-bold text-gray-800 mt-2">{{ money(overview.pendingAdjustmentAmount) }}</div>
       </div>
     </div>
 
-    <div class="rimo-card p-5">
+    <div class="sr-card p-5">
       <div class="flex items-center justify-between mb-4">
         <el-tabs v-model="activeTab" class="finance-tabs">
           <el-tab-pane label="资金流水" name="transactions" />
