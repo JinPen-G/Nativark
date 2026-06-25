@@ -5,8 +5,8 @@ import type {
   OrganizationSummary,
   SaveOrganizationRequest,
   TenantSummary
-} from "@rimo/shared";
-import { RoleScope } from "@rimo/shared";
+} from "@store-rental/shared";
+import { RoleScope } from "@store-rental/shared";
 import {
   listOrganizations,
   listTenants,
@@ -301,23 +301,23 @@ onMounted(loadData);
     </div>
 
     <div class="grid grid-cols-1 xl:grid-cols-5 gap-4 mb-4">
-      <div class="rimo-card p-4">
+      <div class="sr-card p-4">
         <div class="text-xs text-gray-400">组织总数</div>
         <div class="mt-2 text-2xl font-bold text-gray-800">{{ metrics.total }}</div>
       </div>
-      <div class="rimo-card p-4">
+      <div class="sr-card p-4">
         <div class="text-xs text-gray-400">启用</div>
         <div class="mt-2 text-2xl font-bold text-emerald-600">{{ metrics.enabled }}</div>
       </div>
-      <div class="rimo-card p-4">
+      <div class="sr-card p-4">
         <div class="text-xs text-gray-400">停用</div>
         <div class="mt-2 text-2xl font-bold text-gray-500">{{ metrics.disabled }}</div>
       </div>
-      <div class="rimo-card p-4">
+      <div class="sr-card p-4">
         <div class="text-xs text-gray-400">营运部门</div>
         <div class="mt-2 text-2xl font-bold text-[#00689E]">{{ metrics.operators }}</div>
       </div>
-      <div class="rimo-card p-4">
+      <div class="sr-card p-4">
         <div class="text-xs text-gray-400">车行/门店/站点</div>
         <div class="mt-2 text-2xl font-bold text-amber-600">{{ metrics.stores }}</div>
       </div>

@@ -43,7 +43,7 @@ const tenants: TenantSeed[] = [
   {
     id: "tenant_001",
     code: "demo",
-    name: "RIMO 香港租户",
+    name: "演示香港租户",
     organizations: [
       { id: "org_operator_hk", type: OrganizationType.OPERATOR, code: "OP-HK", name: "香港营运中心" },
       { id: "org_store_mongkok", parentId: "org_operator_hk", type: OrganizationType.STORE, code: "STORE-MK", name: "旺角门市" },
@@ -83,7 +83,7 @@ const tenants: TenantSeed[] = [
   {
     id: "tenant_002",
     code: "demo2",
-    name: "RIMO 深圳租户",
+    name: "演示深圳租户",
     organizations: [
       { id: "org_operator_sz", type: OrganizationType.OPERATOR, code: "OP-SZ", name: "深圳营运中心" },
       { id: "org_store_nanshan", parentId: "org_operator_sz", type: OrganizationType.STORE, code: "STORE-NS", name: "南山门市" }
@@ -772,7 +772,7 @@ async function upsertRentalMasterData() {
         vehicleGroupId: vehicle.vehicleGroupId,
         plateNo: vehicle.plateNo,
         vin: vehicle.vin,
-        assetCompanyName: "RIMO 香港租户",
+        assetCompanyName: "演示香港租户",
         color: vehicle.color,
         cid: vehicle.cid,
         isSpecial: vehicle.isSpecial,
@@ -791,7 +791,7 @@ async function upsertRentalMasterData() {
         vehicleGroupId: vehicle.vehicleGroupId,
         plateNo: vehicle.plateNo,
         vin: vehicle.vin,
-        assetCompanyName: "RIMO 香港租户",
+        assetCompanyName: "演示香港租户",
         color: vehicle.color,
         cid: vehicle.cid,
         isSpecial: vehicle.isSpecial,
@@ -907,7 +907,7 @@ async function upsertRentalMasterData() {
         }
       },
       update: {
-        provider: "RIMO reserved",
+        provider: "store-rental reserved",
         modelNo: vehicle.serviceType === VehicleServiceType.STORE_24H ? "RTB-LTE-V1" : "RTB-4G-V2",
         status: "active",
         onlineStatus: "online",
@@ -920,7 +920,7 @@ async function upsertRentalMasterData() {
         id: `tbox_${vehicle.cid}`,
         tenantId,
         cid: vehicle.cid,
-        provider: "RIMO reserved",
+        provider: "store-rental reserved",
         modelNo: vehicle.serviceType === VehicleServiceType.STORE_24H ? "RTB-LTE-V1" : "RTB-4G-V2",
         status: "active",
         onlineStatus: "online",
@@ -1070,7 +1070,7 @@ async function main() {
 main()
   .then(async () => {
     await prisma.$disconnect();
-    console.log("RIMO store rental seed completed.");
+    console.log("Store rental seed completed.");
   })
   .catch(async (error) => {
     console.error(error);

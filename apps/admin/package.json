@@ -1,5 +1,5 @@
 {
-  "name": "@rimo/admin",
+  "name": "@store-rental/admin",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.1",
-    "@rimo/shared": "0.1.0",
+    "@store-rental/shared": "0.1.0",
     "axios": "^1.7.7",
     "element-plus": "^2.8.8",
     "pinia": "^2.2.6",

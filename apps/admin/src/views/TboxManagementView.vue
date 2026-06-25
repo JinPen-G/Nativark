@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ElMessage } from "element-plus";
 import { computed, onMounted, reactive, ref } from "vue";
-import type { TboxDeviceSummary, VehicleInstanceSummary } from "@rimo/shared";
+import type { TboxDeviceSummary, VehicleInstanceSummary } from "@store-rental/shared";
 import { bindTboxDevice, listTboxDevices, listVehicles } from "../api/client";
 import AppLayout from "../components/AppLayout.vue";
 
@@ -89,25 +89,25 @@ onMounted(loadData);
     </div>
 
     <div class="grid grid-cols-12 gap-4 mb-5">
-      <div class="rimo-card p-4 col-span-12 md:col-span-3">
+      <div class="sr-card p-4 col-span-12 md:col-span-3">
         <div class="text-xs text-gray-500">设备总数</div>
         <div class="text-2xl font-bold text-gray-800 mt-1">{{ devices.length }}</div>
       </div>
-      <div class="rimo-card p-4 col-span-12 md:col-span-3">
+      <div class="sr-card p-4 col-span-12 md:col-span-3">
         <div class="text-xs text-gray-500">已绑定车辆</div>
         <div class="text-2xl font-bold text-blue-600 mt-1">{{ devices.filter((item) => item.boundVehicleId).length }}</div>
       </div>
-      <div class="rimo-card p-4 col-span-12 md:col-span-3">
+      <div class="sr-card p-4 col-span-12 md:col-span-3">
         <div class="text-xs text-gray-500">在线设备</div>
         <div class="text-2xl font-bold text-emerald-600 mt-1">{{ devices.filter((item) => item.onlineStatus === "online").length }}</div>
       </div>
-      <div class="rimo-card p-4 col-span-12 md:col-span-3">
+      <div class="sr-card p-4 col-span-12 md:col-span-3">
         <div class="text-xs text-gray-500">预留接口</div>
         <div class="text-lg font-bold text-gray-800 mt-2">Mock adapter</div>
       </div>
     </div>
 
-    <div class="rimo-card p-5">
+    <div class="sr-card p-5">
       <div class="flex items-center justify-between gap-4 mb-5">
         <el-input v-model="keyword" placeholder="CID/车牌/供应商" clearable prefix-icon="Search" style="width: 260px" />
         <div class="text-sm text-gray-500">共 {{ filteredDevices.length }} 台设备</div>

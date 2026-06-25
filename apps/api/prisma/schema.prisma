@@ -1387,25 +1387,6 @@ model OrderContractDocument {
   @@index([orderId, status])
 }
 
-model OrderNotificationRecord {
-  id             String           @id @default(uuid())
-  orderId        String
-  order          StoreRentalOrder @relation(fields: [orderId], references: [id])
-  scene          String
-  channel        String
-  target         String
-  status         String
-  content        String           @db.Text
-  idempotencyKey String?
-  payload        Json?
-  operator       String?
-  sentAt         DateTime?
-  createdAt      DateTime         @default(now())
-
-  @@index([orderId, scene, createdAt])
-  @@index([orderId, idempotencyKey])
-}
-
 model OrderRemarkRecord {
   id          String           @id @default(uuid())
   orderId     String

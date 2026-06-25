@@ -4,7 +4,7 @@ import {
   LoginRequest,
   LoginResponse,
   RoleScope
-} from "@rimo/shared";
+} from "@store-rental/shared";
 import { PlatformService } from "../platform/platform.service";
 
 interface LoginFailureState {

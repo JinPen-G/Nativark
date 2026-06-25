@@ -13,7 +13,7 @@ module.exports = {
         ]
       },
       colors: {
-        rimo: "#00689E"
+        brand: "#00689E"
       }
     }
   },

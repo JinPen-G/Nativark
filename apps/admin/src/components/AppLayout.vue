@@ -134,7 +134,7 @@ async function logout() {
           <el-icon class="mr-2 group-hover:rotate-12 transition-transform">
             <Platform />
           </el-icon>
-          RIMO Rental
+          Store Rental Platform
         </RouterLink>
       </div>
 
@@ -152,7 +152,7 @@ async function logout() {
                 </el-icon>
                 <span class="font-medium">{{ item.label }}</span>
               </span>
-              <RouterLink v-else :to="item.to" class="rimo-sidebar-link">
+              <RouterLink v-else :to="item.to" class="sr-sidebar-link">
                 <el-icon class="mr-3 text-lg">
                   <component :is="item.icon" />
                 </el-icon>
@@ -178,7 +178,7 @@ async function logout() {
           <el-dropdown>
             <span class="el-dropdown-link flex items-center text-sm font-medium text-gray-700 cursor-pointer">
               <span class="w-2 h-2 rounded-full bg-green-500 mr-2"></span>
-              {{ authStore.tenant?.tenantName || "RIMO 香港租户" }}
+              {{ authStore.tenant?.tenantName || "演示香港租户" }}
               <el-icon class="el-icon--right"><ArrowDown /></el-icon>
             </span>
             <template #dropdown>

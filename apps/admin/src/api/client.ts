@@ -151,7 +151,6 @@ import type {
   StationCalendarDay,
   StationCapacityRefreshResult,
   StationCapacitySnapshot,
-  StationCapacityRefreshResult,
   TenantBootstrapPreview,
   TenantBootstrapRequest,
   TenantBootstrapResult,
@@ -179,7 +178,7 @@ import type {
   UpdateVehicleStatusRequest,
   RunTboxCommandRequest,
   WorkflowTransition
-} from "@rimo/shared";
+} from "@store-rental/shared";
 
 const baseURL = import.meta.env.VITE_API_BASE_URL ?? "/api";
 
@@ -189,8 +188,8 @@ export const http = axios.create({
 });
 
 http.interceptors.request.use((config) => {
-  const token = window.localStorage.getItem("rimo_access_token");
-  const tenantRaw = window.localStorage.getItem("rimo_tenant");
+  const token = window.localStorage.getItem("store_rental_access_token");
+  const tenantRaw = window.localStorage.getItem("store_rental_tenant");
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -207,7 +206,7 @@ http.interceptors.request.use((config) => {
         config.headers["x-tenant-code"] = tenant.tenantCode;
       }
     } catch {
-      window.localStorage.removeItem("rimo_tenant");
+      window.localStorage.removeItem("store_rental_tenant");
     }
   }
   return config;
@@ -217,9 +216,9 @@ http.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error?.response?.status === 401) {
-      window.localStorage.removeItem("rimo_access_token");
-      window.localStorage.removeItem("rimo_tenant");
-      window.localStorage.removeItem("rimo_user");
+      window.localStorage.removeItem("store_rental_access_token");
+      window.localStorage.removeItem("store_rental_tenant");
+      window.localStorage.removeItem("store_rental_user");
       if (window.location.pathname !== "/login") {
         window.location.href = "/login";
       }
@@ -764,6 +763,34 @@ export async function getDispatchTasks(params: StoreRentalDispatchTaskQuery = {}
 export async function closeDispatchTask(payload: StoreRentalDispatchCloseTaskRequest) {
   const response = await http.post<ApiResult<StoreRentalDispatchTaskActionResult>>(
     "/store-rental/dispatch/tasks/close",
+    payload
+  );
+  return response.data.data;
+}
+
+export async function claimDispatchTask(payload: {
+  taskId: string;
+  orderId: string;
+  taskType: string;
+  operator: string;
+}) {
+  const response = await http.post<ApiResult<StoreRentalDispatchTaskActionResult>>(
+    "/store-rental/dispatch/tasks/claim",
+    payload
+  );
+  return response.data.data;
+}
+
+export async function processDispatchTask(payload: {
+  taskId: string;
+  orderId: string;
+  taskType: string;
+  status: string;
+  operator: string;
+  memo?: string;
+}) {
+  const response = await http.post<ApiResult<StoreRentalDispatchTaskActionResult>>(
+    "/store-rental/dispatch/tasks/process",
     payload
   );
   return response.data.data;

@@ -3,7 +3,7 @@ import type {
   StoreRentalReportExportRequest,
   StoreRentalReportQuery,
   StoreRentalReportType
-} from "@rimo/shared";
+} from "@store-rental/shared";
 import { ReportsRepository } from "./reports.repository";
 
 @Injectable()

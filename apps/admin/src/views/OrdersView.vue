@@ -11,7 +11,7 @@ import {
   type PlatformFilterPreset,
   type StoreRentalOrderDetail,
   type StoreRentalOrderSummary
-} from "@rimo/shared";
+} from "@store-rental/shared";
 import {
   deletePlatformFilterPreset,
   getStoreRentalOrder,

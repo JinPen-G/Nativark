@@ -6,7 +6,7 @@ import type {
   CreatePrintJobRequest,
   FileAssetSummary,
   PrintJobSummary
-} from "@rimo/shared";
+} from "@store-rental/shared";
 import {
   createFileAsset,
   createPrintJob,
@@ -212,23 +212,23 @@ onMounted(loadData);
     </div>
 
     <div class="grid grid-cols-1 xl:grid-cols-5 gap-4 mb-4">
-      <div class="rimo-card p-4">
+      <div class="sr-card p-4">
         <div class="text-xs text-gray-400">附件总数</div>
         <div class="mt-2 text-2xl font-bold text-gray-800">{{ metrics.files }}</div>
       </div>
-      <div class="rimo-card p-4">
+      <div class="sr-card p-4">
         <div class="text-xs text-gray-400">有效附件</div>
         <div class="mt-2 text-2xl font-bold text-[#00689E]">{{ metrics.activeFiles }}</div>
       </div>
-      <div class="rimo-card p-4">
+      <div class="sr-card p-4">
         <div class="text-xs text-gray-400">附件容量</div>
         <div class="mt-2 text-2xl font-bold text-gray-800">{{ formatBytes(metrics.totalBytes) }}</div>
       </div>
-      <div class="rimo-card p-4">
+      <div class="sr-card p-4">
         <div class="text-xs text-gray-400">打印任务</div>
         <div class="mt-2 text-2xl font-bold text-gray-800">{{ metrics.printJobs }}</div>
       </div>
-      <div class="rimo-card p-4">
+      <div class="sr-card p-4">
         <div class="text-xs text-gray-400">已生成</div>
         <div class="mt-2 text-2xl font-bold text-emerald-600">{{ metrics.generatedPrintJobs }}</div>
       </div>
@@ -236,7 +236,7 @@ onMounted(loadData);
 
     <div class="grid grid-cols-12 gap-4">
       <section class="col-span-12 xl:col-span-4 space-y-4">
-        <div class="rimo-card p-5">
+        <div class="sr-card p-5">
           <div class="flex items-center justify-between mb-4">
             <div>
               <div class="font-semibold text-gray-800">附件元数据</div>
@@ -298,7 +298,7 @@ onMounted(loadData);
           </el-form>
         </div>
 
-        <div class="rimo-card p-5">
+        <div class="sr-card p-5">
           <div class="flex items-center justify-between mb-4">
             <div>
               <div class="font-semibold text-gray-800">打印任务</div>
@@ -350,7 +350,7 @@ onMounted(loadData);
       </section>
 
       <section class="col-span-12 xl:col-span-8 space-y-4 min-w-0">
-        <div class="rimo-card p-4">
+        <div class="sr-card p-4">
           <div class="font-semibold text-gray-800 mb-3">附件列表</div>
           <el-table v-loading="loading" :data="files" border class="prototype-table">
             <el-table-column prop="fileName" label="文件名" min-width="220" fixed="left" />
@@ -374,7 +374,7 @@ onMounted(loadData);
           </el-table>
         </div>
 
-        <div class="rimo-card p-4">
+        <div class="sr-card p-4">
           <div class="font-semibold text-gray-800 mb-3">打印任务</div>
           <el-table v-loading="loading" :data="printJobs" border class="prototype-table">
             <el-table-column prop="documentNo" label="单据号" min-width="180" fixed="left" />

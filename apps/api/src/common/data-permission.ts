@@ -1,4 +1,4 @@
-import type { SystemDataScope, SystemUserRow } from "@rimo/shared";
+import type { SystemDataScope, SystemUserRow } from "@store-rental/shared";
 
 export interface DataPermissionSummary {
   tenantId?: string;

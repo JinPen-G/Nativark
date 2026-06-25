@@ -1,10 +1,10 @@
 import { defineStore } from "pinia";
-import type { AuthUser, LoginRequest, TenantContext } from "@rimo/shared";
+import type { AuthUser, LoginRequest, TenantContext } from "@store-rental/shared";
 import { login as loginApi } from "../api/client";
 
-const tokenKey = "rimo_access_token";
-const tenantKey = "rimo_tenant";
-const userKey = "rimo_user";
+const tokenKey = "store_rental_access_token";
+const tenantKey = "store_rental_tenant";
+const userKey = "store_rental_user";
 
 function readJson<T>(key: string): T | null {
   const raw = window.localStorage.getItem(key);

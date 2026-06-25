@@ -2,7 +2,7 @@
 import { ElMessage } from "element-plus";
 import { onMounted, reactive, ref } from "vue";
 import { useRoute } from "vue-router";
-import type { MemberDetail, MemberReviewTask } from "@rimo/shared";
+import type { MemberDetail, MemberReviewTask } from "@store-rental/shared";
 import { getMemberDetail, listMemberReviews, processMemberReview } from "../api/client";
 import AppLayout from "../components/AppLayout.vue";
 
@@ -77,7 +77,7 @@ onMounted(loadRows);
       <el-button @click="loadRows">刷新</el-button>
     </div>
 
-    <div class="rimo-card p-5">
+    <div class="sr-card p-5">
       <el-table v-loading="loading" :data="rows" stripe>
         <el-table-column prop="memberName" label="会员姓名" min-width="160" />
         <el-table-column prop="phoneMasked" label="手机号" width="140" />
@@ -110,7 +110,7 @@ onMounted(loadRows);
         <div class="text-lg font-semibold text-gray-800">会员审核处理</div>
       </template>
       <div v-if="currentReview && currentMember" class="space-y-5">
-        <div class="rimo-card p-5">
+        <div class="sr-card p-5">
           <div class="text-sm font-semibold text-gray-800 mb-4">会员资料</div>
           <el-descriptions :column="2" border>
             <el-descriptions-item label="会员姓名">{{ currentMember.name }}</el-descriptions-item>
@@ -122,7 +122,7 @@ onMounted(loadRows);
           </el-descriptions>
         </div>
 
-        <div class="rimo-card p-5">
+        <div class="sr-card p-5">
           <div class="text-sm font-semibold text-gray-800 mb-4">审核动作</div>
           <el-form label-position="top">
             <el-form-item label="审核结果">

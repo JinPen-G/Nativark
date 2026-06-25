@@ -474,11 +474,11 @@ async function upsertOpsArtifacts() {
         id: "report_export_demo_001",
         tenantId,
         reportType: "orders",
-        fileName: "rimo-orders-2026-06-demo.csv",
+        fileName: "store-rental-orders-2026-06-demo.csv",
         status: "completed",
         filters: { from: "2026-06-01", to: "2026-06-30" },
         rowCount: demoOrders.length,
-        downloadUrl: "/api/reports/exports/rimo-orders-2026-06-demo.csv",
+        downloadUrl: "/api/reports/exports/store-rental-orders-2026-06-demo.csv",
         operator: "seed",
         completedAt: new Date("2026-06-08T11:00:00+08:00")
       },
@@ -486,11 +486,11 @@ async function upsertOpsArtifacts() {
         id: "report_export_demo_002",
         tenantId,
         reportType: "finance",
-        fileName: "rimo-finance-2026-06-demo.csv",
+        fileName: "store-rental-finance-2026-06-demo.csv",
         status: "completed",
         filters: { from: "2026-06-01", to: "2026-06-30" },
         rowCount: 6,
-        downloadUrl: "/api/reports/exports/rimo-finance-2026-06-demo.csv",
+        downloadUrl: "/api/reports/exports/store-rental-finance-2026-06-demo.csv",
         operator: "seed",
         completedAt: new Date("2026-06-08T11:20:00+08:00")
       }
@@ -548,7 +548,7 @@ async function main() {
 main()
   .then(async () => {
     await prisma.$disconnect();
-    console.log("RIMO report demo seed completed.");
+    console.log("Store rental report demo seed completed.");
   })
   .catch(async (error) => {
     console.error(error);

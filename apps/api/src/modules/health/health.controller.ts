@@ -5,7 +5,7 @@ export class HealthController {
   @Get()
   health() {
     return {
-      service: "rimo-store-rental-api",
+      service: "store-rental-api",
       status: "ok",
       time: new Date().toISOString()
     };

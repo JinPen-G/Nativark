@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ElMessage } from "element-plus";
 import { onMounted, reactive, ref } from "vue";
-import type { MembershipPlanSummary, SaveMembershipPlanRequest } from "@rimo/shared";
+import type { MembershipPlanSummary, SaveMembershipPlanRequest } from "@store-rental/shared";
 import { listMembershipPlans, saveMembershipPlan } from "../api/client";
 import AppLayout from "../components/AppLayout.vue";
 
@@ -78,7 +78,7 @@ onMounted(loadData);
       <el-button type="primary" color="#00689E" @click="openCreate">新增等级</el-button>
     </div>
 
-    <div class="rimo-card p-5">
+    <div class="sr-card p-5">
       <el-table v-loading="loading" :data="rows" stripe>
         <el-table-column prop="name" label="等级名称" min-width="160" />
         <el-table-column prop="code" label="等级编码" width="160" />

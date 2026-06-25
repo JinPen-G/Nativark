@@ -175,7 +175,7 @@ function openProductVersion() {
 
     <el-tabs
       v-model="activeTab"
-      class="service-product-tabs rimo-page-tabs bg-white rounded-xl shadow-sm border border-gray-100 min-h-[500px]"
+      class="service-product-tabs sr-page-tabs bg-white rounded-xl shadow-sm border border-gray-100 min-h-[500px]"
     >
       <el-tab-pane name="SHARING">
         <template #label>

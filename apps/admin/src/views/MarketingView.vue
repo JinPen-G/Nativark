@@ -7,7 +7,7 @@ import {
   type MarketingPlanDetail,
   type MarketingPlanSummary,
   type SaveMarketingPlanRequest
-} from "@rimo/shared";
+} from "@store-rental/shared";
 import { getMarketingPlan, listMarketingPlans, saveMarketingPlan } from "../api/client";
 import AppLayout from "../components/AppLayout.vue";
 
@@ -256,7 +256,7 @@ onMounted(loadPlans);
       </div>
     </div>
 
-    <el-tabs v-model="activeBusinessTab" class="rimo-page-tabs bg-white rounded-xl shadow-sm border border-gray-100 min-h-[620px]">
+    <el-tabs v-model="activeBusinessTab" class="sr-page-tabs bg-white rounded-xl shadow-sm border border-gray-100 min-h-[620px]">
       <el-tab-pane name="STORE">
         <template #label>
           <span class="flex items-center gap-2"><el-icon><Shop /></el-icon><span>门市租赁</span></span>

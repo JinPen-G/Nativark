@@ -4,7 +4,7 @@ import {
   Injectable,
   NestInterceptor
 } from "@nestjs/common";
-import type { SystemUserRow } from "@rimo/shared";
+import type { SystemUserRow } from "@store-rental/shared";
 import { Observable, tap } from "rxjs";
 import { OperationLogService } from "./operation-log.service";
 

@@ -12,7 +12,7 @@ import {
   DispatchStatus,
   OrderMainStatus,
   PaymentStatus
-} from "@rimo/shared";
+} from "@store-rental/shared";
 import type {
   StoreRentalFinanceReport,
   StoreRentalFinanceReportRow,
@@ -32,7 +32,7 @@ import type {
   StoreRentalVehicleReportRow,
   StoreRentalVehiclesReport,
   VehicleInstanceSummary
-} from "@rimo/shared";
+} from "@store-rental/shared";
 import { PrismaService } from "../database/prisma.service";
 
 type NormalizedReportQuery = Required<
@@ -261,7 +261,7 @@ export class ReportsRepository {
     request: StoreRentalReportExportRequest
   ): Promise<StoreRentalReportExportJob> {
     const normalized = this.normalizeQuery(request.filters);
-    const fileName = `rimo-${request.reportType}-${normalized.from}-${normalized.to}-${Date.now()}.csv`;
+    const fileName = `store-rental-${request.reportType}-${normalized.from}-${normalized.to}-${Date.now()}.csv`;
     const created = await this.prisma.reportExportJob.create({
       data: {
         tenantId: normalized.tenantId,
@@ -408,7 +408,7 @@ export class ReportsRepository {
         {
           name: "restore-mysql.ps1",
           path: "scripts/restore-mysql.ps1",
-          purpose: "把备份 SQL 恢复到本地 rimo_store_rental 数据库。"
+          purpose: "把备份 SQL 恢复到本地 store_rental 数据库。"
         },
         {
           name: "seed-report-demo.ts",

@@ -65,7 +65,7 @@ import type {
   VehicleGroupMaster,
   VehicleInstanceSummary,
   VehicleListQuery
-} from "@rimo/shared";
+} from "@store-rental/shared";
 import { StoreRentalService } from "./store-rental.service";
 
 @Controller("store-rental")
@@ -187,6 +187,16 @@ export class StoreRentalController {
   @Post("dispatch/tasks/close")
   closeDispatchTask(@Body() body: StoreRentalDispatchCloseTaskRequest) {
     return this.storeRentalService.closeDispatchTask(body);
+  }
+
+  @Post("dispatch/tasks/claim")
+  claimDispatchTask(@Body() body: { taskId: string; orderId: string; taskType: string; operator: string }) {
+    return this.storeRentalService.claimDispatchTask(body);
+  }
+
+  @Post("dispatch/tasks/process")
+  processDispatchTask(@Body() body: { taskId: string; orderId: string; taskType: string; status: string; operator: string; memo?: string }) {
+    return this.storeRentalService.processDispatchTask(body);
   }
 
   @Get("dispatch/events")

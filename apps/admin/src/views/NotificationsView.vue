@@ -5,7 +5,7 @@ import type {
   NotificationSendLogSummary,
   NotificationTemplateSummary,
   SendMockNotificationRequest
-} from "@rimo/shared";
+} from "@store-rental/shared";
 import {
   listNotificationLogs,
   listNotificationTemplates,
@@ -185,26 +185,26 @@ onMounted(loadData);
     </div>
 
     <div class="grid grid-cols-1 xl:grid-cols-4 gap-4 mb-4">
-      <div class="rimo-card p-4">
+      <div class="sr-card p-4">
         <div class="text-xs text-gray-400">模板总数</div>
         <div class="mt-2 text-2xl font-bold text-gray-800">{{ metrics.templates }}</div>
       </div>
-      <div class="rimo-card p-4">
+      <div class="sr-card p-4">
         <div class="text-xs text-gray-400">启用模板</div>
         <div class="mt-2 text-2xl font-bold text-[#00689E]">{{ metrics.enabledTemplates }}</div>
       </div>
-      <div class="rimo-card p-4">
+      <div class="sr-card p-4">
         <div class="text-xs text-gray-400">mock 成功</div>
         <div class="mt-2 text-2xl font-bold text-emerald-600">{{ metrics.successLogs }}</div>
       </div>
-      <div class="rimo-card p-4">
+      <div class="sr-card p-4">
         <div class="text-xs text-gray-400">跳过发送</div>
         <div class="mt-2 text-2xl font-bold text-amber-600">{{ metrics.skippedLogs }}</div>
       </div>
     </div>
 
     <div class="grid grid-cols-12 gap-4">
-      <section class="col-span-12 xl:col-span-4 rimo-card p-5">
+      <section class="col-span-12 xl:col-span-4 sr-card p-5">
         <div class="flex items-center justify-between mb-4">
           <div>
             <div class="font-semibold text-gray-800">模拟发送</div>
@@ -283,7 +283,7 @@ onMounted(loadData);
       </section>
 
       <section class="col-span-12 xl:col-span-8 space-y-4 min-w-0">
-        <div class="rimo-card p-4">
+        <div class="sr-card p-4">
           <div class="font-semibold text-gray-800 mb-3">通知模板</div>
           <el-table v-loading="loading" :data="templates" border class="prototype-table">
             <el-table-column prop="name" label="模板名称" min-width="170" fixed="left" />
@@ -310,7 +310,7 @@ onMounted(loadData);
           </el-table>
         </div>
 
-        <div class="rimo-card p-4">
+        <div class="sr-card p-4">
           <div class="font-semibold text-gray-800 mb-3">发送日志</div>
           <el-table v-loading="loading" :data="logs" border class="prototype-table">
             <el-table-column label="创建时间" width="150" fixed="left">

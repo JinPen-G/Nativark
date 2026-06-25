@@ -8,7 +8,7 @@ import type {
   StoreStationHierarchyNode,
   StoreStationListQuery,
   StoreStationSummary
-} from "@rimo/shared";
+} from "@store-rental/shared";
 import {
   listStationHierarchy,
   listStationCalendar,
@@ -175,9 +175,9 @@ async function refreshCapacitySnapshots(showMessage = true) {
 
 function buildFallbackHierarchy(stations: StoreStationSummary[]): StoreStationHierarchyNode[] {
   const company: StoreStationHierarchyNode = {
-    id: "company_RIMO 香港租户",
+    id: "company_演示香港租户",
     type: "company",
-    label: "RIMO 香港租户",
+    label: "演示香港租户",
     stationCount: stations.length,
     children: Array.from(new Set(stations.map((station) => station.parentStoreName))).map(
       (store): StoreStationHierarchyNode => ({
@@ -359,7 +359,7 @@ onMounted(loadRows);
 
     <div class="grid grid-cols-12 gap-5">
       <aside class="col-span-12 xl:col-span-3">
-        <div class="rimo-card p-4">
+        <div class="sr-card p-4">
           <div class="flex items-center justify-between mb-3">
             <div>
               <div class="text-sm font-bold text-gray-800">站点与区域</div>
@@ -386,7 +386,7 @@ onMounted(loadRows);
       </aside>
 
       <div class="col-span-12 xl:col-span-9">
-        <div class="rimo-card p-5">
+        <div class="sr-card p-5">
       <div class="flex items-center justify-between gap-4 mb-5">
         <div class="flex items-center gap-3">
           <el-input

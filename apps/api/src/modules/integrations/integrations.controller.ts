@@ -4,7 +4,7 @@ import type {
   CreateDataExchangeJobRequest,
   InvokeMockAdapterRequest,
   SaveTBoxDeviceRequest
-} from "@rimo/shared";
+} from "@store-rental/shared";
 import { IntegrationsService } from "./integrations.service";
 
 @Controller("integrations")

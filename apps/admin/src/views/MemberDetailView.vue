@@ -2,7 +2,7 @@
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import type { MemberDetail, SaveMemberRequest } from "@rimo/shared";
+import type { MemberDetail, SaveMemberRequest } from "@store-rental/shared";
 import { getMemberDetail, processMemberRisk, saveMember } from "../api/client";
 import AppLayout from "../components/AppLayout.vue";
 import { useAuthStore } from "../stores/auth";
@@ -194,7 +194,7 @@ onMounted(loadData);
     </div>
 
     <div v-loading="loading" class="grid grid-cols-12 gap-5">
-      <div class="col-span-12 xl:col-span-8 rimo-card p-5">
+      <div class="col-span-12 xl:col-span-8 sr-card p-5">
         <el-form label-position="top">
           <div class="grid grid-cols-12 gap-4">
             <el-form-item label="会员姓名" required class="col-span-12 md:col-span-4">
@@ -265,7 +265,7 @@ onMounted(loadData);
       </div>
 
       <div class="col-span-12 xl:col-span-4 space-y-5">
-        <div class="rimo-card p-5" v-if="member">
+        <div class="sr-card p-5" v-if="member">
           <div class="text-sm font-semibold text-gray-800">会员概览</div>
           <div class="mt-4 space-y-3 text-sm">
             <div class="flex justify-between"><span class="text-gray-500">会员状态</span><span>{{ member.status }}</span></div>
@@ -285,7 +285,7 @@ onMounted(loadData);
           </div>
         </div>
 
-        <div class="rimo-card p-5" v-if="member">
+        <div class="sr-card p-5" v-if="member">
           <div class="text-sm font-semibold text-gray-800 mb-4">操作记录</div>
           <el-timeline>
             <el-timeline-item

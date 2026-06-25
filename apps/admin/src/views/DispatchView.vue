@@ -15,16 +15,18 @@ import type {
   StoreRentalDispatchVehicleUnavailableResult,
   StoreRentalVehicleUnavailableReason,
   VehicleInstanceSummary
-} from "@rimo/shared";
+} from "@store-rental/shared";
 import {
   analyzeDispatchWithAi,
   applyDispatchOptimization,
+  claimDispatchTask,
   closeDispatchTask,
   getDispatchBoard,
   getDispatchEvents,
   getDispatchTasks,
   hardLockDispatchOrders,
   manualReassignFromDispatch,
+  processDispatchTask,
   processDispatchVehicleUnavailable,
   previewDispatchOptimization
 } from "../api/client";
@@ -87,7 +89,7 @@ const unavailableStatusOptions = [
 
 const aiCards = [
   { label: "模型提供商", value: "OpenAI Compatible", hint: "租户自有 API Key 接入" },
-  { label: "提示词版本", value: "rimo-store-dispatch-agent-v1", hint: "系统内置提示词" },
+  { label: "提示词版本", value: "store-rental-dispatch-agent-v1", hint: "系统内置提示词" },
   { label: "数据包版本", value: "dispatch-packet-v1", hint: "仅提交调度必要数据" },
   { label: "执行方式", value: "人工确认", hint: "AI 不直接改订单" }
 ];
@@ -245,6 +247,68 @@ function openTask(task: StoreRentalDispatchTask) {
   const row = board.value?.rows.find((item) => item.orderId === task.orderId);
   if (row) {
     openOrderDrawer(row);
+  }
+}
+
+async function claimTask(task: StoreRentalDispatchTask) {
+  try {
+    await ElMessageBox.confirm(
+      `确认认领订单 ${task.orderNo} 的调度任务？认领后其他调度员将无法处理此任务。`,
+      "认领调度任务",
+      {
+        confirmButtonText: "确认认领",
+        cancelButtonText: "取消",
+        type: "info"
+      }
+    );
+    actionLoading.value = `claim-task-${task.id}`;
+    await claimDispatchTask({
+      taskId: task.id,
+      orderId: task.orderId,
+      taskType: task.taskType,
+      operator: "营运端"
+    });
+    ElMessage.success("调度任务已认领");
+    await loadBoard();
+  } catch (error) {
+    if (error !== "cancel") {
+      ElMessage.error(readErrorMessage(error, "认领调度任务失败"));
+    }
+  } finally {
+    actionLoading.value = "";
+  }
+}
+
+async function processTask(task: StoreRentalDispatchTask) {
+  try {
+    const { value } = await ElMessageBox.prompt(
+      "请输入处理说明，系统会写入调度事件流。",
+      "处理调度任务",
+      {
+        confirmButtonText: "确认处理",
+        cancelButtonText: "取消",
+        inputType: "textarea",
+        inputPlaceholder: "例如：已联系客户确认取车时间，建议保持当前派车方案",
+        inputValidator: (value) => Boolean(value && value.trim()) || "请填写处理说明"
+      }
+    );
+    actionLoading.value = `process-task-${task.id}`;
+    await processDispatchTask({
+      taskId: task.id,
+      orderId: task.orderId,
+      taskType: task.taskType,
+      status: "processed",
+      operator: "营运端",
+      memo: value
+    });
+    ElMessage.success("调度任务已处理");
+    await loadBoard();
+  } catch (error) {
+    if (error !== "cancel") {
+      ElMessage.error(readErrorMessage(error, "处理调度任务失败"));
+    }
+  } finally {
+    actionLoading.value = "";
   }
 }
 
@@ -813,6 +877,24 @@ function readErrorMessage(error: unknown, fallback: string) {
             </div>
             <div class="mt-3 flex justify-end gap-2">
               <el-button size="small" text @click.stop="openTask(task)">查看订单</el-button>
+              <el-button
+                size="small"
+                type="success"
+                plain
+                :loading="actionLoading === `claim-task-${task.id}`"
+                @click.stop="claimTask(task)"
+              >
+                认领任务
+              </el-button>
+              <el-button
+                size="small"
+                type="primary"
+                plain
+                :loading="actionLoading === `process-task-${task.id}`"
+                @click.stop="processTask(task)"
+              >
+                处理任务
+              </el-button>
               <el-button
                 size="small"
                 type="warning"

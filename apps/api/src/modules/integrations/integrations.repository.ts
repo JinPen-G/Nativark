@@ -14,7 +14,7 @@ import type {
   SaveTBoxDeviceRequest,
   SendMockNotificationRequest,
   TBoxDeviceSummary
-} from "@rimo/shared";
+} from "@store-rental/shared";
 import { PrismaService } from "../database/prisma.service";
 
 const DEFAULT_TENANT_ID = "tenant_001";

@@ -45,8 +45,8 @@ import type {
   TenantBootstrapRequest,
   TenantBootstrapResult,
   TenantSummary
-} from "@rimo/shared";
-import { RoleScope, TenantStatus } from "@rimo/shared";
+} from "@store-rental/shared";
+import { RoleScope, TenantStatus } from "@store-rental/shared";
 import {
   buildOrganizationWhere,
   buildSystemUserWhere

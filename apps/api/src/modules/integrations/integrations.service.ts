@@ -23,7 +23,7 @@ import type {
   SaveTBoxDeviceRequest,
   SendMockNotificationRequest,
   TBoxDeviceSummary
-} from "@rimo/shared";
+} from "@store-rental/shared";
 import { IntegrationsRepository } from "./integrations.repository";
 
 @Injectable()
@@ -149,7 +149,7 @@ export class IntegrationsService {
       id: "tbox_demo_001",
       cid: "CID-HK-880001",
       simNo: "89852-0000-0001",
-      model: "RIMO-TBOX-A1",
+      model: "STORE-TBOX-A1",
       status: "bound",
       boundVehicleId: "vehicle_001",
       boundPlateNo: "RX 7821",
@@ -168,7 +168,7 @@ export class IntegrationsService {
       id: "tbox_demo_002",
       cid: "CID-HK-880002",
       simNo: "89852-0000-0002",
-      model: "RIMO-TBOX-A1",
+      model: "STORE-TBOX-A1",
       status: "unbound",
       firmwareVersion: "V1.4.8",
       appVersion: "V2.1.0",

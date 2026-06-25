@@ -4,7 +4,7 @@ import type {
   StoreRentalReportExportRequest,
   StoreRentalReportPeriod,
   StoreRentalReportQuery
-} from "@rimo/shared";
+} from "@store-rental/shared";
 import { ReportsService } from "./reports.service";
 
 @Controller("reports")

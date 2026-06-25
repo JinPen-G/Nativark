@@ -8,7 +8,7 @@ import type {
   PlatformDictionaryItem,
   PlatformNumberRule,
   TenantBootstrapPreview
-} from "@rimo/shared";
+} from "@store-rental/shared";
 import {
   bootstrapTenant,
   generatePlatformNumber,
@@ -50,7 +50,7 @@ const dictionaryForm = reactive<PlatformDictionaryGroup>({
 
 const tenantForm = reactive({
   tenantCode: "demo3",
-  tenantName: "RIMO 新租户",
+  tenantName: "演示新租户",
   adminAccount: "admin",
   adminDisplayName: "租户管理员",
   adminPhone: "",

@@ -9,7 +9,7 @@ import {
   type StoreRentalContractCenterRow,
   type StoreRentalContractRecord,
   type StoreRentalOrderSummary
-} from "@rimo/shared";
+} from "@store-rental/shared";
 import {
   createStoreRentalOrderContract,
   getStoreRentalContractCenter,

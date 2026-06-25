@@ -6,7 +6,7 @@ import type {
   SystemPushRule,
   SystemRuleSpecialDate,
   SystemRulesConfig
-} from "@rimo/shared";
+} from "@store-rental/shared";
 import {
   getSystemRules,
   saveSystemRuleSection,
@@ -286,7 +286,7 @@ onMounted(loadSystemRules);
 
       <el-tabs
         v-model="activeTab"
-        class="rimo-page-tabs w-full bg-white rounded-xl shadow-sm border border-gray-100 min-h-[600px]"
+        class="sr-page-tabs w-full bg-white rounded-xl shadow-sm border border-gray-100 min-h-[600px]"
       >
         <el-tab-pane name="MEMBER">
           <template #label>

@@ -31,7 +31,7 @@ import {
   TenantBootstrapResult,
   TenantStatus,
   TenantSummary
-} from "@rimo/shared";
+} from "@store-rental/shared";
 import {
   buildOrganizationWhere,
   buildSystemUserWhere,
@@ -55,14 +55,14 @@ export class PlatformService {
     {
       tenantId: "tenant_001",
       tenantCode: "demo",
-      tenantName: "RIMO 香港租户",
+      tenantName: "演示香港租户",
       tenantStatus: TenantStatus.Active,
       enabledBusinessLines: ["store_rental"]
     },
     {
       tenantId: "tenant_002",
       tenantCode: "demo2",
-      tenantName: "RIMO 深圳租户",
+      tenantName: "演示深圳租户",
       tenantStatus: TenantStatus.Active,
       enabledBusinessLines: ["store_rental"]
     }
@@ -365,7 +365,7 @@ export class PlatformService {
       apiKeyMasked: "sk-****8F3A",
       promptSourceText: "租户专属版",
       promptConfigVersion: "prompt-config-20260519.01",
-      promptVersion: "rimo-store-dispatch-agent-v1",
+      promptVersion: "store-rental-dispatch-agent-v1",
       promptHash: "sha256:8c21...f09a",
       lastTestStatus: "成功",
       lastTestTime: "2026-05-05 10:30",
@@ -390,16 +390,16 @@ export class PlatformService {
           operator: "王店长",
           model: "gpt-xxx",
           promptSourceText: "租户专属版",
-          promptVersion: "rimo-store-dispatch-agent-v1",
+          promptVersion: "store-rental-dispatch-agent-v1",
           promptHash: "sha256:8c21...f09a",
           filteredCount: 5,
           status: "成功",
           promptText:
-            "你是 RIMO Rental 门市租赁 AI 调度分析 Agent。\n你的职责是帮助调度员分析车辆排程风险，并在系统合法候选车辆范围内生成推荐。",
+            "你是 Store Rental Platform 门市租赁 AI 调度分析 Agent。\n你的职责是帮助调度员分析车辆排程风险，并在系统合法候选车辆范围内生成推荐。",
           requestPayload: JSON.stringify(
             {
               analysisContext: {
-                tenantId: "tenant-rimo-tpe",
+                tenantId: "tenant-demo-tpe",
                 windowDays: 7,
                 storeScope: ["台北总店", "桃园机场店"]
               },
@@ -428,16 +428,16 @@ export class PlatformService {
           operator: "陈调度",
           model: "gpt-xxx",
           promptSourceText: "默认版",
-          promptVersion: "rimo-store-dispatch-agent-v1",
+          promptVersion: "store-rental-dispatch-agent-v1",
           promptHash: "sha256:7f18...a921",
           filteredCount: 5,
           status: "成功",
           promptText:
-            "你是 RIMO Rental 门市租赁 AI 调度分析 Agent。\n必须遵守系统硬约束，不得直接修改订单、车辆或排程。",
+            "你是 Store Rental Platform 门市租赁 AI 调度分析 Agent。\n必须遵守系统硬约束，不得直接修改订单、车辆或排程。",
           requestPayload: JSON.stringify(
             {
               analysisContext: {
-                tenantId: "tenant-rimo-tpe",
+                tenantId: "tenant-demo-tpe",
                 windowDays: 3,
                 storeScope: ["台北总店"]
               },

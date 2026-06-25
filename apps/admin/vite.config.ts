@@ -9,7 +9,7 @@ export default defineConfig(({ mode }) => {
     plugins: [vue()],
     resolve: {
       alias: {
-        "@rimo/shared": fileURLToPath(new URL("../../packages/shared/src/index.ts", import.meta.url))
+        "@store-rental/shared": fileURLToPath(new URL("../../packages/shared/src/index.ts", import.meta.url))
       }
     },
     server: {

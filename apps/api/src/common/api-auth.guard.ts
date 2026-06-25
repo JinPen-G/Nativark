@@ -5,7 +5,7 @@ import {
   Injectable,
   UnauthorizedException
 } from "@nestjs/common";
-import type { SystemUserRow } from "@rimo/shared";
+import type { SystemUserRow } from "@store-rental/shared";
 import { PlatformService } from "../modules/platform/platform.service";
 
 interface RequestLike {

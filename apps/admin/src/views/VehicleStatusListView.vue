@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
-import type { TboxDeviceSummary, VehicleInstanceSummary } from "@rimo/shared";
+import type { TboxDeviceSummary, VehicleInstanceSummary } from "@store-rental/shared";
 import { listTboxDevices, listVehicles } from "../api/client";
 import AppLayout from "../components/AppLayout.vue";
 
@@ -91,25 +91,25 @@ onMounted(loadData);
     </div>
 
     <div class="grid grid-cols-12 gap-4 mb-5">
-      <div class="rimo-card p-4 col-span-12 md:col-span-3">
+      <div class="sr-card p-4 col-span-12 md:col-span-3">
         <div class="text-xs text-gray-500">车辆总数</div>
         <div class="text-2xl font-bold text-gray-800 mt-1">{{ metrics.total }}</div>
       </div>
-      <div class="rimo-card p-4 col-span-12 md:col-span-3">
+      <div class="sr-card p-4 col-span-12 md:col-span-3">
         <div class="text-xs text-gray-500">空闲可派</div>
         <div class="text-2xl font-bold text-emerald-600 mt-1">{{ metrics.idle }}</div>
       </div>
-      <div class="rimo-card p-4 col-span-12 md:col-span-3">
+      <div class="sr-card p-4 col-span-12 md:col-span-3">
         <div class="text-xs text-gray-500">预约/租赁中</div>
         <div class="text-2xl font-bold text-blue-600 mt-1">{{ metrics.occupied }}</div>
       </div>
-      <div class="rimo-card p-4 col-span-12 md:col-span-3">
+      <div class="sr-card p-4 col-span-12 md:col-span-3">
         <div class="text-xs text-gray-500">整备/异常</div>
         <div class="text-2xl font-bold text-amber-600 mt-1">{{ metrics.exception }}</div>
       </div>
     </div>
 
-    <div class="rimo-card p-5">
+    <div class="sr-card p-5">
       <div class="flex flex-wrap items-center gap-3 mb-5">
         <el-input v-model="filters.keyword" placeholder="车牌/CID/车型组" clearable prefix-icon="Search" style="width: 240px" />
         <el-select v-model="filters.station" placeholder="据点/门店" clearable style="width: 180px">

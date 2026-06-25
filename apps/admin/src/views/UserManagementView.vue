@@ -8,8 +8,8 @@ import type {
   SystemRoleRow,
   SystemUserRow,
   TenantSummary
-} from "@rimo/shared";
-import { RoleScope } from "@rimo/shared";
+} from "@store-rental/shared";
+import { RoleScope } from "@store-rental/shared";
 import {
   listOrganizations,
   getRoles,

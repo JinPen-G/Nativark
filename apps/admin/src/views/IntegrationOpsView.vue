@@ -12,7 +12,7 @@ import type {
   InvokeMockAdapterRequest,
   SendMockNotificationRequest,
   TBoxDeviceSummary
-} from "@rimo/shared";
+} from "@store-rental/shared";
 import {
   bindTBoxDevice,
   createAsyncJob,
@@ -389,7 +389,7 @@ onMounted(loadDashboard);
 
       <el-tabs
         v-model="activeTab"
-        class="rimo-page-tabs w-full bg-white rounded-xl shadow-sm border border-gray-100 min-h-[640px]"
+        class="sr-page-tabs w-full bg-white rounded-xl shadow-sm border border-gray-100 min-h-[640px]"
       >
         <el-tab-pane name="capabilities">
           <template #label>

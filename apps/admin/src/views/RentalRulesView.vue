@@ -9,7 +9,7 @@ import {
 } from "../api/client";
 import AppLayout from "../components/AppLayout.vue";
 import { fallbackRules } from "../data/prototypeSeed";
-import type { StoreRentalRuleConfig, StoreRentalRuleVersionRecord } from "@rimo/shared";
+import type { StoreRentalRuleConfig, StoreRentalRuleVersionRecord } from "@store-rental/shared";
 
 const activeTab = ref("TRANSACTION");
 const loading = ref(false);
@@ -171,76 +171,119 @@ onMounted(loadRules);
     <el-tabs
       v-loading="loading"
       v-model="activeTab"
-      class="rimo-page-tabs bg-white rounded-xl shadow-sm border border-gray-100 min-h-[600px]"
+      class="sr-page-tabs bg-white rounded-xl shadow-sm border border-gray-100 min-h-[600px]"
     >
       <el-tab-pane name="TRANSACTION">
         <template #label>
           <span class="flex items-center gap-2"><el-icon><CreditCard /></el-icon>交易与授权</span>
         </template>
-        <div class="p-6 space-y-6">
-          <div class="rounded-lg border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-800">
-            本期下单阶段的预授权押金统一采用线上预授权，不支持现金押金、线下押金或仅登记线下凭证。
-          </div>
-
-          <div class="grid grid-cols-12 gap-5">
-            <div class="col-span-12 lg:col-span-7 rimo-card p-6">
-              <div class="font-bold text-gray-800 mb-4">支付方式开关</div>
-              <el-form label-position="top">
-                <el-form-item label="客户自付可用渠道">
-                  <el-checkbox-group v-model="rules.payment.enabledGateways">
-                    <el-checkbox label="jiekou">街口支付</el-checkbox>
-                    <el-checkbox label="credit_card">信用卡</el-checkbox>
-                  </el-checkbox-group>
-                </el-form-item>
-                <el-form-item label="企业月结">
-                  <div class="flex items-center gap-4">
-                    <el-switch v-model="rules.enterpriseBilling.monthlySettlementEnabled" active-text="启用" inactive-text="禁用" />
-                    <span class="text-sm text-gray-500">企业月结订单不读取客户支付方式，不发起预授权。</span>
-                  </div>
-                </el-form-item>
-                <el-form-item label="取车资金处理口径">
-                  <el-checkbox-group v-model="rules.payment.pickupFundHandling">
-                    <el-checkbox label="performance_guarantee">履约担保</el-checkbox>
-                    <el-checkbox label="preauth_to_rental">预授权转租金</el-checkbox>
-                  </el-checkbox-group>
-                </el-form-item>
-              </el-form>
+        <div class="p-6">
+          <div class="grid grid-cols-12 gap-6">
+            <!-- 左侧规则分组导航 -->
+            <div class="col-span-12 lg:col-span-3">
+              <div class="sticky top-4 rounded-xl border border-gray-100 bg-gray-50 p-3">
+                <div class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">规则分类</div>
+                <a href="#transaction-payment"
+                  class="rule-nav-link block rounded-lg px-3 py-2 text-sm font-medium text-gray-600 transition-colors">
+                  支付方式开关
+                </a>
+                <a href="#transaction-preauth"
+                  class="rule-nav-link block rounded-lg px-3 py-2 text-sm font-medium text-gray-600 transition-colors">
+                  预授权规则
+                </a>
+                <a href="#transaction-pending"
+                  class="rule-nav-link block rounded-lg px-3 py-2 text-sm font-medium text-gray-600 transition-colors">
+                  待支付保留
+                </a>
+                <a href="#transaction-enterprise"
+                  class="rule-nav-link block rounded-lg px-3 py-2 text-sm font-medium text-gray-600 transition-colors">
+                  企业月结配置
+                </a>
+              </div>
             </div>
 
-            <div class="col-span-12 lg:col-span-5 rimo-card p-6">
-              <div class="font-bold text-gray-800 mb-4">预授权押金策略</div>
-              <el-form label-position="top">
-                <el-form-item label="预授权额度模式">
-                  <el-radio-group v-model="rules.payment.preAuthMode">
-                    <el-radio-button label="rental_ratio">租金比例</el-radio-button>
-                    <el-radio-button label="fixed_amount">固定额度</el-radio-button>
-                  </el-radio-group>
-                </el-form-item>
-                <div class="grid grid-cols-2 gap-4">
-                  <el-form-item label="预授权比例">
-                    <el-input-number v-model="rules.payment.preAuthRatioPercent" :min="0" :max="rules.payment.maxPreAuthRatioPercent" class="w-full" />
-                  </el-form-item>
-                  <el-form-item label="固定额度">
-                    <el-input-number v-model="rules.payment.fixedPreAuthAmount" :min="0" :step="100" class="w-full" />
-                  </el-form-item>
+            <!-- 右侧规则内容 -->
+            <div class="col-span-12 lg:col-span-9 space-y-6">
+              <div class="rounded-lg border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-800">
+                本期下单阶段的预授权押金统一采用线上预授权，不支持现金押金、线下押金或仅登记线下凭证。
+              </div>
+
+              <div id="transaction-payment" class="scroll-mt-4">
+                <div class="sr-card p-6">
+                  <div class="font-bold text-gray-800 mb-4">支付方式开关</div>
+                  <el-form label-position="top">
+                    <el-form-item label="客户自付可用渠道">
+                      <el-checkbox-group v-model="rules.payment.enabledGateways">
+                        <el-checkbox label="jiekou">街口支付</el-checkbox>
+                        <el-checkbox label="credit_card">信用卡</el-checkbox>
+                      </el-checkbox-group>
+                    </el-form-item>
+                    <el-form-item label="企业月结">
+                      <div class="flex items-center gap-4">
+                        <el-switch v-model="rules.enterpriseBilling.monthlySettlementEnabled" active-text="启用" inactive-text="禁用" />
+                        <span class="text-sm text-gray-500">企业月结订单不读取客户支付方式，不发起预授权。</span>
+                      </div>
+                    </el-form-item>
+                    <el-form-item label="取车资金处理口径">
+                      <el-checkbox-group v-model="rules.payment.pickupFundHandling">
+                        <el-checkbox label="performance_guarantee">履约担保</el-checkbox>
+                        <el-checkbox label="preauth_to_rental">预授权转租金</el-checkbox>
+                      </el-checkbox-group>
+                    </el-form-item>
+                  </el-form>
                 </div>
-                <el-form-item label="企业月结预授权金额">
-                  <el-input-number v-model="rules.payment.enterpriseMonthlyPreAuthAmount" :min="0" :step="100" class="w-full" />
-                </el-form-item>
-              </el-form>
-            </div>
+              </div>
 
-            <div class="col-span-12 rimo-card p-6">
-              <div class="font-bold text-gray-800 mb-4">待支付资源保留</div>
-              <div class="grid grid-cols-12 gap-4 items-end">
-                <el-form-item label="启用待支付资源保留" class="col-span-12 md:col-span-3 mb-0">
-                  <el-switch v-model="rules.pendingPayment.enabled" active-text="开启" inactive-text="关闭" />
-                </el-form-item>
-                <el-form-item label="保留时长 (分钟)" class="col-span-12 md:col-span-3 mb-0">
-                  <el-input-number v-model="rules.pendingPayment.holdMinutes" :min="1" class="w-full" />
-                </el-form-item>
-                <div class="col-span-12 md:col-span-6 text-sm text-gray-500 bg-gray-50 rounded-lg border border-gray-100 px-4 py-3">
-                  保留时长到期仍未完成预授权押金时，订单进入已取消并释放车组资源。
+              <div id="transaction-preauth" class="scroll-mt-4">
+                <div class="sr-card p-6">
+                  <div class="font-bold text-gray-800 mb-4">预授权押金策略</div>
+                  <el-form label-position="top">
+                    <el-form-item label="预授权额度模式">
+                      <el-radio-group v-model="rules.payment.preAuthMode">
+                        <el-radio-button label="rental_ratio">租金比例</el-radio-button>
+                        <el-radio-button label="fixed_amount">固定额度</el-radio-button>
+                      </el-radio-group>
+                    </el-form-item>
+                    <div class="grid grid-cols-2 gap-4">
+                      <el-form-item label="预授权比例">
+                        <el-input-number v-model="rules.payment.preAuthRatioPercent" :min="0" :max="rules.payment.maxPreAuthRatioPercent" class="w-full" />
+                      </el-form-item>
+                      <el-form-item label="固定额度">
+                        <el-input-number v-model="rules.payment.fixedPreAuthAmount" :min="0" :step="100" class="w-full" />
+                      </el-form-item>
+                    </div>
+                    <el-form-item label="企业月结预授权金额">
+                      <el-input-number v-model="rules.payment.enterpriseMonthlyPreAuthAmount" :min="0" :step="100" class="w-full" />
+                    </el-form-item>
+                  </el-form>
+                </div>
+              </div>
+
+              <div id="transaction-pending" class="scroll-mt-4">
+                <div class="sr-card p-6">
+                  <div class="font-bold text-gray-800 mb-4">待支付资源保留</div>
+                  <div class="grid grid-cols-12 gap-4 items-end">
+                    <el-form-item label="启用待支付资源保留" class="col-span-12 md:col-span-3 mb-0">
+                      <el-switch v-model="rules.pendingPayment.enabled" active-text="开启" inactive-text="关闭" />
+                    </el-form-item>
+                    <el-form-item label="保留时长 (分钟)" class="col-span-12 md:col-span-3 mb-0">
+                      <el-input-number v-model="rules.pendingPayment.holdMinutes" :min="1" class="w-full" />
+                    </el-form-item>
+                    <div class="col-span-12 md:col-span-6 text-sm text-gray-500 bg-gray-50 rounded-lg border border-gray-100 px-4 py-3">
+                      保留时长到期仍未完成预授权押金时，订单进入已取消并释放车组资源。
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div id="transaction-enterprise" class="scroll-mt-4">
+                <div class="sr-card p-6">
+                  <div class="font-bold text-gray-800 mb-4">企业月结配置</div>
+                  <el-form label-position="top">
+                    <el-form-item label="企业月结预授权金额">
+                      <el-input-number v-model="rules.payment.enterpriseMonthlyPreAuthAmount" :min="0" :step="100" class="w-full" />
+                    </el-form-item>
+                  </el-form>
                 </div>
               </div>
             </div>
@@ -253,7 +296,7 @@ onMounted(loadRules);
           <span class="flex items-center gap-2"><el-icon><Timer /></el-icon>计费与取还车</span>
         </template>
         <div class="p-6 grid grid-cols-12 gap-5">
-          <div class="col-span-12 lg:col-span-6 rimo-card p-6">
+          <div class="col-span-12 lg:col-span-6 sr-card p-6">
             <div class="font-bold text-gray-800 mb-4">时租与日租转换</div>
             <div class="grid grid-cols-3 gap-4">
               <el-form-item label="起租小时">
@@ -268,7 +311,7 @@ onMounted(loadRules);
             </div>
           </div>
 
-          <div class="col-span-12 lg:col-span-6 rimo-card p-6">
+          <div class="col-span-12 lg:col-span-6 sr-card p-6">
             <div class="font-bold text-gray-800 mb-4">异地还车规则</div>
             <div class="grid grid-cols-2 gap-4">
               <el-form-item label="允许异地还车">
@@ -286,7 +329,7 @@ onMounted(loadRules);
             </div>
           </div>
 
-          <div class="col-span-12 rimo-card p-6">
+          <div class="col-span-12 sr-card p-6">
             <div class="font-bold text-gray-800 mb-4">取车、还车和操作锁规则</div>
             <div class="grid grid-cols-12 gap-4">
               <el-form-item label="允许提前取车" class="col-span-12 md:col-span-3">
@@ -332,7 +375,7 @@ onMounted(loadRules);
           <span class="flex items-center gap-2"><el-icon><WarningFilled /></el-icon>取消与超时</span>
         </template>
         <div class="p-6 grid grid-cols-12 gap-5">
-          <div class="col-span-12 lg:col-span-4 rimo-card p-6">
+          <div class="col-span-12 lg:col-span-4 sr-card p-6">
             <div class="font-bold text-gray-800 mb-4">免责取消</div>
             <el-form label-position="top">
               <el-form-item label="下单后限时取消">
@@ -351,7 +394,7 @@ onMounted(loadRules);
             </el-form>
           </div>
 
-          <div class="col-span-12 lg:col-span-4 rimo-card p-6">
+          <div class="col-span-12 lg:col-span-4 sr-card p-6">
             <div class="font-bold text-gray-800 mb-4">有责取消</div>
             <el-form label-position="top">
               <el-form-item label="计算方式">
@@ -372,7 +415,7 @@ onMounted(loadRules);
             </el-form>
           </div>
 
-          <div class="col-span-12 lg:col-span-4 rimo-card p-6">
+          <div class="col-span-12 lg:col-span-4 sr-card p-6">
             <div class="font-bold text-gray-800 mb-4">未取车爽约</div>
             <el-form label-position="top">
               <el-form-item label="保留车辆时长 (小时)">
@@ -390,7 +433,7 @@ onMounted(loadRules);
             </el-form>
           </div>
 
-          <div class="col-span-12 rimo-card p-6">
+          <div class="col-span-12 sr-card p-6">
             <div class="font-bold text-gray-800 mb-4">超时还车与续租</div>
             <div class="grid grid-cols-12 gap-4">
               <el-form-item label="超时免费宽限 (分钟)" class="col-span-12 md:col-span-3">

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, ref } from "vue";
-import type { RunTboxCommandRequest, TboxCommandRecord, TboxDeviceSummary } from "@rimo/shared";
+import type { RunTboxCommandRequest, TboxCommandRecord, TboxDeviceSummary } from "@store-rental/shared";
 import { listTboxDevices, runTboxCommand } from "../api/client";
 import AppLayout from "../components/AppLayout.vue";
 
@@ -98,7 +98,7 @@ onMounted(loadData);
 
     <div class="grid grid-cols-12 gap-5">
       <aside class="col-span-12 xl:col-span-3">
-        <div class="rimo-card p-4">
+        <div class="sr-card p-4">
           <div class="font-bold text-gray-800 mb-3">目标车辆检索</div>
           <el-input v-model="keyword" placeholder="车牌/CID" clearable prefix-icon="Search" class="mb-3" />
           <div v-loading="loading" class="space-y-2 max-h-[640px] overflow-y-auto custom-scroll pr-1">
@@ -123,7 +123,7 @@ onMounted(loadData);
 
       <section class="col-span-12 xl:col-span-9">
         <div v-if="activeDevice" class="space-y-5">
-          <div class="rimo-card p-5">
+          <div class="sr-card p-5">
             <div class="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <div class="text-xs text-gray-500">当前控制车辆</div>
@@ -140,24 +140,24 @@ onMounted(loadData);
           </div>
 
           <div class="grid grid-cols-12 gap-4">
-            <div class="rimo-card p-5 col-span-12 md:col-span-4">
+            <div class="sr-card p-5 col-span-12 md:col-span-4">
               <div class="text-xs text-gray-500">终端状态</div>
               <div class="mt-3 flex items-center gap-2">
                 <el-tag :type="activeDevice.onlineStatus === 'online' ? 'success' : 'info'" effect="plain">{{ activeDevice.onlineStatus }}</el-tag>
                 <el-tag :type="activeDevice.status === 'active' ? 'success' : 'danger'" effect="plain">{{ activeDevice.status }}</el-tag>
               </div>
             </div>
-            <div class="rimo-card p-5 col-span-12 md:col-span-4">
+            <div class="sr-card p-5 col-span-12 md:col-span-4">
               <div class="text-xs text-gray-500">信号强度</div>
               <el-progress class="mt-4" :percentage="activeDevice.signalStrength ?? 0" />
             </div>
-            <div class="rimo-card p-5 col-span-12 md:col-span-4">
+            <div class="sr-card p-5 col-span-12 md:col-span-4">
               <div class="text-xs text-gray-500">电量</div>
               <el-progress class="mt-4" :percentage="activeDevice.batteryLevel ?? 0" status="success" />
             </div>
           </div>
 
-          <div class="rimo-card p-5">
+          <div class="sr-card p-5">
             <div class="font-bold text-gray-800 mb-4">车辆远程控制指令台账</div>
             <el-table :data="commandLogs" empty-text="暂无本次会话指令" stripe>
               <el-table-column prop="createdAt" label="时间" width="190" />
@@ -176,7 +176,7 @@ onMounted(loadData);
           </div>
         </div>
 
-        <div v-else class="rimo-card h-[520px] flex flex-col items-center justify-center text-gray-400">
+        <div v-else class="sr-card h-[520px] flex flex-col items-center justify-center text-gray-400">
           <el-icon size="72"><Monitor /></el-icon>
           <div class="text-xl font-bold mt-4">未选择监控车辆</div>
           <div class="text-sm mt-2">请在左侧检索栏中选择一台车辆以开启实时控制与监控面板</div>

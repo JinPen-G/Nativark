@@ -7,8 +7,8 @@ import type {
   SaveSystemRoleRequest,
   SystemDataScope,
   SystemRoleRow
-} from "@rimo/shared";
-import { RoleScope } from "@rimo/shared";
+} from "@store-rental/shared";
+import { RoleScope } from "@store-rental/shared";
 import {
   deleteSystemRole,
   getPermissionTree,

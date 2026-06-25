@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
-import type { SystemUserRow } from "@rimo/shared";
+import type { SystemUserRow } from "@store-rental/shared";
 import { PrismaService } from "../modules/database/prisma.service";
 
 export interface OperationLogInput {

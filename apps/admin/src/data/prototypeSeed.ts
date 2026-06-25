@@ -3,13 +3,13 @@ import {
   ConfigStatus,
   StoreRentalMode,
   type StoreRentalRuleConfig
-} from "@rimo/shared";
+} from "@store-rental/shared";
 import type {
   StoreStationSummary,
   StoreValueAddedServiceSummary,
   VehicleGroupMaster,
   VehicleInstanceSummary
-} from "@rimo/shared";
+} from "@store-rental/shared";
 
 export const fallbackRules: StoreRentalRuleConfig = {
   version: "store-rental-rules-v2026.05.01",
@@ -303,7 +303,7 @@ export const vehicleRows: VehicleInstanceSummary[] = [
     licensePlate: "RX 7821",
     vin: "AHTLB3JE0R0001234",
     vehicleGroupName: "Toyota Noah / 同级 7座",
-    assetCompanyName: "RIMO 香港租户",
+    assetCompanyName: "演示香港租户",
     currentStoreName: "旺角门市",
     currentStationName: "旺角门市柜台",
     operationStatus: "renting",
@@ -320,7 +320,7 @@ export const vehicleRows: VehicleInstanceSummary[] = [
     licensePlate: "BCP 7315",
     vin: "JTMBW3FV0R1009012",
     vehicleGroupName: "Honda Jazz / 同级",
-    assetCompanyName: "RIMO 香港租户",
+    assetCompanyName: "演示香港租户",
     currentStoreName: "中环门市",
     currentStationName: "中环门市服务点",
     operationStatus: "idle",
@@ -337,7 +337,7 @@ export const vehicleRows: VehicleInstanceSummary[] = [
     licensePlate: "EV 9308",
     vin: "LRW3E7FS0PC001122",
     vehicleGroupName: "Tesla Model 3 / 同级",
-    assetCompanyName: "RIMO 香港租户",
+    assetCompanyName: "演示香港租户",
     currentStoreName: "机场门市",
     currentStationName: "机场门市停车区",
     operationStatus: "reserved",

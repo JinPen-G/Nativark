@@ -17,13 +17,13 @@ const langOptions = [
 ];
 const i18nTexts = {
   "zh-CN": {
-    brandTitle: "RIMO Rental Solution",
+    brandTitle: "Store Rental Platform",
     brandSubtitle: "统一管理车辆资产、订单租赁、会员与企业客户，支撑多场景的用车业务运营。",
     brandBullet1: "实时掌握车辆状态与调度排程",
     brandBullet2: "多维度会员与企业客户管理",
     brandBullet3: "支持门市租赁、分时租赁等多业务模式",
     title: "营运后台登录",
-    subtitle: "请使用分配的后台账号登录 RIMO Rental 管理系统。",
+    subtitle: "请使用分配的后台账号登录 Store Rental Platform 管理系统。",
     tenantLabel: "群组代码 / 租户编码",
     tenantPlaceholder: "请输入所属租户的群组代码",
     accountLabel: "账号",
@@ -40,13 +40,13 @@ const i18nTexts = {
     footerNote: "如需开通后台账号，请联系系统管理员。"
   },
   "zh-TW": {
-    brandTitle: "RIMO Rental Solution",
+    brandTitle: "Store Rental Platform",
     brandSubtitle: "統一管理車輛資產、訂單租賃、會員與企業客戶，支援多場景的用車業務營運。",
     brandBullet1: "即時掌握車輛狀態與調度排程",
     brandBullet2: "多維度會員與企業客戶管理",
     brandBullet3: "支援門市租賃、分時租賃等多業務模式",
     title: "後台登入",
-    subtitle: "請使用分配的後台帳號登入 RIMO Rental 管理系統。",
+    subtitle: "請使用分配的後台帳號登入 Store Rental Platform 管理系統。",
     tenantLabel: "群組代碼 / 租戶編碼",
     tenantPlaceholder: "請輸入所屬租戶的群組代碼",
     accountLabel: "帳號",
@@ -63,13 +63,13 @@ const i18nTexts = {
     footerNote: "如需開通後台帳號，請聯繫系統管理員。"
   },
   "en-US": {
-    brandTitle: "RIMO Rental Solution",
+    brandTitle: "Store Rental Platform",
     brandSubtitle: "Manage vehicles, rentals, and customers in one place to support multi-scenario fleet operations.",
     brandBullet1: "Real-time vehicle status & dispatch scheduling",
     brandBullet2: "Unified member and enterprise customer management",
     brandBullet3: "Supports counter rental and time-share business models",
     title: "Admin Sign In",
-    subtitle: "Use your assigned admin account to sign in to the RIMO Rental console.",
+    subtitle: "Use your assigned admin account to sign in to the Store Rental Platform console.",
     tenantLabel: "Tenant / Group Code",
     tenantPlaceholder: "Enter your tenant/group code",
     accountLabel: "Account",
@@ -153,13 +153,13 @@ async function handleLogin() {
           </div>
         </div>
         <div class="text-xs text-white/60 mt-8">
-          © {{ new Date().getFullYear() }} RIMO Rental. All rights reserved.
+          © {{ new Date().getFullYear() }} Store Rental Platform. All rights reserved.
         </div>
       </div>
 
       <div class="w-full lg:w-1/2 px-6 py-8 sm:px-10 sm:py-10 flex flex-col bg-white">
         <div class="flex items-center justify-between mb-8">
-          <div class="text-xl font-bold tracking-wider text-[#00689E]">RIMO</div>
+          <div class="text-xl font-bold tracking-wider text-[#00689E]">门市租赁平台</div>
           <el-segmented v-model="currentLang" size="small" :options="langOptions" />
         </div>
 

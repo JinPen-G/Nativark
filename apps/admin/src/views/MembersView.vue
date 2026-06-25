@@ -7,7 +7,7 @@ import type {
   MemberSummary,
   PlatformFilterPreset,
   SaveMemberRequest
-} from "@rimo/shared";
+} from "@store-rental/shared";
 import {
   deletePlatformFilterPreset,
   getMemberDetail,
@@ -417,25 +417,25 @@ onMounted(async () => {
     </div>
 
     <div class="grid grid-cols-4 gap-4 mb-6">
-      <div class="rimo-card p-4">
+      <div class="sr-card p-4">
         <div class="text-xs text-gray-400">会员总数</div>
         <div class="text-2xl font-bold text-gray-900 mt-2">{{ stats.total }}</div>
       </div>
-      <div class="rimo-card p-4">
+      <div class="sr-card p-4">
         <div class="text-xs text-gray-400">正常会员</div>
         <div class="text-2xl font-bold text-emerald-600 mt-2">{{ stats.active }}</div>
       </div>
-      <div class="rimo-card p-4">
+      <div class="sr-card p-4">
         <div class="text-xs text-gray-400">待审核</div>
         <div class="text-2xl font-bold text-amber-600 mt-2">{{ stats.pending }}</div>
       </div>
-      <div class="rimo-card p-4">
+      <div class="sr-card p-4">
         <div class="text-xs text-gray-400">黑名单</div>
         <div class="text-2xl font-bold text-rose-600 mt-2">{{ stats.blacklisted }}</div>
       </div>
     </div>
 
-    <div class="rimo-card p-5">
+    <div class="sr-card p-5">
       <div class="flex flex-wrap items-center gap-3 mb-5">
         <el-input
           v-model="search"

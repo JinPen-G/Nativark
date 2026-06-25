@@ -50,28 +50,28 @@ select,
   border-radius: 999px;
 }
 
-.rimo-page-tabs > .el-tabs__header {
+.sr-page-tabs > .el-tabs__header {
   margin: 0;
   padding: 0 24px;
   border-bottom: 1px solid #eef2f7;
 }
 
-.rimo-page-tabs > .el-tabs__header .el-tabs__nav-wrap::after {
+.sr-page-tabs > .el-tabs__header .el-tabs__nav-wrap::after {
   display: none;
 }
 
-.rimo-page-tabs > .el-tabs__header .el-tabs__item {
+.sr-page-tabs > .el-tabs__header .el-tabs__item {
   height: 58px;
   font-weight: 700;
   color: #64748b;
 }
 
-.rimo-page-tabs > .el-tabs__header .el-tabs__item.is-active,
-.rimo-page-tabs > .el-tabs__header .el-tabs__item:hover {
+.sr-page-tabs > .el-tabs__header .el-tabs__item.is-active,
+.sr-page-tabs > .el-tabs__header .el-tabs__item:hover {
   color: #00689e;
 }
 
-.rimo-page-tabs > .el-tabs__header .el-tabs__active-bar {
+.sr-page-tabs > .el-tabs__header .el-tabs__active-bar {
   background-color: #00689e;
   height: 3px;
 }
@@ -89,15 +89,15 @@ select,
   @apply flex h-screen w-full overflow-hidden bg-gray-100 text-gray-700;
 }
 
-.rimo-sidebar-link {
+.sr-sidebar-link {
   @apply relative flex items-center px-3 py-2.5 rounded-lg text-white/70 hover:bg-white/10 hover:text-white transition-colors;
 }
 
-.rimo-sidebar-link.router-link-active {
+.sr-sidebar-link.router-link-active {
   @apply bg-white/20 text-white font-semibold shadow-sm;
 }
 
-.rimo-card {
+.sr-card {
   @apply bg-white rounded-xl shadow-sm border border-gray-100;
 }
 

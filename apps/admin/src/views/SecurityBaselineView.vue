@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ElMessage } from "element-plus";
 import { computed, onMounted, reactive, ref } from "vue";
-import type { SystemSecurityBaselineConfig } from "@rimo/shared";
+import type { SystemSecurityBaselineConfig } from "@store-rental/shared";
 import {
   checkSecondConfirmation,
   getSecurityBaseline,
@@ -151,19 +151,19 @@ onMounted(loadBaseline);
     </div>
 
     <div class="grid grid-cols-1 xl:grid-cols-4 gap-4 mb-4">
-      <div class="rimo-card p-4">
+      <div class="sr-card p-4">
         <div class="text-xs text-gray-400">登录限流</div>
         <div class="mt-2 text-2xl font-bold text-[#00689E]">{{ metrics.rateLimit }}</div>
       </div>
-      <div class="rimo-card p-4">
+      <div class="sr-card p-4">
         <div class="text-xs text-gray-400">密码规则</div>
         <div class="mt-2 text-2xl font-bold text-gray-800">{{ metrics.passwordRules }} 项</div>
       </div>
-      <div class="rimo-card p-4">
+      <div class="sr-card p-4">
         <div class="text-xs text-gray-400">脱敏字段</div>
         <div class="mt-2 text-2xl font-bold text-emerald-600">{{ metrics.maskingCount }} 类</div>
       </div>
-      <div class="rimo-card p-4">
+      <div class="sr-card p-4">
         <div class="text-xs text-gray-400">二次确认动作</div>
         <div class="mt-2 text-2xl font-bold text-amber-600">{{ metrics.confirmationActions }}</div>
       </div>
@@ -171,7 +171,7 @@ onMounted(loadBaseline);
 
     <div class="grid grid-cols-12 gap-4">
       <section class="col-span-12 xl:col-span-7 space-y-4">
-        <div class="rimo-card p-5">
+        <div class="sr-card p-5">
           <div class="flex items-center justify-between mb-4">
             <div>
               <div class="font-semibold text-gray-800">登录限流</div>
@@ -192,7 +192,7 @@ onMounted(loadBaseline);
           </div>
         </div>
 
-        <div class="rimo-card p-5">
+        <div class="sr-card p-5">
           <div class="font-semibold text-gray-800 mb-4">密码策略</div>
           <div class="grid grid-cols-2 gap-4">
             <el-form-item label="最小长度">
@@ -218,7 +218,7 @@ onMounted(loadBaseline);
           </div>
         </div>
 
-        <div class="rimo-card p-5">
+        <div class="sr-card p-5">
           <div class="font-semibold text-gray-800 mb-4">敏感字段脱敏</div>
           <div class="grid grid-cols-1 xl:grid-cols-5 gap-3">
             <label
@@ -234,7 +234,7 @@ onMounted(loadBaseline);
       </section>
 
       <section class="col-span-12 xl:col-span-5 space-y-4">
-        <div class="rimo-card p-5">
+        <div class="sr-card p-5">
           <div class="flex items-center justify-between mb-4">
             <div>
               <div class="font-semibold text-gray-800">关键操作二次确认</div>
@@ -255,7 +255,7 @@ onMounted(loadBaseline);
           </el-checkbox-group>
         </div>
 
-        <div class="rimo-card p-5">
+        <div class="sr-card p-5">
           <div class="font-semibold text-gray-800 mb-4">二次确认校验</div>
           <el-form label-position="top">
             <el-form-item label="动作编码">

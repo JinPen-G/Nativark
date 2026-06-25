@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ElMessage } from "element-plus";
 import { computed, onMounted, reactive, ref } from "vue";
-import type { StoreValueAddedServiceSummary } from "@rimo/shared";
+import type { StoreValueAddedServiceSummary } from "@store-rental/shared";
 import {
   listValueAddedServices,
   saveValueAddedService as persistValueAddedService
@@ -123,7 +123,7 @@ onMounted(loadRows);
       </div>
     </div>
 
-    <el-tabs v-model="activeTab" class="rimo-page-tabs bg-white rounded-xl shadow-sm border border-gray-100 min-h-[500px]">
+    <el-tabs v-model="activeTab" class="sr-page-tabs bg-white rounded-xl shadow-sm border border-gray-100 min-h-[500px]">
       <el-tab-pane name="store">
         <template #label>
           <span class="flex items-center gap-2"><el-icon><Shop /></el-icon><span>门市租赁</span></span>

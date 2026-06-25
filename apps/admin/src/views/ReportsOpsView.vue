@@ -17,7 +17,7 @@ import {
   type StoreRentalReportQuery,
   type StoreRentalReportType,
   type StoreRentalVehiclesReport
-} from "@rimo/shared";
+} from "@store-rental/shared";
 import {
   createStoreRentalReportExport,
   downloadStoreRentalReportExport,
@@ -497,7 +497,7 @@ onMounted(loadReports);
         </div>
       </div>
 
-      <el-tabs v-model="activeTab" class="rimo-page-tabs w-full rounded-xl border border-gray-100 bg-white shadow-sm">
+      <el-tabs v-model="activeTab" class="sr-page-tabs w-full rounded-xl border border-gray-100 bg-white shadow-sm">
         <el-tab-pane name="overview">
           <template #label><span class="flex items-center gap-2"><el-icon><Histogram /></el-icon>经营概览</span></template>
           <div class="grid gap-6 p-6 xl:grid-cols-12">

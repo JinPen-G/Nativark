@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, reactive, ref } from "vue";
-import type { VehicleGroupMaster } from "@rimo/shared";
+import type { VehicleGroupMaster } from "@store-rental/shared";
 import {
   deleteVehicleGroup as removeVehicleGroup,
   listVehicleGroups,
@@ -164,7 +164,7 @@ onMounted(loadRows);
       </el-button>
     </div>
 
-    <div class="rimo-card p-5">
+    <div class="sr-card p-5">
       <div class="flex justify-between items-center mb-5">
         <el-input v-model="searchQuery" placeholder="搜索品牌或型号..." clearable style="width: 260px" />
         <div class="text-sm text-gray-500">共 {{ filteredRows.length }} 个车型组</div>

@@ -2,7 +2,7 @@
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import type { CorporateListQuery, CorporateSummary, PlatformFilterPreset } from "@rimo/shared";
+import type { CorporateListQuery, CorporateSummary, PlatformFilterPreset } from "@store-rental/shared";
 import {
   deletePlatformFilterPreset,
   listCorporatePage,
@@ -221,7 +221,7 @@ onMounted(async () => {
       <el-button type="primary" color="#00689E" @click="router.push('/corporates/new')">新增企业客户</el-button>
     </div>
 
-    <div class="rimo-card p-5">
+    <div class="sr-card p-5">
       <div class="flex flex-wrap items-center gap-3 mb-5">
         <el-input
           v-model="search"

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ElMessage, ElMessageBox } from "element-plus";
+import { Upload } from "@element-plus/icons-vue";
 import { computed, onMounted, reactive, ref } from "vue";
 import type {
   CreateVehicleConditionPhotoRecordRequest,
@@ -16,7 +17,7 @@ import type {
   VehicleInstanceSummary,
   VehicleListQuery,
   VehicleOnboardItemRecord
-} from "@rimo/shared";
+} from "@store-rental/shared";
 import {
   createVehicleConditionPhotoRecord,
   createVehicleLocationEvent,
@@ -86,6 +87,29 @@ const photoForm = reactive<CreateVehicleConditionPhotoRecordRequest>({
   photos: []
 });
 const photoUrlText = ref("");
+const photoFileInput = ref<HTMLInputElement | null>(null);
+
+function handlePhotoFileChange(event: Event) {
+  const input = event.target as HTMLInputElement;
+  if (input.files && input.files.length > 0) {
+    const files = Array.from(input.files);
+    const urls: string[] = [];
+
+    files.forEach((file) => {
+      // 在实际实现中，这里应该调用文件上传接口
+      // 目前使用 mock URL
+      const mockUrl = `https://mock-storage.example.com/vehicle-photos/${Date.now()}-${file.name}`;
+      urls.push(mockUrl);
+    });
+
+    // 将文件 URL 添加到 photoUrlText
+    const currentUrls = photoUrlText.value ? photoUrlText.value.split('\n').filter(Boolean) : [];
+    const allUrls = [...currentUrls, ...urls];
+    photoUrlText.value = allUrls.join('\n');
+
+    ElMessage.success(`已添加 ${files.length} 张照片（mock URL）`);
+  }
+}
 
 const locationForm = reactive<CreateVehicleLocationEventRequest>({
   type: "manual_adjust",
@@ -142,7 +166,7 @@ const currentVehicle = reactive<VehicleInstanceSummary>({
   licensePlate: "",
   vin: "",
   vehicleGroupName: "",
-  assetCompanyName: "RIMO 香港租户",
+  assetCompanyName: "演示香港租户",
   currentStoreName: "旺角门市",
   currentStationName: "旺角门市柜台",
   operationStatus: "idle",
@@ -397,7 +421,7 @@ function openCreate() {
     licensePlate: "",
     vin: "",
     vehicleGroupName: "",
-    assetCompanyName: "RIMO 香港租户",
+    assetCompanyName: "演示香港租户",
     currentStoreName: "旺角门市",
     currentStationName: "旺角门市柜台",
     operationStatus: "idle",
@@ -1115,7 +1139,7 @@ onMounted(async () => {
       </el-button>
     </div>
 
-    <div class="rimo-card p-5">
+    <div class="sr-card p-5">
       <div class="flex flex-wrap items-center gap-3 mb-5">
         <el-input
           v-model="searchQuery"
@@ -1126,7 +1150,7 @@ onMounted(async () => {
           @keyup.enter="applyVehicleFilters"
         />
         <el-select placeholder="资产归属" style="width: 150px">
-          <el-option label="RIMO 香港租户" value="rimo" />
+          <el-option label="演示香港租户" value="demo" />
         </el-select>
         <el-select v-model="storeFilter" placeholder="当前位置" clearable style="width: 210px">
           <el-option
@@ -1751,6 +1775,18 @@ onMounted(async () => {
               :rows="4"
               placeholder="每行一张图片 URL，可先用对象存储地址或示意图地址"
             />
+            <div class="mt-2">
+              <input
+                ref="photoFileInput"
+                type="file"
+                multiple
+                accept="image/*"
+                @change="handlePhotoFileChange"
+                style="display: none;"
+              />
+              <el-button @click="photoFileInput?.click()" :icon="Upload">选择照片文件</el-button>
+              <span class="text-xs text-gray-500 ml-2">支持 jpg、png、gif 等图片格式，可多选</span>
+            </div>
           </el-form-item>
           <el-form-item label="照片说明" required class="col-span-12">
             <el-input
@@ -2088,7 +2124,7 @@ onMounted(async () => {
           <div class="grid grid-cols-12 gap-4">
             <el-form-item label="资产所属车行" required class="col-span-12 md:col-span-4">
               <el-select v-model="currentVehicle.assetCompanyName" placeholder="请选择资产所属车行" class="w-full">
-                <el-option label="RIMO 香港租户" value="RIMO 香港租户" />
+                <el-option label="演示香港租户" value="演示香港租户" />
               </el-select>
             </el-form-item>
             <el-form-item label="当前门市" required class="col-span-12 md:col-span-4">

@@ -13,7 +13,7 @@ import type {
   SystemSecurityBaselineConfig,
   SystemUserRow,
   TenantBootstrapRequest
-} from "@rimo/shared";
+} from "@store-rental/shared";
 import { PlatformService } from "./platform.service";
 
 interface RequestWithUser {

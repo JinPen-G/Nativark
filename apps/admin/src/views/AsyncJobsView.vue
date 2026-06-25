@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ElMessage } from "element-plus";
 import { computed, onMounted, reactive, ref } from "vue";
-import type { AsyncJobSummary, CreateAsyncJobRequest } from "@rimo/shared";
+import type { AsyncJobSummary, CreateAsyncJobRequest } from "@store-rental/shared";
 import {
   createAsyncJob,
   listAsyncJobs,
@@ -201,34 +201,34 @@ onMounted(loadJobs);
     </div>
 
     <div class="grid grid-cols-1 xl:grid-cols-6 gap-4 mb-4">
-      <div class="rimo-card p-4">
+      <div class="sr-card p-4">
         <div class="text-xs text-gray-400">任务总数</div>
         <div class="mt-2 text-2xl font-bold text-gray-800">{{ metrics.total }}</div>
       </div>
-      <div class="rimo-card p-4">
+      <div class="sr-card p-4">
         <div class="text-xs text-gray-400">排队中</div>
         <div class="mt-2 text-2xl font-bold text-amber-600">{{ metrics.queued }}</div>
       </div>
-      <div class="rimo-card p-4">
+      <div class="sr-card p-4">
         <div class="text-xs text-gray-400">已到期</div>
         <div class="mt-2 text-2xl font-bold text-[#00689E]">{{ metrics.due }}</div>
       </div>
-      <div class="rimo-card p-4">
+      <div class="sr-card p-4">
         <div class="text-xs text-gray-400">运行中</div>
         <div class="mt-2 text-2xl font-bold text-sky-600">{{ metrics.running }}</div>
       </div>
-      <div class="rimo-card p-4">
+      <div class="sr-card p-4">
         <div class="text-xs text-gray-400">成功</div>
         <div class="mt-2 text-2xl font-bold text-emerald-600">{{ metrics.success }}</div>
       </div>
-      <div class="rimo-card p-4">
+      <div class="sr-card p-4">
         <div class="text-xs text-gray-400">失败</div>
         <div class="mt-2 text-2xl font-bold text-red-600">{{ metrics.failed }}</div>
       </div>
     </div>
 
     <div class="grid grid-cols-12 gap-4">
-      <section class="col-span-12 xl:col-span-4 rimo-card p-5">
+      <section class="col-span-12 xl:col-span-4 sr-card p-5">
         <div class="flex items-center justify-between mb-4">
           <div>
             <div class="font-semibold text-gray-800">创建任务</div>
@@ -285,7 +285,7 @@ onMounted(loadJobs);
         </el-form>
       </section>
 
-      <section class="col-span-12 xl:col-span-8 rimo-card p-4 min-w-0">
+      <section class="col-span-12 xl:col-span-8 sr-card p-4 min-w-0">
         <div class="flex items-center justify-between mb-3">
           <div class="font-semibold text-gray-800">任务列表</div>
           <div v-if="lastRunMessage" class="text-xs text-gray-400">{{ lastRunMessage }}</div>

@@ -376,7 +376,7 @@ function hasStoredPermission(permission?: unknown) {
     return true;
   }
 
-  const raw = window.localStorage.getItem("rimo_user");
+  const raw = window.localStorage.getItem("store_rental_user");
   if (!raw) {
     return false;
   }
@@ -397,7 +397,7 @@ function hasStoredPermission(permission?: unknown) {
 }
 
 function firstAllowedPath() {
-  const raw = window.localStorage.getItem("rimo_user");
+  const raw = window.localStorage.getItem("store_rental_user");
   if (!raw) {
     return "/login";
   }
@@ -466,7 +466,7 @@ function firstAllowedPath() {
 }
 
 router.beforeEach((to) => {
-  const token = window.localStorage.getItem("rimo_access_token");
+  const token = window.localStorage.getItem("store_rental_access_token");
 
   if (!publicPaths.has(to.path) && !token) {
     return {
@@ -484,9 +484,9 @@ router.beforeEach((to) => {
   if (!hasStoredPermission(to.meta.permission)) {
     const fallback = firstAllowedPath();
     if (fallback === "/login") {
-      window.localStorage.removeItem("rimo_access_token");
-      window.localStorage.removeItem("rimo_tenant");
-      window.localStorage.removeItem("rimo_user");
+      window.localStorage.removeItem("store_rental_access_token");
+      window.localStorage.removeItem("store_rental_tenant");
+      window.localStorage.removeItem("store_rental_user");
     }
     return fallback;
   }

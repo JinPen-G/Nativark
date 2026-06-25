@@ -7,7 +7,7 @@ import type {
   StoreStationSummary,
   VehicleInstanceSummary,
   VehicleTransferTask
-} from "@rimo/shared";
+} from "@store-rental/shared";
 import {
   advanceVehicleTransferTask,
   createVehicleTransferTask,
@@ -246,25 +246,25 @@ onMounted(loadData);
     </div>
 
     <div class="grid grid-cols-12 gap-4 mb-5">
-      <div class="rimo-card p-4 col-span-12 md:col-span-3">
+      <div class="sr-card p-4 col-span-12 md:col-span-3">
         <div class="text-xs text-gray-500">监控车辆池</div>
         <div class="text-2xl font-bold text-gray-800 mt-1">{{ rows.length }}</div>
       </div>
-      <div class="rimo-card p-4 col-span-12 md:col-span-3">
+      <div class="sr-card p-4 col-span-12 md:col-span-3">
         <div class="text-xs text-gray-500">可直接调拨</div>
         <div class="text-2xl font-bold text-emerald-600 mt-1">{{ idleCount }}</div>
       </div>
-      <div class="rimo-card p-4 col-span-12 md:col-span-3">
+      <div class="sr-card p-4 col-span-12 md:col-span-3">
         <div class="text-xs text-gray-500">调拨任务</div>
         <div class="text-2xl font-bold text-gray-800 mt-1">{{ transferTasks.length }}</div>
       </div>
-      <div class="rimo-card p-4 col-span-12 md:col-span-3">
+      <div class="sr-card p-4 col-span-12 md:col-span-3">
         <div class="text-xs text-gray-500">当前范围</div>
         <div class="text-lg font-bold text-gray-800 mt-2">门市租赁</div>
       </div>
     </div>
 
-    <div class="rimo-card p-5 mb-5">
+    <div class="sr-card p-5 mb-5">
       <div class="flex flex-wrap items-center gap-3 mb-5">
         <el-input v-model="filters.keyword" placeholder="车牌/车型组" clearable prefix-icon="Search" style="width: 220px" />
         <el-select v-model="filters.stationName" placeholder="当前所在站点" clearable style="width: 200px">
@@ -314,7 +314,7 @@ onMounted(loadData);
       </el-table>
     </div>
 
-    <div class="rimo-card p-5">
+    <div class="sr-card p-5">
       <div class="font-bold text-gray-800 mb-4">调拨任务记录</div>
       <el-table :data="transferTasks" stripe>
         <el-table-column prop="taskNo" label="任务号" width="180" />
