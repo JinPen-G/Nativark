@@ -357,6 +357,17 @@ function parseDispatchDetails(title: string): string {
   }
   return title;
 }
+
+function parseAccidentDetails(title: string): string {
+  // 解析事故事件标题，提取事故描述
+  // 格式示例：事故登记：xxx事故描述
+  const match = title.match(/事故[：:](.+)/);
+  if (match) {
+    const description = match[1].trim().split(/[，,]/)[0].trim();
+    return `事故描述：${description}`;
+  }
+  return title;
+}
 const pickupBalanceDue = computed(() => {
   const order = detail.value;
   if (!order || isMonthly.value) {
@@ -2811,6 +2822,10 @@ onMounted(loadDetail);
                           <el-tag size="small" type="danger" effect="plain" class="mr-2">事故</el-tag>
                           <span class="font-medium text-gray-800">{{ event.title }}</span>
                           <div class="text-xs text-gray-500 mt-1">{{ event.summary || "-" }}</div>
+                          <!-- 事故事件详情：事故描述、责任归属、处理状态 -->
+                          <div v-if="event.title.includes('事故')" class="text-xs text-gray-600 mt-1">
+                            {{ parseAccidentDetails(event.title) }}
+                          </div>
                         </div>
                         <div class="text-right shrink-0">
                           <div class="text-xs text-gray-400">{{ event.operator }}</div>
