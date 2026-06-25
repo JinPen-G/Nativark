@@ -6874,6 +6874,16 @@ export class StoreRentalService {
         break;
     }
 
+    // MySQL模式统一审计日志写入
+    await this.storeRentalRepository.createOperationLog({
+      targetType: "order",
+      targetId: order.id,
+      action: this.actionLabel(action),
+      operator: String(body.operator ?? "门店营运"),
+      detail: `订单 ${order.orderNo} 执行动作 ${this.actionLabel(action)}，状态从 ${previousStatus} 变更为 ${order.mainStatus}`,
+      createdAt: new Date().toISOString()
+    });
+
     await this.storeRentalRepository.updateOrderState(order, settlementToSave);
     await this.storeRentalRepository.appendOrderTimeline(order.id, {
       at: new Date().toISOString(),
