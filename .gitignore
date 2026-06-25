@@ -26,3 +26,8 @@ apps/api/uploads/
 # OS/editor noise
 .DS_Store
 Thumbs.db
+
+# 排除大型备份文件
+*.zip
+备份.zip
+.claude/
