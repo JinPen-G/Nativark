@@ -345,6 +345,18 @@ function eventTypeTag(type: string) {
   const map: Record<string, string> = { action: "info", dispatch: "warning", accident: "danger", fee: "success", contract: "", notification: "info", remark: "info" };
   return map[type] || "";
 }
+
+function parseDispatchDetails(title: string): string {
+  // 解析改派事件标题，提取原车辆、新车辆、原因
+  // 格式示例：调度页人工改派：RX 7821 -> BCP 7315，原因：车辆调度调整，备注：xxx
+  const match = title.match(/改派[：:]([^-]+)->([^,，]+)/);
+  if (match) {
+    const fromVehicle = match[1].trim();
+    const toVehicle = match[2].trim().split(/[，,]/)[0].trim();
+    return `原车辆：${fromVehicle} → 新车辆：${toVehicle}`;
+  }
+  return title;
+}
 const pickupBalanceDue = computed(() => {
   const order = detail.value;
   if (!order || isMonthly.value) {
@@ -2777,6 +2789,10 @@ onMounted(loadDetail);
                           <el-tag size="small" type="warning" effect="plain" class="mr-2">改派</el-tag>
                           <span class="font-medium text-gray-800">{{ event.title }}</span>
                           <div class="text-xs text-gray-500 mt-1">{{ event.summary || "-" }}</div>
+                          <!-- 改派事件详情：原车辆、新车辆、原因 -->
+                          <div v-if="event.title.includes('改派')" class="text-xs text-gray-600 mt-1">
+                            {{ parseDispatchDetails(event.title) }}
+                          </div>
                         </div>
                         <div class="text-right shrink-0">
                           <div class="text-xs text-gray-400">{{ event.operator }}</div>
