@@ -14,7 +14,7 @@ import {
   type StoreStationSummary,
   type VehicleGroupMaster,
   type VehicleInstanceSummary
-} from "@rimo/shared";
+} from "@store-rental/shared";
 import {
   createStoreRentalOrderContract,
   createStoreRentalOrderFee,
