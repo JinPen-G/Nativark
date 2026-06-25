@@ -675,7 +675,25 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   StoreRentalOrderActionResult: objectSchema,
   CreateStoreRentalFeeRequest: objectSchema,
   CreateStoreRentalTransactionRequest: objectSchema,
-  WaiveStoreRentalFeeRequest: objectSchema
+  WaiveStoreRentalFeeRequest: objectSchema,
+  // ===== 2026-06-25 新增的 Schema 定义 =====
+  StoreRentalContractCenter: objectSchema,
+  StoreRentalContractTemplate: objectSchema,
+  StoreRentalContractPrintRequest: objectSchema,
+  StoreRentalContractPrintResult: objectSchema,
+  StoreRentalContractMockSignRequest: objectSchema,
+  StoreRentalContractMockSignResult: objectSchema,
+  StoreRentalDispatchCloseTaskRequest: objectSchema,
+  FinancePreAuthorizationRow: objectSchema,
+  SaveFinancePreAuthorizationRequest: objectSchema,
+  StoreRentalOrderNotificationRecord: objectSchema,
+  StoreRentalOrderOperationRecord: objectSchema,
+  CloseStoreRentalRemarkRequest: objectSchema,
+  AdvanceVehicleTransferTaskRequest: objectSchema,
+  // ===== 2026-06-25 DP-01 调度任务认领新增的 Schema =====
+  StoreRentalDispatchClaimTaskRequest: objectSchema,
+  StoreRentalDispatchProcessTaskRequest: objectSchema,
+  StoreRentalDispatchTaskActionResult: objectSchema
 };
 
 function backlogOperation(
@@ -1801,16 +1819,168 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     authRequired: true,
     responseSchema: "GenericObject"
   },
+  // ===== 2026-06-25 新增的契约操作 =====
+  {
+    method: "get",
+    path: "/api/reports/exports/{fileName}",
+    tag: "Reports",
+    operationId: "downloadReportExport",
+    summary: "Download report export file",
+    permissions: ["store-rental:report:view"],
+    authRequired: true,
+    responseSchema: "GenericObject"
+  },
+  {
+    method: "get",
+    path: "/api/store-rental/contracts",
+    tag: "StoreRental",
+    operationId: "listContracts",
+    summary: "List store rental contracts",
+    permissions: ["store-rental:order:view"],
+    authRequired: true,
+    responseSchema: "StoreRentalContractCenter"
+  },
+  {
+    method: "get",
+    path: "/api/store-rental/contracts/templates",
+    tag: "StoreRental",
+    operationId: "listContractTemplates",
+    summary: "List contract templates",
+    permissions: ["store-rental:order:view"],
+    authRequired: true,
+    responseSchema: "StoreRentalContractTemplate"
+  },
+  {
+    method: "post",
+    path: "/api/store-rental/contracts/{id}/print-mock",
+    tag: "StoreRental",
+    operationId: "printContractMock",
+    summary: "Print contract mock",
+    permissions: ["store-rental:order:operate"],
+    requestSchema: "StoreRentalContractPrintRequest",
+    responseSchema: "StoreRentalContractPrintResult"
+  },
+  {
+    method: "post",
+    path: "/api/store-rental/contracts/{id}/sign-mock",
+    tag: "StoreRental",
+    operationId: "signContractMock",
+    summary: "Sign contract mock",
+    permissions: ["store-rental:order:operate"],
+    requestSchema: "StoreRentalContractMockSignRequest",
+    responseSchema: "StoreRentalContractMockSignResult"
+  },
+  {
+    method: "post",
+    path: "/api/store-rental/dispatch/tasks/close",
+    tag: "Dispatch",
+    operationId: "closeDispatchTask",
+    summary: "Close dispatch task",
+    permissions: ["store-rental:dispatch:manage"],
+    requestSchema: "StoreRentalDispatchCloseTaskRequest",
+    responseSchema: "GenericObject"
+  },
+  {
+    method: "get",
+    path: "/api/store-rental/finance/pre-authorizations",
+    tag: "Finance",
+    operationId: "listFinancePreAuthorizations",
+    summary: "List finance pre-authorizations",
+    permissions: ["store-rental:order:settle"],
+    authRequired: true,
+    responseSchema: "FinancePreAuthorizationRow"
+  },
+  {
+    method: "post",
+    path: "/api/store-rental/finance/pre-authorizations",
+    tag: "Finance",
+    operationId: "createFinancePreAuthorization",
+    summary: "Create finance pre-authorization",
+    permissions: ["store-rental:order:settle"],
+    requestSchema: "SaveFinancePreAuthorizationRequest",
+    responseSchema: "FinancePreAuthorizationRow"
+  },
+  {
+    method: "put",
+    path: "/api/store-rental/finance/pre-authorizations/{id}",
+    tag: "Finance",
+    operationId: "updateFinancePreAuthorization",
+    summary: "Update finance pre-authorization",
+    permissions: ["store-rental:order:settle"],
+    requestSchema: "SaveFinancePreAuthorizationRequest",
+    responseSchema: "FinancePreAuthorizationRow"
+  },
+  {
+    method: "get",
+    path: "/api/store-rental/orders/{id}/notifications",
+    tag: "Order",
+    operationId: "listOrderNotifications",
+    summary: "List order notifications",
+    permissions: ["store-rental:order:view"],
+    authRequired: true,
+    responseSchema: "StoreRentalOrderNotificationRecord"
+  },
+  {
+    method: "get",
+    path: "/api/store-rental/orders/{id}/operation-records",
+    tag: "Order",
+    operationId: "listOrderOperationRecords",
+    summary: "List order operation records",
+    permissions: ["store-rental:order:view"],
+    authRequired: true,
+    responseSchema: "StoreRentalOrderOperationRecord"
+  },
+  {
+    method: "patch",
+    path: "/api/store-rental/orders/{id}/remarks/{remarkId}/close",
+    tag: "Order",
+    operationId: "closeOrderRemark",
+    summary: "Close order remark",
+    permissions: ["store-rental:order:operate"],
+    requestSchema: "CloseStoreRentalRemarkRequest",
+    responseSchema: "GenericObject"
+  },
+  {
+    method: "patch",
+    path: "/api/store-rental/vehicles/transfer-tasks/{id}",
+    tag: "MasterData",
+    operationId: "updateVehicleTransferTask",
+    summary: "Update vehicle transfer task",
+    permissions: ["store-rental:vehicle:manage"],
+    requestSchema: "AdvanceVehicleTransferTaskRequest",
+    responseSchema: "GenericObject"
+  },
+  // ===== 2026-06-25 DP-01 调度任务认领新增的契约操作 =====
+  {
+    method: "post",
+    path: "/api/store-rental/dispatch/tasks/claim",
+    tag: "Dispatch",
+    operationId: "claimDispatchTask",
+    summary: "Claim dispatch task",
+    permissions: ["store-rental:dispatch:manage"],
+    requestSchema: "StoreRentalDispatchClaimTaskRequest",
+    responseSchema: "StoreRentalDispatchTaskActionResult"
+  },
+  {
+    method: "post",
+    path: "/api/store-rental/dispatch/tasks/process",
+    tag: "Dispatch",
+    operationId: "processDispatchTask",
+    summary: "Process dispatch task",
+    permissions: ["store-rental:dispatch:manage"],
+    requestSchema: "StoreRentalDispatchProcessTaskRequest",
+    responseSchema: "StoreRentalDispatchTaskActionResult"
+  },
   ...INTEGRATION_BACKLOG_OPERATIONS
 ];
 
 export const OPENAPI_DOCUMENT = {
   openapi: "3.0.3",
   info: {
-    title: "RIMO Store Rental Platform API",
+    title: "Store Rental Platform API",
     version: "0.1.0",
     description:
-      "Internal OpenAPI contract for the RIMO store rental platform MVP. Runtime responses are wrapped as { data, requestId } unless the path is /api/openapi.json."
+      "Internal OpenAPI contract for the store rental platform MVP. Runtime responses are wrapped as { data, requestId } unless the path is /api/openapi.json."
   },
   servers: [
     {
