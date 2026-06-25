@@ -71,7 +71,7 @@
 
 ```powershell
 npm run ops:mysql:setup
-$env:DATABASE_URL="mysql://rimo:rimo@localhost:3306/rimo_store_rental"
+$env:DATABASE_URL="mysql://store_rental:store_rental@localhost:3306/store_rental"
 $env:PLATFORM_DATA_SOURCE="mysql"
 $env:STORE_RENTAL_DATA_SOURCE="mysql"
 npm run db:generate
@@ -89,7 +89,7 @@ npm run ops:mysql:backup
 恢复：
 
 ```powershell
-npm run ops:mysql:restore -- -InputFile backups\rimo-store-rental-YYYYMMDD-HHMMSS.sql
+npm run ops:mysql:restore -- -InputFile backups\store-rental-YYYYMMDD-HHMMSS.sql
 ```
 
 ## 测试覆盖

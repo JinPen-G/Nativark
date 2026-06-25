@@ -22,7 +22,7 @@ docker compose up -d mysql redis
 2. 设置本次 PowerShell 会话的数据库连接：
 
 ```powershell
-$env:DATABASE_URL="mysql://rimo:rimo@localhost:3306/rimo_store_rental"
+$env:DATABASE_URL="mysql://store_rental:store_rental@localhost:3306/store_rental"
 ```
 
 平台底座默认仍走内存数据，方便不启数据库时直接跑本地 MVP。如需让登录、租户、组织、系统用户、角色权限、系统参数走 MySQL，设置：
@@ -101,7 +101,7 @@ npm run ops:mysql:backup
 恢复本地 MySQL：
 
 ```powershell
-npm run ops:mysql:restore -- -InputFile backups\rimo-store-rental-YYYYMMDD-HHMMSS.sql
+npm run ops:mysql:restore -- -InputFile backups\store-rental-YYYYMMDD-HHMMSS.sql
 ```
 
 ## Seed 账号

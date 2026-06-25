@@ -72,10 +72,10 @@
 
 ## 验证
 
-- `npm run build -w @rimo/shared`：通过
+- `npm run build -w @store-rental/shared`：通过
 - `npm run db:validate`：通过
-- `npm run build -w @rimo/api`：通过
-- `npm run build -w @rimo/admin`：通过
+- `npm run build -w @store-rental/api`：通过
+- `npm run build -w @store-rental/admin`：通过
 
 ## 未完成项
 
@@ -100,11 +100,11 @@
 
 验证：
 
-- `npm run build -w @rimo/shared`
+- `npm run build -w @store-rental/shared`
 - `DATABASE_URL=... npm run db:validate`
 - `DATABASE_URL=... npm run db:generate`
-- `npm run build -w @rimo/api`
-- `npm run build -w @rimo/admin`
+- `npm run build -w @store-rental/api`
+- `npm run build -w @store-rental/admin`
 
 ## 2026-06-09 MD-10 闭环补齐
 
@@ -116,9 +116,9 @@
 
 验证：
 
-- `npm run build -w @rimo/shared`：通过
+- `npm run build -w @store-rental/shared`：通过
 - `npm run db:generate`：通过
-- `npm run build -w @rimo/api`：通过
-- `npm run build -w @rimo/admin`：通过
+- `npm run build -w @store-rental/api`：通过
+- `npm run build -w @store-rental/admin`：通过
 - `git diff --check`：通过
 - `npx prisma validate --schema apps/api/prisma/schema.prisma`：未注入 `DATABASE_URL` 时失败；尝试通过单次命令注入临时 `DATABASE_URL` 被本地审批系统因工作区额度不足拒绝，未继续绕路执行。

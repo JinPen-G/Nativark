@@ -10,13 +10,13 @@
 
 本轮使用独立 worktree：
 
-`D:\工作文件\RIMORental\.worktrees\integration-store-rental-mvp`
+`历史外层 worktree（已废弃）/integration-store-rental-mvp`
 
 原因：主工作树当前被 `codex/infra-adapters` 占用并存在未提交改动，不能切换分支或覆盖其他 worker 的工作。
 
 ## 项目约束
 
-- 严格按用户最新要求、RIMO 项目规则、门市租赁 PRD 和原型执行。
+- 严格按用户最新要求、项目规则、门市租赁 PRD 和原型执行。
 - 不修改 PRD 文件、原型文件、历史资料和归档资料。
 - 不做工作台。
 - 不开发分时租赁；原型内出现分时租赁 tab 时只保留页面结构表达，不实现分时业务。
@@ -74,15 +74,15 @@
 
 核心共享文件：
 
-- `05_代码与工程/rimo-store-rental-platform/apps/api/prisma/schema.prisma`
-- `05_代码与工程/rimo-store-rental-platform/apps/api/prisma/seed.ts`
-- `05_代码与工程/rimo-store-rental-platform/packages/shared/src/index.ts`
-- `05_代码与工程/rimo-store-rental-platform/apps/api/src/modules/store-rental/store-rental.controller.ts`
-- `05_代码与工程/rimo-store-rental-platform/apps/api/src/modules/store-rental/store-rental.repository.ts`
-- `05_代码与工程/rimo-store-rental-platform/apps/api/src/modules/store-rental/store-rental.service.ts`
-- `05_代码与工程/rimo-store-rental-platform/apps/admin/src/api/client.ts`
-- `05_代码与工程/rimo-store-rental-platform/apps/admin/src/router.ts`
-- `05_代码与工程/rimo-store-rental-platform/apps/admin/src/components/AppLayout.vue`
+- `05_代码与工程/store-rental-platform/apps/api/prisma/schema.prisma`
+- `05_代码与工程/store-rental-platform/apps/api/prisma/seed.ts`
+- `05_代码与工程/store-rental-platform/packages/shared/src/index.ts`
+- `05_代码与工程/store-rental-platform/apps/api/src/modules/store-rental/store-rental.controller.ts`
+- `05_代码与工程/store-rental-platform/apps/api/src/modules/store-rental/store-rental.repository.ts`
+- `05_代码与工程/store-rental-platform/apps/api/src/modules/store-rental/store-rental.service.ts`
+- `05_代码与工程/store-rental-platform/apps/admin/src/api/client.ts`
+- `05_代码与工程/store-rental-platform/apps/admin/src/router.ts`
+- `05_代码与工程/store-rental-platform/apps/admin/src/components/AppLayout.vue`
 
 业务页面高风险区域：
 
@@ -132,9 +132,9 @@
 基础命令：
 
 ```powershell
-npm run build -w @rimo/shared
-npm run build -w @rimo/api
-npm run build -w @rimo/admin
+npm run build -w @store-rental/shared
+npm run build -w @store-rental/api
+npm run build -w @store-rental/admin
 npx prisma validate --schema apps/api/prisma/schema.prisma
 git diff --check
 ```
@@ -148,7 +148,7 @@ npm run build
 
 本地 MySQL 跑通清单：
 
-1. 确认 `.env` 或本地环境变量指向 MySQL，例如 `DATABASE_URL=mysql://user:password@127.0.0.1:3306/rimo_store_rental_mvp`
+1. 确认 `.env` 或本地环境变量指向 MySQL，例如 `DATABASE_URL=mysql://user:password@127.0.0.1:3306/store_rental_mvp`
 2. 确认 MySQL 数据库已创建，字符集建议 `utf8mb4`
 3. 首次运行依赖安装：`npm install`
 4. 生成 Prisma Client：`npm run db:generate`
@@ -305,23 +305,23 @@ integration 分支职责：
 
 依赖准备：
 
-- 独立 worktree 初始没有 `node_modules`，首次 `npm run build -w @rimo/shared` 因 `tsc` 不存在失败。
+- 独立 worktree 初始没有 `node_modules`，首次 `npm run build -w @store-rental/shared` 因 `tsc` 不存在失败。
 - 已执行 `npm install`，安装成功；npm audit 提示 25 个既有依赖风险，未在本轮处理。
 - 已执行 `npm run db:generate`，Prisma Client 生成成功。
 
 通过项：
 
-- `npm run build -w @rimo/shared`
-- `npm run build -w @rimo/api`
-- `npm run build -w @rimo/admin`
+- `npm run build -w @store-rental/shared`
+- `npm run build -w @store-rental/api`
+- `npm run build -w @store-rental/admin`
 - `npm run build`
 - `npm run contract:validate`
-- `$env:DATABASE_URL='mysql://root:root@127.0.0.1:3306/rimo_store_rental_mvp'; npm run db:validate`
+- `$env:DATABASE_URL='mysql://root:root@127.0.0.1:3306/store_rental_mvp'; npm run db:validate`
 - `git diff --check`
 
 说明：
 
-- `npm run build -w @rimo/admin` 有 Vite CJS API deprecated 和 chunk 超 500 kB 警告，不影响本次 baseline 通过。
+- `npm run build -w @store-rental/admin` 有 Vite CJS API deprecated 和 chunk 超 500 kB 警告，不影响本次 baseline 通过。
 - 本轮 `npm run contract:validate` 覆盖 169 个控制器操作。
 - 直接执行 `npm run db:validate` 时因未配置 `DATABASE_URL` 失败；注入占位 MySQL URL 后 schema validate 通过。
 - 本轮没有执行 MySQL migration/seed，因为未配置真实本地 MySQL 账号和数据库；后续集成合并后需要按上方 MySQL 跑通清单执行并记录实际结果。

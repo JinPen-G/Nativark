@@ -33,7 +33,7 @@
 MVP 阶段为了贴合原型和 PRD，以下位置可以保留汽车文案：
 
 - 页面标题和菜单：车辆档案库、车型组管理、门市租赁订单。
-- `@rimo/shared` 中的 `VehicleGroupMaster`、`VehicleInstanceSummary`。
+- `@store-rental/shared` 中的 `VehicleGroupMaster`、`VehicleInstanceSummary`。
 - `store-rental` API 路径。
 - 页面表格字段：车牌、VIN、车型、里程、TBox CID。
 

@@ -6,14 +6,14 @@
 
 - 前端：Vue 3、Vite、TypeScript、Pinia、Vue Router、Element Plus、Tailwind CSS。
 - 后端：NestJS、TypeScript。
-- 共享包：`@rimo/shared` 维护前后端共用 DTO、枚举和状态。
+- 共享包：`@store-rental/shared` 维护前后端共用 DTO、枚举和状态。
 - 数据库：MySQL。当前 MVP 默认使用后端内存数据；平台底座可通过 `PLATFORM_DATA_SOURCE=mysql` 切到 Prisma/MySQL，门市租赁可通过 `STORE_RENTAL_DATA_SOURCE=mysql` 逐步切换站点、车辆、客户、订单、费用和月结域。
 - 本地辅助：Docker Compose 预留 MySQL、Redis。
 
 ## 目录结构
 
 ```text
-rimo-store-rental-platform/
+store-rental-platform/
   apps/
     admin/        营运端前端，门店端也复用该端
     api/          NestJS API
@@ -108,9 +108,9 @@ rimo-store-rental-platform/
 
 前端登录态存在 localStorage：
 
-- `rimo_access_token`
-- `rimo_tenant`
-- `rimo_user`
+- `store_rental_access_token`
+- `store_rental_tenant`
+- `store_rental_user`
 
 请求时会自动写入：
 
@@ -179,8 +179,8 @@ rimo-store-rental-platform/
 
 当前 SaaS 数据：
 
-- `tenant_001 / demo / RIMO 香港租户`
-- `tenant_002 / demo2 / RIMO 深圳租户`
+- `tenant_001 / demo / 演示香港租户`
+- `tenant_002 / demo2 / 演示深圳租户`
 
 默认账号：
 
@@ -700,7 +700,7 @@ PF-15 当前数据边界：
 当前 schema 校验命令：
 
 ```powershell
-$env:DATABASE_URL='mysql://root:password@localhost:3306/rimo_store_rental'
+$env:DATABASE_URL='mysql://root:password@localhost:3306/store_rental'
 npx prisma validate --schema apps/api/prisma/schema.prisma
 ```
 

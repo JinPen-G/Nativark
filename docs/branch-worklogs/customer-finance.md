@@ -3,7 +3,7 @@
 ## 本轮范围
 
 - 目标分支：`codex/customer-finance`
-- 工作树：`D:\工作文件\RIMORental\.worktrees\customer-finance`
+- 工作树：`历史外层 worktree（已废弃）/customer-finance`
 - 业务范围：个人会员、企业客户、客户等级、押金/预授权预留、发票/收据、手工调账、企业月结、财务对账。
 - 本轮新增重点：营运端财务结算中心、财务 MySQL 表、财务 API、权限接入。
 
@@ -101,10 +101,10 @@
 - `npm install` 已在独立 worktree 成功。
 - 2026-06-09 已运行：
   - `npm run db:generate`
-  - `npm run build -w @rimo/shared`
-  - `npm run build -w @rimo/api`
-  - `npm run build -w @rimo/admin`
-  - `$env:DATABASE_URL='mysql://root:password@localhost:3306/rimo_store_rental'; npx prisma validate --schema apps/api/prisma/schema.prisma`
+  - `npm run build -w @store-rental/shared`
+  - `npm run build -w @store-rental/api`
+  - `npm run build -w @store-rental/admin`
+  - `$env:DATABASE_URL='mysql://root:password@localhost:3306/store_rental'; npx prisma validate --schema apps/api/prisma/schema.prisma`
   - `npm run build`
   - `git diff --check`
 - 仍需在最终提交前运行：

@@ -35,7 +35,7 @@
 4. AI 调度分析预留
    - 新增 `POST /api/store-rental/dispatch/ai-analysis`
    - 当前 MVP 不调用外部模型，只生成调度分析数据包摘要、风险行、推荐行，并写入 `DispatchEvent.payload`。
-   - 记录 `promptVersion=rimo-store-dispatch-agent-v1`、`packetVersion=dispatch-packet-v1`、系统提示词、候选池和推荐摘要。
+   - 记录 `promptVersion=store-rental-dispatch-agent-v1`、`packetVersion=dispatch-packet-v1`、系统提示词、候选池和推荐摘要。
 
 5. 营运端调度页面
    - 订单调度抽屉新增“车辆不可交付”入口。
@@ -93,9 +93,9 @@
 
 ### 验证
 
-- `npm run build -w @rimo/shared`
-- `npm run build -w @rimo/api`
-- `npm run build -w @rimo/admin`
+- `npm run build -w @store-rental/shared`
+- `npm run build -w @store-rental/api`
+- `npm run build -w @store-rental/admin`
 - `DATABASE_URL=... npx prisma validate --schema apps/api/prisma/schema.prisma`
 
 ### 待继续

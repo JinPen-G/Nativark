@@ -35,13 +35,13 @@
 
 ## 验证结果
 
-- `npm run build -w @rimo/shared`：通过。
-- `npx prisma validate --schema apps/api/prisma/schema.prisma`：通过，执行前临时设置 `DATABASE_URL=mysql://root:password@localhost:3306/rimo_store_rental`。
+- `npm run build -w @store-rental/shared`：通过。
+- `npx prisma validate --schema apps/api/prisma/schema.prisma`：通过，执行前临时设置 `DATABASE_URL=mysql://root:password@localhost:3306/store_rental`。
 - `npm run db:generate`：通过。
-- `npm run build -w @rimo/api`：通过。
-- `npm run build -w @rimo/admin`：通过，有 Vite chunk size 和 CJS API 警告，不阻断。
+- `npm run build -w @store-rental/api`：通过。
+- `npm run build -w @store-rental/admin`：通过，有 Vite chunk size 和 CJS API 警告，不阻断。
 - `npm run contract:validate`：通过，覆盖 95 个控制器操作。
-- `npm run build -w @rimo/api`：通过。
+- `npm run build -w @store-rental/api`：通过。
 - PF-22 本轮：`npm run db:generate` 通过；`npm run db:validate`、`npm run contract:validate`、`npm run build`、`git diff --check`、提交和推送因当前工作区审批额度不足暂未执行。
 
 ## 未完成项

@@ -124,10 +124,10 @@
 - 打印、PDF、电子签真实 provider 保持预留，本轮自动跳过外部调用，并写入 `externalProvider=reserved`、`externalSignStatus=skipped`。
 
 验证：
-- `npm run build -w @rimo/shared`
-- `npm run build -w @rimo/api`
-- `npm run build -w @rimo/admin`
-- `$env:DATABASE_URL='mysql://root:password@localhost:3306/rimo_store_rental'; npm run db:validate`
+- `npm run build -w @store-rental/shared`
+- `npm run build -w @store-rental/api`
+- `npm run build -w @store-rental/admin`
+- `$env:DATABASE_URL='mysql://root:password@localhost:3306/store_rental'; npm run db:validate`
 - `npm run build`
 
 未完成项：

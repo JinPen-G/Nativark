@@ -70,11 +70,11 @@
 
 ## 验证记录
 
-- `npm run build -w @rimo/shared`：通过。
+- `npm run build -w @store-rental/shared`：通过。
 - `npx prisma validate --schema apps/api/prisma/schema.prisma`：通过，使用本地占位 `DATABASE_URL`。
 - `npx prisma generate --schema apps/api/prisma/schema.prisma`：通过。
-- `npm run build -w @rimo/api`：通过。
-- `npm run build -w @rimo/admin`：通过。
+- `npm run build -w @store-rental/api`：通过。
+- `npm run build -w @store-rental/admin`：通过。
 
 ## 2026-06-09 追加
 
@@ -90,4 +90,4 @@
 - 试算面板复用真实 `POST /store-rental/pricing/quote` 接口，不做静态假数据；支持选择车组、取还门市、取还时间、客户类型和结算方式。
 - 试算结果展示报价号、计费天数、租金、优惠、押金/预授权、应付/入账金额、命中的 `priceVersionId`、`marketingPlanVersionId`、规则版本、费用项、报价解释链和日历分段。
 - 该入口用于验证调价计划或手动改价后“只影响新订单、历史订单读取快照”的规则；真正的定时作业自动执行计划仍需后续接入后台 runner。
-- 验证：`npm run build -w @rimo/shared`、`npm run db:generate`、`npm run build -w @rimo/api`、`npm run build -w @rimo/admin`、`git diff --check` 已通过；首次 API 构建因本 worktree Prisma Client 过旧失败，执行 `db:generate` 后通过。
+- 验证：`npm run build -w @store-rental/shared`、`npm run db:generate`、`npm run build -w @store-rental/api`、`npm run build -w @store-rental/admin`、`git diff --check` 已通过；首次 API 构建因本 worktree Prisma Client 过旧失败，执行 `db:generate` 后通过。

@@ -1,4 +1,4 @@
-# RIMO 门市租赁平台开发说明
+# 门市租赁平台开发说明
 
 这个目录是从零开始的真实 MVP 工程，和仓库根目录的 PRD、知识库、静态原型隔离。
 
@@ -6,7 +6,7 @@
 
 本目录已经作为门市租赁平台的独立 Git 仓库使用，后续门市租赁代码、开发文档、数据库迁移和任务台账都在本目录内提交。
 
-- 子项目提交目录：`05_代码与工程/rimo-store-rental-platform`
+- 子项目提交目录：`05_代码与工程/store-rental-platform`
 - 子项目默认分支：`main`
 - 外层大仓库只保留 PRD、原型、知识库等资料，不再跟踪本目录内的开发文件。
 - 需要提交门市租赁功能时，先进入本目录再执行 `git status`、`git add`、`git commit`。
@@ -52,7 +52,7 @@
 ## 本地启动
 
 ```bash
-cd rimo-store-rental-platform
+cd store-rental-platform
 copy .env.example .env
 docker compose up -d
 npm install
@@ -81,7 +81,7 @@ npm run dev:admin:5174
 默认 MySQL 连接：
 
 ```text
-mysql://rimo:rimo@localhost:3306/rimo_store_rental
+mysql://store_rental:store_rental@localhost:3306/store_rental
 ```
 
 当前 MVP 支持内存数据和 MySQL 数据源。报表、导出任务和运维日志按 MySQL 口径开发；验证报表前建议执行 `npm run db:seed:reports` 补齐演示订单、费用、月结和运维日志数据。
@@ -89,3 +89,17 @@ mysql://rimo:rimo@localhost:3306/rimo_store_rental
 ## MVP 集成策略
 
 支付、发票、短信、TBox、地图、文件存储和 AI 调度先保留适配器边界，默认返回模拟结果。这样第一阶段能跑完整效果，后面替换真实供应商时不改业务流程。
+
+## 业务知识库与 PRD 资料
+
+完整的业务知识库、PRD 和原型资料保留在外层项目资料目录中，本仓库只记录开发台账和技术实现。
+
+- **业务知识库位置**: `D:\工作文件\RIMORental\01_业务知识库与决策台账\`
+- **PRD 文档位置**: `D:\工作文件\RIMORental\02_原型和PRD\PRD\门市租赁\`
+- **原型页面位置**: `D:\工作文件\RIMORental\02_原型和PRD\原型\营运端\`
+
+开发前务必查阅：
+1. 先读 `docs/STORE_RENTAL_DEVELOPMENT_TASKS.md` 确认任务边界和优先级。
+2. 到外层业务知识库、PRD 和原型目录查对应资料。
+3. 严格按照 PRD 和原型实现功能。
+4. 不要修改 PRD 和原型文件。

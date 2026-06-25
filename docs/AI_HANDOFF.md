@@ -1,6 +1,6 @@
-# RIMO 门市租赁平台 AI 交接说明
+# 门市租赁平台 AI 交接说明
 
-更新时间：2026-06-10
+更新时间：2026-06-25
 
 本文用于把当前门市租赁 MVP 工程转交给其他 AI 或开发者继续做。接手方应先读本文，再读开发台账和技术文档。
 
@@ -9,27 +9,26 @@
 主工程目录：
 
 ```text
-D:\工作文件\RIMORental\05_代码与工程\rimo-store-rental-platform
+D:\工作文件\store-rental-platform
 ```
 
 Git 边界：
 
-- 门市租赁平台已经拆成独立 Git 仓库，仓库根目录就是上面的 `rimo-store-rental-platform`。
+- 门市租赁平台已经拆成独立 Git 仓库，仓库根目录就是上面的 `store-rental-platform`。
 - 后续开发、提交、分支管理和状态检查都在该目录内执行，不再把门市租赁代码提交到外层大仓库。
 - 外层大仓库只作为 PRD、原型、知识库和项目资料容器；PRD/原型仍然只读。
 
-不要再使用旧路径：
+旧路径（已废弃，不要再使用）：
 
 ```text
-D:\工作文件\RIMORental\rimo-store-rental-platform
+历史外层仓库路径（已废弃）/05_代码与工程/store-rental-platform
+历史外层仓库路径（已废弃）/store-rental-platform
 ```
-
-当前仓库做过目录重组，Git 状态里可能同时看到旧根目录文件删除、新编号目录未跟踪。这是整理资料目录后的状态，不要为了“清理”而回滚这些目录。
 
 ## 2. 接手前必须遵守的边界
 
 - PRD、原型、业务知识库是依据，只读，不要改。
-- 代码和开发文档只写在 `05_代码与工程\rimo-store-rental-platform` 内。
+- 代码和开发文档只写在 `store-rental-platform` 仓库内。
 - 页面视觉按原型复刻，顶栏按当前系统统一顶栏处理。
 - 业务逻辑按 PRD 和业务知识库，不能只看原型。
 - 当前仍保留 SaaS 架构，至少支持 1-2 个租户本地跑通。
@@ -58,20 +57,40 @@ D:\工作文件\RIMORental\rimo-store-rental-platform
 - 业务知识库和决策台账：`01_业务知识库与决策台账\业务知识库`
 - 项目说明：`PROJECT_README.md`
 
+外部资料源（完整的业务知识、PRD 和原型）：
+
+- **业务知识库**: `D:\工作文件\RIMORental\01_业务知识库与决策台账\`
+  - `RIMO租赁平台业务全局说明.md`：平台整体业务模型和核心概念
+  - `门市租赁业务说明.md`：门市租赁详细业务规则
+  - `RIMO租赁平台业务决策与变更记录.md`：历史决策和规则变更
+
+- **PRD 文档**: `D:\工作文件\RIMORental\02_原型和PRD\PRD\门市租赁\`
+  - `门市租赁业务总索引.md`：总索引和导航
+  - `门市租赁端到端业务流程.md`：完整业务流程
+  - `订单/新建订单.md`、`订单/订单详情.md`、`订单/订单取车.md`、`订单/订单还车.md`、`订单/费用管理.md` 等 10+ 个订单相关 PRD
+  - `服务站点管理.md`、`基础产品定价（车组）.md`、`智能调度派车规则.md` 等主数据和调度 PRD
+
+- **原型页面**: `D:\工作文件\RIMORental\02_原型和PRD\原型\营运端\`
+  - 40+ 个 HTML 原型页面，覆盖所有营运端功能
+  - 核心页面：`order_detail.html`（708KB）、`members.html`、`vehicles.html`、`dispatch.html` 等
+  - 纯静态 HTML，可直接浏览器打开查看
+
+**重要**: 开发任何功能前，先读 `docs/STORE_RENTAL_DEVELOPMENT_TASKS.md` 确认任务边界，再到外层 PRD、原型和业务知识库目录查对应资料，严格按照资料实现功能。
+
 ## 4. 技术栈和工程结构
 
 技术栈：
 
 - 前端：Vue 3、Vite、TypeScript、Pinia、Vue Router、Element Plus、Tailwind CSS。
 - 后端：NestJS、TypeScript。
-- 共享类型：`@rimo/shared`。
+- 共享类型：`@store-rental/shared`。
 - 数据库：MySQL。当前 MVP 默认使用后端内存数据；平台底座可通过 `PLATFORM_DATA_SOURCE=mysql` 切到 Prisma/MySQL。
 - 本地环境预留：Docker Compose 的 MySQL、Redis。
 
 工程结构：
 
 ```text
-rimo-store-rental-platform/
+store-rental-platform/
   apps/
     admin/        营运端前端，门店端也复用
     api/          NestJS API
@@ -100,16 +119,15 @@ rimo-store-rental-platform/
 推荐接手后执行：
 
 ```bash
-cd D:\工作文件\RIMORental\05_代码与工程\rimo-store-rental-platform
+cd D:\工作文件\store-rental-platform
 npm install
 npm run build
 ```
 
 说明：
 
-- 由于项目从旧根目录迁移到 `05_代码与工程`，`node_modules/@rimo/*` 的 workspace junction 可能指向旧路径。
-- 本次交接前已执行 `npm install` 刷新链接，`npm run build` 已通过。
-- 如果接手方复制或移动目录后构建报 `Cannot find module '@rimo/shared'`，先重新执行 `npm install`。
+- `npm install` 会自动建立 workspace 链接。
+- 如果接手方复制或移动目录后构建报 `Cannot find module '@store-rental/shared'`，先重新执行 `npm install`。
 - 当前 `npm install` 报告 22 个依赖漏洞，暂未处理。不要直接 `npm audit fix --force`，可能引入破坏性升级。
 - `npm run build` 通过时仍会有 Vite CJS deprecation 和 chunk size warning，这是现阶段已知警告。
 
@@ -227,7 +245,7 @@ MySQL / Prisma：
 - `apps/api/prisma/schema.prisma` 已是 MySQL provider，并扩展为主干业务模型。
 - 已覆盖平台用户多角色、角色权限、按钮权限/数据范围、系统参数、站点、车型组、车辆台账、会员、企业客户、订单、费用/资金、月结账单、检查记录、订单时间线、续租快照和改派所需车辆/车型组快照字段。
 - `StoreRentalRepository` 已实现订单、费用、资金、预授权押金台账、发票/收据、人工调账、检查、时间线、车辆状态更新、还车门市/据点快照更新和企业月结账单第一版 DTO 映射；`StoreRentalService` 已把订单创建/查询、费用中心、财务结算中心、资金登记、主流程动作、续租、改派、改还车门市/据点、终止动作、事故登记和企业月结接口接入 `STORE_RENTAL_DATA_SOURCE=mysql`。
-- 已用临时 `DATABASE_URL=mysql://root:password@localhost:3306/rimo_store_rental` 通过 `npx prisma validate --schema apps/api/prisma/schema.prisma`。
+- 已用临时 `DATABASE_URL=mysql://root:password@localhost:3306/store_rental` 通过 `npx prisma validate --schema apps/api/prisma/schema.prisma`。
 - 已新增 `apps/api/prisma/seed.ts`，可重复初始化 demo/demo2 租户、组织、用户、角色权限、系统参数、站点、车型组、车辆、会员等级、会员和企业客户。
 - 根脚本已补：`db:generate`、`db:validate`、`db:migrate`、`db:seed`；执行说明见 `docs/DATABASE_BOOTSTRAP.md`。
 - 已新增全局 `DatabaseModule` 和 `PrismaService`，后续 repository 可直接注入；默认 `DATABASE_CONNECT_ON_START=false`，不会影响当前内存 MVP 启动。
@@ -304,7 +322,7 @@ MySQL / Prisma：
 - 新增接口：`GET /store-rental/contracts`、`GET /store-rental/contracts/templates`、`POST /store-rental/contracts/:id/print-mock`、`POST /store-rental/contracts/:id/sign-mock`。
 - MySQL 模式复用 `OrderContractDocument` 表，扩展信息存入 `payload` JSON；内存模式复用 `orderContracts` map。生成、打印/下载和签署状态会回读到订单详情和合同中心。
 - 打印、PDF、真实电子签和附件中心仍为预留接入，本轮全部自动跳过外部调用并记录 `externalProvider=reserved`、`externalSignStatus=skipped`。
-- 本轮验证：`npm run build -w @rimo/shared`、`npm run build -w @rimo/api`、`npm run build -w @rimo/admin`、`$env:DATABASE_URL='mysql://root:password@localhost:3306/rimo_store_rental'; npm run db:validate`、`npm run build`。
+- 本轮验证：`npm run build -w @store-rental/shared`、`npm run build -w @store-rental/api`、`npm run build -w @store-rental/admin`、`$env:DATABASE_URL='mysql://root:password@localhost:3306/store_rental'; npm run db:validate`、`npm run build`。
 
 预留：
 
