@@ -14579,6 +14579,49 @@ export class StoreRentalService {
     if (body.customerSigned !== true) {
       throw new BadRequestException("请完成客户取车签字确认。");
     }
+
+    // 补充车辆相关校验（基于PRD《订单取车.md》）
+    const plateNoForValidation = this.optionalString(body.plateNo) || order.plateNo;
+    if (plateNoForValidation && plateNoForValidation !== "待人工派车") {
+      const vehicle = this.vehicles.find((v) => v.licensePlate === plateNoForValidation);
+      if (vehicle) {
+        // 车辆启用状态校验
+        if (!vehicle.enabled) {
+          throw new BadRequestException("车辆已停用，不能确认发车。");
+        }
+        // 车辆营运状态校验
+        if (vehicle.operationStatus !== "idle") {
+          throw new BadRequestException(
+            `车辆当前状态为 ${vehicle.operationStatus}，必须为空闲状态才能发车。`
+          );
+        }
+        // 车辆交付范围校验
+        if (vehicle.currentStoreName !== order.pickupStoreName) {
+          throw new BadRequestException(
+            `车辆当前所在门店 ${vehicle.currentStoreName} 与订单取车门店 ${order.pickupStoreName} 不匹配。`
+          );
+        }
+      }
+    }
+
+    // 派车状态校验
+    if (order.dispatchStatus !== "locked") {
+      throw new BadRequestException("订单必须完成硬锁车辆才能确认发车。");
+    }
+
+    // 证件信息缺失校验
+    if (!this.optionalString(body.driverName)) {
+      throw new BadRequestException("请填写驾驶人姓名。");
+    }
+    if (!this.optionalString(body.driverPhone)) {
+      throw new BadRequestException("请填写驾驶人手机号。");
+    }
+    if (!this.optionalString(body.identityNoMasked)) {
+      throw new BadRequestException("请填写身份证号。");
+    }
+    if (!this.optionalString(body.licenseValidUntil)) {
+      throw new BadRequestException("请填写驾照有效期。");
+    }
   }
 
   private validateReturnInspection(
