@@ -1908,6 +1908,7 @@ export interface StoreStationListQuery {
   status?: StoreStationSummary["status"];
   scopeType?: StoreStationHierarchyNode["type"];
   scopeLabel?: string;
+  organizationId?: string;
   page?: number;
   pageSize?: number;
 }

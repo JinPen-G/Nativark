@@ -25,6 +25,7 @@ const searchQuery = ref("");
 const serviceFilter = ref("");
 const serviceStatusFilter = ref("");
 const statusFilter = ref("");
+const organizationFilter = ref("");
 const loading = ref(false);
 const page = ref(1);
 const pageSize = ref(20);
@@ -93,6 +94,7 @@ async function loadRows() {
         status: (statusFilter.value || undefined) as StoreStationListQuery["status"] | undefined,
         scopeType: currentScope.value.type,
         scopeLabel: currentScope.value.type === "all" ? undefined : currentScope.value.label,
+        organizationId: organizationFilter.value || undefined,
         page: page.value,
         pageSize: pageSize.value
       }),
@@ -217,6 +219,7 @@ function resetStationFilters() {
   serviceFilter.value = "";
   serviceStatusFilter.value = "";
   statusFilter.value = "";
+  organizationFilter.value = "";
   page.value = 1;
   void loadRows();
 }
@@ -409,6 +412,12 @@ onMounted(loadRows);
           <el-select v-model="statusFilter" placeholder="据点状态" clearable style="width: 160px">
             <el-option label="启用" value="enabled" />
             <el-option label="停用" value="disabled" />
+          </el-select>
+          <el-select v-model="organizationFilter" placeholder="所属组织" clearable style="width: 180px">
+            <el-option label="香港营运中心" value="org_operator_hk" />
+            <el-option label="旺角门市" value="org_store_mongkok" />
+            <el-option label="中环门市" value="org_store_central" />
+            <el-option label="机场门市" value="org_store_airport" />
           </el-select>
           <el-button type="primary" plain @click="applyStationFilters">查询</el-button>
           <el-button icon="Refresh" circle @click="resetStationFilters" />
