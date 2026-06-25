@@ -14628,6 +14628,15 @@ export class StoreRentalService {
     order: StoreRentalOrderSummary,
     body: Record<string, unknown>
   ) {
+    // 还车基础信息校验
+    if (!this.optionalString(body.actualReturnAt)) {
+      throw new BadRequestException("请填写实际还车时间。");
+    }
+    if (!this.optionalString(body.returnStationName)) {
+      throw new BadRequestException("请选择归还据点。");
+    }
+
+    // 里程校验
     const returnMileage = this.optionalNumber(body.returnMileage);
     if (returnMileage === undefined) {
       throw new BadRequestException("请填写还车里程。");
@@ -14638,17 +14647,50 @@ export class StoreRentalService {
     if (pickupMileage !== undefined && returnMileage < pickupMileage) {
       throw new BadRequestException("还车里程不能小于取车里程。");
     }
+
+    // 油量/电量校验
     if (
       this.optionalNumber(body.fuelLevelPercent) === undefined &&
       this.optionalNumber(body.batteryLevelPercent) === undefined
     ) {
       throw new BadRequestException("请填写还车油量或电量。");
     }
+
+    // 照片数量校验
     if ((this.optionalNumber(body.photoCount) ?? 0) < 9) {
       throw new BadRequestException("请补齐还车外观和内饰标准照片。");
     }
+
+    // 客户签字校验
     if (body.customerSigned !== true) {
       throw new BadRequestException("请完成客户还车签字确认。");
+    }
+
+    // 车辆状态校验（车辆必须在用车状态）
+    const plateNo = order.plateNo;
+    if (plateNo && plateNo !== "待人工派车") {
+      const vehicle = this.vehicles.find((v) => v.licensePlate === plateNo);
+      if (vehicle) {
+        // 车辆必须在用车状态
+        if (!["renting", "renewing", "overdue", "controlled"].includes(vehicle.operationStatus)) {
+          throw new BadRequestException(
+            `车辆当前状态为 ${vehicle.operationStatus}，必须在用车状态才能还车。`
+          );
+        }
+      }
+    }
+
+    // 订单状态校验
+    const allowedStatuses = [
+      OrderMainStatus.Renting,
+      OrderMainStatus.Renewing,
+      OrderMainStatus.Overdue,
+      OrderMainStatus.AccidentProcessing
+    ];
+    if (!allowedStatuses.includes(order.mainStatus)) {
+      throw new BadRequestException(
+        `订单当前状态为 ${order.mainStatus}，必须在用车状态才能还车。`
+      );
     }
   }
 
