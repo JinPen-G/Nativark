@@ -13,7 +13,7 @@ import {
   type MemberSummary,
   type StoreRentalAvailabilityResult,
   type PricingQuoteResult
-} from "@rimo/shared";
+} from "@store-rental/shared";
 import {
   checkStoreRentalAvailability,
   createStoreRentalOrder,
