@@ -14556,6 +14556,13 @@ export class StoreRentalService {
     if (body.identityMatched !== true) {
       throw new BadRequestException("请先确认人证合一。");
     }
+    // PRD要求：证件信息缺失时禁止进入下一步
+    if (body.identityPhotoUploaded !== true) {
+      throw new BadRequestException("请先上传身份证照片。");
+    }
+    if (body.licensePhotoUploaded !== true) {
+      throw new BadRequestException("请先上传驾照照片。");
+    }
     if (this.optionalString(body.licenseValidUntil)) {
       const licenseValidUntil = new Date(String(body.licenseValidUntil));
       if (
