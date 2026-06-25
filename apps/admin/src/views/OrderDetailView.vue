@@ -2536,6 +2536,32 @@ onMounted(loadDetail);
               </div>
             </div>
           </section>
+
+          <section class="col-span-12 xl:col-span-4 bg-white rounded-xl border border-gray-200">
+            <div class="px-5 py-3 border-b border-gray-100 font-bold text-gray-800">报价快照</div>
+            <div class="p-5 space-y-3">
+              <div class="flex justify-between text-sm">
+                <span class="text-gray-500">价格版本</span>
+                <span class="font-medium text-gray-800">{{ detail.snapshots?.pricingVersion || "-" }}</span>
+              </div>
+              <div v-if="detail.snapshots?.priceVersionId" class="flex justify-between text-sm">
+                <span class="text-gray-500">价格版本ID</span>
+                <span class="font-mono text-xs text-gray-700">{{ detail.snapshots.priceVersionId }}</span>
+              </div>
+              <div v-if="detail.snapshots?.marketingPlanName" class="flex justify-between text-sm">
+                <span class="text-gray-500">行销方案</span>
+                <span class="font-medium text-gray-800">{{ detail.snapshots.marketingPlanName }}</span>
+              </div>
+              <div v-if="detail.snapshots?.marketingPlanVersionId" class="flex justify-between text-sm">
+                <span class="text-gray-500">行销版本ID</span>
+                <span class="font-mono text-xs text-gray-700">{{ detail.snapshots.marketingPlanVersionId }}</span>
+              </div>
+              <div class="flex justify-between text-sm">
+                <span class="text-gray-500">车辆分组</span>
+                <span class="font-medium text-gray-800">{{ detail.snapshots?.vehicleGroup || "-" }}</span>
+              </div>
+            </div>
+          </section>
         </div>
 
         <div class="grid grid-cols-12 gap-6">
