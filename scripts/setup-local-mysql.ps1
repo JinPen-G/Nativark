@@ -1,5 +1,5 @@
 param(
-  [string]$DatabaseUrl = "mysql://rimo:rimo@localhost:3306/rimo_store_rental"
+  [string]$DatabaseUrl = "mysql://store_rental:store_rental@localhost:3306/store_rental"
 )
 
 $ErrorActionPreference = "Stop"

@@ -1,9 +1,9 @@
 param(
   [Parameter(Mandatory = $true)]
   [string]$InputFile,
-  [string]$Database = "rimo_store_rental",
-  [string]$User = "rimo",
-  [string]$Password = "rimo"
+  [string]$Database = "store_rental",
+  [string]$User = "store_rental",
+  [string]$Password = "store_rental"
 )
 
 $ErrorActionPreference = "Stop"
