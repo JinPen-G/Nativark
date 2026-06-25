@@ -1057,6 +1057,68 @@ async function upsertCustomers() {
   }
 }
 
+async function upsertSceneOrders() {
+  const tenantId = "tenant_001";
+  const now = new Date();
+  const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+
+  const sceneOrders = [
+    {
+      id: "order_scene_001",
+      orderNo: "SO-20260625-0001",
+      mode: "store_rental" as const,
+      mainStatus: "renting" as const,
+      dispatchStatus: "locked" as const,
+      paymentStatus: "deposit_paid" as const,
+      billingMode: "customer_pay" as const,
+      memberId: "member_001",
+      customerName: "陈嘉豪",
+      customerPhoneMasked: "852****2388",
+      vehicleGroupId: "VG_SEVEN",
+      assignedVehicleId: "VEH_001",
+      pickupStationId: "station_mk_counter",
+      returnStationId: "station_mk_counter",
+      pickupStoreSnapshot: { storeName: "旺角门市", stationName: "旺角门市柜台" },
+      returnStoreSnapshot: { storeName: "旺角门市", stationName: "旺角门市柜台" },
+      pickupAt: yesterday,
+      returnAt: tomorrow,
+      totalAmount: 2380,
+      riskFlags: ["企业月结", "已验车"]
+    },
+    {
+      id: "order_scene_002",
+      orderNo: "SO-20260625-0002",
+      mode: "store_rental" as const,
+      mainStatus: "reserved" as const,
+      dispatchStatus: "pre_assigned" as const,
+      paymentStatus: "deposit_paid" as const,
+      billingMode: "customer_pay" as const,
+      memberId: "member_002",
+      customerName: "林慧仪",
+      customerPhoneMasked: "852****6619",
+      vehicleGroupId: "VG_ECONOMY",
+      assignedVehicleId: "VEH_002",
+      pickupStationId: "station_central",
+      returnStationId: "station_airport",
+      pickupStoreSnapshot: { storeName: "中环门市", stationName: "中环门市服务点" },
+      returnStoreSnapshot: { storeName: "机场门市", stationName: "机场门市停车区" },
+      pickupAt: tomorrow,
+      returnAt: new Date(tomorrow.getTime() + 24 * 60 * 60 * 1000),
+      totalAmount: 780,
+      riskFlags: ["异店还车", "待取车"]
+    }
+  ];
+
+  for (const order of sceneOrders) {
+    await prisma.storeRentalOrder.upsert({
+      where: { id: order.id },
+      update: { tenantId, ...order },
+      create: { tenantId, ...order }
+    });
+  }
+}
+
 async function main() {
   await upsertTenants();
   await upsertOrganizations();
@@ -1065,6 +1127,7 @@ async function main() {
   await upsertSystemParameters();
   await upsertRentalMasterData();
   await upsertCustomers();
+  await upsertSceneOrders();
 }
 
 main()
