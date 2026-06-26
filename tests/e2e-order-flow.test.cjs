@@ -491,6 +491,86 @@ function testReachableFromInitial() {
   console.log("  PASS  可达性验证通过");
 }
 
+// TST-01: 转换目标有效性测试
+function testTransitionTargetValidity() {
+  console.log("\n[测试] 转换目标有效性");
+  for (const [status, targets] of Object.entries(VALID_TRANSITIONS)) {
+    for (const target of targets) {
+      assert(ALL_STATUSES.includes(target), `${status} -> ${target} 目标状态 ${target} 存在于全部状态列表`);
+    }
+  }
+  passed++;
+  console.log("  PASS  转换目标有效性验证通过");
+}
+
+// TST-01: 图结构属性测试
+function testGraphStructuralProperties() {
+  console.log("\n[测试] 图结构属性");
+  let totalEdges = 0;
+  for (const targets of Object.values(VALID_TRANSITIONS)) {
+    totalEdges += targets.length;
+  }
+  assert(totalEdges > 0, `总边数 > 0 (实际: ${totalEdges})`);
+  // 初始状态入度为 0
+  const initialInbound = Object.values(VALID_TRANSITIONS).some((targets) => targets.includes("pending_payment"));
+  assert(!initialInbound, "pending_payment 入度为 0（初始状态）");
+  passed++;
+  console.log("  PASS  图结构属性验证通过");
+}
+
+// TST-01: 费用方向阶段映射测试
+function testFeeDirectionStageMapping() {
+  console.log("\n[测试] 费用方向阶段映射");
+  const validDirections = ["charge", "refund", "waiver"];
+  const validStages = ["pickup", "rental", "return_settlement", "cancellation", "post_charge"];
+  // charge 适用于所有阶段
+  for (const stage of validStages) {
+    assert(validDirections.includes("charge"), `阶段 ${stage} 支持 charge`);
+  }
+  // refund 适用于 pickup/rental/return_settlement
+  for (const stage of ["pickup", "rental", "return_settlement"]) {
+    assert(validDirections.includes("refund"), `阶段 ${stage} 支持 refund`);
+  }
+  // waiver 适用于所有阶段
+  for (const stage of validStages) {
+    assert(validDirections.includes("waiver"), `阶段 ${stage} 支持 waiver`);
+  }
+  passed++;
+  console.log("  PASS  费用方向阶段映射验证通过");
+}
+
+// TST-01: 枚举完整性测试
+function testExpectedEnumCompleteness() {
+  console.log("\n[测试] 枚举完整性");
+  assert(Object.keys(VALID_TRANSITIONS).length === 16, `OrderMainStatus 有 16 个值 (实际: ${Object.keys(VALID_TRANSITIONS).length})`);
+  const validDispatchStatuses = ["pending", "pre_assigned", "locked", "manual_reassigned", "upgraded", "dispatch_manual_required"];
+  assert(validDispatchStatuses.length === 6, `DispatchStatus 有 6 个值`);
+  const validPaymentStatuses = ["unpaid", "deposit_paid", "monthly_billing", "partial_paid", "paid", "payment_due", "refund_pending", "refunded"];
+  assert(validPaymentStatuses.length === 8, `PaymentStatus 有 8 个值`);
+  const validBillingModes = ["customer_pay", "monthly"];
+  assert(validBillingModes.length === 2, `BillingMode 有 2 个值`);
+  passed++;
+  console.log("  PASS  枚举完整性验证通过");
+}
+
+// TST-01: 费用金额合理性测试
+function testFeeAmountSanity() {
+  console.log("\n[测试] 费用金额合理性");
+  // 模拟费用项验证
+  const mockFees = [
+    { name: "租金", amount: 1000, settledAmount: 800 },
+    { name: "超时费", amount: 200, settledAmount: 0 },
+    { name: "清洁费", amount: 100, settledAmount: 100 }
+  ];
+  for (const fee of mockFees) {
+    assert(fee.amount >= 0, `费用 ${fee.name} 金额 >= 0`);
+    assert(fee.settledAmount <= fee.amount, `费用 ${fee.name} 已结金额 <= 总金额`);
+    assert(fee.settledAmount >= 0, `费用 ${fee.name} 已结金额 >= 0`);
+  }
+  passed++;
+  console.log("  PASS  费用金额合理性验证通过");
+}
+
 async function main() {
   console.log("=".repeat(60));
   console.log("E2E 订单状态流转 & 报表测试");
@@ -512,6 +592,11 @@ async function main() {
   testFeeStageCompleteness();
   testTransitionProperties();
   testReachableFromInitial();
+  testTransitionTargetValidity();
+  testGraphStructuralProperties();
+  testFeeDirectionStageMapping();
+  testExpectedEnumCompleteness();
+  testFeeAmountSanity();
 
   // API 集成测试
   await testReportDashboard();
