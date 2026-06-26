@@ -6521,21 +6521,37 @@ export class StoreRentalService {
       case "extend-rental":
         {
           const oldReturnAtText = order.returnAt;
+          const oldReturnAtForFee = new Date(oldReturnAtText);
           const result = this.extendRental(order, body, previousStatus);
           actionTimelineDetail = result.timelineAction;
           resultMessage = result.message;
           const newReturnAt = this.requiredDate(body.newReturnAt, "");
           const extensionHours = Math.max(1, Math.ceil((newReturnAt.getTime() - new Date(oldReturnAtText).getTime()) / 3_600_000));
+          const extensionFeeItems = this.manualFeeLedgerItems.get(order.id) ?? [];
+          const extensionFeeAmount = extensionFeeItems.find((f) => f.code === "extension_rent")?.amount ?? 0;
+          const isOverdueExtension = previousStatus === OrderMainStatus.Overdue;
+
           await this.persistEventSnapshotRecord(order, {
             eventType: "extension",
-            title: previousStatus === OrderMainStatus.Overdue ? "补办续租快照" : "延长用车快照",
-            triggerReason: previousStatus === OrderMainStatus.Overdue ? "逾期补办续租" : "客户申请延长用车",
+            title: isOverdueExtension ? "补办续租快照" : "延长用车快照",
+            triggerReason: isOverdueExtension ? "逾期补办续租" : "客户申请延长用车",
             settlementTarget: "还车结算",
+            amount: extensionFeeAmount,
             before: { returnAt: oldReturnAtText, mainStatus: previousStatus },
             after: { returnAt: order.returnAt, mainStatus: order.mainStatus, extensionHours },
-            amountBreakdown: { extensionHours, billableDays: Math.max(1, Math.ceil(extensionHours / 24)) },
+            amountBreakdown: { extensionAmount: extensionFeeAmount, extensionHours, billableDays: Math.max(1, Math.ceil(extensionHours / 24)), settlementMode: this.extensionSettlementMode(body.settlementMode, order.billingMode === BillingMode.Monthly) },
             operator: String(body.operator ?? "门店营运")
           });
+
+          // 续租审计日志（内存路径）
+          const settlementMode = this.extensionSettlementMode(body.settlementMode, order.billingMode === BillingMode.Monthly);
+          this.appendOperationLog(
+            "order",
+            order.id,
+            "续租审计",
+            String(body.operator ?? "门店营运"),
+            `订单 ${order.orderNo} 延长用车 ${extensionHours} 小时，结算方式：${settlementMode}，续租费用：${extensionFeeAmount} 元，原还车：${oldReturnAtText}，新还车：${order.returnAt}`
+          );
         }
         break;
       case "redirect-order":
@@ -6647,6 +6663,26 @@ export class StoreRentalService {
           })
         );
         this.updateVehicleOperationStatus(order.plateNo, "controlled");
+
+        // 还车完成事件快照
+        const returnInspectionSnap = this.latestInspectionRecord(order, "return");
+        await this.persistEventSnapshotRecord(order, {
+          eventType: "return_inspection",
+          title: "还车完成快照",
+          triggerReason: "客户还车验车完成",
+          settlementTarget: "还车结算",
+          before: { mainStatus: OrderMainStatus.Renting },
+          after: { mainStatus: order.mainStatus, plateNo: order.plateNo },
+          amountBreakdown: {
+            overtimeFeeAmount: this.optionalNumber(body.overtimeFeeAmount) ?? 0,
+            damageFeeAmount: this.optionalNumber(body.damageFeeAmount) ?? 0,
+            cleaningFeeAmount: this.optionalNumber(body.cleaningFeeAmount) ?? 0
+          },
+          payload: returnInspectionSnap
+            ? { mileage: returnInspectionSnap.mileage, fuelLevelPercent: returnInspectionSnap.fuelLevelPercent, batteryLevelPercent: returnInspectionSnap.batteryLevelPercent, cleanliness: returnInspectionSnap.cleanliness }
+            : undefined,
+          operator: String(body.operator ?? "门店营运")
+        });
         break;
       case "confirm-settlement":
         // 结算确认校验
@@ -6716,6 +6752,25 @@ export class StoreRentalService {
               ["已结算"]
             );
           }
+
+          // 结算确认事件快照
+          await this.persistEventSnapshotRecord(order, {
+            eventType: "settlement_confirmation",
+            title: "结算确认快照",
+            triggerReason: "门店确认结算",
+            settlementTarget: order.billingMode === BillingMode.Monthly ? "企业月结" : settlement.balanceDue > 0 ? "待补缴" : settlement.balanceDue < 0 ? "待退款" : "已结清",
+            amount: settlement.finalReceivableAmount,
+            before: { mainStatus: previousStatus },
+            after: { mainStatus: order.mainStatus, paymentStatus: order.paymentStatus },
+            amountBreakdown: {
+              finalReceivableAmount: settlement.finalReceivableAmount,
+              returnTransactionTotal: settlement.returnTransactionTotal,
+              balanceDue: settlement.balanceDue,
+              monthlyBillAmount: settlement.monthlyBillAmount,
+              billingMode: order.billingMode
+            },
+            operator: String(body.operator ?? "门店营运")
+          });
         }
         break;
       case "register-accident":
@@ -6972,6 +7027,22 @@ export class StoreRentalService {
           returnTransactionTotal: this.optionalNumber(body.returnTransactionTotal) ?? 0
         });
         this.settlementSummaries.set(order.id, settlementToSave);
+
+        // 还车完成事件快照（MySQL路径）
+        await this.persistEventSnapshotRecord(order, {
+          eventType: "return_inspection",
+          title: "还车完成快照",
+          triggerReason: "客户还车验车完成",
+          settlementTarget: "还车结算",
+          before: { mainStatus: OrderMainStatus.Renting },
+          after: { mainStatus: order.mainStatus, plateNo: order.plateNo },
+          amountBreakdown: {
+            overtimeFeeAmount: this.optionalNumber(body.overtimeFeeAmount) ?? 0,
+            damageFeeAmount: this.optionalNumber(body.damageFeeAmount) ?? 0,
+            cleaningFeeAmount: this.optionalNumber(body.cleaningFeeAmount) ?? 0
+          },
+          operator: String(body.operator ?? "门店营运")
+        });
         break;
       case "extend-rental":
         {
@@ -7017,6 +7088,8 @@ export class StoreRentalService {
         break;
       case "confirm-settlement":
         {
+          // 结算确认校验（MySQL路径）
+          this.validateConfirmSettlement(order, body);
           const settlementPatch = {
             overtimeFeeAmount: this.optionalNumber(body.overtimeFeeAmount),
             damageFeeAmount: this.optionalNumber(body.damageFeeAmount),
@@ -7107,6 +7180,25 @@ export class StoreRentalService {
               }
             );
           }
+
+          // 结算确认事件快照（MySQL路径）
+          await this.persistEventSnapshotRecord(order, {
+            eventType: "settlement_confirmation",
+            title: "结算确认快照",
+            triggerReason: "门店确认结算",
+            settlementTarget: order.billingMode === BillingMode.Monthly ? "企业月结" : settlement.balanceDue > 0 ? "待补缴" : settlement.balanceDue < 0 ? "待退款" : "已结清",
+            amount: settlement.finalReceivableAmount,
+            before: { mainStatus: previousStatus },
+            after: { mainStatus: order.mainStatus, paymentStatus: order.paymentStatus },
+            amountBreakdown: {
+              finalReceivableAmount: settlement.finalReceivableAmount,
+              returnTransactionTotal: settlement.returnTransactionTotal,
+              balanceDue: settlement.balanceDue,
+              monthlyBillAmount: settlement.monthlyBillAmount,
+              billingMode: order.billingMode
+            },
+            operator: String(body.operator ?? "门店营运")
+          });
         }
         break;
       case "register-accident":
@@ -7293,6 +7385,17 @@ export class StoreRentalService {
         after: { returnAt: order.returnAt, mainStatus: order.mainStatus, extensionHours: Math.max(1, Math.ceil((newReturnAt.getTime() - oldReturnAt.getTime()) / 3_600_000)) },
         amountBreakdown: { extensionAmount: extensionFee?.amount ?? 0, settlementMode, feeStatus: settlementMode === "monthly" ? "monthly_billing" : settlementMode === "immediate" ? "settled" : "pending" },
         operator: String(body.operator ?? "门店营运")
+      });
+
+      // 续租审计日志（MySQL路径）
+      const extensionHoursForAudit = Math.max(1, Math.ceil((newReturnAt.getTime() - oldReturnAt.getTime()) / 3_600_000));
+      await this.storeRentalRepository.createOperationLog({
+        targetType: "order",
+        targetId: order.id,
+        action: "续租审计",
+        operator: String(body.operator ?? "门店营运"),
+        detail: `订单 ${order.orderNo} 延长用车 ${extensionHoursForAudit} 小时，结算方式：${settlementMode}，续租费用：${extensionFee?.amount ?? 0} 元，原还车：${oldReturnAtText}，新还车：${order.returnAt}`,
+        createdAt: new Date().toISOString()
       });
 
       return {
