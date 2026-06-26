@@ -5431,7 +5431,17 @@ export class StoreRentalService {
         at: new Date().toISOString(),
         actor: "库存引擎",
         action: "完成所选时间段资源可用性校验并占用库存"
-      }
+      },
+      // CRM-04: 记录会员权益快照
+      ...(storedQuote?.result.selectedMembershipPlan
+        ? [
+            {
+              at: new Date().toISOString(),
+              actor: "规则引擎",
+              action: `会员权益快照：${storedQuote.result.selectedMembershipPlan.name}，租金折扣 ${storedQuote.result.selectedMembershipPlan.orderDiscountPercent}%，押金折扣 ${storedQuote.result.selectedMembershipPlan.depositDiscountPercent}%`
+            }
+          ]
+        : [])
     ];
 
     if (this.useMysqlDataSource()) {
