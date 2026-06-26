@@ -2585,6 +2585,9 @@ export interface MemberDetail extends MemberSummary {
   recentOrderNos: string[];
   timeline: MemberTimelineRecord[];
   photos?: Record<string, string>;
+  organizationName?: string;
+  assignedStoreName?: string;
+  createdBy?: string;
 }
 
 export interface SaveMemberRequest {
