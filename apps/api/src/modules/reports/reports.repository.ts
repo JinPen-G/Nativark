@@ -133,9 +133,8 @@ export class ReportsRepository {
 
   async getOrdersReport(query: StoreRentalReportQuery = {}): Promise<StoreRentalOrdersReport> {
     const normalized = this.normalizeQuery(query);
-    const rows = this.filterOrders(await this.fetchOrders(normalized), normalized).map((order) =>
-      this.toOrderReportRow(order)
-    );
+    const filteredOrders = this.filterOrders(await this.fetchOrders(normalized), normalized);
+    const rows = filteredOrders.map((order) => this.toOrderReportRow(order));
 
     return {
       generatedAt: new Date().toISOString(),
@@ -165,6 +164,9 @@ export class ReportsRepository {
         riskOrders: rows.filter((row) => row.riskFlags.length > 0).length,
         monthlyOrders: rows.filter((row) => row.billingMode === BillingMode.Monthly).length
       },
+      byStore: this.groupOrdersByStore(filteredOrders),
+      byVehicleGroup: this.groupOrdersByVehicleGroup(filteredOrders),
+      byStatus: this.groupOrdersByStatus(filteredOrders),
       rows
     };
   }
@@ -806,6 +808,67 @@ export class ReportsRepository {
       orders.map((order) => this.vehicleGroupName(order.vehicleGroupSnapshot, order.vehicleGroup.name)),
       8
     );
+  }
+
+  private groupOrdersByStore(orders: StoreRentalOrderRow[]): StoreRentalNamedMetric[] {
+    const groups = new Map<string, { count: number; amount: number }>();
+    for (const order of orders) {
+      const storeName = this.storeName(order.pickupStoreSnapshot, order.pickupStation?.parentStoreName);
+      const existing = groups.get(storeName) ?? { count: 0, amount: 0 };
+      existing.count += 1;
+      existing.amount += money(order.totalAmount);
+      groups.set(storeName, existing);
+    }
+    return Array.from(groups.entries())
+      .sort((a, b) => b[1].count - a[1].count)
+      .map(([name, data]) => ({ name, value: data.count, amount: data.amount }));
+  }
+
+  private groupOrdersByVehicleGroup(orders: StoreRentalOrderRow[]): StoreRentalNamedMetric[] {
+    const groups = new Map<string, { count: number; amount: number }>();
+    for (const order of orders) {
+      const groupName = this.vehicleGroupName(order.vehicleGroupSnapshot, order.vehicleGroup.name);
+      const existing = groups.get(groupName) ?? { count: 0, amount: 0 };
+      existing.count += 1;
+      existing.amount += money(order.totalAmount);
+      groups.set(groupName, existing);
+    }
+    return Array.from(groups.entries())
+      .sort((a, b) => b[1].count - a[1].count)
+      .map(([name, data]) => ({ name, value: data.count, amount: data.amount }));
+  }
+
+  private groupOrdersByStatus(orders: StoreRentalOrderRow[]): StoreRentalNamedMetric[] {
+    const statusLabels: Record<string, string> = {
+      PENDING_PAYMENT: "待付款",
+      RESERVED: "已预约",
+      PICKUP_OVERDUE: "逾期未取",
+      INSPECTING: "验车中",
+      RENTING: "租赁中",
+      RENEWING: "续租中",
+      OVERDUE: "逾期未还",
+      ACCIDENT_PROCESSING: "事故处理中",
+      SETTLEMENT_PENDING: "待结算",
+      PAYMENT_DUE: "待补缴",
+      REFUND_PENDING: "待退款",
+      COMPLETED: "已完成",
+      CANCELLED: "已取消",
+      NO_SHOW: "未到店",
+      REJECTED: "已驳回",
+      CLOSED: "已关闭"
+    };
+    const groups = new Map<string, { count: number; amount: number }>();
+    for (const order of orders) {
+      const raw = String(order.mainStatus);
+      const label = statusLabels[raw] ?? raw;
+      const existing = groups.get(label) ?? { count: 0, amount: 0 };
+      existing.count += 1;
+      existing.amount += money(order.totalAmount);
+      groups.set(label, existing);
+    }
+    return Array.from(groups.entries())
+      .sort((a, b) => b[1].count - a[1].count)
+      .map(([name, data]) => ({ name, value: data.count, amount: data.amount }));
   }
 
   private riskTrend(orders: StoreRentalOrderRow[]) {

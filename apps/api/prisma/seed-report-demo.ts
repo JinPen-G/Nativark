@@ -385,6 +385,130 @@ const demoOrders: DemoOrder[] = [
       { code: "SERVICE", name: "GPS服务费", stage: FeeStage.RENTAL, direction: FeeDirection.CHARGE, status: FeeStatus.MONTHLY_BILLING, amount: 400, settledAmount: 0 }
     ],
     transactions: [{ type: "monthly_bill", status: "success", amount: 1600, channel: "internal", operator: "seed" }]
+  },
+  {
+    id: "report_order_014",
+    orderNo: "SR-DEMO-202606-0014",
+    memberId: "member_002",
+    corporateId: undefined,
+    customerName: "林慧仪",
+    customerPhoneMasked: "852****6619",
+    vehicleGroupId: "VG_ECONOMY",
+    assignedVehicleId: undefined,
+    pickupStationId: "station_central",
+    returnStationId: "station_central",
+    pickupAt: "2026-06-13T10:00:00+08:00",
+    returnAt: "2026-06-15T10:00:00+08:00",
+    totalAmount: 1280,
+    mainStatus: OrderMainStatus.PENDING_PAYMENT,
+    dispatchStatus: DispatchStatus.PRE_ASSIGNED,
+    paymentStatus: PaymentStatus.UNPAID,
+    billingMode: BillingMode.CUSTOMER_PAY,
+    riskFlags: ["等待付款"],
+    fees: [
+      { code: "RENTAL", name: "车辆租金", stage: FeeStage.RENTAL, direction: FeeDirection.CHARGE, status: FeeStatus.PENDING, amount: 1180, settledAmount: 0 },
+      { code: "DEPOSIT", name: "押金预授权", stage: FeeStage.PRE_AUTH, direction: FeeDirection.CHARGE, status: FeeStatus.PENDING, amount: 100, settledAmount: 0 }
+    ],
+    transactions: []
+  },
+  {
+    id: "report_order_015",
+    orderNo: "SR-DEMO-202606-0015",
+    memberId: "member_001",
+    corporateId: undefined,
+    customerName: "陈嘉豪",
+    customerPhoneMasked: "852****2388",
+    vehicleGroupId: "VG_SEVEN",
+    assignedVehicleId: "VEH_001",
+    pickupStationId: "station_mk_counter",
+    returnStationId: "station_mk_counter",
+    pickupAt: "2026-06-13T14:00:00+08:00",
+    returnAt: "2026-06-16T14:00:00+08:00",
+    totalAmount: 3180,
+    mainStatus: OrderMainStatus.INSPECTING,
+    dispatchStatus: DispatchStatus.LOCKED,
+    paymentStatus: PaymentStatus.DEPOSIT_PAID,
+    billingMode: BillingMode.CUSTOMER_PAY,
+    riskFlags: [],
+    fees: [
+      { code: "RENTAL", name: "车辆租金", stage: FeeStage.RENTAL, direction: FeeDirection.CHARGE, status: FeeStatus.PENDING, amount: 2980, settledAmount: 0 },
+      { code: "SERVICE", name: "保险升级", stage: FeeStage.RENTAL, direction: FeeDirection.CHARGE, status: FeeStatus.PENDING, amount: 200, settledAmount: 0 }
+    ],
+    transactions: [{ type: "pre_auth_freeze", status: "success", amount: 0, channel: "online", operator: "seed" }]
+  },
+  {
+    id: "report_order_016",
+    orderNo: "SR-DEMO-202606-0016",
+    memberId: "member_003",
+    corporateId: undefined,
+    customerName: "王子俊",
+    customerPhoneMasked: "852****9081",
+    vehicleGroupId: "VG_EV",
+    assignedVehicleId: "VEH_003",
+    pickupStationId: "station_airport",
+    returnStationId: "station_airport",
+    pickupAt: "2026-06-01T09:00:00+08:00",
+    returnAt: "2026-06-03T09:00:00+08:00",
+    totalAmount: 2560,
+    mainStatus: OrderMainStatus.OVERDUE,
+    dispatchStatus: DispatchStatus.LOCKED,
+    paymentStatus: PaymentStatus.PARTIAL_PAID,
+    billingMode: BillingMode.CUSTOMER_PAY,
+    riskFlags: ["逾期未还", "持续催缴"],
+    fees: [
+      { code: "RENTAL", name: "车辆租金", stage: FeeStage.RENTAL, direction: FeeDirection.CHARGE, status: FeeStatus.SETTLED, amount: 1960, settledAmount: 1960 },
+      { code: "OVERDUE_FEE", name: "逾期滞纳金", stage: FeeStage.POST_CHARGE, direction: FeeDirection.CHARGE, status: FeeStatus.PENDING, amount: 600, settledAmount: 0 }
+    ],
+    transactions: [{ type: "payment", status: "success", amount: 1960, channel: "online", operator: "seed" }]
+  },
+  {
+    id: "report_order_017",
+    orderNo: "SR-DEMO-202606-0017",
+    memberId: "member_002",
+    corporateId: undefined,
+    customerName: "林慧仪",
+    customerPhoneMasked: "852****6619",
+    vehicleGroupId: "VG_ECONOMY",
+    assignedVehicleId: undefined,
+    pickupStationId: "station_mk_counter",
+    returnStationId: "station_mk_counter",
+    pickupAt: "2026-06-14T08:00:00+08:00",
+    returnAt: "2026-06-15T08:00:00+08:00",
+    totalAmount: 680,
+    mainStatus: OrderMainStatus.NO_SHOW,
+    dispatchStatus: DispatchStatus.PENDING,
+    paymentStatus: PaymentStatus.DEPOSIT_PAID,
+    billingMode: BillingMode.CUSTOMER_PAY,
+    riskFlags: ["客户未到店"],
+    fees: [
+      { code: "NO_SHOW_FEE", name: "未到店手续费", stage: FeeStage.CANCELLATION, direction: FeeDirection.CHARGE, status: FeeStatus.PENDING, amount: 680, settledAmount: 0 }
+    ],
+    transactions: [{ type: "pre_auth_freeze", status: "success", amount: 0, channel: "online", operator: "seed" }]
+  },
+  {
+    id: "report_order_018",
+    orderNo: "SR-DEMO-202606-0018",
+    memberId: undefined,
+    corporateId: "corp_001",
+    customerName: "ABC 车辆调换",
+    customerPhoneMasked: "852****0001",
+    corporateShortName: "ABC Trading",
+    vehicleGroupId: "VG_ECONOMY",
+    assignedVehicleId: undefined,
+    pickupStationId: "station_central",
+    returnStationId: "station_central",
+    pickupAt: "2026-06-11T10:00:00+08:00",
+    returnAt: "2026-06-12T10:00:00+08:00",
+    totalAmount: 0,
+    mainStatus: OrderMainStatus.CLOSED,
+    dispatchStatus: DispatchStatus.PENDING,
+    paymentStatus: PaymentStatus.REFUNDED,
+    billingMode: BillingMode.MONTHLY,
+    riskFlags: [],
+    fees: [
+      { code: "RENTAL", name: "车辆租金", stage: FeeStage.RENTAL, direction: FeeDirection.CHARGE, status: FeeStatus.VOIDED, amount: 960, settledAmount: 0 }
+    ],
+    transactions: []
   }
 ];
 
@@ -664,7 +788,7 @@ async function upsertOpsArtifacts() {
         fileName: "store-rental-orders-2026-06-demo.csv",
         status: "completed",
         filters: { from: "2026-06-01", to: "2026-06-30" },
-        rowCount: 13,
+        rowCount: 18,
         downloadUrl: "/api/reports/exports/store-rental-orders-2026-06-demo.csv",
         operator: "seed",
         completedAt: new Date("2026-06-08T11:00:00+08:00")

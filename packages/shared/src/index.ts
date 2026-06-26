@@ -3405,6 +3405,9 @@ export interface StoreRentalOrdersReport {
     riskOrders: number;
     monthlyOrders: number;
   };
+  byStore: StoreRentalNamedMetric[];
+  byVehicleGroup: StoreRentalNamedMetric[];
+  byStatus: StoreRentalNamedMetric[];
   rows: StoreRentalOrderReportRow[];
 }
 

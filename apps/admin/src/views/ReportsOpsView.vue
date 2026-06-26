@@ -361,6 +361,9 @@ function emptyOrdersReport(): StoreRentalOrdersReport {
       riskOrders: 0,
       monthlyOrders: 0
     },
+    byStore: [],
+    byVehicleGroup: [],
+    byStatus: [],
     rows: []
   };
 }
