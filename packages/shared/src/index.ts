@@ -3488,11 +3488,29 @@ export interface StoreRentalFinanceReport {
   reconciliation?: StoreRentalFinanceReconciliation;
 }
 
+export interface StoreRentalFinanceReconciliationDimension {
+  totalAmount: number;
+  count: number;
+}
+
 export interface StoreRentalFinanceReconciliation {
   collections: { totalAmount: number; count: number };
   refunds: { totalAmount: number; count: number };
-  monthlyBills: { totalAmount: number; count: number; unpaidAmount: number };
   waivers: { totalAmount: number; count: number };
+  monthlyBills: { totalAmount: number; count: number; unpaidAmount: number };
+  netAmount: number;
+  byStore: Record<string, {
+    collections: number;
+    refunds: number;
+    waivers: number;
+    count: number;
+  }>;
+  byBillingMode: Record<string, {
+    collections: number;
+    refunds: number;
+    waivers: number;
+    count: number;
+  }>;
 }
 
 export interface StoreRentalRiskReportRow {

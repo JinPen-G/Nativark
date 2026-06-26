@@ -377,20 +377,37 @@ export class ReportsRepository {
     let waiversTotal = 0;
     let waiversCount = 0;
 
+    const byStore: Record<string, { collections: number; refunds: number; waivers: number; count: number }> = {};
+    const byBillingMode: Record<string, { collections: number; refunds: number; waivers: number; count: number }> = {};
+
     for (const order of orders) {
       const finance = this.orderFinance(order);
+      const storeName = this.storeName(order.pickupStoreSnapshot, order.pickupStation?.parentStoreName);
+      const billingMode = this.toSharedBillingMode(String(order.billingMode));
+
+      if (!byStore[storeName]) byStore[storeName] = { collections: 0, refunds: 0, waivers: 0, count: 0 };
+      if (!byBillingMode[billingMode]) byBillingMode[billingMode] = { collections: 0, refunds: 0, waivers: 0, count: 0 };
+
       if (finance.settledAmount > 0) {
         collectionsTotal += finance.settledAmount;
         collectionsCount++;
+        byStore[storeName].collections += finance.settledAmount;
+        byBillingMode[billingMode].collections += finance.settledAmount;
       }
       if (finance.refundAmount > 0) {
         refundsTotal += finance.refundAmount;
         refundsCount++;
+        byStore[storeName].refunds += finance.refundAmount;
+        byBillingMode[billingMode].refunds += finance.refundAmount;
       }
       if (finance.waiverAmount > 0) {
         waiversTotal += finance.waiverAmount;
         waiversCount++;
+        byStore[storeName].waivers += finance.waiverAmount;
+        byBillingMode[billingMode].waivers += finance.waiverAmount;
       }
+      byStore[storeName].count++;
+      byBillingMode[billingMode].count++;
     }
 
     let monthlyTotal = 0;
@@ -402,11 +419,16 @@ export class ReportsRepository {
       monthlyUnpaid += money(bill.balanceAmount);
     }
 
+    const netAmount = collectionsTotal - refundsTotal - waiversTotal;
+
     return {
       collections: { totalAmount: collectionsTotal, count: collectionsCount },
       refunds: { totalAmount: refundsTotal, count: refundsCount },
       waivers: { totalAmount: waiversTotal, count: waiversCount },
-      monthlyBills: { totalAmount: monthlyTotal, count: monthlyCount, unpaidAmount: monthlyUnpaid }
+      monthlyBills: { totalAmount: monthlyTotal, count: monthlyCount, unpaidAmount: monthlyUnpaid },
+      netAmount,
+      byStore,
+      byBillingMode
     };
   }
 
