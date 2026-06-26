@@ -13503,7 +13503,13 @@ export class StoreRentalService {
   ) {
     const plateNo = order.plateNo;
     if (plateNo && plateNo !== "待人工派车") {
-      this.updateVehicleOperationStatus(plateNo, vehicleStatus);
+      // OR-09: 检查车辆启用状态，禁用车辆保持禁用状态
+      const vehicle = this.vehicles.find((v) => v.licensePlate === plateNo);
+      if (vehicle && !vehicle.enabled) {
+        this.updateVehicleOperationStatus(plateNo, "disabled");
+      } else {
+        this.updateVehicleOperationStatus(plateNo, vehicleStatus);
+      }
     }
     delete order.plateNo;
     order.dispatchStatus = DispatchStatus.Pending;
