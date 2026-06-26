@@ -2434,6 +2434,17 @@ export class StoreRentalService {
       corporate.unpaidAmount = Math.max(0, corporate.unpaidAmount - amount);
     }
 
+    // OR-21: 企业月结回款审计日志（内存路径）
+    if (!this.useMysqlDataSource()) {
+      await this.appendOperationLog(
+        "monthly_bill",
+        billId,
+        "月结回款",
+        input.operator || "财务",
+        `企业 ${corporate?.shortName ?? corporateId} 月结账单 ${bill.billNo} 回款 ${amount}，渠道：${input.channel || "offline"}`
+      );
+    }
+
     return (await this.listCorporateMonthlyBills(corporateId)).find(
       (item) => item.id === billId
     );
@@ -6717,6 +6728,25 @@ export class StoreRentalService {
 
       // 费用减免后重新计算订单支付状态并持久化
       this.recalcOrderPaymentStatus(order);
+
+      // OR-08: 检查所有费用项是否都已平账，如果是则自动推进订单状态
+      const feeItems = this.buildFeeLedgerItems(order);
+      const allFeesSettled = feeItems.every(
+        (item) => item.amount - item.settledAmount === 0
+      );
+      if (
+        allFeesSettled &&
+        (order.mainStatus === OrderMainStatus.PaymentDue ||
+          order.mainStatus === OrderMainStatus.RefundPending)
+      ) {
+        order.mainStatus = OrderMainStatus.Completed;
+        await this.storeRentalRepository.appendOrderTimeline(order.id, {
+          at: new Date().toISOString(),
+          actor: "系统",
+          action: "所有费用已平账，订单自动完成"
+        });
+      }
+
       await this.storeRentalRepository.updateOrderState(order);
 
       // OR-20: 费用减免统一审计
