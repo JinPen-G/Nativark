@@ -13,10 +13,11 @@
 
 ## 开发文档索引
 
+- `docs/STORE_RENTAL_DEVELOPMENT_TASKS.md`：唯一开发任务台账，记录任务范围、优先级、分支规则和防偏离要求。
 - `docs/TECHNICAL_DEVELOPMENT_GUIDE.md`：当前前后端平台的技术开发文档，记录模块边界、权限、接口、数据模型和开发规范。
+- `docs/STORE_RENTAL_DEVELOPMENT_LOG.md`：开发流水账，只记录过程检查和阶段复盘，不作为任务优先级依据。
 - `docs/GENERAL_RENTAL_MIGRATION_GUIDE.md`：后续从汽车门市租赁改造成通用租赁平台的改造指南，明确哪些文件、字段、页面、规则和接口需要调整。
 - `docs/DOMAIN_BOUNDARY_DECISIONS.md`：当前阶段的领域边界和命名决策，用于避免代码继续绑定死汽车租赁。
-- `docs/AI_HANDOFF.md`：交接给其他 AI 或开发者时优先阅读的当前状态说明。
 
 ## 工程边界
 
