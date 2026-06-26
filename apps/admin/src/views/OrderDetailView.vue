@@ -4215,7 +4215,14 @@ onMounted(loadDetail);
         <el-tabs v-model="activeFeeTab">
           <el-tab-pane label="收费明细" name="overview">
             <div class="flex justify-between items-center mb-3">
-              <div class="text-sm text-gray-500">费用项和资金记录分离，费用项只表达业务金额。</div>
+              <div class="text-sm text-gray-500">
+                费用项和资金记录分离，费用项只表达业务金额。
+                <span class="ml-2 text-xs text-gray-400">
+                  共 {{ detail.feeLedgerItems.length }} 项
+                  <span v-if="detail.feeLedgerItems.filter(i => i.status === 'pending').length" class="text-orange-500 ml-1">· {{ detail.feeLedgerItems.filter(i => i.status === 'pending').length }} 项待处理</span>
+                  <span v-if="detail.feeLedgerItems.filter(i => i.status === 'waived').length" class="text-gray-500 ml-1">· {{ detail.feeLedgerItems.filter(i => i.status === 'waived').length }} 项已减免</span>
+                </span>
+              </div>
               <el-button
                 v-if="canManageOrderFees"
                 type="primary"
