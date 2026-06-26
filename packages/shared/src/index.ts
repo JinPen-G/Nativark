@@ -3373,6 +3373,9 @@ export interface StoreRentalNamedMetric {
   value: number;
   amount?: number;
   percent?: number;
+  settledAmount?: number;
+  pendingAmount?: number;
+  riskCount?: number;
 }
 
 export interface StoreRentalTimeSeriesPoint {
@@ -3439,6 +3442,9 @@ export interface StoreRentalOrdersReport {
     settlementOrders: number;
     riskOrders: number;
     monthlyOrders: number;
+    totalSettledAmount: number;
+    totalPendingAmount: number;
+    totalAmount: number;
   };
   byStore: StoreRentalNamedMetric[];
   byVehicleGroup: StoreRentalNamedMetric[];

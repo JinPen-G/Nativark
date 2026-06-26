@@ -360,7 +360,10 @@ function emptyOrdersReport(): StoreRentalOrdersReport {
       inProgressOrders: 0,
       settlementOrders: 0,
       riskOrders: 0,
-      monthlyOrders: 0
+      monthlyOrders: 0,
+      totalSettledAmount: 0,
+      totalPendingAmount: 0,
+      totalAmount: 0
     },
     byStore: [],
     byVehicleGroup: [],
