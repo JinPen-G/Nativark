@@ -2113,7 +2113,7 @@ export class StoreRentalService {
         throw new NotFoundException(`Monthly bill ${billId} was not found`);
       }
       // OR-21: 企业月结回款审计
-      await this.appendOperationLog("monthly_bill", billId, "月结回款", input.operator || "财务", `企业 ${corporate.name} 月结账单 ${bill.billNo} 回款 ${amount}，渠道：${input.channel || "offline"}`);
+      await this.appendOperationLog("monthly_bill", billId, "月结回款", input.operator || "财务", `企业 ${corporate.shortName} 月结账单 ${bill.billNo} 回款 ${amount}，渠道：${input.channel || "offline"}`);
       return this.storeRentalRepository.settleCorporateMonthlyBill(billId, amount, {
         channel: input.channel,
         operator: input.operator,
