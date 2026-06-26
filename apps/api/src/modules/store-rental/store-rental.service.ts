@@ -189,6 +189,7 @@ interface DynamicPricingMatchResult {
   matched: boolean;
   scheduleId?: string;
   scheduleSummary?: string;
+  dynamicPricingVersion?: string;
   originalDailyRate: number;
   adjustedDailyRate: number;
   effectiveAt?: string;
@@ -3160,7 +3161,7 @@ export class StoreRentalService {
         ...(dynamicPricing.matched
           ? {
               dynamicPricingScheduleId: dynamicPricing.scheduleId,
-              dynamicPricingVersion: dynamicPricing.scheduleId,
+              dynamicPricingVersion: dynamicPricing.dynamicPricingVersion,
               dynamicPricingSummary: dynamicPricing.scheduleSummary,
               dynamicPricingEffectiveAt: dynamicPricing.effectiveAt,
               dynamicPricingAdjustedDailyRate: dynamicPricing.adjustedDailyRate,
@@ -7846,6 +7847,8 @@ export class StoreRentalService {
         taskKey: `${order.id}:${input.taskType}`
       }
     });
+
+    await this.appendOperationLog("dispatch_task", input.taskId, "调度任务关闭", operator, `调度任务 ${order.orderNo} 类型 ${input.taskType} 已由 ${operator} 关闭，原因：${reason}`);
 
     return {
       taskId: input.taskId,
@@ -15743,7 +15746,7 @@ export class StoreRentalService {
     pickupAt: Date,
     currentBaseDailyRate: number
   ): DynamicPricingMatchResult {
-    const activeSchedule = this.priceSchedules.find((schedule) => {
+    const eligibleSchedules = this.priceSchedules.filter((schedule) => {
       if (schedule.status !== "scheduled") {
         return false;
       }
@@ -15753,6 +15756,12 @@ export class StoreRentalService {
         schedule.changes.some((change) => change.vehicleGroupCode === vehicleGroupCode)
       );
     });
+
+    eligibleSchedules.sort(
+      (a, b) => new Date(b.effectiveAt).getTime() - new Date(a.effectiveAt).getTime()
+    );
+
+    const activeSchedule = eligibleSchedules[0];
 
     if (!activeSchedule) {
       return { matched: false, originalDailyRate: currentBaseDailyRate, adjustedDailyRate: currentBaseDailyRate };
@@ -15770,6 +15779,7 @@ export class StoreRentalService {
       matched: true,
       scheduleId: activeSchedule.id,
       scheduleSummary: activeSchedule.summary,
+      dynamicPricingVersion: activeSchedule.id,
       originalDailyRate: groupChange.currentPrice,
       adjustedDailyRate: groupChange.newPrice,
       effectiveAt: activeSchedule.effectiveAt,
