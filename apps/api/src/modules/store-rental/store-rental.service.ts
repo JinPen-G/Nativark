@@ -5912,8 +5912,10 @@ export class StoreRentalService {
       if (corporate) {
         await this.storeRentalRepository.recordCorporateOrderCreated(corporate.id);
       }
-
-      // PF-14: 订单创建统一审计
+      // COR-03: 月结订单占用企业额度
+      if (corporate && isMonthly && totalAmount > 0) {
+        await this.storeRentalRepository.occupyCorporateQuota(corporate.id, totalAmount);
+      }
       await this.appendOperationLog("order", orderId, "创建订单", "规则引擎", `创建订单 ${orderNo}，总额 ${totalAmount}，客户 ${input.customerName ?? "unknown"}`);
 
       return {
@@ -7066,28 +7068,28 @@ export class StoreRentalService {
         break;
       case "mark-no-show":
         {
-          const result = this.markOrderNoShow(order, body, previousStatus);
+          const result = await this.markOrderNoShow(order, body, previousStatus);
           actionTimelineDetail = result.timelineAction;
           resultMessage = result.message;
         }
         break;
       case "reject-order":
         {
-          const result = this.rejectOrder(order, body, previousStatus);
+          const result = await this.rejectOrder(order, body, previousStatus);
           actionTimelineDetail = result.timelineAction;
           resultMessage = result.message;
         }
         break;
       case "close-order":
         {
-          const result = this.closeOrder(order, body, previousStatus);
+          const result = await this.closeOrder(order, body, previousStatus);
           actionTimelineDetail = result.timelineAction;
           resultMessage = result.message;
         }
         break;
       case "cancel":
         {
-          const result = this.cancelOrder(order, body, previousStatus);
+          const result = await this.cancelOrder(order, body, previousStatus);
           actionTimelineDetail = result.timelineAction;
           resultMessage = result.message;
         }
@@ -7724,16 +7726,16 @@ export class StoreRentalService {
     const scratch = this.startMysqlOrderActionScratch(order);
 
     try {
-      const effect =
-        action === "cancel"
-          ? this.cancelOrder(order, body, previousStatus)
-          : action === "mark-no-show"
-            ? this.markOrderNoShow(order, body, previousStatus)
-            : action === "reject-order"
-              ? this.rejectOrder(order, body, previousStatus)
-              : action === "close-order"
-                ? this.closeOrder(order, body, previousStatus)
-                : undefined;
+      let effect: OrderActionEffect | undefined;
+      if (action === "cancel") {
+        effect = await this.cancelOrder(order, body, previousStatus);
+      } else if (action === "mark-no-show") {
+        effect = await this.markOrderNoShow(order, body, previousStatus);
+      } else if (action === "reject-order") {
+        effect = await this.rejectOrder(order, body, previousStatus);
+      } else if (action === "close-order") {
+        effect = await this.closeOrder(order, body, previousStatus);
+      }
 
       if (!effect) {
         throw new BadRequestException("未知的终止类订单动作。");
@@ -13678,11 +13680,11 @@ export class StoreRentalService {
     };
   }
 
-  private cancelOrder(
+  private async cancelOrder(
     order: StoreRentalOrderSummary,
     body: Record<string, unknown>,
     previousStatus: OrderMainStatus
-  ): OrderActionEffect {
+  ): Promise<OrderActionEffect> {
     const operator = String(body.operator ?? "门店营运");
     const reason = this.requiredActionReason(
       body.reason ?? body.cancelReason,
@@ -13745,7 +13747,7 @@ export class StoreRentalService {
     this.applyTerminalSettlement(order, estimate.feeAmount, charge.capturedAmount);
     this.releaseOrderResources(order, "idle");
     order.mainStatus = OrderMainStatus.Cancelled;
-    this.releaseCorporateQuota(order);
+    await this.releaseCorporateQuota(order);
 
     order.paymentStatus = this.terminalPaymentStatus(
       order,
@@ -13774,11 +13776,11 @@ export class StoreRentalService {
     };
   }
 
-  private markOrderNoShow(
+  private async markOrderNoShow(
     order: StoreRentalOrderSummary,
     body: Record<string, unknown>,
     previousStatus: OrderMainStatus
-  ): OrderActionEffect {
+  ): Promise<OrderActionEffect> {
     const operator = String(body.operator ?? "门店营运");
     const contactResult = this.requiredActionReason(
       body.reason ?? body.contactResult,
@@ -13813,7 +13815,7 @@ export class StoreRentalService {
     this.applyTerminalSettlement(order, noShowFeeAmount, charge.capturedAmount);
     this.releaseOrderResources(order, "idle");
     order.mainStatus = OrderMainStatus.NoShow;
-    this.releaseCorporateQuota(order);
+    await this.releaseCorporateQuota(order);
 
     order.paymentStatus = this.terminalPaymentStatus(
       order,
@@ -13838,11 +13840,11 @@ export class StoreRentalService {
     };
   }
 
-  private rejectOrder(
+  private async rejectOrder(
     order: StoreRentalOrderSummary,
     body: Record<string, unknown>,
     previousStatus: OrderMainStatus
-  ): OrderActionEffect {
+  ): Promise<OrderActionEffect> {
     const operator = String(body.operator ?? "门店营运");
     const reason = this.requiredActionReason(
       body.reason ?? body.rejectReason,
@@ -13876,7 +13878,7 @@ export class StoreRentalService {
     this.applyTerminalSettlement(order, rejectionFeeAmount, charge.capturedAmount);
     this.releaseOrderResources(order, "idle");
     order.mainStatus = OrderMainStatus.Rejected;
-    this.releaseCorporateQuota(order);
+    await this.releaseCorporateQuota(order);
 
     order.paymentStatus = this.terminalPaymentStatus(
       order,
@@ -13901,11 +13903,11 @@ export class StoreRentalService {
     };
   }
 
-  private closeOrder(
+  private async closeOrder(
     order: StoreRentalOrderSummary,
     body: Record<string, unknown>,
     previousStatus: OrderMainStatus
-  ): OrderActionEffect {
+  ): Promise<OrderActionEffect> {
     const operator = String(body.operator ?? "门店营运");
     const reason = this.requiredActionReason(
       body.reason ?? body.closeReason,
@@ -13939,7 +13941,7 @@ export class StoreRentalService {
     this.applyTerminalSettlement(order, 0, 0);
     this.releaseOrderResources(order, "idle");
     order.mainStatus = OrderMainStatus.Closed;
-    this.releaseCorporateQuota(order);
+    await this.releaseCorporateQuota(order);
 
     order.paymentStatus = this.terminalPaymentStatus(
       order,
@@ -13968,12 +13970,18 @@ export class StoreRentalService {
     };
   }
 
-  private releaseCorporateQuota(order: StoreRentalOrderSummary) {
+  private async releaseCorporateQuota(order: StoreRentalOrderSummary) {
     if (
-      order.billingMode === BillingMode.Monthly &&
-      order.corporateId &&
-      !this.useMysqlDataSource()
+      order.billingMode !== BillingMode.Monthly ||
+      !order.corporateId ||
+      order.totalAmount <= 0
     ) {
+      return;
+    }
+
+    if (this.useMysqlDataSource()) {
+      await this.storeRentalRepository.releaseCorporateQuota(order.corporateId, order.totalAmount);
+    } else {
       const corporate = this.corporates.find((item) => item.id === order.corporateId);
       if (corporate) {
         corporate.unpaidAmount = Math.max(0, corporate.unpaidAmount - order.totalAmount);

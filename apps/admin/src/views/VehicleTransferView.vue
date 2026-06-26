@@ -4,6 +4,7 @@ import { computed, onMounted, reactive, ref } from "vue";
 import type {
   AdvanceVehicleTransferTaskRequest,
   CreateVehicleTransferTaskRequest,
+  PlatformFilterPreset,
   StoreStationSummary,
   VehicleInstanceSummary,
   VehicleTransferTask
@@ -11,11 +12,16 @@ import type {
 import {
   advanceVehicleTransferTask,
   createVehicleTransferTask,
+  deletePlatformFilterPreset,
+  listPlatformFilterPresets,
   listStations,
   listVehicleTransferTasks,
-  listVehicles
+  listVehicles,
+  savePlatformFilterPreset,
+  setPlatformFilterPresetDefault
 } from "../api/client";
 import AppLayout from "../components/AppLayout.vue";
+import { useAuthStore } from "../stores/auth";
 
 const loading = ref(false);
 const drawerVisible = ref(false);
@@ -24,11 +30,20 @@ const rows = ref<VehicleInstanceSummary[]>([]);
 const stations = ref<StoreStationSummary[]>([]);
 const transferTasks = ref<VehicleTransferTask[]>([]);
 const selectedVehicles = ref<VehicleInstanceSummary[]>([]);
+const authStore = useAuthStore();
+const filterPresetScope = "store-rental.vehicle-transfer" as const;
+const filterPresets = ref<PlatformFilterPreset[]>([]);
+const selectedFilterPresetId = ref("");
+const filterPresetLoading = ref(false);
 const filters = reactive({
   keyword: "",
   stationName: "",
   serviceType: ""
 });
+
+const selectedFilterPreset = computed(() =>
+  filterPresets.value.find((preset) => preset.id === selectedFilterPresetId.value)
+);
 const transferForm = reactive<CreateVehicleTransferTaskRequest>({
   vehicleIds: [],
   targetStoreName: "",
@@ -229,7 +244,131 @@ async function advanceTask(
   }
 }
 
-onMounted(loadData);
+function filterPresetOperator() {
+  return authStore.user?.displayName || "营运端";
+}
+
+function cloneTransferFilters() {
+  return {
+    keyword: filters.keyword,
+    stationName: filters.stationName,
+    serviceType: filters.serviceType
+  } satisfies Record<string, unknown>;
+}
+
+function applyTransferPresetFilters(presetFilters: Record<string, unknown>) {
+  filters.keyword = typeof presetFilters.keyword === "string" ? presetFilters.keyword : "";
+  filters.stationName = typeof presetFilters.stationName === "string" ? presetFilters.stationName : "";
+  filters.serviceType = typeof presetFilters.serviceType === "string" ? presetFilters.serviceType : "";
+}
+
+async function applySelectedFilterPreset() {
+  const preset = selectedFilterPreset.value;
+  if (!preset) {
+    return;
+  }
+  applyTransferPresetFilters(preset.filters);
+}
+
+async function loadFilterPresets() {
+  filterPresetLoading.value = true;
+  try {
+    filterPresets.value = await listPlatformFilterPresets({
+      scopeKey: filterPresetScope
+    });
+    const defaultPreset = filterPresets.value.find((preset) => preset.isDefault);
+    if (defaultPreset) {
+      selectedFilterPresetId.value = defaultPreset.id;
+      applyTransferPresetFilters(defaultPreset.filters);
+    }
+  } catch {
+    filterPresets.value = [];
+  } finally {
+    filterPresetLoading.value = false;
+  }
+}
+
+async function saveCurrentFilterPreset() {
+  try {
+    const { value } = await ElMessageBox.prompt(
+      "请输入筛选预设名称",
+      "保存筛选预设",
+      {
+        confirmButtonText: "保存",
+        cancelButtonText: "取消",
+        inputValue: selectedFilterPreset.value?.name ?? "",
+        inputPattern: /^(?=.*\S).{1,40}$/,
+        inputErrorMessage: "名称长度需为 1-40 个字符"
+      }
+    );
+    const saved = await savePlatformFilterPreset({
+      id: selectedFilterPreset.value?.id,
+      scopeKey: filterPresetScope,
+      name: value.trim(),
+      filters: cloneTransferFilters(),
+      isDefault: selectedFilterPreset.value?.isDefault,
+      operator: filterPresetOperator()
+    });
+    await loadFilterPresets();
+    selectedFilterPresetId.value = saved.id;
+    ElMessage.success("筛选预设已保存");
+  } catch (error) {
+    if (error !== "cancel" && error !== "close") {
+      ElMessage.error("筛选预设保存失败");
+    }
+  }
+}
+
+async function setCurrentFilterPresetDefault() {
+  if (!selectedFilterPreset.value) {
+    ElMessage.warning("请先选择筛选预设");
+    return;
+  }
+  try {
+    const saved = await setPlatformFilterPresetDefault(
+      selectedFilterPreset.value.id,
+      filterPresetOperator()
+    );
+    await loadFilterPresets();
+    selectedFilterPresetId.value = saved.id;
+    ElMessage.success("已设为默认筛选预设");
+  } catch {
+    ElMessage.error("默认筛选预设设置失败");
+  }
+}
+
+async function deleteCurrentFilterPreset() {
+  if (!selectedFilterPreset.value) {
+    ElMessage.warning("请先选择筛选预设");
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确认删除筛选预设"${selectedFilterPreset.value.name}"？`,
+      "删除筛选预设",
+      {
+        confirmButtonText: "删除",
+        cancelButtonText: "取消",
+        type: "warning"
+      }
+    );
+    await deletePlatformFilterPreset(
+      selectedFilterPreset.value.id,
+      filterPresetOperator()
+    );
+    selectedFilterPresetId.value = "";
+    await loadFilterPresets();
+    ElMessage.success("筛选预设已删除");
+  } catch (error) {
+    if (error !== "cancel" && error !== "close") {
+      ElMessage.error("筛选预设删除失败");
+    }
+  }
+}
+
+onMounted(async () => {
+  await Promise.all([loadData(), loadFilterPresets()]);
+});
 </script>
 
 <template>
@@ -274,6 +413,40 @@ onMounted(loadData);
           <el-option label="门市租赁" value="STORE_STANDARD" />
           <el-option label="24小时自助" value="STORE_24H" />
         </el-select>
+        <el-select
+          v-model="selectedFilterPresetId"
+          placeholder="筛选预设"
+          clearable
+          :loading="filterPresetLoading"
+          style="width: 190px"
+          @change="applySelectedFilterPreset"
+        >
+          <el-option
+            v-for="preset in filterPresets"
+            :key="preset.id"
+            :label="preset.isDefault ? `${preset.name}（默认）` : preset.name"
+            :value="preset.id"
+          />
+        </el-select>
+        <el-button icon="Collection" plain @click="saveCurrentFilterPreset">
+          保存视图
+        </el-button>
+        <el-tooltip content="设为默认" placement="top">
+          <el-button
+            icon="Star"
+            circle
+            :disabled="!selectedFilterPresetId"
+            @click="setCurrentFilterPresetDefault"
+          />
+        </el-tooltip>
+        <el-tooltip content="删除预设" placement="top">
+          <el-button
+            icon="Delete"
+            circle
+            :disabled="!selectedFilterPresetId"
+            @click="deleteCurrentFilterPreset"
+          />
+        </el-tooltip>
         <div class="ml-auto text-sm text-gray-500">共 {{ filteredRows.length }} 台车辆</div>
       </div>
 
