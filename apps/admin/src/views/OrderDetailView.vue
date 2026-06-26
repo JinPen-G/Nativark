@@ -1496,6 +1496,20 @@ const detailAvailableActions = computed(() => {
   return availableActions(order);
 });
 
+/** 判断指定操作是否可用（含权限校验） */
+function isActionAvailable(action: string): boolean {
+  return detailAvailableActions.value.includes(action);
+}
+
+/** 判断操作权限是否缺失（用于禁用态提示） */
+function actionPermissionHint(action: string): string {
+  if (canRunOrderAction(action)) {
+    return "";
+  }
+  const required = orderActionPermissionMap[action] ?? ["store-rental:order:operate"];
+  return `需要权限: ${required.join(" 或 ")}`;
+}
+
 function primaryActions(row: StoreRentalOrderSummary) {
   // 详情页使用服务端返回的 availableActions，列表页使用本地计算
   if (detail.value && row.id === detail.value.id) {
@@ -2246,7 +2260,11 @@ async function submitExtension() {
   actionLoading.value = "extend-rental";
   try {
     const result = await runStoreRentalOrderAction(order.id, "extend-rental", {
+      oldReturnAt: order.returnAt,
       newReturnAt: extensionForm.newReturnAt,
+      extensionHours: extensionHours.value,
+      extensionAmount: extensionAmount.value,
+      billableDays: extensionBillableDays.value,
       settlementMode:
         order.billingMode === BillingMode.Monthly ? "monthly" : extensionForm.settlementMode,
       paymentPaid: extensionForm.paymentPaid,
@@ -2807,18 +2825,25 @@ onMounted(loadDetail);
           </div>
 
           <div class="mt-5 pt-4 border-t border-gray-100 flex flex-wrap items-center gap-2">
-            <el-button
+            <el-tooltip
               v-for="action in primaryActions(detail)"
               :key="action"
-              :type="['start-pickup', 'return-inspection', 'payment-success', 'extend-rental'].includes(action) ? 'primary' : 'default'"
-              :plain="!['start-pickup', 'return-inspection', 'payment-success', 'extend-rental'].includes(action)"
-              :loading="actionLoading === action"
-              @click="runAction(action)"
+              :disabled="canRunOrderAction(action)"
+              :content="actionPermissionHint(action)"
+              placement="top"
             >
-              {{ actionLabel(action, detail) }}
-            </el-button>
+              <el-button
+                :type="['start-pickup', 'return-inspection', 'payment-success', 'extend-rental'].includes(action) ? 'primary' : 'default'"
+                :plain="!['start-pickup', 'return-inspection', 'payment-success', 'extend-rental'].includes(action)"
+                :loading="actionLoading === action"
+                :disabled="!canRunOrderAction(action)"
+                @click="runAction(action)"
+              >
+                {{ actionLabel(action, detail) }}
+              </el-button>
+            </el-tooltip>
             <el-button v-if="canManageOrderFees" plain icon="Money" @click="feeModalVisible = true">费用</el-button>
-            <el-button v-else plain icon="Money" disabled>费用</el-button>
+            <el-button v-else plain icon="Money" disabled>费用（无权限）</el-button>
             <el-dropdown trigger="click" @command="handleMoreCommand">
               <el-button plain>
                 更多操作
@@ -2830,8 +2855,10 @@ onMounted(loadDetail);
                     v-for="action in moreActions(detail)"
                     :key="action"
                     :command="action"
+                    :disabled="!canRunOrderAction(action)"
                   >
                     {{ actionLabel(action, detail) }}
+                    <span v-if="!canRunOrderAction(action)" class="text-xs text-gray-400 ml-1">（无权限）</span>
                   </el-dropdown-item>
                   <el-dropdown-item command="订单备注">订单备注</el-dropdown-item>
                   <el-dropdown-item command="打印单据">打印单据</el-dropdown-item>
@@ -2849,11 +2876,20 @@ onMounted(loadDetail);
                 <el-descriptions-item label="客户">{{ detail.customerName }}</el-descriptions-item>
                 <el-descriptions-item label="手机">{{ detail.customerPhoneMasked }}</el-descriptions-item>
                 <el-descriptions-item label="企业">{{ detail.corporateShortName || "-" }}</el-descriptions-item>
+                <el-descriptions-item label="会员ID">
+                  <span v-if="detail.memberId" class="font-mono text-xs">{{ detail.memberId }}</span>
+                  <span v-else class="text-gray-400">-</span>
+                </el-descriptions-item>
+                <el-descriptions-item v-if="detail.corporateId" label="企业ID">
+                  <span class="font-mono text-xs">{{ detail.corporateId }}</span>
+                </el-descriptions-item>
                 <el-descriptions-item label="结算">{{ isMonthly ? "企业月结" : "客户自付" }}</el-descriptions-item>
               </el-descriptions>
               <el-descriptions :column="1" border size="small">
                 <el-descriptions-item label="取车门市">{{ detail.pickupStoreName }}</el-descriptions-item>
+                <el-descriptions-item label="取➦据点">{{ detail.pickupStationName || "-" }}</el-descriptions-item>
                 <el-descriptions-item label="还车门市">{{ detail.returnStoreName }}</el-descriptions-item>
+                <el-descriptions-item label="还➦据点">{{ detail.returnStationName || "-" }}</el-descriptions-item>
                 <el-descriptions-item label="预定车组">{{ detail.vehicleGroupName }}</el-descriptions-item>
                 <el-descriptions-item label="车辆">{{ detail.plateNo || "待派车" }}</el-descriptions-item>
                 <el-descriptions-item label="租赁模式">
@@ -2870,6 +2906,12 @@ onMounted(loadDetail);
                   <template v-if="detail.operationLockExpiresAt">
                     <span class="text-xs text-gray-400 ml-1">至 {{ detail.operationLockExpiresAt }}</span>
                   </template>
+                  <div v-if="detail.operationLockExpiredHint" class="text-xs text-orange-500 mt-1">
+                    {{ detail.operationLockExpiredHint }}
+                  </div>
+                </el-descriptions-item>
+                <el-descriptions-item v-if="detail.preAuthExpiredHint" label="预授权提示">
+                  <span class="text-xs text-orange-500">{{ detail.preAuthExpiredHint }}</span>
                 </el-descriptions-item>
               </el-descriptions>
             </div>
@@ -2914,6 +2956,18 @@ onMounted(loadDetail);
                 <span class="text-gray-500">车辆分组</span>
                 <span class="font-medium text-gray-800">{{ detail.snapshots?.vehicleGroup || "-" }}</span>
               </div>
+              <div v-if="detail.snapshots?.termsVersion" class="flex justify-between text-sm">
+                <span class="text-gray-500">条款版本</span>
+                <span class="font-mono text-xs text-gray-700">{{ detail.snapshots.termsVersion }}</span>
+              </div>
+              <div v-if="detail.snapshots?.pickupStore" class="flex justify-between text-sm">
+                <span class="text-gray-500">取车门市快照</span>
+                <span class="font-medium text-gray-800">{{ detail.snapshots.pickupStore }}</span>
+              </div>
+              <div v-if="detail.snapshots?.returnStore" class="flex justify-between text-sm">
+                <span class="text-gray-500">还车门市快照</span>
+                <span class="font-medium text-gray-800">{{ detail.snapshots.returnStore }}</span>
+              </div>
             </div>
             <!-- 事件级快照链 -->
             <div v-if="eventSnapshots.length" class="border-t border-gray-100 px-5 py-3">
@@ -2939,6 +2993,15 @@ onMounted(loadDetail);
                   <div v-if="snap.before && snap.after" class="text-gray-500 mb-1">
                     变更：{{ snapshotBeforeAfterSummary(snap.before, snap.after) }}
                   </div>
+                  <!-- 续租快照费用明细分量 -->
+                  <template v-if="snap.eventType === 'extension' && snap.amountBreakdown">
+                    <div class="mt-2 rounded bg-gray-50 p-2 text-xs space-y-1">
+                      <div class="font-medium text-gray-700">续租费用快照</div>
+                      <div class="flex justify-between"><span class="text-gray-500">续租时长</span><span>{{ (snap.amountBreakdown as Record<string, unknown>).extensionHours ?? '-' }} 小时 / {{ (snap.amountBreakdown as Record<string, unknown>).billableDays ?? '-' }} 天</span></div>
+                      <div class="flex justify-between"><span class="text-gray-500">续租费用</span><span class="font-mono font-bold text-red-600">{{ formatMoney(Number((snap.amountBreakdown as Record<string, unknown>).extensionAmount ?? 0)) }}</span></div>
+                      <div class="flex justify-between"><span class="text-gray-500">结算方式</span><span>{{ (snap.amountBreakdown as Record<string, unknown>).settlementMode ?? '-' }}</span></div>
+                    </div>
+                  </template>
                   <div class="text-gray-400">操作人：{{ snap.operator }}</div>
                 </div>
               </div>
@@ -3005,6 +3068,24 @@ onMounted(loadDetail);
                 <div v-if="isMonthly" class="col-span-2 rounded border border-indigo-100 bg-indigo-50 px-3 py-2">
                   企业月结金额<br><b>{{ formatMoney(detail.financialOverview.monthlyBillingAmount) }}</b>
                 </div>
+              </div>
+            </section>
+
+            <!-- 结算摘要 -->
+            <section v-if="detail.settlementSummary" class="bg-white rounded-xl border border-gray-200">
+              <div class="px-5 py-3 border-b border-gray-100 font-bold text-gray-800">结算摘要</div>
+              <div class="p-5 grid grid-cols-2 gap-3 text-xs">
+                <div class="flex justify-between"><span class="text-gray-500">租金</span><span class="font-mono">{{ formatMoney(detail.settlementSummary.rentalAmount) }}</span></div>
+                <div class="flex justify-between"><span class="text-gray-500">服务费</span><span class="font-mono">{{ formatMoney(detail.settlementSummary.serviceFeeAmount) }}</span></div>
+                <div class="flex justify-between"><span class="text-gray-500">超时费</span><span class="font-mono">{{ formatMoney(detail.settlementSummary.overtimeFeeAmount) }}</span></div>
+                <div class="flex justify-between"><span class="text-gray-500">超里程费</span><span class="font-mono">{{ formatMoney(detail.settlementSummary.extraMileageFeeAmount) }}</span></div>
+                <div class="flex justify-between"><span class="text-gray-500">车损费</span><span class="font-mono">{{ formatMoney(detail.settlementSummary.damageFeeAmount) }}</span></div>
+                <div class="flex justify-between"><span class="text-gray-500">清洁费</span><span class="font-mono">{{ formatMoney(detail.settlementSummary.cleaningFeeAmount) }}</span></div>
+                <div class="flex justify-between"><span class="text-gray-500">优惠</span><span class="font-mono text-green-600">-{{ formatMoney(detail.settlementSummary.discountAmount) }}</span></div>
+                <div class="flex justify-between"><span class="text-gray-500 font-bold">应收款</span><span class="font-mono font-bold text-[#00689E]">{{ formatMoney(detail.settlementSummary.finalReceivableAmount) }}</span></div>
+                <div class="col-span-2 border-t border-gray-100 pt-2 flex justify-between"><span class="text-gray-500">客户应付</span><span class="font-mono font-bold">{{ formatMoney(detail.settlementSummary.customerPayableAmount) }}</span></div>
+                <div v-if="detail.settlementSummary.customerRefundAmount > 0" class="flex justify-between"><span class="text-gray-500">应退客户</span><span class="font-mono text-green-600 font-bold">{{ formatMoney(detail.settlementSummary.customerRefundAmount) }}</span></div>
+                <div v-if="isMonthly" class="flex justify-between"><span class="text-gray-500">月结金额</span><span class="font-mono font-bold text-indigo-600">{{ formatMoney(detail.settlementSummary.monthlyBillAmount) }}</span></div>
               </div>
             </section>
 
