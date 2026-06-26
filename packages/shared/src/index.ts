@@ -449,7 +449,8 @@ export type PlatformFilterPresetScope =
   | "store-rental.members"
   | "store-rental.corporates"
   | "store-rental.stations"
-  | "store-rental.vehicle-transfer";
+  | "store-rental.vehicle-transfer"
+  | "store-rental.contracts";
 
 export interface PlatformFilterPreset {
   id: string;
