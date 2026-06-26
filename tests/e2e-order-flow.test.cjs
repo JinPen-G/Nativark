@@ -283,6 +283,44 @@ function testFeeVerification() {
   console.log("  PASS  费用项结构验证通过");
 }
 
+// TST-01: 事故流程测试（纯逻辑）
+function testAccidentFlow() {
+  console.log("\n[测试] 事故流程状态路径");
+  assert(VALID_TRANSITIONS.renting.includes("accident_processing"), "renting 可转 accident_processing");
+  assert(VALID_TRANSITIONS.overdue.includes("accident_processing"), "overdue 可转 accident_processing");
+  assert(VALID_TRANSITIONS.accident_processing.includes("settlement_pending"), "accident_processing 可转 settlement_pending");
+  assert(VALID_TRANSITIONS.accident_processing.includes("completed"), "accident_processing 可转 completed");
+  passed++;
+  console.log("  PASS  事故流程状态路径验证通过");
+}
+
+// TST-01: 改派流程测试（纯逻辑）
+function testRedirectFlow() {
+  console.log("\n[测试] 改派流程状态路径");
+  assert(VALID_TRANSITIONS.reserved.includes("inspecting"), "reserved 可转 inspecting");
+  assert(VALID_TRANSITIONS.reserved.includes("pickup_overdue"), "reserved 可转 pickup_overdue");
+  assert(VALID_TRANSITIONS.reserved.includes("cancelled"), "reserved 可转 cancelled");
+  assert(VALID_TRANSITIONS.reserved.includes("no_show"), "reserved 可转 no_show");
+  assert(VALID_TRANSITIONS.pickup_overdue.includes("cancelled"), "pickup_overdue 可转 cancelled");
+  assert(VALID_TRANSITIONS.pickup_overdue.includes("no_show"), "pickup_overdue 可转 no_show");
+  passed++;
+  console.log("  PASS  改派流程状态路径验证通过");
+}
+
+// TST-01: 取消流程测试（纯逻辑）
+function testCancelFlow() {
+  console.log("\n[测试] 取消流程状态路径");
+  assert(VALID_TRANSITIONS.pending_payment.includes("cancelled"), "pending_payment 可转 cancelled");
+  assert(VALID_TRANSITIONS.reserved.includes("cancelled"), "reserved 可转 cancelled");
+  assert(VALID_TRANSITIONS.pickup_overdue.includes("cancelled"), "pickup_overdue 可转 cancelled");
+  assert(VALID_TRANSITIONS.cancelled.length === 0, "cancelled 是终态，无后续转换");
+  assert(VALID_TRANSITIONS.no_show.length === 0, "no_show 是终态，无后续转换");
+  assert(VALID_TRANSITIONS.rejected.length === 0, "rejected 是终态，无后续转换");
+  assert(VALID_TRANSITIONS.closed.length === 0, "closed 是终态，无后续转换");
+  passed++;
+  console.log("  PASS  取消流程状态路径验证通过");
+}
+
 async function main() {
   console.log("=".repeat(60));
   console.log("E2E 订单状态流转 & 报表测试");
@@ -294,6 +332,9 @@ async function main() {
   testExtendRentalFlow();
   testReturnInspectionFlow();
   testFeeVerification();
+  testAccidentFlow();
+  testRedirectFlow();
+  testCancelFlow();
 
   // API 集成测试
   await testReportDashboard();
