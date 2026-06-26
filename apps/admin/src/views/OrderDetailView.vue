@@ -244,6 +244,7 @@ const returnForm = reactive({
   photoCount: 9,
   customerSigned: false,
   overtimeFeeAmount: 0,
+  extraMileageFeeAmount: 0,
   damageFeeAmount: 0,
   cleaningFeeAmount: 0,
   discountAmount: 0,
@@ -478,6 +479,7 @@ const canContinuePickupStep = computed(() => {
 const returnFeeTotal = computed(
   () =>
     returnForm.overtimeFeeAmount +
+    returnForm.extraMileageFeeAmount +
     returnForm.damageFeeAmount +
     returnForm.cleaningFeeAmount -
     returnForm.discountAmount
@@ -499,6 +501,65 @@ const canSubmitReturnInspection = computed(() => {
     returnForm.customerSigned
   );
 });
+// OR-07: 超时费自动计算预览
+const overtimeFeePreview = computed(() => {
+  const order = detail.value;
+  if (!order || !returnForm.actualReturnAt) {
+    return 0;
+  }
+  const gracePeriodMinutes = 30;
+  const overtimeHourlyRate = 50;
+  const dailyThresholdHours = 5;
+
+  const expectedReturnAt = new Date(order.returnAt);
+  const actualReturnAt = new Date(returnForm.actualReturnAt);
+  if (!Number.isFinite(expectedReturnAt.getTime()) || !Number.isFinite(actualReturnAt.getTime())) {
+    return 0;
+  }
+
+  const overtimeMs = actualReturnAt.getTime() - expectedReturnAt.getTime();
+  if (overtimeMs <= 0) {
+    return 0;
+  }
+
+  const overtimeMinutes = overtimeMs / 60_000;
+  if (overtimeMinutes <= gracePeriodMinutes) {
+    return 0;
+  }
+
+  const billableMinutes = overtimeMinutes - gracePeriodMinutes;
+  const billableHours = billableMinutes / 60;
+
+  if (billableHours >= dailyThresholdHours) {
+    const dailyRate = overtimeHourlyRate * dailyThresholdHours;
+    const billableDays = Math.ceil(billableHours / 24);
+    return Math.round(dailyRate * billableDays);
+  }
+
+  return Math.round(overtimeHourlyRate * Math.ceil(billableHours));
+});
+// OR-07: 超里程费自动计算预览
+const extraMileageFeePreview = computed(() => {
+  const order = detail.value;
+  if (!order || !returnForm.returnMileage) {
+    return 0;
+  }
+  const overMileageRate = 2;
+  const pickupMileage = latestPickupInspection.value?.mileage ?? 0;
+  const freeMileage = order.totalAmount > 0 ? Math.floor(order.totalAmount / 100) * 100 : 0;
+  const usedMileage = returnForm.returnMileage - pickupMileage;
+
+  if (usedMileage <= freeMileage) {
+    return 0;
+  }
+
+  const overMileage = usedMileage - freeMileage;
+  return Math.round(overMileage * overMileageRate);
+});
+// OR-07: 还车费用汇总预览
+const returnFeePreviewTotal = computed(() =>
+  overtimeFeePreview.value + extraMileageFeePreview.value
+);
 const extensionHours = computed(() => {
   const order = detail.value;
   if (!order || !extensionForm.newReturnAt) {
@@ -1617,6 +1678,7 @@ function resetReturnWizard(order: StoreRentalOrderDetail, step = 0) {
     photoCount: 9,
     customerSigned: false,
     overtimeFeeAmount: order.settlementSummary.overtimeFeeAmount,
+    extraMileageFeeAmount: order.settlementSummary.extraMileageFeeAmount,
     damageFeeAmount: order.settlementSummary.damageFeeAmount,
     cleaningFeeAmount: order.settlementSummary.cleaningFeeAmount,
     discountAmount: order.settlementSummary.discountAmount,
@@ -1666,6 +1728,7 @@ async function submitReturnInspection() {
       photoCount: returnForm.photoCount,
       customerSigned: returnForm.customerSigned,
       overtimeFeeAmount: returnForm.overtimeFeeAmount,
+      extraMileageFeeAmount: returnForm.extraMileageFeeAmount,
       damageFeeAmount: returnForm.damageFeeAmount,
       cleaningFeeAmount: returnForm.cleaningFeeAmount,
       discountAmount: returnForm.discountAmount,
@@ -1697,6 +1760,7 @@ async function submitReturnSettlement() {
       source: "order-detail-return-wizard",
       idempotencyKey: `confirm-settlement-${order.id}-${Date.now()}`,
       overtimeFeeAmount: returnForm.overtimeFeeAmount,
+      extraMileageFeeAmount: returnForm.extraMileageFeeAmount,
       damageFeeAmount: returnForm.damageFeeAmount,
       cleaningFeeAmount: returnForm.cleaningFeeAmount,
       discountAmount: returnForm.discountAmount,
@@ -3484,13 +3548,64 @@ onMounted(loadDetail);
               <el-checkbox v-model="returnForm.customerSigned" class="mt-3">客户确认并签字</el-checkbox>
             </el-form>
           </section>
+          <!-- OR-07: 还车费用自动计算预览 -->
+          <section class="lg:col-span-2 rounded border border-blue-200 bg-blue-50 p-4">
+            <div class="font-bold text-blue-800 mb-3">费用自动计算预览</div>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+              <div class="rounded bg-white border border-gray-200 p-3">
+                <div class="text-xs text-gray-500">超时费</div>
+                <div class="text-lg font-mono font-bold" :class="overtimeFeePreview > 0 ? 'text-red-600' : 'text-gray-400'">
+                  {{ formatMoney(overtimeFeePreview) }}
+                </div>
+                <div class="text-xs text-gray-400 mt-1">
+                  30分钟免费，50元/小时
+                </div>
+              </div>
+              <div class="rounded bg-white border border-gray-200 p-3">
+                <div class="text-xs text-gray-500">超里程费</div>
+                <div class="text-lg font-mono font-bold" :class="extraMileageFeePreview > 0 ? 'text-red-600' : 'text-gray-400'">
+                  {{ formatMoney(extraMileageFeePreview) }}
+                </div>
+                <div class="text-xs text-gray-400 mt-1">
+                  免费里程 {{ detail.totalAmount > 0 ? Math.floor(detail.totalAmount / 100) * 100 : 0 }} km，2元/km
+                </div>
+              </div>
+              <div class="rounded bg-white border border-gray-200 p-3">
+                <div class="text-xs text-gray-500">使用里程</div>
+                <div class="text-lg font-mono font-bold text-gray-800">
+                  {{ Math.max(0, returnForm.returnMileage - (latestPickupInspection?.mileage ?? 0)) }} km
+                </div>
+                <div class="text-xs text-gray-400 mt-1">
+                  取车 {{ latestPickupInspection?.mileage ?? '-' }} → 还车 {{ returnForm.returnMileage || '-' }}
+                </div>
+              </div>
+              <div class="rounded bg-white border border-gray-200 p-3 flex flex-col justify-center">
+                <div class="text-xs text-gray-500">预估合计</div>
+                <div class="text-xl font-mono font-bold" :class="returnFeePreviewTotal > 0 ? 'text-red-600' : 'text-green-600'">
+                  {{ formatMoney(returnFeePreviewTotal) }}
+                </div>
+              </div>
+            </div>
+            <div v-if="overtimeFeePreview > 0 || extraMileageFeePreview > 0" class="mt-3 text-xs text-blue-700">
+              以上为系统预估值，进入「费用结算」步骤后可手动修正，以后端最终结算为准。
+            </div>
+            <div v-else class="mt-3 text-xs text-green-700">
+              当前无超时或超里程费用，验车数据提交后进入费用结算步骤。
+            </div>
+          </section>
         </div>
 
         <div v-else-if="returnStep === 1" class="space-y-4">
-          <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <div class="grid grid-cols-1 md:grid-cols-5 gap-3">
             <div class="rounded border border-gray-200 bg-gray-50 p-4">
               <div class="text-xs text-gray-500">超时费</div>
               <el-input-number v-model="returnForm.overtimeFeeAmount" :min="0" :step="50" class="w-full mt-2" />
+              <div v-if="overtimeFeePreview > 0" class="text-xs text-blue-600 mt-1">系统预估：{{ formatMoney(overtimeFeePreview) }}</div>
+            </div>
+            <div class="rounded border border-gray-200 bg-gray-50 p-4">
+              <div class="text-xs text-gray-500">超里程费</div>
+              <el-input-number v-model="returnForm.extraMileageFeeAmount" :min="0" :step="50" class="w-full mt-2" />
+              <div v-if="extraMileageFeePreview > 0" class="text-xs text-blue-600 mt-1">系统预估：{{ formatMoney(extraMileageFeePreview) }}</div>
             </div>
             <div class="rounded border border-gray-200 bg-gray-50 p-4">
               <div class="text-xs text-gray-500">损伤赔偿</div>

@@ -57,6 +57,7 @@ const actionForm = reactive({
   photoCount: 6,
   customerSigned: true,
   overtimeFeeAmount: 0,
+  extraMileageFeeAmount: 0,
   damageFeeAmount: 0,
   cleaningFeeAmount: 0,
   discountAmount: 0,
@@ -636,6 +637,7 @@ function resetActionForm(row: StoreRentalOrderSummary, action: string) {
     photoCount: action === "confirm-settlement" ? 0 : 6,
     customerSigned: true,
     overtimeFeeAmount: 0,
+    extraMileageFeeAmount: 0,
     damageFeeAmount: 0,
     cleaningFeeAmount: 0,
     discountAmount: 0,
@@ -704,6 +706,7 @@ async function confirmOrderAction() {
   ) {
     [
       "overtimeFeeAmount",
+      "extraMileageFeeAmount",
       "damageFeeAmount",
       "cleaningFeeAmount",
       "discountAmount",
@@ -1378,6 +1381,9 @@ onMounted(() => {
                 超时费：{{ formatMoney(selectedOrder.settlementSummary.overtimeFeeAmount) }}
               </div>
               <div class="rounded border border-gray-200 bg-gray-50 px-3 py-2">
+                超里程费：{{ formatMoney(selectedOrder.settlementSummary.extraMileageFeeAmount) }}
+              </div>
+              <div class="rounded border border-gray-200 bg-gray-50 px-3 py-2">
                 损伤赔偿：{{ formatMoney(selectedOrder.settlementSummary.damageFeeAmount) }}
               </div>
               <div class="rounded border border-gray-200 bg-gray-50 px-3 py-2">
@@ -1735,6 +1741,9 @@ onMounted(() => {
               <el-form-item label="超时费用">
                 <el-input-number v-model="actionForm.overtimeFeeAmount" :min="0" :step="50" class="w-full" />
               </el-form-item>
+              <el-form-item label="超里程费用">
+                <el-input-number v-model="actionForm.extraMileageFeeAmount" :min="0" :step="50" class="w-full" />
+              </el-form-item>
               <el-form-item label="损伤赔偿">
                 <el-input-number v-model="actionForm.damageFeeAmount" :min="0" :step="100" class="w-full" />
               </el-form-item>
@@ -1769,6 +1778,9 @@ onMounted(() => {
             <div v-else class="grid grid-cols-2 gap-4">
               <el-form-item label="超时费用">
                 <el-input-number v-model="actionForm.overtimeFeeAmount" :min="0" :step="50" class="w-full" />
+              </el-form-item>
+              <el-form-item label="超里程费用">
+                <el-input-number v-model="actionForm.extraMileageFeeAmount" :min="0" :step="50" class="w-full" />
               </el-form-item>
               <el-form-item label="损伤赔偿">
                 <el-input-number v-model="actionForm.damageFeeAmount" :min="0" :step="100" class="w-full" />
