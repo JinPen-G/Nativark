@@ -15266,8 +15266,16 @@ export class StoreRentalService {
       const matchesMember =
         rule.membershipLevels.length === 0 ||
         (input.membershipLevel && rule.membershipLevels.includes(input.membershipLevel));
+      // PR-04: 提前预订天数校验
+      const matchesLeadDays = !rule.bookingLeadDays || (() => {
+        const now = new Date();
+        const leadDays = (input.pickupAt.getTime() - now.getTime()) / (24 * 60 * 60 * 1000);
+        return leadDays >= rule.bookingLeadDays;
+      })();
+      // PR-04: 最大抵扣金额校验
+      const matchesMaxDeduction = !rule.maxDeductionAmount || rule.maxDeductionAmount > 0;
 
-      return matchesGroup && matchesDuration && matchesMember;
+      return matchesGroup && matchesDuration && matchesMember && matchesLeadDays && matchesMaxDeduction;
     });
   }
 
