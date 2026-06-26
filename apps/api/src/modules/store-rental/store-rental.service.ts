@@ -1619,6 +1619,16 @@ export class StoreRentalService {
         reason
       });
 
+      // 统一审计日志写入（CRM-05）
+      const actionLabel = input.action === "blacklist" ? "加入黑名单" : input.action === "suspend" ? "暂停租车资格" : "恢复租车资格";
+      await this.appendOperationLog(
+        "member",
+        savedMember.id,
+        actionLabel,
+        input.operator?.trim() || "营运风控",
+        `会员 ${savedMember.name}（${savedMember.phoneMasked}）执行风控动作：${actionLabel}，原因：${reason}，影响订单数：${affectedOrders.length}`
+      );
+
       return {
         member: savedMember,
         affectedOrderNos: affectedOrders.map((order) => order.orderNo),
