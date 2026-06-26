@@ -421,7 +421,7 @@ async function manualAssign(candidate: StoreRentalDispatchCandidate) {
   // DP-01: 人工改派确认对话框
   try {
     await ElMessageBox.confirm(
-      `确认将订单 ${order.orderNo} 改派至车辆 ${candidate.licensePlate}？\n目标车辆：${candidate.licensePlate} (${candidate.currentStoreName})`,
+      `确认将订单 ${order.orderNo} 改派至车辆 ${candidate.licensePlate}？\n当前车辆：${order.currentPlateNo || '未分配'}\n目标车辆：${candidate.licensePlate} (${candidate.currentStoreName})`,
       "人工改派确认",
       { type: "warning", confirmButtonText: "确认改派", cancelButtonText: "取消" }
     );
@@ -672,10 +672,9 @@ function eventTypeText(type: StoreRentalDispatchEvent["eventType"]) {
     vehicle_unavailable: "车辆不可交付",
     ai_analysis: "AI分析",
     alert_closed: "告警关闭",
-    task_closed: "任务关闭",
     task_claimed: "任务认领",
     task_processed: "任务处理",
-    task_completed: "任务完成"
+    task_closed: "任务关闭"
   };
   return map[type];
 }
