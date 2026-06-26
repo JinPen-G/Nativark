@@ -3381,7 +3381,7 @@ export class StoreRentalService {
         returnStoreCode: input.returnStoreCode,
         baseDailyAmount: line.baseDailyAmount,
         standardDailyRate: line.baseDailyAmount,
-        freeKm: 300,
+        freeKm: this.getVehicleGroupFreeKm(input.vehicleGroupCode),
         priceVersionTitle:
           this.priceVersionHistory.find((v) => v.version === plan.version)?.title,
         marketingPlanId: marketing.plan?.id,
@@ -3393,6 +3393,7 @@ export class StoreRentalService {
         membershipPlanId: membershipBenefit.plan?.id,
         membershipPlanCode: membershipBenefit.plan?.code,
         membershipPlanName: membershipBenefit.plan?.name,
+        membershipVersion: membershipBenefit.plan?.id,
         membershipOrderDiscountPercent: membershipBenefit.plan?.orderDiscountPercent,
         membershipDepositDiscountPercent: membershipBenefit.plan?.depositDiscountPercent,
         effectiveAt: plan.effectiveAt,
@@ -3400,6 +3401,7 @@ export class StoreRentalService {
         ...(dynamicPricing.matched
           ? {
               dynamicPricingScheduleId: dynamicPricing.scheduleId,
+              dynamicPricingVersion: dynamicPricing.scheduleId,
               dynamicPricingSummary: dynamicPricing.scheduleSummary,
               dynamicPricingEffectiveAt: dynamicPricing.effectiveAt,
               dynamicPricingAdjustedDailyRate: dynamicPricing.adjustedDailyRate,
@@ -3425,6 +3427,57 @@ export class StoreRentalService {
     });
 
     return result;
+  }
+
+  getPricingExplanation(quoteNo: string) {
+    const stored = this.quotes.get(quoteNo);
+    if (!stored) {
+      throw new NotFoundException(`报价 ${quoteNo} 不存在或已过期。`);
+    }
+    const { result } = stored;
+    return {
+      quoteNo: result.quoteNo,
+      planId: result.planId,
+      currency: result.currency,
+      billableDays: result.billableDays,
+      rentalAmount: result.rentalAmount,
+      serviceFeeAmount: result.serviceFeeAmount,
+      adjustmentAmount: result.adjustmentAmount,
+      discountAmount: result.discountAmount,
+      depositAmount: result.depositAmount,
+      payableAmount: result.payableAmount,
+      monthlySettlementAmount: result.monthlySettlementAmount,
+      feeItems: result.feeItems.map((item) => ({
+        code: item.code,
+        name: item.name,
+        amount: item.amount,
+        source: item.source ?? "unknown"
+      })),
+      explanationLines: result.explanationLines,
+      billingSegments: result.billingSegments,
+      selectedMarketingPlan: result.selectedMarketingPlan,
+      selectedMembershipPlan: result.selectedMembershipPlan,
+      versionChain: {
+        pricingVersion: result.snapshots.pricingVersion,
+        pricingVersionTitle: result.snapshots.priceVersionTitle,
+        priceVersionId: result.snapshots.priceVersionId,
+        ruleVersion: result.snapshots.ruleVersion,
+        ruleEffectiveAt: result.snapshots.ruleEffectiveAt,
+        marketingPlanId: result.snapshots.marketingPlanId,
+        marketingPlanVersionId: result.snapshots.marketingPlanVersionId,
+        marketingPlanName: result.snapshots.marketingPlanName,
+        membershipPlanId: result.snapshots.membershipPlanId,
+        membershipPlanCode: result.snapshots.membershipPlanCode,
+        membershipPlanName: result.snapshots.membershipPlanName,
+        membershipVersion: result.snapshots.membershipVersion,
+        dynamicPricingScheduleId: result.snapshots.dynamicPricingScheduleId,
+        dynamicPricingVersion: result.snapshots.dynamicPricingVersion,
+        dynamicPricingSummary: result.snapshots.dynamicPricingSummary,
+        dynamicPricingEffectiveAt: result.snapshots.dynamicPricingEffectiveAt
+      },
+      snapshots: result.snapshots,
+      warnings: result.warnings
+    };
   }
 
   checkAvailability(
@@ -16544,6 +16597,16 @@ export class StoreRentalService {
       plan.ruleLines.find((line) => line.vehicleGroupCode === code)?.vehicleGroupName ??
       code
     );
+  }
+
+  private getVehicleGroupFreeKm(vehicleGroupCode: string): number {
+    const groupName = this.getVehicleGroupNameByCode(vehicleGroupCode);
+    const primaryName = groupName.split(" / ")[0].toLowerCase();
+    const master = this.vehicleGroupMasters.find((vg) => {
+      const vgPrimary = (vg.storeProductGroupName || "").toLowerCase();
+      return vgPrimary && (primaryName.includes(vgPrimary) || vgPrimary.includes(primaryName));
+    });
+    return master?.freeKm ?? 300;
   }
 
   private getStoreNameByCode(code: string) {
