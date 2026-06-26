@@ -26,6 +26,10 @@ export class ReportsService {
     return this.reportsRepository.getFinanceReport(query);
   }
 
+  getRiskReport(query: StoreRentalReportQuery) {
+    return this.reportsRepository.getRiskReport(query);
+  }
+
   createExportJob(input: StoreRentalReportExportRequest) {
     if (!this.isReportType(input.reportType)) {
       throw new BadRequestException("报表类型不存在");
@@ -54,6 +58,6 @@ export class ReportsService {
   }
 
   private isReportType(value: StoreRentalReportType | string): value is StoreRentalReportType {
-    return ["overview", "orders", "vehicles", "finance", "ops"].includes(value);
+    return ["overview", "orders", "vehicles", "finance", "ops", "risk", "audit"].includes(value);
   }
 }

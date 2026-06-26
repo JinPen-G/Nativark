@@ -31,6 +31,11 @@ export class ReportsController {
     return this.reportsService.getFinanceReport(toReportQuery(query));
   }
 
+  @Get("risk")
+  risk(@Query() query: ReportQueryDto) {
+    return this.reportsService.getRiskReport(toReportQuery(query));
+  }
+
   @Post("exports")
   createExport(@Body() body: StoreRentalReportExportRequest) {
     return this.reportsService.createExportJob(body);
@@ -75,6 +80,7 @@ interface ReportQueryDto {
   storeName?: string;
   vehicleGroupName?: string;
   billingMode?: BillingMode | "all";
+  riskCategory?: string;
 }
 
 function toReportQuery(query: ReportQueryDto): StoreRentalReportQuery {
@@ -85,6 +91,7 @@ function toReportQuery(query: ReportQueryDto): StoreRentalReportQuery {
     period: query.period,
     storeName: query.storeName,
     vehicleGroupName: query.vehicleGroupName,
-    billingMode: query.billingMode
+    billingMode: query.billingMode,
+    riskCategory: query.riskCategory
   };
 }
