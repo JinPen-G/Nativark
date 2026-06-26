@@ -3283,6 +3283,26 @@ onMounted(loadDetail);
 
     <el-dialog v-model="pickupWizardVisible" title="车辆取车作业" width="1100px" top="4vh" destroy-on-close>
       <template v-if="detail">
+        <!-- OR-06: 操作锁过期警告 -->
+        <el-alert
+          v-if="detail.operationLockStatus === 'expired'"
+          title="取车操作锁已过期"
+          :description="`操作人：${detail.operationLockOperator || '未知'}，请重新发起取车操作或联系管理员释放操作锁。`"
+          type="warning"
+          show-icon
+          :closable="false"
+          class="mb-4"
+        />
+        <!-- OR-06: 预授权过期警告 -->
+        <el-alert
+          v-if="detail.preAuthExpiredHint"
+          title="预授权已过期"
+          :description="detail.preAuthExpiredHint"
+          type="error"
+          show-icon
+          :closable="false"
+          class="mb-4"
+        />
         <el-steps :active="pickupStep" finish-status="success" class="mb-5">
           <el-step title="身份与优惠资格" />
           <el-step title="押金尾款" />
