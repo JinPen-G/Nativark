@@ -3477,6 +3477,14 @@ export interface StoreRentalFinanceReport {
   summary: StoreRentalReportDashboard["financeSummary"];
   rows: StoreRentalFinanceReportRow[];
   monthlyBills: CorporateMonthlyBillSummary[];
+  reconciliation?: StoreRentalFinanceReconciliation;
+}
+
+export interface StoreRentalFinanceReconciliation {
+  collections: { totalAmount: number; count: number };
+  refunds: { totalAmount: number; count: number };
+  monthlyBills: { totalAmount: number; count: number; unpaidAmount: number };
+  waivers: { totalAmount: number; count: number };
 }
 
 export interface StoreRentalReportExportRequest {
