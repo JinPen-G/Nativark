@@ -28,6 +28,8 @@ import type {
   StoreRentalReportPeriod,
   StoreRentalReportQuery,
   StoreRentalReportType,
+  StoreRentalRiskReport,
+  StoreRentalRiskReportRow,
   StoreRentalTimeSeriesPoint,
   StoreRentalVehicleReportRow,
   StoreRentalVehiclesReport,
@@ -249,6 +251,122 @@ export class ReportsRepository {
       })),
       reconciliation: this.buildReconciliation(orders, monthlyBills)
     };
+  }
+
+  async getRiskReport(query: StoreRentalReportQuery = {}): Promise<StoreRentalRiskReport> {
+    const normalized = this.normalizeQuery(query);
+    const orders = this.filterOrders(await this.fetchOrders(normalized), normalized);
+    const riskOrders = orders.filter((order) => this.isRiskOrder(order));
+    const riskCategoryFilter = query.riskCategory?.trim();
+
+    const categorizedRiskOrders = riskOrders.map((order) => ({
+      order,
+      riskCategories: this.classifyRiskCategories(order),
+      riskFlags: this.riskFlags(order)
+    }));
+
+    const filteredByCategory = riskCategoryFilter
+      ? categorizedRiskOrders.filter((entry) => entry.riskCategories.includes(riskCategoryFilter))
+      : categorizedRiskOrders;
+
+    const rows: StoreRentalRiskReportRow[] = filteredByCategory.map((entry) => {
+      const order = entry.order;
+      const finance = this.orderFinance(order);
+      return {
+        orderId: order.id,
+        orderNo: order.orderNo,
+        customerName: order.customerName,
+        corporateShortName: order.corporateShortName ?? order.corporate?.shortName ?? undefined,
+        vehicleGroupName: this.vehicleGroupName(order.vehicleGroupSnapshot, order.vehicleGroup.name),
+        plateNo: order.assignedVehicle?.plateNo ?? undefined,
+        pickupStoreName: this.storeName(order.pickupStoreSnapshot, order.pickupStation?.parentStoreName),
+        returnStoreName: this.storeName(order.returnStoreSnapshot, order.returnStation?.parentStoreName),
+        pickupAt: order.pickupAt.toISOString(),
+        returnAt: order.returnAt.toISOString(),
+        mainStatus: this.toSharedMainStatus(String(order.mainStatus)),
+        dispatchStatus: this.toSharedDispatchStatus(String(order.dispatchStatus)),
+        billingMode: this.toSharedBillingMode(String(order.billingMode)),
+        totalAmount: money(order.totalAmount),
+        riskCategories: entry.riskCategories,
+        riskFlags: entry.riskFlags
+      };
+    });
+
+    const byCategoryEntries = categorizedRiskOrders.reduce<Record<string, number>>((map, entry) => {
+      for (const category of entry.riskCategories) {
+        map[category] = (map[category] ?? 0) + 1;
+      }
+      return map;
+    }, {});
+    const byCategory: StoreRentalNamedMetric[] = Object.entries(byCategoryEntries)
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, value]) => ({ name, value }));
+
+    const byStoreEntries = filteredByCategory.reduce<Record<string, number>>((map, entry) => {
+      const storeName = this.storeName(entry.order.pickupStoreSnapshot, entry.order.pickupStation?.parentStoreName);
+      map[storeName] = (map[storeName] ?? 0) + 1;
+      return map;
+    }, {});
+    const byStore: StoreRentalNamedMetric[] = Object.entries(byStoreEntries)
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, value]) => ({ name, value }));
+
+    const byFlagEntries = categorizedRiskOrders.reduce<Record<string, number>>((map, entry) => {
+      for (const flag of entry.riskFlags) {
+        map[flag] = (map[flag] ?? 0) + 1;
+      }
+      return map;
+    }, {});
+    const byFlag: StoreRentalNamedMetric[] = Object.entries(byFlagEntries)
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, value]) => ({ name, value }));
+
+    return {
+      generatedAt: new Date().toISOString(),
+      range: {
+        from: normalized.from,
+        to: normalized.to,
+        period: normalized.period
+      },
+      summary: {
+        totalRiskOrders: rows.length,
+        pickupOverdueCount: rows.filter((row) => row.riskCategories.includes("pickup_overdue")).length,
+        overdueReturnCount: rows.filter((row) => row.riskCategories.includes("overdue_return")).length,
+        accidentCount: rows.filter((row) => row.riskCategories.includes("accident")).length,
+        manualDispatchCount: rows.filter((row) => row.riskCategories.includes("manual_dispatch")).length,
+        totalExposureAmount: rows.reduce((sum, row) => sum + row.totalAmount, 0)
+      },
+      byCategory,
+      byStore,
+      byFlag,
+      rows
+    };
+  }
+
+  private classifyRiskCategories(order: StoreRentalOrderRow): string[] {
+    const categories: string[] = [];
+    if (String(order.mainStatus) === "PICKUP_OVERDUE") {
+      categories.push("pickup_overdue");
+    }
+    if (String(order.mainStatus) === "OVERDUE") {
+      categories.push("overdue_return");
+    }
+    if (String(order.mainStatus) === "ACCIDENT_PROCESSING") {
+      categories.push("accident");
+    }
+    if (String(order.dispatchStatus) === "MANUAL_REQUIRED") {
+      categories.push("manual_dispatch");
+    }
+    if (String(order.mainStatus) === "NO_SHOW") {
+      categories.push("no_show");
+    }
+    const flags = arrayValue(order.riskFlags).filter(
+      (item): item is string => typeof item === "string"
+    );
+    if (flags.length > 0 && categories.length === 0) {
+      categories.push("general_risk");
+    }
+    return categories;
   }
 
   private buildReconciliation(orders: any[], monthlyBills: any[]) {
@@ -1058,6 +1176,45 @@ export class ReportsRepository {
         ])
       };
     }
+    if (reportType === "risk") {
+      const report = await this.getRiskReport(query);
+      return {
+        headers: [
+          "订单号",
+          "客户",
+          "企业客户",
+          "车型组",
+          "车牌",
+          "取车门市",
+          "还车门市",
+          "预计取车时间",
+          "预计还车时间",
+          "订单状态",
+          "派车状态",
+          "结算方式",
+          "订单金额",
+          "风控类别",
+          "风险标记"
+        ],
+        rows: report.rows.map((row) => [
+          row.orderNo,
+          row.customerName,
+          row.corporateShortName ?? "",
+          row.vehicleGroupName,
+          row.plateNo ?? "",
+          row.pickupStoreName,
+          row.returnStoreName,
+          row.pickupAt,
+          row.returnAt,
+          row.mainStatus,
+          row.dispatchStatus,
+          row.billingMode,
+          row.totalAmount,
+          row.riskCategories.join("|"),
+          row.riskFlags.join("|")
+        ])
+      };
+    }
     if (reportType === "ops") {
       const rows = await this.listOpsLogs(query);
       return {
@@ -1210,7 +1367,7 @@ export class ReportsRepository {
   }
 
   private toReportType(value: string): StoreRentalReportType {
-    if (["overview", "orders", "vehicles", "finance", "ops"].includes(value)) {
+    if (["overview", "orders", "vehicles", "finance", "ops", "risk", "audit"].includes(value)) {
       return value as StoreRentalReportType;
     }
     return "overview";

@@ -746,6 +746,7 @@ const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
   backlogOperation("get", "/api/reports/exports", "Reports", "listReportExports", "List report exports", ["reports:view"]),
   backlogOperation("post", "/api/reports/exports", "Reports", "createReportExport", "Create report export", ["reports:export"]),
   backlogOperation("get", "/api/reports/finance", "Reports", "getFinanceReport", "Get finance report", ["reports:view"]),
+  backlogOperation("get", "/api/reports/risk", "Reports", "getRiskReport", "Get risk report", ["reports:view"]),
   backlogOperation("get", "/api/reports/ops/health", "Reports", "getReportsOpsHealth", "Get reports ops health", ["reports:view"]),
   backlogOperation("get", "/api/reports/ops/logs", "Reports", "listReportsOpsLogs", "List reports ops logs", ["reports:view"]),
   backlogOperation("get", "/api/reports/orders", "Reports", "getOrderReport", "Get order report", ["reports:view"]),
@@ -2013,7 +2014,8 @@ export const OPENAPI_DOCUMENT = {
     { name: "Dispatch" },
     { name: "MasterData" },
     { name: "Customer" },
-    { name: "Order" }
+    { name: "Order" },
+    { name: "Reports" }
   ],
   paths: buildPaths(API_CONTRACT_OPERATIONS),
   components: {

@@ -3495,6 +3495,46 @@ export interface StoreRentalFinanceReconciliation {
   waivers: { totalAmount: number; count: number };
 }
 
+export interface StoreRentalRiskReportRow {
+  orderId: string;
+  orderNo: string;
+  customerName: string;
+  corporateShortName?: string;
+  vehicleGroupName: string;
+  plateNo?: string;
+  pickupStoreName: string;
+  returnStoreName: string;
+  pickupAt: string;
+  returnAt: string;
+  mainStatus: OrderMainStatus;
+  dispatchStatus: DispatchStatus;
+  billingMode: BillingMode;
+  totalAmount: number;
+  riskCategories: string[];
+  riskFlags: string[];
+}
+
+export interface StoreRentalRiskReport {
+  generatedAt: string;
+  range: {
+    from: string;
+    to: string;
+    period: StoreRentalReportPeriod;
+  };
+  summary: {
+    totalRiskOrders: number;
+    pickupOverdueCount: number;
+    overdueReturnCount: number;
+    accidentCount: number;
+    manualDispatchCount: number;
+    totalExposureAmount: number;
+  };
+  byCategory: StoreRentalNamedMetric[];
+  byStore: StoreRentalNamedMetric[];
+  byFlag: StoreRentalNamedMetric[];
+  rows: StoreRentalRiskReportRow[];
+}
+
 export interface StoreRentalReportExportRequest {
   reportType: StoreRentalReportType;
   filters: StoreRentalReportQuery;
