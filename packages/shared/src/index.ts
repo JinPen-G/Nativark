@@ -1454,6 +1454,8 @@ export interface PricingQuoteResult {
     membershipPlanName?: string;
     membershipOrderDiscountPercent?: number;
     membershipDepositDiscountPercent?: number;
+    effectiveAt?: string;
+    ruleEffectiveAt?: string;
   };
   warnings: string[];
 }
