@@ -4588,6 +4588,7 @@ export class StoreRentalService {
         action: this.vehicleStatusActionLabel(input, saved),
         reason: input.reason
       });
+      await this.appendOperationLog("vehicle", saved.id, this.vehicleStatusActionLabel(input, saved), saved.lastOperationBy || "营运端", `车辆 ${saved.licensePlate} 状态变更：${input.operationStatus}，原因：${input.reason || "无"}`);
       return {
         vehicle: saved,
         message: `车辆 ${saved.licensePlate} 状态已更新`,
@@ -4599,6 +4600,7 @@ export class StoreRentalService {
       action: this.vehicleStatusActionLabel(input, vehicle),
       reason: input.reason
     });
+    this.appendOperationLog("vehicle", vehicle.id, this.vehicleStatusActionLabel(input, vehicle), vehicle.lastOperationBy || "营运端", `车辆 ${vehicle.licensePlate} 状态变更：${input.operationStatus}，原因：${input.reason || "无"}`);
 
     return {
       vehicle,
