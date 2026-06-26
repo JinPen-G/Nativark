@@ -1619,6 +1619,16 @@ export class StoreRentalService {
         reason
       });
 
+      // 统一审计日志写入（CRM-05）
+      const actionLabel = input.action === "blacklist" ? "加入黑名单" : input.action === "suspend" ? "暂停租车资格" : "恢复租车资格";
+      await this.appendOperationLog(
+        "member",
+        savedMember.id,
+        actionLabel,
+        input.operator?.trim() || "营运风控",
+        `会员 ${savedMember.name}（${savedMember.phoneMasked}）执行风控动作：${actionLabel}，原因：${reason}，影响订单数：${affectedOrders.length}`
+      );
+
       return {
         member: savedMember,
         affectedOrderNos: affectedOrders.map((order) => order.orderNo),
@@ -4588,6 +4598,7 @@ export class StoreRentalService {
         action: this.vehicleStatusActionLabel(input, saved),
         reason: input.reason
       });
+      await this.appendOperationLog("vehicle", saved.id, this.vehicleStatusActionLabel(input, saved), saved.lastOperationBy || "营运端", `车辆 ${saved.licensePlate} 状态变更：${input.operationStatus}，原因：${input.reason || "无"}`);
       return {
         vehicle: saved,
         message: `车辆 ${saved.licensePlate} 状态已更新`,
@@ -4599,6 +4610,7 @@ export class StoreRentalService {
       action: this.vehicleStatusActionLabel(input, vehicle),
       reason: input.reason
     });
+    this.appendOperationLog("vehicle", vehicle.id, this.vehicleStatusActionLabel(input, vehicle), vehicle.lastOperationBy || "营运端", `车辆 ${vehicle.licensePlate} 状态变更：${input.operationStatus}，原因：${input.reason || "无"}`);
 
     return {
       vehicle,
