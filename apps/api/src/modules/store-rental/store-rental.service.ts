@@ -164,6 +164,7 @@ import {
   WorkflowTransition
 } from "@store-rental/shared";
 import { IntegrationsService } from "../integrations/integrations.service";
+import { PlatformService } from "../platform/platform.service";
 import { StoreRentalRepository } from "./store-rental.repository";
 
 interface OrderFilter {
@@ -234,7 +235,8 @@ export class StoreRentalService {
   constructor(
     private readonly configService: ConfigService,
     private readonly storeRentalRepository: StoreRentalRepository,
-    private readonly integrationsService: IntegrationsService
+    private readonly integrationsService: IntegrationsService,
+    private readonly platformService: PlatformService
   ) {
     this.ruleVersionHistory = [
       this.createRuleVersionRecord(this.ruleConfig, 1, {
@@ -3350,11 +3352,19 @@ export class StoreRentalService {
     ];
   }
 
-  saveStation(input: StoreStationSummary) {
+  async saveStation(input: StoreStationSummary) {
     const station = this.normalizeStation(input);
     this.validateStation(station);
+
+    // MD-01: 捕获变更前站点状态用于审计
+    const allStations = await this.getStationsForRead();
+    const previous = allStations.find((item) => item.id === station.id);
+    const isUpdate = !!previous;
+
     if (this.useMysqlDataSource()) {
-      return this.storeRentalRepository.saveStation(station);
+      const result = await this.storeRentalRepository.saveStation(station);
+      await this.appendStationStatusAudit(station, previous, isUpdate);
+      return result;
     }
     const index = this.stations.findIndex((item) => item.id === station.id);
 
@@ -3364,6 +3374,7 @@ export class StoreRentalService {
       this.stations.unshift(station);
     }
 
+    await this.appendStationStatusAudit(station, previous, isUpdate);
     return station;
   }
 
@@ -5351,9 +5362,20 @@ export class StoreRentalService {
       throw new BadRequestException("当前企业未配置月结结算模式。");
     }
 
-    const orderNo = `SR${new Date().toISOString().slice(0, 10).replaceAll("-", "")}${Math.floor(
-      Math.random() * 9000 + 1000
-    )}`;
+    // PF-20: 使用统一编号规则生成订单号
+    let orderNo: string;
+    try {
+      const generated = await this.platformService.generateNumber({
+        code: "STORE_ORDER",
+        operator: "规则引擎"
+      });
+      orderNo = generated.generatedNo;
+    } catch {
+      // 编号规则不存在或停用时降级为本地编号
+      orderNo = `SO${new Date().toISOString().slice(0, 10).replaceAll("-", "")}${String(
+        Math.floor(Math.random() * 900_000) + 100_000
+      )}`;
+    }
     const mainStatus =
       isMonthly || isDeposit ? OrderMainStatus.Reserved : OrderMainStatus.PendingPayment;
     const paymentStatus = isMonthly
@@ -10900,6 +10922,55 @@ export class StoreRentalService {
       (station.selfServicePickupMethods ?? []).length === 0
     ) {
       throw new BadRequestException("24 小时自助启用时，请至少选择一种自助取还方式。");
+    }
+  }
+
+  // MD-01: 站点状态变更审计日志
+  private async appendStationStatusAudit(
+    station: StoreStationSummary,
+    previous: StoreStationSummary | undefined,
+    isUpdate: boolean
+  ) {
+    if (!isUpdate) {
+      await this.appendOperationLog(
+        "station",
+        station.id,
+        "站点创建",
+        "营运端",
+        `新增站点 ${station.name}，所属门店 ${station.parentStoreName}，启用状态 ${station.status}，服务状态 ${station.serviceStatus}`
+      );
+      return;
+    }
+
+    const changes: string[] = [];
+    if (previous!.status !== station.status) {
+      changes.push(`启用状态 ${previous!.status} -> ${station.status}`);
+    }
+    if (previous!.serviceStatus !== station.serviceStatus) {
+      changes.push(`服务状态 ${previous!.serviceStatus} -> ${station.serviceStatus}`);
+    }
+    if ((previous!.storeRentalServiceStatus || "normal") !== (station.storeRentalServiceStatus || "normal")) {
+      changes.push(`门市租车服务 ${(previous!.storeRentalServiceStatus || "normal")} -> ${station.storeRentalServiceStatus || "normal"}`);
+    }
+    if ((previous!.storeSelfServiceStatus || "normal") !== (station.storeSelfServiceStatus || "normal")) {
+      changes.push(`自助服务 ${(previous!.storeSelfServiceStatus || "normal")} -> ${station.storeSelfServiceStatus || "normal"}`);
+    }
+
+    if (changes.length > 0) {
+      const actionLabel = station.status === "disabled"
+        ? "站点停用"
+        : station.serviceStatus === "paused"
+          ? "站点暂停"
+          : station.serviceStatus === "maintenance"
+            ? "站点维护"
+            : "站点状态变更";
+      await this.appendOperationLog(
+        "station",
+        station.id,
+        actionLabel,
+        "营运端",
+        `站点 ${station.name}：${changes.join("，")}`
+      );
     }
   }
 
