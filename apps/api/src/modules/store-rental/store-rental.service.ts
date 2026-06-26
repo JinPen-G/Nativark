@@ -7841,6 +7841,7 @@ export class StoreRentalService {
     return this.dispatchEvents
       .filter((event) => (query.orderId ? event.orderId === query.orderId : true))
       .filter((event) => (query.planId ? event.planId === query.planId : true))
+      .filter((event) => (query.eventType ? event.eventType === query.eventType : true))
       .sort(
         (left, right) =>
           new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
@@ -15719,6 +15720,7 @@ export class StoreRentalService {
               customerType,
               vehicleGroupCode: input.vehicleGroupCode,
               pickupStoreCode: input.pickupStoreCode,
+              returnStoreCode: input.returnStoreCode,
               pickupAt,
               billableDays,
               membershipLevel: input.membershipLevel
@@ -15932,6 +15934,7 @@ export class StoreRentalService {
       customerType: StoreRentalCustomerType;
       vehicleGroupCode: string;
       pickupStoreCode: string;
+      returnStoreCode?: string;
       pickupAt: Date;
       billableDays: number;
       membershipLevel?: string;
@@ -15947,6 +15950,10 @@ export class StoreRentalService {
       return false;
     }
     if (plan.storeCodes.length > 0 && !plan.storeCodes.includes(input.pickupStoreCode)) {
+      return false;
+    }
+    // PR-04: 到店核验 - 也校验还车门店是否在方案覆盖范围内
+    if (plan.storeCodes.length > 0 && input.returnStoreCode && !plan.storeCodes.includes(input.returnStoreCode)) {
       return false;
     }
     if (

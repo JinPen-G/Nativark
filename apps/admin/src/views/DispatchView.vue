@@ -7,6 +7,7 @@ import type {
   StoreRentalDispatchBoard,
   StoreRentalDispatchCandidate,
   StoreRentalDispatchEvent,
+  StoreRentalDispatchEventType,
   StoreRentalDispatchOrderRow,
   StoreRentalDispatchPlan,
   StoreRentalDispatchResultRow,
@@ -54,6 +55,26 @@ const optimizationDays = ref<3 | 7 | 14>(7);
 const optimizationPlan = ref<StoreRentalDispatchPlan>();
 const aiAnalysisResult = ref<StoreRentalAiDispatchAnalysisResult>();
 const vehicleUnavailableResult = ref<StoreRentalDispatchVehicleUnavailableResult>();
+
+// DP-01: 事件筛选功能
+const eventFilterType = ref<StoreRentalDispatchEventType | "">("");
+const eventFilterLoading = ref(false);
+const eventFilterOptions: Array<{ label: string; value: StoreRentalDispatchEventType | "" }> = [
+  { label: "全部事件", value: "" },
+  { label: "优化预览", value: "optimization_preview" },
+  { label: "应用优化", value: "optimization_apply" },
+  { label: "应用失败", value: "optimization_apply_failed" },
+  { label: "硬锁成功", value: "hard_lock_success" },
+  { label: "硬锁失败", value: "hard_lock_failed" },
+  { label: "人工改派", value: "manual_reassign" },
+  { label: "人工告警", value: "manual_required" },
+  { label: "车辆不可交付", value: "vehicle_unavailable" },
+  { label: "AI分析", value: "ai_analysis" },
+  { label: "告警关闭", value: "alert_closed" },
+  { label: "任务认领", value: "task_claimed" },
+  { label: "任务处理", value: "task_processed" },
+  { label: "任务关闭", value: "task_closed" }
+];
 
 const vehicleUnavailableForm = reactive<{
   orderId?: string;
@@ -169,6 +190,22 @@ const vehicleGroups = computed(() => {
 
 const dispatchTasks = computed(() => taskPool.value?.tasks ?? []);
 
+// DP-01: 事件统计
+const eventStats = computed(() => {
+  const events = dispatchEvents.value;
+  return {
+    total: events.length,
+    highRisk: events.filter((e) => e.riskLevel === "high").length,
+    locked: events.filter((e) => e.eventType === "hard_lock_success").length,
+    manual: events.filter((e) => e.eventType === "manual_reassign").length
+  };
+});
+
+// DP-01: 硬锁订单计数（用于硬锁状态视觉指示）
+const lockedOrderCount = computed(() =>
+  (board.value?.rows ?? []).filter((row) => row.dispatchStatus === "locked").length
+);
+
 const summaryCards = computed(() => {
   const metrics = board.value?.metrics;
   return [
@@ -220,7 +257,7 @@ async function loadBoard() {
     const [boardData, taskPoolData, eventData] = await Promise.all([
       getDispatchBoard(params),
       getDispatchTasks(params),
-      getDispatchEvents({ limit: 20 })
+      getDispatchEvents({ limit: 20, ...(eventFilterType.value ? { eventType: eventFilterType.value } : {}) })
     ]);
     board.value = boardData;
     taskPool.value = taskPoolData;
@@ -236,6 +273,21 @@ function resetFilters() {
   filterStoreName.value = "";
   filterGroupName.value = "";
   void loadBoard();
+}
+
+// DP-01: 事件筛选刷新
+async function refreshEvents() {
+  eventFilterLoading.value = true;
+  try {
+    dispatchEvents.value = await getDispatchEvents({
+      limit: 50,
+      ...(eventFilterType.value ? { eventType: eventFilterType.value } : {})
+    });
+  } catch (error) {
+    ElMessage.error(readErrorMessage(error, "加载事件历史失败"));
+  } finally {
+    eventFilterLoading.value = false;
+  }
 }
 
 function openOrderDrawer(row: StoreRentalDispatchOrderRow) {
@@ -571,6 +623,13 @@ function vehicleOrders(vehicle: VehicleInstanceSummary) {
     .sort((left, right) => new Date(left.pickupAt).getTime() - new Date(right.pickupAt).getTime());
 }
 
+// DP-01: 硬锁状态视觉指示 - 检查车辆是否有硬锁订单
+function vehicleHasLockedOrder(vehicle: VehicleInstanceSummary) {
+  return (board.value?.rows ?? []).some(
+    (row) => row.currentPlateNo === vehicle.licensePlate && row.dispatchStatus === "locked"
+  );
+}
+
 function rowClass(row: StoreRentalDispatchOrderRow) {
   const status = row.dispatchStatus;
   if (status === "locked") {
@@ -679,6 +738,18 @@ function eventTypeText(type: StoreRentalDispatchEvent["eventType"]) {
   return map[type];
 }
 
+// DP-01: 事件来源文字
+function eventSourceText(source: StoreRentalDispatchEvent["source"]) {
+  const map: Record<StoreRentalDispatchEvent["source"], string> = {
+    system: "系统自动",
+    manual: "人工操作",
+    ai: "AI分析",
+    job: "定时任务",
+    accident_registration: "事故登记"
+  };
+  return map[source] || source;
+}
+
 function formatDateTime(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
@@ -761,7 +832,10 @@ function readErrorMessage(error: unknown, fallback: string) {
     <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
       <div v-for="card in summaryCards" :key="card.label" class="rounded-lg border border-gray-200 bg-white p-4">
         <div class="text-xs text-gray-400 uppercase tracking-wider">{{ card.label }}</div>
-        <div class="text-2xl font-bold text-gray-800 mt-2">{{ card.value }}</div>
+        <div class="text-2xl font-bold text-gray-800 mt-2 flex items-center gap-2">
+          {{ card.value }}
+          <el-icon v-if="card.label === '已硬锁' && card.value > 0" class="text-emerald-500" :size="18"><Lock /></el-icon>
+        </div>
         <div class="text-xs text-gray-500 mt-1">{{ card.hint }}</div>
       </div>
     </div>
@@ -819,9 +893,14 @@ function readErrorMessage(error: unknown, fallback: string) {
                 >
                   <div class="flex items-center justify-between gap-2">
                     <span class="font-bold text-slate-800 text-sm">{{ vehicle.licensePlate }}</span>
-                    <el-tag size="small" effect="light" :type="vehicleStatusType(vehicle.operationStatus)">
-                      {{ vehicle.operationStatus }}
-                    </el-tag>
+                    <div class="flex items-center gap-1">
+                      <el-tag v-if="vehicleHasLockedOrder(vehicle)" size="small" type="success" effect="dark" class="animate-pulse">
+                        <el-icon class="mr-0.5"><Lock /></el-icon>硬锁
+                      </el-tag>
+                      <el-tag size="small" effect="light" :type="vehicleStatusType(vehicle.operationStatus)">
+                        {{ vehicle.operationStatus }}
+                      </el-tag>
+                    </div>
                   </div>
                   <div class="text-xs text-gray-400 mt-1 truncate">{{ vehicle.currentStoreName }} / {{ vehicle.currentStationName }}</div>
                 </div>
@@ -941,8 +1020,35 @@ function readErrorMessage(error: unknown, fallback: string) {
         </div>
 
         <div class="border-t border-gray-100 mt-4 pt-4">
-          <div class="text-sm font-semibold text-gray-800 mb-3">调度事件历史时间线</div>
-          <div class="max-h-[320px] overflow-auto custom-scroll">
+          <div class="flex items-center justify-between mb-3">
+            <div class="text-sm font-semibold text-gray-800">调度事件历史时间线</div>
+            <div class="flex items-center gap-2">
+              <el-tag v-if="eventStats.highRisk > 0" size="small" type="danger" effect="plain">
+                {{ eventStats.highRisk }} 条高风险
+              </el-tag>
+              <el-tag v-if="eventStats.locked > 0" size="small" type="success" effect="plain">
+                <el-icon class="mr-0.5"><Lock /></el-icon> {{ eventStats.locked }} 次硬锁
+              </el-tag>
+            </div>
+          </div>
+          <div class="mb-3">
+            <el-select
+              v-model="eventFilterType"
+              placeholder="筛选事件类型"
+              clearable
+              size="small"
+              class="w-full"
+              @change="refreshEvents"
+            >
+              <el-option
+                v-for="opt in eventFilterOptions"
+                :key="opt.value"
+                :label="opt.label"
+                :value="opt.value"
+              />
+            </el-select>
+          </div>
+          <div v-loading="eventFilterLoading" class="max-h-[320px] overflow-auto custom-scroll">
             <el-timeline v-if="dispatchEvents.length > 0">
               <el-timeline-item
                 v-for="event in dispatchEvents"
@@ -959,21 +1065,40 @@ function readErrorMessage(error: unknown, fallback: string) {
                       <el-tag v-if="event.eventType === 'hard_lock_success'" size="small" type="success" effect="plain">
                         <el-icon class="mr-0.5"><Lock /></el-icon> 已锁
                       </el-tag>
+                      <el-tag v-if="event.eventType === 'hard_lock_failed'" size="small" type="danger" effect="plain">
+                        <el-icon class="mr-0.5"><WarningFilled /></el-icon> 锁定失败
+                      </el-tag>
+                      <el-tag v-if="event.eventType === 'manual_reassign'" size="small" type="warning" effect="plain">
+                        人工改派
+                      </el-tag>
+                      <el-tag v-if="event.eventType === 'vehicle_unavailable'" size="small" type="danger" effect="plain">
+                        车辆异常
+                      </el-tag>
                       <el-tag size="small" effect="plain" :type="riskTagType(event.riskLevel)">{{ event.riskLevel }}</el-tag>
                     </div>
                   </div>
                   <div class="text-xs text-gray-500 mt-1.5">{{ event.orderNo || event.planId || '全局调度' }}</div>
                   <div class="text-xs text-gray-400 mt-1">{{ event.reasonText || event.title }}</div>
                   <div class="text-[11px] text-gray-400 mt-1.5 flex items-center gap-2">
-                    <span>{{ event.operator || event.source }}</span>
+                    <span>{{ event.operator || eventSourceText(event.source) }}</span>
                     <span v-if="event.beforeVehicle && event.targetVehicle" class="text-indigo-500">
                       {{ event.beforeVehicle }} → {{ event.targetVehicle }}
                     </span>
                   </div>
+                  <div v-if="event.reasonCode" class="text-[10px] text-gray-300 mt-1">
+                    {{ event.reasonCode }}
+                  </div>
+                  <div v-if="event.orderId" class="mt-2">
+                    <el-button size="small" text type="primary" @click.stop="router.push(`/orders/${event.orderId}`)">
+                      查看订单
+                    </el-button>
+                  </div>
                 </div>
               </el-timeline-item>
             </el-timeline>
-            <div v-else class="text-center text-sm text-gray-400 py-6">暂无调度事件</div>
+            <div v-else class="text-center text-sm text-gray-400 py-6">
+              {{ eventFilterType ? '无匹配的调度事件' : '暂无调度事件' }}
+            </div>
           </div>
         </div>
       </aside>

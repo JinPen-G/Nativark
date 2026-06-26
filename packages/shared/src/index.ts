@@ -1898,6 +1898,7 @@ export interface StoreRentalDispatchTaskPool {
 export interface StoreRentalDispatchEventQuery {
   orderId?: string;
   planId?: string;
+  eventType?: StoreRentalDispatchEventType;
   limit?: number;
 }
 

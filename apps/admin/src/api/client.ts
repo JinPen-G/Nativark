@@ -810,7 +810,7 @@ export async function getOrderNotifications(id: string) {
   return response.data.data;
 }
 
-export async function getDispatchEvents(params: StoreRentalDispatchEventQuery = {}) {
+export async function getDispatchEvents(params: StoreRentalDispatchEventQuery & { eventType?: string } = {}) {
   const response = await http.get<ApiResult<StoreRentalDispatchEvent[]>>(
     "/store-rental/dispatch/events",
     { params }

@@ -208,11 +208,13 @@ export class StoreRentalController {
   dispatchEvents(
     @Query("orderId") orderId?: string,
     @Query("planId") planId?: string,
+    @Query("eventType") eventType?: string,
     @Query("limit") limit?: string
   ) {
     return this.storeRentalService.listDispatchEvents({
       orderId,
       planId,
+      eventType,
       limit: limit ? Number(limit) : undefined
     } as StoreRentalDispatchEventQuery);
   }
