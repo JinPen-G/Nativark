@@ -5684,7 +5684,7 @@ export class StoreRentalService {
 
   getOrderDetail(id: string): StoreRentalOrderDetail | Promise<StoreRentalOrderDetail> {
     if (this.useMysqlDataSource()) {
-      return this.storeRentalRepository.getOrderDetail(id);
+      return this.enrichMysqlOrderDetail(id);
     }
 
     const order = this.findOrder(id);
@@ -5735,7 +5735,21 @@ export class StoreRentalService {
           (p: FinancePreAuthorizationRow) => p.status === "frozen" && p.expiresAt && new Date(p.expiresAt).getTime() < Date.now()
         );
         return expired ? "预授权已过期，请重新发起预授权或联系财务处理。" : undefined;
-      })()
+      })(),
+      // OR-05: 操作按钮权限
+      availableActions: this.buildAvailableActions(order)
+    };
+  }
+
+  private async enrichMysqlOrderDetail(id: string): Promise<StoreRentalOrderDetail> {
+    const detail = await this.storeRentalRepository.getOrderDetail(id);
+    const hasExpiredPreAuth = await this.storeRentalRepository.hasExpiredPreAuthorization(id);
+
+    return {
+      ...detail,
+      preAuthExpiredHint: hasExpiredPreAuth
+        ? "预授权已过期，请重新发起预授权或联系财务处理。"
+        : undefined
     };
   }
 
@@ -6157,6 +6171,19 @@ export class StoreRentalService {
         });
       }
 
+      // 费用变动后重新计算订单支付状态
+      this.recalcOrderPaymentStatus(order);
+      await this.storeRentalRepository.updateOrderState(order);
+
+      // OR-08: 费用新增审计日志
+      await this.appendOperationLog(
+        "order_fee",
+        order.id,
+        "新增费用",
+        input.operator || "门店营运",
+        `订单 ${order.orderNo} 新增费用：${fee.name} ${fee.amount} ${fee.direction === "charge" ? "补收" : "退款"}`
+      );
+
       return this.storeRentalRepository.getOrderFeeCenter(order.id);
     }
 
@@ -6194,6 +6221,9 @@ export class StoreRentalService {
         note: `人工费用进入企业月结：${fee.name}`
       });
     }
+
+    // 费用变动后重新计算订单支付状态
+    this.recalcOrderPaymentStatus(order);
 
     // 统一审计日志写入
     await this.appendOperationLog(
@@ -6252,6 +6282,10 @@ export class StoreRentalService {
         action: `费用减免：${fee.name} ${amount}`
       });
 
+      // 费用减免后重新计算订单支付状态并持久化
+      this.recalcOrderPaymentStatus(order);
+      await this.storeRentalRepository.updateOrderState(order);
+
       // OR-20: 费用减免统一审计
       await this.appendOperationLog("order_fee", order.id, "费用减免", input.operator || "门店营运", `订单 ${order.orderNo} 费用 ${fee.name} 减免 ${amount}，原因：${input.reason || "无"}`);
 
@@ -6292,6 +6326,9 @@ export class StoreRentalService {
       input.operator || "门店营运",
       `费用减免：${fee.name} ${amount}`
     );
+
+    // 费用减免后重新计算订单支付状态
+    this.recalcOrderPaymentStatus(order);
 
     // 检查所有费用项是否都已平账，如果是则自动推进订单状态
     const updatedFeeItems = this.buildFeeLedgerItems(order);
@@ -6372,6 +6409,15 @@ export class StoreRentalService {
         actor: input.operator || "门店营运",
         action: `${this.transactionLabel(input.type)}：${amount}`
       });
+
+      // OR-08: 资金流水审计日志
+      await this.appendOperationLog(
+        "order_transaction",
+        order.id,
+        this.transactionLabel(input.type),
+        input.operator || "门店营运",
+        `订单 ${order.orderNo} ${this.transactionLabel(input.type)}：${amount}，渠道：${input.channel}，备注：${input.note || "无"}`
+      );
 
       return this.storeRentalRepository.getOrderFeeCenter(order.id);
     }
@@ -14115,6 +14161,109 @@ export class StoreRentalService {
     }
 
     return PaymentStatus.Unpaid;
+  }
+
+  private recalcOrderPaymentStatus(order: StoreRentalOrderSummary): void {
+    const feeItems = this.buildFeeLedgerItems(order);
+    const chargeFees = feeItems.filter((f) => f.direction === "charge" && f.status !== "voided");
+    const totalCharge = chargeFees.reduce((sum, f) => sum + f.amount, 0);
+    const pendingCharge = chargeFees
+      .filter((f) => f.status === "pending")
+      .reduce((sum, f) => sum + f.pendingAmount, 0);
+
+    if (order.billingMode === BillingMode.Monthly) {
+      order.paymentStatus =
+        totalCharge > 0 ? PaymentStatus.MonthlyBilling : PaymentStatus.Unpaid;
+    } else if (pendingCharge > 0) {
+      order.paymentStatus = PaymentStatus.PaymentDue;
+    } else if (totalCharge > 0) {
+      order.paymentStatus = PaymentStatus.Paid;
+    } else {
+      order.paymentStatus = PaymentStatus.Unpaid;
+    }
+  }
+
+  private buildAvailableActions(order: StoreRentalOrderSummary): string[] {
+    const actionStatusMap: Record<string, OrderMainStatus[]> = {
+      "payment-success": [OrderMainStatus.PendingPayment],
+      "start-pickup": [OrderMainStatus.Reserved, OrderMainStatus.PickupOverdue],
+      "pickup-inspection": [OrderMainStatus.Inspecting],
+      "extend-rental": [
+        OrderMainStatus.Renting,
+        OrderMainStatus.Renewing,
+        OrderMainStatus.Overdue
+      ],
+      "redirect-order": [
+        OrderMainStatus.Reserved,
+        OrderMainStatus.PickupOverdue,
+        OrderMainStatus.Inspecting,
+        OrderMainStatus.Renting,
+        OrderMainStatus.Renewing,
+        OrderMainStatus.Overdue,
+        OrderMainStatus.AccidentProcessing
+      ],
+      "change-return-store": [
+        OrderMainStatus.Reserved,
+        OrderMainStatus.PickupOverdue,
+        OrderMainStatus.Inspecting,
+        OrderMainStatus.Renting,
+        OrderMainStatus.Renewing,
+        OrderMainStatus.Overdue,
+        OrderMainStatus.AccidentProcessing
+      ],
+      "change-return-station": [
+        OrderMainStatus.Reserved,
+        OrderMainStatus.PickupOverdue,
+        OrderMainStatus.Inspecting,
+        OrderMainStatus.Renting,
+        OrderMainStatus.Renewing,
+        OrderMainStatus.Overdue,
+        OrderMainStatus.AccidentProcessing
+      ],
+      "return-inspection": [
+        OrderMainStatus.Renting,
+        OrderMainStatus.Renewing,
+        OrderMainStatus.Overdue,
+        OrderMainStatus.AccidentProcessing
+      ],
+      "confirm-settlement": [
+        OrderMainStatus.SettlementPending,
+        OrderMainStatus.PaymentDue,
+        OrderMainStatus.RefundPending
+      ],
+      "register-accident": [
+        OrderMainStatus.Renting,
+        OrderMainStatus.Renewing,
+        OrderMainStatus.Overdue,
+        OrderMainStatus.AccidentProcessing,
+        OrderMainStatus.SettlementPending,
+        OrderMainStatus.PaymentDue,
+        OrderMainStatus.RefundPending,
+        OrderMainStatus.Completed
+      ],
+      "release-operation-lock": [OrderMainStatus.Inspecting],
+      "mark-no-show": [OrderMainStatus.PickupOverdue],
+      "reject-order": [OrderMainStatus.Inspecting],
+      "close-order": [
+        OrderMainStatus.PendingPayment,
+        OrderMainStatus.Reserved,
+        OrderMainStatus.PickupOverdue,
+        OrderMainStatus.Inspecting,
+        OrderMainStatus.Renting,
+        OrderMainStatus.Renewing,
+        OrderMainStatus.Overdue,
+        OrderMainStatus.AccidentProcessing
+      ],
+      cancel: [
+        OrderMainStatus.PendingPayment,
+        OrderMainStatus.Reserved,
+        OrderMainStatus.PickupOverdue
+      ]
+    };
+
+    return Object.entries(actionStatusMap)
+      .filter(([, statuses]) => statuses.includes(order.mainStatus))
+      .map(([action]) => action);
   }
 
   private buildFeeLedgerItems(order: StoreRentalOrderSummary): StoreRentalFeeLedgerItem[] {
