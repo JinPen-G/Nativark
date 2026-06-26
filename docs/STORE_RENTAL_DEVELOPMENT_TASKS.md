@@ -7,10 +7,10 @@
 ## 0. 当前真实状态
 
 - 当前分支：`main`。
-- 最新功能基线：`8011c22 docs: 更新订单履约模块成熟度`；本次文档拆分和分支重建完成后以 `git log -1` 为准。
+- 最新基线：当前 `main`，已同步 `origin/main`，并作为 4 个新开发分支的共同起点。
 - 最近有效开发：MySQL 模式订单动作统一审计、会员详情证件照片区域、场景化订单 seed、订单履约/客户/车辆/定价/调度/报表深化、发票记录展示、事件级快照链展示。
 - 最新验证结果：`npm run build` 通过；`npm run contract:validate` 通过，覆盖 185 个 controller operation；`npx prisma validate --schema apps/api/prisma/schema.prisma` 通过；`npm run test:reports` 通过；`git diff --check` 通过。
-- 当前未收口项：`DEVELOPMENT.md` 已按用户要求改名为 `README.md`；`docs/AI_HANDOFF.md` 已按用户要求删除；开发流水账已迁移到 `docs/STORE_RENTAL_DEVELOPMENT_LOG.md`；旧多分支需回收并从最新 `main` 重建。
+- 当前未收口项：旧多分支和旧 `.claude/worktrees` 已回收；仅保留 `main`、`codex/master-data-foundation`、`codex/order-finance-flow`、`codex/pricing-dispatch`、`codex/reports-tests`。
 - 当前结论：不是“开发完成”，而是“核心模块有第一版，部分深化已推进，仍需按 PRD/原型继续做真实闭环、MySQL 回归和测试”。
 
 ## 1. 不可偏离边界
