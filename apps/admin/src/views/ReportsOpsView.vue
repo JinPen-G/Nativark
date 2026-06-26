@@ -86,7 +86,8 @@ const activeReportLabel = computed(() => {
     vehicles: "车辆报表",
     finance: "财务报表",
     ops: "运维日志",
-    audit: "审计风控"
+    audit: "审计风控",
+    risk: "风控报表"
   };
   return labels[activeTab.value];
 });
