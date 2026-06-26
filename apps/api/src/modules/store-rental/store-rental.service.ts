@@ -6145,6 +6145,9 @@ export class StoreRentalService {
         action: `费用减免：${fee.name} ${amount}`
       });
 
+      // OR-20: 费用减免统一审计
+      await this.appendOperationLog("order_fee", order.id, "费用减免", input.operator || "门店营运", `订单 ${order.orderNo} 费用 ${fee.name} 减免 ${amount}，原因：${input.reason || "无"}`);
+
       return this.storeRentalRepository.getOrderFeeCenter(order.id);
     }
 
