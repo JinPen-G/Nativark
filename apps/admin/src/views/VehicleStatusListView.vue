@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import type { TboxDeviceSummary, VehicleInstanceSummary } from "@store-rental/shared";
-import { listTboxDevices, listVehicles, updateVehicleStatus } from "../api/client";
+import type { TboxDeviceSummary, VehicleInstanceSummary, VehicleCredentialRecord, VehicleOnboardItemRecord } from "@store-rental/shared";
+import { listTboxDevices, listVehicles, updateVehicleStatus, listVehicleCredentials, listVehicleOnboardItems } from "../api/client";
 import AppLayout from "../components/AppLayout.vue";
 
 const loading = ref(false);
@@ -15,6 +15,49 @@ const filters = reactive({
   operationStatus: "",
   serviceType: ""
 });
+const credentialCache = ref<Record<string, VehicleCredentialRecord[]>>({});
+const onboardCache = ref<Record<string, VehicleOnboardItemRecord[]>>({});
+
+async function handleExpandChange(row: VehicleInstanceSummary, expanded: boolean) {
+  if (!expanded) return;
+  if (credentialCache.value[row.id]) return;
+  try {
+    const [creds, items] = await Promise.all([
+      listVehicleCredentials(row.id),
+      listVehicleOnboardItems(row.id)
+    ]);
+    credentialCache.value[row.id] = creds;
+    onboardCache.value[row.id] = items;
+  } catch {
+    ElMessage.error("加载证照/物资数据失败");
+  }
+}
+
+function credentialTypeLabel(type: string) {
+  const map: Record<string, string> = { license: "行驶/登记证", insurance: "保险", inspection: "年检", permit: "营运许可", other: "其他" };
+  return map[type] || type;
+}
+function credentialStatusLabel(status: string) {
+  const map: Record<string, string> = { valid: "有效", expiring: "即将到期", expired: "已到期", missing: "缺失" };
+  return map[status] || status;
+}
+function credentialStatusType(status: string) {
+  return status === "valid" ? "success" : status === "expiring" ? "warning" : "danger";
+}
+function isCredentialExpired(status: string) {
+  return status === "expired" || status === "missing";
+}
+function onboardItemCategoryLabel(category: string) {
+  const map: Record<string, string> = { key: "钥匙/卡片", document: "随车文件", equipment: "随车工具", cleaning: "清洁整备", other: "其他" };
+  return map[category] || category;
+}
+function onboardItemStatusLabel(status: string) {
+  const map: Record<string, string> = { normal: "正常", missing: "缺失", damaged: "损坏" };
+  return map[status] || status;
+}
+function onboardItemStatusType(status: string) {
+  return status === "normal" ? "success" : status === "missing" ? "danger" : "warning";
+}
 
 function handleSelectionChange(selection: VehicleInstanceSummary[]) {
   selectedVehicles.value = selection;
@@ -228,8 +271,51 @@ onMounted(loadData);
       </div>
       </div>
 
-      <el-table :data="filteredRows" :loading="loading" border stripe @selection-change="handleSelectionChange">
+      <el-table :data="filteredRows" :loading="loading" border stripe @selection-change="handleSelectionChange" @expand-change="handleExpandChange">
         <el-table-column type="selection" width="50" />
+        <el-table-column type="expand">
+          <template #default="{ row }">
+            <div class="p-4 grid grid-cols-2 gap-6" style="background: #fafbfc;">
+              <div>
+                <h4 class="text-sm font-bold text-gray-700 mb-2">车辆证照</h4>
+                <el-table :data="credentialCache[row.id] ?? []" size="small" border empty-text="暂无证照记录" :row-class-name="(scope: any) => isCredentialExpired(scope.row.status) ? 'credential-expired-row' : ''">
+                  <el-table-column label="证照类型" width="110">
+                    <template #default="{ row: r }">{{ credentialTypeLabel(r.credentialType) }}</template>
+                  </el-table-column>
+                  <el-table-column prop="credentialName" label="证照名称" min-width="120" />
+                  <el-table-column prop="certNo" label="证件编号" min-width="120" />
+                  <el-table-column label="状态" width="100">
+                    <template #default="{ row: r }">
+                      <el-tag :type="credentialStatusType(r.status)" effect="plain">{{ credentialStatusLabel(r.status) }}</el-tag>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="到期日" width="120">
+                    <template #default="{ row: r }">
+                      <span :class="{ 'text-red-600 font-bold': isCredentialExpired(r.status) }">{{ r.expiresAt?.slice(0, 10) ?? "-" }}</span>
+                    </template>
+                  </el-table-column>
+                </el-table>
+              </div>
+              <div>
+                <h4 class="text-sm font-bold text-gray-700 mb-2">随车物资</h4>
+                <el-table :data="onboardCache[row.id] ?? []" size="small" border empty-text="暂无随车物资">
+                  <el-table-column label="类别" width="100">
+                    <template #default="{ row: r }">{{ onboardItemCategoryLabel(r.category) }}</template>
+                  </el-table-column>
+                  <el-table-column prop="itemName" label="物资名称" min-width="120" />
+                  <el-table-column label="数量" width="80">
+                    <template #default="{ row: r }">{{ r.actualQuantity }} / {{ r.standardQuantity }}</template>
+                  </el-table-column>
+                  <el-table-column label="状态" width="80">
+                    <template #default="{ row: r }">
+                      <el-tag :type="onboardItemStatusType(r.status)" effect="plain">{{ onboardItemStatusLabel(r.status) }}</el-tag>
+                    </template>
+                  </el-table-column>
+                </el-table>
+              </div>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="车辆基础信息" align="center">
           <el-table-column label="车牌 / 车型组" min-width="220">
             <template #default="{ row }">
