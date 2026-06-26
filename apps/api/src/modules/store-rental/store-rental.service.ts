@@ -6629,6 +6629,18 @@ export class StoreRentalService {
           order.riskFlags.filter((flag) => flag !== "待取车"),
           ["取车中", "操作锁有效"]
         );
+
+        // OR-14: 取车开始事件快照（内存路径）
+        await this.persistEventSnapshotRecord(order, {
+          eventType: "pickup_qualification",
+          title: "取车开始快照",
+          triggerReason: "门店开始办理取车手续",
+          settlementTarget: "取车尾款",
+          before: { mainStatus: previousStatus },
+          after: { mainStatus: order.mainStatus, operationLockStatus: order.operationLockStatus },
+          amountBreakdown: { operationLockMinutes: this.ruleConfig.pickupReturn.operationLockMinutes },
+          operator: String(body.operator ?? "门店营运")
+        });
         break;
       case "pickup-inspection":
         this.validatePickupCompletion(order, body);
@@ -6674,6 +6686,24 @@ export class StoreRentalService {
           String(body.operator ?? "门店营运"),
           `取车验车完成：${vehicleInfo}${mileageInfo}${fuelInfo}${batteryInfo}`
         );
+
+        // OR-14: 取车验车完成事件快照（内存路径）
+        await this.persistEventSnapshotRecord(order, {
+          eventType: "pickup_delivery",
+          title: "取车验车完成快照",
+          triggerReason: "客户取车验车完成，确认发车",
+          settlementTarget: "取车尾款",
+          before: { mainStatus: previousStatus },
+          after: { mainStatus: order.mainStatus, plateNo: order.plateNo },
+          amountBreakdown: {
+            mileage: this.optionalNumber(body.mileage),
+            fuelLevelPercent: this.optionalNumber(body.fuelLevelPercent),
+            batteryLevelPercent: this.optionalNumber(body.batteryLevelPercent),
+            cleanliness: this.cleanlinessValue(body.cleanliness),
+            damageFound: Boolean(body.damageFound)
+          },
+          operator: String(body.operator ?? "门店营运")
+        });
         break;
       case "extend-rental":
         {
@@ -6959,6 +6989,17 @@ export class StoreRentalService {
           const result = this.releaseOperationLock(order, body);
           actionTimelineDetail = result.timelineAction;
           resultMessage = result.message;
+          // OR-14: 操作锁释放事件快照（内存路径）
+          await this.persistEventSnapshotRecord(order, {
+            eventType: "operation_lock_release",
+            title: order.mainStatus === OrderMainStatus.NoShow ? "取车超时/爽约快照" : "操作锁释放快照",
+            triggerReason: this.optionalString(body.reason) || (order.mainStatus === OrderMainStatus.NoShow ? "取车超时，系统判定爽约" : "门店释放取车操作锁"),
+            settlementTarget: order.mainStatus === OrderMainStatus.NoShow ? "终止结算" : "无",
+            before: { mainStatus: previousStatus, operationLockStatus: OperationLockStatus.Active },
+            after: { mainStatus: order.mainStatus, operationLockStatus: order.mainStatus === OrderMainStatus.NoShow ? OperationLockStatus.Released : order.operationLockStatus },
+            amountBreakdown: order.mainStatus === OrderMainStatus.NoShow ? { noShow: true, contactResult: this.optionalString(body.contactResult) } : undefined,
+            operator: String(body.operator ?? "门店营运")
+          });
         }
         break;
       case "mark-no-show":
@@ -7195,6 +7236,18 @@ export class StoreRentalService {
           order.riskFlags.filter((flag) => flag !== "待取车"),
           ["取车中", "操作锁有效"]
         );
+
+        // OR-14: 取车开始事件快照（MySQL路径）
+        await this.persistEventSnapshotRecord(order, {
+          eventType: "pickup_qualification",
+          title: "取车开始快照",
+          triggerReason: "门店开始办理取车手续",
+          settlementTarget: "取车尾款",
+          before: { mainStatus: previousStatus },
+          after: { mainStatus: order.mainStatus, operationLockStatus: order.operationLockStatus },
+          amountBreakdown: { operationLockMinutes: this.ruleConfig.pickupReturn.operationLockMinutes },
+          operator: String(body.operator ?? "门店营运")
+        });
         break;
       case "pickup-inspection":
         {
@@ -7241,6 +7294,24 @@ export class StoreRentalService {
               reason: `订单 ${order.orderNo} 已取车`
             }
           );
+
+          // OR-14: 取车验车完成事件快照（MySQL路径）
+          await this.persistEventSnapshotRecord(order, {
+            eventType: "pickup_delivery",
+            title: "取车验车完成快照",
+            triggerReason: "客户取车验车完成，确认发车",
+            settlementTarget: "取车尾款",
+            before: { mainStatus: previousStatus },
+            after: { mainStatus: order.mainStatus, plateNo: order.plateNo },
+            amountBreakdown: {
+              mileage: this.optionalNumber(body.mileage),
+              fuelLevelPercent: this.optionalNumber(body.fuelLevelPercent),
+              batteryLevelPercent: this.optionalNumber(body.batteryLevelPercent),
+              cleanliness: this.cleanlinessValue(body.cleanliness),
+              damageFound: Boolean(body.damageFound)
+            },
+            operator: String(body.operator ?? "门店营运")
+          });
         }
         break;
       case "return-inspection":
@@ -7498,6 +7569,17 @@ export class StoreRentalService {
               }
             );
           }
+          // OR-14: 操作锁释放事件快照（MySQL路径）
+          await this.persistEventSnapshotRecord(order, {
+            eventType: "operation_lock_release",
+            title: order.mainStatus === OrderMainStatus.NoShow ? "取车超时/爽约快照" : "操作锁释放快照",
+            triggerReason: this.optionalString(body.reason) || (order.mainStatus === OrderMainStatus.NoShow ? "取车超时，系统判定爽约" : "门店释放取车操作锁"),
+            settlementTarget: order.mainStatus === OrderMainStatus.NoShow ? "终止结算" : "无",
+            before: { mainStatus: previousStatus, operationLockStatus: OperationLockStatus.Active },
+            after: { mainStatus: order.mainStatus, operationLockStatus: order.mainStatus === OrderMainStatus.NoShow ? OperationLockStatus.Released : order.operationLockStatus },
+            amountBreakdown: order.mainStatus === OrderMainStatus.NoShow ? { noShow: true, contactResult: this.optionalString(body.contactResult) } : undefined,
+            operator: String(body.operator ?? "门店营运")
+          });
         }
         break;
       case "mark-no-show":
