@@ -3022,7 +3022,9 @@ export class StoreRentalService {
         membershipPlanCode: membershipBenefit.plan?.code,
         membershipPlanName: membershipBenefit.plan?.name,
         membershipOrderDiscountPercent: membershipBenefit.plan?.orderDiscountPercent,
-        membershipDepositDiscountPercent: membershipBenefit.plan?.depositDiscountPercent
+        membershipDepositDiscountPercent: membershipBenefit.plan?.depositDiscountPercent,
+        effectiveAt: plan.effectiveAt,
+        ruleEffectiveAt: this.ruleConfig.effectiveAt
       },
       warnings: [
         ...(input.billingMode === BillingMode.Monthly
