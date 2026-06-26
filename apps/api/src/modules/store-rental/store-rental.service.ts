@@ -5547,6 +5547,17 @@ export class StoreRentalService {
 
     const order = this.findOrder(id);
 
+    // 操作锁过期检测
+    if (
+      order.operationLockStatus === OperationLockStatus.Active &&
+      order.operationLockExpiresAt
+    ) {
+      const expiresAt = new Date(order.operationLockExpiresAt);
+      if (expiresAt.getTime() < Date.now()) {
+        order.operationLockStatus = OperationLockStatus.Expired;
+      }
+    }
+
     return {
       ...order,
       timeline: this.orderTimelines.get(order.id) ?? this.defaultTimeline(order),
@@ -5570,7 +5581,11 @@ export class StoreRentalService {
         priceVersionId: this.pricingPlans[0].version,
         termsVersion: "store-rental-terms-v2026.04.28",
         events: this.orderEventSnapshots.get(order.id) ?? []
-      }
+      },
+      operationLockExpiredHint:
+        order.operationLockStatus === OperationLockStatus.Expired
+          ? "操作锁已过期，请重新发起取车操作。"
+          : undefined
     };
   }
 
@@ -6125,6 +6140,25 @@ export class StoreRentalService {
       `费用减免：${fee.name} ${amount}`
     );
 
+    // 检查所有费用项是否都已平账，如果是则自动推进订单状态
+    const updatedFeeItems = this.buildFeeLedgerItems(order);
+    const allFeesSettled = updatedFeeItems.every(
+      (item) => item.amount - item.settledAmount === 0
+    );
+
+    if (
+      allFeesSettled &&
+      (order.mainStatus === OrderMainStatus.PaymentDue ||
+        order.mainStatus === OrderMainStatus.RefundPending)
+    ) {
+      order.mainStatus = OrderMainStatus.Completed;
+      this.appendOrderTimeline(
+        order,
+        "系统",
+        "所有费用已平账，订单自动完成"
+      );
+    }
+
     // 统一审计日志写入
     await this.appendOperationLog(
       "order_fee",
@@ -6325,6 +6359,17 @@ export class StoreRentalService {
           customerSigned: body.customerSigned !== false,
           memo: this.optionalString(body.memo)
         });
+
+        // 添加取车验车完成的履约事件
+        const vehicleInfo = order.plateNo ? `车辆 ${order.plateNo}` : "车辆";
+        const mileageInfo = body.mileage ? `，里程 ${body.mileage}km` : "";
+        const fuelInfo = body.fuelLevelPercent ? `，油量 ${body.fuelLevelPercent}%` : "";
+        const batteryInfo = body.batteryLevelPercent ? `，电量 ${body.batteryLevelPercent}%` : "";
+        this.appendOrderTimeline(
+          order,
+          String(body.operator ?? "门店营运"),
+          `取车验车完成：${vehicleInfo}${mileageInfo}${fuelInfo}${batteryInfo}`
+        );
         break;
       case "extend-rental":
         {

@@ -1052,6 +1052,7 @@ export interface StoreRentalOrderDetail extends StoreRentalOrderSummary {
     termsVersion: string;
     events: StoreRentalEventSnapshotRecord[];
   };
+  operationLockExpiredHint?: string;
 }
 
 export interface StoreRentalOrderActionResult {
