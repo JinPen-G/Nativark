@@ -5297,6 +5297,33 @@ export class StoreRentalService {
         throw new BadRequestException("当前车组在所选时间段无可用库存，请更换车组或调整时间。");
       }
     }
+
+    // 站点能力校验：取车门店和还车门店至少各有一个 enabled + normal 站点
+    if (storedQuote) {
+      const pickupStoreCode = storedQuote.request.pickupStoreCode;
+      const returnStoreCode = storedQuote.request.returnStoreCode;
+      const pickupStoreName = this.getStoreNameByCode(pickupStoreCode);
+      const returnStoreName = this.getStoreNameByCode(returnStoreCode);
+      const allStations = await this.getStationsForRead();
+      const pickupOk = allStations.some(
+        (s) =>
+          (s.storeCode === pickupStoreCode || s.parentStoreName === pickupStoreName) &&
+          s.status === "enabled" &&
+          s.serviceStatus === "normal"
+      );
+      const returnOk = allStations.some(
+        (s) =>
+          (s.storeCode === returnStoreCode || s.parentStoreName === returnStoreName) &&
+          s.status === "enabled" &&
+          s.serviceStatus === "normal"
+      );
+      if (!pickupOk || !returnOk) {
+        throw new BadRequestException(
+          "所选取车或还车门店当前无可用站点（站点未启用或服务暂停），请更换门店后重试。"
+        );
+      }
+    }
+
     const isMonthly =
       input.billingMode === BillingMode.Monthly || input.collectionMode === "monthly";
     const isDeposit = input.collectionMode === "deposit";
@@ -5494,6 +5521,9 @@ export class StoreRentalService {
         ...corporate.recentOrderNos.filter((item) => item !== orderNo)
       ].slice(0, 10);
       corporate.activeOrderCount += 1;
+      if (isMonthly) {
+        corporate.unpaidAmount += totalAmount;
+      }
     }
 
     this.orderTimelines.set(orderId, timeline);
@@ -13049,6 +13079,8 @@ export class StoreRentalService {
     this.applyTerminalSettlement(order, estimate.feeAmount, charge.capturedAmount);
     this.releaseOrderResources(order, "idle");
     order.mainStatus = OrderMainStatus.Cancelled;
+    this.releaseCorporateQuota(order);
+
     order.paymentStatus = this.terminalPaymentStatus(
       order,
       estimate.feeAmount,
@@ -13115,6 +13147,8 @@ export class StoreRentalService {
     this.applyTerminalSettlement(order, noShowFeeAmount, charge.capturedAmount);
     this.releaseOrderResources(order, "idle");
     order.mainStatus = OrderMainStatus.NoShow;
+    this.releaseCorporateQuota(order);
+
     order.paymentStatus = this.terminalPaymentStatus(
       order,
       noShowFeeAmount,
@@ -13176,6 +13210,8 @@ export class StoreRentalService {
     this.applyTerminalSettlement(order, rejectionFeeAmount, charge.capturedAmount);
     this.releaseOrderResources(order, "idle");
     order.mainStatus = OrderMainStatus.Rejected;
+    this.releaseCorporateQuota(order);
+
     order.paymentStatus = this.terminalPaymentStatus(
       order,
       rejectionFeeAmount,
@@ -13237,6 +13273,8 @@ export class StoreRentalService {
     this.applyTerminalSettlement(order, 0, 0);
     this.releaseOrderResources(order, "idle");
     order.mainStatus = OrderMainStatus.Closed;
+    this.releaseCorporateQuota(order);
+
     order.paymentStatus = this.terminalPaymentStatus(
       order,
       0,
@@ -13262,6 +13300,19 @@ export class StoreRentalService {
           ? "订单已关闭，企业月结不生成账单，车辆资源已释放。"
           : "订单已关闭，退款和预授权释放记录已写入费用中心。"
     };
+  }
+
+  private releaseCorporateQuota(order: StoreRentalOrderSummary) {
+    if (
+      order.billingMode === BillingMode.Monthly &&
+      order.corporateId &&
+      !this.useMysqlDataSource()
+    ) {
+      const corporate = this.corporates.find((item) => item.id === order.corporateId);
+      if (corporate) {
+        corporate.unpaidAmount = Math.max(0, corporate.unpaidAmount - order.totalAmount);
+      }
+    }
   }
 
   private requiredActionReason(value: unknown, message: string) {
