@@ -1729,7 +1729,7 @@ export type StoreRentalDispatchEventType =
 export interface StoreRentalDispatchEvent {
   id: string;
   eventType: StoreRentalDispatchEventType;
-  source: "system" | "manual" | "ai" | "job";
+  source: "system" | "manual" | "ai" | "job" | "accident_registration";
   title: string;
   orderId?: string;
   orderNo?: string;
