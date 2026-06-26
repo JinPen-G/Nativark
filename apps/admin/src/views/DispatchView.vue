@@ -974,8 +974,16 @@ function readErrorMessage(error: unknown, fallback: string) {
               >
                 <div class="flex items-center justify-between gap-3">
                   <div>
-                    <div class="font-bold text-gray-800">{{ candidate.licensePlate }}</div>
+                    <div class="flex items-center gap-2">
+                      <span class="font-bold text-gray-800">{{ candidate.licensePlate }}</span>
+                      <el-tag v-if="candidate.operationStatus" size="small" :type="vehicleStatusType(candidate.operationStatus)" effect="plain">
+                        {{ vehicleStatusText(candidate.operationStatus) }}
+                      </el-tag>
+                    </div>
                     <div class="text-xs text-gray-500 mt-1">{{ candidate.currentStoreName }} / {{ candidate.currentStationName }}</div>
+                    <div v-if="candidate.score !== undefined" class="text-xs text-indigo-600 mt-1">
+                      匹配度：{{ candidate.score }}{{ candidate.scoreText ? ` · ${candidate.scoreText}` : '' }}
+                    </div>
                   </div>
                   <el-button
                     type="primary"
