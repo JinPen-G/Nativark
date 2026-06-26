@@ -3331,6 +3331,8 @@ export interface StoreRentalReportQuery {
   billingMode?: BillingMode | "all";
   mainStatuss?: string[];
   riskCategory?: string;
+  orderId?: string;
+  memberId?: string;
 }
 
 export interface StoreRentalMetricCard {
@@ -3546,6 +3548,10 @@ export interface StoreRentalRiskReport {
     overdueReturnCount: number;
     accidentCount: number;
     manualDispatchCount: number;
+    blacklistCount: number;
+    adjustmentCount: number;
+    reassignCount: number;
+    noShowCount: number;
     totalExposureAmount: number;
   };
   byCategory: StoreRentalNamedMetric[];

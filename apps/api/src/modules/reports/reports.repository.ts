@@ -74,6 +74,13 @@ interface CsvExportData {
   rows: CsvCell[][];
 }
 
+interface RiskContext {
+  accidentsByVehicleId: Map<string, Array<{ vehicleId: string; [key: string]: unknown }>>;
+  adjustmentsByOrderId: Map<string, Array<{ orderId: string | null; [key: string]: unknown }>>;
+  blacklistedMemberIds: Set<string>;
+  reassignsByOrderId: Map<string, Array<{ orderId: string | null; [key: string]: unknown }>>;
+}
+
 @Injectable()
 export class ReportsRepository {
   private readonly defaultTenantId = "tenant_001";
@@ -262,14 +269,56 @@ export class ReportsRepository {
 
   async getRiskReport(query: StoreRentalReportQuery = {}): Promise<StoreRentalRiskReport> {
     const normalized = this.normalizeQuery(query);
-    const orders = this.filterOrders(await this.fetchOrders(normalized), normalized);
-    const riskOrders = orders.filter((order) => this.isRiskOrder(order));
+    const [orders, accidentRecords, adjustments, blacklistedMembers, reassignEvents] =
+      await Promise.all([
+        this.fetchOrders(normalized),
+        this.fetchAccidentRecords(normalized.tenantId),
+        this.fetchFinanceAdjustments(normalized),
+        this.fetchBlacklistedMembers(normalized.tenantId),
+        this.fetchDispatchReassignEvents(normalized)
+      ]);
+
+    const filteredOrders = this.filterOrders(orders, normalized);
+    const riskOrders = filteredOrders.filter((order) => this.isRiskOrder(order));
+
+    // Build lookup maps for cross-reference enrichment
+    const accidentsByVehicleId = new Map<string, typeof accidentRecords>();
+    for (const record of accidentRecords) {
+      const list = accidentsByVehicleId.get(record.vehicleId) ?? [];
+      list.push(record);
+      accidentsByVehicleId.set(record.vehicleId, list);
+    }
+    const adjustmentsByOrderId = new Map<string, typeof adjustments>();
+    for (const adj of adjustments) {
+      if (adj.orderId) {
+        const list = adjustmentsByOrderId.get(adj.orderId) ?? [];
+        list.push(adj);
+        adjustmentsByOrderId.set(adj.orderId, list);
+      }
+    }
+    const blacklistedMemberIds = new Set(blacklistedMembers.map((m) => m.id));
+    const reassignsByOrderId = new Map<string, typeof reassignEvents>();
+    for (const evt of reassignEvents) {
+      if (evt.orderId) {
+        const list = reassignsByOrderId.get(evt.orderId) ?? [];
+        list.push(evt);
+        reassignsByOrderId.set(evt.orderId, list);
+      }
+    }
+
     const riskCategoryFilter = query.riskCategory?.trim();
+
+    const contextMap = {
+      accidentsByVehicleId,
+      adjustmentsByOrderId,
+      blacklistedMemberIds,
+      reassignsByOrderId
+    };
 
     const categorizedRiskOrders = riskOrders.map((order) => ({
       order,
-      riskCategories: this.classifyRiskCategories(order),
-      riskFlags: this.riskFlags(order)
+      riskCategories: this.classifyRiskCategories(order, contextMap),
+      riskFlags: this.riskFlags(order, contextMap)
     }));
 
     const filteredByCategory = riskCategoryFilter
@@ -328,6 +377,17 @@ export class ReportsRepository {
       .sort((a, b) => b[1] - a[1])
       .map(([name, value]) => ({ name, value }));
 
+    // Aggregated byVehicle for cross-reference metrics
+    const byVehicle = Object.entries(accidentsByVehicleId)
+      .filter(([vehicleId]) =>
+        filteredOrders.some((o) => o.assignedVehicleId === vehicleId)
+      )
+      .map(([vehicleId, records]) => {
+        const vehicle = records[0].vehicle;
+        return { name: vehicle.plateNo, value: records.length };
+      })
+      .sort((a, b) => b.value - a.value);
+
     return {
       generatedAt: new Date().toISOString(),
       range: {
@@ -341,6 +401,10 @@ export class ReportsRepository {
         overdueReturnCount: rows.filter((row) => row.riskCategories.includes("overdue_return")).length,
         accidentCount: rows.filter((row) => row.riskCategories.includes("accident")).length,
         manualDispatchCount: rows.filter((row) => row.riskCategories.includes("manual_dispatch")).length,
+        blacklistCount: rows.filter((row) => row.riskCategories.includes("blacklist_member")).length,
+        adjustmentCount: rows.filter((row) => row.riskCategories.includes("finance_adjustment")).length,
+        reassignCount: rows.filter((row) => row.riskCategories.includes("dispatch_reassign")).length,
+        noShowCount: rows.filter((row) => row.riskCategories.includes("no_show")).length,
         totalExposureAmount: rows.reduce((sum, row) => sum + row.totalAmount, 0)
       },
       byCategory,
@@ -350,7 +414,7 @@ export class ReportsRepository {
     };
   }
 
-  private classifyRiskCategories(order: StoreRentalOrderRow): string[] {
+  private classifyRiskCategories(order: StoreRentalOrderRow, ctx?: RiskContext): string[] {
     const categories: string[] = [];
     if (String(order.mainStatus) === "PICKUP_OVERDUE") {
       categories.push("pickup_overdue");
@@ -367,6 +431,29 @@ export class ReportsRepository {
     if (String(order.mainStatus) === "NO_SHOW") {
       categories.push("no_show");
     }
+
+    // Enrichment from cross-referenced data sources
+    if (ctx) {
+      // 黑名单：订单关联的客户处于黑名单状态
+      if (order.memberId && ctx.blacklistedMemberIds.has(order.memberId)) {
+        categories.push("blacklist_member");
+      }
+      // 调账：订单存在手工调账记录
+      if (ctx.adjustmentsByOrderId.has(order.id)) {
+        categories.push("finance_adjustment");
+      }
+      // 改派：订单存在人工改派事件
+      if (ctx.reassignsByOrderId.has(order.id)) {
+        categories.push("dispatch_reassign");
+      }
+      // 事故出险记录：车辆有事故记录
+      if (order.assignedVehicleId && ctx.accidentsByVehicleId.has(order.assignedVehicleId)) {
+        if (!categories.includes("accident")) {
+          categories.push("accident");
+        }
+      }
+    }
+
     const flags = arrayValue(order.riskFlags).filter(
       (item): item is string => typeof item === "string"
     );
@@ -691,6 +778,51 @@ export class ReportsRepository {
     });
   }
 
+  private fetchAccidentRecords(tenantId: string) {
+    return this.prisma.vehicleAccidentRecord.findMany({
+      where: { vehicle: { tenantId } },
+      include: { vehicle: true },
+      orderBy: { createdAt: "desc" }
+    });
+  }
+
+  private fetchFinanceAdjustments(query: NormalizedReportQuery) {
+    return this.prisma.financeManualAdjustment.findMany({
+      where: {
+        tenantId: query.tenantId,
+        createdAt: {
+          gte: query.fromDate,
+          lte: query.toDate
+        }
+      },
+      orderBy: { createdAt: "desc" }
+    });
+  }
+
+  private fetchBlacklistedMembers(tenantId: string) {
+    return this.prisma.member.findMany({
+      where: {
+        tenantId,
+        status: "BLACKLISTED"
+      },
+      select: { id: true, name: true, phone: true }
+    });
+  }
+
+  private fetchDispatchReassignEvents(query: NormalizedReportQuery) {
+    return this.prisma.dispatchEvent.findMany({
+      where: {
+        tenantId: query.tenantId,
+        createdAt: {
+          gte: query.fromDate,
+          lte: query.toDate
+        },
+        eventType: { in: ["reassign", "manual_reassign", "upgrade", "manual_required"] }
+      },
+      orderBy: { createdAt: "desc" }
+    });
+  }
+
   private fetchVehicles(tenantId: string) {
     return this.prisma.vehicle.findMany({
       where: { tenantId },
@@ -751,7 +883,9 @@ export class ReportsRepository {
           returnStoreName === query.storeName) &&
         (!query.vehicleGroupName || vehicleGroupName === query.vehicleGroupName) &&
         (!query.billingMode || query.billingMode === "all" || billingMode === query.billingMode) &&
-        (!query.mainStatuss || query.mainStatuss.length === 0 || query.mainStatuss.includes(mainStatus))
+        (!query.mainStatuss || query.mainStatuss.length === 0 || query.mainStatuss.includes(mainStatus)) &&
+        (!query.orderId || row.id === query.orderId || row.orderNo === query.orderId) &&
+        (!query.memberId || row.memberId === query.memberId)
       );
     });
   }
@@ -1441,7 +1575,7 @@ export class ReportsRepository {
     );
   }
 
-  private riskFlags(order: StoreRentalOrderRow) {
+  private riskFlags(order: StoreRentalOrderRow, ctx?: RiskContext) {
     const flags = arrayValue(order.riskFlags).filter(
       (item): item is string => typeof item === "string"
     );
@@ -1450,6 +1584,20 @@ export class ReportsRepository {
     }
     if (String(order.dispatchStatus) === "MANUAL_REQUIRED" && !flags.includes("人工调度")) {
       flags.push("人工调度");
+    }
+    if (ctx) {
+      if (order.memberId && ctx.blacklistedMemberIds.has(order.memberId) && !flags.includes("黑名单客户")) {
+        flags.push("黑名单客户");
+      }
+      if (ctx.adjustmentsByOrderId.has(order.id) && !flags.includes("存在调账")) {
+        flags.push("存在调账");
+      }
+      if (ctx.reassignsByOrderId.has(order.id) && !flags.includes("人工改派")) {
+        flags.push("人工改派");
+      }
+      if (order.assignedVehicleId && ctx.accidentsByVehicleId.has(order.assignedVehicleId) && !flags.includes("车辆事故")) {
+        flags.push("车辆事故");
+      }
     }
     return flags;
   }
