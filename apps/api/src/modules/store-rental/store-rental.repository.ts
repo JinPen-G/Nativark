@@ -3043,6 +3043,18 @@ export class StoreRentalRepository {
     return this.getOrderFeeCenter(orderId);
   }
 
+  async hasExpiredPreAuthorization(orderId: string): Promise<boolean> {
+    const now = new Date();
+    const count = await this.prisma.financePreAuthorization.count({
+      where: {
+        orderId,
+        status: PrismaFinancePreAuthorizationStatus.FROZEN,
+        expiresAt: { lt: now }
+      }
+    });
+    return count > 0;
+  }
+
   async createOrderTransaction(
     orderId: string,
     record: StoreRentalTransactionRecord
@@ -5620,8 +5632,96 @@ export class StoreRentalRepository {
         events: (row.eventSnapshots ?? []).map((snapshot: any) =>
           this.toEventSnapshotRecord(snapshot)
         )
-      }
+      },
+      operationLockExpiredHint:
+        order.operationLockStatus === OperationLockStatus.Expired
+          ? "操作锁已过期，请重新发起取车操作。"
+          : undefined,
+      availableActions: this.buildAvailableActions(order)
     };
+  }
+
+  private buildAvailableActions(order: StoreRentalOrderSummary): string[] {
+    const actionStatusMap: Record<string, OrderMainStatus[]> = {
+      "payment-success": [OrderMainStatus.PendingPayment],
+      "start-pickup": [OrderMainStatus.Reserved, OrderMainStatus.PickupOverdue],
+      "pickup-inspection": [OrderMainStatus.Inspecting],
+      "extend-rental": [
+        OrderMainStatus.Renting,
+        OrderMainStatus.Renewing,
+        OrderMainStatus.Overdue
+      ],
+      "redirect-order": [
+        OrderMainStatus.Reserved,
+        OrderMainStatus.PickupOverdue,
+        OrderMainStatus.Inspecting,
+        OrderMainStatus.Renting,
+        OrderMainStatus.Renewing,
+        OrderMainStatus.Overdue,
+        OrderMainStatus.AccidentProcessing
+      ],
+      "change-return-store": [
+        OrderMainStatus.Reserved,
+        OrderMainStatus.PickupOverdue,
+        OrderMainStatus.Inspecting,
+        OrderMainStatus.Renting,
+        OrderMainStatus.Renewing,
+        OrderMainStatus.Overdue,
+        OrderMainStatus.AccidentProcessing
+      ],
+      "change-return-station": [
+        OrderMainStatus.Reserved,
+        OrderMainStatus.PickupOverdue,
+        OrderMainStatus.Inspecting,
+        OrderMainStatus.Renting,
+        OrderMainStatus.Renewing,
+        OrderMainStatus.Overdue,
+        OrderMainStatus.AccidentProcessing
+      ],
+      "return-inspection": [
+        OrderMainStatus.Renting,
+        OrderMainStatus.Renewing,
+        OrderMainStatus.Overdue,
+        OrderMainStatus.AccidentProcessing
+      ],
+      "confirm-settlement": [
+        OrderMainStatus.SettlementPending,
+        OrderMainStatus.PaymentDue,
+        OrderMainStatus.RefundPending
+      ],
+      "register-accident": [
+        OrderMainStatus.Renting,
+        OrderMainStatus.Renewing,
+        OrderMainStatus.Overdue,
+        OrderMainStatus.AccidentProcessing,
+        OrderMainStatus.SettlementPending,
+        OrderMainStatus.PaymentDue,
+        OrderMainStatus.RefundPending,
+        OrderMainStatus.Completed
+      ],
+      "release-operation-lock": [OrderMainStatus.Inspecting],
+      "mark-no-show": [OrderMainStatus.PickupOverdue],
+      "reject-order": [OrderMainStatus.Inspecting],
+      "close-order": [
+        OrderMainStatus.PendingPayment,
+        OrderMainStatus.Reserved,
+        OrderMainStatus.PickupOverdue,
+        OrderMainStatus.Inspecting,
+        OrderMainStatus.Renting,
+        OrderMainStatus.Renewing,
+        OrderMainStatus.Overdue,
+        OrderMainStatus.AccidentProcessing
+      ],
+      cancel: [
+        OrderMainStatus.PendingPayment,
+        OrderMainStatus.Reserved,
+        OrderMainStatus.PickupOverdue
+      ]
+    };
+
+    return Object.entries(actionStatusMap)
+      .filter(([, statuses]) => statuses.includes(order.mainStatus))
+      .map(([action]) => action);
   }
 
   private toContractRecord(row: any): StoreRentalContractRecord {
