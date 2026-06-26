@@ -1211,6 +1211,14 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     responseSchema: "PricingQuoteResult"
   },
   {
+    method: "get",
+    path: "/api/store-rental/pricing/explanation/{quoteNo}",
+    tag: "StoreRental",
+    operationId: "getPricingExplanation",
+    summary: "Get pricing explanation by quote number",
+    permissions: ["store-rental:price:manage", "store-rental:order:view"]
+  },
+  {
     method: "post",
     path: "/api/store-rental/availability",
     tag: "StoreRental",

@@ -122,6 +122,11 @@ export class StoreRentalController {
     return this.storeRentalService.quote(body);
   }
 
+  @Get("pricing/explanation/:quoteNo")
+  pricingExplanation(@Param("quoteNo") quoteNo: string) {
+    return this.storeRentalService.getPricingExplanation(quoteNo);
+  }
+
   @Get("marketing/plans")
   marketingPlans() {
     return this.storeRentalService.listMarketingPlans();
