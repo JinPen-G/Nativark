@@ -874,7 +874,10 @@ export interface StoreRentalEventSnapshotRecord {
     | "return_settlement"
     | "settlement_confirmation"
     | "operation_lock_release"
-    | "manual_adjust";
+    | "manual_adjust"
+    | "extension"
+    | "redirection"
+    | "return_location_change";
   title: string;
   triggerReason?: string;
   settlementTarget?: string;

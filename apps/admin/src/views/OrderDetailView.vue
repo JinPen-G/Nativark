@@ -53,6 +53,12 @@ const transactionDialogVisible = ref(false);
 const contractDialogVisible = ref(false);
 const notificationDialogVisible = ref(false);
 const remarkDialogVisible = ref(false);
+const closeRemarkDialogVisible = ref(false);
+const closeRemarkId = ref("");
+const closeRemarkForm = reactive({
+  closeNote: "",
+  operator: "营运端"
+});
 const feeActionLoading = ref("");
 const fulfillmentActionLoading = ref("");
 const extendDialogVisible = ref(false);
@@ -957,6 +963,20 @@ const canManageOrderFees = computed(() =>
     "store-rental:order:settle",
     "store-rental:order:fee-manage"
   ])
+);
+const internalRemarks = computed(() =>
+  (detail.value?.remarks ?? []).filter((r) => r.category === "internal_note")
+);
+const customerRemarks = computed(() =>
+  (detail.value?.remarks ?? []).filter((r) => r.category === "customer_note")
+);
+const returnVisitRemarks = computed(() =>
+  (detail.value?.remarks ?? []).filter((r) => r.category === "return_visit")
+);
+const otherRemarks = computed(() =>
+  (detail.value?.remarks ?? []).filter(
+    (r) => !["internal_note", "customer_note", "return_visit"].includes(r.category)
+  )
 );
 const pickupReturnRows = computed(() => {
   const order = detail.value;
@@ -1931,16 +1951,24 @@ async function submitRemark() {
 }
 
 async function closeRemark(recordId: string) {
+  closeRemarkId.value = recordId;
+  closeRemarkForm.closeNote = "";
+  closeRemarkForm.operator = authStore.user?.displayName || "营运端";
+  closeRemarkDialogVisible.value = true;
+}
+
+async function submitCloseRemark() {
   const order = detail.value;
-  if (!order) {
+  if (!order || !closeRemarkId.value) {
     return;
   }
-  fulfillmentActionLoading.value = `${recordId}:close`;
+  fulfillmentActionLoading.value = `${closeRemarkId.value}:close`;
   try {
-    await closeStoreRentalOrderRemark(order.id, recordId, {
-      operator: authStore.user?.displayName || "营运端",
-      closeNote: "跟进已处理"
+    await closeStoreRentalOrderRemark(order.id, closeRemarkId.value, {
+      operator: closeRemarkForm.operator,
+      closeNote: closeRemarkForm.closeNote || "跟进已处理"
     });
+    closeRemarkDialogVisible.value = false;
     await reloadAfterFulfillmentAction("跟进记录已关闭");
   } catch (error) {
     ElMessage.error(readErrorMessage(error, "跟进记录关闭失败"));
@@ -3034,48 +3062,186 @@ onMounted(loadDetail);
                     <el-tag size="small" :type="notificationStatusType(record.status)" effect="plain">{{ record.status }}</el-tag>
                   </div>
                 </div>
-                <div v-for="record in detail.remarks" :key="record.id" class="px-5 py-3 text-sm">
-                  <div class="flex justify-between gap-3">
-                    <div class="font-bold text-gray-800">
-                      {{ remarkCategoryLabel(record.category) }}
-                      <span class="ml-2 text-xs font-normal text-gray-400">
-                        {{ record.visibility === "customer_visible" ? "客户可见" : "内部" }}
-                      </span>
+                <template v-if="internalRemarks.length">
+                  <div class="px-5 pt-3 pb-1 text-xs font-bold text-gray-500 bg-gray-50">内部备注</div>
+                  <div v-for="record in internalRemarks" :key="record.id" class="px-5 py-3 text-sm">
+                    <div class="flex justify-between gap-3">
+                      <div class="font-bold text-gray-800">
+                        {{ remarkCategoryLabel(record.category) }}
+                        <span class="ml-2 text-xs font-normal text-gray-400">
+                          {{ record.visibility === "customer_visible" ? "客户可见" : "内部" }}
+                        </span>
+                      </div>
+                      <el-tag size="small" :type="record.status === 'closed' ? 'info' : 'warning'" effect="plain">
+                        {{ record.status === "closed" ? "已关闭" : "待跟进" }}
+                      </el-tag>
                     </div>
-                    <el-tag size="small" :type="record.status === 'closed' ? 'info' : 'warning'" effect="plain">
-                      {{ record.status === "closed" ? "已关闭" : "待跟进" }}
-                    </el-tag>
+                    <div class="text-xs text-gray-500 mt-1">{{ record.content }}</div>
+                    <div class="text-xs text-gray-400 mt-1">
+                      责任人：{{ record.responsibleName || record.operator }}
+                      <span class="mx-1">·</span>
+                      记录人：{{ record.operator }}
+                      <span class="mx-1">·</span>
+                      {{ record.createdAt }}
+                    </div>
+                    <div v-if="record.followUpAt || record.reminderAt" class="text-xs text-gray-400 mt-1">
+                      <span v-if="record.followUpAt">跟进时间：{{ record.followUpAt }}</span>
+                      <span v-if="record.followUpAt && record.reminderAt" class="mx-1">·</span>
+                      <span v-if="record.reminderAt">提醒时间：{{ record.reminderAt }}</span>
+                    </div>
+                    <div v-if="record.status === 'closed'" class="text-xs text-gray-400 mt-1">
+                      关闭人：{{ record.closedBy || "营运端" }}
+                      <span v-if="record.closedAt"> · {{ record.closedAt }}</span>
+                      <span v-if="record.closeNote"> · {{ record.closeNote }}</span>
+                    </div>
+                    <div v-else class="mt-2">
+                      <el-button
+                        size="small"
+                        link
+                        type="primary"
+                        :loading="fulfillmentActionLoading === `${record.id}:close`"
+                        @click="closeRemark(record.id)"
+                      >
+                        关闭跟进
+                      </el-button>
+                    </div>
                   </div>
-                  <div class="text-xs text-gray-500 mt-1">{{ record.content }}</div>
-                  <div class="text-xs text-gray-400 mt-1">
-                    责任人：{{ record.responsibleName || record.operator }}
-                    <span class="mx-1">·</span>
-                    记录人：{{ record.operator }}
-                    <span class="mx-1">·</span>
-                    {{ record.createdAt }}
+                </template>
+                <template v-if="customerRemarks.length">
+                  <div class="px-5 pt-3 pb-1 text-xs font-bold text-gray-500 bg-gray-50">客户备注</div>
+                  <div v-for="record in customerRemarks" :key="record.id" class="px-5 py-3 text-sm">
+                    <div class="flex justify-between gap-3">
+                      <div class="font-bold text-gray-800">
+                        {{ remarkCategoryLabel(record.category) }}
+                        <span class="ml-2 text-xs font-normal text-gray-400">
+                          {{ record.visibility === "customer_visible" ? "客户可见" : "内部" }}
+                        </span>
+                      </div>
+                      <el-tag size="small" :type="record.status === 'closed' ? 'info' : 'warning'" effect="plain">
+                        {{ record.status === "closed" ? "已关闭" : "待跟进" }}
+                      </el-tag>
+                    </div>
+                    <div class="text-xs text-gray-500 mt-1">{{ record.content }}</div>
+                    <div class="text-xs text-gray-400 mt-1">
+                      责任人：{{ record.responsibleName || record.operator }}
+                      <span class="mx-1">·</span>
+                      记录人：{{ record.operator }}
+                      <span class="mx-1">·</span>
+                      {{ record.createdAt }}
+                    </div>
+                    <div v-if="record.followUpAt || record.reminderAt" class="text-xs text-gray-400 mt-1">
+                      <span v-if="record.followUpAt">跟进时间：{{ record.followUpAt }}</span>
+                      <span v-if="record.followUpAt && record.reminderAt" class="mx-1">·</span>
+                      <span v-if="record.reminderAt">提醒时间：{{ record.reminderAt }}</span>
+                    </div>
+                    <div v-if="record.status === 'closed'" class="text-xs text-gray-400 mt-1">
+                      关闭人：{{ record.closedBy || "营运端" }}
+                      <span v-if="record.closedAt"> · {{ record.closedAt }}</span>
+                      <span v-if="record.closeNote"> · {{ record.closeNote }}</span>
+                    </div>
+                    <div v-else class="mt-2">
+                      <el-button
+                        size="small"
+                        link
+                        type="primary"
+                        :loading="fulfillmentActionLoading === `${record.id}:close`"
+                        @click="closeRemark(record.id)"
+                      >
+                        关闭跟进
+                      </el-button>
+                    </div>
                   </div>
-                  <div v-if="record.followUpAt || record.reminderAt" class="text-xs text-gray-400 mt-1">
-                    <span v-if="record.followUpAt">跟进时间：{{ record.followUpAt }}</span>
-                    <span v-if="record.followUpAt && record.reminderAt" class="mx-1">·</span>
-                    <span v-if="record.reminderAt">提醒时间：{{ record.reminderAt }}</span>
+                </template>
+                <template v-if="returnVisitRemarks.length">
+                  <div class="px-5 pt-3 pb-1 text-xs font-bold text-gray-500 bg-gray-50">回访记录</div>
+                  <div v-for="record in returnVisitRemarks" :key="record.id" class="px-5 py-3 text-sm">
+                    <div class="flex justify-between gap-3">
+                      <div class="font-bold text-gray-800">
+                        {{ remarkCategoryLabel(record.category) }}
+                        <span class="ml-2 text-xs font-normal text-gray-400">
+                          {{ record.visibility === "customer_visible" ? "客户可见" : "内部" }}
+                        </span>
+                      </div>
+                      <el-tag size="small" :type="record.status === 'closed' ? 'info' : 'warning'" effect="plain">
+                        {{ record.status === "closed" ? "已关闭" : "待跟进" }}
+                      </el-tag>
+                    </div>
+                    <div class="text-xs text-gray-500 mt-1">{{ record.content }}</div>
+                    <div class="text-xs text-gray-400 mt-1">
+                      责任人：{{ record.responsibleName || record.operator }}
+                      <span class="mx-1">·</span>
+                      记录人：{{ record.operator }}
+                      <span class="mx-1">·</span>
+                      {{ record.createdAt }}
+                    </div>
+                    <div v-if="record.followUpAt || record.reminderAt" class="text-xs text-gray-400 mt-1">
+                      <span v-if="record.followUpAt">跟进时间：{{ record.followUpAt }}</span>
+                      <span v-if="record.followUpAt && record.reminderAt" class="mx-1">·</span>
+                      <span v-if="record.reminderAt">提醒时间：{{ record.reminderAt }}</span>
+                    </div>
+                    <div v-if="record.status === 'closed'" class="text-xs text-gray-400 mt-1">
+                      关闭人：{{ record.closedBy || "营运端" }}
+                      <span v-if="record.closedAt"> · {{ record.closedAt }}</span>
+                      <span v-if="record.closeNote"> · {{ record.closeNote }}</span>
+                    </div>
+                    <div v-else class="mt-2">
+                      <el-button
+                        size="small"
+                        link
+                        type="primary"
+                        :loading="fulfillmentActionLoading === `${record.id}:close`"
+                        @click="closeRemark(record.id)"
+                      >
+                        关闭跟进
+                      </el-button>
+                    </div>
                   </div>
-                  <div v-if="record.status === 'closed'" class="text-xs text-gray-400 mt-1">
-                    关闭人：{{ record.closedBy || "营运端" }}
-                    <span v-if="record.closedAt"> · {{ record.closedAt }}</span>
-                    <span v-if="record.closeNote"> · {{ record.closeNote }}</span>
+                </template>
+                <template v-if="otherRemarks.length">
+                  <div class="px-5 pt-3 pb-1 text-xs font-bold text-gray-500 bg-gray-50">其他跟进</div>
+                  <div v-for="record in otherRemarks" :key="record.id" class="px-5 py-3 text-sm">
+                    <div class="flex justify-between gap-3">
+                      <div class="font-bold text-gray-800">
+                        {{ remarkCategoryLabel(record.category) }}
+                        <span class="ml-2 text-xs font-normal text-gray-400">
+                          {{ record.visibility === "customer_visible" ? "客户可见" : "内部" }}
+                        </span>
+                      </div>
+                      <el-tag size="small" :type="record.status === 'closed' ? 'info' : 'warning'" effect="plain">
+                        {{ record.status === "closed" ? "已关闭" : "待跟进" }}
+                      </el-tag>
+                    </div>
+                    <div class="text-xs text-gray-500 mt-1">{{ record.content }}</div>
+                    <div class="text-xs text-gray-400 mt-1">
+                      责任人：{{ record.responsibleName || record.operator }}
+                      <span class="mx-1">·</span>
+                      记录人：{{ record.operator }}
+                      <span class="mx-1">·</span>
+                      {{ record.createdAt }}
+                    </div>
+                    <div v-if="record.followUpAt || record.reminderAt" class="text-xs text-gray-400 mt-1">
+                      <span v-if="record.followUpAt">跟进时间：{{ record.followUpAt }}</span>
+                      <span v-if="record.followUpAt && record.reminderAt" class="mx-1">·</span>
+                      <span v-if="record.reminderAt">提醒时间：{{ record.reminderAt }}</span>
+                    </div>
+                    <div v-if="record.status === 'closed'" class="text-xs text-gray-400 mt-1">
+                      关闭人：{{ record.closedBy || "营运端" }}
+                      <span v-if="record.closedAt"> · {{ record.closedAt }}</span>
+                      <span v-if="record.closeNote"> · {{ record.closeNote }}</span>
+                    </div>
+                    <div v-else class="mt-2">
+                      <el-button
+                        size="small"
+                        link
+                        type="primary"
+                        :loading="fulfillmentActionLoading === `${record.id}:close`"
+                        @click="closeRemark(record.id)"
+                      >
+                        关闭跟进
+                      </el-button>
+                    </div>
                   </div>
-                  <div v-else class="mt-2">
-                    <el-button
-                      size="small"
-                      link
-                      type="primary"
-                      :loading="fulfillmentActionLoading === `${record.id}:close`"
-                      @click="closeRemark(record.id)"
-                    >
-                      关闭跟进
-                    </el-button>
-                  </div>
-                </div>
+                </template>
               </div>
               <el-empty v-if="!detail.notifications.length && !detail.remarks.length" description="暂无通知或备注" :image-size="70" />
             </section>
@@ -4522,6 +4688,29 @@ onMounted(loadDetail);
         <el-button @click="remarkDialogVisible = false">取消</el-button>
         <el-button type="primary" color="#00689E" :loading="fulfillmentActionLoading === 'remark'" @click="submitRemark">
           保存备注
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="closeRemarkDialogVisible" title="关闭跟进记录" width="480px" destroy-on-close>
+      <el-form label-position="top">
+        <el-form-item label="关闭原因">
+          <el-select v-model="closeRemarkForm.closeNote" placeholder="选择关闭原因" class="w-full" allow-create filterable>
+            <el-option label="跟进已处理" value="跟进已处理" />
+            <el-option label="客户已确认" value="客户已确认" />
+            <el-option label="问题已解决" value="问题已解决" />
+            <el-option label="转交其他部门" value="转交其他部门" />
+            <el-option label="无需跟进" value="无需跟进" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="操作人">
+          <el-input v-model="closeRemarkForm.operator" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="closeRemarkDialogVisible = false">取消</el-button>
+        <el-button type="primary" color="#00689E" :loading="fulfillmentActionLoading.endsWith(':close')" @click="submitCloseRemark">
+          确认关闭
         </el-button>
       </template>
     </el-dialog>
