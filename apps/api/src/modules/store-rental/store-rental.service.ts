@@ -5654,7 +5654,15 @@ export class StoreRentalService {
       operationLockExpiredHint:
         order.operationLockStatus === OperationLockStatus.Expired
           ? "操作锁已过期，请重新发起取车操作。"
-          : undefined
+          : undefined,
+      // OR-16: 预授权过期检测
+      preAuthExpiredHint: (() => {
+        const preauths = this.financePreAuthorizations.get(order.id) ?? [];
+        const expired = preauths.find(
+          (p) => p.status === "frozen" && p.expiresAt && new Date(p.expiresAt).getTime() < Date.now()
+        );
+        return expired ? "预授权已过期，请重新发起预授权或联系财务处理。" : undefined;
+      })()
     };
   }
 
