@@ -207,25 +207,16 @@ export class ReportsRepository {
     const normalized = this.normalizeQuery(query);
     const orders = this.filterOrders(await this.fetchOrders(normalized), normalized);
     const rows = orders.map((order) => this.toFinanceReportRow(order));
-    const monthlyBills = await this.prisma.corporateMonthlyBill.findMany({
-      where: {
-        tenantId: normalized.tenantId,
-        createdAt: {
-          gte: normalized.fromDate,
-          lte: normalized.toDate
-        }
-      },
-      include: {
-        corporate: true,
-        lineItems: true
-      },
-      orderBy: { createdAt: "desc" },
-      take: 80
-    });
+    const monthlyBills = await this.fetchMonthlyBills(normalized);
+    const orderSummary = this.calculateFinanceSummary(orders);
+    const billAggregation = this.calculateMonthlyBillAggregation(monthlyBills);
 
     return {
       generatedAt: new Date().toISOString(),
-      summary: this.calculateFinanceSummary(orders),
+      summary: {
+        ...orderSummary,
+        ...billAggregation
+      },
       rows,
       monthlyBills: monthlyBills.map((bill) => ({
         id: bill.id,
@@ -523,6 +514,38 @@ export class ReportsRepository {
     });
   }
 
+  private fetchMonthlyBills(query: NormalizedReportQuery) {
+    return this.prisma.corporateMonthlyBill.findMany({
+      where: {
+        tenantId: query.tenantId,
+        createdAt: {
+          gte: query.fromDate,
+          lte: query.toDate
+        }
+      },
+      include: {
+        corporate: true,
+        lineItems: true
+      },
+      orderBy: { createdAt: "desc" },
+      take: 80
+    });
+  }
+
+  private calculateMonthlyBillAggregation(
+    bills: Awaited<ReturnType<ReportsRepository["fetchMonthlyBills"]>>
+  ) {
+    return bills.reduce(
+      (agg, bill) => {
+        agg.monthlyBillTotalAmount += money(bill.totalAmount);
+        agg.monthlyBillPaidAmount += money(bill.paidAmount);
+        agg.monthlyBillBalanceAmount += money(bill.balanceAmount);
+        return agg;
+      },
+      { monthlyBillTotalAmount: 0, monthlyBillPaidAmount: 0, monthlyBillBalanceAmount: 0 }
+    );
+  }
+
   private filterOrders(rows: StoreRentalOrderRow[], query: NormalizedReportQuery) {
     return rows.filter((row) => {
       const pickupStoreName = this.storeName(row.pickupStoreSnapshot, row.pickupStation?.parentStoreName);
@@ -642,7 +665,10 @@ export class ReportsRepository {
         pendingAmount: 0,
         refundAmount: 0,
         waiverAmount: 0,
-        monthlyBillingAmount: 0
+        monthlyBillingAmount: 0,
+        monthlyBillTotalAmount: 0,
+        monthlyBillPaidAmount: 0,
+        monthlyBillBalanceAmount: 0
       }
     );
   }

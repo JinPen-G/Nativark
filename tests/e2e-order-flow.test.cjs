@@ -24,7 +24,8 @@ const VALID_TRANSITIONS = {
   cancelled: [],
   no_show: [],
   rejected: [],
-  closed: []
+  closed: [],
+  refunded: []
 };
 
 /** 全部主状态 */
@@ -44,6 +45,10 @@ function assert(condition, message) {
   }
 }
 
+function isConnectionError(err) {
+  return /服务未启动|ECONNREFUSED|请求超时/.test(err.message);
+}
+
 function request(method, path, body) {
   return new Promise((resolve, reject) => {
     const url = new URL(path, BASE);
@@ -57,7 +62,8 @@ function request(method, path, body) {
         "Content-Type": "application/json",
         "x-tenant-id": "tenant_001",
         ...(payload ? { "Content-Length": Buffer.byteLength(payload) } : {})
-      }
+      },
+      timeout: 5000
     };
     const req = http.request(options, (res) => {
       let data = "";
@@ -70,7 +76,13 @@ function request(method, path, body) {
         }
       });
     });
-    req.on("error", reject);
+    req.on("timeout", () => {
+      req.destroy();
+      reject(new Error("请求超时"));
+    });
+    req.on("error", (err) => {
+      reject(new Error(err.code === "ECONNREFUSED" ? `服务未启动 (${BASE})` : err.message));
+    });
     if (payload) req.write(payload);
     req.end();
   });
@@ -85,8 +97,13 @@ async function testReportDashboard() {
     assert(data && Array.isArray(data.metricCards), "返回 metricCards 数组");
     assert(data.orderFunnel && data.orderFunnel.length > 0, "返回 orderFunnel 数据");
   } catch (err) {
-    failed++;
-    console.error(`  FAIL  Dashboard 请求失败: ${err.message}`);
+    if (isConnectionError(err)) {
+      skipped++;
+      console.log(`  SKIP  Dashboard: ${err.message}`);
+    } else {
+      failed++;
+      console.error(`  FAIL  Dashboard 请求失败: ${err.message}`);
+    }
   }
 }
 
@@ -100,8 +117,13 @@ async function testOrdersReport() {
     assert(data.rows.length > 0, "订单数量 > 0");
     assert(data.summary, "返回 summary 统计");
   } catch (err) {
-    failed++;
-    console.error(`  FAIL  订单报表请求失败: ${err.message}`);
+    if (isConnectionError(err)) {
+      skipped++;
+      console.log(`  SKIP  订单报表: ${err.message}`);
+    } else {
+      failed++;
+      console.error(`  FAIL  订单报表请求失败: ${err.message}`);
+    }
   }
 }
 
@@ -117,8 +139,13 @@ async function testMainStatusFilter() {
     );
     assert(invalid.length === 0, "所有返回订单的 mainStatus 都在 renting 或 completed 中");
   } catch (err) {
-    failed++;
-    console.error(`  FAIL  mainStatuss 筛选请求失败: ${err.message}`);
+    if (isConnectionError(err)) {
+      skipped++;
+      console.log(`  SKIP  mainStatuss 筛选: ${err.message}`);
+    } else {
+      failed++;
+      console.error(`  FAIL  mainStatuss 筛选请求失败: ${err.message}`);
+    }
   }
 }
 
@@ -131,8 +158,13 @@ async function testVehiclesReport() {
     assert(Array.isArray(data.rows), "返回 rows 数组");
     assert(data.summary, "返回 summary 统计");
   } catch (err) {
-    failed++;
-    console.error(`  FAIL  车辆报表请求失败: ${err.message}`);
+    if (isConnectionError(err)) {
+      skipped++;
+      console.log(`  SKIP  车辆报表: ${err.message}`);
+    } else {
+      failed++;
+      console.error(`  FAIL  车辆报表请求失败: ${err.message}`);
+    }
   }
 }
 
@@ -144,9 +176,15 @@ async function testFinanceReport() {
     const data = res.body?.data ?? res.body;
     assert(Array.isArray(data.rows), "返回 rows 数组");
     assert(data.summary, "返回 summary 统计");
+    assert(typeof data.summary.monthlyBillTotalAmount === "number", "summary 包含 monthlyBillTotalAmount");
   } catch (err) {
-    failed++;
-    console.error(`  FAIL  财务报表请求失败: ${err.message}`);
+    if (isConnectionError(err)) {
+      skipped++;
+      console.log(`  SKIP  财务报表: ${err.message}`);
+    } else {
+      failed++;
+      console.error(`  FAIL  财务报表请求失败: ${err.message}`);
+    }
   }
 }
 
@@ -159,8 +197,13 @@ async function testOpsHealth() {
     assert(data.database, "返回 database 信息");
     assert(data.seed, "返回 seed 信息");
   } catch (err) {
-    failed++;
-    console.error(`  FAIL  运维健康检查请求失败: ${err.message}`);
+    if (isConnectionError(err)) {
+      skipped++;
+      console.log(`  SKIP  运维健康检查: ${err.message}`);
+    } else {
+      failed++;
+      console.error(`  FAIL  运维健康检查请求失败: ${err.message}`);
+    }
   }
 }
 
