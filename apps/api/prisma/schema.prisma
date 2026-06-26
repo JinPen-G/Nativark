@@ -1250,23 +1250,24 @@ model PricingQuoteSnapshot {
 }
 
 model FeeItem {
-  id            String           @id @default(uuid())
-  orderId       String
-  order         StoreRentalOrder @relation(fields: [orderId], references: [id])
-  code          String
-  name          String
-  stage         FeeStage         @default(RENTAL)
-  direction     FeeDirection     @default(CHARGE)
-  status        FeeStatus        @default(PENDING)
-  amount        Decimal          @db.Decimal(12, 2)
-  settledAmount Decimal          @default(0) @db.Decimal(12, 2)
-  pendingAmount Decimal          @default(0) @db.Decimal(12, 2)
-  source        String           @default("system")
-  description   String?
-  snapshotRef   String?
-  ruleSnapshot  Json
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
+  id             String           @id @default(uuid())
+  orderId        String
+  order          StoreRentalOrder @relation(fields: [orderId], references: [id])
+  code           String
+  name           String
+  stage          FeeStage         @default(RENTAL)
+  direction      FeeDirection     @default(CHARGE)
+  status         FeeStatus        @default(PENDING)
+  invoicedStatus String           @default("none")
+  amount         Decimal          @db.Decimal(12, 2)
+  settledAmount  Decimal          @default(0) @db.Decimal(12, 2)
+  pendingAmount  Decimal          @default(0) @db.Decimal(12, 2)
+  source         String           @default("system")
+  description    String?
+  snapshotRef    String?
+  ruleSnapshot   Json
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
 
   @@index([orderId, stage, status])
 }

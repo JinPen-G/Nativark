@@ -1,0 +1,2 @@
+ALTER TABLE `FeeItem`
+  ADD COLUMN `invoicedStatus` VARCHAR(191) NOT NULL DEFAULT 'none';
