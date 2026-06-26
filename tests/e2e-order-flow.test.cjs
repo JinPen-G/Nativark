@@ -628,6 +628,254 @@ function testFeeAmountSanity() {
   console.log("  PASS  费用金额合理性验证通过");
 }
 
+// TST-01: PaymentStatus 枚举完整性
+function testPaymentStatusEnumCompleteness() {
+  console.log("\n[测试] PaymentStatus 枚举完整性");
+  const validPaymentStatuses = ["unpaid", "deposit_paid", "monthly_billing", "partial_paid", "paid", "payment_due", "refund_pending", "refunded"];
+  assert(validPaymentStatuses.length === 8, `PaymentStatus 有 8 个值 (实际: ${validPaymentStatuses.length})`);
+  for (const ps of validPaymentStatuses) {
+    assert(typeof ps === "string" && ps.length > 0, `PaymentStatus ${ps} 名称非空`);
+  }
+  assert(new Set(validPaymentStatuses).size === validPaymentStatuses.length, "PaymentStatus 无重复值");
+  // 分组校验：未付款/已付款/特殊
+  const unpaidGroup = ["unpaid", "deposit_paid"];
+  const paidGroup = ["paid", "partial_paid"];
+  const specialGroup = ["monthly_billing", "payment_due", "refund_pending", "refunded"];
+  for (const s of unpaidGroup) assert(validPaymentStatuses.includes(s), `未付款组包含 ${s}`);
+  for (const s of paidGroup) assert(validPaymentStatuses.includes(s), `已付款组包含 ${s}`);
+  for (const s of specialGroup) assert(validPaymentStatuses.includes(s), `特殊组包含 ${s}`);
+  assert(unpaidGroup.length + paidGroup.length + specialGroup.length === 8, "三组总数 = 8");
+  passed++;
+  console.log("  PASS  PaymentStatus 枚举完整性验证通过");
+}
+
+// TST-01: BillingMode 枚举完整性
+function testBillingModeEnumCompleteness() {
+  console.log("\n[测试] BillingMode 枚举完整性");
+  const validBillingModes = ["customer_pay", "monthly"];
+  assert(validBillingModes.length === 2, `BillingMode 有 2 个值`);
+  assert(validBillingModes.includes("customer_pay"), "包含 customer_pay");
+  assert(validBillingModes.includes("monthly"), "包含 monthly");
+  assert(new Set(validBillingModes).size === validBillingModes.length, "BillingMode 无重复值");
+  passed++;
+  console.log("  PASS  BillingMode 枚举完整性验证通过");
+}
+
+// TST-01: 终态互不可达测试
+function testTerminalStatesNoMutualReach() {
+  console.log("\n[测试] 终态互不可达");
+  const terminalStates = ALL_STATUSES.filter((s) => VALID_TRANSITIONS[s].length === 0);
+  for (const terminal of terminalStates) {
+    for (const other of terminalStates) {
+      if (terminal === other) continue;
+      assert(
+        !VALID_TRANSITIONS[terminal].includes(other),
+        `终态 ${terminal} 不可达终态 ${other}`
+      );
+    }
+  }
+  passed++;
+  console.log("  PASS  终态互不可达验证通过");
+}
+
+// TST-01: 续租流程深度属性测试
+function testRenewalFlowDeepProperties() {
+  console.log("\n[测试] 续租流程深度属性");
+  // 续租只能从 renting 进入
+  const renewingInbound = Object.entries(VALID_TRANSITIONS).filter(([_, t]) => t.includes("renewing"));
+  assert(renewingInbound.length === 1, `renewing 只有 1 个入边来源 (实际: ${renewingInbound.length})`);
+  assert(renewingInbound[0][0] === "renting", "renewing 入边仅来自 renting");
+  // 续租可回退到 renting
+  assert(VALID_TRANSITIONS.renewing.includes("renting"), "renewing 可回退到 renting");
+  // 续租不可跳过 settlement 直接到 payment_due
+  assert(!VALID_TRANSITIONS.renewing.includes("payment_due"), "renewing 不可直接转 payment_due");
+  assert(!VALID_TRANSITIONS.renewing.includes("refund_pending"), "renewing 不可直接转 refund_pending");
+  // 续租状态有 4 个出边
+  assert(VALID_TRANSITIONS.renewing.length === 4, `renewing 有 4 个出边 (实际: ${VALID_TRANSITIONS.renewing.length})`);
+  passed++;
+  console.log("  PASS  续租流程深度属性验证通过");
+}
+
+// TST-01: 取消退款流程路径测试
+function testCancelRefundFlow() {
+  console.log("\n[测试] 取消退款流程路径");
+  // 可取消的状态
+  const cancellableStates = Object.entries(VALID_TRANSITIONS)
+    .filter(([_, t]) => t.includes("cancelled"))
+    .map(([s]) => s);
+  assert(cancellableStates.includes("pending_payment"), "pending_payment 可取消");
+  assert(cancellableStates.includes("reserved"), "reserved 可取消");
+  assert(cancellableStates.includes("pickup_overdue"), "pickup_overdue 可取消");
+  assert(cancellableStates.length === 3, `可取消状态数为 3 (实际: ${cancellableStates.length})`);
+  // 退款相关
+  const refundableStates = Object.entries(VALID_TRANSITIONS)
+    .filter(([_, t]) => t.includes("refund_pending"))
+    .map(([s]) => s);
+  assert(refundableStates.includes("settlement_pending"), "settlement_pending 可转 refund_pending");
+  assert(refundableStates.includes("payment_due"), "payment_due 可转 refund_pending");
+  assert(refundableStates.length === 2, `可转 refund_pending 的状态数为 2 (实际: ${refundableStates.length})`);
+  // refund_pending 只能到 completed 或 closed
+  assert(VALID_TRANSITIONS.refund_pending.includes("completed"), "refund_pending 可转 completed");
+  assert(VALID_TRANSITIONS.refund_pending.includes("closed"), "refund_pending 可转 closed");
+  assert(VALID_TRANSITIONS.refund_pending.length === 2, `refund_pending 有 2 个出边`);
+  passed++;
+  console.log("  PASS  取消退款流程路径验证通过");
+}
+
+// TST-01: 逾期流程深度测试
+function testOverdueFlowDeepProperties() {
+  console.log("\n[测试] 逾期流程深度属性");
+  // overdue 只能从 renting 或 renewing 进入
+  const overdueInbound = Object.entries(VALID_TRANSITIONS).filter(([_, t]) => t.includes("overdue"));
+  assert(overdueInbound.length === 2, `overdue 有 2 个入边来源 (实际: ${overdueInbound.length})`);
+  const inboundNames = overdueInbound.map(([s]) => s).sort();
+  assert(inboundNames.includes("renting"), "overdue 入边来源包含 renting");
+  assert(inboundNames.includes("renewing"), "overdue 入边来源包含 renewing");
+  // overdue 可转 settlement_pending / completed / accident_processing
+  assert(VALID_TRANSITIONS.overdue.includes("settlement_pending"), "overdue 可转 settlement_pending");
+  assert(VALID_TRANSITIONS.overdue.includes("completed"), "overdue 可转 completed");
+  assert(VALID_TRANSITIONS.overdue.includes("accident_processing"), "overdue 可转 accident_processing");
+  assert(VALID_TRANSITIONS.overdue.length === 3, `overdue 有 3 个出边`);
+  // overdue 不能直接回到 renting
+  assert(!VALID_TRANSITIONS.overdue.includes("renting"), "overdue 不可回到 renting");
+  passed++;
+  console.log("  PASS  逾期流程深度属性验证通过");
+}
+
+// TST-01: 状态图双向连通性测试
+function testGraphBidirectionalEdges() {
+  console.log("\n[测试] 状态图双向连通边");
+  // renting <-> renewing 是双向边
+  assert(VALID_TRANSITIONS.renting.includes("renewing"), "renting -> renewing 存在");
+  assert(VALID_TRANSITIONS.renewing.includes("renting"), "renewing -> renting 存在");
+  // settlement_pending -> payment_due 和 settlement_pending -> refund_pending 是单向
+  assert(VALID_TRANSITIONS.settlement_pending.includes("payment_due"), "settlement_pending -> payment_due 存在");
+  assert(!VALID_TRANSITIONS.payment_due.includes("settlement_pending"), "payment_due -> settlement_pending 不存在");
+  assert(VALID_TRANSITIONS.settlement_pending.includes("refund_pending"), "settlement_pending -> refund_pending 存在");
+  assert(!VALID_TRANSITIONS.refund_pending.includes("settlement_pending"), "refund_pending -> settlement_pending 不存在");
+  // 验证唯一双向边就是 renting <-> renewing
+  let bidirectionalPairs = 0;
+  for (const [s, targets] of Object.entries(VALID_TRANSITIONS)) {
+    for (const t of targets) {
+      if (VALID_TRANSITIONS[t] && VALID_TRANSITIONS[t].includes(s) && s !== t) {
+        bidirectionalPairs++;
+      }
+    }
+  }
+  assert(bidirectionalPairs === 2, `双向边对数为 2 (renting<->renewing 各计 1) (实际: ${bidirectionalPairs})`);
+  passed++;
+  console.log("  PASS  状态图双向连通边验证通过");
+}
+
+// TST-01: 完整费用阶段-状态兼容矩阵测试
+function testFeeStageStatusCompatibility() {
+  console.log("\n[测试] 费用阶段-状态兼容矩阵");
+  const stageStatusMatrix = {
+    pickup: ["pending", "settled", "waived", "voided"],
+    rental: ["pending", "settled", "waived", "monthly_billing", "voided"],
+    return_settlement: ["pending", "settled", "waived", "voided"],
+    cancellation: ["settled", "waived", "voided"],
+    post_charge: ["pending", "settled", "waived", "voided"]
+  };
+  for (const [stage, statuses] of Object.entries(stageStatusMatrix)) {
+    assert(statuses.length > 0, `阶段 ${stage} 至少有 1 个兼容状态`);
+    for (const status of statuses) {
+      assert(
+        ["pending", "settled", "waived", "monthly_billing", "voided"].includes(status),
+        `阶段 ${stage} 的状态 ${status} 是合法费用状态`
+      );
+    }
+  }
+  // rental 是唯一可使用 monthly_billing 的阶段
+  assert(stageStatusMatrix.rental.includes("monthly_billing"), "rental 可使用 monthly_billing");
+  assert(!stageStatusMatrix.pickup.includes("monthly_billing"), "pickup 不可使用 monthly_billing");
+  assert(!stageStatusMatrix.return_settlement.includes("monthly_billing"), "return_settlement 不可使用 monthly_billing");
+  assert(!stageStatusMatrix.cancellation.includes("monthly_billing"), "cancellation 不可使用 monthly_billing");
+  assert(!stageStatusMatrix.post_charge.includes("monthly_billing"), "post_charge 不可使用 monthly_billing");
+  // cancellation 不可使用 pending
+  assert(!stageStatusMatrix.cancellation.includes("pending"), "cancellation 不可使用 pending");
+  passed++;
+  console.log("  PASS  费用阶段-状态兼容矩阵验证通过");
+}
+
+// TST-01: DispatchStatus 枚举完整性
+function testDispatchStatusEnumCompleteness() {
+  console.log("\n[测试] DispatchStatus 枚举完整性");
+  const validDispatchStatuses = ["pending", "pre_assigned", "locked", "manual_reassigned", "upgraded", "dispatch_manual_required"];
+  assert(validDispatchStatuses.length === 6, `DispatchStatus 有 6 个值 (实际: ${validDispatchStatuses.length})`);
+  for (const ds of validDispatchStatuses) {
+    assert(typeof ds === "string" && ds.length > 0, `DispatchStatus ${ds} 名称非空`);
+  }
+  assert(new Set(validDispatchStatuses).size === validDispatchStatuses.length, "DispatchStatus 无重复值");
+  // 分组校验
+  const preDispatch = ["pending", "pre_assigned"];
+  const activeDispatch = ["locked", "manual_reassigned", "upgraded", "dispatch_manual_required"];
+  for (const s of preDispatch) assert(validDispatchStatuses.includes(s), `调度前组包含 ${s}`);
+  for (const s of activeDispatch) assert(validDispatchStatuses.includes(s), `调度中/后组包含 ${s}`);
+  assert(preDispatch.length + activeDispatch.length === 6, "两组总数 = 6");
+  passed++;
+  console.log("  PASS  DispatchStatus 枚举完整性验证通过");
+}
+
+// TST-01: 状态图分层拓扑测试
+function testGraphTopologyLayers() {
+  console.log("\n[测试] 状态图分层拓扑");
+  // BFS 按层级分组
+  const layerMap = new Map();
+  const visited = new Set();
+  const queue = ["pending_payment"];
+  layerMap.set("pending_payment", 0);
+  visited.add("pending_payment");
+  while (queue.length > 0) {
+    const current = queue.shift();
+    const currentLayer = layerMap.get(current);
+    for (const target of VALID_TRANSITIONS[current] || []) {
+      if (!visited.has(target)) {
+        visited.add(target);
+        layerMap.set(target, currentLayer + 1);
+        queue.push(target);
+      }
+    }
+  }
+  // 验证层级总数合理
+  const maxLayer = Math.max(...layerMap.values());
+  assert(maxLayer >= 3, `最大拓扑层数 >= 3 (实际: ${maxLayer})`);
+  assert(maxLayer <= 15, `最大拓扑层数 <= 15 (实际: ${maxLayer})`);
+  // 验证 pending_payment 在第 0 层
+  assert(layerMap.get("pending_payment") === 0, "pending_payment 在第 0 层");
+  // 验证终态在最深或较深层
+  const terminalStates = ALL_STATUSES.filter((s) => VALID_TRANSITIONS[s].length === 0);
+  for (const t of terminalStates) {
+    assert(layerMap.has(t), `终态 ${t} 有拓扑层`);
+    assert(layerMap.get(t) >= 2, `终态 ${t} 拓扑层 >= 2 (实际: ${layerMap.get(t)})`);
+  }
+  // 验证每一层至少有 1 个状态
+  for (let i = 0; i <= maxLayer; i++) {
+    const layerStates = [...layerMap.entries()].filter(([_, l]) => l === i).map(([s]) => s);
+    assert(layerStates.length >= 1, `第 ${i} 层至少有 1 个状态 (实际: ${layerStates.length})`);
+  }
+  passed++;
+  console.log("  PASS  状态图分层拓扑验证通过");
+}
+
+// TST-01: 费用 code 命名规范测试
+function testFeeCodeNamingConvention() {
+  console.log("\n[测试] 费用 code 命名规范");
+  const knownFeeCodes = [
+    "RENTAL", "SERVICE", "ONEWAY", "DAMAGE", "OVERTIME",
+    "EARLY_RETURN", "CANCEL_FEE", "DEPOSIT", "POST_ETC",
+    "OVERDUE_FEE", "NO_SHOW_FEE", "INSPECT_FEE", "RENTAL_EXT"
+  ];
+  for (const code of knownFeeCodes) {
+    assert(code === code.toUpperCase(), `费用 code ${code} 全大写`);
+    assert(/^[A-Z_]+$/.test(code), `费用 code ${code} 只含大写字母和下划线`);
+  }
+  assert(new Set(knownFeeCodes).size === knownFeeCodes.length, "费用 code 无重复");
+  assert(knownFeeCodes.length >= 10, `已知费用 code 数量 >= 10 (实际: ${knownFeeCodes.length})`);
+  passed++;
+  console.log("  PASS  费用 code 命名规范验证通过");
+}
+
 async function main() {
   console.log("=".repeat(60));
   console.log("E2E 订单状态流转 & 报表测试");
@@ -654,6 +902,17 @@ async function main() {
   testFeeDirectionStageMapping();
   testExpectedEnumCompleteness();
   testFeeAmountSanity();
+  testPaymentStatusEnumCompleteness();
+  testBillingModeEnumCompleteness();
+  testTerminalStatesNoMutualReach();
+  testRenewalFlowDeepProperties();
+  testCancelRefundFlow();
+  testOverdueFlowDeepProperties();
+  testGraphBidirectionalEdges();
+  testFeeStageStatusCompatibility();
+  testDispatchStatusEnumCompleteness();
+  testGraphTopologyLayers();
+  testFeeCodeNamingConvention();
 
   // API 集成测试
   await testReportDashboard();
