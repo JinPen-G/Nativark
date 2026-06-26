@@ -341,7 +341,10 @@ function emptyDashboard(): StoreRentalReportDashboard {
       pendingAmount: 0,
       refundAmount: 0,
       waiverAmount: 0,
-      monthlyBillingAmount: 0
+      monthlyBillingAmount: 0,
+      monthlyBillTotalAmount: 0,
+      monthlyBillPaidAmount: 0,
+      monthlyBillBalanceAmount: 0
     }
   };
 }

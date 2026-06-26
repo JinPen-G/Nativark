@@ -359,6 +359,32 @@ const demoOrders: DemoOrder[] = [
       { type: "refund", status: "success", amount: 780, channel: "online", operator: "seed" },
       { type: "payment", status: "success", amount: 100, channel: "online", operator: "seed" }
     ]
+  },
+  {
+    id: "report_order_013",
+    orderNo: "SR-DEMO-202606-0013",
+    memberId: undefined,
+    corporateId: "corp_002",
+    customerName: "Peak Studio 拍摄用车",
+    customerPhoneMasked: "852****0018",
+    corporateShortName: "Peak Studio",
+    vehicleGroupId: "VG_ECONOMY",
+    assignedVehicleId: "VEH_002",
+    pickupStationId: "station_mk_counter",
+    returnStationId: "station_mk_counter",
+    pickupAt: "2026-06-12T09:00:00+08:00",
+    returnAt: "2026-06-14T09:00:00+08:00",
+    totalAmount: 1600,
+    mainStatus: OrderMainStatus.RENTING,
+    dispatchStatus: DispatchStatus.LOCKED,
+    paymentStatus: PaymentStatus.MONTHLY_BILLING,
+    billingMode: BillingMode.MONTHLY,
+    riskFlags: [],
+    fees: [
+      { code: "RENTAL", name: "车辆租金", stage: FeeStage.RENTAL, direction: FeeDirection.CHARGE, status: FeeStatus.MONTHLY_BILLING, amount: 1200, settledAmount: 0 },
+      { code: "SERVICE", name: "GPS服务费", stage: FeeStage.RENTAL, direction: FeeDirection.CHARGE, status: FeeStatus.MONTHLY_BILLING, amount: 400, settledAmount: 0 }
+    ],
+    transactions: [{ type: "monthly_bill", status: "success", amount: 1600, channel: "internal", operator: "seed" }]
   }
 ];
 
@@ -572,6 +598,60 @@ async function upsertMonthlyBill() {
     ],
     skipDuplicates: true
   });
+
+  // corp_002 (Peak Studio) monthly bill
+  await prisma.corporateMonthlyBillLine.deleteMany({
+    where: { billId: "report_bill_002" }
+  });
+  await prisma.corporateMonthlyBillSettlement.deleteMany({
+    where: { billId: "report_bill_002" }
+  });
+  await prisma.corporateMonthlyBill.upsert({
+    where: { id: "report_bill_002" },
+    update: {
+      tenantId,
+      corporateId: "corp_002",
+      billNo: "BILL-DEMO-202606-PS",
+      period: "2026-06",
+      status: MonthlyBillStatus.POSTED,
+      orderCount: 1,
+      totalAmount: 1600,
+      paidAmount: 0,
+      balanceAmount: 1600,
+      dueDate: new Date("2026-07-25T00:00:00+08:00")
+    },
+    create: {
+      id: "report_bill_002",
+      tenantId,
+      corporateId: "corp_002",
+      billNo: "BILL-DEMO-202606-PS",
+      period: "2026-06",
+      status: MonthlyBillStatus.POSTED,
+      orderCount: 1,
+      totalAmount: 1600,
+      paidAmount: 0,
+      balanceAmount: 1600,
+      dueDate: new Date("2026-07-25T00:00:00+08:00")
+    }
+  });
+
+  await prisma.corporateMonthlyBillLine.createMany({
+    data: [
+      {
+        id: "report_bill_002_line_1",
+        billId: "report_bill_002",
+        orderId: "report_order_013",
+        orderNo: "SR-DEMO-202606-0013",
+        customerName: "Peak Studio 拍摄用车",
+        vehicleGroupName: "Honda Jazz / 同级",
+        pickupStoreName: "旺角门市",
+        returnStoreName: "旺角门市",
+        amount: 1600,
+        remark: "Peak Studio 企业月结拍摄用车"
+      }
+    ],
+    skipDuplicates: true
+  });
 }
 
 async function upsertOpsArtifacts() {
@@ -584,7 +664,7 @@ async function upsertOpsArtifacts() {
         fileName: "store-rental-orders-2026-06-demo.csv",
         status: "completed",
         filters: { from: "2026-06-01", to: "2026-06-30" },
-        rowCount: demoOrders.length,
+        rowCount: 13,
         downloadUrl: "/api/reports/exports/store-rental-orders-2026-06-demo.csv",
         operator: "seed",
         completedAt: new Date("2026-06-08T11:00:00+08:00")

@@ -3356,6 +3356,9 @@ export interface StoreRentalReportDashboard {
     refundAmount: number;
     waiverAmount: number;
     monthlyBillingAmount: number;
+    monthlyBillTotalAmount: number;
+    monthlyBillPaidAmount: number;
+    monthlyBillBalanceAmount: number;
   };
 }
 
