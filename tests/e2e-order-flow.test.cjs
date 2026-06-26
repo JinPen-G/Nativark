@@ -390,12 +390,43 @@ function testRejectedTerminal() {
 function testFeeStageCompleteness() {
   console.log("\n[测试] 费用阶段枚举完整性");
   const validStages = ["pickup", "rental", "return_settlement", "cancellation", "post_charge"];
+  const validDirections = ["charge", "refund", "waiver"];
+  const validStatuses = ["pending", "settled", "waived", "monthly_billing", "voided"];
+
   assert(validStages.length === 5, "费用阶段枚举完整 (5 个)");
   assert(validStages.includes("pickup"), "包含 pickup 阶段");
   assert(validStages.includes("rental"), "包含 rental 阶段");
   assert(validStages.includes("return_settlement"), "包含 return_settlement 阶段");
   assert(validStages.includes("cancellation"), "包含 cancellation 阶段");
   assert(validStages.includes("post_charge"), "包含 post_charge 阶段");
+
+  // 阶段顺序校验：pickup 最早，return_settlement 在 rental 之后
+  assert(validStages.indexOf("pickup") < validStages.indexOf("rental"), "pickup 在 rental 之前");
+  assert(validStages.indexOf("rental") < validStages.indexOf("return_settlement"), "rental 在 return_settlement 之前");
+  assert(validStages.indexOf("return_settlement") < validStages.indexOf("cancellation"), "return_settlement 在 cancellation 之前");
+  assert(validStages.indexOf("cancellation") < validStages.indexOf("post_charge"), "cancellation 在 post_charge 之前");
+
+  // 每个阶段至少对应一个有效方向
+  for (const stage of validStages) {
+    assert(typeof stage === "string" && stage.length > 0, `阶段 ${stage} 名称非空`);
+  }
+  // 方向枚举完整
+  assert(validDirections.length === 3, "费用方向枚举完整 (3 个)");
+  assert(validDirections.includes("charge"), "包含 charge 方向");
+  assert(validDirections.includes("refund"), "包含 refund 方向");
+  assert(validDirections.includes("waiver"), "包含 waiver 方向");
+  // 状态枚举完整
+  assert(validStatuses.length === 5, "费用状态枚举完整 (5 个)");
+  assert(validStatuses.includes("pending"), "包含 pending 状态");
+  assert(validStatuses.includes("settled"), "包含 settled 状态");
+  assert(validStatuses.includes("waived"), "包含 waived 状态");
+  assert(validStatuses.includes("monthly_billing"), "包含 monthly_billing 状态");
+  assert(validStatuses.includes("voided"), "包含 voided 状态");
+  // 无重复枚举值
+  assert(new Set(validStages).size === validStages.length, "费用阶段无重复枚举值");
+  assert(new Set(validDirections).size === validDirections.length, "费用方向无重复枚举值");
+  assert(new Set(validStatuses).size === validStatuses.length, "费用状态无重复枚举值");
+
   passed++;
   console.log("  PASS  费用阶段枚举完整性验证通过");
 }
@@ -419,15 +450,43 @@ function testReachableFromInitial() {
   console.log("\n[测试] 从初始状态可达性");
   const visited = new Set();
   const queue = ["pending_payment"];
+  const depthMap = new Map();
+  depthMap.set("pending_payment", 0);
   while (queue.length > 0) {
     const current = queue.shift();
     if (visited.has(current)) continue;
     visited.add(current);
     for (const target of VALID_TRANSITIONS[current] || []) {
-      if (!visited.has(target)) queue.push(target);
+      if (!visited.has(target)) {
+        queue.push(target);
+        if (!depthMap.has(target)) {
+          depthMap.set(target, (depthMap.get(current) || 0) + 1);
+        }
+      }
     }
   }
   assert(visited.size === ALL_STATUSES.length, `从 pending_payment 可达所有 ${ALL_STATUSES.length} 个状态 (实际: ${visited.size})`);
+
+  // 验证所有终态均可达
+  const terminalStates = ALL_STATUSES.filter((s) => VALID_TRANSITIONS[s].length === 0);
+  for (const terminal of terminalStates) {
+    assert(visited.has(terminal), `终态 ${terminal} 从初始状态可达`);
+  }
+
+  // 验证 BFS 深度：pending_payment 深度为 0
+  assert(depthMap.get("pending_payment") === 0, "pending_payment 深度为 0");
+  // reserved 深度应为 1（直接后继）
+  assert(depthMap.get("reserved") === 1, "reserved 深度为 1");
+  // completed 可通过多条路径到达，深度至少为 2
+  assert((depthMap.get("completed") || 0) >= 2, `completed 深度 >= 2 (实际: ${depthMap.get("completed")})`);
+
+  // 验证无孤立状态（每个非初始活跃状态至少有一个入边）
+  for (const status of ALL_STATUSES) {
+    if (status === "pending_payment") continue;
+    const hasInbound = Object.values(VALID_TRANSITIONS).some((targets) => targets.includes(status));
+    assert(hasInbound, `状态 ${status} 有入边（非孤立）`);
+  }
+
   passed++;
   console.log("  PASS  可达性验证通过");
 }

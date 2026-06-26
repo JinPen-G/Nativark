@@ -164,7 +164,10 @@ export class ReportsRepository {
           ].includes(row.mainStatus)
         ).length,
         riskOrders: rows.filter((row) => row.riskFlags.length > 0).length,
-        monthlyOrders: rows.filter((row) => row.billingMode === BillingMode.Monthly).length
+        monthlyOrders: rows.filter((row) => row.billingMode === BillingMode.Monthly).length,
+        totalSettledAmount: rows.reduce((sum, row) => sum + row.settledAmount, 0),
+        totalPendingAmount: rows.reduce((sum, row) => sum + row.pendingAmount, 0),
+        totalAmount: rows.reduce((sum, row) => sum + row.totalAmount, 0)
       },
       byStore: this.groupOrdersByStore(filteredOrders),
       byVehicleGroup: this.groupOrdersByVehicleGroup(filteredOrders),
@@ -993,31 +996,53 @@ export class ReportsRepository {
   }
 
   private groupOrdersByStore(orders: StoreRentalOrderRow[]): StoreRentalNamedMetric[] {
-    const groups = new Map<string, { count: number; amount: number }>();
+    const groups = new Map<string, { count: number; amount: number; settled: number; pending: number; risk: number }>();
     for (const order of orders) {
       const storeName = this.storeName(order.pickupStoreSnapshot, order.pickupStation?.parentStoreName);
-      const existing = groups.get(storeName) ?? { count: 0, amount: 0 };
+      const existing = groups.get(storeName) ?? { count: 0, amount: 0, settled: 0, pending: 0, risk: 0 };
+      const finance = this.orderFinance(order);
       existing.count += 1;
       existing.amount += money(order.totalAmount);
+      existing.settled += finance.settledAmount;
+      existing.pending += finance.pendingAmount;
+      if (this.isRiskOrder(order)) existing.risk += 1;
       groups.set(storeName, existing);
     }
     return Array.from(groups.entries())
       .sort((a, b) => b[1].count - a[1].count)
-      .map(([name, data]) => ({ name, value: data.count, amount: data.amount }));
+      .map(([name, data]) => ({
+        name,
+        value: data.count,
+        amount: data.amount,
+        settledAmount: data.settled,
+        pendingAmount: data.pending,
+        riskCount: data.risk
+      }));
   }
 
   private groupOrdersByVehicleGroup(orders: StoreRentalOrderRow[]): StoreRentalNamedMetric[] {
-    const groups = new Map<string, { count: number; amount: number }>();
+    const groups = new Map<string, { count: number; amount: number; settled: number; pending: number; risk: number }>();
     for (const order of orders) {
       const groupName = this.vehicleGroupName(order.vehicleGroupSnapshot, order.vehicleGroup.name);
-      const existing = groups.get(groupName) ?? { count: 0, amount: 0 };
+      const existing = groups.get(groupName) ?? { count: 0, amount: 0, settled: 0, pending: 0, risk: 0 };
+      const finance = this.orderFinance(order);
       existing.count += 1;
       existing.amount += money(order.totalAmount);
+      existing.settled += finance.settledAmount;
+      existing.pending += finance.pendingAmount;
+      if (this.isRiskOrder(order)) existing.risk += 1;
       groups.set(groupName, existing);
     }
     return Array.from(groups.entries())
       .sort((a, b) => b[1].count - a[1].count)
-      .map(([name, data]) => ({ name, value: data.count, amount: data.amount }));
+      .map(([name, data]) => ({
+        name,
+        value: data.count,
+        amount: data.amount,
+        settledAmount: data.settled,
+        pendingAmount: data.pending,
+        riskCount: data.risk
+      }));
   }
 
   private groupOrdersByStatus(orders: StoreRentalOrderRow[]): StoreRentalNamedMetric[] {
