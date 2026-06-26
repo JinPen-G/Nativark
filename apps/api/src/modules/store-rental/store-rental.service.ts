@@ -7831,7 +7831,7 @@ export class StoreRentalService {
       "manual_protected_invalid"
     ].includes(input.taskType);
     const event = await this.recordDispatchEvent({
-      eventType: "alert_closed",
+      eventType: "task_closed",
       source: "manual",
       title: "调度任务关闭",
       orderId: order.id,
@@ -7871,7 +7871,7 @@ export class StoreRentalService {
 
     const operator = input.operator || "调度员";
     const event = await this.recordDispatchEvent({
-      eventType: "alert_closed",
+      eventType: "task_claimed",
       source: "manual",
       title: "调度任务认领",
       orderId: order.id,
@@ -7918,7 +7918,7 @@ export class StoreRentalService {
 
     const operator = input.operator || "调度员";
     const event = await this.recordDispatchEvent({
-      eventType: "alert_closed",
+      eventType: "task_processed",
       source: "manual",
       title: `调度任务处理: ${input.status}`,
       orderId: order.id,
