@@ -1019,6 +1019,7 @@ export interface StoreRentalSettlementSummary {
   rentalAmount: number;
   serviceFeeAmount: number;
   overtimeFeeAmount: number;
+  extraMileageFeeAmount: number;
   damageFeeAmount: number;
   cleaningFeeAmount: number;
   discountAmount: number;

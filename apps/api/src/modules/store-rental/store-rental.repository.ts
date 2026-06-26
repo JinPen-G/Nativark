@@ -6021,6 +6021,7 @@ export class StoreRentalRepository {
       feeLedgerItems.find((item) => item.code === "SERVICE")?.amount ??
       0;
     const overtimeFeeAmount = this.numberValue(stored.overtimeFeeAmount) ?? 0;
+    const extraMileageFeeAmount = this.numberValue(stored.extraMileageFeeAmount) ?? 0;
     const damageFeeAmount = this.numberValue(stored.damageFeeAmount) ?? 0;
     const cleaningFeeAmount = this.numberValue(stored.cleaningFeeAmount) ?? 0;
     const discountAmount = this.numberValue(stored.discountAmount) ?? 0;
@@ -6029,12 +6030,13 @@ export class StoreRentalRepository {
       rentalAmount +
         serviceFeeAmount +
         overtimeFeeAmount +
+        extraMileageFeeAmount +
         damageFeeAmount +
         cleaningFeeAmount -
         discountAmount;
     const returnFeeTotal =
       this.numberValue(stored.returnFeeTotal) ??
-      overtimeFeeAmount + damageFeeAmount + cleaningFeeAmount - discountAmount;
+      overtimeFeeAmount + extraMileageFeeAmount + damageFeeAmount + cleaningFeeAmount - discountAmount;
     const returnTransactionTotal =
       this.numberValue(stored.returnTransactionTotal) ?? 0;
     const balanceDue =
@@ -6045,6 +6047,7 @@ export class StoreRentalRepository {
       rentalAmount,
       serviceFeeAmount,
       overtimeFeeAmount,
+      extraMileageFeeAmount,
       damageFeeAmount,
       cleaningFeeAmount,
       discountAmount,

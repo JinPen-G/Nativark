@@ -7137,6 +7137,7 @@ export class StoreRentalService {
           order.id,
           this.mergeSettlementSummary(order, {
             overtimeFeeAmount: this.optionalNumber(body.overtimeFeeAmount) ?? autoOvertimeFee,
+            extraMileageFeeAmount: this.optionalNumber(body.extraMileageFeeAmount) ?? autoOvermileageFee,
             damageFeeAmount: this.optionalNumber(body.damageFeeAmount) ?? 0,
             cleaningFeeAmount: this.optionalNumber(body.cleaningFeeAmount) ?? 0,
             discountAmount: this.optionalNumber(body.discountAmount) ?? 0,
@@ -7172,6 +7173,7 @@ export class StoreRentalService {
         {
           const settlementPatch = {
             overtimeFeeAmount: this.optionalNumber(body.overtimeFeeAmount),
+            extraMileageFeeAmount: this.optionalNumber(body.extraMileageFeeAmount),
             damageFeeAmount: this.optionalNumber(body.damageFeeAmount),
             cleaningFeeAmount: this.optionalNumber(body.cleaningFeeAmount),
             discountAmount: this.optionalNumber(body.discountAmount),
@@ -7574,6 +7576,7 @@ export class StoreRentalService {
           this.validateConfirmSettlement(order, body);
           const settlementPatch = {
             overtimeFeeAmount: this.optionalNumber(body.overtimeFeeAmount),
+            extraMileageFeeAmount: this.optionalNumber(body.extraMileageFeeAmount),
             damageFeeAmount: this.optionalNumber(body.damageFeeAmount),
             cleaningFeeAmount: this.optionalNumber(body.cleaningFeeAmount),
             discountAmount: this.optionalNumber(body.discountAmount),
@@ -12279,6 +12282,7 @@ export class StoreRentalService {
       { name: "基础租金", amount: settlement.rentalAmount },
       { name: "增值服务/保障", amount: settlement.serviceFeeAmount },
       { name: "超时费用", amount: settlement.overtimeFeeAmount },
+      { name: "超里程费用", amount: settlement.extraMileageFeeAmount },
       { name: "损伤赔偿", amount: settlement.damageFeeAmount },
       { name: "清洁/缺件费用", amount: settlement.cleaningFeeAmount },
       ...(settlement.discountAmount > 0
@@ -14545,6 +14549,7 @@ export class StoreRentalService {
         rentalAmount: 0,
         serviceFeeAmount: 0,
         overtimeFeeAmount: 0,
+        extraMileageFeeAmount: 0,
         damageFeeAmount: 0,
         cleaningFeeAmount: 0,
         discountAmount: 0,
@@ -14760,6 +14765,24 @@ export class StoreRentalService {
           status: returnFeeStatus,
           amount: settlement.overtimeFeeAmount,
           description: "还车阶段按实际还车时间和规则快照计算。",
+          snapshotRef: returnSnapshotRef,
+          createdAt: new Date().toISOString()
+        })
+      );
+    }
+
+    if (settlement.extraMileageFeeAmount > 0) {
+      items.push(
+        this.feeLedgerItem({
+          id: `${order.id}_extra_mileage`,
+          code: "EXTRA_MILEAGE",
+          name: "超里程费用",
+          stage: "return_settlement",
+          source: "system",
+          direction: "charge",
+          status: returnFeeStatus,
+          amount: settlement.extraMileageFeeAmount,
+          description: "还车阶段按还车里程、免费里程和规则快照计算。",
           snapshotRef: returnSnapshotRef,
           createdAt: new Date().toISOString()
         })
@@ -15349,6 +15372,7 @@ export class StoreRentalService {
       rentalAmount,
       serviceFeeAmount,
       overtimeFeeAmount: 0,
+      extraMileageFeeAmount: 0,
       damageFeeAmount: 0,
       cleaningFeeAmount: 0,
       discountAmount: 0,
@@ -15380,6 +15404,7 @@ export class StoreRentalService {
       next.rentalAmount +
         next.serviceFeeAmount +
         next.overtimeFeeAmount +
+        next.extraMileageFeeAmount +
         next.damageFeeAmount +
         next.cleaningFeeAmount -
         next.discountAmount;
