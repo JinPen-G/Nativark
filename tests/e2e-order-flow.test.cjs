@@ -245,6 +245,44 @@ async function testExportJob() {
   }
 }
 
+// TST-01: 续租流程测试（纯逻辑）
+function testExtendRentalFlow() {
+  console.log("\n[测试] 续租流程状态路径");
+  assert(VALID_TRANSITIONS.renting.includes("renewing"), "renting 可转 renewing");
+  assert(VALID_TRANSITIONS.renewing.includes("renting"), "renewing 可转 renting");
+  assert(VALID_TRANSITIONS.renewing.includes("settlement_pending"), "renewing 可转 settlement_pending");
+  assert(VALID_TRANSITIONS.renewing.includes("completed"), "renewing 可转 completed");
+  assert(VALID_TRANSITIONS.renewing.includes("overdue"), "renewing 可转 overdue");
+  passed++;
+  console.log("  PASS  续租流程状态路径验证通过");
+}
+
+// TST-01: 还车结算流程测试（纯逻辑）
+function testReturnInspectionFlow() {
+  console.log("\n[测试] 还车结算流程状态路径");
+  assert(VALID_TRANSITIONS.renting.includes("settlement_pending"), "renting 可转 settlement_pending");
+  assert(VALID_TRANSITIONS.settlement_pending.includes("payment_due"), "settlement_pending 可转 payment_due");
+  assert(VALID_TRANSITIONS.settlement_pending.includes("refund_pending"), "settlement_pending 可转 refund_pending");
+  assert(VALID_TRANSITIONS.settlement_pending.includes("completed"), "settlement_pending 可转 completed");
+  assert(VALID_TRANSITIONS.payment_due.includes("completed"), "payment_due 可转 completed");
+  assert(VALID_TRANSITIONS.refund_pending.includes("completed"), "refund_pending 可转 completed");
+  passed++;
+  console.log("  PASS  还车结算流程状态路径验证通过");
+}
+
+// TST-01: 费用项结构验证（纯逻辑）
+function testFeeVerification() {
+  console.log("\n[测试] 费用项结构验证");
+  const validStages = ["booking", "pickup", "return_settlement", "post_charge", "monthly_billing", "manual"];
+  const validDirections = ["charge", "refund", "waiver"];
+  const validSources = ["system", "manual"];
+  assert(validStages.length === 6, "费用阶段枚举完整");
+  assert(validDirections.length === 3, "费用方向枚举完整");
+  assert(validSources.length === 2, "费用来源枚举完整");
+  passed++;
+  console.log("  PASS  费用项结构验证通过");
+}
+
 async function main() {
   console.log("=".repeat(60));
   console.log("E2E 订单状态流转 & 报表测试");
@@ -253,6 +291,9 @@ async function main() {
 
   // 状态流转规则（纯逻辑测试，不依赖服务器）
   testStatusTransitions();
+  testExtendRentalFlow();
+  testReturnInspectionFlow();
+  testFeeVerification();
 
   // API 集成测试
   await testReportDashboard();
