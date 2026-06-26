@@ -3956,6 +3956,26 @@ export class StoreRentalRepository {
       });
     }
 
+    // OR-17: 发票状态回写费用项
+    if (relatedFeeIds.length > 0) {
+      const invoicedStatus =
+        input.status === "voided" ? "invoice_voided" : "invoiced";
+      await this.prisma.feeItem.updateMany({
+        where: { id: { in: relatedFeeIds }, orderId: order?.id ?? "" },
+        data: { invoicedStatus }
+      });
+    }
+
+    // OR-17: 发票审计日志
+    await this.createOperationLog({
+      targetType: "finance_document",
+      targetId: row.id,
+      action: row.type === "RECEIPT" ? "收据操作" : "发票操作",
+      operator,
+      detail: `${originalDocument ? "重开" : input.status === "voided" ? "作废" : input.status === "sent" ? "寄送" : input.status === "issued" ? "开具" : "保存"}${row.type === "RECEIPT" ? "收据" : "发票"} ${documentNo}，金额 ${amount}，关联订单 ${order?.orderNo ?? "无"}`,
+      createdAt: now.toISOString()
+    });
+
     return this.toFinanceDocumentRow(row);
   }
 
@@ -5954,6 +5974,7 @@ export class StoreRentalRepository {
       source: row.source === "manual" ? "manual" : "system",
       direction: this.toSharedFeeDirection(row.direction),
       status: this.toSharedFeeStatus(row.status),
+      invoicedStatus: this.toSharedFeeInvoicedStatus(row.invoicedStatus),
       amount: Number(row.amount),
       settledAmount: Number(row.settledAmount),
       pendingAmount: Number(row.pendingAmount),
@@ -6113,6 +6134,7 @@ export class StoreRentalRepository {
       stage: this.toPrismaFeeStage(fee.stage),
       direction: this.toPrismaFeeDirection(fee.direction),
       status: this.toPrismaFeeStatus(fee.status),
+      invoicedStatus: fee.invoicedStatus ?? "none",
       amount: fee.amount,
       settledAmount: fee.settledAmount,
       pendingAmount: fee.pendingAmount,
@@ -6134,6 +6156,7 @@ export class StoreRentalRepository {
       stage: this.toPrismaFeeStage(fee.stage),
       direction: this.toPrismaFeeDirection(fee.direction),
       status: this.toPrismaFeeStatus(fee.status),
+      invoicedStatus: fee.invoicedStatus ?? "none",
       amount: fee.amount,
       settledAmount: fee.settledAmount,
       pendingAmount: fee.pendingAmount,
@@ -7233,6 +7256,12 @@ export class StoreRentalRepository {
       VOIDED: "voided"
     };
     return map[status] ?? "pending";
+  }
+
+  private toSharedFeeInvoicedStatus(raw: string | null | undefined): "none" | "invoiced" | "invoice_voided" {
+    if (raw === "invoiced") return "invoiced";
+    if (raw === "invoice_voided") return "invoice_voided";
+    return "none";
   }
 
   private toPrismaFinanceDocumentType(

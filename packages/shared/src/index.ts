@@ -642,6 +642,9 @@ export type StoreRentalFeeStatus =
   | "monthly_billing"
   | "voided";
 
+/** 发票开票状态：未开票、已开票、发票作废 */
+export type StoreRentalFeeInvoicedStatus = "none" | "invoiced" | "invoice_voided";
+
 export interface StoreRentalFeeLedgerItem {
   id: string;
   code: string;
@@ -650,6 +653,7 @@ export interface StoreRentalFeeLedgerItem {
   source: StoreRentalFeeSource;
   direction: StoreRentalFeeDirection;
   status: StoreRentalFeeStatus;
+  invoicedStatus: StoreRentalFeeInvoicedStatus;
   amount: number;
   settledAmount: number;
   pendingAmount: number;

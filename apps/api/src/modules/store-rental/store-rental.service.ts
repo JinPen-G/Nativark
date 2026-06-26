@@ -2236,16 +2236,25 @@ export class StoreRentalService {
     return this.financeDocuments;
   }
 
-  saveFinanceDocument(
+  async saveFinanceDocument(
     input: SaveFinanceDocumentRequest
-  ): Promise<FinanceDocumentRow> | FinanceDocumentRow {
+  ): Promise<FinanceDocumentRow> {
     const amount = Number(input.amount || 0);
     if (amount <= 0) {
       throw new BadRequestException("单据金额必须大于 0。");
     }
 
     if (this.useMysqlDataSource()) {
-      return this.storeRentalRepository.saveFinanceDocument(input);
+      const saved = await this.storeRentalRepository.saveFinanceDocument(input);
+      // OR-17: 发票审计日志
+      await this.appendOperationLog(
+        "finance_document",
+        saved.id,
+        "保存发票",
+        input.createdBy || "营运财务",
+        `发票 ${saved.documentNo}，类型 ${saved.type}，状态 ${saved.status}，金额 ${saved.amount}，客户 ${input.customerName || "unknown"}`
+      );
+      return saved;
     }
 
     const order = input.orderId
@@ -2371,6 +2380,33 @@ export class StoreRentalService {
       };
       }
     }
+
+    // OR-17: 发票状态回写费用项（in-memory 分支）
+    if (order && relatedFeeIds.length > 0) {
+      const timeline = this.orderTimelines.get(order.id) ?? [];
+      const feeStatusMap: Record<string, string> = {
+        issued: "已开票",
+        sent: "已寄送",
+        voided: "作废"
+      };
+      const label = feeStatusMap[input.status] ?? input.status;
+      timeline.unshift({
+        at: now,
+        actor: operator,
+        action: `${label} ${document.type === "receipt" ? "收据" : "发票"} ${documentNo}，关联费用项 ${relatedFeeIds.join(", ")}`
+      });
+      this.orderTimelines.set(order.id, timeline);
+    }
+
+    // OR-17: 发票审计日志
+    await this.appendOperationLog(
+      "finance_document",
+      document.id,
+      document.type === "receipt" ? "收据操作" : "发票操作",
+      operator,
+      `${originalDocument ? "重开" : input.status === "voided" ? "作废" : input.status === "sent" ? "寄送" : input.status === "issued" ? "开具" : "保存"}${document.type === "receipt" ? "收据" : "发票"} ${documentNo}，金额 ${amount}，关联订单 ${order?.orderNo ?? "无"}`
+    );
+
     return document;
   }
 
@@ -5616,7 +5652,25 @@ export class StoreRentalService {
 
     this.orders.unshift(order);
 
+    // OR-03: 写入结算摘要、费用台账与交易流水（与 MySQL 分支对齐）
+    const settlementSummary = this.defaultSettlementSummary(order);
+    this.settlementSummaries.set(order.id, settlementSummary);
+    const feeLedgerItems = this.buildFeeLedgerItems(order);
+    const transactionRecords = this.buildTransactionRecords(order);
+    const snapshots =
+      storedQuote?.result.snapshots ?? {
+        pricingVersion: "unknown",
+        priceVersionId: "unknown",
+        ruleVersion: this.ruleConfig.version,
+        vehicleGroupCode: "unknown",
+        pickupStoreCode: "unknown",
+        returnStoreCode: "unknown",
+        baseDailyAmount: 0
+      };
+
     if (member && this.useMysqlDataSource()) {
+      await this.storeRentalRepository.recordMemberOrderCreated(member.id, orderNo);
+    } else if (member) {
       await this.storeRentalRepository.recordMemberOrderCreated(member.id, orderNo);
     } else if (member) {
       member.recentOrderNos = [orderNo, ...member.recentOrderNos.filter((item) => item !== orderNo)].slice(0, 10);
@@ -5645,6 +5699,9 @@ export class StoreRentalService {
 
     this.orderTimelines.set(orderId, timeline);
 
+    // OR-03: 订单创建审计日志（与 MySQL 分支对齐）
+    await this.appendOperationLog("order", orderId, "创建订单", "规则引擎", `创建订单 ${orderNo}，总额 ${totalAmount}，客户 ${input.customerName ?? "unknown"}`);
+
     return {
       id: orderId,
       orderNo,
@@ -5654,16 +5711,7 @@ export class StoreRentalService {
       dispatchStatus: DispatchStatus.Pending,
       totalAmount,
       message: `已基于报价 ${input.quoteNo} 创建模拟订单，并写入规则/价格快照。`,
-      snapshots:
-        storedQuote?.result.snapshots ?? {
-          pricingVersion: "unknown",
-          priceVersionId: "unknown",
-          ruleVersion: this.ruleConfig.version,
-          vehicleGroupCode: "unknown",
-          pickupStoreCode: "unknown",
-          returnStoreCode: "unknown",
-          baseDailyAmount: 0
-        }
+      snapshots
     };
   }
 
@@ -14772,12 +14820,13 @@ export class StoreRentalService {
   }
 
   private feeLedgerItem(
-    input: Omit<StoreRentalFeeLedgerItem, "settledAmount" | "pendingAmount">
+    input: Omit<StoreRentalFeeLedgerItem, "settledAmount" | "pendingAmount" | "invoicedStatus">
   ): StoreRentalFeeLedgerItem {
     const isSettled = ["settled", "waived", "monthly_billing"].includes(input.status);
 
     return {
       ...input,
+      invoicedStatus: "none",
       settledAmount: isSettled ? input.amount : 0,
       pendingAmount: input.status === "pending" ? input.amount : 0
     };
