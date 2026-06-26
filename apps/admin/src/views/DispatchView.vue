@@ -585,6 +585,18 @@ function vehicleStatusType(status: VehicleInstanceSummary["operationStatus"]) {
   return "info";
 }
 
+function vehicleStatusText(status: VehicleInstanceSummary["operationStatus"]) {
+  const map: Record<string, string> = {
+    idle: "空闲",
+    renting: "租赁中",
+    reserved: "已预约",
+    controlled: "整备中",
+    maintenance: "维保",
+    disabled: "停用"
+  };
+  return map[status] || status;
+}
+
 function dispatchStatusText(status: string) {
   const map: Record<string, string> = {
     pending: "待派车",
