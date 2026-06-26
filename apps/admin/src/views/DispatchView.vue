@@ -828,8 +828,13 @@ function readErrorMessage(error: unknown, fallback: string) {
                     @click="openOrderDrawer(row)"
                   >
                     <div class="flex items-center justify-between gap-1">
-                      <span class="font-bold truncate">{{ row.customerName }}</span>
-                      <span class="shrink-0 border rounded px-1 py-[1px] text-[10px]">{{ dispatchStatusText(row.dispatchStatus) }}</span>
+                      <span class="flex items-center gap-1 font-bold truncate">
+                        <el-icon v-if="row.dispatchStatus === 'locked'" class="text-emerald-600 shrink-0" :size="12"><Lock /></el-icon>
+                        {{ row.customerName }}
+                      </span>
+                      <span class="shrink-0 border rounded px-1 py-[1px] text-[10px]" :class="row.dispatchStatus === 'locked' ? 'border-emerald-300 bg-emerald-100 text-emerald-700 font-semibold' : ''">
+                        {{ dispatchStatusText(row.dispatchStatus) }}
+                      </span>
                     </div>
                     <div class="mt-1 truncate">{{ formatDateTime(row.pickupAt) }} - {{ formatDateTime(row.returnAt) }}</div>
                   </button>
@@ -923,22 +928,39 @@ function readErrorMessage(error: unknown, fallback: string) {
         </div>
 
         <div class="border-t border-gray-100 mt-4 pt-4">
-          <div class="text-sm font-semibold text-gray-800 mb-3">调度事件</div>
-          <div class="space-y-2 max-h-[260px] overflow-auto custom-scroll">
-            <div
-              v-for="event in dispatchEvents"
-              :key="event.id"
-              class="rounded-lg border border-gray-100 bg-slate-50 p-3"
-            >
-              <div class="flex items-center justify-between gap-2">
-                <span class="text-xs font-semibold text-gray-700">{{ eventTypeText(event.eventType) }}</span>
-                <el-tag size="small" effect="plain" :type="riskTagType(event.riskLevel)">{{ event.riskLevel }}</el-tag>
-              </div>
-              <div class="text-xs text-gray-500 mt-2">{{ event.orderNo || event.planId || '全局调度' }}</div>
-              <div class="text-xs text-gray-400 mt-1">{{ event.reasonText || event.title }}</div>
-              <div class="text-[11px] text-gray-400 mt-2">{{ formatDateTime(event.createdAt) }} / {{ event.operator || event.source }}</div>
-            </div>
-            <div v-if="dispatchEvents.length === 0" class="text-center text-sm text-gray-400 py-6">暂无调度事件</div>
+          <div class="text-sm font-semibold text-gray-800 mb-3">调度事件历史时间线</div>
+          <div class="max-h-[320px] overflow-auto custom-scroll">
+            <el-timeline v-if="dispatchEvents.length > 0">
+              <el-timeline-item
+                v-for="event in dispatchEvents"
+                :key="event.id"
+                :type="event.riskLevel === 'high' ? 'danger' : event.riskLevel === 'medium' ? 'warning' : 'primary'"
+                :color="event.eventType === 'hard_lock_success' ? '#10b981' : event.eventType === 'manual_reassign' ? '#8b5cf6' : event.eventType === 'vehicle_unavailable' ? '#ef4444' : undefined"
+                :timestamp="formatDateTime(event.createdAt)"
+                placement="top"
+              >
+                <div class="rounded-lg border border-gray-100 bg-slate-50 p-2.5">
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="text-xs font-semibold text-gray-700">{{ eventTypeText(event.eventType) }}</span>
+                    <div class="flex items-center gap-1">
+                      <el-tag v-if="event.eventType === 'hard_lock_success'" size="small" type="success" effect="plain">
+                        <el-icon class="mr-0.5"><Lock /></el-icon> 已锁
+                      </el-tag>
+                      <el-tag size="small" effect="plain" :type="riskTagType(event.riskLevel)">{{ event.riskLevel }}</el-tag>
+                    </div>
+                  </div>
+                  <div class="text-xs text-gray-500 mt-1.5">{{ event.orderNo || event.planId || '全局调度' }}</div>
+                  <div class="text-xs text-gray-400 mt-1">{{ event.reasonText || event.title }}</div>
+                  <div class="text-[11px] text-gray-400 mt-1.5 flex items-center gap-2">
+                    <span>{{ event.operator || event.source }}</span>
+                    <span v-if="event.beforeVehicle && event.targetVehicle" class="text-indigo-500">
+                      {{ event.beforeVehicle }} → {{ event.targetVehicle }}
+                    </span>
+                  </div>
+                </div>
+              </el-timeline-item>
+            </el-timeline>
+            <div v-else class="text-center text-sm text-gray-400 py-6">暂无调度事件</div>
           </div>
         </div>
       </aside>
@@ -950,12 +972,21 @@ function readErrorMessage(error: unknown, fallback: string) {
           <div class="bg-blue-50 p-4 rounded-lg border border-blue-100">
             <div class="flex justify-between items-start mb-2">
               <span class="text-lg font-bold text-blue-900">{{ selectedOrder.customerName }}</span>
-              <el-tag>{{ dispatchStatusText(selectedOrder.dispatchStatus) }}</el-tag>
+              <div class="flex items-center gap-2">
+                <el-tag v-if="selectedOrder.dispatchStatus === 'locked'" type="success" effect="dark">
+                  <el-icon class="mr-1"><Lock /></el-icon>已硬锁
+                </el-tag>
+                <el-tag>{{ dispatchStatusText(selectedOrder.dispatchStatus) }}</el-tag>
+              </div>
             </div>
             <div class="text-sm text-blue-700 space-y-1">
               <div>订单：{{ selectedOrder.orderNo }}</div>
               <div>当前车辆：<b>{{ selectedOrder.currentPlateNo || '未分配' }}</b></div>
               <div>车组：{{ selectedOrder.vehicleGroupName }}</div>
+            </div>
+            <div v-if="selectedOrder.dispatchStatus === 'locked'" class="mt-3 flex items-center gap-2 rounded-md bg-emerald-100 border border-emerald-200 px-3 py-2 text-xs text-emerald-800">
+              <el-icon class="shrink-0"><Lock /></el-icon>
+              <span>此订单已硬锁，不参与批量优化。如需调整请先解锁后重新分配。</span>
             </div>
           </div>
 
