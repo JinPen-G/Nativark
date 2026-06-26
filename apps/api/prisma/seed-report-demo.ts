@@ -53,6 +53,28 @@ type DemoOrder = {
   }>;
 };
 
+/**
+ * OPS-04: 主状态覆盖说明
+ *
+ * 本文件 22 个演示订单覆盖全部 16 种 OrderMainStatus:
+ *   PENDING_PAYMENT   -> report_order_014
+ *   RESERVED          -> report_order_007
+ *   PICKUP_OVERDUE    -> report_order_006
+ *   INSPECTING        -> report_order_015
+ *   RENTING           -> report_order_002, 010, 013
+ *   RENEWING          -> report_order_009
+ *   OVERDUE           -> report_order_016
+ *   ACCIDENT_PROCESSING -> report_order_003, 011
+ *   SETTLEMENT_PENDING  -> report_order_019, 021
+ *   PAYMENT_DUE       -> report_order_004
+ *   REFUND_PENDING    -> report_order_005
+ *   COMPLETED         -> report_order_001, 008
+ *   CANCELLED         -> report_order_012
+ *   NO_SHOW           -> report_order_017
+ *   REJECTED          -> report_order_020, 022
+ *   CLOSED            -> report_order_018
+ */
+
 const demoOrders: DemoOrder[] = [
   {
     id: "report_order_001",
