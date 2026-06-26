@@ -785,6 +785,7 @@ model Corporate {
   linkedStores               Json
   notes                      String?
   activeOrderCount           Int                    @default(0)
+  reservedQuotaAmount        Decimal                @default(0) @db.Decimal(12, 2)
   lastOrderAt                DateTime?
   contacts                   CorporateContact[]
   contracts                  CorporateContract[]

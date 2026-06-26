@@ -2235,6 +2235,40 @@ export class StoreRentalRepository {
     });
   }
 
+  async occupyCorporateQuota(corporateId: string, amount: number) {
+    if (amount <= 0) {
+      return;
+    }
+
+    await this.prisma.corporate.update({
+      where: { id: corporateId },
+      data: {
+        reservedQuotaAmount: { increment: amount }
+      }
+    });
+  }
+
+  async releaseCorporateQuota(corporateId: string, amount: number) {
+    if (amount <= 0) {
+      return;
+    }
+
+    const corporate = await this.prisma.corporate.findUnique({ where: { id: corporateId } });
+    if (!corporate) {
+      return;
+    }
+
+    const currentReserved = Number(corporate.reservedQuotaAmount);
+    const decrementBy = Math.min(currentReserved, amount);
+
+    await this.prisma.corporate.update({
+      where: { id: corporateId },
+      data: {
+        reservedQuotaAmount: { decrement: decrementBy }
+      }
+    });
+  }
+
   async listOrders(
     filter: OrderFilter,
     tenantId = this.defaultTenantId
@@ -5386,7 +5420,7 @@ export class StoreRentalRepository {
         (total: number, bill: { balanceAmount: Prisma.Decimal }) =>
           total + Number(bill.balanceAmount),
         0
-      ),
+      ) + Number(row.reservedQuotaAmount ?? 0),
       contractStatus: this.resolveCorporateContractStatus(row.contracts ?? [])
     };
   }
