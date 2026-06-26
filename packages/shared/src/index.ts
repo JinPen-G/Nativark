@@ -3351,6 +3351,12 @@ export interface StoreRentalNamedMetric {
   settledAmount?: number;
   pendingAmount?: number;
   riskCount?: number;
+  refundAmount?: number;
+  waiverAmount?: number;
+  completedCount?: number;
+  cancelledCount?: number;
+  monthlyCount?: number;
+  completionRate?: number;
 }
 
 export interface StoreRentalTimeSeriesPoint {
@@ -3425,6 +3431,7 @@ export interface StoreRentalOrdersReport {
   };
   byStore: StoreRentalNamedMetric[];
   byVehicleGroup: StoreRentalNamedMetric[];
+  byRoute: StoreRentalNamedMetric[];
   byStatus: StoreRentalNamedMetric[];
   byBillingMode: StoreRentalNamedMetric[];
   rows: StoreRentalOrderReportRow[];
