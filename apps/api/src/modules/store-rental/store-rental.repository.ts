@@ -2264,6 +2264,31 @@ export class StoreRentalRepository {
     return rows.map((row) => this.toOrderSummary(row));
   }
 
+  async countOrders(
+    filter: OrderFilter,
+    tenantId = this.defaultTenantId
+  ): Promise<number> {
+    const keyword = filter.keyword?.trim();
+    return this.prisma.storeRentalOrder.count({
+      where: {
+        tenantId,
+        ...(filter.status
+          ? { mainStatus: this.toPrismaOrderMainStatus(filter.status as StoreRentalOrderSummary["mainStatus"]) }
+          : {}),
+        ...(keyword
+          ? {
+              OR: [
+                { orderNo: { contains: keyword } },
+                { customerName: { contains: keyword } },
+                { corporateShortName: { contains: keyword } },
+                { vehicleGroup: { name: { contains: keyword } } }
+              ]
+            }
+          : {})
+      }
+    });
+  }
+
   async getOrderDetail(id: string): Promise<StoreRentalOrderDetail> {
     const row = await this.prisma.storeRentalOrder.findUnique({
       where: { id },

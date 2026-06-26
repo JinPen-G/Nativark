@@ -5656,15 +5656,19 @@ export class StoreRentalService {
     };
   }
 
-  listOrders(filter: OrderFilter) {
+  async listOrders(filter: OrderFilter) {
     if (this.useMysqlDataSource()) {
-      return this.storeRentalRepository.listOrders(filter);
+      const [items, count] = await Promise.all([
+        this.storeRentalRepository.listOrders(filter),
+        this.storeRentalRepository.countOrders(filter)
+      ]);
+      return { items, count };
     }
 
     const keyword = filter.keyword?.trim().toLowerCase();
     const status = filter.status?.trim();
 
-    return this.orders.filter((order) => {
+    const items = this.orders.filter((order) => {
       const matchedKeyword =
         !keyword ||
         order.orderNo.toLowerCase().includes(keyword) ||
@@ -5674,6 +5678,8 @@ export class StoreRentalService {
 
       return matchedKeyword && matchedStatus;
     });
+
+    return { items, count: items.length };
   }
 
   getOrderDetail(id: string): StoreRentalOrderDetail | Promise<StoreRentalOrderDetail> {
@@ -13144,6 +13150,15 @@ export class StoreRentalService {
       }
     }
 
+    // OR-13: 事故登记审计日志
+    this.appendOperationLog(
+      "accident",
+      accident.record.id,
+      "事故登记",
+      accident.operator,
+      `订单 ${order.orderNo} 事故登记：${accident.record.reportNo}，事故描述：${accident.record.description}，责任归属：${accident.responsibilityLabel}，预估费用：${accident.estimatedCostAmount} 元，理赔状态：${accident.record.claimStatus}`
+    );
+
     return this.accidentActionEffect(order, accident, financial.fee, previousStatus);
   }
 
@@ -13199,6 +13214,15 @@ export class StoreRentalService {
           tryAutoReassign: true
         });
       }
+
+      // OR-13: 事故登记审计日志（MySQL路径）
+      await this.appendOperationLog(
+        "accident",
+        accident.record.id,
+        "事故登记",
+        accident.operator,
+        `订单 ${order.orderNo} 事故登记：${accident.record.reportNo}，事故描述：${accident.record.description}，责任归属：${accident.responsibilityLabel}，预估费用：${accident.estimatedCostAmount} 元，理赔状态：${accident.record.claimStatus}`
+      );
 
       return {
         ...this.accidentActionEffect(order, accident, financial.fee, previousStatus),
