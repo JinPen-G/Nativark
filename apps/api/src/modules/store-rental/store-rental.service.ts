@@ -2877,6 +2877,42 @@ export class StoreRentalService {
             `增值服务 ${fee.name}(${code}) 仅限${scopeLabel}使用，当前客户类型不符合要求。`
           );
         }
+
+        // MD-04: 跨表查找增值服务详情以获取库存/等级/企业字段
+        const serviceDetail = this.valueAddedServices.find((svc) => svc.code === code);
+
+        // MD-04: 增值服务库存校验
+        if (serviceDetail?.trackInventory && (serviceDetail.totalStock ?? 0) <= 0) {
+          throw new BadRequestException(
+            `增值服务 ${fee.name}(${code}) 当前库存不足，暂不可选择。`
+          );
+        }
+
+        // MD-04: 会员等级限制校验
+        if (serviceDetail?.minMemberTierRank && serviceDetail.minMemberTierRank > 0) {
+          const userTier = this.resolveMembershipTierRank(input.membershipLevel);
+          if (userTier < serviceDetail.minMemberTierRank) {
+            const limitLabel = serviceDetail.memberLimit ?? `等级 ${serviceDetail.minMemberTierRank} 及以上`;
+            throw new BadRequestException(
+              `增值服务 ${fee.name}(${code}) 仅限${limitLabel}，当前会员等级不满足要求。`
+            );
+          }
+        } else if (serviceDetail?.memberLimit && serviceDetail.memberLimit !== "不限") {
+          const requiredTier = this.parseMemberTierRank(serviceDetail.memberLimit);
+          const userTier = this.resolveMembershipTierRank(input.membershipLevel);
+          if (requiredTier > 0 && userTier < requiredTier) {
+            throw new BadRequestException(
+              `增值服务 ${fee.name}(${code}) 仅限${serviceDetail.memberLimit}，当前会员等级不满足要求。`
+            );
+          }
+        }
+
+        // MD-04: 企业专属校验
+        if (serviceDetail?.corporateOnly && input.customerType !== "enterprise") {
+          throw new BadRequestException(
+            `增值服务 ${fee.name}(${code}) 为企业专属服务，非企业客户不可选择。`
+          );
+        }
       }
     }
 
@@ -3184,19 +3220,33 @@ export class StoreRentalService {
         pricingVersion: result.snapshots.pricingVersion,
         pricingVersionTitle: result.snapshots.priceVersionTitle,
         priceVersionId: result.snapshots.priceVersionId,
+        effectiveAt: result.snapshots.effectiveAt,
         ruleVersion: result.snapshots.ruleVersion,
         ruleEffectiveAt: result.snapshots.ruleEffectiveAt,
+        vehicleGroupCode: result.snapshots.vehicleGroupCode,
+        baseDailyAmount: result.snapshots.baseDailyAmount,
+        standardDailyRate: result.snapshots.standardDailyRate,
+        freeKm: result.snapshots.freeKm,
+        pickupStoreCode: result.snapshots.pickupStoreCode,
+        returnStoreCode: result.snapshots.returnStoreCode,
         marketingPlanId: result.snapshots.marketingPlanId,
         marketingPlanVersionId: result.snapshots.marketingPlanVersionId,
         marketingPlanName: result.snapshots.marketingPlanName,
+        manualVerification: result.snapshots.manualVerification,
+        qualificationName: result.snapshots.qualificationName,
+        requiredDocText: result.snapshots.requiredDocText,
         membershipPlanId: result.snapshots.membershipPlanId,
         membershipPlanCode: result.snapshots.membershipPlanCode,
         membershipPlanName: result.snapshots.membershipPlanName,
         membershipVersion: result.snapshots.membershipVersion,
+        membershipOrderDiscountPercent: result.snapshots.membershipOrderDiscountPercent,
+        membershipDepositDiscountPercent: result.snapshots.membershipDepositDiscountPercent,
         dynamicPricingScheduleId: result.snapshots.dynamicPricingScheduleId,
         dynamicPricingVersion: result.snapshots.dynamicPricingVersion,
         dynamicPricingSummary: result.snapshots.dynamicPricingSummary,
-        dynamicPricingEffectiveAt: result.snapshots.dynamicPricingEffectiveAt
+        dynamicPricingEffectiveAt: result.snapshots.dynamicPricingEffectiveAt,
+        dynamicPricingAdjustedDailyRate: result.snapshots.dynamicPricingAdjustedDailyRate,
+        dynamicPricingAdjustmentAmount: result.snapshots.dynamicPricingAdjustmentAmount
       },
       snapshots: result.snapshots,
       warnings: result.warnings
@@ -16020,5 +16070,36 @@ export class StoreRentalService {
     };
 
     return codes[storeName] ?? storeName;
+  }
+
+  /**
+   * 解析增值服务 memberLimit 中的最低会员等级 tierRank。
+   * 例: "黄金会员及以上" => 2, "黑金会员" => 3, "不限" => 0
+   */
+  private parseMemberTierRank(memberLimit: string): number {
+    if (!memberLimit || memberLimit === "不限") return 0;
+    const tierMap: Record<string, number> = {
+      白银: 1, 黄金: 2, 铂金: 3, 黑金: 3
+    };
+    for (const [label, rank] of Object.entries(tierMap)) {
+      if (memberLimit.includes(label)) return rank;
+    }
+    return 0;
+  }
+
+  /**
+   * 根据会员等级名称查找对应 tierRank。
+   * 通过 membershipPlans 按 name/code 模糊匹配。
+   */
+  private resolveMembershipTierRank(membershipLevel?: string): number {
+    if (!membershipLevel) return 0;
+    const normalized = membershipLevel.trim().toLowerCase();
+    const matched = this.membershipPlans.find(
+      (p) =>
+        p.status === "enabled" &&
+        (p.name.toLowerCase().includes(normalized) ||
+          p.code.toLowerCase().includes(normalized))
+    );
+    return matched?.tierRank ?? 0;
   }
 }
