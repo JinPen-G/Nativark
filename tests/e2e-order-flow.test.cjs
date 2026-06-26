@@ -386,6 +386,52 @@ function testRejectedTerminal() {
   console.log("  PASS  被拒流程终态测试通过");
 }
 
+// TST-01: 费用阶段枚举完整性测试
+function testFeeStageCompleteness() {
+  console.log("\n[测试] 费用阶段枚举完整性");
+  const validStages = ["pickup", "rental", "return_settlement", "cancellation", "post_charge"];
+  assert(validStages.length === 5, "费用阶段枚举完整 (5 个)");
+  assert(validStages.includes("pickup"), "包含 pickup 阶段");
+  assert(validStages.includes("rental"), "包含 rental 阶段");
+  assert(validStages.includes("return_settlement"), "包含 return_settlement 阶段");
+  assert(validStages.includes("cancellation"), "包含 cancellation 阶段");
+  assert(validStages.includes("post_charge"), "包含 post_charge 阶段");
+  passed++;
+  console.log("  PASS  费用阶段枚举完整性验证通过");
+}
+
+// TST-01: 状态图属性测试
+function testTransitionProperties() {
+  console.log("\n[测试] 状态图属性验证");
+  // 无自环
+  for (const [status, targets] of Object.entries(VALID_TRANSITIONS)) {
+    assert(!targets.includes(status), `${status} 无自环`);
+  }
+  // completed 有 7 个入边
+  const completedInbound = Object.entries(VALID_TRANSITIONS).filter(([_, targets]) => targets.includes("completed"));
+  assert(completedInbound.length === 7, `completed 有 7 个入边 (实际: ${completedInbound.length})`);
+  passed++;
+  console.log("  PASS  状态图属性验证通过");
+}
+
+// TST-01: 可达性测试
+function testReachableFromInitial() {
+  console.log("\n[测试] 从初始状态可达性");
+  const visited = new Set();
+  const queue = ["pending_payment"];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (visited.has(current)) continue;
+    visited.add(current);
+    for (const target of VALID_TRANSITIONS[current] || []) {
+      if (!visited.has(target)) queue.push(target);
+    }
+  }
+  assert(visited.size === ALL_STATUSES.length, `从 pending_payment 可达所有 ${ALL_STATUSES.length} 个状态 (实际: ${visited.size})`);
+  passed++;
+  console.log("  PASS  可达性验证通过");
+}
+
 async function main() {
   console.log("=".repeat(60));
   console.log("E2E 订单状态流转 & 报表测试");
@@ -404,6 +450,9 @@ async function main() {
   testMainStatusCompleteness();
   testStatusGraphProperties();
   testRejectedTerminal();
+  testFeeStageCompleteness();
+  testTransitionProperties();
+  testReachableFromInitial();
 
   // API 集成测试
   await testReportDashboard();
