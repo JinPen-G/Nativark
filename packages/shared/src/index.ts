@@ -552,6 +552,7 @@ export interface StoreRentalOrderSummary {
   operationLockOperator?: string;
   operationLockExpiresAt?: string;
   riskFlags: string[];
+  createdAt?: string;
 }
 
 export interface StoreRentalOrderTimelineItem {
