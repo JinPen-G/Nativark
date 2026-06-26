@@ -246,7 +246,49 @@ export class ReportsRepository {
           feeCodes: [],
           remark: line.remark ?? undefined
         }))
-      }))
+      })),
+      reconciliation: this.buildReconciliation(orders, monthlyBills)
+    };
+  }
+
+  private buildReconciliation(orders: any[], monthlyBills: any[]) {
+    let collectionsTotal = 0;
+    let collectionsCount = 0;
+    let refundsTotal = 0;
+    let refundsCount = 0;
+    let waiversTotal = 0;
+    let waiversCount = 0;
+
+    for (const order of orders) {
+      const finance = this.orderFinance(order);
+      if (finance.settledAmount > 0) {
+        collectionsTotal += finance.settledAmount;
+        collectionsCount++;
+      }
+      if (finance.refundAmount > 0) {
+        refundsTotal += finance.refundAmount;
+        refundsCount++;
+      }
+      if (finance.waiverAmount > 0) {
+        waiversTotal += finance.waiverAmount;
+        waiversCount++;
+      }
+    }
+
+    let monthlyTotal = 0;
+    let monthlyCount = 0;
+    let monthlyUnpaid = 0;
+    for (const bill of monthlyBills) {
+      monthlyTotal += money(bill.totalAmount);
+      monthlyCount++;
+      monthlyUnpaid += money(bill.balanceAmount);
+    }
+
+    return {
+      collections: { totalAmount: collectionsTotal, count: collectionsCount },
+      refunds: { totalAmount: refundsTotal, count: refundsCount },
+      waivers: { totalAmount: waiversTotal, count: waiversCount },
+      monthlyBills: { totalAmount: monthlyTotal, count: monthlyCount, unpaidAmount: monthlyUnpaid }
     };
   }
 
