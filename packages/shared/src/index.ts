@@ -449,7 +449,8 @@ export type PlatformFilterPresetScope =
   | "store-rental.members"
   | "store-rental.corporates"
   | "store-rental.stations"
-  | "store-rental.vehicle-transfer";
+  | "store-rental.vehicle-transfer"
+  | "store-rental.contracts";
 
 export interface PlatformFilterPreset {
   id: string;
@@ -1743,7 +1744,10 @@ export type StoreRentalDispatchEventType =
   | "manual_required"
   | "vehicle_unavailable"
   | "ai_analysis"
-  | "alert_closed";
+  | "alert_closed"
+  | "task_claimed"
+  | "task_processed"
+  | "task_closed";
 
 export interface StoreRentalDispatchEvent {
   id: string;
@@ -3325,7 +3329,8 @@ export type StoreRentalReportType =
   | "vehicles"
   | "finance"
   | "ops"
-  | "audit";
+  | "audit"
+  | "risk";
 
 export interface StoreRentalReportQuery {
   tenantId?: string;

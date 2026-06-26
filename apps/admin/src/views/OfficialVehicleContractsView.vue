@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
 import {
   BillingMode,
   OrderMainStatus,
+  type PlatformFilterPreset,
   type StoreRentalContractCenter,
   type StoreRentalContractCenterRow,
   type StoreRentalContractRecord,
@@ -12,9 +13,13 @@ import {
 } from "@store-rental/shared";
 import {
   createStoreRentalOrderContract,
+  deletePlatformFilterPreset,
   getStoreRentalContractCenter,
+  listPlatformFilterPresets,
   listStoreRentalOrders,
   printStoreRentalContractMock,
+  savePlatformFilterPreset,
+  setPlatformFilterPresetDefault,
   signStoreRentalContractMock
 } from "../api/client";
 import AppLayout from "../components/AppLayout.vue";
@@ -27,6 +32,14 @@ const orderLoading = ref(false);
 const actionLoading = ref("");
 const generateDialogVisible = ref(false);
 const detailDrawerVisible = ref(false);
+const filterPresetScope = "store-rental.contracts" as const;
+const filterPresets = ref<PlatformFilterPreset[]>([]);
+const selectedFilterPresetId = ref("");
+const filterPresetLoading = ref(false);
+
+const selectedFilterPreset = computed(() =>
+  filterPresets.value.find((preset) => preset.id === selectedFilterPresetId.value)
+);
 const center = ref<StoreRentalContractCenter>({
   rows: [],
   stats: {
@@ -239,7 +252,116 @@ function resetFilters() {
   filters.type = "";
   filters.status = "";
   filters.orderStatus = "";
+  selectedFilterPresetId.value = "";
   void loadContracts();
+}
+
+function filterPresetOperator() {
+  return authStore.user?.displayName || "营运端";
+}
+
+function cloneContractFilters() {
+  return {
+    keyword: filters.keyword,
+    type: filters.type,
+    status: filters.status,
+    orderStatus: filters.orderStatus
+  } satisfies Record<string, unknown>;
+}
+
+function applyContractPresetFilters(presetFilters: Record<string, unknown>) {
+  filters.keyword = typeof presetFilters.keyword === "string" ? presetFilters.keyword : "";
+  filters.type =
+    typeof presetFilters.type === "string"
+      ? (presetFilters.type as "" | StoreRentalContractRecord["type"])
+      : "";
+  filters.status =
+    typeof presetFilters.status === "string"
+      ? (presetFilters.status as "" | StoreRentalContractRecord["status"])
+      : "";
+  filters.orderStatus =
+    typeof presetFilters.orderStatus === "string"
+      ? (presetFilters.orderStatus as "" | OrderMainStatus)
+      : "";
+}
+
+function applySelectedFilterPreset() {
+  const preset = selectedFilterPreset.value;
+  if (!preset) {
+    return;
+  }
+  applyContractPresetFilters(preset.filters);
+  void loadContracts();
+}
+
+async function loadFilterPresets() {
+  filterPresetLoading.value = true;
+  try {
+    filterPresets.value = await listPlatformFilterPresets({
+      scopeKey: filterPresetScope
+    });
+    const defaultPreset = filterPresets.value.find((preset) => preset.isDefault);
+    if (defaultPreset) {
+      selectedFilterPresetId.value = defaultPreset.id;
+      applyContractPresetFilters(defaultPreset.filters);
+    }
+  } catch {
+    filterPresets.value = [];
+  } finally {
+    filterPresetLoading.value = false;
+  }
+}
+
+async function saveCurrentFilterPreset() {
+  const { value: name } = await ElMessageBox.prompt("请输入筛选预设名称", "保存视图", {
+    inputValue: selectedFilterPreset.value?.name ?? "",
+    confirmButtonText: "保存",
+    cancelButtonText: "取消",
+    inputPattern: /\S+/,
+    inputErrorMessage: "名称不能为空"
+  });
+  const saved = await savePlatformFilterPreset({
+    id: selectedFilterPreset.value?.id,
+    scopeKey: filterPresetScope,
+    name: name.trim(),
+    filters: cloneContractFilters(),
+    isDefault: selectedFilterPreset.value?.isDefault,
+    operator: filterPresetOperator()
+  });
+  await loadFilterPresets();
+  selectedFilterPresetId.value = saved.id;
+  ElMessage.success("筛选预设已保存");
+}
+
+async function setCurrentFilterPresetDefault() {
+  if (!selectedFilterPreset.value) {
+    return;
+  }
+  const saved = await setPlatformFilterPresetDefault(
+    selectedFilterPreset.value.id,
+    filterPresetOperator()
+  );
+  await loadFilterPresets();
+  selectedFilterPresetId.value = saved.id;
+  ElMessage.success("已设为默认筛选预设");
+}
+
+async function deleteCurrentFilterPreset() {
+  if (!selectedFilterPreset.value) {
+    return;
+  }
+  await ElMessageBox.confirm(
+    `确认删除筛选预设"${selectedFilterPreset.value.name}"？`,
+    "删除确认",
+    { confirmButtonText: "删除", cancelButtonText: "取消", type: "warning" }
+  );
+  await deletePlatformFilterPreset(
+    selectedFilterPreset.value.id,
+    filterPresetOperator()
+  );
+  selectedFilterPresetId.value = "";
+  await loadFilterPresets();
+  ElMessage.success("筛选预设已删除");
 }
 
 function contractTypeLabel(value: StoreRentalContractRecord["type"]) {
@@ -326,7 +448,7 @@ function readErrorMessage(error: unknown, fallback: string) {
 }
 
 onMounted(async () => {
-  await Promise.all([loadContracts(), loadOrders()]);
+  await Promise.all([loadContracts(), loadOrders(), loadFilterPresets()]);
 });
 </script>
 
@@ -365,6 +487,40 @@ onMounted(async () => {
 
       <section class="rounded-lg border border-slate-200 bg-white">
         <div class="flex flex-wrap items-center gap-3 border-b border-slate-100 bg-slate-50 p-4">
+          <el-select
+            v-model="selectedFilterPresetId"
+            placeholder="筛选预设"
+            clearable
+            class="!w-48"
+            :loading="filterPresetLoading"
+            @change="applySelectedFilterPreset"
+          >
+            <el-option
+              v-for="preset in filterPresets"
+              :key="preset.id"
+              :label="preset.isDefault ? `${preset.name}（默认）` : preset.name"
+              :value="preset.id"
+            />
+          </el-select>
+          <el-button icon="Collection" plain @click="saveCurrentFilterPreset">
+            保存视图
+          </el-button>
+          <el-tooltip content="设为默认" placement="top">
+            <el-button
+              icon="Star"
+              plain
+              :disabled="!selectedFilterPresetId"
+              @click="setCurrentFilterPresetDefault"
+            />
+          </el-tooltip>
+          <el-tooltip content="删除预设" placement="top">
+            <el-button
+              icon="Delete"
+              plain
+              :disabled="!selectedFilterPresetId"
+              @click="deleteCurrentFilterPreset"
+            />
+          </el-tooltip>
           <el-input
             v-model="filters.keyword"
             placeholder="搜索单据号 / 订单号 / 客户 / 车牌"
