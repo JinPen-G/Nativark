@@ -447,7 +447,8 @@ export type PlatformFilterPresetScope =
   | "store-rental.orders"
   | "store-rental.vehicles"
   | "store-rental.members"
-  | "store-rental.corporates";
+  | "store-rental.corporates"
+  | "store-rental.stations";
 
 export interface PlatformFilterPreset {
   id: string;
@@ -650,6 +651,7 @@ export interface StoreRentalFeeLedgerItem {
   source: StoreRentalFeeSource;
   direction: StoreRentalFeeDirection;
   status: StoreRentalFeeStatus;
+  invoicedStatus?: string;
   amount: number;
   settledAmount: number;
   pendingAmount: number;
@@ -877,7 +879,14 @@ export interface StoreRentalEventSnapshotRecord {
     | "manual_adjust"
     | "extension"
     | "redirection"
-    | "return_location_change";
+    | "return_location_change"
+    | "accident_registration"
+    | "no_show"
+    | "order_rejection"
+    | "order_close"
+    | "order_cancellation"
+    | "payment_success"
+    | "pickup_inspection";
   title: string;
   triggerReason?: string;
   settlementTarget?: string;
@@ -1018,6 +1027,7 @@ export interface StoreRentalSettlementSummary {
   rentalAmount: number;
   serviceFeeAmount: number;
   overtimeFeeAmount: number;
+  extraMileageFeeAmount?: number;
   damageFeeAmount: number;
   cleaningFeeAmount: number;
   discountAmount: number;
@@ -1057,6 +1067,7 @@ export interface StoreRentalOrderDetail extends StoreRentalOrderSummary {
   };
   operationLockExpiredHint?: string;
   preAuthExpiredHint?: string;
+  availableActions?: string[];
 }
 
 export interface StoreRentalOrderActionResult {
@@ -1460,6 +1471,8 @@ export interface PricingQuoteResult {
     membershipVersion?: string;
     membershipOrderDiscountPercent?: number;
     membershipDepositDiscountPercent?: number;
+    membershipRentalDiscountAmount?: number;
+    membershipDepositDiscountAmount?: number;
     effectiveAt?: string;
     ruleEffectiveAt?: string;
     dynamicPricingScheduleId?: string;
@@ -3328,7 +3341,8 @@ export type StoreRentalReportType =
   | "vehicles"
   | "finance"
   | "ops"
-  | "audit";
+  | "audit"
+  | "risk";
 
 export interface StoreRentalReportQuery {
   tenantId?: string;
@@ -3423,6 +3437,9 @@ export interface StoreRentalOrdersReport {
     settlementOrders: number;
     riskOrders: number;
     monthlyOrders: number;
+    totalSettledAmount: number;
+    totalPendingAmount: number;
+    totalAmount: number;
   };
   byStore: StoreRentalNamedMetric[];
   byVehicleGroup: StoreRentalNamedMetric[];
@@ -3479,6 +3496,51 @@ export interface StoreRentalFinanceReport {
   summary: StoreRentalReportDashboard["financeSummary"];
   rows: StoreRentalFinanceReportRow[];
   monthlyBills: CorporateMonthlyBillSummary[];
+  reconciliation?: {
+    collections: { totalAmount: number; count: number };
+    refunds: { totalAmount: number; count: number };
+    waivers: { totalAmount: number; count: number };
+    monthlyBills: { totalAmount: number; count: number; unpaidAmount: number };
+    netAmount: number;
+    byStore: StoreRentalNamedMetric[] | Record<string, number>;
+    byBillingMode: StoreRentalNamedMetric[] | Record<string, number>;
+  };
+}
+
+export interface StoreRentalRiskReportRow {
+  orderId: string;
+  orderNo: string;
+  customerName: string;
+  corporateShortName?: string;
+  vehicleGroupName: string;
+  plateNo?: string;
+  pickupStoreName: string;
+  returnStoreName: string;
+  pickupAt: string;
+  returnAt: string;
+  mainStatus: OrderMainStatus;
+  dispatchStatus: DispatchStatus;
+  billingMode: BillingMode;
+  totalAmount: number;
+  riskCategories: string[];
+  riskFlags: string[];
+}
+
+export interface StoreRentalRiskReport {
+  generatedAt: string;
+  summary: {
+    totalRisks: number;
+    totalRiskOrders?: number;
+    pickupOverdueCount?: number;
+    overdueReturnCount?: number;
+    accidentCount?: number;
+    manualDispatchCount?: number;
+    totalExposureAmount?: number;
+    byCategory: StoreRentalNamedMetric[];
+    byStore: StoreRentalNamedMetric[];
+    byFlag: StoreRentalNamedMetric[];
+  };
+  rows: StoreRentalRiskReportRow[];
 }
 
 export interface StoreRentalReportExportRequest {
