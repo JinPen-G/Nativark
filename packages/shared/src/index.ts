@@ -3324,7 +3324,8 @@ export type StoreRentalReportType =
   | "vehicles"
   | "finance"
   | "ops"
-  | "audit";
+  | "audit"
+  | "risk";
 
 export interface StoreRentalReportQuery {
   tenantId?: string;
