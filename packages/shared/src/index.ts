@@ -447,10 +447,7 @@ export type PlatformFilterPresetScope =
   | "store-rental.orders"
   | "store-rental.vehicles"
   | "store-rental.members"
-  | "store-rental.corporates"
-  | "store-rental.stations"
-  | "store-rental.vehicle-transfer"
-  | "store-rental.contracts";
+  | "store-rental.corporates";
 
 export interface PlatformFilterPreset {
   id: string;
@@ -653,7 +650,6 @@ export interface StoreRentalFeeLedgerItem {
   source: StoreRentalFeeSource;
   direction: StoreRentalFeeDirection;
   status: StoreRentalFeeStatus;
-  invoicedStatus?: string;
   amount: number;
   settledAmount: number;
   pendingAmount: number;
@@ -881,14 +877,7 @@ export interface StoreRentalEventSnapshotRecord {
     | "manual_adjust"
     | "extension"
     | "redirection"
-    | "return_location_change"
-    | "accident_registration"
-    | "no_show"
-    | "order_rejection"
-    | "order_close"
-    | "order_cancellation"
-    | "payment_success"
-    | "pickup_inspection";
+    | "return_location_change";
   title: string;
   triggerReason?: string;
   settlementTarget?: string;
@@ -1029,7 +1018,6 @@ export interface StoreRentalSettlementSummary {
   rentalAmount: number;
   serviceFeeAmount: number;
   overtimeFeeAmount: number;
-  extraMileageFeeAmount?: number;
   damageFeeAmount: number;
   cleaningFeeAmount: number;
   discountAmount: number;
@@ -1069,7 +1057,6 @@ export interface StoreRentalOrderDetail extends StoreRentalOrderSummary {
   };
   operationLockExpiredHint?: string;
   preAuthExpiredHint?: string;
-  availableActions?: string[];
 }
 
 export interface StoreRentalOrderActionResult {
@@ -1225,7 +1212,6 @@ export interface ServiceFeeRule {
   amount: number;
   chargeMode: "fixed" | "per_day";
   enabled: boolean;
-  customerScope?: StoreRentalCustomerType | "all";
 }
 
 export interface PricingPlanDetail extends PricingPlanSummary {
@@ -1470,16 +1456,11 @@ export interface PricingQuoteResult {
     membershipPlanId?: string;
     membershipPlanCode?: string;
     membershipPlanName?: string;
-    membershipVersion?: string;
     membershipOrderDiscountPercent?: number;
     membershipDepositDiscountPercent?: number;
-    membershipRentalDiscountAmount?: number;
-    membershipDepositDiscountAmount?: number;
     effectiveAt?: string;
     ruleEffectiveAt?: string;
     dynamicPricingScheduleId?: string;
-    dynamicPricingVersion?: string;
-    dynamicPricingPlanVersion?: string;
     dynamicPricingSummary?: string;
     dynamicPricingEffectiveAt?: string;
     dynamicPricingAdjustedDailyRate?: number;
@@ -1758,10 +1739,7 @@ export type StoreRentalDispatchEventType =
   | "manual_required"
   | "vehicle_unavailable"
   | "ai_analysis"
-  | "alert_closed"
-  | "task_claimed"
-  | "task_processed"
-  | "task_closed";
+  | "alert_closed";
 
 export interface StoreRentalDispatchEvent {
   id: string;
@@ -2518,10 +2496,6 @@ export interface StoreValueAddedServiceSummary {
   maxQuantity: number;
   trackInventory: boolean;
   totalStock?: number;
-  currentStock?: number;
-  minMemberTierRank?: number;
-  maxPerOrder?: number;
-  corporateOnly?: boolean;
   status: "enabled" | "disabled";
   version: string;
   description: string;
@@ -2588,9 +2562,6 @@ export interface MemberDetail extends MemberSummary {
   recentOrderNos: string[];
   timeline: MemberTimelineRecord[];
   photos?: Record<string, string>;
-  organizationName?: string;
-  assignedStoreName?: string;
-  createdBy?: string;
 }
 
 export interface SaveMemberRequest {
@@ -3377,6 +3348,15 @@ export interface StoreRentalNamedMetric {
   value: number;
   amount?: number;
   percent?: number;
+  settledAmount?: number;
+  pendingAmount?: number;
+  riskCount?: number;
+  refundAmount?: number;
+  waiverAmount?: number;
+  completedCount?: number;
+  cancelledCount?: number;
+  monthlyCount?: number;
+  completionRate?: number;
 }
 
 export interface StoreRentalTimeSeriesPoint {
@@ -3451,6 +3431,7 @@ export interface StoreRentalOrdersReport {
   };
   byStore: StoreRentalNamedMetric[];
   byVehicleGroup: StoreRentalNamedMetric[];
+  byRoute: StoreRentalNamedMetric[];
   byStatus: StoreRentalNamedMetric[];
   byBillingMode: StoreRentalNamedMetric[];
   rows: StoreRentalOrderReportRow[];
@@ -3505,15 +3486,32 @@ export interface StoreRentalFinanceReport {
   summary: StoreRentalReportDashboard["financeSummary"];
   rows: StoreRentalFinanceReportRow[];
   monthlyBills: CorporateMonthlyBillSummary[];
-  reconciliation?: {
-    collections: { totalAmount: number; count: number };
-    refunds: { totalAmount: number; count: number };
-    waivers: { totalAmount: number; count: number };
-    monthlyBills: { totalAmount: number; count: number; unpaidAmount: number };
-    netAmount: number;
-    byStore: StoreRentalNamedMetric[] | Record<string, number>;
-    byBillingMode: StoreRentalNamedMetric[] | Record<string, number>;
-  };
+  reconciliation?: StoreRentalFinanceReconciliation;
+}
+
+export interface StoreRentalFinanceReconciliationDimension {
+  totalAmount: number;
+  count: number;
+}
+
+export interface StoreRentalFinanceReconciliation {
+  collections: { totalAmount: number; count: number };
+  refunds: { totalAmount: number; count: number };
+  waivers: { totalAmount: number; count: number };
+  monthlyBills: { totalAmount: number; count: number; unpaidAmount: number };
+  netAmount: number;
+  byStore: Record<string, {
+    collections: number;
+    refunds: number;
+    waivers: number;
+    count: number;
+  }>;
+  byBillingMode: Record<string, {
+    collections: number;
+    refunds: number;
+    waivers: number;
+    count: number;
+  }>;
 }
 
 export interface StoreRentalRiskReportRow {
@@ -3537,18 +3535,22 @@ export interface StoreRentalRiskReportRow {
 
 export interface StoreRentalRiskReport {
   generatedAt: string;
-  summary: {
-    totalRisks: number;
-    totalRiskOrders?: number;
-    pickupOverdueCount?: number;
-    overdueReturnCount?: number;
-    accidentCount?: number;
-    manualDispatchCount?: number;
-    totalExposureAmount?: number;
-    byCategory: StoreRentalNamedMetric[];
-    byStore: StoreRentalNamedMetric[];
-    byFlag: StoreRentalNamedMetric[];
+  range: {
+    from: string;
+    to: string;
+    period: StoreRentalReportPeriod;
   };
+  summary: {
+    totalRiskOrders: number;
+    pickupOverdueCount: number;
+    overdueReturnCount: number;
+    accidentCount: number;
+    manualDispatchCount: number;
+    totalExposureAmount: number;
+  };
+  byCategory: StoreRentalNamedMetric[];
+  byStore: StoreRentalNamedMetric[];
+  byFlag: StoreRentalNamedMetric[];
   rows: StoreRentalRiskReportRow[];
 }
 

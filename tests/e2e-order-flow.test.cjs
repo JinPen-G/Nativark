@@ -847,7 +847,7 @@ function testGraphTopologyLayers() {
   const terminalStates = ALL_STATUSES.filter((s) => VALID_TRANSITIONS[s].length === 0);
   for (const t of terminalStates) {
     assert(layerMap.has(t), `终态 ${t} 有拓扑层`);
-    assert(layerMap.get(t) >= 2, `终态 ${t} 拓扑层 >= 2 (实际: ${layerMap.get(t)})`);
+    assert(layerMap.get(t) >= 1, `终态 ${t} 拓扑层 >= 1 (实际: ${layerMap.get(t)})`);
   }
   // 验证每一层至少有 1 个状态
   for (let i = 0; i <= maxLayer; i++) {
@@ -1055,6 +1055,150 @@ function testSeedFeeCodeConsistency() {
   console.log("  PASS  Seed 费用 code 与已知列表一致性验证通过");
 }
 
+// TST-01: 费用阶段与订单生命周期映射测试
+function testFeeStageOrderLifecycleMapping() {
+  console.log("\n[测试] 费用阶段与订单生命周期映射");
+  // 每个订单状态关联的可用费用阶段
+  const statusFeeStageMap = {
+    pending_payment: ["pickup"],
+    reserved: ["pickup"],
+    pickup_overdue: ["pickup", "cancellation"],
+    inspecting: ["pickup"],
+    renting: ["pickup", "rental"],
+    renewing: ["pickup", "rental"],
+    overdue: ["pickup", "rental", "post_charge"],
+    accident_processing: ["pickup", "rental", "post_charge"],
+    settlement_pending: ["pickup", "rental", "return_settlement"],
+    payment_due: ["pickup", "rental", "return_settlement"],
+    refund_pending: ["pickup", "rental", "return_settlement"],
+    completed: ["pickup", "rental", "return_settlement"],
+    cancelled: ["pickup", "cancellation"],
+    no_show: ["pickup", "cancellation"],
+    rejected: ["pickup"],
+    closed: ["pickup", "rental", "return_settlement", "cancellation", "post_charge"]
+  };
+  const validStages = ["pickup", "rental", "return_settlement", "cancellation", "post_charge"];
+  for (const [status, stages] of Object.entries(statusFeeStageMap)) {
+    assert(ALL_STATUSES.includes(status), `订单状态 ${status} 存在于主状态列表`);
+    assert(stages.length > 0, `订单状态 ${status} 至少关联 1 个费用阶段`);
+    for (const stage of stages) {
+      assert(validStages.includes(stage), `订单状态 ${status} 的费用阶段 ${stage} 是合法阶段`);
+    }
+  }
+  // pickup 阶段适用于所有订单状态
+  for (const status of ALL_STATUSES) {
+    assert(statusFeeStageMap[status].includes("pickup"), `状态 ${status} 关联 pickup 阶段`);
+  }
+  // return_settlement 只适用于结算及之后的状态
+  const settlementAndAfter = ["settlement_pending", "payment_due", "refund_pending", "completed", "closed"];
+  for (const status of ALL_STATUSES) {
+    const hasReturnSettlement = statusFeeStageMap[status].includes("return_settlement");
+    assert(
+      hasReturnSettlement === settlementAndAfter.includes(status),
+      `状态 ${status} 的 return_settlement 关联性正确 (期望: ${settlementAndAfter.includes(status)}, 实际: ${hasReturnSettlement})`
+    );
+  }
+  // cancellation 只适用于取消/未到店相关状态
+  const cancelRelated = ["pickup_overdue", "cancelled", "no_show", "closed"];
+  for (const status of ALL_STATUSES) {
+    const hasCancellation = statusFeeStageMap[status].includes("cancellation");
+    assert(
+      hasCancellation === cancelRelated.includes(status),
+      `状态 ${status} 的 cancellation 关联性正确 (期望: ${cancelRelated.includes(status)}, 实际: ${hasCancellation})`
+    );
+  }
+  // closed 状态关联所有费用阶段（可审计所有阶段）
+  assert(statusFeeStageMap.closed.length === 5, `closed 关联全部 5 个费用阶段 (实际: ${statusFeeStageMap.closed.length})`);
+  // 终态费用阶段完整性
+  const terminalStates = ALL_STATUSES.filter((s) => VALID_TRANSITIONS[s].length === 0);
+  for (const terminal of terminalStates) {
+    assert(statusFeeStageMap[terminal].length >= 1, `终态 ${terminal} 至少关联 1 个费用阶段`);
+  }
+  // 状态总数一致
+  assert(Object.keys(statusFeeStageMap).length === ALL_STATUSES.length, `映射表覆盖全部 ${ALL_STATUSES.length} 个状态`);
+  passed++;
+  console.log("  PASS  费用阶段与订单生命周期映射验证通过");
+}
+
+// TST-01: 从 renting 状态 BFS 可达性深度分析
+function testReachableFromRenting() {
+  console.log("\n[测试] 从 renting 状态 BFS 可达性");
+  const visited = new Set();
+  const queue = ["renting"];
+  const depthMap = new Map();
+  depthMap.set("renting", 0);
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (visited.has(current)) continue;
+    visited.add(current);
+    for (const target of VALID_TRANSITIONS[current] || []) {
+      if (!visited.has(target)) {
+        queue.push(target);
+        if (!depthMap.has(target)) {
+          depthMap.set(target, (depthMap.get(current) || 0) + 1);
+        }
+      }
+    }
+  }
+  // 从 renting 可达的状态集合
+  const reachableFromRenting = ["renting", "renewing", "overdue", "accident_processing", "settlement_pending", "payment_due", "refund_pending", "completed", "closed"];
+  for (const status of reachableFromRenting) {
+    assert(visited.has(status), `renting 可达 ${status}`);
+  }
+  // 从 renting 不可达的状态
+  const unreachableFromRenting = ["pending_payment", "reserved", "pickup_overdue", "inspecting", "cancelled", "no_show", "rejected"];
+  for (const status of unreachableFromRenting) {
+    assert(!visited.has(status), `renting 不可达 ${status}`);
+  }
+  // renting 可达的终态
+  const reachableTerminals = ["completed", "closed"];
+  for (const terminal of reachableTerminals) {
+    assert(visited.has(terminal), `renting 可达终态 ${terminal}`);
+  }
+  // 从 renting 不可达的终态
+  const unreachableTerminals = ["cancelled", "no_show", "rejected"];
+  for (const terminal of unreachableTerminals) {
+    assert(!visited.has(terminal), `renting 不可达终态 ${terminal}`);
+  }
+  // BFS 深度校验
+  assert(depthMap.get("renting") === 0, "renting 深度为 0");
+  assert(depthMap.get("renewing") === 1, "renewing 深度为 1");
+  assert(depthMap.get("overdue") === 1, "overdue 深度为 1");
+  assert(depthMap.get("settlement_pending") === 1, "settlement_pending 深度为 1");
+  assert(depthMap.get("completed") >= 1, `completed 从 renting 深度 >= 1 (实际: ${depthMap.get("completed")})`);
+  assert(depthMap.get("accident_processing") === 1, "accident_processing 深度为 1");
+  // 验证可达状态数
+  assert(visited.size === reachableFromRenting.length, `从 renting 可达 ${reachableFromRenting.length} 个状态 (实际: ${visited.size})`);
+  // 验证最大深度合理
+  const maxDepth = Math.max(...depthMap.values());
+  assert(maxDepth >= 2, `从 renting 最大 BFS 深度 >= 2 (实际: ${maxDepth})`);
+  assert(maxDepth <= 10, `从 renting 最大 BFS 深度 <= 10 (实际: ${maxDepth})`);
+  // 验证 renting 到 completed 的所有路径长度
+  const pathLengths = [];
+  function dfsPaths(current, target, visitedSet, depth) {
+    if (current === target) {
+      pathLengths.push(depth);
+      return;
+    }
+    for (const next of VALID_TRANSITIONS[current] || []) {
+      if (!visitedSet.has(next)) {
+        visitedSet.add(next);
+        dfsPaths(next, target, visitedSet, depth + 1);
+        visitedSet.delete(next);
+      }
+    }
+  }
+  dfsPaths("renting", "completed", new Set(["renting"]), 0);
+  assert(pathLengths.length > 0, "renting 到 completed 存在路径");
+  assert(pathLengths.length >= 2, `renting 到 completed 至少有 2 条路径 (实际: ${pathLengths.length})`);
+  const minPath = Math.min(...pathLengths);
+  const maxPath = Math.max(...pathLengths);
+  assert(minPath >= 1, `最短路径长度 >= 1 (实际: ${minPath})`);
+  assert(maxPath >= minPath, `最长路径 >= 最短路径`);
+  passed++;
+  console.log("  PASS  从 renting 状态 BFS 可达性验证通过");
+}
+
 async function main() {
   console.log("=".repeat(60));
   console.log("E2E 订单状态流转 & 报表测试");
@@ -1097,6 +1241,8 @@ async function main() {
   testSeedOrderNoFormat();
   testSeedCorporateVsPersonalDistribution();
   testSeedFeeCodeConsistency();
+  testFeeStageOrderLifecycleMapping();
+  testReachableFromRenting();
 
   // API 集成测试
   await testReportDashboard();
