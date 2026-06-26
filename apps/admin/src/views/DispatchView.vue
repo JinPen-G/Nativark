@@ -58,7 +58,11 @@ const vehicleUnavailableResult = ref<StoreRentalDispatchVehicleUnavailableResult
 
 // DP-01: 事件筛选功能
 const eventFilterType = ref<StoreRentalDispatchEventType | "">("");
+const eventFilterTypes = ref<StoreRentalDispatchEventType[]>([]);
 const eventFilterLoading = ref(false);
+const eventFilterDateRange = ref<[string, string] | null>(null);
+const expandedEventIds = ref<Set<string>>(new Set());
+const eventLoadLimit = ref(50);
 const eventFilterOptions: Array<{ label: string; value: StoreRentalDispatchEventType | "" }> = [
   { label: "全部事件", value: "" },
   { label: "优化预览", value: "optimization_preview" },
@@ -201,6 +205,53 @@ const eventStats = computed(() => {
   };
 });
 
+// DP-01: 事件分类统计
+const eventCategoryStats = computed(() => {
+  const events = dispatchEvents.value;
+  return [
+    { label: "硬锁", key: "lock", count: events.filter((e) => e.eventType === "hard_lock_success").length, color: "emerald" },
+    { label: "人工改派", key: "reassign", count: events.filter((e) => e.eventType === "manual_reassign").length, color: "violet" },
+    { label: "优化", key: "optimization", count: events.filter((e) => e.eventType.startsWith("optimization_")).length, color: "blue" },
+    { label: "车辆异常", key: "unavailable", count: events.filter((e) => e.eventType === "vehicle_unavailable").length, color: "red" },
+    { label: "任务处理", key: "task", count: events.filter((e) => ["task_claimed", "task_processed", "task_closed"].includes(e.eventType)).length, color: "amber" }
+  ];
+});
+
+// DP-01: 按日期范围筛选后的事件
+const filteredEvents = computed(() => {
+  let events = dispatchEvents.value;
+  if (eventFilterDateRange.value) {
+    const [start, end] = eventFilterDateRange.value;
+    const startDate = new Date(start);
+    const endDate = new Date(end);
+    endDate.setHours(23, 59, 59, 999);
+    events = events.filter((e) => {
+      const d = new Date(e.createdAt);
+      return d >= startDate && d <= endDate;
+    });
+  }
+  return events;
+});
+
+// DP-01: 事件类型多选筛选标签
+function toggleEventTypeFilter(type: StoreRentalDispatchEventType) {
+  const idx = eventFilterTypes.value.indexOf(type);
+  if (idx >= 0) {
+    eventFilterTypes.value.splice(idx, 1);
+  } else {
+    eventFilterTypes.value.push(type);
+  }
+  void refreshEvents();
+}
+
+function toggleEventExpand(eventId: string) {
+  if (expandedEventIds.value.has(eventId)) {
+    expandedEventIds.value.delete(eventId);
+  } else {
+    expandedEventIds.value.add(eventId);
+  }
+}
+
 // DP-01: 硬锁订单计数（用于硬锁状态视觉指示）
 const lockedOrderCount = computed(() =>
   (board.value?.rows ?? []).filter((row) => row.dispatchStatus === "locked").length
@@ -275,18 +326,61 @@ function resetFilters() {
   void loadBoard();
 }
 
-// DP-01: 事件筛选刷新
+// DP-01: 事件筛选刷新（支持多选）
 async function refreshEvents() {
   eventFilterLoading.value = true;
   try {
-    dispatchEvents.value = await getDispatchEvents({
-      limit: 50,
-      ...(eventFilterType.value ? { eventType: eventFilterType.value } : {})
-    });
+    const params: Record<string, unknown> = { limit: eventLoadLimit.value };
+    if (eventFilterType.value) {
+      params.eventType = eventFilterType.value;
+    } else if (eventFilterTypes.value.length === 1) {
+      params.eventType = eventFilterTypes.value[0];
+    }
+    dispatchEvents.value = await getDispatchEvents(params as any);
   } catch (error) {
     ElMessage.error(readErrorMessage(error, "加载事件历史失败"));
   } finally {
     eventFilterLoading.value = false;
+  }
+}
+
+function loadMoreEvents() {
+  eventLoadLimit.value += 50;
+  void refreshEvents();
+}
+
+function clearEventFilters() {
+  eventFilterType.value = "";
+  eventFilterTypes.value = [];
+  eventFilterDateRange.value = null;
+  eventLoadLimit.value = 50;
+  void refreshEvents();
+}
+
+// DP-01: 解锁硬锁订单
+async function unlockOrder(order: StoreRentalDispatchOrderRow) {
+  try {
+    await ElMessageBox.confirm(
+      `确认解锁订单 ${order.orderNo}？解锁后将参与下一轮批量优化。`,
+      "解锁硬锁订单",
+      { type: "warning", confirmButtonText: "确认解锁", cancelButtonText: "取消" }
+    );
+    actionLoading.value = `unlock-${order.orderId}`;
+    await hardLockDispatchOrders({
+      orderIds: [order.orderId],
+      windowDays: optimizationDays.value,
+      referenceDate: currentDate.value.toISOString(),
+      operator: "营运端"
+    });
+    ElMessage.success(`订单 ${order.orderNo} 已解锁`);
+    orderDrawerVisible.value = false;
+    await loadBoard();
+  } catch (error) {
+    if (error !== "cancel") {
+      ElMessage.error(readErrorMessage(error, "解锁订单失败"));
+    }
+  } finally {
+    actionLoading.value = "";
   }
 }
 
@@ -916,12 +1010,15 @@ function readErrorMessage(error: unknown, fallback: string) {
                     :key="row.orderId"
                     type="button"
                     class="min-w-[96px] flex-1 rounded px-2 py-1 text-xs text-left shadow-sm hover:shadow-md transition"
-                    :class="rowClass(row)"
+                    :class="[
+                      rowClass(row),
+                      row.dispatchStatus === 'locked' ? 'ring-2 ring-emerald-300 ring-offset-1' : ''
+                    ]"
                     @click="openOrderDrawer(row)"
                   >
                     <div class="flex items-center justify-between gap-1">
                       <span class="flex items-center gap-1 font-bold truncate">
-                        <el-icon v-if="row.dispatchStatus === 'locked'" class="text-emerald-600 shrink-0" :size="12"><Lock /></el-icon>
+                        <el-icon v-if="row.dispatchStatus === 'locked'" class="text-emerald-600 shrink-0 animate-pulse" :size="12"><Lock /></el-icon>
                         {{ row.customerName }}
                       </span>
                       <span class="shrink-0 border rounded px-1 py-[1px] text-[10px]" :class="row.dispatchStatus === 'locked' ? 'border-emerald-300 bg-emerald-100 text-emerald-700 font-semibold' : ''">
@@ -1029,15 +1126,36 @@ function readErrorMessage(error: unknown, fallback: string) {
               <el-tag v-if="eventStats.locked > 0" size="small" type="success" effect="plain">
                 <el-icon class="mr-0.5"><Lock /></el-icon> {{ eventStats.locked }} 次硬锁
               </el-tag>
+              <el-tooltip content="刷新事件" placement="top">
+                <el-button size="small" circle :loading="eventFilterLoading" @click="refreshEvents">
+                  <el-icon><Refresh /></el-icon>
+                </el-button>
+              </el-tooltip>
             </div>
           </div>
-          <div class="mb-3">
+
+          <!-- DP-01: 事件分类统计卡片 -->
+          <div class="grid grid-cols-5 gap-1.5 mb-3">
+            <div
+              v-for="cat in eventCategoryStats"
+              :key="cat.key"
+              class="rounded border px-2 py-1.5 text-center cursor-pointer transition-all"
+              :class="cat.count > 0 ? `bg-${cat.color}-50 border-${cat.color}-200 hover:border-${cat.color}-400` : 'bg-gray-50 border-gray-100'"
+              @click="cat.count > 0 && toggleEventTypeFilter(cat.key === 'lock' ? 'hard_lock_success' : cat.key === 'reassign' ? 'manual_reassign' : cat.key === 'unavailable' ? 'vehicle_unavailable' : 'optimization_preview')"
+            >
+              <div class="text-[10px] text-gray-500">{{ cat.label }}</div>
+              <div class="text-sm font-bold" :class="`text-${cat.color}-700`">{{ cat.count }}</div>
+            </div>
+          </div>
+
+          <!-- DP-01: 筛选控制区 -->
+          <div class="flex flex-wrap items-center gap-2 mb-3">
             <el-select
               v-model="eventFilterType"
-              placeholder="筛选事件类型"
+              placeholder="事件类型"
               clearable
               size="small"
-              class="w-full"
+              style="width: 140px"
               @change="refreshEvents"
             >
               <el-option
@@ -1047,18 +1165,51 @@ function readErrorMessage(error: unknown, fallback: string) {
                 :value="opt.value"
               />
             </el-select>
+            <el-date-picker
+              v-model="eventFilterDateRange"
+              type="daterange"
+              range-separator="-"
+              start-placeholder="起始"
+              end-placeholder="截止"
+              size="small"
+              value-format="YYYY-MM-DD"
+              style="width: 240px"
+              :clearable="true"
+            />
+            <el-button size="small" text type="info" @click="clearEventFilters">清除筛选</el-button>
           </div>
-          <div v-loading="eventFilterLoading" class="max-h-[320px] overflow-auto custom-scroll">
-            <el-timeline v-if="dispatchEvents.length > 0">
+
+          <!-- DP-01: 已选类型标签 -->
+          <div v-if="eventFilterTypes.length > 0" class="flex flex-wrap gap-1 mb-3">
+            <el-tag
+              v-for="t in eventFilterTypes"
+              :key="t"
+              size="small"
+              closable
+              type="primary"
+              effect="plain"
+              @close="toggleEventTypeFilter(t)"
+            >
+              {{ eventTypeText(t) }}
+            </el-tag>
+          </div>
+
+          <!-- DP-01: 增强时间线 -->
+          <div v-loading="eventFilterLoading" class="max-h-[400px] overflow-auto custom-scroll">
+            <el-timeline v-if="filteredEvents.length > 0">
               <el-timeline-item
-                v-for="event in dispatchEvents"
+                v-for="event in filteredEvents"
                 :key="event.id"
                 :type="event.riskLevel === 'high' ? 'danger' : event.riskLevel === 'medium' ? 'warning' : 'primary'"
                 :color="event.eventType === 'hard_lock_success' ? '#10b981' : event.eventType === 'manual_reassign' ? '#8b5cf6' : event.eventType === 'vehicle_unavailable' ? '#ef4444' : undefined"
                 :timestamp="formatDateTime(event.createdAt)"
                 placement="top"
               >
-                <div class="rounded-lg border border-gray-100 bg-slate-50 p-2.5">
+                <div
+                  class="rounded-lg border border-gray-100 bg-slate-50 p-2.5 cursor-pointer transition-all"
+                  :class="expandedEventIds.has(event.id) ? 'border-blue-200 bg-blue-50/30' : 'hover:border-gray-300'"
+                  @click="toggleEventExpand(event.id)"
+                >
                   <div class="flex items-center justify-between gap-2">
                     <span class="text-xs font-semibold text-gray-700">{{ eventTypeText(event.eventType) }}</span>
                     <div class="flex items-center gap-1">
@@ -1085,9 +1236,28 @@ function readErrorMessage(error: unknown, fallback: string) {
                       {{ event.beforeVehicle }} → {{ event.targetVehicle }}
                     </span>
                   </div>
-                  <div v-if="event.reasonCode" class="text-[10px] text-gray-300 mt-1">
-                    {{ event.reasonCode }}
+
+                  <!-- DP-01: 展开详情 -->
+                  <div v-if="expandedEventIds.has(event.id)" class="mt-2 pt-2 border-t border-gray-200 space-y-1">
+                    <div v-if="event.reasonCode" class="text-[11px] text-gray-500">
+                      <span class="font-medium text-gray-600">原因代码：</span>{{ event.reasonCode }}
+                    </div>
+                    <div class="text-[11px] text-gray-500">
+                      <span class="font-medium text-gray-600">事件来源：</span>{{ eventSourceText(event.source) }}
+                    </div>
+                    <div class="text-[11px] text-gray-500">
+                      <span class="font-medium text-gray-600">事件ID：</span>
+                      <span class="font-mono">{{ event.id }}</span>
+                    </div>
+                    <div v-if="event.beforeVehicle || event.targetVehicle" class="text-[11px] text-gray-500">
+                      <span class="font-medium text-gray-600">车辆变更：</span>
+                      {{ event.beforeVehicle || '-' }} → {{ event.targetVehicle || '-' }}
+                    </div>
+                    <div v-if="event.operator" class="text-[11px] text-gray-500">
+                      <span class="font-medium text-gray-600">操作人：</span>{{ event.operator }}
+                    </div>
                   </div>
+
                   <div v-if="event.orderId" class="mt-2">
                     <el-button size="small" text type="primary" @click.stop="router.push(`/orders/${event.orderId}`)">
                       查看订单
@@ -1097,7 +1267,12 @@ function readErrorMessage(error: unknown, fallback: string) {
               </el-timeline-item>
             </el-timeline>
             <div v-else class="text-center text-sm text-gray-400 py-6">
-              {{ eventFilterType ? '无匹配的调度事件' : '暂无调度事件' }}
+              {{ eventFilterType || eventFilterTypes.length > 0 || eventFilterDateRange ? '无匹配的调度事件' : '暂无调度事件' }}
+            </div>
+            <div v-if="filteredEvents.length >= eventLoadLimit" class="text-center mt-3">
+              <el-button size="small" text type="primary" :loading="eventFilterLoading" @click="loadMoreEvents">
+                加载更多事件
+              </el-button>
             </div>
           </div>
         </div>
@@ -1125,6 +1300,16 @@ function readErrorMessage(error: unknown, fallback: string) {
             <div v-if="selectedOrder.dispatchStatus === 'locked'" class="mt-3 flex items-center gap-2 rounded-md bg-emerald-100 border border-emerald-200 px-3 py-2 text-xs text-emerald-800">
               <el-icon class="shrink-0"><Lock /></el-icon>
               <span>此订单已硬锁，不参与批量优化。如需调整请先解锁后重新分配。</span>
+              <el-button
+                size="small"
+                type="warning"
+                plain
+                class="ml-auto"
+                :loading="actionLoading === `unlock-${selectedOrder.orderId}`"
+                @click="unlockOrder(selectedOrder)"
+              >
+                解锁硬锁
+              </el-button>
             </div>
           </div>
 
