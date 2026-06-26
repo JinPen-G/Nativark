@@ -7,8 +7,8 @@
 ## 0. 当前真实状态
 
 - 当前分支：`main`。
-- 最新提交：`d54447d feat: 补充场景化订单 seed 数据`。
-- 最近有效开发：MySQL 模式订单动作统一审计、会员详情证件照片区域、场景化订单 seed、订单履约/客户/车辆/定价/调度/报表深化。
+- 最新提交：`c4abc06 feat: 深化订单详情页计费快照展示`。
+- 最近有效开发：MySQL 模式订单动作统一审计、会员详情证件照片区域、场景化订单 seed、订单履约/客户/车辆/定价/调度/报表深化、发票记录展示、事件级快照链展示。
 - 最新验证结果：`npm run build` 通过；`npm run contract:validate` 通过，覆盖 185 个 controller operation；`npx prisma validate --schema apps/api/prisma/schema.prisma` 通过；`npm run test:reports` 通过；`git diff --check` 通过。
 - 当前未收口项：`docs/STORE_RENTAL_DEVELOPMENT_TASKS.md` 有本次台账更新；`.claude/` 未跟踪；`备份.zip` 未跟踪且体积约 220MB，不应提交进仓库。
 - 当前结论：不是“开发完成”，而是“核心模块有第一版，部分深化已推进，仍需按 PRD/原型继续做真实闭环、MySQL 回归和测试”。
