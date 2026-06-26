@@ -1213,6 +1213,7 @@ export interface ServiceFeeRule {
   amount: number;
   chargeMode: "fixed" | "per_day";
   enabled: boolean;
+  customerScope?: StoreRentalCustomerType | "all";
 }
 
 export interface PricingPlanDetail extends PricingPlanSummary {

@@ -2864,6 +2864,39 @@ export class StoreRentalService {
       );
     }
 
+    if (input.serviceCodes && input.serviceCodes.length > 0) {
+      const availableFees = plan.serviceFees;
+      const availableCodes = new Set(availableFees.map((f) => f.code));
+
+      for (const code of input.serviceCodes) {
+        const fee = availableFees.find((f) => f.code === code);
+
+        if (!fee) {
+          throw new BadRequestException(
+            `增值服务代码 ${code} 在当前价格方案中不存在，请检查服务代码是否正确。`
+          );
+        }
+
+        if (!fee.enabled) {
+          throw new BadRequestException(
+            `增值服务 ${fee.name}(${code}) 当前已停用，不能选择。`
+          );
+        }
+
+        const customerScope = fee.customerScope ?? "all";
+        if (
+          customerScope !== "all" &&
+          input.customerType &&
+          customerScope !== input.customerType
+        ) {
+          const scopeLabel = customerScope === "enterprise" ? "企业客户" : "个人客户";
+          throw new BadRequestException(
+            `增值服务 ${fee.name}(${code}) 仅限${scopeLabel}使用，当前客户类型不符合要求。`
+          );
+        }
+      }
+    }
+
     const pickupAt = new Date(input.pickupAt);
     const returnAt = new Date(input.returnAt);
     const hours = Math.max(
@@ -8812,7 +8845,19 @@ export class StoreRentalService {
         riskRows,
         recommendations,
         systemPrompt:
-          "你是门市租赁调度分析 Agent，只能在同车行、同车组、车辆状态、时间窗、硬锁和人工保护约束内输出建议，不得直接执行动作。"
+          "你是门市租赁调度分析 Agent，只能在同车行、同车组、车辆状态、时间窗、硬锁和人工保护约束内输出建议，不得直接执行动作。",
+        mockMode: true,
+        mockReason:
+          "当前为 MVP 阶段，AI 调度分析仅生成建议数据包，不执行任何订单变更操作。",
+        aiRequestLog: {
+          requestedAt: new Date().toISOString(),
+          analysisId,
+          promptVersion,
+          packetVersion,
+          riskRowCount: riskRows.length,
+          recommendationCount: recommendations.length,
+          status: "mock_only"
+        }
       }
     });
 
@@ -8826,7 +8871,7 @@ export class StoreRentalService {
       riskRows,
       recommendations,
       event,
-      message: "AI 调度分析请求已记录。本期预留真实模型接入，推荐结果需人工确认后再按现有调度接口应用。"
+      message: "AI 调度分析请求已记录。当前为 MVP 阶段，推荐结果仅作参考，需人工确认后再按现有调度接口应用。不直接修改订单数据。"
     };
   }
 
