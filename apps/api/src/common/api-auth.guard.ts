@@ -77,6 +77,10 @@ function requiredPermissions(method: string, path: string) {
     return ["store-rental:report:view"];
   }
 
+  if (path.startsWith("/store-rental/data-dictionary")) {
+    return ["store-rental:order:view", "store-rental:vehicle:view", "store-rental:member:view"];
+  }
+
   if (path.startsWith("/store-rental/rules")) {
     return ["store-rental:rules:manage"];
   }
