@@ -382,6 +382,47 @@ function invoiceStatusLabel(status: string) {
   return map[status] || status;
 }
 
+function eventSnapshotTypeLabel(eventType: string) {
+  const map: Record<string, string> = {
+    pickup_qualification: "取车资格",
+    pickup_fund: "取车资金",
+    pickup_delivery: "取车交付",
+    return_inspection: "还车验车",
+    return_settlement: "还车结算",
+    settlement_confirmation: "结算确认",
+    operation_lock_release: "操作锁释放",
+    manual_adjust: "人工调整"
+  };
+  return map[eventType] || eventType;
+}
+
+function eventSnapshotTypeTag(eventType: string) {
+  const map: Record<string, string> = {
+    pickup_qualification: "primary",
+    pickup_fund: "warning",
+    pickup_delivery: "success",
+    return_inspection: "info",
+    return_settlement: "warning",
+    settlement_confirmation: "success",
+    operation_lock_release: "info",
+    manual_adjust: "danger"
+  };
+  return map[eventType] || "";
+}
+
+function snapshotBeforeAfterSummary(before: Record<string, unknown>, after: Record<string, unknown>): string {
+  const changes: string[] = [];
+  const allKeys = new Set([...Object.keys(before), ...Object.keys(after)]);
+  for (const key of allKeys) {
+    const beforeVal = before[key];
+    const afterVal = after[key];
+    if (beforeVal !== afterVal) {
+      changes.push(`${key}: ${String(beforeVal ?? "-")} → ${String(afterVal ?? "-")}`);
+    }
+  }
+  return changes.slice(0, 3).join("；") || "无变更";
+}
+
 const pickupBalanceDue = computed(() => {
   const order = detail.value;
   if (!order || isMonthly.value) {
@@ -2672,6 +2713,34 @@ onMounted(loadDetail);
               <div class="flex justify-between text-sm">
                 <span class="text-gray-500">车辆分组</span>
                 <span class="font-medium text-gray-800">{{ detail.snapshots?.vehicleGroup || "-" }}</span>
+              </div>
+            </div>
+            <!-- 事件级快照链 -->
+            <div v-if="eventSnapshots.length" class="border-t border-gray-100 px-5 py-3">
+              <div class="font-bold text-gray-800 mb-3">事件级快照链</div>
+              <div class="space-y-3 max-h-60 overflow-y-auto">
+                <div v-for="snap in eventSnapshots" :key="snap.id" class="rounded border border-gray-200 p-3 text-xs">
+                  <div class="flex justify-between items-start mb-2">
+                    <div>
+                      <el-tag size="small" :type="eventSnapshotTypeTag(snap.eventType)" effect="plain" class="mr-2">
+                        {{ eventSnapshotTypeLabel(snap.eventType) }}
+                      </el-tag>
+                      <span class="font-medium text-gray-800">{{ snap.title }}</span>
+                    </div>
+                    <span class="text-gray-400 font-mono">{{ snap.occurredAt }}</span>
+                  </div>
+                  <div v-if="snap.triggerReason" class="text-gray-500 mb-1">触发原因：{{ snap.triggerReason }}</div>
+                  <div v-if="snap.settlementTarget" class="text-gray-500 mb-1">结算去向：{{ snap.settlementTarget }}</div>
+                  <div v-if="snap.amount !== undefined" class="text-gray-500 mb-1">
+                    金额：<span class="font-mono font-bold" :class="snap.amount > 0 ? 'text-red-600' : 'text-green-600'">
+                      {{ formatMoney(snap.amount) }}
+                    </span>
+                  </div>
+                  <div v-if="snap.before && snap.after" class="text-gray-500 mb-1">
+                    变更：{{ snapshotBeforeAfterSummary(snap.before, snap.after) }}
+                  </div>
+                  <div class="text-gray-400">操作人：{{ snap.operator }}</div>
+                </div>
               </div>
             </div>
           </section>
