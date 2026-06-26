@@ -1147,6 +1147,15 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   },
   {
     method: "get",
+    path: "/api/store-rental/data-dictionary",
+    tag: "StoreRental",
+    operationId: "getDataDictionary",
+    summary: "Get all status/type label mappings",
+    permissions: ["store-rental:order:view", "store-rental:vehicle:view", "store-rental:member:view"],
+    responseSchema: "GenericObject"
+  },
+  {
+    method: "get",
     path: "/api/store-rental/rules",
     tag: "StoreRental",
     operationId: "getStoreRentalRules",

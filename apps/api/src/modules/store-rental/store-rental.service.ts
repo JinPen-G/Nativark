@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -163,6 +163,7 @@ import {
   WaiveStoreRentalFeeRequest,
   WorkflowTransition
 } from "@store-rental/shared";
+import type { AuthUser } from "@store-rental/shared";
 import { IntegrationsService } from "../integrations/integrations.service";
 import { PlatformService } from "../platform/platform.service";
 import { StoreRentalRepository } from "./store-rental.repository";
@@ -255,6 +256,256 @@ export class StoreRentalService {
         changeReason: "初始化门市租赁业务规则"
       })
     ];
+  }
+
+  // ── 数据字典 PF-21 ──────────────────────────────────────────────
+
+  private readonly DATA_DICTIONARY: Record<string, Record<string, string>> = {
+    storeRentalMode: {
+      store_rental: "门店租赁",
+      self_service_24h: "24小时自助"
+    },
+    orderMainStatus: {
+      pending_payment: "待付款",
+      reserved: "已预约",
+      pickup_overdue: "取车逾期",
+      inspecting: "验车中",
+      renting: "租赁中",
+      return_overdue: "还车逾期",
+      settling: "结算中",
+      completed: "已完成",
+      cancelled: "已取消",
+      no_show: "未到店",
+      rejected: "已拒绝",
+      closed: "已关闭"
+    },
+    dispatchStatus: {
+      pending: "待派车",
+      pre_assigned: "已预派",
+      locked: "已锁定",
+      manual_reassigned: "手动改派",
+      upgraded: "已升级",
+      dispatch_manual_required: "需手动派车"
+    },
+    operationLockStatus: {
+      active: "生效中",
+      interrupted: "已中断",
+      expired: "已过期",
+      released: "已释放"
+    },
+    paymentStatus: {
+      unpaid: "未付款",
+      deposit_paid: "已付押金",
+      monthly_billing: "月结中",
+      partial_paid: "部分付款",
+      paid: "已付款",
+      payment_due: "待付款",
+      refund_pending: "退款中",
+      refunded: "已退款"
+    },
+    configStatus: {
+      draft: "草稿",
+      effective: "生效中",
+      archived: "已归档"
+    },
+    billingMode: {
+      customer_pay: "客户付费",
+      monthly: "企业月结"
+    },
+    customerType: {
+      personal: "个人客户",
+      enterprise: "企业客户"
+    },
+    feeStage: {
+      booking: "预订",
+      rental: "租赁",
+      pickup: "取车",
+      return_settlement: "还车结算",
+      cancellation: "取消",
+      post_charge: "事后补收"
+    },
+    feeSource: {
+      system: "系统自动",
+      manual: "手动添加"
+    },
+    feeDirection: {
+      charge: "收费",
+      refund: "退款",
+      waiver: "减免"
+    },
+    feeStatus: {
+      pending: "待结算",
+      settled: "已结算",
+      waived: "已减免",
+      monthly_billing: "月结中",
+      voided: "已作废"
+    },
+    transactionType: {
+      pre_auth_freeze: "预授权冻结",
+      pre_auth_release: "预授权释放",
+      pre_auth_capture: "预授权扣款",
+      payment: "支付",
+      refund: "退款",
+      waiver: "减免",
+      monthly_bill: "月结账单"
+    },
+    transactionChannel: {
+      online: "线上",
+      offline: "线下",
+      internal: "内部"
+    },
+    transactionStatus: {
+      pending: "处理中",
+      success: "成功",
+      failed: "失败"
+    },
+    contractStatus: {
+      pending: "待签",
+      signed: "已签",
+      fallback_uploaded: "已上传备档",
+      voided: "已作废"
+    },
+    contractPrintStatus: {
+      not_generated: "未生成",
+      generated: "已生成",
+      printed: "已打印",
+      downloaded: "已下载"
+    },
+    contractType: {
+      rental_contract: "租赁合约",
+      pickup_sheet: "取车交接单",
+      return_sheet: "还车交接单",
+      settlement_sheet: "结算单"
+    },
+    signMethod: {
+      app: "APP签署",
+      counter: "柜台签署",
+      offline_paper: "线下纸质",
+      system: "系统签署"
+    },
+    memberStatus: {
+      pending_review: "待审核",
+      active: "正常",
+      suspended: "暂停",
+      blacklisted: "黑名单"
+    },
+    memberTag: {
+      frequent_user: "高频用户",
+      vip: "VIP客户",
+      high_value: "高价值客户",
+      risk_alert: "风险预警",
+      blacklist: "黑名单"
+    },
+    memberReviewStatus: {
+      pending: "待审核",
+      approved: "已通过",
+      rejected: "已拒绝"
+    },
+    stationServiceStatus: {
+      normal: "正常",
+      paused: "暂停",
+      maintenance: "维护中"
+    },
+    stationStatus: {
+      enabled: "启用",
+      disabled: "停用"
+    },
+    stationScopeType: {
+      car_shop: "车行",
+      store: "门店",
+      station: "站点"
+    },
+    vehicleOperationStatus: {
+      idle: "空闲",
+      reserved: "已预约",
+      renting: "租赁中",
+      controlled: "管控中",
+      maintenance: "维护中",
+      disabled: "停用"
+    },
+    vehicleServiceType: {
+      STORE_STANDARD: "门店标准",
+      STORE_24H: "24小时自助"
+    },
+    vehicleStatusRecheckResult: {
+      approved: "已通过",
+      rejected: "未通过"
+    },
+    vehicleTransferStatus: {
+      pending: "待审批",
+      approved: "已审批",
+      departed: "已发车",
+      arrived: "已到店",
+      completed: "已完成",
+      cancelled: "已取消"
+    },
+    dispatchOptimizationResultStatus: {
+      optimized: "已优化",
+      unchanged: "未变化",
+      skipped: "已跳过",
+      failed: "失败"
+    },
+    dispatchOptimizationReasonCode: {
+      ASSIGN_PENDING: "分配待处理订单",
+      REPLACE_CONFLICT: "替换冲突车辆",
+      REPLACE_SCORE: "按评分替换",
+      KEEP_CURRENT: "保留当前分配",
+      SKIP_MANUAL: "跳过手动订单"
+    },
+    riskLevel: {
+      low: "低",
+      medium: "中",
+      high: "高"
+    },
+    corporateBillStatus: {
+      draft: "草稿",
+      pending_review: "待审核",
+      approved: "已审批",
+      settled: "已结清",
+      voided: "已作废"
+    },
+    orderRemarkStatus: {
+      open: "待处理",
+      closed: "已关闭"
+    }
+  };
+
+  getDataDictionary(): Record<string, Record<string, string>> {
+    return this.DATA_DICTIONARY;
+  }
+
+  // ── 数据权限过滤 PF-10 ─────────────────────────────────────────
+
+  private extractUserOrThrow(currentUser?: AuthUser): AuthUser {
+    if (!currentUser) {
+      throw new ForbiddenException("缺少用户上下文");
+    }
+    return currentUser;
+  }
+
+  private matchesDataScope(
+    currentUser: AuthUser,
+    recordOrgId?: string | null,
+    recordOrgName?: string | null
+  ): boolean {
+    if (currentUser.isPlatformAdmin || currentUser.dataScope === "all") {
+      return true;
+    }
+    if (!currentUser.dataScope || currentUser.dataScope === "own") {
+      return true;
+    }
+    if (currentUser.dataScope === "organization" || currentUser.dataScope === "store") {
+      // MySQL 路径有 orgId 匹配
+      if (recordOrgId && currentUser.organizationId) {
+        return recordOrgId === currentUser.organizationId;
+      }
+      // 内存路径回退到名称匹配
+      if (recordOrgName && currentUser.organizationName) {
+        return recordOrgName === currentUser.organizationName;
+      }
+      return true;
+    }
+    return true;
   }
 
   private readonly quotes = new Map<string, StoredQuote>();
@@ -1360,7 +1611,7 @@ export class StoreRentalService {
     }
   ];
 
-  listMembers(query: MemberListQuery = {}): MemberListResult | Promise<MemberListResult> {
+  listMembers(query: MemberListQuery = {}, currentUser?: AuthUser): MemberListResult | Promise<MemberListResult> {
     if (this.useMysqlDataSource()) {
       return this.storeRentalRepository.listMembers(query);
     }
@@ -1433,7 +1684,7 @@ export class StoreRentalService {
       : undefined;
   }
 
-  getMemberDetail(id: string) {
+  getMemberDetail(id: string, currentUser?: AuthUser) {
     if (this.useMysqlDataSource()) {
       return this.storeRentalRepository.getMemberDetail(id);
     }
@@ -1811,7 +2062,7 @@ export class StoreRentalService {
     return plan;
   }
 
-  listCorporates(): CorporateSummary[] | Promise<CorporateSummary[]> {
+  listCorporates(currentUser?: AuthUser): CorporateSummary[] | Promise<CorporateSummary[]> {
     if (this.useMysqlDataSource()) {
       return this.storeRentalRepository.listCorporates();
     }
@@ -1819,7 +2070,8 @@ export class StoreRentalService {
   }
 
   listCorporatePage(
-    query: CorporateListQuery = {}
+    query: CorporateListQuery = {},
+    currentUser?: AuthUser
   ): CorporateListResult | Promise<CorporateListResult> {
     if (this.useMysqlDataSource()) {
       return this.storeRentalRepository.listCorporatePage(query);
@@ -2184,7 +2436,7 @@ export class StoreRentalService {
     );
   }
 
-  getFinanceOverview(): Promise<FinanceOverviewMetrics> | FinanceOverviewMetrics {
+  getFinanceOverview(currentUser?: AuthUser): Promise<FinanceOverviewMetrics> | FinanceOverviewMetrics {
     if (this.useMysqlDataSource()) {
       return this.storeRentalRepository.getFinanceOverview();
     }
@@ -2236,7 +2488,7 @@ export class StoreRentalService {
     };
   }
 
-  listFinanceTransactions(): Promise<FinanceTransactionRow[]> | FinanceTransactionRow[] {
+  listFinanceTransactions(currentUser?: AuthUser): Promise<FinanceTransactionRow[]> | FinanceTransactionRow[] {
     if (this.useMysqlDataSource()) {
       return this.storeRentalRepository.listFinanceTransactions();
     }
@@ -5692,7 +5944,7 @@ export class StoreRentalService {
     };
   }
 
-  listOrders(filter: OrderFilter) {
+  listOrders(filter: OrderFilter, currentUser?: AuthUser) {
     if (this.useMysqlDataSource()) {
       return this.storeRentalRepository.listOrders(filter);
     }
@@ -5707,17 +5959,23 @@ export class StoreRentalService {
         order.customerName.toLowerCase().includes(keyword) ||
         order.vehicleGroupName.toLowerCase().includes(keyword);
       const matchedStatus = !status || order.mainStatus === status;
+      const matchedScope = !currentUser || this.matchesDataScope(currentUser, null, order.pickupStoreName);
 
-      return matchedKeyword && matchedStatus;
+      return matchedKeyword && matchedStatus && matchedScope;
     });
   }
 
-  getOrderDetail(id: string): StoreRentalOrderDetail | Promise<StoreRentalOrderDetail> {
+  getOrderDetail(id: string, currentUser?: AuthUser): StoreRentalOrderDetail | Promise<StoreRentalOrderDetail> {
     if (this.useMysqlDataSource()) {
       return this.storeRentalRepository.getOrderDetail(id);
     }
 
     const order = this.findOrder(id);
+
+    // PF-10 数据权限校验
+    if (currentUser && !this.matchesDataScope(currentUser, null, order.pickupStoreName)) {
+      throw new ForbiddenException("当前账号无权查看该订单");
+    }
 
     // 操作锁过期检测
     if (

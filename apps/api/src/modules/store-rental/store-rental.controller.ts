@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, Req } from "@nestjs/common";
 import type {
   CreateVehicleConditionPhotoRecordRequest,
   CreatePriceAdjustmentScheduleRequest,
@@ -71,6 +71,11 @@ import { StoreRentalService } from "./store-rental.service";
 @Controller("store-rental")
 export class StoreRentalController {
   constructor(private readonly storeRentalService: StoreRentalService) {}
+
+  @Get("data-dictionary")
+  dataDictionary() {
+    return this.storeRentalService.getDataDictionary();
+  }
 
   @Get("rules")
   rules() {
@@ -477,6 +482,7 @@ export class StoreRentalController {
 
   @Get("members")
   members(
+    @Req() req: any,
     @Query("keyword") keyword?: string,
     @Query("status") status?: MemberListQuery["status"],
     @Query("reviewStatus") reviewStatus?: MemberListQuery["reviewStatus"],
@@ -491,12 +497,12 @@ export class StoreRentalController {
       tag,
       page: page ? Number(page) : undefined,
       pageSize: pageSize ? Number(pageSize) : undefined
-    });
+    }, req.user);
   }
 
   @Get("members/:id")
-  memberDetail(@Param("id") id: string) {
-    return this.storeRentalService.getMemberDetail(id);
+  memberDetail(@Req() req: any, @Param("id") id: string) {
+    return this.storeRentalService.getMemberDetail(id, req.user);
   }
 
   @Post("members")
@@ -549,11 +555,11 @@ export class StoreRentalController {
   }
 
   @Get("corporates")
-  corporates(@Query() query: CorporateListQuery) {
+  corporates(@Req() req: any, @Query() query: CorporateListQuery) {
     const hasQuery = Object.values(query).some((value) => value !== undefined && value !== "");
     return hasQuery
-      ? this.storeRentalService.listCorporatePage(query)
-      : this.storeRentalService.listCorporates();
+      ? this.storeRentalService.listCorporatePage(query, req.user)
+      : this.storeRentalService.listCorporates(req.user);
   }
 
   @Get("corporates/:id/monthly-bills")
@@ -592,13 +598,13 @@ export class StoreRentalController {
   }
 
   @Get("finance/overview")
-  financeOverview() {
-    return this.storeRentalService.getFinanceOverview();
+  financeOverview(@Req() req: any) {
+    return this.storeRentalService.getFinanceOverview(req.user);
   }
 
   @Get("finance/transactions")
-  financeTransactions() {
-    return this.storeRentalService.listFinanceTransactions();
+  financeTransactions(@Req() req: any) {
+    return this.storeRentalService.listFinanceTransactions(req.user);
   }
 
   @Get("finance/documents")
@@ -709,8 +715,8 @@ export class StoreRentalController {
   }
 
   @Get("orders")
-  orders(@Query("keyword") keyword?: string, @Query("status") status?: string) {
-    return this.storeRentalService.listOrders({ keyword, status });
+  orders(@Req() req: any, @Query("keyword") keyword?: string, @Query("status") status?: string) {
+    return this.storeRentalService.listOrders({ keyword, status }, req.user);
   }
 
   @Get("contracts")
@@ -751,8 +757,8 @@ export class StoreRentalController {
   }
 
   @Get("orders/:id")
-  orderDetail(@Param("id") id: string) {
-    return this.storeRentalService.getOrderDetail(id);
+  orderDetail(@Req() req: any, @Param("id") id: string) {
+    return this.storeRentalService.getOrderDetail(id, req.user);
   }
 
   @Get("orders/:id/operation-records")
