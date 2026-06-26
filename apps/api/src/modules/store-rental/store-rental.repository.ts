@@ -6156,7 +6156,10 @@ export class StoreRentalRepository {
       "return_settlement",
       "settlement_confirmation",
       "operation_lock_release",
-      "manual_adjust"
+      "manual_adjust",
+      "extension",
+      "redirection",
+      "return_location_change"
     ];
     return allowed.includes(value as StoreRentalEventSnapshotRecord["eventType"])
       ? (value as StoreRentalEventSnapshotRecord["eventType"])

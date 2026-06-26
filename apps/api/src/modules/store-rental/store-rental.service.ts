@@ -6413,20 +6413,46 @@ export class StoreRentalService {
         break;
       case "extend-rental":
         {
+          const oldReturnAtText = order.returnAt;
           const result = this.extendRental(order, body, previousStatus);
           actionTimelineDetail = result.timelineAction;
           resultMessage = result.message;
+          const newReturnAt = this.requiredDate(body.newReturnAt, "");
+          const extensionHours = Math.max(1, Math.ceil((newReturnAt.getTime() - new Date(oldReturnAtText).getTime()) / 3_600_000));
+          await this.persistEventSnapshotRecord(order, {
+            eventType: "extension",
+            title: previousStatus === OrderMainStatus.Overdue ? "补办续租快照" : "延长用车快照",
+            triggerReason: previousStatus === OrderMainStatus.Overdue ? "逾期补办续租" : "客户申请延长用车",
+            settlementTarget: "还车结算",
+            before: { returnAt: oldReturnAtText, mainStatus: previousStatus },
+            after: { returnAt: order.returnAt, mainStatus: order.mainStatus, extensionHours },
+            amountBreakdown: { extensionHours, billableDays: Math.max(1, Math.ceil(extensionHours / 24)) },
+            operator: String(body.operator ?? "门店营运")
+          });
         }
         break;
       case "redirect-order":
         {
+          const previousPlateNo = order.plateNo;
+          const previousVehicleGroupName = order.vehicleGroupName;
           const result = this.redirectOrder(order, body, previousStatus);
           actionTimelineDetail = result.timelineAction;
           resultMessage = result.message;
+          await this.persistEventSnapshotRecord(order, {
+            eventType: "redirection",
+            title: order.dispatchStatus === DispatchStatus.Upgraded ? "免费升等快照" : "车辆改派快照",
+            triggerReason: this.normalizeRedirectionReason(body.reason ?? body.redirectionReason).label,
+            settlementTarget: order.billingMode === BillingMode.Monthly ? "企业月结" : "取车尾款",
+            before: { plateNo: previousPlateNo, vehicleGroupName: previousVehicleGroupName, dispatchStatus: DispatchStatus.Pending },
+            after: { plateNo: order.plateNo, vehicleGroupName: order.vehicleGroupName, dispatchStatus: order.dispatchStatus },
+            operator: String(body.operator ?? "门店营运")
+          });
         }
         break;
       case "change-return-store":
         {
+          const origReturnStoreName = order.returnStoreName;
+          const origReturnStationName = order.returnStationName;
           const result = this.changeReturnLocation(
             order,
             body,
@@ -6439,10 +6465,22 @@ export class StoreRentalService {
           );
           actionTimelineDetail = result.timelineAction;
           resultMessage = result.message;
+          await this.persistEventSnapshotRecord(order, {
+            eventType: "return_location_change",
+            title: "改还车门市/转单快照",
+            triggerReason: this.optionalString(body.reason ?? body.changeReason) || "客户申请变更还车地点",
+            settlementTarget: order.billingMode === BillingMode.Monthly ? "企业月结" : result.fee ? "取车尾款" : "不调整费用",
+            before: { returnStoreName: origReturnStoreName, returnStationName: origReturnStationName },
+            after: { returnStoreName: order.returnStoreName, returnStationName: order.returnStationName, changedBy: "store" },
+            amountBreakdown: { feeAmount: result.fee?.amount ?? 0, quickRedirectApplied: Boolean(result.quickRedirect) },
+            operator: result.operator
+          });
         }
         break;
       case "change-return-station":
         {
+          const origReturnStoreName = order.returnStoreName;
+          const origReturnStationName = order.returnStationName;
           const result = this.changeReturnLocation(
             order,
             body,
@@ -6455,6 +6493,16 @@ export class StoreRentalService {
           );
           actionTimelineDetail = result.timelineAction;
           resultMessage = result.message;
+          await this.persistEventSnapshotRecord(order, {
+            eventType: "return_location_change",
+            title: "改还车据点快照",
+            triggerReason: this.optionalString(body.reason ?? body.changeReason) || "客户申请变更还车地点",
+            settlementTarget: order.billingMode === BillingMode.Monthly ? "企业月结" : result.fee ? "取车尾款" : "不调整费用",
+            before: { returnStoreName: origReturnStoreName, returnStationName: origReturnStationName },
+            after: { returnStoreName: order.returnStoreName, returnStationName: order.returnStationName, changedBy: "station" },
+            amountBreakdown: { feeAmount: result.fee?.amount ?? 0, quickRedirectApplied: Boolean(result.quickRedirect) },
+            operator: result.operator
+          });
         }
         break;
       case "return-inspection":
@@ -7128,6 +7176,18 @@ export class StoreRentalService {
         });
       }
 
+      await this.persistEventSnapshotRecord(order, {
+        eventType: "extension",
+        title: previousStatus === OrderMainStatus.Overdue ? "补办续租快照" : "延长用车快照",
+        triggerReason: previousStatus === OrderMainStatus.Overdue ? "逾期补办续租" : "客户申请延长用车",
+        settlementTarget: settlementMode === "immediate" ? "立即收款" : settlementMode === "monthly" ? "企业月结" : "还车结算",
+        amount: extensionFee?.amount,
+        before: { returnAt: oldReturnAtText, mainStatus: previousStatus },
+        after: { returnAt: order.returnAt, mainStatus: order.mainStatus, extensionHours: Math.max(1, Math.ceil((newReturnAt.getTime() - oldReturnAt.getTime()) / 3_600_000)) },
+        amountBreakdown: { extensionAmount: extensionFee?.amount ?? 0, settlementMode, feeStatus: settlementMode === "monthly" ? "monthly_billing" : settlementMode === "immediate" ? "settled" : "pending" },
+        operator: String(body.operator ?? "门店营运")
+      });
+
       return {
         ...effect,
         settlementSummary
@@ -7193,6 +7253,17 @@ export class StoreRentalService {
           reason: `${order.orderNo} / ${effect.reasonLabel}`
         }
       );
+
+      await this.persistEventSnapshotRecord(order, {
+        eventType: "redirection",
+        title: order.dispatchStatus === DispatchStatus.Upgraded ? "免费升等快照" : "车辆改派快照",
+        triggerReason: effect.reasonLabel,
+        settlementTarget: order.billingMode === BillingMode.Monthly ? "企业月结" : "取车尾款",
+        before: { plateNo: effect.previousPlateNo, vehicleGroupName: currentVehicle?.vehicleGroupName, dispatchStatus: DispatchStatus.Pending },
+        after: { plateNo: order.plateNo, vehicleGroupName: order.vehicleGroupName, dispatchStatus: order.dispatchStatus },
+        amountBreakdown: { feeAmount: effect.fee?.amount ?? 0, priceHandling: effect.fee ? "diff" : "free" },
+        operator: effect.operator
+      });
 
       return {
         timelineAction: effect.timelineAction,
@@ -11851,6 +11922,8 @@ export class StoreRentalService {
       this.storeRentalRepository.listVehicles(),
       this.storeRentalRepository.listVehicleGroups()
     ]);
+    const originalReturnStoreName = order.returnStoreName;
+    const originalReturnStationName = order.returnStationName;
     const effect = this.changeReturnLocation(
       order,
       body,
@@ -11900,6 +11973,18 @@ export class StoreRentalService {
     if (effect.fee) {
       await this.storeRentalRepository.upsertOrderFeeItem(order.id, effect.fee);
     }
+
+    const changeTitle = mode === "store" ? "改还车门市/转单快照" : "改还车据点快照";
+    await this.persistEventSnapshotRecord(order, {
+      eventType: "return_location_change",
+      title: changeTitle,
+      triggerReason: this.optionalString(body.reason ?? body.changeReason) || "客户申请变更还车地点",
+      settlementTarget: order.billingMode === BillingMode.Monthly ? "企业月结" : effect.fee ? "取车尾款" : "不调整费用",
+      before: { returnStoreName: originalReturnStoreName, returnStationName: originalReturnStationName },
+      after: { returnStoreName: order.returnStoreName, returnStationName: order.returnStationName, changedBy: mode },
+      amountBreakdown: { feeAmount: effect.fee?.amount ?? 0, diffAmount: effect.fee?.amount ?? 0, quickRedirectApplied: Boolean(effect.quickRedirect) },
+      operator: effect.operator
+    });
 
     return {
       timelineAction: effect.timelineAction,
