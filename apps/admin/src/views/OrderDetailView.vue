@@ -52,11 +52,13 @@ const waiveFeeDialogVisible = ref(false);
 const transactionDialogVisible = ref(false);
 const contractDialogVisible = ref(false);
 const notificationDialogVisible = ref(false);
+const remarkStatusFilter = ref<"all" | "open" | "closed">("all");
 const remarkDialogVisible = ref(false);
 const closeRemarkDialogVisible = ref(false);
 const closeRemarkId = ref("");
 const closeRemarkForm = reactive({
   closeNote: "",
+  resolutionNotes: "",
   operator: "营运端"
 });
 const feeActionLoading = ref("");
@@ -1039,6 +1041,24 @@ const otherRemarks = computed(() =>
     (r) => !["internal_note", "customer_note", "return_visit"].includes(r.category)
   )
 );
+const remarkSummary = computed(() => {
+  const all = detail.value?.remarks ?? [];
+  return {
+    total: all.length,
+    open: all.filter((r) => r.status === "open").length,
+    closed: all.filter((r) => r.status === "closed").length,
+    internal: all.filter((r) => r.category === "internal_note").length,
+    customer: all.filter((r) => r.category === "customer_note").length,
+    visit: all.filter((r) => r.category === "return_visit").length
+  };
+});
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function filterRemarks(list: any[]): any[] {
+  if (remarkStatusFilter.value === "all") {
+    return list;
+  }
+  return list.filter((r) => r.status === remarkStatusFilter.value);
+}
 const pickupReturnRows = computed(() => {
   const order = detail.value;
   if (!order) {
@@ -2017,6 +2037,7 @@ async function submitRemark() {
 async function closeRemark(recordId: string) {
   closeRemarkId.value = recordId;
   closeRemarkForm.closeNote = "";
+  closeRemarkForm.resolutionNotes = "";
   closeRemarkForm.operator = authStore.user?.displayName || "营运端";
   closeRemarkDialogVisible.value = true;
 }
@@ -2028,9 +2049,13 @@ async function submitCloseRemark() {
   }
   fulfillmentActionLoading.value = `${closeRemarkId.value}:close`;
   try {
+    const closeNoteText = [
+      closeRemarkForm.closeNote || "跟进已处理",
+      closeRemarkForm.resolutionNotes ? `处理备注：${closeRemarkForm.resolutionNotes}` : ""
+    ].filter(Boolean).join("；");
     await closeStoreRentalOrderRemark(order.id, closeRemarkId.value, {
       operator: closeRemarkForm.operator,
-      closeNote: closeRemarkForm.closeNote || "跟进已处理"
+      closeNote: closeNoteText
     });
     closeRemarkDialogVisible.value = false;
     await reloadAfterFulfillmentAction("跟进记录已关闭");
@@ -2631,6 +2656,41 @@ function remarkCategoryLabel(value: string) {
   };
   return map[value] ?? value;
 }
+function remarkCategoryColor(value: string): string {
+  const map: Record<string, string> = {
+    internal_note: "#00689E",
+    customer_note: "#E6A23C",
+    return_visit: "#67C23A",
+    fulfillment_followup: "#409EFF",
+    customer_followup: "#F56C6C"
+  };
+  return map[value] ?? "#909399";
+}
+function remarkCategoryIcon(value: string): string {
+  const map: Record<string, string> = {
+    internal_note: "OfficeBuilding",
+    customer_note: "User",
+    return_visit: "Phone",
+    fulfillment_followup: "Van",
+    customer_followup: "ChatDotRound"
+  };
+  return map[value] ?? "Document";
+}
+function relativeTime(dateStr: string): string {
+  if (!dateStr) return "";
+  const now = Date.now();
+  const then = new Date(dateStr).getTime();
+  if (Number.isNaN(then)) return dateStr;
+  const diff = now - then;
+  const minutes = Math.floor(diff / 60_000);
+  if (minutes < 1) return "刚刚";
+  if (minutes < 60) return `${minutes} 分钟前`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} 小时前`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days} 天前`;
+  return dateStr;
+}
 
 function operationLockStatusLabel(value: string) {
   const map: Record<string, string> = {
@@ -3111,7 +3171,12 @@ onMounted(loadDetail);
             <section class="bg-white rounded-xl border border-gray-200">
               <div class="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
                 <span class="font-bold text-gray-800">通知与跟进</span>
-                <div class="flex gap-2">
+                <div class="flex gap-2 items-center">
+                  <el-radio-group v-model="remarkStatusFilter" size="small">
+                    <el-radio-button value="all">全部({{ remarkSummary.total }})</el-radio-button>
+                    <el-radio-button value="open">待跟进({{ remarkSummary.open }})</el-radio-button>
+                    <el-radio-button value="closed">已关闭({{ remarkSummary.closed }})</el-radio-button>
+                  </el-radio-group>
                   <el-button size="small" link type="primary" @click="openNotificationDialog()">通知</el-button>
                   <el-button size="small" link type="primary" @click="openRemarkDialog">备注</el-button>
                 </div>
@@ -3126,11 +3191,16 @@ onMounted(loadDetail);
                     <el-tag size="small" :type="notificationStatusType(record.status)" effect="plain">{{ record.status }}</el-tag>
                   </div>
                 </div>
-                <template v-if="internalRemarks.length">
-                  <div class="px-5 pt-3 pb-1 text-xs font-bold text-gray-500 bg-gray-50">内部备注</div>
-                  <div v-for="record in internalRemarks" :key="record.id" class="px-5 py-3 text-sm">
+                <template v-if="filterRemarks(internalRemarks).length">
+                  <div class="px-5 pt-3 pb-1 text-xs font-bold text-gray-500 bg-gray-50 flex items-center gap-2">
+                    <span class="inline-block w-2 h-2 rounded-full" :style="{ backgroundColor: remarkCategoryColor('internal_note') }" />
+                    内部备注
+                    <span class="font-normal text-gray-400">({{ filterRemarks(internalRemarks).length }})</span>
+                  </div>
+                  <div v-for="record in filterRemarks(internalRemarks)" :key="record.id" class="px-5 py-3 text-sm">
                     <div class="flex justify-between gap-3">
-                      <div class="font-bold text-gray-800">
+                      <div class="font-bold text-gray-800 flex items-center gap-1">
+                        <span class="inline-block w-1.5 h-1.5 rounded-full" :style="{ backgroundColor: remarkCategoryColor(record.category) }" />
                         {{ remarkCategoryLabel(record.category) }}
                         <span class="ml-2 text-xs font-normal text-gray-400">
                           {{ record.visibility === "customer_visible" ? "客户可见" : "内部" }}
@@ -3147,6 +3217,7 @@ onMounted(loadDetail);
                       记录人：{{ record.operator }}
                       <span class="mx-1">·</span>
                       {{ record.createdAt }}
+                      <span v-if="record.createdAt" class="text-gray-300 ml-1">({{ relativeTime(record.createdAt) }})</span>
                     </div>
                     <div v-if="record.followUpAt || record.reminderAt" class="text-xs text-gray-400 mt-1">
                       <span v-if="record.followUpAt">跟进时间：{{ record.followUpAt }}</span>
@@ -3171,11 +3242,16 @@ onMounted(loadDetail);
                     </div>
                   </div>
                 </template>
-                <template v-if="customerRemarks.length">
-                  <div class="px-5 pt-3 pb-1 text-xs font-bold text-gray-500 bg-gray-50">客户备注</div>
-                  <div v-for="record in customerRemarks" :key="record.id" class="px-5 py-3 text-sm">
+                <template v-if="filterRemarks(customerRemarks).length">
+                  <div class="px-5 pt-3 pb-1 text-xs font-bold text-gray-500 bg-gray-50 flex items-center gap-2">
+                    <span class="inline-block w-2 h-2 rounded-full" :style="{ backgroundColor: remarkCategoryColor('customer_note') }" />
+                    客户备注
+                    <span class="font-normal text-gray-400">({{ filterRemarks(customerRemarks).length }})</span>
+                  </div>
+                  <div v-for="record in filterRemarks(customerRemarks)" :key="record.id" class="px-5 py-3 text-sm">
                     <div class="flex justify-between gap-3">
-                      <div class="font-bold text-gray-800">
+                      <div class="font-bold text-gray-800 flex items-center gap-1">
+                        <span class="inline-block w-1.5 h-1.5 rounded-full" :style="{ backgroundColor: remarkCategoryColor(record.category) }" />
                         {{ remarkCategoryLabel(record.category) }}
                         <span class="ml-2 text-xs font-normal text-gray-400">
                           {{ record.visibility === "customer_visible" ? "客户可见" : "内部" }}
@@ -3192,6 +3268,7 @@ onMounted(loadDetail);
                       记录人：{{ record.operator }}
                       <span class="mx-1">·</span>
                       {{ record.createdAt }}
+                      <span v-if="record.createdAt" class="text-gray-300 ml-1">({{ relativeTime(record.createdAt) }})</span>
                     </div>
                     <div v-if="record.followUpAt || record.reminderAt" class="text-xs text-gray-400 mt-1">
                       <span v-if="record.followUpAt">跟进时间：{{ record.followUpAt }}</span>
@@ -3216,11 +3293,16 @@ onMounted(loadDetail);
                     </div>
                   </div>
                 </template>
-                <template v-if="returnVisitRemarks.length">
-                  <div class="px-5 pt-3 pb-1 text-xs font-bold text-gray-500 bg-gray-50">回访记录</div>
-                  <div v-for="record in returnVisitRemarks" :key="record.id" class="px-5 py-3 text-sm">
+                <template v-if="filterRemarks(returnVisitRemarks).length">
+                  <div class="px-5 pt-3 pb-1 text-xs font-bold text-gray-500 bg-gray-50 flex items-center gap-2">
+                    <span class="inline-block w-2 h-2 rounded-full" :style="{ backgroundColor: remarkCategoryColor('return_visit') }" />
+                    回访记录
+                    <span class="font-normal text-gray-400">({{ filterRemarks(returnVisitRemarks).length }})</span>
+                  </div>
+                  <div v-for="record in filterRemarks(returnVisitRemarks)" :key="record.id" class="px-5 py-3 text-sm">
                     <div class="flex justify-between gap-3">
-                      <div class="font-bold text-gray-800">
+                      <div class="font-bold text-gray-800 flex items-center gap-1">
+                        <span class="inline-block w-1.5 h-1.5 rounded-full" :style="{ backgroundColor: remarkCategoryColor(record.category) }" />
                         {{ remarkCategoryLabel(record.category) }}
                         <span class="ml-2 text-xs font-normal text-gray-400">
                           {{ record.visibility === "customer_visible" ? "客户可见" : "内部" }}
@@ -3237,6 +3319,7 @@ onMounted(loadDetail);
                       记录人：{{ record.operator }}
                       <span class="mx-1">·</span>
                       {{ record.createdAt }}
+                      <span v-if="record.createdAt" class="text-gray-300 ml-1">({{ relativeTime(record.createdAt) }})</span>
                     </div>
                     <div v-if="record.followUpAt || record.reminderAt" class="text-xs text-gray-400 mt-1">
                       <span v-if="record.followUpAt">跟进时间：{{ record.followUpAt }}</span>
@@ -3261,11 +3344,16 @@ onMounted(loadDetail);
                     </div>
                   </div>
                 </template>
-                <template v-if="otherRemarks.length">
-                  <div class="px-5 pt-3 pb-1 text-xs font-bold text-gray-500 bg-gray-50">其他跟进</div>
-                  <div v-for="record in otherRemarks" :key="record.id" class="px-5 py-3 text-sm">
+                <template v-if="filterRemarks(otherRemarks).length">
+                  <div class="px-5 pt-3 pb-1 text-xs font-bold text-gray-500 bg-gray-50 flex items-center gap-2">
+                    <span class="inline-block w-2 h-2 rounded-full bg-gray-400" />
+                    其他跟进
+                    <span class="font-normal text-gray-400">({{ filterRemarks(otherRemarks).length }})</span>
+                  </div>
+                  <div v-for="record in filterRemarks(otherRemarks)" :key="record.id" class="px-5 py-3 text-sm">
                     <div class="flex justify-between gap-3">
-                      <div class="font-bold text-gray-800">
+                      <div class="font-bold text-gray-800 flex items-center gap-1">
+                        <span class="inline-block w-1.5 h-1.5 rounded-full" :style="{ backgroundColor: remarkCategoryColor(record.category) }" />
                         {{ remarkCategoryLabel(record.category) }}
                         <span class="ml-2 text-xs font-normal text-gray-400">
                           {{ record.visibility === "customer_visible" ? "客户可见" : "内部" }}
@@ -3282,6 +3370,7 @@ onMounted(loadDetail);
                       记录人：{{ record.operator }}
                       <span class="mx-1">·</span>
                       {{ record.createdAt }}
+                      <span v-if="record.createdAt" class="text-gray-300 ml-1">({{ relativeTime(record.createdAt) }})</span>
                     </div>
                     <div v-if="record.followUpAt || record.reminderAt" class="text-xs text-gray-400 mt-1">
                       <span v-if="record.followUpAt">跟进时间：{{ record.followUpAt }}</span>
@@ -4827,7 +4916,8 @@ onMounted(loadDetail);
       </template>
     </el-dialog>
 
-    <el-dialog v-model="closeRemarkDialogVisible" title="关闭跟进记录" width="480px" destroy-on-close>
+    <el-dialog v-model="closeRemarkDialogVisible" title="关闭跟进记录" width="520px" destroy-on-close>
+      <el-alert type="info" :closable="false" show-icon class="mb-4" title="关闭后跟进记录将归档，不再显示为待跟进。" />
       <el-form label-position="top">
         <el-form-item label="关闭原因">
           <el-select v-model="closeRemarkForm.closeNote" placeholder="选择关闭原因" class="w-full" allow-create filterable>
@@ -4837,6 +4927,9 @@ onMounted(loadDetail);
             <el-option label="转交其他部门" value="转交其他部门" />
             <el-option label="无需跟进" value="无需跟进" />
           </el-select>
+        </el-form-item>
+        <el-form-item label="处理备注">
+          <el-input v-model="closeRemarkForm.resolutionNotes" type="textarea" :rows="3" placeholder="记录处理过程或结果（可选）" />
         </el-form-item>
         <el-form-item label="操作人">
           <el-input v-model="closeRemarkForm.operator" />

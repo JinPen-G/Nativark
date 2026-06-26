@@ -6832,6 +6832,21 @@ export class StoreRentalService {
           const result = await this.registerOrderAccident(order, body, previousStatus);
           actionTimelineDetail = result.timelineAction;
           resultMessage = result.message;
+          await this.persistEventSnapshotRecord(order, {
+            eventType: "accident_registration",
+            title: "事故登记快照",
+            triggerReason: this.optionalString(body.description) || "订单关联车辆事故",
+            settlementTarget: order.billingMode === BillingMode.Monthly ? "企业月结" : "还车结算",
+            amount: this.optionalNumber(body.estimatedCostAmount ?? body.estimatedAmount ?? body.amount) ?? 0,
+            before: { mainStatus: previousStatus },
+            after: { mainStatus: order.mainStatus, riskFlags: order.riskFlags },
+            amountBreakdown: {
+              estimatedCostAmount: this.optionalNumber(body.estimatedCostAmount ?? body.estimatedAmount ?? body.amount) ?? 0,
+              responsibility: this.normalizeAccidentResponsibility(body.responsibility).label,
+              claimStatus: this.normalizeAccidentClaimStatus(body.claimStatus ?? body.handlingStatus)
+            },
+            operator: String(body.operator ?? "门店营运")
+          });
         }
         break;
       case "release-operation-lock":
@@ -6846,6 +6861,23 @@ export class StoreRentalService {
           const result = this.markOrderNoShow(order, body, previousStatus);
           actionTimelineDetail = result.timelineAction;
           resultMessage = result.message;
+          const noShowFee = (this.manualFeeLedgerItems.get(order.id) ?? []).find((f) => f.code === "no_show_fee");
+          await this.persistEventSnapshotRecord(order, {
+            eventType: "no_show",
+            title: "爽约标记快照",
+            triggerReason: this.requiredActionReason(body.reason ?? body.contactResult, ""),
+            settlementTarget: "终止结算",
+            amount: noShowFee?.amount ?? 0,
+            before: { mainStatus: previousStatus },
+            after: { mainStatus: order.mainStatus, paymentStatus: order.paymentStatus },
+            amountBreakdown: {
+              noShowFeeAmount: noShowFee?.amount ?? 0,
+              contactResult: this.optionalString(body.contactResult),
+              capturedAmount: this.optionalNumber(body.capturedAmount) ?? 0,
+              releaseAmount: this.optionalNumber(body.releaseAmount) ?? 0
+            },
+            operator: String(body.operator ?? "门店营运")
+          });
         }
         break;
       case "reject-order":
@@ -6853,6 +6885,22 @@ export class StoreRentalService {
           const result = this.rejectOrder(order, body, previousStatus);
           actionTimelineDetail = result.timelineAction;
           resultMessage = result.message;
+          const rejectionFee = (this.manualFeeLedgerItems.get(order.id) ?? []).find((f) => f.code === "rejection_fee");
+          await this.persistEventSnapshotRecord(order, {
+            eventType: "order_rejection",
+            title: "拒绝履约快照",
+            triggerReason: this.requiredActionReason(body.reason ?? body.rejectReason, ""),
+            settlementTarget: "终止结算",
+            amount: rejectionFee?.amount ?? 0,
+            before: { mainStatus: previousStatus },
+            after: { mainStatus: order.mainStatus, paymentStatus: order.paymentStatus },
+            amountBreakdown: {
+              rejectionFeeAmount: rejectionFee?.amount ?? 0,
+              capturedAmount: this.optionalNumber(body.capturedAmount) ?? 0,
+              releaseAmount: this.optionalNumber(body.releaseAmount) ?? 0
+            },
+            operator: String(body.operator ?? "门店营运")
+          });
         }
         break;
       case "close-order":
@@ -6860,6 +6908,19 @@ export class StoreRentalService {
           const result = this.closeOrder(order, body, previousStatus);
           actionTimelineDetail = result.timelineAction;
           resultMessage = result.message;
+          await this.persistEventSnapshotRecord(order, {
+            eventType: "order_close",
+            title: "关闭订单快照",
+            triggerReason: this.requiredActionReason(body.reason ?? body.closeReason, ""),
+            settlementTarget: order.billingMode === BillingMode.Monthly ? "企业月结" : "终止结算",
+            before: { mainStatus: previousStatus },
+            after: { mainStatus: order.mainStatus, paymentStatus: order.paymentStatus },
+            amountBreakdown: {
+              billingMode: order.billingMode,
+              communicationConfirmed: true
+            },
+            operator: String(body.operator ?? "门店营运")
+          });
         }
         break;
       case "cancel":
@@ -6867,6 +6928,23 @@ export class StoreRentalService {
           const result = this.cancelOrder(order, body, previousStatus);
           actionTimelineDetail = result.timelineAction;
           resultMessage = result.message;
+          const cancelFee = (this.manualFeeLedgerItems.get(order.id) ?? []).find((f) => f.code === "cancellation_fee");
+          await this.persistEventSnapshotRecord(order, {
+            eventType: "order_cancellation",
+            title: "取消订单快照",
+            triggerReason: this.requiredActionReason(body.reason ?? body.cancelReason, ""),
+            settlementTarget: "终止结算",
+            amount: cancelFee?.amount ?? 0,
+            before: { mainStatus: previousStatus },
+            after: { mainStatus: order.mainStatus, paymentStatus: order.paymentStatus },
+            amountBreakdown: {
+              cancelFeeAmount: cancelFee?.amount ?? 0,
+              specialWaiver: this.truthyFlag(body.specialWaiver),
+              capturedAmount: this.optionalNumber(body.capturedAmount) ?? 0,
+              releaseAmount: this.optionalNumber(body.releaseAmount) ?? 0
+            },
+            operator: String(body.operator ?? "门店营运")
+          });
         }
         break;
       default:
@@ -7262,6 +7340,21 @@ export class StoreRentalService {
           actionTimelineDetail = result.timelineAction;
           resultMessage = result.message;
           settlementToSave = result.settlementSummary;
+          await this.persistEventSnapshotRecord(order, {
+            eventType: "accident_registration",
+            title: "事故登记快照",
+            triggerReason: this.optionalString(body.description) || "订单关联车辆事故",
+            settlementTarget: order.billingMode === BillingMode.Monthly ? "企业月结" : "还车结算",
+            amount: this.optionalNumber(body.estimatedCostAmount ?? body.estimatedAmount ?? body.amount) ?? 0,
+            before: { mainStatus: previousStatus },
+            after: { mainStatus: order.mainStatus, riskFlags: order.riskFlags },
+            amountBreakdown: {
+              estimatedCostAmount: this.optionalNumber(body.estimatedCostAmount ?? body.estimatedAmount ?? body.amount) ?? 0,
+              responsibility: this.normalizeAccidentResponsibility(body.responsibility).label,
+              claimStatus: this.normalizeAccidentClaimStatus(body.claimStatus ?? body.handlingStatus)
+            },
+            operator: String(body.operator ?? "门店营运")
+          });
         }
         break;
       case "release-operation-lock":
@@ -7292,6 +7385,68 @@ export class StoreRentalService {
           actionTimelineDetail = result.timelineAction;
           resultMessage = result.message;
           settlementToSave = result.settlementSummary;
+          if (action === "mark-no-show") {
+            await this.persistEventSnapshotRecord(order, {
+              eventType: "no_show",
+              title: "爽约标记快照",
+              triggerReason: this.requiredActionReason(body.reason ?? body.contactResult, ""),
+              settlementTarget: "终止结算",
+              amount: result.settlementSummary?.finalReceivableAmount ?? 0,
+              before: { mainStatus: previousStatus },
+              after: { mainStatus: order.mainStatus, paymentStatus: order.paymentStatus },
+              amountBreakdown: {
+                finalReceivableAmount: result.settlementSummary?.finalReceivableAmount ?? 0,
+                contactResult: this.optionalString(body.contactResult)
+              },
+              operator: String(body.operator ?? "门店营运")
+            });
+          } else if (action === "reject-order") {
+            await this.persistEventSnapshotRecord(order, {
+              eventType: "order_rejection",
+              title: "拒绝履约快照",
+              triggerReason: this.requiredActionReason(body.reason ?? body.rejectReason, ""),
+              settlementTarget: "终止结算",
+              amount: this.optionalNumber(body.feeAmount ?? body.rejectionFeeAmount) ?? 0,
+              before: { mainStatus: previousStatus },
+              after: { mainStatus: order.mainStatus, paymentStatus: order.paymentStatus },
+              amountBreakdown: {
+                rejectionFeeAmount: this.optionalNumber(body.feeAmount ?? body.rejectionFeeAmount) ?? 0,
+                finalReceivableAmount: result.settlementSummary?.finalReceivableAmount ?? 0
+              },
+              operator: String(body.operator ?? "门店营运")
+            });
+          } else if (action === "close-order") {
+            await this.persistEventSnapshotRecord(order, {
+              eventType: "order_close",
+              title: "关闭订单快照",
+              triggerReason: this.requiredActionReason(body.reason ?? body.closeReason, ""),
+              settlementTarget: order.billingMode === BillingMode.Monthly ? "企业月结" : "终止结算",
+              before: { mainStatus: previousStatus },
+              after: { mainStatus: order.mainStatus, paymentStatus: order.paymentStatus },
+              amountBreakdown: {
+                billingMode: order.billingMode,
+                finalReceivableAmount: result.settlementSummary?.finalReceivableAmount ?? 0,
+                communicationConfirmed: true
+              },
+              operator: String(body.operator ?? "门店营运")
+            });
+          } else if (action === "cancel") {
+            await this.persistEventSnapshotRecord(order, {
+              eventType: "order_cancellation",
+              title: "取消订单快照",
+              triggerReason: this.requiredActionReason(body.reason ?? body.cancelReason, ""),
+              settlementTarget: "终止结算",
+              amount: result.settlementSummary?.finalReceivableAmount ?? 0,
+              before: { mainStatus: previousStatus },
+              after: { mainStatus: order.mainStatus, paymentStatus: order.paymentStatus },
+              amountBreakdown: {
+                cancelFeeAmount: result.settlementSummary?.finalReceivableAmount ?? 0,
+                specialWaiver: this.truthyFlag(body.specialWaiver),
+                finalReceivableAmount: result.settlementSummary?.finalReceivableAmount ?? 0
+              },
+              operator: String(body.operator ?? "门店营运")
+            });
+          }
         }
         break;
       default:
