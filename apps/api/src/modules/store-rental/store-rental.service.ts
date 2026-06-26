@@ -6241,6 +6241,20 @@ export class StoreRentalService {
         `订单 ${order.orderNo} 新增费用：${fee.name} ${fee.amount} ${fee.direction === "charge" ? "补收" : "退款"}`
       );
 
+      // OR-08: 费用状态联动逻辑——终止态订单的新增费用自动作废
+      if (this.isTerminalOrderStatus(order.mainStatus)) {
+        fee.status = "voided";
+        fee.pendingAmount = 0;
+        await this.storeRentalRepository.upsertOrderFeeItem(order.id, fee);
+        await this.appendOperationLog(
+          "order_fee",
+          order.id,
+          "费用状态联动",
+          input.operator || "门店营运",
+          `订单 ${order.orderNo} 处于终止状态（${order.mainStatus}），新增费用 ${fee.name} 已自动作废`
+        );
+      }
+
       return this.storeRentalRepository.getOrderFeeCenter(order.id);
     }
 
@@ -6290,6 +6304,19 @@ export class StoreRentalService {
       input.operator || "门店营运",
       `订单 ${order.orderNo} 新增费用：${fee.name} ${fee.amount} ${fee.direction === "charge" ? "补收" : "退款"}`
     );
+
+    // OR-08: 费用状态联动逻辑——终止态订单的新增费用自动作废
+    if (this.isTerminalOrderStatus(order.mainStatus)) {
+      fee.status = "voided";
+      fee.pendingAmount = 0;
+      await this.appendOperationLog(
+        "order_fee",
+        order.id,
+        "费用状态联动",
+        input.operator || "门店营运",
+        `订单 ${order.orderNo} 处于终止状态（${order.mainStatus}），新增费用 ${fee.name} 已自动作废`
+      );
+    }
 
     return this.getOrderFeeCenter(order.id);
   }
@@ -6543,6 +6570,8 @@ export class StoreRentalService {
       return replayed;
     }
     const previousStatus = order.mainStatus;
+    // OR-09: 终止动作前记录车辆牌号，供审计日志使用
+    const previousPlateNo = order.plateNo;
     const knownAction = [
       "payment-success",
       "start-pickup",
@@ -7027,6 +7056,23 @@ export class StoreRentalService {
         break;
     }
 
+    // OR-09: 终止动作专项审计日志（内存路径）
+    if (["cancel", "mark-no-show", "reject-order", "close-order"].includes(action)) {
+      const feeItems = (this.manualFeeLedgerItems.get(order.id) ?? []);
+      const feeSummary = feeItems
+        .map((item) => `${item.name}:${item.amount}`)
+        .join("、") || "无";
+      await this.appendOperationLog(
+        "order",
+        order.id,
+        `终止动作-${this.actionLabel(action)}`,
+        String(body.operator ?? "门店营运"),
+        `订单 ${order.orderNo} 终止：${this.actionLabel(action)}，` +
+        `${previousStatus} -> ${order.mainStatus}，费用：${feeSummary}，` +
+        `车辆 ${previousPlateNo || "未分配"} 已释放，操作锁已释放`
+      );
+    }
+
     // 统一审计日志写入
     await this.appendOperationLog(
       "order",
@@ -7087,6 +7133,8 @@ export class StoreRentalService {
       return replayed;
     }
     const previousStatus = order.mainStatus;
+    // OR-09: 终止动作前记录车辆牌号，供审计日志使用
+    const previousPlateNo = order.plateNo;
     const knownAction = [
       "payment-success",
       "start-pickup",
@@ -7527,6 +7575,29 @@ export class StoreRentalService {
         break;
       default:
         break;
+    }
+
+    // OR-09: 终止动作专项审计日志（MySQL路径）
+    if (["cancel", "mark-no-show", "reject-order", "close-order"].includes(action)) {
+      try {
+        const feeSummary = (order.feeLedgerItems ?? [])
+          .filter((item) => item.status !== "voided")
+          .map((item) => `${item.name}:${item.amount}`)
+          .join("、") || "无";
+        await this.storeRentalRepository.createOperationLog({
+          targetType: "order",
+          targetId: order.id,
+          action: `终止动作-${this.actionLabel(action)}`,
+          operator: String(body.operator ?? "门店营运"),
+          detail:
+            `订单 ${order.orderNo} 终止：${this.actionLabel(action)}，` +
+            `${previousStatus} -> ${order.mainStatus}，费用：${feeSummary}，` +
+            `车辆 ${previousPlateNo || "未分配"} 已释放，操作锁已释放`,
+          createdAt: new Date().toISOString()
+        });
+      } catch (error) {
+        console.error("Failed to write terminal action audit log:", error);
+      }
     }
 
     // MySQL模式统一审计日志写入
@@ -14847,6 +14918,16 @@ export class StoreRentalService {
       return "monthly_billing";
     }
     return order.paymentStatus === PaymentStatus.Unpaid ? "pending" : "settled";
+  }
+
+  // OR-08: 判断订单是否处于终止态
+  private isTerminalOrderStatus(status: OrderMainStatus): boolean {
+    return [
+      OrderMainStatus.Cancelled,
+      OrderMainStatus.NoShow,
+      OrderMainStatus.Rejected,
+      OrderMainStatus.Closed
+    ].includes(status);
   }
 
   private returnFeeStatus(
