@@ -363,11 +363,14 @@ function emptyOrdersReport(): StoreRentalOrdersReport {
       monthlyOrders: 0,
       totalSettledAmount: 0,
       totalPendingAmount: 0,
-      totalAmount: 0
+      totalAmount: 0,
+      completedOrders: 0,
+      cancelledOrders: 0
     },
     byStore: [],
     byVehicleGroup: [],
     byStatus: [],
+    byBillingMode: [],
     rows: []
   };
 }

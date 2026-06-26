@@ -427,6 +427,35 @@ function testFeeStageCompleteness() {
   assert(new Set(validDirections).size === validDirections.length, "费用方向无重复枚举值");
   assert(new Set(validStatuses).size === validStatuses.length, "费用状态无重复枚举值");
 
+  // 深化：阶段-方向兼容矩阵
+  const stageDirectionMatrix = {
+    pickup: ["charge", "refund", "waiver"],
+    rental: ["charge", "refund", "waiver"],
+    return_settlement: ["charge", "refund", "waiver"],
+    cancellation: ["charge", "waiver"],
+    post_charge: ["charge", "waiver"]
+  };
+  for (const [stage, dirs] of Object.entries(stageDirectionMatrix)) {
+    assert(dirs.length > 0, `阶段 ${stage} 至少有 1 个兼容方向`);
+    for (const dir of dirs) {
+      assert(validDirections.includes(dir), `阶段 ${stage} 的方向 ${dir} 是合法方向`);
+    }
+  }
+  // refund 不适用于 cancellation / post_charge
+  assert(!stageDirectionMatrix.cancellation.includes("refund"), "cancellation 不支持 refund");
+  assert(!stageDirectionMatrix.post_charge.includes("refund"), "post_charge 不支持 refund");
+
+  // 深化：状态终态校验 - settled/waived/voided 是终态，pending/monthly_billing 可流转
+  const terminalStatuses = ["settled", "waived", "voided"];
+  const activeStatuses = ["pending", "monthly_billing"];
+  for (const s of terminalStatuses) {
+    assert(validStatuses.includes(s), `终态 ${s} 存在于枚举中`);
+  }
+  for (const s of activeStatuses) {
+    assert(validStatuses.includes(s), `活跃状态 ${s} 存在于枚举中`);
+  }
+  assert(terminalStatuses.length + activeStatuses.length === validStatuses.length, "终态 + 活跃状态 = 全部状态数");
+
   passed++;
   console.log("  PASS  费用阶段枚举完整性验证通过");
 }
@@ -452,11 +481,13 @@ function testReachableFromInitial() {
   const queue = ["pending_payment"];
   const depthMap = new Map();
   depthMap.set("pending_payment", 0);
+  const edgeCount = { traversed: 0 };
   while (queue.length > 0) {
     const current = queue.shift();
     if (visited.has(current)) continue;
     visited.add(current);
     for (const target of VALID_TRANSITIONS[current] || []) {
+      edgeCount.traversed++;
       if (!visited.has(target)) {
         queue.push(target);
         if (!depthMap.has(target)) {
@@ -485,6 +516,32 @@ function testReachableFromInitial() {
     if (status === "pending_payment") continue;
     const hasInbound = Object.values(VALID_TRANSITIONS).some((targets) => targets.includes(status));
     assert(hasInbound, `状态 ${status} 有入边（非孤立）`);
+  }
+
+  // 深化：验证 BFS 遍历边数与实际边数一致
+  let totalEdges = 0;
+  for (const targets of Object.values(VALID_TRANSITIONS)) {
+    totalEdges += targets.length;
+  }
+  assert(edgeCount.traversed === totalEdges, `BFS 遍历边数等于图总边数 (遍历: ${edgeCount.traversed}, 总计: ${totalEdges})`);
+
+  // 深化：验证最大 BFS 深度合理（不超过状态总数）
+  const maxDepth = Math.max(...depthMap.values());
+  assert(maxDepth < ALL_STATUSES.length, `最大 BFS 深度 ${maxDepth} 小于状态总数 ${ALL_STATUSES.length}`);
+  assert(maxDepth >= 3, `最大 BFS 深度 >= 3 (实际: ${maxDepth})`);
+
+  // 深化：验证每个终态的入度至少为 1
+  for (const terminal of terminalStates) {
+    const inboundCount = Object.values(VALID_TRANSITIONS).filter((targets) => targets.includes(terminal)).length;
+    assert(inboundCount >= 1, `终态 ${terminal} 入度 >= 1 (实际: ${inboundCount})`);
+  }
+
+  // 深化：验证 completed 入度最大（最常见终态）
+  const completedInbound = Object.values(VALID_TRANSITIONS).filter((targets) => targets.includes("completed")).length;
+  for (const terminal of terminalStates) {
+    if (terminal === "completed") continue;
+    const inDeg = Object.values(VALID_TRANSITIONS).filter((targets) => targets.includes(terminal)).length;
+    assert(completedInbound >= inDeg, `completed 入度 (${completedInbound}) >= ${terminal} 入度 (${inDeg})`);
   }
 
   passed++;
