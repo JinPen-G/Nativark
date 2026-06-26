@@ -626,7 +626,8 @@ function taskTypeText(type: StoreRentalDispatchTask["taskType"]) {
     near_lock_unlocked: "临近未硬锁",
     manual_required: "人工调度",
     vehicle_unavailable: "车辆不可交付",
-    manual_protected_invalid: "人工结果失效"
+    manual_protected_invalid: "人工结果失效",
+    accident_reassignment: "事故改派"
   };
   return map[type];
 }

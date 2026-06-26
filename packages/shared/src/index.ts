@@ -1384,6 +1384,7 @@ export interface PricingQuoteExplanationLine {
   title: string;
   detail: string;
   amount: number;
+  source?: "base_price" | "dynamic_pricing" | "marketing" | "value_added_service" | "membership" | "store_adjustment" | "deposit";
 }
 
 export interface PricingQuoteBillingSegment {
@@ -1410,6 +1411,7 @@ export interface PricingQuoteResult {
     code: string;
     name: string;
     amount: number;
+    source?: string;
   }>;
   selectedMarketingPlan?: {
     id: string;
@@ -1798,11 +1800,17 @@ export type StoreRentalDispatchTaskType =
   | "near_lock_unlocked"
   | "manual_required"
   | "vehicle_unavailable"
-  | "manual_protected_invalid";
+  | "manual_protected_invalid"
+  | "accident_reassignment";
 
 export interface StoreRentalDispatchTask {
   id: string;
   taskType: StoreRentalDispatchTaskType;
+  taskStatus?: "open" | "claimed" | "processing" | "completed";
+  claimedBy?: string;
+  claimedAt?: string;
+  completedBy?: string;
+  completedAt?: string;
   priority: "low" | "medium" | "high";
   title: string;
   description: string;
