@@ -633,7 +633,8 @@ export class StoreRentalService {
       mainStatus: OrderMainStatus.Renting,
       dispatchStatus: DispatchStatus.Locked,
       paymentStatus: PaymentStatus.MonthlyBilling,
-      riskFlags: ["企业月结", "已验车"]
+      riskFlags: ["企业月结", "已验车"],
+      createdAt: "2026-05-05T18:04:00+08:00"
     },
     {
       id: "order_10002",
@@ -652,7 +653,8 @@ export class StoreRentalService {
       mainStatus: OrderMainStatus.Reserved,
       dispatchStatus: DispatchStatus.PreAssigned,
       paymentStatus: PaymentStatus.DepositPaid,
-      riskFlags: ["异店还车", "待取车"]
+      riskFlags: ["异店还车", "待取车"],
+      createdAt: "2026-05-06T14:00:00+08:00"
     },
     {
       id: "order_10003",
@@ -671,7 +673,8 @@ export class StoreRentalService {
       mainStatus: OrderMainStatus.PendingPayment,
       dispatchStatus: DispatchStatus.ManualRequired,
       paymentStatus: PaymentStatus.Unpaid,
-      riskFlags: ["夜间取车", "需人工确认"]
+      riskFlags: ["夜间取车", "需人工确认"],
+      createdAt: "2026-05-06T22:00:00+08:00"
     }
   ];
 

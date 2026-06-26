@@ -2564,6 +2564,20 @@ function paymentLabel(value: string) {
   return map[value] ?? value;
 }
 
+function paymentStatusTag(value: string) {
+  const map: Record<string, string> = {
+    unpaid: "warning",
+    deposit_paid: "success",
+    monthly_billing: "primary",
+    partial_paid: "warning",
+    paid: "success",
+    payment_due: "warning",
+    refund_pending: "info",
+    refunded: "info"
+  };
+  return map[value] ?? "info";
+}
+
 function feeStageLabel(value: string) {
   const map: Record<string, string> = {
     booking: "下单",
@@ -2884,6 +2898,14 @@ onMounted(loadDetail);
                   <span class="font-mono text-xs">{{ detail.corporateId }}</span>
                 </el-descriptions-item>
                 <el-descriptions-item label="结算">{{ isMonthly ? "企业月结" : "客户自付" }}</el-descriptions-item>
+                <el-descriptions-item v-if="detail.createdAt" label="创建时间">
+                  <span class="font-mono text-xs">{{ detail.createdAt }}</span>
+                </el-descriptions-item>
+                <el-descriptions-item label="付款状态">
+                  <el-tag size="small" :type="paymentStatusTag(detail.paymentStatus)" effect="plain">
+                    {{ paymentLabel(detail.paymentStatus) }}
+                  </el-tag>
+                </el-descriptions-item>
               </el-descriptions>
               <el-descriptions :column="1" border size="small">
                 <el-descriptions-item label="取车门市">{{ detail.pickupStoreName }}</el-descriptions-item>
@@ -2894,6 +2916,11 @@ onMounted(loadDetail);
                 <el-descriptions-item label="车辆">{{ detail.plateNo || "待派车" }}</el-descriptions-item>
                 <el-descriptions-item label="租赁模式">
                   {{ detail.mode === 'self_service_24h' ? '24小时自助' : '门店柜台' }}
+                </el-descriptions-item>
+                <el-descriptions-item label="调度状态">
+                  <el-tag size="small" :type="detail.dispatchStatus === 'locked' ? 'success' : detail.dispatchStatus === 'pending' ? 'warning' : 'info'" effect="plain">
+                    {{ dispatchLabel(detail.dispatchStatus) }}
+                  </el-tag>
                 </el-descriptions-item>
                 <el-descriptions-item label="操作锁">
                   <el-tag v-if="detail.operationLockStatus" size="small" :type="detail.operationLockStatus === 'active' ? 'warning' : 'info'" effect="plain">
