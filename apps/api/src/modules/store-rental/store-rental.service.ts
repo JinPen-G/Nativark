@@ -1615,8 +1615,20 @@ export class StoreRentalService {
     if (this.useMysqlDataSource()) {
       return this.storeRentalRepository.listMembers(query);
     }
+    // PF-10: 数据权限过滤
+    let members = this.members;
+    if (currentUser && currentUser.dataScope && currentUser.dataScope !== "all") {
+      const orgName = currentUser.organizationName;
+      if (currentUser.dataScope === "organization" && orgName) {
+        members = members.filter((m) => m.organizationName === orgName || !m.organizationName);
+      } else if (currentUser.dataScope === "store" && orgName) {
+        members = members.filter((m) => m.assignedStoreName === orgName || !m.assignedStoreName);
+      } else if (currentUser.dataScope === "own") {
+        members = members.filter((m) => m.createdBy === currentUser.account || !m.createdBy);
+      }
+    }
     return this.buildMemberListResult(
-      this.members.map((member) => this.toMemberSummary(member)),
+      members.map((member) => this.toMemberSummary(member)),
       query
     );
   }
