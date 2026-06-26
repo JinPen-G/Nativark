@@ -3440,10 +3440,13 @@ export interface StoreRentalOrdersReport {
     totalSettledAmount: number;
     totalPendingAmount: number;
     totalAmount: number;
+    completedOrders: number;
+    cancelledOrders: number;
   };
   byStore: StoreRentalNamedMetric[];
   byVehicleGroup: StoreRentalNamedMetric[];
   byStatus: StoreRentalNamedMetric[];
+  byBillingMode: StoreRentalNamedMetric[];
   rows: StoreRentalOrderReportRow[];
 }
 
