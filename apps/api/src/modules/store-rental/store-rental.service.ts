@@ -7356,6 +7356,17 @@ export class StoreRentalService {
             },
             operator: String(body.operator ?? "门店营运")
           });
+
+          // OR-22: 取车完成通知留痕（MySQL路径）
+          await this.persistNotificationRecord(order, {
+            scene: "pickup_completed",
+            channel: "app",
+            target: order.customerPhoneMasked,
+            status: "sent",
+            content: `订单 ${order.orderNo} 已完成取车，车辆 ${order.plateNo || "已交付"}。`,
+            idempotencyKey: this.optionalString(body.idempotencyKey),
+            operator: String(body.operator ?? "门店营运")
+          });
         }
         break;
       case "return-inspection":
@@ -7412,6 +7423,17 @@ export class StoreRentalService {
             damageFeeAmount: this.optionalNumber(body.damageFeeAmount) ?? 0,
             cleaningFeeAmount: this.optionalNumber(body.cleaningFeeAmount) ?? 0
           },
+          operator: String(body.operator ?? "门店营运")
+        });
+
+        // OR-22: 还车完成通知留痕（MySQL路径）
+        await this.persistNotificationRecord(order, {
+          scene: "return_completed",
+          channel: "app",
+          target: order.customerPhoneMasked,
+          status: "sent",
+          content: `订单 ${order.orderNo} 还车验车完成，等待结算。`,
+          idempotencyKey: this.optionalString(body.idempotencyKey),
           operator: String(body.operator ?? "门店营运")
         });
         break;
@@ -7571,6 +7593,17 @@ export class StoreRentalService {
             },
             operator: String(body.operator ?? "门店营运")
           });
+
+          // OR-22: 结算确认通知留痕（MySQL路径）
+          await this.persistNotificationRecord(order, {
+            scene: order.paymentStatus === PaymentStatus.PaymentDue ? "payment_due" : "return_completed",
+            channel: "app",
+            target: order.customerPhoneMasked,
+            status: "sent",
+            content: `订单 ${order.orderNo} 已完成结算确认，当前状态 ${order.mainStatus}。`,
+            idempotencyKey: this.optionalString(body.idempotencyKey),
+            operator: String(body.operator ?? "门店营运")
+          });
         }
         break;
       case "register-accident":
@@ -7694,6 +7727,17 @@ export class StoreRentalService {
                 specialWaiver: this.truthyFlag(body.specialWaiver),
                 finalReceivableAmount: result.settlementSummary?.finalReceivableAmount ?? 0
               },
+              operator: String(body.operator ?? "门店营运")
+            });
+
+            // OR-22: 取消订单通知留痕（MySQL路径）
+            await this.persistNotificationRecord(order, {
+              scene: "order_terminal",
+              channel: "manual",
+              target: order.customerPhoneMasked,
+              status: "sent",
+              content: `订单 ${order.orderNo} 已取消，原因：${this.optionalString(body.reason ?? body.cancelReason) || "门店处理"}。`,
+              idempotencyKey: this.optionalString(body.idempotencyKey),
               operator: String(body.operator ?? "门店营运")
             });
           }
