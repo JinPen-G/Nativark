@@ -491,7 +491,7 @@ export class ReportsRepository {
     return this.prisma.storeRentalOrder.findMany({
       where: {
         tenantId: query.tenantId,
-        pickupAt: {
+        createdAt: {
           gte: query.fromDate,
           lte: query.toDate
         }
@@ -505,7 +505,7 @@ export class ReportsRepository {
         pickupStation: true,
         returnStation: true
       },
-      orderBy: { pickupAt: "desc" }
+      orderBy: { createdAt: "desc" }
     });
   }
 
@@ -529,13 +529,15 @@ export class ReportsRepository {
       const returnStoreName = this.storeName(row.returnStoreSnapshot, row.returnStation?.parentStoreName);
       const vehicleGroupName = this.vehicleGroupName(row.vehicleGroupSnapshot, row.vehicleGroup.name);
       const billingMode = this.toSharedBillingMode(String(row.billingMode));
+      const mainStatus = this.toSharedMainStatus(String(row.mainStatus));
 
       return (
         (!query.storeName ||
           pickupStoreName === query.storeName ||
           returnStoreName === query.storeName) &&
         (!query.vehicleGroupName || vehicleGroupName === query.vehicleGroupName) &&
-        (!query.billingMode || query.billingMode === "all" || billingMode === query.billingMode)
+        (!query.billingMode || query.billingMode === "all" || billingMode === query.billingMode) &&
+        (!query.mainStatuss || query.mainStatuss.length === 0 || query.mainStatuss.includes(mainStatus))
       );
     });
   }

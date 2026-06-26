@@ -3295,6 +3295,7 @@ export interface StoreRentalReportQuery {
   storeName?: string;
   vehicleGroupName?: string;
   billingMode?: BillingMode | "all";
+  mainStatuss?: string[];
 }
 
 export interface StoreRentalMetricCard {
