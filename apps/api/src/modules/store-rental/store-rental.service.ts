@@ -7540,9 +7540,26 @@ export class StoreRentalService {
         settlementTarget: order.billingMode === BillingMode.Monthly ? "企业月结" : "取车尾款",
         before: { plateNo: effect.previousPlateNo, vehicleGroupName: currentVehicle?.vehicleGroupName, dispatchStatus: DispatchStatus.Pending },
         after: { plateNo: order.plateNo, vehicleGroupName: order.vehicleGroupName, dispatchStatus: order.dispatchStatus },
-        amountBreakdown: { feeAmount: effect.fee?.amount ?? 0, priceHandling: effect.fee ? "diff" : "free" },
+        amountBreakdown: {
+          feeAmount: effect.fee?.amount ?? 0,
+          priceHandling: effect.fee ? "diff" : "free",
+          totalAmount: order.totalAmount,
+          finalReceivableAmount: effect.settlementSummary.finalReceivableAmount,
+          monthlyBillingPosted: effect.settlementSummary.monthlyBillingPosted
+        },
         operator: effect.operator
       });
+
+      // OR-11: 改派专项审计日志
+      await this.appendOperationLog(
+        "order",
+        order.id,
+        order.dispatchStatus === DispatchStatus.Upgraded ? "免费升等" : "订单改派",
+        effect.operator,
+        `订单 ${order.orderNo} ${order.dispatchStatus === DispatchStatus.Upgraded ? "免费升等" : "人工改派"}：` +
+        `${effect.previousPlateNo} -> ${targetVehicle.licensePlate}，` +
+        `${effect.fee ? `差价 ${effect.fee.amount}` : "无差价"}，原因：${effect.reasonLabel}`
+      );
 
       return {
         timelineAction: effect.timelineAction,
@@ -12317,6 +12334,32 @@ export class StoreRentalService {
           action: "转单冲突快捷改派锁车",
           reason: `${redirect.order.orderNo} / ${redirect.reasonLabel}`
         }
+      );
+
+      // OR-12: 快捷改派后续订单事件快照
+      await this.persistEventSnapshotRecord(redirect.order, {
+        eventType: "redirection",
+        title: "转单冲突快捷改派快照",
+        triggerReason: `当前订单 ${order.orderNo} 改还车${mode === "store" ? "门市" : "据点"}导致后续预约占用冲突`,
+        settlementTarget: redirect.order.billingMode === BillingMode.Monthly ? "企业月结" : "取车尾款",
+        before: { plateNo: redirect.previousPlateNo, vehicleGroupName: redirect.order.vehicleGroupName },
+        after: { plateNo: redirect.order.plateNo, vehicleGroupName: redirect.order.vehicleGroupName, dispatchStatus: redirect.order.dispatchStatus },
+        amountBreakdown: {
+          feeAmount: redirect.fee?.amount ?? 0,
+          finalReceivableAmount: redirect.settlementSummary.finalReceivableAmount
+        },
+        operator: redirect.operator
+      });
+
+      // OR-12: 转单冲突快捷改派审计日志
+      await this.appendOperationLog(
+        "order",
+        redirect.order.id,
+        "转单冲突快捷改派",
+        redirect.operator,
+        `订单 ${redirect.order.orderNo} 因 ${order.orderNo} 改还车${mode === "store" ? "门市" : "据点"}导致占用冲突，` +
+        `快捷改派：${redirect.previousPlateNo} -> ${redirect.targetVehicle.licensePlate}，` +
+        `原还车门市 ${originalReturnStoreName} 存在后续预约，已转单不破坏后续订单占用。`
       );
     }
     if (effect.fee) {
