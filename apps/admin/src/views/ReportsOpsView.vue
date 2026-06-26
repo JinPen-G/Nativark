@@ -86,7 +86,8 @@ const activeReportLabel = computed(() => {
     vehicles: "车辆报表",
     finance: "财务报表",
     ops: "运维日志",
-    audit: "审计风控"
+    audit: "审计风控",
+    risk: "风控报表"
   };
   return labels[activeTab.value];
 });
@@ -359,11 +360,17 @@ function emptyOrdersReport(): StoreRentalOrdersReport {
       inProgressOrders: 0,
       settlementOrders: 0,
       riskOrders: 0,
-      monthlyOrders: 0
+      monthlyOrders: 0,
+      totalSettledAmount: 0,
+      totalPendingAmount: 0,
+      totalAmount: 0,
+      completedOrders: 0,
+      cancelledOrders: 0
     },
     byStore: [],
     byVehicleGroup: [],
     byStatus: [],
+    byBillingMode: [],
     rows: []
   };
 }

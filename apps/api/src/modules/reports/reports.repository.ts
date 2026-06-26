@@ -162,11 +162,17 @@ export class ReportsRepository {
           ].includes(row.mainStatus)
         ).length,
         riskOrders: rows.filter((row) => row.riskFlags.length > 0).length,
-        monthlyOrders: rows.filter((row) => row.billingMode === BillingMode.Monthly).length
+        monthlyOrders: rows.filter((row) => row.billingMode === BillingMode.Monthly).length,
+        totalSettledAmount: rows.reduce((sum, row) => sum + row.settledAmount, 0),
+        totalPendingAmount: rows.reduce((sum, row) => sum + row.pendingAmount, 0),
+        totalAmount: rows.reduce((sum, row) => sum + row.totalAmount, 0),
+        completedOrders: rows.filter((row) => row.mainStatus === OrderMainStatus.Completed).length,
+        cancelledOrders: rows.filter((row) => row.mainStatus === OrderMainStatus.Cancelled || row.mainStatus === OrderMainStatus.NoShow).length
       },
       byStore: this.groupOrdersByStore(filteredOrders),
       byVehicleGroup: this.groupOrdersByVehicleGroup(filteredOrders),
       byStatus: this.groupOrdersByStatus(filteredOrders),
+      byBillingMode: this.groupOrdersByBillingMode(filteredOrders),
       rows
     };
   }
@@ -861,6 +867,25 @@ export class ReportsRepository {
     for (const order of orders) {
       const raw = String(order.mainStatus);
       const label = statusLabels[raw] ?? raw;
+      const existing = groups.get(label) ?? { count: 0, amount: 0 };
+      existing.count += 1;
+      existing.amount += money(order.totalAmount);
+      groups.set(label, existing);
+    }
+    return Array.from(groups.entries())
+      .sort((a, b) => b[1].count - a[1].count)
+      .map(([name, data]) => ({ name, value: data.count, amount: data.amount }));
+  }
+
+  private groupOrdersByBillingMode(orders: StoreRentalOrderRow[]): StoreRentalNamedMetric[] {
+    const billingLabels: Record<string, string> = {
+      CUSTOMER_PAY: "散客自付",
+      MONTHLY: "企业月结"
+    };
+    const groups = new Map<string, { count: number; amount: number }>();
+    for (const order of orders) {
+      const raw = String(order.billingMode);
+      const label = billingLabels[raw] ?? raw;
       const existing = groups.get(label) ?? { count: 0, amount: 0 };
       existing.count += 1;
       existing.amount += money(order.totalAmount);

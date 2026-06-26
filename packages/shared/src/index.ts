@@ -2565,6 +2565,9 @@ export interface MemberDetail extends MemberSummary {
   recentOrderNos: string[];
   timeline: MemberTimelineRecord[];
   photos?: Record<string, string>;
+  organizationName?: string;
+  assignedStoreName?: string;
+  createdBy?: string;
 }
 
 export interface SaveMemberRequest {
@@ -3416,10 +3419,16 @@ export interface StoreRentalOrdersReport {
     settlementOrders: number;
     riskOrders: number;
     monthlyOrders: number;
+    totalSettledAmount: number;
+    totalPendingAmount: number;
+    totalAmount: number;
+    completedOrders: number;
+    cancelledOrders: number;
   };
   byStore: StoreRentalNamedMetric[];
   byVehicleGroup: StoreRentalNamedMetric[];
   byStatus: StoreRentalNamedMetric[];
+  byBillingMode: StoreRentalNamedMetric[];
   rows: StoreRentalOrderReportRow[];
 }
 
