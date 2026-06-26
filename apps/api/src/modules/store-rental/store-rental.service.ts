@@ -1945,7 +1945,7 @@ export class StoreRentalService {
     };
   }
 
-  saveCorporate(input: SaveCorporateRequest) {
+  async saveCorporate(input: SaveCorporateRequest) {
     const shortName = input.shortName.trim();
     const fullName = input.fullName.trim();
 
@@ -2040,6 +2040,23 @@ export class StoreRentalService {
       this.corporates[existingIndex] = detail;
     } else {
       this.corporates.unshift(detail);
+    }
+
+    // COR-01/02: 企业状态变更审计日志
+    const previousStatus = current?.status;
+    if (previousStatus && previousStatus !== detail.status) {
+      const statusLabel: Record<string, string> = {
+        active: "正常",
+        paused: "停用",
+        disabled: "禁用"
+      };
+      await this.appendOperationLog(
+        "corporate",
+        detail.id,
+        "企业状态变更",
+        normalizedInput.notes?.includes("operator") ? normalizedInput.notes : "营运管理",
+        `企业 ${detail.shortName} 状态从 ${statusLabel[previousStatus] ?? previousStatus} 变更为 ${statusLabel[detail.status] ?? detail.status}`
+      );
     }
 
     return detail;
@@ -5424,6 +5441,17 @@ export class StoreRentalService {
     }
     if (corporate && corporate.status !== "active") {
       throw new BadRequestException("当前企业客户不可下单，请先恢复企业状态。");
+    }
+    // COR-01/02: 合同有效性校验 — 企业停用或合同失效时阻止下单
+    if (corporate && isMonthly) {
+      const hasValidContract = corporate.contracts.some(
+        (contract) =>
+          contract.status === "active" &&
+          (!contract.endDate || new Date(contract.endDate) >= new Date())
+      );
+      if (!hasValidContract) {
+        throw new BadRequestException("当前企业无有效合同，不能创建月结订单。请先更新或续签合同。");
+      }
     }
     if (isMonthly && corporate && corporate.settlementMode !== "monthly") {
       throw new BadRequestException("当前企业未配置月结结算模式。");

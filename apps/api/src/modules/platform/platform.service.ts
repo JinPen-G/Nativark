@@ -1663,7 +1663,8 @@ export class PlatformService {
       "store-rental.orders",
       "store-rental.vehicles",
       "store-rental.members",
-      "store-rental.corporates"
+      "store-rental.corporates",
+      "store-rental.stations"
     ];
     if (!allowedScopes.includes(scopeKey as PlatformFilterPresetScope)) {
       throw new BadRequestException("筛选预设范围不支持");

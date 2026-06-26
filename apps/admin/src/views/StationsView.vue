@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, reactive, ref } from "vue";
 import type {
+  PlatformFilterPreset,
   SaveStationCalendarDayRequest,
   StationCalendarDay,
   StationCapacitySnapshot,
@@ -10,13 +11,17 @@ import type {
   StoreStationSummary
 } from "@store-rental/shared";
 import {
+  deletePlatformFilterPreset,
+  listPlatformFilterPresets,
   listStationHierarchy,
   listStationCalendar,
   listStationCapacitySnapshots,
   listStationPage,
   refreshStationCapacitySnapshots,
+  savePlatformFilterPreset,
   saveStationCalendarDay,
-  saveStation as persistStation
+  saveStation as persistStation,
+  setPlatformFilterPresetDefault
 } from "../api/client";
 import AppLayout from "../components/AppLayout.vue";
 import { stationRows } from "../data/prototypeSeed";
@@ -40,6 +45,10 @@ const calendarRows = ref<StationCalendarDay[]>([]);
 const capacityRows = ref<StationCapacitySnapshot[]>([]);
 const capacityRefreshing = ref(false);
 const selectedStation = ref<StoreStationSummary | null>(null);
+const filterPresetScope = "store-rental.stations" as const;
+const filterPresets = ref<PlatformFilterPreset[]>([]);
+const selectedFilterPresetId = ref("");
+const filterPresetLoading = ref(false);
 const currentScope = ref<StoreStationHierarchyNode>({
   id: "all",
   type: "all",
@@ -220,6 +229,7 @@ function resetStationFilters() {
   serviceStatusFilter.value = "";
   statusFilter.value = "";
   organizationFilter.value = "";
+  selectedFilterPresetId.value = "";
   page.value = 1;
   void loadRows();
 }
@@ -344,7 +354,149 @@ function capacityPressureType(level?: StationCapacitySnapshot["pressureLevel"]) 
   return "info";
 }
 
-onMounted(loadRows);
+const selectedFilterPreset = computed(() =>
+  filterPresets.value.find((preset) => preset.id === selectedFilterPresetId.value)
+);
+
+function filterPresetOperator() {
+  return "营运端";
+}
+
+function cloneStationFilters() {
+  return JSON.parse(
+    JSON.stringify({
+      searchQuery: searchQuery.value,
+      serviceFilter: serviceFilter.value,
+      serviceStatusFilter: serviceStatusFilter.value,
+      statusFilter: statusFilter.value,
+      organizationFilter: organizationFilter.value
+    })
+  ) as Record<string, unknown>;
+}
+
+function applyStationPresetFilters(presetFilters: Record<string, unknown>) {
+  searchQuery.value =
+    typeof presetFilters.searchQuery === "string" ? presetFilters.searchQuery : "";
+  serviceFilter.value =
+    typeof presetFilters.serviceFilter === "string" ? presetFilters.serviceFilter : "";
+  serviceStatusFilter.value =
+    typeof presetFilters.serviceStatusFilter === "string" ? presetFilters.serviceStatusFilter : "";
+  statusFilter.value =
+    typeof presetFilters.statusFilter === "string" ? presetFilters.statusFilter : "";
+  organizationFilter.value =
+    typeof presetFilters.organizationFilter === "string" ? presetFilters.organizationFilter : "";
+  page.value = 1;
+  void loadRows();
+}
+
+function applySelectedFilterPreset() {
+  const preset = selectedFilterPreset.value;
+  if (!preset) {
+    return;
+  }
+  applyStationPresetFilters(preset.filters);
+}
+
+async function loadFilterPresets() {
+  filterPresetLoading.value = true;
+  try {
+    filterPresets.value = await listPlatformFilterPresets({
+      scopeKey: filterPresetScope
+    });
+    const defaultPreset = filterPresets.value.find((preset) => preset.isDefault);
+    if (defaultPreset) {
+      selectedFilterPresetId.value = defaultPreset.id;
+      applyStationPresetFilters(defaultPreset.filters);
+    }
+  } catch {
+    filterPresets.value = [];
+  } finally {
+    filterPresetLoading.value = false;
+  }
+}
+
+async function saveCurrentFilterPreset() {
+  try {
+    const { value } = await ElMessageBox.prompt(
+      "请输入筛选预设名称",
+      "保存筛选预设",
+      {
+        confirmButtonText: "保存",
+        cancelButtonText: "取消",
+        inputValue: selectedFilterPreset.value?.name ?? "",
+        inputPattern: /^(?=.*\S).{1,40}$/,
+        inputErrorMessage: "名称长度需为 1-40 个字符"
+      }
+    );
+    const saved = await savePlatformFilterPreset({
+      id: selectedFilterPreset.value?.id,
+      scopeKey: filterPresetScope,
+      name: value.trim(),
+      filters: cloneStationFilters(),
+      isDefault: selectedFilterPreset.value?.isDefault,
+      operator: filterPresetOperator()
+    });
+    await loadFilterPresets();
+    selectedFilterPresetId.value = saved.id;
+    ElMessage.success("筛选预设已保存");
+  } catch (error) {
+    if (error !== "cancel" && error !== "close") {
+      ElMessage.error("筛选预设保存失败");
+    }
+  }
+}
+
+async function setCurrentFilterPresetDefault() {
+  if (!selectedFilterPreset.value) {
+    ElMessage.warning("请先选择筛选预设");
+    return;
+  }
+  try {
+    const saved = await setPlatformFilterPresetDefault(
+      selectedFilterPreset.value.id,
+      filterPresetOperator()
+    );
+    await loadFilterPresets();
+    selectedFilterPresetId.value = saved.id;
+    ElMessage.success("已设为默认筛选预设");
+  } catch {
+    ElMessage.error("默认筛选预设设置失败");
+  }
+}
+
+async function deleteCurrentFilterPreset() {
+  if (!selectedFilterPreset.value) {
+    ElMessage.warning("请先选择筛选预设");
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确认删除筛选预设"${selectedFilterPreset.value.name}"？`,
+      "删除筛选预设",
+      {
+        confirmButtonText: "删除",
+        cancelButtonText: "取消",
+        type: "warning"
+      }
+    );
+    await deletePlatformFilterPreset(
+      selectedFilterPreset.value.id,
+      filterPresetOperator()
+    );
+    selectedFilterPresetId.value = "";
+    await loadFilterPresets();
+    ElMessage.success("筛选预设已删除");
+  } catch (error) {
+    if (error !== "cancel" && error !== "close") {
+      ElMessage.error("筛选预设删除失败");
+    }
+  }
+}
+
+onMounted(() => {
+  void loadRows();
+  void loadFilterPresets();
+});
 </script>
 
 <template>
@@ -421,6 +573,40 @@ onMounted(loadRows);
           </el-select>
           <el-button type="primary" plain @click="applyStationFilters">查询</el-button>
           <el-button icon="Refresh" circle @click="resetStationFilters" />
+          <el-select
+            v-model="selectedFilterPresetId"
+            placeholder="筛选预设"
+            clearable
+            :loading="filterPresetLoading"
+            style="width: 190px"
+            @change="applySelectedFilterPreset"
+          >
+            <el-option
+              v-for="preset in filterPresets"
+              :key="preset.id"
+              :label="preset.isDefault ? `${preset.name}（默认）` : preset.name"
+              :value="preset.id"
+            />
+          </el-select>
+          <el-button icon="Collection" plain @click="saveCurrentFilterPreset">
+            保存视图
+          </el-button>
+          <el-tooltip content="设为默认" placement="top">
+            <el-button
+              icon="Star"
+              circle
+              :disabled="!selectedFilterPresetId"
+              @click="setCurrentFilterPresetDefault"
+            />
+          </el-tooltip>
+          <el-tooltip content="删除预设" placement="top">
+            <el-button
+              icon="Delete"
+              circle
+              :disabled="!selectedFilterPresetId"
+              @click="deleteCurrentFilterPreset"
+            />
+          </el-tooltip>
         </div>
         <div class="text-sm text-gray-500">共 {{ total }} 个据点</div>
       </div>
