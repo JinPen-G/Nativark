@@ -878,7 +878,12 @@ export interface StoreRentalEventSnapshotRecord {
     | "manual_adjust"
     | "extension"
     | "redirection"
-    | "return_location_change";
+    | "return_location_change"
+    | "accident_registration"
+    | "no_show"
+    | "order_rejection"
+    | "order_close"
+    | "order_cancellation";
   title: string;
   triggerReason?: string;
   settlementTarget?: string;
