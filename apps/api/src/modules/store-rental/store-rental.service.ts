@@ -5671,8 +5671,6 @@ export class StoreRentalService {
     if (member && this.useMysqlDataSource()) {
       await this.storeRentalRepository.recordMemberOrderCreated(member.id, orderNo);
     } else if (member) {
-      await this.storeRentalRepository.recordMemberOrderCreated(member.id, orderNo);
-    } else if (member) {
       member.recentOrderNos = [orderNo, ...member.recentOrderNos.filter((item) => item !== orderNo)].slice(0, 10);
       member.totalOrders += 1;
       member.timeline.unshift({
