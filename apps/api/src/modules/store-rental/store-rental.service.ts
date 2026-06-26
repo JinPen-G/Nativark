@@ -2882,14 +2882,15 @@ export class StoreRentalService {
       monthlySettlementAmount:
         input.billingMode === BillingMode.Monthly ? orderAmount : undefined,
       feeItems: [
-        { code: "RENTAL", name: `${line.vehicleGroupName} 租金`, amount: rentalAmount },
-        ...serviceFeeItems,
+        { code: "RENTAL", name: `${line.vehicleGroupName} 租金`, amount: rentalAmount, source: "base_price" },
+        ...serviceFeeItems.map((f) => ({ ...f, source: "value_added_service" })),
         ...(storeAdjustment
           ? [
               {
                 code: "STORE_ADJUSTMENT",
                 name: storeAdjustment.name,
-                amount: adjustmentAmount
+                amount: adjustmentAmount,
+                source: "store_adjustment"
               }
             ]
           : []),
@@ -2902,7 +2903,8 @@ export class StoreRentalService {
                       name: marketing.plan
                         ? `${marketing.plan.displayName}优惠`
                         : "行销优惠方案",
-                      amount: -marketing.discountAmount
+                      amount: -marketing.discountAmount,
+                      source: "marketing"
                     }
                   ]
                 : []),
@@ -2911,7 +2913,8 @@ export class StoreRentalService {
                     {
                       code: "MEMBERSHIP_RENTAL_DISCOUNT",
                       name: `${membershipBenefit.plan?.name ?? input.membershipLevel}租金权益`,
-                      amount: -membershipBenefit.rentalDiscountAmount
+                      amount: -membershipBenefit.rentalDiscountAmount,
+                      source: "membership"
                     }
                   ]
                 : [])
@@ -2922,11 +2925,12 @@ export class StoreRentalService {
               {
                 code: "MEMBERSHIP_DEPOSIT_DISCOUNT",
                 name: `${membershipBenefit.plan?.name ?? input.membershipLevel}押金权益`,
-                amount: -membershipBenefit.depositDiscountAmount
+                amount: -membershipBenefit.depositDiscountAmount,
+                source: "membership"
               }
             ]
           : []),
-        { code: "DEPOSIT", name: "押金/预授权", amount: depositAmount }
+        { code: "DEPOSIT", name: "押金/预授权", amount: depositAmount, source: "deposit" }
       ],
       selectedMarketingPlan: marketing.plan
         ? {
@@ -2954,15 +2958,17 @@ export class StoreRentalService {
           code: "BASE_PRICE",
           title: "标准租金",
           detail: `${line.vehicleGroupName} 按 ${plan.version} 标准日租金 ¥${line.baseDailyAmount} × ${billableDays}天。`,
-          amount: rentalAmount
+          amount: rentalAmount,
+          source: "base_price" as const
         },
-        ...marketing.explanationLines,
-        ...membershipBenefit.explanationLines,
+        ...marketing.explanationLines.map((l) => ({ ...l, source: "marketing" as const })),
+        ...membershipBenefit.explanationLines.map((l) => ({ ...l, source: "membership" as const })),
         ...serviceFeeItems.map((fee) => ({
           code: fee.code,
           title: fee.name,
           detail: "按已选择增值服务计入报价。",
-          amount: fee.amount
+          amount: fee.amount,
+          source: "value_added_service" as const
         })),
         ...(storeAdjustment
           ? [
@@ -2970,7 +2976,8 @@ export class StoreRentalService {
                 code: "STORE_ADJUSTMENT",
                 title: storeAdjustment.name,
                 detail: "按取还门市组合收取。",
-                amount: adjustmentAmount
+                amount: adjustmentAmount,
+                source: "store_adjustment" as const
               }
             ]
           : []),
@@ -2983,7 +2990,8 @@ export class StoreRentalService {
               : membershipBenefit.depositDiscountAmount > 0
                 ? `按车组押金标准 ¥${baseDepositAmount} 扣减会员押金权益 ¥${membershipBenefit.depositDiscountAmount}。`
                 : "按车组押金标准计入本次预授权金额。",
-          amount: depositAmount
+          amount: depositAmount,
+          source: "deposit" as const
         }
       ],
       snapshots: {
@@ -9114,7 +9122,8 @@ export class StoreRentalService {
       near_lock_unlocked: "临近未硬锁",
       manual_required: "人工调度",
       vehicle_unavailable: "车辆不可交付",
-      manual_protected_invalid: "人工结果失效"
+      manual_protected_invalid: "人工结果失效",
+      accident_reassignment: "事故改派"
     };
     return map[taskType];
   }
