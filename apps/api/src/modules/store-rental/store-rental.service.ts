@@ -185,6 +185,16 @@ interface MarketingMatchResult {
   warnings: string[];
 }
 
+interface DynamicPricingMatchResult {
+  matched: boolean;
+  scheduleId?: string;
+  scheduleSummary?: string;
+  originalDailyRate: number;
+  adjustedDailyRate: number;
+  effectiveAt?: string;
+  vehicleGroupCode?: string;
+}
+
 type ExtensionSettlementMode = "immediate" | "return_settlement" | "monthly";
 type ReturnLocationChangeMode = "store" | "station";
 
@@ -2844,7 +2854,6 @@ export class StoreRentalService {
       Math.ceil((returnAt.getTime() - pickupAt.getTime()) / 3_600_000)
     );
     const billableDays = Math.max(1, Math.ceil(hours / 24));
-    const rentalAmount = line.baseDailyAmount * billableDays;
     const serviceFeeItems = plan.serviceFees
       .filter((fee) => fee.enabled && input.serviceCodes?.includes(fee.code))
       .map((fee) => ({
@@ -2859,6 +2868,18 @@ export class StoreRentalService {
     );
     const adjustmentAmount = storeAdjustment?.amount ?? 0;
     const marketing = this.resolveMarketing(input, line, pickupAt, billableDays);
+    const dynamicPricing = this.matchDynamicPricing(
+      input.vehicleGroupCode,
+      pickupAt,
+      line.baseDailyAmount
+    );
+    const effectiveDailyRate = dynamicPricing.matched
+      ? dynamicPricing.adjustedDailyRate
+      : line.baseDailyAmount;
+    const rentalAmount = effectiveDailyRate * billableDays;
+    const dynamicPricingAdjustment = dynamicPricing.matched
+      ? (dynamicPricing.adjustedDailyRate - dynamicPricing.originalDailyRate) * billableDays
+      : 0;
     const baseDepositAmount =
       input.billingMode === BillingMode.Monthly
         ? this.ruleConfig.payment.enterpriseMonthlyPreAuthAmount
@@ -2896,7 +2917,29 @@ export class StoreRentalService {
       monthlySettlementAmount:
         input.billingMode === BillingMode.Monthly ? orderAmount : undefined,
       feeItems: [
-        { code: "RENTAL", name: `${line.vehicleGroupName} 租金`, amount: rentalAmount, source: "base_price" },
+        ...(dynamicPricing.matched
+          ? [
+              {
+                code: "RENTAL_BASE",
+                name: `${line.vehicleGroupName} 标准租金`,
+                amount: line.baseDailyAmount * billableDays,
+                source: "base_price"
+              },
+              {
+                code: "DYNAMIC_PRICING_ADJUSTMENT",
+                name: `${dynamicPricing.scheduleSummary ?? "动态调价"}`,
+                amount: dynamicPricingAdjustment,
+                source: "dynamic_pricing"
+              }
+            ]
+          : [
+              {
+                code: "RENTAL",
+                name: `${line.vehicleGroupName} 租金`,
+                amount: rentalAmount,
+                source: "base_price"
+              }
+            ]),
         ...serviceFeeItems.map((f) => ({ ...f, source: "value_added_service" })),
         ...(storeAdjustment
           ? [
@@ -2972,9 +3015,20 @@ export class StoreRentalService {
           code: "BASE_PRICE",
           title: "标准租金",
           detail: `${line.vehicleGroupName} 按 ${plan.version} 标准日租金 ¥${line.baseDailyAmount} × ${billableDays}天。`,
-          amount: rentalAmount,
+          amount: line.baseDailyAmount * billableDays,
           source: "base_price" as const
         },
+        ...(dynamicPricing.matched
+          ? [
+              {
+                code: "DYNAMIC_PRICING_ADJUSTMENT",
+                title: dynamicPricing.scheduleSummary ?? "动态调价",
+                detail: `动态调价方案自 ${dynamicPricing.effectiveAt ? new Date(dynamicPricing.effectiveAt).toLocaleDateString("zh-CN") : "已生效"} 起，日租金调整为 ¥${dynamicPricing.adjustedDailyRate}，差额 ¥${dynamicPricingAdjustment}。`,
+                amount: dynamicPricingAdjustment,
+                source: "dynamic_pricing" as const
+              }
+            ]
+          : []),
         ...marketing.explanationLines.map((l) => ({ ...l, source: "marketing" as const })),
         ...membershipBenefit.explanationLines.map((l) => ({ ...l, source: "membership" as const })),
         ...serviceFeeItems.map((fee) => ({
@@ -3016,6 +3070,10 @@ export class StoreRentalService {
         pickupStoreCode: input.pickupStoreCode,
         returnStoreCode: input.returnStoreCode,
         baseDailyAmount: line.baseDailyAmount,
+        standardDailyRate: line.baseDailyAmount,
+        freeKm: 300,
+        priceVersionTitle:
+          this.priceVersionHistory.find((v) => v.version === plan.version)?.title,
         marketingPlanId: marketing.plan?.id,
         marketingPlanVersionId: marketing.plan?.versionId,
         marketingPlanName: marketing.plan?.name,
@@ -3028,7 +3086,16 @@ export class StoreRentalService {
         membershipOrderDiscountPercent: membershipBenefit.plan?.orderDiscountPercent,
         membershipDepositDiscountPercent: membershipBenefit.plan?.depositDiscountPercent,
         effectiveAt: plan.effectiveAt,
-        ruleEffectiveAt: this.ruleConfig.effectiveAt
+        ruleEffectiveAt: this.ruleConfig.effectiveAt,
+        ...(dynamicPricing.matched
+          ? {
+              dynamicPricingScheduleId: dynamicPricing.scheduleId,
+              dynamicPricingSummary: dynamicPricing.scheduleSummary,
+              dynamicPricingEffectiveAt: dynamicPricing.effectiveAt,
+              dynamicPricingAdjustedDailyRate: dynamicPricing.adjustedDailyRate,
+              dynamicPricingAdjustmentAmount: dynamicPricingAdjustment
+            }
+          : {})
       },
       warnings: [
         ...(input.billingMode === BillingMode.Monthly
@@ -15509,6 +15576,45 @@ export class StoreRentalService {
             ]
           : [])
       ]
+    };
+  }
+
+  private matchDynamicPricing(
+    vehicleGroupCode: string,
+    pickupAt: Date,
+    currentBaseDailyRate: number
+  ): DynamicPricingMatchResult {
+    const activeSchedule = this.priceSchedules.find((schedule) => {
+      if (schedule.status !== "scheduled") {
+        return false;
+      }
+      const effectiveDate = new Date(schedule.effectiveAt);
+      return (
+        pickupAt >= effectiveDate &&
+        schedule.changes.some((change) => change.vehicleGroupCode === vehicleGroupCode)
+      );
+    });
+
+    if (!activeSchedule) {
+      return { matched: false, originalDailyRate: currentBaseDailyRate, adjustedDailyRate: currentBaseDailyRate };
+    }
+
+    const groupChange = activeSchedule.changes.find(
+      (change) => change.vehicleGroupCode === vehicleGroupCode
+    );
+
+    if (!groupChange) {
+      return { matched: false, originalDailyRate: currentBaseDailyRate, adjustedDailyRate: currentBaseDailyRate };
+    }
+
+    return {
+      matched: true,
+      scheduleId: activeSchedule.id,
+      scheduleSummary: activeSchedule.summary,
+      originalDailyRate: groupChange.currentPrice,
+      adjustedDailyRate: groupChange.newPrice,
+      effectiveAt: activeSchedule.effectiveAt,
+      vehicleGroupCode
     };
   }
 

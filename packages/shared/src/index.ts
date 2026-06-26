@@ -1443,6 +1443,9 @@ export interface PricingQuoteResult {
     pickupStoreCode: string;
     returnStoreCode: string;
     baseDailyAmount: number;
+    standardDailyRate?: number;
+    freeKm?: number;
+    priceVersionTitle?: string;
     marketingPlanId?: string;
     marketingPlanVersionId?: string;
     marketingPlanName?: string;
@@ -1456,6 +1459,11 @@ export interface PricingQuoteResult {
     membershipDepositDiscountPercent?: number;
     effectiveAt?: string;
     ruleEffectiveAt?: string;
+    dynamicPricingScheduleId?: string;
+    dynamicPricingSummary?: string;
+    dynamicPricingEffectiveAt?: string;
+    dynamicPricingAdjustedDailyRate?: number;
+    dynamicPricingAdjustmentAmount?: number;
   };
   warnings: string[];
 }
