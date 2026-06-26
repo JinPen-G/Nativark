@@ -671,7 +671,11 @@ function eventTypeText(type: StoreRentalDispatchEvent["eventType"]) {
     manual_required: "人工告警",
     vehicle_unavailable: "车辆不可交付",
     ai_analysis: "AI分析",
-    alert_closed: "告警关闭"
+    alert_closed: "告警关闭",
+    task_closed: "任务关闭",
+    task_claimed: "任务认领",
+    task_processed: "任务处理",
+    task_completed: "任务完成"
   };
   return map[type];
 }

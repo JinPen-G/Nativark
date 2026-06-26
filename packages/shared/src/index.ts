@@ -1750,7 +1750,11 @@ export type StoreRentalDispatchEventType =
   | "manual_required"
   | "vehicle_unavailable"
   | "ai_analysis"
-  | "alert_closed";
+  | "alert_closed"
+  | "task_closed"
+  | "task_claimed"
+  | "task_processed"
+  | "task_completed";
 
 export interface StoreRentalDispatchEvent {
   id: string;
