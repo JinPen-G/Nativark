@@ -19,13 +19,12 @@ const VALID_TRANSITIONS = {
   accident_processing: ["settlement_pending", "completed"],
   settlement_pending: ["payment_due", "refund_pending", "completed"],
   payment_due: ["completed", "refund_pending"],
-  refund_pending: ["completed", "refunded"],
+  refund_pending: ["completed", "closed"],
   completed: [],
   cancelled: [],
   no_show: [],
   rejected: [],
   closed: [],
-  refunded: []
 };
 
 /** 全部主状态 */
@@ -273,12 +272,14 @@ function testReturnInspectionFlow() {
 // TST-01: 费用项结构验证（纯逻辑）
 function testFeeVerification() {
   console.log("\n[测试] 费用项结构验证");
-  const validStages = ["booking", "pickup", "return_settlement", "post_charge", "monthly_billing", "manual"];
+  const validStages = ["pickup", "rental", "return_settlement", "cancellation", "post_charge"];
   const validDirections = ["charge", "refund", "waiver"];
+  const validStatuses = ["pending", "settled", "waived", "monthly_billing", "voided"];
   const validSources = ["system", "manual"];
-  assert(validStages.length === 6, "费用阶段枚举完整");
-  assert(validDirections.length === 3, "费用方向枚举完整");
-  assert(validSources.length === 2, "费用来源枚举完整");
+  assert(validStages.length === 5, "费用阶段枚举完整 (5 个: pickup, rental, return_settlement, cancellation, post_charge)");
+  assert(validDirections.length === 3, "费用方向枚举完整 (3 个: charge, refund, waiver)");
+  assert(validStatuses.length === 5, "费用状态枚举完整 (5 个: pending, settled, waived, monthly_billing, voided)");
+  assert(validSources.length === 2, "费用来源枚举完整 (2 个: system, manual)");
   passed++;
   console.log("  PASS  费用项结构验证通过");
 }
@@ -321,6 +322,70 @@ function testCancelFlow() {
   console.log("  PASS  取消流程状态路径验证通过");
 }
 
+// TST-01: 结算待处理流程测试（纯逻辑）
+function testSettlementPendingFlow() {
+  console.log("\n[测试] 结算待处理流程状态路径");
+  assert(VALID_TRANSITIONS.renting.includes("settlement_pending"), "renting 可转 settlement_pending");
+  assert(VALID_TRANSITIONS.renewing.includes("settlement_pending"), "renewing 可转 settlement_pending");
+  assert(VALID_TRANSITIONS.overdue.includes("settlement_pending"), "overdue 可转 settlement_pending");
+  assert(VALID_TRANSITIONS.accident_processing.includes("settlement_pending"), "accident_processing 可转 settlement_pending");
+  assert(VALID_TRANSITIONS.settlement_pending.includes("payment_due"), "settlement_pending 可转 payment_due");
+  assert(VALID_TRANSITIONS.settlement_pending.includes("refund_pending"), "settlement_pending 可转 refund_pending");
+  assert(VALID_TRANSITIONS.settlement_pending.includes("completed"), "settlement_pending 可转 completed");
+  passed++;
+  console.log("  PASS  结算待处理流程状态路径验证通过");
+}
+
+// TST-01: 主状态完整性校验（纯逻辑）
+function testMainStatusCompleteness() {
+  console.log("\n[测试] 主状态完整性校验");
+  const expectedStatuses = [
+    "pending_payment", "reserved", "pickup_overdue", "inspecting",
+    "renting", "renewing", "overdue", "accident_processing",
+    "settlement_pending", "payment_due", "refund_pending",
+    "completed", "cancelled", "no_show", "rejected", "closed"
+  ];
+  assert(ALL_STATUSES.length === 16, `主状态总数为 16 (实际: ${ALL_STATUSES.length})`);
+  for (const status of expectedStatuses) {
+    assert(ALL_STATUSES.includes(status), `主状态列表包含 ${status}`);
+  }
+  passed++;
+  console.log("  PASS  主状态完整性校验通过");
+}
+
+// TST-01: 状态图属性校验（纯逻辑）
+function testStatusGraphProperties() {
+  console.log("\n[测试] 状态图属性校验");
+  // 终态数量：completed, cancelled, no_show, rejected, closed
+  const terminalStates = ALL_STATUSES.filter((s) => VALID_TRANSITIONS[s].length === 0);
+  assert(terminalStates.length === 5, `终态数量为 5 (实际: ${terminalStates.length}: ${terminalStates.join(", ")})`);
+  // 所有终态都在预期列表中
+  const expectedTerminals = ["completed", "cancelled", "no_show", "rejected", "closed"];
+  for (const t of expectedTerminals) {
+    assert(terminalStates.includes(t), `${t} 是终态`);
+  }
+  // 活跃状态数量
+  const activeStates = ALL_STATUSES.filter((s) => VALID_TRANSITIONS[s].length > 0);
+  assert(activeStates.length === 11, `活跃状态数量为 11 (实际: ${activeStates.length})`);
+  // 每个活跃状态至少有 1 个出边
+  for (const s of activeStates) {
+    assert(VALID_TRANSITIONS[s].length >= 1, `活跃状态 ${s} 有出边`);
+  }
+  passed++;
+  console.log("  PASS  状态图属性校验通过");
+}
+
+// TST-01: 被拒流程终态测试（纯逻辑）
+function testRejectedTerminal() {
+  console.log("\n[测试] 被拒流程终态测试");
+  assert(VALID_TRANSITIONS.rejected.length === 0, "rejected 是终态");
+  assert(VALID_TRANSITIONS.inspecting.includes("rejected"), "inspecting 可转 rejected");
+  assert(!VALID_TRANSITIONS.pending_payment.includes("rejected"), "pending_payment 不可转 rejected");
+  assert(!VALID_TRANSITIONS.reserved.includes("rejected"), "reserved 不可转 rejected");
+  passed++;
+  console.log("  PASS  被拒流程终态测试通过");
+}
+
 async function main() {
   console.log("=".repeat(60));
   console.log("E2E 订单状态流转 & 报表测试");
@@ -335,6 +400,10 @@ async function main() {
   testAccidentFlow();
   testRedirectFlow();
   testCancelFlow();
+  testSettlementPendingFlow();
+  testMainStatusCompleteness();
+  testStatusGraphProperties();
+  testRejectedTerminal();
 
   // API 集成测试
   await testReportDashboard();

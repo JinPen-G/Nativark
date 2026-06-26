@@ -509,6 +509,59 @@ const demoOrders: DemoOrder[] = [
       { code: "RENTAL", name: "车辆租金", stage: FeeStage.RENTAL, direction: FeeDirection.CHARGE, status: FeeStatus.VOIDED, amount: 960, settledAmount: 0 }
     ],
     transactions: []
+  },
+  {
+    id: "report_order_019",
+    orderNo: "SR-DEMO-202606-0019",
+    memberId: "member_003",
+    corporateId: undefined,
+    customerName: "王子俊",
+    customerPhoneMasked: "852****9081",
+    vehicleGroupId: "VG_EV",
+    assignedVehicleId: "VEH_003",
+    pickupStationId: "station_airport",
+    returnStationId: "station_airport",
+    pickupAt: "2026-06-15T09:00:00+08:00",
+    returnAt: "2026-06-18T09:00:00+08:00",
+    totalAmount: 4560,
+    mainStatus: OrderMainStatus.SETTLEMENT_PENDING,
+    dispatchStatus: DispatchStatus.LOCKED,
+    paymentStatus: PaymentStatus.PARTIAL_PAID,
+    billingMode: BillingMode.CUSTOMER_PAY,
+    riskFlags: ["待结算"],
+    fees: [
+      { code: "RENTAL", name: "车辆租金", stage: FeeStage.RENTAL, direction: FeeDirection.CHARGE, status: FeeStatus.SETTLED, amount: 3960, settledAmount: 3960 },
+      { code: "OVERTIME", name: "超时费", stage: FeeStage.RETURN_SETTLEMENT, direction: FeeDirection.CHARGE, status: FeeStatus.PENDING, amount: 600, settledAmount: 0 }
+    ],
+    transactions: [{ type: "payment", status: "success", amount: 3960, channel: "online", operator: "seed" }]
+  },
+  {
+    id: "report_order_020",
+    orderNo: "SR-DEMO-202606-0020",
+    memberId: "member_002",
+    corporateId: undefined,
+    customerName: "林慧仪",
+    customerPhoneMasked: "852****6619",
+    vehicleGroupId: "VG_ECONOMY",
+    assignedVehicleId: undefined,
+    pickupStationId: "station_mk_counter",
+    returnStationId: "station_mk_counter",
+    pickupAt: "2026-06-16T10:00:00+08:00",
+    returnAt: "2026-06-18T10:00:00+08:00",
+    totalAmount: 1560,
+    mainStatus: OrderMainStatus.REJECTED,
+    dispatchStatus: DispatchStatus.PENDING,
+    paymentStatus: PaymentStatus.REFUNDED,
+    billingMode: BillingMode.CUSTOMER_PAY,
+    riskFlags: ["验车不通过"],
+    fees: [
+      { code: "RENTAL", name: "车辆租金", stage: FeeStage.RENTAL, direction: FeeDirection.CHARGE, status: FeeStatus.VOIDED, amount: 1460, settledAmount: 0 },
+      { code: "INSPECT_FEE", name: "验车手续费", stage: FeeStage.PICKUP, direction: FeeDirection.CHARGE, status: FeeStatus.SETTLED, amount: 100, settledAmount: 100 }
+    ],
+    transactions: [
+      { type: "refund", status: "success", amount: 1460, channel: "online", operator: "seed" },
+      { type: "payment", status: "success", amount: 100, channel: "online", operator: "seed" }
+    ]
   }
 ];
 
