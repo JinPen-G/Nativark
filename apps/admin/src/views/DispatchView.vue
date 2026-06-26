@@ -418,6 +418,16 @@ async function manualAssign(candidate: StoreRentalDispatchCandidate) {
   if (!order) {
     return;
   }
+  // DP-01: 人工改派确认对话框
+  try {
+    await ElMessageBox.confirm(
+      `确认将订单 ${order.orderNo} 改派至车辆 ${candidate.licensePlate}？\n当前车辆：${order.plateNo || '未分配'}\n目标车辆：${candidate.licensePlate} (${candidate.currentStoreName})`,
+      "人工改派确认",
+      { type: "warning", confirmButtonText: "确认改派", cancelButtonText: "取消" }
+    );
+  } catch {
+    return;
+  }
   actionLoading.value = `manual-${candidate.vehicleId}`;
   try {
     const result = await manualReassignFromDispatch({
