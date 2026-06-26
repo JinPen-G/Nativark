@@ -552,6 +552,7 @@ export interface StoreRentalOrderSummary {
   operationLockOperator?: string;
   operationLockExpiresAt?: string;
   riskFlags: string[];
+  dynamicPricingVersion?: string;
 }
 
 export interface StoreRentalOrderTimelineItem {
@@ -1052,6 +1053,7 @@ export interface StoreRentalOrderDetail extends StoreRentalOrderSummary {
     priceVersionId?: string;
     marketingPlanVersionId?: string;
     marketingPlanName?: string;
+    dynamicPricingVersion?: string;
     termsVersion: string;
     events: StoreRentalEventSnapshotRecord[];
   };

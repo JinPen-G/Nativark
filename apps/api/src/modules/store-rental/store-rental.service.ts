@@ -2904,6 +2904,13 @@ export class StoreRentalService {
         // MD-04: 跨表查找增值服务详情以获取库存/等级/企业字段
         const serviceDetail = this.valueAddedServices.find((svc) => svc.code === code);
 
+        // MD-04: 增值服务启用状态校验（跨表二次确认）
+        if (serviceDetail && serviceDetail.status !== "enabled") {
+          throw new BadRequestException(
+            `增值服务 ${fee.name}(${code}) 当前已停用，不能选择。`
+          );
+        }
+
         // MD-04: 增值服务库存校验 (currentStock 优先，totalStock 兜底)
         if (serviceDetail?.trackInventory) {
           const availableStock = serviceDetail.currentStock ?? serviceDetail.totalStock ?? 0;
@@ -5681,7 +5688,8 @@ export class StoreRentalService {
       mainStatus,
       dispatchStatus: DispatchStatus.Pending,
       paymentStatus,
-      riskFlags
+      riskFlags,
+      dynamicPricingVersion: storedQuote?.result.snapshots.dynamicPricingVersion
     };
 
     const timeline: StoreRentalOrderTimelineItem[] = [
@@ -5725,7 +5733,8 @@ export class StoreRentalService {
           vehicleGroupCode: "unknown",
           pickupStoreCode: "unknown",
           returnStoreCode: "unknown",
-          baseDailyAmount: 0
+          baseDailyAmount: 0,
+          dynamicPricingVersion: undefined
         };
       const marketingSnapshot = storedQuote?.result.selectedMarketingPlan
         ? JSON.parse(
@@ -5826,7 +5835,8 @@ export class StoreRentalService {
           vehicleGroupCode: "unknown",
           pickupStoreCode: "unknown",
           returnStoreCode: "unknown",
-          baseDailyAmount: 0
+          baseDailyAmount: 0,
+          dynamicPricingVersion: undefined
         }
     };
   }
@@ -5890,6 +5900,7 @@ export class StoreRentalService {
         returnStore: order.returnStoreName,
         pricingVersion: this.pricingPlans[0].version,
         priceVersionId: this.pricingPlans[0].version,
+        dynamicPricingVersion: order.dynamicPricingVersion,
         termsVersion: "store-rental-terms-v2026.04.28",
         events: this.orderEventSnapshots.get(order.id) ?? []
       },
@@ -7453,7 +7464,8 @@ export class StoreRentalService {
             vehicleGroupName: order.vehicleGroupName,
             baseReturnAt: oldReturnAtText,
             newReturnAt: order.returnAt,
-            pricingVersion: "store-rental-price-v2026.05.01"
+            pricingVersion: "store-rental-price-v2026.05.01",
+            dynamicPricingVersion: order.dynamicPricingVersion
           }
         });
       }
@@ -14146,7 +14158,9 @@ export class StoreRentalService {
     const baseStatus = this.baseFeeStatus(order);
     const returnFeeStatus = this.returnFeeStatus(order, settlement);
     const createdAt = order.pickupAt;
-    const baseSnapshotRef = "pricingVersion:store-rental-price-v2026.05.01";
+    const baseSnapshotRef = order.dynamicPricingVersion
+      ? `pricingVersion:store-rental-price-v2026.05.01@${order.dynamicPricingVersion}`
+      : "pricingVersion:store-rental-price-v2026.05.01";
     const returnSnapshotRef = `returnSettlement:${order.orderNo}`;
     const items: StoreRentalFeeLedgerItem[] = [
       this.feeLedgerItem({
