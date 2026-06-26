@@ -2852,7 +2852,15 @@ onMounted(loadDetail);
             </section>
 
             <section class="bg-white rounded-xl border border-gray-200">
-              <div class="px-5 py-3 border-b border-gray-100 font-bold text-gray-800">履约事件</div>
+              <div class="px-5 py-3 border-b border-gray-100 font-bold text-gray-800">
+                履约事件
+                <span class="text-xs font-normal text-gray-500 ml-2">
+                  共 {{ allEvents.length }} 条
+                  <span v-if="exceptionEvents.length" class="text-red-500 ml-1">· {{ exceptionEvents.length }} 条异常</span>
+                  <span v-if="reassignEvents.length" class="text-orange-500 ml-1">· {{ reassignEvents.length }} 条改派</span>
+                  <span v-if="accidentEvents.length" class="text-red-500 ml-1">· {{ accidentEvents.length }} 条事故</span>
+                </span>
+              </div>
               <el-tabs v-model="eventTab" class="px-5 pt-3">
                 <el-tab-pane label="全部" name="all">
                   <div v-if="allEvents.length" class="divide-y divide-gray-100 max-h-80 overflow-y-auto">
