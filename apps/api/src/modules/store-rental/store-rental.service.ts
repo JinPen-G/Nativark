@@ -5494,6 +5494,9 @@ export class StoreRentalService {
         await this.storeRentalRepository.recordCorporateOrderCreated(corporate.id);
       }
 
+      // PF-14: 订单创建统一审计
+      await this.appendOperationLog("order", orderId, "创建订单", "规则引擎", `创建订单 ${orderNo}，总额 ${totalAmount}，客户 ${input.customerName ?? "unknown"}`);
+
       return {
         id: orderId,
         orderNo,
