@@ -6372,10 +6372,13 @@ export class StoreRentalService {
           customerSigned: body.customerSigned !== false,
           memo: this.optionalString(body.memo)
         });
+        // 自动计算超时费和超里程费（PRD OR-07）
+        const autoOvertimeFee = this.calculateOvertimeFee(order, body);
+        const autoOvermileageFee = this.calculateOvermileageFee(order, body);
         this.settlementSummaries.set(
           order.id,
           this.mergeSettlementSummary(order, {
-            overtimeFeeAmount: this.optionalNumber(body.overtimeFeeAmount) ?? 0,
+            overtimeFeeAmount: this.optionalNumber(body.overtimeFeeAmount) ?? autoOvertimeFee,
             damageFeeAmount: this.optionalNumber(body.damageFeeAmount) ?? 0,
             cleaningFeeAmount: this.optionalNumber(body.cleaningFeeAmount) ?? 0,
             discountAmount: this.optionalNumber(body.discountAmount) ?? 0,
@@ -14943,6 +14946,63 @@ export class StoreRentalService {
     }
 
     return order;
+  }
+
+  // OR-07: 自动计算超时费
+  private calculateOvertimeFee(order: StoreRentalOrderSummary, body: Record<string, unknown>): number {
+    const gracePeriodMinutes = this.ruleConfig.pickupReturn.gracePeriodMinutes ?? 30;
+    const overtimeHourlyRate = this.ruleConfig.pickupReturn.overtimeHourlyRate ?? 50;
+    const dailyThresholdHours = this.ruleConfig.pickupReturn.dailyThresholdHours ?? 5;
+
+    const expectedReturnAt = new Date(order.returnAt);
+    const actualReturnAt = body.actualReturnAt ? new Date(String(body.actualReturnAt)) : new Date();
+
+    if (!Number.isFinite(expectedReturnAt.getTime()) || !Number.isFinite(actualReturnAt.getTime())) {
+      return 0;
+    }
+
+    const overtimeMs = actualReturnAt.getTime() - expectedReturnAt.getTime();
+    if (overtimeMs <= 0) {
+      return 0;
+    }
+
+    const overtimeMinutes = overtimeMs / 60_000;
+    if (overtimeMinutes <= gracePeriodMinutes) {
+      return 0;
+    }
+
+    const billableMinutes = overtimeMinutes - gracePeriodMinutes;
+    const billableHours = billableMinutes / 60;
+
+    if (billableHours >= dailyThresholdHours) {
+      const dailyRate = overtimeHourlyRate * dailyThresholdHours;
+      const billableDays = Math.ceil(billableHours / 24);
+      return Math.round(dailyRate * billableDays);
+    }
+
+    return Math.round(overtimeHourlyRate * Math.ceil(billableHours));
+  }
+
+  // OR-07: 自动计算超里程费
+  private calculateOvermileageFee(order: StoreRentalOrderSummary, body: Record<string, unknown>): number {
+    const overMileageRate = this.ruleConfig.pickupReturn.overMileageRate ?? 2;
+
+    const returnMileage = this.optionalNumber(body.returnMileage);
+    if (!returnMileage) {
+      return 0;
+    }
+
+    const pickupInspection = (this.inspectionRecords.get(order.id) ?? []).find((r) => r.stage === "pickup");
+    const pickupMileage = pickupInspection?.mileage ?? 0;
+    const freeMileage = order.totalAmount > 0 ? Math.floor(order.totalAmount / 100) * 100 : 0;
+
+    const usedMileage = returnMileage - pickupMileage;
+    if (usedMileage <= freeMileage) {
+      return 0;
+    }
+
+    const overMileage = usedMileage - freeMileage;
+    return Math.round(overMileage * overMileageRate);
   }
 
   private createMarketingPlanSeed(

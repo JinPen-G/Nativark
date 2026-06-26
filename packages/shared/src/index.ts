@@ -1114,6 +1114,10 @@ export interface StoreRentalRuleConfig {
     closeReturnWindowAction: "submit_return_inspection" | "keep_renting";
     allowEarlyReturn: boolean;
     earlyReturnRefundMode: "full_unused_days" | "no_refund";
+    gracePeriodMinutes?: number;
+    overtimeHourlyRate?: number;
+    dailyThresholdHours?: number;
+    overMileageRate?: number;
   };
   cancellation: {
     limitedFreeCancelEnabled: boolean;
