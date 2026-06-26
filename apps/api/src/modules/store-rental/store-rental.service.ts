@@ -7796,6 +7796,9 @@ export class StoreRentalService {
       event,
       message: `调度任务 ${order.orderNo} 已被 ${operator} 认领。`
     };
+
+    // DP-04: 调度任务认领审计
+    await this.appendOperationLog("dispatch_task", input.taskId, "调度任务认领", operator, `调度任务 ${order.orderNo} 类型 ${input.taskType} 已被 ${operator} 认领`);
   }
 
   async processDispatchTask(
