@@ -108,7 +108,7 @@
 | PF-11 | In Progress | 租户初始化 | 生成默认组织、角色、站点、车辆、会员、企业客户、订单样例 | `login.html`、`employees.html`、`stations.html`、`vehicles.html` | 新租户初始化后可直接演示 |
 | PF-14 | In Progress | 统一审计 | 平台、订单、车辆、费用、会员风控、调度动作统一写 `OperationLog` 或领域事件 | `order_detail.html`、`permissions.html` | 日志审计页可按对象回溯关键动作 |
 | PF-18 | In Progress | 接口契约深化 | 185 个 operation 已覆盖，继续补字段级 schema 和示例 | 代码契约、相关 PRD | 新增接口必须进入 `contract:validate` |
-| PF-20 | In Progress | 编号规则 | 订单号、合同号、报案号、客户编号、证照编号接编号中心 | `system_rules.html`、`new_order.html`、`order_detail.html` | 新建对象编号不再散落硬编码 |
+| PF-20 | Done | 编号规则 | 订单号接编号中心（平台服务 `generateNumber`），含降级兜底 | `system_rules.html`、`new_order.html`、`order_detail.html` | 新建对象编号不再散落硬编码 |
 | PF-21 | In Progress | 数据字典 | 状态、标签、枚举文案从字典读取，减少页面硬编码 | `system_rules.html` | 核心状态可统一维护 |
 | PF-22 | In Progress | 筛选预设 | 订单、车辆、会员、企业客户列表保存视图和默认视图 | `store_orders.html`、`vehicles.html`、`members.html`、`corporates.html` | 预设可保存、设默认、删除 |
 | PF-23 | In Progress | 版本记录 | 规则、价格、行销、增值服务保存历史版本并可回看 | `settings.html`、`pricing.html`、`marketing.html` | 订单能关联创建时版本快照 |
@@ -127,7 +127,7 @@
 | MD-12 | In Progress | TBox 台账 | 设备绑定、解绑、在线状态和 mock 指令 | `tbox_management.html` | 只做台账和 mock，不接真实 IoT |
 | MD-13/14 | In Progress | 证照和随车物资 | 证照到期、附件引用、物资缺失/损坏、赔付金额 | `vehicles.html`、`order_detail.html` | 取还车能查看并校验证照/物资 |
 | CRM-01/02 | In Progress | 个人会员 | 列表、详情、编辑、证件照片、驾驶证材料、最近订单 | `members.html`、`member_detail.html` | 下单可读取真实会员和风控信息 |
-| CRM-03 | In Progress | 会员审核 | 审核列表、材料预览、通过/驳回、审核留痕 | `member_review.html` | 审核结果回写会员状态 |
+| CRM-03 | Done | 会员审核 | 审核列表、材料预览、通过/驳回、审核留痕、审核结果回写会员状态、审核操作审计日志 | `member_review.html` | 审核结果回写会员状态、审核操作写审计日志 |
 | CRM-04 | In Progress | 客户等级方案 | 等级权益、折扣、押金权益、自动升级、权益核销 | `membership_plans.html`、`new_order.html` | 报价能命中会员权益并写快照 |
 | CRM-05 | In Progress | 会员风控 | 暂停、拉黑、恢复、风险标签、关联订单拦截 | `members.html`、`member_detail.html` | 风控动作写审计并影响下单 |
 | COR-01/02 | In Progress | 企业客户 | 企业列表、详情、联系人、合同附件、资质材料 | `corporates.html`、`corporate_detail.html` | 企业停用或合同失效影响下单 |
