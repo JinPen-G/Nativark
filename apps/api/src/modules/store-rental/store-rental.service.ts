@@ -6555,7 +6555,7 @@ export class StoreRentalService {
         break;
       case "register-accident":
         {
-          const result = this.registerOrderAccident(order, body, previousStatus);
+          const result = await this.registerOrderAccident(order, body, previousStatus);
           actionTimelineDetail = result.timelineAction;
           resultMessage = result.message;
         }
@@ -12687,11 +12687,11 @@ export class StoreRentalService {
     );
   }
 
-  private registerOrderAccident(
+  private async registerOrderAccident(
     order: StoreRentalOrderSummary,
     body: Record<string, unknown>,
     previousStatus: OrderMainStatus
-  ): OrderActionEffect {
+  ): Promise<OrderActionEffect> {
     const accident = this.buildOrderAccidentPayload(order, body);
     const vehicle = this.vehicles.find(
       (item) => item.licensePlate === order.plateNo
@@ -12707,6 +12707,38 @@ export class StoreRentalService {
     this.persistCompletedAccidentMonthlyBill(order, accident, financial.fee);
     if (accident.record.claimStatus !== "closed") {
       this.updateVehicleOperationStatus(order.plateNo, "controlled");
+    }
+
+    // DP-03: 事故登记后检查该车辆是否被其他订单占用，若受影响则创建 dispatchEvent
+    if (accident.record.claimStatus !== "closed") {
+      const affectedOrders = this.orders.filter(
+        (o) =>
+          o.id !== order.id &&
+          o.plateNo === order.plateNo &&
+          [OrderMainStatus.Reserved, OrderMainStatus.PickupOverdue].includes(
+            o.mainStatus
+          )
+      );
+      if (affectedOrders.length > 0) {
+        await this.recordDispatchEvent({
+          eventType: "vehicle_unavailable",
+          source: "accident_registration",
+          title: "事故登记导致车辆不可交付",
+          orderId: order.id,
+          orderNo: order.orderNo,
+          beforeVehicle: order.plateNo,
+          reasonCode: "VEHICLE_UNAVAILABLE",
+          reasonText: `车辆 ${order.plateNo} 因事故登记（${accident.record.reportNo}）不可交付，影响 ${affectedOrders.length} 笔后续订单。`,
+          riskLevel: affectedOrders.length > 0 ? "high" : "medium",
+          operator: accident.operator,
+          payload: {
+            accidentReportNo: accident.record.reportNo,
+            responsibility: accident.responsibilityLabel,
+            claimStatus: accident.record.claimStatus,
+            affectedOrderNos: affectedOrders.map((o) => o.orderNo)
+          }
+        });
+      }
     }
 
     return this.accidentActionEffect(order, accident, financial.fee, previousStatus);
