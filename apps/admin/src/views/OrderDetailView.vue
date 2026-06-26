@@ -7,6 +7,7 @@ import {
   OrderMainStatus,
   PaymentStatus,
   StoreRentalMode,
+  type FinanceDocumentRow,
   type StoreRentalFeeDirection,
   type StoreRentalFeeStage,
   type StoreRentalOrderDetail,
@@ -23,6 +24,7 @@ import {
   closeStoreRentalOrderRemark,
   createStoreRentalOrderTransaction,
   getStoreRentalOrder,
+  listFinanceDocuments,
   listStations,
   listVehicleGroups,
   listVehicles,
@@ -79,6 +81,7 @@ const selectedFeeId = ref("");
 const selectedFeeName = ref("");
 const pendingTransactionType = ref<"payment" | "refund" | "monthly_bill">("payment");
 const detail = ref<StoreRentalOrderDetail | null>(null);
+const financeDocuments = ref<FinanceDocumentRow[]>([]);
 const extensionForm = reactive({
   newReturnAt: "",
   settlementMode: "return_settlement" as "immediate" | "return_settlement" | "monthly",
@@ -368,6 +371,17 @@ function parseAccidentDetails(title: string): string {
   }
   return title;
 }
+
+function invoiceStatusLabel(status: string) {
+  const map: Record<string, string> = {
+    issued: "已开具",
+    voided: "已作废",
+    pending: "待开具",
+    draft: "草稿"
+  };
+  return map[status] || status;
+}
+
 const pickupBalanceDue = computed(() => {
   const order = detail.value;
   if (!order || isMonthly.value) {
@@ -961,13 +975,28 @@ const feeAuditRows = computed(() => {
   return [...feeRows, ...transactionRows].sort((left, right) => left.order - right.order);
 });
 
+const invoiceDocuments = computed(() => {
+  const order = detail.value;
+  if (!order) {
+    return [];
+  }
+  return financeDocuments.value.filter(
+    (doc) => doc.orderId === order.id || doc.orderNo === order.orderNo
+  );
+});
+
 async function loadDetail() {
   if (!orderId.value) {
     return;
   }
   loading.value = true;
   try {
-    detail.value = await getStoreRentalOrder(orderId.value);
+    const [orderData, documentsData] = await Promise.all([
+      getStoreRentalOrder(orderId.value),
+      listFinanceDocuments()
+    ]);
+    detail.value = orderData;
+    financeDocuments.value = documentsData;
   } catch {
     ElMessage.error("订单详情加载失败");
   } finally {
@@ -4226,7 +4255,27 @@ onMounted(loadDetail);
           </el-tab-pane>
 
           <el-tab-pane label="发票记录" name="invoices">
-            <el-empty description="MVP 阶段预留发票接入；真实开票需等待发票平台返回结果后展示。" />
+            <div v-if="invoiceDocuments.length" class="divide-y divide-gray-100">
+              <div v-for="record in invoiceDocuments" :key="record.id" class="py-3 text-sm">
+                <div class="flex justify-between gap-3">
+                  <div>
+                    <el-tag size="small" :type="record.type === 'invoice' ? 'success' : 'info'" effect="plain" class="mr-2">
+                      {{ record.type === "invoice" ? "发票" : "收据" }}
+                    </el-tag>
+                    <span class="font-medium text-gray-800">{{ record.title || record.documentNo }}</span>
+                    <div class="text-xs text-gray-500 mt-1">{{ record.documentNo }} · {{ invoiceStatusLabel(record.status) }}</div>
+                    <div v-if="record.relatedFeeIds && record.relatedFeeIds.length" class="text-xs text-gray-400 mt-1">
+                      关联费用：{{ record.relatedFeeIds.join(", ") }}
+                    </div>
+                  </div>
+                  <div class="text-right">
+                    <div class="font-mono font-bold">{{ formatMoney(record.amount) }}</div>
+                    <div class="text-xs text-gray-400 mt-1">{{ record.issuedAt }}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <el-empty v-else description="暂无发票记录" :image-size="60" />
           </el-tab-pane>
 
           <el-tab-pane label="费用审计" name="audit">
