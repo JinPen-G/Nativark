@@ -562,6 +562,63 @@ const demoOrders: DemoOrder[] = [
       { type: "refund", status: "success", amount: 1460, channel: "online", operator: "seed" },
       { type: "payment", status: "success", amount: 100, channel: "online", operator: "seed" }
     ]
+  },
+  // 补充: SETTLEMENT_PENDING 状态 (还车待结算)
+  {
+    id: "report_order_021",
+    orderNo: "SR-DEMO-202606-0021",
+    memberId: "member_003",
+    corporateId: undefined,
+    customerName: "王子俊",
+    customerPhoneMasked: "852****9081",
+    vehicleGroupId: "VG_EV",
+    assignedVehicleId: "VEH_003",
+    pickupStationId: "station_airport",
+    returnStationId: "station_airport",
+    pickupAt: "2026-06-17T09:00:00+08:00",
+    returnAt: "2026-06-19T09:00:00+08:00",
+    totalAmount: 3160,
+    mainStatus: OrderMainStatus.SETTLEMENT_PENDING,
+    dispatchStatus: DispatchStatus.LOCKED,
+    paymentStatus: PaymentStatus.DEPOSIT_PAID,
+    billingMode: BillingMode.CUSTOMER_PAY,
+    riskFlags: ["待结算"],
+    fees: [
+      { code: "RENTAL", name: "车辆租金", stage: FeeStage.RENTAL, direction: FeeDirection.CHARGE, status: FeeStatus.SETTLED, amount: 2760, settledAmount: 2760 },
+      { code: "DAMAGE", name: "车辆刮蹭修复费", stage: FeeStage.RETURN_SETTLEMENT, direction: FeeDirection.CHARGE, status: FeeStatus.PENDING, amount: 400, settledAmount: 0 }
+    ],
+    transactions: [
+      { type: "pre_auth_freeze", status: "success", amount: 0, channel: "online", operator: "seed" },
+      { type: "payment", status: "success", amount: 2760, channel: "online", operator: "seed" }
+    ]
+  },
+  // 补充: REJECTED 状态 (验车不通过, 租金已退款)
+  {
+    id: "report_order_022",
+    orderNo: "SR-DEMO-202606-0022",
+    memberId: "member_001",
+    corporateId: undefined,
+    customerName: "陈嘉豪",
+    customerPhoneMasked: "852****2388",
+    vehicleGroupId: "VG_SEVEN",
+    assignedVehicleId: "VEH_001",
+    pickupStationId: "station_mk_counter",
+    returnStationId: "station_mk_counter",
+    pickupAt: "2026-06-18T14:00:00+08:00",
+    returnAt: "2026-06-20T14:00:00+08:00",
+    totalAmount: 2780,
+    mainStatus: OrderMainStatus.REJECTED,
+    dispatchStatus: DispatchStatus.LOCKED,
+    paymentStatus: PaymentStatus.REFUNDED,
+    billingMode: BillingMode.CUSTOMER_PAY,
+    riskFlags: ["验车不通过", "已退款"],
+    fees: [
+      { code: "RENTAL", name: "车辆租金", stage: FeeStage.RENTAL, direction: FeeDirection.CHARGE, status: FeeStatus.VOIDED, amount: 2580, settledAmount: 0 },
+      { code: "DEPOSIT", name: "押金退还", stage: FeeStage.PICKUP, direction: FeeDirection.REFUND, status: FeeStatus.SETTLED, amount: 200, settledAmount: 200 }
+    ],
+    transactions: [
+      { type: "refund", status: "success", amount: 2780, channel: "online", operator: "seed" }
+    ]
   }
 ];
 
