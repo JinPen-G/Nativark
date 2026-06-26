@@ -1459,6 +1459,8 @@ export interface PricingQuoteResult {
     membershipPlanName?: string;
     membershipOrderDiscountPercent?: number;
     membershipDepositDiscountPercent?: number;
+    membershipRentalDiscountAmount?: number;
+    membershipDepositDiscountAmount?: number;
     effectiveAt?: string;
     ruleEffectiveAt?: string;
     dynamicPricingScheduleId?: string;
