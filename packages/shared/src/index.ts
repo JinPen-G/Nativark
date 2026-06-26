@@ -1853,7 +1853,12 @@ export interface StoreRentalDispatchTaskActionResult {
   taskId: string;
   orderId: string;
   orderNo: string;
-  status: "closed";
+  status: "closed" | "claimed" | "processing" | "completed";
+  taskStatus?: "open" | "claimed" | "processing" | "completed";
+  claimedBy?: string;
+  claimedAt?: string;
+  completedBy?: string;
+  completedAt?: string;
   event: StoreRentalDispatchEvent;
   message: string;
 }

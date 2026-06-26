@@ -7649,7 +7649,10 @@ export class StoreRentalService {
       taskId: input.taskId,
       orderId: order.id,
       orderNo: order.orderNo,
-      status: "closed",
+      status: "claimed",
+      taskStatus: "claimed",
+      claimedBy: operator,
+      claimedAt: new Date().toISOString(),
       event,
       message: `调度任务 ${order.orderNo} 已被 ${operator} 认领。`
     };
@@ -7692,7 +7695,10 @@ export class StoreRentalService {
       taskId: input.taskId,
       orderId: order.id,
       orderNo: order.orderNo,
-      status: "closed",
+      status: input.status === "completed" ? "completed" : "processing",
+      taskStatus: input.status === "completed" ? "completed" : "processing",
+      completedBy: input.status === "completed" ? operator : undefined,
+      completedAt: input.status === "completed" ? new Date().toISOString() : undefined,
       event,
       message: `调度任务 ${order.orderNo} 已处理为 ${input.status}。`
     };
