@@ -1557,9 +1557,13 @@ export class StoreRentalService {
     return this.memberReviews;
   }
 
-  processMemberReview(id: string, input: ProcessMemberReviewRequest) {
+  async processMemberReview(id: string, input: ProcessMemberReviewRequest) {
     if (this.useMysqlDataSource()) {
-      return this.storeRentalRepository.processMemberReview(id, input);
+      const result = await this.storeRentalRepository.processMemberReview(id, input);
+      // CRM-03: 会员审核审计日志
+      const actionLabel = input.action === "approve" ? "审核通过" : "审核驳回";
+      await this.appendOperationLog("member_review", id, actionLabel, input.operator || "营运端审核", `会员审核 ${actionLabel}，备注：${input.remark || "无"}`);
+      return result;
     }
 
     const review = this.memberReviews.find((item) => item.id === id);
@@ -1585,6 +1589,10 @@ export class StoreRentalService {
       action: input.action === "approve" ? "审核通过" : "审核驳回",
       remark: review.remark
     });
+
+    // CRM-03: 会员审核审计日志
+    const actionLabel = input.action === "approve" ? "审核通过" : "审核驳回";
+    await this.appendOperationLog("member_review", id, actionLabel, input.operator || "营运端审核", `会员审核 ${actionLabel}，备注：${input.remark || "无"}`);
 
     return {
       review,
