@@ -3306,7 +3306,8 @@ export type StoreRentalReportType =
   | "orders"
   | "vehicles"
   | "finance"
-  | "ops";
+  | "ops"
+  | "audit";
 
 export interface StoreRentalReportQuery {
   tenantId?: string;
@@ -3317,6 +3318,7 @@ export interface StoreRentalReportQuery {
   vehicleGroupName?: string;
   billingMode?: BillingMode | "all";
   mainStatuss?: string[];
+  riskCategory?: string;
 }
 
 export interface StoreRentalMetricCard {
