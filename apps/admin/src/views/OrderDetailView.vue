@@ -400,7 +400,10 @@ function eventSnapshotTypeLabel(eventType: string) {
     return_settlement: "还车结算",
     settlement_confirmation: "结算确认",
     operation_lock_release: "操作锁释放",
-    manual_adjust: "人工调整"
+    manual_adjust: "人工调整",
+    extension: "续租快照",
+    redirection: "改派快照",
+    return_location_change: "还车地点变更"
   };
   return map[eventType] || eventType;
 }
@@ -414,7 +417,10 @@ function eventSnapshotTypeTag(eventType: string) {
     return_settlement: "warning",
     settlement_confirmation: "success",
     operation_lock_release: "info",
-    manual_adjust: "danger"
+    manual_adjust: "danger",
+    extension: "warning",
+    redirection: "warning",
+    return_location_change: "info"
   };
   return map[eventType] || "";
 }
@@ -1113,8 +1119,19 @@ const feeAuditRows = computed(() => {
     operator: item.operator,
     order: index + 100
   }));
+  // 续租审计行：从事件快照中提取 extension 类型记录
+  const extensionAuditRows = eventSnapshots.value
+    .filter((snap) => snap.eventType === "extension")
+    .map((snap, index) => ({
+      id: `ext_audit_${snap.id}`,
+      at: snap.occurredAt,
+      action: "续租审计",
+      detail: `${snap.title}，${snap.triggerReason || "客户延长用车"}，费用：${formatMoney(snap.amount ?? 0)}${snap.settlementTarget ? "，结算去向：" + snap.settlementTarget : ""}`,
+      operator: snap.operator,
+      order: index + 200
+    }));
 
-  return [...feeRows, ...transactionRows].sort((left, right) => left.order - right.order);
+  return [...feeRows, ...transactionRows, ...extensionAuditRows].sort((left, right) => left.order - right.order);
 });
 
 const invoiceDocuments = computed(() => {
@@ -1468,7 +1485,22 @@ function isTerminationAction(action: string): action is TerminationAction {
   return ["cancel", "mark-no-show", "reject-order", "close-order"].includes(action);
 }
 
+const detailAvailableActions = computed(() => {
+  const order = detail.value;
+  if (!order) return [];
+  // 优先使用服务端返回的可用操作列表（已做状态和权限过滤）
+  if (order.availableActions?.length) {
+    return order.availableActions.filter(canRunOrderAction);
+  }
+  // 降级到本地状态机计算
+  return availableActions(order);
+});
+
 function primaryActions(row: StoreRentalOrderSummary) {
+  // 详情页使用服务端返回的 availableActions，列表页使用本地计算
+  if (detail.value && row.id === detail.value.id) {
+    return detailAvailableActions.value.filter((action) => !isTerminationAction(action));
+  }
   return availableActions(row).filter((action) => !isTerminationAction(action));
 }
 
@@ -2785,7 +2817,8 @@ onMounted(loadDetail);
             >
               {{ actionLabel(action, detail) }}
             </el-button>
-            <el-button plain icon="Money" @click="feeModalVisible = true">费用</el-button>
+            <el-button v-if="canManageOrderFees" plain icon="Money" @click="feeModalVisible = true">费用</el-button>
+            <el-button v-else plain icon="Money" disabled>费用</el-button>
             <el-dropdown trigger="click" @command="handleMoreCommand">
               <el-button plain>
                 更多操作
@@ -2823,6 +2856,21 @@ onMounted(loadDetail);
                 <el-descriptions-item label="还车门市">{{ detail.returnStoreName }}</el-descriptions-item>
                 <el-descriptions-item label="预定车组">{{ detail.vehicleGroupName }}</el-descriptions-item>
                 <el-descriptions-item label="车辆">{{ detail.plateNo || "待派车" }}</el-descriptions-item>
+                <el-descriptions-item label="租赁模式">
+                  {{ detail.mode === 'self_service_24h' ? '24小时自助' : '门店柜台' }}
+                </el-descriptions-item>
+                <el-descriptions-item label="操作锁">
+                  <el-tag v-if="detail.operationLockStatus" size="small" :type="detail.operationLockStatus === 'active' ? 'warning' : 'info'" effect="plain">
+                    {{ operationLockStatusLabel(detail.operationLockStatus) }}
+                  </el-tag>
+                  <span v-else class="text-gray-400">-</span>
+                  <template v-if="detail.operationLockOperator">
+                    <span class="text-xs text-gray-500 ml-2">{{ detail.operationLockOperator }}</span>
+                  </template>
+                  <template v-if="detail.operationLockExpiresAt">
+                    <span class="text-xs text-gray-400 ml-1">至 {{ detail.operationLockExpiresAt }}</span>
+                  </template>
+                </el-descriptions-item>
               </el-descriptions>
             </div>
           </section>
@@ -2953,6 +3001,9 @@ onMounted(loadDetail);
                 </div>
                 <div class="rounded border border-gray-200 bg-gray-50 px-3 py-2">
                   待退款<br><b>{{ formatMoney(detail.financialOverview.refundAmount) }}</b>
+                </div>
+                <div v-if="isMonthly" class="col-span-2 rounded border border-indigo-100 bg-indigo-50 px-3 py-2">
+                  企业月结金额<br><b>{{ formatMoney(detail.financialOverview.monthlyBillingAmount) }}</b>
                 </div>
               </div>
             </section>
