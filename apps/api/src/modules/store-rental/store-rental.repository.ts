@@ -3328,6 +3328,9 @@ export class StoreRentalRepository {
     if (query.planId) {
       conditions.push(Prisma.sql`planId = ${query.planId}`);
     }
+    if (query.eventType) {
+      conditions.push(Prisma.sql`eventType = ${query.eventType}`);
+    }
     const rows = await this.prisma.$queryRaw<
       Array<{
         id: string;
