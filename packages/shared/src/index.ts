@@ -1477,6 +1477,7 @@ export interface PricingQuoteResult {
     ruleEffectiveAt?: string;
     dynamicPricingScheduleId?: string;
     dynamicPricingVersion?: string;
+    dynamicPricingPlanVersion?: string;
     dynamicPricingSummary?: string;
     dynamicPricingEffectiveAt?: string;
     dynamicPricingAdjustedDailyRate?: number;

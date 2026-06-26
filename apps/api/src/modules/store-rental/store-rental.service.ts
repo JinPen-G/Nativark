@@ -1326,6 +1326,8 @@ export class StoreRentalService {
       maxQuantity: 2,
       trackInventory: true,
       totalStock: 18,
+      currentStock: 12,
+      maxPerOrder: 2,
       status: "enabled",
       version: "SVC-STORE-20260418-002",
       description: "门店按库存提供儿童安全座椅。"
@@ -1336,6 +1338,7 @@ export class StoreRentalService {
       code: "NIGHT_PICKUP",
       category: "service",
       memberLimit: "黄金会员及以上",
+      minMemberTierRank: 2,
       price: 120,
       unit: "/次",
       maxQuantity: 1,
@@ -1343,6 +1346,25 @@ export class StoreRentalService {
       status: "enabled",
       version: "SVC-STORE-20260418-003",
       description: "非柜台服务时间取车时加收一次性服务费。"
+    },
+    {
+      id: "svc_enterprise_vip_lounge",
+      name: "企业VIP贵宾室",
+      code: "VIP_LOUNGE",
+      category: "service",
+      memberLimit: "黑金会员及以上",
+      minMemberTierRank: 3,
+      corporateOnly: true,
+      price: 200,
+      unit: "/次",
+      maxQuantity: 1,
+      trackInventory: true,
+      totalStock: 5,
+      currentStock: 3,
+      maxPerOrder: 1,
+      status: "enabled",
+      version: "SVC-STORE-20260620-001",
+      description: "企业专属贵宾休息室服务，仅限企业黑金会员使用。"
     }
   ];
 
@@ -3232,11 +3254,24 @@ export class StoreRentalService {
         // MD-04: 跨表查找增值服务详情以获取库存/等级/企业字段
         const serviceDetail = this.valueAddedServices.find((svc) => svc.code === code);
 
-        // MD-04: 增值服务库存校验
-        if (serviceDetail?.trackInventory && (serviceDetail.totalStock ?? 0) <= 0) {
-          throw new BadRequestException(
-            `增值服务 ${fee.name}(${code}) 当前库存不足，暂不可选择。`
-          );
+        // MD-04: 增值服务库存校验 (currentStock 优先，totalStock 兜底)
+        if (serviceDetail?.trackInventory) {
+          const availableStock = serviceDetail.currentStock ?? serviceDetail.totalStock ?? 0;
+          if (availableStock <= 0) {
+            throw new BadRequestException(
+              `增值服务 ${fee.name}(${code}) 当前库存不足，暂不可选择。`
+            );
+          }
+        }
+
+        // MD-04: 单次订购数量上限校验
+        if (serviceDetail?.maxPerOrder && serviceDetail.maxPerOrder > 0) {
+          const existingCount = input.serviceCodes?.filter((c) => c === code).length ?? 0;
+          if (existingCount > serviceDetail.maxPerOrder) {
+            throw new BadRequestException(
+              `增值服务 ${fee.name}(${code}) 单次订购上限 ${serviceDetail.maxPerOrder} 件。`
+            );
+          }
         }
 
         // MD-04: 会员等级限制校验
@@ -3291,7 +3326,8 @@ export class StoreRentalService {
     const dynamicPricing = this.matchDynamicPricing(
       input.vehicleGroupCode,
       pickupAt,
-      line.baseDailyAmount
+      line.baseDailyAmount,
+      plan.version
     );
     const effectiveDailyRate = dynamicPricing.matched
       ? dynamicPricing.adjustedDailyRate
@@ -3514,6 +3550,7 @@ export class StoreRentalService {
           ? {
               dynamicPricingScheduleId: dynamicPricing.scheduleId,
               dynamicPricingVersion: dynamicPricing.dynamicPricingVersion,
+              dynamicPricingPlanVersion: plan.version,
               dynamicPricingSummary: dynamicPricing.scheduleSummary,
               dynamicPricingEffectiveAt: dynamicPricing.effectiveAt,
               dynamicPricingAdjustedDailyRate: dynamicPricing.adjustedDailyRate,
@@ -3596,6 +3633,7 @@ export class StoreRentalService {
         membershipDepositDiscountPercent: result.snapshots.membershipDepositDiscountPercent,
         dynamicPricingScheduleId: result.snapshots.dynamicPricingScheduleId,
         dynamicPricingVersion: result.snapshots.dynamicPricingVersion,
+        dynamicPricingPlanVersion: result.snapshots.dynamicPricingPlanVersion,
         dynamicPricingSummary: result.snapshots.dynamicPricingSummary,
         dynamicPricingEffectiveAt: result.snapshots.dynamicPricingEffectiveAt,
         dynamicPricingAdjustedDailyRate: result.snapshots.dynamicPricingAdjustedDailyRate,
@@ -16723,10 +16761,12 @@ export class StoreRentalService {
   private matchDynamicPricing(
     vehicleGroupCode: string,
     pickupAt: Date,
-    currentBaseDailyRate: number
+    currentBaseDailyRate: number,
+    planVersion?: string
   ): DynamicPricingMatchResult {
     const eligibleSchedules = this.priceSchedules.filter((schedule) => {
-      if (schedule.status !== "scheduled") {
+      // PR-03: 匹配已排期和已执行的调价方案
+      if (schedule.status !== "scheduled" && schedule.status !== "executed") {
         return false;
       }
       const effectiveDate = new Date(schedule.effectiveAt);
@@ -16758,7 +16798,10 @@ export class StoreRentalService {
       matched: true,
       scheduleId: activeSchedule.id,
       scheduleSummary: activeSchedule.summary,
-      dynamicPricingVersion: activeSchedule.id,
+      // PR-03: dynamicPricingVersion 组合方案版本与调度ID，便于追溯
+      dynamicPricingVersion: planVersion
+        ? `${planVersion}@${activeSchedule.id}`
+        : activeSchedule.id,
       originalDailyRate: groupChange.currentPrice,
       adjustedDailyRate: groupChange.newPrice,
       effectiveAt: activeSchedule.effectiveAt,
