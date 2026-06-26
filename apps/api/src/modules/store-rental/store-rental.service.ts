@@ -2259,7 +2259,31 @@ export class StoreRentalService {
     };
 
     if (this.useMysqlDataSource()) {
-      return this.storeRentalRepository.saveCorporate(normalizedInput);
+      const previousStatus = normalizedInput.id
+        ? await this.storeRentalRepository
+            .getCorporateDetail(normalizedInput.id)
+            .then((existing) => existing.status)
+            .catch(() => undefined)
+        : undefined;
+
+      const result = await this.storeRentalRepository.saveCorporate(normalizedInput);
+
+      if (previousStatus && previousStatus !== result.status) {
+        const statusLabel: Record<string, string> = {
+          active: "正常",
+          paused: "停用",
+          disabled: "禁用"
+        };
+        await this.appendOperationLog(
+          "corporate",
+          result.id,
+          "企业状态变更",
+          normalizedInput.notes?.includes("operator") ? normalizedInput.notes : "营运管理",
+          `企业 ${result.shortName} 状态从 ${statusLabel[previousStatus] ?? previousStatus} 变更为 ${statusLabel[result.status] ?? result.status}`
+        );
+      }
+
+      return result;
     }
 
     const duplicated = this.corporates.some(
@@ -3446,6 +3470,8 @@ export class StoreRentalService {
         membershipVersion: membershipBenefit.plan?.id,
         membershipOrderDiscountPercent: membershipBenefit.plan?.orderDiscountPercent,
         membershipDepositDiscountPercent: membershipBenefit.plan?.depositDiscountPercent,
+        membershipRentalDiscountAmount: membershipBenefit.rentalDiscountAmount,
+        membershipDepositDiscountAmount: membershipBenefit.depositDiscountAmount,
         effectiveAt: plan.effectiveAt,
         ruleEffectiveAt: this.ruleConfig.effectiveAt,
         ...(dynamicPricing.matched
