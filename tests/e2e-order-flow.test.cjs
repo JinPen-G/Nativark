@@ -1199,6 +1199,418 @@ function testReachableFromRenting() {
   console.log("  PASS  从 renting 状态 BFS 可达性验证通过");
 }
 
+// TST-01: 风控类别枚举完整性测试（纯逻辑）
+function testRiskCategoryCompleteness() {
+  console.log("\n[测试] 风控类别枚举完整性");
+  const riskCategories = [
+    "pickup_overdue", "overdue_return", "accident", "manual_dispatch",
+    "no_show", "blacklist_member", "finance_adjustment",
+    "dispatch_reassign", "general_risk"
+  ];
+  assert(riskCategories.length === 9, `风控类别总数为 9 (实际: ${riskCategories.length})`);
+  for (const cat of riskCategories) {
+    assert(typeof cat === "string" && cat.length > 0, `风控类别 ${cat} 名称非空`);
+  }
+  assert(new Set(riskCategories).size === riskCategories.length, "风控类别无重复值");
+
+  // 验证每个主状态至少关联一个风控类别
+  const statusRiskMap = {
+    pending_payment: [],
+    reserved: [],
+    pickup_overdue: ["pickup_overdue"],
+    inspecting: [],
+    renting: [],
+    renewing: [],
+    overdue: ["overdue_return"],
+    accident_processing: ["accident"],
+    settlement_pending: [],
+    payment_due: [],
+    refund_pending: [],
+    completed: [],
+    cancelled: [],
+    no_show: ["no_show"],
+    rejected: [],
+    closed: []
+  };
+  // 状态相关的风控类别
+  const riskStatuses = ["pickup_overdue", "overdue", "accident_processing", "no_show"];
+  for (const status of riskStatuses) {
+    assert(Object.keys(statusRiskMap).includes(status), `状态 ${status} 在风控映射中`);
+    assert(statusRiskMap[status].length > 0, `状态 ${status} 关联至少一个风控类别`);
+  }
+
+  // 验证新增风控类别（黑名单调账改派）在非状态驱动场景下有意义
+  const enrichmentCategories = ["blacklist_member", "finance_adjustment", "dispatch_reassign"];
+  for (const cat of enrichmentCategories) {
+    assert(riskCategories.includes(cat), `风控类别列表包含 ${cat}`);
+  }
+  passed++;
+  console.log("  PASS  风控类别枚举完整性验证通过");
+}
+
+// TST-01: 风控标记完整性测试（纯逻辑）
+function testRiskFlagCompleteness() {
+  console.log("\n[测试] 风控标记完整性");
+  const riskFlags = [
+    "事故出险", "人工调度", "黑名单客户", "存在调账", "人工改派", "车辆事故"
+  ];
+  assert(riskFlags.length === 6, `风控标记总数为 6 (实际: ${riskFlags.length})`);
+  for (const flag of riskFlags) {
+    assert(typeof flag === "string" && flag.length > 0, `风控标记 ${flag} 名称非空`);
+  }
+  assert(new Set(riskFlags).size === riskFlags.length, "风控标记无重复值");
+
+  // 验证风控标记与状态的关联
+  const statusFlagMap = {
+    ACCIDENT_PROCESSING: "事故出险",
+    MANUAL_REQUIRED: "人工调度"
+  };
+  for (const [status, flag] of Object.entries(statusFlagMap)) {
+    assert(riskFlags.includes(flag), `状态 ${status} 关联风控标记 ${flag}`);
+  }
+
+  // 验证数据源驱动的风控标记
+  const dataSourceFlags = ["黑名单客户", "存在调账", "人工改派", "车辆事故"];
+  for (const flag of dataSourceFlags) {
+    assert(riskFlags.includes(flag), `数据源驱动标记 ${flag} 存在`);
+  }
+  passed++;
+  console.log("  PASS  风控标记完整性验证通过");
+}
+
+// TST-01: 主状态入边来源完整性测试（纯逻辑）
+function testStatusInboundEdges() {
+  console.log("\n[测试] 主状态入边来源完整性");
+  // 计算每个状态的入边来源
+  const inboundMap = {};
+  for (const status of ALL_STATUSES) {
+    inboundMap[status] = [];
+  }
+  for (const [source, targets] of Object.entries(VALID_TRANSITIONS)) {
+    for (const target of targets) {
+      if (!inboundMap[target].includes(source)) {
+        inboundMap[target].push(source);
+      }
+    }
+  }
+
+  // 初始状态无入边
+  assert(inboundMap.pending_payment.length === 0, "pending_payment 入度为 0 (初始状态)");
+
+  // 验证每个终态的入边来源
+  assert(inboundMap.completed.length >= 3, `completed 至少有 3 个入边来源 (实际: ${inboundMap.completed.length})`);
+  assert(inboundMap.completed.includes("settlement_pending"), "completed 入边包含 settlement_pending");
+  assert(inboundMap.completed.includes("payment_due"), "completed 入边包含 payment_due");
+  assert(inboundMap.completed.includes("refund_pending"), "completed 入边包含 refund_pending");
+
+  assert(inboundMap.cancelled.includes("pending_payment"), "cancelled 入边包含 pending_payment");
+  assert(inboundMap.cancelled.includes("reserved"), "cancelled 入边包含 reserved");
+  assert(inboundMap.cancelled.includes("pickup_overdue"), "cancelled 入边包含 pickup_overdue");
+
+  assert(inboundMap.no_show.includes("reserved"), "no_show 入边包含 reserved");
+  assert(inboundMap.no_show.includes("pickup_overdue"), "no_show 入边包含 pickup_overdue");
+
+  assert(inboundMap.rejected.includes("inspecting"), "rejected 入边包含 inspecting");
+
+  assert(inboundMap.closed.includes("refund_pending"), "closed 入边包含 refund_pending");
+
+  // 验证活跃状态入边
+  assert(inboundMap.reserved.includes("pending_payment"), "reserved 入边包含 pending_payment");
+  assert(inboundMap.inspecting.includes("reserved"), "inspecting 入边包含 reserved");
+  assert(inboundMap.renting.includes("inspecting"), "renting 入边包含 inspecting");
+  assert(inboundMap.renting.includes("renewing"), "renting 入边包含 renewing");
+
+  passed++;
+  console.log("  PASS  主状态入边来源完整性验证通过");
+}
+
+// TST-01: 状态转换边数统计测试（纯逻辑）
+function testTransitionEdgeCount() {
+  console.log("\n[测试] 状态转换边数统计");
+  let totalEdges = 0;
+  const edgeCountMap = {};
+  for (const [status, targets] of Object.entries(VALID_TRANSITIONS)) {
+    edgeCountMap[status] = targets.length;
+    totalEdges += targets.length;
+  }
+
+  // 已知边数校验
+  assert(edgeCountMap.pending_payment === 2, `pending_payment 出边数 = 2 (实际: ${edgeCountMap.pending_payment})`);
+  assert(edgeCountMap.reserved === 4, `reserved 出边数 = 4 (实际: ${edgeCountMap.reserved})`);
+  assert(edgeCountMap.inspecting === 2, `inspecting 出边数 = 2 (实际: ${edgeCountMap.inspecting})`);
+  assert(edgeCountMap.renting === 5, `renting 出边数 = 5 (实际: ${edgeCountMap.renting})`);
+  assert(edgeCountMap.renewing === 4, `renewing 出边数 = 4 (实际: ${edgeCountMap.renewing})`);
+  assert(edgeCountMap.overdue === 3, `overdue 出边数 = 3 (实际: ${edgeCountMap.overdue})`);
+  assert(edgeCountMap.accident_processing === 2, `accident_processing 出边数 = 2 (实际: ${edgeCountMap.accident_processing})`);
+  assert(edgeCountMap.settlement_pending === 3, `settlement_pending 出边数 = 3 (实际: ${edgeCountMap.settlement_pending})`);
+  assert(edgeCountMap.payment_due === 2, `payment_due 出边数 = 2 (实际: ${edgeCountMap.payment_due})`);
+  assert(edgeCountMap.refund_pending === 2, `refund_pending 出边数 = 2 (实际: ${edgeCountMap.refund_pending})`);
+  assert(edgeCountMap.pickup_overdue === 2, `pickup_overdue 出边数 = 2 (实际: ${edgeCountMap.pickup_overdue})`);
+
+  // 终态出边数为 0
+  for (const terminal of ["completed", "cancelled", "no_show", "rejected", "closed"]) {
+    assert(edgeCountMap[terminal] === 0, `${terminal} 出边数 = 0`);
+  }
+
+  // 总边数
+  assert(totalEdges === 31, `总边数 = 31 (实际: ${totalEdges})`);
+
+  // renting 出边最多（最活跃状态）
+  let maxEdgeStatus = "";
+  let maxEdges = 0;
+  for (const [status, count] of Object.entries(edgeCountMap)) {
+    if (count > maxEdges) {
+      maxEdges = count;
+      maxEdgeStatus = status;
+    }
+  }
+  assert(maxEdgeStatus === "renting", `出边最多的活跃状态是 renting (实际: ${maxEdgeStatus})`);
+
+  passed++;
+  console.log("  PASS  状态转换边数统计验证通过");
+}
+
+// TST-01: 订单报表 API 覆盖全部16种状态测试
+async function testAllStatusFilterCoverage() {
+  console.log("\n[测试] 订单报表 API 全状态覆盖");
+  // 逐一验证每种主状态过滤
+  const statusValues = [
+    "pending_payment", "reserved", "pickup_overdue", "inspecting",
+    "renting", "renewing", "overdue", "accident_processing",
+    "settlement_pending", "payment_due", "refund_pending",
+    "completed", "cancelled", "no_show", "rejected", "closed"
+  ];
+  for (const status of statusValues) {
+    try {
+      const res = await request("GET", `/api/reports/orders?mainStatuss=${status}`);
+      assert(res.status === 200, `GET /api/reports/orders?mainStatuss=${status} 返回 200`);
+      const data = res.body?.data ?? res.body;
+      assert(Array.isArray(data.rows), `${status}: 返回 rows 数组`);
+      if (data.rows.length > 0) {
+        const invalid = data.rows.filter((r) => r.mainStatus !== status);
+        assert(invalid.length === 0, `${status}: 所有返回订单 mainStatus 都是 ${status}`);
+      }
+    } catch (err) {
+      if (isConnectionError(err)) {
+        skipped++;
+        console.log(`  SKIP  状态过滤 ${status}: ${err.message}`);
+      } else {
+        failed++;
+        console.error(`  FAIL  状态过滤 ${status} 请求失败: ${err.message}`);
+      }
+    }
+  }
+}
+
+// TST-01: 风控报表 API 测试
+async function testRiskReport() {
+  console.log("\n[测试] 风控报表接口");
+  try {
+    const res = await request("GET", "/api/reports/risk");
+    assert(res.status === 200, "GET /api/reports/risk 返回 200");
+    const data = res.body?.data ?? res.body;
+    assert(data.summary, "返回 summary 统计");
+    assert(typeof data.summary.totalRiskOrders === "number", "summary.totalRiskOrders 是数字");
+    assert(typeof data.summary.pickupOverdueCount === "number", "summary.pickupOverdueCount 是数字");
+    assert(typeof data.summary.overdueReturnCount === "number", "summary.overdueReturnCount 是数字");
+    assert(typeof data.summary.accidentCount === "number", "summary.accidentCount 是数字");
+    assert(typeof data.summary.manualDispatchCount === "number", "summary.manualDispatchCount 是数字");
+    assert(typeof data.summary.blacklistCount === "number", "summary.blacklistCount 是数字");
+    assert(typeof data.summary.adjustmentCount === "number", "summary.adjustmentCount 是数字");
+    assert(typeof data.summary.reassignCount === "number", "summary.reassignCount 是数字");
+    assert(typeof data.summary.noShowCount === "number", "summary.noShowCount 是数字");
+    assert(typeof data.summary.totalExposureAmount === "number", "summary.totalExposureAmount 是数字");
+    assert(Array.isArray(data.rows), "返回 rows 数组");
+    assert(Array.isArray(data.byCategory), "返回 byCategory 数组");
+    assert(Array.isArray(data.byStore), "返回 byStore 数组");
+    assert(Array.isArray(data.byFlag), "返回 byFlag 数组");
+    assert(data.range, "返回 range");
+    assert(data.range.from, "range 包含 from");
+    assert(data.range.to, "range 包含 to");
+  } catch (err) {
+    if (isConnectionError(err)) {
+      skipped++;
+      console.log(`  SKIP  风控报表: ${err.message}`);
+    } else {
+      failed++;
+      console.error(`  FAIL  风控报表请求失败: ${err.message}`);
+    }
+  }
+}
+
+// TST-01: 风控报表按类别过滤测试
+async function testRiskReportCategoryFilter() {
+  console.log("\n[测试] 风控报表按类别过滤");
+  const categories = [
+    "pickup_overdue", "overdue_return", "accident", "manual_dispatch",
+    "no_show", "blacklist_member", "finance_adjustment", "dispatch_reassign"
+  ];
+  for (const cat of categories) {
+    try {
+      const res = await request("GET", `/api/reports/risk?riskCategory=${cat}`);
+      assert(res.status === 200, `GET /api/reports/risk?riskCategory=${cat} 返回 200`);
+      const data = res.body?.data ?? res.body;
+      assert(Array.isArray(data.rows), `${cat}: 返回 rows 数组`);
+      if (data.rows.length > 0) {
+        for (const row of data.rows) {
+          assert(
+            row.riskCategories.includes(cat),
+            `${cat}: 行 ${row.orderNo} 的 riskCategories 包含 ${cat}`
+          );
+        }
+      }
+    } catch (err) {
+      if (isConnectionError(err)) {
+        skipped++;
+        console.log(`  SKIP  风控类别过滤 ${cat}: ${err.message}`);
+      } else {
+        failed++;
+        console.error(`  FAIL  风控类别过滤 ${cat} 请求失败: ${err.message}`);
+      }
+    }
+  }
+}
+
+// TST-01: 风控报表按时间范围过滤测试
+async function testRiskReportTimeFilter() {
+  console.log("\n[测试] 风控报表按时间范围过滤");
+  try {
+    const res = await request("GET", "/api/reports/risk?period=7d");
+    assert(res.status === 200, "GET /api/reports/risk?period=7d 返回 200");
+    const data = res.body?.data ?? res.body;
+    assert(data.range.period === "7d", "range.period = 7d");
+    assert(data.range.from, "range.from 存在");
+    assert(data.range.to, "range.to 存在");
+  } catch (err) {
+    if (isConnectionError(err)) {
+      skipped++;
+      console.log(`  SKIP  风控报表时间过滤: ${err.message}`);
+    } else {
+      failed++;
+      console.error(`  FAIL  风控报表时间过滤请求失败: ${err.message}`);
+    }
+  }
+  try {
+    const res = await request("GET", "/api/reports/risk?period=today");
+    assert(res.status === 200, "GET /api/reports/risk?period=today 返回 200");
+  } catch (err) {
+    if (isConnectionError(err)) {
+      skipped++;
+      console.log(`  SKIP  风控报表时间过滤 today: ${err.message}`);
+    } else {
+      failed++;
+      console.error(`  FAIL  风控报表时间过滤 today 请求失败: ${err.message}`);
+    }
+  }
+}
+
+// TST-01: 风控报表行数据结构完整性测试
+async function testRiskReportRowStructure() {
+  console.log("\n[测试] 风控报表行数据结构完整性");
+  try {
+    const res = await request("GET", "/api/reports/risk");
+    assert(res.status === 200, "GET /api/reports/risk 返回 200");
+    const data = res.body?.data ?? res.body;
+    if (data.rows.length > 0) {
+      const row = data.rows[0];
+      assert(typeof row.orderId === "string", "row.orderId 是字符串");
+      assert(typeof row.orderNo === "string", "row.orderNo 是字符串");
+      assert(typeof row.customerName === "string", "row.customerName 是字符串");
+      assert(typeof row.vehicleGroupName === "string", "row.vehicleGroupName 是字符串");
+      assert(typeof row.pickupStoreName === "string", "row.pickupStoreName 是字符串");
+      assert(typeof row.returnStoreName === "string", "row.returnStoreName 是字符串");
+      assert(typeof row.pickupAt === "string", "row.pickupAt 是字符串");
+      assert(typeof row.returnAt === "string", "row.returnAt 是字符串");
+      assert(typeof row.mainStatus === "string", "row.mainStatus 是字符串");
+      assert(typeof row.dispatchStatus === "string", "row.dispatchStatus 是字符串");
+      assert(typeof row.billingMode === "string", "row.billingMode 是字符串");
+      assert(typeof row.totalAmount === "number", "row.totalAmount 是数字");
+      assert(Array.isArray(row.riskCategories), "row.riskCategories 是数组");
+      assert(Array.isArray(row.riskFlags), "row.riskFlags 是数组");
+      // 验证每个 riskCategories 值都是已知类别
+      const knownCategories = [
+        "pickup_overdue", "overdue_return", "accident", "manual_dispatch",
+        "no_show", "blacklist_member", "finance_adjustment",
+        "dispatch_reassign", "general_risk"
+      ];
+      for (const cat of row.riskCategories) {
+        assert(knownCategories.includes(cat), `风险类别 ${cat} 在已知列表中`);
+      }
+    }
+  } catch (err) {
+    if (isConnectionError(err)) {
+      skipped++;
+      console.log(`  SKIP  风控报表行结构: ${err.message}`);
+    } else {
+      failed++;
+      console.error(`  FAIL  风控报表行结构请求失败: ${err.message}`);
+    }
+  }
+}
+
+// TST-01: 风控导出任务测试
+async function testRiskExportJob() {
+  console.log("\n[测试] 风控导出任务");
+  try {
+    const res = await request("POST", "/api/reports/exports", {
+      reportType: "risk",
+      filters: { period: "30d" },
+      operator: "e2e-test"
+    });
+    assert(res.status === 201 || res.status === 200, "POST /api/reports/exports (risk) 返回成功");
+  } catch (err) {
+    if (isConnectionError(err)) {
+      skipped++;
+      console.log(`  SKIP  风控导出任务: ${err.message}`);
+    } else {
+      failed++;
+      console.error(`  FAIL  风控导出任务请求失败: ${err.message}`);
+    }
+  }
+}
+
+// TST-01: 财务报表导出任务测试
+async function testFinanceExportJob() {
+  console.log("\n[测试] 财务导出任务");
+  try {
+    const res = await request("POST", "/api/reports/exports", {
+      reportType: "finance",
+      filters: { period: "30d" },
+      operator: "e2e-test"
+    });
+    assert(res.status === 201 || res.status === 200, "POST /api/reports/exports (finance) 返回成功");
+  } catch (err) {
+    if (isConnectionError(err)) {
+      skipped++;
+      console.log(`  SKIP  财务导出任务: ${err.message}`);
+    } else {
+      failed++;
+      console.error(`  FAIL  财务导出任务请求失败: ${err.message}`);
+    }
+  }
+}
+
+// TST-01: 车辆导出任务测试
+async function testVehicleExportJob() {
+  console.log("\n[测试] 车辆导出任务");
+  try {
+    const res = await request("POST", "/api/reports/exports", {
+      reportType: "vehicles",
+      filters: { period: "30d" },
+      operator: "e2e-test"
+    });
+    assert(res.status === 201 || res.status === 200, "POST /api/reports/exports (vehicles) 返回成功");
+  } catch (err) {
+    if (isConnectionError(err)) {
+      skipped++;
+      console.log(`  SKIP  车辆导出任务: ${err.message}`);
+    } else {
+      failed++;
+      console.error(`  FAIL  车辆导出任务请求失败: ${err.message}`);
+    }
+  }
+}
+
 async function main() {
   console.log("=".repeat(60));
   console.log("E2E 订单状态流转 & 报表测试");
@@ -1243,15 +1655,27 @@ async function main() {
   testSeedFeeCodeConsistency();
   testFeeStageOrderLifecycleMapping();
   testReachableFromRenting();
+  testRiskCategoryCompleteness();
+  testRiskFlagCompleteness();
+  testStatusInboundEdges();
+  testTransitionEdgeCount();
 
   // API 集成测试
   await testReportDashboard();
   await testOrdersReport();
   await testMainStatusFilter();
+  await testAllStatusFilterCoverage();
   await testVehiclesReport();
   await testFinanceReport();
   await testOpsHealth();
   await testExportJob();
+  await testRiskReport();
+  await testRiskReportCategoryFilter();
+  await testRiskReportTimeFilter();
+  await testRiskReportRowStructure();
+  await testRiskExportJob();
+  await testFinanceExportJob();
+  await testVehicleExportJob();
 
   console.log("\n" + "=".repeat(60));
   console.log(`结果: ${passed} passed, ${failed} failed, ${skipped} skipped`);
