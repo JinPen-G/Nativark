@@ -2498,6 +2498,10 @@ export interface StoreValueAddedServiceSummary {
   maxQuantity: number;
   trackInventory: boolean;
   totalStock?: number;
+  currentStock?: number;
+  minMemberTierRank?: number;
+  maxPerOrder?: number;
+  corporateOnly?: boolean;
   status: "enabled" | "disabled";
   version: string;
   description: string;
