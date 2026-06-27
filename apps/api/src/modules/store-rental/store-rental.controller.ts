@@ -504,12 +504,12 @@ export class StoreRentalController {
       tag,
       page: page ? Number(page) : undefined,
       pageSize: pageSize ? Number(pageSize) : undefined
-    }, req.user);
+    });
   }
 
   @Get("members/:id")
-  memberDetail(@Req() req: any, @Param("id") id: string) {
-    return this.storeRentalService.getMemberDetail(id, req.user);
+  memberDetail(@Param("id") id: string) {
+    return this.storeRentalService.getMemberDetail(id);
   }
 
   @Post("members")
@@ -562,11 +562,11 @@ export class StoreRentalController {
   }
 
   @Get("corporates")
-  corporates(@Req() req: any, @Query() query: CorporateListQuery) {
+  corporates(@Query() query: CorporateListQuery) {
     const hasQuery = Object.values(query).some((value) => value !== undefined && value !== "");
     return hasQuery
-      ? this.storeRentalService.listCorporatePage(query, req.user)
-      : this.storeRentalService.listCorporates(req.user);
+      ? this.storeRentalService.listCorporatePage(query)
+      : this.storeRentalService.listCorporates();
   }
 
   @Get("corporates/:id/monthly-bills")
@@ -605,13 +605,13 @@ export class StoreRentalController {
   }
 
   @Get("finance/overview")
-  financeOverview(@Req() req: any) {
-    return this.storeRentalService.getFinanceOverview(req.user);
+  financeOverview() {
+    return this.storeRentalService.getFinanceOverview();
   }
 
   @Get("finance/transactions")
-  financeTransactions(@Req() req: any) {
-    return this.storeRentalService.listFinanceTransactions(req.user);
+  financeTransactions() {
+    return this.storeRentalService.listFinanceTransactions();
   }
 
   @Get("finance/documents")
@@ -722,8 +722,8 @@ export class StoreRentalController {
   }
 
   @Get("orders")
-  orders(@Req() req: any, @Query("keyword") keyword?: string, @Query("status") status?: string) {
-    return this.storeRentalService.listOrders({ keyword, status }, req.user);
+  orders(@Query("keyword") keyword?: string, @Query("status") status?: string) {
+    return this.storeRentalService.listOrders({ keyword, status });
   }
 
   @Get("contracts")
@@ -764,8 +764,8 @@ export class StoreRentalController {
   }
 
   @Get("orders/:id")
-  orderDetail(@Req() req: any, @Param("id") id: string) {
-    return this.storeRentalService.getOrderDetail(id, req.user);
+  orderDetail(@Param("id") id: string) {
+    return this.storeRentalService.getOrderDetail(id);
   }
 
   @Get("orders/:id/operation-records")

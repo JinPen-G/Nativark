@@ -447,7 +447,10 @@ export type PlatformFilterPresetScope =
   | "store-rental.orders"
   | "store-rental.vehicles"
   | "store-rental.members"
-  | "store-rental.corporates";
+  | "store-rental.corporates"
+  | "store-rental.stations"
+  | "store-rental.vehicle-transfer"
+  | "store-rental.contracts";
 
 export interface PlatformFilterPreset {
   id: string;
@@ -543,6 +546,7 @@ export interface StoreRentalOrderSummary {
   returnStationName?: string;
   pickupAt: string;
   returnAt: string;
+  createdAt?: string;
   totalAmount: number;
   billingMode: BillingMode;
   mainStatus: OrderMainStatus;
@@ -551,6 +555,7 @@ export interface StoreRentalOrderSummary {
   operationLockStatus?: OperationLockStatus;
   operationLockOperator?: string;
   operationLockExpiresAt?: string;
+  dynamicPricingVersion?: string;
   riskFlags: string[];
 }
 
@@ -650,6 +655,7 @@ export interface StoreRentalFeeLedgerItem {
   source: StoreRentalFeeSource;
   direction: StoreRentalFeeDirection;
   status: StoreRentalFeeStatus;
+  invoicedStatus?: string;
   amount: number;
   settledAmount: number;
   pendingAmount: number;
@@ -877,7 +883,12 @@ export interface StoreRentalEventSnapshotRecord {
     | "manual_adjust"
     | "extension"
     | "redirection"
-    | "return_location_change";
+    | "return_location_change"
+    | "accident_registration"
+    | "no_show"
+    | "order_rejection"
+    | "order_close"
+    | "order_cancellation";
   title: string;
   triggerReason?: string;
   settlementTarget?: string;
@@ -1018,6 +1029,7 @@ export interface StoreRentalSettlementSummary {
   rentalAmount: number;
   serviceFeeAmount: number;
   overtimeFeeAmount: number;
+  extraMileageFeeAmount: number;
   damageFeeAmount: number;
   cleaningFeeAmount: number;
   discountAmount: number;
@@ -1054,9 +1066,11 @@ export interface StoreRentalOrderDetail extends StoreRentalOrderSummary {
     marketingPlanName?: string;
     termsVersion: string;
     events: StoreRentalEventSnapshotRecord[];
+    dynamicPricingVersion?: string;
   };
   operationLockExpiredHint?: string;
   preAuthExpiredHint?: string;
+  availableActions?: string[];
 }
 
 export interface StoreRentalOrderActionResult {
@@ -1212,6 +1226,7 @@ export interface ServiceFeeRule {
   amount: number;
   chargeMode: "fixed" | "per_day";
   enabled: boolean;
+  customerScope?: "personal" | "enterprise" | "all";
 }
 
 export interface PricingPlanDetail extends PricingPlanSummary {
@@ -1460,7 +1475,10 @@ export interface PricingQuoteResult {
     membershipDepositDiscountPercent?: number;
     effectiveAt?: string;
     ruleEffectiveAt?: string;
+    membershipVersion?: string;
     dynamicPricingScheduleId?: string;
+    dynamicPricingVersion?: string;
+    dynamicPricingPlanVersion?: string;
     dynamicPricingSummary?: string;
     dynamicPricingEffectiveAt?: string;
     dynamicPricingAdjustedDailyRate?: number;
@@ -1739,7 +1757,10 @@ export type StoreRentalDispatchEventType =
   | "manual_required"
   | "vehicle_unavailable"
   | "ai_analysis"
-  | "alert_closed";
+  | "alert_closed"
+  | "task_claimed"
+  | "task_processed"
+  | "task_closed";
 
 export interface StoreRentalDispatchEvent {
   id: string;
@@ -1892,6 +1913,7 @@ export interface StoreRentalDispatchEventQuery {
   orderId?: string;
   planId?: string;
   limit?: number;
+  eventType?: string;
 }
 
 export interface StoreStationSummary {
@@ -2496,6 +2518,10 @@ export interface StoreValueAddedServiceSummary {
   maxQuantity: number;
   trackInventory: boolean;
   totalStock?: number;
+  currentStock?: number;
+  minMemberTierRank?: number;
+  corporateOnly?: boolean;
+  maxPerOrder?: number;
   status: "enabled" | "disabled";
   version: string;
   description: string;

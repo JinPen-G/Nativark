@@ -14092,6 +14092,7 @@ export class StoreRentalService {
         rentalAmount: 0,
         serviceFeeAmount: 0,
         overtimeFeeAmount: 0,
+        extraMileageFeeAmount: 0,
         damageFeeAmount: 0,
         cleaningFeeAmount: 0,
         discountAmount: 0,
@@ -14795,6 +14796,7 @@ export class StoreRentalService {
       rentalAmount,
       serviceFeeAmount,
       overtimeFeeAmount: 0,
+      extraMileageFeeAmount: 0,
       damageFeeAmount: 0,
       cleaningFeeAmount: 0,
       discountAmount: 0,
@@ -16178,5 +16180,17 @@ export class StoreRentalService {
           p.code.toLowerCase().includes(normalized))
     );
     return matched?.tierRank ?? 0;
+  }
+
+  // PF-21: 数据字典
+  getDataDictionary() {
+    return {
+      orderMainStatus: Object.values(OrderMainStatus),
+      dispatchStatus: Object.values(DispatchStatus),
+      paymentStatus: Object.values(PaymentStatus),
+      billingMode: Object.values(BillingMode),
+      operationLockStatus: Object.values(OperationLockStatus),
+      configStatus: Object.values(ConfigStatus)
+    };
   }
 }
