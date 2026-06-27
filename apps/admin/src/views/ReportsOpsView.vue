@@ -372,6 +372,7 @@ function emptyOrdersReport(): StoreRentalOrdersReport {
     byRoute: [],
     byStatus: [],
     byBillingMode: [],
+    byStoreVehicleGroup: [],
     rows: []
   };
 }

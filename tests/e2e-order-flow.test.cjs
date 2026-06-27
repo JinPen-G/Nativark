@@ -1611,6 +1611,234 @@ async function testVehicleExportJob() {
   }
 }
 
+// TST-01: 费用阶段转换路径深度测试（纯逻辑）
+function testFeeStageTransitionPaths() {
+  console.log("\n[测试] 费用阶段转换路径深度验证");
+
+  // 验证每个主状态在不同阶段下的费用方向可行性
+  const stageDirectionByStatus = {
+    pending_payment: { pickup: ["charge", "refund", "waiver"] },
+    reserved: { pickup: ["charge", "refund", "waiver"] },
+    inspecting: { pickup: ["charge", "refund", "waiver"] },
+    renting: {
+      pickup: ["charge", "refund", "waiver"],
+      rental: ["charge", "refund", "waiver"]
+    },
+    renewing: {
+      pickup: ["charge", "refund", "waiver"],
+      rental: ["charge", "refund", "waiver"]
+    },
+    overdue: {
+      pickup: ["charge", "refund", "waiver"],
+      rental: ["charge", "refund", "waiver"],
+      post_charge: ["charge", "waiver"]
+    },
+    settlement_pending: {
+      pickup: ["charge", "refund", "waiver"],
+      rental: ["charge", "refund", "waiver"],
+      return_settlement: ["charge", "refund", "waiver"]
+    },
+    completed: {
+      pickup: ["charge", "refund", "waiver"],
+      rental: ["charge", "refund", "waiver"],
+      return_settlement: ["charge", "refund", "waiver"]
+    },
+    cancelled: {
+      pickup: ["charge", "refund", "waiver"],
+      cancellation: ["charge", "waiver"]
+    },
+    closed: {
+      pickup: ["charge", "refund", "waiver"],
+      rental: ["charge", "refund", "waiver"],
+      return_settlement: ["charge", "refund", "waiver"],
+      cancellation: ["charge", "waiver"],
+      post_charge: ["charge", "waiver"]
+    }
+  };
+
+  for (const [status, stages] of Object.entries(stageDirectionByStatus)) {
+    assert(ALL_STATUSES.includes(status), `状态 ${status} 存在于主状态列表`);
+    for (const [stage, dirs] of Object.entries(stages)) {
+      assert(["pickup", "rental", "return_settlement", "cancellation", "post_charge"].includes(stage), `阶段 ${stage} 合法`);
+      for (const dir of dirs) {
+        assert(["charge", "refund", "waiver"].includes(dir), `方向 ${dir} 合法`);
+      }
+      // cancellation 和 post_charge 不应支持 refund
+      if (stage === "cancellation" || stage === "post_charge") {
+        assert(!dirs.includes("refund"), `状态 ${status} 阶段 ${stage} 不支持 refund`);
+      }
+    }
+  }
+
+  // 验证 closed 状态覆盖全部 5 个阶段
+  assert(Object.keys(stageDirectionByStatus.closed).length === 5, "closed 覆盖全部 5 个费用阶段");
+
+  // 验证已取消相关状态包含 cancellation 阶段
+  const cancelRelatedStatuses = ["cancelled"];
+  for (const status of cancelRelatedStatuses) {
+    assert(
+      Object.keys(stageDirectionByStatus[status]).includes("cancellation"),
+      `状态 ${status} 包含 cancellation 阶段`
+    );
+  }
+
+  // 验证租赁中/续租中状态有 rental 阶段但无 return_settlement
+  for (const status of ["renting", "renewing"]) {
+    assert(
+      Object.keys(stageDirectionByStatus[status]).includes("rental"),
+      `状态 ${status} 包含 rental 阶段`
+    );
+    assert(
+      !Object.keys(stageDirectionByStatus[status]).includes("return_settlement"),
+      `状态 ${status} 不包含 return_settlement 阶段`
+    );
+  }
+
+  // 验证 post_charge 只出现在逾期/事故/关闭等后期状态
+  const postChargeStatuses = Object.entries(stageDirectionByStatus)
+    .filter(([_, stages]) => Object.keys(stages).includes("post_charge"))
+    .map(([s]) => s);
+  assert(postChargeStatuses.length >= 2, `post_charge 出现在 >= 2 个状态 (实际: ${postChargeStatuses.length})`);
+  assert(postChargeStatuses.includes("overdue"), "overdue 包含 post_charge");
+  assert(postChargeStatuses.includes("closed"), "closed 包含 post_charge");
+
+  // 验证 charge 方向适用于所有阶段
+  const allStages = ["pickup", "rental", "return_settlement", "cancellation", "post_charge"];
+  for (const [status, stages] of Object.entries(stageDirectionByStatus)) {
+    for (const stage of Object.keys(stages)) {
+      if (allStages.includes(stage)) {
+        assert(
+          stages[stage].includes("charge"),
+          `状态 ${status} 阶段 ${stage} 支持 charge`
+        );
+      }
+    }
+  }
+
+  // 验证阶段出现频率：pickup 在所有状态中出现
+  const pickupStatuses = Object.entries(stageDirectionByStatus)
+    .filter(([_, stages]) => Object.keys(stages).includes("pickup"))
+    .map(([s]) => s);
+  assert(pickupStatuses.length === Object.keys(stageDirectionByStatus).length, "pickup 出现在所有映射状态中");
+
+  passed++;
+  console.log("  PASS  费用阶段转换路径深度验证通过");
+}
+
+// TST-01: 从所有非终态状态 BFS 可达性测试（纯逻辑）
+function testReachableFromAllStates() {
+  console.log("\n[测试] 从所有非终态状态 BFS 可达性");
+
+  const activeStates = ALL_STATUSES.filter((s) => VALID_TRANSITIONS[s].length > 0);
+  const terminalStates = ALL_STATUSES.filter((s) => VALID_TRANSITIONS[s].length === 0);
+
+  assert(activeStates.length === 11, `非终态状态数为 11 (实际: ${activeStates.length})`);
+  assert(terminalStates.length === 5, `终态数为 5 (实际: ${terminalStates.length})`);
+
+  // 从每个非终态状态执行 BFS，验证可达性
+  const reachabilityMatrix = new Map();
+  for (const startState of activeStates) {
+    const visited = new Set();
+    const queue = [startState];
+    const depthMap = new Map();
+    depthMap.set(startState, 0);
+
+    while (queue.length > 0) {
+      const current = queue.shift();
+      if (visited.has(current)) continue;
+      visited.add(current);
+      for (const target of VALID_TRANSITIONS[current] || []) {
+        if (!visited.has(target)) {
+          queue.push(target);
+          if (!depthMap.has(target)) {
+            depthMap.set(target, (depthMap.get(current) || 0) + 1);
+          }
+        }
+      }
+    }
+
+    reachabilityMatrix.set(startState, { visited, depthMap });
+
+    // 每个非终态至少可达自身
+    assert(visited.has(startState), `${startState} 可达自身`);
+  }
+
+  // 验证从 renting 可达 completed（最长路径之一）
+  const rentingReach = reachabilityMatrix.get("renting");
+  assert(rentingReach.visited.has("completed"), "renting 可达 completed");
+  assert(rentingReach.visited.has("closed"), "renting 可达 closed");
+
+  // 验证从 pending_payment 可达所有状态
+  const initialReach = reachabilityMatrix.get("pending_payment");
+  assert(initialReach.visited.size === ALL_STATUSES.length, `pending_payment 可达全部 ${ALL_STATUSES.length} 个状态`);
+
+  // 验证终态不可达任何其他状态（出度为 0）
+  for (const terminal of terminalStates) {
+    assert(VALID_TRANSITIONS[terminal].length === 0, `终态 ${terminal} 出度为 0`);
+  }
+
+  // 验证从 settlement_pending 可达所有终态
+  const spReach = reachabilityMatrix.get("settlement_pending");
+  for (const terminal of terminalStates) {
+    if (terminal === "cancelled" || terminal === "no_show" || terminal === "rejected") {
+      // 这些终态从 settlement_pending 不可达
+      assert(!spReach.visited.has(terminal), `settlement_pending 不可达终态 ${terminal}`);
+    } else {
+      assert(spReach.visited.has(terminal), `settlement_pending 可达终态 ${terminal}`);
+    }
+  }
+
+  // 验证最大深度差异：从不同起点到 completed 的最短路径
+  const completedDepths = new Map();
+  for (const [startState, reach] of reachabilityMatrix.entries()) {
+    if (reach.depthMap.has("completed")) {
+      completedDepths.set(startState, reach.depthMap.get("completed"));
+    }
+  }
+  // pending_payment 到 completed 应有最大深度
+  const initialDepthToCompleted = completedDepths.get("pending_payment");
+  assert(initialDepthToCompleted >= 3, `pending_payment 到 completed 深度 >= 3 (实际: ${initialDepthToCompleted})`);
+
+  // 验证双向边 renting <-> renewing 在 BFS 中都被遍历
+  const rentingBFS = reachabilityMatrix.get("renting");
+  const renewingBFS = reachabilityMatrix.get("renewing");
+  assert(rentingBFS.visited.has("renewing"), "renting BFS 包含 renewing");
+  assert(renewingBFS.visited.has("renting"), "renewing BFS 包含 renting");
+
+  // 验证每个活跃状态可达至少一个终态
+  for (const active of activeStates) {
+    const reach = reachabilityMatrix.get(active);
+    const reachedTerminals = terminalStates.filter((t) => reach.visited.has(t));
+    assert(reachedTerminals.length >= 1, `${active} 可达至少 1 个终态 (实际: ${reachedTerminals.length})`);
+  }
+
+  // 验证所有活跃状态的 BFS 深度范围合理
+  for (const active of activeStates) {
+    const reach = reachabilityMatrix.get(active);
+    const maxDepth = Math.max(...reach.depthMap.values());
+    assert(maxDepth <= ALL_STATUSES.length, `${active} 最大深度 ${maxDepth} <= ${ALL_STATUSES.length}`);
+    assert(reach.visited.size >= 1, `${active} 至少可达 1 个状态`);
+  }
+
+  // 验证从 renting 出发 BFS 遍历的边数
+  let rentingEdges = 0;
+  for (const state of rentingBFS.visited) {
+    for (const target of VALID_TRANSITIONS[state] || []) {
+      if (rentingBFS.visited.has(target)) {
+        rentingEdges++;
+      }
+    }
+  }
+  assert(rentingEdges >= 5, `renting BFS 遍历内部边数 >= 5 (实际: ${rentingEdges})`);
+
+  // 验证环路存在性：renting -> renewing -> renting 形成环
+  assert(VALID_TRANSITIONS.renting.includes("renewing"), "renting -> renewing 存在");
+  assert(VALID_TRANSITIONS.renewing.includes("renting"), "renewing -> renting 存在（环路确认）");
+
+  passed++;
+  console.log("  PASS  从所有非终态状态 BFS 可达性验证通过");
+}
+
 async function main() {
   console.log("=".repeat(60));
   console.log("E2E 订单状态流转 & 报表测试");
@@ -1659,6 +1887,8 @@ async function main() {
   testRiskFlagCompleteness();
   testStatusInboundEdges();
   testTransitionEdgeCount();
+  testFeeStageTransitionPaths();
+  testReachableFromAllStates();
 
   // API 集成测试
   await testReportDashboard();

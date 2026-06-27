@@ -183,6 +183,7 @@ export class ReportsRepository {
       byRoute: this.groupOrdersByPickupReturnRoute(filteredOrders),
       byStatus: this.groupOrdersByStatus(filteredOrders),
       byBillingMode: this.groupOrdersByBillingMode(filteredOrders),
+      byStoreVehicleGroup: this.groupOrdersByStoreAndVehicleGroup(filteredOrders),
       rows
     };
   }
@@ -1134,10 +1135,10 @@ export class ReportsRepository {
   }
 
   private groupOrdersByStore(orders: StoreRentalOrderRow[]): StoreRentalNamedMetric[] {
-    const groups = new Map<string, { count: number; amount: number; settled: number; pending: number; risk: number; refund: number; waiver: number; completed: number; cancelled: number; monthly: number }>();
+    const groups = new Map<string, { count: number; amount: number; settled: number; pending: number; risk: number; refund: number; waiver: number; completed: number; cancelled: number; monthly: number; statusMap: Record<string, number> }>();
     for (const order of orders) {
       const storeName = this.storeName(order.pickupStoreSnapshot, order.pickupStation?.parentStoreName);
-      const existing = groups.get(storeName) ?? { count: 0, amount: 0, settled: 0, pending: 0, risk: 0, refund: 0, waiver: 0, completed: 0, cancelled: 0, monthly: 0 };
+      const existing = groups.get(storeName) ?? { count: 0, amount: 0, settled: 0, pending: 0, risk: 0, refund: 0, waiver: 0, completed: 0, cancelled: 0, monthly: 0, statusMap: {} };
       const finance = this.orderFinance(order);
       const mainStatus = String(order.mainStatus);
       existing.count += 1;
@@ -1150,6 +1151,7 @@ export class ReportsRepository {
       if (mainStatus === "CANCELLED") existing.cancelled += 1;
       if (this.toSharedBillingMode(String(order.billingMode)) === BillingMode.Monthly) existing.monthly += 1;
       if (this.isRiskOrder(order)) existing.risk += 1;
+      existing.statusMap[mainStatus] = (existing.statusMap[mainStatus] ?? 0) + 1;
       groups.set(storeName, existing);
     }
     return Array.from(groups.entries())
@@ -1166,15 +1168,19 @@ export class ReportsRepository {
         completedCount: data.completed,
         cancelledCount: data.cancelled,
         monthlyCount: data.monthly,
-        completionRate: data.count > 0 ? Math.round((data.completed / data.count) * 1000) / 10 : 0
+        completionRate: data.count > 0 ? Math.round((data.completed / data.count) * 1000) / 10 : 0,
+        avgOrderValue: data.count > 0 ? Math.round(data.amount / data.count) : 0,
+        settlementRate: data.amount > 0 ? Math.round((data.settled / data.amount) * 1000) / 10 : 0,
+        riskRate: data.count > 0 ? Math.round((data.risk / data.count) * 1000) / 10 : 0,
+        statusBreakdown: data.statusMap
       }));
   }
 
   private groupOrdersByVehicleGroup(orders: StoreRentalOrderRow[]): StoreRentalNamedMetric[] {
-    const groups = new Map<string, { count: number; amount: number; settled: number; pending: number; risk: number; refund: number; waiver: number; completed: number; cancelled: number; monthly: number }>();
+    const groups = new Map<string, { count: number; amount: number; settled: number; pending: number; risk: number; refund: number; waiver: number; completed: number; cancelled: number; monthly: number; statusMap: Record<string, number> }>();
     for (const order of orders) {
       const groupName = this.vehicleGroupName(order.vehicleGroupSnapshot, order.vehicleGroup.name);
-      const existing = groups.get(groupName) ?? { count: 0, amount: 0, settled: 0, pending: 0, risk: 0, refund: 0, waiver: 0, completed: 0, cancelled: 0, monthly: 0 };
+      const existing = groups.get(groupName) ?? { count: 0, amount: 0, settled: 0, pending: 0, risk: 0, refund: 0, waiver: 0, completed: 0, cancelled: 0, monthly: 0, statusMap: {} };
       const finance = this.orderFinance(order);
       const mainStatus = String(order.mainStatus);
       existing.count += 1;
@@ -1187,6 +1193,7 @@ export class ReportsRepository {
       if (mainStatus === "CANCELLED") existing.cancelled += 1;
       if (this.toSharedBillingMode(String(order.billingMode)) === BillingMode.Monthly) existing.monthly += 1;
       if (this.isRiskOrder(order)) existing.risk += 1;
+      existing.statusMap[mainStatus] = (existing.statusMap[mainStatus] ?? 0) + 1;
       groups.set(groupName, existing);
     }
     return Array.from(groups.entries())
@@ -1203,6 +1210,49 @@ export class ReportsRepository {
         completedCount: data.completed,
         cancelledCount: data.cancelled,
         monthlyCount: data.monthly,
+        completionRate: data.count > 0 ? Math.round((data.completed / data.count) * 1000) / 10 : 0,
+        avgOrderValue: data.count > 0 ? Math.round(data.amount / data.count) : 0,
+        settlementRate: data.amount > 0 ? Math.round((data.settled / data.amount) * 1000) / 10 : 0,
+        riskRate: data.count > 0 ? Math.round((data.risk / data.count) * 1000) / 10 : 0,
+        statusBreakdown: data.statusMap
+      }));
+  }
+
+  private groupOrdersByStoreAndVehicleGroup(orders: StoreRentalOrderRow[]): Array<{
+    storeName: string;
+    vehicleGroupName: string;
+    count: number;
+    amount: number;
+    settledAmount: number;
+    pendingAmount: number;
+    riskCount: number;
+    completionRate: number;
+  }> {
+    const groups = new Map<string, { storeName: string; vehicleGroupName: string; count: number; amount: number; settled: number; pending: number; risk: number; completed: number }>();
+    for (const order of orders) {
+      const storeName = this.storeName(order.pickupStoreSnapshot, order.pickupStation?.parentStoreName);
+      const groupName = this.vehicleGroupName(order.vehicleGroupSnapshot, order.vehicleGroup.name);
+      const key = `${storeName}||${groupName}`;
+      const existing = groups.get(key) ?? { storeName, vehicleGroupName: groupName, count: 0, amount: 0, settled: 0, pending: 0, risk: 0, completed: 0 };
+      const finance = this.orderFinance(order);
+      existing.count += 1;
+      existing.amount += money(order.totalAmount);
+      existing.settled += finance.settledAmount;
+      existing.pending += finance.pendingAmount;
+      if (String(order.mainStatus) === "COMPLETED") existing.completed += 1;
+      if (this.isRiskOrder(order)) existing.risk += 1;
+      groups.set(key, existing);
+    }
+    return Array.from(groups.values())
+      .sort((a, b) => b.count - a.count)
+      .map((data) => ({
+        storeName: data.storeName,
+        vehicleGroupName: data.vehicleGroupName,
+        count: data.count,
+        amount: data.amount,
+        settledAmount: data.settled,
+        pendingAmount: data.pending,
+        riskCount: data.risk,
         completionRate: data.count > 0 ? Math.round((data.completed / data.count) * 1000) / 10 : 0
       }));
   }
