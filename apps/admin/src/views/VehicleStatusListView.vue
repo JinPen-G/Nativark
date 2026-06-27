@@ -366,3 +366,12 @@ onMounted(loadData);
     </div>
   </AppLayout>
 </template>
+
+<style scoped>
+:deep(.credential-expired-row) {
+  background-color: #fef2f2 !important;
+}
+:deep(.credential-expired-row:hover > td) {
+  background-color: #fee2e2 !important;
+}
+</style>
