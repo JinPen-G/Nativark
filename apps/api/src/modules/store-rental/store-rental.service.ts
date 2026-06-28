@@ -6753,6 +6753,16 @@ export class StoreRentalService {
             String(body.operator ?? "门店营运"),
             `订单 ${order.orderNo} 延长用车 ${extensionHours} 小时，结算方式：${settlementMode}，续租费用：${extensionFeeAmount} 元，原还车：${oldReturnAtText}，新还车：${order.returnAt}`
           );
+
+          // OR-22: 续租通知留痕（内存路径）
+          await this.persistNotificationRecord(order, {
+            scene: "payment_due",
+            channel: "manual",
+            target: order.customerPhoneMasked,
+            status: "sent",
+            content: `订单 ${order.orderNo} 已续租 ${extensionHours} 小时，新还车时间 ${order.returnAt}，续租费用 ${extensionFeeAmount} 元。`,
+            operator: String(body.operator ?? "门店营运")
+          });
         }
         break;
       case "redirect-order":
