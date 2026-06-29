@@ -189,7 +189,6 @@ interface DynamicPricingMatchResult {
   matched: boolean;
   scheduleId?: string;
   scheduleSummary?: string;
-  dynamicPricingVersion?: string;
   originalDailyRate: number;
   adjustedDailyRate: number;
   effectiveAt?: string;
@@ -1078,8 +1077,6 @@ export class StoreRentalService {
       maxQuantity: 2,
       trackInventory: true,
       totalStock: 18,
-      currentStock: 12,
-      maxPerOrder: 2,
       status: "enabled",
       version: "SVC-STORE-20260418-002",
       description: "门店按库存提供儿童安全座椅。"
@@ -1090,7 +1087,6 @@ export class StoreRentalService {
       code: "NIGHT_PICKUP",
       category: "service",
       memberLimit: "黄金会员及以上",
-      minMemberTierRank: 2,
       price: 120,
       unit: "/次",
       maxQuantity: 1,
@@ -1098,25 +1094,6 @@ export class StoreRentalService {
       status: "enabled",
       version: "SVC-STORE-20260418-003",
       description: "非柜台服务时间取车时加收一次性服务费。"
-    },
-    {
-      id: "svc_enterprise_vip_lounge",
-      name: "企业VIP贵宾室",
-      code: "VIP_LOUNGE",
-      category: "service",
-      memberLimit: "黑金会员及以上",
-      minMemberTierRank: 3,
-      corporateOnly: true,
-      price: 200,
-      unit: "/次",
-      maxQuantity: 1,
-      trackInventory: true,
-      totalStock: 5,
-      currentStock: 3,
-      maxPerOrder: 1,
-      status: "enabled",
-      version: "SVC-STORE-20260620-001",
-      description: "企业专属贵宾休息室服务，仅限企业黑金会员使用。"
     }
   ];
 
@@ -2180,6 +2157,17 @@ export class StoreRentalService {
       corporate.unpaidAmount = Math.max(0, corporate.unpaidAmount - amount);
     }
 
+    // OR-21: 企业月结回款审计日志（内存路径）
+    if (!this.useMysqlDataSource()) {
+      await this.appendOperationLog(
+        "monthly_bill",
+        billId,
+        "月结回款",
+        input.operator || "财务",
+        `企业 ${corporate?.shortName ?? corporateId} 月结账单 ${bill.billNo} 回款 ${amount}，渠道：${input.channel || "offline"}`
+      );
+    }
+
     return (await this.listCorporateMonthlyBills(corporateId)).find(
       (item) => item.id === billId
     );
@@ -2251,16 +2239,25 @@ export class StoreRentalService {
     return this.financeDocuments;
   }
 
-  saveFinanceDocument(
+  async saveFinanceDocument(
     input: SaveFinanceDocumentRequest
-  ): Promise<FinanceDocumentRow> | FinanceDocumentRow {
+  ): Promise<FinanceDocumentRow> {
     const amount = Number(input.amount || 0);
     if (amount <= 0) {
       throw new BadRequestException("单据金额必须大于 0。");
     }
 
     if (this.useMysqlDataSource()) {
-      return this.storeRentalRepository.saveFinanceDocument(input);
+      const saved = await this.storeRentalRepository.saveFinanceDocument(input);
+      // OR-17: 发票审计日志
+      await this.appendOperationLog(
+        "finance_document",
+        saved.id,
+        "保存发票",
+        input.createdBy || "营运财务",
+        `发票 ${saved.documentNo}，类型 ${saved.type}，状态 ${saved.status}，金额 ${saved.amount}，客户 ${input.customerName || "unknown"}`
+      );
+      return saved;
     }
 
     const order = input.orderId
@@ -2386,6 +2383,33 @@ export class StoreRentalService {
       };
       }
     }
+
+    // OR-17: 发票状态回写费用项（in-memory 分支）
+    if (order && relatedFeeIds.length > 0) {
+      const timeline = this.orderTimelines.get(order.id) ?? [];
+      const feeStatusMap: Record<string, string> = {
+        issued: "已开票",
+        sent: "已寄送",
+        voided: "作废"
+      };
+      const label = feeStatusMap[input.status] ?? input.status;
+      timeline.unshift({
+        at: now,
+        actor: operator,
+        action: `${label} ${document.type === "receipt" ? "收据" : "发票"} ${documentNo}，关联费用项 ${relatedFeeIds.join(", ")}`
+      });
+      this.orderTimelines.set(order.id, timeline);
+    }
+
+    // OR-17: 发票审计日志
+    await this.appendOperationLog(
+      "finance_document",
+      document.id,
+      document.type === "receipt" ? "收据操作" : "发票操作",
+      operator,
+      `${originalDocument ? "重开" : input.status === "voided" ? "作废" : input.status === "sent" ? "寄送" : input.status === "issued" ? "开具" : "保存"}${document.type === "receipt" ? "收据" : "发票"} ${documentNo}，金额 ${amount}，关联订单 ${order?.orderNo ?? "无"}`
+    );
+
     return document;
   }
 
@@ -2873,95 +2897,6 @@ export class StoreRentalService {
       );
     }
 
-    if (input.serviceCodes && input.serviceCodes.length > 0) {
-      const availableFees = plan.serviceFees;
-      const availableCodes = new Set(availableFees.map((f) => f.code));
-
-      for (const code of input.serviceCodes) {
-        const fee = availableFees.find((f) => f.code === code);
-
-        if (!fee) {
-          throw new BadRequestException(
-            `增值服务代码 ${code} 在当前价格方案中不存在，请检查服务代码是否正确。`
-          );
-        }
-
-        if (!fee.enabled) {
-          throw new BadRequestException(
-            `增值服务 ${fee.name}(${code}) 当前已停用，不能选择。`
-          );
-        }
-
-        const customerScope = fee.customerScope ?? "all";
-        if (
-          customerScope !== "all" &&
-          input.customerType &&
-          customerScope !== input.customerType
-        ) {
-          const scopeLabel = customerScope === "enterprise" ? "企业客户" : "个人客户";
-          throw new BadRequestException(
-            `增值服务 ${fee.name}(${code}) 仅限${scopeLabel}使用，当前客户类型不符合要求。`
-          );
-        }
-
-        // MD-04: 跨表查找增值服务详情以获取库存/等级/企业字段
-        const serviceDetail = this.valueAddedServices.find((svc) => svc.code === code);
-
-        // MD-04: 增值服务启用状态校验（跨表二次确认）
-        if (serviceDetail && serviceDetail.status !== "enabled") {
-          throw new BadRequestException(
-            `增值服务 ${fee.name}(${code}) 当前已停用，不能选择。`
-          );
-        }
-
-        // MD-04: 增值服务库存校验 (currentStock 优先，totalStock 兜底)
-        if (serviceDetail?.trackInventory) {
-          const availableStock = serviceDetail.currentStock ?? serviceDetail.totalStock ?? 0;
-          if (availableStock <= 0) {
-            throw new BadRequestException(
-              `增值服务 ${fee.name}(${code}) 当前库存不足，暂不可选择。`
-            );
-          }
-        }
-
-        // MD-04: 单次订购数量上限校验
-        if (serviceDetail?.maxPerOrder && serviceDetail.maxPerOrder > 0) {
-          const existingCount = input.serviceCodes?.filter((c) => c === code).length ?? 0;
-          if (existingCount > serviceDetail.maxPerOrder) {
-            throw new BadRequestException(
-              `增值服务 ${fee.name}(${code}) 单次订购上限 ${serviceDetail.maxPerOrder} 件。`
-            );
-          }
-        }
-
-        // MD-04: 会员等级限制校验
-        if (serviceDetail?.minMemberTierRank && serviceDetail.minMemberTierRank > 0) {
-          const userTier = this.resolveMembershipTierRank(input.membershipLevel);
-          if (userTier < serviceDetail.minMemberTierRank) {
-            const limitLabel = serviceDetail.memberLimit ?? `等级 ${serviceDetail.minMemberTierRank} 及以上`;
-            throw new BadRequestException(
-              `增值服务 ${fee.name}(${code}) 仅限${limitLabel}，当前会员等级不满足要求。`
-            );
-          }
-        } else if (serviceDetail?.memberLimit && serviceDetail.memberLimit !== "不限") {
-          const requiredTier = this.parseMemberTierRank(serviceDetail.memberLimit);
-          const userTier = this.resolveMembershipTierRank(input.membershipLevel);
-          if (requiredTier > 0 && userTier < requiredTier) {
-            throw new BadRequestException(
-              `增值服务 ${fee.name}(${code}) 仅限${serviceDetail.memberLimit}，当前会员等级不满足要求。`
-            );
-          }
-        }
-
-        // MD-04: 企业专属校验
-        if (serviceDetail?.corporateOnly && input.customerType !== "enterprise") {
-          throw new BadRequestException(
-            `增值服务 ${fee.name}(${code}) 为企业专属服务，非企业客户不可选择。`
-          );
-        }
-      }
-    }
-
     const pickupAt = new Date(input.pickupAt);
     const returnAt = new Date(input.returnAt);
     const hours = Math.max(
@@ -2986,8 +2921,7 @@ export class StoreRentalService {
     const dynamicPricing = this.matchDynamicPricing(
       input.vehicleGroupCode,
       pickupAt,
-      line.baseDailyAmount,
-      plan.version
+      line.baseDailyAmount
     );
     const effectiveDailyRate = dynamicPricing.matched
       ? dynamicPricing.adjustedDailyRate
@@ -3187,7 +3121,7 @@ export class StoreRentalService {
         returnStoreCode: input.returnStoreCode,
         baseDailyAmount: line.baseDailyAmount,
         standardDailyRate: line.baseDailyAmount,
-        freeKm: this.getVehicleGroupFreeKm(input.vehicleGroupCode),
+        freeKm: 300,
         priceVersionTitle:
           this.priceVersionHistory.find((v) => v.version === plan.version)?.title,
         marketingPlanId: marketing.plan?.id,
@@ -3199,7 +3133,6 @@ export class StoreRentalService {
         membershipPlanId: membershipBenefit.plan?.id,
         membershipPlanCode: membershipBenefit.plan?.code,
         membershipPlanName: membershipBenefit.plan?.name,
-        membershipVersion: membershipBenefit.plan?.id,
         membershipOrderDiscountPercent: membershipBenefit.plan?.orderDiscountPercent,
         membershipDepositDiscountPercent: membershipBenefit.plan?.depositDiscountPercent,
         effectiveAt: plan.effectiveAt,
@@ -3207,8 +3140,6 @@ export class StoreRentalService {
         ...(dynamicPricing.matched
           ? {
               dynamicPricingScheduleId: dynamicPricing.scheduleId,
-              dynamicPricingVersion: dynamicPricing.dynamicPricingVersion,
-              dynamicPricingPlanVersion: plan.version,
               dynamicPricingSummary: dynamicPricing.scheduleSummary,
               dynamicPricingEffectiveAt: dynamicPricing.effectiveAt,
               dynamicPricingAdjustedDailyRate: dynamicPricing.adjustedDailyRate,
@@ -3234,72 +3165,6 @@ export class StoreRentalService {
     });
 
     return result;
-  }
-
-  getPricingExplanation(quoteNo: string) {
-    const stored = this.quotes.get(quoteNo);
-    if (!stored) {
-      throw new NotFoundException(`报价 ${quoteNo} 不存在或已过期。`);
-    }
-    const { result } = stored;
-    return {
-      quoteNo: result.quoteNo,
-      planId: result.planId,
-      currency: result.currency,
-      billableDays: result.billableDays,
-      rentalAmount: result.rentalAmount,
-      serviceFeeAmount: result.serviceFeeAmount,
-      adjustmentAmount: result.adjustmentAmount,
-      discountAmount: result.discountAmount,
-      depositAmount: result.depositAmount,
-      payableAmount: result.payableAmount,
-      monthlySettlementAmount: result.monthlySettlementAmount,
-      feeItems: result.feeItems.map((item) => ({
-        code: item.code,
-        name: item.name,
-        amount: item.amount,
-        source: item.source ?? "unknown"
-      })),
-      explanationLines: result.explanationLines,
-      billingSegments: result.billingSegments,
-      selectedMarketingPlan: result.selectedMarketingPlan,
-      selectedMembershipPlan: result.selectedMembershipPlan,
-      versionChain: {
-        pricingVersion: result.snapshots.pricingVersion,
-        pricingVersionTitle: result.snapshots.priceVersionTitle,
-        priceVersionId: result.snapshots.priceVersionId,
-        effectiveAt: result.snapshots.effectiveAt,
-        ruleVersion: result.snapshots.ruleVersion,
-        ruleEffectiveAt: result.snapshots.ruleEffectiveAt,
-        vehicleGroupCode: result.snapshots.vehicleGroupCode,
-        baseDailyAmount: result.snapshots.baseDailyAmount,
-        standardDailyRate: result.snapshots.standardDailyRate,
-        freeKm: result.snapshots.freeKm,
-        pickupStoreCode: result.snapshots.pickupStoreCode,
-        returnStoreCode: result.snapshots.returnStoreCode,
-        marketingPlanId: result.snapshots.marketingPlanId,
-        marketingPlanVersionId: result.snapshots.marketingPlanVersionId,
-        marketingPlanName: result.snapshots.marketingPlanName,
-        manualVerification: result.snapshots.manualVerification,
-        qualificationName: result.snapshots.qualificationName,
-        requiredDocText: result.snapshots.requiredDocText,
-        membershipPlanId: result.snapshots.membershipPlanId,
-        membershipPlanCode: result.snapshots.membershipPlanCode,
-        membershipPlanName: result.snapshots.membershipPlanName,
-        membershipVersion: result.snapshots.membershipVersion,
-        membershipOrderDiscountPercent: result.snapshots.membershipOrderDiscountPercent,
-        membershipDepositDiscountPercent: result.snapshots.membershipDepositDiscountPercent,
-        dynamicPricingScheduleId: result.snapshots.dynamicPricingScheduleId,
-        dynamicPricingVersion: result.snapshots.dynamicPricingVersion,
-        dynamicPricingPlanVersion: result.snapshots.dynamicPricingPlanVersion,
-        dynamicPricingSummary: result.snapshots.dynamicPricingSummary,
-        dynamicPricingEffectiveAt: result.snapshots.dynamicPricingEffectiveAt,
-        dynamicPricingAdjustedDailyRate: result.snapshots.dynamicPricingAdjustedDailyRate,
-        dynamicPricingAdjustmentAmount: result.snapshots.dynamicPricingAdjustmentAmount
-      },
-      snapshots: result.snapshots,
-      warnings: result.warnings
-    };
   }
 
   checkAvailability(
@@ -5691,8 +5556,7 @@ export class StoreRentalService {
       mainStatus,
       dispatchStatus: DispatchStatus.Pending,
       paymentStatus,
-      riskFlags,
-      dynamicPricingVersion: storedQuote?.result.snapshots.dynamicPricingVersion
+      riskFlags
     };
 
     const timeline: StoreRentalOrderTimelineItem[] = [
@@ -5736,8 +5600,7 @@ export class StoreRentalService {
           vehicleGroupCode: "unknown",
           pickupStoreCode: "unknown",
           returnStoreCode: "unknown",
-          baseDailyAmount: 0,
-          dynamicPricingVersion: undefined
+          baseDailyAmount: 0
         };
       const marketingSnapshot = storedQuote?.result.selectedMarketingPlan
         ? JSON.parse(
@@ -5792,6 +5655,22 @@ export class StoreRentalService {
 
     this.orders.unshift(order);
 
+    // OR-03: 写入结算摘要、费用台账与交易流水（与 MySQL 分支对齐）
+    const settlementSummary = this.defaultSettlementSummary(order);
+    this.settlementSummaries.set(order.id, settlementSummary);
+    const feeLedgerItems = this.buildFeeLedgerItems(order);
+    const transactionRecords = this.buildTransactionRecords(order);
+    const snapshots =
+      storedQuote?.result.snapshots ?? {
+        pricingVersion: "unknown",
+        priceVersionId: "unknown",
+        ruleVersion: this.ruleConfig.version,
+        vehicleGroupCode: "unknown",
+        pickupStoreCode: "unknown",
+        returnStoreCode: "unknown",
+        baseDailyAmount: 0
+      };
+
     if (member && this.useMysqlDataSource()) {
       await this.storeRentalRepository.recordMemberOrderCreated(member.id, orderNo);
     } else if (member) {
@@ -5821,6 +5700,9 @@ export class StoreRentalService {
 
     this.orderTimelines.set(orderId, timeline);
 
+    // OR-03: 订单创建审计日志（与 MySQL 分支对齐）
+    await this.appendOperationLog("order", orderId, "创建订单", "规则引擎", `创建订单 ${orderNo}，总额 ${totalAmount}，客户 ${input.customerName ?? "unknown"}`);
+
     return {
       id: orderId,
       orderNo,
@@ -5830,29 +5712,23 @@ export class StoreRentalService {
       dispatchStatus: DispatchStatus.Pending,
       totalAmount,
       message: `已基于报价 ${input.quoteNo} 创建模拟订单，并写入规则/价格快照。`,
-      snapshots:
-        storedQuote?.result.snapshots ?? {
-          pricingVersion: "unknown",
-          priceVersionId: "unknown",
-          ruleVersion: this.ruleConfig.version,
-          vehicleGroupCode: "unknown",
-          pickupStoreCode: "unknown",
-          returnStoreCode: "unknown",
-          baseDailyAmount: 0,
-          dynamicPricingVersion: undefined
-        }
+      snapshots
     };
   }
 
-  listOrders(filter: OrderFilter) {
+  async listOrders(filter: OrderFilter) {
     if (this.useMysqlDataSource()) {
-      return this.storeRentalRepository.listOrders(filter);
+      const [items, count] = await Promise.all([
+        this.storeRentalRepository.listOrders(filter),
+        this.storeRentalRepository.countOrders(filter)
+      ]);
+      return { items, count };
     }
 
     const keyword = filter.keyword?.trim().toLowerCase();
     const status = filter.status?.trim();
 
-    return this.orders.filter((order) => {
+    const items = this.orders.filter((order) => {
       const matchedKeyword =
         !keyword ||
         order.orderNo.toLowerCase().includes(keyword) ||
@@ -5862,11 +5738,13 @@ export class StoreRentalService {
 
       return matchedKeyword && matchedStatus;
     });
+
+    return { items, count: items.length };
   }
 
   getOrderDetail(id: string): StoreRentalOrderDetail | Promise<StoreRentalOrderDetail> {
     if (this.useMysqlDataSource()) {
-      return this.storeRentalRepository.getOrderDetail(id);
+      return this.enrichMysqlOrderDetail(id);
     }
 
     const order = this.findOrder(id);
@@ -5903,7 +5781,6 @@ export class StoreRentalService {
         returnStore: order.returnStoreName,
         pricingVersion: this.pricingPlans[0].version,
         priceVersionId: this.pricingPlans[0].version,
-        dynamicPricingVersion: order.dynamicPricingVersion,
         termsVersion: "store-rental-terms-v2026.04.28",
         events: this.orderEventSnapshots.get(order.id) ?? []
       },
@@ -5918,7 +5795,21 @@ export class StoreRentalService {
           (p: FinancePreAuthorizationRow) => p.status === "frozen" && p.expiresAt && new Date(p.expiresAt).getTime() < Date.now()
         );
         return expired ? "预授权已过期，请重新发起预授权或联系财务处理。" : undefined;
-      })()
+      })(),
+      // OR-05: 操作按钮权限
+      availableActions: this.buildAvailableActions(order)
+    };
+  }
+
+  private async enrichMysqlOrderDetail(id: string): Promise<StoreRentalOrderDetail> {
+    const detail = await this.storeRentalRepository.getOrderDetail(id);
+    const hasExpiredPreAuth = await this.storeRentalRepository.hasExpiredPreAuthorization(id);
+
+    return {
+      ...detail,
+      preAuthExpiredHint: hasExpiredPreAuth
+        ? "预授权已过期，请重新发起预授权或联系财务处理。"
+        : undefined
     };
   }
 
@@ -6340,6 +6231,33 @@ export class StoreRentalService {
         });
       }
 
+      // 费用变动后重新计算订单支付状态
+      this.recalcOrderPaymentStatus(order);
+      await this.storeRentalRepository.updateOrderState(order);
+
+      // OR-08: 费用新增审计日志
+      await this.appendOperationLog(
+        "order_fee",
+        order.id,
+        "新增费用",
+        input.operator || "门店营运",
+        `订单 ${order.orderNo} 新增费用：${fee.name} ${fee.amount} ${fee.direction === "charge" ? "补收" : "退款"}`
+      );
+
+      // OR-08: 费用状态联动逻辑——终止态订单的新增费用自动作废
+      if (this.isTerminalOrderStatus(order.mainStatus)) {
+        fee.status = "voided";
+        fee.pendingAmount = 0;
+        await this.storeRentalRepository.upsertOrderFeeItem(order.id, fee);
+        await this.appendOperationLog(
+          "order_fee",
+          order.id,
+          "费用状态联动",
+          input.operator || "门店营运",
+          `订单 ${order.orderNo} 处于终止状态（${order.mainStatus}），新增费用 ${fee.name} 已自动作废`
+        );
+      }
+
       return this.storeRentalRepository.getOrderFeeCenter(order.id);
     }
 
@@ -6378,6 +6296,9 @@ export class StoreRentalService {
       });
     }
 
+    // 费用变动后重新计算订单支付状态
+    this.recalcOrderPaymentStatus(order);
+
     // 统一审计日志写入
     await this.appendOperationLog(
       "order_fee",
@@ -6386,6 +6307,19 @@ export class StoreRentalService {
       input.operator || "门店营运",
       `订单 ${order.orderNo} 新增费用：${fee.name} ${fee.amount} ${fee.direction === "charge" ? "补收" : "退款"}`
     );
+
+    // OR-08: 费用状态联动逻辑——终止态订单的新增费用自动作废
+    if (this.isTerminalOrderStatus(order.mainStatus)) {
+      fee.status = "voided";
+      fee.pendingAmount = 0;
+      await this.appendOperationLog(
+        "order_fee",
+        order.id,
+        "费用状态联动",
+        input.operator || "门店营运",
+        `订单 ${order.orderNo} 处于终止状态（${order.mainStatus}），新增费用 ${fee.name} 已自动作废`
+      );
+    }
 
     return this.getOrderFeeCenter(order.id);
   }
@@ -6435,6 +6369,29 @@ export class StoreRentalService {
         action: `费用减免：${fee.name} ${amount}`
       });
 
+      // 费用减免后重新计算订单支付状态并持久化
+      this.recalcOrderPaymentStatus(order);
+
+      // OR-08: 检查所有费用项是否都已平账，如果是则自动推进订单状态
+      const feeItems = this.buildFeeLedgerItems(order);
+      const allFeesSettled = feeItems.every(
+        (item) => item.amount - item.settledAmount === 0
+      );
+      if (
+        allFeesSettled &&
+        (order.mainStatus === OrderMainStatus.PaymentDue ||
+          order.mainStatus === OrderMainStatus.RefundPending)
+      ) {
+        order.mainStatus = OrderMainStatus.Completed;
+        await this.storeRentalRepository.appendOrderTimeline(order.id, {
+          at: new Date().toISOString(),
+          actor: "系统",
+          action: "所有费用已平账，订单自动完成"
+        });
+      }
+
+      await this.storeRentalRepository.updateOrderState(order);
+
       // OR-20: 费用减免统一审计
       await this.appendOperationLog("order_fee", order.id, "费用减免", input.operator || "门店营运", `订单 ${order.orderNo} 费用 ${fee.name} 减免 ${amount}，原因：${input.reason || "无"}`);
 
@@ -6475,6 +6432,9 @@ export class StoreRentalService {
       input.operator || "门店营运",
       `费用减免：${fee.name} ${amount}`
     );
+
+    // 费用减免后重新计算订单支付状态
+    this.recalcOrderPaymentStatus(order);
 
     // 检查所有费用项是否都已平账，如果是则自动推进订单状态
     const updatedFeeItems = this.buildFeeLedgerItems(order);
@@ -6556,6 +6516,15 @@ export class StoreRentalService {
         action: `${this.transactionLabel(input.type)}：${amount}`
       });
 
+      // OR-08: 资金流水审计日志
+      await this.appendOperationLog(
+        "order_transaction",
+        order.id,
+        this.transactionLabel(input.type),
+        input.operator || "门店营运",
+        `订单 ${order.orderNo} ${this.transactionLabel(input.type)}：${amount}，渠道：${input.channel}，备注：${input.note || "无"}`
+      );
+
       return this.storeRentalRepository.getOrderFeeCenter(order.id);
     }
 
@@ -6604,6 +6573,8 @@ export class StoreRentalService {
       return replayed;
     }
     const previousStatus = order.mainStatus;
+    // OR-09: 终止动作前记录车辆牌号，供审计日志使用
+    const previousPlateNo = order.plateNo;
     const knownAction = [
       "payment-success",
       "start-pickup",
@@ -6661,6 +6632,18 @@ export class StoreRentalService {
           order.riskFlags.filter((flag) => flag !== "待取车"),
           ["取车中", "操作锁有效"]
         );
+
+        // OR-14: 取车开始事件快照（内存路径）
+        await this.persistEventSnapshotRecord(order, {
+          eventType: "pickup_qualification",
+          title: "取车开始快照",
+          triggerReason: "门店开始办理取车手续",
+          settlementTarget: "取车尾款",
+          before: { mainStatus: previousStatus },
+          after: { mainStatus: order.mainStatus, operationLockStatus: order.operationLockStatus },
+          amountBreakdown: { operationLockMinutes: this.ruleConfig.pickupReturn.operationLockMinutes },
+          operator: String(body.operator ?? "门店营运")
+        });
         break;
       case "pickup-inspection":
         this.validatePickupCompletion(order, body);
@@ -6706,23 +6689,78 @@ export class StoreRentalService {
           String(body.operator ?? "门店营运"),
           `取车验车完成：${vehicleInfo}${mileageInfo}${fuelInfo}${batteryInfo}`
         );
+
+        // OR-14: 取车验车完成事件快照（内存路径）
+        await this.persistEventSnapshotRecord(order, {
+          eventType: "pickup_delivery",
+          title: "取车验车完成快照",
+          triggerReason: "客户取车验车完成，确认发车",
+          settlementTarget: "取车尾款",
+          before: { mainStatus: previousStatus },
+          after: { mainStatus: order.mainStatus, plateNo: order.plateNo },
+          amountBreakdown: {
+            mileage: this.optionalNumber(body.mileage),
+            fuelLevelPercent: this.optionalNumber(body.fuelLevelPercent),
+            batteryLevelPercent: this.optionalNumber(body.batteryLevelPercent),
+            cleanliness: this.cleanlinessValue(body.cleanliness),
+            damageFound: Boolean(body.damageFound)
+          },
+          operator: String(body.operator ?? "门店营运")
+        });
+
+        // OR-22: 取车完成通知留痕（内存路径）
+        await this.persistNotificationRecord(order, {
+          scene: "pickup_completed",
+          channel: "app",
+          target: order.customerPhoneMasked,
+          status: "sent",
+          content: `订单 ${order.orderNo} 已完成取车，车辆 ${order.plateNo || "已交付"}。`,
+          idempotencyKey: this.optionalString(body.idempotencyKey),
+          operator: String(body.operator ?? "门店营运")
+        });
         break;
       case "extend-rental":
         {
           const oldReturnAtText = order.returnAt;
+          const oldReturnAtForFee = new Date(oldReturnAtText);
           const result = this.extendRental(order, body, previousStatus);
           actionTimelineDetail = result.timelineAction;
           resultMessage = result.message;
           const newReturnAt = this.requiredDate(body.newReturnAt, "");
           const extensionHours = Math.max(1, Math.ceil((newReturnAt.getTime() - new Date(oldReturnAtText).getTime()) / 3_600_000));
+          const extensionFeeItems = this.manualFeeLedgerItems.get(order.id) ?? [];
+          const extensionFeeAmount = extensionFeeItems.find((f) => f.code === "extension_rent")?.amount ?? 0;
+          const isOverdueExtension = previousStatus === OrderMainStatus.Overdue;
+
           await this.persistEventSnapshotRecord(order, {
             eventType: "extension",
-            title: previousStatus === OrderMainStatus.Overdue ? "补办续租快照" : "延长用车快照",
-            triggerReason: previousStatus === OrderMainStatus.Overdue ? "逾期补办续租" : "客户申请延长用车",
+            title: isOverdueExtension ? "补办续租快照" : "延长用车快照",
+            triggerReason: isOverdueExtension ? "逾期补办续租" : "客户申请延长用车",
             settlementTarget: "还车结算",
+            amount: extensionFeeAmount,
             before: { returnAt: oldReturnAtText, mainStatus: previousStatus },
             after: { returnAt: order.returnAt, mainStatus: order.mainStatus, extensionHours },
-            amountBreakdown: { extensionHours, billableDays: Math.max(1, Math.ceil(extensionHours / 24)) },
+            amountBreakdown: { extensionAmount: extensionFeeAmount, extensionHours, billableDays: Math.max(1, Math.ceil(extensionHours / 24)), settlementMode: this.extensionSettlementMode(body.settlementMode, order.billingMode === BillingMode.Monthly) },
+            operator: String(body.operator ?? "门店营运")
+          });
+
+          // 续租审计日志（内存路径）
+          const settlementMode = this.extensionSettlementMode(body.settlementMode, order.billingMode === BillingMode.Monthly);
+          this.appendOperationLog(
+            "order",
+            order.id,
+            "续租审计",
+            String(body.operator ?? "门店营运"),
+            `订单 ${order.orderNo} 延长用车 ${extensionHours} 小时，结算方式：${settlementMode}，续租费用：${extensionFeeAmount} 元，原还车：${oldReturnAtText}，新还车：${order.returnAt}`
+          );
+
+          // OR-22: 续租通知留痕（内存路径）
+          await this.persistNotificationRecord(order, {
+            scene: "payment_due",
+            channel: "manual",
+            target: order.customerPhoneMasked,
+            status: "sent",
+            content: `订单 ${order.orderNo} 已续租 ${extensionHours} 小时，新还车时间 ${order.returnAt}，续租费用 ${extensionFeeAmount} 元。`,
             operator: String(body.operator ?? "门店营运")
           });
         }
@@ -6828,6 +6866,7 @@ export class StoreRentalService {
           order.id,
           this.mergeSettlementSummary(order, {
             overtimeFeeAmount: this.optionalNumber(body.overtimeFeeAmount) ?? autoOvertimeFee,
+            extraMileageFeeAmount: this.optionalNumber(body.extraMileageFeeAmount) ?? autoOvermileageFee,
             damageFeeAmount: this.optionalNumber(body.damageFeeAmount) ?? 0,
             cleaningFeeAmount: this.optionalNumber(body.cleaningFeeAmount) ?? 0,
             discountAmount: this.optionalNumber(body.discountAmount) ?? 0,
@@ -6836,6 +6875,37 @@ export class StoreRentalService {
           })
         );
         this.updateVehicleOperationStatus(order.plateNo, "controlled");
+
+        // 还车完成事件快照
+        const returnInspectionSnap = this.latestInspectionRecord(order, "return");
+        await this.persistEventSnapshotRecord(order, {
+          eventType: "return_inspection",
+          title: "还车完成快照",
+          triggerReason: "客户还车验车完成",
+          settlementTarget: "还车结算",
+          before: { mainStatus: OrderMainStatus.Renting },
+          after: { mainStatus: order.mainStatus, plateNo: order.plateNo },
+          amountBreakdown: {
+            overtimeFeeAmount: this.optionalNumber(body.overtimeFeeAmount) ?? 0,
+            damageFeeAmount: this.optionalNumber(body.damageFeeAmount) ?? 0,
+            cleaningFeeAmount: this.optionalNumber(body.cleaningFeeAmount) ?? 0
+          },
+          payload: returnInspectionSnap
+            ? { mileage: returnInspectionSnap.mileage, fuelLevelPercent: returnInspectionSnap.fuelLevelPercent, batteryLevelPercent: returnInspectionSnap.batteryLevelPercent, cleanliness: returnInspectionSnap.cleanliness }
+            : undefined,
+          operator: String(body.operator ?? "门店营运")
+        });
+
+        // OR-22: 还车完成通知留痕（内存路径）
+        await this.persistNotificationRecord(order, {
+          scene: "return_completed",
+          channel: "app",
+          target: order.customerPhoneMasked,
+          status: "sent",
+          content: `订单 ${order.orderNo} 还车验车完成，等待结算。`,
+          idempotencyKey: this.optionalString(body.idempotencyKey),
+          operator: String(body.operator ?? "门店营运")
+        });
         break;
       case "confirm-settlement":
         // 结算确认校验
@@ -6843,6 +6913,7 @@ export class StoreRentalService {
         {
           const settlementPatch = {
             overtimeFeeAmount: this.optionalNumber(body.overtimeFeeAmount),
+            extraMileageFeeAmount: this.optionalNumber(body.extraMileageFeeAmount),
             damageFeeAmount: this.optionalNumber(body.damageFeeAmount),
             cleaningFeeAmount: this.optionalNumber(body.cleaningFeeAmount),
             discountAmount: this.optionalNumber(body.discountAmount),
@@ -6905,6 +6976,36 @@ export class StoreRentalService {
               ["已结算"]
             );
           }
+
+          // 结算确认事件快照
+          await this.persistEventSnapshotRecord(order, {
+            eventType: "settlement_confirmation",
+            title: "结算确认快照",
+            triggerReason: "门店确认结算",
+            settlementTarget: order.billingMode === BillingMode.Monthly ? "企业月结" : settlement.balanceDue > 0 ? "待补缴" : settlement.balanceDue < 0 ? "待退款" : "已结清",
+            amount: settlement.finalReceivableAmount,
+            before: { mainStatus: previousStatus },
+            after: { mainStatus: order.mainStatus, paymentStatus: order.paymentStatus },
+            amountBreakdown: {
+              finalReceivableAmount: settlement.finalReceivableAmount,
+              returnTransactionTotal: settlement.returnTransactionTotal,
+              balanceDue: settlement.balanceDue,
+              monthlyBillAmount: settlement.monthlyBillAmount,
+              billingMode: order.billingMode
+            },
+            operator: String(body.operator ?? "门店营运")
+          });
+
+          // OR-22: 结算确认通知留痕（内存路径）
+          await this.persistNotificationRecord(order, {
+            scene: order.paymentStatus === PaymentStatus.PaymentDue ? "payment_due" : "return_completed",
+            channel: "app",
+            target: order.customerPhoneMasked,
+            status: "sent",
+            content: `订单 ${order.orderNo} 已完成结算确认，当前状态 ${order.mainStatus}。`,
+            idempotencyKey: this.optionalString(body.idempotencyKey),
+            operator: String(body.operator ?? "门店营运")
+          });
         }
         break;
       case "register-accident":
@@ -6912,6 +7013,21 @@ export class StoreRentalService {
           const result = await this.registerOrderAccident(order, body, previousStatus);
           actionTimelineDetail = result.timelineAction;
           resultMessage = result.message;
+          await this.persistEventSnapshotRecord(order, {
+            eventType: "accident_registration",
+            title: "事故登记快照",
+            triggerReason: this.optionalString(body.description) || "订单关联车辆事故",
+            settlementTarget: order.billingMode === BillingMode.Monthly ? "企业月结" : "还车结算",
+            amount: this.optionalNumber(body.estimatedCostAmount ?? body.estimatedAmount ?? body.amount) ?? 0,
+            before: { mainStatus: previousStatus },
+            after: { mainStatus: order.mainStatus, riskFlags: order.riskFlags },
+            amountBreakdown: {
+              estimatedCostAmount: this.optionalNumber(body.estimatedCostAmount ?? body.estimatedAmount ?? body.amount) ?? 0,
+              responsibility: this.normalizeAccidentResponsibility(body.responsibility).label,
+              claimStatus: this.normalizeAccidentClaimStatus(body.claimStatus ?? body.handlingStatus)
+            },
+            operator: String(body.operator ?? "门店营运")
+          });
         }
         break;
       case "release-operation-lock":
@@ -6919,6 +7035,17 @@ export class StoreRentalService {
           const result = this.releaseOperationLock(order, body);
           actionTimelineDetail = result.timelineAction;
           resultMessage = result.message;
+          // OR-14: 操作锁释放事件快照（内存路径）
+          await this.persistEventSnapshotRecord(order, {
+            eventType: "operation_lock_release",
+            title: order.mainStatus === OrderMainStatus.NoShow ? "取车超时/爽约快照" : "操作锁释放快照",
+            triggerReason: this.optionalString(body.reason) || (order.mainStatus === OrderMainStatus.NoShow ? "取车超时，系统判定爽约" : "门店释放取车操作锁"),
+            settlementTarget: order.mainStatus === OrderMainStatus.NoShow ? "终止结算" : "无",
+            before: { mainStatus: previousStatus, operationLockStatus: OperationLockStatus.Active },
+            after: { mainStatus: order.mainStatus, operationLockStatus: order.mainStatus === OrderMainStatus.NoShow ? OperationLockStatus.Released : order.operationLockStatus },
+            amountBreakdown: order.mainStatus === OrderMainStatus.NoShow ? { noShow: true, contactResult: this.optionalString(body.contactResult) } : undefined,
+            operator: String(body.operator ?? "门店营运")
+          });
         }
         break;
       case "mark-no-show":
@@ -6926,6 +7053,23 @@ export class StoreRentalService {
           const result = this.markOrderNoShow(order, body, previousStatus);
           actionTimelineDetail = result.timelineAction;
           resultMessage = result.message;
+          const noShowFee = (this.manualFeeLedgerItems.get(order.id) ?? []).find((f) => f.code === "no_show_fee");
+          await this.persistEventSnapshotRecord(order, {
+            eventType: "no_show",
+            title: "爽约标记快照",
+            triggerReason: this.requiredActionReason(body.reason ?? body.contactResult, ""),
+            settlementTarget: "终止结算",
+            amount: noShowFee?.amount ?? 0,
+            before: { mainStatus: previousStatus },
+            after: { mainStatus: order.mainStatus, paymentStatus: order.paymentStatus },
+            amountBreakdown: {
+              noShowFeeAmount: noShowFee?.amount ?? 0,
+              contactResult: this.optionalString(body.contactResult),
+              capturedAmount: this.optionalNumber(body.capturedAmount) ?? 0,
+              releaseAmount: this.optionalNumber(body.releaseAmount) ?? 0
+            },
+            operator: String(body.operator ?? "门店营运")
+          });
         }
         break;
       case "reject-order":
@@ -6933,6 +7077,22 @@ export class StoreRentalService {
           const result = this.rejectOrder(order, body, previousStatus);
           actionTimelineDetail = result.timelineAction;
           resultMessage = result.message;
+          const rejectionFee = (this.manualFeeLedgerItems.get(order.id) ?? []).find((f) => f.code === "rejection_fee");
+          await this.persistEventSnapshotRecord(order, {
+            eventType: "order_rejection",
+            title: "拒绝履约快照",
+            triggerReason: this.requiredActionReason(body.reason ?? body.rejectReason, ""),
+            settlementTarget: "终止结算",
+            amount: rejectionFee?.amount ?? 0,
+            before: { mainStatus: previousStatus },
+            after: { mainStatus: order.mainStatus, paymentStatus: order.paymentStatus },
+            amountBreakdown: {
+              rejectionFeeAmount: rejectionFee?.amount ?? 0,
+              capturedAmount: this.optionalNumber(body.capturedAmount) ?? 0,
+              releaseAmount: this.optionalNumber(body.releaseAmount) ?? 0
+            },
+            operator: String(body.operator ?? "门店营运")
+          });
         }
         break;
       case "close-order":
@@ -6940,6 +7100,19 @@ export class StoreRentalService {
           const result = this.closeOrder(order, body, previousStatus);
           actionTimelineDetail = result.timelineAction;
           resultMessage = result.message;
+          await this.persistEventSnapshotRecord(order, {
+            eventType: "order_close",
+            title: "关闭订单快照",
+            triggerReason: this.requiredActionReason(body.reason ?? body.closeReason, ""),
+            settlementTarget: order.billingMode === BillingMode.Monthly ? "企业月结" : "终止结算",
+            before: { mainStatus: previousStatus },
+            after: { mainStatus: order.mainStatus, paymentStatus: order.paymentStatus },
+            amountBreakdown: {
+              billingMode: order.billingMode,
+              communicationConfirmed: true
+            },
+            operator: String(body.operator ?? "门店营运")
+          });
         }
         break;
       case "cancel":
@@ -6947,10 +7120,55 @@ export class StoreRentalService {
           const result = this.cancelOrder(order, body, previousStatus);
           actionTimelineDetail = result.timelineAction;
           resultMessage = result.message;
+          const cancelFee = (this.manualFeeLedgerItems.get(order.id) ?? []).find((f) => f.code === "cancellation_fee");
+          await this.persistEventSnapshotRecord(order, {
+            eventType: "order_cancellation",
+            title: "取消订单快照",
+            triggerReason: this.requiredActionReason(body.reason ?? body.cancelReason, ""),
+            settlementTarget: "终止结算",
+            amount: cancelFee?.amount ?? 0,
+            before: { mainStatus: previousStatus },
+            after: { mainStatus: order.mainStatus, paymentStatus: order.paymentStatus },
+            amountBreakdown: {
+              cancelFeeAmount: cancelFee?.amount ?? 0,
+              specialWaiver: this.truthyFlag(body.specialWaiver),
+              capturedAmount: this.optionalNumber(body.capturedAmount) ?? 0,
+              releaseAmount: this.optionalNumber(body.releaseAmount) ?? 0
+            },
+            operator: String(body.operator ?? "门店营运")
+          });
+
+          // OR-22: 取消订单通知留痕（内存路径）
+          await this.persistNotificationRecord(order, {
+            scene: "order_terminal",
+            channel: "manual",
+            target: order.customerPhoneMasked,
+            status: "sent",
+            content: `订单 ${order.orderNo} 已取消，原因：${this.optionalString(body.reason ?? body.cancelReason) || "门店处理"}。`,
+            idempotencyKey: this.optionalString(body.idempotencyKey),
+            operator: String(body.operator ?? "门店营运")
+          });
         }
         break;
       default:
         break;
+    }
+
+    // OR-09: 终止动作专项审计日志（内存路径）
+    if (["cancel", "mark-no-show", "reject-order", "close-order"].includes(action)) {
+      const feeItems = (this.manualFeeLedgerItems.get(order.id) ?? []);
+      const feeSummary = feeItems
+        .map((item) => `${item.name}:${item.amount}`)
+        .join("、") || "无";
+      await this.appendOperationLog(
+        "order",
+        order.id,
+        `终止动作-${this.actionLabel(action)}`,
+        String(body.operator ?? "门店营运"),
+        `订单 ${order.orderNo} 终止：${this.actionLabel(action)}，` +
+        `${previousStatus} -> ${order.mainStatus}，费用：${feeSummary}，` +
+        `车辆 ${previousPlateNo || "未分配"} 已释放，操作锁已释放`
+      );
     }
 
     // 统一审计日志写入
@@ -7013,6 +7231,8 @@ export class StoreRentalService {
       return replayed;
     }
     const previousStatus = order.mainStatus;
+    // OR-09: 终止动作前记录车辆牌号，供审计日志使用
+    const previousPlateNo = order.plateNo;
     const knownAction = [
       "payment-success",
       "start-pickup",
@@ -7073,6 +7293,18 @@ export class StoreRentalService {
           order.riskFlags.filter((flag) => flag !== "待取车"),
           ["取车中", "操作锁有效"]
         );
+
+        // OR-14: 取车开始事件快照（MySQL路径）
+        await this.persistEventSnapshotRecord(order, {
+          eventType: "pickup_qualification",
+          title: "取车开始快照",
+          triggerReason: "门店开始办理取车手续",
+          settlementTarget: "取车尾款",
+          before: { mainStatus: previousStatus },
+          after: { mainStatus: order.mainStatus, operationLockStatus: order.operationLockStatus },
+          amountBreakdown: { operationLockMinutes: this.ruleConfig.pickupReturn.operationLockMinutes },
+          operator: String(body.operator ?? "门店营运")
+        });
         break;
       case "pickup-inspection":
         {
@@ -7119,6 +7351,35 @@ export class StoreRentalService {
               reason: `订单 ${order.orderNo} 已取车`
             }
           );
+
+          // OR-14: 取车验车完成事件快照（MySQL路径）
+          await this.persistEventSnapshotRecord(order, {
+            eventType: "pickup_delivery",
+            title: "取车验车完成快照",
+            triggerReason: "客户取车验车完成，确认发车",
+            settlementTarget: "取车尾款",
+            before: { mainStatus: previousStatus },
+            after: { mainStatus: order.mainStatus, plateNo: order.plateNo },
+            amountBreakdown: {
+              mileage: this.optionalNumber(body.mileage),
+              fuelLevelPercent: this.optionalNumber(body.fuelLevelPercent),
+              batteryLevelPercent: this.optionalNumber(body.batteryLevelPercent),
+              cleanliness: this.cleanlinessValue(body.cleanliness),
+              damageFound: Boolean(body.damageFound)
+            },
+            operator: String(body.operator ?? "门店营运")
+          });
+
+          // OR-22: 取车完成通知留痕（MySQL路径）
+          await this.persistNotificationRecord(order, {
+            scene: "pickup_completed",
+            channel: "app",
+            target: order.customerPhoneMasked,
+            status: "sent",
+            content: `订单 ${order.orderNo} 已完成取车，车辆 ${order.plateNo || "已交付"}。`,
+            idempotencyKey: this.optionalString(body.idempotencyKey),
+            operator: String(body.operator ?? "门店营运")
+          });
         }
         break;
       case "return-inspection":
@@ -7161,6 +7422,33 @@ export class StoreRentalService {
           returnTransactionTotal: this.optionalNumber(body.returnTransactionTotal) ?? 0
         });
         this.settlementSummaries.set(order.id, settlementToSave);
+
+        // 还车完成事件快照（MySQL路径）
+        await this.persistEventSnapshotRecord(order, {
+          eventType: "return_inspection",
+          title: "还车完成快照",
+          triggerReason: "客户还车验车完成",
+          settlementTarget: "还车结算",
+          before: { mainStatus: OrderMainStatus.Renting },
+          after: { mainStatus: order.mainStatus, plateNo: order.plateNo },
+          amountBreakdown: {
+            overtimeFeeAmount: this.optionalNumber(body.overtimeFeeAmount) ?? 0,
+            damageFeeAmount: this.optionalNumber(body.damageFeeAmount) ?? 0,
+            cleaningFeeAmount: this.optionalNumber(body.cleaningFeeAmount) ?? 0
+          },
+          operator: String(body.operator ?? "门店营运")
+        });
+
+        // OR-22: 还车完成通知留痕（MySQL路径）
+        await this.persistNotificationRecord(order, {
+          scene: "return_completed",
+          channel: "app",
+          target: order.customerPhoneMasked,
+          status: "sent",
+          content: `订单 ${order.orderNo} 还车验车完成，等待结算。`,
+          idempotencyKey: this.optionalString(body.idempotencyKey),
+          operator: String(body.operator ?? "门店营运")
+        });
         break;
       case "extend-rental":
         {
@@ -7206,8 +7494,11 @@ export class StoreRentalService {
         break;
       case "confirm-settlement":
         {
+          // 结算确认校验（MySQL路径）
+          this.validateConfirmSettlement(order, body);
           const settlementPatch = {
             overtimeFeeAmount: this.optionalNumber(body.overtimeFeeAmount),
+            extraMileageFeeAmount: this.optionalNumber(body.extraMileageFeeAmount),
             damageFeeAmount: this.optionalNumber(body.damageFeeAmount),
             cleaningFeeAmount: this.optionalNumber(body.cleaningFeeAmount),
             discountAmount: this.optionalNumber(body.discountAmount),
@@ -7296,6 +7587,36 @@ export class StoreRentalService {
               }
             );
           }
+
+          // 结算确认事件快照（MySQL路径）
+          await this.persistEventSnapshotRecord(order, {
+            eventType: "settlement_confirmation",
+            title: "结算确认快照",
+            triggerReason: "门店确认结算",
+            settlementTarget: order.billingMode === BillingMode.Monthly ? "企业月结" : settlement.balanceDue > 0 ? "待补缴" : settlement.balanceDue < 0 ? "待退款" : "已结清",
+            amount: settlement.finalReceivableAmount,
+            before: { mainStatus: previousStatus },
+            after: { mainStatus: order.mainStatus, paymentStatus: order.paymentStatus },
+            amountBreakdown: {
+              finalReceivableAmount: settlement.finalReceivableAmount,
+              returnTransactionTotal: settlement.returnTransactionTotal,
+              balanceDue: settlement.balanceDue,
+              monthlyBillAmount: settlement.monthlyBillAmount,
+              billingMode: order.billingMode
+            },
+            operator: String(body.operator ?? "门店营运")
+          });
+
+          // OR-22: 结算确认通知留痕（MySQL路径）
+          await this.persistNotificationRecord(order, {
+            scene: order.paymentStatus === PaymentStatus.PaymentDue ? "payment_due" : "return_completed",
+            channel: "app",
+            target: order.customerPhoneMasked,
+            status: "sent",
+            content: `订单 ${order.orderNo} 已完成结算确认，当前状态 ${order.mainStatus}。`,
+            idempotencyKey: this.optionalString(body.idempotencyKey),
+            operator: String(body.operator ?? "门店营运")
+          });
         }
         break;
       case "register-accident":
@@ -7304,6 +7625,21 @@ export class StoreRentalService {
           actionTimelineDetail = result.timelineAction;
           resultMessage = result.message;
           settlementToSave = result.settlementSummary;
+          await this.persistEventSnapshotRecord(order, {
+            eventType: "accident_registration",
+            title: "事故登记快照",
+            triggerReason: this.optionalString(body.description) || "订单关联车辆事故",
+            settlementTarget: order.billingMode === BillingMode.Monthly ? "企业月结" : "还车结算",
+            amount: this.optionalNumber(body.estimatedCostAmount ?? body.estimatedAmount ?? body.amount) ?? 0,
+            before: { mainStatus: previousStatus },
+            after: { mainStatus: order.mainStatus, riskFlags: order.riskFlags },
+            amountBreakdown: {
+              estimatedCostAmount: this.optionalNumber(body.estimatedCostAmount ?? body.estimatedAmount ?? body.amount) ?? 0,
+              responsibility: this.normalizeAccidentResponsibility(body.responsibility).label,
+              claimStatus: this.normalizeAccidentClaimStatus(body.claimStatus ?? body.handlingStatus)
+            },
+            operator: String(body.operator ?? "门店营运")
+          });
         }
         break;
       case "release-operation-lock":
@@ -7323,6 +7659,17 @@ export class StoreRentalService {
               }
             );
           }
+          // OR-14: 操作锁释放事件快照（MySQL路径）
+          await this.persistEventSnapshotRecord(order, {
+            eventType: "operation_lock_release",
+            title: order.mainStatus === OrderMainStatus.NoShow ? "取车超时/爽约快照" : "操作锁释放快照",
+            triggerReason: this.optionalString(body.reason) || (order.mainStatus === OrderMainStatus.NoShow ? "取车超时，系统判定爽约" : "门店释放取车操作锁"),
+            settlementTarget: order.mainStatus === OrderMainStatus.NoShow ? "终止结算" : "无",
+            before: { mainStatus: previousStatus, operationLockStatus: OperationLockStatus.Active },
+            after: { mainStatus: order.mainStatus, operationLockStatus: order.mainStatus === OrderMainStatus.NoShow ? OperationLockStatus.Released : order.operationLockStatus },
+            amountBreakdown: order.mainStatus === OrderMainStatus.NoShow ? { noShow: true, contactResult: this.optionalString(body.contactResult) } : undefined,
+            operator: String(body.operator ?? "门店营运")
+          });
         }
         break;
       case "mark-no-show":
@@ -7334,10 +7681,106 @@ export class StoreRentalService {
           actionTimelineDetail = result.timelineAction;
           resultMessage = result.message;
           settlementToSave = result.settlementSummary;
+          if (action === "mark-no-show") {
+            await this.persistEventSnapshotRecord(order, {
+              eventType: "no_show",
+              title: "爽约标记快照",
+              triggerReason: this.requiredActionReason(body.reason ?? body.contactResult, ""),
+              settlementTarget: "终止结算",
+              amount: result.settlementSummary?.finalReceivableAmount ?? 0,
+              before: { mainStatus: previousStatus },
+              after: { mainStatus: order.mainStatus, paymentStatus: order.paymentStatus },
+              amountBreakdown: {
+                finalReceivableAmount: result.settlementSummary?.finalReceivableAmount ?? 0,
+                contactResult: this.optionalString(body.contactResult)
+              },
+              operator: String(body.operator ?? "门店营运")
+            });
+          } else if (action === "reject-order") {
+            await this.persistEventSnapshotRecord(order, {
+              eventType: "order_rejection",
+              title: "拒绝履约快照",
+              triggerReason: this.requiredActionReason(body.reason ?? body.rejectReason, ""),
+              settlementTarget: "终止结算",
+              amount: this.optionalNumber(body.feeAmount ?? body.rejectionFeeAmount) ?? 0,
+              before: { mainStatus: previousStatus },
+              after: { mainStatus: order.mainStatus, paymentStatus: order.paymentStatus },
+              amountBreakdown: {
+                rejectionFeeAmount: this.optionalNumber(body.feeAmount ?? body.rejectionFeeAmount) ?? 0,
+                finalReceivableAmount: result.settlementSummary?.finalReceivableAmount ?? 0
+              },
+              operator: String(body.operator ?? "门店营运")
+            });
+          } else if (action === "close-order") {
+            await this.persistEventSnapshotRecord(order, {
+              eventType: "order_close",
+              title: "关闭订单快照",
+              triggerReason: this.requiredActionReason(body.reason ?? body.closeReason, ""),
+              settlementTarget: order.billingMode === BillingMode.Monthly ? "企业月结" : "终止结算",
+              before: { mainStatus: previousStatus },
+              after: { mainStatus: order.mainStatus, paymentStatus: order.paymentStatus },
+              amountBreakdown: {
+                billingMode: order.billingMode,
+                finalReceivableAmount: result.settlementSummary?.finalReceivableAmount ?? 0,
+                communicationConfirmed: true
+              },
+              operator: String(body.operator ?? "门店营运")
+            });
+          } else if (action === "cancel") {
+            await this.persistEventSnapshotRecord(order, {
+              eventType: "order_cancellation",
+              title: "取消订单快照",
+              triggerReason: this.requiredActionReason(body.reason ?? body.cancelReason, ""),
+              settlementTarget: "终止结算",
+              amount: result.settlementSummary?.finalReceivableAmount ?? 0,
+              before: { mainStatus: previousStatus },
+              after: { mainStatus: order.mainStatus, paymentStatus: order.paymentStatus },
+              amountBreakdown: {
+                cancelFeeAmount: result.settlementSummary?.finalReceivableAmount ?? 0,
+                specialWaiver: this.truthyFlag(body.specialWaiver),
+                finalReceivableAmount: result.settlementSummary?.finalReceivableAmount ?? 0
+              },
+              operator: String(body.operator ?? "门店营运")
+            });
+
+            // OR-22: 取消订单通知留痕（MySQL路径）
+            await this.persistNotificationRecord(order, {
+              scene: "order_terminal",
+              channel: "manual",
+              target: order.customerPhoneMasked,
+              status: "sent",
+              content: `订单 ${order.orderNo} 已取消，原因：${this.optionalString(body.reason ?? body.cancelReason) || "门店处理"}。`,
+              idempotencyKey: this.optionalString(body.idempotencyKey),
+              operator: String(body.operator ?? "门店营运")
+            });
+          }
         }
         break;
       default:
         break;
+    }
+
+    // OR-09: 终止动作专项审计日志（MySQL路径）
+    if (["cancel", "mark-no-show", "reject-order", "close-order"].includes(action)) {
+      try {
+        const feeSummary = (order.feeLedgerItems ?? [])
+          .filter((item) => item.status !== "voided")
+          .map((item) => `${item.name}:${item.amount}`)
+          .join("、") || "无";
+        await this.storeRentalRepository.createOperationLog({
+          targetType: "order",
+          targetId: order.id,
+          action: `终止动作-${this.actionLabel(action)}`,
+          operator: String(body.operator ?? "门店营运"),
+          detail:
+            `订单 ${order.orderNo} 终止：${this.actionLabel(action)}，` +
+            `${previousStatus} -> ${order.mainStatus}，费用：${feeSummary}，` +
+            `车辆 ${previousPlateNo || "未分配"} 已释放，操作锁已释放`,
+          createdAt: new Date().toISOString()
+        });
+      } catch (error) {
+        console.error("Failed to write terminal action audit log:", error);
+      }
     }
 
     // MySQL模式统一审计日志写入
@@ -7467,8 +7910,7 @@ export class StoreRentalService {
             vehicleGroupName: order.vehicleGroupName,
             baseReturnAt: oldReturnAtText,
             newReturnAt: order.returnAt,
-            pricingVersion: "store-rental-price-v2026.05.01",
-            dynamicPricingVersion: order.dynamicPricingVersion
+            pricingVersion: "store-rental-price-v2026.05.01"
           }
         });
       }
@@ -7483,6 +7925,17 @@ export class StoreRentalService {
         after: { returnAt: order.returnAt, mainStatus: order.mainStatus, extensionHours: Math.max(1, Math.ceil((newReturnAt.getTime() - oldReturnAt.getTime()) / 3_600_000)) },
         amountBreakdown: { extensionAmount: extensionFee?.amount ?? 0, settlementMode, feeStatus: settlementMode === "monthly" ? "monthly_billing" : settlementMode === "immediate" ? "settled" : "pending" },
         operator: String(body.operator ?? "门店营运")
+      });
+
+      // 续租审计日志（MySQL路径）
+      const extensionHoursForAudit = Math.max(1, Math.ceil((newReturnAt.getTime() - oldReturnAt.getTime()) / 3_600_000));
+      await this.storeRentalRepository.createOperationLog({
+        targetType: "order",
+        targetId: order.id,
+        action: "续租审计",
+        operator: String(body.operator ?? "门店营运"),
+        detail: `订单 ${order.orderNo} 延长用车 ${extensionHoursForAudit} 小时，结算方式：${settlementMode}，续租费用：${extensionFee?.amount ?? 0} 元，原还车：${oldReturnAtText}，新还车：${order.returnAt}`,
+        createdAt: new Date().toISOString()
       });
 
       return {
@@ -7558,9 +8011,26 @@ export class StoreRentalService {
         settlementTarget: order.billingMode === BillingMode.Monthly ? "企业月结" : "取车尾款",
         before: { plateNo: effect.previousPlateNo, vehicleGroupName: currentVehicle?.vehicleGroupName, dispatchStatus: DispatchStatus.Pending },
         after: { plateNo: order.plateNo, vehicleGroupName: order.vehicleGroupName, dispatchStatus: order.dispatchStatus },
-        amountBreakdown: { feeAmount: effect.fee?.amount ?? 0, priceHandling: effect.fee ? "diff" : "free" },
+        amountBreakdown: {
+          feeAmount: effect.fee?.amount ?? 0,
+          priceHandling: effect.fee ? "diff" : "free",
+          totalAmount: order.totalAmount,
+          finalReceivableAmount: effect.settlementSummary.finalReceivableAmount,
+          monthlyBillingPosted: effect.settlementSummary.monthlyBillingPosted
+        },
         operator: effect.operator
       });
+
+      // OR-11: 改派专项审计日志
+      await this.appendOperationLog(
+        "order",
+        order.id,
+        order.dispatchStatus === DispatchStatus.Upgraded ? "免费升等" : "订单改派",
+        effect.operator,
+        `订单 ${order.orderNo} ${order.dispatchStatus === DispatchStatus.Upgraded ? "免费升等" : "人工改派"}：` +
+        `${effect.previousPlateNo} -> ${targetVehicle.licensePlate}，` +
+        `${effect.fee ? `差价 ${effect.fee.amount}` : "无差价"}，原因：${effect.reasonLabel}`
+      );
 
       return {
         timelineAction: effect.timelineAction,
@@ -7856,7 +8326,6 @@ export class StoreRentalService {
     return this.dispatchEvents
       .filter((event) => (query.orderId ? event.orderId === query.orderId : true))
       .filter((event) => (query.planId ? event.planId === query.planId : true))
-      .filter((event) => (query.eventType ? event.eventType === query.eventType : true))
       .sort(
         (left, right) =>
           new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
@@ -7885,7 +8354,7 @@ export class StoreRentalService {
       "manual_protected_invalid"
     ].includes(input.taskType);
     const event = await this.recordDispatchEvent({
-      eventType: "task_closed",
+      eventType: "alert_closed",
       source: "manual",
       title: "调度任务关闭",
       orderId: order.id,
@@ -7901,8 +8370,6 @@ export class StoreRentalService {
         taskKey: `${order.id}:${input.taskType}`
       }
     });
-
-    await this.appendOperationLog("dispatch_task", input.taskId, "调度任务关闭", operator, `调度任务 ${order.orderNo} 类型 ${input.taskType} 已由 ${operator} 关闭，原因：${reason}`);
 
     return {
       taskId: input.taskId,
@@ -7925,7 +8392,7 @@ export class StoreRentalService {
 
     const operator = input.operator || "调度员";
     const event = await this.recordDispatchEvent({
-      eventType: "task_claimed",
+      eventType: "alert_closed",
       source: "manual",
       title: "调度任务认领",
       orderId: order.id,
@@ -7944,9 +8411,6 @@ export class StoreRentalService {
         action: "claim"
       }
     });
-
-    // DP-04: 调度任务认领审计
-    await this.appendOperationLog("dispatch_task", input.taskId, "调度任务认领", operator, `调度任务 ${order.orderNo} 类型 ${input.taskType} 已被 ${operator} 认领`);
 
     return {
       taskId: input.taskId,
@@ -7972,7 +8436,7 @@ export class StoreRentalService {
 
     const operator = input.operator || "调度员";
     const event = await this.recordDispatchEvent({
-      eventType: "task_processed",
+      eventType: "alert_closed",
       source: "manual",
       title: `调度任务处理: ${input.status}`,
       orderId: order.id,
@@ -8980,19 +9444,7 @@ export class StoreRentalService {
         riskRows,
         recommendations,
         systemPrompt:
-          "你是门市租赁调度分析 Agent，只能在同车行、同车组、车辆状态、时间窗、硬锁和人工保护约束内输出建议，不得直接执行动作。",
-        mockMode: true,
-        mockReason:
-          "当前为 MVP 阶段，AI 调度分析仅生成建议数据包，不执行任何订单变更操作。",
-        aiRequestLog: {
-          requestedAt: new Date().toISOString(),
-          analysisId,
-          promptVersion,
-          packetVersion,
-          riskRowCount: riskRows.length,
-          recommendationCount: recommendations.length,
-          status: "mock_only"
-        }
+          "你是门市租赁调度分析 Agent，只能在同车行、同车组、车辆状态、时间窗、硬锁和人工保护约束内输出建议，不得直接执行动作。"
       }
     });
 
@@ -9006,7 +9458,7 @@ export class StoreRentalService {
       riskRows,
       recommendations,
       event,
-      message: "AI 调度分析请求已记录。当前为 MVP 阶段，推荐结果仅作参考，需人工确认后再按现有调度接口应用。不直接修改订单数据。"
+      message: "AI 调度分析请求已记录。本期预留真实模型接入，推荐结果需人工确认后再按现有调度接口应用。"
     };
   }
 
@@ -11870,6 +12322,7 @@ export class StoreRentalService {
       { name: "基础租金", amount: settlement.rentalAmount },
       { name: "增值服务/保障", amount: settlement.serviceFeeAmount },
       { name: "超时费用", amount: settlement.overtimeFeeAmount },
+      { name: "超里程费用", amount: settlement.extraMileageFeeAmount },
       { name: "损伤赔偿", amount: settlement.damageFeeAmount },
       { name: "清洁/缺件费用", amount: settlement.cleaningFeeAmount },
       ...(settlement.discountAmount > 0
@@ -12338,6 +12791,32 @@ export class StoreRentalService {
           action: "转单冲突快捷改派锁车",
           reason: `${redirect.order.orderNo} / ${redirect.reasonLabel}`
         }
+      );
+
+      // OR-12: 快捷改派后续订单事件快照
+      await this.persistEventSnapshotRecord(redirect.order, {
+        eventType: "redirection",
+        title: "转单冲突快捷改派快照",
+        triggerReason: `当前订单 ${order.orderNo} 改还车${mode === "store" ? "门市" : "据点"}导致后续预约占用冲突`,
+        settlementTarget: redirect.order.billingMode === BillingMode.Monthly ? "企业月结" : "取车尾款",
+        before: { plateNo: redirect.previousPlateNo, vehicleGroupName: redirect.order.vehicleGroupName },
+        after: { plateNo: redirect.order.plateNo, vehicleGroupName: redirect.order.vehicleGroupName, dispatchStatus: redirect.order.dispatchStatus },
+        amountBreakdown: {
+          feeAmount: redirect.fee?.amount ?? 0,
+          finalReceivableAmount: redirect.settlementSummary.finalReceivableAmount
+        },
+        operator: redirect.operator
+      });
+
+      // OR-12: 转单冲突快捷改派审计日志
+      await this.appendOperationLog(
+        "order",
+        redirect.order.id,
+        "转单冲突快捷改派",
+        redirect.operator,
+        `订单 ${redirect.order.orderNo} 因 ${order.orderNo} 改还车${mode === "store" ? "门市" : "据点"}导致占用冲突，` +
+        `快捷改派：${redirect.previousPlateNo} -> ${redirect.targetVehicle.licensePlate}，` +
+        `原还车门市 ${originalReturnStoreName} 存在后续预约，已转单不破坏后续订单占用。`
       );
     }
     if (effect.fee) {
@@ -13206,6 +13685,15 @@ export class StoreRentalService {
       }
     }
 
+    // OR-13: 事故登记审计日志
+    this.appendOperationLog(
+      "accident",
+      accident.record.id,
+      "事故登记",
+      accident.operator,
+      `订单 ${order.orderNo} 事故登记：${accident.record.reportNo}，事故描述：${accident.record.description}，责任归属：${accident.responsibilityLabel}，预估费用：${accident.estimatedCostAmount} 元，理赔状态：${accident.record.claimStatus}`
+    );
+
     return this.accidentActionEffect(order, accident, financial.fee, previousStatus);
   }
 
@@ -13261,6 +13749,15 @@ export class StoreRentalService {
           tryAutoReassign: true
         });
       }
+
+      // OR-13: 事故登记审计日志（MySQL路径）
+      await this.appendOperationLog(
+        "accident",
+        accident.record.id,
+        "事故登记",
+        accident.operator,
+        `订单 ${order.orderNo} 事故登记：${accident.record.reportNo}，事故描述：${accident.record.description}，责任归属：${accident.responsibilityLabel}，预估费用：${accident.estimatedCostAmount} 元，理赔状态：${accident.record.claimStatus}`
+      );
 
       return {
         ...this.accidentActionEffect(order, accident, financial.fee, previousStatus),
@@ -14156,15 +14653,116 @@ export class StoreRentalService {
     return PaymentStatus.Unpaid;
   }
 
+  private recalcOrderPaymentStatus(order: StoreRentalOrderSummary): void {
+    const feeItems = this.buildFeeLedgerItems(order);
+    const chargeFees = feeItems.filter((f) => f.direction === "charge" && f.status !== "voided");
+    const totalCharge = chargeFees.reduce((sum, f) => sum + f.amount, 0);
+    const pendingCharge = chargeFees
+      .filter((f) => f.status === "pending")
+      .reduce((sum, f) => sum + f.pendingAmount, 0);
+
+    if (order.billingMode === BillingMode.Monthly) {
+      order.paymentStatus =
+        totalCharge > 0 ? PaymentStatus.MonthlyBilling : PaymentStatus.Unpaid;
+    } else if (pendingCharge > 0) {
+      order.paymentStatus = PaymentStatus.PaymentDue;
+    } else if (totalCharge > 0) {
+      order.paymentStatus = PaymentStatus.Paid;
+    } else {
+      order.paymentStatus = PaymentStatus.Unpaid;
+    }
+  }
+
+  private buildAvailableActions(order: StoreRentalOrderSummary): string[] {
+    const actionStatusMap: Record<string, OrderMainStatus[]> = {
+      "payment-success": [OrderMainStatus.PendingPayment],
+      "start-pickup": [OrderMainStatus.Reserved, OrderMainStatus.PickupOverdue],
+      "pickup-inspection": [OrderMainStatus.Inspecting],
+      "extend-rental": [
+        OrderMainStatus.Renting,
+        OrderMainStatus.Renewing,
+        OrderMainStatus.Overdue
+      ],
+      "redirect-order": [
+        OrderMainStatus.Reserved,
+        OrderMainStatus.PickupOverdue,
+        OrderMainStatus.Inspecting,
+        OrderMainStatus.Renting,
+        OrderMainStatus.Renewing,
+        OrderMainStatus.Overdue,
+        OrderMainStatus.AccidentProcessing
+      ],
+      "change-return-store": [
+        OrderMainStatus.Reserved,
+        OrderMainStatus.PickupOverdue,
+        OrderMainStatus.Inspecting,
+        OrderMainStatus.Renting,
+        OrderMainStatus.Renewing,
+        OrderMainStatus.Overdue,
+        OrderMainStatus.AccidentProcessing
+      ],
+      "change-return-station": [
+        OrderMainStatus.Reserved,
+        OrderMainStatus.PickupOverdue,
+        OrderMainStatus.Inspecting,
+        OrderMainStatus.Renting,
+        OrderMainStatus.Renewing,
+        OrderMainStatus.Overdue,
+        OrderMainStatus.AccidentProcessing
+      ],
+      "return-inspection": [
+        OrderMainStatus.Renting,
+        OrderMainStatus.Renewing,
+        OrderMainStatus.Overdue,
+        OrderMainStatus.AccidentProcessing
+      ],
+      "confirm-settlement": [
+        OrderMainStatus.SettlementPending,
+        OrderMainStatus.PaymentDue,
+        OrderMainStatus.RefundPending
+      ],
+      "register-accident": [
+        OrderMainStatus.Renting,
+        OrderMainStatus.Renewing,
+        OrderMainStatus.Overdue,
+        OrderMainStatus.AccidentProcessing,
+        OrderMainStatus.SettlementPending,
+        OrderMainStatus.PaymentDue,
+        OrderMainStatus.RefundPending,
+        OrderMainStatus.Completed
+      ],
+      "release-operation-lock": [OrderMainStatus.Inspecting],
+      "mark-no-show": [OrderMainStatus.PickupOverdue],
+      "reject-order": [OrderMainStatus.Inspecting],
+      "close-order": [
+        OrderMainStatus.PendingPayment,
+        OrderMainStatus.Reserved,
+        OrderMainStatus.PickupOverdue,
+        OrderMainStatus.Inspecting,
+        OrderMainStatus.Renting,
+        OrderMainStatus.Renewing,
+        OrderMainStatus.Overdue,
+        OrderMainStatus.AccidentProcessing
+      ],
+      cancel: [
+        OrderMainStatus.PendingPayment,
+        OrderMainStatus.Reserved,
+        OrderMainStatus.PickupOverdue
+      ]
+    };
+
+    return Object.entries(actionStatusMap)
+      .filter(([, statuses]) => statuses.includes(order.mainStatus))
+      .map(([action]) => action);
+  }
+
   private buildFeeLedgerItems(order: StoreRentalOrderSummary): StoreRentalFeeLedgerItem[] {
     const settlement =
       this.settlementSummaries.get(order.id) ?? this.defaultSettlementSummary(order);
     const baseStatus = this.baseFeeStatus(order);
     const returnFeeStatus = this.returnFeeStatus(order, settlement);
     const createdAt = order.pickupAt;
-    const baseSnapshotRef = order.dynamicPricingVersion
-      ? `pricingVersion:store-rental-price-v2026.05.01@${order.dynamicPricingVersion}`
-      : "pricingVersion:store-rental-price-v2026.05.01";
+    const baseSnapshotRef = "pricingVersion:store-rental-price-v2026.05.01";
     const returnSnapshotRef = `returnSettlement:${order.orderNo}`;
     const items: StoreRentalFeeLedgerItem[] = [
       this.feeLedgerItem({
@@ -14207,6 +14805,24 @@ export class StoreRentalService {
           status: returnFeeStatus,
           amount: settlement.overtimeFeeAmount,
           description: "还车阶段按实际还车时间和规则快照计算。",
+          snapshotRef: returnSnapshotRef,
+          createdAt: new Date().toISOString()
+        })
+      );
+    }
+
+    if (settlement.extraMileageFeeAmount > 0) {
+      items.push(
+        this.feeLedgerItem({
+          id: `${order.id}_extra_mileage`,
+          code: "EXTRA_MILEAGE",
+          name: "超里程费用",
+          stage: "return_settlement",
+          source: "system",
+          direction: "charge",
+          status: returnFeeStatus,
+          amount: settlement.extraMileageFeeAmount,
+          description: "还车阶段按还车里程、免费里程和规则快照计算。",
           snapshotRef: returnSnapshotRef,
           createdAt: new Date().toISOString()
         })
@@ -14456,12 +15072,13 @@ export class StoreRentalService {
   }
 
   private feeLedgerItem(
-    input: Omit<StoreRentalFeeLedgerItem, "settledAmount" | "pendingAmount">
+    input: Omit<StoreRentalFeeLedgerItem, "settledAmount" | "pendingAmount" | "invoicedStatus">
   ): StoreRentalFeeLedgerItem {
     const isSettled = ["settled", "waived", "monthly_billing"].includes(input.status);
 
     return {
       ...input,
+      invoicedStatus: "none",
       settledAmount: isSettled ? input.amount : 0,
       pendingAmount: input.status === "pending" ? input.amount : 0
     };
@@ -14484,6 +15101,16 @@ export class StoreRentalService {
       return "monthly_billing";
     }
     return order.paymentStatus === PaymentStatus.Unpaid ? "pending" : "settled";
+  }
+
+  // OR-08: 判断订单是否处于终止态
+  private isTerminalOrderStatus(status: OrderMainStatus): boolean {
+    return [
+      OrderMainStatus.Cancelled,
+      OrderMainStatus.NoShow,
+      OrderMainStatus.Rejected,
+      OrderMainStatus.Closed
+    ].includes(status);
   }
 
   private returnFeeStatus(
@@ -14828,6 +15455,7 @@ export class StoreRentalService {
       next.rentalAmount +
         next.serviceFeeAmount +
         next.overtimeFeeAmount +
+        next.extraMileageFeeAmount +
         next.damageFeeAmount +
         next.cleaningFeeAmount -
         next.discountAmount;
@@ -15739,7 +16367,6 @@ export class StoreRentalService {
               customerType,
               vehicleGroupCode: input.vehicleGroupCode,
               pickupStoreCode: input.pickupStoreCode,
-              returnStoreCode: input.returnStoreCode,
               pickupAt,
               billableDays,
               membershipLevel: input.membershipLevel
@@ -15803,12 +16430,10 @@ export class StoreRentalService {
   private matchDynamicPricing(
     vehicleGroupCode: string,
     pickupAt: Date,
-    currentBaseDailyRate: number,
-    planVersion?: string
+    currentBaseDailyRate: number
   ): DynamicPricingMatchResult {
-    const eligibleSchedules = this.priceSchedules.filter((schedule) => {
-      // PR-03: 匹配已排期和已执行的调价方案
-      if (schedule.status !== "scheduled" && schedule.status !== "executed") {
+    const activeSchedule = this.priceSchedules.find((schedule) => {
+      if (schedule.status !== "scheduled") {
         return false;
       }
       const effectiveDate = new Date(schedule.effectiveAt);
@@ -15817,12 +16442,6 @@ export class StoreRentalService {
         schedule.changes.some((change) => change.vehicleGroupCode === vehicleGroupCode)
       );
     });
-
-    eligibleSchedules.sort(
-      (a, b) => new Date(b.effectiveAt).getTime() - new Date(a.effectiveAt).getTime()
-    );
-
-    const activeSchedule = eligibleSchedules[0];
 
     if (!activeSchedule) {
       return { matched: false, originalDailyRate: currentBaseDailyRate, adjustedDailyRate: currentBaseDailyRate };
@@ -15840,10 +16459,6 @@ export class StoreRentalService {
       matched: true,
       scheduleId: activeSchedule.id,
       scheduleSummary: activeSchedule.summary,
-      // PR-03: dynamicPricingVersion 组合方案版本与调度ID，便于追溯
-      dynamicPricingVersion: planVersion
-        ? `${planVersion}@${activeSchedule.id}`
-        : activeSchedule.id,
       originalDailyRate: groupChange.currentPrice,
       adjustedDailyRate: groupChange.newPrice,
       effectiveAt: activeSchedule.effectiveAt,
@@ -15953,7 +16568,6 @@ export class StoreRentalService {
       customerType: StoreRentalCustomerType;
       vehicleGroupCode: string;
       pickupStoreCode: string;
-      returnStoreCode?: string;
       pickupAt: Date;
       billableDays: number;
       membershipLevel?: string;
@@ -15969,10 +16583,6 @@ export class StoreRentalService {
       return false;
     }
     if (plan.storeCodes.length > 0 && !plan.storeCodes.includes(input.pickupStoreCode)) {
-      return false;
-    }
-    // PR-04: 到店核验 - 也校验还车门店是否在方案覆盖范围内
-    if (plan.storeCodes.length > 0 && input.returnStoreCode && !plan.storeCodes.includes(input.returnStoreCode)) {
       return false;
     }
     if (
@@ -16115,16 +16725,6 @@ export class StoreRentalService {
     );
   }
 
-  private getVehicleGroupFreeKm(vehicleGroupCode: string): number {
-    const groupName = this.getVehicleGroupNameByCode(vehicleGroupCode);
-    const primaryName = groupName.split(" / ")[0].toLowerCase();
-    const master = this.vehicleGroupMasters.find((vg) => {
-      const vgPrimary = (vg.storeProductGroupName || "").toLowerCase();
-      return vgPrimary && (primaryName.includes(vgPrimary) || vgPrimary.includes(primaryName));
-    });
-    return master?.freeKm ?? 300;
-  }
-
   private getStoreNameByCode(code: string) {
     const names: Record<string, string> = {
       MONGKOK: "旺角门市",
@@ -16149,48 +16749,5 @@ export class StoreRentalService {
     };
 
     return codes[storeName] ?? storeName;
-  }
-
-  /**
-   * 解析增值服务 memberLimit 中的最低会员等级 tierRank。
-   * 例: "黄金会员及以上" => 2, "黑金会员" => 3, "不限" => 0
-   */
-  private parseMemberTierRank(memberLimit: string): number {
-    if (!memberLimit || memberLimit === "不限") return 0;
-    const tierMap: Record<string, number> = {
-      白银: 1, 黄金: 2, 铂金: 3, 黑金: 3
-    };
-    for (const [label, rank] of Object.entries(tierMap)) {
-      if (memberLimit.includes(label)) return rank;
-    }
-    return 0;
-  }
-
-  /**
-   * 根据会员等级名称查找对应 tierRank。
-   * 通过 membershipPlans 按 name/code 模糊匹配。
-   */
-  private resolveMembershipTierRank(membershipLevel?: string): number {
-    if (!membershipLevel) return 0;
-    const normalized = membershipLevel.trim().toLowerCase();
-    const matched = this.membershipPlans.find(
-      (p) =>
-        p.status === "enabled" &&
-        (p.name.toLowerCase().includes(normalized) ||
-          p.code.toLowerCase().includes(normalized))
-    );
-    return matched?.tierRank ?? 0;
-  }
-
-  // PF-21: 数据字典
-  getDataDictionary() {
-    return {
-      orderMainStatus: Object.values(OrderMainStatus),
-      dispatchStatus: Object.values(DispatchStatus),
-      paymentStatus: Object.values(PaymentStatus),
-      billingMode: Object.values(BillingMode),
-      operationLockStatus: Object.values(OperationLockStatus),
-      configStatus: Object.values(ConfigStatus)
-    };
   }
 }
