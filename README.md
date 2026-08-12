@@ -1,15 +1,6 @@
-# 门市租赁平台开发说明
+# Rental OS 开发说明
 
-这个目录是从零开始的真实 MVP 工程，和仓库根目录的 PRD、知识库、静态原型隔离。
-
-## Git 边界
-
-本目录已经作为门市租赁平台的独立 Git 仓库使用，后续门市租赁代码、开发文档、数据库迁移和任务台账都在本目录内提交。
-
-- 子项目提交目录：`05_代码与工程/store-rental-platform`
-- 子项目默认分支：`main`
-- 外层大仓库只保留 PRD、原型、知识库等资料，不再跟踪本目录内的开发文件。
-- 需要提交门市租赁功能时，先进入本目录再执行 `git status`、`git add`、`git commit`。
+Rental OS 是面向摄影设备、露营装备、车辆载具和工程设备等品类的多租户 SaaS 租赁平台。这里的“租户”指使用系统的租赁经营商，不是向经营商租设备的个人或企业客户；一个 SaaS 租户只经营一种设备品类。
 
 ## 开发文档索引
 
@@ -18,11 +9,14 @@
 - `docs/STORE_RENTAL_DEVELOPMENT_LOG.md`：开发流水账，只记录过程检查和阶段复盘，不作为任务优先级依据。
 - `docs/GENERAL_RENTAL_MIGRATION_GUIDE.md`：后续从汽车门市租赁改造成通用租赁平台的改造指南，明确哪些文件、字段、页面、规则和接口需要调整。
 - `docs/DOMAIN_BOUNDARY_DECISIONS.md`：当前阶段的领域边界和命名决策，用于避免代码继续绑定死汽车租赁。
+- `docs/GENERAL_RENTAL_REACT_MIGRATION_PLAN.md`：已确认的通用设备租赁方向与 React + Ant Design 营运端迁移计划；后续架构和前端迁移以此为准。
+- `docs/PROJECT_STATUS_AND_ROADMAP.md`：当前功能地图、成熟度边界、通用化差距与下一阶段推荐路线；继续讨论开发方向时优先从这里开始。
+- `docs/SAAS_TENANT_FOUNDATION.md`：SaaS 租户、平台管理员、租户管理员、认证会话、生命周期和数据隔离的当前权威说明。
 
 ## 工程边界
 
-- `apps/admin`：营运端 Vue3 应用，门店端也复用该端，只通过角色和权限限制功能。
-- `apps/api`：NestJS API，先提供门市租赁 MVP 的接口和模拟集成。
+- `apps/admin`：React 19 + Ant Design 6 通用租赁营运端，运行在 `5175`；旧 Vue 前端已完全移除。当前仍使用现有车辆 API 的通用术语投影，尚未代表后端已完成多品类内核。
+- `apps/api`：NestJS API；保留既有车辆 MVP，并新增 `/api/rental/v1/*` 通用租赁内核。
 - `packages/shared`：前后端共享的枚举、DTO 和基础类型。
 - `docker-compose.yml`：本地 MySQL、Redis，用于后续真实数据和异步任务。
 
@@ -45,15 +39,22 @@
 - `/new-order`：新建门市订单，使用规则、可用性和价格进行报价试算并创建订单。
 - `/orders`：门市租赁订单列表和详情抽屉，支持支付成功、取车验车、还车验车、结算确认、取消等 MVP 状态动作。
 - `/reports`：数据报表，覆盖经营概览、订单报表、车辆报表、财务报表、导出任务和本地 MySQL 运维日志。
-- `/users`：平台账户管理，支持租户内账号、组织、角色、启停和重置密码。
-- `/permissions`：权限管理，平台管理员固定全权限，其他角色按业务线和权限码配置。
+- `/platform/tenants`：SaaS 运营方的租户管理，支持按唯一经营品类原子初始化、资料编辑、冻结和停用。
+- `/platform/users`：租户内账户与权限管理，支持组织、账号、角色、启停和一次性密码重置。
+- 租户管理员固定拥有当前租户内全权限；SaaS 平台管理员不自动拥有租户业务权限。
 
 分时租赁相关页签只保留原型位置，不实现业务逻辑。
+
+React 营运端已覆盖运营概览、标的/资产/网点、订单与辅助台账、合同、商业规则、动态调价、客户与企业月结、财务、高级调度、资产生命周期、调拨/TBox、完整报表、平台权限、租户治理和基础设施任务。`/rental/core` 已接入 Rental Core v0.1，支持租户单品类、序列化/数量/套装库存、多行订单、预占、配货和动态取还检查；原有业务页面仍使用 `/store-rental/*` 车辆兼容 API，尚未切换为同一事实源。
+
+Rental Core v0.1 当前默认使用进程内演示数据：`tenant_001` 为摄影设备样本，`tenant_002` 为露营设备样本。Prisma schema 和增量迁移已经准备，但 MySQL repository、迁移执行、seed 和重启持久化 E2E 仍是下一阶段，不应把当前演示状态视为生产持久化完成。
+
+营运端框架以 Ant Design v6 官方 `design.md` 和官网 Light / Dashboard 主题示例为视觉基线：显式启用 CSS Variable，使用 outlined 控件原型和官方 Default/Dark/Compact 算法。真实后台使用 6px 浏览器边缘留白和 14px 圆角组成完整应用窗口，窄屏自动贴边；窗口内部由白色顶栏、白色侧栏、可下拉选择的面包屑和 `#f5f8ff` 工作区构成。面包屑负责页面定位，不再使用“左上大标题 + 小标题”业务页头。页面视图切换使用官网示例的全圆角 Segmented 语言，一级业务 Tabs 必须独立放在页面背景上，下方内容另起白色圆角面板；只有确属某个面板的二级 Tabs 才能留在内容区。按钮保留 Ant v6 轻描边与按压反馈，表格使用浅灰表头、宽松行距、细分隔线和圆形/胶囊行操作。指标卡、页签、筛选和数据面板仍只在业务需要时使用，不作为全局模板强制复制。界面不复制 Ant 官网导航和品牌内容，也不使用装饰渐变。
 
 ## 本地启动
 
 ```bash
-cd store-rental-platform
+cd rental-OS
 copy .env.example .env
 docker compose up -d
 npm install
@@ -63,19 +64,19 @@ npm run dev
 启动后：
 
 - API: `http://localhost:3000/api`
-- 营运端: `http://localhost:5173`
+- React 营运端: `http://localhost:5175`
 
-如果本机已有旧项目占用 `5173`，可以分开启动并把当前营运端固定到 `5174`：
+如果需要单独启动 React 端：
 
 ```bash
 npm run dev:api
-npm run dev:admin:5174
+npm run dev:admin
 ```
 
 对应访问地址：
 
 - API: `http://localhost:3000/api`
-- 营运端: `http://localhost:5174`
+- React 营运端: `http://localhost:5175`
 
 本地开发时不要长期同时跑 `npm run build` 和 API watch；生产构建会清理 API 的 `dist`。如果构建后 `3000` 不响应，重新执行 `npm run dev:api`。
 
@@ -85,7 +86,7 @@ npm run dev:admin:5174
 mysql://store_rental:store_rental@localhost:3306/store_rental
 ```
 
-当前 MVP 支持内存数据和 MySQL 数据源。报表、导出任务和运维日志按 MySQL 口径开发；验证报表前建议执行 `npm run db:seed:reports` 补齐演示订单、费用、月结和运维日志数据。
+`.env.example` 默认让平台底座和旧车辆兼容域使用 MySQL。执行 migration 与 seed 后，可使用 `platform / admin / RentalOS!2026` 进入 SaaS 租户管理，或使用 `demo / admin / RentalDemo!2026` 进入租户运营台。报表、导出任务和运维日志按 MySQL 口径开发；验证报表前建议执行 `npm run db:seed:reports`。
 
 ## MVP 集成策略
 

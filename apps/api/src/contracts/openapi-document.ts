@@ -175,10 +175,23 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   LoginResponse: objectOf(
     {
       accessToken: stringSchema,
+      refreshToken: stringSchema,
+      expiresIn: numberSchema,
       tenant: ref("TenantContext"),
       user: ref("AuthUser")
     },
-    ["accessToken", "tenant", "user"]
+    ["accessToken", "refreshToken", "expiresIn", "tenant", "user"]
+  ),
+  RefreshSessionRequest: objectOf(
+    { refreshToken: stringSchema },
+    ["refreshToken"]
+  ),
+  ChangePasswordRequest: objectOf(
+    {
+      currentPassword: { type: "string", format: "password" },
+      newPassword: { type: "string", format: "password" }
+    },
+    ["currentPassword", "newPassword"]
   ),
   TenantContext: objectOf(
     {
@@ -192,6 +205,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   AuthUser: objectOf(
     {
       id: stringSchema,
+      tenantId: stringSchema,
       account: stringSchema,
       displayName: stringSchema,
       roleNames: arrayOf(stringSchema),
@@ -201,9 +215,11 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       organizationId: stringSchema,
       organizationName: stringSchema,
       isPlatformAdmin: booleanSchema,
+      isSaasAdmin: booleanSchema,
+      mustChangePassword: booleanSchema,
       permissions: arrayOf(stringSchema)
     },
-    ["id", "account", "displayName", "roleNames", "scope"]
+    ["id", "tenantId", "account", "displayName", "roleNames", "scope"]
   ),
   TenantSummary: objectOf(
     {
@@ -211,7 +227,15 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       tenantCode: stringSchema,
       tenantName: stringSchema,
       tenantStatus: stringSchema,
-      enabledBusinessLines: arrayOf(stringSchema)
+      enabledBusinessLines: arrayOf(stringSchema),
+      categoryCode: stringSchema,
+      categoryName: stringSchema,
+      userCount: numberSchema,
+      organizationCount: numberSchema,
+      orderCount: numberSchema,
+      statusReason: stringSchema,
+      createdAt: { type: "string", format: "date-time" },
+      updatedAt: { type: "string", format: "date-time" }
     },
     ["tenantId", "tenantCode", "tenantName", "tenantStatus", "enabledBusinessLines"]
   ),
@@ -244,6 +268,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   SystemRoleRow: objectOf(
     {
       id: stringSchema,
+      tenantId: stringSchema,
       code: stringSchema,
       name: stringSchema,
       description: stringSchema,
@@ -296,6 +321,9 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       roleNames: arrayOf(stringSchema),
       scope: stringSchema,
       isPlatformAdmin: booleanSchema,
+      isSaasAdmin: booleanSchema,
+      mustChangePassword: booleanSchema,
+      temporaryPassword: stringSchema,
       isActive: booleanSchema,
       permissions: arrayOf(stringSchema),
       dataScope: stringSchema
@@ -528,6 +556,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     {
       tenantCode: stringSchema,
       tenantName: stringSchema,
+      categoryCode: stringSchema,
       operator: stringSchema,
       adminAccount: stringSchema,
       adminDisplayName: stringSchema,
@@ -535,10 +564,31 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       storeName: stringSchema,
       storeCode: stringSchema
     },
-    ["tenantCode", "tenantName", "operator", "adminAccount", "adminDisplayName"]
+    ["tenantCode", "tenantName", "categoryCode", "operator", "adminAccount", "adminDisplayName"]
+  ),
+  UpdateTenantRequest: objectOf(
+    { tenantName: stringSchema },
+    ["tenantName"]
+  ),
+  UpdateTenantStatusRequest: objectOf(
+    {
+      status: stringSchema,
+      reason: stringSchema
+    },
+    ["status", "reason"]
   ),
   TenantBootstrapPreview: objectSchema,
-  TenantBootstrapResult: objectSchema,
+  TenantBootstrapResult: objectOf(
+    {
+      tenant: ref("TenantSummary"),
+      adminUser: ref("SystemUserRow"),
+      preview: ref("TenantBootstrapPreview"),
+      templateExecution: objectSchema,
+      message: stringSchema,
+      temporaryPassword: stringSchema
+    },
+    ["tenant", "adminUser", "preview", "message"]
+  ),
   RolePermissionsRequest: objectOf({
     permissions: arrayOf(stringSchema)
   }),
@@ -828,13 +878,74 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     responseSchema: "AuthUser"
   },
   {
+    method: "post",
+    path: "/api/auth/refresh",
+    tag: "Auth",
+    operationId: "refreshSession",
+    summary: "Rotate refresh token and issue a new access token",
+    permissions: [],
+    requestSchema: "RefreshSessionRequest",
+    responseSchema: "LoginResponse"
+  },
+  {
+    method: "post",
+    path: "/api/auth/logout",
+    tag: "Auth",
+    operationId: "logout",
+    summary: "Revoke the current refresh session",
+    permissions: [],
+    authRequired: true,
+    requestSchema: "RefreshSessionRequest",
+    responseSchema: "GenericObject"
+  },
+  {
+    method: "post",
+    path: "/api/auth/change-password",
+    tag: "Auth",
+    operationId: "changePassword",
+    summary: "Change password and revoke other sessions",
+    permissions: [],
+    authRequired: true,
+    requestSchema: "ChangePasswordRequest",
+    responseSchema: "LoginResponse"
+  },
+  {
     method: "get",
     path: "/api/platform/tenants",
     tag: "Platform",
     operationId: "listTenants",
     summary: "List tenants",
-    permissions: ["system:tenant:manage", "system:user:manage", "system:role:manage"],
+    permissions: ["system:tenant:manage"],
     responseSchema: arrayOf("TenantSummary")
+  },
+  {
+    method: "get",
+    path: "/api/platform/tenants/{id}",
+    tag: "Platform",
+    operationId: "getTenant",
+    summary: "Get one SaaS tenant",
+    permissions: ["system:tenant:manage"],
+    responseSchema: "TenantSummary"
+  },
+  {
+    method: "put",
+    path: "/api/platform/tenants/{id}",
+    tag: "Platform",
+    operationId: "updateTenant",
+    summary: "Update one SaaS tenant",
+    permissions: ["system:tenant:manage"],
+    requestSchema: "UpdateTenantRequest",
+    responseSchema: "TenantSummary"
+  },
+  {
+    method: "put",
+    path: "/api/platform/tenants/{id}/status",
+    tag: "Platform",
+    operationId: "updateTenantStatus",
+    summary: "Change one SaaS tenant lifecycle status",
+    permissions: ["system:tenant:manage"],
+    requestSchema: "UpdateTenantStatusRequest",
+    responseSchema: "TenantSummary"
   },
   {
     method: "get",
@@ -1989,6 +2100,94 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     requestSchema: "StoreRentalDispatchProcessTaskRequest",
     responseSchema: "StoreRentalDispatchTaskActionResult"
   },
+  {
+    method: "get", path: "/api/rental/v1/categories", tag: "RentalCore", operationId: "listRentalCategories",
+    summary: "List supported rental categories", permissions: ["store-rental:order:view", "store-rental:vehicle:view"], responseSchema: "GenericObject"
+  },
+  {
+    method: "get", path: "/api/rental/v1/tenant-profile", tag: "RentalCore", operationId: "getRentalTenantProfile",
+    summary: "Get tenant rental profile", permissions: ["store-rental:order:view", "store-rental:vehicle:view"], responseSchema: "GenericObject"
+  },
+  {
+    method: "put", path: "/api/rental/v1/tenant-profile", tag: "RentalCore", operationId: "saveRentalTenantProfile",
+    summary: "Save tenant rental profile", permissions: ["store-rental:order:operate", "store-rental:vehicle:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+  },
+  {
+    method: "get", path: "/api/rental/v1/locations", tag: "RentalCore", operationId: "listRentalLocations",
+    summary: "List generic fulfillment locations", permissions: ["store-rental:order:view", "store-rental:vehicle:view"], responseSchema: "GenericObject"
+  },
+  {
+    method: "get", path: "/api/rental/v1/item-groups", tag: "RentalCore", operationId: "listRentalItemGroups",
+    summary: "List generic rental item groups", permissions: ["store-rental:order:view", "store-rental:vehicle:view"], responseSchema: "GenericObject"
+  },
+  {
+    method: "post", path: "/api/rental/v1/item-groups", tag: "RentalCore", operationId: "createRentalItemGroup",
+    summary: "Create generic rental item group", permissions: ["store-rental:order:operate", "store-rental:vehicle:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+  },
+  {
+    method: "put", path: "/api/rental/v1/item-groups/{id}", tag: "RentalCore", operationId: "updateRentalItemGroup",
+    summary: "Update generic rental item group", permissions: ["store-rental:order:operate", "store-rental:vehicle:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+  },
+  {
+    method: "get", path: "/api/rental/v1/assets", tag: "RentalCore", operationId: "listRentalAssets",
+    summary: "List serialized rental assets", permissions: ["store-rental:order:view", "store-rental:vehicle:view"], responseSchema: "GenericObject"
+  },
+  {
+    method: "post", path: "/api/rental/v1/assets", tag: "RentalCore", operationId: "createRentalAsset",
+    summary: "Create serialized rental asset", permissions: ["store-rental:order:operate", "store-rental:vehicle:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+  },
+  {
+    method: "put", path: "/api/rental/v1/assets/{id}", tag: "RentalCore", operationId: "updateRentalAsset",
+    summary: "Update serialized rental asset", permissions: ["store-rental:order:operate", "store-rental:vehicle:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+  },
+  {
+    method: "get", path: "/api/rental/v1/stock-balances", tag: "RentalCore", operationId: "listRentalStockBalances",
+    summary: "List quantity stock balances", permissions: ["store-rental:order:view", "store-rental:vehicle:view"], responseSchema: "GenericObject"
+  },
+  {
+    method: "put", path: "/api/rental/v1/stock-balances", tag: "RentalCore", operationId: "saveRentalStockBalance",
+    summary: "Save quantity stock balance", permissions: ["store-rental:order:operate", "store-rental:vehicle:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+  },
+  {
+    method: "post", path: "/api/rental/v1/availability", tag: "RentalCore", operationId: "checkRentalAvailability",
+    summary: "Check generic rental availability", permissions: ["store-rental:order:operate", "store-rental:vehicle:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+  },
+  {
+    method: "get", path: "/api/rental/v1/orders", tag: "RentalCore", operationId: "listRentalCoreOrders",
+    summary: "List Rental Core orders", permissions: ["store-rental:order:view", "store-rental:vehicle:view"], responseSchema: "GenericObject"
+  },
+  {
+    method: "post", path: "/api/rental/v1/orders", tag: "RentalCore", operationId: "createRentalCoreOrder",
+    summary: "Create multi-line Rental Core order", permissions: ["store-rental:order:operate", "store-rental:vehicle:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+  },
+  {
+    method: "get", path: "/api/rental/v1/orders/{id}", tag: "RentalCore", operationId: "getRentalCoreOrder",
+    summary: "Get Rental Core order", permissions: ["store-rental:order:view", "store-rental:vehicle:view"], responseSchema: "GenericObject"
+  },
+  {
+    method: "post", path: "/api/rental/v1/orders/{id}/confirm", tag: "RentalCore", operationId: "confirmRentalCoreOrder",
+    summary: "Confirm Rental Core reservation", permissions: ["store-rental:order:operate", "store-rental:vehicle:manage"], responseSchema: "GenericObject"
+  },
+  {
+    method: "post", path: "/api/rental/v1/orders/{id}/allocate", tag: "RentalCore", operationId: "allocateRentalCoreOrder",
+    summary: "Allocate Rental Core inventory", permissions: ["store-rental:order:operate", "store-rental:vehicle:manage"], responseSchema: "GenericObject"
+  },
+  {
+    method: "post", path: "/api/rental/v1/orders/{id}/cancel", tag: "RentalCore", operationId: "cancelRentalCoreOrder",
+    summary: "Cancel Rental Core order", permissions: ["store-rental:order:operate", "store-rental:vehicle:manage"], responseSchema: "GenericObject"
+  },
+  {
+    method: "get", path: "/api/rental/v1/inspection-templates", tag: "RentalCore", operationId: "listRentalInspectionTemplates",
+    summary: "List category inspection templates", permissions: ["store-rental:order:view", "store-rental:vehicle:view"], responseSchema: "GenericObject"
+  },
+  {
+    method: "get", path: "/api/rental/v1/orders/{id}/inspections", tag: "RentalCore", operationId: "listRentalOrderInspections",
+    summary: "List Rental Core inspections", permissions: ["store-rental:order:view", "store-rental:vehicle:view"], responseSchema: "GenericObject"
+  },
+  {
+    method: "post", path: "/api/rental/v1/orders/{id}/inspections", tag: "RentalCore", operationId: "createRentalOrderInspection",
+    summary: "Complete pickup or return inspection", permissions: ["store-rental:order:operate", "store-rental:vehicle:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+  },
   ...INTEGRATION_BACKLOG_OPERATIONS
 ];
 
@@ -2015,6 +2214,7 @@ export const OPENAPI_DOCUMENT = {
     { name: "MasterData" },
     { name: "Customer" },
     { name: "Order" },
+    { name: "RentalCore" },
     { name: "Reports" }
   ],
   paths: buildPaths(API_CONTRACT_OPERATIONS),

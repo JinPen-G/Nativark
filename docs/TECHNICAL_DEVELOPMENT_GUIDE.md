@@ -4,11 +4,18 @@
 
 ## 技术栈
 
-- 前端：Vue 3、Vite、TypeScript、Pinia、Vue Router、Element Plus、Tailwind CSS。
+- 前端：React 19.2.8、React DOM 19.2.8、Vite、TypeScript、Ant Design 6.6.0、React Router、TanStack Query、Zustand、Axios。
 - 后端：NestJS、TypeScript。
 - 共享包：`@store-rental/shared` 维护前后端共用 DTO、枚举和状态。
-- 数据库：MySQL。当前 MVP 默认使用后端内存数据；平台底座可通过 `PLATFORM_DATA_SOURCE=mysql` 切到 Prisma/MySQL，门市租赁可通过 `STORE_RENTAL_DATA_SOURCE=mysql` 逐步切换站点、车辆、客户、订单、费用和月结域。
+- 数据库：MySQL。`.env.example` 默认让平台底座与旧车辆兼容域使用 Prisma/MySQL；`memory` 仅保留为无数据库演示和自动测试 fallback。Rental Core v0.1 运行数据仍是进程内实现。
 - 本地辅助：Docker Compose 预留 MySQL、Redis。
+
+### 已确认的前端技术决策
+
+- `apps/admin` 已由 React + Ant Design 完全接替，旧 Vue、Pinia、Vue Router、Element Plus 和 Tailwind 前端依赖已移除。
+- React 页面消费 `packages/shared` DTO，服务端状态使用 TanStack Query，登录态与租户上下文使用 Zustand。
+- 现阶段 React 仍消费 `/store-rental/*` 车辆兼容 API；前端技术迁移完成不代表通用租赁后端和多品类数据模型已经完成。
+- 后续所有新页面和阻断修复均直接落在 React 工程，不再维护第二套前端。
 
 ## 目录结构
 
@@ -28,36 +35,21 @@ store-rental-platform/
 
 ### 入口
 
-- `apps/admin/src/main.ts`：注册 Vue、Pinia、Router、Element Plus 和图标。
-- `apps/admin/src/router.ts`：路由、登录守卫、页面级权限校验。
-- `apps/admin/src/api/client.ts`：Axios 实例、token、租户上下文、401 处理。
-- `apps/admin/src/stores/auth.ts`：登录态、租户上下文、用户权限。
-- `apps/admin/src/components/AppLayout.vue`：营运端统一侧边栏、顶部栏、菜单权限过滤。
+- `apps/admin/src/main.tsx`：挂载 React、Ant Design Provider、QueryClient 和 Router。
+- `apps/admin/src/app/AppRouter.tsx`：路由、登录守卫、页面级权限校验和旧地址重定向。
+- `apps/admin/src/api/http.ts`：Axios 实例、token、租户上下文和 401 处理。
+- `apps/admin/src/api/rental.ts`：高频领域 API；`api/operations.ts`：完整运营与平台工具 API。
+- `apps/admin/src/features/auth/authStore.ts`：登录态、租户上下文和用户权限。
+- `apps/admin/src/components/AppShell.tsx`：营运端侧边栏、顶部栏、菜单权限过滤。
 
 ### 当前页面
 
-- `LoginView.vue`：登录页，按原型左右分栏，保留验证码和语言切换。
-- `OrganizationManagementView.vue`：组织架构，按 `employees.html` 的组织树和部门编辑思路维护营运部门、车行、门店和站点；当前组织仍服务汽车租赁，后续通用租赁可改名为运营组织/服务网点/仓库层级。
-- `UserManagementView.vue`：平台账户管理，包含租户、组织、角色、启停、重置密码。
-- `PermissionsView.vue`：角色权限管理，包含业务线授权和权限矩阵。
-- `PlatformGovernanceView.vue`：平台治理中心，包含审计日志、数据字典、编号规则、租户初始化。
-- `RentalRulesView.vue`：门市租赁规则。
-- `ProductPricingView.vue`：基础产品定价。
-- `DynamicPricingView.vue`：动态调价策略，包含门市标准价版本、定时调价计划和基于真实报价接口的门市调价试算。
-- `StationsView.vue`：服务站点管理。
-- `VehicleGroupsView.vue`：车型组管理。
-- `VehiclesView.vue`：车辆档案库，包含车辆详情抽屉、维保/事故记录新增、车辆证照与随车物资维护、车辆状态动作和筛选预设。
-- `VehicleTransferView.vue`：车辆调拨管理，包含调拨任务列表、调拨创建、确认、出发、到达、取消和任务流转。
-- `VehicleStatusListView.vue`：车辆速查表，包含车辆状态、TBox 绑定和异常车务筛选。
-- `VehicleConsoleView.vue`：车辆控制台，包含 TBox 预留远控指令 mock。
-- `TboxManagementView.vue`：TBox 设备管理，包含设备台账和车辆绑定。
-- `ValueAddedServicesView.vue`：增值服务管理。
-- `NewOrderView.vue`：新建门市订单。
-- `OrdersView.vue`：门市租赁订单列表，已接入筛选预设保存、设默认、删除和默认视图自动应用。
-- `OrderDetailView.vue`：门市租赁订单详情工作台，包含订单动作、履约信息、费用中心。
-- `FinanceCenterView.vue`：财务结算中心，覆盖资金流水、预授权押金、企业月结、发票收据、手工调账和财务对账。
-- `OfficialVehicleContractsView.vue`：合同与单据中心，包含单据统计、筛选、模板卡片、订单关联生成、打印/下载 mock、mock 签署和单据快照。
-- `ReportsOpsView.vue`：战情分析看板，包含经营概览、订单报表、车辆报表、财务报表、运维日志和导出任务下载。
+- 业务主路径：运营概览、标的分组、资产与库存、履约网点、订单创建/列表/详情、合同与单据。
+- 商业与客户：租赁规则、基础定价、动态调价计划、营销方案、增值服务、个人客户、企业客户、会员审核与等级。
+- 财务与运营：资金流水、预授权、财务单据、调账审核、对账、调度任务、资产调拨和 TBox。
+- 资产生命周期：状态、位置流水、证照、随车物品、维保、事故、车况照片、履约点营业日历和容量快照。
+- 业务控制台：调度优化、AI 分析、人工改派、硬锁、车辆不可用、订单费用/交易/通知/备注、企业月结和合同附件。
+- 平台：组织、用户、角色、系统参数、安全基线、租户初始化、数据字典、编号规则、筛选预设、文件、打印、通知、异步任务和完整报表导出。
 
 当前已接入的营运端基础页面：
 
@@ -74,10 +66,9 @@ store-rental-platform/
 
 当前已落地的客户运营页面和接口：
 
-- 个人会员：`MembersView.vue`、`MemberDetailView.vue`、`MemberReviewView.vue`；列表已接入关键字、会员状态、审核状态、标签、分页、筛选统计和筛选预设，并在列表页补齐新增/编辑弹窗。新增/编辑走 `saveMember`，编辑前用 `getMemberDetail` 回填手机号、邮箱、证件、认证、紧急联系人、标签和风控备注。
-- 客户等级方案：`MembershipPlansView.vue`；等级保存已做后端层级、折扣比例、免费服务次数校验，个人订单报价会读取启用等级方案并生成租金/押金权益。
-- 企业客户：`CorporatesView.vue`、`CorporateDetailView.vue`；列表已接入关键字、企业状态、合同状态、分页、筛选统计和筛选预设。
-- 新建订单客户接入：`NewOrderView.vue` 已切换到真实会员/企业客户接口，不再使用原型客户 seed
+- 个人会员：客户工作台支持列表、新增/编辑、审核、风险操作和会员等级权益。
+- 企业客户：客户工作台和业务控制台支持企业档案、授信、月结账单、回款登记、合同和附件。
+- 新建订单使用真实会员/企业客户接口，不再使用原型客户 seed。
 
 当前已落地的客户运营接口：
 
@@ -95,7 +86,7 @@ store-rental-platform/
 
 当前客户运营与订单联动已具备：
 
-- 会员列表返回真实会员等级、认证状态、标签、积分余额、筛选统计和分页结果；会员列表页可直接新增/编辑资料并刷新后端分页结果；`NewOrderView.vue` 继续通过前端 client 兼容数组式会员下拉。
+- 会员列表返回真实会员等级、认证状态、标签、积分余额、筛选统计和分页结果；订单创建页通过 React API client 获取会员下拉。
 - 客户等级方案的 `orderDiscountPercent` 和 `depositDiscountPercent` 已接入 `POST /store-rental/pricing/quote`：个人订单按启用等级方案计算租金折扣、押金折扣、费用项、报价说明和订单快照；企业/月结订单不使用个人会员权益。
 - 企业客户详情支持月结配置字段：账单邮箱、对账单邮箱、对账联系人、自动生成月结、授信预警阈值。
 - 企业客户详情支持合同台账字段：合同编号、名称、状态、生效期、门市范围、附件文件名、备注。
@@ -108,9 +99,10 @@ store-rental-platform/
 
 前端登录态存在 localStorage：
 
-- `store_rental_access_token`
-- `store_rental_tenant`
-- `store_rental_user`
+- `rental_access_token`
+- `rental_refresh_token`
+- `rental_tenant`
+- `rental_user`
 
 请求时会自动写入：
 
@@ -120,8 +112,8 @@ store-rental-platform/
 
 页面权限分两层：
 
-- 菜单层：`AppLayout.vue` 根据 `authStore.hasPermission` 过滤菜单。
-- 路由层：`router.ts` 根据 `route.meta.permission` 拦截直接 URL 访问。
+- 菜单层：`AppShell.tsx` 根据 `authStore.hasPermission` 过滤菜单。
+- 路由层：`AppRouter.tsx` 通过 `PermissionRoute` 拦截直接 URL 访问。
 
 注意：前端权限只做交互保护，真正的接口保护在后端 `ApiAuthGuard`。
 
@@ -164,8 +156,8 @@ store-rental-platform/
 
 数据源：
 
-- 默认 `PLATFORM_DATA_SOURCE=memory`，继续使用内存 demo 数据，方便本地无数据库启动。
-- 设置 `PLATFORM_DATA_SOURCE=mysql` 后，登录、当前用户、租户、组织、权限树、角色、系统用户、系统参数、审计日志、数据字典、编号规则、筛选预设和租户初始化走 `PlatformRepository/Prisma`。
+- `.env.example` 默认 `PLATFORM_DATA_SOURCE=mysql`；登录、签名会话、租户、组织、权限树、角色、系统用户、系统参数、审计日志、数据字典、编号规则、筛选预设和租户初始化走 `PlatformRepository/Prisma`。
+- `PLATFORM_DATA_SOURCE=memory` 仅用于无数据库演示和自动测试，不作为持久化验收依据。
 - `DATABASE_CONNECT_ON_START=false` 时 API 启动不主动连库；切到 `mysql` 后实际访问平台接口会连接数据库。
 
 平台治理接口：
@@ -173,21 +165,23 @@ store-rental-platform/
 1. `GET /platform/audit-logs`：查询平台操作审计。内存模式读演示日志；MySQL 模式读 `OperationLog`。
 2. `GET /platform/dictionaries`、`PUT /platform/dictionaries/:code`：维护数据字典。MySQL 模式写 `SystemParameterSet.module=platform-dictionaries`。
 3. `GET /platform/number-rules`、`PUT /platform/number-rules/:code`、`POST /platform/number-rules/generate`：维护和试生成编号。MySQL 模式写 `SystemParameterSet.module=platform-number-rules`，生成时递增当前流水并写审计。
-4. `GET /platform/tenant-bootstrap/preview`、`POST /platform/tenant-bootstrap`：初始化租户、默认营运组织、默认角色、平台管理员、系统参数、数据字典和编号规则。
+4. `GET /platform/tenant-bootstrap/preview`、`POST /platform/tenant-bootstrap`：由 SaaS 平台管理员原子初始化租户、唯一经营品类、默认营运组织、租户管理员、系统参数、数据字典和编号规则。
 
 后续通用租赁改造时，平台治理优先保持品类无关：审计使用 `objectType/objectId/action`，字典按模块分组，编号规则按 `module/code` 分组。汽车相关的 `VEHICLE_LICENSE` 应迁移为通用 `ASSET_CERTIFICATE` 或按品类扩展。
 
 当前 SaaS 数据：
 
+- `tenant_platform / platform / Rental OS SaaS 平台`
 - `tenant_001 / demo / 演示香港租户`
 - `tenant_002 / demo2 / 演示深圳租户`
 
 默认账号：
 
-- `demo / admin / 123456`
-- `demo / store / 123456`
-- `demo / pricing / 123456`
-- `demo2 / admin / 123456`
+- `platform / admin / RentalOS!2026`（SaaS 平台管理员）
+- `demo / admin / RentalDemo!2026`（租户管理员）
+- `demo / store / RentalDemo!2026`
+- `demo / pricing / RentalDemo!2026`
+- `demo2 / admin / RentalDemo!2026`（租户管理员）
 
 ### 门市租赁模块
 
@@ -216,7 +210,7 @@ store-rental-platform/
 - 外部集成预留。
 - 企业端/H5 预留接口说明。
 
-当前门市租赁业务默认仍是内存数据。已新增 `StoreRentalRepository` 和 `STORE_RENTAL_DATA_SOURCE=memory|mysql`：设置为 `mysql` 后，租赁业务规则当前版本/历史版本、站点列表分页/筛选/保存、站点营业日历、站点容量/排队快照、车型组、车辆列表分页/筛选/保存/删除校验/车辆状态更新、车辆出入站流水、车况照片记录、维保记录、事故/出险记录、车辆操作日志、车辆调拨任务与流转、车辆证照、随车物资、TBox 台账、个人会员列表分页/筛选/详情/保存、会员审核、会员风控、客户等级方案、企业客户列表分页/筛选/详情/保存、企业联系人、企业合同、订单创建/查询、订单费用中心、检查记录、资金流水、预授权押金台账、发票/收据、手工调账、订单时间线、续租快照、改派动作、改还车门市/据点动作、终止类动作、订单事故登记、调度预分配/硬锁/人工改派、调度事件审计和企业月结账单走 Prisma/MySQL。
+`.env.example` 默认 `STORE_RENTAL_DATA_SOURCE=mysql`。旧车辆兼容仓库从认证请求上下文读取租户，不再固定 `tenant_001`；报表查询和导出也由后端覆盖为登录租户。`memory` 模式只供遗留页面演示，不作为跨租户验收依据。
 
 租赁业务规则版本实现口径：
 
@@ -370,10 +364,10 @@ system:tenant:manage
 - 企业动作：企业月结回款。
 - 系统动作：列表/报表导出。
 
-数据范围当前取值为 `all`、`organization`、`store`、`own`，已经在角色和登录用户上承载，但内存 MVP 还没有按数据范围过滤查询结果。接 MySQL 和 repository 层时，应在查询层统一追加租户、组织、门市、本人条件，不能只依赖前端隐藏。
+数据范围当前取值为 `all`、`organization`、`store`、`own`。平台组织、角色和用户查询已在 repository 层追加租户及组织条件；Rental Core 从认证上下文读取租户；旧车辆兼容仓库使用请求级租户。后续新增查询仍必须在数据库层追加范围条件，不能只依赖前端隐藏。
 
 后续通用租赁改造时，建议把 `store-rental:*` 权限迁移成通用 `rental:*` 命名，汽车专有按钮只保留在门市汽车租赁插件/模块内；`dataScope` 可以继续复用。
-- 平台管理员仍固定全权限。
+- 租户管理员固定拥有当前租户内全权限；SaaS 平台管理员只拥有租户管理能力。
 - 在页面级和接口级权限之外，新增按钮级权限和数据权限任务已列入台账，应和角色模板、组织归属、租户初始化一起设计。
 
 ## 主数据闭环
@@ -421,7 +415,7 @@ system:tenant:manage
 11. 租户初始化模板：`GET /platform/tenant-bootstrap/preview`
 12. 执行租户初始化：`POST /platform/tenant-bootstrap`
 
-`sectionKey` 当前按原型保存按钮拆分为 `memberRegister`、`memberPoints`、`fleetMaintenance`、`fleetCleaning`、`calendarFixed`、`calendarSpecial`、`push`、`aiModel`。MVP 阶段系统参数仍在内存中保存；接 MySQL 后建议拆为 `system_rule_configs`、`system_push_rules`、`system_ai_model_configs`、`system_ai_call_logs`，并按租户保存版本和更新人。
+`sectionKey` 当前按原型保存按钮拆分为 `memberRegister`、`memberPoints`、`fleetMaintenance`、`fleetCleaning`、`calendarFixed`、`calendarSpecial`、`push`、`aiModel`。MySQL 模式按租户和版本写入 `SystemParameterSet`；后续可再按访问频率拆为独立规则、推送和 AI 配置表。
 
 筛选预设使用独立 `FilterPreset` 表，按 `tenantId + scopeKey + name` 唯一，`scopeKey` 当前限定为 `store-rental.orders`、`store-rental.vehicles`、`store-rental.members`、`store-rental.corporates`。保存、设默认、删除会写入 `OperationLog`；同一租户同一 scope 的默认预设由 service/repository 主动保持单选。营运端订单、车辆、会员和企业客户列表已接入同一套 API 与前端控件。后续改造成通用租赁平台时，建议把 scope 命名扩展为 `rental.orders`、`rental.assets`、`rental.members`、`rental.corporates` 或按租赁品类增加前缀，表结构和 service 逻辑可保持不变。
 
@@ -662,6 +656,19 @@ PF-15 当前数据边界：
 
 ## MySQL 落库建议
 
+### Rental Core v0.1
+
+- 通用接口前缀：`/api/rental/v1`。
+- 控制器：`apps/api/src/modules/rental-core/rental-core.controller.ts`。
+- 领域服务：`apps/api/src/modules/rental-core/rental-core.service.ts`。
+- React 工作台：`apps/admin/src/features/rental-core/RentalCorePage.tsx`。
+- 共享 DTO：`packages/shared/src/index.ts` 的 `Rental Core v0.1` 区段。
+- 数据模型：`TenantRentalProfile`、`RentalItemGroup`、`RentalAsset`、`RentalStockBalance`、`RentalOrder`、`RentalOrderLine`、`RentalReservation`、`RentalAllocation`、`RentalInspectionTemplate`、`RentalInspectionRecord`。
+- 增量迁移：`apps/api/prisma/migrations/20260813000100_add_rental_core_v1/migration.sql`。
+- 自动验证：`npm run test:rental-core`、`npm run contract:validate`、`npm run test:admin`。
+
+当前 Core 服务是可运行的内存实现，生命周期随 API 进程结束。Prisma Client 和迁移只是持久化边界准备；只有完成 repository、增加明确的数据源开关、执行迁移/seed 并通过 MySQL 重启 E2E 后，才允许宣称持久化完成。
+
 当前 Prisma schema 已扩展为 MySQL 主干模型。平台底座已完成 repository 和 `PLATFORM_DATA_SOURCE=memory|mysql` 切换；门市租赁的站点、车辆和客户域已完成 `STORE_RENTAL_DATA_SOURCE=memory|mysql` 第一版切换。schema 已覆盖：
 
 - 平台底座：租户、组织、用户、多角色、角色权限、权限码、系统参数集、筛选预设、平台审计日志、数据字典配置、编号规则配置。
@@ -725,7 +732,7 @@ npx prisma validate --schema apps/api/prisma/schema.prisma
 
 注意：`db:seed` 初始化的是可验证基础数据。平台模块可通过 `PLATFORM_DATA_SOURCE=mysql` 使用这些数据，包含登录、用户、角色、系统参数、数据字典、编号规则和平台审计；租赁业务规则保存/历史版本、站点分页列表、站点营业日历、站点容量/排队快照、车型组、车辆分页列表/详情事件、车辆调拨、车辆证照、随车物资、TBox、会员列表分页/详情/审核/风控、客户等级方案、企业客户列表分页/详情、订单、费用、检查记录、资金流水、预授权押金台账、发票/收据、手工调账、续租、改派、改还车门市/据点、终止动作、事故登记、调度事件、订单操作记录、客户通知记录和企业月结账单可通过 `STORE_RENTAL_DATA_SOURCE=mysql` 使用这些数据。
 
-`PlatformRepository` 已覆盖租户、组织、权限树、角色、用户、系统参数、平台审计、筛选预设、数据字典、编号规则和租户初始化的基础读写和 DTO 映射。`PlatformService` 已增加 `PLATFORM_DATA_SOURCE=memory|mysql` 开关。`StoreRentalRepository` 已覆盖租赁业务规则版本、站点、站点营业日历、站点容量/排队快照、车型组、车辆基础读写、站点/车辆列表分页筛选、车辆详情事件、车辆调拨、车辆证照、随车物资、TBox、客户域、会员/企业客户列表分页筛选、订单域、费用/资金、预授权押金台账、发票/收据费用关联、重开链路、手工调账、检查记录、时间线、续租快照、改派动作、改还车门市/据点动作、转单后续预约快捷改派一期、事故记录、调度事件、订单操作记录、客户通知记录和企业月结基础读写，并通过 `metadata` JSON 保留原型扩展字段。`ReportsRepository` 已覆盖经营概览、订单/车辆/财务报表、运维日志和真实 CSV 导出任务，导出 job 落 `ReportExportJob`，文件落 `storage/report-exports`。下一步迁事故后续订单联动、统一审计、通知模板、完整幂等、报表数据权限和导出文件生命周期。
+`PlatformRepository` 已覆盖租户、生命周期、认证会话、组织、权限树、角色、用户、系统参数、审计、筛选预设、数据字典、编号规则和事务化租户初始化。`StoreRentalRepository` 已覆盖旧车辆兼容域的主要读写，并从请求级上下文取得租户。`ReportsRepository` 的查询、导出任务和文件下载均按登录租户过滤。下一步继续收口事故联动、统一领域审计、通知模板、完整幂等和导出文件生命周期。
 
 操作锁、幂等和通知留痕实现口径：
 
@@ -736,9 +743,25 @@ npx prisma validate --schema apps/api/prisma/schema.prisma
 
 ## 开发约定
 
+### Ant Design v6 后台设计规范
+
+- 依赖基线为 React 19、Ant Design 6 和 `@ant-design/icons` 6；禁止回退到 Vue 或 Ant Design 5 兼容层。
+- 视觉规范以 Ant Design v6 官方 [`design.md`](https://ant.design/design.md) 为准：Natural、Certain、Meaningful、Growing 是取舍原则，不能把官网页面外层或某张示例图当成后台框架规范。
+- 根 `ConfigProvider` 显式启用 `cssVar` 并使用 `outlined` 控件原型；颜色、圆角、阴影、背景和组件状态从 Design Token 派生，不在业务页硬编码白色表面或自定义强调色。
+- 外观提供 Default、Dark、Compact 三种模式，全部使用 antd 官方 `defaultAlgorithm`、`darkAlgorithm`、`compactAlgorithm`，不维护玻璃主题或手工反色。
+- 后台框架复用 Ant Design 官网 Light / Dashboard 示例的结构关系：桌面端应用窗口距浏览器边缘 6px，使用 14px 圆角、1px 语义边框和克制阴影；窄屏取消外边距、圆角与阴影。窗口内部由白色顶栏、白色侧栏、面包屑上下文区和 `#f5f8ff` 内容工作区组成。顶部栏只放品牌、主题和账户；搜索、筛选与导出属于具体业务页面。
+- 页面使用 `bg-layout → bg-container → bg-elevated` 三层表面；页面和卡片主间距为 24px，常规内容间距为 16px，全部落在 4px 网格。
+- 控件默认 6px 圆角、内容表面 8px 圆角；普通 Card、表格和导航以边框及色阶建立层级，下拉浮层使用标准浮层阴影，按钮与被选中的胶囊控件只使用三级轻阴影。
+- 面包屑承担页面名称与定位，中间业务分组使用 `Breadcrumb.menu` 提供同组页面选择。业务页不显示重复的大标题和说明副标题。官网 Dashboard 示例中的大圆角视图切换是 `Segmented` 而不是 `Tabs`：Segmented 及业务 Tabs 均采用浅灰轨道、999px 圆角、白色选中项、600 字重和三级轻阴影；禁止 `type="card"` 填充页签。一级业务 Tabs 使用 `standalone-tabs`，轨道单独位于页面背景，下方 `ant-tabs-content-holder` 才使用白色、边框和 8px 圆角；兼容期的 `tabbed-workspace` Card 必须透明、无边框且 body padding 为 0。只有二级 Tabs 可以留在所属内容面板。指标卡、搜索筛选和宽幅数据面板仍是可选业务组件，不由后台壳强制生成。
+- 按钮沿用 Ant v6 默认 6px 圆角、轻描边和轻阴影；图标单操作使用 32px 圆形按钮，文字型表格行操作使用胶囊按钮。按下时立即缩放到 0.97，`prefers-reduced-motion` 下取消缩放。
+- Table 使用 8px 容器圆角、`#fafafa` 表头、12px×8px 单元格内边距、600 表头字重和细分隔线；双行信息自然形成约 69px 行高，不在页面内另写一套表格皮肤。
+- 数据列表优先采用“面板标题 + 总数 + 搜索 + 筛选工具栏 + Table”；页面级主操作通过 `PageHeader` 的操作插槽靠右展示，行级操作放 Table 最右侧。
+- 主题选择保存在浏览器 `localStorage`，键为 `rental_admin_appearance`。
+- 主题与框架实现位于 `apps/admin/src/app/theme.tsx`、`apps/admin/src/components/AppShell.tsx` 和 `apps/admin/src/styles.css`。
+
 - 原型和 PRD 只读，不要改。
 - 页面复刻以原型为准，当前系统顶栏可按实际系统统一。
-- 字体使用：`Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`。
+- 字体沿用 Ant Design 默认系统字体栈；界面正文为 14px/400，标题和表头只使用 600，不引入 700+ 或斜体作为界面强调。
 - 后端新增接口必须经过 `ApiAuthGuard`。
 - 前端新增页面必须配置 `route.meta.permission`。
 - 新增共享类型必须先考虑后续通用租赁映射。

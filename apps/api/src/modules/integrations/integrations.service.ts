@@ -24,11 +24,14 @@ import type {
   SendMockNotificationRequest,
   TBoxDeviceSummary
 } from "@store-rental/shared";
+import { getRequestTenantId } from "../../common/request-identity";
 import { IntegrationsRepository } from "./integrations.repository";
 
 @Injectable()
 export class IntegrationsService {
-  private readonly defaultTenantId = "tenant_001";
+  private get defaultTenantId() {
+    return getRequestTenantId();
+  }
 
   constructor(
     private readonly configService: ConfigService,
@@ -939,7 +942,7 @@ export class IntegrationsService {
     const value =
       this.configService.get<string>("INFRA_DATA_SOURCE") ??
       this.configService.get<string>("STORE_RENTAL_DATA_SOURCE") ??
-      "memory";
+      "mysql";
     return value.toLowerCase() === "mysql";
   }
 }

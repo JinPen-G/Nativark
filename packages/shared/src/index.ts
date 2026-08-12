@@ -89,6 +89,7 @@ export interface TenantContext {
 
 export interface AuthUser {
   id: string;
+  tenantId: string;
   account: string;
   displayName: string;
   roleNames: string[];
@@ -98,6 +99,8 @@ export interface AuthUser {
   organizationId?: string;
   organizationName?: string;
   isPlatformAdmin?: boolean;
+  isSaasAdmin?: boolean;
+  mustChangePassword?: boolean;
   permissions?: string[];
 }
 
@@ -109,8 +112,19 @@ export interface LoginRequest {
 
 export interface LoginResponse {
   accessToken: string;
+  refreshToken: string;
+  expiresIn: number;
   tenant: TenantContext;
   user: AuthUser;
+}
+
+export interface RefreshSessionRequest {
+  refreshToken: string;
+}
+
+export interface ChangePasswordRequest {
+  currentPassword: string;
+  newPassword: string;
 }
 
 export interface TenantSummary {
@@ -119,6 +133,23 @@ export interface TenantSummary {
   tenantName: string;
   tenantStatus: TenantStatus;
   enabledBusinessLines: string[];
+  categoryCode?: RentalCategoryCode;
+  categoryName?: string;
+  userCount?: number;
+  organizationCount?: number;
+  orderCount?: number;
+  statusReason?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface UpdateTenantRequest {
+  tenantName: string;
+}
+
+export interface UpdateTenantStatusRequest {
+  status: TenantStatus;
+  reason: string;
 }
 
 export interface OrganizationSummary {
@@ -158,6 +189,7 @@ export type SystemDataScope = "all" | "organization" | "store" | "own";
 
 export interface SystemRoleRow {
   id: string;
+  tenantId?: string;
   code: string;
   name: string;
   description?: string;
@@ -172,6 +204,7 @@ export interface SystemRoleRow {
 
 export interface SaveSystemRoleRequest {
   id?: string;
+  tenantId?: string;
   code: string;
   name: string;
   description?: string;
@@ -195,6 +228,9 @@ export interface SystemUserRow {
   roleNames: string[];
   scope: RoleScope;
   isPlatformAdmin: boolean;
+  isSaasAdmin?: boolean;
+  mustChangePassword?: boolean;
+  temporaryPassword?: string;
   isActive: boolean;
   permissions: string[];
   dataScope: SystemDataScope;
@@ -209,6 +245,7 @@ export interface SaveSystemUserRequest {
   organizationId?: string;
   roleIds: string[];
   isPlatformAdmin?: boolean;
+  isSaasAdmin?: boolean;
   isActive: boolean;
 }
 
@@ -493,6 +530,7 @@ export interface DeletePlatformFilterPresetResult {
 export interface TenantBootstrapRequest {
   tenantCode: string;
   tenantName: string;
+  categoryCode: RentalCategoryCode;
   operator: string;
   adminAccount: string;
   adminDisplayName: string;
@@ -527,6 +565,7 @@ export interface TenantBootstrapResult {
     message: string;
   };
   message: string;
+  temporaryPassword?: string;
 }
 
 export interface StoreRentalOrderSummary {
@@ -3654,4 +3693,340 @@ export interface StoreRentalOpsHealth {
 export interface ApiResult<T> {
   data: T;
   requestId: string;
+}
+
+// Rental Core v0.1 ---------------------------------------------------------
+
+export enum RentalCategoryCode {
+  Vehicle = "vehicle",
+  Camera = "camera",
+  Camping = "camping",
+  Construction = "construction"
+}
+
+export enum RentalInventoryMode {
+  Serialized = "serialized",
+  Quantity = "quantity",
+  Bundle = "bundle"
+}
+
+export enum RentalAssetStatus {
+  Available = "available",
+  Reserved = "reserved",
+  Rented = "rented",
+  Inspection = "inspection",
+  Maintenance = "maintenance",
+  Disabled = "disabled"
+}
+
+export enum RentalReservationStatus {
+  Soft = "soft",
+  Confirmed = "confirmed",
+  Fulfilled = "fulfilled",
+  Released = "released",
+  Expired = "expired",
+  Cancelled = "cancelled"
+}
+
+export enum RentalCoreOrderStatus {
+  Draft = "draft",
+  Reserved = "reserved",
+  ReadyForPickup = "ready_for_pickup",
+  Renting = "renting",
+  ReturnInspection = "return_inspection",
+  Completed = "completed",
+  Cancelled = "cancelled"
+}
+
+export type RentalCapability =
+  | "serialized_inventory"
+  | "quantity_inventory"
+  | "bundle_inventory"
+  | "pickup"
+  | "return"
+  | "delivery"
+  | "locker"
+  | "dispatch"
+  | "usage_reading"
+  | "qualification"
+  | "iot";
+
+export interface RentalCategoryTerminology {
+  itemLabel: string;
+  itemGroupLabel: string;
+  assetLabel: string;
+  fulfillmentLabel: string;
+  pickupLabel: string;
+  returnLabel: string;
+  identifierLabel: string;
+  usageMetricLabel?: string;
+}
+
+export interface RentalCategoryDefinition {
+  code: RentalCategoryCode;
+  name: string;
+  description: string;
+  supportedInventoryModes: RentalInventoryMode[];
+  defaultCapabilities: RentalCapability[];
+  terminology: RentalCategoryTerminology;
+  attributeSchema: Record<string, unknown>;
+  version: string;
+}
+
+export interface TenantRentalProfile {
+  tenantId: string;
+  categoryCode: RentalCategoryCode;
+  capabilities: RentalCapability[];
+  terminology: RentalCategoryTerminology;
+  configVersion: string;
+  initializedAt: string;
+  updatedAt: string;
+}
+
+export interface SaveTenantRentalProfileRequest {
+  categoryCode: RentalCategoryCode;
+  capabilities?: RentalCapability[];
+  terminology?: Partial<RentalCategoryTerminology>;
+  operator?: string;
+}
+
+export interface RentalFulfillmentLocation {
+  id: string;
+  tenantId: string;
+  code: string;
+  name: string;
+  type: "store" | "warehouse" | "locker" | "delivery_hub";
+  capabilities: Array<"pickup" | "return" | "storage" | "delivery">;
+  address?: string;
+  status: "enabled" | "disabled";
+}
+
+export interface RentalBundleComponent {
+  itemGroupId: string;
+  itemGroupCode: string;
+  itemGroupName: string;
+  quantity: number;
+  optional?: boolean;
+  substitutionGroup?: string;
+}
+
+export interface RentalItemGroup {
+  id: string;
+  tenantId: string;
+  categoryCode: RentalCategoryCode;
+  code: string;
+  name: string;
+  inventoryMode: RentalInventoryMode;
+  unit: string;
+  description?: string;
+  attributes: Record<string, unknown>;
+  bundleComponents: RentalBundleComponent[];
+  status: "enabled" | "disabled";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SaveRentalItemGroupRequest {
+  id?: string;
+  code: string;
+  name: string;
+  inventoryMode: RentalInventoryMode;
+  unit?: string;
+  description?: string;
+  attributes?: Record<string, unknown>;
+  bundleComponents?: Array<Pick<RentalBundleComponent, "itemGroupId" | "quantity" | "optional" | "substitutionGroup">>;
+  status?: "enabled" | "disabled";
+  operator?: string;
+}
+
+export interface RentalAsset {
+  id: string;
+  tenantId: string;
+  itemGroupId: string;
+  itemGroupCode: string;
+  itemGroupName: string;
+  assetNo: string;
+  serialNo?: string;
+  locationId: string;
+  locationName: string;
+  status: RentalAssetStatus;
+  attributes: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SaveRentalAssetRequest {
+  id?: string;
+  itemGroupId: string;
+  assetNo: string;
+  serialNo?: string;
+  locationId: string;
+  status?: RentalAssetStatus;
+  attributes?: Record<string, unknown>;
+  operator?: string;
+}
+
+export interface RentalStockBalance {
+  id: string;
+  tenantId: string;
+  itemGroupId: string;
+  itemGroupCode: string;
+  itemGroupName: string;
+  locationId: string;
+  locationName: string;
+  onHandQuantity: number;
+  reservedQuantity: number;
+  maintenanceQuantity: number;
+  availableQuantity: number;
+  updatedAt: string;
+}
+
+export interface SaveRentalStockBalanceRequest {
+  itemGroupId: string;
+  locationId: string;
+  onHandQuantity: number;
+  maintenanceQuantity?: number;
+  operator?: string;
+}
+
+export interface RentalAvailabilityRequest {
+  locationId: string;
+  startAt: string;
+  endAt: string;
+  lines: Array<{ itemGroupId: string; quantity: number }>;
+}
+
+export interface RentalAvailabilityLine {
+  itemGroupId: string;
+  itemGroupCode: string;
+  itemGroupName: string;
+  inventoryMode: RentalInventoryMode;
+  requestedQuantity: number;
+  availableQuantity: number;
+  available: boolean;
+  reasons: string[];
+}
+
+export interface RentalAvailabilityResult {
+  available: boolean;
+  locationId: string;
+  startAt: string;
+  endAt: string;
+  lines: RentalAvailabilityLine[];
+}
+
+export interface CreateRentalOrderRequest {
+  customerType: "personal" | "corporate";
+  customerId?: string;
+  customerName: string;
+  contactPhone?: string;
+  fulfillmentLocationId: string;
+  startAt: string;
+  endAt: string;
+  lines: Array<{
+    itemGroupId: string;
+    quantity: number;
+    unitPrice: number;
+    note?: string;
+  }>;
+  operator?: string;
+}
+
+export interface RentalOrderLine {
+  id: string;
+  itemGroupId: string;
+  itemGroupCode: string;
+  itemGroupName: string;
+  inventoryMode: RentalInventoryMode;
+  quantity: number;
+  unitPrice: number;
+  amount: number;
+  note?: string;
+}
+
+export interface RentalReservation {
+  id: string;
+  orderId: string;
+  orderLineId: string;
+  itemGroupId: string;
+  locationId: string;
+  quantity: number;
+  status: RentalReservationStatus;
+  expiresAt?: string;
+  createdAt: string;
+}
+
+export interface RentalAllocation {
+  id: string;
+  orderId: string;
+  orderLineId: string;
+  assetId?: string;
+  assetNo?: string;
+  quantity: number;
+  status: "allocated" | "picked_up" | "returned" | "released";
+}
+
+export interface RentalOrder {
+  id: string;
+  tenantId: string;
+  orderNo: string;
+  categoryCode: RentalCategoryCode;
+  status: RentalCoreOrderStatus;
+  customerType: "personal" | "corporate";
+  customerId?: string;
+  customerName: string;
+  contactPhone?: string;
+  fulfillmentLocationId: string;
+  fulfillmentLocationName: string;
+  startAt: string;
+  endAt: string;
+  totalAmount: number;
+  lines: RentalOrderLine[];
+  reservations: RentalReservation[];
+  allocations: RentalAllocation[];
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RentalInspectionTemplate {
+  id: string;
+  tenantId: string;
+  categoryCode: RentalCategoryCode;
+  code: string;
+  name: string;
+  stage: "pickup" | "return";
+  version: string;
+  fields: Array<{
+    code: string;
+    label: string;
+    type: "boolean" | "number" | "text" | "select" | "photo";
+    required: boolean;
+    unit?: string;
+    options?: string[];
+  }>;
+  enabled: boolean;
+}
+
+export interface CreateRentalInspectionRequest {
+  templateId: string;
+  results: Record<string, unknown>;
+  exceptions?: Array<{ code: string; description: string; chargeAmount?: number }>;
+  attachments?: string[];
+  operator?: string;
+}
+
+export interface RentalInspectionRecord {
+  id: string;
+  tenantId: string;
+  orderId: string;
+  stage: "pickup" | "return";
+  templateId: string;
+  templateCode: string;
+  templateVersion: string;
+  results: Record<string, unknown>;
+  exceptions: Array<{ code: string; description: string; chargeAmount?: number }>;
+  attachments: string[];
+  operator: string;
+  createdAt: string;
 }

@@ -45,8 +45,8 @@ export class ReportsService {
     return this.reportsRepository.listExportJobs(query);
   }
 
-  getExportFile(fileName: string) {
-    return this.reportsRepository.getExportFile(fileName);
+  getExportFile(fileName: string, tenantId: string) {
+    return this.reportsRepository.getExportFile(fileName, tenantId);
   }
 
   getOpsHealth(query: StoreRentalReportQuery) {

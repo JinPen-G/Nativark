@@ -2,6 +2,8 @@
 
 本文档用于后续把当前“门市汽车租赁平台”改造成通用租赁平台，例如摄影器材、露营器材、设备租赁等。
 
+> 当前状态（2026-08-12）：营运端已完全切换为 `apps/admin` 下的 React 19 + Ant Design 6 应用，旧 Vue 源码和依赖已删除。下文出现的 Vue 文件名仅用于说明迁移前的历史基线，不能作为当前代码入口。
+
 ## 改造目标
 
 目标不是简单替换页面文案，而是把业务能力从“汽车”抽象为“可预约、可占用、可领取、可归还、可质检、可计费的租赁标的”。
@@ -63,7 +65,7 @@
 
 ### 3. 数据库改造
 
-当前 MVP 是内存数据，后续接 MySQL 时表结构要预留通用化空间。
+当前项目已有 Prisma/MySQL 车辆兼容模型以及 Rental Core 通用模型迁移；Rental Core v0.1 服务仍是内存实现。下一步应实现通用 repository 和数据迁移，避免旧车辆表与通用表长期成为双事实源。
 
 建议表：
 
@@ -99,9 +101,9 @@
 - 摄影器材：品牌、型号、序列号、快门数、传感器规格、配件清单。
 - 露营器材：容量、重量、套装组件、清洁等级、损耗等级。
 
-### 4. 前端页面改造
+### 4. 前端页面改造（已完成技术栈切换）
 
-当前页面：
+迁移前页面基线：
 
 - `VehicleGroupsView.vue`：车型组管理。
 - `VehiclesView.vue`：车辆档案库。
@@ -112,13 +114,14 @@
 - `NewOrderView.vue`：新建门市订单。
 - `OrdersView.vue`：门市租赁订单。
 
-建议迁移：
+已迁移到 React 领域页面：
 
-- `VehicleGroupsView.vue` -> `ItemGroupsView.vue`
-- `VehiclesView.vue` -> `InventoryItemsView.vue`
-- `StationsView.vue` -> `FulfillmentLocationsView.vue`
-- `NewOrderView.vue` -> `RentalOrderCreateView.vue`
-- `OrdersView.vue` -> `RentalOrdersView.vue`
+- 标的分组、资产与库存：`apps/admin/src/features/catalog/`
+- 履约网点：`apps/admin/src/features/locations/`
+- 订单创建、列表和详情：`apps/admin/src/features/orders/`
+- 资产生命周期：`apps/admin/src/features/catalog/AssetLifecyclePage.tsx`
+- 调度、账本和动态定价工具：`apps/admin/src/features/advanced/BusinessToolsPage.tsx`
+- 平台治理、文件、打印、异步任务和报表工具：`apps/admin/src/features/platform/PlatformToolsPage.tsx`
 
 页面文案可通过品类配置驱动：
 
@@ -301,17 +304,16 @@ const categoryUiConfig = {
 | `apps/api/src/modules/store-rental/store-rental.service.ts` | 门市租赁规则、定价、订单、主数据 | 拆为 rental-core、inventory、fulfillment，store-rental 保留适配层。 |
 | `apps/api/src/modules/store-rental/store-rental.controller.ts` | 门市租赁 API | 新增 `/rental/*` 通用 API，保留 `/store-rental/*` 兼容。 |
 | `apps/api/src/common/api-auth.guard.ts` | API 权限拦截 | 新旧权限码兼容映射。 |
-| `apps/admin/src/router.ts` | 页面路由和权限 | 增加品类路由或通过租户配置决定默认业务线。 |
-| `apps/admin/src/components/AppLayout.vue` | 菜单导航 | 菜单从业务线配置生成，不写死车辆菜单。 |
-| `apps/admin/src/views/VehicleGroupsView.vue` | 车型组管理 | 改成通用标的分组，汽车字段做可选扩展。 |
-| `apps/admin/src/views/VehiclesView.vue` | 车辆档案库 | 改成库存实例，按品类渲染扩展字段。 |
-| `apps/admin/src/views/RentalRulesView.vue` | 汽车租赁规则 | 改成通用规则页，按品类启用/隐藏规则块。 |
-| `apps/admin/src/views/NewOrderView.vue` | 新建门市订单 | 改成通用新建订单，标的选择和检查模板按品类加载。 |
-| `apps/admin/src/views/OrdersView.vue` | 门市订单列表 | 改成通用订单列表，状态文案按品类配置。 |
+| `apps/admin/src/app/AppRouter.tsx` | React 页面路由和权限 | 继续由路由元数据和租户能力决定可访问页面。 |
+| `apps/admin/src/components/AppShell.tsx` | 菜单导航 | 菜单从权限与业务能力生成，避免写死单一车辆流程。 |
+| `apps/admin/src/features/catalog/` | 标的分组、资产与库存 | 当前通过车辆兼容 API 投影；待通用资产 API 落地后替换数据源。 |
+| `apps/admin/src/features/commercial/` | 规则、定价、营销和服务 | 继续把车辆字段约束在兼容层。 |
+| `apps/admin/src/features/orders/` | 订单创建、列表和详情 | 待通用订单行/库存占用 API 落地后支持多行与数量库存。 |
+| `apps/admin/src/features/platform/` | 平台配置、运维与治理 | 保持后端权限校验，前端菜单隐藏不作为数据隔离。 |
 
 ## 不建议现在做的事
 
-- 不建议现在把所有 `Vehicle*` 类型立刻改名，否则会打断当前门市租赁 MVP 交付。
+- 不建议只在 React 前端把所有 `Vehicle*` DTO 机械改名；应等通用后端模型与兼容 facade 完成后切换数据契约。
 - 不建议把所有页面做成完全动态表单，否则原型复刻质量会下降。
 - 不建议为了未来品类提前引入复杂插件化架构；当前只需要把字段、状态、权限、接口边界记录清楚。
 

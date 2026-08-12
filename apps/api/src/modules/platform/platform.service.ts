@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "node:crypto";
 import {
@@ -15,6 +15,7 @@ import {
   PlatformNumberRule,
   SavePlatformFilterPresetRequest,
   RoleScope,
+  RentalCategoryCode,
   SaveOrganizationRequest,
   SavePlatformDictionaryGroupRequest,
   SavePlatformNumberRuleRequest,
@@ -30,7 +31,9 @@ import {
   TenantBootstrapRequest,
   TenantBootstrapResult,
   TenantStatus,
-  TenantSummary
+  TenantSummary,
+  UpdateTenantRequest,
+  UpdateTenantStatusRequest
 } from "@store-rental/shared";
 import {
   buildOrganizationWhere,
@@ -42,6 +45,7 @@ import { PlatformRepository } from "./platform.repository";
 interface StoredUser extends SaveSystemUserRequest {
   id: string;
   password: string;
+  mustChangePassword?: boolean;
 }
 
 @Injectable()
@@ -52,6 +56,13 @@ export class PlatformService {
   ) {}
 
   private readonly tenants: TenantSummary[] = [
+    {
+      tenantId: "tenant_platform",
+      tenantCode: "platform",
+      tenantName: "Rental OS SaaS 平台",
+      tenantStatus: TenantStatus.Active,
+      enabledBusinessLines: []
+    },
     {
       tenantId: "tenant_001",
       tenantCode: "demo",
@@ -69,6 +80,14 @@ export class PlatformService {
   ];
 
   private readonly organizations: OrganizationSummary[] = [
+    {
+      id: "org_saas_platform",
+      tenantId: "tenant_platform",
+      type: RoleScope.Operator,
+      code: "SAAS",
+      name: "SaaS 平台运营",
+      status: "enabled"
+    },
     {
       id: "org_operator_hk",
       tenantId: "tenant_001",
@@ -162,9 +181,10 @@ export class PlatformService {
   private readonly roleRows: SystemRoleRow[] = [
     {
       id: "role_platform_admin",
-      code: "PLATFORM_ADMIN",
-      name: "平台管理员",
-      description: "固定拥有当前租户全部权限，不允许按功能裁剪。",
+      tenantId: "tenant_001",
+      code: "TENANT_ADMIN",
+      name: "租户管理员",
+      description: "固定拥有当前 SaaS 租户全部权限，不允许跨租户。",
       scope: RoleScope.Operator,
       fixedAllPermissions: true,
       enabledBusinessScopes: ["STORE_STANDARD", "STORE_24H", "SYSTEM_GLOBAL"],
@@ -175,6 +195,7 @@ export class PlatformService {
     },
     {
       id: "role_store_operator",
+      tenantId: "tenant_001",
       code: "STORE_OPERATOR",
       name: "门店营运",
       description: "门店前台和门店值班人员处理订单、取还车和基础车辆查看。",
@@ -205,6 +226,7 @@ export class PlatformService {
     },
     {
       id: "role_pricing_manager",
+      tenantId: "tenant_001",
       code: "PRICING_MANAGER",
       name: "价格规则管理员",
       description: "维护门市租赁价格、规则和增值服务配置。",
@@ -226,16 +248,65 @@ export class PlatformService {
       ],
       buttonPermissions: ["system:button:export"],
       dataScope: "organization"
+    },
+    {
+      id: "role_tenant_admin_002",
+      tenantId: "tenant_002",
+      code: "TENANT_ADMIN",
+      name: "租户管理员",
+      description: "固定拥有当前 SaaS 租户全部权限，不允许跨租户。",
+      scope: RoleScope.Operator,
+      fixedAllPermissions: true,
+      enabledBusinessScopes: ["STORE_STANDARD", "STORE_24H", "SYSTEM_GLOBAL"],
+      isActive: true,
+      permissions: ["*"],
+      buttonPermissions: ["*"],
+      dataScope: "all"
+    },
+    {
+      id: "role_store_operator_002",
+      tenantId: "tenant_002",
+      code: "STORE_OPERATOR",
+      name: "门店营运",
+      description: "门店前台和门店值班人员处理订单、取还与基础资产查看。",
+      scope: RoleScope.Store,
+      fixedAllPermissions: false,
+      enabledBusinessScopes: ["STORE_STANDARD", "STORE_24H"],
+      isActive: true,
+      permissions: [
+        "store-rental:order:view",
+        "store-rental:order:operate",
+        "store-rental:station:view",
+        "store-rental:vehicle:view"
+      ],
+      buttonPermissions: [
+        "store-rental:order:create",
+        "store-rental:order:pickup",
+        "store-rental:order:return"
+      ],
+      dataScope: "store"
     }
   ];
 
   private readonly users: StoredUser[] = [
     {
+      id: "user_saas_admin",
+      tenantId: "tenant_platform",
+      account: "admin",
+      password: "RentalOS!2026",
+      displayName: "SaaS 平台管理员",
+      organizationId: "org_saas_platform",
+      roleIds: [],
+      isSaasAdmin: true,
+      isPlatformAdmin: false,
+      isActive: true
+    },
+    {
       id: "user_admin_001",
       tenantId: "tenant_001",
       account: "admin",
-      password: "123456",
-      displayName: "平台管理员",
+      password: "RentalDemo!2026",
+      displayName: "香港租户管理员",
       phone: "852-1000-0001",
       organizationId: "org_operator_hk",
       roleIds: ["role_platform_admin"],
@@ -246,7 +317,7 @@ export class PlatformService {
       id: "user_store_001",
       tenantId: "tenant_001",
       account: "store",
-      password: "123456",
+      password: "RentalDemo!2026",
       displayName: "旺角门店值班员",
       phone: "852-2388-0001",
       organizationId: "org_store_mongkok",
@@ -258,7 +329,7 @@ export class PlatformService {
       id: "user_pricing_001",
       tenantId: "tenant_001",
       account: "pricing",
-      password: "123456",
+      password: "RentalDemo!2026",
       displayName: "价格规则管理员",
       phone: "852-3000-1001",
       organizationId: "org_operator_hk",
@@ -270,15 +341,23 @@ export class PlatformService {
       id: "user_admin_002",
       tenantId: "tenant_002",
       account: "admin",
-      password: "123456",
+      password: "RentalDemo!2026",
       displayName: "深圳租户管理员",
       phone: "86-755-1000-0001",
       organizationId: "org_operator_sz",
-      roleIds: ["role_platform_admin"],
+      roleIds: ["role_tenant_admin_002"],
       isPlatformAdmin: true,
       isActive: true
     }
   ];
+
+  private readonly authSessions = new Map<string, {
+    id: string;
+    userId: string;
+    refreshTokenHash: string;
+    expiresAt: Date;
+    revokedAt?: Date;
+  }>();
 
   private systemRulesConfig: SystemRulesConfig = {
     member: {
@@ -736,17 +815,21 @@ export class PlatformService {
     };
   }
 
-  async listAuditLogs(query: PlatformAuditLogQuery = {}) {
+  async listAuditLogs(query: PlatformAuditLogQuery = {}, user?: SystemUserRow) {
+    const tenantId = user?.isSaasAdmin
+      ? query.tenantId
+      : user?.tenantId ?? query.tenantId;
+    const scopedQuery = { ...query, tenantId };
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.listAuditLogs(query);
+      return this.platformRepository.listAuditLogs(scopedQuery);
     }
 
-    const limit = Math.min(Math.max(Number(query.limit ?? 50), 1), 200);
+    const limit = Math.min(Math.max(Number(scopedQuery.limit ?? 50), 1), 200);
     const rows = this.auditLogs
-      .filter((log) => !query.tenantId || log.tenantId === query.tenantId)
-      .filter((log) => !query.action || log.action.includes(query.action))
-      .filter((log) => !query.operator || log.operator.includes(query.operator))
-      .filter((log) => !query.targetType || log.targetType === query.targetType)
+      .filter((log) => !scopedQuery.tenantId || log.tenantId === scopedQuery.tenantId)
+      .filter((log) => !scopedQuery.action || log.action.includes(scopedQuery.action))
+      .filter((log) => !scopedQuery.operator || log.operator.includes(scopedQuery.operator))
+      .filter((log) => !scopedQuery.targetType || log.targetType === scopedQuery.targetType)
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 
     return {
@@ -843,15 +926,17 @@ export class PlatformService {
     operator?: string,
     user?: SystemUserRow
   ) {
+    const tenantId = this.resolvePlatformTenantId(undefined, user);
     if (this.useMysqlDataSource()) {
       return this.platformRepository.setDefaultFilterPreset(
         id,
-        operator || user?.displayName || "营运端"
+        operator || user?.displayName || "营运端",
+        tenantId
       );
     }
 
     const preset = this.filterPresets.find((item) => item.id === id);
-    if (!preset) {
+    if (!preset || preset.tenantId !== tenantId) {
       throw new NotFoundException("筛选预设不存在");
     }
     const updatedBy = operator || user?.displayName || "营运端";
@@ -887,15 +972,17 @@ export class PlatformService {
     operator?: string,
     user?: SystemUserRow
   ) {
+    const tenantId = this.resolvePlatformTenantId(undefined, user);
     if (this.useMysqlDataSource()) {
       return this.platformRepository.deleteFilterPreset(
         id,
-        operator || user?.displayName || "营运端"
+        operator || user?.displayName || "营运端",
+        tenantId
       );
     }
 
     const index = this.filterPresets.findIndex((item) => item.id === id);
-    if (index < 0) {
+    if (index < 0 || this.filterPresets[index].tenantId !== tenantId) {
       throw new NotFoundException("筛选预设不存在");
     }
     const [deleted] = this.filterPresets.splice(index, 1);
@@ -1040,8 +1127,8 @@ export class PlatformService {
     return {
       roles: [
         {
-          code: "PLATFORM_ADMIN",
-          name: "平台管理员",
+          code: "TENANT_ADMIN",
+          name: "租户管理员",
           permissions: ["*"]
         },
         {
@@ -1060,14 +1147,18 @@ export class PlatformService {
     };
   }
 
-  async bootstrapTenant(input: TenantBootstrapRequest): Promise<TenantBootstrapResult> {
+  async bootstrapTenant(input: TenantBootstrapRequest, currentUser?: SystemUserRow): Promise<TenantBootstrapResult> {
+    this.assertSaasAdmin(currentUser);
     const tenantCode = input.tenantCode.trim().toLowerCase();
     const tenantName = input.tenantName.trim();
     const adminAccount = input.adminAccount.trim();
     const adminDisplayName = input.adminDisplayName.trim();
 
-    if (!tenantCode || !tenantName || !adminAccount || !adminDisplayName) {
-      throw new BadRequestException("租户编码、租户名称、管理员账号和管理员姓名不能为空");
+    if (!tenantCode || !tenantName || !adminAccount || !adminDisplayName || !input.categoryCode) {
+      throw new BadRequestException("租户编码、名称、经营品类和管理员信息不能为空");
+    }
+    if (!Object.values(RentalCategoryCode).includes(input.categoryCode)) {
+      throw new BadRequestException("经营品类不存在");
     }
     if (!/^[a-z][a-z0-9_-]{1,31}$/.test(tenantCode)) {
       throw new BadRequestException("租户编码必须以小写字母开头，只能包含小写字母、数字、下划线和短横线");
@@ -1088,14 +1179,15 @@ export class PlatformService {
     const tenantId = `tenant_${tenantCode}`;
     const orgId = `org_operator_${tenantCode}`;
     const storeId = `org_store_${tenantCode}`;
-    const platformRoleId = `role_platform_admin_${tenantCode}`;
+    const platformRoleId = `role_tenant_admin_${tenantCode}`;
     const storeRoleId = `role_store_operator_${tenantCode}`;
     const tenant: TenantSummary = {
       tenantId,
       tenantCode,
       tenantName,
       tenantStatus: TenantStatus.Active,
-      enabledBusinessLines: ["store_rental"]
+      enabledBusinessLines: ["rental_core"],
+      categoryCode: input.categoryCode
     };
     this.tenants.push(tenant);
     this.organizations.push(
@@ -1121,32 +1213,40 @@ export class PlatformService {
       {
         ...this.roleRows[0],
         id: platformRoleId,
+        tenantId,
+        code: "TENANT_ADMIN",
+        name: "租户管理员",
         permissions: ["*"],
         buttonPermissions: ["*"]
       },
       {
         ...this.roleRows[1],
-        id: storeRoleId
+        id: storeRoleId,
+        tenantId
       }
     );
+
+    const temporaryPassword = `R!${randomUUID().replace(/-/g, "").slice(0, 12)}8a`;
 
     const user: StoredUser = {
       id: `user_admin_${tenantCode}`,
       tenantId,
       account: adminAccount,
-      password: "123456",
+      password: temporaryPassword,
       displayName: adminDisplayName,
       phone: input.adminPhone,
       organizationId: orgId,
       roleIds: [platformRoleId],
       isPlatformAdmin: true,
+      isSaasAdmin: false,
+      mustChangePassword: true,
       isActive: true
     };
     this.users.push(user);
     this.recordMemoryAudit({
       tenantId,
       action: "tenant.bootstrap",
-      operator: input.operator || "营运端",
+      operator: currentUser?.displayName || input.operator || "SaaS 平台管理员",
       targetType: "tenant",
       targetId: tenantId,
       detail: `初始化租户：${tenantName}`
@@ -1157,15 +1257,56 @@ export class PlatformService {
       adminUser: this.toUserRow(user),
       preview: this.getTenantBootstrapPreview(),
       templateExecution: this.buildTenantBootstrapExecution(),
-      message: "租户初始化已完成，默认管理员密码为 123456。"
+      temporaryPassword,
+      message: "租户初始化已完成；临时密码仅本次返回，管理员首次登录必须修改。"
     };
   }
 
-  listTenants() {
+  listTenants(currentUser?: SystemUserRow) {
+    this.assertSaasAdmin(currentUser);
     if (this.useMysqlDataSource()) {
       return this.platformRepository.listTenants();
     }
-    return this.tenants;
+    return this.tenants.filter((tenant) => tenant.tenantCode !== "platform");
+  }
+
+  getTenant(id: string, currentUser?: SystemUserRow) {
+    this.assertSaasAdmin(currentUser);
+    if (this.useMysqlDataSource()) return this.platformRepository.getTenant(id);
+    const tenant = this.tenants.find((item) => item.tenantId === id);
+    if (!tenant) throw new NotFoundException("租户不存在");
+    if (tenant.tenantCode === "platform") throw new BadRequestException("SaaS 平台主体不属于业务租户列表");
+    return tenant;
+  }
+
+  updateTenant(id: string, input: UpdateTenantRequest, currentUser?: SystemUserRow) {
+    this.assertSaasAdmin(currentUser);
+    if (this.useMysqlDataSource()) return this.platformRepository.updateTenant(id, input, currentUser!);
+    const tenant = this.tenants.find((item) => item.tenantId === id);
+    if (!tenant) throw new NotFoundException("租户不存在");
+    if (tenant.tenantCode === "platform") throw new BadRequestException("SaaS 平台主体不能通过租户接口修改");
+    const tenantName = input.tenantName.trim();
+    if (!tenantName) throw new BadRequestException("租户名称不能为空");
+    tenant.tenantName = tenantName;
+    return tenant;
+  }
+
+  updateTenantStatus(id: string, input: UpdateTenantStatusRequest, currentUser?: SystemUserRow) {
+    this.assertSaasAdmin(currentUser);
+    if (this.useMysqlDataSource()) return this.platformRepository.updateTenantStatus(id, input, currentUser!);
+    const tenant = this.tenants.find((item) => item.tenantId === id);
+    if (!tenant) throw new NotFoundException("租户不存在");
+    if (tenant.tenantCode === "platform") throw new BadRequestException("SaaS 平台主体不能冻结或停用");
+    if (!input.reason.trim()) throw new BadRequestException("状态变更原因不能为空");
+    tenant.tenantStatus = input.status;
+    tenant.statusReason = input.reason.trim();
+    if (input.status !== TenantStatus.Active) {
+      for (const session of this.authSessions.values()) {
+        const user = this.users.find((item) => item.id === session.userId);
+        if (user?.tenantId === id) session.revokedAt = new Date();
+      }
+    }
+    return tenant;
   }
 
   findTenantByCode(code: string) {
@@ -1191,7 +1332,9 @@ export class PlatformService {
     });
   }
 
-  async saveOrganization(input: SaveOrganizationRequest) {
+  async saveOrganization(input: SaveOrganizationRequest, currentUser?: SystemUserRow) {
+    const tenantId = this.resolveTargetTenantId(input.tenantId, currentUser);
+    input = { ...input, tenantId };
     if (this.useMysqlDataSource()) {
       return this.platformRepository.saveOrganization(input);
     }
@@ -1228,8 +1371,13 @@ export class PlatformService {
     }
 
     const existing = input.id
-      ? this.organizations.find((item) => item.id === input.id)
+      ? this.organizations.find(
+          (item) => item.id === input.id && item.tenantId === input.tenantId
+        )
       : undefined;
+    if (input.id && !existing) {
+      throw new NotFoundException("组织不存在");
+    }
     const row: OrganizationSummary = {
       id: existing?.id ?? `org_${randomUUID()}`,
       tenantId: input.tenantId,
@@ -1261,8 +1409,14 @@ export class PlatformService {
   async setOrganizationStatus(
     id: string,
     status: OrganizationSummary["status"],
-    operator = "平台管理员"
+    operator = "租户管理员",
+    currentUser?: SystemUserRow
   ) {
+    const existing = this.organizations.find((item) => item.id === id);
+    const mysqlTarget = this.useMysqlDataSource()
+      ? await this.platformRepository.getOrganizationTenantId(id)
+      : existing?.tenantId;
+    this.resolveTargetTenantId(mysqlTarget, currentUser);
     if (this.useMysqlDataSource()) {
       return this.platformRepository.setOrganizationStatus(id, status, operator);
     }
@@ -1292,16 +1446,27 @@ export class PlatformService {
     return this.permissionTree;
   }
 
-  listRoles() {
+  listRoles(tenantId?: string, currentUser?: SystemUserRow) {
+    const targetTenantId = this.resolveTargetTenantId(tenantId, currentUser);
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.listRoles();
+      return this.platformRepository.listRoles(targetTenantId);
     }
-    return this.roleRows;
+    return this.roleRows
+      .filter((role) => !role.tenantId || role.tenantId === targetTenantId)
+      .map((role) => ({ ...role, tenantId: targetTenantId }));
   }
 
-  saveRole(input: SaveSystemRoleRequest) {
+  findTenantByIdForAuth(id: string) {
+    if (this.useMysqlDataSource()) return this.platformRepository.getTenant(id);
+    const tenant = this.tenants.find((item) => item.tenantId === id);
+    if (!tenant) throw new NotFoundException("租户不存在");
+    return tenant;
+  }
+
+  saveRole(input: SaveSystemRoleRequest, currentUser?: SystemUserRow) {
+    const tenantId = this.resolveTargetTenantId(input.tenantId, currentUser);
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.saveRole(input);
+      return this.platformRepository.saveRole(input, tenantId);
     }
     const existing = input.id
       ? this.roleRows.find((role) => role.id === input.id)
@@ -1312,16 +1477,22 @@ export class PlatformService {
     if (!code || !name) {
       throw new BadRequestException("角色编码和角色名称不能为空");
     }
+    if (existing?.tenantId && existing.tenantId !== tenantId) {
+      throw new NotFoundException("角色不存在");
+    }
     if (
       this.roleRows.some(
-        (role) => role.id !== existing?.id && role.code === code
+        (role) =>
+          role.id !== existing?.id &&
+          role.code === code &&
+          (!role.tenantId || role.tenantId === tenantId)
       )
     ) {
       throw new BadRequestException("角色编码已存在");
     }
 
     const fixedAllPermissions =
-      existing?.fixedAllPermissions ?? code === "PLATFORM_ADMIN";
+      existing?.fixedAllPermissions ?? code === "TENANT_ADMIN";
     const requestedPermissions = [...new Set(input.permissions ?? [])];
     const requestedButtonPermissions = [
       ...new Set([
@@ -1333,6 +1504,7 @@ export class PlatformService {
     ];
     const role: SystemRoleRow = {
       id: existing?.id ?? `role_${randomUUID()}`,
+      tenantId,
       code,
       name,
       description: input.description?.trim(),
@@ -1362,9 +1534,15 @@ export class PlatformService {
     return role;
   }
 
-  saveRolePermissions(id: string, permissions: string[]) {
+  async saveRolePermissions(id: string, permissions: string[], tenantId: string | undefined, currentUser?: SystemUserRow) {
+    const targetTenantId = this.resolveTargetTenantId(
+      tenantId ?? (this.useMysqlDataSource()
+        ? await this.platformRepository.getRoleTenantId(id)
+        : this.roleRows.find((role) => role.id === id)?.tenantId),
+      currentUser
+    );
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.saveRolePermissions(id, permissions);
+      return this.platformRepository.saveRolePermissions(id, permissions, targetTenantId);
     }
     const role = this.roleRows.find((item) => item.id === id);
 
@@ -1385,9 +1563,15 @@ export class PlatformService {
     return role;
   }
 
-  deleteRole(id: string) {
+  async deleteRole(id: string, tenantId: string | undefined, currentUser?: SystemUserRow) {
+    const targetTenantId = this.resolveTargetTenantId(
+      tenantId ?? (this.useMysqlDataSource()
+        ? await this.platformRepository.getRoleTenantId(id)
+        : this.roleRows.find((role) => role.id === id)?.tenantId),
+      currentUser
+    );
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.deleteRole(id);
+      return this.platformRepository.deleteRole(id, targetTenantId);
     }
     const index = this.roleRows.findIndex((role) => role.id === id);
     if (index < 0) {
@@ -1409,32 +1593,47 @@ export class PlatformService {
     };
   }
 
-  setUserStatus(id: string, isActive: boolean) {
+  async setUserStatus(id: string, isActive: boolean, tenantId: string | undefined, currentUser?: SystemUserRow) {
+    const targetTenantId = this.resolveTargetTenantId(
+      tenantId ?? (this.useMysqlDataSource()
+        ? await this.platformRepository.getUserTenantId(id)
+        : this.users.find((user) => user.id === id)?.tenantId),
+      currentUser
+    );
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.setUserStatus(id, isActive);
+      return this.platformRepository.setUserStatus(id, isActive, targetTenantId);
     }
     const user = this.users.find((item) => item.id === id);
-    if (!user) {
+    if (!user || user.tenantId !== targetTenantId) {
       throw new NotFoundException(`User ${id} was not found`);
     }
     user.isActive = isActive;
     return this.toUserRow(user);
   }
 
-  resetUserPassword(id: string) {
+  async resetUserPassword(id: string, tenantId: string | undefined, currentUser?: SystemUserRow) {
+    const targetTenantId = this.resolveTargetTenantId(
+      tenantId ?? (this.useMysqlDataSource()
+        ? await this.platformRepository.getUserTenantId(id)
+        : this.users.find((user) => user.id === id)?.tenantId),
+      currentUser
+    );
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.resetUserPassword(id);
+      return this.platformRepository.resetUserPassword(id, targetTenantId);
     }
     const user = this.users.find((item) => item.id === id);
-    if (!user) {
+    if (!user || user.tenantId !== targetTenantId) {
       throw new NotFoundException(`User ${id} was not found`);
     }
-    user.password = "123456";
+    const temporaryPassword = `R!${randomUUID().replace(/-/g, "").slice(0, 12)}8a`;
+    user.password = temporaryPassword;
+    user.mustChangePassword = true;
+    await this.revokeUserSessions(user.id);
     return {
       userId: user.id,
       account: user.account,
-      temporaryPassword: "123456",
-      message: "密码已重置为默认演示密码 123456。"
+      temporaryPassword,
+      message: "密码已重置为一次性临时密码，用户下次登录必须修改。"
     };
   }
 
@@ -1459,9 +1658,11 @@ export class PlatformService {
       .map((user) => this.toUserRow(user));
   }
 
-  saveUser(input: SaveSystemUserRequest) {
+  saveUser(input: SaveSystemUserRequest, currentUser?: SystemUserRow) {
+    const targetTenantId = this.resolveTargetTenantId(input.tenantId, currentUser);
+    input = { ...input, tenantId: targetTenantId, isSaasAdmin: false };
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.saveUser(input);
+      return this.platformRepository.saveUser(input, targetTenantId);
     }
     const tenant = this.tenants.find((item) => item.tenantId === input.tenantId);
     const account = input.account.trim();
@@ -1492,11 +1693,29 @@ export class PlatformService {
       throw new BadRequestException("归属组织不属于当前租户");
     }
 
+    const existingUser = input.id
+      ? this.users.find(
+          (user) => user.id === input.id && user.tenantId === input.tenantId
+        )
+      : undefined;
+    if (input.id && !existingUser) {
+      throw new NotFoundException("账号不存在");
+    }
+
+    const tenantAdminRoleId =
+      this.roleRows.find(
+        (role) => role.tenantId === input.tenantId && role.code === "TENANT_ADMIN"
+      )?.id ?? "role_platform_admin";
     const roleIds = input.isPlatformAdmin
-      ? ["role_platform_admin"]
-      : [...new Set(input.roleIds)].filter((roleId) => roleId !== "role_platform_admin");
+      ? [tenantAdminRoleId]
+      : [...new Set(input.roleIds)].filter((roleId) => roleId !== tenantAdminRoleId);
     const invalidRoleIds = roleIds.filter(
-      (roleId) => !this.roleRows.some((role) => role.id === roleId)
+      (roleId) =>
+        !this.roleRows.some(
+          (role) =>
+            role.id === roleId &&
+            (!role.tenantId || role.tenantId === input.tenantId)
+        )
     );
 
     if (!input.isPlatformAdmin && roleIds.length === 0) {
@@ -1506,12 +1725,14 @@ export class PlatformService {
       throw new BadRequestException("角色不存在");
     }
 
+    const temporaryPassword = input.id ? undefined : `R!${randomUUID().replace(/-/g, "").slice(0, 12)}8a`;
     const payload: StoredUser = {
       ...input,
       id: input.id || `user_${randomUUID()}`,
       account,
       displayName,
-      password: "123456",
+      password: temporaryPassword ?? "",
+      mustChangePassword: input.id ? existingUser?.mustChangePassword : true,
       roleIds
     };
     const index = this.users.findIndex((user) => user.id === payload.id);
@@ -1526,7 +1747,7 @@ export class PlatformService {
       this.users.unshift(payload);
     }
 
-    return this.toUserRow(index >= 0 ? this.users[index] : payload);
+    return { ...this.toUserRow(index >= 0 ? this.users[index] : payload), temporaryPassword };
   }
 
   async findUserForLogin(tenantCode: string, account: string, password: string) {
@@ -1554,33 +1775,54 @@ export class PlatformService {
       : undefined;
   }
 
-  async resolveUserByToken(token?: string) {
-    if (this.useMysqlDataSource()) {
-      return this.platformRepository.resolveUserByToken(token);
-    }
-    const raw = token?.replace(/^Bearer\s+/i, "").trim();
-    const [, tenantCode, account] = raw?.split(".") ?? [];
-
-    if (!tenantCode || !account) {
-      return undefined;
-    }
-
-    const tenant = this.tenants.find((item) => item.tenantCode === tenantCode);
-    const user = this.users.find(
-      (item) =>
-        item.tenantId === tenant?.tenantId &&
-        item.account === account &&
-        item.isActive
-    );
-
-    return user ? this.toUserRow(user) : undefined;
+  async findUserById(id: string) {
+    if (this.useMysqlDataSource()) return this.platformRepository.findUserById(id);
+    const user = this.users.find((item) => item.id === id && item.isActive);
+    const tenant = this.tenants.find((item) => item.tenantId === user?.tenantId);
+    return user && tenant?.tenantStatus === TenantStatus.Active ? this.toUserRow(user) : undefined;
   }
 
-  async findUserByToken(token?: string) {
-    if (this.useMysqlDataSource()) {
-      return this.platformRepository.findUserByToken(token);
+  createAuthSession(input: { id: string; userId: string; refreshTokenHash: string; expiresAt: Date }) {
+    if (this.useMysqlDataSource()) return this.platformRepository.createAuthSession(input);
+    this.authSessions.set(input.id, { ...input });
+    return input;
+  }
+
+  getAuthSession(id: string) {
+    if (this.useMysqlDataSource()) return this.platformRepository.getAuthSession(id);
+    const session = this.authSessions.get(id);
+    return session && !session.revokedAt && session.expiresAt > new Date() ? session : undefined;
+  }
+
+  getAuthSessionByRefreshHash(refreshTokenHash: string) {
+    if (this.useMysqlDataSource()) return this.platformRepository.getAuthSessionByRefreshHash(refreshTokenHash);
+    return [...this.authSessions.values()].find((session) =>
+      session.refreshTokenHash === refreshTokenHash && !session.revokedAt && session.expiresAt > new Date()
+    );
+  }
+
+  revokeAuthSession(id: string) {
+    if (this.useMysqlDataSource()) return this.platformRepository.revokeAuthSession(id);
+    const session = this.authSessions.get(id);
+    if (session) session.revokedAt = new Date();
+  }
+
+  revokeUserSessions(userId: string) {
+    if (this.useMysqlDataSource()) return this.platformRepository.revokeUserSessions(userId);
+    for (const session of this.authSessions.values()) {
+      if (session.userId === userId) session.revokedAt = new Date();
     }
-    return (await this.resolveUserByToken(token)) ?? this.getDefaultAdmin();
+  }
+
+  async changeUserPassword(userId: string, currentPassword: string, nextPassword: string) {
+    if (this.useMysqlDataSource()) {
+      return this.platformRepository.changeUserPassword(userId, currentPassword, nextPassword);
+    }
+    const user = this.users.find((item) => item.id === userId);
+    if (!user || user.password !== currentPassword) throw new BadRequestException("当前密码不正确");
+    user.password = nextPassword;
+    user.mustChangePassword = false;
+    await this.revokeUserSessions(userId);
   }
 
   getDefaultAdmin() {
@@ -1655,7 +1897,12 @@ export class PlatformService {
   }
 
   private resolvePlatformTenantId(tenantId?: string, user?: SystemUserRow) {
-    return tenantId?.trim() || user?.tenantId || "tenant_001";
+    if (user) {
+      return user.isSaasAdmin
+        ? tenantId?.trim() || user.tenantId
+        : user.tenantId;
+    }
+    return tenantId?.trim() || "tenant_001";
   }
 
   private normalizeFilterPresetScope(scopeKey: string): PlatformFilterPresetScope {
@@ -1804,8 +2051,26 @@ export class PlatformService {
 
   private useMysqlDataSource() {
     return (
-      this.configService.get<string>("PLATFORM_DATA_SOURCE") ?? "memory"
+      this.configService.get<string>("PLATFORM_DATA_SOURCE") ?? "mysql"
     ).toLowerCase() === "mysql";
+  }
+
+  private assertSaasAdmin(user?: SystemUserRow) {
+    if (!user?.isSaasAdmin) {
+      throw new ForbiddenException("仅 SaaS 平台管理员可以管理租户");
+    }
+  }
+
+  private resolveTargetTenantId(requestedTenantId: string | undefined, user?: SystemUserRow) {
+    if (!user) throw new ForbiddenException("缺少登录用户上下文");
+    if (user.isSaasAdmin) {
+      if (!requestedTenantId) throw new BadRequestException("SaaS 平台操作必须明确目标租户");
+      return requestedTenantId;
+    }
+    if (requestedTenantId && requestedTenantId !== user.tenantId) {
+      throw new ForbiddenException("不能访问或修改其他租户的数据");
+    }
+    return user.tenantId;
   }
 
   private cloneSystemRulesConfig(
@@ -1865,10 +2130,10 @@ export class PlatformService {
         lockMinutes: 15
       },
       passwordPolicy: {
-        minLength: 6,
-        requireLetter: false,
+        minLength: 8,
+        requireLetter: true,
         requireNumber: true,
-        disallowDefaultPassword: false,
+        disallowDefaultPassword: true,
         expireDays: 90
       },
       masking: {
@@ -2004,6 +2269,8 @@ export class PlatformService {
       ),
       scope: roleRows[0]?.scope ?? organization?.type ?? RoleScope.Operator,
       isPlatformAdmin,
+      isSaasAdmin: Boolean(user.isSaasAdmin),
+      mustChangePassword: Boolean(user.mustChangePassword),
       isActive: user.isActive,
       permissions,
       dataScope: isPlatformAdmin ? "all" : this.resolveUserDataScope(activeRoleRows)

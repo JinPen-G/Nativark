@@ -10,7 +10,7 @@
 - 最新基线：当前 `main`，已同步 `origin/main`，并作为 4 个新开发分支的共同起点。
 - 最近有效开发：多分支并行开发——企业额度占用释放、站点能力校验、会员风控审计、会员权益快照、操作锁过期检测、费用减免联动、取车履约事件、车辆释放校验、报价解释链来源、行销资格校验、调度任务状态流转、事故联动改派、订单快照链、备注跟进深化、审计风控报表类型扩展、报表数据聚合深化、演示数据补充、E2E测试脚本。
 - 最新验证结果：`npm run build` 通过；`npm run contract:validate` 通过，覆盖 185 个 controller operation；`npx prisma validate --schema apps/api/prisma/schema.prisma` 通过；`npm run test:reports` 通过；`git diff --check` 通过。
-- 当前未收口项：旧多分支和旧 `.claude/worktrees` 已回收；仅保留 `main`、`codex/master-data-foundation`、`codex/order-finance-flow`、`codex/pricing-dispatch`、`codex/reports-tests`。
+- 仓库工作区已收口：失效的 `.claude/worktrees`、旧仓库压缩备份和本地工具日志已清理，Git worktree 元数据已 prune；历史分支仍保留在 Git 中。
 - 当前结论：不是“开发完成”，而是“核心模块有第一版，部分深化已推进，仍需按 PRD/原型继续做真实闭环、MySQL 回归和测试”。
 
 ## 1. 不可偏离边界
@@ -64,7 +64,7 @@
 
 | 模块 | 状态 | 当前进度 | 后续判断 |
 | --- | --- | --- | --- |
-| 工程与仓库 | Done | 独立 monorepo、Vue3/Nest/Prisma/MySQL 脚本已建立 | 清理未跟踪文件，保持仓库干净 |
+| 工程与仓库 | Done | 独立 monorepo、React 19 + Ant Design 6 / Nest / Prisma / MySQL 脚本已建立；旧 Vue 已移除 | 保持工作区依赖、构建与静态契约检查稳定 |
 | 登录与权限 | In Progress | 登录、租户、用户、角色、权限、按钮权限已有第一版 | 数据权限和后端过滤未完全验收 |
 | MySQL 数据层 | In Progress | 多数核心域有 MySQL 第一版 | 缺完整 MySQL 端到端回归 |
 | 审计与事件 | In Progress | 订单、车辆、会员风控统一审计已写入 OperationLog | 需覆盖费用/调度并验证查询 |
@@ -79,7 +79,7 @@
 
 ## 4. 下一轮总优先级
 
-1. **仓库收口**：处理 `备份.zip`、`.claude/`、提交本台账。
+1. **仓库收口**：工作区垃圾与失效 worktree 已清理；后续提交当前 React 替换与文档变更。
 2. **MySQL 模式验收**：用 `PLATFORM_DATA_SOURCE=mysql`、`STORE_RENTAL_DATA_SOURCE=mysql` 跑登录、站点、车辆、会员、企业客户、订单、费用、调度、报表。
 3. **订单履约闭环**：优先做取车、还车、结算、异常动作和操作锁/幂等。
 4. **资金闭环**：预授权、收退款、企业月结、发票收据、调账。
@@ -93,7 +93,7 @@
 
 | ID | 状态 | 开发目标 | 开发方向 | 必看资料 | 验收 |
 | --- | --- | --- | --- | --- | --- |
-| P0-01 | In Progress | 清理仓库未跟踪垃圾文件 | `备份.zip` 不应提交；`.claude/` 需确认是否加入 `.gitignore` 或移出仓库 | 无 PRD；按工程规范 | `git status --short` 只剩必要改动 |
+| P0-01 | Done | 清理仓库未跟踪垃圾文件 | 已删除旧 `备份.zip`、失效 `.claude/worktrees`、`.codex` 日志、前端构建产物和增量缓存，并保留依赖与本地运行配置 | 无 PRD；按工程规范 | 根目录只保留源码、文档、依赖、配置、脚本、测试和 `.env` |
 | P0-02 | In Progress | 提交本台账 | 本文件作为唯一开发任务台账，避免自动追加日志 | 本文件、`README.md`、`STORE_RENTAL_DEVELOPMENT_LOG.md` | 提交后主线台账与当前状态一致 |
 | P0-03 | Done | 基础验证 | 每轮合并前跑 build、contract、Prisma、diff check | `README.md`、`TECHNICAL_DEVELOPMENT_GUIDE.md` | 已通过：build、contract、Prisma、test:reports、diff check |
 
@@ -105,9 +105,9 @@
 | PF-06 | In Progress | Repository 与 seed 完整性 | 补场景化 seed、一键重置脚本；修复内存和 MySQL 行为差异 | `门市租赁业务总索引.md` | `npm run db:seed` 可重复执行，demo/demo2 数据完整 |
 | PF-09 | In Progress | 组织架构深化 | 组织树、门店/站点归属、负责人、启停校验 | `employees.html`、`stations.html` | 用户/角色/站点能按组织归属过滤 |
 | PF-10 | In Progress | 权限和数据权限 | 按钮权限、数据范围、后端 API guard 与查询过滤一致 | `permissions.html` | 不同角色看不到越权订单/车辆/会员 |
-| PF-11 | In Progress | 租户初始化 | 生成默认组织、角色、站点、车辆、会员、企业客户、订单样例 | `login.html`、`employees.html`、`stations.html`、`vehicles.html` | 新租户初始化后可直接演示 |
+| PF-11 | Done | SaaS 租户初始化底座 | 原子生成唯一经营品类、默认组织、租户管理员、角色、字典、编号规则和审计；业务演示数据由各品类模板后续补充 | `SAAS_TENANT_FOUNDATION.md` | 失败整体回滚，临时密码只返回一次，首次登录强制改密 |
 | PF-14 | In Progress | 统一审计 | 平台、订单、车辆、费用、会员风控、调度动作统一写 `OperationLog` 或领域事件 | `order_detail.html`、`permissions.html` | 日志审计页可按对象回溯关键动作 |
-| PF-18 | In Progress | 接口契约深化 | 185 个 operation 已覆盖，继续补字段级 schema 和示例 | 代码契约、相关 PRD | 新增接口必须进入 `contract:validate` |
+| PF-18 | In Progress | 接口契约深化 | 216 个 operation 已覆盖，继续补字段级 schema 和示例 | 代码契约、相关 PRD | 新增接口必须进入 `contract:validate` |
 | PF-20 | Done | 编号规则 | 订单号接编号中心（平台服务 `generateNumber`），含降级兜底 | `system_rules.html`、`new_order.html`、`order_detail.html` | 新建对象编号不再散落硬编码 |
 | PF-21 | In Progress | 数据字典 | 状态、标签、枚举文案从字典读取，减少页面硬编码 | `system_rules.html` | 核心状态可统一维护 |
 | PF-22 | In Progress | 筛选预设 | 订单、车辆、会员、企业客户列表保存视图和默认视图 | `store_orders.html`、`vehicles.html`、`members.html`、`corporates.html` | 预设可保存、设默认、删除 |

@@ -6,7 +6,8 @@ import {
   UnauthorizedException
 } from "@nestjs/common";
 import type { SystemUserRow } from "@store-rental/shared";
-import { PlatformService } from "../modules/platform/platform.service";
+import { AuthService } from "../modules/auth/auth.service";
+import { enterRequestIdentity } from "./request-identity";
 
 interface RequestLike {
   method: string;
@@ -24,6 +25,7 @@ function requiredPermissions(method: string, path: string) {
     path === "/health" ||
     path === "/openapi.json" ||
     path === "/auth/login" ||
+    path === "/auth/refresh" ||
     method === "OPTIONS"
   ) {
     return [];
@@ -70,11 +72,20 @@ function requiredPermissions(method: string, path: string) {
   if (path.startsWith("/platform/organizations") || path.startsWith("/platform/users")) {
     return ["system:user:manage"];
   }
-  if (path === "/platform/tenants") {
-    return ["system:tenant:manage", "system:user:manage", "system:role:manage"];
+  if (path.startsWith("/platform/tenants")) {
+    return ["system:tenant:manage"];
   }
   if (path.startsWith("/reports")) {
     return ["store-rental:report:view"];
+  }
+
+  if (path === "/rental/v1/categories") {
+    return ["system:tenant:manage", "store-rental:order:view", "store-rental:vehicle:view"];
+  }
+  if (path.startsWith("/rental/v1")) {
+    return method === "GET"
+      ? ["store-rental:order:view", "store-rental:vehicle:view"]
+      : ["store-rental:order:operate", "store-rental:vehicle:manage"];
   }
 
   if (path.startsWith("/store-rental/data-dictionary")) {
@@ -225,6 +236,9 @@ function hasAnyPermission(user: SystemUserRow, permissions: string[]) {
   if (permissions.length === 0) {
     return true;
   }
+  if (user.isSaasAdmin) {
+    return permissions.some((permission) => permission.startsWith("system:tenant:"));
+  }
   if (user.isPlatformAdmin || user.permissions.includes("*")) {
     return true;
   }
@@ -233,7 +247,7 @@ function hasAnyPermission(user: SystemUserRow, permissions: string[]) {
 
 @Injectable()
 export class ApiAuthGuard implements CanActivate {
-  constructor(private readonly platformService: PlatformService) {}
+  constructor(private readonly authService: AuthService) {}
 
   async canActivate(context: ExecutionContext) {
     const request = context.switchToHttp().getRequest<RequestLike>();
@@ -244,6 +258,7 @@ export class ApiAuthGuard implements CanActivate {
       path === "/health" ||
       path === "/openapi.json" ||
       path === "/auth/login" ||
+      path === "/auth/refresh" ||
       request.method === "OPTIONS"
     ) {
       return true;
@@ -251,15 +266,45 @@ export class ApiAuthGuard implements CanActivate {
 
     const authorization = request.headers.authorization;
     const token = Array.isArray(authorization) ? authorization[0] : authorization;
-    const user = await this.platformService.resolveUserByToken(token);
+    const user = await this.authService.resolveAccessToken(token);
 
     if (!user) {
       throw new UnauthorizedException("请先登录");
+    }
+    if (
+      user.isSaasAdmin &&
+      ![
+        "/auth/me",
+        "/auth/change-password",
+        "/auth/logout",
+        "/rental/v1/categories"
+      ].includes(path) &&
+      !path.startsWith("/platform/tenants") &&
+      !path.startsWith("/platform/tenant-bootstrap")
+    ) {
+      throw new ForbiddenException("SaaS 平台管理员只能访问租户管理能力");
+    }
+    if (
+      user.mustChangePassword &&
+      !["/auth/me", "/auth/change-password", "/auth/logout"].includes(path)
+    ) {
+      throw new ForbiddenException("首次登录或密码重置后必须先修改密码");
+    }
+    if (
+      (path.startsWith("/platform/tenants") || path.startsWith("/platform/tenant-bootstrap")) &&
+      !user.isSaasAdmin
+    ) {
+      throw new ForbiddenException("仅 SaaS 平台管理员可以管理租户");
     }
     if (!hasAnyPermission(user, permissions)) {
       throw new ForbiddenException("当前账号无权访问该功能");
     }
 
+    enterRequestIdentity({
+      tenantId: user.tenantId,
+      userId: user.id,
+      isSaasAdmin: Boolean(user.isSaasAdmin)
+    });
     request.user = user;
     return true;
   }

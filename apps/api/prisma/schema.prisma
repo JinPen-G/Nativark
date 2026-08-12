@@ -52,12 +52,12 @@ enum OrderMainStatus {
 }
 
 enum DispatchStatus {
-  PENDING          @map("pending")
-  PRE_ASSIGNED     @map("pre_assigned")
-  LOCKED           @map("locked")
+  PENDING           @map("pending")
+  PRE_ASSIGNED      @map("pre_assigned")
+  LOCKED            @map("locked")
   MANUAL_REASSIGNED @map("manual_reassigned")
-  UPGRADED         @map("upgraded")
-  MANUAL_REQUIRED  @map("dispatch_manual_required")
+  UPGRADED          @map("upgraded")
+  MANUAL_REQUIRED   @map("dispatch_manual_required")
 }
 
 enum PaymentStatus {
@@ -204,110 +204,183 @@ enum FeeStatus {
   VOIDED          @map("voided")
 }
 
+enum RentalCategoryCode {
+  VEHICLE      @map("vehicle")
+  CAMERA       @map("camera")
+  CAMPING      @map("camping")
+  CONSTRUCTION @map("construction")
+}
+
+enum RentalInventoryMode {
+  SERIALIZED @map("serialized")
+  QUANTITY   @map("quantity")
+  BUNDLE     @map("bundle")
+}
+
+enum RentalAssetState {
+  AVAILABLE   @map("available")
+  RESERVED    @map("reserved")
+  RENTED      @map("rented")
+  INSPECTION  @map("inspection")
+  MAINTENANCE @map("maintenance")
+  DISABLED    @map("disabled")
+}
+
+enum RentalOrderV1Status {
+  DRAFT             @map("draft")
+  RESERVED          @map("reserved")
+  READY_FOR_PICKUP  @map("ready_for_pickup")
+  RENTING           @map("renting")
+  RETURN_INSPECTION @map("return_inspection")
+  COMPLETED         @map("completed")
+  CANCELLED         @map("cancelled")
+}
+
+enum RentalReservationState {
+  SOFT      @map("soft")
+  CONFIRMED @map("confirmed")
+  FULFILLED @map("fulfilled")
+  RELEASED  @map("released")
+  EXPIRED   @map("expired")
+  CANCELLED @map("cancelled")
+}
+
 model Tenant {
-  id             String              @id @default(uuid())
-  code           String              @unique
-  name           String
-  status         TenantStatus        @default(ACTIVE)
-  organizations  OrganizationUnit[]
-  users          User[]
-  roles          Role[]
-  stations       StoreStation[]
-  vehicleGroups  VehicleGroup[]
-  vehicles       Vehicle[]
-  vehicleTransferTasks VehicleTransferTask[]
-  tboxDevices    TboxDevice[]
-  members        Member[]
-  corporates     Corporate[]
-  membershipPlans MembershipPlan[]
-  orders         StoreRentalOrder[]
-  dispatchEvents DispatchEvent[]
-  filterPresets FilterPreset[]
-  monthlyBills   CorporateMonthlyBill[]
-  rentalRuleSets RentalRuleSet[]
-  pricingPlans   PricingPlan[]
-  priceAdjustmentSchedules PriceAdjustmentSchedule[]
-  marketingPlans MarketingPlan[]
-  quoteSnapshots PricingQuoteSnapshot[]
-  configVersions ConfigVersion[]
-  systemParameterSets SystemParameterSet[]
-  integrations   IntegrationCredential[]
-  files          FileAsset[]
-  notificationTemplates NotificationTemplate[]
-  notificationLogs NotificationSendLog[]
-  adapterLogs    ExternalAdapterLog[]
-  asyncJobs      AsyncJob[]
-  printJobs      DocumentPrintJob[]
-  integrationTboxDevices TBoxDevice[]
-  logs           OperationLog[]
-  reportExportJobs ReportExportJob[]
-  opsEventLogs   OpsEventLog[]
-  createdAt      DateTime            @default(now())
-  updatedAt      DateTime            @updatedAt
+  id                        String                      @id @default(uuid())
+  code                      String                      @unique
+  name                      String
+  status                    TenantStatus                @default(ACTIVE)
+  statusReason              String?
+  statusChangedAt           DateTime?
+  statusChangedBy           String?
+  organizations             OrganizationUnit[]
+  users                     User[]
+  roles                     Role[]
+  stations                  StoreStation[]
+  vehicleGroups             VehicleGroup[]
+  vehicles                  Vehicle[]
+  vehicleTransferTasks      VehicleTransferTask[]
+  tboxDevices               TboxDevice[]
+  members                   Member[]
+  corporates                Corporate[]
+  membershipPlans           MembershipPlan[]
+  orders                    StoreRentalOrder[]
+  dispatchEvents            DispatchEvent[]
+  filterPresets             FilterPreset[]
+  monthlyBills              CorporateMonthlyBill[]
+  rentalRuleSets            RentalRuleSet[]
+  pricingPlans              PricingPlan[]
+  priceAdjustmentSchedules  PriceAdjustmentSchedule[]
+  marketingPlans            MarketingPlan[]
+  quoteSnapshots            PricingQuoteSnapshot[]
+  configVersions            ConfigVersion[]
+  systemParameterSets       SystemParameterSet[]
+  integrations              IntegrationCredential[]
+  files                     FileAsset[]
+  notificationTemplates     NotificationTemplate[]
+  notificationLogs          NotificationSendLog[]
+  adapterLogs               ExternalAdapterLog[]
+  asyncJobs                 AsyncJob[]
+  printJobs                 DocumentPrintJob[]
+  integrationTboxDevices    TBoxDevice[]
+  logs                      OperationLog[]
+  reportExportJobs          ReportExportJob[]
+  opsEventLogs              OpsEventLog[]
+  rentalProfile             TenantRentalProfile?
+  rentalLocations           RentalFulfillmentLocation[]
+  rentalItemGroups          RentalItemGroup[]
+  rentalAssets              RentalAsset[]
+  rentalStockBalances       RentalStockBalance[]
+  rentalOrders              RentalOrder[]
+  rentalReservations        RentalReservation[]
+  rentalInspectionTemplates RentalInspectionTemplate[]
+  rentalInspectionRecords   RentalInspectionRecord[]
+  createdAt                 DateTime                    @default(now())
+  updatedAt                 DateTime                    @updatedAt
 }
 
 model OrganizationUnit {
-  id        String           @id @default(uuid())
+  id        String             @id @default(uuid())
   tenantId  String
-  tenant    Tenant           @relation(fields: [tenantId], references: [id])
+  tenant    Tenant             @relation(fields: [tenantId], references: [id])
   parentId  String?
-  parent    OrganizationUnit? @relation("OrgTree", fields: [parentId], references: [id])
+  parent    OrganizationUnit?  @relation("OrgTree", fields: [parentId], references: [id])
   children  OrganizationUnit[] @relation("OrgTree")
   type      OrganizationType
   code      String
   name      String
-  status    String            @default("enabled")
+  status    String             @default("enabled")
   users     User[]
   vehicles  Vehicle[]
-  createdAt DateTime         @default(now())
-  updatedAt DateTime         @updatedAt
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
 
   @@unique([tenantId, code])
   @@index([tenantId, type, status])
 }
 
 model User {
-  id             String            @id @default(uuid())
-  tenantId       String
-  tenant         Tenant            @relation(fields: [tenantId], references: [id])
-  organizationId String?
-  organization   OrganizationUnit? @relation(fields: [organizationId], references: [id])
-  roleId         String?
-  role           Role?             @relation(fields: [roleId], references: [id])
-  account        String
-  displayName    String
-  phone          String?
-  passwordHash   String
-  isPlatformAdmin Boolean          @default(false)
-  isActive       Boolean           @default(true)
+  id              String             @id @default(uuid())
+  tenantId        String
+  tenant          Tenant             @relation(fields: [tenantId], references: [id])
+  organizationId  String?
+  organization    OrganizationUnit?  @relation(fields: [organizationId], references: [id])
+  roleId          String?
+  role            Role?              @relation(fields: [roleId], references: [id])
+  account         String
+  displayName     String
+  phone           String?
+  passwordHash    String
+  isSaasAdmin     Boolean            @default(false)
+  isPlatformAdmin Boolean            @default(false)
+  isActive        Boolean            @default(true)
+  mustChangePassword Boolean         @default(true)
+  tokenVersion    Int                @default(1)
+  passwordChangedAt DateTime?
+  lastLoginAt     DateTime?
   roleAssignments UserRole[]
-  createdOrders  StoreRentalOrder[] @relation("OrderCreator")
-  logs           OperationLog[]
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
+  authSessions    AuthSession[]
+  createdOrders   StoreRentalOrder[] @relation("OrderCreator")
+  logs            OperationLog[]
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
 
   @@unique([tenantId, account])
   @@index([tenantId, organizationId])
 }
 
+model AuthSession {
+  id               String    @id @default(uuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokenHash String    @unique
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  lastUsedAt       DateTime?
+  createdAt        DateTime  @default(now())
+
+  @@index([userId, expiresAt, revokedAt])
+  @@map("auth_sessions")
+}
+
 model Role {
-  id          String           @id @default(uuid())
-  tenantId    String
-  tenant      Tenant           @relation(fields: [tenantId], references: [id])
-  code        String
-  name        String
-  description String?
-  scope       RoleScope
-  fixedAllPermissions Boolean  @default(false)
+  id                    String           @id @default(uuid())
+  tenantId              String
+  tenant                Tenant           @relation(fields: [tenantId], references: [id])
+  code                  String
+  name                  String
+  description           String?
+  scope                 RoleScope
+  fixedAllPermissions   Boolean          @default(false)
   enabledBusinessScopes Json
-  buttonPermissions Json?
-  dataScope   SystemDataScope  @default(STORE)
-  isActive    Boolean          @default(true)
-  users       User[]
-  userAssignments UserRole[]
-  permissions RolePermission[]
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+  buttonPermissions     Json?
+  dataScope             SystemDataScope  @default(STORE)
+  isActive              Boolean          @default(true)
+  users                 User[]
+  userAssignments       UserRole[]
+  permissions           RolePermission[]
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
 
   @@unique([tenantId, code])
   @@unique([tenantId, name])
@@ -319,7 +392,7 @@ model Permission {
   name        String
   description String?
   module      String
-  kind        PermissionKind    @default(ACTION)
+  kind        PermissionKind   @default(ACTION)
   roles       RolePermission[]
   createdAt   DateTime         @default(now())
 }
@@ -345,87 +418,87 @@ model RolePermission {
 }
 
 model StoreStation {
-  id              String              @id @default(uuid())
-  tenantId        String
-  tenant          Tenant              @relation(fields: [tenantId], references: [id])
-  code            String
-  name            String
-  parentStoreName String
-  type            String              @default("store_counter")
-  status          String              @default("enabled")
-  serviceStatus   String              @default("normal")
-  address         String?
-  serviceTypes    Json
-  metadata        Json?
-  pickupOrders    StoreRentalOrder[]  @relation("PickupStation")
-  returnOrders    StoreRentalOrder[]  @relation("ReturnStation")
-  currentVehicles Vehicle[]           @relation("VehicleCurrentStation")
-  calendarDays    StationCalendarDay[]
+  id                String                    @id @default(uuid())
+  tenantId          String
+  tenant            Tenant                    @relation(fields: [tenantId], references: [id])
+  code              String
+  name              String
+  parentStoreName   String
+  type              String                    @default("store_counter")
+  status            String                    @default("enabled")
+  serviceStatus     String                    @default("normal")
+  address           String?
+  serviceTypes      Json
+  metadata          Json?
+  pickupOrders      StoreRentalOrder[]        @relation("PickupStation")
+  returnOrders      StoreRentalOrder[]        @relation("ReturnStation")
+  currentVehicles   Vehicle[]                 @relation("VehicleCurrentStation")
+  calendarDays      StationCalendarDay[]
   capacitySnapshots StationCapacitySnapshot[]
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
 
   @@unique([tenantId, code])
   @@index([tenantId, parentStoreName, status])
 }
 
 model VehicleGroup {
-  id        String              @id @default(uuid())
-  tenantId  String
-  tenant    Tenant              @relation(fields: [tenantId], references: [id])
-  code      String
-  name      String
-  seats     Int
-  brand     String?
-  model     String?
-  energyType String?
+  id           String             @id @default(uuid())
+  tenantId     String
+  tenant       Tenant             @relation(fields: [tenantId], references: [id])
+  code         String
+  name         String
+  seats        Int
+  brand        String?
+  model        String?
+  energyType   String?
   transmission String?
   luggageCount Int?
-  status    String              @default("enabled")
-  metadata  Json?
-  createdAt DateTime            @default(now())
-  updatedAt DateTime            @updatedAt
-  vehicles  Vehicle[]
-  orders    StoreRentalOrder[]
+  status       String             @default("enabled")
+  metadata     Json?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  vehicles     Vehicle[]
+  orders       StoreRentalOrder[]
 
   @@unique([tenantId, code])
 }
 
 model Vehicle {
-  id             String            @id @default(uuid())
-  tenantId       String
-  tenant         Tenant            @relation(fields: [tenantId], references: [id])
-  storeId        String?
-  store          OrganizationUnit? @relation(fields: [storeId], references: [id])
-  currentStationId String?
-  currentStation StoreStation?     @relation("VehicleCurrentStation", fields: [currentStationId], references: [id])
-  vehicleGroupId String
-  vehicleGroup   VehicleGroup      @relation(fields: [vehicleGroupId], references: [id])
-  plateNo        String
-  vin            String?
-  assetCompanyName String?
-  color          String?
-  cid            String?
-  isSpecial      Boolean           @default(false)
-  enabled        Boolean           @default(true)
-  operationStatus VehicleOperationStatus @default(IDLE)
-  currentServiceType VehicleServiceType @default(STORE_STANDARD)
-  serviceTypes   Json
-  mileage        Int               @default(0)
-  status         String
-  metadata       Json?
-  orders         StoreRentalOrder[]
-  locationEvents VehicleLocationEvent[]
-  conditionPhotos VehicleConditionPhotoRecord[]
-  maintenanceRecords VehicleMaintenanceRecord[]
-  accidentRecords VehicleAccidentRecord[]
-  credentialRecords VehicleCredentialRecord[]
-  onboardItems   VehicleOnboardItem[]
+  id                  String                        @id @default(uuid())
+  tenantId            String
+  tenant              Tenant                        @relation(fields: [tenantId], references: [id])
+  storeId             String?
+  store               OrganizationUnit?             @relation(fields: [storeId], references: [id])
+  currentStationId    String?
+  currentStation      StoreStation?                 @relation("VehicleCurrentStation", fields: [currentStationId], references: [id])
+  vehicleGroupId      String
+  vehicleGroup        VehicleGroup                  @relation(fields: [vehicleGroupId], references: [id])
+  plateNo             String
+  vin                 String?
+  assetCompanyName    String?
+  color               String?
+  cid                 String?
+  isSpecial           Boolean                       @default(false)
+  enabled             Boolean                       @default(true)
+  operationStatus     VehicleOperationStatus        @default(IDLE)
+  currentServiceType  VehicleServiceType            @default(STORE_STANDARD)
+  serviceTypes        Json
+  mileage             Int                           @default(0)
+  status              String
+  metadata            Json?
+  orders              StoreRentalOrder[]
+  locationEvents      VehicleLocationEvent[]
+  conditionPhotos     VehicleConditionPhotoRecord[]
+  maintenanceRecords  VehicleMaintenanceRecord[]
+  accidentRecords     VehicleAccidentRecord[]
+  credentialRecords   VehicleCredentialRecord[]
+  onboardItems        VehicleOnboardItem[]
   statusChangeRecords VehicleStatusChangeRecord[]
-  attachmentRecords VehicleAttachmentRecord[]
-  tboxDevice     TboxDevice?
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
+  attachmentRecords   VehicleAttachmentRecord[]
+  tboxDevice          TboxDevice?
+  createdAt           DateTime                      @default(now())
+  updatedAt           DateTime                      @updatedAt
 
   @@unique([tenantId, plateNo])
   @@index([tenantId, storeId, status])
@@ -463,36 +536,36 @@ model VehicleConditionPhotoRecord {
 }
 
 model VehicleMaintenanceRecord {
-  id          String   @id @default(uuid())
-  vehicleId   String
-  vehicle     Vehicle  @relation(fields: [vehicleId], references: [id])
-  type        String
-  vendor      String
-  mileage     Int
-  costAmount  Decimal  @db.Decimal(12, 2)
-  status      String
-  nextDueAt    DateTime?
+  id             String    @id @default(uuid())
+  vehicleId      String
+  vehicle        Vehicle   @relation(fields: [vehicleId], references: [id])
+  type           String
+  vendor         String
+  mileage        Int
+  costAmount     Decimal   @db.Decimal(12, 2)
+  status         String
+  nextDueAt      DateTime?
   nextDueMileage Int?
-  attachments Json?
-  remark      String?
-  operator    String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  attachments    Json?
+  remark         String?
+  operator       String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   @@index([vehicleId, status])
 }
 
 model VehicleAccidentRecord {
   id                  String   @id @default(uuid())
-  vehicleId            String
-  vehicle              Vehicle  @relation(fields: [vehicleId], references: [id])
-  description          String
-  claimStatus          String
-  estimatedCostAmount  Decimal  @db.Decimal(12, 2)
-  reportNo             String?
-  operator             String?
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  vehicleId           String
+  vehicle             Vehicle  @relation(fields: [vehicleId], references: [id])
+  description         String
+  claimStatus         String
+  estimatedCostAmount Decimal  @db.Decimal(12, 2)
+  reportNo            String?
+  operator            String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
   @@index([vehicleId, claimStatus])
 }
@@ -558,20 +631,20 @@ model VehicleAttachmentRecord {
 }
 
 model VehicleCredentialRecord {
-  id             String   @id @default(uuid())
+  id             String    @id @default(uuid())
   vehicleId      String
-  vehicle        Vehicle  @relation(fields: [vehicleId], references: [id])
+  vehicle        Vehicle   @relation(fields: [vehicleId], references: [id])
   credentialType String
   credentialName String
   certNo         String
   status         String
   issueAt        DateTime?
   expiresAt      DateTime?
-  reminderDays   Int      @default(30)
+  reminderDays   Int       @default(30)
   attachments    Json
   operator       String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   @@index([vehicleId, credentialType])
   @@index([vehicleId, status])
@@ -619,16 +692,16 @@ model TboxDevice {
 }
 
 model TboxCommandRecord {
-  id             String     @id @default(uuid())
-  deviceId       String
-  device         TboxDevice @relation(fields: [deviceId], references: [id])
-  command        String
-  status         String
-  vehiclePlateNo String?
-  operator       String?
-  requestPayload Json?
+  id              String     @id @default(uuid())
+  deviceId        String
+  device          TboxDevice @relation(fields: [deviceId], references: [id])
+  command         String
+  status          String
+  vehiclePlateNo  String?
+  operator        String?
+  requestPayload  Json?
   responsePayload Json?
-  createdAt      DateTime   @default(now())
+  createdAt       DateTime   @default(now())
 
   @@index([deviceId, createdAt])
   @@index([status, createdAt])
@@ -686,40 +759,40 @@ model StationCapacitySnapshot {
 }
 
 model MembershipPlan {
-  id              String       @id @default(uuid())
-  tenantId        String
-  tenant          Tenant       @relation(fields: [tenantId], references: [id])
-  code            String
-  name            String
-  status          ConfigStatus @default(DRAFT)
-  levelRules      Json
-  benefits        Json
-  effectiveAt     DateTime?
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+  id          String       @id @default(uuid())
+  tenantId    String
+  tenant      Tenant       @relation(fields: [tenantId], references: [id])
+  code        String
+  name        String
+  status      ConfigStatus @default(DRAFT)
+  levelRules  Json
+  benefits    Json
+  effectiveAt DateTime?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
 
   @@unique([tenantId, code])
   @@index([tenantId, status])
 }
 
 model Member {
-  id                    String             @id @default(uuid())
+  id                    String                @id @default(uuid())
   tenantId              String
-  tenant                Tenant             @relation(fields: [tenantId], references: [id])
+  tenant                Tenant                @relation(fields: [tenantId], references: [id])
   name                  String
   phone                 String
   phoneMasked           String
   email                 String?
   source                String
   levelName             String
-  status                MemberStatus       @default(PENDING_REVIEW)
-  reviewStatus          MemberReviewStatus @default(PENDING)
+  status                MemberStatus          @default(PENDING_REVIEW)
+  reviewStatus          MemberReviewStatus    @default(PENDING)
   tags                  Json
-  pointsBalance         Int                @default(0)
-  totalOrders           Int                @default(0)
-  totalSpendAmount      Decimal            @default(0) @db.Decimal(12, 2)
-  identityVerified      Boolean            @default(false)
-  driverLicenseVerified Boolean            @default(false)
+  pointsBalance         Int                   @default(0)
+  totalOrders           Int                   @default(0)
+  totalSpendAmount      Decimal               @default(0) @db.Decimal(12, 2)
+  identityVerified      Boolean               @default(false)
+  driverLicenseVerified Boolean               @default(false)
   identityNoMasked      String?
   driverLicenseNoMasked String?
   birthday              DateTime?
@@ -731,8 +804,8 @@ model Member {
   orders                StoreRentalOrder[]
   riskEvents            MemberRiskEvent[]
   timeline              MemberTimelineEvent[]
-  createdAt             DateTime           @default(now())
-  updatedAt             DateTime           @updatedAt
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
 
   @@unique([tenantId, phone])
   @@index([tenantId, status, reviewStatus])
@@ -833,94 +906,94 @@ model CorporateContract {
 }
 
 model CorporateMonthlyBill {
-  id            String               @id @default(uuid())
+  id            String                           @id @default(uuid())
   tenantId      String
-  tenant        Tenant               @relation(fields: [tenantId], references: [id])
+  tenant        Tenant                           @relation(fields: [tenantId], references: [id])
   corporateId   String
-  corporate     Corporate            @relation(fields: [corporateId], references: [id])
+  corporate     Corporate                        @relation(fields: [corporateId], references: [id])
   billNo        String
   period        String
-  status        MonthlyBillStatus    @default(DRAFT)
-  orderCount    Int                  @default(0)
-  totalAmount   Decimal              @default(0) @db.Decimal(12, 2)
-  paidAmount    Decimal              @default(0) @db.Decimal(12, 2)
-  balanceAmount Decimal              @default(0) @db.Decimal(12, 2)
+  status        MonthlyBillStatus                @default(DRAFT)
+  orderCount    Int                              @default(0)
+  totalAmount   Decimal                          @default(0) @db.Decimal(12, 2)
+  paidAmount    Decimal                          @default(0) @db.Decimal(12, 2)
+  balanceAmount Decimal                          @default(0) @db.Decimal(12, 2)
   dueDate       DateTime
   lineItems     CorporateMonthlyBillLine[]
   settlements   CorporateMonthlyBillSettlement[]
-  createdAt     DateTime             @default(now())
-  updatedAt     DateTime             @updatedAt
+  createdAt     DateTime                         @default(now())
+  updatedAt     DateTime                         @updatedAt
 
   @@unique([tenantId, billNo])
   @@index([corporateId, period])
 }
 
 model CorporateMonthlyBillLine {
-  id              String               @id @default(uuid())
-  billId          String
-  bill            CorporateMonthlyBill  @relation(fields: [billId], references: [id])
-  orderId         String?
-  order           StoreRentalOrder?     @relation(fields: [orderId], references: [id])
-  orderNo         String
-  customerName    String
+  id               String               @id @default(uuid())
+  billId           String
+  bill             CorporateMonthlyBill @relation(fields: [billId], references: [id])
+  orderId          String?
+  order            StoreRentalOrder?    @relation(fields: [orderId], references: [id])
+  orderNo          String
+  customerName     String
   vehicleGroupName String
-  pickupStoreName String
-  returnStoreName String
-  amount          Decimal              @db.Decimal(12, 2)
-  remark          String?
-  createdAt       DateTime             @default(now())
+  pickupStoreName  String
+  returnStoreName  String
+  amount           Decimal              @db.Decimal(12, 2)
+  remark           String?
+  createdAt        DateTime             @default(now())
 
   @@index([billId])
   @@index([orderId])
 }
 
 model CorporateMonthlyBillSettlement {
-  id        String              @id @default(uuid())
+  id        String               @id @default(uuid())
   billId    String
   bill      CorporateMonthlyBill @relation(fields: [billId], references: [id])
-  amount    Decimal             @db.Decimal(12, 2)
+  amount    Decimal              @db.Decimal(12, 2)
   channel   String
   operator  String
   note      String?
-  createdAt DateTime            @default(now())
+  createdAt DateTime             @default(now())
 
   @@index([billId, createdAt])
 }
 
 model FinanceDocument {
-  id                 String                @id @default(uuid())
-  tenantId           String
-  documentNo         String
-  type               FinanceDocumentType
-  status             FinanceDocumentStatus @default(DRAFT)
-  orderId            String?
-  orderNo            String?
-  memberId           String?
-  corporateId        String?
-  corporateShortName String?
-  monthlyBillId      String?
-  customerName       String
-  title              String
-  taxNo              String?
-  email              String?
-  amount             Decimal               @db.Decimal(12, 2)
-  issueSource        String                @default("manual")
-  relatedFeeIds      Json?
-  originalDocumentId String?
-  originalDocumentNo String?
+  id                    String                @id @default(uuid())
+  tenantId              String
+  documentNo            String
+  type                  FinanceDocumentType
+  status                FinanceDocumentStatus @default(DRAFT)
+  orderId               String?
+  orderNo               String?
+  memberId              String?
+  corporateId           String?
+  corporateShortName    String?
+  monthlyBillId         String?
+  customerName          String
+  title                 String
+  taxNo                 String?
+  email                 String?
+  amount                Decimal               @db.Decimal(12, 2)
+  issueSource           String                @default("manual")
+  relatedFeeIds         Json?
+  originalDocumentId    String?
+  originalDocumentNo    String?
   replacementDocumentId String?
   replacementDocumentNo String?
-  issuedAt           DateTime?
-  voidedAt           DateTime?
-  voidReason         String?
-  voidedBy           String?
-  reissuedAt         DateTime?
-  createdBy          String?
-  remark             String?
-  auditTrail         Json?
-  metadata           Json?
-  createdAt          DateTime              @default(now())
-  updatedAt          DateTime              @updatedAt
+  issuedAt              DateTime?
+  voidedAt              DateTime?
+  voidReason            String?
+  voidedBy              String?
+  reissuedAt            DateTime?
+  createdBy             String?
+  remark                String?
+  auditTrail            Json?
+  metadata              Json?
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
 
   @@unique([tenantId, documentNo])
   @@index([tenantId, type, status])
@@ -999,62 +1072,62 @@ model FinancePreAuthorization {
 }
 
 model StoreRentalOrder {
-  id                    String         @id @default(uuid())
-  tenantId              String
-  tenant                Tenant         @relation(fields: [tenantId], references: [id])
-  orderNo               String
-  mode                  StoreRentalMode
-  mainStatus            OrderMainStatus
-  dispatchStatus        DispatchStatus
-  paymentStatus         PaymentStatus
-  billingMode           BillingMode
-  memberId              String?
-  member                Member?        @relation(fields: [memberId], references: [id])
-  corporateId           String?
-  corporate             Corporate?     @relation(fields: [corporateId], references: [id])
-  customerName          String
-  customerPhoneMasked   String
-  corporateShortName    String?
-  vehicleGroupId        String
-  vehicleGroup          VehicleGroup   @relation(fields: [vehicleGroupId], references: [id])
-  vehicleGroupSnapshot  Json
-  assignedVehicleId     String?
-  assignedVehicle       Vehicle?       @relation(fields: [assignedVehicleId], references: [id])
+  id                      String                     @id @default(uuid())
+  tenantId                String
+  tenant                  Tenant                     @relation(fields: [tenantId], references: [id])
+  orderNo                 String
+  mode                    StoreRentalMode
+  mainStatus              OrderMainStatus
+  dispatchStatus          DispatchStatus
+  paymentStatus           PaymentStatus
+  billingMode             BillingMode
+  memberId                String?
+  member                  Member?                    @relation(fields: [memberId], references: [id])
+  corporateId             String?
+  corporate               Corporate?                 @relation(fields: [corporateId], references: [id])
+  customerName            String
+  customerPhoneMasked     String
+  corporateShortName      String?
+  vehicleGroupId          String
+  vehicleGroup            VehicleGroup               @relation(fields: [vehicleGroupId], references: [id])
+  vehicleGroupSnapshot    Json
+  assignedVehicleId       String?
+  assignedVehicle         Vehicle?                   @relation(fields: [assignedVehicleId], references: [id])
   assignedVehicleSnapshot Json?
-  pickupStationId       String?
-  pickupStation         StoreStation?  @relation("PickupStation", fields: [pickupStationId], references: [id])
-  returnStationId       String?
-  returnStation         StoreStation?  @relation("ReturnStation", fields: [returnStationId], references: [id])
-  pickupStoreSnapshot   Json
-  returnStoreSnapshot   Json
-  pickupAt              DateTime
-  returnAt              DateTime
-  totalAmount           Decimal        @db.Decimal(12, 2)
-  riskFlags             Json
-  pricingSnapshot       Json
-  marketingSnapshot     Json?
-  termsSnapshot         Json
-  settlementSummary     Json?
-  createdById           String?
-  createdBy             User?          @relation("OrderCreator", fields: [createdById], references: [id])
-  fees                  FeeItem[]
-  transactions          TransactionRecord[]
-  inspectionRecords     OrderInspectionRecord[]
-  timeline              OrderTimelineEvent[]
-  extensionSnapshots    OrderExtensionSnapshot[]
-  eventSnapshots        OrderEventSnapshot[]
-  contractDocuments     OrderContractDocument[]
-  notificationRecords   OrderNotificationRecord[]
-  remarkRecords         OrderRemarkRecord[]
-  operationLocks        OrderOperationLock[]
-  idempotencyRecords    OrderIdempotencyRecord[]
-  dispatchEvents        DispatchEvent[]
-  quoteSnapshots         PricingQuoteSnapshot[]
-  operationRecords      OrderOperationRecord[]
-  monthlyBillLines      CorporateMonthlyBillLine[]
-  logs                  OperationLog[]
-  createdAt             DateTime       @default(now())
-  updatedAt             DateTime       @updatedAt
+  pickupStationId         String?
+  pickupStation           StoreStation?              @relation("PickupStation", fields: [pickupStationId], references: [id])
+  returnStationId         String?
+  returnStation           StoreStation?              @relation("ReturnStation", fields: [returnStationId], references: [id])
+  pickupStoreSnapshot     Json
+  returnStoreSnapshot     Json
+  pickupAt                DateTime
+  returnAt                DateTime
+  totalAmount             Decimal                    @db.Decimal(12, 2)
+  riskFlags               Json
+  pricingSnapshot         Json
+  marketingSnapshot       Json?
+  termsSnapshot           Json
+  settlementSummary       Json?
+  createdById             String?
+  createdBy               User?                      @relation("OrderCreator", fields: [createdById], references: [id])
+  fees                    FeeItem[]
+  transactions            TransactionRecord[]
+  inspectionRecords       OrderInspectionRecord[]
+  timeline                OrderTimelineEvent[]
+  extensionSnapshots      OrderExtensionSnapshot[]
+  eventSnapshots          OrderEventSnapshot[]
+  contractDocuments       OrderContractDocument[]
+  notificationRecords     OrderNotificationRecord[]
+  remarkRecords           OrderRemarkRecord[]
+  operationLocks          OrderOperationLock[]
+  idempotencyRecords      OrderIdempotencyRecord[]
+  dispatchEvents          DispatchEvent[]
+  quoteSnapshots          PricingQuoteSnapshot[]
+  operationRecords        OrderOperationRecord[]
+  monthlyBillLines        CorporateMonthlyBillLine[]
+  logs                    OperationLog[]
+  createdAt               DateTime                   @default(now())
+  updatedAt               DateTime                   @updatedAt
 
   @@unique([tenantId, orderNo])
   @@index([tenantId, mainStatus, pickupAt])
@@ -1064,35 +1137,35 @@ model StoreRentalOrder {
 }
 
 model RentalRuleSet {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   tenantId    String
-  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  tenant      Tenant    @relation(fields: [tenantId], references: [id])
   code        String
   name        String
   versionNo   Int
   status      String
   content     Json
   effectiveAt DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   @@unique([tenantId, code, versionNo])
   @@index([tenantId, status])
 }
 
 model PricingPlan {
-  id               String               @id @default(uuid())
+  id               String                    @id @default(uuid())
   tenantId         String
-  tenant           Tenant               @relation(fields: [tenantId], references: [id])
+  tenant           Tenant                    @relation(fields: [tenantId], references: [id])
   code             String
   name             String
-  currency         String               @default("HKD")
+  currency         String                    @default("HKD")
   status           String
   currentVersionNo Int
   versions         PricingPlanVersion[]
   priceSchedules   PriceAdjustmentSchedule[]
-  createdAt        DateTime             @default(now())
-  updatedAt        DateTime             @updatedAt
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
 
   @@unique([tenantId, code])
   @@index([tenantId, status])
@@ -1163,31 +1236,31 @@ model PriceAdjustmentSchedule {
 }
 
 model MarketingPlan {
-  id                  String                 @id @default(uuid())
-  tenantId            String
-  tenant              Tenant                 @relation(fields: [tenantId], references: [id])
-  code                String
-  name                String
-  displayName         String
-  status              ConfigStatus           @default(DRAFT)
-  currentVersionNo    Int                    @default(1)
-  customerScope       String
-  supportedModes      Json
-  priority            Int                    @default(0)
-  effectiveFrom       DateTime
-  effectiveTo         DateTime
-  storeCodes          Json
-  vehicleGroupCodes   Json
-  manualVerification  Boolean                @default(false)
-  qualificationName   String?
-  requiredDocText     String?
-  weekdayRate         Decimal                @default(1) @db.Decimal(6, 4)
-  holidayRate         Decimal                @default(1) @db.Decimal(6, 4)
-  fixedDeductionAmount Decimal               @default(0) @db.Decimal(12, 2)
-  description         String?
-  versions            MarketingPlanVersion[]
-  createdAt           DateTime               @default(now())
-  updatedAt           DateTime               @updatedAt
+  id                   String                 @id @default(uuid())
+  tenantId             String
+  tenant               Tenant                 @relation(fields: [tenantId], references: [id])
+  code                 String
+  name                 String
+  displayName          String
+  status               ConfigStatus           @default(DRAFT)
+  currentVersionNo     Int                    @default(1)
+  customerScope        String
+  supportedModes       Json
+  priority             Int                    @default(0)
+  effectiveFrom        DateTime
+  effectiveTo          DateTime
+  storeCodes           Json
+  vehicleGroupCodes    Json
+  manualVerification   Boolean                @default(false)
+  qualificationName    String?
+  requiredDocText      String?
+  weekdayRate          Decimal                @default(1) @db.Decimal(6, 4)
+  holidayRate          Decimal                @default(1) @db.Decimal(6, 4)
+  fixedDeductionAmount Decimal                @default(0) @db.Decimal(12, 2)
+  description          String?
+  versions             MarketingPlanVersion[]
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
 
   @@unique([tenantId, code])
   @@index([tenantId, status, effectiveFrom, effectiveTo])
@@ -1328,20 +1401,20 @@ model OrderTimelineEvent {
 }
 
 model OrderExtensionSnapshot {
-  id             String           @id @default(uuid())
-  orderId        String
-  order          StoreRentalOrder @relation(fields: [orderId], references: [id])
-  snapshotRef    String
-  oldReturnAt    DateTime
-  newReturnAt    DateTime
-  extensionHours Int
-  billableDays   Int
-  amount         Decimal          @db.Decimal(12, 2)
-  settlementMode String
-  ruleSnapshot   Json
+  id              String           @id @default(uuid())
+  orderId         String
+  order           StoreRentalOrder @relation(fields: [orderId], references: [id])
+  snapshotRef     String
+  oldReturnAt     DateTime
+  newReturnAt     DateTime
+  extensionHours  Int
+  billableDays    Int
+  amount          Decimal          @db.Decimal(12, 2)
+  settlementMode  String
+  ruleSnapshot    Json
   pricingSnapshot Json?
-  operator       String?
-  createdAt      DateTime         @default(now())
+  operator        String?
+  createdAt       DateTime         @default(now())
 
   @@unique([orderId, snapshotRef])
 }
@@ -1369,44 +1442,44 @@ model OrderEventSnapshot {
 }
 
 model OrderContractDocument {
-  id          String           @id @default(uuid())
-  orderId     String
-  order       StoreRentalOrder @relation(fields: [orderId], references: [id])
-  documentNo  String
-  type        String
-  title       String
-  status      String
-  signMethod  String?
-  signerName  String?
-  signedAt    DateTime?
-  fileUrl     String?
-  payload     Json?
-  operator    String?
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+  id         String           @id @default(uuid())
+  orderId    String
+  order      StoreRentalOrder @relation(fields: [orderId], references: [id])
+  documentNo String
+  type       String
+  title      String
+  status     String
+  signMethod String?
+  signerName String?
+  signedAt   DateTime?
+  fileUrl    String?
+  payload    Json?
+  operator   String?
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
 
   @@unique([orderId, documentNo])
   @@index([orderId, status])
 }
 
 model OrderRemarkRecord {
-  id          String           @id @default(uuid())
-  orderId     String
-  order       StoreRentalOrder @relation(fields: [orderId], references: [id])
-  category    String
-  content     String           @db.Text
-  visibility  String
-  operator    String?
-  followUpAt  DateTime?
-  reminderAt  DateTime?
+  id                String           @id @default(uuid())
+  orderId           String
+  order             StoreRentalOrder @relation(fields: [orderId], references: [id])
+  category          String
+  content           String           @db.Text
+  visibility        String
+  operator          String?
+  followUpAt        DateTime?
+  reminderAt        DateTime?
   responsibleUserId String?
   responsibleName   String?
-  status      String
-  closedAt    DateTime?
-  closedBy    String?
-  closeNote   String?          @db.Text
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+  status            String
+  closedAt          DateTime?
+  closedBy          String?
+  closeNote         String?          @db.Text
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
 
   @@index([orderId, category, createdAt])
   @@index([orderId, status])
@@ -1529,16 +1602,16 @@ model OrderNotificationRecord {
 }
 
 model OperationLog {
-  id          String            @id @default(uuid())
-  tenantId    String
-  tenant      Tenant            @relation(fields: [tenantId], references: [id])
-  userId      String?
-  user        User?             @relation(fields: [userId], references: [id])
-  orderId     String?
-  order       StoreRentalOrder? @relation(fields: [orderId], references: [id])
-  action      String
-  detail      Json
-  createdAt   DateTime          @default(now())
+  id        String            @id @default(uuid())
+  tenantId  String
+  tenant    Tenant            @relation(fields: [tenantId], references: [id])
+  userId    String?
+  user      User?             @relation(fields: [userId], references: [id])
+  orderId   String?
+  order     StoreRentalOrder? @relation(fields: [orderId], references: [id])
+  action    String
+  detail    Json
+  createdAt DateTime          @default(now())
 
   @@index([tenantId, action, createdAt])
 }
@@ -1594,15 +1667,15 @@ model FilterPreset {
 }
 
 model IntegrationCredential {
-  id          String   @id @default(uuid())
-  tenantId    String
-  tenant      Tenant   @relation(fields: [tenantId], references: [id])
-  provider    String
-  purpose     String
-  status      String
-  config      Json
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default(uuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  provider  String
+  purpose   String
+  status    String
+  config    Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([tenantId, provider, purpose])
 }
@@ -1652,9 +1725,9 @@ model NotificationTemplate {
 }
 
 model NotificationSendLog {
-  id          String   @id @default(uuid())
-  tenantId    String
-  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  id           String    @id @default(uuid())
+  tenantId     String
+  tenant       Tenant    @relation(fields: [tenantId], references: [id])
   templateCode String?
   businessType String
   businessId   String?
@@ -1662,12 +1735,12 @@ model NotificationSendLog {
   targetName   String?
   targetMasked String?
   channels     Json
-  provider     String   @default("mock")
+  provider     String    @default("mock")
   status       String
   requestJson  Json
   responseJson Json?
   sentAt       DateTime?
-  createdAt    DateTime @default(now())
+  createdAt    DateTime  @default(now())
 
   @@index([tenantId, businessType, businessId])
   @@index([tenantId, templateCode, createdAt])
@@ -1695,23 +1768,23 @@ model ExternalAdapterLog {
 }
 
 model AsyncJob {
-  id           String   @id @default(uuid())
+  id           String    @id @default(uuid())
   tenantId     String
-  tenant       Tenant   @relation(fields: [tenantId], references: [id])
+  tenant       Tenant    @relation(fields: [tenantId], references: [id])
   jobType      String
   businessType String?
   businessId   String?
   status       String
-  attempt      Int      @default(0)
-  maxAttempts  Int      @default(3)
+  attempt      Int       @default(0)
+  maxAttempts  Int       @default(3)
   scheduledAt  DateTime?
   startedAt    DateTime?
   finishedAt   DateTime?
   operator     String?
   payload      Json
   result       Json?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   @@index([tenantId, jobType, status])
   @@index([tenantId, scheduledAt])
@@ -1741,26 +1814,26 @@ model DocumentPrintJob {
 }
 
 model TBoxDevice {
-  id              String   @id @default(uuid())
-  tenantId        String
-  tenant          Tenant   @relation(fields: [tenantId], references: [id])
-  cid             String
-  simNo           String?
-  model           String
-  status          String   @default("unbound")
-  boundVehicleId  String?
-  boundPlateNo    String?
-  vehicleModel    String?
-  firmwareVersion String?
-  appVersion      String?
+  id               String    @id @default(uuid())
+  tenantId         String
+  tenant           Tenant    @relation(fields: [tenantId], references: [id])
+  cid              String
+  simNo            String?
+  model            String
+  status           String    @default("unbound")
+  boundVehicleId   String?
+  boundPlateNo     String?
+  vehicleModel     String?
+  firmwareVersion  String?
+  appVersion       String?
   warrantyExpireAt DateTime?
-  supportsIButton Boolean  @default(false)
-  iButtonCode     String?
-  powerOnAt       DateTime?
-  lastHeartbeatAt DateTime?
-  telemetry       Json?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  supportsIButton  Boolean   @default(false)
+  iButtonCode      String?
+  powerOnAt        DateTime?
+  lastHeartbeatAt  DateTime?
+  telemetry        Json?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   @@unique([tenantId, cid])
   @@index([tenantId, status])
@@ -1768,17 +1841,17 @@ model TBoxDevice {
 }
 
 model ReportExportJob {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   tenantId    String
-  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  tenant      Tenant    @relation(fields: [tenantId], references: [id])
   reportType  String
   fileName    String
-  status      String   @default("completed")
+  status      String    @default("completed")
   filters     Json
-  rowCount    Int      @default(0)
+  rowCount    Int       @default(0)
   downloadUrl String?
   operator    String?
-  createdAt   DateTime @default(now())
+  createdAt   DateTime  @default(now())
   completedAt DateTime?
 
   @@index([tenantId, reportType, createdAt])
@@ -1798,4 +1871,276 @@ model OpsEventLog {
 
   @@index([tenantId, level, createdAt])
   @@index([tenantId, category, createdAt])
+}
+
+model RentalCategoryDefinition {
+  code                    RentalCategoryCode         @id
+  name                    String
+  description             String
+  supportedInventoryModes Json
+  defaultCapabilities     Json
+  terminology             Json
+  attributeSchema         Json
+  version                 String
+  profiles                TenantRentalProfile[]
+  itemGroups              RentalItemGroup[]
+  inspectionTemplates     RentalInspectionTemplate[]
+  createdAt               DateTime                   @default(now())
+  updatedAt               DateTime                   @updatedAt
+
+  @@map("rental_category_definitions")
+}
+
+model TenantRentalProfile {
+  tenantId      String                   @id
+  tenant        Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  categoryCode  RentalCategoryCode
+  category      RentalCategoryDefinition @relation(fields: [categoryCode], references: [code])
+  capabilities  Json
+  terminology   Json
+  configVersion String
+  initializedAt DateTime                 @default(now())
+  updatedAt     DateTime                 @updatedAt
+
+  @@index([categoryCode])
+  @@map("tenant_rental_profiles")
+}
+
+model RentalFulfillmentLocation {
+  id            String               @id @default(uuid())
+  tenantId      String
+  tenant        Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  code          String
+  name          String
+  type          String
+  capabilities  Json
+  address       String?
+  status        String               @default("enabled")
+  assets        RentalAsset[]
+  stockBalances RentalStockBalance[]
+  orders        RentalOrder[]
+  reservations  RentalReservation[]
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  @@unique([tenantId, code])
+  @@index([tenantId, status])
+  @@map("rental_fulfillment_locations")
+}
+
+model RentalItemGroup {
+  id               String                   @id @default(uuid())
+  tenantId         String
+  tenant           Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  categoryCode     RentalCategoryCode
+  category         RentalCategoryDefinition @relation(fields: [categoryCode], references: [code])
+  code             String
+  name             String
+  inventoryMode    RentalInventoryMode
+  unit             String                   @default("件")
+  description      String?
+  attributes       Json
+  status           String                   @default("enabled")
+  assets           RentalAsset[]
+  stockBalances    RentalStockBalance[]
+  orderLines       RentalOrderLine[]
+  reservations     RentalReservation[]
+  bundleComponents RentalBundleComponent[]  @relation("BundleParent")
+  usedByBundles    RentalBundleComponent[]  @relation("BundleComponent")
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+
+  @@unique([tenantId, code])
+  @@index([tenantId, categoryCode, inventoryMode, status])
+  @@map("rental_item_groups")
+}
+
+model RentalBundleComponent {
+  id                   String          @id @default(uuid())
+  bundleItemGroupId    String
+  bundleItemGroup      RentalItemGroup @relation("BundleParent", fields: [bundleItemGroupId], references: [id], onDelete: Cascade)
+  componentItemGroupId String
+  componentItemGroup   RentalItemGroup @relation("BundleComponent", fields: [componentItemGroupId], references: [id])
+  quantity             Int
+  optional             Boolean         @default(false)
+  substitutionGroup    String?
+  createdAt            DateTime        @default(now())
+
+  @@unique([bundleItemGroupId, componentItemGroupId])
+  @@index([componentItemGroupId])
+  @@map("rental_bundle_components")
+}
+
+model RentalAsset {
+  id          String                    @id @default(uuid())
+  tenantId    String
+  tenant      Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  itemGroupId String
+  itemGroup   RentalItemGroup           @relation(fields: [itemGroupId], references: [id])
+  assetNo     String
+  serialNo    String?
+  locationId  String
+  location    RentalFulfillmentLocation @relation(fields: [locationId], references: [id])
+  status      RentalAssetState          @default(AVAILABLE)
+  attributes  Json
+  allocations RentalAllocation[]
+  createdAt   DateTime                  @default(now())
+  updatedAt   DateTime                  @updatedAt
+
+  @@unique([tenantId, assetNo])
+  @@unique([tenantId, serialNo])
+  @@index([tenantId, itemGroupId, locationId, status])
+  @@map("rental_assets")
+}
+
+model RentalStockBalance {
+  id                  String                    @id @default(uuid())
+  tenantId            String
+  tenant              Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  itemGroupId         String
+  itemGroup           RentalItemGroup           @relation(fields: [itemGroupId], references: [id])
+  locationId          String
+  location            RentalFulfillmentLocation @relation(fields: [locationId], references: [id])
+  onHandQuantity      Int                       @default(0)
+  reservedQuantity    Int                       @default(0)
+  maintenanceQuantity Int                       @default(0)
+  updatedAt           DateTime                  @updatedAt
+
+  @@unique([tenantId, itemGroupId, locationId])
+  @@index([tenantId, locationId])
+  @@map("rental_stock_balances")
+}
+
+model RentalOrder {
+  id                    String                    @id @default(uuid())
+  tenantId              String
+  tenant                Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  orderNo               String
+  categoryCode          RentalCategoryCode
+  status                RentalOrderV1Status       @default(RESERVED)
+  customerType          String
+  customerId            String?
+  customerName          String
+  contactPhone          String?
+  fulfillmentLocationId String
+  fulfillmentLocation   RentalFulfillmentLocation @relation(fields: [fulfillmentLocationId], references: [id])
+  startAt               DateTime
+  endAt                 DateTime
+  totalAmount           Decimal                   @db.Decimal(12, 2)
+  createdBy             String
+  lines                 RentalOrderLine[]
+  reservations          RentalReservation[]
+  allocations           RentalAllocation[]
+  inspections           RentalInspectionRecord[]
+  createdAt             DateTime                  @default(now())
+  updatedAt             DateTime                  @updatedAt
+
+  @@unique([tenantId, orderNo])
+  @@index([tenantId, status, startAt])
+  @@index([tenantId, customerType, customerId])
+  @@map("rental_orders")
+}
+
+model RentalOrderLine {
+  id            String              @id @default(uuid())
+  orderId       String
+  order         RentalOrder         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  itemGroupId   String
+  itemGroup     RentalItemGroup     @relation(fields: [itemGroupId], references: [id])
+  inventoryMode RentalInventoryMode
+  quantity      Int
+  unitPrice     Decimal             @db.Decimal(12, 2)
+  amount        Decimal             @db.Decimal(12, 2)
+  note          String?
+  reservations  RentalReservation[]
+  allocations   RentalAllocation[]
+  createdAt     DateTime            @default(now())
+
+  @@index([orderId, itemGroupId])
+  @@map("rental_order_lines")
+}
+
+model RentalReservation {
+  id          String                    @id @default(uuid())
+  tenantId    String
+  tenant      Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  orderId     String
+  order       RentalOrder               @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderLineId String
+  orderLine   RentalOrderLine           @relation(fields: [orderLineId], references: [id], onDelete: Cascade)
+  itemGroupId String
+  itemGroup   RentalItemGroup           @relation(fields: [itemGroupId], references: [id])
+  locationId  String
+  location    RentalFulfillmentLocation @relation(fields: [locationId], references: [id])
+  quantity    Int
+  startAt     DateTime
+  endAt       DateTime
+  status      RentalReservationState    @default(SOFT)
+  expiresAt   DateTime?
+  createdAt   DateTime                  @default(now())
+  updatedAt   DateTime                  @updatedAt
+
+  @@index([tenantId, itemGroupId, locationId, startAt, endAt, status])
+  @@index([orderId, orderLineId])
+  @@map("rental_reservations")
+}
+
+model RentalAllocation {
+  id          String          @id @default(uuid())
+  orderId     String
+  order       RentalOrder     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderLineId String
+  orderLine   RentalOrderLine @relation(fields: [orderLineId], references: [id], onDelete: Cascade)
+  assetId     String?
+  asset       RentalAsset?    @relation(fields: [assetId], references: [id])
+  quantity    Int             @default(1)
+  status      String          @default("allocated")
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([orderId, orderLineId])
+  @@index([assetId, status])
+  @@map("rental_allocations")
+}
+
+model RentalInspectionTemplate {
+  id           String                   @id @default(uuid())
+  tenantId     String
+  tenant       Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  categoryCode RentalCategoryCode
+  category     RentalCategoryDefinition @relation(fields: [categoryCode], references: [code])
+  code         String
+  name         String
+  stage        String
+  version      String
+  fields       Json
+  enabled      Boolean                  @default(true)
+  records      RentalInspectionRecord[]
+  createdAt    DateTime                 @default(now())
+  updatedAt    DateTime                 @updatedAt
+
+  @@unique([tenantId, code, version])
+  @@index([tenantId, categoryCode, stage, enabled])
+  @@map("rental_inspection_templates")
+}
+
+model RentalInspectionRecord {
+  id              String                   @id @default(uuid())
+  tenantId        String
+  tenant          Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  orderId         String
+  order           RentalOrder              @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  stage           String
+  templateId      String
+  template        RentalInspectionTemplate @relation(fields: [templateId], references: [id])
+  templateCode    String
+  templateVersion String
+  results         Json
+  exceptions      Json
+  attachments     Json
+  operator        String
+  createdAt       DateTime                 @default(now())
+
+  @@index([tenantId, orderId, stage])
+  @@map("rental_inspection_records")
 }

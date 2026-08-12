@@ -1,0 +1,176 @@
+const fs = require("node:fs");
+const path = require("node:path");
+
+const root = path.resolve(__dirname, "..");
+const reactRoot = path.join(root, "apps", "admin", "src");
+const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), "utf8");
+const failures = [];
+
+function requireText(source, expected, label) {
+  if (!source.includes(expected)) failures.push(`${label}: missing ${expected}`);
+}
+
+const router = read("apps/admin/src/app/AppRouter.tsx");
+const api = read("apps/admin/src/api/rental.ts");
+const httpSource = read("apps/admin/src/api/http.ts");
+const operations = read("apps/admin/src/api/operations.ts");
+const shell = read("apps/admin/src/components/AppShell.tsx");
+const appearanceSwitcher = read("apps/admin/src/components/AppearanceSwitcher.tsx");
+const pageHeader = read("apps/admin/src/components/PageHeader.tsx");
+const loginPage = read("apps/admin/src/features/auth/LoginPage.tsx");
+const styles = read("apps/admin/src/styles.css");
+const commercialPage = read("apps/admin/src/features/commercial/CommercialWorkspacePage.tsx");
+const locationPage = read("apps/admin/src/features/fulfillment/LocationPage.tsx");
+const platformPage = read("apps/admin/src/features/platform/PlatformPage.tsx");
+const tenantManagementPage = read("apps/admin/src/features/platform/TenantManagementPage.tsx");
+const platformOperationsPage = read("apps/admin/src/features/platform/PlatformOperationsPage.tsx");
+const assetLifecyclePage = read("apps/admin/src/features/catalog/AssetLifecyclePage.tsx");
+const rentalCorePage = read("apps/admin/src/features/rental-core/RentalCorePage.tsx");
+const rentalCoreApi = read("apps/admin/src/api/rentalCore.ts");
+const appRoot = read("apps/admin/src/app/App.tsx");
+const themeSource = read("apps/admin/src/app/theme.tsx");
+
+[
+  "/workbench", "/rental/core", "/rental/orders", "/rental/contracts", "/rental/item-groups", "/rental/assets",
+  "/rental/locations", "/rental/commercial", "/customers", "/finance", "/operations",
+  "/asset-operations", "/asset-lifecycle", "/business-tools", "/reports", "/platform/tenants", "/platform/users", "/platform/system", "/platform/operations", "/platform/tools"
+].forEach((route) => requireText(router, `path="${route}"`, "route coverage"));
+
+[
+  "savePricingPlan", "saveMarketingPlan", "saveMember", "processMemberRisk", "saveCorporate",
+  "saveFinanceDocument", "saveFinancePreAuth", "createFinanceAdjustment", "processFinanceAdjustment",
+  "bindTboxDevice", "runTboxCommand", "saveOrganization", "saveUser", "saveRole", "saveSystemRuleSection"
+].forEach((method) => requireText(api, `${method}:`, "API write coverage"));
+
+[
+  "categories", "profile", "itemGroups", "assets", "stockBalances", "availability", "orders",
+  "createOrder", "confirmOrder", "allocateOrder", "cancelOrder", "inspectionTemplates", "createInspection"
+].forEach((method) => requireText(rentalCoreApi, `${method}:`, "Rental Core API coverage"));
+[
+  "Rental Core v0.1", "序列化资产", "数量库存", "套装", "确认预占", "执行配货"
+].forEach((label) => requireText(rentalCorePage, label, "Rental Core UI coverage"));
+
+[
+  "createPriceSchedule", "previewDispatchOptimization", "applyDispatchOptimization", "manualReassignFromDispatch",
+  "createStoreRentalOrderFee", "createStoreRentalOrderTransaction", "settleCorporateMonthlyBill",
+  "createVehicleMaintenanceRecord", "saveVehicleCredential", "saveStationCalendarDay",
+  "bootstrapTenant", "savePlatformDictionary", "savePlatformNumberRule", "createFileAsset", "createPrintJob",
+  "createAsyncJob", "createStoreRentalReportExport", "downloadStoreRentalReportExport",
+  "checkSecondConfirmation", "getRentalRuleVersion", "invokeMockAdapter", "listRentalRuleVersions",
+  "listStationHierarchy", "setOrganizationStatus", "updateVehicleAccidentRecord",
+  "updateVehicleLocationEvent", "updateVehicleMaintenanceRecord"
+].forEach((method) => requireText(operations, `function ${method}`, "advanced operation coverage"));
+
+requireText(operations, "function listTenants", "tenant list API coverage");
+requireText(operations, "function updateTenantStatus", "tenant lifecycle API coverage");
+requireText(operations, 'import { http } from "./http";', "shared authenticated HTTP client");
+if (operations.includes("axios.create") || operations.includes("store_rental_access_token")) {
+  failures.push("authentication contract: operations API recreated the HTTP client or uses retired auth storage keys");
+}
+if (!httpSource.includes('window.localStorage.getItem("rental_access_token")')) {
+  failures.push("authentication contract: canonical HTTP client does not read the current React auth token");
+}
+
+[
+  [commercialPage, "listRentalRuleVersions", "rule version list UI"],
+  [commercialPage, "getRentalRuleVersion", "rule version detail UI"],
+  [locationPage, "listStationHierarchy", "station hierarchy UI"],
+  [tenantManagementPage, "listTenants", "tenant list UI"],
+  [tenantManagementPage, "bootstrapTenant", "tenant bootstrap UI"],
+  [tenantManagementPage, "updateTenantStatus", "tenant lifecycle UI"],
+  [platformPage, "setOrganizationStatus", "organization status UI"],
+  [platformOperationsPage, "checkSecondConfirmation", "second confirmation UI"],
+  [platformOperationsPage, "invokeMockAdapter", "mock adapter UI"],
+  [assetLifecyclePage, "updateVehicleLocationEvent", "location event edit UI"],
+  [assetLifecyclePage, "updateVehicleMaintenanceRecord", "maintenance record edit UI"],
+  [assetLifecyclePage, "updateVehicleAccidentRecord", "accident record edit UI"]
+].forEach(([source, expected, label]) => requireText(source, expected, label));
+
+[
+  "Rental Core", "商业规则", "客户与企业", "财务结算", "资产调拨与设备", "资产生命周期", "业务控制台", "组织与权限", "平台工具与治理"
+].forEach((label) => requireText(shell, label, "navigation coverage"));
+
+[
+  [appRoot, 'variant="outlined"', "Ant Design v6 outlined control archetype"],
+  [themeSource, 'cssVar:', "Ant Design CSS variable theme"],
+  [themeSource, 'theme.darkAlgorithm', "official dark algorithm"],
+  [themeSource, '"default" | "dark" | "compact"', "official appearance presets"],
+  [themeSource, 'theme.compactAlgorithm', "official compact algorithm"],
+  [themeSource, 'bodyBg: "#f5f8ff"', "official dashboard layout background"],
+  [themeSource, 'activeBarBorderWidth: 0', "official dashboard menu treatment"],
+  [appearanceSwitcher, '切换外观主题', "theme switcher"],
+  [loginPage, 'login-frame', "compact framed login composition"],
+  [pageHeader, 'page-toolbar', "optional business-owned view and action toolbar"],
+  [shell, 'app-frame-stage', "compact framed dashboard shell"],
+  [styles, 'padding: 6px', "narrow browser-edge breathing room"],
+  [styles, 'border-radius: 14px', "rounded application frame"],
+  [shell, 'menu: { items: breadcrumbMenuItems }', "selectable breadcrumb menu"],
+  [themeSource, 'cellPaddingBlock: 12', "official dashboard table density"],
+  [styles, '.ant-segmented', "official pill segmented styling"],
+  [styles, '.ant-tabs .ant-tabs-nav-list', "pill section tabs"],
+  [styles, '.standalone-tabs > .ant-tabs-content-holder', "tabs separated from content panel"],
+  [styles, '.tabbed-workspace.ant-card', "legacy tab card wrapper removed visually"],
+  [styles, 'border-radius: 999px', "fully rounded selection controls"],
+  [styles, '.ant-table-wrapper .ant-table-thead', "official table header styling"],
+  [styles, 'transform: scale(.97)', "direct press feedback"]
+].forEach(([source, expected, label]) => requireText(source, expected, label));
+
+if (pageHeader.includes("Typography.Title") || pageHeader.includes("Typography.Paragraph")) {
+  failures.push("Ant Design dashboard layout contract: legacy title-and-subtitle PageHeader returned");
+}
+if (pageHeader.includes("Segmented")) {
+  failures.push("Ant Design dashboard layout contract: shell forced a demo-specific segmented control into every page");
+}
+
+const visualSource = `${shell}\n${loginPage}\n${styles}`;
+[
+  ['stage-orb', "decorative website-stage orb"],
+  ['type="card"', "filled card tabs"],
+  ['linear-gradient', "decorative gradient"],
+  ['radial-gradient', "decorative gradient"]
+].forEach(([text, label]) => {
+  if (visualSource.includes(text)) failures.push(`Ant Design design.md visual contract: forbidden ${label}`);
+});
+if (themeSource.includes('"glass"')) failures.push("Ant Design design.md visual contract: custom glass algorithm returned");
+if (/\.(?:app-frame-stage|login-stage)\s*\{[^}]*padding:\s*12px/s.test(styles)) {
+  failures.push("Ant Design dashboard layout contract: application frame gutter is wider than the approved compact gutter");
+}
+
+const forbidden = [];
+const embeddedPrimaryTabs = [];
+for (const entry of fs.readdirSync(reactRoot, { recursive: true, withFileTypes: true })) {
+  if (!entry.isFile() || !/\.(ts|tsx|css)$/.test(entry.name)) continue;
+  const file = path.join(entry.parentPath, entry.name);
+  const source = fs.readFileSync(file, "utf8");
+  if (/from\s+["']vue["']|element-plus|\.vue["']/.test(source)) forbidden.push(path.relative(root, file));
+  if (/<Card[^>]*className=["'][^"']*data-panel[^"']*["'][^>]*>\s*<Tabs/s.test(source)) {
+    embeddedPrimaryTabs.push(path.relative(root, file));
+  }
+}
+if (forbidden.length) failures.push(`React app imports removed frontend dependencies: ${forbidden.join(", ")}`);
+if (embeddedPrimaryTabs.length) failures.push(`primary tabs remain embedded in content cards: ${embeddedPrimaryTabs.join(", ")}`);
+
+const retiredVueFiles = [];
+const appsRoot = path.join(root, "apps");
+for (const entry of fs.readdirSync(appsRoot, { recursive: true, withFileTypes: true })) {
+  if (entry.isFile() && entry.name.endsWith(".vue")) {
+    retiredVueFiles.push(path.relative(root, path.join(entry.parentPath, entry.name)));
+  }
+}
+if (retiredVueFiles.length) failures.push(`retired Vue source files still exist: ${retiredVueFiles.join(", ")}`);
+
+const packageFiles = [read("package.json"), read("package-lock.json"), read("apps/admin/package.json")];
+if (packageFiles.some((source) => /"(?:vue|vue-router|pinia|element-plus|vue-tsc|@vitejs\/plugin-vue)"/.test(source))) {
+  failures.push("package manifests or lockfile still contain removed frontend dependencies");
+}
+if (packageFiles.some((source) => source.includes("@store-rental/admin-next") || source.includes('"apps/admin-next"'))) {
+  failures.push("package metadata still contains the temporary React workspace");
+}
+if (fs.existsSync(path.join(root, "apps", "admin-next"))) failures.push("temporary apps/admin-next directory still exists");
+
+if (failures.length) {
+  console.error(failures.map((failure) => `- ${failure}`).join("\n"));
+  process.exit(1);
+}
+
+console.log("React admin static contract passed: routes, navigation, Ant Design design.md language, full write APIs, and dependency isolation verified.");

@@ -258,6 +258,57 @@ export class StoreRentalService {
   }
 
   private readonly quotes = new Map<string, StoredQuote>();
+  private readonly dataDictionary: Record<string, Record<string, string>> = {
+    storeRentalMode: {
+      store_rental: "门店租赁",
+      self_service_24h: "24 小时自助"
+    },
+    orderMainStatus: {
+      pending_payment: "待付款",
+      reserved: "已预约",
+      pickup_overdue: "取车逾期",
+      inspecting: "验车中",
+      renting: "租赁中",
+      renewing: "续租中",
+      overdue: "还车逾期",
+      accident_processing: "事故处理中",
+      settlement_pending: "待结算",
+      payment_due: "待付款",
+      refund_pending: "退款中",
+      completed: "已完成",
+      cancelled: "已取消",
+      no_show: "未到店",
+      rejected: "已拒绝",
+      closed: "已关闭"
+    },
+    dispatchStatus: {
+      pending: "待派车",
+      pre_assigned: "已预派",
+      locked: "已锁定",
+      manual_reassigned: "手动改派",
+      upgraded: "已升级",
+      dispatch_manual_required: "需手动派车"
+    },
+    paymentStatus: {
+      unpaid: "未付款",
+      deposit_paid: "已付押金",
+      monthly_billing: "月结中",
+      partial_paid: "部分付款",
+      paid: "已付款",
+      payment_due: "待付款",
+      refund_pending: "退款中",
+      refunded: "已退款"
+    },
+    configStatus: {
+      draft: "草稿",
+      effective: "生效中",
+      archived: "已归档"
+    },
+    billingMode: {
+      customer_pay: "客户付费",
+      monthly: "企业月结"
+    }
+  };
   private readonly dispatchEvents: StoreRentalDispatchEvent[] = [];
   private ruleVersionHistory: StoreRentalRuleVersionRecord[] = [];
   private readonly orderOperationRecords = new Map<
@@ -3165,6 +3216,62 @@ export class StoreRentalService {
     });
 
     return result;
+  }
+
+  getDataDictionary(): Record<string, Record<string, string>> {
+    return this.dataDictionary;
+  }
+
+  getPricingExplanation(quoteNo: string) {
+    const stored = this.quotes.get(quoteNo);
+    if (!stored) {
+      throw new NotFoundException(`报价 ${quoteNo} 不存在或已过期。`);
+    }
+
+    const { result } = stored;
+    return {
+      quoteNo: result.quoteNo,
+      planId: result.planId,
+      currency: result.currency,
+      billableDays: result.billableDays,
+      rentalAmount: result.rentalAmount,
+      serviceFeeAmount: result.serviceFeeAmount,
+      adjustmentAmount: result.adjustmentAmount,
+      discountAmount: result.discountAmount,
+      depositAmount: result.depositAmount,
+      payableAmount: result.payableAmount,
+      monthlySettlementAmount: result.monthlySettlementAmount,
+      feeItems: result.feeItems.map((item) => ({
+        code: item.code,
+        name: item.name,
+        amount: item.amount,
+        source: item.source ?? "unknown"
+      })),
+      explanationLines: result.explanationLines,
+      billingSegments: result.billingSegments,
+      selectedMarketingPlan: result.selectedMarketingPlan,
+      selectedMembershipPlan: result.selectedMembershipPlan,
+      versionChain: {
+        pricingVersion: result.snapshots.pricingVersion,
+        pricingVersionTitle: result.snapshots.priceVersionTitle,
+        priceVersionId: result.snapshots.priceVersionId,
+        ruleVersion: result.snapshots.ruleVersion,
+        ruleEffectiveAt: result.snapshots.ruleEffectiveAt,
+        marketingPlanId: result.snapshots.marketingPlanId,
+        marketingPlanVersionId: result.snapshots.marketingPlanVersionId,
+        marketingPlanName: result.snapshots.marketingPlanName,
+        membershipPlanId: result.snapshots.membershipPlanId,
+        membershipPlanCode: result.snapshots.membershipPlanCode,
+        membershipPlanName: result.snapshots.membershipPlanName,
+        membershipVersion: result.snapshots.membershipVersion,
+        dynamicPricingScheduleId: result.snapshots.dynamicPricingScheduleId,
+        dynamicPricingVersion: result.snapshots.dynamicPricingVersion,
+        dynamicPricingSummary: result.snapshots.dynamicPricingSummary,
+        dynamicPricingEffectiveAt: result.snapshots.dynamicPricingEffectiveAt
+      },
+      snapshots: result.snapshots,
+      warnings: result.warnings
+    };
   }
 
   checkAvailability(
@@ -11477,7 +11584,7 @@ export class StoreRentalService {
 
   private useMysqlDataSource() {
     return (
-      this.configService.get<string>("STORE_RENTAL_DATA_SOURCE") ?? "memory"
+      this.configService.get<string>("STORE_RENTAL_DATA_SOURCE") ?? "mysql"
     ).toLowerCase() === "mysql";
   }
 

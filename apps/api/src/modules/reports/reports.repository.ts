@@ -36,6 +36,7 @@ import type {
   VehicleInstanceSummary
 } from "@store-rental/shared";
 import { PrismaService } from "../database/prisma.service";
+import { getRequestTenantId } from "../../common/request-identity";
 
 type NormalizedReportQuery = Required<
   Pick<StoreRentalReportQuery, "tenantId" | "from" | "to" | "period">
@@ -83,7 +84,9 @@ interface RiskContext {
 
 @Injectable()
 export class ReportsRepository {
-  private readonly defaultTenantId = "tenant_001";
+  private get defaultTenantId() {
+    return getRequestTenantId();
+  }
   private readonly exportDirectory = resolve(process.cwd(), "storage", "report-exports");
 
   constructor(private readonly prisma: PrismaService) {}
@@ -600,11 +603,12 @@ export class ReportsRepository {
     }
   }
 
-  async getExportFile(fileName: string): Promise<{ fileName: string; content: Buffer }> {
+  async getExportFile(fileName: string, tenantId = this.defaultTenantId): Promise<{ fileName: string; content: Buffer }> {
     const safeFileName = this.safeExportFileName(fileName);
     const job = await this.prisma.reportExportJob.findFirst({
       where: {
         fileName: safeFileName,
+        tenantId,
         status: "completed"
       }
     });
@@ -642,7 +646,7 @@ export class ReportsRepository {
     const [tenantCount, orderCount, vehicleCount, reportExportJobCount, recentLogs] =
       connected
         ? await Promise.all([
-            this.prisma.tenant.count(),
+            this.prisma.tenant.count({ where: { id: normalized.tenantId } }),
             this.prisma.storeRentalOrder.count({ where: { tenantId: normalized.tenantId } }),
             this.prisma.vehicle.count({ where: { tenantId: normalized.tenantId } }),
             this.prisma.reportExportJob.count({ where: { tenantId: normalized.tenantId } }),

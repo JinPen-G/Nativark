@@ -1,5 +1,5 @@
 {
-  "name": "store-rental-platform",
+  "name": "rental-os",
   "version": "0.1.0",
   "private": true,
   "workspaces": [
@@ -10,8 +10,8 @@
     "dev": "npm run build -w @store-rental/shared && concurrently -n api,admin -c blue,green \"npm run dev -w @store-rental/api\" \"npm run dev -w @store-rental/admin\"",
     "dev:api": "npm run build -w @store-rental/shared && npm run dev -w @store-rental/api",
     "dev:admin": "npm run build -w @store-rental/shared && npm run dev -w @store-rental/admin",
-    "dev:admin:5174": "npm run build -w @store-rental/shared && npm run dev:5174 -w @store-rental/admin",
     "build": "npm run build -w @store-rental/shared && npm run build -w @store-rental/api && npm run build -w @store-rental/admin",
+    "build:admin": "npm run build -w @store-rental/shared && npm run build -w @store-rental/admin",
     "lint": "npm run lint -w @store-rental/shared && npm run lint -w @store-rental/api && npm run lint -w @store-rental/admin",
     "db:generate": "npm run prisma:generate -w @store-rental/api",
     "db:validate": "npm run prisma:validate -w @store-rental/api",
@@ -22,8 +22,12 @@
     "ops:mysql:backup": "powershell -ExecutionPolicy Bypass -File scripts/backup-mysql.ps1",
     "ops:mysql:restore": "powershell -ExecutionPolicy Bypass -File scripts/restore-mysql.ps1",
     "test:reports": "node tests/reports-metrics.test.cjs",
+    "test:admin": "node scripts/validate-react-admin.cjs",
+    "test:rental-core": "npm run build -w @store-rental/shared && node tests/rental-core-v01.test.cjs",
+    "test:saas-foundation": "npm run build -w @store-rental/shared && node tests/saas-foundation.test.cjs",
+    "test:seed-types": "tsc --noEmit --skipLibCheck --target ES2022 --module commonjs --moduleResolution node --esModuleInterop apps/api/prisma/seed.ts",
     "contract:validate": "node scripts/validate-api-contracts.cjs",
-    "format": "prettier --write \"apps/**/*.{ts,vue,css}\" \"packages/**/*.ts\""
+    "format": "prettier --write \"apps/**/*.{ts,tsx,css}\" \"packages/**/*.ts\""
   },
   "devDependencies": {
     "concurrently": "^9.1.0",

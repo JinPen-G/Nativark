@@ -6,7 +6,9 @@ import {
   MonthlyBillStatus,
   OrganizationType,
   PermissionKind,
+  Prisma,
   PrismaClient,
+  RentalCategoryCode,
   RoleScope,
   SettlementMode,
   SystemDataScope,
@@ -14,6 +16,7 @@ import {
   VehicleOperationStatus,
   VehicleServiceType
 } from "@prisma/client";
+import { hashPassword } from "../src/common/password";
 
 const prisma = new PrismaClient();
 
@@ -35,11 +38,32 @@ type TenantSeed = {
     phone: string;
     organizationId: string;
     roleIds: string[];
+    isSaasAdmin: boolean;
     isPlatformAdmin: boolean;
   }>;
 };
 
 const tenants: TenantSeed[] = [
+  {
+    id: "tenant_platform",
+    code: "platform",
+    name: "Rental OS SaaS 平台",
+    organizations: [
+      { id: "org_saas_platform", type: OrganizationType.OPERATOR, code: "SAAS", name: "SaaS 平台运营" }
+    ],
+    users: [
+      {
+        id: "user_saas_admin",
+        account: "admin",
+        displayName: "SaaS 平台管理员",
+        phone: "000-0000-0000",
+        organizationId: "org_saas_platform",
+        roleIds: ["role_saas_admin"],
+        isSaasAdmin: true,
+        isPlatformAdmin: false
+      }
+    ]
+  },
   {
     id: "tenant_001",
     code: "demo",
@@ -54,10 +78,11 @@ const tenants: TenantSeed[] = [
       {
         id: "user_admin_001",
         account: "admin",
-        displayName: "平台管理员",
+        displayName: "香港租户管理员",
         phone: "852-1000-0001",
         organizationId: "org_operator_hk",
         roleIds: ["role_platform_admin"],
+        isSaasAdmin: false,
         isPlatformAdmin: true
       },
       {
@@ -67,6 +92,7 @@ const tenants: TenantSeed[] = [
         phone: "852-2388-0001",
         organizationId: "org_store_mongkok",
         roleIds: ["role_store_operator"],
+        isSaasAdmin: false,
         isPlatformAdmin: false
       },
       {
@@ -76,6 +102,7 @@ const tenants: TenantSeed[] = [
         phone: "852-2388-0002",
         organizationId: "org_operator_hk",
         roleIds: ["role_pricing_manager"],
+        isSaasAdmin: false,
         isPlatformAdmin: false
       }
     ]
@@ -92,10 +119,11 @@ const tenants: TenantSeed[] = [
       {
         id: "user_admin_002",
         account: "admin",
-        displayName: "深圳平台管理员",
+        displayName: "深圳租户管理员",
         phone: "0755-1000-0001",
         organizationId: "org_operator_sz",
         roleIds: ["role_platform_admin_sz"],
+        isSaasAdmin: false,
         isPlatformAdmin: true
       },
       {
@@ -105,6 +133,7 @@ const tenants: TenantSeed[] = [
         phone: "0755-2388-0001",
         organizationId: "org_store_nanshan",
         roleIds: ["role_store_operator_sz"],
+        isSaasAdmin: false,
         isPlatformAdmin: false
       }
     ]
@@ -160,9 +189,9 @@ const permissions = [
 const roleTemplates = [
   {
     id: "role_platform_admin",
-    code: "PLATFORM_ADMIN",
-    name: "平台管理员",
-    description: "固定拥有当前租户全部权限，不允许按功能裁剪。",
+    code: "TENANT_ADMIN",
+    name: "租户管理员",
+    description: "固定拥有当前 SaaS 租户全部权限，不允许跨租户。",
     scope: RoleScope.OPERATOR,
     fixedAllPermissions: true,
     enabledBusinessScopes: ["STORE_STANDARD", "STORE_24H", "SYSTEM_GLOBAL"],
@@ -223,6 +252,21 @@ const roleTemplates = [
     dataScope: SystemDataScope.ORGANIZATION
   }
 ];
+
+const saasRoleTemplate = {
+  id: "role_saas_admin",
+  code: "SAAS_ADMIN",
+  name: "SaaS 平台管理员",
+  description: "仅负责 SaaS 租户开通、资料维护和生命周期管理。",
+  scope: RoleScope.OPERATOR,
+  fixedAllPermissions: false,
+  enabledBusinessScopes: ["SAAS_PLATFORM"],
+  permissions: permissions
+    .map(([code]) => code)
+    .filter((code) => code.startsWith("system:tenant:")),
+  buttonPermissions: [],
+  dataScope: SystemDataScope.ALL
+} as const;
 
 const stations = [
   {
@@ -424,6 +468,81 @@ async function upsertTenants() {
   }
 }
 
+const rentalCategories = [
+  {
+    code: RentalCategoryCode.CAMERA,
+    name: "摄影设备",
+    description: "机身、镜头、灯光和拍摄套装租赁",
+    supportedInventoryModes: ["serialized", "quantity", "bundle"],
+    defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery", "usage_reading"],
+    terminology: { itemLabel: "器材", itemGroupLabel: "器材型号", assetLabel: "器材资产", fulfillmentLabel: "器材门店", pickupLabel: "取机", returnLabel: "还机", identifierLabel: "资产编号", usageMetricLabel: "快门次数" },
+    attributeSchema: { brand: "string", mount: "string", sensor: "string" },
+    version: "0.1.0"
+  },
+  {
+    code: RentalCategoryCode.CAMPING,
+    name: "露营设备",
+    description: "帐篷、桌椅、炊具和露营套装租赁",
+    supportedInventoryModes: ["serialized", "quantity", "bundle"],
+    defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery"],
+    terminology: { itemLabel: "装备", itemGroupLabel: "装备品类", assetLabel: "装备资产", fulfillmentLabel: "装备仓", pickupLabel: "领用", returnLabel: "归还", identifierLabel: "装备编号" },
+    attributeSchema: { brand: "string", people: "number", season: "string" },
+    version: "0.1.0"
+  },
+  {
+    code: RentalCategoryCode.VEHICLE,
+    name: "车辆载具",
+    description: "汽车、摩托车和其他载具租赁",
+    supportedInventoryModes: ["serialized", "bundle"],
+    defaultCapabilities: ["serialized_inventory", "bundle_inventory", "pickup", "return", "dispatch", "usage_reading", "qualification", "iot"],
+    terminology: { itemLabel: "车辆", itemGroupLabel: "车型组", assetLabel: "车辆", fulfillmentLabel: "门店", pickupLabel: "取车", returnLabel: "还车", identifierLabel: "车牌号", usageMetricLabel: "里程" },
+    attributeSchema: { brand: "string", model: "string", energyType: "string" },
+    version: "0.1.0"
+  },
+  {
+    code: RentalCategoryCode.CONSTRUCTION,
+    name: "工程设备",
+    description: "工程机械、工具和配套设备租赁",
+    supportedInventoryModes: ["serialized", "quantity", "bundle"],
+    defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery", "dispatch", "usage_reading", "qualification", "iot"],
+    terminology: { itemLabel: "设备", itemGroupLabel: "设备型号", assetLabel: "设备资产", fulfillmentLabel: "设备仓", pickupLabel: "出库", returnLabel: "入库", identifierLabel: "设备编号", usageMetricLabel: "工时" },
+    attributeSchema: { brand: "string", power: "string", ratedLoad: "number" },
+    version: "0.1.0"
+  }
+];
+
+async function upsertRentalCategoriesAndProfiles() {
+  for (const category of rentalCategories) {
+    await prisma.rentalCategoryDefinition.upsert({
+      where: { code: category.code },
+      update: category,
+      create: category
+    });
+  }
+  for (const profile of [
+    { tenantId: "tenant_001", categoryCode: RentalCategoryCode.CAMERA },
+    { tenantId: "tenant_002", categoryCode: RentalCategoryCode.CAMPING }
+  ]) {
+    const category = rentalCategories.find((item) => item.code === profile.categoryCode)!;
+    await prisma.tenantRentalProfile.upsert({
+      where: { tenantId: profile.tenantId },
+      update: {
+        categoryCode: profile.categoryCode,
+        capabilities: category.defaultCapabilities,
+        terminology: category.terminology,
+        configVersion: category.version
+      },
+      create: {
+        tenantId: profile.tenantId,
+        categoryCode: profile.categoryCode,
+        capabilities: category.defaultCapabilities,
+        terminology: category.terminology,
+        configVersion: category.version
+      }
+    });
+  }
+}
+
 async function upsertOrganizations() {
   for (const tenant of tenants) {
     for (const org of tenant.organizations) {
@@ -461,8 +580,10 @@ async function upsertPermissions() {
 
 async function upsertRolesAndUsers() {
   for (const tenant of tenants) {
-    for (const template of roleTemplates) {
-      const roleId = tenant.id === "tenant_001" ? template.id : `${template.id}_sz`;
+    const tenantRoleTemplates = tenant.code === "platform" ? [saasRoleTemplate] : roleTemplates;
+    for (const template of tenantRoleTemplates) {
+      const suffix = tenant.id === "tenant_001" ? "" : "_sz";
+      const roleId = tenant.code === "platform" ? template.id : `${template.id}${suffix}`;
       await prisma.role.upsert({
         where: { id: roleId },
         update: {
@@ -518,8 +639,10 @@ async function upsertRolesAndUsers() {
           displayName: user.displayName,
           phone: user.phone,
           roleId: user.roleIds[0],
-          passwordHash: "dev-only:123456",
+          passwordHash: hashPassword(tenant.code === "platform" ? "RentalOS!2026" : "RentalDemo!2026"),
+          isSaasAdmin: user.isSaasAdmin,
           isPlatformAdmin: user.isPlatformAdmin,
+          mustChangePassword: false,
           isActive: true
         },
         create: {
@@ -530,12 +653,15 @@ async function upsertRolesAndUsers() {
           displayName: user.displayName,
           phone: user.phone,
           roleId: user.roleIds[0],
-          passwordHash: "dev-only:123456",
+          passwordHash: hashPassword(tenant.code === "platform" ? "RentalOS!2026" : "RentalDemo!2026"),
+          isSaasAdmin: user.isSaasAdmin,
           isPlatformAdmin: user.isPlatformAdmin,
+          mustChangePassword: false,
           isActive: true
         }
       });
 
+      await prisma.userRole.deleteMany({ where: { userId: user.id } });
       for (const roleId of user.roleIds) {
         await prisma.userRole.upsert({
           where: { userId_roleId: { userId: user.id, roleId } },
@@ -1254,16 +1380,25 @@ async function upsertSceneOrders() {
   ];
 
   for (const order of sceneOrders) {
+    const createData = {
+      tenantId,
+      ...order
+      } as unknown as Prisma.StoreRentalOrderUncheckedCreateInput;
+    const updateData = {
+      tenantId,
+      ...order
+      } as unknown as Prisma.StoreRentalOrderUncheckedUpdateInput;
     await prisma.storeRentalOrder.upsert({
       where: { id: order.id },
-      update: { tenantId, ...order },
-      create: { tenantId, ...order }
+      update: updateData,
+      create: createData
     });
   }
 }
 
 async function main() {
   await upsertTenants();
+  await upsertRentalCategoriesAndProfiles();
   await upsertOrganizations();
   await upsertPermissions();
   await upsertRolesAndUsers();

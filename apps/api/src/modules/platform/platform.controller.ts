@@ -12,7 +12,9 @@ import type {
   SavePlatformNumberRuleRequest,
   SystemSecurityBaselineConfig,
   SystemUserRow,
-  TenantBootstrapRequest
+  TenantBootstrapRequest,
+  UpdateTenantRequest,
+  UpdateTenantStatusRequest
 } from "@store-rental/shared";
 import { PlatformService } from "./platform.service";
 
@@ -25,8 +27,23 @@ export class PlatformController {
   constructor(private readonly platformService: PlatformService) {}
 
   @Get("tenants")
-  tenants() {
-    return this.platformService.listTenants();
+  tenants(@Req() req: RequestWithUser) {
+    return this.platformService.listTenants(req.user);
+  }
+
+  @Get("tenants/:id")
+  tenant(@Param("id") id: string, @Req() req: RequestWithUser) {
+    return this.platformService.getTenant(id, req.user);
+  }
+
+  @Put("tenants/:id")
+  updateTenant(@Param("id") id: string, @Body() body: UpdateTenantRequest, @Req() req: RequestWithUser) {
+    return this.platformService.updateTenant(id, body, req.user);
+  }
+
+  @Put("tenants/:id/status")
+  updateTenantStatus(@Param("id") id: string, @Body() body: UpdateTenantStatusRequest, @Req() req: RequestWithUser) {
+    return this.platformService.updateTenantStatus(id, body, req.user);
   }
 
   @Get("organizations")
@@ -35,28 +52,31 @@ export class PlatformController {
   }
 
   @Post("organizations")
-  createOrganization(@Body() body: SaveOrganizationRequest) {
-    return this.platformService.saveOrganization(body);
+  createOrganization(@Body() body: SaveOrganizationRequest, @Req() req: RequestWithUser) {
+    return this.platformService.saveOrganization(body, req.user);
   }
 
   @Put("organizations/:id/status")
   setOrganizationStatus(
     @Param("id") id: string,
-    @Body() body: { status: "enabled" | "disabled"; operator?: string }
+    @Body() body: { status: "enabled" | "disabled"; operator?: string; tenantId?: string },
+    @Req() req?: RequestWithUser
   ) {
     return this.platformService.setOrganizationStatus(
       id,
       body.status,
-      body.operator ?? "平台管理员"
+      body.operator ?? "租户管理员",
+      req?.user
     );
   }
 
   @Put("organizations/:id")
   saveOrganization(
     @Param("id") id: string,
-    @Body() body: Omit<SaveOrganizationRequest, "id">
+    @Body() body: Omit<SaveOrganizationRequest, "id">,
+    @Req() req: RequestWithUser
   ) {
-    return this.platformService.saveOrganization({ ...body, id });
+    return this.platformService.saveOrganization({ ...body, id }, req.user);
   }
 
   @Get("permission-tree")
@@ -113,8 +133,8 @@ export class PlatformController {
   }
 
   @Get("audit-logs")
-  auditLogs(@Query() query: PlatformAuditLogQuery) {
-    return this.platformService.listAuditLogs(query);
+  auditLogs(@Query() query: PlatformAuditLogQuery, @Req() req: RequestWithUser) {
+    return this.platformService.listAuditLogs(query, req.user);
   }
 
   @Get("filter-presets")
@@ -185,36 +205,37 @@ export class PlatformController {
   }
 
   @Post("tenant-bootstrap")
-  bootstrapTenant(@Body() body: TenantBootstrapRequest) {
-    return this.platformService.bootstrapTenant(body);
+  bootstrapTenant(@Body() body: TenantBootstrapRequest, @Req() req: RequestWithUser) {
+    return this.platformService.bootstrapTenant(body, req.user);
   }
 
   @Get("roles")
-  roles() {
-    return this.platformService.listRoles();
+  roles(@Query("tenantId") tenantId: string | undefined, @Req() req: RequestWithUser) {
+    return this.platformService.listRoles(tenantId, req.user);
   }
 
   @Post("roles")
-  createRole(@Body() body: SaveSystemRoleRequest) {
-    return this.platformService.saveRole(body);
+  createRole(@Body() body: SaveSystemRoleRequest, @Req() req: RequestWithUser) {
+    return this.platformService.saveRole(body, req.user);
   }
 
   @Put("roles/:id")
-  updateRole(@Param("id") id: string, @Body() body: SaveSystemRoleRequest) {
-    return this.platformService.saveRole({ ...body, id });
+  updateRole(@Param("id") id: string, @Body() body: SaveSystemRoleRequest, @Req() req: RequestWithUser) {
+    return this.platformService.saveRole({ ...body, id }, req.user);
   }
 
   @Delete("roles/:id")
-  deleteRole(@Param("id") id: string) {
-    return this.platformService.deleteRole(id);
+  deleteRole(@Param("id") id: string, @Query("tenantId") tenantId: string | undefined, @Req() req: RequestWithUser) {
+    return this.platformService.deleteRole(id, tenantId, req.user);
   }
 
   @Put("roles/:id/permissions")
   saveRolePermissions(
     @Param("id") id: string,
-    @Body() body: { permissions?: string[] }
+    @Body() body: { permissions?: string[]; tenantId?: string },
+    @Req() req: RequestWithUser
   ) {
-    return this.platformService.saveRolePermissions(id, body.permissions ?? []);
+    return this.platformService.saveRolePermissions(id, body.permissions ?? [], body.tenantId, req.user);
   }
 
   @Get("users")
@@ -223,25 +244,26 @@ export class PlatformController {
   }
 
   @Post("users")
-  createUser(@Body() body: SaveSystemUserRequest) {
-    return this.platformService.saveUser(body);
+  createUser(@Body() body: SaveSystemUserRequest, @Req() req: RequestWithUser) {
+    return this.platformService.saveUser(body, req.user);
   }
 
   @Put("users/:id")
-  updateUser(@Param("id") id: string, @Body() body: SaveSystemUserRequest) {
-    return this.platformService.saveUser({ ...body, id });
+  updateUser(@Param("id") id: string, @Body() body: SaveSystemUserRequest, @Req() req: RequestWithUser) {
+    return this.platformService.saveUser({ ...body, id }, req.user);
   }
 
   @Put("users/:id/status")
   setUserStatus(
     @Param("id") id: string,
-    @Body() body: { isActive?: boolean }
+    @Body() body: { isActive?: boolean; tenantId?: string },
+    @Req() req: RequestWithUser
   ) {
-    return this.platformService.setUserStatus(id, Boolean(body.isActive));
+    return this.platformService.setUserStatus(id, Boolean(body.isActive), body.tenantId, req.user);
   }
 
   @Post("users/:id/reset-password")
-  resetUserPassword(@Param("id") id: string) {
-    return this.platformService.resetUserPassword(id);
+  resetUserPassword(@Param("id") id: string, @Body() body: { tenantId?: string }, @Req() req: RequestWithUser) {
+    return this.platformService.resetUserPassword(id, body.tenantId, req.user);
   }
 }

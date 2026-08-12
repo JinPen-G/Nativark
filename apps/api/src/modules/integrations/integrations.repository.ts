@@ -15,15 +15,14 @@ import type {
   SendMockNotificationRequest,
   TBoxDeviceSummary
 } from "@store-rental/shared";
+import { getRequestTenantId } from "../../common/request-identity";
 import { PrismaService } from "../database/prisma.service";
-
-const DEFAULT_TENANT_ID = "tenant_001";
 
 @Injectable()
 export class IntegrationsRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async ensureDefaultNotificationTemplates(tenantId = DEFAULT_TENANT_ID) {
+  async ensureDefaultNotificationTemplates(tenantId = getRequestTenantId()) {
     const templates = defaultNotificationTemplates();
     await Promise.all(
       templates.map((template) =>
@@ -59,7 +58,7 @@ export class IntegrationsRepository {
   }
 
   async listFiles(
-    tenantId = DEFAULT_TENANT_ID,
+    tenantId = getRequestTenantId(),
     query: FileAssetQuery = {}
   ): Promise<FileAssetSummary[]> {
     const where: Prisma.FileAssetWhereInput = {
@@ -81,7 +80,7 @@ export class IntegrationsRepository {
 
   async createFile(
     input: CreateFileAssetRequest,
-    tenantId = DEFAULT_TENANT_ID
+    tenantId = getRequestTenantId()
   ): Promise<FileAssetSummary> {
     const fileId = `file_${cryptoRandomId()}`;
     const fileExt = input.fileName.includes(".")
@@ -111,7 +110,7 @@ export class IntegrationsRepository {
   }
 
   async listNotificationTemplates(
-    tenantId = DEFAULT_TENANT_ID
+    tenantId = getRequestTenantId()
   ): Promise<NotificationTemplateSummary[]> {
     await this.ensureDefaultNotificationTemplates(tenantId);
     const rows = await this.prisma.notificationTemplate.findMany({
@@ -122,7 +121,7 @@ export class IntegrationsRepository {
   }
 
   async listNotificationLogs(
-    tenantId = DEFAULT_TENANT_ID
+    tenantId = getRequestTenantId()
   ): Promise<NotificationSendLogSummary[]> {
     const rows = await this.prisma.notificationSendLog.findMany({
       where: { tenantId },
@@ -134,7 +133,7 @@ export class IntegrationsRepository {
 
   async recordNotification(
     input: SendMockNotificationRequest,
-    tenantId = DEFAULT_TENANT_ID
+    tenantId = getRequestTenantId()
   ): Promise<NotificationSendLogSummary> {
     const now = new Date();
     const row = await this.prisma.notificationSendLog.create({
@@ -166,7 +165,7 @@ export class IntegrationsRepository {
   }
 
   async listAdapterLogs(
-    tenantId = DEFAULT_TENANT_ID
+    tenantId = getRequestTenantId()
   ): Promise<AdapterLogSummary[]> {
     const rows = await this.prisma.externalAdapterLog.findMany({
       where: { tenantId },
@@ -178,7 +177,7 @@ export class IntegrationsRepository {
 
   async recordAdapterLog(
     input: Omit<AdapterLogSummary, "id" | "createdAt">,
-    tenantId = DEFAULT_TENANT_ID
+    tenantId = getRequestTenantId()
   ): Promise<AdapterLogSummary> {
     const row = await this.prisma.externalAdapterLog.create({
       data: {
@@ -198,7 +197,7 @@ export class IntegrationsRepository {
     return toAdapterLogSummary(row);
   }
 
-  async listJobs(tenantId = DEFAULT_TENANT_ID): Promise<AsyncJobSummary[]> {
+  async listJobs(tenantId = getRequestTenantId()): Promise<AsyncJobSummary[]> {
     const rows = await this.prisma.asyncJob.findMany({
       where: { tenantId },
       orderBy: [{ status: "asc" }, { createdAt: "desc" }],
@@ -209,7 +208,7 @@ export class IntegrationsRepository {
 
   async getJob(
     id: string,
-    tenantId = DEFAULT_TENANT_ID
+    tenantId = getRequestTenantId()
   ): Promise<AsyncJobSummary | undefined> {
     const row = await this.prisma.asyncJob.findFirst({ where: { id, tenantId } });
     return row ? toAsyncJobSummary(row) : undefined;
@@ -217,7 +216,7 @@ export class IntegrationsRepository {
 
   async createJob(
     input: CreateAsyncJobRequest,
-    tenantId = DEFAULT_TENANT_ID
+    tenantId = getRequestTenantId()
   ): Promise<AsyncJobSummary> {
     const row = await this.prisma.asyncJob.create({
       data: {
@@ -238,7 +237,7 @@ export class IntegrationsRepository {
   async finishJob(
     id: string,
     result: Record<string, unknown>,
-    tenantId = DEFAULT_TENANT_ID
+    tenantId = getRequestTenantId()
   ): Promise<AsyncJobSummary> {
     const existing = await this.prisma.asyncJob.findFirst({ where: { id, tenantId } });
     if (!existing) {
@@ -258,7 +257,7 @@ export class IntegrationsRepository {
     return toAsyncJobSummary(row);
   }
 
-  async listPrintJobs(tenantId = DEFAULT_TENANT_ID): Promise<PrintJobSummary[]> {
+  async listPrintJobs(tenantId = getRequestTenantId()): Promise<PrintJobSummary[]> {
     const rows = await this.prisma.documentPrintJob.findMany({
       where: { tenantId },
       orderBy: { createdAt: "desc" },
@@ -271,7 +270,7 @@ export class IntegrationsRepository {
     input: CreatePrintJobRequest,
     fileAssetId: string | undefined,
     documentNo: string,
-    tenantId = DEFAULT_TENANT_ID
+    tenantId = getRequestTenantId()
   ): Promise<PrintJobSummary> {
     const row = await this.prisma.documentPrintJob.create({
       data: {
@@ -297,7 +296,7 @@ export class IntegrationsRepository {
   }
 
   async listTBoxDevices(
-    tenantId = DEFAULT_TENANT_ID
+    tenantId = getRequestTenantId()
   ): Promise<TBoxDeviceSummary[]> {
     const rows = await this.prisma.tBoxDevice.findMany({
       where: { tenantId },
@@ -308,7 +307,7 @@ export class IntegrationsRepository {
 
   async saveTBoxDevice(
     input: SaveTBoxDeviceRequest,
-    tenantId = DEFAULT_TENANT_ID
+    tenantId = getRequestTenantId()
   ): Promise<TBoxDeviceSummary> {
     const id = input.id ?? `tbox_${cryptoRandomId()}`;
     const row = await this.prisma.tBoxDevice.upsert({
@@ -345,7 +344,7 @@ export class IntegrationsRepository {
   async bindTBoxDevice(
     id: string,
     input: { vehicleId?: string; plateNo?: string; vehicleModel?: string },
-    tenantId = DEFAULT_TENANT_ID
+    tenantId = getRequestTenantId()
   ): Promise<TBoxDeviceSummary> {
     const existing = await this.prisma.tBoxDevice.findFirst({ where: { id, tenantId } });
     if (!existing) {

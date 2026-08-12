@@ -17,12 +17,19 @@ export function describeDataPermission(
     };
   }
 
+  if (user.isSaasAdmin) {
+    return {
+      scope: "all",
+      description: "SaaS 平台管理员可在显式目标租户范围内管理数据"
+    };
+  }
+
   if (user.isPlatformAdmin || user.permissions.includes("*")) {
     return {
       tenantId: user.tenantId,
       scope: "all",
       organizationId: user.organizationId,
-      description: "平台管理员拥有当前租户全部数据"
+      description: "租户管理员拥有当前租户全部数据"
     };
   }
 
@@ -48,9 +55,7 @@ export function resolveTenantIdForQuery(
   if (!user) {
     return requestedTenantId;
   }
-  if (user.isPlatformAdmin || user.permissions.includes("*")) {
-    return requestedTenantId ?? user.tenantId;
-  }
+  if (user.isSaasAdmin) return requestedTenantId ?? user.tenantId;
   return user.tenantId;
 }
 
@@ -61,7 +66,7 @@ export function buildSystemUserWhere(
   const tenantId = resolveTenantIdForQuery(requestedTenantId, user);
   const where: Record<string, unknown> = tenantId ? { tenantId } : {};
 
-  if (!user || user.isPlatformAdmin || user.permissions.includes("*")) {
+  if (!user || user.isSaasAdmin || user.isPlatformAdmin || user.permissions.includes("*")) {
     return where;
   }
 
@@ -93,7 +98,7 @@ export function buildOrganizationWhere(
   const tenantId = resolveTenantIdForQuery(requestedTenantId, user);
   const where: Record<string, unknown> = tenantId ? { tenantId } : {};
 
-  if (!user || user.isPlatformAdmin || user.permissions.includes("*")) {
+  if (!user || user.isSaasAdmin || user.isPlatformAdmin || user.permissions.includes("*")) {
     return where;
   }
 

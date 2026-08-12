@@ -54,7 +54,7 @@
 
 - 新增 `system:integration:manage`。
 - API guard 对 `/integrations`、`/files`、`/notifications`、`/jobs` 要求 `system:integration:manage` 或 `system:params:manage`。
-- 平台管理员仍固定全权限；价格规则管理员新增该权限，便于本地验证系统参数/外部接入。
+- 租户管理员固定拥有当前租户内全权限；价格规则管理员新增该租户内权限，便于本地验证系统参数/外部接入。
 
 ### 3. 前端营运端页面
 
