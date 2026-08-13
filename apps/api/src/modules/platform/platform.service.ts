@@ -68,14 +68,18 @@ export class PlatformService {
       tenantCode: "demo",
       tenantName: "演示香港租户",
       tenantStatus: TenantStatus.Active,
-      enabledBusinessLines: ["store_rental"]
+      enabledBusinessLines: ["rental_core", "store_rental"],
+      categoryCode: RentalCategoryCode.Camera,
+      categoryName: "摄影设备"
     },
     {
       tenantId: "tenant_002",
       tenantCode: "demo2",
       tenantName: "演示深圳租户",
       tenantStatus: TenantStatus.Active,
-      enabledBusinessLines: ["store_rental"]
+      enabledBusinessLines: ["rental_core"],
+      categoryCode: RentalCategoryCode.Camping,
+      categoryName: "露营设备"
     }
   ];
 
@@ -1187,7 +1191,8 @@ export class PlatformService {
       tenantName,
       tenantStatus: TenantStatus.Active,
       enabledBusinessLines: ["rental_core"],
-      categoryCode: input.categoryCode
+      categoryCode: input.categoryCode,
+      categoryName: this.rentalCategoryName(input.categoryCode)
     };
     this.tenants.push(tenant);
     this.organizations.push(
@@ -1267,7 +1272,14 @@ export class PlatformService {
     if (this.useMysqlDataSource()) {
       return this.platformRepository.listTenants();
     }
-    return this.tenants.filter((tenant) => tenant.tenantCode !== "platform");
+    return this.tenants
+      .filter((tenant) => tenant.tenantCode !== "platform")
+      .map((tenant) => ({
+        ...tenant,
+        userCount: this.users.filter((user) => user.tenantId === tenant.tenantId).length,
+        organizationCount: this.organizations.filter((organization) => organization.tenantId === tenant.tenantId).length,
+        orderCount: tenant.orderCount ?? 0
+      }));
   }
 
   getTenant(id: string, currentUser?: SystemUserRow) {
@@ -2233,6 +2245,16 @@ export class PlatformService {
     ) {
       throw new BadRequestException("启用 AI 模型时必须填写模型名称，兼容模式还必须填写 Base URL");
     }
+  }
+
+  private rentalCategoryName(categoryCode: RentalCategoryCode) {
+    const names: Record<RentalCategoryCode, string> = {
+      [RentalCategoryCode.Vehicle]: "车辆载具",
+      [RentalCategoryCode.Camera]: "摄影设备",
+      [RentalCategoryCode.Camping]: "露营设备",
+      [RentalCategoryCode.Construction]: "工程设备"
+    };
+    return names[categoryCode];
   }
 
   private toUserRow(user: StoredUser): SystemUserRow {

@@ -63,7 +63,20 @@ function requestContext(method, url, accessToken) {
   assert.equal(saas.user.isPlatformAdmin, false, "SaaS admin must not be a tenant admin");
   assert.equal(demo.user.isSaasAdmin, false);
   assert.equal(demo.user.isPlatformAdmin, true);
-  assert.equal(platform.listTenants(saas.user).length, 2);
+  assert.equal(demo.tenant.categoryCode, "camera");
+  assert.equal(demo.tenant.categoryName, "摄影设备");
+  const demoTenants = platform.listTenants(saas.user);
+  assert.equal(demoTenants.length, 2);
+  assert.deepEqual(
+    demoTenants.map((tenant) => [tenant.tenantCode, tenant.categoryCode, tenant.categoryName]),
+    [
+      ["demo", "camera", "摄影设备"],
+      ["demo2", "camping", "露营设备"]
+    ],
+    "memory demo tenants must expose the same category profiles as Rental Core and MySQL seed"
+  );
+  assert.ok(demoTenants.every((tenant) => Number.isInteger(tenant.userCount)));
+  assert.ok(demoTenants.every((tenant) => Number.isInteger(tenant.organizationCount)));
   assert.throws(() => platform.listTenants(demo.user), /SaaS/);
 
   const crossTenantUsers = platform.listUsers("tenant_002", demo.user);

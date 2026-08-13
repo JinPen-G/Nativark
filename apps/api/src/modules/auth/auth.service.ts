@@ -177,7 +177,9 @@ export class AuthService {
         tenantId: tenant.tenantId,
         tenantCode: tenant.tenantCode,
         tenantName: tenant.tenantName,
-        tenantStatus: tenant.tenantStatus
+        tenantStatus: tenant.tenantStatus,
+        categoryCode: tenant.categoryCode,
+        categoryName: tenant.categoryName
       },
       user: this.toAuthUser(user)
     };

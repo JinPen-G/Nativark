@@ -198,7 +198,9 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       tenantId: stringSchema,
       tenantCode: stringSchema,
       tenantName: stringSchema,
-      tenantStatus: stringSchema
+      tenantStatus: stringSchema,
+      categoryCode: stringSchema,
+      categoryName: stringSchema
     },
     ["tenantId", "tenantCode", "tenantName", "tenantStatus"]
   ),

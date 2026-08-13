@@ -85,6 +85,8 @@ export interface TenantContext {
   tenantCode: string;
   tenantName: string;
   tenantStatus: TenantStatus;
+  categoryCode?: RentalCategoryCode;
+  categoryName?: string;
 }
 
 export interface AuthUser {

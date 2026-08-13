@@ -152,7 +152,8 @@ export class PlatformRepository {
 
   async findTenantByCode(code: string): Promise<TenantSummary | undefined> {
     const tenant = await this.prisma.tenant.findUnique({
-      where: { code }
+      where: { code },
+      include: { rentalProfile: { include: { category: true } } }
     });
     if (!tenant) {
       return undefined;
@@ -163,13 +164,16 @@ export class PlatformRepository {
       tenantCode: tenant.code,
       tenantName: tenant.name,
       tenantStatus: this.toTenantStatus(tenant.status),
-      enabledBusinessLines: ["store_rental"]
+      enabledBusinessLines: ["rental_core"],
+      categoryCode: tenant.rentalProfile?.categoryCode as TenantSummary["categoryCode"],
+      categoryName: tenant.rentalProfile?.category.name
     };
   }
 
   async findUserForLogin(tenantCode: string, account: string, password: string) {
     const tenant = await this.prisma.tenant.findUnique({
-      where: { code: tenantCode }
+      where: { code: tenantCode },
+      include: { rentalProfile: { include: { category: true } } }
     });
     if (!tenant || tenant.status !== PrismaTenantStatus.ACTIVE) {
       return undefined;
@@ -198,7 +202,9 @@ export class PlatformRepository {
         tenantCode: tenant.code,
         tenantName: tenant.name,
         tenantStatus: this.toTenantStatus(tenant.status),
-        enabledBusinessLines: ["store_rental"]
+        enabledBusinessLines: ["rental_core"],
+        categoryCode: tenant.rentalProfile?.categoryCode as TenantSummary["categoryCode"],
+        categoryName: tenant.rentalProfile?.category.name
       },
       user: this.toUserRow(user)
     };
@@ -1231,7 +1237,7 @@ export class PlatformRepository {
           }
         }
       });
-      return { tenant, user, templateExecution };
+      return { tenant, user, templateExecution, categoryName: category.name };
     });
 
     return {
@@ -1241,7 +1247,8 @@ export class PlatformRepository {
         tenantName: created.tenant.name,
         tenantStatus: this.toTenantStatus(created.tenant.status),
         enabledBusinessLines: ["rental_core"],
-        categoryCode: input.categoryCode
+        categoryCode: input.categoryCode,
+        categoryName: created.categoryName
       },
       adminUser: this.toUserRow(await this.findUserWithRoles(created.user.id)),
       preview,
