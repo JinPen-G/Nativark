@@ -58,6 +58,11 @@ function requestContext(method, url, accessToken) {
     account: "admin",
     password: "RentalDemo!2026"
   });
+  const demo2 = await auth.login({
+    tenantCode: "demo2",
+    account: "admin",
+    password: "RentalDemo!2026"
+  });
 
   assert.equal(saas.user.isSaasAdmin, true);
   assert.equal(saas.user.isPlatformAdmin, false, "SaaS admin must not be a tenant admin");
@@ -66,6 +71,11 @@ function requestContext(method, url, accessToken) {
   assert.equal(demo.tenant.categoryCode, "camera");
   assert.equal(demo.tenant.categoryName, "摄影设备");
   assert.ok(demo.tenant.capabilities.includes("serialized_inventory"));
+  assert.equal(demo2.tenant.categoryCode, "camping");
+  assert.equal(demo2.tenant.categoryName, "露营设备");
+  assert.ok(demo2.tenant.capabilities.includes("quantity_inventory"));
+  const refreshedDemo2Context = await auth.getSessionContext(`Bearer ${demo2.accessToken}`);
+  assert.equal(refreshedDemo2Context.tenant.categoryCode, "camping");
   const refreshedContext = await auth.getSessionContext(`Bearer ${demo.accessToken}`);
   assert.equal(refreshedContext.tenant.categoryCode, "camera");
   assert.ok(refreshedContext.tenant.capabilities.includes("delivery"));

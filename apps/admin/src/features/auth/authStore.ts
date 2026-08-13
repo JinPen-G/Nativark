@@ -1,6 +1,7 @@
 import type { AuthUser, RentalCapability, TenantContext } from "@store-rental/shared";
 import { create } from "zustand";
 import { api } from "@/api/rental";
+import { clearSessionQueryCache } from "@/app/queryClient";
 
 const keys = {
   token: "rental_access_token",
@@ -38,6 +39,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (!token) { set({ ready: true }); return; }
     try {
       const context = await api.sessionContext();
+      if (get().tenant?.tenantId && get().tenant?.tenantId !== context.tenant.tenantId) {
+        clearSessionQueryCache();
+      }
       window.localStorage.setItem(keys.tenant, JSON.stringify(context.tenant));
       window.localStorage.setItem(keys.user, JSON.stringify(context.user));
       set({ ready: true, token, tenant: context.tenant, user: context.user });
@@ -48,6 +52,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
   async login(tenantCode, account, password) {
     const result = await api.login({ tenantCode, account, password });
+    clearSessionQueryCache();
     window.localStorage.setItem(keys.token, result.accessToken);
     window.localStorage.setItem(keys.refreshToken, result.refreshToken);
     window.localStorage.setItem(keys.tenant, JSON.stringify(result.tenant));
@@ -56,6 +61,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
   async changePassword(currentPassword, newPassword) {
     const result = await api.changePassword({ currentPassword, newPassword });
+    clearSessionQueryCache();
     window.localStorage.setItem(keys.token, result.accessToken);
     window.localStorage.setItem(keys.refreshToken, result.refreshToken);
     window.localStorage.setItem(keys.tenant, JSON.stringify(result.tenant));
@@ -65,6 +71,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   logout() {
     const refreshToken = window.localStorage.getItem(keys.refreshToken);
     if (refreshToken) void api.logout({ refreshToken }).catch(() => undefined);
+    clearSessionQueryCache();
     Object.values(keys).forEach((key) => window.localStorage.removeItem(key));
     set({ token: undefined, tenant: undefined, user: undefined });
   },

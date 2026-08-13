@@ -29,6 +29,8 @@ const assetLifecyclePage = read("apps/admin/src/features/catalog/AssetLifecycleP
 const rentalCorePage = read("apps/admin/src/features/rental-core/RentalCorePage.tsx");
 const rentalCoreApi = read("apps/admin/src/api/rentalCore.ts");
 const appRoot = read("apps/admin/src/app/App.tsx");
+const queryClientSource = read("apps/admin/src/app/queryClient.ts");
+const authStoreSource = read("apps/admin/src/features/auth/authStore.ts");
 const themeSource = read("apps/admin/src/app/theme.tsx");
 
 [
@@ -70,6 +72,13 @@ if (operations.includes("axios.create") || operations.includes("store_rental_acc
 }
 if (!httpSource.includes('window.localStorage.getItem("rental_access_token")')) {
   failures.push("authentication contract: canonical HTTP client does not read the current React auth token");
+}
+requireText(appRoot, 'import { queryClient } from "./queryClient"', "shared query client");
+requireText(queryClientSource, "queryClient.cancelQueries()", "cancel previous tenant queries");
+requireText(queryClientSource, "queryClient.clear()", "clear previous tenant cache");
+const sessionCacheClearCount = (authStoreSource.match(/clearSessionQueryCache\(\)/g) ?? []).length;
+if (sessionCacheClearCount < 4) {
+  failures.push("tenant cache isolation: login, logout, password rotation and changed bootstrap context must clear query state");
 }
 
 [

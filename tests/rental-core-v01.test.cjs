@@ -23,6 +23,10 @@ assert.equal(categories.length, 4);
 assert.ok(categories.every((category) => category.businessModel.assetFields.length > 0));
 assert.ok(categories.find((category) => category.code === "vehicle").businessModel.assetFields.some((field) => field.code === "licensePlate" && field.scope === "asset"));
 assert.ok(categories.find((category) => category.code === "camera").businessModel.assetFields.some((field) => field.code === "model" && field.scope === "item_group"));
+assert.ok(categories.find((category) => category.code === "camping").businessModel.assetFields.some((field) => field.code === "people" && field.scope === "item_group"));
+assert.ok(service.listItemGroups(campingTenant).every((group) => group.categoryCode === "camping"));
+assert.ok(service.listItemGroups(campingTenant).some((group) => group.code === "CAMP-TENT"));
+assert.ok(service.listItemGroups(campingTenant).every((group) => !group.code.startsWith("CAM-")));
 
 const cameraSettings = service.getBusinessSettings(cameraTenant);
 assert.equal(cameraSettings.categoryCode, "camera");
