@@ -1,5 +1,6 @@
 import { ApartmentOutlined, LockOutlined, SafetyCertificateOutlined, UserOutlined } from "@ant-design/icons";
 import { Alert, App, Button, Card, Form, Input, Typography } from "antd";
+import { isAxiosError } from "axios";
 import { useNavigate } from "react-router-dom";
 import { AppearanceSwitcher } from "@/components/AppearanceSwitcher";
 import { useAuthStore } from "./authStore";
@@ -30,7 +31,14 @@ export function LoginPage() {
                 message.success("登录成功");
                 navigate(useAuthStore.getState().user?.isSaasAdmin ? "/platform/tenants" : "/workbench", { replace: true });
               }
-              catch { message.error("登录失败，请检查租户、账号和密码"); }
+              catch (error) {
+                let errorMessage = "登录失败，请检查租户、账号和密码";
+                if (isAxiosError(error)) {
+                  if (!error.response) errorMessage = "无法连接 API，请确认开发服务已启动";
+                  else if (error.response.status >= 500) errorMessage = "服务暂不可用，请检查 API 与数据库配置";
+                }
+                message.error(errorMessage);
+              }
             }}>
               <Form.Item label="租户编码" name="tenantCode" rules={[{ required: true, message: "请输入租户编码" }]}><Input prefix={<SafetyCertificateOutlined />} autoComplete="organization" /></Form.Item>
               <Form.Item label="账号" name="account" rules={[{ required: true, message: "请输入账号" }]}><Input prefix={<UserOutlined />} autoComplete="username" /></Form.Item>

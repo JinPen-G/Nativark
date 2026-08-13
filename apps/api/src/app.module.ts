@@ -31,7 +31,8 @@ import { RentalCoreService } from "./modules/rental-core/rental-core.service";
 @Module({
   imports: [
     ConfigModule.forRoot({
-      isGlobal: true
+      isGlobal: true,
+      envFilePath: [".env", "../../.env"]
     }),
     DatabaseModule
   ],
