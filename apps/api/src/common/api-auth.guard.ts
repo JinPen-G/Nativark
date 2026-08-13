@@ -5,7 +5,7 @@ import {
   Injectable,
   UnauthorizedException
 } from "@nestjs/common";
-import type { SystemUserRow } from "@store-rental/shared";
+import type { RentalCapability, SystemUserRow } from "@store-rental/shared";
 import { AuthService } from "../modules/auth/auth.service";
 import { enterRequestIdentity } from "./request-identity";
 
@@ -18,6 +18,12 @@ interface RequestLike {
 
 function normalizePath(url: string) {
   return url.split("?")[0]?.replace(/^\/api/, "") || "/";
+}
+
+function requiredCapability(path: string): RentalCapability | undefined {
+  if (path.startsWith("/store-rental/dispatch") || path.startsWith("/store-rental/vehicles/transfer-tasks")) return "dispatch";
+  if (path.startsWith("/store-rental/tbox-devices")) return "iot";
+  return undefined;
 }
 
 function requiredPermissions(method: string, path: string) {
@@ -81,6 +87,21 @@ function requiredPermissions(method: string, path: string) {
 
   if (path === "/rental/v1/categories") {
     return ["system:tenant:manage", "store-rental:order:view", "store-rental:vehicle:view"];
+  }
+  if (path === "/rental/v1/business-settings") {
+    return ["store-rental:price:manage"];
+  }
+  if (path === "/rental/v1/coupon-templates" || path.startsWith("/rental/v1/coupon-templates/")) {
+    return ["store-rental:marketing:manage", "store-rental:price:manage"];
+  }
+  if (path === "/rental/v1/locations" || path.startsWith("/rental/v1/locations/")) {
+    return method === "GET" ? ["store-rental:station:view"] : ["store-rental:station:manage"];
+  }
+  if (path === "/rental/v1/item-groups" || path.startsWith("/rental/v1/item-groups/")) {
+    return ["store-rental:vehicle-group:manage"];
+  }
+  if (path === "/rental/v1/assets" || path.startsWith("/rental/v1/assets/") || path === "/rental/v1/stock-balances") {
+    return method === "GET" ? ["store-rental:vehicle:view"] : ["store-rental:vehicle:manage"];
   }
   if (path.startsWith("/rental/v1")) {
     return method === "GET"
@@ -275,6 +296,7 @@ export class ApiAuthGuard implements CanActivate {
       user.isSaasAdmin &&
       ![
         "/auth/me",
+        "/auth/session-context",
         "/auth/change-password",
         "/auth/logout",
         "/rental/v1/categories"
@@ -286,7 +308,7 @@ export class ApiAuthGuard implements CanActivate {
     }
     if (
       user.mustChangePassword &&
-      !["/auth/me", "/auth/change-password", "/auth/logout"].includes(path)
+      !["/auth/me", "/auth/session-context", "/auth/change-password", "/auth/logout"].includes(path)
     ) {
       throw new ForbiddenException("首次登录或密码重置后必须先修改密码");
     }
@@ -298,6 +320,13 @@ export class ApiAuthGuard implements CanActivate {
     }
     if (!hasAnyPermission(user, permissions)) {
       throw new ForbiddenException("当前账号无权访问该功能");
+    }
+    const capability = requiredCapability(path);
+    if (capability && !user.isSaasAdmin) {
+      const tenant = await this.authService.getTenantContext(user.tenantId);
+      if (!tenant.capabilities?.includes(capability)) {
+        throw new ForbiddenException("当前租户经营品类未启用该业务能力");
+      }
     }
 
     enterRequestIdentity({

@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import {
+  RENTAL_CATEGORY_DEFINITIONS,
   RentalAssetStatus,
   RentalCategoryCode,
   RentalCoreOrderStatus,
@@ -15,6 +16,7 @@ import {
   type RentalBundleComponent,
   type RentalCapability,
   type RentalCategoryDefinition,
+  type RentalCouponTemplate,
   type RentalFulfillmentLocation,
   type RentalInspectionRecord,
   type RentalInspectionTemplate,
@@ -23,14 +25,20 @@ import {
   type RentalReservation,
   type RentalStockBalance,
   type SaveRentalAssetRequest,
+  type SaveRentalCouponTemplateRequest,
+  type SaveRentalFulfillmentLocationRequest,
   type SaveRentalItemGroupRequest,
   type SaveRentalStockBalanceRequest,
+  type SaveTenantRentalBusinessSettingsRequest,
   type SaveTenantRentalProfileRequest,
+  type TenantRentalBusinessSettings,
   type TenantRentalProfile
 } from "@store-rental/shared";
 
 interface TenantRentalState {
   profile: TenantRentalProfile;
+  businessSettings: TenantRentalBusinessSettings;
+  couponTemplates: RentalCouponTemplate[];
   locations: RentalFulfillmentLocation[];
   itemGroups: RentalItemGroup[];
   assets: RentalAsset[];
@@ -40,53 +48,63 @@ interface TenantRentalState {
   inspections: RentalInspectionRecord[];
 }
 
-const categories: RentalCategoryDefinition[] = [
-  {
-    code: RentalCategoryCode.Camera,
-    name: "摄影设备",
-    description: "机身、镜头、灯光和拍摄套装租赁",
-    supportedInventoryModes: [RentalInventoryMode.Serialized, RentalInventoryMode.Quantity, RentalInventoryMode.Bundle],
-    defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery", "usage_reading"],
-    terminology: { itemLabel: "器材", itemGroupLabel: "器材型号", assetLabel: "器材资产", fulfillmentLabel: "器材门店", pickupLabel: "取机", returnLabel: "还机", identifierLabel: "资产编号", usageMetricLabel: "快门次数" },
-    attributeSchema: { brand: "string", mount: "string", sensor: "string" },
-    version: "0.1.0"
-  },
-  {
-    code: RentalCategoryCode.Camping,
-    name: "露营设备",
-    description: "帐篷、桌椅、炊具和露营套装租赁",
-    supportedInventoryModes: [RentalInventoryMode.Serialized, RentalInventoryMode.Quantity, RentalInventoryMode.Bundle],
-    defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery"],
-    terminology: { itemLabel: "装备", itemGroupLabel: "装备品类", assetLabel: "装备资产", fulfillmentLabel: "装备仓", pickupLabel: "领用", returnLabel: "归还", identifierLabel: "装备编号" },
-    attributeSchema: { brand: "string", people: "number", season: "string" },
-    version: "0.1.0"
-  },
-  {
-    code: RentalCategoryCode.Vehicle,
-    name: "车辆载具",
-    description: "汽车、摩托车和其他载具租赁",
-    supportedInventoryModes: [RentalInventoryMode.Serialized, RentalInventoryMode.Bundle],
-    defaultCapabilities: ["serialized_inventory", "bundle_inventory", "pickup", "return", "dispatch", "usage_reading", "qualification", "iot"],
-    terminology: { itemLabel: "车辆", itemGroupLabel: "车型组", assetLabel: "车辆", fulfillmentLabel: "门店", pickupLabel: "取车", returnLabel: "还车", identifierLabel: "车牌号", usageMetricLabel: "里程" },
-    attributeSchema: { brand: "string", model: "string", energyType: "string" },
-    version: "0.1.0"
-  },
-  {
-    code: RentalCategoryCode.Construction,
-    name: "工程设备",
-    description: "工程机械、工具和配套设备租赁",
-    supportedInventoryModes: [RentalInventoryMode.Serialized, RentalInventoryMode.Quantity, RentalInventoryMode.Bundle],
-    defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery", "dispatch", "usage_reading", "qualification", "iot"],
-    terminology: { itemLabel: "设备", itemGroupLabel: "设备型号", assetLabel: "设备资产", fulfillmentLabel: "设备仓", pickupLabel: "出库", returnLabel: "入库", identifierLabel: "设备编号", usageMetricLabel: "工时" },
-    attributeSchema: { brand: "string", power: "string", ratedLoad: "number" },
-    version: "0.1.0"
-  }
-];
+const categories: RentalCategoryDefinition[] = RENTAL_CATEGORY_DEFINITIONS;
 
 function now() { return new Date().toISOString(); }
 function id(prefix: string) { return `${prefix}_${randomUUID().slice(0, 8)}`; }
 function overlaps(aStart: string, aEnd: string, bStart: string, bEnd: string) {
   return new Date(aStart).getTime() < new Date(bEnd).getTime() && new Date(aEnd).getTime() > new Date(bStart).getTime();
+}
+
+function defaultBusinessSettings(tenantId: string, definition: RentalCategoryDefinition): TenantRentalBusinessSettings {
+  const supportsPreauthorization = definition.businessModel.supportsPreauthorization;
+  return {
+    tenantId,
+    categoryCode: definition.code,
+    configVersion: definition.version,
+    pricing: {
+      enabledUnits: [...definition.businessModel.pricingUnits],
+      defaultUnit: definition.businessModel.defaultPricingUnit,
+      currency: "CNY",
+      taxIncluded: true,
+      holidayPricingEnabled: definition.businessModel.supportsHolidayPricing
+    },
+    fulfillment: {
+      enabledModes: [...definition.businessModel.fulfillmentModes],
+      allowDifferentReturnLocation: definition.code === RentalCategoryCode.Vehicle
+    },
+    payment: {
+      timing: definition.code === RentalCategoryCode.Construction ? "confirmation" : "order",
+      depositMode: supportsPreauthorization ? "preauthorization" : "fixed",
+      preauthorizationRequired: supportsPreauthorization
+    },
+    overdue: {
+      graceMinutes: definition.code === RentalCategoryCode.Construction ? 60 : 30,
+      feeMode: definition.code === RentalCategoryCode.Construction ? "manual_review" : "next_period",
+      feeMultiplier: 1
+    },
+    calendar: {
+      weekendDays: [0, 6],
+      holidayPricingEnabled: definition.businessModel.supportsHolidayPricing,
+      officialCalendarRegion: "CN"
+    },
+    membership: {
+      signupRewardEnabled: false,
+      signupRewardType: "points",
+      signupRewardAmount: 0,
+      referralRewardEnabled: false,
+      referralRewardType: "coupon",
+      referrerRewardAmount: 0,
+      inviteeRewardAmount: 0,
+      referralTrigger: "first_order_completed"
+    },
+    notifications: {
+      enabledEvents: ["order.created", "order.confirmed", "pickup.reminder", "return.reminder", "order.overdue"],
+      editableChannels: ["sms", "app_push", "wechat"]
+    },
+    updatedAt: now(),
+    updatedBy: "system"
+  };
 }
 
 @Injectable()
@@ -95,6 +113,72 @@ export class RentalCoreService {
 
   listCategories() { return categories; }
   getProfile(tenantId: string) { return this.state(tenantId).profile; }
+  getBusinessSettings(tenantId: string) { return this.state(tenantId).businessSettings; }
+
+  saveBusinessSettings(tenantId: string, input: SaveTenantRentalBusinessSettingsRequest, operator: string) {
+    const state = this.state(tenantId);
+    const definition = this.category(state.profile.categoryCode);
+    const pricingUnits = new Set(definition.businessModel.pricingUnits);
+    const fulfillmentModes = new Set(definition.businessModel.fulfillmentModes);
+    if (!input.pricing.enabledUnits.length || input.pricing.enabledUnits.some((unit) => !pricingUnits.has(unit))) {
+      throw new BadRequestException("存在当前经营品类不支持的计价单位");
+    }
+    if (!input.pricing.enabledUnits.includes(input.pricing.defaultUnit)) {
+      throw new BadRequestException("默认计价单位必须处于已启用计价单位中");
+    }
+    if (input.fulfillment.enabledModes.some((mode) => !fulfillmentModes.has(mode))) {
+      throw new BadRequestException("存在当前经营品类不支持的履约方式");
+    }
+    if (input.payment.preauthorizationRequired && !definition.businessModel.supportsPreauthorization) {
+      throw new BadRequestException("当前经营品类不支持预授权");
+    }
+    if (input.pricing.holidayPricingEnabled && !definition.businessModel.supportsHolidayPricing) {
+      throw new BadRequestException("当前经营品类不支持节假日差异定价");
+    }
+    if (!Number.isInteger(input.overdue.graceMinutes) || input.overdue.graceMinutes < 0 || input.overdue.feeMultiplier < 0) {
+      throw new BadRequestException("逾期宽限时间或费用系数无效");
+    }
+    state.businessSettings = {
+      ...input,
+      tenantId,
+      categoryCode: definition.code,
+      configVersion: definition.version,
+      updatedAt: now(),
+      updatedBy: operator
+    };
+    return state.businessSettings;
+  }
+
+  listCouponTemplates(tenantId: string) { return this.state(tenantId).couponTemplates; }
+
+  saveCouponTemplate(tenantId: string, input: SaveRentalCouponTemplateRequest) {
+    const state = this.state(tenantId);
+    if (!input.code?.trim() || !input.name?.trim()) throw new BadRequestException("优惠券编码和名称不能为空");
+    if (!Number.isFinite(input.discountValue) || input.discountValue <= 0) throw new BadRequestException("优惠值必须大于 0");
+    if (input.discountType === "percentage" && input.discountValue > 100) throw new BadRequestException("折扣百分比不能超过 100");
+    if (!Number.isFinite(input.minimumSpend) || input.minimumSpend < 0 || (input.maximumDiscount !== undefined && input.maximumDiscount < 0)) throw new BadRequestException("优惠门槛或封顶金额无效");
+    if (!Number.isInteger(input.totalQuota) || input.totalQuota < 0 || !Number.isInteger(input.perCustomerLimit) || input.perCustomerLimit <= 0) throw new BadRequestException("发行量或每客限领数量无效");
+    if (new Date(input.effectiveFrom).getTime() >= new Date(input.effectiveTo).getTime()) throw new BadRequestException("优惠券有效期无效");
+    const duplicate = state.couponTemplates.find((row) => row.code === input.code.trim() && row.id !== input.id);
+    if (duplicate) throw new ConflictException("优惠券编码已存在");
+    const invalidGroup = (input.applicableItemGroupIds ?? []).find((itemGroupId) => !state.itemGroups.some((group) => group.id === itemGroupId));
+    if (invalidGroup) throw new BadRequestException("优惠券包含不存在的适用商品");
+    const existing = input.id ? state.couponTemplates.find((row) => row.id === input.id) : undefined;
+    if (input.id && !existing) throw new NotFoundException("优惠券模板不存在");
+    if (existing && input.totalQuota < existing.claimedQuantity) throw new BadRequestException("发行量不能低于已领取数量");
+    const timestamp = now();
+    const nextVersion = existing ? `${Number(existing.version.split(".")[0] ?? 0) + 1}.0` : "1.0";
+    const result: RentalCouponTemplate = {
+      id: existing?.id ?? id("coupon"), tenantId, code: input.code.trim(), name: input.name.trim(),
+      discountType: input.discountType, discountValue: input.discountValue, minimumSpend: input.minimumSpend,
+      maximumDiscount: input.maximumDiscount, totalQuota: input.totalQuota, claimedQuantity: existing?.claimedQuantity ?? 0,
+      perCustomerLimit: input.perCustomerLimit, effectiveFrom: input.effectiveFrom, effectiveTo: input.effectiveTo,
+      applicableItemGroupIds: [...new Set(input.applicableItemGroupIds ?? [])], status: input.status ?? existing?.status ?? "draft",
+      version: nextVersion, createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp
+    };
+    if (existing) state.couponTemplates.splice(state.couponTemplates.indexOf(existing), 1, result); else state.couponTemplates.unshift(result);
+    return result;
+  }
 
   saveProfile(tenantId: string, input: SaveTenantRentalProfileRequest) {
     const state = this.state(tenantId);
@@ -113,11 +197,46 @@ export class RentalCoreService {
       configVersion: definition.version,
       updatedAt: now()
     };
-    if (categoryChanged) state.inspectionTemplates = this.buildInspectionTemplates(tenantId, input.categoryCode);
+    if (categoryChanged) {
+      state.inspectionTemplates = this.buildInspectionTemplates(tenantId, input.categoryCode);
+      state.businessSettings = defaultBusinessSettings(tenantId, definition);
+    }
     return state.profile;
   }
 
   listLocations(tenantId: string) { return this.state(tenantId).locations; }
+
+  saveLocation(tenantId: string, input: SaveRentalFulfillmentLocationRequest) {
+    const state = this.state(tenantId);
+    const definition = this.category(state.profile.categoryCode);
+    if (!definition.businessModel.locationTypes.includes(input.type)) throw new BadRequestException("当前经营品类不支持该履约地点类型");
+    if (!input.code?.trim() || !input.name?.trim() || !input.operatorName?.trim()) throw new BadRequestException("地点编码、名称和经营主体不能为空");
+    if (!input.capabilities?.length) throw new BadRequestException("履约地点至少需要一种能力");
+    const duplicate = state.locations.find((row) => row.code === input.code.trim() && row.id !== input.id);
+    if (duplicate) throw new ConflictException("履约地点编码已存在");
+    if (input.id && input.parentLocationId === input.id) throw new BadRequestException("地点不能将自身设为上级");
+    if (input.parentLocationId) this.location(state, input.parentLocationId);
+    const existing = input.id ? state.locations.find((row) => row.id === input.id) : undefined;
+    if (input.id && !existing) throw new NotFoundException("履约地点不存在");
+    const result: RentalFulfillmentLocation = {
+      id: existing?.id ?? id("location"),
+      tenantId,
+      code: input.code.trim(),
+      name: input.name.trim(),
+      type: input.type,
+      operatorType: input.operatorType,
+      operatorName: input.operatorName.trim(),
+      parentLocationId: input.parentLocationId,
+      capabilities: [...new Set(input.capabilities)],
+      address: input.address?.trim(),
+      contactName: input.contactName?.trim(),
+      contactPhone: input.contactPhone?.trim(),
+      businessHours: input.businessHours?.trim(),
+      status: input.status ?? existing?.status ?? "enabled"
+    };
+    if (existing) state.locations.splice(state.locations.indexOf(existing), 1, result); else state.locations.unshift(result);
+    return result;
+  }
   listItemGroups(tenantId: string) { return this.state(tenantId).itemGroups; }
 
   saveItemGroup(tenantId: string, input: SaveRentalItemGroupRequest) {
@@ -387,7 +506,7 @@ export class RentalCoreService {
     const categoryCode = tenantId === "tenant_002" ? RentalCategoryCode.Camping : RentalCategoryCode.Camera;
     const isSampleTenant = tenantId === "tenant_001" || tenantId === "tenant_002";
     const definition = this.category(categoryCode); const timestamp = now(); const locationId = `${tenantId}_location_01`;
-    const location: RentalFulfillmentLocation = { id: locationId, tenantId, code: "MAIN", name: categoryCode === RentalCategoryCode.Camera ? "中心器材门店" : "中心装备仓", type: "store", capabilities: ["pickup", "return", "storage", "delivery"], address: "演示地址 1 号", status: "enabled" };
+    const location: RentalFulfillmentLocation = { id: locationId, tenantId, code: "MAIN", name: categoryCode === RentalCategoryCode.Camera ? "中心器材门店" : "中心装备仓", type: categoryCode === RentalCategoryCode.Camera ? "store" : "warehouse", operatorType: "self_operated", operatorName: categoryCode === RentalCategoryCode.Camera ? "演示摄影器材行" : "演示露营装备中心", capabilities: ["pickup", "return", "storage", "delivery"], address: "演示地址 1 号", contactName: "值班负责人", contactPhone: "13800000000", businessHours: "09:00-20:00", status: "enabled" };
     const base = (code: string, name: string, mode: RentalInventoryMode, unit: string, attributes: Record<string, unknown> = {}): RentalItemGroup => ({ id: `${tenantId}_${code.toLowerCase()}`, tenantId, categoryCode, code, name, inventoryMode: mode, unit, attributes, bundleComponents: [], status: "enabled", createdAt: timestamp, updatedAt: timestamp });
     const first = categoryCode === RentalCategoryCode.Camera ? base("CAM-BODY", "全画幅相机机身", RentalInventoryMode.Serialized, "台", { brand: "Sony", mount: "E" }) : base("CAMP-TENT", "四人露营帐篷", RentalInventoryMode.Quantity, "顶", { people: 4, season: "三季" });
     const second = categoryCode === RentalCategoryCode.Camera ? base("CAM-LENS", "24-70mm 标准镜头", RentalInventoryMode.Serialized, "支", { mount: "E" }) : base("CAMP-CHAIR", "折叠露营椅", RentalInventoryMode.Quantity, "把");
@@ -397,7 +516,7 @@ export class RentalCoreService {
     const assets: RentalAsset[] = isSampleTenant && categoryCode === RentalCategoryCode.Camera ? groups.filter((row) => row.inventoryMode === RentalInventoryMode.Serialized).flatMap((group, groupIndex) => Array.from({ length: 3 }, (_, index) => ({ id: `${group.id}_asset_${index + 1}`, tenantId, itemGroupId: group.id, itemGroupCode: group.code, itemGroupName: group.name, assetNo: `${group.code}-${String(index + 1).padStart(3, "0")}`, serialNo: `SN${groupIndex + 1}${index + 1}0001`, locationId, locationName: location.name, status: RentalAssetStatus.Available, attributes: {}, createdAt: timestamp, updatedAt: timestamp }))) : [];
     const stocks: RentalStockBalance[] = isSampleTenant && categoryCode === RentalCategoryCode.Camping ? groups.filter((row) => row.inventoryMode === RentalInventoryMode.Quantity).map((group, index) => ({ id: `${group.id}_stock`, tenantId, itemGroupId: group.id, itemGroupCode: group.code, itemGroupName: group.name, locationId, locationName: location.name, onHandQuantity: index === 0 ? 12 : 24, reservedQuantity: 0, maintenanceQuantity: index === 0 ? 1 : 2, availableQuantity: index === 0 ? 11 : 22, updatedAt: timestamp })) : [];
     const templates = this.buildInspectionTemplates(tenantId, categoryCode);
-    return { profile: { tenantId, categoryCode, capabilities: [...definition.defaultCapabilities] as RentalCapability[], terminology: { ...definition.terminology }, configVersion: definition.version, initializedAt: timestamp, updatedAt: timestamp }, locations: [location], itemGroups: groups, assets, stockBalances: stocks, orders: [], inspectionTemplates: templates, inspections: [] };
+    return { profile: { tenantId, categoryCode, capabilities: [...definition.defaultCapabilities] as RentalCapability[], terminology: { ...definition.terminology }, configVersion: definition.version, initializedAt: timestamp, updatedAt: timestamp }, businessSettings: defaultBusinessSettings(tenantId, definition), couponTemplates: [], locations: [location], itemGroups: groups, assets, stockBalances: stocks, orders: [], inspectionTemplates: templates, inspections: [] };
   }
 
   private buildInspectionTemplates(tenantId: string, categoryCode: RentalCategoryCode): RentalInspectionTemplate[] {

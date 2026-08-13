@@ -18,9 +18,67 @@ const cameraProfile = service.getProfile(cameraTenant);
 const campingProfile = service.getProfile(campingTenant);
 assert.equal(cameraProfile.categoryCode, "camera");
 assert.equal(campingProfile.categoryCode, "camping");
+const categories = service.listCategories();
+assert.equal(categories.length, 4);
+assert.ok(categories.every((category) => category.businessModel.assetFields.length > 0));
+assert.ok(categories.find((category) => category.code === "vehicle").businessModel.assetFields.some((field) => field.code === "licensePlate" && field.scope === "asset"));
+assert.ok(categories.find((category) => category.code === "camera").businessModel.assetFields.some((field) => field.code === "model" && field.scope === "item_group"));
+
+const cameraSettings = service.getBusinessSettings(cameraTenant);
+assert.equal(cameraSettings.categoryCode, "camera");
+assert.ok(cameraSettings.pricing.enabledUnits.includes("day_24h"));
+const savedCameraSettings = service.saveBusinessSettings(cameraTenant, {
+  pricing: { ...cameraSettings.pricing, enabledUnits: ["hour", "day_24h"], defaultUnit: "day_24h" },
+  fulfillment: { ...cameraSettings.fulfillment, enabledModes: ["store_pickup_return", "delivery"] },
+  payment: { ...cameraSettings.payment, preauthorizationRequired: true },
+  overdue: { ...cameraSettings.overdue, graceMinutes: 45 },
+  calendar: cameraSettings.calendar,
+  membership: { ...cameraSettings.membership, signupRewardEnabled: true, signupRewardAmount: 100 },
+  notifications: cameraSettings.notifications
+}, "test");
+assert.equal(savedCameraSettings.overdue.graceMinutes, 45);
+assert.equal(savedCameraSettings.updatedBy, "test");
+const coupon = service.saveCouponTemplate(cameraTenant, {
+  code: "WELCOME-20",
+  name: "新客满减券",
+  discountType: "fixed_amount",
+  discountValue: 20,
+  minimumSpend: 200,
+  totalQuota: 1000,
+  perCustomerLimit: 1,
+  effectiveFrom: startAt,
+  effectiveTo: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString(),
+  applicableItemGroupIds: [],
+  status: "enabled"
+});
+assert.equal(coupon.version, "1.0");
+assert.equal(service.listCouponTemplates(cameraTenant).length, 1);
+assert.equal(service.listCouponTemplates(campingTenant).length, 0, "coupon templates must remain tenant isolated");
+assert.throws(() => service.saveBusinessSettings(campingTenant, {
+  ...service.getBusinessSettings(campingTenant),
+  payment: { ...service.getBusinessSettings(campingTenant).payment, preauthorizationRequired: true }
+}, "test"), /不支持预授权/);
 
 const cameraGroups = service.listItemGroups(cameraTenant);
 const cameraLocation = service.listLocations(cameraTenant)[0];
+const partnerLocation = service.saveLocation(cameraTenant, {
+  code: "PARTNER-01",
+  name: "合作器材取还点",
+  type: "store",
+  operatorType: "partner",
+  operatorName: "测试摄影合作商",
+  capabilities: ["pickup", "return"],
+  status: "enabled"
+});
+assert.equal(partnerLocation.operatorType, "partner");
+assert.throws(() => service.saveLocation(cameraTenant, {
+  code: "SITE-01",
+  name: "错误项目现场",
+  type: "project_site",
+  operatorType: "partner",
+  operatorName: "错误合作商",
+  capabilities: ["pickup"]
+}), /不支持该履约地点类型/);
 const cameraBundle = cameraGroups.find((row) => row.inventoryMode === RentalInventoryMode.Bundle);
 assert.ok(cameraBundle && cameraBundle.bundleComponents.length === 2);
 

@@ -1,89 +1,98 @@
-import { PlusOutlined, SearchOutlined } from "@ant-design/icons";
-import type { VehicleGroupMaster } from "@store-rental/shared";
-import { Alert, App, Button, Card, Col, Drawer, Form, Input, InputNumber, Row, Select, Space, Table, Tag } from "antd";
+import { MinusCircleOutlined, PlusOutlined, SearchOutlined } from "@ant-design/icons";
+import { RentalInventoryMode, type RentalAttributeDefinition, type RentalItemGroup, type SaveRentalItemGroupRequest } from "@store-rental/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Alert, App, Button, Card, Col, Drawer, Form, Input, InputNumber, Row, Select, Space, Switch, Table, Tag } from "antd";
 import { useMemo, useState } from "react";
-import { api } from "@/api/rental";
-import { deleteVehicleGroup } from "@/api/operations";
+import { rentalCoreApi } from "@/api/rentalCore";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 
+const inventoryLabels: Record<string, string> = { serialized: "序列化资产", quantity: "数量库存", bundle: "套装" };
+
+function AttributeInput({ field }: { field: RentalAttributeDefinition }) {
+  if (field.type === "number") return <InputNumber min={0} addonAfter={field.unit} style={{ width: "100%" }} />;
+  if (field.type === "select") return <Select options={field.options?.map((value) => ({ value, label: value }))} />;
+  if (field.type === "boolean") return <Switch />;
+  return <Input />;
+}
+
 export function CatalogPage() {
-  const { message, modal } = App.useApp();
+  const { message } = App.useApp();
   const queryClient = useQueryClient();
   const [keyword, setKeyword] = useState("");
-  const [editing, setEditing] = useState<VehicleGroupMaster>();
+  const [editing, setEditing] = useState<RentalItemGroup>();
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [form] = Form.useForm<VehicleGroupMaster>();
-  const query = useQuery({ queryKey: ["item-groups"], queryFn: api.itemGroups });
-  const save = useMutation({ mutationFn: api.saveItemGroup, onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["item-groups"] }); setDrawerOpen(false); setEditing(undefined); form.resetFields(); message.success("标的分组已保存"); }, onError: () => message.error("保存失败，请检查分组编码和兼容字段") });
-  const remove = useMutation({ mutationFn: deleteVehicleGroup, onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["item-groups"] }); message.success("标的分组已删除"); }, onError: () => message.error("分组仍被资产或订单引用，不能删除") });
-  const rows = useMemo(() => (query.data ?? []).filter((item) => `${item.storeProductGroupName}${item.brand}${item.model}`.toLowerCase().includes(keyword.toLowerCase())), [query.data, keyword]);
+  const [form] = Form.useForm<SaveRentalItemGroupRequest>();
+  const groups = useQuery({ queryKey: ["rental-core", "groups"], queryFn: rentalCoreApi.itemGroups });
+  const profile = useQuery({ queryKey: ["rental-core", "profile"], queryFn: rentalCoreApi.profile });
+  const categories = useQuery({ queryKey: ["rental-core", "categories"], queryFn: rentalCoreApi.categories });
+  const category = categories.data?.find((item) => item.code === profile.data?.categoryCode);
+  const groupFields = category?.businessModel.assetFields.filter((field) => field.scope === "item_group") ?? [];
+  const save = useMutation({
+    mutationFn: rentalCoreApi.saveItemGroup,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["rental-core", "groups"] });
+      setDrawerOpen(false);
+      setEditing(undefined);
+      form.resetFields();
+      message.success(`${profile.data?.terminology.itemGroupLabel ?? "商品"}已保存`);
+    },
+    onError: () => message.error("保存失败，请检查编码、库存模式、品类字段和套装组成")
+  });
+  const rows = useMemo(() => (groups.data ?? []).filter((item) => `${item.code}${item.name}${Object.values(item.attributes).join("")}`.toLowerCase().includes(keyword.toLowerCase())), [groups.data, keyword]);
 
-  function openEditor(record?: VehicleGroupMaster) {
+  function openEditor(record?: RentalItemGroup) {
     setEditing(record);
     form.setFieldsValue(record ?? {
-      id: "",
-      vehicleType: "equipment",
-      brand: "",
-      model: "",
-      year: String(new Date().getFullYear()),
-      originType: "self_owned",
-      seats: 0,
-      displacement: "N/A",
-      trunkCapacity: "N/A",
-      features: [],
-      storeProductGroupName: "",
-      dailyPrice: 0,
-      freeKm: 0,
-      pricePerKm: 0,
-      status: "enabled",
-      vehicleCount: 0,
-      reservedOrderCount: 0,
-      isSpecial: false
+      code: "",
+      name: "",
+      inventoryMode: category?.supportedInventoryModes[0] ?? RentalInventoryMode.Serialized,
+      unit: "件",
+      description: "",
+      attributes: {},
+      bundleComponents: [],
+      status: "enabled"
     });
     setDrawerOpen(true);
   }
 
   return (
     <>
-      <PageHeader title="标的分组" description="管理可预约的商品组、套装和定价基础。当前数据由原车型组 API 兼容投影。" extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>新增标的分组</Button>} />
+      <PageHeader title={profile.data?.terminology.itemGroupLabel ?? "商品目录"} description="按经营品类维护商品型号、库存方式、规格字段和套装组成。" extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>新增{profile.data?.terminology.itemGroupLabel ?? "商品"}</Button>} />
+      <Alert type="info" showIcon message={`${category?.name ?? "当前品类"}商品模型`} description="厂商、型号等共享属性保存在商品型号；车牌、SN 等单件信息保存在资产实例；基础价格不再直接写进商品主数据。" style={{ marginBottom: 16 }} />
       <Card className="data-panel" styles={{ body: { paddingBottom: 0 } }}>
-        <Space style={{ marginBottom: 16 }}><Input allowClear prefix={<SearchOutlined />} placeholder="搜索标的名称、品牌或型号" value={keyword} onChange={(event) => setKeyword(event.target.value)} style={{ width: 300 }} /></Space>
-        <QueryState loading={query.isLoading} error={query.error}>
-          <Table rowKey="id" dataSource={rows} scroll={{ x: 1000 }} columns={[
-            { title: "标的分组", dataIndex: "storeProductGroupName", fixed: "left", render: (value) => <b>{value}</b> },
-            { title: "品牌 / 型号", render: (_, record) => `${record.brand || "-"} ${record.model || ""}` },
-            { title: "规格摘要", render: (_, record) => record.features?.slice(0, 2).join(" · ") || "待配置" },
-            { title: "基础租金", dataIndex: "dailyPrice", align: "right", render: (value) => `¥${Number(value).toLocaleString()}/天` },
-            { title: "可用资产", dataIndex: "vehicleCount", align: "right", render: (value) => value ?? 0 },
+        <Space style={{ marginBottom: 16 }}><Input allowClear prefix={<SearchOutlined />} placeholder="搜索编码、名称或规格" value={keyword} onChange={(event) => setKeyword(event.target.value)} style={{ width: 300 }} /></Space>
+        <QueryState loading={groups.isLoading || profile.isLoading || categories.isLoading} error={groups.error || profile.error || categories.error}>
+          <Table<RentalItemGroup> rowKey="id" dataSource={rows} scroll={{ x: 960 }} columns={[
+            { title: profile.data?.terminology.itemGroupLabel ?? "商品", fixed: "left", render: (_, row) => <><b>{row.name}</b><br /><span className="muted">{row.code}</span></> },
+            { title: "厂商 / 型号", render: (_, row) => [row.attributes.manufacturer, row.attributes.brand, row.attributes.model].filter(Boolean).join(" · ") || "-" },
+            { title: "库存方式", dataIndex: "inventoryMode", render: (value) => <Tag color={value === "bundle" ? "purple" : value === "quantity" ? "gold" : "blue"}>{inventoryLabels[value] ?? value}</Tag> },
+            { title: "单位", dataIndex: "unit" },
+            { title: "套装组成", dataIndex: "bundleComponents", render: (items) => items?.length ? items.map((item: { itemGroupName: string; quantity: number }) => `${item.itemGroupName}×${item.quantity}`).join("，") : "-" },
             { title: "状态", dataIndex: "status", render: (value) => <Tag color={value === "enabled" ? "success" : "default"}>{value === "enabled" ? "启用" : "停用"}</Tag> },
-            { title: "操作", fixed: "right", render: (_, record) => <Space size={0}><Button type="link" onClick={() => openEditor(record)}>编辑</Button><Button type="link" danger onClick={() => modal.confirm({ title: `删除 ${record.storeProductGroupName}？`, content: "只有未被资产、定价或订单引用的分组才能删除。", okButtonProps: { danger: true }, onOk: () => remove.mutateAsync(record.id) })}>删除</Button></Space> }
+            { title: "操作", fixed: "right", render: (_, row) => <Button type="link" onClick={() => openEditor(row)}>编辑</Button> }
           ]} />
         </QueryState>
       </Card>
-      <Drawer title={editing ? "编辑标的分组" : "新增标的分组"} width={600} open={drawerOpen} destroyOnHidden onClose={() => setDrawerOpen(false)} extra={<Button type="primary" loading={save.isPending} onClick={() => form.submit()}>保存</Button>}>
-        <Alert type="warning" showIcon message="当前仍写入 VehicleGroup 兼容模型" description="车辆类型、座位数、排量、免费里程等字段尚未被品类 schema 替代；非车辆租户正式启用前必须迁移到 RentalItemGroup。" style={{ marginBottom: 20 }} />
-        <Form form={form} layout="vertical" onFinish={(values) => save.mutate({ ...editing, ...values })}>
-          <Form.Item name="id" hidden><Input /></Form.Item>
-          <Form.Item name="storeProductGroupName" label="标的分组名称" rules={[{ required: true }]}><Input /></Form.Item>
+
+      <Drawer title={editing ? `编辑${profile.data?.terminology.itemGroupLabel ?? "商品"}` : `新增${profile.data?.terminology.itemGroupLabel ?? "商品"}`} width={680} open={drawerOpen} destroyOnHidden onClose={() => setDrawerOpen(false)} extra={<Button type="primary" loading={save.isPending} onClick={() => form.submit()}>保存</Button>}>
+        <Form<SaveRentalItemGroupRequest> form={form} layout="vertical" onFinish={(values) => save.mutate({ ...values, id: editing?.id })}>
           <Row gutter={12}>
-            <Col span={12}><Form.Item name="brand" label="品牌" rules={[{ required: true }]}><Input /></Form.Item></Col>
-            <Col span={12}><Form.Item name="model" label="型号" rules={[{ required: true }]}><Input /></Form.Item></Col>
-            <Col span={12}><Form.Item name="vehicleType" label="兼容类型" rules={[{ required: true }]}><Input /></Form.Item></Col>
-            <Col span={12}><Form.Item name="year" label="年份 / 版本" rules={[{ required: true }]}><Input /></Form.Item></Col>
-            <Col span={12}><Form.Item name="originType" label="资产来源" rules={[{ required: true }]}><Select options={[{ value: "self_owned", label: "自有" }, { value: "leased", label: "租入" }, { value: "partner", label: "合作方" }]} /></Form.Item></Col>
-            <Col span={12}><Form.Item name="status" label="状态" rules={[{ required: true }]}><Select options={[{ value: "enabled", label: "启用" }, { value: "disabled", label: "停用" }]} /></Form.Item></Col>
+            <Col span={12}><Form.Item name="code" label="商品编码" rules={[{ required: true }]}><Input disabled={Boolean(editing)} /></Form.Item></Col>
+            <Col span={12}><Form.Item name="name" label="名称" rules={[{ required: true }]}><Input /></Form.Item></Col>
+            <Col span={12}><Form.Item name="inventoryMode" label="库存方式" rules={[{ required: true }]}><Select disabled={Boolean(editing)} options={category?.supportedInventoryModes.map((value) => ({ value, label: inventoryLabels[value] ?? value }))} /></Form.Item></Col>
+            <Col span={12}><Form.Item name="unit" label="计量单位" rules={[{ required: true }]}><Input placeholder="台、套、顶、辆" /></Form.Item></Col>
           </Row>
-          <Form.Item name="features" label="规格 / 特性"><Select mode="tags" tokenSeparators={[",", "，"]} /></Form.Item>
-          <Row gutter={12}>
-            <Col span={8}><Form.Item name="dailyPrice" label="日租金" rules={[{ required: true }]}><InputNumber min={0} precision={2} style={{ width: "100%" }} /></Form.Item></Col>
-            <Col span={8}><Form.Item name="freeKm" label="免费用量（兼容公里）" rules={[{ required: true }]}><InputNumber min={0} style={{ width: "100%" }} /></Form.Item></Col>
-            <Col span={8}><Form.Item name="pricePerKm" label="超量单价" rules={[{ required: true }]}><InputNumber min={0} precision={2} style={{ width: "100%" }} /></Form.Item></Col>
-            <Col span={8}><Form.Item name="seats" label="容量（兼容座位）" rules={[{ required: true }]}><InputNumber min={0} style={{ width: "100%" }} /></Form.Item></Col>
-            <Col span={8}><Form.Item name="displacement" label="规格（兼容排量）" rules={[{ required: true }]}><Input /></Form.Item></Col>
-            <Col span={8}><Form.Item name="trunkCapacity" label="收纳规格（兼容后备箱）" rules={[{ required: true }]}><Input /></Form.Item></Col>
-          </Row>
+          <Card size="small" title={`${category?.name ?? "品类"}规格字段`} style={{ marginBottom: 16 }}>
+            <Row gutter={12}>{groupFields.map((field) => <Col span={12} key={field.code}><Form.Item name={["attributes", field.code]} label={field.label} rules={[{ required: field.required }]} valuePropName={field.type === "boolean" ? "checked" : "value"}><AttributeInput field={field} /></Form.Item></Col>)}</Row>
+          </Card>
+          <Form.Item noStyle shouldUpdate={(previous, current) => previous.inventoryMode !== current.inventoryMode}>{({ getFieldValue }) => getFieldValue("inventoryMode") === RentalInventoryMode.Bundle && (
+            <Card size="small" title="套装组成" style={{ marginBottom: 16 }}>
+              <Form.List name="bundleComponents">{(fields, { add, remove }) => <Space direction="vertical" style={{ width: "100%" }}>{fields.map((field) => <Row gutter={8} key={field.key}><Col span={14}><Form.Item {...field} name={[field.name, "itemGroupId"]} rules={[{ required: true }]}><Select placeholder="选择组成商品" options={(groups.data ?? []).filter((item) => item.id !== editing?.id && item.inventoryMode !== RentalInventoryMode.Bundle).map((item) => ({ value: item.id, label: `${item.code} · ${item.name}` }))} /></Form.Item></Col><Col span={6}><Form.Item {...field} name={[field.name, "quantity"]} rules={[{ required: true }]}><InputNumber min={1} precision={0} placeholder="数量" style={{ width: "100%" }} /></Form.Item></Col><Col span={4}><Button danger type="text" icon={<MinusCircleOutlined />} onClick={() => remove(field.name)} /></Col></Row>)}<Button block type="dashed" onClick={() => add({ quantity: 1 })} icon={<PlusOutlined />}>增加组成项</Button></Space>}</Form.List>
+            </Card>
+          )}</Form.Item>
+          <Form.Item name="description" label="说明"><Input.TextArea rows={3} /></Form.Item>
+          <Form.Item name="status" label="状态" rules={[{ required: true }]}><Select options={[{ value: "enabled", label: "启用" }, { value: "disabled", label: "停用" }]} /></Form.Item>
         </Form>
       </Drawer>
     </>

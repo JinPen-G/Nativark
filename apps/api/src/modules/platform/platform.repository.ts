@@ -166,7 +166,8 @@ export class PlatformRepository {
       tenantStatus: this.toTenantStatus(tenant.status),
       enabledBusinessLines: ["rental_core"],
       categoryCode: tenant.rentalProfile?.categoryCode as TenantSummary["categoryCode"],
-      categoryName: tenant.rentalProfile?.category.name
+      categoryName: tenant.rentalProfile?.category.name,
+      capabilities: tenant.rentalProfile?.capabilities as TenantSummary["capabilities"]
     };
   }
 
@@ -204,7 +205,8 @@ export class PlatformRepository {
         tenantStatus: this.toTenantStatus(tenant.status),
         enabledBusinessLines: ["rental_core"],
         categoryCode: tenant.rentalProfile?.categoryCode as TenantSummary["categoryCode"],
-        categoryName: tenant.rentalProfile?.category.name
+        categoryName: tenant.rentalProfile?.category.name,
+        capabilities: tenant.rentalProfile?.capabilities as TenantSummary["capabilities"]
       },
       user: this.toUserRow(user)
     };
@@ -1599,6 +1601,7 @@ export class PlatformRepository {
     updatedAt: Date;
     rentalProfile: null | {
       categoryCode: string;
+      capabilities: unknown;
       category: { name: string };
     };
     _count: { users: number; organizations: number; orders: number; rentalOrders: number };
@@ -1611,6 +1614,7 @@ export class PlatformRepository {
       enabledBusinessLines: ["rental_core"],
       categoryCode: tenant.rentalProfile?.categoryCode as TenantSummary["categoryCode"],
       categoryName: tenant.rentalProfile?.category.name,
+      capabilities: tenant.rentalProfile?.capabilities as TenantSummary["capabilities"],
       userCount: tenant._count.users,
       organizationCount: tenant._count.organizations,
       orderCount: tenant._count.orders + tenant._count.rentalOrders,

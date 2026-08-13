@@ -65,6 +65,10 @@ function requestContext(method, url, accessToken) {
   assert.equal(demo.user.isPlatformAdmin, true);
   assert.equal(demo.tenant.categoryCode, "camera");
   assert.equal(demo.tenant.categoryName, "摄影设备");
+  assert.ok(demo.tenant.capabilities.includes("serialized_inventory"));
+  const refreshedContext = await auth.getSessionContext(`Bearer ${demo.accessToken}`);
+  assert.equal(refreshedContext.tenant.categoryCode, "camera");
+  assert.ok(refreshedContext.tenant.capabilities.includes("delivery"));
   const demoTenants = platform.listTenants(saas.user);
   assert.equal(demoTenants.length, 2);
   assert.deepEqual(
@@ -195,6 +199,8 @@ function requestContext(method, url, accessToken) {
   const demoCore = requestContext("GET", "/api/rental/v1/profile", rotated.accessToken);
   assert.equal(await guard.canActivate(demoCore.context), true);
   assert.equal(getRequestTenantId(), "tenant_001");
+  const cameraDispatch = requestContext("GET", "/api/store-rental/dispatch/board", rotated.accessToken);
+  await assert.rejects(guard.canActivate(cameraDispatch.context), /未启用该业务能力/);
 
   await platform.updateTenantStatus(
     bootstrapped.tenant.tenantId,

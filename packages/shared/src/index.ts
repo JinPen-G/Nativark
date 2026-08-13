@@ -87,6 +87,7 @@ export interface TenantContext {
   tenantStatus: TenantStatus;
   categoryCode?: RentalCategoryCode;
   categoryName?: string;
+  capabilities?: RentalCapability[];
 }
 
 export interface AuthUser {
@@ -120,6 +121,11 @@ export interface LoginResponse {
   user: AuthUser;
 }
 
+export interface SessionContextResponse {
+  tenant: TenantContext;
+  user: AuthUser;
+}
+
 export interface RefreshSessionRequest {
   refreshToken: string;
 }
@@ -137,6 +143,7 @@ export interface TenantSummary {
   enabledBusinessLines: string[];
   categoryCode?: RentalCategoryCode;
   categoryName?: string;
+  capabilities?: RentalCapability[];
   userCount?: number;
   organizationCount?: number;
   orderCount?: number;
@@ -3764,6 +3771,37 @@ export interface RentalCategoryTerminology {
   usageMetricLabel?: string;
 }
 
+export type RentalPricingUnit = "hour" | "shift" | "day_24h" | "calendar_day" | "night" | "week" | "month" | "usage" | "package";
+export type RentalFulfillmentMode = "store_pickup_return" | "partner_pickup_return" | "warehouse_pickup_return" | "locker_pickup_return" | "delivery" | "onsite_delivery";
+export type RentalLocationType = "store" | "warehouse" | "station" | "locker" | "delivery_hub" | "project_site";
+export type RentalSettingModule = "pricing" | "discounts" | "coupons" | "value_added_services" | "rental_rules" | "business_calendar" | "membership_rewards" | "notification_templates";
+export type RentalAttributeScope = "item_group" | "asset" | "transaction";
+export type RentalAttributeValueType = "string" | "number" | "boolean" | "date" | "select";
+
+export interface RentalAttributeDefinition {
+  code: string;
+  label: string;
+  scope: RentalAttributeScope;
+  type: RentalAttributeValueType;
+  required?: boolean;
+  unit?: string;
+  options?: string[];
+}
+
+export interface RentalCategoryBusinessModel {
+  pricingUnits: RentalPricingUnit[];
+  defaultPricingUnit: RentalPricingUnit;
+  fulfillmentModes: RentalFulfillmentMode[];
+  locationTypes: RentalLocationType[];
+  settingModules: RentalSettingModule[];
+  assetFields: RentalAttributeDefinition[];
+  supportsHolidayPricing: boolean;
+  supportsUsagePricing: boolean;
+  supportsPreauthorization: boolean;
+  supportsQualificationReview: boolean;
+  valueAddedServicePresets: string[];
+}
+
 export interface RentalCategoryDefinition {
   code: RentalCategoryCode;
   name: string;
@@ -3772,6 +3810,7 @@ export interface RentalCategoryDefinition {
   defaultCapabilities: RentalCapability[];
   terminology: RentalCategoryTerminology;
   attributeSchema: Record<string, unknown>;
+  businessModel: RentalCategoryBusinessModel;
   version: string;
 }
 
@@ -3785,6 +3824,234 @@ export interface TenantRentalProfile {
   updatedAt: string;
 }
 
+export interface TenantRentalBusinessSettings {
+  tenantId: string;
+  categoryCode: RentalCategoryCode;
+  configVersion: string;
+  pricing: {
+    enabledUnits: RentalPricingUnit[];
+    defaultUnit: RentalPricingUnit;
+    currency: "CNY";
+    taxIncluded: boolean;
+    holidayPricingEnabled: boolean;
+  };
+  fulfillment: {
+    enabledModes: RentalFulfillmentMode[];
+    allowDifferentReturnLocation: boolean;
+  };
+  payment: {
+    timing: "order" | "confirmation" | "pickup" | "offline_terms";
+    depositMode: "none" | "fixed" | "price_multiple" | "preauthorization";
+    preauthorizationRequired: boolean;
+  };
+  overdue: {
+    graceMinutes: number;
+    feeMode: "none" | "hourly" | "next_period" | "multiplier" | "manual_review";
+    feeMultiplier: number;
+  };
+  calendar: {
+    weekendDays: number[];
+    holidayPricingEnabled: boolean;
+    officialCalendarRegion: "CN" | "NONE";
+  };
+  membership: {
+    signupRewardEnabled: boolean;
+    signupRewardType: "points" | "balance" | "coupon";
+    signupRewardAmount: number;
+    referralRewardEnabled: boolean;
+    referralRewardType: "points" | "balance" | "coupon";
+    referrerRewardAmount: number;
+    inviteeRewardAmount: number;
+    referralTrigger: "registration" | "identity_verified" | "first_order_completed";
+  };
+  notifications: {
+    enabledEvents: string[];
+    editableChannels: Array<"sms" | "app_push" | "wechat" | "email">;
+  };
+  updatedAt: string;
+  updatedBy: string;
+}
+
+export interface SaveTenantRentalBusinessSettingsRequest extends Omit<TenantRentalBusinessSettings, "tenantId" | "categoryCode" | "configVersion" | "updatedAt" | "updatedBy"> {}
+
+export interface RentalCouponTemplate {
+  id: string;
+  tenantId: string;
+  code: string;
+  name: string;
+  discountType: "fixed_amount" | "percentage";
+  discountValue: number;
+  minimumSpend: number;
+  maximumDiscount?: number;
+  totalQuota: number;
+  claimedQuantity: number;
+  perCustomerLimit: number;
+  effectiveFrom: string;
+  effectiveTo: string;
+  applicableItemGroupIds: string[];
+  status: "draft" | "enabled" | "disabled";
+  version: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SaveRentalCouponTemplateRequest {
+  id?: string;
+  code: string;
+  name: string;
+  discountType: "fixed_amount" | "percentage";
+  discountValue: number;
+  minimumSpend: number;
+  maximumDiscount?: number;
+  totalQuota: number;
+  perCustomerLimit: number;
+  effectiveFrom: string;
+  effectiveTo: string;
+  applicableItemGroupIds?: string[];
+  status?: "draft" | "enabled" | "disabled";
+}
+
+const commonSettingModules: RentalSettingModule[] = [
+  "pricing",
+  "discounts",
+  "coupons",
+  "value_added_services",
+  "rental_rules",
+  "business_calendar",
+  "membership_rewards",
+  "notification_templates"
+];
+
+export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
+  {
+    code: RentalCategoryCode.Camera,
+    name: "摄影设备",
+    description: "机身、镜头、灯光和拍摄套装租赁",
+    supportedInventoryModes: [RentalInventoryMode.Serialized, RentalInventoryMode.Quantity, RentalInventoryMode.Bundle],
+    defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery", "usage_reading"],
+    terminology: { itemLabel: "器材", itemGroupLabel: "器材型号", assetLabel: "器材资产", fulfillmentLabel: "器材门店", pickupLabel: "取机", returnLabel: "还机", identifierLabel: "资产编号", usageMetricLabel: "快门次数" },
+    attributeSchema: { brand: "string", model: "string", mount: "string", sensor: "string", serialNo: "string", shutterCount: "number" },
+    businessModel: {
+      pricingUnits: ["hour", "day_24h", "calendar_day", "week", "package", "usage"],
+      defaultPricingUnit: "day_24h",
+      fulfillmentModes: ["store_pickup_return", "partner_pickup_return", "locker_pickup_return", "delivery"],
+      locationTypes: ["store", "warehouse", "locker", "delivery_hub"],
+      settingModules: [...commonSettingModules],
+      assetFields: [
+        { code: "brand", label: "厂商", scope: "item_group", type: "string", required: true },
+        { code: "model", label: "型号", scope: "item_group", type: "string", required: true },
+        { code: "mount", label: "卡口", scope: "item_group", type: "string" },
+        { code: "sensor", label: "传感器规格", scope: "item_group", type: "string" },
+        { code: "serialNo", label: "设备序列号", scope: "asset", type: "string", required: true },
+        { code: "shutterCount", label: "快门次数", scope: "transaction", type: "number", unit: "次" },
+        { code: "conditionGrade", label: "成色等级", scope: "asset", type: "select", options: ["A", "B", "C"] }
+      ],
+      supportsHolidayPricing: true,
+      supportsUsagePricing: true,
+      supportsPreauthorization: true,
+      supportsQualificationReview: false,
+      valueAddedServicePresets: ["损坏免赔", "设备保险", "上门配送", "备用电池", "技术支持"]
+    },
+    version: "0.2.0"
+  },
+  {
+    code: RentalCategoryCode.Camping,
+    name: "露营设备",
+    description: "帐篷、桌椅、炊具和露营套装租赁",
+    supportedInventoryModes: [RentalInventoryMode.Serialized, RentalInventoryMode.Quantity, RentalInventoryMode.Bundle],
+    defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery"],
+    terminology: { itemLabel: "装备", itemGroupLabel: "装备品类", assetLabel: "装备资产", fulfillmentLabel: "装备仓", pickupLabel: "领用", returnLabel: "归还", identifierLabel: "装备编号" },
+    attributeSchema: { brand: "string", model: "string", people: "number", season: "string", material: "string", batchNo: "string" },
+    businessModel: {
+      pricingUnits: ["calendar_day", "night", "week", "package"],
+      defaultPricingUnit: "calendar_day",
+      fulfillmentModes: ["store_pickup_return", "partner_pickup_return", "warehouse_pickup_return", "delivery"],
+      locationTypes: ["store", "warehouse", "delivery_hub"],
+      settingModules: [...commonSettingModules],
+      assetFields: [
+        { code: "brand", label: "品牌", scope: "item_group", type: "string", required: true },
+        { code: "model", label: "型号", scope: "item_group", type: "string" },
+        { code: "people", label: "适用人数", scope: "item_group", type: "number", unit: "人" },
+        { code: "season", label: "季节规格", scope: "item_group", type: "select", options: ["三季", "四季"] },
+        { code: "material", label: "材质", scope: "item_group", type: "string" },
+        { code: "batchNo", label: "批次号", scope: "asset", type: "string" },
+        { code: "cleaningStatus", label: "清洁状态", scope: "transaction", type: "select", options: ["clean", "needs_cleaning", "damaged"] }
+      ],
+      supportsHolidayPricing: true,
+      supportsUsagePricing: false,
+      supportsPreauthorization: false,
+      supportsQualificationReview: false,
+      valueAddedServicePresets: ["清洁服务", "配送服务", "天气保障", "耗材包"]
+    },
+    version: "0.2.0"
+  },
+  {
+    code: RentalCategoryCode.Vehicle,
+    name: "车辆载具",
+    description: "汽车、摩托车和其他载具租赁",
+    supportedInventoryModes: [RentalInventoryMode.Serialized, RentalInventoryMode.Bundle],
+    defaultCapabilities: ["serialized_inventory", "bundle_inventory", "pickup", "return", "dispatch", "usage_reading", "qualification", "iot"],
+    terminology: { itemLabel: "车辆", itemGroupLabel: "车型组", assetLabel: "车辆", fulfillmentLabel: "门店", pickupLabel: "取车", returnLabel: "还车", identifierLabel: "车牌号", usageMetricLabel: "里程" },
+    attributeSchema: { manufacturer: "string", brand: "string", model: "string", trim: "string", energyType: "string", licensePlate: "string", vin: "string", mileage: "number" },
+    businessModel: {
+      pricingUnits: ["hour", "day_24h", "calendar_day", "week", "month", "usage", "package"],
+      defaultPricingUnit: "day_24h",
+      fulfillmentModes: ["store_pickup_return", "partner_pickup_return", "delivery"],
+      locationTypes: ["store", "station", "warehouse", "delivery_hub"],
+      settingModules: [...commonSettingModules],
+      assetFields: [
+        { code: "manufacturer", label: "制造商", scope: "item_group", type: "string", required: true },
+        { code: "brand", label: "品牌", scope: "item_group", type: "string", required: true },
+        { code: "model", label: "车系", scope: "item_group", type: "string", required: true },
+        { code: "trim", label: "款型", scope: "item_group", type: "string" },
+        { code: "energyType", label: "能源类型", scope: "item_group", type: "select", options: ["燃油", "纯电", "混动", "其他"] },
+        { code: "licensePlate", label: "车牌号", scope: "asset", type: "string", required: true },
+        { code: "vin", label: "VIN", scope: "asset", type: "string", required: true },
+        { code: "mileage", label: "里程", scope: "transaction", type: "number", unit: "km" },
+        { code: "energyLevel", label: "油量/电量", scope: "transaction", type: "number", unit: "%" }
+      ],
+      supportsHolidayPricing: true,
+      supportsUsagePricing: true,
+      supportsPreauthorization: true,
+      supportsQualificationReview: true,
+      valueAddedServicePresets: ["基础保险", "不计免赔", "道路救援", "儿童座椅", "异地还车"]
+    },
+    version: "0.2.0"
+  },
+  {
+    code: RentalCategoryCode.Construction,
+    name: "工程设备",
+    description: "工程机械、工具和配套设备租赁",
+    supportedInventoryModes: [RentalInventoryMode.Serialized, RentalInventoryMode.Quantity, RentalInventoryMode.Bundle],
+    defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery", "dispatch", "usage_reading", "qualification", "iot"],
+    terminology: { itemLabel: "设备", itemGroupLabel: "设备型号", assetLabel: "设备资产", fulfillmentLabel: "设备仓", pickupLabel: "出库", returnLabel: "入库", identifierLabel: "设备编号", usageMetricLabel: "工时" },
+    attributeSchema: { manufacturer: "string", brand: "string", model: "string", power: "string", ratedLoad: "number", factoryNo: "string", hourMeter: "number" },
+    businessModel: {
+      pricingUnits: ["hour", "shift", "calendar_day", "week", "month", "usage", "package"],
+      defaultPricingUnit: "shift",
+      fulfillmentModes: ["warehouse_pickup_return", "delivery", "onsite_delivery", "partner_pickup_return"],
+      locationTypes: ["warehouse", "delivery_hub", "project_site"],
+      settingModules: [...commonSettingModules],
+      assetFields: [
+        { code: "manufacturer", label: "制造商", scope: "item_group", type: "string", required: true },
+        { code: "brand", label: "品牌", scope: "item_group", type: "string" },
+        { code: "model", label: "型号", scope: "item_group", type: "string", required: true },
+        { code: "power", label: "功率", scope: "item_group", type: "string" },
+        { code: "ratedLoad", label: "额定载荷", scope: "item_group", type: "number" },
+        { code: "factoryNo", label: "出厂编号", scope: "asset", type: "string", required: true },
+        { code: "inspectionExpiry", label: "检验有效期", scope: "asset", type: "date" },
+        { code: "hourMeter", label: "累计工时", scope: "transaction", type: "number", unit: "小时" }
+      ],
+      supportsHolidayPricing: true,
+      supportsUsagePricing: true,
+      supportsPreauthorization: true,
+      supportsQualificationReview: true,
+      valueAddedServicePresets: ["设备保险", "操作员服务", "运输服务", "现场技术支持", "损坏免赔"]
+    },
+    version: "0.2.0"
+  }
+];
+
 export interface SaveTenantRentalProfileRequest {
   categoryCode: RentalCategoryCode;
   capabilities?: RentalCapability[];
@@ -3797,10 +4064,32 @@ export interface RentalFulfillmentLocation {
   tenantId: string;
   code: string;
   name: string;
-  type: "store" | "warehouse" | "locker" | "delivery_hub";
+  type: RentalLocationType;
+  operatorType?: "self_operated" | "partner";
+  operatorName?: string;
+  parentLocationId?: string;
   capabilities: Array<"pickup" | "return" | "storage" | "delivery">;
   address?: string;
+  contactName?: string;
+  contactPhone?: string;
+  businessHours?: string;
   status: "enabled" | "disabled";
+}
+
+export interface SaveRentalFulfillmentLocationRequest {
+  id?: string;
+  code: string;
+  name: string;
+  type: RentalLocationType;
+  operatorType: "self_operated" | "partner";
+  operatorName: string;
+  parentLocationId?: string;
+  capabilities: Array<"pickup" | "return" | "storage" | "delivery">;
+  address?: string;
+  contactName?: string;
+  contactPhone?: string;
+  businessHours?: string;
+  status?: "enabled" | "disabled";
 }
 
 export interface RentalBundleComponent {

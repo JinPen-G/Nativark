@@ -4,8 +4,11 @@ import type {
   CreateRentalOrderRequest,
   RentalAvailabilityRequest,
   SaveRentalAssetRequest,
+  SaveRentalCouponTemplateRequest,
+  SaveRentalFulfillmentLocationRequest,
   SaveRentalItemGroupRequest,
   SaveRentalStockBalanceRequest,
+  SaveTenantRentalBusinessSettingsRequest,
   SaveTenantRentalProfileRequest,
   SystemUserRow
 } from "@store-rental/shared";
@@ -19,7 +22,14 @@ export class RentalCoreController {
   @Get("categories") categories() { return this.service.listCategories(); }
   @Get("tenant-profile") profile(@Req() req: AuthenticatedRequest) { return this.service.getProfile(req.user.tenantId); }
   @Put("tenant-profile") saveProfile(@Req() req: AuthenticatedRequest, @Body() body: SaveTenantRentalProfileRequest) { return this.service.saveProfile(req.user.tenantId, body); }
+  @Get("business-settings") businessSettings(@Req() req: AuthenticatedRequest) { return this.service.getBusinessSettings(req.user.tenantId); }
+  @Put("business-settings") saveBusinessSettings(@Req() req: AuthenticatedRequest, @Body() body: SaveTenantRentalBusinessSettingsRequest) { return this.service.saveBusinessSettings(req.user.tenantId, body, req.user.displayName); }
+  @Get("coupon-templates") couponTemplates(@Req() req: AuthenticatedRequest) { return this.service.listCouponTemplates(req.user.tenantId); }
+  @Post("coupon-templates") saveCouponTemplate(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalCouponTemplateRequest) { return this.service.saveCouponTemplate(req.user.tenantId, body); }
+  @Put("coupon-templates/:id") updateCouponTemplate(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalCouponTemplateRequest) { return this.service.saveCouponTemplate(req.user.tenantId, { ...body, id }); }
   @Get("locations") locations(@Req() req: AuthenticatedRequest) { return this.service.listLocations(req.user.tenantId); }
+  @Post("locations") saveLocation(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalFulfillmentLocationRequest) { return this.service.saveLocation(req.user.tenantId, body); }
+  @Put("locations/:id") updateLocation(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalFulfillmentLocationRequest) { return this.service.saveLocation(req.user.tenantId, { ...body, id }); }
   @Get("item-groups") groups(@Req() req: AuthenticatedRequest) { return this.service.listItemGroups(req.user.tenantId); }
   @Post("item-groups") saveGroup(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalItemGroupRequest) { return this.service.saveItemGroup(req.user.tenantId, body); }
   @Put("item-groups/:id") updateGroup(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalItemGroupRequest) { return this.service.saveItemGroup(req.user.tenantId, { ...body, id }); }

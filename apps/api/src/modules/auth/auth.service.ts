@@ -138,6 +138,28 @@ export class AuthService {
     return this.toAuthUser(user);
   }
 
+  async getSessionContext(authorization?: string) {
+    const user = await this.resolveAccessToken(authorization);
+    if (!user) throw new UnauthorizedException("会话已失效，请重新登录");
+    const tenant = await this.platformService.findTenantByIdForAuth(user.tenantId);
+    return {
+      tenant: {
+        tenantId: tenant.tenantId,
+        tenantCode: tenant.tenantCode,
+        tenantName: tenant.tenantName,
+        tenantStatus: tenant.tenantStatus,
+        categoryCode: tenant.categoryCode,
+        categoryName: tenant.categoryName,
+        capabilities: tenant.capabilities
+      },
+      user: this.toAuthUser(user)
+    };
+  }
+
+  getTenantContext(tenantId: string) {
+    return this.platformService.findTenantByIdForAuth(tenantId);
+  }
+
   async resolveAccessToken(authorization?: string): Promise<SystemUserRow | undefined> {
     const token = authorization?.replace(/^Bearer\s+/i, "").trim();
     if (!token) return undefined;
@@ -179,7 +201,8 @@ export class AuthService {
         tenantName: tenant.tenantName,
         tenantStatus: tenant.tenantStatus,
         categoryCode: tenant.categoryCode,
-        categoryName: tenant.categoryName
+        categoryName: tenant.categoryName,
+        capabilities: tenant.capabilities
       },
       user: this.toAuthUser(user)
     };

@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "node:crypto";
 import {
+  RENTAL_CATEGORY_DEFINITIONS,
   GeneratePlatformNumberRequest,
   OrganizationSummary,
   PermissionModule,
@@ -70,7 +71,8 @@ export class PlatformService {
       tenantStatus: TenantStatus.Active,
       enabledBusinessLines: ["rental_core", "store_rental"],
       categoryCode: RentalCategoryCode.Camera,
-      categoryName: "摄影设备"
+      categoryName: "摄影设备",
+      capabilities: [...RENTAL_CATEGORY_DEFINITIONS.find((category) => category.code === RentalCategoryCode.Camera)!.defaultCapabilities]
     },
     {
       tenantId: "tenant_002",
@@ -79,7 +81,8 @@ export class PlatformService {
       tenantStatus: TenantStatus.Active,
       enabledBusinessLines: ["rental_core"],
       categoryCode: RentalCategoryCode.Camping,
-      categoryName: "露营设备"
+      categoryName: "露营设备",
+      capabilities: [...RENTAL_CATEGORY_DEFINITIONS.find((category) => category.code === RentalCategoryCode.Camping)!.defaultCapabilities]
     }
   ];
 
@@ -1192,7 +1195,8 @@ export class PlatformService {
       tenantStatus: TenantStatus.Active,
       enabledBusinessLines: ["rental_core"],
       categoryCode: input.categoryCode,
-      categoryName: this.rentalCategoryName(input.categoryCode)
+      categoryName: this.rentalCategoryName(input.categoryCode),
+      capabilities: [...(RENTAL_CATEGORY_DEFINITIONS.find((category) => category.code === input.categoryCode)?.defaultCapabilities ?? [])]
     };
     this.tenants.push(tenant);
     this.organizations.push(

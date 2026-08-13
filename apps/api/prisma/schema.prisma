@@ -295,6 +295,7 @@ model Tenant {
   rentalReservations        RentalReservation[]
   rentalInspectionTemplates RentalInspectionTemplate[]
   rentalInspectionRecords   RentalInspectionRecord[]
+  rentalCouponTemplates     RentalCouponTemplate[]
   createdAt                 DateTime                    @default(now())
   updatedAt                 DateTime                    @updatedAt
 }
@@ -1881,6 +1882,7 @@ model RentalCategoryDefinition {
   defaultCapabilities     Json
   terminology             Json
   attributeSchema         Json
+  businessModel           Json
   version                 String
   profiles                TenantRentalProfile[]
   itemGroups              RentalItemGroup[]
@@ -1906,6 +1908,32 @@ model TenantRentalProfile {
   @@map("tenant_rental_profiles")
 }
 
+model RentalCouponTemplate {
+  id                     String   @id @default(uuid())
+  tenantId               String
+  tenant                 Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  code                   String
+  name                   String
+  discountType           String
+  discountValue          Decimal  @db.Decimal(12, 2)
+  minimumSpend           Decimal  @db.Decimal(12, 2)
+  maximumDiscount        Decimal? @db.Decimal(12, 2)
+  totalQuota             Int
+  claimedQuantity        Int      @default(0)
+  perCustomerLimit       Int      @default(1)
+  effectiveFrom          DateTime
+  effectiveTo            DateTime
+  applicableItemGroupIds Json
+  status                 String   @default("draft")
+  version                String
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@unique([tenantId, code])
+  @@index([tenantId, status, effectiveFrom, effectiveTo])
+  @@map("rental_coupon_templates")
+}
+
 model RentalFulfillmentLocation {
   id            String               @id @default(uuid())
   tenantId      String
@@ -1913,8 +1941,14 @@ model RentalFulfillmentLocation {
   code          String
   name          String
   type          String
+  operatorType  String?
+  operatorName  String?
+  parentLocationId String?
   capabilities  Json
   address       String?
+  contactName   String?
+  contactPhone  String?
+  businessHours String?
   status        String               @default("enabled")
   assets        RentalAsset[]
   stockBalances RentalStockBalance[]

@@ -16,6 +16,10 @@ import {
   VehicleOperationStatus,
   VehicleServiceType
 } from "@prisma/client";
+import {
+  RENTAL_CATEGORY_DEFINITIONS,
+  RentalCategoryCode as SharedRentalCategoryCode
+} from "@store-rental/shared";
 import { hashPassword } from "../src/common/password";
 
 const prisma = new PrismaClient();
@@ -468,48 +472,26 @@ async function upsertTenants() {
   }
 }
 
-const rentalCategories = [
-  {
-    code: RentalCategoryCode.CAMERA,
-    name: "摄影设备",
-    description: "机身、镜头、灯光和拍摄套装租赁",
-    supportedInventoryModes: ["serialized", "quantity", "bundle"],
-    defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery", "usage_reading"],
-    terminology: { itemLabel: "器材", itemGroupLabel: "器材型号", assetLabel: "器材资产", fulfillmentLabel: "器材门店", pickupLabel: "取机", returnLabel: "还机", identifierLabel: "资产编号", usageMetricLabel: "快门次数" },
-    attributeSchema: { brand: "string", mount: "string", sensor: "string" },
-    version: "0.1.0"
-  },
-  {
-    code: RentalCategoryCode.CAMPING,
-    name: "露营设备",
-    description: "帐篷、桌椅、炊具和露营套装租赁",
-    supportedInventoryModes: ["serialized", "quantity", "bundle"],
-    defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery"],
-    terminology: { itemLabel: "装备", itemGroupLabel: "装备品类", assetLabel: "装备资产", fulfillmentLabel: "装备仓", pickupLabel: "领用", returnLabel: "归还", identifierLabel: "装备编号" },
-    attributeSchema: { brand: "string", people: "number", season: "string" },
-    version: "0.1.0"
-  },
-  {
-    code: RentalCategoryCode.VEHICLE,
-    name: "车辆载具",
-    description: "汽车、摩托车和其他载具租赁",
-    supportedInventoryModes: ["serialized", "bundle"],
-    defaultCapabilities: ["serialized_inventory", "bundle_inventory", "pickup", "return", "dispatch", "usage_reading", "qualification", "iot"],
-    terminology: { itemLabel: "车辆", itemGroupLabel: "车型组", assetLabel: "车辆", fulfillmentLabel: "门店", pickupLabel: "取车", returnLabel: "还车", identifierLabel: "车牌号", usageMetricLabel: "里程" },
-    attributeSchema: { brand: "string", model: "string", energyType: "string" },
-    version: "0.1.0"
-  },
-  {
-    code: RentalCategoryCode.CONSTRUCTION,
-    name: "工程设备",
-    description: "工程机械、工具和配套设备租赁",
-    supportedInventoryModes: ["serialized", "quantity", "bundle"],
-    defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery", "dispatch", "usage_reading", "qualification", "iot"],
-    terminology: { itemLabel: "设备", itemGroupLabel: "设备型号", assetLabel: "设备资产", fulfillmentLabel: "设备仓", pickupLabel: "出库", returnLabel: "入库", identifierLabel: "设备编号", usageMetricLabel: "工时" },
-    attributeSchema: { brand: "string", power: "string", ratedLoad: "number" },
-    version: "0.1.0"
-  }
-];
+const categoryCodeMap: Record<SharedRentalCategoryCode, RentalCategoryCode> = {
+  [SharedRentalCategoryCode.Vehicle]: RentalCategoryCode.VEHICLE,
+  [SharedRentalCategoryCode.Camera]: RentalCategoryCode.CAMERA,
+  [SharedRentalCategoryCode.Camping]: RentalCategoryCode.CAMPING,
+  [SharedRentalCategoryCode.Construction]: RentalCategoryCode.CONSTRUCTION
+};
+
+const asJson = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+
+const rentalCategories = RENTAL_CATEGORY_DEFINITIONS.map((category) => ({
+  code: categoryCodeMap[category.code],
+  name: category.name,
+  description: category.description,
+  supportedInventoryModes: asJson(category.supportedInventoryModes),
+  defaultCapabilities: asJson(category.defaultCapabilities),
+  terminology: asJson(category.terminology),
+  attributeSchema: asJson(category.attributeSchema),
+  businessModel: asJson(category.businessModel),
+  version: category.version
+}));
 
 async function upsertRentalCategoriesAndProfiles() {
   for (const category of rentalCategories) {

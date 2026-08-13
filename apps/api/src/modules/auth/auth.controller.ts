@@ -31,6 +31,11 @@ export class AuthController {
     return this.authService.getCurrentUser(authorization);
   }
 
+  @Get("session-context")
+  sessionContext(@Headers("authorization") authorization?: string) {
+    return this.authService.getSessionContext(authorization);
+  }
+
   @Post("refresh")
   refresh(@Body() body: RefreshSessionRequest) {
     return this.authService.refresh(body);

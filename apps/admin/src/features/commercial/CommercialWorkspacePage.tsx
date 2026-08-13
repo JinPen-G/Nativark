@@ -4,6 +4,7 @@ import type { MarketingPlanDetail, PricingPlanDetail, PricingRuleLine, SaveMarke
 import { App, Button, Card, Descriptions, Drawer, Form, Input, InputNumber, Select, Space, Switch, Table, Tabs, Tag, Typography } from "antd";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { api } from "@/api/rental";
 import { getRentalRuleVersion, listRentalRuleVersions } from "@/api/operations";
 import { PageHeader } from "@/components/PageHeader";
@@ -25,8 +26,11 @@ type MarketingEditorValues = Omit<SaveMarketingPlanRequest, "rules" | "operator"
 
 const money = (value: number | undefined) => `¥${Number(value ?? 0).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-export function CommercialWorkspacePage() {
+export type CommercialSection = "pricing" | "rules" | "services" | "marketing";
+
+export function CommercialWorkspacePage({ section = "pricing" }: { section?: CommercialSection }) {
   const { message } = App.useApp();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const operator = useAuthStore((state) => state.user?.displayName ?? "规则管理员");
   const [serviceDrawer, setServiceDrawer] = useState(false);
@@ -172,6 +176,8 @@ export function CommercialWorkspacePage() {
       <Card className="tabbed-workspace">
         <Tabs
           className="standalone-tabs"
+          activeKey={section}
+          onChange={(key) => navigate(({ pricing: "/rental/pricing", rules: "/rental/settings", services: "/rental/services", marketing: "/rental/discounts" } as const)[key as CommercialSection])}
           items={[
             {
               key: "pricing",

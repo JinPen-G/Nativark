@@ -1,4 +1,4 @@
-import type { AuthUser, TenantContext } from "@store-rental/shared";
+import type { AuthUser, RentalCapability, TenantContext } from "@store-rental/shared";
 import { create } from "zustand";
 import { api } from "@/api/rental";
 
@@ -25,6 +25,7 @@ interface AuthState {
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   logout: () => void;
   hasPermission: (permission?: string) => boolean;
+  hasCapability: (capability?: RentalCapability) => boolean;
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -36,8 +37,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const token = window.localStorage.getItem(keys.token);
     if (!token) { set({ ready: true }); return; }
     try {
-      const user = await api.me();
-      set({ ready: true, token, user });
+      const context = await api.sessionContext();
+      window.localStorage.setItem(keys.tenant, JSON.stringify(context.tenant));
+      window.localStorage.setItem(keys.user, JSON.stringify(context.user));
+      set({ ready: true, token, tenant: context.tenant, user: context.user });
     } catch {
       get().logout();
       set({ ready: true });
@@ -71,5 +74,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (!user) return false;
     if (user.isSaasAdmin) return permission.startsWith("system:tenant:");
     return Boolean(user.isPlatformAdmin || user.permissions?.includes("*") || user.permissions?.includes(permission));
+  },
+  hasCapability(capability) {
+    if (!capability) return true;
+    const capabilities = get().tenant?.capabilities;
+    if (!capabilities) return true;
+    return capabilities.includes(capability);
   }
 }));

@@ -11,6 +11,7 @@ function requireText(source, expected, label) {
 }
 
 const router = read("apps/admin/src/app/AppRouter.tsx");
+const navigation = read("apps/admin/src/app/navigation.tsx");
 const api = read("apps/admin/src/api/rental.ts");
 const httpSource = read("apps/admin/src/api/http.ts");
 const operations = read("apps/admin/src/api/operations.ts");
@@ -32,9 +33,9 @@ const themeSource = read("apps/admin/src/app/theme.tsx");
 
 [
   "/workbench", "/rental/core", "/rental/orders", "/rental/contracts", "/rental/item-groups", "/rental/assets",
-  "/rental/locations", "/rental/commercial", "/customers", "/finance", "/operations",
+  "/rental/locations", "/rental/pricing", "/rental/discounts", "/rental/coupons", "/rental/services", "/rental/settings", "/customers", "/finance", "/operations",
   "/asset-operations", "/asset-lifecycle", "/business-tools", "/reports", "/platform/tenants", "/platform/users", "/platform/system", "/platform/operations", "/platform/tools"
-].forEach((route) => requireText(router, `path="${route}"`, "route coverage"));
+].forEach((route) => requireText(navigation, `path: "${route}"`, "route registry coverage"));
 
 [
   "savePricingPlan", "saveMarketingPlan", "saveMember", "processMemberRisk", "saveCorporate",
@@ -43,7 +44,7 @@ const themeSource = read("apps/admin/src/app/theme.tsx");
 ].forEach((method) => requireText(api, `${method}:`, "API write coverage"));
 
 [
-  "categories", "profile", "itemGroups", "assets", "stockBalances", "availability", "orders",
+  "categories", "profile", "businessSettings", "saveBusinessSettings", "couponTemplates", "saveCouponTemplate", "locations", "saveLocation", "itemGroups", "assets", "stockBalances", "availability", "orders",
   "createOrder", "confirmOrder", "allocateOrder", "cancelOrder", "inspectionTemplates", "createInspection"
 ].forEach((method) => requireText(rentalCoreApi, `${method}:`, "Rental Core API coverage"));
 [
@@ -74,7 +75,7 @@ if (!httpSource.includes('window.localStorage.getItem("rental_access_token")')) 
 [
   [commercialPage, "listRentalRuleVersions", "rule version list UI"],
   [commercialPage, "getRentalRuleVersion", "rule version detail UI"],
-  [locationPage, "listStationHierarchy", "station hierarchy UI"],
+  [locationPage, "rentalCoreApi.saveLocation", "generic fulfillment location UI"],
   [tenantManagementPage, "listTenants", "tenant list UI"],
   [tenantManagementPage, "bootstrapTenant", "tenant bootstrap UI"],
   [tenantManagementPage, "updateTenantStatus", "tenant lifecycle UI"],
@@ -87,8 +88,11 @@ if (!httpSource.includes('window.localStorage.getItem("rental_access_token")')) 
 ].forEach(([source, expected, label]) => requireText(source, expected, label));
 
 [
-  "Rental Core", "商业规则", "客户与企业", "财务结算", "资产调拨与设备", "资产生命周期", "业务控制台", "组织与权限", "平台工具与治理"
-].forEach((label) => requireText(shell, label, "navigation coverage"));
+  "租赁工作台", "基础定价", "优惠方案", "优惠券", "增值服务", "品类与业务规则", "客户、会员与企业", "财务结算", "资产调拨与设备", "资产生命周期", "运营控制台", "组织与权限", "平台工具与治理"
+].forEach((label) => requireText(navigation, label, "navigation registry coverage"));
+
+requireText(shell, "APP_NAVIGATION", "shell consumes unified navigation registry");
+requireText(router, "APP_ROUTES", "router consumes unified route registry");
 
 [
   [appRoot, 'variant="outlined"', "Ant Design v6 outlined control archetype"],
