@@ -120,7 +120,7 @@
 
 合并后：
 
-1. 更新对应 `docs/branch-worklogs/integration-store-rental-mvp.md` 合并记录
+1. 更新对应 `docs/branch-worklogs/门店租赁MVP集成.md` 合并记录
 2. 重新执行 PRD/原型偏离审计，确认合并结果没有新增无依据可见功能
 3. 运行验证命令
 4. 验证通过后提交一次集成提交
@@ -157,7 +157,7 @@ npm run build
 7. 写入演示/验证数据：`npm run db:seed`
 8. 启动营运端和 API：`npm run dev`
 9. 用 1-2 个租户验证登录、权限、基础资料、定价、订单、调度、财务/报表入口
-10. 检查新增/修改页面、菜单、路由是否能对应 `docs/STORE_RENTAL_DEVELOPMENT_TASKS.md` 的“资料依据”和“已开发内容合规审计”
+10. 检查新增/修改页面、菜单、路由是否能对应 `docs/门店租赁开发任务.md` 的“资料依据”和“已开发内容合规审计”
 
 注意：
 
@@ -175,10 +175,10 @@ npm run build
 
 integration 分支职责：
 
-- 合并各业务分支后统一更新 `docs/STORE_RENTAL_DEVELOPMENT_TASKS.md`
-- 同步更新 `docs/TECHNICAL_DEVELOPMENT_GUIDE.md`
+- 合并各业务分支后统一更新 `docs/门店租赁开发任务.md`
+- 同步更新 `docs/技术开发指南.md`
 - 同步更新 `docs/AI_HANDOFF.md`
-- 必要时补充 `docs/DATABASE_BOOTSTRAP.md` 的 MySQL migration/seed 说明
+- 必要时补充 `docs/数据库启动与初始化.md` 的 MySQL migration/seed 说明
 - 全局文档必须写清楚“已合并且验证通过”和“分支已完成但未合并”的区别
 
 ## 后续监控项
@@ -200,7 +200,7 @@ integration 分支职责：
 本轮继续使用既有 worktree 和既有分支，不再创建新的 `codex/next-*` 分支。分发原则：
 
 - 每个 worker 只在指定 worktree 内开发，不能修改 PRD、原型、业务知识库。
-- 所有业务实现必须先读 `docs/STORE_RENTAL_DEVELOPMENT_TASKS.md`、`docs/AI_HANDOFF.md`、`docs/TECHNICAL_DEVELOPMENT_GUIDE.md` 和本分支工作日志。
+- 所有业务实现必须先读 `docs/门店租赁开发任务.md`、`docs/AI_HANDOFF.md`、`docs/技术开发指南.md` 和本分支工作日志。
 - 有 PRD 的按 PRD 做业务规则，有原型的按原型做页面；无独立 PRD 的基础功能按原型字段、交互和当前系统权限规则落地。
 - 前后端同步开发，涉及持久化时同步补 Prisma/MySQL、repository/service/controller/API client/页面。
 - 每个 worker 完成后必须更新自己的 `docs/branch-worklogs/<branch>.md`，并说明验证命令、提交哈希和未完成项。
@@ -247,7 +247,7 @@ integration 分支职责：
 
 | 分支 | worktree | worker | 本轮任务 | 状态 |
 | --- | --- | --- | --- | --- |
-| `codex/fleet-ops` | `.worktrees/fleet-ops` | `019eab99-e5f3-7592-91f7-4b7b67a296d9` / Copernicus | MD-15/MD-16/MD-11 中选择有 PRD/原型依据的车辆站点闭环切片，依据 `服务站点管理.md`、`门市租赁调度边界与履约规则.md`、`stations.html`、`vehicle_status_list.html`、`vehicle_console.html` | 合入 integration 时冲突，已停止；冲突文件：`apps/admin/src/api/client.ts`、`docs/STORE_RENTAL_DEVELOPMENT_TASKS.md`、`docs/TECHNICAL_DEVELOPMENT_GUIDE.md` |
+| `codex/fleet-ops` | `.worktrees/fleet-ops` | `019eab99-e5f3-7592-91f7-4b7b67a296d9` / Copernicus | MD-15/MD-16/MD-11 中选择有 PRD/原型依据的车辆站点闭环切片，依据 `服务站点管理.md`、`门市租赁调度边界与履约规则.md`、`stations.html`、`vehicle_status_list.html`、`vehicle_console.html` | 合入 integration 时冲突，已停止；冲突文件：`apps/admin/src/api/client.ts`、`docs/门店租赁开发任务.md`、`docs/技术开发指南.md` |
 | `codex/order-fulfillment` | `.worktrees/order-fulfillment` | `019eab9a-27c9-70a2-89b7-721507dd937e` / Beauvoir | OR-06/OR-07/OR-18/OR-19 中选择订单履约闭环切片，依据订单取车/还车/详情/费用 PRD 和 `order_detail.html` | 合入 integration 时冲突，已停止；冲突文件：`apps/admin/src/api/client.ts`、`apps/admin/src/router.ts`、`apps/api/src/modules/store-rental/store-rental.repository.ts`、两份全局文档 |
 | `codex/reports-ops` | `.worktrees/reports-ops` | `019eab9a-6c91-7851-a02c-532b6c15cdf6` / Tesla | RP-01/RP-02/RP-03 中选择已有 `/reports` 报表深化切片，依据订单/调度 PRD 和营运端相关原型 | 已分发，要求先合入 `origin/codex/integration/store-rental-mvp@28233eb`；若冲突立即停止 |
 

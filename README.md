@@ -4,14 +4,14 @@ Rental OS 是面向摄影设备、露营装备、车辆载具和工程设备等�
 
 ## 开发文档索引
 
-- `docs/STORE_RENTAL_DEVELOPMENT_TASKS.md`：唯一开发任务台账，记录任务范围、优先级、分支规则和防偏离要求。
-- `docs/TECHNICAL_DEVELOPMENT_GUIDE.md`：当前前后端平台的技术开发文档，记录模块边界、权限、接口、数据模型和开发规范。
-- `docs/STORE_RENTAL_DEVELOPMENT_LOG.md`：开发流水账，只记录过程检查和阶段复盘，不作为任务优先级依据。
-- `docs/GENERAL_RENTAL_MIGRATION_GUIDE.md`：后续从汽车门市租赁改造成通用租赁平台的改造指南，明确哪些文件、字段、页面、规则和接口需要调整。
-- `docs/DOMAIN_BOUNDARY_DECISIONS.md`：当前阶段的领域边界和命名决策，用于避免代码继续绑定死汽车租赁。
-- `docs/GENERAL_RENTAL_REACT_MIGRATION_PLAN.md`：已确认的通用设备租赁方向与 React + Ant Design 营运端迁移计划；后续架构和前端迁移以此为准。
-- `docs/PROJECT_STATUS_AND_ROADMAP.md`：当前功能地图、成熟度边界、通用化差距与下一阶段推荐路线；继续讨论开发方向时优先从这里开始。
-- `docs/SAAS_TENANT_FOUNDATION.md`：SaaS 租户、平台管理员、租户管理员、认证会话、生命周期和数据隔离的当前权威说明。
+- `docs/门店租赁开发任务.md`：唯一开发任务台账，记录任务范围、优先级、分支规则和防偏离要求。
+- `docs/技术开发指南.md`：当前前后端平台的技术开发文档，记录模块边界、权限、接口、数据模型和开发规范。
+- `docs/门店租赁开发日志.md`：开发流水账，只记录过程检查和阶段复盘，不作为任务优先级依据。
+- `docs/通用租赁改造指南.md`：后续从汽车门市租赁改造成通用租赁平台的改造指南，明确哪些文件、字段、页面、规则和接口需要调整。
+- `docs/领域边界决策.md`：当前阶段的领域边界和命名决策，用于避免代码继续绑定死汽车租赁。
+- `docs/通用租赁前端迁移计划.md`：已确认的通用设备租赁方向与 React + Ant Design 营运端迁移计划；后续架构和前端迁移以此为准。
+- `docs/项目状态与路线图.md`：当前功能地图、成熟度边界、通用化差距与下一阶段推荐路线；继续讨论开发方向时优先从这里开始。
+- `docs/SaaS租户基础.md`：SaaS 租户、平台管理员、租户管理员、认证会话、生命周期和数据隔离的当前权威说明。
 
 ## 工程边界
 
@@ -101,7 +101,7 @@ mysql://store_rental:store_rental@localhost:3306/store_rental
 - **原型页面位置**: `D:\工作文件\RIMORental\02_原型和PRD\原型\营运端\`
 
 开发前务必查阅：
-1. 先读 `docs/STORE_RENTAL_DEVELOPMENT_TASKS.md` 确认任务边界和优先级。
+1. 先读 `docs/门店租赁开发任务.md` 确认任务边界和优先级。
 2. 到外层业务知识库、PRD 和原型目录查对应资料。
 3. 严格按照 PRD 和原型实现功能。
 4. 不要修改 PRD 和原型文件。
