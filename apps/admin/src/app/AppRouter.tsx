@@ -11,11 +11,11 @@ const WorkbenchPage = lazy(() => import("@/features/workbench/WorkbenchPage").th
 const CatalogPage = lazy(() => import("@/features/catalog/CatalogPage").then((module) => ({ default: module.CatalogPage })));
 const AssetWorkspacePage = lazy(() => import("@/features/catalog/AssetWorkspacePage").then((module) => ({ default: module.AssetWorkspacePage })));
 const LocationPage = lazy(() => import("@/features/fulfillment/LocationPage").then((module) => ({ default: module.LocationPage })));
-const OrdersPage = lazy(() => import("@/features/orders/OrdersPage").then((module) => ({ default: module.OrdersPage })));
-const OrderCreatePage = lazy(() => import("@/features/orders/OrderCreatePage").then((module) => ({ default: module.OrderCreatePage })));
-const OrderDetailPage = lazy(() => import("@/features/orders/OrderDetailPage").then((module) => ({ default: module.OrderDetailPage })));
+const OrdersPage = lazy(() => import("@/features/rental-core/RentalOrdersPage").then((module) => ({ default: module.RentalOrdersPage })));
+const OrderCreatePage = lazy(() => import("@/features/rental-core/RentalOrderCreatePage").then((module) => ({ default: module.RentalOrderCreatePage })));
+const OrderDetailPage = lazy(() => import("@/features/rental-core/RentalOrderDetailPage").then((module) => ({ default: module.RentalOrderDetailPage })));
 const ContractsPage = lazy(() => import("@/features/contracts/ContractsPage").then((module) => ({ default: module.ContractsPage })));
-const CommercialWorkspacePage = lazy(() => import("@/features/commercial/CommercialWorkspacePage").then((module) => ({ default: module.CommercialWorkspacePage })));
+const RentalCommercialPage = lazy(() => import("@/features/commercial/RentalCommercialPage").then((module) => ({ default: module.RentalCommercialPage })));
 const CouponPage = lazy(() => import("@/features/commercial/CouponPage").then((module) => ({ default: module.CouponPage })));
 const CustomerPage = lazy(() => import("@/features/customers/CustomerPage").then((module) => ({ default: module.CustomerPage })));
 const FinancePage = lazy(() => import("@/features/finance/FinancePage").then((module) => ({ default: module.FinancePage })));
@@ -29,7 +29,7 @@ const BusinessToolsPage = lazy(() => import("@/features/advanced/BusinessToolsPa
 const PlatformToolsPage = lazy(() => import("@/features/platform/PlatformToolsPage").then((module) => ({ default: module.PlatformToolsPage })));
 const TenantManagementPage = lazy(() => import("@/features/platform/TenantManagementPage").then((module) => ({ default: module.TenantManagementPage })));
 const RentalCorePage = lazy(() => import("@/features/rental-core/RentalCorePage").then((module) => ({ default: module.RentalCorePage })));
-const RentalSettingsPage = lazy(() => import("@/features/settings/RentalSettingsPage").then((module) => ({ default: module.RentalSettingsPage })));
+const RentalSettingsPage = lazy(() => import("@/features/settings/RentalGovernancePage").then((module) => ({ default: module.RentalGovernancePage })));
 
 function PageLoader() {
   return <div className="route-loader"><Spin size="large" /></div>;
@@ -38,7 +38,8 @@ function PageLoader() {
 function RouteAccess({ route, children }: { route: AppRouteDefinition; children: ReactNode }) {
   const hasPermission = useAuthStore((state) => state.hasPermission);
   const hasCapability = useAuthStore((state) => state.hasCapability);
-  if (!canAccessRoute(route, hasPermission, hasCapability)) {
+  const categoryCode = useAuthStore((state) => state.tenant?.categoryCode);
+  if (!canAccessRoute(route, hasPermission, hasCapability, categoryCode)) {
     return <Result status="403" title="无权访问" subTitle="当前账号权限或租户经营品类能力不支持此功能；前端菜单隐藏不能替代后端数据权限。" />;
   }
   return <>{children}</>;
@@ -74,10 +75,10 @@ function ProtectedRoutes() {
             <Route path={APP_ROUTES.itemGroups.path} element={guard(APP_ROUTES.itemGroups, <CatalogPage />)} />
             <Route path={APP_ROUTES.assets.path} element={guard(APP_ROUTES.assets, <AssetWorkspacePage />)} />
             <Route path={APP_ROUTES.locations.path} element={guard(APP_ROUTES.locations, <LocationPage />)} />
-            <Route path={APP_ROUTES.pricing.path} element={guard(APP_ROUTES.pricing, <CommercialWorkspacePage section="pricing" />)} />
-            <Route path={APP_ROUTES.discounts.path} element={guard(APP_ROUTES.discounts, <CommercialWorkspacePage section="marketing" />)} />
+            <Route path={APP_ROUTES.pricing.path} element={guard(APP_ROUTES.pricing, <RentalCommercialPage section="pricing" />)} />
+            <Route path={APP_ROUTES.discounts.path} element={guard(APP_ROUTES.discounts, <RentalCommercialPage section="discounts" />)} />
             <Route path={APP_ROUTES.coupons.path} element={guard(APP_ROUTES.coupons, <CouponPage />)} />
-            <Route path={APP_ROUTES.services.path} element={guard(APP_ROUTES.services, <CommercialWorkspacePage section="services" />)} />
+            <Route path={APP_ROUTES.services.path} element={guard(APP_ROUTES.services, <RentalCommercialPage section="services" />)} />
             <Route path={APP_ROUTES.rentalSettings.path} element={guard(APP_ROUTES.rentalSettings, <RentalSettingsPage />)} />
             <Route path={APP_ROUTES.customers.path} element={guard(APP_ROUTES.customers, <CustomerPage />)} />
             <Route path={APP_ROUTES.finance.path} element={guard(APP_ROUTES.finance, <FinancePage />)} />

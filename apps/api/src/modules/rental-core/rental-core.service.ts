@@ -1,8 +1,9 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable, NotFoundException, OnModuleInit, Optional } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import {
   RENTAL_CATEGORY_DEFINITIONS,
   RentalAssetStatus,
+  type RentalAttributeDefinition,
   RentalCategoryCode,
   RentalCoreOrderStatus,
   RentalInventoryMode,
@@ -17,16 +18,19 @@ import {
   type RentalCapability,
   type RentalCategoryDefinition,
   type RentalCouponTemplate,
+  type RentalFulfillmentOperator,
   type RentalFulfillmentLocation,
   type RentalInspectionRecord,
   type RentalInspectionTemplate,
   type RentalItemGroup,
   type RentalOrder,
+  type RentalQuoteSnapshotV1,
   type RentalReservation,
   type RentalStockBalance,
   type SaveRentalAssetRequest,
   type SaveRentalCouponTemplateRequest,
   type SaveRentalFulfillmentLocationRequest,
+  type SaveRentalFulfillmentOperatorRequest,
   type SaveRentalItemGroupRequest,
   type SaveRentalStockBalanceRequest,
   type SaveTenantRentalBusinessSettingsRequest,
@@ -34,11 +38,13 @@ import {
   type TenantRentalBusinessSettings,
   type TenantRentalProfile
 } from "@store-rental/shared";
+import { RentalStateRepository } from "./rental-state.repository";
 
 interface TenantRentalState {
   profile: TenantRentalProfile;
   businessSettings: TenantRentalBusinessSettings;
   couponTemplates: RentalCouponTemplate[];
+  operators: RentalFulfillmentOperator[];
   locations: RentalFulfillmentLocation[];
   itemGroups: RentalItemGroup[];
   assets: RentalAsset[];
@@ -99,7 +105,7 @@ function defaultBusinessSettings(tenantId: string, definition: RentalCategoryDef
       referralTrigger: "first_order_completed"
     },
     notifications: {
-      enabledEvents: ["order.created", "order.confirmed", "pickup.reminder", "return.reminder", "order.overdue"],
+      enabledEvents: ["member.registered", "order.created", "order.confirmed", "order.cancelled", "pickup.completed", "return.completed", "pickup.reminder", "return.reminder", "order.overdue"],
       editableChannels: ["sms", "app_push", "wechat"]
     },
     updatedAt: now(),
@@ -108,10 +114,38 @@ function defaultBusinessSettings(tenantId: string, definition: RentalCategoryDef
 }
 
 @Injectable()
-export class RentalCoreService {
+export class RentalCoreService implements OnModuleInit {
   private readonly states = new Map<string, TenantRentalState>();
 
+  constructor(@Optional() private readonly stateRepository?: RentalStateRepository) {}
+
+  async onModuleInit() {
+    for (const row of await this.stateRepository?.loadCoreStates() ?? []) {
+      const state = row.state as unknown as TenantRentalState;
+      if (state?.profile?.tenantId === row.tenantId) this.states.set(row.tenantId, state);
+    }
+    for (const tenant of await this.stateRepository?.loadTenantProfiles() ?? []) {
+      if (!tenant.categoryCode || this.states.has(tenant.tenantId)) continue;
+      const categoryCode = String(tenant.categoryCode).toLowerCase() as RentalCategoryCode;
+      if (Object.values(RentalCategoryCode).includes(categoryCode)) this.states.set(tenant.tenantId, this.seedState(tenant.tenantId, categoryCode));
+    }
+  }
+
+  async persist(tenantId: string) {
+    const state = this.states.get(tenantId);
+    if (state) await this.stateRepository?.saveCoreState(tenantId, state);
+  }
+
   listCategories() { return categories; }
+  initializeTenant(tenantId: string, categoryCode: RentalCategoryCode) {
+    const existing = this.states.get(tenantId);
+    if (existing && existing.profile.categoryCode !== categoryCode) {
+      throw new ConflictException("已有租赁数据的租户不能切换经营品类");
+    }
+    if (!existing) this.states.set(tenantId, this.seedState(tenantId, categoryCode));
+    return this.states.get(tenantId)!.profile;
+  }
+  hasTenantState(tenantId: string) { return this.states.has(tenantId); }
   getProfile(tenantId: string) { return this.state(tenantId).profile; }
   getBusinessSettings(tenantId: string) { return this.state(tenantId).businessSettings; }
 
@@ -126,18 +160,31 @@ export class RentalCoreService {
     if (!input.pricing.enabledUnits.includes(input.pricing.defaultUnit)) {
       throw new BadRequestException("默认计价单位必须处于已启用计价单位中");
     }
-    if (input.fulfillment.enabledModes.some((mode) => !fulfillmentModes.has(mode))) {
+    if (!input.fulfillment.enabledModes.length || input.fulfillment.enabledModes.some((mode) => !fulfillmentModes.has(mode))) {
       throw new BadRequestException("存在当前经营品类不支持的履约方式");
     }
-    if (input.payment.preauthorizationRequired && !definition.businessModel.supportsPreauthorization) {
+    if ((input.payment.preauthorizationRequired || input.payment.depositMode === "preauthorization") && !definition.businessModel.supportsPreauthorization) {
       throw new BadRequestException("当前经营品类不支持预授权");
     }
+    if (input.payment.preauthorizationRequired && input.payment.depositMode !== "preauthorization") throw new BadRequestException("必须预授权时，押金方式也必须选择预授权");
     if (input.pricing.holidayPricingEnabled && !definition.businessModel.supportsHolidayPricing) {
       throw new BadRequestException("当前经营品类不支持节假日差异定价");
     }
     if (!Number.isInteger(input.overdue.graceMinutes) || input.overdue.graceMinutes < 0 || input.overdue.feeMultiplier < 0) {
       throw new BadRequestException("逾期宽限时间或费用系数无效");
     }
+    if (input.calendar.weekendDays.some((day) => !Number.isInteger(day) || day < 0 || day > 6)) throw new BadRequestException("周末规则只能使用 0 到 6 的星期序号");
+    const rewardAmounts = [input.membership.signupRewardAmount, input.membership.referrerRewardAmount, input.membership.inviteeRewardAmount];
+    if (rewardAmounts.some((amount) => !Number.isFinite(amount) || amount < 0)) throw new BadRequestException("会员奖励数量不能为负数");
+    const validateRewardCoupon = (enabled: boolean, type: string, amount: number, templateId: string | undefined) => {
+      if (!enabled || type !== "coupon" || amount <= 0) return;
+      if (!Number.isInteger(amount)) throw new BadRequestException("优惠券奖励数量必须是整数");
+      if (!templateId || !state.couponTemplates.some((template) => template.id === templateId && template.status === "enabled")) throw new BadRequestException("优惠券奖励必须选择已启用的券模板");
+    };
+    validateRewardCoupon(input.membership.signupRewardEnabled, input.membership.signupRewardType, input.membership.signupRewardAmount, input.membership.signupRewardCouponTemplateId);
+    validateRewardCoupon(input.membership.referralRewardEnabled, input.membership.referralRewardType, Math.max(input.membership.referrerRewardAmount, input.membership.inviteeRewardAmount), input.membership.referralRewardCouponTemplateId);
+    const supportedNotificationEvents = new Set(["member.registered", "referral.rewarded", "order.created", "order.confirmed", "order.cancelled", "pickup.completed", "return.completed", "pickup.reminder", "return.reminder", "order.overdue", "qualification.reviewed", "refund.completed", "asset.exception"]);
+    if (!input.notifications.editableChannels.length || input.notifications.enabledEvents.some((event) => !supportedNotificationEvents.has(event))) throw new BadRequestException("通知渠道不能为空，且只能启用已注册的系统事件");
     state.businessSettings = {
       ...input,
       tenantId,
@@ -184,9 +231,7 @@ export class RentalCoreService {
     const state = this.state(tenantId);
     const definition = this.category(input.categoryCode);
     const categoryChanged = state.profile.categoryCode !== input.categoryCode;
-    if (categoryChanged && (state.itemGroups.length > 0 || state.orders.length > 0)) {
-      throw new ConflictException("租户已有标的或订单，不能直接切换经营品类");
-    }
+    if (categoryChanged) throw new ConflictException("SaaS 租户创建后经营品类固定，不能切换");
     const allowed = new Set(definition.defaultCapabilities);
     const capabilities = (input.capabilities ?? definition.defaultCapabilities).filter((item) => allowed.has(item));
     state.profile = {
@@ -197,20 +242,42 @@ export class RentalCoreService {
       configVersion: definition.version,
       updatedAt: now()
     };
-    if (categoryChanged) {
-      state.inspectionTemplates = this.buildInspectionTemplates(tenantId, input.categoryCode);
-      state.businessSettings = defaultBusinessSettings(tenantId, definition);
-    }
     return state.profile;
   }
 
   listLocations(tenantId: string) { return this.state(tenantId).locations; }
 
+  listOperators(tenantId: string) { return this.state(tenantId).operators; }
+
+  saveOperator(tenantId: string, input: SaveRentalFulfillmentOperatorRequest) {
+    const state = this.state(tenantId);
+    if (!input.code?.trim() || !input.name?.trim()) throw new BadRequestException("经营主体编码和名称不能为空");
+    const duplicate = state.operators.find((row) => row.code === input.code.trim() && row.id !== input.id);
+    if (duplicate) throw new ConflictException("经营主体编码已存在");
+    const existing = input.id ? state.operators.find((row) => row.id === input.id) : undefined;
+    if (input.id && !existing) throw new NotFoundException("经营主体不存在");
+    const timestamp = now();
+    const result: RentalFulfillmentOperator = {
+      id: existing?.id ?? id("operator"), tenantId, code: input.code.trim(), name: input.name.trim(), type: input.type,
+      contactName: input.contactName?.trim(), contactPhone: input.contactPhone?.trim(),
+      settlementMode: input.settlementMode ?? (input.type === "partner" ? "monthly" : "self"),
+      status: input.status ?? existing?.status ?? "enabled", createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp
+    };
+    if (existing) state.operators.splice(state.operators.indexOf(existing), 1, result); else state.operators.unshift(result);
+    return result;
+  }
+
   saveLocation(tenantId: string, input: SaveRentalFulfillmentLocationRequest) {
     const state = this.state(tenantId);
     const definition = this.category(state.profile.categoryCode);
     if (!definition.businessModel.locationTypes.includes(input.type)) throw new BadRequestException("当前经营品类不支持该履约地点类型");
-    if (!input.code?.trim() || !input.name?.trim() || !input.operatorName?.trim()) throw new BadRequestException("地点编码、名称和经营主体不能为空");
+    if (!input.code?.trim() || !input.name?.trim()) throw new BadRequestException("地点编码和名称不能为空");
+    let operator = input.operatorId ? state.operators.find((row) => row.id === input.operatorId) : undefined;
+    if (!operator && input.operatorName?.trim()) {
+      operator = state.operators.find((row) => row.name === input.operatorName?.trim());
+      if (!operator) operator = this.saveOperator(tenantId, { code: `LEGACY-${state.operators.length + 1}`, name: input.operatorName.trim(), type: input.operatorType ?? "self_operated" });
+    }
+    if (!operator || operator.status !== "enabled") throw new BadRequestException("请选择已启用的经营主体");
     if (!input.capabilities?.length) throw new BadRequestException("履约地点至少需要一种能力");
     const duplicate = state.locations.find((row) => row.code === input.code.trim() && row.id !== input.id);
     if (duplicate) throw new ConflictException("履约地点编码已存在");
@@ -224,8 +291,9 @@ export class RentalCoreService {
       code: input.code.trim(),
       name: input.name.trim(),
       type: input.type,
-      operatorType: input.operatorType,
-      operatorName: input.operatorName.trim(),
+      operatorId: operator.id,
+      operatorType: operator.type,
+      operatorName: operator.name,
       parentLocationId: input.parentLocationId,
       capabilities: [...new Set(input.capabilities)],
       address: input.address?.trim(),
@@ -249,6 +317,7 @@ export class RentalCoreService {
     const components = this.resolveComponents(state, input.bundleComponents ?? [], input.id);
     if (input.inventoryMode === RentalInventoryMode.Bundle && components.length === 0) throw new BadRequestException("套装至少需要一个组成项");
     if (input.inventoryMode !== RentalInventoryMode.Bundle && components.length > 0) throw new BadRequestException("仅套装模式可以配置组成项");
+    if (input.inventoryMode !== RentalInventoryMode.Bundle) this.validateAttributes(definition.businessModel.assetFields, "item_group", input.attributes ?? {});
     const timestamp = now();
     const existing = input.id ? state.itemGroups.find((row) => row.id === input.id) : undefined;
     if (input.id && !existing) throw new NotFoundException("标的分组不存在");
@@ -270,6 +339,8 @@ export class RentalCoreService {
     if (group.inventoryMode !== RentalInventoryMode.Serialized) throw new BadRequestException("只有序列化库存可以登记独立资产");
     const location = this.location(state, input.locationId);
     if (!input.assetNo?.trim()) throw new BadRequestException("资产编号不能为空");
+    const definition = this.category(state.profile.categoryCode);
+    this.validateAttributes(definition.businessModel.assetFields, "asset", input.attributes ?? {}, { serialNo: input.serialNo });
     if (state.assets.some((row) => row.assetNo === input.assetNo && row.id !== input.id)) throw new ConflictException("资产编号已存在");
     const timestamp = now();
     const existing = input.id ? state.assets.find((row) => row.id === input.id) : undefined;
@@ -353,9 +424,16 @@ export class RentalCoreService {
   listOrders(tenantId: string) { return this.state(tenantId).orders; }
   getOrder(tenantId: string, orderId: string) { return this.order(this.state(tenantId), orderId); }
 
-  createOrder(tenantId: string, input: CreateRentalOrderRequest, userName: string) {
+  createOrder(tenantId: string, input: CreateRentalOrderRequest, userName: string, quote: RentalQuoteSnapshotV1) {
     const state = this.state(tenantId);
     if (!input.customerName?.trim()) throw new BadRequestException("客户名称不能为空");
+    if (quote.ruleSnapshot.qualification.required) {
+      if (!input.qualificationApproved) throw new ConflictException(`当前品类要求先通过资质审核：${quote.ruleSnapshot.qualification.documentTypes.join("、")}`);
+      if (input.qualificationValidTo) {
+        const validDays = (new Date(input.qualificationValidTo).getTime() - new Date(input.startAt).getTime()) / 86_400_000;
+        if (validDays < quote.ruleSnapshot.qualification.minimumValidityDays) throw new ConflictException("资质有效期不满足租赁规则");
+      }
+    }
     const checked = this.availability(tenantId, {
       locationId: input.fulfillmentLocationId, startAt: input.startAt, endAt: input.endAt,
       lines: input.lines.map((line) => ({ itemGroupId: line.itemGroupId, quantity: line.quantity }))
@@ -366,8 +444,10 @@ export class RentalCoreService {
     const orderId = id("order");
     const orderLines = input.lines.map((line) => {
       const group = this.group(state, line.itemGroupId);
-      if (!Number.isFinite(line.unitPrice) || line.unitPrice < 0) throw new BadRequestException("单价必须是非负数");
-      return { id: id("line"), itemGroupId: group.id, itemGroupCode: group.code, itemGroupName: group.name, inventoryMode: group.inventoryMode, quantity: line.quantity, unitPrice: line.unitPrice, amount: line.quantity * line.unitPrice, note: line.note };
+      const rentalCharge = quote.chargeLines.find((item) => item.code === `rental:${group.code}`);
+      if (!rentalCharge) throw new BadRequestException(`${group.name} 缺少服务端租金明细`);
+      const amount = rentalCharge.amount;
+      return { id: id("line"), itemGroupId: group.id, itemGroupCode: group.code, itemGroupName: group.name, inventoryMode: group.inventoryMode, quantity: line.quantity, unitPrice: amount / line.quantity, amount, note: line.note };
     });
     const reservations: RentalReservation[] = [];
     for (const line of orderLines) {
@@ -385,8 +465,16 @@ export class RentalCoreService {
       id: orderId, tenantId, orderNo: `RC${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}${String(state.orders.length + 1).padStart(3, "0")}`,
       categoryCode: state.profile.categoryCode, status: RentalCoreOrderStatus.Draft,
       customerType: input.customerType, customerId: input.customerId, customerName: input.customerName.trim(), contactPhone: input.contactPhone?.trim(),
-      fulfillmentLocationId: location.id, fulfillmentLocationName: location.name, startAt: input.startAt, endAt: input.endAt,
-      totalAmount: orderLines.reduce((sum, line) => sum + line.amount, 0), lines: orderLines,
+      fulfillmentMode: input.fulfillmentMode,
+      fulfillmentLocationId: location.id, fulfillmentLocationName: location.name,
+      returnLocationId: input.returnLocationId, returnLocationName: input.returnLocationId ? this.location(state, input.returnLocationId).name : location.name,
+      startAt: input.startAt, endAt: input.endAt,
+      quoteId: quote.id, quoteNo: quote.quoteNo, pricingPlanVersion: quote.pricingPlanVersion,
+      ruleVersion: quote.ruleVersion, ruleSnapshot: structuredClone(quote.ruleSnapshot), calendarVersion: quote.calendarVersion, chargeLines: structuredClone(quote.chargeLines),
+      rentalAmount: quote.rentalAmount, discountAmount: quote.discountAmount, couponAmount: quote.couponAmount,
+      serviceAmount: quote.serviceAmount, depositAmount: quote.depositAmount, payableAmount: quote.payableAmount,
+      adjustmentAmount: 0, finalPayableAmount: quote.payableAmount,
+      totalAmount: quote.payableAmount, lines: orderLines,
       reservations, allocations: [], createdBy: input.operator || userName, createdAt: timestamp, updatedAt: timestamp
     };
     state.orders.unshift(order);
@@ -421,12 +509,35 @@ export class RentalCoreService {
     return order;
   }
 
-  cancelOrder(tenantId: string, orderId: string) {
+  cancelOrder(tenantId: string, orderId: string, reason: string, chargeAmount = 0) {
     const state = this.state(tenantId); const order = this.order(state, orderId);
     if ([RentalCoreOrderStatus.Renting, RentalCoreOrderStatus.Completed, RentalCoreOrderStatus.Cancelled].includes(order.status)) throw new ConflictException("当前订单状态不能取消");
+    if (!reason?.trim()) throw new BadRequestException("取消原因不能为空");
     order.reservations.forEach((row) => { row.status = RentalReservationStatus.Cancelled; });
     order.allocations.forEach((row) => { row.status = "released"; if (row.assetId) { const asset = state.assets.find((item) => item.id === row.assetId); if (asset) asset.status = RentalAssetStatus.Available; } });
+    if (chargeAmount > 0) order.chargeLines.push({ code: `cancellation:${order.id}`, name: "晚取消费用", type: "cancellation", amount: chargeAmount, sourceVersion: order.ruleVersion, detail: reason.trim() });
+    order.adjustmentAmount = chargeAmount;
+    order.finalPayableAmount = Math.round((order.payableAmount + chargeAmount) * 100) / 100;
+    order.totalAmount = order.finalPayableAmount;
+    order.cancellationReason = reason.trim(); order.cancelledAt = now();
     order.status = RentalCoreOrderStatus.Cancelled; order.updatedAt = now(); return order;
+  }
+
+  completeHandoverWithoutInspection(tenantId: string, orderId: string, stage: "pickup" | "return", overdueCharge = 0) {
+    const state = this.state(tenantId); const order = this.order(state, orderId);
+    if (stage === "pickup") {
+      if (order.ruleSnapshot.fulfillment.pickupInspectionRequired) throw new ConflictException("当前规则要求完成领取检查");
+      if (order.status !== RentalCoreOrderStatus.ReadyForPickup) throw new ConflictException("订单尚未完成配货");
+      order.status = RentalCoreOrderStatus.Renting;
+      order.reservations.forEach((row) => { row.status = RentalReservationStatus.Fulfilled; });
+      order.allocations.forEach((row) => { row.status = "picked_up"; if (row.assetId) { const asset = state.assets.find((item) => item.id === row.assetId); if (asset) asset.status = RentalAssetStatus.Rented; } });
+    } else {
+      if (order.ruleSnapshot.fulfillment.returnInspectionRequired) throw new ConflictException("当前规则要求完成归还检查");
+      if (order.status !== RentalCoreOrderStatus.Renting) throw new ConflictException("只有租赁中的订单可以归还");
+      this.finishReturn(state, order, overdueCharge);
+    }
+    order.updatedAt = now();
+    return order;
   }
 
   listInspectionTemplates(tenantId: string, stage?: "pickup" | "return") {
@@ -455,16 +566,46 @@ export class RentalCoreService {
       order.reservations.forEach((row) => { row.status = RentalReservationStatus.Fulfilled; });
       order.allocations.forEach((row) => { row.status = "picked_up"; if (row.assetId) { const asset = state.assets.find((item) => item.id === row.assetId); if (asset) asset.status = RentalAssetStatus.Rented; } });
     } else {
-      order.status = RentalCoreOrderStatus.Completed;
-      order.reservations.forEach((row) => { row.status = RentalReservationStatus.Released; });
-      order.allocations.forEach((row) => { row.status = "returned"; if (row.assetId) { const asset = state.assets.find((item) => item.id === row.assetId); if (asset) asset.status = RentalAssetStatus.Available; } });
+      this.finishReturn(state, order, 0);
     }
     order.updatedAt = now(); return { inspection: record, order };
   }
 
+  applyOverdueCharge(tenantId: string, orderId: string, amount: number, returnedAt: string) {
+    const order = this.order(this.state(tenantId), orderId);
+    if (amount <= 0 || order.chargeLines.some((line) => line.code === `overdue:${order.id}`)) return order;
+    order.chargeLines.push({ code: `overdue:${order.id}`, name: "逾期费用", type: "overdue", amount, sourceVersion: order.ruleVersion, detail: `实际归还时间 ${returnedAt}` });
+    order.adjustmentAmount = Math.round((order.adjustmentAmount + amount) * 100) / 100;
+    order.finalPayableAmount = Math.round((order.payableAmount + order.adjustmentAmount) * 100) / 100;
+    order.totalAmount = order.finalPayableAmount;
+    return order;
+  }
+
+  applyDamageCharge(tenantId: string, orderId: string, amount: number, detail: string) {
+    const order = this.order(this.state(tenantId), orderId);
+    if (amount <= 0 || order.chargeLines.some((line) => line.code === `damage:${order.id}`)) return order;
+    order.chargeLines.push({ code: `damage:${order.id}`, name: "损坏费用", type: "damage", amount, sourceVersion: order.ruleVersion, detail });
+    order.adjustmentAmount = Math.round((order.adjustmentAmount + amount) * 100) / 100;
+    order.finalPayableAmount = Math.round((order.payableAmount + order.adjustmentAmount) * 100) / 100;
+    order.totalAmount = order.finalPayableAmount;
+    return order;
+  }
+
+  private finishReturn(state: TenantRentalState, order: RentalOrder, overdueCharge: number) {
+    order.status = RentalCoreOrderStatus.Completed; order.completedAt = now();
+    order.reservations.forEach((row) => { row.status = RentalReservationStatus.Released; });
+    order.allocations.forEach((row) => { row.status = "returned"; if (row.assetId) { const asset = state.assets.find((item) => item.id === row.assetId); if (asset) asset.status = RentalAssetStatus.Available; } });
+    if (overdueCharge > 0) this.applyOverdueCharge(order.tenantId, order.id, overdueCharge, order.completedAt);
+  }
+
   private state(tenantId: string) {
     let state = this.states.get(tenantId);
-    if (!state) { state = this.seedState(tenantId); this.states.set(tenantId, state); }
+    if (!state) {
+      const sampleCategory = tenantId === "tenant_001" ? RentalCategoryCode.Camera : tenantId === "tenant_002" ? RentalCategoryCode.Camping : undefined;
+      if (!sampleCategory) throw new ConflictException("当前 SaaS 租户尚未初始化经营品类");
+      state = this.seedState(tenantId, sampleCategory); this.states.set(tenantId, state);
+    }
+    state.operators ??= [];
     return state;
   }
   private category(code: RentalCategoryCode) { const found = categories.find((row) => row.code === code); if (!found) throw new BadRequestException("未知经营品类"); return found; }
@@ -472,6 +613,18 @@ export class RentalCoreService {
   private location(state: TenantRentalState, locationId: string) { const found = state.locations.find((row) => row.id === locationId); if (!found) throw new NotFoundException("履约网点不存在"); return found; }
   private order(state: TenantRentalState, orderId: string) { const found = state.orders.find((row) => row.id === orderId); if (!found) throw new NotFoundException("租赁订单不存在"); return found; }
   private validatePeriod(startAt: string, endAt: string) { const start = new Date(startAt).getTime(); const end = new Date(endAt).getTime(); if (!Number.isFinite(start) || !Number.isFinite(end) || start >= end) throw new BadRequestException("租赁起止时间无效"); }
+  private validateAttributes(fields: RentalAttributeDefinition[], scope: "item_group" | "asset", attributes: Record<string, unknown>, aliases: Record<string, unknown> = {}) {
+    for (const field of fields.filter((item) => item.scope === scope)) {
+      const value = aliases[field.code] ?? attributes[field.code];
+      const missing = value === undefined || value === null || value === "";
+      if (field.required && missing) throw new BadRequestException(`${field.label}不能为空`);
+      if (missing) continue;
+      if (field.type === "number" && (typeof value !== "number" || !Number.isFinite(value))) throw new BadRequestException(`${field.label}必须是有效数字`);
+      if (field.type === "boolean" && typeof value !== "boolean") throw new BadRequestException(`${field.label}必须是布尔值`);
+      if (field.type === "date" && !Number.isFinite(new Date(String(value)).getTime())) throw new BadRequestException(`${field.label}必须是有效日期`);
+      if (field.type === "select" && field.options?.length && !field.options.includes(String(value))) throw new BadRequestException(`${field.label}不在允许选项中`);
+    }
+  }
   private activeReservations(state: TenantRentalState, itemGroupId: string, locationId: string, startAt?: string, endAt?: string) {
     return state.orders.flatMap((order) => order.reservations.map((row) => ({ ...row, startAt: order.startAt, endAt: order.endAt }))).filter((row) => row.itemGroupId === itemGroupId && row.locationId === locationId && [RentalReservationStatus.Soft, RentalReservationStatus.Confirmed, RentalReservationStatus.Fulfilled].includes(row.status) && (!row.expiresAt || new Date(row.expiresAt).getTime() >= Date.now()) && (!startAt || !endAt || overlaps(row.startAt, row.endAt, startAt, endAt)));
   }
@@ -502,21 +655,32 @@ export class RentalCoreService {
     });
   }
 
-  private seedState(tenantId: string): TenantRentalState {
-    const categoryCode = tenantId === "tenant_002" ? RentalCategoryCode.Camping : RentalCategoryCode.Camera;
+  private seedState(tenantId: string, categoryCode: RentalCategoryCode): TenantRentalState {
     const isSampleTenant = tenantId === "tenant_001" || tenantId === "tenant_002";
     const definition = this.category(categoryCode); const timestamp = now(); const locationId = `${tenantId}_location_01`;
-    const location: RentalFulfillmentLocation = { id: locationId, tenantId, code: "MAIN", name: categoryCode === RentalCategoryCode.Camera ? "中心器材门店" : "中心装备仓", type: categoryCode === RentalCategoryCode.Camera ? "store" : "warehouse", operatorType: "self_operated", operatorName: categoryCode === RentalCategoryCode.Camera ? "演示摄影器材行" : "演示露营装备中心", capabilities: ["pickup", "return", "storage", "delivery"], address: "演示地址 1 号", contactName: "值班负责人", contactPhone: "13800000000", businessHours: "09:00-20:00", status: "enabled" };
+    const sampleNames: Record<RentalCategoryCode, { operator: string; location: string; locationType: RentalFulfillmentLocation["type"] }> = {
+      [RentalCategoryCode.Camera]: { operator: "演示摄影器材行", location: "中心器材门店", locationType: "store" },
+      [RentalCategoryCode.Camping]: { operator: "演示露营装备中心", location: "中心装备仓", locationType: "warehouse" },
+      [RentalCategoryCode.Vehicle]: { operator: "演示车辆租赁门店", location: "中心车行门店", locationType: "store" },
+      [RentalCategoryCode.Construction]: { operator: "演示工程设备中心", location: "中心设备场站", locationType: "project_site" }
+    };
+    const sampleName = sampleNames[categoryCode];
+    const operator: RentalFulfillmentOperator = { id: `${tenantId}_operator_01`, tenantId, code: "SELF", name: sampleName.operator, type: "self_operated", contactName: "运营负责人", contactPhone: "13800000000", settlementMode: "self", status: "enabled", createdAt: timestamp, updatedAt: timestamp };
+    const location: RentalFulfillmentLocation = { id: locationId, tenantId, code: "MAIN", name: sampleName.location, type: sampleName.locationType, operatorId: operator.id, operatorType: operator.type, operatorName: operator.name, capabilities: ["pickup", "return", "storage", "delivery"], address: "演示地址 1 号", contactName: "值班负责人", contactPhone: "13800000000", businessHours: "09:00-20:00", status: "enabled" };
     const base = (code: string, name: string, mode: RentalInventoryMode, unit: string, attributes: Record<string, unknown> = {}): RentalItemGroup => ({ id: `${tenantId}_${code.toLowerCase()}`, tenantId, categoryCode, code, name, inventoryMode: mode, unit, attributes, bundleComponents: [], status: "enabled", createdAt: timestamp, updatedAt: timestamp });
-    const first = categoryCode === RentalCategoryCode.Camera ? base("CAM-BODY", "全画幅相机机身", RentalInventoryMode.Serialized, "台", { brand: "Sony", mount: "E" }) : base("CAMP-TENT", "四人露营帐篷", RentalInventoryMode.Quantity, "顶", { people: 4, season: "三季" });
-    const second = categoryCode === RentalCategoryCode.Camera ? base("CAM-LENS", "24-70mm 标准镜头", RentalInventoryMode.Serialized, "支", { mount: "E" }) : base("CAMP-CHAIR", "折叠露营椅", RentalInventoryMode.Quantity, "把");
+    const first = categoryCode === RentalCategoryCode.Camera
+      ? base("CAM-BODY", "全画幅相机机身", RentalInventoryMode.Serialized, "台", { brand: "Sony", model: "Alpha 7 IV", mount: "E", sensor: "全画幅" })
+      : base("CAMP-TENT", "四人露营帐篷", RentalInventoryMode.Quantity, "顶", { brand: "Naturehike", model: "Cloud Up 4", people: 4, season: "三季" });
+    const second = categoryCode === RentalCategoryCode.Camera
+      ? base("CAM-LENS", "24-70mm 标准镜头", RentalInventoryMode.Serialized, "支", { brand: "Sony", model: "FE 24-70mm F2.8 GM II", mount: "E" })
+      : base("CAMP-CHAIR", "折叠露营椅", RentalInventoryMode.Quantity, "把", { brand: "Helinox", model: "Chair One" });
     const bundle = base(categoryCode === RentalCategoryCode.Camera ? "CAM-KIT" : "CAMP-KIT", categoryCode === RentalCategoryCode.Camera ? "标准拍摄套装" : "双人露营套装", RentalInventoryMode.Bundle, "套");
     bundle.bundleComponents = [first, second].map((row) => ({ itemGroupId: row.id, itemGroupCode: row.code, itemGroupName: row.name, quantity: row === second && categoryCode === RentalCategoryCode.Camping ? 2 : 1 }));
     const groups = isSampleTenant ? [first, second, bundle] : [];
     const assets: RentalAsset[] = isSampleTenant && categoryCode === RentalCategoryCode.Camera ? groups.filter((row) => row.inventoryMode === RentalInventoryMode.Serialized).flatMap((group, groupIndex) => Array.from({ length: 3 }, (_, index) => ({ id: `${group.id}_asset_${index + 1}`, tenantId, itemGroupId: group.id, itemGroupCode: group.code, itemGroupName: group.name, assetNo: `${group.code}-${String(index + 1).padStart(3, "0")}`, serialNo: `SN${groupIndex + 1}${index + 1}0001`, locationId, locationName: location.name, status: RentalAssetStatus.Available, attributes: {}, createdAt: timestamp, updatedAt: timestamp }))) : [];
     const stocks: RentalStockBalance[] = isSampleTenant && categoryCode === RentalCategoryCode.Camping ? groups.filter((row) => row.inventoryMode === RentalInventoryMode.Quantity).map((group, index) => ({ id: `${group.id}_stock`, tenantId, itemGroupId: group.id, itemGroupCode: group.code, itemGroupName: group.name, locationId, locationName: location.name, onHandQuantity: index === 0 ? 12 : 24, reservedQuantity: 0, maintenanceQuantity: index === 0 ? 1 : 2, availableQuantity: index === 0 ? 11 : 22, updatedAt: timestamp })) : [];
     const templates = this.buildInspectionTemplates(tenantId, categoryCode);
-    return { profile: { tenantId, categoryCode, capabilities: [...definition.defaultCapabilities] as RentalCapability[], terminology: { ...definition.terminology }, configVersion: definition.version, initializedAt: timestamp, updatedAt: timestamp }, businessSettings: defaultBusinessSettings(tenantId, definition), couponTemplates: [], locations: [location], itemGroups: groups, assets, stockBalances: stocks, orders: [], inspectionTemplates: templates, inspections: [] };
+    return { profile: { tenantId, categoryCode, capabilities: [...definition.defaultCapabilities] as RentalCapability[], terminology: { ...definition.terminology }, configVersion: definition.version, initializedAt: timestamp, updatedAt: timestamp }, businessSettings: defaultBusinessSettings(tenantId, definition), couponTemplates: [], operators: [operator], locations: [location], itemGroups: groups, assets, stockBalances: stocks, orders: [], inspectionTemplates: templates, inspections: [] };
   }
 
   private buildInspectionTemplates(tenantId: string, categoryCode: RentalCategoryCode): RentalInspectionTemplate[] {

@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "node:crypto";
 import {
@@ -42,6 +42,7 @@ import {
   describeDataPermission
 } from "../../common/data-permission";
 import { PlatformRepository } from "./platform.repository";
+import { RentalCoreService } from "../rental-core/rental-core.service";
 
 interface StoredUser extends SaveSystemUserRequest {
   id: string;
@@ -53,7 +54,8 @@ interface StoredUser extends SaveSystemUserRequest {
 export class PlatformService {
   constructor(
     private readonly configService: ConfigService,
-    private readonly platformRepository: PlatformRepository
+    private readonly platformRepository: PlatformRepository,
+    @Optional() private readonly rentalCoreService?: RentalCoreService
   ) {}
 
   private readonly tenants: TenantSummary[] = [
@@ -1172,11 +1174,14 @@ export class PlatformService {
     }
 
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.bootstrapTenant(input, this.getTenantBootstrapPreview(), {
+      const result = await this.platformRepository.bootstrapTenant(input, this.getTenantBootstrapPreview(), {
         systemRules: this.systemRulesConfig,
         dictionaries: this.dictionaryGroups,
         numberRules: this.numberRules
       });
+      this.rentalCoreService?.initializeTenant(result.tenant.tenantId, input.categoryCode);
+      await this.rentalCoreService?.persist(result.tenant.tenantId);
+      return result;
     }
 
     if (this.tenants.some((tenant) => tenant.tenantCode === tenantCode)) {
@@ -1261,6 +1266,8 @@ export class PlatformService {
       detail: `初始化租户：${tenantName}`
     });
 
+    this.rentalCoreService?.initializeTenant(tenantId, input.categoryCode);
+    await this.rentalCoreService?.persist(tenantId);
     return {
       tenant,
       adminUser: this.toUserRow(user),

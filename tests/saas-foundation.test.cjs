@@ -17,6 +17,7 @@ const { getRequestTenantId } = require("../apps/api/src/common/request-identity"
 const { hashPassword, verifyPassword } = require("../apps/api/src/common/password");
 const { AuthService } = require("../apps/api/src/modules/auth/auth.service");
 const { PlatformService } = require("../apps/api/src/modules/platform/platform.service");
+const { RentalCoreService } = require("../apps/api/src/modules/rental-core/rental-core.service");
 const { RoleScope, TenantStatus } = require("@store-rental/shared");
 
 const config = {
@@ -44,7 +45,8 @@ function requestContext(method, url, accessToken) {
 }
 
 (async () => {
-  const platform = new PlatformService(config, undefined);
+  const rentalCore = new RentalCoreService();
+  const platform = new PlatformService(config, undefined, rentalCore);
   const auth = new AuthService(platform, config);
   const guard = new ApiAuthGuard(auth);
 
@@ -160,6 +162,8 @@ function requestContext(method, url, accessToken) {
     saas.user
   );
   assert.equal(bootstrapped.tenant.categoryCode, "camera");
+  assert.equal(rentalCore.getProfile(bootstrapped.tenant.tenantId).categoryCode, "camera", "bootstrapped tenant must initialize Rental Core with its selected category");
+  assert.equal(rentalCore.listItemGroups(bootstrapped.tenant.tenantId).length, 0, "new tenant must not inherit demo camera products");
   assert.equal(bootstrapped.adminUser.isSaasAdmin, false);
   assert.equal(bootstrapped.adminUser.isPlatformAdmin, true);
   assert.equal(bootstrapped.adminUser.mustChangePassword, true);
@@ -210,7 +214,20 @@ function requestContext(method, url, accessToken) {
   assert.equal(await guard.canActivate(demoCore.context), true);
   assert.equal(getRequestTenantId(), "tenant_001");
   const cameraDispatch = requestContext("GET", "/api/store-rental/dispatch/board", rotated.accessToken);
-  await assert.rejects(guard.canActivate(cameraDispatch.context), /未启用该业务能力/);
+  await assert.rejects(guard.canActivate(cameraDispatch.context), /旧车辆兼容域/);
+  const cameraVehicleList = requestContext("GET", "/api/store-rental/vehicles", rotated.accessToken);
+  await assert.rejects(guard.canActivate(cameraVehicleList.context), /旧车辆兼容域/, "camera tenants must not call legacy vehicle APIs through direct URLs");
+  const campingContracts = requestContext("GET", "/api/store-rental/contracts", demo2.accessToken);
+  await assert.rejects(guard.canActivate(campingContracts.context), /旧车辆兼容域/, "camping tenants must not call legacy vehicle contracts through direct URLs");
+
+  const priceOnlyGuard = new ApiAuthGuard({
+    async resolveAccessToken() { return { ...demo.user, isPlatformAdmin: false, permissions: ["store-rental:price:manage"] }; },
+    async getTenantContext() { return { capabilities: demo.tenant.capabilities }; }
+  });
+  const pricingWrite = requestContext("POST", "/api/rental/v1/pricing-plans", "price-only");
+  assert.equal(await priceOnlyGuard.canActivate(pricingWrite.context), true, "price managers must be allowed to maintain generic pricing");
+  const priceCannotCreateOrder = requestContext("POST", "/api/rental/v1/orders", "price-only");
+  await assert.rejects(priceOnlyGuard.canActivate(priceCannotCreateOrder.context), /无权访问/, "pricing permission must not imply order operation");
 
   await platform.updateTenantStatus(
     bootstrapped.tenant.tenantId,

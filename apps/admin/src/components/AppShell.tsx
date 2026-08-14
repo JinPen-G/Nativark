@@ -24,8 +24,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const homePath = user?.isSaasAdmin ? "/platform/tenants" : "/workbench";
   const sections = useMemo(() => APP_NAVIGATION.map((section) => ({
     ...section,
-    routes: section.routes.filter((route) => route.menu && canAccessRoute(route, hasPermission, hasCapability))
-  })).filter((section) => section.routes.length > 0), [hasCapability, hasPermission]);
+    routes: section.routes.filter((route) => route.menu && canAccessRoute(route, hasPermission, hasCapability, tenant?.categoryCode))
+  })).filter((section) => section.routes.length > 0), [hasCapability, hasPermission, tenant?.categoryCode]);
   const menuItems = useMemo<MenuProps["items"]>(() => sections.map((section) => ({
     key: section.key,
     icon: section.icon,

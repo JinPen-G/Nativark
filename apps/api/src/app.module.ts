@@ -27,6 +27,9 @@ import { StoreRentalRepository } from "./modules/store-rental/store-rental.repos
 import { StoreRentalService } from "./modules/store-rental/store-rental.service";
 import { RentalCoreController } from "./modules/rental-core/rental-core.controller";
 import { RentalCoreService } from "./modules/rental-core/rental-core.service";
+import { RentalBusinessController } from "./modules/rental-core/rental-business.controller";
+import { RentalBusinessService } from "./modules/rental-core/rental-business.service";
+import { RentalStateRepository } from "./modules/rental-core/rental-state.repository";
 
 @Module({
   imports: [
@@ -44,6 +47,7 @@ import { RentalCoreService } from "./modules/rental-core/rental-core.service";
     ReportsController,
     StoreRentalController,
     RentalCoreController,
+    RentalBusinessController,
     IntegrationsController,
     FilesController,
     NotificationsController,
@@ -59,6 +63,8 @@ import { RentalCoreService } from "./modules/rental-core/rental-core.service";
     StoreRentalService,
     StoreRentalRepository,
     RentalCoreService,
+    RentalBusinessService,
+    RentalStateRepository,
     IntegrationsService,
     IntegrationsRepository,
     {

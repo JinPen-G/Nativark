@@ -81,7 +81,7 @@ export function CustomerPage() {
         status: detail.status, source: detail.source, tags: detail.tags, identityVerified: detail.identityVerified,
         driverLicenseVerified: detail.driverLicenseVerified, identityNoMasked: detail.identityNoMasked,
         driverLicenseNoMasked: detail.driverLicenseNoMasked, birthday: detail.birthday, emergencyContactName: detail.emergencyContactName,
-        emergencyContactPhone: detail.emergencyContactPhone, notes: detail.notes, riskNote: detail.riskNote
+        emergencyContactPhone: detail.emergencyContactPhone, notes: detail.notes, riskNote: detail.riskNote, referrerCustomerId: detail.referrerCustomerId
       } : { name: "", phone: "", levelName: "普通会员", status: "pending_review", source: "后台录入", tags: [], identityVerified: false, driverLicenseVerified: false });
       setMemberOpen(true);
     } catch { message.error("客户详情加载失败"); }
@@ -213,7 +213,7 @@ export function CustomerPage() {
           <Form.Item name="tags" label="客户标签"><Select mode="tags" /></Form.Item>
           <Space size="large"><Form.Item name="identityVerified" label="身份已认证" valuePropName="checked"><Switch /></Form.Item><Form.Item name="driverLicenseVerified" label="租赁资质已认证" valuePropName="checked"><Switch /></Form.Item></Space>
           <Row gutter={12}><Col span={12}><Form.Item name="identityNoMasked" label="证件号（脱敏）"><Input /></Form.Item></Col><Col span={12}><Form.Item name="driverLicenseNoMasked" label="资质证号（脱敏）"><Input /></Form.Item></Col><Col span={12}><Form.Item name="birthday" label="出生日期"><Input placeholder="YYYY-MM-DD" /></Form.Item></Col><Col span={12}><Form.Item name="emergencyContactName" label="紧急联系人"><Input /></Form.Item></Col><Col span={12}><Form.Item name="emergencyContactPhone" label="紧急联系电话"><Input /></Form.Item></Col></Row>
-          <Form.Item name="notes" label="客户备注"><Input.TextArea rows={3} /></Form.Item><Form.Item name="riskNote" label="风险备注"><Input.TextArea rows={3} /></Form.Item>
+          <Form.Item name="referrerCustomerId" label="邀请人客户编号"><Input placeholder="可选，用于按租户规则发放邀请奖励" /></Form.Item><Form.Item name="notes" label="客户备注"><Input.TextArea rows={3} /></Form.Item><Form.Item name="riskNote" label="风险备注"><Input.TextArea rows={3} /></Form.Item>
         </Form>
       </Drawer>
 

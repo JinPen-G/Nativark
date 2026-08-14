@@ -8,7 +8,7 @@ import { rentalCoreApi } from "@/api/rentalCore";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 
-type OrderForm = Omit<CreateRentalOrderRequest, "startAt" | "endAt"> & { period: [Dayjs, Dayjs] };
+type OrderForm = Omit<CreateRentalOrderRequest, "quoteId" | "startAt" | "endAt" | "lines"> & { period: [Dayjs, Dayjs]; lines: Array<{ itemGroupId: string; quantity: number; note?: string }> };
 const orderStatus: Record<string, { label: string; color: string }> = {
   draft: { label: "软预占", color: "default" }, reserved: { label: "已确认", color: "processing" },
   ready_for_pickup: { label: "待取件", color: "cyan" }, renting: { label: "租赁中", color: "blue" },
@@ -25,6 +25,7 @@ export function RentalCorePage() {
   const [orderForm] = Form.useForm<OrderForm>();
   const [inspectionForm] = Form.useForm<Record<string, unknown>>();
   const profile = useQuery({ queryKey: ["rental-core", "profile"], queryFn: rentalCoreApi.profile });
+  const settings = useQuery({ queryKey: ["rental-core", "business-settings"], queryFn: rentalCoreApi.businessSettings });
   const categories = useQuery({ queryKey: ["rental-core", "categories"], queryFn: rentalCoreApi.categories });
   const locations = useQuery({ queryKey: ["rental-core", "locations"], queryFn: rentalCoreApi.locations });
   const groups = useQuery({ queryKey: ["rental-core", "groups"], queryFn: rentalCoreApi.itemGroups });
@@ -40,13 +41,19 @@ export function RentalCorePage() {
     ]);
   };
   const create = useMutation({ mutationFn: rentalCoreApi.createOrder, onSuccess: async (result) => { await refreshOrders(); setOrderOpen(false); orderForm.resetFields(); setDetail(result); message.success("订单已创建，库存软预占 15 分钟"); }, onError: () => message.error("订单创建失败，请检查库存和时间段") });
-  const action = useMutation({ mutationFn: ({ id, type }: { id: string; type: "confirm" | "allocate" | "cancel" }) => type === "confirm" ? rentalCoreApi.confirmOrder(id) : type === "allocate" ? rentalCoreApi.allocateOrder(id) : rentalCoreApi.cancelOrder(id), onSuccess: async (result) => { await refreshOrders(); setDetail(result); message.success("订单状态已更新"); }, onError: () => message.error("操作失败，请检查订单状态或库存") });
+  const action = useMutation({ mutationFn: ({ id, type }: { id: string; type: "confirm" | "allocate" | "cancel" }) => type === "confirm" ? rentalCoreApi.confirmOrder(id) : type === "allocate" ? rentalCoreApi.allocateOrder(id) : rentalCoreApi.cancelOrder(id, { reason: "运营端取消" }), onSuccess: async (result) => { await refreshOrders(); setDetail(result); message.success("订单状态已更新"); }, onError: () => message.error("操作失败，请检查订单状态、库存或业务规则") });
   const submitInspection = useMutation({ mutationFn: ({ orderId, templateId, results }: { orderId: string; templateId: string; results: Record<string, unknown> }) => rentalCoreApi.createInspection(orderId, { templateId, results }), onSuccess: async (result) => { await refreshOrders(); setDetail(result.order); setInspection(undefined); inspectionForm.resetFields(); message.success("检查已完成，履约状态已推进"); }, onError: () => message.error("检查提交失败，请填写所有必填项") });
   const currentCategory = categories.data?.find((row) => row.code === profile.data?.categoryCode);
   const counts = useMemo(() => ({ serialized: groups.data?.filter((row) => row.inventoryMode === RentalInventoryMode.Serialized).length ?? 0, quantity: groups.data?.filter((row) => row.inventoryMode === RentalInventoryMode.Quantity).length ?? 0, bundle: groups.data?.filter((row) => row.inventoryMode === RentalInventoryMode.Bundle).length ?? 0 }), [groups.data]);
 
-  function submitOrder(values: OrderForm) {
-    create.mutate({ ...values, startAt: values.period[0].toISOString(), endAt: values.period[1].toISOString(), lines: values.lines.map((line) => ({ ...line, unitPrice: Number(line.unitPrice), quantity: Number(line.quantity) })) });
+  async function submitOrder(values: OrderForm) {
+    try {
+      const startAt = values.period[0].toISOString();
+      const endAt = values.period[1].toISOString();
+      const lines = values.lines.map(({ itemGroupId, quantity, note }) => ({ itemGroupId, quantity: Number(quantity), note }));
+      const quote = await rentalCoreApi.createQuote({ customerType: values.customerType, customerId: values.customerId, fulfillmentMode: values.fulfillmentMode, fulfillmentLocationId: values.fulfillmentLocationId, returnLocationId: values.returnLocationId, startAt, endAt, lines });
+      create.mutate({ quoteId: quote.id, customerType: values.customerType, customerId: values.customerId, customerName: values.customerName, contactPhone: values.contactPhone, qualificationApproved: values.qualificationApproved, qualificationValidTo: values.qualificationValidTo, fulfillmentMode: quote.request.fulfillmentMode, fulfillmentLocationId: values.fulfillmentLocationId, returnLocationId: values.returnLocationId, startAt, endAt, lines });
+    } catch { message.error("服务端报价失败，请先维护已启用的基础定价与规则"); }
   }
   function startInspection(order: RentalOrder, stage: "pickup" | "return") {
     const template = templates.data?.find((row) => row.stage === stage);
@@ -57,8 +64,8 @@ export function RentalCorePage() {
 
   return (
     <>
-      <PageHeader title="Rental Core v0.1" description="租户品类、三种库存模式、多行订单、预占配货和动态检查。" extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => { orderForm.setFieldsValue({ customerType: "personal", fulfillmentLocationId: locations.data?.[0]?.id, period: [dayjs().add(1, "day").hour(9), dayjs().add(2, "day").hour(18)], lines: [{ itemGroupId: groups.data?.[0]?.id ?? "", quantity: 1, unitPrice: 100 }] }); setOrderOpen(true); }}>新建 Core 订单</Button>} />
-      <div className="context-note"><InfoCircleOutlined /><span>这是新的通用租赁领域，并非车辆接口改名。tenant_001 为摄影样本、tenant_002 为露营样本；当前运行数据仍是进程内演示存储。</span></div>
+      <PageHeader title="Rental Core v0.1" description="租户品类、三种库存模式、多行订单、服务端报价、预占配货和动态检查。" extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => { orderForm.setFieldsValue({ customerType: "personal", fulfillmentMode: settings.data?.fulfillment.enabledModes[0] ?? "store_pickup_return", fulfillmentLocationId: locations.data?.[0]?.id, period: [dayjs().add(1, "day").hour(9), dayjs().add(2, "day").hour(18)], lines: [{ itemGroupId: groups.data?.[0]?.id ?? "", quantity: 1 }] }); setOrderOpen(true); }}>新建 Core 订单</Button>} />
+      <div className="context-note"><InfoCircleOutlined /><span>这是通用租赁领域，不是车辆接口改名。demo 为摄影样本、demo2 为露营样本；MySQL 模式通过租户聚合快照持久化，需应用本次数据库迁移。</span></div>
       <QueryState loading={profile.isLoading || groups.isLoading} error={profile.error || groups.error}>
         <div className="metric-grid">
           <Card className="metric-card"><Statistic title="当前经营品类" value={currentCategory?.name ?? profile.data?.categoryCode ?? "-"} prefix={<ApartmentOutlined />} /><div className="metric-foot"><span>单租户单品类</span><span className="metric-trend">已配置</span></div></Card>
@@ -75,9 +82,9 @@ export function RentalCorePage() {
 
       <Drawer title="新建多行租赁订单" width={720} open={orderOpen} destroyOnHidden onClose={() => setOrderOpen(false)} extra={<Button type="primary" loading={create.isPending} onClick={() => orderForm.submit()}>检查库存并创建</Button>}>
         <Form form={orderForm} layout="vertical" onFinish={submitOrder}>
-          <Row gutter={12}><Col span={12}><Form.Item name="customerType" label="客户类型" rules={[{ required: true }]}><Select options={[{ value: "personal", label: "个人" }, { value: "corporate", label: "企业" }]} /></Form.Item></Col><Col span={12}><Form.Item name="customerName" label="客户名称" rules={[{ required: true }]}><Input /></Form.Item></Col><Col span={12}><Form.Item name="contactPhone" label="联系电话"><Input /></Form.Item></Col><Col span={12}><Form.Item name="fulfillmentLocationId" label={profile.data?.terminology.fulfillmentLabel ?? "履约网点"} rules={[{ required: true }]}><Select options={(locations.data ?? []).map((row) => ({ value: row.id, label: row.name }))} /></Form.Item></Col></Row>
+          <Row gutter={12}><Col span={12}><Form.Item name="customerType" label="客户类型" rules={[{ required: true }]}><Select options={[{ value: "personal", label: "个人" }, { value: "corporate", label: "企业" }]} /></Form.Item></Col><Col span={12}><Form.Item name="customerName" label="客户名称" rules={[{ required: true }]}><Input /></Form.Item></Col><Col span={12}><Form.Item name="contactPhone" label="联系电话"><Input /></Form.Item></Col><Col span={12}><Form.Item name="fulfillmentMode" label="租赁履约方式" rules={[{ required: true }]}><Select options={(settings.data?.fulfillment.enabledModes ?? []).map((value) => ({ value, label: value }))} /></Form.Item></Col><Col span={12}><Form.Item name="fulfillmentLocationId" label={profile.data?.terminology.fulfillmentLabel ?? "履约网点"} rules={[{ required: true }]}><Select options={(locations.data ?? []).map((row) => ({ value: row.id, label: row.name }))} /></Form.Item></Col><Col span={12}><Form.Item name="qualificationApproved" label="资质审核"><Select allowClear options={[{ value: true, label: "已通过" }, { value: false, label: "未通过/不适用" }]} /></Form.Item></Col></Row>
           <Form.Item name="period" label="租赁时间" rules={[{ required: true }]}><DatePicker.RangePicker showTime style={{ width: "100%" }} /></Form.Item>
-          <Form.List name="lines">{(fields, { add, remove }) => <Space direction="vertical" style={{ width: "100%" }}>{fields.map((field) => <Card size="small" key={field.key} extra={fields.length > 1 && <Button danger type="link" onClick={() => remove(field.name)}>删除</Button>}><Row gutter={12}><Col span={12}><Form.Item {...field} name={[field.name, "itemGroupId"]} label="租赁标的" rules={[{ required: true }]}><Select showSearch optionFilterProp="label" options={itemOptions} /></Form.Item></Col><Col span={6}><Form.Item {...field} name={[field.name, "quantity"]} label="数量" rules={[{ required: true }]}><InputNumber min={1} precision={0} style={{ width: "100%" }} /></Form.Item></Col><Col span={6}><Form.Item {...field} name={[field.name, "unitPrice"]} label="单价" rules={[{ required: true }]}><InputNumber min={0} precision={2} prefix="¥" style={{ width: "100%" }} /></Form.Item></Col></Row></Card>)}<Button block type="dashed" icon={<PlusOutlined />} onClick={() => add({ quantity: 1, unitPrice: 100 })}>增加订单明细</Button></Space>}</Form.List>
+          <Form.List name="lines">{(fields, { add, remove }) => <Space direction="vertical" style={{ width: "100%" }}>{fields.map((field) => <Card size="small" key={field.key} extra={fields.length > 1 && <Button danger type="link" onClick={() => remove(field.name)}>删除</Button>}><Row gutter={12}><Col span={18}><Form.Item {...field} name={[field.name, "itemGroupId"]} label="租赁标的" rules={[{ required: true }]}><Select showSearch optionFilterProp="label" options={itemOptions} /></Form.Item></Col><Col span={6}><Form.Item {...field} name={[field.name, "quantity"]} label="数量" rules={[{ required: true }]}><InputNumber min={1} precision={0} style={{ width: "100%" }} /></Form.Item></Col></Row></Card>)}<Button block type="dashed" icon={<PlusOutlined />} onClick={() => add({ quantity: 1 })}>增加订单明细</Button></Space>}</Form.List>
         </Form>
       </Drawer>
 

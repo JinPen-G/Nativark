@@ -6,9 +6,11 @@ require("ts-node").register({
 });
 
 const { RentalCoreService } = require("../apps/api/src/modules/rental-core/rental-core.service");
+const { RentalBusinessService } = require("../apps/api/src/modules/rental-core/rental-business.service");
 const { RentalCoreOrderStatus, RentalInventoryMode } = require("@store-rental/shared");
 
 const service = new RentalCoreService();
+const business = new RentalBusinessService();
 const cameraTenant = "tenant_001";
 const campingTenant = "tenant_002";
 const startAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
@@ -27,6 +29,8 @@ assert.ok(categories.find((category) => category.code === "camping").businessMod
 assert.ok(service.listItemGroups(campingTenant).every((group) => group.categoryCode === "camping"));
 assert.ok(service.listItemGroups(campingTenant).some((group) => group.code === "CAMP-TENT"));
 assert.ok(service.listItemGroups(campingTenant).every((group) => !group.code.startsWith("CAM-")));
+assert.equal(service.listItemGroups(cameraTenant).find((group) => group.code === "CAM-BODY").attributes.model, "Alpha 7 IV");
+assert.equal(service.listItemGroups(campingTenant).find((group) => group.code === "CAMP-TENT").attributes.brand, "Naturehike");
 
 const cameraSettings = service.getBusinessSettings(cameraTenant);
 assert.equal(cameraSettings.categoryCode, "camera");
@@ -86,15 +90,34 @@ assert.throws(() => service.saveLocation(cameraTenant, {
 const cameraBundle = cameraGroups.find((row) => row.inventoryMode === RentalInventoryMode.Bundle);
 assert.ok(cameraBundle && cameraBundle.bundleComponents.length === 2);
 
-const order = service.createOrder(cameraTenant, {
+const cameraContext = {
+  profile: service.getProfile(cameraTenant),
+  category: service.listCategories().find((item) => item.code === service.getProfile(cameraTenant).categoryCode),
+  settings: service.getBusinessSettings(cameraTenant),
+  groups: service.listItemGroups(cameraTenant),
+  couponTemplates: service.listCouponTemplates(cameraTenant)
+};
+const quote = business.createQuote(cameraTenant, cameraContext, {
   customerType: "personal",
-  customerName: "摄影测试客户",
+  fulfillmentMode: "store_pickup_return",
   fulfillmentLocationId: cameraLocation.id,
   startAt,
   endAt,
-  lines: [{ itemGroupId: cameraBundle.id, quantity: 1, unitPrice: 299 }]
-}, "test");
+  lines: [{ itemGroupId: cameraBundle.id, quantity: 1 }]
+});
+const order = service.createOrder(cameraTenant, {
+  quoteId: quote.id,
+  customerType: "personal",
+  customerName: "摄影测试客户",
+  fulfillmentMode: quote.request.fulfillmentMode,
+  fulfillmentLocationId: cameraLocation.id,
+  startAt,
+  endAt,
+  lines: [{ itemGroupId: cameraBundle.id, quantity: 1 }]
+}, "test", quote);
 assert.equal(order.lines.length, 1);
+assert.equal(order.quoteId, quote.id);
+assert.equal(order.totalAmount, quote.payableAmount);
 assert.equal(order.reservations.length, 2, "bundle should reserve its components");
 assert.equal(order.status, RentalCoreOrderStatus.Draft);
 
@@ -142,9 +165,42 @@ assert.equal(overbooked.available, false, "combined bundle/component demand must
 assert.equal(service.listOrders(campingTenant).length, 0, "tenant data must be isolated");
 
 const newTenant = "tenant_new";
+service.initializeTenant(newTenant, "construction");
 assert.equal(service.listItemGroups(newTenant).length, 0);
 const configured = service.saveProfile(newTenant, { categoryCode: "construction" });
 assert.equal(configured.categoryCode, "construction", "an empty tenant can select its single rental category");
+assert.throws(() => service.saveProfile(newTenant, { categoryCode: "vehicle" }), /创建后经营品类固定/, "initialized SaaS tenant category must be immutable even before products are created");
 assert.equal(service.listInspectionTemplates(newTenant, "pickup")[0].categoryCode, "construction");
+assert.throws(() => service.saveItemGroup(newTenant, {
+  code: "EXC-001",
+  name: "测试挖掘机",
+  inventoryMode: "serialized",
+  attributes: { model: "E20" },
+  status: "enabled"
+}), /制造商/, "construction groups must validate their category-specific fields");
+const constructionGroup = service.saveItemGroup(newTenant, {
+  code: "EXC-001",
+  name: "测试挖掘机",
+  inventoryMode: "serialized",
+  attributes: { manufacturer: "测试重工", model: "E20" },
+  status: "enabled"
+});
+const constructionLocation = service.listLocations(newTenant)[0];
+assert.throws(() => service.saveAsset(newTenant, {
+  itemGroupId: constructionGroup.id,
+  assetNo: "EXC-ASSET-001",
+  locationId: constructionLocation.id,
+  attributes: {},
+  status: "available"
+}), /出厂编号/, "construction assets must validate their category-specific identifiers");
+const constructionAsset = service.saveAsset(newTenant, {
+  itemGroupId: constructionGroup.id,
+  assetNo: "EXC-ASSET-001",
+  locationId: constructionLocation.id,
+  attributes: { factoryNo: "FACTORY-001" },
+  status: "available"
+});
+assert.equal(constructionAsset.attributes.factoryNo, "FACTORY-001");
+assert.ok(service.listOperators(cameraTenant).some((operator) => operator.name === "测试摄影合作商"), "partner locations must link to the operator master");
 
 console.log("Rental Core v0.1 test passed: category isolation, bundle reservation, allocation, inspections and quantity availability verified.");

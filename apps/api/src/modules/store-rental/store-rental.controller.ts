@@ -67,10 +67,25 @@ import type {
   VehicleListQuery
 } from "@store-rental/shared";
 import { StoreRentalService } from "./store-rental.service";
+import { RentalCoreService } from "../rental-core/rental-core.service";
+import { RentalBusinessService, type BusinessContext } from "../rental-core/rental-business.service";
+
+interface AuthenticatedRequest { user: { tenantId: string; displayName: string } }
 
 @Controller("store-rental")
 export class StoreRentalController {
-  constructor(private readonly storeRentalService: StoreRentalService) {}
+  constructor(
+    private readonly storeRentalService: StoreRentalService,
+    private readonly rentalCoreService: RentalCoreService,
+    private readonly rentalBusinessService: RentalBusinessService
+  ) {}
+
+  private rentalContext(tenantId: string): BusinessContext {
+    const profile = this.rentalCoreService.getProfile(tenantId);
+    const category = this.rentalCoreService.listCategories().find((item) => item.code === profile.categoryCode);
+    if (!category) throw new Error("租户经营品类定义不存在");
+    return { profile, category, settings: this.rentalCoreService.getBusinessSettings(tenantId), groups: this.rentalCoreService.listItemGroups(tenantId), couponTemplates: this.rentalCoreService.listCouponTemplates(tenantId) };
+  }
 
   @Get("data-dictionary")
   dataDictionary() {
@@ -513,13 +528,26 @@ export class StoreRentalController {
   }
 
   @Post("members")
-  createMember(@Body() body: SaveMemberRequest) {
-    return this.storeRentalService.saveMember(body);
+  async createMember(@Req() req: AuthenticatedRequest, @Body() body: SaveMemberRequest) {
+    const member = await this.storeRentalService.saveMember(body);
+    const context = this.rentalContext(req.user.tenantId);
+    this.rentalBusinessService.registerReferral(req.user.tenantId, context, member.id, body.referrerCustomerId);
+    this.rentalBusinessService.handleCustomerEvent(req.user.tenantId, context, member.id, "registration");
+    if (member.identityVerified) this.rentalBusinessService.handleCustomerEvent(req.user.tenantId, context, member.id, "identity_verified");
+    this.rentalBusinessService.emitNotificationEvent(req.user.tenantId, context, "member.registered", member.phone, { customerName: member.name });
+    await this.rentalBusinessService.persist(req.user.tenantId);
+    return member;
   }
 
   @Put("members/:id")
-  updateMember(@Param("id") id: string, @Body() body: SaveMemberRequest) {
-    return this.storeRentalService.saveMember({ ...body, id });
+  async updateMember(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveMemberRequest) {
+    const previous = await this.storeRentalService.getMemberDetail(id);
+    const member = await this.storeRentalService.saveMember({ ...body, id });
+    const context = this.rentalContext(req.user.tenantId);
+    this.rentalBusinessService.registerReferral(req.user.tenantId, context, member.id, body.referrerCustomerId);
+    if (!previous.identityVerified && member.identityVerified) this.rentalBusinessService.handleCustomerEvent(req.user.tenantId, context, member.id, "identity_verified");
+    await this.rentalBusinessService.persist(req.user.tenantId);
+    return member;
   }
 
   @Post("members/:id/risk-actions")

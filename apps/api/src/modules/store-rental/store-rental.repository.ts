@@ -1646,9 +1646,9 @@ export class StoreRentalRepository {
       : undefined;
   }
 
-  async getMemberDetail(id: string): Promise<MemberDetail> {
-    const row = await this.prisma.member.findUnique({
-      where: { id },
+  async getMemberDetail(id: string, tenantId = this.defaultTenantId): Promise<MemberDetail> {
+    const row = await this.prisma.member.findFirst({
+      where: { id, tenantId },
       include: {
         orders: { orderBy: { createdAt: "desc" }, take: 10 },
         timeline: { orderBy: { createdAt: "desc" }, take: 80 }
@@ -1677,8 +1677,13 @@ export class StoreRentalRepository {
     }
 
     const current = input.id
-      ? await this.prisma.member.findUnique({ where: { id: input.id } })
+      ? await this.prisma.member.findFirst({ where: { id: input.id, tenantId } })
       : undefined;
+    if (input.referrerCustomerId && input.referrerCustomerId === current?.id) throw new BadRequestException("会员不能邀请自己。");
+    if (input.referrerCustomerId) {
+      const referrer = await this.prisma.member.findFirst({ where: { id: input.referrerCustomerId, tenantId } });
+      if (!referrer) throw new BadRequestException("邀请人不存在或不属于当前租户。");
+    }
     const memberId = current?.id ?? input.id ?? `member_${cryptoRandomId()}`;
     const reviewStatus =
       input.status === "pending_review"
@@ -1709,6 +1714,7 @@ export class StoreRentalRepository {
         emergencyContactPhone: input.emergencyContactPhone,
         notes: input.notes,
         riskNote: input.riskNote
+        ,referrerCustomerId: input.referrerCustomerId
       },
       create: {
         id: memberId,
@@ -1731,6 +1737,7 @@ export class StoreRentalRepository {
         emergencyContactPhone: input.emergencyContactPhone,
         notes: input.notes,
         riskNote: input.riskNote
+        ,referrerCustomerId: input.referrerCustomerId
       }
     });
 
@@ -1778,7 +1785,7 @@ export class StoreRentalRepository {
     input: ProcessMemberReviewRequest
   ) {
     const memberId = reviewId.replace(/^review_/, "");
-    const member = await this.prisma.member.findUnique({ where: { id: memberId } });
+    const member = await this.prisma.member.findFirst({ where: { id: memberId, tenantId: this.defaultTenantId } });
     if (!member) {
       throw new NotFoundException(`Member review ${reviewId} was not found`);
     }
@@ -1834,7 +1841,7 @@ export class StoreRentalRepository {
   }
 
   async processMemberRisk(id: string, input: ProcessMemberRiskRequest) {
-    const member = await this.prisma.member.findUnique({ where: { id } });
+    const member = await this.prisma.member.findFirst({ where: { id, tenantId: this.defaultTenantId } });
     if (!member) {
       throw new NotFoundException(`Member ${id} was not found`);
     }
@@ -1898,7 +1905,7 @@ export class StoreRentalRepository {
   }
 
   async recordMemberOrderCreated(id: string, orderNo: string) {
-    const member = await this.prisma.member.findUnique({ where: { id } });
+    const member = await this.prisma.member.findFirst({ where: { id, tenantId: this.defaultTenantId } });
     if (!member) {
       return;
     }
@@ -5378,6 +5385,7 @@ export class StoreRentalRepository {
       emergencyContactPhone: row.emergencyContactPhone ?? undefined,
       notes: row.notes ?? undefined,
       riskNote: row.riskNote ?? undefined,
+      referrerCustomerId: row.referrerCustomerId ?? undefined,
       recentOrderNos: (row.orders ?? []).map((order: { orderNo: string }) => order.orderNo),
       timeline: (row.timeline ?? []).map((item: any) => {
         const detail = this.objectMetadata(item.detail);

@@ -5,7 +5,7 @@ import {
   Injectable,
   UnauthorizedException
 } from "@nestjs/common";
-import type { RentalCapability, SystemUserRow } from "@store-rental/shared";
+import { RentalCategoryCode, type RentalCapability, type SystemUserRow } from "@store-rental/shared";
 import { AuthService } from "../modules/auth/auth.service";
 import { enterRequestIdentity } from "./request-identity";
 
@@ -24,6 +24,24 @@ function requiredCapability(path: string): RentalCapability | undefined {
   if (path.startsWith("/store-rental/dispatch") || path.startsWith("/store-rental/vehicles/transfer-tasks")) return "dispatch";
   if (path.startsWith("/store-rental/tbox-devices")) return "iot";
   return undefined;
+}
+
+function requiresVehicleCategory(path: string) {
+  return [
+    "/reports",
+    "/store-rental/availability",
+    "/store-rental/contracts",
+    "/store-rental/dispatch",
+    "/store-rental/finance",
+    "/store-rental/orders",
+    "/store-rental/pricing",
+    "/store-rental/stations",
+    "/store-rental/tbox-devices",
+    "/store-rental/value-added-services",
+    "/store-rental/vehicle-groups",
+    "/store-rental/vehicles",
+    "/store-rental/workflow"
+  ].some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
 }
 
 function requiredPermissions(method: string, path: string) {
@@ -88,21 +106,50 @@ function requiredPermissions(method: string, path: string) {
   if (path === "/rental/v1/categories") {
     return ["system:tenant:manage", "store-rental:order:view", "store-rental:vehicle:view"];
   }
+  if (path === "/rental/v1/tenant-profile") {
+    return method === "GET" ? ["store-rental:order:view", "store-rental:vehicle:view"] : ["store-rental:rules:manage", "store-rental:price:manage"];
+  }
   if (path === "/rental/v1/business-settings") {
-    return ["store-rental:price:manage"];
+    return method === "GET" ? ["store-rental:rules:manage", "store-rental:price:manage", "store-rental:order:view", "store-rental:order:create"] : ["store-rental:rules:manage", "store-rental:price:manage"];
+  }
+  if (path.startsWith("/rental/v1/rule-versions") || path.startsWith("/rental/v1/calendars") || path.startsWith("/rental/v1/rewards") || path.startsWith("/rental/v1/benefit-accounts") || path.startsWith("/rental/v1/notification-templates") || path.startsWith("/rental/v1/notification-logs") || path === "/rental/v1/notifications/send") {
+    return ["store-rental:rules:manage", "store-rental:price:manage"];
   }
   if (path === "/rental/v1/coupon-templates" || path.startsWith("/rental/v1/coupon-templates/")) {
     return ["store-rental:marketing:manage", "store-rental:price:manage"];
   }
-  if (path === "/rental/v1/locations" || path.startsWith("/rental/v1/locations/")) {
+  if (path.startsWith("/rental/v1/discount-plans") || path.startsWith("/rental/v1/customer-coupons")) {
+    return method === "GET" ? ["store-rental:marketing:manage", "store-rental:price:manage", "store-rental:order:view"] : ["store-rental:marketing:manage", "store-rental:price:manage", "store-rental:order:operate"];
+  }
+  if (path.startsWith("/rental/v1/pricing-plans") || path.startsWith("/rental/v1/value-added-services")) {
+    return method === "GET" ? ["store-rental:price:manage", "store-rental:order:view", "store-rental:order:create"] : ["store-rental:price:manage"];
+  }
+  if (path === "/rental/v1/locations" || path.startsWith("/rental/v1/locations/") || path.startsWith("/rental/v1/fulfillment-operators")) {
     return method === "GET" ? ["store-rental:station:view"] : ["store-rental:station:manage"];
   }
   if (path === "/rental/v1/item-groups" || path.startsWith("/rental/v1/item-groups/")) {
-    return ["store-rental:vehicle-group:manage"];
+    return method === "GET" ? ["store-rental:vehicle-group:manage", "store-rental:vehicle:view", "store-rental:order:view", "store-rental:order:create"] : ["store-rental:vehicle-group:manage"];
   }
   if (path === "/rental/v1/assets" || path.startsWith("/rental/v1/assets/") || path === "/rental/v1/stock-balances") {
     return method === "GET" ? ["store-rental:vehicle:view"] : ["store-rental:vehicle:manage"];
   }
+  if (path === "/rental/v1/availability") {
+    return ["store-rental:order:operate", "store-rental:order:create", "store-rental:vehicle:view"];
+  }
+  if (path.startsWith("/rental/v1/quotes")) {
+    return method === "GET" ? ["store-rental:order:view"] : ["store-rental:order:operate", "store-rental:order:create"];
+  }
+  if (path === "/rental/v1/orders") {
+    return method === "GET" ? ["store-rental:order:view"] : ["store-rental:order:operate", "store-rental:order:create"];
+  }
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+$/)) {
+    return ["store-rental:order:view"];
+  }
+  if (path.startsWith("/rental/v1/inspection-templates") || path.match(/^\/rental\/v1\/orders\/[^/]+\/inspections$/)) {
+    return method === "GET" ? ["store-rental:order:view"] : ["store-rental:order:operate", "store-rental:order:pickup", "store-rental:order:return"];
+  }
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/cancel$/)) return ["store-rental:order:cancel", "store-rental:order:operate"];
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/(confirm|allocate|handover\/[^/]+)$/)) return ["store-rental:order:operate"];
   if (path.startsWith("/rental/v1")) {
     return method === "GET"
       ? ["store-rental:order:view", "store-rental:vehicle:view"]
@@ -322,9 +369,13 @@ export class ApiAuthGuard implements CanActivate {
       throw new ForbiddenException("当前账号无权访问该功能");
     }
     const capability = requiredCapability(path);
-    if (capability && !user.isSaasAdmin) {
+    const vehicleCategoryRequired = requiresVehicleCategory(path);
+    if ((capability || vehicleCategoryRequired) && !user.isSaasAdmin) {
       const tenant = await this.authService.getTenantContext(user.tenantId);
-      if (!tenant.capabilities?.includes(capability)) {
+      if (vehicleCategoryRequired && tenant.categoryCode !== RentalCategoryCode.Vehicle) {
+        throw new ForbiddenException("该接口属于旧车辆兼容域，当前租户经营品类不可用");
+      }
+      if (capability && !tenant.capabilities?.includes(capability)) {
         throw new ForbiddenException("当前租户经营品类未启用该业务能力");
       }
     }

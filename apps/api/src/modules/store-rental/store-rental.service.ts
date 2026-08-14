@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { createHash, randomUUID } from "node:crypto";
+import { getRequestTenantId } from "../../common/request-identity";
 import {
   BillingMode,
   ConfigStatus,
@@ -1305,6 +1306,27 @@ export class StoreRentalService {
       remark: "门店补录客户，待人工核验证件一致性"
     }
   ];
+  private readonly tenantMembers = new Map<string, MemberDetail[]>();
+  private readonly tenantMemberReviews = new Map<string, MemberReviewTask[]>();
+  private readonly tenantMembershipPlans = new Map<string, MembershipPlanSummary[]>();
+
+  private currentMembers() {
+    const tenantId = getRequestTenantId();
+    if (!this.tenantMembers.has(tenantId)) this.tenantMembers.set(tenantId, structuredClone(this.members));
+    return this.tenantMembers.get(tenantId)!;
+  }
+
+  private currentMemberReviews() {
+    const tenantId = getRequestTenantId();
+    if (!this.tenantMemberReviews.has(tenantId)) this.tenantMemberReviews.set(tenantId, structuredClone(this.memberReviews));
+    return this.tenantMemberReviews.get(tenantId)!;
+  }
+
+  private currentMembershipPlans() {
+    const tenantId = getRequestTenantId();
+    if (!this.tenantMembershipPlans.has(tenantId)) this.tenantMembershipPlans.set(tenantId, structuredClone(this.membershipPlans));
+    return this.tenantMembershipPlans.get(tenantId)!;
+  }
 
   private corporates: CorporateDetail[] = [
     {
@@ -1419,7 +1441,7 @@ export class StoreRentalService {
       return this.storeRentalRepository.listMembers(query);
     }
     return this.buildMemberListResult(
-      this.members.map((member) => this.toMemberSummary(member)),
+      this.currentMembers().map((member) => this.toMemberSummary(member)),
       query
     );
   }
@@ -1491,7 +1513,7 @@ export class StoreRentalService {
     if (this.useMysqlDataSource()) {
       return this.storeRentalRepository.getMemberDetail(id);
     }
-    const member = this.members.find((item) => item.id === id);
+    const member = this.currentMembers().find((item) => item.id === id);
     if (!member) {
       throw new NotFoundException(`Member ${id} was not found`);
     }
@@ -1523,22 +1545,27 @@ export class StoreRentalService {
       emergencyContactName: this.optionalString(input.emergencyContactName),
       emergencyContactPhone: this.optionalString(input.emergencyContactPhone),
       notes: this.optionalString(input.notes),
-      riskNote: this.optionalString(input.riskNote)
+      riskNote: this.optionalString(input.riskNote),
+      referrerCustomerId: this.optionalString(input.referrerCustomerId)
     };
 
     if (this.useMysqlDataSource()) {
       return this.storeRentalRepository.saveMember(normalizedInput);
     }
 
-    const duplicated = this.members.some(
+    const members = this.currentMembers();
+    const memberReviews = this.currentMemberReviews();
+    const duplicated = members.some(
       (member) => member.id !== input.id && member.phone === phone
     );
     if (duplicated) {
       throw new BadRequestException("手机号已存在。");
     }
 
-    const existingIndex = this.members.findIndex((item) => item.id === input.id);
-    const current = existingIndex >= 0 ? this.members[existingIndex] : undefined;
+    const existingIndex = members.findIndex((item) => item.id === input.id);
+    const current = existingIndex >= 0 ? members[existingIndex] : undefined;
+    if (normalizedInput.referrerCustomerId && normalizedInput.referrerCustomerId === current?.id) throw new BadRequestException("会员不能邀请自己。");
+    if (normalizedInput.referrerCustomerId && !members.some((member) => member.id === normalizedInput.referrerCustomerId)) throw new BadRequestException("邀请人不存在或不属于当前租户。");
     const detail: MemberDetail = {
       id: current?.id ?? `member_${randomUUID()}`,
       name,
@@ -1568,6 +1595,7 @@ export class StoreRentalService {
       emergencyContactPhone: normalizedInput.emergencyContactPhone,
       notes: normalizedInput.notes,
       riskNote: normalizedInput.riskNote,
+      referrerCustomerId: normalizedInput.referrerCustomerId ?? current?.referrerCustomerId,
       recentOrderNos: current?.recentOrderNos || [],
       timeline: [
         {
@@ -1582,13 +1610,13 @@ export class StoreRentalService {
     };
 
     if (existingIndex >= 0) {
-      this.members[existingIndex] = detail;
+      members[existingIndex] = detail;
     } else {
-      this.members.unshift(detail);
+      members.unshift(detail);
     }
 
-    if (detail.reviewStatus === "pending" && !this.memberReviews.some((item) => item.memberId === detail.id)) {
-      this.memberReviews.unshift({
+    if (detail.reviewStatus === "pending" && !memberReviews.some((item) => item.memberId === detail.id)) {
+      memberReviews.unshift({
         id: `review_${detail.id}`,
         memberId: detail.id,
         memberName: detail.name,
@@ -1608,7 +1636,7 @@ export class StoreRentalService {
     if (this.useMysqlDataSource()) {
       return this.storeRentalRepository.listMemberReviews();
     }
-    return this.memberReviews;
+    return this.currentMemberReviews();
   }
 
   processMemberReview(id: string, input: ProcessMemberReviewRequest) {
@@ -1616,11 +1644,11 @@ export class StoreRentalService {
       return this.storeRentalRepository.processMemberReview(id, input);
     }
 
-    const review = this.memberReviews.find((item) => item.id === id);
+    const review = this.currentMemberReviews().find((item) => item.id === id);
     if (!review) {
       throw new NotFoundException(`Member review ${id} was not found`);
     }
-    const member = this.members.find((item) => item.id === review.memberId);
+    const member = this.currentMembers().find((item) => item.id === review.memberId);
     if (!member) {
       throw new NotFoundException(`Member ${review.memberId} was not found`);
     }
@@ -1702,7 +1730,7 @@ export class StoreRentalService {
       };
     }
 
-    const member = this.members.find((item) => item.id === id);
+    const member = this.currentMembers().find((item) => item.id === id);
     if (!member) {
       throw new NotFoundException(`Member ${id} was not found`);
     }
@@ -1787,7 +1815,7 @@ export class StoreRentalService {
     if (this.useMysqlDataSource()) {
       return this.storeRentalRepository.listMembershipPlans();
     }
-    return this.membershipPlans;
+    return this.currentMembershipPlans();
   }
 
   saveMembershipPlan(input: SaveMembershipPlanRequest) {
@@ -1827,8 +1855,9 @@ export class StoreRentalService {
       return this.storeRentalRepository.saveMembershipPlan(normalizedInput);
     }
 
-    const existingIndex = this.membershipPlans.findIndex((item) => item.id === input.id);
-    const duplicated = this.membershipPlans.some(
+    const membershipPlans = this.currentMembershipPlans();
+    const existingIndex = membershipPlans.findIndex((item) => item.id === input.id);
+    const duplicated = membershipPlans.some(
       (item) => item.id !== input.id && item.code === code
     );
     if (duplicated) {
@@ -1836,7 +1865,7 @@ export class StoreRentalService {
     }
 
     const plan: MembershipPlanSummary = {
-      id: existingIndex >= 0 ? this.membershipPlans[existingIndex].id : `member_plan_${randomUUID()}`,
+      id: existingIndex >= 0 ? membershipPlans[existingIndex].id : `member_plan_${randomUUID()}`,
       code,
       name,
       tierRank: normalizedInput.tierRank,
@@ -1849,9 +1878,9 @@ export class StoreRentalService {
     };
 
     if (existingIndex >= 0) {
-      this.membershipPlans[existingIndex] = plan;
+      membershipPlans[existingIndex] = plan;
     } else {
-      this.membershipPlans.unshift(plan);
+      membershipPlans.unshift(plan);
     }
 
     return plan;
@@ -6724,7 +6753,7 @@ export class StoreRentalService {
       case "start-pickup":
         // 黑名单检查（PRD要求：客户命中黑名单时禁止发车）
         if (order.memberId) {
-          const pickupMember = this.members.find((m) => m.id === order.memberId);
+          const pickupMember = this.currentMembers().find((m) => m.id === order.memberId);
           if (pickupMember && pickupMember.status === "blacklisted") {
             throw new BadRequestException("客户已加入黑名单，不能办理取车。请联系风控部门。");
           }
@@ -7385,7 +7414,7 @@ export class StoreRentalService {
       case "start-pickup":
         // 黑名单检查（PRD要求：客户命中黑名单时禁止发车）
         if (order.memberId) {
-          const pickupMember = this.members.find((m) => m.id === order.memberId);
+          const pickupMember = this.currentMembers().find((m) => m.id === order.memberId);
           if (pickupMember && pickupMember.status === "blacklisted") {
             throw new BadRequestException("客户已加入黑名单，不能办理取车。请联系风控部门。");
           }
@@ -11720,7 +11749,7 @@ export class StoreRentalService {
       return this.storeRentalRepository.getMemberDetail(id);
     }
 
-    const member = this.members.find((item) => item.id === id);
+    const member = this.currentMembers().find((item) => item.id === id);
     if (!member) {
       throw new NotFoundException(`Member ${id} was not found`);
     }

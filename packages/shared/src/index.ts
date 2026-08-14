@@ -2633,6 +2633,7 @@ export interface MemberDetail extends MemberSummary {
   emergencyContactPhone?: string;
   notes?: string;
   riskNote?: string;
+  referrerCustomerId?: string;
   recentOrderNos: string[];
   timeline: MemberTimelineRecord[];
   photos?: Record<string, string>;
@@ -2656,6 +2657,7 @@ export interface SaveMemberRequest {
   emergencyContactPhone?: string;
   notes?: string;
   riskNote?: string;
+  referrerCustomerId?: string;
 }
 
 export interface ProcessMemberRiskRequest {
@@ -3858,10 +3860,12 @@ export interface TenantRentalBusinessSettings {
     signupRewardEnabled: boolean;
     signupRewardType: "points" | "balance" | "coupon";
     signupRewardAmount: number;
+    signupRewardCouponTemplateId?: string;
     referralRewardEnabled: boolean;
     referralRewardType: "points" | "balance" | "coupon";
     referrerRewardAmount: number;
     inviteeRewardAmount: number;
+    referralRewardCouponTemplateId?: string;
     referralTrigger: "registration" | "identity_verified" | "first_order_completed";
   };
   notifications: {
@@ -3909,6 +3913,339 @@ export interface SaveRentalCouponTemplateRequest {
   effectiveTo: string;
   applicableItemGroupIds?: string[];
   status?: "draft" | "enabled" | "disabled";
+}
+
+export type RentalDayType = "workday" | "weekend" | "statutory_holiday" | "makeup_workday" | "tenant_special";
+
+export interface RentalCalendarDay {
+  date: string;
+  dayType: RentalDayType;
+  name: string;
+  pricingMultiplier: number;
+  closed: boolean;
+  source: "week_rule" | "official_cn" | "tenant_override";
+}
+
+export interface RentalCalendarYear {
+  tenantId: string;
+  year: number;
+  region: "CN" | "NONE";
+  version: string;
+  status: "draft" | "published";
+  sourceName?: string;
+  sourceUrl?: string;
+  sourcePublishedAt?: string;
+  importedAt?: string;
+  publishedAt?: string;
+  days: RentalCalendarDay[];
+}
+
+export interface SaveRentalCalendarDayRequest extends Omit<RentalCalendarDay, "source"> {}
+
+export interface ImportRentalCalendarRequest {
+  year: number;
+  region: "CN";
+  sourceName: string;
+  sourceUrl: string;
+  sourcePublishedAt: string;
+  days: Array<Pick<RentalCalendarDay, "date" | "dayType" | "name"> & Partial<Pick<RentalCalendarDay, "pricingMultiplier" | "closed">>>;
+}
+
+export interface RentalPricingRate {
+  id: string;
+  itemGroupId: string;
+  itemGroupCode: string;
+  itemGroupName: string;
+  unit: RentalPricingUnit;
+  baseAmount: number;
+  weekendMultiplier: number;
+  holidayMultiplier: number;
+  depositAmount: number;
+  minimumUnits: number;
+  includedUsage?: number;
+  excessUsageAmount?: number;
+}
+
+export interface RentalPricingPlanV1 {
+  id: string;
+  tenantId: string;
+  categoryCode: RentalCategoryCode;
+  code: string;
+  name: string;
+  currency: "CNY";
+  status: "draft" | "enabled" | "disabled";
+  version: string;
+  effectiveFrom: string;
+  effectiveTo?: string;
+  rates: RentalPricingRate[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SaveRentalPricingPlanRequest {
+  id?: string;
+  code: string;
+  name: string;
+  status?: "draft" | "enabled" | "disabled";
+  effectiveFrom: string;
+  effectiveTo?: string;
+  changeReason: string;
+  rates: Array<Omit<RentalPricingRate, "id" | "itemGroupCode" | "itemGroupName">>;
+}
+
+export interface RentalDiscountPlan {
+  id: string;
+  tenantId: string;
+  categoryCode: RentalCategoryCode;
+  code: string;
+  name: string;
+  status: "draft" | "enabled" | "disabled";
+  discountType: "percentage" | "fixed_amount";
+  discountValue: number;
+  minimumSpend: number;
+  maximumDiscount?: number;
+  customerScope: "all" | "personal" | "corporate" | "member";
+  applicableItemGroupIds: string[];
+  applicableDayTypes: RentalDayType[];
+  priority: number;
+  stackableWithCoupon: boolean;
+  effectiveFrom: string;
+  effectiveTo?: string;
+  version: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SaveRentalDiscountPlanRequest extends Omit<RentalDiscountPlan, "id" | "tenantId" | "categoryCode" | "version" | "createdAt" | "updatedAt"> {
+  id?: string;
+  changeReason: string;
+}
+
+export interface RentalValueAddedService {
+  id: string;
+  tenantId: string;
+  categoryCode: RentalCategoryCode;
+  code: string;
+  name: string;
+  serviceType: "insurance" | "damage_waiver" | "delivery" | "consumable" | "operator" | "support" | "other";
+  billingUnit: "per_order" | "per_day" | "per_unit";
+  price: number;
+  maximumQuantity: number;
+  coverageLimit?: number;
+  deductible?: number;
+  termsVersion: string;
+  terms: string;
+  applicableItemGroupIds: string[];
+  status: "enabled" | "disabled";
+  version: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SaveRentalValueAddedServiceRequest extends Omit<RentalValueAddedService, "id" | "tenantId" | "categoryCode" | "version" | "createdAt" | "updatedAt"> {
+  id?: string;
+}
+
+export interface RentalRuleConfig {
+  payment: {
+    timing: "order" | "confirmation" | "pickup" | "offline_terms";
+    depositMode: "none" | "fixed" | "price_multiple" | "preauthorization";
+    preauthorizationRequired: boolean;
+    unpaidHoldMinutes: number;
+  };
+  fulfillment: {
+    pickupInspectionRequired: boolean;
+    returnInspectionRequired: boolean;
+    evidenceRequired: boolean;
+    allowDifferentReturnLocation: boolean;
+  };
+  overdue: {
+    graceMinutes: number;
+    feeMode: "none" | "hourly" | "next_period" | "multiplier" | "manual_review";
+    feeMultiplier: number;
+    maximumFee?: number;
+  };
+  cancellation: {
+    freeBeforeHours: number;
+    lateFeeType: "none" | "fixed_amount" | "percentage";
+    lateFeeValue: number;
+    weatherExceptionEnabled: boolean;
+  };
+  qualification: {
+    required: boolean;
+    documentTypes: string[];
+    minimumValidityDays: number;
+  };
+  damage: {
+    manualReviewRequired: boolean;
+    chargeLimit?: number;
+  };
+}
+
+export interface RentalRuleVersion {
+  id: string;
+  tenantId: string;
+  categoryCode: RentalCategoryCode;
+  version: string;
+  status: "draft" | "published" | "retired";
+  config: RentalRuleConfig;
+  changeReason: string;
+  createdBy: string;
+  createdAt: string;
+  publishedAt?: string;
+}
+
+export interface SaveRentalRuleVersionRequest {
+  config: RentalRuleConfig;
+  changeReason: string;
+  publish?: boolean;
+}
+
+export type RentalCustomerCouponStatus = "claimed" | "locked" | "redeemed" | "expired" | "void";
+
+export interface RentalCustomerCoupon {
+  id: string;
+  tenantId: string;
+  customerId: string;
+  templateId: string;
+  templateCode: string;
+  templateName: string;
+  status: RentalCustomerCouponStatus;
+  claimedAt: string;
+  effectiveFrom: string;
+  effectiveTo: string;
+  lockedOrderId?: string;
+  lockedAt?: string;
+  redeemedOrderId?: string;
+  redeemedAt?: string;
+  releasedAt?: string;
+}
+
+export interface RentalRewardLedgerEntry {
+  id: string;
+  tenantId: string;
+  customerId: string;
+  rewardType: "points" | "balance" | "coupon";
+  amount: number;
+  triggerType: "registration" | "identity_verified" | "first_order_completed" | "referral";
+  idempotencyKey: string;
+  relatedCustomerId?: string;
+  status: "granted" | "reversed";
+  reason: string;
+  benefitReferenceIds?: string[];
+  appliedAt?: string;
+  createdAt: string;
+  reversedAt?: string;
+}
+
+export interface RentalCustomerBenefitAccount {
+  tenantId: string;
+  customerId: string;
+  pointsBalance: number;
+  marketingBalance: number;
+  availableRewardCouponCount: number;
+  updatedAt: string;
+}
+
+export interface GrantRentalRewardRequest {
+  customerId: string;
+  triggerType: RentalRewardLedgerEntry["triggerType"];
+  idempotencyKey: string;
+  relatedCustomerId?: string;
+}
+
+export interface RentalNotificationTemplateV1 {
+  id: string;
+  tenantId: string;
+  eventCode: string;
+  channel: "sms" | "app_push" | "wechat" | "email";
+  name: string;
+  title: string;
+  body: string;
+  variableSchema: Record<string, { label: string; required: boolean }>;
+  status: "enabled" | "disabled";
+  version: string;
+  updatedAt: string;
+}
+
+export interface SaveRentalNotificationTemplateRequest extends Omit<RentalNotificationTemplateV1, "id" | "tenantId" | "version" | "updatedAt"> {
+  id?: string;
+}
+
+export interface RentalNotificationSendLogV1 {
+  id: string;
+  tenantId: string;
+  templateId: string;
+  templateVersion: string;
+  eventCode: string;
+  channel: RentalNotificationTemplateV1["channel"];
+  recipient: string;
+  renderedTitle: string;
+  renderedBody: string;
+  variables: Record<string, unknown>;
+  status: "queued" | "sent" | "failed";
+  provider: string;
+  providerMessageId?: string;
+  errorMessage?: string;
+  attempts: number;
+  createdAt: string;
+  sentAt?: string;
+}
+
+export interface SendRentalNotificationRequest {
+  templateId: string;
+  recipient: string;
+  variables: Record<string, unknown>;
+}
+
+export interface RentalQuoteRequest {
+  customerType: "personal" | "corporate";
+  customerId?: string;
+  fulfillmentMode: RentalFulfillmentMode;
+  fulfillmentLocationId: string;
+  returnLocationId?: string;
+  startAt: string;
+  endAt: string;
+  pricingPlanId?: string;
+  discountPlanId?: string;
+  customerCouponId?: string;
+  lines: Array<{ itemGroupId: string; quantity: number; pricingUnit?: RentalPricingUnit; usageQuantity?: number; note?: string }>;
+  services?: Array<{ serviceId: string; quantity: number }>;
+}
+
+export interface RentalQuoteChargeLine {
+  code: string;
+  name: string;
+  type: "rental" | "calendar_adjustment" | "discount" | "coupon" | "service" | "deposit" | "cancellation" | "overdue" | "damage";
+  amount: number;
+  sourceId?: string;
+  sourceVersion?: string;
+  detail?: string;
+}
+
+export interface RentalQuoteSnapshotV1 {
+  id: string;
+  tenantId: string;
+  quoteNo: string;
+  categoryCode: RentalCategoryCode;
+  request: RentalQuoteRequest;
+  chargeLines: RentalQuoteChargeLine[];
+  rentalAmount: number;
+  discountAmount: number;
+  couponAmount: number;
+  serviceAmount: number;
+  depositAmount: number;
+  payableAmount: number;
+  pricingPlanVersion: string;
+  ruleVersion: string;
+  ruleSnapshot: RentalRuleConfig;
+  calendarVersion?: string;
+  appliedDiscountPlanIds: string[];
+  customerCouponId?: string;
+  expiresAt: string;
+  createdAt: string;
+  consumedAt?: string;
+  consumedOrderId?: string;
 }
 
 const commonSettingModules: RentalSettingModule[] = [
@@ -4065,6 +4402,7 @@ export interface RentalFulfillmentLocation {
   code: string;
   name: string;
   type: RentalLocationType;
+  operatorId?: string;
   operatorType?: "self_operated" | "partner";
   operatorName?: string;
   parentLocationId?: string;
@@ -4081,14 +4419,40 @@ export interface SaveRentalFulfillmentLocationRequest {
   code: string;
   name: string;
   type: RentalLocationType;
-  operatorType: "self_operated" | "partner";
-  operatorName: string;
+  operatorId?: string;
+  operatorType?: "self_operated" | "partner";
+  operatorName?: string;
   parentLocationId?: string;
   capabilities: Array<"pickup" | "return" | "storage" | "delivery">;
   address?: string;
   contactName?: string;
   contactPhone?: string;
   businessHours?: string;
+  status?: "enabled" | "disabled";
+}
+
+export interface RentalFulfillmentOperator {
+  id: string;
+  tenantId: string;
+  code: string;
+  name: string;
+  type: "self_operated" | "partner";
+  contactName?: string;
+  contactPhone?: string;
+  settlementMode?: "self" | "monthly" | "per_order";
+  status: "enabled" | "disabled";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SaveRentalFulfillmentOperatorRequest {
+  id?: string;
+  code: string;
+  name: string;
+  type: "self_operated" | "partner";
+  contactName?: string;
+  contactPhone?: string;
+  settlementMode?: "self" | "monthly" | "per_order";
   status?: "enabled" | "disabled";
 }
 
@@ -4207,20 +4571,29 @@ export interface RentalAvailabilityResult {
 }
 
 export interface CreateRentalOrderRequest {
+  quoteId: string;
   customerType: "personal" | "corporate";
   customerId?: string;
   customerName: string;
   contactPhone?: string;
+  qualificationApproved?: boolean;
+  qualificationValidTo?: string;
+  fulfillmentMode: RentalFulfillmentMode;
   fulfillmentLocationId: string;
+  returnLocationId?: string;
   startAt: string;
   endAt: string;
   lines: Array<{
     itemGroupId: string;
     quantity: number;
-    unitPrice: number;
     note?: string;
   }>;
   operator?: string;
+}
+
+export interface CancelRentalOrderRequest {
+  reason: string;
+  weatherException?: boolean;
 }
 
 export interface RentalOrderLine {
@@ -4267,10 +4640,31 @@ export interface RentalOrder {
   customerId?: string;
   customerName: string;
   contactPhone?: string;
+  fulfillmentMode: RentalFulfillmentMode;
   fulfillmentLocationId: string;
   fulfillmentLocationName: string;
+  returnLocationId?: string;
+  returnLocationName?: string;
   startAt: string;
   endAt: string;
+  quoteId: string;
+  quoteNo: string;
+  pricingPlanVersion: string;
+  ruleVersion: string;
+  ruleSnapshot: RentalRuleConfig;
+  calendarVersion?: string;
+  chargeLines: RentalQuoteChargeLine[];
+  rentalAmount: number;
+  discountAmount: number;
+  couponAmount: number;
+  serviceAmount: number;
+  depositAmount: number;
+  payableAmount: number;
+  adjustmentAmount: number;
+  finalPayableAmount: number;
+  cancellationReason?: string;
+  cancelledAt?: string;
+  completedAt?: string;
   totalAmount: number;
   lines: RentalOrderLine[];
   reservations: RentalReservation[];

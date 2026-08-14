@@ -16,7 +16,7 @@ import {
   TagsOutlined,
   TeamOutlined
 } from "@ant-design/icons";
-import type { RentalCapability } from "@store-rental/shared";
+import { RentalCategoryCode, type RentalCapability } from "@store-rental/shared";
 import type { ReactNode } from "react";
 
 export interface AppRouteDefinition {
@@ -25,6 +25,7 @@ export interface AppRouteDefinition {
   permission: string;
   icon: ReactNode;
   capability?: RentalCapability;
+  categories?: RentalCategoryCode[];
   menu?: boolean;
 }
 
@@ -41,7 +42,7 @@ export const APP_ROUTES = {
   orderCreate: { path: "/rental/orders/new", label: "新建订单", permission: "store-rental:order:create", icon: <FormOutlined />, menu: true },
   orders: { path: "/rental/orders", label: "订单管理", permission: "store-rental:order:view", icon: <FileTextOutlined />, menu: true },
   orderDetail: { path: "/rental/orders/:id", label: "订单详情", permission: "store-rental:order:view", icon: <FileTextOutlined /> },
-  contracts: { path: "/rental/contracts", label: "合同与单据", permission: "store-rental:order:view", icon: <SafetyCertificateOutlined />, menu: true },
+  contracts: { path: "/rental/contracts", label: "车辆合同与单据", permission: "store-rental:order:view", categories: [RentalCategoryCode.Vehicle], icon: <SafetyCertificateOutlined />, menu: true },
   itemGroups: { path: "/rental/item-groups", label: "商品目录", permission: "store-rental:vehicle-group:manage", icon: <AppstoreOutlined />, menu: true },
   assets: { path: "/rental/assets", label: "资产与库存", permission: "store-rental:vehicle:view", icon: <BoxPlotOutlined />, menu: true },
   locations: { path: "/rental/locations", label: "履约地点", permission: "store-rental:station:view", icon: <ShopOutlined />, menu: true },
@@ -51,12 +52,12 @@ export const APP_ROUTES = {
   services: { path: "/rental/services", label: "增值服务", permission: "store-rental:price:manage", icon: <SafetyCertificateOutlined />, menu: true },
   rentalSettings: { path: "/rental/settings", label: "品类与业务规则", permission: "store-rental:price:manage", icon: <SettingOutlined />, menu: true },
   customers: { path: "/customers", label: "客户、会员与企业", permission: "store-rental:member:view", icon: <TeamOutlined />, menu: true },
-  finance: { path: "/finance", label: "财务结算", permission: "store-rental:finance:view", icon: <BankOutlined />, menu: true },
-  operations: { path: "/operations", label: "履约调度", permission: "store-rental:dispatch:manage", capability: "dispatch", icon: <ControlOutlined />, menu: true },
-  assetOperations: { path: "/asset-operations", label: "资产调拨与设备", permission: "store-rental:vehicle:view", capability: "dispatch", icon: <SwapOutlined />, menu: true },
-  assetLifecycle: { path: "/asset-lifecycle", label: "资产生命周期", permission: "store-rental:vehicle:view", icon: <BoxPlotOutlined />, menu: true },
-  businessTools: { path: "/business-tools", label: "运营控制台", permission: "store-rental:dispatch:manage", capability: "iot", icon: <ControlOutlined />, menu: true },
-  reports: { path: "/reports", label: "经营报表", permission: "store-rental:report:view", icon: <BarChartOutlined />, menu: true },
+  finance: { path: "/finance", label: "车辆财务结算", permission: "store-rental:finance:view", categories: [RentalCategoryCode.Vehicle], icon: <BankOutlined />, menu: true },
+  operations: { path: "/operations", label: "车辆履约调度", permission: "store-rental:dispatch:manage", capability: "dispatch", categories: [RentalCategoryCode.Vehicle], icon: <ControlOutlined />, menu: true },
+  assetOperations: { path: "/asset-operations", label: "车辆调拨与 TBox", permission: "store-rental:vehicle:view", capability: "dispatch", categories: [RentalCategoryCode.Vehicle], icon: <SwapOutlined />, menu: true },
+  assetLifecycle: { path: "/asset-lifecycle", label: "车辆生命周期", permission: "store-rental:vehicle:view", categories: [RentalCategoryCode.Vehicle], icon: <BoxPlotOutlined />, menu: true },
+  businessTools: { path: "/business-tools", label: "车辆运营控制台", permission: "store-rental:dispatch:manage", capability: "iot", categories: [RentalCategoryCode.Vehicle], icon: <ControlOutlined />, menu: true },
+  reports: { path: "/reports", label: "车辆兼容报表", permission: "store-rental:report:view", categories: [RentalCategoryCode.Vehicle], icon: <BarChartOutlined />, menu: true },
   platformTenants: { path: "/platform/tenants", label: "SaaS 租户", permission: "system:tenant:manage", icon: <ShopOutlined />, menu: true },
   platformUsers: { path: "/platform/users", label: "组织与权限", permission: "system:user:manage", icon: <TeamOutlined />, menu: true },
   platformSystem: { path: "/platform/system", label: "平台参数", permission: "system:params:manage", icon: <SettingOutlined />, menu: true },
@@ -78,7 +79,9 @@ export const APP_NAVIGATION: AppNavigationSection[] = [
 export function canAccessRoute(
   route: AppRouteDefinition,
   hasPermission: (permission?: string) => boolean,
-  hasCapability: (capability?: RentalCapability) => boolean
+  hasCapability: (capability?: RentalCapability) => boolean,
+  categoryCode?: RentalCategoryCode
 ) {
-  return hasPermission(route.permission) && hasCapability(route.capability);
+  const supportsCategory = !route.categories || Boolean(categoryCode && route.categories.includes(categoryCode));
+  return hasPermission(route.permission) && hasCapability(route.capability) && supportsCategory;
 }

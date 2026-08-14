@@ -20,7 +20,8 @@ const appearanceSwitcher = read("apps/admin/src/components/AppearanceSwitcher.ts
 const pageHeader = read("apps/admin/src/components/PageHeader.tsx");
 const loginPage = read("apps/admin/src/features/auth/LoginPage.tsx");
 const styles = read("apps/admin/src/styles.css");
-const commercialPage = read("apps/admin/src/features/commercial/CommercialWorkspacePage.tsx");
+const commercialPage = read("apps/admin/src/features/commercial/RentalCommercialPage.tsx");
+const governancePage = read("apps/admin/src/features/settings/RentalGovernancePage.tsx");
 const locationPage = read("apps/admin/src/features/fulfillment/LocationPage.tsx");
 const platformPage = read("apps/admin/src/features/platform/PlatformPage.tsx");
 const tenantManagementPage = read("apps/admin/src/features/platform/TenantManagementPage.tsx");
@@ -46,8 +47,8 @@ const themeSource = read("apps/admin/src/app/theme.tsx");
 ].forEach((method) => requireText(api, `${method}:`, "API write coverage"));
 
 [
-  "categories", "profile", "businessSettings", "saveBusinessSettings", "couponTemplates", "saveCouponTemplate", "locations", "saveLocation", "itemGroups", "assets", "stockBalances", "availability", "orders",
-  "createOrder", "confirmOrder", "allocateOrder", "cancelOrder", "inspectionTemplates", "createInspection"
+  "categories", "profile", "businessSettings", "saveBusinessSettings", "couponTemplates", "saveCouponTemplate", "operators", "saveOperator", "locations", "saveLocation", "itemGroups", "assets", "stockBalances", "availability", "orders",
+  "createOrder", "confirmOrder", "allocateOrder", "cancelOrder", "inspectionTemplates", "createInspection", "pricingPlans", "discountPlans", "valueAddedServices", "calendar", "ruleVersions", "rewards", "notificationTemplates", "createQuote"
 ].forEach((method) => requireText(rentalCoreApi, `${method}:`, "Rental Core API coverage"));
 [
   "Rental Core v0.1", "序列化资产", "数量库存", "套装", "确认预占", "执行配货"
@@ -82,8 +83,10 @@ if (sessionCacheClearCount < 4) {
 }
 
 [
-  [commercialPage, "listRentalRuleVersions", "rule version list UI"],
-  [commercialPage, "getRentalRuleVersion", "rule version detail UI"],
+  [commercialPage, "rentalCoreApi.pricingPlans", "generic pricing UI"],
+  [commercialPage, "rentalCoreApi.discountPlans", "generic discount UI"],
+  [governancePage, "rentalCoreApi.ruleVersions", "generic rule version UI"],
+  [governancePage, "rentalCoreApi.notificationTemplates", "tenant notification template UI"],
   [locationPage, "rentalCoreApi.saveLocation", "generic fulfillment location UI"],
   [tenantManagementPage, "listTenants", "tenant list UI"],
   [tenantManagementPage, "bootstrapTenant", "tenant bootstrap UI"],
@@ -97,8 +100,14 @@ if (sessionCacheClearCount < 4) {
 ].forEach(([source, expected, label]) => requireText(source, expected, label));
 
 [
-  "租赁工作台", "基础定价", "优惠方案", "优惠券", "增值服务", "品类与业务规则", "客户、会员与企业", "财务结算", "资产调拨与设备", "资产生命周期", "运营控制台", "组织与权限", "平台工具与治理"
+  "租赁工作台", "基础定价", "优惠方案", "优惠券", "增值服务", "品类与业务规则", "客户、会员与企业", "车辆财务结算", "车辆调拨与 TBox", "车辆生命周期", "车辆运营控制台", "组织与权限", "平台工具与治理"
 ].forEach((label) => requireText(navigation, label, "navigation registry coverage"));
+requireText(navigation, "categories?: RentalCategoryCode[]", "category-specific route metadata");
+requireText(navigation, "route.categories.includes(categoryCode)", "category-specific route guard");
+for (const routeKey of ["contracts", "finance", "operations", "assetOperations", "assetLifecycle", "businessTools", "reports"]) {
+  const routePattern = new RegExp(`${routeKey}: \\{[^\\n]+categories: \\[RentalCategoryCode\\.Vehicle\\]`);
+  if (!routePattern.test(navigation)) failures.push(`vehicle compatibility boundary: ${routeKey} must be hidden from non-vehicle tenants`);
+}
 
 requireText(shell, "APP_NAVIGATION", "shell consumes unified navigation registry");
 requireText(router, "APP_ROUTES", "router consumes unified route registry");

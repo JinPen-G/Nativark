@@ -296,8 +296,28 @@ model Tenant {
   rentalInspectionTemplates RentalInspectionTemplate[]
   rentalInspectionRecords   RentalInspectionRecord[]
   rentalCouponTemplates     RentalCouponTemplate[]
+  rentalCoreStateSnapshot   RentalCoreStateSnapshot?
+  rentalBusinessStateSnapshot RentalBusinessStateSnapshot?
   createdAt                 DateTime                    @default(now())
   updatedAt                 DateTime                    @updatedAt
+}
+
+model RentalCoreStateSnapshot {
+  tenantId  String   @id
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  state     Json
+  updatedAt DateTime @updatedAt
+
+  @@map("rental_core_state_snapshots")
+}
+
+model RentalBusinessStateSnapshot {
+  tenantId  String   @id
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  state     Json
+  updatedAt DateTime @updatedAt
+
+  @@map("rental_business_state_snapshots")
 }
 
 model OrganizationUnit {
@@ -801,6 +821,7 @@ model Member {
   emergencyContactPhone String?
   riskNote              String?
   notes                 String?
+  referrerCustomerId    String?
   lastOrderAt           DateTime?
   orders                StoreRentalOrder[]
   riskEvents            MemberRiskEvent[]
@@ -810,6 +831,7 @@ model Member {
 
   @@unique([tenantId, phone])
   @@index([tenantId, status, reviewStatus])
+  @@index([tenantId, referrerCustomerId])
 }
 
 model MemberRiskEvent {

@@ -1,0 +1,780 @@
+import { BadRequestException, ConflictException, Injectable, NotFoundException, OnModuleInit, Optional } from "@nestjs/common";
+import { randomUUID } from "node:crypto";
+import {
+  RentalCategoryCode,
+  type GrantRentalRewardRequest,
+  type ImportRentalCalendarRequest,
+  type RentalCalendarDay,
+  type RentalCalendarYear,
+  type RentalCategoryDefinition,
+  type RentalCouponTemplate,
+  type RentalCustomerBenefitAccount,
+  type RentalCustomerCoupon,
+  type RentalDayType,
+  type RentalDiscountPlan,
+  type RentalItemGroup,
+  type RentalNotificationSendLogV1,
+  type RentalNotificationTemplateV1,
+  type RentalPricingPlanV1,
+  type RentalPricingRate,
+  type RentalPricingUnit,
+  type RentalQuoteRequest,
+  type RentalQuoteSnapshotV1,
+  type RentalRewardLedgerEntry,
+  type RentalRuleConfig,
+  type RentalRuleVersion,
+  type RentalValueAddedService,
+  type SaveRentalCalendarDayRequest,
+  type SaveRentalDiscountPlanRequest,
+  type SaveRentalNotificationTemplateRequest,
+  type SaveRentalPricingPlanRequest,
+  type SaveRentalRuleVersionRequest,
+  type SaveRentalValueAddedServiceRequest,
+  type SendRentalNotificationRequest,
+  type TenantRentalBusinessSettings,
+  type TenantRentalProfile
+} from "@store-rental/shared";
+import { RentalStateRepository } from "./rental-state.repository";
+
+interface RentalBusinessState {
+  categoryCode: RentalCategoryCode;
+  pricingPlans: RentalPricingPlanV1[];
+  discountPlans: RentalDiscountPlan[];
+  services: RentalValueAddedService[];
+  calendars: RentalCalendarYear[];
+  ruleVersions: RentalRuleVersion[];
+  customerCoupons: RentalCustomerCoupon[];
+  rewardLedger: RentalRewardLedgerEntry[];
+  benefitAccounts: RentalCustomerBenefitAccount[];
+  referrals: Array<{ inviteeCustomerId: string; referrerCustomerId: string; registeredAt: string }>;
+  notificationTemplates: RentalNotificationTemplateV1[];
+  notificationLogs: RentalNotificationSendLogV1[];
+  quotes: RentalQuoteSnapshotV1[];
+}
+
+interface BusinessContext {
+  profile: TenantRentalProfile;
+  category: RentalCategoryDefinition;
+  settings: TenantRentalBusinessSettings;
+  groups: RentalItemGroup[];
+  couponTemplates: RentalCouponTemplate[];
+}
+
+const stamp = () => new Date().toISOString();
+const uid = (prefix: string) => `${prefix}_${randomUUID().slice(0, 8)}`;
+const roundMoney = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
+const dayMs = 24 * 60 * 60 * 1000;
+
+function versionAfter(current?: string) {
+  if (!current) return "1.0";
+  const [major, minor] = current.split(".").map(Number);
+  return `${Number.isFinite(major) ? major : 1}.${(Number.isFinite(minor) ? minor : 0) + 1}`;
+}
+
+function defaultRuleConfig(category: RentalCategoryDefinition, settings: TenantRentalBusinessSettings): RentalRuleConfig {
+  return {
+    payment: {
+      ...settings.payment,
+      unpaidHoldMinutes: 15
+    },
+    fulfillment: {
+      pickupInspectionRequired: true,
+      returnInspectionRequired: true,
+      evidenceRequired: [RentalCategoryCode.Vehicle, RentalCategoryCode.Camera, RentalCategoryCode.Construction].includes(category.code),
+      allowDifferentReturnLocation: settings.fulfillment.allowDifferentReturnLocation
+    },
+    overdue: { ...settings.overdue },
+    cancellation: {
+      freeBeforeHours: category.code === RentalCategoryCode.Construction ? 48 : 24,
+      lateFeeType: "percentage",
+      lateFeeValue: category.code === RentalCategoryCode.Camping ? 10 : 20,
+      weatherExceptionEnabled: category.code === RentalCategoryCode.Camping
+    },
+    qualification: {
+      required: category.businessModel.supportsQualificationReview,
+      documentTypes: category.code === RentalCategoryCode.Vehicle ? ["驾驶证"] : category.code === RentalCategoryCode.Construction ? ["操作资格证"] : [],
+      minimumValidityDays: 1
+    },
+    damage: {
+      manualReviewRequired: true,
+      chargeLimit: undefined
+    }
+  };
+}
+
+function serviceType(name: string): RentalValueAddedService["serviceType"] {
+  if (name.includes("保险")) return "insurance";
+  if (name.includes("免赔")) return "damage_waiver";
+  if (name.includes("配送") || name.includes("运输")) return "delivery";
+  if (name.includes("操作员")) return "operator";
+  if (name.includes("耗材") || name.includes("电池") || name.includes("座椅")) return "consumable";
+  if (name.includes("支持") || name.includes("救援")) return "support";
+  return "other";
+}
+
+@Injectable()
+export class RentalBusinessService implements OnModuleInit {
+  private readonly states = new Map<string, RentalBusinessState>();
+
+  constructor(@Optional() private readonly stateRepository?: RentalStateRepository) {}
+
+  async onModuleInit() {
+    for (const row of await this.stateRepository?.loadBusinessStates() ?? []) {
+      const state = row.state as unknown as RentalBusinessState;
+      if (state?.categoryCode) this.states.set(row.tenantId, state);
+    }
+  }
+
+  async persist(tenantId: string) {
+    const state = this.states.get(tenantId);
+    if (state) await this.stateRepository?.saveBusinessState(tenantId, state);
+  }
+
+  listPricingPlans(tenantId: string, context: BusinessContext) { return this.state(tenantId, context).pricingPlans; }
+
+  savePricingPlan(tenantId: string, context: BusinessContext, input: SaveRentalPricingPlanRequest) {
+    const state = this.state(tenantId, context);
+    if (!input.code?.trim() || !input.name?.trim() || !input.changeReason?.trim()) throw new BadRequestException("定价编码、名称和变更原因不能为空");
+    if (!input.rates.length) throw new BadRequestException("定价计划至少需要一条价格");
+    if (input.effectiveTo && new Date(input.effectiveFrom).getTime() >= new Date(input.effectiveTo).getTime()) throw new BadRequestException("定价计划有效期无效");
+    const supportedUnits = new Set(context.settings.pricing.enabledUnits);
+    const groupMap = new Map(context.groups.map((group) => [group.id, group]));
+    const seen = new Set<string>();
+    const rates: RentalPricingRate[] = input.rates.map((row) => {
+      const group = groupMap.get(row.itemGroupId);
+      if (!group) throw new BadRequestException("定价包含不存在的商品");
+      if (!supportedUnits.has(row.unit)) throw new BadRequestException(`${group.name} 使用了当前品类未启用的计价单位`);
+      const unique = `${row.itemGroupId}:${row.unit}`;
+      if (seen.has(unique)) throw new BadRequestException("同一商品和计价单位不能重复配置");
+      seen.add(unique);
+      for (const value of [row.baseAmount, row.weekendMultiplier, row.holidayMultiplier, row.depositAmount, row.minimumUnits]) {
+        if (!Number.isFinite(value) || value < 0) throw new BadRequestException("价格、倍率、押金和最低计费单位必须是非负数");
+      }
+      return { ...row, id: uid("rate"), itemGroupCode: group.code, itemGroupName: group.name };
+    });
+    const existing = input.id ? state.pricingPlans.find((plan) => plan.id === input.id) : undefined;
+    if (input.id && !existing) throw new NotFoundException("定价计划不存在");
+    if (state.pricingPlans.some((plan) => plan.code === input.code.trim() && plan.id !== input.id)) throw new ConflictException("定价计划编码已存在");
+    const timestamp = stamp();
+    const result: RentalPricingPlanV1 = {
+      id: existing?.id ?? uid("pricing"), tenantId, categoryCode: context.profile.categoryCode,
+      code: input.code.trim(), name: input.name.trim(), currency: "CNY", status: input.status ?? "draft",
+      version: versionAfter(existing?.version), effectiveFrom: input.effectiveFrom, effectiveTo: input.effectiveTo,
+      rates, createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp
+    };
+    if (existing) Object.assign(existing, result); else state.pricingPlans.unshift(result);
+    return result;
+  }
+
+  listDiscountPlans(tenantId: string, context: BusinessContext) { return this.state(tenantId, context).discountPlans; }
+
+  saveDiscountPlan(tenantId: string, context: BusinessContext, input: SaveRentalDiscountPlanRequest) {
+    const state = this.state(tenantId, context);
+    if (!input.code?.trim() || !input.name?.trim() || !input.changeReason?.trim()) throw new BadRequestException("优惠编码、名称和变更原因不能为空");
+    if (input.discountType === "percentage" && (input.discountValue <= 0 || input.discountValue > 100)) throw new BadRequestException("百分比优惠必须大于 0 且不超过 100");
+    if (input.discountType === "fixed_amount" && input.discountValue <= 0) throw new BadRequestException("固定减免必须大于 0");
+    if (input.effectiveTo && new Date(input.effectiveFrom).getTime() >= new Date(input.effectiveTo).getTime()) throw new BadRequestException("优惠方案有效期无效");
+    const groupIds = new Set(context.groups.map((group) => group.id));
+    if (input.applicableItemGroupIds.some((id) => !groupIds.has(id))) throw new BadRequestException("优惠方案包含不存在的商品");
+    const existing = input.id ? state.discountPlans.find((plan) => plan.id === input.id) : undefined;
+    if (input.id && !existing) throw new NotFoundException("优惠方案不存在");
+    if (state.discountPlans.some((plan) => plan.code === input.code.trim() && plan.id !== input.id)) throw new ConflictException("优惠方案编码已存在");
+    const timestamp = stamp();
+    const { changeReason: _changeReason, ...data } = input;
+    const result: RentalDiscountPlan = {
+      ...data, id: existing?.id ?? uid("discount"), tenantId, categoryCode: context.profile.categoryCode,
+      code: input.code.trim(), name: input.name.trim(), version: versionAfter(existing?.version),
+      createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp
+    };
+    if (existing) Object.assign(existing, result); else state.discountPlans.unshift(result);
+    return result;
+  }
+
+  listServices(tenantId: string, context: BusinessContext) { return this.state(tenantId, context).services; }
+
+  saveService(tenantId: string, context: BusinessContext, input: SaveRentalValueAddedServiceRequest) {
+    const state = this.state(tenantId, context);
+    if (!input.code?.trim() || !input.name?.trim() || !input.terms?.trim() || !input.termsVersion?.trim()) throw new BadRequestException("服务编码、名称及条款不能为空");
+    if (input.price < 0 || input.maximumQuantity < 1) throw new BadRequestException("服务价格或数量限制无效");
+    if ((input.coverageLimit !== undefined && input.coverageLimit < 0) || (input.deductible !== undefined && input.deductible < 0)) throw new BadRequestException("保障额度和免赔额不能为负数");
+    const groupIds = new Set(context.groups.map((group) => group.id));
+    if (input.applicableItemGroupIds.some((id) => !groupIds.has(id))) throw new BadRequestException("增值服务包含不存在的商品");
+    const existing = input.id ? state.services.find((service) => service.id === input.id) : undefined;
+    if (input.id && !existing) throw new NotFoundException("增值服务不存在");
+    if (state.services.some((service) => service.code === input.code.trim() && service.id !== input.id)) throw new ConflictException("服务编码已存在");
+    const timestamp = stamp();
+    const result: RentalValueAddedService = {
+      ...input, id: existing?.id ?? uid("service"), tenantId, categoryCode: context.profile.categoryCode,
+      code: input.code.trim(), name: input.name.trim(), version: versionAfter(existing?.version),
+      createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp
+    };
+    if (existing) Object.assign(existing, result); else state.services.unshift(result);
+    return result;
+  }
+
+  getCalendar(tenantId: string, context: BusinessContext, year: number) {
+    const state = this.state(tenantId, context);
+    let calendar = state.calendars.find((item) => item.year === year);
+    if (!calendar) {
+      calendar = this.buildCalendar(tenantId, context.settings, year);
+      state.calendars.push(calendar);
+    }
+    return calendar;
+  }
+
+  importOfficialCalendar(tenantId: string, context: BusinessContext, input: ImportRentalCalendarRequest) {
+    if (!/^https:\/\//.test(input.sourceUrl)) throw new BadRequestException("官方日历来源必须使用 HTTPS 地址");
+    if (!input.days.length) throw new BadRequestException("官方日历数据不能为空");
+    const calendar = this.getCalendar(tenantId, context, input.year);
+    const dayMap = new Map(calendar.days.map((day) => [day.date, day]));
+    for (const row of input.days) {
+      if (!row.date.startsWith(`${input.year}-`)) throw new BadRequestException("日历日期与年度不一致");
+      if (!["statutory_holiday", "makeup_workday"].includes(row.dayType)) throw new BadRequestException("官方数据只允许法定节假日或调休工作日");
+      dayMap.set(row.date, {
+        date: row.date, dayType: row.dayType, name: row.name,
+        pricingMultiplier: row.pricingMultiplier ?? (row.dayType === "statutory_holiday" ? 1.25 : 1),
+        closed: row.closed ?? false, source: "official_cn"
+      });
+    }
+    calendar.days = [...dayMap.values()].sort((a, b) => a.date.localeCompare(b.date));
+    calendar.region = "CN";
+    calendar.status = "draft";
+    calendar.version = versionAfter(calendar.version);
+    calendar.sourceName = input.sourceName;
+    calendar.sourceUrl = input.sourceUrl;
+    calendar.sourcePublishedAt = input.sourcePublishedAt;
+    calendar.importedAt = stamp();
+    calendar.publishedAt = undefined;
+    return calendar;
+  }
+
+  saveCalendarDay(tenantId: string, context: BusinessContext, year: number, input: SaveRentalCalendarDayRequest) {
+    const calendar = this.getCalendar(tenantId, context, year);
+    if (!input.date.startsWith(`${year}-`) || input.pricingMultiplier < 0) throw new BadRequestException("日期年度或价格系数无效");
+    const day: RentalCalendarDay = { ...input, source: "tenant_override" };
+    const index = calendar.days.findIndex((item) => item.date === input.date);
+    if (index >= 0) calendar.days[index] = day; else calendar.days.push(day);
+    calendar.days.sort((a, b) => a.date.localeCompare(b.date));
+    calendar.status = "draft";
+    calendar.version = versionAfter(calendar.version);
+    calendar.publishedAt = undefined;
+    return day;
+  }
+
+  publishCalendar(tenantId: string, context: BusinessContext, year: number) {
+    const calendar = this.getCalendar(tenantId, context, year);
+    if (calendar.region === "CN" && !calendar.sourceName) throw new ConflictException("中国大陆日历发布前必须导入并记录官方来源");
+    calendar.status = "published";
+    calendar.publishedAt = stamp();
+    return calendar;
+  }
+
+  listRuleVersions(tenantId: string, context: BusinessContext) { return this.state(tenantId, context).ruleVersions; }
+
+  currentRule(tenantId: string, context: BusinessContext) {
+    return this.state(tenantId, context).ruleVersions.find((item) => item.status === "published") ?? this.state(tenantId, context).ruleVersions[0];
+  }
+
+  saveRuleVersion(tenantId: string, context: BusinessContext, input: SaveRentalRuleVersionRequest, operator: string) {
+    const state = this.state(tenantId, context);
+    this.validateRule(context, input.config);
+    if (!input.changeReason?.trim()) throw new BadRequestException("规则变更原因不能为空");
+    if (input.publish) state.ruleVersions.forEach((row) => { if (row.status === "published") row.status = "retired"; });
+    const result: RentalRuleVersion = {
+      id: uid("rule"), tenantId, categoryCode: context.profile.categoryCode,
+      version: versionAfter(state.ruleVersions[0]?.version), status: input.publish ? "published" : "draft",
+      config: structuredClone(input.config), changeReason: input.changeReason.trim(), createdBy: operator,
+      createdAt: stamp(), publishedAt: input.publish ? stamp() : undefined
+    };
+    state.ruleVersions.unshift(result);
+    return result;
+  }
+
+  listCustomerCoupons(tenantId: string, context: BusinessContext, customerId?: string) {
+    return this.state(tenantId, context).customerCoupons.filter((coupon) => !customerId || coupon.customerId === customerId);
+  }
+
+  claimCoupon(tenantId: string, context: BusinessContext, templateId: string, customerId: string) {
+    const state = this.state(tenantId, context);
+    const template = context.couponTemplates.find((item) => item.id === templateId && item.status === "enabled");
+    if (!template) throw new NotFoundException("优惠券模板不存在或未启用");
+    const now = Date.now();
+    if (now < new Date(template.effectiveFrom).getTime() || now > new Date(template.effectiveTo).getTime()) throw new ConflictException("优惠券不在可领取有效期");
+    if (template.claimedQuantity >= template.totalQuota) throw new ConflictException("优惠券已领完");
+    if (state.customerCoupons.filter((item) => item.templateId === templateId && item.customerId === customerId && item.status !== "void").length >= template.perCustomerLimit) throw new ConflictException("已达到每客限领数量");
+    const coupon: RentalCustomerCoupon = {
+      id: uid("customer_coupon"), tenantId, customerId, templateId, templateCode: template.code,
+      templateName: template.name, status: "claimed", claimedAt: stamp(), effectiveFrom: template.effectiveFrom, effectiveTo: template.effectiveTo
+    };
+    template.claimedQuantity += 1;
+    template.updatedAt = stamp();
+    state.customerCoupons.unshift(coupon);
+    return coupon;
+  }
+
+  lockCoupon(tenantId: string, context: BusinessContext, couponId: string | undefined, orderId: string) {
+    if (!couponId) return undefined;
+    const coupon = this.customerCoupon(this.state(tenantId, context), couponId);
+    if (coupon.status !== "claimed") throw new ConflictException("优惠券当前不能锁定");
+    if (new Date(coupon.effectiveTo).getTime() < Date.now()) { coupon.status = "expired"; throw new ConflictException("优惠券已过期"); }
+    coupon.status = "locked"; coupon.lockedOrderId = orderId; coupon.lockedAt = stamp();
+    return coupon;
+  }
+
+  redeemCoupon(tenantId: string, context: BusinessContext, orderId: string) {
+    const coupon = this.state(tenantId, context).customerCoupons.find((item) => item.lockedOrderId === orderId);
+    if (!coupon) return undefined;
+    if (coupon.status !== "locked") throw new ConflictException("优惠券不是锁定状态");
+    coupon.status = "redeemed"; coupon.redeemedOrderId = orderId; coupon.redeemedAt = stamp();
+    return coupon;
+  }
+
+  releaseCoupon(tenantId: string, context: BusinessContext, orderId: string) {
+    const coupon = this.state(tenantId, context).customerCoupons.find((item) => item.lockedOrderId === orderId || item.redeemedOrderId === orderId);
+    if (!coupon) return undefined;
+    coupon.status = "claimed"; coupon.lockedOrderId = undefined; coupon.lockedAt = undefined;
+    coupon.redeemedOrderId = undefined; coupon.redeemedAt = undefined; coupon.releasedAt = stamp();
+    return coupon;
+  }
+
+  listRewards(tenantId: string, context: BusinessContext, customerId?: string) {
+    return this.state(tenantId, context).rewardLedger.filter((row) => !customerId || row.customerId === customerId);
+  }
+
+  listBenefitAccounts(tenantId: string, context: BusinessContext, customerId?: string) {
+    return this.state(tenantId, context).benefitAccounts.filter((row) => !customerId || row.customerId === customerId);
+  }
+
+  grantReward(tenantId: string, context: BusinessContext, input: GrantRentalRewardRequest) {
+    const state = this.state(tenantId, context);
+    if (!input.customerId || !input.idempotencyKey) throw new BadRequestException("客户和幂等键不能为空");
+    const existing = state.rewardLedger.filter((row) => row.idempotencyKey === input.idempotencyKey || row.idempotencyKey.startsWith(`${input.idempotencyKey}:`));
+    if (existing.length) return existing;
+    const membership = context.settings.membership;
+    const rows: RentalRewardLedgerEntry[] = [];
+    const planned: Array<{ customerId: string; type: RentalRewardLedgerEntry["rewardType"]; amount: number; couponTemplateId?: string }> = [];
+    if (input.triggerType === "registration" && membership.signupRewardEnabled) planned.push({ customerId: input.customerId, type: membership.signupRewardType, amount: membership.signupRewardAmount, couponTemplateId: membership.signupRewardCouponTemplateId });
+    const matchesReferralTrigger = input.triggerType === "referral" || input.triggerType === membership.referralTrigger;
+    if (matchesReferralTrigger && membership.referralRewardEnabled && input.relatedCustomerId) {
+      planned.push({ customerId: input.customerId, type: membership.referralRewardType, amount: membership.referrerRewardAmount, couponTemplateId: membership.referralRewardCouponTemplateId });
+      planned.push({ customerId: input.relatedCustomerId, type: membership.referralRewardType, amount: membership.inviteeRewardAmount, couponTemplateId: membership.referralRewardCouponTemplateId });
+    }
+    this.validateRewardBatch(state, context, planned.filter((item) => item.amount > 0));
+    const add = (customerId: string, type: RentalRewardLedgerEntry["rewardType"], amount: number, key: string, reason: string, relatedCustomerId?: string, couponTemplateId?: string) => {
+      if (amount <= 0) return;
+      const applied = this.applyRewardBenefit(state, context, customerId, type, amount, couponTemplateId);
+      const row: RentalRewardLedgerEntry = { id: uid("reward"), tenantId, customerId, rewardType: type, amount, triggerType: input.triggerType, idempotencyKey: key, relatedCustomerId, status: "granted", reason, benefitReferenceIds: applied.referenceIds, appliedAt: applied.appliedAt, createdAt: applied.appliedAt };
+      state.rewardLedger.unshift(row); rows.push(row);
+    };
+    if (input.triggerType === "registration" && membership.signupRewardEnabled) add(input.customerId, membership.signupRewardType, membership.signupRewardAmount, input.idempotencyKey, "新会员注册赠礼", undefined, membership.signupRewardCouponTemplateId);
+    if (matchesReferralTrigger && membership.referralRewardEnabled && input.relatedCustomerId) {
+      add(input.customerId, membership.referralRewardType, membership.referrerRewardAmount, `${input.idempotencyKey}:referrer`, "邀请人奖励", input.relatedCustomerId, membership.referralRewardCouponTemplateId);
+      add(input.relatedCustomerId, membership.referralRewardType, membership.inviteeRewardAmount, `${input.idempotencyKey}:invitee`, "被邀请人奖励", input.customerId, membership.referralRewardCouponTemplateId);
+    }
+    if (!rows.length) throw new ConflictException("当前激励规则未启用或触发条件不匹配");
+    return rows;
+  }
+
+  registerReferral(tenantId: string, context: BusinessContext, inviteeCustomerId: string, referrerCustomerId?: string) {
+    const state = this.state(tenantId, context);
+    if (!referrerCustomerId) return undefined;
+    if (inviteeCustomerId === referrerCustomerId) throw new BadRequestException("客户不能邀请自己");
+    const current = state.referrals.find((row) => row.inviteeCustomerId === inviteeCustomerId);
+    if (current && current.referrerCustomerId !== referrerCustomerId) throw new ConflictException("邀请关系建立后不能更换邀请人");
+    if (current) return current;
+    const relation = { inviteeCustomerId, referrerCustomerId, registeredAt: stamp() };
+    state.referrals.unshift(relation);
+    return relation;
+  }
+
+  handleCustomerEvent(tenantId: string, context: BusinessContext, customerId: string, triggerType: "registration" | "identity_verified" | "first_order_completed") {
+    const state = this.state(tenantId, context);
+    const membership = context.settings.membership;
+    const rows: RentalRewardLedgerEntry[] = [];
+    if (triggerType === "registration" && membership.signupRewardEnabled) {
+      rows.push(...this.grantReward(tenantId, context, { customerId, triggerType, idempotencyKey: `signup:${customerId}` }));
+    }
+    const relation = state.referrals.find((row) => row.inviteeCustomerId === customerId);
+    if (relation && membership.referralRewardEnabled && membership.referralTrigger === triggerType) {
+      rows.push(...this.grantReward(tenantId, context, { customerId: relation.referrerCustomerId, relatedCustomerId: customerId, triggerType, idempotencyKey: `referral:${triggerType}:${customerId}` }));
+    }
+    return rows;
+  }
+
+  reverseReward(tenantId: string, context: BusinessContext, id: string, reason: string) {
+    const state = this.state(tenantId, context);
+    const row = state.rewardLedger.find((item) => item.id === id);
+    if (!row) throw new NotFoundException("奖励流水不存在");
+    if (row.status === "reversed") return row;
+    if (!reason?.trim()) throw new BadRequestException("撤销原因不能为空");
+    this.reverseRewardBenefit(state, context, row);
+    row.status = "reversed"; row.reason = `${row.reason}；撤销：${reason.trim()}`; row.reversedAt = stamp();
+    return row;
+  }
+
+  listNotificationTemplates(tenantId: string, context: BusinessContext) { return this.state(tenantId, context).notificationTemplates; }
+
+  saveNotificationTemplate(tenantId: string, context: BusinessContext, input: SaveRentalNotificationTemplateRequest) {
+    const state = this.state(tenantId, context);
+    if (!context.settings.notifications.enabledEvents.includes(input.eventCode)) throw new BadRequestException("通知事件未在租户经营设置中启用");
+    if (!context.settings.notifications.editableChannels.includes(input.channel)) throw new BadRequestException("通知渠道未在租户经营设置中启用");
+    const existing = input.id ? state.notificationTemplates.find((item) => item.id === input.id) : undefined;
+    if (input.id && !existing) throw new NotFoundException("通知模板不存在");
+    const variables = new Set(Object.keys(input.variableSchema));
+    const used = [...input.title.matchAll(/\{\{(\w+)\}\}/g), ...input.body.matchAll(/\{\{(\w+)\}\}/g)].map((match) => match[1]);
+    if (used.some((key) => !variables.has(key))) throw new BadRequestException("模板使用了未注册变量");
+    const result: RentalNotificationTemplateV1 = {
+      ...input, id: existing?.id ?? uid("notification_template"), tenantId,
+      version: versionAfter(existing?.version), updatedAt: stamp()
+    };
+    if (existing) Object.assign(existing, result); else state.notificationTemplates.unshift(result);
+    return result;
+  }
+
+  listNotificationLogs(tenantId: string, context: BusinessContext) { return this.state(tenantId, context).notificationLogs; }
+
+  sendNotification(tenantId: string, context: BusinessContext, input: SendRentalNotificationRequest) {
+    const state = this.state(tenantId, context);
+    const template = state.notificationTemplates.find((item) => item.id === input.templateId && item.status === "enabled");
+    if (!template) throw new NotFoundException("通知模板不存在或未启用");
+    const missing = Object.entries(template.variableSchema).filter(([key, value]) => value.required && (input.variables[key] === undefined || input.variables[key] === ""));
+    if (missing.length) throw new BadRequestException(`缺少通知变量：${missing.map(([key]) => key).join("、")}`);
+    const render = (source: string) => source.replace(/\{\{(\w+)\}\}/g, (_match, key: string) => String(input.variables[key] ?? ""));
+    const timestamp = stamp();
+    const log: RentalNotificationSendLogV1 = {
+      id: uid("notification"), tenantId, templateId: template.id, templateVersion: template.version,
+      eventCode: template.eventCode, channel: template.channel, recipient: input.recipient,
+      renderedTitle: render(template.title), renderedBody: render(template.body), variables: structuredClone(input.variables),
+      status: "sent", provider: "mock-notification-adapter", providerMessageId: uid("mock"), attempts: 1,
+      createdAt: timestamp, sentAt: timestamp
+    };
+    state.notificationLogs.unshift(log);
+    return log;
+  }
+
+  emitNotificationEvent(tenantId: string, context: BusinessContext, eventCode: string, recipient: string | undefined, variables: Record<string, unknown>) {
+    if (!recipient || !context.settings.notifications.enabledEvents.includes(eventCode)) return [];
+    const templates = this.state(tenantId, context).notificationTemplates.filter((item) => item.eventCode === eventCode && item.status === "enabled");
+    return templates.flatMap((template) => {
+      try { return [this.sendNotification(tenantId, context, { templateId: template.id, recipient, variables })]; }
+      catch { return []; }
+    });
+  }
+
+  createQuote(tenantId: string, context: BusinessContext, input: RentalQuoteRequest) {
+    const state = this.state(tenantId, context);
+    if (new Date(input.startAt).getTime() >= new Date(input.endAt).getTime()) throw new BadRequestException("租赁结束时间必须晚于开始时间");
+    if (!input.lines.length) throw new BadRequestException("报价至少需要一个商品");
+    if (new Set(input.lines.map((line) => line.itemGroupId)).size !== input.lines.length) throw new BadRequestException("同一商品在一次报价中只能出现一行");
+    if (!context.settings.fulfillment.enabledModes.includes(input.fulfillmentMode)) throw new BadRequestException("当前租户未启用所选租赁履约方式");
+    if (input.returnLocationId && input.returnLocationId !== input.fulfillmentLocationId && !context.settings.fulfillment.allowDifferentReturnLocation) throw new BadRequestException("当前租户未启用异地归还");
+    const plan = input.pricingPlanId ? state.pricingPlans.find((item) => item.id === input.pricingPlanId && item.status === "enabled") : state.pricingPlans.find((item) => item.status === "enabled");
+    if (!plan) throw new ConflictException("当前租户没有已启用的基础定价计划");
+    const calendars = this.calendarsForDateRange(tenantId, context, input.startAt, input.endAt);
+    const rule = this.currentRule(tenantId, context);
+    if (!rule || rule.status !== "published") throw new ConflictException("当前租户没有已发布的租赁规则");
+    const groups = new Map(context.groups.map((group) => [group.id, group]));
+    const chargeLines: RentalQuoteSnapshotV1["chargeLines"] = [];
+    let rentalAmount = 0;
+    let depositAmount = 0;
+    for (const line of input.lines) {
+      const group = groups.get(line.itemGroupId);
+      if (!group || line.quantity < 1 || !Number.isInteger(line.quantity)) throw new BadRequestException("报价商品或数量无效");
+      const rate = plan.rates.find((item) => item.itemGroupId === line.itemGroupId && (!line.pricingUnit || item.unit === line.pricingUnit)) ?? plan.rates.find((item) => item.itemGroupId === line.itemGroupId);
+      if (!rate) throw new ConflictException(`${group.name} 尚未配置基础价格`);
+      const units = Math.max(rate.minimumUnits, this.billableUnits(rate.unit, input.startAt, input.endAt, line.usageQuantity));
+      const multiplier = this.calendarMultiplier(calendars, context.settings, input.startAt, input.endAt, rate);
+      const amount = roundMoney((rate.unit === "usage"
+        ? rate.baseAmount + Math.max(0, units - (rate.includedUsage ?? 0)) * (rate.excessUsageAmount ?? rate.baseAmount)
+        : rate.baseAmount * units) * line.quantity * multiplier);
+      rentalAmount += amount;
+      depositAmount += rate.depositAmount * line.quantity;
+      chargeLines.push({ code: `rental:${group.code}`, name: `${group.name}租金`, type: "rental", amount, sourceId: plan.id, sourceVersion: plan.version, detail: `${line.quantity} × ${units} ${rate.unit} × 日历系数 ${multiplier.toFixed(2)}` });
+    }
+    rentalAmount = roundMoney(rentalAmount);
+    depositAmount = rule.config.payment.depositMode === "none" ? 0 : roundMoney(depositAmount);
+    if (rule.config.payment.preauthorizationRequired && depositAmount <= 0) throw new ConflictException("当前规则要求预授权，但所选商品未配置预授权额度");
+    const quotedDayTypes = new Set(this.dayTypesForRange(calendars, input.startAt, input.endAt));
+    const eligible = state.discountPlans.filter((item) => item.status === "enabled" && this.inPeriod(item.effectiveFrom, item.effectiveTo, input.startAt) && item.minimumSpend <= rentalAmount && (item.customerScope === "all" || item.customerScope === input.customerType || (item.customerScope === "member" && Boolean(input.customerId))) && (!item.applicableItemGroupIds.length || input.lines.some((line) => item.applicableItemGroupIds.includes(line.itemGroupId))) && (!item.applicableDayTypes.length || item.applicableDayTypes.some((dayType) => quotedDayTypes.has(dayType)))).sort((a, b) => a.priority - b.priority);
+    const discountPlans = input.discountPlanId ? eligible.filter((item) => item.id === input.discountPlanId) : eligible.slice(0, 1);
+    if (input.discountPlanId && !discountPlans.length) throw new ConflictException("指定优惠方案不满足本次报价条件");
+    let discountAmount = 0;
+    for (const discount of discountPlans) {
+      const amount = this.discountAmount(rentalAmount - discountAmount, discount.discountType, discount.discountValue, discount.maximumDiscount);
+      discountAmount += amount;
+      chargeLines.push({ code: `discount:${discount.code}`, name: discount.name, type: "discount", amount: -amount, sourceId: discount.id, sourceVersion: discount.version });
+    }
+    const customerCoupon = input.customerCouponId ? this.customerCoupon(state, input.customerCouponId) : undefined;
+    let couponAmount = 0;
+    if (customerCoupon) {
+      if (customerCoupon.customerId !== input.customerId || customerCoupon.status !== "claimed") throw new ConflictException("优惠券不属于当前客户或不可用");
+      const template = context.couponTemplates.find((item) => item.id === customerCoupon.templateId && item.status === "enabled");
+      if (!template || rentalAmount < template.minimumSpend || !this.inPeriod(template.effectiveFrom, template.effectiveTo, input.startAt) || (template.applicableItemGroupIds.length > 0 && !input.lines.some((line) => template.applicableItemGroupIds.includes(line.itemGroupId)))) throw new ConflictException("优惠券不满足本次报价条件");
+      if (discountPlans.some((item) => !item.stackableWithCoupon)) throw new ConflictException("当前优惠方案不能与优惠券叠加");
+      couponAmount = this.discountAmount(rentalAmount - discountAmount, template.discountType === "percentage" ? "percentage" : "fixed_amount", template.discountValue, template.maximumDiscount);
+      chargeLines.push({ code: `coupon:${template.code}`, name: template.name, type: "coupon", amount: -couponAmount, sourceId: template.id, sourceVersion: template.version });
+    }
+    let serviceAmount = 0;
+    for (const selected of input.services ?? []) {
+      const service = state.services.find((item) => item.id === selected.serviceId && item.status === "enabled");
+      if (!service || selected.quantity < 1 || selected.quantity > service.maximumQuantity) throw new BadRequestException("增值服务或数量无效");
+      if (service.applicableItemGroupIds.length && !input.lines.some((line) => service.applicableItemGroupIds.includes(line.itemGroupId))) throw new ConflictException(`${service.name} 不适用于所选商品`);
+      const units = service.billingUnit === "per_day" ? Math.max(1, Math.ceil((new Date(input.endAt).getTime() - new Date(input.startAt).getTime()) / dayMs)) : 1;
+      const amount = roundMoney(service.price * selected.quantity * units);
+      serviceAmount += amount;
+      chargeLines.push({ code: `service:${service.code}`, name: service.name, type: "service", amount, sourceId: service.id, sourceVersion: `${service.version}/${service.termsVersion}`, detail: service.terms });
+    }
+    serviceAmount = roundMoney(serviceAmount);
+    if (depositAmount > 0) chargeLines.push({ code: "deposit", name: rule.config.payment.preauthorizationRequired ? "预授权额度" : "押金", type: "deposit", amount: depositAmount, sourceId: rule.id, sourceVersion: rule.version });
+    const timestamp = stamp();
+    const quote: RentalQuoteSnapshotV1 = {
+      id: uid("quote"), tenantId, quoteNo: `RQ${timestamp.replace(/\D/g, "").slice(0, 14)}${String(state.quotes.length + 1).padStart(3, "0")}`,
+      categoryCode: context.profile.categoryCode, request: structuredClone(input), chargeLines,
+      rentalAmount, discountAmount: roundMoney(discountAmount), couponAmount: roundMoney(couponAmount), serviceAmount,
+      depositAmount, payableAmount: roundMoney(rentalAmount - discountAmount - couponAmount + serviceAmount),
+      pricingPlanVersion: plan.version, ruleVersion: rule.version, ruleSnapshot: structuredClone(rule.config), calendarVersion: calendars.map((calendar) => `${calendar.year}:${calendar.status === "published" ? calendar.version : "draft"}`).join("|"),
+      appliedDiscountPlanIds: discountPlans.map((item) => item.id), customerCouponId: customerCoupon?.id,
+      expiresAt: new Date(Date.now() + rule.config.payment.unpaidHoldMinutes * 60_000).toISOString(), createdAt: timestamp
+    };
+    state.quotes.unshift(quote);
+    return quote;
+  }
+
+  getQuote(tenantId: string, context: BusinessContext, quoteId: string) {
+    const quote = this.state(tenantId, context).quotes.find((item) => item.id === quoteId);
+    if (!quote) throw new NotFoundException("报价不存在");
+    return quote;
+  }
+
+  consumeQuote(tenantId: string, context: BusinessContext, quoteId: string) {
+    const quote = this.getQuote(tenantId, context, quoteId);
+    if (new Date(quote.expiresAt).getTime() < Date.now()) throw new ConflictException("报价已过期，请重新报价");
+    if (quote.consumedAt) throw new ConflictException(`报价已用于订单 ${quote.consumedOrderId ?? ""}，请重新报价`);
+    return quote;
+  }
+
+  markQuoteConsumed(tenantId: string, context: BusinessContext, quoteId: string, orderId: string) {
+    const quote = this.consumeQuote(tenantId, context, quoteId);
+    quote.consumedAt = stamp();
+    quote.consumedOrderId = orderId;
+    return quote;
+  }
+
+  private state(tenantId: string, context: BusinessContext) {
+    let state = this.states.get(tenantId);
+    if (!state || state.categoryCode !== context.profile.categoryCode) {
+      state = this.seedState(tenantId, context);
+      this.states.set(tenantId, state);
+    }
+    state.referrals ??= [];
+    state.benefitAccounts ??= [];
+    return state;
+  }
+
+  private seedState(tenantId: string, context: BusinessContext): RentalBusinessState {
+    const timestamp = stamp();
+    const rates: RentalPricingRate[] = context.groups.filter((group) => group.status === "enabled").map((group, index) => ({
+      id: uid("rate"), itemGroupId: group.id, itemGroupCode: group.code, itemGroupName: group.name,
+      unit: context.settings.pricing.defaultUnit, baseAmount: context.profile.categoryCode === RentalCategoryCode.Camping ? 80 + index * 20 : context.profile.categoryCode === RentalCategoryCode.Camera ? 180 + index * 80 : context.profile.categoryCode === RentalCategoryCode.Vehicle ? 380 + index * 100 : 680 + index * 180,
+      weekendMultiplier: 1.1, holidayMultiplier: 1.25,
+      depositAmount: context.category.businessModel.supportsPreauthorization ? 1000 + index * 500 : 200,
+      minimumUnits: 1
+    }));
+    const pricingPlans: RentalPricingPlanV1[] = [{ id: `${tenantId}_pricing_default`, tenantId, categoryCode: context.profile.categoryCode, code: "STANDARD", name: `${context.category.name}标准价格`, currency: "CNY", status: "enabled", version: "1.0", effectiveFrom: timestamp, rates, createdAt: timestamp, updatedAt: timestamp }];
+    const discountPlans: RentalDiscountPlan[] = [{ id: `${tenantId}_discount_long`, tenantId, categoryCode: context.profile.categoryCode, code: "LONG_RENTAL", name: "长期租赁优惠", status: "enabled", discountType: "percentage", discountValue: 5, minimumSpend: 500, customerScope: "all", applicableItemGroupIds: [], applicableDayTypes: [], priority: 100, stackableWithCoupon: true, effectiveFrom: timestamp, version: "1.0", createdAt: timestamp, updatedAt: timestamp }];
+    const services: RentalValueAddedService[] = context.category.businessModel.valueAddedServicePresets.slice(0, 4).map((name, index) => ({ id: `${tenantId}_service_${index + 1}`, tenantId, categoryCode: context.profile.categoryCode, code: `SERVICE_${index + 1}`, name, serviceType: serviceType(name), billingUnit: name.includes("配送") || name.includes("运输") ? "per_order" : "per_day", price: 20 + index * 30, maximumQuantity: 5, coverageLimit: name.includes("保险") || name.includes("免赔") ? 5000 : undefined, deductible: name.includes("免赔") ? 200 : undefined, termsVersion: "1.0", terms: `${name}服务条款：以订单保存的本版本范围、限额及除外责任为准。`, applicableItemGroupIds: [], status: "enabled", version: "1.0", createdAt: timestamp, updatedAt: timestamp }));
+    const ruleVersions: RentalRuleVersion[] = [{ id: `${tenantId}_rule_v1`, tenantId, categoryCode: context.profile.categoryCode, version: "1.0", status: "published", config: defaultRuleConfig(context.category, context.settings), changeReason: "品类初始化规则", createdBy: "system", createdAt: timestamp, publishedAt: timestamp }];
+    const defaultVariables = { customerName: { label: "客户名称", required: true }, orderNo: { label: "订单号", required: true } };
+    const notificationTemplates: RentalNotificationTemplateV1[] = context.settings.notifications.enabledEvents.slice(0, 12).map((eventCode, index) => {
+      const memberEvent = eventCode === "member.registered";
+      return { id: `${tenantId}_template_${index + 1}`, tenantId, eventCode, channel: context.settings.notifications.editableChannels.includes("app_push") ? "app_push" : context.settings.notifications.editableChannels[0] ?? "email", name: `${eventCode} 默认模板`, title: memberEvent ? "欢迎加入" : `订单通知 {{orderNo}}`, body: memberEvent ? `{{customerName}}，欢迎注册成为会员。` : `{{customerName}}，您的订单 {{orderNo}} 状态已更新。`, variableSchema: memberEvent ? { customerName: defaultVariables.customerName } : defaultVariables, status: "enabled", version: "1.0", updatedAt: timestamp };
+    });
+    return { categoryCode: context.profile.categoryCode, pricingPlans, discountPlans, services, calendars: [], ruleVersions, customerCoupons: [], rewardLedger: [], benefitAccounts: [], referrals: [], notificationTemplates, notificationLogs: [], quotes: [] };
+  }
+
+  private applyRewardBenefit(state: RentalBusinessState, context: BusinessContext, customerId: string, type: RentalRewardLedgerEntry["rewardType"], amount: number, couponTemplateId?: string) {
+    const appliedAt = stamp();
+    let account = state.benefitAccounts.find((row) => row.customerId === customerId);
+    if (!account) {
+      account = { tenantId: context.profile.tenantId, customerId, pointsBalance: 0, marketingBalance: 0, availableRewardCouponCount: 0, updatedAt: appliedAt };
+      state.benefitAccounts.unshift(account);
+    }
+    const referenceIds: string[] = [];
+    if (type === "points") account.pointsBalance += amount;
+    else if (type === "balance") account.marketingBalance = roundMoney(account.marketingBalance + amount);
+    else {
+      if (!Number.isInteger(amount)) throw new BadRequestException("优惠券奖励数量必须是整数");
+      if (!couponTemplateId) throw new BadRequestException("优惠券奖励必须选择优惠券模板");
+      const template = context.couponTemplates.find((row) => row.id === couponTemplateId && row.status === "enabled");
+      if (!template) throw new BadRequestException("奖励优惠券模板不存在或未启用");
+      const existingCount = state.customerCoupons.filter((row) => row.templateId === template.id && row.customerId === customerId && row.status !== "void").length;
+      if (existingCount + amount > template.perCustomerLimit) throw new ConflictException("奖励优惠券超过每客限领数量");
+      if (template.claimedQuantity + amount > template.totalQuota) throw new ConflictException("奖励优惠券库存不足");
+      for (let index = 0; index < amount; index += 1) {
+        const coupon: RentalCustomerCoupon = { id: uid("reward_coupon"), tenantId: context.profile.tenantId, customerId, templateId: template.id, templateCode: template.code, templateName: template.name, status: "claimed", claimedAt: appliedAt, effectiveFrom: template.effectiveFrom, effectiveTo: template.effectiveTo };
+        state.customerCoupons.unshift(coupon); referenceIds.push(coupon.id);
+      }
+      template.claimedQuantity += amount; template.updatedAt = appliedAt;
+      account.availableRewardCouponCount += amount;
+    }
+    account.updatedAt = appliedAt;
+    return { appliedAt, referenceIds };
+  }
+
+  private validateRewardBatch(state: RentalBusinessState, context: BusinessContext, planned: Array<{ customerId: string; type: RentalRewardLedgerEntry["rewardType"]; amount: number; couponTemplateId?: string }>) {
+    const couponPlans = planned.filter((item) => item.type === "coupon");
+    const byTemplate = new Map<string, number>();
+    const byCustomerTemplate = new Map<string, number>();
+    for (const plan of couponPlans) {
+      if (!Number.isInteger(plan.amount)) throw new BadRequestException("优惠券奖励数量必须是整数");
+      if (!plan.couponTemplateId) throw new BadRequestException("优惠券奖励必须选择优惠券模板");
+      const template = context.couponTemplates.find((row) => row.id === plan.couponTemplateId && row.status === "enabled");
+      if (!template) throw new BadRequestException("奖励优惠券模板不存在或未启用");
+      byTemplate.set(template.id, (byTemplate.get(template.id) ?? 0) + plan.amount);
+      const customerKey = `${plan.customerId}:${template.id}`;
+      byCustomerTemplate.set(customerKey, (byCustomerTemplate.get(customerKey) ?? 0) + plan.amount);
+      const existingCount = state.customerCoupons.filter((row) => row.templateId === template.id && row.customerId === plan.customerId && row.status !== "void").length;
+      if (existingCount + (byCustomerTemplate.get(customerKey) ?? 0) > template.perCustomerLimit) throw new ConflictException("奖励优惠券超过每客限领数量");
+    }
+    for (const [templateId, amount] of byTemplate) {
+      const template = context.couponTemplates.find((row) => row.id === templateId)!;
+      if (template.claimedQuantity + amount > template.totalQuota) throw new ConflictException("奖励优惠券库存不足");
+    }
+  }
+
+  private reverseRewardBenefit(state: RentalBusinessState, context: BusinessContext, row: RentalRewardLedgerEntry) {
+    const account = state.benefitAccounts.find((item) => item.customerId === row.customerId);
+    if (!account) throw new ConflictException("客户权益账户不存在，不能撤销奖励");
+    if (row.rewardType === "points") {
+      if (account.pointsBalance < row.amount) throw new ConflictException("积分余额不足，不能撤销奖励");
+      account.pointsBalance -= row.amount;
+    } else if (row.rewardType === "balance") {
+      if (account.marketingBalance < row.amount) throw new ConflictException("营销余额不足，不能撤销奖励");
+      account.marketingBalance = roundMoney(account.marketingBalance - row.amount);
+    } else {
+      const references = row.benefitReferenceIds ?? [];
+      const coupons = references.map((id) => state.customerCoupons.find((coupon) => coupon.id === id));
+      if (!references.length || coupons.some((coupon) => !coupon || coupon.status !== "claimed")) throw new ConflictException("奖励券已锁定、核销或不存在，不能撤销");
+      coupons.forEach((coupon) => { coupon!.status = "void"; });
+      const couponTemplate = context.couponTemplates.find((template) => template.id === coupons[0]!.templateId);
+      if (couponTemplate) { couponTemplate.claimedQuantity = Math.max(0, couponTemplate.claimedQuantity - references.length); couponTemplate.updatedAt = stamp(); }
+      account.availableRewardCouponCount = Math.max(0, account.availableRewardCouponCount - references.length);
+    }
+    account.updatedAt = stamp();
+  }
+
+  private buildCalendar(tenantId: string, settings: TenantRentalBusinessSettings, year: number): RentalCalendarYear {
+    if (!Number.isInteger(year) || year < 2000 || year > 2100) throw new BadRequestException("日历年度无效");
+    const days: RentalCalendarDay[] = [];
+    for (let cursor = new Date(Date.UTC(year, 0, 1)); cursor.getUTCFullYear() === year; cursor = new Date(cursor.getTime() + dayMs)) {
+      const date = cursor.toISOString().slice(0, 10);
+      const weekend = settings.calendar.weekendDays.includes(cursor.getUTCDay());
+      days.push({ date, dayType: weekend ? "weekend" : "workday", name: weekend ? "周末" : "工作日", pricingMultiplier: weekend ? 1.1 : 1, closed: false, source: "week_rule" });
+    }
+    return { tenantId, year, region: settings.calendar.officialCalendarRegion, version: "1.0", status: "draft", days };
+  }
+
+  private validateRule(context: BusinessContext, config: RentalRuleConfig) {
+    if (config.payment.preauthorizationRequired && !context.category.businessModel.supportsPreauthorization) throw new BadRequestException("当前品类不支持预授权");
+    if (config.qualification.required && !context.category.businessModel.supportsQualificationReview) throw new BadRequestException("当前品类不支持资质审核");
+    if (config.fulfillment.allowDifferentReturnLocation && !context.settings.fulfillment.allowDifferentReturnLocation) throw new BadRequestException("租户履约设置未启用异地归还");
+    if (config.payment.unpaidHoldMinutes < 1 || config.overdue.graceMinutes < 0 || config.overdue.feeMultiplier < 0 || config.cancellation.freeBeforeHours < 0) throw new BadRequestException("规则中的时长或费用参数无效");
+  }
+
+  private customerCoupon(state: RentalBusinessState, id: string) {
+    const coupon = state.customerCoupons.find((item) => item.id === id);
+    if (!coupon) throw new NotFoundException("客户优惠券不存在");
+    return coupon;
+  }
+
+  private inPeriod(from: string, to: string | undefined, target: string) {
+    const time = new Date(target).getTime();
+    return time >= new Date(from).getTime() && (!to || time <= new Date(to).getTime());
+  }
+
+  private discountAmount(base: number, type: "percentage" | "fixed_amount", value: number, maximum?: number) {
+    const amount = type === "percentage" ? base * value / 100 : value;
+    return roundMoney(Math.max(0, Math.min(base, maximum === undefined ? amount : Math.min(amount, maximum))));
+  }
+
+  calculateCancellationCharge(tenantId: string, context: BusinessContext, quote: RentalQuoteSnapshotV1, nowAt = stamp(), weatherException = false) {
+    const rule = quote.ruleSnapshot ?? this.currentRule(tenantId, context)?.config;
+    if (!rule) throw new ConflictException("订单缺少租赁规则快照");
+    if (weatherException && rule.cancellation.weatherExceptionEnabled) return 0;
+    const hoursBeforeStart = (new Date(quote.request.startAt).getTime() - new Date(nowAt).getTime()) / 3_600_000;
+    if (hoursBeforeStart >= rule.cancellation.freeBeforeHours || rule.cancellation.lateFeeType === "none") return 0;
+    return this.discountAmount(quote.payableAmount, rule.cancellation.lateFeeType === "percentage" ? "percentage" : "fixed_amount", rule.cancellation.lateFeeValue);
+  }
+
+  calculateOverdueCharge(tenantId: string, context: BusinessContext, quote: RentalQuoteSnapshotV1, returnedAt: string) {
+    const rule = quote.ruleSnapshot ?? this.currentRule(tenantId, context)?.config;
+    if (!rule) throw new ConflictException("订单缺少租赁规则快照");
+    const overdueMinutes = Math.max(0, (new Date(returnedAt).getTime() - new Date(quote.request.endAt).getTime()) / 60_000 - rule.overdue.graceMinutes);
+    if (overdueMinutes <= 0 || rule.overdue.feeMode === "none" || rule.overdue.feeMode === "manual_review") return 0;
+    const hourlyBase = quote.rentalAmount / Math.max(1, (new Date(quote.request.endAt).getTime() - new Date(quote.request.startAt).getTime()) / 3_600_000);
+    const amount = rule.overdue.feeMode === "hourly"
+      ? hourlyBase * Math.ceil(overdueMinutes / 60) * rule.overdue.feeMultiplier
+      : quote.rentalAmount * rule.overdue.feeMultiplier;
+    return roundMoney(Math.min(amount, rule.overdue.maximumFee ?? amount));
+  }
+
+  calculateDamageCharge(tenantId: string, context: BusinessContext, quote: RentalQuoteSnapshotV1, exceptions: Array<{ chargeAmount?: number }>) {
+    const rule = quote.ruleSnapshot ?? this.currentRule(tenantId, context)?.config;
+    if (!rule) throw new ConflictException("订单缺少租赁规则快照");
+    let amount = exceptions.reduce((sum, item) => sum + Math.max(0, Number(item.chargeAmount) || 0), 0);
+    const state = this.state(tenantId, context);
+    const selectedIds = new Set((quote.request.services ?? []).map((item) => item.serviceId));
+    const waiver = state.services.find((service) => selectedIds.has(service.id) && service.serviceType === "damage_waiver" && service.status === "enabled");
+    if (waiver && amount > 0) {
+      const coverage = waiver.coverageLimit ?? 0;
+      const deductible = waiver.deductible ?? 0;
+      amount = Math.min(amount, deductible) + Math.max(0, amount - coverage);
+    }
+    return roundMoney(Math.min(amount, rule.damage.chargeLimit ?? amount));
+  }
+
+  private billableUnits(unit: RentalPricingUnit, startAt: string, endAt: string, usageQuantity?: number) {
+    const hours = Math.max(0, (new Date(endAt).getTime() - new Date(startAt).getTime()) / 3_600_000);
+    if (unit === "usage") {
+      if (!Number.isFinite(usageQuantity) || Number(usageQuantity) < 0) throw new BadRequestException("按使用量计价时必须提供有效使用量");
+      return Math.ceil(Number(usageQuantity));
+    }
+    if (unit === "hour") return Math.ceil(hours);
+    if (unit === "shift") return Math.ceil(hours / 8);
+    if (unit === "week") return Math.ceil(hours / 168);
+    if (unit === "month") return Math.ceil(hours / 720);
+    if (unit === "package") return 1;
+    return Math.ceil(hours / 24);
+  }
+
+  private calendarsForDateRange(tenantId: string, context: BusinessContext, startAt: string, endAt: string) {
+    const startYear = new Date(startAt).getUTCFullYear();
+    const endYear = new Date(endAt).getUTCFullYear();
+    const years = Array.from({ length: endYear - startYear + 1 }, (_, index) => startYear + index);
+    return years.map((year) => this.state(tenantId, context).calendars.find((item) => item.year === year && item.status === "published") ?? this.getCalendar(tenantId, context, year));
+  }
+
+  private calendarMultiplier(calendars: RentalCalendarYear[], settings: TenantRentalBusinessSettings, startAt: string, endAt: string, rate: RentalPricingRate) {
+    if (!settings.pricing.holidayPricingEnabled || !calendars.length) return 1;
+    const values: number[] = [];
+    for (let cursor = new Date(`${startAt.slice(0, 10)}T00:00:00.000Z`); cursor.getTime() < new Date(endAt).getTime(); cursor = new Date(cursor.getTime() + dayMs)) {
+      const calendar = calendars.find((item) => item.year === cursor.getUTCFullYear());
+      const day = calendar?.days.find((item) => item.date === cursor.toISOString().slice(0, 10));
+      const type: RentalDayType = day?.dayType ?? "workday";
+      if (day?.closed) throw new ConflictException(`${day.date} 为停业日，不能报价`);
+      values.push(type === "statutory_holiday" || type === "tenant_special" ? rate.holidayMultiplier : type === "weekend" ? rate.weekendMultiplier : day?.pricingMultiplier ?? 1);
+    }
+    return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 1;
+  }
+
+  private dayTypesForRange(calendars: RentalCalendarYear[], startAt: string, endAt: string) {
+    const values: RentalDayType[] = [];
+    for (let cursor = new Date(`${startAt.slice(0, 10)}T00:00:00.000Z`); cursor.getTime() < new Date(endAt).getTime(); cursor = new Date(cursor.getTime() + dayMs)) {
+      const calendar = calendars.find((item) => item.year === cursor.getUTCFullYear());
+      values.push(calendar?.days.find((item) => item.date === cursor.toISOString().slice(0, 10))?.dayType ?? "workday");
+    }
+    return values;
+  }
+}
+
+export type { BusinessContext };
