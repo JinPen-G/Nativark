@@ -1078,7 +1078,12 @@ export class PlatformRepository {
       systemRules: SystemRulesConfig;
       dictionaries: PlatformDictionaryGroup[];
       numberRules: PlatformNumberRule[];
-    }
+    },
+    /**
+     * 在初始化事务内、提交之前执行。用于把 Rental Core 品类配置并入同一事务，
+     * 满足需求 4.1「初始化失败必须整体回滚」；抛错会连带回滚租户、组织、角色和管理员。
+     */
+    onBeforeCommit?: (tx: Prisma.TransactionClient, tenantId: string) => Promise<void>
   ): Promise<TenantBootstrapResult> {
     const tenantCode = input.tenantCode.trim().toLowerCase();
     const tenantName = input.tenantName.trim();
@@ -1239,6 +1244,7 @@ export class PlatformRepository {
           }
         }
       });
+      await onBeforeCommit?.(tx, tenant.id);
       return { tenant, user, templateExecution, categoryName: category.name };
     });
 

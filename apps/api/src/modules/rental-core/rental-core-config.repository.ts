@@ -28,6 +28,12 @@ export interface TenantConfigSnapshot {
 }
 
 /**
+ * 事务客户端。租户初始化必须把品类配置写在 `bootstrapTenant` 的同一事务内（需求 4.1），
+ * 因此每个写方法都允许调用方传入外层事务；不传时各自独立提交。
+ */
+export type RentalConfigTx = Prisma.TransactionClient;
+
+/**
  * 服务层只依赖这个接口，不依赖 Prisma。
  *
  * 这样做的目的不是"方便 mock"：不连库的单元测试注入一个**吸收式 stub**
@@ -38,13 +44,13 @@ export interface TenantConfigSnapshot {
  */
 export interface RentalConfigStore {
   loadAll(): Promise<TenantConfigSnapshot[]>;
-  upsertProfile(profile: TenantRentalProfile): Promise<void>;
-  upsertBusinessSettings(settings: TenantRentalBusinessSettings, updatedBy: string): Promise<void>;
-  upsertOperator(operator: RentalFulfillmentOperator): Promise<void>;
-  upsertLocation(location: RentalFulfillmentLocation): Promise<void>;
-  upsertItemGroup(group: RentalItemGroup): Promise<void>;
-  upsertCouponTemplate(template: RentalCouponTemplate): Promise<void>;
-  upsertInspectionTemplate(template: RentalInspectionTemplate): Promise<void>;
+  upsertProfile(profile: TenantRentalProfile, tx?: RentalConfigTx): Promise<void>;
+  upsertBusinessSettings(settings: TenantRentalBusinessSettings, updatedBy: string, tx?: RentalConfigTx): Promise<void>;
+  upsertOperator(operator: RentalFulfillmentOperator, tx?: RentalConfigTx): Promise<void>;
+  upsertLocation(location: RentalFulfillmentLocation, tx?: RentalConfigTx): Promise<void>;
+  upsertItemGroup(group: RentalItemGroup, tx?: RentalConfigTx): Promise<void>;
+  upsertCouponTemplate(template: RentalCouponTemplate, tx?: RentalConfigTx): Promise<void>;
+  upsertInspectionTemplate(template: RentalInspectionTemplate, tx?: RentalConfigTx): Promise<void>;
 }
 
 function iso(value: Date): string {
@@ -67,6 +73,11 @@ function upper<T extends string>(value: string): T {
 @Injectable()
 export class RentalCoreConfigRepository implements RentalConfigStore {
   constructor(private readonly prisma: PrismaService) {}
+
+  /** 有外层事务就用它，否则用连接自身——写方法据此既能独立提交，也能并入 bootstrap 事务。 */
+  private db(tx?: RentalConfigTx) {
+    return tx ?? this.prisma;
+  }
 
   async loadAll(): Promise<TenantConfigSnapshot[]> {
     const [profiles, settings, operators, locations, itemGroups, couponTemplates, inspectionTemplates] =
@@ -113,35 +124,35 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
     }));
   }
 
-  async upsertProfile(profile: TenantRentalProfile): Promise<void> {
+  async upsertProfile(profile: TenantRentalProfile, tx?: RentalConfigTx): Promise<void> {
     const data = {
       categoryCode: upper<$Enums.RentalCategoryCode>(profile.categoryCode),
       capabilities: profile.capabilities as unknown as Prisma.InputJsonValue,
       terminology: profile.terminology as unknown as Prisma.InputJsonValue,
       configVersion: profile.configVersion
     };
-    await this.prisma.tenantRentalProfile.upsert({
+    await this.db(tx).tenantRentalProfile.upsert({
       where: { tenantId: profile.tenantId },
       create: { tenantId: profile.tenantId, ...data, initializedAt: new Date(profile.initializedAt) },
       update: data
     });
   }
 
-  async upsertBusinessSettings(settings: TenantRentalBusinessSettings, updatedBy: string): Promise<void> {
+  async upsertBusinessSettings(settings: TenantRentalBusinessSettings, updatedBy: string, tx?: RentalConfigTx): Promise<void> {
     const data = {
       categoryCode: upper<$Enums.RentalCategoryCode>(settings.categoryCode),
       configVersion: settings.configVersion,
       settings: settings as unknown as Prisma.InputJsonValue,
       updatedBy
     };
-    await this.prisma.rentalTenantBusinessSettings.upsert({
+    await this.db(tx).rentalTenantBusinessSettings.upsert({
       where: { tenantId: settings.tenantId },
       create: { tenantId: settings.tenantId, ...data },
       update: data
     });
   }
 
-  async upsertOperator(operator: RentalFulfillmentOperator): Promise<void> {
+  async upsertOperator(operator: RentalFulfillmentOperator, tx?: RentalConfigTx): Promise<void> {
     const data = {
       tenantId: operator.tenantId,
       code: operator.code,
@@ -152,14 +163,14 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       settlementMode: operator.settlementMode ?? null,
       status: operator.status
     };
-    await this.prisma.rentalFulfillmentOperator.upsert({
+    await this.db(tx).rentalFulfillmentOperator.upsert({
       where: { id: operator.id },
       create: { id: operator.id, ...data, createdAt: new Date(operator.createdAt) },
       update: data
     });
   }
 
-  async upsertLocation(location: RentalFulfillmentLocation): Promise<void> {
+  async upsertLocation(location: RentalFulfillmentLocation, tx?: RentalConfigTx): Promise<void> {
     const data = {
       tenantId: location.tenantId,
       code: location.code,
@@ -176,7 +187,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       businessHours: location.businessHours ?? null,
       status: location.status
     };
-    await this.prisma.rentalFulfillmentLocation.upsert({
+    await this.db(tx).rentalFulfillmentLocation.upsert({
       where: { id: location.id },
       create: { id: location.id, ...data },
       update: data
@@ -184,7 +195,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
   }
 
   /** 套装组成是独立表，整组替换以免留下已被移除的组件行。 */
-  async upsertItemGroup(group: RentalItemGroup): Promise<void> {
+  async upsertItemGroup(group: RentalItemGroup, tx?: RentalConfigTx): Promise<void> {
     const data = {
       tenantId: group.tenantId,
       categoryCode: upper<$Enums.RentalCategoryCode>(group.categoryCode),
@@ -196,15 +207,17 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       attributes: group.attributes as Prisma.InputJsonValue,
       status: group.status
     };
-    await this.prisma.$transaction(async (tx) => {
-      await tx.rentalItemGroup.upsert({
+    // 商品组与套装组成必须一起提交，否则会留下"组已改、组成还是旧的"的中间态。
+    // 有外层事务时直接复用它——Prisma 不支持嵌套交互式事务，自己再开一个会报错。
+    const write = async (client: RentalConfigTx) => {
+      await client.rentalItemGroup.upsert({
         where: { id: group.id },
         create: { id: group.id, ...data, createdAt: new Date(group.createdAt) },
         update: data
       });
-      await tx.rentalBundleComponent.deleteMany({ where: { bundleItemGroupId: group.id } });
+      await client.rentalBundleComponent.deleteMany({ where: { bundleItemGroupId: group.id } });
       for (const component of group.bundleComponents) {
-        await tx.rentalBundleComponent.create({
+        await client.rentalBundleComponent.create({
           data: {
             bundleItemGroupId: group.id,
             componentItemGroupId: component.itemGroupId,
@@ -214,10 +227,15 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
           }
         });
       }
-    });
+    };
+    if (tx) {
+      await write(tx);
+      return;
+    }
+    await this.prisma.$transaction(write);
   }
 
-  async upsertCouponTemplate(template: RentalCouponTemplate): Promise<void> {
+  async upsertCouponTemplate(template: RentalCouponTemplate, tx?: RentalConfigTx): Promise<void> {
     const data = {
       tenantId: template.tenantId,
       code: template.code,
@@ -235,14 +253,14 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       status: template.status,
       version: template.version
     };
-    await this.prisma.rentalCouponTemplate.upsert({
+    await this.db(tx).rentalCouponTemplate.upsert({
       where: { id: template.id },
       create: { id: template.id, ...data, createdAt: new Date(template.createdAt) },
       update: data
     });
   }
 
-  async upsertInspectionTemplate(template: RentalInspectionTemplate): Promise<void> {
+  async upsertInspectionTemplate(template: RentalInspectionTemplate, tx?: RentalConfigTx): Promise<void> {
     const data = {
       tenantId: template.tenantId,
       categoryCode: upper<$Enums.RentalCategoryCode>(template.categoryCode),
@@ -253,7 +271,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       fields: template.fields as unknown as Prisma.InputJsonValue,
       enabled: template.enabled
     };
-    await this.prisma.rentalInspectionTemplate.upsert({
+    await this.db(tx).rentalInspectionTemplate.upsert({
       where: { id: template.id },
       create: { id: template.id, ...data },
       update: data

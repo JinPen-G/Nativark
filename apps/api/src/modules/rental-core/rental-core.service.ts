@@ -39,7 +39,7 @@ import {
   type TenantRentalProfile
 } from "@store-rental/shared";
 import { RentalStateRepository } from "./rental-state.repository";
-import { RentalCoreConfigRepository, type RentalConfigStore } from "./rental-core-config.repository";
+import { RentalCoreConfigRepository, type RentalConfigStore, type RentalConfigTx } from "./rental-core-config.repository";
 
 interface TenantRentalState {
   profile: TenantRentalProfile;
@@ -171,15 +171,24 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   }
 
   listCategories() { return categories; }
-  async initializeTenant(tenantId: string, categoryCode: RentalCategoryCode) {
+  /**
+   * 初始化租户经营品类。
+   *
+   * `tx` 由租户 bootstrap 传入：需求 4.1 要求租户档案与唯一经营品类在同一事务内创建，
+   * 否则会留下"租户和管理员已建、品类配置没建"的半成品租户——而阶段 3 的事实表
+   * 全部外键指向这些配置，那种租户后续下单会撞外键且报错指向订单而非真正原因。
+   * 内存缓存只在事务成功提交后才写入，避免回滚后缓存里留下并不存在的租户。
+   */
+  async initializeTenant(tenantId: string, categoryCode: RentalCategoryCode, tx?: RentalConfigTx) {
     const existing = this.states.get(tenantId);
     if (existing && existing.profile.categoryCode !== categoryCode) {
       throw new ConflictException("已有租赁数据的租户不能切换经营品类");
     }
     if (!existing) {
       const seeded = this.seedState(tenantId, categoryCode);
+      await this.persistConfig(seeded, tx);
       this.states.set(tenantId, seeded);
-      await this.persistConfig(seeded);
+      return seeded.profile;
     }
     return this.states.get(tenantId)!.profile;
   }
@@ -188,17 +197,17 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
    * 把整份配置落库。用于租户初始化；此后各 save* 方法按条写穿。
    * 套装必须排在其组成项之后写入——组成项是独立表的外键，先写套装会违反约束。
    */
-  private async persistConfig(state: TenantRentalState) {
-    await this.configStore.upsertProfile(state.profile);
-    await this.configStore.upsertBusinessSettings(state.businessSettings, state.businessSettings.updatedBy);
-    for (const operator of state.operators) await this.configStore.upsertOperator(operator);
-    for (const location of state.locations) await this.configStore.upsertLocation(location);
+  private async persistConfig(state: TenantRentalState, tx?: RentalConfigTx) {
+    await this.configStore.upsertProfile(state.profile, tx);
+    await this.configStore.upsertBusinessSettings(state.businessSettings, state.businessSettings.updatedBy, tx);
+    for (const operator of state.operators) await this.configStore.upsertOperator(operator, tx);
+    for (const location of state.locations) await this.configStore.upsertLocation(location, tx);
     const ordered = [...state.itemGroups].sort(
       (left, right) => Number(left.inventoryMode === RentalInventoryMode.Bundle) - Number(right.inventoryMode === RentalInventoryMode.Bundle)
     );
-    for (const group of ordered) await this.configStore.upsertItemGroup(group);
-    for (const template of state.couponTemplates) await this.configStore.upsertCouponTemplate(template);
-    for (const template of state.inspectionTemplates) await this.configStore.upsertInspectionTemplate(template);
+    for (const group of ordered) await this.configStore.upsertItemGroup(group, tx);
+    for (const template of state.couponTemplates) await this.configStore.upsertCouponTemplate(template, tx);
+    for (const template of state.inspectionTemplates) await this.configStore.upsertInspectionTemplate(template, tx);
   }
   hasTenantState(tenantId: string) { return this.states.has(tenantId); }
   getProfile(tenantId: string) { return this.state(tenantId).profile; }

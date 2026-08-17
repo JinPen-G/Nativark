@@ -1182,12 +1182,20 @@ export class PlatformService {
     }
 
     if (this.useMysqlDataSource()) {
-      const result = await this.platformRepository.bootstrapTenant(input, this.getTenantBootstrapPreview(), {
-        systemRules: this.systemRulesConfig,
-        dictionaries: this.dictionaryGroups,
-        numberRules: this.numberRules
-      });
-      await this.rentalCoreService?.initializeTenant(result.tenant.tenantId, input.categoryCode);
+      const result = await this.platformRepository.bootstrapTenant(
+        input,
+        this.getTenantBootstrapPreview(),
+        {
+          systemRules: this.systemRulesConfig,
+          dictionaries: this.dictionaryGroups,
+          numberRules: this.numberRules
+        },
+        // 需求 4.1：品类配置必须与租户档案同事务创建，任一步失败整体回滚，
+        // 不留"租户和管理员已建、品类配置没建"的半成品租户。
+        async (tx, tenantId) => {
+          await this.rentalCoreService?.initializeTenant(tenantId, input.categoryCode, tx);
+        }
+      );
       await this.rentalCoreService?.persist(result.tenant.tenantId);
       return result;
     }
