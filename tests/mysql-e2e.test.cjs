@@ -23,6 +23,15 @@ const path = require("node:path");
 const ROOT = path.resolve(__dirname, "..");
 const API_DIR = path.join(ROOT, "apps", "api");
 const SCHEMA_PATH = path.join(API_DIR, "prisma", "schema.prisma");
+const MIGRATIONS_DIR = path.join(API_DIR, "prisma", "migrations");
+
+// 期望迁移条数由迁移目录推导，而不是写死常量：写死会让"新增一条迁移"必然连带
+// 改测试期望值，而改期望值时很容易顺手填成实际观测值，从此失去校验意义。
+const EXPECTED_MIGRATIONS = fs
+  .readdirSync(MIGRATIONS_DIR, { withFileTypes: true })
+  .filter(
+    (entry) => entry.isDirectory() && fs.existsSync(path.join(MIGRATIONS_DIR, entry.name, "migration.sql"))
+  ).length;
 
 /* ---------- 配置解析：环境变量优先，其次本地 .env（不入仓库） ---------- */
 
@@ -304,8 +313,10 @@ async function main() {
   const firstDeploy = deploy();
   if (firstDeploy.status !== 0) fail("空库 migrate deploy 失败", `${firstDeploy.stdout || ""}${firstDeploy.stderr || ""}`);
   const appliedCount = readCount("SELECT COUNT(*) FROM `_prisma_migrations` WHERE `finished_at` IS NOT NULL AND `rolled_back_at` IS NULL;");
-  if (!Number.isFinite(appliedCount) || appliedCount < 24) fail(`迁移数量异常: ${appliedCount}`);
-  ok(`全量迁移完成，_prisma_migrations=${appliedCount}`);
+  if (appliedCount !== EXPECTED_MIGRATIONS) {
+    fail(`迁移数量异常: 实际 ${appliedCount}，迁移目录 ${EXPECTED_MIGRATIONS}`);
+  }
+  ok(`全量迁移完成，_prisma_migrations=${appliedCount}/${EXPECTED_MIGRATIONS}`);
   const drift = runNode([PRISMA_CLI, "migrate", "diff", "--from-url", TEST_DATABASE_URL, "--to-schema-datamodel", SCHEMA_PATH]);
   if (drift.status !== 0) fail("migrate diff 执行失败", `${drift.stdout || ""}${drift.stderr || ""}`);
   const driftSql = `${drift.stdout || ""}${drift.stderr || ""}`.replace(
@@ -412,7 +423,7 @@ async function main() {
   assert.match(`${staleColumn.stdout || ""}${staleColumn.stderr || ""}`, /Unknown column/u, "旧列应已移除");
   assert.equal(
     readCount("SELECT COUNT(*) FROM `_prisma_migrations` WHERE `finished_at` IS NOT NULL AND `rolled_back_at` IS NULL;"),
-    24,
+    EXPECTED_MIGRATIONS,
     "升级后迁移记录应恢复完整"
   );
   ok("旧通知数据经升级完整保留并正确映射（tenantId/orderNo/event/截断规则）");
@@ -883,6 +894,51 @@ async function main() {
   assert.equal(restored.status, "completed");
   assert.ok(readCount("SELECT COUNT(*) FROM `rental_core_state_snapshots` WHERE `tenantId`='tenant_001';") >= 1, "租户聚合快照缺失");
   ok(`重启后订单 ${restored.orderNo} 恢复为 completed，快照在库`);
+
+  console.log("== 18. RC-01 快照 → 规范化事实表回填 ==");
+  // 第 7 节首次启动时快照表为空，本次测试过程写出了聚合快照；第 17 节重启触发回填。
+  // 这里断言"回填后规范化表与快照逐项一致"，以及"再次重启不重复插入"。
+  const snapshotCount = (jsonPath) =>
+    readCount(
+      `SELECT JSON_LENGTH(\`state\`->'$.${jsonPath}') FROM \`rental_core_state_snapshots\` WHERE \`tenantId\`='tenant_001';`
+    );
+  const backfillPairs = [
+    ["rental_orders", "orders", snapshotCount("orders")],
+    ["rental_item_groups", "itemGroups", snapshotCount("itemGroups")],
+    ["rental_assets", "assets", snapshotCount("assets")],
+    ["rental_inspection_records", "inspections", snapshotCount("inspections")]
+  ];
+  for (const [table, jsonPath, expected] of backfillPairs) {
+    assert.ok(expected > 0, `快照中 ${jsonPath} 应有数据才能验证回填，实际 ${expected}`);
+    const actual = readCount(`SELECT COUNT(*) FROM \`${table}\` WHERE \`tenantId\`='tenant_001';`);
+    assert.equal(actual, expected, `${table} 回填行数应与快照 ${jsonPath} 一致`);
+  }
+  // 订单行、预占、分配没有 tenantId 列，通过订单关联计数，同时验证关联正确落库。
+  const orderChildren = readCount(
+    "SELECT COUNT(*) FROM `rental_order_lines` l JOIN `rental_orders` o ON o.`id`=l.`orderId` WHERE o.`tenantId`='tenant_001';"
+  );
+  assert.ok(orderChildren > 0, "订单行应随订单回填");
+  assert.ok(
+    readCount("SELECT COUNT(*) FROM `rental_reservations` WHERE `tenantId`='tenant_001';") > 0,
+    "预占应随订单回填"
+  );
+  assert.ok(
+    readCount("SELECT COUNT(*) FROM `rental_quotes` WHERE `tenantId`='tenant_001';") > 0,
+    "报价事实应从业务快照回填"
+  );
+  // 金额必须按 Decimal 落库，不能因 JSON→列转换丢精度或写成 0。
+  const payable = readCount(
+    "SELECT ROUND(SUM(`finalPayableAmount`)) FROM `rental_orders` WHERE `tenantId`='tenant_001';"
+  );
+  assert.ok(payable > 0, `回填订单的最终应付金额不应为 0，实际 ${payable}`);
+
+  const beforeRestart = readCount("SELECT COUNT(*) FROM `rental_orders`;");
+  await stopApi();
+  startApi();
+  if (!(await waitHealth())) fail("回填幂等校验的 API 重启超时");
+  const afterRestart = readCount("SELECT COUNT(*) FROM `rental_orders`;");
+  assert.equal(afterRestart, beforeRestart, "再次重启不得重复回填订单");
+  ok(`回填与快照逐项一致（订单/商品组/资产/检查/报价），金额非零，二次重启不重复（${afterRestart} 单）`);
 
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);
 }
