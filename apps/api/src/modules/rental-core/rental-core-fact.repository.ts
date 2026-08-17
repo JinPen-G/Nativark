@@ -34,6 +34,25 @@ export interface AssetStatusChange {
   status: RentalAssetStatus;
 }
 
+/**
+ * 服务层只依赖这个接口。与配置仓储同理：不连库的单元测试注入吸收式 stub，
+ * 而租户隔离、外键、过期预占过滤这类持久化语义只在 MySQL E2E 里验证。
+ */
+export interface RentalCoreFactStore {
+  listOrders(tenantId: string): Promise<RentalOrder[]>;
+  findOrder(tenantId: string, orderId: string): Promise<RentalOrder | undefined>;
+  countOrders(tenantId: string): Promise<number>;
+  saveOrderAggregate(order: RentalOrder, assetChanges?: AssetStatusChange[]): Promise<void>;
+  activeReservations(tenantId: string): Promise<ActiveReservationRow[]>;
+  allocatedAssetIds(tenantId: string): Promise<Set<string>>;
+  listAssets(tenantId: string): Promise<RentalAsset[]>;
+  upsertAsset(asset: RentalAsset): Promise<void>;
+  listStockBalances(tenantId: string): Promise<RentalStockBalance[]>;
+  upsertStockBalance(balance: RentalStockBalance): Promise<void>;
+  listInspections(tenantId: string, orderId: string): Promise<RentalInspectionRecord[]>;
+  insertInspection(record: RentalInspectionRecord): Promise<void>;
+}
+
 const ACTIVE_RESERVATION_STATES: $Enums.RentalReservationState[] = ["SOFT", "CONFIRMED", "FULFILLED"];
 const IN_USE_ALLOCATION_STATES = ["allocated", "picked_up"];
 
@@ -69,7 +88,7 @@ function upper<T extends string>(value: string): T {
  * 通过 orderId 关联到已按租户过滤的订单，写入前必须先确认订单归属。
  */
 @Injectable()
-export class RentalCoreFactRepository {
+export class RentalCoreFactRepository implements RentalCoreFactStore {
   constructor(private readonly prisma: PrismaService) {}
 
   /* ---------- 订单聚合 ---------- */

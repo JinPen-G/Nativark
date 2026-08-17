@@ -30,4 +30,39 @@ function createAbsorbingConfigStore() {
   };
 }
 
-module.exports = { createAbsorbingConfigStore };
+
+/**
+ * 吸收式事实 store：读返回空、写丢弃。
+ *
+ * 与配置 stub 的差别很重要：配置读取走服务内存写穿缓存，所以吸收式 stub 不影响断言；
+ * 而事实是**从 store 读**的，返回空意味着订单类断言在这里无法成立。这是有意的——
+ * 订单生命周期、库存占用释放、资产状态流转和检查联动都依赖持久化语义，
+ * 只有 tests/mysql-e2e.test.cjs 对真实 MySQL 的断言才算证明；在这里靠假实现
+ * 重写一遍查询逻辑只会制造「对着假的过、对着真库挂」的分叉。
+ *
+ * 因此这个 stub 只保证服务可被构造、配置与纯算法断言可运行。
+ */
+function createAbsorbingFactStore() {
+  const writes = [];
+  const record = (kind) => (payload) => {
+    writes.push({ kind, id: payload?.id });
+    return Promise.resolve();
+  };
+  return {
+    writes,
+    listOrders: () => Promise.resolve([]),
+    findOrder: () => Promise.resolve(undefined),
+    countOrders: () => Promise.resolve(0),
+    saveOrderAggregate: record("order"),
+    activeReservations: () => Promise.resolve([]),
+    allocatedAssetIds: () => Promise.resolve(new Set()),
+    listAssets: () => Promise.resolve([]),
+    upsertAsset: record("asset"),
+    listStockBalances: () => Promise.resolve([]),
+    upsertStockBalance: record("stockBalance"),
+    listInspections: () => Promise.resolve([]),
+    insertInspection: record("inspection")
+  };
+}
+
+module.exports = { createAbsorbingConfigStore, createAbsorbingFactStore };

@@ -147,9 +147,15 @@ function ok(message) {
   passedGroups += 1;
   console.log(`  PASS  ${message}`);
 }
+let apiLogRef = null;
 function fail(message, detail) {
   console.error(`  FAIL  ${message}`);
   if (detail) console.error(detail);
+  // API 侧 500 在断言层看不到成因，这里附上子进程日志尾部，避免只留一个状态码。
+  if (apiLogRef && apiLogRef.length) {
+    console.error("--- API 日志尾部 ---");
+    console.error(apiLogRef.join("").slice(-3000));
+  }
   process.exitCode = 1;
   throw new Error(message);
 }
@@ -218,6 +224,7 @@ function startApi() {
     stdio: ["ignore", "pipe", "pipe"]
   });
   const logs = [];
+  apiLogRef = logs;
   apiProcess.stdout.on("data", (chunk) => logs.push(String(chunk)));
   apiProcess.stderr.on("data", (chunk) => logs.push(String(chunk)));
   apiProcess.on("exit", (code) => {
@@ -895,50 +902,53 @@ async function main() {
   assert.ok(readCount("SELECT COUNT(*) FROM `rental_core_state_snapshots` WHERE `tenantId`='tenant_001';") >= 1, "租户聚合快照缺失");
   ok(`重启后订单 ${restored.orderNo} 恢复为 completed，快照在库`);
 
-  console.log("== 18. RC-01 快照 → 规范化事实表回填 ==");
-  // 第 7 节首次启动时快照表为空，本次测试过程写出了聚合快照；第 17 节重启触发回填。
-  // 这里断言"回填后规范化表与快照逐项一致"，以及"再次重启不重复插入"。
-  const snapshotCount = (jsonPath) =>
-    readCount(
-      `SELECT JSON_LENGTH(\`state\`->'$.${jsonPath}') FROM \`rental_core_state_snapshots\` WHERE \`tenantId\`='tenant_001';`
-    );
-  const backfillPairs = [
-    ["rental_orders", "orders", snapshotCount("orders")],
-    ["rental_item_groups", "itemGroups", snapshotCount("itemGroups")],
-    ["rental_assets", "assets", snapshotCount("assets")],
-    ["rental_inspection_records", "inspections", snapshotCount("inspections")]
-  ];
-  for (const [table, jsonPath, expected] of backfillPairs) {
-    assert.ok(expected > 0, `快照中 ${jsonPath} 应有数据才能验证回填，实际 ${expected}`);
-    const actual = readCount(`SELECT COUNT(*) FROM \`${table}\` WHERE \`tenantId\`='tenant_001';`);
-    assert.equal(actual, expected, `${table} 回填行数应与快照 ${jsonPath} 一致`);
-  }
-  // 订单行、预占、分配没有 tenantId 列，通过订单关联计数，同时验证关联正确落库。
-  const orderChildren = readCount(
+  console.log("== 18. RC-01 核心事实以数据库为事实源 ==");
+  // 阶段 3 后订单、行、预占、分配和检查记录直接写规范化表，聚合快照不再承载事实，
+  // 因此这里不能再拿快照里的 orders 做对账基准（那个键已经不存在了）。
+  // 快照 → 表的回填只对阶段 3 之前建立的旧库有意义，其自身幂等由下面的二次重启覆盖。
+  const orderRows = readCount("SELECT COUNT(*) FROM `rental_orders` WHERE `tenantId`='tenant_001';");
+  assert.ok(orderRows > 0, "订单必须落在 rental_orders 表中");
+  const lineRows = readCount(
     "SELECT COUNT(*) FROM `rental_order_lines` l JOIN `rental_orders` o ON o.`id`=l.`orderId` WHERE o.`tenantId`='tenant_001';"
   );
-  assert.ok(orderChildren > 0, "订单行应随订单回填");
+  assert.ok(lineRows >= orderRows, "订单行必须随订单落库");
   assert.ok(
     readCount("SELECT COUNT(*) FROM `rental_reservations` WHERE `tenantId`='tenant_001';") > 0,
-    "预占应随订单回填"
+    "预占必须落库"
   );
   assert.ok(
-    readCount("SELECT COUNT(*) FROM `rental_quotes` WHERE `tenantId`='tenant_001';") > 0,
-    "报价事实应从业务快照回填"
+    readCount(
+      "SELECT COUNT(*) FROM `rental_allocations` a JOIN `rental_orders` o ON o.`id`=a.`orderId` WHERE o.`tenantId`='tenant_001';"
+    ) > 0,
+    "分配必须落库"
   );
-  // 金额必须按 Decimal 落库，不能因 JSON→列转换丢精度或写成 0。
-  const payable = readCount(
-    "SELECT ROUND(SUM(`finalPayableAmount`)) FROM `rental_orders` WHERE `tenantId`='tenant_001';"
+  assert.ok(
+    readCount("SELECT COUNT(*) FROM `rental_inspection_records` WHERE `tenantId`='tenant_001';") > 0,
+    "检查记录必须落库"
   );
-  assert.ok(payable > 0, `回填订单的最终应付金额不应为 0，实际 ${payable}`);
+  // 资产状态流转必须落到表上，而不是只存在于进程内。
+  assert.ok(
+    readCount("SELECT COUNT(*) FROM `rental_assets` WHERE `tenantId`='tenant_001' AND `status`='available';") > 0,
+    "归还后资产状态必须在表中回到 available"
+  );
+  // 金额必须按 Decimal 落库，不能因领域对象→列转换丢精度或写成 0。
+  assert.ok(
+    readCount("SELECT ROUND(SUM(`finalPayableAmount`)) FROM `rental_orders` WHERE `tenantId`='tenant_001';") > 0,
+    "订单最终应付金额不应为 0"
+  );
 
   const beforeRestart = readCount("SELECT COUNT(*) FROM `rental_orders`;");
   await stopApi();
   startApi();
-  if (!(await waitHealth())) fail("回填幂等校验的 API 重启超时");
+  if (!(await waitHealth())) fail("事实源校验的 API 重启超时");
   const afterRestart = readCount("SELECT COUNT(*) FROM `rental_orders`;");
-  assert.equal(afterRestart, beforeRestart, "再次重启不得重复回填订单");
-  ok(`回填与快照逐项一致（订单/商品组/资产/检查/报价），金额非零，二次重启不重复（${afterRestart} 单）`);
+  assert.equal(afterRestart, beforeRestart, "重启不得重复写入订单");
+  // 重启后必须能从表恢复订单，而不是依赖进程内对象。
+  const demoAfterFactRestart = await login("demo", "admin", DEMO_PASSWORD);
+  const restoredOrders = (await request("GET", "/api/rental/v1/orders", null, demoAfterFactRestart.accessToken)).body.data;
+  assert.equal(restoredOrders.length, orderRows, "重启后订单列表必须与表中行数一致");
+  assert.ok(restoredOrders.some((row) => row.status === "completed"), "已完成订单必须从表中恢复");
+  ok(`核心事实以库为事实源：${orderRows} 单/${lineRows} 行落表，资产状态与金额在库，重启后从表恢复且不重复`);
 
   console.log("== 19. RC-01 配置写穿：API 写入必须真正落库 ==");
   // 这一节不可省：API 读配置走的是服务内存写穿缓存，因此即使写穿完全没生效，
@@ -1007,6 +1017,11 @@ async function main() {
     await main();
   } catch (error) {
     console.error(`\nE2E 失败: ${error.message}`);
+    // 断言层只看到状态码，成因在 API 子进程里；附上日志尾部避免无从下手。
+    if (apiLogRef && apiLogRef.length) {
+      console.error("--- API 日志尾部 ---");
+      console.error(apiLogRef.join("").slice(-3000));
+    }
     process.exitCode = 1;
   } finally {
     await stopApi();

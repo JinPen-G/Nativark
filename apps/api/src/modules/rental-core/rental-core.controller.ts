@@ -70,7 +70,7 @@ export class RentalCoreController {
   @Post("availability") availability(@Req() req: AuthenticatedRequest, @Body() body: RentalAvailabilityRequest) { return this.service.availability(req.user.tenantId, body); }
   @Get("orders") orders(@Req() req: AuthenticatedRequest) { return this.service.listOrders(req.user.tenantId); }
   @Get("orders/:id") order(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.service.getOrder(req.user.tenantId, id); }
-  @Post("orders") createOrder(@Req() req: AuthenticatedRequest, @Body() body: CreateRentalOrderRequest) {
+  @Post("orders") async createOrder(@Req() req: AuthenticatedRequest, @Body() body: CreateRentalOrderRequest) {
     const context = this.context(req.user.tenantId);
     const quote = this.business.consumeQuote(req.user.tenantId, context, body.quoteId);
     const quotedLines = quote.request.lines.map((line) => `${line.itemGroupId}:${line.quantity}`).sort();
@@ -78,54 +78,60 @@ export class RentalCoreController {
     if (quote.request.fulfillmentMode !== body.fulfillmentMode || quote.request.fulfillmentLocationId !== body.fulfillmentLocationId || quote.request.returnLocationId !== body.returnLocationId || quote.request.startAt !== body.startAt || quote.request.endAt !== body.endAt || quote.request.customerType !== body.customerType || quote.request.customerId !== body.customerId || JSON.stringify(quotedLines) !== JSON.stringify(orderLines)) {
       throw new BadRequestException("订单内容与服务端报价快照不一致");
     }
-    const order = this.service.createOrder(req.user.tenantId, body, req.user.displayName, quote);
+    const order = await this.service.createOrder(req.user.tenantId, body, req.user.displayName, quote);
     this.business.markQuoteConsumed(req.user.tenantId, context, quote.id, order.id);
     this.business.lockCoupon(req.user.tenantId, context, quote.customerCouponId, order.id);
     this.emitOrderEvent(req.user.tenantId, "order.created", order);
     return this.committed(req.user.tenantId, order);
   }
-  @Post("orders/:id/confirm") confirm(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
-    const order = this.service.confirmOrder(req.user.tenantId, id);
+  @Post("orders/:id/confirm") async confirm(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
+    const order = await this.service.confirmOrder(req.user.tenantId, id);
     this.business.redeemCoupon(req.user.tenantId, this.context(req.user.tenantId), id);
     this.emitOrderEvent(req.user.tenantId, "order.confirmed", order);
     return this.committed(req.user.tenantId, order);
   }
-  @Post("orders/:id/allocate") allocate(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.committed(req.user.tenantId, this.service.allocateOrder(req.user.tenantId, id)); }
-  @Post("orders/:id/cancel") cancel(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: CancelRentalOrderRequest) {
+  @Post("orders/:id/allocate") async allocate(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.committed(req.user.tenantId, await this.service.allocateOrder(req.user.tenantId, id)); }
+  @Post("orders/:id/cancel") async cancel(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: CancelRentalOrderRequest) {
     const context = this.context(req.user.tenantId);
-    const current = this.service.getOrder(req.user.tenantId, id);
+    const current = await this.service.getOrder(req.user.tenantId, id);
     const quote = this.business.getQuote(req.user.tenantId, context, current.quoteId);
     const charge = this.business.calculateCancellationCharge(req.user.tenantId, context, quote, undefined, Boolean(body.weatherException));
-    const order = this.service.cancelOrder(req.user.tenantId, id, body.reason, charge);
+    const order = await this.service.cancelOrder(req.user.tenantId, id, body.reason, charge);
     this.business.releaseCoupon(req.user.tenantId, this.context(req.user.tenantId), id);
     this.emitOrderEvent(req.user.tenantId, "order.cancelled", order);
     return this.committed(req.user.tenantId, order);
   }
   @Get("inspection-templates") templates(@Req() req: AuthenticatedRequest, @Query("stage") stage?: "pickup" | "return") { return this.service.listInspectionTemplates(req.user.tenantId, stage); }
   @Get("orders/:id/inspections") inspections(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.service.listInspections(req.user.tenantId, id); }
-  @Post("orders/:id/inspections") createInspection(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: CreateRentalInspectionRequest) {
+  @Post("orders/:id/inspections") async createInspection(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: CreateRentalInspectionRequest) {
     const context = this.context(req.user.tenantId);
-    const current = this.service.getOrder(req.user.tenantId, id);
+    const current = await this.service.getOrder(req.user.tenantId, id);
     const template = this.service.listInspectionTemplates(req.user.tenantId).find((row) => row.id === body.templateId);
     const returnedAt = new Date().toISOString();
-    const overdueCharge = template?.stage === "return" ? this.business.calculateOverdueCharge(req.user.tenantId, context, this.business.getQuote(req.user.tenantId, context, current.quoteId), returnedAt) : 0;
-    const result = this.service.createInspection(req.user.tenantId, id, body, req.user.displayName);
-    if (overdueCharge > 0) this.service.applyOverdueCharge(req.user.tenantId, id, overdueCharge, returnedAt);
-    if (template?.stage === "return") {
-      const damageCharge = this.business.calculateDamageCharge(req.user.tenantId, context, this.business.getQuote(req.user.tenantId, context, current.quoteId), body.exceptions ?? []);
-      if (damageCharge > 0) this.service.applyDamageCharge(req.user.tenantId, id, damageCharge, (body.exceptions ?? []).map((item) => item.description).join("；") || "归还检查损坏费用");
-      this.completeCustomerOrderEvent(req.user.tenantId, result.order);
-    }
+    // 逾期费与损坏费先按报价算好再一次性交给 service：迁库后每次"加载订单→改→存"
+    // 都是独立事务，分三次调用会把一个业务动作拆成三个事务。
+    const quote = this.business.getQuote(req.user.tenantId, context, current.quoteId);
+    const charges = template?.stage === "return"
+      ? {
+          overdue: { amount: this.business.calculateOverdueCharge(req.user.tenantId, context, quote, returnedAt), returnedAt },
+          damage: {
+            amount: this.business.calculateDamageCharge(req.user.tenantId, context, quote, body.exceptions ?? []),
+            detail: (body.exceptions ?? []).map((item) => item.description).join("；") || "归还检查损坏费用"
+          }
+        }
+      : {};
+    const result = await this.service.createInspection(req.user.tenantId, id, body, req.user.displayName, charges);
+    if (template?.stage === "return") this.completeCustomerOrderEvent(req.user.tenantId, result.order);
     this.emitOrderEvent(req.user.tenantId, result.inspection.stage === "pickup" ? "pickup.completed" : "return.completed", result.order);
     return this.committed(req.user.tenantId, result);
   }
-  @Post("orders/:id/handover/:stage") handover(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Param("stage") stage: string) {
+  @Post("orders/:id/handover/:stage") async handover(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Param("stage") stage: string) {
     if (stage !== "pickup" && stage !== "return") throw new BadRequestException("交接阶段无效");
     const context = this.context(req.user.tenantId);
-    const current = this.service.getOrder(req.user.tenantId, id);
+    const current = await this.service.getOrder(req.user.tenantId, id);
     const returnedAt = new Date().toISOString();
     const overdueCharge = stage === "return" ? this.business.calculateOverdueCharge(req.user.tenantId, context, this.business.getQuote(req.user.tenantId, context, current.quoteId), returnedAt) : 0;
-    const order = this.service.completeHandoverWithoutInspection(req.user.tenantId, id, stage, overdueCharge);
+    const order = await this.service.completeHandoverWithoutInspection(req.user.tenantId, id, stage, overdueCharge);
     if (stage === "return") this.completeCustomerOrderEvent(req.user.tenantId, order);
     this.emitOrderEvent(req.user.tenantId, stage === "pickup" ? "pickup.completed" : "return.completed", order);
     return this.committed(req.user.tenantId, order);

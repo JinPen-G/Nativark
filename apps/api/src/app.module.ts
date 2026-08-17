@@ -32,6 +32,7 @@ import { RentalBusinessService } from "./modules/rental-core/rental-business.ser
 import { RentalStateRepository } from "./modules/rental-core/rental-state.repository";
 import { RentalSnapshotBackfillService } from "./modules/rental-core/rental-snapshot-backfill.service";
 import { RentalCoreConfigRepository } from "./modules/rental-core/rental-core-config.repository";
+import { RentalCoreFactRepository } from "./modules/rental-core/rental-core-fact.repository";
 
 @Module({
   imports: [
@@ -69,6 +70,7 @@ import { RentalCoreConfigRepository } from "./modules/rental-core/rental-core-co
     RentalStateRepository,
     RentalSnapshotBackfillService,
     RentalCoreConfigRepository,
+    RentalCoreFactRepository,
     IntegrationsService,
     IntegrationsRepository,
     {

@@ -7,10 +7,10 @@ require("ts-node").register({
 
 const { RentalCoreService } = require("../apps/api/src/modules/rental-core/rental-core.service");
 const { RentalBusinessService } = require("../apps/api/src/modules/rental-core/rental-business.service");
-const { createAbsorbingConfigStore } = require("./helpers/absorbing-config-store.cjs");
+const { createAbsorbingConfigStore, createAbsorbingFactStore } = require("./helpers/absorbing-config-store.cjs");
 
 // 不连库用例：注入吸收式 store 让配置写穿落空，配置读取仍由服务内存缓存提供。
-const core = new RentalCoreService(createAbsorbingConfigStore());
+const core = new RentalCoreService(createAbsorbingConfigStore(), createAbsorbingFactStore());
 const business = new RentalBusinessService();
 const tenantId = "tenant_002";
 const now = Date.now();
@@ -106,26 +106,20 @@ assert.ok(quote.serviceAmount > 0);
 assert.equal(quote.calendarVersion, `${publishedCalendar.year}:${publishedCalendar.version}`);
 assert.ok(quote.chargeLines.some((line) => line.type === "coupon"));
 
-const order = core.createOrder(tenantId, {
-  quoteId: quote.id,
-  customerType: "personal",
-  customerId: "member_001",
-  customerName: "露营测试会员",
-  fulfillmentMode: quote.request.fulfillmentMode,
-  fulfillmentLocationId: location.id,
-  startAt,
-  endAt,
-  lines: [{ itemGroupId: group.id, quantity: 1 }]
-}, "test", business.consumeQuote(tenantId, context(), quote.id));
-business.markQuoteConsumed(tenantId, context(), quote.id, order.id);
+// 券状态机（锁定→核销→释放）是业务状态，仍在内存，这里继续断言。
+// 但订单本体已随 RC-01 阶段 3 迁入数据库：core.createOrder 会先查可用量，
+// 而吸收式 stub 没有库存事实，必然判定库存不足。券操作只需要一个订单标识，
+// 因此这里用合成 id 驱动，订单生命周期本身由 E2E 第 9/11/12 节对真实 MySQL 验证。
+const orderId = "order_coupon_flow_test";
+const consumed = business.consumeQuote(tenantId, context(), quote.id);
+assert.equal(consumed.id, quote.id);
+business.markQuoteConsumed(tenantId, context(), quote.id, orderId);
 assert.throws(() => business.consumeQuote(tenantId, context(), quote.id), /已用于订单/, "quote snapshots must be single-use");
-business.lockCoupon(tenantId, context(), quote.customerCouponId, order.id);
+business.lockCoupon(tenantId, context(), quote.customerCouponId, orderId);
 assert.equal(business.listCustomerCoupons(tenantId, context(), "member_001")[0].status, "locked");
-core.confirmOrder(tenantId, order.id);
-business.redeemCoupon(tenantId, context(), order.id);
+business.redeemCoupon(tenantId, context(), orderId);
 assert.equal(business.listCustomerCoupons(tenantId, context(), "member_001")[0].status, "redeemed");
-core.cancelOrder(tenantId, order.id, "测试取消");
-business.releaseCoupon(tenantId, context(), order.id);
+business.releaseCoupon(tenantId, context(), orderId);
 assert.equal(business.listCustomerCoupons(tenantId, context(), "member_001")[0].status, "claimed");
 
 const settings = core.getBusinessSettings(tenantId);
@@ -200,7 +194,7 @@ const template = business.listNotificationTemplates(tenantId, context())[0];
 const sendLog = business.sendNotification(tenantId, context(), {
   templateId: template.id,
   recipient: "member_001",
-  variables: { customerName: "露营测试会员", orderNo: order.orderNo }
+  variables: { customerName: "露营测试会员", orderNo: "RC-NOTIFY-TEST-001" }
 });
 assert.equal(sendLog.status, "sent");
 assert.equal(sendLog.provider, "mock-notification-adapter");
