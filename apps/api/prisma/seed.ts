@@ -1,16 +1,21 @@
 import {
+  BillingMode,
   ConfigStatus,
   CorporateStatus,
+  DispatchStatus,
   MemberReviewStatus,
   MemberStatus,
   MonthlyBillStatus,
+  OrderMainStatus,
   OrganizationType,
+  PaymentStatus,
   PermissionKind,
   Prisma,
   PrismaClient,
   RentalCategoryCode,
   RoleScope,
   SettlementMode,
+  StoreRentalMode,
   SystemDataScope,
   TenantStatus,
   VehicleOperationStatus,
@@ -1361,19 +1366,47 @@ async function upsertSceneOrders() {
     }
   ];
 
+  // 场景数据使用领域文案（如 unassigned）和数据库枚举值；写入前必须转换为 Prisma 枚举名
+  const modeMap: Record<string, StoreRentalMode> = { store_rental: StoreRentalMode.STORE_RENTAL };
+  const mainStatusMap: Record<string, OrderMainStatus> = {
+    pending_payment: OrderMainStatus.PENDING_PAYMENT,
+    reserved: OrderMainStatus.RESERVED,
+    renting: OrderMainStatus.RENTING,
+    settlement_pending: OrderMainStatus.SETTLEMENT_PENDING,
+    completed: OrderMainStatus.COMPLETED,
+    cancelled: OrderMainStatus.CANCELLED,
+    accident_processing: OrderMainStatus.ACCIDENT_PROCESSING
+  };
+  const dispatchStatusMap: Record<string, DispatchStatus> = {
+    unassigned: DispatchStatus.PENDING,
+    pre_assigned: DispatchStatus.PRE_ASSIGNED,
+    locked: DispatchStatus.LOCKED
+  };
+  const paymentStatusMap: Record<string, PaymentStatus> = {
+    unpaid: PaymentStatus.UNPAID,
+    deposit_paid: PaymentStatus.DEPOSIT_PAID,
+    monthly_billing: PaymentStatus.MONTHLY_BILLING,
+    refunded: PaymentStatus.REFUNDED
+  };
+  const billingModeMap: Record<string, BillingMode> = {
+    customer_pay: BillingMode.CUSTOMER_PAY,
+    monthly: BillingMode.MONTHLY
+  };
+
   for (const order of sceneOrders) {
-    const createData = {
-      tenantId,
-      ...order
-      } as unknown as Prisma.StoreRentalOrderUncheckedCreateInput;
-    const updateData = {
-      tenantId,
-      ...order
-      } as unknown as Prisma.StoreRentalOrderUncheckedUpdateInput;
+    const { mode, mainStatus, dispatchStatus, paymentStatus, billingMode, ...rest } = order;
+    const normalized = {
+      ...rest,
+      mode: modeMap[mode],
+      mainStatus: mainStatusMap[mainStatus],
+      dispatchStatus: dispatchStatusMap[dispatchStatus],
+      paymentStatus: paymentStatusMap[paymentStatus],
+      billingMode: billingModeMap[billingMode]
+    };
     await prisma.storeRentalOrder.upsert({
       where: { id: order.id },
-      update: updateData,
-      create: createData
+      update: { tenantId, ...normalized } as unknown as Prisma.StoreRentalOrderUncheckedUpdateInput,
+      create: { tenantId, ...normalized } as unknown as Prisma.StoreRentalOrderUncheckedCreateInput
     });
   }
 }

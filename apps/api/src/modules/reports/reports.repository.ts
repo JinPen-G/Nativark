@@ -36,7 +36,7 @@ import type {
   VehicleInstanceSummary
 } from "@store-rental/shared";
 import { PrismaService } from "../database/prisma.service";
-import { getRequestTenantId } from "../../common/request-identity";
+import { requireRequestTenantId } from "../../common/request-identity";
 
 type NormalizedReportQuery = Required<
   Pick<StoreRentalReportQuery, "tenantId" | "from" | "to" | "period">
@@ -85,7 +85,7 @@ interface RiskContext {
 @Injectable()
 export class ReportsRepository {
   private get defaultTenantId() {
-    return getRequestTenantId();
+    return requireRequestTenantId();
   }
   private readonly exportDirectory = resolve(process.cwd(), "storage", "report-exports");
 

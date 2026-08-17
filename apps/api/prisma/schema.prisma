@@ -692,7 +692,7 @@ model VehicleOnboardItem {
 model TboxDevice {
   id              String              @id @default(uuid())
   tenantId        String
-  tenant          Tenant              @relation(fields: [tenantId], references: [id])
+  tenant          Tenant              @relation(fields: [tenantId], references: [id], map: "TboxDevice_tenantId_fleet_fkey")
   cid             String
   provider        String
   modelNo         String
@@ -1622,6 +1622,7 @@ model OrderNotificationRecord {
   @@index([tenantId, orderId, createdAt])
   @@index([tenantId, event, status, createdAt])
   @@index([tenantId, relatedAction, createdAt])
+  @@index([orderId])
 }
 
 model OperationLog {
@@ -1952,7 +1953,7 @@ model RentalCouponTemplate {
   updatedAt              DateTime @updatedAt
 
   @@unique([tenantId, code])
-  @@index([tenantId, status, effectiveFrom, effectiveTo])
+  @@index([tenantId, status, effectiveFrom, effectiveTo], map: "rental_coupon_templates_tenant_status_effective_idx")
   @@map("rental_coupon_templates")
 }
 
@@ -2007,7 +2008,7 @@ model RentalItemGroup {
   updatedAt        DateTime                 @updatedAt
 
   @@unique([tenantId, code])
-  @@index([tenantId, categoryCode, inventoryMode, status])
+  @@index([tenantId, categoryCode, inventoryMode, status], map: "rental_item_groups_tenant_category_mode_status_idx")
   @@map("rental_item_groups")
 }
 
@@ -2022,7 +2023,7 @@ model RentalBundleComponent {
   substitutionGroup    String?
   createdAt            DateTime        @default(now())
 
-  @@unique([bundleItemGroupId, componentItemGroupId])
+  @@unique([bundleItemGroupId, componentItemGroupId], map: "rental_bundle_components_bundle_component_key")
   @@index([componentItemGroupId])
   @@map("rental_bundle_components")
 }
@@ -2136,7 +2137,7 @@ model RentalReservation {
   createdAt   DateTime                  @default(now())
   updatedAt   DateTime                  @updatedAt
 
-  @@index([tenantId, itemGroupId, locationId, startAt, endAt, status])
+  @@index([tenantId, itemGroupId, locationId, startAt, endAt, status], map: "rental_reservations_tenant_group_loc_period_status_idx")
   @@index([orderId, orderLineId])
   @@map("rental_reservations")
 }
@@ -2176,7 +2177,7 @@ model RentalInspectionTemplate {
   updatedAt    DateTime                 @updatedAt
 
   @@unique([tenantId, code, version])
-  @@index([tenantId, categoryCode, stage, enabled])
+  @@index([tenantId, categoryCode, stage, enabled], map: "rental_inspection_templates_tenant_category_stage_idx")
   @@map("rental_inspection_templates")
 }
 

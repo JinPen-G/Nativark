@@ -24,13 +24,13 @@ import type {
   SendMockNotificationRequest,
   TBoxDeviceSummary
 } from "@store-rental/shared";
-import { getRequestTenantId } from "../../common/request-identity";
+import { requireRequestTenantId } from "../../common/request-identity";
 import { IntegrationsRepository } from "./integrations.repository";
 
 @Injectable()
 export class IntegrationsService {
   private get defaultTenantId() {
-    return getRequestTenantId();
+    return requireRequestTenantId();
   }
 
   constructor(

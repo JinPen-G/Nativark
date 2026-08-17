@@ -36,7 +36,7 @@ CREATE TABLE `rental_coupon_templates` (
   `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   `updatedAt` DATETIME(3) NOT NULL,
   UNIQUE INDEX `rental_coupon_templates_tenantId_code_key` (`tenantId`, `code`),
-  INDEX `rental_coupon_templates_tenantId_status_effectiveFrom_effectiveTo_idx` (`tenantId`, `status`, `effectiveFrom`, `effectiveTo`),
+  INDEX `rental_coupon_templates_tenant_status_effective_idx` (`tenantId`, `status`, `effectiveFrom`, `effectiveTo`),
   PRIMARY KEY (`id`),
   CONSTRAINT `rental_coupon_templates_tenantId_fkey` FOREIGN KEY (`tenantId`) REFERENCES `Tenant` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

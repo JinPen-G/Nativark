@@ -56,7 +56,7 @@ import {
   buildSystemUserWhere
 } from "../../common/data-permission";
 import { PrismaService } from "../database/prisma.service";
-import { getRequestTenantId } from "../../common/request-identity";
+import { requireRequestTenantId } from "../../common/request-identity";
 
 type RoleWithPermissions = Awaited<
   ReturnType<PlatformRepository["findRoleWithPermissions"]>
@@ -165,7 +165,7 @@ export class PlatformRepository {
       tenantName: tenant.name,
       tenantStatus: this.toTenantStatus(tenant.status),
       enabledBusinessLines: ["rental_core"],
-      categoryCode: tenant.rentalProfile?.categoryCode as TenantSummary["categoryCode"],
+      categoryCode: this.toDomainCategoryCode(tenant.rentalProfile?.categoryCode),
       categoryName: tenant.rentalProfile?.category.name,
       capabilities: tenant.rentalProfile?.capabilities as TenantSummary["capabilities"]
     };
@@ -204,7 +204,7 @@ export class PlatformRepository {
         tenantName: tenant.name,
         tenantStatus: this.toTenantStatus(tenant.status),
         enabledBusinessLines: ["rental_core"],
-        categoryCode: tenant.rentalProfile?.categoryCode as TenantSummary["categoryCode"],
+        categoryCode: this.toDomainCategoryCode(tenant.rentalProfile?.categoryCode),
         categoryName: tenant.rentalProfile?.category.name,
         capabilities: tenant.rentalProfile?.capabilities as TenantSummary["capabilities"]
       },
@@ -720,7 +720,7 @@ export class PlatformRepository {
     };
   }
 
-  async getSystemRules(tenantId = getRequestTenantId()) {
+  async getSystemRules(tenantId = requireRequestTenantId()) {
     const row = await this.prisma.systemParameterSet.findFirst({
       where: {
         tenantId,
@@ -735,7 +735,7 @@ export class PlatformRepository {
   async saveSystemRules(
     config: SystemRulesConfig,
     operator = "system",
-    tenantId = getRequestTenantId()
+    tenantId = requireRequestTenantId()
   ) {
     const row = await this.prisma.systemParameterSet.findFirst({
       where: { tenantId, module: "system-rules", status: "EFFECTIVE" },
@@ -768,7 +768,7 @@ export class PlatformRepository {
   ): Promise<PlatformAuditResult> {
     const limit = Math.min(Math.max(Number(query.limit ?? 50), 1), 200);
     const where: Prisma.OperationLogWhereInput = {
-      tenantId: query.tenantId || getRequestTenantId(),
+      tenantId: query.tenantId || requireRequestTenantId(),
       action: query.action ? { contains: query.action } : undefined
     };
     const [rows, total] = await Promise.all([
@@ -878,7 +878,7 @@ export class PlatformRepository {
   async setDefaultFilterPreset(
     id: string,
     operator = "营运端",
-    tenantId = getRequestTenantId()
+    tenantId = requireRequestTenantId()
   ): Promise<PlatformFilterPreset> {
     const row = await this.prisma.filterPreset.findFirst({ where: { id, tenantId } });
     if (!row) {
@@ -908,7 +908,7 @@ export class PlatformRepository {
   async deleteFilterPreset(
     id: string,
     operator = "营运端",
-    tenantId = getRequestTenantId()
+    tenantId = requireRequestTenantId()
   ) {
     const row = await this.prisma.filterPreset.findFirst({ where: { id, tenantId } });
     if (!row) {
@@ -1105,7 +1105,7 @@ export class PlatformRepository {
       if (await tx.tenant.findUnique({ where: { code: tenantCode } })) {
         throw new BadRequestException("租户编码已存在");
       }
-      const categoryCode = input.categoryCode as unknown as PrismaRentalCategoryCode;
+      const categoryCode = this.toPrismaCategoryCode(input.categoryCode);
       const category = await tx.rentalCategoryDefinition.findUnique({ where: { code: categoryCode } });
       if (!category) throw new BadRequestException("经营品类不存在");
       const tenant = await tx.tenant.create({
@@ -1408,7 +1408,7 @@ export class PlatformRepository {
   }
 
   private async resolveConfigTenantId() {
-    const requestTenantId = getRequestTenantId();
+    const requestTenantId = requireRequestTenantId();
     const tenant = await this.prisma.tenant.findUnique({
       where: { id: requestTenantId }
     });
@@ -1591,6 +1591,24 @@ export class PlatformRepository {
     return TenantStatus.Active;
   }
 
+  // Prisma 枚举带 @map：客户端读写都使用枚举名（如 CAMERA），领域契约统一为小写（camera）。
+  // 登录上下文、路由守卫和前端菜单都按小写比较，必须在仓储边界归一化。
+  private toDomainCategoryCode(value: string | null | undefined): TenantSummary["categoryCode"] | undefined {
+    return value ? (value.toLowerCase() as TenantSummary["categoryCode"]) : undefined;
+  }
+
+  private toPrismaCategoryCode(value: string): PrismaRentalCategoryCode {
+    const map: Record<string, PrismaRentalCategoryCode> = {
+      vehicle: PrismaRentalCategoryCode.VEHICLE,
+      camera: PrismaRentalCategoryCode.CAMERA,
+      camping: PrismaRentalCategoryCode.CAMPING,
+      construction: PrismaRentalCategoryCode.CONSTRUCTION
+    };
+    const mapped = map[value];
+    if (!mapped) throw new BadRequestException("经营品类不存在");
+    return mapped;
+  }
+
   private toTenantSummary(tenant: {
     id: string;
     code: string;
@@ -1612,7 +1630,7 @@ export class PlatformRepository {
       tenantName: tenant.name,
       tenantStatus: this.toTenantStatus(tenant.status),
       enabledBusinessLines: ["rental_core"],
-      categoryCode: tenant.rentalProfile?.categoryCode as TenantSummary["categoryCode"],
+      categoryCode: this.toDomainCategoryCode(tenant.rentalProfile?.categoryCode),
       categoryName: tenant.rentalProfile?.category.name,
       capabilities: tenant.rentalProfile?.capabilities as TenantSummary["capabilities"],
       userCount: tenant._count.users,

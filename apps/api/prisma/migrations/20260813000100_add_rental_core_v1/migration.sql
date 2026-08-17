@@ -60,7 +60,7 @@ CREATE TABLE `rental_item_groups` (
   `updatedAt` DATETIME(3) NOT NULL,
   PRIMARY KEY (`id`),
   UNIQUE INDEX `rental_item_groups_tenantId_code_key` (`tenantId`, `code`),
-  INDEX `rental_item_groups_tenantId_categoryCode_inventoryMode_status_idx` (`tenantId`, `categoryCode`, `inventoryMode`, `status`),
+  INDEX `rental_item_groups_tenant_category_mode_status_idx` (`tenantId`, `categoryCode`, `inventoryMode`, `status`),
   CONSTRAINT `rental_item_groups_tenantId_fkey` FOREIGN KEY (`tenantId`) REFERENCES `Tenant` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `rental_item_groups_categoryCode_fkey` FOREIGN KEY (`categoryCode`) REFERENCES `rental_category_definitions` (`code`) ON DELETE RESTRICT ON UPDATE CASCADE
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -74,7 +74,7 @@ CREATE TABLE `rental_bundle_components` (
   `substitutionGroup` VARCHAR(191) NULL,
   `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
-  UNIQUE INDEX `rental_bundle_components_bundleItemGroupId_componentItemGroupId_key` (`bundleItemGroupId`, `componentItemGroupId`),
+  UNIQUE INDEX `rental_bundle_components_bundle_component_key` (`bundleItemGroupId`, `componentItemGroupId`),
   INDEX `rental_bundle_components_componentItemGroupId_idx` (`componentItemGroupId`),
   CONSTRAINT `rental_bundle_components_bundleItemGroupId_fkey` FOREIGN KEY (`bundleItemGroupId`) REFERENCES `rental_item_groups` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `rental_bundle_components_componentItemGroupId_fkey` FOREIGN KEY (`componentItemGroupId`) REFERENCES `rental_item_groups` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE
@@ -173,7 +173,7 @@ CREATE TABLE `rental_reservations` (
   `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   `updatedAt` DATETIME(3) NOT NULL,
   PRIMARY KEY (`id`),
-  INDEX `rental_reservations_tenantId_itemGroupId_locationId_startAt_endAt_status_idx` (`tenantId`, `itemGroupId`, `locationId`, `startAt`, `endAt`, `status`),
+  INDEX `rental_reservations_tenant_group_loc_period_status_idx` (`tenantId`, `itemGroupId`, `locationId`, `startAt`, `endAt`, `status`),
   INDEX `rental_reservations_orderId_orderLineId_idx` (`orderId`, `orderLineId`),
   CONSTRAINT `rental_reservations_tenantId_fkey` FOREIGN KEY (`tenantId`) REFERENCES `Tenant` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `rental_reservations_orderId_fkey` FOREIGN KEY (`orderId`) REFERENCES `rental_orders` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
@@ -213,7 +213,7 @@ CREATE TABLE `rental_inspection_templates` (
   `updatedAt` DATETIME(3) NOT NULL,
   PRIMARY KEY (`id`),
   UNIQUE INDEX `rental_inspection_templates_tenantId_code_version_key` (`tenantId`, `code`, `version`),
-  INDEX `rental_inspection_templates_tenantId_categoryCode_stage_enabled_idx` (`tenantId`, `categoryCode`, `stage`, `enabled`),
+  INDEX `rental_inspection_templates_tenant_category_stage_idx` (`tenantId`, `categoryCode`, `stage`, `enabled`),
   CONSTRAINT `rental_inspection_templates_tenantId_fkey` FOREIGN KEY (`tenantId`) REFERENCES `Tenant` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `rental_inspection_templates_categoryCode_fkey` FOREIGN KEY (`categoryCode`) REFERENCES `rental_category_definitions` (`code`) ON DELETE RESTRICT ON UPDATE CASCADE
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

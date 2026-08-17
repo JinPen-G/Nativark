@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { createHash, randomUUID } from "node:crypto";
-import { getRequestTenantId } from "../../common/request-identity";
+import { requireRequestTenantId } from "../../common/request-identity";
 import {
   BillingMode,
   ConfigStatus,
@@ -1311,19 +1311,19 @@ export class StoreRentalService {
   private readonly tenantMembershipPlans = new Map<string, MembershipPlanSummary[]>();
 
   private currentMembers() {
-    const tenantId = getRequestTenantId();
+    const tenantId = requireRequestTenantId();
     if (!this.tenantMembers.has(tenantId)) this.tenantMembers.set(tenantId, structuredClone(this.members));
     return this.tenantMembers.get(tenantId)!;
   }
 
   private currentMemberReviews() {
-    const tenantId = getRequestTenantId();
+    const tenantId = requireRequestTenantId();
     if (!this.tenantMemberReviews.has(tenantId)) this.tenantMemberReviews.set(tenantId, structuredClone(this.memberReviews));
     return this.tenantMemberReviews.get(tenantId)!;
   }
 
   private currentMembershipPlans() {
-    const tenantId = getRequestTenantId();
+    const tenantId = requireRequestTenantId();
     if (!this.tenantMembershipPlans.has(tenantId)) this.tenantMembershipPlans.set(tenantId, structuredClone(this.membershipPlans));
     return this.tenantMembershipPlans.get(tenantId)!;
   }

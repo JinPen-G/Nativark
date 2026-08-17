@@ -150,7 +150,8 @@ ALTER TABLE `VehicleCredentialRecord` ADD CONSTRAINT `VehicleCredentialRecord_ve
 ALTER TABLE `VehicleOnboardItem` ADD CONSTRAINT `VehicleOnboardItem_vehicleId_fkey` FOREIGN KEY (`vehicleId`) REFERENCES `Vehicle`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE `TboxDevice` ADD CONSTRAINT `TboxDevice_tenantId_fkey` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+-- 约束名不能使用 TboxDevice_tenantId_fkey：与 infra 迁移中 TBoxDevice 表的外键在 MySQL 大小写不敏感校验下重名（错误 1826）
+ALTER TABLE `TboxDevice` ADD CONSTRAINT `TboxDevice_tenantId_fleet_fkey` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `TboxDevice` ADD CONSTRAINT `TboxDevice_boundVehicleId_fkey` FOREIGN KEY (`boundVehicleId`) REFERENCES `Vehicle`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;

@@ -1,6 +1,7 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "node:crypto";
+import { requireRequestTenantId } from "../../common/request-identity";
 import {
   RENTAL_CATEGORY_DEFINITIONS,
   GeneratePlatformNumberRequest,
@@ -49,6 +50,9 @@ interface StoredUser extends SaveSystemUserRequest {
   password: string;
   mustChangePassword?: boolean;
 }
+
+// 平台主体租户：平台级配置（登录安全基线等）的读写与审计范围，区别于业务租户和演示租户
+const PLATFORM_SUBJECT_TENANT_ID = "tenant_platform";
 
 @Injectable()
 export class PlatformService {
@@ -630,9 +634,10 @@ export class PlatformService {
     this.buildNumberRule("VEHICLE_LICENSE", "车辆证照编号", "车辆资产", "VL", "yyyyMM", 4)
   ];
 
-  getSystemRules() {
+  getSystemRules(tenantId?: string) {
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.getSystemRules().then((config) =>
+      const scope = tenantId ?? requireRequestTenantId();
+      return this.platformRepository.getSystemRules(scope).then((config) =>
         config ? this.cloneSystemRulesConfig(config) : this.cloneSystemRulesConfig()
       );
     }
@@ -640,7 +645,8 @@ export class PlatformService {
   }
 
   async getSecurityBaseline() {
-    const config = await this.getSystemRules();
+    // 登录等认证前流程没有租户身份：安全基线显式从平台主体读取，不回退演示租户
+    const config = await this.getSystemRules(PLATFORM_SUBJECT_TENANT_ID);
     return this.normalizeSecurityBaseline(config.security);
   }
 
@@ -649,7 +655,8 @@ export class PlatformService {
     operator = "平台管理员"
   ) {
     const security = this.normalizeSecurityBaseline(input);
-    const config = await this.getSystemRules();
+    // 安全基线是平台级配置：读取、写入和审计都固定使用平台主体，不回退演示租户
+    const config = await this.getSystemRules(PLATFORM_SUBJECT_TENANT_ID);
     const next: SystemRulesConfig = {
       ...config,
       security,
@@ -659,9 +666,9 @@ export class PlatformService {
     this.validateSystemRulesConfig(next);
 
     if (this.useMysqlDataSource()) {
-      await this.platformRepository.saveSystemRules(next, operator);
+      await this.platformRepository.saveSystemRules(next, operator, PLATFORM_SUBJECT_TENANT_ID);
       await this.platformRepository.recordAuditLog({
-        tenantId: "tenant_001",
+        tenantId: PLATFORM_SUBJECT_TENANT_ID,
         action: "security-baseline.update",
         operator,
         targetType: "security-baseline",
@@ -671,7 +678,7 @@ export class PlatformService {
     } else {
       this.systemRulesConfig = next;
       this.recordMemoryAudit({
-        tenantId: "tenant_001",
+        tenantId: PLATFORM_SUBJECT_TENANT_ID,
         action: "security-baseline.update",
         operator,
         targetType: "security-baseline",
@@ -720,8 +727,9 @@ export class PlatformService {
       input.tenantId ??
       (input.tenantCode
         ? (await this.findTenantByCode(input.tenantCode))?.tenantId
-        : undefined) ??
-      "tenant_001";
+        : undefined);
+    // 无法确定归属租户的安全审计不落库，也不得回退到演示租户
+    if (!tenantId) return;
 
     if (this.useMysqlDataSource()) {
       await this.platformRepository.recordAuditLog({
@@ -1925,7 +1933,8 @@ export class PlatformService {
         ? tenantId?.trim() || user.tenantId
         : user.tenantId;
     }
-    return tenantId?.trim() || "tenant_001";
+    // 未认证调用方必须显式传租户；交给仓储层 requireRequestTenantId 拒绝空值
+    return tenantId?.trim();
   }
 
   private normalizeFilterPresetScope(scopeKey: string): PlatformFilterPresetScope {
@@ -1970,7 +1979,7 @@ export class PlatformService {
     return {
       ...input,
       id: input.id?.trim(),
-      tenantId: this.resolvePlatformTenantId(input.tenantId, user),
+      tenantId: this.resolvePlatformTenantId(input.tenantId, user) ?? requireRequestTenantId(),
       scopeKey,
       name,
       description: input.description?.trim() || undefined,

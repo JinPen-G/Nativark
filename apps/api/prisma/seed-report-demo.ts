@@ -429,7 +429,7 @@ const demoOrders: DemoOrder[] = [
     riskFlags: ["等待付款"],
     fees: [
       { code: "RENTAL", name: "车辆租金", stage: FeeStage.RENTAL, direction: FeeDirection.CHARGE, status: FeeStatus.PENDING, amount: 1180, settledAmount: 0 },
-      { code: "DEPOSIT", name: "押金预授权", stage: FeeStage.PRE_AUTH, direction: FeeDirection.CHARGE, status: FeeStatus.PENDING, amount: 100, settledAmount: 0 }
+      { code: "DEPOSIT", name: "押金预授权", stage: FeeStage.PICKUP, direction: FeeDirection.CHARGE, status: FeeStatus.PENDING, amount: 100, settledAmount: 0 }
     ],
     transactions: []
   },

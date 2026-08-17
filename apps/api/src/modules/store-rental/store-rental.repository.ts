@@ -131,7 +131,7 @@ import type {
   VehicleTransferTaskResult
 } from "@store-rental/shared";
 import { PrismaService } from "../database/prisma.service";
-import { getRequestTenantId } from "../../common/request-identity";
+import { requireRequestTenantId } from "../../common/request-identity";
 
 type Metadata = Record<string, unknown>;
 
@@ -190,7 +190,7 @@ interface SaveOrderEventSnapshotInput {
 @Injectable()
 export class StoreRentalRepository {
   private get defaultTenantId() {
-    return getRequestTenantId();
+    return requireRequestTenantId();
   }
   private readonly rentalRuleCode = "STORE_RENTAL_RULES";
 

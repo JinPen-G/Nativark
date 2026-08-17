@@ -13,7 +13,7 @@ require("ts-node").register({
 });
 
 const { ApiAuthGuard } = require("../apps/api/src/common/api-auth.guard");
-const { getRequestTenantId } = require("../apps/api/src/common/request-identity");
+const { getRequestTenantId, runWithRequestIdentity } = require("../apps/api/src/common/request-identity");
 const { hashPassword, verifyPassword } = require("../apps/api/src/common/password");
 const { AuthService } = require("../apps/api/src/modules/auth/auth.service");
 const { PlatformService } = require("../apps/api/src/modules/platform/platform.service");
@@ -212,7 +212,14 @@ function requestContext(method, url, accessToken) {
   assert.equal(await guard.canActivate(saasTenantList.context), true);
   const demoCore = requestContext("GET", "/api/rental/v1/profile", rotated.accessToken);
   assert.equal(await guard.canActivate(demoCore.context), true);
-  assert.equal(getRequestTenantId(), "tenant_001");
+  // 在与请求中间件等价的上下文存储内验证：守卫注入的是登录租户，而不是默认回退值
+  const guardTenantId = await runWithRequestIdentity({}, async () => {
+    assert.equal(await guard.canActivate(demoCore.context), true);
+    return getRequestTenantId();
+  });
+  assert.equal(guardTenantId, "tenant_001");
+  // 请求链之外的读取必须得到 undefined（fail-closed 前提），不得再出现默认租户
+  assert.equal(getRequestTenantId(), undefined);
   const cameraDispatch = requestContext("GET", "/api/store-rental/dispatch/board", rotated.accessToken);
   await assert.rejects(guard.canActivate(cameraDispatch.context), /旧车辆兼容域/);
   const cameraVehicleList = requestContext("GET", "/api/store-rental/vehicles", rotated.accessToken);
@@ -267,10 +274,17 @@ function requestContext(method, url, accessToken) {
     path.join(__dirname, "../apps/api/src/modules/integrations/integrations.repository.ts"),
     "utf8"
   );
-  assert.match(integrationsServiceSource, /return getRequestTenantId\(\)/);
-  assert.match(integrationsRepositorySource, /tenantId = getRequestTenantId\(\)/);
+  const requestIdentitySource = fs.readFileSync(
+    path.join(__dirname, "../apps/api/src/common/request-identity.ts"),
+    "utf8"
+  );
+  assert.match(integrationsServiceSource, /return requireRequestTenantId\(\)/);
+  assert.match(integrationsRepositorySource, /tenantId = requireRequestTenantId\(\)/);
   assert.doesNotMatch(integrationsServiceSource, /private readonly defaultTenantId = "tenant_001"/);
   assert.doesNotMatch(integrationsRepositorySource, /DEFAULT_TENANT_ID/);
+  // 租户解析必须 fail-closed：请求身份模块不得再提供默认租户回退
+  assert.doesNotMatch(requestIdentitySource, /fallback\s*=\s*"tenant_001"/);
+  assert.match(requestIdentitySource, /export function requireRequestTenantId/);
 
   console.log(
     "SaaS foundation test passed: admin boundary, tenant isolation (including integrations), bootstrap, password gate, session rotation, lifecycle revocation and password hashing verified."

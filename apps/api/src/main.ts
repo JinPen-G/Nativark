@@ -2,10 +2,12 @@ import "reflect-metadata";
 import { ValidationPipe } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { AppModule } from "./app.module";
+import { requestIdentityMiddleware } from "./common/request-identity";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  app.use(requestIdentityMiddleware);
   app.setGlobalPrefix("api");
   app.enableCors({
     credentials: true,
