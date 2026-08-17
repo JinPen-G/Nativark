@@ -39,11 +39,11 @@ export class RentalCoreController {
     await Promise.all([this.service.persist(tenantId), this.business.persist(tenantId)]);
     return resolved;
   }
-  private emitOrderEvent(tenantId: string, eventCode: string, order: { orderNo: string; customerName: string; contactPhone?: string; customerId?: string }) {
-    return this.business.emitNotificationEvent(tenantId, this.context(tenantId), eventCode, order.contactPhone ?? order.customerId, { customerName: order.customerName, orderNo: order.orderNo });
+  private async emitOrderEvent(tenantId: string, eventCode: string, order: { orderNo: string; customerName: string; contactPhone?: string; customerId?: string }) {
+    return await this.business.emitNotificationEvent(tenantId, this.context(tenantId), eventCode, order.contactPhone ?? order.customerId, { customerName: order.customerName, orderNo: order.orderNo });
   }
-  private completeCustomerOrderEvent(tenantId: string, order: { customerId?: string; status: string }) {
-    if (order.customerId && order.status === "completed") this.business.handleCustomerEvent(tenantId, this.context(tenantId), order.customerId, "first_order_completed");
+  private async completeCustomerOrderEvent(tenantId: string, order: { customerId?: string; status: string }) {
+    if (order.customerId && order.status === "completed") await this.business.handleCustomerEvent(tenantId, this.context(tenantId), order.customerId, "first_order_completed");
   }
   @Get("categories") categories() { return this.service.listCategories(); }
   @Get("tenant-profile") profile(@Req() req: AuthenticatedRequest) { return this.service.getProfile(req.user.tenantId); }
@@ -79,15 +79,15 @@ export class RentalCoreController {
       throw new BadRequestException("订单内容与服务端报价快照不一致");
     }
     const order = await this.service.createOrder(req.user.tenantId, body, req.user.displayName, quote);
-    this.business.markQuoteConsumed(req.user.tenantId, context, quote.id, order.id);
-    this.business.lockCoupon(req.user.tenantId, context, quote.customerCouponId, order.id);
-    this.emitOrderEvent(req.user.tenantId, "order.created", order);
+    await this.business.markQuoteConsumed(req.user.tenantId, context, quote.id, order.id);
+    await this.business.lockCoupon(req.user.tenantId, context, quote.customerCouponId, order.id);
+    await this.emitOrderEvent(req.user.tenantId, "order.created", order);
     return this.committed(req.user.tenantId, order);
   }
   @Post("orders/:id/confirm") async confirm(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
     const order = await this.service.confirmOrder(req.user.tenantId, id);
-    this.business.redeemCoupon(req.user.tenantId, this.context(req.user.tenantId), id);
-    this.emitOrderEvent(req.user.tenantId, "order.confirmed", order);
+    await this.business.redeemCoupon(req.user.tenantId, this.context(req.user.tenantId), id);
+    await this.emitOrderEvent(req.user.tenantId, "order.confirmed", order);
     return this.committed(req.user.tenantId, order);
   }
   @Post("orders/:id/allocate") async allocate(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.committed(req.user.tenantId, await this.service.allocateOrder(req.user.tenantId, id)); }
@@ -97,8 +97,8 @@ export class RentalCoreController {
     const quote = this.business.getQuote(req.user.tenantId, context, current.quoteId);
     const charge = this.business.calculateCancellationCharge(req.user.tenantId, context, quote, undefined, Boolean(body.weatherException));
     const order = await this.service.cancelOrder(req.user.tenantId, id, body.reason, charge);
-    this.business.releaseCoupon(req.user.tenantId, this.context(req.user.tenantId), id);
-    this.emitOrderEvent(req.user.tenantId, "order.cancelled", order);
+    await this.business.releaseCoupon(req.user.tenantId, this.context(req.user.tenantId), id);
+    await this.emitOrderEvent(req.user.tenantId, "order.cancelled", order);
     return this.committed(req.user.tenantId, order);
   }
   @Get("inspection-templates") templates(@Req() req: AuthenticatedRequest, @Query("stage") stage?: "pickup" | "return") { return this.service.listInspectionTemplates(req.user.tenantId, stage); }
@@ -121,8 +121,8 @@ export class RentalCoreController {
         }
       : {};
     const result = await this.service.createInspection(req.user.tenantId, id, body, req.user.displayName, charges);
-    if (template?.stage === "return") this.completeCustomerOrderEvent(req.user.tenantId, result.order);
-    this.emitOrderEvent(req.user.tenantId, result.inspection.stage === "pickup" ? "pickup.completed" : "return.completed", result.order);
+    if (template?.stage === "return") await this.completeCustomerOrderEvent(req.user.tenantId, result.order);
+    await this.emitOrderEvent(req.user.tenantId, result.inspection.stage === "pickup" ? "pickup.completed" : "return.completed", result.order);
     return this.committed(req.user.tenantId, result);
   }
   @Post("orders/:id/handover/:stage") async handover(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Param("stage") stage: string) {
@@ -132,8 +132,8 @@ export class RentalCoreController {
     const returnedAt = new Date().toISOString();
     const overdueCharge = stage === "return" ? this.business.calculateOverdueCharge(req.user.tenantId, context, this.business.getQuote(req.user.tenantId, context, current.quoteId), returnedAt) : 0;
     const order = await this.service.completeHandoverWithoutInspection(req.user.tenantId, id, stage, overdueCharge);
-    if (stage === "return") this.completeCustomerOrderEvent(req.user.tenantId, order);
-    this.emitOrderEvent(req.user.tenantId, stage === "pickup" ? "pickup.completed" : "return.completed", order);
+    if (stage === "return") await this.completeCustomerOrderEvent(req.user.tenantId, order);
+    await this.emitOrderEvent(req.user.tenantId, stage === "pickup" ? "pickup.completed" : "return.completed", order);
     return this.committed(req.user.tenantId, order);
   }
 }

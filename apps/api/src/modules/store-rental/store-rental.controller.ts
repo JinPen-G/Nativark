@@ -531,10 +531,10 @@ export class StoreRentalController {
   async createMember(@Req() req: AuthenticatedRequest, @Body() body: SaveMemberRequest) {
     const member = await this.storeRentalService.saveMember(body);
     const context = this.rentalContext(req.user.tenantId);
-    this.rentalBusinessService.registerReferral(req.user.tenantId, context, member.id, body.referrerCustomerId);
-    this.rentalBusinessService.handleCustomerEvent(req.user.tenantId, context, member.id, "registration");
-    if (member.identityVerified) this.rentalBusinessService.handleCustomerEvent(req.user.tenantId, context, member.id, "identity_verified");
-    this.rentalBusinessService.emitNotificationEvent(req.user.tenantId, context, "member.registered", member.phone, { customerName: member.name });
+    await this.rentalBusinessService.registerReferral(req.user.tenantId, context, member.id, body.referrerCustomerId);
+    await this.rentalBusinessService.handleCustomerEvent(req.user.tenantId, context, member.id, "registration");
+    if (member.identityVerified) await this.rentalBusinessService.handleCustomerEvent(req.user.tenantId, context, member.id, "identity_verified");
+    await this.rentalBusinessService.emitNotificationEvent(req.user.tenantId, context, "member.registered", member.phone, { customerName: member.name });
     await this.rentalBusinessService.persist(req.user.tenantId);
     return member;
   }
@@ -544,8 +544,8 @@ export class StoreRentalController {
     const previous = await this.storeRentalService.getMemberDetail(id);
     const member = await this.storeRentalService.saveMember({ ...body, id });
     const context = this.rentalContext(req.user.tenantId);
-    this.rentalBusinessService.registerReferral(req.user.tenantId, context, member.id, body.referrerCustomerId);
-    if (!previous.identityVerified && member.identityVerified) this.rentalBusinessService.handleCustomerEvent(req.user.tenantId, context, member.id, "identity_verified");
+    await this.rentalBusinessService.registerReferral(req.user.tenantId, context, member.id, body.referrerCustomerId);
+    if (!previous.identityVerified && member.identityVerified) await this.rentalBusinessService.handleCustomerEvent(req.user.tenantId, context, member.id, "identity_verified");
     await this.rentalBusinessService.persist(req.user.tenantId);
     return member;
   }

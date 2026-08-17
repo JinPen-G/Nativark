@@ -34,6 +34,7 @@ import { RentalSnapshotBackfillService } from "./modules/rental-core/rental-snap
 import { RentalCoreConfigRepository } from "./modules/rental-core/rental-core-config.repository";
 import { RentalCoreFactRepository } from "./modules/rental-core/rental-core-fact.repository";
 import { RentalBusinessConfigRepository } from "./modules/rental-core/rental-business-config.repository";
+import { RentalBusinessFactRepository } from "./modules/rental-core/rental-business-fact.repository";
 
 @Module({
   imports: [
@@ -73,6 +74,7 @@ import { RentalBusinessConfigRepository } from "./modules/rental-core/rental-bus
     RentalCoreConfigRepository,
     RentalCoreFactRepository,
     RentalBusinessConfigRepository,
+    RentalBusinessFactRepository,
     IntegrationsService,
     IntegrationsRepository,
     {

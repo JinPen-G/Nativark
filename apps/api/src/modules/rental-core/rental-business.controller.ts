@@ -67,19 +67,19 @@ export class RentalBusinessController {
   @Post("rule-versions") async saveRule(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalRuleVersionRequest) { return this.committed(req.user.tenantId, await this.business.saveRuleVersion(req.user.tenantId, this.context(req.user.tenantId), body, req.user.displayName)); }
 
   @Get("customer-coupons") customerCoupons(@Req() req: AuthenticatedRequest, @Query("customerId") customerId?: string) { return this.business.listCustomerCoupons(req.user.tenantId, this.context(req.user.tenantId), customerId); }
-  @Post("customer-coupons/claim") claimCoupon(@Req() req: AuthenticatedRequest, @Body() body: { templateId: string; customerId: string }) { return this.committed(req.user.tenantId, this.business.claimCoupon(req.user.tenantId, this.context(req.user.tenantId), body.templateId, body.customerId)); }
+  @Post("customer-coupons/claim") async claimCoupon(@Req() req: AuthenticatedRequest, @Body() body: { templateId: string; customerId: string }) { return this.committed(req.user.tenantId, await this.business.claimCoupon(req.user.tenantId, this.context(req.user.tenantId), body.templateId, body.customerId)); }
 
   @Get("rewards") rewards(@Req() req: AuthenticatedRequest, @Query("customerId") customerId?: string) { return this.business.listRewards(req.user.tenantId, this.context(req.user.tenantId), customerId); }
   @Get("benefit-accounts") benefitAccounts(@Req() req: AuthenticatedRequest, @Query("customerId") customerId?: string) { return this.business.listBenefitAccounts(req.user.tenantId, this.context(req.user.tenantId), customerId); }
-  @Post("rewards/grant") grantReward(@Req() req: AuthenticatedRequest, @Body() body: GrantRentalRewardRequest) { return this.committed(req.user.tenantId, this.business.grantReward(req.user.tenantId, this.context(req.user.tenantId), body)); }
-  @Post("rewards/:id/reverse") reverseReward(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: { reason: string }) { return this.committed(req.user.tenantId, this.business.reverseReward(req.user.tenantId, this.context(req.user.tenantId), id, body.reason)); }
+  @Post("rewards/grant") async grantReward(@Req() req: AuthenticatedRequest, @Body() body: GrantRentalRewardRequest) { return this.committed(req.user.tenantId, await this.business.grantReward(req.user.tenantId, this.context(req.user.tenantId), body)); }
+  @Post("rewards/:id/reverse") async reverseReward(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: { reason: string }) { return this.committed(req.user.tenantId, await this.business.reverseReward(req.user.tenantId, this.context(req.user.tenantId), id, body.reason)); }
 
   @Get("notification-templates") notificationTemplates(@Req() req: AuthenticatedRequest) { return this.business.listNotificationTemplates(req.user.tenantId, this.context(req.user.tenantId)); }
   @Post("notification-templates") async createNotificationTemplate(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalNotificationTemplateRequest) { return this.committed(req.user.tenantId, await this.business.saveNotificationTemplate(req.user.tenantId, this.context(req.user.tenantId), body)); }
   @Put("notification-templates/:id") async updateNotificationTemplate(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalNotificationTemplateRequest) { return this.committed(req.user.tenantId, await this.business.saveNotificationTemplate(req.user.tenantId, this.context(req.user.tenantId), { ...body, id })); }
   @Get("notification-logs") notificationLogs(@Req() req: AuthenticatedRequest) { return this.business.listNotificationLogs(req.user.tenantId, this.context(req.user.tenantId)); }
-  @Post("notifications/send") sendNotification(@Req() req: AuthenticatedRequest, @Body() body: SendRentalNotificationRequest) { return this.committed(req.user.tenantId, this.business.sendNotification(req.user.tenantId, this.context(req.user.tenantId), body)); }
+  @Post("notifications/send") async sendNotification(@Req() req: AuthenticatedRequest, @Body() body: SendRentalNotificationRequest) { return this.committed(req.user.tenantId, await this.business.sendNotification(req.user.tenantId, this.context(req.user.tenantId), body)); }
 
-  @Post("quotes") quote(@Req() req: AuthenticatedRequest, @Body() body: RentalQuoteRequest) { return this.committed(req.user.tenantId, this.business.createQuote(req.user.tenantId, this.context(req.user.tenantId), body)); }
+  @Post("quotes") async quote(@Req() req: AuthenticatedRequest, @Body() body: RentalQuoteRequest) { return this.committed(req.user.tenantId, await this.business.createQuote(req.user.tenantId, this.context(req.user.tenantId), body)); }
   @Get("quotes/:id") quoteDetail(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.business.getQuote(req.user.tenantId, this.context(req.user.tenantId), id); }
 }

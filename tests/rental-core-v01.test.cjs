@@ -8,12 +8,12 @@ require("ts-node").register({
 const { RentalCoreService } = require("../apps/api/src/modules/rental-core/rental-core.service");
 const { RentalBusinessService } = require("../apps/api/src/modules/rental-core/rental-business.service");
 const { RentalCoreOrderStatus, RentalInventoryMode } = require("@store-rental/shared");
-const { createAbsorbingConfigStore, createAbsorbingFactStore, createAbsorbingBusinessConfigStore } = require("./helpers/absorbing-config-store.cjs");
+const { createAbsorbingConfigStore, createAbsorbingFactStore, createAbsorbingBusinessConfigStore, createAbsorbingBusinessFactStore } = require("./helpers/absorbing-config-store.cjs");
 
 // 配置的事实源是数据库；本用例不连库，注入吸收式 store 让写穿落空，
 // 配置读取仍由服务的内存写穿缓存提供。依赖持久化语义的断言在 mysql-e2e 里。
 const service = new RentalCoreService(createAbsorbingConfigStore(), createAbsorbingFactStore());
-const business = new RentalBusinessService(createAbsorbingBusinessConfigStore());
+const business = new RentalBusinessService(createAbsorbingBusinessConfigStore(), createAbsorbingBusinessFactStore(), createAbsorbingConfigStore());
 const cameraTenant = "tenant_001";
 const campingTenant = "tenant_002";
 const startAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();

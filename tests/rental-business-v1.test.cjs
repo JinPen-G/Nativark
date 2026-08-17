@@ -7,11 +7,11 @@ require("ts-node").register({
 
 const { RentalCoreService } = require("../apps/api/src/modules/rental-core/rental-core.service");
 const { RentalBusinessService } = require("../apps/api/src/modules/rental-core/rental-business.service");
-const { createAbsorbingConfigStore, createAbsorbingFactStore, createAbsorbingBusinessConfigStore } = require("./helpers/absorbing-config-store.cjs");
+const { createAbsorbingConfigStore, createAbsorbingFactStore, createAbsorbingBusinessConfigStore, createAbsorbingBusinessFactStore } = require("./helpers/absorbing-config-store.cjs");
 
 // 不连库用例：注入吸收式 store 让配置写穿落空，配置读取仍由服务内存缓存提供。
 const core = new RentalCoreService(createAbsorbingConfigStore(), createAbsorbingFactStore());
-const business = new RentalBusinessService(createAbsorbingBusinessConfigStore());
+const business = new RentalBusinessService(createAbsorbingBusinessConfigStore(), createAbsorbingBusinessFactStore(), createAbsorbingConfigStore());
 const tenantId = "tenant_002";
 const now = Date.now();
 const startAt = new Date(now + 2 * 24 * 60 * 60 * 1000).toISOString();
@@ -82,14 +82,14 @@ const couponTemplate = await core.saveCouponTemplate(tenantId, {
   applicableItemGroupIds: [],
   status: "enabled"
 });
-const customerCoupon = business.claimCoupon(tenantId, context(), couponTemplate.id, "member_001");
+const customerCoupon = await business.claimCoupon(tenantId, context(), couponTemplate.id, "member_001");
 assert.equal(customerCoupon.status, "claimed");
-assert.throws(() => business.claimCoupon(tenantId, context(), couponTemplate.id, "member_001"), /限领/);
+await assert.rejects(async () => business.claimCoupon(tenantId, context(), couponTemplate.id, "member_001"), /限领/);
 
 const group = context().groups.find((item) => item.code === "CAMP-TENT");
 const location = core.listLocations(tenantId)[0];
 const selectedService = business.listServices(tenantId, context())[0];
-const quote = business.createQuote(tenantId, context(), {
+const quote = await business.createQuote(tenantId, context(), {
   customerType: "personal",
   customerId: "member_001",
   fulfillmentMode: "store_pickup_return",
@@ -113,13 +113,13 @@ assert.ok(quote.chargeLines.some((line) => line.type === "coupon"));
 const orderId = "order_coupon_flow_test";
 const consumed = business.consumeQuote(tenantId, context(), quote.id);
 assert.equal(consumed.id, quote.id);
-business.markQuoteConsumed(tenantId, context(), quote.id, orderId);
+await business.markQuoteConsumed(tenantId, context(), quote.id, orderId);
 assert.throws(() => business.consumeQuote(tenantId, context(), quote.id), /已用于订单/, "quote snapshots must be single-use");
-business.lockCoupon(tenantId, context(), quote.customerCouponId, orderId);
+await business.lockCoupon(tenantId, context(), quote.customerCouponId, orderId);
 assert.equal(business.listCustomerCoupons(tenantId, context(), "member_001")[0].status, "locked");
-business.redeemCoupon(tenantId, context(), orderId);
+await business.redeemCoupon(tenantId, context(), orderId);
 assert.equal(business.listCustomerCoupons(tenantId, context(), "member_001")[0].status, "redeemed");
-business.releaseCoupon(tenantId, context(), orderId);
+await business.releaseCoupon(tenantId, context(), orderId);
 assert.equal(business.listCustomerCoupons(tenantId, context(), "member_001")[0].status, "claimed");
 
 const settings = core.getBusinessSettings(tenantId);
@@ -127,19 +127,19 @@ await core.saveBusinessSettings(tenantId, {
   ...settings,
   membership: { ...settings.membership, signupRewardEnabled: true, signupRewardType: "points", signupRewardAmount: 100, referralRewardEnabled: true, referralRewardType: "points", referrerRewardAmount: 50, inviteeRewardAmount: 20 }
 }, "test");
-const reward = business.grantReward(tenantId, context(), { customerId: "member_001", triggerType: "registration", idempotencyKey: "register:member_001" });
+const reward = await business.grantReward(tenantId, context(), { customerId: "member_001", triggerType: "registration", idempotencyKey: "register:member_001" });
 assert.equal(reward[0].amount, 100);
 assert.equal(business.listBenefitAccounts(tenantId, context(), "member_001")[0].pointsBalance, 100, "points rewards must be applied to the tenant benefit account");
-assert.equal(business.grantReward(tenantId, context(), { customerId: "member_001", triggerType: "registration", idempotencyKey: "register:member_001" })[0].id, reward[0].id, "reward grant must be idempotent");
-business.reverseReward(tenantId, context(), reward[0].id, "测试撤销");
+assert.equal((await business.grantReward(tenantId, context(), { customerId: "member_001", triggerType: "registration", idempotencyKey: "register:member_001" }))[0].id, reward[0].id, "reward grant must be idempotent");
+await business.reverseReward(tenantId, context(), reward[0].id, "测试撤销");
 assert.equal(business.listRewards(tenantId, context())[0].status, "reversed");
 assert.equal(business.listBenefitAccounts(tenantId, context(), "member_001")[0].pointsBalance, 0, "reversing a reward must reverse the applied benefit");
-const referralReward = business.grantReward(tenantId, context(), { customerId: "member_referrer", relatedCustomerId: "member_invitee", triggerType: "first_order_completed", idempotencyKey: "referral:first-order:member_invitee" });
+const referralReward = await business.grantReward(tenantId, context(), { customerId: "member_referrer", relatedCustomerId: "member_invitee", triggerType: "first_order_completed", idempotencyKey: "referral:first-order:member_invitee" });
 assert.equal(referralReward.length, 2, "configured referral trigger must grant both referrer and invitee rewards");
-business.registerReferral(tenantId, context(), "member_event_invitee", "member_event_referrer");
-const eventRewards = business.handleCustomerEvent(tenantId, context(), "member_event_invitee", "first_order_completed");
+await business.registerReferral(tenantId, context(), "member_event_invitee", "member_event_referrer");
+const eventRewards = await business.handleCustomerEvent(tenantId, context(), "member_event_invitee", "first_order_completed");
 assert.equal(eventRewards.length, 2, "first completed order must execute the configured referral trigger");
-assert.equal(business.handleCustomerEvent(tenantId, context(), "member_event_invitee", "first_order_completed").length, 2, "business event rewards must be idempotent");
+assert.equal((await business.handleCustomerEvent(tenantId, context(), "member_event_invitee", "first_order_completed")).length, 2, "business event rewards must be idempotent");
 const pointsBeforeOtherTenantRead = business.listBenefitAccounts(tenantId, context()).length;
 const cameraContext = {
   profile: core.getProfile("tenant_001"),
@@ -155,11 +155,11 @@ await core.saveBusinessSettings(tenantId, {
   ...couponRewardSettings,
   membership: { ...couponRewardSettings.membership, referralRewardEnabled: true, referralRewardType: "coupon", referrerRewardAmount: 1, inviteeRewardAmount: 1, referralRewardCouponTemplateId: couponTemplate.id }
 }, "test");
-const couponRewards = business.grantReward(tenantId, context(), { customerId: "coupon_referrer", relatedCustomerId: "coupon_invitee", triggerType: "first_order_completed", idempotencyKey: "referral:coupon:test" });
+const couponRewards = await business.grantReward(tenantId, context(), { customerId: "coupon_referrer", relatedCustomerId: "coupon_invitee", triggerType: "first_order_completed", idempotencyKey: "referral:coupon:test" });
 assert.equal(couponRewards.length, 2);
 assert.equal(business.listCustomerCoupons(tenantId, context(), "coupon_referrer").length, 1, "coupon rewards must create an actual customer coupon");
 assert.equal(business.listBenefitAccounts(tenantId, context(), "coupon_invitee")[0].availableRewardCouponCount, 1);
-business.reverseReward(tenantId, context(), couponRewards[0].id, "撤销测试券奖励");
+await business.reverseReward(tenantId, context(), couponRewards[0].id, "撤销测试券奖励");
 assert.equal(business.listBenefitAccounts(tenantId, context(), "coupon_referrer")[0].availableRewardCouponCount, 0);
 assert.equal(business.listBenefitAccounts(tenantId, context()).length >= pointsBeforeOtherTenantRead, true);
 
@@ -180,7 +180,7 @@ const damageWaiver = await business.saveService(tenantId, context(), {
 const damageQuote = { ...quote, request: { ...quote.request, services: [{ serviceId: damageWaiver.id, quantity: 1 }] } };
 assert.ok(business.calculateDamageCharge(tenantId, context(), damageQuote, [{ chargeAmount: 1000 }]) < 1000, "damage waiver must reduce the customer charge according to its saved terms");
 
-const crossYearQuote = business.createQuote(tenantId, context(), {
+const crossYearQuote = await business.createQuote(tenantId, context(), {
   customerType: "personal",
   fulfillmentMode: "store_pickup_return",
   fulfillmentLocationId: location.id,
@@ -191,7 +191,7 @@ const crossYearQuote = business.createQuote(tenantId, context(), {
 assert.match(crossYearQuote.calendarVersion, /\|/, "cross-year quotes must snapshot every calendar year");
 
 const template = business.listNotificationTemplates(tenantId, context())[0];
-const sendLog = business.sendNotification(tenantId, context(), {
+const sendLog = await business.sendNotification(tenantId, context(), {
   templateId: template.id,
   recipient: "member_001",
   variables: { customerName: "露营测试会员", orderNo: "RC-NOTIFY-TEST-001" }
@@ -199,7 +199,7 @@ const sendLog = business.sendNotification(tenantId, context(), {
 assert.equal(sendLog.status, "sent");
 assert.equal(sendLog.provider, "mock-notification-adapter");
 assert.equal(sendLog.templateVersion, template.version);
-assert.throws(() => business.sendNotification(tenantId, context(), { templateId: template.id, recipient: "member_001", variables: {} }), /缺少通知变量/);
+await assert.rejects(async () => business.sendNotification(tenantId, context(), { templateId: template.id, recipient: "member_001", variables: {} }), /缺少通知变量/);
 
 assert.equal(business.listPricingPlans("tenant_001", {
   profile: core.getProfile("tenant_001"),

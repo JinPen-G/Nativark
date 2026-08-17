@@ -90,3 +90,27 @@ module.exports = {
   createAbsorbingFactStore,
   createAbsorbingBusinessConfigStore
 };
+
+/** 吸收式业务事实 store：读返回空、写丢弃。 */
+function createAbsorbingBusinessFactStore() {
+  const writes = [];
+  const record = (kind) => (payload) => {
+    writes.push({ kind, id: payload?.id ?? payload?.customerId });
+    return Promise.resolve();
+  };
+  return {
+    writes,
+    loadAll: () => Promise.resolve([]),
+    upsertQuote: record("quote"),
+    upsertCustomerCoupon: record("customerCoupon"),
+    upsertRewardEntry: record("rewardEntry"),
+    upsertBenefitAccount: record("benefitAccount"),
+    upsertReferral: (_tenantId, referral) => {
+      writes.push({ kind: "referral", id: referral?.inviteeCustomerId });
+      return Promise.resolve();
+    },
+    insertNotificationLog: record("notificationLog")
+  };
+}
+
+module.exports.createAbsorbingBusinessFactStore = createAbsorbingBusinessFactStore;

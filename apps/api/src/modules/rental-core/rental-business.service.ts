@@ -39,6 +39,11 @@ import {
   RentalBusinessConfigRepository,
   type RentalBusinessConfigStore
 } from "./rental-business-config.repository";
+import {
+  RentalBusinessFactRepository,
+  type RentalBusinessFactStore
+} from "./rental-business-fact.repository";
+import { RentalCoreConfigRepository, type RentalConfigStore } from "./rental-core-config.repository";
 
 interface RentalBusinessState {
   categoryCode: RentalCategoryCode;
@@ -124,6 +129,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
 
   constructor(
     @Inject(RentalBusinessConfigRepository) private readonly configStore: RentalBusinessConfigStore,
+    @Inject(RentalBusinessFactRepository) private readonly factStore: RentalBusinessFactStore,
+    @Inject(RentalCoreConfigRepository) private readonly coreConfigStore: RentalConfigStore,
     @Optional() private readonly stateRepository?: RentalStateRepository
   ) {}
 
@@ -142,6 +149,22 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       if (snapshot.calendars.length) state.calendars = snapshot.calendars;
       if (snapshot.ruleVersions.length) state.ruleVersions = snapshot.ruleVersions;
       if (snapshot.notificationTemplates.length) state.notificationTemplates = snapshot.notificationTemplates;
+    }
+    // 业务事实一律以库为准，直接覆盖而非"非空才覆盖"。
+    //
+    // onModuleInit 会从 JSON 快照装载整个业务聚合（含事实），若这里不覆盖，
+    // 事实就有两个来源：内存副本来自快照、写入却走库，快照一旦落后于库，
+    // 读到的券状态和奖励流水就是旧的。空数组覆盖也是正确语义——库里没有就是没有，
+    // 这样快照才真正降级为恢复副本而不再是事实源。
+    for (const facts of await this.factStore.loadAll()) {
+      const state = this.states.get(facts.tenantId);
+      if (!state) continue;
+      state.quotes = facts.quotes;
+      state.customerCoupons = facts.customerCoupons;
+      state.rewardLedger = facts.rewardLedger;
+      state.benefitAccounts = facts.benefitAccounts;
+      state.referrals = facts.referrals;
+      state.notificationLogs = facts.notificationLogs;
     }
   }
 
@@ -167,6 +190,14 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   }
 
   /** 把整份业务配置落库。仅用于补落懒加载默认值；此后各 save* 方法按条写穿。 */
+  /** 奖励入账会改权益账户余额，这里把受影响客户的账户刷进库。 */
+  private async flushBenefitAccounts(state: RentalBusinessState, customerIds: string[]) {
+    for (const customerId of new Set(customerIds)) {
+      const account = state.benefitAccounts.find((row) => row.customerId === customerId);
+      if (account) await this.factStore.upsertBenefitAccount(account);
+    }
+  }
+
   private async persistBusinessConfig(state: RentalBusinessState) {
     for (const plan of state.pricingPlans) await this.configStore.upsertPricingPlan(plan);
     for (const plan of state.discountPlans) await this.configStore.upsertDiscountPlan(plan);
@@ -352,7 +383,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return this.state(tenantId, context).customerCoupons.filter((coupon) => !customerId || coupon.customerId === customerId);
   }
 
-  claimCoupon(tenantId: string, context: BusinessContext, templateId: string, customerId: string) {
+  async claimCoupon(tenantId: string, context: BusinessContext, templateId: string, customerId: string) {
     const state = this.state(tenantId, context);
     const template = context.couponTemplates.find((item) => item.id === templateId && item.status === "enabled");
     if (!template) throw new NotFoundException("优惠券模板不存在或未启用");
@@ -367,31 +398,38 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     template.claimedQuantity += 1;
     template.updatedAt = stamp();
     state.customerCoupons.unshift(coupon);
+    await this.factStore.upsertCustomerCoupon(coupon);
+    // 领取会递增模板已领数量，那是核心配置对象；不一并写穿的话重启后配额回退，
+    // 同一张券可以被反复领完。
+    await this.coreConfigStore.upsertCouponTemplate(template);
     return coupon;
   }
 
-  lockCoupon(tenantId: string, context: BusinessContext, couponId: string | undefined, orderId: string) {
+  async lockCoupon(tenantId: string, context: BusinessContext, couponId: string | undefined, orderId: string) {
     if (!couponId) return undefined;
     const coupon = this.customerCoupon(this.state(tenantId, context), couponId);
     if (coupon.status !== "claimed") throw new ConflictException("优惠券当前不能锁定");
     if (new Date(coupon.effectiveTo).getTime() < Date.now()) { coupon.status = "expired"; throw new ConflictException("优惠券已过期"); }
     coupon.status = "locked"; coupon.lockedOrderId = orderId; coupon.lockedAt = stamp();
+    await this.factStore.upsertCustomerCoupon(coupon);
     return coupon;
   }
 
-  redeemCoupon(tenantId: string, context: BusinessContext, orderId: string) {
+  async redeemCoupon(tenantId: string, context: BusinessContext, orderId: string) {
     const coupon = this.state(tenantId, context).customerCoupons.find((item) => item.lockedOrderId === orderId);
     if (!coupon) return undefined;
     if (coupon.status !== "locked") throw new ConflictException("优惠券不是锁定状态");
     coupon.status = "redeemed"; coupon.redeemedOrderId = orderId; coupon.redeemedAt = stamp();
+    await this.factStore.upsertCustomerCoupon(coupon);
     return coupon;
   }
 
-  releaseCoupon(tenantId: string, context: BusinessContext, orderId: string) {
+  async releaseCoupon(tenantId: string, context: BusinessContext, orderId: string) {
     const coupon = this.state(tenantId, context).customerCoupons.find((item) => item.lockedOrderId === orderId || item.redeemedOrderId === orderId);
     if (!coupon) return undefined;
     coupon.status = "claimed"; coupon.lockedOrderId = undefined; coupon.lockedAt = undefined;
     coupon.redeemedOrderId = undefined; coupon.redeemedAt = undefined; coupon.releasedAt = stamp();
+    await this.factStore.upsertCustomerCoupon(coupon);
     return coupon;
   }
 
@@ -403,7 +441,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return this.state(tenantId, context).benefitAccounts.filter((row) => !customerId || row.customerId === customerId);
   }
 
-  grantReward(tenantId: string, context: BusinessContext, input: GrantRentalRewardRequest) {
+  async grantReward(tenantId: string, context: BusinessContext, input: GrantRentalRewardRequest) {
     const state = this.state(tenantId, context);
     if (!input.customerId || !input.idempotencyKey) throw new BadRequestException("客户和幂等键不能为空");
     const existing = state.rewardLedger.filter((row) => row.idempotencyKey === input.idempotencyKey || row.idempotencyKey.startsWith(`${input.idempotencyKey}:`));
@@ -430,10 +468,12 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       add(input.relatedCustomerId, membership.referralRewardType, membership.inviteeRewardAmount, `${input.idempotencyKey}:invitee`, "被邀请人奖励", input.customerId, membership.referralRewardCouponTemplateId);
     }
     if (!rows.length) throw new ConflictException("当前激励规则未启用或触发条件不匹配");
+    for (const row of rows) await this.factStore.upsertRewardEntry(row);
+    await this.flushBenefitAccounts(state, rows.map((row) => row.customerId));
     return rows;
   }
 
-  registerReferral(tenantId: string, context: BusinessContext, inviteeCustomerId: string, referrerCustomerId?: string) {
+  async registerReferral(tenantId: string, context: BusinessContext, inviteeCustomerId: string, referrerCustomerId?: string) {
     const state = this.state(tenantId, context);
     if (!referrerCustomerId) return undefined;
     if (inviteeCustomerId === referrerCustomerId) throw new BadRequestException("客户不能邀请自己");
@@ -442,24 +482,25 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     if (current) return current;
     const relation = { inviteeCustomerId, referrerCustomerId, registeredAt: stamp() };
     state.referrals.unshift(relation);
+    await this.factStore.upsertReferral(tenantId, relation);
     return relation;
   }
 
-  handleCustomerEvent(tenantId: string, context: BusinessContext, customerId: string, triggerType: "registration" | "identity_verified" | "first_order_completed") {
+  async handleCustomerEvent(tenantId: string, context: BusinessContext, customerId: string, triggerType: "registration" | "identity_verified" | "first_order_completed") {
     const state = this.state(tenantId, context);
     const membership = context.settings.membership;
     const rows: RentalRewardLedgerEntry[] = [];
     if (triggerType === "registration" && membership.signupRewardEnabled) {
-      rows.push(...this.grantReward(tenantId, context, { customerId, triggerType, idempotencyKey: `signup:${customerId}` }));
+      rows.push(...await this.grantReward(tenantId, context, { customerId, triggerType, idempotencyKey: `signup:${customerId}` }));
     }
     const relation = state.referrals.find((row) => row.inviteeCustomerId === customerId);
     if (relation && membership.referralRewardEnabled && membership.referralTrigger === triggerType) {
-      rows.push(...this.grantReward(tenantId, context, { customerId: relation.referrerCustomerId, relatedCustomerId: customerId, triggerType, idempotencyKey: `referral:${triggerType}:${customerId}` }));
+      rows.push(...await this.grantReward(tenantId, context, { customerId: relation.referrerCustomerId, relatedCustomerId: customerId, triggerType, idempotencyKey: `referral:${triggerType}:${customerId}` }));
     }
     return rows;
   }
 
-  reverseReward(tenantId: string, context: BusinessContext, id: string, reason: string) {
+  async reverseReward(tenantId: string, context: BusinessContext, id: string, reason: string) {
     const state = this.state(tenantId, context);
     const row = state.rewardLedger.find((item) => item.id === id);
     if (!row) throw new NotFoundException("奖励流水不存在");
@@ -467,6 +508,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     if (!reason?.trim()) throw new BadRequestException("撤销原因不能为空");
     this.reverseRewardBenefit(state, context, row);
     row.status = "reversed"; row.reason = `${row.reason}；撤销：${reason.trim()}`; row.reversedAt = stamp();
+    await this.factStore.upsertRewardEntry(row);
+    await this.flushBenefitAccounts(state, [row.customerId]);
     return row;
   }
 
@@ -492,7 +535,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
 
   listNotificationLogs(tenantId: string, context: BusinessContext) { return this.state(tenantId, context).notificationLogs; }
 
-  sendNotification(tenantId: string, context: BusinessContext, input: SendRentalNotificationRequest) {
+  async sendNotification(tenantId: string, context: BusinessContext, input: SendRentalNotificationRequest) {
     const state = this.state(tenantId, context);
     const template = state.notificationTemplates.find((item) => item.id === input.templateId && item.status === "enabled");
     if (!template) throw new NotFoundException("通知模板不存在或未启用");
@@ -508,19 +551,32 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       createdAt: timestamp, sentAt: timestamp
     };
     state.notificationLogs.unshift(log);
+    await this.factStore.insertNotificationLog(log);
     return log;
   }
 
-  emitNotificationEvent(tenantId: string, context: BusinessContext, eventCode: string, recipient: string | undefined, variables: Record<string, unknown>) {
+  /**
+   * 按事件码向所有启用模板发送通知。
+   *
+   * 必须逐个 await：`sendNotification` 现在落库后返回 Promise，而同步 `try/catch`
+   * 捕不到异步拒绝——未处理的拒绝会直接终止 Node 进程（E2E 表现为 ECONNRESET）。
+   * 单个模板失败不应中断其余模板与主业务动作，因此在循环内单独捕获。
+   */
+  async emitNotificationEvent(tenantId: string, context: BusinessContext, eventCode: string, recipient: string | undefined, variables: Record<string, unknown>) {
     if (!recipient || !context.settings.notifications.enabledEvents.includes(eventCode)) return [];
     const templates = this.state(tenantId, context).notificationTemplates.filter((item) => item.eventCode === eventCode && item.status === "enabled");
-    return templates.flatMap((template) => {
-      try { return [this.sendNotification(tenantId, context, { templateId: template.id, recipient, variables })]; }
-      catch { return []; }
-    });
+    const logs: RentalNotificationSendLogV1[] = [];
+    for (const template of templates) {
+      try {
+        logs.push(await this.sendNotification(tenantId, context, { templateId: template.id, recipient, variables }));
+      } catch {
+        // 模板停用、渠道不可用等单点失败不冒泡到订单动作。
+      }
+    }
+    return logs;
   }
 
-  createQuote(tenantId: string, context: BusinessContext, input: RentalQuoteRequest) {
+  async createQuote(tenantId: string, context: BusinessContext, input: RentalQuoteRequest) {
     const state = this.state(tenantId, context);
     if (new Date(input.startAt).getTime() >= new Date(input.endAt).getTime()) throw new BadRequestException("租赁结束时间必须晚于开始时间");
     if (!input.lines.length) throw new BadRequestException("报价至少需要一个商品");
@@ -596,6 +652,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       expiresAt: new Date(Date.now() + rule.config.payment.unpaidHoldMinutes * 60_000).toISOString(), createdAt: timestamp
     };
     state.quotes.unshift(quote);
+    await this.factStore.upsertQuote(quote);
     return quote;
   }
 
@@ -612,10 +669,11 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return quote;
   }
 
-  markQuoteConsumed(tenantId: string, context: BusinessContext, quoteId: string, orderId: string) {
+  async markQuoteConsumed(tenantId: string, context: BusinessContext, quoteId: string, orderId: string) {
     const quote = this.consumeQuote(tenantId, context, quoteId);
     quote.consumedAt = stamp();
     quote.consumedOrderId = orderId;
+    await this.factStore.upsertQuote(quote);
     return quote;
   }
 

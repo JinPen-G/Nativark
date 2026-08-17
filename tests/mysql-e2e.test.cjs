@@ -170,8 +170,13 @@ function request(method, requestPath, body, token) {
       url,
       {
         method,
+        // 必须禁用 keep-alive：Node 19+ 的 globalAgent 默认 keepAlive=true，
+        // 而本测试会重启 API（重启恢复与回填幂等两节）。连接池里指向旧进程的 socket
+        // 已失效，之后第一个复用它的请求会随机抛 ECONNRESET，表现为偶发失败。
+        agent: false,
         headers: {
           "Content-Type": "application/json",
+          Connection: "close",
           ...(token ? { Authorization: `Bearer ${token}` } : {})
         }
       },
@@ -1090,6 +1095,140 @@ async function main() {
   );
 
   ok(`配置写穿已验证：核心与业务配置均落库（新建券模板未经重启即在库、定价/优惠/服务/规则/模板无租户遗漏、日历已发布、rates 明细非空），共 ${profiledTenants} 个租户`);
+
+  console.log("== 20. RC-01 业务事实以库为事实源 ==");
+  // 与配置同理：API 读业务事实走服务内存副本，写穿失效时前面的 HTTP 断言仍会全绿，
+  // 只有直查库能证明真的落盘。
+  //
+  // 奖励与权益账户默认规则是关闭的（membership.signupRewardEnabled=false），
+  // 前面各节从未触发发奖。这里先启用注册奖励再真实发一次，而不是把断言放宽——
+  // 断言测试不产生的数据没有意义，放宽同样没有意义。
+  const settingsBefore = (await request("GET", "/api/rental/v1/business-settings", null, demoForWriteThrough.accessToken)).body.data;
+  const enableReward = await request(
+    "PUT",
+    "/api/rental/v1/business-settings",
+    {
+      ...settingsBefore,
+      membership: { ...settingsBefore.membership, signupRewardEnabled: true, signupRewardType: "points", signupRewardAmount: 88 }
+    },
+    demoForWriteThrough.accessToken
+  );
+  assert.equal(enableReward.status, 200, `启用注册奖励失败: ${JSON.stringify(enableReward.body)}`);
+  const grant = await request(
+    "POST",
+    "/api/rental/v1/rewards/grant",
+    { customerId: "e2e_reward_member", triggerType: "registration", idempotencyKey: "e2e:reward:once" },
+    demoForWriteThrough.accessToken
+  );
+  assert.equal(grant.status, 201, `发放奖励失败: ${JSON.stringify(grant.body)}`);
+  // 同一幂等键重复发放不得新增流水。
+  const grantAgain = await request(
+    "POST",
+    "/api/rental/v1/rewards/grant",
+    { customerId: "e2e_reward_member", triggerType: "registration", idempotencyKey: "e2e:reward:once" },
+    demoForWriteThrough.accessToken
+  );
+  assert.equal(grantAgain.status, 201, "重复发放应幂等返回既有流水");
+  assert.equal(
+    readCount("SELECT COUNT(*) FROM `rental_reward_ledger_entries` WHERE `idempotencyKey`='e2e:reward:once';"),
+    1,
+    "同一幂等键在库中只能有一条奖励流水"
+  );
+  assert.equal(
+    readCount("SELECT ROUND(`pointsBalance`) FROM `rental_benefit_accounts` WHERE `customerId`='e2e_reward_member';"),
+    88,
+    "奖励入账后权益账户余额必须落库"
+  );
+
+  const factRows = {
+    quotes: readCount("SELECT COUNT(*) FROM `rental_quotes`;"),
+    coupons: readCount("SELECT COUNT(*) FROM `rental_customer_coupons`;"),
+    rewards: readCount("SELECT COUNT(*) FROM `rental_reward_ledger_entries`;"),
+    accounts: readCount("SELECT COUNT(*) FROM `rental_benefit_accounts`;"),
+    logs: readCount("SELECT COUNT(*) FROM `rental_notification_logs`;")
+  };
+  for (const [key, value] of Object.entries(factRows)) {
+    assert.ok(value > 0, `业务事实 ${key} 未落库，实际 ${value} 行`);
+  }
+  // 报价被订单消费后，consumedOrderId 必须落库并指向真实订单，否则报价一次性使用无法追溯。
+  assert.ok(
+    readCount(
+      "SELECT COUNT(*) FROM `rental_quotes` q JOIN `rental_orders` o ON o.`id`=q.`consumedOrderId` WHERE q.`consumedAt` IS NOT NULL;"
+    ) > 0,
+    "已消费报价的 consumedOrderId 必须落库且指向真实订单"
+  );
+  // 券状态机：第 12 节走过领取→锁定→核销→取消释放。释放会把状态改回 claimed，
+  // 因此终态不能用 status 判断；用 releasedAt 落库来证明整条流转确实持久化过。
+  assert.ok(
+    readCount("SELECT COUNT(*) FROM `rental_customer_coupons` WHERE `releasedAt` IS NOT NULL;") > 0,
+    "券的锁定→核销→释放流转必须落库，不能只存在于内存"
+  );
+  // 领取递增的模板配额也必须落库，否则重启后同一张券可被反复领完。
+  assert.ok(
+    readCount("SELECT COUNT(*) FROM `rental_coupon_templates` WHERE `claimedQuantity` > 0;") > 0,
+    "券模板已领数量必须随领取写穿落库"
+  );
+  // 奖励幂等键在库上有唯一约束，重复键必须被数据库拒绝而不是只靠内存判重。
+  const dupKey = mysqlRaw(
+    `USE \`${TEST_DB}\`;\nINSERT INTO \`rental_reward_ledger_entries\`` +
+      " (`id`,`tenantId`,`customerId`,`rewardType`,`amount`,`triggerType`,`idempotencyKey`,`status`,`reason`,`createdAt`)" +
+      " SELECT 'e2e_dup_reward',`tenantId`,`customerId`,`rewardType`,`amount`,`triggerType`,`idempotencyKey`,`status`,`reason`,NOW(3)" +
+      " FROM `rental_reward_ledger_entries` LIMIT 1;"
+  );
+  assert.notEqual(dupKey.status, 0, "重复奖励幂等键必须被数据库唯一约束拒绝");
+  assert.match(
+    `${dupKey.stdout || ""}${dupKey.stderr || ""}`,
+    /Duplicate entry/u,
+    "重复幂等键应报 Duplicate entry"
+  );
+  // 通知记录的外键必须指向真实模板，证明记录不是孤立写入。
+  assert.equal(
+    readCount(
+      "SELECT COUNT(*) FROM `rental_notification_logs` l WHERE NOT EXISTS (SELECT 1 FROM `rental_notification_templates` t WHERE t.`id`=l.`templateId`);"
+    ),
+    0,
+    "通知记录不得引用不存在的模板"
+  );
+  ok(
+    `业务事实以库为事实源：${factRows.quotes} 报价/${factRows.coupons} 券/${factRows.rewards} 奖励/${factRows.accounts} 权益账户/${factRows.logs} 通知记录落表，` +
+      "报价消费可追溯、券状态与模板配额已写穿、奖励幂等键由唯一约束保证、通知记录外键完整"
+  );
+
+  console.log("== 21. RC-01 聚合快照已降级为恢复副本 ==");
+  // 判定方法：直接篡改 JSON 快照里的业务事实，再重启 API。
+  // 若快照仍是事实源，重启后读到的就是被篡改的值；正确行为是启动时用库覆盖，
+  // 篡改被忽略。这是"快照只作恢复或缓存"唯一能被证伪的检查方式。
+  mysqlQuery(
+    "UPDATE `rental_business_state_snapshots` " +
+      "SET `state` = JSON_SET(`state`, '$.customerCoupons', JSON_ARRAY(), '$.rewardLedger', JSON_ARRAY(), '$.quotes', JSON_ARRAY()) " +
+      "WHERE `tenantId`='tenant_001';"
+  );
+  assert.equal(
+    readCount(
+      "SELECT JSON_LENGTH(`state`->'$.customerCoupons') FROM `rental_business_state_snapshots` WHERE `tenantId`='tenant_001';"
+    ),
+    0,
+    "篡改快照未生效，本节无法判定"
+  );
+  await stopApi();
+  startApi();
+  if (!(await waitHealth())) fail("快照降级校验的 API 重启超时");
+  const demoAfterTamper = await login("demo", "admin", DEMO_PASSWORD);
+  const couponsAfterTamper = (
+    await request("GET", "/api/rental/v1/customer-coupons", null, demoAfterTamper.accessToken)
+  ).body.data;
+  const rewardsAfterTamper = (await request("GET", "/api/rental/v1/rewards", null, demoAfterTamper.accessToken)).body.data;
+  assert.ok(
+    Array.isArray(couponsAfterTamper) && couponsAfterTamper.length > 0,
+    "快照被清空后仍必须从库恢复出客户优惠券，否则快照仍是事实源"
+  );
+  assert.ok(
+    Array.isArray(rewardsAfterTamper) && rewardsAfterTamper.length > 0,
+    "快照被清空后仍必须从库恢复出奖励流水"
+  );
+  ok(
+    `快照已降级：清空快照中的券/奖励/报价后重启，仍从库恢复出 ${couponsAfterTamper.length} 张券与 ${rewardsAfterTamper.length} 条奖励流水`
+  );
 
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);
 }

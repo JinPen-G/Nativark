@@ -7,7 +7,7 @@ require("ts-node").register({
 
 const { RentalCoreService } = require("../apps/api/src/modules/rental-core/rental-core.service");
 const { RentalBusinessService } = require("../apps/api/src/modules/rental-core/rental-business.service");
-const { createAbsorbingConfigStore, createAbsorbingFactStore, createAbsorbingBusinessConfigStore } = require("./helpers/absorbing-config-store.cjs");
+const { createAbsorbingConfigStore, createAbsorbingFactStore, createAbsorbingBusinessConfigStore, createAbsorbingBusinessFactStore } = require("./helpers/absorbing-config-store.cjs");
 
 class FakeRepository {
   constructor() { this.core = new Map(); this.business = new Map(); }
@@ -28,7 +28,7 @@ class FakeRepository {
   await core.saveOperator("tenant_camera_db", { code: "PARTNER", name: "摄影合作商", type: "partner", settlementMode: "monthly" });
   await core.persist("tenant_camera_db");
 
-  const business = new RentalBusinessService(createAbsorbingBusinessConfigStore(), repository);
+  const business = new RentalBusinessService(createAbsorbingBusinessConfigStore(), createAbsorbingBusinessFactStore(), createAbsorbingConfigStore(), repository);
   const context = () => {
     const profile = core.getProfile("tenant_camera_db");
     return { profile, category: core.listCategories().find((item) => item.code === profile.categoryCode), settings: core.getBusinessSettings("tenant_camera_db"), groups: core.listItemGroups("tenant_camera_db"), couponTemplates: core.listCouponTemplates("tenant_camera_db") };
@@ -37,7 +37,7 @@ class FakeRepository {
   await business.persist("tenant_camera_db");
 
   const restoredCore = new RentalCoreService(createAbsorbingConfigStore(), createAbsorbingFactStore(), repository);
-  const restoredBusiness = new RentalBusinessService(createAbsorbingBusinessConfigStore(), repository);
+  const restoredBusiness = new RentalBusinessService(createAbsorbingBusinessConfigStore(), createAbsorbingBusinessFactStore(), createAbsorbingConfigStore(), repository);
   await Promise.all([restoredCore.onModuleInit(), restoredBusiness.onModuleInit()]);
   assert.equal(restoredCore.listOperators("tenant_camera_db").some((item) => item.code === "PARTNER"), true, "core state must survive service restart");
   const restoredProfile = restoredCore.getProfile("tenant_camera_db");
