@@ -565,7 +565,25 @@ async function upsertPermissions() {
   }
 }
 
+/**
+ * Seed 账号口令只能来自环境变量，仓库不保存任何明文密码。
+ * 缺失时立即失败，避免用已知默认口令创建管理员账号。
+ * 兼容既有的 `E2E_*` 变量名，使已有本地 .env 无需改动即可继续工作。
+ */
+function requiredSeedPassword(primary: string, alias: string) {
+  const value = (process.env[primary] ?? process.env[alias])?.trim();
+  if (!value) {
+    throw new Error(
+      `缺少 Seed 凭据 ${primary}（兼容别名 ${alias}）。` +
+        "请在本地 .env 或环境变量中配置后重试；不得在仓库代码或文档中硬编码密码。"
+    );
+  }
+  return value;
+}
+
 async function upsertRolesAndUsers() {
+  const platformPassword = requiredSeedPassword("SEED_PLATFORM_PASSWORD", "E2E_PLATFORM_PASSWORD");
+  const demoPassword = requiredSeedPassword("SEED_DEMO_PASSWORD", "E2E_DEMO_PASSWORD");
   for (const tenant of tenants) {
     const tenantRoleTemplates = tenant.code === "platform" ? [saasRoleTemplate] : roleTemplates;
     for (const template of tenantRoleTemplates) {
@@ -626,7 +644,7 @@ async function upsertRolesAndUsers() {
           displayName: user.displayName,
           phone: user.phone,
           roleId: user.roleIds[0],
-          passwordHash: hashPassword(tenant.code === "platform" ? "RentalOS!2026" : "RentalDemo!2026"),
+          passwordHash: hashPassword(tenant.code === "platform" ? platformPassword : demoPassword),
           isSaasAdmin: user.isSaasAdmin,
           isPlatformAdmin: user.isPlatformAdmin,
           mustChangePassword: false,
@@ -640,7 +658,7 @@ async function upsertRolesAndUsers() {
           displayName: user.displayName,
           phone: user.phone,
           roleId: user.roleIds[0],
-          passwordHash: hashPassword(tenant.code === "platform" ? "RentalOS!2026" : "RentalDemo!2026"),
+          passwordHash: hashPassword(tenant.code === "platform" ? platformPassword : demoPassword),
           isSaasAdmin: user.isSaasAdmin,
           isPlatformAdmin: user.isPlatformAdmin,
           mustChangePassword: false,
@@ -1412,6 +1430,10 @@ async function upsertSceneOrders() {
 }
 
 async function main() {
+  // 先校验凭据再写库：缺少口令时必须在任何 upsert 之前失败，
+  // 避免留下"租户/组织已建、管理员账号未建"的半成品库。
+  requiredSeedPassword("SEED_PLATFORM_PASSWORD", "E2E_PLATFORM_PASSWORD");
+  requiredSeedPassword("SEED_DEMO_PASSWORD", "E2E_DEMO_PASSWORD");
   await upsertTenants();
   await upsertRentalCategoriesAndProfiles();
   await upsertOrganizations();

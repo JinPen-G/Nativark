@@ -1,4 +1,27 @@
 /**
+ * ⚠️ 已隔离（QUARANTINED）——当前无法运行，且不得作为调用 API 的参考。
+ *
+ * 状态：未被任何 npm script 引用，不计入 `test:rental-foundation` 覆盖率。
+ *
+ * 为什么不能运行：
+ * 本脚本写于 P0-01（租户上下文 fail-closed）之前，靠请求头 `x-tenant-id: tenant_001`
+ * 选择租户，且完全没有 `Authorization` 头。现在 `ApiAuthGuard` 是全局守卫，仅放行
+ * `/health`、`/openapi.json`、`/auth/login`、`/auth/refresh`，因此这里每个请求都会返回 401。
+ *
+ * 为什么不得当作参考：
+ * 「信任客户端提交的 tenantId」正是 P0-01 判定为跨租户漏洞并明令删除的模式。
+ * 照抄本文件的调用方式会重新引入该漏洞。
+ *
+ * 已保留的价值：
+ * 下方 VALID_TRANSITIONS 是车辆兼容域 16 个订单主状态唯一的成文规格，已提炼为
+ * `packages/shared` 的 `ORDER_MAIN_STATUS_TRANSITIONS` 正式契约。此处副本仅作历史留存。
+ *
+ * 后续处置（需项目负责人决定）：
+ * 复活需要补登录取 token、凭据从环境变量注入、并像 `tests/mysql-e2e.test.cjs` 那样
+ * 自带专用测试库生命周期（本脚本有 4 个 POST 会写导出任务到 API 所连的库）。
+ * 该工作量属 ORDER-01「非法状态动作被拒绝」范围，不是清理项。
+ *
+ * ---
  * E2E 订单状态流转测试脚本
  * 验证各主状态之间的合法转换路径
  */

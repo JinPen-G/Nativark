@@ -689,6 +689,10 @@ model VehicleOnboardItem {
   @@index([vehicleId, status])
 }
 
+/// 车辆兼容域（store-rental）的 TBox 运行台账：在线状态、电量、信号与远程指令。
+/// 经 `/store-rental/tbox-devices` 暴露，Prisma 访问器为 `prisma.tboxDevice`。
+/// 注意：与 `TBoxDevice`（integrations 域的设备资产台账）是两张不同的表，
+/// 模型名仅差一个大小写字母，访问器写错会静默读写另一张表。合并归属 RC-05。
 model TboxDevice {
   id              String              @id @default(uuid())
   tenantId        String
@@ -1837,6 +1841,10 @@ model DocumentPrintJob {
   @@index([tenantId, businessType, businessId])
 }
 
+/// integrations 域的 TBox 设备资产台账：SIM 卡、型号、固件/App 版本、保修与 iButton。
+/// 经 `/integrations/tbox-devices` 暴露，Prisma 访问器为 `prisma.tBoxDevice`。
+/// 注意：与 `TboxDevice`（车辆兼容域的运行台账）是两张不同的表，
+/// 模型名仅差一个大小写字母，访问器写错会静默读写另一张表。合并归属 RC-05。
 model TBoxDevice {
   id               String    @id @default(uuid())
   tenantId         String

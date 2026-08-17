@@ -42,6 +42,59 @@ export enum OrderMainStatus {
   Closed = "closed"
 }
 
+/**
+ * 车辆兼容域订单主状态的合法转移表。
+ *
+ * 这是该状态机唯一的成文规格：生产代码把转移规则分散在
+ * `store-rental.service.ts` 的各个 action 处理器里，没有集中定义。
+ * 本表由已隔离的 `tests/e2e-order-flow.test.cjs` 提炼而来，键集与
+ * `OrderMainStatus` 完全一致，可供 ORDER-01 在服务端集中校验非法转移时引用。
+ *
+ * 空数组表示终态。
+ */
+export const ORDER_MAIN_STATUS_TRANSITIONS: Record<OrderMainStatus, OrderMainStatus[]> = {
+  [OrderMainStatus.PendingPayment]: [OrderMainStatus.Reserved, OrderMainStatus.Cancelled],
+  [OrderMainStatus.Reserved]: [
+    OrderMainStatus.PickupOverdue,
+    OrderMainStatus.Inspecting,
+    OrderMainStatus.Cancelled,
+    OrderMainStatus.NoShow
+  ],
+  [OrderMainStatus.PickupOverdue]: [OrderMainStatus.Cancelled, OrderMainStatus.NoShow],
+  [OrderMainStatus.Inspecting]: [OrderMainStatus.Renting, OrderMainStatus.Rejected],
+  [OrderMainStatus.Renting]: [
+    OrderMainStatus.Renewing,
+    OrderMainStatus.Overdue,
+    OrderMainStatus.AccidentProcessing,
+    OrderMainStatus.SettlementPending,
+    OrderMainStatus.Completed
+  ],
+  [OrderMainStatus.Renewing]: [
+    OrderMainStatus.Renting,
+    OrderMainStatus.Overdue,
+    OrderMainStatus.SettlementPending,
+    OrderMainStatus.Completed
+  ],
+  [OrderMainStatus.Overdue]: [
+    OrderMainStatus.SettlementPending,
+    OrderMainStatus.Completed,
+    OrderMainStatus.AccidentProcessing
+  ],
+  [OrderMainStatus.AccidentProcessing]: [OrderMainStatus.SettlementPending, OrderMainStatus.Completed],
+  [OrderMainStatus.SettlementPending]: [
+    OrderMainStatus.PaymentDue,
+    OrderMainStatus.RefundPending,
+    OrderMainStatus.Completed
+  ],
+  [OrderMainStatus.PaymentDue]: [OrderMainStatus.Completed, OrderMainStatus.RefundPending],
+  [OrderMainStatus.RefundPending]: [OrderMainStatus.Completed, OrderMainStatus.Closed],
+  [OrderMainStatus.Completed]: [],
+  [OrderMainStatus.Cancelled]: [],
+  [OrderMainStatus.NoShow]: [],
+  [OrderMainStatus.Rejected]: [],
+  [OrderMainStatus.Closed]: []
+};
+
 export enum DispatchStatus {
   Pending = "pending",
   PreAssigned = "pre_assigned",

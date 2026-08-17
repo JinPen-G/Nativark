@@ -332,8 +332,16 @@ async function main() {
   ok("二次 deploy 为无操作且数据不变");
 
   console.log("== 4. Seed 重复执行 ==");
+  // Seed 现在强制从环境变量取账号口令（仓库不再保存明文密码）。
+  // requiredCredential 允许凭据只存在于本地 .env，而 runNode 只继承 process.env，
+  // 因此必须在这里显式透传，否则 seed 会因缺少凭据而失败。
+  const seedEnv = {
+    ...migrateEnv,
+    SEED_PLATFORM_PASSWORD: PLATFORM_PASSWORD,
+    SEED_DEMO_PASSWORD: DEMO_PASSWORD
+  };
   const seedRun = (script) =>
-    runNode([TS_NODE_BIN, `prisma/${script}`], { cwd: API_DIR, env: migrateEnv });
+    runNode([TS_NODE_BIN, `prisma/${script}`], { cwd: API_DIR, env: seedEnv });
   for (const script of ["seed.ts", "seed-report-demo.ts"]) {
     for (let round = 1; round <= 2; round += 1) {
       const result = seedRun(script);
