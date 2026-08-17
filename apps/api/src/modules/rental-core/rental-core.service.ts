@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException, OnModuleInit, Optional } from "@nestjs/common";
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, OnApplicationBootstrap, OnModuleInit, Optional } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import {
   RENTAL_CATEGORY_DEFINITIONS,
@@ -39,6 +39,7 @@ import {
   type TenantRentalProfile
 } from "@store-rental/shared";
 import { RentalStateRepository } from "./rental-state.repository";
+import { RentalCoreConfigRepository, type RentalConfigStore } from "./rental-core-config.repository";
 
 interface TenantRentalState {
   profile: TenantRentalProfile;
@@ -114,10 +115,15 @@ function defaultBusinessSettings(tenantId: string, definition: RentalCategoryDef
 }
 
 @Injectable()
-export class RentalCoreService implements OnModuleInit {
+export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   private readonly states = new Map<string, TenantRentalState>();
 
-  constructor(@Optional() private readonly stateRepository?: RentalStateRepository) {}
+  // configStore 必填：配置的事实源是数据库，内存 states 只是写穿缓存。
+  // 不设为可选，避免生产环境缺少注入时静默退回纯内存而无人察觉。
+  constructor(
+    @Inject(RentalCoreConfigRepository) private readonly configStore: RentalConfigStore,
+    @Optional() private readonly stateRepository?: RentalStateRepository
+  ) {}
 
   async onModuleInit() {
     for (const row of await this.stateRepository?.loadCoreStates() ?? []) {
@@ -131,25 +137,74 @@ export class RentalCoreService implements OnModuleInit {
     }
   }
 
+  /**
+   * 配置写穿缓存的启动预热。
+   *
+   * 用 onApplicationBootstrap 而不是 onModuleInit：快照回填服务
+   * （RentalSnapshotBackfillService）也是 OnModuleInit，且在 app.module 里注册在本服务之后，
+   * 如果预热放在 onModuleInit，会先于回填执行而读到空表。Nest 保证
+   * onApplicationBootstrap 在所有 onModuleInit 之后运行，因此无需引入服务间耦合来排序。
+   *
+   * 库中已有的配置一律覆盖内存中的同名集合——库是事实源，
+   * seedState 造出来的样本只是尚未落库时的占位。
+   */
+  async onApplicationBootstrap() {
+    for (const snapshot of await this.configStore.loadAll()) {
+      const cached = this.states.get(snapshot.tenantId);
+      const categoryCode = snapshot.profile?.categoryCode ?? cached?.profile.categoryCode;
+      if (!categoryCode) continue;
+      const base = cached ?? this.seedState(snapshot.tenantId, categoryCode);
+      if (snapshot.profile) base.profile = snapshot.profile;
+      if (snapshot.businessSettings) base.businessSettings = snapshot.businessSettings;
+      if (snapshot.operators.length) base.operators = snapshot.operators;
+      if (snapshot.locations.length) base.locations = snapshot.locations;
+      if (snapshot.itemGroups.length) base.itemGroups = snapshot.itemGroups;
+      if (snapshot.couponTemplates.length) base.couponTemplates = snapshot.couponTemplates;
+      if (snapshot.inspectionTemplates.length) base.inspectionTemplates = snapshot.inspectionTemplates;
+      this.states.set(snapshot.tenantId, base);
+    }
+  }
+
   async persist(tenantId: string) {
     const state = this.states.get(tenantId);
     if (state) await this.stateRepository?.saveCoreState(tenantId, state);
   }
 
   listCategories() { return categories; }
-  initializeTenant(tenantId: string, categoryCode: RentalCategoryCode) {
+  async initializeTenant(tenantId: string, categoryCode: RentalCategoryCode) {
     const existing = this.states.get(tenantId);
     if (existing && existing.profile.categoryCode !== categoryCode) {
       throw new ConflictException("已有租赁数据的租户不能切换经营品类");
     }
-    if (!existing) this.states.set(tenantId, this.seedState(tenantId, categoryCode));
+    if (!existing) {
+      const seeded = this.seedState(tenantId, categoryCode);
+      this.states.set(tenantId, seeded);
+      await this.persistConfig(seeded);
+    }
     return this.states.get(tenantId)!.profile;
+  }
+
+  /**
+   * 把整份配置落库。用于租户初始化；此后各 save* 方法按条写穿。
+   * 套装必须排在其组成项之后写入——组成项是独立表的外键，先写套装会违反约束。
+   */
+  private async persistConfig(state: TenantRentalState) {
+    await this.configStore.upsertProfile(state.profile);
+    await this.configStore.upsertBusinessSettings(state.businessSettings, state.businessSettings.updatedBy);
+    for (const operator of state.operators) await this.configStore.upsertOperator(operator);
+    for (const location of state.locations) await this.configStore.upsertLocation(location);
+    const ordered = [...state.itemGroups].sort(
+      (left, right) => Number(left.inventoryMode === RentalInventoryMode.Bundle) - Number(right.inventoryMode === RentalInventoryMode.Bundle)
+    );
+    for (const group of ordered) await this.configStore.upsertItemGroup(group);
+    for (const template of state.couponTemplates) await this.configStore.upsertCouponTemplate(template);
+    for (const template of state.inspectionTemplates) await this.configStore.upsertInspectionTemplate(template);
   }
   hasTenantState(tenantId: string) { return this.states.has(tenantId); }
   getProfile(tenantId: string) { return this.state(tenantId).profile; }
   getBusinessSettings(tenantId: string) { return this.state(tenantId).businessSettings; }
 
-  saveBusinessSettings(tenantId: string, input: SaveTenantRentalBusinessSettingsRequest, operator: string) {
+  async saveBusinessSettings(tenantId: string, input: SaveTenantRentalBusinessSettingsRequest, operator: string) {
     const state = this.state(tenantId);
     const definition = this.category(state.profile.categoryCode);
     const pricingUnits = new Set(definition.businessModel.pricingUnits);
@@ -193,12 +248,13 @@ export class RentalCoreService implements OnModuleInit {
       updatedAt: now(),
       updatedBy: operator
     };
+    await this.configStore.upsertBusinessSettings(state.businessSettings, operator);
     return state.businessSettings;
   }
 
   listCouponTemplates(tenantId: string) { return this.state(tenantId).couponTemplates; }
 
-  saveCouponTemplate(tenantId: string, input: SaveRentalCouponTemplateRequest) {
+  async saveCouponTemplate(tenantId: string, input: SaveRentalCouponTemplateRequest) {
     const state = this.state(tenantId);
     if (!input.code?.trim() || !input.name?.trim()) throw new BadRequestException("优惠券编码和名称不能为空");
     if (!Number.isFinite(input.discountValue) || input.discountValue <= 0) throw new BadRequestException("优惠值必须大于 0");
@@ -224,10 +280,11 @@ export class RentalCoreService implements OnModuleInit {
       version: nextVersion, createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp
     };
     if (existing) state.couponTemplates.splice(state.couponTemplates.indexOf(existing), 1, result); else state.couponTemplates.unshift(result);
+    await this.configStore.upsertCouponTemplate(result);
     return result;
   }
 
-  saveProfile(tenantId: string, input: SaveTenantRentalProfileRequest) {
+  async saveProfile(tenantId: string, input: SaveTenantRentalProfileRequest) {
     const state = this.state(tenantId);
     const definition = this.category(input.categoryCode);
     const categoryChanged = state.profile.categoryCode !== input.categoryCode;
@@ -242,6 +299,7 @@ export class RentalCoreService implements OnModuleInit {
       configVersion: definition.version,
       updatedAt: now()
     };
+    await this.configStore.upsertProfile(state.profile);
     return state.profile;
   }
 
@@ -249,7 +307,7 @@ export class RentalCoreService implements OnModuleInit {
 
   listOperators(tenantId: string) { return this.state(tenantId).operators; }
 
-  saveOperator(tenantId: string, input: SaveRentalFulfillmentOperatorRequest) {
+  async saveOperator(tenantId: string, input: SaveRentalFulfillmentOperatorRequest) {
     const state = this.state(tenantId);
     if (!input.code?.trim() || !input.name?.trim()) throw new BadRequestException("经营主体编码和名称不能为空");
     const duplicate = state.operators.find((row) => row.code === input.code.trim() && row.id !== input.id);
@@ -264,10 +322,11 @@ export class RentalCoreService implements OnModuleInit {
       status: input.status ?? existing?.status ?? "enabled", createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp
     };
     if (existing) state.operators.splice(state.operators.indexOf(existing), 1, result); else state.operators.unshift(result);
+    await this.configStore.upsertOperator(result);
     return result;
   }
 
-  saveLocation(tenantId: string, input: SaveRentalFulfillmentLocationRequest) {
+  async saveLocation(tenantId: string, input: SaveRentalFulfillmentLocationRequest) {
     const state = this.state(tenantId);
     const definition = this.category(state.profile.categoryCode);
     if (!definition.businessModel.locationTypes.includes(input.type)) throw new BadRequestException("当前经营品类不支持该履约地点类型");
@@ -275,7 +334,7 @@ export class RentalCoreService implements OnModuleInit {
     let operator = input.operatorId ? state.operators.find((row) => row.id === input.operatorId) : undefined;
     if (!operator && input.operatorName?.trim()) {
       operator = state.operators.find((row) => row.name === input.operatorName?.trim());
-      if (!operator) operator = this.saveOperator(tenantId, { code: `LEGACY-${state.operators.length + 1}`, name: input.operatorName.trim(), type: input.operatorType ?? "self_operated" });
+      if (!operator) operator = await this.saveOperator(tenantId, { code: `LEGACY-${state.operators.length + 1}`, name: input.operatorName.trim(), type: input.operatorType ?? "self_operated" });
     }
     if (!operator || operator.status !== "enabled") throw new BadRequestException("请选择已启用的经营主体");
     if (!input.capabilities?.length) throw new BadRequestException("履约地点至少需要一种能力");
@@ -303,11 +362,12 @@ export class RentalCoreService implements OnModuleInit {
       status: input.status ?? existing?.status ?? "enabled"
     };
     if (existing) state.locations.splice(state.locations.indexOf(existing), 1, result); else state.locations.unshift(result);
+    await this.configStore.upsertLocation(result);
     return result;
   }
   listItemGroups(tenantId: string) { return this.state(tenantId).itemGroups; }
 
-  saveItemGroup(tenantId: string, input: SaveRentalItemGroupRequest) {
+  async saveItemGroup(tenantId: string, input: SaveRentalItemGroupRequest) {
     const state = this.state(tenantId);
     const definition = this.category(state.profile.categoryCode);
     if (!definition.supportedInventoryModes.includes(input.inventoryMode)) throw new BadRequestException("当前经营品类不支持该库存模式");
@@ -329,6 +389,7 @@ export class RentalCoreService implements OnModuleInit {
       createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp
     };
     if (existing) state.itemGroups.splice(state.itemGroups.indexOf(existing), 1, result); else state.itemGroups.unshift(result);
+    await this.configStore.upsertItemGroup(result);
     return result;
   }
 

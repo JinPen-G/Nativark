@@ -37,9 +37,12 @@ export class RentalBusinessController {
     };
   }
 
-  private async committed<T>(tenantId: string, result: T) {
+  // 必须先 await 业务结果再写快照：核心服务的配置写方法已转为异步，若直接把 Promise
+  // 传进来就会与快照写入并发，快照可能捕获到变更前的状态。
+  private async committed<T>(tenantId: string, result: T | Promise<T>): Promise<T> {
+    const resolved = await result;
     await Promise.all([this.business.persist(tenantId), this.core.persist(tenantId)]);
-    return result;
+    return resolved;
   }
 
   @Get("pricing-plans") pricingPlans(@Req() req: AuthenticatedRequest) { return this.business.listPricingPlans(req.user.tenantId, this.context(req.user.tenantId)); }

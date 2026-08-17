@@ -1187,7 +1187,7 @@ export class PlatformService {
         dictionaries: this.dictionaryGroups,
         numberRules: this.numberRules
       });
-      this.rentalCoreService?.initializeTenant(result.tenant.tenantId, input.categoryCode);
+      await this.rentalCoreService?.initializeTenant(result.tenant.tenantId, input.categoryCode);
       await this.rentalCoreService?.persist(result.tenant.tenantId);
       return result;
     }
@@ -1274,7 +1274,7 @@ export class PlatformService {
       detail: `初始化租户：${tenantName}`
     });
 
-    this.rentalCoreService?.initializeTenant(tenantId, input.categoryCode);
+    await this.rentalCoreService?.initializeTenant(tenantId, input.categoryCode);
     await this.rentalCoreService?.persist(tenantId);
     return {
       tenant,

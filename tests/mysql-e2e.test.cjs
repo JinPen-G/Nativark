@@ -940,6 +940,65 @@ async function main() {
   assert.equal(afterRestart, beforeRestart, "再次重启不得重复回填订单");
   ok(`回填与快照逐项一致（订单/商品组/资产/检查/报价），金额非零，二次重启不重复（${afterRestart} 单）`);
 
+  console.log("== 19. RC-01 配置写穿：API 写入必须真正落库 ==");
+  // 这一节不可省：API 读配置走的是服务内存写穿缓存，因此即使写穿完全没生效，
+  // 前面所有通过 HTTP 的断言依然会全绿。只有直查库才能证明配置真的落了盘。
+  //
+  // 关键：必须用"本次新建"的配置来验证。若只检查前面各节创建的配置，
+  // 第 17 节重启会触发快照回填，回填同样能把这些行写进库，断言就失去了区分力。
+  const writeThroughCode = `E2E-WRITETHROUGH-${afterRestart}`;
+  // 第 18 节又重启过一次 API，第 17 节取得的会话已不可用，这里重新登录。
+  const demoForWriteThrough = await login("demo", "admin", DEMO_PASSWORD);
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_coupon_templates\` WHERE \`code\`='${writeThroughCode}';`),
+    0,
+    "写穿校验用的券模板编码必须尚不存在"
+  );
+  const writeThrough = await request(
+    "POST",
+    "/api/rental/v1/coupon-templates",
+    {
+      code: writeThroughCode,
+      name: "E2E 写穿校验券",
+      discountType: "fixed_amount",
+      discountValue: 5,
+      minimumSpend: 10,
+      totalQuota: 1,
+      perCustomerLimit: 1,
+      effectiveFrom: new Date(Date.now() - 86400000).toISOString(),
+      effectiveTo: new Date(Date.now() + 30 * 86400000).toISOString(),
+      status: "enabled"
+    },
+    demoForWriteThrough.accessToken
+  );
+  assert.equal(writeThrough.status, 201, `写穿校验券创建失败: ${JSON.stringify(writeThrough.body)}`);
+  // 未经任何重启或回填，该行必须已在库中。
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_coupon_templates\` WHERE \`code\`='${writeThroughCode}' AND \`tenantId\`='tenant_001';`),
+    1,
+    "配置写方法必须同步写穿到数据库，且带正确租户戳"
+  );
+
+  // 初始化落库：每个有品类档案的租户，主体、地点和业务设置都不能缺。
+  const profiledTenants = readCount("SELECT COUNT(*) FROM `tenant_rental_profiles`;");
+  assert.ok(profiledTenants >= 3, `品类档案数异常: ${profiledTenants}`);
+  for (const [table, label] of [
+    ["rental_fulfillment_operators", "经营主体"],
+    ["rental_fulfillment_locations", "履约地点"],
+    ["rental_tenant_business_settings", "业务设置"]
+  ]) {
+    const orphans = readCount(
+      `SELECT COUNT(*) FROM \`tenant_rental_profiles\` p WHERE NOT EXISTS (SELECT 1 FROM \`${table}\` t WHERE t.\`tenantId\`=p.\`tenantId\`);`
+    );
+    assert.equal(orphans, 0, `有 ${orphans} 个租户缺少${label}落库记录`);
+  }
+  // 套装组成是独立表，验证 upsertItemGroup 的整组替换确实写入了组件行。
+  assert.ok(
+    readCount("SELECT COUNT(*) FROM `rental_bundle_components`;") > 0,
+    "套装组成必须随商品组落库"
+  );
+  ok(`配置写穿已验证：新建券模板未经重启即在库且租户戳正确，${profiledTenants} 个租户的主体/地点/业务设置无遗漏`);
+
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);
 }
 

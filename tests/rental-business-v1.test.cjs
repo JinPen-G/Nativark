@@ -7,8 +7,10 @@ require("ts-node").register({
 
 const { RentalCoreService } = require("../apps/api/src/modules/rental-core/rental-core.service");
 const { RentalBusinessService } = require("../apps/api/src/modules/rental-core/rental-business.service");
+const { createAbsorbingConfigStore } = require("./helpers/absorbing-config-store.cjs");
 
-const core = new RentalCoreService();
+// 不连库用例：注入吸收式 store 让配置写穿落空，配置读取仍由服务内存缓存提供。
+const core = new RentalCoreService(createAbsorbingConfigStore());
 const business = new RentalBusinessService();
 const tenantId = "tenant_002";
 const now = Date.now();
@@ -25,6 +27,9 @@ function context() {
     couponTemplates: core.listCouponTemplates(tenantId)
   };
 }
+
+// 核心服务的配置写方法已随「配置落库」转为异步，.cjs 无顶层 await，故包一层异步 IIFE。
+void (async () => {
 
 const pricing = business.listPricingPlans(tenantId, context());
 assert.equal(pricing[0].categoryCode, "camping");
@@ -64,7 +69,7 @@ const savedRule = business.saveRuleVersion(tenantId, context(), {
 assert.equal(savedRule.status, "published");
 assert.equal(business.currentRule(tenantId, context()).version, "1.1");
 
-const couponTemplate = core.saveCouponTemplate(tenantId, {
+const couponTemplate = await core.saveCouponTemplate(tenantId, {
   code: "CAMP-WELCOME",
   name: "露营新客券",
   discountType: "fixed_amount",
@@ -124,7 +129,7 @@ business.releaseCoupon(tenantId, context(), order.id);
 assert.equal(business.listCustomerCoupons(tenantId, context(), "member_001")[0].status, "claimed");
 
 const settings = core.getBusinessSettings(tenantId);
-core.saveBusinessSettings(tenantId, {
+await core.saveBusinessSettings(tenantId, {
   ...settings,
   membership: { ...settings.membership, signupRewardEnabled: true, signupRewardType: "points", signupRewardAmount: 100, referralRewardEnabled: true, referralRewardType: "points", referrerRewardAmount: 50, inviteeRewardAmount: 20 }
 }, "test");
@@ -152,7 +157,7 @@ const cameraContext = {
 assert.equal(business.listBenefitAccounts("tenant_001", cameraContext).length, 0, "benefit accounts must remain isolated by SaaS tenant");
 
 const couponRewardSettings = core.getBusinessSettings(tenantId);
-core.saveBusinessSettings(tenantId, {
+await core.saveBusinessSettings(tenantId, {
   ...couponRewardSettings,
   membership: { ...couponRewardSettings.membership, referralRewardEnabled: true, referralRewardType: "coupon", referrerRewardAmount: 1, inviteeRewardAmount: 1, referralRewardCouponTemplateId: couponTemplate.id }
 }, "test");
@@ -211,3 +216,7 @@ assert.equal(business.listPricingPlans("tenant_001", {
 })[0].categoryCode, "camera");
 
 console.log("Rental business v1 test passed: generic pricing, official calendar publication, rule snapshots, discounts, coupon lifecycle, quote/order snapshots, rewards and notifications verified.");
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

@@ -8,13 +8,19 @@ require("ts-node").register({
 const { RentalCoreService } = require("../apps/api/src/modules/rental-core/rental-core.service");
 const { RentalBusinessService } = require("../apps/api/src/modules/rental-core/rental-business.service");
 const { RentalCoreOrderStatus, RentalInventoryMode } = require("@store-rental/shared");
+const { createAbsorbingConfigStore } = require("./helpers/absorbing-config-store.cjs");
 
-const service = new RentalCoreService();
+// 配置的事实源是数据库；本用例不连库，注入吸收式 store 让写穿落空，
+// 配置读取仍由服务的内存写穿缓存提供。依赖持久化语义的断言在 mysql-e2e 里。
+const service = new RentalCoreService(createAbsorbingConfigStore());
 const business = new RentalBusinessService();
 const cameraTenant = "tenant_001";
 const campingTenant = "tenant_002";
 const startAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 const endAt = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
+
+// 配置写方法已随「配置落库」转为异步，.cjs 无顶层 await，故整体包一层异步 IIFE。
+void (async () => {
 
 const cameraProfile = service.getProfile(cameraTenant);
 const campingProfile = service.getProfile(campingTenant);
@@ -35,7 +41,7 @@ assert.equal(service.listItemGroups(campingTenant).find((group) => group.code ==
 const cameraSettings = service.getBusinessSettings(cameraTenant);
 assert.equal(cameraSettings.categoryCode, "camera");
 assert.ok(cameraSettings.pricing.enabledUnits.includes("day_24h"));
-const savedCameraSettings = service.saveBusinessSettings(cameraTenant, {
+const savedCameraSettings = await service.saveBusinessSettings(cameraTenant, {
   pricing: { ...cameraSettings.pricing, enabledUnits: ["hour", "day_24h"], defaultUnit: "day_24h" },
   fulfillment: { ...cameraSettings.fulfillment, enabledModes: ["store_pickup_return", "delivery"] },
   payment: { ...cameraSettings.payment, preauthorizationRequired: true },
@@ -46,7 +52,7 @@ const savedCameraSettings = service.saveBusinessSettings(cameraTenant, {
 }, "test");
 assert.equal(savedCameraSettings.overdue.graceMinutes, 45);
 assert.equal(savedCameraSettings.updatedBy, "test");
-const coupon = service.saveCouponTemplate(cameraTenant, {
+const coupon = await service.saveCouponTemplate(cameraTenant, {
   code: "WELCOME-20",
   name: "新客满减券",
   discountType: "fixed_amount",
@@ -62,14 +68,14 @@ const coupon = service.saveCouponTemplate(cameraTenant, {
 assert.equal(coupon.version, "1.0");
 assert.equal(service.listCouponTemplates(cameraTenant).length, 1);
 assert.equal(service.listCouponTemplates(campingTenant).length, 0, "coupon templates must remain tenant isolated");
-assert.throws(() => service.saveBusinessSettings(campingTenant, {
+await assert.rejects(async () => service.saveBusinessSettings(campingTenant, {
   ...service.getBusinessSettings(campingTenant),
   payment: { ...service.getBusinessSettings(campingTenant).payment, preauthorizationRequired: true }
 }, "test"), /不支持预授权/);
 
 const cameraGroups = service.listItemGroups(cameraTenant);
 const cameraLocation = service.listLocations(cameraTenant)[0];
-const partnerLocation = service.saveLocation(cameraTenant, {
+const partnerLocation = await service.saveLocation(cameraTenant, {
   code: "PARTNER-01",
   name: "合作器材取还点",
   type: "store",
@@ -79,7 +85,7 @@ const partnerLocation = service.saveLocation(cameraTenant, {
   status: "enabled"
 });
 assert.equal(partnerLocation.operatorType, "partner");
-assert.throws(() => service.saveLocation(cameraTenant, {
+await assert.rejects(async () => service.saveLocation(cameraTenant, {
   code: "SITE-01",
   name: "错误项目现场",
   type: "project_site",
@@ -165,20 +171,20 @@ assert.equal(overbooked.available, false, "combined bundle/component demand must
 assert.equal(service.listOrders(campingTenant).length, 0, "tenant data must be isolated");
 
 const newTenant = "tenant_new";
-service.initializeTenant(newTenant, "construction");
+await service.initializeTenant(newTenant, "construction");
 assert.equal(service.listItemGroups(newTenant).length, 0);
-const configured = service.saveProfile(newTenant, { categoryCode: "construction" });
+const configured = await service.saveProfile(newTenant, { categoryCode: "construction" });
 assert.equal(configured.categoryCode, "construction", "an empty tenant can select its single rental category");
-assert.throws(() => service.saveProfile(newTenant, { categoryCode: "vehicle" }), /创建后经营品类固定/, "initialized SaaS tenant category must be immutable even before products are created");
+await assert.rejects(async () => service.saveProfile(newTenant, { categoryCode: "vehicle" }), /创建后经营品类固定/, "initialized SaaS tenant category must be immutable even before products are created");
 assert.equal(service.listInspectionTemplates(newTenant, "pickup")[0].categoryCode, "construction");
-assert.throws(() => service.saveItemGroup(newTenant, {
+await assert.rejects(async () => service.saveItemGroup(newTenant, {
   code: "EXC-001",
   name: "测试挖掘机",
   inventoryMode: "serialized",
   attributes: { model: "E20" },
   status: "enabled"
 }), /制造商/, "construction groups must validate their category-specific fields");
-const constructionGroup = service.saveItemGroup(newTenant, {
+const constructionGroup = await service.saveItemGroup(newTenant, {
   code: "EXC-001",
   name: "测试挖掘机",
   inventoryMode: "serialized",
@@ -204,3 +210,7 @@ assert.equal(constructionAsset.attributes.factoryNo, "FACTORY-001");
 assert.ok(service.listOperators(cameraTenant).some((operator) => operator.name === "测试摄影合作商"), "partner locations must link to the operator master");
 
 console.log("Rental Core v0.1 test passed: category isolation, bundle reservation, allocation, inspections and quantity availability verified.");
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

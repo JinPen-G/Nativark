@@ -32,9 +32,12 @@ export class RentalCoreController {
     if (!category) throw new Error("租户经营品类定义不存在");
     return { profile, category, settings: this.service.getBusinessSettings(tenantId), groups: this.service.listItemGroups(tenantId), couponTemplates: this.service.listCouponTemplates(tenantId) };
   }
-  private async committed<T>(tenantId: string, result: T) {
+  // 必须先 await 业务结果再写快照：配置写方法已转为异步，若直接把 Promise 传进来
+  // 就会与快照写入并发，快照可能捕获到变更前的状态。
+  private async committed<T>(tenantId: string, result: T | Promise<T>): Promise<T> {
+    const resolved = await result;
     await Promise.all([this.service.persist(tenantId), this.business.persist(tenantId)]);
-    return result;
+    return resolved;
   }
   private emitOrderEvent(tenantId: string, eventCode: string, order: { orderNo: string; customerName: string; contactPhone?: string; customerId?: string }) {
     return this.business.emitNotificationEvent(tenantId, this.context(tenantId), eventCode, order.contactPhone ?? order.customerId, { customerName: order.customerName, orderNo: order.orderNo });
