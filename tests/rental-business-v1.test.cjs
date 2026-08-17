@@ -7,11 +7,11 @@ require("ts-node").register({
 
 const { RentalCoreService } = require("../apps/api/src/modules/rental-core/rental-core.service");
 const { RentalBusinessService } = require("../apps/api/src/modules/rental-core/rental-business.service");
-const { createAbsorbingConfigStore, createAbsorbingFactStore } = require("./helpers/absorbing-config-store.cjs");
+const { createAbsorbingConfigStore, createAbsorbingFactStore, createAbsorbingBusinessConfigStore } = require("./helpers/absorbing-config-store.cjs");
 
 // 不连库用例：注入吸收式 store 让配置写穿落空，配置读取仍由服务内存缓存提供。
 const core = new RentalCoreService(createAbsorbingConfigStore(), createAbsorbingFactStore());
-const business = new RentalBusinessService();
+const business = new RentalBusinessService(createAbsorbingBusinessConfigStore());
 const tenantId = "tenant_002";
 const now = Date.now();
 const startAt = new Date(now + 2 * 24 * 60 * 60 * 1000).toISOString();
@@ -36,7 +36,7 @@ assert.equal(pricing[0].categoryCode, "camping");
 assert.ok(pricing[0].rates.every((rate) => rate.unit === "calendar_day"));
 assert.ok(pricing[0].rates.every((rate) => rate.itemGroupCode.startsWith("CAMP-")));
 
-const savedPricing = business.savePricingPlan(tenantId, context(), {
+const savedPricing = await business.savePricingPlan(tenantId, context(), {
   id: pricing[0].id,
   code: pricing[0].code,
   name: pricing[0].name,
@@ -47,7 +47,7 @@ const savedPricing = business.savePricingPlan(tenantId, context(), {
 });
 assert.equal(savedPricing.version, "1.1");
 
-const calendar = business.importOfficialCalendar(tenantId, context(), {
+const calendar = await business.importOfficialCalendar(tenantId, context(), {
   year: new Date(startAt).getUTCFullYear(),
   region: "CN",
   sourceName: "测试用国务院办公厅年度通知",
@@ -56,12 +56,12 @@ const calendar = business.importOfficialCalendar(tenantId, context(), {
   days: [{ date: startAt.slice(0, 10), dayType: "statutory_holiday", name: "测试法定假日" }]
 });
 assert.equal(calendar.status, "draft");
-const publishedCalendar = business.publishCalendar(tenantId, context(), calendar.year);
+const publishedCalendar = await business.publishCalendar(tenantId, context(), calendar.year);
 assert.equal(publishedCalendar.status, "published");
 assert.ok(publishedCalendar.sourceUrl.startsWith("https://"));
 
 const currentRule = business.currentRule(tenantId, context());
-const savedRule = business.saveRuleVersion(tenantId, context(), {
+const savedRule = await business.saveRuleVersion(tenantId, context(), {
   config: { ...structuredClone(currentRule.config), cancellation: { ...currentRule.config.cancellation, weatherExceptionEnabled: true } },
   changeReason: "测试露营天气取消规则",
   publish: true
@@ -163,7 +163,7 @@ business.reverseReward(tenantId, context(), couponRewards[0].id, "撤销测试�
 assert.equal(business.listBenefitAccounts(tenantId, context(), "coupon_referrer")[0].availableRewardCouponCount, 0);
 assert.equal(business.listBenefitAccounts(tenantId, context()).length >= pointsBeforeOtherTenantRead, true);
 
-const damageWaiver = business.saveService(tenantId, context(), {
+const damageWaiver = await business.saveService(tenantId, context(), {
   code: "DAMAGE-WAIVER",
   name: "露营设备损坏免赔",
   serviceType: "damage_waiver",

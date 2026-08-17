@@ -65,4 +65,28 @@ function createAbsorbingFactStore() {
   };
 }
 
-module.exports = { createAbsorbingConfigStore, createAbsorbingFactStore };
+
+/** 吸收式业务配置 store：读返回空、写丢弃。语义与核心配置 stub 完全一致。 */
+function createAbsorbingBusinessConfigStore() {
+  const writes = [];
+  const record = (kind) => (payload) => {
+    writes.push({ kind, id: payload?.id ?? payload?.year });
+    return Promise.resolve();
+  };
+  return {
+    writes,
+    loadAll: () => Promise.resolve([]),
+    upsertPricingPlan: record("pricingPlan"),
+    upsertDiscountPlan: record("discountPlan"),
+    upsertService: record("service"),
+    upsertCalendar: record("calendar"),
+    upsertRuleVersion: record("ruleVersion"),
+    upsertNotificationTemplate: record("notificationTemplate")
+  };
+}
+
+module.exports = {
+  createAbsorbingConfigStore,
+  createAbsorbingFactStore,
+  createAbsorbingBusinessConfigStore
+};

@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException, OnModuleInit, Optional } from "@nestjs/common";
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, OnApplicationBootstrap, OnModuleInit, Optional } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import {
   RentalCategoryCode,
@@ -35,6 +35,10 @@ import {
   type TenantRentalProfile
 } from "@store-rental/shared";
 import { RentalStateRepository } from "./rental-state.repository";
+import {
+  RentalBusinessConfigRepository,
+  type RentalBusinessConfigStore
+} from "./rental-business-config.repository";
 
 interface RentalBusinessState {
   categoryCode: RentalCategoryCode;
@@ -50,6 +54,8 @@ interface RentalBusinessState {
   notificationTemplates: RentalNotificationTemplateV1[];
   notificationLogs: RentalNotificationSendLogV1[];
   quotes: RentalQuoteSnapshotV1[];
+  /** 该租户的业务配置是否已确认落库。懒加载 seedState 只灌内存，需要一次补落。 */
+  configPersisted?: boolean;
 }
 
 interface BusinessContext {
@@ -113,10 +119,31 @@ function serviceType(name: string): RentalValueAddedService["serviceType"] {
 }
 
 @Injectable()
-export class RentalBusinessService implements OnModuleInit {
+export class RentalBusinessService implements OnModuleInit, OnApplicationBootstrap {
   private readonly states = new Map<string, RentalBusinessState>();
 
-  constructor(@Optional() private readonly stateRepository?: RentalStateRepository) {}
+  constructor(
+    @Inject(RentalBusinessConfigRepository) private readonly configStore: RentalBusinessConfigStore,
+    @Optional() private readonly stateRepository?: RentalStateRepository
+  ) {}
+
+  /**
+   * 业务配置写穿缓存的启动预热。
+   * 与核心配置同理放在 OnApplicationBootstrap：快照回填是 OnModuleInit，
+   * 在它之前预热会读到还没回填的空表。
+   */
+  async onApplicationBootstrap() {
+    for (const snapshot of await this.configStore.loadAll()) {
+      const state = this.states.get(snapshot.tenantId);
+      if (!state) continue;
+      if (snapshot.pricingPlans.length) state.pricingPlans = snapshot.pricingPlans;
+      if (snapshot.discountPlans.length) state.discountPlans = snapshot.discountPlans;
+      if (snapshot.services.length) state.services = snapshot.services;
+      if (snapshot.calendars.length) state.calendars = snapshot.calendars;
+      if (snapshot.ruleVersions.length) state.ruleVersions = snapshot.ruleVersions;
+      if (snapshot.notificationTemplates.length) state.notificationTemplates = snapshot.notificationTemplates;
+    }
+  }
 
   async onModuleInit() {
     for (const row of await this.stateRepository?.loadBusinessStates() ?? []) {
@@ -127,15 +154,38 @@ export class RentalBusinessService implements OnModuleInit {
 
   async persist(tenantId: string) {
     const state = this.states.get(tenantId);
-    if (state) await this.stateRepository?.saveBusinessState(tenantId, state);
+    if (!state) return;
+    // 懒加载的默认业务配置只在内存里，必须补落库。与核心配置同一类缺陷：
+    // seedState 生成默认定价/优惠/服务/日历/规则/模板，但只有各 save* 写方法会写穿，
+    // 从未被显式保存过的租户在库中就是空的——阶段 4b 的通知记录外键指向通知模板，
+    // 那时才发现就晚了。
+    if (!state.configPersisted) {
+      await this.persistBusinessConfig(state);
+      state.configPersisted = true;
+    }
+    await this.stateRepository?.saveBusinessState(tenantId, state);
+  }
+
+  /** 把整份业务配置落库。仅用于补落懒加载默认值；此后各 save* 方法按条写穿。 */
+  private async persistBusinessConfig(state: RentalBusinessState) {
+    for (const plan of state.pricingPlans) await this.configStore.upsertPricingPlan(plan);
+    for (const plan of state.discountPlans) await this.configStore.upsertDiscountPlan(plan);
+    for (const service of state.services) await this.configStore.upsertService(service);
+    for (const calendar of state.calendars) await this.configStore.upsertCalendar(calendar);
+    for (const version of state.ruleVersions) await this.configStore.upsertRuleVersion(version);
+    for (const template of state.notificationTemplates) await this.configStore.upsertNotificationTemplate(template);
   }
 
   listPricingPlans(tenantId: string, context: BusinessContext) { return this.state(tenantId, context).pricingPlans; }
 
-  savePricingPlan(tenantId: string, context: BusinessContext, input: SaveRentalPricingPlanRequest) {
+  async savePricingPlan(tenantId: string, context: BusinessContext, input: SaveRentalPricingPlanRequest) {
     const state = this.state(tenantId, context);
     if (!input.code?.trim() || !input.name?.trim() || !input.changeReason?.trim()) throw new BadRequestException("定价编码、名称和变更原因不能为空");
     if (!input.rates.length) throw new BadRequestException("定价计划至少需要一条价格");
+    // effectiveFrom 在 DTO 里是必填，但此前只校验了它与 effectiveTo 的先后关系。
+    // 内存实现能容忍缺失（存 undefined），落库后 DateTime NOT NULL 列会直接报错，
+    // 因此这里显式 fail-closed：没有生效时间的价格/优惠方案本身没有业务含义。
+    if (!Number.isFinite(new Date(input.effectiveFrom).getTime())) throw new BadRequestException("定价计划生效时间无效");
     if (input.effectiveTo && new Date(input.effectiveFrom).getTime() >= new Date(input.effectiveTo).getTime()) throw new BadRequestException("定价计划有效期无效");
     const supportedUnits = new Set(context.settings.pricing.enabledUnits);
     const groupMap = new Map(context.groups.map((group) => [group.id, group]));
@@ -163,16 +213,18 @@ export class RentalBusinessService implements OnModuleInit {
       rates, createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp
     };
     if (existing) Object.assign(existing, result); else state.pricingPlans.unshift(result);
+    await this.configStore.upsertPricingPlan(result);
     return result;
   }
 
   listDiscountPlans(tenantId: string, context: BusinessContext) { return this.state(tenantId, context).discountPlans; }
 
-  saveDiscountPlan(tenantId: string, context: BusinessContext, input: SaveRentalDiscountPlanRequest) {
+  async saveDiscountPlan(tenantId: string, context: BusinessContext, input: SaveRentalDiscountPlanRequest) {
     const state = this.state(tenantId, context);
     if (!input.code?.trim() || !input.name?.trim() || !input.changeReason?.trim()) throw new BadRequestException("优惠编码、名称和变更原因不能为空");
     if (input.discountType === "percentage" && (input.discountValue <= 0 || input.discountValue > 100)) throw new BadRequestException("百分比优惠必须大于 0 且不超过 100");
     if (input.discountType === "fixed_amount" && input.discountValue <= 0) throw new BadRequestException("固定减免必须大于 0");
+    if (!Number.isFinite(new Date(input.effectiveFrom).getTime())) throw new BadRequestException("优惠方案生效时间无效");
     if (input.effectiveTo && new Date(input.effectiveFrom).getTime() >= new Date(input.effectiveTo).getTime()) throw new BadRequestException("优惠方案有效期无效");
     const groupIds = new Set(context.groups.map((group) => group.id));
     if (input.applicableItemGroupIds.some((id) => !groupIds.has(id))) throw new BadRequestException("优惠方案包含不存在的商品");
@@ -187,12 +239,13 @@ export class RentalBusinessService implements OnModuleInit {
       createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp
     };
     if (existing) Object.assign(existing, result); else state.discountPlans.unshift(result);
+    await this.configStore.upsertDiscountPlan(result);
     return result;
   }
 
   listServices(tenantId: string, context: BusinessContext) { return this.state(tenantId, context).services; }
 
-  saveService(tenantId: string, context: BusinessContext, input: SaveRentalValueAddedServiceRequest) {
+  async saveService(tenantId: string, context: BusinessContext, input: SaveRentalValueAddedServiceRequest) {
     const state = this.state(tenantId, context);
     if (!input.code?.trim() || !input.name?.trim() || !input.terms?.trim() || !input.termsVersion?.trim()) throw new BadRequestException("服务编码、名称及条款不能为空");
     if (input.price < 0 || input.maximumQuantity < 1) throw new BadRequestException("服务价格或数量限制无效");
@@ -209,6 +262,7 @@ export class RentalBusinessService implements OnModuleInit {
       createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp
     };
     if (existing) Object.assign(existing, result); else state.services.unshift(result);
+    await this.configStore.upsertService(result);
     return result;
   }
 
@@ -222,7 +276,7 @@ export class RentalBusinessService implements OnModuleInit {
     return calendar;
   }
 
-  importOfficialCalendar(tenantId: string, context: BusinessContext, input: ImportRentalCalendarRequest) {
+  async importOfficialCalendar(tenantId: string, context: BusinessContext, input: ImportRentalCalendarRequest) {
     if (!/^https:\/\//.test(input.sourceUrl)) throw new BadRequestException("官方日历来源必须使用 HTTPS 地址");
     if (!input.days.length) throw new BadRequestException("官方日历数据不能为空");
     const calendar = this.getCalendar(tenantId, context, input.year);
@@ -245,10 +299,11 @@ export class RentalBusinessService implements OnModuleInit {
     calendar.sourcePublishedAt = input.sourcePublishedAt;
     calendar.importedAt = stamp();
     calendar.publishedAt = undefined;
+    await this.configStore.upsertCalendar(calendar);
     return calendar;
   }
 
-  saveCalendarDay(tenantId: string, context: BusinessContext, year: number, input: SaveRentalCalendarDayRequest) {
+  async saveCalendarDay(tenantId: string, context: BusinessContext, year: number, input: SaveRentalCalendarDayRequest) {
     const calendar = this.getCalendar(tenantId, context, year);
     if (!input.date.startsWith(`${year}-`) || input.pricingMultiplier < 0) throw new BadRequestException("日期年度或价格系数无效");
     const day: RentalCalendarDay = { ...input, source: "tenant_override" };
@@ -258,14 +313,16 @@ export class RentalBusinessService implements OnModuleInit {
     calendar.status = "draft";
     calendar.version = versionAfter(calendar.version);
     calendar.publishedAt = undefined;
+    await this.configStore.upsertCalendar(calendar);
     return day;
   }
 
-  publishCalendar(tenantId: string, context: BusinessContext, year: number) {
+  async publishCalendar(tenantId: string, context: BusinessContext, year: number) {
     const calendar = this.getCalendar(tenantId, context, year);
     if (calendar.region === "CN" && !calendar.sourceName) throw new ConflictException("中国大陆日历发布前必须导入并记录官方来源");
     calendar.status = "published";
     calendar.publishedAt = stamp();
+    await this.configStore.upsertCalendar(calendar);
     return calendar;
   }
 
@@ -275,7 +332,7 @@ export class RentalBusinessService implements OnModuleInit {
     return this.state(tenantId, context).ruleVersions.find((item) => item.status === "published") ?? this.state(tenantId, context).ruleVersions[0];
   }
 
-  saveRuleVersion(tenantId: string, context: BusinessContext, input: SaveRentalRuleVersionRequest, operator: string) {
+  async saveRuleVersion(tenantId: string, context: BusinessContext, input: SaveRentalRuleVersionRequest, operator: string) {
     const state = this.state(tenantId, context);
     this.validateRule(context, input.config);
     if (!input.changeReason?.trim()) throw new BadRequestException("规则变更原因不能为空");
@@ -287,6 +344,7 @@ export class RentalBusinessService implements OnModuleInit {
       createdAt: stamp(), publishedAt: input.publish ? stamp() : undefined
     };
     state.ruleVersions.unshift(result);
+    await this.configStore.upsertRuleVersion(result);
     return result;
   }
 
@@ -414,7 +472,7 @@ export class RentalBusinessService implements OnModuleInit {
 
   listNotificationTemplates(tenantId: string, context: BusinessContext) { return this.state(tenantId, context).notificationTemplates; }
 
-  saveNotificationTemplate(tenantId: string, context: BusinessContext, input: SaveRentalNotificationTemplateRequest) {
+  async saveNotificationTemplate(tenantId: string, context: BusinessContext, input: SaveRentalNotificationTemplateRequest) {
     const state = this.state(tenantId, context);
     if (!context.settings.notifications.enabledEvents.includes(input.eventCode)) throw new BadRequestException("通知事件未在租户经营设置中启用");
     if (!context.settings.notifications.editableChannels.includes(input.channel)) throw new BadRequestException("通知渠道未在租户经营设置中启用");
@@ -428,6 +486,7 @@ export class RentalBusinessService implements OnModuleInit {
       version: versionAfter(existing?.version), updatedAt: stamp()
     };
     if (existing) Object.assign(existing, result); else state.notificationTemplates.unshift(result);
+    await this.configStore.upsertNotificationTemplate(result);
     return result;
   }
 

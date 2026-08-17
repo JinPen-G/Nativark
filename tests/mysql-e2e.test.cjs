@@ -739,7 +739,7 @@ async function main() {
   const truckPlan = await request(
     "POST",
     "/api/rental/v1/pricing-plans",
-    { code: "E2E-TRUCK-PRICE", name: "E2E 货车价格", changeReason: "E2E 品类深度用例", status: "enabled", rates: [{ itemGroupId: truckGroup.body.data.id, unit: "day_24h", baseAmount: 600, weekendMultiplier: 1.1, holidayMultiplier: 1.25, depositAmount: 2000, minimumUnits: 1 }] },
+    { effectiveFrom: new Date(Date.now() - 86400000).toISOString(), code: "E2E-TRUCK-PRICE", name: "E2E 货车价格", changeReason: "E2E 品类深度用例", status: "enabled", rates: [{ itemGroupId: truckGroup.body.data.id, unit: "day_24h", baseAmount: 600, weekendMultiplier: 1.1, holidayMultiplier: 1.25, depositAmount: 2000, minimumUnits: 1 }] },
     vehicleA.accessToken
   );
   assert.equal(truckPlan.status, 201, `车辆定价计划失败: ${JSON.stringify(truckPlan.body).slice(0, 200)}`);
@@ -817,7 +817,7 @@ async function main() {
   const excavatorPlan = await request(
     "POST",
     "/api/rental/v1/pricing-plans",
-    { code: "E2E-EXCA-PRICE", name: "E2E 挖掘机价格", changeReason: "E2E 品类深度用例", status: "enabled", rates: [{ itemGroupId: excavatorGroup.body.data.id, unit: "shift", baseAmount: 1500, weekendMultiplier: 1.1, holidayMultiplier: 1.25, depositAmount: 5000, minimumUnits: 1 }] },
+    { effectiveFrom: new Date(Date.now() - 86400000).toISOString(), code: "E2E-EXCA-PRICE", name: "E2E 挖掘机价格", changeReason: "E2E 品类深度用例", status: "enabled", rates: [{ itemGroupId: excavatorGroup.body.data.id, unit: "shift", baseAmount: 1500, weekendMultiplier: 1.1, holidayMultiplier: 1.25, depositAmount: 5000, minimumUnits: 1 }] },
     construction.accessToken
   );
   assert.equal(excavatorPlan.status, 201, `工程定价计划失败: ${JSON.stringify(excavatorPlan.body).slice(0, 200)}`);
@@ -1007,7 +1007,89 @@ async function main() {
     readCount("SELECT COUNT(*) FROM `rental_bundle_components`;") > 0,
     "套装组成必须随商品组落库"
   );
-  ok(`配置写穿已验证：新建券模板未经重启即在库且租户戳正确，${profiledTenants} 个租户的主体/地点/业务设置无遗漏`);
+  // 业务配置（定价、优惠、增值服务、日历、规则版本、通知模板）同样必须落库。
+  // 这些是阶段 4a 新迁的集合，前面各节都是经 API 读回、走内存缓存，无法证明写穿。
+  for (const [code, table] of [
+    ["E2E-TRUCK-PRICE", "rental_pricing_plans"],
+    ["E2E-EXCA-PRICE", "rental_pricing_plans"],
+    ["E2E-EXCLUSIVE", "rental_discount_plans"]
+  ]) {
+    assert.equal(
+      readCount(`SELECT COUNT(*) FROM \`${table}\` WHERE \`code\`='${code}';`),
+      1,
+      `经 API 创建的 ${code} 必须落库到 ${table}`
+    );
+  }
+  // 不能断言"每个租户都有业务配置"——默认配置按设计在该租户首次使用业务域时才落库，
+  // 只做过隔离校验、从未有业务写动作的租户在库中为空是正确的。
+  // 真正的不变量是：一旦某租户有任一类业务配置，六类都必须在（防止只落了一半）。
+  const businessConfigTables = [
+    ["rental_pricing_plans", "定价方案"],
+    ["rental_discount_plans", "优惠方案"],
+    ["rental_value_added_services", "增值服务"],
+    ["rental_rule_versions", "规则版本"],
+    ["rental_notification_templates", "通知模板"]
+  ];
+  const unionSql = businessConfigTables
+    .map(([table]) => `SELECT DISTINCT \`tenantId\` FROM \`${table}\``)
+    .join(" UNION ");
+  for (const [table, label] of businessConfigTables) {
+    const partial = readCount(
+      `SELECT COUNT(*) FROM (${unionSql}) tenants WHERE NOT EXISTS (SELECT 1 FROM \`${table}\` t WHERE t.\`tenantId\`=tenants.\`tenantId\`);`
+    );
+    assert.equal(partial, 0, `有 ${partial} 个已有业务配置的租户缺少${label}，说明配置只落了一半`);
+  }
+  // demo 与 demo2 全程有真实业务动作（报价、下单、优惠券），它们必须齐全。
+  for (const tenantId of ["tenant_001", "tenant_002"]) {
+    for (const [table, label] of businessConfigTables) {
+      assert.ok(
+        readCount(`SELECT COUNT(*) FROM \`${table}\` WHERE \`tenantId\`='${tenantId}';`) > 0,
+        `${tenantId} 必须有${label}落库记录`
+      );
+    }
+  }
+  // 营业日历：经 API 导入官方来源并发布，然后直查库确认状态与来源都落了盘。
+  // 此前 E2E 完全没碰日历接口，而它是阶段 4a 迁移的集合之一。
+  const calendarYear = new Date().getUTCFullYear() + 1;
+  const importedCalendar = await request(
+    "POST",
+    "/api/rental/v1/calendars/import",
+    {
+      year: calendarYear,
+      region: "CN",
+      sourceName: "E2E 官方节假日来源",
+      sourceUrl: "https://example.invalid/e2e-holidays",
+      sourcePublishedAt: new Date(Date.now() - 86400000).toISOString(),
+      days: [{ date: `${calendarYear}-10-01`, dayType: "statutory_holiday", name: "国庆节", pricingMultiplier: 1.5 }]
+    },
+    demoForWriteThrough.accessToken
+  );
+  assert.equal(importedCalendar.status, 201, `日历导入失败: ${JSON.stringify(importedCalendar.body)}`);
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_business_calendars\` WHERE \`tenantId\`='tenant_001' AND \`year\`=${calendarYear} AND \`status\`='draft';`),
+    1,
+    "导入后的日历必须以 draft 落库"
+  );
+  const publishedCalendar = await request(
+    "POST",
+    `/api/rental/v1/calendars/${calendarYear}/publish`,
+    null,
+    demoForWriteThrough.accessToken
+  );
+  assert.equal(publishedCalendar.status, 201, `日历发布失败: ${JSON.stringify(publishedCalendar.body)}`);
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_business_calendars\` WHERE \`tenantId\`='tenant_001' AND \`year\`=${calendarYear} AND \`status\`='published' AND \`sourceName\` IS NOT NULL AND JSON_LENGTH(\`days\`)>0;`),
+    1,
+    "发布后的日历必须在库中为 published，且来源与按日明细都在"
+  );
+  // JSON 明细列不能写成空：定价方案的 rates 是报价可复算的依据。
+  assert.equal(
+    readCount("SELECT COUNT(*) FROM `rental_pricing_plans` WHERE JSON_LENGTH(`rates`) IS NULL OR JSON_LENGTH(`rates`)=0;"),
+    0,
+    "定价方案的 rates 明细不得为空"
+  );
+
+  ok(`配置写穿已验证：核心与业务配置均落库（新建券模板未经重启即在库、定价/优惠/服务/规则/模板无租户遗漏、日历已发布、rates 明细非空），共 ${profiledTenants} 个租户`);
 
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);
 }
