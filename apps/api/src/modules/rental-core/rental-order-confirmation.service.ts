@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, Inject, Injectable } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import type {
   CreateRentalOrderRequest,
   RentalQuoteSnapshotV1
@@ -78,42 +79,58 @@ export class RentalOrderConfirmationService {
     );
     const order = await this.core.prepareOrder(tenantId, input, userName, quote);
 
-    await this.prisma.$transaction(async (tx) => {
-      // 故意先写订单聚合，再校验并消费报价、锁券；后续任一步失败都必须证明
-      // 前面的订单、订单行和库存预占会随同一事务整体回滚。
-      await this.coreFacts.saveOrderAggregate(order, [], tx);
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        // 先锁定序列化资产或数量余额，再在同一事务内按最新预占重新计算。
+        // 并发请求会在这里串行，后到者不能继续使用事务外看到的陈旧可用量。
+        await this.core.assertAvailabilityWithLocks(tenantId, {
+          locationId: input.fulfillmentLocationId,
+          startAt: input.startAt,
+          endAt: input.endAt,
+          lines: input.lines.map((line) => ({ itemGroupId: line.itemGroupId, quantity: line.quantity }))
+        }, tx);
 
-      const storedQuote = await this.businessFacts.findQuote(tenantId, quote.id, tx);
-      if (!storedQuote) throw new ConflictException("报价事实不存在，请重新报价");
-      if (storedQuote.consumedAt) throw new ConflictException("报价已被使用，请重新报价");
-      if (new Date(storedQuote.expiresAt).getTime() < new Date(committedAt).getTime()) {
-        throw new ConflictException("报价已过期，请重新报价");
-      }
-      if (quoteSnapshotFingerprint(storedQuote) !== quoteSnapshotFingerprint(quote)) {
-        throw new ConflictException("报价事实已变化，请重新报价");
-      }
+        // 故意先写订单聚合，再校验并消费报价、锁券；后续任一步失败都必须证明
+        // 前面的订单、订单行和库存预占会随同一事务整体回滚。
+        await this.coreFacts.saveOrderAggregate(order, [], tx);
 
-      const quoteConsumed = await this.businessFacts.consumeQuoteIfAvailable(
-        tenantId,
-        quote.id,
-        order.id,
-        committedAt,
-        tx
-      );
-      if (!quoteConsumed) throw new ConflictException("报价已失效或被使用，请重新报价");
+        const storedQuote = await this.businessFacts.findQuote(tenantId, quote.id, tx);
+        if (!storedQuote) throw new ConflictException("报价事实不存在，请重新报价");
+        if (storedQuote.consumedAt) throw new ConflictException("报价已被使用，请重新报价");
+        if (new Date(storedQuote.expiresAt).getTime() < new Date(committedAt).getTime()) {
+          throw new ConflictException("报价已过期，请重新报价");
+        }
+        if (quoteSnapshotFingerprint(storedQuote) !== quoteSnapshotFingerprint(quote)) {
+          throw new ConflictException("报价事实已变化，请重新报价");
+        }
 
-      if (coupon) {
-        const couponLocked = await this.businessFacts.lockCouponIfAvailable(
+        const quoteConsumed = await this.businessFacts.consumeQuoteIfAvailable(
           tenantId,
-          coupon.id,
-          quote.request.customerId,
+          quote.id,
           order.id,
           committedAt,
           tx
         );
-        if (!couponLocked) throw new ConflictException("优惠券已失效或被占用，请重新报价");
+        if (!quoteConsumed) throw new ConflictException("报价已失效或被使用，请重新报价");
+
+        if (coupon) {
+          const couponLocked = await this.businessFacts.lockCouponIfAvailable(
+            tenantId,
+            coupon.id,
+            quote.request.customerId,
+            order.id,
+            committedAt,
+            tx
+          );
+          if (!couponLocked) throw new ConflictException("优惠券已失效或被占用，请重新报价");
+        }
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") {
+        throw new ConflictException("库存正在被其他订单占用，请稍后重试");
       }
-    });
+      throw error;
+    }
 
     this.business.applyOrderConfirmationToCache(quote, coupon, order.id, committedAt);
     return order;
