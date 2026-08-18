@@ -1871,6 +1871,27 @@ async function main() {
   assert.equal(rewardsAfterConfigLoss.length, rewardsBeforeConfigLoss, "定价和规则缺失不得阻断奖励事实恢复");
   ok("品类恢复：业务快照、定价和规则同时缺失时，仍从核心租户档案装载业务事实");
 
+  console.log("== 41. RC-04 通用租赁域审计事件 ==");
+  // 审计写入有 try/catch 兜底（不阻断业务），因此 E2E 全绿并不能证明审计落库。
+  // 必须直查库：此前拦截器只放行 /platform 与 /store-rental，
+  // /rental/v1 的全部变更动作没有任何审计记录。
+  const rentalAudits = readCount(
+    "SELECT COUNT(*) FROM `OperationLog` WHERE `action` LIKE 'http.post.rental.%';"
+  );
+  assert.ok(rentalAudits > 0, `通用租赁域的变更动作必须产生审计记录，实际 ${rentalAudits} 条`);
+  // 订单动作必须能按订单检索，否则无法回溯单笔订单的操作链。
+  const auditsWithOrder = readCount(
+    "SELECT COUNT(*) FROM `OperationLog` o JOIN `rental_orders` r ON r.`id`=o.`rentalOrderId`;"
+  );
+  assert.ok(auditsWithOrder > 0, `订单动作审计必须关联到真实通用租赁订单，实际 ${auditsWithOrder} 条`);
+  // targetType 必须解析成资源名而不是版本段：早前 /rental/v1/... 会被解析成
+  // targetType="rental"、targetId="v1"，审计无法按对象检索。
+  const badTarget = readCount(
+    "SELECT COUNT(*) FROM `OperationLog` WHERE `action` LIKE 'http.%.rental.%' AND JSON_UNQUOTE(JSON_EXTRACT(`detail`,'$.targetId'))='v1';"
+  );
+  assert.equal(badTarget, 0, "审计的 targetId 不得是版本段 v1");
+  ok(`通用租赁域审计已落库：${rentalAudits} 条动作记录，其中 ${auditsWithOrder} 条关联到真实订单，targetId 未误取版本段`);
+
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);
 }
 
