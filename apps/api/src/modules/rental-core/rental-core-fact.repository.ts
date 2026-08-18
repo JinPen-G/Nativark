@@ -36,6 +36,11 @@ export interface AssetStatusChange {
 
 export type RentalFactTx = Prisma.TransactionClient;
 
+export interface InventoryLockTarget {
+  itemGroupId: string;
+  inventoryMode: RentalInventoryMode;
+}
+
 /**
  * 服务层只依赖这个接口。与配置仓储同理：不连库的单元测试注入吸收式 stub，
  * 而租户隔离、外键、过期预占过滤这类持久化语义只在 MySQL E2E 里验证。
@@ -45,11 +50,12 @@ export interface RentalCoreFactStore {
   findOrder(tenantId: string, orderId: string): Promise<RentalOrder | undefined>;
   countOrders(tenantId: string): Promise<number>;
   saveOrderAggregate(order: RentalOrder, assetChanges?: AssetStatusChange[], tx?: RentalFactTx): Promise<void>;
-  activeReservations(tenantId: string): Promise<ActiveReservationRow[]>;
+  lockInventoryTargets(tenantId: string, locationId: string, targets: InventoryLockTarget[], tx: RentalFactTx): Promise<void>;
+  activeReservations(tenantId: string, tx?: RentalFactTx): Promise<ActiveReservationRow[]>;
   allocatedAssetIds(tenantId: string): Promise<Set<string>>;
-  listAssets(tenantId: string): Promise<RentalAsset[]>;
+  listAssets(tenantId: string, tx?: RentalFactTx): Promise<RentalAsset[]>;
   upsertAsset(asset: RentalAsset): Promise<void>;
-  listStockBalances(tenantId: string): Promise<RentalStockBalance[]>;
+  listStockBalances(tenantId: string, tx?: RentalFactTx): Promise<RentalStockBalance[]>;
   upsertStockBalance(balance: RentalStockBalance): Promise<void>;
   listInspections(tenantId: string, orderId: string): Promise<RentalInspectionRecord[]>;
   insertInspection(record: RentalInspectionRecord): Promise<void>;
@@ -246,11 +252,42 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
   /* ---------- 可用量与分配 ---------- */
 
   /**
+   * 对本次下单实际依赖的基础库存行加排他锁。调用方必须先展开套装并按稳定顺序传入：
+   * 序列化库存锁定地点下的资产行，数量库存锁定唯一余额行。拿到锁后再查预占，
+   * 可确保同一资源的并发下单串行重算，而不同地点仍可并行。
+   */
+  async lockInventoryTargets(tenantId: string, locationId: string, targets: InventoryLockTarget[], tx: RentalFactTx): Promise<void> {
+    const ordered = [...targets].sort((left, right) =>
+      `${left.itemGroupId}:${left.inventoryMode}`.localeCompare(`${right.itemGroupId}:${right.inventoryMode}`)
+    );
+    for (const target of ordered) {
+      if (target.inventoryMode === RentalInventoryMode.Serialized) {
+        await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+          SELECT \`id\` FROM \`rental_assets\`
+          WHERE \`tenantId\` = ${tenantId}
+            AND \`itemGroupId\` = ${target.itemGroupId}
+            AND \`locationId\` = ${locationId}
+          ORDER BY \`id\` FOR UPDATE
+        `);
+      } else if (target.inventoryMode === RentalInventoryMode.Quantity) {
+        await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+          SELECT \`id\` FROM \`rental_stock_balances\`
+          WHERE \`tenantId\` = ${tenantId}
+            AND \`itemGroupId\` = ${target.itemGroupId}
+            AND \`locationId\` = ${locationId}
+          ORDER BY \`id\` FOR UPDATE
+        `);
+      }
+    }
+  }
+
+  /**
    * 参与占用的预占。软预占过期的行不计入，与内存实现的判定保持一致。
    */
-  async activeReservations(tenantId: string): Promise<ActiveReservationRow[]> {
+  async activeReservations(tenantId: string, tx?: RentalFactTx): Promise<ActiveReservationRow[]> {
     const now = new Date();
-    const rows = await this.prisma.rentalReservation.findMany({
+    const client = tx ?? this.prisma;
+    const rows = await client.rentalReservation.findMany({
       where: {
         tenantId,
         status: { in: ACTIVE_RESERVATION_STATES },
@@ -282,8 +319,9 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
 
   /* ---------- 资产 ---------- */
 
-  async listAssets(tenantId: string): Promise<RentalAsset[]> {
-    const rows = await this.prisma.rentalAsset.findMany({
+  async listAssets(tenantId: string, tx?: RentalFactTx): Promise<RentalAsset[]> {
+    const client = tx ?? this.prisma;
+    const rows = await client.rentalAsset.findMany({
       where: { tenantId },
       include: { itemGroup: { select: { code: true, name: true } }, location: { select: { name: true } } },
       orderBy: { createdAt: "desc" }
@@ -329,8 +367,9 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
   /* ---------- 数量库存 ---------- */
 
   /** 返回在手/维护量原值；预占与可用量由服务层结合 activeReservations 计算。 */
-  async listStockBalances(tenantId: string): Promise<RentalStockBalance[]> {
-    const rows = await this.prisma.rentalStockBalance.findMany({
+  async listStockBalances(tenantId: string, tx?: RentalFactTx): Promise<RentalStockBalance[]> {
+    const client = tx ?? this.prisma;
+    const rows = await client.rentalStockBalance.findMany({
       where: { tenantId },
       include: { itemGroup: { select: { code: true, name: true } }, location: { select: { name: true } } },
       orderBy: { updatedAt: "desc" }

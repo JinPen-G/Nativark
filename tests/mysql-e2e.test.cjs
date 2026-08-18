@@ -799,6 +799,116 @@ async function main() {
   assert.equal(restoredAtomicCoupon.lockedOrderId, atomicOrderId, "重启后优惠券仍须关联原订单");
   ok("RC-02 重启一致性：成功事务完整恢复，失败事务无半成品复活");
 
+  console.log("== 12.2 RC-03 序列化、数量和套装库存并发防超卖 ==");
+  const runInventoryRace = async ({ label, token, locationId, itemGroupId, startAt, endAt, reservationQuantity }) => {
+    const lines = [{ itemGroupId, quantity: reservationQuantity.requested }];
+    const availability = async () => {
+      const response = await request(
+        "POST",
+        "/api/rental/v1/availability",
+        { locationId, startAt, endAt, lines: [{ itemGroupId, quantity: 1 }] },
+        token
+      );
+      assert.equal(response.status, 201, `${label} 可用量查询失败: ${JSON.stringify(response.body)}`);
+      return response.body.data.lines[0].availableQuantity;
+    };
+    const availableBefore = await availability();
+    assert.equal(availableBefore, reservationQuantity.requested, `${label} 构造前提：请求量应恰好等于全部可用量`);
+
+    const quotePayload = { customerType: "personal", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: locationId, startAt, endAt, lines };
+    const firstQuoteResponse = await request("POST", "/api/rental/v1/quotes", quotePayload, token);
+    const secondQuoteResponse = await request("POST", "/api/rental/v1/quotes", quotePayload, token);
+    assert.equal(firstQuoteResponse.status, 201, `${label} 第一份报价失败: ${JSON.stringify(firstQuoteResponse.body)}`);
+    assert.equal(secondQuoteResponse.status, 201, `${label} 第二份报价失败: ${JSON.stringify(secondQuoteResponse.body)}`);
+    const firstQuote = firstQuoteResponse.body.data;
+    const secondQuote = secondQuoteResponse.body.data;
+    const orderPayload = (quoteId, suffix) => ({
+      quoteId,
+      customerType: "personal",
+      customerName: `${label}并发客户${suffix}`,
+      fulfillmentMode: "store_pickup_return",
+      fulfillmentLocationId: locationId,
+      startAt,
+      endAt,
+      lines
+    });
+    const results = await Promise.all([
+      request("POST", "/api/rental/v1/orders", orderPayload(firstQuote.id, "A"), token),
+      request("POST", "/api/rental/v1/orders", orderPayload(secondQuote.id, "B"), token)
+    ]);
+    const winners = results.filter((response) => response.status === 201);
+    const conflicts = results.filter((response) => response.status === 409);
+    assert.equal(winners.length, 1, `${label} 并发下单必须且只能成功一个: ${JSON.stringify(results.map((row) => row.body))}`);
+    assert.equal(conflicts.length, 1, `${label} 并发下单必须明确拒绝另一个请求`);
+    assert.match(JSON.stringify(conflicts[0].body), /库存/u, `${label} 冲突原因必须明确指向库存竞争`);
+
+    const winningOrderId = winners[0].body.data.id;
+    const winningQuoteId = winners[0].body.data.quoteId;
+    const losingQuoteId = winningQuoteId === firstQuote.id ? secondQuote.id : firstQuote.id;
+    assert.equal(
+      readCount(`SELECT COUNT(*) FROM \`rental_orders\` WHERE \`quoteId\` IN ('${firstQuote.id}','${secondQuote.id}');`),
+      1,
+      `${label} 不得生成第二张订单`
+    );
+    assert.equal(
+      readCount(`SELECT COALESCE(SUM(\`quantity\`),0) FROM \`rental_reservations\` WHERE \`orderId\`='${winningOrderId}' AND \`status\`='SOFT';`),
+      reservationQuantity.persisted,
+      `${label} 只能保留成功订单的预占`
+    );
+    assert.equal(
+      readCount(`SELECT COUNT(*) FROM \`rental_quotes\` WHERE \`id\`='${losingQuoteId}' AND \`consumedAt\` IS NULL AND \`consumedOrderId\` IS NULL;`),
+      1,
+      `${label} 被拒订单的报价不得被消费`
+    );
+    assert.equal(await availability(), 0, `${label} 成功订单占满后可用量必须为 0`);
+
+    const cancelledRaceOrder = await request(
+      "POST",
+      `/api/rental/v1/orders/${winningOrderId}/cancel`,
+      { reason: `${label}并发验收后释放` },
+      token
+    );
+    assert.equal(cancelledRaceOrder.status, 201, `${label} 并发成功订单取消失败: ${JSON.stringify(cancelledRaceOrder.body)}`);
+    assert.equal(await availability(), availableBefore, `${label} 取消后库存必须完整释放`);
+    ok(`${label}并发防超卖：两个请求仅一个成功，冲突明确，取消后完整释放`);
+  };
+
+  const serializedRaceStart = new Date(Date.now() + 200 * 86400000).toISOString();
+  const serializedRaceEnd = new Date(Date.now() + 202 * 86400000).toISOString();
+  await runInventoryRace({
+    label: "序列化库存",
+    token: demo.accessToken,
+    locationId: location.id,
+    itemGroupId: serialized[0].id,
+    startAt: serializedRaceStart,
+    endAt: serializedRaceEnd,
+    reservationQuantity: { requested: 3, persisted: 3 }
+  });
+
+  const quantityRaceStart = new Date(Date.now() + 210 * 86400000).toISOString();
+  const quantityRaceEnd = new Date(Date.now() + 212 * 86400000).toISOString();
+  await runInventoryRace({
+    label: "数量库存",
+    token: demo2.accessToken,
+    locationId: campingLocation.id,
+    itemGroupId: tent.id,
+    startAt: quantityRaceStart,
+    endAt: quantityRaceEnd,
+    reservationQuantity: { requested: tentStockBefore.availableQuantity, persisted: tentStockBefore.availableQuantity }
+  });
+
+  const bundleRaceStart = new Date(Date.now() + 220 * 86400000).toISOString();
+  const bundleRaceEnd = new Date(Date.now() + 222 * 86400000).toISOString();
+  await runInventoryRace({
+    label: "套装库存",
+    token: demo.accessToken,
+    locationId: location.id,
+    itemGroupId: cameraKit.id,
+    startAt: bundleRaceStart,
+    endAt: bundleRaceEnd,
+    reservationQuantity: { requested: 3, persisted: 6 }
+  });
+
   const exclusivePlan = await request(
     "POST",
     "/api/rental/v1/discount-plans",

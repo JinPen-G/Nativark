@@ -44,6 +44,8 @@ import {
   RentalCoreFactRepository,
   type ActiveReservationRow,
   type AssetStatusChange,
+  type InventoryLockTarget,
+  type RentalFactTx,
   type RentalCoreFactStore
 } from "./rental-core-fact.repository";
 
@@ -551,6 +553,33 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     return this.computeAvailability(state, await this.loadInventorySnapshot(tenantId), input);
   }
 
+  /**
+   * RC-03：在订单事务内锁定实际依赖的基础库存并重新计算可用量。
+   * 事务外的 availability 只负责快速反馈，最终是否可下单以这里的锁后重算为准。
+   */
+  async assertAvailabilityWithLocks(tenantId: string, input: RentalAvailabilityRequest, tx: RentalFactTx) {
+    const state = this.state(tenantId);
+    this.validatePeriod(input.startAt, input.endAt);
+    this.location(state, input.locationId);
+    if (!input.lines?.length) throw new BadRequestException("至少需要一个租赁明细");
+
+    const targets = new Map<string, InventoryLockTarget>();
+    for (const line of input.lines) {
+      const group = this.group(state, line.itemGroupId);
+      const dependencies = group.inventoryMode === RentalInventoryMode.Bundle
+        ? group.bundleComponents.filter((component) => !component.optional).map((component) => this.group(state, component.itemGroupId))
+        : [group];
+      for (const dependency of dependencies) {
+        targets.set(dependency.id, { itemGroupId: dependency.id, inventoryMode: dependency.inventoryMode });
+      }
+    }
+
+    await this.factStore.lockInventoryTargets(tenantId, input.locationId, [...targets.values()], tx);
+    const checked = this.computeAvailability(state, await this.loadInventorySnapshot(tenantId, tx), input);
+    if (!checked.available) throw new ConflictException("库存已被其他订单占用，请重新选择租期或数量");
+    return checked;
+  }
+
   async listOrders(tenantId: string) {
     this.state(tenantId);
     return this.factStore.listOrders(tenantId);
@@ -594,7 +623,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     for (const line of orderLines) {
       const group = this.group(state, line.itemGroupId);
       const reservationTargets = group.inventoryMode === RentalInventoryMode.Bundle
-        ? group.bundleComponents.map((component) => ({ itemGroupId: component.itemGroupId, quantity: component.quantity * line.quantity }))
+        ? group.bundleComponents.filter((component) => !component.optional).map((component) => ({ itemGroupId: component.itemGroupId, quantity: component.quantity * line.quantity }))
         : [{ itemGroupId: group.id, quantity: line.quantity }];
       for (const target of reservationTargets) reservations.push({
         id: id("reservation"), orderId, orderLineId: line.id, itemGroupId: target.itemGroupId,
@@ -827,11 +856,11 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
    * 可用量计算所需的库存事实。一次取齐后计算全程同步——套装展开是递归的，
    * 若在递归里逐层查库会放大成 N 次查询，且让纯算术逻辑变得难以复核和单测。
    */
-  private async loadInventorySnapshot(tenantId: string): Promise<InventorySnapshot> {
+  private async loadInventorySnapshot(tenantId: string, tx?: RentalFactTx): Promise<InventorySnapshot> {
     const [reservations, assets, stocks] = await Promise.all([
-      this.factStore.activeReservations(tenantId),
-      this.factStore.listAssets(tenantId),
-      this.factStore.listStockBalances(tenantId)
+      this.factStore.activeReservations(tenantId, tx),
+      this.factStore.listAssets(tenantId, tx),
+      this.factStore.listStockBalances(tenantId, tx)
     ]);
     return { reservations, assets, stocks };
   }

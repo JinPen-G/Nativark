@@ -54,6 +54,7 @@ function createAbsorbingFactStore() {
     findOrder: () => Promise.resolve(undefined),
     countOrders: () => Promise.resolve(0),
     saveOrderAggregate: record("order"),
+    lockInventoryTargets: () => Promise.resolve(),
     activeReservations: () => Promise.resolve([]),
     allocatedAssetIds: () => Promise.resolve(new Set()),
     listAssets: () => Promise.resolve([]),
