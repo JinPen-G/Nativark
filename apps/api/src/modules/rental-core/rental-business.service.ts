@@ -481,11 +481,45 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return coupon;
   }
 
-  async lockCoupon(tenantId: string, context: BusinessContext, couponId: string | undefined, orderId: string) {
+  validateCouponForOrder(
+    tenantId: string,
+    context: BusinessContext,
+    couponId: string | undefined,
+    customerId: string | undefined,
+    at = stamp()
+  ): RentalCustomerCoupon | undefined {
     if (!couponId) return undefined;
     const coupon = this.customerCoupon(this.state(tenantId, context), couponId);
+    if (customerId && coupon.customerId !== customerId) throw new ConflictException("优惠券不属于当前客户");
     if (coupon.status !== "claimed") throw new ConflictException("优惠券当前不能锁定");
-    if (new Date(coupon.effectiveTo).getTime() < Date.now()) { coupon.status = "expired"; throw new ConflictException("优惠券已过期"); }
+    const timestamp = new Date(at).getTime();
+    if (timestamp < new Date(coupon.effectiveFrom).getTime() || timestamp > new Date(coupon.effectiveTo).getTime()) {
+      throw new ConflictException("优惠券不在有效期");
+    }
+    return coupon;
+  }
+
+  /** 数据库事务提交后再更新内存副本，事务失败时不得留下幽灵消费或幽灵锁定。 */
+  applyOrderConfirmationToCache(
+    quote: RentalQuoteSnapshotV1,
+    coupon: RentalCustomerCoupon | undefined,
+    orderId: string,
+    committedAt: string
+  ) {
+    quote.consumedAt = committedAt;
+    quote.consumedOrderId = orderId;
+    if (coupon) {
+      coupon.status = "locked";
+      coupon.lockedOrderId = orderId;
+      coupon.lockedAt = committedAt;
+      coupon.releasedAt = undefined;
+    }
+  }
+
+  async lockCoupon(tenantId: string, context: BusinessContext, couponId: string | undefined, orderId: string) {
+    if (!couponId) return undefined;
+    const coupon = this.validateCouponForOrder(tenantId, context, couponId, undefined);
+    if (!coupon) return undefined;
     coupon.status = "locked"; coupon.lockedOrderId = orderId; coupon.lockedAt = stamp();
     await this.factStore.upsertCustomerCoupon(coupon);
     return coupon;
