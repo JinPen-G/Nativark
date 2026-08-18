@@ -34,6 +34,8 @@ export interface AssetStatusChange {
   status: RentalAssetStatus;
 }
 
+export type RentalFactTx = Prisma.TransactionClient;
+
 /**
  * 服务层只依赖这个接口。与配置仓储同理：不连库的单元测试注入吸收式 stub，
  * 而租户隔离、外键、过期预占过滤这类持久化语义只在 MySQL E2E 里验证。
@@ -42,7 +44,7 @@ export interface RentalCoreFactStore {
   listOrders(tenantId: string): Promise<RentalOrder[]>;
   findOrder(tenantId: string, orderId: string): Promise<RentalOrder | undefined>;
   countOrders(tenantId: string): Promise<number>;
-  saveOrderAggregate(order: RentalOrder, assetChanges?: AssetStatusChange[]): Promise<void>;
+  saveOrderAggregate(order: RentalOrder, assetChanges?: AssetStatusChange[], tx?: RentalFactTx): Promise<void>;
   activeReservations(tenantId: string): Promise<ActiveReservationRow[]>;
   allocatedAssetIds(tenantId: string): Promise<Set<string>>;
   listAssets(tenantId: string): Promise<RentalAsset[]>;
@@ -124,7 +126,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
    * 写回订单聚合。行与预占按 id upsert，分配整表替换（配货会重算整组分配），
    * 资产状态变更一并进入同一事务。
    */
-  async saveOrderAggregate(order: RentalOrder, assetChanges: AssetStatusChange[] = []): Promise<void> {
+  async saveOrderAggregate(order: RentalOrder, assetChanges: AssetStatusChange[] = [], tx?: RentalFactTx): Promise<void> {
     const orderData = {
       tenantId: order.tenantId,
       orderNo: order.orderNo,
@@ -163,8 +165,8 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       createdBy: order.createdBy
     };
 
-    await this.prisma.$transaction(async (tx) => {
-      await tx.rentalOrder.upsert({
+    const write = async (client: RentalFactTx) => {
+      await client.rentalOrder.upsert({
         where: { id: order.id },
         create: { id: order.id, ...orderData, createdAt: new Date(order.createdAt) },
         update: orderData
@@ -182,7 +184,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
           amount: new Prisma.Decimal(line.amount),
           note: line.note ?? null
         };
-        await tx.rentalOrderLine.upsert({
+        await client.rentalOrderLine.upsert({
           where: { id: line.id },
           create: { id: line.id, ...lineData },
           update: lineData
@@ -203,7 +205,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
           status: upper<$Enums.RentalReservationState>(reservation.status),
           expiresAt: reservation.expiresAt ? new Date(reservation.expiresAt) : null
         };
-        await tx.rentalReservation.upsert({
+        await client.rentalReservation.upsert({
           where: { id: reservation.id },
           create: { id: reservation.id, ...reservationData, createdAt: new Date(reservation.createdAt) },
           update: reservationData
@@ -211,9 +213,9 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       }
 
       // 配货会重算整组分配，整表替换比逐条对齐更不容易留下孤立行。
-      await tx.rentalAllocation.deleteMany({ where: { orderId: order.id } });
+      await client.rentalAllocation.deleteMany({ where: { orderId: order.id } });
       for (const allocation of order.allocations) {
-        await tx.rentalAllocation.create({
+        await client.rentalAllocation.create({
           data: {
             id: allocation.id,
             orderId: order.id,
@@ -227,12 +229,18 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       }
 
       for (const change of assetChanges) {
-        await tx.rentalAsset.updateMany({
+        await client.rentalAsset.updateMany({
           where: { id: change.assetId, tenantId: order.tenantId },
           data: { status: upper<$Enums.RentalAssetState>(change.status) }
         });
       }
-    });
+    };
+
+    if (tx) {
+      await write(tx);
+      return;
+    }
+    await this.prisma.$transaction(write);
   }
 
   /* ---------- 可用量与分配 ---------- */

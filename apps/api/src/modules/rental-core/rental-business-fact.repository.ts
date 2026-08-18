@@ -15,6 +15,8 @@ import type {
 } from "@store-rental/shared";
 import { PrismaService } from "../database/prisma.service";
 
+export type RentalBusinessFactTx = Prisma.TransactionClient;
+
 export interface RentalReferralRecord {
   inviteeCustomerId: string;
   referrerCustomerId: string;
@@ -41,6 +43,9 @@ export interface TenantBusinessFactSnapshot {
  */
 export interface RentalBusinessFactStore {
   loadAll(): Promise<TenantBusinessFactSnapshot[]>;
+  findQuote(tenantId: string, quoteId: string, tx?: RentalBusinessFactTx): Promise<RentalQuoteSnapshotV1 | undefined>;
+  consumeQuoteIfAvailable(tenantId: string, quoteId: string, orderId: string, consumedAt: string, tx: RentalBusinessFactTx): Promise<boolean>;
+  lockCouponIfAvailable(tenantId: string, couponId: string, customerId: string | undefined, orderId: string, lockedAt: string, tx: RentalBusinessFactTx): Promise<boolean>;
   upsertQuote(quote: RentalQuoteSnapshotV1): Promise<void>;
   upsertCustomerCoupon(coupon: RentalCustomerCoupon): Promise<void>;
   upsertRewardEntry(entry: RentalRewardLedgerEntry): Promise<void>;
@@ -114,6 +119,50 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       })),
       notificationLogs: logs.filter((row) => row.tenantId === tenantId).map((row) => this.toNotificationLog(row))
     }));
+  }
+
+  async findQuote(tenantId: string, quoteId: string, tx?: RentalBusinessFactTx): Promise<RentalQuoteSnapshotV1 | undefined> {
+    const client = tx ?? this.prisma;
+    const row = await client.rentalQuote.findFirst({ where: { id: quoteId, tenantId } });
+    return row ? this.toQuote(row) : undefined;
+  }
+
+  async consumeQuoteIfAvailable(
+    tenantId: string,
+    quoteId: string,
+    orderId: string,
+    consumedAt: string,
+    tx: RentalBusinessFactTx
+  ): Promise<boolean> {
+    const timestamp = date(consumedAt);
+    const result = await tx.rentalQuote.updateMany({
+      where: { id: quoteId, tenantId, consumedAt: null, expiresAt: { gte: timestamp } },
+      data: { consumedAt: timestamp, consumedOrderId: orderId }
+    });
+    return result.count === 1;
+  }
+
+  async lockCouponIfAvailable(
+    tenantId: string,
+    couponId: string,
+    customerId: string | undefined,
+    orderId: string,
+    lockedAt: string,
+    tx: RentalBusinessFactTx
+  ): Promise<boolean> {
+    const timestamp = date(lockedAt);
+    const result = await tx.rentalCustomerCoupon.updateMany({
+      where: {
+        id: couponId,
+        tenantId,
+        ...(customerId ? { customerId } : {}),
+        status: "claimed",
+        effectiveFrom: { lte: timestamp },
+        effectiveTo: { gte: timestamp }
+      },
+      data: { status: "locked", lockedOrderId: orderId, lockedAt: timestamp, releasedAt: null }
+    });
+    return result.count === 1;
   }
 
   async upsertQuote(quote: RentalQuoteSnapshotV1): Promise<void> {

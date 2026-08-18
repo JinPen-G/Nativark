@@ -561,7 +561,11 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     return this.requireOrder(tenantId, orderId);
   }
 
-  async createOrder(tenantId: string, input: CreateRentalOrderRequest, userName: string, quote: RentalQuoteSnapshotV1) {
+  /**
+   * 校验下单条件并构造完整订单聚合，但不落库。
+   * RC-02 由订单确认应用服务把该聚合与报价消费、优惠券锁定放进同一事务。
+   */
+  async prepareOrder(tenantId: string, input: CreateRentalOrderRequest, userName: string, quote: RentalQuoteSnapshotV1) {
     const state = this.state(tenantId);
     if (!input.customerName?.trim()) throw new BadRequestException("客户名称不能为空");
     if (quote.ruleSnapshot.qualification.required) {
@@ -616,7 +620,6 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       totalAmount: quote.payableAmount, lines: orderLines,
       reservations, allocations: [], createdBy: input.operator || userName, createdAt: timestamp, updatedAt: timestamp
     };
-    await this.factStore.saveOrderAggregate(order);
     return order;
   }
 

@@ -16,6 +16,7 @@ import type {
 } from "@store-rental/shared";
 import { RentalCoreService } from "./rental-core.service";
 import { RentalBusinessService, type BusinessContext } from "./rental-business.service";
+import { RentalOrderConfirmationService } from "./rental-order-confirmation.service";
 
 interface AuthenticatedRequest { user: SystemUserRow; }
 
@@ -23,7 +24,8 @@ interface AuthenticatedRequest { user: SystemUserRow; }
 export class RentalCoreController {
   constructor(
     private readonly service: RentalCoreService,
-    private readonly business: RentalBusinessService
+    private readonly business: RentalBusinessService,
+    private readonly orderConfirmation: RentalOrderConfirmationService
   ) {}
 
   private context(tenantId: string): BusinessContext {
@@ -72,15 +74,7 @@ export class RentalCoreController {
   @Get("orders/:id") order(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.service.getOrder(req.user.tenantId, id); }
   @Post("orders") async createOrder(@Req() req: AuthenticatedRequest, @Body() body: CreateRentalOrderRequest) {
     const context = this.context(req.user.tenantId);
-    const quote = this.business.consumeQuote(req.user.tenantId, context, body.quoteId);
-    const quotedLines = quote.request.lines.map((line) => `${line.itemGroupId}:${line.quantity}`).sort();
-    const orderLines = body.lines.map((line) => `${line.itemGroupId}:${line.quantity}`).sort();
-    if (quote.request.fulfillmentMode !== body.fulfillmentMode || quote.request.fulfillmentLocationId !== body.fulfillmentLocationId || quote.request.returnLocationId !== body.returnLocationId || quote.request.startAt !== body.startAt || quote.request.endAt !== body.endAt || quote.request.customerType !== body.customerType || quote.request.customerId !== body.customerId || JSON.stringify(quotedLines) !== JSON.stringify(orderLines)) {
-      throw new BadRequestException("订单内容与服务端报价快照不一致");
-    }
-    const order = await this.service.createOrder(req.user.tenantId, body, req.user.displayName, quote);
-    await this.business.markQuoteConsumed(req.user.tenantId, context, quote.id, order.id);
-    await this.business.lockCoupon(req.user.tenantId, context, quote.customerCouponId, order.id);
+    const order = await this.orderConfirmation.createOrder(req.user.tenantId, body, req.user.displayName, context);
     await this.emitOrderEvent(req.user.tenantId, "order.created", order);
     return this.committed(req.user.tenantId, order);
   }

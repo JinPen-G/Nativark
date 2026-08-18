@@ -689,6 +689,116 @@ async function main() {
   assert.equal(template2.status, 201);
   const claim2 = await request("POST", "/api/rental/v1/customer-coupons/claim", { templateId: template2.body.data.id, customerId: "e2e_coupon_customer" }, demo.accessToken);
   assert.equal(claim2.status, 201);
+
+  console.log("== 12.1 RC-02 订单确认事务：成功全落库，报价或锁券失败则整体回滚 ==");
+  const atomicTemplate = await request(
+    "POST",
+    "/api/rental/v1/coupon-templates",
+    { code: "RC02-ATOMIC-20", name: "RC-02 事务券", discountType: "fixed_amount", discountValue: 20, minimumSpend: 0, totalQuota: 2, perCustomerLimit: 1, effectiveFrom: new Date(Date.now() - 86400000).toISOString(), effectiveTo: new Date(Date.now() + 180 * 86400000).toISOString(), status: "enabled" },
+    demo.accessToken
+  );
+  assert.equal(atomicTemplate.status, 201, `RC-02 券模板创建失败: ${JSON.stringify(atomicTemplate.body)}`);
+  const atomicClaim = await request(
+    "POST",
+    "/api/rental/v1/customer-coupons/claim",
+    { templateId: atomicTemplate.body.data.id, customerId: "rc02_success_customer" },
+    demo.accessToken
+  );
+  assert.equal(atomicClaim.status, 201, `RC-02 领券失败: ${JSON.stringify(atomicClaim.body)}`);
+  const atomicStart = new Date(Date.now() + 120 * 86400000).toISOString();
+  const atomicEnd = new Date(Date.now() + 122 * 86400000).toISOString();
+  const atomicLines = [{ itemGroupId: serialized[0].id, quantity: 1 }];
+  const atomicQuote = (
+    await request(
+      "POST",
+      "/api/rental/v1/quotes",
+      { customerType: "personal", customerId: "rc02_success_customer", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: atomicStart, endAt: atomicEnd, lines: atomicLines, customerCouponId: atomicClaim.body.data.id },
+      demo.accessToken
+    )
+  ).body.data;
+  const atomicOrderResponse = await request(
+    "POST",
+    "/api/rental/v1/orders",
+    { quoteId: atomicQuote.id, customerType: "personal", customerId: "rc02_success_customer", customerName: "RC-02成功客户", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: atomicStart, endAt: atomicEnd, lines: atomicLines },
+    demo.accessToken
+  );
+  assert.equal(atomicOrderResponse.status, 201, `RC-02 正常订单创建失败: ${JSON.stringify(atomicOrderResponse.body)}`);
+  const atomicOrderId = atomicOrderResponse.body.data.id;
+  assert.equal(readCount(`SELECT COUNT(*) FROM \`rental_orders\` WHERE \`id\`='${atomicOrderId}' AND \`quoteId\`='${atomicQuote.id}';`), 1, "订单必须落库");
+  assert.equal(readCount(`SELECT COUNT(*) FROM \`rental_order_lines\` WHERE \`orderId\`='${atomicOrderId}';`), 1, "订单行必须落库");
+  assert.ok(readCount(`SELECT COUNT(*) FROM \`rental_reservations\` WHERE \`orderId\`='${atomicOrderId}';`) > 0, "库存预占必须落库");
+  assert.equal(readScalar(`SELECT \`consumedOrderId\` FROM \`rental_quotes\` WHERE \`id\`='${atomicQuote.id}';`), atomicOrderId, "报价必须关联消费订单");
+  assert.equal(readScalar(`SELECT \`status\` FROM \`rental_customer_coupons\` WHERE \`id\`='${atomicClaim.body.data.id}';`), "locked", "优惠券必须锁定");
+  assert.equal(readScalar(`SELECT \`lockedOrderId\` FROM \`rental_customer_coupons\` WHERE \`id\`='${atomicClaim.body.data.id}';`), atomicOrderId, "优惠券必须关联订单");
+  ok("RC-02 正常路径：订单、订单行、库存预占、报价消费和优惠券锁定同时提交");
+
+  const factCounts = () => ({
+    orders: readCount("SELECT COUNT(*) FROM `rental_orders`;"),
+    lines: readCount("SELECT COUNT(*) FROM `rental_order_lines`;"),
+    reservations: readCount("SELECT COUNT(*) FROM `rental_reservations`;")
+  });
+  const couponFailureStart = new Date(Date.now() + 20 * 86400000).toISOString();
+  const couponFailureEnd = new Date(Date.now() + 22 * 86400000).toISOString();
+  const couponFailureQuoteResponse = await request(
+    "POST",
+    "/api/rental/v1/quotes",
+    { customerType: "personal", customerId: "e2e_coupon_customer", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: couponFailureStart, endAt: couponFailureEnd, lines: atomicLines, customerCouponId: claim2.body.data.id },
+    demo.accessToken
+  );
+  assert.equal(couponFailureQuoteResponse.status, 201, `RC-02 锁券失败用报价创建失败: ${JSON.stringify(couponFailureQuoteResponse.body)}`);
+  const couponFailureQuote = couponFailureQuoteResponse.body.data;
+  const beforeCouponFailure = factCounts();
+  mysqlQuery(`UPDATE \`rental_customer_coupons\` SET \`status\`='expired' WHERE \`id\`='${claim2.body.data.id}';`);
+  const couponFailure = await request(
+    "POST",
+    "/api/rental/v1/orders",
+    { quoteId: couponFailureQuote.id, customerType: "personal", customerId: "e2e_coupon_customer", customerName: "RC-02锁券失败客户", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: couponFailureStart, endAt: couponFailureEnd, lines: atomicLines },
+    demo.accessToken
+  );
+  assert.equal(couponFailure.status, 409, `数据库券状态变化后必须拒绝下单: ${JSON.stringify(couponFailure.body)}`);
+  assert.deepEqual(factCounts(), beforeCouponFailure, "锁券失败后不得遗留订单、订单行或库存预占");
+  assert.equal(readCount(`SELECT COUNT(*) FROM \`rental_quotes\` WHERE \`id\`='${couponFailureQuote.id}' AND \`consumedAt\` IS NULL AND \`consumedOrderId\` IS NULL;`), 1, "锁券失败后报价不得被消费");
+  assert.equal(readScalar(`SELECT \`status\` FROM \`rental_customer_coupons\` WHERE \`id\`='${claim2.body.data.id}';`), "expired", "失败事务不得把不可用券改成 locked");
+  mysqlQuery(`UPDATE \`rental_customer_coupons\` SET \`status\`='claimed' WHERE \`id\`='${claim2.body.data.id}';`);
+  ok("RC-02 锁券失败：订单、订单行、库存预占和报价消费全部回滚");
+
+  const quoteFailureStart = new Date(Date.now() + 140 * 86400000).toISOString();
+  const quoteFailureEnd = new Date(Date.now() + 142 * 86400000).toISOString();
+  const quoteFailureQuoteResponse = await request(
+    "POST",
+    "/api/rental/v1/quotes",
+    { customerType: "personal", customerId: "rc02_quote_failure", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: quoteFailureStart, endAt: quoteFailureEnd, lines: atomicLines },
+    demo.accessToken
+  );
+  assert.equal(quoteFailureQuoteResponse.status, 201, `RC-02 失效用报价创建失败: ${JSON.stringify(quoteFailureQuoteResponse.body)}`);
+  const quoteFailureQuote = quoteFailureQuoteResponse.body.data;
+  const beforeQuoteFailure = factCounts();
+  mysqlQuery(`UPDATE \`rental_quotes\` SET \`expiresAt\`=DATE_SUB(NOW(), INTERVAL 1 MINUTE) WHERE \`id\`='${quoteFailureQuote.id}';`);
+  const quoteFailure = await request(
+    "POST",
+    "/api/rental/v1/orders",
+    { quoteId: quoteFailureQuote.id, customerType: "personal", customerId: "rc02_quote_failure", customerName: "RC-02报价失败客户", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: quoteFailureStart, endAt: quoteFailureEnd, lines: atomicLines },
+    demo.accessToken
+  );
+  assert.equal(quoteFailure.status, 409, `数据库报价过期后必须拒绝下单: ${JSON.stringify(quoteFailure.body)}`);
+  assert.deepEqual(factCounts(), beforeQuoteFailure, "报价消费失败后不得遗留订单、订单行或库存预占");
+  assert.equal(readCount(`SELECT COUNT(*) FROM \`rental_quotes\` WHERE \`id\`='${quoteFailureQuote.id}' AND \`consumedAt\` IS NULL AND \`consumedOrderId\` IS NULL;`), 1, "失败报价不得留下消费标记");
+  ok("RC-02 报价失效：订单、订单行和库存预占全部回滚");
+
+  await stopApi();
+  startApi();
+  if (!(await waitHealth())) fail("RC-02 事务结果重启校验的 API 重启超时");
+  const demoAfterRc02Restart = await login("demo", "admin", DEMO_PASSWORD);
+  const demo2AfterRc02Restart = await login("demo2", "admin", DEMO_PASSWORD);
+  demo.accessToken = demoAfterRc02Restart.accessToken;
+  demo2.accessToken = demo2AfterRc02Restart.accessToken;
+  const restoredAtomicOrder = (await request("GET", `/api/rental/v1/orders/${atomicOrderId}`, null, demoAfterRc02Restart.accessToken)).body.data;
+  const restoredAtomicCoupon = (await request("GET", "/api/rental/v1/customer-coupons?customerId=rc02_success_customer", null, demoAfterRc02Restart.accessToken)).body.data.find((row) => row.id === atomicClaim.body.data.id);
+  assert.equal(restoredAtomicOrder.quoteId, atomicQuote.id, "重启后必须从库恢复事务成功订单");
+  assert.equal(restoredAtomicCoupon.status, "locked", "重启后必须从库恢复优惠券锁定状态");
+  assert.equal(restoredAtomicCoupon.lockedOrderId, atomicOrderId, "重启后优惠券仍须关联原订单");
+  ok("RC-02 重启一致性：成功事务完整恢复，失败事务无半成品复活");
+
   const exclusivePlan = await request(
     "POST",
     "/api/rental/v1/discount-plans",
