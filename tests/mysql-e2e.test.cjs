@@ -1377,6 +1377,41 @@ async function main() {
     readCount(`SELECT COUNT(*) FROM \`rental_item_groups\` WHERE \`tenantId\`='${snapshotTenant}';`) > 0,
     "一条业务键分歧不得回滚整个租户的回填"
   );
+
+  // 上面那种改主键的情形因唯一约束 (tenantId, code, version) 被占，无法恢复原键。
+  // 但 Codex 指出的原始场景是「库里多出一条无关行」——此时数量相同、键集不同，
+  // 缺失的那条**必须**被补回。这才是直接证伪"只比数量"的用例，单独构造。
+  const rekeyTemplate = mysqlQuery(
+    `SELECT \`code\`, \`version\`, \`categoryCode\`, \`stage\`, \`name\` FROM \`rental_inspection_templates\`` +
+      ` WHERE \`id\`='e2e_rekeyed_template';`
+  );
+  assert.match(rekeyTemplate, /\w/u, "取不到改键行的业务字段，无法构造无冲突场景");
+  const missingId = originalTemplateId;
+  // 释放原键：把改键行的业务编码改成独占值，让 missingId 的 (code, version) 重新可用。
+  mysqlQuery(
+    "UPDATE `rental_inspection_templates` SET `code`=CONCAT(`code`,'_E2E_MOVED') WHERE `id`='e2e_rekeyed_template';"
+  );
+  const countBeforeHeal = readCount(
+    `SELECT COUNT(*) FROM \`rental_inspection_templates\` WHERE \`tenantId\`='${snapshotTenant}';`
+  );
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_inspection_templates\` WHERE \`id\`='${missingId}';`),
+    0,
+    "构造前提：快照中的该主键此刻不在库中"
+  );
+  await stopApi();
+  startApi();
+  if (!(await waitHealth())) fail("无冲突主键自愈校验的 API 重启超时");
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_inspection_templates\` WHERE \`id\`='${missingId}';`),
+    1,
+    "数量相同但键集不同时，快照中缺失的主键必须被补回（只比数量会漏掉这种情况）"
+  );
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_inspection_templates\` WHERE \`tenantId\`='${snapshotTenant}';`),
+    countBeforeHeal + 1,
+    "补回缺失主键后应恰好多一行，不应重复插入"
+  );
   ok(`业务键分歧被隔离：改掉一条主键后重启，现存行未被陈旧快照覆盖，其余各类未受回滚影响`);
 
   console.log("== 25. RC-01 规则发布后库中只保留一个 published 版本 ==");
