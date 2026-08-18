@@ -1,4 +1,5 @@
 import { BadRequestException, Body, Controller, Get, Param, Post, Put, Query, Req } from "@nestjs/common";
+import { RentalCoreOrderStatus } from "@store-rental/shared";
 import type {
   CreateRentalInspectionRequest,
   CreateRentalOrderRequest,
@@ -17,6 +18,7 @@ import type {
 import { RentalCoreService } from "./rental-core.service";
 import { RentalBusinessService, type BusinessContext } from "./rental-business.service";
 import { RentalOrderConfirmationService } from "./rental-order-confirmation.service";
+import { RentalIdempotentActionService } from "./rental-idempotent-action.service";
 
 /** 读取标准 Idempotency-Key 请求头。大小写不敏感，超长键直接拒绝。 */
 function idempotencyKeyOf(req: { headers?: Record<string, unknown> }): string | undefined {
@@ -36,7 +38,8 @@ export class RentalCoreController {
   constructor(
     private readonly service: RentalCoreService,
     private readonly business: RentalBusinessService,
-    private readonly orderConfirmation: RentalOrderConfirmationService
+    private readonly orderConfirmation: RentalOrderConfirmationService,
+    private readonly idempotent: RentalIdempotentActionService
   ) {}
 
   private context(tenantId: string): BusinessContext {
@@ -97,18 +100,64 @@ export class RentalCoreController {
     return this.committed(req.user.tenantId, order);
   }
   @Post("orders/:id/confirm") async confirm(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
-    const order = await this.service.confirmOrder(req.user.tenantId, id);
-    await this.business.redeemCoupon(req.user.tenantId, this.context(req.user.tenantId), id);
-    await this.emitOrderEvent(req.user.tenantId, "order.confirmed", order);
-    return this.committed(req.user.tenantId, order);
+    const tenantId = req.user.tenantId;
+    const order = await this.idempotent.execute({
+      tenantId,
+      action: "order.confirm",
+      key: idempotencyKeyOf(req),
+      // 兜底键纳入当前状态：否则同一订单的键永久固定，
+      // 已完成订单再次确认会命中当初成功的记录并回放 201，掩盖本该有的 409。
+      fallbackKey: `order.confirm:${id}:${(await this.service.getOrder(tenantId, id)).status}`,
+      request: { orderId: id },
+      orderId: id,
+      run: (tx) => this.service.confirmOrder(tenantId, id, tx),
+      replay: async () => {
+        const current = await this.service.getOrder(tenantId, id);
+        // 只有已达成目标状态才算同一次意图的重试；否则交回状态机拒绝。
+        return current.status === RentalCoreOrderStatus.Reserved ? current : undefined;
+      }
+    });
+    await this.business.redeemCoupon(tenantId, this.context(tenantId), id);
+    await this.emitOrderEvent(tenantId, "order.confirmed", order);
+    return this.committed(tenantId, order);
   }
-  @Post("orders/:id/allocate") async allocate(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.committed(req.user.tenantId, await this.service.allocateOrder(req.user.tenantId, id)); }
+  @Post("orders/:id/allocate") async allocate(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
+    const tenantId = req.user.tenantId;
+    const order = await this.idempotent.execute({
+      tenantId,
+      action: "order.allocate",
+      key: idempotencyKeyOf(req),
+      fallbackKey: `order.allocate:${id}:${(await this.service.getOrder(tenantId, id)).status}`,
+      request: { orderId: id },
+      orderId: id,
+      run: (tx) => this.service.allocateOrder(tenantId, id, tx),
+      replay: async () => {
+        const current = await this.service.getOrder(tenantId, id);
+        return current.status === RentalCoreOrderStatus.ReadyForPickup ? current : undefined;
+      }
+    });
+    return this.committed(tenantId, order);
+  }
   @Post("orders/:id/cancel") async cancel(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: CancelRentalOrderRequest) {
     const context = this.context(req.user.tenantId);
     const current = await this.service.getOrder(req.user.tenantId, id);
     const quote = this.business.getQuote(req.user.tenantId, context, current.quoteId);
     const charge = this.business.calculateCancellationCharge(req.user.tenantId, context, quote, undefined, Boolean(body.weatherException));
-    const order = await this.service.cancelOrder(req.user.tenantId, id, body.reason, charge);
+    const order = await this.idempotent.execute({
+      tenantId: req.user.tenantId,
+      action: "order.cancel",
+      key: idempotencyKeyOf(req),
+      fallbackKey: `order.cancel:${id}:${current.status}`,
+      // 取消原因与天气例外参与指纹：同键换内容属调用方错误，
+      // 必须报冲突而不是静默沿用第一次的原因与费用。
+      request: { orderId: id, reason: body.reason, weatherException: Boolean(body.weatherException) },
+      orderId: id,
+      run: (tx) => this.service.cancelOrder(req.user.tenantId, id, body.reason, charge, tx),
+      replay: async () => {
+        const latest = await this.service.getOrder(req.user.tenantId, id);
+        return latest.status === RentalCoreOrderStatus.Cancelled ? latest : undefined;
+      }
+    });
     await this.business.releaseCoupon(req.user.tenantId, this.context(req.user.tenantId), id);
     await this.emitOrderEvent(req.user.tenantId, "order.cancelled", order);
     return this.committed(req.user.tenantId, order);

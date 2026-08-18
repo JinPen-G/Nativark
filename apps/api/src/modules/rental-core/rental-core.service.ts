@@ -652,18 +652,18 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     return order;
   }
 
-  async confirmOrder(tenantId: string, orderId: string) {
+  async confirmOrder(tenantId: string, orderId: string, tx?: RentalFactTx) {
     this.state(tenantId);
     const order = await this.requireOrder(tenantId, orderId);
     if (order.status !== RentalCoreOrderStatus.Draft) throw new ConflictException("只有草稿订单可以确认");
     if (order.reservations.some((row) => row.expiresAt && new Date(row.expiresAt).getTime() < Date.now())) throw new ConflictException("软预占已过期，请重新下单");
     order.reservations.forEach((row) => { row.status = RentalReservationStatus.Confirmed; row.expiresAt = undefined; });
     order.status = RentalCoreOrderStatus.Reserved; order.updatedAt = now();
-    await this.factStore.saveOrderAggregate(order);
+    await this.factStore.saveOrderAggregate(order, [], tx);
     return order;
   }
 
-  async allocateOrder(tenantId: string, orderId: string) {
+  async allocateOrder(tenantId: string, orderId: string, tx?: RentalFactTx) {
     const state = await this.factContext(tenantId);
     const order = await this.requireOrder(tenantId, orderId);
     if (order.status !== RentalCoreOrderStatus.Reserved) throw new ConflictException("只有已确认预占的订单可以配货");
@@ -692,11 +692,11 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       }
     }
     order.allocations = allocations; order.status = RentalCoreOrderStatus.ReadyForPickup; order.updatedAt = now();
-    await this.factStore.saveOrderAggregate(order, assetChanges);
+    await this.factStore.saveOrderAggregate(order, assetChanges, tx);
     return order;
   }
 
-  async cancelOrder(tenantId: string, orderId: string, reason: string, chargeAmount = 0) {
+  async cancelOrder(tenantId: string, orderId: string, reason: string, chargeAmount = 0, tx?: RentalFactTx) {
     this.state(tenantId);
     const order = await this.requireOrder(tenantId, orderId);
     if ([RentalCoreOrderStatus.Renting, RentalCoreOrderStatus.Completed, RentalCoreOrderStatus.Cancelled].includes(order.status)) throw new ConflictException("当前订单状态不能取消");
@@ -713,11 +713,11 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     order.totalAmount = order.finalPayableAmount;
     order.cancellationReason = reason.trim(); order.cancelledAt = now();
     order.status = RentalCoreOrderStatus.Cancelled; order.updatedAt = now();
-    await this.factStore.saveOrderAggregate(order, assetChanges);
+    await this.factStore.saveOrderAggregate(order, assetChanges, tx);
     return order;
   }
 
-  async completeHandoverWithoutInspection(tenantId: string, orderId: string, stage: "pickup" | "return", overdueCharge = 0) {
+  async completeHandoverWithoutInspection(tenantId: string, orderId: string, stage: "pickup" | "return", overdueCharge = 0, tx?: RentalFactTx) {
     this.state(tenantId);
     const order = await this.requireOrder(tenantId, orderId);
     const assetChanges: AssetStatusChange[] = [];
@@ -731,7 +731,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       this.finishReturn(order, overdueCharge, assetChanges);
     }
     order.updatedAt = now();
-    await this.factStore.saveOrderAggregate(order, assetChanges);
+    await this.factStore.saveOrderAggregate(order, assetChanges, tx);
     return order;
   }
 
@@ -757,7 +757,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     orderId: string,
     input: CreateRentalInspectionRequest,
     userName: string,
-    charges: { overdue?: { amount: number; returnedAt: string }; damage?: { amount: number; detail: string } } = {}
+    charges: { overdue?: { amount: number; returnedAt: string }; damage?: { amount: number; detail: string } } = {},
+    tx?: RentalFactTx
   ) {
     const state = this.state(tenantId);
     const order = await this.requireOrder(tenantId, orderId);
@@ -781,8 +782,10 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       if (charges.damage && charges.damage.amount > 0) this.applyDamageTo(order, charges.damage.amount, charges.damage.detail);
     }
     order.updatedAt = now();
-    await this.factStore.insertInspection(record);
-    await this.factStore.saveOrderAggregate(order, assetChanges);
+    // 检查记录与订单状态推进必须同事务：分两次写时中途失败会留下
+    // "检查已记录、订单未推进"的中间态。
+    await this.factStore.insertInspection(record, tx);
+    await this.factStore.saveOrderAggregate(order, assetChanges, tx);
     return { inspection: record, order };
   }
 

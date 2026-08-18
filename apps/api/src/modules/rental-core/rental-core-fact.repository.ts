@@ -58,7 +58,7 @@ export interface RentalCoreFactStore {
   listStockBalances(tenantId: string, tx?: RentalFactTx): Promise<RentalStockBalance[]>;
   upsertStockBalance(balance: RentalStockBalance): Promise<void>;
   listInspections(tenantId: string, orderId: string): Promise<RentalInspectionRecord[]>;
-  insertInspection(record: RentalInspectionRecord): Promise<void>;
+  insertInspection(record: RentalInspectionRecord, tx?: RentalFactTx): Promise<void>;
 }
 
 const ACTIVE_RESERVATION_STATES: $Enums.RentalReservationState[] = ["SOFT", "CONFIRMED", "FULFILLED"];
@@ -435,8 +435,8 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     }));
   }
 
-  async insertInspection(record: RentalInspectionRecord): Promise<void> {
-    await this.prisma.rentalInspectionRecord.create({
+  async insertInspection(record: RentalInspectionRecord, tx?: RentalFactTx): Promise<void> {
+    await (tx ?? this.prisma).rentalInspectionRecord.create({
       data: {
         id: record.id,
         tenantId: record.tenantId,

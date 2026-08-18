@@ -48,4 +48,3 @@ ALTER TABLE `rental_order_idempotency_records` ADD CONSTRAINT `rental_order_idem
 
 -- AddForeignKey
 ALTER TABLE `rental_order_idempotency_records` ADD CONSTRAINT `rental_order_idempotency_records_orderId_fkey` FOREIGN KEY (`orderId`) REFERENCES `rental_orders`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
-
