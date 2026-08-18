@@ -135,6 +135,28 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
     }
   }
 
+  /**
+   * 执行一条回填写入，把唯一约束冲突降级为可见的分歧记录而不是整租户回滚。
+   *
+   * 起因：回填按主键 upsert，但多张表还有业务唯一键（如
+   * rental_inspection_templates 的 (tenantId, code, version)）。当库中已存在同业务键
+   * 但主键不同的行时，按主键找不到便走 insert，撞唯一约束抛错——原实现会因此
+   * 回滚整个租户，导致其余二十来类事实全都补不上。
+   *
+   * 这里刻意不按业务键改写既有行：快照是恢复副本，可能已经陈旧，
+   * 用它覆盖库中现存行有撤销他人有意删除或修改的风险。分歧只记录并跳过，
+   * 交由人工判断，其余记录照常补齐。
+   */
+  private async writeOne(label: string, divergences: string[], run: () => Promise<unknown>) {
+    try {
+      await run();
+    } catch (error) {
+      const code = (error as { code?: string }).code;
+      if (code !== "P2002") throw error;
+      divergences.push(label);
+    }
+  }
+
   async run(): Promise<BackfillTenantResult[]> {
     const [coreRows, businessRows] = await Promise.all([
       this.prisma.rentalCoreStateSnapshot.findMany(),
@@ -167,45 +189,148 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
   }
 
   /**
-   * 快路径：该租户是否**每一类**快照里有数据的规范化表都已有行。
+   * 快路径：快照里每一条记录的**主键**是否都已在库中存在。
    *
-   * 早期实现用「任一表非空」判定，导致部分填充、人工写入或历史失败的租户被永久跳过——
-   * 全量 upsert 根本执行不到，"部分填充能自愈"这个说法当时是不成立的。
-   * 现在要求逐类齐备才跳过：只要还有一类该有数据却为空，就重跑整轮 upsert
-   * （upsert 对已存在的行是无害的，代价只是一次多余写入）。
+   * 早前两版都不成立：第一版用「任一表非空」判定，部分填充的租户被永久跳过；
+   * 第二版改成逐类比对行数，但只比数量——快照期望 A、B 而库里是 A、C 时数量相等，
+   * 会被误判为已完整，缺失的 B 永远补不回。
+   * 现在按主键集合判定：只要有任一条快照记录的主键不在库中，就重跑整轮 upsert
+   * （upsert 对已存在的行无害，代价只是一次多余写入）。
    */
   private async alreadyBackfilled(
     tenantId: string,
     core: CoreSnapshotState,
     business: BusinessSnapshotState
   ) {
-    const expectations: Array<{ expected: number; actual: () => Promise<number> }> = [
-      { expected: (core.operators ?? []).length, actual: () => this.prisma.rentalFulfillmentOperator.count({ where: { tenantId } }) },
-      { expected: (core.locations ?? []).length, actual: () => this.prisma.rentalFulfillmentLocation.count({ where: { tenantId } }) },
-      { expected: (core.itemGroups ?? []).length, actual: () => this.prisma.rentalItemGroup.count({ where: { tenantId } }) },
-      { expected: (core.assets ?? []).length, actual: () => this.prisma.rentalAsset.count({ where: { tenantId } }) },
-      { expected: (core.stockBalances ?? []).length, actual: () => this.prisma.rentalStockBalance.count({ where: { tenantId } }) },
-      { expected: (core.couponTemplates ?? []).length, actual: () => this.prisma.rentalCouponTemplate.count({ where: { tenantId } }) },
-      { expected: (core.inspectionTemplates ?? []).length, actual: () => this.prisma.rentalInspectionTemplate.count({ where: { tenantId } }) },
-      { expected: (core.orders ?? []).length, actual: () => this.prisma.rentalOrder.count({ where: { tenantId } }) },
-      { expected: (core.inspections ?? []).length, actual: () => this.prisma.rentalInspectionRecord.count({ where: { tenantId } }) },
-      { expected: (business.quotes ?? []).length, actual: () => this.prisma.rentalQuote.count({ where: { tenantId } }) },
-      { expected: (business.customerCoupons ?? []).length, actual: () => this.prisma.rentalCustomerCoupon.count({ where: { tenantId } }) },
-      { expected: (business.rewardLedger ?? []).length, actual: () => this.prisma.rentalRewardLedgerEntry.count({ where: { tenantId } }) },
-      { expected: (business.benefitAccounts ?? []).length, actual: () => this.prisma.rentalBenefitAccount.count({ where: { tenantId } }) },
-      { expected: (business.referrals ?? []).length, actual: () => this.prisma.rentalReferral.count({ where: { tenantId } }) },
-      { expected: (business.notificationTemplates ?? []).length, actual: () => this.prisma.rentalNotificationTemplate.count({ where: { tenantId } }) },
-      { expected: (business.notificationLogs ?? []).length, actual: () => this.prisma.rentalNotificationLog.count({ where: { tenantId } }) },
-      { expected: (business.pricingPlans ?? []).length, actual: () => this.prisma.rentalPricingPlan.count({ where: { tenantId } }) },
-      { expected: (business.discountPlans ?? []).length, actual: () => this.prisma.rentalDiscountPlan.count({ where: { tenantId } }) },
-      { expected: (business.services ?? []).length, actual: () => this.prisma.rentalValueAddedService.count({ where: { tenantId } }) },
-      { expected: (business.ruleVersions ?? []).length, actual: () => this.prisma.rentalRuleVersion.count({ where: { tenantId } }) },
-      { expected: (business.calendars ?? []).length, actual: () => this.prisma.rentalBusinessCalendar.count({ where: { tenantId } }) }
+    const checks: Array<{ ids: string[]; existing: () => Promise<string[]> }> = [
+      {
+        ids: (core.operators ?? []).map((row) => row.id),
+        existing: async () =>
+          (await this.prisma.rentalFulfillmentOperator.findMany({ where: { tenantId }, select: { id: true } }))
+            .map((row) => row.id)
+      },
+      {
+        ids: (core.locations ?? []).map((row) => row.id),
+        existing: async () =>
+          (await this.prisma.rentalFulfillmentLocation.findMany({ where: { tenantId }, select: { id: true } }))
+            .map((row) => row.id)
+      },
+      {
+        ids: (core.itemGroups ?? []).map((row) => row.id),
+        existing: async () =>
+          (await this.prisma.rentalItemGroup.findMany({ where: { tenantId }, select: { id: true } }))
+            .map((row) => row.id)
+      },
+      { ids: (core.assets ?? []).map((row) => row.id), existing: async () =>
+          (await this.prisma.rentalAsset.findMany({ where: { tenantId }, select: { id: true } }))
+            .map((row) => row.id) },
+      {
+        ids: (core.stockBalances ?? []).map((row) => row.id),
+        existing: async () =>
+          (await this.prisma.rentalStockBalance.findMany({ where: { tenantId }, select: { id: true } }))
+            .map((row) => row.id)
+      },
+      {
+        ids: (core.couponTemplates ?? []).map((row) => row.id),
+        existing: async () =>
+          (await this.prisma.rentalCouponTemplate.findMany({ where: { tenantId }, select: { id: true } }))
+            .map((row) => row.id)
+      },
+      {
+        ids: (core.inspectionTemplates ?? []).map((row) => row.id),
+        existing: async () =>
+          (await this.prisma.rentalInspectionTemplate.findMany({ where: { tenantId }, select: { id: true } }))
+            .map((row) => row.id)
+      },
+      { ids: (core.orders ?? []).map((row) => row.id), existing: async () =>
+          (await this.prisma.rentalOrder.findMany({ where: { tenantId }, select: { id: true } }))
+            .map((row) => row.id) },
+      {
+        ids: (core.inspections ?? []).map((row) => row.id),
+        existing: async () =>
+          (await this.prisma.rentalInspectionRecord.findMany({ where: { tenantId }, select: { id: true } }))
+            .map((row) => row.id)
+      },
+      { ids: (business.quotes ?? []).map((row) => row.id), existing: async () =>
+          (await this.prisma.rentalQuote.findMany({ where: { tenantId }, select: { id: true } }))
+            .map((row) => row.id) },
+      {
+        ids: (business.customerCoupons ?? []).map((row) => row.id),
+        existing: async () =>
+          (await this.prisma.rentalCustomerCoupon.findMany({ where: { tenantId }, select: { id: true } }))
+            .map((row) => row.id)
+      },
+      {
+        ids: (business.rewardLedger ?? []).map((row) => row.id),
+        existing: async () =>
+          (await this.prisma.rentalRewardLedgerEntry.findMany({ where: { tenantId }, select: { id: true } }))
+            .map((row) => row.id)
+      },
+      {
+        ids: (business.notificationTemplates ?? []).map((row) => row.id),
+        existing: async () =>
+          (await this.prisma.rentalNotificationTemplate.findMany({ where: { tenantId }, select: { id: true } }))
+            .map((row) => row.id)
+      },
+      {
+        ids: (business.notificationLogs ?? []).map((row) => row.id),
+        existing: async () =>
+          (await this.prisma.rentalNotificationLog.findMany({ where: { tenantId }, select: { id: true } }))
+            .map((row) => row.id)
+      },
+      {
+        ids: (business.pricingPlans ?? []).map((row) => row.id),
+        existing: async () =>
+          (await this.prisma.rentalPricingPlan.findMany({ where: { tenantId }, select: { id: true } }))
+            .map((row) => row.id)
+      },
+      {
+        ids: (business.discountPlans ?? []).map((row) => row.id),
+        existing: async () =>
+          (await this.prisma.rentalDiscountPlan.findMany({ where: { tenantId }, select: { id: true } }))
+            .map((row) => row.id)
+      },
+      {
+        ids: (business.services ?? []).map((row) => row.id),
+        existing: async () =>
+          (await this.prisma.rentalValueAddedService.findMany({ where: { tenantId }, select: { id: true } }))
+            .map((row) => row.id)
+      },
+      {
+        ids: (business.ruleVersions ?? []).map((row) => row.id),
+        existing: async () =>
+          (await this.prisma.rentalRuleVersion.findMany({ where: { tenantId }, select: { id: true } }))
+            .map((row) => row.id)
+      }
     ];
-    const pending = expectations.filter((row) => row.expected > 0);
-    if (!pending.length) return false;
-    const actuals = await Promise.all(pending.map((row) => row.actual()));
-    return actuals.every((value, index) => value >= pending[index].expected);
+
+    const pending = checks.filter((row) => row.ids.length > 0);
+    // 复合主键的三类没有单一 id，用「租户内条数不少于快照」判定即可：
+    // 它们的键完全由快照内容决定（年份、客户、被邀请人），不存在"数量相同键不同"。
+    const compositeCounts = await Promise.all([
+      (business.benefitAccounts ?? []).length
+        ? this.prisma.rentalBenefitAccount.count({ where: { tenantId } })
+        : Promise.resolve(0),
+      (business.referrals ?? []).length
+        ? this.prisma.rentalReferral.count({ where: { tenantId } })
+        : Promise.resolve(0),
+      (business.calendars ?? []).length
+        ? this.prisma.rentalBusinessCalendar.count({ where: { tenantId } })
+        : Promise.resolve(0)
+    ]);
+    const compositeExpected = [
+      (business.benefitAccounts ?? []).length,
+      (business.referrals ?? []).length,
+      (business.calendars ?? []).length
+    ];
+    if (compositeExpected.some((expected, index) => expected > 0 && compositeCounts[index] < expected)) return false;
+
+    if (!pending.length) return compositeExpected.every((expected) => expected === 0) ? false : true;
+    const existingSets = await Promise.all(pending.map((row) => row.existing()));
+    return pending.every((row, index) => {
+      const present = new Set(existingSets[index]);
+      return row.ids.every((id) => present.has(id));
+    });
   }
 
   private async backfillTenant(
@@ -227,28 +352,32 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
 
     await this.prisma.$transaction(
       async (tx) => {
+        const divergences: string[] = [];
         const categoryCode = core.profile?.categoryCode ?? business.categoryCode;
 
         // 1. 品类档案：seed 可能已建，用 upsert 避免冲突。
-        if (categoryCode && core.profile) {
-          await tx.tenantRentalProfile.upsert({
+        const snapshotProfile = core.profile;
+        if (categoryCode && snapshotProfile) {
+          await this.writeOne("tenantRentalProfile", divergences, () =>
+            tx.tenantRentalProfile.upsert({
             where: { tenantId },
             create: {
               tenantId,
               categoryCode: upperEnum(categoryCode, "profile.categoryCode"),
-              capabilities: jsonArray(core.profile.capabilities),
-              terminology: json(core.profile.terminology),
-              configVersion: core.profile.configVersion ?? "0.1.0",
-              initializedAt: optionalDate(core.profile.initializedAt) ?? new Date()
+              capabilities: jsonArray(snapshotProfile.capabilities),
+              terminology: json(snapshotProfile.terminology),
+              configVersion: snapshotProfile.configVersion ?? "0.1.0",
+              initializedAt: optionalDate(snapshotProfile.initializedAt) ?? new Date()
             },
             update: {}
-          });
+          }));
         }
 
         // 2. 业务设置
         if (categoryCode && core.businessSettings) {
           const settings = core.businessSettings as TenantRentalBusinessSettings & { updatedBy?: string };
-          await tx.rentalTenantBusinessSettings.upsert({
+          await this.writeOne("rentalTenantBusinessSettings", divergences, () =>
+            tx.rentalTenantBusinessSettings.upsert({
             where: { tenantId },
             create: {
               tenantId,
@@ -258,13 +387,14 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               updatedBy: settings.updatedBy ?? "backfill"
             },
             update: {}
-          });
+          }));
           count("businessSettings", 1);
         }
 
         // 3. 经营主体 → 4. 履约地点（地点的 operatorId 外键依赖主体）
         for (const operator of core.operators ?? []) {
-          await tx.rentalFulfillmentOperator.upsert({
+          await this.writeOne("rentalFulfillmentOperator", divergences, () =>
+            tx.rentalFulfillmentOperator.upsert({
             where: { id: operator.id },
             update: {},
             create: {
@@ -279,13 +409,14 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               status: operator.status ?? "enabled",
               createdAt: optionalDate(operator.createdAt) ?? new Date()
             }
-          });
+          }));
         }
         count("operators", (core.operators ?? []).length);
 
         const operatorIds = new Set((core.operators ?? []).map((row) => row.id));
         for (const location of core.locations ?? []) {
-          await tx.rentalFulfillmentLocation.upsert({
+          await this.writeOne("rentalFulfillmentLocation", divergences, () =>
+            tx.rentalFulfillmentLocation.upsert({
             where: { id: location.id },
             update: {},
             create: {
@@ -306,13 +437,14 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               businessHours: location.businessHours ?? null,
               status: location.status ?? "enabled"
             }
-          });
+          }));
         }
         count("locations", (core.locations ?? []).length);
 
         // 5. 商品组（套装组成需先有全部商品组，故分两轮）
         for (const group of core.itemGroups ?? []) {
-          await tx.rentalItemGroup.upsert({
+          await this.writeOne("rentalItemGroup", divergences, () =>
+            tx.rentalItemGroup.upsert({
             where: { id: group.id },
             update: {},
             create: {
@@ -328,7 +460,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               status: group.status ?? "enabled",
               createdAt: optionalDate(group.createdAt) ?? new Date()
             }
-          });
+          }));
         }
         count("itemGroups", (core.itemGroups ?? []).length);
 
@@ -337,7 +469,8 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
         for (const group of core.itemGroups ?? []) {
           for (const component of group.bundleComponents ?? []) {
             if (!groupIds.has(component.itemGroupId)) continue;
-            await tx.rentalBundleComponent.upsert({
+            await this.writeOne("rentalBundleComponent", divergences, () =>
+              tx.rentalBundleComponent.upsert({
               where: {
                 bundleItemGroupId_componentItemGroupId: {
                   bundleItemGroupId: group.id,
@@ -352,7 +485,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
                 optional: Boolean(component.optional),
                 substitutionGroup: component.substitutionGroup ?? null
               }
-            });
+            }));
             components += 1;
           }
         }
@@ -360,7 +493,8 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
 
         // 6. 资产与库存余额（itemGroupName/locationName/availableQuantity 是派生字段，表中不存）
         for (const asset of core.assets ?? []) {
-          await tx.rentalAsset.upsert({
+          await this.writeOne("rentalAsset", divergences, () =>
+            tx.rentalAsset.upsert({
             where: { id: asset.id },
             update: {},
             create: {
@@ -374,12 +508,13 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               attributes: json(asset.attributes ?? {}),
               createdAt: optionalDate(asset.createdAt) ?? new Date()
             }
-          });
+          }));
         }
         count("assets", (core.assets ?? []).length);
 
         for (const stock of core.stockBalances ?? []) {
-          await tx.rentalStockBalance.upsert({
+          await this.writeOne("rentalStockBalance", divergences, () =>
+            tx.rentalStockBalance.upsert({
             where: { id: stock.id },
             update: {},
             create: {
@@ -391,13 +526,14 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               reservedQuantity: stock.reservedQuantity ?? 0,
               maintenanceQuantity: stock.maintenanceQuantity ?? 0
             }
-          });
+          }));
         }
         count("stockBalances", (core.stockBalances ?? []).length);
 
         // 7. 优惠券模板 → 客户优惠券（外键依赖）
         for (const template of core.couponTemplates ?? []) {
-          await tx.rentalCouponTemplate.upsert({
+          await this.writeOne("rentalCouponTemplate", divergences, () =>
+            tx.rentalCouponTemplate.upsert({
             where: { id: template.id },
             update: {},
             create: {
@@ -419,7 +555,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               version: template.version ?? "1.0",
               createdAt: optionalDate(template.createdAt) ?? new Date()
             }
-          });
+          }));
         }
         count("couponTemplates", (core.couponTemplates ?? []).length);
 
@@ -429,7 +565,8 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
           if (!templateIds.has(coupon.templateId)) {
             throw new Error(`客户优惠券 ${coupon.id} 引用的模板 ${coupon.templateId} 不在快照中`);
           }
-          await tx.rentalCustomerCoupon.upsert({
+          await this.writeOne("rentalCustomerCoupon", divergences, () =>
+            tx.rentalCustomerCoupon.upsert({
             where: { id: coupon.id },
             update: {},
             create: {
@@ -449,14 +586,15 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               redeemedAt: optionalDate(coupon.redeemedAt),
               releasedAt: optionalDate(coupon.releasedAt)
             }
-          });
+          }));
           customerCoupons += 1;
         }
         count("customerCoupons", customerCoupons);
 
         // 8. 检查模板（检查记录的外键依赖）
         for (const template of core.inspectionTemplates ?? []) {
-          await tx.rentalInspectionTemplate.upsert({
+          await this.writeOne("rentalInspectionTemplate", divergences, () =>
+            tx.rentalInspectionTemplate.upsert({
             where: { id: template.id },
             update: {},
             create: {
@@ -470,13 +608,14 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               fields: jsonArray(template.fields),
               enabled: template.enabled ?? true
             }
-          });
+          }));
         }
         count("inspectionTemplates", (core.inspectionTemplates ?? []).length);
 
         // 9. 业务配置
         for (const plan of business.pricingPlans ?? []) {
-          await tx.rentalPricingPlan.upsert({
+          await this.writeOne("rentalPricingPlan", divergences, () =>
+            tx.rentalPricingPlan.upsert({
             where: { id: plan.id },
             update: {},
             create: {
@@ -493,12 +632,13 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               rates: jsonArray(plan.rates),
               createdAt: optionalDate(plan.createdAt) ?? new Date()
             }
-          });
+          }));
         }
         count("pricingPlans", (business.pricingPlans ?? []).length);
 
         for (const plan of business.discountPlans ?? []) {
-          await tx.rentalDiscountPlan.upsert({
+          await this.writeOne("rentalDiscountPlan", divergences, () =>
+            tx.rentalDiscountPlan.upsert({
             where: { id: plan.id },
             update: {},
             create: {
@@ -522,12 +662,13 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               version: plan.version ?? "1.0",
               createdAt: optionalDate(plan.createdAt) ?? new Date()
             }
-          });
+          }));
         }
         count("discountPlans", (business.discountPlans ?? []).length);
 
         for (const service of business.services ?? []) {
-          await tx.rentalValueAddedService.upsert({
+          await this.writeOne("rentalValueAddedService", divergences, () =>
+            tx.rentalValueAddedService.upsert({
             where: { id: service.id },
             update: {},
             create: {
@@ -549,12 +690,13 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               version: service.version ?? "1.0",
               createdAt: optionalDate(service.createdAt) ?? new Date()
             }
-          });
+          }));
         }
         count("valueAddedServices", (business.services ?? []).length);
 
         for (const rule of business.ruleVersions ?? []) {
-          await tx.rentalRuleVersion.upsert({
+          await this.writeOne("rentalRuleVersion", divergences, () =>
+            tx.rentalRuleVersion.upsert({
             where: { id: rule.id },
             update: {},
             create: {
@@ -569,12 +711,13 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               createdAt: optionalDate(rule.createdAt) ?? new Date(),
               publishedAt: optionalDate(rule.publishedAt)
             }
-          });
+          }));
         }
         count("ruleVersions", (business.ruleVersions ?? []).length);
 
         for (const calendar of business.calendars ?? []) {
-          await tx.rentalBusinessCalendar.upsert({
+          await this.writeOne("rentalBusinessCalendar", divergences, () =>
+            tx.rentalBusinessCalendar.upsert({
             where: { tenantId_year: { tenantId, year: calendar.year } },
             update: {},
             create: {
@@ -590,12 +733,13 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               publishedAt: optionalDate(calendar.publishedAt),
               days: jsonArray(calendar.days)
             }
-          });
+          }));
         }
         count("businessCalendars", (business.calendars ?? []).length);
 
         for (const template of business.notificationTemplates ?? []) {
-          await tx.rentalNotificationTemplate.upsert({
+          await this.writeOne("rentalNotificationTemplate", divergences, () =>
+            tx.rentalNotificationTemplate.upsert({
             where: { id: template.id },
             update: {},
             create: {
@@ -610,13 +754,14 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               status: template.status ?? "enabled",
               version: template.version ?? "1.0"
             }
-          });
+          }));
         }
         count("notificationTemplates", (business.notificationTemplates ?? []).length);
 
         // 10. 报价（订单引用报价号，但不建外键；报价先插以便对账）
         for (const quote of business.quotes ?? []) {
-          await tx.rentalQuote.upsert({
+          await this.writeOne("rentalQuote", divergences, () =>
+            tx.rentalQuote.upsert({
             where: { id: quote.id },
             update: {},
             create: {
@@ -643,7 +788,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               consumedOrderId: quote.consumedOrderId ?? null,
               createdAt: optionalDate(quote.createdAt) ?? new Date()
             }
-          });
+          }));
         }
         count("quotes", (business.quotes ?? []).length);
 
@@ -653,7 +798,8 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
         let allocations = 0;
         const assetIds = new Set((core.assets ?? []).map((row) => row.id));
         for (const order of core.orders ?? []) {
-          await tx.rentalOrder.upsert({
+          await this.writeOne("rentalOrder", divergences, () =>
+            tx.rentalOrder.upsert({
             where: { id: order.id },
             update: {},
             create: {
@@ -695,10 +841,11 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               createdBy: order.createdBy ?? "backfill",
               createdAt: optionalDate(order.createdAt) ?? new Date()
             }
-          });
+          }));
 
           for (const line of order.lines ?? []) {
-            await tx.rentalOrderLine.upsert({
+            await this.writeOne("rentalOrderLine", divergences, () =>
+              tx.rentalOrderLine.upsert({
               where: { id: line.id },
               update: {},
               create: {
@@ -713,12 +860,13 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
                 amount: amount(line.amount),
                 note: line.note ?? null
               }
-            });
+            }));
             lines += 1;
           }
 
           for (const reservation of order.reservations ?? []) {
-            await tx.rentalReservation.upsert({
+            await this.writeOne("rentalReservation", divergences, () =>
+              tx.rentalReservation.upsert({
               where: { id: reservation.id },
               update: {},
               create: {
@@ -736,12 +884,13 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
                 expiresAt: optionalDate(reservation.expiresAt),
                 createdAt: optionalDate(reservation.createdAt) ?? new Date()
               }
-            });
+            }));
             reservations += 1;
           }
 
           for (const allocation of order.allocations ?? []) {
-            await tx.rentalAllocation.upsert({
+            await this.writeOne("rentalAllocation", divergences, () =>
+              tx.rentalAllocation.upsert({
               where: { id: allocation.id },
               update: {},
               create: {
@@ -753,7 +902,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
                 quantity: allocation.quantity ?? 1,
                 status: allocation.status ?? "allocated"
               }
-            });
+            }));
             allocations += 1;
           }
         }
@@ -769,7 +918,8 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
           if (!inspectionTemplateIds.has(record.templateId)) {
             throw new Error(`检查记录 ${record.id} 引用的模板 ${record.templateId} 不在快照中`);
           }
-          await tx.rentalInspectionRecord.upsert({
+          await this.writeOne("rentalInspectionRecord", divergences, () =>
+            tx.rentalInspectionRecord.upsert({
             where: { id: record.id },
             update: {},
             create: {
@@ -786,7 +936,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               operator: record.operator ?? "backfill",
               createdAt: optionalDate(record.createdAt) ?? new Date()
             }
-          });
+          }));
           inspections += 1;
         }
         count("inspections", inspections);
@@ -798,7 +948,8 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
           if (!notificationTemplateIds.has(log.templateId)) {
             throw new Error(`通知记录 ${log.id} 引用的模板 ${log.templateId} 不在快照中`);
           }
-          await tx.rentalNotificationLog.upsert({
+          await this.writeOne("rentalNotificationLog", divergences, () =>
+            tx.rentalNotificationLog.upsert({
             where: { id: log.id },
             update: {},
             create: {
@@ -820,14 +971,15 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               sentAt: optionalDate(log.sentAt),
               createdAt: optionalDate(log.createdAt) ?? new Date()
             }
-          });
+          }));
           notificationLogs += 1;
         }
         count("notificationLogs", notificationLogs);
 
         // 14. 奖励流水、权益账户与邀请关系
         for (const entry of business.rewardLedger ?? []) {
-          await tx.rentalRewardLedgerEntry.upsert({
+          await this.writeOne("rentalRewardLedgerEntry", divergences, () =>
+            tx.rentalRewardLedgerEntry.upsert({
             where: { id: entry.id },
             update: {},
             create: {
@@ -846,12 +998,13 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               reversedAt: optionalDate(entry.reversedAt),
               createdAt: optionalDate(entry.createdAt) ?? new Date()
             }
-          });
+          }));
         }
         count("rewardLedger", (business.rewardLedger ?? []).length);
 
         for (const account of business.benefitAccounts ?? []) {
-          await tx.rentalBenefitAccount.upsert({
+          await this.writeOne("rentalBenefitAccount", divergences, () =>
+            tx.rentalBenefitAccount.upsert({
             where: { tenantId_customerId: { tenantId, customerId: account.customerId } },
             update: {},
             create: {
@@ -861,12 +1014,13 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               marketingBalance: amount(account.marketingBalance),
               availableRewardCouponCount: account.availableRewardCouponCount ?? 0
             }
-          });
+          }));
         }
         count("benefitAccounts", (business.benefitAccounts ?? []).length);
 
         for (const referral of business.referrals ?? []) {
-          await tx.rentalReferral.upsert({
+          await this.writeOne("rentalReferral", divergences, () =>
+            tx.rentalReferral.upsert({
             where: { tenantId_inviteeCustomerId: { tenantId, inviteeCustomerId: referral.inviteeCustomerId } },
             update: {},
             create: {
@@ -875,9 +1029,17 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               referrerCustomerId: referral.referrerCustomerId,
               registeredAt: optionalDate(referral.registeredAt) ?? new Date()
             }
-          });
+          }));
         }
         count("referrals", (business.referrals ?? []).length);
+
+        if (divergences.length) {
+          // 分歧必须可见：库中已有同业务键但主键不同的行，回填未覆盖它们。
+          this.logger.warn(
+            `租户 ${tenantId} 有 ${divergences.length} 条记录与库中现存行业务键冲突，已跳过未覆盖：` +
+              [...new Set(divergences)].join("、")
+          );
+        }
       },
       { timeout: 60_000 }
     );

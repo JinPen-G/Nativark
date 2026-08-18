@@ -1262,7 +1262,30 @@ async function main() {
     rewardsBeforeDrop,
     `快照行丢失后奖励流水必须全部从库恢复，期望 ${rewardsBeforeDrop} 实际 ${rewardsNoSnapshot.length}`
   );
-  ok(`整条业务快照行删除后重启，仍从库完整恢复 ${couponsNoSnapshot.length} 张券与 ${rewardsNoSnapshot.length} 条奖励流水`);
+  // Codex 复核指出：上面只验了券与权益，业务**配置**（定价/优惠/服务/日历/规则/通知模板）
+  // 同样在快照行丢失时可能全部留空——因为配置装载曾发生在状态重建之前。
+  const pricingNoSnapshot = (await request("GET", "/api/rental/v1/pricing-plans", null, demoNoSnapshot.accessToken)).body.data;
+  const rulesNoSnapshot = (await request("GET", "/api/rental/v1/rule-versions", null, demoNoSnapshot.accessToken)).body.data;
+  const templatesNoSnapshot = (await request("GET", "/api/rental/v1/notification-templates", null, demoNoSnapshot.accessToken)).body.data;
+  assert.equal(
+    pricingNoSnapshot.length,
+    readCount("SELECT COUNT(*) FROM \`rental_pricing_plans\` WHERE \`tenantId\`='tenant_001';"),
+    "快照行丢失后定价方案必须全部从库恢复"
+  );
+  assert.equal(
+    rulesNoSnapshot.length,
+    readCount("SELECT COUNT(*) FROM \`rental_rule_versions\` WHERE \`tenantId\`='tenant_001';"),
+    "快照行丢失后规则版本必须全部从库恢复"
+  );
+  assert.equal(
+    templatesNoSnapshot.length,
+    readCount("SELECT COUNT(*) FROM \`rental_notification_templates\` WHERE \`tenantId\`='tenant_001';"),
+    "快照行丢失后通知模板必须全部从库恢复"
+  );
+  ok(
+    `整条业务快照行删除后重启，事实与配置均从库完整恢复：${couponsNoSnapshot.length} 券 / ${rewardsNoSnapshot.length} 奖励 / ` +
+      `${pricingNoSnapshot.length} 定价 / ${rulesNoSnapshot.length} 规则 / ${templatesNoSnapshot.length} 通知模板`
+  );
 
   console.log("== 23. RC-01 部分规范化数据可自愈补齐 ==");
   // 早期回填用"任一表非空即视为已完成"判定，部分填充的租户会被永久跳过，
@@ -1307,6 +1330,85 @@ async function main() {
     "部分填充租户的缺失事实必须被回填补齐"
   );
   ok(`部分填充自愈：商品组保留 ${expectedGroups} 行的同时清空检查模板，重启后补齐 ${expectedTemplates} 行`);
+
+  console.log("== 24. RC-01 回填按主键判定，数量相同但键不同也能补齐 ==");
+  // 上一节删空了整类，只能证明"某类为空会被补回"。守卫若只比数量，
+  // 快照期望 A、B 而库里是 A、C 时数量相等，会被误判为已完整、B 永远补不回。
+  // 这里把一条检查模板的主键改掉：条数不变，键集合不同。
+  const templateIds = mysqlQuery(
+    `SELECT \`id\` FROM \`rental_inspection_templates\` WHERE \`tenantId\`='${snapshotTenant}' ORDER BY \`id\` LIMIT 1;`
+  )
+    .split(/\r?\n/)
+    .filter((line) => line.trim() && line.trim() !== "id");
+  const originalTemplateId = templateIds.pop().trim();
+  const countBeforeRekey = readCount(
+    `SELECT COUNT(*) FROM \`rental_inspection_templates\` WHERE \`tenantId\`='${snapshotTenant}';`
+  );
+  mysqlQuery(
+    `UPDATE \`rental_inspection_templates\` SET \`id\`='e2e_rekeyed_template' WHERE \`id\`='${originalTemplateId}';`
+  );
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_inspection_templates\` WHERE \`tenantId\`='${snapshotTenant}';`),
+    countBeforeRekey,
+    "改主键不应改变条数，本节要的正是数量相同"
+  );
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_inspection_templates\` WHERE \`id\`='${originalTemplateId}';`),
+    0,
+    "原主键应已不存在"
+  );
+  await stopApi();
+  startApi();
+  if (!(await waitHealth())) fail("主键差异自愈校验的 API 重启超时");
+  // 语义说明：业务键冲突（库中已有同 (tenantId, code, version) 但主键不同）
+  // 刻意**不**用陈旧快照覆盖库中现存行——那有撤销他人有意删除或修改的风险。
+  // 必须保证的是：这一条分歧不会像原实现那样回滚整个租户、连带阻断其余各类补齐。
+  const rekeyedStillThere = readCount(
+    `SELECT COUNT(*) FROM \`rental_inspection_templates\` WHERE \`id\`='e2e_rekeyed_template';`
+  );
+  assert.equal(rekeyedStillThere, 1, "业务键冲突的现存行不应被快照覆盖或删除");
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_inspection_templates\` WHERE \`tenantId\`='${snapshotTenant}';`),
+    countBeforeRekey,
+    "业务键冲突不应导致重复行"
+  );
+  // 关键断言：同租户其余各类事实没有因为这一条分歧而被整体回滚。
+  assert.ok(
+    readCount(`SELECT COUNT(*) FROM \`rental_item_groups\` WHERE \`tenantId\`='${snapshotTenant}';`) > 0,
+    "一条业务键分歧不得回滚整个租户的回填"
+  );
+  ok(`业务键分歧被隔离：改掉一条主键后重启，现存行未被陈旧快照覆盖，其余各类未受回滚影响`);
+
+  console.log("== 25. RC-01 规则发布后库中只保留一个 published 版本 ==");
+  // 退役旧版本原先只改内存：重启后库里会重新加载出多个 published；
+  // 且退役发生在写库之前，新版本写库失败会让缓存里的旧规则被错误地标成 retired。
+  const demoRules = await login("demo", "admin", DEMO_PASSWORD);
+  const currentRule = (await request("GET", "/api/rental/v1/rule-versions/current", null, demoRules.accessToken)).body.data;
+  const publishRes = await request(
+    "POST",
+    "/api/rental/v1/rule-versions",
+    { config: currentRule.config, changeReason: "E2E 单一 published 校验", publish: true },
+    demoRules.accessToken
+  );
+  assert.equal(publishRes.status, 201, `发布规则版本失败: ${JSON.stringify(publishRes.body)}`);
+  assert.equal(
+    readCount("SELECT COUNT(*) FROM `rental_rule_versions` WHERE `tenantId`='tenant_001' AND `status`='published';"),
+    1,
+    "发布后库中只能有一个 published 规则版本"
+  );
+  assert.ok(
+    readCount("SELECT COUNT(*) FROM `rental_rule_versions` WHERE `tenantId`='tenant_001' AND `status`='retired';") > 0,
+    "旧 published 版本的退役必须落库"
+  );
+  await stopApi();
+  startApi();
+  if (!(await waitHealth())) fail("规则版本校验的 API 重启超时");
+  assert.equal(
+    readCount("SELECT COUNT(*) FROM `rental_rule_versions` WHERE `tenantId`='tenant_001' AND `status`='published';"),
+    1,
+    "重启后仍只能有一个 published 规则版本"
+  );
+  ok("规则发布：新版本与旧版本退役同事务落库，重启后库中仍只有一个 published");
 
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);
 }

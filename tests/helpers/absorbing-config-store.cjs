@@ -81,6 +81,10 @@ function createAbsorbingBusinessConfigStore() {
     upsertService: record("service"),
     upsertCalendar: record("calendar"),
     upsertRuleVersion: record("ruleVersion"),
+    replacePublishedRuleVersion: (next) => {
+      writes.push({ kind: "ruleVersion", id: next?.id });
+      return Promise.resolve();
+    },
     upsertNotificationTemplate: record("notificationTemplate")
   };
 }

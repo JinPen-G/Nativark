@@ -321,7 +321,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     validateRewardCoupon(input.membership.referralRewardEnabled, input.membership.referralRewardType, Math.max(input.membership.referrerRewardAmount, input.membership.inviteeRewardAmount), input.membership.referralRewardCouponTemplateId);
     const supportedNotificationEvents = new Set(["member.registered", "referral.rewarded", "order.created", "order.confirmed", "order.cancelled", "pickup.completed", "return.completed", "pickup.reminder", "return.reminder", "order.overdue", "qualification.reviewed", "refund.completed", "asset.exception"]);
     if (!input.notifications.editableChannels.length || input.notifications.enabledEvents.some((event) => !supportedNotificationEvents.has(event))) throw new BadRequestException("通知渠道不能为空，且只能启用已注册的系统事件");
-    state.businessSettings = {
+    const nextSettings = {
       ...input,
       tenantId,
       categoryCode: definition.code,
@@ -329,7 +329,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       updatedAt: now(),
       updatedBy: operator
     };
-    await this.configStore.upsertBusinessSettings(state.businessSettings, operator);
+    await this.configStore.upsertBusinessSettings(nextSettings, operator);
+    state.businessSettings = nextSettings;
     return state.businessSettings;
   }
 
@@ -373,7 +374,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (categoryChanged) throw new ConflictException("SaaS 租户创建后经营品类固定，不能切换");
     const allowed = new Set(definition.defaultCapabilities);
     const capabilities = (input.capabilities ?? definition.defaultCapabilities).filter((item) => allowed.has(item));
-    state.profile = {
+    const nextProfile = {
       ...state.profile,
       categoryCode: input.categoryCode,
       capabilities,
@@ -381,7 +382,10 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       configVersion: definition.version,
       updatedAt: now()
     };
-    await this.configStore.upsertProfile(state.profile);
+    // 先写库，成功后再落缓存：库写失败时缓存保持原状，
+    // 不留只存在于当前进程的幽灵配置。
+    await this.configStore.upsertProfile(nextProfile);
+    state.profile = nextProfile;
     return state.profile;
   }
 

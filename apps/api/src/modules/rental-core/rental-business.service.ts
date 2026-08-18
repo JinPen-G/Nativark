@@ -142,38 +142,48 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
    * 在它之前预热会读到还没回填的空表。
    */
   async onApplicationBootstrap() {
-    // 先记下库中各租户的品类：业务快照行丢失时，重建业务状态需要它。
+    const configs = await this.configStore.loadAll();
+    const facts = await this.factStore.loadAll();
+
     this.bootstrapCategoryByTenant.clear();
-    for (const snapshot of await this.configStore.loadAll()) {
+    for (const snapshot of configs) {
       if (snapshot.categoryCode) this.bootstrapCategoryByTenant.set(snapshot.tenantId, snapshot.categoryCode);
-      const state = this.states.get(snapshot.tenantId);
-      if (!state) continue;
-      // 无条件覆盖，包括空数组：库里没有就是没有。
-      // 「非空才覆盖」会让合法为空的配置继续保留 JSON 快照或 seedState 的演示数据，
-      // 使快照在读路径上静默胜出。
-      state.pricingPlans = snapshot.pricingPlans;
-      state.discountPlans = snapshot.discountPlans;
-      state.services = snapshot.services;
-      state.calendars = snapshot.calendars;
-      state.ruleVersions = snapshot.ruleVersions;
-      state.notificationTemplates = snapshot.notificationTemplates;
     }
-    // 业务事实一律以库为准。
+
+    // 配置与事实必须在同一轮里处理，且状态重建要发生在两者之前。
     //
-    // 关键：不能像配置那样"内存里没有该租户就跳过"。onModuleInit 只从 JSON 快照建状态，
-    // 若整条业务快照行丢失而规范化表尚在，跳过就等于把库里的事实读出来又扔掉，
-    // 随后系统用空白默认状态继续运行——那样快照仍是事实源，验收并未真正满足。
-    // 因此这里在内存缺失时按库中品类建出状态。
-    for (const facts of await this.factStore.loadAll()) {
-      const state = this.states.get(facts.tenantId) ?? this.stateFromFacts(facts.tenantId);
+    // 早前实现分成两轮、且配置那轮遇到内存缺失就 continue：整条业务快照行丢失时，
+    // 状态只在事实那轮才被重建，于是定价、优惠、增值服务、日历、规则和通知模板
+    // 全部留空——只恢复了事实，配置照样丢。
+    const tenantIds = new Set<string>([...configs.map((row) => row.tenantId), ...facts.map((row) => row.tenantId)]);
+    const configByTenant = new Map(configs.map((row) => [row.tenantId, row]));
+    const factsByTenant = new Map(facts.map((row) => [row.tenantId, row]));
+
+    for (const tenantId of tenantIds) {
+      const state = this.states.get(tenantId) ?? this.stateFromFacts(tenantId);
       if (!state) continue;
-      state.quotes = facts.quotes;
-      state.customerCoupons = facts.customerCoupons;
-      state.rewardLedger = facts.rewardLedger;
-      state.benefitAccounts = facts.benefitAccounts;
-      state.referrals = facts.referrals;
-      state.notificationLogs = facts.notificationLogs;
-      this.states.set(facts.tenantId, state);
+      const config = configByTenant.get(tenantId);
+      if (config) {
+        // 无条件覆盖，包括空数组：库里没有就是没有。
+        // 「非空才覆盖」会让合法为空的配置继续保留快照或 seedState 的演示数据，
+        // 使快照在读路径上静默胜出。
+        state.pricingPlans = config.pricingPlans;
+        state.discountPlans = config.discountPlans;
+        state.services = config.services;
+        state.calendars = config.calendars;
+        state.ruleVersions = config.ruleVersions;
+        state.notificationTemplates = config.notificationTemplates;
+      }
+      const fact = factsByTenant.get(tenantId);
+      if (fact) {
+        state.quotes = fact.quotes;
+        state.customerCoupons = fact.customerCoupons;
+        state.rewardLedger = fact.rewardLedger;
+        state.benefitAccounts = fact.benefitAccounts;
+        state.referrals = fact.referrals;
+        state.notificationLogs = fact.notificationLogs;
+      }
+      this.states.set(tenantId, state);
     }
   }
 
@@ -404,14 +414,24 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const state = this.state(tenantId, context);
     this.validateRule(context, input.config);
     if (!input.changeReason?.trim()) throw new BadRequestException("规则变更原因不能为空");
-    if (input.publish) state.ruleVersions.forEach((row) => { if (row.status === "published") row.status = "retired"; });
+    // 退役旧版本延后到写库成功之后：早前在此处直接改内存，
+    // 一旦新版本写库失败，缓存里的旧规则已被改成 retired，
+    // 而库中仍是 published，重启后会重新加载出多个 published 版本。
+    const retiring = input.publish
+      ? state.ruleVersions.filter((row) => row.status === "published")
+      : [];
     const result: RentalRuleVersion = {
       id: uid("rule"), tenantId, categoryCode: context.profile.categoryCode,
       version: versionAfter(state.ruleVersions[0]?.version), status: input.publish ? "published" : "draft",
       config: structuredClone(input.config), changeReason: input.changeReason.trim(), createdBy: operator,
       createdAt: stamp(), publishedAt: input.publish ? stamp() : undefined
     };
-    await this.configStore.upsertRuleVersion(result);
+    // 新版本与旧版本退役必须一起落库，否则库里会同时存在多个 published。
+    await this.configStore.replacePublishedRuleVersion(
+      result,
+      retiring.map((row) => ({ ...row, status: "retired" as const }))
+    );
+    for (const row of retiring) row.status = "retired";
 
     state.ruleVersions.unshift(result);
     return result;

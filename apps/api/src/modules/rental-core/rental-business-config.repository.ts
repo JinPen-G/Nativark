@@ -38,6 +38,11 @@ export interface RentalBusinessConfigStore {
   upsertService(service: RentalValueAddedService): Promise<void>;
   upsertCalendar(calendar: RentalCalendarYear): Promise<void>;
   upsertRuleVersion(version: RentalRuleVersion): Promise<void>;
+  /**
+   * 发布新规则版本：新版本落库与旧 published 版本退役必须在同一事务内。
+   * 分两次写会让库里短暂（失败时则永久）同时存在多个 published 版本。
+   */
+  replacePublishedRuleVersion(next: RentalRuleVersion, retiring: RentalRuleVersion[]): Promise<void>;
   upsertNotificationTemplate(template: RentalNotificationTemplateV1): Promise<void>;
 }
 
@@ -207,8 +212,8 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
     });
   }
 
-  async upsertRuleVersion(version: RentalRuleVersion): Promise<void> {
-    const data = {
+  private ruleVersionData(version: RentalRuleVersion) {
+    return {
       tenantId: version.tenantId,
       categoryCode: upper<$Enums.RentalCategoryCode>(version.categoryCode),
       version: version.version,
@@ -218,10 +223,31 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       createdBy: version.createdBy,
       publishedAt: version.publishedAt ? new Date(version.publishedAt) : null
     };
+  }
+
+  async upsertRuleVersion(version: RentalRuleVersion): Promise<void> {
+    const data = this.ruleVersionData(version);
     await this.prisma.rentalRuleVersion.upsert({
       where: { id: version.id },
       create: { id: version.id, ...data, createdAt: new Date(version.createdAt) },
       update: data
+    });
+  }
+
+  async replacePublishedRuleVersion(next: RentalRuleVersion, retiring: RentalRuleVersion[]): Promise<void> {
+    const data = this.ruleVersionData(next);
+    await this.prisma.$transaction(async (tx) => {
+      for (const row of retiring) {
+        await tx.rentalRuleVersion.update({
+          where: { id: row.id },
+          data: { status: "retired" }
+        });
+      }
+      await tx.rentalRuleVersion.upsert({
+        where: { id: next.id },
+        create: { id: next.id, ...data, createdAt: new Date(next.createdAt) },
+        update: data
+      });
     });
   }
 
