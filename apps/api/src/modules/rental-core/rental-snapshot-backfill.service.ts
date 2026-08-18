@@ -167,17 +167,45 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
   }
 
   /**
-   * 快路径：该租户是否已有规范化事实/配置行。命中即跳过，避免每次启动重复 upsert。
-   * 这不是正确性保证——正确性由各条 upsert 自身承担。
+   * 快路径：该租户是否**每一类**快照里有数据的规范化表都已有行。
+   *
+   * 早期实现用「任一表非空」判定，导致部分填充、人工写入或历史失败的租户被永久跳过——
+   * 全量 upsert 根本执行不到，"部分填充能自愈"这个说法当时是不成立的。
+   * 现在要求逐类齐备才跳过：只要还有一类该有数据却为空，就重跑整轮 upsert
+   * （upsert 对已存在的行是无害的，代价只是一次多余写入）。
    */
-  private async alreadyBackfilled(tenantId: string) {
-    const [locations, orders, quotes, groups] = await Promise.all([
-      this.prisma.rentalFulfillmentLocation.count({ where: { tenantId } }),
-      this.prisma.rentalOrder.count({ where: { tenantId } }),
-      this.prisma.rentalQuote.count({ where: { tenantId } }),
-      this.prisma.rentalItemGroup.count({ where: { tenantId } })
-    ]);
-    return locations + orders + quotes + groups > 0;
+  private async alreadyBackfilled(
+    tenantId: string,
+    core: CoreSnapshotState,
+    business: BusinessSnapshotState
+  ) {
+    const expectations: Array<{ expected: number; actual: () => Promise<number> }> = [
+      { expected: (core.operators ?? []).length, actual: () => this.prisma.rentalFulfillmentOperator.count({ where: { tenantId } }) },
+      { expected: (core.locations ?? []).length, actual: () => this.prisma.rentalFulfillmentLocation.count({ where: { tenantId } }) },
+      { expected: (core.itemGroups ?? []).length, actual: () => this.prisma.rentalItemGroup.count({ where: { tenantId } }) },
+      { expected: (core.assets ?? []).length, actual: () => this.prisma.rentalAsset.count({ where: { tenantId } }) },
+      { expected: (core.stockBalances ?? []).length, actual: () => this.prisma.rentalStockBalance.count({ where: { tenantId } }) },
+      { expected: (core.couponTemplates ?? []).length, actual: () => this.prisma.rentalCouponTemplate.count({ where: { tenantId } }) },
+      { expected: (core.inspectionTemplates ?? []).length, actual: () => this.prisma.rentalInspectionTemplate.count({ where: { tenantId } }) },
+      { expected: (core.orders ?? []).length, actual: () => this.prisma.rentalOrder.count({ where: { tenantId } }) },
+      { expected: (core.inspections ?? []).length, actual: () => this.prisma.rentalInspectionRecord.count({ where: { tenantId } }) },
+      { expected: (business.quotes ?? []).length, actual: () => this.prisma.rentalQuote.count({ where: { tenantId } }) },
+      { expected: (business.customerCoupons ?? []).length, actual: () => this.prisma.rentalCustomerCoupon.count({ where: { tenantId } }) },
+      { expected: (business.rewardLedger ?? []).length, actual: () => this.prisma.rentalRewardLedgerEntry.count({ where: { tenantId } }) },
+      { expected: (business.benefitAccounts ?? []).length, actual: () => this.prisma.rentalBenefitAccount.count({ where: { tenantId } }) },
+      { expected: (business.referrals ?? []).length, actual: () => this.prisma.rentalReferral.count({ where: { tenantId } }) },
+      { expected: (business.notificationTemplates ?? []).length, actual: () => this.prisma.rentalNotificationTemplate.count({ where: { tenantId } }) },
+      { expected: (business.notificationLogs ?? []).length, actual: () => this.prisma.rentalNotificationLog.count({ where: { tenantId } }) },
+      { expected: (business.pricingPlans ?? []).length, actual: () => this.prisma.rentalPricingPlan.count({ where: { tenantId } }) },
+      { expected: (business.discountPlans ?? []).length, actual: () => this.prisma.rentalDiscountPlan.count({ where: { tenantId } }) },
+      { expected: (business.services ?? []).length, actual: () => this.prisma.rentalValueAddedService.count({ where: { tenantId } }) },
+      { expected: (business.ruleVersions ?? []).length, actual: () => this.prisma.rentalRuleVersion.count({ where: { tenantId } }) },
+      { expected: (business.calendars ?? []).length, actual: () => this.prisma.rentalBusinessCalendar.count({ where: { tenantId } }) }
+    ];
+    const pending = expectations.filter((row) => row.expected > 0);
+    if (!pending.length) return false;
+    const actuals = await Promise.all(pending.map((row) => row.actual()));
+    return actuals.every((value, index) => value >= pending[index].expected);
   }
 
   private async backfillTenant(
@@ -185,7 +213,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
     core: CoreSnapshotState,
     business: BusinessSnapshotState
   ): Promise<BackfillTenantResult> {
-    if (await this.alreadyBackfilled(tenantId)) {
+    if (await this.alreadyBackfilled(tenantId, core, business)) {
       return { tenantId, skipped: true, reason: "已存在规范化数据", inserted: {} };
     }
     // 租户必须存在，否则所有外键都会失败——这属于数据不一致，应明确报错。

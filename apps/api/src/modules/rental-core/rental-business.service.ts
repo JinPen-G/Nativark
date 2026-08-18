@@ -126,6 +126,8 @@ function serviceType(name: string): RentalValueAddedService["serviceType"] {
 @Injectable()
 export class RentalBusinessService implements OnModuleInit, OnApplicationBootstrap {
   private readonly states = new Map<string, RentalBusinessState>();
+  /** 启动预热时从库中收集的租户品类，用于业务快照行丢失后重建状态。 */
+  private readonly bootstrapCategoryByTenant = new Map<string, RentalCategoryCode>();
 
   constructor(
     @Inject(RentalBusinessConfigRepository) private readonly configStore: RentalBusinessConfigStore,
@@ -140,24 +142,30 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
    * 在它之前预热会读到还没回填的空表。
    */
   async onApplicationBootstrap() {
+    // 先记下库中各租户的品类：业务快照行丢失时，重建业务状态需要它。
+    this.bootstrapCategoryByTenant.clear();
     for (const snapshot of await this.configStore.loadAll()) {
+      if (snapshot.categoryCode) this.bootstrapCategoryByTenant.set(snapshot.tenantId, snapshot.categoryCode);
       const state = this.states.get(snapshot.tenantId);
       if (!state) continue;
-      if (snapshot.pricingPlans.length) state.pricingPlans = snapshot.pricingPlans;
-      if (snapshot.discountPlans.length) state.discountPlans = snapshot.discountPlans;
-      if (snapshot.services.length) state.services = snapshot.services;
-      if (snapshot.calendars.length) state.calendars = snapshot.calendars;
-      if (snapshot.ruleVersions.length) state.ruleVersions = snapshot.ruleVersions;
-      if (snapshot.notificationTemplates.length) state.notificationTemplates = snapshot.notificationTemplates;
+      // 无条件覆盖，包括空数组：库里没有就是没有。
+      // 「非空才覆盖」会让合法为空的配置继续保留 JSON 快照或 seedState 的演示数据，
+      // 使快照在读路径上静默胜出。
+      state.pricingPlans = snapshot.pricingPlans;
+      state.discountPlans = snapshot.discountPlans;
+      state.services = snapshot.services;
+      state.calendars = snapshot.calendars;
+      state.ruleVersions = snapshot.ruleVersions;
+      state.notificationTemplates = snapshot.notificationTemplates;
     }
-    // 业务事实一律以库为准，直接覆盖而非"非空才覆盖"。
+    // 业务事实一律以库为准。
     //
-    // onModuleInit 会从 JSON 快照装载整个业务聚合（含事实），若这里不覆盖，
-    // 事实就有两个来源：内存副本来自快照、写入却走库，快照一旦落后于库，
-    // 读到的券状态和奖励流水就是旧的。空数组覆盖也是正确语义——库里没有就是没有，
-    // 这样快照才真正降级为恢复副本而不再是事实源。
+    // 关键：不能像配置那样"内存里没有该租户就跳过"。onModuleInit 只从 JSON 快照建状态，
+    // 若整条业务快照行丢失而规范化表尚在，跳过就等于把库里的事实读出来又扔掉，
+    // 随后系统用空白默认状态继续运行——那样快照仍是事实源，验收并未真正满足。
+    // 因此这里在内存缺失时按库中品类建出状态。
     for (const facts of await this.factStore.loadAll()) {
-      const state = this.states.get(facts.tenantId);
+      const state = this.states.get(facts.tenantId) ?? this.stateFromFacts(facts.tenantId);
       if (!state) continue;
       state.quotes = facts.quotes;
       state.customerCoupons = facts.customerCoupons;
@@ -165,7 +173,33 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       state.benefitAccounts = facts.benefitAccounts;
       state.referrals = facts.referrals;
       state.notificationLogs = facts.notificationLogs;
+      this.states.set(facts.tenantId, state);
     }
+  }
+
+  /**
+   * 业务快照行丢失时，按库中该租户的品类重建空业务状态，供事实覆盖使用。
+   * 品类取自业务配置表；若连配置也没有则无法判定品类，返回 undefined 交由
+   * 后续请求经 `state(tenantId, context)` 用登录上下文的品类正常建立。
+   */
+  private stateFromFacts(tenantId: string): RentalBusinessState | undefined {
+    const categoryCode = this.bootstrapCategoryByTenant.get(tenantId);
+    if (!categoryCode) return undefined;
+    return {
+      categoryCode,
+      pricingPlans: [],
+      discountPlans: [],
+      services: [],
+      calendars: [],
+      ruleVersions: [],
+      customerCoupons: [],
+      rewardLedger: [],
+      benefitAccounts: [],
+      referrals: [],
+      notificationTemplates: [],
+      notificationLogs: [],
+      quotes: []
+    };
   }
 
   async onModuleInit() {
@@ -243,8 +277,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       version: versionAfter(existing?.version), effectiveFrom: input.effectiveFrom, effectiveTo: input.effectiveTo,
       rates, createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp
     };
-    if (existing) Object.assign(existing, result); else state.pricingPlans.unshift(result);
     await this.configStore.upsertPricingPlan(result);
+
+    if (existing) Object.assign(existing, result); else state.pricingPlans.unshift(result);
     return result;
   }
 
@@ -269,8 +304,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       code: input.code.trim(), name: input.name.trim(), version: versionAfter(existing?.version),
       createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp
     };
-    if (existing) Object.assign(existing, result); else state.discountPlans.unshift(result);
     await this.configStore.upsertDiscountPlan(result);
+
+    if (existing) Object.assign(existing, result); else state.discountPlans.unshift(result);
     return result;
   }
 
@@ -292,8 +328,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       code: input.code.trim(), name: input.name.trim(), version: versionAfter(existing?.version),
       createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp
     };
-    if (existing) Object.assign(existing, result); else state.services.unshift(result);
     await this.configStore.upsertService(result);
+
+    if (existing) Object.assign(existing, result); else state.services.unshift(result);
     return result;
   }
 
@@ -374,8 +411,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       config: structuredClone(input.config), changeReason: input.changeReason.trim(), createdBy: operator,
       createdAt: stamp(), publishedAt: input.publish ? stamp() : undefined
     };
-    state.ruleVersions.unshift(result);
     await this.configStore.upsertRuleVersion(result);
+
+    state.ruleVersions.unshift(result);
     return result;
   }
 
@@ -528,8 +566,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       ...input, id: existing?.id ?? uid("notification_template"), tenantId,
       version: versionAfter(existing?.version), updatedAt: stamp()
     };
-    if (existing) Object.assign(existing, result); else state.notificationTemplates.unshift(result);
     await this.configStore.upsertNotificationTemplate(result);
+
+    if (existing) Object.assign(existing, result); else state.notificationTemplates.unshift(result);
     return result;
   }
 

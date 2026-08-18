@@ -25,6 +25,15 @@ export interface TenantConfigSnapshot {
   itemGroups: RentalItemGroup[];
   couponTemplates: RentalCouponTemplate[];
   inspectionTemplates: RentalInspectionTemplate[];
+  /**
+   * 该租户的配置是否真的写过库（存在品类档案之外的任一配置行）。
+   *
+   * 需要这个标记是因为租户集合里包含只有 `tenant_rental_profiles` 行的租户——
+   * seed 会建品类档案但不建商品组和地点。缺少它就无法区分两种情况：
+   * 「库里合法为空」应当覆盖缓存，而「库还没写过」必须保留 seedState 的内存配置，
+   * 否则冷启动会把演示商品组直接抹掉。
+   */
+  hasPersistedConfig: boolean;
 }
 
 /**
@@ -120,7 +129,15 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
         .map((row) => this.toCouponTemplate(row)),
       inspectionTemplates: inspectionTemplates
         .filter((row) => row.tenantId === tenantId)
-        .map((row) => this.toInspectionTemplate(row))
+        .map((row) => this.toInspectionTemplate(row)),
+      // 品类档案不计入：seed 只建档案，不代表配置写过库。
+      hasPersistedConfig:
+        settings.some((row) => row.tenantId === tenantId) ||
+        operators.some((row) => row.tenantId === tenantId) ||
+        locations.some((row) => row.tenantId === tenantId) ||
+        itemGroups.some((row) => row.tenantId === tenantId) ||
+        couponTemplates.some((row) => row.tenantId === tenantId) ||
+        inspectionTemplates.some((row) => row.tenantId === tenantId)
     }));
   }
 

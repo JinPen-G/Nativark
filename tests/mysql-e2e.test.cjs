@@ -1230,6 +1230,84 @@ async function main() {
     `快照已降级：清空快照中的券/奖励/报价后重启，仍从库恢复出 ${couponsAfterTamper.length} 张券与 ${rewardsAfterTamper.length} 条奖励流水`
   );
 
+  console.log("== 22. RC-01 整条业务快照行丢失后仍从规范化表恢复 ==");
+  // 第 21 节只清空快照里的数组，快照行本身还在，因此内存状态仍能由它建出来。
+  // 那测不出真正的风险：若整条快照行丢失，onApplicationBootstrap 曾因"内存里没有该租户
+  // 就跳过"而把库中事实读出来又丢弃，随后用空白默认状态继续运行——快照实际仍是事实源。
+  // 这一节直接删掉整行，是该结论唯一能被证伪的检查方式。
+  const couponsBeforeDrop = readCount("SELECT COUNT(*) FROM `rental_customer_coupons` WHERE `tenantId`='tenant_001';");
+  const rewardsBeforeDrop = readCount("SELECT COUNT(*) FROM `rental_reward_ledger_entries` WHERE `tenantId`='tenant_001';");
+  assert.ok(couponsBeforeDrop > 0 && rewardsBeforeDrop > 0, "本节需要库中已有券与奖励事实");
+  mysqlQuery("DELETE FROM `rental_business_state_snapshots` WHERE `tenantId`='tenant_001';");
+  assert.equal(
+    readCount("SELECT COUNT(*) FROM `rental_business_state_snapshots` WHERE `tenantId`='tenant_001';"),
+    0,
+    "业务快照行未删除，本节无法判定"
+  );
+  await stopApi();
+  startApi();
+  if (!(await waitHealth())) fail("快照行删除后的 API 重启超时");
+  const demoNoSnapshot = await login("demo", "admin", DEMO_PASSWORD);
+  const couponsNoSnapshot = (
+    await request("GET", "/api/rental/v1/customer-coupons", null, demoNoSnapshot.accessToken)
+  ).body.data;
+  const rewardsNoSnapshot = (await request("GET", "/api/rental/v1/rewards", null, demoNoSnapshot.accessToken)).body.data;
+  assert.equal(
+    couponsNoSnapshot.length,
+    couponsBeforeDrop,
+    `快照行丢失后券必须全部从库恢复，期望 ${couponsBeforeDrop} 实际 ${couponsNoSnapshot.length}`
+  );
+  assert.equal(
+    rewardsNoSnapshot.length,
+    rewardsBeforeDrop,
+    `快照行丢失后奖励流水必须全部从库恢复，期望 ${rewardsBeforeDrop} 实际 ${rewardsNoSnapshot.length}`
+  );
+  ok(`整条业务快照行删除后重启，仍从库完整恢复 ${couponsNoSnapshot.length} 张券与 ${rewardsNoSnapshot.length} 条奖励流水`);
+
+  console.log("== 23. RC-01 部分规范化数据可自愈补齐 ==");
+  // 早期回填用"任一表非空即视为已完成"判定，部分填充的租户会被永久跳过，
+  // 全量 upsert 根本执行不到。这里删掉某几类事实后重启，验证其余各类被补齐。
+  const snapshotTenant = mysqlQuery(
+    "SELECT `tenantId` FROM `rental_core_state_snapshots` WHERE JSON_LENGTH(`state`->'$.itemGroups') > 0 LIMIT 1;"
+  )
+    .split(/\r?\n/)
+    .filter((line) => line.trim() && line.trim() !== "tenantId")
+    .pop()
+    .trim();
+  const expectedGroups = readCount(
+    `SELECT JSON_LENGTH(\`state\`->'$.itemGroups') FROM \`rental_core_state_snapshots\` WHERE \`tenantId\`='${snapshotTenant}';`
+  );
+  // 删除商品组会连带删掉引用它的资产与订单行，因此改删不被其他表引用的检查模板：
+  // 它同样属于"快照里有、库里被清空"的部分填充场景，且不触发外键级联。
+  const expectedTemplates = readCount(
+    `SELECT JSON_LENGTH(\`state\`->'$.inspectionTemplates') FROM \`rental_core_state_snapshots\` WHERE \`tenantId\`='${snapshotTenant}';`
+  );
+  assert.ok(expectedTemplates > 0, "本节需要快照中存在检查模板");
+  mysqlQuery(
+    `DELETE r FROM \`rental_inspection_records\` r WHERE r.\`tenantId\`='${snapshotTenant}';\n` +
+      `DELETE FROM \`rental_inspection_templates\` WHERE \`tenantId\`='${snapshotTenant}';`
+  );
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_inspection_templates\` WHERE \`tenantId\`='${snapshotTenant}';`),
+    0,
+    "检查模板未清空，本节无法判定"
+  );
+  // 商品组仍在（未删），构成"部分已填充"的状态——旧判定会因此整租户跳过。
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_item_groups\` WHERE \`tenantId\`='${snapshotTenant}';`),
+    expectedGroups,
+    "商品组应保持存在，用于构造部分填充场景"
+  );
+  await stopApi();
+  startApi();
+  if (!(await waitHealth())) fail("部分填充自愈校验的 API 重启超时");
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_inspection_templates\` WHERE \`tenantId\`='${snapshotTenant}';`),
+    expectedTemplates,
+    "部分填充租户的缺失事实必须被回填补齐"
+  );
+  ok(`部分填充自愈：商品组保留 ${expectedGroups} 行的同时清空检查模板，重启后补齐 ${expectedTemplates} 行`);
+
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);
 }
 

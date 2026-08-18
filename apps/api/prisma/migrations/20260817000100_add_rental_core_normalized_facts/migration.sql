@@ -402,4 +402,3 @@ ALTER TABLE `rental_notification_logs` ADD CONSTRAINT `rental_notification_logs_
 
 -- AddForeignKey
 ALTER TABLE `rental_notification_logs` ADD CONSTRAINT `rental_notification_logs_templateId_fkey` FOREIGN KEY (`templateId`) REFERENCES `rental_notification_templates`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
-

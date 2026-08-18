@@ -217,11 +217,21 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       const base = cached ?? this.seedState(snapshot.tenantId, categoryCode);
       if (snapshot.profile) base.profile = snapshot.profile;
       if (snapshot.businessSettings) base.businessSettings = snapshot.businessSettings;
-      if (snapshot.operators.length) base.operators = snapshot.operators;
-      if (snapshot.locations.length) base.locations = snapshot.locations;
-      if (snapshot.itemGroups.length) base.itemGroups = snapshot.itemGroups;
-      if (snapshot.couponTemplates.length) base.couponTemplates = snapshot.couponTemplates;
-      if (snapshot.inspectionTemplates.length) base.inspectionTemplates = snapshot.inspectionTemplates;
+      // 库写过配置的租户：无条件覆盖，包括空数组——库里没有就是没有。
+      // 「非空才覆盖」会让合法为空的配置继续保留快照或 seedState 的演示数据，
+      // 使快照在读路径上静默胜出。
+      //
+      // 但只有品类档案（seed 建的）而没写过任何配置的租户不能覆盖：那不是
+      // "库里为空"而是"库还没写"，覆盖会把 seedState 的演示商品组直接抹掉，
+      // 后续 factContext 补落时已无内容可写。
+      if (snapshot.hasPersistedConfig) {
+        base.operators = snapshot.operators;
+        base.locations = snapshot.locations;
+        base.itemGroups = snapshot.itemGroups;
+        base.couponTemplates = snapshot.couponTemplates;
+        base.inspectionTemplates = snapshot.inspectionTemplates;
+        base.configPersisted = true;
+      }
       this.states.set(snapshot.tenantId, base);
     }
   }
@@ -350,8 +360,9 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       applicableItemGroupIds: [...new Set(input.applicableItemGroupIds ?? [])], status: input.status ?? existing?.status ?? "draft",
       version: nextVersion, createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp
     };
-    if (existing) state.couponTemplates.splice(state.couponTemplates.indexOf(existing), 1, result); else state.couponTemplates.unshift(result);
     await this.configStore.upsertCouponTemplate(result);
+
+    if (existing) state.couponTemplates.splice(state.couponTemplates.indexOf(existing), 1, result); else state.couponTemplates.unshift(result);
     return result;
   }
 
@@ -392,8 +403,9 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       settlementMode: input.settlementMode ?? (input.type === "partner" ? "monthly" : "self"),
       status: input.status ?? existing?.status ?? "enabled", createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp
     };
-    if (existing) state.operators.splice(state.operators.indexOf(existing), 1, result); else state.operators.unshift(result);
     await this.configStore.upsertOperator(result);
+
+    if (existing) state.operators.splice(state.operators.indexOf(existing), 1, result); else state.operators.unshift(result);
     return result;
   }
 
@@ -432,8 +444,9 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       businessHours: input.businessHours?.trim(),
       status: input.status ?? existing?.status ?? "enabled"
     };
-    if (existing) state.locations.splice(state.locations.indexOf(existing), 1, result); else state.locations.unshift(result);
     await this.configStore.upsertLocation(result);
+
+    if (existing) state.locations.splice(state.locations.indexOf(existing), 1, result); else state.locations.unshift(result);
     return result;
   }
   listItemGroups(tenantId: string) { return this.state(tenantId).itemGroups; }
@@ -459,8 +472,9 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       bundleComponents: components, status: input.status ?? existing?.status ?? "enabled",
       createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp
     };
-    if (existing) state.itemGroups.splice(state.itemGroups.indexOf(existing), 1, result); else state.itemGroups.unshift(result);
     await this.configStore.upsertItemGroup(result);
+
+    if (existing) state.itemGroups.splice(state.itemGroups.indexOf(existing), 1, result); else state.itemGroups.unshift(result);
     return result;
   }
 
