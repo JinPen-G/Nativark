@@ -168,7 +168,7 @@ function fail(message, detail) {
 
 /* ---------- HTTP 与 API 子进程 ---------- */
 
-function request(method, requestPath, body, token) {
+function request(method, requestPath, body, token, extraHeaders) {
   return new Promise((resolve, reject) => {
     const payload = body ? JSON.stringify(body) : null;
     const url = new URL(requestPath, API_BASE);
@@ -183,7 +183,8 @@ function request(method, requestPath, body, token) {
         headers: {
           "Content-Type": "application/json",
           Connection: "close",
-          ...(token ? { Authorization: `Bearer ${token}` } : {})
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(extraHeaders || {})
         }
       },
       (res) => {
@@ -1454,6 +1455,97 @@ async function main() {
   );
   ok(
     `快照已降级：清空快照中的券/奖励/报价后重启，仍从库恢复出 ${couponsAfterTamper.length} 张券与 ${rewardsAfterTamper.length} 条奖励流水`
+  );
+
+  console.log("== RC-04. 订单创建业务幂等 ==");
+  // 幂等只能用真实并发与重放来证明：静态检查看不出"重复请求是否重复占了库存"。
+  const idemDemo = await login("demo", "admin", DEMO_PASSWORD);
+  const idemLoc = (await request("GET", "/api/rental/v1/locations", null, idemDemo.accessToken)).body.data[0];
+  const idemGroups = (await request("GET", "/api/rental/v1/item-groups", null, idemDemo.accessToken)).body.data
+    .filter((row) => row.inventoryMode === "serialized" && row.status === "enabled");
+  assert.ok(idemGroups.length, "缺少可用于幂等验证的序列化商品组");
+  const idemStart = new Date(Date.now() + 90 * 86400000).toISOString();
+  const idemEnd = new Date(Date.now() + 91 * 86400000).toISOString();
+  const idemLines = [{ itemGroupId: idemGroups[0].id, quantity: 1 }];
+  const availableFor = async () =>
+    (await request(
+      "POST",
+      "/api/rental/v1/availability",
+      { locationId: idemLoc.id, startAt: idemStart, endAt: idemEnd, lines: idemLines },
+      idemDemo.accessToken
+    )).body.data.lines[0].availableQuantity;
+
+  const idemBody = (quoteId) => ({
+    quoteId,
+    customerType: "personal",
+    customerName: "E2E幂等客户",
+    fulfillmentMode: "store_pickup_return",
+    fulfillmentLocationId: idemLoc.id,
+    startAt: idemStart,
+    endAt: idemEnd,
+    lines: idemLines
+  });
+  const newQuote = async () =>
+    (await request(
+      "POST",
+      "/api/rental/v1/quotes",
+      { customerType: "personal", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: idemLoc.id, startAt: idemStart, endAt: idemEnd, lines: idemLines },
+      idemDemo.accessToken
+    )).body.data;
+
+  // 1) 串行重放同一个 Idempotency-Key：必须返回同一张订单，且库存只被占一次。
+  const beforeSerial = await availableFor();
+  const q1 = await newQuote();
+  const key1 = `e2e-idem-${q1.id}`;
+  const first = await request("POST", "/api/rental/v1/orders", idemBody(q1.id), idemDemo.accessToken, { "Idempotency-Key": key1 });
+  assert.equal(first.status, 201, `幂等首次下单失败: ${JSON.stringify(first.body).slice(0, 200)}`);
+  const replay = await request("POST", "/api/rental/v1/orders", idemBody(q1.id), idemDemo.accessToken, { "Idempotency-Key": key1 });
+  assert.equal(replay.status, 201, `幂等重放应成功返回既有订单: ${JSON.stringify(replay.body).slice(0, 200)}`);
+  assert.equal(replay.body.data.id, first.body.data.id, "同幂等键重放必须返回同一张订单");
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_orders\` WHERE \`quoteId\`='${q1.id}';`),
+    1,
+    "同幂等键重放不得产生第二张订单"
+  );
+  assert.equal(await availableFor(), beforeSerial - 1, "重放不得二次占用库存");
+
+  // 2) 同键但请求体不同：必须报冲突，而不是静默返回上一次的订单。
+  const tampered = { ...idemBody(q1.id), customerName: "E2E幂等客户-改名" };
+  const conflict = await request("POST", "/api/rental/v1/orders", tampered, idemDemo.accessToken, { "Idempotency-Key": key1 });
+  assert.equal(conflict.status, 409, `同键不同请求体必须 409，实际 ${conflict.status}`);
+
+  // 3) 并发同键：只能成交一张，且两个响应指向同一张订单。
+  const beforeConcurrent = await availableFor();
+  const q2 = await newQuote();
+  const key2 = `e2e-idem-concurrent-${q2.id}`;
+  const [c1, c2] = await Promise.all([
+    request("POST", "/api/rental/v1/orders", idemBody(q2.id), idemDemo.accessToken, { "Idempotency-Key": key2 }),
+    request("POST", "/api/rental/v1/orders", idemBody(q2.id), idemDemo.accessToken, { "Idempotency-Key": key2 })
+  ]);
+  const created = [c1, c2].filter((res) => res.status === 201);
+  assert.ok(created.length >= 1, `并发同键至少应有一个成功: ${c1.status}/${c2.status}`);
+  const ids = new Set(created.map((res) => res.body.data.id));
+  assert.equal(ids.size, 1, "并发同键的成功响应必须指向同一张订单");
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_orders\` WHERE \`quoteId\`='${q2.id}';`),
+    1,
+    "并发同键不得产生两张订单"
+  );
+  assert.equal(await availableFor(), beforeConcurrent - 1, "并发同键只应占用一次库存");
+
+  // 4) 幂等记录必须落库且带正确租户戳，否则重启后重放会再次建单。
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_order_idempotency_records\` WHERE \`idempotencyKey\`='${key1}' AND \`tenantId\`='tenant_001';`),
+    1,
+    "幂等记录必须落库并带租户戳"
+  );
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_order_idempotency_records\` WHERE \`orderId\`='${first.body.data.id}';`),
+    1,
+    "幂等记录必须回填 orderId 以便按单追溯"
+  );
+  ok(
+    `订单创建幂等：串行重放返回同一单且库存只占一次、同键改请求体 409、并发同键只成交一张、幂等记录落库带租户戳`
   );
 
   console.log("== 22. RC-01 整条业务快照行丢失后仍从规范化表恢复 ==");

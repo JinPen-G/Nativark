@@ -18,7 +18,18 @@ import { RentalCoreService } from "./rental-core.service";
 import { RentalBusinessService, type BusinessContext } from "./rental-business.service";
 import { RentalOrderConfirmationService } from "./rental-order-confirmation.service";
 
-interface AuthenticatedRequest { user: SystemUserRow; }
+/** 读取标准 Idempotency-Key 请求头。大小写不敏感，超长键直接拒绝。 */
+function idempotencyKeyOf(req: { headers?: Record<string, unknown> }): string | undefined {
+  const raw = req.headers?.["idempotency-key"] ?? req.headers?.["Idempotency-Key"];
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.length > 200) throw new BadRequestException("Idempotency-Key 过长");
+  return trimmed;
+}
+
+interface AuthenticatedRequest { user: SystemUserRow; headers?: Record<string, unknown>; }
 
 @Controller("rental/v1")
 export class RentalCoreController {
@@ -74,7 +85,14 @@ export class RentalCoreController {
   @Get("orders/:id") order(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.service.getOrder(req.user.tenantId, id); }
   @Post("orders") async createOrder(@Req() req: AuthenticatedRequest, @Body() body: CreateRentalOrderRequest) {
     const context = this.context(req.user.tenantId);
-    const order = await this.orderConfirmation.createOrder(req.user.tenantId, body, req.user.displayName, context);
+    // 幂等键取标准的 Idempotency-Key 请求头；未传时下单侧退回 quoteId（报价一次性使用）。
+    const order = await this.orderConfirmation.createOrder(
+      req.user.tenantId,
+      body,
+      req.user.displayName,
+      context,
+      idempotencyKeyOf(req)
+    );
     await this.emitOrderEvent(req.user.tenantId, "order.created", order);
     return this.committed(req.user.tenantId, order);
   }

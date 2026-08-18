@@ -310,6 +310,7 @@ model Tenant {
   rentalValueAddedServices  RentalValueAddedService[]
   rentalRuleVersions        RentalRuleVersion[]
   rentalBusinessCalendars   RentalBusinessCalendar[]
+  rentalIdempotencyRecords  RentalOrderIdempotencyRecord[]
   rentalCoreStateSnapshot   RentalCoreStateSnapshot?
   rentalBusinessStateSnapshot RentalBusinessStateSnapshot?
   createdAt                 DateTime                    @default(now())
@@ -1651,11 +1652,18 @@ model OperationLog {
   user      User?             @relation(fields: [userId], references: [id])
   orderId   String?
   order     StoreRentalOrder? @relation(fields: [orderId], references: [id])
+  /// 通用租赁订单引用。`orderId` 的外键指向车辆兼容域的 StoreRentalOrder，
+  /// 无法承载 Rental Core 订单，因此 RC-04 的审计事件走这一列。
+  /// 不新建审计表：本表已有 tenantId/userId/action/detail 与平台审计查询，
+  /// 再建一张只会造出第二个审计事实源。
+  rentalOrderId String?
+  rentalOrder   RentalOrder?  @relation(fields: [rentalOrderId], references: [id])
   action    String
   detail    Json
   createdAt DateTime          @default(now())
 
   @@index([tenantId, action, createdAt])
+  @@index([tenantId, rentalOrderId, createdAt])
 }
 
 model ConfigVersion {
@@ -2140,6 +2148,8 @@ model RentalOrder {
   reservations          RentalReservation[]
   allocations           RentalAllocation[]
   inspections           RentalInspectionRecord[]
+  idempotencyRecords    RentalOrderIdempotencyRecord[]
+  auditLogs             OperationLog[]
   createdAt             DateTime                  @default(now())
   updatedAt             DateTime                  @updatedAt
 
@@ -2579,4 +2589,32 @@ model RentalNotificationLog {
   @@index([tenantId, status, createdAt], map: "rental_notification_logs_tenant_status_created_idx")
   @@index([templateId])
   @@map("rental_notification_logs")
+}
+
+/// RC-04：通用租赁订单动作的业务幂等记录。
+///
+/// 为什么不复用 `OrderIdempotencyRecord`：那张表的 orderId 外键指向车辆兼容域的
+/// `StoreRentalOrder`，承载不了 Rental Core 订单；改成双引用会造出双事实源表结构，
+/// 与 RC-05「停止双事实源扩张」相悖。旧表留给车辆域，等 RC-05 收口。
+model RentalOrderIdempotencyRecord {
+  id        String   @id @default(uuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// 订单创建时订单还不存在，因此可空；创建成功后回填，供按单追溯。
+  orderId   String?
+  order     RentalOrder? @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  action    String
+  idempotencyKey String
+  /// 请求体指纹。同键但不同请求体属于调用方错误，必须报冲突而不是返回上一次的结果——
+  /// 否则「改了金额重发同一个键」会静默拿到旧订单。
+  requestHash String
+  status    String   @default("succeeded")
+  /// 首次成功的响应快照，重复请求据此原样返回，不重新推进状态。
+  response  Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, action, idempotencyKey], map: "rental_idempotency_tenant_action_key")
+  @@index([tenantId, orderId, action], map: "rental_idempotency_tenant_order_action_idx")
+  @@map("rental_order_idempotency_records")
 }

@@ -35,6 +35,7 @@ import { RentalCoreConfigRepository } from "./modules/rental-core/rental-core-co
 import { RentalCoreFactRepository } from "./modules/rental-core/rental-core-fact.repository";
 import { RentalBusinessConfigRepository } from "./modules/rental-core/rental-business-config.repository";
 import { RentalBusinessFactRepository } from "./modules/rental-core/rental-business-fact.repository";
+import { RentalIdempotencyRepository } from "./modules/rental-core/rental-idempotency.repository";
 import { RentalOrderConfirmationService } from "./modules/rental-core/rental-order-confirmation.service";
 
 @Module({
@@ -76,6 +77,7 @@ import { RentalOrderConfirmationService } from "./modules/rental-core/rental-ord
     RentalCoreFactRepository,
     RentalBusinessConfigRepository,
     RentalBusinessFactRepository,
+    RentalIdempotencyRepository,
     RentalOrderConfirmationService,
     IntegrationsService,
     IntegrationsRepository,
