@@ -7,6 +7,7 @@ require("ts-node").register({
 
 const { RentalCoreService } = require("../apps/api/src/modules/rental-core/rental-core.service");
 const { RentalBusinessService } = require("../apps/api/src/modules/rental-core/rental-business.service");
+const { createAbsorbingConfigStore, createAbsorbingFactStore, createAbsorbingBusinessConfigStore, createAbsorbingBusinessFactStore } = require("./helpers/absorbing-config-store.cjs");
 
 class FakeRepository {
   constructor() { this.core = new Map(); this.business = new Map(); }
@@ -19,13 +20,15 @@ class FakeRepository {
 
 (async () => {
   const repository = new FakeRepository();
-  const core = new RentalCoreService(repository);
+  // 本用例验证的是 JSON 聚合快照的重启恢复，配置落库不在其关注范围，故注入吸收式 store。
+  // 注意：阶段 4 把快照正式降级为恢复副本后，本用例的主题即被 mysql-e2e 第 17/18 节取代，应退休。
+  const core = new RentalCoreService(createAbsorbingConfigStore(), createAbsorbingFactStore(), repository);
   await core.onModuleInit();
   assert.equal(core.getProfile("tenant_camera_db").categoryCode, "camera", "database tenant profile must initialize the right category");
-  core.saveOperator("tenant_camera_db", { code: "PARTNER", name: "摄影合作商", type: "partner", settlementMode: "monthly" });
+  await core.saveOperator("tenant_camera_db", { code: "PARTNER", name: "摄影合作商", type: "partner", settlementMode: "monthly" });
   await core.persist("tenant_camera_db");
 
-  const business = new RentalBusinessService(repository);
+  const business = new RentalBusinessService(createAbsorbingBusinessConfigStore(), createAbsorbingBusinessFactStore(), createAbsorbingConfigStore(), repository);
   const context = () => {
     const profile = core.getProfile("tenant_camera_db");
     return { profile, category: core.listCategories().find((item) => item.code === profile.categoryCode), settings: core.getBusinessSettings("tenant_camera_db"), groups: core.listItemGroups("tenant_camera_db"), couponTemplates: core.listCouponTemplates("tenant_camera_db") };
@@ -33,8 +36,8 @@ class FakeRepository {
   business.listPricingPlans("tenant_camera_db", context());
   await business.persist("tenant_camera_db");
 
-  const restoredCore = new RentalCoreService(repository);
-  const restoredBusiness = new RentalBusinessService(repository);
+  const restoredCore = new RentalCoreService(createAbsorbingConfigStore(), createAbsorbingFactStore(), repository);
+  const restoredBusiness = new RentalBusinessService(createAbsorbingBusinessConfigStore(), createAbsorbingBusinessFactStore(), createAbsorbingConfigStore(), repository);
   await Promise.all([restoredCore.onModuleInit(), restoredBusiness.onModuleInit()]);
   assert.equal(restoredCore.listOperators("tenant_camera_db").some((item) => item.code === "PARTNER"), true, "core state must survive service restart");
   const restoredProfile = restoredCore.getProfile("tenant_camera_db");

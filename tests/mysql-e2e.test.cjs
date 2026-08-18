@@ -23,6 +23,15 @@ const path = require("node:path");
 const ROOT = path.resolve(__dirname, "..");
 const API_DIR = path.join(ROOT, "apps", "api");
 const SCHEMA_PATH = path.join(API_DIR, "prisma", "schema.prisma");
+const MIGRATIONS_DIR = path.join(API_DIR, "prisma", "migrations");
+
+// 期望迁移条数由迁移目录推导，而不是写死常量：写死会让"新增一条迁移"必然连带
+// 改测试期望值，而改期望值时很容易顺手填成实际观测值，从此失去校验意义。
+const EXPECTED_MIGRATIONS = fs
+  .readdirSync(MIGRATIONS_DIR, { withFileTypes: true })
+  .filter(
+    (entry) => entry.isDirectory() && fs.existsSync(path.join(MIGRATIONS_DIR, entry.name, "migration.sql"))
+  ).length;
 
 /* ---------- 配置解析：环境变量优先，其次本地 .env（不入仓库） ---------- */
 
@@ -131,6 +140,12 @@ function readCount(sql) {
   return Number(match[1]);
 }
 
+function readScalar(sql) {
+  const lines = mysqlQuery(sql).split(/\r?\n/u).filter((line) => line.trim());
+  if (lines.length < 2) fail(`标量查询无结果: ${sql}`);
+  return lines.at(-1).trim();
+}
+
 /* ---------- 断言与进度输出 ---------- */
 
 let passedGroups = 0;
@@ -138,9 +153,15 @@ function ok(message) {
   passedGroups += 1;
   console.log(`  PASS  ${message}`);
 }
+let apiLogRef = null;
 function fail(message, detail) {
   console.error(`  FAIL  ${message}`);
   if (detail) console.error(detail);
+  // API 侧 500 在断言层看不到成因，这里附上子进程日志尾部，避免只留一个状态码。
+  if (apiLogRef && apiLogRef.length) {
+    console.error("--- API 日志尾部 ---");
+    console.error(apiLogRef.join("").slice(-3000));
+  }
   process.exitCode = 1;
   throw new Error(message);
 }
@@ -155,8 +176,13 @@ function request(method, requestPath, body, token) {
       url,
       {
         method,
+        // 必须禁用 keep-alive：Node 19+ 的 globalAgent 默认 keepAlive=true，
+        // 而本测试会重启 API（重启恢复与回填幂等两节）。连接池里指向旧进程的 socket
+        // 已失效，之后第一个复用它的请求会随机抛 ECONNRESET，表现为偶发失败。
+        agent: false,
         headers: {
           "Content-Type": "application/json",
+          Connection: "close",
           ...(token ? { Authorization: `Bearer ${token}` } : {})
         }
       },
@@ -209,6 +235,7 @@ function startApi() {
     stdio: ["ignore", "pipe", "pipe"]
   });
   const logs = [];
+  apiLogRef = logs;
   apiProcess.stdout.on("data", (chunk) => logs.push(String(chunk)));
   apiProcess.stderr.on("data", (chunk) => logs.push(String(chunk)));
   apiProcess.on("exit", (code) => {
@@ -304,8 +331,10 @@ async function main() {
   const firstDeploy = deploy();
   if (firstDeploy.status !== 0) fail("空库 migrate deploy 失败", `${firstDeploy.stdout || ""}${firstDeploy.stderr || ""}`);
   const appliedCount = readCount("SELECT COUNT(*) FROM `_prisma_migrations` WHERE `finished_at` IS NOT NULL AND `rolled_back_at` IS NULL;");
-  if (!Number.isFinite(appliedCount) || appliedCount < 24) fail(`迁移数量异常: ${appliedCount}`);
-  ok(`全量迁移完成，_prisma_migrations=${appliedCount}`);
+  if (appliedCount !== EXPECTED_MIGRATIONS) {
+    fail(`迁移数量异常: 实际 ${appliedCount}，迁移目录 ${EXPECTED_MIGRATIONS}`);
+  }
+  ok(`全量迁移完成，_prisma_migrations=${appliedCount}/${EXPECTED_MIGRATIONS}`);
   const drift = runNode([PRISMA_CLI, "migrate", "diff", "--from-url", TEST_DATABASE_URL, "--to-schema-datamodel", SCHEMA_PATH]);
   if (drift.status !== 0) fail("migrate diff 执行失败", `${drift.stdout || ""}${drift.stderr || ""}`);
   const driftSql = `${drift.stdout || ""}${drift.stderr || ""}`.replace(
@@ -412,7 +441,7 @@ async function main() {
   assert.match(`${staleColumn.stdout || ""}${staleColumn.stderr || ""}`, /Unknown column/u, "旧列应已移除");
   assert.equal(
     readCount("SELECT COUNT(*) FROM `_prisma_migrations` WHERE `finished_at` IS NOT NULL AND `rolled_back_at` IS NULL;"),
-    24,
+    EXPECTED_MIGRATIONS,
     "升级后迁移记录应恢复完整"
   );
   ok("旧通知数据经升级完整保留并正确映射（tenantId/orderNo/event/截断规则）");
@@ -721,7 +750,7 @@ async function main() {
   const truckPlan = await request(
     "POST",
     "/api/rental/v1/pricing-plans",
-    { code: "E2E-TRUCK-PRICE", name: "E2E 货车价格", changeReason: "E2E 品类深度用例", status: "enabled", rates: [{ itemGroupId: truckGroup.body.data.id, unit: "day_24h", baseAmount: 600, weekendMultiplier: 1.1, holidayMultiplier: 1.25, depositAmount: 2000, minimumUnits: 1 }] },
+    { effectiveFrom: new Date(Date.now() - 86400000).toISOString(), code: "E2E-TRUCK-PRICE", name: "E2E 货车价格", changeReason: "E2E 品类深度用例", status: "enabled", rates: [{ itemGroupId: truckGroup.body.data.id, unit: "day_24h", baseAmount: 600, weekendMultiplier: 1.1, holidayMultiplier: 1.25, depositAmount: 2000, minimumUnits: 1 }] },
     vehicleA.accessToken
   );
   assert.equal(truckPlan.status, 201, `车辆定价计划失败: ${JSON.stringify(truckPlan.body).slice(0, 200)}`);
@@ -799,7 +828,7 @@ async function main() {
   const excavatorPlan = await request(
     "POST",
     "/api/rental/v1/pricing-plans",
-    { code: "E2E-EXCA-PRICE", name: "E2E 挖掘机价格", changeReason: "E2E 品类深度用例", status: "enabled", rates: [{ itemGroupId: excavatorGroup.body.data.id, unit: "shift", baseAmount: 1500, weekendMultiplier: 1.1, holidayMultiplier: 1.25, depositAmount: 5000, minimumUnits: 1 }] },
+    { effectiveFrom: new Date(Date.now() - 86400000).toISOString(), code: "E2E-EXCA-PRICE", name: "E2E 挖掘机价格", changeReason: "E2E 品类深度用例", status: "enabled", rates: [{ itemGroupId: excavatorGroup.body.data.id, unit: "shift", baseAmount: 1500, weekendMultiplier: 1.1, holidayMultiplier: 1.25, depositAmount: 5000, minimumUnits: 1 }] },
     construction.accessToken
   );
   assert.equal(excavatorPlan.status, 201, `工程定价计划失败: ${JSON.stringify(excavatorPlan.body).slice(0, 200)}`);
@@ -884,6 +913,652 @@ async function main() {
   assert.ok(readCount("SELECT COUNT(*) FROM `rental_core_state_snapshots` WHERE `tenantId`='tenant_001';") >= 1, "租户聚合快照缺失");
   ok(`重启后订单 ${restored.orderNo} 恢复为 completed，快照在库`);
 
+  console.log("== 18. RC-01 核心事实以数据库为事实源 ==");
+  // 阶段 3 后订单、行、预占、分配和检查记录直接写规范化表，聚合快照不再承载事实，
+  // 因此这里不能再拿快照里的 orders 做对账基准（那个键已经不存在了）。
+  // 快照 → 表的回填只对阶段 3 之前建立的旧库有意义，其自身幂等由下面的二次重启覆盖。
+  const orderRows = readCount("SELECT COUNT(*) FROM `rental_orders` WHERE `tenantId`='tenant_001';");
+  assert.ok(orderRows > 0, "订单必须落在 rental_orders 表中");
+  const lineRows = readCount(
+    "SELECT COUNT(*) FROM `rental_order_lines` l JOIN `rental_orders` o ON o.`id`=l.`orderId` WHERE o.`tenantId`='tenant_001';"
+  );
+  assert.ok(lineRows >= orderRows, "订单行必须随订单落库");
+  assert.ok(
+    readCount("SELECT COUNT(*) FROM `rental_reservations` WHERE `tenantId`='tenant_001';") > 0,
+    "预占必须落库"
+  );
+  assert.ok(
+    readCount(
+      "SELECT COUNT(*) FROM `rental_allocations` a JOIN `rental_orders` o ON o.`id`=a.`orderId` WHERE o.`tenantId`='tenant_001';"
+    ) > 0,
+    "分配必须落库"
+  );
+  assert.ok(
+    readCount("SELECT COUNT(*) FROM `rental_inspection_records` WHERE `tenantId`='tenant_001';") > 0,
+    "检查记录必须落库"
+  );
+  // 资产状态流转必须落到表上，而不是只存在于进程内。
+  assert.ok(
+    readCount("SELECT COUNT(*) FROM `rental_assets` WHERE `tenantId`='tenant_001' AND `status`='available';") > 0,
+    "归还后资产状态必须在表中回到 available"
+  );
+  // 金额必须按 Decimal 落库，不能因领域对象→列转换丢精度或写成 0。
+  assert.ok(
+    readCount("SELECT ROUND(SUM(`finalPayableAmount`)) FROM `rental_orders` WHERE `tenantId`='tenant_001';") > 0,
+    "订单最终应付金额不应为 0"
+  );
+
+  const beforeRestart = readCount("SELECT COUNT(*) FROM `rental_orders`;");
+  await stopApi();
+  startApi();
+  if (!(await waitHealth())) fail("事实源校验的 API 重启超时");
+  const afterRestart = readCount("SELECT COUNT(*) FROM `rental_orders`;");
+  assert.equal(afterRestart, beforeRestart, "重启不得重复写入订单");
+  // 重启后必须能从表恢复订单，而不是依赖进程内对象。
+  const demoAfterFactRestart = await login("demo", "admin", DEMO_PASSWORD);
+  const restoredOrders = (await request("GET", "/api/rental/v1/orders", null, demoAfterFactRestart.accessToken)).body.data;
+  assert.equal(restoredOrders.length, orderRows, "重启后订单列表必须与表中行数一致");
+  assert.ok(restoredOrders.some((row) => row.status === "completed"), "已完成订单必须从表中恢复");
+  ok(`核心事实以库为事实源：${orderRows} 单/${lineRows} 行落表，资产状态与金额在库，重启后从表恢复且不重复`);
+
+  console.log("== 19. RC-01 配置写穿：API 写入必须真正落库 ==");
+  // 这一节不可省：API 读配置走的是服务内存写穿缓存，因此即使写穿完全没生效，
+  // 前面所有通过 HTTP 的断言依然会全绿。只有直查库才能证明配置真的落了盘。
+  //
+  // 关键：必须用"本次新建"的配置来验证。若只检查前面各节创建的配置，
+  // 第 17 节重启会触发快照回填，回填同样能把这些行写进库，断言就失去了区分力。
+  const writeThroughCode = `E2E-WRITETHROUGH-${afterRestart}`;
+  // 第 18 节又重启过一次 API，第 17 节取得的会话已不可用，这里重新登录。
+  const demoForWriteThrough = await login("demo", "admin", DEMO_PASSWORD);
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_coupon_templates\` WHERE \`code\`='${writeThroughCode}';`),
+    0,
+    "写穿校验用的券模板编码必须尚不存在"
+  );
+  const writeThrough = await request(
+    "POST",
+    "/api/rental/v1/coupon-templates",
+    {
+      code: writeThroughCode,
+      name: "E2E 写穿校验券",
+      discountType: "fixed_amount",
+      discountValue: 5,
+      minimumSpend: 10,
+      totalQuota: 1,
+      perCustomerLimit: 1,
+      effectiveFrom: new Date(Date.now() - 86400000).toISOString(),
+      effectiveTo: new Date(Date.now() + 30 * 86400000).toISOString(),
+      status: "enabled"
+    },
+    demoForWriteThrough.accessToken
+  );
+  assert.equal(writeThrough.status, 201, `写穿校验券创建失败: ${JSON.stringify(writeThrough.body)}`);
+  // 未经任何重启或回填，该行必须已在库中。
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_coupon_templates\` WHERE \`code\`='${writeThroughCode}' AND \`tenantId\`='tenant_001';`),
+    1,
+    "配置写方法必须同步写穿到数据库，且带正确租户戳"
+  );
+
+  // 初始化落库：每个有品类档案的租户，主体、地点和业务设置都不能缺。
+  const profiledTenants = readCount("SELECT COUNT(*) FROM `tenant_rental_profiles`;");
+  assert.ok(profiledTenants >= 3, `品类档案数异常: ${profiledTenants}`);
+  for (const [table, label] of [
+    ["rental_fulfillment_operators", "经营主体"],
+    ["rental_fulfillment_locations", "履约地点"],
+    ["rental_tenant_business_settings", "业务设置"]
+  ]) {
+    const orphans = readCount(
+      `SELECT COUNT(*) FROM \`tenant_rental_profiles\` p WHERE NOT EXISTS (SELECT 1 FROM \`${table}\` t WHERE t.\`tenantId\`=p.\`tenantId\`);`
+    );
+    assert.equal(orphans, 0, `有 ${orphans} 个租户缺少${label}落库记录`);
+  }
+  // 套装组成是独立表，验证 upsertItemGroup 的整组替换确实写入了组件行。
+  assert.ok(
+    readCount("SELECT COUNT(*) FROM `rental_bundle_components`;") > 0,
+    "套装组成必须随商品组落库"
+  );
+  // 业务配置（定价、优惠、增值服务、日历、规则版本、通知模板）同样必须落库。
+  // 这些是阶段 4a 新迁的集合，前面各节都是经 API 读回、走内存缓存，无法证明写穿。
+  for (const [code, table] of [
+    ["E2E-TRUCK-PRICE", "rental_pricing_plans"],
+    ["E2E-EXCA-PRICE", "rental_pricing_plans"],
+    ["E2E-EXCLUSIVE", "rental_discount_plans"]
+  ]) {
+    assert.equal(
+      readCount(`SELECT COUNT(*) FROM \`${table}\` WHERE \`code\`='${code}';`),
+      1,
+      `经 API 创建的 ${code} 必须落库到 ${table}`
+    );
+  }
+  // 不能断言"每个租户都有业务配置"——默认配置按设计在该租户首次使用业务域时才落库，
+  // 只做过隔离校验、从未有业务写动作的租户在库中为空是正确的。
+  // 真正的不变量是：一旦某租户有任一类业务配置，六类都必须在（防止只落了一半）。
+  const businessConfigTables = [
+    ["rental_pricing_plans", "定价方案"],
+    ["rental_discount_plans", "优惠方案"],
+    ["rental_value_added_services", "增值服务"],
+    ["rental_rule_versions", "规则版本"],
+    ["rental_notification_templates", "通知模板"]
+  ];
+  const unionSql = businessConfigTables
+    .map(([table]) => `SELECT DISTINCT \`tenantId\` FROM \`${table}\``)
+    .join(" UNION ");
+  for (const [table, label] of businessConfigTables) {
+    const partial = readCount(
+      `SELECT COUNT(*) FROM (${unionSql}) tenants WHERE NOT EXISTS (SELECT 1 FROM \`${table}\` t WHERE t.\`tenantId\`=tenants.\`tenantId\`);`
+    );
+    assert.equal(partial, 0, `有 ${partial} 个已有业务配置的租户缺少${label}，说明配置只落了一半`);
+  }
+  // demo 与 demo2 全程有真实业务动作（报价、下单、优惠券），它们必须齐全。
+  for (const tenantId of ["tenant_001", "tenant_002"]) {
+    for (const [table, label] of businessConfigTables) {
+      assert.ok(
+        readCount(`SELECT COUNT(*) FROM \`${table}\` WHERE \`tenantId\`='${tenantId}';`) > 0,
+        `${tenantId} 必须有${label}落库记录`
+      );
+    }
+  }
+  // 营业日历：经 API 导入官方来源并发布，然后直查库确认状态与来源都落了盘。
+  // 此前 E2E 完全没碰日历接口，而它是阶段 4a 迁移的集合之一。
+  const calendarYear = new Date().getUTCFullYear() + 1;
+  const importedCalendar = await request(
+    "POST",
+    "/api/rental/v1/calendars/import",
+    {
+      year: calendarYear,
+      region: "CN",
+      sourceName: "E2E 官方节假日来源",
+      sourceUrl: "https://example.invalid/e2e-holidays",
+      sourcePublishedAt: new Date(Date.now() - 86400000).toISOString(),
+      days: [{ date: `${calendarYear}-10-01`, dayType: "statutory_holiday", name: "国庆节", pricingMultiplier: 1.5 }]
+    },
+    demoForWriteThrough.accessToken
+  );
+  assert.equal(importedCalendar.status, 201, `日历导入失败: ${JSON.stringify(importedCalendar.body)}`);
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_business_calendars\` WHERE \`tenantId\`='tenant_001' AND \`year\`=${calendarYear} AND \`status\`='draft';`),
+    1,
+    "导入后的日历必须以 draft 落库"
+  );
+  const publishedCalendar = await request(
+    "POST",
+    `/api/rental/v1/calendars/${calendarYear}/publish`,
+    null,
+    demoForWriteThrough.accessToken
+  );
+  assert.equal(publishedCalendar.status, 201, `日历发布失败: ${JSON.stringify(publishedCalendar.body)}`);
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_business_calendars\` WHERE \`tenantId\`='tenant_001' AND \`year\`=${calendarYear} AND \`status\`='published' AND \`sourceName\` IS NOT NULL AND JSON_LENGTH(\`days\`)>0;`),
+    1,
+    "发布后的日历必须在库中为 published，且来源与按日明细都在"
+  );
+  // JSON 明细列不能写成空：定价方案的 rates 是报价可复算的依据。
+  assert.equal(
+    readCount("SELECT COUNT(*) FROM `rental_pricing_plans` WHERE JSON_LENGTH(`rates`) IS NULL OR JSON_LENGTH(`rates`)=0;"),
+    0,
+    "定价方案的 rates 明细不得为空"
+  );
+
+  ok(`配置写穿已验证：核心与业务配置均落库（新建券模板未经重启即在库、定价/优惠/服务/规则/模板无租户遗漏、日历已发布、rates 明细非空），共 ${profiledTenants} 个租户`);
+
+  console.log("== 20. RC-01 业务事实以库为事实源 ==");
+  // 与配置同理：API 读业务事实走服务内存副本，写穿失效时前面的 HTTP 断言仍会全绿，
+  // 只有直查库能证明真的落盘。
+  //
+  // 奖励与权益账户默认规则是关闭的（membership.signupRewardEnabled=false），
+  // 前面各节从未触发发奖。这里先启用注册奖励再真实发一次，而不是把断言放宽——
+  // 断言测试不产生的数据没有意义，放宽同样没有意义。
+  const settingsBefore = (await request("GET", "/api/rental/v1/business-settings", null, demoForWriteThrough.accessToken)).body.data;
+  const enableReward = await request(
+    "PUT",
+    "/api/rental/v1/business-settings",
+    {
+      ...settingsBefore,
+      membership: { ...settingsBefore.membership, signupRewardEnabled: true, signupRewardType: "points", signupRewardAmount: 88 }
+    },
+    demoForWriteThrough.accessToken
+  );
+  assert.equal(enableReward.status, 200, `启用注册奖励失败: ${JSON.stringify(enableReward.body)}`);
+  const grant = await request(
+    "POST",
+    "/api/rental/v1/rewards/grant",
+    { customerId: "e2e_reward_member", triggerType: "registration", idempotencyKey: "e2e:reward:once" },
+    demoForWriteThrough.accessToken
+  );
+  assert.equal(grant.status, 201, `发放奖励失败: ${JSON.stringify(grant.body)}`);
+  // 同一幂等键重复发放不得新增流水。
+  const grantAgain = await request(
+    "POST",
+    "/api/rental/v1/rewards/grant",
+    { customerId: "e2e_reward_member", triggerType: "registration", idempotencyKey: "e2e:reward:once" },
+    demoForWriteThrough.accessToken
+  );
+  assert.equal(grantAgain.status, 201, "重复发放应幂等返回既有流水");
+  assert.equal(
+    readCount("SELECT COUNT(*) FROM `rental_reward_ledger_entries` WHERE `idempotencyKey`='e2e:reward:once';"),
+    1,
+    "同一幂等键在库中只能有一条奖励流水"
+  );
+  assert.equal(
+    readCount("SELECT ROUND(`pointsBalance`) FROM `rental_benefit_accounts` WHERE `customerId`='e2e_reward_member';"),
+    88,
+    "奖励入账后权益账户余额必须落库"
+  );
+
+  const factRows = {
+    quotes: readCount("SELECT COUNT(*) FROM `rental_quotes`;"),
+    coupons: readCount("SELECT COUNT(*) FROM `rental_customer_coupons`;"),
+    rewards: readCount("SELECT COUNT(*) FROM `rental_reward_ledger_entries`;"),
+    accounts: readCount("SELECT COUNT(*) FROM `rental_benefit_accounts`;"),
+    logs: readCount("SELECT COUNT(*) FROM `rental_notification_logs`;")
+  };
+  for (const [key, value] of Object.entries(factRows)) {
+    assert.ok(value > 0, `业务事实 ${key} 未落库，实际 ${value} 行`);
+  }
+  // 报价被订单消费后，consumedOrderId 必须落库并指向真实订单，否则报价一次性使用无法追溯。
+  assert.ok(
+    readCount(
+      "SELECT COUNT(*) FROM `rental_quotes` q JOIN `rental_orders` o ON o.`id`=q.`consumedOrderId` WHERE q.`consumedAt` IS NOT NULL;"
+    ) > 0,
+    "已消费报价的 consumedOrderId 必须落库且指向真实订单"
+  );
+  // 券状态机：第 12 节走过领取→锁定→核销→取消释放。释放会把状态改回 claimed，
+  // 因此终态不能用 status 判断；用 releasedAt 落库来证明整条流转确实持久化过。
+  assert.ok(
+    readCount("SELECT COUNT(*) FROM `rental_customer_coupons` WHERE `releasedAt` IS NOT NULL;") > 0,
+    "券的锁定→核销→释放流转必须落库，不能只存在于内存"
+  );
+  // 领取递增的模板配额也必须落库，否则重启后同一张券可被反复领完。
+  assert.ok(
+    readCount("SELECT COUNT(*) FROM `rental_coupon_templates` WHERE `claimedQuantity` > 0;") > 0,
+    "券模板已领数量必须随领取写穿落库"
+  );
+  // 奖励幂等键在库上有唯一约束，重复键必须被数据库拒绝而不是只靠内存判重。
+  const dupKey = mysqlRaw(
+    `USE \`${TEST_DB}\`;\nINSERT INTO \`rental_reward_ledger_entries\`` +
+      " (`id`,`tenantId`,`customerId`,`rewardType`,`amount`,`triggerType`,`idempotencyKey`,`status`,`reason`,`createdAt`)" +
+      " SELECT 'e2e_dup_reward',`tenantId`,`customerId`,`rewardType`,`amount`,`triggerType`,`idempotencyKey`,`status`,`reason`,NOW(3)" +
+      " FROM `rental_reward_ledger_entries` LIMIT 1;"
+  );
+  assert.notEqual(dupKey.status, 0, "重复奖励幂等键必须被数据库唯一约束拒绝");
+  assert.match(
+    `${dupKey.stdout || ""}${dupKey.stderr || ""}`,
+    /Duplicate entry/u,
+    "重复幂等键应报 Duplicate entry"
+  );
+  // 通知记录的外键必须指向真实模板，证明记录不是孤立写入。
+  assert.equal(
+    readCount(
+      "SELECT COUNT(*) FROM `rental_notification_logs` l WHERE NOT EXISTS (SELECT 1 FROM `rental_notification_templates` t WHERE t.`id`=l.`templateId`);"
+    ),
+    0,
+    "通知记录不得引用不存在的模板"
+  );
+  ok(
+    `业务事实以库为事实源：${factRows.quotes} 报价/${factRows.coupons} 券/${factRows.rewards} 奖励/${factRows.accounts} 权益账户/${factRows.logs} 通知记录落表，` +
+      "报价消费可追溯、券状态与模板配额已写穿、奖励幂等键由唯一约束保证、通知记录外键完整"
+  );
+
+  console.log("== 21. RC-01 聚合快照已降级为恢复副本 ==");
+  // 判定方法：直接篡改 JSON 快照里的业务事实，再重启 API。
+  // 若快照仍是事实源，重启后读到的就是被篡改的值；正确行为是启动时用库覆盖，
+  // 篡改被忽略。这是"快照只作恢复或缓存"唯一能被证伪的检查方式。
+  mysqlQuery(
+    "UPDATE `rental_business_state_snapshots` " +
+      "SET `state` = JSON_SET(`state`, '$.customerCoupons', JSON_ARRAY(), '$.rewardLedger', JSON_ARRAY(), '$.quotes', JSON_ARRAY()) " +
+      "WHERE `tenantId`='tenant_001';"
+  );
+  assert.equal(
+    readCount(
+      "SELECT JSON_LENGTH(`state`->'$.customerCoupons') FROM `rental_business_state_snapshots` WHERE `tenantId`='tenant_001';"
+    ),
+    0,
+    "篡改快照未生效，本节无法判定"
+  );
+  await stopApi();
+  startApi();
+  if (!(await waitHealth())) fail("快照降级校验的 API 重启超时");
+  const demoAfterTamper = await login("demo", "admin", DEMO_PASSWORD);
+  const couponsAfterTamper = (
+    await request("GET", "/api/rental/v1/customer-coupons", null, demoAfterTamper.accessToken)
+  ).body.data;
+  const rewardsAfterTamper = (await request("GET", "/api/rental/v1/rewards", null, demoAfterTamper.accessToken)).body.data;
+  assert.ok(
+    Array.isArray(couponsAfterTamper) && couponsAfterTamper.length > 0,
+    "快照被清空后仍必须从库恢复出客户优惠券，否则快照仍是事实源"
+  );
+  assert.ok(
+    Array.isArray(rewardsAfterTamper) && rewardsAfterTamper.length > 0,
+    "快照被清空后仍必须从库恢复出奖励流水"
+  );
+  ok(
+    `快照已降级：清空快照中的券/奖励/报价后重启，仍从库恢复出 ${couponsAfterTamper.length} 张券与 ${rewardsAfterTamper.length} 条奖励流水`
+  );
+
+  console.log("== 22. RC-01 整条业务快照行丢失后仍从规范化表恢复 ==");
+  // 第 21 节只清空快照里的数组，快照行本身还在，因此内存状态仍能由它建出来。
+  // 那测不出真正的风险：若整条快照行丢失，onApplicationBootstrap 曾因"内存里没有该租户
+  // 就跳过"而把库中事实读出来又丢弃，随后用空白默认状态继续运行——快照实际仍是事实源。
+  // 这一节直接删掉整行，是该结论唯一能被证伪的检查方式。
+  const couponsBeforeDrop = readCount("SELECT COUNT(*) FROM `rental_customer_coupons` WHERE `tenantId`='tenant_001';");
+  const rewardsBeforeDrop = readCount("SELECT COUNT(*) FROM `rental_reward_ledger_entries` WHERE `tenantId`='tenant_001';");
+  assert.ok(couponsBeforeDrop > 0 && rewardsBeforeDrop > 0, "本节需要库中已有券与奖励事实");
+  mysqlQuery("DELETE FROM `rental_business_state_snapshots` WHERE `tenantId`='tenant_001';");
+  assert.equal(
+    readCount("SELECT COUNT(*) FROM `rental_business_state_snapshots` WHERE `tenantId`='tenant_001';"),
+    0,
+    "业务快照行未删除，本节无法判定"
+  );
+  await stopApi();
+  startApi();
+  if (!(await waitHealth())) fail("快照行删除后的 API 重启超时");
+  const demoNoSnapshot = await login("demo", "admin", DEMO_PASSWORD);
+  const couponsNoSnapshot = (
+    await request("GET", "/api/rental/v1/customer-coupons", null, demoNoSnapshot.accessToken)
+  ).body.data;
+  const rewardsNoSnapshot = (await request("GET", "/api/rental/v1/rewards", null, demoNoSnapshot.accessToken)).body.data;
+  assert.equal(
+    couponsNoSnapshot.length,
+    couponsBeforeDrop,
+    `快照行丢失后券必须全部从库恢复，期望 ${couponsBeforeDrop} 实际 ${couponsNoSnapshot.length}`
+  );
+  assert.equal(
+    rewardsNoSnapshot.length,
+    rewardsBeforeDrop,
+    `快照行丢失后奖励流水必须全部从库恢复，期望 ${rewardsBeforeDrop} 实际 ${rewardsNoSnapshot.length}`
+  );
+  // Codex 复核指出：上面只验了券与权益，业务**配置**（定价/优惠/服务/日历/规则/通知模板）
+  // 同样在快照行丢失时可能全部留空——因为配置装载曾发生在状态重建之前。
+  const pricingNoSnapshot = (await request("GET", "/api/rental/v1/pricing-plans", null, demoNoSnapshot.accessToken)).body.data;
+  const rulesNoSnapshot = (await request("GET", "/api/rental/v1/rule-versions", null, demoNoSnapshot.accessToken)).body.data;
+  const templatesNoSnapshot = (await request("GET", "/api/rental/v1/notification-templates", null, demoNoSnapshot.accessToken)).body.data;
+  assert.equal(
+    pricingNoSnapshot.length,
+    readCount("SELECT COUNT(*) FROM \`rental_pricing_plans\` WHERE \`tenantId\`='tenant_001';"),
+    "快照行丢失后定价方案必须全部从库恢复"
+  );
+  assert.equal(
+    rulesNoSnapshot.length,
+    readCount("SELECT COUNT(*) FROM \`rental_rule_versions\` WHERE \`tenantId\`='tenant_001';"),
+    "快照行丢失后规则版本必须全部从库恢复"
+  );
+  assert.equal(
+    templatesNoSnapshot.length,
+    readCount("SELECT COUNT(*) FROM \`rental_notification_templates\` WHERE \`tenantId\`='tenant_001';"),
+    "快照行丢失后通知模板必须全部从库恢复"
+  );
+  ok(
+    `整条业务快照行删除后重启，事实与配置均从库完整恢复：${couponsNoSnapshot.length} 券 / ${rewardsNoSnapshot.length} 奖励 / ` +
+      `${pricingNoSnapshot.length} 定价 / ${rulesNoSnapshot.length} 规则 / ${templatesNoSnapshot.length} 通知模板`
+  );
+
+  console.log("== 23. RC-01 部分规范化数据可自愈补齐 ==");
+  // 早期回填用"任一表非空即视为已完成"判定，部分填充的租户会被永久跳过，
+  // 全量 upsert 根本执行不到。这里删掉某几类事实后重启，验证其余各类被补齐。
+  const snapshotTenant = mysqlQuery(
+    "SELECT `tenantId` FROM `rental_core_state_snapshots` " +
+      "WHERE JSON_LENGTH(`state`->'$.itemGroups') > 0 " +
+      "AND JSON_LENGTH(`state`->'$.inspectionTemplates') > 0 LIMIT 1;"
+  )
+    .split(/\r?\n/)
+    .filter((line) => line.trim() && line.trim() !== "tenantId")
+    .pop()
+    .trim();
+  const expectedGroups = readCount(
+    `SELECT JSON_LENGTH(\`state\`->'$.itemGroups') FROM \`rental_core_state_snapshots\` WHERE \`tenantId\`='${snapshotTenant}';`
+  );
+  // 删除商品组会连带删掉引用它的资产与订单行，因此改删不被其他表引用的检查模板：
+  // 它同样属于"快照里有、库里被清空"的部分填充场景，且不触发外键级联。
+  const expectedTemplates = readCount(
+    `SELECT JSON_LENGTH(\`state\`->'$.inspectionTemplates') FROM \`rental_core_state_snapshots\` WHERE \`tenantId\`='${snapshotTenant}';`
+  );
+  assert.ok(expectedTemplates > 0, "本节需要快照中存在检查模板");
+  mysqlQuery(
+    `DELETE r FROM \`rental_inspection_records\` r WHERE r.\`tenantId\`='${snapshotTenant}';\n` +
+      `DELETE FROM \`rental_inspection_templates\` WHERE \`tenantId\`='${snapshotTenant}';`
+  );
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_inspection_templates\` WHERE \`tenantId\`='${snapshotTenant}';`),
+    0,
+    "检查模板未清空，本节无法判定"
+  );
+  // 商品组仍在（未删），构成"部分已填充"的状态——旧判定会因此整租户跳过。
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_item_groups\` WHERE \`tenantId\`='${snapshotTenant}';`),
+    expectedGroups,
+    "商品组应保持存在，用于构造部分填充场景"
+  );
+  await stopApi();
+  startApi();
+  if (!(await waitHealth())) fail("部分填充自愈校验的 API 重启超时");
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_inspection_templates\` WHERE \`tenantId\`='${snapshotTenant}';`),
+    expectedTemplates,
+    "部分填充租户的缺失事实必须被回填补齐"
+  );
+  ok(`部分填充自愈：商品组保留 ${expectedGroups} 行的同时清空检查模板，重启后补齐 ${expectedTemplates} 行`);
+
+  console.log("== 24. RC-01 回填按主键判定，数量相同但键不同也能补齐 ==");
+  // 上一节删空了整类，只能证明"某类为空会被补回"。守卫若只比数量，
+  // 快照期望 A、B 而库里是 A、C 时数量相等，会被误判为已完整、B 永远补不回。
+  // 这里把一条检查模板的主键改掉：条数不变，键集合不同。
+  const originalTemplateId = readScalar(
+    `SELECT JSON_UNQUOTE(JSON_EXTRACT(\`state\`,'$.inspectionTemplates[0].id')) ` +
+      `FROM \`rental_core_state_snapshots\` WHERE \`tenantId\`='${snapshotTenant}';`
+  );
+  assert.ok(originalTemplateId && originalTemplateId !== "NULL", "业务键冲突测试需要快照模板");
+  const countBeforeRekey = readCount(
+    `SELECT COUNT(*) FROM \`rental_inspection_templates\` WHERE \`tenantId\`='${snapshotTenant}';`
+  );
+  mysqlQuery(
+    `UPDATE \`rental_inspection_templates\` SET \`id\`='e2e_rekeyed_template' WHERE \`id\`='${originalTemplateId}';`
+  );
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_inspection_templates\` WHERE \`tenantId\`='${snapshotTenant}';`),
+    countBeforeRekey,
+    "改主键不应改变条数，本节要的正是数量相同"
+  );
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_inspection_templates\` WHERE \`id\`='${originalTemplateId}';`),
+    0,
+    "原主键应已不存在"
+  );
+  await stopApi();
+  startApi();
+  if (!(await waitHealth())) fail("主键差异自愈校验的 API 重启超时");
+  // 语义说明：业务键冲突（库中已有同 (tenantId, code, version) 但主键不同）
+  // 刻意**不**用陈旧快照覆盖库中现存行——那有撤销他人有意删除或修改的风险。
+  // 必须保证的是：这一条分歧不会像原实现那样回滚整个租户、连带阻断其余各类补齐。
+  const rekeyedStillThere = readCount(
+    `SELECT COUNT(*) FROM \`rental_inspection_templates\` WHERE \`id\`='e2e_rekeyed_template';`
+  );
+  assert.equal(rekeyedStillThere, 1, "业务键冲突的现存行不应被快照覆盖或删除");
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_inspection_templates\` WHERE \`tenantId\`='${snapshotTenant}';`),
+    countBeforeRekey,
+    "业务键冲突不应导致重复行"
+  );
+  // 关键断言：同租户其余各类事实没有因为这一条分歧而被整体回滚。
+  assert.ok(
+    readCount(`SELECT COUNT(*) FROM \`rental_item_groups\` WHERE \`tenantId\`='${snapshotTenant}';`) > 0,
+    "一条业务键分歧不得回滚整个租户的回填"
+  );
+
+  // 上面那种改主键的情形因唯一约束 (tenantId, code, version) 被占，无法恢复原键。
+  // 但 Codex 指出的原始场景是「库里多出一条无关行」——此时数量相同、键集不同，
+  // 缺失的那条**必须**被补回。这才是直接证伪"只比数量"的用例，单独构造。
+  const rekeyTemplate = mysqlQuery(
+    `SELECT \`code\`, \`version\`, \`categoryCode\`, \`stage\`, \`name\` FROM \`rental_inspection_templates\`` +
+      ` WHERE \`id\`='e2e_rekeyed_template';`
+  );
+  assert.match(rekeyTemplate, /\w/u, "取不到改键行的业务字段，无法构造无冲突场景");
+  const missingId = originalTemplateId;
+  // 释放原键：把改键行的业务编码改成独占值，让 missingId 的 (code, version) 重新可用。
+  mysqlQuery(
+    "UPDATE `rental_inspection_templates` SET `code`=CONCAT(`code`,'_E2E_MOVED') WHERE `id`='e2e_rekeyed_template';"
+  );
+  const countBeforeHeal = readCount(
+    `SELECT COUNT(*) FROM \`rental_inspection_templates\` WHERE \`tenantId\`='${snapshotTenant}';`
+  );
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_inspection_templates\` WHERE \`id\`='${missingId}';`),
+    0,
+    "构造前提：快照中的该主键此刻不在库中"
+  );
+  await stopApi();
+  startApi();
+  if (!(await waitHealth())) fail("无冲突主键自愈校验的 API 重启超时");
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_inspection_templates\` WHERE \`id\`='${missingId}';`),
+    1,
+    "数量相同但键集不同时，快照中缺失的主键必须被补回（只比数量会漏掉这种情况）"
+  );
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_inspection_templates\` WHERE \`tenantId\`='${snapshotTenant}';`),
+    countBeforeHeal + 1,
+    "补回缺失主键后应恰好多一行，不应重复插入"
+  );
+  ok(`业务键分歧被隔离：改掉一条主键后重启，现存行未被陈旧快照覆盖，其余各类未受回滚影响`);
+
+  console.log("== 25. RC-01 业务键冲突父记录必须映射关联子记录 ==");
+  const relationTenant = readScalar(
+    "SELECT `tenantId` FROM `rental_business_state_snapshots` WHERE `tenantId`<>'tenant_001' ORDER BY `tenantId` LIMIT 1;"
+  );
+  await stopApi();
+  mysqlQuery(
+    `UPDATE \`rental_business_state_snapshots\` SET \`state\`=JSON_SET(\`state\`,` +
+      `'$.notificationTemplates',JSON_ARRAY(JSON_OBJECT(` +
+      `'id','e2e_snapshot_notification_template','tenantId','${relationTenant}',` +
+      `'eventCode','e2e.parent.mapping','channel','email','name','映射测试模板',` +
+      `'title','映射测试','body','映射测试','variableSchema',JSON_OBJECT(),` +
+      `'status','enabled','version','1.0','updatedAt','2026-08-18T00:00:00.000Z')),` +
+      `'$.notificationLogs',JSON_ARRAY(JSON_OBJECT(` +
+      `'id','e2e_mapped_notification_log','tenantId','${relationTenant}',` +
+      `'templateId','e2e_snapshot_notification_template','templateVersion','1.0',` +
+      `'eventCode','e2e.parent.mapping','channel','email','recipient','e2e@example.com',` +
+      `'renderedTitle','映射测试','renderedBody','映射测试','variables',JSON_OBJECT(),` +
+      `'status','queued','provider','mock','attempts',0,'createdAt','2026-08-18T00:00:00.000Z')))` +
+      ` WHERE \`tenantId\`='${relationTenant}';`
+  );
+  mysqlQuery(
+    `DELETE FROM \`rental_notification_logs\` WHERE \`id\`='e2e_mapped_notification_log';` +
+      `DELETE FROM \`rental_notification_templates\` WHERE \`id\` IN ` +
+      `('e2e_snapshot_notification_template','e2e_live_notification_template');` +
+      `INSERT INTO \`rental_notification_templates\` ` +
+      `(\`id\`,\`tenantId\`,\`eventCode\`,\`channel\`,\`name\`,\`title\`,\`body\`,\`variableSchema\`,\`status\`,\`version\`,\`createdAt\`,\`updatedAt\`) VALUES ` +
+      `('e2e_live_notification_template','${relationTenant}','e2e.parent.mapping','email',` +
+      `'现存映射模板','映射测试','映射测试',JSON_OBJECT(),'enabled','1.0',NOW(),NOW());`
+  );
+  startApi();
+  if (!(await waitHealth())) fail("业务键冲突父子映射校验的 API 重启超时");
+  assert.equal(
+    readCount(
+      "SELECT COUNT(*) FROM `rental_notification_logs` WHERE `id`='e2e_mapped_notification_log' " +
+        "AND `templateId`='e2e_live_notification_template';"
+    ),
+    1,
+    "业务键冲突的父模板必须映射到现存主键，关联通知日志不能触发整租户回滚"
+  );
+  ok("业务键冲突映射：保留现存通知模板，并将快照通知日志关联到现存主键");
+
+  console.log("== 26. RC-01 规则发布后库中只保留一个 published 版本 ==");
+  // 退役旧版本原先只改内存：重启后库里会重新加载出多个 published；
+  // 且退役发生在写库之前，新版本写库失败会让缓存里的旧规则被错误地标成 retired。
+  const demoRules = await login("demo", "admin", DEMO_PASSWORD);
+  const currentRule = (await request("GET", "/api/rental/v1/rule-versions/current", null, demoRules.accessToken)).body.data;
+  const publishRes = await request(
+    "POST",
+    "/api/rental/v1/rule-versions",
+    { config: currentRule.config, changeReason: "E2E 单一 published 校验", publish: true },
+    demoRules.accessToken
+  );
+  assert.equal(publishRes.status, 201, `发布规则版本失败: ${JSON.stringify(publishRes.body)}`);
+  assert.equal(
+    readCount("SELECT COUNT(*) FROM `rental_rule_versions` WHERE `tenantId`='tenant_001' AND `status`='published';"),
+    1,
+    "发布后库中只能有一个 published 规则版本"
+  );
+  assert.ok(
+    readCount("SELECT COUNT(*) FROM `rental_rule_versions` WHERE `tenantId`='tenant_001' AND `status`='retired';") > 0,
+    "旧 published 版本的退役必须落库"
+  );
+  await stopApi();
+  startApi();
+  if (!(await waitHealth())) fail("规则版本校验的 API 重启超时");
+  assert.equal(
+    readCount("SELECT COUNT(*) FROM `rental_rule_versions` WHERE `tenantId`='tenant_001' AND `status`='published';"),
+    1,
+    "重启后仍只能有一个 published 规则版本"
+  );
+  ok("规则发布：新版本与旧版本退役同事务落库，重启后库中仍只有一个 published");
+
+  console.log("== 27. RC-01 复合键集合不能退化为数量比较 ==");
+  const compositeTenant = readScalar(
+    "SELECT `tenantId` FROM `rental_business_state_snapshots` WHERE `tenantId`<>'tenant_001' ORDER BY `tenantId` LIMIT 1;"
+  );
+  assert.ok(compositeTenant, "复合键回归测试需要另一个业务快照租户");
+  await stopApi();
+  mysqlQuery(
+    `UPDATE \`rental_business_state_snapshots\` SET \`state\`=JSON_SET(\`state\`,'$.benefitAccounts',` +
+      `JSON_ARRAY(JSON_OBJECT('tenantId','${compositeTenant}','customerId','e2e_snapshot_customer',` +
+      `'pointsBalance',88,'marketingBalance',6,'availableRewardCouponCount',2,` +
+      `'updatedAt','2026-08-18T00:00:00.000Z'))) WHERE \`tenantId\`='${compositeTenant}';`
+  );
+  mysqlQuery(
+      `DELETE FROM \`rental_benefit_accounts\` WHERE \`tenantId\`='${compositeTenant}';` +
+      `INSERT INTO \`rental_benefit_accounts\` ` +
+      `(\`tenantId\`,\`customerId\`,\`pointsBalance\`,\`marketingBalance\`,\`availableRewardCouponCount\`,\`updatedAt\`) VALUES ` +
+      `('${compositeTenant}','e2e_unrelated_customer',1,0,0,NOW());`
+  );
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_benefit_accounts\` WHERE \`tenantId\`='${compositeTenant}';`),
+    1,
+    "构造前提：数据库与快照的权益账户数量必须相同"
+  );
+  startApi();
+  if (!(await waitHealth())) fail("复合键集合自愈校验的 API 重启超时");
+  assert.equal(
+    readCount(
+      `SELECT COUNT(*) FROM \`rental_benefit_accounts\` WHERE \`tenantId\`='${compositeTenant}' ` +
+        "AND `customerId`='e2e_snapshot_customer';"
+    ),
+    1,
+    "数量相同但 customerId 不同时，快照缺失的复合主键必须被补回"
+  );
+  ok("复合键集合回填：同数量、不同 customerId 不再被误判为完整");
+
+  console.log("== 28. RC-01 品类恢复不依赖定价或规则行存在 ==");
+  const couponsBeforeConfigLoss = readCount(
+    "SELECT COUNT(*) FROM `rental_customer_coupons` WHERE `tenantId`='tenant_001';"
+  );
+  const rewardsBeforeConfigLoss = readCount(
+    "SELECT COUNT(*) FROM `rental_reward_ledger_entries` WHERE `tenantId`='tenant_001';"
+  );
+  await stopApi();
+  mysqlQuery(
+    "DELETE FROM `rental_business_state_snapshots` WHERE `tenantId`='tenant_001';" +
+      "DELETE FROM `rental_pricing_plans` WHERE `tenantId`='tenant_001';" +
+      "DELETE FROM `rental_rule_versions` WHERE `tenantId`='tenant_001';"
+  );
+  assert.equal(
+    readCount("SELECT COUNT(*) FROM `rental_business_state_snapshots` WHERE `tenantId`='tenant_001';"),
+    0,
+    "构造前提：tenant_001 的业务快照必须仍然缺失"
+  );
+  startApi();
+  if (!(await waitHealth())) fail("核心品类档案恢复校验的 API 重启超时");
+  const demoWithoutPricingOrRules = await login("demo", "admin", DEMO_PASSWORD);
+  const couponsAfterConfigLoss = (
+    await request("GET", "/api/rental/v1/customer-coupons", null, demoWithoutPricingOrRules.accessToken)
+  ).body.data;
+  const rewardsAfterConfigLoss = (
+    await request("GET", "/api/rental/v1/rewards", null, demoWithoutPricingOrRules.accessToken)
+  ).body.data;
+  assert.equal(couponsAfterConfigLoss.length, couponsBeforeConfigLoss, "定价和规则缺失不得阻断客户券事实恢复");
+  assert.equal(rewardsAfterConfigLoss.length, rewardsBeforeConfigLoss, "定价和规则缺失不得阻断奖励事实恢复");
+  ok("品类恢复：业务快照、定价和规则同时缺失时，仍从核心租户档案装载业务事实");
+
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);
 }
 
@@ -892,6 +1567,11 @@ async function main() {
     await main();
   } catch (error) {
     console.error(`\nE2E 失败: ${error.message}`);
+    // 断言层只看到状态码，成因在 API 子进程里；附上日志尾部避免无从下手。
+    if (apiLogRef && apiLogRef.length) {
+      console.error("--- API 日志尾部 ---");
+      console.error(apiLogRef.join("").slice(-3000));
+    }
     process.exitCode = 1;
   } finally {
     await stopApi();

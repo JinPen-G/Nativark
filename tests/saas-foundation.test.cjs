@@ -19,6 +19,7 @@ const { AuthService } = require("../apps/api/src/modules/auth/auth.service");
 const { PlatformService } = require("../apps/api/src/modules/platform/platform.service");
 const { RentalCoreService } = require("../apps/api/src/modules/rental-core/rental-core.service");
 const { RoleScope, TenantStatus } = require("@store-rental/shared");
+const { createAbsorbingConfigStore, createAbsorbingFactStore } = require("./helpers/absorbing-config-store.cjs");
 
 const config = {
   get(key) {
@@ -45,7 +46,7 @@ function requestContext(method, url, accessToken) {
 }
 
 (async () => {
-  const rentalCore = new RentalCoreService();
+  const rentalCore = new RentalCoreService(createAbsorbingConfigStore(), createAbsorbingFactStore());
   const platform = new PlatformService(config, undefined, rentalCore);
   const auth = new AuthService(platform, config);
   const guard = new ApiAuthGuard(auth);

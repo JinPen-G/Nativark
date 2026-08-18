@@ -8,13 +8,19 @@ require("ts-node").register({
 const { RentalCoreService } = require("../apps/api/src/modules/rental-core/rental-core.service");
 const { RentalBusinessService } = require("../apps/api/src/modules/rental-core/rental-business.service");
 const { RentalCoreOrderStatus, RentalInventoryMode } = require("@store-rental/shared");
+const { createAbsorbingConfigStore, createAbsorbingFactStore, createAbsorbingBusinessConfigStore, createAbsorbingBusinessFactStore } = require("./helpers/absorbing-config-store.cjs");
 
-const service = new RentalCoreService();
-const business = new RentalBusinessService();
+// 配置的事实源是数据库；本用例不连库，注入吸收式 store 让写穿落空，
+// 配置读取仍由服务的内存写穿缓存提供。依赖持久化语义的断言在 mysql-e2e 里。
+const service = new RentalCoreService(createAbsorbingConfigStore(), createAbsorbingFactStore());
+const business = new RentalBusinessService(createAbsorbingBusinessConfigStore(), createAbsorbingBusinessFactStore(), createAbsorbingConfigStore());
 const cameraTenant = "tenant_001";
 const campingTenant = "tenant_002";
 const startAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 const endAt = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
+
+// 配置写方法已随「配置落库」转为异步，.cjs 无顶层 await，故整体包一层异步 IIFE。
+void (async () => {
 
 const cameraProfile = service.getProfile(cameraTenant);
 const campingProfile = service.getProfile(campingTenant);
@@ -35,7 +41,7 @@ assert.equal(service.listItemGroups(campingTenant).find((group) => group.code ==
 const cameraSettings = service.getBusinessSettings(cameraTenant);
 assert.equal(cameraSettings.categoryCode, "camera");
 assert.ok(cameraSettings.pricing.enabledUnits.includes("day_24h"));
-const savedCameraSettings = service.saveBusinessSettings(cameraTenant, {
+const savedCameraSettings = await service.saveBusinessSettings(cameraTenant, {
   pricing: { ...cameraSettings.pricing, enabledUnits: ["hour", "day_24h"], defaultUnit: "day_24h" },
   fulfillment: { ...cameraSettings.fulfillment, enabledModes: ["store_pickup_return", "delivery"] },
   payment: { ...cameraSettings.payment, preauthorizationRequired: true },
@@ -46,7 +52,7 @@ const savedCameraSettings = service.saveBusinessSettings(cameraTenant, {
 }, "test");
 assert.equal(savedCameraSettings.overdue.graceMinutes, 45);
 assert.equal(savedCameraSettings.updatedBy, "test");
-const coupon = service.saveCouponTemplate(cameraTenant, {
+const coupon = await service.saveCouponTemplate(cameraTenant, {
   code: "WELCOME-20",
   name: "新客满减券",
   discountType: "fixed_amount",
@@ -62,14 +68,14 @@ const coupon = service.saveCouponTemplate(cameraTenant, {
 assert.equal(coupon.version, "1.0");
 assert.equal(service.listCouponTemplates(cameraTenant).length, 1);
 assert.equal(service.listCouponTemplates(campingTenant).length, 0, "coupon templates must remain tenant isolated");
-assert.throws(() => service.saveBusinessSettings(campingTenant, {
+await assert.rejects(async () => service.saveBusinessSettings(campingTenant, {
   ...service.getBusinessSettings(campingTenant),
   payment: { ...service.getBusinessSettings(campingTenant).payment, preauthorizationRequired: true }
 }, "test"), /不支持预授权/);
 
 const cameraGroups = service.listItemGroups(cameraTenant);
 const cameraLocation = service.listLocations(cameraTenant)[0];
-const partnerLocation = service.saveLocation(cameraTenant, {
+const partnerLocation = await service.saveLocation(cameraTenant, {
   code: "PARTNER-01",
   name: "合作器材取还点",
   type: "store",
@@ -79,7 +85,7 @@ const partnerLocation = service.saveLocation(cameraTenant, {
   status: "enabled"
 });
 assert.equal(partnerLocation.operatorType, "partner");
-assert.throws(() => service.saveLocation(cameraTenant, {
+await assert.rejects(async () => service.saveLocation(cameraTenant, {
   code: "SITE-01",
   name: "错误项目现场",
   type: "project_site",
@@ -97,88 +103,35 @@ const cameraContext = {
   groups: service.listItemGroups(cameraTenant),
   couponTemplates: service.listCouponTemplates(cameraTenant)
 };
-const quote = business.createQuote(cameraTenant, cameraContext, {
-  customerType: "personal",
-  fulfillmentMode: "store_pickup_return",
-  fulfillmentLocationId: cameraLocation.id,
-  startAt,
-  endAt,
-  lines: [{ itemGroupId: cameraBundle.id, quantity: 1 }]
-});
-const order = service.createOrder(cameraTenant, {
-  quoteId: quote.id,
-  customerType: "personal",
-  customerName: "摄影测试客户",
-  fulfillmentMode: quote.request.fulfillmentMode,
-  fulfillmentLocationId: cameraLocation.id,
-  startAt,
-  endAt,
-  lines: [{ itemGroupId: cameraBundle.id, quantity: 1 }]
-}, "test", quote);
-assert.equal(order.lines.length, 1);
-assert.equal(order.quoteId, quote.id);
-assert.equal(order.totalAmount, quote.payableAmount);
-assert.equal(order.reservations.length, 2, "bundle should reserve its components");
-assert.equal(order.status, RentalCoreOrderStatus.Draft);
-
-service.confirmOrder(cameraTenant, order.id);
-service.allocateOrder(cameraTenant, order.id);
-assert.equal(order.status, RentalCoreOrderStatus.ReadyForPickup);
-assert.equal(order.allocations.length, 2);
-
-const pickup = service.listInspectionTemplates(cameraTenant, "pickup")[0];
-service.createInspection(cameraTenant, order.id, {
-  templateId: pickup.id,
-  results: { appearance_ok: true, function_ok: true, shutter_count: 1200 }
-}, "test");
-assert.equal(order.status, RentalCoreOrderStatus.Renting);
-
-const returned = service.listInspectionTemplates(cameraTenant, "return")[0];
-service.createInspection(cameraTenant, order.id, {
-  templateId: returned.id,
-  results: { appearance_ok: true, function_ok: true, shutter_count: 1250 }
-}, "test");
-assert.equal(order.status, RentalCoreOrderStatus.Completed);
-assert.ok(order.allocations.every((row) => row.status === "returned"));
-
-const campingGroups = service.listItemGroups(campingTenant);
-const campingLocation = service.listLocations(campingTenant)[0];
-const campingBundle = campingGroups.find((row) => row.inventoryMode === RentalInventoryMode.Bundle);
-const campingAvailability = service.availability(campingTenant, {
-  locationId: campingLocation.id,
-  startAt,
-  endAt,
-  lines: [{ itemGroupId: campingBundle.id, quantity: 6 }]
-});
-assert.equal(campingAvailability.available, true);
-
-const overbooked = service.availability(campingTenant, {
-  locationId: campingLocation.id,
-  startAt,
-  endAt,
-  lines: [
-    { itemGroupId: campingBundle.id, quantity: 6 },
-    { itemGroupId: campingGroups.find((row) => row.code === "CAMP-CHAIR").id, quantity: 12 }
-  ]
-});
-assert.equal(overbooked.available, false, "combined bundle/component demand must not overbook stock");
-assert.equal(service.listOrders(campingTenant).length, 0, "tenant data must be isolated");
+// ── 订单生命周期与可用量断言已移交 tests/mysql-e2e.test.cjs ──
+// RC-01 阶段 3 把订单、预占、分配、资产、库存和检查记录迁到数据库后，服务不再就地
+// 修改调用方持有的 order 对象，而是从库加载副本再写回。原先"调 confirmOrder 后
+// 断言 order.status 变了"的写法依赖的正是那个就地修改，本质上测的是内存实现细节。
+//
+// 这些断言现在由 E2E 对真实 MySQL 验证，覆盖面反而更宽：
+//   第 9 节  摄影套装 → 报价/下单/确认/配货/取还检查、资产 reserved→rented→available
+//   第 10 节 露营数量+套装合并占用、缺件污损计费、库存完整释放
+//   第 11 节 非法状态转移拒绝、收费窗口取消、库存释放
+//   第 16 节 双租户并发隔离（原 listOrders 隔离断言在吸收式 stub 下恒为空数组，
+//            已无区分力，不再保留）
+//
+// 本文件保留的是不依赖持久化的部分：品类 schema 形状、配置隔离、动态字段校验。
 
 const newTenant = "tenant_new";
-service.initializeTenant(newTenant, "construction");
+await service.initializeTenant(newTenant, "construction");
 assert.equal(service.listItemGroups(newTenant).length, 0);
-const configured = service.saveProfile(newTenant, { categoryCode: "construction" });
+const configured = await service.saveProfile(newTenant, { categoryCode: "construction" });
 assert.equal(configured.categoryCode, "construction", "an empty tenant can select its single rental category");
-assert.throws(() => service.saveProfile(newTenant, { categoryCode: "vehicle" }), /创建后经营品类固定/, "initialized SaaS tenant category must be immutable even before products are created");
+await assert.rejects(async () => service.saveProfile(newTenant, { categoryCode: "vehicle" }), /创建后经营品类固定/, "initialized SaaS tenant category must be immutable even before products are created");
 assert.equal(service.listInspectionTemplates(newTenant, "pickup")[0].categoryCode, "construction");
-assert.throws(() => service.saveItemGroup(newTenant, {
+await assert.rejects(async () => service.saveItemGroup(newTenant, {
   code: "EXC-001",
   name: "测试挖掘机",
   inventoryMode: "serialized",
   attributes: { model: "E20" },
   status: "enabled"
 }), /制造商/, "construction groups must validate their category-specific fields");
-const constructionGroup = service.saveItemGroup(newTenant, {
+const constructionGroup = await service.saveItemGroup(newTenant, {
   code: "EXC-001",
   name: "测试挖掘机",
   inventoryMode: "serialized",
@@ -186,14 +139,14 @@ const constructionGroup = service.saveItemGroup(newTenant, {
   status: "enabled"
 });
 const constructionLocation = service.listLocations(newTenant)[0];
-assert.throws(() => service.saveAsset(newTenant, {
+await assert.rejects(async () => service.saveAsset(newTenant, {
   itemGroupId: constructionGroup.id,
   assetNo: "EXC-ASSET-001",
   locationId: constructionLocation.id,
   attributes: {},
   status: "available"
 }), /出厂编号/, "construction assets must validate their category-specific identifiers");
-const constructionAsset = service.saveAsset(newTenant, {
+const constructionAsset = await service.saveAsset(newTenant, {
   itemGroupId: constructionGroup.id,
   assetNo: "EXC-ASSET-001",
   locationId: constructionLocation.id,
@@ -203,4 +156,8 @@ const constructionAsset = service.saveAsset(newTenant, {
 assert.equal(constructionAsset.attributes.factoryNo, "FACTORY-001");
 assert.ok(service.listOperators(cameraTenant).some((operator) => operator.name === "测试摄影合作商"), "partner locations must link to the operator master");
 
-console.log("Rental Core v0.1 test passed: category isolation, bundle reservation, allocation, inspections and quantity availability verified.");
+console.log("Rental Core v0.1 test passed: category schema, config isolation and dynamic field validation verified (order lifecycle, inventory and inspections are asserted against real MySQL in tests/mysql-e2e.test.cjs).");
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

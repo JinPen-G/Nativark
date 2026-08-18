@@ -296,6 +296,20 @@ model Tenant {
   rentalInspectionTemplates RentalInspectionTemplate[]
   rentalInspectionRecords   RentalInspectionRecord[]
   rentalCouponTemplates     RentalCouponTemplate[]
+  rentalOperators           RentalFulfillmentOperator[]
+  rentalBusinessSettings    RentalTenantBusinessSettings?
+  rentalQuotes              RentalQuote[]
+  rentalCustomerCoupons     RentalCustomerCoupon[]
+  rentalRewardEntries       RentalRewardLedgerEntry[]
+  rentalBenefitAccounts     RentalBenefitAccount[]
+  rentalReferrals           RentalReferral[]
+  rentalNotificationTemplates RentalNotificationTemplate[]
+  rentalNotificationLogs    RentalNotificationLog[]
+  rentalPricingPlans        RentalPricingPlan[]
+  rentalDiscountPlans       RentalDiscountPlan[]
+  rentalValueAddedServices  RentalValueAddedService[]
+  rentalRuleVersions        RentalRuleVersion[]
+  rentalBusinessCalendars   RentalBusinessCalendar[]
   rentalCoreStateSnapshot   RentalCoreStateSnapshot?
   rentalBusinessStateSnapshot RentalBusinessStateSnapshot?
   createdAt                 DateTime                    @default(now())
@@ -1957,6 +1971,7 @@ model RentalCouponTemplate {
   applicableItemGroupIds Json
   status                 String   @default("draft")
   version                String
+  customerCoupons        RentalCustomerCoupon[]
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
 
@@ -1972,6 +1987,8 @@ model RentalFulfillmentLocation {
   code          String
   name          String
   type          String
+  operatorId    String?
+  operator      RentalFulfillmentOperator? @relation(fields: [operatorId], references: [id])
   operatorType  String?
   operatorName  String?
   parentLocationId String?
@@ -1990,6 +2007,7 @@ model RentalFulfillmentLocation {
 
   @@unique([tenantId, code])
   @@index([tenantId, status])
+  @@index([operatorId])
   @@map("rental_fulfillment_locations")
 }
 
@@ -2087,11 +2105,36 @@ model RentalOrder {
   customerId            String?
   customerName          String
   contactPhone          String?
+  fulfillmentMode       String
   fulfillmentLocationId String
   fulfillmentLocation   RentalFulfillmentLocation @relation(fields: [fulfillmentLocationId], references: [id])
+  /// 履约地点与归还地点的名称按需求 4.3 存为下单时快照，主档改名不得篡改历史订单。
+  fulfillmentLocationName String
+  returnLocationId      String?
+  returnLocationName    String?
   startAt               DateTime
   endAt                 DateTime
+  /// 报价快照：订单已内联保存 quoteNo/版本/规则/费用行，因此不对 rental_quotes 建外键，
+  /// 避免把订单生命周期耦合到报价行的存续（报价可过期清理，订单事实必须长存）。
+  quoteId               String
+  quoteNo               String
+  pricingPlanVersion    String
+  ruleVersion           String
+  ruleSnapshot          Json
+  calendarVersion       String?
+  chargeLines           Json
+  rentalAmount          Decimal                   @db.Decimal(12, 2)
+  discountAmount        Decimal                   @db.Decimal(12, 2)
+  couponAmount          Decimal                   @db.Decimal(12, 2)
+  serviceAmount         Decimal                   @db.Decimal(12, 2)
+  depositAmount         Decimal                   @db.Decimal(12, 2)
+  payableAmount         Decimal                   @db.Decimal(12, 2)
+  adjustmentAmount      Decimal                   @db.Decimal(12, 2)
+  finalPayableAmount    Decimal                   @db.Decimal(12, 2)
   totalAmount           Decimal                   @db.Decimal(12, 2)
+  cancellationReason    String?
+  cancelledAt           DateTime?
+  completedAt           DateTime?
   createdBy             String
   lines                 RentalOrderLine[]
   reservations          RentalReservation[]
@@ -2103,6 +2146,7 @@ model RentalOrder {
   @@unique([tenantId, orderNo])
   @@index([tenantId, status, startAt])
   @@index([tenantId, customerType, customerId])
+  @@index([tenantId, quoteId])
   @@map("rental_orders")
 }
 
@@ -2112,6 +2156,9 @@ model RentalOrderLine {
   order         RentalOrder         @relation(fields: [orderId], references: [id], onDelete: Cascade)
   itemGroupId   String
   itemGroup     RentalItemGroup     @relation(fields: [itemGroupId], references: [id])
+  /// 商品编码与名称存为下单时快照，主档改名不影响历史订单行。
+  itemGroupCode String
+  itemGroupName String
   inventoryMode RentalInventoryMode
   quantity      Int
   unitPrice     Decimal             @db.Decimal(12, 2)
@@ -2158,6 +2205,8 @@ model RentalAllocation {
   orderLine   RentalOrderLine @relation(fields: [orderLineId], references: [id], onDelete: Cascade)
   assetId     String?
   asset       RentalAsset?    @relation(fields: [assetId], references: [id])
+  /// 资产编号存为分配时快照，资产改号不影响历史分配记录。
+  assetNo     String?
   quantity    Int             @default(1)
   status      String          @default("allocated")
   createdAt   DateTime        @default(now())
@@ -2208,4 +2257,326 @@ model RentalInspectionRecord {
 
   @@index([tenantId, orderId, stage])
   @@map("rental_inspection_records")
+}
+
+// Rental Core 配置表（RC-01）------------------------------------------------
+// 配置采用「规范化标识列 + 版本化 JSON 明细」：租户、编码、版本、状态和生效区间
+// 是真实列，可被查询与 join；深层嵌套的规则明细放 JSON。这与被替换掉的
+// 「一个租户所有事实挤在一行 JSON」的巨型聚合是两回事。
+
+model RentalFulfillmentOperator {
+  id             String                      @id @default(uuid())
+  tenantId       String
+  tenant         Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  code           String
+  name           String
+  type           String
+  contactName    String?
+  contactPhone   String?
+  settlementMode String?
+  status         String                      @default("enabled")
+  locations      RentalFulfillmentLocation[]
+  createdAt      DateTime                    @default(now())
+  updatedAt      DateTime                    @updatedAt
+
+  @@unique([tenantId, code])
+  @@index([tenantId, status])
+  @@map("rental_fulfillment_operators")
+}
+
+model RentalTenantBusinessSettings {
+  tenantId      String             @id
+  tenant        Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  categoryCode  RentalCategoryCode
+  configVersion String
+  /// TenantRentalBusinessSettings 的 pricing/fulfillment/deposit 等嵌套配置块。
+  settings      Json
+  updatedBy     String
+  updatedAt     DateTime           @updatedAt
+
+  @@map("rental_tenant_business_settings")
+}
+
+model RentalPricingPlan {
+  id            String             @id @default(uuid())
+  tenantId      String
+  tenant        Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  categoryCode  RentalCategoryCode
+  code          String
+  name          String
+  currency      String             @default("CNY")
+  status        String             @default("draft")
+  version       String
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  /// RentalPricingRate[]：按商品组的单位价、倍率、押金、起租量和超额用量费。
+  rates         Json
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  @@unique([tenantId, code, version], map: "rental_pricing_plans_tenant_code_version_key")
+  @@index([tenantId, status, effectiveFrom, effectiveTo], map: "rental_pricing_plans_tenant_status_effective_idx")
+  @@map("rental_pricing_plans")
+}
+
+model RentalDiscountPlan {
+  id                     String             @id @default(uuid())
+  tenantId               String
+  tenant                 Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  categoryCode           RentalCategoryCode
+  code                   String
+  name                   String
+  status                 String             @default("draft")
+  discountType           String
+  discountValue          Decimal            @db.Decimal(12, 2)
+  minimumSpend           Decimal            @db.Decimal(12, 2)
+  maximumDiscount        Decimal?           @db.Decimal(12, 2)
+  customerScope          String             @default("all")
+  applicableItemGroupIds Json
+  applicableDayTypes     Json
+  priority               Int                @default(0)
+  stackableWithCoupon    Boolean            @default(true)
+  effectiveFrom          DateTime
+  effectiveTo            DateTime?
+  version                String
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  @@unique([tenantId, code, version], map: "rental_discount_plans_tenant_code_version_key")
+  @@index([tenantId, status, priority], map: "rental_discount_plans_tenant_status_priority_idx")
+  @@map("rental_discount_plans")
+}
+
+model RentalValueAddedService {
+  id                     String             @id @default(uuid())
+  tenantId               String
+  tenant                 Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  categoryCode           RentalCategoryCode
+  code                   String
+  name                   String
+  serviceType            String
+  billingUnit            String
+  price                  Decimal            @db.Decimal(12, 2)
+  maximumQuantity        Int                @default(1)
+  coverageLimit          Decimal?           @db.Decimal(12, 2)
+  deductible             Decimal?           @db.Decimal(12, 2)
+  /// 条款正文与版本按需求 4.4 随订单保存快照，此处是当前主档。
+  termsVersion           String
+  terms                  String             @db.Text
+  applicableItemGroupIds Json
+  status                 String             @default("enabled")
+  version                String
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  @@unique([tenantId, code, version], map: "rental_value_added_services_tenant_code_version_key")
+  @@index([tenantId, status, serviceType], map: "rental_value_added_services_tenant_status_type_idx")
+  @@map("rental_value_added_services")
+}
+
+model RentalRuleVersion {
+  id           String             @id @default(uuid())
+  tenantId     String
+  tenant       Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  categoryCode RentalCategoryCode
+  version      String
+  status       String             @default("draft")
+  /// RentalRuleConfig：payment/fulfillment/overdue/cancellation/qualification/damage 六个规则块。
+  config       Json
+  changeReason String
+  createdBy    String
+  createdAt    DateTime           @default(now())
+  publishedAt  DateTime?
+
+  @@unique([tenantId, version], map: "rental_rule_versions_tenant_version_key")
+  @@index([tenantId, status, publishedAt], map: "rental_rule_versions_tenant_status_published_idx")
+  @@map("rental_rule_versions")
+}
+
+model RentalBusinessCalendar {
+  id                 String    @id @default(uuid())
+  tenantId           String
+  tenant             Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  year               Int
+  region             String    @default("CN")
+  version            String
+  status             String    @default("draft")
+  sourceName         String?
+  sourceUrl          String?
+  sourcePublishedAt  DateTime?
+  importedAt         DateTime?
+  publishedAt        DateTime?
+  /// RentalCalendarDay[]：整年按日的类型、倍率与停业标记。定价按年整体加载，
+  /// 拆成每年 365 行没有查询收益，因此保留为该年配置行的明细。
+  days               Json
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@unique([tenantId, year], map: "rental_business_calendars_tenant_year_key")
+  @@index([tenantId, status])
+  @@map("rental_business_calendars")
+}
+
+model RentalNotificationTemplate {
+  id             String   @id @default(uuid())
+  tenantId       String
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  eventCode      String
+  channel        String
+  name           String
+  title          String
+  body           String   @db.Text
+  variableSchema Json
+  status         String   @default("enabled")
+  version        String
+  logs           RentalNotificationLog[]
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([tenantId, eventCode, channel, version], map: "rental_notification_templates_tenant_event_channel_ver_key")
+  @@index([tenantId, status, eventCode], map: "rental_notification_templates_tenant_status_event_idx")
+  @@map("rental_notification_templates")
+}
+
+// Rental Core 事实表（RC-01）------------------------------------------------
+// 事实完整规范化为真实列。仅 request/chargeLines/ruleSnapshot/variables 等
+// 需求要求的不可变时点快照保留 JSON（需求 4.7）。
+
+model RentalQuote {
+  id                     String             @id @default(uuid())
+  tenantId               String
+  tenant                 Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  quoteNo                String
+  categoryCode           RentalCategoryCode
+  /// RentalQuoteRequest：报价入参原样留存，用于下单时比对与复算。
+  request                Json
+  /// RentalQuoteChargeLine[]：费用行明细，是报价可解释性的依据。
+  chargeLines            Json
+  rentalAmount           Decimal            @db.Decimal(12, 2)
+  discountAmount         Decimal            @db.Decimal(12, 2)
+  couponAmount           Decimal            @db.Decimal(12, 2)
+  serviceAmount          Decimal            @db.Decimal(12, 2)
+  depositAmount          Decimal            @db.Decimal(12, 2)
+  payableAmount          Decimal            @db.Decimal(12, 2)
+  pricingPlanVersion     String
+  ruleVersion            String
+  ruleSnapshot           Json
+  calendarVersion        String?
+  appliedDiscountPlanIds Json
+  customerCouponId       String?
+  expiresAt              DateTime
+  consumedAt             DateTime?
+  consumedOrderId        String?
+  createdAt              DateTime           @default(now())
+
+  @@unique([tenantId, quoteNo], map: "rental_quotes_tenant_quote_no_key")
+  @@index([tenantId, expiresAt, consumedAt], map: "rental_quotes_tenant_expires_consumed_idx")
+  @@index([consumedOrderId])
+  @@map("rental_quotes")
+}
+
+model RentalCustomerCoupon {
+  id              String               @id @default(uuid())
+  tenantId        String
+  tenant          Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId      String
+  templateId      String
+  template        RentalCouponTemplate @relation(fields: [templateId], references: [id])
+  /// 模板编码与名称存为领取时快照，模板改名不影响已发出的券。
+  templateCode    String
+  templateName    String
+  status          String               @default("claimed")
+  claimedAt       DateTime             @default(now())
+  effectiveFrom   DateTime
+  effectiveTo     DateTime
+  lockedOrderId   String?
+  lockedAt        DateTime?
+  redeemedOrderId String?
+  redeemedAt      DateTime?
+  releasedAt      DateTime?
+
+  @@index([tenantId, customerId, status], map: "rental_customer_coupons_tenant_customer_status_idx")
+  @@index([tenantId, templateId, customerId], map: "rental_customer_coupons_tenant_template_customer_idx")
+  @@index([lockedOrderId])
+  @@index([redeemedOrderId])
+  @@map("rental_customer_coupons")
+}
+
+model RentalRewardLedgerEntry {
+  id                  String    @id @default(uuid())
+  tenantId            String
+  tenant              Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId          String
+  rewardType          String
+  amount              Decimal   @db.Decimal(12, 2)
+  triggerType         String
+  /// 业务幂等键：同一租户同一键只允许入账一次，防重复发奖。
+  idempotencyKey      String
+  relatedCustomerId   String?
+  status              String    @default("granted")
+  reason              String
+  benefitReferenceIds Json?
+  appliedAt           DateTime?
+  reversedAt          DateTime?
+  createdAt           DateTime  @default(now())
+
+  @@unique([tenantId, idempotencyKey], map: "rental_reward_ledger_tenant_idempotency_key")
+  @@index([tenantId, customerId, createdAt], map: "rental_reward_ledger_tenant_customer_created_idx")
+  @@index([tenantId, triggerType, status], map: "rental_reward_ledger_tenant_trigger_status_idx")
+  @@map("rental_reward_ledger_entries")
+}
+
+model RentalBenefitAccount {
+  tenantId                    String
+  tenant                      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId                  String
+  pointsBalance               Decimal  @default(0) @db.Decimal(12, 2)
+  /// 营销余额不是可提现或储值资金账户（需求 4.8）。
+  marketingBalance            Decimal  @default(0) @db.Decimal(12, 2)
+  availableRewardCouponCount  Int      @default(0)
+  updatedAt                   DateTime @updatedAt
+
+  @@id([tenantId, customerId])
+  @@map("rental_benefit_accounts")
+}
+
+model RentalReferral {
+  id                 String   @id @default(uuid())
+  tenantId           String
+  tenant             Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  inviteeCustomerId  String
+  referrerCustomerId String
+  registeredAt       DateTime @default(now())
+
+  @@unique([tenantId, inviteeCustomerId], map: "rental_referrals_tenant_invitee_key")
+  @@index([tenantId, referrerCustomerId], map: "rental_referrals_tenant_referrer_idx")
+  @@map("rental_referrals")
+}
+
+model RentalNotificationLog {
+  id                String                     @id @default(uuid())
+  tenantId          String
+  tenant            Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  templateId        String
+  template          RentalNotificationTemplate @relation(fields: [templateId], references: [id])
+  templateVersion   String
+  eventCode         String
+  channel           String
+  /// 发送目标按需求 4.9 脱敏后留存。
+  recipient         String
+  renderedTitle     String
+  renderedBody      String                     @db.Text
+  variables         Json
+  status            String                     @default("queued")
+  provider          String
+  providerMessageId String?
+  errorMessage      String?
+  attempts          Int                        @default(0)
+  sentAt            DateTime?
+  createdAt         DateTime                   @default(now())
+
+  @@index([tenantId, eventCode, createdAt], map: "rental_notification_logs_tenant_event_created_idx")
+  @@index([tenantId, status, createdAt], map: "rental_notification_logs_tenant_status_created_idx")
+  @@index([templateId])
+  @@map("rental_notification_logs")
 }
