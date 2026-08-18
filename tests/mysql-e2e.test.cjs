@@ -140,6 +140,12 @@ function readCount(sql) {
   return Number(match[1]);
 }
 
+function readScalar(sql) {
+  const lines = mysqlQuery(sql).split(/\r?\n/u).filter((line) => line.trim());
+  if (lines.length < 2) fail(`标量查询无结果: ${sql}`);
+  return lines.at(-1).trim();
+}
+
 /* ---------- 断言与进度输出 ---------- */
 
 let passedGroups = 0;
@@ -1291,7 +1297,9 @@ async function main() {
   // 早期回填用"任一表非空即视为已完成"判定，部分填充的租户会被永久跳过，
   // 全量 upsert 根本执行不到。这里删掉某几类事实后重启，验证其余各类被补齐。
   const snapshotTenant = mysqlQuery(
-    "SELECT `tenantId` FROM `rental_core_state_snapshots` WHERE JSON_LENGTH(`state`->'$.itemGroups') > 0 LIMIT 1;"
+    "SELECT `tenantId` FROM `rental_core_state_snapshots` " +
+      "WHERE JSON_LENGTH(`state`->'$.itemGroups') > 0 " +
+      "AND JSON_LENGTH(`state`->'$.inspectionTemplates') > 0 LIMIT 1;"
   )
     .split(/\r?\n/)
     .filter((line) => line.trim() && line.trim() !== "tenantId")
@@ -1335,12 +1343,11 @@ async function main() {
   // 上一节删空了整类，只能证明"某类为空会被补回"。守卫若只比数量，
   // 快照期望 A、B 而库里是 A、C 时数量相等，会被误判为已完整、B 永远补不回。
   // 这里把一条检查模板的主键改掉：条数不变，键集合不同。
-  const templateIds = mysqlQuery(
-    `SELECT \`id\` FROM \`rental_inspection_templates\` WHERE \`tenantId\`='${snapshotTenant}' ORDER BY \`id\` LIMIT 1;`
-  )
-    .split(/\r?\n/)
-    .filter((line) => line.trim() && line.trim() !== "id");
-  const originalTemplateId = templateIds.pop().trim();
+  const originalTemplateId = readScalar(
+    `SELECT JSON_UNQUOTE(JSON_EXTRACT(\`state\`,'$.inspectionTemplates[0].id')) ` +
+      `FROM \`rental_core_state_snapshots\` WHERE \`tenantId\`='${snapshotTenant}';`
+  );
+  assert.ok(originalTemplateId && originalTemplateId !== "NULL", "业务键冲突测试需要快照模板");
   const countBeforeRekey = readCount(
     `SELECT COUNT(*) FROM \`rental_inspection_templates\` WHERE \`tenantId\`='${snapshotTenant}';`
   );
@@ -1414,7 +1421,48 @@ async function main() {
   );
   ok(`业务键分歧被隔离：改掉一条主键后重启，现存行未被陈旧快照覆盖，其余各类未受回滚影响`);
 
-  console.log("== 25. RC-01 规则发布后库中只保留一个 published 版本 ==");
+  console.log("== 25. RC-01 业务键冲突父记录必须映射关联子记录 ==");
+  const relationTenant = readScalar(
+    "SELECT `tenantId` FROM `rental_business_state_snapshots` WHERE `tenantId`<>'tenant_001' ORDER BY `tenantId` LIMIT 1;"
+  );
+  await stopApi();
+  mysqlQuery(
+    `UPDATE \`rental_business_state_snapshots\` SET \`state\`=JSON_SET(\`state\`,` +
+      `'$.notificationTemplates',JSON_ARRAY(JSON_OBJECT(` +
+      `'id','e2e_snapshot_notification_template','tenantId','${relationTenant}',` +
+      `'eventCode','e2e.parent.mapping','channel','email','name','映射测试模板',` +
+      `'title','映射测试','body','映射测试','variableSchema',JSON_OBJECT(),` +
+      `'status','enabled','version','1.0','updatedAt','2026-08-18T00:00:00.000Z')),` +
+      `'$.notificationLogs',JSON_ARRAY(JSON_OBJECT(` +
+      `'id','e2e_mapped_notification_log','tenantId','${relationTenant}',` +
+      `'templateId','e2e_snapshot_notification_template','templateVersion','1.0',` +
+      `'eventCode','e2e.parent.mapping','channel','email','recipient','e2e@example.com',` +
+      `'renderedTitle','映射测试','renderedBody','映射测试','variables',JSON_OBJECT(),` +
+      `'status','queued','provider','mock','attempts',0,'createdAt','2026-08-18T00:00:00.000Z')))` +
+      ` WHERE \`tenantId\`='${relationTenant}';`
+  );
+  mysqlQuery(
+    `DELETE FROM \`rental_notification_logs\` WHERE \`id\`='e2e_mapped_notification_log';` +
+      `DELETE FROM \`rental_notification_templates\` WHERE \`id\` IN ` +
+      `('e2e_snapshot_notification_template','e2e_live_notification_template');` +
+      `INSERT INTO \`rental_notification_templates\` ` +
+      `(\`id\`,\`tenantId\`,\`eventCode\`,\`channel\`,\`name\`,\`title\`,\`body\`,\`variableSchema\`,\`status\`,\`version\`,\`createdAt\`,\`updatedAt\`) VALUES ` +
+      `('e2e_live_notification_template','${relationTenant}','e2e.parent.mapping','email',` +
+      `'现存映射模板','映射测试','映射测试',JSON_OBJECT(),'enabled','1.0',NOW(),NOW());`
+  );
+  startApi();
+  if (!(await waitHealth())) fail("业务键冲突父子映射校验的 API 重启超时");
+  assert.equal(
+    readCount(
+      "SELECT COUNT(*) FROM `rental_notification_logs` WHERE `id`='e2e_mapped_notification_log' " +
+        "AND `templateId`='e2e_live_notification_template';"
+    ),
+    1,
+    "业务键冲突的父模板必须映射到现存主键，关联通知日志不能触发整租户回滚"
+  );
+  ok("业务键冲突映射：保留现存通知模板，并将快照通知日志关联到现存主键");
+
+  console.log("== 26. RC-01 规则发布后库中只保留一个 published 版本 ==");
   // 退役旧版本原先只改内存：重启后库里会重新加载出多个 published；
   // 且退役发生在写库之前，新版本写库失败会让缓存里的旧规则被错误地标成 retired。
   const demoRules = await login("demo", "admin", DEMO_PASSWORD);
@@ -1444,6 +1492,72 @@ async function main() {
     "重启后仍只能有一个 published 规则版本"
   );
   ok("规则发布：新版本与旧版本退役同事务落库，重启后库中仍只有一个 published");
+
+  console.log("== 27. RC-01 复合键集合不能退化为数量比较 ==");
+  const compositeTenant = readScalar(
+    "SELECT `tenantId` FROM `rental_business_state_snapshots` WHERE `tenantId`<>'tenant_001' ORDER BY `tenantId` LIMIT 1;"
+  );
+  assert.ok(compositeTenant, "复合键回归测试需要另一个业务快照租户");
+  await stopApi();
+  mysqlQuery(
+    `UPDATE \`rental_business_state_snapshots\` SET \`state\`=JSON_SET(\`state\`,'$.benefitAccounts',` +
+      `JSON_ARRAY(JSON_OBJECT('tenantId','${compositeTenant}','customerId','e2e_snapshot_customer',` +
+      `'pointsBalance',88,'marketingBalance',6,'availableRewardCouponCount',2,` +
+      `'updatedAt','2026-08-18T00:00:00.000Z'))) WHERE \`tenantId\`='${compositeTenant}';`
+  );
+  mysqlQuery(
+      `DELETE FROM \`rental_benefit_accounts\` WHERE \`tenantId\`='${compositeTenant}';` +
+      `INSERT INTO \`rental_benefit_accounts\` ` +
+      `(\`tenantId\`,\`customerId\`,\`pointsBalance\`,\`marketingBalance\`,\`availableRewardCouponCount\`,\`updatedAt\`) VALUES ` +
+      `('${compositeTenant}','e2e_unrelated_customer',1,0,0,NOW());`
+  );
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_benefit_accounts\` WHERE \`tenantId\`='${compositeTenant}';`),
+    1,
+    "构造前提：数据库与快照的权益账户数量必须相同"
+  );
+  startApi();
+  if (!(await waitHealth())) fail("复合键集合自愈校验的 API 重启超时");
+  assert.equal(
+    readCount(
+      `SELECT COUNT(*) FROM \`rental_benefit_accounts\` WHERE \`tenantId\`='${compositeTenant}' ` +
+        "AND `customerId`='e2e_snapshot_customer';"
+    ),
+    1,
+    "数量相同但 customerId 不同时，快照缺失的复合主键必须被补回"
+  );
+  ok("复合键集合回填：同数量、不同 customerId 不再被误判为完整");
+
+  console.log("== 28. RC-01 品类恢复不依赖定价或规则行存在 ==");
+  const couponsBeforeConfigLoss = readCount(
+    "SELECT COUNT(*) FROM `rental_customer_coupons` WHERE `tenantId`='tenant_001';"
+  );
+  const rewardsBeforeConfigLoss = readCount(
+    "SELECT COUNT(*) FROM `rental_reward_ledger_entries` WHERE `tenantId`='tenant_001';"
+  );
+  await stopApi();
+  mysqlQuery(
+    "DELETE FROM `rental_business_state_snapshots` WHERE `tenantId`='tenant_001';" +
+      "DELETE FROM `rental_pricing_plans` WHERE `tenantId`='tenant_001';" +
+      "DELETE FROM `rental_rule_versions` WHERE `tenantId`='tenant_001';"
+  );
+  assert.equal(
+    readCount("SELECT COUNT(*) FROM `rental_business_state_snapshots` WHERE `tenantId`='tenant_001';"),
+    0,
+    "构造前提：tenant_001 的业务快照必须仍然缺失"
+  );
+  startApi();
+  if (!(await waitHealth())) fail("核心品类档案恢复校验的 API 重启超时");
+  const demoWithoutPricingOrRules = await login("demo", "admin", DEMO_PASSWORD);
+  const couponsAfterConfigLoss = (
+    await request("GET", "/api/rental/v1/customer-coupons", null, demoWithoutPricingOrRules.accessToken)
+  ).body.data;
+  const rewardsAfterConfigLoss = (
+    await request("GET", "/api/rental/v1/rewards", null, demoWithoutPricingOrRules.accessToken)
+  ).body.data;
+  assert.equal(couponsAfterConfigLoss.length, couponsBeforeConfigLoss, "定价和规则缺失不得阻断客户券事实恢复");
+  assert.equal(rewardsAfterConfigLoss.length, rewardsBeforeConfigLoss, "定价和规则缺失不得阻断奖励事实恢复");
+  ok("品类恢复：业务快照、定价和规则同时缺失时，仍从核心租户档案装载业务事实");
 
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);
 }

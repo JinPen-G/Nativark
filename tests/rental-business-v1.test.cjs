@@ -11,7 +11,8 @@ const { createAbsorbingConfigStore, createAbsorbingFactStore, createAbsorbingBus
 
 // 不连库用例：注入吸收式 store 让配置写穿落空，配置读取仍由服务内存缓存提供。
 const core = new RentalCoreService(createAbsorbingConfigStore(), createAbsorbingFactStore());
-const business = new RentalBusinessService(createAbsorbingBusinessConfigStore(), createAbsorbingBusinessFactStore(), createAbsorbingConfigStore());
+const businessConfigStore = createAbsorbingBusinessConfigStore();
+const business = new RentalBusinessService(businessConfigStore, createAbsorbingBusinessFactStore(), createAbsorbingConfigStore());
 const tenantId = "tenant_002";
 const now = Date.now();
 const startAt = new Date(now + 2 * 24 * 60 * 60 * 1000).toISOString();
@@ -59,6 +60,31 @@ assert.equal(calendar.status, "draft");
 const publishedCalendar = await business.publishCalendar(tenantId, context(), calendar.year);
 assert.equal(publishedCalendar.status, "published");
 assert.ok(publishedCalendar.sourceUrl.startsWith("https://"));
+
+// GET 只能返回缺省视图，不能把尚未保存的年度悄悄塞进缓存。
+const cachedCalendarCount = business.states.get(tenantId).calendars.length;
+business.getCalendar(tenantId, context(), calendar.year + 10);
+assert.equal(business.states.get(tenantId).calendars.length, cachedCalendarCount, "calendar GET must be side-effect free");
+
+// 写库失败时必须保留最后一次成功提交的缓存，而不是留下幽灵日历配置。
+const calendarBeforeRejectedWrite = structuredClone(business.getCalendar(tenantId, context(), calendar.year));
+businessConfigStore.failCalendar = true;
+await assert.rejects(
+  business.saveCalendarDay(tenantId, context(), calendar.year, {
+    date: `${calendar.year}-12-31`,
+    dayType: "tenant_special",
+    name: "不得进入缓存",
+    pricingMultiplier: 1.5,
+    closed: false
+  }),
+  /calendar write rejected/
+);
+assert.deepEqual(
+  business.getCalendar(tenantId, context(), calendar.year),
+  calendarBeforeRejectedWrite,
+  "failed calendar write must leave cache unchanged"
+);
+businessConfigStore.failCalendar = false;
 
 const currentRule = business.currentRule(tenantId, context());
 const savedRule = await business.saveRuleVersion(tenantId, context(), {

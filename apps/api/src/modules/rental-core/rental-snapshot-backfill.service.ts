@@ -136,24 +136,19 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
   }
 
   /**
-   * 执行一条回填写入，把唯一约束冲突降级为可见的分歧记录而不是整租户回滚。
-   *
-   * 起因：回填按主键 upsert，但多张表还有业务唯一键（如
-   * rental_inspection_templates 的 (tenantId, code, version)）。当库中已存在同业务键
-   * 但主键不同的行时，按主键找不到便走 insert，撞唯一约束抛错——原实现会因此
-   * 回滚整个租户，导致其余二十来类事实全都补不上。
-   *
-   * 这里刻意不按业务键改写既有行：快照是恢复副本，可能已经陈旧，
-   * 用它覆盖库中现存行有撤销他人有意删除或修改的风险。分歧只记录并跳过，
-   * 交由人工判断，其余记录照常补齐。
+   * 叶子记录的唯一约束冲突只记录分歧，不回滚整租户。
+   * 有下游外键的父记录不能只跳过：backfillTenant 内会按租户业务键保留现存主档，
+   * 建立快照 ID 到真实 ID 的映射，再让子记录使用映射后的外键。
    */
-  private async writeOne(label: string, divergences: string[], run: () => Promise<unknown>) {
+  private async writeOne(label: string, divergences: string[], run: () => Promise<unknown>): Promise<boolean> {
     try {
       await run();
+      return true;
     } catch (error) {
       const code = (error as { code?: string }).code;
       if (code !== "P2002") throw error;
       divergences.push(label);
+      return false;
     }
   }
 
@@ -189,12 +184,12 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
   }
 
   /**
-   * 快路径：快照里每一条记录的**主键**是否都已在库中存在。
+   * 快路径：快照里每一条记录的**主键或完整复合键**是否都已在库中存在。
    *
    * 早前两版都不成立：第一版用「任一表非空」判定，部分填充的租户被永久跳过；
    * 第二版改成逐类比对行数，但只比数量——快照期望 A、B 而库里是 A、C 时数量相等，
    * 会被误判为已完整，缺失的 B 永远补不回。
-   * 现在按主键集合判定：只要有任一条快照记录的主键不在库中，就重跑整轮 upsert
+   * 现在按键集合判定：只要有任一条快照记录的键不在库中，就重跑整轮 upsert
    * （upsert 对已存在的行无害，代价只是一次多余写入）。
    */
   private async alreadyBackfilled(
@@ -202,134 +197,132 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
     core: CoreSnapshotState,
     business: BusinessSnapshotState
   ) {
-    const checks: Array<{ ids: string[]; existing: () => Promise<string[]> }> = [
+    const checks: Array<{ keys: string[]; existing: () => Promise<string[]> }> = [
       {
-        ids: (core.operators ?? []).map((row) => row.id),
+        keys: (core.operators ?? []).map((row) => row.id),
         existing: async () =>
           (await this.prisma.rentalFulfillmentOperator.findMany({ where: { tenantId }, select: { id: true } }))
             .map((row) => row.id)
       },
       {
-        ids: (core.locations ?? []).map((row) => row.id),
+        keys: (core.locations ?? []).map((row) => row.id),
         existing: async () =>
           (await this.prisma.rentalFulfillmentLocation.findMany({ where: { tenantId }, select: { id: true } }))
             .map((row) => row.id)
       },
       {
-        ids: (core.itemGroups ?? []).map((row) => row.id),
+        keys: (core.itemGroups ?? []).map((row) => row.id),
         existing: async () =>
           (await this.prisma.rentalItemGroup.findMany({ where: { tenantId }, select: { id: true } }))
             .map((row) => row.id)
       },
-      { ids: (core.assets ?? []).map((row) => row.id), existing: async () =>
+      { keys: (core.assets ?? []).map((row) => row.id), existing: async () =>
           (await this.prisma.rentalAsset.findMany({ where: { tenantId }, select: { id: true } }))
             .map((row) => row.id) },
       {
-        ids: (core.stockBalances ?? []).map((row) => row.id),
+        keys: (core.stockBalances ?? []).map((row) => row.id),
         existing: async () =>
           (await this.prisma.rentalStockBalance.findMany({ where: { tenantId }, select: { id: true } }))
             .map((row) => row.id)
       },
       {
-        ids: (core.couponTemplates ?? []).map((row) => row.id),
+        keys: (core.couponTemplates ?? []).map((row) => row.id),
         existing: async () =>
           (await this.prisma.rentalCouponTemplate.findMany({ where: { tenantId }, select: { id: true } }))
             .map((row) => row.id)
       },
       {
-        ids: (core.inspectionTemplates ?? []).map((row) => row.id),
+        keys: (core.inspectionTemplates ?? []).map((row) => row.id),
         existing: async () =>
           (await this.prisma.rentalInspectionTemplate.findMany({ where: { tenantId }, select: { id: true } }))
             .map((row) => row.id)
       },
-      { ids: (core.orders ?? []).map((row) => row.id), existing: async () =>
+      { keys: (core.orders ?? []).map((row) => row.id), existing: async () =>
           (await this.prisma.rentalOrder.findMany({ where: { tenantId }, select: { id: true } }))
             .map((row) => row.id) },
       {
-        ids: (core.inspections ?? []).map((row) => row.id),
+        keys: (core.inspections ?? []).map((row) => row.id),
         existing: async () =>
           (await this.prisma.rentalInspectionRecord.findMany({ where: { tenantId }, select: { id: true } }))
             .map((row) => row.id)
       },
-      { ids: (business.quotes ?? []).map((row) => row.id), existing: async () =>
+      { keys: (business.quotes ?? []).map((row) => row.id), existing: async () =>
           (await this.prisma.rentalQuote.findMany({ where: { tenantId }, select: { id: true } }))
             .map((row) => row.id) },
       {
-        ids: (business.customerCoupons ?? []).map((row) => row.id),
+        keys: (business.customerCoupons ?? []).map((row) => row.id),
         existing: async () =>
           (await this.prisma.rentalCustomerCoupon.findMany({ where: { tenantId }, select: { id: true } }))
             .map((row) => row.id)
       },
       {
-        ids: (business.rewardLedger ?? []).map((row) => row.id),
+        keys: (business.rewardLedger ?? []).map((row) => row.id),
         existing: async () =>
           (await this.prisma.rentalRewardLedgerEntry.findMany({ where: { tenantId }, select: { id: true } }))
             .map((row) => row.id)
       },
       {
-        ids: (business.notificationTemplates ?? []).map((row) => row.id),
+        keys: (business.notificationTemplates ?? []).map((row) => row.id),
         existing: async () =>
           (await this.prisma.rentalNotificationTemplate.findMany({ where: { tenantId }, select: { id: true } }))
             .map((row) => row.id)
       },
       {
-        ids: (business.notificationLogs ?? []).map((row) => row.id),
+        keys: (business.notificationLogs ?? []).map((row) => row.id),
         existing: async () =>
           (await this.prisma.rentalNotificationLog.findMany({ where: { tenantId }, select: { id: true } }))
             .map((row) => row.id)
       },
       {
-        ids: (business.pricingPlans ?? []).map((row) => row.id),
+        keys: (business.pricingPlans ?? []).map((row) => row.id),
         existing: async () =>
           (await this.prisma.rentalPricingPlan.findMany({ where: { tenantId }, select: { id: true } }))
             .map((row) => row.id)
       },
       {
-        ids: (business.discountPlans ?? []).map((row) => row.id),
+        keys: (business.discountPlans ?? []).map((row) => row.id),
         existing: async () =>
           (await this.prisma.rentalDiscountPlan.findMany({ where: { tenantId }, select: { id: true } }))
             .map((row) => row.id)
       },
       {
-        ids: (business.services ?? []).map((row) => row.id),
+        keys: (business.services ?? []).map((row) => row.id),
         existing: async () =>
           (await this.prisma.rentalValueAddedService.findMany({ where: { tenantId }, select: { id: true } }))
             .map((row) => row.id)
       },
       {
-        ids: (business.ruleVersions ?? []).map((row) => row.id),
+        keys: (business.ruleVersions ?? []).map((row) => row.id),
         existing: async () =>
           (await this.prisma.rentalRuleVersion.findMany({ where: { tenantId }, select: { id: true } }))
             .map((row) => row.id)
+      },
+      {
+        keys: (business.benefitAccounts ?? []).map((row) => row.customerId),
+        existing: async () =>
+          (await this.prisma.rentalBenefitAccount.findMany({ where: { tenantId }, select: { customerId: true } }))
+            .map((row) => row.customerId)
+      },
+      {
+        keys: (business.referrals ?? []).map((row) => row.inviteeCustomerId),
+        existing: async () =>
+          (await this.prisma.rentalReferral.findMany({ where: { tenantId }, select: { inviteeCustomerId: true } }))
+            .map((row) => row.inviteeCustomerId)
+      },
+      {
+        keys: (business.calendars ?? []).map((row) => String(row.year)),
+        existing: async () =>
+          (await this.prisma.rentalBusinessCalendar.findMany({ where: { tenantId }, select: { year: true } }))
+            .map((row) => String(row.year))
       }
     ];
 
-    const pending = checks.filter((row) => row.ids.length > 0);
-    // 复合主键的三类没有单一 id，用「租户内条数不少于快照」判定即可：
-    // 它们的键完全由快照内容决定（年份、客户、被邀请人），不存在"数量相同键不同"。
-    const compositeCounts = await Promise.all([
-      (business.benefitAccounts ?? []).length
-        ? this.prisma.rentalBenefitAccount.count({ where: { tenantId } })
-        : Promise.resolve(0),
-      (business.referrals ?? []).length
-        ? this.prisma.rentalReferral.count({ where: { tenantId } })
-        : Promise.resolve(0),
-      (business.calendars ?? []).length
-        ? this.prisma.rentalBusinessCalendar.count({ where: { tenantId } })
-        : Promise.resolve(0)
-    ]);
-    const compositeExpected = [
-      (business.benefitAccounts ?? []).length,
-      (business.referrals ?? []).length,
-      (business.calendars ?? []).length
-    ];
-    if (compositeExpected.some((expected, index) => expected > 0 && compositeCounts[index] < expected)) return false;
-
-    if (!pending.length) return compositeExpected.every((expected) => expected === 0) ? false : true;
+    const pending = checks.filter((row) => row.keys.length > 0);
+    if (!pending.length) return false;
     const existingSets = await Promise.all(pending.map((row) => row.existing()));
     return pending.every((row, index) => {
       const present = new Set(existingSets[index]);
-      return row.ids.every((id) => present.has(id));
+      return row.keys.every((key) => present.has(key));
     });
   }
 
@@ -354,6 +347,46 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
       async (tx) => {
         const divergences: string[] = [];
         const categoryCode = core.profile?.categoryCode ?? business.categoryCode;
+        const operatorIdMap = new Map<string, string>();
+        const locationIdMap = new Map<string, string>();
+        const itemGroupIdMap = new Map<string, string>();
+        const couponTemplateIdMap = new Map<string, string>();
+        const inspectionTemplateIdMap = new Map<string, string>();
+        const notificationTemplateIdMap = new Map<string, string>();
+        const assetIdMap = new Map<string, string>();
+        const orderIdMap = new Map<string, string>();
+        const orderLineIdMap = new Map<string, string>();
+
+        // 快照主键与库中现存主键可能不同，但业务唯一键相同。此时保留库中主档，
+        // 并把快照子记录的外键映射到现存主键；只“吞掉 P2002”会让子记录继续引用
+        // 不存在的旧主键，随后以 P2003 回滚整租户。
+        const resolveId = async (
+          label: string,
+          snapshotId: string,
+          findExisting: () => Promise<{ id: string } | null>,
+          write: () => Promise<{ id: string }>
+        ): Promise<string | undefined> => {
+          const existing = await findExisting();
+          if (existing) {
+            if (existing.id !== snapshotId) divergences.push(`${label}(${snapshotId}->${existing.id})`);
+            return existing.id;
+          }
+          try {
+            return (await write()).id;
+          } catch (error) {
+            const code = (error as { code?: string }).code;
+            if (code !== "P2002") throw error;
+            // 多实例同时回填时，另一个事务可能刚写入同一业务键。重新查询并采用它；
+            // 若仍找不到，通常是快照主键撞到了其他租户的全局主键，必须安全跳过。
+            const raced = await findExisting();
+            if (raced) {
+              divergences.push(`${label}(${snapshotId}->${raced.id})`);
+              return raced.id;
+            }
+            divergences.push(`${label}(${snapshotId}):unresolved-unique-conflict`);
+            return undefined;
+          }
+        };
 
         // 1. 品类档案：seed 可能已建，用 upsert 避免冲突。
         const snapshotProfile = core.profile;
@@ -393,9 +426,16 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
 
         // 3. 经营主体 → 4. 履约地点（地点的 operatorId 外键依赖主体）
         for (const operator of core.operators ?? []) {
-          await this.writeOne("rentalFulfillmentOperator", divergences, () =>
+          const resolvedId = await resolveId(
+            "rentalFulfillmentOperator",
+            operator.id,
+            () => tx.rentalFulfillmentOperator.findUnique({
+              where: { tenantId_code: { tenantId, code: operator.code } },
+              select: { id: true }
+            }),
+            () =>
             tx.rentalFulfillmentOperator.upsert({
-            where: { id: operator.id },
+            where: { tenantId_code: { tenantId, code: operator.code } },
             update: {},
             create: {
               id: operator.id,
@@ -408,16 +448,25 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               settlementMode: operator.settlementMode ?? null,
               status: operator.status ?? "enabled",
               createdAt: optionalDate(operator.createdAt) ?? new Date()
-            }
+            },
+            select: { id: true }
           }));
+          if (resolvedId) operatorIdMap.set(operator.id, resolvedId);
         }
         count("operators", (core.operators ?? []).length);
 
         const operatorIds = new Set((core.operators ?? []).map((row) => row.id));
         for (const location of core.locations ?? []) {
-          await this.writeOne("rentalFulfillmentLocation", divergences, () =>
+          const resolvedId = await resolveId(
+            "rentalFulfillmentLocation",
+            location.id,
+            () => tx.rentalFulfillmentLocation.findUnique({
+              where: { tenantId_code: { tenantId, code: location.code } },
+              select: { id: true }
+            }),
+            () =>
             tx.rentalFulfillmentLocation.upsert({
-            where: { id: location.id },
+            where: { tenantId_code: { tenantId, code: location.code } },
             update: {},
             create: {
               id: location.id,
@@ -426,26 +475,39 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               name: location.name,
               type: location.type,
               // 快照里的 operatorId 可能指向已不存在的主体，置空而不是让整个租户回填失败。
-              operatorId: location.operatorId && operatorIds.has(location.operatorId) ? location.operatorId : null,
+              operatorId: location.operatorId && operatorIds.has(location.operatorId)
+                ? operatorIdMap.get(location.operatorId) ?? null
+                : null,
               operatorType: location.operatorType ?? null,
               operatorName: location.operatorName ?? null,
-              parentLocationId: location.parentLocationId ?? null,
+              parentLocationId: location.parentLocationId
+                ? locationIdMap.get(location.parentLocationId) ?? location.parentLocationId
+                : null,
               capabilities: jsonArray(location.capabilities),
               address: location.address ?? null,
               contactName: location.contactName ?? null,
               contactPhone: location.contactPhone ?? null,
               businessHours: location.businessHours ?? null,
               status: location.status ?? "enabled"
-            }
+            },
+            select: { id: true }
           }));
+          if (resolvedId) locationIdMap.set(location.id, resolvedId);
         }
         count("locations", (core.locations ?? []).length);
 
         // 5. 商品组（套装组成需先有全部商品组，故分两轮）
         for (const group of core.itemGroups ?? []) {
-          await this.writeOne("rentalItemGroup", divergences, () =>
+          const resolvedId = await resolveId(
+            "rentalItemGroup",
+            group.id,
+            () => tx.rentalItemGroup.findUnique({
+              where: { tenantId_code: { tenantId, code: group.code } },
+              select: { id: true }
+            }),
+            () =>
             tx.rentalItemGroup.upsert({
-            where: { id: group.id },
+            where: { tenantId_code: { tenantId, code: group.code } },
             update: {},
             create: {
               id: group.id,
@@ -459,28 +521,34 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               attributes: json(group.attributes ?? {}),
               status: group.status ?? "enabled",
               createdAt: optionalDate(group.createdAt) ?? new Date()
-            }
+            },
+            select: { id: true }
           }));
+          if (resolvedId) itemGroupIdMap.set(group.id, resolvedId);
         }
         count("itemGroups", (core.itemGroups ?? []).length);
 
         let components = 0;
-        const groupIds = new Set((core.itemGroups ?? []).map((row) => row.id));
         for (const group of core.itemGroups ?? []) {
           for (const component of group.bundleComponents ?? []) {
-            if (!groupIds.has(component.itemGroupId)) continue;
+            const bundleItemGroupId = itemGroupIdMap.get(group.id);
+            const componentItemGroupId = itemGroupIdMap.get(component.itemGroupId);
+            if (!bundleItemGroupId || !componentItemGroupId) {
+              divergences.push(`rentalBundleComponent(${group.id}->${component.itemGroupId})`);
+              continue;
+            }
             await this.writeOne("rentalBundleComponent", divergences, () =>
               tx.rentalBundleComponent.upsert({
-              where: {
-                bundleItemGroupId_componentItemGroupId: {
-                  bundleItemGroupId: group.id,
-                  componentItemGroupId: component.itemGroupId
-                }
-              },
+                where: {
+                  bundleItemGroupId_componentItemGroupId: {
+                    bundleItemGroupId,
+                    componentItemGroupId
+                  }
+                },
               update: {},
               create: {
-                bundleItemGroupId: group.id,
-                componentItemGroupId: component.itemGroupId,
+                bundleItemGroupId,
+                componentItemGroupId,
                 quantity: component.quantity,
                 optional: Boolean(component.optional),
                 substitutionGroup: component.substitutionGroup ?? null
@@ -493,26 +561,47 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
 
         // 6. 资产与库存余额（itemGroupName/locationName/availableQuantity 是派生字段，表中不存）
         for (const asset of core.assets ?? []) {
-          await this.writeOne("rentalAsset", divergences, () =>
+          const itemGroupId = itemGroupIdMap.get(asset.itemGroupId);
+          const locationId = locationIdMap.get(asset.locationId);
+          if (!itemGroupId || !locationId) {
+            divergences.push(`rentalAsset(${asset.id}):parent-missing`);
+            continue;
+          }
+          const resolvedId = await resolveId(
+            "rentalAsset",
+            asset.id,
+            () => tx.rentalAsset.findUnique({
+              where: { tenantId_assetNo: { tenantId, assetNo: asset.assetNo } },
+              select: { id: true }
+            }),
+            () =>
             tx.rentalAsset.upsert({
-            where: { id: asset.id },
+            where: { tenantId_assetNo: { tenantId, assetNo: asset.assetNo } },
             update: {},
             create: {
               id: asset.id,
               tenantId,
-              itemGroupId: asset.itemGroupId,
+              itemGroupId,
               assetNo: asset.assetNo,
               serialNo: asset.serialNo ?? null,
-              locationId: asset.locationId,
+              locationId,
               status: upperEnum<$Enums.RentalAssetState>(asset.status, `asset(${asset.assetNo}).status`),
               attributes: json(asset.attributes ?? {}),
               createdAt: optionalDate(asset.createdAt) ?? new Date()
-            }
+            },
+            select: { id: true }
           }));
+          if (resolvedId) assetIdMap.set(asset.id, resolvedId);
         }
         count("assets", (core.assets ?? []).length);
 
         for (const stock of core.stockBalances ?? []) {
+          const itemGroupId = itemGroupIdMap.get(stock.itemGroupId);
+          const locationId = locationIdMap.get(stock.locationId);
+          if (!itemGroupId || !locationId) {
+            divergences.push(`rentalStockBalance(${stock.id}):parent-missing`);
+            continue;
+          }
           await this.writeOne("rentalStockBalance", divergences, () =>
             tx.rentalStockBalance.upsert({
             where: { id: stock.id },
@@ -520,8 +609,8 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             create: {
               id: stock.id,
               tenantId,
-              itemGroupId: stock.itemGroupId,
-              locationId: stock.locationId,
+              itemGroupId,
+              locationId,
               onHandQuantity: stock.onHandQuantity ?? 0,
               reservedQuantity: stock.reservedQuantity ?? 0,
               maintenanceQuantity: stock.maintenanceQuantity ?? 0
@@ -532,9 +621,16 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
 
         // 7. 优惠券模板 → 客户优惠券（外键依赖）
         for (const template of core.couponTemplates ?? []) {
-          await this.writeOne("rentalCouponTemplate", divergences, () =>
+          const resolvedId = await resolveId(
+            "rentalCouponTemplate",
+            template.id,
+            () => tx.rentalCouponTemplate.findUnique({
+              where: { tenantId_code: { tenantId, code: template.code } },
+              select: { id: true }
+            }),
+            () =>
             tx.rentalCouponTemplate.upsert({
-            where: { id: template.id },
+            where: { tenantId_code: { tenantId, code: template.code } },
             update: {},
             create: {
               id: template.id,
@@ -550,20 +646,25 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               perCustomerLimit: template.perCustomerLimit ?? 1,
               effectiveFrom: date(template.effectiveFrom, `couponTemplate(${template.code}).effectiveFrom`),
               effectiveTo: date(template.effectiveTo, `couponTemplate(${template.code}).effectiveTo`),
-              applicableItemGroupIds: jsonArray(template.applicableItemGroupIds),
+              applicableItemGroupIds: jsonArray(
+                (template.applicableItemGroupIds ?? []).flatMap((id) => itemGroupIdMap.get(id) ?? [])
+              ),
               status: template.status ?? "draft",
               version: template.version ?? "1.0",
               createdAt: optionalDate(template.createdAt) ?? new Date()
-            }
+            },
+            select: { id: true }
           }));
+          if (resolvedId) couponTemplateIdMap.set(template.id, resolvedId);
         }
         count("couponTemplates", (core.couponTemplates ?? []).length);
 
-        const templateIds = new Set((core.couponTemplates ?? []).map((row) => row.id));
         let customerCoupons = 0;
         for (const coupon of business.customerCoupons ?? []) {
-          if (!templateIds.has(coupon.templateId)) {
-            throw new Error(`客户优惠券 ${coupon.id} 引用的模板 ${coupon.templateId} 不在快照中`);
+          const templateId = couponTemplateIdMap.get(coupon.templateId);
+          if (!templateId) {
+            divergences.push(`rentalCustomerCoupon(${coupon.id}):template-missing`);
+            continue;
           }
           await this.writeOne("rentalCustomerCoupon", divergences, () =>
             tx.rentalCustomerCoupon.upsert({
@@ -573,7 +674,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               id: coupon.id,
               tenantId,
               customerId: coupon.customerId,
-              templateId: coupon.templateId,
+              templateId,
               templateCode: coupon.templateCode,
               templateName: coupon.templateName,
               status: coupon.status ?? "claimed",
@@ -593,9 +694,20 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
 
         // 8. 检查模板（检查记录的外键依赖）
         for (const template of core.inspectionTemplates ?? []) {
-          await this.writeOne("rentalInspectionTemplate", divergences, () =>
+          const resolvedId = await resolveId(
+            "rentalInspectionTemplate",
+            template.id,
+            () => tx.rentalInspectionTemplate.findUnique({
+              where: {
+                tenantId_code_version: { tenantId, code: template.code, version: template.version ?? "1.0" }
+              },
+              select: { id: true }
+            }),
+            () =>
             tx.rentalInspectionTemplate.upsert({
-            where: { id: template.id },
+            where: {
+              tenantId_code_version: { tenantId, code: template.code, version: template.version ?? "1.0" }
+            },
             update: {},
             create: {
               id: template.id,
@@ -607,8 +719,10 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               version: template.version ?? "1.0",
               fields: jsonArray(template.fields),
               enabled: template.enabled ?? true
-            }
+            },
+            select: { id: true }
           }));
+          if (resolvedId) inspectionTemplateIdMap.set(template.id, resolvedId);
         }
         count("inspectionTemplates", (core.inspectionTemplates ?? []).length);
 
@@ -629,7 +743,10 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               version: plan.version ?? "1.0",
               effectiveFrom: date(plan.effectiveFrom, `pricingPlan(${plan.code}).effectiveFrom`),
               effectiveTo: optionalDate(plan.effectiveTo),
-              rates: jsonArray(plan.rates),
+              rates: jsonArray(plan.rates.map((rate) => ({
+                ...rate,
+                itemGroupId: itemGroupIdMap.get(rate.itemGroupId) ?? rate.itemGroupId
+              }))),
               createdAt: optionalDate(plan.createdAt) ?? new Date()
             }
           }));
@@ -653,7 +770,9 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               minimumSpend: amount(plan.minimumSpend),
               maximumDiscount: plan.maximumDiscount === undefined ? null : amount(plan.maximumDiscount),
               customerScope: plan.customerScope ?? "all",
-              applicableItemGroupIds: jsonArray(plan.applicableItemGroupIds),
+              applicableItemGroupIds: jsonArray(
+                (plan.applicableItemGroupIds ?? []).map((id) => itemGroupIdMap.get(id) ?? id)
+              ),
               applicableDayTypes: jsonArray(plan.applicableDayTypes),
               priority: plan.priority ?? 0,
               stackableWithCoupon: plan.stackableWithCoupon ?? true,
@@ -685,7 +804,9 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               deductible: service.deductible === undefined ? null : amount(service.deductible),
               termsVersion: service.termsVersion ?? "1.0",
               terms: service.terms ?? "",
-              applicableItemGroupIds: jsonArray(service.applicableItemGroupIds),
+              applicableItemGroupIds: jsonArray(
+                (service.applicableItemGroupIds ?? []).map((id) => itemGroupIdMap.get(id) ?? id)
+              ),
               status: service.status ?? "enabled",
               version: service.version ?? "1.0",
               createdAt: optionalDate(service.createdAt) ?? new Date()
@@ -738,9 +859,30 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
         count("businessCalendars", (business.calendars ?? []).length);
 
         for (const template of business.notificationTemplates ?? []) {
-          await this.writeOne("rentalNotificationTemplate", divergences, () =>
+          const resolvedId = await resolveId(
+            "rentalNotificationTemplate",
+            template.id,
+            () => tx.rentalNotificationTemplate.findUnique({
+              where: {
+                tenantId_eventCode_channel_version: {
+                  tenantId,
+                  eventCode: template.eventCode,
+                  channel: template.channel,
+                  version: template.version ?? "1.0"
+                }
+              },
+              select: { id: true }
+            }),
+            () =>
             tx.rentalNotificationTemplate.upsert({
-            where: { id: template.id },
+            where: {
+              tenantId_eventCode_channel_version: {
+                tenantId,
+                eventCode: template.eventCode,
+                channel: template.channel,
+                version: template.version ?? "1.0"
+              }
+            },
             update: {},
             create: {
               id: template.id,
@@ -753,8 +895,10 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               variableSchema: json(template.variableSchema ?? {}),
               status: template.status ?? "enabled",
               version: template.version ?? "1.0"
-            }
+            },
+            select: { id: true }
           }));
+          if (resolvedId) notificationTemplateIdMap.set(template.id, resolvedId);
         }
         count("notificationTemplates", (business.notificationTemplates ?? []).length);
 
@@ -796,11 +940,25 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
         let lines = 0;
         let reservations = 0;
         let allocations = 0;
-        const assetIds = new Set((core.assets ?? []).map((row) => row.id));
         for (const order of core.orders ?? []) {
-          await this.writeOne("rentalOrder", divergences, () =>
+          const fulfillmentLocationId = locationIdMap.get(order.fulfillmentLocationId);
+          const returnLocationId = order.returnLocationId
+            ? locationIdMap.get(order.returnLocationId)
+            : undefined;
+          if (!fulfillmentLocationId || (order.returnLocationId && !returnLocationId)) {
+            divergences.push(`rentalOrder(${order.id}):location-missing`);
+            continue;
+          }
+          const resolvedOrderId = await resolveId(
+            "rentalOrder",
+            order.id,
+            () => tx.rentalOrder.findUnique({
+              where: { tenantId_orderNo: { tenantId, orderNo: order.orderNo } },
+              select: { id: true }
+            }),
+            () =>
             tx.rentalOrder.upsert({
-            where: { id: order.id },
+            where: { tenantId_orderNo: { tenantId, orderNo: order.orderNo } },
             update: {},
             create: {
               id: order.id,
@@ -813,9 +971,9 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               customerName: order.customerName,
               contactPhone: order.contactPhone ?? null,
               fulfillmentMode: order.fulfillmentMode,
-              fulfillmentLocationId: order.fulfillmentLocationId,
+              fulfillmentLocationId,
               fulfillmentLocationName: order.fulfillmentLocationName,
-              returnLocationId: order.returnLocationId ?? null,
+              returnLocationId: returnLocationId ?? null,
               returnLocationName: order.returnLocationName ?? null,
               startAt: date(order.startAt, `order(${order.orderNo}).startAt`),
               endAt: date(order.endAt, `order(${order.orderNo}).endAt`),
@@ -840,18 +998,26 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               completedAt: optionalDate(order.completedAt),
               createdBy: order.createdBy ?? "backfill",
               createdAt: optionalDate(order.createdAt) ?? new Date()
-            }
+            },
+            select: { id: true }
           }));
+          if (!resolvedOrderId) continue;
+          orderIdMap.set(order.id, resolvedOrderId);
 
           for (const line of order.lines ?? []) {
-            await this.writeOne("rentalOrderLine", divergences, () =>
+            const itemGroupId = itemGroupIdMap.get(line.itemGroupId);
+            if (!itemGroupId) {
+              divergences.push(`rentalOrderLine(${line.id}):item-group-missing`);
+              continue;
+            }
+            const written = await this.writeOne("rentalOrderLine", divergences, () =>
               tx.rentalOrderLine.upsert({
               where: { id: line.id },
               update: {},
               create: {
                 id: line.id,
-                orderId: order.id,
-                itemGroupId: line.itemGroupId,
+                orderId: resolvedOrderId,
+                itemGroupId,
                 itemGroupCode: line.itemGroupCode,
                 itemGroupName: line.itemGroupName,
                 inventoryMode: upperEnum(line.inventoryMode, `orderLine(${line.id}).inventoryMode`),
@@ -861,10 +1027,20 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
                 note: line.note ?? null
               }
             }));
-            lines += 1;
+            if (written) {
+              orderLineIdMap.set(line.id, line.id);
+              lines += 1;
+            }
           }
 
           for (const reservation of order.reservations ?? []) {
+            const orderLineId = orderLineIdMap.get(reservation.orderLineId);
+            const itemGroupId = itemGroupIdMap.get(reservation.itemGroupId);
+            const locationId = locationIdMap.get(reservation.locationId);
+            if (!orderLineId || !itemGroupId || !locationId) {
+              divergences.push(`rentalReservation(${reservation.id}):parent-missing`);
+              continue;
+            }
             await this.writeOne("rentalReservation", divergences, () =>
               tx.rentalReservation.upsert({
               where: { id: reservation.id },
@@ -872,10 +1048,10 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               create: {
                 id: reservation.id,
                 tenantId,
-                orderId: order.id,
-                orderLineId: reservation.orderLineId,
-                itemGroupId: reservation.itemGroupId,
-                locationId: reservation.locationId,
+                orderId: resolvedOrderId,
+                orderLineId,
+                itemGroupId,
+                locationId,
                 quantity: reservation.quantity,
                 // 预占的起止期间在快照里由订单承载，回填时取订单期间。
                 startAt: date(order.startAt, `reservation(${reservation.id}).startAt`),
@@ -889,15 +1065,20 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
           }
 
           for (const allocation of order.allocations ?? []) {
+            const orderLineId = orderLineIdMap.get(allocation.orderLineId);
+            if (!orderLineId) {
+              divergences.push(`rentalAllocation(${allocation.id}):order-line-missing`);
+              continue;
+            }
             await this.writeOne("rentalAllocation", divergences, () =>
               tx.rentalAllocation.upsert({
               where: { id: allocation.id },
               update: {},
               create: {
                 id: allocation.id,
-                orderId: order.id,
-                orderLineId: allocation.orderLineId,
-                assetId: allocation.assetId && assetIds.has(allocation.assetId) ? allocation.assetId : null,
+                orderId: resolvedOrderId,
+                orderLineId,
+                assetId: allocation.assetId ? assetIdMap.get(allocation.assetId) ?? null : null,
                 assetNo: allocation.assetNo ?? null,
                 quantity: allocation.quantity ?? 1,
                 status: allocation.status ?? "allocated"
@@ -912,11 +1093,13 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
         count("allocations", allocations);
 
         // 12. 检查记录
-        const inspectionTemplateIds = new Set((core.inspectionTemplates ?? []).map((row) => row.id));
         let inspections = 0;
         for (const record of core.inspections ?? []) {
-          if (!inspectionTemplateIds.has(record.templateId)) {
-            throw new Error(`检查记录 ${record.id} 引用的模板 ${record.templateId} 不在快照中`);
+          const orderId = orderIdMap.get(record.orderId);
+          const templateId = inspectionTemplateIdMap.get(record.templateId);
+          if (!orderId || !templateId) {
+            divergences.push(`rentalInspectionRecord(${record.id}):parent-missing`);
+            continue;
           }
           await this.writeOne("rentalInspectionRecord", divergences, () =>
             tx.rentalInspectionRecord.upsert({
@@ -925,9 +1108,9 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             create: {
               id: record.id,
               tenantId,
-              orderId: record.orderId,
+              orderId,
               stage: record.stage,
-              templateId: record.templateId,
+              templateId,
               templateCode: record.templateCode,
               templateVersion: record.templateVersion,
               results: json(record.results ?? {}),
@@ -942,11 +1125,12 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
         count("inspections", inspections);
 
         // 13. 通知发送记录（外键依赖通知模板）
-        const notificationTemplateIds = new Set((business.notificationTemplates ?? []).map((row) => row.id));
         let notificationLogs = 0;
         for (const log of business.notificationLogs ?? []) {
-          if (!notificationTemplateIds.has(log.templateId)) {
-            throw new Error(`通知记录 ${log.id} 引用的模板 ${log.templateId} 不在快照中`);
+          const templateId = notificationTemplateIdMap.get(log.templateId);
+          if (!templateId) {
+            divergences.push(`rentalNotificationLog(${log.id}):template-missing`);
+            continue;
           }
           await this.writeOne("rentalNotificationLog", divergences, () =>
             tx.rentalNotificationLog.upsert({
@@ -955,7 +1139,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             create: {
               id: log.id,
               tenantId,
-              templateId: log.templateId,
+              templateId,
               templateVersion: log.templateVersion ?? "1.0",
               eventCode: log.eventCode,
               channel: log.channel,

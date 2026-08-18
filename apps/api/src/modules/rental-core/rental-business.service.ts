@@ -142,10 +142,20 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
    * 在它之前预热会读到还没回填的空表。
    */
   async onApplicationBootstrap() {
-    const configs = await this.configStore.loadAll();
-    const facts = await this.factStore.loadAll();
+    const [configs, facts, coreConfigs] = await Promise.all([
+      this.configStore.loadAll(),
+      this.factStore.loadAll(),
+      this.coreConfigStore.loadAll()
+    ]);
 
     this.bootstrapCategoryByTenant.clear();
+    // 租户经营品类的事实源是核心档案，不能从“是否仍有定价/规则行”反推。
+    // 这样即使业务快照及部分业务配置同时损坏，规范化事实仍能装载到正确品类状态。
+    for (const snapshot of coreConfigs) {
+      if (snapshot.profile?.categoryCode) {
+        this.bootstrapCategoryByTenant.set(snapshot.tenantId, snapshot.profile.categoryCode);
+      }
+    }
     for (const snapshot of configs) {
       if (snapshot.categoryCode) this.bootstrapCategoryByTenant.set(snapshot.tenantId, snapshot.categoryCode);
     }
@@ -346,18 +356,21 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
 
   getCalendar(tenantId: string, context: BusinessContext, year: number) {
     const state = this.state(tenantId, context);
-    let calendar = state.calendars.find((item) => item.year === year);
-    if (!calendar) {
-      calendar = this.buildCalendar(tenantId, context.settings, year);
-      state.calendars.push(calendar);
-    }
-    return calendar;
+    return state.calendars.find((item) => item.year === year)
+      ?? this.buildCalendar(tenantId, context.settings, year);
+  }
+
+  private cacheCalendar(state: RentalBusinessState, calendar: RentalCalendarYear) {
+    const index = state.calendars.findIndex((item) => item.year === calendar.year);
+    if (index >= 0) state.calendars.splice(index, 1, calendar);
+    else state.calendars.push(calendar);
   }
 
   async importOfficialCalendar(tenantId: string, context: BusinessContext, input: ImportRentalCalendarRequest) {
     if (!/^https:\/\//.test(input.sourceUrl)) throw new BadRequestException("官方日历来源必须使用 HTTPS 地址");
     if (!input.days.length) throw new BadRequestException("官方日历数据不能为空");
-    const calendar = this.getCalendar(tenantId, context, input.year);
+    const state = this.state(tenantId, context);
+    const calendar = structuredClone(this.getCalendar(tenantId, context, input.year));
     const dayMap = new Map(calendar.days.map((day) => [day.date, day]));
     for (const row of input.days) {
       if (!row.date.startsWith(`${input.year}-`)) throw new BadRequestException("日历日期与年度不一致");
@@ -378,11 +391,13 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     calendar.importedAt = stamp();
     calendar.publishedAt = undefined;
     await this.configStore.upsertCalendar(calendar);
+    this.cacheCalendar(state, calendar);
     return calendar;
   }
 
   async saveCalendarDay(tenantId: string, context: BusinessContext, year: number, input: SaveRentalCalendarDayRequest) {
-    const calendar = this.getCalendar(tenantId, context, year);
+    const state = this.state(tenantId, context);
+    const calendar = structuredClone(this.getCalendar(tenantId, context, year));
     if (!input.date.startsWith(`${year}-`) || input.pricingMultiplier < 0) throw new BadRequestException("日期年度或价格系数无效");
     const day: RentalCalendarDay = { ...input, source: "tenant_override" };
     const index = calendar.days.findIndex((item) => item.date === input.date);
@@ -392,15 +407,18 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     calendar.version = versionAfter(calendar.version);
     calendar.publishedAt = undefined;
     await this.configStore.upsertCalendar(calendar);
+    this.cacheCalendar(state, calendar);
     return day;
   }
 
   async publishCalendar(tenantId: string, context: BusinessContext, year: number) {
-    const calendar = this.getCalendar(tenantId, context, year);
+    const state = this.state(tenantId, context);
+    const calendar = structuredClone(this.getCalendar(tenantId, context, year));
     if (calendar.region === "CN" && !calendar.sourceName) throw new ConflictException("中国大陆日历发布前必须导入并记录官方来源");
     calendar.status = "published";
     calendar.publishedAt = stamp();
     await this.configStore.upsertCalendar(calendar);
+    this.cacheCalendar(state, calendar);
     return calendar;
   }
 

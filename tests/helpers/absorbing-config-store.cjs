@@ -73,13 +73,17 @@ function createAbsorbingBusinessConfigStore() {
     writes.push({ kind, id: payload?.id ?? payload?.year });
     return Promise.resolve();
   };
-  return {
+  const store = {
     writes,
+    failCalendar: false,
     loadAll: () => Promise.resolve([]),
     upsertPricingPlan: record("pricingPlan"),
     upsertDiscountPlan: record("discountPlan"),
     upsertService: record("service"),
-    upsertCalendar: record("calendar"),
+    upsertCalendar: (calendar) => {
+      if (store.failCalendar) return Promise.reject(new Error("calendar write rejected"));
+      return record("calendar")(calendar);
+    },
     upsertRuleVersion: record("ruleVersion"),
     replacePublishedRuleVersion: (next) => {
       writes.push({ kind: "ruleVersion", id: next?.id });
@@ -87,6 +91,7 @@ function createAbsorbingBusinessConfigStore() {
     },
     upsertNotificationTemplate: record("notificationTemplate")
   };
+  return store;
 }
 
 module.exports = {
