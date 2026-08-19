@@ -1892,6 +1892,41 @@ async function main() {
   assert.equal(badTarget, 0, "审计的 targetId 不得是版本段 v1");
   ok(`通用租赁域审计已落库：${rentalAudits} 条动作记录，其中 ${auditsWithOrder} 条关联到真实订单，targetId 未误取版本段`);
 
+  console.log("== 42. RC-04 奖励幂等以库为准（跨重启仍成立）==");
+  // 早前奖励判重只查内存 rewardLedger：库上虽有 (tenantId, idempotencyKey) 唯一约束，
+  // 但那只会在写入时抛错，而不是幂等返回既有流水。缓存冷启动或多实例部署下，
+  // 重复发放会变成 500 而非幂等。
+  //
+  // 重启会清空内存流水，因此"重启后用同一幂等键再发一次"能直接证伪内存判重：
+  // 若仍依赖内存，这里会新增一条流水或直接报错。
+  const rewardsBeforeRestart = readCount(
+    "SELECT COUNT(*) FROM `rental_reward_ledger_entries` WHERE `idempotencyKey` LIKE 'e2e:reward:once%';"
+  );
+  assert.ok(rewardsBeforeRestart > 0, "前置条件：应已存在该幂等键的奖励流水");
+  await stopApi();
+  startApi();
+  if (!(await waitHealth())) fail("奖励幂等校验的 API 重启超时");
+  const demoReward = await login("demo", "admin", DEMO_PASSWORD);
+  const regrant = await request(
+    "POST",
+    "/api/rental/v1/rewards/grant",
+    { customerId: "e2e_reward_member", triggerType: "registration", idempotencyKey: "e2e:reward:once" },
+    demoReward.accessToken
+  );
+  assert.equal(regrant.status, 201, `重启后同键发放应幂等返回既有流水: ${JSON.stringify(regrant.body)}`);
+  assert.equal(
+    readCount("SELECT COUNT(*) FROM `rental_reward_ledger_entries` WHERE `idempotencyKey` LIKE 'e2e:reward:once%';"),
+    rewardsBeforeRestart,
+    "重启后同键发放不得新增奖励流水（内存判重会在此失败）"
+  );
+  // 权益账户余额同样不能被二次入账。
+  assert.equal(
+    readCount("SELECT ROUND(`pointsBalance`) FROM `rental_benefit_accounts` WHERE `customerId`='e2e_reward_member';"),
+    88,
+    "重复发放不得重复累加权益余额"
+  );
+  ok(`奖励幂等以库为准：重启清空内存后同键再发，流水仍为 ${rewardsBeforeRestart} 条、积分仍为 88`);
+
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);
 }
 

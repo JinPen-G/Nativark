@@ -113,6 +113,9 @@ function createAbsorbingBusinessFactStore() {
     loadAll: () => Promise.resolve([]),
     upsertQuote: record("quote"),
     upsertCustomerCoupon: record("customerCoupon"),
+    // 读返回空：刻意不模拟按键查询语义。奖励幂等真正依赖的是库上的唯一约束
+    // 与前缀匹配，那只能在 MySQL E2E 里验证（第 42 节做了跨重启证伪）。
+    findRewardsByIdempotencyKey: () => Promise.resolve([]),
     upsertRewardEntry: record("rewardEntry"),
     upsertBenefitAccount: record("benefitAccount"),
     upsertReferral: (_tenantId, referral) => {
