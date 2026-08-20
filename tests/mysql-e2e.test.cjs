@@ -1493,6 +1493,25 @@ async function main() {
       idemDemo.accessToken
     )).body.data;
 
+  // 本节要造多张订单（串行重放 / 并发同键 / 通知取样 / 同键异体并发），
+  // 而序列化库存的容量就是该地点下的可用资产数，固定夹具只够 3 张。
+  // 先补两台资产，避免后面的用例因"库存不足"而在错误的地方失败——
+  // 那种失败会被误读成幂等缺陷。serialNo 是 camera 品类唯一的资产级必填属性。
+  for (let index = 0; index < 2; index += 1) {
+    const extraAsset = await request(
+      "POST",
+      "/api/rental/v1/assets",
+      {
+        itemGroupId: idemGroups[0].id,
+        locationId: idemLoc.id,
+        assetNo: `E2E-IDEM-CAM-00${index}`,
+        attributes: { serialNo: `E2E-IDEM-SN-00${index}` }
+      },
+      idemDemo.accessToken
+    );
+    assert.equal(extraAsset.status, 201, `幂等用例补充资产失败: ${JSON.stringify(extraAsset.body).slice(0, 200)}`);
+  }
+
   // 1) 串行重放同一个 Idempotency-Key：必须返回同一张订单，且库存只被占一次。
   const beforeSerial = await availableFor();
   const q1 = await newQuote();
@@ -1514,22 +1533,30 @@ async function main() {
   const conflict = await request("POST", "/api/rental/v1/orders", tampered, idemDemo.accessToken, { "Idempotency-Key": key1 });
   assert.equal(conflict.status, 409, `同键不同请求体必须 409，实际 ${conflict.status}`);
 
-  // 3) 并发同键：两个请求都必须成功（一个执行、一个回放），且指向同一张订单。
+  // 3) 并发同键：**每个**请求都必须成功（一个执行、其余回放），且指向同一张订单。
   //    早前只断言「至少一个成功」，输家返回 409 也能过——而输家 409 恰恰是缺陷：
-  //    先到者会先消费掉报价，后到者在事务内的报价校验就被拒，走不到幂等回放。
+  //    先到者会先消费掉报价，后到者在事务内的报价校验就被拒，那一步位于事务末尾的
+  //    幂等重查之前，因此它永远走不到回放。
+  //
+  //    刻意用 6 路而非 2 路：两路请求很难稳定制造出「后到者已过预检、又在事务中段
+  //    撞上已消费报价」的交错，2 路时该分支常常根本不被走到。提高并发度提高命中率。
+  //    断言本身在任何交错下都成立——同键同请求体就该拿到同一张订单，绝不该 409。
+  const CONCURRENT_SAME_KEY = 6;
   const beforeConcurrent = await availableFor();
   const q2 = await newQuote();
   const key2 = `e2e-idem-concurrent-${q2.id}`;
-  const [c1, c2] = await Promise.all([
-    request("POST", "/api/rental/v1/orders", idemBody(q2.id), idemDemo.accessToken, { "Idempotency-Key": key2 }),
-    request("POST", "/api/rental/v1/orders", idemBody(q2.id), idemDemo.accessToken, { "Idempotency-Key": key2 })
-  ]);
-  const created = [c1, c2].filter((res) => res.status === 201);
+  const sameKeyResults = await Promise.all(
+    Array.from({ length: CONCURRENT_SAME_KEY }, () =>
+      request("POST", "/api/rental/v1/orders", idemBody(q2.id), idemDemo.accessToken, { "Idempotency-Key": key2 })
+    )
+  );
+  const created = sameKeyResults.filter((res) => res.status === 201);
   assert.equal(
     created.length,
-    2,
-    `并发同键两个请求都应成功（一个执行、一个回放），实际 ${c1.status}/${c2.status}: ` +
-      `${JSON.stringify(c1.body).slice(0, 120)} | ${JSON.stringify(c2.body).slice(0, 120)}`
+    CONCURRENT_SAME_KEY,
+    `并发同键 ${CONCURRENT_SAME_KEY} 个请求都应成功（一个执行、其余回放），实际状态 ` +
+      `${sameKeyResults.map((res) => res.status).join("/")}；首个非 201 响应体: ` +
+      `${JSON.stringify((sameKeyResults.find((res) => res.status !== 201) || {}).body ?? null).slice(0, 200)}`
   );
   const ids = new Set(created.map((res) => res.body.data.id));
   assert.equal(ids.size, 1, "并发同键的成功响应必须指向同一张订单");
@@ -1539,6 +1566,44 @@ async function main() {
     "并发同键不得产生两张订单"
   );
   assert.equal(await availableFor(), beforeConcurrent - 1, "并发同键只应占用一次库存");
+
+  // 3b) 同键但请求体不同且**并发**：任何请求都不得拿到别人的订单。
+  //     顺序场景由 2) 覆盖（事务外预检里有指纹校验），但并发时后到者会撞唯一约束
+  //     落进 P2002 分支——该分支此前不比对指纹，会把先到者的订单当成自己的结果返回。
+  //     断言用「返回的 customerName 必须等于自己提交的」，这样即使某次交错走的是
+  //     预检路径（正确地 409），断言依然成立，不会变成靠运气过的绿灯。
+  const q2b = await newQuote();
+  const key2b = `e2e-idem-samekey-diffbody-${q2b.id}`;
+  const distinctNames = ["E2E并发甲", "E2E并发乙", "E2E并发丙", "E2E并发丁"];
+  const diffBodyResults = await Promise.all(
+    distinctNames.map((customerName) =>
+      request(
+        "POST",
+        "/api/rental/v1/orders",
+        { ...idemBody(q2b.id), customerName },
+        idemDemo.accessToken,
+        { "Idempotency-Key": key2b }
+      ).then((res) => ({ customerName, res }))
+    )
+  );
+  for (const { customerName, res } of diffBodyResults) {
+    if (res.status !== 201) continue;
+    assert.equal(
+      res.body.data.customerName,
+      customerName,
+      `同键不同请求体并发时，请求「${customerName}」拿到了别人的订单「${res.body.data.customerName}」——` +
+        `P2002 回放前未比对指纹`
+    );
+  }
+  assert.ok(
+    diffBodyResults.filter(({ res }) => res.status === 201).length <= 1,
+    `同键不同请求体最多只能有一个成功，实际 ${diffBodyResults.map(({ res }) => res.status).join("/")}`
+  );
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_orders\` WHERE \`quoteId\`='${q2b.id}';`),
+    1,
+    "同键不同请求体并发不得产生多张订单"
+  );
 
   // 4) 幂等记录必须落库且带正确租户戳，否则重启后重放会再次建单。
   assert.equal(

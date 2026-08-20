@@ -129,7 +129,12 @@ export class RentalIdempotentActionService {
       // 并发同键撞唯一约束：先到者已提交，回放它的结果而不是报错。
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
         const winner = await this.idempotency.find(input.tenantId, input.action, key);
-        const replayed = winner ? await input.replay(winner.response) : undefined;
+        if (!winner) throw new ConflictException("相同幂等键的请求正在处理，请稍后重试");
+        // 回放前必须比对指纹：两个**不同**请求并发复用同一幂等键时，
+        // 后到者会撞唯一约束落到这里，不比对就会把先到者的结果当成自己的返回。
+        // 顺序请求走事务外预检时已有这道校验，并发路径此前漏了。
+        assertSameRequest(winner, fingerprint);
+        const replayed = await input.replay(winner.response);
         if (replayed !== undefined) return replayed;
         throw new ConflictException("相同幂等键的请求正在处理，请稍后重试");
       }

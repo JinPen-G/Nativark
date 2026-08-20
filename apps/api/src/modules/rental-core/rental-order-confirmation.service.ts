@@ -181,12 +181,41 @@ export class RentalOrderConfirmationService {
       }
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
         const winner = await this.idempotency.find(tenantId, ORDER_CREATE_ACTION, key);
-        const replayed = winner?.orderId ? await this.coreFacts.findOrder(tenantId, winner.orderId) : undefined;
+        if (!winner) throw new ConflictException("相同幂等键的请求正在处理，请稍后重试");
+        // 回放前必须比对指纹：两个**不同**请求并发复用同一幂等键时，
+        // 后到者会撞唯一约束落到这里，不比对就会把先到者的订单当成自己的结果返回。
+        // 顺序请求走事务外预检时已有这道校验，并发路径此前漏了。
+        assertSameRequest(winner, fingerprint);
+        const replayed = winner.orderId ? await this.coreFacts.findOrder(tenantId, winner.orderId) : undefined;
         if (replayed) return { order: replayed, replayed: true };
         throw new ConflictException("相同幂等键的请求正在处理，请稍后重试");
       }
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") {
         throw new ConflictException("库存正在被其他订单占用，请稍后重试");
+      }
+      // 业务冲突后再探一次幂等记录。
+      //
+      // 可复现的交错（Codex 2026-08-20 指出，此前我误以为该分支走不到）：
+      //   1. 两个同键请求都在首单提交前完成事务外预检，双双查不到记录；
+      //   2. 后到者在事务内等待库存锁；
+      //   3. 首单提交，消费报价并占用库存；
+      //   4. 后到者拿到锁，因报价已被消费而在**事务中段**抛 409；
+      //   5. 那一步位于事务末尾的幂等重查之前，因此它永远走不到回放。
+      //
+      // 「E2E 当前能过」只说明没有稳定制造出这个交错，不能证明分支不可达。
+      // 实测：6 路同键并发连跑 3 次，后到者总是在事务外预检就命中先到者已提交的
+      // 记录并回放，走不到这里。**因此本分支目前无测试覆盖**——不要因为"删掉它
+      // 测试仍全绿"就删掉它（我犯过这个错）。多实例部署或不同时序下窗口是真实的。
+      //
+      // 判据必须是同键 + 同指纹 + 订单确实存在，三者缺一即保留原始错误，
+      // 真正的报价失效、过期、变更仍如实报 409。
+      if (error instanceof ConflictException) {
+        const winner = await this.idempotency.find(tenantId, ORDER_CREATE_ACTION, key);
+        if (!winner) throw error;
+        assertSameRequest(winner, fingerprint);
+        const replayed = winner.orderId ? await this.coreFacts.findOrder(tenantId, winner.orderId) : undefined;
+        if (replayed) return { order: replayed, replayed: true };
+        throw error;
       }
       throw error;
     }
