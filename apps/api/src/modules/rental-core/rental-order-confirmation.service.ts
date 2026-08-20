@@ -76,6 +76,10 @@ export class RentalOrderConfirmationService {
     @Inject(RentalIdempotencyRepository) private readonly idempotency: RentalIdempotencyStore
   ) {}
 
+  /**
+   * 返回值带 `replayed` 标记：调用方据此跳过下单通知等**外部副作用**。
+   * 通知不在事务内，事务回滚撤不回已发出的短信，正确边界是「只在首次真正建单时发」。
+   */
   async createOrder(
     tenantId: string,
     input: CreateRentalOrderRequest,
@@ -92,7 +96,7 @@ export class RentalOrderConfirmationService {
     if (early) {
       assertSameRequest(early, fingerprint);
       const replayed = early.orderId ? await this.coreFacts.findOrder(tenantId, early.orderId) : undefined;
-      if (replayed) return replayed;
+      if (replayed) return { order: replayed, replayed: true };
     }
 
     const quote = this.business.consumeQuote(tenantId, context, input.quoteId);
@@ -172,13 +176,13 @@ export class RentalOrderConfirmationService {
       // 并发同键：先到者已提交，本次回滚后返回它的结果，而不是报错或重复建单。
       if (error instanceof IdempotentReplay) {
         const replayed = error.orderId ? await this.coreFacts.findOrder(tenantId, error.orderId) : undefined;
-        if (replayed) return replayed;
+        if (replayed) return { order: replayed, replayed: true };
         throw new ConflictException("相同幂等键的请求正在处理，请稍后重试");
       }
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
         const winner = await this.idempotency.find(tenantId, ORDER_CREATE_ACTION, key);
         const replayed = winner?.orderId ? await this.coreFacts.findOrder(tenantId, winner.orderId) : undefined;
-        if (replayed) return replayed;
+        if (replayed) return { order: replayed, replayed: true };
         throw new ConflictException("相同幂等键的请求正在处理，请稍后重试");
       }
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") {
@@ -188,7 +192,7 @@ export class RentalOrderConfirmationService {
     }
 
     this.business.applyOrderConfirmationToCache(quote, coupon, order.id, committedAt);
-    return order;
+    return { order, replayed: false };
   }
 
   private assertOrderMatchesQuote(input: CreateRentalOrderRequest, quote: RentalQuoteSnapshotV1) {

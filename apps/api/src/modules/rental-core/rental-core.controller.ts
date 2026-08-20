@@ -21,13 +21,22 @@ import { RentalOrderConfirmationService } from "./rental-order-confirmation.serv
 import { RentalIdempotentActionService } from "./rental-idempotent-action.service";
 
 /** 读取标准 Idempotency-Key 请求头。大小写不敏感，超长键直接拒绝。 */
+/**
+ * 上限必须与 `rental_order_idempotency_records.idempotencyKey` 的列宽一致。
+ * Prisma 的 `String` 在 MySQL 下落成 `VARCHAR(191)`，放行更长的键会在写入时
+ * 撞 MySQL 1406（Data too long）变成 500，而不是这里明确的 400。
+ */
+const IDEMPOTENCY_KEY_MAX_LENGTH = 191;
+
 function idempotencyKeyOf(req: { headers?: Record<string, unknown> }): string | undefined {
   const raw = req.headers?.["idempotency-key"] ?? req.headers?.["Idempotency-Key"];
   const value = Array.isArray(raw) ? raw[0] : raw;
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   if (!trimmed) return undefined;
-  if (trimmed.length > 200) throw new BadRequestException("Idempotency-Key 过长");
+  if (trimmed.length > IDEMPOTENCY_KEY_MAX_LENGTH) {
+    throw new BadRequestException(`Idempotency-Key 过长，最多 ${IDEMPOTENCY_KEY_MAX_LENGTH} 个字符`);
+  }
   return trimmed;
 }
 
@@ -89,14 +98,15 @@ export class RentalCoreController {
   @Post("orders") async createOrder(@Req() req: AuthenticatedRequest, @Body() body: CreateRentalOrderRequest) {
     const context = this.context(req.user.tenantId);
     // 幂等键取标准的 Idempotency-Key 请求头；未传时下单侧退回 quoteId（报价一次性使用）。
-    const order = await this.orderConfirmation.createOrder(
+    const { order, replayed } = await this.orderConfirmation.createOrder(
       req.user.tenantId,
       body,
       req.user.displayName,
       context,
       idempotencyKeyOf(req)
     );
-    await this.emitOrderEvent(req.user.tenantId, "order.created", order);
+    // 回放时跳过通知：同键重试不该让客户收到第二条「订单已创建」。
+    if (!replayed) await this.emitOrderEvent(req.user.tenantId, "order.created", order);
     return this.committed(req.user.tenantId, order);
   }
   @Post("orders/:id/confirm") async confirm(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
@@ -105,9 +115,11 @@ export class RentalCoreController {
       tenantId,
       action: "order.confirm",
       key: idempotencyKeyOf(req),
-      // 兜底键纳入当前状态：否则同一订单的键永久固定，
-      // 已完成订单再次确认会命中当初成功的记录并回放 201，掩盖本该有的 409。
-      fallbackKey: `order.confirm:${id}:${(await this.service.getOrder(tenantId, id)).status}`,
+      // 兜底键**不得**纳入当前状态：状态会被本动作改掉，纳入后无键网络重试
+      // 算出的键与首次登记的键不同，查不到记录就落回状态机报 409——幂等失效。
+      // 非法转移由下面的 replay 拒绝：只有订单确实处于本动作的目标状态才回放，
+      // 已完成订单再次确认因状态不符而返回 undefined，交由状态机给出 409。
+      fallbackKey: `order.confirm:${id}`,
       request: { orderId: id },
       orderId: id,
       run: (tx) => this.service.confirmOrder(tenantId, id, tx),
@@ -128,7 +140,7 @@ export class RentalCoreController {
       tenantId,
       action: "order.allocate",
       key: idempotencyKeyOf(req),
-      fallbackKey: `order.allocate:${id}:${(await this.service.getOrder(tenantId, id)).status}`,
+      fallbackKey: `order.allocate:${id}`,
       request: { orderId: id },
       orderId: id,
       run: (tx) => this.service.allocateOrder(tenantId, id, tx),
@@ -148,7 +160,7 @@ export class RentalCoreController {
       tenantId: req.user.tenantId,
       action: "order.cancel",
       key: idempotencyKeyOf(req),
-      fallbackKey: `order.cancel:${id}:${current.status}`,
+      fallbackKey: `order.cancel:${id}`,
       // 取消原因与天气例外参与指纹：同键换内容属调用方错误，
       // 必须报冲突而不是静默沿用第一次的原因与费用。
       request: { orderId: id, reason: body.reason, weatherException: Boolean(body.weatherException) },

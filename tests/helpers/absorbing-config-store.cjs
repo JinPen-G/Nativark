@@ -54,6 +54,9 @@ function createAbsorbingFactStore() {
     findOrder: () => Promise.resolve(undefined),
     countOrders: () => Promise.resolve(0),
     saveOrderAggregate: record("order"),
+    // 与 lockInventoryTargets 同理：锁语义（丢失更新、死锁映射）只能在真 MySQL 里验证，
+    // 这里吸收掉，不假装加了锁。
+    lockOrder: () => Promise.resolve(),
     lockInventoryTargets: () => Promise.resolve(),
     activeReservations: () => Promise.resolve([]),
     allocatedAssetIds: () => Promise.resolve(new Set()),

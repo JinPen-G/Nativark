@@ -47,7 +47,13 @@ export interface InventoryLockTarget {
  */
 export interface RentalCoreFactStore {
   listOrders(tenantId: string): Promise<RentalOrder[]>;
-  findOrder(tenantId: string, orderId: string): Promise<RentalOrder | undefined>;
+  findOrder(tenantId: string, orderId: string, tx?: RentalFactTx): Promise<RentalOrder | undefined>;
+  /**
+   * 对订单行加排他锁，供状态推进动作在读取聚合前调用。
+   * 不加锁时确认、配货、取消会各读一份聚合副本、各跑状态机、各整体写回，
+   * 后提交者把先提交者的状态覆盖掉（丢失更新），两个动作都返回成功。
+   */
+  lockOrder(tenantId: string, orderId: string, tx: RentalFactTx): Promise<void>;
   countOrders(tenantId: string): Promise<number>;
   saveOrderAggregate(order: RentalOrder, assetChanges?: AssetStatusChange[], tx?: RentalFactTx): Promise<void>;
   lockInventoryTargets(tenantId: string, locationId: string, targets: InventoryLockTarget[], tx: RentalFactTx): Promise<void>;
@@ -116,12 +122,25 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     return rows.map((row) => this.toDomainOrder(row));
   }
 
-  async findOrder(tenantId: string, orderId: string): Promise<RentalOrder | undefined> {
-    const row = await this.prisma.rentalOrder.findFirst({
+  async findOrder(tenantId: string, orderId: string, tx?: RentalFactTx): Promise<RentalOrder | undefined> {
+    const client = tx ?? this.prisma;
+    const row = await client.rentalOrder.findFirst({
       where: { id: orderId, tenantId },
       include: this.orderInclude
     });
     return row ? this.toDomainOrder(row) : undefined;
+  }
+
+  /**
+   * 锁只加在订单行上，子表（行、预占、分配）随聚合一起由同一事务写回，
+   * 拿到订单锁即可串行同一订单的状态推进，不同订单仍并行。
+   */
+  async lockOrder(tenantId: string, orderId: string, tx: RentalFactTx): Promise<void> {
+    await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT \`id\` FROM \`rental_orders\`
+      WHERE \`tenantId\` = ${tenantId} AND \`id\` = ${orderId}
+      FOR UPDATE
+    `);
   }
 
   async countOrders(tenantId: string): Promise<number> {

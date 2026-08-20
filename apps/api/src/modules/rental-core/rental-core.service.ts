@@ -654,7 +654,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
 
   async confirmOrder(tenantId: string, orderId: string, tx?: RentalFactTx) {
     this.state(tenantId);
-    const order = await this.requireOrder(tenantId, orderId);
+    const order = await this.lockedOrder(tenantId, orderId, tx);
     if (order.status !== RentalCoreOrderStatus.Draft) throw new ConflictException("只有草稿订单可以确认");
     if (order.reservations.some((row) => row.expiresAt && new Date(row.expiresAt).getTime() < Date.now())) throw new ConflictException("软预占已过期，请重新下单");
     order.reservations.forEach((row) => { row.status = RentalReservationStatus.Confirmed; row.expiresAt = undefined; });
@@ -665,7 +665,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
 
   async allocateOrder(tenantId: string, orderId: string, tx?: RentalFactTx) {
     const state = await this.factContext(tenantId);
-    const order = await this.requireOrder(tenantId, orderId);
+    const order = await this.lockedOrder(tenantId, orderId, tx);
     if (order.status !== RentalCoreOrderStatus.Reserved) throw new ConflictException("只有已确认预占的订单可以配货");
     const [assets, used] = await Promise.all([
       this.factStore.listAssets(tenantId),
@@ -698,7 +698,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
 
   async cancelOrder(tenantId: string, orderId: string, reason: string, chargeAmount = 0, tx?: RentalFactTx) {
     this.state(tenantId);
-    const order = await this.requireOrder(tenantId, orderId);
+    const order = await this.lockedOrder(tenantId, orderId, tx);
     if ([RentalCoreOrderStatus.Renting, RentalCoreOrderStatus.Completed, RentalCoreOrderStatus.Cancelled].includes(order.status)) throw new ConflictException("当前订单状态不能取消");
     if (!reason?.trim()) throw new BadRequestException("取消原因不能为空");
     const assetChanges: AssetStatusChange[] = [];
@@ -839,6 +839,20 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   private location(state: TenantRentalState, locationId: string) { const found = state.locations.find((row) => row.id === locationId); if (!found) throw new NotFoundException("履约网点不存在"); return found; }
   private async requireOrder(tenantId: string, orderId: string) {
     const order = await this.factStore.findOrder(tenantId, orderId);
+    if (!order) throw new NotFoundException("租赁订单不存在");
+    return order;
+  }
+  /**
+   * 取订单聚合用于状态推进：先锁订单行，再**在同一事务内**重读。
+   *
+   * 顺序不能反。若先读后锁，读到的是锁等待之前的旧快照，拿到锁时状态可能已被
+   * 并发动作改掉，状态机据旧状态放行并整体写回，直接覆盖对方的结果。
+   * 也不能沿用 requireOrder：它走 this.prisma，读根本不在事务内。
+   */
+  private async lockedOrder(tenantId: string, orderId: string, tx?: RentalFactTx) {
+    if (!tx) return this.requireOrder(tenantId, orderId);
+    await this.factStore.lockOrder(tenantId, orderId, tx);
+    const order = await this.factStore.findOrder(tenantId, orderId, tx);
     if (!order) throw new NotFoundException("租赁订单不存在");
     return order;
   }

@@ -43,9 +43,13 @@ export interface IdempotentActionInput<T> {
  * 并发同键会双双通过，两边都推进状态。
  *
  * 关于回放与状态机的先后：幂等只覆盖「同一次意图的重试」，不得把非法状态转移
- * 伪装成重放。因此调用方的 fallbackKey 必须纳入订单当前状态，且 replay 只在
- * 状态仍然合法时才返回结果——否则「已完成订单再次确认」会命中当初那次成功的
- * 记录并回放 201，把本该 409 的非法动作放行。
+ * 伪装成重放。这件事由 `replay` 负责——只有订单确实处于本动作的**目标状态**才回放，
+ * 否则返回 undefined 交回状态机拒绝：已完成订单再次确认因状态不是 reserved 而落到
+ * `run`，由状态机给出 409。
+ *
+ * 反过来，`fallbackKey` **不得**纳入订单当前状态。状态会被本动作自己改掉，纳入后
+ * 无键网络重试算出的键与首次登记的键不同，查不到记录同样落到状态机报 409，
+ * 于是「没传幂等键的重试」永远拿不到幂等保护。键要稳定，判别交给 replay。
  */
 @Injectable()
 export class RentalIdempotentActionService {
@@ -131,6 +135,22 @@ export class RentalIdempotentActionService {
       }
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") {
         throw new ConflictException("订单正在被其他请求处理，请稍后重试");
+      }
+      // 状态机拒绝后再探一次幂等记录。
+      //
+      // 并发同键时先到者可能在本次事务外刚刚提交：事务外那次预检看不到它，
+      // 而订单行锁会让后到者拿锁后读到**已推进**的状态，于是状态机给出 409。
+      // 但这两个请求本就是同一次意图，正确结果是回放而不是冲突。
+      //
+      // 只有「确实存在同键同指纹的记录，且 replay 判定目标状态已达成」才回放，
+      // 因此真正的非法转移（无记录，或状态不符）仍如实抛出原始 409。
+      if (error instanceof ConflictException) {
+        const winner = await this.idempotency.find(input.tenantId, input.action, key);
+        if (!winner) throw error;
+        assertSameRequest(winner, fingerprint);
+        const replayed = await input.replay(winner.response);
+        if (replayed !== undefined) return replayed;
+        throw error;
       }
       throw error;
     }
