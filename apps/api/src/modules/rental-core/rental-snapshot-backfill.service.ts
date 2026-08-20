@@ -338,6 +338,18 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
     const tenant = await this.prisma.tenant.findUnique({ where: { id: tenantId }, select: { id: true } });
     if (!tenant) throw new Error("Tenant 表中不存在该租户");
 
+    // SPACE-03：快照回填出来的经营事实全部归属该租户的**默认经营空间**。
+    //
+    // 这里没有会话（onModuleInit 阶段），因此不能取会话空间；而快照本身是
+    // 升级前的单空间时代产物，其内容本来就属于兼容层，也只可能属于默认空间。
+    // 找不到默认空间时直接抛错让该租户整体回滚，绝不猜一个空间 id。
+    const defaultWorkspace = await this.prisma.businessWorkspace.findFirst({
+      where: { tenantId, defaultMarker: "default" },
+      select: { id: true }
+    });
+    if (!defaultWorkspace) throw new Error("该租户没有默认经营空间，无法归属回填出的经营事实");
+    const workspaceId = defaultWorkspace.id;
+
     const inserted: Record<string, number> = {};
     const count = (key: string, n: number) => {
       if (n > 0) inserted[key] = n;
@@ -414,6 +426,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             where: { tenantId },
             create: {
               tenantId,
+              workspaceId,
               categoryCode: upperEnum(categoryCode, "businessSettings.categoryCode"),
               configVersion: settings.configVersion ?? "0.1.0",
               settings: json(settings),
@@ -430,16 +443,17 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             "rentalFulfillmentOperator",
             operator.id,
             () => tx.rentalFulfillmentOperator.findUnique({
-              where: { tenantId_code: { tenantId, code: operator.code } },
+              where: { workspaceId_code: { workspaceId, code: operator.code } },
               select: { id: true }
             }),
             () =>
             tx.rentalFulfillmentOperator.upsert({
-            where: { tenantId_code: { tenantId, code: operator.code } },
+            where: { workspaceId_code: { workspaceId, code: operator.code } },
             update: {},
             create: {
               id: operator.id,
               tenantId,
+              workspaceId,
               code: operator.code,
               name: operator.name,
               type: operator.type,
@@ -461,16 +475,17 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             "rentalFulfillmentLocation",
             location.id,
             () => tx.rentalFulfillmentLocation.findUnique({
-              where: { tenantId_code: { tenantId, code: location.code } },
+              where: { workspaceId_code: { workspaceId, code: location.code } },
               select: { id: true }
             }),
             () =>
             tx.rentalFulfillmentLocation.upsert({
-            where: { tenantId_code: { tenantId, code: location.code } },
+            where: { workspaceId_code: { workspaceId, code: location.code } },
             update: {},
             create: {
               id: location.id,
               tenantId,
+              workspaceId,
               code: location.code,
               name: location.name,
               type: location.type,
@@ -502,16 +517,17 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             "rentalItemGroup",
             group.id,
             () => tx.rentalItemGroup.findUnique({
-              where: { tenantId_code: { tenantId, code: group.code } },
+              where: { workspaceId_code: { workspaceId, code: group.code } },
               select: { id: true }
             }),
             () =>
             tx.rentalItemGroup.upsert({
-            where: { tenantId_code: { tenantId, code: group.code } },
+            where: { workspaceId_code: { workspaceId, code: group.code } },
             update: {},
             create: {
               id: group.id,
               tenantId,
+              workspaceId,
               categoryCode: upperEnum(group.categoryCode, `itemGroup(${group.code}).categoryCode`),
               code: group.code,
               name: group.name,
@@ -571,16 +587,17 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             "rentalAsset",
             asset.id,
             () => tx.rentalAsset.findUnique({
-              where: { tenantId_assetNo: { tenantId, assetNo: asset.assetNo } },
+              where: { workspaceId_assetNo: { workspaceId, assetNo: asset.assetNo } },
               select: { id: true }
             }),
             () =>
             tx.rentalAsset.upsert({
-            where: { tenantId_assetNo: { tenantId, assetNo: asset.assetNo } },
+            where: { workspaceId_assetNo: { workspaceId, assetNo: asset.assetNo } },
             update: {},
             create: {
               id: asset.id,
               tenantId,
+              workspaceId,
               itemGroupId,
               assetNo: asset.assetNo,
               serialNo: asset.serialNo ?? null,
@@ -609,6 +626,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             create: {
               id: stock.id,
               tenantId,
+              workspaceId,
               itemGroupId,
               locationId,
               onHandQuantity: stock.onHandQuantity ?? 0,
@@ -625,16 +643,17 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             "rentalCouponTemplate",
             template.id,
             () => tx.rentalCouponTemplate.findUnique({
-              where: { tenantId_code: { tenantId, code: template.code } },
+              where: { workspaceId_code: { workspaceId, code: template.code } },
               select: { id: true }
             }),
             () =>
             tx.rentalCouponTemplate.upsert({
-            where: { tenantId_code: { tenantId, code: template.code } },
+            where: { workspaceId_code: { workspaceId, code: template.code } },
             update: {},
             create: {
               id: template.id,
               tenantId,
+              workspaceId,
               code: template.code,
               name: template.name,
               discountType: template.discountType,
@@ -673,6 +692,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             create: {
               id: coupon.id,
               tenantId,
+              workspaceId,
               customerId: coupon.customerId,
               templateId,
               templateCode: coupon.templateCode,
@@ -699,19 +719,20 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             template.id,
             () => tx.rentalInspectionTemplate.findUnique({
               where: {
-                tenantId_code_version: { tenantId, code: template.code, version: template.version ?? "1.0" }
+                workspaceId_code_version: { workspaceId, code: template.code, version: template.version ?? "1.0" }
               },
               select: { id: true }
             }),
             () =>
             tx.rentalInspectionTemplate.upsert({
             where: {
-              tenantId_code_version: { tenantId, code: template.code, version: template.version ?? "1.0" }
+              workspaceId_code_version: { workspaceId, code: template.code, version: template.version ?? "1.0" }
             },
             update: {},
             create: {
               id: template.id,
               tenantId,
+              workspaceId,
               categoryCode: upperEnum(template.categoryCode, `inspectionTemplate(${template.code}).categoryCode`),
               code: template.code,
               name: template.name,
@@ -735,6 +756,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             create: {
               id: plan.id,
               tenantId,
+              workspaceId,
               categoryCode: upperEnum(plan.categoryCode, `pricingPlan(${plan.code}).categoryCode`),
               code: plan.code,
               name: plan.name,
@@ -761,6 +783,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             create: {
               id: plan.id,
               tenantId,
+              workspaceId,
               categoryCode: upperEnum(plan.categoryCode, `discountPlan(${plan.code}).categoryCode`),
               code: plan.code,
               name: plan.name,
@@ -793,6 +816,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             create: {
               id: service.id,
               tenantId,
+              workspaceId,
               categoryCode: upperEnum(service.categoryCode, `service(${service.code}).categoryCode`),
               code: service.code,
               name: service.name,
@@ -823,6 +847,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             create: {
               id: rule.id,
               tenantId,
+              workspaceId,
               categoryCode: upperEnum(rule.categoryCode, `ruleVersion(${rule.version}).categoryCode`),
               version: rule.version,
               status: rule.status ?? "draft",
@@ -839,10 +864,11 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
         for (const calendar of business.calendars ?? []) {
           await this.writeOne("rentalBusinessCalendar", divergences, () =>
             tx.rentalBusinessCalendar.upsert({
-            where: { tenantId_year: { tenantId, year: calendar.year } },
+            where: { workspaceId_year: { workspaceId, year: calendar.year } },
             update: {},
             create: {
               tenantId,
+              workspaceId,
               year: calendar.year,
               region: calendar.region ?? "CN",
               version: calendar.version ?? "1.0",
@@ -864,8 +890,8 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             template.id,
             () => tx.rentalNotificationTemplate.findUnique({
               where: {
-                tenantId_eventCode_channel_version: {
-                  tenantId,
+                workspaceId_eventCode_channel_version: {
+                  workspaceId,
                   eventCode: template.eventCode,
                   channel: template.channel,
                   version: template.version ?? "1.0"
@@ -876,8 +902,8 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             () =>
             tx.rentalNotificationTemplate.upsert({
             where: {
-              tenantId_eventCode_channel_version: {
-                tenantId,
+              workspaceId_eventCode_channel_version: {
+                workspaceId,
                 eventCode: template.eventCode,
                 channel: template.channel,
                 version: template.version ?? "1.0"
@@ -887,6 +913,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             create: {
               id: template.id,
               tenantId,
+              workspaceId,
               eventCode: template.eventCode,
               channel: template.channel,
               name: template.name,
@@ -911,6 +938,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             create: {
               id: quote.id,
               tenantId,
+              workspaceId,
               quoteNo: quote.quoteNo,
               categoryCode: upperEnum(quote.categoryCode, `quote(${quote.quoteNo}).categoryCode`),
               request: json(quote.request),
@@ -953,16 +981,17 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             "rentalOrder",
             order.id,
             () => tx.rentalOrder.findUnique({
-              where: { tenantId_orderNo: { tenantId, orderNo: order.orderNo } },
+              where: { workspaceId_orderNo: { workspaceId, orderNo: order.orderNo } },
               select: { id: true }
             }),
             () =>
             tx.rentalOrder.upsert({
-            where: { tenantId_orderNo: { tenantId, orderNo: order.orderNo } },
+            where: { workspaceId_orderNo: { workspaceId, orderNo: order.orderNo } },
             update: {},
             create: {
               id: order.id,
               tenantId,
+              workspaceId,
               orderNo: order.orderNo,
               categoryCode: upperEnum(order.categoryCode, `order(${order.orderNo}).categoryCode`),
               status: upperEnum<$Enums.RentalOrderV1Status>(order.status, `order(${order.orderNo}).status`),
@@ -1048,6 +1077,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               create: {
                 id: reservation.id,
                 tenantId,
+                workspaceId,
                 orderId: resolvedOrderId,
                 orderLineId,
                 itemGroupId,
@@ -1108,6 +1138,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             create: {
               id: record.id,
               tenantId,
+              workspaceId,
               orderId,
               stage: record.stage,
               templateId,
@@ -1139,6 +1170,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             create: {
               id: log.id,
               tenantId,
+              workspaceId,
               templateId,
               templateVersion: log.templateVersion ?? "1.0",
               eventCode: log.eventCode,
@@ -1169,6 +1201,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             create: {
               id: entry.id,
               tenantId,
+              workspaceId,
               customerId: entry.customerId,
               rewardType: entry.rewardType,
               amount: amount(entry.amount),
@@ -1193,6 +1226,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             update: {},
             create: {
               tenantId,
+              workspaceId,
               customerId: account.customerId,
               pointsBalance: amount(account.pointsBalance),
               marketingBalance: amount(account.marketingBalance),
@@ -1205,10 +1239,11 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
         for (const referral of business.referrals ?? []) {
           await this.writeOne("rentalReferral", divergences, () =>
             tx.rentalReferral.upsert({
-            where: { tenantId_inviteeCustomerId: { tenantId, inviteeCustomerId: referral.inviteeCustomerId } },
+            where: { workspaceId_inviteeCustomerId: { workspaceId, inviteeCustomerId: referral.inviteeCustomerId } },
             update: {},
             create: {
               tenantId,
+              workspaceId,
               inviteeCustomerId: referral.inviteeCustomerId,
               referrerCustomerId: referral.referrerCustomerId,
               registeredAt: optionalDate(referral.registeredAt) ?? new Date()

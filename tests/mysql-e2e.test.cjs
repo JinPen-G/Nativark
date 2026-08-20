@@ -1433,8 +1433,8 @@ async function main() {
   // 奖励幂等键在库上有唯一约束，重复键必须被数据库拒绝而不是只靠内存判重。
   const dupKey = mysqlRaw(
     `USE \`${TEST_DB}\`;\nINSERT INTO \`rental_reward_ledger_entries\`` +
-      " (`id`,`tenantId`,`customerId`,`rewardType`,`amount`,`triggerType`,`idempotencyKey`,`status`,`reason`,`createdAt`)" +
-      " SELECT 'e2e_dup_reward',`tenantId`,`customerId`,`rewardType`,`amount`,`triggerType`,`idempotencyKey`,`status`,`reason`,NOW(3)" +
+      " (`id`,`tenantId`,`workspaceId`,`customerId`,`rewardType`,`amount`,`triggerType`,`idempotencyKey`,`status`,`reason`,`createdAt`)" +
+      " SELECT 'e2e_dup_reward',`tenantId`,`workspaceId`,`customerId`,`rewardType`,`amount`,`triggerType`,`idempotencyKey`,`status`,`reason`,NOW(3)" +
       " FROM `rental_reward_ledger_entries` LIMIT 1;"
   );
   assert.notEqual(dupKey.status, 0, "重复奖励幂等键必须被数据库唯一约束拒绝");
@@ -1929,8 +1929,8 @@ async function main() {
       `DELETE FROM \`rental_notification_templates\` WHERE \`id\` IN ` +
       `('e2e_snapshot_notification_template','e2e_live_notification_template');` +
       `INSERT INTO \`rental_notification_templates\` ` +
-      `(\`id\`,\`tenantId\`,\`eventCode\`,\`channel\`,\`name\`,\`title\`,\`body\`,\`variableSchema\`,\`status\`,\`version\`,\`createdAt\`,\`updatedAt\`) VALUES ` +
-      `('e2e_live_notification_template','${relationTenant}','e2e.parent.mapping','email',` +
+      `(\`id\`,\`tenantId\`,\`workspaceId\`,\`eventCode\`,\`channel\`,\`name\`,\`title\`,\`body\`,\`variableSchema\`,\`status\`,\`version\`,\`createdAt\`,\`updatedAt\`) VALUES ` +
+      `('e2e_live_notification_template','${relationTenant}',CONCAT('ws_','${relationTenant}'),'e2e.parent.mapping','email',` +
       `'现存映射模板','映射测试','映射测试',JSON_OBJECT(),'enabled','1.0',NOW(),NOW());`
   );
   startApi();
@@ -1991,8 +1991,8 @@ async function main() {
   mysqlQuery(
       `DELETE FROM \`rental_benefit_accounts\` WHERE \`tenantId\`='${compositeTenant}';` +
       `INSERT INTO \`rental_benefit_accounts\` ` +
-      `(\`tenantId\`,\`customerId\`,\`pointsBalance\`,\`marketingBalance\`,\`availableRewardCouponCount\`,\`updatedAt\`) VALUES ` +
-      `('${compositeTenant}','e2e_unrelated_customer',1,0,0,NOW());`
+      `(\`tenantId\`,\`workspaceId\`,\`customerId\`,\`pointsBalance\`,\`marketingBalance\`,\`availableRewardCouponCount\`,\`updatedAt\`) VALUES ` +
+      `('${compositeTenant}',CONCAT('ws_','${compositeTenant}'),'e2e_unrelated_customer',1,0,0,NOW());`
   );
   assert.equal(
     readCount(`SELECT COUNT(*) FROM \`rental_benefit_accounts\` WHERE \`tenantId\`='${compositeTenant}';`),
@@ -2774,6 +2774,111 @@ async function main() {
   ok(
     "经营接口 fail-closed：无空间会话访问 /rental/v1 返回 403 且不回退默认空间，" +
       "查询参数伪造 workspaceId 无效，/auth 与 /platform 仍可用以便选择空间"
+  );
+
+  console.log("== 54. SPACE-03 经营事实已归属经营空间 ==");
+  // 24 张经营事实/配置表都必须有 workspaceId，且必须落在**本租户**的空间上。
+  const SPACED_TABLES = [
+    "rental_assets", "rental_benefit_accounts", "rental_business_calendars", "rental_coupon_templates",
+    "rental_customer_coupons", "rental_discount_plans", "rental_fulfillment_locations",
+    "rental_fulfillment_operators", "rental_inspection_records", "rental_inspection_templates",
+    "rental_item_groups", "rental_notification_logs", "rental_notification_templates",
+    "rental_order_idempotency_records", "rental_orders", "rental_pricing_plans", "rental_quotes",
+    "rental_referrals", "rental_reservations", "rental_reward_ledger_entries", "rental_rule_versions",
+    "rental_stock_balances", "rental_tenant_business_settings", "rental_value_added_services"
+  ];
+  const spacedProblems = [];
+  let spacedRows = 0;
+  for (const table of SPACED_TABLES) {
+    spacedRows += readCount(`SELECT COUNT(*) FROM \`${table}\`;`);
+    // workspaceId 必须指向同租户的空间；跨租户或悬空立即计为问题。
+    const bad = readCount(
+      `SELECT COUNT(*) FROM \`${table}\` f LEFT JOIN \`business_workspaces\` w` +
+        " ON w.`id` = f.`workspaceId` AND w.`tenantId` = f.`tenantId` WHERE w.`id` IS NULL;"
+    );
+    if (bad > 0) spacedProblems.push(`${table}: ${bad} 行未归属本租户空间`);
+  }
+  assert.deepEqual(spacedProblems, [], `经营事实归属异常：${spacedProblems.join("；")}`);
+  assert.ok(spacedRows > 0, "前置条件：应存在经营事实行，否则本节为空转");
+
+  // 复合外键必须挡住"把事实挂到别的租户的空间上"。
+  const s3OtherWs = readScalar("SELECT `id` FROM `business_workspaces` WHERE `tenantId`='tenant_002' LIMIT 1;");
+  const s3Group = readScalar("SELECT `id` FROM `rental_item_groups` WHERE `tenantId`='tenant_001' LIMIT 1;");
+  const s3Cross = mysqlRaw(
+    `USE \`${TEST_DB}\`;\nUPDATE \`rental_item_groups\` SET \`workspaceId\`='${s3OtherWs}' WHERE \`id\`='${s3Group}';`
+  );
+  assert.notEqual(s3Cross.status, 0, "把经营事实改挂到别租户的空间必须被外键拒绝");
+
+  // 唯一键已含空间维度：同租户第二个空间可以复用商品编码。
+  // 这是"两个空间互不干扰"最直接的证据——改造前 (tenantId, code) 唯一会直接冲突。
+  const s3Login = await login("demo", "admin", DEMO_PASSWORD);
+  const s3Existing = (await request("GET", "/api/rental/v1/item-groups", null, s3Login.accessToken)).body.data[0];
+  assert.ok(s3Existing, "前置条件：默认空间应已有商品组");
+  const s3Second = (await request("GET", "/api/platform/workspaces", null, s3Login.accessToken)).body.data
+    .find((row) => !row.isDefault && row.status === "active");
+  assert.ok(s3Second, "前置条件：需要第 52 节创建的第二个经营空间");
+  const s3Switch = await request(
+    "POST",
+    "/api/auth/switch-workspace",
+    { workspaceId: s3Second.id },
+    s3Login.accessToken
+  );
+  assert.equal(s3Switch.status, 201, `切换到第二空间失败: ${JSON.stringify(s3Switch.body).slice(0, 200)}`);
+  // 库层已按空间隔离唯一键：直接用 SQL 在第二空间插入同编码商品组必须成功。
+  // 用 SQL 而不是 API，是因为**服务层的判重仍是租户级**（内存状态以 tenantId 为键），
+  // 那属于 SPACE-03 尚未完成的部分，见下面被显式钉住的当前行为。
+  const s3RawDup = mysqlRaw(
+    `USE \`${TEST_DB}\`;
+INSERT INTO \`rental_item_groups\`` +
+      " (`id`,`tenantId`,`workspaceId`,`categoryCode`,`code`,`name`,`inventoryMode`,`unit`,`attributes`,`status`,`createdAt`,`updatedAt`)" +
+      ` SELECT 'e2e_s3_dup_code','tenant_001','${s3Second.id}',\`categoryCode\`,\`code\`,` +
+      "CONCAT(`name`,'（第二空间同码）'),`inventoryMode`,`unit`,`attributes`,`status`,NOW(3),NOW(3)" +
+      ` FROM \`rental_item_groups\` WHERE \`id\`='${s3Existing.id}';`
+  );
+  assert.equal(
+    s3RawDup.status,
+    0,
+    `同租户第二个空间必须能复用商品编码（唯一键需含 workspaceId）: ${(s3RawDup.stdout || "") + (s3RawDup.stderr || "")}`
+  );
+  assert.equal(
+    readCount(
+      `SELECT COUNT(*) FROM \`rental_item_groups\` WHERE \`tenantId\`='tenant_001' AND \`code\`='${s3Existing.code}';`
+    ),
+    2,
+    "同一租户内应存在两条同编码商品组，分属两个经营空间"
+  );
+  assert.equal(
+    readCount(
+      `SELECT COUNT(DISTINCT \`workspaceId\`) FROM \`rental_item_groups\` WHERE \`tenantId\`='tenant_001' AND \`code\`='${s3Existing.code}';`
+    ),
+    2,
+    "两条同编码商品组必须分属不同经营空间"
+  );
+  // 钉住当前（尚未完成的）服务层行为：判重仍是租户级，因此 API 仍会拒绝同编码。
+  // 这条断言不是在为缺陷背书，而是让 SPACE-03 后续阶段**必须**有意识地改掉它——
+  // 届时这里会失败，提醒把判重改成按经营空间。
+  const s3ApiDup = await request(
+    "POST",
+    "/api/rental/v1/item-groups",
+    {
+      code: s3Existing.code,
+      name: "第二空间同码（经 API）",
+      inventoryMode: s3Existing.inventoryMode,
+      unit: s3Existing.unit,
+      attributes: {},
+      status: "enabled"
+    },
+    s3Switch.body.data.accessToken
+  );
+  assert.equal(
+    s3ApiDup.status,
+    409,
+    "已知未完成项：服务层判重仍以 tenantId 为键，因此 API 仍拒绝跨空间同编码。" +
+      `若此处不再是 409，说明服务层判重已空间化，应同步更新本断言。实际 ${s3ApiDup.status}`
+  );
+  ok(
+    `经营事实已归属经营空间：${SPACED_TABLES.length} 张表共 ${spacedRows} 行全部落在本租户空间、` +
+      `跨租户改挂被外键拒绝、库层允许第二空间复用商品编码（服务层判重仍为租户级，已钉住）`
   );
 
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);

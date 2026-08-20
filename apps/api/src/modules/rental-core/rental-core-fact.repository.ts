@@ -18,6 +18,7 @@ import {
   type RentalStockBalance
 } from "@store-rental/shared";
 import { PrismaService } from "../database/prisma.service";
+import { resolveWriteWorkspaceId } from "./workspace-scope";
 
 /** 参与可用量计算的预占。表上直接带 startAt/endAt，因此不必回连订单。 */
 export interface ActiveReservationRow {
@@ -191,9 +192,10 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     };
 
     const write = async (client: RentalFactTx) => {
+      const workspaceId = await resolveWriteWorkspaceId(client, order.tenantId);
       await client.rentalOrder.upsert({
         where: { id: order.id },
-        create: { id: order.id, ...orderData, createdAt: new Date(order.createdAt) },
+        create: { workspaceId, id: order.id, ...orderData, createdAt: new Date(order.createdAt) },
         update: orderData
       });
 
@@ -230,9 +232,10 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
           status: upper<$Enums.RentalReservationState>(reservation.status),
           expiresAt: reservation.expiresAt ? new Date(reservation.expiresAt) : null
         };
+        const workspaceId = await resolveWriteWorkspaceId(client, order.tenantId);
         await client.rentalReservation.upsert({
           where: { id: reservation.id },
-          create: { id: reservation.id, ...reservationData, createdAt: new Date(reservation.createdAt) },
+          create: { workspaceId, id: reservation.id, ...reservationData, createdAt: new Date(reservation.createdAt) },
           update: reservationData
         });
       }
@@ -376,9 +379,10 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       status: upper<$Enums.RentalAssetState>(asset.status),
       attributes: asset.attributes as Prisma.InputJsonValue
     };
+    const workspaceId = await resolveWriteWorkspaceId(this.prisma, asset.tenantId);
     await this.prisma.rentalAsset.upsert({
       where: { id: asset.id },
-      create: { id: asset.id, ...data, createdAt: new Date(asset.createdAt) },
+      create: { workspaceId, id: asset.id, ...data, createdAt: new Date(asset.createdAt) },
       update: data
     });
   }
@@ -424,9 +428,10 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       onHandQuantity: balance.onHandQuantity,
       maintenanceQuantity: balance.maintenanceQuantity
     };
+    const workspaceId = await resolveWriteWorkspaceId(this.prisma, balance.tenantId);
     await this.prisma.rentalStockBalance.upsert({
       where: { id: balance.id },
-      create: { id: balance.id, ...data },
+      create: { workspaceId, id: balance.id, ...data },
       update: data
     });
   }
@@ -455,10 +460,12 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
   }
 
   async insertInspection(record: RentalInspectionRecord, tx?: RentalFactTx): Promise<void> {
+    const workspaceId = await resolveWriteWorkspaceId(tx ?? this.prisma, record.tenantId);
     await (tx ?? this.prisma).rentalInspectionRecord.create({
       data: {
         id: record.id,
         tenantId: record.tenantId,
+        workspaceId,
         orderId: record.orderId,
         stage: record.stage,
         templateId: record.templateId,
