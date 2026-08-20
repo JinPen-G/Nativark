@@ -342,10 +342,45 @@ async function main() {
     /\x1B\[[0-?]*[ -/]*[@-~]/gu,
     ""
   );
-  if (/\b(ALTER TABLE|CREATE TABLE|DROP TABLE|CREATE INDEX|DROP INDEX|ALTER DATABASE)\b/iu.test(driftSql)) {
-    fail("迁移结果与 schema.prisma 存在 drift", driftSql.slice(0, 1500));
+  // 判据必须是「Prisma 明确说没有差异」，不能是「输出里没出现 SQL 关键字」。
+  //
+  // 早前这里用 /ALTER TABLE|CREATE TABLE|.../ 去匹配，但不带 --script 时
+  // migrate diff 输出的是人类可读摘要（`[+] Added tables` / `[*] Changed the X table`），
+  // 根本不含 SQL 关键字，于是这条断言**永远不会触发**——一个测不出东西的绿灯。
+  // 实测确认：迁移与 schema.prisma 之间本就存在 11 张表的历史 drift，旧写法全程没报。
+  const driftClean = /No difference detected/iu.test(driftSql);
+  if (!driftClean) {
+    // 历史遗留 drift 清单（迁移产物与 schema.prisma 不一致，均早于 SPACE-01）。
+    // 只允许这些表出现在差异里；任何新表进入差异都会让本节失败。
+    // 这不是豁免，而是把既有欠账**显式钉住**，避免它继续掩盖新引入的 drift。
+    const KNOWN_LEGACY_DRIFT = [
+      "MarketingPlan",
+      "MarketingPlanVersion",
+      "OrderContractDocument",
+      "OrderEventSnapshot",
+      "OrderIdempotencyRecord",
+      "OrderNotificationRecord",
+      "OrderOperationLock",
+      "OrderOperationRecord",
+      "OrderRemarkRecord",
+      "Tenant",
+      "VehicleAttachmentRecord"
+    ];
+    const changed = [...driftSql.matchAll(/Changed the `([^`]+)` table/gu)].map((m) => m[1]);
+    const added = [...driftSql.matchAll(/^\s+- (\S+)$/gmu)].map((m) => m[1]);
+    const unexpected = [...new Set([...changed, ...added])].filter((name) => !KNOWN_LEGACY_DRIFT.includes(name));
+    if (unexpected.length) {
+      fail(
+        `迁移结果与 schema.prisma 存在**新增** drift: ${unexpected.join(", ")}`,
+        driftSql.slice(0, 2000)
+      );
+    }
+    ok(
+      `迁移后无新增 drift；历史遗留 drift ${changed.filter((n) => KNOWN_LEGACY_DRIFT.includes(n)).length} 张表待独立任务收口`
+    );
+  } else {
+    ok("迁移后库结构与 schema.prisma 完全一致（无 drift）");
   }
-  ok("迁移后库结构与 schema.prisma 一致（无 drift）");
 
   console.log("== 3. 二次部署幂等（已迁移库升级路径） ==");
   const countsBefore = {
@@ -2500,6 +2535,101 @@ async function main() {
     `发通知同键并发只有一次副作用：${SEND_CONCURRENCY} 路并发均回放同一条记录，库与当前进程各只增一条，` +
       `同键异收件人 409 且无残留`
   );
+
+  console.log("== 50. SPACE-01 默认经营空间与成员回填 ==");
+  // 空库初始化路径：seed 建的每个「有品类档案」的租户都必须恰好拿到一个默认空间，
+  // 且品类与档案一致（回填只从 tenantId + tenant_rental_profiles 推导，不按名称猜）。
+  const tenantsWithProfile = readCount(
+    "SELECT COUNT(*) FROM `Tenant` t INNER JOIN `tenant_rental_profiles` p ON p.`tenantId`=t.`id`;"
+  );
+  assert.ok(tenantsWithProfile > 0, "前置条件：至少要有一个带品类档案的租户");
+  assert.equal(
+    readCount("SELECT COUNT(*) FROM `business_workspaces` WHERE `isDefault`=1;"),
+    tenantsWithProfile,
+    "每个有品类档案的租户必须恰好一个默认经营空间"
+  );
+  assert.equal(
+    readCount(
+      "SELECT COUNT(*) FROM `Tenant` t INNER JOIN `tenant_rental_profiles` p ON p.`tenantId`=t.`id`" +
+        " INNER JOIN `business_workspaces` w ON w.`tenantId`=t.`id` AND w.`defaultMarker`='default'" +
+        " WHERE w.`categoryCode` <> p.`categoryCode`;"
+    ),
+    0,
+    "默认空间的品类必须与租户品类档案完全一致"
+  );
+  // 无品类档案的租户（平台管理租户）不得被凭空塞一个品类。
+  assert.equal(
+    readCount(
+      "SELECT COUNT(*) FROM `business_workspaces` w" +
+        " LEFT JOIN `tenant_rental_profiles` p ON p.`tenantId`=w.`tenantId`" +
+        " WHERE p.`tenantId` IS NULL;"
+    ),
+    0,
+    "没有品类档案的租户不得获得经营空间（不得猜测归属）"
+  );
+  // 所有账号都必须进入所属租户的默认空间，且沿用原有角色。
+  assert.equal(
+    readCount(
+      "SELECT COUNT(*) FROM `User` u" +
+        " INNER JOIN `business_workspaces` w ON w.`tenantId`=u.`tenantId` AND w.`defaultMarker`='default'" +
+        " LEFT JOIN `workspace_members` m ON m.`workspaceId`=w.`id` AND m.`userId`=u.`id`" +
+        " WHERE m.`userId` IS NULL;"
+    ),
+    0,
+    "拥有默认空间的租户，其所有账号都必须已回填为成员"
+  );
+  assert.equal(
+    readCount(
+      "SELECT COUNT(*) FROM `User` u" +
+        " INNER JOIN `business_workspaces` w ON w.`tenantId`=u.`tenantId` AND w.`defaultMarker`='default'" +
+        " INNER JOIN `workspace_members` m ON m.`workspaceId`=w.`id` AND m.`userId`=u.`id`" +
+        " WHERE NOT (m.`roleId` <=> u.`roleId`);"
+    ),
+    0,
+    "成员角色必须与账号原有角色一致（既有角色关系被映射而非丢弃）"
+  );
+  // 默认空间 id 必须是确定可重算的 ws_<tenantId>，让空库与升级两条路径同形状。
+  assert.equal(
+    readCount("SELECT COUNT(*) FROM `business_workspaces` WHERE `isDefault`=1 AND `id` <> CONCAT('ws_', `tenantId`);"),
+    0,
+    "默认空间 id 必须等于 CONCAT('ws_', tenantId)"
+  );
+  ok(
+    `默认经营空间与成员回填完整：${tenantsWithProfile} 个租户各一个默认空间、品类与档案一致、` +
+      `无档案租户未被塞入、全部账号已回填且沿用原角色`
+  );
+
+  console.log("== 51. SPACE-01 空间隔离约束由库层保证 ==");
+  // 这些都必须在**数据库**层被拒绝，而不是只靠应用层校验——
+  // 应用层可以被绕过（后台脚本、别的服务），空间是安全边界。
+  const wsA = readScalar("SELECT `id` FROM `business_workspaces` WHERE `tenantId`='tenant_001' LIMIT 1;");
+  const userB = readScalar("SELECT `id` FROM `User` WHERE `tenantId`='tenant_002' LIMIT 1;");
+  assert.ok(wsA && userB, "前置条件：需要 tenant_001 的空间与 tenant_002 的账号");
+  // 用 mysqlRaw 而不是 mysqlQuery：后者失败时会调 fail()，那会把 process.exitCode
+  // 置成 1 并抛错——即使我们捕获了异常，整个套件也会以非零码退出。
+  // 这里"写入被拒绝"是**期望结果**，必须用不改全局状态的原始执行。
+  const rejects = (sql, label) => {
+    const result = mysqlRaw(`USE \`${TEST_DB}\`;\n${sql}`);
+    if (result.error) fail(`无法调用 docker: ${result.error.message}`);
+    return result.status === 0 ? `${label}: 未被拒绝` : null;
+  };
+  const guardFailures = [
+    rejects(
+      `INSERT INTO \`workspace_members\` (\`tenantId\`,\`workspaceId\`,\`userId\`,\`isActive\`,\`createdAt\`,\`updatedAt\`) VALUES ('tenant_001','${wsA}','${userB}',1,NOW(3),NOW(3));`,
+      "跨租户成员（本租户空间 + 他租户账号）"
+    ),
+    rejects(
+      `INSERT INTO \`workspace_members\` (\`tenantId\`,\`workspaceId\`,\`userId\`,\`isActive\`,\`createdAt\`,\`updatedAt\`) VALUES ('tenant_002','${wsA}','${userB}',1,NOW(3),NOW(3));`,
+      "伪造 tenantId 绕过（空间属 A、声称属 B）"
+    ),
+    rejects(
+      "INSERT INTO `business_workspaces` (`id`,`tenantId`,`code`,`name`,`categoryCode`,`isDefault`,`defaultMarker`,`createdAt`,`updatedAt`)" +
+        " VALUES ('ws_dup_e2e','tenant_001','second-default','重复默认','camera',1,'default',NOW(3),NOW(3));",
+      "同租户第二个默认空间"
+    )
+  ].filter(Boolean);
+  assert.deepEqual(guardFailures, [], `空间隔离约束必须在库层拒绝：${guardFailures.join("；")}`);
+  ok("空间隔离由库层保证：跨租户成员、伪造 tenantId 绕过、重复默认空间三种写入均被数据库拒绝");
 
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);
 }

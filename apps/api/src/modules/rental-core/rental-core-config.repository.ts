@@ -153,6 +153,53 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       create: { tenantId: profile.tenantId, ...data, initializedAt: new Date(profile.initializedAt) },
       update: data
     });
+    await this.ensureDefaultWorkspace(profile.tenantId, data.categoryCode, tx);
+  }
+
+  /**
+   * SPACE-01：保证「有品类档案的租户必然有一个默认经营空间，且其所有账号都是成员」。
+   *
+   * 为什么挂在 upsertProfile 上而不是只放在 bootstrapTenant：品类档案有两条写入路径——
+   * 租户初始化，以及懒加载租户首次访问业务事实时的自愈补落。只在 bootstrap 里建空间，
+   * 懒加载出来的租户就会有档案却没有空间，与回填迁移的规则不一致（E2E 第 50 节实测到
+   * 5 个有档案的租户只有 3 个空间）。把不变量钉在档案的写入点上，两条路径才一致。
+   *
+   * 规则与回填迁移逐字一致：id 为 ws_<tenantId>、code 为 default、品类取自档案。
+   *
+   * 品类**只在创建时写入**：需求 3 规定空间产生业务后不得通过普通设置切换品类，
+   * 因此即使档案品类被改动，也不在这里跟着改既有空间——那需要显式迁移。
+   */
+  private async ensureDefaultWorkspace(
+    tenantId: string,
+    categoryCode: $Enums.RentalCategoryCode,
+    tx?: RentalConfigTx
+  ): Promise<void> {
+    const client = this.db(tx);
+    const workspaceId = `ws_${tenantId}`;
+    await client.businessWorkspace.upsert({
+      where: { id: workspaceId },
+      create: {
+        id: workspaceId,
+        tenantId,
+        code: "default",
+        name: "默认经营空间",
+        categoryCode,
+        isDefault: true,
+        defaultMarker: "default"
+      },
+      // 已存在即不动：不覆盖名称，也绝不改品类。
+      update: {}
+    });
+    // 该租户的现有账号全部补为成员，沿用各自既有角色（与回填迁移同规则）。
+    // 用 upsert 而不是 createMany，保证可重复执行且不覆盖已有的空间级角色配置。
+    const users = await client.user.findMany({ where: { tenantId }, select: { id: true, roleId: true, isActive: true } });
+    for (const user of users) {
+      await client.workspaceMember.upsert({
+        where: { workspaceId_userId: { workspaceId, userId: user.id } },
+        create: { tenantId, workspaceId, userId: user.id, roleId: user.roleId, isActive: user.isActive },
+        update: {}
+      });
+    }
   }
 
   async upsertBusinessSettings(settings: TenantRentalBusinessSettings, updatedBy: string, tx?: RentalConfigTx): Promise<void> {

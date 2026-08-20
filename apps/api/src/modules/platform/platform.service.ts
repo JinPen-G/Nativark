@@ -4,6 +4,9 @@ import { randomUUID } from "node:crypto";
 import { requireRequestTenantId } from "../../common/request-identity";
 import {
   RENTAL_CATEGORY_DEFINITIONS,
+  CreateBusinessWorkspaceRequest,
+  SaveWorkspaceMemberRequest,
+  UpdateBusinessWorkspaceRequest,
   GeneratePlatformNumberRequest,
   OrganizationSummary,
   PermissionModule,
@@ -1353,6 +1356,44 @@ export class PlatformService {
       return this.platformRepository.findTenantByCode(code);
     }
     return this.tenants.find((tenant) => tenant.tenantCode === code);
+  }
+
+  /**
+   * SPACE-01：经营空间主档与成员关系一律以 MySQL 为事实源。
+   *
+   * 刻意不提供内存模式实现：内存假数据源在本项目造成过 P0-01（跨租户泄露被
+   * 演示固件掩盖），四份文档都写明不得把内存数据源当成持久化的证明。
+   * 空间隔离是安全边界，宁可在无库时明确拒绝，也不给一个"看起来能用"的假实现。
+   */
+  private requireWorkspaceDataSource() {
+    if (!this.useMysqlDataSource()) {
+      throw new BadRequestException("经营空间管理需要 MySQL 数据源，当前为内存演示模式");
+    }
+  }
+
+  listBusinessWorkspaces(currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    return this.platformRepository.listBusinessWorkspaces(currentUser);
+  }
+
+  createBusinessWorkspace(input: CreateBusinessWorkspaceRequest, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    return this.platformRepository.createBusinessWorkspace(input, currentUser);
+  }
+
+  updateBusinessWorkspace(id: string, input: UpdateBusinessWorkspaceRequest, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    return this.platformRepository.updateBusinessWorkspace(id, input, currentUser);
+  }
+
+  listWorkspaceMembers(workspaceId: string, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    return this.platformRepository.listWorkspaceMembers(workspaceId, currentUser);
+  }
+
+  saveWorkspaceMember(workspaceId: string, input: SaveWorkspaceMemberRequest, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    return this.platformRepository.saveWorkspaceMember(workspaceId, input, currentUser);
   }
 
   listOrganizations(tenantId?: string, currentUser?: SystemUserRow) {

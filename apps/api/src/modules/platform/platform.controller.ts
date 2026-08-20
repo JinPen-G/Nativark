@@ -14,7 +14,10 @@ import type {
   SystemUserRow,
   TenantBootstrapRequest,
   UpdateTenantRequest,
-  UpdateTenantStatusRequest
+  UpdateTenantStatusRequest,
+  CreateBusinessWorkspaceRequest,
+  UpdateBusinessWorkspaceRequest,
+  SaveWorkspaceMemberRequest
 } from "@store-rental/shared";
 import { PlatformService } from "./platform.service";
 
@@ -49,6 +52,46 @@ export class PlatformController {
   @Get("organizations")
   organizations(@Query("tenantId") tenantId?: string, @Req() req?: RequestWithUser) {
     return this.platformService.listOrganizations(tenantId, req?.user);
+  }
+
+  /**
+   * SPACE-01 的最小管理面。
+   *
+   * 刻意不提供「切换当前空间」接口——会话空间上下文属 SPACE-02。
+   * 这里只让租户管理员维护空间主档与成员关系，空间范围一律取自服务端会话的
+   * tenantId，不接受客户端提交的 tenantId 覆盖。
+   */
+  @Get("workspaces")
+  workspaces(@Req() req: RequestWithUser) {
+    return this.platformService.listBusinessWorkspaces(req.user);
+  }
+
+  @Post("workspaces")
+  createWorkspace(@Body() body: CreateBusinessWorkspaceRequest, @Req() req: RequestWithUser) {
+    return this.platformService.createBusinessWorkspace(body, req.user);
+  }
+
+  @Put("workspaces/:id")
+  updateWorkspace(
+    @Param("id") id: string,
+    @Body() body: UpdateBusinessWorkspaceRequest,
+    @Req() req: RequestWithUser
+  ) {
+    return this.platformService.updateBusinessWorkspace(id, body, req.user);
+  }
+
+  @Get("workspaces/:id/members")
+  workspaceMembers(@Param("id") id: string, @Req() req: RequestWithUser) {
+    return this.platformService.listWorkspaceMembers(id, req.user);
+  }
+
+  @Put("workspaces/:id/members")
+  saveWorkspaceMember(
+    @Param("id") id: string,
+    @Body() body: SaveWorkspaceMemberRequest,
+    @Req() req: RequestWithUser
+  ) {
+    return this.platformService.saveWorkspaceMember(id, body, req.user);
   }
 
   @Post("organizations")

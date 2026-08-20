@@ -13,6 +13,14 @@ enum TenantStatus {
   DISABLED @map("disabled")
 }
 
+/// SPACE-01：经营空间状态。冻结与停用的语义与租户一致——
+/// 冻结可恢复，停用是终态；两者都必须让成员进入被拒绝（SPACE-02 校验）。
+enum WorkspaceStatus {
+  ACTIVE   @map("active")
+  FROZEN   @map("frozen")
+  DISABLED @map("disabled")
+}
+
 enum OrganizationType {
   OPERATOR @map("operator")
   CAR_SHOP @map("car_shop")
@@ -313,8 +321,80 @@ model Tenant {
   rentalIdempotencyRecords  RentalOrderIdempotencyRecord[]
   rentalCoreStateSnapshot   RentalCoreStateSnapshot?
   rentalBusinessStateSnapshot RentalBusinessStateSnapshot?
+  businessWorkspaces        BusinessWorkspace[]
+  workspaceMembers          WorkspaceMember[]
   createdAt                 DateTime                    @default(now())
   updatedAt                 DateTime                    @updatedAt
+}
+
+/// SPACE-01：经营空间。
+///
+/// 需求 3：一个 SaaS 租户可建立多个经营空间，每个空间只经营一种品类。
+/// 空间是业务隔离边界，不替代租户——所有经营事实最终同时带 tenantId 与 workspaceId
+/// （事实的空间化属 SPACE-03，本任务只建主档与兼容层）。
+///
+/// 品类在创建时确定且不通过普通设置切换（需求 3）：变更品类必须新建空间或显式迁移，
+/// 因此这里不提供"改品类"的写接口。
+model BusinessWorkspace {
+  id           String              @id
+  tenantId     String
+  tenant       Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  code         String
+  name         String
+  /// 唯一经营品类。外键指向品类定义表，杜绝写入未定义品类。
+  categoryCode RentalCategoryCode
+  category     RentalCategoryDefinition @relation(fields: [categoryCode], references: [code])
+  status       WorkspaceStatus     @default(ACTIVE)
+  /// 兼容层标记：升级前建立的既有业务全部归属租户的默认空间。
+  /// 每租户至多一个，由下方 partial-unique 的替代方案（defaultMarker）保证。
+  isDefault    Boolean             @default(false)
+  /// 用于"每租户只能有一个默认空间"的唯一约束。
+  /// MySQL 没有部分索引，因此默认空间写 'default'、非默认写自身 id：
+  /// 前者在租户内必然冲突，后者天然唯一。
+  defaultMarker String
+  members      WorkspaceMember[]
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  @@unique([tenantId, code], map: "business_workspaces_tenant_code_key")
+  @@unique([tenantId, defaultMarker], map: "business_workspaces_tenant_default_key")
+  /// 供成员关系的复合外键引用，保证成员只能指向同租户的空间。
+  @@unique([tenantId, id], map: "business_workspaces_tenant_id_key")
+  @@index([categoryCode], map: "business_workspaces_category_idx")
+  @@index([tenantId, status], map: "business_workspaces_tenant_status_idx")
+  @@map("business_workspaces")
+}
+
+/// SPACE-01：账号与经营空间的成员关系。
+///
+/// 需求 3/4.1：账号归属租户，通过成员关系进入一个或多个空间，并可在不同空间
+/// 拥有不同角色与数据范围。因此角色和数据范围记在成员关系上，而不是复用
+/// `User.roleId`（那是租户级的旧模型，升级后作为默认值保留）。
+///
+/// 跨租户防护由**复合外键**在库层完成，而不是靠应用层校验：
+/// (tenantId, workspaceId) 必须存在于 business_workspaces(tenantId, id)，
+/// (tenantId, userId) 必须存在于 User(tenantId, id)。
+/// 于是「A 租户的空间关联 B 租户的用户」在数据库层就写不进去。
+model WorkspaceMember {
+  tenantId    String
+  workspaceId String
+  userId      String
+  tenant      Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspace   BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  user        User              @relation(fields: [tenantId, userId], references: [tenantId, id], onDelete: Cascade)
+  /// 该账号在本空间的角色。空表示沿用租户级默认角色（升级兼容）。
+  roleId      String?
+  role        Role?             @relation(fields: [roleId], references: [id])
+  /// 该账号在本空间的数据范围。空表示沿用角色自带范围。
+  dataScope   SystemDataScope?
+  isActive    Boolean           @default(true)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@id([workspaceId, userId])
+  @@index([tenantId, userId], map: "workspace_members_tenant_user_idx")
+  @@index([roleId], map: "workspace_members_role_idx")
+  @@map("workspace_members")
 }
 
 model RentalCoreStateSnapshot {
@@ -375,6 +455,7 @@ model User {
   passwordChangedAt DateTime?
   lastLoginAt     DateTime?
   roleAssignments UserRole[]
+  workspaceMembers WorkspaceMember[]
   authSessions    AuthSession[]
   createdOrders   StoreRentalOrder[] @relation("OrderCreator")
   logs            OperationLog[]
@@ -382,6 +463,9 @@ model User {
   updatedAt       DateTime           @updatedAt
 
   @@unique([tenantId, account])
+  /// 供成员关系的复合外键引用：成员必须指向**同租户**的账号，
+  /// 从库层杜绝「把别的租户的用户加进本空间」。
+  @@unique([tenantId, id], map: "users_tenant_id_key")
   @@index([tenantId, organizationId])
 }
 
@@ -414,6 +498,7 @@ model Role {
   isActive              Boolean          @default(true)
   users                 User[]
   userAssignments       UserRole[]
+  workspaceMembers      WorkspaceMember[]
   permissions           RolePermission[]
   createdAt             DateTime         @default(now())
   updatedAt             DateTime         @updatedAt
@@ -1938,6 +2023,7 @@ model RentalCategoryDefinition {
   businessModel           Json
   version                 String
   profiles                TenantRentalProfile[]
+  workspaces              BusinessWorkspace[]
   itemGroups              RentalItemGroup[]
   inspectionTemplates     RentalInspectionTemplate[]
   createdAt               DateTime                   @default(now())

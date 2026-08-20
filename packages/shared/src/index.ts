@@ -3869,6 +3869,66 @@ export interface RentalCategoryDefinition {
   version: string;
 }
 
+/** SPACE-01：经营空间状态。冻结可恢复，停用是终态。 */
+export type BusinessWorkspaceStatus = "active" | "frozen" | "disabled";
+
+/**
+ * SPACE-01：经营空间。
+ *
+ * 一个 SaaS 租户可有多个空间，每个空间只经营一种品类（需求 3）。
+ * 品类在创建时确定，不通过普通设置切换——变更品类必须新建空间或显式迁移，
+ * 因此更新接口不接受 categoryCode。
+ */
+export interface BusinessWorkspace {
+  id: string;
+  tenantId: string;
+  code: string;
+  name: string;
+  categoryCode: RentalCategoryCode;
+  status: BusinessWorkspaceStatus;
+  /** 升级兼容层：既有业务全部归属租户的默认空间。每租户至多一个。 */
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * SPACE-01：账号在某个经营空间的成员关系。
+ *
+ * 角色与数据范围记在成员关系上，因为同一账号可在不同空间拥有不同角色和范围
+ * （需求 3）。`roleId` 为空表示沿用租户级默认角色（升级兼容），
+ * `dataScope` 为空表示沿用角色自带范围。
+ */
+export interface WorkspaceMember {
+  tenantId: string;
+  workspaceId: string;
+  userId: string;
+  roleId?: string;
+  dataScope?: SystemDataScope;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateBusinessWorkspaceRequest {
+  code: string;
+  name: string;
+  categoryCode: RentalCategoryCode;
+}
+
+/** 不含 categoryCode：品类创建后不可通过普通设置变更（需求 3）。 */
+export interface UpdateBusinessWorkspaceRequest {
+  name?: string;
+  status?: BusinessWorkspaceStatus;
+}
+
+export interface SaveWorkspaceMemberRequest {
+  userId: string;
+  roleId?: string;
+  dataScope?: SystemDataScope;
+  isActive?: boolean;
+}
+
 export interface TenantRentalProfile {
   tenantId: string;
   categoryCode: RentalCategoryCode;
