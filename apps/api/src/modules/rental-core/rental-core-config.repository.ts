@@ -14,7 +14,7 @@ import type {
   TenantRentalProfile
 } from "@store-rental/shared";
 import { PrismaService } from "../database/prisma.service";
-import { resolveWriteWorkspaceId } from "./workspace-scope";
+import { resolveScopeWorkspaceId } from "./workspace-scope";
 
 /** 单个租户的全部配置，用于启动预热写穿缓存。 */
 export interface TenantConfigSnapshot {
@@ -210,7 +210,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       settings: settings as unknown as Prisma.InputJsonValue,
       updatedBy
     };
-    const workspaceId = await resolveWriteWorkspaceId(this.db(tx), settings.tenantId);
+    const workspaceId = await resolveScopeWorkspaceId(this.db(tx), settings.tenantId);
     await this.db(tx).rentalTenantBusinessSettings.upsert({
       where: { tenantId: settings.tenantId },
       create: { workspaceId, tenantId: settings.tenantId, ...data },
@@ -229,7 +229,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       settlementMode: operator.settlementMode ?? null,
       status: operator.status
     };
-    const workspaceId = await resolveWriteWorkspaceId(this.db(tx), operator.tenantId);
+    const workspaceId = await resolveScopeWorkspaceId(this.db(tx), operator.tenantId);
     await this.db(tx).rentalFulfillmentOperator.upsert({
       where: { id: operator.id },
       create: { workspaceId, id: operator.id, ...data, createdAt: new Date(operator.createdAt) },
@@ -254,7 +254,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       businessHours: location.businessHours ?? null,
       status: location.status
     };
-    const workspaceId = await resolveWriteWorkspaceId(this.db(tx), location.tenantId);
+    const workspaceId = await resolveScopeWorkspaceId(this.db(tx), location.tenantId);
     await this.db(tx).rentalFulfillmentLocation.upsert({
       where: { id: location.id },
       create: { workspaceId, id: location.id, ...data },
@@ -278,7 +278,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
     // 商品组与套装组成必须一起提交，否则会留下"组已改、组成还是旧的"的中间态。
     // 有外层事务时直接复用它——Prisma 不支持嵌套交互式事务，自己再开一个会报错。
     const write = async (client: RentalConfigTx) => {
-      const workspaceId = await resolveWriteWorkspaceId(client, group.tenantId);
+      const workspaceId = await resolveScopeWorkspaceId(client, group.tenantId);
       await client.rentalItemGroup.upsert({
         where: { id: group.id },
         create: { workspaceId, id: group.id, ...data, createdAt: new Date(group.createdAt) },
@@ -322,7 +322,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       status: template.status,
       version: template.version
     };
-    const workspaceId = await resolveWriteWorkspaceId(this.db(tx), template.tenantId);
+    const workspaceId = await resolveScopeWorkspaceId(this.db(tx), template.tenantId);
     await this.db(tx).rentalCouponTemplate.upsert({
       where: { id: template.id },
       create: { workspaceId, id: template.id, ...data, createdAt: new Date(template.createdAt) },
@@ -341,7 +341,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       fields: template.fields as unknown as Prisma.InputJsonValue,
       enabled: template.enabled
     };
-    const workspaceId = await resolveWriteWorkspaceId(this.db(tx), template.tenantId);
+    const workspaceId = await resolveScopeWorkspaceId(this.db(tx), template.tenantId);
     await this.db(tx).rentalInspectionTemplate.upsert({
       where: { id: template.id },
       create: { workspaceId, id: template.id, ...data },

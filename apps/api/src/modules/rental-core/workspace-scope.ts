@@ -14,7 +14,7 @@ type AnyClient = {
 export type WorkspaceScopeTx = Prisma.TransactionClient;
 
 /**
- * SPACE-03：写入经营事实时使用的经营空间。
+ * SPACE-03：读写经营事实时使用的经营空间。
  *
  * 两条来源，优先级明确：
  *   1. **请求路径**取会话空间。会话空间由认证守卫从 `auth_sessions` 写入，
@@ -32,7 +32,7 @@ export type WorkspaceScopeTx = Prisma.TransactionClient;
  * 找不到默认空间时**明确拒绝**，绝不写入一个猜测的空间 id——
  * 没有品类档案的租户（如平台管理租户）本就不该产生经营事实。
  */
-export async function resolveWriteWorkspaceId(
+export async function resolveScopeWorkspaceId(
   client: AnyClient,
   tenantId: string
 ): Promise<string> {
@@ -43,7 +43,7 @@ export async function resolveWriteWorkspaceId(
     select: { id: true }
   });
   if (!fallback) {
-    throw new ForbiddenException(`租户 ${tenantId} 没有默认经营空间，拒绝写入经营事实`);
+    throw new ForbiddenException(`租户 ${tenantId} 没有默认经营空间，拒绝访问经营事实`);
   }
   return fallback.id;
 }

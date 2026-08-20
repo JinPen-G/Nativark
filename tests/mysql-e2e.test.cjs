@@ -2881,6 +2881,85 @@ INSERT INTO \`rental_item_groups\`` +
       `跨租户改挂被外键拒绝、库层允许第二空间复用商品编码（服务层判重仍为租户级，已钉住）`
   );
 
+  console.log("== 55. SPACE-03 同租户两个空间不能互读经营事实 ==");
+  // 这是 SPACE-03 的核心验收：同一租户、同一账号，切换空间后必须看不到对方的数据。
+  const isoA2 = await login("demo", "admin", DEMO_PASSWORD);
+  const isoDefaultWs = isoA2.currentWorkspaceId;
+  const isoSecondWs = (await request("GET", "/api/platform/workspaces", null, isoA2.accessToken)).body.data
+    .find((row) => !row.isDefault && row.status === "active");
+  assert.ok(isoSecondWs, "前置条件：需要第二个启用的经营空间");
+
+  // 默认空间里应当有订单（前面的用例造过）。
+  const isoOrdersDefault = (await request("GET", "/api/rental/v1/orders", null, isoA2.accessToken)).body.data;
+  assert.ok(isoOrdersDefault.length > 0, "前置条件：默认空间应已有订单，否则本节为空转");
+  const isoDbDefault = readCount(
+    `SELECT COUNT(*) FROM \`rental_orders\` WHERE \`tenantId\`='tenant_001' AND \`workspaceId\`='${isoDefaultWs}';`
+  );
+  assert.equal(
+    isoOrdersDefault.length,
+    isoDbDefault,
+    `默认空间订单数应与库中该空间的行数一致：接口 ${isoOrdersDefault.length} / 库 ${isoDbDefault}`
+  );
+
+  // 切到第二空间：必须看不到默认空间的任何订单。
+  const isoSwitch = await request(
+    "POST",
+    "/api/auth/switch-workspace",
+    { workspaceId: isoSecondWs.id },
+    isoA2.accessToken
+  );
+  assert.equal(isoSwitch.status, 201, `切换到第二空间失败: ${JSON.stringify(isoSwitch.body).slice(0, 200)}`);
+  const isoTokenB = isoSwitch.body.data.accessToken;
+  const isoOrdersSecond = (await request("GET", "/api/rental/v1/orders", null, isoTokenB)).body.data;
+  const isoDefaultIds = new Set(isoOrdersDefault.map((row) => row.id));
+  const isoLeaked = isoOrdersSecond.filter((row) => isoDefaultIds.has(row.id));
+  assert.deepEqual(
+    isoLeaked.map((row) => row.id),
+    [],
+    `第二个经营空间读到了默认空间的订单（${isoLeaked.length} 张），空间隔离未生效`
+  );
+  assert.equal(
+    isoOrdersSecond.length,
+    readCount(
+      `SELECT COUNT(*) FROM \`rental_orders\` WHERE \`tenantId\`='tenant_001' AND \`workspaceId\`='${isoSecondWs.id}';`
+    ),
+    "第二空间的订单数必须等于库中该空间的行数"
+  );
+
+  // 资产与库存同理：第二空间没有资产，可用量必须为 0 而不是沿用默认空间的。
+  const isoAssetsSecond = (await request("GET", "/api/rental/v1/assets", null, isoTokenB)).body.data;
+  assert.equal(
+    isoAssetsSecond.length,
+    readCount(
+      `SELECT COUNT(*) FROM \`rental_assets\` WHERE \`tenantId\`='tenant_001' AND \`workspaceId\`='${isoSecondWs.id}';`
+    ),
+    "第二空间的资产数必须等于库中该空间的行数"
+  );
+  const isoAssetsDefaultCount = readCount(
+    `SELECT COUNT(*) FROM \`rental_assets\` WHERE \`tenantId\`='tenant_001' AND \`workspaceId\`='${isoDefaultWs}';`
+  );
+  assert.ok(isoAssetsDefaultCount > 0, "前置条件：默认空间应有资产");
+  assert.notEqual(
+    isoAssetsSecond.length,
+    isoAssetsDefaultCount,
+    "第二空间不应看到与默认空间相同数量的资产（那意味着读取未按空间过滤）"
+  );
+
+  // 切回默认空间，数据必须原样回来——证明隔离是双向的，不是"第二空间恰好为空"。
+  const isoBack = await request(
+    "POST",
+    "/api/auth/switch-workspace",
+    { workspaceId: isoDefaultWs },
+    isoTokenB
+  );
+  assert.equal(isoBack.status, 201, "切回默认空间失败");
+  const isoOrdersBack = (await request("GET", "/api/rental/v1/orders", null, isoBack.body.data.accessToken)).body.data;
+  assert.equal(isoOrdersBack.length, isoDbDefault, "切回默认空间后订单必须原样可见");
+  ok(
+    `同租户两空间互不可读：默认空间 ${isoDbDefault} 张订单/${isoAssetsDefaultCount} 件资产，` +
+      `第二空间 ${isoOrdersSecond.length} 张/${isoAssetsSecond.length} 件且无一条来自默认空间，切回后原样可见`
+  );
+
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);
 }
 

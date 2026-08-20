@@ -18,7 +18,7 @@ import {
   type RentalStockBalance
 } from "@store-rental/shared";
 import { PrismaService } from "../database/prisma.service";
-import { resolveWriteWorkspaceId } from "./workspace-scope";
+import { resolveScopeWorkspaceId } from "./workspace-scope";
 
 /** 参与可用量计算的预占。表上直接带 startAt/endAt，因此不必回连订单。 */
 export interface ActiveReservationRow {
@@ -115,8 +115,9 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
   } as const;
 
   async listOrders(tenantId: string): Promise<RentalOrder[]> {
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
     const rows = await this.prisma.rentalOrder.findMany({
-      where: { tenantId },
+      where: { tenantId, workspaceId },
       include: this.orderInclude,
       orderBy: { createdAt: "desc" }
     });
@@ -125,8 +126,9 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
 
   async findOrder(tenantId: string, orderId: string, tx?: RentalFactTx): Promise<RentalOrder | undefined> {
     const client = tx ?? this.prisma;
+    const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
     const row = await client.rentalOrder.findFirst({
-      where: { id: orderId, tenantId },
+      where: { id: orderId, tenantId, workspaceId },
       include: this.orderInclude
     });
     return row ? this.toDomainOrder(row) : undefined;
@@ -145,7 +147,8 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
   }
 
   async countOrders(tenantId: string): Promise<number> {
-    return this.prisma.rentalOrder.count({ where: { tenantId } });
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
+    return this.prisma.rentalOrder.count({ where: { tenantId, workspaceId } });
   }
 
   /**
@@ -192,7 +195,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     };
 
     const write = async (client: RentalFactTx) => {
-      const workspaceId = await resolveWriteWorkspaceId(client, order.tenantId);
+      const workspaceId = await resolveScopeWorkspaceId(client, order.tenantId);
       await client.rentalOrder.upsert({
         where: { id: order.id },
         create: { workspaceId, id: order.id, ...orderData, createdAt: new Date(order.createdAt) },
@@ -232,7 +235,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
           status: upper<$Enums.RentalReservationState>(reservation.status),
           expiresAt: reservation.expiresAt ? new Date(reservation.expiresAt) : null
         };
-        const workspaceId = await resolveWriteWorkspaceId(client, order.tenantId);
+        const workspaceId = await resolveScopeWorkspaceId(client, order.tenantId);
         await client.rentalReservation.upsert({
           where: { id: reservation.id },
           create: { workspaceId, id: reservation.id, ...reservationData, createdAt: new Date(reservation.createdAt) },
@@ -309,9 +312,11 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
   async activeReservations(tenantId: string, tx?: RentalFactTx): Promise<ActiveReservationRow[]> {
     const now = new Date();
     const client = tx ?? this.prisma;
+    const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
     const rows = await client.rentalReservation.findMany({
       where: {
         tenantId,
+        workspaceId,
         status: { in: ACTIVE_RESERVATION_STATES },
         OR: [{ expiresAt: null }, { expiresAt: { gte: now } }]
       },
@@ -328,11 +333,13 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
 
   /** 已被有效分配占住的资产 id，用于配货时排除。 */
   async allocatedAssetIds(tenantId: string): Promise<Set<string>> {
+    // 分配表没有 workspaceId（它是订单子表），通过父订单的空间条件过滤。
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
     const rows = await this.prisma.rentalAllocation.findMany({
       where: {
         status: { in: IN_USE_ALLOCATION_STATES },
         assetId: { not: null },
-        order: { tenantId }
+        order: { tenantId, workspaceId }
       },
       select: { assetId: true }
     });
@@ -343,8 +350,9 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
 
   async listAssets(tenantId: string, tx?: RentalFactTx): Promise<RentalAsset[]> {
     const client = tx ?? this.prisma;
+    const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
     const rows = await client.rentalAsset.findMany({
-      where: { tenantId },
+      where: { tenantId, workspaceId },
       include: { itemGroup: { select: { code: true, name: true } }, location: { select: { name: true } } },
       orderBy: { createdAt: "desc" }
     });
@@ -366,7 +374,8 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
   }
 
   async findAssetByNo(tenantId: string, assetNo: string): Promise<{ id: string } | null> {
-    return this.prisma.rentalAsset.findFirst({ where: { tenantId, assetNo }, select: { id: true } });
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
+    return this.prisma.rentalAsset.findFirst({ where: { tenantId, workspaceId, assetNo }, select: { id: true } });
   }
 
   async upsertAsset(asset: RentalAsset): Promise<void> {
@@ -379,7 +388,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       status: upper<$Enums.RentalAssetState>(asset.status),
       attributes: asset.attributes as Prisma.InputJsonValue
     };
-    const workspaceId = await resolveWriteWorkspaceId(this.prisma, asset.tenantId);
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, asset.tenantId);
     await this.prisma.rentalAsset.upsert({
       where: { id: asset.id },
       create: { workspaceId, id: asset.id, ...data, createdAt: new Date(asset.createdAt) },
@@ -392,8 +401,9 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
   /** 返回在手/维护量原值；预占与可用量由服务层结合 activeReservations 计算。 */
   async listStockBalances(tenantId: string, tx?: RentalFactTx): Promise<RentalStockBalance[]> {
     const client = tx ?? this.prisma;
+    const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
     const rows = await client.rentalStockBalance.findMany({
-      where: { tenantId },
+      where: { tenantId, workspaceId },
       include: { itemGroup: { select: { code: true, name: true } }, location: { select: { name: true } } },
       orderBy: { updatedAt: "desc" }
     });
@@ -415,7 +425,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
 
   async findStockBalance(tenantId: string, itemGroupId: string, locationId: string) {
     return this.prisma.rentalStockBalance.findFirst({
-      where: { tenantId, itemGroupId, locationId },
+      where: { tenantId, workspaceId: await resolveScopeWorkspaceId(this.prisma, tenantId), itemGroupId, locationId },
       select: { id: true }
     });
   }
@@ -428,7 +438,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       onHandQuantity: balance.onHandQuantity,
       maintenanceQuantity: balance.maintenanceQuantity
     };
-    const workspaceId = await resolveWriteWorkspaceId(this.prisma, balance.tenantId);
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, balance.tenantId);
     await this.prisma.rentalStockBalance.upsert({
       where: { id: balance.id },
       create: { workspaceId, id: balance.id, ...data },
@@ -439,8 +449,9 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
   /* ---------- 检查记录 ---------- */
 
   async listInspections(tenantId: string, orderId: string): Promise<RentalInspectionRecord[]> {
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
     const rows = await this.prisma.rentalInspectionRecord.findMany({
-      where: { tenantId, orderId },
+      where: { tenantId, workspaceId, orderId },
       orderBy: { createdAt: "desc" }
     });
     return rows.map((row) => ({
@@ -460,7 +471,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
   }
 
   async insertInspection(record: RentalInspectionRecord, tx?: RentalFactTx): Promise<void> {
-    const workspaceId = await resolveWriteWorkspaceId(tx ?? this.prisma, record.tenantId);
+    const workspaceId = await resolveScopeWorkspaceId(tx ?? this.prisma, record.tenantId);
     await (tx ?? this.prisma).rentalInspectionRecord.create({
       data: {
         id: record.id,

@@ -14,7 +14,7 @@ import type {
   RentalValueAddedService
 } from "@store-rental/shared";
 import { PrismaService } from "../database/prisma.service";
-import { resolveWriteWorkspaceId } from "./workspace-scope";
+import { resolveScopeWorkspaceId } from "./workspace-scope";
 
 /** 单个租户的业务配置，用于启动预热写穿缓存。 */
 export interface TenantBusinessConfigSnapshot {
@@ -134,7 +134,7 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       effectiveTo: plan.effectiveTo ? new Date(plan.effectiveTo) : null,
       rates: plan.rates as unknown as Prisma.InputJsonValue
     };
-    const workspaceId = await resolveWriteWorkspaceId(this.prisma, plan.tenantId);
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, plan.tenantId);
     await this.prisma.rentalPricingPlan.upsert({
       where: { id: plan.id },
       create: { workspaceId, id: plan.id, ...data, createdAt: new Date(plan.createdAt) },
@@ -162,7 +162,7 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       effectiveTo: plan.effectiveTo ? new Date(plan.effectiveTo) : null,
       version: plan.version
     };
-    const workspaceId = await resolveWriteWorkspaceId(this.prisma, plan.tenantId);
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, plan.tenantId);
     await this.prisma.rentalDiscountPlan.upsert({
       where: { id: plan.id },
       create: { workspaceId, id: plan.id, ...data, createdAt: new Date(plan.createdAt) },
@@ -188,7 +188,7 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       status: service.status,
       version: service.version
     };
-    const workspaceId = await resolveWriteWorkspaceId(this.prisma, service.tenantId);
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, service.tenantId);
     await this.prisma.rentalValueAddedService.upsert({
       where: { id: service.id },
       create: { workspaceId, id: service.id, ...data, createdAt: new Date(service.createdAt) },
@@ -209,7 +209,7 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       publishedAt: calendar.publishedAt ? new Date(calendar.publishedAt) : null,
       days: calendar.days as unknown as Prisma.InputJsonValue
     };
-    const workspaceId = await resolveWriteWorkspaceId(this.prisma, calendar.tenantId);
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, calendar.tenantId);
     await this.prisma.rentalBusinessCalendar.upsert({
       where: { workspaceId_year: { workspaceId, year: calendar.year } },
       create: { workspaceId, tenantId: calendar.tenantId, year: calendar.year, ...data },
@@ -232,7 +232,7 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
 
   async upsertRuleVersion(version: RentalRuleVersion): Promise<void> {
     const data = this.ruleVersionData(version);
-    const workspaceId = await resolveWriteWorkspaceId(this.prisma, version.tenantId);
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, version.tenantId);
     await this.prisma.rentalRuleVersion.upsert({
       where: { id: version.id },
       create: { workspaceId, id: version.id, ...data, createdAt: new Date(version.createdAt) },
@@ -242,7 +242,7 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
 
   async replacePublishedRuleVersion(next: RentalRuleVersion, retiring: RentalRuleVersion[]): Promise<void> {
     const data = this.ruleVersionData(next);
-    const workspaceId = await resolveWriteWorkspaceId(this.prisma, next.tenantId);
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, next.tenantId);
     await this.prisma.$transaction(async (tx) => {
       for (const row of retiring) {
         await tx.rentalRuleVersion.update({
@@ -270,7 +270,7 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       status: template.status,
       version: template.version
     };
-    const workspaceId = await resolveWriteWorkspaceId(this.prisma, template.tenantId);
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, template.tenantId);
     await this.prisma.rentalNotificationTemplate.upsert({
       where: { id: template.id },
       create: { workspaceId, id: template.id, ...data },

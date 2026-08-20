@@ -14,7 +14,7 @@ import type {
   RentalRuleConfig
 } from "@store-rental/shared";
 import { PrismaService } from "../database/prisma.service";
-import { resolveWriteWorkspaceId } from "./workspace-scope";
+import { resolveScopeWorkspaceId } from "./workspace-scope";
 
 export type RentalBusinessFactTx = Prisma.TransactionClient;
 
@@ -134,7 +134,8 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
 
   async findQuote(tenantId: string, quoteId: string, tx?: RentalBusinessFactTx): Promise<RentalQuoteSnapshotV1 | undefined> {
     const client = tx ?? this.prisma;
-    const row = await client.rentalQuote.findFirst({ where: { id: quoteId, tenantId } });
+    const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
+    const row = await client.rentalQuote.findFirst({ where: { id: quoteId, tenantId, workspaceId } });
     return row ? this.toQuote(row) : undefined;
   }
 
@@ -199,7 +200,7 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       consumedAt: optionalDate(quote.consumedAt),
       consumedOrderId: quote.consumedOrderId ?? null
     };
-    const workspaceId = await resolveWriteWorkspaceId(this.prisma, quote.tenantId);
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, quote.tenantId);
     await this.prisma.rentalQuote.upsert({
       where: { id: quote.id },
       create: { workspaceId, id: quote.id, ...data, createdAt: date(quote.createdAt) },
@@ -224,7 +225,7 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       redeemedAt: optionalDate(coupon.redeemedAt),
       releasedAt: optionalDate(coupon.releasedAt)
     };
-    const workspaceId = await resolveWriteWorkspaceId(tx ?? this.prisma, coupon.tenantId);
+    const workspaceId = await resolveScopeWorkspaceId(tx ?? this.prisma, coupon.tenantId);
     await (tx ?? this.prisma).rentalCustomerCoupon.upsert({
       where: { id: coupon.id },
       create: { workspaceId, id: coupon.id, ...data },
@@ -238,8 +239,11 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
     tx?: RentalBusinessFactTx
   ): Promise<RentalRewardLedgerEntry[]> {
     const client = tx ?? this.prisma;
+    // 奖励幂等键的唯一约束已是 (workspaceId, idempotencyKey)，判重也必须按空间，
+    // 否则一个空间的发奖会被另一个空间的同键记录误判为重复。
+    const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
     const rows = await client.rentalRewardLedgerEntry.findMany({
-      where: { tenantId, OR: [{ idempotencyKey: key }, { idempotencyKey: { startsWith: `${key}:` } }] },
+      where: { tenantId, workspaceId, OR: [{ idempotencyKey: key }, { idempotencyKey: { startsWith: `${key}:` } }] },
       orderBy: { createdAt: "asc" }
     });
     return rows.map((row) => this.toRewardEntry(row));
@@ -262,7 +266,7 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       appliedAt: optionalDate(entry.appliedAt),
       reversedAt: optionalDate(entry.reversedAt)
     };
-    const workspaceId = await resolveWriteWorkspaceId(this.prisma, entry.tenantId);
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, entry.tenantId);
     await this.prisma.rentalRewardLedgerEntry.upsert({
       where: { id: entry.id },
       create: { workspaceId, id: entry.id, ...data, createdAt: date(entry.createdAt) },
@@ -276,7 +280,7 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       marketingBalance: new Prisma.Decimal(account.marketingBalance),
       availableRewardCouponCount: account.availableRewardCouponCount
     };
-    const workspaceId = await resolveWriteWorkspaceId(this.prisma, account.tenantId);
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, account.tenantId);
     await this.prisma.rentalBenefitAccount.upsert({
       where: { tenantId_customerId: { tenantId: account.tenantId, customerId: account.customerId } },
       create: { workspaceId, tenantId: account.tenantId, customerId: account.customerId, ...data },
@@ -285,7 +289,7 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
   }
 
   async upsertReferral(tenantId: string, referral: RentalReferralRecord): Promise<void> {
-    const workspaceId = await resolveWriteWorkspaceId(this.prisma, tenantId);
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
     await this.prisma.rentalReferral.upsert({
       where: { workspaceId_inviteeCustomerId: { workspaceId, inviteeCustomerId: referral.inviteeCustomerId } },
       create: {
@@ -301,7 +305,7 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
 
   /** 发送记录是追加式流水，用 create 而非 upsert：同一条记录不应被改写。 */
   async insertNotificationLog(log: RentalNotificationSendLogV1, tx?: RentalBusinessFactTx): Promise<void> {
-    const workspaceId = await resolveWriteWorkspaceId(tx ?? this.prisma, log.tenantId);
+    const workspaceId = await resolveScopeWorkspaceId(tx ?? this.prisma, log.tenantId);
     await (tx ?? this.prisma).rentalNotificationLog.create({
       data: {
         id: log.id,
