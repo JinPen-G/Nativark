@@ -1595,9 +1595,10 @@ async function main() {
         `P2002 回放前未比对指纹`
     );
   }
-  assert.ok(
-    diffBodyResults.filter(({ res }) => res.status === 201).length <= 1,
-    `同键不同请求体最多只能有一个成功，实际 ${diffBodyResults.map(({ res }) => res.status).join("/")}`
+  assert.equal(
+    diffBodyResults.filter(({ res }) => res.status === 201).length,
+    1,
+    `同键不同请求体并发必须恰好一个成功，实际 ${diffBodyResults.map(({ res }) => res.status).join("/")}`
   );
   assert.equal(
     readCount(`SELECT COUNT(*) FROM \`rental_orders\` WHERE \`quoteId\`='${q2b.id}';`),
@@ -1680,7 +1681,7 @@ async function main() {
   );
 
   ok(
-    `订单创建幂等：串行重放返回同一单且库存只占一次、同键改请求体 409、并发同键两请求均回放同一单、重放不重复发通知、幂等记录落库带租户戳`
+    `订单创建幂等：串行重放返回同一单且库存只占一次、同键改请求体 409、6 路同键并发均回放同一单、重放不重复发通知、幂等记录落库带租户戳`
   );
 
   console.log("== 22. RC-01 整条业务快照行丢失后仍从规范化表恢复 ==");
