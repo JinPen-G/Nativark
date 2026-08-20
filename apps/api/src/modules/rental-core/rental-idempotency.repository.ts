@@ -26,6 +26,14 @@ export interface RentalIdempotencyStore {
     },
     tx: RentalIdempotencyTx
   ): Promise<void>;
+  /**
+   * 删除保留窗口之外的幂等记录，返回删除行数。
+   *
+   * 必须有清理：这张表每个受保护动作写一行、只增不减，长期运行会无界增长，
+   * 而记录价值随时间迅速衰减——客户端网络重试发生在秒级到分钟级，
+   * 不会在两周后拿同一个键重发。
+   */
+  deleteOlderThan(cutoff: Date): Promise<number>;
 }
 
 /** 请求体指纹：键名排序后再序列化，避免字段顺序不同被判成不同请求。 */
@@ -87,6 +95,13 @@ export class RentalIdempotencyRepository implements RentalIdempotencyStore {
         response: (input.response ?? null) as Prisma.InputJsonValue
       }
     });
+  }
+
+  async deleteOlderThan(cutoff: Date): Promise<number> {
+    const result = await this.prisma.rentalOrderIdempotencyRecord.deleteMany({
+      where: { createdAt: { lt: cutoff } }
+    });
+    return result.count;
   }
 }
 

@@ -2227,6 +2227,132 @@ async function main() {
   );
   ok("同订单并发状态动作已串行：不同键并发取消恰有一个成功、一个 409，订单只推进一次且分配全部释放");
 
+  console.log("== 46. RC-04 幂等键按租户隔离 ==");
+  // 幂等表的唯一约束是 (tenantId, action, idempotencyKey)，因此**同一个键**在两个
+  // 租户下必须各自独立生效：A 租户用过的键不能让 B 租户的请求被回放成 A 的结果，
+  // 也不能让 B 因为"键已存在"而被拒。这是 SaaS 隔离在幂等层的体现。
+  const isoDemo = await login("demo", "admin", DEMO_PASSWORD);
+  const isoDemo2 = await login("demo2", "admin", DEMO_PASSWORD);
+  const sharedKey = `e2e-cross-tenant-${Date.now().toString(36)}`;
+  // 两个租户各发一次通知，用同一个幂等键、不同模板与收件人。
+  const isoTemplateOf = async (token) =>
+    (await request("GET", "/api/rental/v1/notification-templates", null, token)).body.data.find((row) => row.status === "enabled");
+  const isoTplA = await isoTemplateOf(isoDemo.accessToken);
+  const isoTplB = await isoTemplateOf(isoDemo2.accessToken);
+  assert.ok(isoTplA && isoTplB, "前置条件：两个租户都需要至少一个启用的通知模板");
+  const varsFor = (template) =>
+    Object.fromEntries(Object.keys(template.variableSchema).map((key) => [key, `E2E-${key}`]));
+  const sendAs = (token, template, recipient) =>
+    request(
+      "POST",
+      "/api/rental/v1/notifications/send",
+      { templateId: template.id, recipient, variables: varsFor(template) },
+      token,
+      { "Idempotency-Key": sharedKey }
+    );
+  const isoA = await sendAs(isoDemo.accessToken, isoTplA, "13900001111");
+  assert.equal(isoA.status, 201, `租户 A 发送应成功: ${JSON.stringify(isoA.body).slice(0, 200)}`);
+  const isoB = await sendAs(isoDemo2.accessToken, isoTplB, "13900002222");
+  assert.equal(
+    isoB.status,
+    201,
+    `同一幂等键在另一租户下必须独立生效，不得被 A 的记录挡住: ${JSON.stringify(isoB.body).slice(0, 200)}`
+  );
+  assert.notEqual(isoB.body.data.id, isoA.body.data.id, "跨租户同键不得回放出另一租户的发送记录");
+  assert.equal(isoB.body.data.recipient, "13900002222", "租户 B 必须拿到自己的收件人，而不是 A 的");
+  // 两条记录必须各归其主，且同键在库中恰好两行（每租户一行）。
+  assert.equal(
+    readCount(
+      `SELECT COUNT(*) FROM \`rental_order_idempotency_records\` WHERE \`idempotencyKey\`='${sharedKey}' AND \`action\`='notification.send';`
+    ),
+    2,
+    "同键应在两个租户下各留一行幂等记录"
+  );
+  assert.equal(
+    readCount(
+      `SELECT COUNT(*) FROM \`rental_order_idempotency_records\` WHERE \`idempotencyKey\`='${sharedKey}' AND \`tenantId\`='tenant_001';`
+    ),
+    1,
+    "租户 A 的幂等记录必须带自己的租户戳"
+  );
+  // 同租户同键重发：必须回放同一条，不得再向渠道发第二次。
+  const isoLogsBefore = readCount(
+    "SELECT COUNT(*) FROM `rental_notification_logs` WHERE `tenantId`='tenant_001';"
+  );
+  const isoAReplay = await sendAs(isoDemo.accessToken, isoTplA, "13900001111");
+  assert.equal(isoAReplay.status, 201, `同租户同键重发应回放: ${JSON.stringify(isoAReplay.body).slice(0, 200)}`);
+  assert.equal(isoAReplay.body.data.id, isoA.body.data.id, "同租户同键重发必须回放同一条发送记录");
+  assert.equal(
+    readCount("SELECT COUNT(*) FROM `rental_notification_logs` WHERE `tenantId`='tenant_001';"),
+    isoLogsBefore,
+    "同键重发不得新增发送记录（通知是外部副作用，重试不该再发一次）"
+  );
+  // 同键换请求体：必须 409，而不是把 A 第一次的结果当成新请求的结果返回。
+  const isoTamper = await sendAs(isoDemo.accessToken, isoTplA, "13900009999");
+  assert.equal(isoTamper.status, 409, `同键不同请求体必须 409，实际 ${isoTamper.status}`);
+  ok("幂等键按租户隔离：同键在两租户各自独立生效且互不回放，同租户同键重发不新增发送记录，同键异体 409");
+
+  console.log("== 47. RC-04 业务失败时幂等记录必须一并回滚 ==");
+  // 幂等登记与业务写入在同一事务。若登记先于业务失败而独立提交，这个键会被
+  // "占住"：客户端用同一个键重试时会命中一条指向从未发生过的业务的记录，
+  // 于是永远拿不到真正的执行——重试被自己的幂等记录挡死。
+  //
+  // 构造：对一张**已取消**的订单发确认。状态机必然拒绝，事务回滚。
+  const rbDemo = await login("demo", "admin", DEMO_PASSWORD);
+  const cancelledOrderId = readScalar(
+    "SELECT `id` FROM `rental_orders` WHERE `tenantId`='tenant_001' AND `status`='cancelled' ORDER BY `createdAt` DESC LIMIT 1;"
+  );
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_orders\` WHERE \`id\`='${cancelledOrderId}' AND \`status\`='cancelled';`),
+    1,
+    `前置条件：需要一张已取消订单，取到的是 ${cancelledOrderId}`
+  );
+  const rollbackKey = `e2e-rollback-${cancelledOrderId}`;
+  const rbFail = await request(
+    "POST",
+    `/api/rental/v1/orders/${cancelledOrderId}/confirm`,
+    {},
+    rbDemo.accessToken,
+    { "Idempotency-Key": rollbackKey }
+  );
+  assert.equal(rbFail.status, 409, `已取消订单确认必须 409，实际 ${rbFail.status}: ${JSON.stringify(rbFail.body).slice(0, 200)}`);
+  assert.equal(
+    readCount(
+      `SELECT COUNT(*) FROM \`rental_order_idempotency_records\` WHERE \`idempotencyKey\`='${rollbackKey}';`
+    ),
+    0,
+    "业务失败时不得留下幂等记录，否则该键被占住、后续重试永远拿不到真正的执行"
+  );
+  // 该键仍必须可用：换一张合法的 draft 订单，用同一个键必须能真正执行成功。
+  const rbDraftId = readScalar(
+    "SELECT `id` FROM `rental_orders` WHERE `tenantId`='tenant_001' AND `status`='draft' ORDER BY `createdAt` DESC LIMIT 1;"
+  );
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_orders\` WHERE \`id\`='${rbDraftId}' AND \`status\`='draft';`),
+    1,
+    `前置条件：需要一张 draft 订单验证键仍可用，取到的是 ${rbDraftId}`
+  );
+  const rbOk = await request(
+    "POST",
+    `/api/rental/v1/orders/${rbDraftId}/confirm`,
+    {},
+    rbDemo.accessToken,
+    { "Idempotency-Key": rollbackKey }
+  );
+  assert.equal(
+    rbOk.status,
+    201,
+    `回滚后同一个键必须仍可用于真正的执行，实际 ${rbOk.status}: ${JSON.stringify(rbOk.body).slice(0, 200)}`
+  );
+  assert.equal(
+    readCount(
+      `SELECT COUNT(*) FROM \`rental_order_idempotency_records\` WHERE \`idempotencyKey\`='${rollbackKey}';`
+    ),
+    1,
+    "成功执行后才应留下幂等记录"
+  );
+  ok("业务失败时幂等记录随事务回滚：失败未留记录，同一个键随后仍能正常执行并登记");
+
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);
 }
 

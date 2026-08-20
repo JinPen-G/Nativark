@@ -178,36 +178,78 @@ export class RentalCoreController {
   @Get("inspection-templates") templates(@Req() req: AuthenticatedRequest, @Query("stage") stage?: "pickup" | "return") { return this.service.listInspectionTemplates(req.user.tenantId, stage); }
   @Get("orders/:id/inspections") inspections(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.service.listInspections(req.user.tenantId, id); }
   @Post("orders/:id/inspections") async createInspection(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: CreateRentalInspectionRequest) {
-    const context = this.context(req.user.tenantId);
-    const current = await this.service.getOrder(req.user.tenantId, id);
-    const template = this.service.listInspectionTemplates(req.user.tenantId).find((row) => row.id === body.templateId);
+    const tenantId = req.user.tenantId;
+    const context = this.context(tenantId);
+    const current = await this.service.getOrder(tenantId, id);
+    const template = this.service.listInspectionTemplates(tenantId).find((row) => row.id === body.templateId);
     const returnedAt = new Date().toISOString();
     // 逾期费与损坏费先按报价算好再一次性交给 service：迁库后每次"加载订单→改→存"
     // 都是独立事务，分三次调用会把一个业务动作拆成三个事务。
-    const quote = this.business.getQuote(req.user.tenantId, context, current.quoteId);
+    const quote = this.business.getQuote(tenantId, context, current.quoteId);
     const charges = template?.stage === "return"
       ? {
-          overdue: { amount: this.business.calculateOverdueCharge(req.user.tenantId, context, quote, returnedAt), returnedAt },
+          overdue: { amount: this.business.calculateOverdueCharge(tenantId, context, quote, returnedAt), returnedAt },
           damage: {
-            amount: this.business.calculateDamageCharge(req.user.tenantId, context, quote, body.exceptions ?? []),
+            amount: this.business.calculateDamageCharge(tenantId, context, quote, body.exceptions ?? []),
             detail: (body.exceptions ?? []).map((item) => item.description).join("；") || "归还检查损坏费用"
           }
         }
       : {};
-    const result = await this.service.createInspection(req.user.tenantId, id, body, req.user.displayName, charges);
-    if (template?.stage === "return") await this.completeCustomerOrderEvent(req.user.tenantId, result.order);
-    await this.emitOrderEvent(req.user.tenantId, result.inspection.stage === "pickup" ? "pickup.completed" : "return.completed", result.order);
-    return this.committed(req.user.tenantId, result);
+    const stage = template?.stage;
+    // 目标状态：取件检查后进入 renting，归还检查后进入 completed。
+    const targetStatus = stage === "pickup" ? RentalCoreOrderStatus.Renting : RentalCoreOrderStatus.Completed;
+    const { result, replayed } = await this.idempotent.executeWithReplayFlag({
+      tenantId,
+      action: "order.inspection",
+      key: idempotencyKeyOf(req),
+      // 键按订单 + 阶段：同一阶段的检查只应生效一次，换阶段是另一个动作。
+      // 不纳入订单当前状态（理由见执行器注释），也不纳入 returnedAt——
+      // 那是服务端每次取的当前时间，纳入后每次重试都算出新键，幂等直接失效。
+      fallbackKey: `order.inspection:${id}:${stage ?? "unknown"}`,
+      // returnedAt 同样不能进指纹，否则重试必然被判为"同键不同内容"而 409。
+      request: { orderId: id, templateId: body.templateId, results: body.results, exceptions: body.exceptions ?? [] },
+      orderId: id,
+      run: (tx) => this.service.createInspection(tenantId, id, body, req.user.displayName, charges, tx),
+      replay: async () => {
+        const latest = await this.service.getOrder(tenantId, id);
+        if (latest.status !== targetStatus) return undefined;
+        const recorded = (await this.service.listInspections(tenantId, id)).filter((row) => row.stage === stage).at(-1);
+        return recorded ? { inspection: recorded, order: latest } : undefined;
+      }
+    });
+    // 回放时跳过外部副作用：重复的取件/归还完成通知会让客户收到第二条，
+    // 而 completeCustomerOrderEvent 会触发首单完成奖励，重复触发等于重复发奖。
+    if (!replayed) {
+      if (stage === "return") await this.completeCustomerOrderEvent(tenantId, result.order);
+      await this.emitOrderEvent(tenantId, result.inspection.stage === "pickup" ? "pickup.completed" : "return.completed", result.order);
+    }
+    return this.committed(tenantId, result);
   }
   @Post("orders/:id/handover/:stage") async handover(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Param("stage") stage: string) {
     if (stage !== "pickup" && stage !== "return") throw new BadRequestException("交接阶段无效");
-    const context = this.context(req.user.tenantId);
-    const current = await this.service.getOrder(req.user.tenantId, id);
+    const tenantId = req.user.tenantId;
+    const context = this.context(tenantId);
+    const current = await this.service.getOrder(tenantId, id);
     const returnedAt = new Date().toISOString();
-    const overdueCharge = stage === "return" ? this.business.calculateOverdueCharge(req.user.tenantId, context, this.business.getQuote(req.user.tenantId, context, current.quoteId), returnedAt) : 0;
-    const order = await this.service.completeHandoverWithoutInspection(req.user.tenantId, id, stage, overdueCharge);
-    if (stage === "return") await this.completeCustomerOrderEvent(req.user.tenantId, order);
-    await this.emitOrderEvent(req.user.tenantId, stage === "pickup" ? "pickup.completed" : "return.completed", order);
-    return this.committed(req.user.tenantId, order);
+    const overdueCharge = stage === "return" ? this.business.calculateOverdueCharge(tenantId, context, this.business.getQuote(tenantId, context, current.quoteId), returnedAt) : 0;
+    const targetStatus = stage === "pickup" ? RentalCoreOrderStatus.Renting : RentalCoreOrderStatus.Completed;
+    const { result: order, replayed } = await this.idempotent.executeWithReplayFlag({
+      tenantId,
+      action: "order.handover",
+      key: idempotencyKeyOf(req),
+      fallbackKey: `order.handover:${id}:${stage}`,
+      request: { orderId: id, stage },
+      orderId: id,
+      run: (tx) => this.service.completeHandoverWithoutInspection(tenantId, id, stage, overdueCharge, tx),
+      replay: async () => {
+        const latest = await this.service.getOrder(tenantId, id);
+        return latest.status === targetStatus ? latest : undefined;
+      }
+    });
+    if (!replayed) {
+      if (stage === "return") await this.completeCustomerOrderEvent(tenantId, order);
+      await this.emitOrderEvent(tenantId, stage === "pickup" ? "pickup.completed" : "return.completed", order);
+    }
+    return this.committed(tenantId, order);
   }
 }

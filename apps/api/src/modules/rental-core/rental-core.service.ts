@@ -719,7 +719,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
 
   async completeHandoverWithoutInspection(tenantId: string, orderId: string, stage: "pickup" | "return", overdueCharge = 0, tx?: RentalFactTx) {
     this.state(tenantId);
-    const order = await this.requireOrder(tenantId, orderId);
+    const order = await this.lockedOrder(tenantId, orderId, tx);
     const assetChanges: AssetStatusChange[] = [];
     if (stage === "pickup") {
       if (order.ruleSnapshot.fulfillment.pickupInspectionRequired) throw new ConflictException("当前规则要求完成领取检查");
@@ -761,7 +761,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     tx?: RentalFactTx
   ) {
     const state = this.state(tenantId);
-    const order = await this.requireOrder(tenantId, orderId);
+    const order = await this.lockedOrder(tenantId, orderId, tx);
     const template = state.inspectionTemplates.find((row) => row.id === input.templateId && row.enabled);
     if (!template) throw new NotFoundException("检查模板不存在或已停用");
     const missing = template.fields.filter((field) => field.required && (input.results[field.code] === undefined || input.results[field.code] === ""));

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put, Query, Req } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Param, Post, Put, Query, Req } from "@nestjs/common";
 import type {
   GrantRentalRewardRequest,
   ImportRentalCalendarRequest,
@@ -14,14 +14,40 @@ import type {
 } from "@store-rental/shared";
 import { RentalBusinessService, type BusinessContext } from "./rental-business.service";
 import { RentalCoreService } from "./rental-core.service";
+import { RentalIdempotentActionService } from "./rental-idempotent-action.service";
 
-interface AuthenticatedRequest { user: SystemUserRow; }
+interface AuthenticatedRequest { user: SystemUserRow; headers?: Record<string, unknown>; }
+
+/**
+ * 领券与发通知**不是天然幂等**的动作：同一客户可以合法地多次领同一模板的券
+ * （受 perCustomerLimit 约束），同一模板也可以合法地多次发送。因此不能像订单
+ * 动作那样凭「订单 + 目标状态」构造兜底键——没有键时，「重试」与「第二次合法请求」
+ * 在服务端无法区分，硬造兜底键只会把第二次合法请求错误地回放成第一次的结果。
+ *
+ * 所以这两个动作只在调用方显式传 `Idempotency-Key` 时提供幂等保护，不传时保持
+ * 原语义。这既与主流支付网关一致，也避免凭空发明业务语义。
+ * 长度上限与幂等表列宽一致，理由见 rental-core.controller.ts 的同名常量。
+ */
+const IDEMPOTENCY_KEY_MAX_LENGTH = 191;
+
+function explicitIdempotencyKey(req: { headers?: Record<string, unknown> }): string | undefined {
+  const raw = req.headers?.["idempotency-key"] ?? req.headers?.["Idempotency-Key"];
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.length > IDEMPOTENCY_KEY_MAX_LENGTH) {
+    throw new BadRequestException(`Idempotency-Key 过长，最多 ${IDEMPOTENCY_KEY_MAX_LENGTH} 个字符`);
+  }
+  return trimmed;
+}
 
 @Controller("rental/v1")
 export class RentalBusinessController {
   constructor(
     private readonly business: RentalBusinessService,
-    private readonly core: RentalCoreService
+    private readonly core: RentalCoreService,
+    private readonly idempotent: RentalIdempotentActionService
   ) {}
 
   private context(tenantId: string): BusinessContext {
@@ -67,7 +93,23 @@ export class RentalBusinessController {
   @Post("rule-versions") async saveRule(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalRuleVersionRequest) { return this.committed(req.user.tenantId, await this.business.saveRuleVersion(req.user.tenantId, this.context(req.user.tenantId), body, req.user.displayName)); }
 
   @Get("customer-coupons") customerCoupons(@Req() req: AuthenticatedRequest, @Query("customerId") customerId?: string) { return this.business.listCustomerCoupons(req.user.tenantId, this.context(req.user.tenantId), customerId); }
-  @Post("customer-coupons/claim") async claimCoupon(@Req() req: AuthenticatedRequest, @Body() body: { templateId: string; customerId: string }) { return this.committed(req.user.tenantId, await this.business.claimCoupon(req.user.tenantId, this.context(req.user.tenantId), body.templateId, body.customerId)); }
+  @Post("customer-coupons/claim") async claimCoupon(@Req() req: AuthenticatedRequest, @Body() body: { templateId: string; customerId: string }) {
+    const tenantId = req.user.tenantId;
+    const key = explicitIdempotencyKey(req);
+    // 不传键时保持原语义：第二次请求是合法的第二次领取（受 perCustomerLimit 约束）。
+    if (!key) return this.committed(tenantId, await this.business.claimCoupon(tenantId, this.context(tenantId), body.templateId, body.customerId));
+    return this.committed(tenantId, await this.idempotent.execute({
+      tenantId,
+      action: "coupon.claim",
+      key,
+      // 有显式键时 fallbackKey 用不到，给同值以免误用。
+      fallbackKey: key,
+      request: { templateId: body.templateId, customerId: body.customerId },
+      run: () => this.business.claimCoupon(tenantId, this.context(tenantId), body.templateId, body.customerId),
+      // 回放已登记的那张券本身：领券没有"目标状态"可查，券 id 就是结果。
+      replay: async (response) => (response ?? undefined) as Awaited<ReturnType<RentalBusinessService["claimCoupon"]>> | undefined
+    }));
+  }
 
   @Get("rewards") rewards(@Req() req: AuthenticatedRequest, @Query("customerId") customerId?: string) { return this.business.listRewards(req.user.tenantId, this.context(req.user.tenantId), customerId); }
   @Get("benefit-accounts") benefitAccounts(@Req() req: AuthenticatedRequest, @Query("customerId") customerId?: string) { return this.business.listBenefitAccounts(req.user.tenantId, this.context(req.user.tenantId), customerId); }
@@ -78,7 +120,21 @@ export class RentalBusinessController {
   @Post("notification-templates") async createNotificationTemplate(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalNotificationTemplateRequest) { return this.committed(req.user.tenantId, await this.business.saveNotificationTemplate(req.user.tenantId, this.context(req.user.tenantId), body)); }
   @Put("notification-templates/:id") async updateNotificationTemplate(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalNotificationTemplateRequest) { return this.committed(req.user.tenantId, await this.business.saveNotificationTemplate(req.user.tenantId, this.context(req.user.tenantId), { ...body, id })); }
   @Get("notification-logs") notificationLogs(@Req() req: AuthenticatedRequest) { return this.business.listNotificationLogs(req.user.tenantId, this.context(req.user.tenantId)); }
-  @Post("notifications/send") async sendNotification(@Req() req: AuthenticatedRequest, @Body() body: SendRentalNotificationRequest) { return this.committed(req.user.tenantId, await this.business.sendNotification(req.user.tenantId, this.context(req.user.tenantId), body)); }
+  @Post("notifications/send") async sendNotification(@Req() req: AuthenticatedRequest, @Body() body: SendRentalNotificationRequest) {
+    const tenantId = req.user.tenantId;
+    const key = explicitIdempotencyKey(req);
+    if (!key) return this.committed(tenantId, await this.business.sendNotification(tenantId, this.context(tenantId), body));
+    return this.committed(tenantId, await this.idempotent.execute({
+      tenantId,
+      action: "notification.send",
+      key,
+      fallbackKey: key,
+      request: { templateId: body.templateId, recipient: body.recipient, variables: body.variables },
+      run: () => this.business.sendNotification(tenantId, this.context(tenantId), body),
+      // 回放已登记的发送记录：重试不得再向外部渠道发一次。
+      replay: async (response) => (response ?? undefined) as Awaited<ReturnType<RentalBusinessService["sendNotification"]>> | undefined
+    }));
+  }
 
   @Post("quotes") async quote(@Req() req: AuthenticatedRequest, @Body() body: RentalQuoteRequest) { return this.committed(req.user.tenantId, await this.business.createQuote(req.user.tenantId, this.context(req.user.tenantId), body)); }
   @Get("quotes/:id") quoteDetail(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.business.getQuote(req.user.tenantId, this.context(req.user.tenantId), id); }
