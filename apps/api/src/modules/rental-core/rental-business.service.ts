@@ -42,9 +42,10 @@ import {
 } from "./rental-business-config.repository";
 import {
   RentalBusinessFactRepository,
-  type RentalBusinessFactStore
+  type RentalBusinessFactStore,
+  type RentalBusinessFactTx
 } from "./rental-business-fact.repository";
-import { RentalCoreConfigRepository, type RentalConfigStore } from "./rental-core-config.repository";
+import { RentalCoreConfigRepository, type RentalConfigStore, type RentalConfigTx } from "./rental-core-config.repository";
 
 interface RentalBusinessState {
   categoryCode: RentalCategoryCode;
@@ -460,7 +461,15 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return this.state(tenantId, context).customerCoupons.filter((coupon) => !customerId || coupon.customerId === customerId);
   }
 
-  async claimCoupon(tenantId: string, context: BusinessContext, templateId: string, customerId: string) {
+  /**
+   * 领券。传入 `tx` 时（幂等执行器包裹的路径）数据库写入全部走该事务，
+   * 且**不碰内存缓存**——缓存必须等事务提交成功后由调用方用
+   * `applyCouponClaimToCache` 落地。否则事务回滚后内存里会留下一张库中并不存在的
+   * 幽灵券，以及一个多加过的 claimedQuantity。
+   *
+   * 不传 `tx` 时保持原语义（无事务、写完即更新缓存）。
+   */
+  async claimCoupon(tenantId: string, context: BusinessContext, templateId: string, customerId: string, tx?: RentalBusinessFactTx) {
     const state = this.state(tenantId, context);
     const template = context.couponTemplates.find((item) => item.id === templateId && item.status === "enabled");
     if (!template) throw new NotFoundException("优惠券模板不存在或未启用");
@@ -472,14 +481,25 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       id: uid("customer_coupon"), tenantId, customerId, templateId, templateCode: template.code,
       templateName: template.name, status: "claimed", claimedAt: stamp(), effectiveFrom: template.effectiveFrom, effectiveTo: template.effectiveTo
     };
-    template.claimedQuantity += 1;
-    template.updatedAt = stamp();
-    state.customerCoupons.unshift(coupon);
-    await this.factStore.upsertCustomerCoupon(coupon);
+    // 构造候选模板而不是就地改 template：就地改会在事务回滚后留下多加的配额。
+    const nextTemplate: RentalCouponTemplate = { ...template, claimedQuantity: template.claimedQuantity + 1, updatedAt: stamp() };
+    await this.factStore.upsertCustomerCoupon(coupon, tx);
     // 领取会递增模板已领数量，那是核心配置对象；不一并写穿的话重启后配额回退，
     // 同一张券可以被反复领完。
-    await this.coreConfigStore.upsertCouponTemplate(template);
-    return coupon;
+    await this.coreConfigStore.upsertCouponTemplate(nextTemplate, tx as RentalConfigTx | undefined);
+    if (!tx) this.applyCouponClaimToCache(tenantId, context, coupon, nextTemplate);
+    return { coupon, template: nextTemplate };
+  }
+
+  /** 事务提交成功后把领券结果落进内存缓存。提交前调用会产生幽灵券。 */
+  applyCouponClaimToCache(tenantId: string, context: BusinessContext, coupon: RentalCustomerCoupon, template: RentalCouponTemplate) {
+    const state = this.state(tenantId, context);
+    if (!state.customerCoupons.some((item) => item.id === coupon.id)) state.customerCoupons.unshift(coupon);
+    const cached = context.couponTemplates.find((item) => item.id === template.id);
+    if (cached) {
+      cached.claimedQuantity = template.claimedQuantity;
+      cached.updatedAt = template.updatedAt;
+    }
   }
 
   validateCouponForOrder(
@@ -682,7 +702,16 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
 
   listNotificationLogs(tenantId: string, context: BusinessContext) { return this.state(tenantId, context).notificationLogs; }
 
-  async sendNotification(tenantId: string, context: BusinessContext, input: SendRentalNotificationRequest) {
+  /**
+   * 发送通知。传入 `tx` 时数据库写入走该事务，且**不碰内存缓存**——
+   * 缓存由调用方在提交成功后用 `applyNotificationLogToCache` 落地。
+   *
+   * 注意边界：事务只能回滚**数据库记录**。当前 provider 是 mock adapter，
+   * 没有真正的外部投递，所以"回滚"是完整的；接入真实 provider 后，事务
+   * 撤不回已发出的短信，那时必须改用 provider 幂等键或 transactional outbox。
+   * 本任务不虚构外部 provider，因此不在此实现 outbox。
+   */
+  async sendNotification(tenantId: string, context: BusinessContext, input: SendRentalNotificationRequest, tx?: RentalBusinessFactTx) {
     const state = this.state(tenantId, context);
     const template = state.notificationTemplates.find((item) => item.id === input.templateId && item.status === "enabled");
     if (!template) throw new NotFoundException("通知模板不存在或未启用");
@@ -697,9 +726,16 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       status: "sent", provider: "mock-notification-adapter", providerMessageId: uid("mock"), attempts: 1,
       createdAt: timestamp, sentAt: timestamp
     };
-    state.notificationLogs.unshift(log);
-    await this.factStore.insertNotificationLog(log);
+    // 事务路径下不动缓存：回滚后内存里会留下库中不存在的幽灵通知记录。
+    if (!tx) state.notificationLogs.unshift(log);
+    await this.factStore.insertNotificationLog(log, tx);
     return log;
+  }
+
+  /** 事务提交成功后把发送记录落进内存缓存。提交前调用会产生幽灵通知记录。 */
+  applyNotificationLogToCache(tenantId: string, context: BusinessContext, log: RentalNotificationSendLogV1) {
+    const state = this.state(tenantId, context);
+    if (!state.notificationLogs.some((item) => item.id === log.id)) state.notificationLogs.unshift(log);
   }
 
   /**

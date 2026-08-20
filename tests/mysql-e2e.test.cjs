@@ -2353,6 +2353,154 @@ async function main() {
   );
   ok("业务失败时幂等记录随事务回滚：失败未留记录，同一个键随后仍能正常执行并登记");
 
+  console.log("== 48. RC-04 领券同租户同键并发只能产生一次副作用 ==");
+  // 关键缺陷（Codex 指出）：幂等执行器把 tx 传给了 run，但 claimCoupon 忽略它、
+  // 用默认连接独立提交，并在提交前就改了内存缓存。于是两个同键并发请求各写一张券、
+  // 各加一次 claimedQuantity，最后只有幂等表的一条记录获胜——
+  // **接口看起来回放了，业务副作用已经发生两次**。
+  //
+  // 这里刻意用 4 路并发：2 路时输家常常在事务外预检就命中先到者，走不到
+  // 「已在事务内写完券、再撞幂等唯一约束」的那条路，而那条路才是回滚的证明。
+  const clDemo = await login("demo", "admin", DEMO_PASSWORD);
+  const clTemplate = (await request("GET", "/api/rental/v1/coupon-templates", null, clDemo.accessToken)).body.data
+    .find((row) => row.status === "enabled" && row.claimedQuantity < row.totalQuota && row.perCustomerLimit >= 1);
+  assert.ok(clTemplate, "前置条件：需要一个启用且未领完的优惠券模板");
+  const clCustomer = `e2e_idem_claim_${Date.now().toString(36)}`;
+  const clQuotaBefore = readCount(
+    `SELECT \`claimedQuantity\` FROM \`rental_coupon_templates\` WHERE \`id\`='${clTemplate.id}';`
+  );
+  const clKey = `e2e-claim-race-${clCustomer}`;
+  const CLAIM_CONCURRENCY = 4;
+  const clResults = await Promise.all(
+    Array.from({ length: CLAIM_CONCURRENCY }, () =>
+      request(
+        "POST",
+        "/api/rental/v1/customer-coupons/claim",
+        { templateId: clTemplate.id, customerId: clCustomer },
+        clDemo.accessToken,
+        { "Idempotency-Key": clKey }
+      )
+    )
+  );
+  assert.equal(
+    clResults.filter((res) => res.status === 201).length,
+    CLAIM_CONCURRENCY,
+    `同键并发领券每个请求都应成功（一次执行、其余回放），实际 ${clResults.map((r) => r.status).join("/")}：` +
+      `${JSON.stringify((clResults.find((r) => r.status !== 201) || {}).body ?? null).slice(0, 200)}`
+  );
+  const clIds = new Set(clResults.map((res) => res.body.data.id));
+  assert.equal(clIds.size, 1, `同键并发领券必须回放同一张券，实际拿到 ${clIds.size} 个不同 id`);
+  // 库里只能多一张券：多于一张就说明输家的写入独立提交了、没有随事务回滚。
+  assert.equal(
+    readCount(
+      `SELECT COUNT(*) FROM \`rental_customer_coupons\` WHERE \`tenantId\`='tenant_001' AND \`customerId\`='${clCustomer}';`
+    ),
+    1,
+    "同键并发领券只能在库中留下一张客户券（多于一张=业务写入未随事务回滚）"
+  );
+  assert.equal(
+    readCount(`SELECT \`claimedQuantity\` FROM \`rental_coupon_templates\` WHERE \`id\`='${clTemplate.id}';`),
+    clQuotaBefore + 1,
+    "模板已领数量只能加一（加多=回滚后内存/库残留了多余配额）"
+  );
+  // 库与当前进程必须一致：缓存若在提交前更新过，这里会读到库里不存在的幽灵券。
+  const clFromApi = (await request(
+    "GET",
+    `/api/rental/v1/customer-coupons?customerId=${clCustomer}`,
+    null,
+    clDemo.accessToken
+  )).body.data;
+  assert.equal(clFromApi.length, 1, `当前进程读取到的券数量必须与库一致，实际 ${clFromApi.length}`);
+  assert.equal(clFromApi[0].id, [...clIds][0], "当前进程读取到的券必须就是库里那一张");
+  const clTemplateFromApi = (await request("GET", "/api/rental/v1/coupon-templates", null, clDemo.accessToken)).body.data
+    .find((row) => row.id === clTemplate.id);
+  assert.equal(
+    clTemplateFromApi.claimedQuantity,
+    clQuotaBefore + 1,
+    "当前进程读取到的 claimedQuantity 必须与库一致"
+  );
+  // 同键异体仍必须 409，不能因为"键已存在"就把别人的券回放出去。
+  const clTamper = await request(
+    "POST",
+    "/api/rental/v1/customer-coupons/claim",
+    { templateId: clTemplate.id, customerId: `${clCustomer}_other` },
+    clDemo.accessToken,
+    { "Idempotency-Key": clKey }
+  );
+  assert.equal(clTamper.status, 409, `领券同键异体必须 409，实际 ${clTamper.status}`);
+  assert.equal(
+    readCount(
+      `SELECT COUNT(*) FROM \`rental_customer_coupons\` WHERE \`tenantId\`='tenant_001' AND \`customerId\`='${clCustomer}_other';`
+    ),
+    0,
+    "同键异体被拒后不得留下客户券"
+  );
+  ok(
+    `领券同键并发只有一次副作用：${CLAIM_CONCURRENCY} 路并发均回放同一张券，库中一张券、配额加一，` +
+      `当前进程读取与库一致，同键异体 409 且无残留`
+  );
+
+  console.log("== 49. RC-04 发通知同租户同键并发只能产生一次副作用 ==");
+  const snTemplate = (await request("GET", "/api/rental/v1/notification-templates", null, clDemo.accessToken)).body.data
+    .find((row) => row.status === "enabled");
+  assert.ok(snTemplate, "前置条件：需要一个启用的通知模板");
+  const snVars = Object.fromEntries(Object.keys(snTemplate.variableSchema).map((k) => [k, `E2E-${k}`]));
+  const snRecipient = "13900003333";
+  const snKey = `e2e-send-race-${Date.now().toString(36)}`;
+  const snLogsBefore = readCount(
+    `SELECT COUNT(*) FROM \`rental_notification_logs\` WHERE \`tenantId\`='tenant_001' AND \`recipient\`='${snRecipient}';`
+  );
+  const SEND_CONCURRENCY = 4;
+  const snResults = await Promise.all(
+    Array.from({ length: SEND_CONCURRENCY }, () =>
+      request(
+        "POST",
+        "/api/rental/v1/notifications/send",
+        { templateId: snTemplate.id, recipient: snRecipient, variables: snVars },
+        clDemo.accessToken,
+        { "Idempotency-Key": snKey }
+      )
+    )
+  );
+  assert.equal(
+    snResults.filter((res) => res.status === 201).length,
+    SEND_CONCURRENCY,
+    `同键并发发送每个请求都应成功，实际 ${snResults.map((r) => r.status).join("/")}：` +
+      `${JSON.stringify((snResults.find((r) => r.status !== 201) || {}).body ?? null).slice(0, 200)}`
+  );
+  const snIds = new Set(snResults.map((res) => res.body.data.id));
+  assert.equal(snIds.size, 1, `同键并发发送必须回放同一条记录，实际 ${snIds.size} 个不同 id`);
+  assert.equal(
+    readCount(
+      `SELECT COUNT(*) FROM \`rental_notification_logs\` WHERE \`tenantId\`='tenant_001' AND \`recipient\`='${snRecipient}';`
+    ),
+    snLogsBefore + 1,
+    "同键并发发送只能在库中留下一条通知日志（多于一条=写入未随事务回滚）"
+  );
+  const snFromApi = (await request("GET", "/api/rental/v1/notification-logs", null, clDemo.accessToken)).body.data
+    .filter((row) => row.recipient === snRecipient);
+  assert.equal(snFromApi.length, 1, `当前进程通知列表只能新增一条，实际 ${snFromApi.length}`);
+  assert.equal(snFromApi[0].id, [...snIds][0], "当前进程读取到的通知记录必须就是库里那一条");
+  const snTamper = await request(
+    "POST",
+    "/api/rental/v1/notifications/send",
+    { templateId: snTemplate.id, recipient: "13900004444", variables: snVars },
+    clDemo.accessToken,
+    { "Idempotency-Key": snKey }
+  );
+  assert.equal(snTamper.status, 409, `发通知同键异收件人必须 409，实际 ${snTamper.status}`);
+  assert.equal(
+    readCount(
+      "SELECT COUNT(*) FROM `rental_notification_logs` WHERE `tenantId`='tenant_001' AND `recipient`='13900004444';"
+    ),
+    0,
+    "同键异收件人被拒后不得留下通知日志"
+  );
+  ok(
+    `发通知同键并发只有一次副作用：${SEND_CONCURRENCY} 路并发均回放同一条记录，库与当前进程各只增一条，` +
+      `同键异收件人 409 且无残留`
+  );
+
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);
 }
 

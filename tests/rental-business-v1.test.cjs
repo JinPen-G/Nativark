@@ -108,8 +108,12 @@ const couponTemplate = await core.saveCouponTemplate(tenantId, {
   applicableItemGroupIds: [],
   status: "enabled"
 });
-const customerCoupon = await business.claimCoupon(tenantId, context(), couponTemplate.id, "member_001");
+// claimCoupon 现在返回 { coupon, template }：模板的 claimedQuantity 也是本次写入的一部分，
+// 调用方需要它才能在事务提交后正确更新缓存。
+const claimResult = await business.claimCoupon(tenantId, context(), couponTemplate.id, "member_001");
+const customerCoupon = claimResult.coupon;
 assert.equal(customerCoupon.status, "claimed");
+assert.equal(claimResult.template.claimedQuantity, 1, "领取应使模板已领数量加一");
 await assert.rejects(async () => business.claimCoupon(tenantId, context(), couponTemplate.id, "member_001"), /限领/);
 
 const group = context().groups.find((item) => item.code === "CAMP-TENT");

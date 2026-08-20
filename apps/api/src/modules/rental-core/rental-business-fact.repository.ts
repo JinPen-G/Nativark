@@ -47,7 +47,11 @@ export interface RentalBusinessFactStore {
   consumeQuoteIfAvailable(tenantId: string, quoteId: string, orderId: string, consumedAt: string, tx: RentalBusinessFactTx): Promise<boolean>;
   lockCouponIfAvailable(tenantId: string, couponId: string, customerId: string | undefined, orderId: string, lockedAt: string, tx: RentalBusinessFactTx): Promise<boolean>;
   upsertQuote(quote: RentalQuoteSnapshotV1): Promise<void>;
-  upsertCustomerCoupon(coupon: RentalCustomerCoupon): Promise<void>;
+  /**
+   * 传入 tx 时必须使用它。领券由幂等执行器包在事务里，若这里另起连接独立提交，
+   * 事务回滚撤不回这张券，会留下"幂等表已回滚、客户券已存在"的孤儿。
+   */
+  upsertCustomerCoupon(coupon: RentalCustomerCoupon, tx?: RentalBusinessFactTx): Promise<void>;
   /**
    * 按幂等键查既有奖励流水，用于以库为准判重。
    * 必须按前缀匹配：grantReward 会派生 `<key>:referrer` / `<key>:invitee` 子键，
@@ -57,7 +61,7 @@ export interface RentalBusinessFactStore {
   upsertRewardEntry(entry: RentalRewardLedgerEntry): Promise<void>;
   upsertBenefitAccount(account: RentalCustomerBenefitAccount): Promise<void>;
   upsertReferral(tenantId: string, referral: RentalReferralRecord): Promise<void>;
-  insertNotificationLog(log: RentalNotificationSendLogV1): Promise<void>;
+  insertNotificationLog(log: RentalNotificationSendLogV1, tx?: RentalBusinessFactTx): Promise<void>;
 }
 
 function iso(value: Date): string {
@@ -201,7 +205,7 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
     });
   }
 
-  async upsertCustomerCoupon(coupon: RentalCustomerCoupon): Promise<void> {
+  async upsertCustomerCoupon(coupon: RentalCustomerCoupon, tx?: RentalBusinessFactTx): Promise<void> {
     const data = {
       tenantId: coupon.tenantId,
       customerId: coupon.customerId,
@@ -218,7 +222,7 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       redeemedAt: optionalDate(coupon.redeemedAt),
       releasedAt: optionalDate(coupon.releasedAt)
     };
-    await this.prisma.rentalCustomerCoupon.upsert({
+    await (tx ?? this.prisma).rentalCustomerCoupon.upsert({
       where: { id: coupon.id },
       create: { id: coupon.id, ...data },
       update: data
@@ -289,8 +293,8 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
   }
 
   /** 发送记录是追加式流水，用 create 而非 upsert：同一条记录不应被改写。 */
-  async insertNotificationLog(log: RentalNotificationSendLogV1): Promise<void> {
-    await this.prisma.rentalNotificationLog.create({
+  async insertNotificationLog(log: RentalNotificationSendLogV1, tx?: RentalBusinessFactTx): Promise<void> {
+    await (tx ?? this.prisma).rentalNotificationLog.create({
       data: {
         id: log.id,
         tenantId: log.tenantId,

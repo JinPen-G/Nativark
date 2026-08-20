@@ -2,6 +2,9 @@ import { BadRequestException, Body, Controller, Get, Param, Post, Put, Query, Re
 import type {
   GrantRentalRewardRequest,
   ImportRentalCalendarRequest,
+  RentalCouponTemplate,
+  RentalCustomerCoupon,
+  RentalNotificationSendLogV1,
   RentalQuoteRequest,
   SaveRentalCalendarDayRequest,
   SaveRentalDiscountPlanRequest,
@@ -96,19 +99,25 @@ export class RentalBusinessController {
   @Post("customer-coupons/claim") async claimCoupon(@Req() req: AuthenticatedRequest, @Body() body: { templateId: string; customerId: string }) {
     const tenantId = req.user.tenantId;
     const key = explicitIdempotencyKey(req);
+    const context = this.context(tenantId);
     // 不传键时保持原语义：第二次请求是合法的第二次领取（受 perCustomerLimit 约束）。
-    if (!key) return this.committed(tenantId, await this.business.claimCoupon(tenantId, this.context(tenantId), body.templateId, body.customerId));
-    return this.committed(tenantId, await this.idempotent.execute({
+    if (!key) return this.committed(tenantId, (await this.business.claimCoupon(tenantId, context, body.templateId, body.customerId)).coupon);
+    const { result, replayed } = await this.idempotent.executeWithReplayFlag({
       tenantId,
       action: "coupon.claim",
       key,
       // 有显式键时 fallbackKey 用不到，给同值以免误用。
       fallbackKey: key,
       request: { templateId: body.templateId, customerId: body.customerId },
-      run: () => this.business.claimCoupon(tenantId, this.context(tenantId), body.templateId, body.customerId),
-      // 回放已登记的那张券本身：领券没有"目标状态"可查，券 id 就是结果。
-      replay: async (response) => (response ?? undefined) as Awaited<ReturnType<RentalBusinessService["claimCoupon"]>> | undefined
-    }));
+      // tx 必须真的传下去：否则领券与幂等登记各自独立提交，
+      // 事务回滚撤不回券和 claimedQuantity。
+      run: (tx) => this.business.claimCoupon(tenantId, context, body.templateId, body.customerId, tx),
+      // 领券没有"目标状态"可查，登记的那张券本身就是结果。
+      replay: async (response) => (response ?? undefined) as { coupon: RentalCustomerCoupon; template: RentalCouponTemplate } | undefined
+    });
+    // 只有真正执行过才落缓存；回放说明缓存在首次执行时已经更新过。
+    if (!replayed) this.business.applyCouponClaimToCache(tenantId, context, result.coupon, result.template);
+    return this.committed(tenantId, result.coupon);
   }
 
   @Get("rewards") rewards(@Req() req: AuthenticatedRequest, @Query("customerId") customerId?: string) { return this.business.listRewards(req.user.tenantId, this.context(req.user.tenantId), customerId); }
@@ -123,17 +132,21 @@ export class RentalBusinessController {
   @Post("notifications/send") async sendNotification(@Req() req: AuthenticatedRequest, @Body() body: SendRentalNotificationRequest) {
     const tenantId = req.user.tenantId;
     const key = explicitIdempotencyKey(req);
-    if (!key) return this.committed(tenantId, await this.business.sendNotification(tenantId, this.context(tenantId), body));
-    return this.committed(tenantId, await this.idempotent.execute({
+    const context = this.context(tenantId);
+    if (!key) return this.committed(tenantId, await this.business.sendNotification(tenantId, context, body));
+    const { result, replayed } = await this.idempotent.executeWithReplayFlag({
       tenantId,
       action: "notification.send",
       key,
       fallbackKey: key,
       request: { templateId: body.templateId, recipient: body.recipient, variables: body.variables },
-      run: () => this.business.sendNotification(tenantId, this.context(tenantId), body),
-      // 回放已登记的发送记录：重试不得再向外部渠道发一次。
-      replay: async (response) => (response ?? undefined) as Awaited<ReturnType<RentalBusinessService["sendNotification"]>> | undefined
-    }));
+      // tx 必须真的传下去：否则通知记录独立提交，两个同键并发请求会各写一条日志，
+      // 只有幂等表的一条记录获胜——接口看似回放，副作用已经发生两次。
+      run: (tx) => this.business.sendNotification(tenantId, context, body, tx),
+      replay: async (response) => (response ?? undefined) as RentalNotificationSendLogV1 | undefined
+    });
+    if (!replayed) this.business.applyNotificationLogToCache(tenantId, context, result);
+    return this.committed(tenantId, result);
   }
 
   @Post("quotes") async quote(@Req() req: AuthenticatedRequest, @Body() body: RentalQuoteRequest) { return this.committed(req.user.tenantId, await this.business.createQuote(req.user.tenantId, this.context(req.user.tenantId), body)); }

@@ -19,6 +19,15 @@ class IdempotentReplay extends Error {
 /** 幂等记录保留天数。理由见 onApplicationBootstrap。 */
 const IDEMPOTENCY_RETENTION_DAYS = 14;
 
+/**
+ * 写冲突的有界重试。次数刻意小：它只为覆盖「先到者即将提交」的窄窗口，
+ * 不是用来硬扛持续争用——真正的持续争用必须让调用方看到 409，而不是无限等待。
+ */
+const WRITE_CONFLICT_MAX_RETRIES = 3;
+const WRITE_CONFLICT_BACKOFF_MS = 25;
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 export interface IdempotentActionInput<T> {
   tenantId: string;
   action: string;
@@ -111,7 +120,7 @@ export class RentalIdempotentActionService implements OnApplicationBootstrap {
     return { result, replayed };
   }
 
-  async execute<T>(input: IdempotentActionInput<T>): Promise<T> {
+  async execute<T>(input: IdempotentActionInput<T>, attempt = 0): Promise<T> {
     const key = input.key?.trim() || input.fallbackKey;
     const fingerprint = requestFingerprint(input.request);
 
@@ -169,7 +178,19 @@ export class RentalIdempotentActionService implements OnApplicationBootstrap {
         throw new ConflictException("相同幂等键的请求正在处理，请稍后重试");
       }
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") {
-        throw new ConflictException("订单正在被其他请求处理，请稍后重试");
+        // 写冲突（多路同键并发争同一行，如领券都要递增同一个模板的 claimedQuantity）。
+        //
+        // 直接 409 是错的：同键同请求本就是一次意图，客户端不该因为内部行争用而
+        // 收到冲突。先到者此刻很可能正要提交，因此有界重试一轮——重试会从事务外
+        // 预检开始，命中先到者已提交的记录并回放。
+        //
+        // 重试不会产生第二次副作用：每次重试都是新事务，事务内重查与唯一约束仍在，
+        // 真正执行成功的只有一路。
+        if (attempt < WRITE_CONFLICT_MAX_RETRIES) {
+          await sleep(WRITE_CONFLICT_BACKOFF_MS * (attempt + 1));
+          return this.execute(input, attempt + 1);
+        }
+        throw new ConflictException("请求正在被其他请求处理，请稍后重试");
       }
       // 状态机拒绝后再探一次幂等记录。
       //
