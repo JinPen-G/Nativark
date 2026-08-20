@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import {
   BillingMode,
@@ -227,7 +227,7 @@ export class PlatformRepository {
     return user ? this.toUserRow(user) : undefined;
   }
 
-  async createAuthSession(input: { id: string; userId: string; refreshTokenHash: string; expiresAt: Date }) {
+  async createAuthSession(input: { id: string; userId: string; refreshTokenHash: string; expiresAt: Date; currentWorkspaceId?: string | null }) {
     return this.prisma.authSession.create({ data: input });
   }
 
@@ -457,6 +457,91 @@ export class PlatformRepository {
       disabled: PrismaWorkspaceStatus.DISABLED
     } as const;
     return map[status];
+  }
+
+  /* ---------- SPACE-02：会话空间上下文 ---------- */
+
+  /**
+   * 该账号可进入的经营空间：必须是**启用的成员关系**且空间本身启用。
+   * 冻结/停用的空间不出现在可进入列表里，因此前端也拿不到可切换项。
+   */
+  async listUserWorkspaces(userId: string): Promise<BusinessWorkspace[]> {
+    const members = await this.prisma.workspaceMember.findMany({
+      where: {
+        userId,
+        isActive: true,
+        workspace: { status: PrismaWorkspaceStatus.ACTIVE }
+      },
+      include: { workspace: true },
+      orderBy: { createdAt: "asc" }
+    });
+    return members
+      .map((member) => this.toWorkspace(member.workspace))
+      .sort((left, right) => Number(right.isDefault) - Number(left.isDefault) || left.code.localeCompare(right.code));
+  }
+
+  /**
+   * 校验并解析会话的当前经营空间。
+   *
+   * 传入 workspaceId 时逐项校验（成员关系启用、空间启用、租户匹配）；
+   * 不传时按「默认空间优先，否则第一个可进入空间」解析。
+   * 返回 undefined 表示该账号没有任何可进入空间（如平台管理租户）——
+   * 这不是错误，但经营接口会对此 fail-closed。
+   *
+   * 跨租户由成员关系保证：`workspace_members` 的复合外键已使
+   * 「账号在该空间有成员关系」蕴含两者同租户，因此按 userId 查成员即可，
+   * 不需要也不应该再信任调用方传来的 tenantId。
+   */
+  async resolveSessionWorkspaceId(userId: string, requested?: string): Promise<string | undefined> {
+    const available = await this.listUserWorkspaces(userId);
+    if (!requested) return available.find((item) => item.isDefault)?.id ?? available[0]?.id;
+    const match = available.find((item) => item.id === requested);
+    if (!match) throw new ForbiddenException("无权进入该经营空间，或该空间已冻结/停用");
+    return match.id;
+  }
+
+  /**
+   * 按当前经营空间解析账号权限。
+   *
+   * 需求 3：同一账号可在不同空间拥有不同角色和数据范围。因此成员关系上的
+   * roleId 一旦存在，就**取代**租户级角色参与权限计算；dataScope 同理。
+   * 成员关系没配时沿用租户级默认值（升级兼容层的行为）。
+   */
+  async findWorkspaceScopedUser(userId: string, workspaceId?: string): Promise<SystemUserRow | undefined> {
+    const base = await this.findUserById(userId);
+    if (!base || !workspaceId) return base;
+    const member = await this.prisma.workspaceMember.findFirst({
+      where: { userId, workspaceId, isActive: true },
+      include: { role: { include: { permissions: { include: { permission: true } } } } }
+    });
+    if (!member) return base;
+    const next: SystemUserRow = { ...base };
+    if (member.role) {
+      const role = member.role;
+      const isAll = base.isPlatformAdmin || role.fixedAllPermissions;
+      next.roleIds = [role.id];
+      next.roleNames = [role.isActive ? role.name : `${role.name}（停用）`];
+      next.scope = this.toSharedRoleScope(role.scope);
+      next.permissions = isAll
+        ? ["*"]
+        : [
+            ...new Set([
+              ...role.permissions.map((item) => item.permission.code),
+              ...(((role.buttonPermissions as string[] | null) ?? []) as string[])
+            ])
+          ];
+      next.dataScope = isAll ? "all" : this.toSharedDataScope(role.dataScope);
+    }
+    // 成员关系上的数据范围优先级最高：它是"该账号在本空间"的显式授权。
+    if (member.dataScope) next.dataScope = this.toSharedDataScope(member.dataScope);
+    return next;
+  }
+
+  async setSessionWorkspace(sessionId: string, workspaceId: string | null): Promise<void> {
+    await this.prisma.authSession.update({
+      where: { id: sessionId },
+      data: { currentWorkspaceId: workspaceId }
+    });
   }
 
   async listOrganizations(

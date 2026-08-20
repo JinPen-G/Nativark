@@ -373,6 +373,8 @@ export class PlatformService {
     refreshTokenHash: string;
     expiresAt: Date;
     revokedAt?: Date;
+    /** SPACE-02：内存模式没有经营空间，这里恒为 null，使经营接口 fail-closed。 */
+    currentWorkspaceId?: string | null;
   }>();
 
   private systemRulesConfig: SystemRulesConfig = {
@@ -1862,10 +1864,37 @@ export class PlatformService {
     return user && tenant?.tenantStatus === TenantStatus.Active ? this.toUserRow(user) : undefined;
   }
 
-  createAuthSession(input: { id: string; userId: string; refreshTokenHash: string; expiresAt: Date }) {
+  createAuthSession(input: { id: string; userId: string; refreshTokenHash: string; expiresAt: Date; currentWorkspaceId?: string | null }) {
     if (this.useMysqlDataSource()) return this.platformRepository.createAuthSession(input);
     this.authSessions.set(input.id, { ...input });
     return input;
+  }
+
+  /* ---------- SPACE-02：会话空间上下文 ---------- */
+
+  /**
+   * 内存演示模式没有经营空间（见 requireWorkspaceDataSource 的理由），
+   * 因此这些方法在该模式下返回"无空间"，而不是伪造一个。
+   * 结果是内存模式下经营接口会被 fail-closed 拒绝——这正是期望行为。
+   */
+  async listUserWorkspaces(userId: string) {
+    if (!this.useMysqlDataSource()) return [];
+    return this.platformRepository.listUserWorkspaces(userId);
+  }
+
+  async resolveSessionWorkspaceId(userId: string, requested?: string) {
+    if (!this.useMysqlDataSource()) return undefined;
+    return this.platformRepository.resolveSessionWorkspaceId(userId, requested);
+  }
+
+  async findWorkspaceScopedUser(userId: string, workspaceId?: string) {
+    if (!this.useMysqlDataSource()) return this.findUserById(userId);
+    return this.platformRepository.findWorkspaceScopedUser(userId, workspaceId);
+  }
+
+  async setSessionWorkspace(sessionId: string, workspaceId: string | null) {
+    if (!this.useMysqlDataSource()) return;
+    await this.platformRepository.setSessionWorkspace(sessionId, workspaceId);
   }
 
   getAuthSession(id: string) {

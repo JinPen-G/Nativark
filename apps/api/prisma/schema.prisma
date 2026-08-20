@@ -353,6 +353,7 @@ model BusinessWorkspace {
   /// 前者在租户内必然冲突，后者天然唯一。
   defaultMarker String
   members      WorkspaceMember[]
+  authSessions AuthSession[]
   createdAt    DateTime            @default(now())
   updatedAt    DateTime            @updatedAt
 
@@ -474,12 +475,21 @@ model AuthSession {
   userId           String
   user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   refreshTokenHash String    @unique
+  /// SPACE-02：会话的当前经营空间。**服务端唯一权威**——客户端提交的
+  /// workspaceId 一律忽略，切换必须走 switch 接口重新校验成员资格。
+  ///
+  /// 可空：平台管理租户没有经营空间，其会话合法地没有当前空间。
+  /// 跨租户防护不依赖这里的外键，而依赖 workspace_members 的复合外键：
+  /// 「该账号在该空间有成员关系」已蕴含两者同租户。
+  currentWorkspaceId String?
+  currentWorkspace   BusinessWorkspace? @relation(fields: [currentWorkspaceId], references: [id], onDelete: SetNull)
   expiresAt        DateTime
   revokedAt        DateTime?
   lastUsedAt       DateTime?
   createdAt        DateTime  @default(now())
 
   @@index([userId, expiresAt, revokedAt])
+  @@index([currentWorkspaceId], map: "auth_sessions_workspace_idx")
   @@map("auth_sessions")
 }
 

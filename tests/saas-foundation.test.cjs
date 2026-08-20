@@ -230,6 +230,16 @@ function requestContext(method, url, accessToken) {
 
   const priceOnlyGuard = new ApiAuthGuard({
     async resolveAccessToken() { return { ...demo.user, isPlatformAdmin: false, permissions: ["store-rental:price:manage"] }; },
+    // SPACE-02：守卫改为经 resolveAccessContext 取「账号 + 当前经营空间」。
+    // 这个 stub 模拟"没有任何可进入空间"的账号（hasWorkspaces=false），
+    // 因此空间 fail-closed 不参与本用例，被验证的仍然是权限判定本身。
+    async resolveAccessContext() {
+      return {
+        user: { ...demo.user, isPlatformAdmin: false, permissions: ["store-rental:price:manage"] },
+        workspaceId: undefined,
+        hasWorkspaces: false
+      };
+    },
     async getTenantContext() { return { capabilities: demo.tenant.capabilities }; }
   });
   const pricingWrite = requestContext("POST", "/api/rental/v1/pricing-plans", "price-only");

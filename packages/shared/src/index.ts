@@ -172,6 +172,17 @@ export interface LoginResponse {
   expiresIn: number;
   tenant: TenantContext;
   user: AuthUser;
+  /**
+   * SPACE-02：该账号可进入的经营空间（成员关系启用且空间启用）。
+   * 切换空间时 refreshToken 不变，因此切换响应里它为空串。
+   */
+  workspaces?: BusinessWorkspace[];
+  /** 当前经营空间。平台管理租户没有经营空间时为空。 */
+  currentWorkspaceId?: string;
+}
+
+export interface SwitchWorkspaceRequest {
+  workspaceId: string;
 }
 
 export interface SessionContextResponse {

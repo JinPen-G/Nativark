@@ -675,6 +675,45 @@ async function upsertRolesAndUsers() {
         });
       }
     }
+
+    // SPACE-01/02：空库初始化必须建立与回填迁移**同规则**的默认经营空间与成员关系。
+    //
+    // Seed 直接用 Prisma 写 tenant_rental_profiles，绕过了服务层的 upsertProfile，
+    // 因此不能指望那条路径来建空间；而账号是在档案之后创建的，所以成员关系必须
+    // 在这里、账号都建好之后补齐。缺了这一步，登录解析不到当前经营空间，
+    // 所有经营接口都会被 SPACE-02 的 fail-closed 守卫拒绝。
+    //
+    // 只为拥有品类档案的租户建空间：平台管理租户没有档案，也不该被凭空给一个品类。
+    const rentalProfile = await prisma.tenantRentalProfile.findUnique({ where: { tenantId: tenant.id } });
+    if (rentalProfile) {
+      const workspaceId = `ws_${tenant.id}`;
+      await prisma.businessWorkspace.upsert({
+        where: { id: workspaceId },
+        update: {},
+        create: {
+          id: workspaceId,
+          tenantId: tenant.id,
+          code: "default",
+          name: `${tenant.name} 默认经营空间`,
+          categoryCode: rentalProfile.categoryCode,
+          isDefault: true,
+          defaultMarker: "default"
+        }
+      });
+      for (const user of tenant.users) {
+        await prisma.workspaceMember.upsert({
+          where: { workspaceId_userId: { workspaceId, userId: user.id } },
+          update: {},
+          create: {
+            tenantId: tenant.id,
+            workspaceId,
+            userId: user.id,
+            roleId: user.roleIds[0],
+            isActive: true
+          }
+        });
+      }
+    }
   }
 }
 

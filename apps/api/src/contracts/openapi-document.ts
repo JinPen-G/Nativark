@@ -186,6 +186,10 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     { refreshToken: stringSchema },
     ["refreshToken"]
   ),
+  SwitchWorkspaceRequest: objectOf(
+    { workspaceId: stringSchema },
+    ["workspaceId"]
+  ),
   ChangePasswordRequest: objectOf(
     {
       currentPassword: { type: "string", format: "password" },
@@ -933,6 +937,18 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     permissions: [],
     authRequired: true,
     requestSchema: "ChangePasswordRequest",
+    responseSchema: "LoginResponse"
+  },
+  {
+    // SPACE-02：切换当前经营空间。只接受 workspaceId，其余会话范围从令牌与会话推导。
+    method: "post",
+    path: "/api/auth/switch-workspace",
+    tag: "Auth",
+    operationId: "switchWorkspace",
+    summary: "Switch current business workspace",
+    permissions: [],
+    authRequired: true,
+    requestSchema: "SwitchWorkspaceRequest",
     responseSchema: "LoginResponse"
   },
   {

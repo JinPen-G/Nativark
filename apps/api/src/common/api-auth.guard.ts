@@ -334,7 +334,9 @@ export class ApiAuthGuard implements CanActivate {
 
     const authorization = request.headers.authorization;
     const token = Array.isArray(authorization) ? authorization[0] : authorization;
-    const user = await this.authService.resolveAccessToken(token);
+    const accessContext = await this.authService.resolveAccessContext(token);
+    const user = accessContext?.user;
+    const workspaceId = accessContext?.workspaceId;
 
     if (!user) {
       throw new UnauthorizedException("请先登录");
@@ -380,10 +382,31 @@ export class ApiAuthGuard implements CanActivate {
       }
     }
 
+    // SPACE-02 fail-closed：经营域接口必须有已验证的当前经营空间。
+    //
+    // 只拦经营域（/rental/v1 与 /store-rental），不拦 /auth 与 /platform：
+    // 登录、切换空间、以及租户管理员维护空间本身，都发生在"还没有空间"的时刻。
+    //
+    // 这里刻意不回退到默认空间：默认空间只是升级兼容层，回退会让一个本该被拒绝的
+    // 无空间会话静默拿到某个空间的数据——与 P0-01 的默认租户回退同型。
+    // 例外：品类定义是全局参考数据（且 SaaS 平台管理员被显式允许访问），
+    // 它不属于某个经营空间，要求空间会让平台管理员无法读取品类目录。
+    const workspaceExemptPath = path === "/rental/v1/categories";
+    if (
+      !workspaceId &&
+      accessContext.hasWorkspaces &&
+      !workspaceExemptPath &&
+      (path.startsWith("/rental/") || path.startsWith("/store-rental/"))
+    ) {
+      throw new ForbiddenException("当前会话没有经营空间，请先选择经营空间");
+    }
+
     enterRequestIdentity({
       tenantId: user.tenantId,
       userId: user.id,
-      isSaasAdmin: Boolean(user.isSaasAdmin)
+      isSaasAdmin: Boolean(user.isSaasAdmin),
+      // 只从会话写入，绝不读取请求体或查询参数里的 workspaceId。
+      workspaceId
     });
     request.user = user;
     return true;

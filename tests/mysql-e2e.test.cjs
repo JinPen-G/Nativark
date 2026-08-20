@@ -2631,6 +2631,151 @@ async function main() {
   assert.deepEqual(guardFailures, [], `空间隔离约束必须在库层拒绝：${guardFailures.join("；")}`);
   ok("空间隔离由库层保证：跨租户成员、伪造 tenantId 绕过、重复默认空间三种写入均被数据库拒绝");
 
+  console.log("== 52. SPACE-02 会话空间上下文与切换 ==");
+  // 登录必须返回可进入空间与当前空间；当前空间取自成员关系，不是客户端说了算。
+  const spDemo = await login("demo", "admin", DEMO_PASSWORD);
+  assert.ok(Array.isArray(spDemo.workspaces) && spDemo.workspaces.length >= 1, `登录必须返回可进入空间列表: ${JSON.stringify(spDemo.workspaces)}`);
+  assert.ok(spDemo.currentWorkspaceId, "登录必须解析出当前经营空间");
+  assert.equal(
+    spDemo.currentWorkspaceId,
+    `ws_tenant_001`,
+    `默认空间优先：当前空间应为 ws_tenant_001，实际 ${spDemo.currentWorkspaceId}`
+  );
+  // 当前空间必须落到会话行上——它才是权威，令牌里的 wid 只是提示。
+  assert.equal(
+    readCount(
+      `SELECT COUNT(*) FROM \`auth_sessions\` WHERE \`currentWorkspaceId\`='${spDemo.currentWorkspaceId}' AND \`revokedAt\` IS NULL;`
+    ) >= 1,
+    true,
+    "当前空间必须持久化到会话行"
+  );
+
+  // 为切换准备第二个空间：同租户、不同品类，并把 demo 的 admin 加为成员。
+  const spSecond = await request(
+    "POST",
+    "/api/platform/workspaces",
+    { code: "camping-biz", name: "露营经营空间", categoryCode: "camping" },
+    spDemo.accessToken
+  );
+  assert.equal(spSecond.status, 201, `创建第二个经营空间失败: ${JSON.stringify(spSecond.body).slice(0, 200)}`);
+  assert.equal(spSecond.body.data.categoryCode, "camping", "第二个空间应绑定 camping 品类");
+  assert.equal(spSecond.body.data.isDefault, false, "新建空间不得是默认空间");
+  const spSecondId = spSecond.body.data.id;
+
+  // 尚未加入成员前，切换必须被拒绝（未授权空间）。
+  const spDenied = await request(
+    "POST",
+    "/api/auth/switch-workspace",
+    { workspaceId: spSecondId },
+    spDemo.accessToken
+  );
+  assert.equal(spDenied.status, 403, `未加入成员就切换必须 403，实际 ${spDenied.status}: ${JSON.stringify(spDenied.body).slice(0, 160)}`);
+
+  // 加入成员后切换成功，且会话行随之更新。
+  const spMember = await request(
+    "PUT",
+    `/api/platform/workspaces/${spSecondId}/members`,
+    { userId: spDemo.user.id, dataScope: "store" },
+    spDemo.accessToken
+  );
+  assert.equal(spMember.status, 200, `加入空间成员失败: ${JSON.stringify(spMember.body).slice(0, 200)}`);
+  const spSwitched = await request(
+    "POST",
+    "/api/auth/switch-workspace",
+    { workspaceId: spSecondId },
+    spDemo.accessToken
+  );
+  assert.equal(spSwitched.status, 201, `切换空间失败: ${JSON.stringify(spSwitched.body).slice(0, 200)}`);
+  assert.equal(spSwitched.body.data.currentWorkspaceId, spSecondId, "切换后当前空间必须是目标空间");
+  // 成员关系上的数据范围必须生效（需求 3：同一账号在不同空间可有不同范围）。
+  assert.equal(
+    spSwitched.body.data.user.dataScope,
+    "store",
+    `切换后数据范围必须按空间生效，实际 ${spSwitched.body.data.user.dataScope}`
+  );
+
+  // 跨租户空间不可切换：拿 tenant_002 的空间去切 tenant_001 的会话。
+  const spOtherWs = readScalar("SELECT `id` FROM `business_workspaces` WHERE `tenantId`='tenant_002' LIMIT 1;");
+  const spCross = await request(
+    "POST",
+    "/api/auth/switch-workspace",
+    { workspaceId: spOtherWs },
+    spSwitched.body.data.accessToken
+  );
+  assert.equal(spCross.status, 403, `跨租户切换必须 403，实际 ${spCross.status}`);
+
+  // 停用空间不可切换。
+  const spFrozen = await request("PUT", `/api/platform/workspaces/${spSecondId}`, { status: "disabled" }, spDemo.accessToken);
+  assert.equal(spFrozen.status, 200, `停用空间失败: ${JSON.stringify(spFrozen.body).slice(0, 160)}`);
+  const spToDisabled = await request(
+    "POST",
+    "/api/auth/switch-workspace",
+    { workspaceId: spSecondId },
+    spDemo.accessToken
+  );
+  assert.equal(spToDisabled.status, 403, `切换到已停用空间必须 403，实际 ${spToDisabled.status}`);
+  // 已停用空间也不得出现在可进入列表里。
+  const spRelogin = await login("demo", "admin", DEMO_PASSWORD);
+  assert.equal(
+    spRelogin.workspaces.some((row) => row.id === spSecondId),
+    false,
+    "已停用空间不得出现在可进入空间列表"
+  );
+  // 复原，避免影响后续断言组。
+  await request("PUT", `/api/platform/workspaces/${spSecondId}`, { status: "active" }, spDemo.accessToken);
+  ok(
+    "会话空间上下文：登录解析默认空间并落库、未授权/跨租户/已停用空间切换均 403、" +
+      "加入成员后可切换且成员级数据范围生效、停用空间不出现在可进入列表"
+  );
+
+  console.log("== 53. SPACE-02 经营接口缺少空间必须 fail-closed ==");
+  // 平台管理租户没有任何经营空间成员关系（SPACE-01 刻意不猜测归属），
+  // 因此它的会话访问经营接口必须被拒绝，而不是回退到某个默认空间。
+  const spPlatformWs = readCount(
+    "SELECT COUNT(*) FROM `workspace_members` m INNER JOIN `User` u ON u.`id`=m.`userId` INNER JOIN `Tenant` t ON t.`id`=u.`tenantId` WHERE t.`code`='platform';"
+  );
+  assert.equal(spPlatformWs, 0, "前置条件：平台管理租户不应有经营空间成员关系");
+  // 直接把会话的当前空间清空，模拟"无空间会话"访问经营接口。
+  const spSession = readScalar(
+    `SELECT \`id\` FROM \`auth_sessions\` WHERE \`currentWorkspaceId\`='ws_tenant_001' AND \`revokedAt\` IS NULL ORDER BY \`createdAt\` DESC LIMIT 1;`
+  );
+  const spProbe = await login("demo", "admin", DEMO_PASSWORD);
+  const spProbeSession = readScalar(
+    "SELECT `id` FROM `auth_sessions` WHERE `revokedAt` IS NULL ORDER BY `createdAt` DESC LIMIT 1;"
+  );
+  // 先确认带空间时经营接口正常。
+  const spBefore = await request("GET", "/api/rental/v1/item-groups", null, spProbe.accessToken);
+  assert.equal(spBefore.status, 200, `带空间时经营接口应正常: ${spBefore.status}`);
+  mysqlQuery(`UPDATE \`auth_sessions\` SET \`currentWorkspaceId\`=NULL WHERE \`id\`='${spProbeSession}';`);
+  const spAfter = await request("GET", "/api/rental/v1/item-groups", null, spProbe.accessToken);
+  assert.equal(
+    spAfter.status,
+    403,
+    `无空间会话访问经营接口必须 403（不得回退到默认空间），实际 ${spAfter.status}: ${JSON.stringify(spAfter.body).slice(0, 160)}`
+  );
+  // 但 /auth 与 /platform 仍必须可用——否则用户无法选择空间、管理员无法维护空间。
+  const spAuthStillOk = await request("GET", "/api/auth/me", null, spProbe.accessToken);
+  assert.equal(spAuthStillOk.status, 200, `无空间会话仍须能访问 /auth/me，实际 ${spAuthStillOk.status}`);
+  const spPlatformStillOk = await request("GET", "/api/platform/workspaces", null, spProbe.accessToken);
+  assert.equal(
+    spPlatformStillOk.status,
+    200,
+    `无空间会话仍须能列出可管理空间，实际 ${spPlatformStillOk.status}`
+  );
+  // 客户端不能用请求体/查询参数伪造空间范围。
+  const spForge = await request(
+    "GET",
+    `/api/rental/v1/item-groups?workspaceId=ws_tenant_001`,
+    null,
+    spProbe.accessToken
+  );
+  assert.equal(spForge.status, 403, `客户端参数不得覆盖会话空间范围，实际 ${spForge.status}`);
+  assert.ok(spSession, "前置条件：应存在带空间的会话行");
+  ok(
+    "经营接口 fail-closed：无空间会话访问 /rental/v1 返回 403 且不回退默认空间，" +
+      "查询参数伪造 workspaceId 无效，/auth 与 /platform 仍可用以便选择空间"
+  );
+
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);
 }
 
