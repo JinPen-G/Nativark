@@ -54,6 +54,29 @@ export class RentalIdempotentActionService {
     @Inject(RentalIdempotencyRepository) private readonly idempotency: RentalIdempotencyStore
   ) {}
 
+  /**
+   * 返回值带 `replayed` 标记：调用方据此跳过通知等**外部副作用**。
+   *
+   * 通知刻意不放进事务：它是对外部系统的副作用（当前是 mock adapter，将来是真 provider），
+   * 事务回滚撤不回已发出的短信。正确边界是"只在首次真正执行时发"，
+   * 因此由执行器告知本次是否为回放，而不是把副作用拖进事务。
+   */
+  async executeWithReplayFlag<T>(input: IdempotentActionInput<T>): Promise<{ result: T; replayed: boolean }> {
+    let replayed = false;
+    const result = await this.execute({
+      ...input,
+      // 以"是否走了回放"判定，而不是以"run 有没有被调用"判定：
+      // run 被调用不代表提交成功——事务内若发现同键已提交会回滚并转入回放，
+      // 那种情况下 run 跑过但结果被丢弃，通知不该再发一次。
+      replay: async (response) => {
+        const value = await input.replay(response);
+        if (value !== undefined) replayed = true;
+        return value;
+      }
+    });
+    return { result, replayed };
+  }
+
   async execute<T>(input: IdempotentActionInput<T>): Promise<T> {
     const key = input.key?.trim() || input.fallbackKey;
     const fingerprint = requestFingerprint(input.request);

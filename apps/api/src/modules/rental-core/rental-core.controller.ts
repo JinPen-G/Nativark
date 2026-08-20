@@ -101,7 +101,7 @@ export class RentalCoreController {
   }
   @Post("orders/:id/confirm") async confirm(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
     const tenantId = req.user.tenantId;
-    const order = await this.idempotent.execute({
+    const { result: order, replayed } = await this.idempotent.executeWithReplayFlag({
       tenantId,
       action: "order.confirm",
       key: idempotencyKeyOf(req),
@@ -118,7 +118,8 @@ export class RentalCoreController {
       }
     });
     await this.business.redeemCoupon(tenantId, this.context(tenantId), id);
-    await this.emitOrderEvent(tenantId, "order.confirmed", order);
+    // 回放时跳过通知：通知是外部副作用，同键重试不该让客户收到第二条短信。
+    if (!replayed) await this.emitOrderEvent(tenantId, "order.confirmed", order);
     return this.committed(tenantId, order);
   }
   @Post("orders/:id/allocate") async allocate(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
@@ -143,7 +144,7 @@ export class RentalCoreController {
     const current = await this.service.getOrder(req.user.tenantId, id);
     const quote = this.business.getQuote(req.user.tenantId, context, current.quoteId);
     const charge = this.business.calculateCancellationCharge(req.user.tenantId, context, quote, undefined, Boolean(body.weatherException));
-    const order = await this.idempotent.execute({
+    const { result: order, replayed: cancelReplayed } = await this.idempotent.executeWithReplayFlag({
       tenantId: req.user.tenantId,
       action: "order.cancel",
       key: idempotencyKeyOf(req),
@@ -159,7 +160,7 @@ export class RentalCoreController {
       }
     });
     await this.business.releaseCoupon(req.user.tenantId, this.context(req.user.tenantId), id);
-    await this.emitOrderEvent(req.user.tenantId, "order.cancelled", order);
+    if (!cancelReplayed) await this.emitOrderEvent(req.user.tenantId, "order.cancelled", order);
     return this.committed(req.user.tenantId, order);
   }
   @Get("inspection-templates") templates(@Req() req: AuthenticatedRequest, @Query("stage") stage?: "pickup" | "return") { return this.service.listInspectionTemplates(req.user.tenantId, stage); }

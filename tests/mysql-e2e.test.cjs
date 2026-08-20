@@ -1927,6 +1927,69 @@ async function main() {
   );
   ok(`奖励幂等以库为准：重启清空内存后同键再发，流水仍为 ${rewardsBeforeRestart} 条、积分仍为 88`);
 
+  console.log("== 43. RC-04 订单动作重试不得重复发通知 ==");
+  // emitOrderEvent 在幂等执行器之外调用，所以要验证：同键重试时订单只推进一次，
+  // 通知也只发一条。
+  //
+  // 样本必须挑「有 recipient 的 draft 订单」——emitNotificationEvent 在
+  // recipient 为空时直接返回空数组（取 contactPhone ?? customerId）。
+  // 早前只按 status='draft' 挑，取到的订单两者皆空，通知新增 0 条，
+  // 断言失败的原因是样本选错而非产品缺陷。
+  //
+  // 本节不新造订单：它位于「发布新规则」之后，旧定价计划已退役，再报价会 409。
+  const demoNotify = await login("demo", "admin", DEMO_PASSWORD);
+  const notifiableDraft =
+    "FROM `rental_orders` WHERE `tenantId`='tenant_001' AND `status`='draft'" +
+    " AND (`contactPhone` IS NOT NULL OR `customerId` IS NOT NULL)";
+  assert.ok(
+    readCount(`SELECT COUNT(*) ${notifiableDraft};`) > 0,
+    "前置条件：需要一个带 contactPhone 或 customerId 的 draft 订单"
+  );
+  const draftOrderId = readScalar(`SELECT \`id\` ${notifiableDraft} ORDER BY \`createdAt\` DESC LIMIT 1;`);
+  // readScalar 取输出最后一行，查询无结果时可能拿到表头，这里回查确认。
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_orders\` WHERE \`id\`='${draftOrderId}' AND \`status\`='draft';`),
+    1,
+    `取到的 id 不是有效 draft 订单: ${draftOrderId}`
+  );
+  const retryKey = `e2e-confirm-retry-${draftOrderId}`;
+  const notifyBefore = readCount(
+    "SELECT COUNT(*) FROM `rental_notification_logs` WHERE `tenantId`='tenant_001' AND `eventCode`='order.confirmed';"
+  );
+  const retryA = await request(
+    "POST",
+    `/api/rental/v1/orders/${draftOrderId}/confirm`,
+    {},
+    demoNotify.accessToken,
+    { "Idempotency-Key": retryKey }
+  );
+  assert.equal(retryA.status, 201, `首次确认应成功: ${JSON.stringify(retryA.body)}`);
+  const retryB = await request(
+    "POST",
+    `/api/rental/v1/orders/${draftOrderId}/confirm`,
+    {},
+    demoNotify.accessToken,
+    { "Idempotency-Key": retryKey }
+  );
+  // 同键重试必须幂等返回同一订单，而不是因状态已变成 reserved 而报 409。
+  assert.equal(retryB.status, 201, `同键重试应幂等返回: ${JSON.stringify(retryB.body)}`);
+  assert.equal(retryB.body.data.id, retryA.body.data.id, "重试应返回同一订单");
+  assert.equal(retryB.body.data.status, "reserved", "重试返回的状态应是已确认");
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_orders\` WHERE \`id\`='${draftOrderId}' AND \`status\`='reserved';`),
+    1,
+    "订单应恰好处于已确认状态，只推进一次"
+  );
+  const notifyAfter = readCount(
+    "SELECT COUNT(*) FROM `rental_notification_logs` WHERE `tenantId`='tenant_001' AND `eventCode`='order.confirmed';"
+  );
+  assert.equal(
+    notifyAfter,
+    notifyBefore + 1,
+    `同键重试确认只能产生一条 order.confirmed 通知，实际新增 ${notifyAfter - notifyBefore} 条`
+  );
+  ok("成功动作重试幂等且不重复发通知：同键确认两次均返回 reserved，order.confirmed 通知仅新增 1 条");
+
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);
 }
 

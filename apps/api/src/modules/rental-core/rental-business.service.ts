@@ -527,7 +527,16 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   }
 
   async redeemCoupon(tenantId: string, context: BusinessContext, orderId: string) {
-    const coupon = this.state(tenantId, context).customerCoupons.find((item) => item.lockedOrderId === orderId);
+    const coupons = this.state(tenantId, context).customerCoupons;
+    // 已按本订单核销过：属于同一次意图的重复核销，幂等返回而不是报错。
+    //
+    // 订单动作被幂等执行器保护后，重试会走回放路径正常返回，但控制器随后仍会
+    // 调用本方法；若这里对已核销状态抛 409，整个重试请求就失败了——
+    // 幂等保护了订单本体，却被它的副作用破功。RC-04 要求的正是"重复请求不重复核销"，
+    // 而不是"重复请求报错"。
+    const alreadyRedeemed = coupons.find((item) => item.redeemedOrderId === orderId && item.status === "redeemed");
+    if (alreadyRedeemed) return alreadyRedeemed;
+    const coupon = coupons.find((item) => item.lockedOrderId === orderId);
     if (!coupon) return undefined;
     if (coupon.status !== "locked") throw new ConflictException("优惠券不是锁定状态");
     coupon.status = "redeemed"; coupon.redeemedOrderId = orderId; coupon.redeemedAt = stamp();
