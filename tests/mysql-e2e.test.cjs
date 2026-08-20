@@ -168,7 +168,7 @@ function fail(message, detail) {
 
 /* ---------- HTTP 与 API 子进程 ---------- */
 
-function request(method, requestPath, body, token) {
+function request(method, requestPath, body, token, extraHeaders) {
   return new Promise((resolve, reject) => {
     const payload = body ? JSON.stringify(body) : null;
     const url = new URL(requestPath, API_BASE);
@@ -183,7 +183,8 @@ function request(method, requestPath, body, token) {
         headers: {
           "Content-Type": "application/json",
           Connection: "close",
-          ...(token ? { Authorization: `Bearer ${token}` } : {})
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(extraHeaders || {})
         }
       },
       (res) => {
@@ -1456,6 +1457,233 @@ async function main() {
     `快照已降级：清空快照中的券/奖励/报价后重启，仍从库恢复出 ${couponsAfterTamper.length} 张券与 ${rewardsAfterTamper.length} 条奖励流水`
   );
 
+  console.log("== RC-04. 订单创建业务幂等 ==");
+  // 幂等只能用真实并发与重放来证明：静态检查看不出"重复请求是否重复占了库存"。
+  const idemDemo = await login("demo", "admin", DEMO_PASSWORD);
+  const idemLoc = (await request("GET", "/api/rental/v1/locations", null, idemDemo.accessToken)).body.data[0];
+  const idemGroups = (await request("GET", "/api/rental/v1/item-groups", null, idemDemo.accessToken)).body.data
+    .filter((row) => row.inventoryMode === "serialized" && row.status === "enabled");
+  assert.ok(idemGroups.length, "缺少可用于幂等验证的序列化商品组");
+  const idemStart = new Date(Date.now() + 90 * 86400000).toISOString();
+  const idemEnd = new Date(Date.now() + 91 * 86400000).toISOString();
+  const idemLines = [{ itemGroupId: idemGroups[0].id, quantity: 1 }];
+  const availableFor = async () =>
+    (await request(
+      "POST",
+      "/api/rental/v1/availability",
+      { locationId: idemLoc.id, startAt: idemStart, endAt: idemEnd, lines: idemLines },
+      idemDemo.accessToken
+    )).body.data.lines[0].availableQuantity;
+
+  const idemBody = (quoteId) => ({
+    quoteId,
+    customerType: "personal",
+    customerName: "E2E幂等客户",
+    fulfillmentMode: "store_pickup_return",
+    fulfillmentLocationId: idemLoc.id,
+    startAt: idemStart,
+    endAt: idemEnd,
+    lines: idemLines
+  });
+  const newQuote = async () =>
+    (await request(
+      "POST",
+      "/api/rental/v1/quotes",
+      { customerType: "personal", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: idemLoc.id, startAt: idemStart, endAt: idemEnd, lines: idemLines },
+      idemDemo.accessToken
+    )).body.data;
+
+  // 本节要造多张订单（串行重放 / 并发同键 / 通知取样 / 同键异体并发），
+  // 而序列化库存的容量就是该地点下的可用资产数，固定夹具只够 3 张。
+  // 先补两台资产，避免后面的用例因"库存不足"而在错误的地方失败——
+  // 那种失败会被误读成幂等缺陷。serialNo 是 camera 品类唯一的资产级必填属性。
+  for (let index = 0; index < 2; index += 1) {
+    const extraAsset = await request(
+      "POST",
+      "/api/rental/v1/assets",
+      {
+        itemGroupId: idemGroups[0].id,
+        locationId: idemLoc.id,
+        assetNo: `E2E-IDEM-CAM-00${index}`,
+        attributes: { serialNo: `E2E-IDEM-SN-00${index}` }
+      },
+      idemDemo.accessToken
+    );
+    assert.equal(extraAsset.status, 201, `幂等用例补充资产失败: ${JSON.stringify(extraAsset.body).slice(0, 200)}`);
+  }
+
+  // 1) 串行重放同一个 Idempotency-Key：必须返回同一张订单，且库存只被占一次。
+  const beforeSerial = await availableFor();
+  const q1 = await newQuote();
+  const key1 = `e2e-idem-${q1.id}`;
+  const first = await request("POST", "/api/rental/v1/orders", idemBody(q1.id), idemDemo.accessToken, { "Idempotency-Key": key1 });
+  assert.equal(first.status, 201, `幂等首次下单失败: ${JSON.stringify(first.body).slice(0, 200)}`);
+  const replay = await request("POST", "/api/rental/v1/orders", idemBody(q1.id), idemDemo.accessToken, { "Idempotency-Key": key1 });
+  assert.equal(replay.status, 201, `幂等重放应成功返回既有订单: ${JSON.stringify(replay.body).slice(0, 200)}`);
+  assert.equal(replay.body.data.id, first.body.data.id, "同幂等键重放必须返回同一张订单");
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_orders\` WHERE \`quoteId\`='${q1.id}';`),
+    1,
+    "同幂等键重放不得产生第二张订单"
+  );
+  assert.equal(await availableFor(), beforeSerial - 1, "重放不得二次占用库存");
+
+  // 2) 同键但请求体不同：必须报冲突，而不是静默返回上一次的订单。
+  const tampered = { ...idemBody(q1.id), customerName: "E2E幂等客户-改名" };
+  const conflict = await request("POST", "/api/rental/v1/orders", tampered, idemDemo.accessToken, { "Idempotency-Key": key1 });
+  assert.equal(conflict.status, 409, `同键不同请求体必须 409，实际 ${conflict.status}`);
+
+  // 3) 并发同键：**每个**请求都必须成功（一个执行、其余回放），且指向同一张订单。
+  //    早前只断言「至少一个成功」，输家返回 409 也能过——而输家 409 恰恰是缺陷：
+  //    先到者会先消费掉报价，后到者在事务内的报价校验就被拒，那一步位于事务末尾的
+  //    幂等重查之前，因此它永远走不到回放。
+  //
+  //    刻意用 6 路而非 2 路：两路请求很难稳定制造出「后到者已过预检、又在事务中段
+  //    撞上已消费报价」的交错，2 路时该分支常常根本不被走到。提高并发度提高命中率。
+  //    断言本身在任何交错下都成立——同键同请求体就该拿到同一张订单，绝不该 409。
+  const CONCURRENT_SAME_KEY = 6;
+  const beforeConcurrent = await availableFor();
+  const q2 = await newQuote();
+  const key2 = `e2e-idem-concurrent-${q2.id}`;
+  const sameKeyResults = await Promise.all(
+    Array.from({ length: CONCURRENT_SAME_KEY }, () =>
+      request("POST", "/api/rental/v1/orders", idemBody(q2.id), idemDemo.accessToken, { "Idempotency-Key": key2 })
+    )
+  );
+  const created = sameKeyResults.filter((res) => res.status === 201);
+  assert.equal(
+    created.length,
+    CONCURRENT_SAME_KEY,
+    `并发同键 ${CONCURRENT_SAME_KEY} 个请求都应成功（一个执行、其余回放），实际状态 ` +
+      `${sameKeyResults.map((res) => res.status).join("/")}；首个非 201 响应体: ` +
+      `${JSON.stringify((sameKeyResults.find((res) => res.status !== 201) || {}).body ?? null).slice(0, 200)}`
+  );
+  const ids = new Set(created.map((res) => res.body.data.id));
+  assert.equal(ids.size, 1, "并发同键的成功响应必须指向同一张订单");
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_orders\` WHERE \`quoteId\`='${q2.id}';`),
+    1,
+    "并发同键不得产生两张订单"
+  );
+  assert.equal(await availableFor(), beforeConcurrent - 1, "并发同键只应占用一次库存");
+
+  // 3b) 同键但请求体不同且**并发**：任何请求都不得拿到别人的订单。
+  //     顺序场景由 2) 覆盖（事务外预检里有指纹校验），但并发时后到者会撞唯一约束
+  //     落进 P2002 分支——该分支此前不比对指纹，会把先到者的订单当成自己的结果返回。
+  //     断言用「返回的 customerName 必须等于自己提交的」，这样即使某次交错走的是
+  //     预检路径（正确地 409），断言依然成立，不会变成靠运气过的绿灯。
+  const q2b = await newQuote();
+  const key2b = `e2e-idem-samekey-diffbody-${q2b.id}`;
+  const distinctNames = ["E2E并发甲", "E2E并发乙", "E2E并发丙", "E2E并发丁"];
+  const diffBodyResults = await Promise.all(
+    distinctNames.map((customerName) =>
+      request(
+        "POST",
+        "/api/rental/v1/orders",
+        { ...idemBody(q2b.id), customerName },
+        idemDemo.accessToken,
+        { "Idempotency-Key": key2b }
+      ).then((res) => ({ customerName, res }))
+    )
+  );
+  for (const { customerName, res } of diffBodyResults) {
+    if (res.status !== 201) continue;
+    assert.equal(
+      res.body.data.customerName,
+      customerName,
+      `同键不同请求体并发时，请求「${customerName}」拿到了别人的订单「${res.body.data.customerName}」——` +
+        `P2002 回放前未比对指纹`
+    );
+  }
+  assert.equal(
+    diffBodyResults.filter(({ res }) => res.status === 201).length,
+    1,
+    `同键不同请求体并发必须恰好一个成功，实际 ${diffBodyResults.map(({ res }) => res.status).join("/")}`
+  );
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_orders\` WHERE \`quoteId\`='${q2b.id}';`),
+    1,
+    "同键不同请求体并发不得产生多张订单"
+  );
+
+  // 4) 幂等记录必须落库且带正确租户戳，否则重启后重放会再次建单。
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_order_idempotency_records\` WHERE \`idempotencyKey\`='${key1}' AND \`tenantId\`='tenant_001';`),
+    1,
+    "幂等记录必须落库并带租户戳"
+  );
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_order_idempotency_records\` WHERE \`orderId\`='${first.body.data.id}';`),
+    1,
+    "幂等记录必须回填 orderId 以便按单追溯"
+  );
+  // 5) 下单重放不得重复发「订单已创建」通知。
+  //    样本必须带 contactPhone：emitOrderEvent 的收件人取 contactPhone ?? customerId，
+  //    两者皆空时 emitNotificationEvent 直接返回，通知数恒为 0，断言会变成空转。
+  //    contactPhone 不参与报价与订单的一致性校验，只加在订单体上不会被拒。
+  const q3 = await newQuote();
+  const key3 = `e2e-idem-notify-${q3.id}`;
+  const notifyBody = { ...idemBody(q3.id), contactPhone: "13900000007" };
+  const createdNotifyBefore = readCount(
+    "SELECT COUNT(*) FROM `rental_notification_logs` WHERE `tenantId`='tenant_001' AND `eventCode`='order.created';"
+  );
+  const n1 = await request("POST", "/api/rental/v1/orders", notifyBody, idemDemo.accessToken, { "Idempotency-Key": key3 });
+  assert.equal(n1.status, 201, `带手机号下单应成功: ${JSON.stringify(n1.body).slice(0, 200)}`);
+  const createdNotifyOnce = readCount(
+    "SELECT COUNT(*) FROM `rental_notification_logs` WHERE `tenantId`='tenant_001' AND `eventCode`='order.created';"
+  );
+  assert.equal(
+    createdNotifyOnce,
+    createdNotifyBefore + 1,
+    `前置条件：首次下单必须真的发出一条 order.created 通知，否则本节无区分力（实际新增 ${createdNotifyOnce - createdNotifyBefore} 条）`
+  );
+  const n2 = await request("POST", "/api/rental/v1/orders", notifyBody, idemDemo.accessToken, { "Idempotency-Key": key3 });
+  assert.equal(n2.status, 201, `同键重放应返回既有订单: ${JSON.stringify(n2.body).slice(0, 200)}`);
+  assert.equal(n2.body.data.id, n1.body.data.id, "同键重放必须返回同一张订单");
+  const createdNotifyAfter = readCount(
+    "SELECT COUNT(*) FROM `rental_notification_logs` WHERE `tenantId`='tenant_001' AND `eventCode`='order.created';"
+  );
+  assert.equal(
+    createdNotifyAfter,
+    createdNotifyOnce,
+    `下单重放不得再发 order.created 通知，实际又新增 ${createdNotifyAfter - createdNotifyOnce} 条`
+  );
+
+  // 6) 同键并发**确认**：测的是幂等执行器，而 3) 测的是创建路径。
+  //    加了订单行锁后，后到者拿锁时会读到已推进的状态，状态机据此给出 409——
+  //    但两个请求本是同一次意图，正确结果是回放。用 q1 的订单（此时仍是 draft，
+  //    且无 contactPhone，不会占用第 43、44 节需要的可通知样本）。
+  const raceConfirmId = first.body.data.id;
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_orders\` WHERE \`id\`='${raceConfirmId}' AND \`status\`='draft';`),
+    1,
+    `前置条件：q1 的订单应仍为 draft: ${raceConfirmId}`
+  );
+  const raceConfirmKey = `e2e-confirm-race-${raceConfirmId}`;
+  const [cf1, cf2] = await Promise.all([
+    request("POST", `/api/rental/v1/orders/${raceConfirmId}/confirm`, {}, idemDemo.accessToken, {
+      "Idempotency-Key": raceConfirmKey
+    }),
+    request("POST", `/api/rental/v1/orders/${raceConfirmId}/confirm`, {}, idemDemo.accessToken, {
+      "Idempotency-Key": raceConfirmKey
+    })
+  ]);
+  assert.equal(
+    [cf1, cf2].filter((res) => res.status === 201).length,
+    2,
+    `同键并发确认两个请求都应成功（一个执行、一个回放），实际 ${cf1.status}/${cf2.status}: ` +
+      `${JSON.stringify(cf1.body).slice(0, 120)} | ${JSON.stringify(cf2.body).slice(0, 120)}`
+  );
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_orders\` WHERE \`id\`='${raceConfirmId}' AND \`status\`='reserved';`),
+    1,
+    "同键并发确认后订单必须恰好处于已确认状态"
+  );
+
+  ok(
+    `订单创建幂等：串行重放返回同一单且库存只占一次、同键改请求体 409、6 路同键并发均回放同一单、重放不重复发通知、幂等记录落库带租户戳`
+  );
+
   console.log("== 22. RC-01 整条业务快照行丢失后仍从规范化表恢复 ==");
   // 第 21 节只清空快照里的数组，快照行本身还在，因此内存状态仍能由它建出来。
   // 那测不出真正的风险：若整条快照行丢失，onApplicationBootstrap 曾因"内存里没有该租户
@@ -1778,6 +2006,226 @@ async function main() {
   assert.equal(couponsAfterConfigLoss.length, couponsBeforeConfigLoss, "定价和规则缺失不得阻断客户券事实恢复");
   assert.equal(rewardsAfterConfigLoss.length, rewardsBeforeConfigLoss, "定价和规则缺失不得阻断奖励事实恢复");
   ok("品类恢复：业务快照、定价和规则同时缺失时，仍从核心租户档案装载业务事实");
+
+  console.log("== 41. RC-04 通用租赁域审计事件 ==");
+  // 审计写入有 try/catch 兜底（不阻断业务），因此 E2E 全绿并不能证明审计落库。
+  // 必须直查库：此前拦截器只放行 /platform 与 /store-rental，
+  // /rental/v1 的全部变更动作没有任何审计记录。
+  const rentalAudits = readCount(
+    "SELECT COUNT(*) FROM `OperationLog` WHERE `action` LIKE 'http.post.rental.%';"
+  );
+  assert.ok(rentalAudits > 0, `通用租赁域的变更动作必须产生审计记录，实际 ${rentalAudits} 条`);
+  // 订单动作必须能按订单检索，否则无法回溯单笔订单的操作链。
+  const auditsWithOrder = readCount(
+    "SELECT COUNT(*) FROM `OperationLog` o JOIN `rental_orders` r ON r.`id`=o.`rentalOrderId`;"
+  );
+  assert.ok(auditsWithOrder > 0, `订单动作审计必须关联到真实通用租赁订单，实际 ${auditsWithOrder} 条`);
+  // targetType 必须解析成资源名而不是版本段：早前 /rental/v1/... 会被解析成
+  // targetType="rental"、targetId="v1"，审计无法按对象检索。
+  const badTarget = readCount(
+    "SELECT COUNT(*) FROM `OperationLog` WHERE `action` LIKE 'http.%.rental.%' AND JSON_UNQUOTE(JSON_EXTRACT(`detail`,'$.targetId'))='v1';"
+  );
+  assert.equal(badTarget, 0, "审计的 targetId 不得是版本段 v1");
+  ok(`通用租赁域审计已落库：${rentalAudits} 条动作记录，其中 ${auditsWithOrder} 条关联到真实订单，targetId 未误取版本段`);
+
+  console.log("== 42. RC-04 奖励幂等以库为准（跨重启仍成立）==");
+  // 早前奖励判重只查内存 rewardLedger：库上虽有 (tenantId, idempotencyKey) 唯一约束，
+  // 但那只会在写入时抛错，而不是幂等返回既有流水。缓存冷启动或多实例部署下，
+  // 重复发放会变成 500 而非幂等。
+  //
+  // 重启会清空内存流水，因此"重启后用同一幂等键再发一次"能直接证伪内存判重：
+  // 若仍依赖内存，这里会新增一条流水或直接报错。
+  const rewardsBeforeRestart = readCount(
+    "SELECT COUNT(*) FROM `rental_reward_ledger_entries` WHERE `idempotencyKey` LIKE 'e2e:reward:once%';"
+  );
+  assert.ok(rewardsBeforeRestart > 0, "前置条件：应已存在该幂等键的奖励流水");
+  await stopApi();
+  startApi();
+  if (!(await waitHealth())) fail("奖励幂等校验的 API 重启超时");
+  const demoReward = await login("demo", "admin", DEMO_PASSWORD);
+  const regrant = await request(
+    "POST",
+    "/api/rental/v1/rewards/grant",
+    { customerId: "e2e_reward_member", triggerType: "registration", idempotencyKey: "e2e:reward:once" },
+    demoReward.accessToken
+  );
+  assert.equal(regrant.status, 201, `重启后同键发放应幂等返回既有流水: ${JSON.stringify(regrant.body)}`);
+  assert.equal(
+    readCount("SELECT COUNT(*) FROM `rental_reward_ledger_entries` WHERE `idempotencyKey` LIKE 'e2e:reward:once%';"),
+    rewardsBeforeRestart,
+    "重启后同键发放不得新增奖励流水（内存判重会在此失败）"
+  );
+  // 权益账户余额同样不能被二次入账。
+  assert.equal(
+    readCount("SELECT ROUND(`pointsBalance`) FROM `rental_benefit_accounts` WHERE `customerId`='e2e_reward_member';"),
+    88,
+    "重复发放不得重复累加权益余额"
+  );
+  ok(`奖励幂等以库为准：重启清空内存后同键再发，流水仍为 ${rewardsBeforeRestart} 条、积分仍为 88`);
+
+  console.log("== 43. RC-04 订单动作重试不得重复发通知 ==");
+  // emitOrderEvent 在幂等执行器之外调用，所以要验证：同键重试时订单只推进一次，
+  // 通知也只发一条。
+  //
+  // 样本必须挑「有 recipient 的 draft 订单」——emitNotificationEvent 在
+  // recipient 为空时直接返回空数组（取 contactPhone ?? customerId）。
+  // 早前只按 status='draft' 挑，取到的订单两者皆空，通知新增 0 条，
+  // 断言失败的原因是样本选错而非产品缺陷。
+  //
+  // 本节不新造订单：它位于「发布新规则」之后，旧定价计划已退役，再报价会 409。
+  const demoNotify = await login("demo", "admin", DEMO_PASSWORD);
+  const notifiableDraft =
+    "FROM `rental_orders` WHERE `tenantId`='tenant_001' AND `status`='draft'" +
+    " AND (`contactPhone` IS NOT NULL OR `customerId` IS NOT NULL)";
+  assert.ok(
+    readCount(`SELECT COUNT(*) ${notifiableDraft};`) > 0,
+    "前置条件：需要一个带 contactPhone 或 customerId 的 draft 订单"
+  );
+  const draftOrderId = readScalar(`SELECT \`id\` ${notifiableDraft} ORDER BY \`createdAt\` DESC LIMIT 1;`);
+  // readScalar 取输出最后一行，查询无结果时可能拿到表头，这里回查确认。
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_orders\` WHERE \`id\`='${draftOrderId}' AND \`status\`='draft';`),
+    1,
+    `取到的 id 不是有效 draft 订单: ${draftOrderId}`
+  );
+  const retryKey = `e2e-confirm-retry-${draftOrderId}`;
+  const notifyBefore = readCount(
+    "SELECT COUNT(*) FROM `rental_notification_logs` WHERE `tenantId`='tenant_001' AND `eventCode`='order.confirmed';"
+  );
+  const retryA = await request(
+    "POST",
+    `/api/rental/v1/orders/${draftOrderId}/confirm`,
+    {},
+    demoNotify.accessToken,
+    { "Idempotency-Key": retryKey }
+  );
+  assert.equal(retryA.status, 201, `首次确认应成功: ${JSON.stringify(retryA.body)}`);
+  const retryB = await request(
+    "POST",
+    `/api/rental/v1/orders/${draftOrderId}/confirm`,
+    {},
+    demoNotify.accessToken,
+    { "Idempotency-Key": retryKey }
+  );
+  // 同键重试必须幂等返回同一订单，而不是因状态已变成 reserved 而报 409。
+  assert.equal(retryB.status, 201, `同键重试应幂等返回: ${JSON.stringify(retryB.body)}`);
+  assert.equal(retryB.body.data.id, retryA.body.data.id, "重试应返回同一订单");
+  assert.equal(retryB.body.data.status, "reserved", "重试返回的状态应是已确认");
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_orders\` WHERE \`id\`='${draftOrderId}' AND \`status\`='reserved';`),
+    1,
+    "订单应恰好处于已确认状态，只推进一次"
+  );
+  const notifyAfter = readCount(
+    "SELECT COUNT(*) FROM `rental_notification_logs` WHERE `tenantId`='tenant_001' AND `eventCode`='order.confirmed';"
+  );
+  assert.equal(
+    notifyAfter,
+    notifyBefore + 1,
+    `同键重试确认只能产生一条 order.confirmed 通知，实际新增 ${notifyAfter - notifyBefore} 条`
+  );
+  ok("成功动作重试幂等且不重复发通知：同键确认两次均返回 reserved，order.confirmed 通知仅新增 1 条");
+
+  console.log("== 44. RC-04 未传幂等键时的网络重试同样必须幂等 ==");
+  // 兜底键曾经纳入订单当前状态，于是：首次以 :draft 登记，重试时状态已是 reserved，
+  // 算出的键不同 → 查不到记录 → 落回状态机 → 409。没传 Idempotency-Key 的客户端
+  // （即绝大多数网络重试）因此完全拿不到幂等保护。
+  //
+  // 本节同时守住反向要求：兜底键稳定之后，非法状态转移**仍然**必须 409，
+  // 不能因为「同一订单永久同键」而把陈旧的成功结果回放出去。
+  const keylessDraft =
+    "FROM `rental_orders` WHERE `tenantId`='tenant_001' AND `status`='draft'" +
+    " AND (`contactPhone` IS NOT NULL OR `customerId` IS NOT NULL)";
+  assert.ok(
+    readCount(`SELECT COUNT(*) ${keylessDraft};`) > 0,
+    "前置条件：需要另一个带 contactPhone 或 customerId 的 draft 订单"
+  );
+  const keylessId = readScalar(`SELECT \`id\` ${keylessDraft} ORDER BY \`createdAt\` DESC LIMIT 1;`);
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_orders\` WHERE \`id\`='${keylessId}' AND \`status\`='draft';`),
+    1,
+    `取到的 id 不是有效 draft 订单: ${keylessId}`
+  );
+  const keylessNotifyBefore = readCount(
+    "SELECT COUNT(*) FROM `rental_notification_logs` WHERE `tenantId`='tenant_001' AND `eventCode`='order.confirmed';"
+  );
+  // 刻意不传 Idempotency-Key，走 fallbackKey 路径。
+  const keylessA = await request("POST", `/api/rental/v1/orders/${keylessId}/confirm`, {}, demoNotify.accessToken);
+  assert.equal(keylessA.status, 201, `无键首次确认应成功: ${JSON.stringify(keylessA.body)}`);
+  const keylessB = await request("POST", `/api/rental/v1/orders/${keylessId}/confirm`, {}, demoNotify.accessToken);
+  assert.equal(
+    keylessB.status,
+    201,
+    `无键重试必须幂等返回而不是 409（这正是兜底键纳入状态时的缺陷）: ${JSON.stringify(keylessB.body)}`
+  );
+  assert.equal(keylessB.body.data.id, keylessA.body.data.id, "无键重试应返回同一订单");
+  assert.equal(keylessB.body.data.status, "reserved", "无键重试返回的状态应是已确认");
+  const keylessNotifyAfter = readCount(
+    "SELECT COUNT(*) FROM `rental_notification_logs` WHERE `tenantId`='tenant_001' AND `eventCode`='order.confirmed';"
+  );
+  assert.equal(
+    keylessNotifyAfter,
+    keylessNotifyBefore + 1,
+    `无键重试也只能产生一条 order.confirmed 通知，实际新增 ${keylessNotifyAfter - keylessNotifyBefore} 条`
+  );
+  // 把订单推进到 ready_for_pickup 后再无键确认：记录仍在，但 replay 会发现状态
+  // 不是 reserved 而返回 undefined，必须由状态机给出 409，不得回放当初的 201。
+  const keylessAllocate = await request("POST", `/api/rental/v1/orders/${keylessId}/allocate`, {}, demoNotify.accessToken);
+  assert.equal(keylessAllocate.status, 201, `配货应成功: ${JSON.stringify(keylessAllocate.body)}`);
+  assert.equal(keylessAllocate.body.data.status, "ready_for_pickup", "配货后状态应为待取");
+  const illegalConfirm = await request("POST", `/api/rental/v1/orders/${keylessId}/confirm`, {}, demoNotify.accessToken);
+  assert.equal(
+    illegalConfirm.status,
+    409,
+    `已配货订单再次确认必须 409，不得回放当初的成功结果，实际 ${illegalConfirm.status}`
+  );
+  ok("无键重试幂等：同一订单两次无键确认均返回 reserved 且通知只发一条；推进到待取后再确认仍如实 409");
+
+  console.log("== 45. RC-04 同一订单的并发状态动作必须串行 ==");
+  // 确认/配货/取消原先都用不带事务的 requireOrder 读订单（走 this.prisma，读根本
+  // 不在事务内），也不对订单行加锁。两个并发动作会各读一份聚合副本、各自通过状态
+  // 检查、各自把整个聚合写回，后提交者覆盖先提交者——两个请求都返回成功。
+  //
+  // 用**不同**幂等键，避免被幂等回放吸收掉，测的才是锁本身。
+  // 复用第 44 节留下的 ready_for_pickup 订单：本节位于「发布新规则」之后，
+  // 旧定价计划已退役，无法再报价新建样本。
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_orders\` WHERE \`id\`='${keylessId}' AND \`status\`='ready_for_pickup';`),
+    1,
+    `前置条件：第 44 节应把订单留在 ready_for_pickup: ${keylessId}`
+  );
+  const cancelBody = { reason: "E2E 并发取消" };
+  const [r1, r2] = await Promise.all([
+    request("POST", `/api/rental/v1/orders/${keylessId}/cancel`, cancelBody, demoNotify.accessToken, {
+      "Idempotency-Key": `e2e-race-a-${keylessId}`
+    }),
+    request("POST", `/api/rental/v1/orders/${keylessId}/cancel`, cancelBody, demoNotify.accessToken, {
+      "Idempotency-Key": `e2e-race-b-${keylessId}`
+    })
+  ]);
+  const raceOk = [r1, r2].filter((res) => res.status === 201);
+  const raceConflict = [r1, r2].filter((res) => res.status === 409);
+  assert.equal(
+    raceOk.length,
+    1,
+    `不同键并发取消只能有一个成功（无锁时两个都会成功并互相覆盖），实际 ${r1.status}/${r2.status}: ` +
+      `${JSON.stringify(r1.body).slice(0, 120)} | ${JSON.stringify(r2.body).slice(0, 120)}`
+  );
+  assert.equal(raceConflict.length, 1, `另一个必须被状态机以 409 拒绝，实际 ${r1.status}/${r2.status}`);
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_orders\` WHERE \`id\`='${keylessId}' AND \`status\`='cancelled';`),
+    1,
+    "并发取消后订单必须恰好处于已取消状态，只推进一次"
+  );
+  // 状态只推进一次的另一面：分配必须全部释放，不能有一次取消的写入被覆盖掉。
+  assert.equal(
+    readCount(
+      `SELECT COUNT(*) FROM \`rental_allocations\` WHERE \`orderId\`='${keylessId}' AND \`status\`<>'released';`
+    ),
+    0,
+    "该订单的分配应全部释放，不应残留未释放行"
+  );
+  ok("同订单并发状态动作已串行：不同键并发取消恰有一个成功、一个 409，订单只推进一次且分配全部释放");
 
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);
 }

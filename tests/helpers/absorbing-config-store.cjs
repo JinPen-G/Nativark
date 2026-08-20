@@ -54,6 +54,9 @@ function createAbsorbingFactStore() {
     findOrder: () => Promise.resolve(undefined),
     countOrders: () => Promise.resolve(0),
     saveOrderAggregate: record("order"),
+    // 与 lockInventoryTargets 同理：锁语义（丢失更新、死锁映射）只能在真 MySQL 里验证，
+    // 这里吸收掉，不假装加了锁。
+    lockOrder: () => Promise.resolve(),
     lockInventoryTargets: () => Promise.resolve(),
     activeReservations: () => Promise.resolve([]),
     allocatedAssetIds: () => Promise.resolve(new Set()),
@@ -113,6 +116,9 @@ function createAbsorbingBusinessFactStore() {
     loadAll: () => Promise.resolve([]),
     upsertQuote: record("quote"),
     upsertCustomerCoupon: record("customerCoupon"),
+    // 读返回空：刻意不模拟按键查询语义。奖励幂等真正依赖的是库上的唯一约束
+    // 与前缀匹配，那只能在 MySQL E2E 里验证（第 42 节做了跨重启证伪）。
+    findRewardsByIdempotencyKey: () => Promise.resolve([]),
     upsertRewardEntry: record("rewardEntry"),
     upsertBenefitAccount: record("benefitAccount"),
     upsertReferral: (_tenantId, referral) => {

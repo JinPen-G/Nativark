@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, OnApplicationBootstrap, OnModuleInit, Optional } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import {
   RentalCategoryCode,
@@ -526,7 +527,16 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   }
 
   async redeemCoupon(tenantId: string, context: BusinessContext, orderId: string) {
-    const coupon = this.state(tenantId, context).customerCoupons.find((item) => item.lockedOrderId === orderId);
+    const coupons = this.state(tenantId, context).customerCoupons;
+    // 已按本订单核销过：属于同一次意图的重复核销，幂等返回而不是报错。
+    //
+    // 订单动作被幂等执行器保护后，重试会走回放路径正常返回，但控制器随后仍会
+    // 调用本方法；若这里对已核销状态抛 409，整个重试请求就失败了——
+    // 幂等保护了订单本体，却被它的副作用破功。RC-04 要求的正是"重复请求不重复核销"，
+    // 而不是"重复请求报错"。
+    const alreadyRedeemed = coupons.find((item) => item.redeemedOrderId === orderId && item.status === "redeemed");
+    if (alreadyRedeemed) return alreadyRedeemed;
+    const coupon = coupons.find((item) => item.lockedOrderId === orderId);
     if (!coupon) return undefined;
     if (coupon.status !== "locked") throw new ConflictException("优惠券不是锁定状态");
     coupon.status = "redeemed"; coupon.redeemedOrderId = orderId; coupon.redeemedAt = stamp();
@@ -554,8 +564,19 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   async grantReward(tenantId: string, context: BusinessContext, input: GrantRentalRewardRequest) {
     const state = this.state(tenantId, context);
     if (!input.customerId || !input.idempotencyKey) throw new BadRequestException("客户和幂等键不能为空");
-    const existing = state.rewardLedger.filter((row) => row.idempotencyKey === input.idempotencyKey || row.idempotencyKey.startsWith(`${input.idempotencyKey}:`));
-    if (existing.length) return existing;
+    // 判重以库为准，不靠内存 rewardLedger。
+    //
+    // 早前只查内存：库上虽有 (tenantId, idempotencyKey) 唯一约束，但那只会在写入时
+    // 抛错，而不是幂等返回既有流水。缓存冷启动或多实例部署下，重复发放会变成 500。
+    // 关掉内存判重跑 E2E 可复现——「重复发放应幂等返回既有流水」当场失败。
+    const existing = await this.factStore.findRewardsByIdempotencyKey(tenantId, input.idempotencyKey);
+    if (existing.length) {
+      // 顺带把缺失的条目回填进缓存，使后续读取与库一致。
+      for (const row of existing) {
+        if (!state.rewardLedger.some((cached) => cached.id === row.id)) state.rewardLedger.unshift(row);
+      }
+      return existing;
+    }
     const membership = context.settings.membership;
     const rows: RentalRewardLedgerEntry[] = [];
     const planned: Array<{ customerId: string; type: RentalRewardLedgerEntry["rewardType"]; amount: number; couponTemplateId?: string }> = [];
@@ -578,7 +599,22 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       add(input.relatedCustomerId, membership.referralRewardType, membership.inviteeRewardAmount, `${input.idempotencyKey}:invitee`, "被邀请人奖励", input.customerId, membership.referralRewardCouponTemplateId);
     }
     if (!rows.length) throw new ConflictException("当前激励规则未启用或触发条件不匹配");
-    for (const row of rows) await this.factStore.upsertRewardEntry(row);
+    try {
+      for (const row of rows) await this.factStore.upsertRewardEntry(row);
+    } catch (error) {
+      // 并发同键：两边都通过了库查询，写入时撞唯一约束。
+      // 先到者已入账，这里回放它的流水而不是把 500 抛给调用方。
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        const winner = await this.factStore.findRewardsByIdempotencyKey(tenantId, input.idempotencyKey);
+        if (winner.length) {
+          for (const row of winner) {
+            if (!state.rewardLedger.some((cached) => cached.id === row.id)) state.rewardLedger.unshift(row);
+          }
+          return winner;
+        }
+      }
+      throw error;
+    }
     await this.flushBenefitAccounts(state, rows.map((row) => row.customerId));
     return rows;
   }

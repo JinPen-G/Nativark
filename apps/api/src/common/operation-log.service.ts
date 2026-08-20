@@ -7,7 +7,10 @@ export interface OperationLogInput {
   tenantId?: string;
   user?: SystemUserRow;
   userId?: string;
+  /** 车辆兼容域订单（StoreRentalOrder）。 */
   orderId?: string;
+  /** 通用租赁订单（rental_orders）。orderId 的外键指向车辆域，承载不了它。 */
+  rentalOrderId?: string;
   action: string;
   targetType: string;
   targetId?: string;
@@ -19,6 +22,8 @@ export interface OperationLogInput {
 export interface HttpMutationAuditInput {
   method: string;
   path: string;
+  /** 由调用方或路径解析得出的通用租赁订单 id。 */
+  rentalOrderId?: string;
   requestId?: string;
   user?: SystemUserRow;
   body?: unknown;
@@ -44,6 +49,7 @@ export class OperationLogService {
           tenantId,
           userId: input.userId ?? input.user?.id,
           orderId: input.orderId,
+          rentalOrderId: input.rentalOrderId,
           action: input.action,
           detail: this.toJsonValue({
             operator:
@@ -72,6 +78,7 @@ export class OperationLogService {
       action: this.resolveAction(input.method, normalizedPath),
       targetType,
       targetId,
+      rentalOrderId: input.rentalOrderId ?? this.resolveRentalOrderId(normalizedPath),
       detail:
         input.status === "success"
           ? "接口动作执行成功"
@@ -107,6 +114,29 @@ export class OperationLogService {
         targetId: parts[2]
       };
     }
+    // /rental/v1/<resource>/<id>/... —— 版本段不是资源，必须跳过，
+    // 否则 targetType 会变成 "rental"、targetId 变成 "v1"，审计无法按对象检索。
+    if (parts[0] === "rental") {
+      const resourceIndex = parts[1] && /^v\d+$/u.test(parts[1]) ? 2 : 1;
+      const typeMap: Record<string, string> = {
+        orders: "rental-order",
+        quotes: "rental-quote",
+        assets: "rental-asset",
+        "item-groups": "rental-item-group",
+        locations: "rental-location",
+        "coupon-templates": "rental-coupon-template",
+        "customer-coupons": "rental-customer-coupon",
+        rewards: "rental-reward",
+        "rule-versions": "rental-rule-version",
+        "pricing-plans": "rental-pricing-plan",
+        "notification-templates": "rental-notification-template"
+      };
+      const resource = parts[resourceIndex] ?? "rental";
+      return {
+        targetType: typeMap[resource] ?? resource,
+        targetId: parts[resourceIndex + 1]
+      };
+    }
     if (parts[0] === "store-rental") {
       const typeMap: Record<string, string> = {
         orders: "order",
@@ -128,6 +158,15 @@ export class OperationLogService {
       targetType: parts[0] ?? "system",
       targetId: parts[1]
     };
+  }
+
+  /**
+   * 从 /rental/v1/orders/<id>/... 抽出通用租赁订单 id。
+   * 只认 orders 资源，避免把其他资源的 id 误填进订单外键而触发约束失败。
+   */
+  private resolveRentalOrderId(path: string) {
+    const match = path.match(/^\/rental\/v\d+\/orders\/([^/]+)/u);
+    return match ? match[1] : undefined;
   }
 
   private toJsonValue(value: Record<string, unknown>): Prisma.InputJsonValue {

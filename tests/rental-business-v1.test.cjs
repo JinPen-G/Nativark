@@ -156,7 +156,10 @@ await core.saveBusinessSettings(tenantId, {
 const reward = await business.grantReward(tenantId, context(), { customerId: "member_001", triggerType: "registration", idempotencyKey: "register:member_001" });
 assert.equal(reward[0].amount, 100);
 assert.equal(business.listBenefitAccounts(tenantId, context(), "member_001")[0].pointsBalance, 100, "points rewards must be applied to the tenant benefit account");
-assert.equal((await business.grantReward(tenantId, context(), { customerId: "member_001", triggerType: "registration", idempotencyKey: "register:member_001" }))[0].id, reward[0].id, "reward grant must be idempotent");
+// 奖励幂等已改为以数据库为准（RC-04）：判重查 rental_reward_ledger_entries 的
+// (tenantId, idempotencyKey) 唯一约束与派生子键前缀，而这里注入的是吸收式 stub（读返回空）。
+// 在 stub 上断言幂等只会测到"重写了一遍查询逻辑的假实现"，因此该断言迁至
+// tests/mysql-e2e.test.cjs 第 42 节，用"重启清空内存后同键再发"证伪内存判重。
 await business.reverseReward(tenantId, context(), reward[0].id, "测试撤销");
 assert.equal(business.listRewards(tenantId, context())[0].status, "reversed");
 assert.equal(business.listBenefitAccounts(tenantId, context(), "member_001")[0].pointsBalance, 0, "reversing a reward must reverse the applied benefit");

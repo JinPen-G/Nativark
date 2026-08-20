@@ -6,6 +6,12 @@ import type {
 } from "@store-rental/shared";
 import { PrismaService } from "../database/prisma.service";
 import {
+  RentalIdempotencyRepository,
+  assertSameRequest,
+  requestFingerprint,
+  type RentalIdempotencyStore
+} from "./rental-idempotency.repository";
+import {
   RentalBusinessFactRepository,
   type RentalBusinessFactStore
 } from "./rental-business-fact.repository";
@@ -50,6 +56,15 @@ function quoteSnapshotFingerprint(quote: RentalQuoteSnapshotV1) {
   }));
 }
 
+const ORDER_CREATE_ACTION = "rental.order.create";
+
+/** 事务内发现同键已提交时抛出，用于回滚本次并在外层返回既有订单。 */
+class IdempotentReplay extends Error {
+  constructor(readonly orderId: string | null) {
+    super("idempotent replay");
+  }
+}
+
 @Injectable()
 export class RentalOrderConfirmationService {
   constructor(
@@ -57,15 +72,33 @@ export class RentalOrderConfirmationService {
     private readonly core: RentalCoreService,
     private readonly business: RentalBusinessService,
     @Inject(RentalCoreFactRepository) private readonly coreFacts: RentalCoreFactStore,
-    @Inject(RentalBusinessFactRepository) private readonly businessFacts: RentalBusinessFactStore
+    @Inject(RentalBusinessFactRepository) private readonly businessFacts: RentalBusinessFactStore,
+    @Inject(RentalIdempotencyRepository) private readonly idempotency: RentalIdempotencyStore
   ) {}
 
+  /**
+   * 返回值带 `replayed` 标记：调用方据此跳过下单通知等**外部副作用**。
+   * 通知不在事务内，事务回滚撤不回已发出的短信，正确边界是「只在首次真正建单时发」。
+   */
   async createOrder(
     tenantId: string,
     input: CreateRentalOrderRequest,
     userName: string,
-    context: BusinessContext
+    context: BusinessContext,
+    idempotencyKey?: string
   ) {
+    // 未显式传键时退回 quoteId：报价一次性使用，天然是这次下单的唯一标识。
+    const key = idempotencyKey?.trim() || `quote:${input.quoteId}`;
+    const fingerprint = requestFingerprint(input);
+
+    // 事务外先快速命中，避免重复请求白跑一遍报价校验与库存锁。
+    const early = await this.idempotency.find(tenantId, ORDER_CREATE_ACTION, key);
+    if (early) {
+      assertSameRequest(early, fingerprint);
+      const replayed = early.orderId ? await this.coreFacts.findOrder(tenantId, early.orderId) : undefined;
+      if (replayed) return { order: replayed, replayed: true };
+    }
+
     const quote = this.business.consumeQuote(tenantId, context, input.quoteId);
     this.assertOrderMatchesQuote(input, quote);
 
@@ -124,16 +157,71 @@ export class RentalOrderConfirmationService {
           );
           if (!couponLocked) throw new ConflictException("优惠券已失效或被占用，请重新报价");
         }
+
+        // 事务内必须再查一次：事务外那次检查与此处之间存在窗口，
+        // 并发同键会双双通过外层检查。这里连同唯一约束一起兜住。
+        const inTx = await this.idempotency.find(tenantId, ORDER_CREATE_ACTION, key, tx);
+        if (inTx) {
+          assertSameRequest(inTx, fingerprint);
+          throw new IdempotentReplay(inTx.orderId);
+        }
+        // 与订单聚合、报价消费、券锁定同一事务提交：任一步失败则幂等记录一并回滚，
+        // 不会出现"已记幂等但业务未生效"或反之。
+        await this.idempotency.record(
+          { tenantId, action: ORDER_CREATE_ACTION, key, requestHash: fingerprint, orderId: order.id, response: { orderId: order.id } },
+          tx
+        );
       }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
     } catch (error) {
+      // 并发同键：先到者已提交，本次回滚后返回它的结果，而不是报错或重复建单。
+      if (error instanceof IdempotentReplay) {
+        const replayed = error.orderId ? await this.coreFacts.findOrder(tenantId, error.orderId) : undefined;
+        if (replayed) return { order: replayed, replayed: true };
+        throw new ConflictException("相同幂等键的请求正在处理，请稍后重试");
+      }
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        const winner = await this.idempotency.find(tenantId, ORDER_CREATE_ACTION, key);
+        if (!winner) throw new ConflictException("相同幂等键的请求正在处理，请稍后重试");
+        // 回放前必须比对指纹：两个**不同**请求并发复用同一幂等键时，
+        // 后到者会撞唯一约束落到这里，不比对就会把先到者的订单当成自己的结果返回。
+        // 顺序请求走事务外预检时已有这道校验，并发路径此前漏了。
+        assertSameRequest(winner, fingerprint);
+        const replayed = winner.orderId ? await this.coreFacts.findOrder(tenantId, winner.orderId) : undefined;
+        if (replayed) return { order: replayed, replayed: true };
+        throw new ConflictException("相同幂等键的请求正在处理，请稍后重试");
+      }
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") {
         throw new ConflictException("库存正在被其他订单占用，请稍后重试");
+      }
+      // 业务冲突后再探一次幂等记录。
+      //
+      // 可复现的交错（Codex 2026-08-20 指出，此前我误以为该分支走不到）：
+      //   1. 两个同键请求都在首单提交前完成事务外预检，双双查不到记录；
+      //   2. 后到者在事务内等待库存锁；
+      //   3. 首单提交，消费报价并占用库存；
+      //   4. 后到者拿到锁，因报价已被消费而在**事务中段**抛 409；
+      //   5. 那一步位于事务末尾的幂等重查之前，因此它永远走不到回放。
+      //
+      // 「E2E 当前能过」只说明没有稳定制造出这个交错，不能证明分支不可达。
+      // 实测：6 路同键并发连跑 3 次，后到者总是在事务外预检就命中先到者已提交的
+      // 记录并回放，走不到这里。**因此本分支目前无测试覆盖**——不要因为"删掉它
+      // 测试仍全绿"就删掉它（我犯过这个错）。多实例部署或不同时序下窗口是真实的。
+      //
+      // 判据必须是同键 + 同指纹 + 订单确实存在，三者缺一即保留原始错误，
+      // 真正的报价失效、过期、变更仍如实报 409。
+      if (error instanceof ConflictException) {
+        const winner = await this.idempotency.find(tenantId, ORDER_CREATE_ACTION, key);
+        if (!winner) throw error;
+        assertSameRequest(winner, fingerprint);
+        const replayed = winner.orderId ? await this.coreFacts.findOrder(tenantId, winner.orderId) : undefined;
+        if (replayed) return { order: replayed, replayed: true };
+        throw error;
       }
       throw error;
     }
 
     this.business.applyOrderConfirmationToCache(quote, coupon, order.id, committedAt);
-    return order;
+    return { order, replayed: false };
   }
 
   private assertOrderMatchesQuote(input: CreateRentalOrderRequest, quote: RentalQuoteSnapshotV1) {

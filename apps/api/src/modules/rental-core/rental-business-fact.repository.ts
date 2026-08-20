@@ -48,6 +48,12 @@ export interface RentalBusinessFactStore {
   lockCouponIfAvailable(tenantId: string, couponId: string, customerId: string | undefined, orderId: string, lockedAt: string, tx: RentalBusinessFactTx): Promise<boolean>;
   upsertQuote(quote: RentalQuoteSnapshotV1): Promise<void>;
   upsertCustomerCoupon(coupon: RentalCustomerCoupon): Promise<void>;
+  /**
+   * 按幂等键查既有奖励流水，用于以库为准判重。
+   * 必须按前缀匹配：grantReward 会派生 `<key>:referrer` / `<key>:invitee` 子键，
+   * 只按精确键查会漏掉双边邀请奖励，导致重复入账。
+   */
+  findRewardsByIdempotencyKey(tenantId: string, key: string, tx?: RentalBusinessFactTx): Promise<RentalRewardLedgerEntry[]>;
   upsertRewardEntry(entry: RentalRewardLedgerEntry): Promise<void>;
   upsertBenefitAccount(account: RentalCustomerBenefitAccount): Promise<void>;
   upsertReferral(tenantId: string, referral: RentalReferralRecord): Promise<void>;
@@ -217,6 +223,19 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       create: { id: coupon.id, ...data },
       update: data
     });
+  }
+
+  async findRewardsByIdempotencyKey(
+    tenantId: string,
+    key: string,
+    tx?: RentalBusinessFactTx
+  ): Promise<RentalRewardLedgerEntry[]> {
+    const client = tx ?? this.prisma;
+    const rows = await client.rentalRewardLedgerEntry.findMany({
+      where: { tenantId, OR: [{ idempotencyKey: key }, { idempotencyKey: { startsWith: `${key}:` } }] },
+      orderBy: { createdAt: "asc" }
+    });
+    return rows.map((row) => this.toRewardEntry(row));
   }
 
   async upsertRewardEntry(entry: RentalRewardLedgerEntry): Promise<void> {
