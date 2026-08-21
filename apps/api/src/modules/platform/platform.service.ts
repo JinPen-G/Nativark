@@ -1380,7 +1380,10 @@ export class PlatformService {
 
   createBusinessWorkspace(input: CreateBusinessWorkspaceRequest, currentUser?: SystemUserRow) {
     this.requireWorkspaceDataSource();
-    return this.platformRepository.createBusinessWorkspace(input, currentUser);
+    // 需求 4.1：空间档案与其品类配置同事务创建，任一步失败整体回滚。
+    return this.platformRepository.createBusinessWorkspace(input, currentUser, async (tx, workspaceId, tenantId) => {
+      await this.rentalCoreService?.registerWorkspace(workspaceId, tenantId, input.categoryCode, tx);
+    });
   }
 
   updateBusinessWorkspace(id: string, input: UpdateBusinessWorkspaceRequest, currentUser?: SystemUserRow) {

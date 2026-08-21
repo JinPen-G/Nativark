@@ -2824,61 +2824,67 @@ async function main() {
     s3Login.accessToken
   );
   assert.equal(s3Switch.status, 201, `切换到第二空间失败: ${JSON.stringify(s3Switch.body).slice(0, 200)}`);
-  // 库层已按空间隔离唯一键：直接用 SQL 在第二空间插入同编码商品组必须成功。
-  // 用 SQL 而不是 API，是因为**服务层的判重仍是租户级**（内存状态以 tenantId 为键），
-  // 那属于 SPACE-03 尚未完成的部分，见下面被显式钉住的当前行为。
-  const s3RawDup = mysqlRaw(
-    `USE \`${TEST_DB}\`;
-INSERT INTO \`rental_item_groups\`` +
-      " (`id`,`tenantId`,`workspaceId`,`categoryCode`,`code`,`name`,`inventoryMode`,`unit`,`attributes`,`status`,`createdAt`,`updatedAt`)" +
-      ` SELECT 'e2e_s3_dup_code','tenant_001','${s3Second.id}',\`categoryCode\`,\`code\`,` +
-      "CONCAT(`name`,'（第二空间同码）'),`inventoryMode`,`unit`,`attributes`,`status`,NOW(3),NOW(3)" +
-      ` FROM \`rental_item_groups\` WHERE \`id\`='${s3Existing.id}';`
+  // 唯一键与服务层判重都已按经营空间：第二空间经**真实 API**建同编码商品组必须成功。
+  // 刻意只走 API 而不再另插一条 SQL——先插 SQL 会让随后的 API 写入撞上库唯一键，
+  // 那是测试自己制造的冲突，不是被测行为。
+  const s3SecondGroups = (await request("GET", "/api/rental/v1/item-groups", null, s3Switch.body.data.accessToken)).body.data;
+  assert.ok(
+    s3SecondGroups.length > 0,
+    "前置条件：新建经营空间应已原子获得该品类的默认配置（需求 4.1）"
+  );
+  const s3Template = s3SecondGroups[0];
+  assert.equal(
+    s3SecondGroups.some((row) => row.code === s3Existing.code),
+    false,
+    "前置条件：第二空间不应已存在与默认空间同编码的商品组"
+  );
+  const s3DupBody = {
+    code: s3Existing.code,
+    name: "第二空间同码（经 API）",
+    inventoryMode: s3Template.inventoryMode,
+    unit: s3Template.unit,
+    attributes: s3Template.attributes ?? {},
+    status: "enabled"
+  };
+  const s3ApiDup = await request(
+    "POST",
+    "/api/rental/v1/item-groups",
+    s3DupBody,
+    s3Switch.body.data.accessToken
   );
   assert.equal(
-    s3RawDup.status,
-    0,
-    `同租户第二个空间必须能复用商品编码（唯一键需含 workspaceId）: ${(s3RawDup.stdout || "") + (s3RawDup.stderr || "")}`
+    s3ApiDup.status,
+    201,
+    `第二空间必须能复用默认空间的商品编码（唯一键与判重均需按空间），实际 ${s3ApiDup.status}: ` +
+      `${JSON.stringify(s3ApiDup.body).slice(0, 300)}`
   );
   assert.equal(
-    readCount(
-      `SELECT COUNT(*) FROM \`rental_item_groups\` WHERE \`tenantId\`='tenant_001' AND \`code\`='${s3Existing.code}';`
-    ),
-    2,
-    "同一租户内应存在两条同编码商品组，分属两个经营空间"
+    readScalar(`SELECT \`workspaceId\` FROM \`rental_item_groups\` WHERE \`id\`='${s3ApiDup.body.data.id}';`),
+    s3Second.id,
+    "经 API 新建的商品组必须落在当前会话的经营空间，而不是默认空间"
   );
   assert.equal(
     readCount(
       `SELECT COUNT(DISTINCT \`workspaceId\`) FROM \`rental_item_groups\` WHERE \`tenantId\`='tenant_001' AND \`code\`='${s3Existing.code}';`
     ),
     2,
-    "两条同编码商品组必须分属不同经营空间"
+    "同一编码应在该租户的两个经营空间各有一条"
   );
-  // 钉住当前（尚未完成的）服务层行为：判重仍是租户级，因此 API 仍会拒绝同编码。
-  // 这条断言不是在为缺陷背书，而是让 SPACE-03 后续阶段**必须**有意识地改掉它——
-  // 届时这里会失败，提醒把判重改成按经营空间。
-  const s3ApiDup = await request(
+  // 判重是按空间**收紧**而不是被取消：同一空间内重复编码仍必须 409。
+  const s3SameWsDup = await request(
     "POST",
     "/api/rental/v1/item-groups",
-    {
-      code: s3Existing.code,
-      name: "第二空间同码（经 API）",
-      inventoryMode: s3Existing.inventoryMode,
-      unit: s3Existing.unit,
-      attributes: {},
-      status: "enabled"
-    },
+    s3DupBody,
     s3Switch.body.data.accessToken
   );
   assert.equal(
-    s3ApiDup.status,
+    s3SameWsDup.status,
     409,
-    "已知未完成项：服务层判重仍以 tenantId 为键，因此 API 仍拒绝跨空间同编码。" +
-      `若此处不再是 409，说明服务层判重已空间化，应同步更新本断言。实际 ${s3ApiDup.status}`
+    `同一经营空间内重复编码仍必须 409，实际 ${s3SameWsDup.status}`
   );
   ok(
     `经营事实已归属经营空间：${SPACED_TABLES.length} 张表共 ${spacedRows} 行全部落在本租户空间、` +
-      `跨租户改挂被外键拒绝、库层允许第二空间复用商品编码（服务层判重仍为租户级，已钉住）`
+      `跨租户改挂被外键拒绝、第二空间可复用商品编码且落在会话空间、同空间内重复编码仍 409`
   );
 
   console.log("== 55. SPACE-03 同租户两个空间不能互读经营事实 ==");

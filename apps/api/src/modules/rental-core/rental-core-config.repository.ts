@@ -16,9 +16,17 @@ import type {
 import { PrismaService } from "../database/prisma.service";
 import { resolveScopeWorkspaceId } from "./workspace-scope";
 
-/** 单个租户的全部配置，用于启动预热写穿缓存。 */
+/**
+ * 单个**经营空间**的全部配置，用于启动预热写穿缓存。
+ *
+ * SPACE-03：以空间为单位而不是租户——同租户两个空间各有独立配置。
+ * 品类取自 `business_workspaces.categoryCode`：需求 3 规定品类由空间决定，
+ * `tenant_rental_profiles` 只是升级兼容层的租户级档案。
+ */
 export interface TenantConfigSnapshot {
   tenantId: string;
+  workspaceId: string;
+  workspaceCategoryCode: RentalCategoryCode;
   profile?: TenantRentalProfile;
   businessSettings?: TenantRentalBusinessSettings;
   operators: RentalFulfillmentOperator[];
@@ -54,6 +62,8 @@ export type RentalConfigTx = Prisma.TransactionClient;
  */
 export interface RentalConfigStore {
   loadAll(): Promise<TenantConfigSnapshot[]>;
+  /** 全部启用的经营空间，用于服务层按空间建状态并解析「租户 → 默认空间」。 */
+  listWorkspaces(): Promise<Array<{ id: string; tenantId: string; categoryCode: RentalCategoryCode; isDefault: boolean }>>;
   upsertProfile(profile: TenantRentalProfile, tx?: RentalConfigTx): Promise<void>;
   upsertBusinessSettings(settings: TenantRentalBusinessSettings, updatedBy: string, tx?: RentalConfigTx): Promise<void>;
   upsertOperator(operator: RentalFulfillmentOperator, tx?: RentalConfigTx): Promise<void>;
@@ -89,9 +99,22 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
     return tx ?? this.prisma;
   }
 
+  async listWorkspaces(): Promise<Array<{ id: string; tenantId: string; categoryCode: RentalCategoryCode; isDefault: boolean }>> {
+    const rows = await this.prisma.businessWorkspace.findMany({
+      select: { id: true, tenantId: true, categoryCode: true, isDefault: true }
+    });
+    return rows.map((row) => ({
+      id: row.id,
+      tenantId: row.tenantId,
+      categoryCode: lower<RentalCategoryCode>(row.categoryCode),
+      isDefault: row.isDefault
+    }));
+  }
+
   async loadAll(): Promise<TenantConfigSnapshot[]> {
-    const [profiles, settings, operators, locations, itemGroups, couponTemplates, inspectionTemplates] =
+    const [workspaces, profiles, settings, operators, locations, itemGroups, couponTemplates, inspectionTemplates] =
       await Promise.all([
+        this.listWorkspaces(),
         this.prisma.tenantRentalProfile.findMany(),
         this.prisma.rentalTenantBusinessSettings.findMany(),
         this.prisma.rentalFulfillmentOperator.findMany({ orderBy: { createdAt: "desc" } }),
@@ -108,38 +131,41 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
         this.prisma.rentalInspectionTemplate.findMany({ orderBy: { createdAt: "desc" } })
       ]);
 
-    const tenantIds = new Set<string>([
-      ...profiles.map((row) => row.tenantId),
-      ...settings.map((row) => row.tenantId),
-      ...operators.map((row) => row.tenantId),
-      ...locations.map((row) => row.tenantId),
-      ...itemGroups.map((row) => row.tenantId),
-      ...couponTemplates.map((row) => row.tenantId),
-      ...inspectionTemplates.map((row) => row.tenantId)
-    ]);
-
-    return [...tenantIds].map((tenantId) => ({
-      tenantId,
-      profile: this.toProfile(profiles.find((row) => row.tenantId === tenantId)),
-      businessSettings: this.toBusinessSettings(settings.find((row) => row.tenantId === tenantId)),
-      operators: operators.filter((row) => row.tenantId === tenantId).map((row) => this.toOperator(row)),
-      locations: locations.filter((row) => row.tenantId === tenantId).map((row) => this.toLocation(row)),
-      itemGroups: itemGroups.filter((row) => row.tenantId === tenantId).map((row) => this.toItemGroup(row)),
-      couponTemplates: couponTemplates
-        .filter((row) => row.tenantId === tenantId)
-        .map((row) => this.toCouponTemplate(row)),
-      inspectionTemplates: inspectionTemplates
-        .filter((row) => row.tenantId === tenantId)
-        .map((row) => this.toInspectionTemplate(row)),
-      // 品类档案不计入：seed 只建档案，不代表配置写过库。
-      hasPersistedConfig:
-        settings.some((row) => row.tenantId === tenantId) ||
-        operators.some((row) => row.tenantId === tenantId) ||
-        locations.some((row) => row.tenantId === tenantId) ||
-        itemGroups.some((row) => row.tenantId === tenantId) ||
-        couponTemplates.some((row) => row.tenantId === tenantId) ||
-        inspectionTemplates.some((row) => row.tenantId === tenantId)
-    }));
+    // SPACE-03：以**经营空间**为单位分组，而不是租户。
+    // 空间集合取自 business_workspaces 而不是从配置行反推：一个刚建好、
+    // 还没有任何配置的空间同样必须得到状态，否则它在读路径上会退化成
+    // 「找不到状态」并沿用租户级演示配置。
+    return workspaces.map((workspace) => {
+      const mine = <T extends { workspaceId: string }>(rows: T[]) => rows.filter((row) => row.workspaceId === workspace.id);
+      const wsOperators = mine(operators);
+      const wsLocations = mine(locations);
+      const wsItemGroups = mine(itemGroups);
+      const wsCouponTemplates = mine(couponTemplates);
+      const wsInspectionTemplates = mine(inspectionTemplates);
+      const wsSettings = mine(settings)[0];
+      return {
+        tenantId: workspace.tenantId,
+        workspaceId: workspace.id,
+        workspaceCategoryCode: workspace.categoryCode,
+        // 品类档案仍是租户级（升级兼容层），按 tenantId 取；品类本身以空间为准。
+        profile: this.toProfile(profiles.find((row) => row.tenantId === workspace.tenantId)),
+        businessSettings: this.toBusinessSettings(wsSettings),
+        operators: wsOperators.map((row) => this.toOperator(row)),
+        locations: wsLocations.map((row) => this.toLocation(row)),
+        itemGroups: wsItemGroups.map((row) => this.toItemGroup(row)),
+        couponTemplates: wsCouponTemplates.map((row) => this.toCouponTemplate(row)),
+        inspectionTemplates: wsInspectionTemplates.map((row) => this.toInspectionTemplate(row)),
+        // 品类档案不计入：seed 只建档案，不代表该空间的配置写过库。
+        hasPersistedConfig: Boolean(
+          wsSettings ||
+            wsOperators.length ||
+            wsLocations.length ||
+            wsItemGroups.length ||
+            wsCouponTemplates.length ||
+            wsInspectionTemplates.length
+        )
+      };
+    });
   }
 
   async upsertProfile(profile: TenantRentalProfile, tx?: RentalConfigTx): Promise<void> {

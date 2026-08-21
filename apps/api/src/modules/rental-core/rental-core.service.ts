@@ -38,6 +38,7 @@ import {
   type TenantRentalBusinessSettings,
   type TenantRentalProfile
 } from "@store-rental/shared";
+import { getRequestWorkspaceId, runWithRequestIdentity } from "../../common/request-identity";
 import { RentalStateRepository } from "./rental-state.repository";
 import { RentalCoreConfigRepository, type RentalConfigStore, type RentalConfigTx } from "./rental-core-config.repository";
 import {
@@ -138,7 +139,21 @@ function defaultBusinessSettings(tenantId: string, definition: RentalCategoryDef
 
 @Injectable()
 export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
+  /**
+   * SPACE-03：状态以**经营空间**为键，而不是租户。
+   * 同租户两个空间各有独立的商品组、地点、券模板与检查模板。
+   */
   private readonly states = new Map<string, TenantRentalState>();
+  /**
+   * 「租户 → 默认经营空间」与「经营空间 → 品类」。
+   *
+   * 需要这两张表是因为 `state()` 是同步的（58 处调用），而解析空间在无会话路径上
+   * 需要查库。启动预热与租户初始化时填好，`state()` 便可同步解析：
+   * 有会话取会话空间，无会话取默认空间。
+   */
+  private readonly defaultWorkspaceByTenant = new Map<string, string>();
+  private readonly categoryByWorkspace = new Map<string, RentalCategoryCode>();
+  private readonly tenantByWorkspace = new Map<string, string>();
 
   // configStore 必填：配置的事实源是数据库，内存 states 只是写穿缓存。
   // 不设为可选，避免生产环境缺少注入时静默退回纯内存而无人察觉。
@@ -212,11 +227,27 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
    * seedState 造出来的样本只是尚未落库时的占位。
    */
   async onApplicationBootstrap() {
+    // 先建「租户 → 默认空间」「空间 → 品类」两张表：state() 是同步的，
+    // 无会话路径（快照回填、seed）需要它们才能解析空间。
+    for (const workspace of await this.configStore.listWorkspaces()) {
+      this.categoryByWorkspace.set(workspace.id, workspace.categoryCode);
+      this.tenantByWorkspace.set(workspace.id, workspace.tenantId);
+      if (workspace.isDefault) this.defaultWorkspaceByTenant.set(workspace.tenantId, workspace.id);
+    }
+    // onModuleInit 阶段的快照恢复是按 tenantId 键的（那是升级前的形态），
+    // 这里把它们迁到默认空间键上，避免同一份状态在两个键下并存。
+    for (const [key, state] of [...this.states]) {
+      if (this.categoryByWorkspace.has(key)) continue;
+      const target = this.defaultWorkspaceByTenant.get(key);
+      this.states.delete(key);
+      if (target) this.states.set(target, state);
+    }
     for (const snapshot of await this.configStore.loadAll()) {
-      const cached = this.states.get(snapshot.tenantId);
-      const categoryCode = snapshot.profile?.categoryCode ?? cached?.profile.categoryCode;
+      const cached = this.states.get(snapshot.workspaceId);
+      // 品类以经营空间为准（需求 3）。
+      const categoryCode = snapshot.workspaceCategoryCode;
       if (!categoryCode) continue;
-      const base = cached ?? this.seedState(snapshot.tenantId, categoryCode);
+      const base = cached ?? this.seedState(snapshot.tenantId, categoryCode, this.seedPrefix(snapshot.tenantId, snapshot.workspaceId));
       if (snapshot.profile) base.profile = snapshot.profile;
       if (snapshot.businessSettings) base.businessSettings = snapshot.businessSettings;
       // 库写过配置的租户：无条件覆盖，包括空数组——库里没有就是没有。
@@ -234,12 +265,15 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
         base.inspectionTemplates = snapshot.inspectionTemplates;
         base.configPersisted = true;
       }
-      this.states.set(snapshot.tenantId, base);
+      this.states.set(snapshot.workspaceId, base);
     }
   }
 
   async persist(tenantId: string) {
-    const state = this.states.get(tenantId);
+    // 快照表主键仍是 tenantId（其空间化属后续阶段），因此这里按默认空间的状态存档。
+    // 同租户多空间时只有默认空间的状态进快照——这是已知限制，已在台账记录。
+    const workspaceId = this.defaultWorkspaceByTenant.get(tenantId);
+    const state = workspaceId ? this.states.get(workspaceId) : undefined;
     if (state) await this.stateRepository?.saveCoreState(tenantId, state);
   }
 
@@ -253,7 +287,15 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
    * 内存缓存只在事务成功提交后才写入，避免回滚后缓存里留下并不存在的租户。
    */
   async initializeTenant(tenantId: string, categoryCode: RentalCategoryCode, tx?: RentalConfigTx) {
-    const existing = this.states.get(tenantId);
+    // upsertProfile 会在同一事务里建默认经营空间（见 ensureDefaultWorkspace），
+    // 但那发生在 persistConfig 内部，而 persistConfig 里的写入已经需要空间。
+    // 因此这里先把空间 id 按同一确定性规则登记进查找表，让同步的 workspaceOf 可用。
+    const workspaceId = `ws_${tenantId}`;
+    this.categoryByWorkspace.set(workspaceId, categoryCode);
+    this.tenantByWorkspace.set(workspaceId, tenantId);
+    this.defaultWorkspaceByTenant.set(tenantId, workspaceId);
+
+    const existing = this.states.get(workspaceId);
     if (existing && existing.profile.categoryCode !== categoryCode) {
       throw new ConflictException("已有租赁数据的租户不能切换经营品类");
     }
@@ -261,10 +303,38 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       const seeded = this.seedState(tenantId, categoryCode);
       await this.persistConfig(seeded, tx);
       seeded.configPersisted = true;
-      this.states.set(tenantId, seeded);
+      this.states.set(workspaceId, seeded);
       return seeded.profile;
     }
-    return this.states.get(tenantId)!.profile;
+    return existing.profile;
+  }
+
+  /**
+   * SPACE-01/03：登记一个**新建的经营空间**并为其建立品类配置。
+   *
+   * 需求 4.1 要求新增空间必须原子创建空间档案与品类配置，因此由调用方在
+   * 创建空间的同一事务内调用本方法：任一步失败则空间与配置一起回滚，
+   * 不留「空间已建、没有任何品类配置」的空壳。
+   *
+   * 同时登记查找表，使同步的 workspaceOf/state 立刻能解析这个新空间——
+   * 否则新空间在本进程内要等到下次重启预热才可用。
+   */
+  async registerWorkspace(
+    workspaceId: string,
+    tenantId: string,
+    categoryCode: RentalCategoryCode,
+    tx?: RentalConfigTx
+  ) {
+    this.categoryByWorkspace.set(workspaceId, categoryCode);
+    this.tenantByWorkspace.set(workspaceId, tenantId);
+    if (this.states.has(workspaceId)) return;
+    const seeded = this.seedState(tenantId, categoryCode, this.seedPrefix(tenantId, workspaceId));
+    // 写入必须落在这个新空间，而不是会话当前所在的空间。
+    await runWithRequestIdentity({ tenantId, workspaceId }, async () => {
+      await this.persistConfig(seeded, tx);
+    });
+    seeded.configPersisted = true;
+    this.states.set(workspaceId, seeded);
   }
 
   /**
@@ -824,12 +894,38 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (overdueCharge > 0) this.applyOverdueTo(order, overdueCharge, order.completedAt);
   }
 
+  /**
+   * 当前请求应当读写的经营空间。
+   *
+   * 有会话取会话空间（守卫已 fail-closed 保证经营域必然有值）；
+   * 无会话（启动预热、快照回填、seed）取该租户的默认空间。
+   * 两者都拿不到就明确拒绝——绝不猜一个空间。
+   */
+  /**
+   * 该空间的配置 id 前缀。默认空间沿用 tenantId（保持升级前的既有 id 不变），
+   * 其余空间用自己的 id，避免同租户多空间生成相同 id 后互相 upsert 覆盖。
+   */
+  private seedPrefix(tenantId: string, workspaceId: string): string {
+    return this.defaultWorkspaceByTenant.get(tenantId) === workspaceId ? tenantId : workspaceId;
+  }
+
+  private workspaceOf(tenantId: string): string {
+    const fromSession = getRequestWorkspaceId();
+    if (fromSession) return fromSession;
+    const fallback = this.defaultWorkspaceByTenant.get(tenantId);
+    if (!fallback) throw new ConflictException("当前 SaaS 租户尚未建立经营空间");
+    return fallback;
+  }
+
   private state(tenantId: string) {
-    let state = this.states.get(tenantId);
+    const workspaceId = this.workspaceOf(tenantId);
+    let state = this.states.get(workspaceId);
     if (!state) {
-      const sampleCategory = tenantId === "tenant_001" ? RentalCategoryCode.Camera : tenantId === "tenant_002" ? RentalCategoryCode.Camping : undefined;
-      if (!sampleCategory) throw new ConflictException("当前 SaaS 租户尚未初始化经营品类");
-      state = this.seedState(tenantId, sampleCategory); this.states.set(tenantId, state);
+      // 品类以**经营空间**为准（需求 3），不再按租户猜测。
+      const categoryCode = this.categoryByWorkspace.get(workspaceId);
+      if (!categoryCode) throw new ConflictException("当前经营空间尚未初始化经营品类");
+      state = this.seedState(tenantId, categoryCode, this.seedPrefix(tenantId, workspaceId));
+      this.states.set(workspaceId, state);
     }
     state.operators ??= [];
     return state;
@@ -949,9 +1045,17 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     });
   }
 
-  private seedState(tenantId: string, categoryCode: RentalCategoryCode): TenantRentalState {
+  /**
+   * 生成一个经营空间的默认配置。
+   *
+   * `idPrefix` 必须按**经营空间**取值，不能一律用 tenantId：同租户第二个空间
+   * 会生成同样的 id，而配置写入是按 id upsert 的——那会把默认空间的商品组、
+   * 地点、券模板直接改挂到新空间上（实测表现为新建空间后原空间数据消失）。
+   * 默认空间沿用 tenantId 前缀以保持既有 id 不变，其余空间用自己的 id。
+   */
+  private seedState(tenantId: string, categoryCode: RentalCategoryCode, idPrefix: string = tenantId): TenantRentalState {
     const isSampleTenant = tenantId === "tenant_001" || tenantId === "tenant_002";
-    const definition = this.category(categoryCode); const timestamp = now(); const locationId = `${tenantId}_location_01`;
+    const definition = this.category(categoryCode); const timestamp = now(); const locationId = `${idPrefix}_location_01`;
     const sampleNames: Record<RentalCategoryCode, { operator: string; location: string; locationType: RentalFulfillmentLocation["type"] }> = {
       [RentalCategoryCode.Camera]: { operator: "演示摄影器材行", location: "中心器材门店", locationType: "store" },
       [RentalCategoryCode.Camping]: { operator: "演示露营装备中心", location: "中心装备仓", locationType: "warehouse" },
@@ -959,9 +1063,9 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       [RentalCategoryCode.Construction]: { operator: "演示工程设备中心", location: "中心设备场站", locationType: "project_site" }
     };
     const sampleName = sampleNames[categoryCode];
-    const operator: RentalFulfillmentOperator = { id: `${tenantId}_operator_01`, tenantId, code: "SELF", name: sampleName.operator, type: "self_operated", contactName: "运营负责人", contactPhone: "13800000000", settlementMode: "self", status: "enabled", createdAt: timestamp, updatedAt: timestamp };
+    const operator: RentalFulfillmentOperator = { id: `${idPrefix}_operator_01`, tenantId, code: "SELF", name: sampleName.operator, type: "self_operated", contactName: "运营负责人", contactPhone: "13800000000", settlementMode: "self", status: "enabled", createdAt: timestamp, updatedAt: timestamp };
     const location: RentalFulfillmentLocation = { id: locationId, tenantId, code: "MAIN", name: sampleName.location, type: sampleName.locationType, operatorId: operator.id, operatorType: operator.type, operatorName: operator.name, capabilities: ["pickup", "return", "storage", "delivery"], address: "演示地址 1 号", contactName: "值班负责人", contactPhone: "13800000000", businessHours: "09:00-20:00", status: "enabled" };
-    const base = (code: string, name: string, mode: RentalInventoryMode, unit: string, attributes: Record<string, unknown> = {}): RentalItemGroup => ({ id: `${tenantId}_${code.toLowerCase()}`, tenantId, categoryCode, code, name, inventoryMode: mode, unit, attributes, bundleComponents: [], status: "enabled", createdAt: timestamp, updatedAt: timestamp });
+    const base = (code: string, name: string, mode: RentalInventoryMode, unit: string, attributes: Record<string, unknown> = {}): RentalItemGroup => ({ id: `${idPrefix}_${code.toLowerCase()}`, tenantId, categoryCode, code, name, inventoryMode: mode, unit, attributes, bundleComponents: [], status: "enabled", createdAt: timestamp, updatedAt: timestamp });
     const first = categoryCode === RentalCategoryCode.Camera
       ? base("CAM-BODY", "全画幅相机机身", RentalInventoryMode.Serialized, "台", { brand: "Sony", model: "Alpha 7 IV", mount: "E", sensor: "全画幅" })
       : base("CAMP-TENT", "四人露营帐篷", RentalInventoryMode.Quantity, "顶", { brand: "Naturehike", model: "Cloud Up 4", people: 4, season: "三季" });
@@ -973,14 +1077,14 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const groups = isSampleTenant ? [first, second, bundle] : [];
     const assets: RentalAsset[] = isSampleTenant && categoryCode === RentalCategoryCode.Camera ? groups.filter((row) => row.inventoryMode === RentalInventoryMode.Serialized).flatMap((group, groupIndex) => Array.from({ length: 3 }, (_, index) => ({ id: `${group.id}_asset_${index + 1}`, tenantId, itemGroupId: group.id, itemGroupCode: group.code, itemGroupName: group.name, assetNo: `${group.code}-${String(index + 1).padStart(3, "0")}`, serialNo: `SN${groupIndex + 1}${index + 1}0001`, locationId, locationName: location.name, status: RentalAssetStatus.Available, attributes: {}, createdAt: timestamp, updatedAt: timestamp }))) : [];
     const stocks: RentalStockBalance[] = isSampleTenant && categoryCode === RentalCategoryCode.Camping ? groups.filter((row) => row.inventoryMode === RentalInventoryMode.Quantity).map((group, index) => ({ id: `${group.id}_stock`, tenantId, itemGroupId: group.id, itemGroupCode: group.code, itemGroupName: group.name, locationId, locationName: location.name, onHandQuantity: index === 0 ? 12 : 24, reservedQuantity: 0, maintenanceQuantity: index === 0 ? 1 : 2, availableQuantity: index === 0 ? 11 : 22, updatedAt: timestamp })) : [];
-    const templates = this.buildInspectionTemplates(tenantId, categoryCode);
+    const templates = this.buildInspectionTemplates(tenantId, categoryCode, idPrefix);
     return { profile: { tenantId, categoryCode, capabilities: [...definition.defaultCapabilities] as RentalCapability[], terminology: { ...definition.terminology }, configVersion: definition.version, initializedAt: timestamp, updatedAt: timestamp }, businessSettings: defaultBusinessSettings(tenantId, definition), couponTemplates: [], operators: [operator], locations: [location], itemGroups: groups, inspectionTemplates: templates, sampleAssets: assets, sampleStockBalances: stocks };
   }
 
-  private buildInspectionTemplates(tenantId: string, categoryCode: RentalCategoryCode): RentalInspectionTemplate[] {
+  private buildInspectionTemplates(tenantId: string, categoryCode: RentalCategoryCode, idPrefix: string): RentalInspectionTemplate[] {
     const definition = this.category(categoryCode);
     return (["pickup", "return"] as const).map((stage) => ({
-      id: `${tenantId}_${stage}_template`, tenantId, categoryCode,
+      id: `${idPrefix}_${stage}_template`, tenantId, categoryCode,
       code: `${categoryCode.toUpperCase()}_${stage.toUpperCase()}_V1`,
       name: `${stage === "pickup" ? definition.terminology.pickupLabel : definition.terminology.returnLabel}检查`,
       stage, version: "1.0", enabled: true,

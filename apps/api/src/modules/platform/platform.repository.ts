@@ -302,7 +302,12 @@ export class PlatformRepository {
 
   async createBusinessWorkspace(
     input: CreateBusinessWorkspaceRequest,
-    currentUser?: SystemUserRow
+    currentUser?: SystemUserRow,
+    /**
+     * 在创建空间的**同一事务内**、提交之前执行。
+     * 需求 4.1：新增空间必须原子创建空间档案与品类配置，抛错则一起回滚。
+     */
+    onBeforeCommit?: (tx: Prisma.TransactionClient, workspaceId: string, tenantId: string) => Promise<void>
   ): Promise<BusinessWorkspace> {
     const tenantId = this.workspaceTenantId(currentUser);
     const code = input.code?.trim().toLowerCase();
@@ -317,20 +322,23 @@ export class PlatformRepository {
       if (await tx.businessWorkspace.findFirst({ where: { tenantId, code } })) {
         throw new BadRequestException("空间编码已存在");
       }
-      return tx.businessWorkspace.create({
+      const workspaceId = `ws_${randomUUID()}`;
+      const created = await tx.businessWorkspace.create({
         data: {
           // 非默认空间的 id 与 defaultMarker 同值：marker 只用于让「每租户一个默认空间」
           // 成为唯一约束，非默认行必须各自唯一才不会互相冲突。
-          id: `ws_${randomUUID()}`,
+          id: workspaceId,
           tenantId,
           code,
           name,
           categoryCode,
           status: PrismaWorkspaceStatus.ACTIVE,
           isDefault: false,
-          defaultMarker: `ws_${randomUUID()}`
+          defaultMarker: workspaceId
         }
       });
+      await onBeforeCommit?.(tx, workspaceId, tenantId);
+      return created;
     });
     return this.toWorkspace(created);
   }

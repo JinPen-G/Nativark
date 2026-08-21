@@ -20,6 +20,8 @@ function createAbsorbingConfigStore() {
   return {
     writes,
     loadAll: () => Promise.resolve([]),
+    // SPACE-03：吸收式 stub —— 没有经营空间，服务层因此退回 seedState 的演示配置。
+    listWorkspaces: () => Promise.resolve([]),
     upsertProfile: record("profile"),
     upsertBusinessSettings: record("businessSettings"),
     upsertOperator: record("operator"),
