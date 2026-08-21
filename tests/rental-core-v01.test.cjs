@@ -22,6 +22,12 @@ const endAt = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
 // 配置写方法已随「配置落库」转为异步，.cjs 无顶层 await，故整体包一层异步 IIFE。
 void (async () => {
 
+// SPACE-03：服务层状态按经营空间取，因此必须先跑一次启动预热，
+// 让「租户 → 默认空间」「空间 → 品类」查找表建立（夹具提供两个演示空间）。
+// 这也更贴近真实启动顺序，而不是靠生产代码里的硬编码样本兜底。
+await service.onApplicationBootstrap();
+await business.onApplicationBootstrap();
+
 const cameraProfile = service.getProfile(cameraTenant);
 const campingProfile = service.getProfile(campingTenant);
 assert.equal(cameraProfile.categoryCode, "camera");

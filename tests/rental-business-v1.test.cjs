@@ -32,6 +32,10 @@ function context() {
 // 核心服务的配置写方法已随「配置落库」转为异步，.cjs 无顶层 await，故包一层异步 IIFE。
 void (async () => {
 
+// SPACE-03：状态按经营空间取，先跑启动预热建立查找表（夹具提供演示空间）。
+await core.onApplicationBootstrap();
+await business.onApplicationBootstrap();
+
 const pricing = business.listPricingPlans(tenantId, context());
 assert.equal(pricing[0].categoryCode, "camping");
 assert.ok(pricing[0].rates.every((rate) => rate.unit === "calendar_day"));
@@ -62,9 +66,11 @@ assert.equal(publishedCalendar.status, "published");
 assert.ok(publishedCalendar.sourceUrl.startsWith("https://"));
 
 // GET 只能返回缺省视图，不能把尚未保存的年度悄悄塞进缓存。
-const cachedCalendarCount = business.states.get(tenantId).calendars.length;
+// SPACE-03：states 现在按经营空间键，演示租户的默认空间是 ws_<tenantId>。
+const workspaceKey = `ws_${tenantId}`;
+const cachedCalendarCount = business.states.get(workspaceKey).calendars.length;
 business.getCalendar(tenantId, context(), calendar.year + 10);
-assert.equal(business.states.get(tenantId).calendars.length, cachedCalendarCount, "calendar GET must be side-effect free");
+assert.equal(business.states.get(workspaceKey).calendars.length, cachedCalendarCount, "calendar GET must be side-effect free");
 
 // 写库失败时必须保留最后一次成功提交的缓存，而不是留下幽灵日历配置。
 const calendarBeforeRejectedWrite = structuredClone(business.getCalendar(tenantId, context(), calendar.year));

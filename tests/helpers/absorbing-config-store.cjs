@@ -11,7 +11,7 @@
  *
  * writes 数组只用于需要断言"确实发生了写穿"的场景，不作为数据源回读。
  */
-function createAbsorbingConfigStore() {
+function createAbsorbingConfigStore(extraWorkspaces = []) {
   const writes = [];
   const record = (kind) => (payload) => {
     writes.push({ kind, id: payload?.id ?? payload?.tenantId });
@@ -20,8 +20,20 @@ function createAbsorbingConfigStore() {
   return {
     writes,
     loadAll: () => Promise.resolve([]),
-    // SPACE-03：吸收式 stub —— 没有经营空间，服务层因此退回 seedState 的演示配置。
-    listWorkspaces: () => Promise.resolve([]),
+    /**
+     * SPACE-03：两个演示租户各有一个默认经营空间。
+     *
+     * 这不是"忠实模拟 Prisma"——读仍返回空、写仍丢弃。它只是把原先硬编码在
+     * `RentalCoreService.state()` 里的「tenant_001=camera / tenant_002=camping」
+     * 样本上下文搬到测试夹具里。服务层现在按经营空间取状态，不连库的用例
+     * 必须从某处拿到这个上下文，放在夹具里比留在生产代码里正确。
+     */
+    listWorkspaces: () =>
+      Promise.resolve([
+        ...extraWorkspaces,
+        { id: "ws_tenant_001", tenantId: "tenant_001", categoryCode: "camera", isDefault: true },
+        { id: "ws_tenant_002", tenantId: "tenant_002", categoryCode: "camping", isDefault: true }
+      ]),
     upsertProfile: record("profile"),
     upsertBusinessSettings: record("businessSettings"),
     upsertOperator: record("operator"),

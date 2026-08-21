@@ -2061,7 +2061,38 @@ async function main() {
     "SELECT COUNT(*) FROM `OperationLog` WHERE `action` LIKE 'http.%.rental.%' AND JSON_UNQUOTE(JSON_EXTRACT(`detail`,'$.targetId'))='v1';"
   );
   assert.equal(badTarget, 0, "审计的 targetId 不得是版本段 v1");
-  ok(`通用租赁域审计已落库：${rentalAudits} 条动作记录，其中 ${auditsWithOrder} 条关联到真实订单，targetId 未误取版本段`);
+  // SPACE-03：经营域审计必须带经营空间，且必须落在本租户的空间上。
+  const auditWithWs = readCount(
+    "SELECT COUNT(*) FROM `OperationLog` WHERE `action` LIKE 'http.%.rental.%' AND `workspaceId` IS NOT NULL;"
+  );
+  assert.ok(auditWithWs > 0, "经营域审计必须带 workspaceId");
+  assert.equal(
+    readCount(
+      "SELECT COUNT(*) FROM `OperationLog` l LEFT JOIN `business_workspaces` w" +
+        " ON w.`id` = l.`workspaceId` AND w.`tenantId` = l.`tenantId`" +
+        " WHERE l.`workspaceId` IS NOT NULL AND w.`id` IS NULL;"
+    ),
+    0,
+    "审计的 workspaceId 不得跨租户或悬空"
+  );
+  // 平台域审计（租户创建/冻结）没有经营空间，留 NULL 而不是被塞进默认空间。
+  // 先证明样本存在：否则「没有平台审计带空间」在根本没有平台审计时也成立，
+  // 是一条永真的空断言。
+  const platformAudits = readCount(
+    "SELECT COUNT(*) FROM `OperationLog` WHERE `action` LIKE 'tenant.%' OR `action` LIKE 'http.%.platform.%';"
+  );
+  assert.ok(platformAudits > 0, `前置条件：应存在平台域审计样本，实际 ${platformAudits} 条`);
+  assert.equal(
+    readCount(
+      "SELECT COUNT(*) FROM `OperationLog` WHERE (`action` LIKE 'tenant.%' OR `action` LIKE 'http.%.platform.%') AND `workspaceId` IS NOT NULL;"
+    ),
+    0,
+    "平台域审计不得被赋予经营空间（那是伪造归属）"
+  );
+  ok(
+    `通用租赁域审计已落库：${rentalAudits} 条动作记录，其中 ${auditsWithOrder} 条关联到真实订单、` +
+      `${auditWithWs} 条带经营空间且无跨租户，平台域审计保持无空间，targetId 未误取版本段`
+  );
 
   console.log("== 42. RC-04 奖励幂等以库为准（跨重启仍成立）==");
   // 早前奖励判重只查内存 rewardLedger：库上虽有 (tenantId, idempotencyKey) 唯一约束，

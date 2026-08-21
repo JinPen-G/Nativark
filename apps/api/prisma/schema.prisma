@@ -354,6 +354,7 @@ model BusinessWorkspace {
   defaultMarker String
   members      WorkspaceMember[]
   authSessions AuthSession[]
+  operationLogs OperationLog[]
   // SPACE-03：经营事实的反向关系。字段仅供 Prisma 关系解析，不用于查询。
   rentalCouponTemplates       RentalCouponTemplate[]
   rentalFulfillmentLocations  RentalFulfillmentLocation[]
@@ -1778,12 +1779,22 @@ model OperationLog {
   /// 再建一张只会造出第二个审计事实源。
   rentalOrderId String?
   rentalOrder   RentalOrder?  @relation(fields: [rentalOrderId], references: [id])
+  /// SPACE-03：经营空间归属。
+  ///
+  /// 可空：平台域审计（租户创建、冻结、平台配置）不属于任何经营空间，
+  /// 强制 NOT NULL 会逼出一个假的归属。经营域审计必须带值。
+  /// onDelete 用 Restrict 而不是 Cascade：审计不能随经营空间被删而消失。
+  /// 也不能用 SetNull——复合外键里的 tenantId 是必填列，Prisma 不允许。
+  /// 产品上空间只冻结/停用、不硬删，因此 Restrict 不会挡住正常操作。
+  workspaceId String?
+  workspace   BusinessWorkspace? @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Restrict)
   action    String
   detail    Json
   createdAt DateTime          @default(now())
 
   @@index([tenantId, action, createdAt])
   @@index([tenantId, rentalOrderId, createdAt])
+  @@index([tenantId, workspaceId, createdAt], map: "OperationLog_tenant_workspace_created_idx")
 }
 
 model ConfigVersion {
