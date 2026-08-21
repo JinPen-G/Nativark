@@ -3059,9 +3059,60 @@ async function main() {
     "访问过第二空间后，默认空间的定价方案不得丢失（状态必须按经营空间各自独立）"
   );
 
+  // 业务设置（支付/押金/逾期/履约/取消规则）必须按空间各自一份。
+  // 主键原本是 tenantId，同租户两个空间抢同一行——第二个空间保存会直接覆盖
+  // 第一个空间的规则。这条断言正是用来抓那种覆盖。
+  const isoSettingsOf = async (token) =>
+    (await request("GET", "/api/rental/v1/business-settings", null, token)).body.data;
+  const isoDefaultSettings = await isoSettingsOf(isoBack2.body.data.accessToken);
+  // 用 overdue.graceMinutes：它是真实存在的数值字段。
+  // 先前用 payment.unpaidHoldMinutes——该字段并不存在，undefined + 7 得到 NaN，
+  // 于是断言比较的是 NaN，看着像发现了缺陷，实际是坏样本。
+  const isoDefaultHold = isoDefaultSettings.overdue.graceMinutes;
+  assert.equal(typeof isoDefaultHold, "number", "前置条件：graceMinutes 必须是数值");
+  const isoSavedSettings = await request(
+    "PUT",
+    "/api/rental/v1/business-settings",
+    { ...isoDefaultSettings, overdue: { ...isoDefaultSettings.overdue, graceMinutes: isoDefaultHold + 7 } },
+    isoBack2.body.data.accessToken
+  );
+  assert.equal(isoSavedSettings.status, 200, `默认空间保存业务设置失败: ${JSON.stringify(isoSavedSettings.body).slice(0, 200)}`);
+  const isoSwitch3 = await request(
+    "POST",
+    "/api/auth/switch-workspace",
+    { workspaceId: isoSecondWs.id },
+    isoBack2.body.data.accessToken
+  );
+  assert.equal(isoSwitch3.status, 201, "第三次切换到第二空间失败");
+  const isoSecondSettings = await isoSettingsOf(isoSwitch3.body.data.accessToken);
+  assert.notEqual(
+    isoSecondSettings.overdue.graceMinutes,
+    isoDefaultHold + 7,
+    "第二空间不得继承默认空间刚改的业务设置（业务设置必须按空间各自一份）"
+  );
+  // 库层同样必须是两行，各归其主。
+  assert.equal(
+    readCount("SELECT COUNT(*) FROM `rental_tenant_business_settings` WHERE `tenantId`='tenant_001';"),
+    readCount("SELECT COUNT(DISTINCT `workspaceId`) FROM `rental_tenant_business_settings` WHERE `tenantId`='tenant_001';"),
+    "同租户的业务设置行数必须等于其涉及的经营空间数（不得多个空间共用一行）"
+  );
+  // 默认空间的改动必须仍在，没被第二空间的读取或写入抹掉。
+  const isoBack3 = await request(
+    "POST",
+    "/api/auth/switch-workspace",
+    { workspaceId: isoDefaultWs },
+    isoSwitch3.body.data.accessToken
+  );
+  assert.equal(isoBack3.status, 201, "第三次切回默认空间失败");
+  assert.equal(
+    (await isoSettingsOf(isoBack3.body.data.accessToken)).overdue.graceMinutes,
+    isoDefaultHold + 7,
+    "默认空间的业务设置改动不得被第二空间覆盖"
+  );
+
   ok(
     `同租户两空间互不可读：默认空间 ${isoDbDefault} 张订单/${isoAssetsDefaultCount} 件资产，` +
-      `第二空间 ${isoOrdersSecond.length} 张/${isoAssetsSecond.length} 件且无一条来自默认空间，切回后原样可见；业务配置亦隔离（默认空间新建的定价方案在第二空间不可见，第二空间品类随空间）`
+      `第二空间 ${isoOrdersSecond.length} 张/${isoAssetsSecond.length} 件且无一条来自默认空间，切回后原样可见；业务配置与业务设置亦隔离（定价方案不互见、业务设置各一份且不互相覆盖）`
   );
 
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);

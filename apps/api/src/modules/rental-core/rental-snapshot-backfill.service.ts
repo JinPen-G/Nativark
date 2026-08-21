@@ -423,7 +423,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
           const settings = core.businessSettings as TenantRentalBusinessSettings & { updatedBy?: string };
           await this.writeOne("rentalTenantBusinessSettings", divergences, () =>
             tx.rentalTenantBusinessSettings.upsert({
-            where: { tenantId },
+            where: { workspaceId },
             create: {
               tenantId,
               workspaceId,

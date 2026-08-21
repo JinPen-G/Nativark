@@ -237,8 +237,9 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       updatedBy
     };
     const workspaceId = await resolveScopeWorkspaceId(this.db(tx), settings.tenantId);
+    // 按经营空间 upsert：按 tenantId 会让同租户第二个空间覆盖第一个空间的业务设置。
     await this.db(tx).rentalTenantBusinessSettings.upsert({
-      where: { tenantId: settings.tenantId },
+      where: { workspaceId },
       create: { workspaceId, tenantId: settings.tenantId, ...data },
       update: data
     });

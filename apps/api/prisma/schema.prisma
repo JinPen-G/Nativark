@@ -305,7 +305,7 @@ model Tenant {
   rentalInspectionRecords   RentalInspectionRecord[]
   rentalCouponTemplates     RentalCouponTemplate[]
   rentalOperators           RentalFulfillmentOperator[]
-  rentalBusinessSettings    RentalTenantBusinessSettings?
+  rentalBusinessSettings    RentalTenantBusinessSettings[]
   rentalQuotes              RentalQuote[]
   rentalCustomerCoupons     RentalCustomerCoupon[]
   rentalRewardEntries       RentalRewardLedgerEntry[]
@@ -2467,10 +2467,13 @@ model RentalFulfillmentOperator {
 }
 
 model RentalTenantBusinessSettings {
-  tenantId      String             @id
+  /// SPACE-03：主键改为经营空间。
+  ///
+  /// 原主键是 tenantId，于是同租户两个空间抢同一行——第二个空间保存业务设置
+  /// 会直接覆盖第一个空间的支付、逾期、履约规则。业务设置属于经营空间。
+  workspaceId      String            @id
+  tenantId      String
   tenant        Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  /// SPACE-03：经营空间归属。与 tenantId 并存（需求 3：经营事实同时包含两者）。
-  workspaceId      String
   /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
   workspace        BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   categoryCode  RentalCategoryCode
@@ -2480,6 +2483,7 @@ model RentalTenantBusinessSettings {
   updatedBy     String
   updatedAt     DateTime           @updatedAt
 
+  @@index([tenantId], map: "rental_business_settings_tenant_idx")
   @@map("rental_tenant_business_settings")
 }
 
