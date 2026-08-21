@@ -3376,6 +3376,71 @@ async function main() {
       "第二空间业务列表不含未接入客户、重复接入幂等、跨租户接入 404 且无残留、权益账户主键为 (workspaceId, customerId)"
   );
 
+  console.log("== 58. SPACE-05 切换后会话上下文随空间刷新 ==");
+  // 前端切换器完全依赖这两个接口的返回：切换响应与 session-context。
+  // 若它们仍给租户级品类，界面就会"换了空间、菜单还是旧品类"，
+  // 而这类缺陷在前端看起来像缓存问题，实际根因在服务端。
+  const swDemo = await login("demo", "admin", DEMO_PASSWORD);
+  assert.ok(Array.isArray(swDemo.workspaces) && swDemo.workspaces.length >= 2, "前置条件：登录应返回至少两个可进入空间");
+  const swDefault = swDemo.workspaces.find((row) => row.isDefault);
+  const swOther = swDemo.workspaces.find((row) => !row.isDefault && row.status === "active");
+  assert.ok(swDefault && swOther, "前置条件：需要默认空间与另一个启用空间");
+  assert.notEqual(swDefault.categoryCode, swOther.categoryCode, "两个空间品类应不同，否则本节无法验证品类随空间刷新");
+
+  // 1) session-context 必须带出空间列表与当前空间（刷新页面后切换器靠它恢复）
+  const swCtx1 = await request("GET", "/api/auth/session-context", null, swDemo.accessToken);
+  assert.equal(swCtx1.status, 200, `session-context 应成功: ${JSON.stringify(swCtx1.body).slice(0, 160)}`);
+  assert.equal(swCtx1.body.data.currentWorkspaceId, swDemo.currentWorkspaceId, "session-context 的当前空间必须与登录一致");
+  assert.ok(
+    Array.isArray(swCtx1.body.data.workspaces) && swCtx1.body.data.workspaces.length >= 2,
+    "session-context 必须带出可进入空间列表，否则刷新页面后切换器无从渲染"
+  );
+  assert.equal(
+    swCtx1.body.data.tenant.categoryCode,
+    swDefault.categoryCode,
+    "session-context 的品类必须是当前空间的品类"
+  );
+
+  // 2) 切换到另一空间：响应与 session-context 的品类都必须跟着变
+  const swSwitch = await request("POST", "/api/auth/switch-workspace", { workspaceId: swOther.id }, swDemo.accessToken);
+  assert.equal(swSwitch.status, 201, `切换空间失败: ${JSON.stringify(swSwitch.body).slice(0, 200)}`);
+  assert.equal(swSwitch.body.data.currentWorkspaceId, swOther.id, "切换响应的当前空间必须是目标空间");
+  assert.equal(
+    swSwitch.body.data.tenant.categoryCode,
+    swOther.categoryCode,
+    `切换响应的品类必须随空间变化，实际 ${swSwitch.body.data.tenant.categoryCode} 期望 ${swOther.categoryCode}`
+  );
+  const swCtx2 = await request("GET", "/api/auth/session-context", null, swSwitch.body.data.accessToken);
+  assert.equal(
+    swCtx2.body.data.tenant.categoryCode,
+    swOther.categoryCode,
+    "切换后 session-context 的品类也必须是新空间的品类（刷新页面不得回退到旧品类）"
+  );
+  assert.equal(swCtx2.body.data.currentWorkspaceId, swOther.id, "切换后 session-context 的当前空间必须是新空间");
+
+  // 3) 无权空间不可切换：另一租户的空间必须被拒
+  const swDemo2 = await login("demo2", "admin", DEMO_PASSWORD);
+  const swCross = await request("POST", "/api/auth/switch-workspace", { workspaceId: swOther.id }, swDemo2.accessToken);
+  assert.ok(
+    swCross.status === 403 || swCross.status === 404,
+    `切换到无权空间必须被拒（403/404），实际 ${swCross.status}: ${JSON.stringify(swCross.body).slice(0, 160)}`
+  );
+  // 被拒后原会话的当前空间不得被改动。
+  const swCtx3 = await request("GET", "/api/auth/session-context", null, swDemo2.accessToken);
+  assert.notEqual(swCtx3.body.data.currentWorkspaceId, swOther.id, "切换被拒后不得改动原会话的当前空间");
+
+  // 4) 切换器渲染所依赖的空间列表必须只含本账号可进入的空间（无权空间不可见）
+  const swVisible = swCtx1.body.data.workspaces.map((row) => row.tenantId);
+  assert.deepEqual(
+    [...new Set(swVisible)],
+    ["tenant_001"],
+    `可进入空间列表不得含其他租户的空间: ${JSON.stringify([...new Set(swVisible)])}`
+  );
+  ok(
+    "切换后会话上下文随空间刷新：session-context 带出空间列表与当前空间、品类随空间变化（切换响应与刷新后一致）、" +
+      "跨租户空间切换被拒且不改动原会话、空间列表只含本租户"
+  );
+
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);
 }
 

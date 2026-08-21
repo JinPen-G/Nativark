@@ -188,6 +188,14 @@ export interface SwitchWorkspaceRequest {
 export interface SessionContextResponse {
   tenant: TenantContext;
   user: AuthUser;
+  /**
+   * SPACE-05：可进入的经营空间与当前空间。
+   *
+   * 必须由 session-context 返回，否则刷新页面后前端只剩 token，
+   * 切换器无从知道「当前在哪个空间、还能去哪些空间」，只能退化成重新登录。
+   */
+  workspaces?: BusinessWorkspace[];
+  currentWorkspaceId?: string;
 }
 
 export interface RefreshSessionRequest {

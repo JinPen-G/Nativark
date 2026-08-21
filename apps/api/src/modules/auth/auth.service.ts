@@ -148,8 +148,16 @@ export class AuthService {
   }
 
   async getSessionContext(authorization?: string) {
-    const user = await this.resolveAccessToken(authorization);
+    const context = await this.resolveAccessContext(authorization);
+    const user = context?.user;
     if (!user) throw new UnauthorizedException("会话已失效，请重新登录");
+    const workspaceId = context?.workspaceId;
+    // SPACE-05：品类与能力按**当前经营空间**取。
+    //
+    // 原先固定取租户级档案，于是刷新页面后停留在非默认空间的会话会显示
+    // 另一个空间的品类与 capability——前端据此渲染菜单，等于换了空间却
+    // 沿用旧品类的界面。这与 Guard 的判定口径也不一致。
+    const scope = await this.getCategoryContext(user.tenantId, workspaceId);
     const tenant = await this.platformService.findTenantByIdForAuth(user.tenantId);
     return {
       tenant: {
@@ -157,11 +165,14 @@ export class AuthService {
         tenantCode: tenant.tenantCode,
         tenantName: tenant.tenantName,
         tenantStatus: tenant.tenantStatus,
-        categoryCode: tenant.categoryCode,
-        categoryName: tenant.categoryName,
-        capabilities: tenant.capabilities
+        categoryCode: scope.categoryCode,
+        categoryName: scope.categoryName,
+        capabilities: scope.capabilities
       },
-      user: this.toAuthUser(user)
+      user: this.toAuthUser(user),
+      // 刷新页面后切换器仍需知道「在哪、能去哪」，因此这里必须带出空间列表。
+      workspaces: await this.platformService.listUserWorkspaces(user.id),
+      currentWorkspaceId: workspaceId
     };
   }
 
@@ -274,6 +285,7 @@ export class AuthService {
       exp: now + this.accessTtlSeconds
     });
     const workspaces = await this.platformService.listUserWorkspaces(user.id);
+    const sessionScope = await this.getCategoryContext(user.tenantId, workspaceId);
     return {
       accessToken,
       refreshToken: refreshToken ?? "",
@@ -283,9 +295,10 @@ export class AuthService {
         tenantCode: tenant.tenantCode,
         tenantName: tenant.tenantName,
         tenantStatus: tenant.tenantStatus,
-        categoryCode: tenant.categoryCode,
-        categoryName: tenant.categoryName,
-        capabilities: tenant.capabilities
+        // 与 session-context 同口径：品类和能力取当前经营空间，不取租户级档案。
+        categoryCode: sessionScope.categoryCode,
+        categoryName: sessionScope.categoryName,
+        capabilities: sessionScope.capabilities
       },
       user: this.toAuthUser(user),
       // SPACE-02：登录返回可进入的空间与当前空间，供前端渲染切换器（前端属 SPACE-05）。

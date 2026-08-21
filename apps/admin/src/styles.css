@@ -366,3 +366,10 @@ button, input, textarea, select { font: inherit; }
   .metric-grid { grid-template-columns: 1fr; }
   .login-workspace { min-height: calc(100vh - 48px); padding: 16px; }
 }
+
+/* SPACE-05：经营空间切换器 */
+.workspace-switcher { display: inline-flex; align-items: center; gap: 6px; max-width: 220px; }
+.workspace-switcher > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-indicator { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
+.workspace-option { display: inline-flex; flex-direction: column; line-height: 1.25; }
+.workspace-option small { opacity: 0.6; font-size: 12px; }

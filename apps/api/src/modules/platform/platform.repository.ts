@@ -302,15 +302,17 @@ export class PlatformRepository {
   async getWorkspaceCategoryContext(
     tenantId: string,
     workspaceId: string
-  ): Promise<{ categoryCode?: string; capabilities?: string[] }> {
+  ): Promise<{ categoryCode?: TenantSummary["categoryCode"]; categoryName?: string; capabilities?: TenantSummary["capabilities"] }> {
     const workspace = await this.prisma.businessWorkspace.findFirst({
       where: { id: workspaceId, tenantId },
-      include: { category: { select: { defaultCapabilities: true } } }
+      include: { category: { select: { name: true, defaultCapabilities: true } } }
     });
     if (!workspace) return {};
     return {
       categoryCode: this.toDomainCategoryCode(workspace.categoryCode),
-      capabilities: workspace.category.defaultCapabilities as unknown as string[]
+      // categoryName 供前端直接展示；缺了它，切换空间后标题仍是旧品类名。
+      categoryName: workspace.category.name,
+      capabilities: workspace.category.defaultCapabilities as unknown as TenantSummary["capabilities"]
     };
   }
 
