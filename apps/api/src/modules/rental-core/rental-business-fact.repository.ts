@@ -280,7 +280,12 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
     };
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, account.tenantId);
     await this.prisma.rentalBenefitAccount.upsert({
-      where: { tenantId_customerId: { tenantId: account.tenantId, customerId: account.customerId } },
+      // SPACE-04：按 (workspaceId, customerId) 键控。
+      //
+      // 原先键 (tenantId, customerId)，而积分与营销余额按需求是**空间级**的：
+      // 同一客户在摄影空间和露营空间各有独立余额。用租户级键 upsert 时，
+      // 第二个空间的写入会 update 掉第一个空间那行，余额互相覆盖而不是各记一行。
+      where: { workspaceId_customerId: { workspaceId, customerId: account.customerId } },
       create: { workspaceId, tenantId: account.tenantId, customerId: account.customerId, ...data },
       update: data
     });

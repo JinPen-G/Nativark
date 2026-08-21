@@ -1,0 +1,217 @@
+import { Injectable } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
+import type {
+  CustomerWorkspaceLink,
+  SaveSharedCustomerRequest,
+  SharedCustomerProfile
+} from "@store-rental/shared";
+import { PrismaService } from "../database/prisma.service";
+
+export type SharedCustomerTx = Prisma.TransactionClient;
+
+/**
+ * SPACE-04：共享客户主档的库侧唯一入口。
+ *
+ * 隔离口径与其他仓储不同，必须分清两层，否则会把「共享」做成「泄露」：
+ * - **主档**按 `tenantId` 共享：同租户任一空间都能查到同一个客户，这是需求要的复用。
+ * - **业务关系**按 `workspaceId` 隔离：客户在哪个空间有业务、等级多少，各空间独立。
+ *
+ * 因此主档查询只带 tenantId 条件（跨空间可见是**设计**，不是漏洞），
+ * 而关系查询一律带 workspaceId。两者不能互相套用。
+ */
+@Injectable()
+export class SharedCustomerRepository {
+  constructor(private readonly prisma: PrismaService) {}
+
+  private mask(phone: string) {
+    const trimmed = phone.trim();
+    if (trimmed.length <= 4) return trimmed;
+    return `${trimmed.slice(0, 3)}****${trimmed.slice(-4)}`;
+  }
+
+  /** 按租户列出共享客户主档，附带其空间关系（供判断是否需要接入当前空间）。 */
+  async listByTenant(tenantId: string): Promise<SharedCustomerProfile[]> {
+    const rows = await this.prisma.customerProfile.findMany({
+      where: { tenantId },
+      include: { workspaceLinks: true },
+      orderBy: { createdAt: "desc" }
+    });
+    return rows.map((row) => this.toDomain(row));
+  }
+
+  async findById(tenantId: string, customerId: string): Promise<SharedCustomerProfile | undefined> {
+    const row = await this.prisma.customerProfile.findFirst({
+      where: { id: customerId, tenantId },
+      include: { workspaceLinks: true }
+    });
+    return row ? this.toDomain(row) : undefined;
+  }
+
+  /** 按手机号查主档。用于「客户已在别的空间注册过」的复用判定。 */
+  async findByPhone(tenantId: string, phone: string): Promise<SharedCustomerProfile | undefined> {
+    const row = await this.prisma.customerProfile.findFirst({
+      where: { tenantId, phone: phone.trim() },
+      include: { workspaceLinks: true }
+    });
+    return row ? this.toDomain(row) : undefined;
+  }
+
+  /**
+   * 创建共享客户主档，并在同一事务里把它接入指定经营空间。
+   *
+   * 两件事必须同事务：主档建好而关系没建，客户在当前空间"不存在"却又占用了
+   * 手机号唯一键，再次创建会撞 409 且无从修复。
+   */
+  async createWithLink(
+    tenantId: string,
+    workspaceId: string,
+    input: SaveSharedCustomerRequest,
+    levelName: string
+  ): Promise<SharedCustomerProfile> {
+    const created = await this.prisma.$transaction(async (tx) => {
+      const profile = await tx.customerProfile.create({
+        data: {
+          tenantId,
+          customerType: input.customerType,
+          name: input.name.trim(),
+          phone: input.phone.trim(),
+          phoneMasked: this.mask(input.phone),
+          email: input.email?.trim() || null,
+          identityVerified: input.identityVerified ?? false,
+          // 只存掩码，绝不落明文证件号。
+          identityNoMasked: input.identityNo ? this.mask(input.identityNo) : null,
+          qualifications: (input.qualifications ?? {}) as Prisma.InputJsonValue,
+          corporateName: input.corporateName?.trim() || null,
+          corporateTaxNo: input.corporateTaxNo?.trim() || null
+        }
+      });
+      await tx.customerWorkspaceLink.create({
+        data: { tenantId, workspaceId, customerId: profile.id, levelName }
+      });
+      return profile.id;
+    });
+    const profile = await this.findById(tenantId, created);
+    if (!profile) throw new Error("共享客户创建后读取失败");
+    return profile;
+  }
+
+  /**
+   * 把已存在的共享客户接入某个经营空间。幂等：已接入则返回既有关系。
+   *
+   * 这是「同一客户无需重复注册即可在两个空间使用」的落点。
+   */
+  async linkToWorkspace(
+    tenantId: string,
+    workspaceId: string,
+    customerId: string,
+    levelName: string
+  ): Promise<CustomerWorkspaceLink> {
+    const existing = await this.prisma.customerWorkspaceLink.findFirst({
+      where: { tenantId, workspaceId, customerId }
+    });
+    if (existing) return this.toLink(existing);
+    const row = await this.prisma.customerWorkspaceLink.create({
+      data: { tenantId, workspaceId, customerId, levelName }
+    });
+    return this.toLink(row);
+  }
+
+  /** 列出**当前空间**的客户关系。与主档列表刻意分开，避免把跨空间可见误用到业务侧。 */
+  async listLinksByWorkspace(tenantId: string, workspaceId: string): Promise<CustomerWorkspaceLink[]> {
+    const rows = await this.prisma.customerWorkspaceLink.findMany({
+      where: { tenantId, workspaceId },
+      orderBy: { createdAt: "desc" }
+    });
+    return rows.map((row) => this.toLink(row));
+  }
+
+  async findLink(
+    tenantId: string,
+    workspaceId: string,
+    customerId: string
+  ): Promise<CustomerWorkspaceLink | undefined> {
+    const row = await this.prisma.customerWorkspaceLink.findFirst({
+      where: { tenantId, workspaceId, customerId }
+    });
+    return row ? this.toLink(row) : undefined;
+  }
+
+  private toDomain(row: {
+    id: string;
+    tenantId: string;
+    customerType: string;
+    name: string;
+    phone: string;
+    phoneMasked: string;
+    email: string | null;
+    identityVerified: boolean;
+    identityNoMasked: string | null;
+    qualifications: Prisma.JsonValue;
+    corporateName: string | null;
+    corporateTaxNo: string | null;
+    status: string;
+    sourceMemberId: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+    workspaceLinks?: Array<Parameters<SharedCustomerRepository["toLinkPublic"]>[0]>;
+  }): SharedCustomerProfile {
+    return {
+      id: row.id,
+      tenantId: row.tenantId,
+      customerType: row.customerType as SharedCustomerProfile["customerType"],
+      name: row.name,
+      phone: row.phone,
+      phoneMasked: row.phoneMasked,
+      email: row.email ?? undefined,
+      identityVerified: row.identityVerified,
+      identityNoMasked: row.identityNoMasked ?? undefined,
+      qualifications: (row.qualifications ?? {}) as Record<string, unknown>,
+      corporateName: row.corporateName ?? undefined,
+      corporateTaxNo: row.corporateTaxNo ?? undefined,
+      status: row.status as SharedCustomerProfile["status"],
+      sourceMemberId: row.sourceMemberId ?? undefined,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+      workspaceLinks: row.workspaceLinks?.map((link) => this.toLink(link))
+    };
+  }
+
+  /** 仅用于给 toDomain 的入参推导类型，不在运行时调用。 */
+  private toLinkPublic(row: {
+    id: string;
+    tenantId: string;
+    workspaceId: string;
+    customerId: string;
+    levelName: string;
+    status: string;
+    firstOrderAt: Date | null;
+    createdAt: Date;
+    updatedAt: Date;
+  }) {
+    return row;
+  }
+
+  private toLink(row: {
+    id: string;
+    tenantId: string;
+    workspaceId: string;
+    customerId: string;
+    levelName: string;
+    status: string;
+    firstOrderAt: Date | null;
+    createdAt: Date;
+    updatedAt: Date;
+  }): CustomerWorkspaceLink {
+    return {
+      id: row.id,
+      tenantId: row.tenantId,
+      workspaceId: row.workspaceId,
+      customerId: row.customerId,
+      levelName: row.levelName,
+      status: row.status as CustomerWorkspaceLink["status"],
+      firstOrderAt: row.firstOrderAt?.toISOString(),
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString()
+    };
+  }
+}

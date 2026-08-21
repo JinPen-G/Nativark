@@ -1222,7 +1222,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
         for (const account of business.benefitAccounts ?? []) {
           await this.writeOne("rentalBenefitAccount", divergences, () =>
             tx.rentalBenefitAccount.upsert({
-            where: { tenantId_customerId: { tenantId, customerId: account.customerId } },
+            where: { workspaceId_customerId: { workspaceId, customerId: account.customerId } },
             update: {},
             create: {
               tenantId,

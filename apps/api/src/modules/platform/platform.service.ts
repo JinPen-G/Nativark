@@ -1,11 +1,13 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "node:crypto";
-import { requireRequestTenantId } from "../../common/request-identity";
+import { requireRequestTenantId, requireRequestWorkspaceId } from "../../common/request-identity";
 import {
   RENTAL_CATEGORY_DEFINITIONS,
   CreateBusinessWorkspaceRequest,
   SaveWorkspaceMemberRequest,
+  SaveSharedCustomerRequest,
+  LinkCustomerToWorkspaceRequest,
   UpdateBusinessWorkspaceRequest,
   GeneratePlatformNumberRequest,
   OrganizationSummary,
@@ -46,6 +48,7 @@ import {
   describeDataPermission
 } from "../../common/data-permission";
 import { PlatformRepository } from "./platform.repository";
+import { SharedCustomerRepository } from "./shared-customer.repository";
 import { RentalCoreService } from "../rental-core/rental-core.service";
 
 interface StoredUser extends SaveSystemUserRequest {
@@ -62,7 +65,14 @@ export class PlatformService {
   constructor(
     private readonly configService: ConfigService,
     private readonly platformRepository: PlatformRepository,
-    @Optional() private readonly rentalCoreService?: RentalCoreService
+    @Optional() private readonly rentalCoreService?: RentalCoreService,
+    // SPACE-04：放在最后且 @Optional。
+    //
+    // 不能插到 rentalCoreService 之前：多个不连库的测试用位置参数构造本服务
+    // （`new PlatformService(config, undefined, rentalCore)`），插在中间会让
+    // rentalCore 落到错误的槽位，租户初始化的回调不再注册默认经营空间，
+    // 表现为后续调用报「当前 SaaS 租户尚未建立经营空间」——实测踩过。
+    @Optional() private readonly sharedCustomers?: SharedCustomerRepository
   ) {}
 
   private readonly tenants: TenantSummary[] = [
@@ -1376,6 +1386,83 @@ export class PlatformService {
   listBusinessWorkspaces(currentUser?: SystemUserRow) {
     this.requireWorkspaceDataSource();
     return this.platformRepository.listBusinessWorkspaces(currentUser);
+  }
+
+  /**
+   * 共享客户主档仓储只在连库时注入（不连库的单元测试用位置参数构造本服务）。
+   * 缺失时明确拒绝，而不是让 `undefined.xxx` 抛成 500。
+   */
+  private requireSharedCustomers(): SharedCustomerRepository {
+    if (!this.sharedCustomers) {
+      throw new BadRequestException("共享客户主档需要 MySQL 数据源，当前为内存演示模式");
+    }
+    return this.sharedCustomers;
+  }
+
+  /* ---------- SPACE-04：租户共享客户主档 ---------- */
+
+  /**
+   * 列出本租户的共享客户主档。
+   *
+   * 跨空间可见是**设计**：需求要的正是「同一客户无需重复注册即可在两个空间使用」，
+   * 运营在露营空间必须能查到这个客户已在摄影空间注册过，否则只能重复建档。
+   * 业务侧的隔离由 `listWorkspaceCustomers` 承担，两个接口不可混用。
+   */
+  listSharedCustomers(currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireSharedCustomers().listByTenant(tenantId);
+  }
+
+  /** 列出**当前经营空间**已接入的客户关系。空间取自会话，不接受客户端传入。 */
+  listWorkspaceCustomers(currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    const workspaceId = requireRequestWorkspaceId();
+    return this.requireSharedCustomers().listLinksByWorkspace(tenantId, workspaceId);
+  }
+
+  /**
+   * 在当前空间登记客户。
+   *
+   * 手机号已存在时**不报错也不改主档**，而是把既有客户接入当前空间——
+   * 这正是「共享」的语义。若改成 409，运营在第二个空间就只能换号建档，
+   * 等于把共享主档退化成按空间各存一份。
+   */
+  async registerSharedCustomer(input: SaveSharedCustomerRequest, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    const workspaceId = requireRequestWorkspaceId();
+    if (!input?.phone?.trim()) throw new BadRequestException("客户手机号不能为空");
+    if (!input?.name?.trim()) throw new BadRequestException("客户名称不能为空");
+    const levelName = "普通会员";
+    const customers = this.requireSharedCustomers();
+    const existing = await customers.findByPhone(tenantId, input.phone);
+    if (existing) {
+      await customers.linkToWorkspace(tenantId, workspaceId, existing.id, levelName);
+      const refreshed = await customers.findById(tenantId, existing.id);
+      return refreshed ?? existing;
+    }
+    return customers.createWithLink(tenantId, workspaceId, input, levelName);
+  }
+
+  /** 把已存在的共享客户接入当前空间。目标空间取自会话，客户必须属于同租户。 */
+  async linkCustomerToWorkspace(input: LinkCustomerToWorkspaceRequest, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    const workspaceId = requireRequestWorkspaceId();
+    if (!input?.customerId?.trim()) throw new BadRequestException("客户不能为空");
+    // 必须按 tenantId 校验存在性：否则可以拿别租户的 customerId 建立关系，
+    // 虽然复合外键会在库层拒绝，但那会表现成 500 而不是明确的 404。
+    const customers = this.requireSharedCustomers();
+    const profile = await customers.findById(tenantId, input.customerId.trim());
+    if (!profile) throw new NotFoundException("共享客户不存在");
+    return customers.linkToWorkspace(
+      tenantId,
+      workspaceId,
+      profile.id,
+      input.levelName?.trim() || "普通会员"
+    );
   }
 
   createBusinessWorkspace(input: CreateBusinessWorkspaceRequest, currentUser?: SystemUserRow) {

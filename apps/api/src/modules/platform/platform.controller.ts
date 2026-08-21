@@ -16,6 +16,8 @@ import type {
   UpdateTenantRequest,
   UpdateTenantStatusRequest,
   CreateBusinessWorkspaceRequest,
+  LinkCustomerToWorkspaceRequest,
+  SaveSharedCustomerRequest,
   UpdateBusinessWorkspaceRequest,
   SaveWorkspaceMemberRequest
 } from "@store-rental/shared";
@@ -64,6 +66,36 @@ export class PlatformController {
   @Get("workspaces")
   workspaces(@Req() req: RequestWithUser) {
     return this.platformService.listBusinessWorkspaces(req.user);
+  }
+
+  /**
+   * SPACE-04 的最小管理面：租户共享客户主档 + 空间接入。
+   *
+   * 两个列表接口的隔离口径**刻意不同**，不是疏漏：
+   * - `customers` 按租户列全部主档，跨空间可见——这正是「同一客户无需重复注册」
+   *   所要求的：运营在露营空间必须能查到他已在摄影空间注册过。
+   * - `workspace-customers` 只列当前空间的业务关系，空间取自会话。
+   *
+   * 不提供跨空间的订单/权益汇总（需求明确排除本阶段建设）。
+   */
+  @Get("customers")
+  sharedCustomers(@Req() req: RequestWithUser) {
+    return this.platformService.listSharedCustomers(req.user);
+  }
+
+  @Get("workspace-customers")
+  workspaceCustomers(@Req() req: RequestWithUser) {
+    return this.platformService.listWorkspaceCustomers(req.user);
+  }
+
+  @Post("customers")
+  registerCustomer(@Body() body: SaveSharedCustomerRequest, @Req() req: RequestWithUser) {
+    return this.platformService.registerSharedCustomer(body, req.user);
+  }
+
+  @Post("workspace-customers")
+  linkCustomer(@Body() body: LinkCustomerToWorkspaceRequest, @Req() req: RequestWithUser) {
+    return this.platformService.linkCustomerToWorkspace(body, req.user);
   }
 
   @Post("workspaces")

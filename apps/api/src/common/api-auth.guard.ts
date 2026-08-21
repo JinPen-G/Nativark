@@ -96,6 +96,13 @@ function requiredPermissions(method: string, path: string) {
   if (path.startsWith("/platform/organizations") || path.startsWith("/platform/users")) {
     return ["system:user:manage"];
   }
+  if (path.startsWith("/platform/customers") || path.startsWith("/platform/workspace-customers")) {
+    // SPACE-04：共享客户主档按会员权限判定，与旧车辆域会员页面一致。
+    // 读写分开：查看不应要求管理权限，否则运营查客户就得给写权限。
+    return method === "GET"
+      ? ["store-rental:member:view", "store-rental:member:manage"]
+      : ["store-rental:member:manage"];
+  }
   if (path.startsWith("/platform/tenants")) {
     return ["system:tenant:manage"];
   }
@@ -398,7 +405,15 @@ export class ApiAuthGuard implements CanActivate {
       !workspaceId &&
       accessContext.hasWorkspaces &&
       !workspaceExemptPath &&
-      (path.startsWith("/rental/") || path.startsWith("/store-rental/"))
+      (path.startsWith("/rental/") ||
+        path.startsWith("/store-rental/") ||
+        // SPACE-04：这两条按当前空间读写业务关系，缺空间同样必须 fail-closed。
+        // 不加进来的话，服务层的 requireRequestWorkspaceId() 会抛成 500，
+        // 而正确语义是「请先选择经营空间」的 403。
+        path === "/platform/workspace-customers" ||
+        path.startsWith("/platform/workspace-customers/") ||
+        path === "/platform/customers" ||
+        path.startsWith("/platform/customers/"))
     ) {
       throw new ForbiddenException("当前会话没有经营空间，请先选择经营空间");
     }

@@ -18,6 +18,7 @@ import { OpenApiController } from "./modules/openapi/openapi.controller";
 import { DatabaseModule } from "./modules/database/database.module";
 import { PlatformController } from "./modules/platform/platform.controller";
 import { PlatformRepository } from "./modules/platform/platform.repository";
+import { SharedCustomerRepository } from "./modules/platform/shared-customer.repository";
 import { PlatformService } from "./modules/platform/platform.service";
 import { ReportsController } from "./modules/reports/reports.controller";
 import { ReportsRepository } from "./modules/reports/reports.repository";
@@ -65,6 +66,7 @@ import { RentalOrderConfirmationService } from "./modules/rental-core/rental-ord
     AuthService,
     PlatformService,
     PlatformRepository,
+    SharedCustomerRepository,
     OperationLogService,
     ReportsService,
     ReportsRepository,

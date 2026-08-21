@@ -3940,6 +3940,73 @@ export interface SaveWorkspaceMemberRequest {
   isActive?: boolean;
 }
 
+/**
+ * SPACE-04：租户级共享客户主档。
+ *
+ * 身份在租户内共享（同一手机号只有一份主档），而订单、优惠券、积分、
+ * 会员等级和营销余额按经营空间隔离——后者不在本类型里，各由自己的事实承载。
+ *
+ * `qualifications` 存资质**原始事实**（如驾驶证是否已验证），不存"是否适用"的结论：
+ * 驾驶证对 vehicle 空间有意义、对 camera 空间无意义，适用性由目标空间品类规则判断。
+ */
+export interface SharedCustomerProfile {
+  id: string;
+  tenantId: string;
+  customerType: "personal" | "corporate";
+  name: string;
+  phone: string;
+  phoneMasked: string;
+  email?: string;
+  identityVerified: boolean;
+  identityNoMasked?: string;
+  qualifications: Record<string, unknown>;
+  corporateName?: string;
+  corporateTaxNo?: string;
+  status: "active" | "suspended";
+  /** 回填来源的旧会员主键，仅用于对账追溯，不参与业务判定。 */
+  sourceMemberId?: string;
+  createdAt: string;
+  updatedAt: string;
+  /** 该客户已接入的经营空间关系。列表接口默认带出，便于判断"是否需要接入本空间"。 */
+  workspaceLinks?: CustomerWorkspaceLink[];
+}
+
+/** SPACE-04：客户在某个经营空间的业务关系。会员等级按空间隔离。 */
+export interface CustomerWorkspaceLink {
+  id: string;
+  tenantId: string;
+  workspaceId: string;
+  customerId: string;
+  levelName: string;
+  status: "active" | "suspended";
+  firstOrderAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SaveSharedCustomerRequest {
+  customerType: "personal" | "corporate";
+  name: string;
+  phone: string;
+  email?: string;
+  identityVerified?: boolean;
+  identityNo?: string;
+  qualifications?: Record<string, unknown>;
+  corporateName?: string;
+  corporateTaxNo?: string;
+}
+
+/**
+ * 把已存在的共享客户接入当前经营空间。
+ *
+ * 刻意不接受 workspaceId：目标空间一律取自服务端会话，
+ * 否则客户端可以把客户接入自己无权进入的空间。
+ */
+export interface LinkCustomerToWorkspaceRequest {
+  customerId: string;
+  levelName?: string;
+}
+
 export interface TenantRentalProfile {
   tenantId: string;
   categoryCode: RentalCategoryCode;

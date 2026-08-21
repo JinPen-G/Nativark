@@ -3243,6 +3243,139 @@ async function main() {
   );
   ok("品类与能力按经营空间判定：车辆租户在 camera 空间被车辆域拒绝 403，切回 vehicle 空间即恢复 200");
 
+  console.log("== 57. SPACE-04 共享客户主档按租户复用、业务关系按空间隔离 ==");
+  // SPACE-04 的核心验收，两个方向都必须成立，缺一个就是做错了：
+  //   共享方向：同一客户在第二个空间**不必重复注册**（主档按租户唯一）
+  //   隔离方向：空间级业务关系互不可见（等级、订单、权益按空间独立）
+  // 只测一个方向很容易自欺——把主档也做成按空间各存一份时，"隔离"照样过。
+  const scDemo = await login("demo", "admin", DEMO_PASSWORD);
+  const scDefaultWs = scDemo.currentWorkspaceId;
+  const scSecondWs = (await request("GET", "/api/platform/workspaces", null, scDemo.accessToken)).body.data
+    .find((row) => !row.isDefault && row.status === "active");
+  assert.ok(scSecondWs, "前置条件：需要第二个启用的经营空间");
+
+  // 1) 在默认空间登记一个新客户
+  const scPhone = `139${String(Date.now()).slice(-8)}`;
+  const scCreate = await request(
+    "POST",
+    "/api/platform/customers",
+    { customerType: "personal", name: "E2E共享客户", phone: scPhone, identityVerified: true, qualifications: { driverLicenseVerified: true } },
+    scDemo.accessToken
+  );
+  assert.equal(scCreate.status, 201, `登记共享客户应成功: ${JSON.stringify(scCreate.body).slice(0, 200)}`);
+  const scCustomerId = scCreate.body.data.id;
+  // 明文证件号绝不落库，只存掩码。
+  assert.equal(scCreate.body.data.phoneMasked, `${scPhone.slice(0, 3)}****${scPhone.slice(-4)}`, "手机号必须有掩码");
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`customer_profiles\` WHERE \`tenantId\`='tenant_001' AND \`phone\`='${scPhone}';`),
+    1,
+    "共享客户主档应恰好一行"
+  );
+  assert.equal(
+    readCount(
+      `SELECT COUNT(*) FROM \`customer_workspace_links\` WHERE \`customerId\`='${scCustomerId}' AND \`workspaceId\`='${scDefaultWs}';`
+    ),
+    1,
+    "登记时应同时建立默认空间的业务关系"
+  );
+
+  // 2) 隔离方向：第二空间的业务关系列表看不到这个客户
+  const scSwitch = await request("POST", "/api/auth/switch-workspace", { workspaceId: scSecondWs.id }, scDemo.accessToken);
+  assert.equal(scSwitch.status, 201, `切换到第二空间失败: ${JSON.stringify(scSwitch.body).slice(0, 200)}`);
+  const scTokenB = scSwitch.body.data.accessToken;
+  const scLinksB = (await request("GET", "/api/platform/workspace-customers", null, scTokenB)).body.data;
+  assert.equal(
+    scLinksB.filter((row) => row.customerId === scCustomerId).length,
+    0,
+    "第二空间的业务关系列表不得看到只在默认空间登记的客户"
+  );
+
+  // 3) 共享方向：主档在第二空间**可见**（这是设计，不是泄露）
+  const scProfilesB = (await request("GET", "/api/platform/customers", null, scTokenB)).body.data;
+  const scFoundB = scProfilesB.find((row) => row.id === scCustomerId);
+  assert.ok(
+    scFoundB,
+    "共享客户主档必须在同租户第二空间可见——否则运营只能重复建档，违背「无需重复注册」"
+  );
+
+  // 4) 同手机号在第二空间"再登记"：不得报错、不得新建主档，而是接入本空间
+  const scReRegister = await request(
+    "POST",
+    "/api/platform/customers",
+    { customerType: "personal", name: "E2E共享客户", phone: scPhone },
+    scTokenB
+  );
+  assert.equal(
+    scReRegister.status,
+    201,
+    `同手机号在第二空间登记应复用主档而不是 409: ${JSON.stringify(scReRegister.body).slice(0, 200)}`
+  );
+  assert.equal(scReRegister.body.data.id, scCustomerId, "必须复用同一个共享客户主档，不得新建");
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`customer_profiles\` WHERE \`tenantId\`='tenant_001' AND \`phone\`='${scPhone}';`),
+    1,
+    "复用后主档仍只有一行（新建了第二行=主档没有真正共享）"
+  );
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`customer_workspace_links\` WHERE \`customerId\`='${scCustomerId}';`),
+    2,
+    "两个空间应各有一条业务关系"
+  );
+
+  // 5) 幂等：重复接入不得产生第二条关系
+  const scLinkAgain = await request(
+    "POST",
+    "/api/platform/workspace-customers",
+    { customerId: scCustomerId },
+    scTokenB
+  );
+  assert.equal(scLinkAgain.status, 201, `重复接入应幂等返回: ${JSON.stringify(scLinkAgain.body).slice(0, 200)}`);
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`customer_workspace_links\` WHERE \`customerId\`='${scCustomerId}';`),
+    2,
+    "重复接入不得新增业务关系"
+  );
+
+  // 6) 跨租户必须拒绝：拿别租户的 customerId 接入本空间
+  const scDemo2 = await login("demo2", "admin", DEMO_PASSWORD);
+  const scOtherTenantCustomer = readScalar(
+    "SELECT `id` FROM `customer_profiles` WHERE `tenantId`='tenant_001' LIMIT 1;"
+  );
+  assert.ok(scOtherTenantCustomer, "前置条件：tenant_001 应有共享客户可用于跨租户测试");
+  const scCross = await request(
+    "POST",
+    "/api/platform/workspace-customers",
+    { customerId: scOtherTenantCustomer },
+    scDemo2.accessToken
+  );
+  assert.equal(
+    scCross.status,
+    404,
+    `跨租户接入客户必须被拒（404 而非 500）: ${scCross.status} ${JSON.stringify(scCross.body).slice(0, 160)}`
+  );
+  assert.equal(
+    readCount(
+      `SELECT COUNT(*) FROM \`customer_workspace_links\` WHERE \`customerId\`='${scOtherTenantCustomer}' AND \`tenantId\`='tenant_002';`
+    ),
+    0,
+    "跨租户接入被拒后不得留下业务关系"
+  );
+
+  // 7) 权益账户主键已按空间：同一客户在两空间可各有独立余额
+  const scBenefitPk = readScalar(
+    "SELECT GROUP_CONCAT(`COLUMN_NAME` ORDER BY `ORDINAL_POSITION`) FROM `information_schema`.`KEY_COLUMN_USAGE` " +
+      `WHERE \`TABLE_SCHEMA\`='${TEST_DB}' AND \`TABLE_NAME\`='rental_benefit_accounts' AND \`CONSTRAINT_NAME\`='PRIMARY';`
+  );
+  assert.equal(
+    scBenefitPk,
+    "workspaceId,customerId",
+    `权益账户主键必须按空间键控，实际 ${scBenefitPk}——租户级主键会让第二个空间的积分覆盖第一个空间`
+  );
+  ok(
+    "共享客户主档按租户复用、业务关系按空间隔离：同手机号在第二空间复用同一主档（主档仍 1 行、关系 2 条）、" +
+      "第二空间业务列表不含未接入客户、重复接入幂等、跨租户接入 404 且无残留、权益账户主键为 (workspaceId, customerId)"
+  );
+
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);
 }
 

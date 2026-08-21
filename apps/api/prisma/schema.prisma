@@ -319,6 +319,8 @@ model Tenant {
   rentalRuleVersions        RentalRuleVersion[]
   rentalBusinessCalendars   RentalBusinessCalendar[]
   rentalIdempotencyRecords  RentalOrderIdempotencyRecord[]
+  customerProfiles          CustomerProfile[]
+  customerWorkspaceLinks    CustomerWorkspaceLink[]
   rentalCoreStateSnapshot   RentalCoreStateSnapshot[]
   rentalBusinessStateSnapshot RentalBusinessStateSnapshot[]
   businessWorkspaces        BusinessWorkspace[]
@@ -355,6 +357,7 @@ model BusinessWorkspace {
   members      WorkspaceMember[]
   authSessions AuthSession[]
   operationLogs OperationLog[]
+  customerWorkspaceLinks CustomerWorkspaceLink[]
   coreStateSnapshot RentalCoreStateSnapshot?
   businessStateSnapshot RentalBusinessStateSnapshot?
   // SPACE-03：经营事实的反向关系。字段仅供 Prisma 关系解析，不用于查询。
@@ -941,6 +944,81 @@ model StationCapacitySnapshot {
 
   @@index([stationId, date])
   @@index([stationId, createdAt])
+}
+
+/// SPACE-04：租户级共享客户主档。
+///
+/// 边界（需求 v1.2 第 41、180 行）：客户**身份**在 SaaS 租户内共享——基础联系方式、
+/// 企业资料、基础实名认证只存一份，同一客户不必在第二个经营空间重复注册。
+/// 而订单、优惠券、积分、会员等级和营销余额**按经营空间隔离**，因此那些表带
+/// workspaceId 并各自建行，只通过 (tenantId, id) 指回本表。
+///
+/// 品类资质存在本表（共享资料），但「是否适用」要按目标空间的品类规则判断：
+/// 驾驶证对 vehicle 空间有意义，对 camera 空间无意义。故本表只存事实，不存结论。
+///
+/// 与 Member 的关系：Member 是旧车辆域的会员表，仍在使用且已是租户级。
+/// 本表不删不改 Member（迁移硬规则 5、7：不得删除或替换现有数据），
+/// 而是新增租户级主档并把旧 Member 回填进来，由 sourceMemberId 保留对应关系。
+model CustomerProfile {
+  id                    String   @id @default(uuid())
+  tenantId              String
+  tenant                Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerType          String
+  name                  String
+  phone                 String
+  phoneMasked           String
+  email                 String?
+  /// 基础实名认证：租户内共享，不按空间重复认证。
+  identityVerified      Boolean  @default(false)
+  identityNoMasked      String?
+  /// 品类资质原始事实（如驾驶证、操作资格证），适用性由目标空间品类规则判断。
+  qualifications        Json
+  corporateName         String?
+  corporateTaxNo        String?
+  status                String   @default("active")
+  /// 回填来源：旧车辆域 Member 的主键。用于对账与幂等回填，不参与业务判定。
+  sourceMemberId        String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  workspaceLinks        CustomerWorkspaceLink[]
+
+  /// 供复合外键引用：让「权益/关系必须与客户同租户」可以在库层表达。
+  /// 与 BusinessWorkspace 的 (tenantId, id) 同一手法。
+  @@unique([tenantId, id], map: "customer_profiles_tenant_id_key")
+  /// 同租户内手机号唯一 = 「同一客户不必重复注册」的库层保证。
+  /// 不含 workspaceId：加了就等于允许同一手机号在两个空间各建一份主档，
+  /// 与需求「租户内共享唯一客户主档」直接冲突。
+  @@unique([tenantId, phone], map: "customer_profiles_tenant_phone_key")
+  @@unique([tenantId, sourceMemberId], map: "customer_profiles_tenant_source_member_key")
+  @@index([tenantId, status], map: "customer_profiles_tenant_status_idx")
+  @@map("customer_profiles")
+}
+
+/// SPACE-04：客户在某个经营空间的业务关系。
+///
+/// 主档共享而业务关系按空间建立：客户在摄影空间下过单、在露营空间没下过，
+/// 这条关系记录「他在哪些空间有过业务」，供空间侧列表与资质校验使用，
+/// 不承载订单或权益数据本身（那些在各自的事实表里）。
+model CustomerWorkspaceLink {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId String
+  /// 复合外键：空间与关系必须同租户，杜绝跨租户挂接。
+  workspace   BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  customerId  String
+  customer    CustomerProfile   @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
+  /// 该客户在本空间的会员等级：等级按空间隔离（需求第 41 行）。
+  levelName   String   @default("普通会员")
+  status      String   @default("active")
+  firstOrderAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([workspaceId, customerId], map: "customer_workspace_links_ws_customer_key")
+  @@index([tenantId, customerId], map: "customer_workspace_links_tenant_customer_idx")
+  @@map("customer_workspace_links")
 }
 
 model MembershipPlan {
@@ -2784,13 +2862,23 @@ model RentalBenefitAccount {
   /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
   workspace        BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   customerId                  String
+  /// SPACE-04：**刻意不加**到 customer_profiles 的外键。
+  ///
+  /// 原因：rental 域的 customerId 目前是自由标识（grantReward 等接口不校验客户存在，
+  /// 注册奖励可以发给一个尚未建档的 customerId）。加外键会让这些既有路径直接 500，
+  /// 而唯一的修好办法是从任意 customerId 自动补建客户主档——那等于凭空编造
+  /// 身份数据，需求没有授权，也违背「共享客户主档是唯一身份来源」的本意。
+  ///
+  /// 正确做法是先让 rental 域改为引用共享主档（属 CUSTOMER-01 的范围），再加约束。
+  /// 在此之前保持无外键，避免用一个更差的实现去满足一条约束。
   pointsBalance               Decimal  @default(0) @db.Decimal(12, 2)
   /// 营销余额不是可提现或储值资金账户（需求 4.8）。
   marketingBalance            Decimal  @default(0) @db.Decimal(12, 2)
   availableRewardCouponCount  Int      @default(0)
   updatedAt                   DateTime @updatedAt
 
-  @@id([tenantId, customerId])
+  @@id([workspaceId, customerId])
+  @@index([tenantId, customerId], map: "rental_benefit_accounts_tenant_customer_idx")
   @@map("rental_benefit_accounts")
 }
 
