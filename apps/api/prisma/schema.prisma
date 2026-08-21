@@ -319,8 +319,8 @@ model Tenant {
   rentalRuleVersions        RentalRuleVersion[]
   rentalBusinessCalendars   RentalBusinessCalendar[]
   rentalIdempotencyRecords  RentalOrderIdempotencyRecord[]
-  rentalCoreStateSnapshot   RentalCoreStateSnapshot?
-  rentalBusinessStateSnapshot RentalBusinessStateSnapshot?
+  rentalCoreStateSnapshot   RentalCoreStateSnapshot[]
+  rentalBusinessStateSnapshot RentalBusinessStateSnapshot[]
   businessWorkspaces        BusinessWorkspace[]
   workspaceMembers          WorkspaceMember[]
   createdAt                 DateTime                    @default(now())
@@ -355,6 +355,8 @@ model BusinessWorkspace {
   members      WorkspaceMember[]
   authSessions AuthSession[]
   operationLogs OperationLog[]
+  coreStateSnapshot RentalCoreStateSnapshot?
+  businessStateSnapshot RentalBusinessStateSnapshot?
   // SPACE-03：经营事实的反向关系。字段仅供 Prisma 关系解析，不用于查询。
   rentalCouponTemplates       RentalCouponTemplate[]
   rentalFulfillmentLocations  RentalFulfillmentLocation[]
@@ -425,20 +427,42 @@ model WorkspaceMember {
 }
 
 model RentalCoreStateSnapshot {
-  tenantId  String   @id
+  /// SPACE-03：主键改为经营空间。
+  ///
+  /// 原主键是 tenantId，于是同租户只有一份快照——非默认空间根本没有存档，
+  /// 而 persist 又必须固定写默认空间，否则会互相覆盖（实测过：在第二空间触发
+  /// persist 会把它的状态写进租户级行、抹掉默认空间的存档）。
+  /// 主键换成空间后，每个空间各有自己的恢复副本，persist 也不必再挑空间。
+  workspaceId String  @id
+  tenantId  String
   tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspace BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   state     Json
   updatedAt DateTime @updatedAt
 
+  /// 一个经营空间至多一份快照；同时供 BusinessWorkspace 侧的一对一反向关系使用。
+  @@unique([tenantId, workspaceId], map: "core_snapshot_tenant_ws_key")
+  @@index([tenantId], map: "core_snapshot_tenant_idx")
   @@map("rental_core_state_snapshots")
 }
 
 model RentalBusinessStateSnapshot {
-  tenantId  String   @id
+  /// SPACE-03：主键改为经营空间。
+  ///
+  /// 原主键是 tenantId，于是同租户只有一份快照——非默认空间根本没有存档，
+  /// 而 persist 又必须固定写默认空间，否则会互相覆盖（实测过：在第二空间触发
+  /// persist 会把它的状态写进租户级行、抹掉默认空间的存档）。
+  /// 主键换成空间后，每个空间各有自己的恢复副本，persist 也不必再挑空间。
+  workspaceId String  @id
+  tenantId  String
   tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspace BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   state     Json
   updatedAt DateTime @updatedAt
 
+  /// 一个经营空间至多一份快照；同时供 BusinessWorkspace 侧的一对一反向关系使用。
+  @@unique([tenantId, workspaceId], map: "business_snapshot_tenant_ws_key")
+  @@index([tenantId], map: "business_snapshot_tenant_idx")
   @@map("rental_business_state_snapshots")
 }
 

@@ -206,12 +206,17 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   async onModuleInit() {
     for (const row of await this.stateRepository?.loadCoreStates() ?? []) {
       const state = row.state as unknown as TenantRentalState;
-      if (state?.profile?.tenantId === row.tenantId) this.states.set(row.tenantId, state);
+      // 快照行自带 workspaceId，直接按空间键装载，不再需要事后从 tenantId 迁键。
+      if (state?.profile?.tenantId === row.tenantId) this.states.set(row.workspaceId, state);
     }
     for (const tenant of await this.stateRepository?.loadTenantProfiles() ?? []) {
-      if (!tenant.categoryCode || this.states.has(tenant.tenantId)) continue;
+      // 守卫也必须按空间键判断：states 已改为按经营空间键，
+      // 继续用 tenantId 判断会认为"还没有状态"，从而用空白 seedState
+      // 覆盖上一步刚从快照恢复出来的状态（实测表现为重启后配置丢失）。
+      if (!tenant.categoryCode || this.states.has(`ws_${tenant.tenantId}`)) continue;
       const categoryCode = String(tenant.categoryCode).toLowerCase() as RentalCategoryCode;
-      if (Object.values(RentalCategoryCode).includes(categoryCode)) this.states.set(tenant.tenantId, this.seedState(tenant.tenantId, categoryCode));
+      // 品类档案仍是租户级，其对应的是该租户的默认空间。
+      if (Object.values(RentalCategoryCode).includes(categoryCode)) this.states.set(`ws_${tenant.tenantId}`, this.seedState(tenant.tenantId, categoryCode));
     }
   }
 
@@ -233,14 +238,6 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       this.categoryByWorkspace.set(workspace.id, workspace.categoryCode);
       this.tenantByWorkspace.set(workspace.id, workspace.tenantId);
       if (workspace.isDefault) this.defaultWorkspaceByTenant.set(workspace.tenantId, workspace.id);
-    }
-    // onModuleInit 阶段的快照恢复是按 tenantId 键的（那是升级前的形态），
-    // 这里把它们迁到默认空间键上，避免同一份状态在两个键下并存。
-    for (const [key, state] of [...this.states]) {
-      if (this.categoryByWorkspace.has(key)) continue;
-      const target = this.defaultWorkspaceByTenant.get(key);
-      this.states.delete(key);
-      if (target) this.states.set(target, state);
     }
     for (const snapshot of await this.configStore.loadAll()) {
       const cached = this.states.get(snapshot.workspaceId);
@@ -270,11 +267,10 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   }
 
   async persist(tenantId: string) {
-    // 快照表主键仍是 tenantId（其空间化属后续阶段），因此这里按默认空间的状态存档。
-    // 同租户多空间时只有默认空间的状态进快照——这是已知限制，已在台账记录。
-    const workspaceId = this.defaultWorkspaceByTenant.get(tenantId);
-    const state = workspaceId ? this.states.get(workspaceId) : undefined;
-    if (state) await this.stateRepository?.saveCoreState(tenantId, state);
+    // 快照已按经营空间存档，因此直接存**当前**空间的状态，不必再固定挑默认空间。
+    const workspaceId = this.workspaceOf(tenantId);
+    const state = this.states.get(workspaceId);
+    if (state) await this.stateRepository?.saveCoreState(tenantId, workspaceId, state);
   }
 
   listCategories() { return categories; }

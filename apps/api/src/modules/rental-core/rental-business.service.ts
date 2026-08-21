@@ -176,13 +176,6 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     for (const workspace of await this.coreConfigStore.listWorkspaces()) {
       if (workspace.isDefault) this.defaultWorkspaceByTenant.set(workspace.tenantId, workspace.id);
     }
-    // onModuleInit 的快照恢复按 tenantId 键（升级前形态），迁到默认空间键上。
-    for (const [key, state] of [...this.states]) {
-      const target = this.defaultWorkspaceByTenant.get(key);
-      if (!target || key === target) continue;
-      this.states.delete(key);
-      this.states.set(target, state);
-    }
     // 只处理**确实有数据可装载**的空间。
     //
     // 不能对所有空间都建状态：loadAll 现在为每个空间都返回一条，而这里会把
@@ -269,17 +262,17 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   async onModuleInit() {
     for (const row of await this.stateRepository?.loadBusinessStates() ?? []) {
       const state = row.state as unknown as RentalBusinessState;
-      if (state?.categoryCode) this.states.set(row.tenantId, state);
+      // 快照行自带 workspaceId，直接按空间键装载。
+      if (state?.categoryCode) this.states.set(row.workspaceId, state);
     }
   }
 
   async persist(tenantId: string) {
-    // 快照表主键仍是 tenantId（其空间化属后续任务），因此这里必须**固定**取默认空间，
-    // 不能用 workspaceOf——那会优先取会话空间，于是在第二空间里触发的 persist
-    // 会把第二空间的状态写进租户级快照行，覆盖默认空间的存档（实测表现为重启后
-    // 默认空间的定价计划消失）。非默认空间不进快照，其恢复依赖按空间隔离的配置表。
-    const workspaceId = await this.resolveDefaultWorkspace(tenantId);
-    const state = workspaceId ? this.states.get(workspaceId) : undefined;
+    // 快照已按经营空间存档：直接存**当前**空间的状态。
+    // 此前因为快照按 tenantId 键，这里必须固定挑默认空间，否则在第二个空间触发
+    // persist 会覆盖默认空间的存档；主键换成空间后该权衡消失。
+    const workspaceId = this.workspaceOf(tenantId);
+    const state = this.states.get(workspaceId);
     if (!state) return;
     // 懒加载的默认业务配置只在内存里，必须补落库。与核心配置同一类缺陷：
     // seedState 生成默认定价/优惠/服务/日历/规则/模板，但只有各 save* 写方法会写穿，
@@ -289,7 +282,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       await this.persistBusinessConfig(state);
       state.configPersisted = true;
     }
-    await this.stateRepository?.saveBusinessState(tenantId, state);
+    await this.stateRepository?.saveBusinessState(tenantId, workspaceId, state);
   }
 
   /** 把整份业务配置落库。仅用于补落懒加载默认值；此后各 save* 方法按条写穿。 */

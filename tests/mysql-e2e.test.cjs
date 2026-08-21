@@ -3090,6 +3090,16 @@ async function main() {
     isoDefaultHold + 7,
     "第二空间不得继承默认空间刚改的业务设置（业务设置必须按空间各自一份）"
   );
+  // 在第二空间也真写一次：既让两侧都有自己的存档，也验证写入不会回流到默认空间。
+  // 不写就不会触发 persist，第二空间自然没有快照——那是懒加载的既有设计，不是缺陷。
+  const isoSecondHold = isoSecondSettings.overdue.graceMinutes + 21;
+  const isoSecondSaved = await request(
+    "PUT",
+    "/api/rental/v1/business-settings",
+    { ...isoSecondSettings, overdue: { ...isoSecondSettings.overdue, graceMinutes: isoSecondHold } },
+    isoSwitch3.body.data.accessToken
+  );
+  assert.equal(isoSecondSaved.status, 200, `第二空间保存业务设置失败: ${JSON.stringify(isoSecondSaved.body).slice(0, 200)}`);
   // 库层同样必须是两行，各归其主。
   assert.equal(
     readCount("SELECT COUNT(*) FROM `rental_tenant_business_settings` WHERE `tenantId`='tenant_001';"),
@@ -3110,9 +3120,51 @@ async function main() {
     "默认空间的业务设置改动不得被第二空间覆盖"
   );
 
+  // 每个经营空间必须各有自己的状态快照。
+  //
+  // 快照主键原本是 tenantId，同租户只有一份：非默认空间根本没有存档，而 persist
+  // 又必须固定写默认空间才不互相覆盖。主键换成空间后，两边都该有自己的快照。
+  const isoSnapshotRows = readCount(
+    "SELECT COUNT(*) FROM `rental_business_state_snapshots` WHERE `tenantId`='tenant_001';"
+  );
+  assert.ok(
+    isoSnapshotRows >= 2,
+    `同租户的两个经营空间应各有业务状态快照，实际只有 ${isoSnapshotRows} 行`
+  );
+  assert.equal(
+    readCount(
+      "SELECT COUNT(*) FROM `rental_business_state_snapshots` s LEFT JOIN `business_workspaces` w" +
+        " ON w.`id`=s.`workspaceId` AND w.`tenantId`=s.`tenantId` WHERE w.`id` IS NULL;"
+    ),
+    0,
+    "快照的 workspaceId 不得跨租户或悬空"
+  );
+  // 重启后两个空间的配置必须各自从自己的快照/配置表恢复，互不串台。
+  await stopApi();
+  startApi();
+  if (!(await waitHealth())) fail("按空间快照恢复校验的 API 重启超时");
+  const isoAfterRestart = await login("demo", "admin", DEMO_PASSWORD);
+  assert.equal(
+    (await isoSettingsOf(isoAfterRestart.accessToken)).overdue.graceMinutes,
+    isoDefaultHold + 7,
+    "重启后默认空间的业务设置必须从自己的快照/配置恢复"
+  );
+  const isoRestartSecond = await request(
+    "POST",
+    "/api/auth/switch-workspace",
+    { workspaceId: isoSecondWs.id },
+    isoAfterRestart.accessToken
+  );
+  assert.equal(isoRestartSecond.status, 201, "重启后切换到第二空间失败");
+  assert.equal(
+    (await isoSettingsOf(isoRestartSecond.body.data.accessToken)).overdue.graceMinutes,
+    isoSecondHold,
+    "重启后第二空间必须恢复出**自己**的业务设置，而不是默认空间的"
+  );
+
   ok(
     `同租户两空间互不可读：默认空间 ${isoDbDefault} 张订单/${isoAssetsDefaultCount} 件资产，` +
-      `第二空间 ${isoOrdersSecond.length} 张/${isoAssetsSecond.length} 件且无一条来自默认空间，切回后原样可见；业务配置与业务设置亦隔离（定价方案不互见、业务设置各一份且不互相覆盖）`
+      `第二空间 ${isoOrdersSecond.length} 张/${isoAssetsSecond.length} 件且无一条来自默认空间，切回后原样可见；业务配置与业务设置亦隔离（定价方案不互见、业务设置各一份），且两空间各有状态快照、重启后各自恢复不串台`
   );
 
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);
