@@ -1895,6 +1895,11 @@ export class PlatformService {
     return this.platformRepository.findWorkspaceScopedUser(userId, workspaceId);
   }
 
+  async getWorkspaceCategoryContext(tenantId: string, workspaceId: string) {
+    if (!this.useMysqlDataSource()) return {};
+    return this.platformRepository.getWorkspaceCategoryContext(tenantId, workspaceId);
+  }
+
   async setSessionWorkspace(sessionId: string, workspaceId: string | null) {
     if (!this.useMysqlDataSource()) return;
     await this.platformRepository.setSessionWorkspace(sessionId, workspaceId);

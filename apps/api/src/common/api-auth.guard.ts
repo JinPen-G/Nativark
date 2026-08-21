@@ -373,12 +373,14 @@ export class ApiAuthGuard implements CanActivate {
     const capability = requiredCapability(path);
     const vehicleCategoryRequired = requiresVehicleCategory(path);
     if ((capability || vehicleCategoryRequired) && !user.isSaasAdmin) {
-      const tenant = await this.authService.getTenantContext(user.tenantId);
-      if (vehicleCategoryRequired && tenant.categoryCode !== RentalCategoryCode.Vehicle) {
-        throw new ForbiddenException("该接口属于旧车辆兼容域，当前租户经营品类不可用");
+      // SPACE-03：品类与能力按**当前经营空间**判定，不能用租户级档案——
+      // 同租户多个空间品类不同时，那会让 camping 空间按 camera 的能力集放行。
+      const scope = await this.authService.getCategoryContext(user.tenantId, workspaceId);
+      if (vehicleCategoryRequired && scope.categoryCode !== RentalCategoryCode.Vehicle) {
+        throw new ForbiddenException("该接口属于旧车辆兼容域，当前经营空间品类不可用");
       }
-      if (capability && !tenant.capabilities?.includes(capability)) {
-        throw new ForbiddenException("当前租户经营品类未启用该业务能力");
+      if (capability && !scope.capabilities?.includes(capability)) {
+        throw new ForbiddenException("当前经营空间品类未启用该业务能力");
       }
     }
 

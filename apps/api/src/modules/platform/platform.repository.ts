@@ -291,6 +291,29 @@ export class PlatformRepository {
     return currentUser?.tenantId ?? requireRequestTenantId();
   }
 
+  /**
+   * SPACE-03：按**经营空间**取品类与业务能力。
+   *
+   * 守卫原先用租户级 `tenant_rental_profiles` 的品类做 capability 与车辆域校验。
+   * 同租户有多个空间且品类不同时那是错的：一个 camping 空间会被按 camera 的
+   * 能力集放行。品类的事实源是 `business_workspaces.categoryCode`（需求 3），
+   * 能力取该品类定义的默认能力集。
+   */
+  async getWorkspaceCategoryContext(
+    tenantId: string,
+    workspaceId: string
+  ): Promise<{ categoryCode?: string; capabilities?: string[] }> {
+    const workspace = await this.prisma.businessWorkspace.findFirst({
+      where: { id: workspaceId, tenantId },
+      include: { category: { select: { defaultCapabilities: true } } }
+    });
+    if (!workspace) return {};
+    return {
+      categoryCode: this.toDomainCategoryCode(workspace.categoryCode),
+      capabilities: workspace.category.defaultCapabilities as unknown as string[]
+    };
+  }
+
   async listBusinessWorkspaces(currentUser?: SystemUserRow): Promise<BusinessWorkspace[]> {
     const tenantId = this.workspaceTenantId(currentUser);
     const rows = await this.prisma.businessWorkspace.findMany({

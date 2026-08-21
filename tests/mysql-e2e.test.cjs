@@ -2963,6 +2963,26 @@ async function main() {
     "第二空间的订单数必须等于库中该空间的行数"
   );
 
+  // 按 id 直取也必须隔离。这条是变异测试逼出来的：把 findOrder 的 where 去掉
+  // workspaceId 后，上面的列表断言全部照过——列表走 listOrders，单取走 findOrder，
+  // 是两条独立的查询路径。只测列表会漏掉「知道 id 就能跨空间读」这个更严重的缺口。
+  const isoTargetId = [...isoDefaultIds][0];
+  const isoCrossRead = await request("GET", `/api/rental/v1/orders/${isoTargetId}`, null, isoTokenB);
+  assert.equal(
+    isoCrossRead.status,
+    404,
+    `在第二空间按 id 直取默认空间的订单必须 404，实际 ${isoCrossRead.status}：` +
+      `${JSON.stringify(isoCrossRead.body).slice(0, 160)}`
+  );
+  // 反向确认这个 id 在它自己的空间里是可读的，否则 404 可能只是订单不存在。
+  //
+  // 必须重新登录，不能复用 isoA2.accessToken：switch-workspace 改的是**会话**上的
+  // 当前空间（setSessionWorkspace），旧访问令牌的 sid 指向同一会话，因此它此刻
+  // 也已经解析到第二空间了。这一点是本断言先失败才发现的。
+  const isoRelogin = await login("demo", "admin", DEMO_PASSWORD);
+  const isoOwnRead = await request("GET", `/api/rental/v1/orders/${isoTargetId}`, null, isoRelogin.accessToken);
+  assert.equal(isoOwnRead.status, 200, `同一 id 在默认空间必须可读，否则上面的 404 不能说明隔离生效`);
+
   // 资产与库存同理：第二空间没有资产，可用量必须为 0 而不是沿用默认空间的。
   const isoAssetsSecond = (await request("GET", "/api/rental/v1/assets", null, isoTokenB)).body.data;
   assert.equal(
@@ -3166,6 +3186,62 @@ async function main() {
     `同租户两空间互不可读：默认空间 ${isoDbDefault} 张订单/${isoAssetsDefaultCount} 件资产，` +
       `第二空间 ${isoOrdersSecond.length} 张/${isoAssetsSecond.length} 件且无一条来自默认空间，切回后原样可见；业务配置与业务设置亦隔离（定价方案不互见、业务设置各一份），且两空间各有状态快照、重启后各自恢复不串台`
   );
+
+  console.log("== 56. SPACE-03 品类与能力按经营空间判定 ==");
+  // 守卫原先用**租户级**品类档案做 capability 与车辆域校验。同租户多个空间且
+  // 品类不同时那是错的：一个 camping 空间会被按 camera/vehicle 的能力集放行。
+  //
+  // 构造：车辆租户（租户级品类=vehicle）新建一个 camera 空间并切进去，
+  // 此时 /store-rental/* 必须被拒——若仍按租户判定，它会被放行。
+  const catPlatform = await login("platform", "admin", PLATFORM_PASSWORD);
+  const catVehicle = await bootstrapTenant(catPlatform.accessToken, "e2e_scope_vehicle", "vehicle");
+  const catVehicleOk = await request("GET", "/api/store-rental/vehicles", null, catVehicle.accessToken);
+  assert.equal(
+    catVehicleOk.status,
+    200,
+    `前置条件：车辆租户在其默认（vehicle）空间应能访问车辆域，实际 ${catVehicleOk.status}`
+  );
+  const catCameraWs = await request(
+    "POST",
+    "/api/platform/workspaces",
+    { code: "camera-side", name: "摄影副空间", categoryCode: "camera" },
+    catVehicle.accessToken
+  );
+  assert.equal(catCameraWs.status, 201, `车辆租户创建 camera 空间失败: ${JSON.stringify(catCameraWs.body).slice(0, 200)}`);
+  const catMember = await request(
+    "PUT",
+    `/api/platform/workspaces/${catCameraWs.body.data.id}/members`,
+    { userId: catVehicle.user.id },
+    catVehicle.accessToken
+  );
+  assert.equal(catMember.status, 200, "加入 camera 空间成员失败");
+  const catSwitched = await request(
+    "POST",
+    "/api/auth/switch-workspace",
+    { workspaceId: catCameraWs.body.data.id },
+    catVehicle.accessToken
+  );
+  assert.equal(catSwitched.status, 201, "切换到 camera 空间失败");
+  const catDenied = await request("GET", "/api/store-rental/vehicles", null, catSwitched.body.data.accessToken);
+  assert.equal(
+    catDenied.status,
+    403,
+    `车辆租户切到 camera 空间后必须被车辆域拒绝（品类须按空间判定），实际 ${catDenied.status}: ${JSON.stringify(catDenied.body).slice(0, 200)}`
+  );
+  // 切回默认（vehicle）空间必须恢复可访问，证明拒绝来自空间品类而非账号权限。
+  const catBack = await request(
+    "POST",
+    "/api/auth/switch-workspace",
+    { workspaceId: catVehicle.currentWorkspaceId },
+    catSwitched.body.data.accessToken
+  );
+  assert.equal(catBack.status, 201, "切回 vehicle 空间失败");
+  assert.equal(
+    (await request("GET", "/api/store-rental/vehicles", null, catBack.body.data.accessToken)).status,
+    200,
+    "切回 vehicle 空间后必须恢复可访问（证明拒绝来自空间品类，不是账号权限）"
+  );
+  ok("品类与能力按经营空间判定：车辆租户在 camera 空间被车辆域拒绝 403，切回 vehicle 空间即恢复 200");
 
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);
 }

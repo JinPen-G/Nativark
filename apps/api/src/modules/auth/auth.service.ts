@@ -165,6 +165,15 @@ export class AuthService {
     };
   }
 
+  /** SPACE-03：有会话空间时按空间取品类与能力；无空间时退回租户级档案。 */
+  async getCategoryContext(tenantId: string, workspaceId?: string) {
+    if (workspaceId) {
+      const scoped = await this.platformService.getWorkspaceCategoryContext(tenantId, workspaceId);
+      if (scoped.categoryCode) return scoped;
+    }
+    return this.getTenantContext(tenantId);
+  }
+
   getTenantContext(tenantId: string) {
     return this.platformService.findTenantByIdForAuth(tenantId);
   }
