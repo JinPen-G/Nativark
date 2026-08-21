@@ -2961,9 +2961,76 @@ async function main() {
   assert.equal(isoBack.status, 201, "切回默认空间失败");
   const isoOrdersBack = (await request("GET", "/api/rental/v1/orders", null, isoBack.body.data.accessToken)).body.data;
   assert.equal(isoOrdersBack.length, isoDbDefault, "切回默认空间后订单必须原样可见");
+  // 业务配置（定价方案）同样必须按空间隔离。
+  //
+  // 不能假设默认空间"本来就有"定价方案：第 28 节为验证事实恢复**故意删除**了
+  // tenant_001 的定价方案且不恢复。因此自己造一条，让断言不依赖上游残留数据。
+  const isoDefaultToken = isoBack.body.data.accessToken;
+  const isoDefaultGroup = (await request("GET", "/api/rental/v1/item-groups", null, isoDefaultToken)).body.data[0];
+  assert.ok(isoDefaultGroup, "前置条件：默认空间应有商品组");
+  const isoMadePlan = await request(
+    "POST",
+    "/api/rental/v1/pricing-plans",
+    {
+      effectiveFrom: new Date(Date.now() - 86400000).toISOString(),
+      code: "E2E-WS-ISO",
+      name: "空间隔离验证价格",
+      changeReason: "SPACE-03 空间隔离验证",
+      status: "enabled",
+      rates: [{ itemGroupId: isoDefaultGroup.id, unit: "day_24h", baseAmount: 100, weekendMultiplier: 1, holidayMultiplier: 1, depositAmount: 100, minimumUnits: 1 }]
+    },
+    isoDefaultToken
+  );
+  assert.equal(isoMadePlan.status, 201, `默认空间创建定价方案失败: ${JSON.stringify(isoMadePlan.body).slice(0, 200)}`);
+  assert.equal(
+    readScalar(`SELECT \`workspaceId\` FROM \`rental_pricing_plans\` WHERE \`id\`='${isoMadePlan.body.data.id}';`),
+    isoDefaultWs,
+    "新建定价方案必须落在默认经营空间"
+  );
+  const isoHasPlan = async (token) =>
+    (await request("GET", "/api/rental/v1/pricing-plans", null, token)).body.data.some((row) => row.code === "E2E-WS-ISO");
+  assert.equal(await isoHasPlan(isoDefaultToken), true, "默认空间应能看到自己刚建的定价方案");
+
+  // 切到第二空间：看不到它。
+  const isoSwitch2 = await request(
+    "POST",
+    "/api/auth/switch-workspace",
+    { workspaceId: isoSecondWs.id },
+    isoDefaultToken
+  );
+  assert.equal(isoSwitch2.status, 201, "再次切换到第二空间失败");
+  assert.equal(
+    await isoHasPlan(isoSwitch2.body.data.accessToken),
+    false,
+    "第二空间不得看到默认空间的定价方案"
+  );
+  const isoPricingSecond = (await request("GET", "/api/rental/v1/pricing-plans", null, isoSwitch2.body.data.accessToken)).body.data;
+  assert.ok(isoPricingSecond.length > 0, "第二空间应有属于自己的基础定价方案");
+  assert.equal(
+    isoPricingSecond[0].categoryCode,
+    isoSecondWs.categoryCode,
+    `第二空间的定价方案品类应随空间为 ${isoSecondWs.categoryCode}，实际 ${isoPricingSecond[0].categoryCode}`
+  );
+
+  // 关键一条：访问过另一个空间之后，默认空间的配置必须**原样still在**。
+  // 若状态不按空间键，去第二空间那一次会把同一份状态按 camping 重建，
+  // 默认空间刚建的方案随之从内存消失——这条断言正是用来抓这种串台。
+  const isoBack2 = await request(
+    "POST",
+    "/api/auth/switch-workspace",
+    { workspaceId: isoDefaultWs },
+    isoSwitch2.body.data.accessToken
+  );
+  assert.equal(isoBack2.status, 201, "第二次切回默认空间失败");
+  assert.equal(
+    await isoHasPlan(isoBack2.body.data.accessToken),
+    true,
+    "访问过第二空间后，默认空间的定价方案不得丢失（状态必须按经营空间各自独立）"
+  );
+
   ok(
     `同租户两空间互不可读：默认空间 ${isoDbDefault} 张订单/${isoAssetsDefaultCount} 件资产，` +
-      `第二空间 ${isoOrdersSecond.length} 张/${isoAssetsSecond.length} 件且无一条来自默认空间，切回后原样可见`
+      `第二空间 ${isoOrdersSecond.length} 张/${isoAssetsSecond.length} 件且无一条来自默认空间，切回后原样可见；业务配置亦隔离（默认空间新建的定价方案在第二空间不可见，第二空间品类随空间）`
   );
 
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);

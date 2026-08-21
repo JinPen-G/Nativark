@@ -24,9 +24,10 @@ export interface RentalReferralRecord {
   registeredAt: string;
 }
 
-/** 单个租户的业务事实，用于启动装载。 */
+/** SPACE-03：单个**经营空间**的业务事实，用于启动装载。 */
 export interface TenantBusinessFactSnapshot {
   tenantId: string;
+  workspaceId: string;
   quotes: RentalQuoteSnapshotV1[];
   customerCoupons: RentalCustomerCoupon[];
   rewardLedger: RentalRewardLedgerEntry[];
@@ -99,7 +100,8 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
   constructor(private readonly prisma: PrismaService) {}
 
   async loadAll(): Promise<TenantBusinessFactSnapshot[]> {
-    const [quotes, coupons, rewards, accounts, referrals, logs] = await Promise.all([
+    const [workspaces, quotes, coupons, rewards, accounts, referrals, logs] = await Promise.all([
+      this.prisma.businessWorkspace.findMany({ select: { id: true, tenantId: true } }),
       this.prisma.rentalQuote.findMany({ orderBy: { createdAt: "desc" } }),
       this.prisma.rentalCustomerCoupon.findMany({ orderBy: { claimedAt: "desc" } }),
       this.prisma.rentalRewardLedgerEntry.findMany({ orderBy: { createdAt: "desc" } }),
@@ -108,28 +110,24 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       this.prisma.rentalNotificationLog.findMany({ orderBy: { createdAt: "desc" } })
     ]);
 
-    const tenantIds = new Set<string>([
-      ...quotes.map((row) => row.tenantId),
-      ...coupons.map((row) => row.tenantId),
-      ...rewards.map((row) => row.tenantId),
-      ...accounts.map((row) => row.tenantId),
-      ...referrals.map((row) => row.tenantId),
-      ...logs.map((row) => row.tenantId)
-    ]);
-
-    return [...tenantIds].map((tenantId) => ({
-      tenantId,
-      quotes: quotes.filter((row) => row.tenantId === tenantId).map((row) => this.toQuote(row)),
-      customerCoupons: coupons.filter((row) => row.tenantId === tenantId).map((row) => this.toCoupon(row)),
-      rewardLedger: rewards.filter((row) => row.tenantId === tenantId).map((row) => this.toRewardEntry(row)),
-      benefitAccounts: accounts.filter((row) => row.tenantId === tenantId).map((row) => this.toBenefitAccount(row)),
-      referrals: referrals.filter((row) => row.tenantId === tenantId).map((row) => ({
-        inviteeCustomerId: row.inviteeCustomerId,
-        referrerCustomerId: row.referrerCustomerId,
-        registeredAt: iso(row.registeredAt)
-      })),
-      notificationLogs: logs.filter((row) => row.tenantId === tenantId).map((row) => this.toNotificationLog(row))
-    }));
+    // 以经营空间为单位装载：同租户两个空间各有独立的报价、券、奖励与通知记录。
+    return workspaces.map((workspace) => {
+      const mine = <T extends { workspaceId: string }>(rows: T[]) => rows.filter((row) => row.workspaceId === workspace.id);
+      return {
+        tenantId: workspace.tenantId,
+        workspaceId: workspace.id,
+        quotes: mine(quotes).map((row) => this.toQuote(row)),
+        customerCoupons: mine(coupons).map((row) => this.toCoupon(row)),
+        rewardLedger: mine(rewards).map((row) => this.toRewardEntry(row)),
+        benefitAccounts: mine(accounts).map((row) => this.toBenefitAccount(row)),
+        referrals: mine(referrals).map((row) => ({
+          inviteeCustomerId: row.inviteeCustomerId,
+          referrerCustomerId: row.referrerCustomerId,
+          registeredAt: iso(row.registeredAt)
+        })),
+        notificationLogs: mine(logs).map((row) => this.toNotificationLog(row))
+      };
+    });
   }
 
   async findQuote(tenantId: string, quoteId: string, tx?: RentalBusinessFactTx): Promise<RentalQuoteSnapshotV1 | undefined> {

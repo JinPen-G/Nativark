@@ -17,8 +17,13 @@ import { PrismaService } from "../database/prisma.service";
 import { resolveScopeWorkspaceId } from "./workspace-scope";
 
 /** 单个租户的业务配置，用于启动预热写穿缓存。 */
+/**
+ * SPACE-03：单个**经营空间**的业务配置。同租户两个空间各有独立的定价、
+ * 优惠、增值服务、营业日历、规则版本与通知模板。
+ */
 export interface TenantBusinessConfigSnapshot {
   tenantId: string;
+  workspaceId: string;
   categoryCode?: RentalCategoryCode;
   pricingPlans: RentalPricingPlanV1[];
   discountPlans: RentalDiscountPlan[];
@@ -26,6 +31,15 @@ export interface TenantBusinessConfigSnapshot {
   calendars: RentalCalendarYear[];
   ruleVersions: RentalRuleVersion[];
   notificationTemplates: RentalNotificationTemplateV1[];
+  /**
+   * 该空间的业务配置是否真的写过库。
+   *
+   * 必需：loadAll 现在为**每个经营空间**都返回一条（包括刚建好、还没写过配置的），
+   * 而预热是「无条件覆盖，包括空数组」。缺这个标记就会把 seedState 生成的
+   * 默认定价/优惠/服务/日历/规则/模板全部抹成空——表现为报价时
+   * 「当前租户没有已启用的基础定价计划」。
+   */
+  hasPersistedConfig: boolean;
 }
 
 /**
@@ -81,7 +95,8 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
   constructor(private readonly prisma: PrismaService) {}
 
   async loadAll(): Promise<TenantBusinessConfigSnapshot[]> {
-    const [pricing, discounts, services, calendars, rules, templates] = await Promise.all([
+    const [workspaces, pricing, discounts, services, calendars, rules, templates] = await Promise.all([
+      this.prisma.businessWorkspace.findMany({ select: { id: true, tenantId: true, categoryCode: true } }),
       this.prisma.rentalPricingPlan.findMany({ orderBy: { createdAt: "desc" } }),
       this.prisma.rentalDiscountPlan.findMany({ orderBy: { createdAt: "desc" } }),
       this.prisma.rentalValueAddedService.findMany({ orderBy: { createdAt: "desc" } }),
@@ -90,33 +105,30 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       this.prisma.rentalNotificationTemplate.findMany({ orderBy: { createdAt: "desc" } })
     ]);
 
-    const tenantIds = new Set<string>([
-      ...pricing.map((row) => row.tenantId),
-      ...discounts.map((row) => row.tenantId),
-      ...services.map((row) => row.tenantId),
-      ...calendars.map((row) => row.tenantId),
-      ...rules.map((row) => row.tenantId),
-      ...templates.map((row) => row.tenantId)
-    ]);
-
-    return [...tenantIds].map((tenantId) => {
-      const tenantRules = rules.filter((row) => row.tenantId === tenantId);
+    // 以经营空间为单位分组。空间集合取自 business_workspaces 而不是从配置行反推：
+    // 一个还没有任何业务配置的空间同样必须得到状态。
+    return workspaces.map((workspace) => {
+      const mine = <T extends { workspaceId: string }>(rows: T[]) => rows.filter((row) => row.workspaceId === workspace.id);
+      const wsRules = mine(rules);
       return {
-        tenantId,
-        // 品类以该租户任一业务配置行为准；配置为空时由核心档案决定，这里不猜。
-        categoryCode: tenantRules.length
-          ? lower<RentalCategoryCode>(tenantRules[0].categoryCode)
-          : pricing.find((row) => row.tenantId === tenantId)
-            ? lower<RentalCategoryCode>(pricing.find((row) => row.tenantId === tenantId)!.categoryCode)
-            : undefined,
-        pricingPlans: pricing.filter((row) => row.tenantId === tenantId).map((row) => this.toPricingPlan(row)),
-        discountPlans: discounts.filter((row) => row.tenantId === tenantId).map((row) => this.toDiscountPlan(row)),
-        services: services.filter((row) => row.tenantId === tenantId).map((row) => this.toService(row)),
-        calendars: calendars.filter((row) => row.tenantId === tenantId).map((row) => this.toCalendar(row)),
-        ruleVersions: tenantRules.map((row) => this.toRuleVersion(row)),
-        notificationTemplates: templates
-          .filter((row) => row.tenantId === tenantId)
-          .map((row) => this.toNotificationTemplate(row))
+        tenantId: workspace.tenantId,
+        workspaceId: workspace.id,
+        // 品类以经营空间为准（需求 3），不再从配置行反推。
+        categoryCode: lower<RentalCategoryCode>(workspace.categoryCode),
+        pricingPlans: mine(pricing).map((row) => this.toPricingPlan(row)),
+        discountPlans: mine(discounts).map((row) => this.toDiscountPlan(row)),
+        services: mine(services).map((row) => this.toService(row)),
+        calendars: mine(calendars).map((row) => this.toCalendar(row)),
+        ruleVersions: wsRules.map((row) => this.toRuleVersion(row)),
+        notificationTemplates: mine(templates).map((row) => this.toNotificationTemplate(row)),
+        hasPersistedConfig: Boolean(
+          mine(pricing).length ||
+            mine(discounts).length ||
+            mine(services).length ||
+            mine(calendars).length ||
+            wsRules.length ||
+            mine(templates).length
+        )
       };
     });
   }

@@ -35,6 +35,7 @@ import {
   type TenantRentalBusinessSettings,
   type TenantRentalProfile
 } from "@store-rental/shared";
+import { getRequestWorkspaceId } from "../../common/request-identity";
 import { RentalStateRepository } from "./rental-state.repository";
 import {
   RentalBusinessConfigRepository,
@@ -127,7 +128,10 @@ function serviceType(name: string): RentalValueAddedService["serviceType"] {
 
 @Injectable()
 export class RentalBusinessService implements OnModuleInit, OnApplicationBootstrap {
+  /** SPACE-03：业务状态以**经营空间**为键，与核心服务同构。 */
   private readonly states = new Map<string, RentalBusinessState>();
+  /** 「租户 → 默认经营空间」。state() 是同步的，无会话路径需要它解析空间。 */
+  private readonly defaultWorkspaceByTenant = new Map<string, string>();
   /** 启动预热时从库中收集的租户品类，用于业务快照行丢失后重建状态。 */
   private readonly bootstrapCategoryByTenant = new Map<string, RentalCategoryCode>();
 
@@ -167,15 +171,53 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     // 早前实现分成两轮、且配置那轮遇到内存缺失就 continue：整条业务快照行丢失时，
     // 状态只在事实那轮才被重建，于是定价、优惠、增值服务、日历、规则和通知模板
     // 全部留空——只恢复了事实，配置照样丢。
-    const tenantIds = new Set<string>([...configs.map((row) => row.tenantId), ...facts.map((row) => row.tenantId)]);
-    const configByTenant = new Map(configs.map((row) => [row.tenantId, row]));
-    const factsByTenant = new Map(facts.map((row) => [row.tenantId, row]));
+    // SPACE-03：改为按**经营空间**处理。空间集合取自两个 loadAll 的并集，
+    // 它们都已以 business_workspaces 为基准，因此新建但尚无数据的空间也在内。
+    for (const workspace of await this.coreConfigStore.listWorkspaces()) {
+      if (workspace.isDefault) this.defaultWorkspaceByTenant.set(workspace.tenantId, workspace.id);
+    }
+    // onModuleInit 的快照恢复按 tenantId 键（升级前形态），迁到默认空间键上。
+    for (const [key, state] of [...this.states]) {
+      const target = this.defaultWorkspaceByTenant.get(key);
+      if (!target || key === target) continue;
+      this.states.delete(key);
+      this.states.set(target, state);
+    }
+    // 只处理**确实有数据可装载**的空间。
+    //
+    // 不能对所有空间都建状态：loadAll 现在为每个空间都返回一条，而这里会把
+    // 内存状态设成库中内容。对一个还没写过任何配置的空间，那等于塞进一个空状态，
+    // 于是 state() 认为状态已存在、不再走 seedState —— 表现为报价时
+    // 「当前租户没有已启用的基础定价计划」。
+    const factHasRows = (row: (typeof facts)[number]) =>
+      Boolean(
+        row.quotes.length ||
+          row.customerCoupons.length ||
+          row.rewardLedger.length ||
+          row.benefitAccounts.length ||
+          row.referrals.length ||
+          row.notificationLogs.length
+      );
+    const workspaceIds = new Set<string>([
+      ...configs.filter((row) => row.hasPersistedConfig).map((row) => row.workspaceId),
+      ...facts.filter(factHasRows).map((row) => row.workspaceId),
+      // 已有内存状态的空间也要参与，让库内容覆盖它。
+      ...this.states.keys()
+    ]);
+    const configByWorkspace = new Map(configs.map((row) => [row.workspaceId, row]));
+    const factsByWorkspace = new Map(facts.map((row) => [row.workspaceId, row]));
+    const tenantByWorkspace = new Map<string, string>([
+      ...configs.map((row) => [row.workspaceId, row.tenantId] as const),
+      ...facts.map((row) => [row.workspaceId, row.tenantId] as const)
+    ]);
 
-    for (const tenantId of tenantIds) {
-      const state = this.states.get(tenantId) ?? this.stateFromFacts(tenantId);
+    for (const workspaceId of workspaceIds) {
+      const tenantId = tenantByWorkspace.get(workspaceId)!;
+      const state = this.states.get(workspaceId) ?? this.stateFromFacts(tenantId);
       if (!state) continue;
-      const config = configByTenant.get(tenantId);
-      if (config) {
+      const config = configByWorkspace.get(workspaceId);
+      // 只有真的写过库的空间才覆盖：否则会把 seedState 的默认配置抹成空。
+      if (config?.hasPersistedConfig) {
         // 无条件覆盖，包括空数组：库里没有就是没有。
         // 「非空才覆盖」会让合法为空的配置继续保留快照或 seedState 的演示数据，
         // 使快照在读路径上静默胜出。
@@ -186,7 +228,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         state.ruleVersions = config.ruleVersions;
         state.notificationTemplates = config.notificationTemplates;
       }
-      const fact = factsByTenant.get(tenantId);
+      const fact = factsByWorkspace.get(workspaceId);
       if (fact) {
         state.quotes = fact.quotes;
         state.customerCoupons = fact.customerCoupons;
@@ -195,7 +237,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         state.referrals = fact.referrals;
         state.notificationLogs = fact.notificationLogs;
       }
-      this.states.set(tenantId, state);
+      this.states.set(workspaceId, state);
     }
   }
 
@@ -232,7 +274,12 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   }
 
   async persist(tenantId: string) {
-    const state = this.states.get(tenantId);
+    // 快照表主键仍是 tenantId（其空间化属后续任务），因此这里必须**固定**取默认空间，
+    // 不能用 workspaceOf——那会优先取会话空间，于是在第二空间里触发的 persist
+    // 会把第二空间的状态写进租户级快照行，覆盖默认空间的存档（实测表现为重启后
+    // 默认空间的定价计划消失）。非默认空间不进快照，其恢复依赖按空间隔离的配置表。
+    const workspaceId = await this.resolveDefaultWorkspace(tenantId);
+    const state = workspaceId ? this.states.get(workspaceId) : undefined;
     if (!state) return;
     // 懒加载的默认业务配置只在内存里，必须补落库。与核心配置同一类缺陷：
     // seedState 生成默认定价/优惠/服务/日历/规则/模板，但只有各 save* 写方法会写穿，
@@ -860,18 +907,56 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return quote;
   }
 
+  /**
+   * 当前请求应当读写的经营空间。有会话取会话空间，无会话取租户默认空间。
+   * 与核心服务同一规则，两者皆无则明确拒绝，不猜。
+   */
+  /**
+   * 解析并缓存租户的默认经营空间。
+   *
+   * 预热时建的表覆盖不到**启动后新建**的租户；那些租户的 persist 会因此查不到
+   * 空间而静默跳过，业务配置就永远不落库（实测表现为第 19 节报「配置只落了一半」）。
+   * 因此这里在缓存未命中时回查一次并补全缓存。
+   */
+  private async resolveDefaultWorkspace(tenantId: string): Promise<string | undefined> {
+    const cached = this.defaultWorkspaceByTenant.get(tenantId);
+    if (cached) return cached;
+    for (const workspace of await this.coreConfigStore.listWorkspaces()) {
+      if (workspace.isDefault) this.defaultWorkspaceByTenant.set(workspace.tenantId, workspace.id);
+    }
+    return this.defaultWorkspaceByTenant.get(tenantId);
+  }
+
+  private workspaceOf(tenantId: string): string {
+    const fromSession = getRequestWorkspaceId();
+    if (fromSession) return fromSession;
+    const fallback = this.defaultWorkspaceByTenant.get(tenantId);
+    if (!fallback) throw new ConflictException("当前 SaaS 租户尚未建立经营空间");
+    return fallback;
+  }
+
+  /** 配置 id 前缀：默认空间沿用 tenantId 保持既有 id，其余空间用自己的 id。 */
+  private seedPrefix(tenantId: string, workspaceId: string): string {
+    return this.defaultWorkspaceByTenant.get(tenantId) === workspaceId ? tenantId : workspaceId;
+  }
+
   private state(tenantId: string, context: BusinessContext) {
-    let state = this.states.get(tenantId);
+    const workspaceId = this.workspaceOf(tenantId);
+    let state = this.states.get(workspaceId);
     if (!state || state.categoryCode !== context.profile.categoryCode) {
-      state = this.seedState(tenantId, context);
-      this.states.set(tenantId, state);
+      state = this.seedState(tenantId, context, this.seedPrefix(tenantId, workspaceId));
+      this.states.set(workspaceId, state);
     }
     state.referrals ??= [];
     state.benefitAccounts ??= [];
     return state;
   }
 
-  private seedState(tenantId: string, context: BusinessContext): RentalBusinessState {
+  /**
+   * `idPrefix` 必须按经营空间取值：同租户第二个空间若生成相同 id，
+   * 而配置写入按 id upsert，就会把默认空间的定价/优惠/服务改挂到新空间上。
+   */
+  private seedState(tenantId: string, context: BusinessContext, idPrefix: string = tenantId): RentalBusinessState {
     const timestamp = stamp();
     const rates: RentalPricingRate[] = context.groups.filter((group) => group.status === "enabled").map((group, index) => ({
       id: uid("rate"), itemGroupId: group.id, itemGroupCode: group.code, itemGroupName: group.name,
@@ -880,14 +965,14 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       depositAmount: context.category.businessModel.supportsPreauthorization ? 1000 + index * 500 : 200,
       minimumUnits: 1
     }));
-    const pricingPlans: RentalPricingPlanV1[] = [{ id: `${tenantId}_pricing_default`, tenantId, categoryCode: context.profile.categoryCode, code: "STANDARD", name: `${context.category.name}标准价格`, currency: "CNY", status: "enabled", version: "1.0", effectiveFrom: timestamp, rates, createdAt: timestamp, updatedAt: timestamp }];
-    const discountPlans: RentalDiscountPlan[] = [{ id: `${tenantId}_discount_long`, tenantId, categoryCode: context.profile.categoryCode, code: "LONG_RENTAL", name: "长期租赁优惠", status: "enabled", discountType: "percentage", discountValue: 5, minimumSpend: 500, customerScope: "all", applicableItemGroupIds: [], applicableDayTypes: [], priority: 100, stackableWithCoupon: true, effectiveFrom: timestamp, version: "1.0", createdAt: timestamp, updatedAt: timestamp }];
-    const services: RentalValueAddedService[] = context.category.businessModel.valueAddedServicePresets.slice(0, 4).map((name, index) => ({ id: `${tenantId}_service_${index + 1}`, tenantId, categoryCode: context.profile.categoryCode, code: `SERVICE_${index + 1}`, name, serviceType: serviceType(name), billingUnit: name.includes("配送") || name.includes("运输") ? "per_order" : "per_day", price: 20 + index * 30, maximumQuantity: 5, coverageLimit: name.includes("保险") || name.includes("免赔") ? 5000 : undefined, deductible: name.includes("免赔") ? 200 : undefined, termsVersion: "1.0", terms: `${name}服务条款：以订单保存的本版本范围、限额及除外责任为准。`, applicableItemGroupIds: [], status: "enabled", version: "1.0", createdAt: timestamp, updatedAt: timestamp }));
-    const ruleVersions: RentalRuleVersion[] = [{ id: `${tenantId}_rule_v1`, tenantId, categoryCode: context.profile.categoryCode, version: "1.0", status: "published", config: defaultRuleConfig(context.category, context.settings), changeReason: "品类初始化规则", createdBy: "system", createdAt: timestamp, publishedAt: timestamp }];
+    const pricingPlans: RentalPricingPlanV1[] = [{ id: `${idPrefix}_pricing_default`, tenantId, categoryCode: context.profile.categoryCode, code: "STANDARD", name: `${context.category.name}标准价格`, currency: "CNY", status: "enabled", version: "1.0", effectiveFrom: timestamp, rates, createdAt: timestamp, updatedAt: timestamp }];
+    const discountPlans: RentalDiscountPlan[] = [{ id: `${idPrefix}_discount_long`, tenantId, categoryCode: context.profile.categoryCode, code: "LONG_RENTAL", name: "长期租赁优惠", status: "enabled", discountType: "percentage", discountValue: 5, minimumSpend: 500, customerScope: "all", applicableItemGroupIds: [], applicableDayTypes: [], priority: 100, stackableWithCoupon: true, effectiveFrom: timestamp, version: "1.0", createdAt: timestamp, updatedAt: timestamp }];
+    const services: RentalValueAddedService[] = context.category.businessModel.valueAddedServicePresets.slice(0, 4).map((name, index) => ({ id: `${idPrefix}_service_${index + 1}`, tenantId, categoryCode: context.profile.categoryCode, code: `SERVICE_${index + 1}`, name, serviceType: serviceType(name), billingUnit: name.includes("配送") || name.includes("运输") ? "per_order" : "per_day", price: 20 + index * 30, maximumQuantity: 5, coverageLimit: name.includes("保险") || name.includes("免赔") ? 5000 : undefined, deductible: name.includes("免赔") ? 200 : undefined, termsVersion: "1.0", terms: `${name}服务条款：以订单保存的本版本范围、限额及除外责任为准。`, applicableItemGroupIds: [], status: "enabled", version: "1.0", createdAt: timestamp, updatedAt: timestamp }));
+    const ruleVersions: RentalRuleVersion[] = [{ id: `${idPrefix}_rule_v1`, tenantId, categoryCode: context.profile.categoryCode, version: "1.0", status: "published", config: defaultRuleConfig(context.category, context.settings), changeReason: "品类初始化规则", createdBy: "system", createdAt: timestamp, publishedAt: timestamp }];
     const defaultVariables = { customerName: { label: "客户名称", required: true }, orderNo: { label: "订单号", required: true } };
     const notificationTemplates: RentalNotificationTemplateV1[] = context.settings.notifications.enabledEvents.slice(0, 12).map((eventCode, index) => {
       const memberEvent = eventCode === "member.registered";
-      return { id: `${tenantId}_template_${index + 1}`, tenantId, eventCode, channel: context.settings.notifications.editableChannels.includes("app_push") ? "app_push" : context.settings.notifications.editableChannels[0] ?? "email", name: `${eventCode} 默认模板`, title: memberEvent ? "欢迎加入" : `订单通知 {{orderNo}}`, body: memberEvent ? `{{customerName}}，欢迎注册成为会员。` : `{{customerName}}，您的订单 {{orderNo}} 状态已更新。`, variableSchema: memberEvent ? { customerName: defaultVariables.customerName } : defaultVariables, status: "enabled", version: "1.0", updatedAt: timestamp };
+      return { id: `${idPrefix}_template_${index + 1}`, tenantId, eventCode, channel: context.settings.notifications.editableChannels.includes("app_push") ? "app_push" : context.settings.notifications.editableChannels[0] ?? "email", name: `${eventCode} 默认模板`, title: memberEvent ? "欢迎加入" : `订单通知 {{orderNo}}`, body: memberEvent ? `{{customerName}}，欢迎注册成为会员。` : `{{customerName}}，您的订单 {{orderNo}} 状态已更新。`, variableSchema: memberEvent ? { customerName: defaultVariables.customerName } : defaultVariables, status: "enabled", version: "1.0", updatedAt: timestamp };
     });
     return { categoryCode: context.profile.categoryCode, pricingPlans, discountPlans, services, calendars: [], ruleVersions, customerCoupons: [], rewardLedger: [], benefitAccounts: [], referrals: [], notificationTemplates, notificationLogs: [], quotes: [] };
   }
