@@ -73,6 +73,7 @@ function createAbsorbingFactStore() {
     lockOrder: () => Promise.resolve(),
     lockInventoryTargets: () => Promise.resolve(),
     activeReservations: () => Promise.resolve([]),
+    lockAssetsForAllocation: () => Promise.resolve(),
     allocatedAssetIds: () => Promise.resolve(new Set()),
     listAssets: () => Promise.resolve([]),
     upsertAsset: record("asset"),

@@ -732,9 +732,31 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const state = await this.factContext(tenantId);
     const order = await this.lockedOrder(tenantId, orderId, tx);
     if (order.status !== RentalCoreOrderStatus.Reserved) throw new ConflictException("只有已确认预占的订单可以配货");
+    // 先锁候选资产行，再在**同一事务内**读资产与既有分配。
+    //
+    // 顺序不可反，也不能省锁：只锁订单行时两张订单锁的是不同的行、互不争锁，
+    // 双方都读到"资产可用且无占用分配"，各自挑中同一台资产并提交，
+    // 而 RentalAllocation 上没有 assetId 唯一约束，库层也拦不住。
+    // E2E 实测过该缺陷：两个并发配货均返回 201，同一台资产被两张订单占住。
+    //
+    // 无 tx 的调用方（仍存在的旧路径）退回不加锁的读，行为与此前一致。
+    if (tx) {
+      const serializedTargets = new Map<string, string>();
+      for (const reservation of order.reservations) {
+        const group = this.group(state, reservation.itemGroupId);
+        if (group.inventoryMode === RentalInventoryMode.Serialized) {
+          serializedTargets.set(`${group.id}:${reservation.locationId}`, reservation.locationId);
+        }
+      }
+      // 按 key 排序取锁，与库存锁同样的固定顺序，避免交叉死锁。
+      for (const key of [...serializedTargets.keys()].sort()) {
+        const [itemGroupId] = key.split(":");
+        await this.factStore.lockAssetsForAllocation(tenantId, itemGroupId, serializedTargets.get(key)!, tx);
+      }
+    }
     const [assets, used] = await Promise.all([
-      this.factStore.listAssets(tenantId),
-      this.factStore.allocatedAssetIds(tenantId)
+      this.factStore.listAssets(tenantId, tx),
+      this.factStore.allocatedAssetIds(tenantId, tx)
     ]);
     const allocations: RentalAllocation[] = [];
     const assetChanges: AssetStatusChange[] = [];

@@ -59,7 +59,21 @@ export interface RentalCoreFactStore {
   saveOrderAggregate(order: RentalOrder, assetChanges?: AssetStatusChange[], tx?: RentalFactTx): Promise<void>;
   lockInventoryTargets(tenantId: string, locationId: string, targets: InventoryLockTarget[], tx: RentalFactTx): Promise<void>;
   activeReservations(tenantId: string, tx?: RentalFactTx): Promise<ActiveReservationRow[]>;
-  allocatedAssetIds(tenantId: string): Promise<Set<string>>;
+  /**
+   * 对该地点下某商品组的资产行加排他锁，供配货使用。
+   *
+   * 与 lockInventoryTargets 同理：拿到锁后再读资产与既有分配，才能让同一资源的
+   * 并发配货串行。缺这一步时两张订单锁的是各自的订单行、互不争锁，
+   * 双方都读到"资产可用且无占用分配"，各自挑中同一台资产并提交。
+   */
+  lockAssetsForAllocation(tenantId: string, itemGroupId: string, locationId: string, tx: RentalFactTx): Promise<void>;
+  /**
+   * 已被有效分配占住的资产 id。
+   *
+   * 必须支持 tx：配货在事务内挑资产，若这里走独立连接的 autocommit 读，
+   * 就看不到并发事务已提交但本连接快照之外的分配。
+   */
+  allocatedAssetIds(tenantId: string, tx?: RentalFactTx): Promise<Set<string>>;
   listAssets(tenantId: string, tx?: RentalFactTx): Promise<RentalAsset[]>;
   upsertAsset(asset: RentalAsset): Promise<void>;
   listStockBalances(tenantId: string, tx?: RentalFactTx): Promise<RentalStockBalance[]>;
@@ -332,10 +346,33 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
   }
 
   /** 已被有效分配占住的资产 id，用于配货时排除。 */
-  async allocatedAssetIds(tenantId: string): Promise<Set<string>> {
+  /**
+   * 配货前对候选资产行加排他锁。
+   *
+   * 锁的粒度是「租户 + 商品组 + 地点」下的全部资产行，与 lockInventoryTargets
+   * 的序列化分支一致：同一资源的并发配货因此串行，不同地点或不同商品组仍可并行。
+   * 按 id 排序取锁，避免与其他按同序取锁的路径互相死锁。
+   */
+  async lockAssetsForAllocation(
+    tenantId: string,
+    itemGroupId: string,
+    locationId: string,
+    tx: RentalFactTx
+  ): Promise<void> {
+    await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT \`id\` FROM \`rental_assets\`
+      WHERE \`tenantId\` = ${tenantId}
+        AND \`itemGroupId\` = ${itemGroupId}
+        AND \`locationId\` = ${locationId}
+      ORDER BY \`id\` FOR UPDATE
+    `);
+  }
+
+  async allocatedAssetIds(tenantId: string, tx?: RentalFactTx): Promise<Set<string>> {
+    const client = tx ?? this.prisma;
     // 分配表没有 workspaceId（它是订单子表），通过父订单的空间条件过滤。
-    const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
-    const rows = await this.prisma.rentalAllocation.findMany({
+    const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
+    const rows = await client.rentalAllocation.findMany({
       where: {
         status: { in: IN_USE_ALLOCATION_STATES },
         assetId: { not: null },

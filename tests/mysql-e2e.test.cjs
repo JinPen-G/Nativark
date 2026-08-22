@@ -2011,6 +2011,97 @@ async function main() {
   );
   ok("复合键集合回填：同数量、不同 customerId 不再被误判为完整");
 
+  console.log("== 27b. 并发配货不得把同一台资产分配给两张订单 ==");
+  // 自查 Review 发现：allocateOrder 只锁了订单行（lockOrder），随后
+  // listAssets / allocatedAssetIds 都**不传 tx**、走独立连接的 autocommit 读，
+  // 对 rental_assets 也没有 FOR UPDATE。两张订单锁的是不同的订单行、互不争锁，
+  // 于是双方都读到"该资产可用且无占用分配行"，各自挑中同一台资产并提交。
+  // RentalAllocation 上没有 assetId 唯一约束，库层也拦不住。
+  //
+  // 下单路径本身是对的（先 lockInventoryTargets 再在事务内重算），只有配货漏了。
+  const allocDemo = await login("demo", "admin", DEMO_PASSWORD);
+  const allocLoc = (await request("GET", "/api/rental/v1/locations", null, allocDemo.accessToken)).body.data[0];
+  const allocGroup = (await request("GET", "/api/rental/v1/item-groups", null, allocDemo.accessToken)).body.data
+    .find((row) => row.inventoryMode === "serialized" && row.status === "enabled");
+  assert.ok(allocGroup, "前置条件：需要一个启用的序列化商品组");
+  // 造一个只有 1 台可用资产的独立时段，避免与前面各节的库存互相干扰。
+  const allocStart = new Date(Date.now() + 200 * 86400000).toISOString();
+  const allocEnd = new Date(Date.now() + 201 * 86400000).toISOString();
+  const allocLines = [{ itemGroupId: allocGroup.id, quantity: 1 }];
+  const allocQuote = async () => {
+    const res = await request(
+      "POST",
+      "/api/rental/v1/quotes",
+      { customerType: "personal", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: allocLoc.id, startAt: allocStart, endAt: allocEnd, lines: allocLines },
+      allocDemo.accessToken
+    );
+    assert.equal(res.status, 201, `配货用例报价应成功: ${res.status} ${JSON.stringify(res.body).slice(0, 300)}`);
+    return res.body.data;
+  };
+  const allocOrder = async (quoteId, name) => {
+    const res = await request(
+      "POST",
+      "/api/rental/v1/orders",
+      {
+        quoteId,
+        customerType: "personal",
+        customerName: name,
+        fulfillmentMode: "store_pickup_return",
+        fulfillmentLocationId: allocLoc.id,
+        startAt: allocStart,
+        endAt: allocEnd,
+        lines: allocLines
+      },
+      allocDemo.accessToken
+    );
+    assert.equal(res.status, 201, `配货用例下单应成功: ${res.status} ${JSON.stringify(res.body).slice(0, 300)}`);
+    return res.body.data;
+  };
+
+  // 两张订单都推进到 reserved（各占一个预占，库存足够容纳两张）
+  const allocA = await allocOrder((await allocQuote()).id, "E2E配货甲");
+  const allocB = await allocOrder((await allocQuote()).id, "E2E配货乙");
+  for (const target of [allocA, allocB]) {
+    const confirmed = await request("POST", `/api/rental/v1/orders/${target.id}/confirm`, {}, allocDemo.accessToken);
+    assert.equal(confirmed.status, 201, `配货用例的订单确认应成功: ${JSON.stringify(confirmed.body).slice(0, 200)}`);
+  }
+
+  // 并发配货：即使两者都能配到货，也绝不允许同一台资产出现在两张订单的分配里。
+  const [allocR1, allocR2] = await Promise.all([
+    request("POST", `/api/rental/v1/orders/${allocA.id}/allocate`, {}, allocDemo.accessToken),
+    request("POST", `/api/rental/v1/orders/${allocB.id}/allocate`, {}, allocDemo.accessToken)
+  ]);
+  // 这条断言不预设"必须恰好一个成功"：库存足够时两个都该成功。
+  // 真正的不变量是"同一台资产不得被两张订单同时占住"，因此直接查库。
+  const allocDup = readCount(
+    "SELECT COUNT(*) FROM (" +
+      "SELECT a.`assetId` FROM `rental_allocations` a" +
+      " INNER JOIN `rental_orders` o ON o.`id` = a.`orderId`" +
+      " WHERE a.`assetId` IS NOT NULL AND a.`status` IN ('allocated','picked_up')" +
+      "   AND o.`tenantId`='tenant_001'" +
+      " GROUP BY a.`assetId` HAVING COUNT(DISTINCT a.`orderId`) > 1" +
+      ") dup;"
+  );
+  assert.equal(
+    allocDup,
+    0,
+    `同一台资产被多张订单同时占用（并发配货未加锁），冲突资产数 ${allocDup}；` +
+      `本次两个配货响应 ${allocR1.status}/${allocR2.status}`
+  );
+  // 资产状态也不能被两次覆盖成不一致：每台被分配的资产应恰好对应一条有效分配。
+  const allocOrphan = readCount(
+    "SELECT COUNT(*) FROM `rental_assets` s" +
+      " WHERE s.`tenantId`='tenant_001' AND s.`status`='reserved'" +
+      "   AND NOT EXISTS (SELECT 1 FROM `rental_allocations` a" +
+      "     INNER JOIN `rental_orders` o ON o.`id` = a.`orderId`" +
+      "     WHERE a.`assetId` = s.`id` AND a.`status` IN ('allocated','picked_up'));"
+  );
+  assert.equal(allocOrphan, 0, `有 ${allocOrphan} 台资产被标记为 reserved 但没有对应的有效分配`);
+  ok(
+    `并发配货资产不重复占用：两张订单并发配货（响应 ${allocR1.status}/${allocR2.status}）后，` +
+      "无任何资产被多张订单同时占住，也无 reserved 资产缺少对应分配"
+  );
+
   console.log("== 28. RC-01 品类恢复不依赖定价或规则行存在 ==");
   const couponsBeforeConfigLoss = readCount(
     "SELECT COUNT(*) FROM `rental_customer_coupons` WHERE `tenantId`='tenant_001';"
