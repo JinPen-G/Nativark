@@ -180,7 +180,16 @@ export class AuthService {
   async getCategoryContext(tenantId: string, workspaceId?: string) {
     if (workspaceId) {
       const scoped = await this.platformService.getWorkspaceCategoryContext(tenantId, workspaceId);
-      if (scoped.categoryCode) return scoped;
+      // 会话里有明确的空间，就必须用那个空间的品类判定，解析不出来要拒绝而不是放行。
+      //
+      // 早前这里在 `!scoped.categoryCode` 时退回 getTenantContext——那是 fail-open：
+      // 租户级档案的品类是「最后一个持久化配置的空间」的品类，于是守卫会用**另一个
+      // 空间**的能力集给当前请求放行。空间存在而品类查不到只有两种成因：空间被删了，
+      // 或数据坏了；两者都该让请求失败，而不是借用别处的品类。
+      if (!scoped.categoryCode) {
+        throw new ForbiddenException("当前经营空间不存在或经营品类缺失，请重新选择经营空间");
+      }
+      return scoped;
     }
     return this.getTenantContext(tenantId);
   }

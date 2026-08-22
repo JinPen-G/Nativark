@@ -14,6 +14,7 @@ import type {
   TenantRentalProfile
 } from "@store-rental/shared";
 import { PrismaService } from "../database/prisma.service";
+import { getRequestWorkspaceId } from "../../common/request-identity";
 import { resolveScopeWorkspaceId } from "./workspace-scope";
 
 /**
@@ -175,12 +176,35 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       terminology: profile.terminology as unknown as Prisma.InputJsonValue,
       configVersion: profile.configVersion
     };
+    // 租户级档案只能由**默认空间**写入。
+    //
+    // 这张表主键是 tenantId 一格，而 persistConfig 会被 registerWorkspace（新建
+    // 任意空间）和 factContext（任一空间首次访问经营事实）调用。不做这个判定时，
+    // 第二个空间的品类会覆盖租户级档案；启动预热又把这份租户级档案灌进**每个**
+    // 空间的 state.profile，于是默认空间的品类被改成另一个空间的品类。
+    // 实测后果：tenant_001 默认空间是 camera，档案被 camping 空间改成了 camping，
+    // 之后业务侧每个请求都判定"品类变了"并用 camping 默认值覆盖该空间的定价、
+    // 优惠、规则与通知模板——vehicle 的资质审核要求也会被一并抹掉。
+    //
+    // 档案在需求里是「租户级升级兼容层」，不是空间的品类来源；空间品类的事实源
+    // 是 business_workspaces.categoryCode。因此非默认空间一律不碰它。
+    const requestWorkspaceId = getRequestWorkspaceId();
+    const isDefaultWorkspaceWrite = !requestWorkspaceId || requestWorkspaceId === `ws_${profile.tenantId}`;
+    if (isDefaultWorkspaceWrite) {
+      await this.db(tx).tenantRentalProfile.upsert({
+        where: { tenantId: profile.tenantId },
+        create: { tenantId: profile.tenantId, ...data, initializedAt: new Date(profile.initializedAt) },
+        update: data
+      });
+      await this.ensureDefaultWorkspace(profile.tenantId, data.categoryCode, tx);
+      return;
+    }
+    // 非默认空间：确保档案存在（懒加载租户可能还没有），但绝不改既有品类。
     await this.db(tx).tenantRentalProfile.upsert({
       where: { tenantId: profile.tenantId },
       create: { tenantId: profile.tenantId, ...data, initializedAt: new Date(profile.initializedAt) },
-      update: data
+      update: {}
     });
-    await this.ensureDefaultWorkspace(profile.tenantId, data.categoryCode, tx);
   }
 
   /**
@@ -203,7 +227,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
   ): Promise<void> {
     const client = this.db(tx);
     const workspaceId = `ws_${tenantId}`;
-    await client.businessWorkspace.upsert({
+    const workspace = await client.businessWorkspace.upsert({
       where: { id: workspaceId },
       create: {
         id: workspaceId,
@@ -217,13 +241,25 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       // 已存在即不动：不覆盖名称，也绝不改品类。
       update: {}
     });
-    // 该租户的现有账号全部补为成员，沿用各自既有角色（与回填迁移同规则）。
-    // 用 upsert 而不是 createMany，保证可重复执行且不覆盖已有的空间级角色配置。
-    const users = await client.user.findMany({ where: { tenantId }, select: { id: true, roleId: true, isActive: true } });
+    // 该租户的现有账号补为默认空间成员，仅在**首次创建**该空间时执行。
+    //
+    // 不能每次 upsertProfile 都跑：这个方法会被 registerWorkspace（新建任意空间）
+    // 和 factContext（任一空间首次访问经营事实）触发，若每次都把全部账号 upsert
+    // 进默认空间，管理员刻意移除的成员关系会被静默重建——一个只该进入空间 B 的
+    // 账号会重新获得默认空间 A 的读写权。`update: {}` 只保护"已存在但被停用"的行，
+    // 挡不住"已被删除"的行重新出现。
+    //
+    // 首次创建的判定用 upsert 的返回值：createdAt === updatedAt 说明这次是 create。
+    const isFreshWorkspace = workspace.createdAt.getTime() === workspace.updatedAt.getTime();
+    if (!isFreshWorkspace) return;
+    const users = await client.user.findMany({ where: { tenantId }, select: { id: true, isActive: true } });
     for (const user of users) {
       await client.workspaceMember.upsert({
         where: { workspaceId_userId: { workspaceId, userId: user.id } },
-        create: { tenantId, workspaceId, userId: user.id, roleId: user.roleId, isActive: user.isActive },
+        // roleId 留空 = 沿用租户级角色集（与回填迁移同规则）。
+        // 写 user.roleId 会让 findWorkspaceScopedUser 用单个角色整体替换权限，
+        // 多角色账号的授权会静默收缩。
+        create: { tenantId, workspaceId, userId: user.id, roleId: null, isActive: user.isActive },
         update: {}
       });
     }

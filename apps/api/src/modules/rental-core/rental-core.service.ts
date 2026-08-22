@@ -349,7 +349,6 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     for (const template of state.couponTemplates) await this.configStore.upsertCouponTemplate(template, tx);
     for (const template of state.inspectionTemplates) await this.configStore.upsertInspectionTemplate(template, tx);
   }
-  hasTenantState(tenantId: string) { return this.states.has(tenantId); }
   getProfile(tenantId: string) { return this.state(tenantId).profile; }
   getBusinessSettings(tenantId: string) { return this.state(tenantId).businessSettings; }
 

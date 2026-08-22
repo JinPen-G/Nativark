@@ -2609,15 +2609,16 @@ async function main() {
     0,
     "拥有默认空间的租户，其所有账号都必须已回填为成员"
   );
+  // 成员关系不得写入空间级角色：本列为空表示沿用租户级角色集。
+  //
+  // 上一版断言写的是 `WHERE NOT (m.roleId <=> u.roleId)`——拿回填时刚复制过去的列
+  // 比源列，永远不可能失败，证明不了「既有角色关系被正确映射」。而且它锁定的正是
+  // 一个缺陷：账号的权威角色集是 UserRole ∪ {User.roleId}，写单个 roleId 会让
+  // findWorkspaceScopedUser 用它**整体替换**权限，多角色账号升级后权限静默收缩。
   assert.equal(
-    readCount(
-      "SELECT COUNT(*) FROM `User` u" +
-        " INNER JOIN `business_workspaces` w ON w.`tenantId`=u.`tenantId` AND w.`defaultMarker`='default'" +
-        " INNER JOIN `workspace_members` m ON m.`workspaceId`=w.`id` AND m.`userId`=u.`id`" +
-        " WHERE NOT (m.`roleId` <=> u.`roleId`);"
-    ),
+    readCount("SELECT COUNT(*) FROM `workspace_members` WHERE `roleId` IS NOT NULL;"),
     0,
-    "成员角色必须与账号原有角色一致（既有角色关系被映射而非丢弃）"
+    "成员关系不得写入空间级角色，否则会覆盖账号的租户级角色集（多角色账号权限收缩）"
   );
   // 默认空间 id 必须是确定可重算的 ws_<tenantId>，让空库与升级两条路径同形状。
   assert.equal(
@@ -3531,6 +3532,126 @@ async function main() {
     "旧版快照缺字段仍可读：清空该空间配置行并移除 sampleAssets/sampleStockBalances/operators/" +
       "sampleFactsEnsured 后重启，切入该空间后五个读接口均 200 而非 500"
   );
+
+  console.log("== 60. 经营空间管理接口必须有权限门槛 ==");
+  // 自查 Review 发现的 fail-open：`requiredPermissions()` 的 /platform 分支
+  // 漏列了 /platform/workspaces，落到函数末尾的 `return []`，而 hasAnyPermission
+  // 对空数组直接放行。后果是任何能登录的账号都能列出全部空间、把自己加进任一空间、
+  // 甚至附带租户管理员角色——既跨空间读数据又提权。
+  //
+  // 用一个**无管理权限**的账号验证：造一个只有订单查看权的角色并建号。
+  const permAdmin = await login("demo", "admin", DEMO_PASSWORD);
+  const permRole = await request(
+    "POST",
+    "/api/platform/roles",
+    {
+      code: `E2E-LOWPRIV-${Date.now().toString(36)}`,
+      name: "E2E 低权限角色",
+      scope: "store",
+      dataScope: "own",
+      enabledBusinessScopes: ["rental"],
+      // 字段名是 permissions，不是 permissionCodes。写错的话角色会拿到 0 条权限，
+      // 于是第 61 节的 403 来自"无权访问该功能"而不是空间检查——因错误的理由通过。
+      // 实测过：写错时把 hasWorkspaces 豁免加回去，第 61 节依然全绿。
+      permissions: [
+        "store-rental:order:view",
+        "store-rental:vehicle:view",
+        "store-rental:vehicle-group:manage"
+      ],
+      isActive: true
+    },
+    permAdmin.accessToken
+  );
+  assert.equal(permRole.status, 201, `建低权限角色应成功: ${JSON.stringify(permRole.body).slice(0, 200)}`);
+  const permAccount = `e2e_lowpriv_${Date.now().toString(36)}`;
+  const permUser = await request(
+    "POST",
+    "/api/platform/users",
+    {
+      account: permAccount,
+      displayName: "E2E 低权限账号",
+      phone: "13900007777",
+      roleIds: [permRole.body.data.id],
+      isActive: true
+    },
+    permAdmin.accessToken
+  );
+  assert.equal(permUser.status, 201, `建低权限账号应成功: ${JSON.stringify(permUser.body).slice(0, 200)}`);
+  const permTempPassword = permUser.body.data.temporaryPassword;
+  assert.ok(permTempPassword, "新账号应返回初始密码");
+  // 新账号必须先改密才能调业务接口（mustChangePassword 闸门），否则拿到的 403
+  // 来自改密要求而不是空间检查，断言就测不到目标路径。
+  const permFirstLogin = await login("demo", permAccount, permTempPassword);
+  const permNewPassword = `E2e!${randomBytes(4).toString("hex")}`;
+  const permChanged = await request(
+    "POST",
+    "/api/auth/change-password",
+    { currentPassword: permTempPassword, newPassword: permNewPassword },
+    permFirstLogin.accessToken
+  );
+  assert.equal(permChanged.status, 201, `低权限账号改密应成功: ${JSON.stringify(permChanged.body).slice(0, 200)}`);
+  const permLogin = await login("demo", permAccount, permNewPassword);
+
+  // 1) 列空间：低权限账号不得读取
+  const permList = await request("GET", "/api/platform/workspaces", null, permLogin.accessToken);
+  assert.equal(
+    permList.status,
+    403,
+    `低权限账号不得列出经营空间，实际 ${permList.status}: ${JSON.stringify(permList.body).slice(0, 200)}`
+  );
+  // 2) 加成员（提权路径）：必须被拒
+  const permTargetWs = (await request("GET", "/api/platform/workspaces", null, permAdmin.accessToken)).body.data[0];
+  const permAddMember = await request(
+    "PUT",
+    `/api/platform/workspaces/${permTargetWs.id}/members`,
+    { userId: permUser.body.data.id, roleId: permRole.body.data.id },
+    permLogin.accessToken
+  );
+  assert.equal(
+    permAddMember.status,
+    403,
+    `低权限账号不得增删空间成员（这是提权路径），实际 ${permAddMember.status}: ` +
+      `${JSON.stringify(permAddMember.body).slice(0, 200)}`
+  );
+  // 3) 建空间：必须被拒
+  const permCreateWs = await request(
+    "POST",
+    "/api/platform/workspaces",
+    { tenantId: "tenant_001", code: `E2E-NOPERM-${Date.now().toString(36)}`, name: "越权建空间", categoryCode: "camping" },
+    permLogin.accessToken
+  );
+  assert.equal(
+    permCreateWs.status,
+    403,
+    `低权限账号不得新建经营空间，实际 ${permCreateWs.status}: ${JSON.stringify(permCreateWs.body).slice(0, 200)}`
+  );
+  // 4) 管理员仍然可用（避免把权限收得过紧而不自知）
+  const permAdminList = await request("GET", "/api/platform/workspaces", null, permAdmin.accessToken);
+  assert.equal(permAdminList.status, 200, "租户管理员仍应能列出经营空间");
+  ok("经营空间管理接口有权限门槛：低权限账号列空间/加成员/建空间均 403，管理员不受影响");
+
+  console.log("== 61. 无空间成员关系的账号不得访问经营域 ==");
+  // 另一处 fail-open：空间检查曾附加 `accessContext.hasWorkspaces` 条件，
+  // 于是「一个空间都没有的账号」跳过检查，随后仓储层的 resolveScopeWorkspaceId
+  // 回退到默认空间——成员关系为零的账号拿到了默认空间的完整读写权。
+  // saveUser 不建成员关系，所以新建账号天然处于这个状态，无需任何数据库直改。
+  assert.equal(
+    readCount(
+      `SELECT COUNT(*) FROM \`workspace_members\` WHERE \`userId\`='${permUser.body.data.id}';`
+    ),
+    0,
+    "前置条件：新建账号不应有任何空间成员关系，否则本节测不到该路径"
+  );
+  for (const endpoint of ["orders", "assets", "item-groups"]) {
+    const res = await request("GET", `/api/rental/v1/${endpoint}`, null, permLogin.accessToken);
+    assert.equal(
+      res.status,
+      403,
+      `无空间成员关系的账号访问 /${endpoint} 必须 403 而不是回退到默认空间，实际 ${res.status}: ` +
+        `${JSON.stringify(res.body).slice(0, 300)}`
+    );
+  }
+  ok("无成员关系账号 fail-closed：三个经营接口均 403，不再静默回退到默认空间");
 
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);
 }

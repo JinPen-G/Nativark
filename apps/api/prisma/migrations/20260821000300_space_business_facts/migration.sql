@@ -72,6 +72,7 @@ UPDATE `rental_value_added_services` f INNER JOIN `business_workspaces` w ON w.`
 
 -- 3. 对账：任何一行没能归属到经营空间，就让本次迁移明确失败
 --    手法与 SPACE-01 一致：带 CHECK 约束的临时表，只允许 'ok'。
+DROP TABLE IF EXISTS `_space03_reconcile`;
 CREATE TABLE `_space03_reconcile` (
     `finding` VARCHAR(191) NOT NULL,
     CONSTRAINT `space03_backfill_must_be_complete` CHECK (`finding` = 'ok')

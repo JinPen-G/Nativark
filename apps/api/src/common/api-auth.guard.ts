@@ -96,9 +96,31 @@ function requiredPermissions(method: string, path: string) {
   if (path.startsWith("/platform/organizations") || path.startsWith("/platform/users")) {
     return ["system:user:manage"];
   }
-  if (path.startsWith("/platform/customers") || path.startsWith("/platform/workspace-customers")) {
+  if (path.startsWith("/platform/workspace-customers")) {
     // SPACE-04：共享客户主档按会员权限判定，与旧车辆域会员页面一致。
     // 读写分开：查看不应要求管理权限，否则运营查客户就得给写权限。
+    return method === "GET"
+      ? ["store-rental:member:view", "store-rental:member:manage"]
+      : ["store-rental:member:manage"];
+  }
+  // SPACE-01/02：经营空间主档与成员关系属于租户管理能力。
+  //
+  // 必须显式列出：本函数末尾兜底 `return []`，而 hasAnyPermission 对空数组
+  // 直接放行。漏列等于把「新建空间、改空间状态、增删空间成员」开放给任何
+  // 能登录的账号——普通运营账号可以把自己加进任一空间并附带租户管理员角色，
+  // 既跨空间读数据又提权。注意不能靠 `/platform/workspace-customers` 覆盖：
+  // 两者互不为前缀，必须分开判定，且这条要放在它之后避免被前缀吃掉。
+  if (path.startsWith("/platform/workspaces")) {
+    // 成员关系直接决定谁能进入哪个空间、以何角色进入，等价于授权操作，
+    // 因此读也要求管理权限；空间列表本身按用户管理权限放行读。
+    if (path.includes("/members")) {
+      return ["system:user:manage"];
+    }
+    return method === "GET"
+      ? ["system:user:manage", "system:tenant:manage"]
+      : ["system:tenant:manage"];
+  }
+  if (path.startsWith("/platform/customers")) {
     return method === "GET"
       ? ["store-rental:member:view", "store-rental:member:manage"]
       : ["store-rental:member:manage"];
@@ -401,9 +423,18 @@ export class ApiAuthGuard implements CanActivate {
     // 例外：品类定义是全局参考数据（且 SaaS 平台管理员被显式允许访问），
     // 它不属于某个经营空间，要求空间会让平台管理员无法读取品类目录。
     const workspaceExemptPath = path === "/rental/v1/categories";
+    // 刻意**不**附加 `accessContext.hasWorkspaces` 条件。
+    //
+    // 曾经加过，理由是「一个空间都没有的账号不该被空间检查拦住」——那是错的：
+    // 无空间会话继续往下走时，仓储层的 resolveScopeWorkspaceId 会回退到租户
+    // 默认空间，于是**成员关系为零的账号拿到了默认空间的完整读写权**，
+    // 「账号通过成员关系进入空间」被整条绕过。saveUser 不建成员关系，
+    // 所以新建账号天然处于这个状态，不需要任何数据库直改就能复现。
+    //
+    // 正确语义是一致的 403：没有可进入的空间，就不能访问经营域。
+    // 该账号需要管理员先把它加入某个空间，这正是成员关系存在的意义。
     if (
       !workspaceId &&
-      accessContext.hasWorkspaces &&
       !workspaceExemptPath &&
       (path.startsWith("/rental/") ||
         path.startsWith("/store-rental/") ||

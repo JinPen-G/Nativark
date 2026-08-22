@@ -102,6 +102,7 @@ WHERE NOT EXISTS (
 );
 
 -- 4. 权益账户主键改为按空间。先记录改前行数，供对账验证守恒。
+DROP TABLE IF EXISTS `_space04_before`;
 CREATE TABLE `_space04_before` (
     `n` INT NOT NULL
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -114,6 +115,7 @@ ALTER TABLE `rental_benefit_accounts` DROP PRIMARY KEY, ADD PRIMARY KEY (`worksp
 CREATE INDEX `rental_benefit_accounts_tenant_customer_idx` ON `rental_benefit_accounts`(`tenantId`, `customerId`);
 
 -- 5. 对账：任何一条不成立就让本次迁移明确失败
+DROP TABLE IF EXISTS `_space04_reconcile`;
 CREATE TABLE `_space04_reconcile` (
     `finding` VARCHAR(191) NOT NULL,
     CONSTRAINT `space04_backfill_must_be_complete` CHECK (`finding` = 'ok')
@@ -129,10 +131,20 @@ WHERE NOT EXISTS (
 ) HAVING COUNT(*) > 0;
 
 -- 每个共享主档都必须进入其租户的默认空间
+--
+-- 限定「该租户确实有默认空间」：默认空间只存在于有 tenant_rental_profiles 的租户，
+-- 而没有任何迁移回填过那张表（它由运行时写入）。一个 2026-08-13 之前建的老车辆
+-- 租户可能有几百条 Member 却没有档案，于是拿不到默认空间。
+-- 不加这个限定的话，那种租户会让本迁移必然中止——而它的客户主档已经正确建立，
+-- 缺的只是空间关系，等该租户首次使用经营域时由运行时补齐即可。
+-- 真正必须报错的是「有默认空间却没接上」，那才是回填漏了。
 INSERT INTO `_space04_reconcile` (`finding`)
 SELECT CONCAT('共享客户未接入默认经营空间: ', COUNT(*))
 FROM `customer_profiles` p
-WHERE NOT EXISTS (
+WHERE EXISTS (
+    SELECT 1 FROM `business_workspaces` w0
+    WHERE w0.`tenantId` = p.`tenantId` AND w0.`defaultMarker` = 'default'
+) AND NOT EXISTS (
     SELECT 1 FROM `customer_workspace_links` l
     INNER JOIN `business_workspaces` w ON w.`id` = l.`workspaceId`
     WHERE l.`customerId` = p.`id` AND w.`tenantId` = p.`tenantId` AND w.`defaultMarker` = 'default'
@@ -146,11 +158,13 @@ LEFT JOIN `business_workspaces` w
        ON w.`id` = l.`workspaceId` AND w.`tenantId` = l.`tenantId`
 WHERE w.`id` IS NULL HAVING COUNT(*) > 0;
 
--- 权益账户行数守恒（只允许删掉孤儿行，不得凭空增减）
+-- 权益账户行数必须守恒：本迁移只换主键，不增不减行。
+-- 用 <> 而不是 >：这条迁移不往该表插行，只用 > 的话它永远不会响，
+-- 而真正要防的方向恰恰是「换主键时丢行」（旧键有重复值就会丢）。
 INSERT INTO `_space04_reconcile` (`finding`)
 SELECT CONCAT('权益账户行数异常：改键前 ', b.`n`, ' 行，现有 ', (SELECT COUNT(*) FROM `rental_benefit_accounts`), ' 行')
 FROM `_space04_before` b
-WHERE (SELECT COUNT(*) FROM `rental_benefit_accounts`) > b.`n`;
+WHERE (SELECT COUNT(*) FROM `rental_benefit_accounts`) <> b.`n`;
 
 DROP TABLE `_space04_reconcile`;
 DROP TABLE `_space04_before`;

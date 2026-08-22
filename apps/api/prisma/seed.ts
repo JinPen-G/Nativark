@@ -708,7 +708,10 @@ async function upsertRolesAndUsers() {
             tenantId: tenant.id,
             workspaceId,
             userId: user.id,
-            roleId: user.roleIds[0],
+            // 与迁移回填一致：不写空间级角色。本列为空表示沿用租户级角色集；
+            // 写 roleIds[0] 会让 findWorkspaceScopedUser 用单个角色整体替换权限，
+            // 多角色账号（如同时是店长与财务复核）的权限会静默收缩。
+            roleId: null,
             isActive: true
           }
         });

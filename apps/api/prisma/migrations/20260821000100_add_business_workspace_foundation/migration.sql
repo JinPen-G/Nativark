@@ -98,8 +98,8 @@ ON DUPLICATE KEY UPDATE `business_workspaces`.`id` = `business_workspaces`.`id`;
 
 -- Backfill: 现有账号 → 默认空间成员
 --
--- roleId 沿用账号既有的租户级角色，使升级后权限不变（需求：现有账号仍可正常使用）。
--- dataScope 留空表示沿用角色自带范围；空间级差异化授权属后续任务。
+-- roleId 与 dataScope 都留空，表示沿用账号既有的租户级角色与范围，
+-- 使升级后权限**完全不变**（需求：现有账号仍可正常使用）。详见下方列注释。
 -- 不删除、不重建任何 User 或 UserRole 行。
 INSERT INTO `workspace_members`
     (`tenantId`, `workspaceId`, `userId`, `roleId`, `dataScope`, `isActive`, `createdAt`, `updatedAt`)
@@ -107,7 +107,13 @@ SELECT
     u.`tenantId`,
     w.`id`,
     u.`id`,
-    u.`roleId`,
+    -- 刻意写 NULL 而不是 u.roleId：本列为空表示「沿用租户级默认角色」（见 schema 注释），
+    -- 而账号的权威角色集是 UserRole ∪ {User.roleId}，User.roleId 只是建号时存的第一个角色。
+    -- 写 u.roleId 会让 findWorkspaceScopedUser 用这单个角色**整体替换**权限集，
+    -- 于是多角色账号升级后权限静默收缩（例如同时是店长和财务复核的人只剩店长）。
+    -- 升级的要求是"既有账号仍可正常使用"，因此这里不缩小任何人的授权；
+    -- 空间级角色由管理员后续按需显式配置。
+    NULL,
     NULL,
     u.`isActive`,
     NOW(3),
@@ -122,6 +128,7 @@ ON DUPLICATE KEY UPDATE `workspace_members`.`workspaceId` = `workspace_members`.
 -- 用带 CHECK 约束的临时表做断言：把每一条不满足项作为一行插入，
 -- CHECK 只允许 'ok'，因此任何一条问题都会让本次迁移以可读消息中止。
 -- 刻意不用存储过程——Prisma 按分号切分语句，过程体里的分号会被切坏。
+DROP TABLE IF EXISTS `_space01_reconcile`;
 CREATE TABLE `_space01_reconcile` (
     `finding` VARCHAR(191) NOT NULL,
     CONSTRAINT `space01_backfill_must_be_complete` CHECK (`finding` = 'ok')
@@ -151,12 +158,15 @@ INNER JOIN `business_workspaces` w ON w.`tenantId` = u.`tenantId` AND w.`default
 LEFT JOIN `workspace_members` m ON m.`workspaceId` = w.`id` AND m.`userId` = u.`id`
 WHERE m.`userId` IS NULL;
 
--- 成员的角色必须与账号原有角色一致（证明既有角色关系被正确映射而非丢弃）
+-- 成员关系不得缩小任何账号的授权：roleId 必须为空（= 沿用租户级角色）。
+--
+-- 这条对账有区分力：如果回填改回写 u.roleId，它会立刻报出行数。
+-- 上一版写的是 `WHERE NOT (m.roleId <=> u.roleId)`——拿刚复制过去的列比源列，
+-- 永远不可能失败，证明不了任何事。
 INSERT INTO `_space01_reconcile` (`finding`)
-SELECT CONCAT('成员角色与账号原角色不一致: ', u.`account`)
-FROM `User` u
-INNER JOIN `business_workspaces` w ON w.`tenantId` = u.`tenantId` AND w.`defaultMarker` = 'default'
-INNER JOIN `workspace_members` m ON m.`workspaceId` = w.`id` AND m.`userId` = u.`id`
-WHERE NOT (m.`roleId` <=> u.`roleId`);
+SELECT CONCAT('成员关系写入了空间级角色，会覆盖账号的租户级角色集: ', COUNT(*), ' 行')
+FROM `workspace_members`
+WHERE `roleId` IS NOT NULL
+HAVING COUNT(*) > 0;
 
 DROP TABLE `_space01_reconcile`;

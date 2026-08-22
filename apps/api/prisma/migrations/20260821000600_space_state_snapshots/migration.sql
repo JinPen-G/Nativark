@@ -23,6 +23,7 @@ UPDATE `rental_business_state_snapshots` s
 
 -- 3. 对账：没能归属的快照行会让换主键时报 NOT NULL 错误且信息晦涩，
 --    因此在这里先以可读消息中止。手法与前几条迁移一致。
+DROP TABLE IF EXISTS `_space03_snapshot_reconcile`;
 CREATE TABLE `_space03_snapshot_reconcile` (
     `finding` VARCHAR(191) NOT NULL,
     CONSTRAINT `space03_snapshot_backfill_complete` CHECK (`finding` = 'ok')
