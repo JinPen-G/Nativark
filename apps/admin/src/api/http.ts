@@ -1,6 +1,7 @@
 import axios from "axios";
 import type { ApiResult, LoginResponse } from "@store-rental/shared";
 import type { InternalAxiosRequestConfig } from "axios";
+import { currentSessionSignal } from "@/app/queryClient";
 
 const baseURL = import.meta.env.VITE_API_BASE_URL ?? "/api";
 
@@ -10,6 +11,14 @@ http.interceptors.request.use((config) => {
   const token = window.localStorage.getItem("rental_access_token");
   const tenantRaw = window.localStorage.getItem("rental_tenant");
   if (token) config.headers.Authorization = `Bearer ${token}`;
+  // SPACE-05：给每个请求挂上当前会话的中止信号。
+  //
+  // 切换经营空间时会中止上一代信号，于是那一刻仍在飞行中的请求当场失败，
+  // 不会在新空间落地。只靠 queryClient.cancelQueries() 不够——它管不到
+  // 直接走 axios 的调用（表单提交、命令式拉取）。
+  //
+  // 调用方已显式传 signal 时不覆盖：那是更精细的控制，不该被这里夺走。
+  if (!config.signal) config.signal = currentSessionSignal();
   if (tenantRaw) {
     try {
       const tenant = JSON.parse(tenantRaw) as { tenantId?: string; tenantCode?: string };

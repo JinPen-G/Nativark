@@ -3441,6 +3441,97 @@ async function main() {
       "跨租户空间切换被拒且不改动原会话、空间列表只含本租户"
   );
 
+  console.log("== 59. 旧版快照缺字段时读路径仍不得 500 ==");
+  // 浏览器实测发现的缺陷（E2E 当时没抓到）：快照 JSON 被直接当 TenantRentalState 装载，
+  // 早于某字段引入的快照不含该字段，于是 `state.sampleAssets.length` 抛
+  // "Cannot read properties of undefined"，/rental/v1/assets 与 /stock-balances 直接 500。
+  //
+  // E2E 抓不到的原因很具体：它每次用全新测试库，快照都是当前版本写的、天然带齐字段。
+  // 因此这里**主动把快照改成旧版形状**（删掉字段）再重启，模拟真实的升级库。
+  // 这是证伪式测试：不是断言"字段在就正常"，而是断言"字段不在也不能崩"。
+  // 取 demo 租户的**非默认**空间：本节要清空该空间的配置行，
+  // 放在最后一节且只动非默认空间，不影响前面各节已完成的断言。
+  // 复现条件要精确：开发库炸掉是因为该空间**在配置表里没有任何行**，
+  // 于是 onApplicationBootstrap 的重建循环跳过它，onModuleInit 装载的原始 JSON
+  // 保持为活状态；而只改字段不够——重建基底总是带齐字段，改坏的 JSON 到不了读路径
+  // （第一版就是这样写成了不具区分力的绿灯，靠变异测试才发现）。
+  //
+  // 因此这里**新建**一个空间：新空间天然没有配置行，不必删任何现有数据，
+  // 也就不会因为外键依赖顺序而失败，更不会影响前面各节。
+  const legacyDemoAdmin = await login("demo", "admin", DEMO_PASSWORD);
+  // 复现条件要精确：开发库炸掉是因为该空间**在配置表里没有任何行**，
+  // 于是 onApplicationBootstrap 的重建循环跳过它，onModuleInit 装载的原始 JSON
+  // 保持为活状态；而只改字段不够——重建基底总是带齐字段，改坏的 JSON 到不了读路径
+  // （第一版就是这样写成了不具区分力的绿灯，靠变异测试才发现）。
+  //
+  // 注意不能用「新建空间」来复现：新建会连带落配置行，那也是新空间为何天然健康。
+  // 开发库里出问题的是历史空间——快照行在、配置行不在。这里如实构造该形态。
+  const orphanSnapWs = `ws_e2e_legacy_${Date.now().toString(36)}`;
+  mysqlQuery(
+    "INSERT INTO `business_workspaces` (`id`,`tenantId`,`code`,`name`,`categoryCode`,`status`," +
+      "`isDefault`,`defaultMarker`,`createdAt`,`updatedAt`) VALUES (" +
+      `'${orphanSnapWs}','tenant_001','E2E-ORPHAN-${Date.now().toString(36)}','旧版快照孤立空间',` +
+      `'construction','active',0,'${orphanSnapWs}',NOW(3),NOW(3));`
+  );
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_item_groups\` WHERE \`workspaceId\`='${orphanSnapWs}';`),
+    0,
+    "前置条件：该空间不应有配置行，否则重建循环不会跳过它、复现不成立"
+  );
+  // 让当前账号能进入这个空间，否则切换会被成员校验拒绝（那是另一条正确的规则）。
+  mysqlQuery(
+    "INSERT INTO `workspace_members` (`tenantId`,`workspaceId`,`userId`,`isActive`,`createdAt`,`updatedAt`) " +
+      `SELECT 'tenant_001', '${orphanSnapWs}', u.\`id\`, 1, NOW(3), NOW(3) ` +
+      "FROM `User` u WHERE u.`tenantId`='tenant_001' AND u.`account`='admin' LIMIT 1;"
+  );
+  // 直接写入一条**旧版形状**的快照：不含 sampleAssets/sampleStockBalances/operators。
+  // 这正是升级库里那些老快照的样子。
+  mysqlQuery(
+    "INSERT INTO `rental_core_state_snapshots` (`workspaceId`, `tenantId`, `state`, `updatedAt`) VALUES (" +
+      `'${orphanSnapWs}', 'tenant_001', ` +
+      "JSON_OBJECT('profile', JSON_OBJECT('tenantId','tenant_001','categoryCode','construction'), " +
+      "'itemGroups', JSON_ARRAY(), 'locations', JSON_ARRAY(), 'inspectionTemplates', JSON_ARRAY(), " +
+      "'couponTemplates', JSON_ARRAY()), NOW(3));"
+  );
+  assert.equal(
+    readCount(
+      "SELECT COUNT(*) FROM `rental_core_state_snapshots` WHERE " +
+        `\`workspaceId\`='${orphanSnapWs}' AND JSON_CONTAINS_PATH(\`state\`,'one','$.sampleAssets');`
+    ),
+    0,
+    "前置条件：快照不应含 sampleAssets，否则本节测的不是旧版快照"
+  );
+  await stopApi();
+  startApi();
+  if (!(await waitHealth())) fail("旧版快照兼容性校验的 API 重启超时");
+  const legacyDemo = await login("demo", "admin", DEMO_PASSWORD);
+  // 必须切到那个被改坏的空间，否则读的是默认空间的健康状态，等于没测。
+  const legacySwitch = await request(
+    "POST",
+    "/api/auth/switch-workspace",
+    { workspaceId: orphanSnapWs },
+    legacyDemo.accessToken
+  );
+  assert.equal(
+    legacySwitch.status,
+    201,
+    `切换到旧版快照空间应成功: ${legacySwitch.status} ${JSON.stringify(legacySwitch.body).slice(0, 200)}`
+  );
+  const legacyToken = legacySwitch.body.data.accessToken;
+  for (const endpoint of ["assets", "stock-balances", "item-groups", "locations", "orders"]) {
+    const res = await request("GET", `/api/rental/v1/${endpoint}`, null, legacyToken);
+    assert.equal(
+      res.status,
+      200,
+      `旧版快照下 /${endpoint} 必须正常返回而不是 500（缺字段应被补默认值）: ` +
+        `${res.status} ${JSON.stringify(res.body).slice(0, 200)}`
+    );
+  }
+  ok(
+    "旧版快照缺字段仍可读：清空该空间配置行并移除 sampleAssets/sampleStockBalances/operators/" +
+      "sampleFactsEnsured 后重启，切入该空间后五个读接口均 200 而非 500"
+  );
+
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);
 }
 

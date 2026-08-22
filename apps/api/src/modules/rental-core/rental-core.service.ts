@@ -923,7 +923,25 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       state = this.seedState(tenantId, categoryCode, this.seedPrefix(tenantId, workspaceId));
       this.states.set(workspaceId, state);
     }
+    // 快照 JSON 直接当 TenantRentalState 装载，早于某字段引入的快照不含它。
+    // 这里统一补默认值，否则读路径上会抛 "Cannot read properties of undefined"。
+    //
+    // 两类都要补，实测各自炸过一次：
+    //   - 数组字段：`state.sampleAssets.length`（/rental/v1/assets 500）
+    //   - businessSettings：`state.businessSettings.updatedBy`（persistConfig 500）
+    // 补 businessSettings 用 defaultBusinessSettings 重建而不是留空对象——
+    // 它有十余个下游读取点，空对象只会把崩溃点往后推。
     state.operators ??= [];
+    state.sampleAssets ??= [];
+    state.sampleStockBalances ??= [];
+    state.couponTemplates ??= [];
+    state.inspectionTemplates ??= [];
+    state.itemGroups ??= [];
+    state.locations ??= [];
+    if (!state.businessSettings) {
+      const definition = this.category(state.profile.categoryCode);
+      state.businessSettings = defaultBusinessSettings(state.profile.tenantId, definition);
+    }
     return state;
   }
   private category(code: RentalCategoryCode) { const found = categories.find((row) => row.code === code); if (!found) throw new BadRequestException("未知经营品类"); return found; }
