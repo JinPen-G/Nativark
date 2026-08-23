@@ -3744,6 +3744,78 @@ async function main() {
   }
   ok("无成员关系账号 fail-closed：三个经营接口均 403，不再静默回退到默认空间");
 
+  console.log("== 62. 入参校验：缺必填字段必须 400 而不是 500 ==");
+  // 缺陷来源：全局 ValidationPipe 只在拿得到 metatype 时工作，而 @Body() 标注的是
+  // TypeScript interface——运行时被擦除，管道整体跳过。于是缺必填字段会一路走到
+  // Prisma 才炸（`Argument type is missing`），对外表现为 500。
+  //
+  // 500 与 400 的区别不只是好看：500 意味着"服务器内部错误"，会污染告警与错误率指标，
+  // 而且不告诉调用方到底哪个字段不对。
+  const vdDemo = await login("demo", "admin", DEMO_PASSWORD);
+  const vdCases = [
+    { path: "fulfillment-operators", method: "POST", body: {}, missing: "code/name/type" },
+    { path: "locations", method: "POST", body: { code: "E2E-VD-L1" }, missing: "name/type/capabilities" },
+    { path: "item-groups", method: "POST", body: { code: "E2E-VD-G1", name: "校验用" }, missing: "inventoryMode" }
+  ];
+  for (const item of vdCases) {
+    const res = await request(item.method, `/api/rental/v1/${item.path}`, item.body, vdDemo.accessToken);
+    assert.equal(
+      res.status,
+      400,
+      `${item.path} 缺少 ${item.missing} 时必须 400，实际 ${res.status}: ${JSON.stringify(res.body).slice(0, 250)}`
+    );
+    // 400 还必须说明是哪个字段：只给状态码而不给字段名，调用方仍然无从修正。
+    const detail = JSON.stringify(res.body);
+    assert.ok(
+      /message/.test(detail) && detail.length > 30,
+      `${item.path} 的 400 必须带字段级说明，实际: ${detail.slice(0, 250)}`
+    );
+  }
+  // 取值受限的字段不能只判类型：状态、能力这类值会进数据库枚举或参与业务判断。
+  const vdBadEnum = await request(
+    "POST",
+    "/api/rental/v1/fulfillment-operators",
+    { code: "E2E-VD-O2", name: "非法类型", type: "not_a_real_type" },
+    vdDemo.accessToken
+  );
+  assert.equal(
+    vdBadEnum.status,
+    400,
+    `非法 type 取值必须 400，实际 ${vdBadEnum.status}: ${JSON.stringify(vdBadEnum.body).slice(0, 250)}`
+  );
+  // 合法请求必须照常成功——校验不能把正常路径也挡掉。
+  const vdOk = await request(
+    "POST",
+    "/api/rental/v1/fulfillment-operators",
+    { code: `E2E-VD-OK-${Date.now().toString(36)}`, name: "校验通过样本", type: "self_operated" },
+    vdDemo.accessToken
+  );
+  assert.equal(vdOk.status, 201, `合法请求应成功，实际 ${vdOk.status}: ${JSON.stringify(vdOk.body).slice(0, 250)}`);
+  // whitelist:true 会剥离未声明字段，因此必须确认声明过的可选字段**没有**被剥掉。
+  const vdOptional = await request(
+    "POST",
+    "/api/rental/v1/locations",
+    {
+      code: `E2E-VD-LOC-${Date.now().toString(36)}`,
+      name: "可选字段保留验证",
+      type: "store",
+      // 建地点要求先有启用的经营主体，复用上面刚建成功的那个。
+      operatorId: vdOk.body.data.id,
+      capabilities: ["pickup", "return"],
+      businessHours: "09:00-18:00",
+      contactName: "联系人甲"
+    },
+    vdDemo.accessToken
+  );
+  assert.equal(vdOptional.status, 201, `带可选字段的请求应成功: ${JSON.stringify(vdOptional.body).slice(0, 250)}`);
+  assert.equal(
+    vdOptional.body.data.businessHours,
+    "09:00-18:00",
+    "DTO 中声明过的可选字段不得被 whitelist 剥离——被剥离说明 DTO 漏声明了该字段"
+  );
+  assert.equal(vdOptional.body.data.contactName, "联系人甲", "可选字段 contactName 同样不得被剥离");
+  ok("入参校验已生效：缺必填字段与非法枚举取值均 400 且带字段说明，合法请求成功，声明过的可选字段未被剥离");
+
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);
 }
 
