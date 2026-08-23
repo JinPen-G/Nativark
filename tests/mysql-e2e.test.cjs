@@ -555,7 +555,7 @@ async function main() {
   assert.equal(pickedUp.order.status, "renting");
   assert.equal((await assetStatus()).find((row) => row.id === trackedAssetId).status, "rented", "领取后资产应为 rented");
   const returnTemplate = (await request("GET", "/api/rental/v1/inspection-templates?stage=return", null, demo.accessToken)).body.data[0];
-  const returned = (await request("POST", `/api/rental/v1/orders/${orderId}/inspections`, { templateId: returnTemplate.id, results: { appearance_ok: true, function_ok: true, shutter_count: 9100 }, exceptions: [{ description: "E2E 损坏", chargeAmount: 66 }] }, demo.accessToken)).body.data;
+  const returned = (await request("POST", `/api/rental/v1/orders/${orderId}/inspections`, { templateId: returnTemplate.id, results: { appearance_ok: true, function_ok: true, shutter_count: 9100 }, exceptions: [{ code: "damage", description: "E2E 损坏", chargeAmount: 66 }] }, demo.accessToken)).body.data;
   assert.equal(returned.order.status, "completed");
   assert.ok(returned.order.finalPayableAmount > returned.order.payableAmount, "损坏费应进入最终应付");
   assert.equal((await assetStatus()).find((row) => row.id === trackedAssetId).status, "available", "归还后资产应释放为 available");
@@ -617,7 +617,7 @@ async function main() {
   const campingReturned = (await request(
     "POST",
     `/api/rental/v1/orders/${campingOrderId}/inspections`,
-    { templateId: campingReturnTemplate.id, results: { count_ok: false, cleanliness: "严重污损" }, exceptions: [{ description: "帐篷地钉缺失 2 枚", chargeAmount: 35 }, { description: "折叠椅严重污损", chargeAmount: 20 }] },
+    { templateId: campingReturnTemplate.id, results: { count_ok: false, cleanliness: "严重污损" }, exceptions: [{ code: "missing_part", description: "帐篷地钉缺失 2 枚", chargeAmount: 35 }, { code: "soiled", description: "折叠椅严重污损", chargeAmount: 20 }] },
     demo2.accessToken
   )).body.data;
   assert.equal(campingReturned.order.status, "completed");
@@ -1129,7 +1129,7 @@ async function main() {
   const constructionReturned = (await request(
     "POST",
     `/api/rental/v1/orders/${constructionOrderId}/inspections`,
-    { templateId: constructionReturnTemplate.id, results: { appearance_ok: false, function_ok: true, usage_reading: 356 }, exceptions: [{ description: "铲斗液压油管破损", chargeAmount: 800 }] },
+    { templateId: constructionReturnTemplate.id, results: { appearance_ok: false, function_ok: true, usage_reading: 356 }, exceptions: [{ code: "damage", description: "铲斗液压油管破损", chargeAmount: 800 }] },
     construction.accessToken
   )).body.data;
   assert.equal(constructionReturned.order.status, "completed");
@@ -3814,7 +3814,66 @@ async function main() {
     "DTO 中声明过的可选字段不得被 whitelist 剥离——被剥离说明 DTO 漏声明了该字段"
   );
   assert.equal(vdOptional.body.data.contactName, "联系人甲", "可选字段 contactName 同样不得被剥离");
-  ok("入参校验已生效：缺必填字段与非法枚举取值均 400 且带字段说明，合法请求成功，声明过的可选字段未被剥离");
+  // 第二批：订单、报价、资产、库存、奖励、通知。这些端点的入参直接参与
+  // 计价、库存与入账，缺校验的后果比配置类更重。
+  const vdCases2 = [
+    { path: "orders", body: {}, why: "缺 quoteId/customerName/lines 等" },
+    { path: "quotes", body: { customerType: "personal" }, why: "缺 fulfillmentMode/lines 等" },
+    { path: "assets", body: { assetNo: "E2E-VD-A1" }, why: "缺 itemGroupId/locationId" },
+    { path: "rewards/grant", body: { customerId: "c1" }, why: "缺 triggerType/idempotencyKey" },
+    { path: "notifications/send", body: { templateId: "t1" }, why: "缺 recipient/variables" },
+    { path: "coupon-templates", body: { code: "E2E-VD-C1", name: "x" }, why: "缺 discountType/额度/有效期" }
+  ];
+  for (const item of vdCases2) {
+    const res = await request("POST", `/api/rental/v1/${item.path}`, item.body, vdDemo.accessToken);
+    assert.equal(
+      res.status,
+      400,
+      `${item.path}（${item.why}）必须 400，实际 ${res.status}: ${JSON.stringify(res.body).slice(0, 250)}`
+    );
+  }
+  // 数量与金额必须拒绝字符串：JS 里 "5"*2=10 但 "5"+2="52"，混进计价就是错账。
+  const vdBadNumber = await request(
+    "POST",
+    "/api/rental/v1/availability",
+    { locationId: "loc", startAt: new Date().toISOString(), endAt: new Date(Date.now() + 86400000).toISOString(), lines: [{ itemGroupId: "g", quantity: "3" }] },
+    vdDemo.accessToken
+  );
+  assert.equal(
+    vdBadNumber.status,
+    400,
+    `quantity 传字符串必须 400（嵌套数组的内层校验是否真的执行），实际 ${vdBadNumber.status}: ` +
+      `${JSON.stringify(vdBadNumber.body).slice(0, 250)}`
+  );
+  // 时间字段必须拒绝非法日期：非法值会变成 Invalid Date，参与任何比较都得 false，
+  // 于是"档期冲突"检查静默失效——比直接报错危险得多。
+  const vdBadDate = await request(
+    "POST",
+    "/api/rental/v1/availability",
+    { locationId: "loc", startAt: "not-a-date", endAt: "also-not", lines: [{ itemGroupId: "g", quantity: 1 }] },
+    vdDemo.accessToken
+  );
+  assert.equal(
+    vdBadDate.status,
+    400,
+    `非法日期必须 400，实际 ${vdBadDate.status}: ${JSON.stringify(vdBadDate.body).slice(0, 250)}`
+  );
+  // 空行项目数组必须拒绝：查可用量/下单没有任何行是无意义请求。
+  const vdEmptyLines = await request(
+    "POST",
+    "/api/rental/v1/availability",
+    { locationId: "loc", startAt: new Date().toISOString(), endAt: new Date(Date.now() + 86400000).toISOString(), lines: [] },
+    vdDemo.accessToken
+  );
+  assert.equal(
+    vdEmptyLines.status,
+    400,
+    `空 lines 必须 400，实际 ${vdEmptyLines.status}: ${JSON.stringify(vdEmptyLines.body).slice(0, 250)}`
+  );
+  ok(
+    "入参校验已生效：两批共 9 个端点缺必填字段均 400 且带字段说明，非法枚举/非法日期/字符串数量/空行项目均被拒，" +
+      "合法请求成功且声明过的可选字段未被剥离"
+  );
 
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);
 }

@@ -1,21 +1,23 @@
 import { BadRequestException, Body, Controller, Get, Param, Post, Put, Query, Req } from "@nestjs/common";
 import type {
-  GrantRentalRewardRequest,
   ImportRentalCalendarRequest,
   RentalCouponTemplate,
   RentalCustomerCoupon,
   RentalNotificationSendLogV1,
-  RentalQuoteRequest,
   SaveRentalCalendarDayRequest,
   SaveRentalDiscountPlanRequest,
   SaveRentalNotificationTemplateRequest,
   SaveRentalPricingPlanRequest,
   SaveRentalRuleVersionRequest,
   SaveRentalValueAddedServiceRequest,
-  SendRentalNotificationRequest,
   SystemUserRow
 } from "@store-rental/shared";
 import { RentalBusinessService, type BusinessContext } from "./rental-business.service";
+import {
+  GrantRentalRewardDto,
+  RentalQuoteDto,
+  SendRentalNotificationDto,
+} from "./rental-order-request.dto";
 import { RentalCoreService } from "./rental-core.service";
 import { RentalIdempotentActionService } from "./rental-idempotent-action.service";
 
@@ -122,14 +124,14 @@ export class RentalBusinessController {
 
   @Get("rewards") rewards(@Req() req: AuthenticatedRequest, @Query("customerId") customerId?: string) { return this.business.listRewards(req.user.tenantId, this.context(req.user.tenantId), customerId); }
   @Get("benefit-accounts") benefitAccounts(@Req() req: AuthenticatedRequest, @Query("customerId") customerId?: string) { return this.business.listBenefitAccounts(req.user.tenantId, this.context(req.user.tenantId), customerId); }
-  @Post("rewards/grant") async grantReward(@Req() req: AuthenticatedRequest, @Body() body: GrantRentalRewardRequest) { return this.committed(req.user.tenantId, await this.business.grantReward(req.user.tenantId, this.context(req.user.tenantId), body)); }
+  @Post("rewards/grant") async grantReward(@Req() req: AuthenticatedRequest, @Body() body: GrantRentalRewardDto) { return this.committed(req.user.tenantId, await this.business.grantReward(req.user.tenantId, this.context(req.user.tenantId), body)); }
   @Post("rewards/:id/reverse") async reverseReward(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: { reason: string }) { return this.committed(req.user.tenantId, await this.business.reverseReward(req.user.tenantId, this.context(req.user.tenantId), id, body.reason)); }
 
   @Get("notification-templates") notificationTemplates(@Req() req: AuthenticatedRequest) { return this.business.listNotificationTemplates(req.user.tenantId, this.context(req.user.tenantId)); }
   @Post("notification-templates") async createNotificationTemplate(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalNotificationTemplateRequest) { return this.committed(req.user.tenantId, await this.business.saveNotificationTemplate(req.user.tenantId, this.context(req.user.tenantId), body)); }
   @Put("notification-templates/:id") async updateNotificationTemplate(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalNotificationTemplateRequest) { return this.committed(req.user.tenantId, await this.business.saveNotificationTemplate(req.user.tenantId, this.context(req.user.tenantId), { ...body, id })); }
   @Get("notification-logs") notificationLogs(@Req() req: AuthenticatedRequest) { return this.business.listNotificationLogs(req.user.tenantId, this.context(req.user.tenantId)); }
-  @Post("notifications/send") async sendNotification(@Req() req: AuthenticatedRequest, @Body() body: SendRentalNotificationRequest) {
+  @Post("notifications/send") async sendNotification(@Req() req: AuthenticatedRequest, @Body() body: SendRentalNotificationDto) {
     const tenantId = req.user.tenantId;
     const key = explicitIdempotencyKey(req);
     const context = this.context(tenantId);
@@ -149,6 +151,6 @@ export class RentalBusinessController {
     return this.committed(tenantId, result);
   }
 
-  @Post("quotes") async quote(@Req() req: AuthenticatedRequest, @Body() body: RentalQuoteRequest) { return this.committed(req.user.tenantId, await this.business.createQuote(req.user.tenantId, this.context(req.user.tenantId), body)); }
+  @Post("quotes") async quote(@Req() req: AuthenticatedRequest, @Body() body: RentalQuoteDto) { return this.committed(req.user.tenantId, await this.business.createQuote(req.user.tenantId, this.context(req.user.tenantId), body)); }
   @Get("quotes/:id") quoteDetail(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.business.getQuote(req.user.tenantId, this.context(req.user.tenantId), id); }
 }
