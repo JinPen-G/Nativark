@@ -3936,6 +3936,90 @@ async function main() {
       "嵌套内层非法值、倍率越界均被拒；合法请求成功且声明过的可选字段未被剥离"
   );
 
+  console.log("== 63. RC-04 奖励券与配额必须落库 ==");
+  // grantReward 的 applyRewardBenefit 会创建奖励优惠券并递增模板 claimedQuantity，
+  // 但这两处都**只改内存**：方法末尾只落了流水（upsertRewardEntry）与权益账户
+  // （flushBenefitAccounts），没有任何 upsertCustomerCoupon / upsertCouponTemplate。
+  // 于是重启后奖励券凭空消失、模板配额回退，同一批券可以被反复发放。
+  const rwDemo = await login("demo", "admin", DEMO_PASSWORD);
+  const rwCustomer = `e2e_reward_coupon_${Date.now().toString(36)}`;
+  // 建专用券模板，避免与其他用例争配额。
+  const rwTemplate = await request(
+    "POST",
+    "/api/rental/v1/coupon-templates",
+    {
+      code: `E2E-RW-${Date.now().toString(36)}`,
+      name: "奖励券模板",
+      discountType: "fixed_amount",
+      discountValue: 20,
+      minimumSpend: 0,
+      totalQuota: 50,
+      perCustomerLimit: 5,
+      effectiveFrom: new Date(Date.now() - 86400000).toISOString(),
+      effectiveTo: new Date(Date.now() + 30 * 86400000).toISOString(),
+      status: "enabled"
+    },
+    rwDemo.accessToken
+  );
+  assert.equal(rwTemplate.status, 201, `奖励券模板创建失败: ${JSON.stringify(rwTemplate.body).slice(0, 250)}`);
+  const rwTemplateId = rwTemplate.body.data.id;
+  const rwSettings = (await request("GET", "/api/rental/v1/business-settings", null, rwDemo.accessToken)).body.data;
+  const rwEnable = await request(
+    "PUT",
+    "/api/rental/v1/business-settings",
+    {
+      ...rwSettings,
+      membership: {
+        ...rwSettings.membership,
+        signupRewardEnabled: true,
+        signupRewardType: "coupon",
+        signupRewardAmount: 2,
+        signupRewardCouponTemplateId: rwTemplateId
+      }
+    },
+    rwDemo.accessToken
+  );
+  assert.equal(rwEnable.status, 200, `切换为券类奖励失败: ${JSON.stringify(rwEnable.body).slice(0, 250)}`);
+  const rwQuotaBefore = readCount(
+    `SELECT \`claimedQuantity\` FROM \`rental_coupon_templates\` WHERE \`id\`='${rwTemplateId}';`
+  );
+  const rwGrant = await request(
+    "POST",
+    "/api/rental/v1/rewards/grant",
+    { customerId: rwCustomer, triggerType: "registration", idempotencyKey: `e2e:rwcoupon:${rwCustomer}` },
+    rwDemo.accessToken
+  );
+  assert.equal(rwGrant.status, 201, `券类奖励发放失败: ${JSON.stringify(rwGrant.body).slice(0, 250)}`);
+  const rwRefs = (rwGrant.body.data[0] || {}).benefitReferenceIds || [];
+  assert.equal(rwRefs.length, 2, `应发出 2 张奖励券，实际 ${rwRefs.length}: ${JSON.stringify(rwGrant.body.data).slice(0, 250)}`);
+  // 关键断言：券必须在库里。只在内存里=重启即丢。
+  assert.equal(
+    readCount(
+      `SELECT COUNT(*) FROM \`rental_customer_coupons\` WHERE \`tenantId\`='tenant_001' AND \`customerId\`='${rwCustomer}';`
+    ),
+    2,
+    "奖励券必须落库（为 0 说明 applyRewardBenefit 只改了内存，重启后券会凭空消失）"
+  );
+  assert.equal(
+    readCount(`SELECT \`claimedQuantity\` FROM \`rental_coupon_templates\` WHERE \`id\`='${rwTemplateId}';`),
+    rwQuotaBefore + 2,
+    "奖励券应使模板 claimedQuantity 增加 2（未增加说明配额只在内存里递增）"
+  );
+  // 证伪式验证：重启后仍能从库读出这 2 张券，才算真的落库。
+  await stopApi();
+  startApi();
+  if (!(await waitHealth())) fail("第 63 节的 API 重启超时");
+  const rwAfterRestart = await login("demo", "admin", DEMO_PASSWORD);
+  const rwCoupons = (await request(
+    "GET",
+    `/api/rental/v1/customer-coupons?customerId=${rwCustomer}`,
+    null,
+    rwAfterRestart.accessToken
+  )).body.data;
+  assert.equal(rwCoupons.length, 2, `重启后应仍有 2 张奖励券，实际 ${rwCoupons.length}`);
+  ok("奖励券与配额已落库：券类奖励发出 2 张券，库中 2 行、模板配额加 2，重启后仍可读出");
+
+
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);
 }
 

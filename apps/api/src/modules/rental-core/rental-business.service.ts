@@ -287,6 +287,41 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
 
   /** 把整份业务配置落库。仅用于补落懒加载默认值；此后各 save* 方法按条写穿。 */
   /** 奖励入账会改权益账户余额，这里把受影响客户的账户刷进库。 */
+  /**
+   * 撤回 applyRewardBenefit 在内存里做过的权益兑付。
+   *
+   * 仅用于「并发同键落败、转而回放先到者流水」这一条路径：那时本次的内存改动
+   * 不会落库，留着会让本进程的余额与库长期不一致（直到重启才自愈）。
+   *
+   * 刻意按本次实际发生的数额逐项回退，而不是重算余额：重算需要重放全部历史流水，
+   * 而并发下另一路可能同时在改同一个账户，重算会把对方的入账也一并抹掉。
+   */
+  private revertRewardBenefits(
+    state: RentalBusinessState,
+    context: BusinessContext,
+    rows: RentalRewardLedgerEntry[],
+    grantedCoupons: RentalCustomerCoupon[],
+    touchedTemplates: Map<string, RentalCouponTemplate>
+  ) {
+    for (const row of rows) {
+      const account = state.benefitAccounts.find((item) => item.customerId === row.customerId);
+      if (!account) continue;
+      if (row.rewardType === "points") account.pointsBalance -= row.amount;
+      else if (row.rewardType === "balance") account.marketingBalance = roundMoney(account.marketingBalance - row.amount);
+      else account.availableRewardCouponCount -= row.amount;
+    }
+    const revokedIds = new Set(grantedCoupons.map((coupon) => coupon.id));
+    if (revokedIds.size) {
+      state.customerCoupons = state.customerCoupons.filter((coupon) => !revokedIds.has(coupon.id));
+    }
+    // 模板配额同样要退回。context.couponTemplates 与 state 共享同一批对象引用，
+    // 因此改这里等于改缓存里的那一份。
+    for (const template of touchedTemplates.values()) {
+      const revoked = grantedCoupons.filter((coupon) => coupon.templateId === template.id).length;
+      if (revoked) template.claimedQuantity = Math.max(0, template.claimedQuantity - revoked);
+    }
+  }
+
   private async flushBenefitAccounts(state: RentalBusinessState, customerIds: string[]) {
     for (const customerId of new Set(customerIds)) {
       const account = state.benefitAccounts.find((row) => row.customerId === customerId);
@@ -647,9 +682,17 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       planned.push({ customerId: input.relatedCustomerId, type: membership.referralRewardType, amount: membership.inviteeRewardAmount, couponTemplateId: membership.referralRewardCouponTemplateId });
     }
     this.validateRewardBatch(state, context, planned.filter((item) => item.amount > 0));
+    // 奖励券与被改动的券模板必须与流水一起落库，否则它们只存在于内存里：
+    // 重启后券凭空消失、模板配额回退，同一批券可被反复发放。
+    const grantedCoupons: RentalCustomerCoupon[] = [];
+    const touchedTemplates = new Map<string, RentalCouponTemplate>();
     const add = (customerId: string, type: RentalRewardLedgerEntry["rewardType"], amount: number, key: string, reason: string, relatedCustomerId?: string, couponTemplateId?: string) => {
       if (amount <= 0) return;
       const applied = this.applyRewardBenefit(state, context, customerId, type, amount, couponTemplateId);
+      grantedCoupons.push(...applied.grantedCoupons);
+      // 用 Map 去重：双边邀请奖励会两次命中同一个模板，配额已在内存累加完，
+      // 落库只需按最终值写一次。
+      if (applied.touchedTemplate) touchedTemplates.set(applied.touchedTemplate.id, applied.touchedTemplate);
       const row: RentalRewardLedgerEntry = { id: uid("reward"), tenantId, customerId, rewardType: type, amount, triggerType: input.triggerType, idempotencyKey: key, relatedCustomerId, status: "granted", reason, benefitReferenceIds: applied.referenceIds, appliedAt: applied.appliedAt, createdAt: applied.appliedAt };
       state.rewardLedger.unshift(row); rows.push(row);
     };
@@ -667,6 +710,12 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
         const winner = await this.factStore.findRewardsByIdempotencyKey(tenantId, input.idempotencyKey);
         if (winner.length) {
+          // 落败者必须撤回它在内存里已经兑付的权益。
+          //
+          // applyRewardBenefit 在写库之前就加过积分/余额、造过券、递增过模板配额；
+          // 本分支直接返回先到者的流水，那些内存改动却留了下来，且永远不会落库——
+          // 于是本进程读到的余额比库里高，重启才会"自愈"。必须显式回滚。
+          this.revertRewardBenefits(state, context, rows, grantedCoupons, touchedTemplates);
           for (const row of winner) {
             if (!state.rewardLedger.some((cached) => cached.id === row.id)) state.rewardLedger.unshift(row);
           }
@@ -675,6 +724,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       }
       throw error;
     }
+    // 券与模板配额随流水一起落库。放在流水之后：流水的唯一约束是并发判重的
+    // 唯一可靠关口，先过了那一关再写券，避免落败者也写出券来。
+    for (const coupon of grantedCoupons) await this.factStore.upsertCustomerCoupon(coupon);
+    for (const template of touchedTemplates.values()) await this.coreConfigStore.upsertCouponTemplate(template);
     await this.flushBenefitAccounts(state, rows.map((row) => row.customerId));
     return rows;
   }
@@ -970,8 +1023,17 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return { categoryCode: context.profile.categoryCode, pricingPlans, discountPlans, services, calendars: [], ruleVersions, customerCoupons: [], rewardLedger: [], benefitAccounts: [], referrals: [], notificationTemplates, notificationLogs: [], quotes: [] };
   }
 
+  /**
+   * 兑付奖励权益，并**回报它改动过的券与券模板**。
+   *
+   * 为什么必须回报：本方法只改内存对象，而奖励券与模板配额都是需要落库的事实。
+   * 早前它只返回 `referenceIds`，调用方无从得知该写哪些行，于是券只存在于内存中——
+   * 重启即凭空消失、模板配额回退，同一批券可以被反复发放（E2E 第 63 节实测库中 0 行）。
+   */
   private applyRewardBenefit(state: RentalBusinessState, context: BusinessContext, customerId: string, type: RentalRewardLedgerEntry["rewardType"], amount: number, couponTemplateId?: string) {
     const appliedAt = stamp();
+    const grantedCoupons: RentalCustomerCoupon[] = [];
+    let touchedTemplate: RentalCouponTemplate | undefined;
     let account = state.benefitAccounts.find((row) => row.customerId === customerId);
     if (!account) {
       account = { tenantId: context.profile.tenantId, customerId, pointsBalance: 0, marketingBalance: 0, availableRewardCouponCount: 0, updatedAt: appliedAt };
@@ -991,12 +1053,14 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       for (let index = 0; index < amount; index += 1) {
         const coupon: RentalCustomerCoupon = { id: uid("reward_coupon"), tenantId: context.profile.tenantId, customerId, templateId: template.id, templateCode: template.code, templateName: template.name, status: "claimed", claimedAt: appliedAt, effectiveFrom: template.effectiveFrom, effectiveTo: template.effectiveTo };
         state.customerCoupons.unshift(coupon); referenceIds.push(coupon.id);
+        grantedCoupons.push(coupon);
       }
       template.claimedQuantity += amount; template.updatedAt = appliedAt;
+      touchedTemplate = template;
       account.availableRewardCouponCount += amount;
     }
     account.updatedAt = appliedAt;
-    return { appliedAt, referenceIds };
+    return { appliedAt, referenceIds, grantedCoupons, touchedTemplate };
   }
 
   private validateRewardBatch(state: RentalBusinessState, context: BusinessContext, planned: Array<{ customerId: string; type: RentalRewardLedgerEntry["rewardType"]; amount: number; couponTemplateId?: string }>) {
