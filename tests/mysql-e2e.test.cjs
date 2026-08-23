@@ -3870,9 +3870,70 @@ async function main() {
     400,
     `空 lines 必须 400，实际 ${vdEmptyLines.status}: ${JSON.stringify(vdEmptyLines.body).slice(0, 250)}`
   );
+  // 第三批：配置类端点。请求体是嵌套对象，重点验证**内层**校验是否真的执行——
+  // 少了 @Type，class-transformer 不会把嵌套对象实例化成 DTO 类，
+  // 于是外层看着有校验、内层什么都没查，这种"半有校验"最难发现。
+  const vdCases3 = [
+    { path: "pricing-plans", body: { code: "E2E-VD-P1", name: "x" }, why: "缺 effectiveFrom/changeReason/rates" },
+    { path: "discount-plans", body: { code: "E2E-VD-D1", name: "x" }, why: "缺 status/discountType 等" },
+    { path: "value-added-services", body: { code: "E2E-VD-S1", name: "x" }, why: "缺 serviceType/billingUnit/terms 等" },
+    { path: "rule-versions", body: { changeReason: "缺 config" }, why: "缺 config" },
+    { path: "notification-templates", body: { eventCode: "e", name: "x" }, why: "缺 channel/title/body 等" },
+    { path: "calendars/import", body: { year: 2027 }, why: "缺 region/sourceName/sourceUrl/days" }
+  ];
+  for (const item of vdCases3) {
+    const res = await request("POST", `/api/rental/v1/${item.path}`, item.body, vdDemo.accessToken);
+    assert.equal(
+      res.status,
+      400,
+      `${item.path}（${item.why}）必须 400，实际 ${res.status}: ${JSON.stringify(res.body).slice(0, 250)}`
+    );
+  }
+  // 嵌套内层的非法值必须被拒：外层 config 结构完整，只有 payment.timing 取值非法。
+  // 这一条专门证明 @ValidateNested + @Type 真的生效了。
+  const vdNestedBad = await request(
+    "POST",
+    "/api/rental/v1/rule-versions",
+    {
+      changeReason: "嵌套校验验证",
+      config: {
+        payment: { timing: "不存在的时机", depositMode: "none", preauthorizationRequired: false, unpaidHoldMinutes: 15 },
+        fulfillment: { pickupInspectionRequired: true, returnInspectionRequired: true, evidenceRequired: false, allowDifferentReturnLocation: true },
+        overdue: { graceMinutes: 30, feeMode: "hourly", feeMultiplier: 1.5 },
+        cancellation: { freeBeforeHours: 24, lateFeeType: "percentage", lateFeeValue: 20, weatherExceptionEnabled: false },
+        qualification: { required: false, documentTypes: [], minimumValidityDays: 1 },
+        damage: { manualReviewRequired: true }
+      }
+    },
+    vdDemo.accessToken
+  );
+  assert.equal(
+    vdNestedBad.status,
+    400,
+    `嵌套内层非法枚举必须 400（证明 @ValidateNested + @Type 生效），实际 ${vdNestedBad.status}: ` +
+      `${JSON.stringify(vdNestedBad.body).slice(0, 300)}`
+  );
+  // 定价倍率写错数量级必须被拒：倍率直接乘进金额，15 倍不会被任何下游拦住。
+  const vdBadMultiplier = await request(
+    "POST",
+    "/api/rental/v1/pricing-plans",
+    {
+      code: `E2E-VD-MUL-${Date.now().toString(36)}`,
+      name: "倍率越界",
+      changeReason: "倍率上界验证",
+      effectiveFrom: new Date().toISOString(),
+      rates: [{ itemGroupId: "g", unit: "day_24h", baseAmount: 100, weekendMultiplier: 15, holidayMultiplier: 1, depositAmount: 0, minimumUnits: 1 }]
+    },
+    vdDemo.accessToken
+  );
+  assert.equal(
+    vdBadMultiplier.status,
+    400,
+    `倍率 15 必须 400（数量级写错的典型），实际 ${vdBadMultiplier.status}: ${JSON.stringify(vdBadMultiplier.body).slice(0, 250)}`
+  );
   ok(
-    "入参校验已生效：两批共 9 个端点缺必填字段均 400 且带字段说明，非法枚举/非法日期/字符串数量/空行项目均被拒，" +
-      "合法请求成功且声明过的可选字段未被剥离"
+    "入参校验已生效：三批共 21 个端点缺必填字段均 400 且带字段说明；非法枚举、非法日期、字符串数量、空行项目、" +
+      "嵌套内层非法值、倍率越界均被拒；合法请求成功且声明过的可选字段未被剥离"
   );
 
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);

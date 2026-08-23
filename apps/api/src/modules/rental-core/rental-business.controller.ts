@@ -1,15 +1,8 @@
 import { BadRequestException, Body, Controller, Get, Param, Post, Put, Query, Req } from "@nestjs/common";
 import type {
-  ImportRentalCalendarRequest,
   RentalCouponTemplate,
   RentalCustomerCoupon,
   RentalNotificationSendLogV1,
-  SaveRentalCalendarDayRequest,
-  SaveRentalDiscountPlanRequest,
-  SaveRentalNotificationTemplateRequest,
-  SaveRentalPricingPlanRequest,
-  SaveRentalRuleVersionRequest,
-  SaveRentalValueAddedServiceRequest,
   SystemUserRow
 } from "@store-rental/shared";
 import { RentalBusinessService, type BusinessContext } from "./rental-business.service";
@@ -18,6 +11,15 @@ import {
   RentalQuoteDto,
   SendRentalNotificationDto,
 } from "./rental-order-request.dto";
+import {
+  ImportRentalCalendarDto,
+  SaveRentalCalendarDayDto,
+  SaveRentalDiscountPlanDto,
+  SaveRentalNotificationTemplateDto,
+  SaveRentalPricingPlanDto,
+  SaveRentalRuleVersionDto,
+  SaveRentalValueAddedServiceDto,
+} from "./rental-config-request.dto";
 import { RentalCoreService } from "./rental-core.service";
 import { RentalIdempotentActionService } from "./rental-idempotent-action.service";
 
@@ -77,25 +79,25 @@ export class RentalBusinessController {
   }
 
   @Get("pricing-plans") pricingPlans(@Req() req: AuthenticatedRequest) { return this.business.listPricingPlans(req.user.tenantId, this.context(req.user.tenantId)); }
-  @Post("pricing-plans") async createPricingPlan(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalPricingPlanRequest) { return this.committed(req.user.tenantId, await this.business.savePricingPlan(req.user.tenantId, this.context(req.user.tenantId), body)); }
-  @Put("pricing-plans/:id") async updatePricingPlan(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalPricingPlanRequest) { return this.committed(req.user.tenantId, await this.business.savePricingPlan(req.user.tenantId, this.context(req.user.tenantId), { ...body, id })); }
+  @Post("pricing-plans") async createPricingPlan(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalPricingPlanDto) { return this.committed(req.user.tenantId, await this.business.savePricingPlan(req.user.tenantId, this.context(req.user.tenantId), body)); }
+  @Put("pricing-plans/:id") async updatePricingPlan(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalPricingPlanDto) { return this.committed(req.user.tenantId, await this.business.savePricingPlan(req.user.tenantId, this.context(req.user.tenantId), { ...body, id })); }
 
   @Get("discount-plans") discountPlans(@Req() req: AuthenticatedRequest) { return this.business.listDiscountPlans(req.user.tenantId, this.context(req.user.tenantId)); }
-  @Post("discount-plans") async createDiscountPlan(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalDiscountPlanRequest) { return this.committed(req.user.tenantId, await this.business.saveDiscountPlan(req.user.tenantId, this.context(req.user.tenantId), body)); }
-  @Put("discount-plans/:id") async updateDiscountPlan(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalDiscountPlanRequest) { return this.committed(req.user.tenantId, await this.business.saveDiscountPlan(req.user.tenantId, this.context(req.user.tenantId), { ...body, id })); }
+  @Post("discount-plans") async createDiscountPlan(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalDiscountPlanDto) { return this.committed(req.user.tenantId, await this.business.saveDiscountPlan(req.user.tenantId, this.context(req.user.tenantId), body)); }
+  @Put("discount-plans/:id") async updateDiscountPlan(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalDiscountPlanDto) { return this.committed(req.user.tenantId, await this.business.saveDiscountPlan(req.user.tenantId, this.context(req.user.tenantId), { ...body, id })); }
 
   @Get("value-added-services") services(@Req() req: AuthenticatedRequest) { return this.business.listServices(req.user.tenantId, this.context(req.user.tenantId)); }
-  @Post("value-added-services") async createService(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalValueAddedServiceRequest) { return this.committed(req.user.tenantId, await this.business.saveService(req.user.tenantId, this.context(req.user.tenantId), body)); }
-  @Put("value-added-services/:id") async updateService(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalValueAddedServiceRequest) { return this.committed(req.user.tenantId, await this.business.saveService(req.user.tenantId, this.context(req.user.tenantId), { ...body, id })); }
+  @Post("value-added-services") async createService(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalValueAddedServiceDto) { return this.committed(req.user.tenantId, await this.business.saveService(req.user.tenantId, this.context(req.user.tenantId), body)); }
+  @Put("value-added-services/:id") async updateService(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalValueAddedServiceDto) { return this.committed(req.user.tenantId, await this.business.saveService(req.user.tenantId, this.context(req.user.tenantId), { ...body, id })); }
 
   @Get("calendars/:year") calendar(@Req() req: AuthenticatedRequest, @Param("year") year: string) { return this.business.getCalendar(req.user.tenantId, this.context(req.user.tenantId), Number(year)); }
-  @Post("calendars/import") async importCalendar(@Req() req: AuthenticatedRequest, @Body() body: ImportRentalCalendarRequest) { return this.committed(req.user.tenantId, await this.business.importOfficialCalendar(req.user.tenantId, this.context(req.user.tenantId), body)); }
-  @Put("calendars/:year/days/:date") async saveCalendarDay(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Param("date") date: string, @Body() body: SaveRentalCalendarDayRequest) { return this.committed(req.user.tenantId, await this.business.saveCalendarDay(req.user.tenantId, this.context(req.user.tenantId), Number(year), { ...body, date })); }
+  @Post("calendars/import") async importCalendar(@Req() req: AuthenticatedRequest, @Body() body: ImportRentalCalendarDto) { return this.committed(req.user.tenantId, await this.business.importOfficialCalendar(req.user.tenantId, this.context(req.user.tenantId), body)); }
+  @Put("calendars/:year/days/:date") async saveCalendarDay(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Param("date") date: string, @Body() body: SaveRentalCalendarDayDto) { return this.committed(req.user.tenantId, await this.business.saveCalendarDay(req.user.tenantId, this.context(req.user.tenantId), Number(year), { ...body, date })); }
   @Post("calendars/:year/publish") async publishCalendar(@Req() req: AuthenticatedRequest, @Param("year") year: string) { return this.committed(req.user.tenantId, await this.business.publishCalendar(req.user.tenantId, this.context(req.user.tenantId), Number(year))); }
 
   @Get("rule-versions") ruleVersions(@Req() req: AuthenticatedRequest) { return this.business.listRuleVersions(req.user.tenantId, this.context(req.user.tenantId)); }
   @Get("rule-versions/current") currentRule(@Req() req: AuthenticatedRequest) { return this.business.currentRule(req.user.tenantId, this.context(req.user.tenantId)); }
-  @Post("rule-versions") async saveRule(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalRuleVersionRequest) { return this.committed(req.user.tenantId, await this.business.saveRuleVersion(req.user.tenantId, this.context(req.user.tenantId), body, req.user.displayName)); }
+  @Post("rule-versions") async saveRule(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalRuleVersionDto) { return this.committed(req.user.tenantId, await this.business.saveRuleVersion(req.user.tenantId, this.context(req.user.tenantId), body, req.user.displayName)); }
 
   @Get("customer-coupons") customerCoupons(@Req() req: AuthenticatedRequest, @Query("customerId") customerId?: string) { return this.business.listCustomerCoupons(req.user.tenantId, this.context(req.user.tenantId), customerId); }
   @Post("customer-coupons/claim") async claimCoupon(@Req() req: AuthenticatedRequest, @Body() body: { templateId: string; customerId: string }) {
@@ -128,8 +130,8 @@ export class RentalBusinessController {
   @Post("rewards/:id/reverse") async reverseReward(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: { reason: string }) { return this.committed(req.user.tenantId, await this.business.reverseReward(req.user.tenantId, this.context(req.user.tenantId), id, body.reason)); }
 
   @Get("notification-templates") notificationTemplates(@Req() req: AuthenticatedRequest) { return this.business.listNotificationTemplates(req.user.tenantId, this.context(req.user.tenantId)); }
-  @Post("notification-templates") async createNotificationTemplate(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalNotificationTemplateRequest) { return this.committed(req.user.tenantId, await this.business.saveNotificationTemplate(req.user.tenantId, this.context(req.user.tenantId), body)); }
-  @Put("notification-templates/:id") async updateNotificationTemplate(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalNotificationTemplateRequest) { return this.committed(req.user.tenantId, await this.business.saveNotificationTemplate(req.user.tenantId, this.context(req.user.tenantId), { ...body, id })); }
+  @Post("notification-templates") async createNotificationTemplate(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalNotificationTemplateDto) { return this.committed(req.user.tenantId, await this.business.saveNotificationTemplate(req.user.tenantId, this.context(req.user.tenantId), body)); }
+  @Put("notification-templates/:id") async updateNotificationTemplate(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalNotificationTemplateDto) { return this.committed(req.user.tenantId, await this.business.saveNotificationTemplate(req.user.tenantId, this.context(req.user.tenantId), { ...body, id })); }
   @Get("notification-logs") notificationLogs(@Req() req: AuthenticatedRequest) { return this.business.listNotificationLogs(req.user.tenantId, this.context(req.user.tenantId)); }
   @Post("notifications/send") async sendNotification(@Req() req: AuthenticatedRequest, @Body() body: SendRentalNotificationDto) {
     const tenantId = req.user.tenantId;
