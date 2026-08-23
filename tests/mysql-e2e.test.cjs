@@ -3954,7 +3954,9 @@ async function main() {
       discountValue: 20,
       minimumSpend: 0,
       totalQuota: 50,
-      perCustomerLimit: 5,
+      // 限领上限放宽：并发用例会有多路同时校验，每路发 2 张。
+      // 上限太低会让并发在"每客限领"处被拒，测不到本节要验的回滚路径。
+      perCustomerLimit: 20,
       effectiveFrom: new Date(Date.now() - 86400000).toISOString(),
       effectiveTo: new Date(Date.now() + 30 * 86400000).toISOString(),
       status: "enabled"
@@ -4017,7 +4019,70 @@ async function main() {
     rwAfterRestart.accessToken
   )).body.data;
   assert.equal(rwCoupons.length, 2, `重启后应仍有 2 张奖励券，实际 ${rwCoupons.length}`);
-  ok("奖励券与配额已落库：券类奖励发出 2 张券，库中 2 行、模板配额加 2，重启后仍可读出");
+  // 并发同键：只有一路能写进流水（唯一约束），落败者必须把已在内存兑付的
+  // 积分/券/配额退回去——否则本进程读到的余额比库里高，直到重启才自愈。
+  const rwRaceCustomer = `e2e_rw_race_${Date.now().toString(36)}`;
+  const rwRaceKey = `e2e:rwrace:${rwRaceCustomer}`;
+  const rwQuotaBeforeRace = readCount(
+    `SELECT \`claimedQuantity\` FROM \`rental_coupon_templates\` WHERE \`id\`='${rwTemplateId}';`
+  );
+  const rwRace = await Promise.all(
+    Array.from({ length: 4 }, () =>
+      request(
+        "POST",
+        "/api/rental/v1/rewards/grant",
+        { customerId: rwRaceCustomer, triggerType: "registration", idempotencyKey: rwRaceKey },
+        rwAfterRestart.accessToken
+      )
+    )
+  );
+  assert.equal(
+    rwRace.filter((res) => res.status === 201).length,
+    4,
+    `同键并发发放每路都应成功（一路执行、其余回放），实际 ${rwRace.map((r) => r.status).join("/")}：` +
+      `${JSON.stringify((rwRace.find((r) => r.status !== 201) || {}).body ?? null).slice(0, 250)}`
+  );
+  // 库中只能有一条流水、2 张券、配额只加 2。多出来就说明落败者的兑付也生效了。
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_reward_ledger_entries\` WHERE \`idempotencyKey\`='${rwRaceKey}';`),
+    1,
+    "同键并发只能留下一条奖励流水"
+  );
+  assert.equal(
+    readCount(
+      `SELECT COUNT(*) FROM \`rental_customer_coupons\` WHERE \`tenantId\`='tenant_001' AND \`customerId\`='${rwRaceCustomer}';`
+    ),
+    2,
+    "同键并发只能落 2 张奖励券"
+  );
+  assert.equal(
+    readCount(`SELECT \`claimedQuantity\` FROM \`rental_coupon_templates\` WHERE \`id\`='${rwTemplateId}';`),
+    rwQuotaBeforeRace + 2,
+    "同键并发只能使模板配额加 2（加更多说明落败者的配额递增没有退回）"
+  );
+  // 关键：**当前进程**读到的券数与配额必须与库一致。落败者若不回滚，这里会偏高。
+  const rwRaceCoupons = (await request(
+    "GET",
+    `/api/rental/v1/customer-coupons?customerId=${rwRaceCustomer}`,
+    null,
+    rwAfterRestart.accessToken
+  )).body.data;
+  assert.equal(
+    rwRaceCoupons.length,
+    2,
+    `当前进程读到的奖励券数必须与库一致（实际 ${rwRaceCoupons.length}，偏高说明落败者的内存兑付未回滚）`
+  );
+  const rwRaceTemplate = (await request("GET", "/api/rental/v1/coupon-templates", null, rwAfterRestart.accessToken)).body.data
+    .find((row) => row.id === rwTemplateId);
+  assert.equal(
+    rwRaceTemplate.claimedQuantity,
+    rwQuotaBeforeRace + 2,
+    "当前进程读到的模板配额必须与库一致（偏高说明落败者的配额递增未回滚）"
+  );
+  ok(
+    "奖励券与配额已落库且并发落败者已回滚：券类奖励库中 2 行、配额加 2、重启后仍可读出；" +
+      "同键 4 路并发仍只有 1 条流水/2 张券/配额加 2，且当前进程读取与库一致"
+  );
 
 
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);

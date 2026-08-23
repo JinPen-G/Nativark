@@ -60,6 +60,15 @@ interface StoredUser extends SaveSystemUserRequest {
 // 平台主体租户：平台级配置（登录安全基线等）的读写与审计范围，区别于业务租户和演示租户
 const PLATFORM_SUBJECT_TENANT_ID = "tenant_platform";
 
+/**
+ * 内存数据源的合成经营空间 id。
+ *
+ * 内存模式没有空间表，但守卫在缺空间时 fail-closed，故给它一个稳定的占位空间，
+ * 使内存模式的会话行为与 mysql 模式一致（都带空间），而不是靠豁免绕过检查。
+ * 前缀 `ws_memory_` 便于在日志里一眼识别它不是真实空间。
+ */
+const MEMORY_MODE_WORKSPACE_ID = "ws_memory_default";
+
 @Injectable()
 export class PlatformService {
   constructor(
@@ -1972,8 +1981,29 @@ export class PlatformService {
     return this.platformRepository.listUserWorkspaces(userId);
   }
 
+  /**
+   * 解析会话应进入的经营空间。
+   *
+   * 内存数据源没有 `business_workspaces` 等表，因此返回一个**合成的默认空间 id**，
+   * 而不是 undefined。理由：SPACE-03 之后守卫对缺空间的会话 fail-closed，
+   * 返回 undefined 会让内存模式的每个会话都无法访问经营接口
+   * （`saas-foundation` 测试即因此失败）。
+   *
+   * 刻意不在守卫里为内存模式开豁免口子：那等于在鉴权路径上留一条
+   * 「某个配置值能绕过空间检查」的分支，是 fail-open 的老问题。
+   * 这里合成的空间 id 只在内存模式下产生，而内存模式按
+   * `docs/数据库启动与初始化.md` 仅用于显式测试，生产一律 mysql。
+   */
   async resolveSessionWorkspaceId(userId: string, requested?: string) {
-    if (!this.useMysqlDataSource()) return undefined;
+    if (!this.useMysqlDataSource()) {
+      // 平台管理租户没有经营品类，不是经营主体，不该有经营空间——
+      // 与 mysql 模式一致（它也没有成员关系，解析结果为 undefined）。
+      // 给它合成空间会让登录在 getCategoryContext 处 403。
+      const user = this.users.find((row) => row.id === userId);
+      const tenant = user ? this.tenants.find((row) => row.tenantId === user.tenantId) : undefined;
+      if (!tenant?.categoryCode) return undefined;
+      return requested ?? MEMORY_MODE_WORKSPACE_ID;
+    }
     return this.platformRepository.resolveSessionWorkspaceId(userId, requested);
   }
 
@@ -1982,8 +2012,23 @@ export class PlatformService {
     return this.platformRepository.findWorkspaceScopedUser(userId, workspaceId);
   }
 
+  /**
+   * 取某个经营空间的品类与能力。
+   *
+   * 内存模式没有空间表，此处返回**租户级档案**而不是空对象：调用方
+   * （`AuthService.getCategoryContext`）在空间存在而品类缺失时会 fail-closed 拒绝，
+   * 返回 `{}` 会让内存模式登录直接 403。内存模式只有一个合成空间
+   * （见 `MEMORY_MODE_WORKSPACE_ID`），因此「空间品类 == 租户品类」在该模式下成立。
+   */
   async getWorkspaceCategoryContext(tenantId: string, workspaceId: string) {
-    if (!this.useMysqlDataSource()) return {};
+    if (!this.useMysqlDataSource()) {
+      const tenant = await this.findTenantByIdForAuth(tenantId);
+      return {
+        categoryCode: tenant.categoryCode,
+        categoryName: tenant.categoryName,
+        capabilities: tenant.capabilities
+      };
+    }
     return this.platformRepository.getWorkspaceCategoryContext(tenantId, workspaceId);
   }
 

@@ -231,16 +231,25 @@ function requestContext(method, url, accessToken) {
   const priceOnlyGuard = new ApiAuthGuard({
     async resolveAccessToken() { return { ...demo.user, isPlatformAdmin: false, permissions: ["store-rental:price:manage"] }; },
     // SPACE-02：守卫改为经 resolveAccessContext 取「账号 + 当前经营空间」。
-    // 这个 stub 模拟"没有任何可进入空间"的账号（hasWorkspaces=false），
-    // 因此空间 fail-closed 不参与本用例，被验证的仍然是权限判定本身。
+    //
+    // 本用例验证的是**权限判定**（有定价权不等于有下单权），因此必须给一个
+    // 正常的会话空间，让请求走到权限那一步。早前这里给 workspaceId: undefined
+    // 并注释说"空间 fail-closed 不参与本用例"——那在守卫 fail-open 时成立，
+    // 但空间检查改为 fail-closed 后，请求会先因缺空间被 403 拒掉，
+    // 于是后面那条"有定价权也不能下单"的断言其实什么都没验证到
+    // （它照样 rejects，只是原因换成了缺空间）。
     async resolveAccessContext() {
       return {
         user: { ...demo.user, isPlatformAdmin: false, permissions: ["store-rental:price:manage"] },
-        workspaceId: undefined,
-        hasWorkspaces: false
+        workspaceId: "ws_saas_foundation_price_only",
+        hasWorkspaces: true
       };
     },
-    async getTenantContext() { return { capabilities: demo.tenant.capabilities }; }
+    async getTenantContext() { return { capabilities: demo.tenant.capabilities }; },
+    // 守卫按会话空间取品类与能力，stub 必须一并提供，否则拿不到 capabilities。
+    async getCategoryContext() {
+      return { categoryCode: demo.tenant.categoryCode, capabilities: demo.tenant.capabilities };
+    }
   });
   const pricingWrite = requestContext("POST", "/api/rental/v1/pricing-plans", "price-only");
   assert.equal(await priceOnlyGuard.canActivate(pricingWrite.context), true, "price managers must be allowed to maintain generic pricing");
