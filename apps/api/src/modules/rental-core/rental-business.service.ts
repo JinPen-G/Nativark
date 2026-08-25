@@ -1102,7 +1102,17 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         );
       }
       const pricingStrategy = rentalPricingStrategy(rate.unit);
-      const naturalUnits = pricingStrategy.billableUnits(input.startAt, input.endAt, line.usageQuantity, quoteTimeZone);
+      // 计价上下文：小时粒度来自费率（需求"按价格配置的小时粒度"），
+      // 班次时长与边界来自已发布规则（需求"由经营空间规则定义"），
+      // 因此二者的取数来源不同，不能都塞进费率或都塞进规则。
+      const pricingContext = {
+        usageQuantity: line.usageQuantity,
+        timeZone: quoteTimeZone,
+        hourGranularityMinutes: rate.hourGranularityMinutes,
+        shiftHours: rule.config.pricing?.shiftHours,
+        shiftStartHours: rule.config.pricing?.shiftStartHours
+      };
+      const naturalUnits = pricingStrategy.billableUnits(input.startAt, input.endAt, pricingContext);
       // 最小起租量属于价格计划的职责（技术指南 5.4），因此在这里兜底而不是在策略里。
       const units = Math.max(rate.minimumUnits, naturalUnits);
       // 逐单位日期价格（需求 4.4.5 明确禁止用整段平均倍率代替）。
@@ -1111,7 +1121,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       // 计费块开始时所在的营业日期取价。日期序列由策略给出——单位语义在策略里，
       // 日历知识在服务层，两边各管一段。
       const holidayPricing = context.settings.pricing.holidayPricingEnabled && calendars.length > 0;
-      const unitDates = pricingStrategy.billableUnitDates(input.startAt, units, quoteTimeZone);
+      const unitDates = pricingStrategy.billableUnitDates(input.startAt, units, pricingContext);
       const unitFactors = unitDates.map((date) => this.dateMultiplier(calendars, date, rate));
       const unitMultipliers = holidayPricing ? unitFactors.map((item) => item.value) : undefined;
       // 停业日必须拦住：即使关掉了节假日定价，停业日也不能接单。

@@ -73,3 +73,34 @@ export function businessDateKeyFromIndex(index: number): string {
 export function businessYearFromDateKey(dateKey: string): number {
   return Number(dateKey.slice(0, 4));
 }
+
+/**
+ * 某个营业日期在营业时区的指定整点，返回对应的绝对时刻（毫秒）。
+ *
+ * 做法是先假定偏移为 0 取一个候选时刻，再用该候选在目标时区的实际偏移回修一次。
+ * 直接拼 `${dateKey}T${hh}:00:00Z` 会把 UTC 当成当地时间；而固定偏移在夏令时
+ * 地区又会错。回修一次即可对齐，因为同一时刻的偏移由 ICU 给出。
+ */
+export function businessInstantAt(dateKey: string, hour: number, timeZone: string): number {
+  const naive = Date.parse(`${dateKey}T${String(hour).padStart(2, "0")}:00:00Z`);
+  const offsetMs = zoneOffsetMs(naive, timeZone);
+  // 用回修后的时刻再取一次偏移：跨夏令时切换时首次估计可能落在切换的另一侧。
+  return naive - zoneOffsetMs(naive - offsetMs, timeZone);
+}
+
+/** 指定时刻在目标时区的 UTC 偏移（毫秒）。 */
+function zoneOffsetMs(instant: number, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  }).formatToParts(new Date(instant));
+  const get = (type: string) => Number(parts.find((part) => part.type === type)?.value ?? 0);
+  const asUtc = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"), get("second"));
+  return asUtc - instant;
+}

@@ -4276,6 +4276,13 @@ export interface RentalPricingRate {
    * 与 `depositAmount`（固定押金）是两种模式下各自的取数来源，不会同时生效。
    */
   depositMultiple?: number;
+  /**
+   * 小时粒度（分钟），仅 `unit: "hour"` 使用。缺省 60。
+   *
+   * 需求 4.4.5：「按价格配置的小时粒度向上取整，例如每 1 小时或每 30 分钟；
+   * 不足一个粒度按一个粒度计」——因此它属于**价格**而不是经营空间规则。
+   */
+  hourGranularityMinutes?: number;
 }
 
 /**
@@ -4376,6 +4383,21 @@ export interface SaveRentalValueAddedServiceRequest extends Omit<RentalValueAdde
 }
 
 export interface RentalRuleConfig {
+  /**
+   * 计价相关的经营空间规则（需求 4.4.5：「班次时长及边界由经营空间规则定义」）。
+   *
+   * 可选，且整组可缺省：既有规则快照里没有这一组，订单必须继续按原快照复算，
+   * 不能因为新增字段就让历史订单换一套班次口径。
+   */
+  pricing?: {
+    /** 班次时长（小时）。缺省 8。 */
+    shiftHours?: number;
+    /**
+     * 班次边界：一天内各班次的起始小时（营业时区），如 `[0, 8, 16]`。
+     * 给了边界就按「跨过几个班次窗口」计数；不给则按班次时长整除。
+     */
+    shiftStartHours?: number[];
+  };
   payment: {
     timing: "order" | "confirmation" | "pickup" | "offline_terms";
     depositMode: "none" | "fixed" | "price_multiple" | "preauthorization";

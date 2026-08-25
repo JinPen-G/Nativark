@@ -41,7 +41,10 @@ const iso = (value) => {
   return value;
 };
 const units = (unit, start, end, usageQuantity, timeZone) =>
-  rentalPricingStrategy(unit).billableUnits(iso(start), iso(end), usageQuantity, timeZone);
+  rentalPricingStrategy(unit).billableUnits(iso(start), iso(end), { usageQuantity, timeZone });
+/** 需要小时粒度、班次时长或班次边界时用这个，参数一目了然。 */
+const unitsWith = (unit, start, end, ctx) =>
+  rentalPricingStrategy(unit).billableUnits(iso(start), iso(end), ctx);
 
 /* ---------- 注册表完整性 ---------- */
 
@@ -259,8 +262,8 @@ assert.match(explain("day_24h", tiered, 7), /阶梯价 70\/day_24h（满 7 day_2
 
 /* ---------- 逐单位日期价格（需求 4.4.5 禁止整段平均倍率）---------- */
 
-const dates = (unit, start, unitCount, tz = DEFAULT_BUSINESS_TIME_ZONE) =>
-  rentalPricingStrategy(unit).billableUnitDates(iso(start), unitCount, tz);
+const dates = (unit, start, unitCount, tz = DEFAULT_BUSINESS_TIME_ZONE, extra) =>
+  rentalPricingStrategy(unit).billableUnitDates(iso(start), unitCount, { timeZone: tz, ...extra });
 
 // 自然日：逐个计费日期。
 assert.deepEqual(
@@ -325,6 +328,91 @@ assert.match(
   rentalPricingStrategy("calendar_day").explain(rateOf({}), 3, [1, 1, 1.25]),
   /逐单位系数 1\.00\+1\.00\+1\.25/,
   "计算说明必须展示逐单位系数"
+);
+
+/* ---------- 小时粒度可配置（需求 4.4.5：按价格配置的小时粒度）---------- */
+
+// 缺省 60 分钟。
+assert.equal(unitsWith("hour", "2026-03-02T09:00:00Z", "2026-03-02T09:30:00Z", {}), 1, "缺省粒度：半小时进位为 1 小时");
+// 30 分钟粒度：同样 30 分钟只算 1 个单位，但 45 分钟要算 2 个。
+assert.equal(
+  unitsWith("hour", "2026-03-02T09:00:00Z", "2026-03-02T09:30:00Z", { hourGranularityMinutes: 30 }),
+  1,
+  "30 分钟粒度：整 30 分钟为 1 个单位"
+);
+assert.equal(
+  unitsWith("hour", "2026-03-02T09:00:00Z", "2026-03-02T09:45:00Z", { hourGranularityMinutes: 30 }),
+  2,
+  "30 分钟粒度：45 分钟不足两个粒度也按两个计（需求：不足一个粒度按一个粒度计）"
+);
+// 15 分钟粒度：3 小时 = 12 个单位。
+assert.equal(
+  unitsWith("hour", "2026-03-02T09:00:00Z", "2026-03-02T12:00:00Z", { hourGranularityMinutes: 15 }),
+  12,
+  "15 分钟粒度：3 小时为 12 个单位"
+);
+// 非法粒度必须回落到 60，而不是算出 Infinity 或 0。
+for (const bad of [0, -30, Number.NaN, Number.POSITIVE_INFINITY, undefined]) {
+  assert.equal(
+    unitsWith("hour", "2026-03-02T09:00:00Z", "2026-03-02T12:00:00Z", { hourGranularityMinutes: bad }),
+    3,
+    `非法小时粒度 ${JSON.stringify(bad)} 必须回落到 60 分钟`
+  );
+}
+// 逐单位日期序列也要按粒度推进：30 分钟粒度下，23:30 起租的第 2 个单位落到次日。
+assert.deepEqual(
+  dates("hour", "2026-03-02T23:30:00+08:00", 2, "Asia/Shanghai", { hourGranularityMinutes: 30 }),
+  ["2026-03-02", "2026-03-03"],
+  "小时粒度必须同时影响逐单位取价的日期序列"
+);
+
+/* ---------- 班次时长与边界可配置（需求 4.4.5：由经营空间规则定义）---------- */
+
+// 缺省 8 小时。
+assert.equal(unitsWith("shift", "2026-03-02T08:00:00Z", "2026-03-02T17:00:00Z", {}), 2, "缺省班次 8 小时：9 小时为 2 班");
+// 12 小时班：同样 9 小时只算 1 班。
+assert.equal(
+  unitsWith("shift", "2026-03-02T08:00:00Z", "2026-03-02T17:00:00Z", { shiftHours: 12 }),
+  1,
+  "12 小时班：9 小时为 1 班"
+);
+assert.equal(
+  unitsWith("shift", "2026-03-02T08:00:00Z", "2026-03-02T21:00:00Z", { shiftHours: 12 }),
+  2,
+  "12 小时班：13 小时为 2 班"
+);
+// 班次边界：配了边界就按「跨过几个班次窗口」计数，这与按时长整除**不同**。
+// 边界 [0, 8, 16]，租期 07:00–09:00 只有 2 小时，但横跨 00-08 与 08-16 两个班次。
+const boundaryCtx = { timeZone: "Asia/Shanghai", shiftStartHours: [0, 8, 16] };
+assert.equal(
+  unitsWith("shift", "2026-03-02T07:00:00+08:00", "2026-03-02T09:00:00+08:00", boundaryCtx),
+  2,
+  "班次边界：07:00–09:00 横跨两个班次窗口（按时长整除只会算 1 班）"
+);
+assert.equal(
+  unitsWith("shift", "2026-03-02T09:00:00+08:00", "2026-03-02T15:00:00+08:00", boundaryCtx),
+  1,
+  "班次边界：完全落在 08-16 窗口内计 1 班"
+);
+assert.equal(
+  unitsWith("shift", "2026-03-02T09:00:00+08:00", "2026-03-03T09:00:00+08:00", boundaryCtx),
+  4,
+  "班次边界：跨一整天从 08-16 到次日 08-16，共 4 个窗口"
+);
+// 边界配置乱序或重复不应改变结果——配置是人填的。
+assert.equal(
+  unitsWith("shift", "2026-03-02T07:00:00+08:00", "2026-03-02T09:00:00+08:00", {
+    timeZone: "Asia/Shanghai",
+    shiftStartHours: [16, 0, 8, 8]
+  }),
+  2,
+  "班次边界乱序且重复时必须得到同一结果"
+);
+// 空边界回落到按时长整除。
+assert.equal(
+  unitsWith("shift", "2026-03-02T08:00:00Z", "2026-03-02T17:00:00Z", { shiftStartHours: [], shiftHours: 8 }),
+  2,
+  "空边界回落到按班次时长整除"
 );
 
 console.log("rental pricing strategy tests passed: 单位语义、边界、非法输入、阶梯价、封顶价与计算说明均已覆盖");

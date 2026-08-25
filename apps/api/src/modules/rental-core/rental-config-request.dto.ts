@@ -325,6 +325,16 @@ export class RentalPricingRateInputDto {
   @Min(0)
   maxAmount?: number;
 
+  /**
+   * 小时粒度（分钟），仅小时计价使用。1..1440：0 会让单位数变成 Infinity，
+   * 超过一天的"小时粒度"没有业务含义。
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(1440)
+  hourGranularityMinutes?: number;
+
   /** 租金倍数押金的倍数。上界复用 MAX_MULTIPLIER：押金 10 倍租金已远超任何真实场景。 */
   @IsOptional()
   @IsNumber()
@@ -604,7 +614,31 @@ export class RuleConfigDamageInputDto {
   chargeLimit?: number;
 }
 
+/** 计价相关的经营空间规则（需求 4.4.5：班次时长及边界由经营空间规则定义）。 */
+export class RuleConfigPricingInputDto {
+  @IsOptional()
+  @IsNumber()
+  @Min(0.5)
+  @Max(24)
+  shiftHours?: number;
+
+  /** 一天内各班次起始小时。0..23：24 等于次日 0 点，用 0 表达即可。 */
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  @Min(0, { each: true })
+  @Max(23, { each: true })
+  shiftStartHours?: number[];
+}
+
 export class RentalRuleConfigInputDto implements RentalRuleConfig {
+  /** 整组可缺省：既有规则快照没有这一组，历史订单必须继续按原快照复算。 */
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => RuleConfigPricingInputDto)
+  pricing?: RuleConfigPricingInputDto;
+
   @IsObject()
   @ValidateNested()
   @Type(() => RuleConfigPaymentInputDto)
