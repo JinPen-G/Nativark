@@ -3609,7 +3609,32 @@ async function main() {
       "跨租户空间切换被拒且不改动原会话、空间列表只含本租户"
   );
 
-  console.log("== 59. 旧版快照缺字段时读路径仍不得 500 ==");
+  console.log("== 59. RC-04 审计列表按经营空间隔离 ==");
+  // 审计写入已经携带会话 workspaceId，但如果列表只按 tenantId 查询，
+  // 同租户在两个空间的管理员会在 audit-logs 中互相看到业务动作，
+  // 这既违反 SPACE-03，也让 RC-04 的“按空间可追溯”失去边界。
+  // 先在当前空间执行一次无语义变化的完整覆盖写，避免依赖前面章节恰好选中过
+  // 同一个 non-default 空间；审计拦截器异步落库，因此有限轮询到该动作可见。
+  const swSettings = (await request("GET", "/api/rental/v1/business-settings", null, swSwitch.body.data.accessToken)).body.data;
+  const swAuditWrite = await request("PUT", "/api/rental/v1/business-settings", swSettings, swSwitch.body.data.accessToken);
+  assert.equal(swAuditWrite.status, 200, `当前空间保存业务设置失败: ${JSON.stringify(swAuditWrite.body).slice(0, 200)}`);
+  let swAuditRows = [];
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const swAudit = await request("GET", "/api/platform/audit-logs?limit=200", null, swSwitch.body.data.accessToken);
+    assert.equal(swAudit.status, 200, `当前空间读取审计列表应成功: ${JSON.stringify(swAudit.body).slice(0, 200)}`);
+    swAuditRows = swAudit.body.data.rows;
+    if (swAuditRows.some((row) => row.workspaceId === swOther.id)) break;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.ok(Array.isArray(swAuditRows) && swAuditRows.length > 0, "前置条件：当前空间应有可追溯的审计动作");
+  assert.deepEqual(
+    [...new Set(swAuditRows.map((row) => row.workspaceId))],
+    [swOther.id],
+    `审计列表不得混入同租户其他空间或平台域动作：${JSON.stringify(swAuditRows.map((row) => row.workspaceId))}`
+  );
+  ok("RC-04 审计列表按当前经营空间隔离，返回记录带 workspaceId 以便追溯边界");
+
+  console.log("== 60. 旧版快照缺字段时读路径仍不得 500 ==");
   // 浏览器实测发现的缺陷（E2E 当时没抓到）：快照 JSON 被直接当 TenantRentalState 装载，
   // 早于某字段引入的快照不含该字段，于是 `state.sampleAssets.length` 抛
   // "Cannot read properties of undefined"，/rental/v1/assets 与 /stock-balances 直接 500。
@@ -3700,7 +3725,7 @@ async function main() {
       "sampleFactsEnsured 后重启，切入该空间后五个读接口均 200 而非 500"
   );
 
-  console.log("== 60. 经营空间管理接口必须有权限门槛 ==");
+  console.log("== 61. 经营空间管理接口必须有权限门槛 ==");
   // 自查 Review 发现的 fail-open：`requiredPermissions()` 的 /platform 分支
   // 漏列了 /platform/workspaces，落到函数末尾的 `return []`，而 hasAnyPermission
   // 对空数组直接放行。后果是任何能登录的账号都能列出全部空间、把自己加进任一空间、
@@ -3797,7 +3822,7 @@ async function main() {
   assert.equal(permAdminList.status, 200, "租户管理员仍应能列出经营空间");
   ok("经营空间管理接口有权限门槛：低权限账号列空间/加成员/建空间均 403，管理员不受影响");
 
-  console.log("== 61. 无空间成员关系的账号不得访问经营域 ==");
+  console.log("== 62. 无空间成员关系的账号不得访问经营域 ==");
   // 另一处 fail-open：空间检查曾附加 `accessContext.hasWorkspaces` 条件，
   // 于是「一个空间都没有的账号」跳过检查，随后仓储层的 resolveScopeWorkspaceId
   // 回退到默认空间——成员关系为零的账号拿到了默认空间的完整读写权。
@@ -3820,7 +3845,7 @@ async function main() {
   }
   ok("无成员关系账号 fail-closed：三个经营接口均 403，不再静默回退到默认空间");
 
-  console.log("== 62. 入参校验：缺必填字段必须 400 而不是 500 ==");
+  console.log("== 63. 入参校验：缺必填字段必须 400 而不是 500 ==");
   // 缺陷来源：全局 ValidationPipe 只在拿得到 metatype 时工作，而 @Body() 标注的是
   // TypeScript interface——运行时被擦除，管道整体跳过。于是缺必填字段会一路走到
   // Prisma 才炸（`Argument type is missing`），对外表现为 500。
@@ -4012,7 +4037,7 @@ async function main() {
       "嵌套内层非法值、倍率越界均被拒；合法请求成功且声明过的可选字段未被剥离"
   );
 
-  console.log("== 63. RC-04 奖励券与配额必须落库 ==");
+  console.log("== 64. RC-04 奖励券与配额必须落库 ==");
   // grantReward 的 applyRewardBenefit 会创建奖励优惠券并递增模板 claimedQuantity，
   // 但这两处都**只改内存**：方法末尾只落了流水（upsertRewardEntry）与权益账户
   // （flushBenefitAccounts），没有任何 upsertCustomerCoupon / upsertCouponTemplate。

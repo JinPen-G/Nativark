@@ -474,6 +474,8 @@ export interface SystemAiConnectionTestResult {
 export interface PlatformAuditLogRow {
   id: string;
   tenantId: string;
+  /** 经营域审计必填；平台域动作不属于任何经营空间时为空。 */
+  workspaceId?: string;
   action: string;
   operator: string;
   targetType: string;

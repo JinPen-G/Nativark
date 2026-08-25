@@ -417,6 +417,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     {
       id: stringSchema,
       tenantId: stringSchema,
+      workspaceId: stringSchema,
       action: stringSchema,
       operator: stringSchema,
       targetType: stringSchema,

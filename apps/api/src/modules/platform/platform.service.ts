@@ -1,7 +1,7 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "node:crypto";
-import { requireRequestTenantId, requireRequestWorkspaceId } from "../../common/request-identity";
+import { getRequestWorkspaceId, requireRequestTenantId, requireRequestWorkspaceId } from "../../common/request-identity";
 import {
   RENTAL_CATEGORY_DEFINITIONS,
   CreateBusinessWorkspaceRequest,
@@ -867,8 +867,10 @@ export class PlatformService {
     }
 
     const limit = Math.min(Math.max(Number(scopedQuery.limit ?? 50), 1), 200);
+    const workspaceId = getRequestWorkspaceId();
     const rows = this.auditLogs
       .filter((log) => !scopedQuery.tenantId || log.tenantId === scopedQuery.tenantId)
+      .filter((log) => !workspaceId || log.workspaceId === workspaceId)
       .filter((log) => !scopedQuery.action || log.action.includes(scopedQuery.action))
       .filter((log) => !scopedQuery.operator || log.operator.includes(scopedQuery.operator))
       .filter((log) => !scopedQuery.targetType || log.targetType === scopedQuery.targetType)

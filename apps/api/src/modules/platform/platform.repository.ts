@@ -63,7 +63,7 @@ import {
   buildSystemUserWhere
 } from "../../common/data-permission";
 import { PrismaService } from "../database/prisma.service";
-import { requireRequestTenantId } from "../../common/request-identity";
+import { getRequestWorkspaceId, requireRequestTenantId } from "../../common/request-identity";
 
 type RoleWithPermissions = Awaited<
   ReturnType<PlatformRepository["findRoleWithPermissions"]>
@@ -1124,8 +1124,13 @@ export class PlatformRepository {
     query: PlatformAuditLogQuery = {}
   ): Promise<PlatformAuditResult> {
     const limit = Math.min(Math.max(Number(query.limit ?? 50), 1), 200);
+    // 审计是经营事实的一部分：普通经营会话只能回看当前空间的动作。
+    // 平台管理会话没有 workspaceId，保留租户级平台审计的查询能力；绝不从
+    // query 参数读取空间，避免客户端借此跨空间枚举审计记录。
+    const workspaceId = getRequestWorkspaceId();
     const where: Prisma.OperationLogWhereInput = {
       tenantId: query.tenantId || requireRequestTenantId(),
+      workspaceId,
       action: query.action ? { contains: query.action } : undefined
     };
     const [rows, total] = await Promise.all([
@@ -1711,6 +1716,7 @@ export class PlatformRepository {
   private toAuditLogRow(row: {
     id: string;
     tenantId: string;
+    workspaceId: string | null;
     action: string;
     detail: Prisma.JsonValue;
     createdAt: Date;
@@ -1727,6 +1733,7 @@ export class PlatformRepository {
     return {
       id: row.id,
       tenantId: row.tenantId,
+      workspaceId: row.workspaceId ?? undefined,
       action: row.action,
       operator,
       targetType: String(detail.targetType ?? "system"),
