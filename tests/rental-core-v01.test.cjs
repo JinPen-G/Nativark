@@ -7,7 +7,14 @@ require("ts-node").register({
 
 const { RentalCoreService } = require("../apps/api/src/modules/rental-core/rental-core.service");
 const { RentalBusinessService } = require("../apps/api/src/modules/rental-core/rental-business.service");
-const { RentalCoreOrderStatus, RentalInventoryMode } = require("@store-rental/shared");
+const {
+  RENTAL_CAPABILITY_MODULES,
+  RENTAL_PRICING_UNIT_CODES,
+  RentalCoreOrderStatus,
+  RentalInventoryMode
+} = require("@store-rental/shared");
+const { assertRentalCategoryExtensions } = require("../apps/api/src/modules/rental-core/rental-extension-registry");
+const { RENTAL_PRICING_STRATEGIES, rentalPricingStrategy } = require("../apps/api/src/modules/rental-core/rental-pricing-strategy");
 const { createAbsorbingConfigStore, createAbsorbingFactStore, createAbsorbingBusinessConfigStore, createAbsorbingBusinessFactStore } = require("./helpers/absorbing-config-store.cjs");
 
 // 配置的事实源是数据库；本用例不连库，注入吸收式 store 让写穿落空，
@@ -34,7 +41,38 @@ assert.equal(cameraProfile.categoryCode, "camera");
 assert.equal(campingProfile.categoryCode, "camping");
 const categories = service.listCategories();
 assert.equal(categories.length, 4);
+assert.doesNotThrow(() => assertRentalCategoryExtensions(categories));
+assert.deepEqual(Object.keys(RENTAL_PRICING_STRATEGIES).sort(), [...RENTAL_PRICING_UNIT_CODES].sort());
+assert.ok(categories.every((category) => category.defaultCapabilities.every((capability) =>
+  RENTAL_CAPABILITY_MODULES.some((module) => module.code === capability))));
+const extensionCategory = {
+  ...categories[0],
+  code: "test_equipment",
+  name: "扩展测试品类",
+  businessModel: {
+    ...categories[0].businessModel,
+    pricingUnits: ["hour", "usage"],
+    defaultPricingUnit: "hour"
+  }
+};
+assert.doesNotThrow(() => assertRentalCategoryExtensions([...categories, extensionCategory]));
+assert.equal(categories.length, 4, "验证新扩展定义时不得改写现有品类注册表");
+assert.throws(() => assertRentalCategoryExtensions([
+  { ...extensionCategory, code: "invalid_equipment", defaultCapabilities: ["unknown_capability"] }
+]), /未注册 capability/);
+const strategyStart = "2026-01-01T00:00:00.000Z";
+const strategyEnd = "2026-01-02T01:00:00.000Z";
+assert.equal(rentalPricingStrategy("hour").billableUnits(strategyStart, strategyEnd), 25);
+assert.equal(rentalPricingStrategy("shift").billableUnits(strategyStart, strategyEnd), 4);
+assert.equal(rentalPricingStrategy("day_24h").billableUnits(strategyStart, strategyEnd), 2);
+assert.equal(rentalPricingStrategy("package").billableUnits(strategyStart, strategyEnd), 1);
+assert.equal(rentalPricingStrategy("usage").amountPerItem({ baseAmount: 50, includedUsage: 100, excessUsageAmount: 2 }, 150), 150);
 assert.ok(categories.every((category) => category.businessModel.assetFields.length > 0));
+assert.deepEqual(
+  Object.fromEntries(categories.map((category) => [category.code, [category.businessModel.defaults.sampleBaseAmount, category.businessModel.defaults.sampleAmountIncrement]])),
+  { camera: [180, 80], camping: [80, 20], vehicle: [380, 100], construction: [680, 180] },
+  "品类默认值注册化不得改变既有演示定价"
+);
 assert.ok(categories.find((category) => category.code === "vehicle").businessModel.assetFields.some((field) => field.code === "licensePlate" && field.scope === "asset"));
 assert.ok(categories.find((category) => category.code === "camera").businessModel.assetFields.some((field) => field.code === "model" && field.scope === "item_group"));
 assert.ok(categories.find((category) => category.code === "camping").businessModel.assetFields.some((field) => field.code === "people" && field.scope === "item_group"));

@@ -3824,18 +3824,46 @@ export enum RentalCoreOrderStatus {
   Cancelled = "cancelled"
 }
 
-export type RentalCapability =
-  | "serialized_inventory"
-  | "quantity_inventory"
-  | "bundle_inventory"
-  | "pickup"
-  | "return"
-  | "delivery"
-  | "locker"
-  | "dispatch"
-  | "usage_reading"
-  | "qualification"
-  | "iot";
+export const RENTAL_CAPABILITY_CODES = [
+  "serialized_inventory",
+  "quantity_inventory",
+  "bundle_inventory",
+  "pickup",
+  "return",
+  "delivery",
+  "locker",
+  "dispatch",
+  "usage_reading",
+  "qualification",
+  "iot"
+] as const;
+
+export type RentalCapability = (typeof RENTAL_CAPABILITY_CODES)[number];
+
+export interface RentalCapabilityModuleDefinition {
+  code: RentalCapability;
+  label: string;
+  kind: "core" | "category_extension";
+  extensionPoints: Array<"menu" | "api" | "order_validation" | "fulfillment" | "integration">;
+}
+
+/**
+ * 品类能力的统一注册表。新增专属能力时先登记扩展点，再由独立模块实现；
+ * Rental Core 只识别 capability code，不在订单主流程里判断具体品类。
+ */
+export const RENTAL_CAPABILITY_MODULES: RentalCapabilityModuleDefinition[] = [
+  { code: "serialized_inventory", label: "序列化库存", kind: "core", extensionPoints: ["order_validation", "fulfillment"] },
+  { code: "quantity_inventory", label: "数量库存", kind: "core", extensionPoints: ["order_validation", "fulfillment"] },
+  { code: "bundle_inventory", label: "套装库存", kind: "core", extensionPoints: ["order_validation", "fulfillment"] },
+  { code: "pickup", label: "领取", kind: "core", extensionPoints: ["fulfillment"] },
+  { code: "return", label: "归还", kind: "core", extensionPoints: ["fulfillment"] },
+  { code: "delivery", label: "配送", kind: "category_extension", extensionPoints: ["menu", "api", "fulfillment", "integration"] },
+  { code: "locker", label: "智能柜", kind: "category_extension", extensionPoints: ["menu", "api", "fulfillment", "integration"] },
+  { code: "dispatch", label: "调度", kind: "category_extension", extensionPoints: ["menu", "api", "fulfillment"] },
+  { code: "usage_reading", label: "使用量读数", kind: "category_extension", extensionPoints: ["order_validation", "fulfillment"] },
+  { code: "qualification", label: "资质审核", kind: "category_extension", extensionPoints: ["menu", "api", "order_validation"] },
+  { code: "iot", label: "IoT", kind: "category_extension", extensionPoints: ["menu", "api", "integration"] }
+];
 
 export interface RentalCategoryTerminology {
   itemLabel: string;
@@ -3848,7 +3876,8 @@ export interface RentalCategoryTerminology {
   usageMetricLabel?: string;
 }
 
-export type RentalPricingUnit = "hour" | "shift" | "day_24h" | "calendar_day" | "night" | "week" | "month" | "usage" | "package";
+export const RENTAL_PRICING_UNIT_CODES = ["hour", "shift", "day_24h", "calendar_day", "night", "week", "month", "usage", "package"] as const;
+export type RentalPricingUnit = (typeof RENTAL_PRICING_UNIT_CODES)[number];
 export type RentalFulfillmentMode = "store_pickup_return" | "partner_pickup_return" | "warehouse_pickup_return" | "locker_pickup_return" | "delivery" | "onsite_delivery";
 export type RentalLocationType = "store" | "warehouse" | "station" | "locker" | "delivery_hub" | "project_site";
 export type RentalSettingModule = "pricing" | "discounts" | "coupons" | "value_added_services" | "rental_rules" | "business_calendar" | "membership_rewards" | "notification_templates";
@@ -3865,6 +3894,34 @@ export interface RentalAttributeDefinition {
   options?: string[];
 }
 
+export interface RentalInspectionFieldDefinition {
+  code: string;
+  label: string;
+  type: "boolean" | "number" | "text" | "select" | "photo";
+  required: boolean;
+  unit?: string;
+  options?: string[];
+}
+
+export interface RentalCategoryDefaults {
+  fulfillment: { allowDifferentReturnLocation: boolean };
+  payment: { timing: TenantRentalBusinessSettings["payment"]["timing"] };
+  overdue: Pick<TenantRentalBusinessSettings["overdue"], "graceMinutes" | "feeMode" | "feeMultiplier">;
+  rules: {
+    evidenceRequired: boolean;
+    cancellation: Pick<RentalRuleConfig["cancellation"], "freeBeforeHours" | "lateFeeType" | "lateFeeValue" | "weatherExceptionEnabled">;
+    qualificationDocumentTypes: string[];
+  };
+  initialSetup: {
+    operatorName: string;
+    locationName: string;
+    locationType: RentalLocationType;
+  };
+  inspectionFields: RentalInspectionFieldDefinition[];
+  sampleBaseAmount: number;
+  sampleAmountIncrement: number;
+}
+
 export interface RentalCategoryBusinessModel {
   pricingUnits: RentalPricingUnit[];
   defaultPricingUnit: RentalPricingUnit;
@@ -3877,6 +3934,7 @@ export interface RentalCategoryBusinessModel {
   supportsPreauthorization: boolean;
   supportsQualificationReview: boolean;
   valueAddedServicePresets: string[];
+  defaults: RentalCategoryDefaults;
 }
 
 export interface RentalCategoryDefinition {
@@ -4489,7 +4547,21 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
       supportsUsagePricing: true,
       supportsPreauthorization: true,
       supportsQualificationReview: false,
-      valueAddedServicePresets: ["损坏免赔", "设备保险", "上门配送", "备用电池", "技术支持"]
+      valueAddedServicePresets: ["损坏免赔", "设备保险", "上门配送", "备用电池", "技术支持"],
+      defaults: {
+        fulfillment: { allowDifferentReturnLocation: false },
+        payment: { timing: "order" },
+        overdue: { graceMinutes: 30, feeMode: "next_period", feeMultiplier: 1 },
+        rules: { evidenceRequired: true, cancellation: { freeBeforeHours: 24, lateFeeType: "percentage", lateFeeValue: 20, weatherExceptionEnabled: false }, qualificationDocumentTypes: [] },
+        initialSetup: { operatorName: "演示摄影器材行", locationName: "中心器材门店", locationType: "store" },
+        inspectionFields: [
+          { code: "appearance_ok", label: "外观完好", type: "boolean", required: true },
+          { code: "function_ok", label: "功能正常", type: "boolean", required: true },
+          { code: "shutter_count", label: "快门次数", type: "number", required: true, unit: "次" }
+        ],
+        sampleBaseAmount: 180,
+        sampleAmountIncrement: 80
+      }
     },
     version: "0.2.0"
   },
@@ -4520,7 +4592,21 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
       supportsUsagePricing: false,
       supportsPreauthorization: false,
       supportsQualificationReview: false,
-      valueAddedServicePresets: ["清洁服务", "配送服务", "天气保障", "耗材包"]
+      valueAddedServicePresets: ["清洁服务", "配送服务", "天气保障", "耗材包"],
+      defaults: {
+        fulfillment: { allowDifferentReturnLocation: false },
+        payment: { timing: "order" },
+        overdue: { graceMinutes: 30, feeMode: "next_period", feeMultiplier: 1 },
+        rules: { evidenceRequired: false, cancellation: { freeBeforeHours: 24, lateFeeType: "percentage", lateFeeValue: 10, weatherExceptionEnabled: true }, qualificationDocumentTypes: [] },
+        initialSetup: { operatorName: "演示露营装备中心", locationName: "中心装备仓", locationType: "warehouse" },
+        inspectionFields: [
+          { code: "count_ok", label: "数量齐全", type: "boolean", required: true },
+          { code: "cleanliness", label: "清洁状态", type: "select", required: true, options: ["良好", "需清洁", "严重污损"] },
+          { code: "damage_note", label: "破损说明", type: "text", required: false }
+        ],
+        sampleBaseAmount: 80,
+        sampleAmountIncrement: 20
+      }
     },
     version: "0.2.0"
   },
@@ -4553,7 +4639,21 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
       supportsUsagePricing: true,
       supportsPreauthorization: true,
       supportsQualificationReview: true,
-      valueAddedServicePresets: ["基础保险", "不计免赔", "道路救援", "儿童座椅", "异地还车"]
+      valueAddedServicePresets: ["基础保险", "不计免赔", "道路救援", "儿童座椅", "异地还车"],
+      defaults: {
+        fulfillment: { allowDifferentReturnLocation: true },
+        payment: { timing: "order" },
+        overdue: { graceMinutes: 30, feeMode: "next_period", feeMultiplier: 1 },
+        rules: { evidenceRequired: true, cancellation: { freeBeforeHours: 24, lateFeeType: "percentage", lateFeeValue: 20, weatherExceptionEnabled: false }, qualificationDocumentTypes: ["驾驶证"] },
+        initialSetup: { operatorName: "演示车辆租赁门店", locationName: "中心车行门店", locationType: "store" },
+        inspectionFields: [
+          { code: "appearance_ok", label: "外观完好", type: "boolean", required: true },
+          { code: "function_ok", label: "功能正常", type: "boolean", required: true },
+          { code: "usage_reading", label: "里程", type: "number", required: false, unit: "km" }
+        ],
+        sampleBaseAmount: 380,
+        sampleAmountIncrement: 100
+      }
     },
     version: "0.2.0"
   },
@@ -4585,7 +4685,21 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
       supportsUsagePricing: true,
       supportsPreauthorization: true,
       supportsQualificationReview: true,
-      valueAddedServicePresets: ["设备保险", "操作员服务", "运输服务", "现场技术支持", "损坏免赔"]
+      valueAddedServicePresets: ["设备保险", "操作员服务", "运输服务", "现场技术支持", "损坏免赔"],
+      defaults: {
+        fulfillment: { allowDifferentReturnLocation: false },
+        payment: { timing: "confirmation" },
+        overdue: { graceMinutes: 60, feeMode: "manual_review", feeMultiplier: 1 },
+        rules: { evidenceRequired: true, cancellation: { freeBeforeHours: 48, lateFeeType: "percentage", lateFeeValue: 20, weatherExceptionEnabled: false }, qualificationDocumentTypes: ["操作资格证"] },
+        initialSetup: { operatorName: "演示工程设备中心", locationName: "中心设备场站", locationType: "project_site" },
+        inspectionFields: [
+          { code: "appearance_ok", label: "外观完好", type: "boolean", required: true },
+          { code: "function_ok", label: "功能正常", type: "boolean", required: true },
+          { code: "usage_reading", label: "工时", type: "number", required: false, unit: "小时" }
+        ],
+        sampleBaseAmount: 680,
+        sampleAmountIncrement: 180
+      }
     },
     version: "0.2.0"
   }
@@ -4884,14 +4998,7 @@ export interface RentalInspectionTemplate {
   name: string;
   stage: "pickup" | "return";
   version: string;
-  fields: Array<{
-    code: string;
-    label: string;
-    type: "boolean" | "number" | "text" | "select" | "photo";
-    required: boolean;
-    unit?: string;
-    options?: string[];
-  }>;
+  fields: RentalInspectionFieldDefinition[];
   enabled: boolean;
 }
 

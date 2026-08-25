@@ -49,6 +49,8 @@ import {
   type RentalFactTx,
   type RentalCoreFactStore
 } from "./rental-core-fact.repository";
+import { assertRentalCategoryExtensions } from "./rental-extension-registry";
+import { buildRentalCategorySamples } from "./rental-category-samples";
 
 /**
  * 内存态只保留**配置**（库为事实源、这里是写穿缓存）。
@@ -79,6 +81,7 @@ interface InventorySnapshot {
 }
 
 const categories: RentalCategoryDefinition[] = RENTAL_CATEGORY_DEFINITIONS;
+assertRentalCategoryExtensions(categories);
 
 function now() { return new Date().toISOString(); }
 function id(prefix: string) { return `${prefix}_${randomUUID().slice(0, 8)}`; }
@@ -88,6 +91,7 @@ function overlaps(aStart: string, aEnd: string, bStart: string, bEnd: string) {
 
 function defaultBusinessSettings(tenantId: string, definition: RentalCategoryDefinition): TenantRentalBusinessSettings {
   const supportsPreauthorization = definition.businessModel.supportsPreauthorization;
+  const defaults = definition.businessModel.defaults;
   return {
     tenantId,
     categoryCode: definition.code,
@@ -101,17 +105,15 @@ function defaultBusinessSettings(tenantId: string, definition: RentalCategoryDef
     },
     fulfillment: {
       enabledModes: [...definition.businessModel.fulfillmentModes],
-      allowDifferentReturnLocation: definition.code === RentalCategoryCode.Vehicle
+      allowDifferentReturnLocation: defaults.fulfillment.allowDifferentReturnLocation
     },
     payment: {
-      timing: definition.code === RentalCategoryCode.Construction ? "confirmation" : "order",
+      timing: defaults.payment.timing,
       depositMode: supportsPreauthorization ? "preauthorization" : "fixed",
       preauthorizationRequired: supportsPreauthorization
     },
     overdue: {
-      graceMinutes: definition.code === RentalCategoryCode.Construction ? 60 : 30,
-      feeMode: definition.code === RentalCategoryCode.Construction ? "manual_review" : "next_period",
-      feeMultiplier: 1
+      ...defaults.overdue
     },
     calendar: {
       weekendDays: [0, 6],
@@ -1105,29 +1107,14 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   private seedState(tenantId: string, categoryCode: RentalCategoryCode, idPrefix: string = tenantId): TenantRentalState {
     const isSampleTenant = tenantId === "tenant_001" || tenantId === "tenant_002";
     const definition = this.category(categoryCode); const timestamp = now(); const locationId = `${idPrefix}_location_01`;
-    const sampleNames: Record<RentalCategoryCode, { operator: string; location: string; locationType: RentalFulfillmentLocation["type"] }> = {
-      [RentalCategoryCode.Camera]: { operator: "演示摄影器材行", location: "中心器材门店", locationType: "store" },
-      [RentalCategoryCode.Camping]: { operator: "演示露营装备中心", location: "中心装备仓", locationType: "warehouse" },
-      [RentalCategoryCode.Vehicle]: { operator: "演示车辆租赁门店", location: "中心车行门店", locationType: "store" },
-      [RentalCategoryCode.Construction]: { operator: "演示工程设备中心", location: "中心设备场站", locationType: "project_site" }
-    };
-    const sampleName = sampleNames[categoryCode];
-    const operator: RentalFulfillmentOperator = { id: `${idPrefix}_operator_01`, tenantId, code: "SELF", name: sampleName.operator, type: "self_operated", contactName: "运营负责人", contactPhone: "13800000000", settlementMode: "self", status: "enabled", createdAt: timestamp, updatedAt: timestamp };
-    const location: RentalFulfillmentLocation = { id: locationId, tenantId, code: "MAIN", name: sampleName.location, type: sampleName.locationType, operatorId: operator.id, operatorType: operator.type, operatorName: operator.name, capabilities: ["pickup", "return", "storage", "delivery"], address: "演示地址 1 号", contactName: "值班负责人", contactPhone: "13800000000", businessHours: "09:00-20:00", status: "enabled" };
-    const base = (code: string, name: string, mode: RentalInventoryMode, unit: string, attributes: Record<string, unknown> = {}): RentalItemGroup => ({ id: `${idPrefix}_${code.toLowerCase()}`, tenantId, categoryCode, code, name, inventoryMode: mode, unit, attributes, bundleComponents: [], status: "enabled", createdAt: timestamp, updatedAt: timestamp });
-    const first = categoryCode === RentalCategoryCode.Camera
-      ? base("CAM-BODY", "全画幅相机机身", RentalInventoryMode.Serialized, "台", { brand: "Sony", model: "Alpha 7 IV", mount: "E", sensor: "全画幅" })
-      : base("CAMP-TENT", "四人露营帐篷", RentalInventoryMode.Quantity, "顶", { brand: "Naturehike", model: "Cloud Up 4", people: 4, season: "三季" });
-    const second = categoryCode === RentalCategoryCode.Camera
-      ? base("CAM-LENS", "24-70mm 标准镜头", RentalInventoryMode.Serialized, "支", { brand: "Sony", model: "FE 24-70mm F2.8 GM II", mount: "E" })
-      : base("CAMP-CHAIR", "折叠露营椅", RentalInventoryMode.Quantity, "把", { brand: "Helinox", model: "Chair One" });
-    const bundle = base(categoryCode === RentalCategoryCode.Camera ? "CAM-KIT" : "CAMP-KIT", categoryCode === RentalCategoryCode.Camera ? "标准拍摄套装" : "双人露营套装", RentalInventoryMode.Bundle, "套");
-    bundle.bundleComponents = [first, second].map((row) => ({ itemGroupId: row.id, itemGroupCode: row.code, itemGroupName: row.name, quantity: row === second && categoryCode === RentalCategoryCode.Camping ? 2 : 1 }));
-    const groups = isSampleTenant ? [first, second, bundle] : [];
-    const assets: RentalAsset[] = isSampleTenant && categoryCode === RentalCategoryCode.Camera ? groups.filter((row) => row.inventoryMode === RentalInventoryMode.Serialized).flatMap((group, groupIndex) => Array.from({ length: 3 }, (_, index) => ({ id: `${group.id}_asset_${index + 1}`, tenantId, itemGroupId: group.id, itemGroupCode: group.code, itemGroupName: group.name, assetNo: `${group.code}-${String(index + 1).padStart(3, "0")}`, serialNo: `SN${groupIndex + 1}${index + 1}0001`, locationId, locationName: location.name, status: RentalAssetStatus.Available, attributes: {}, createdAt: timestamp, updatedAt: timestamp }))) : [];
-    const stocks: RentalStockBalance[] = isSampleTenant && categoryCode === RentalCategoryCode.Camping ? groups.filter((row) => row.inventoryMode === RentalInventoryMode.Quantity).map((group, index) => ({ id: `${group.id}_stock`, tenantId, itemGroupId: group.id, itemGroupCode: group.code, itemGroupName: group.name, locationId, locationName: location.name, onHandQuantity: index === 0 ? 12 : 24, reservedQuantity: 0, maintenanceQuantity: index === 0 ? 1 : 2, availableQuantity: index === 0 ? 11 : 22, updatedAt: timestamp })) : [];
+    const initialSetup = definition.businessModel.defaults.initialSetup;
+    const operator: RentalFulfillmentOperator = { id: `${idPrefix}_operator_01`, tenantId, code: "SELF", name: initialSetup.operatorName, type: "self_operated", contactName: "运营负责人", contactPhone: "13800000000", settlementMode: "self", status: "enabled", createdAt: timestamp, updatedAt: timestamp };
+    const location: RentalFulfillmentLocation = { id: locationId, tenantId, code: "MAIN", name: initialSetup.locationName, type: initialSetup.locationType, operatorId: operator.id, operatorType: operator.type, operatorName: operator.name, capabilities: ["pickup", "return", "storage", "delivery"], address: "演示地址 1 号", contactName: "值班负责人", contactPhone: "13800000000", businessHours: "09:00-20:00", status: "enabled" };
+    const samples = isSampleTenant
+      ? buildRentalCategorySamples({ tenantId, idPrefix, categoryCode, location, timestamp })
+      : { itemGroups: [], assets: [], stockBalances: [] };
     const templates = this.buildInspectionTemplates(tenantId, categoryCode, idPrefix);
-    return { profile: { tenantId, categoryCode, capabilities: [...definition.defaultCapabilities] as RentalCapability[], terminology: { ...definition.terminology }, configVersion: definition.version, initializedAt: timestamp, updatedAt: timestamp }, businessSettings: defaultBusinessSettings(tenantId, definition), couponTemplates: [], operators: [operator], locations: [location], itemGroups: groups, inspectionTemplates: templates, sampleAssets: assets, sampleStockBalances: stocks };
+    return { profile: { tenantId, categoryCode, capabilities: [...definition.defaultCapabilities] as RentalCapability[], terminology: { ...definition.terminology }, configVersion: definition.version, initializedAt: timestamp, updatedAt: timestamp }, businessSettings: defaultBusinessSettings(tenantId, definition), couponTemplates: [], operators: [operator], locations: [location], itemGroups: samples.itemGroups, inspectionTemplates: templates, sampleAssets: samples.assets, sampleStockBalances: samples.stockBalances };
   }
 
   private buildInspectionTemplates(tenantId: string, categoryCode: RentalCategoryCode, idPrefix: string): RentalInspectionTemplate[] {
@@ -1137,11 +1124,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       code: `${categoryCode.toUpperCase()}_${stage.toUpperCase()}_V1`,
       name: `${stage === "pickup" ? definition.terminology.pickupLabel : definition.terminology.returnLabel}检查`,
       stage, version: "1.0", enabled: true,
-      fields: categoryCode === RentalCategoryCode.Camera
-        ? [{ code: "appearance_ok", label: "外观完好", type: "boolean", required: true }, { code: "function_ok", label: "功能正常", type: "boolean", required: true }, { code: "shutter_count", label: "快门次数", type: "number", required: true, unit: "次" }]
-        : categoryCode === RentalCategoryCode.Camping
-          ? [{ code: "count_ok", label: "数量齐全", type: "boolean", required: true }, { code: "cleanliness", label: "清洁状态", type: "select", required: true, options: ["良好", "需清洁", "严重污损"] }, { code: "damage_note", label: "破损说明", type: "text", required: false }]
-          : [{ code: "appearance_ok", label: "外观完好", type: "boolean", required: true }, { code: "function_ok", label: "功能正常", type: "boolean", required: true }, { code: "usage_reading", label: definition.terminology.usageMetricLabel ?? "使用量", type: "number", required: false }]
+      fields: definition.businessModel.defaults.inspectionFields.map((field) => ({ ...field }))
     }));
   }
 }

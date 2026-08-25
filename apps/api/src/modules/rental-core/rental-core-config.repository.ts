@@ -575,7 +575,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       name: row.name,
       stage: row.stage as RentalInspectionTemplate["stage"],
       version: row.version,
-      fields: (row.fields ?? []) as RentalInspectionTemplate["fields"],
+      fields: (row.fields ?? []) as unknown as RentalInspectionTemplate["fields"],
       enabled: row.enabled
     };
   }

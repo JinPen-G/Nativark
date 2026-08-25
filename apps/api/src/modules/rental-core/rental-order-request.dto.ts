@@ -1,4 +1,6 @@
 import {
+  RENTAL_CAPABILITY_CODES,
+  RENTAL_PRICING_UNIT_CODES,
   RentalAssetStatus,
   RentalCategoryCode,
   type CancelRentalOrderRequest,
@@ -62,30 +64,6 @@ const FULFILLMENT_MODES = [
   "delivery",
   "onsite_delivery"
 ] as const;
-const PRICING_UNITS = [
-  "hour",
-  "shift",
-  "day_24h",
-  "calendar_day",
-  "night",
-  "week",
-  "month",
-  "usage",
-  "package"
-] as const;
-const CAPABILITIES = [
-  "serialized_inventory",
-  "quantity_inventory",
-  "bundle_inventory",
-  "pickup",
-  "return",
-  "delivery",
-  "locker",
-  "dispatch",
-  "usage_reading",
-  "qualification",
-  "iot"
-] as const;
 const REWARD_TRIGGERS = ["registration", "identity_verified", "first_order_completed", "referral"] as const;
 const DISCOUNT_TYPES = ["fixed_amount", "percentage"] as const;
 const TEMPLATE_STATUSES = ["draft", "enabled", "disabled"] as const;
@@ -126,7 +104,7 @@ export class RentalQuoteLineInputDto {
   quantity!: number;
 
   @IsOptional()
-  @IsIn(PRICING_UNITS)
+  @IsIn(RENTAL_PRICING_UNIT_CODES)
   pricingUnit?: RentalPricingUnit;
 
   @IsOptional()
@@ -393,7 +371,7 @@ export class SaveTenantRentalProfileDto implements SaveTenantRentalProfileReques
 
   @IsOptional()
   @IsArray()
-  @IsIn(CAPABILITIES, { each: true })
+  @IsIn(RENTAL_CAPABILITY_CODES, { each: true })
   capabilities?: RentalCapability[];
 
   /** 术语表是品类文案覆盖，键集由品类定义决定，只校验是对象。 */

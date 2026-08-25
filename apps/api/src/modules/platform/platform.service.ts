@@ -2520,13 +2520,7 @@ export class PlatformService {
   }
 
   private rentalCategoryName(categoryCode: RentalCategoryCode) {
-    const names: Record<RentalCategoryCode, string> = {
-      [RentalCategoryCode.Vehicle]: "车辆载具",
-      [RentalCategoryCode.Camera]: "摄影设备",
-      [RentalCategoryCode.Camping]: "露营设备",
-      [RentalCategoryCode.Construction]: "工程设备"
-    };
-    return names[categoryCode];
+    return RENTAL_CATEGORY_DEFINITIONS.find((category) => category.code === categoryCode)?.name ?? categoryCode;
   }
 
   private toUserRow(user: StoredUser): SystemUserRow {

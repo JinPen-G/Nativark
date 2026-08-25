@@ -18,7 +18,6 @@ import {
   type RentalNotificationTemplateV1,
   type RentalPricingPlanV1,
   type RentalPricingRate,
-  type RentalPricingUnit,
   type RentalQuoteRequest,
   type RentalQuoteSnapshotV1,
   type RentalRewardLedgerEntry,
@@ -48,6 +47,7 @@ import {
 } from "./rental-business-fact.repository";
 import { RentalCoreConfigRepository, type RentalConfigStore, type RentalConfigTx } from "./rental-core-config.repository";
 import { PrismaService } from "../database/prisma.service";
+import { rentalPricingStrategy } from "./rental-pricing-strategy";
 
 interface RentalBusinessState {
   categoryCode: RentalCategoryCode;
@@ -87,6 +87,7 @@ function versionAfter(current?: string) {
 }
 
 function defaultRuleConfig(category: RentalCategoryDefinition, settings: TenantRentalBusinessSettings): RentalRuleConfig {
+  const defaults = category.businessModel.defaults.rules;
   return {
     payment: {
       ...settings.payment,
@@ -95,19 +96,14 @@ function defaultRuleConfig(category: RentalCategoryDefinition, settings: TenantR
     fulfillment: {
       pickupInspectionRequired: true,
       returnInspectionRequired: true,
-      evidenceRequired: [RentalCategoryCode.Vehicle, RentalCategoryCode.Camera, RentalCategoryCode.Construction].includes(category.code),
+      evidenceRequired: defaults.evidenceRequired,
       allowDifferentReturnLocation: settings.fulfillment.allowDifferentReturnLocation
     },
     overdue: { ...settings.overdue },
-    cancellation: {
-      freeBeforeHours: category.code === RentalCategoryCode.Construction ? 48 : 24,
-      lateFeeType: "percentage",
-      lateFeeValue: category.code === RentalCategoryCode.Camping ? 10 : 20,
-      weatherExceptionEnabled: category.code === RentalCategoryCode.Camping
-    },
+    cancellation: { ...defaults.cancellation },
     qualification: {
       required: category.businessModel.supportsQualificationReview,
-      documentTypes: category.code === RentalCategoryCode.Vehicle ? ["驾驶证"] : category.code === RentalCategoryCode.Construction ? ["操作资格证"] : [],
+      documentTypes: [...defaults.qualificationDocumentTypes],
       minimumValidityDays: 1
     },
     damage: {
@@ -1007,11 +1003,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       if (!group || line.quantity < 1 || !Number.isInteger(line.quantity)) throw new BadRequestException("报价商品或数量无效");
       const rate = plan.rates.find((item) => item.itemGroupId === line.itemGroupId && (!line.pricingUnit || item.unit === line.pricingUnit)) ?? plan.rates.find((item) => item.itemGroupId === line.itemGroupId);
       if (!rate) throw new ConflictException(`${group.name} 尚未配置基础价格`);
-      const units = Math.max(rate.minimumUnits, this.billableUnits(rate.unit, input.startAt, input.endAt, line.usageQuantity));
+      const pricingStrategy = rentalPricingStrategy(rate.unit);
+      const units = Math.max(rate.minimumUnits, pricingStrategy.billableUnits(input.startAt, input.endAt, line.usageQuantity));
       const multiplier = this.calendarMultiplier(calendars, context.settings, input.startAt, input.endAt, rate);
-      const amount = roundMoney((rate.unit === "usage"
-        ? rate.baseAmount + Math.max(0, units - (rate.includedUsage ?? 0)) * (rate.excessUsageAmount ?? rate.baseAmount)
-        : rate.baseAmount * units) * line.quantity * multiplier);
+      const amount = roundMoney(pricingStrategy.amountPerItem(rate, units) * line.quantity * multiplier);
       rentalAmount += amount;
       depositAmount += rate.depositAmount * line.quantity;
       chargeLines.push({ code: `rental:${group.code}`, name: `${group.name}租金`, type: "rental", amount, sourceId: plan.id, sourceVersion: plan.version, detail: `${line.quantity} × ${units} ${rate.unit} × 日历系数 ${multiplier.toFixed(2)}` });
@@ -1140,7 +1135,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const timestamp = stamp();
     const rates: RentalPricingRate[] = context.groups.filter((group) => group.status === "enabled").map((group, index) => ({
       id: uid("rate"), itemGroupId: group.id, itemGroupCode: group.code, itemGroupName: group.name,
-      unit: context.settings.pricing.defaultUnit, baseAmount: context.profile.categoryCode === RentalCategoryCode.Camping ? 80 + index * 20 : context.profile.categoryCode === RentalCategoryCode.Camera ? 180 + index * 80 : context.profile.categoryCode === RentalCategoryCode.Vehicle ? 380 + index * 100 : 680 + index * 180,
+      unit: context.settings.pricing.defaultUnit,
+      baseAmount: context.category.businessModel.defaults.sampleBaseAmount + index * context.category.businessModel.defaults.sampleAmountIncrement,
       weekendMultiplier: 1.1, holidayMultiplier: 1.25,
       depositAmount: context.category.businessModel.supportsPreauthorization ? 1000 + index * 500 : 200,
       minimumUnits: 1
@@ -1315,20 +1311,6 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       amount = Math.min(amount, deductible) + Math.max(0, amount - coverage);
     }
     return roundMoney(Math.min(amount, rule.damage.chargeLimit ?? amount));
-  }
-
-  private billableUnits(unit: RentalPricingUnit, startAt: string, endAt: string, usageQuantity?: number) {
-    const hours = Math.max(0, (new Date(endAt).getTime() - new Date(startAt).getTime()) / 3_600_000);
-    if (unit === "usage") {
-      if (!Number.isFinite(usageQuantity) || Number(usageQuantity) < 0) throw new BadRequestException("按使用量计价时必须提供有效使用量");
-      return Math.ceil(Number(usageQuantity));
-    }
-    if (unit === "hour") return Math.ceil(hours);
-    if (unit === "shift") return Math.ceil(hours / 8);
-    if (unit === "week") return Math.ceil(hours / 168);
-    if (unit === "month") return Math.ceil(hours / 720);
-    if (unit === "package") return 1;
-    return Math.ceil(hours / 24);
   }
 
   private calendarsForDateRange(tenantId: string, context: BusinessContext, startAt: string, endAt: string) {

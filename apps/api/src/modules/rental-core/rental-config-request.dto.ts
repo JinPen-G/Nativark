@@ -1,4 +1,4 @@
-import type { RentalDayType, RentalPricingUnit } from "@store-rental/shared";
+import { RENTAL_PRICING_UNIT_CODES, type RentalDayType, type RentalPricingUnit } from "@store-rental/shared";
 import type {
   ImportRentalCalendarRequest,
   RentalRuleConfig,
@@ -50,17 +50,6 @@ import {
  * （比如把 1.5 输成 15）不会被任何下游拦住，只会变成一笔离谱的账。
  */
 
-const PRICING_UNITS = [
-  "hour",
-  "shift",
-  "day_24h",
-  "calendar_day",
-  "night",
-  "week",
-  "month",
-  "usage",
-  "package"
-] as const;
 const FULFILLMENT_MODES = [
   "store_pickup_return",
   "partner_pickup_return",
@@ -100,10 +89,10 @@ const MAX_MULTIPLIER = 10;
 export class BusinessSettingsPricingInputDto {
   @IsArray()
   @ArrayNotEmpty()
-  @IsIn(PRICING_UNITS, { each: true })
+  @IsIn(RENTAL_PRICING_UNIT_CODES, { each: true })
   enabledUnits!: RentalPricingUnit[];
 
-  @IsIn(PRICING_UNITS)
+  @IsIn(RENTAL_PRICING_UNIT_CODES)
   defaultUnit!: RentalPricingUnit;
 
   /** 目前只支持人民币。放开前先确认计价与结算链路是否真的支持多币种。 */
@@ -258,7 +247,7 @@ export class RentalPricingRateInputDto {
   @IsNotEmpty()
   itemGroupId!: string;
 
-  @IsIn(PRICING_UNITS)
+  @IsIn(RENTAL_PRICING_UNIT_CODES)
   unit!: RentalPricingUnit;
 
   @IsNumber()

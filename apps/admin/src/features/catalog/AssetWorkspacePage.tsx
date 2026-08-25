@@ -38,6 +38,7 @@ export function AssetWorkspacePage() {
   const profile = useQuery({ queryKey: ["rental-core", "profile"], queryFn: rentalCoreApi.profile });
   const categories = useQuery({ queryKey: ["rental-core", "categories"], queryFn: rentalCoreApi.categories });
   const category = categories.data?.find((item) => item.code === profile.data?.categoryCode);
+  const serialNoField = category?.businessModel.assetFields.find((field) => field.scope === "asset" && field.code === "serialNo");
   const assetFields = category?.businessModel.assetFields.filter((field) => field.scope === "asset" && field.code !== "serialNo") ?? [];
   const saveAsset = useMutation({ mutationFn: rentalCoreApi.saveAsset, onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["rental-core", "assets"] }); setAssetDrawerOpen(false); setEditing(undefined); assetForm.resetFields(); message.success("资产已保存"); }, onError: () => message.error("资产保存失败，请检查编号、商品和履约地点") });
   const saveStock = useMutation({ mutationFn: rentalCoreApi.saveStockBalance, onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["rental-core", "stocks"] }); setStockDrawerOpen(false); stockForm.resetFields(); message.success("库存余额已保存"); }, onError: () => message.error("库存保存失败，请检查数量和履约地点") });
@@ -89,7 +90,7 @@ export function AssetWorkspacePage() {
         <Form<SaveRentalAssetRequest> form={assetForm} layout="vertical" onFinish={(values) => saveAsset.mutate({ ...values, id: editing?.id })}>
           <Row gutter={12}>
             <Col span={12}><Form.Item name="assetNo" label={profile.data?.terminology.identifierLabel ?? "资产编号"} rules={[{ required: true }]}><Input /></Form.Item></Col>
-            <Col span={12}><Form.Item name="serialNo" label="设备序列号" rules={[{ required: profile.data?.categoryCode === "camera" }]}><Input /></Form.Item></Col>
+            {serialNoField && <Col span={12}><Form.Item name="serialNo" label={serialNoField.label} rules={[{ required: serialNoField.required }]}><AttributeInput field={serialNoField} /></Form.Item></Col>}
             <Col span={12}><Form.Item name="itemGroupId" label={profile.data?.terminology.itemGroupLabel ?? "商品"} rules={[{ required: true }]}><Select disabled={Boolean(editing)} showSearch optionFilterProp="label" options={serializedGroups.map((item) => ({ value: item.id, label: `${item.code} · ${item.name}` }))} /></Form.Item></Col>
             <Col span={12}><Form.Item name="locationId" label={profile.data?.terminology.fulfillmentLabel ?? "履约地点"} rules={[{ required: true }]}><Select options={(locations.data ?? []).filter((item) => item.status === "enabled").map((item) => ({ value: item.id, label: item.name }))} /></Form.Item></Col>
             <Col span={12}><Form.Item name="status" label="状态" rules={[{ required: true }]}><Select options={Object.entries(statusMap).map(([value, item]) => ({ value, label: item.label }))} /></Form.Item></Col>
