@@ -111,6 +111,8 @@ for (const routeKey of ["contracts", "finance", "operations", "assetOperations",
 
 requireText(shell, "APP_NAVIGATION", "shell consumes unified navigation registry");
 requireText(router, "APP_ROUTES", "router consumes unified route registry");
+requireText(router, "workspaceScopeKey", "workspace switch remount boundary");
+requireText(router, '<AppShell key={workspaceScopeKey}>', "workspace switch remounts active data pages");
 
 [
   [appRoot, 'variant="outlined"', "Ant Design v6 outlined control archetype"],

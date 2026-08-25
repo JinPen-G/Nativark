@@ -60,9 +60,17 @@ function DefaultRoute() {
 }
 
 function ProtectedRoutes() {
+  const workspaceScopeKey = useAuthStore((state) => `${state.tenant?.tenantId ?? "platform"}:${state.currentWorkspaceId ?? "none"}`);
+
   return (
     <RequireAuth>
-      <AppShell>
+      {/**
+       * 经营空间是前端数据边界，不只是页头标签。切换空间时认证 Store 会先
+       * 清空 React Query 和中止旧请求；这里再以空间为 key 重挂整个受保护区，
+       * 让所有声明式查询及命令式 useEffect 重新取数，避免另一个标签页只更新
+       * 了空间名称却继续显示旧空间的数据。
+       */}
+      <AppShell key={workspaceScopeKey}>
         <Suspense fallback={<PageLoader />}>
           <Routes>
             <Route path="/" element={<DefaultRoute />} />
