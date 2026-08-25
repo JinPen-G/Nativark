@@ -1602,9 +1602,108 @@ async function main() {
   // 7) 起租量兜底：不足 1 个自然日的租期仍按 minimumUnits 计，且说明要讲明它生效了。
   const shortRent = await priceQuoteFor("2027-03-02T09:00:00.000Z", "2027-03-02T10:00:00.000Z");
   assert.equal(shortRent.rentalAmount, 100, `1 小时仍占用 1 个自然日，应为 100：实际 ${shortRent.rentalAmount}`);
+  // 8) 有效期必须参与判定。早前只看 status，`effectiveFrom`/`effectiveTo` 存了却从不判断：
+  //    过期计划照样给新报价定价，未生效计划也会被提前使用，两者都直接算错钱。
+  const expiredPlan = await request(
+    "POST",
+    "/api/rental/v1/pricing-plans",
+    {
+      code: "E2E-PRICE-EXPIRED",
+      name: "E2E 已过期价格",
+      changeReason: "PRICE-01 有效期验收",
+      status: "enabled",
+      effectiveFrom: new Date(Date.now() - 30 * 86400000).toISOString(),
+      effectiveTo: new Date(Date.now() - 86400000).toISOString(),
+      rates: [
+        {
+          itemGroupId: priceGroupId,
+          unit: "calendar_day",
+          baseAmount: 999,
+          weekendMultiplier: 1,
+          holidayMultiplier: 1,
+          depositAmount: 500,
+          minimumUnits: 1
+        }
+      ]
+    },
+    construction.accessToken
+  );
+  assert.equal(expiredPlan.status, 201, `过期计划应允许保存（历史留档）: ${JSON.stringify(expiredPlan.body).slice(0, 200)}`);
+  const expiredQuote = await request(
+    "POST",
+    "/api/rental/v1/quotes",
+    {
+      customerType: "corporate",
+      fulfillmentMode: "warehouse_pickup_return",
+      fulfillmentLocationId: constructionLocation.id,
+      startAt: "2027-03-02T09:00:00.000Z",
+      endAt: "2027-03-03T09:00:00.000Z",
+      pricingPlanId: expiredPlan.body.data.id,
+      lines: [{ itemGroupId: priceGroupId, quantity: 1 }]
+    },
+    construction.accessToken
+  );
+  assert.equal(
+    expiredQuote.status,
+    409,
+    `指定已过期的计划必须 409，不能拿它定价：实际 ${expiredQuote.status} ${JSON.stringify(expiredQuote.body).slice(0, 200)}`
+  );
+  // 未指定计划时也不得回落到过期计划：仍应按有效期内的阶梯计划算出 100。
+  const autoPick = await request(
+    "POST",
+    "/api/rental/v1/quotes",
+    {
+      customerType: "corporate",
+      fulfillmentMode: "warehouse_pickup_return",
+      fulfillmentLocationId: constructionLocation.id,
+      startAt: "2027-03-02T09:00:00.000Z",
+      endAt: "2027-03-02T18:00:00.000Z",
+      lines: [{ itemGroupId: priceGroupId, quantity: 1 }]
+    },
+    construction.accessToken
+  );
+  assert.equal(autoPick.status, 201, `自动择一报价失败: ${JSON.stringify(autoPick.body).slice(0, 250)}`);
+  assert.notEqual(
+    autoPick.chargeLines === undefined ? autoPick.body.data.rentalAmount : 0,
+    999,
+    "自动择一不得选中已过期的 999 计划"
+  );
+  assert.equal(
+    autoPick.body.data.rentalAmount,
+    100,
+    `自动择一应命中有效期内的计划（1 自然日 = 100）：实际 ${autoPick.body.data.rentalAmount}`
+  );
+
+  // 9) 阶梯档位重复必须被拒：否则"取最高已达档"变成看装载顺序，价格解释不唯一。
+  const dupTier = await request(
+    "POST",
+    "/api/rental/v1/pricing-plans",
+    {
+      code: "E2E-PRICE-DUP",
+      name: "E2E 重复档位",
+      changeReason: "PRICE-01 冲突校验",
+      status: "draft",
+      effectiveFrom: new Date().toISOString(),
+      rates: [
+        {
+          itemGroupId: priceGroupId,
+          unit: "calendar_day",
+          baseAmount: 100,
+          weekendMultiplier: 1,
+          holidayMultiplier: 1,
+          depositAmount: 500,
+          minimumUnits: 1,
+          tiers: [{ minUnits: 3, unitAmount: 90 }, { minUnits: 3, unitAmount: 80 }]
+        }
+      ]
+    },
+    construction.accessToken
+  );
+  assert.equal(dupTier.status, 400, `重复阶梯档位必须 400：实际 ${dupTier.status} ${JSON.stringify(dupTier.body).slice(0, 200)}`);
+
   ok(
     "报价可复算：自然日按日期计（跨日 10 小时=2 日）、阶梯价整单重定价、封顶价生效且按行封顶、" +
-      "相同输入复算一致、计算说明含档位/单位数/封顶/版本"
+      "相同输入复算一致、计算说明含档位/单位数/封顶/版本、有效期参与判定、重复档位被拒"
   );
 
   console.log("== 16. 双租户并发隔离 ==");

@@ -366,6 +366,19 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       for (const value of [row.baseAmount, row.weekendMultiplier, row.holidayMultiplier, row.depositAmount, row.minimumUnits]) {
         if (!Number.isFinite(value) || value < 0) throw new BadRequestException("价格、倍率、押金和最低计费单位必须是非负数");
       }
+      // 阶梯档位重复会让"取最高已达档"变成看装载顺序，同一份配置解释不出唯一价格。
+      const tierKeys = new Set<number>();
+      for (const tier of row.tiers ?? []) {
+        if (!Number.isFinite(tier.minUnits) || !Number.isFinite(tier.unitAmount) || tier.minUnits < 1 || tier.unitAmount < 0) {
+          throw new BadRequestException(`${group.name} 的阶梯价档位必须是起始单位数 ≥ 1、单价非负`);
+        }
+        if (tierKeys.has(tier.minUnits)) throw new BadRequestException(`${group.name} 的阶梯价存在重复的起始单位数 ${tier.minUnits}`);
+        tierKeys.add(tier.minUnits);
+      }
+      // 用 undefined 判空而不是真值判断：封顶 0 是合法配置（免租）。
+      if (row.maxAmount !== undefined && (!Number.isFinite(row.maxAmount) || row.maxAmount < 0)) {
+        throw new BadRequestException(`${group.name} 的封顶价必须是非负数`);
+      }
       return { ...row, id: uid("rate"), itemGroupCode: group.code, itemGroupName: group.name };
     });
     const existing = input.id ? state.pricingPlans.find((plan) => plan.id === input.id) : undefined;
@@ -986,6 +999,50 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return logs;
   }
 
+  /**
+   * 选出本次报价适用的价格计划。
+   *
+   * 早前只按 `status === "enabled"` 过滤，`effectiveFrom` / `effectiveTo` 存了却从不判断：
+   * 有效期已过的计划照样给新报价定价，未生效的计划也会被提前使用——两者都直接算错钱。
+   * 需求 4.4 明确要求「发布版本、有效期、优先级、冲突校验」。
+   *
+   * 未指定计划时的择一规则：**生效时间最晚的胜出**，同刻再按版本、编码排序。
+   * 早前是 `find()` 取数组第一个，结果取决于装载顺序，同样的输入换次重启就可能换个价——
+   * 那与"相同输入可复算"直接冲突。这里不引入新的 priority 字段，
+   * 「最近生效的覆盖较早的」本身就是可解释的优先级口径。
+   */
+  private resolvePricingPlan(plans: RentalPricingPlanV1[], requestedId: string | undefined, itemGroupIds: string[]) {
+    const now = Date.now();
+    const effective = (plan: RentalPricingPlanV1) =>
+      plan.status === "enabled" &&
+      new Date(plan.effectiveFrom).getTime() <= now &&
+      (plan.effectiveTo === undefined || new Date(plan.effectiveTo).getTime() >= now);
+    // 适用范围（需求 4.4）：计划必须覆盖本次报价的每个商品组，否则它对这张报价不适用。
+    const covers = (plan: RentalPricingPlanV1) =>
+      itemGroupIds.every((groupId) => plan.rates.some((rate) => rate.itemGroupId === groupId));
+
+    if (requestedId) {
+      const requested = plans.find((plan) => plan.id === requestedId);
+      if (!requested) throw new NotFoundException("指定的定价计划不存在");
+      if (requested.status !== "enabled") throw new ConflictException("指定的定价计划未启用");
+      // 明确报错而不是静默换一个计划：调用方指名了计划，替它挑别的会让报价无从解释。
+      if (!effective(requested)) throw new ConflictException("指定的定价计划不在有效期内");
+      return requested;
+    }
+
+    // 只在**覆盖全部商品组**的计划里择一。早前是 `find()` 取第一个已启用计划，
+    // 于是多计划租户常常拿到一个不含所需商品组的计划，报出"尚未配置基础价格"，
+    // 而真正可用的计划就在后面。
+    const candidates = plans.filter((plan) => effective(plan) && covers(plan)).sort((left, right) => {
+      const byEffective = new Date(right.effectiveFrom).getTime() - new Date(left.effectiveFrom).getTime();
+      if (byEffective !== 0) return byEffective;
+      const byVersion = right.version.localeCompare(left.version);
+      return byVersion !== 0 ? byVersion : left.code.localeCompare(right.code);
+    });
+    if (!candidates.length) throw new ConflictException("当前经营空间没有覆盖所选商品且处于有效期内的已启用定价计划");
+    return candidates[0];
+  }
+
   async createQuote(tenantId: string, context: BusinessContext, input: RentalQuoteRequest) {
     const state = this.state(tenantId, context);
     if (new Date(input.startAt).getTime() >= new Date(input.endAt).getTime()) throw new BadRequestException("租赁结束时间必须晚于开始时间");
@@ -994,8 +1051,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     if (!context.settings.fulfillment.enabledModes.includes(input.fulfillmentMode)) throw new BadRequestException("当前租户未启用所选租赁履约方式");
     if (input.returnLocationId && input.returnLocationId !== input.fulfillmentLocationId && !context.settings.fulfillment.allowDifferentReturnLocation) throw new BadRequestException("当前租户未启用异地归还");
     this.validateFulfillmentLocations(context, input);
-    const plan = input.pricingPlanId ? state.pricingPlans.find((item) => item.id === input.pricingPlanId && item.status === "enabled") : state.pricingPlans.find((item) => item.status === "enabled");
-    if (!plan) throw new ConflictException("当前租户没有已启用的基础定价计划");
+    const plan = this.resolvePricingPlan(state.pricingPlans, input.pricingPlanId, input.lines.map((line) => line.itemGroupId));
     const calendars = this.calendarsForDateRange(tenantId, context, input.startAt, input.endAt);
     const rule = this.currentRule(tenantId, context);
     if (!rule || rule.status !== "published") throw new ConflictException("当前租户没有已发布的租赁规则");
