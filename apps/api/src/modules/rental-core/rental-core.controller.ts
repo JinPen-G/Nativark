@@ -15,6 +15,24 @@ import type {
   SaveTenantRentalProfileRequest,
   SystemUserRow
 } from "@store-rental/shared";
+import {
+  SaveRentalFulfillmentLocationDto,
+  SaveRentalFulfillmentOperatorDto,
+  SaveRentalItemGroupDto
+} from "./rental-core-request.dto";
+import {
+  CancelRentalOrderDto,
+  CreateRentalInspectionDto,
+  CreateRentalOrderDto,
+  RentalAvailabilityDto,
+  SaveRentalAssetDto,
+  SaveRentalCouponTemplateDto,
+  SaveRentalStockBalanceDto,
+  SaveTenantRentalProfileDto,
+} from "./rental-order-request.dto";
+import {
+  SaveTenantRentalBusinessSettingsDto,
+} from "./rental-config-request.dto";
 import { RentalCoreService } from "./rental-core.service";
 import { RentalBusinessService, type BusinessContext } from "./rental-business.service";
 import { RentalOrderConfirmationService } from "./rental-order-confirmation.service";
@@ -67,35 +85,32 @@ export class RentalCoreController {
   private async emitOrderEvent(tenantId: string, eventCode: string, order: { orderNo: string; customerName: string; contactPhone?: string; customerId?: string }) {
     return await this.business.emitNotificationEvent(tenantId, this.context(tenantId), eventCode, order.contactPhone ?? order.customerId, { customerName: order.customerName, orderNo: order.orderNo });
   }
-  private async completeCustomerOrderEvent(tenantId: string, order: { customerId?: string; status: string }) {
-    if (order.customerId && order.status === "completed") await this.business.handleCustomerEvent(tenantId, this.context(tenantId), order.customerId, "first_order_completed");
-  }
   @Get("categories") categories() { return this.service.listCategories(); }
   @Get("tenant-profile") profile(@Req() req: AuthenticatedRequest) { return this.service.getProfile(req.user.tenantId); }
-  @Put("tenant-profile") saveProfile(@Req() req: AuthenticatedRequest, @Body() body: SaveTenantRentalProfileRequest) { return this.committed(req.user.tenantId, this.service.saveProfile(req.user.tenantId, body)); }
+  @Put("tenant-profile") saveProfile(@Req() req: AuthenticatedRequest, @Body() body: SaveTenantRentalProfileDto) { return this.committed(req.user.tenantId, this.service.saveProfile(req.user.tenantId, body)); }
   @Get("business-settings") businessSettings(@Req() req: AuthenticatedRequest) { return this.service.getBusinessSettings(req.user.tenantId); }
-  @Put("business-settings") saveBusinessSettings(@Req() req: AuthenticatedRequest, @Body() body: SaveTenantRentalBusinessSettingsRequest) { return this.committed(req.user.tenantId, this.service.saveBusinessSettings(req.user.tenantId, body, req.user.displayName)); }
+  @Put("business-settings") saveBusinessSettings(@Req() req: AuthenticatedRequest, @Body() body: SaveTenantRentalBusinessSettingsDto) { return this.committed(req.user.tenantId, this.service.saveBusinessSettings(req.user.tenantId, body, req.user.displayName)); }
   @Get("coupon-templates") couponTemplates(@Req() req: AuthenticatedRequest) { return this.service.listCouponTemplates(req.user.tenantId); }
-  @Post("coupon-templates") saveCouponTemplate(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalCouponTemplateRequest) { return this.committed(req.user.tenantId, this.service.saveCouponTemplate(req.user.tenantId, body)); }
-  @Put("coupon-templates/:id") updateCouponTemplate(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalCouponTemplateRequest) { return this.committed(req.user.tenantId, this.service.saveCouponTemplate(req.user.tenantId, { ...body, id })); }
+  @Post("coupon-templates") saveCouponTemplate(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalCouponTemplateDto) { return this.committed(req.user.tenantId, this.service.saveCouponTemplate(req.user.tenantId, body)); }
+  @Put("coupon-templates/:id") updateCouponTemplate(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalCouponTemplateDto) { return this.committed(req.user.tenantId, this.service.saveCouponTemplate(req.user.tenantId, { ...body, id })); }
   @Get("locations") locations(@Req() req: AuthenticatedRequest) { return this.service.listLocations(req.user.tenantId); }
   @Get("fulfillment-operators") operators(@Req() req: AuthenticatedRequest) { return this.service.listOperators(req.user.tenantId); }
-  @Post("fulfillment-operators") saveOperator(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalFulfillmentOperatorRequest) { return this.committed(req.user.tenantId, this.service.saveOperator(req.user.tenantId, body)); }
-  @Put("fulfillment-operators/:id") updateOperator(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalFulfillmentOperatorRequest) { return this.committed(req.user.tenantId, this.service.saveOperator(req.user.tenantId, { ...body, id })); }
-  @Post("locations") saveLocation(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalFulfillmentLocationRequest) { return this.committed(req.user.tenantId, this.service.saveLocation(req.user.tenantId, body)); }
-  @Put("locations/:id") updateLocation(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalFulfillmentLocationRequest) { return this.committed(req.user.tenantId, this.service.saveLocation(req.user.tenantId, { ...body, id })); }
+  @Post("fulfillment-operators") saveOperator(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalFulfillmentOperatorDto) { return this.committed(req.user.tenantId, this.service.saveOperator(req.user.tenantId, body)); }
+  @Put("fulfillment-operators/:id") updateOperator(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalFulfillmentOperatorDto) { return this.committed(req.user.tenantId, this.service.saveOperator(req.user.tenantId, { ...body, id })); }
+  @Post("locations") saveLocation(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalFulfillmentLocationDto) { return this.committed(req.user.tenantId, this.service.saveLocation(req.user.tenantId, body)); }
+  @Put("locations/:id") updateLocation(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalFulfillmentLocationDto) { return this.committed(req.user.tenantId, this.service.saveLocation(req.user.tenantId, { ...body, id })); }
   @Get("item-groups") groups(@Req() req: AuthenticatedRequest) { return this.service.listItemGroups(req.user.tenantId); }
-  @Post("item-groups") saveGroup(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalItemGroupRequest) { return this.committed(req.user.tenantId, this.service.saveItemGroup(req.user.tenantId, body)); }
-  @Put("item-groups/:id") updateGroup(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalItemGroupRequest) { return this.committed(req.user.tenantId, this.service.saveItemGroup(req.user.tenantId, { ...body, id })); }
+  @Post("item-groups") saveGroup(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalItemGroupDto) { return this.committed(req.user.tenantId, this.service.saveItemGroup(req.user.tenantId, body)); }
+  @Put("item-groups/:id") updateGroup(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalItemGroupDto) { return this.committed(req.user.tenantId, this.service.saveItemGroup(req.user.tenantId, { ...body, id })); }
   @Get("assets") assets(@Req() req: AuthenticatedRequest) { return this.service.listAssets(req.user.tenantId); }
-  @Post("assets") saveAsset(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalAssetRequest) { return this.committed(req.user.tenantId, this.service.saveAsset(req.user.tenantId, body)); }
-  @Put("assets/:id") updateAsset(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalAssetRequest) { return this.committed(req.user.tenantId, this.service.saveAsset(req.user.tenantId, { ...body, id })); }
+  @Post("assets") saveAsset(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalAssetDto) { return this.committed(req.user.tenantId, this.service.saveAsset(req.user.tenantId, body)); }
+  @Put("assets/:id") updateAsset(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalAssetDto) { return this.committed(req.user.tenantId, this.service.saveAsset(req.user.tenantId, { ...body, id })); }
   @Get("stock-balances") stocks(@Req() req: AuthenticatedRequest) { return this.service.listStockBalances(req.user.tenantId); }
-  @Put("stock-balances") saveStock(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalStockBalanceRequest) { return this.committed(req.user.tenantId, this.service.saveStockBalance(req.user.tenantId, body)); }
-  @Post("availability") availability(@Req() req: AuthenticatedRequest, @Body() body: RentalAvailabilityRequest) { return this.service.availability(req.user.tenantId, body); }
+  @Put("stock-balances") saveStock(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalStockBalanceDto) { return this.committed(req.user.tenantId, this.service.saveStockBalance(req.user.tenantId, body)); }
+  @Post("availability") availability(@Req() req: AuthenticatedRequest, @Body() body: RentalAvailabilityDto) { return this.service.availability(req.user.tenantId, body); }
   @Get("orders") orders(@Req() req: AuthenticatedRequest) { return this.service.listOrders(req.user.tenantId); }
   @Get("orders/:id") order(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.service.getOrder(req.user.tenantId, id); }
-  @Post("orders") async createOrder(@Req() req: AuthenticatedRequest, @Body() body: CreateRentalOrderRequest) {
+  @Post("orders") async createOrder(@Req() req: AuthenticatedRequest, @Body() body: CreateRentalOrderDto) {
     const context = this.context(req.user.tenantId);
     // 幂等键取标准的 Idempotency-Key 请求头；未传时下单侧退回 quoteId（报价一次性使用）。
     const { order, replayed } = await this.orderConfirmation.createOrder(
@@ -122,14 +137,19 @@ export class RentalCoreController {
       fallbackKey: `order.confirm:${id}`,
       request: { orderId: id },
       orderId: id,
-      run: (tx) => this.service.confirmOrder(tenantId, id, tx),
+      run: async (tx) => {
+        const confirmed = await this.service.confirmOrder(tenantId, id, tx);
+        await this.business.redeemCouponInTransaction(tenantId, id, tx);
+        return confirmed;
+      },
       replay: async () => {
         const current = await this.service.getOrder(tenantId, id);
         // 只有已达成目标状态才算同一次意图的重试；否则交回状态机拒绝。
         return current.status === RentalCoreOrderStatus.Reserved ? current : undefined;
       }
     });
-    await this.business.redeemCoupon(tenantId, this.context(tenantId), id);
+    // 内部权益已与订单同事务提交；此处只发布已提交的数据到进程缓存。
+    await this.business.refreshFromDatabase();
     // 回放时跳过通知：通知是外部副作用，同键重试不该让客户收到第二条短信。
     if (!replayed) await this.emitOrderEvent(tenantId, "order.confirmed", order);
     return this.committed(tenantId, order);
@@ -151,7 +171,7 @@ export class RentalCoreController {
     });
     return this.committed(tenantId, order);
   }
-  @Post("orders/:id/cancel") async cancel(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: CancelRentalOrderRequest) {
+  @Post("orders/:id/cancel") async cancel(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: CancelRentalOrderDto) {
     const context = this.context(req.user.tenantId);
     const current = await this.service.getOrder(req.user.tenantId, id);
     const quote = this.business.getQuote(req.user.tenantId, context, current.quoteId);
@@ -165,49 +185,101 @@ export class RentalCoreController {
       // 必须报冲突而不是静默沿用第一次的原因与费用。
       request: { orderId: id, reason: body.reason, weatherException: Boolean(body.weatherException) },
       orderId: id,
-      run: (tx) => this.service.cancelOrder(req.user.tenantId, id, body.reason, charge, tx),
+      run: async (tx) => {
+        const cancelled = await this.service.cancelOrder(req.user.tenantId, id, body.reason, charge, tx);
+        await this.business.releaseCouponInTransaction(req.user.tenantId, id, tx);
+        return cancelled;
+      },
       replay: async () => {
         const latest = await this.service.getOrder(req.user.tenantId, id);
         return latest.status === RentalCoreOrderStatus.Cancelled ? latest : undefined;
       }
     });
-    await this.business.releaseCoupon(req.user.tenantId, this.context(req.user.tenantId), id);
+    await this.business.refreshFromDatabase();
     if (!cancelReplayed) await this.emitOrderEvent(req.user.tenantId, "order.cancelled", order);
     return this.committed(req.user.tenantId, order);
   }
   @Get("inspection-templates") templates(@Req() req: AuthenticatedRequest, @Query("stage") stage?: "pickup" | "return") { return this.service.listInspectionTemplates(req.user.tenantId, stage); }
   @Get("orders/:id/inspections") inspections(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.service.listInspections(req.user.tenantId, id); }
-  @Post("orders/:id/inspections") async createInspection(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: CreateRentalInspectionRequest) {
-    const context = this.context(req.user.tenantId);
-    const current = await this.service.getOrder(req.user.tenantId, id);
-    const template = this.service.listInspectionTemplates(req.user.tenantId).find((row) => row.id === body.templateId);
+  @Post("orders/:id/inspections") async createInspection(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: CreateRentalInspectionDto) {
+    const tenantId = req.user.tenantId;
+    const context = this.context(tenantId);
+    const current = await this.service.getOrder(tenantId, id);
+    const template = this.service.listInspectionTemplates(tenantId).find((row) => row.id === body.templateId);
     const returnedAt = new Date().toISOString();
     // 逾期费与损坏费先按报价算好再一次性交给 service：迁库后每次"加载订单→改→存"
     // 都是独立事务，分三次调用会把一个业务动作拆成三个事务。
-    const quote = this.business.getQuote(req.user.tenantId, context, current.quoteId);
+    const quote = this.business.getQuote(tenantId, context, current.quoteId);
     const charges = template?.stage === "return"
       ? {
-          overdue: { amount: this.business.calculateOverdueCharge(req.user.tenantId, context, quote, returnedAt), returnedAt },
+          overdue: { amount: this.business.calculateOverdueCharge(tenantId, context, quote, returnedAt), returnedAt },
           damage: {
-            amount: this.business.calculateDamageCharge(req.user.tenantId, context, quote, body.exceptions ?? []),
+            amount: this.business.calculateDamageCharge(tenantId, context, quote, body.exceptions ?? []),
             detail: (body.exceptions ?? []).map((item) => item.description).join("；") || "归还检查损坏费用"
           }
         }
       : {};
-    const result = await this.service.createInspection(req.user.tenantId, id, body, req.user.displayName, charges);
-    if (template?.stage === "return") await this.completeCustomerOrderEvent(req.user.tenantId, result.order);
-    await this.emitOrderEvent(req.user.tenantId, result.inspection.stage === "pickup" ? "pickup.completed" : "return.completed", result.order);
-    return this.committed(req.user.tenantId, result);
+    const stage = template?.stage;
+    // 目标状态：取件检查后进入 renting，归还检查后进入 completed。
+    const targetStatus = stage === "pickup" ? RentalCoreOrderStatus.Renting : RentalCoreOrderStatus.Completed;
+    const { result, replayed } = await this.idempotent.executeWithReplayFlag({
+      tenantId,
+      action: "order.inspection",
+      key: idempotencyKeyOf(req),
+      // 键按订单 + 阶段：同一阶段的检查只应生效一次，换阶段是另一个动作。
+      // 不纳入订单当前状态（理由见执行器注释），也不纳入 returnedAt——
+      // 那是服务端每次取的当前时间，纳入后每次重试都算出新键，幂等直接失效。
+      fallbackKey: `order.inspection:${id}:${stage ?? "unknown"}`,
+      // returnedAt 同样不能进指纹，否则重试必然被判为"同键不同内容"而 409。
+      request: { orderId: id, templateId: body.templateId, results: body.results, exceptions: body.exceptions ?? [] },
+      orderId: id,
+      run: async (tx) => {
+        const created = await this.service.createInspection(tenantId, id, body, req.user.displayName, charges, tx);
+        if (stage === "return") await this.business.completeCustomerOrderEventInTransaction(tenantId, context, created.order.customerId, tx);
+        return created;
+      },
+      replay: async () => {
+        const latest = await this.service.getOrder(tenantId, id);
+        if (latest.status !== targetStatus) return undefined;
+        const recorded = (await this.service.listInspections(tenantId, id)).filter((row) => row.stage === stage).at(-1);
+        return recorded ? { inspection: recorded, order: latest } : undefined;
+      }
+    });
+    if (stage === "return") await this.business.refreshFromDatabase();
+    if (!replayed) {
+      await this.emitOrderEvent(tenantId, result.inspection.stage === "pickup" ? "pickup.completed" : "return.completed", result.order);
+    }
+    return this.committed(tenantId, result);
   }
   @Post("orders/:id/handover/:stage") async handover(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Param("stage") stage: string) {
     if (stage !== "pickup" && stage !== "return") throw new BadRequestException("交接阶段无效");
-    const context = this.context(req.user.tenantId);
-    const current = await this.service.getOrder(req.user.tenantId, id);
+    const tenantId = req.user.tenantId;
+    const context = this.context(tenantId);
+    const current = await this.service.getOrder(tenantId, id);
     const returnedAt = new Date().toISOString();
-    const overdueCharge = stage === "return" ? this.business.calculateOverdueCharge(req.user.tenantId, context, this.business.getQuote(req.user.tenantId, context, current.quoteId), returnedAt) : 0;
-    const order = await this.service.completeHandoverWithoutInspection(req.user.tenantId, id, stage, overdueCharge);
-    if (stage === "return") await this.completeCustomerOrderEvent(req.user.tenantId, order);
-    await this.emitOrderEvent(req.user.tenantId, stage === "pickup" ? "pickup.completed" : "return.completed", order);
-    return this.committed(req.user.tenantId, order);
+    const overdueCharge = stage === "return" ? this.business.calculateOverdueCharge(tenantId, context, this.business.getQuote(tenantId, context, current.quoteId), returnedAt) : 0;
+    const targetStatus = stage === "pickup" ? RentalCoreOrderStatus.Renting : RentalCoreOrderStatus.Completed;
+    const { result: order, replayed } = await this.idempotent.executeWithReplayFlag({
+      tenantId,
+      action: "order.handover",
+      key: idempotencyKeyOf(req),
+      fallbackKey: `order.handover:${id}:${stage}`,
+      request: { orderId: id, stage },
+      orderId: id,
+      run: async (tx) => {
+        const completed = await this.service.completeHandoverWithoutInspection(tenantId, id, stage, overdueCharge, tx);
+        if (stage === "return") await this.business.completeCustomerOrderEventInTransaction(tenantId, context, completed.customerId, tx);
+        return completed;
+      },
+      replay: async () => {
+        const latest = await this.service.getOrder(tenantId, id);
+        return latest.status === targetStatus ? latest : undefined;
+      }
+    });
+    if (stage === "return") await this.business.refreshFromDatabase();
+    if (!replayed) {
+      await this.emitOrderEvent(tenantId, stage === "pickup" ? "pickup.completed" : "return.completed", order);
+    }
+    return this.committed(tenantId, order);
   }
 }

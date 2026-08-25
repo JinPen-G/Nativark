@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import {
   BillingMode,
@@ -18,10 +18,17 @@ import {
   StoreRentalMode,
   SystemDataScope as PrismaSystemDataScope,
   TenantStatus as PrismaTenantStatus,
+  WorkspaceStatus as PrismaWorkspaceStatus,
   VehicleOperationStatus,
   VehicleServiceType
 } from "@prisma/client";
 import type {
+  BusinessWorkspace,
+  BusinessWorkspaceStatus,
+  CreateBusinessWorkspaceRequest,
+  SaveWorkspaceMemberRequest,
+  UpdateBusinessWorkspaceRequest,
+  WorkspaceMember,
   GeneratePlatformNumberRequest,
   OrganizationSummary,
   PermissionModule,
@@ -220,8 +227,24 @@ export class PlatformRepository {
     return user ? this.toUserRow(user) : undefined;
   }
 
-  async createAuthSession(input: { id: string; userId: string; refreshTokenHash: string; expiresAt: Date }) {
+  async createAuthSession(input: { id: string; userId: string; refreshTokenHash: string; expiresAt: Date; currentWorkspaceId?: string | null }) {
     return this.prisma.authSession.create({ data: input });
+  }
+
+  /** 单次刷新令牌的消费和新会话创建必须同事务完成，避免旧令牌已作废却没有替代会话。 */
+  async rotateAuthSession(
+    previousSessionId: string,
+    input: { id: string; userId: string; refreshTokenHash: string; expiresAt: Date; currentWorkspaceId?: string | null }
+  ): Promise<boolean> {
+    return this.prisma.$transaction(async (tx) => {
+      const revoked = await tx.authSession.updateMany({
+        where: { id: previousSessionId, revokedAt: null, expiresAt: { gt: new Date() } },
+        data: { revokedAt: new Date() }
+      });
+      if (revoked.count !== 1) return false;
+      await tx.authSession.create({ data: input });
+      return true;
+    });
   }
 
   async getAuthSession(id: string) {
@@ -238,11 +261,12 @@ export class PlatformRepository {
     });
   }
 
-  async revokeAuthSession(id: string) {
-    await this.prisma.authSession.updateMany({
+  async revokeAuthSession(id: string): Promise<boolean> {
+    const result = await this.prisma.authSession.updateMany({
       where: { id, revokedAt: null },
       data: { revokedAt: new Date() }
     });
+    return result.count === 1;
   }
 
   async revokeUserSessions(userId: string) {
@@ -272,6 +296,339 @@ export class PlatformRepository {
         data: { revokedAt: new Date() }
       })
     ]);
+  }
+
+  /* ---------- SPACE-01：经营空间主档与成员关系 ---------- */
+
+  /**
+   * 空间范围只取自服务端会话，绝不接受客户端提交的 tenantId。
+   * 需求 2.3：租户业务请求中的当前经营空间必须来自服务端验证过的会话上下文。
+   */
+  private workspaceTenantId(currentUser?: SystemUserRow): string {
+    return currentUser?.tenantId ?? requireRequestTenantId();
+  }
+
+  /**
+   * SPACE-03：按**经营空间**取品类与业务能力。
+   *
+   * 守卫原先用租户级 `tenant_rental_profiles` 的品类做 capability 与车辆域校验。
+   * 同租户有多个空间且品类不同时那是错的：一个 camping 空间会被按 camera 的
+   * 能力集放行。品类的事实源是 `business_workspaces.categoryCode`（需求 3），
+   * 能力取该品类定义的默认能力集。
+   */
+  async getWorkspaceCategoryContext(
+    tenantId: string,
+    workspaceId: string
+  ): Promise<{ categoryCode?: TenantSummary["categoryCode"]; categoryName?: string; capabilities?: TenantSummary["capabilities"] }> {
+    const workspace = await this.prisma.businessWorkspace.findFirst({
+      where: { id: workspaceId, tenantId },
+      include: { category: { select: { name: true, defaultCapabilities: true } } }
+    });
+    if (!workspace) return {};
+    return {
+      categoryCode: this.toDomainCategoryCode(workspace.categoryCode),
+      // categoryName 供前端直接展示；缺了它，切换空间后标题仍是旧品类名。
+      categoryName: workspace.category.name,
+      capabilities: workspace.category.defaultCapabilities as unknown as TenantSummary["capabilities"]
+    };
+  }
+
+  async listBusinessWorkspaces(currentUser?: SystemUserRow): Promise<BusinessWorkspace[]> {
+    const tenantId = this.workspaceTenantId(currentUser);
+    const rows = await this.prisma.businessWorkspace.findMany({
+      where: { tenantId },
+      orderBy: [{ isDefault: "desc" }, { code: "asc" }]
+    });
+    return rows.map((row) => this.toWorkspace(row));
+  }
+
+  async createBusinessWorkspace(
+    input: CreateBusinessWorkspaceRequest,
+    currentUser?: SystemUserRow,
+    /**
+     * 在创建空间的**同一事务内**、提交之前执行。
+     * 需求 4.1：新增空间必须原子创建空间档案与品类配置，抛错则一起回滚。
+     */
+    onBeforeCommit?: (tx: Prisma.TransactionClient, workspaceId: string, tenantId: string) => Promise<void>
+  ): Promise<BusinessWorkspace> {
+    const tenantId = this.workspaceTenantId(currentUser);
+    const code = input.code?.trim().toLowerCase();
+    const name = input.name?.trim();
+    if (!code || !name || !input.categoryCode) throw new BadRequestException("空间编码、名称和经营品类不能为空");
+    if (code === "default") throw new BadRequestException("default 为升级兼容层保留编码，请使用其他编码");
+    const categoryCode = this.toPrismaCategoryCode(input.categoryCode);
+    const created = await this.prisma.$transaction(async (tx) => {
+      if (!(await tx.rentalCategoryDefinition.findUnique({ where: { code: categoryCode } }))) {
+        throw new BadRequestException("经营品类不存在");
+      }
+      if (await tx.businessWorkspace.findFirst({ where: { tenantId, code } })) {
+        throw new BadRequestException("空间编码已存在");
+      }
+      const workspaceId = `ws_${randomUUID()}`;
+      const created = await tx.businessWorkspace.create({
+        data: {
+          // 非默认空间的 id 与 defaultMarker 同值：marker 只用于让「每租户一个默认空间」
+          // 成为唯一约束，非默认行必须各自唯一才不会互相冲突。
+          id: workspaceId,
+          tenantId,
+          code,
+          name,
+          categoryCode,
+          status: PrismaWorkspaceStatus.ACTIVE,
+          isDefault: false,
+          defaultMarker: workspaceId
+        }
+      });
+      await onBeforeCommit?.(tx, workspaceId, tenantId);
+      return created;
+    });
+    return this.toWorkspace(created);
+  }
+
+  async updateBusinessWorkspace(
+    id: string,
+    input: UpdateBusinessWorkspaceRequest,
+    currentUser?: SystemUserRow
+  ): Promise<BusinessWorkspace> {
+    const tenantId = this.workspaceTenantId(currentUser);
+    const name = input.name?.trim();
+    if (input.name !== undefined && !name) throw new BadRequestException("空间名称不能为空");
+    const updated = await this.prisma.$transaction(async (tx) => {
+      // 用 tenantId 条件定位，避免越权改到别的租户的空间。
+      const current = await tx.businessWorkspace.findFirst({ where: { id, tenantId } });
+      if (!current) throw new NotFoundException("经营空间不存在");
+      return tx.businessWorkspace.update({
+        where: { id },
+        data: {
+          ...(name ? { name } : {}),
+          ...(input.status ? { status: this.toPrismaWorkspaceStatus(input.status) } : {})
+        }
+      });
+    });
+    return this.toWorkspace(updated);
+  }
+
+  async listWorkspaceMembers(workspaceId: string, currentUser?: SystemUserRow): Promise<WorkspaceMember[]> {
+    const tenantId = this.workspaceTenantId(currentUser);
+    const workspace = await this.prisma.businessWorkspace.findFirst({ where: { id: workspaceId, tenantId } });
+    if (!workspace) throw new NotFoundException("经营空间不存在");
+    const rows = await this.prisma.workspaceMember.findMany({
+      where: { tenantId, workspaceId },
+      orderBy: { createdAt: "asc" }
+    });
+    return rows.map((row) => this.toWorkspaceMember(row));
+  }
+
+  async saveWorkspaceMember(
+    workspaceId: string,
+    input: SaveWorkspaceMemberRequest,
+    currentUser?: SystemUserRow
+  ): Promise<WorkspaceMember> {
+    const tenantId = this.workspaceTenantId(currentUser);
+    if (!input.userId) throw new BadRequestException("账号不能为空");
+    const saved = await this.prisma.$transaction(async (tx) => {
+      const workspace = await tx.businessWorkspace.findFirst({ where: { id: workspaceId, tenantId } });
+      if (!workspace) throw new NotFoundException("经营空间不存在");
+      if (workspace.status !== PrismaWorkspaceStatus.ACTIVE) {
+        throw new BadRequestException("冻结或停用的经营空间不能变更成员");
+      }
+      // 复合外键已在库层挡住跨租户成员，这里仍显式校验，为的是给出可读的 400
+      // 而不是把数据库外键错误直接抛给调用方。
+      const user = await tx.user.findFirst({ where: { id: input.userId, tenantId } });
+      if (!user) throw new BadRequestException("账号不存在或不属于当前租户");
+      if (input.roleId) {
+        const role = await tx.role.findFirst({ where: { id: input.roleId, tenantId } });
+        if (!role) throw new BadRequestException("角色不存在或不属于当前租户");
+      }
+      const data = {
+        roleId: input.roleId ?? null,
+        dataScope: input.dataScope ? this.toPrismaDataScope(input.dataScope) : null,
+        isActive: input.isActive ?? true
+      };
+      return tx.workspaceMember.upsert({
+        where: { workspaceId_userId: { workspaceId, userId: input.userId } },
+        create: { tenantId, workspaceId, userId: input.userId, ...data },
+        update: data
+      });
+    });
+    return this.toWorkspaceMember(saved);
+  }
+
+  private toWorkspace(row: {
+    id: string;
+    tenantId: string;
+    code: string;
+    name: string;
+    categoryCode: PrismaRentalCategoryCode;
+    status: PrismaWorkspaceStatus;
+    isDefault: boolean;
+    createdAt: Date;
+    updatedAt: Date;
+  }): BusinessWorkspace {
+    return {
+      id: row.id,
+      tenantId: row.tenantId,
+      code: row.code,
+      name: row.name,
+      categoryCode: this.toDomainCategoryCode(row.categoryCode) as BusinessWorkspace["categoryCode"],
+      status: row.status.toLowerCase() as BusinessWorkspaceStatus,
+      isDefault: row.isDefault,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString()
+    };
+  }
+
+  private toWorkspaceMember(row: {
+    tenantId: string;
+    workspaceId: string;
+    userId: string;
+    roleId: string | null;
+    dataScope: PrismaSystemDataScope | null;
+    isActive: boolean;
+    createdAt: Date;
+    updatedAt: Date;
+  }): WorkspaceMember {
+    return {
+      tenantId: row.tenantId,
+      workspaceId: row.workspaceId,
+      userId: row.userId,
+      roleId: row.roleId ?? undefined,
+      dataScope: row.dataScope ? (row.dataScope.toLowerCase() as SystemDataScope) : undefined,
+      isActive: row.isActive,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString()
+    };
+  }
+
+  private toPrismaWorkspaceStatus(status: BusinessWorkspaceStatus): PrismaWorkspaceStatus {
+    const map = {
+      active: PrismaWorkspaceStatus.ACTIVE,
+      frozen: PrismaWorkspaceStatus.FROZEN,
+      disabled: PrismaWorkspaceStatus.DISABLED
+    } as const;
+    return map[status];
+  }
+
+  /* ---------- SPACE-02：会话空间上下文 ---------- */
+
+  /**
+   * 该账号可进入的经营空间：必须是**启用的成员关系**且空间本身启用。
+   * 冻结/停用的空间不出现在可进入列表里，因此前端也拿不到可切换项。
+   */
+  async listUserWorkspaces(userId: string): Promise<BusinessWorkspace[]> {
+    const members = await this.prisma.workspaceMember.findMany({
+      where: {
+        userId,
+        isActive: true,
+        workspace: { status: PrismaWorkspaceStatus.ACTIVE }
+      },
+      include: { workspace: true },
+      orderBy: { createdAt: "asc" }
+    });
+    return members
+      .map((member) => this.toWorkspace(member.workspace))
+      .sort((left, right) => Number(right.isDefault) - Number(left.isDefault) || left.code.localeCompare(right.code));
+  }
+
+  /**
+   * 校验并解析会话的当前经营空间。
+   *
+   * 传入 workspaceId 时逐项校验（成员关系启用、空间启用、租户匹配）；
+   * 不传时按「默认空间优先，否则第一个可进入空间」解析。
+   * 返回 undefined 表示该账号没有任何可进入空间（如平台管理租户）——
+   * 这不是错误，但经营接口会对此 fail-closed。
+   *
+   * 跨租户由成员关系保证：`workspace_members` 的复合外键已使
+   * 「账号在该空间有成员关系」蕴含两者同租户，因此按 userId 查成员即可，
+   * 不需要也不应该再信任调用方传来的 tenantId。
+   */
+  async resolveSessionWorkspaceId(userId: string, requested?: string): Promise<string | undefined> {
+    const available = await this.listUserWorkspaces(userId);
+    if (!requested) return available.find((item) => item.isDefault)?.id ?? available[0]?.id;
+    const match = available.find((item) => item.id === requested);
+    if (!match) throw new ForbiddenException("无权进入该经营空间，或该空间已冻结/停用");
+    return match.id;
+  }
+
+  /**
+   * 按当前经营空间解析账号权限。
+   *
+   * 需求 3：同一账号可在不同空间拥有不同角色和数据范围。因此成员关系上的
+   * roleId 一旦存在，就**取代**租户级角色参与权限计算；dataScope 同理。
+   * 成员关系没配时沿用租户级默认值（升级兼容层的行为）。
+   */
+  async findWorkspaceScopedUser(userId: string, workspaceId?: string): Promise<SystemUserRow | undefined> {
+    const base = await this.findUserById(userId);
+    if (!base || !workspaceId) return base;
+    const member = await this.prisma.workspaceMember.findFirst({
+      where: {
+        userId,
+        workspaceId,
+        isActive: true,
+        workspace: { status: PrismaWorkspaceStatus.ACTIVE }
+      },
+        include: { role: { include: { permissions: { include: { permission: true } } } } }
+    });
+    // 会话已经明确要求某个空间时，成员关系失效不能退回租户级账号。
+    // 否则撤销成员后，旧 refresh/access session 会重新获得 base 用户权限。
+    if (!member) return undefined;
+    const next: SystemUserRow = { ...base };
+    if (member.role?.isActive) {
+      const role = member.role;
+      const isAll = base.isPlatformAdmin || role.fixedAllPermissions;
+      next.roleIds = [role.id];
+      next.roleNames = [role.isActive ? role.name : `${role.name}（停用）`];
+      next.scope = this.toSharedRoleScope(role.scope);
+      next.permissions = isAll
+        ? ["*"]
+        : [
+            ...new Set([
+              ...role.permissions.map((item) => item.permission.code),
+              ...(((role.buttonPermissions as string[] | null) ?? []) as string[])
+            ])
+          ];
+      next.dataScope = isAll ? "all" : this.toSharedDataScope(role.dataScope);
+    } else if (member.role) {
+      // 停用角色不能继续通过 fixedAllPermissions、buttonPermissions 或成员范围放权。
+      next.roleIds = [];
+      next.roleNames = [];
+      next.permissions = [];
+    }
+    // 成员关系上的数据范围优先级最高：它是"该账号在本空间"的显式授权。
+    if (member.dataScope) next.dataScope = this.toSharedDataScope(member.dataScope);
+    return next;
+  }
+
+  async setSessionWorkspace(sessionId: string, workspaceId: string | null, expectedWorkspaceId?: string | null): Promise<boolean> {
+    const result = await this.prisma.authSession.updateMany({
+      where: {
+        id: sessionId,
+        ...(expectedWorkspaceId === undefined
+          ? {}
+          : { currentWorkspaceId: expectedWorkspaceId })
+      },
+      data: { currentWorkspaceId: workspaceId }
+    });
+    return result.count === 1;
+  }
+
+  /**
+   * 旧 `/store-rental/*` 车辆域的表仍只有 tenantId，尚未完成空间级迁移。
+   * 在迁移完成前只允许默认车辆空间使用这组兼容接口，禁止非默认空间把
+   * 同一套租户级车辆数据伪装成自己的空间数据。
+   */
+  async isLegacyVehicleDomainWorkspaceAllowed(tenantId: string, workspaceId: string): Promise<boolean> {
+    const [current, defaultWorkspace] = await Promise.all([
+      this.prisma.businessWorkspace.findFirst({
+        where: { id: workspaceId, tenantId, categoryCode: PrismaRentalCategoryCode.VEHICLE },
+        select: { id: true }
+      }),
+      this.prisma.businessWorkspace.findFirst({
+        where: { tenantId, isDefault: true, categoryCode: PrismaRentalCategoryCode.VEHICLE },
+        select: { id: true }
+      })
+    ]);
+    return Boolean(current && defaultWorkspace && current.id === defaultWorkspace.id);
   }
 
   async listOrganizations(
@@ -564,7 +921,7 @@ export class PlatformRepository {
   async deleteRole(id: string, tenantId: string) {
     const role = await this.prisma.role.findUnique({
       where: { id },
-      include: { userAssignments: true, users: true }
+      include: { userAssignments: true, users: true, workspaceMembers: true }
     });
     if (!role || role.tenantId !== tenantId) {
       throw new NotFoundException(`Role ${id} was not found`);
@@ -572,7 +929,7 @@ export class PlatformRepository {
     if (role.fixedAllPermissions) {
       throw new BadRequestException("预设角色不能删除");
     }
-    if (role.userAssignments.length > 0 || role.users.length > 0) {
+    if (role.userAssignments.length > 0 || role.users.length > 0 || role.workspaceMembers.length > 0) {
       throw new BadRequestException("该角色已分配给账号，不能删除");
     }
 
@@ -1204,6 +1561,13 @@ export class PlatformRepository {
         }
       });
       await tx.userRole.create({ data: { userId: user.id, roleId: tenantAdminRole.id } });
+      // SPACE-01（需求 4.1）：默认经营空间、其唯一品类以及管理员的成员关系，
+      // 由 onBeforeCommit 里的 initializeTenant → upsertProfile 在**同一事务**内建立，
+      // 因此这里不再重复创建。
+      //
+      // 刻意不在此处单独写一份：品类档案有两条写入路径（租户初始化与懒加载自愈），
+      // 不变量必须钉在档案的写入点上，否则两条路径会给出不一致的结果。
+      // 该调用在本方法末尾、提交之前发生，任一步失败仍整体回滚。
       const configs = [
         ["system-rules", seed.systemRules],
         ["platform-dictionaries", { groups: seed.dictionaries }],

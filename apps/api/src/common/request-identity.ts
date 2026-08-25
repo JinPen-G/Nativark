@@ -5,6 +5,14 @@ export interface RequestIdentity {
   tenantId: string;
   userId: string;
   isSaasAdmin: boolean;
+  /**
+   * SPACE-02：当前经营空间。只由认证守卫从**会话**写入，
+   * 绝不接受客户端请求体或查询参数里的 workspaceId。
+   *
+   * 可选：平台管理租户的账号没有经营空间成员关系，其请求合法地没有当前空间；
+   * 经营接口对此 fail-closed（见 requireRequestWorkspaceId）。
+   */
+  workspaceId?: string;
 }
 
 // 存储类型允许字段缺失：中间件先建立空上下文，守卫认证后才补全，
@@ -51,4 +59,25 @@ export function requireRequestTenantId(): string {
     throw new ForbiddenException("缺少已验证的租户身份，拒绝访问");
   }
   return tenantId;
+}
+
+// 可选读取：调用方需要自行处理"当前会话没有经营空间"的情况。
+export function getRequestWorkspaceId(): string | undefined {
+  return requestIdentityStorage.getStore()?.workspaceId;
+}
+
+/**
+ * SPACE-02 fail-closed：经营业务的经营空间唯一取值入口。
+ *
+ * 与租户同理，这里绝不提供"默认空间"回退。默认空间只是**升级兼容层**，
+ * 由登录时的成员关系解析决定；如果在这里回退到默认空间，
+ * 一个本该被拒绝的无空间会话就会静默拿到某个空间的数据——
+ * 那正是 P0-01（默认租户回退导致跨租户泄露）的同型缺陷。
+ */
+export function requireRequestWorkspaceId(): string {
+  const workspaceId = requestIdentityStorage.getStore()?.workspaceId;
+  if (!workspaceId) {
+    throw new ForbiddenException("缺少已验证的经营空间，拒绝访问");
+  }
+  return workspaceId;
 }

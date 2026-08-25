@@ -13,6 +13,14 @@ enum TenantStatus {
   DISABLED @map("disabled")
 }
 
+/// SPACE-01：经营空间状态。冻结与停用的语义与租户一致——
+/// 冻结可恢复，停用是终态；两者都必须让成员进入被拒绝（SPACE-02 校验）。
+enum WorkspaceStatus {
+  ACTIVE   @map("active")
+  FROZEN   @map("frozen")
+  DISABLED @map("disabled")
+}
+
 enum OrganizationType {
   OPERATOR @map("operator")
   CAR_SHOP @map("car_shop")
@@ -297,7 +305,7 @@ model Tenant {
   rentalInspectionRecords   RentalInspectionRecord[]
   rentalCouponTemplates     RentalCouponTemplate[]
   rentalOperators           RentalFulfillmentOperator[]
-  rentalBusinessSettings    RentalTenantBusinessSettings?
+  rentalBusinessSettings    RentalTenantBusinessSettings[]
   rentalQuotes              RentalQuote[]
   rentalCustomerCoupons     RentalCustomerCoupon[]
   rentalRewardEntries       RentalRewardLedgerEntry[]
@@ -311,27 +319,153 @@ model Tenant {
   rentalRuleVersions        RentalRuleVersion[]
   rentalBusinessCalendars   RentalBusinessCalendar[]
   rentalIdempotencyRecords  RentalOrderIdempotencyRecord[]
-  rentalCoreStateSnapshot   RentalCoreStateSnapshot?
-  rentalBusinessStateSnapshot RentalBusinessStateSnapshot?
+  customerProfiles          CustomerProfile[]
+  customerWorkspaceLinks    CustomerWorkspaceLink[]
+  rentalCoreStateSnapshot   RentalCoreStateSnapshot[]
+  rentalBusinessStateSnapshot RentalBusinessStateSnapshot[]
+  businessWorkspaces        BusinessWorkspace[]
+  workspaceMembers          WorkspaceMember[]
   createdAt                 DateTime                    @default(now())
   updatedAt                 DateTime                    @updatedAt
 }
 
+/// SPACE-01：经营空间。
+///
+/// 需求 3：一个 SaaS 租户可建立多个经营空间，每个空间只经营一种品类。
+/// 空间是业务隔离边界，不替代租户——所有经营事实最终同时带 tenantId 与 workspaceId
+/// （事实的空间化属 SPACE-03，本任务只建主档与兼容层）。
+///
+/// 品类在创建时确定且不通过普通设置切换（需求 3）：变更品类必须新建空间或显式迁移，
+/// 因此这里不提供"改品类"的写接口。
+model BusinessWorkspace {
+  id           String              @id
+  tenantId     String
+  tenant       Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  code         String
+  name         String
+  /// 唯一经营品类。外键指向品类定义表，杜绝写入未定义品类。
+  categoryCode RentalCategoryCode
+  category     RentalCategoryDefinition @relation(fields: [categoryCode], references: [code])
+  status       WorkspaceStatus     @default(ACTIVE)
+  /// 兼容层标记：升级前建立的既有业务全部归属租户的默认空间。
+  /// 每租户至多一个，由下方 partial-unique 的替代方案（defaultMarker）保证。
+  isDefault    Boolean             @default(false)
+  /// 用于"每租户只能有一个默认空间"的唯一约束。
+  /// MySQL 没有部分索引，因此默认空间写 'default'、非默认写自身 id：
+  /// 前者在租户内必然冲突，后者天然唯一。
+  defaultMarker String
+  members      WorkspaceMember[]
+  authSessions AuthSession[]
+  operationLogs OperationLog[]
+  customerWorkspaceLinks CustomerWorkspaceLink[]
+  coreStateSnapshot RentalCoreStateSnapshot?
+  businessStateSnapshot RentalBusinessStateSnapshot?
+  // SPACE-03：经营事实的反向关系。字段仅供 Prisma 关系解析，不用于查询。
+  rentalCouponTemplates       RentalCouponTemplate[]
+  rentalFulfillmentLocations  RentalFulfillmentLocation[]
+  rentalItemGroups            RentalItemGroup[]
+  rentalAssets                RentalAsset[]
+  rentalStockBalances         RentalStockBalance[]
+  rentalOrders                RentalOrder[]
+  rentalReservations          RentalReservation[]
+  rentalInspectionTemplates   RentalInspectionTemplate[]
+  rentalInspectionRecords     RentalInspectionRecord[]
+  rentalFulfillmentOperators  RentalFulfillmentOperator[]
+  rentalTenantBusinessSettingss RentalTenantBusinessSettings[]
+  rentalPricingPlans          RentalPricingPlan[]
+  rentalDiscountPlans         RentalDiscountPlan[]
+  rentalValueAddedServices    RentalValueAddedService[]
+  rentalRuleVersions          RentalRuleVersion[]
+  rentalBusinessCalendars     RentalBusinessCalendar[]
+  rentalNotificationTemplates RentalNotificationTemplate[]
+  rentalQuotes                RentalQuote[]
+  rentalCustomerCoupons       RentalCustomerCoupon[]
+  rentalRewardLedgerEntrys    RentalRewardLedgerEntry[]
+  rentalBenefitAccounts       RentalBenefitAccount[]
+  rentalReferrals             RentalReferral[]
+  rentalNotificationLogs      RentalNotificationLog[]
+  rentalOrderIdempotencyRecords RentalOrderIdempotencyRecord[]
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  @@unique([tenantId, code], map: "business_workspaces_tenant_code_key")
+  @@unique([tenantId, defaultMarker], map: "business_workspaces_tenant_default_key")
+  /// 供成员关系的复合外键引用，保证成员只能指向同租户的空间。
+  @@unique([tenantId, id], map: "business_workspaces_tenant_id_key")
+  @@index([categoryCode], map: "business_workspaces_category_idx")
+  @@index([tenantId, status], map: "business_workspaces_tenant_status_idx")
+  @@map("business_workspaces")
+}
+
+/// SPACE-01：账号与经营空间的成员关系。
+///
+/// 需求 3/4.1：账号归属租户，通过成员关系进入一个或多个空间，并可在不同空间
+/// 拥有不同角色与数据范围。因此角色和数据范围记在成员关系上，而不是复用
+/// `User.roleId`（那是租户级的旧模型，升级后作为默认值保留）。
+///
+/// 跨租户防护由**复合外键**在库层完成，而不是靠应用层校验：
+/// (tenantId, workspaceId) 必须存在于 business_workspaces(tenantId, id)，
+/// (tenantId, userId) 必须存在于 User(tenantId, id)。
+/// 于是「A 租户的空间关联 B 租户的用户」在数据库层就写不进去。
+model WorkspaceMember {
+  tenantId    String
+  workspaceId String
+  userId      String
+  tenant      Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspace   BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  user        User              @relation(fields: [tenantId, userId], references: [tenantId, id], onDelete: Cascade)
+  /// 该账号在本空间的角色。空表示沿用租户级默认角色（升级兼容）。
+  roleId      String?
+  role        Role?             @relation(fields: [tenantId, roleId], references: [tenantId, id], onDelete: Restrict)
+  /// 该账号在本空间的数据范围。空表示沿用角色自带范围。
+  dataScope   SystemDataScope?
+  isActive    Boolean           @default(true)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@id([workspaceId, userId])
+  @@index([tenantId, userId], map: "workspace_members_tenant_user_idx")
+  @@index([tenantId, roleId], map: "workspace_members_role_idx")
+  @@map("workspace_members")
+}
+
 model RentalCoreStateSnapshot {
-  tenantId  String   @id
+  /// SPACE-03：主键改为经营空间。
+  ///
+  /// 原主键是 tenantId，于是同租户只有一份快照——非默认空间根本没有存档，
+  /// 而 persist 又必须固定写默认空间，否则会互相覆盖（实测过：在第二空间触发
+  /// persist 会把它的状态写进租户级行、抹掉默认空间的存档）。
+  /// 主键换成空间后，每个空间各有自己的恢复副本，persist 也不必再挑空间。
+  workspaceId String  @id
+  tenantId  String
   tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspace BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   state     Json
   updatedAt DateTime @updatedAt
 
+  /// 一个经营空间至多一份快照；同时供 BusinessWorkspace 侧的一对一反向关系使用。
+  @@unique([tenantId, workspaceId], map: "core_snapshot_tenant_ws_key")
+  @@index([tenantId], map: "core_snapshot_tenant_idx")
   @@map("rental_core_state_snapshots")
 }
 
 model RentalBusinessStateSnapshot {
-  tenantId  String   @id
+  /// SPACE-03：主键改为经营空间。
+  ///
+  /// 原主键是 tenantId，于是同租户只有一份快照——非默认空间根本没有存档，
+  /// 而 persist 又必须固定写默认空间，否则会互相覆盖（实测过：在第二空间触发
+  /// persist 会把它的状态写进租户级行、抹掉默认空间的存档）。
+  /// 主键换成空间后，每个空间各有自己的恢复副本，persist 也不必再挑空间。
+  workspaceId String  @id
+  tenantId  String
   tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspace BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   state     Json
   updatedAt DateTime @updatedAt
 
+  /// 一个经营空间至多一份快照；同时供 BusinessWorkspace 侧的一对一反向关系使用。
+  @@unique([tenantId, workspaceId], map: "business_snapshot_tenant_ws_key")
+  @@index([tenantId], map: "business_snapshot_tenant_idx")
   @@map("rental_business_state_snapshots")
 }
 
@@ -375,6 +509,7 @@ model User {
   passwordChangedAt DateTime?
   lastLoginAt     DateTime?
   roleAssignments UserRole[]
+  workspaceMembers WorkspaceMember[]
   authSessions    AuthSession[]
   createdOrders   StoreRentalOrder[] @relation("OrderCreator")
   logs            OperationLog[]
@@ -382,6 +517,9 @@ model User {
   updatedAt       DateTime           @updatedAt
 
   @@unique([tenantId, account])
+  /// 供成员关系的复合外键引用：成员必须指向**同租户**的账号，
+  /// 从库层杜绝「把别的租户的用户加进本空间」。
+  @@unique([tenantId, id], map: "users_tenant_id_key")
   @@index([tenantId, organizationId])
 }
 
@@ -390,12 +528,21 @@ model AuthSession {
   userId           String
   user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   refreshTokenHash String    @unique
+  /// SPACE-02：会话的当前经营空间。**服务端唯一权威**——客户端提交的
+  /// workspaceId 一律忽略，切换必须走 switch 接口重新校验成员资格。
+  ///
+  /// 可空：平台管理租户没有经营空间，其会话合法地没有当前空间。
+  /// 跨租户防护不依赖这里的外键，而依赖 workspace_members 的复合外键：
+  /// 「该账号在该空间有成员关系」已蕴含两者同租户。
+  currentWorkspaceId String?
+  currentWorkspace   BusinessWorkspace? @relation(fields: [currentWorkspaceId], references: [id], onDelete: SetNull)
   expiresAt        DateTime
   revokedAt        DateTime?
   lastUsedAt       DateTime?
   createdAt        DateTime  @default(now())
 
   @@index([userId, expiresAt, revokedAt])
+  @@index([currentWorkspaceId], map: "auth_sessions_workspace_idx")
   @@map("auth_sessions")
 }
 
@@ -414,12 +561,15 @@ model Role {
   isActive              Boolean          @default(true)
   users                 User[]
   userAssignments       UserRole[]
+  workspaceMembers      WorkspaceMember[]
   permissions           RolePermission[]
   createdAt             DateTime         @default(now())
   updatedAt             DateTime         @updatedAt
 
   @@unique([tenantId, code])
   @@unique([tenantId, name])
+  /// 供 WorkspaceMember 的复合外键引用，阻止跨租户角色授权。
+  @@unique([tenantId, id], map: "roles_tenant_id_key")
 }
 
 model Permission {
@@ -796,6 +946,81 @@ model StationCapacitySnapshot {
 
   @@index([stationId, date])
   @@index([stationId, createdAt])
+}
+
+/// SPACE-04：租户级共享客户主档。
+///
+/// 边界（需求 v1.2 第 41、180 行）：客户**身份**在 SaaS 租户内共享——基础联系方式、
+/// 企业资料、基础实名认证只存一份，同一客户不必在第二个经营空间重复注册。
+/// 而订单、优惠券、积分、会员等级和营销余额**按经营空间隔离**，因此那些表带
+/// workspaceId 并各自建行，只通过 (tenantId, id) 指回本表。
+///
+/// 品类资质存在本表（共享资料），但「是否适用」要按目标空间的品类规则判断：
+/// 驾驶证对 vehicle 空间有意义，对 camera 空间无意义。故本表只存事实，不存结论。
+///
+/// 与 Member 的关系：Member 是旧车辆域的会员表，仍在使用且已是租户级。
+/// 本表不删不改 Member（迁移硬规则 5、7：不得删除或替换现有数据），
+/// 而是新增租户级主档并把旧 Member 回填进来，由 sourceMemberId 保留对应关系。
+model CustomerProfile {
+  id                    String   @id @default(uuid())
+  tenantId              String
+  tenant                Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerType          String
+  name                  String
+  phone                 String
+  phoneMasked           String
+  email                 String?
+  /// 基础实名认证：租户内共享，不按空间重复认证。
+  identityVerified      Boolean  @default(false)
+  identityNoMasked      String?
+  /// 品类资质原始事实（如驾驶证、操作资格证），适用性由目标空间品类规则判断。
+  qualifications        Json
+  corporateName         String?
+  corporateTaxNo        String?
+  status                String   @default("active")
+  /// 回填来源：旧车辆域 Member 的主键。用于对账与幂等回填，不参与业务判定。
+  sourceMemberId        String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  workspaceLinks        CustomerWorkspaceLink[]
+
+  /// 供复合外键引用：让「权益/关系必须与客户同租户」可以在库层表达。
+  /// 与 BusinessWorkspace 的 (tenantId, id) 同一手法。
+  @@unique([tenantId, id], map: "customer_profiles_tenant_id_key")
+  /// 同租户内手机号唯一 = 「同一客户不必重复注册」的库层保证。
+  /// 不含 workspaceId：加了就等于允许同一手机号在两个空间各建一份主档，
+  /// 与需求「租户内共享唯一客户主档」直接冲突。
+  @@unique([tenantId, phone], map: "customer_profiles_tenant_phone_key")
+  @@unique([tenantId, sourceMemberId], map: "customer_profiles_tenant_source_member_key")
+  @@index([tenantId, status], map: "customer_profiles_tenant_status_idx")
+  @@map("customer_profiles")
+}
+
+/// SPACE-04：客户在某个经营空间的业务关系。
+///
+/// 主档共享而业务关系按空间建立：客户在摄影空间下过单、在露营空间没下过，
+/// 这条关系记录「他在哪些空间有过业务」，供空间侧列表与资质校验使用，
+/// 不承载订单或权益数据本身（那些在各自的事实表里）。
+model CustomerWorkspaceLink {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId String
+  /// 复合外键：空间与关系必须同租户，杜绝跨租户挂接。
+  workspace   BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  customerId  String
+  customer    CustomerProfile   @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
+  /// 该客户在本空间的会员等级：等级按空间隔离（需求第 41 行）。
+  levelName   String   @default("普通会员")
+  status      String   @default("active")
+  firstOrderAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([workspaceId, customerId], map: "customer_workspace_links_ws_customer_key")
+  @@index([tenantId, customerId], map: "customer_workspace_links_tenant_customer_idx")
+  @@map("customer_workspace_links")
 }
 
 model MembershipPlan {
@@ -1658,12 +1883,22 @@ model OperationLog {
   /// 再建一张只会造出第二个审计事实源。
   rentalOrderId String?
   rentalOrder   RentalOrder?  @relation(fields: [rentalOrderId], references: [id])
+  /// SPACE-03：经营空间归属。
+  ///
+  /// 可空：平台域审计（租户创建、冻结、平台配置）不属于任何经营空间，
+  /// 强制 NOT NULL 会逼出一个假的归属。经营域审计必须带值。
+  /// onDelete 用 Restrict 而不是 Cascade：审计不能随经营空间被删而消失。
+  /// 也不能用 SetNull——复合外键里的 tenantId 是必填列，Prisma 不允许。
+  /// 产品上空间只冻结/停用、不硬删，因此 Restrict 不会挡住正常操作。
+  workspaceId String?
+  workspace   BusinessWorkspace? @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Restrict)
   action    String
   detail    Json
   createdAt DateTime          @default(now())
 
   @@index([tenantId, action, createdAt])
   @@index([tenantId, rentalOrderId, createdAt])
+  @@index([tenantId, workspaceId, createdAt], map: "OperationLog_tenant_workspace_created_idx")
 }
 
 model ConfigVersion {
@@ -1938,6 +2173,7 @@ model RentalCategoryDefinition {
   businessModel           Json
   version                 String
   profiles                TenantRentalProfile[]
+  workspaces              BusinessWorkspace[]
   itemGroups              RentalItemGroup[]
   inspectionTemplates     RentalInspectionTemplate[]
   createdAt               DateTime                   @default(now())
@@ -1965,6 +2201,10 @@ model RentalCouponTemplate {
   id                     String   @id @default(uuid())
   tenantId               String
   tenant                 Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// SPACE-03：经营空间归属。与 tenantId 并存（需求 3：经营事实同时包含两者）。
+  workspaceId      String
+  /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
+  workspace        BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   code                   String
   name                   String
   discountType           String
@@ -1983,7 +2223,7 @@ model RentalCouponTemplate {
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
 
-  @@unique([tenantId, code])
+  @@unique([workspaceId, code], map: "rental_coupon_templates_ws_code_key")
   @@index([tenantId, status, effectiveFrom, effectiveTo], map: "rental_coupon_templates_tenant_status_effective_idx")
   @@map("rental_coupon_templates")
 }
@@ -1992,6 +2232,10 @@ model RentalFulfillmentLocation {
   id            String               @id @default(uuid())
   tenantId      String
   tenant        Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// SPACE-03：经营空间归属。与 tenantId 并存（需求 3：经营事实同时包含两者）。
+  workspaceId      String
+  /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
+  workspace        BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   code          String
   name          String
   type          String
@@ -2013,7 +2257,7 @@ model RentalFulfillmentLocation {
   createdAt     DateTime             @default(now())
   updatedAt     DateTime             @updatedAt
 
-  @@unique([tenantId, code])
+  @@unique([workspaceId, code], map: "rental_locations_ws_code_key")
   @@index([tenantId, status])
   @@index([operatorId])
   @@map("rental_fulfillment_locations")
@@ -2023,6 +2267,10 @@ model RentalItemGroup {
   id               String                   @id @default(uuid())
   tenantId         String
   tenant           Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// SPACE-03：经营空间归属。与 tenantId 并存（需求 3：经营事实同时包含两者）。
+  workspaceId      String
+  /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
+  workspace        BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   categoryCode     RentalCategoryCode
   category         RentalCategoryDefinition @relation(fields: [categoryCode], references: [code])
   code             String
@@ -2041,7 +2289,7 @@ model RentalItemGroup {
   createdAt        DateTime                 @default(now())
   updatedAt        DateTime                 @updatedAt
 
-  @@unique([tenantId, code])
+  @@unique([workspaceId, code], map: "rental_item_groups_ws_code_key")
   @@index([tenantId, categoryCode, inventoryMode, status], map: "rental_item_groups_tenant_category_mode_status_idx")
   @@map("rental_item_groups")
 }
@@ -2066,6 +2314,10 @@ model RentalAsset {
   id          String                    @id @default(uuid())
   tenantId    String
   tenant      Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// SPACE-03：经营空间归属。与 tenantId 并存（需求 3：经营事实同时包含两者）。
+  workspaceId      String
+  /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
+  workspace        BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   itemGroupId String
   itemGroup   RentalItemGroup           @relation(fields: [itemGroupId], references: [id])
   assetNo     String
@@ -2078,8 +2330,8 @@ model RentalAsset {
   createdAt   DateTime                  @default(now())
   updatedAt   DateTime                  @updatedAt
 
-  @@unique([tenantId, assetNo])
-  @@unique([tenantId, serialNo])
+  @@unique([workspaceId, assetNo], map: "rental_assets_ws_asset_no_key")
+  @@unique([workspaceId, serialNo], map: "rental_assets_ws_serial_no_key")
   @@index([tenantId, itemGroupId, locationId, status])
   @@map("rental_assets")
 }
@@ -2088,6 +2340,10 @@ model RentalStockBalance {
   id                  String                    @id @default(uuid())
   tenantId            String
   tenant              Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// SPACE-03：经营空间归属。与 tenantId 并存（需求 3：经营事实同时包含两者）。
+  workspaceId      String
+  /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
+  workspace        BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   itemGroupId         String
   itemGroup           RentalItemGroup           @relation(fields: [itemGroupId], references: [id])
   locationId          String
@@ -2097,7 +2353,7 @@ model RentalStockBalance {
   maintenanceQuantity Int                       @default(0)
   updatedAt           DateTime                  @updatedAt
 
-  @@unique([tenantId, itemGroupId, locationId])
+  @@unique([workspaceId, itemGroupId, locationId], map: "rental_stock_ws_group_location_key")
   @@index([tenantId, locationId])
   @@map("rental_stock_balances")
 }
@@ -2106,6 +2362,10 @@ model RentalOrder {
   id                    String                    @id @default(uuid())
   tenantId              String
   tenant                Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// SPACE-03：经营空间归属。与 tenantId 并存（需求 3：经营事实同时包含两者）。
+  workspaceId      String
+  /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
+  workspace        BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   orderNo               String
   categoryCode          RentalCategoryCode
   status                RentalOrderV1Status       @default(RESERVED)
@@ -2153,7 +2413,7 @@ model RentalOrder {
   createdAt             DateTime                  @default(now())
   updatedAt             DateTime                  @updatedAt
 
-  @@unique([tenantId, orderNo])
+  @@unique([workspaceId, orderNo], map: "rental_orders_ws_order_no_key")
   @@index([tenantId, status, startAt])
   @@index([tenantId, customerType, customerId])
   @@index([tenantId, quoteId])
@@ -2186,6 +2446,10 @@ model RentalReservation {
   id          String                    @id @default(uuid())
   tenantId    String
   tenant      Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// SPACE-03：经营空间归属。与 tenantId 并存（需求 3：经营事实同时包含两者）。
+  workspaceId      String
+  /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
+  workspace        BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   orderId     String
   order       RentalOrder               @relation(fields: [orderId], references: [id], onDelete: Cascade)
   orderLineId String
@@ -2231,6 +2495,10 @@ model RentalInspectionTemplate {
   id           String                   @id @default(uuid())
   tenantId     String
   tenant       Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// SPACE-03：经营空间归属。与 tenantId 并存（需求 3：经营事实同时包含两者）。
+  workspaceId      String
+  /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
+  workspace        BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   categoryCode RentalCategoryCode
   category     RentalCategoryDefinition @relation(fields: [categoryCode], references: [code])
   code         String
@@ -2243,7 +2511,7 @@ model RentalInspectionTemplate {
   createdAt    DateTime                 @default(now())
   updatedAt    DateTime                 @updatedAt
 
-  @@unique([tenantId, code, version])
+  @@unique([workspaceId, code, version], map: "rental_inspection_tpl_ws_code_ver_key")
   @@index([tenantId, categoryCode, stage, enabled], map: "rental_inspection_templates_tenant_category_stage_idx")
   @@map("rental_inspection_templates")
 }
@@ -2252,6 +2520,10 @@ model RentalInspectionRecord {
   id              String                   @id @default(uuid())
   tenantId        String
   tenant          Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// SPACE-03：经营空间归属。与 tenantId 并存（需求 3：经营事实同时包含两者）。
+  workspaceId      String
+  /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
+  workspace        BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   orderId         String
   order           RentalOrder              @relation(fields: [orderId], references: [id], onDelete: Cascade)
   stage           String
@@ -2278,6 +2550,10 @@ model RentalFulfillmentOperator {
   id             String                      @id @default(uuid())
   tenantId       String
   tenant         Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// SPACE-03：经营空间归属。与 tenantId 并存（需求 3：经营事实同时包含两者）。
+  workspaceId      String
+  /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
+  workspace        BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   code           String
   name           String
   type           String
@@ -2289,14 +2565,21 @@ model RentalFulfillmentOperator {
   createdAt      DateTime                    @default(now())
   updatedAt      DateTime                    @updatedAt
 
-  @@unique([tenantId, code])
+  @@unique([workspaceId, code], map: "rental_operators_ws_code_key")
   @@index([tenantId, status])
   @@map("rental_fulfillment_operators")
 }
 
 model RentalTenantBusinessSettings {
-  tenantId      String             @id
+  /// SPACE-03：主键改为经营空间。
+  ///
+  /// 原主键是 tenantId，于是同租户两个空间抢同一行——第二个空间保存业务设置
+  /// 会直接覆盖第一个空间的支付、逾期、履约规则。业务设置属于经营空间。
+  workspaceId      String            @id
+  tenantId      String
   tenant        Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
+  workspace        BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   categoryCode  RentalCategoryCode
   configVersion String
   /// TenantRentalBusinessSettings 的 pricing/fulfillment/deposit 等嵌套配置块。
@@ -2304,6 +2587,7 @@ model RentalTenantBusinessSettings {
   updatedBy     String
   updatedAt     DateTime           @updatedAt
 
+  @@index([tenantId], map: "rental_business_settings_tenant_idx")
   @@map("rental_tenant_business_settings")
 }
 
@@ -2311,6 +2595,10 @@ model RentalPricingPlan {
   id            String             @id @default(uuid())
   tenantId      String
   tenant        Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// SPACE-03：经营空间归属。与 tenantId 并存（需求 3：经营事实同时包含两者）。
+  workspaceId      String
+  /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
+  workspace        BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   categoryCode  RentalCategoryCode
   code          String
   name          String
@@ -2324,7 +2612,7 @@ model RentalPricingPlan {
   createdAt     DateTime           @default(now())
   updatedAt     DateTime           @updatedAt
 
-  @@unique([tenantId, code, version], map: "rental_pricing_plans_tenant_code_version_key")
+  @@unique([workspaceId, code, version], map: "rental_pricing_plans_tenant_code_version_key")
   @@index([tenantId, status, effectiveFrom, effectiveTo], map: "rental_pricing_plans_tenant_status_effective_idx")
   @@map("rental_pricing_plans")
 }
@@ -2333,6 +2621,10 @@ model RentalDiscountPlan {
   id                     String             @id @default(uuid())
   tenantId               String
   tenant                 Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// SPACE-03：经营空间归属。与 tenantId 并存（需求 3：经营事实同时包含两者）。
+  workspaceId      String
+  /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
+  workspace        BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   categoryCode           RentalCategoryCode
   code                   String
   name                   String
@@ -2352,7 +2644,7 @@ model RentalDiscountPlan {
   createdAt              DateTime           @default(now())
   updatedAt              DateTime           @updatedAt
 
-  @@unique([tenantId, code, version], map: "rental_discount_plans_tenant_code_version_key")
+  @@unique([workspaceId, code, version], map: "rental_discount_plans_tenant_code_version_key")
   @@index([tenantId, status, priority], map: "rental_discount_plans_tenant_status_priority_idx")
   @@map("rental_discount_plans")
 }
@@ -2361,6 +2653,10 @@ model RentalValueAddedService {
   id                     String             @id @default(uuid())
   tenantId               String
   tenant                 Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// SPACE-03：经营空间归属。与 tenantId 并存（需求 3：经营事实同时包含两者）。
+  workspaceId      String
+  /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
+  workspace        BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   categoryCode           RentalCategoryCode
   code                   String
   name                   String
@@ -2379,7 +2675,7 @@ model RentalValueAddedService {
   createdAt              DateTime           @default(now())
   updatedAt              DateTime           @updatedAt
 
-  @@unique([tenantId, code, version], map: "rental_value_added_services_tenant_code_version_key")
+  @@unique([workspaceId, code, version], map: "rental_value_added_services_tenant_code_version_key")
   @@index([tenantId, status, serviceType], map: "rental_value_added_services_tenant_status_type_idx")
   @@map("rental_value_added_services")
 }
@@ -2388,6 +2684,10 @@ model RentalRuleVersion {
   id           String             @id @default(uuid())
   tenantId     String
   tenant       Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// SPACE-03：经营空间归属。与 tenantId 并存（需求 3：经营事实同时包含两者）。
+  workspaceId      String
+  /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
+  workspace        BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   categoryCode RentalCategoryCode
   version      String
   status       String             @default("draft")
@@ -2398,7 +2698,7 @@ model RentalRuleVersion {
   createdAt    DateTime           @default(now())
   publishedAt  DateTime?
 
-  @@unique([tenantId, version], map: "rental_rule_versions_tenant_version_key")
+  @@unique([workspaceId, version], map: "rental_rule_versions_tenant_version_key")
   @@index([tenantId, status, publishedAt], map: "rental_rule_versions_tenant_status_published_idx")
   @@map("rental_rule_versions")
 }
@@ -2407,6 +2707,10 @@ model RentalBusinessCalendar {
   id                 String    @id @default(uuid())
   tenantId           String
   tenant             Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// SPACE-03：经营空间归属。与 tenantId 并存（需求 3：经营事实同时包含两者）。
+  workspaceId      String
+  /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
+  workspace        BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   year               Int
   region             String    @default("CN")
   version            String
@@ -2422,7 +2726,7 @@ model RentalBusinessCalendar {
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
-  @@unique([tenantId, year], map: "rental_business_calendars_tenant_year_key")
+  @@unique([workspaceId, year], map: "rental_business_calendars_tenant_year_key")
   @@index([tenantId, status])
   @@map("rental_business_calendars")
 }
@@ -2431,6 +2735,10 @@ model RentalNotificationTemplate {
   id             String   @id @default(uuid())
   tenantId       String
   tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// SPACE-03：经营空间归属。与 tenantId 并存（需求 3：经营事实同时包含两者）。
+  workspaceId      String
+  /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
+  workspace        BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   eventCode      String
   channel        String
   name           String
@@ -2443,7 +2751,7 @@ model RentalNotificationTemplate {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  @@unique([tenantId, eventCode, channel, version], map: "rental_notification_templates_tenant_event_channel_ver_key")
+  @@unique([workspaceId, eventCode, channel, version], map: "rental_notification_templates_tenant_event_channel_ver_key")
   @@index([tenantId, status, eventCode], map: "rental_notification_templates_tenant_status_event_idx")
   @@map("rental_notification_templates")
 }
@@ -2456,6 +2764,10 @@ model RentalQuote {
   id                     String             @id @default(uuid())
   tenantId               String
   tenant                 Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// SPACE-03：经营空间归属。与 tenantId 并存（需求 3：经营事实同时包含两者）。
+  workspaceId      String
+  /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
+  workspace        BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   quoteNo                String
   categoryCode           RentalCategoryCode
   /// RentalQuoteRequest：报价入参原样留存，用于下单时比对与复算。
@@ -2479,7 +2791,7 @@ model RentalQuote {
   consumedOrderId        String?
   createdAt              DateTime           @default(now())
 
-  @@unique([tenantId, quoteNo], map: "rental_quotes_tenant_quote_no_key")
+  @@unique([workspaceId, quoteNo], map: "rental_quotes_tenant_quote_no_key")
   @@index([tenantId, expiresAt, consumedAt], map: "rental_quotes_tenant_expires_consumed_idx")
   @@index([consumedOrderId])
   @@map("rental_quotes")
@@ -2489,6 +2801,10 @@ model RentalCustomerCoupon {
   id              String               @id @default(uuid())
   tenantId        String
   tenant          Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// SPACE-03：经营空间归属。与 tenantId 并存（需求 3：经营事实同时包含两者）。
+  workspaceId      String
+  /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
+  workspace        BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   customerId      String
   templateId      String
   template        RentalCouponTemplate @relation(fields: [templateId], references: [id])
@@ -2516,6 +2832,10 @@ model RentalRewardLedgerEntry {
   id                  String    @id @default(uuid())
   tenantId            String
   tenant              Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// SPACE-03：经营空间归属。与 tenantId 并存（需求 3：经营事实同时包含两者）。
+  workspaceId      String
+  /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
+  workspace        BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   customerId          String
   rewardType          String
   amount              Decimal   @db.Decimal(12, 2)
@@ -2530,7 +2850,7 @@ model RentalRewardLedgerEntry {
   reversedAt          DateTime?
   createdAt           DateTime  @default(now())
 
-  @@unique([tenantId, idempotencyKey], map: "rental_reward_ledger_tenant_idempotency_key")
+  @@unique([workspaceId, idempotencyKey], map: "rental_reward_ledger_tenant_idempotency_key")
   @@index([tenantId, customerId, createdAt], map: "rental_reward_ledger_tenant_customer_created_idx")
   @@index([tenantId, triggerType, status], map: "rental_reward_ledger_tenant_trigger_status_idx")
   @@map("rental_reward_ledger_entries")
@@ -2539,14 +2859,28 @@ model RentalRewardLedgerEntry {
 model RentalBenefitAccount {
   tenantId                    String
   tenant                      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// SPACE-03：经营空间归属。与 tenantId 并存（需求 3：经营事实同时包含两者）。
+  workspaceId      String
+  /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
+  workspace        BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   customerId                  String
+  /// SPACE-04：**刻意不加**到 customer_profiles 的外键。
+  ///
+  /// 原因：rental 域的 customerId 目前是自由标识（grantReward 等接口不校验客户存在，
+  /// 注册奖励可以发给一个尚未建档的 customerId）。加外键会让这些既有路径直接 500，
+  /// 而唯一的修好办法是从任意 customerId 自动补建客户主档——那等于凭空编造
+  /// 身份数据，需求没有授权，也违背「共享客户主档是唯一身份来源」的本意。
+  ///
+  /// 正确做法是先让 rental 域改为引用共享主档（属 CUSTOMER-01 的范围），再加约束。
+  /// 在此之前保持无外键，避免用一个更差的实现去满足一条约束。
   pointsBalance               Decimal  @default(0) @db.Decimal(12, 2)
   /// 营销余额不是可提现或储值资金账户（需求 4.8）。
   marketingBalance            Decimal  @default(0) @db.Decimal(12, 2)
   availableRewardCouponCount  Int      @default(0)
   updatedAt                   DateTime @updatedAt
 
-  @@id([tenantId, customerId])
+  @@id([workspaceId, customerId])
+  @@index([tenantId, customerId], map: "rental_benefit_accounts_tenant_customer_idx")
   @@map("rental_benefit_accounts")
 }
 
@@ -2554,11 +2888,15 @@ model RentalReferral {
   id                 String   @id @default(uuid())
   tenantId           String
   tenant             Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// SPACE-03：经营空间归属。与 tenantId 并存（需求 3：经营事实同时包含两者）。
+  workspaceId      String
+  /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
+  workspace        BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   inviteeCustomerId  String
   referrerCustomerId String
   registeredAt       DateTime @default(now())
 
-  @@unique([tenantId, inviteeCustomerId], map: "rental_referrals_tenant_invitee_key")
+  @@unique([workspaceId, inviteeCustomerId], map: "rental_referrals_tenant_invitee_key")
   @@index([tenantId, referrerCustomerId], map: "rental_referrals_tenant_referrer_idx")
   @@map("rental_referrals")
 }
@@ -2567,6 +2905,10 @@ model RentalNotificationLog {
   id                String                     @id @default(uuid())
   tenantId          String
   tenant            Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// SPACE-03：经营空间归属。与 tenantId 并存（需求 3：经营事实同时包含两者）。
+  workspaceId      String
+  /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
+  workspace        BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   templateId        String
   template          RentalNotificationTemplate @relation(fields: [templateId], references: [id])
   templateVersion   String
@@ -2600,6 +2942,10 @@ model RentalOrderIdempotencyRecord {
   id        String   @id @default(uuid())
   tenantId  String
   tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// SPACE-03：经营空间归属。与 tenantId 并存（需求 3：经营事实同时包含两者）。
+  workspaceId      String
+  /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
+  workspace        BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   /// 订单创建时订单还不存在，因此可空；创建成功后回填，供按单追溯。
   orderId   String?
   order     RentalOrder? @relation(fields: [orderId], references: [id], onDelete: Cascade)
@@ -2614,7 +2960,7 @@ model RentalOrderIdempotencyRecord {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([tenantId, action, idempotencyKey], map: "rental_idempotency_tenant_action_key")
+  @@unique([workspaceId, action, idempotencyKey], map: "rental_idempotency_tenant_action_key")
   @@index([tenantId, orderId, action], map: "rental_idempotency_tenant_order_action_idx")
   @@map("rental_order_idempotency_records")
 }

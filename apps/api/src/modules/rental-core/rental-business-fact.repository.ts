@@ -14,6 +14,7 @@ import type {
   RentalRuleConfig
 } from "@store-rental/shared";
 import { PrismaService } from "../database/prisma.service";
+import { resolveScopeWorkspaceId } from "./workspace-scope";
 
 export type RentalBusinessFactTx = Prisma.TransactionClient;
 
@@ -23,9 +24,10 @@ export interface RentalReferralRecord {
   registeredAt: string;
 }
 
-/** 单个租户的业务事实，用于启动装载。 */
+/** SPACE-03：单个**经营空间**的业务事实，用于启动装载。 */
 export interface TenantBusinessFactSnapshot {
   tenantId: string;
+  workspaceId: string;
   quotes: RentalQuoteSnapshotV1[];
   customerCoupons: RentalCustomerCoupon[];
   rewardLedger: RentalRewardLedgerEntry[];
@@ -46,18 +48,26 @@ export interface RentalBusinessFactStore {
   findQuote(tenantId: string, quoteId: string, tx?: RentalBusinessFactTx): Promise<RentalQuoteSnapshotV1 | undefined>;
   consumeQuoteIfAvailable(tenantId: string, quoteId: string, orderId: string, consumedAt: string, tx: RentalBusinessFactTx): Promise<boolean>;
   lockCouponIfAvailable(tenantId: string, couponId: string, customerId: string | undefined, orderId: string, lockedAt: string, tx: RentalBusinessFactTx): Promise<boolean>;
+  redeemCouponForOrder(tenantId: string, orderId: string, redeemedAt: string, tx: RentalBusinessFactTx): Promise<"none" | "redeemed" | "already_redeemed" | "invalid">;
+  releaseCouponForOrder(tenantId: string, orderId: string, releasedAt: string, tx: RentalBusinessFactTx): Promise<void>;
   upsertQuote(quote: RentalQuoteSnapshotV1): Promise<void>;
-  upsertCustomerCoupon(coupon: RentalCustomerCoupon): Promise<void>;
+  /**
+   * 传入 tx 时必须使用它。领券由幂等执行器包在事务里，若这里另起连接独立提交，
+   * 事务回滚撤不回这张券，会留下"幂等表已回滚、客户券已存在"的孤儿。
+   */
+  upsertCustomerCoupon(coupon: RentalCustomerCoupon, tx?: RentalBusinessFactTx): Promise<void>;
+  countCustomerCoupons(tenantId: string, templateId: string, customerId: string, tx: RentalBusinessFactTx): Promise<number>;
   /**
    * 按幂等键查既有奖励流水，用于以库为准判重。
    * 必须按前缀匹配：grantReward 会派生 `<key>:referrer` / `<key>:invitee` 子键，
    * 只按精确键查会漏掉双边邀请奖励，导致重复入账。
    */
   findRewardsByIdempotencyKey(tenantId: string, key: string, tx?: RentalBusinessFactTx): Promise<RentalRewardLedgerEntry[]>;
-  upsertRewardEntry(entry: RentalRewardLedgerEntry): Promise<void>;
-  upsertBenefitAccount(account: RentalCustomerBenefitAccount): Promise<void>;
+  upsertRewardEntry(entry: RentalRewardLedgerEntry, tx?: RentalBusinessFactTx): Promise<void>;
+  upsertBenefitAccount(account: RentalCustomerBenefitAccount, tx?: RentalBusinessFactTx): Promise<void>;
+  incrementBenefitAccount(tenantId: string, customerId: string, delta: { points: number; marketing: number; rewardCoupons: number }, tx: RentalBusinessFactTx): Promise<void>;
   upsertReferral(tenantId: string, referral: RentalReferralRecord): Promise<void>;
-  insertNotificationLog(log: RentalNotificationSendLogV1): Promise<void>;
+  insertNotificationLog(log: RentalNotificationSendLogV1, tx?: RentalBusinessFactTx): Promise<void>;
 }
 
 function iso(value: Date): string {
@@ -94,7 +104,8 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
   constructor(private readonly prisma: PrismaService) {}
 
   async loadAll(): Promise<TenantBusinessFactSnapshot[]> {
-    const [quotes, coupons, rewards, accounts, referrals, logs] = await Promise.all([
+    const [workspaces, quotes, coupons, rewards, accounts, referrals, logs] = await Promise.all([
+      this.prisma.businessWorkspace.findMany({ select: { id: true, tenantId: true } }),
       this.prisma.rentalQuote.findMany({ orderBy: { createdAt: "desc" } }),
       this.prisma.rentalCustomerCoupon.findMany({ orderBy: { claimedAt: "desc" } }),
       this.prisma.rentalRewardLedgerEntry.findMany({ orderBy: { createdAt: "desc" } }),
@@ -103,33 +114,30 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       this.prisma.rentalNotificationLog.findMany({ orderBy: { createdAt: "desc" } })
     ]);
 
-    const tenantIds = new Set<string>([
-      ...quotes.map((row) => row.tenantId),
-      ...coupons.map((row) => row.tenantId),
-      ...rewards.map((row) => row.tenantId),
-      ...accounts.map((row) => row.tenantId),
-      ...referrals.map((row) => row.tenantId),
-      ...logs.map((row) => row.tenantId)
-    ]);
-
-    return [...tenantIds].map((tenantId) => ({
-      tenantId,
-      quotes: quotes.filter((row) => row.tenantId === tenantId).map((row) => this.toQuote(row)),
-      customerCoupons: coupons.filter((row) => row.tenantId === tenantId).map((row) => this.toCoupon(row)),
-      rewardLedger: rewards.filter((row) => row.tenantId === tenantId).map((row) => this.toRewardEntry(row)),
-      benefitAccounts: accounts.filter((row) => row.tenantId === tenantId).map((row) => this.toBenefitAccount(row)),
-      referrals: referrals.filter((row) => row.tenantId === tenantId).map((row) => ({
-        inviteeCustomerId: row.inviteeCustomerId,
-        referrerCustomerId: row.referrerCustomerId,
-        registeredAt: iso(row.registeredAt)
-      })),
-      notificationLogs: logs.filter((row) => row.tenantId === tenantId).map((row) => this.toNotificationLog(row))
-    }));
+    // 以经营空间为单位装载：同租户两个空间各有独立的报价、券、奖励与通知记录。
+    return workspaces.map((workspace) => {
+      const mine = <T extends { workspaceId: string }>(rows: T[]) => rows.filter((row) => row.workspaceId === workspace.id);
+      return {
+        tenantId: workspace.tenantId,
+        workspaceId: workspace.id,
+        quotes: mine(quotes).map((row) => this.toQuote(row)),
+        customerCoupons: mine(coupons).map((row) => this.toCoupon(row)),
+        rewardLedger: mine(rewards).map((row) => this.toRewardEntry(row)),
+        benefitAccounts: mine(accounts).map((row) => this.toBenefitAccount(row)),
+        referrals: mine(referrals).map((row) => ({
+          inviteeCustomerId: row.inviteeCustomerId,
+          referrerCustomerId: row.referrerCustomerId,
+          registeredAt: iso(row.registeredAt)
+        })),
+        notificationLogs: mine(logs).map((row) => this.toNotificationLog(row))
+      };
+    });
   }
 
   async findQuote(tenantId: string, quoteId: string, tx?: RentalBusinessFactTx): Promise<RentalQuoteSnapshotV1 | undefined> {
     const client = tx ?? this.prisma;
-    const row = await client.rentalQuote.findFirst({ where: { id: quoteId, tenantId } });
+    const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
+    const row = await client.rentalQuote.findFirst({ where: { id: quoteId, tenantId, workspaceId } });
     return row ? this.toQuote(row) : undefined;
   }
 
@@ -171,6 +179,36 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
     return result.count === 1;
   }
 
+  async redeemCouponForOrder(tenantId: string, orderId: string, redeemedAt: string, tx: RentalBusinessFactTx): Promise<"none" | "redeemed" | "already_redeemed" | "invalid"> {
+    const workspaceId = await resolveScopeWorkspaceId(tx, tenantId);
+    const timestamp = date(redeemedAt);
+    const coupon = await tx.rentalCustomerCoupon.findFirst({
+      where: { tenantId, workspaceId, OR: [{ lockedOrderId: orderId }, { redeemedOrderId: orderId }] },
+      select: { status: true, redeemedOrderId: true }
+    });
+    if (!coupon) return "none";
+    if (coupon.status === "redeemed" && coupon.redeemedOrderId === orderId) return "already_redeemed";
+    if (coupon.status !== "locked") return "invalid";
+    // 条件更新同时防住读取后到更新前的状态竞争；0 行必须由上层拒绝订单确认。
+    const result = await tx.rentalCustomerCoupon.updateMany({
+      where: { tenantId, workspaceId, lockedOrderId: orderId, status: "locked" },
+      data: { status: "redeemed", redeemedOrderId: orderId, redeemedAt: timestamp }
+    });
+    return result.count === 1 ? "redeemed" : "invalid";
+  }
+
+  async releaseCouponForOrder(tenantId: string, orderId: string, releasedAt: string, tx: RentalBusinessFactTx): Promise<void> {
+    const workspaceId = await resolveScopeWorkspaceId(tx, tenantId);
+    await tx.rentalCustomerCoupon.updateMany({
+      where: {
+        tenantId,
+        workspaceId,
+        OR: [{ lockedOrderId: orderId, status: "locked" }, { redeemedOrderId: orderId, status: "redeemed" }]
+      },
+      data: { status: "claimed", lockedOrderId: null, lockedAt: null, redeemedOrderId: null, redeemedAt: null, releasedAt: date(releasedAt) }
+    });
+  }
+
   async upsertQuote(quote: RentalQuoteSnapshotV1): Promise<void> {
     const data = {
       tenantId: quote.tenantId,
@@ -194,14 +232,15 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       consumedAt: optionalDate(quote.consumedAt),
       consumedOrderId: quote.consumedOrderId ?? null
     };
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, quote.tenantId);
     await this.prisma.rentalQuote.upsert({
       where: { id: quote.id },
-      create: { id: quote.id, ...data, createdAt: date(quote.createdAt) },
+      create: { workspaceId, id: quote.id, ...data, createdAt: date(quote.createdAt) },
       update: data
     });
   }
 
-  async upsertCustomerCoupon(coupon: RentalCustomerCoupon): Promise<void> {
+  async upsertCustomerCoupon(coupon: RentalCustomerCoupon, tx?: RentalBusinessFactTx): Promise<void> {
     const data = {
       tenantId: coupon.tenantId,
       customerId: coupon.customerId,
@@ -218,9 +257,10 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       redeemedAt: optionalDate(coupon.redeemedAt),
       releasedAt: optionalDate(coupon.releasedAt)
     };
-    await this.prisma.rentalCustomerCoupon.upsert({
+    const workspaceId = await resolveScopeWorkspaceId(tx ?? this.prisma, coupon.tenantId);
+    await (tx ?? this.prisma).rentalCustomerCoupon.upsert({
       where: { id: coupon.id },
-      create: { id: coupon.id, ...data },
+      create: { workspaceId, id: coupon.id, ...data },
       update: data
     });
   }
@@ -231,14 +271,17 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
     tx?: RentalBusinessFactTx
   ): Promise<RentalRewardLedgerEntry[]> {
     const client = tx ?? this.prisma;
+    // 奖励幂等键的唯一约束已是 (workspaceId, idempotencyKey)，判重也必须按空间，
+    // 否则一个空间的发奖会被另一个空间的同键记录误判为重复。
+    const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
     const rows = await client.rentalRewardLedgerEntry.findMany({
-      where: { tenantId, OR: [{ idempotencyKey: key }, { idempotencyKey: { startsWith: `${key}:` } }] },
+      where: { tenantId, workspaceId, OR: [{ idempotencyKey: key }, { idempotencyKey: { startsWith: `${key}:` } }] },
       orderBy: { createdAt: "asc" }
     });
     return rows.map((row) => this.toRewardEntry(row));
   }
 
-  async upsertRewardEntry(entry: RentalRewardLedgerEntry): Promise<void> {
+  async upsertRewardEntry(entry: RentalRewardLedgerEntry, tx?: RentalBusinessFactTx): Promise<void> {
     const data = {
       tenantId: entry.tenantId,
       customerId: entry.customerId,
@@ -255,31 +298,67 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       appliedAt: optionalDate(entry.appliedAt),
       reversedAt: optionalDate(entry.reversedAt)
     };
-    await this.prisma.rentalRewardLedgerEntry.upsert({
+    const client = tx ?? this.prisma;
+    const workspaceId = await resolveScopeWorkspaceId(client, entry.tenantId);
+    await client.rentalRewardLedgerEntry.upsert({
       where: { id: entry.id },
-      create: { id: entry.id, ...data, createdAt: date(entry.createdAt) },
+      create: { workspaceId, id: entry.id, ...data, createdAt: date(entry.createdAt) },
       update: data
     });
   }
 
-  async upsertBenefitAccount(account: RentalCustomerBenefitAccount): Promise<void> {
+  async upsertBenefitAccount(account: RentalCustomerBenefitAccount, tx?: RentalBusinessFactTx): Promise<void> {
     const data = {
       pointsBalance: new Prisma.Decimal(account.pointsBalance),
       marketingBalance: new Prisma.Decimal(account.marketingBalance),
       availableRewardCouponCount: account.availableRewardCouponCount
     };
-    await this.prisma.rentalBenefitAccount.upsert({
-      where: { tenantId_customerId: { tenantId: account.tenantId, customerId: account.customerId } },
-      create: { tenantId: account.tenantId, customerId: account.customerId, ...data },
+    const client = tx ?? this.prisma;
+    const workspaceId = await resolveScopeWorkspaceId(client, account.tenantId);
+    await client.rentalBenefitAccount.upsert({
+      // SPACE-04：按 (workspaceId, customerId) 键控。
+      //
+      // 原先键 (tenantId, customerId)，而积分与营销余额按需求是**空间级**的：
+      // 同一客户在摄影空间和露营空间各有独立余额。用租户级键 upsert 时，
+      // 第二个空间的写入会 update 掉第一个空间那行，余额互相覆盖而不是各记一行。
+      where: { workspaceId_customerId: { workspaceId, customerId: account.customerId } },
+      create: { workspaceId, tenantId: account.tenantId, customerId: account.customerId, ...data },
       update: data
     });
   }
 
+  async incrementBenefitAccount(tenantId: string, customerId: string, delta: { points: number; marketing: number; rewardCoupons: number }, tx: RentalBusinessFactTx): Promise<void> {
+    const workspaceId = await resolveScopeWorkspaceId(tx, tenantId);
+    await tx.$executeRaw(Prisma.sql`
+      INSERT INTO \`rental_benefit_accounts\` (\`tenantId\`, \`workspaceId\`, \`customerId\`, \`pointsBalance\`, \`marketingBalance\`, \`availableRewardCouponCount\`, \`updatedAt\`)
+      VALUES (${tenantId}, ${workspaceId}, ${customerId}, ${delta.points}, ${delta.marketing}, ${delta.rewardCoupons}, NOW(3))
+      ON DUPLICATE KEY UPDATE
+        \`pointsBalance\` = \`pointsBalance\` + VALUES(\`pointsBalance\`),
+        \`marketingBalance\` = \`marketingBalance\` + VALUES(\`marketingBalance\`),
+        \`availableRewardCouponCount\` = \`availableRewardCouponCount\` + VALUES(\`availableRewardCouponCount\`),
+        \`updatedAt\` = NOW(3)
+    `);
+  }
+
+  async countCustomerCoupons(
+    tenantId: string,
+    templateId: string,
+    customerId: string,
+    tx: RentalBusinessFactTx
+  ): Promise<number> {
+    const workspaceId = await resolveScopeWorkspaceId(tx, tenantId);
+    return tx.rentalCustomerCoupon.count({
+      where: { tenantId, workspaceId, templateId, customerId, status: { not: "void" } }
+    });
+  }
+
   async upsertReferral(tenantId: string, referral: RentalReferralRecord): Promise<void> {
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
     await this.prisma.rentalReferral.upsert({
-      where: { tenantId_inviteeCustomerId: { tenantId, inviteeCustomerId: referral.inviteeCustomerId } },
+      where: { workspaceId_inviteeCustomerId: { workspaceId, inviteeCustomerId: referral.inviteeCustomerId } },
       create: {
         tenantId,
+        workspaceId,
         inviteeCustomerId: referral.inviteeCustomerId,
         referrerCustomerId: referral.referrerCustomerId,
         registeredAt: date(referral.registeredAt)
@@ -289,11 +368,13 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
   }
 
   /** 发送记录是追加式流水，用 create 而非 upsert：同一条记录不应被改写。 */
-  async insertNotificationLog(log: RentalNotificationSendLogV1): Promise<void> {
-    await this.prisma.rentalNotificationLog.create({
+  async insertNotificationLog(log: RentalNotificationSendLogV1, tx?: RentalBusinessFactTx): Promise<void> {
+    const workspaceId = await resolveScopeWorkspaceId(tx ?? this.prisma, log.tenantId);
+    await (tx ?? this.prisma).rentalNotificationLog.create({
       data: {
         id: log.id,
         tenantId: log.tenantId,
+        workspaceId,
         templateId: log.templateId,
         templateVersion: log.templateVersion,
         eventCode: log.eventCode,

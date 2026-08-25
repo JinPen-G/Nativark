@@ -1,4 +1,4 @@
-import { ConflictException, Inject, Injectable } from "@nestjs/common";
+import { ConflictException, Inject, Injectable, Logger, type OnApplicationBootstrap } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../database/prisma.service";
 import {
@@ -16,6 +16,18 @@ class IdempotentReplay extends Error {
   }
 }
 
+/** 幂等记录保留天数。理由见 onApplicationBootstrap。 */
+const IDEMPOTENCY_RETENTION_DAYS = 14;
+
+/**
+ * 写冲突的有界重试。次数刻意小：它只为覆盖「先到者即将提交」的窄窗口，
+ * 不是用来硬扛持续争用——真正的持续争用必须让调用方看到 409，而不是无限等待。
+ */
+const WRITE_CONFLICT_MAX_RETRIES = 3;
+const WRITE_CONFLICT_BACKOFF_MS = 25;
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 export interface IdempotentActionInput<T> {
   tenantId: string;
   action: string;
@@ -24,7 +36,11 @@ export interface IdempotentActionInput<T> {
   fallbackKey: string;
   /** 参与指纹的请求内容。同键不同内容将被判为冲突。 */
   request: unknown;
-  orderId: string;
+  /**
+   * 关联订单，用于按单追溯。领券、奖励冲正、发通知这类非订单动作传空，
+   * 列本身可空——表名带 order 是历史原因，不代表只能记订单动作。
+   */
+  orderId?: string | null;
   /** 在事务内执行业务变更，返回要登记并回放的结果。 */
   run: (tx: RentalIdempotencyTx) => Promise<T>;
   /**
@@ -52,11 +68,34 @@ export interface IdempotentActionInput<T> {
  * 于是「没传幂等键的重试」永远拿不到幂等保护。键要稳定，判别交给 replay。
  */
 @Injectable()
-export class RentalIdempotentActionService {
+export class RentalIdempotentActionService implements OnApplicationBootstrap {
+  private readonly logger = new Logger(RentalIdempotentActionService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     @Inject(RentalIdempotencyRepository) private readonly idempotency: RentalIdempotencyStore
   ) {}
+
+  /**
+   * 启动时清理保留窗口之外的幂等记录。
+   *
+   * 为什么是 14 天：幂等记录只服务「同一次意图的重试」，客户端重试发生在秒级到
+   * 分钟级；14 天远超任何真实重试窗口，又足以覆盖排查期间的人工追溯。
+   *
+   * 为什么放在启动钩子：本任务分支只负责 rental-core，不跨到 jobs 模块加定时任务。
+   * 代价是长期不重启的进程不会再清理——**这是已知限制**，正式的周期调度应由
+   * 拥有 jobs 模块的任务承接（已在台账记录为依赖，不在此自行实现）。
+   */
+  async onApplicationBootstrap() {
+    const cutoff = new Date(Date.now() - IDEMPOTENCY_RETENTION_DAYS * 86_400_000);
+    try {
+      const removed = await this.idempotency.deleteOlderThan(cutoff);
+      if (removed > 0) this.logger.log(`清理过期幂等记录 ${removed} 条（保留 ${IDEMPOTENCY_RETENTION_DAYS} 天）`);
+    } catch (error) {
+      // 清理失败不得阻断启动：它是维护动作，不是业务正确性的前提。
+      this.logger.warn(`幂等记录清理失败，将在下次启动重试：${(error as Error).message}`);
+    }
+  }
 
   /**
    * 返回值带 `replayed` 标记：调用方据此跳过通知等**外部副作用**。
@@ -81,7 +120,7 @@ export class RentalIdempotentActionService {
     return { result, replayed };
   }
 
-  async execute<T>(input: IdempotentActionInput<T>): Promise<T> {
+  async execute<T>(input: IdempotentActionInput<T>, attempt = 0): Promise<T> {
     const key = input.key?.trim() || input.fallbackKey;
     const fingerprint = requestFingerprint(input.request);
 
@@ -111,7 +150,7 @@ export class RentalIdempotentActionService {
               action: input.action,
               key,
               requestHash: fingerprint,
-              orderId: input.orderId,
+              orderId: input.orderId ?? null,
               response: result
             },
             tx
@@ -139,7 +178,19 @@ export class RentalIdempotentActionService {
         throw new ConflictException("相同幂等键的请求正在处理，请稍后重试");
       }
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") {
-        throw new ConflictException("订单正在被其他请求处理，请稍后重试");
+        // 写冲突（多路同键并发争同一行，如领券都要递增同一个模板的 claimedQuantity）。
+        //
+        // 直接 409 是错的：同键同请求本就是一次意图，客户端不该因为内部行争用而
+        // 收到冲突。先到者此刻很可能正要提交，因此有界重试一轮——重试会从事务外
+        // 预检开始，命中先到者已提交的记录并回放。
+        //
+        // 重试不会产生第二次副作用：每次重试都是新事务，事务内重查与唯一约束仍在，
+        // 真正执行成功的只有一路。
+        if (attempt < WRITE_CONFLICT_MAX_RETRIES) {
+          await sleep(WRITE_CONFLICT_BACKOFF_MS * (attempt + 1));
+          return this.execute(input, attempt + 1);
+        }
+        throw new ConflictException("请求正在被其他请求处理，请稍后重试");
       }
       // 状态机拒绝后再探一次幂等记录。
       //

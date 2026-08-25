@@ -63,6 +63,7 @@ interface BusinessSnapshotState {
 
 export interface BackfillTenantResult {
   tenantId: string;
+  workspaceId?: string;
   skipped: boolean;
   reason?: string;
   /** 本次处理的快照条目数，按集合分组。写入是 upsert，因此不等于新插入行数。 */
@@ -157,19 +158,27 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
       this.prisma.rentalCoreStateSnapshot.findMany(),
       this.prisma.rentalBusinessStateSnapshot.findMany()
     ]);
-    const businessByTenant = new Map(businessRows.map((row) => [row.tenantId, row.state as unknown as BusinessSnapshotState]));
-    const tenantIds = [...new Set([...coreRows.map((row) => row.tenantId), ...businessByTenant.keys()])];
+    const snapshots = new Map<string, { tenantId: string; core: CoreSnapshotState; business: BusinessSnapshotState }>();
+    for (const row of coreRows) {
+      const current = snapshots.get(row.workspaceId) ?? { tenantId: row.tenantId, core: {}, business: {} };
+      current.core = row.state as unknown as CoreSnapshotState;
+      snapshots.set(row.workspaceId, current);
+    }
+    for (const row of businessRows) {
+      const current = snapshots.get(row.workspaceId) ?? { tenantId: row.tenantId, core: {}, business: {} };
+      current.business = row.state as unknown as BusinessSnapshotState;
+      snapshots.set(row.workspaceId, current);
+    }
 
     const results: BackfillTenantResult[] = [];
-    for (const tenantId of tenantIds) {
-      const core = (coreRows.find((row) => row.tenantId === tenantId)?.state ?? {}) as unknown as CoreSnapshotState;
-      const business = businessByTenant.get(tenantId) ?? {};
+    for (const [workspaceId, snapshot] of snapshots) {
+      const { tenantId, core, business } = snapshot;
       try {
-        results.push(await this.backfillTenant(tenantId, core, business));
+        results.push(await this.backfillTenant(tenantId, workspaceId, core, business));
       } catch (error) {
         const reason = (error as Error).message;
-        this.logger.error(`租户 ${tenantId} 快照回填失败，已回滚该租户：${reason}`);
-        results.push({ tenantId, skipped: true, reason, inserted: {} });
+        this.logger.error(`租户 ${tenantId} 空间 ${workspaceId} 快照回填失败，已回滚该空间：${reason}`);
+        results.push({ tenantId, workspaceId, skipped: true, reason, inserted: {} });
       }
     }
 
@@ -194,6 +203,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
    */
   private async alreadyBackfilled(
     tenantId: string,
+    workspaceId: string,
     core: CoreSnapshotState,
     business: BusinessSnapshotState
   ) {
@@ -201,118 +211,118 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
       {
         keys: (core.operators ?? []).map((row) => row.id),
         existing: async () =>
-          (await this.prisma.rentalFulfillmentOperator.findMany({ where: { tenantId }, select: { id: true } }))
+          (await this.prisma.rentalFulfillmentOperator.findMany({ where: { tenantId, workspaceId }, select: { id: true } }))
             .map((row) => row.id)
       },
       {
         keys: (core.locations ?? []).map((row) => row.id),
         existing: async () =>
-          (await this.prisma.rentalFulfillmentLocation.findMany({ where: { tenantId }, select: { id: true } }))
+          (await this.prisma.rentalFulfillmentLocation.findMany({ where: { tenantId, workspaceId }, select: { id: true } }))
             .map((row) => row.id)
       },
       {
         keys: (core.itemGroups ?? []).map((row) => row.id),
         existing: async () =>
-          (await this.prisma.rentalItemGroup.findMany({ where: { tenantId }, select: { id: true } }))
+          (await this.prisma.rentalItemGroup.findMany({ where: { tenantId, workspaceId }, select: { id: true } }))
             .map((row) => row.id)
       },
       { keys: (core.assets ?? []).map((row) => row.id), existing: async () =>
-          (await this.prisma.rentalAsset.findMany({ where: { tenantId }, select: { id: true } }))
+          (await this.prisma.rentalAsset.findMany({ where: { tenantId, workspaceId }, select: { id: true } }))
             .map((row) => row.id) },
       {
         keys: (core.stockBalances ?? []).map((row) => row.id),
         existing: async () =>
-          (await this.prisma.rentalStockBalance.findMany({ where: { tenantId }, select: { id: true } }))
+          (await this.prisma.rentalStockBalance.findMany({ where: { tenantId, workspaceId }, select: { id: true } }))
             .map((row) => row.id)
       },
       {
         keys: (core.couponTemplates ?? []).map((row) => row.id),
         existing: async () =>
-          (await this.prisma.rentalCouponTemplate.findMany({ where: { tenantId }, select: { id: true } }))
+          (await this.prisma.rentalCouponTemplate.findMany({ where: { tenantId, workspaceId }, select: { id: true } }))
             .map((row) => row.id)
       },
       {
         keys: (core.inspectionTemplates ?? []).map((row) => row.id),
         existing: async () =>
-          (await this.prisma.rentalInspectionTemplate.findMany({ where: { tenantId }, select: { id: true } }))
+          (await this.prisma.rentalInspectionTemplate.findMany({ where: { tenantId, workspaceId }, select: { id: true } }))
             .map((row) => row.id)
       },
       { keys: (core.orders ?? []).map((row) => row.id), existing: async () =>
-          (await this.prisma.rentalOrder.findMany({ where: { tenantId }, select: { id: true } }))
+          (await this.prisma.rentalOrder.findMany({ where: { tenantId, workspaceId }, select: { id: true } }))
             .map((row) => row.id) },
       {
         keys: (core.inspections ?? []).map((row) => row.id),
         existing: async () =>
-          (await this.prisma.rentalInspectionRecord.findMany({ where: { tenantId }, select: { id: true } }))
+          (await this.prisma.rentalInspectionRecord.findMany({ where: { tenantId, workspaceId }, select: { id: true } }))
             .map((row) => row.id)
       },
       { keys: (business.quotes ?? []).map((row) => row.id), existing: async () =>
-          (await this.prisma.rentalQuote.findMany({ where: { tenantId }, select: { id: true } }))
+          (await this.prisma.rentalQuote.findMany({ where: { tenantId, workspaceId }, select: { id: true } }))
             .map((row) => row.id) },
       {
         keys: (business.customerCoupons ?? []).map((row) => row.id),
         existing: async () =>
-          (await this.prisma.rentalCustomerCoupon.findMany({ where: { tenantId }, select: { id: true } }))
+          (await this.prisma.rentalCustomerCoupon.findMany({ where: { tenantId, workspaceId }, select: { id: true } }))
             .map((row) => row.id)
       },
       {
         keys: (business.rewardLedger ?? []).map((row) => row.id),
         existing: async () =>
-          (await this.prisma.rentalRewardLedgerEntry.findMany({ where: { tenantId }, select: { id: true } }))
+          (await this.prisma.rentalRewardLedgerEntry.findMany({ where: { tenantId, workspaceId }, select: { id: true } }))
             .map((row) => row.id)
       },
       {
         keys: (business.notificationTemplates ?? []).map((row) => row.id),
         existing: async () =>
-          (await this.prisma.rentalNotificationTemplate.findMany({ where: { tenantId }, select: { id: true } }))
+          (await this.prisma.rentalNotificationTemplate.findMany({ where: { tenantId, workspaceId }, select: { id: true } }))
             .map((row) => row.id)
       },
       {
         keys: (business.notificationLogs ?? []).map((row) => row.id),
         existing: async () =>
-          (await this.prisma.rentalNotificationLog.findMany({ where: { tenantId }, select: { id: true } }))
+          (await this.prisma.rentalNotificationLog.findMany({ where: { tenantId, workspaceId }, select: { id: true } }))
             .map((row) => row.id)
       },
       {
         keys: (business.pricingPlans ?? []).map((row) => row.id),
         existing: async () =>
-          (await this.prisma.rentalPricingPlan.findMany({ where: { tenantId }, select: { id: true } }))
+          (await this.prisma.rentalPricingPlan.findMany({ where: { tenantId, workspaceId }, select: { id: true } }))
             .map((row) => row.id)
       },
       {
         keys: (business.discountPlans ?? []).map((row) => row.id),
         existing: async () =>
-          (await this.prisma.rentalDiscountPlan.findMany({ where: { tenantId }, select: { id: true } }))
+          (await this.prisma.rentalDiscountPlan.findMany({ where: { tenantId, workspaceId }, select: { id: true } }))
             .map((row) => row.id)
       },
       {
         keys: (business.services ?? []).map((row) => row.id),
         existing: async () =>
-          (await this.prisma.rentalValueAddedService.findMany({ where: { tenantId }, select: { id: true } }))
+          (await this.prisma.rentalValueAddedService.findMany({ where: { tenantId, workspaceId }, select: { id: true } }))
             .map((row) => row.id)
       },
       {
         keys: (business.ruleVersions ?? []).map((row) => row.id),
         existing: async () =>
-          (await this.prisma.rentalRuleVersion.findMany({ where: { tenantId }, select: { id: true } }))
+          (await this.prisma.rentalRuleVersion.findMany({ where: { tenantId, workspaceId }, select: { id: true } }))
             .map((row) => row.id)
       },
       {
         keys: (business.benefitAccounts ?? []).map((row) => row.customerId),
         existing: async () =>
-          (await this.prisma.rentalBenefitAccount.findMany({ where: { tenantId }, select: { customerId: true } }))
+          (await this.prisma.rentalBenefitAccount.findMany({ where: { tenantId, workspaceId }, select: { customerId: true } }))
             .map((row) => row.customerId)
       },
       {
         keys: (business.referrals ?? []).map((row) => row.inviteeCustomerId),
         existing: async () =>
-          (await this.prisma.rentalReferral.findMany({ where: { tenantId }, select: { inviteeCustomerId: true } }))
+          (await this.prisma.rentalReferral.findMany({ where: { tenantId, workspaceId }, select: { inviteeCustomerId: true } }))
             .map((row) => row.inviteeCustomerId)
       },
       {
         keys: (business.calendars ?? []).map((row) => String(row.year)),
         existing: async () =>
-          (await this.prisma.rentalBusinessCalendar.findMany({ where: { tenantId }, select: { year: true } }))
+          (await this.prisma.rentalBusinessCalendar.findMany({ where: { tenantId, workspaceId }, select: { year: true } }))
             .map((row) => String(row.year))
       }
     ];
@@ -328,15 +338,22 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
 
   private async backfillTenant(
     tenantId: string,
+    workspaceId: string,
     core: CoreSnapshotState,
     business: BusinessSnapshotState
   ): Promise<BackfillTenantResult> {
-    if (await this.alreadyBackfilled(tenantId, core, business)) {
-      return { tenantId, skipped: true, reason: "已存在规范化数据", inserted: {} };
+    if (await this.alreadyBackfilled(tenantId, workspaceId, core, business)) {
+      return { tenantId, workspaceId, skipped: true, reason: "已存在规范化数据", inserted: {} };
     }
     // 租户必须存在，否则所有外键都会失败——这属于数据不一致，应明确报错。
     const tenant = await this.prisma.tenant.findUnique({ where: { id: tenantId }, select: { id: true } });
     if (!tenant) throw new Error("Tenant 表中不存在该租户");
+
+    const workspace = await this.prisma.businessWorkspace.findFirst({
+      where: { id: workspaceId, tenantId },
+      select: { id: true }
+    });
+    if (!workspace) throw new Error("快照所属经营空间不存在或不属于该租户");
 
     const inserted: Record<string, number> = {};
     const count = (key: string, n: number) => {
@@ -411,9 +428,10 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
           const settings = core.businessSettings as TenantRentalBusinessSettings & { updatedBy?: string };
           await this.writeOne("rentalTenantBusinessSettings", divergences, () =>
             tx.rentalTenantBusinessSettings.upsert({
-            where: { tenantId },
+            where: { workspaceId },
             create: {
               tenantId,
+              workspaceId,
               categoryCode: upperEnum(categoryCode, "businessSettings.categoryCode"),
               configVersion: settings.configVersion ?? "0.1.0",
               settings: json(settings),
@@ -430,16 +448,17 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             "rentalFulfillmentOperator",
             operator.id,
             () => tx.rentalFulfillmentOperator.findUnique({
-              where: { tenantId_code: { tenantId, code: operator.code } },
+              where: { workspaceId_code: { workspaceId, code: operator.code } },
               select: { id: true }
             }),
             () =>
             tx.rentalFulfillmentOperator.upsert({
-            where: { tenantId_code: { tenantId, code: operator.code } },
+            where: { workspaceId_code: { workspaceId, code: operator.code } },
             update: {},
             create: {
               id: operator.id,
               tenantId,
+              workspaceId,
               code: operator.code,
               name: operator.name,
               type: operator.type,
@@ -461,16 +480,17 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             "rentalFulfillmentLocation",
             location.id,
             () => tx.rentalFulfillmentLocation.findUnique({
-              where: { tenantId_code: { tenantId, code: location.code } },
+              where: { workspaceId_code: { workspaceId, code: location.code } },
               select: { id: true }
             }),
             () =>
             tx.rentalFulfillmentLocation.upsert({
-            where: { tenantId_code: { tenantId, code: location.code } },
+            where: { workspaceId_code: { workspaceId, code: location.code } },
             update: {},
             create: {
               id: location.id,
               tenantId,
+              workspaceId,
               code: location.code,
               name: location.name,
               type: location.type,
@@ -502,16 +522,17 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             "rentalItemGroup",
             group.id,
             () => tx.rentalItemGroup.findUnique({
-              where: { tenantId_code: { tenantId, code: group.code } },
+              where: { workspaceId_code: { workspaceId, code: group.code } },
               select: { id: true }
             }),
             () =>
             tx.rentalItemGroup.upsert({
-            where: { tenantId_code: { tenantId, code: group.code } },
+            where: { workspaceId_code: { workspaceId, code: group.code } },
             update: {},
             create: {
               id: group.id,
               tenantId,
+              workspaceId,
               categoryCode: upperEnum(group.categoryCode, `itemGroup(${group.code}).categoryCode`),
               code: group.code,
               name: group.name,
@@ -571,16 +592,17 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             "rentalAsset",
             asset.id,
             () => tx.rentalAsset.findUnique({
-              where: { tenantId_assetNo: { tenantId, assetNo: asset.assetNo } },
+              where: { workspaceId_assetNo: { workspaceId, assetNo: asset.assetNo } },
               select: { id: true }
             }),
             () =>
             tx.rentalAsset.upsert({
-            where: { tenantId_assetNo: { tenantId, assetNo: asset.assetNo } },
+            where: { workspaceId_assetNo: { workspaceId, assetNo: asset.assetNo } },
             update: {},
             create: {
               id: asset.id,
               tenantId,
+              workspaceId,
               itemGroupId,
               assetNo: asset.assetNo,
               serialNo: asset.serialNo ?? null,
@@ -609,6 +631,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             create: {
               id: stock.id,
               tenantId,
+              workspaceId,
               itemGroupId,
               locationId,
               onHandQuantity: stock.onHandQuantity ?? 0,
@@ -625,16 +648,17 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             "rentalCouponTemplate",
             template.id,
             () => tx.rentalCouponTemplate.findUnique({
-              where: { tenantId_code: { tenantId, code: template.code } },
+              where: { workspaceId_code: { workspaceId, code: template.code } },
               select: { id: true }
             }),
             () =>
             tx.rentalCouponTemplate.upsert({
-            where: { tenantId_code: { tenantId, code: template.code } },
+            where: { workspaceId_code: { workspaceId, code: template.code } },
             update: {},
             create: {
               id: template.id,
               tenantId,
+              workspaceId,
               code: template.code,
               name: template.name,
               discountType: template.discountType,
@@ -673,6 +697,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             create: {
               id: coupon.id,
               tenantId,
+              workspaceId,
               customerId: coupon.customerId,
               templateId,
               templateCode: coupon.templateCode,
@@ -699,19 +724,20 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             template.id,
             () => tx.rentalInspectionTemplate.findUnique({
               where: {
-                tenantId_code_version: { tenantId, code: template.code, version: template.version ?? "1.0" }
+                workspaceId_code_version: { workspaceId, code: template.code, version: template.version ?? "1.0" }
               },
               select: { id: true }
             }),
             () =>
             tx.rentalInspectionTemplate.upsert({
             where: {
-              tenantId_code_version: { tenantId, code: template.code, version: template.version ?? "1.0" }
+              workspaceId_code_version: { workspaceId, code: template.code, version: template.version ?? "1.0" }
             },
             update: {},
             create: {
               id: template.id,
               tenantId,
+              workspaceId,
               categoryCode: upperEnum(template.categoryCode, `inspectionTemplate(${template.code}).categoryCode`),
               code: template.code,
               name: template.name,
@@ -735,6 +761,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             create: {
               id: plan.id,
               tenantId,
+              workspaceId,
               categoryCode: upperEnum(plan.categoryCode, `pricingPlan(${plan.code}).categoryCode`),
               code: plan.code,
               name: plan.name,
@@ -761,6 +788,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             create: {
               id: plan.id,
               tenantId,
+              workspaceId,
               categoryCode: upperEnum(plan.categoryCode, `discountPlan(${plan.code}).categoryCode`),
               code: plan.code,
               name: plan.name,
@@ -793,6 +821,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             create: {
               id: service.id,
               tenantId,
+              workspaceId,
               categoryCode: upperEnum(service.categoryCode, `service(${service.code}).categoryCode`),
               code: service.code,
               name: service.name,
@@ -823,6 +852,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             create: {
               id: rule.id,
               tenantId,
+              workspaceId,
               categoryCode: upperEnum(rule.categoryCode, `ruleVersion(${rule.version}).categoryCode`),
               version: rule.version,
               status: rule.status ?? "draft",
@@ -839,10 +869,11 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
         for (const calendar of business.calendars ?? []) {
           await this.writeOne("rentalBusinessCalendar", divergences, () =>
             tx.rentalBusinessCalendar.upsert({
-            where: { tenantId_year: { tenantId, year: calendar.year } },
+            where: { workspaceId_year: { workspaceId, year: calendar.year } },
             update: {},
             create: {
               tenantId,
+              workspaceId,
               year: calendar.year,
               region: calendar.region ?? "CN",
               version: calendar.version ?? "1.0",
@@ -864,8 +895,8 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             template.id,
             () => tx.rentalNotificationTemplate.findUnique({
               where: {
-                tenantId_eventCode_channel_version: {
-                  tenantId,
+                workspaceId_eventCode_channel_version: {
+                  workspaceId,
                   eventCode: template.eventCode,
                   channel: template.channel,
                   version: template.version ?? "1.0"
@@ -876,8 +907,8 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             () =>
             tx.rentalNotificationTemplate.upsert({
             where: {
-              tenantId_eventCode_channel_version: {
-                tenantId,
+              workspaceId_eventCode_channel_version: {
+                workspaceId,
                 eventCode: template.eventCode,
                 channel: template.channel,
                 version: template.version ?? "1.0"
@@ -887,6 +918,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             create: {
               id: template.id,
               tenantId,
+              workspaceId,
               eventCode: template.eventCode,
               channel: template.channel,
               name: template.name,
@@ -911,6 +943,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             create: {
               id: quote.id,
               tenantId,
+              workspaceId,
               quoteNo: quote.quoteNo,
               categoryCode: upperEnum(quote.categoryCode, `quote(${quote.quoteNo}).categoryCode`),
               request: json(quote.request),
@@ -953,16 +986,17 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             "rentalOrder",
             order.id,
             () => tx.rentalOrder.findUnique({
-              where: { tenantId_orderNo: { tenantId, orderNo: order.orderNo } },
+              where: { workspaceId_orderNo: { workspaceId, orderNo: order.orderNo } },
               select: { id: true }
             }),
             () =>
             tx.rentalOrder.upsert({
-            where: { tenantId_orderNo: { tenantId, orderNo: order.orderNo } },
+            where: { workspaceId_orderNo: { workspaceId, orderNo: order.orderNo } },
             update: {},
             create: {
               id: order.id,
               tenantId,
+              workspaceId,
               orderNo: order.orderNo,
               categoryCode: upperEnum(order.categoryCode, `order(${order.orderNo}).categoryCode`),
               status: upperEnum<$Enums.RentalOrderV1Status>(order.status, `order(${order.orderNo}).status`),
@@ -1048,6 +1082,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               create: {
                 id: reservation.id,
                 tenantId,
+                workspaceId,
                 orderId: resolvedOrderId,
                 orderLineId,
                 itemGroupId,
@@ -1108,6 +1143,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             create: {
               id: record.id,
               tenantId,
+              workspaceId,
               orderId,
               stage: record.stage,
               templateId,
@@ -1139,6 +1175,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             create: {
               id: log.id,
               tenantId,
+              workspaceId,
               templateId,
               templateVersion: log.templateVersion ?? "1.0",
               eventCode: log.eventCode,
@@ -1169,6 +1206,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             create: {
               id: entry.id,
               tenantId,
+              workspaceId,
               customerId: entry.customerId,
               rewardType: entry.rewardType,
               amount: amount(entry.amount),
@@ -1189,10 +1227,11 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
         for (const account of business.benefitAccounts ?? []) {
           await this.writeOne("rentalBenefitAccount", divergences, () =>
             tx.rentalBenefitAccount.upsert({
-            where: { tenantId_customerId: { tenantId, customerId: account.customerId } },
+            where: { workspaceId_customerId: { workspaceId, customerId: account.customerId } },
             update: {},
             create: {
               tenantId,
+              workspaceId,
               customerId: account.customerId,
               pointsBalance: amount(account.pointsBalance),
               marketingBalance: amount(account.marketingBalance),
@@ -1205,10 +1244,11 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
         for (const referral of business.referrals ?? []) {
           await this.writeOne("rentalReferral", divergences, () =>
             tx.rentalReferral.upsert({
-            where: { tenantId_inviteeCustomerId: { tenantId, inviteeCustomerId: referral.inviteeCustomerId } },
+            where: { workspaceId_inviteeCustomerId: { workspaceId, inviteeCustomerId: referral.inviteeCustomerId } },
             update: {},
             create: {
               tenantId,
+              workspaceId,
               inviteeCustomerId: referral.inviteeCustomerId,
               referrerCustomerId: referral.referrerCustomerId,
               registeredAt: optionalDate(referral.registeredAt) ?? new Date()
@@ -1231,6 +1271,6 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
     const summary = Object.entries(inserted).map(([key, value]) => `${key}=${value}`).join(" ");
     // 计数是"本次处理的快照条目数"，不等于"新插入行数"——写入是 upsert，已存在的条目也计入。
     this.logger.log(`租户 ${tenantId} 回填完成（按快照条目计）：${summary || "无可回填数据"}`);
-    return { tenantId, skipped: false, inserted };
+    return { tenantId, workspaceId, skipped: false, inserted };
   }
 }

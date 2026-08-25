@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import type { SystemUserRow } from "@store-rental/shared";
 import { PrismaService } from "../modules/database/prisma.service";
+import { getRequestWorkspaceId } from "./request-identity";
 
 export interface OperationLogInput {
   tenantId?: string;
@@ -47,6 +48,10 @@ export class OperationLogService {
       await this.prisma.operationLog.create({
         data: {
           tenantId,
+          // SPACE-03：经营空间归属取自**会话**，不接受调用方传入，也不回退默认空间。
+          // 平台域动作（租户创建/冻结、平台配置）本就没有空间，留 NULL 表示"不属于
+          // 任何经营空间"——比塞一个看似精确的假归属诚实。
+          workspaceId: getRequestWorkspaceId() ?? null,
           userId: input.userId ?? input.user?.id,
           orderId: input.orderId,
           rentalOrderId: input.rentalOrderId,

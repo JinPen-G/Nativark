@@ -186,6 +186,10 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     { refreshToken: stringSchema },
     ["refreshToken"]
   ),
+  SwitchWorkspaceRequest: objectOf(
+    { workspaceId: stringSchema },
+    ["workspaceId"]
+  ),
   ChangePasswordRequest: objectOf(
     {
       currentPassword: { type: "string", format: "password" },
@@ -799,8 +803,20 @@ const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
   backlogOperation("get", "/api/notifications/logs", "Notifications", "listNotificationLogs", "List notification logs", ["system:notifications:manage"]),
   backlogOperation("post", "/api/notifications/send", "Notifications", "sendNotification", "Send notification", ["system:notifications:manage"]),
   backlogOperation("get", "/api/notifications/templates", "Notifications", "listNotificationTemplates", "List notification templates", ["system:notifications:manage"]),
-  backlogOperation("post", "/api/platform/organizations", "Platform", "createOrganization", "Create organization", ["system:org:manage"]),
-  backlogOperation("put", "/api/platform/organizations/{id}", "Platform", "updateOrganization", "Update organization", ["system:org:manage"]),
+  // SPACE-01：经营空间主档与成员关系的最小管理面。
+  // 刻意没有"切换当前空间"操作——会话空间上下文属 SPACE-02。
+  backlogOperation("get", "/api/platform/workspaces", "Platform", "listBusinessWorkspaces", "List business workspaces", ["system:org:manage"]),
+  backlogOperation("post", "/api/platform/workspaces", "Platform", "createBusinessWorkspace", "Create business workspace", ["system:org:manage"]),
+  backlogOperation("put", "/api/platform/workspaces/{id}", "Platform", "updateBusinessWorkspace", "Update business workspace", ["system:org:manage"]),
+  backlogOperation("get", "/api/platform/workspaces/{id}/members", "Platform", "listWorkspaceMembers", "List workspace members", ["system:org:manage"]),
+  backlogOperation("put", "/api/platform/workspaces/{id}/members", "Platform", "saveWorkspaceMember", "Save workspace member", ["system:org:manage"]),
+  // SPACE-04：租户共享客户主档与空间接入。
+  // customers 按租户共享（跨空间可见是设计），workspace-customers 按当前会话空间隔离。
+  backlogOperation("get", "/api/platform/customers", "Platform", "listSharedCustomers", "List tenant shared customers", ["store-rental:member:view"]),
+  backlogOperation("post", "/api/platform/customers", "Platform", "registerSharedCustomer", "Register shared customer in current workspace", ["store-rental:member:manage"]),
+  backlogOperation("get", "/api/platform/workspace-customers", "Platform", "listWorkspaceCustomers", "List customers linked to current workspace", ["store-rental:member:view"]),
+  backlogOperation("post", "/api/platform/workspace-customers", "Platform", "linkCustomerToWorkspace", "Link existing shared customer to current workspace", ["store-rental:member:manage"]),
+  backlogOperation("post", "/api/platform/organizations", "Platform", "createOrganization", "Create organization", ["system:org:manage"]),  backlogOperation("put", "/api/platform/organizations/{id}", "Platform", "updateOrganization", "Update organization", ["system:org:manage"]),
   backlogOperation("put", "/api/platform/organizations/{id}/status", "Platform", "setOrganizationStatus", "Set organization status", ["system:org:manage"]),
   backlogOperation("get", "/api/reports/dashboard", "Reports", "getReportsDashboard", "Get reports dashboard", ["reports:view"]),
   backlogOperation("get", "/api/reports/exports", "Reports", "listReportExports", "List report exports", ["reports:view"]),
@@ -927,6 +943,18 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     permissions: [],
     authRequired: true,
     requestSchema: "ChangePasswordRequest",
+    responseSchema: "LoginResponse"
+  },
+  {
+    // SPACE-02：切换当前经营空间。只接受 workspaceId，其余会话范围从令牌与会话推导。
+    method: "post",
+    path: "/api/auth/switch-workspace",
+    tag: "Auth",
+    operationId: "switchWorkspace",
+    summary: "Switch current business workspace",
+    permissions: [],
+    authRequired: true,
+    requestSchema: "SwitchWorkspaceRequest",
     responseSchema: "LoginResponse"
   },
   {

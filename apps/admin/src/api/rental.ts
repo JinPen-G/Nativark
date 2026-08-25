@@ -17,6 +17,7 @@ import type {
   FinanceReconciliationRow,
   FinanceTransactionRow,
   InfraDashboardResult,
+  BusinessWorkspace,
   LoginRequest,
   LoginResponse,
   ChangePasswordRequest,
@@ -97,6 +98,9 @@ export const api = {
   refresh: (payload: RefreshSessionRequest) => request<LoginResponse>("/auth/refresh", { method: "post", data: payload }),
   logout: (payload: RefreshSessionRequest) => request<{ loggedOut: boolean }>("/auth/logout", { method: "post", data: payload }),
   changePassword: (payload: ChangePasswordRequest) => request<LoginResponse>("/auth/change-password", { method: "post", data: payload }),
+  // SPACE-05：切换当前经营空间。服务端重新校验成员资格与空间状态。
+  switchWorkspace: (payload: { workspaceId: string }) => request<LoginResponse>("/auth/switch-workspace", { method: "post", data: payload }),
+  businessWorkspaces: () => request<BusinessWorkspace[]>("/platform/workspaces"),
   me: () => request<AuthUser>("/auth/me"),
   sessionContext: () => request<SessionContextResponse>("/auth/session-context"),
   dashboard: () => request<StoreRentalReportDashboard>("/reports/dashboard"),

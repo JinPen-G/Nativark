@@ -7,6 +7,7 @@ import { APP_NAVIGATION, canAccessRoute } from "@/app/navigation";
 import { useAppearance } from "@/app/theme";
 import { useAuthStore } from "@/features/auth/authStore";
 import { AppearanceSwitcher } from "./AppearanceSwitcher";
+import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 
 const { Header, Sider, Content } = Layout;
 
@@ -71,6 +72,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </button>
           <div />
           <Space className="header-actions" size={8}>
+            <WorkspaceSwitcher />
             <AppearanceSwitcher />
             <span className="header-divider" />
             <Dropdown placement="bottomRight" menu={{ items: [{ key: "logout", icon: <LogoutOutlined />, label: "退出登录", onClick: () => { logout(); navigate("/login"); } }] }}>

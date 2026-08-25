@@ -172,11 +172,30 @@ export interface LoginResponse {
   expiresIn: number;
   tenant: TenantContext;
   user: AuthUser;
+  /**
+   * SPACE-02：该账号可进入的经营空间（成员关系启用且空间启用）。
+   * 切换空间时 refreshToken 不变，因此切换响应里它为空串。
+   */
+  workspaces?: BusinessWorkspace[];
+  /** 当前经营空间。平台管理租户没有经营空间时为空。 */
+  currentWorkspaceId?: string;
+}
+
+export interface SwitchWorkspaceRequest {
+  workspaceId: string;
 }
 
 export interface SessionContextResponse {
   tenant: TenantContext;
   user: AuthUser;
+  /**
+   * SPACE-05：可进入的经营空间与当前空间。
+   *
+   * 必须由 session-context 返回，否则刷新页面后前端只剩 token，
+   * 切换器无从知道「当前在哪个空间、还能去哪些空间」，只能退化成重新登录。
+   */
+  workspaces?: BusinessWorkspace[];
+  currentWorkspaceId?: string;
 }
 
 export interface RefreshSessionRequest {
@@ -300,7 +319,8 @@ export interface SystemUserRow {
 
 export interface SaveSystemUserRequest {
   id?: string;
-  tenantId: string;
+  /** SaaS 管理员可指定；租户内管理员省略时由当前会话租户补齐。 */
+  tenantId?: string;
   account: string;
   displayName: string;
   phone?: string;
@@ -593,7 +613,7 @@ export interface TenantBootstrapRequest {
   tenantCode: string;
   tenantName: string;
   categoryCode: RentalCategoryCode;
-  operator: string;
+  operator?: string;
   adminAccount: string;
   adminDisplayName: string;
   adminPhone?: string;
@@ -3867,6 +3887,133 @@ export interface RentalCategoryDefinition {
   attributeSchema: Record<string, unknown>;
   businessModel: RentalCategoryBusinessModel;
   version: string;
+}
+
+/** SPACE-01：经营空间状态。冻结可恢复，停用是终态。 */
+export type BusinessWorkspaceStatus = "active" | "frozen" | "disabled";
+
+/**
+ * SPACE-01：经营空间。
+ *
+ * 一个 SaaS 租户可有多个空间，每个空间只经营一种品类（需求 3）。
+ * 品类在创建时确定，不通过普通设置切换——变更品类必须新建空间或显式迁移，
+ * 因此更新接口不接受 categoryCode。
+ */
+export interface BusinessWorkspace {
+  id: string;
+  tenantId: string;
+  code: string;
+  name: string;
+  categoryCode: RentalCategoryCode;
+  status: BusinessWorkspaceStatus;
+  /** 升级兼容层：既有业务全部归属租户的默认空间。每租户至多一个。 */
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * SPACE-01：账号在某个经营空间的成员关系。
+ *
+ * 角色与数据范围记在成员关系上，因为同一账号可在不同空间拥有不同角色和范围
+ * （需求 3）。`roleId` 为空表示沿用租户级默认角色（升级兼容），
+ * `dataScope` 为空表示沿用角色自带范围。
+ */
+export interface WorkspaceMember {
+  tenantId: string;
+  workspaceId: string;
+  userId: string;
+  roleId?: string;
+  dataScope?: SystemDataScope;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateBusinessWorkspaceRequest {
+  code: string;
+  name: string;
+  categoryCode: RentalCategoryCode;
+}
+
+/** 不含 categoryCode：品类创建后不可通过普通设置变更（需求 3）。 */
+export interface UpdateBusinessWorkspaceRequest {
+  name?: string;
+  status?: BusinessWorkspaceStatus;
+}
+
+export interface SaveWorkspaceMemberRequest {
+  userId: string;
+  roleId?: string;
+  dataScope?: SystemDataScope;
+  isActive?: boolean;
+}
+
+/**
+ * SPACE-04：租户级共享客户主档。
+ *
+ * 身份在租户内共享（同一手机号只有一份主档），而订单、优惠券、积分、
+ * 会员等级和营销余额按经营空间隔离——后者不在本类型里，各由自己的事实承载。
+ *
+ * `qualifications` 存资质**原始事实**（如驾驶证是否已验证），不存"是否适用"的结论：
+ * 驾驶证对 vehicle 空间有意义、对 camera 空间无意义，适用性由目标空间品类规则判断。
+ */
+export interface SharedCustomerProfile {
+  id: string;
+  tenantId: string;
+  customerType: "personal" | "corporate";
+  name: string;
+  phone: string;
+  phoneMasked: string;
+  email?: string;
+  identityVerified: boolean;
+  identityNoMasked?: string;
+  qualifications: Record<string, unknown>;
+  corporateName?: string;
+  corporateTaxNo?: string;
+  status: "active" | "suspended";
+  /** 回填来源的旧会员主键，仅用于对账追溯，不参与业务判定。 */
+  sourceMemberId?: string;
+  createdAt: string;
+  updatedAt: string;
+  /** 该客户已接入的经营空间关系。列表接口默认带出，便于判断"是否需要接入本空间"。 */
+  workspaceLinks?: CustomerWorkspaceLink[];
+}
+
+/** SPACE-04：客户在某个经营空间的业务关系。会员等级按空间隔离。 */
+export interface CustomerWorkspaceLink {
+  id: string;
+  tenantId: string;
+  workspaceId: string;
+  customerId: string;
+  levelName: string;
+  status: "active" | "suspended";
+  firstOrderAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SaveSharedCustomerRequest {
+  customerType: "personal" | "corporate";
+  name: string;
+  phone: string;
+  email?: string;
+  identityVerified?: boolean;
+  identityNo?: string;
+  qualifications?: Record<string, unknown>;
+  corporateName?: string;
+  corporateTaxNo?: string;
+}
+
+/**
+ * 把已存在的共享客户接入当前经营空间。
+ *
+ * 刻意不接受 workspaceId：目标空间一律取自服务端会话，
+ * 否则客户端可以把客户接入自己无权进入的空间。
+ */
+export interface LinkCustomerToWorkspaceRequest {
+  customerId: string;
+  levelName?: string;
 }
 
 export interface TenantRentalProfile {

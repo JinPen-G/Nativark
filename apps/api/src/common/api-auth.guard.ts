@@ -96,6 +96,35 @@ function requiredPermissions(method: string, path: string) {
   if (path.startsWith("/platform/organizations") || path.startsWith("/platform/users")) {
     return ["system:user:manage"];
   }
+  if (path.startsWith("/platform/workspace-customers")) {
+    // SPACE-04：共享客户主档按会员权限判定，与旧车辆域会员页面一致。
+    // 读写分开：查看不应要求管理权限，否则运营查客户就得给写权限。
+    return method === "GET"
+      ? ["store-rental:member:view", "store-rental:member:manage"]
+      : ["store-rental:member:manage"];
+  }
+  // SPACE-01/02：经营空间主档与成员关系属于租户管理能力。
+  //
+  // 必须显式列出：本函数末尾兜底 `return []`，而 hasAnyPermission 对空数组
+  // 直接放行。漏列等于把「新建空间、改空间状态、增删空间成员」开放给任何
+  // 能登录的账号——普通运营账号可以把自己加进任一空间并附带租户管理员角色，
+  // 既跨空间读数据又提权。注意不能靠 `/platform/workspace-customers` 覆盖：
+  // 两者互不为前缀，必须分开判定，且这条要放在它之后避免被前缀吃掉。
+  if (path.startsWith("/platform/workspaces")) {
+    // 成员关系直接决定谁能进入哪个空间、以何角色进入，等价于授权操作，
+    // 因此读也要求管理权限；空间列表本身按用户管理权限放行读。
+    if (path.includes("/members")) {
+      return ["system:user:manage"];
+    }
+    return method === "GET"
+      ? ["system:user:manage", "system:tenant:manage"]
+      : ["system:tenant:manage"];
+  }
+  if (path.startsWith("/platform/customers")) {
+    return method === "GET"
+      ? ["store-rental:member:view", "store-rental:member:manage"]
+      : ["store-rental:member:manage"];
+  }
   if (path.startsWith("/platform/tenants")) {
     return ["system:tenant:manage"];
   }
@@ -334,7 +363,13 @@ export class ApiAuthGuard implements CanActivate {
 
     const authorization = request.headers.authorization;
     const token = Array.isArray(authorization) ? authorization[0] : authorization;
-    const user = await this.authService.resolveAccessToken(token);
+    const accessContext = await this.authService.resolveAccessContext(token, {
+      // 当前空间刚被停用/撤销时，仍需允许用户进入切换入口；目标空间
+      // 会在 AuthService.switchWorkspace 内再次按成员关系校验。
+      allowInvalidWorkspace: path.startsWith("/auth/") || path.startsWith("/platform/")
+    });
+    const user = accessContext?.user;
+    const workspaceId = accessContext?.workspaceId;
 
     if (!user) {
       throw new UnauthorizedException("请先登录");
@@ -368,22 +403,67 @@ export class ApiAuthGuard implements CanActivate {
     if (!hasAnyPermission(user, permissions)) {
       throw new ForbiddenException("当前账号无权访问该功能");
     }
+    if (!user.isSaasAdmin && (path === "/store-rental" || path.startsWith("/store-rental/"))) {
+      // 旧车辆域的持久化表尚未完成 workspaceId 迁移。非默认空间不能继续
+      // 读取同一租户级数据，否则仅靠 wid 入 token 并不能形成真实隔离。
+      await this.authService.assertLegacyVehicleDomainWorkspace(user.tenantId, workspaceId);
+    }
     const capability = requiredCapability(path);
     const vehicleCategoryRequired = requiresVehicleCategory(path);
     if ((capability || vehicleCategoryRequired) && !user.isSaasAdmin) {
-      const tenant = await this.authService.getTenantContext(user.tenantId);
-      if (vehicleCategoryRequired && tenant.categoryCode !== RentalCategoryCode.Vehicle) {
-        throw new ForbiddenException("该接口属于旧车辆兼容域，当前租户经营品类不可用");
+      // SPACE-03：品类与能力按**当前经营空间**判定，不能用租户级档案——
+      // 同租户多个空间品类不同时，那会让 camping 空间按 camera 的能力集放行。
+      const scope = await this.authService.getCategoryContext(user.tenantId, workspaceId);
+      if (vehicleCategoryRequired && scope.categoryCode !== RentalCategoryCode.Vehicle) {
+        throw new ForbiddenException("该接口属于旧车辆兼容域，当前经营空间品类不可用");
       }
-      if (capability && !tenant.capabilities?.includes(capability)) {
-        throw new ForbiddenException("当前租户经营品类未启用该业务能力");
+      if (capability && !scope.capabilities?.includes(capability)) {
+        throw new ForbiddenException("当前经营空间品类未启用该业务能力");
       }
+    }
+
+    // SPACE-02 fail-closed：经营域接口必须有已验证的当前经营空间。
+    //
+    // 只拦经营域（/rental/v1 与 /store-rental），不拦 /auth 与 /platform：
+    // 登录、切换空间、以及租户管理员维护空间本身，都发生在"还没有空间"的时刻。
+    //
+    // 这里刻意不回退到默认空间：默认空间只是升级兼容层，回退会让一个本该被拒绝的
+    // 无空间会话静默拿到某个空间的数据——与 P0-01 的默认租户回退同型。
+    // 例外：品类定义是全局参考数据（且 SaaS 平台管理员被显式允许访问），
+    // 它不属于某个经营空间，要求空间会让平台管理员无法读取品类目录。
+    const workspaceExemptPath = path === "/rental/v1/categories";
+    // 刻意**不**附加 `accessContext.hasWorkspaces` 条件。
+    //
+    // 曾经加过，理由是「一个空间都没有的账号不该被空间检查拦住」——那是错的：
+    // 无空间会话继续往下走时，仓储层的 resolveScopeWorkspaceId 会回退到租户
+    // 默认空间，于是**成员关系为零的账号拿到了默认空间的完整读写权**，
+    // 「账号通过成员关系进入空间」被整条绕过。saveUser 不建成员关系，
+    // 所以新建账号天然处于这个状态，不需要任何数据库直改就能复现。
+    //
+    // 正确语义是一致的 403：没有可进入的空间，就不能访问经营域。
+    // 该账号需要管理员先把它加入某个空间，这正是成员关系存在的意义。
+    if (
+      !workspaceId &&
+      !workspaceExemptPath &&
+      (path.startsWith("/rental/") ||
+        path.startsWith("/store-rental/") ||
+        // SPACE-04：这两条按当前空间读写业务关系，缺空间同样必须 fail-closed。
+        // 不加进来的话，服务层的 requireRequestWorkspaceId() 会抛成 500，
+        // 而正确语义是「请先选择经营空间」的 403。
+        path === "/platform/workspace-customers" ||
+        path.startsWith("/platform/workspace-customers/") ||
+        path === "/platform/customers" ||
+        path.startsWith("/platform/customers/"))
+    ) {
+      throw new ForbiddenException("当前会话没有经营空间，请先选择经营空间");
     }
 
     enterRequestIdentity({
       tenantId: user.tenantId,
       userId: user.id,
-      isSaasAdmin: Boolean(user.isSaasAdmin)
+      isSaasAdmin: Boolean(user.isSaasAdmin),
+      // 只从会话写入，绝不读取请求体或查询参数里的 workspaceId。
+      workspaceId
     });
     request.user = user;
     return true;

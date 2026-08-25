@@ -1,9 +1,14 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "node:crypto";
-import { requireRequestTenantId } from "../../common/request-identity";
+import { requireRequestTenantId, requireRequestWorkspaceId } from "../../common/request-identity";
 import {
   RENTAL_CATEGORY_DEFINITIONS,
+  CreateBusinessWorkspaceRequest,
+  SaveWorkspaceMemberRequest,
+  SaveSharedCustomerRequest,
+  LinkCustomerToWorkspaceRequest,
+  UpdateBusinessWorkspaceRequest,
   GeneratePlatformNumberRequest,
   OrganizationSummary,
   PermissionModule,
@@ -43,10 +48,12 @@ import {
   describeDataPermission
 } from "../../common/data-permission";
 import { PlatformRepository } from "./platform.repository";
+import { SharedCustomerRepository } from "./shared-customer.repository";
 import { RentalCoreService } from "../rental-core/rental-core.service";
 
-interface StoredUser extends SaveSystemUserRequest {
+interface StoredUser extends Omit<SaveSystemUserRequest, "tenantId"> {
   id: string;
+  tenantId: string;
   password: string;
   mustChangePassword?: boolean;
 }
@@ -54,12 +61,28 @@ interface StoredUser extends SaveSystemUserRequest {
 // 平台主体租户：平台级配置（登录安全基线等）的读写与审计范围，区别于业务租户和演示租户
 const PLATFORM_SUBJECT_TENANT_ID = "tenant_platform";
 
+/**
+ * 内存数据源的合成经营空间 id。
+ *
+ * 内存模式没有空间表，但守卫在缺空间时 fail-closed，故给它一个稳定的占位空间，
+ * 使内存模式的会话行为与 mysql 模式一致（都带空间），而不是靠豁免绕过检查。
+ * 前缀 `ws_memory_` 便于在日志里一眼识别它不是真实空间。
+ */
+const MEMORY_MODE_WORKSPACE_ID = "ws_memory_default";
+
 @Injectable()
 export class PlatformService {
   constructor(
     private readonly configService: ConfigService,
     private readonly platformRepository: PlatformRepository,
-    @Optional() private readonly rentalCoreService?: RentalCoreService
+    @Optional() private readonly rentalCoreService?: RentalCoreService,
+    // SPACE-04：放在最后且 @Optional。
+    //
+    // 不能插到 rentalCoreService 之前：多个不连库的测试用位置参数构造本服务
+    // （`new PlatformService(config, undefined, rentalCore)`），插在中间会让
+    // rentalCore 落到错误的槽位，租户初始化的回调不再注册默认经营空间，
+    // 表现为后续调用报「当前 SaaS 租户尚未建立经营空间」——实测踩过。
+    @Optional() private readonly sharedCustomers?: SharedCustomerRepository
   ) {}
 
   private readonly tenants: TenantSummary[] = [
@@ -370,6 +393,8 @@ export class PlatformService {
     refreshTokenHash: string;
     expiresAt: Date;
     revokedAt?: Date;
+    /** SPACE-02：内存模式没有经营空间，这里恒为 null，使经营接口 fail-closed。 */
+    currentWorkspaceId?: string | null;
   }>();
 
   private systemRulesConfig: SystemRulesConfig = {
@@ -1196,6 +1221,8 @@ export class PlatformService {
           await this.rentalCoreService?.initializeTenant(tenantId, input.categoryCode, tx);
         }
       );
+      // bootstrapTenant 的配置写入刚刚随仓储事务提交；现在才可发布/持久化缓存。
+      await this.rentalCoreService?.onApplicationBootstrap();
       await this.rentalCoreService?.persist(result.tenant.tenantId);
       return result;
     }
@@ -1353,6 +1380,127 @@ export class PlatformService {
       return this.platformRepository.findTenantByCode(code);
     }
     return this.tenants.find((tenant) => tenant.tenantCode === code);
+  }
+
+  /**
+   * SPACE-01：经营空间主档与成员关系一律以 MySQL 为事实源。
+   *
+   * 刻意不提供内存模式实现：内存假数据源在本项目造成过 P0-01（跨租户泄露被
+   * 演示固件掩盖），四份文档都写明不得把内存数据源当成持久化的证明。
+   * 空间隔离是安全边界，宁可在无库时明确拒绝，也不给一个"看起来能用"的假实现。
+   */
+  private requireWorkspaceDataSource() {
+    if (!this.useMysqlDataSource()) {
+      throw new BadRequestException("经营空间管理需要 MySQL 数据源，当前为内存演示模式");
+    }
+  }
+
+  listBusinessWorkspaces(currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    return this.platformRepository.listBusinessWorkspaces(currentUser);
+  }
+
+  /**
+   * 共享客户主档仓储只在连库时注入（不连库的单元测试用位置参数构造本服务）。
+   * 缺失时明确拒绝，而不是让 `undefined.xxx` 抛成 500。
+   */
+  private requireSharedCustomers(): SharedCustomerRepository {
+    if (!this.sharedCustomers) {
+      throw new BadRequestException("共享客户主档需要 MySQL 数据源，当前为内存演示模式");
+    }
+    return this.sharedCustomers;
+  }
+
+  /* ---------- SPACE-04：租户共享客户主档 ---------- */
+
+  /**
+   * 列出本租户的共享客户主档。
+   *
+   * 跨空间可见是**设计**：需求要的正是「同一客户无需重复注册即可在两个空间使用」，
+   * 运营在露营空间必须能查到这个客户已在摄影空间注册过，否则只能重复建档。
+   * 业务侧的隔离由 `listWorkspaceCustomers` 承担，两个接口不可混用。
+   */
+  listSharedCustomers(currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireSharedCustomers().listByTenant(tenantId, requireRequestWorkspaceId());
+  }
+
+  /** 列出**当前经营空间**已接入的客户关系。空间取自会话，不接受客户端传入。 */
+  listWorkspaceCustomers(currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    const workspaceId = requireRequestWorkspaceId();
+    return this.requireSharedCustomers().listLinksByWorkspace(tenantId, workspaceId);
+  }
+
+  /**
+   * 在当前空间登记客户。
+   *
+   * 手机号已存在时**不报错也不改主档**，而是把既有客户接入当前空间——
+   * 这正是「共享」的语义。若改成 409，运营在第二个空间就只能换号建档，
+   * 等于把共享主档退化成按空间各存一份。
+   */
+  async registerSharedCustomer(input: SaveSharedCustomerRequest, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    const workspaceId = requireRequestWorkspaceId();
+    if (!input?.phone?.trim()) throw new BadRequestException("客户手机号不能为空");
+    if (!input?.name?.trim()) throw new BadRequestException("客户名称不能为空");
+    const levelName = "普通会员";
+    const customers = this.requireSharedCustomers();
+    const existing = await customers.findByPhone(tenantId, input.phone, workspaceId);
+    if (existing) {
+      await customers.linkToWorkspace(tenantId, workspaceId, existing.id, levelName);
+      const refreshed = await customers.findById(tenantId, existing.id, workspaceId);
+      return refreshed ?? existing;
+    }
+    return customers.createWithLink(tenantId, workspaceId, input, levelName);
+  }
+
+  /** 把已存在的共享客户接入当前空间。目标空间取自会话，客户必须属于同租户。 */
+  async linkCustomerToWorkspace(input: LinkCustomerToWorkspaceRequest, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    const workspaceId = requireRequestWorkspaceId();
+    if (!input?.customerId?.trim()) throw new BadRequestException("客户不能为空");
+    // 必须按 tenantId 校验存在性：否则可以拿别租户的 customerId 建立关系，
+    // 虽然复合外键会在库层拒绝，但那会表现成 500 而不是明确的 404。
+    const customers = this.requireSharedCustomers();
+    const profile = await customers.findById(tenantId, input.customerId.trim(), workspaceId);
+    if (!profile) throw new NotFoundException("共享客户不存在");
+    return customers.linkToWorkspace(
+      tenantId,
+      workspaceId,
+      profile.id,
+      input.levelName?.trim() || "普通会员"
+    );
+  }
+
+  async createBusinessWorkspace(input: CreateBusinessWorkspaceRequest, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    // 需求 4.1：空间档案与其品类配置同事务创建，任一步失败整体回滚。
+    const result = await this.platformRepository.createBusinessWorkspace(input, currentUser, async (tx, workspaceId, tenantId) => {
+      await this.rentalCoreService?.registerWorkspace(workspaceId, tenantId, input.categoryCode, tx);
+    });
+    // 仓储事务已经提交，才允许将新空间发布到本进程缓存。
+    await this.rentalCoreService?.onApplicationBootstrap();
+    return result;
+  }
+
+  updateBusinessWorkspace(id: string, input: UpdateBusinessWorkspaceRequest, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    return this.platformRepository.updateBusinessWorkspace(id, input, currentUser);
+  }
+
+  listWorkspaceMembers(workspaceId: string, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    return this.platformRepository.listWorkspaceMembers(workspaceId, currentUser);
+  }
+
+  saveWorkspaceMember(workspaceId: string, input: SaveWorkspaceMemberRequest, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    return this.platformRepository.saveWorkspaceMember(workspaceId, input, currentUser);
   }
 
   listOrganizations(tenantId?: string, currentUser?: SystemUserRow) {
@@ -1767,6 +1915,7 @@ export class PlatformService {
     const temporaryPassword = input.id ? undefined : `R!${randomUUID().replace(/-/g, "").slice(0, 12)}8a`;
     const payload: StoredUser = {
       ...input,
+      tenantId: targetTenantId,
       id: input.id || `user_${randomUUID()}`,
       account,
       displayName,
@@ -1821,10 +1970,101 @@ export class PlatformService {
     return user && tenant?.tenantStatus === TenantStatus.Active ? this.toUserRow(user) : undefined;
   }
 
-  createAuthSession(input: { id: string; userId: string; refreshTokenHash: string; expiresAt: Date }) {
+  createAuthSession(input: { id: string; userId: string; refreshTokenHash: string; expiresAt: Date; currentWorkspaceId?: string | null }) {
     if (this.useMysqlDataSource()) return this.platformRepository.createAuthSession(input);
     this.authSessions.set(input.id, { ...input });
     return input;
+  }
+
+  async rotateAuthSession(
+    previousSessionId: string,
+    input: { id: string; userId: string; refreshTokenHash: string; expiresAt: Date; currentWorkspaceId?: string | null }
+  ): Promise<boolean> {
+    if (this.useMysqlDataSource()) return this.platformRepository.rotateAuthSession(previousSessionId, input);
+    const previous = this.authSessions.get(previousSessionId);
+    if (!previous || previous.revokedAt || previous.expiresAt <= new Date()) return false;
+    previous.revokedAt = new Date();
+    this.authSessions.set(input.id, { ...input, currentWorkspaceId: input.currentWorkspaceId ?? null });
+    return true;
+  }
+
+  /* ---------- SPACE-02：会话空间上下文 ---------- */
+
+  /**
+   * 内存演示模式没有经营空间（见 requireWorkspaceDataSource 的理由），
+   * 因此这些方法在该模式下返回"无空间"，而不是伪造一个。
+   * 结果是内存模式下经营接口会被 fail-closed 拒绝——这正是期望行为。
+   */
+  async listUserWorkspaces(userId: string) {
+    if (!this.useMysqlDataSource()) return [];
+    return this.platformRepository.listUserWorkspaces(userId);
+  }
+
+  /**
+   * 解析会话应进入的经营空间。
+   *
+   * 内存数据源没有 `business_workspaces` 等表，因此返回一个**合成的默认空间 id**，
+   * 而不是 undefined。理由：SPACE-03 之后守卫对缺空间的会话 fail-closed，
+   * 返回 undefined 会让内存模式的每个会话都无法访问经营接口
+   * （`saas-foundation` 测试即因此失败）。
+   *
+   * 刻意不在守卫里为内存模式开豁免口子：那等于在鉴权路径上留一条
+   * 「某个配置值能绕过空间检查」的分支，是 fail-open 的老问题。
+   * 这里合成的空间 id 只在内存模式下产生，而内存模式按
+   * `docs/数据库启动与初始化.md` 仅用于显式测试，生产一律 mysql。
+   */
+  async resolveSessionWorkspaceId(userId: string, requested?: string) {
+    if (!this.useMysqlDataSource()) {
+      // 平台管理租户没有经营品类，不是经营主体，不该有经营空间——
+      // 与 mysql 模式一致（它也没有成员关系，解析结果为 undefined）。
+      // 给它合成空间会让登录在 getCategoryContext 处 403。
+      const user = this.users.find((row) => row.id === userId);
+      const tenant = user ? this.tenants.find((row) => row.tenantId === user.tenantId) : undefined;
+      if (!tenant?.categoryCode) return undefined;
+      return requested ?? MEMORY_MODE_WORKSPACE_ID;
+    }
+    return this.platformRepository.resolveSessionWorkspaceId(userId, requested);
+  }
+
+  async findWorkspaceScopedUser(userId: string, workspaceId?: string) {
+    if (!this.useMysqlDataSource()) return this.findUserById(userId);
+    return this.platformRepository.findWorkspaceScopedUser(userId, workspaceId);
+  }
+
+  /**
+   * 取某个经营空间的品类与能力。
+   *
+   * 内存模式没有空间表，此处返回**租户级档案**而不是空对象：调用方
+   * （`AuthService.getCategoryContext`）在空间存在而品类缺失时会 fail-closed 拒绝，
+   * 返回 `{}` 会让内存模式登录直接 403。内存模式只有一个合成空间
+   * （见 `MEMORY_MODE_WORKSPACE_ID`），因此「空间品类 == 租户品类」在该模式下成立。
+   */
+  async getWorkspaceCategoryContext(tenantId: string, workspaceId: string) {
+    if (!this.useMysqlDataSource()) {
+      const tenant = await this.findTenantByIdForAuth(tenantId);
+      return {
+        categoryCode: tenant.categoryCode,
+        categoryName: tenant.categoryName,
+        capabilities: tenant.capabilities
+      };
+    }
+    return this.platformRepository.getWorkspaceCategoryContext(tenantId, workspaceId);
+  }
+
+  async isLegacyVehicleDomainWorkspaceAllowed(tenantId: string, workspaceId: string) {
+    if (!this.useMysqlDataSource()) return true;
+    return this.platformRepository.isLegacyVehicleDomainWorkspaceAllowed(tenantId, workspaceId);
+  }
+
+  async setSessionWorkspace(sessionId: string, workspaceId: string | null, expectedWorkspaceId?: string | null) {
+    if (!this.useMysqlDataSource()) {
+      const session = this.authSessions.get(sessionId);
+      if (!session) return false;
+      if (expectedWorkspaceId !== undefined && session.currentWorkspaceId !== expectedWorkspaceId) return false;
+      session.currentWorkspaceId = workspaceId;
+      return true;
+    }
+    return this.platformRepository.setSessionWorkspace(sessionId, workspaceId, expectedWorkspaceId);
   }
 
   getAuthSession(id: string) {
@@ -1843,7 +2083,9 @@ export class PlatformService {
   revokeAuthSession(id: string) {
     if (this.useMysqlDataSource()) return this.platformRepository.revokeAuthSession(id);
     const session = this.authSessions.get(id);
-    if (session) session.revokedAt = new Date();
+    if (!session || session.revokedAt) return false;
+    session.revokedAt = new Date();
+    return true;
   }
 
   revokeUserSessions(userId: string) {
