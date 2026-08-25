@@ -4216,6 +4216,12 @@ export interface ImportRentalCalendarRequest {
   days: Array<Pick<RentalCalendarDay, "date" | "dayType" | "name"> & Partial<Pick<RentalCalendarDay, "pricingMultiplier" | "closed">>>;
 }
 
+/** 阶梯价档位：达到 `minUnits` 时整单改用 `unitAmount`（长租折扣口径）。 */
+export interface RentalPricingTier {
+  minUnits: number;
+  unitAmount: number;
+}
+
 export interface RentalPricingRate {
   id: string;
   itemGroupId: string;
@@ -4229,6 +4235,10 @@ export interface RentalPricingRate {
   minimumUnits: number;
   includedUsage?: number;
   excessUsageAmount?: number;
+  /** 阶梯价（需求 4.4）。留空表示整段按 baseAmount 计。 */
+  tiers?: RentalPricingTier[];
+  /** 封顶价（需求 4.4）：单行租金上限。0 是合法值（免租），undefined 表示不封顶。 */
+  maxAmount?: number;
 }
 
 export interface RentalPricingPlanV1 {

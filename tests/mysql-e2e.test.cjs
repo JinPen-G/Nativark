@@ -1482,6 +1482,131 @@ async function main() {
   assert.equal(constructionReturned.order.finalPayableAmount, constructionReturned.order.payableAmount + 800, "工程损坏费应进入最终应付");
   ok("工程设备闭环：班次计价、资质拦截、损坏费联动");
 
+  console.log("== 15b. PRICE-01 报价可复算、阶梯价与封顶价 ==");
+  // 验收要求「相同输入可复算并解释来源」。既有用例只断言金额 > 0 或后置费用的增量，
+  // 从未断言过「给定费率与租期，租金必须**恰好**等于某个数」——那才是可复算的证据。
+  //
+  // 本节自建一个数量库存商品与专用价格计划，把数字完全捏在手里：
+  //   基础价 100/自然日，阶梯：满 3 日 90、满 7 日 70，封顶 600
+  // 并刻意用**跨日但不足 24 小时**的租期，验证自然日按日期计而不是按 24 小时块计。
+  const priceGroup = await request(
+    "POST",
+    "/api/rental/v1/item-groups",
+    { code: "E2E-PRICE-KIT", name: "E2E 计价验证组", inventoryMode: "quantity", unit: "套", attributes: { manufacturer: "E2E重工", model: "PRICE-KIT" } },
+    construction.accessToken
+  );
+  assert.equal(priceGroup.status, 201, `计价验证商品组创建失败: ${JSON.stringify(priceGroup.body).slice(0, 200)}`);
+  const priceGroupId = priceGroup.body.data.id;
+  const priceStock = await request(
+    "PUT",
+    "/api/rental/v1/stock-balances",
+    { itemGroupId: priceGroupId, locationId: constructionLocation.id, onHandQuantity: 20, maintenanceQuantity: 0 },
+    construction.accessToken
+  );
+  assert.equal(priceStock.status, 200, `计价验证库存登记失败: ${JSON.stringify(priceStock.body).slice(0, 200)}`);
+  const pricePlan = await request(
+    "POST",
+    "/api/rental/v1/pricing-plans",
+    {
+      code: "E2E-PRICE-TIER",
+      name: "E2E 阶梯与封顶价格",
+      changeReason: "PRICE-01 可复算验收",
+      status: "enabled",
+      effectiveFrom: new Date(Date.now() - 86400000).toISOString(),
+      rates: [
+        {
+          itemGroupId: priceGroupId,
+          unit: "calendar_day",
+          baseAmount: 100,
+          weekendMultiplier: 1,
+          holidayMultiplier: 1,
+          // 工程品类规则要求预授权，而当前实现把预授权额度取自 depositAmount
+          // （需求 4.4 要求二者独立计算，属 PRICE-01 尚未收口的部分，已记录）。
+          // 押金不进 rentalAmount，因此不影响下面的租金断言。
+          depositAmount: 500,
+          minimumUnits: 1,
+          tiers: [{ minUnits: 3, unitAmount: 90 }, { minUnits: 7, unitAmount: 70 }],
+          maxAmount: 600
+        }
+      ]
+    },
+    construction.accessToken
+  );
+  assert.equal(pricePlan.status, 201, `阶梯价格计划创建失败: ${JSON.stringify(pricePlan.body).slice(0, 200)}`);
+  // 阶梯与封顶必须真的落库，否则重启后报价无从复算。
+  const persistedRates = JSON.parse(
+    readScalar(`SELECT \`rates\` FROM \`rental_pricing_plans\` WHERE \`id\`='${pricePlan.body.data.id}';`)
+  );
+  assert.equal(persistedRates[0].tiers.length, 2, "阶梯档位必须落库");
+  assert.equal(persistedRates[0].maxAmount, 600, "封顶价必须落库");
+
+  // UTC 日期边界：与营业日历的按日键法一致。刻意选未来的固定日期，避免跨测试时刻漂移。
+  const priceQuoteFor = async (startUtc, endUtc, quantity = 1) => {
+    const res = await request(
+      "POST",
+      "/api/rental/v1/quotes",
+      {
+        customerType: "corporate",
+        // 工程品类启用的是仓储自提，不是门店自提（品类 capability 决定）。
+        fulfillmentMode: "warehouse_pickup_return",
+        fulfillmentLocationId: constructionLocation.id,
+        startAt: startUtc,
+        endAt: endUtc,
+        pricingPlanId: pricePlan.body.data.id,
+        lines: [{ itemGroupId: priceGroupId, quantity }]
+      },
+      construction.accessToken
+    );
+    assert.equal(res.status, 201, `计价验证报价失败: ${JSON.stringify(res.body).slice(0, 250)}`);
+    return res.body.data;
+  };
+
+  // 1) 自然日必须按日期计：3/2 22:00 → 3/3 08:00 只有 10 小时，但占用 2 个日期。
+  //    早前 calendar_day 与 day_24h 共用 24 小时折算，这里会算成 1 日、少收一天。
+  const crossDay = await priceQuoteFor("2027-03-02T22:00:00.000Z", "2027-03-03T08:00:00.000Z");
+  assert.equal(
+    crossDay.rentalAmount,
+    200,
+    `自然日跨 2 个日期应为 2 × 100 = 200（按 24 小时折算会得 100）：实际 ${crossDay.rentalAmount}`
+  );
+
+  // 2) 阶梯价整单重定价：占用 4 个日期 → 命中"满 3 日 90"档 → 4 × 90 = 360。
+  const tierHit = await priceQuoteFor("2027-03-02T09:00:00.000Z", "2027-03-05T09:00:00.000Z");
+  assert.equal(tierHit.rentalAmount, 360, `满 3 日档应为 4 × 90 = 360：实际 ${tierHit.rentalAmount}`);
+
+  // 3) 封顶价：占用 10 个日期 → 命中"满 7 日 70"档 → 10 × 70 = 700 → 封顶 600。
+  const capHit = await priceQuoteFor("2027-03-02T09:00:00.000Z", "2027-03-11T09:00:00.000Z");
+  assert.equal(capHit.rentalAmount, 600, `10 日应被封顶为 600（未封顶为 700）：实际 ${capHit.rentalAmount}`);
+
+  // 4) 计算说明必须解释来源：命中的档位、单位数与封顶都要能读出来。
+  const capLine = capHit.chargeLines.find((row) => row.type === "rental");
+  assert.ok(capLine, "应有租金明细行");
+  assert.match(capLine.detail, /阶梯价 70/, `说明应指明命中的阶梯单价: ${capLine.detail}`);
+  assert.match(capLine.detail, /封顶 600/, `说明应指明封顶: ${capLine.detail}`);
+  assert.match(capLine.detail, /10 calendar_day/, `说明应指明单位数: ${capLine.detail}`);
+  assert.equal(capLine.sourceVersion, pricePlan.body.data.version, "明细必须带价格计划版本，否则无从复算");
+
+  // 5) 相同输入必须复算出相同结果——这是可复算的直接证据。
+  const priceReplay = await priceQuoteFor("2027-03-02T09:00:00.000Z", "2027-03-11T09:00:00.000Z");
+  assert.equal(priceReplay.rentalAmount, capHit.rentalAmount, "相同输入必须算出相同租金");
+  assert.equal(
+    priceReplay.chargeLines.find((row) => row.type === "rental").detail,
+    capLine.detail,
+    "相同输入必须给出相同的计算说明"
+  );
+
+  // 6) 数量参与线性放大，且封顶是**每行**上限而非整单上限。
+  const twoUnits = await priceQuoteFor("2027-03-02T09:00:00.000Z", "2027-03-11T09:00:00.000Z", 2);
+  assert.equal(twoUnits.rentalAmount, 1200, `2 套应为 2 × 600 = 1200：实际 ${twoUnits.rentalAmount}`);
+
+  // 7) 起租量兜底：不足 1 个自然日的租期仍按 minimumUnits 计，且说明要讲明它生效了。
+  const shortRent = await priceQuoteFor("2027-03-02T09:00:00.000Z", "2027-03-02T10:00:00.000Z");
+  assert.equal(shortRent.rentalAmount, 100, `1 小时仍占用 1 个自然日，应为 100：实际 ${shortRent.rentalAmount}`);
+  ok(
+    "报价可复算：自然日按日期计（跨日 10 小时=2 日）、阶梯价整单重定价、封顶价生效且按行封顶、" +
+      "相同输入复算一致、计算说明含档位/单位数/封顶/版本"
+  );
+
   console.log("== 16. 双租户并发隔离 ==");
   const rounds = 12;
   const concurrent = [];

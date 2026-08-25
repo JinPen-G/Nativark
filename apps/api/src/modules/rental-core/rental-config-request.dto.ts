@@ -242,6 +242,18 @@ export class SaveTenantRentalBusinessSettingsDto implements SaveTenantRentalBusi
 
 /* ---------- 定价方案 ---------- */
 
+/** 阶梯价档位。嵌套对象必须 `@ValidateNested` + `@Type`，否则内层静默不校验。 */
+export class RentalPricingTierInputDto {
+  /** 达到该单位数后整单改用 unitAmount。1 起：0 档等于没有阶梯。 */
+  @IsNumber()
+  @Min(1)
+  minUnits!: number;
+
+  @IsNumber()
+  @Min(0)
+  unitAmount!: number;
+}
+
 export class RentalPricingRateInputDto {
   @IsString()
   @IsNotEmpty()
@@ -271,6 +283,22 @@ export class RentalPricingRateInputDto {
   @IsNumber()
   @Min(1)
   minimumUnits!: number;
+
+  /** 阶梯价（需求 4.4）。 */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RentalPricingTierInputDto)
+  tiers?: RentalPricingTierInputDto[];
+
+  /**
+   * 封顶价（需求 4.4）。允许 0（免租），因此判空必须用 undefined 而非真值判断。
+   * 不设上界：封顶价本身就是上限，再加人为上界只会挡住合法的高价商品。
+   */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  maxAmount?: number;
 
   @IsOptional()
   @IsNumber()

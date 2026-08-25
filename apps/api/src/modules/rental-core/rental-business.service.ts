@@ -1009,12 +1009,24 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       const rate = plan.rates.find((item) => item.itemGroupId === line.itemGroupId && (!line.pricingUnit || item.unit === line.pricingUnit)) ?? plan.rates.find((item) => item.itemGroupId === line.itemGroupId);
       if (!rate) throw new ConflictException(`${group.name} 尚未配置基础价格`);
       const pricingStrategy = rentalPricingStrategy(rate.unit);
-      const units = Math.max(rate.minimumUnits, pricingStrategy.billableUnits(input.startAt, input.endAt, line.usageQuantity));
+      const naturalUnits = pricingStrategy.billableUnits(input.startAt, input.endAt, line.usageQuantity);
+      // 最小起租量属于价格计划的职责（技术指南 5.4），因此在这里兜底而不是在策略里。
+      const units = Math.max(rate.minimumUnits, naturalUnits);
       const multiplier = this.calendarMultiplier(calendars, context.settings, input.startAt, input.endAt, rate);
       const amount = roundMoney(pricingStrategy.amountPerItem(rate, units) * line.quantity * multiplier);
       rentalAmount += amount;
       depositAmount += rate.depositAmount * line.quantity;
-      chargeLines.push({ code: `rental:${group.code}`, name: `${group.name}租金`, type: "rental", amount, sourceId: plan.id, sourceVersion: plan.version, detail: `${line.quantity} × ${units} ${rate.unit} × 日历系数 ${multiplier.toFixed(2)}` });
+      // 计算说明必须能复算：单价来源（基础价/阶梯档/封顶）、单位数、起租量是否生效、
+      // 日历系数、数量，缺一项客服就无法向客户解释这笔钱是怎么来的（验收：可解释来源）。
+      const detail = [
+        `${line.quantity} × ${units} ${rate.unit}`,
+        pricingStrategy.explain(rate, units),
+        units > naturalUnits ? `起租量 ${rate.minimumUnits} 生效（实际 ${naturalUnits}）` : undefined,
+        `日历系数 ${multiplier.toFixed(2)}`
+      ]
+        .filter(Boolean)
+        .join("；");
+      chargeLines.push({ code: `rental:${group.code}`, name: `${group.name}租金`, type: "rental", amount, sourceId: plan.id, sourceVersion: plan.version, detail });
     }
     rentalAmount = roundMoney(rentalAmount);
     depositAmount = rule.config.payment.depositMode === "none" ? 0 : roundMoney(depositAmount);
