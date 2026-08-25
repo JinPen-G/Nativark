@@ -1490,7 +1490,31 @@ async function main() {
   )).body.data;
   assert.equal(constructionReturned.order.status, "completed");
   assert.equal(constructionReturned.order.finalPayableAmount, constructionReturned.order.payableAmount + 800, "工程损坏费应进入最终应付");
-  ok("工程设备闭环：班次计价、资质拦截、损坏费联动");
+  // 订单侧的明细与总额同样要自洽（需求 4.4.1「明细之和等于对应总额」）。
+  // 订单的明细是报价明细的拷贝，再追加取消/逾期/损坏这类异常费用，因此对应关系是：
+  //   报价类明细（非押金、非预授权、非异常）之和 = 租赁应付
+  //   异常类明细之和 = 调整金额
+  // 这条把报价侧的对账延伸到订单侧；只在报价侧成立不足以说明账目在订单上也对得起来。
+  const orderLines = constructionReturned.order.chargeLines;
+  const adjustmentTypes = new Set(["cancellation", "overdue", "damage"]);
+  const sumBy = (predicate) =>
+    Math.round(orderLines.filter(predicate).reduce((total, row) => total + row.amount, 0) * 100) / 100;
+  assert.equal(
+    sumBy((row) => !adjustmentTypes.has(row.type) && row.type !== "deposit" && row.type !== "preauthorization"),
+    constructionReturned.order.payableAmount,
+    `订单的报价类明细之和应等于租赁应付 ${constructionReturned.order.payableAmount}`
+  );
+  assert.equal(
+    sumBy((row) => adjustmentTypes.has(row.type)),
+    constructionReturned.order.adjustmentAmount,
+    `订单的异常类明细之和应等于调整金额 ${constructionReturned.order.adjustmentAmount}`
+  );
+  // 确认异常明细确实存在，否则上面第二条是拿 0 比 0（本节刻意造了 800 元损坏费）。
+  assert.ok(
+    orderLines.some((row) => adjustmentTypes.has(row.type)),
+    `前置条件：本节应已产生异常费用明细，实际类型：${orderLines.map((row) => row.type).join("/")}`
+  );
+  ok("工程设备闭环：班次计价、资质拦截、损坏费联动，订单明细与总额对账一致");
 
   console.log("== 15b. PRICE-01 报价可复算、阶梯价与封顶价 ==");
   // 验收要求「相同输入可复算并解释来源」。既有用例只断言金额 > 0 或后置费用的增量，
@@ -1744,6 +1768,15 @@ async function main() {
       assert.equal(quote.preAuthAmount, preAuthLines, `${label}：预授权额度应与其明细一致`);
     }
   };
+  // 先确认预授权分支**确实被执行过**，否则 reconcile 里的 preAuth 断言是装饰品。
+  // 工程品类规则默认就是 preauthorization 模式，因此这些报价应当带预授权明细。
+  assert.ok(
+    capHit.chargeLines.some((row) => row.type === "preauthorization"),
+    `前置条件：本节报价应产出预授权明细，否则 reconcile 的预授权断言永不执行。` +
+      `实际明细类型：${capHit.chargeLines.map((row) => row.type).join("/")}`
+  );
+  assert.ok(capHit.preAuthAmount > 0, `预授权额度应大于 0，实际 ${capHit.preAuthAmount}`);
+  assert.equal(capHit.depositAmount, 0, `预授权模式下应付押金应为 0，实际 ${capHit.depositAmount}`);
   reconcile(capHit, "封顶用例");
   reconcile(tierHit, "阶梯用例");
   reconcile(crossDay, "跨日用例");
