@@ -415,7 +415,7 @@ export class ApiAuthGuard implements CanActivate {
       // 同租户多个空间品类不同时，那会让 camping 空间按 camera 的能力集放行。
       const scope = await this.authService.getCategoryContext(user.tenantId, workspaceId);
       if (vehicleCategoryRequired && scope.categoryCode !== RentalCategoryCode.Vehicle) {
-        throw new ForbiddenException("该接口属于旧车辆兼容域，当前经营空间品类不可用");
+        throw new ForbiddenException("该接口属于历史门市租赁参考模块，当前经营空间不可用");
       }
       if (capability && !scope.capabilities?.includes(capability)) {
         throw new ForbiddenException("当前经营空间品类未启用该业务能力");

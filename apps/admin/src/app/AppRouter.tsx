@@ -14,18 +14,11 @@ const LocationPage = lazy(() => import("@/features/fulfillment/LocationPage").th
 const OrdersPage = lazy(() => import("@/features/rental-core/RentalOrdersPage").then((module) => ({ default: module.RentalOrdersPage })));
 const OrderCreatePage = lazy(() => import("@/features/rental-core/RentalOrderCreatePage").then((module) => ({ default: module.RentalOrderCreatePage })));
 const OrderDetailPage = lazy(() => import("@/features/rental-core/RentalOrderDetailPage").then((module) => ({ default: module.RentalOrderDetailPage })));
-const ContractsPage = lazy(() => import("@/features/contracts/ContractsPage").then((module) => ({ default: module.ContractsPage })));
 const RentalCommercialPage = lazy(() => import("@/features/commercial/RentalCommercialPage").then((module) => ({ default: module.RentalCommercialPage })));
 const CouponPage = lazy(() => import("@/features/commercial/CouponPage").then((module) => ({ default: module.CouponPage })));
 const CustomerPage = lazy(() => import("@/features/customers/CustomerPage").then((module) => ({ default: module.CustomerPage })));
-const FinancePage = lazy(() => import("@/features/finance/FinancePage").then((module) => ({ default: module.FinancePage })));
-const OperationsPage = lazy(() => import("@/features/operations/OperationsPage").then((module) => ({ default: module.OperationsPage })));
-const AssetOperationsPage = lazy(() => import("@/features/operations/AssetOperationsPage").then((module) => ({ default: module.AssetOperationsPage })));
-const ReportsPage = lazy(() => import("@/features/reports/ReportsPage").then((module) => ({ default: module.ReportsPage })));
 const PlatformPage = lazy(() => import("@/features/platform/PlatformPage").then((module) => ({ default: module.PlatformPage })));
 const PlatformOperationsPage = lazy(() => import("@/features/platform/PlatformOperationsPage").then((module) => ({ default: module.PlatformOperationsPage })));
-const AssetLifecyclePage = lazy(() => import("@/features/catalog/AssetLifecyclePage").then((module) => ({ default: module.AssetLifecyclePage })));
-const BusinessToolsPage = lazy(() => import("@/features/advanced/BusinessToolsPage").then((module) => ({ default: module.BusinessToolsPage })));
 const PlatformToolsPage = lazy(() => import("@/features/platform/PlatformToolsPage").then((module) => ({ default: module.PlatformToolsPage })));
 const TenantManagementPage = lazy(() => import("@/features/platform/TenantManagementPage").then((module) => ({ default: module.TenantManagementPage })));
 const RentalCorePage = lazy(() => import("@/features/rental-core/RentalCorePage").then((module) => ({ default: module.RentalCorePage })));
@@ -79,7 +72,6 @@ function ProtectedRoutes() {
             <Route path={APP_ROUTES.orderCreate.path} element={guard(APP_ROUTES.orderCreate, <OrderCreatePage />)} />
             <Route path={APP_ROUTES.orders.path} element={guard(APP_ROUTES.orders, <OrdersPage />)} />
             <Route path={APP_ROUTES.orderDetail.path} element={guard(APP_ROUTES.orderDetail, <OrderDetailPage />)} />
-            <Route path={APP_ROUTES.contracts.path} element={guard(APP_ROUTES.contracts, <ContractsPage />)} />
             <Route path={APP_ROUTES.itemGroups.path} element={guard(APP_ROUTES.itemGroups, <CatalogPage />)} />
             <Route path={APP_ROUTES.assets.path} element={guard(APP_ROUTES.assets, <AssetWorkspacePage />)} />
             <Route path={APP_ROUTES.locations.path} element={guard(APP_ROUTES.locations, <LocationPage />)} />
@@ -89,12 +81,6 @@ function ProtectedRoutes() {
             <Route path={APP_ROUTES.services.path} element={guard(APP_ROUTES.services, <RentalCommercialPage section="services" />)} />
             <Route path={APP_ROUTES.rentalSettings.path} element={guard(APP_ROUTES.rentalSettings, <RentalSettingsPage />)} />
             <Route path={APP_ROUTES.customers.path} element={guard(APP_ROUTES.customers, <CustomerPage />)} />
-            <Route path={APP_ROUTES.finance.path} element={guard(APP_ROUTES.finance, <FinancePage />)} />
-            <Route path={APP_ROUTES.operations.path} element={guard(APP_ROUTES.operations, <OperationsPage />)} />
-            <Route path={APP_ROUTES.assetOperations.path} element={guard(APP_ROUTES.assetOperations, <AssetOperationsPage />)} />
-            <Route path={APP_ROUTES.assetLifecycle.path} element={guard(APP_ROUTES.assetLifecycle, <AssetLifecyclePage />)} />
-            <Route path={APP_ROUTES.businessTools.path} element={guard(APP_ROUTES.businessTools, <BusinessToolsPage />)} />
-            <Route path={APP_ROUTES.reports.path} element={guard(APP_ROUTES.reports, <ReportsPage />)} />
             <Route path="/platform" element={<Navigate to={APP_ROUTES.platformUsers.path} replace />} />
             <Route path={APP_ROUTES.platformTenants.path} element={guard(APP_ROUTES.platformTenants, <TenantManagementPage />)} />
             <Route path={APP_ROUTES.platformUsers.path} element={guard(APP_ROUTES.platformUsers, <PlatformPage />)} />
@@ -106,7 +92,6 @@ function ProtectedRoutes() {
             <Route path="/new-order" element={<Navigate to={APP_ROUTES.orderCreate.path} replace />} />
             <Route path="/orders" element={<Navigate to={APP_ROUTES.orders.path} replace />} />
             <Route path="/orders/:id" element={<LegacyOrderRedirect />} />
-            <Route path="/contracts" element={<Navigate to={APP_ROUTES.contracts.path} replace />} />
             <Route path="/rental-rules" element={<Navigate to={APP_ROUTES.rentalSettings.path} replace />} />
             <Route path="/service-products" element={<Navigate to={APP_ROUTES.services.path} replace />} />
             <Route path="/services" element={<Navigate to={APP_ROUTES.services.path} replace />} />
@@ -115,10 +100,6 @@ function ProtectedRoutes() {
             <Route path="/stations" element={<Navigate to={APP_ROUTES.locations.path} replace />} />
             <Route path="/vehicle-groups" element={<Navigate to={APP_ROUTES.itemGroups.path} replace />} />
             <Route path="/vehicles" element={<Navigate to={APP_ROUTES.assets.path} replace />} />
-            {["/vehicle-status", "/vehicle-console"].map((path) => <Route key={path} path={path} element={<Navigate to={APP_ROUTES.assetLifecycle.path} replace />} />)}
-            {["/vehicle-transfer", "/tbox-management"].map((path) => <Route key={path} path={path} element={<Navigate to={APP_ROUTES.assetOperations.path} replace />} />)}
-            <Route path="/dispatch" element={<Navigate to={APP_ROUTES.operations.path} replace />} />
-            <Route path="/rental/operations" element={<Navigate to={APP_ROUTES.operations.path} replace />} />
             {["/members", "/members/:id", "/member-reviews", "/membership-plans", "/corporates", "/corporates/:id"].map((path) => <Route key={path} path={path} element={<Navigate to={APP_ROUTES.customers.path} replace />} />)}
             {["/organizations", "/users", "/permissions"].map((path) => <Route key={path} path={path} element={<Navigate to={APP_ROUTES.platformUsers.path} replace />} />)}
             <Route path="/system-rules" element={<Navigate to={APP_ROUTES.platformSystem.path} replace />} />

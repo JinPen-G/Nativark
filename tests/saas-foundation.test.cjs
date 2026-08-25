@@ -222,11 +222,11 @@ function requestContext(method, url, accessToken) {
   // 请求链之外的读取必须得到 undefined（fail-closed 前提），不得再出现默认租户
   assert.equal(getRequestTenantId(), undefined);
   const cameraDispatch = requestContext("GET", "/api/store-rental/dispatch/board", rotated.accessToken);
-  await assert.rejects(guard.canActivate(cameraDispatch.context), /旧车辆兼容域/);
+  await assert.rejects(guard.canActivate(cameraDispatch.context), /历史门市租赁参考模块/);
   const cameraVehicleList = requestContext("GET", "/api/store-rental/vehicles", rotated.accessToken);
-  await assert.rejects(guard.canActivate(cameraVehicleList.context), /旧车辆兼容域/, "camera tenants must not call legacy vehicle APIs through direct URLs");
+  await assert.rejects(guard.canActivate(cameraVehicleList.context), /历史门市租赁参考模块/, "camera tenants must not call legacy vehicle APIs through direct URLs");
   const campingContracts = requestContext("GET", "/api/store-rental/contracts", demo2.accessToken);
-  await assert.rejects(guard.canActivate(campingContracts.context), /旧车辆兼容域/, "camping tenants must not call legacy vehicle contracts through direct URLs");
+  await assert.rejects(guard.canActivate(campingContracts.context), /历史门市租赁参考模块/, "camping tenants must not call legacy vehicle contracts through direct URLs");
 
   const priceOnlyGuard = new ApiAuthGuard({
     async resolveAccessToken() { return { ...demo.user, isPlatformAdmin: false, permissions: ["store-rental:price:manage"] }; },

@@ -65,10 +65,10 @@ export function RentalCorePage() {
   return (
     <>
       <PageHeader title="Rental Core v0.1" description="租户品类、三种库存模式、多行订单、服务端报价、预占配货和动态检查。" extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => { orderForm.setFieldsValue({ customerType: "personal", fulfillmentMode: settings.data?.fulfillment.enabledModes[0] ?? "store_pickup_return", fulfillmentLocationId: locations.data?.[0]?.id, period: [dayjs().add(1, "day").hour(9), dayjs().add(2, "day").hour(18)], lines: [{ itemGroupId: groups.data?.[0]?.id ?? "", quantity: 1 }] }); setOrderOpen(true); }}>新建 Core 订单</Button>} />
-      <div className="context-note"><InfoCircleOutlined /><span>这是通用租赁领域，不是车辆接口改名。demo 为摄影样本、demo2 为露营样本；MySQL 模式通过租户聚合快照持久化，需应用本次数据库迁移。</span></div>
+      <div className="context-note"><InfoCircleOutlined /><span>摄影、露营、车辆和工程设备统一使用 Rental Core；车辆专属能力通过 capability 扩展，不读取旧门市租赁数据。demo 为摄影样本、demo2 为露营样本。</span></div>
       <QueryState loading={profile.isLoading || groups.isLoading} error={profile.error || groups.error}>
         <div className="metric-grid">
-          <Card className="metric-card"><Statistic title="当前经营品类" value={currentCategory?.name ?? profile.data?.categoryCode ?? "-"} prefix={<ApartmentOutlined />} /><div className="metric-foot"><span>单租户单品类</span><span className="metric-trend">已配置</span></div></Card>
+          <Card className="metric-card"><Statistic title="当前经营品类" value={currentCategory?.name ?? profile.data?.categoryCode ?? "-"} prefix={<ApartmentOutlined />} /><div className="metric-foot"><span>单空间单品类</span><span className="metric-trend">已配置</span></div></Card>
           <Card className="metric-card"><Statistic title="序列化分组" value={counts.serialized} /><div className="metric-foot"><span>独立资产追踪</span><span>Serialized</span></div></Card>
           <Card className="metric-card"><Statistic title="数量型分组" value={counts.quantity} /><div className="metric-foot"><span>数量库存核算</span><span>Quantity</span></div></Card>
           <Card className="metric-card"><Statistic title="套装分组" value={counts.bundle} /><div className="metric-foot"><span>组成项自动占用</span><span>Bundle</span></div></Card>

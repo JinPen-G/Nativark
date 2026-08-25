@@ -60,7 +60,7 @@ export class RentalBusinessController {
   private context(tenantId: string): BusinessContext {
     const profile = this.core.getProfile(tenantId);
     const category = this.core.listCategories().find((item) => item.code === profile.categoryCode);
-    if (!category) throw new Error("租户经营品类定义不存在");
+    if (!category) throw new Error("当前经营空间的品类定义不存在");
     return {
       profile,
       category,

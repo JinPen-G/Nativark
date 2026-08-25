@@ -10,6 +10,10 @@ function requireText(source, expected, label) {
   if (!source.includes(expected)) failures.push(`${label}: missing ${expected}`);
 }
 
+function forbidText(source, unexpected, label) {
+  if (source.includes(unexpected)) failures.push(`${label}: unexpected ${unexpected}`);
+}
+
 const router = read("apps/admin/src/app/AppRouter.tsx");
 const navigation = read("apps/admin/src/app/navigation.tsx");
 const api = read("apps/admin/src/api/rental.ts");
@@ -35,9 +39,9 @@ const authStoreSource = read("apps/admin/src/features/auth/authStore.ts");
 const themeSource = read("apps/admin/src/app/theme.tsx");
 
 [
-  "/workbench", "/rental/core", "/rental/orders", "/rental/contracts", "/rental/item-groups", "/rental/assets",
-  "/rental/locations", "/rental/pricing", "/rental/discounts", "/rental/coupons", "/rental/services", "/rental/settings", "/customers", "/finance", "/operations",
-  "/asset-operations", "/asset-lifecycle", "/business-tools", "/reports", "/platform/tenants", "/platform/users", "/platform/system", "/platform/operations", "/platform/tools"
+  "/workbench", "/rental/core", "/rental/orders", "/rental/item-groups", "/rental/assets",
+  "/rental/locations", "/rental/pricing", "/rental/discounts", "/rental/coupons", "/rental/services", "/rental/settings", "/customers",
+  "/platform/tenants", "/platform/users", "/platform/system", "/platform/operations", "/platform/tools"
 ].forEach((route) => requireText(navigation, `path: "${route}"`, "route registry coverage"));
 
 [
@@ -100,13 +104,15 @@ if (sessionCacheClearCount < 4) {
 ].forEach(([source, expected, label]) => requireText(source, expected, label));
 
 [
-  "租赁工作台", "基础定价", "优惠方案", "优惠券", "增值服务", "品类与业务规则", "客户、会员与企业", "车辆财务结算", "车辆调拨与 TBox", "车辆生命周期", "车辆运营控制台", "组织与权限", "平台工具与治理"
+  "租赁工作台", "基础定价", "优惠方案", "优惠券", "增值服务", "品类与业务规则", "客户、会员与企业", "组织与权限", "平台工具与治理"
 ].forEach((label) => requireText(navigation, label, "navigation registry coverage"));
 requireText(navigation, "categories?: RentalCategoryCode[]", "category-specific route metadata");
 requireText(navigation, "route.categories.includes(categoryCode)", "category-specific route guard");
-for (const routeKey of ["contracts", "finance", "operations", "assetOperations", "assetLifecycle", "businessTools", "reports"]) {
-  const routePattern = new RegExp(`${routeKey}: \\{[^\\n]+categories: \\[RentalCategoryCode\\.Vehicle\\]`);
-  if (!routePattern.test(navigation)) failures.push(`vehicle compatibility boundary: ${routeKey} must be hidden from non-vehicle tenants`);
+for (const legacyLabel of ["车辆合同与单据", "车辆财务结算", "车辆履约调度", "车辆调拨与 TBox", "车辆生命周期", "车辆运营控制台", "车辆兼容报表"]) {
+  forbidText(navigation, legacyLabel, "legacy store-rental route must not be registered");
+}
+for (const legacyPage of ["ContractsPage", "FinancePage", "OperationsPage", "AssetOperationsPage", "AssetLifecyclePage", "BusinessToolsPage", "ReportsPage"]) {
+  forbidText(router, `const ${legacyPage} = lazy`, "legacy store-rental page must not be routed");
 }
 
 requireText(shell, "APP_NAVIGATION", "shell consumes unified navigation registry");

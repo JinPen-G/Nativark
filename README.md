@@ -3,9 +3,9 @@
 Rental OS 是面向摄影设备、露营装备、车辆载具和工程设备等品类的多租户 SaaS 租赁平台。
 
 - SaaS 租户是使用系统经营租赁业务的商户，不是租用设备的客户。
-- 一个 SaaS 租户只经营一种设备品类。
+- 一个 SaaS 租户可建立多个经营空间，每个空间经营一种设备品类。
 - 平台使用通用 Rental Core 处理商品、资产、库存、报价、订单和履约。
-- 车辆调度、TBox、工程资质、智能柜和物流等通过品类 capability 按需启用。
+- `vehicle` 与摄影、露营、工程设备一样是 Rental Core 的正式品类；车辆调度、TBox、工程资质、智能柜和物流等通过品类 capability 按需启用。
 
 ## 文档
 
@@ -29,7 +29,7 @@ docs             当前正式文档
 - 管理端：React 19.2.8、Ant Design 6.6.0、Vite 8.2.1。
 - API：NestJS 10，统一前缀 `/api`。
 - 通用租赁 API：`/api/rental/v1/*`。
-- `/api/store-rental/*` 仅作为 `vehicle` 品类兼容域，不是通用业务入口。
+- `/api/store-rental/*` 是历史门市租赁参考接口，不属于新平台产品入口；新业务统一使用 `/api/rental/v1/*`。
 - 数据目标：Prisma + MySQL；进程内模式只用于测试或明确演示。
 
 ## 开发进度
