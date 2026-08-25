@@ -553,7 +553,12 @@ export class StoreRentalService {
     }
   ];
 
-  private marketingPlans: MarketingPlanDetail[] = [
+  /**
+   * 旧门市域仍有一部分内存配置，但不能把所有租户指向同一个可变数组。
+   * 该域后续会迁移到空间级持久化；在迁移完成前，至少先按已验证租户隔离
+   * 进程内的写穿副本，避免 A 租户编辑后 B 租户立即看到同一对象。
+   */
+  private readonly marketingPlanSeed: MarketingPlanDetail[] = [
     this.createMarketingPlanSeed({
       id: "marketing_student",
       code: "MKT_STORE_STUDENT",
@@ -2891,12 +2896,22 @@ export class StoreRentalService {
     return schedule;
   }
 
-  listMarketingPlans(): MarketingPlanSummary[] {
-    return this.marketingPlans.map((plan) => this.toMarketingSummary(plan));
+  private marketingPlansForTenant(tenantId = requireRequestTenantId()): MarketingPlanDetail[] {
+    const cached = this.marketingPlansByTenant.get(tenantId);
+    if (cached) return cached;
+    const seeded = structuredClone(this.marketingPlanSeed);
+    this.marketingPlansByTenant.set(tenantId, seeded);
+    return seeded;
   }
 
-  getMarketingPlan(id: string) {
-    const plan = this.marketingPlans.find((item) => item.id === id);
+  private readonly marketingPlansByTenant = new Map<string, MarketingPlanDetail[]>();
+
+  listMarketingPlans(tenantId = requireRequestTenantId()): MarketingPlanSummary[] {
+    return this.marketingPlansForTenant(tenantId).map((plan) => this.toMarketingSummary(plan));
+  }
+
+  getMarketingPlan(id: string, tenantId = requireRequestTenantId()) {
+    const plan = this.marketingPlansForTenant(tenantId).find((item) => item.id === id);
     if (!plan) {
       throw new NotFoundException(`Marketing plan ${id} was not found`);
     }
@@ -2904,9 +2919,10 @@ export class StoreRentalService {
     return plan;
   }
 
-  saveMarketingPlan(input: SaveMarketingPlanRequest): MarketingPlanDetail {
+  saveMarketingPlan(input: SaveMarketingPlanRequest, tenantId = requireRequestTenantId()): MarketingPlanDetail {
+    const marketingPlans = this.marketingPlansForTenant(tenantId);
     const existing = input.id
-      ? this.marketingPlans.find((item) => item.id === input.id)
+      ? marketingPlans.find((item) => item.id === input.id)
       : undefined;
     const now = new Date().toISOString();
     const versionNo = existing ? existing.versionHistory[0].versionNo + 1 : 1;
@@ -2960,7 +2976,7 @@ export class StoreRentalService {
       return existing;
     }
 
-    this.marketingPlans.unshift(plan);
+    marketingPlans.unshift(plan);
     return plan;
   }
 
@@ -16497,7 +16513,7 @@ export class StoreRentalService {
     const explicitNone = input.marketingPlanId === "none";
     const candidates = explicitNone
       ? []
-      : this.marketingPlans
+      : this.marketingPlansForTenant()
           .filter((plan) =>
             this.isMarketingEligible(plan, {
               customerType,

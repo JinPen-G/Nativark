@@ -51,8 +51,9 @@ import { PlatformRepository } from "./platform.repository";
 import { SharedCustomerRepository } from "./shared-customer.repository";
 import { RentalCoreService } from "../rental-core/rental-core.service";
 
-interface StoredUser extends SaveSystemUserRequest {
+interface StoredUser extends Omit<SaveSystemUserRequest, "tenantId"> {
   id: string;
+  tenantId: string;
   password: string;
   mustChangePassword?: boolean;
 }
@@ -1220,6 +1221,8 @@ export class PlatformService {
           await this.rentalCoreService?.initializeTenant(tenantId, input.categoryCode, tx);
         }
       );
+      // bootstrapTenant 的配置写入刚刚随仓储事务提交；现在才可发布/持久化缓存。
+      await this.rentalCoreService?.onApplicationBootstrap();
       await this.rentalCoreService?.persist(result.tenant.tenantId);
       return result;
     }
@@ -1420,7 +1423,7 @@ export class PlatformService {
   listSharedCustomers(currentUser?: SystemUserRow) {
     this.requireWorkspaceDataSource();
     const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireSharedCustomers().listByTenant(tenantId);
+    return this.requireSharedCustomers().listByTenant(tenantId, requireRequestWorkspaceId());
   }
 
   /** 列出**当前经营空间**已接入的客户关系。空间取自会话，不接受客户端传入。 */
@@ -1446,10 +1449,10 @@ export class PlatformService {
     if (!input?.name?.trim()) throw new BadRequestException("客户名称不能为空");
     const levelName = "普通会员";
     const customers = this.requireSharedCustomers();
-    const existing = await customers.findByPhone(tenantId, input.phone);
+    const existing = await customers.findByPhone(tenantId, input.phone, workspaceId);
     if (existing) {
       await customers.linkToWorkspace(tenantId, workspaceId, existing.id, levelName);
-      const refreshed = await customers.findById(tenantId, existing.id);
+      const refreshed = await customers.findById(tenantId, existing.id, workspaceId);
       return refreshed ?? existing;
     }
     return customers.createWithLink(tenantId, workspaceId, input, levelName);
@@ -1464,7 +1467,7 @@ export class PlatformService {
     // 必须按 tenantId 校验存在性：否则可以拿别租户的 customerId 建立关系，
     // 虽然复合外键会在库层拒绝，但那会表现成 500 而不是明确的 404。
     const customers = this.requireSharedCustomers();
-    const profile = await customers.findById(tenantId, input.customerId.trim());
+    const profile = await customers.findById(tenantId, input.customerId.trim(), workspaceId);
     if (!profile) throw new NotFoundException("共享客户不存在");
     return customers.linkToWorkspace(
       tenantId,
@@ -1474,12 +1477,15 @@ export class PlatformService {
     );
   }
 
-  createBusinessWorkspace(input: CreateBusinessWorkspaceRequest, currentUser?: SystemUserRow) {
+  async createBusinessWorkspace(input: CreateBusinessWorkspaceRequest, currentUser?: SystemUserRow) {
     this.requireWorkspaceDataSource();
     // 需求 4.1：空间档案与其品类配置同事务创建，任一步失败整体回滚。
-    return this.platformRepository.createBusinessWorkspace(input, currentUser, async (tx, workspaceId, tenantId) => {
+    const result = await this.platformRepository.createBusinessWorkspace(input, currentUser, async (tx, workspaceId, tenantId) => {
       await this.rentalCoreService?.registerWorkspace(workspaceId, tenantId, input.categoryCode, tx);
     });
+    // 仓储事务已经提交，才允许将新空间发布到本进程缓存。
+    await this.rentalCoreService?.onApplicationBootstrap();
+    return result;
   }
 
   updateBusinessWorkspace(id: string, input: UpdateBusinessWorkspaceRequest, currentUser?: SystemUserRow) {
@@ -1909,6 +1915,7 @@ export class PlatformService {
     const temporaryPassword = input.id ? undefined : `R!${randomUUID().replace(/-/g, "").slice(0, 12)}8a`;
     const payload: StoredUser = {
       ...input,
+      tenantId: targetTenantId,
       id: input.id || `user_${randomUUID()}`,
       account,
       displayName,
@@ -1967,6 +1974,18 @@ export class PlatformService {
     if (this.useMysqlDataSource()) return this.platformRepository.createAuthSession(input);
     this.authSessions.set(input.id, { ...input });
     return input;
+  }
+
+  async rotateAuthSession(
+    previousSessionId: string,
+    input: { id: string; userId: string; refreshTokenHash: string; expiresAt: Date; currentWorkspaceId?: string | null }
+  ): Promise<boolean> {
+    if (this.useMysqlDataSource()) return this.platformRepository.rotateAuthSession(previousSessionId, input);
+    const previous = this.authSessions.get(previousSessionId);
+    if (!previous || previous.revokedAt || previous.expiresAt <= new Date()) return false;
+    previous.revokedAt = new Date();
+    this.authSessions.set(input.id, { ...input, currentWorkspaceId: input.currentWorkspaceId ?? null });
+    return true;
   }
 
   /* ---------- SPACE-02：会话空间上下文 ---------- */
@@ -2032,9 +2051,20 @@ export class PlatformService {
     return this.platformRepository.getWorkspaceCategoryContext(tenantId, workspaceId);
   }
 
-  async setSessionWorkspace(sessionId: string, workspaceId: string | null) {
-    if (!this.useMysqlDataSource()) return;
-    await this.platformRepository.setSessionWorkspace(sessionId, workspaceId);
+  async isLegacyVehicleDomainWorkspaceAllowed(tenantId: string, workspaceId: string) {
+    if (!this.useMysqlDataSource()) return true;
+    return this.platformRepository.isLegacyVehicleDomainWorkspaceAllowed(tenantId, workspaceId);
+  }
+
+  async setSessionWorkspace(sessionId: string, workspaceId: string | null, expectedWorkspaceId?: string | null) {
+    if (!this.useMysqlDataSource()) {
+      const session = this.authSessions.get(sessionId);
+      if (!session) return false;
+      if (expectedWorkspaceId !== undefined && session.currentWorkspaceId !== expectedWorkspaceId) return false;
+      session.currentWorkspaceId = workspaceId;
+      return true;
+    }
+    return this.platformRepository.setSessionWorkspace(sessionId, workspaceId, expectedWorkspaceId);
   }
 
   getAuthSession(id: string) {
@@ -2053,7 +2083,9 @@ export class PlatformService {
   revokeAuthSession(id: string) {
     if (this.useMysqlDataSource()) return this.platformRepository.revokeAuthSession(id);
     const session = this.authSessions.get(id);
-    if (session) session.revokedAt = new Date();
+    if (!session || session.revokedAt) return false;
+    session.revokedAt = new Date();
+    return true;
   }
 
   revokeUserSessions(userId: string) {

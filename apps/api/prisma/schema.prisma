@@ -416,7 +416,7 @@ model WorkspaceMember {
   user        User              @relation(fields: [tenantId, userId], references: [tenantId, id], onDelete: Cascade)
   /// 该账号在本空间的角色。空表示沿用租户级默认角色（升级兼容）。
   roleId      String?
-  role        Role?             @relation(fields: [roleId], references: [id])
+  role        Role?             @relation(fields: [tenantId, roleId], references: [tenantId, id], onDelete: Restrict)
   /// 该账号在本空间的数据范围。空表示沿用角色自带范围。
   dataScope   SystemDataScope?
   isActive    Boolean           @default(true)
@@ -425,7 +425,7 @@ model WorkspaceMember {
 
   @@id([workspaceId, userId])
   @@index([tenantId, userId], map: "workspace_members_tenant_user_idx")
-  @@index([roleId], map: "workspace_members_role_idx")
+  @@index([tenantId, roleId], map: "workspace_members_role_idx")
   @@map("workspace_members")
 }
 
@@ -568,6 +568,8 @@ model Role {
 
   @@unique([tenantId, code])
   @@unique([tenantId, name])
+  /// 供 WorkspaceMember 的复合外键引用，阻止跨租户角色授权。
+  @@unique([tenantId, id], map: "roles_tenant_id_key")
 }
 
 model Permission {

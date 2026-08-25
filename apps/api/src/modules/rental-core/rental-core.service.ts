@@ -244,8 +244,14 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       // 品类以经营空间为准（需求 3）。
       const categoryCode = snapshot.workspaceCategoryCode;
       if (!categoryCode) continue;
-      const base = cached ?? this.seedState(snapshot.tenantId, categoryCode, this.seedPrefix(snapshot.tenantId, snapshot.workspaceId));
-      if (snapshot.profile) base.profile = snapshot.profile;
+      const seeded = this.seedState(snapshot.tenantId, categoryCode, this.seedPrefix(snapshot.tenantId, snapshot.workspaceId));
+      const base = cached ?? seeded;
+      // tenant_rental_profiles 是升级兼容用的租户级档案，只能还原默认空间。
+      // 第二空间若直接套用它，会把 workspace 的 camping 等品类重新覆盖成租户
+      // 默认空间的 camera，并让业务服务据此生成错误品类的定价和规则。
+      base.profile = this.defaultWorkspaceByTenant.get(snapshot.tenantId) === snapshot.workspaceId && snapshot.profile
+        ? snapshot.profile
+        : seeded.profile;
       if (snapshot.businessSettings) base.businessSettings = snapshot.businessSettings;
       // 库写过配置的租户：无条件覆盖，包括空数组——库里没有就是没有。
       // 「非空才覆盖」会让合法为空的配置继续保留快照或 seedState 的演示数据，
@@ -287,10 +293,6 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     // 但那发生在 persistConfig 内部，而 persistConfig 里的写入已经需要空间。
     // 因此这里先把空间 id 按同一确定性规则登记进查找表，让同步的 workspaceOf 可用。
     const workspaceId = `ws_${tenantId}`;
-    this.categoryByWorkspace.set(workspaceId, categoryCode);
-    this.tenantByWorkspace.set(workspaceId, tenantId);
-    this.defaultWorkspaceByTenant.set(tenantId, workspaceId);
-
     const existing = this.states.get(workspaceId);
     if (existing && existing.profile.categoryCode !== categoryCode) {
       throw new ConflictException("已有租赁数据的租户不能切换经营品类");
@@ -299,7 +301,15 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       const seeded = this.seedState(tenantId, categoryCode);
       await this.persistConfig(seeded, tx);
       seeded.configPersisted = true;
-      this.states.set(workspaceId, seeded);
+      // 先落库再发布进程缓存。persist 失败时不能让同步查找表指向一个
+      // 根本不存在的空间或租户配置。
+      // 外层 bootstrap 事务尚未提交时不得发布缓存；调用方会在提交返回后预热。
+      if (!tx) {
+        this.categoryByWorkspace.set(workspaceId, categoryCode);
+        this.tenantByWorkspace.set(workspaceId, tenantId);
+        this.defaultWorkspaceByTenant.set(tenantId, workspaceId);
+        this.states.set(workspaceId, seeded);
+      }
       return seeded.profile;
     }
     return existing.profile;
@@ -321,8 +331,6 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     categoryCode: RentalCategoryCode,
     tx?: RentalConfigTx
   ) {
-    this.categoryByWorkspace.set(workspaceId, categoryCode);
-    this.tenantByWorkspace.set(workspaceId, tenantId);
     if (this.states.has(workspaceId)) return;
     const seeded = this.seedState(tenantId, categoryCode, this.seedPrefix(tenantId, workspaceId));
     // 写入必须落在这个新空间，而不是会话当前所在的空间。
@@ -330,7 +338,13 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       await this.persistConfig(seeded, tx);
     });
     seeded.configPersisted = true;
-    this.states.set(workspaceId, seeded);
+    // 仅在该空间的全部配置已写入后发布，避免配置写失败时留下幽灵映射。
+    // 同一原则：事务内仅持久化，成功提交后由 PlatformService 统一预热发布。
+    if (!tx) {
+      this.categoryByWorkspace.set(workspaceId, categoryCode);
+      this.tenantByWorkspace.set(workspaceId, tenantId);
+      this.states.set(workspaceId, seeded);
+    }
   }
 
   /**

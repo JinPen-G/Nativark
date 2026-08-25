@@ -157,7 +157,33 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   hasCapability(capability) {
     if (!capability) return true;
     const capabilities = get().tenant?.capabilities;
-    if (!capabilities) return true;
+    // 品类能力是经营入口的许可信息；缺失只能说明会话尚未完成或数据不完整，
+    // 不能据此展示本不该进入的能力入口。
+    if (!capabilities) return false;
     return capabilities.includes(capability);
   }
 }));
+
+function syncSessionFromStorage() {
+  const nextWorkspaceId = window.localStorage.getItem(keys.currentWorkspaceId) ?? undefined;
+  const previousWorkspaceId = useAuthStore.getState().currentWorkspaceId;
+  if (previousWorkspaceId !== nextWorkspaceId) clearSessionQueryCache();
+  setAuthStateFromStorage(useAuthStore, nextWorkspaceId);
+}
+
+function setAuthStateFromStorage(store: typeof useAuthStore, currentWorkspaceId?: string) {
+  store.setState({
+    token: window.localStorage.getItem(keys.token) ?? undefined,
+    tenant: read<TenantContext>(keys.tenant),
+    user: read<AuthUser>(keys.user),
+    workspaces: read<BusinessWorkspace[]>(keys.workspaces) ?? [],
+    currentWorkspaceId
+  });
+}
+
+// refresh 可能由任一请求触发；storage 事件覆盖多标签页，CustomEvent 覆盖
+// 同一标签页内由 axios 拦截器触发的静默刷新。
+window.addEventListener("rental-session-updated", syncSessionFromStorage);
+window.addEventListener("storage", (event) => {
+  if (Object.values(keys).includes(event.key as string)) syncSessionFromStorage();
+});

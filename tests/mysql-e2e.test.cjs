@@ -768,6 +768,20 @@ async function main() {
   assert.equal(readScalar(`SELECT \`lockedOrderId\` FROM \`rental_customer_coupons\` WHERE \`id\`='${atomicClaim.body.data.id}';`), atomicOrderId, "优惠券必须关联订单");
   ok("RC-02 正常路径：订单、订单行、库存预占、报价消费和优惠券锁定同时提交");
 
+  // 确认前券状态若被后台任务/人工修复改走，核销会更新 0 行。订单必须随核销失败
+  // 一起回滚，不能留下“折扣订单已确认、券仍可使用”的资金不一致。
+  const atomicOrderStatusBeforeConfirm = readScalar(`SELECT \`status\` FROM \`rental_orders\` WHERE \`id\`='${atomicOrderId}';`);
+  mysqlQuery(`UPDATE \`rental_customer_coupons\` SET \`status\`='claimed' WHERE \`id\`='${atomicClaim.body.data.id}';`);
+  const invalidRedeemConfirm = await request("POST", `/api/rental/v1/orders/${atomicOrderId}/confirm`, {}, demo.accessToken);
+  assert.equal(invalidRedeemConfirm.status, 409, `券已不锁定时必须拒绝确认订单: ${JSON.stringify(invalidRedeemConfirm.body)}`);
+  assert.equal(
+    readScalar(`SELECT \`status\` FROM \`rental_orders\` WHERE \`id\`='${atomicOrderId}';`),
+    atomicOrderStatusBeforeConfirm,
+    "核销零更新时订单状态必须随事务回滚"
+  );
+  mysqlQuery(`UPDATE \`rental_customer_coupons\` SET \`status\`='locked' WHERE \`id\`='${atomicClaim.body.data.id}';`);
+  ok("RC-02 核销零更新：拒绝确认并回滚订单状态");
+
   const factCounts = () => ({
     orders: readCount("SELECT COUNT(*) FROM `rental_orders`;"),
     lines: readCount("SELECT COUNT(*) FROM `rental_order_lines`;"),
@@ -983,7 +997,37 @@ async function main() {
   const vehicleB = await bootstrapTenant(platform.accessToken, "e2e_vehicle_b", "vehicle");
   const vehicleBStations = (await request("GET", "/api/store-rental/stations", null, vehicleB.accessToken)).body.data;
   assert.equal(Array.isArray(vehicleBStations) ? vehicleBStations.length : 0, 0, "车辆租户 B 不得看到 A 的站点");
-  ok("车辆域读写隔离验证通过（租户戳正确、互不可见）");
+  // 行销方案的租户隔离。这块此前完全没有测试覆盖，而它与站点、会员不同：
+  // 会员/会员方案/会员审核都按 `tenant<X> = new Map` 做了按租户克隆，
+  // 行销方案却直接读写共享的 `this.marketingPlans`，且该类型没有 tenantId。
+  // 后果是 A 改一条方案，B 立刻看到被改后的内容。
+  const mktA = (await request("GET", "/api/store-rental/marketing/plans", null, vehicleA.accessToken)).body.data;
+  assert.ok(Array.isArray(mktA) && mktA.length, "前置条件：车辆租户应能看到行销方案样本");
+  // 列表返回的是 Summary，不含 versionHistory；而 saveMarketingPlan 会读
+  // existing.versionHistory[0]，所以必须取详情再回传，否则 500（我第一版就踩了这个）。
+  const mktTarget = (await request(
+    "GET",
+    `/api/store-rental/marketing/plans/${mktA[0].id}`,
+    null,
+    vehicleA.accessToken
+  )).body.data;
+  const mktRenamed = `E2E-A-改名-${Date.now().toString(36)}`;
+  const mktUpdate = await request(
+    "PUT",
+    `/api/store-rental/marketing/plans/${mktTarget.id}`,
+    { ...mktTarget, displayName: mktRenamed },
+    vehicleA.accessToken
+  );
+  assert.equal(mktUpdate.status, 200, `租户 A 改行销方案应成功: ${JSON.stringify(mktUpdate.body).slice(0, 200)}`);
+  const mktB = (await request("GET", "/api/store-rental/marketing/plans", null, vehicleB.accessToken)).body.data;
+  const mktLeaked = (Array.isArray(mktB) ? mktB : []).find((row) => row.displayName === mktRenamed);
+  assert.equal(
+    mktLeaked,
+    undefined,
+    `租户 B 不得看到 A 修改后的行销方案（看到即说明 marketingPlans 是跨租户共享的同一批对象）：` +
+      `${JSON.stringify(mktLeaked ?? null).slice(0, 200)}`
+  );
+  ok("车辆域读写隔离验证通过（租户戳正确、站点与行销方案均互不可见）");
 
   console.log("== 14. 车辆品类 Rental Core 深度用例：资质拦截、序列化资产与逾期费 ==");
   const vehicleLocation = (await request("GET", "/api/rental/v1/locations", null, vehicleA.accessToken)).body.data[0];
@@ -1401,6 +1445,22 @@ async function main() {
     88,
     "奖励入账后权益账户余额必须落库"
   );
+  // 不同幂等键不是重放：两笔合法奖励同时到达同一客户时，余额必须累加，
+  // 不能由两个进程缓存快照的绝对 upsert 互相覆盖。
+  const parallelRewards = await Promise.all([
+    request("POST", "/api/rental/v1/rewards/grant", { customerId: "e2e_reward_member", triggerType: "registration", idempotencyKey: "e2e:reward:parallel:a" }, demoForWriteThrough.accessToken),
+    request("POST", "/api/rental/v1/rewards/grant", { customerId: "e2e_reward_member", triggerType: "registration", idempotencyKey: "e2e:reward:parallel:b" }, demoForWriteThrough.accessToken)
+  ]);
+  assert.ok(parallelRewards.every((response) => response.status === 201), `不同键并行发奖失败: ${JSON.stringify(parallelRewards.map((response) => response.body))}`);
+  assert.equal(
+    readCount("SELECT ROUND(`pointsBalance`) FROM `rental_benefit_accounts` WHERE `customerId`='e2e_reward_member';"),
+    264,
+    "不同幂等键的并行奖励必须原子累加到账户余额"
+  );
+  const parallelBenefitAccount = (
+    await request("GET", "/api/rental/v1/benefit-accounts?customerId=e2e_reward_member", null, demoForWriteThrough.accessToken)
+  ).body.data.find((row) => row.customerId === "e2e_reward_member");
+  assert.equal(parallelBenefitAccount?.pointsBalance, 264, "并发奖励结束后 API 缓存余额必须与数据库一致，不得被旧刷新覆盖");
 
   const factRows = {
     quotes: readCount("SELECT COUNT(*) FROM `rental_quotes`;"),
@@ -2196,6 +2256,14 @@ async function main() {
     "SELECT COUNT(*) FROM `rental_reward_ledger_entries` WHERE `idempotencyKey` LIKE 'e2e:reward:once%';"
   );
   assert.ok(rewardsBeforeRestart > 0, "前置条件：应已存在该幂等键的奖励流水");
+  // 余额必须**动态**取当前值，不能硬编码。
+  // 早前这里写死 88，而本套件更早处已用两个不同幂等键各发一笔合法奖励把余额累加到 264；
+  // 硬编码值一旦被上游用例改变就会失败，且失败原因与本节要验证的东西无关。
+  // 本节真正的不变量是「重启并用同一键再发一次，余额不变」，因此比对前后值即可。
+  const benefitBeforeRestart = readCount(
+    "SELECT ROUND(`pointsBalance`) FROM `rental_benefit_accounts` WHERE `customerId`='e2e_reward_member';"
+  );
+  assert.ok(benefitBeforeRestart > 0, "前置条件：权益账户应已有余额");
   await stopApi();
   startApi();
   if (!(await waitHealth())) fail("奖励幂等校验的 API 重启超时");
@@ -2215,10 +2283,13 @@ async function main() {
   // 权益账户余额同样不能被二次入账。
   assert.equal(
     readCount("SELECT ROUND(`pointsBalance`) FROM `rental_benefit_accounts` WHERE `customerId`='e2e_reward_member';"),
-    88,
-    "重复发放不得重复累加权益余额"
+    benefitBeforeRestart,
+    `重复发放不得重复累加权益余额（重启前 ${benefitBeforeRestart}）`
   );
-  ok(`奖励幂等以库为准：重启清空内存后同键再发，流水仍为 ${rewardsBeforeRestart} 条、积分仍为 88`);
+  ok(
+    `奖励幂等以库为准：重启清空内存后同键再发，流水仍为 ${rewardsBeforeRestart} 条、` +
+      `积分仍为 ${benefitBeforeRestart}`
+  );
 
   console.log("== 43. RC-04 订单动作重试不得重复发通知 ==");
   // emitOrderEvent 在幂等执行器之外调用，所以要验证：同键重试时订单只推进一次，
@@ -3388,6 +3459,11 @@ async function main() {
   assert.ok(
     scFoundB,
     "共享客户主档必须在同租户第二空间可见——否则运营只能重复建档，违背「无需重复注册」"
+  );
+  assert.equal(
+    (scFoundB.workspaceLinks ?? []).some((row) => row.workspaceId === scDefaultWs),
+    false,
+    "第二空间读取共享主档时不得看到默认空间的等级、状态、首单时间等关系字段"
   );
 
   // 4) 同手机号在第二空间"再登记"：不得报错、不得新建主档，而是接入本空间

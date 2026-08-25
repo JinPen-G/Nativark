@@ -2,6 +2,7 @@ import { Body, Controller, Get, Headers, Post } from "@nestjs/common";
 import type { ChangePasswordRequest, RefreshSessionRequest, SwitchWorkspaceRequest } from "@store-rental/shared";
 import { IsNotEmpty, IsString } from "class-validator";
 import { AuthService } from "./auth.service";
+import { ChangePasswordDto, RefreshSessionDto, SwitchWorkspaceDto } from "./auth-request.dto";
 
 export class LoginDto {
   @IsString()
@@ -37,19 +38,19 @@ export class AuthController {
   }
 
   @Post("refresh")
-  refresh(@Body() body: RefreshSessionRequest) {
+  refresh(@Body() body: RefreshSessionDto) {
     return this.authService.refresh(body);
   }
 
   @Post("logout")
-  logout(@Body() body: RefreshSessionRequest) {
+  logout(@Body() body: RefreshSessionDto) {
     return this.authService.logout(body);
   }
 
   @Post("change-password")
   changePassword(
     @Headers("authorization") authorization: string | undefined,
-    @Body() body: ChangePasswordRequest
+    @Body() body: ChangePasswordDto
   ) {
     return this.authService.changePassword(authorization, body);
   }
@@ -64,7 +65,7 @@ export class AuthController {
   @Post("switch-workspace")
   switchWorkspace(
     @Headers("authorization") authorization: string | undefined,
-    @Body() body: SwitchWorkspaceRequest
+    @Body() body: SwitchWorkspaceDto
   ) {
     return this.authService.switchWorkspace(authorization, body.workspaceId);
   }

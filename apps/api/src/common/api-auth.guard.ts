@@ -363,7 +363,11 @@ export class ApiAuthGuard implements CanActivate {
 
     const authorization = request.headers.authorization;
     const token = Array.isArray(authorization) ? authorization[0] : authorization;
-    const accessContext = await this.authService.resolveAccessContext(token);
+    const accessContext = await this.authService.resolveAccessContext(token, {
+      // 当前空间刚被停用/撤销时，仍需允许用户进入切换入口；目标空间
+      // 会在 AuthService.switchWorkspace 内再次按成员关系校验。
+      allowInvalidWorkspace: path.startsWith("/auth/") || path.startsWith("/platform/")
+    });
     const user = accessContext?.user;
     const workspaceId = accessContext?.workspaceId;
 
@@ -398,6 +402,11 @@ export class ApiAuthGuard implements CanActivate {
     }
     if (!hasAnyPermission(user, permissions)) {
       throw new ForbiddenException("当前账号无权访问该功能");
+    }
+    if (!user.isSaasAdmin && (path === "/store-rental" || path.startsWith("/store-rental/"))) {
+      // 旧车辆域的持久化表尚未完成 workspaceId 迁移。非默认空间不能继续
+      // 读取同一租户级数据，否则仅靠 wid 入 token 并不能形成真实隔离。
+      await this.authService.assertLegacyVehicleDomainWorkspace(user.tenantId, workspaceId);
     }
     const capability = requiredCapability(path);
     const vehicleCategoryRequired = requiresVehicleCategory(path);

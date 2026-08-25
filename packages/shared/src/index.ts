@@ -319,7 +319,8 @@ export interface SystemUserRow {
 
 export interface SaveSystemUserRequest {
   id?: string;
-  tenantId: string;
+  /** SaaS 管理员可指定；租户内管理员省略时由当前会话租户补齐。 */
+  tenantId?: string;
   account: string;
   displayName: string;
   phone?: string;
@@ -612,7 +613,7 @@ export interface TenantBootstrapRequest {
   tenantCode: string;
   tenantName: string;
   categoryCode: RentalCategoryCode;
-  operator: string;
+  operator?: string;
   adminAccount: string;
   adminDisplayName: string;
   adminPhone?: string;

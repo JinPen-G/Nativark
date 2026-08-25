@@ -29,29 +29,29 @@ export class SharedCustomerRepository {
     return `${trimmed.slice(0, 3)}****${trimmed.slice(-4)}`;
   }
 
-  /** 按租户列出共享客户主档，附带其空间关系（供判断是否需要接入当前空间）。 */
-  async listByTenant(tenantId: string): Promise<SharedCustomerProfile[]> {
+  /** 按租户列出共享客户主档；关系详情只附带当前空间，绝不暴露其他空间。 */
+  async listByTenant(tenantId: string, workspaceId: string): Promise<SharedCustomerProfile[]> {
     const rows = await this.prisma.customerProfile.findMany({
       where: { tenantId },
-      include: { workspaceLinks: true },
+      include: { workspaceLinks: { where: { workspaceId } } },
       orderBy: { createdAt: "desc" }
     });
     return rows.map((row) => this.toDomain(row));
   }
 
-  async findById(tenantId: string, customerId: string): Promise<SharedCustomerProfile | undefined> {
+  async findById(tenantId: string, customerId: string, workspaceId?: string): Promise<SharedCustomerProfile | undefined> {
     const row = await this.prisma.customerProfile.findFirst({
       where: { id: customerId, tenantId },
-      include: { workspaceLinks: true }
+      include: { workspaceLinks: workspaceId ? { where: { workspaceId } } : false }
     });
     return row ? this.toDomain(row) : undefined;
   }
 
   /** 按手机号查主档。用于「客户已在别的空间注册过」的复用判定。 */
-  async findByPhone(tenantId: string, phone: string): Promise<SharedCustomerProfile | undefined> {
+  async findByPhone(tenantId: string, phone: string, workspaceId?: string): Promise<SharedCustomerProfile | undefined> {
     const row = await this.prisma.customerProfile.findFirst({
       where: { tenantId, phone: phone.trim() },
-      include: { workspaceLinks: true }
+      include: { workspaceLinks: workspaceId ? { where: { workspaceId } } : false }
     });
     return row ? this.toDomain(row) : undefined;
   }
@@ -90,7 +90,7 @@ export class SharedCustomerRepository {
       });
       return profile.id;
     });
-    const profile = await this.findById(tenantId, created);
+    const profile = await this.findById(tenantId, created, workspaceId);
     if (!profile) throw new Error("共享客户创建后读取失败");
     return profile;
   }
@@ -110,10 +110,21 @@ export class SharedCustomerRepository {
       where: { tenantId, workspaceId, customerId }
     });
     if (existing) return this.toLink(existing);
-    const row = await this.prisma.customerWorkspaceLink.create({
-      data: { tenantId, workspaceId, customerId, levelName }
-    });
-    return this.toLink(row);
+    try {
+      const row = await this.prisma.customerWorkspaceLink.create({
+        data: { tenantId, workspaceId, customerId, levelName }
+      });
+      return this.toLink(row);
+    } catch (error) {
+      // 两个请求可能同时越过上面的查询；唯一约束是最终裁决。撞键后读取
+      // 已提交关系，保持“接入客户”语义幂等，而不是向调用方暴露 500。
+      if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") throw error;
+      const winner = await this.prisma.customerWorkspaceLink.findFirst({
+        where: { tenantId, workspaceId, customerId }
+      });
+      if (!winner) throw error;
+      return this.toLink(winner);
+    }
   }
 
   /** 列出**当前空间**的客户关系。与主档列表刻意分开，避免把跨空间可见误用到业务侧。 */

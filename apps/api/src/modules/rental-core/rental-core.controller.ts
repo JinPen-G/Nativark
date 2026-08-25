@@ -85,9 +85,6 @@ export class RentalCoreController {
   private async emitOrderEvent(tenantId: string, eventCode: string, order: { orderNo: string; customerName: string; contactPhone?: string; customerId?: string }) {
     return await this.business.emitNotificationEvent(tenantId, this.context(tenantId), eventCode, order.contactPhone ?? order.customerId, { customerName: order.customerName, orderNo: order.orderNo });
   }
-  private async completeCustomerOrderEvent(tenantId: string, order: { customerId?: string; status: string }) {
-    if (order.customerId && order.status === "completed") await this.business.handleCustomerEvent(tenantId, this.context(tenantId), order.customerId, "first_order_completed");
-  }
   @Get("categories") categories() { return this.service.listCategories(); }
   @Get("tenant-profile") profile(@Req() req: AuthenticatedRequest) { return this.service.getProfile(req.user.tenantId); }
   @Put("tenant-profile") saveProfile(@Req() req: AuthenticatedRequest, @Body() body: SaveTenantRentalProfileDto) { return this.committed(req.user.tenantId, this.service.saveProfile(req.user.tenantId, body)); }
@@ -140,14 +137,19 @@ export class RentalCoreController {
       fallbackKey: `order.confirm:${id}`,
       request: { orderId: id },
       orderId: id,
-      run: (tx) => this.service.confirmOrder(tenantId, id, tx),
+      run: async (tx) => {
+        const confirmed = await this.service.confirmOrder(tenantId, id, tx);
+        await this.business.redeemCouponInTransaction(tenantId, id, tx);
+        return confirmed;
+      },
       replay: async () => {
         const current = await this.service.getOrder(tenantId, id);
         // 只有已达成目标状态才算同一次意图的重试；否则交回状态机拒绝。
         return current.status === RentalCoreOrderStatus.Reserved ? current : undefined;
       }
     });
-    await this.business.redeemCoupon(tenantId, this.context(tenantId), id);
+    // 内部权益已与订单同事务提交；此处只发布已提交的数据到进程缓存。
+    await this.business.refreshFromDatabase();
     // 回放时跳过通知：通知是外部副作用，同键重试不该让客户收到第二条短信。
     if (!replayed) await this.emitOrderEvent(tenantId, "order.confirmed", order);
     return this.committed(tenantId, order);
@@ -183,13 +185,17 @@ export class RentalCoreController {
       // 必须报冲突而不是静默沿用第一次的原因与费用。
       request: { orderId: id, reason: body.reason, weatherException: Boolean(body.weatherException) },
       orderId: id,
-      run: (tx) => this.service.cancelOrder(req.user.tenantId, id, body.reason, charge, tx),
+      run: async (tx) => {
+        const cancelled = await this.service.cancelOrder(req.user.tenantId, id, body.reason, charge, tx);
+        await this.business.releaseCouponInTransaction(req.user.tenantId, id, tx);
+        return cancelled;
+      },
       replay: async () => {
         const latest = await this.service.getOrder(req.user.tenantId, id);
         return latest.status === RentalCoreOrderStatus.Cancelled ? latest : undefined;
       }
     });
-    await this.business.releaseCoupon(req.user.tenantId, this.context(req.user.tenantId), id);
+    await this.business.refreshFromDatabase();
     if (!cancelReplayed) await this.emitOrderEvent(req.user.tenantId, "order.cancelled", order);
     return this.committed(req.user.tenantId, order);
   }
@@ -227,7 +233,11 @@ export class RentalCoreController {
       // returnedAt 同样不能进指纹，否则重试必然被判为"同键不同内容"而 409。
       request: { orderId: id, templateId: body.templateId, results: body.results, exceptions: body.exceptions ?? [] },
       orderId: id,
-      run: (tx) => this.service.createInspection(tenantId, id, body, req.user.displayName, charges, tx),
+      run: async (tx) => {
+        const created = await this.service.createInspection(tenantId, id, body, req.user.displayName, charges, tx);
+        if (stage === "return") await this.business.completeCustomerOrderEventInTransaction(tenantId, context, created.order.customerId, tx);
+        return created;
+      },
       replay: async () => {
         const latest = await this.service.getOrder(tenantId, id);
         if (latest.status !== targetStatus) return undefined;
@@ -235,10 +245,8 @@ export class RentalCoreController {
         return recorded ? { inspection: recorded, order: latest } : undefined;
       }
     });
-    // 回放时跳过外部副作用：重复的取件/归还完成通知会让客户收到第二条，
-    // 而 completeCustomerOrderEvent 会触发首单完成奖励，重复触发等于重复发奖。
+    if (stage === "return") await this.business.refreshFromDatabase();
     if (!replayed) {
-      if (stage === "return") await this.completeCustomerOrderEvent(tenantId, result.order);
       await this.emitOrderEvent(tenantId, result.inspection.stage === "pickup" ? "pickup.completed" : "return.completed", result.order);
     }
     return this.committed(tenantId, result);
@@ -258,14 +266,18 @@ export class RentalCoreController {
       fallbackKey: `order.handover:${id}:${stage}`,
       request: { orderId: id, stage },
       orderId: id,
-      run: (tx) => this.service.completeHandoverWithoutInspection(tenantId, id, stage, overdueCharge, tx),
+      run: async (tx) => {
+        const completed = await this.service.completeHandoverWithoutInspection(tenantId, id, stage, overdueCharge, tx);
+        if (stage === "return") await this.business.completeCustomerOrderEventInTransaction(tenantId, context, completed.customerId, tx);
+        return completed;
+      },
       replay: async () => {
         const latest = await this.service.getOrder(tenantId, id);
         return latest.status === targetStatus ? latest : undefined;
       }
     });
+    if (stage === "return") await this.business.refreshFromDatabase();
     if (!replayed) {
-      if (stage === "return") await this.completeCustomerOrderEvent(tenantId, order);
       await this.emitOrderEvent(tenantId, stage === "pickup" ? "pickup.completed" : "return.completed", order);
     }
     return this.committed(tenantId, order);

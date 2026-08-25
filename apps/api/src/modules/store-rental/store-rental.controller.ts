@@ -148,23 +148,23 @@ export class StoreRentalController {
   }
 
   @Get("marketing/plans")
-  marketingPlans() {
-    return this.storeRentalService.listMarketingPlans();
+  marketingPlans(@Req() req: AuthenticatedRequest) {
+    return this.storeRentalService.listMarketingPlans(req.user.tenantId);
   }
 
   @Get("marketing/plans/:id")
-  marketingPlan(@Param("id") id: string) {
-    return this.storeRentalService.getMarketingPlan(id);
+  marketingPlan(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
+    return this.storeRentalService.getMarketingPlan(id, req.user.tenantId);
   }
 
   @Post("marketing/plans")
-  createMarketingPlan(@Body() body: SaveMarketingPlanRequest) {
-    return this.storeRentalService.saveMarketingPlan(body);
+  createMarketingPlan(@Req() req: AuthenticatedRequest, @Body() body: SaveMarketingPlanRequest) {
+    return this.storeRentalService.saveMarketingPlan(body, req.user.tenantId);
   }
 
   @Put("marketing/plans/:id")
-  updateMarketingPlan(@Param("id") id: string, @Body() body: SaveMarketingPlanRequest) {
-    return this.storeRentalService.saveMarketingPlan({ ...body, id });
+  updateMarketingPlan(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveMarketingPlanRequest) {
+    return this.storeRentalService.saveMarketingPlan({ ...body, id }, req.user.tenantId);
   }
 
   @Post("availability")

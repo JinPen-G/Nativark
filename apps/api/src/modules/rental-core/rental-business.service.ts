@@ -47,6 +47,7 @@ import {
   type RentalBusinessFactTx
 } from "./rental-business-fact.repository";
 import { RentalCoreConfigRepository, type RentalConfigStore, type RentalConfigTx } from "./rental-core-config.repository";
+import { PrismaService } from "../database/prisma.service";
 
 interface RentalBusinessState {
   categoryCode: RentalCategoryCode;
@@ -132,14 +133,17 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   private readonly states = new Map<string, RentalBusinessState>();
   /** 「租户 → 默认经营空间」。state() 是同步的，无会话路径需要它解析空间。 */
   private readonly defaultWorkspaceByTenant = new Map<string, string>();
-  /** 启动预热时从库中收集的租户品类，用于业务快照行丢失后重建状态。 */
-  private readonly bootstrapCategoryByTenant = new Map<string, RentalCategoryCode>();
+  /** 启动预热时按经营空间收集品类，用于业务快照行丢失后重建状态。 */
+  private readonly bootstrapCategoryByWorkspace = new Map<string, RentalCategoryCode>();
+  /** 运行期提交后刷新串行化，防止较旧数据库快照晚到并覆盖较新缓存。 */
+  private refreshQueue: Promise<void> = Promise.resolve();
 
   constructor(
     @Inject(RentalBusinessConfigRepository) private readonly configStore: RentalBusinessConfigStore,
     @Inject(RentalBusinessFactRepository) private readonly factStore: RentalBusinessFactStore,
     @Inject(RentalCoreConfigRepository) private readonly coreConfigStore: RentalConfigStore,
-    @Optional() private readonly stateRepository?: RentalStateRepository
+    @Optional() private readonly stateRepository?: RentalStateRepository,
+    @Optional() private readonly prisma?: PrismaService
   ) {}
 
   /**
@@ -154,16 +158,16 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       this.coreConfigStore.loadAll()
     ]);
 
-    this.bootstrapCategoryByTenant.clear();
-    // 租户经营品类的事实源是核心档案，不能从“是否仍有定价/规则行”反推。
+    this.bootstrapCategoryByWorkspace.clear();
+    // 空间经营品类的事实源是核心档案，不能从“是否仍有定价/规则行”反推。
     // 这样即使业务快照及部分业务配置同时损坏，规范化事实仍能装载到正确品类状态。
     for (const snapshot of coreConfigs) {
       if (snapshot.profile?.categoryCode) {
-        this.bootstrapCategoryByTenant.set(snapshot.tenantId, snapshot.profile.categoryCode);
+        this.bootstrapCategoryByWorkspace.set(snapshot.workspaceId, snapshot.workspaceCategoryCode ?? snapshot.profile.categoryCode);
       }
     }
     for (const snapshot of configs) {
-      if (snapshot.categoryCode) this.bootstrapCategoryByTenant.set(snapshot.tenantId, snapshot.categoryCode);
+      if (snapshot.categoryCode) this.bootstrapCategoryByWorkspace.set(snapshot.workspaceId, snapshot.categoryCode);
     }
 
     // 配置与事实必须在同一轮里处理，且状态重建要发生在两者之前。
@@ -206,7 +210,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
 
     for (const workspaceId of workspaceIds) {
       const tenantId = tenantByWorkspace.get(workspaceId)!;
-      const state = this.states.get(workspaceId) ?? this.stateFromFacts(tenantId);
+      const state = this.states.get(workspaceId) ?? this.stateFromFacts(workspaceId);
       if (!state) continue;
       const config = configByWorkspace.get(workspaceId);
       // 只有真的写过库的空间才覆盖：否则会把 seedState 的默认配置抹成空。
@@ -239,8 +243,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
    * 品类取自业务配置表；若连配置也没有则无法判定品类，返回 undefined 交由
    * 后续请求经 `state(tenantId, context)` 用登录上下文的品类正常建立。
    */
-  private stateFromFacts(tenantId: string): RentalBusinessState | undefined {
-    const categoryCode = this.bootstrapCategoryByTenant.get(tenantId);
+  private stateFromFacts(workspaceId: string): RentalBusinessState | undefined {
+    const categoryCode = this.bootstrapCategoryByWorkspace.get(workspaceId);
     if (!categoryCode) return undefined;
     return {
       categoryCode,
@@ -322,10 +326,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     }
   }
 
-  private async flushBenefitAccounts(state: RentalBusinessState, customerIds: string[]) {
+  private async flushBenefitAccounts(state: RentalBusinessState, customerIds: string[], tx?: RentalBusinessFactTx) {
     for (const customerId of new Set(customerIds)) {
       const account = state.benefitAccounts.find((row) => row.customerId === customerId);
-      if (account) await this.factStore.upsertBenefitAccount(account);
+      if (account) await this.factStore.upsertBenefitAccount(account, tx);
     }
   }
 
@@ -544,14 +548,35 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
    *
    * 不传 `tx` 时保持原语义（无事务、写完即更新缓存）。
    */
-  async claimCoupon(tenantId: string, context: BusinessContext, templateId: string, customerId: string, tx?: RentalBusinessFactTx) {
+  async claimCoupon(
+    tenantId: string,
+    context: BusinessContext,
+    templateId: string,
+    customerId: string,
+    tx?: RentalBusinessFactTx
+  ): Promise<{ coupon: RentalCustomerCoupon; template: RentalCouponTemplate }> {
+    if (!tx && this.prisma && (process.env.PLATFORM_DATA_SOURCE ?? "mysql").toLowerCase() === "mysql") {
+      const result = await this.prisma.$transaction((transaction) =>
+        this.claimCoupon(tenantId, context, templateId, customerId, transaction)
+      );
+      this.applyCouponClaimToCache(tenantId, context, result.coupon, result.template);
+      return result;
+    }
     const state = this.state(tenantId, context);
-    const template = context.couponTemplates.find((item) => item.id === templateId && item.status === "enabled");
+    const template = tx
+      ? await this.coreConfigStore.lockCouponTemplateForClaim(tenantId, templateId, tx)
+      : context.couponTemplates.find((item) => item.id === templateId && item.status === "enabled");
     if (!template) throw new NotFoundException("优惠券模板不存在或未启用");
+    // 锁行只保证配额读写串行，不代表模板仍可投放。运营可能在领取请求
+    // 等待行锁期间把模板停用；事务路径必须与内存路径使用同一准入规则。
+    if (template.status !== "enabled") throw new NotFoundException("优惠券模板不存在或未启用");
     const now = Date.now();
     if (now < new Date(template.effectiveFrom).getTime() || now > new Date(template.effectiveTo).getTime()) throw new ConflictException("优惠券不在可领取有效期");
     if (template.claimedQuantity >= template.totalQuota) throw new ConflictException("优惠券已领完");
-    if (state.customerCoupons.filter((item) => item.templateId === templateId && item.customerId === customerId && item.status !== "void").length >= template.perCustomerLimit) throw new ConflictException("已达到每客限领数量");
+    const customerClaimCount = tx
+      ? await this.factStore.countCustomerCoupons(tenantId, templateId, customerId, tx)
+      : state.customerCoupons.filter((item) => item.templateId === templateId && item.customerId === customerId && item.status !== "void").length;
+    if (customerClaimCount >= template.perCustomerLimit) throw new ConflictException("已达到每客限领数量");
     const coupon: RentalCustomerCoupon = {
       id: uid("customer_coupon"), tenantId, customerId, templateId, templateCode: template.code,
       templateName: template.name, status: "claimed", claimedAt: stamp(), effectiveFrom: template.effectiveFrom, effectiveTo: template.effectiveTo
@@ -639,6 +664,12 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return coupon;
   }
 
+  /** 订单确认事务内核销；提交后由 refreshFromDatabase 统一发布缓存。 */
+  async redeemCouponInTransaction(tenantId: string, orderId: string, tx: RentalBusinessFactTx) {
+    const result = await this.factStore.redeemCouponForOrder(tenantId, orderId, stamp(), tx);
+    if (result === "invalid") throw new ConflictException("订单优惠券已不在锁定状态，不能确认订单");
+  }
+
   async releaseCoupon(tenantId: string, context: BusinessContext, orderId: string) {
     const coupon = this.state(tenantId, context).customerCoupons.find((item) => item.lockedOrderId === orderId || item.redeemedOrderId === orderId);
     if (!coupon) return undefined;
@@ -646,6 +677,11 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     coupon.redeemedOrderId = undefined; coupon.redeemedAt = undefined; coupon.releasedAt = stamp();
     await this.factStore.upsertCustomerCoupon(coupon);
     return coupon;
+  }
+
+  /** 订单取消事务内释放；避免订单已取消而券释放失败的半完成状态。 */
+  async releaseCouponInTransaction(tenantId: string, orderId: string, tx: RentalBusinessFactTx) {
+    await this.factStore.releaseCouponForOrder(tenantId, orderId, stamp(), tx);
   }
 
   listRewards(tenantId: string, context: BusinessContext, customerId?: string) {
@@ -656,15 +692,53 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return this.state(tenantId, context).benefitAccounts.filter((row) => !customerId || row.customerId === customerId);
   }
 
-  async grantReward(tenantId: string, context: BusinessContext, input: GrantRentalRewardRequest) {
-    const state = this.state(tenantId, context);
+  async grantReward(
+    tenantId: string,
+    context: BusinessContext,
+    input: GrantRentalRewardRequest,
+    tx?: RentalBusinessFactTx,
+    /** MySQL 事务使用隔离副本；提交成功后再用数据库事实刷新共享缓存。 */
+    workingState?: RentalBusinessState
+  ): Promise<RentalRewardLedgerEntry[]> {
+    if (!tx && this.prisma && (process.env.PLATFORM_DATA_SOURCE ?? "mysql").toLowerCase() === "mysql") {
+      const state = this.state(tenantId, context);
+      // 不能把事务中的余额、奖励券和配额直接写进进程共享缓存：在 commit 前
+      // 其他请求能读到未提交数据，而失败后用旧快照恢复又会抹掉并发成功写入。
+      const transactionState = structuredClone(state);
+      const transactionContext: BusinessContext = {
+        ...context,
+        couponTemplates: structuredClone(context.couponTemplates)
+      };
+      try {
+        const result = await this.prisma.$transaction((transaction) =>
+          this.grantReward(tenantId, transactionContext, input, transaction, transactionState)
+        );
+        // 只在事务提交后从库重建缓存，绝不以事务开始前的快照回滚共享状态。
+        await this.refreshFromDatabase();
+        await this.refreshCouponTemplateCache(tenantId, context);
+        return result;
+      } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+          const winner = await this.factStore.findRewardsByIdempotencyKey(tenantId, input.idempotencyKey);
+          if (winner.length) {
+            // 同键并发的落败者回放胜者；刷新来自数据库的缓存即可，不回滚
+            // 或拼接任何请求开始时捕获的内存副本。
+            await this.refreshFromDatabase();
+            await this.refreshCouponTemplateCache(tenantId, context);
+            return winner;
+          }
+        }
+        throw error;
+      }
+    }
+    const state = workingState ?? this.state(tenantId, context);
     if (!input.customerId || !input.idempotencyKey) throw new BadRequestException("客户和幂等键不能为空");
     // 判重以库为准，不靠内存 rewardLedger。
     //
     // 早前只查内存：库上虽有 (tenantId, idempotencyKey) 唯一约束，但那只会在写入时
     // 抛错，而不是幂等返回既有流水。缓存冷启动或多实例部署下，重复发放会变成 500。
     // 关掉内存判重跑 E2E 可复现——「重复发放应幂等返回既有流水」当场失败。
-    const existing = await this.factStore.findRewardsByIdempotencyKey(tenantId, input.idempotencyKey);
+    const existing = await this.factStore.findRewardsByIdempotencyKey(tenantId, input.idempotencyKey, tx);
     if (existing.length) {
       // 顺带把缺失的条目回填进缓存，使后续读取与库一致。
       for (const row of existing) {
@@ -681,7 +755,20 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       planned.push({ customerId: input.customerId, type: membership.referralRewardType, amount: membership.referrerRewardAmount, couponTemplateId: membership.referralRewardCouponTemplateId });
       planned.push({ customerId: input.relatedCustomerId, type: membership.referralRewardType, amount: membership.inviteeRewardAmount, couponTemplateId: membership.referralRewardCouponTemplateId });
     }
-    this.validateRewardBatch(state, context, planned.filter((item) => item.amount > 0));
+    const positivePlans = planned.filter((item) => item.amount > 0);
+    if (tx) {
+      // 不同幂等键也可能同时消耗同一奖励券模板；先按稳定顺序锁模板，
+      // 再依据库中的最新配额和客户已领数量校验，不能只看冷缓存。
+      const templateIds = [...new Set(positivePlans.filter((item) => item.type === "coupon").map((item) => item.couponTemplateId!).sort())];
+      for (const templateId of templateIds) {
+        const locked = await this.coreConfigStore.lockCouponTemplateForClaim(tenantId, templateId, tx);
+        if (!locked) throw new NotFoundException("奖励优惠券模板不存在或未启用");
+        const cached = context.couponTemplates.find((item) => item.id === templateId);
+        if (cached) Object.assign(cached, locked);
+        else context.couponTemplates.push(locked);
+      }
+    }
+    await this.validateRewardBatch(tenantId, state, context, positivePlans, tx);
     // 奖励券与被改动的券模板必须与流水一起落库，否则它们只存在于内存里：
     // 重启后券凭空消失、模板配额回退，同一批券可被反复发放。
     const grantedCoupons: RentalCustomerCoupon[] = [];
@@ -703,8 +790,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     }
     if (!rows.length) throw new ConflictException("当前激励规则未启用或触发条件不匹配");
     try {
-      for (const row of rows) await this.factStore.upsertRewardEntry(row);
+      for (const row of rows) await this.factStore.upsertRewardEntry(row, tx);
     } catch (error) {
+      if (tx) throw error;
       // 并发同键：两边都通过了库查询，写入时撞唯一约束。
       // 先到者已入账，这里回放它的流水而不是把 500 抛给调用方。
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
@@ -726,10 +814,33 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     }
     // 券与模板配额随流水一起落库。放在流水之后：流水的唯一约束是并发判重的
     // 唯一可靠关口，先过了那一关再写券，避免落败者也写出券来。
-    for (const coupon of grantedCoupons) await this.factStore.upsertCustomerCoupon(coupon);
-    for (const template of touchedTemplates.values()) await this.coreConfigStore.upsertCouponTemplate(template);
-    await this.flushBenefitAccounts(state, rows.map((row) => row.customerId));
+    for (const coupon of grantedCoupons) await this.factStore.upsertCustomerCoupon(coupon, tx);
+    for (const template of touchedTemplates.values()) await this.coreConfigStore.upsertCouponTemplate(template, tx);
+    // MySQL 事务不能用缓存中的绝对余额 upsert：两个不同幂等键并发时会互相覆盖。
+    // 改为库侧原子增量；缓存只会在提交后由调用方重建。
+    if (tx) await this.incrementRewardBenefitAccounts(tenantId, rows, tx);
+    else await this.flushBenefitAccounts(state, rows.map((row) => row.customerId));
     return rows;
+  }
+
+  /** 奖励发放以数据库增量更新权益账户，避免不同幂等键并发时用旧缓存覆盖余额。 */
+  private async incrementRewardBenefitAccounts(tenantId: string, rows: RentalRewardLedgerEntry[], tx: RentalBusinessFactTx) {
+    const deltas = new Map<string, { points: number; marketing: number; rewardCoupons: number }>();
+    for (const row of rows) {
+      const delta = deltas.get(row.customerId) ?? { points: 0, marketing: 0, rewardCoupons: 0 };
+      if (row.rewardType === "points") delta.points += row.amount;
+      else if (row.rewardType === "balance") delta.marketing += row.amount;
+      else delta.rewardCoupons += row.amount;
+      deltas.set(row.customerId, delta);
+    }
+    for (const [customerId, delta] of deltas) await this.factStore.incrementBenefitAccount(tenantId, customerId, delta, tx);
+  }
+
+  /** 奖励会修改核心配置中的券模板配额；业务事实预热不拥有这份缓存，需在提交后单独同步。 */
+  private async refreshCouponTemplateCache(tenantId: string, context: BusinessContext) {
+    const workspaceId = this.workspaceOf(tenantId);
+    const config = (await this.coreConfigStore.loadAll()).find((row) => row.workspaceId === workspaceId);
+    if (config) context.couponTemplates.splice(0, context.couponTemplates.length, ...config.couponTemplates);
   }
 
   async registerReferral(tenantId: string, context: BusinessContext, inviteeCustomerId: string, referrerCustomerId?: string) {
@@ -757,6 +868,29 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       rows.push(...await this.grantReward(tenantId, context, { customerId: relation.referrerCustomerId, relatedCustomerId: customerId, triggerType, idempotencyKey: `referral:${triggerType}:${customerId}` }));
     }
     return rows;
+  }
+
+  /** 将订单完成奖励并入订单幂等事务，提交前不改共享缓存。 */
+  async completeCustomerOrderEventInTransaction(tenantId: string, context: BusinessContext, customerId: string | undefined, tx: RentalBusinessFactTx) {
+    if (!customerId) return [];
+    const state = structuredClone(this.state(tenantId, context));
+    const transactionContext: BusinessContext = { ...context, couponTemplates: structuredClone(context.couponTemplates) };
+    const membership = transactionContext.settings.membership;
+    const relation = state.referrals.find((row) => row.inviteeCustomerId === customerId);
+    if (!relation || !membership.referralRewardEnabled || membership.referralTrigger !== "first_order_completed") return [];
+    return this.grantReward(tenantId, transactionContext, {
+      customerId: relation.referrerCustomerId,
+      relatedCustomerId: customerId,
+      triggerType: "first_order_completed",
+      idempotencyKey: `referral:first_order_completed:${customerId}`
+    }, tx, state);
+  }
+
+  /** 仅在外层事务成功返回后调用；所有运行期刷新按调用顺序串行发布。 */
+  async refreshFromDatabase() {
+    const next = this.refreshQueue.catch(() => undefined).then(() => this.onApplicationBootstrap());
+    this.refreshQueue = next;
+    await next;
   }
 
   async reverseReward(tenantId: string, context: BusinessContext, id: string, reason: string) {
@@ -1063,7 +1197,13 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return { appliedAt, referenceIds, grantedCoupons, touchedTemplate };
   }
 
-  private validateRewardBatch(state: RentalBusinessState, context: BusinessContext, planned: Array<{ customerId: string; type: RentalRewardLedgerEntry["rewardType"]; amount: number; couponTemplateId?: string }>) {
+  private async validateRewardBatch(
+    tenantId: string,
+    state: RentalBusinessState,
+    context: BusinessContext,
+    planned: Array<{ customerId: string; type: RentalRewardLedgerEntry["rewardType"]; amount: number; couponTemplateId?: string }>,
+    tx?: RentalBusinessFactTx
+  ) {
     const couponPlans = planned.filter((item) => item.type === "coupon");
     const byTemplate = new Map<string, number>();
     const byCustomerTemplate = new Map<string, number>();
@@ -1075,7 +1215,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       byTemplate.set(template.id, (byTemplate.get(template.id) ?? 0) + plan.amount);
       const customerKey = `${plan.customerId}:${template.id}`;
       byCustomerTemplate.set(customerKey, (byCustomerTemplate.get(customerKey) ?? 0) + plan.amount);
-      const existingCount = state.customerCoupons.filter((row) => row.templateId === template.id && row.customerId === plan.customerId && row.status !== "void").length;
+      const existingCount = tx
+        ? await this.factStore.countCustomerCoupons(tenantId, template.id, plan.customerId, tx)
+        : state.customerCoupons.filter((row) => row.templateId === template.id && row.customerId === plan.customerId && row.status !== "void").length;
       if (existingCount + (byCustomerTemplate.get(customerKey) ?? 0) > template.perCustomerLimit) throw new ConflictException("奖励优惠券超过每客限领数量");
     }
     for (const [templateId, amount] of byTemplate) {

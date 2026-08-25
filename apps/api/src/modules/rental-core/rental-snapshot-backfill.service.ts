@@ -63,6 +63,7 @@ interface BusinessSnapshotState {
 
 export interface BackfillTenantResult {
   tenantId: string;
+  workspaceId?: string;
   skipped: boolean;
   reason?: string;
   /** 本次处理的快照条目数，按集合分组。写入是 upsert，因此不等于新插入行数。 */
@@ -157,19 +158,27 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
       this.prisma.rentalCoreStateSnapshot.findMany(),
       this.prisma.rentalBusinessStateSnapshot.findMany()
     ]);
-    const businessByTenant = new Map(businessRows.map((row) => [row.tenantId, row.state as unknown as BusinessSnapshotState]));
-    const tenantIds = [...new Set([...coreRows.map((row) => row.tenantId), ...businessByTenant.keys()])];
+    const snapshots = new Map<string, { tenantId: string; core: CoreSnapshotState; business: BusinessSnapshotState }>();
+    for (const row of coreRows) {
+      const current = snapshots.get(row.workspaceId) ?? { tenantId: row.tenantId, core: {}, business: {} };
+      current.core = row.state as unknown as CoreSnapshotState;
+      snapshots.set(row.workspaceId, current);
+    }
+    for (const row of businessRows) {
+      const current = snapshots.get(row.workspaceId) ?? { tenantId: row.tenantId, core: {}, business: {} };
+      current.business = row.state as unknown as BusinessSnapshotState;
+      snapshots.set(row.workspaceId, current);
+    }
 
     const results: BackfillTenantResult[] = [];
-    for (const tenantId of tenantIds) {
-      const core = (coreRows.find((row) => row.tenantId === tenantId)?.state ?? {}) as unknown as CoreSnapshotState;
-      const business = businessByTenant.get(tenantId) ?? {};
+    for (const [workspaceId, snapshot] of snapshots) {
+      const { tenantId, core, business } = snapshot;
       try {
-        results.push(await this.backfillTenant(tenantId, core, business));
+        results.push(await this.backfillTenant(tenantId, workspaceId, core, business));
       } catch (error) {
         const reason = (error as Error).message;
-        this.logger.error(`租户 ${tenantId} 快照回填失败，已回滚该租户：${reason}`);
-        results.push({ tenantId, skipped: true, reason, inserted: {} });
+        this.logger.error(`租户 ${tenantId} 空间 ${workspaceId} 快照回填失败，已回滚该空间：${reason}`);
+        results.push({ tenantId, workspaceId, skipped: true, reason, inserted: {} });
       }
     }
 
@@ -194,6 +203,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
    */
   private async alreadyBackfilled(
     tenantId: string,
+    workspaceId: string,
     core: CoreSnapshotState,
     business: BusinessSnapshotState
   ) {
@@ -201,118 +211,118 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
       {
         keys: (core.operators ?? []).map((row) => row.id),
         existing: async () =>
-          (await this.prisma.rentalFulfillmentOperator.findMany({ where: { tenantId }, select: { id: true } }))
+          (await this.prisma.rentalFulfillmentOperator.findMany({ where: { tenantId, workspaceId }, select: { id: true } }))
             .map((row) => row.id)
       },
       {
         keys: (core.locations ?? []).map((row) => row.id),
         existing: async () =>
-          (await this.prisma.rentalFulfillmentLocation.findMany({ where: { tenantId }, select: { id: true } }))
+          (await this.prisma.rentalFulfillmentLocation.findMany({ where: { tenantId, workspaceId }, select: { id: true } }))
             .map((row) => row.id)
       },
       {
         keys: (core.itemGroups ?? []).map((row) => row.id),
         existing: async () =>
-          (await this.prisma.rentalItemGroup.findMany({ where: { tenantId }, select: { id: true } }))
+          (await this.prisma.rentalItemGroup.findMany({ where: { tenantId, workspaceId }, select: { id: true } }))
             .map((row) => row.id)
       },
       { keys: (core.assets ?? []).map((row) => row.id), existing: async () =>
-          (await this.prisma.rentalAsset.findMany({ where: { tenantId }, select: { id: true } }))
+          (await this.prisma.rentalAsset.findMany({ where: { tenantId, workspaceId }, select: { id: true } }))
             .map((row) => row.id) },
       {
         keys: (core.stockBalances ?? []).map((row) => row.id),
         existing: async () =>
-          (await this.prisma.rentalStockBalance.findMany({ where: { tenantId }, select: { id: true } }))
+          (await this.prisma.rentalStockBalance.findMany({ where: { tenantId, workspaceId }, select: { id: true } }))
             .map((row) => row.id)
       },
       {
         keys: (core.couponTemplates ?? []).map((row) => row.id),
         existing: async () =>
-          (await this.prisma.rentalCouponTemplate.findMany({ where: { tenantId }, select: { id: true } }))
+          (await this.prisma.rentalCouponTemplate.findMany({ where: { tenantId, workspaceId }, select: { id: true } }))
             .map((row) => row.id)
       },
       {
         keys: (core.inspectionTemplates ?? []).map((row) => row.id),
         existing: async () =>
-          (await this.prisma.rentalInspectionTemplate.findMany({ where: { tenantId }, select: { id: true } }))
+          (await this.prisma.rentalInspectionTemplate.findMany({ where: { tenantId, workspaceId }, select: { id: true } }))
             .map((row) => row.id)
       },
       { keys: (core.orders ?? []).map((row) => row.id), existing: async () =>
-          (await this.prisma.rentalOrder.findMany({ where: { tenantId }, select: { id: true } }))
+          (await this.prisma.rentalOrder.findMany({ where: { tenantId, workspaceId }, select: { id: true } }))
             .map((row) => row.id) },
       {
         keys: (core.inspections ?? []).map((row) => row.id),
         existing: async () =>
-          (await this.prisma.rentalInspectionRecord.findMany({ where: { tenantId }, select: { id: true } }))
+          (await this.prisma.rentalInspectionRecord.findMany({ where: { tenantId, workspaceId }, select: { id: true } }))
             .map((row) => row.id)
       },
       { keys: (business.quotes ?? []).map((row) => row.id), existing: async () =>
-          (await this.prisma.rentalQuote.findMany({ where: { tenantId }, select: { id: true } }))
+          (await this.prisma.rentalQuote.findMany({ where: { tenantId, workspaceId }, select: { id: true } }))
             .map((row) => row.id) },
       {
         keys: (business.customerCoupons ?? []).map((row) => row.id),
         existing: async () =>
-          (await this.prisma.rentalCustomerCoupon.findMany({ where: { tenantId }, select: { id: true } }))
+          (await this.prisma.rentalCustomerCoupon.findMany({ where: { tenantId, workspaceId }, select: { id: true } }))
             .map((row) => row.id)
       },
       {
         keys: (business.rewardLedger ?? []).map((row) => row.id),
         existing: async () =>
-          (await this.prisma.rentalRewardLedgerEntry.findMany({ where: { tenantId }, select: { id: true } }))
+          (await this.prisma.rentalRewardLedgerEntry.findMany({ where: { tenantId, workspaceId }, select: { id: true } }))
             .map((row) => row.id)
       },
       {
         keys: (business.notificationTemplates ?? []).map((row) => row.id),
         existing: async () =>
-          (await this.prisma.rentalNotificationTemplate.findMany({ where: { tenantId }, select: { id: true } }))
+          (await this.prisma.rentalNotificationTemplate.findMany({ where: { tenantId, workspaceId }, select: { id: true } }))
             .map((row) => row.id)
       },
       {
         keys: (business.notificationLogs ?? []).map((row) => row.id),
         existing: async () =>
-          (await this.prisma.rentalNotificationLog.findMany({ where: { tenantId }, select: { id: true } }))
+          (await this.prisma.rentalNotificationLog.findMany({ where: { tenantId, workspaceId }, select: { id: true } }))
             .map((row) => row.id)
       },
       {
         keys: (business.pricingPlans ?? []).map((row) => row.id),
         existing: async () =>
-          (await this.prisma.rentalPricingPlan.findMany({ where: { tenantId }, select: { id: true } }))
+          (await this.prisma.rentalPricingPlan.findMany({ where: { tenantId, workspaceId }, select: { id: true } }))
             .map((row) => row.id)
       },
       {
         keys: (business.discountPlans ?? []).map((row) => row.id),
         existing: async () =>
-          (await this.prisma.rentalDiscountPlan.findMany({ where: { tenantId }, select: { id: true } }))
+          (await this.prisma.rentalDiscountPlan.findMany({ where: { tenantId, workspaceId }, select: { id: true } }))
             .map((row) => row.id)
       },
       {
         keys: (business.services ?? []).map((row) => row.id),
         existing: async () =>
-          (await this.prisma.rentalValueAddedService.findMany({ where: { tenantId }, select: { id: true } }))
+          (await this.prisma.rentalValueAddedService.findMany({ where: { tenantId, workspaceId }, select: { id: true } }))
             .map((row) => row.id)
       },
       {
         keys: (business.ruleVersions ?? []).map((row) => row.id),
         existing: async () =>
-          (await this.prisma.rentalRuleVersion.findMany({ where: { tenantId }, select: { id: true } }))
+          (await this.prisma.rentalRuleVersion.findMany({ where: { tenantId, workspaceId }, select: { id: true } }))
             .map((row) => row.id)
       },
       {
         keys: (business.benefitAccounts ?? []).map((row) => row.customerId),
         existing: async () =>
-          (await this.prisma.rentalBenefitAccount.findMany({ where: { tenantId }, select: { customerId: true } }))
+          (await this.prisma.rentalBenefitAccount.findMany({ where: { tenantId, workspaceId }, select: { customerId: true } }))
             .map((row) => row.customerId)
       },
       {
         keys: (business.referrals ?? []).map((row) => row.inviteeCustomerId),
         existing: async () =>
-          (await this.prisma.rentalReferral.findMany({ where: { tenantId }, select: { inviteeCustomerId: true } }))
+          (await this.prisma.rentalReferral.findMany({ where: { tenantId, workspaceId }, select: { inviteeCustomerId: true } }))
             .map((row) => row.inviteeCustomerId)
       },
       {
         keys: (business.calendars ?? []).map((row) => String(row.year)),
         existing: async () =>
-          (await this.prisma.rentalBusinessCalendar.findMany({ where: { tenantId }, select: { year: true } }))
+          (await this.prisma.rentalBusinessCalendar.findMany({ where: { tenantId, workspaceId }, select: { year: true } }))
             .map((row) => String(row.year))
       }
     ];
@@ -328,27 +338,22 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
 
   private async backfillTenant(
     tenantId: string,
+    workspaceId: string,
     core: CoreSnapshotState,
     business: BusinessSnapshotState
   ): Promise<BackfillTenantResult> {
-    if (await this.alreadyBackfilled(tenantId, core, business)) {
-      return { tenantId, skipped: true, reason: "已存在规范化数据", inserted: {} };
+    if (await this.alreadyBackfilled(tenantId, workspaceId, core, business)) {
+      return { tenantId, workspaceId, skipped: true, reason: "已存在规范化数据", inserted: {} };
     }
     // 租户必须存在，否则所有外键都会失败——这属于数据不一致，应明确报错。
     const tenant = await this.prisma.tenant.findUnique({ where: { id: tenantId }, select: { id: true } });
     if (!tenant) throw new Error("Tenant 表中不存在该租户");
 
-    // SPACE-03：快照回填出来的经营事实全部归属该租户的**默认经营空间**。
-    //
-    // 这里没有会话（onModuleInit 阶段），因此不能取会话空间；而快照本身是
-    // 升级前的单空间时代产物，其内容本来就属于兼容层，也只可能属于默认空间。
-    // 找不到默认空间时直接抛错让该租户整体回滚，绝不猜一个空间 id。
-    const defaultWorkspace = await this.prisma.businessWorkspace.findFirst({
-      where: { tenantId, defaultMarker: "default" },
+    const workspace = await this.prisma.businessWorkspace.findFirst({
+      where: { id: workspaceId, tenantId },
       select: { id: true }
     });
-    if (!defaultWorkspace) throw new Error("该租户没有默认经营空间，无法归属回填出的经营事实");
-    const workspaceId = defaultWorkspace.id;
+    if (!workspace) throw new Error("快照所属经营空间不存在或不属于该租户");
 
     const inserted: Record<string, number> = {};
     const count = (key: string, n: number) => {
@@ -1266,6 +1271,6 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
     const summary = Object.entries(inserted).map(([key, value]) => `${key}=${value}`).join(" ");
     // 计数是"本次处理的快照条目数"，不等于"新插入行数"——写入是 upsert，已存在的条目也计入。
     this.logger.log(`租户 ${tenantId} 回填完成（按快照条目计）：${summary || "无可回填数据"}`);
-    return { tenantId, skipped: false, inserted };
+    return { tenantId, workspaceId, skipped: false, inserted };
   }
 }

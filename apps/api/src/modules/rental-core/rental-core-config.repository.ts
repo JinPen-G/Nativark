@@ -71,6 +71,8 @@ export interface RentalConfigStore {
   upsertLocation(location: RentalFulfillmentLocation, tx?: RentalConfigTx): Promise<void>;
   upsertItemGroup(group: RentalItemGroup, tx?: RentalConfigTx): Promise<void>;
   upsertCouponTemplate(template: RentalCouponTemplate, tx?: RentalConfigTx): Promise<void>;
+  /** 在领券事务内锁定模板行，串行化不同幂等键对同一配额的竞争。 */
+  lockCouponTemplateForClaim(tenantId: string, templateId: string, tx: RentalConfigTx): Promise<RentalCouponTemplate | undefined>;
   upsertInspectionTemplate(template: RentalInspectionTemplate, tx?: RentalConfigTx): Promise<void>;
 }
 
@@ -391,6 +393,26 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       create: { workspaceId, id: template.id, ...data, createdAt: new Date(template.createdAt) },
       update: data
     });
+  }
+
+  async lockCouponTemplateForClaim(
+    tenantId: string,
+    templateId: string,
+    tx: RentalConfigTx
+  ): Promise<RentalCouponTemplate | undefined> {
+    const workspaceId = await resolveScopeWorkspaceId(tx, tenantId);
+    await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT \`id\` FROM \`rental_coupon_templates\`
+      WHERE \`id\` = ${templateId}
+        AND \`tenantId\` = ${tenantId}
+        AND \`workspaceId\` = ${workspaceId}
+        AND \`status\` = 'enabled'
+      FOR UPDATE
+    `);
+    const row = await tx.rentalCouponTemplate.findFirst({
+      where: { id: templateId, tenantId, workspaceId, status: "enabled" }
+    });
+    return row ? this.toCouponTemplate(row) : undefined;
   }
 
   async upsertInspectionTemplate(template: RentalInspectionTemplate, tx?: RentalConfigTx): Promise<void> {

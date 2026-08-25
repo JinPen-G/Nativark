@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   InternalServerErrorException,
@@ -98,8 +99,27 @@ export class AuthService {
     const user = await this.platformService.findUserById(session.userId);
     if (!user) throw new UnauthorizedException("账号或租户已停用");
     const tenant = await this.platformService.findTenantByIdForAuth(user.tenantId);
-    await this.platformService.revokeAuthSession(session.id);
-    return this.issueSession(user, tenant);
+    // 续期优先保留当前空间；空间在会话存续期内被撤销或停用时，退回账号仍可进入
+    // 的默认空间。先解析再轮换，避免拿到新令牌后才发现上下文无效。
+    const workspaceId =
+      (await this.platformService.resolveSessionWorkspaceId(user.id, session.currentWorkspaceId ?? undefined)) ??
+      (await this.platformService.resolveSessionWorkspaceId(user.id));
+    const sessionId = randomUUID();
+    const refreshToken = randomBytes(48).toString("base64url");
+    const scoped = (await this.platformService.findWorkspaceScopedUser(user.id, workspaceId)) ?? user;
+    // 响应可在写库前计算；令牌中的 sid 只有 rotate 成功创建会话后才会交给客户端。
+    const response = await this.buildLoginResponse(scoped, tenant, sessionId, workspaceId, refreshToken);
+    // 旧令牌撤销和新会话创建是同一个原子操作。并发刷新只有一方能成功，且不会
+    // 出现“旧会话已撤销、新会话尚未创建”的断档。
+    const rotated = await this.platformService.rotateAuthSession(session.id, {
+      id: sessionId,
+      userId: user.id,
+      refreshTokenHash: hashOpaqueToken(refreshToken),
+      expiresAt: new Date(Date.now() + this.refreshTtlMs),
+      currentWorkspaceId: workspaceId ?? null
+    });
+    if (!rotated) throw new UnauthorizedException("会话已被刷新或已失效，请重新登录");
+    return response;
   }
 
   async logout(input: RefreshSessionRequest) {
@@ -145,6 +165,12 @@ export class AuthService {
     const user = await this.resolveAccessToken(authorization);
     if (!user) throw new UnauthorizedException("会话已失效，请重新登录");
     return this.toAuthUser(user);
+  }
+
+  async assertLegacyVehicleDomainWorkspace(tenantId: string, workspaceId?: string) {
+    if (!workspaceId || !(await this.platformService.isLegacyVehicleDomainWorkspaceAllowed(tenantId, workspaceId))) {
+      throw new ForbiddenException("旧车辆兼容接口仅允许默认车辆经营空间使用，空间级迁移完成前请使用 Rental Core 接口");
+    }
   }
 
   async getSessionContext(authorization?: string) {
@@ -210,7 +236,8 @@ export class AuthService {
    * 令牌里的 wid 只作提示，不作判据。
    */
   async resolveAccessContext(
-    authorization?: string
+    authorization?: string,
+    options: { allowInvalidWorkspace?: boolean } = {}
   ): Promise<{ user: SystemUserRow; workspaceId?: string; hasWorkspaces: boolean } | undefined> {
     const token = authorization?.replace(/^Bearer\s+/i, "").trim();
     if (!token) return undefined;
@@ -219,7 +246,8 @@ export class AuthService {
     const session = await this.platformService.getAuthSession(payload.sid);
     if (!session || session.userId !== payload.sub) return undefined;
     const workspaceId = session.currentWorkspaceId ?? undefined;
-    const user = await this.platformService.findWorkspaceScopedUser(payload.sub, workspaceId);
+    const user = await this.platformService.findWorkspaceScopedUser(payload.sub, workspaceId)
+      ?? (options.allowInvalidWorkspace ? await this.platformService.findUserById(payload.sub) : undefined);
     if (!user || user.tenantId !== payload.tid) return undefined;
     // hasWorkspaces 用于区分两种"没有当前空间"：
     //   - 该账号本来就有可进入空间却没选（必须 fail-closed，让它去选）
@@ -243,7 +271,14 @@ export class AuthService {
     // 逐项校验成员关系与空间状态；无权或已冻结/停用在此抛 403。
     const resolved = await this.platformService.resolveSessionWorkspaceId(payload.sub, workspaceId.trim());
     if (!resolved) throw new ForbiddenException("无权进入该经营空间");
-    await this.platformService.setSessionWorkspace(session.id, resolved);
+    const updated = await this.platformService.setSessionWorkspace(
+      session.id,
+      resolved,
+      session.currentWorkspaceId
+    );
+    if (updated === false) {
+      throw new ConflictException("当前会话已在其他标签页切换空间，请刷新后重试");
+    }
     const user = await this.platformService.findWorkspaceScopedUser(payload.sub, resolved);
     if (!user) throw new UnauthorizedException("账号已停用");
     const tenant = await this.platformService.findTenantByIdForAuth(user.tenantId);
@@ -253,14 +288,18 @@ export class AuthService {
 
   private async issueSession(
     user: SystemUserRow,
-    tenant: Awaited<ReturnType<PlatformService["findTenantByIdForAuth"]>>
+    tenant: Awaited<ReturnType<PlatformService["findTenantByIdForAuth"]>>,
+    requestedWorkspaceId?: string | null
   ): Promise<LoginResponse> {
     const sessionId = randomUUID();
     const refreshToken = randomBytes(48).toString("base64url");
     // SPACE-02：登录即解析当前经营空间（默认空间优先，否则第一个可进入空间）。
     // 平台管理租户没有成员关系，解析结果为 undefined —— 那是合法状态，
     // 但其会话访问经营接口会被 fail-closed 拒绝。
-    const workspaceId = await this.platformService.resolveSessionWorkspaceId(user.id);
+    const workspaceId = await this.platformService.resolveSessionWorkspaceId(
+      user.id,
+      requestedWorkspaceId ?? undefined
+    );
     await this.platformService.createAuthSession({
       id: sessionId,
       userId: user.id,

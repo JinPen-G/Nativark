@@ -231,6 +231,22 @@ export class PlatformRepository {
     return this.prisma.authSession.create({ data: input });
   }
 
+  /** 单次刷新令牌的消费和新会话创建必须同事务完成，避免旧令牌已作废却没有替代会话。 */
+  async rotateAuthSession(
+    previousSessionId: string,
+    input: { id: string; userId: string; refreshTokenHash: string; expiresAt: Date; currentWorkspaceId?: string | null }
+  ): Promise<boolean> {
+    return this.prisma.$transaction(async (tx) => {
+      const revoked = await tx.authSession.updateMany({
+        where: { id: previousSessionId, revokedAt: null, expiresAt: { gt: new Date() } },
+        data: { revokedAt: new Date() }
+      });
+      if (revoked.count !== 1) return false;
+      await tx.authSession.create({ data: input });
+      return true;
+    });
+  }
+
   async getAuthSession(id: string) {
     return this.prisma.authSession.findFirst({
       where: { id, revokedAt: null, expiresAt: { gt: new Date() } },
@@ -245,11 +261,12 @@ export class PlatformRepository {
     });
   }
 
-  async revokeAuthSession(id: string) {
-    await this.prisma.authSession.updateMany({
+  async revokeAuthSession(id: string): Promise<boolean> {
+    const result = await this.prisma.authSession.updateMany({
       where: { id, revokedAt: null },
       data: { revokedAt: new Date() }
     });
+    return result.count === 1;
   }
 
   async revokeUserSessions(userId: string) {
@@ -544,12 +561,19 @@ export class PlatformRepository {
     const base = await this.findUserById(userId);
     if (!base || !workspaceId) return base;
     const member = await this.prisma.workspaceMember.findFirst({
-      where: { userId, workspaceId, isActive: true },
-      include: { role: { include: { permissions: { include: { permission: true } } } } }
+      where: {
+        userId,
+        workspaceId,
+        isActive: true,
+        workspace: { status: PrismaWorkspaceStatus.ACTIVE }
+      },
+        include: { role: { include: { permissions: { include: { permission: true } } } } }
     });
-    if (!member) return base;
+    // 会话已经明确要求某个空间时，成员关系失效不能退回租户级账号。
+    // 否则撤销成员后，旧 refresh/access session 会重新获得 base 用户权限。
+    if (!member) return undefined;
     const next: SystemUserRow = { ...base };
-    if (member.role) {
+    if (member.role?.isActive) {
       const role = member.role;
       const isAll = base.isPlatformAdmin || role.fixedAllPermissions;
       next.roleIds = [role.id];
@@ -564,17 +588,47 @@ export class PlatformRepository {
             ])
           ];
       next.dataScope = isAll ? "all" : this.toSharedDataScope(role.dataScope);
+    } else if (member.role) {
+      // 停用角色不能继续通过 fixedAllPermissions、buttonPermissions 或成员范围放权。
+      next.roleIds = [];
+      next.roleNames = [];
+      next.permissions = [];
     }
     // 成员关系上的数据范围优先级最高：它是"该账号在本空间"的显式授权。
     if (member.dataScope) next.dataScope = this.toSharedDataScope(member.dataScope);
     return next;
   }
 
-  async setSessionWorkspace(sessionId: string, workspaceId: string | null): Promise<void> {
-    await this.prisma.authSession.update({
-      where: { id: sessionId },
+  async setSessionWorkspace(sessionId: string, workspaceId: string | null, expectedWorkspaceId?: string | null): Promise<boolean> {
+    const result = await this.prisma.authSession.updateMany({
+      where: {
+        id: sessionId,
+        ...(expectedWorkspaceId === undefined
+          ? {}
+          : { currentWorkspaceId: expectedWorkspaceId })
+      },
       data: { currentWorkspaceId: workspaceId }
     });
+    return result.count === 1;
+  }
+
+  /**
+   * 旧 `/store-rental/*` 车辆域的表仍只有 tenantId，尚未完成空间级迁移。
+   * 在迁移完成前只允许默认车辆空间使用这组兼容接口，禁止非默认空间把
+   * 同一套租户级车辆数据伪装成自己的空间数据。
+   */
+  async isLegacyVehicleDomainWorkspaceAllowed(tenantId: string, workspaceId: string): Promise<boolean> {
+    const [current, defaultWorkspace] = await Promise.all([
+      this.prisma.businessWorkspace.findFirst({
+        where: { id: workspaceId, tenantId, categoryCode: PrismaRentalCategoryCode.VEHICLE },
+        select: { id: true }
+      }),
+      this.prisma.businessWorkspace.findFirst({
+        where: { tenantId, isDefault: true, categoryCode: PrismaRentalCategoryCode.VEHICLE },
+        select: { id: true }
+      })
+    ]);
+    return Boolean(current && defaultWorkspace && current.id === defaultWorkspace.id);
   }
 
   async listOrganizations(
@@ -867,7 +921,7 @@ export class PlatformRepository {
   async deleteRole(id: string, tenantId: string) {
     const role = await this.prisma.role.findUnique({
       where: { id },
-      include: { userAssignments: true, users: true }
+      include: { userAssignments: true, users: true, workspaceMembers: true }
     });
     if (!role || role.tenantId !== tenantId) {
       throw new NotFoundException(`Role ${id} was not found`);
@@ -875,7 +929,7 @@ export class PlatformRepository {
     if (role.fixedAllPermissions) {
       throw new BadRequestException("预设角色不能删除");
     }
-    if (role.userAssignments.length > 0 || role.users.length > 0) {
+    if (role.userAssignments.length > 0 || role.users.length > 0 || role.workspaceMembers.length > 0) {
       throw new BadRequestException("该角色已分配给账号，不能删除");
     }
 

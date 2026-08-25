@@ -128,6 +128,34 @@ for (const file of dtoFiles) {
   });
 }
 
+// 只校验 DTO 自身会产生“假绿”：控制器若继续写 interface、Omit<> 或匿名对象，
+// 这些类型运行时全部被擦除，ValidationPipe 根本不会执行字段校验。
+// Platform/Auth 是本轮会话与空间权限边界，所有 @Body 参数必须显式使用 DTO 类。
+for (const relative of [
+  "apps/api/src/modules/platform/platform.controller.ts",
+  "apps/api/src/modules/auth/auth.controller.ts"
+]) {
+  const file = path.join(repoRoot, relative);
+  const source = ts.createSourceFile(file, fs.readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true);
+  ts.forEachChild(source, function visit(node) {
+    if (ts.isParameter(node)) {
+      const decorators = ts.getDecorators ? ts.getDecorators(node) ?? [] : [];
+      const isBody = decorators.some((decorator) => {
+        const expression = decorator.expression;
+        return ts.isCallExpression(expression) && expression.expression.getText(source) === "Body";
+      });
+      if (isBody) {
+        const typeName = node.type?.getText(source) ?? "<missing>";
+        if (!/Dto$/u.test(typeName)) {
+          const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
+          failures.push(`${relative}:${line}: @Body 参数必须使用运行时 DTO 类，当前为 ${typeName}`);
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  });
+}
+
 if (failures.length) {
   console.error("DTO coverage check failed:\n");
   for (const line of failures) console.error(`  - ${line}`);

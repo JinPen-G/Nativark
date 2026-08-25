@@ -1,27 +1,31 @@
 import { Body, Controller, Delete, Get, Param, Post, Put, Query, Req } from "@nestjs/common";
 import type {
-  GeneratePlatformNumberRequest,
   PlatformAuditLogQuery,
   PlatformFilterPresetQuery,
-  SaveOrganizationRequest,
-  SavePlatformFilterPresetRequest,
-  SaveSystemRoleRequest,
-  SaveSystemRuleSectionRequest,
-  SaveSystemUserRequest,
-  SavePlatformDictionaryGroupRequest,
-  SavePlatformNumberRuleRequest,
-  SystemSecurityBaselineConfig,
   SystemUserRow,
-  TenantBootstrapRequest,
-  UpdateTenantRequest,
-  UpdateTenantStatusRequest,
-  CreateBusinessWorkspaceRequest,
-  LinkCustomerToWorkspaceRequest,
-  SaveSharedCustomerRequest,
-  UpdateBusinessWorkspaceRequest,
-  SaveWorkspaceMemberRequest
 } from "@store-rental/shared";
 import { PlatformService } from "./platform.service";
+import { CreateBusinessWorkspaceDto, LinkCustomerToWorkspaceDto, SaveSharedCustomerDto, SaveWorkspaceMemberDto, UpdateBusinessWorkspaceDto } from "./workspace-request.dto";
+import {
+  GeneratePlatformNumberDto,
+  OperatorInputDto,
+  OrganizationStatusInputDto,
+  ResetUserPasswordInputDto,
+  SaveOrganizationDto,
+  SavePlatformDictionaryBodyInputDto,
+  SavePlatformFilterPresetDto,
+  SavePlatformNumberRuleBodyInputDto,
+  SaveRolePermissionsInputDto,
+  SaveSecurityBaselineInputDto,
+  SaveSystemRoleDto,
+  SaveSystemRuleSectionBodyInputDto,
+  SaveSystemUserDto,
+  SecondConfirmationInputDto,
+  SetUserStatusInputDto,
+  TenantBootstrapDto,
+  UpdateTenantDto,
+  UpdateTenantStatusDto
+} from "./platform-request.dto";
 
 interface RequestWithUser {
   user?: SystemUserRow;
@@ -42,12 +46,12 @@ export class PlatformController {
   }
 
   @Put("tenants/:id")
-  updateTenant(@Param("id") id: string, @Body() body: UpdateTenantRequest, @Req() req: RequestWithUser) {
+  updateTenant(@Param("id") id: string, @Body() body: UpdateTenantDto, @Req() req: RequestWithUser) {
     return this.platformService.updateTenant(id, body, req.user);
   }
 
   @Put("tenants/:id/status")
-  updateTenantStatus(@Param("id") id: string, @Body() body: UpdateTenantStatusRequest, @Req() req: RequestWithUser) {
+  updateTenantStatus(@Param("id") id: string, @Body() body: UpdateTenantStatusDto, @Req() req: RequestWithUser) {
     return this.platformService.updateTenantStatus(id, body, req.user);
   }
 
@@ -89,24 +93,24 @@ export class PlatformController {
   }
 
   @Post("customers")
-  registerCustomer(@Body() body: SaveSharedCustomerRequest, @Req() req: RequestWithUser) {
+  registerCustomer(@Body() body: SaveSharedCustomerDto, @Req() req: RequestWithUser) {
     return this.platformService.registerSharedCustomer(body, req.user);
   }
 
   @Post("workspace-customers")
-  linkCustomer(@Body() body: LinkCustomerToWorkspaceRequest, @Req() req: RequestWithUser) {
+  linkCustomer(@Body() body: LinkCustomerToWorkspaceDto, @Req() req: RequestWithUser) {
     return this.platformService.linkCustomerToWorkspace(body, req.user);
   }
 
   @Post("workspaces")
-  createWorkspace(@Body() body: CreateBusinessWorkspaceRequest, @Req() req: RequestWithUser) {
+  createWorkspace(@Body() body: CreateBusinessWorkspaceDto, @Req() req: RequestWithUser) {
     return this.platformService.createBusinessWorkspace(body, req.user);
   }
 
   @Put("workspaces/:id")
   updateWorkspace(
     @Param("id") id: string,
-    @Body() body: UpdateBusinessWorkspaceRequest,
+    @Body() body: UpdateBusinessWorkspaceDto,
     @Req() req: RequestWithUser
   ) {
     return this.platformService.updateBusinessWorkspace(id, body, req.user);
@@ -120,21 +124,21 @@ export class PlatformController {
   @Put("workspaces/:id/members")
   saveWorkspaceMember(
     @Param("id") id: string,
-    @Body() body: SaveWorkspaceMemberRequest,
+    @Body() body: SaveWorkspaceMemberDto,
     @Req() req: RequestWithUser
   ) {
     return this.platformService.saveWorkspaceMember(id, body, req.user);
   }
 
   @Post("organizations")
-  createOrganization(@Body() body: SaveOrganizationRequest, @Req() req: RequestWithUser) {
+  createOrganization(@Body() body: SaveOrganizationDto, @Req() req: RequestWithUser) {
     return this.platformService.saveOrganization(body, req.user);
   }
 
   @Put("organizations/:id/status")
   setOrganizationStatus(
     @Param("id") id: string,
-    @Body() body: { status: "enabled" | "disabled"; operator?: string; tenantId?: string },
+    @Body() body: OrganizationStatusInputDto,
     @Req() req?: RequestWithUser
   ) {
     return this.platformService.setOrganizationStatus(
@@ -148,7 +152,7 @@ export class PlatformController {
   @Put("organizations/:id")
   saveOrganization(
     @Param("id") id: string,
-    @Body() body: Omit<SaveOrganizationRequest, "id">,
+    @Body() body: SaveOrganizationDto,
     @Req() req: RequestWithUser
   ) {
     return this.platformService.saveOrganization({ ...body, id }, req.user);
@@ -167,13 +171,13 @@ export class PlatformController {
   @Put("system-rules/:sectionKey")
   saveSystemRuleSection(
     @Param("sectionKey") sectionKey: string,
-    @Body() body: Omit<SaveSystemRuleSectionRequest, "sectionKey">
+    @Body() body: SaveSystemRuleSectionBodyInputDto
   ) {
     return this.platformService.saveSystemRuleSection({ ...body, sectionKey });
   }
 
   @Post("system-rules/ai-test")
-  testAiConnection(@Body() body: { operator?: string }) {
+  testAiConnection(@Body() body: OperatorInputDto) {
     return this.platformService.testAiConnection(body.operator);
   }
 
@@ -184,7 +188,7 @@ export class PlatformController {
 
   @Put("security-baseline")
   saveSecurityBaseline(
-    @Body() body: { config: SystemSecurityBaselineConfig; operator?: string }
+    @Body() body: SaveSecurityBaselineInputDto
   ) {
     return this.platformService.saveSecurityBaseline(
       body.config,
@@ -194,7 +198,7 @@ export class PlatformController {
 
   @Post("security-baseline/second-confirmation/check")
   checkSecondConfirmation(
-    @Body() body: { action: string; confirmationCode?: string }
+    @Body() body: SecondConfirmationInputDto
   ) {
     return this.platformService.checkSecondConfirmation(
       body.action,
@@ -219,7 +223,7 @@ export class PlatformController {
 
   @Post("filter-presets")
   saveFilterPreset(
-    @Body() body: SavePlatformFilterPresetRequest,
+    @Body() body: SavePlatformFilterPresetDto,
     @Req() req?: RequestWithUser
   ) {
     return this.platformService.saveFilterPreset(body, req?.user);
@@ -228,7 +232,7 @@ export class PlatformController {
   @Put("filter-presets/:id/default")
   setDefaultFilterPreset(
     @Param("id") id: string,
-    @Body() body: { operator?: string },
+    @Body() body: OperatorInputDto,
     @Req() req?: RequestWithUser
   ) {
     return this.platformService.setDefaultFilterPreset(id, body.operator, req?.user);
@@ -251,7 +255,7 @@ export class PlatformController {
   @Put("dictionaries/:code")
   saveDictionary(
     @Param("code") code: string,
-    @Body() body: Omit<SavePlatformDictionaryGroupRequest, "code">
+    @Body() body: SavePlatformDictionaryBodyInputDto
   ) {
     return this.platformService.saveDictionaryGroup({ ...body, code });
   }
@@ -264,13 +268,13 @@ export class PlatformController {
   @Put("number-rules/:code")
   saveNumberRule(
     @Param("code") code: string,
-    @Body() body: Omit<SavePlatformNumberRuleRequest, "code">
+    @Body() body: SavePlatformNumberRuleBodyInputDto
   ) {
     return this.platformService.saveNumberRule({ ...body, code });
   }
 
   @Post("number-rules/generate")
-  generateNumber(@Body() body: GeneratePlatformNumberRequest) {
+  generateNumber(@Body() body: GeneratePlatformNumberDto) {
     return this.platformService.generateNumber(body);
   }
 
@@ -280,7 +284,7 @@ export class PlatformController {
   }
 
   @Post("tenant-bootstrap")
-  bootstrapTenant(@Body() body: TenantBootstrapRequest, @Req() req: RequestWithUser) {
+  bootstrapTenant(@Body() body: TenantBootstrapDto, @Req() req: RequestWithUser) {
     return this.platformService.bootstrapTenant(body, req.user);
   }
 
@@ -290,12 +294,12 @@ export class PlatformController {
   }
 
   @Post("roles")
-  createRole(@Body() body: SaveSystemRoleRequest, @Req() req: RequestWithUser) {
+  createRole(@Body() body: SaveSystemRoleDto, @Req() req: RequestWithUser) {
     return this.platformService.saveRole(body, req.user);
   }
 
   @Put("roles/:id")
-  updateRole(@Param("id") id: string, @Body() body: SaveSystemRoleRequest, @Req() req: RequestWithUser) {
+  updateRole(@Param("id") id: string, @Body() body: SaveSystemRoleDto, @Req() req: RequestWithUser) {
     return this.platformService.saveRole({ ...body, id }, req.user);
   }
 
@@ -307,7 +311,7 @@ export class PlatformController {
   @Put("roles/:id/permissions")
   saveRolePermissions(
     @Param("id") id: string,
-    @Body() body: { permissions?: string[]; tenantId?: string },
+    @Body() body: SaveRolePermissionsInputDto,
     @Req() req: RequestWithUser
   ) {
     return this.platformService.saveRolePermissions(id, body.permissions ?? [], body.tenantId, req.user);
@@ -319,26 +323,26 @@ export class PlatformController {
   }
 
   @Post("users")
-  createUser(@Body() body: SaveSystemUserRequest, @Req() req: RequestWithUser) {
+  createUser(@Body() body: SaveSystemUserDto, @Req() req: RequestWithUser) {
     return this.platformService.saveUser(body, req.user);
   }
 
   @Put("users/:id")
-  updateUser(@Param("id") id: string, @Body() body: SaveSystemUserRequest, @Req() req: RequestWithUser) {
+  updateUser(@Param("id") id: string, @Body() body: SaveSystemUserDto, @Req() req: RequestWithUser) {
     return this.platformService.saveUser({ ...body, id }, req.user);
   }
 
   @Put("users/:id/status")
   setUserStatus(
     @Param("id") id: string,
-    @Body() body: { isActive?: boolean; tenantId?: string },
+    @Body() body: SetUserStatusInputDto,
     @Req() req: RequestWithUser
   ) {
-    return this.platformService.setUserStatus(id, Boolean(body.isActive), body.tenantId, req.user);
+    return this.platformService.setUserStatus(id, body.isActive, body.tenantId, req.user);
   }
 
   @Post("users/:id/reset-password")
-  resetUserPassword(@Param("id") id: string, @Body() body: { tenantId?: string }, @Req() req: RequestWithUser) {
+  resetUserPassword(@Param("id") id: string, @Body() body: ResetUserPasswordInputDto, @Req() req: RequestWithUser) {
     return this.platformService.resetUserPassword(id, body.tenantId, req.user);
   }
 }
