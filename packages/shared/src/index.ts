@@ -4120,6 +4120,14 @@ export interface TenantRentalBusinessSettings {
     weekendDays: number[];
     holidayPricingEnabled: boolean;
     officialCalendarRegion: "CN" | "NONE";
+    /**
+     * IANA 时区标识（如 `Asia/Shanghai`），决定营业日界。
+     *
+     * 自然日、夜与日历日期类型都按这个时区切分日界；缺省视为 `Asia/Shanghai`。
+     * 存标识而不是固定偏移，是为了让实行夏令时的地区也能算对日界。
+     * 该设置在 SPACE-03 之后按经营空间存储，因此实际粒度是每个经营空间一个时区。
+     */
+    timeZone?: string;
   };
   membership: {
     signupRewardEnabled: boolean;

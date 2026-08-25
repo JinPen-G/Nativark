@@ -154,6 +154,15 @@ export class BusinessSettingsCalendarInputDto {
 
   @IsIn(["CN", "NONE"])
   officialCalendarRegion!: "CN" | "NONE";
+
+  /**
+   * IANA 时区标识。只校验非空字符串，具体是否为已知时区由服务层用 Intl 判定——
+   * 把 418 个时区写进 @IsIn 既冗长又会随 ICU 升级过期。
+   */
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  timeZone?: string;
 }
 
 export class BusinessSettingsMembershipInputDto {

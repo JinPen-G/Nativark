@@ -4,6 +4,7 @@ import {
   type RentalPricingRate,
   type RentalPricingUnit
 } from "@store-rental/shared";
+import { DEFAULT_BUSINESS_TIME_ZONE, businessDayIndex } from "./rental-business-day";
 
 /**
  * 计费单位的可计费量与行金额计算。
@@ -15,19 +16,18 @@ import {
  */
 export interface RentalPricingStrategy {
   readonly unit: RentalPricingUnit;
-  billableUnits(startAt: string, endAt: string, usageQuantity?: number): number;
+  /**
+   * `timeZone` 只对按日界切分的单位（自然日、夜）有意义，其余单位忽略它。
+   * 缺省时按 `DEFAULT_BUSINESS_TIME_ZONE`，因此既有调用方无需改动。
+   */
+  billableUnits(startAt: string, endAt: string, usageQuantity?: number, timeZone?: string): number;
   amountPerItem(rate: RentalPricingRate, units: number): number;
   /** 行金额的推导说明，进入报价明细的"计算说明"。验收要求"相同输入可复算并解释来源"。 */
   explain(rate: RentalPricingRate, units: number): string;
 }
 
-const MS_PER_DAY = 86_400_000;
-
 const durationHours = (startAt: string, endAt: string) =>
   Math.max(0, (new Date(endAt).getTime() - new Date(startAt).getTime()) / 3_600_000);
-
-/** UTC 日期序号。与营业日历的 `toISOString().slice(0,10)` 键法同源，二者必须一致。 */
-const utcDayIndex = (value: string) => Math.floor(new Date(value).getTime() / MS_PER_DAY);
 
 const money = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 
@@ -91,12 +91,14 @@ const strategies: Record<RentalPricingUnit, RentalPricingStrategy> = {
    */
   calendar_day: {
     unit: "calendar_day",
-    billableUnits: (startAt, endAt) => {
+    billableUnits: (startAt, endAt, _usageQuantity, timeZone = DEFAULT_BUSINESS_TIME_ZONE) => {
       const start = new Date(startAt).getTime();
       const end = new Date(endAt).getTime();
       if (end <= start) return 0;
-      // 结束时刻正好落在零点时不跨入新日期，因此对结束端取"最后一刻"的日序号。
-      return utcDayIndex(new Date(end - 1).toISOString()) - utcDayIndex(startAt) + 1;
+      // 结束时刻正好落在营业日零点时不跨入新日期，因此对结束端取"最后一刻"的日序号。
+      return (
+        businessDayIndex(new Date(end - 1).toISOString(), timeZone) - businessDayIndex(startAt, timeZone) + 1
+      );
     },
     amountPerItem: (rate, units) => applyCap(rate, unitAmountFor(rate, units) * units),
     explain: (rate, units) => describeLine(rate, units, unitAmountFor(rate, units) * units)
@@ -108,11 +110,14 @@ const strategies: Record<RentalPricingUnit, RentalPricingStrategy> = {
    */
   night: {
     unit: "night",
-    billableUnits: (startAt, endAt) => {
+    billableUnits: (startAt, endAt, _usageQuantity, timeZone = DEFAULT_BUSINESS_TIME_ZONE) => {
       const start = new Date(startAt).getTime();
       const end = new Date(endAt).getTime();
       if (end <= start) return 0;
-      return Math.max(0, utcDayIndex(new Date(end - 1).toISOString()) - utcDayIndex(startAt));
+      return Math.max(
+        0,
+        businessDayIndex(new Date(end - 1).toISOString(), timeZone) - businessDayIndex(startAt, timeZone)
+      );
     },
     amountPerItem: (rate, units) => applyCap(rate, unitAmountFor(rate, units) * units),
     explain: (rate, units) => describeLine(rate, units, unitAmountFor(rate, units) * units)

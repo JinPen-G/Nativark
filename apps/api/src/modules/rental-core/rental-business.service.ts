@@ -49,6 +49,7 @@ import {
 } from "./rental-business-fact.repository";
 import { RentalCoreConfigRepository, type RentalConfigStore, type RentalConfigTx } from "./rental-core-config.repository";
 import { PrismaService } from "../database/prisma.service";
+import { DEFAULT_BUSINESS_TIME_ZONE, businessDateKey, businessDateKeyFromIndex, businessDayIndex, businessYearFromDateKey } from "./rental-business-day";
 import { rentalPricingStrategy } from "./rental-pricing-strategy";
 
 interface RentalBusinessState {
@@ -1055,6 +1056,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const calendars = this.calendarsForDateRange(tenantId, context, input.startAt, input.endAt);
     const rule = this.currentRule(tenantId, context);
     if (!rule || rule.status !== "published") throw new ConflictException("当前租户没有已发布的租赁规则");
+    // 营业时区解析一次，策略（自然日/夜）与日历（日期类型）必须用同一个值，
+    // 否则同一张报价里两处按不同日界切分，金额与说明会互相矛盾。
+    const quoteTimeZone = context.settings.calendar.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE;
     const groups = new Map(context.groups.map((group) => [group.id, group]));
     const chargeLines: RentalQuoteSnapshotV1["chargeLines"] = [];
     let rentalAmount = 0;
@@ -1065,20 +1069,22 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       const rate = plan.rates.find((item) => item.itemGroupId === line.itemGroupId && (!line.pricingUnit || item.unit === line.pricingUnit)) ?? plan.rates.find((item) => item.itemGroupId === line.itemGroupId);
       if (!rate) throw new ConflictException(`${group.name} 尚未配置基础价格`);
       const pricingStrategy = rentalPricingStrategy(rate.unit);
-      const naturalUnits = pricingStrategy.billableUnits(input.startAt, input.endAt, line.usageQuantity);
+      const naturalUnits = pricingStrategy.billableUnits(input.startAt, input.endAt, line.usageQuantity, quoteTimeZone);
       // 最小起租量属于价格计划的职责（技术指南 5.4），因此在这里兜底而不是在策略里。
       const units = Math.max(rate.minimumUnits, naturalUnits);
-      const multiplier = this.calendarMultiplier(calendars, context.settings, input.startAt, input.endAt, rate);
+      const calendarFactor = this.calendarMultiplier(calendars, context.settings, input.startAt, input.endAt, rate);
+      const multiplier = calendarFactor.factor;
       const amount = roundMoney(pricingStrategy.amountPerItem(rate, units) * line.quantity * multiplier);
       rentalAmount += amount;
       depositAmount += rate.depositAmount * line.quantity;
       // 计算说明必须能复算：单价来源（基础价/阶梯档/封顶）、单位数、起租量是否生效、
-      // 日历系数、数量，缺一项客服就无法向客户解释这笔钱是怎么来的（验收：可解释来源）。
+      // 日历系数与逐日类型、数量，缺一项客服就无法向客户解释这笔钱是怎么来的（验收：可解释来源）。
       const detail = [
         `${line.quantity} × ${units} ${rate.unit}`,
         pricingStrategy.explain(rate, units),
         units > naturalUnits ? `起租量 ${rate.minimumUnits} 生效（实际 ${naturalUnits}）` : undefined,
-        `日历系数 ${multiplier.toFixed(2)}`
+        `日历系数 ${multiplier.toFixed(2)}`,
+        calendarFactor.breakdown.length ? `逐日 ${calendarFactor.breakdown.join("、")}` : undefined
       ]
         .filter(Boolean)
         .join("；");
@@ -1087,7 +1093,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     rentalAmount = roundMoney(rentalAmount);
     depositAmount = rule.config.payment.depositMode === "none" ? 0 : roundMoney(depositAmount);
     if (rule.config.payment.preauthorizationRequired && depositAmount <= 0) throw new ConflictException("当前规则要求预授权，但所选商品未配置预授权额度");
-    const quotedDayTypes = new Set(this.dayTypesForRange(calendars, input.startAt, input.endAt));
+    const quotedDayTypes = new Set(this.dayTypesForRange(calendars, input.startAt, input.endAt, quoteTimeZone));
     const eligible = state.discountPlans.filter((item) => item.status === "enabled" && this.inPeriod(item.effectiveFrom, item.effectiveTo, input.startAt) && item.minimumSpend <= rentalAmount && (item.customerScope === "all" || item.customerScope === input.customerType || (item.customerScope === "member" && Boolean(input.customerId))) && (!item.applicableItemGroupIds.length || input.lines.some((line) => item.applicableItemGroupIds.includes(line.itemGroupId))) && (!item.applicableDayTypes.length || item.applicableDayTypes.some((dayType) => quotedDayTypes.has(dayType)))).sort((a, b) => a.priority - b.priority);
     const discountPlans = input.discountPlanId ? eligible.filter((item) => item.id === input.discountPlanId) : eligible.slice(0, 1);
     if (input.discountPlanId && !discountPlans.length) throw new ConflictException("指定优惠方案不满足本次报价条件");
@@ -1409,24 +1415,65 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return years.map((year) => this.state(tenantId, context).calendars.find((item) => item.year === year && item.status === "published") ?? this.getCalendar(tenantId, context, year));
   }
 
+  /**
+   * 日历系数与逐日明细。
+   *
+   * 两点必须说清：
+   *
+   * 1. **租户逐日覆盖优先于费率的节假日倍率。** 早前的判定是「节假日/特殊日 → 用
+   *    `rate.holidayMultiplier`；周末 → 用 `rate.weekendMultiplier`；其余 → 用
+   *    `day.pricingMultiplier`」，于是 `day.pricingMultiplier` 只对工作日有效——
+   *    而节假日和周末恰恰是最需要人工覆盖的日期，覆盖了却毫无效果（需求 4.5 要求
+   *    「经营空间可在本空间范围覆盖」）。判据用 `source === "tenant_override"`：
+   *    只有 `saveCalendarDay` 会写这个来源，因此它可靠地区分「人工覆盖」与
+   *    「导入或周规则生成时填的默认值」（导入的法定节假日默认 1.25、周末 1.1，
+   *    若不加区分地优先取它，等于把费率级倍率整体废掉）。
+   *
+   * 2. **系数是整段取平均后乘一次，不是逐日累加。** 对自然日/夜这类「单位数 = 天数」
+   *    的计价单位，二者数学上等价；对小时、周、月则是近似。这里不改这个口径——
+   *    改成逐日累加会让行金额与 `order.lines[].amount` 的推导（取自租金明细行）
+   *    不再一致，属更大范围的改动。近似的事实记录在开发任务台账里。
+   */
   private calendarMultiplier(calendars: RentalCalendarYear[], settings: TenantRentalBusinessSettings, startAt: string, endAt: string, rate: RentalPricingRate) {
-    if (!settings.pricing.holidayPricingEnabled || !calendars.length) return 1;
+    const breakdown: string[] = [];
+    if (!settings.pricing.holidayPricingEnabled || !calendars.length) return { factor: 1, breakdown };
+    const timeZone = settings.calendar.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE;
     const values: number[] = [];
-    for (let cursor = new Date(`${startAt.slice(0, 10)}T00:00:00.000Z`); cursor.getTime() < new Date(endAt).getTime(); cursor = new Date(cursor.getTime() + dayMs)) {
-      const calendar = calendars.find((item) => item.year === cursor.getUTCFullYear());
-      const day = calendar?.days.find((item) => item.date === cursor.toISOString().slice(0, 10));
+    // 按**营业时区**的日界游走。早前从 `startAt.slice(0,10)` 起按 UTC 日推进，
+    // 于是北京时间傍晚开始的租期会先命中前一个 UTC 日期，日期类型整体错位一天。
+    const firstIndex = businessDayIndex(startAt, timeZone);
+    const lastIndex = businessDayIndex(new Date(new Date(endAt).getTime() - 1).toISOString(), timeZone);
+    for (let index = firstIndex; index <= lastIndex; index += 1) {
+      const date = businessDateKeyFromIndex(index);
+      const calendar = calendars.find((item) => item.year === businessYearFromDateKey(date));
+      const day = calendar?.days.find((item) => item.date === date);
       const type: RentalDayType = day?.dayType ?? "workday";
       if (day?.closed) throw new ConflictException(`${day.date} 为停业日，不能报价`);
-      values.push(type === "statutory_holiday" || type === "tenant_special" ? rate.holidayMultiplier : type === "weekend" ? rate.weekendMultiplier : day?.pricingMultiplier ?? 1);
+      const overridden = day?.source === "tenant_override";
+      const value = overridden
+        ? day.pricingMultiplier
+        : type === "statutory_holiday" || type === "tenant_special"
+          ? rate.holidayMultiplier
+          : type === "weekend"
+            ? rate.weekendMultiplier
+            : day?.pricingMultiplier ?? 1;
+      values.push(value);
+      // 逐日类型与系数进入报价明细并随之落库，满足需求 4.5「保存命中的日历版本和日期类型」。
+      breakdown.push(`${date} ${type}×${value.toFixed(2)}${overridden ? "(覆盖)" : ""}`);
     }
-    return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 1;
+    const factor = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 1;
+    return { factor, breakdown };
   }
 
-  private dayTypesForRange(calendars: RentalCalendarYear[], startAt: string, endAt: string) {
+  /** 与 calendarMultiplier 必须同一日界口径，否则优惠的适用日期与计价的命中日期会错开。 */
+  private dayTypesForRange(calendars: RentalCalendarYear[], startAt: string, endAt: string, timeZone: string) {
     const values: RentalDayType[] = [];
-    for (let cursor = new Date(`${startAt.slice(0, 10)}T00:00:00.000Z`); cursor.getTime() < new Date(endAt).getTime(); cursor = new Date(cursor.getTime() + dayMs)) {
-      const calendar = calendars.find((item) => item.year === cursor.getUTCFullYear());
-      values.push(calendar?.days.find((item) => item.date === cursor.toISOString().slice(0, 10))?.dayType ?? "workday");
+    const firstIndex = businessDayIndex(startAt, timeZone);
+    const lastIndex = businessDayIndex(new Date(new Date(endAt).getTime() - 1).toISOString(), timeZone);
+    for (let index = firstIndex; index <= lastIndex; index += 1) {
+      const date = businessDateKeyFromIndex(index);
+      const calendar = calendars.find((item) => item.year === businessYearFromDateKey(date));
+      values.push(calendar?.days.find((item) => item.date === date)?.dayType ?? "workday");
     }
     return values;
   }

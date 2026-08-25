@@ -1540,7 +1540,8 @@ async function main() {
   assert.equal(persistedRates[0].tiers.length, 2, "阶梯档位必须落库");
   assert.equal(persistedRates[0].maxAmount, 600, "封顶价必须落库");
 
-  // UTC 日期边界：与营业日历的按日键法一致。刻意选未来的固定日期，避免跨测试时刻漂移。
+  // 时间一律用 +08:00 书写，即营业挂钟时间。自然日按**营业时区**（默认 Asia/Shanghai）
+  // 的日界切分，与营业日历同一口径；刻意选未来的固定日期，避免跨测试时刻漂移。
   const priceQuoteFor = async (startUtc, endUtc, quantity = 1) => {
     const res = await request(
       "POST",
@@ -1563,7 +1564,7 @@ async function main() {
 
   // 1) 自然日必须按日期计：3/2 22:00 → 3/3 08:00 只有 10 小时，但占用 2 个日期。
   //    早前 calendar_day 与 day_24h 共用 24 小时折算，这里会算成 1 日、少收一天。
-  const crossDay = await priceQuoteFor("2027-03-02T22:00:00.000Z", "2027-03-03T08:00:00.000Z");
+  const crossDay = await priceQuoteFor("2027-03-02T22:00:00+08:00", "2027-03-03T08:00:00+08:00");
   assert.equal(
     crossDay.rentalAmount,
     200,
@@ -1571,11 +1572,11 @@ async function main() {
   );
 
   // 2) 阶梯价整单重定价：占用 4 个日期 → 命中"满 3 日 90"档 → 4 × 90 = 360。
-  const tierHit = await priceQuoteFor("2027-03-02T09:00:00.000Z", "2027-03-05T09:00:00.000Z");
+  const tierHit = await priceQuoteFor("2027-03-02T09:00:00+08:00", "2027-03-05T09:00:00+08:00");
   assert.equal(tierHit.rentalAmount, 360, `满 3 日档应为 4 × 90 = 360：实际 ${tierHit.rentalAmount}`);
 
   // 3) 封顶价：占用 10 个日期 → 命中"满 7 日 70"档 → 10 × 70 = 700 → 封顶 600。
-  const capHit = await priceQuoteFor("2027-03-02T09:00:00.000Z", "2027-03-11T09:00:00.000Z");
+  const capHit = await priceQuoteFor("2027-03-02T09:00:00+08:00", "2027-03-11T09:00:00+08:00");
   assert.equal(capHit.rentalAmount, 600, `10 日应被封顶为 600（未封顶为 700）：实际 ${capHit.rentalAmount}`);
 
   // 4) 计算说明必须解释来源：命中的档位、单位数与封顶都要能读出来。
@@ -1587,7 +1588,7 @@ async function main() {
   assert.equal(capLine.sourceVersion, pricePlan.body.data.version, "明细必须带价格计划版本，否则无从复算");
 
   // 5) 相同输入必须复算出相同结果——这是可复算的直接证据。
-  const priceReplay = await priceQuoteFor("2027-03-02T09:00:00.000Z", "2027-03-11T09:00:00.000Z");
+  const priceReplay = await priceQuoteFor("2027-03-02T09:00:00+08:00", "2027-03-11T09:00:00+08:00");
   assert.equal(priceReplay.rentalAmount, capHit.rentalAmount, "相同输入必须算出相同租金");
   assert.equal(
     priceReplay.chargeLines.find((row) => row.type === "rental").detail,
@@ -1596,11 +1597,11 @@ async function main() {
   );
 
   // 6) 数量参与线性放大，且封顶是**每行**上限而非整单上限。
-  const twoUnits = await priceQuoteFor("2027-03-02T09:00:00.000Z", "2027-03-11T09:00:00.000Z", 2);
+  const twoUnits = await priceQuoteFor("2027-03-02T09:00:00+08:00", "2027-03-11T09:00:00+08:00", 2);
   assert.equal(twoUnits.rentalAmount, 1200, `2 套应为 2 × 600 = 1200：实际 ${twoUnits.rentalAmount}`);
 
   // 7) 起租量兜底：不足 1 个自然日的租期仍按 minimumUnits 计，且说明要讲明它生效了。
-  const shortRent = await priceQuoteFor("2027-03-02T09:00:00.000Z", "2027-03-02T10:00:00.000Z");
+  const shortRent = await priceQuoteFor("2027-03-02T09:00:00+08:00", "2027-03-02T10:00:00+08:00");
   assert.equal(shortRent.rentalAmount, 100, `1 小时仍占用 1 个自然日，应为 100：实际 ${shortRent.rentalAmount}`);
   // 8) 有效期必须参与判定。早前只看 status，`effectiveFrom`/`effectiveTo` 存了却从不判断：
   //    过期计划照样给新报价定价，未生效计划也会被提前使用，两者都直接算错钱。
@@ -1636,8 +1637,8 @@ async function main() {
       customerType: "corporate",
       fulfillmentMode: "warehouse_pickup_return",
       fulfillmentLocationId: constructionLocation.id,
-      startAt: "2027-03-02T09:00:00.000Z",
-      endAt: "2027-03-03T09:00:00.000Z",
+      startAt: "2027-03-02T09:00:00+08:00",
+      endAt: "2027-03-03T09:00:00+08:00",
       pricingPlanId: expiredPlan.body.data.id,
       lines: [{ itemGroupId: priceGroupId, quantity: 1 }]
     },
@@ -1656,8 +1657,8 @@ async function main() {
       customerType: "corporate",
       fulfillmentMode: "warehouse_pickup_return",
       fulfillmentLocationId: constructionLocation.id,
-      startAt: "2027-03-02T09:00:00.000Z",
-      endAt: "2027-03-02T18:00:00.000Z",
+      startAt: "2027-03-02T09:00:00+08:00",
+      endAt: "2027-03-02T18:00:00+08:00",
       lines: [{ itemGroupId: priceGroupId, quantity: 1 }]
     },
     construction.accessToken
@@ -1705,6 +1706,75 @@ async function main() {
     "报价可复算：自然日按日期计（跨日 10 小时=2 日）、阶梯价整单重定价、封顶价生效且按行封顶、" +
       "相同输入复算一致、计算说明含档位/单位数/封顶/版本、有效期参与判定、重复档位被拒"
   );
+
+  console.log("== 15c. PRICE-01 营业时区按经营空间配置且真正影响计价 ==");
+  // 项目负责人 2026-08-25 决定按租户配置时区。业务设置在 SPACE-03 之后按**经营空间**
+  // 存储，因此实际粒度是每个经营空间一个时区，与营业日历同样按空间存储保持一致。
+  //
+  // 这一节要证明的是「配置真的接线了」：同一段绝对时间，切换空间时区后自然日数改变、
+  // 报价金额随之改变。纯函数单测只能证明算法对，证明不了它被 API 真正使用。
+  const settingsUrl = "/api/rental/v1/business-settings";
+  const baseSettings = (await request("GET", settingsUrl, null, construction.accessToken)).body.data;
+  assert.ok(baseSettings.calendar, "前置条件：业务设置应含日历分组");
+  assert.equal(
+    baseSettings.calendar.timeZone ?? "Asia/Shanghai",
+    "Asia/Shanghai",
+    `默认营业时区应为 Asia/Shanghai，实际 ${baseSettings.calendar.timeZone}`
+  );
+  const putSettings = (calendarPatch) =>
+    request(
+      "PUT",
+      settingsUrl,
+      {
+        pricing: baseSettings.pricing,
+        fulfillment: baseSettings.fulfillment,
+        payment: baseSettings.payment,
+        overdue: baseSettings.overdue,
+        calendar: { ...baseSettings.calendar, ...calendarPatch },
+        membership: baseSettings.membership,
+        notifications: baseSettings.notifications
+      },
+      construction.accessToken
+    );
+
+  // 非法时区必须在保存时就拒绝。放行的话 Intl 会在报价时抛 RangeError，
+  // 表现为下单前 500——错误离配置点很远，排查成本高得多。
+  const badTz = await putSettings({ timeZone: "Not/AZone" });
+  assert.equal(badTz.status, 400, `非法时区必须 400：实际 ${badTz.status} ${JSON.stringify(badTz.body).slice(0, 200)}`);
+
+  // 北京挂钟 06:00–20:00 是同一个营业日 → 1 自然日 → 100。
+  const shanghaiWindow = ["2027-04-06T06:00:00+08:00", "2027-04-06T20:00:00+08:00"];
+  const inShanghai = await priceQuoteFor(shanghaiWindow[0], shanghaiWindow[1]);
+  assert.equal(inShanghai.rentalAmount, 100, `上海时区下当日租应为 100：实际 ${inShanghai.rentalAmount}`);
+
+  // 同一段绝对时间在 UTC 下是 4/5 22:00–4/6 12:00，跨 2 个日期 → 2 自然日 → 200。
+  const switched = await putSettings({ timeZone: "UTC" });
+  assert.equal(switched.status, 200, `切换营业时区失败: ${JSON.stringify(switched.body).slice(0, 200)}`);
+  assert.equal(
+    readScalar(
+      "SELECT JSON_UNQUOTE(JSON_EXTRACT(`settings`,'$.calendar.timeZone')) FROM `rental_tenant_business_settings` " +
+        `WHERE \`tenantId\`='${construction.tenant.tenantId}';`
+    ),
+    "UTC",
+    "营业时区必须落库，否则重启后回退且报价随之改变"
+  );
+  const inUtc = await priceQuoteFor(shanghaiWindow[0], shanghaiWindow[1]);
+  assert.equal(
+    inUtc.rentalAmount,
+    200,
+    `UTC 时区下同一段时间跨 2 个日期应为 200：实际 ${inUtc.rentalAmount}——` +
+      "若仍为 100 说明时区配置没有真正参与计价"
+  );
+  // 逐日说明也必须随时区改变，否则说明与金额会互相矛盾。
+  const utcLine = inUtc.chargeLines.find((row) => row.type === "rental");
+  assert.match(utcLine.detail, /逐日 2027-04-05/, `UTC 下逐日说明应从 4/5 起：${utcLine.detail}`);
+  const shanghaiLine = inShanghai.chargeLines.find((row) => row.type === "rental");
+  assert.match(shanghaiLine.detail, /逐日 2027-04-06/, `上海下逐日说明应只含 4/6：${shanghaiLine.detail}`);
+
+  // 还原，避免污染后续用例。
+  const tzRestored = await putSettings({ timeZone: "Asia/Shanghai" });
+  assert.equal(tzRestored.status, 200, "还原营业时区失败");
+  ok("营业时区按经营空间生效：非法标识 400、切换后自然日数与金额随之改变、逐日说明同步、配置落库");
 
   console.log("== 16. 双租户并发隔离 ==");
   const rounds = 12;

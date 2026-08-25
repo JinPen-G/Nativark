@@ -44,6 +44,7 @@ import {
 } from "@store-rental/shared";
 import { getRequestWorkspaceId, runWithRequestIdentity } from "../../common/request-identity";
 import { RentalStateRepository } from "./rental-state.repository";
+import { DEFAULT_BUSINESS_TIME_ZONE, isValidTimeZone } from "./rental-business-day";
 import { RentalCoreConfigRepository, type RentalConfigStore, type RentalConfigTx } from "./rental-core-config.repository";
 import {
   RentalCoreFactRepository,
@@ -123,7 +124,8 @@ function defaultBusinessSettings(tenantId: string, definition: RentalCategoryDef
     calendar: {
       weekendDays: [0, 6],
       holidayPricingEnabled: definition.businessModel.supportsHolidayPricing,
-      officialCalendarRegion: "CN"
+      officialCalendarRegion: "CN",
+      timeZone: DEFAULT_BUSINESS_TIME_ZONE
     },
     membership: {
       signupRewardEnabled: false,
@@ -401,6 +403,11 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     }
     if (!input.pricing.enabledUnits.includes(input.pricing.defaultUnit)) {
       throw new BadRequestException("默认计价单位必须处于已启用计价单位中");
+    }
+    // 时区必须在保存时 fail-closed。放行一个无效标识的话，`Intl` 会在**报价时**抛
+    // RangeError，表现为下单前 500——错误离配置点很远，排查成本高得多。
+    if (input.calendar.timeZone !== undefined && !isValidTimeZone(input.calendar.timeZone)) {
+      throw new BadRequestException(`无效的时区标识：${input.calendar.timeZone}`);
     }
     if (!input.fulfillment.enabledModes.length || input.fulfillment.enabledModes.some((mode) => !fulfillmentModes.has(mode))) {
       throw new BadRequestException("存在当前经营品类不支持的履约方式");
