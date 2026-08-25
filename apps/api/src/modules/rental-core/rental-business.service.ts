@@ -1063,6 +1063,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const chargeLines: RentalQuoteSnapshotV1["chargeLines"] = [];
     let rentalAmount = 0;
     let depositAmount = 0;
+    // 押金模式来自**已发布规则**而非当前设置：规则快照要随订单固化，
+    // 用实时设置会让同一张报价在设置改动后复算出不同押金。
+    const depositMode = rule.config.payment.depositMode;
+    const depositBasis: string[] = [];
     for (const line of input.lines) {
       const group = groups.get(line.itemGroupId);
       if (!group || line.quantity < 1 || !Number.isInteger(line.quantity)) throw new BadRequestException("报价商品或数量无效");
@@ -1076,7 +1080,17 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       const multiplier = calendarFactor.factor;
       const amount = roundMoney(pricingStrategy.amountPerItem(rate, units) * line.quantity * multiplier);
       rentalAmount += amount;
-      depositAmount += rate.depositAmount * line.quantity;
+      // 押金按规则的模式取数（需求 4.4「固定押金、租金倍数押金、预授权或免押」）。
+      // `price_multiple` 此前枚举、DTO 与管理端都有、服务层却无任何消费者——
+      // 选它等于选 `fixed`，是个只在界面上存在的选项。倍数按**行租金**乘，
+      // 而不是整单租金再分摊，这样每行押金与该行租金一一对应、可逐行解释。
+      depositAmount +=
+        depositMode === "price_multiple" ? amount * (rate.depositMultiple ?? 0) : rate.depositAmount * line.quantity;
+      depositBasis.push(
+        depositMode === "price_multiple"
+          ? `${group.name} 租金 ${amount} × ${rate.depositMultiple ?? 0} 倍`
+          : `${group.name} 固定 ${rate.depositAmount} × ${line.quantity}`
+      );
       // 计算说明必须能复算：单价来源（基础价/阶梯档/封顶）、单位数、起租量是否生效、
       // 日历系数与逐日类型、数量，缺一项客服就无法向客户解释这笔钱是怎么来的（验收：可解释来源）。
       const detail = [
@@ -1124,7 +1138,27 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       chargeLines.push({ code: `service:${service.code}`, name: service.name, type: "service", amount, sourceId: service.id, sourceVersion: `${service.version}/${service.termsVersion}`, detail: service.terms });
     }
     serviceAmount = roundMoney(serviceAmount);
-    if (depositAmount > 0) chargeLines.push({ code: "deposit", name: rule.config.payment.preauthorizationRequired ? "预授权额度" : "押金", type: "deposit", amount: depositAmount, sourceId: rule.id, sourceVersion: rule.version });
+    // 押金明细必须讲清取数方式：固定押金与倍数押金金额可能相同，
+    // 只给一个数字客服无法回答"为什么是这个数"。
+    if (depositAmount > 0) {
+      // 预授权与固定押金取同一个来源（rate.depositAmount），但语义不同：
+      // 一个是冻结额度、一个是实收押金，标签必须能区分，否则明细读起来是错的。
+      const modeLabel =
+        depositMode === "price_multiple"
+          ? "租金倍数押金"
+          : depositMode === "preauthorization"
+            ? "预授权额度（按固定额）"
+            : "固定押金";
+      chargeLines.push({
+        code: "deposit",
+        name: rule.config.payment.preauthorizationRequired ? "预授权额度" : "押金",
+        type: "deposit",
+        amount: depositAmount,
+        sourceId: rule.id,
+        sourceVersion: rule.version,
+        detail: `${modeLabel}：${depositBasis.join("、")}`
+      });
+    }
     const timestamp = stamp();
     const quote: RentalQuoteSnapshotV1 = {
       id: uid("quote"), tenantId, quoteNo: `RQ${timestamp.replace(/\D/g, "").slice(0, 14)}${String(state.quotes.length + 1).padStart(3, "0")}`,

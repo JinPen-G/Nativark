@@ -4247,6 +4247,13 @@ export interface RentalPricingRate {
   tiers?: RentalPricingTier[];
   /** 封顶价（需求 4.4）：单行租金上限。0 是合法值（免租），undefined 表示不封顶。 */
   maxAmount?: number;
+  /**
+   * 租金倍数押金的倍数（需求 4.4「固定押金、租金倍数押金、预授权或免押」）。
+   *
+   * 仅当规则的 `depositMode === "price_multiple"` 时使用：该行押金 = 该行租金 × 本值。
+   * 与 `depositAmount`（固定押金）是两种模式下各自的取数来源，不会同时生效。
+   */
+  depositMultiple?: number;
 }
 
 export interface RentalPricingPlanV1 {

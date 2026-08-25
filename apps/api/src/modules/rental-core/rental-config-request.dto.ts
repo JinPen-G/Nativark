@@ -309,6 +309,13 @@ export class RentalPricingRateInputDto {
   @Min(0)
   maxAmount?: number;
 
+  /** 租金倍数押金的倍数。上界复用 MAX_MULTIPLIER：押金 10 倍租金已远超任何真实场景。 */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(MAX_MULTIPLIER)
+  depositMultiple?: number;
+
   @IsOptional()
   @IsNumber()
   @Min(0)

@@ -1707,6 +1707,113 @@ async function main() {
       "相同输入复算一致、计算说明含档位/单位数/封顶/版本、有效期参与判定、重复档位被拒"
   );
 
+  console.log("== 15d. PRICE-01 租金倍数押金必须真正生效 ==");
+  // `depositMode: "price_multiple"` 的枚举、DTO 与管理端下拉此前都在，服务层却没有
+  // 任何消费者——选它与选 `fixed` 完全同价，是个只在界面上存在的选项。
+  // 这一节证明它现在按「行租金 × 倍数」取数，且押金明细能讲清取数方式。
+  const depositRule = (await request("GET", "/api/rental/v1/rule-versions/current", null, construction.accessToken)).body.data;
+  assert.ok(depositRule, "前置条件：应有已发布规则");
+  const multiplePlan = await request(
+    "POST",
+    "/api/rental/v1/pricing-plans",
+    {
+      code: "E2E-PRICE-DEPOSIT-X",
+      name: "E2E 倍数押金价格",
+      changeReason: "PRICE-01 押金模式验收",
+      status: "enabled",
+      effectiveFrom: new Date(Date.now() - 3600000).toISOString(),
+      rates: [
+        {
+          itemGroupId: priceGroupId,
+          unit: "calendar_day",
+          baseAmount: 100,
+          weekendMultiplier: 1,
+          holidayMultiplier: 1,
+          // 固定押金刻意给一个**不同于**倍数结果的值：若服务层仍走固定押金，
+          // 断言会立刻看出来（200 vs 300），而不是两个数恰好相同而蒙过去。
+          depositAmount: 200,
+          depositMultiple: 1.5,
+          minimumUnits: 1
+        }
+      ]
+    },
+    construction.accessToken
+  );
+  assert.equal(multiplePlan.status, 201, `倍数押金计划创建失败: ${JSON.stringify(multiplePlan.body).slice(0, 200)}`);
+  assert.equal(
+    JSON.parse(
+      readScalar(`SELECT \`rates\` FROM \`rental_pricing_plans\` WHERE \`id\`='${multiplePlan.body.data.id}';`)
+    )[0].depositMultiple,
+    1.5,
+    "押金倍数必须落库"
+  );
+
+  const depositQuoteWith = async (planId) => {
+    const res = await request(
+      "POST",
+      "/api/rental/v1/quotes",
+      {
+        customerType: "corporate",
+        fulfillmentMode: "warehouse_pickup_return",
+        fulfillmentLocationId: constructionLocation.id,
+        // 2 个自然日 → 租金 200
+        startAt: "2027-05-10T09:00:00+08:00",
+        endAt: "2027-05-11T09:00:00+08:00",
+        pricingPlanId: planId,
+        lines: [{ itemGroupId: priceGroupId, quantity: 1 }]
+      },
+      construction.accessToken
+    );
+    assert.equal(res.status, 201, `押金验证报价失败: ${JSON.stringify(res.body).slice(0, 250)}`);
+    return res.body.data;
+  };
+
+  // 不依赖夹具的初始押金模式（工程品类默认是 preauthorization），显式发布一版固定押金。
+  const publishDepositMode = (mode, reason) =>
+    request(
+      "POST",
+      "/api/rental/v1/rule-versions",
+      {
+        changeReason: reason,
+        // 契约字段是 publish 而不是 status。写错名字不会报错——全局 ValidationPipe
+        // 开了 whitelist，未声明字段被静默剥离，规则会以 draft 落库而 currentRule
+        // 仍返回旧版本，表现为改了却没生效。
+        publish: true,
+        config: { ...depositRule.config, payment: { ...depositRule.config.payment, depositMode: mode } }
+      },
+      construction.accessToken
+    );
+  const toFixed = await publishDepositMode("fixed", "PRICE-01 切换为固定押金");
+  assert.equal(toFixed.status, 201, `切换固定押金失败: ${JSON.stringify(toFixed.body).slice(0, 250)}`);
+  const fixedQuote = await depositQuoteWith(multiplePlan.body.data.id);
+  assert.equal(fixedQuote.rentalAmount, 200, `2 个自然日租金应为 200：实际 ${fixedQuote.rentalAmount}`);
+  assert.equal(fixedQuote.depositAmount, 200, `固定押金模式应取 200：实际 ${fixedQuote.depositAmount}`);
+  const fixedDepositLine = fixedQuote.chargeLines.find((row) => row.type === "deposit");
+  assert.match(fixedDepositLine.detail, /固定押金/, `押金明细应说明取数方式: ${fixedDepositLine.detail}`);
+
+  // 切到租金倍数押金：租金 200 × 1.5 = 300，与固定押金的 200 不同。
+  const ruleToMultiple = await publishDepositMode("price_multiple", "PRICE-01 切换为租金倍数押金");
+  assert.equal(ruleToMultiple.status, 201, `切换押金模式失败: ${JSON.stringify(ruleToMultiple.body).slice(0, 250)}`);
+  const multipleQuote = await depositQuoteWith(multiplePlan.body.data.id);
+  assert.equal(multipleQuote.rentalAmount, 200, "切换押金模式不应改变租金");
+  assert.equal(
+    multipleQuote.depositAmount,
+    300,
+    `租金倍数押金应为 200 × 1.5 = 300：实际 ${multipleQuote.depositAmount}——` +
+      "若仍为 200 说明 price_multiple 没有被服务层消费"
+  );
+  const multipleDepositLine = multipleQuote.chargeLines.find((row) => row.type === "deposit");
+  assert.match(multipleDepositLine.detail, /租金倍数押金/, `倍数押金明细应说明模式: ${multipleDepositLine.detail}`);
+  assert.match(multipleDepositLine.detail, /1\.5 倍/, `倍数押金明细应含倍数: ${multipleDepositLine.detail}`);
+
+  // 还原为固定押金，避免污染后续用例。
+  const ruleBackToOriginal = await publishDepositMode(
+    depositRule.config.payment.depositMode,
+    "PRICE-01 还原原始押金模式"
+  );
+  assert.equal(ruleBackToOriginal.status, 201, "还原押金模式失败");
+  ok("租金倍数押金已生效：固定 200 / 倍数 300 可区分，押金明细讲清取数方式，倍数落库");
+
   console.log("== 15c. PRICE-01 营业时区按经营空间配置且真正影响计价 ==");
   // 项目负责人 2026-08-25 决定按租户配置时区。业务设置在 SPACE-03 之后按**经营空间**
   // 存储，因此实际粒度是每个经营空间一个时区，与营业日历同样按空间存储保持一致。
