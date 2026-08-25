@@ -1814,6 +1814,261 @@ async function main() {
   assert.equal(ruleBackToOriginal.status, 201, "还原押金模式失败");
   ok("租金倍数押金已生效：固定 200 / 倍数 300 可区分，押金明细讲清取数方式，倍数落库");
 
+  console.log("== 15e. PRICE-01 履约费用与异地归还附加费 ==");
+  // 需求 4.4 的应付公式里「履约费用」是与增值服务并列的独立一项，此前既无字段也无
+  // 计算——配送与异地归还一分钱不收，只能靠手工配一个 delivery 增值服务顶替。
+  // 费用配在**价格计划**上：它是价格，要随计划版本发布、生效并进快照，
+  // 报价才能复算"当时按哪一版履约费收的"；配在地点上会随主档改价漂移。
+  const ffLocations = (await request("GET", "/api/rental/v1/locations", null, construction.accessToken)).body.data;
+  const ffReturnLocation = ffLocations.find((row) => row.id !== constructionLocation.id && row.capabilities.includes("return"));
+  const ffPlan = await request(
+    "POST",
+    "/api/rental/v1/pricing-plans",
+    {
+      code: "E2E-PRICE-FULFILL",
+      name: "E2E 履约费价格",
+      changeReason: "PRICE-01 履约费验收",
+      status: "enabled",
+      effectiveFrom: new Date(Date.now() - 3600000).toISOString(),
+      rates: [
+        {
+          itemGroupId: priceGroupId,
+          unit: "calendar_day",
+          baseAmount: 100,
+          weekendMultiplier: 1,
+          holidayMultiplier: 1,
+          depositAmount: 500,
+          minimumUnits: 1
+        }
+      ],
+      fulfillmentFees: [
+        { mode: "warehouse_pickup_return", amount: 60, crossLocationAmount: 40 },
+        // 该方式配 0：0 与"不配置"必须都表现为不收费，且不产生金额为 0 的明细行。
+        { mode: "delivery", amount: 0 }
+      ]
+    },
+    construction.accessToken
+  );
+  assert.equal(ffPlan.status, 201, `履约费计划创建失败: ${JSON.stringify(ffPlan.body).slice(0, 250)}`);
+  assert.equal(
+    JSON.parse(
+      readScalar(`SELECT \`fulfillmentFees\` FROM \`rental_pricing_plans\` WHERE \`id\`='${ffPlan.body.data.id}';`)
+    ).length,
+    2,
+    "履约费配置必须落库，否则重启后报价不可复算"
+  );
+
+  const ffQuote = async (extra) => {
+    const res = await request(
+      "POST",
+      "/api/rental/v1/quotes",
+      {
+        customerType: "corporate",
+        fulfillmentMode: "warehouse_pickup_return",
+        fulfillmentLocationId: constructionLocation.id,
+        startAt: "2027-06-07T09:00:00+08:00",
+        endAt: "2027-06-08T09:00:00+08:00",
+        pricingPlanId: ffPlan.body.data.id,
+        lines: [{ itemGroupId: priceGroupId, quantity: 1 }],
+        ...extra
+      },
+      construction.accessToken
+    );
+    assert.equal(res.status, 201, `履约费报价失败: ${JSON.stringify(res.body).slice(0, 250)}`);
+    return res.body.data;
+  };
+
+  // 同地归还：只收基础履约费 60。租金 2 个自然日 = 200。
+  const sameLocation = await ffQuote({});
+  assert.equal(sameLocation.rentalAmount, 200, `租金应为 200：实际 ${sameLocation.rentalAmount}`);
+  assert.equal(sameLocation.fulfillmentAmount, 60, `同地归还履约费应为 60：实际 ${sameLocation.fulfillmentAmount}`);
+  // 必须进应付：需求 4.4 的公式里履约费是加项。
+  assert.equal(
+    sameLocation.payableAmount,
+    260,
+    `应付应含履约费（200 + 60）：实际 ${sameLocation.payableAmount}——若为 200 说明履约费没进应付`
+  );
+  const ffLine = sameLocation.chargeLines.find((row) => row.type === "fulfillment");
+  assert.ok(ffLine, "应有履约费明细行，且类型为 fulfillment（该类型此前全仓库无人产出）");
+  assert.equal(ffLine.amount, 60, "履约费明细金额应与合计一致");
+  assert.equal(ffLine.sourceVersion, ffPlan.body.data.version, "履约费明细必须带价格计划版本，否则无从复算");
+
+  // 异地归还：基础 60 + 跨点 40 = 100。
+  //
+  // 这一段**不能**写成 `if (第二地点存在)`：夹具一旦只剩一个地点，最关键的跨点附加费
+  // 断言就静默不执行，测试照样绿。缺第二地点就现场建一个，让断言无条件运行。
+  // 异地归还需要先在业务设置里放开（CAT-04 加的校验，行为正确）。
+  // 用完还原，避免影响后续用例。
+  const ffBaseSettings = (await request("GET", "/api/rental/v1/business-settings", null, construction.accessToken)).body.data;
+  const ffPutSettings = (fulfillmentPatch) =>
+    request(
+      "PUT",
+      "/api/rental/v1/business-settings",
+      { ...ffBaseSettings, fulfillment: { ...ffBaseSettings.fulfillment, ...fulfillmentPatch } },
+      construction.accessToken
+    );
+  const allowCross = await ffPutSettings({ allowDifferentReturnLocation: true });
+  assert.equal(allowCross.status, 200, `放开异地归还失败: ${JSON.stringify(allowCross.body).slice(0, 250)}`);
+  const ffReturnId =
+    ffReturnLocation?.id ??
+    (await (async () => {
+      const created = await request(
+        "POST",
+        "/api/rental/v1/locations",
+        {
+          code: `E2E-FF-RET-${Date.now().toString(36)}`,
+          name: "E2E 履约费归还点",
+          type: "warehouse",
+          operatorId: constructionLocation.operatorId,
+          capabilities: ["return", "storage"]
+        },
+        construction.accessToken
+      );
+      assert.equal(created.status, 201, `补建归还地点失败: ${JSON.stringify(created.body).slice(0, 250)}`);
+      return created.body.data.id;
+    })());
+  assert.notEqual(ffReturnId, constructionLocation.id, "归还地点必须与取件地点不同，否则跨点附加费不会触发");
+  const crossLocation = await ffQuote({ returnLocationId: ffReturnId });
+  assert.equal(
+    crossLocation.fulfillmentAmount,
+    100,
+    `异地归还应为 60 + 40 = 100：实际 ${crossLocation.fulfillmentAmount}`
+  );
+  assert.equal(crossLocation.payableAmount, 300, `异地归还应付应为 200 + 100：实际 ${crossLocation.payableAmount}`);
+  assert.match(
+    crossLocation.chargeLines.find((row) => row.type === "fulfillment").detail,
+    /异地归还 40/,
+    "异地附加费必须在计算说明里可追溯"
+  );
+
+  // ④ 费率快照：报价必须固化命中的费率，复算不能依赖计划仍以该版本存在。
+  const snapshotRates = JSON.parse(
+    readScalar(`SELECT \`rateSnapshot\` FROM \`rental_quotes\` WHERE \`id\`='${sameLocation.id}';`)
+  );
+  assert.equal(snapshotRates.length, 1, "报价必须固化命中的费率");
+  assert.equal(snapshotRates[0].baseAmount, 100, "费率快照必须含基础价");
+  assert.equal(snapshotRates[0].unit, "calendar_day", "费率快照必须含计价单位");
+  // 改掉计划的基础价并递增版本后，旧报价的费率快照不得随之改变。
+  const bumped = await request(
+    "POST",
+    "/api/rental/v1/pricing-plans",
+    {
+      id: ffPlan.body.data.id,
+      code: "E2E-PRICE-FULFILL",
+      name: "E2E 履约费价格",
+      changeReason: "PRICE-01 改价后旧报价仍可复算",
+      status: "enabled",
+      effectiveFrom: new Date(Date.now() - 3600000).toISOString(),
+      rates: [
+        {
+          itemGroupId: priceGroupId,
+          unit: "calendar_day",
+          baseAmount: 999,
+          weekendMultiplier: 1,
+          holidayMultiplier: 1,
+          depositAmount: 500,
+          minimumUnits: 1
+        }
+      ],
+      fulfillmentFees: [{ mode: "warehouse_pickup_return", amount: 60, crossLocationAmount: 40 }]
+    },
+    construction.accessToken
+  );
+  assert.equal(bumped.status, 201, `改价失败: ${JSON.stringify(bumped.body).slice(0, 250)}`);
+  assert.equal(
+    Number(
+      JSON.parse(
+        readScalar(`SELECT \`rateSnapshot\` FROM \`rental_quotes\` WHERE \`id\`='${sameLocation.id}';`)
+      )[0].baseAmount
+    ),
+    100,
+    "改价并递增版本后，旧报价的费率快照必须仍是 100——这是 Codex 指出的「版本非不可变快照」" +
+      "的兜底：计划行被覆盖后旧版本内容消失，只有报价自带费率才能按原价复算"
+  );
+
+  // 还原异地归还开关。
+  const restoreCross = await ffPutSettings({
+    allowDifferentReturnLocation: ffBaseSettings.fulfillment.allowDifferentReturnLocation
+  });
+  assert.equal(restoreCross.status, 200, "还原异地归还开关失败");
+
+  // ③ 显式指定不存在的计价单位必须报错，不能静默换成别的单位算钱。
+  const wrongUnit = await request(
+    "POST",
+    "/api/rental/v1/quotes",
+    {
+      customerType: "corporate",
+      fulfillmentMode: "warehouse_pickup_return",
+      fulfillmentLocationId: constructionLocation.id,
+      startAt: "2027-06-07T09:00:00+08:00",
+      endAt: "2027-06-08T09:00:00+08:00",
+      pricingPlanId: ffPlan.body.data.id,
+      lines: [{ itemGroupId: priceGroupId, quantity: 1, pricingUnit: "hour" }]
+    },
+    construction.accessToken
+  );
+  assert.equal(
+    wrongUnit.status,
+    409,
+    `显式指定未配置的计价单位必须 409：实际 ${wrongUnit.status} ${JSON.stringify(wrongUnit.body).slice(0, 200)}——` +
+      "若为 201 说明静默回退到了别的单位，请求快照写着按小时、金额却按自然日算"
+  );
+
+  // 未配置该履约方式 → 不收费、不产生明细行（而不是产生一条 0 元行）。
+  const noFeePlan = await request(
+    "POST",
+    "/api/rental/v1/pricing-plans",
+    {
+      code: "E2E-PRICE-NOFEE",
+      name: "E2E 无履约费",
+      changeReason: "PRICE-01 履约费缺省验收",
+      status: "enabled",
+      effectiveFrom: new Date(Date.now() - 3600000).toISOString(),
+      rates: [
+        {
+          itemGroupId: priceGroupId,
+          unit: "calendar_day",
+          baseAmount: 100,
+          weekendMultiplier: 1,
+          holidayMultiplier: 1,
+          depositAmount: 500,
+          minimumUnits: 1
+        }
+      ]
+    },
+    construction.accessToken
+  );
+  assert.equal(noFeePlan.status, 201, `无履约费计划创建失败: ${JSON.stringify(noFeePlan.body).slice(0, 200)}`);
+  const withoutFee = await request(
+    "POST",
+    "/api/rental/v1/quotes",
+    {
+      customerType: "corporate",
+      fulfillmentMode: "warehouse_pickup_return",
+      fulfillmentLocationId: constructionLocation.id,
+      startAt: "2027-06-07T09:00:00+08:00",
+      endAt: "2027-06-08T09:00:00+08:00",
+      pricingPlanId: noFeePlan.body.data.id,
+      lines: [{ itemGroupId: priceGroupId, quantity: 1 }]
+    },
+    construction.accessToken
+  );
+  assert.equal(withoutFee.status, 201, `无履约费报价失败: ${JSON.stringify(withoutFee.body).slice(0, 250)}`);
+  assert.equal(withoutFee.body.data.fulfillmentAmount, 0, "未配置履约费时合计必须为 0");
+  assert.equal(withoutFee.body.data.payableAmount, 200, "未配置履约费时应付不应被抬高");
+  assert.equal(
+    withoutFee.body.data.chargeLines.filter((row) => row.type === "fulfillment").length,
+    0,
+    "未配置履约费时不得产生金额为 0 的履约明细行"
+  );
+  // 落库校验：合计要真的写进 rental_quotes，不能只存在于响应里。
+  assert.equal(
+    Number(readScalar(`SELECT \`fulfillmentAmount\` FROM \`rental_quotes\` WHERE \`id\`='${sameLocation.id}';`)),
+    60,
+    "履约费合计必须落库"
+  );
+  ok("履约费用已生效：同地 60 / 异地 100 且进应付、明细带计划版本、未配置时为 0 且无空行、合计落库");
+
   console.log("== 15c. PRICE-01 营业时区按经营空间配置且真正影响计价 ==");
   // 项目负责人 2026-08-25 决定按租户配置时区。业务设置在 SPACE-03 之后按**经营空间**
   // 存储，因此实际粒度是每个经营空间一个时区，与营业日历同样按空间存储保持一致。

@@ -144,7 +144,10 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       version: plan.version,
       effectiveFrom: new Date(plan.effectiveFrom),
       effectiveTo: plan.effectiveTo ? new Date(plan.effectiveTo) : null,
-      rates: plan.rates as unknown as Prisma.InputJsonValue
+      rates: plan.rates as unknown as Prisma.InputJsonValue,
+      // 未配置时写 null 而不是 []：null 表示"该计划不收履约费"，
+      // 与"配了一个空清单"在语义上同义，但省掉一次无意义的 JSON 解析。
+      fulfillmentFees: (plan.fulfillmentFees ?? null) as unknown as Prisma.InputJsonValue
     };
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, plan.tenantId);
     await this.prisma.rentalPricingPlan.upsert({
@@ -305,6 +308,7 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       effectiveFrom: iso(row.effectiveFrom),
       effectiveTo: optionalIso(row.effectiveTo),
       rates: (row.rates ?? []) as unknown as RentalPricingRate[],
+      fulfillmentFees: (row.fulfillmentFees ?? undefined) as unknown as RentalPricingPlanV1["fulfillmentFees"],
       createdAt: iso(row.createdAt),
       updatedAt: iso(row.updatedAt)
     };

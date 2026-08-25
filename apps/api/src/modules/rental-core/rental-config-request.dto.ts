@@ -263,6 +263,22 @@ export class RentalPricingTierInputDto {
   unitAmount!: number;
 }
 
+/** 履约费用档。费用配在价格计划上，随版本发布与快照，理由见共享契约的注释。 */
+export class RentalFulfillmentFeeInputDto {
+  @IsIn(FULFILLMENT_MODES)
+  mode!: (typeof FULFILLMENT_MODES)[number];
+
+  @IsNumber()
+  @Min(0)
+  amount!: number;
+
+  /** 异地归还附加费。0 是合法值（异地免费），因此判空必须用 undefined。 */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  crossLocationAmount?: number;
+}
+
 export class RentalPricingRateInputDto {
   @IsString()
   @IsNotEmpty()
@@ -367,6 +383,13 @@ export class SaveRentalPricingPlanDto implements SaveRentalPricingPlanRequest {
   @ValidateNested({ each: true })
   @Type(() => RentalPricingRateInputDto)
   rates!: RentalPricingRateInputDto[];
+
+  /** 履约费用（需求 4.4）。可选：不配置即该计划不收履约费。 */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RentalFulfillmentFeeInputDto)
+  fulfillmentFees?: RentalFulfillmentFeeInputDto[];
 }
 
 /* ---------- 优惠方案 ---------- */

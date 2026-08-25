@@ -2643,6 +2643,9 @@ model RentalPricingPlan {
   effectiveTo   DateTime?
   /// RentalPricingRate[]：按商品组的单位价、倍率、押金、起租量和超额用量费。
   rates         Json
+  /// RentalFulfillmentFee[]：按履约方式的履约费与异地归还附加费（需求 4.4）。
+  /// 与 rates 同为「版本化 JSON 明细」，随计划版本一起发布与快照。
+  fulfillmentFees Json?
   createdAt     DateTime           @default(now())
   updatedAt     DateTime           @updatedAt
 
@@ -2812,9 +2815,14 @@ model RentalQuote {
   discountAmount         Decimal            @db.Decimal(12, 2)
   couponAmount           Decimal            @db.Decimal(12, 2)
   serviceAmount          Decimal            @db.Decimal(12, 2)
+  /// 履约费用合计（需求 4.4 公式的独立一项）。存量报价按 0 回填。
+  fulfillmentAmount      Decimal            @default(0) @db.Decimal(12, 2)
   depositAmount          Decimal            @db.Decimal(12, 2)
   payableAmount          Decimal            @db.Decimal(12, 2)
   pricingPlanVersion     String
+  /// RentalPricingRate[]：本次报价实际命中的费率，使复算不依赖计划仍以该版本存在。
+  /// 存量报价按空数组回填——它们当时确实没有保存费率，空数组是如实记录而非猜测。
+  rateSnapshot           Json?
   ruleVersion            String
   ruleSnapshot           Json
   calendarVersion        String?

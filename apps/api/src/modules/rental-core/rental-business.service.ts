@@ -390,7 +390,11 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       id: existing?.id ?? uid("pricing"), tenantId, categoryCode: context.profile.categoryCode,
       code: input.code.trim(), name: input.name.trim(), currency: "CNY", status: input.status ?? "draft",
       version: versionAfter(existing?.version), effectiveFrom: input.effectiveFrom, effectiveTo: input.effectiveTo,
-      rates, createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp
+      rates,
+      // 同一履约方式配两档会让"取第一条"变成看装载顺序，价格解释不唯一。
+      fulfillmentFees: input.fulfillmentFees ? this.validatedFulfillmentFees(input.fulfillmentFees) : undefined,
+      createdAt: existing?.createdAt ?? timestamp,
+      updatedAt: timestamp
     };
     await this.configStore.upsertPricingPlan(result);
 
@@ -1044,6 +1048,18 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return candidates[0];
   }
 
+  private validatedFulfillmentFees(fees: NonNullable<SaveRentalPricingPlanRequest["fulfillmentFees"]>) {
+    const seen = new Set<string>();
+    for (const fee of fees) {
+      if (seen.has(fee.mode)) throw new BadRequestException(`履约方式 ${fee.mode} 的履约费配置重复`);
+      seen.add(fee.mode);
+      for (const value of [fee.amount, fee.crossLocationAmount ?? 0]) {
+        if (!Number.isFinite(value) || value < 0) throw new BadRequestException("履约费与异地归还附加费必须是非负数");
+      }
+    }
+    return fees.map((fee) => ({ ...fee }));
+  }
+
   async createQuote(tenantId: string, context: BusinessContext, input: RentalQuoteRequest) {
     const state = this.state(tenantId, context);
     if (new Date(input.startAt).getTime() >= new Date(input.endAt).getTime()) throw new BadRequestException("租赁结束时间必须晚于开始时间");
@@ -1067,11 +1083,24 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     // 用实时设置会让同一张报价在设置改动后复算出不同押金。
     const depositMode = rule.config.payment.depositMode;
     const depositBasis: string[] = [];
+    // 命中的费率逐条固化进报价：复算不再依赖价格计划仍以该版本存在。
+    const hitRates: RentalPricingRate[] = [];
     for (const line of input.lines) {
       const group = groups.get(line.itemGroupId);
       if (!group || line.quantity < 1 || !Number.isInteger(line.quantity)) throw new BadRequestException("报价商品或数量无效");
-      const rate = plan.rates.find((item) => item.itemGroupId === line.itemGroupId && (!line.pricingUnit || item.unit === line.pricingUnit)) ?? plan.rates.find((item) => item.itemGroupId === line.itemGroupId);
-      if (!rate) throw new ConflictException(`${group.name} 尚未配置基础价格`);
+      // 调用方显式指定计价单位时**不得**回退到别的单位。
+      // 早前用 `?? plan.rates.find(同商品组)` 兜底：请求快照写着"按小时"、
+      // 金额却按自然日算出，报价既解释不通又可能直接算错钱。
+      const rate = line.pricingUnit
+        ? plan.rates.find((item) => item.itemGroupId === line.itemGroupId && item.unit === line.pricingUnit)
+        : plan.rates.find((item) => item.itemGroupId === line.itemGroupId);
+      if (!rate) {
+        throw new ConflictException(
+          line.pricingUnit
+            ? `${group.name} 未配置计价单位 ${line.pricingUnit} 的价格`
+            : `${group.name} 尚未配置基础价格`
+        );
+      }
       const pricingStrategy = rentalPricingStrategy(rate.unit);
       const naturalUnits = pricingStrategy.billableUnits(input.startAt, input.endAt, line.usageQuantity, quoteTimeZone);
       // 最小起租量属于价格计划的职责（技术指南 5.4），因此在这里兜底而不是在策略里。
@@ -1080,6 +1109,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       const multiplier = calendarFactor.factor;
       const amount = roundMoney(pricingStrategy.amountPerItem(rate, units) * line.quantity * multiplier);
       rentalAmount += amount;
+      // 拷贝而非引用：当前没有任何路径会就地改这些费率对象（savePricingPlan 是重建数组），
+      // 因此**变异测试证明不了**这行的必要性——它是廉价的防御，防的是将来出现就地修改。
+      // 真正让历史报价可复算的是"报价自带费率快照"这件事本身，那一条有断言覆盖。
+      hitRates.push(structuredClone(rate));
       // 押金按规则的模式取数（需求 4.4「固定押金、租金倍数押金、预授权或免押」）。
       // `price_multiple` 此前枚举、DTO 与管理端都有、服务层却无任何消费者——
       // 选它等于选 `fixed`，是个只在界面上存在的选项。倍数按**行租金**乘，
@@ -1138,6 +1171,34 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       chargeLines.push({ code: `service:${service.code}`, name: service.name, type: "service", amount, sourceId: service.id, sourceVersion: `${service.version}/${service.termsVersion}`, detail: service.terms });
     }
     serviceAmount = roundMoney(serviceAmount);
+
+    // 履约费用（需求 4.4 公式的独立一项，与增值服务分开计）。
+    //
+    // 配在价格计划上而不是地点上：它是价格，要随计划版本发布、生效并进快照，
+    // 报价才能复算"当时按哪一版履约费收的"。配在地点上会随主档改价漂移。
+    //
+    // 异地归还附加费按"归还地点与取件地点不同"判定，而不是按履约方式判定——
+    // 门店自提也可能异地归还（规则允许时），那同样要收跨点费。
+    let fulfillmentAmount = 0;
+    const fee = (plan.fulfillmentFees ?? []).find((row) => row.mode === input.fulfillmentMode);
+    if (fee) {
+      const crossLocation = Boolean(input.returnLocationId && input.returnLocationId !== input.fulfillmentLocationId);
+      const crossAmount = crossLocation ? fee.crossLocationAmount ?? 0 : 0;
+      fulfillmentAmount = roundMoney(fee.amount + crossAmount);
+      if (fulfillmentAmount > 0) {
+        chargeLines.push({
+          code: `fulfillment:${input.fulfillmentMode}`,
+          name: "履约费用",
+          type: "fulfillment",
+          amount: fulfillmentAmount,
+          sourceId: plan.id,
+          sourceVersion: plan.version,
+          detail: crossLocation
+            ? `${input.fulfillmentMode} 基础 ${fee.amount} + 异地归还 ${crossAmount}`
+            : `${input.fulfillmentMode} 基础 ${fee.amount}`
+        });
+      }
+    }
     // 押金明细必须讲清取数方式：固定押金与倍数押金金额可能相同，
     // 只给一个数字客服无法回答"为什么是这个数"。
     if (depositAmount > 0) {
@@ -1164,7 +1225,12 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       id: uid("quote"), tenantId, quoteNo: `RQ${timestamp.replace(/\D/g, "").slice(0, 14)}${String(state.quotes.length + 1).padStart(3, "0")}`,
       categoryCode: context.profile.categoryCode, request: structuredClone(input), chargeLines,
       rentalAmount, discountAmount: roundMoney(discountAmount), couponAmount: roundMoney(couponAmount), serviceAmount,
-      depositAmount, payableAmount: roundMoney(rentalAmount - discountAmount - couponAmount + serviceAmount),
+      fulfillmentAmount,
+      rateSnapshot: hitRates,
+      depositAmount,
+      // 需求 4.4：最终应付 = 基础租金 + 使用量费用 + 履约费用 + 增值服务 + 异常费用 - 优惠 - 券。
+      // 使用量费用已并入租金（由 usage 策略计），异常费用在订单侧按快照追加。
+      payableAmount: roundMoney(rentalAmount - discountAmount - couponAmount + serviceAmount + fulfillmentAmount),
       pricingPlanVersion: plan.version, ruleVersion: rule.version, ruleSnapshot: structuredClone(rule.config), calendarVersion: calendars.map((calendar) => `${calendar.year}:${calendar.status === "published" ? calendar.version : "draft"}`).join("|"),
       appliedDiscountPlanIds: discountPlans.map((item) => item.id), customerCouponId: customerCoupon?.id,
       expiresAt: new Date(Date.now() + rule.config.payment.unpaidHoldMinutes * 60_000).toISOString(), createdAt: timestamp
@@ -1442,9 +1508,20 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return roundMoney(Math.min(amount, rule.damage.chargeLimit ?? amount));
   }
 
+  /**
+   * 按营业时区的年份装载日历。
+   *
+   * 用 `getUTCFullYear()` 会在跨年边界装错：北京时间 2027-01-01 01:00 对应 UTC
+   * 2026-12-31，于是只装 2026 年日历，而后续按营业日期查的是 2027-01-01——
+   * 查不到就默认成普通工作日，把法定节假日或停业日算成平日。
+   */
   private calendarsForDateRange(tenantId: string, context: BusinessContext, startAt: string, endAt: string) {
-    const startYear = new Date(startAt).getUTCFullYear();
-    const endYear = new Date(endAt).getUTCFullYear();
+    const timeZone = context.settings.calendar.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE;
+    const startYear = businessYearFromDateKey(businessDateKey(startAt, timeZone));
+    // 结束端取"最后一刻"：结束正好落在营业日零点时不应把下一年也装进来。
+    const endYear = businessYearFromDateKey(
+      businessDateKey(new Date(Math.max(new Date(endAt).getTime() - 1, new Date(startAt).getTime())).toISOString(), timeZone)
+    );
     const years = Array.from({ length: endYear - startYear + 1 }, (_, index) => startYear + index);
     return years.map((year) => this.state(tenantId, context).calendars.find((item) => item.year === year && item.status === "published") ?? this.getCalendar(tenantId, context, year));
   }

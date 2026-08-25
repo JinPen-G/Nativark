@@ -4256,6 +4256,20 @@ export interface RentalPricingRate {
   depositMultiple?: number;
 }
 
+/**
+ * 履约费用（需求 4.4 公式里的独立一项）。
+ *
+ * 配在价格计划上而不是地点上：它是**价格**，要随计划版本一起发布、生效和快照，
+ * 这样报价才能复算「当时按哪一版履约费收的」。配在地点上则会随主档改名/改价漂移。
+ */
+export interface RentalFulfillmentFee {
+  mode: RentalFulfillmentMode;
+  /** 该履约方式的基础履约费。0 表示该方式免费，undefined（不配置）同样按 0。 */
+  amount: number;
+  /** 异地归还附加费：归还地点与取件地点不同时追加。 */
+  crossLocationAmount?: number;
+}
+
 export interface RentalPricingPlanV1 {
   id: string;
   tenantId: string;
@@ -4268,6 +4282,8 @@ export interface RentalPricingPlanV1 {
   effectiveFrom: string;
   effectiveTo?: string;
   rates: RentalPricingRate[];
+  /** 履约费用（需求 4.4）。留空表示该计划不收履约费。 */
+  fulfillmentFees?: RentalFulfillmentFee[];
   createdAt: string;
   updatedAt: string;
 }
@@ -4281,6 +4297,7 @@ export interface SaveRentalPricingPlanRequest {
   effectiveTo?: string;
   changeReason: string;
   rates: Array<Omit<RentalPricingRate, "id" | "itemGroupCode" | "itemGroupName">>;
+  fulfillmentFees?: RentalFulfillmentFee[];
 }
 
 export interface RentalDiscountPlan {
@@ -4506,7 +4523,17 @@ export interface RentalQuoteRequest {
 export interface RentalQuoteChargeLine {
   code: string;
   name: string;
-  type: "rental" | "calendar_adjustment" | "discount" | "coupon" | "service" | "deposit" | "cancellation" | "overdue" | "damage";
+  type:
+    | "rental"
+    | "calendar_adjustment"
+    | "fulfillment"
+    | "discount"
+    | "coupon"
+    | "service"
+    | "deposit"
+    | "cancellation"
+    | "overdue"
+    | "damage";
   amount: number;
   sourceId?: string;
   sourceVersion?: string;
@@ -4524,9 +4551,19 @@ export interface RentalQuoteSnapshotV1 {
   discountAmount: number;
   couponAmount: number;
   serviceAmount: number;
+  /** 履约费用合计（需求 4.4 公式的独立一项，与增值服务分开计）。 */
+  fulfillmentAmount: number;
   depositAmount: number;
   payableAmount: number;
   pricingPlanVersion: string;
+  /**
+   * 本次报价实际命中的费率（需求 4.4「报价快照」+ 验收「相同输入可复算」）。
+   *
+   * 只存 `pricingPlanVersion` 不够：编辑计划会覆盖同一行并递增版本号，
+   * 旧版本的费率内容随之消失，历史报价指向一个已不存在的版本，无法按原价复算。
+   * 这里固化命中的费率本体，复算不再依赖计划仍以该版本存在。
+   */
+  rateSnapshot: RentalPricingRate[];
   ruleVersion: string;
   ruleSnapshot: RentalRuleConfig;
   calendarVersion?: string;
