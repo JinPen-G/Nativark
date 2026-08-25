@@ -1606,6 +1606,118 @@ async function main() {
     "相同输入必须给出相同的计算说明"
   );
 
+  // 5b) 锁价：需求 4.4.4「报价生成后在其有效期内锁定本次命中的价格……锁价期间发布
+  //     新价格不得改变既有报价」。机制（报价快照 + 费率快照）已有，但此前没有任何
+  //     断言证明它在**新价发布之后**仍返回旧价——没被证伪过的机制不算已验证。
+  //
+  //     用**专属计划**而不是复用本节的 pricePlan：改价会污染后续依赖该计划的断言，
+  //     而"靠自己排在最后"是脆弱的顺序依赖（本文件第 28 节的教训）。
+  //     还要用**专属商品组**：自动择一按"覆盖所选商品 + 生效时间最晚 + 版本号大"择一，
+  //     锁价计划改价后版本号变大，若与本节其他计划覆盖同一商品组，就会把第 8 条
+  //     "自动择一"的断言抢走。换成独立商品组后，两者永不竞争，顺序无关。
+  const lockGroup = await request(
+    "POST",
+    "/api/rental/v1/item-groups",
+    {
+      code: "E2E-PRICE-LOCK-KIT",
+      name: "E2E 锁价验证组",
+      inventoryMode: "quantity",
+      unit: "套",
+      attributes: { manufacturer: "E2E重工", model: "LOCK-KIT" }
+    },
+    construction.accessToken
+  );
+  assert.equal(lockGroup.status, 201, `锁价验证商品组创建失败: ${JSON.stringify(lockGroup.body).slice(0, 200)}`);
+  const lockGroupId = lockGroup.body.data.id;
+  const lockStock = await request(
+    "PUT",
+    "/api/rental/v1/stock-balances",
+    { itemGroupId: lockGroupId, locationId: constructionLocation.id, onHandQuantity: 10, maintenanceQuantity: 0 },
+    construction.accessToken
+  );
+  assert.equal(lockStock.status, 200, `锁价验证库存登记失败: ${JSON.stringify(lockStock.body).slice(0, 200)}`);
+  const lockPlanPayload = (baseAmount, reason) => ({
+    code: "E2E-PRICE-LOCK",
+    name: "E2E 锁价验收",
+    changeReason: reason,
+    status: "enabled",
+    effectiveFrom: new Date(Date.now() - 86400000).toISOString(),
+    rates: [
+      {
+        itemGroupId: lockGroupId,
+        unit: "calendar_day",
+        baseAmount,
+        weekendMultiplier: 1,
+        holidayMultiplier: 1,
+        depositAmount: 500,
+        minimumUnits: 1
+      }
+    ]
+  });
+  const lockPlan = await request(
+    "POST",
+    "/api/rental/v1/pricing-plans",
+    lockPlanPayload(100, "PRICE-01 锁价验收：初版"),
+    construction.accessToken
+  );
+  assert.equal(lockPlan.status, 201, `锁价计划创建失败: ${JSON.stringify(lockPlan.body).slice(0, 250)}`);
+  const lockQuoteWith = async (planId) => {
+    const res = await request(
+      "POST",
+      "/api/rental/v1/quotes",
+      {
+        customerType: "corporate",
+        fulfillmentMode: "warehouse_pickup_return",
+        fulfillmentLocationId: constructionLocation.id,
+        startAt: "2027-07-05T09:00:00+08:00",
+        endAt: "2027-07-07T09:00:00+08:00",
+        pricingPlanId: planId,
+        lines: [{ itemGroupId: lockGroupId, quantity: 1 }]
+      },
+      construction.accessToken
+    );
+    assert.equal(res.status, 201, `锁价报价失败: ${JSON.stringify(res.body).slice(0, 250)}`);
+    return res.body.data;
+  };
+  const lockedBefore = await lockQuoteWith(lockPlan.body.data.id);
+  assert.equal(lockedBefore.rentalAmount, 300, `锁价前应为 3 个自然日 × 100 = 300：实际 ${lockedBefore.rentalAmount}`);
+  // 对**同一个计划**发布新版本，把基础价从 100 抬到 500。
+  const repriced = await request(
+    "POST",
+    "/api/rental/v1/pricing-plans",
+    { id: lockPlan.body.data.id, ...lockPlanPayload(500, "PRICE-01 锁价验收：发布新价") },
+    construction.accessToken
+  );
+  assert.equal(repriced.status, 201, `发布新价失败: ${JSON.stringify(repriced.body).slice(0, 250)}`);
+  assert.notEqual(repriced.body.data.version, lockPlan.body.data.version, "发布新价必须产生新的版本号");
+  // 从 API 读回原报价：金额、费率快照与版本号都必须是锁价时的值。
+  const reread = await request("GET", `/api/rental/v1/quotes/${lockedBefore.id}`, null, construction.accessToken);
+  assert.equal(reread.status, 200, `读回报价失败: ${JSON.stringify(reread.body).slice(0, 200)}`);
+  assert.equal(
+    reread.body.data.rentalAmount,
+    300,
+    `锁价期间发布新价后，既有报价仍应为 300：实际 ${reread.body.data.rentalAmount}——` +
+      "若变成 1500（500 × 3）说明报价没有锁价"
+  );
+  assert.equal(
+    reread.body.data.rateSnapshot[0].baseAmount,
+    100,
+    `既有报价的费率快照仍应是 100：实际 ${reread.body.data.rateSnapshot[0].baseAmount}`
+  );
+  assert.equal(
+    reread.body.data.pricingPlanVersion,
+    lockedBefore.pricingPlanVersion,
+    "既有报价引用的价格版本号不得被新版本覆盖"
+  );
+  // 新报价必须用新价——否则"锁价"就变成了"永远不涨价"。
+  const afterReprice = await lockQuoteWith(lockPlan.body.data.id);
+  assert.equal(
+    afterReprice.rentalAmount,
+    1500,
+    `新报价应按新价 500 × 3 = 1500：实际 ${afterReprice.rentalAmount}——` +
+      "若仍为 300 说明新价没有生效，那是另一个方向的错误"
+  );
+
   // 6) 数量参与线性放大，且封顶是**每行**上限而非整单上限。
   const twoUnits = await priceQuoteFor("2027-03-02T09:00:00+08:00", "2027-03-11T09:00:00+08:00", 2);
   assert.equal(twoUnits.rentalAmount, 1200, `2 套应为 2 × 600 = 1200：实际 ${twoUnits.rentalAmount}`);
