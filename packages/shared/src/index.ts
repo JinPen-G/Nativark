@@ -4610,6 +4610,17 @@ export interface RentalQuoteSnapshotV1 {
    */
   preAuthAmount: number;
   payableAmount: number;
+  /**
+   * 本次实收（需求 4.4.1：`本次实收 = 租赁应付 + 应付押金`）。
+   *
+   * 必须是独立字段：需求明确「应付押金、预授权金额、已支付、待支付和可退金额必须作为
+   * 独立金额字段，不得用同一个字段或明细类型混用」。押金此前是一条正数明细却不进
+   * `payableAmount`，于是 `sum(chargeLines)` 不等于任何单一总额，与「明细之和等于
+   * 对应总额」冲突。补上本字段后对应关系明确：非押金明细之和 = payableAmount、
+   * 押金明细之和 = depositAmount、两者之和 = receivableAmount；
+   * 预授权额度按需求不计入其中任何一项。
+   */
+  receivableAmount: number;
   pricingPlanVersion: string;
   /**
    * 本次报价实际命中的费率（需求 4.4「报价快照」+ 验收「相同输入可复算」）。

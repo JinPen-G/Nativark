@@ -1718,6 +1718,36 @@ async function main() {
       "若仍为 300 说明新价没有生效，那是另一个方向的错误"
   );
 
+  // 5c) 明细之和必须等于对应总额（需求 4.4.1 第 432 行）。
+  //
+  //     押金是一条**正数**明细却不计入 payableAmount，因此早前 `sum(chargeLines)`
+  //     不等于任何单一总额——页面、账单和财务核对都无法用求和自校验。
+  //     正确的对应关系是三条，缺一条就说明金额口径混用了：
+  //       非押金明细之和 = 租赁应付；押金明细之和 = 应付押金；两者之和 = 本次实收。
+  //     预授权额度按需求 427 行不计入其中任何一项。
+  const sumOf = (lines, predicate) =>
+    Math.round(lines.filter(predicate).reduce((total, row) => total + row.amount, 0) * 100) / 100;
+  const reconcile = (quote, label) => {
+    const nonDeposit = sumOf(quote.chargeLines, (row) => row.type !== "deposit" && row.type !== "preauthorization");
+    const deposits = sumOf(quote.chargeLines, (row) => row.type === "deposit");
+    assert.equal(nonDeposit, quote.payableAmount, `${label}：非押金明细之和应等于租赁应付 ${quote.payableAmount}，实际 ${nonDeposit}`);
+    assert.equal(deposits, quote.depositAmount, `${label}：押金明细之和应等于应付押金 ${quote.depositAmount}，实际 ${deposits}`);
+    assert.equal(
+      quote.receivableAmount,
+      Math.round((quote.payableAmount + quote.depositAmount) * 100) / 100,
+      `${label}：本次实收应等于租赁应付 + 应付押金，实际 ${quote.receivableAmount}`
+    );
+    // 预授权不得混入任何一个总额。
+    const preAuthLines = sumOf(quote.chargeLines, (row) => row.type === "preauthorization");
+    if (preAuthLines > 0) {
+      assert.notEqual(quote.payableAmount, nonDeposit + preAuthLines, `${label}：预授权不得计入租赁应付`);
+      assert.equal(quote.preAuthAmount, preAuthLines, `${label}：预授权额度应与其明细一致`);
+    }
+  };
+  reconcile(capHit, "封顶用例");
+  reconcile(tierHit, "阶梯用例");
+  reconcile(crossDay, "跨日用例");
+
   // 6) 数量参与线性放大，且封顶是**每行**上限而非整单上限。
   const twoUnits = await priceQuoteFor("2027-03-02T09:00:00+08:00", "2027-03-11T09:00:00+08:00", 2);
   assert.equal(twoUnits.rentalAmount, 1200, `2 套应为 2 × 600 = 1200：实际 ${twoUnits.rentalAmount}`);

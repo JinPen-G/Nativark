@@ -1310,6 +1310,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       // 需求 4.4：最终应付 = 基础租金 + 使用量费用 + 履约费用 + 增值服务 + 异常费用 - 优惠 - 券。
       // 使用量费用已并入租金（由 usage 策略计），异常费用在订单侧按快照追加。
       payableAmount: roundMoney(rentalAmount - discountAmount - couponAmount + serviceAmount + fulfillmentAmount),
+      // 需求 4.4.1：`本次实收 = 租赁应付 + 应付押金`；预授权只是冻结，不计入。
+      receivableAmount: roundMoney(
+        rentalAmount - discountAmount - couponAmount + serviceAmount + fulfillmentAmount + depositAmount
+      ),
       pricingPlanVersion: plan.version, ruleVersion: rule.version, ruleSnapshot: structuredClone(rule.config), calendarVersion: calendars.map((calendar) => `${calendar.year}:${calendar.status === "published" ? calendar.version : "draft"}`).join("|"),
       appliedDiscountPlanIds: discountPlans.map((item) => item.id), customerCouponId: customerCoupon?.id,
       expiresAt: new Date(Date.now() + rule.config.payment.unpaidHoldMinutes * 60_000).toISOString(), createdAt: timestamp

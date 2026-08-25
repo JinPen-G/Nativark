@@ -2825,6 +2825,8 @@ model RentalQuote {
   /// 预授权额度。与 depositAmount 互斥：预授权模式下押金为 0，钱是冻结的没有收。
   preAuthAmount          Decimal            @default(0) @db.Decimal(12, 2)
   payableAmount          Decimal            @db.Decimal(12, 2)
+  /// 本次实收 = 租赁应付 + 应付押金（需求 4.4.1）。迁移里按既有字段补算，不留 0。
+  receivableAmount       Decimal            @default(0) @db.Decimal(12, 2)
   pricingPlanVersion     String
   /// RentalPricingRate[]：本次报价实际命中的费率，使复算不依赖计划仍以该版本存在。
   /// 存量报价按空数组回填——它们当时确实没有保存费率，空数组是如实记录而非猜测。
