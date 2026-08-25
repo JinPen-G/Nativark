@@ -2187,9 +2187,10 @@ async function main() {
   );
   // 逐日说明也必须随时区改变，否则说明与金额会互相矛盾。
   const utcLine = inUtc.chargeLines.find((row) => row.type === "rental");
-  assert.match(utcLine.detail, /逐日 2027-04-05/, `UTC 下逐日说明应从 4/5 起：${utcLine.detail}`);
+  assert.match(utcLine.detail, /逐单位取价 2027-04-05/, `UTC 下逐单位取价应从 4/5 起：${utcLine.detail}`);
   const shanghaiLine = inShanghai.chargeLines.find((row) => row.type === "rental");
-  assert.match(shanghaiLine.detail, /逐日 2027-04-06/, `上海下逐日说明应只含 4/6：${shanghaiLine.detail}`);
+  assert.match(shanghaiLine.detail, /逐单位取价 2027-04-06/, `上海下逐单位取价应只含 4/6：${shanghaiLine.detail}`);
+  assert.doesNotMatch(shanghaiLine.detail, /2027-04-05/, `上海时区不应出现 4/5：${shanghaiLine.detail}`);
 
   // 还原，避免污染后续用例。
   const tzRestored = await putSettings({ timeZone: "Asia/Shanghai" });

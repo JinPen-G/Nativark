@@ -201,6 +201,8 @@ assert.throws(() => rentalPricingStrategy("fortnight"), /未注册的计费策�
 /* ---------- 阶梯价与封顶价（需求 4.4）---------- */
 
 const amount = (unit, rate, unitCount) => rentalPricingStrategy(unit).amountPerItem(rate, unitCount);
+const amountWith = (unit, rate, unitCount, unitMultipliers) =>
+  rentalPricingStrategy(unit).amountPerItem(rate, unitCount, unitMultipliers);
 const explain = (unit, rate, unitCount) => rentalPricingStrategy(unit).explain(rate, unitCount);
 const rateOf = (extra) => ({
   id: "rate_test",
@@ -254,5 +256,75 @@ assert.match(explain("usage", usageRate, 150), /超额 50 × 2/, "超额用量�
 // 计算说明必须能解释来源：单价、单位数都要出现。
 assert.match(explain("day_24h", rateOf({}), 3), /基础价 100\/day_24h × 3/, "无阶梯时说明应给出基础价与单位数");
 assert.match(explain("day_24h", tiered, 7), /阶梯价 70\/day_24h（满 7 day_24h）× 7/, "命中阶梯时说明应指明档位");
+
+/* ---------- 逐单位日期价格（需求 4.4.5 禁止整段平均倍率）---------- */
+
+const dates = (unit, start, unitCount, tz = DEFAULT_BUSINESS_TIME_ZONE) =>
+  rentalPricingStrategy(unit).billableUnitDates(iso(start), unitCount, tz);
+
+// 自然日：逐个计费日期。
+assert.deepEqual(
+  dates("calendar_day", "2026-03-02T09:00:00+08:00", 3),
+  ["2026-03-02", "2026-03-03", "2026-03-04"],
+  "自然日必须按每个计费日期取价"
+);
+// 24 小时块：按**块开始时刻**所在营业日期取价，因此从 15:00 起租的第 2 块落在次日。
+assert.deepEqual(
+  dates("day_24h", "2026-03-02T15:00:00+08:00", 3),
+  ["2026-03-02", "2026-03-03", "2026-03-04"],
+  "24 小时块按块开始日期取价"
+);
+// 小时：同一天内的多个小时块都落在当天。
+assert.deepEqual(
+  dates("hour", "2026-03-02T22:00:00+08:00", 4),
+  ["2026-03-02", "2026-03-02", "2026-03-03", "2026-03-03"],
+  "小时块跨零点后应落到次日，逐块取价才能反映节假日"
+);
+// 周：每块 7 天。
+assert.deepEqual(dates("week", "2026-03-02T09:00:00+08:00", 2), ["2026-03-02", "2026-03-09"], "周按块开始日期取价");
+// 整包：只有一个单位，按起租日。
+assert.deepEqual(dates("package", "2026-03-02T09:00:00+08:00", 1), ["2026-03-02"], "整包按起租日取价");
+// 使用量与日期无一一对应。
+assert.deepEqual(dates("usage", "2026-03-02T09:00:00+08:00", 5), [], "使用量不参与逐日取价");
+// 时区必须影响日期序列。
+assert.deepEqual(
+  dates("calendar_day", "2026-03-02T06:00:00+08:00", 1, "UTC"),
+  ["2026-03-01"],
+  "同一时刻在 UTC 下属于前一天"
+);
+
+// 关于"求和 vs 平均"，先把数学说清楚，免得写出自我欺骗的断言：
+//   Σ(单价 × 系数_i) ≡ 单价 × 单位数 × mean(系数)
+// 两者**恒等**。所以"改成求和"本身不会改变任何金额，需求 4.4.5 禁止平均倍率
+// 真正禁的是**平均的取值集合错了**：早前是对"租期覆盖的日历日期"取平均，
+// 而不是对"每个计费单位"取平均。当计费块与日期不是一一对应时（小时、周、月），
+// 两个集合的元素个数不同，结果才真的不同。
+//
+// 判别用例：3 个小时块中第 1 块在平日、后 2 块跨零点落在 1.5 倍的日期。
+//   逐单位（正确）：100 + 150 + 150 = 400
+//   按日期平均（早前）：日期集合 {平日 1.0, 次日 1.5} → 均值 1.25 → 100 × 3 × 1.25 = 375
+assert.equal(amountWith("hour", rateOf({}), 3, [1, 1.5, 1.5]), 400, "逐单位取价：100+150+150=400（按日期平均会得 375）");
+assert.equal(amountWith("calendar_day", rateOf({}), 3, [1, 1, 1.25]), 325, "自然日逐日取价：100+100+125");
+assert.equal(amountWith("hour", rateOf({}), 4, [1, 1, 1.5, 1.5]), 500, "小时逐块取价：100+100+150+150");
+// 封顶必须在**逐单位取价之后、乘数量之前**应用（需求 4.4.5 的固定顺序）。
+assert.equal(
+  amountWith("calendar_day", rateOf({ maxAmount: 260 }), 3, [1, 1, 1.25]),
+  260,
+  "封顶应作用在逐日求和之后：325 → 260"
+);
+// 阶梯先定单价，再逐单位乘系数。
+assert.equal(
+  amountWith("calendar_day", rateOf({ tiers: [{ minUnits: 3, unitAmount: 90 }] }), 3, [1, 1, 2]),
+  360,
+  "阶梯单价 90 后逐日取价：90+90+180"
+);
+// 缺省系数视为 1，既有调用方无需改动。
+assert.equal(amountWith("calendar_day", rateOf({}), 3, undefined), 300, "缺省系数等价于全 1");
+// 说明必须能看出逐单位系数。
+assert.match(
+  rentalPricingStrategy("calendar_day").explain(rateOf({}), 3, [1, 1, 1.25]),
+  /逐单位系数 1\.00\+1\.00\+1\.25/,
+  "计算说明必须展示逐单位系数"
+);
 
 console.log("rental pricing strategy tests passed: 单位语义、边界、非法输入、阶梯价、封顶价与计算说明均已覆盖");

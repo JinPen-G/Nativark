@@ -1105,9 +1105,19 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       const naturalUnits = pricingStrategy.billableUnits(input.startAt, input.endAt, line.usageQuantity, quoteTimeZone);
       // 最小起租量属于价格计划的职责（技术指南 5.4），因此在这里兜底而不是在策略里。
       const units = Math.max(rate.minimumUnits, naturalUnits);
-      const calendarFactor = this.calendarMultiplier(calendars, context.settings, input.startAt, input.endAt, rate);
-      const multiplier = calendarFactor.factor;
-      const amount = roundMoney(pricingStrategy.amountPerItem(rate, units) * line.quantity * multiplier);
+      // 逐单位日期价格（需求 4.4.5 明确禁止用整段平均倍率代替）。
+      //
+      // 自然日与夜按每个计费日期取价；小时、班次、24 小时、周、30 日月按每个
+      // 计费块开始时所在的营业日期取价。日期序列由策略给出——单位语义在策略里，
+      // 日历知识在服务层，两边各管一段。
+      const holidayPricing = context.settings.pricing.holidayPricingEnabled && calendars.length > 0;
+      const unitDates = pricingStrategy.billableUnitDates(input.startAt, units, quoteTimeZone);
+      const unitFactors = unitDates.map((date) => this.dateMultiplier(calendars, date, rate));
+      const unitMultipliers = holidayPricing ? unitFactors.map((item) => item.value) : undefined;
+      // 停业日必须拦住：即使关掉了节假日定价，停业日也不能接单。
+      if (!holidayPricing) for (const date of unitDates) this.dateMultiplier(calendars, date, rate);
+      // 顺序按需求 4.4.5：阶梯单价 → 逐单位日期价格 → 单件封顶 → 乘商品数量。
+      const amount = roundMoney(pricingStrategy.amountPerItem(rate, units, unitMultipliers) * line.quantity);
       rentalAmount += amount;
       // 拷贝而非引用：当前没有任何路径会就地改这些费率对象（savePricingPlan 是重建数组），
       // 因此**变异测试证明不了**这行的必要性——它是廉价的防御，防的是将来出现就地修改。
@@ -1126,12 +1136,21 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       );
       // 计算说明必须能复算：单价来源（基础价/阶梯档/封顶）、单位数、起租量是否生效、
       // 日历系数与逐日类型、数量，缺一项客服就无法向客户解释这笔钱是怎么来的（验收：可解释来源）。
+      // 需求 4.4.5：说明必须展示原始单位数、进位与最低起租、阶梯档位、
+      // 各日期或计费块价格、封顶前后金额和商品数量，使运营能据快照复算。
+      const dateBreakdown = unitDates
+        .slice(0, units)
+        .map((date, index) => {
+          const factor = unitFactors[index];
+          const shown = holidayPricing ? factor.value : 1;
+          return `${date} ${factor.type}×${shown.toFixed(2)}${factor.overridden && holidayPricing ? "(覆盖)" : ""}`;
+        })
+        .join("、");
       const detail = [
-        `${line.quantity} × ${units} ${rate.unit}`,
-        pricingStrategy.explain(rate, units),
-        units > naturalUnits ? `起租量 ${rate.minimumUnits} 生效（实际 ${naturalUnits}）` : undefined,
-        `日历系数 ${multiplier.toFixed(2)}`,
-        calendarFactor.breakdown.length ? `逐日 ${calendarFactor.breakdown.join("、")}` : undefined
+        `原始 ${naturalUnits} ${rate.unit} → 计费 ${units} ${rate.unit} × ${line.quantity} 件`,
+        pricingStrategy.explain(rate, units, unitMultipliers),
+        units > naturalUnits ? `起租量 ${rate.minimumUnits} 生效` : undefined,
+        dateBreakdown ? `逐单位取价 ${dateBreakdown}` : undefined
       ]
         .filter(Boolean)
         .join("；");
@@ -1559,56 +1578,30 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   }
 
   /**
-   * 日历系数与逐日明细。
+   * 单个营业日期的价格系数。逐单位取价与整段明细共用同一判定，避免两处口径分叉。
    *
-   * 两点必须说清：
-   *
-   * 1. **租户逐日覆盖优先于费率的节假日倍率。** 早前的判定是「节假日/特殊日 → 用
-   *    `rate.holidayMultiplier`；周末 → 用 `rate.weekendMultiplier`；其余 → 用
-   *    `day.pricingMultiplier`」，于是 `day.pricingMultiplier` 只对工作日有效——
-   *    而节假日和周末恰恰是最需要人工覆盖的日期，覆盖了却毫无效果（需求 4.5 要求
-   *    「经营空间可在本空间范围覆盖」）。判据用 `source === "tenant_override"`：
-   *    只有 `saveCalendarDay` 会写这个来源，因此它可靠地区分「人工覆盖」与
-   *    「导入或周规则生成时填的默认值」（导入的法定节假日默认 1.25、周末 1.1，
-   *    若不加区分地优先取它，等于把费率级倍率整体废掉）。
-   *
-   * 2. **系数是整段取平均后乘一次，不是逐日累加。** 对自然日/夜这类「单位数 = 天数」
-   *    的计价单位，二者数学上等价；对小时、周、月则是近似。这里不改这个口径——
-   *    改成逐日累加会让行金额与 `order.lines[].amount` 的推导（取自租金明细行）
-   *    不再一致，属更大范围的改动。近似的事实记录在开发任务台账里。
+   * 租户逐日覆盖优先于费率的节假日倍率：判据是 `source === "tenant_override"`，
+   * 只有 `saveCalendarDay` 会写这个来源，因此能区分「人工覆盖」与「导入或周规则
+   * 填的默认值」（导入的法定节假日默认 1.25、周末 1.1，不加区分地优先取它
+   * 等于把费率级倍率整体废掉）。
    */
-  private calendarMultiplier(calendars: RentalCalendarYear[], settings: TenantRentalBusinessSettings, startAt: string, endAt: string, rate: RentalPricingRate) {
-    const breakdown: string[] = [];
-    if (!settings.pricing.holidayPricingEnabled || !calendars.length) return { factor: 1, breakdown };
-    const timeZone = settings.calendar.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE;
-    const values: number[] = [];
-    // 按**营业时区**的日界游走。早前从 `startAt.slice(0,10)` 起按 UTC 日推进，
-    // 于是北京时间傍晚开始的租期会先命中前一个 UTC 日期，日期类型整体错位一天。
-    const firstIndex = businessDayIndex(startAt, timeZone);
-    const lastIndex = businessDayIndex(new Date(new Date(endAt).getTime() - 1).toISOString(), timeZone);
-    for (let index = firstIndex; index <= lastIndex; index += 1) {
-      const date = businessDateKeyFromIndex(index);
-      const calendar = calendars.find((item) => item.year === businessYearFromDateKey(date));
-      const day = calendar?.days.find((item) => item.date === date);
-      const type: RentalDayType = day?.dayType ?? "workday";
-      if (day?.closed) throw new ConflictException(`${day.date} 为停业日，不能报价`);
-      const overridden = day?.source === "tenant_override";
-      const value = overridden
-        ? day.pricingMultiplier
-        : type === "statutory_holiday" || type === "tenant_special"
-          ? rate.holidayMultiplier
-          : type === "weekend"
-            ? rate.weekendMultiplier
-            : day?.pricingMultiplier ?? 1;
-      values.push(value);
-      // 逐日类型与系数进入报价明细并随之落库，满足需求 4.5「保存命中的日历版本和日期类型」。
-      breakdown.push(`${date} ${type}×${value.toFixed(2)}${overridden ? "(覆盖)" : ""}`);
-    }
-    const factor = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 1;
-    return { factor, breakdown };
+  private dateMultiplier(calendars: RentalCalendarYear[], date: string, rate: RentalPricingRate) {
+    const calendar = calendars.find((item) => item.year === businessYearFromDateKey(date));
+    const day = calendar?.days.find((item) => item.date === date);
+    if (day?.closed) throw new ConflictException(`${day.date} 为停业日，不能报价`);
+    const type: RentalDayType = day?.dayType ?? "workday";
+    const overridden = day?.source === "tenant_override";
+    const value = overridden
+      ? day.pricingMultiplier
+      : type === "statutory_holiday" || type === "tenant_special"
+        ? rate.holidayMultiplier
+        : type === "weekend"
+          ? rate.weekendMultiplier
+          : day?.pricingMultiplier ?? 1;
+    return { value, type, overridden };
   }
 
-  /** 与 calendarMultiplier 必须同一日界口径，否则优惠的适用日期与计价的命中日期会错开。 */
+  /** 与逐单位取价必须同一日界口径，否则优惠的适用日期与计价的命中日期会错开。 */
   private dayTypesForRange(calendars: RentalCalendarYear[], startAt: string, endAt: string, timeZone: string) {
     const values: RentalDayType[] = [];
     const firstIndex = businessDayIndex(startAt, timeZone);
