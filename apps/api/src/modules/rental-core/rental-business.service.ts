@@ -1138,8 +1138,28 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       chargeLines.push({ code: `rental:${group.code}`, name: `${group.name}租金`, type: "rental", amount, sourceId: plan.id, sourceVersion: plan.version, detail });
     }
     rentalAmount = roundMoney(rentalAmount);
-    depositAmount = rule.config.payment.depositMode === "none" ? 0 : roundMoney(depositAmount);
-    if (rule.config.payment.preauthorizationRequired && depositAmount <= 0) throw new ConflictException("当前规则要求预授权，但所选商品未配置预授权额度");
+    // 押金与预授权额度独立计算（需求 4.4「同时独立计算：应付押金；预授权金额」）。
+    //
+    // 先算出「保证金基数」，再按模式决定它是**实收押金**还是**冻结额度**：
+    // 预授权时钱没有收，押金必须是 0，否则财务口径上会凭空多出一笔实收。
+    // 早前二者共用一个字段、只把明细行改个名，于是"实收 500"与"冻结 500"
+    // 在数据上无法区分，对账、退款与风控都读不出真实资金状态。
+    const securityBase = depositMode === "none" ? 0 : roundMoney(depositAmount);
+    // 只由 depositMode 决定「冻结还是实收」。
+    //
+    // 不能把 `preauthorizationRequired` 也当成模式开关：需求 4.4 把押金列为
+    // 「固定押金、租金倍数押金、预授权或免押」**四种互斥模式**，而
+    // `preauthorizationRequired` 在原实现里一直只是个校验位（要求金额非零）。
+    // 把它并进模式判定会让「固定押金 + 要求预授权」的租户押金凭空变成 0——
+    // 实测就是这样：工程品类正是该组合，固定押金 200 被算成 0。
+    const freezeInsteadOfCollect = depositMode === "preauthorization";
+    depositAmount = freezeInsteadOfCollect ? 0 : securityBase;
+    const preAuthAmount = freezeInsteadOfCollect ? securityBase : 0;
+    // 判据必须是保证金基数而不是 depositAmount：预授权时押金已被置 0，
+    // 沿用旧判据会让每一次预授权报价都误报"未配置额度"。
+    if ((freezeInsteadOfCollect || rule.config.payment.preauthorizationRequired) && securityBase <= 0) {
+      throw new ConflictException("当前规则要求预授权，但所选商品未配置预授权额度");
+    }
     const quotedDayTypes = new Set(this.dayTypesForRange(calendars, input.startAt, input.endAt, quoteTimeZone));
     const eligible = state.discountPlans.filter((item) => item.status === "enabled" && this.inPeriod(item.effectiveFrom, item.effectiveTo, input.startAt) && item.minimumSpend <= rentalAmount && (item.customerScope === "all" || item.customerScope === input.customerType || (item.customerScope === "member" && Boolean(input.customerId))) && (!item.applicableItemGroupIds.length || input.lines.some((line) => item.applicableItemGroupIds.includes(line.itemGroupId))) && (!item.applicableDayTypes.length || item.applicableDayTypes.some((dayType) => quotedDayTypes.has(dayType)))).sort((a, b) => a.priority - b.priority);
     const discountPlans = input.discountPlanId ? eligible.filter((item) => item.id === input.discountPlanId) : eligible.slice(0, 1);
@@ -1201,6 +1221,17 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     }
     // 押金明细必须讲清取数方式：固定押金与倍数押金金额可能相同，
     // 只给一个数字客服无法回答"为什么是这个数"。
+    if (preAuthAmount > 0) {
+      chargeLines.push({
+        code: "preauthorization",
+        name: "预授权额度",
+        type: "preauthorization",
+        amount: preAuthAmount,
+        sourceId: rule.id,
+        sourceVersion: rule.version,
+        detail: `冻结额度（不计入应付）：${depositBasis.join("、")}`
+      });
+    }
     if (depositAmount > 0) {
       // 预授权与固定押金取同一个来源（rate.depositAmount），但语义不同：
       // 一个是冻结额度、一个是实收押金，标签必须能区分，否则明细读起来是错的。
@@ -1228,6 +1259,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       fulfillmentAmount,
       rateSnapshot: hitRates,
       depositAmount,
+      preAuthAmount,
       // 需求 4.4：最终应付 = 基础租金 + 使用量费用 + 履约费用 + 增值服务 + 异常费用 - 优惠 - 券。
       // 使用量费用已并入租金（由 usage 策略计），异常费用在订单侧按快照追加。
       payableAmount: roundMoney(rentalAmount - discountAmount - couponAmount + serviceAmount + fulfillmentAmount),

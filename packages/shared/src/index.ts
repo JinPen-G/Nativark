@@ -4527,6 +4527,7 @@ export interface RentalQuoteChargeLine {
     | "rental"
     | "calendar_adjustment"
     | "fulfillment"
+    | "preauthorization"
     | "discount"
     | "coupon"
     | "service"
@@ -4553,7 +4554,17 @@ export interface RentalQuoteSnapshotV1 {
   serviceAmount: number;
   /** 履约费用合计（需求 4.4 公式的独立一项，与增值服务分开计）。 */
   fulfillmentAmount: number;
+  /** 应付押金：实收的那部分。预授权模式下为 0——钱是冻结的，没有收。 */
   depositAmount: number;
+  /**
+   * 预授权额度（需求 4.4「同时独立计算：应付押金；预授权金额」）。
+   *
+   * 与 `depositAmount` 互斥且必须分开存：早前二者共用一个字段，只把明细行改个名，
+   * 于是「实收 500 押金」与「冻结 500 额度」在数据上完全无法区分，
+   * 对账、退款与风控都读不出真实资金状态。两者都不进 `payableAmount`：
+   * 押金要退、预授权只是冻结，都不是本次交易的收入。
+   */
+  preAuthAmount: number;
   payableAmount: number;
   pricingPlanVersion: string;
   /**
@@ -5078,7 +5089,11 @@ export interface RentalOrder {
   discountAmount: number;
   couponAmount: number;
   serviceAmount: number;
+  /** 履约费用合计。与报价同口径，便于订单侧对账时逐项核对。 */
+  fulfillmentAmount: number;
   depositAmount: number;
+  /** 预授权额度。与 `depositAmount` 互斥，理由见报价快照上的同名字段。 */
+  preAuthAmount: number;
   payableAmount: number;
   adjustmentAmount: number;
   finalPayableAmount: number;

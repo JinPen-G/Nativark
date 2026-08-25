@@ -790,7 +790,13 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       quoteId: quote.id, quoteNo: quote.quoteNo, pricingPlanVersion: quote.pricingPlanVersion,
       ruleVersion: quote.ruleVersion, ruleSnapshot: structuredClone(quote.ruleSnapshot), calendarVersion: quote.calendarVersion, chargeLines: structuredClone(quote.chargeLines),
       rentalAmount: quote.rentalAmount, discountAmount: quote.discountAmount, couponAmount: quote.couponAmount,
-      serviceAmount: quote.serviceAmount, depositAmount: quote.depositAmount, payableAmount: quote.payableAmount,
+      serviceAmount: quote.serviceAmount,
+      // 履约费与预授权额度必须一并投影：订单只拿总额的话，
+      // 逐项对账时会发现 payableAmount 里多出一笔说不清来源的钱。
+      fulfillmentAmount: quote.fulfillmentAmount,
+      depositAmount: quote.depositAmount,
+      preAuthAmount: quote.preAuthAmount,
+      payableAmount: quote.payableAmount,
       adjustmentAmount: 0, finalPayableAmount: quote.payableAmount,
       totalAmount: quote.payableAmount, lines: orderLines,
       reservations, allocations: [], createdBy: input.operator || userName, createdAt: timestamp, updatedAt: timestamp

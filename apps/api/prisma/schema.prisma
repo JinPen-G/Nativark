@@ -2425,7 +2425,11 @@ model RentalOrder {
   discountAmount        Decimal                   @db.Decimal(12, 2)
   couponAmount          Decimal                   @db.Decimal(12, 2)
   serviceAmount         Decimal                   @db.Decimal(12, 2)
+  /// 履约费用合计。与报价同口径，便于订单侧逐项对账。
+  fulfillmentAmount     Decimal                   @default(0) @db.Decimal(12, 2)
   depositAmount         Decimal                   @db.Decimal(12, 2)
+  /// 预授权额度。与 depositAmount 互斥。
+  preAuthAmount         Decimal                   @default(0) @db.Decimal(12, 2)
   payableAmount         Decimal                   @db.Decimal(12, 2)
   adjustmentAmount      Decimal                   @db.Decimal(12, 2)
   finalPayableAmount    Decimal                   @db.Decimal(12, 2)
@@ -2818,6 +2822,8 @@ model RentalQuote {
   /// 履约费用合计（需求 4.4 公式的独立一项）。存量报价按 0 回填。
   fulfillmentAmount      Decimal            @default(0) @db.Decimal(12, 2)
   depositAmount          Decimal            @db.Decimal(12, 2)
+  /// 预授权额度。与 depositAmount 互斥：预授权模式下押金为 0，钱是冻结的没有收。
+  preAuthAmount          Decimal            @default(0) @db.Decimal(12, 2)
   payableAmount          Decimal            @db.Decimal(12, 2)
   pricingPlanVersion     String
   /// RentalPricingRate[]：本次报价实际命中的费率，使复算不依赖计划仍以该版本存在。

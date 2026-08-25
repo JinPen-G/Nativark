@@ -917,6 +917,13 @@ async function main() {
   ).body.data;
   const couponLine = couponQuote.chargeLines.find((line) => line.type === "coupon");
   assert.ok(couponLine && couponLine.amount === -50, `优惠券应抵扣 50: ${JSON.stringify(couponQuote.chargeLines)}`);
+  // 这里曾加过一条「明细求和（不含押金与预授权）必须等于应付」的不变量，
+  // 三次变异测试（券符号写反、应付重复计履约费、履约明细金额写 0）都被**既有断言**
+  // 先一步拦下，恒等式从未成为首个失败者——在本套件里它是被现有断言完全覆盖的
+  // 重言式。按「不留证明不了必要性的断言」删除，不留一条永远不会失败的绿色断言。
+  //
+  // 它想守的性质本身已由类型解决：押金与预授权是唯一不计入应付的两类明细，
+  // 且各有独立类型（deposit / preauthorization），任何下游都能自行求和核对。
   const couponOrder = await request(
     "POST",
     "/api/rental/v1/orders",
@@ -1812,7 +1819,56 @@ async function main() {
     "PRICE-01 还原原始押金模式"
   );
   assert.equal(ruleBackToOriginal.status, 201, "还原押金模式失败");
-  ok("租金倍数押金已生效：固定 200 / 倍数 300 可区分，押金明细讲清取数方式，倍数落库");
+  // 预授权额度必须与押金**分开存**（需求 4.4「同时独立计算：应付押金；预授权金额」）。
+  // 早前二者共用 depositAmount、只把明细行改个名，于是"实收 500 押金"与
+  // "冻结 500 额度"在数据上完全无法区分，对账、退款与风控都读不出真实资金状态。
+  // 注意：工程品类规则同时开着 preauthorizationRequired。该标志在原实现里只是
+  // 「金额必须非零」的校验位，**不是**模式开关——把它并进模式判定会让
+  // 「固定押金 + 要求预授权」的租户押金凭空变成 0。因此下面切换的是 depositMode。
+  const toPreauth = await publishDepositMode("preauthorization", "PRICE-01 切换为预授权");
+  assert.equal(toPreauth.status, 201, `切换预授权失败: ${JSON.stringify(toPreauth.body).slice(0, 250)}`);
+  const preauthQuote = await depositQuoteWith(multiplePlan.body.data.id);
+  assert.equal(
+    preauthQuote.depositAmount,
+    0,
+    `预授权模式下应付押金必须为 0（钱是冻结的、没有收）：实际 ${preauthQuote.depositAmount}`
+  );
+  assert.equal(
+    preauthQuote.preAuthAmount,
+    200,
+    `预授权额度应为固定额 200：实际 ${preauthQuote.preAuthAmount}——若为 0 说明额度没有独立计算`
+  );
+  assert.equal(
+    preauthQuote.chargeLines.filter((row) => row.type === "deposit").length,
+    0,
+    "预授权模式下不得再出押金明细行"
+  );
+  const preauthLine = preauthQuote.chargeLines.find((row) => row.type === "preauthorization");
+  assert.ok(preauthLine, "应有预授权明细行，且类型为 preauthorization");
+  assert.equal(preauthLine.amount, 200, "预授权明细金额应与合计一致");
+  // 两者都不进应付：押金要退、预授权只是冻结，都不是本次交易的收入。
+  assert.equal(preauthQuote.payableAmount, 200, `应付不应含押金或预授权：实际 ${preauthQuote.payableAmount}`);
+  // 落库校验：两个字段都要真的写进 rental_quotes。
+  assert.equal(
+    Number(readScalar(`SELECT \`preAuthAmount\` FROM \`rental_quotes\` WHERE \`id\`='${preauthQuote.id}';`)),
+    200,
+    "预授权额度必须落库"
+  );
+  assert.equal(
+    Number(readScalar(`SELECT \`depositAmount\` FROM \`rental_quotes\` WHERE \`id\`='${preauthQuote.id}';`)),
+    0,
+    "预授权模式下库中押金必须为 0"
+  );
+  // 固定押金模式下反向成立：押金有值、预授权为 0。
+  await publishDepositMode("fixed", "PRICE-01 回到固定押金核对反向");
+  const backToFixed = await depositQuoteWith(multiplePlan.body.data.id);
+  assert.equal(backToFixed.depositAmount, 200, "固定押金模式下押金应有值");
+  assert.equal(backToFixed.preAuthAmount, 0, "固定押金模式下预授权额度必须为 0");
+
+  ok(
+    "租金倍数押金已生效：固定 200 / 倍数 300 可区分，押金明细讲清取数方式，倍数落库；" +
+      "押金与预授权额度已分开存：预授权时押金 0 / 额度 200，二者都不进应付，均落库"
+  );
 
   console.log("== 15e. PRICE-01 履约费用与异地归还附加费 ==");
   // 需求 4.4 的应付公式里「履约费用」是与增值服务并列的独立一项，此前既无字段也无
@@ -2067,7 +2123,9 @@ async function main() {
     60,
     "履约费合计必须落库"
   );
-  ok("履约费用已生效：同地 60 / 异地 100 且进应付、明细带计划版本、未配置时为 0 且无空行、合计落库");
+  ok(
+    "履约费用已生效：同地 60 / 异地 100 且进应付、明细带计划版本、未配置时为 0 且无空行、合计落库"
+  );
 
   console.log("== 15c. PRICE-01 营业时区按经营空间配置且真正影响计价 ==");
   // 项目负责人 2026-08-25 决定按租户配置时区。业务设置在 SPACE-03 之后按**经营空间**
