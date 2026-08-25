@@ -6,6 +6,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$composeProjectName = "rental-platform"
 Set-Location $root
 
 function Require-Command([string]$name, [string]$hint) {
@@ -32,7 +33,8 @@ if (-not (Test-Path -LiteralPath (Join-Path $root "node_modules"))) {
 if (-not $SkipDocker) {
   Require-Command "docker" "请先安装并启动 Docker Desktop；或使用 -SkipDocker 跳过容器启动。"
   Write-Host "[rental-platform] 启动 MySQL 和 Redis..." -ForegroundColor Cyan
-  docker compose up -d mysql redis
+  # 固定 Compose 项目名，避免仓库目录改名后与已有具名容器冲突。
+  docker compose --project-name $composeProjectName up -d mysql redis
   if ($LASTEXITCODE -ne 0) { throw "Docker 依赖启动失败。" }
 
   Write-Host "[rental-platform] 等待 MySQL 监听 3306..." -ForegroundColor Cyan
