@@ -78,6 +78,7 @@ export class PlatformRepository {
       where: { code: { not: "platform" } },
       include: {
         rentalProfile: { include: { category: true } },
+        businessWorkspaces: { select: { categoryCode: true } },
         _count: { select: { users: true, organizations: true, orders: true, rentalOrders: true } }
       },
       orderBy: { code: "asc" }
@@ -91,6 +92,7 @@ export class PlatformRepository {
       where: { id },
       include: {
         rentalProfile: { include: { category: true } },
+        businessWorkspaces: { select: { categoryCode: true } },
         _count: { select: { users: true, organizations: true, orders: true, rentalOrders: true } }
       }
     });
@@ -334,7 +336,10 @@ export class PlatformRepository {
   }
 
   async listBusinessWorkspaces(currentUser?: SystemUserRow): Promise<BusinessWorkspace[]> {
-    const tenantId = this.workspaceTenantId(currentUser);
+    return this.listBusinessWorkspacesForTenant(this.workspaceTenantId(currentUser));
+  }
+
+  async listBusinessWorkspacesForTenant(tenantId: string): Promise<BusinessWorkspace[]> {
     const rows = await this.prisma.businessWorkspace.findMany({
       where: { tenantId },
       orderBy: [{ isDefault: "desc" }, { code: "asc" }]
@@ -351,7 +356,14 @@ export class PlatformRepository {
      */
     onBeforeCommit?: (tx: Prisma.TransactionClient, workspaceId: string, tenantId: string) => Promise<void>
   ): Promise<BusinessWorkspace> {
-    const tenantId = this.workspaceTenantId(currentUser);
+    return this.createBusinessWorkspaceForTenant(this.workspaceTenantId(currentUser), input, onBeforeCommit);
+  }
+
+  async createBusinessWorkspaceForTenant(
+    tenantId: string,
+    input: CreateBusinessWorkspaceRequest,
+    onBeforeCommit?: (tx: Prisma.TransactionClient, workspaceId: string, tenantId: string) => Promise<void>
+  ): Promise<BusinessWorkspace> {
     const code = input.code?.trim().toLowerCase();
     const name = input.name?.trim();
     if (!code || !name || !input.categoryCode) throw new BadRequestException("空间编码、名称和经营品类不能为空");
@@ -390,7 +402,14 @@ export class PlatformRepository {
     input: UpdateBusinessWorkspaceRequest,
     currentUser?: SystemUserRow
   ): Promise<BusinessWorkspace> {
-    const tenantId = this.workspaceTenantId(currentUser);
+    return this.updateBusinessWorkspaceForTenant(this.workspaceTenantId(currentUser), id, input);
+  }
+
+  async updateBusinessWorkspaceForTenant(
+    tenantId: string,
+    id: string,
+    input: UpdateBusinessWorkspaceRequest
+  ): Promise<BusinessWorkspace> {
     const name = input.name?.trim();
     if (input.name !== undefined && !name) throw new BadRequestException("空间名称不能为空");
     const updated = await this.prisma.$transaction(async (tx) => {
@@ -2001,6 +2020,7 @@ export class PlatformRepository {
       capabilities: unknown;
       category: { name: string };
     };
+    businessWorkspaces: Array<{ categoryCode: string }>;
     _count: { users: number; organizations: number; orders: number; rentalOrders: number };
   }): TenantSummary {
     return {
@@ -2012,6 +2032,8 @@ export class PlatformRepository {
       categoryCode: this.toDomainCategoryCode(tenant.rentalProfile?.categoryCode),
       categoryName: tenant.rentalProfile?.category.name,
       capabilities: tenant.rentalProfile?.capabilities as TenantSummary["capabilities"],
+      workspaceCount: tenant.businessWorkspaces.length,
+      workspaceCategoryCodes: [...new Set(tenant.businessWorkspaces.map((workspace) => this.toDomainCategoryCode(workspace.categoryCode)).filter(Boolean))] as TenantSummary["workspaceCategoryCodes"],
       userCount: tenant._count.users,
       organizationCount: tenant._count.organizations,
       orderCount: tenant._count.orders + tenant._count.rentalOrders,

@@ -12,6 +12,8 @@ import type {
   CorporateListResult,
   CorporateMonthlyBillSummary,
   CorporateSummary,
+  BusinessWorkspace,
+  CreateBusinessWorkspaceRequest,
   CreateAsyncJobRequest,
   CloseStoreRentalRemarkRequest,
   CreateCorporateContractAttachmentRequest,
@@ -160,6 +162,7 @@ import type {
   TboxCommandResult,
   TboxDeviceSummary,
   TenantSummary,
+  UpdateBusinessWorkspaceRequest,
   UpdateTenantRequest,
   UpdateTenantStatusRequest,
   TBoxDeviceSummary,
@@ -1176,6 +1179,21 @@ export async function updateTenant(id: string, payload: UpdateTenantRequest) {
 
 export async function updateTenantStatus(id: string, payload: UpdateTenantStatusRequest) {
   const response = await http.put<ApiResult<TenantSummary>>(`/platform/tenants/${id}/status`, payload);
+  return response.data.data;
+}
+
+export async function listTenantWorkspaces(tenantId: string) {
+  const response = await http.get<ApiResult<BusinessWorkspace[]>>(`/platform/tenants/${tenantId}/workspaces`);
+  return response.data.data;
+}
+
+export async function createTenantWorkspace(tenantId: string, payload: CreateBusinessWorkspaceRequest) {
+  const response = await http.post<ApiResult<BusinessWorkspace>>(`/platform/tenants/${tenantId}/workspaces`, payload);
+  return response.data.data;
+}
+
+export async function updateTenantWorkspace(tenantId: string, workspaceId: string, payload: UpdateBusinessWorkspaceRequest) {
+  const response = await http.put<ApiResult<BusinessWorkspace>>(`/platform/tenants/${tenantId}/workspaces/${workspaceId}`, payload);
   return response.data.data;
 }
 

@@ -1039,6 +1039,39 @@ async function main() {
   assert.equal(vehicleAList.length, 0, "新车辆租户不得看到 tenant_001 的种子订单");
   const dashboard = await request("GET", "/api/reports/dashboard", null, vehicleA.accessToken);
   assert.equal(dashboard.status, 200);
+  const saasWorkspaceList = await request("GET", `/api/platform/tenants/${tenantAId}/workspaces`, null, platform.accessToken);
+  assert.equal(saasWorkspaceList.status, 200, "SaaS 管理员应能列出目标租户经营空间");
+  assert.equal(saasWorkspaceList.body.data.length, 1, "新租户初始应只有默认经营空间");
+  const saasWorkspaceCreate = await request(
+    "POST",
+    `/api/platform/tenants/${tenantAId}/workspaces`,
+    { code: "camera-space", name: "摄影业务空间", categoryCode: "camera" },
+    platform.accessToken
+  );
+  assert.equal(saasWorkspaceCreate.status, 201, `SaaS 管理员新增目标租户空间失败: ${JSON.stringify(saasWorkspaceCreate.body).slice(0, 200)}`);
+  const saasWorkspaceId = saasWorkspaceCreate.body.data.id;
+  const tenantSessionAfterSpace = await request("GET", "/api/auth/session-context", null, vehicleA.accessToken);
+  assert.ok(tenantSessionAfterSpace.body.data.workspaces.some((workspace) => workspace.id === saasWorkspaceId), "平台创建空间后应自动加入目标租户管理员");
+  const saasWorkspaceUpdate = await request(
+    "PUT",
+    `/api/platform/tenants/${tenantAId}/workspaces/${saasWorkspaceId}`,
+    { name: "摄影业务空间（更新）", status: "frozen" },
+    platform.accessToken
+  );
+  assert.equal(saasWorkspaceUpdate.status, 200, "SaaS 管理员应能编辑目标租户空间名称与状态");
+  assert.equal(saasWorkspaceUpdate.body.data.categoryCode, "camera", "编辑空间不得改变创建时品类");
+  const tenantCannotManageSaasScope = await request(
+    "GET",
+    `/api/platform/tenants/${tenantAId}/workspaces`,
+    null,
+    vehicleA.accessToken
+  );
+  assert.equal(tenantCannotManageSaasScope.status, 403, "普通租户管理员不得调用 SaaS 目标租户空间接口");
+  const tenantRowsAfterSpace = await request("GET", "/api/platform/tenants", null, platform.accessToken);
+  const tenantSummaryAfterSpace = tenantRowsAfterSpace.body.data.find((tenant) => tenant.tenantId === tenantAId);
+  assert.equal(tenantSummaryAfterSpace.workspaceCount, 2, "SaaS 租户摘要应按经营空间统计，不再只显示租户级单一品类");
+  assert.deepEqual([...tenantSummaryAfterSpace.workspaceCategoryCodes].sort(), ["camera", "vehicle"], "租户摘要应汇总空间品类");
+  ok("SaaS 管理员可按目标租户查看、新增和编辑经营空间；租户管理员不能越权，租户摘要按多空间汇总");
   const vehicleB = await bootstrapTenant(platform.accessToken, "e2e_vehicle_b", "vehicle");
   const vehicleBStations = (await request("GET", "/api/store-rental/stations", null, vehicleB.accessToken)).body.data;
   assert.equal(Array.isArray(vehicleBStations) ? vehicleBStations.length : 0, 0, "车辆租户 B 不得看到 A 的站点");
@@ -1100,6 +1133,41 @@ async function main() {
   );
   assert.equal(duplicateVehicleIdentifier.status, 409, "动态唯一字段必须在当前经营空间内忽略大小写与首尾空格判重");
   assert.match(JSON.stringify(duplicateVehicleIdentifier.body), /车牌号已存在/u, "重复原因应指出车牌号");
+  const concurrentDuplicateVehicleIdentifiers = await Promise.all(
+    Array.from({ length: 4 }, (_, index) =>
+      request(
+        "POST",
+        "/api/rental/v1/assets",
+        {
+          itemGroupId: truckGroup.body.data.id,
+          locationId: vehicleLocation.id,
+          assetNo: `E2E-CONCURRENT-${index + 1}`,
+          attributes: {
+            licensePlate: index % 2 === 0 ? "E2E-RACE-001" : " e2e-race-001 ",
+            vin: `E2E-CONCURRENT-VIN-${index + 1}`
+          }
+        },
+        vehicleA.accessToken
+      )
+    )
+  );
+  assert.equal(
+    concurrentDuplicateVehicleIdentifiers.filter((response) => response.status === 201).length,
+    1,
+    "并发写入同一动态唯一值时只能有一个请求成功"
+  );
+  assert.equal(
+    concurrentDuplicateVehicleIdentifiers.filter((response) => response.status === 409).length,
+    3,
+    `其余并发请求必须被数据库唯一声明拒绝: ${JSON.stringify(concurrentDuplicateVehicleIdentifiers.map((response) => response.status))}`
+  );
+  assert.ok(
+    concurrentDuplicateVehicleIdentifiers
+      .filter((response) => response.status === 409)
+      .every((response) => /车牌号已存在/u.test(JSON.stringify(response.body))),
+    "并发冲突必须返回可理解的动态字段名称"
+  );
+  ok("动态唯一字段顺序与并发写入均受经营空间级约束");
   const truckPlan = await request(
     "POST",
     "/api/rental/v1/pricing-plans",

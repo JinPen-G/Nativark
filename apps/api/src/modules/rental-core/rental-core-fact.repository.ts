@@ -1,4 +1,5 @@
-import { Injectable } from "@nestjs/common";
+import { ConflictException, Injectable } from "@nestjs/common";
+import { createHash } from "node:crypto";
 import { Prisma, type $Enums } from "@prisma/client";
 import {
   RentalAssetStatus,
@@ -42,6 +43,12 @@ export interface InventoryLockTarget {
   inventoryMode: RentalInventoryMode;
 }
 
+export interface RentalUniqueAttributeClaim {
+  fieldCode: string;
+  label: string;
+  normalizedValue: string;
+}
+
 /**
  * 服务层只依赖这个接口。与配置仓储同理：不连库的单元测试注入吸收式 stub，
  * 而租户隔离、外键、过期预占过滤这类持久化语义只在 MySQL E2E 里验证。
@@ -75,7 +82,7 @@ export interface RentalCoreFactStore {
    */
   allocatedAssetIds(tenantId: string, tx?: RentalFactTx): Promise<Set<string>>;
   listAssets(tenantId: string, tx?: RentalFactTx): Promise<RentalAsset[]>;
-  upsertAsset(asset: RentalAsset): Promise<void>;
+  upsertAsset(asset: RentalAsset, uniqueAttributes?: RentalUniqueAttributeClaim[]): Promise<void>;
   listStockBalances(tenantId: string, tx?: RentalFactTx): Promise<RentalStockBalance[]>;
   upsertStockBalance(balance: RentalStockBalance): Promise<void>;
   listInspections(tenantId: string, orderId: string): Promise<RentalInspectionRecord[]>;
@@ -415,7 +422,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     return this.prisma.rentalAsset.findFirst({ where: { tenantId, workspaceId, assetNo }, select: { id: true } });
   }
 
-  async upsertAsset(asset: RentalAsset): Promise<void> {
+  async upsertAsset(asset: RentalAsset, uniqueAttributes: RentalUniqueAttributeClaim[] = []): Promise<void> {
     const data = {
       tenantId: asset.tenantId,
       itemGroupId: asset.itemGroupId,
@@ -425,11 +432,37 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       status: upper<$Enums.RentalAssetState>(asset.status),
       attributes: asset.attributes as Prisma.InputJsonValue
     };
-    const workspaceId = await resolveScopeWorkspaceId(this.prisma, asset.tenantId);
-    await this.prisma.rentalAsset.upsert({
-      where: { id: asset.id },
-      create: { workspaceId, id: asset.id, ...data, createdAt: new Date(asset.createdAt) },
-      update: data
+    await this.prisma.$transaction(async (tx) => {
+      const workspaceId = await resolveScopeWorkspaceId(tx, asset.tenantId);
+      await tx.rentalAttributeUniqueValue.deleteMany({
+        where: { tenantId: asset.tenantId, workspaceId, entityType: "asset", entityId: asset.id }
+      });
+      for (const claim of uniqueAttributes) {
+        try {
+          await tx.rentalAttributeUniqueValue.create({
+            data: {
+              id: `attruniq_${createHash("sha256").update(`${workspaceId}|asset|${claim.fieldCode}|${claim.normalizedValue}`).digest("hex")}`,
+              tenantId: asset.tenantId,
+              workspaceId,
+              entityType: "asset",
+              fieldCode: claim.fieldCode,
+              normalizedHash: createHash("sha256").update(claim.normalizedValue).digest("hex"),
+              normalizedValue: claim.normalizedValue,
+              entityId: asset.id
+            }
+          });
+        } catch (error) {
+          if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+            throw new ConflictException(`${claim.label}已存在`);
+          }
+          throw error;
+        }
+      }
+      await tx.rentalAsset.upsert({
+        where: { id: asset.id },
+        create: { workspaceId, id: asset.id, ...data, createdAt: new Date(asset.createdAt) },
+        update: data
+      });
     });
   }
 

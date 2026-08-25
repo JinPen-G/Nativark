@@ -1391,6 +1391,54 @@ export class PlatformService {
     return tenant;
   }
 
+  async listTenantBusinessWorkspaces(tenantId: string, currentUser?: SystemUserRow) {
+    this.assertSaasAdmin(currentUser);
+    this.requireWorkspaceDataSource();
+    await this.platformRepository.getTenant(tenantId);
+    return this.platformRepository.listBusinessWorkspacesForTenant(tenantId);
+  }
+
+  async createTenantBusinessWorkspace(
+    tenantId: string,
+    input: CreateBusinessWorkspaceRequest,
+    currentUser?: SystemUserRow
+  ) {
+    this.assertSaasAdmin(currentUser);
+    this.requireWorkspaceDataSource();
+    await this.platformRepository.getTenant(tenantId);
+    const result = await this.platformRepository.createBusinessWorkspaceForTenant(
+      tenantId,
+      input,
+      async (tx, workspaceId) => {
+        await this.rentalCoreService?.registerWorkspace(workspaceId, tenantId, input.categoryCode, tx);
+        const tenantAdmins = await tx.user.findMany({
+          where: { tenantId, isPlatformAdmin: true, isActive: true },
+          select: { id: true }
+        });
+        if (tenantAdmins.length) {
+          await tx.workspaceMember.createMany({
+            data: tenantAdmins.map((admin) => ({ tenantId, workspaceId, userId: admin.id, isActive: true })),
+            skipDuplicates: true
+          });
+        }
+      }
+    );
+    await this.rentalCoreService?.onApplicationBootstrap();
+    return result;
+  }
+
+  async updateTenantBusinessWorkspace(
+    tenantId: string,
+    workspaceId: string,
+    input: UpdateBusinessWorkspaceRequest,
+    currentUser?: SystemUserRow
+  ) {
+    this.assertSaasAdmin(currentUser);
+    this.requireWorkspaceDataSource();
+    await this.platformRepository.getTenant(tenantId);
+    return this.platformRepository.updateBusinessWorkspaceForTenant(tenantId, workspaceId, input);
+  }
+
   findTenantByCode(code: string) {
     if (this.useMysqlDataSource()) {
       return this.platformRepository.findTenantByCode(code);

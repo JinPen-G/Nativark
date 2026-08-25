@@ -216,6 +216,9 @@ export interface TenantSummary {
   categoryCode?: RentalCategoryCode;
   categoryName?: string;
   capabilities?: RentalCapability[];
+  /** 经营空间才是品类事实源；以下字段供 SaaS 管理面汇总展示。 */
+  workspaceCount?: number;
+  workspaceCategoryCodes?: RentalCategoryCode[];
   userCount?: number;
   organizationCount?: number;
   orderCount?: number;

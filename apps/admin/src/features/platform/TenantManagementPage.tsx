@@ -1,14 +1,17 @@
-import { EditOutlined, PauseCircleOutlined, PlusOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
-import type { TenantBootstrapRequest, TenantSummary, UpdateTenantStatusRequest } from "@store-rental/shared";
+import { ApartmentOutlined, EditOutlined, PauseCircleOutlined, PlusOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
+import type { BusinessWorkspace, CreateBusinessWorkspaceRequest, RentalCategoryCode, TenantBootstrapRequest, TenantSummary, UpdateBusinessWorkspaceRequest, UpdateTenantStatusRequest } from "@store-rental/shared";
 import { TenantStatus } from "@store-rental/shared";
 import { App, Button, Card, Descriptions, Drawer, Form, Input, Modal, Segmented, Select, Space, Table, Tag, Typography } from "antd";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import {
   bootstrapTenant,
+  createTenantWorkspace,
   getTenantBootstrapPreview,
+  listTenantWorkspaces,
   listTenants,
   updateTenant,
+  updateTenantWorkspace,
   updateTenantStatus
 } from "@/api/operations";
 import { rentalCoreApi } from "@/api/rentalCore";
@@ -17,6 +20,7 @@ import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
 
 type Editor = { type: "create" } | { type: "edit"; tenant: TenantSummary } | { type: "status"; tenant: TenantSummary } | undefined;
+type WorkspaceEditor = { type: "create" } | { type: "edit"; workspace: BusinessWorkspace } | undefined;
 
 const statusMeta = {
   [TenantStatus.Active]: { label: "正常", color: "success" },
@@ -30,17 +34,31 @@ export function TenantManagementPage() {
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState<string>("all");
   const [editor, setEditor] = useState<Editor>();
+  const [workspaceTenant, setWorkspaceTenant] = useState<TenantSummary>();
+  const [workspaceEditor, setWorkspaceEditor] = useState<WorkspaceEditor>();
   const [form] = Form.useForm<Record<string, unknown>>();
+  const [workspaceForm] = Form.useForm<CreateBusinessWorkspaceRequest & UpdateBusinessWorkspaceRequest>();
 
   const tenants = useQuery({ queryKey: ["saas-tenants"], queryFn: listTenants });
   const categories = useQuery({ queryKey: ["rental-categories"], queryFn: rentalCoreApi.categories });
   const preview = useQuery({ queryKey: ["tenant-bootstrap-preview"], queryFn: getTenantBootstrapPreview });
+  const workspaces = useQuery({
+    queryKey: ["saas-tenant-workspaces", workspaceTenant?.tenantId],
+    queryFn: () => listTenantWorkspaces(workspaceTenant!.tenantId),
+    enabled: Boolean(workspaceTenant)
+  });
 
   const rows = useMemo(() => (tenants.data ?? []).filter((tenant) =>
     tenant.tenantCode !== "platform" && (filter === "all" || tenant.tenantStatus === filter)
   ), [filter, tenants.data]);
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["saas-tenants"] });
+  const refreshWorkspaces = async () => {
+    await Promise.all([
+      refresh(),
+      queryClient.invalidateQueries({ queryKey: ["saas-tenant-workspaces", workspaceTenant?.tenantId] })
+    ]);
+  };
   const createTenant = useMutation({
     mutationFn: (values: TenantBootstrapRequest) => bootstrapTenant({ ...values, operator }),
     onSuccess: async (result) => {
@@ -52,7 +70,7 @@ export function TenantManagementPage() {
         content: (
           <Descriptions column={1} size="small" bordered items={[
             { key: "tenant", label: "租户", children: `${result.tenant.tenantName}（${result.tenant.tenantCode}）` },
-            { key: "category", label: "经营品类", children: result.tenant.categoryCode },
+            { key: "category", label: "默认经营空间品类", children: result.tenant.categoryCode },
             { key: "account", label: "管理员账号", children: result.adminUser.account },
             { key: "password", label: "一次性临时密码", children: <Typography.Text code copyable>{result.temporaryPassword}</Typography.Text> }
           ]} />
@@ -70,6 +88,16 @@ export function TenantManagementPage() {
     mutationFn: ({ id, payload }: { id: string; payload: UpdateTenantStatusRequest }) => updateTenantStatus(id, payload),
     onSuccess: async () => { await refresh(); closeEditor(); message.success("租户状态已更新，相关会话已按规则处理"); },
     onError: () => message.error("租户状态更新失败")
+  });
+  const createWorkspace = useMutation({
+    mutationFn: (values: CreateBusinessWorkspaceRequest) => createTenantWorkspace(workspaceTenant!.tenantId, values),
+    onSuccess: async () => { await refreshWorkspaces(); closeWorkspaceEditor(); message.success("经营空间已创建，租户管理员已自动加入"); },
+    onError: () => message.error("经营空间创建失败，请检查编码和品类")
+  });
+  const saveWorkspace = useMutation({
+    mutationFn: ({ id, values }: { id: string; values: UpdateBusinessWorkspaceRequest }) => updateTenantWorkspace(workspaceTenant!.tenantId, id, values),
+    onSuccess: async () => { await refreshWorkspaces(); closeWorkspaceEditor(); message.success("经营空间已更新"); },
+    onError: () => message.error("经营空间更新失败")
   });
 
   function closeEditor() {
@@ -92,17 +120,47 @@ export function TenantManagementPage() {
     setEditor({ type: "status", tenant });
   }
 
+  function openWorkspaceManager(tenant: TenantSummary) {
+    setWorkspaceTenant(tenant);
+  }
+
+  function closeWorkspaceEditor() {
+    setWorkspaceEditor(undefined);
+    workspaceForm.resetFields();
+  }
+
+  function openWorkspaceCreate() {
+    workspaceForm.setFieldsValue({ code: "", name: "", categoryCode: undefined, status: "active" });
+    setWorkspaceEditor({ type: "create" });
+  }
+
+  function openWorkspaceEdit(workspace: BusinessWorkspace) {
+    workspaceForm.setFieldsValue({ name: workspace.name, status: workspace.status });
+    setWorkspaceEditor({ type: "edit", workspace });
+  }
+
   async function submit(values: Record<string, unknown>) {
     if (editor?.type === "create") createTenant.mutate(values as unknown as TenantBootstrapRequest);
     if (editor?.type === "edit") saveTenant.mutate({ id: editor.tenant.tenantId, tenantName: String(values.tenantName ?? "") });
     if (editor?.type === "status") changeStatus.mutate({ id: editor.tenant.tenantId, payload: values as unknown as UpdateTenantStatusRequest });
   }
 
+  function submitWorkspace(values: CreateBusinessWorkspaceRequest & UpdateBusinessWorkspaceRequest) {
+    if (workspaceEditor?.type === "create") {
+      createWorkspace.mutate({ code: values.code, name: values.name ?? "", categoryCode: values.categoryCode });
+    }
+    if (workspaceEditor?.type === "edit") {
+      saveWorkspace.mutate({ id: workspaceEditor.workspace.id, values: { name: values.name, status: values.status } });
+    }
+  }
+
+  const categoryNames = useMemo(() => new Map((categories.data ?? []).map((category) => [category.code, category.name])), [categories.data]);
+
   return (
     <>
       <PageHeader
         title="SaaS 租户"
-        description="管理使用 Rental OS 的经营主体、经营品类和生命周期。"
+        description="管理使用 Rental OS 的租户主体、经营空间和生命周期；每个空间独立选择一个品类。"
         view={(
           <Segmented
             value={filter}
@@ -120,7 +178,7 @@ export function TenantManagementPage() {
       <QueryState loading={tenants.isLoading || categories.isLoading} error={tenants.error ?? categories.error}>
         <Card className="data-panel" title={<Space><SafetyCertificateOutlined />租户管理<Typography.Text type="secondary">{tenants.data?.filter((item) => item.tenantCode !== "platform").length ?? 0}</Typography.Text></Space>}>
           <div className="table-toolbar">
-            <Typography.Text type="secondary">经营品类创建后固定；租户不做物理删除，只进行冻结或停用。</Typography.Text>
+            <Typography.Text type="secondary">一个租户可有多个经营空间；已有空间的品类固定，新增品类请新建空间。租户不做物理删除。</Typography.Text>
           </div>
           <Table<TenantSummary>
             rowKey="tenantId"
@@ -128,14 +186,14 @@ export function TenantManagementPage() {
             scroll={{ x: 1120 }}
             columns={[
               { title: "租户", fixed: "left", width: 230, render: (_, row) => <><b>{row.tenantName}</b><br /><span className="muted">{row.tenantCode}</span></> },
-              { title: "经营品类", width: 140, render: (_, row) => row.categoryName ?? row.categoryCode ?? "未配置" },
+              { title: "经营空间", width: 220, render: (_, row) => <Space size={[4, 4]} wrap><b>{row.workspaceCount ?? 0} 个</b>{row.workspaceCategoryCodes?.map((code) => <Tag key={code}>{categoryNames.get(code) ?? code}</Tag>)}</Space> },
               { title: "状态", width: 100, dataIndex: "tenantStatus", render: (value: TenantStatus) => <Tag color={statusMeta[value].color}>{statusMeta[value].label}</Tag> },
               { title: "组织", width: 90, dataIndex: "organizationCount" },
               { title: "账号", width: 90, dataIndex: "userCount" },
               { title: "订单", width: 90, dataIndex: "orderCount" },
               { title: "状态原因", dataIndex: "statusReason", render: (value) => value || "—" },
               { title: "创建时间", width: 170, dataIndex: "createdAt", render: (value) => value ? new Date(value).toLocaleString() : "—" },
-              { title: "操作", fixed: "right", width: 180, render: (_, row) => <Space size={0}><Button type="link" icon={<EditOutlined />} onClick={() => openEdit(row)}>编辑</Button><Button type="link" icon={<PauseCircleOutlined />} onClick={() => openStatus(row)}>状态</Button></Space> }
+              { title: "操作", fixed: "right", width: 250, render: (_, row) => <Space size={0}><Button type="link" icon={<ApartmentOutlined />} onClick={() => openWorkspaceManager(row)}>经营空间</Button><Button type="link" icon={<EditOutlined />} onClick={() => openEdit(row)}>资料</Button><Button type="link" icon={<PauseCircleOutlined />} onClick={() => openStatus(row)}>状态</Button></Space> }
             ]}
           />
         </Card>
@@ -160,7 +218,7 @@ export function TenantManagementPage() {
               <Form.Item name="adminPhone" label="联系电话"><Input /></Form.Item>
               <Form.Item name="storeName" label="首个门店/履约点"><Input /></Form.Item>
               <Form.Item name="storeCode" label="门店编码"><Input /></Form.Item>
-              <Typography.Paragraph type="secondary">初始化将原子创建租户档案、经营品类、根组织、租户管理员、默认角色、字典和编号规则。模板项：{preview.data?.templates?.length ?? 0} 类。</Typography.Paragraph>
+              <Typography.Paragraph type="secondary">初始化将原子创建租户档案、首个默认经营空间、根组织、租户管理员、默认角色、字典和编号规则。后续可继续新增其他品类空间。模板项：{preview.data?.templates?.length ?? 0} 类。</Typography.Paragraph>
             </>
           )}
           {editor?.type === "edit" && <Form.Item name="tenantName" label="租户名称" rules={[{ required: true }]}><Input /></Form.Item>}
@@ -171,6 +229,48 @@ export function TenantManagementPage() {
               <Typography.Paragraph type="secondary">冻结或停用会立即撤销该租户所有登录会话；恢复为正常后账号可重新登录。</Typography.Paragraph>
             </>
           )}
+        </Form>
+      </Drawer>
+
+      <Drawer
+        title={workspaceTenant ? `${workspaceTenant.tenantName} · 经营空间` : "经营空间"}
+        width={820}
+        open={Boolean(workspaceTenant)}
+        destroyOnHidden
+        onClose={() => setWorkspaceTenant(undefined)}
+        extra={<Button type="primary" icon={<PlusOutlined />} onClick={openWorkspaceCreate}>新增经营空间</Button>}
+      >
+        <Typography.Paragraph type="secondary">每个空间只有一个经营品类。空间已有经营事实后不能原地换品类；需要新建空间并单独配置商品、资产、定价与成员。</Typography.Paragraph>
+        <QueryState loading={workspaces.isLoading} error={workspaces.error}>
+          <Table<BusinessWorkspace>
+            rowKey="id"
+            pagination={false}
+            dataSource={workspaces.data ?? []}
+            columns={[
+              { title: "空间", render: (_, row) => <><b>{row.name}</b><br /><span className="muted">{row.code}</span></> },
+              { title: "经营品类", width: 150, render: (_, row) => categoryNames.get(row.categoryCode) ?? row.categoryCode },
+              { title: "属性", width: 100, render: (_, row) => row.isDefault ? <Tag color="blue">默认空间</Tag> : "普通空间" },
+              { title: "状态", width: 100, render: (_, row) => <Tag color={row.status === "active" ? "success" : row.status === "frozen" ? "warning" : "default"}>{row.status === "active" ? "正常" : row.status === "frozen" ? "冻结" : "停用"}</Tag> },
+              { title: "操作", width: 90, render: (_, row) => <Button type="link" onClick={() => openWorkspaceEdit(row)}>编辑</Button> }
+            ]}
+          />
+        </QueryState>
+      </Drawer>
+
+      <Drawer
+        title={workspaceEditor?.type === "create" ? "新增经营空间" : "编辑经营空间"}
+        width={520}
+        open={Boolean(workspaceEditor)}
+        destroyOnHidden
+        onClose={closeWorkspaceEditor}
+        extra={<Button type="primary" loading={createWorkspace.isPending || saveWorkspace.isPending} onClick={() => workspaceForm.submit()}>保存</Button>}
+      >
+        <Form form={workspaceForm} layout="vertical" onFinish={submitWorkspace}>
+          {workspaceEditor?.type === "create" && <Form.Item name="code" label="空间编码" extra="创建后不可修改；同一租户内唯一。" rules={[{ required: true }, { pattern: /^[a-z][a-z0-9_-]{1,31}$/, message: "以小写字母开头，仅支持小写字母、数字、_ 和 -" }]}><Input /></Form.Item>}
+          <Form.Item name="name" label="空间名称" rules={[{ required: true }]}><Input /></Form.Item>
+          {workspaceEditor?.type === "create" && <Form.Item name="categoryCode" label="经营品类" extra="创建后固定，不能通过编辑资料直接切换。" rules={[{ required: true }]}><Select options={(categories.data ?? []).map((item) => ({ value: item.code, label: `${item.name} · ${item.description}` }))} /></Form.Item>}
+          {workspaceEditor?.type === "edit" && <Form.Item label="经营品类"><Select value={workspaceEditor.workspace.categoryCode as RentalCategoryCode} disabled options={(categories.data ?? []).map((item) => ({ value: item.code, label: item.name }))} /></Form.Item>}
+          {workspaceEditor?.type === "edit" && <Form.Item name="status" label="空间状态" rules={[{ required: true }]}><Select options={[{ value: "active", label: "正常" }, { value: "frozen", label: "冻结" }, { value: "disabled", label: "停用" }]} /></Form.Item>}
         </Form>
       </Drawer>
     </>

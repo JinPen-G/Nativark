@@ -47,7 +47,8 @@ import {
   type AssetStatusChange,
   type InventoryLockTarget,
   type RentalFactTx,
-  type RentalCoreFactStore
+  type RentalCoreFactStore,
+  type RentalUniqueAttributeClaim
 } from "./rental-core-fact.repository";
 import { assertRentalCategoryExtensions } from "./rental-extension-registry";
 import { buildRentalCategorySamples } from "./rental-category-samples";
@@ -183,7 +184,13 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       this.factStore.listStockBalances(tenantId)
     ]);
     if (!assets.length && !stocks.length) {
-      for (const asset of state.sampleAssets) await this.factStore.upsertAsset(asset);
+      const fields = this.category(state.profile.categoryCode).businessModel.assetFields;
+      for (const asset of state.sampleAssets) {
+        await this.factStore.upsertAsset(
+          asset,
+          this.uniqueAttributeClaims(fields, "asset", asset.attributes, { serialNo: asset.serialNo })
+        );
+      }
       for (const stock of state.sampleStockBalances) await this.factStore.upsertStockBalance(stock);
     }
     state.sampleFactsEnsured = true;
@@ -629,7 +636,10 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       locationId: location.id, locationName: location.name, status: input.status ?? existing?.status ?? RentalAssetStatus.Available,
       attributes: assetAttributes, createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp
     };
-    await this.factStore.upsertAsset(result);
+    await this.factStore.upsertAsset(
+      result,
+      this.uniqueAttributeClaims(definition.businessModel.assetFields, "asset", assetAttributes, attributeAliases)
+    );
     return result;
   }
 
@@ -1092,6 +1102,22 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   private normalizedUniqueValue(value: unknown): string | undefined {
     if (value === undefined || value === null || value === "") return undefined;
     return typeof value === "string" ? value.normalize("NFKC").trim().toUpperCase() : JSON.stringify(value);
+  }
+
+  private uniqueAttributeClaims(
+    fields: RentalAttributeDefinition[],
+    scope: "item_group" | "asset",
+    attributes: Record<string, unknown>,
+    aliases: Record<string, unknown> = {}
+  ): RentalUniqueAttributeClaim[] {
+    return fields
+      .filter((field) => field.scope === scope && field.unique)
+      .map((field) => ({
+        fieldCode: field.code,
+        label: field.label,
+        normalizedValue: this.normalizedUniqueValue(aliases[field.code] ?? attributes[field.code])
+      }))
+      .filter((claim): claim is RentalUniqueAttributeClaim => Boolean(claim.normalizedValue));
   }
   /**
    * 可用量计算所需的库存事实。一次取齐后计算全程同步——套装展开是递归的，

@@ -32,7 +32,8 @@ function RouteAccess({ route, children }: { route: AppRouteDefinition; children:
   const hasPermission = useAuthStore((state) => state.hasPermission);
   const hasCapability = useAuthStore((state) => state.hasCapability);
   const categoryCode = useAuthStore((state) => state.tenant?.categoryCode);
-  if (!canAccessRoute(route, hasPermission, hasCapability, categoryCode)) {
+  const isSaasAdmin = useAuthStore((state) => Boolean(state.user?.isSaasAdmin));
+  if (!canAccessRoute(route, hasPermission, hasCapability, categoryCode, isSaasAdmin)) {
     return <Result status="403" title="无权访问" subTitle="当前账号权限或租户经营品类能力不支持此功能；前端菜单隐藏不能替代后端数据权限。" />;
   }
   return <>{children}</>;

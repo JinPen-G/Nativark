@@ -325,6 +325,7 @@ model Tenant {
   rentalBusinessStateSnapshot RentalBusinessStateSnapshot[]
   businessWorkspaces        BusinessWorkspace[]
   workspaceMembers          WorkspaceMember[]
+  rentalAttributeUniqueValues RentalAttributeUniqueValue[]
   createdAt                 DateTime                    @default(now())
   updatedAt                 DateTime                    @updatedAt
 }
@@ -385,6 +386,7 @@ model BusinessWorkspace {
   rentalReferrals             RentalReferral[]
   rentalNotificationLogs      RentalNotificationLog[]
   rentalOrderIdempotencyRecords RentalOrderIdempotencyRecord[]
+  attributeUniqueValues RentalAttributeUniqueValue[]
   createdAt    DateTime            @default(now())
   updatedAt    DateTime            @updatedAt
 
@@ -2334,6 +2336,31 @@ model RentalAsset {
   @@unique([workspaceId, serialNo], map: "rental_assets_ws_serial_no_key")
   @@index([tenantId, itemGroupId, locationId, status])
   @@map("rental_assets")
+}
+
+/// CAT-02：动态字段唯一值声明。
+///
+/// JSON 属性无法使用固定列唯一索引；写资产时在同一事务内同步本表，依靠
+/// `(workspaceId, entityType, fieldCode, normalizedHash)` 唯一键阻止并发双写。
+/// normalizedValue 用于审计与碰撞排查，唯一键使用 SHA-256 避免超出 InnoDB 索引长度。
+model RentalAttributeUniqueValue {
+  id              String @id
+  tenantId        String
+  tenant          Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId     String
+  workspace       BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  entityType      String @db.VarChar(32)
+  fieldCode       String @db.VarChar(64)
+  normalizedHash  String @db.Char(64)
+  normalizedValue String @db.VarChar(512)
+  entityId        String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([workspaceId, entityType, fieldCode, normalizedHash], map: "rental_attr_unique_value_key")
+  @@unique([workspaceId, entityType, fieldCode, entityId], map: "rental_attr_unique_entity_key")
+  @@index([tenantId, workspaceId, entityId], map: "rental_attribute_unique_values_tenantId_workspaceId_entityId_idx")
+  @@map("rental_attribute_unique_values")
 }
 
 model RentalStockBalance {

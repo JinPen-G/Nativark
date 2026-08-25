@@ -45,6 +45,30 @@ export class PlatformController {
     return this.platformService.getTenant(id, req.user);
   }
 
+  @Get("tenants/:id/workspaces")
+  tenantWorkspaces(@Param("id") id: string, @Req() req: RequestWithUser) {
+    return this.platformService.listTenantBusinessWorkspaces(id, req.user);
+  }
+
+  @Post("tenants/:id/workspaces")
+  createTenantWorkspace(
+    @Param("id") id: string,
+    @Body() body: CreateBusinessWorkspaceDto,
+    @Req() req: RequestWithUser
+  ) {
+    return this.platformService.createTenantBusinessWorkspace(id, body, req.user);
+  }
+
+  @Put("tenants/:id/workspaces/:workspaceId")
+  updateTenantWorkspace(
+    @Param("id") id: string,
+    @Param("workspaceId") workspaceId: string,
+    @Body() body: UpdateBusinessWorkspaceDto,
+    @Req() req: RequestWithUser
+  ) {
+    return this.platformService.updateTenantBusinessWorkspace(id, workspaceId, body, req.user);
+  }
+
   @Put("tenants/:id")
   updateTenant(@Param("id") id: string, @Body() body: UpdateTenantDto, @Req() req: RequestWithUser) {
     return this.platformService.updateTenant(id, body, req.user);

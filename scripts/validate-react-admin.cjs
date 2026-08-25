@@ -108,6 +108,9 @@ if (sessionCacheClearCount < 4) {
 ].forEach((label) => requireText(navigation, label, "navigation registry coverage"));
 requireText(navigation, "categories?: RentalCategoryCode[]", "category-specific route metadata");
 requireText(navigation, "route.categories.includes(categoryCode)", "category-specific route guard");
+requireText(navigation, 'audience: "tenant" | "saas"', "SaaS and tenant route audience metadata");
+requireText(navigation, '(route.audience === "saas") !== isSaasAdmin', "SaaS and tenant route audience guard");
+requireText(shell, "Boolean(user?.isSaasAdmin)", "navigation filters by authenticated audience");
 for (const legacyLabel of ["车辆合同与单据", "车辆财务结算", "车辆履约调度", "车辆调拨与 TBox", "车辆生命周期", "车辆运营控制台", "车辆兼容报表"]) {
   forbidText(navigation, legacyLabel, "legacy store-rental route must not be registered");
 }
@@ -119,6 +122,11 @@ requireText(shell, "APP_NAVIGATION", "shell consumes unified navigation registry
 requireText(router, "APP_ROUTES", "router consumes unified route registry");
 requireText(router, "workspaceScopeKey", "workspace switch remount boundary");
 requireText(router, '<AppShell key={workspaceScopeKey}>', "workspace switch remounts active data pages");
+requireText(router, "categoryCode, isSaasAdmin", "direct route access enforces authenticated audience");
+requireText(tenantManagementPage, "listTenantWorkspaces", "SaaS target tenant workspace list UI");
+requireText(tenantManagementPage, "createTenantWorkspace", "SaaS target tenant workspace create UI");
+requireText(tenantManagementPage, "updateTenantWorkspace", "SaaS target tenant workspace update UI");
+forbidText(tenantManagementPage, "经营品类创建后固定；租户", "retired tenant-level single-category copy");
 
 [
   [appRoot, 'variant="outlined"', "Ant Design v6 outlined control archetype"],
