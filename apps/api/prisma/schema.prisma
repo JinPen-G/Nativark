@@ -2286,6 +2286,7 @@ model RentalItemGroup {
   stockBalances    RentalStockBalance[]
   orderLines       RentalOrderLine[]
   reservations     RentalReservation[]
+  allocations      RentalAllocation[]
   bundleComponents RentalBundleComponent[]  @relation("BundleParent")
   usedByBundles    RentalBundleComponent[]  @relation("BundleComponent")
   createdAt        DateTime                 @default(now())
@@ -2486,6 +2487,7 @@ model RentalReservation {
   locationId  String
   location    RentalFulfillmentLocation @relation(fields: [locationId], references: [id])
   quantity    Int
+  releasedQuantity Int @default(0)
   startAt     DateTime
   endAt       DateTime
   status      RentalReservationState    @default(SOFT)
@@ -2504,6 +2506,8 @@ model RentalAllocation {
   order       RentalOrder     @relation(fields: [orderId], references: [id], onDelete: Cascade)
   orderLineId String
   orderLine   RentalOrderLine @relation(fields: [orderLineId], references: [id], onDelete: Cascade)
+  itemGroupId String?
+  itemGroup   RentalItemGroup? @relation(fields: [itemGroupId], references: [id])
   assetId     String?
   asset       RentalAsset?    @relation(fields: [assetId], references: [id])
   /// 资产编号存为分配时快照，资产改号不影响历史分配记录。
@@ -2514,6 +2518,7 @@ model RentalAllocation {
   updatedAt   DateTime        @updatedAt
 
   @@index([orderId, orderLineId])
+  @@index([itemGroupId, status])
   @@index([assetId, status])
   @@map("rental_allocations")
 }

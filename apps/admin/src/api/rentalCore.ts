@@ -1,6 +1,7 @@
 import type {
   CreateRentalInspectionRequest,
   CreateRentalOrderRequest,
+  PartialReturnRentalOrderRequest,
   RentalAsset,
   RentalAvailabilityRequest,
   RentalAvailabilityResult,
@@ -43,7 +44,8 @@ import type {
   SaveTenantRentalBusinessSettingsRequest,
   SaveTenantRentalProfileRequest,
   TenantRentalBusinessSettings,
-  TenantRentalProfile
+  TenantRentalProfile,
+  SubstituteRentalBundleComponentRequest
 } from "@store-rental/shared";
 import { request } from "./http";
 
@@ -96,6 +98,8 @@ export const rentalCoreApi = {
   createOrder: (data: CreateRentalOrderRequest) => request<RentalOrder>("/rental/v1/orders", { method: "post", data }),
   confirmOrder: (id: string) => request<RentalOrder>(`/rental/v1/orders/${id}/confirm`, { method: "post" }),
   allocateOrder: (id: string) => request<RentalOrder>(`/rental/v1/orders/${id}/allocate`, { method: "post" }),
+  substituteBundleComponent: (id: string, data: SubstituteRentalBundleComponentRequest) => request<RentalOrder>(`/rental/v1/orders/${id}/substitute-bundle-component`, { method: "post", data }),
+  partialReturnOrder: (id: string, data: PartialReturnRentalOrderRequest) => request<RentalOrder>(`/rental/v1/orders/${id}/partial-return`, { method: "post", data }),
   cancelOrder: (id: string, data: { reason: string; weatherException?: boolean }) => request<RentalOrder>(`/rental/v1/orders/${id}/cancel`, { method: "post", data }),
   handoverOrder: (id: string, stage: "pickup" | "return") => request<RentalOrder>(`/rental/v1/orders/${id}/handover/${stage}`, { method: "post" }),
   inspectionTemplates: (stage?: "pickup" | "return") => request<RentalInspectionTemplate[]>("/rental/v1/inspection-templates", { params: { stage } }),

@@ -7,6 +7,7 @@ import {
   type CreateRentalInspectionRequest,
   type CreateRentalOrderRequest,
   type GrantRentalRewardRequest,
+  type PartialReturnRentalOrderRequest,
   type RentalAvailabilityRequest,
   type RentalCapability,
   type RentalFulfillmentMode,
@@ -16,7 +17,8 @@ import {
   type SaveRentalCouponTemplateRequest,
   type SaveRentalStockBalanceRequest,
   type SaveTenantRentalProfileRequest,
-  type SendRentalNotificationRequest
+  type SendRentalNotificationRequest,
+  type SubstituteRentalBundleComponentRequest
 } from "@store-rental/shared";
 import { Type } from "class-transformer";
 import {
@@ -94,6 +96,16 @@ export class CreateRentalOrderLineInputDto {
   note?: string;
 }
 
+export class PartialReturnAllocationInputDto {
+  @IsString()
+  @IsNotEmpty()
+  allocationId!: string;
+
+  @IsNumber()
+  @Min(1)
+  quantity!: number;
+}
+
 export class RentalQuoteLineInputDto {
   @IsString()
   @IsNotEmpty()
@@ -161,6 +173,28 @@ export class RentalAvailabilityDto implements RentalAvailabilityRequest {
   @ValidateNested({ each: true })
   @Type(() => RentalAvailabilityLineInputDto)
   lines!: RentalAvailabilityLineInputDto[];
+}
+
+export class SubstituteRentalBundleComponentDto implements SubstituteRentalBundleComponentRequest {
+  @IsString()
+  @IsNotEmpty()
+  orderLineId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  fromItemGroupId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  toItemGroupId!: string;
+}
+
+export class PartialReturnRentalOrderDto implements PartialReturnRentalOrderRequest {
+  @IsArray()
+  @ArrayNotEmpty()
+  @ValidateNested({ each: true })
+  @Type(() => PartialReturnAllocationInputDto)
+  items!: PartialReturnAllocationInputDto[];
 }
 
 export class CreateRentalOrderDto implements CreateRentalOrderRequest {

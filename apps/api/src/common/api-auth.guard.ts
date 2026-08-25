@@ -178,7 +178,7 @@ function requiredPermissions(method: string, path: string) {
     return method === "GET" ? ["store-rental:order:view"] : ["store-rental:order:operate", "store-rental:order:pickup", "store-rental:order:return"];
   }
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/cancel$/)) return ["store-rental:order:cancel", "store-rental:order:operate"];
-  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/(confirm|allocate|handover\/[^/]+)$/)) return ["store-rental:order:operate"];
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/(confirm|allocate|substitute-bundle-component|partial-return|handover\/[^/]+)$/)) return ["store-rental:order:operate"];
   if (path.startsWith("/rental/v1")) {
     return method === "GET"
       ? ["store-rental:order:view", "store-rental:vehicle:view"]

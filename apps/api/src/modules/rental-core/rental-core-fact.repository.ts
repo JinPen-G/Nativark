@@ -250,6 +250,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
           itemGroupId: reservation.itemGroupId,
           locationId: reservation.locationId,
           quantity: reservation.quantity,
+          releasedQuantity: reservation.releasedQuantity,
           // 预占自带期间，使可用量查询不必回连订单表。
           startAt: new Date(order.startAt),
           endAt: new Date(order.endAt),
@@ -272,6 +273,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
             id: allocation.id,
             orderId: order.id,
             orderLineId: allocation.orderLineId,
+            itemGroupId: allocation.itemGroupId ?? null,
             assetId: allocation.assetId ?? null,
             assetNo: allocation.assetNo ?? null,
             quantity: allocation.quantity,
@@ -341,12 +343,12 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
         status: { in: ACTIVE_RESERVATION_STATES },
         OR: [{ expiresAt: null }, { expiresAt: { gte: now } }]
       },
-      select: { itemGroupId: true, locationId: true, quantity: true, startAt: true, endAt: true }
+      select: { itemGroupId: true, locationId: true, quantity: true, releasedQuantity: true, startAt: true, endAt: true }
     });
     return rows.map((row) => ({
       itemGroupId: row.itemGroupId,
       locationId: row.locationId,
-      quantity: row.quantity,
+      quantity: Math.max(0, row.quantity - row.releasedQuantity),
       startAt: iso(row.startAt),
       endAt: iso(row.endAt)
     }));
@@ -432,38 +434,48 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       status: upper<$Enums.RentalAssetState>(asset.status),
       attributes: asset.attributes as Prisma.InputJsonValue
     };
-    await this.prisma.$transaction(async (tx) => {
-      const workspaceId = await resolveScopeWorkspaceId(tx, asset.tenantId);
-      await tx.rentalAttributeUniqueValue.deleteMany({
-        where: { tenantId: asset.tenantId, workspaceId, entityType: "asset", entityId: asset.id }
-      });
-      for (const claim of uniqueAttributes) {
-        try {
-          await tx.rentalAttributeUniqueValue.create({
-            data: {
-              id: `attruniq_${createHash("sha256").update(`${workspaceId}|asset|${claim.fieldCode}|${claim.normalizedValue}`).digest("hex")}`,
-              tenantId: asset.tenantId,
-              workspaceId,
-              entityType: "asset",
-              fieldCode: claim.fieldCode,
-              normalizedHash: createHash("sha256").update(claim.normalizedValue).digest("hex"),
-              normalizedValue: claim.normalizedValue,
-              entityId: asset.id
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        const workspaceId = await resolveScopeWorkspaceId(tx, asset.tenantId);
+        await tx.rentalAttributeUniqueValue.deleteMany({
+          where: { tenantId: asset.tenantId, workspaceId, entityType: "asset", entityId: asset.id }
+        });
+        for (const claim of uniqueAttributes) {
+          try {
+            await tx.rentalAttributeUniqueValue.create({
+              data: {
+                id: `attruniq_${createHash("sha256").update(`${workspaceId}|asset|${claim.fieldCode}|${claim.normalizedValue}`).digest("hex")}`,
+                tenantId: asset.tenantId,
+                workspaceId,
+                entityType: "asset",
+                fieldCode: claim.fieldCode,
+                normalizedHash: createHash("sha256").update(claim.normalizedValue).digest("hex"),
+                normalizedValue: claim.normalizedValue,
+                entityId: asset.id
+              }
+            });
+          } catch (error) {
+            if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+              throw new ConflictException(`${claim.label}已存在`);
             }
-          });
-        } catch (error) {
-          if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-            throw new ConflictException(`${claim.label}已存在`);
+            throw error;
           }
-          throw error;
         }
-      }
-      await tx.rentalAsset.upsert({
-        where: { id: asset.id },
-        create: { workspaceId, id: asset.id, ...data, createdAt: new Date(asset.createdAt) },
-        update: data
+        await tx.rentalAsset.upsert({
+          where: { id: asset.id },
+          create: { workspaceId, id: asset.id, ...data, createdAt: new Date(asset.createdAt) },
+          update: data
+        });
       });
-    });
+    } catch (error) {
+      // MySQL 在多个请求同时争抢同一唯一键时可能以死锁/写冲突结束事务，
+      // Prisma 映射为 P2034。唯一约束已经保证不会双写，这里只把技术性 500
+      // 转成稳定的业务冲突；不自动重试写请求，避免调用方误判副作用次数。
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") {
+        throw new ConflictException(`${uniqueAttributes[0]?.label ?? "唯一字段"}已存在`);
+      }
+      throw error;
+    }
   }
 
   /* ---------- 数量库存 ---------- */
@@ -584,6 +596,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       itemGroupId: reservation.itemGroupId,
       locationId: reservation.locationId,
       quantity: reservation.quantity,
+      releasedQuantity: reservation.releasedQuantity,
       status: lower<RentalReservationStatus>(reservation.status),
       expiresAt: optionalIso(reservation.expiresAt),
       createdAt: iso(reservation.createdAt)
@@ -592,6 +605,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       id: allocation.id,
       orderId: allocation.orderId,
       orderLineId: allocation.orderLineId,
+      itemGroupId: allocation.itemGroupId ?? undefined,
       assetId: allocation.assetId ?? undefined,
       assetNo: allocation.assetNo ?? undefined,
       quantity: allocation.quantity,

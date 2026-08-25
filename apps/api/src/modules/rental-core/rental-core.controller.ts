@@ -1,5 +1,6 @@
 import { BadRequestException, Body, Controller, Get, Param, Post, Put, Query, Req } from "@nestjs/common";
 import { RentalCoreOrderStatus } from "@store-rental/shared";
+import { createHash } from "node:crypto";
 import type {
   CreateRentalInspectionRequest,
   CreateRentalOrderRequest,
@@ -24,11 +25,13 @@ import {
   CancelRentalOrderDto,
   CreateRentalInspectionDto,
   CreateRentalOrderDto,
+  PartialReturnRentalOrderDto,
   RentalAvailabilityDto,
   SaveRentalAssetDto,
   SaveRentalCouponTemplateDto,
   SaveRentalStockBalanceDto,
   SaveTenantRentalProfileDto,
+  SubstituteRentalBundleComponentDto,
 } from "./rental-order-request.dto";
 import {
   SaveTenantRentalBusinessSettingsDto,
@@ -167,6 +170,55 @@ export class RentalCoreController {
       replay: async () => {
         const current = await this.service.getOrder(tenantId, id);
         return current.status === RentalCoreOrderStatus.ReadyForPickup ? current : undefined;
+      }
+    });
+    return this.committed(tenantId, order);
+  }
+  @Post("orders/:id/substitute-bundle-component") async substituteBundleComponent(
+    @Req() req: AuthenticatedRequest,
+    @Param("id") id: string,
+    @Body() body: SubstituteRentalBundleComponentDto
+  ) {
+    const tenantId = req.user.tenantId;
+    const fallbackHash = createHash("sha256")
+      .update([body.orderLineId, body.fromItemGroupId, body.toItemGroupId].join(":"))
+      .digest("hex")
+      .slice(0, 32);
+    const order = await this.idempotent.execute({
+      tenantId,
+      action: "order.bundle-component.substitute",
+      key: idempotencyKeyOf(req),
+      fallbackKey: `order.bundle-substitute:${id}:${fallbackHash}`,
+      request: { orderId: id, ...body },
+      orderId: id,
+      run: (tx) => this.service.substituteBundleComponent(tenantId, id, body, tx),
+      replay: async () => {
+        const current = await this.service.getOrder(tenantId, id);
+        return current.status === RentalCoreOrderStatus.Reserved && current.reservations.some((row) =>
+          row.orderLineId === body.orderLineId && row.itemGroupId === body.toItemGroupId
+        ) ? current : undefined;
+      }
+    });
+    return this.committed(tenantId, order);
+  }
+  @Post("orders/:id/partial-return") async partialReturn(
+    @Req() req: AuthenticatedRequest,
+    @Param("id") id: string,
+    @Body() body: PartialReturnRentalOrderDto
+  ) {
+    const tenantId = req.user.tenantId;
+    const fallbackHash = createHash("sha256").update(JSON.stringify([...body.items].sort((left, right) => left.allocationId.localeCompare(right.allocationId)))).digest("hex").slice(0, 32);
+    const order = await this.idempotent.execute({
+      tenantId,
+      action: "order.partial-return",
+      key: idempotencyKeyOf(req),
+      fallbackKey: `order.partial-return:${id}:${fallbackHash}`,
+      request: { orderId: id, items: body.items },
+      orderId: id,
+      run: (tx) => this.service.partialReturnOrder(tenantId, id, body, tx),
+      replay: async () => {
+        const current = await this.service.getOrder(tenantId, id);
+        return current.status === RentalCoreOrderStatus.Renting ? current : undefined;
       }
     });
     return this.committed(tenantId, order);

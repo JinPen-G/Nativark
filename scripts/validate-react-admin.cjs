@@ -32,6 +32,8 @@ const tenantManagementPage = read("apps/admin/src/features/platform/TenantManage
 const platformOperationsPage = read("apps/admin/src/features/platform/PlatformOperationsPage.tsx");
 const assetLifecyclePage = read("apps/admin/src/features/catalog/AssetLifecyclePage.tsx");
 const rentalCorePage = read("apps/admin/src/features/rental-core/RentalCorePage.tsx");
+const rentalOrderDetailPage = read("apps/admin/src/features/rental-core/RentalOrderDetailPage.tsx");
+const catalogPage = read("apps/admin/src/features/catalog/CatalogPage.tsx");
 const rentalCoreApi = read("apps/admin/src/api/rentalCore.ts");
 const appRoot = read("apps/admin/src/app/App.tsx");
 const queryClientSource = read("apps/admin/src/app/queryClient.ts");
@@ -52,11 +54,17 @@ const themeSource = read("apps/admin/src/app/theme.tsx");
 
 [
   "categories", "profile", "businessSettings", "saveBusinessSettings", "couponTemplates", "saveCouponTemplate", "operators", "saveOperator", "locations", "saveLocation", "itemGroups", "assets", "stockBalances", "availability", "orders",
-  "createOrder", "confirmOrder", "allocateOrder", "cancelOrder", "inspectionTemplates", "createInspection", "pricingPlans", "discountPlans", "valueAddedServices", "calendar", "ruleVersions", "rewards", "notificationTemplates", "createQuote"
+  "createOrder", "confirmOrder", "allocateOrder", "substituteBundleComponent", "partialReturnOrder", "cancelOrder", "inspectionTemplates", "createInspection", "pricingPlans", "discountPlans", "valueAddedServices", "calendar", "ruleVersions", "rewards", "notificationTemplates", "createQuote"
 ].forEach((method) => requireText(rentalCoreApi, `${method}:`, "Rental Core API coverage"));
 [
   "Rental Core v0.1", "序列化资产", "数量库存", "套装", "确认预占", "执行配货"
 ].forEach((label) => requireText(rentalCorePage, label, "Rental Core UI coverage"));
+[
+  "替换套装组成", "部分归还", "allocation.itemGroupId", "allocation.quantity > 1"
+].forEach((label) => requireText(rentalOrderDetailPage, label, "inventory fulfillment UI coverage"));
+[
+  "substitutionGroup", "默认组成", "替代候选"
+].forEach((label) => requireText(catalogPage, label, "bundle component UI coverage"));
 
 [
   "createPriceSchedule", "previewDispatchOptimization", "applyDispatchOptimization", "manualReassignFromDispatch",

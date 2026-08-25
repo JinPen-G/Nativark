@@ -4936,6 +4936,7 @@ export interface RentalReservation {
   itemGroupId: string;
   locationId: string;
   quantity: number;
+  releasedQuantity: number;
   status: RentalReservationStatus;
   expiresAt?: string;
   createdAt: string;
@@ -4945,10 +4946,25 @@ export interface RentalAllocation {
   id: string;
   orderId: string;
   orderLineId: string;
+  /** 套装拆分后的实际组成商品；历史分配可能为空。 */
+  itemGroupId?: string;
   assetId?: string;
   assetNo?: string;
   quantity: number;
   status: "allocated" | "picked_up" | "returned" | "released";
+}
+
+export interface SubstituteRentalBundleComponentRequest {
+  orderLineId: string;
+  fromItemGroupId: string;
+  toItemGroupId: string;
+}
+
+export interface PartialReturnRentalOrderRequest {
+  items: Array<{
+    allocationId: string;
+    quantity: number;
+  }>;
 }
 
 export interface RentalOrder {

@@ -2253,6 +2253,14 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: "Allocate Rental Core inventory", permissions: ["store-rental:order:operate", "store-rental:vehicle:manage"], responseSchema: "GenericObject"
   },
   {
+    method: "post", path: "/api/rental/v1/orders/{id}/substitute-bundle-component", tag: "RentalCore", operationId: "substituteRentalBundleComponent",
+    summary: "Substitute a reserved bundle component within its configured group", permissions: ["store-rental:order:operate"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+  },
+  {
+    method: "post", path: "/api/rental/v1/orders/{id}/partial-return", tag: "RentalCore", operationId: "partialReturnRentalCoreOrder",
+    summary: "Return selected allocated assets or quantities while keeping the order renting", permissions: ["store-rental:order:operate"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+  },
+  {
     method: "post", path: "/api/rental/v1/orders/{id}/cancel", tag: "RentalCore", operationId: "cancelRentalCoreOrder",
     summary: "Cancel Rental Core order", permissions: ["store-rental:order:operate", "store-rental:vehicle:manage"], responseSchema: "GenericObject"
   },

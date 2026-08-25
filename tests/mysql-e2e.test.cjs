@@ -606,6 +606,132 @@ async function main() {
   assert.equal((await assetStatus()).find((row) => row.id === trackedAssetId).status, "available", "归还后资产应释放为 available");
   ok(`全链路完成 ${returned.order.orderNo}，套装+损坏费+资产状态流转正确`);
 
+  console.log("== 9.1 CAT-03 套装替代、组成拆分与部分归还 ==");
+  const cat03Groups = [];
+  for (const [code, name] of [["E2E-CAT03-A", "默认电池"], ["E2E-CAT03-B", "替代电池"], ["E2E-CAT03-C", "连接线"]]) {
+    const created = await request(
+      "POST",
+      "/api/rental/v1/item-groups",
+      { code, name, inventoryMode: "quantity", unit: "件", attributes: { brand: "E2E", model: code } },
+      demo.accessToken
+    );
+    assert.equal(created.status, 201, `CAT-03 数量商品创建失败: ${JSON.stringify(created.body).slice(0, 200)}`);
+    cat03Groups.push(created.body.data);
+    const stock = await request("PUT", "/api/rental/v1/stock-balances", { itemGroupId: created.body.data.id, locationId: location.id, onHandQuantity: 6 }, demo.accessToken);
+    assert.equal(stock.status, 200, "CAT-03 数量库存初始化失败");
+  }
+  const [defaultBattery, alternateBattery, cable] = cat03Groups;
+  const invalidSubstitutionGroup = await request(
+    "POST",
+    "/api/rental/v1/item-groups",
+    { code: "E2E-CAT03-BAD", name: "错误替代套装", inventoryMode: "bundle", unit: "套", bundleComponents: [{ itemGroupId: defaultBattery.id, quantity: 1, substitutionGroup: "BATTERY" }] },
+    demo.accessToken
+  );
+  assert.equal(invalidSubstitutionGroup.status, 400, "只有默认件、没有候选的替代组必须被拒绝");
+  const cat03BundleResponse = await request(
+    "POST",
+    "/api/rental/v1/item-groups",
+    {
+      code: "E2E-CAT03-KIT", name: "可替代拍摄附件套装", inventoryMode: "bundle", unit: "套",
+      bundleComponents: [
+        { itemGroupId: defaultBattery.id, quantity: 1, optional: false, substitutionGroup: "BATTERY" },
+        { itemGroupId: alternateBattery.id, quantity: 1, optional: true, substitutionGroup: "BATTERY" },
+        { itemGroupId: cable.id, quantity: 1, optional: false }
+      ]
+    },
+    demo.accessToken
+  );
+  assert.equal(cat03BundleResponse.status, 201, `CAT-03 套装创建失败: ${JSON.stringify(cat03BundleResponse.body).slice(0, 200)}`);
+  const cat03Bundle = cat03BundleResponse.body.data;
+  const cat03Pricing = await request(
+    "POST",
+    "/api/rental/v1/pricing-plans",
+    { effectiveFrom: new Date(Date.now() - 86400000).toISOString(), code: "E2E-CAT03-PRICE", name: "CAT-03 套装定价", changeReason: "CAT-03 E2E", status: "enabled", rates: [{ itemGroupId: cat03Bundle.id, unit: "day_24h", baseAmount: 80, weekendMultiplier: 1, holidayMultiplier: 1, depositAmount: 200, minimumUnits: 1 }] },
+    demo.accessToken
+  );
+  assert.equal(cat03Pricing.status, 201, `CAT-03 定价创建失败: ${JSON.stringify(cat03Pricing.body).slice(0, 200)}`);
+  const cat03Start = new Date(Date.now() + 300 * 86400000).toISOString();
+  const cat03End = new Date(Date.now() + 302 * 86400000).toISOString();
+  const cat03Lines = [{ itemGroupId: cat03Bundle.id, quantity: 2 }];
+  const cat03Quote = await request(
+    "POST", "/api/rental/v1/quotes",
+    { customerType: "personal", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: cat03Start, endAt: cat03End, lines: cat03Lines, pricingPlanId: cat03Pricing.body.data.id },
+    demo.accessToken
+  );
+  assert.equal(cat03Quote.status, 201, "CAT-03 报价失败");
+  const cat03Order = await request(
+    "POST", "/api/rental/v1/orders",
+    { quoteId: cat03Quote.body.data.id, customerType: "personal", customerName: "CAT-03 客户", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: cat03Start, endAt: cat03End, lines: cat03Lines },
+    demo.accessToken
+  );
+  assert.equal(cat03Order.status, 201, "CAT-03 下单失败");
+  const cat03OrderId = cat03Order.body.data.id;
+  const cat03OrderLineId = cat03Order.body.data.lines[0].id;
+  const cat03Confirmed = await request("POST", `/api/rental/v1/orders/${cat03OrderId}/confirm`, {}, demo.accessToken);
+  assert.equal(cat03Confirmed.status, 201, "CAT-03 确认订单失败");
+  assert.ok(cat03Confirmed.body.data.reservations.some((row) => row.itemGroupId === defaultBattery.id && row.quantity === 2), "套装应先预占替代组默认组成");
+  const invalidSubstitution = await request(
+    "POST", `/api/rental/v1/orders/${cat03OrderId}/substitute-bundle-component`,
+    { orderLineId: cat03OrderLineId, fromItemGroupId: defaultBattery.id, toItemGroupId: cable.id },
+    demo.accessToken
+  );
+  assert.equal(invalidSubstitution.status, 400, "跨替代组替换必须被拒绝");
+  const substituted = await request(
+    "POST", `/api/rental/v1/orders/${cat03OrderId}/substitute-bundle-component`,
+    { orderLineId: cat03OrderLineId, fromItemGroupId: defaultBattery.id, toItemGroupId: alternateBattery.id },
+    demo.accessToken
+  );
+  assert.equal(substituted.status, 201, `套装组成替换失败: ${JSON.stringify(substituted.body).slice(0, 200)}`);
+  assert.ok(substituted.body.data.reservations.some((row) => row.itemGroupId === alternateBattery.id && row.quantity === 2), "替换后必须预占候选商品");
+  assert.ok(!substituted.body.data.reservations.some((row) => row.itemGroupId === defaultBattery.id), "替换后不得继续占用默认商品");
+  const cat03Allocated = await request("POST", `/api/rental/v1/orders/${cat03OrderId}/allocate`, {}, demo.accessToken);
+  assert.equal(cat03Allocated.status, 201, "CAT-03 配货失败");
+  assert.deepEqual(
+    [...new Set(cat03Allocated.body.data.allocations.map((allocation) => allocation.itemGroupId))].sort(),
+    [alternateBattery.id, cable.id].sort(),
+    "套装拆分后的分配必须保存实际组成商品"
+  );
+  const cat03Pickup = await request(
+    "POST", `/api/rental/v1/orders/${cat03OrderId}/inspections`,
+    { templateId: pickupTemplate.id, results: { appearance_ok: true, function_ok: true, shutter_count: 100 } },
+    demo.accessToken
+  );
+  assert.equal(cat03Pickup.status, 201, "CAT-03 领取检查失败");
+  const alternateAllocation = cat03Pickup.body.data.order.allocations.find((allocation) => allocation.itemGroupId === alternateBattery.id && allocation.status === "picked_up");
+  const cableAllocation = cat03Pickup.body.data.order.allocations.find((allocation) => allocation.itemGroupId === cable.id && allocation.status === "picked_up");
+  const partialReturned = await request(
+    "POST", `/api/rental/v1/orders/${cat03OrderId}/partial-return`,
+    { items: [{ allocationId: alternateAllocation.id, quantity: 1 }] },
+    demo.accessToken
+  );
+  assert.equal(partialReturned.status, 201, `CAT-03 部分归还失败: ${JSON.stringify(partialReturned.body).slice(0, 200)}`);
+  assert.equal(partialReturned.body.data.status, "renting", "部分归还后订单必须保持租赁中");
+  assert.equal(partialReturned.body.data.allocations.find((allocation) => allocation.id === alternateAllocation.id).quantity, 1, "数量分配应拆出剩余未归还数量");
+  assert.ok(partialReturned.body.data.allocations.some((allocation) => allocation.itemGroupId === alternateBattery.id && allocation.status === "returned" && allocation.quantity === 1), "应生成已归还的拆分分配记录");
+  assert.equal(partialReturned.body.data.reservations.find((row) => row.itemGroupId === alternateBattery.id).releasedQuantity, 1, "预占应记录已释放数量");
+  const remainingAlternateAllocation = partialReturned.body.data.allocations.find((allocation) => allocation.id === alternateAllocation.id);
+  const finalBatchBypass = await request(
+    "POST", `/api/rental/v1/orders/${cat03OrderId}/partial-return`,
+    { items: [{ allocationId: remainingAlternateAllocation.id, quantity: 1 }, { allocationId: cableAllocation.id, quantity: 2 }] },
+    demo.accessToken
+  );
+  assert.equal(finalBatchBypass.status, 409, "最后一批不得绕过归还检查和费用结算");
+  const cat03Returned = await request(
+    "POST", `/api/rental/v1/orders/${cat03OrderId}/inspections`,
+    { templateId: returnTemplate.id, results: { appearance_ok: true, function_ok: true, shutter_count: 120 } },
+    demo.accessToken
+  );
+  assert.equal(cat03Returned.status, 201, "CAT-03 最终归还检查失败");
+  assert.equal(cat03Returned.body.data.order.status, "completed");
+  assert.ok(cat03Returned.body.data.order.reservations.every((row) => row.status === "released" && row.releasedQuantity === row.quantity), "最终归还必须释放全部组成预占");
+  const cat03PricingDisabled = await request(
+    "PUT", `/api/rental/v1/pricing-plans/${cat03Pricing.body.data.id}`,
+    { effectiveFrom: cat03Pricing.body.data.effectiveFrom, code: "E2E-CAT03-PRICE", name: "CAT-03 套装定价", changeReason: "CAT-03 用例完成后停用，避免影响后续默认定价", status: "disabled", rates: [{ itemGroupId: cat03Bundle.id, unit: "day_24h", baseAmount: 80, weekendMultiplier: 1, holidayMultiplier: 1, depositAmount: 200, minimumUnits: 1 }] },
+    demo.accessToken
+  );
+  assert.equal(cat03PricingDisabled.status, 200, "CAT-03 用例定价停用失败");
+  ok("CAT-03 套装替代、实际组成拆分、数量部分归还与最终归还边界验证通过");
+
   console.log("== 10. 露营品类深度用例：数量+套装库存、缺件异常与库存还原 ==");
   const campingGroups = (await request("GET", "/api/rental/v1/item-groups", null, demo2.accessToken)).body.data;
   const tent = campingGroups.find((group) => group.code === "CAMP-TENT");
@@ -1312,7 +1438,7 @@ async function main() {
   const settled = await Promise.all(concurrent);
   for (const item of settled) {
     if (item.tenant === "demo") {
-      assert.ok(item.res.body.data.every((group) => group.code.startsWith("CAM-")), "并发中 demo 数据串线");
+      assert.ok(item.res.body.data.every((group) => group.code.startsWith("CAM-") || group.code.startsWith("E2E-CAT03-")), "并发中 demo 数据串线");
     } else if (item.tenant === "demo2") {
       assert.ok(item.res.body.data.every((group) => group.code.startsWith("CAMP-")), "并发中 demo2 数据串线");
     } else {

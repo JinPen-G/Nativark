@@ -10,6 +10,7 @@ import {
   RentalReservationStatus,
   type CreateRentalInspectionRequest,
   type CreateRentalOrderRequest,
+  type PartialReturnRentalOrderRequest,
   type RentalAllocation,
   type RentalAsset,
   type RentalAvailabilityRequest,
@@ -35,6 +36,7 @@ import {
   type SaveRentalStockBalanceRequest,
   type SaveTenantRentalBusinessSettingsRequest,
   type SaveTenantRentalProfileRequest,
+  type SubstituteRentalBundleComponentRequest,
   type TenantRentalBusinessSettings,
   type TenantRentalProfile
 } from "@store-rental/shared";
@@ -567,6 +569,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const components = this.resolveComponents(state, input.bundleComponents ?? [], input.id);
     if (input.inventoryMode === RentalInventoryMode.Bundle && components.length === 0) throw new BadRequestException("套装至少需要一个组成项");
     if (input.inventoryMode !== RentalInventoryMode.Bundle && components.length > 0) throw new BadRequestException("仅套装模式可以配置组成项");
+    if (input.inventoryMode === RentalInventoryMode.Bundle) this.validateBundleComponentRules(components);
     if (input.inventoryMode !== RentalInventoryMode.Bundle) {
       this.validateAttributes(definition.businessModel.assetFields, "item_group", input.attributes ?? {});
       this.assertUniqueAttributes(
@@ -757,7 +760,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
         : [{ itemGroupId: group.id, quantity: line.quantity }];
       for (const target of reservationTargets) reservations.push({
         id: id("reservation"), orderId, orderLineId: line.id, itemGroupId: target.itemGroupId,
-        locationId: location.id, quantity: target.quantity, status: RentalReservationStatus.Soft,
+        locationId: location.id, quantity: target.quantity, releasedQuantity: 0, status: RentalReservationStatus.Soft,
         expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(), createdAt: timestamp
       });
     }
@@ -837,13 +840,100 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
           // 而这里的 assets 是取出的快照，改它不影响同一订单内下一个预占的筛选。
           used.add(asset.id);
           assetChanges.push({ assetId: asset.id, status: RentalAssetStatus.Reserved });
-          allocations.push({ id: id("allocation"), orderId, orderLineId: reservation.orderLineId, assetId: asset.id, assetNo: asset.assetNo, quantity: 1, status: "allocated" });
+          allocations.push({ id: id("allocation"), orderId, orderLineId: reservation.orderLineId, itemGroupId: reservation.itemGroupId, assetId: asset.id, assetNo: asset.assetNo, quantity: 1, status: "allocated" });
         }
       } else {
-        allocations.push({ id: id("allocation"), orderId, orderLineId: reservation.orderLineId, quantity: reservation.quantity, status: "allocated" });
+        allocations.push({ id: id("allocation"), orderId, orderLineId: reservation.orderLineId, itemGroupId: reservation.itemGroupId, quantity: reservation.quantity, status: "allocated" });
       }
     }
     order.allocations = allocations; order.status = RentalCoreOrderStatus.ReadyForPickup; order.updatedAt = now();
+    await this.factStore.saveOrderAggregate(order, assetChanges, tx);
+    return order;
+  }
+
+  async substituteBundleComponent(
+    tenantId: string,
+    orderId: string,
+    input: SubstituteRentalBundleComponentRequest,
+    tx: RentalFactTx
+  ) {
+    const state = await this.factContext(tenantId);
+    const order = await this.lockedOrder(tenantId, orderId, tx);
+    if (order.status !== RentalCoreOrderStatus.Reserved) throw new ConflictException("只有已确认且尚未配货的订单可以替换套装组成");
+    const line = order.lines.find((row) => row.id === input.orderLineId);
+    if (!line || line.inventoryMode !== RentalInventoryMode.Bundle) throw new BadRequestException("目标订单行不是套装");
+    const bundle = this.group(state, line.itemGroupId);
+    const from = bundle.bundleComponents.find((component) => component.itemGroupId === input.fromItemGroupId);
+    const to = bundle.bundleComponents.find((component) => component.itemGroupId === input.toItemGroupId);
+    if (!from || !to || !from.substitutionGroup || from.substitutionGroup !== to.substitutionGroup) {
+      throw new BadRequestException("只能在同一替代组内更换套装组成");
+    }
+    if (from.itemGroupId === to.itemGroupId) throw new BadRequestException("替代商品不能与当前商品相同");
+    const reservation = order.reservations.find((row) =>
+      row.orderLineId === line.id && row.itemGroupId === from.itemGroupId && row.status === RentalReservationStatus.Confirmed
+    );
+    if (!reservation) throw new ConflictException("当前套装组成没有可替换的有效预占");
+    const targetGroup = this.group(state, to.itemGroupId);
+    const targetQuantity = to.quantity * line.quantity;
+    await this.factStore.lockInventoryTargets(tenantId, reservation.locationId, [{ itemGroupId: targetGroup.id, inventoryMode: targetGroup.inventoryMode }], tx);
+    const snapshot = await this.loadInventorySnapshot(tenantId, tx);
+    const available = this.availableQuantity(state, snapshot, targetGroup, reservation.locationId, order.startAt, order.endAt, new Set());
+    if (available < targetQuantity) throw new ConflictException(`${targetGroup.name} 可替代库存不足`);
+    reservation.itemGroupId = targetGroup.id;
+    reservation.quantity = targetQuantity;
+    reservation.releasedQuantity = 0;
+    order.updatedAt = now();
+    await this.factStore.saveOrderAggregate(order, [], tx);
+    return order;
+  }
+
+  async partialReturnOrder(
+    tenantId: string,
+    orderId: string,
+    input: PartialReturnRentalOrderRequest,
+    tx: RentalFactTx
+  ) {
+    const state = await this.factContext(tenantId);
+    const order = await this.lockedOrder(tenantId, orderId, tx);
+    if (order.status !== RentalCoreOrderStatus.Renting) throw new ConflictException("只有租赁中的订单可以办理部分归还");
+    if (!input.items?.length) throw new BadRequestException("至少选择一个归还分配项");
+    if (new Set(input.items.map((item) => item.allocationId)).size !== input.items.length) throw new BadRequestException("归还分配项不能重复");
+    const assets = await this.factStore.listAssets(tenantId, tx);
+    const assetById = new Map(assets.map((asset) => [asset.id, asset]));
+    const assetChanges: AssetStatusChange[] = [];
+
+    for (const item of input.items) {
+      if (!Number.isInteger(item.quantity) || item.quantity <= 0) throw new BadRequestException("归还数量必须是正整数");
+      const allocation = order.allocations.find((row) => row.id === item.allocationId);
+      if (!allocation || allocation.status !== "picked_up") throw new ConflictException("所选分配项已归还或不可归还");
+      if (item.quantity > allocation.quantity) throw new BadRequestException("归还数量不能超过未归还数量");
+      const actualItemGroupId = allocation.itemGroupId ?? (allocation.assetId ? assetById.get(allocation.assetId)?.itemGroupId : undefined);
+      if (!actualItemGroupId) throw new ConflictException("历史套装分配缺少组成商品标识，请使用整单归还");
+      const group = this.group(state, actualItemGroupId);
+      if (group.inventoryMode === RentalInventoryMode.Serialized && item.quantity !== 1) throw new BadRequestException("序列化资产必须按单件归还");
+      const reservation = order.reservations.find((row) => row.orderLineId === allocation.orderLineId && row.itemGroupId === actualItemGroupId);
+      if (!reservation || reservation.status !== RentalReservationStatus.Fulfilled) throw new ConflictException("归还项没有对应的履约预占");
+      if (reservation.releasedQuantity + item.quantity > reservation.quantity) throw new ConflictException("累计归还数量超过原预占数量");
+
+      if (item.quantity === allocation.quantity) {
+        allocation.status = "returned";
+      } else {
+        allocation.quantity -= item.quantity;
+        order.allocations.push({
+          id: id("allocation"), orderId, orderLineId: allocation.orderLineId, itemGroupId: actualItemGroupId,
+          quantity: item.quantity, status: "returned"
+        });
+      }
+      allocation.itemGroupId = actualItemGroupId;
+      reservation.releasedQuantity += item.quantity;
+      if (reservation.releasedQuantity === reservation.quantity) reservation.status = RentalReservationStatus.Released;
+      if (allocation.assetId) assetChanges.push({ assetId: allocation.assetId, status: RentalAssetStatus.Available });
+    }
+
+    if (order.allocations.every((allocation) => allocation.status === "returned" || allocation.status === "released")) {
+      throw new ConflictException("最后一批必须通过整单归还或归还检查完成，以计算逾期和异常费用");
+    }
+    order.updatedAt = now();
     await this.factStore.saveOrderAggregate(order, assetChanges, tx);
     return order;
   }
@@ -968,7 +1058,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
 
   private finishReturn(order: RentalOrder, overdueCharge: number, assetChanges: AssetStatusChange[]) {
     order.status = RentalCoreOrderStatus.Completed; order.completedAt = now();
-    order.reservations.forEach((row) => { row.status = RentalReservationStatus.Released; });
+    order.reservations.forEach((row) => { row.status = RentalReservationStatus.Released; row.releasedQuantity = row.quantity; });
     order.allocations.forEach((row) => {
       row.status = "returned";
       if (row.assetId) assetChanges.push({ assetId: row.assetId, status: RentalAssetStatus.Available });
@@ -1195,8 +1285,27 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       if (!Number.isInteger(row.quantity) || row.quantity <= 0) throw new BadRequestException("套装组成数量必须是正整数");
       const group = this.group(state, row.itemGroupId);
       if (group.inventoryMode === RentalInventoryMode.Bundle) throw new BadRequestException("v0.1 暂不支持嵌套套装");
-      return { itemGroupId: group.id, itemGroupCode: group.code, itemGroupName: group.name, quantity: row.quantity, optional: row.optional, substitutionGroup: row.substitutionGroup };
+      return { itemGroupId: group.id, itemGroupCode: group.code, itemGroupName: group.name, quantity: row.quantity, optional: Boolean(row.optional), substitutionGroup: row.substitutionGroup?.trim() || undefined };
     });
+  }
+
+  private validateBundleComponentRules(components: RentalBundleComponent[]) {
+    if (new Set(components.map((component) => component.itemGroupId)).size !== components.length) {
+      throw new BadRequestException("同一商品不能在套装组成中重复出现");
+    }
+    if (components.some((component) => component.optional && !component.substitutionGroup)) {
+      throw new BadRequestException("替代候选必须填写替代组；当前阶段不支持无替代组的可选加购项");
+    }
+    const groups = new Map<string, RentalBundleComponent[]>();
+    for (const component of components) {
+      if (!component.substitutionGroup) continue;
+      groups.set(component.substitutionGroup, [...(groups.get(component.substitutionGroup) ?? []), component]);
+    }
+    for (const [groupCode, candidates] of groups) {
+      if (candidates.length < 2 || candidates.filter((candidate) => !candidate.optional).length !== 1) {
+        throw new BadRequestException(`替代组 ${groupCode} 必须且只能有一个默认组成，并至少配置一个替代候选`);
+      }
+    }
   }
 
   /**
