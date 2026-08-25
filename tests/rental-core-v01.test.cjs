@@ -68,6 +68,8 @@ assert.equal(rentalPricingStrategy("day_24h").billableUnits(strategyStart, strat
 assert.equal(rentalPricingStrategy("package").billableUnits(strategyStart, strategyEnd), 1);
 assert.equal(rentalPricingStrategy("usage").amountPerItem({ baseAmount: 50, includedUsage: 100, excessUsageAmount: 2 }, 150), 150);
 assert.ok(categories.every((category) => category.businessModel.assetFields.length > 0));
+assert.ok(categories.find((category) => category.code === "camera").businessModel.assetFields.some((field) => field.code === "serialNo" && field.unique));
+assert.ok(categories.find((category) => category.code === "vehicle").businessModel.assetFields.filter((field) => ["licensePlate", "vin"].includes(field.code)).every((field) => field.unique));
 assert.deepEqual(
   Object.fromEntries(categories.map((category) => [category.code, [category.businessModel.defaults.sampleBaseAmount, category.businessModel.defaults.sampleAmountIncrement]])),
   { camera: [180, 80], camping: [80, 20], vehicle: [380, 100], construction: [680, 180] },
@@ -139,6 +141,17 @@ await assert.rejects(async () => service.saveLocation(cameraTenant, {
 }), /不支持该履约地点类型/);
 const cameraBundle = cameraGroups.find((row) => row.inventoryMode === RentalInventoryMode.Bundle);
 assert.ok(cameraBundle && cameraBundle.bundleComponents.length === 2);
+const cameraSerializedGroup = cameraGroups.find((row) => row.inventoryMode === RentalInventoryMode.Serialized);
+const normalizedCameraAsset = await service.saveAsset(cameraTenant, {
+  itemGroupId: cameraSerializedGroup.id,
+  assetNo: "CAM-ALIAS-001",
+  serialNo: "TOP-LEVEL-SN",
+  locationId: cameraLocation.id,
+  attributes: { serialNo: "JSON-SN" },
+  status: "available"
+});
+assert.equal(normalizedCameraAsset.serialNo, "TOP-LEVEL-SN", "top-level alias must be the canonical value");
+assert.equal(normalizedCameraAsset.attributes.serialNo, undefined, "aliased fields must not persist a second JSON copy");
 
 const cameraContext = {
   profile: service.getProfile(cameraTenant),
@@ -175,6 +188,27 @@ await assert.rejects(async () => service.saveItemGroup(newTenant, {
   attributes: { model: "E20" },
   status: "enabled"
 }), /制造商/, "construction groups must validate their category-specific fields");
+await assert.rejects(async () => service.saveItemGroup(newTenant, {
+  code: "EXC-WRONG-TYPE",
+  name: "错误类型挖掘机",
+  inventoryMode: "serialized",
+  attributes: { manufacturer: 123, model: "E20" },
+  status: "enabled"
+}), /制造商必须是文本/, "string category fields must reject non-string values");
+await assert.rejects(async () => service.saveItemGroup(newTenant, {
+  code: "EXC-BLANK",
+  name: "空白制造商挖掘机",
+  inventoryMode: "serialized",
+  attributes: { manufacturer: "   ", model: "E20" },
+  status: "enabled"
+}), /制造商不能为空/, "required string category fields must reject whitespace-only values");
+await assert.rejects(async () => service.saveItemGroup(newTenant, {
+  code: "EXC-UNKNOWN",
+  name: "未知字段挖掘机",
+  inventoryMode: "serialized",
+  attributes: { manufacturer: "测试重工", model: "E20", legacyVehicleType: "旧字段" },
+  status: "enabled"
+}), /未定义的品类字段.*legacyVehicleType/, "undefined attributes must not leak into category JSON");
 const constructionGroup = await service.saveItemGroup(newTenant, {
   code: "EXC-001",
   name: "测试挖掘机",

@@ -162,6 +162,16 @@ export class PlatformService {
 
   private readonly permissionTree: PermissionModule[] = [
     {
+      code: "rental-core",
+      name: "Rental Core",
+      children: [
+        { code: "rental-core:catalog:view", name: "通用商品目录查看" },
+        { code: "rental-core:catalog:manage", name: "通用商品目录管理" },
+        { code: "rental-core:asset:view", name: "通用资产库存查看" },
+        { code: "rental-core:asset:manage", name: "通用资产库存管理" }
+      ]
+    },
+    {
       code: "store-rental",
       name: "门市租赁",
       children: [
@@ -245,6 +255,8 @@ export class PlatformService {
         "store-rental:order:settle",
         "store-rental:station:view",
         "store-rental:vehicle:view",
+        "rental-core:catalog:view",
+        "rental-core:asset:view",
         "store-rental:member:view",
         "store-rental:corporate:view",
         "store-rental:finance:view"
@@ -313,7 +325,9 @@ export class PlatformService {
         "store-rental:order:view",
         "store-rental:order:operate",
         "store-rental:station:view",
-        "store-rental:vehicle:view"
+        "store-rental:vehicle:view",
+        "rental-core:catalog:view",
+        "rental-core:asset:view"
       ],
       buttonPermissions: [
         "store-rental:order:create",

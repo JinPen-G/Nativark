@@ -17,13 +17,13 @@ function AttributeInput({ field }: { field: RentalAttributeDefinition }) {
   if (field.type === "number") return <InputNumber min={0} addonAfter={field.unit} style={{ width: "100%" }} />;
   if (field.type === "select") return <Select options={field.options?.map((value) => ({ value, label: value }))} />;
   if (field.type === "boolean") return <Switch />;
-  return <Input placeholder={field.type === "date" ? "YYYY-MM-DD" : undefined} />;
+  return <Input type={field.type === "date" ? "date" : undefined} />;
 }
 
 export function AssetWorkspacePage() {
   const { message } = App.useApp();
   const queryClient = useQueryClient();
-  const canManage = useAuthStore((state) => state.hasPermission("store-rental:vehicle:manage"));
+  const canManage = useAuthStore((state) => state.hasPermission("rental-core:asset:manage") || state.hasPermission("store-rental:vehicle:manage"));
   const [activeTab, setActiveTab] = useState<"assets" | "stock">("assets");
   const [keyword, setKeyword] = useState("");
   const [editing, setEditing] = useState<RentalAsset>();
@@ -68,7 +68,7 @@ export function AssetWorkspacePage() {
         <QueryState loading={assets.isLoading || stocks.isLoading || groups.isLoading || locations.isLoading || profile.isLoading || categories.isLoading} error={assets.error || stocks.error || groups.error || locations.error || profile.error || categories.error}>
           {activeTab === "assets" ? <Table<RentalAsset> rowKey="id" dataSource={assetRows} scroll={{ x: 960 }} columns={[
             { title: profile.data?.terminology.identifierLabel ?? "资产编号", dataIndex: "assetNo", fixed: "left", render: (value) => <b>{value}</b> },
-            { title: "序列号", dataIndex: "serialNo", render: (value) => value || "-" },
+            ...(serialNoField ? [{ title: serialNoField.label, dataIndex: "serialNo", render: (value: string | undefined) => value || "-" }] : []),
             { title: profile.data?.terminology.itemGroupLabel ?? "商品", render: (_, row) => <>{row.itemGroupName}<br /><span className="muted">{row.itemGroupCode}</span></> },
             { title: profile.data?.terminology.fulfillmentLabel ?? "履约地点", dataIndex: "locationName" },
             { title: "品类属性", dataIndex: "attributes", render: (value) => Object.entries(value ?? {}).map(([key, item]) => `${category?.businessModel.assetFields.find((field) => field.code === key)?.label ?? key}: ${String(item)}`).join(" · ") || "-" },
@@ -90,12 +90,12 @@ export function AssetWorkspacePage() {
         <Form<SaveRentalAssetRequest> form={assetForm} layout="vertical" onFinish={(values) => saveAsset.mutate({ ...values, id: editing?.id })}>
           <Row gutter={12}>
             <Col span={12}><Form.Item name="assetNo" label={profile.data?.terminology.identifierLabel ?? "资产编号"} rules={[{ required: true }]}><Input /></Form.Item></Col>
-            {serialNoField && <Col span={12}><Form.Item name="serialNo" label={serialNoField.label} rules={[{ required: serialNoField.required }]}><AttributeInput field={serialNoField} /></Form.Item></Col>}
+            {serialNoField && <Col span={12}><Form.Item name="serialNo" label={serialNoField.label} extra={serialNoField.unique ? "当前经营空间内不可重复" : undefined} rules={[{ required: serialNoField.required }]}><AttributeInput field={serialNoField} /></Form.Item></Col>}
             <Col span={12}><Form.Item name="itemGroupId" label={profile.data?.terminology.itemGroupLabel ?? "商品"} rules={[{ required: true }]}><Select disabled={Boolean(editing)} showSearch optionFilterProp="label" options={serializedGroups.map((item) => ({ value: item.id, label: `${item.code} · ${item.name}` }))} /></Form.Item></Col>
             <Col span={12}><Form.Item name="locationId" label={profile.data?.terminology.fulfillmentLabel ?? "履约地点"} rules={[{ required: true }]}><Select options={(locations.data ?? []).filter((item) => item.status === "enabled").map((item) => ({ value: item.id, label: item.name }))} /></Form.Item></Col>
             <Col span={12}><Form.Item name="status" label="状态" rules={[{ required: true }]}><Select options={Object.entries(statusMap).map(([value, item]) => ({ value, label: item.label }))} /></Form.Item></Col>
           </Row>
-          {assetFields.length > 0 && <Card size="small" title="品类资产字段"><Row gutter={12}>{assetFields.map((field) => <Col span={12} key={field.code}><Form.Item name={["attributes", field.code]} label={field.label} rules={[{ required: field.required }]} valuePropName={field.type === "boolean" ? "checked" : "value"}><AttributeInput field={field} /></Form.Item></Col>)}</Row></Card>}
+          {assetFields.length > 0 && <Card size="small" title="品类资产字段"><Row gutter={12}>{assetFields.map((field) => <Col span={12} key={field.code}><Form.Item name={["attributes", field.code]} label={field.label} extra={field.unique ? "当前经营空间内不可重复" : undefined} rules={[{ required: field.required }]} valuePropName={field.type === "boolean" ? "checked" : "value"}><AttributeInput field={field} /></Form.Item></Col>)}</Row></Card>}
         </Form>
       </Drawer>
 

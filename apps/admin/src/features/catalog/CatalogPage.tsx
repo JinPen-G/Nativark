@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
+import { useAuthStore } from "@/features/auth/authStore";
 
 const inventoryLabels: Record<string, string> = { serialized: "序列化资产", quantity: "数量库存", bundle: "套装" };
 
@@ -13,12 +14,13 @@ function AttributeInput({ field }: { field: RentalAttributeDefinition }) {
   if (field.type === "number") return <InputNumber min={0} addonAfter={field.unit} style={{ width: "100%" }} />;
   if (field.type === "select") return <Select options={field.options?.map((value) => ({ value, label: value }))} />;
   if (field.type === "boolean") return <Switch />;
-  return <Input />;
+  return <Input type={field.type === "date" ? "date" : undefined} />;
 }
 
 export function CatalogPage() {
   const { message } = App.useApp();
   const queryClient = useQueryClient();
+  const canManage = useAuthStore((state) => state.hasPermission("rental-core:catalog:manage") || state.hasPermission("store-rental:vehicle-group:manage"));
   const [keyword, setKeyword] = useState("");
   const [editing, setEditing] = useState<RentalItemGroup>();
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -58,7 +60,7 @@ export function CatalogPage() {
 
   return (
     <>
-      <PageHeader title={profile.data?.terminology.itemGroupLabel ?? "商品目录"} description="按经营品类维护商品型号、库存方式、规格字段和套装组成。" extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>新增{profile.data?.terminology.itemGroupLabel ?? "商品"}</Button>} />
+      <PageHeader title={profile.data?.terminology.itemGroupLabel ?? "商品目录"} description="按经营品类维护商品型号、库存方式、规格字段和套装组成。" extra={canManage ? <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>新增{profile.data?.terminology.itemGroupLabel ?? "商品"}</Button> : undefined} />
       <Alert type="info" showIcon message={`${category?.name ?? "当前品类"}商品模型`} description="厂商、型号等共享属性保存在商品型号；车牌、SN 等单件信息保存在资产实例；基础价格不再直接写进商品主数据。" style={{ marginBottom: 16 }} />
       <Card className="data-panel" styles={{ body: { paddingBottom: 0 } }}>
         <Space style={{ marginBottom: 16 }}><Input allowClear prefix={<SearchOutlined />} placeholder="搜索编码、名称或规格" value={keyword} onChange={(event) => setKeyword(event.target.value)} style={{ width: 300 }} /></Space>
@@ -70,7 +72,7 @@ export function CatalogPage() {
             { title: "单位", dataIndex: "unit" },
             { title: "套装组成", dataIndex: "bundleComponents", render: (items) => items?.length ? items.map((item: { itemGroupName: string; quantity: number }) => `${item.itemGroupName}×${item.quantity}`).join("，") : "-" },
             { title: "状态", dataIndex: "status", render: (value) => <Tag color={value === "enabled" ? "success" : "default"}>{value === "enabled" ? "启用" : "停用"}</Tag> },
-            { title: "操作", fixed: "right", render: (_, row) => <Button type="link" onClick={() => openEditor(row)}>编辑</Button> }
+            { title: "操作", fixed: "right", render: (_, row) => canManage ? <Button type="link" onClick={() => openEditor(row)}>编辑</Button> : "-" }
           ]} />
         </QueryState>
       </Card>
@@ -84,7 +86,7 @@ export function CatalogPage() {
             <Col span={12}><Form.Item name="unit" label="计量单位" rules={[{ required: true }]}><Input placeholder="台、套、顶、辆" /></Form.Item></Col>
           </Row>
           <Card size="small" title={`${category?.name ?? "品类"}规格字段`} style={{ marginBottom: 16 }}>
-            <Row gutter={12}>{groupFields.map((field) => <Col span={12} key={field.code}><Form.Item name={["attributes", field.code]} label={field.label} rules={[{ required: field.required }]} valuePropName={field.type === "boolean" ? "checked" : "value"}><AttributeInput field={field} /></Form.Item></Col>)}</Row>
+            <Row gutter={12}>{groupFields.map((field) => <Col span={12} key={field.code}><Form.Item name={["attributes", field.code]} label={field.label} extra={field.unique ? "当前经营空间内不可重复" : undefined} rules={[{ required: field.required }]} valuePropName={field.type === "boolean" ? "checked" : "value"}><AttributeInput field={field} /></Form.Item></Col>)}</Row>
           </Card>
           <Form.Item noStyle shouldUpdate={(previous, current) => previous.inventoryMode !== current.inventoryMode}>{({ getFieldValue }) => getFieldValue("inventoryMode") === RentalInventoryMode.Bundle && (
             <Card size="small" title="套装组成" style={{ marginBottom: 16 }}>

@@ -157,10 +157,10 @@ function requiredPermissions(method: string, path: string) {
     return method === "GET" ? ["store-rental:station:view"] : ["store-rental:station:manage"];
   }
   if (path === "/rental/v1/item-groups" || path.startsWith("/rental/v1/item-groups/")) {
-    return method === "GET" ? ["store-rental:vehicle-group:manage", "store-rental:vehicle:view", "store-rental:order:view", "store-rental:order:create"] : ["store-rental:vehicle-group:manage"];
+    return method === "GET" ? ["rental-core:catalog:view", "rental-core:catalog:manage", "store-rental:vehicle-group:manage", "store-rental:vehicle:view", "store-rental:order:view", "store-rental:order:create"] : ["rental-core:catalog:manage", "store-rental:vehicle-group:manage"];
   }
   if (path === "/rental/v1/assets" || path.startsWith("/rental/v1/assets/") || path === "/rental/v1/stock-balances") {
-    return method === "GET" ? ["store-rental:vehicle:view"] : ["store-rental:vehicle:manage"];
+    return method === "GET" ? ["rental-core:asset:view", "rental-core:asset:manage", "store-rental:vehicle:view"] : ["rental-core:asset:manage", "store-rental:vehicle:manage"];
   }
   if (path === "/rental/v1/availability") {
     return ["store-rental:order:operate", "store-rental:order:create", "store-rental:vehicle:view"];

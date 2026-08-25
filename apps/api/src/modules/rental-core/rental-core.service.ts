@@ -156,6 +156,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   private readonly defaultWorkspaceByTenant = new Map<string, string>();
   private readonly categoryByWorkspace = new Map<string, RentalCategoryCode>();
   private readonly tenantByWorkspace = new Map<string, string>();
+  /** 同一空间首次并发读取时，只允许一条请求执行配置与样本补落。 */
+  private readonly initializationByWorkspace = new Map<string, Promise<void>>();
 
   // configStore 必填：配置的事实源是数据库，内存 states 只是写穿缓存。
   // 不设为可选，避免生产环境缺少注入时静默退回纯内存而无人察觉。
@@ -196,12 +198,22 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
    * 走内存；到阶段 3 事实落库后就会立刻炸：资产和订单行的外键指向并不存在的商品组行。
    */
   private async factContext(tenantId: string) {
+    const workspaceId = this.workspaceOf(tenantId);
     const state = this.state(tenantId);
-    if (!state.configPersisted) {
-      await this.persistConfig(state);
-      state.configPersisted = true;
+    let initialization = this.initializationByWorkspace.get(workspaceId);
+    if (!initialization) {
+      initialization = (async () => {
+        if (!state.configPersisted) {
+          await this.persistConfig(state);
+          state.configPersisted = true;
+        }
+        await this.ensureSampleFacts(state);
+      })().finally(() => {
+        this.initializationByWorkspace.delete(workspaceId);
+      });
+      this.initializationByWorkspace.set(workspaceId, initialization);
     }
-    await this.ensureSampleFacts(state);
+    await initialization;
     return state;
   }
 
@@ -548,7 +560,19 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const components = this.resolveComponents(state, input.bundleComponents ?? [], input.id);
     if (input.inventoryMode === RentalInventoryMode.Bundle && components.length === 0) throw new BadRequestException("套装至少需要一个组成项");
     if (input.inventoryMode !== RentalInventoryMode.Bundle && components.length > 0) throw new BadRequestException("仅套装模式可以配置组成项");
-    if (input.inventoryMode !== RentalInventoryMode.Bundle) this.validateAttributes(definition.businessModel.assetFields, "item_group", input.attributes ?? {});
+    if (input.inventoryMode !== RentalInventoryMode.Bundle) {
+      this.validateAttributes(definition.businessModel.assetFields, "item_group", input.attributes ?? {});
+      this.assertUniqueAttributes(
+        definition.businessModel.assetFields,
+        "item_group",
+        input.attributes ?? {},
+        state.itemGroups,
+        input.id
+      );
+    } else {
+      // 套装不强制继承单品的厂商/型号必填规则，但传入的字段仍必须属于当前品类且类型正确。
+      this.validateAttributes(definition.businessModel.assetFields, "item_group", input.attributes ?? {}, {}, false);
+    }
     const timestamp = now();
     const existing = input.id ? state.itemGroups.find((row) => row.id === input.id) : undefined;
     if (input.id && !existing) throw new NotFoundException("标的分组不存在");
@@ -577,18 +601,33 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const location = this.location(state, input.locationId);
     if (!input.assetNo?.trim()) throw new BadRequestException("资产编号不能为空");
     const definition = this.category(state.profile.categoryCode);
-    this.validateAttributes(definition.businessModel.assetFields, "asset", input.attributes ?? {}, { serialNo: input.serialNo });
     const assetNo = input.assetNo.trim();
     const assets = await this.factStore.listAssets(tenantId);
+    const assetAttributes = { ...(input.attributes ?? {}) };
+    const supportsSerialNo = definition.businessModel.assetFields.some((field) => field.scope === "asset" && field.code === "serialNo");
+    if (!supportsSerialNo && input.serialNo?.trim()) throw new BadRequestException("存在未定义的品类字段：serialNo");
+    const serialNo = supportsSerialNo ? input.serialNo ?? assetAttributes.serialNo : undefined;
+    if (supportsSerialNo) delete assetAttributes.serialNo;
+    const attributeAliases = supportsSerialNo ? { serialNo } : {};
+    this.validateAttributes(definition.businessModel.assetFields, "asset", assetAttributes, attributeAliases);
+    this.assertUniqueAttributes(
+      definition.businessModel.assetFields,
+      "asset",
+      assetAttributes,
+      assets,
+      input.id,
+      attributeAliases,
+      (asset) => ({ serialNo: asset.serialNo })
+    );
     if (assets.some((row) => row.assetNo === assetNo && row.id !== input.id)) throw new ConflictException("资产编号已存在");
     const existing = input.id ? assets.find((row) => row.id === input.id) : undefined;
     if (input.id && !existing) throw new NotFoundException("资产不存在");
     const timestamp = now();
     const result: RentalAsset = {
       id: existing?.id ?? id("asset"), tenantId, itemGroupId: group.id, itemGroupCode: group.code,
-      itemGroupName: group.name, assetNo, serialNo: input.serialNo?.trim(),
+      itemGroupName: group.name, assetNo, serialNo: typeof serialNo === "string" ? serialNo.trim() : undefined,
       locationId: location.id, locationName: location.name, status: input.status ?? existing?.status ?? RentalAssetStatus.Available,
-      attributes: input.attributes ?? {}, createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp
+      attributes: assetAttributes, createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp
     };
     await this.factStore.upsertAsset(result);
     return result;
@@ -1004,17 +1043,55 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     return order;
   }
   private validatePeriod(startAt: string, endAt: string) { const start = new Date(startAt).getTime(); const end = new Date(endAt).getTime(); if (!Number.isFinite(start) || !Number.isFinite(end) || start >= end) throw new BadRequestException("租赁起止时间无效"); }
-  private validateAttributes(fields: RentalAttributeDefinition[], scope: "item_group" | "asset", attributes: Record<string, unknown>, aliases: Record<string, unknown> = {}) {
-    for (const field of fields.filter((item) => item.scope === scope)) {
+  private validateAttributes(
+    fields: RentalAttributeDefinition[],
+    scope: "item_group" | "asset",
+    attributes: Record<string, unknown>,
+    aliases: Record<string, unknown> = {},
+    validateRequired = true
+  ) {
+    const scopedFields = fields.filter((item) => item.scope === scope);
+    const aliasCodes = new Set(Object.keys(aliases));
+    const allowedCodes = new Set(scopedFields.map((field) => field.code).filter((code) => !aliasCodes.has(code)));
+    const unknownCodes = Object.keys(attributes).filter((code) => !allowedCodes.has(code));
+    if (unknownCodes.length) throw new BadRequestException(`存在未定义的品类字段：${unknownCodes.join("、")}`);
+    for (const field of scopedFields) {
       const value = aliases[field.code] ?? attributes[field.code];
-      const missing = value === undefined || value === null || value === "";
-      if (field.required && missing) throw new BadRequestException(`${field.label}不能为空`);
+      const missing = value === undefined || value === null || value === "" || (typeof value === "string" && value.trim() === "");
+      if (validateRequired && field.required && missing) throw new BadRequestException(`${field.label}不能为空`);
       if (missing) continue;
+      if (field.type === "string" && typeof value !== "string") throw new BadRequestException(`${field.label}必须是文本`);
       if (field.type === "number" && (typeof value !== "number" || !Number.isFinite(value))) throw new BadRequestException(`${field.label}必须是有效数字`);
       if (field.type === "boolean" && typeof value !== "boolean") throw new BadRequestException(`${field.label}必须是布尔值`);
       if (field.type === "date" && !Number.isFinite(new Date(String(value)).getTime())) throw new BadRequestException(`${field.label}必须是有效日期`);
       if (field.type === "select" && field.options?.length && !field.options.includes(String(value))) throw new BadRequestException(`${field.label}不在允许选项中`);
     }
+  }
+
+  private assertUniqueAttributes<T extends { id: string; attributes: Record<string, unknown> }>(
+    fields: RentalAttributeDefinition[],
+    scope: "item_group" | "asset",
+    attributes: Record<string, unknown>,
+    records: T[],
+    currentId?: string,
+    aliases: Record<string, unknown> = {},
+    aliasesOf: (record: T) => Record<string, unknown> = () => ({})
+  ) {
+    for (const field of fields.filter((item) => item.scope === scope && item.unique)) {
+      const candidate = this.normalizedUniqueValue(aliases[field.code] ?? attributes[field.code]);
+      if (!candidate) continue;
+      const duplicate = records.find((record) => {
+        if (record.id === currentId) return false;
+        const recordAliases = aliasesOf(record);
+        return this.normalizedUniqueValue(recordAliases[field.code] ?? record.attributes[field.code]) === candidate;
+      });
+      if (duplicate) throw new ConflictException(`${field.label}已存在`);
+    }
+  }
+
+  private normalizedUniqueValue(value: unknown): string | undefined {
+    if (value === undefined || value === null || value === "") return undefined;
+    return typeof value === "string" ? value.normalize("NFKC").trim().toUpperCase() : JSON.stringify(value);
   }
   /**
    * 可用量计算所需的库存事实。一次取齐后计算全程同步——套装展开是递归的，

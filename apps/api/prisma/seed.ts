@@ -19,7 +19,8 @@ import {
   SystemDataScope,
   TenantStatus,
   VehicleOperationStatus,
-  VehicleServiceType
+  VehicleServiceType,
+  WorkspaceStatus
 } from "@prisma/client";
 import {
   RENTAL_CATEGORY_DEFINITIONS,
@@ -150,6 +151,10 @@ const tenants: TenantSeed[] = [
 ];
 
 const permissions = [
+  ["rental-core:catalog:view", "通用商品目录查看", "Rental Core", PermissionKind.ACTION],
+  ["rental-core:catalog:manage", "通用商品目录管理", "Rental Core", PermissionKind.ACTION],
+  ["rental-core:asset:view", "通用资产库存查看", "Rental Core", PermissionKind.ACTION],
+  ["rental-core:asset:manage", "通用资产库存管理", "Rental Core", PermissionKind.ACTION],
   ["store-rental:rules:manage", "业务规则配置", "门市租赁", PermissionKind.ACTION],
   ["store-rental:order:view", "订单查看", "门市租赁", PermissionKind.ACTION],
   ["store-rental:order:operate", "订单操作", "门市租赁", PermissionKind.ACTION],
@@ -222,6 +227,8 @@ const roleTemplates = [
       "store-rental:order:settle",
       "store-rental:station:view",
       "store-rental:vehicle:view",
+      "rental-core:catalog:view",
+      "rental-core:asset:view",
       "store-rental:member:view",
       "store-rental:corporate:view",
       "store-rental:finance:view"
@@ -498,6 +505,13 @@ const rentalCategories = RENTAL_CATEGORY_DEFINITIONS.map((category) => ({
   version: category.version
 }));
 
+const demoWorkspaces = [
+  { id: "ws_tenant_001", code: "default", name: "摄影设备经营空间", categoryCode: RentalCategoryCode.CAMERA, isDefault: true },
+  { id: "ws_tenant_001_camping", code: "camping", name: "露营装备经营空间", categoryCode: RentalCategoryCode.CAMPING, isDefault: false },
+  { id: "ws_tenant_001_vehicle", code: "vehicle", name: "车辆载具经营空间", categoryCode: RentalCategoryCode.VEHICLE, isDefault: false },
+  { id: "ws_tenant_001_construction", code: "construction", name: "工程设备经营空间", categoryCode: RentalCategoryCode.CONSTRUCTION, isDefault: false }
+] as const;
+
 async function upsertRentalCategoriesAndProfiles() {
   for (const category of rentalCategories) {
     await prisma.rentalCategoryDefinition.upsert({
@@ -686,35 +700,47 @@ async function upsertRolesAndUsers() {
     // 只为拥有品类档案的租户建空间：平台管理租户没有档案，也不该被凭空给一个品类。
     const rentalProfile = await prisma.tenantRentalProfile.findUnique({ where: { tenantId: tenant.id } });
     if (rentalProfile) {
-      const workspaceId = `ws_${tenant.id}`;
-      await prisma.businessWorkspace.upsert({
-        where: { id: workspaceId },
-        update: {},
-        create: {
-          id: workspaceId,
-          tenantId: tenant.id,
-          code: "default",
-          name: `${tenant.name} 默认经营空间`,
-          categoryCode: rentalProfile.categoryCode,
-          isDefault: true,
-          defaultMarker: "default"
-        }
-      });
-      for (const user of tenant.users) {
-        await prisma.workspaceMember.upsert({
-          where: { workspaceId_userId: { workspaceId, userId: user.id } },
-          update: {},
+      const workspaceSeeds = tenant.id === "tenant_001"
+        ? demoWorkspaces
+        : [{ id: `ws_${tenant.id}`, code: "default", name: `${tenant.name} 默认经营空间`, categoryCode: rentalProfile.categoryCode, isDefault: true }] as const;
+      for (const workspace of workspaceSeeds) {
+        await prisma.businessWorkspace.upsert({
+          where: { id: workspace.id },
+          update: {
+            code: workspace.code,
+            name: workspace.name,
+            categoryCode: workspace.categoryCode,
+            status: WorkspaceStatus.ACTIVE,
+            isDefault: workspace.isDefault,
+            defaultMarker: workspace.isDefault ? "default" : workspace.id
+          },
           create: {
+            id: workspace.id,
             tenantId: tenant.id,
-            workspaceId,
-            userId: user.id,
-            // 与迁移回填一致：不写空间级角色。本列为空表示沿用租户级角色集；
-            // 写 roleIds[0] 会让 findWorkspaceScopedUser 用单个角色整体替换权限，
-            // 多角色账号（如同时是店长与财务复核）的权限会静默收缩。
-            roleId: null,
-            isActive: true
+            code: workspace.code,
+            name: workspace.name,
+            categoryCode: workspace.categoryCode,
+            status: WorkspaceStatus.ACTIVE,
+            isDefault: workspace.isDefault,
+            defaultMarker: workspace.isDefault ? "default" : workspace.id
           }
         });
+        for (const user of tenant.users) {
+          await prisma.workspaceMember.upsert({
+            where: { workspaceId_userId: { workspaceId: workspace.id, userId: user.id } },
+            update: { isActive: true },
+            create: {
+              tenantId: tenant.id,
+              workspaceId: workspace.id,
+              userId: user.id,
+              // 与迁移回填一致：不写空间级角色。本列为空表示沿用租户级角色集；
+              // 写 roleIds[0] 会让 findWorkspaceScopedUser 用单个角色整体替换权限，
+              // 多角色账号（如同时是店长与财务复核）的权限会静默收缩。
+              roleId: null,
+              isActive: true
+            }
+          });
+        }
       }
     }
   }

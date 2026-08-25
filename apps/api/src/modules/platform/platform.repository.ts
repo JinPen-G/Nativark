@@ -1461,6 +1461,8 @@ export class PlatformRepository {
       "store-rental:order:settle",
       "store-rental:station:view",
       "store-rental:vehicle:view",
+      "rental-core:catalog:view",
+      "rental-core:asset:view",
       "store-rental:member:view",
       "store-rental:corporate:view",
       "store-rental:order:create",

@@ -20,6 +20,8 @@ export interface AppRouteDefinition {
   path: string;
   label: string;
   permission: string;
+  /** 升级兼容：满足任一旧权限也可进入，新增授权应使用 permission。 */
+  legacyPermissions?: string[];
   icon: ReactNode;
   capability?: RentalCapability;
   categories?: RentalCategoryCode[];
@@ -39,8 +41,8 @@ export const APP_ROUTES = {
   orderCreate: { path: "/rental/orders/new", label: "新建订单", permission: "store-rental:order:create", icon: <FormOutlined />, menu: true },
   orders: { path: "/rental/orders", label: "订单管理", permission: "store-rental:order:view", icon: <FileTextOutlined />, menu: true },
   orderDetail: { path: "/rental/orders/:id", label: "订单详情", permission: "store-rental:order:view", icon: <FileTextOutlined /> },
-  itemGroups: { path: "/rental/item-groups", label: "商品目录", permission: "store-rental:vehicle-group:manage", icon: <AppstoreOutlined />, menu: true },
-  assets: { path: "/rental/assets", label: "资产与库存", permission: "store-rental:vehicle:view", icon: <BoxPlotOutlined />, menu: true },
+  itemGroups: { path: "/rental/item-groups", label: "商品目录", permission: "rental-core:catalog:view", legacyPermissions: ["store-rental:vehicle-group:manage"], icon: <AppstoreOutlined />, menu: true },
+  assets: { path: "/rental/assets", label: "资产与库存", permission: "rental-core:asset:view", legacyPermissions: ["store-rental:vehicle:view"], icon: <BoxPlotOutlined />, menu: true },
   locations: { path: "/rental/locations", label: "履约地点", permission: "store-rental:station:view", icon: <ShopOutlined />, menu: true },
   pricing: { path: "/rental/pricing", label: "基础定价", permission: "store-rental:price:manage", icon: <FundOutlined />, menu: true },
   discounts: { path: "/rental/discounts", label: "优惠方案", permission: "store-rental:price:manage", icon: <TagsOutlined />, menu: true },
@@ -72,5 +74,6 @@ export function canAccessRoute(
   categoryCode?: RentalCategoryCode
 ) {
   const supportsCategory = !route.categories || Boolean(categoryCode && route.categories.includes(categoryCode));
-  return hasPermission(route.permission) && hasCapability(route.capability) && supportsCategory;
+  const supportsPermission = hasPermission(route.permission) || Boolean(route.legacyPermissions?.some((permission) => hasPermission(permission)));
+  return supportsPermission && hasCapability(route.capability) && supportsCategory;
 }

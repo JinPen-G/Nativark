@@ -2195,35 +2195,35 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   },
   {
     method: "get", path: "/api/rental/v1/item-groups", tag: "RentalCore", operationId: "listRentalItemGroups",
-    summary: "List generic rental item groups", permissions: ["store-rental:vehicle-group:manage"], responseSchema: "GenericObject"
+    summary: "List generic rental item groups", permissions: ["rental-core:catalog:view"], responseSchema: "GenericObject"
   },
   {
     method: "post", path: "/api/rental/v1/item-groups", tag: "RentalCore", operationId: "createRentalItemGroup",
-    summary: "Create generic rental item group", permissions: ["store-rental:vehicle-group:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+    summary: "Create generic rental item group", permissions: ["rental-core:catalog:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
   },
   {
     method: "put", path: "/api/rental/v1/item-groups/{id}", tag: "RentalCore", operationId: "updateRentalItemGroup",
-    summary: "Update generic rental item group", permissions: ["store-rental:vehicle-group:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+    summary: "Update generic rental item group", permissions: ["rental-core:catalog:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
   },
   {
     method: "get", path: "/api/rental/v1/assets", tag: "RentalCore", operationId: "listRentalAssets",
-    summary: "List serialized rental assets", permissions: ["store-rental:vehicle:view"], responseSchema: "GenericObject"
+    summary: "List serialized rental assets", permissions: ["rental-core:asset:view"], responseSchema: "GenericObject"
   },
   {
     method: "post", path: "/api/rental/v1/assets", tag: "RentalCore", operationId: "createRentalAsset",
-    summary: "Create serialized rental asset", permissions: ["store-rental:vehicle:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+    summary: "Create serialized rental asset", permissions: ["rental-core:asset:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
   },
   {
     method: "put", path: "/api/rental/v1/assets/{id}", tag: "RentalCore", operationId: "updateRentalAsset",
-    summary: "Update serialized rental asset", permissions: ["store-rental:vehicle:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+    summary: "Update serialized rental asset", permissions: ["rental-core:asset:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
   },
   {
     method: "get", path: "/api/rental/v1/stock-balances", tag: "RentalCore", operationId: "listRentalStockBalances",
-    summary: "List quantity stock balances", permissions: ["store-rental:vehicle:view"], responseSchema: "GenericObject"
+    summary: "List quantity stock balances", permissions: ["rental-core:asset:view"], responseSchema: "GenericObject"
   },
   {
     method: "put", path: "/api/rental/v1/stock-balances", tag: "RentalCore", operationId: "saveRentalStockBalance",
-    summary: "Save quantity stock balance", permissions: ["store-rental:vehicle:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+    summary: "Save quantity stock balance", permissions: ["rental-core:asset:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
   },
   {
     method: "post", path: "/api/rental/v1/availability", tag: "RentalCore", operationId: "checkRentalAvailability",

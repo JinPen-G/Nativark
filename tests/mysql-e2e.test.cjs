@@ -421,6 +421,16 @@ async function main() {
   };
   assert.equal(seedCounts.tenants, 3, "Seed 后租户数");
   assert.ok(seedCounts.orders >= 29, `Seed 后订单数异常: ${seedCounts.orders}`);
+  assert.equal(
+    readCount("SELECT COUNT(DISTINCT `categoryCode`) FROM `business_workspaces` WHERE `tenantId`='tenant_001' AND `status`='ACTIVE';"),
+    4,
+    "demo 租户必须具备四个启用品类空间"
+  );
+  assert.equal(
+    readCount("SELECT COUNT(*) FROM `workspace_members` WHERE `tenantId`='tenant_001';"),
+    readCount("SELECT COUNT(*) FROM `User` WHERE `tenantId`='tenant_001';") * 4,
+    "demo 的每个账号都必须加入四个测试空间"
+  );
   ok(`双 Seed 各执行两次，计数稳定: ${JSON.stringify(seedCounts)}`);
 
   console.log("== 5. 真实旧库升级：旧通知表带数据 → 数据保留式迁移 ==");
@@ -513,6 +523,41 @@ async function main() {
   assert.equal(demo.tenant.categoryCode, "camera");
   assert.equal(demo2.tenant.categoryCode, "camping");
   ok("demo=camera / demo2=camping，品类编码为小写领域值");
+  assert.equal(demo.workspaces.length, 4, `demo 登录应返回四个经营空间，实际 ${demo.workspaces.length}`);
+  assert.deepEqual(
+    [...new Set(demo.workspaces.map((workspace) => workspace.categoryCode))].sort(),
+    ["camera", "camping", "construction", "vehicle"],
+    "demo 四个空间必须一一覆盖四个品类"
+  );
+  const demoSampleMinimums = {
+    camera: { groups: 3, assets: 6, stocks: 0 },
+    camping: { groups: 3, assets: 0, stocks: 2 },
+    vehicle: { groups: 2, assets: 4, stocks: 0 },
+    construction: { groups: 2, assets: 1, stocks: 1 }
+  };
+  let demoWorkspaceToken = demo.accessToken;
+  for (const workspace of demo.workspaces) {
+    if (workspace.id !== demo.currentWorkspaceId) {
+      const switched = await request("POST", "/api/auth/switch-workspace", { workspaceId: workspace.id }, demoWorkspaceToken);
+      assert.equal(switched.status, 201, `切换到 ${workspace.categoryCode} 测试空间失败`);
+      demoWorkspaceToken = switched.body.data.accessToken;
+    }
+    const [profileResponse, groupsResponse, assetsResponse, stocksResponse] = await Promise.all([
+      request("GET", "/api/rental/v1/tenant-profile", null, demoWorkspaceToken),
+      request("GET", "/api/rental/v1/item-groups", null, demoWorkspaceToken),
+      request("GET", "/api/rental/v1/assets", null, demoWorkspaceToken),
+      request("GET", "/api/rental/v1/stock-balances", null, demoWorkspaceToken)
+    ]);
+    assert.equal(profileResponse.body.data.categoryCode, workspace.categoryCode, `${workspace.name} 品类上下文不一致`);
+    const minimum = demoSampleMinimums[workspace.categoryCode];
+    assert.ok(groupsResponse.body.data.length >= minimum.groups, `${workspace.name} 缺少测试商品`);
+    assert.ok(assetsResponse.body.data.length >= minimum.assets, `${workspace.name} 缺少测试资产`);
+    assert.ok(stocksResponse.body.data.length >= minimum.stocks, `${workspace.name} 缺少测试库存`);
+  }
+  const demoBackToDefault = await request("POST", "/api/auth/switch-workspace", { workspaceId: demo.currentWorkspaceId }, demoWorkspaceToken);
+  assert.equal(demoBackToDefault.status, 201, "四品类样本验证后切回 demo 默认空间失败");
+  demo.accessToken = demoBackToDefault.body.data.accessToken;
+  ok("demo 四品类空间可切换，且摄影/露营/车辆/工程均有独立测试商品与资产或库存");
   const cameraLegacy = await request("GET", "/api/store-rental/orders", null, demo.accessToken);
   assert.equal(cameraLegacy.status, 403, "camera 租户访问车辆兼容域必须 403");
   ok("品类守卫拒绝 camera 租户访问车辆域");
@@ -1047,6 +1092,14 @@ async function main() {
     );
     assert.equal(asset.status, 201, `车辆资产登记失败: ${JSON.stringify(asset.body).slice(0, 200)}`);
   }
+  const duplicateVehicleIdentifier = await request(
+    "POST",
+    "/api/rental/v1/assets",
+    { itemGroupId: truckGroup.body.data.id, locationId: vehicleLocation.id, assetNo: "E2E-TRUCK-003", attributes: { licensePlate: " e2e-001 ", vin: "E2E-UNIQUE-VIN-003" } },
+    vehicleA.accessToken
+  );
+  assert.equal(duplicateVehicleIdentifier.status, 409, "动态唯一字段必须在当前经营空间内忽略大小写与首尾空格判重");
+  assert.match(JSON.stringify(duplicateVehicleIdentifier.body), /车牌号已存在/u, "重复原因应指出车牌号");
   const truckPlan = await request(
     "POST",
     "/api/rental/v1/pricing-plans",

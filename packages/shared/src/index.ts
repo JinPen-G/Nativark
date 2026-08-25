@@ -3890,6 +3890,8 @@ export interface RentalAttributeDefinition {
   scope: RentalAttributeScope;
   type: RentalAttributeValueType;
   required?: boolean;
+  /** 当前经营空间内唯一；由服务端按字段类型归一化后校验。 */
+  unique?: boolean;
   unit?: string;
   options?: string[];
 }
@@ -4539,7 +4541,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
         { code: "model", label: "型号", scope: "item_group", type: "string", required: true },
         { code: "mount", label: "卡口", scope: "item_group", type: "string" },
         { code: "sensor", label: "传感器规格", scope: "item_group", type: "string" },
-        { code: "serialNo", label: "设备序列号", scope: "asset", type: "string", required: true },
+        { code: "serialNo", label: "设备序列号", scope: "asset", type: "string", required: true, unique: true },
         { code: "shutterCount", label: "快门次数", scope: "transaction", type: "number", unit: "次" },
         { code: "conditionGrade", label: "成色等级", scope: "asset", type: "select", options: ["A", "B", "C"] }
       ],
@@ -4563,7 +4565,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
         sampleAmountIncrement: 80
       }
     },
-    version: "0.2.0"
+    version: "0.3.0"
   },
   {
     code: RentalCategoryCode.Camping,
@@ -4585,7 +4587,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
         { code: "people", label: "适用人数", scope: "item_group", type: "number", unit: "人" },
         { code: "season", label: "季节规格", scope: "item_group", type: "select", options: ["三季", "四季"] },
         { code: "material", label: "材质", scope: "item_group", type: "string" },
-        { code: "batchNo", label: "批次号", scope: "asset", type: "string" },
+        { code: "batchNo", label: "批次号", scope: "asset", type: "string", unique: true },
         { code: "cleaningStatus", label: "清洁状态", scope: "transaction", type: "select", options: ["clean", "needs_cleaning", "damaged"] }
       ],
       supportsHolidayPricing: true,
@@ -4608,7 +4610,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
         sampleAmountIncrement: 20
       }
     },
-    version: "0.2.0"
+    version: "0.3.0"
   },
   {
     code: RentalCategoryCode.Vehicle,
@@ -4616,7 +4618,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     description: "汽车、摩托车和其他载具租赁",
     supportedInventoryModes: [RentalInventoryMode.Serialized, RentalInventoryMode.Bundle],
     defaultCapabilities: ["serialized_inventory", "bundle_inventory", "pickup", "return", "dispatch", "usage_reading", "qualification", "iot"],
-    terminology: { itemLabel: "车辆", itemGroupLabel: "车型组", assetLabel: "车辆", fulfillmentLabel: "门店", pickupLabel: "取车", returnLabel: "还车", identifierLabel: "车牌号", usageMetricLabel: "里程" },
+    terminology: { itemLabel: "车辆", itemGroupLabel: "车型组", assetLabel: "车辆", fulfillmentLabel: "门店", pickupLabel: "取车", returnLabel: "还车", identifierLabel: "车辆编号", usageMetricLabel: "里程" },
     attributeSchema: { manufacturer: "string", brand: "string", model: "string", trim: "string", energyType: "string", licensePlate: "string", vin: "string", mileage: "number" },
     businessModel: {
       pricingUnits: ["hour", "day_24h", "calendar_day", "week", "month", "usage", "package"],
@@ -4630,8 +4632,8 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
         { code: "model", label: "车系", scope: "item_group", type: "string", required: true },
         { code: "trim", label: "款型", scope: "item_group", type: "string" },
         { code: "energyType", label: "能源类型", scope: "item_group", type: "select", options: ["燃油", "纯电", "混动", "其他"] },
-        { code: "licensePlate", label: "车牌号", scope: "asset", type: "string", required: true },
-        { code: "vin", label: "VIN", scope: "asset", type: "string", required: true },
+        { code: "licensePlate", label: "车牌号", scope: "asset", type: "string", required: true, unique: true },
+        { code: "vin", label: "VIN", scope: "asset", type: "string", required: true, unique: true },
         { code: "mileage", label: "里程", scope: "transaction", type: "number", unit: "km" },
         { code: "energyLevel", label: "油量/电量", scope: "transaction", type: "number", unit: "%" }
       ],
@@ -4655,7 +4657,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
         sampleAmountIncrement: 100
       }
     },
-    version: "0.2.0"
+    version: "0.3.0"
   },
   {
     code: RentalCategoryCode.Construction,
@@ -4677,7 +4679,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
         { code: "model", label: "型号", scope: "item_group", type: "string", required: true },
         { code: "power", label: "功率", scope: "item_group", type: "string" },
         { code: "ratedLoad", label: "额定载荷", scope: "item_group", type: "number" },
-        { code: "factoryNo", label: "出厂编号", scope: "asset", type: "string", required: true },
+        { code: "factoryNo", label: "出厂编号", scope: "asset", type: "string", required: true, unique: true },
         { code: "inspectionExpiry", label: "检验有效期", scope: "asset", type: "date" },
         { code: "hourMeter", label: "累计工时", scope: "transaction", type: "number", unit: "小时" }
       ],
@@ -4701,7 +4703,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
         sampleAmountIncrement: 180
       }
     },
-    version: "0.2.0"
+    version: "0.3.0"
   }
 ];
 

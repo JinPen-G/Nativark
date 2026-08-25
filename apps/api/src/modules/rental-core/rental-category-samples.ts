@@ -114,10 +114,77 @@ const campingSamples: RentalCategorySampleFactory = (input) => {
   return { itemGroups: groups, assets: [], stockBalances };
 };
 
+const vehicleSamples: RentalCategorySampleFactory = (input) => {
+  const sedan = itemGroup(input, "VEH-SEDAN", "标准轿车", RentalInventoryMode.Serialized, "辆", {
+    manufacturer: "上汽集团", brand: "荣威", model: "D7", trim: "标准版", energyType: "混动"
+  });
+  const suv = itemGroup(input, "VEH-SUV", "城市 SUV", RentalInventoryMode.Serialized, "辆", {
+    manufacturer: "吉利汽车", brand: "领克", model: "08", trim: "Pro", energyType: "混动"
+  });
+  const assets = [sedan, suv].flatMap((group, groupIndex) => Array.from({ length: 2 }, (_, index) => {
+    const sequence = groupIndex * 2 + index + 1;
+    return {
+      id: `${group.id}_asset_${index + 1}`,
+      tenantId: input.tenantId,
+      itemGroupId: group.id,
+      itemGroupCode: group.code,
+      itemGroupName: group.name,
+      assetNo: `VEH-${String(sequence).padStart(3, "0")}`,
+      locationId: input.location.id,
+      locationName: input.location.name,
+      status: RentalAssetStatus.Available,
+      attributes: { licensePlate: `粤B·R${String(sequence).padStart(4, "0")}`, vin: `LDEMO2026VEH${String(sequence).padStart(4, "0")}` },
+      createdAt: input.timestamp,
+      updatedAt: input.timestamp
+    };
+  }));
+  return { itemGroups: [sedan, suv], assets, stockBalances: [] };
+};
+
+const constructionSamples: RentalCategorySampleFactory = (input) => {
+  const excavator = itemGroup(input, "CON-EXCAVATOR", "小型挖掘机", RentalInventoryMode.Serialized, "台", {
+    manufacturer: "三一重工", brand: "SANY", model: "SY35U", power: "21.5kW", ratedLoad: 3.78
+  });
+  const barriers = itemGroup(input, "CON-BARRIER", "施工围挡", RentalInventoryMode.Quantity, "片", {
+    manufacturer: "演示工程物资", brand: "RIMO", model: "B-2000", ratedLoad: 20
+  });
+  const asset: RentalAsset = {
+    id: `${excavator.id}_asset_1`,
+    tenantId: input.tenantId,
+    itemGroupId: excavator.id,
+    itemGroupCode: excavator.code,
+    itemGroupName: excavator.name,
+    assetNo: "CON-EXC-001",
+    locationId: input.location.id,
+    locationName: input.location.name,
+    status: RentalAssetStatus.Available,
+    attributes: { factoryNo: "SANY-SY35U-0001", inspectionExpiry: "2027-12-31" },
+    createdAt: input.timestamp,
+    updatedAt: input.timestamp
+  };
+  const stock: RentalStockBalance = {
+    id: `${barriers.id}_stock`,
+    tenantId: input.tenantId,
+    itemGroupId: barriers.id,
+    itemGroupCode: barriers.code,
+    itemGroupName: barriers.name,
+    locationId: input.location.id,
+    locationName: input.location.name,
+    onHandQuantity: 40,
+    reservedQuantity: 0,
+    maintenanceQuantity: 2,
+    availableQuantity: 38,
+    updatedAt: input.timestamp
+  };
+  return { itemGroups: [excavator, barriers], assets: [asset], stockBalances: [stock] };
+};
+
 /** 演示数据也通过独立注册表提供，避免样本分支渗入 Rental Core 主流程。 */
 const sampleFactories: Partial<Record<RentalCategoryCode, RentalCategorySampleFactory>> = {
   [RentalCategoryCode.Camera]: cameraSamples,
-  [RentalCategoryCode.Camping]: campingSamples
+  [RentalCategoryCode.Camping]: campingSamples,
+  [RentalCategoryCode.Vehicle]: vehicleSamples,
+  [RentalCategoryCode.Construction]: constructionSamples
 };
 
 export function buildRentalCategorySamples(input: RentalCategorySampleInput): RentalCategorySampleCatalog {
