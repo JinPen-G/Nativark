@@ -42,7 +42,7 @@ class FakeRepository {
   await business.onApplicationBootstrap();
   const context = () => {
     const profile = core.getProfile("tenant_camera_db");
-    return { profile, category: core.listCategories().find((item) => item.code === profile.categoryCode), settings: core.getBusinessSettings("tenant_camera_db"), groups: core.listItemGroups("tenant_camera_db"), couponTemplates: core.listCouponTemplates("tenant_camera_db") };
+    return { profile, category: core.listCategories().find((item) => item.code === profile.categoryCode), settings: core.getBusinessSettings("tenant_camera_db"), groups: core.listItemGroups("tenant_camera_db"), couponTemplates: core.listCouponTemplates("tenant_camera_db"), locations: core.listLocations("tenant_camera_db"), operators: core.listOperators("tenant_camera_db") };
   };
   business.listPricingPlans("tenant_camera_db", context());
   await business.persist("tenant_camera_db");
@@ -54,7 +54,7 @@ class FakeRepository {
   await Promise.all([restoredCore.onApplicationBootstrap(), restoredBusiness.onApplicationBootstrap()]);
   assert.equal(restoredCore.listOperators("tenant_camera_db").some((item) => item.code === "PARTNER"), true, "core state must survive service restart");
   const restoredProfile = restoredCore.getProfile("tenant_camera_db");
-  const restoredContext = { profile: restoredProfile, category: restoredCore.listCategories().find((item) => item.code === restoredProfile.categoryCode), settings: restoredCore.getBusinessSettings("tenant_camera_db"), groups: restoredCore.listItemGroups("tenant_camera_db"), couponTemplates: restoredCore.listCouponTemplates("tenant_camera_db") };
+  const restoredContext = { profile: restoredProfile, category: restoredCore.listCategories().find((item) => item.code === restoredProfile.categoryCode), settings: restoredCore.getBusinessSettings("tenant_camera_db"), groups: restoredCore.listItemGroups("tenant_camera_db"), couponTemplates: restoredCore.listCouponTemplates("tenant_camera_db"), locations: restoredCore.listLocations("tenant_camera_db"), operators: restoredCore.listOperators("tenant_camera_db") };
   assert.equal(restoredBusiness.listPricingPlans("tenant_camera_db", restoredContext)[0].categoryCode, "camera", "business state must survive service restart");
   console.log("Rental state persistence test passed: tenant category, core aggregate and business aggregate survive restart.");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

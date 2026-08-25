@@ -732,6 +732,61 @@ async function main() {
   assert.equal(cat03PricingDisabled.status, 200, "CAT-03 用例定价停用失败");
   ok("CAT-03 套装替代、实际组成拆分、数量部分归还与最终归还边界验证通过");
 
+  console.log("== 9.2 CAT-04 经营主体、地点能力与订单快照 ==");
+  const locationOperator = (await request("GET", "/api/rental/v1/fulfillment-operators", null, demo.accessToken)).body.data.find((row) => row.id === location.operatorId);
+  assert.ok(locationOperator, "摄影主地点缺少经营主体");
+  const locationPayload = (overrides = {}) => ({
+    code: location.code, name: location.name, type: location.type, operatorId: location.operatorId,
+    parentLocationId: location.parentLocationId, capabilities: location.capabilities, address: location.address,
+    contactName: location.contactName, contactPhone: location.contactPhone, businessHours: location.businessHours,
+    status: location.status, ...overrides
+  });
+  const operatorPayload = (overrides = {}) => ({
+    code: locationOperator.code, name: locationOperator.name, type: locationOperator.type,
+    contactName: locationOperator.contactName, contactPhone: locationOperator.contactPhone,
+    settlementMode: locationOperator.settlementMode, status: locationOperator.status, ...overrides
+  });
+  const cat04Start = new Date(Date.now() + 340 * 86400000).toISOString();
+  const cat04End = new Date(Date.now() + 342 * 86400000).toISOString();
+  const cat04Lines = [{ itemGroupId: serialized[0].id, quantity: 1 }];
+  const cat04QuotePayload = { customerType: "personal", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: cat04Start, endAt: cat04End, lines: cat04Lines };
+
+  assert.equal((await request("PUT", `/api/rental/v1/locations/${location.id}`, locationPayload({ capabilities: location.capabilities.filter((value) => value !== "return") }), demo.accessToken)).status, 200);
+  assert.equal((await request("POST", "/api/rental/v1/quotes", cat04QuotePayload, demo.accessToken)).status, 409, "缺少归还能力的地点不得报价");
+  assert.equal((await request("PUT", `/api/rental/v1/locations/${location.id}`, locationPayload(), demo.accessToken)).status, 200);
+
+  assert.equal((await request("PUT", `/api/rental/v1/fulfillment-operators/${locationOperator.id}`, operatorPayload({ status: "disabled" }), demo.accessToken)).status, 200);
+  assert.equal((await request("POST", "/api/rental/v1/quotes", cat04QuotePayload, demo.accessToken)).status, 409, "停用经营主体的地点不得报价");
+  assert.equal((await request("PUT", `/api/rental/v1/fulfillment-operators/${locationOperator.id}`, operatorPayload(), demo.accessToken)).status, 200);
+
+  const cat04Quote = await request("POST", "/api/rental/v1/quotes", cat04QuotePayload, demo.accessToken);
+  assert.equal(cat04Quote.status, 201, `CAT-04 有效地点报价失败: ${JSON.stringify(cat04Quote.body).slice(0, 200)}`);
+  const cat04Order = await request("POST", "/api/rental/v1/orders", {
+    quoteId: cat04Quote.body.data.id, customerType: "personal", customerName: "CAT-04 快照客户",
+    fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id,
+    startAt: cat04Start, endAt: cat04End, lines: cat04Lines
+  }, demo.accessToken);
+  assert.equal(cat04Order.status, 201, "CAT-04 下单失败");
+  assert.equal(cat04Order.body.data.fulfillmentLocationSnapshot.name, location.name, "订单必须保存领取地点快照");
+  assert.equal(cat04Order.body.data.fulfillmentLocationSnapshot.operator.name, locationOperator.name, "订单必须保存经营主体快照");
+  assert.equal(cat04Order.body.data.returnLocationSnapshot.name, location.name, "订单必须保存归还地点快照");
+
+  assert.equal((await request("PUT", `/api/rental/v1/fulfillment-operators/${locationOperator.id}`, operatorPayload({ name: `${locationOperator.name}-已改名` }), demo.accessToken)).status, 200);
+  assert.equal((await request("PUT", `/api/rental/v1/locations/${location.id}`, locationPayload({ name: `${location.name}-已改名` }), demo.accessToken)).status, 200);
+  const cat04SnapshotRead = await request("GET", `/api/rental/v1/orders/${cat04Order.body.data.id}`, null, demo.accessToken);
+  assert.equal(cat04SnapshotRead.body.data.fulfillmentLocationSnapshot.name, location.name, "地点主档改名不得篡改订单快照");
+  assert.equal(cat04SnapshotRead.body.data.fulfillmentLocationSnapshot.operator.name, locationOperator.name, "经营主体改名不得篡改订单快照");
+
+  assert.equal((await request("PUT", `/api/rental/v1/fulfillment-operators/${locationOperator.id}`, operatorPayload(), demo.accessToken)).status, 200);
+  assert.equal((await request("PUT", `/api/rental/v1/locations/${location.id}`, locationPayload(), demo.accessToken)).status, 200);
+  assert.equal((await request("POST", `/api/rental/v1/orders/${cat04Order.body.data.id}/confirm`, {}, demo.accessToken)).status, 201);
+  assert.equal((await request("PUT", `/api/rental/v1/locations/${location.id}`, locationPayload({ status: "disabled" }), demo.accessToken)).status, 200);
+  assert.equal((await request("POST", "/api/rental/v1/quotes", cat04QuotePayload, demo.accessToken)).status, 409, "停用地点不得新报价");
+  assert.equal((await request("POST", `/api/rental/v1/orders/${cat04Order.body.data.id}/allocate`, {}, demo.accessToken)).status, 409, "下单后停用地点必须阻止继续配货");
+  assert.equal((await request("PUT", `/api/rental/v1/locations/${location.id}`, locationPayload(), demo.accessToken)).status, 200);
+  assert.equal((await request("POST", `/api/rental/v1/orders/${cat04Order.body.data.id}/cancel`, { reason: "CAT-04 E2E 清理" }, demo.accessToken)).status, 201);
+  ok("CAT-04 地点能力、地点/主体启停、配货阻断与经营主体/地点不可变快照验证通过");
+
   console.log("== 10. 露营品类深度用例：数量+套装库存、缺件异常与库存还原 ==");
   const campingGroups = (await request("GET", "/api/rental/v1/item-groups", null, demo2.accessToken)).body.data;
   const tent = campingGroups.find((group) => group.code === "CAMP-TENT");

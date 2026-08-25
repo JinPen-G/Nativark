@@ -25,7 +25,9 @@ function context() {
     category: core.listCategories().find((item) => item.code === profile.categoryCode),
     settings: core.getBusinessSettings(tenantId),
     groups: core.listItemGroups(tenantId),
-    couponTemplates: core.listCouponTemplates(tenantId)
+    couponTemplates: core.listCouponTemplates(tenantId),
+    locations: core.listLocations(tenantId),
+    operators: core.listOperators(tenantId)
   };
 }
 

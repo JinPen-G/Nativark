@@ -21,6 +21,8 @@ import {
   type RentalCouponTemplate,
   type RentalFulfillmentOperator,
   type RentalFulfillmentLocation,
+  type RentalFulfillmentLocationSnapshot,
+  type RentalFulfillmentMode,
   type RentalInspectionRecord,
   type RentalInspectionTemplate,
   type RentalItemGroup,
@@ -608,7 +610,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const state = await this.factContext(tenantId);
     const group = this.group(state, input.itemGroupId);
     if (group.inventoryMode !== RentalInventoryMode.Serialized) throw new BadRequestException("只有序列化库存可以登记独立资产");
-    const location = this.location(state, input.locationId);
+    const location = this.activeLocation(state, input.locationId, "storage");
     if (!input.assetNo?.trim()) throw new BadRequestException("资产编号不能为空");
     const definition = this.category(state.profile.categoryCode);
     const assetNo = input.assetNo.trim();
@@ -662,7 +664,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const state = await this.factContext(tenantId);
     const group = this.group(state, input.itemGroupId);
     if (group.inventoryMode !== RentalInventoryMode.Quantity) throw new BadRequestException("只有数量型库存可以维护库存余额");
-    const location = this.location(state, input.locationId);
+    const location = this.activeLocation(state, input.locationId, "storage");
     if (!Number.isInteger(input.onHandQuantity) || input.onHandQuantity < 0) throw new BadRequestException("在手数量必须是非负整数");
     const maintenance = input.maintenanceQuantity ?? 0;
     if (!Number.isInteger(maintenance) || maintenance < 0 || maintenance > input.onHandQuantity) throw new BadRequestException("维护数量无效");
@@ -681,7 +683,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   async availability(tenantId: string, input: RentalAvailabilityRequest): Promise<RentalAvailabilityResult> {
     const state = await this.factContext(tenantId);
     this.validatePeriod(input.startAt, input.endAt);
-    this.location(state, input.locationId);
+    this.activeLocation(state, input.locationId);
     if (!input.lines?.length) throw new BadRequestException("至少需要一个租赁明细");
     return this.computeAvailability(state, await this.loadInventorySnapshot(tenantId), input);
   }
@@ -693,7 +695,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   async assertAvailabilityWithLocks(tenantId: string, input: RentalAvailabilityRequest, tx: RentalFactTx) {
     const state = this.state(tenantId);
     this.validatePeriod(input.startAt, input.endAt);
-    this.location(state, input.locationId);
+    this.activeLocation(state, input.locationId);
     if (!input.lines?.length) throw new BadRequestException("至少需要一个租赁明细");
 
     const targets = new Map<string, InventoryLockTarget>();
@@ -742,7 +744,9 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       lines: input.lines.map((line) => ({ itemGroupId: line.itemGroupId, quantity: line.quantity }))
     });
     if (!checked.available) throw new ConflictException("所选时间段库存不足");
-    const location = this.location(state, input.fulfillmentLocationId);
+    const { fulfillmentLocation: location, returnLocation } = this.validateFulfillmentSelection(
+      state, input.fulfillmentMode, input.fulfillmentLocationId, input.returnLocationId
+    );
     const timestamp = now();
     const orderId = id("order");
     const orderLines = input.lines.map((line) => {
@@ -772,7 +776,9 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       customerType: input.customerType, customerId: input.customerId, customerName: input.customerName.trim(), contactPhone: input.contactPhone?.trim(),
       fulfillmentMode: input.fulfillmentMode,
       fulfillmentLocationId: location.id, fulfillmentLocationName: location.name,
-      returnLocationId: input.returnLocationId, returnLocationName: input.returnLocationId ? this.location(state, input.returnLocationId).name : location.name,
+      fulfillmentLocationSnapshot: this.locationSnapshot(state, location),
+      returnLocationId: input.returnLocationId, returnLocationName: returnLocation.name,
+      returnLocationSnapshot: this.locationSnapshot(state, returnLocation),
       startAt: input.startAt, endAt: input.endAt,
       quoteId: quote.id, quoteNo: quote.quoteNo, pricingPlanVersion: quote.pricingPlanVersion,
       ruleVersion: quote.ruleVersion, ruleSnapshot: structuredClone(quote.ruleSnapshot), calendarVersion: quote.calendarVersion, chargeLines: structuredClone(quote.chargeLines),
@@ -800,6 +806,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const state = await this.factContext(tenantId);
     const order = await this.lockedOrder(tenantId, orderId, tx);
     if (order.status !== RentalCoreOrderStatus.Reserved) throw new ConflictException("只有已确认预占的订单可以配货");
+    this.assertOutboundLocationActive(state, order);
     // 先锁候选资产行，再在**同一事务内**读资产与既有分配。
     //
     // 顺序不可反，也不能省锁：只锁订单行时两张订单锁的是不同的行、互不争锁，
@@ -960,12 +967,13 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   }
 
   async completeHandoverWithoutInspection(tenantId: string, orderId: string, stage: "pickup" | "return", overdueCharge = 0, tx?: RentalFactTx) {
-    this.state(tenantId);
+    const state = this.state(tenantId);
     const order = await this.lockedOrder(tenantId, orderId, tx);
     const assetChanges: AssetStatusChange[] = [];
     if (stage === "pickup") {
       if (order.ruleSnapshot.fulfillment.pickupInspectionRequired) throw new ConflictException("当前规则要求完成领取检查");
       if (order.status !== RentalCoreOrderStatus.ReadyForPickup) throw new ConflictException("订单尚未完成配货");
+      this.assertOutboundLocationActive(state, order);
       this.markPickedUp(order, assetChanges);
     } else {
       if (order.ruleSnapshot.fulfillment.returnInspectionRequired) throw new ConflictException("当前规则要求完成归还检查");
@@ -1010,6 +1018,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (missing.length) throw new BadRequestException(`缺少必填检查项：${missing.map((field) => field.label).join("、")}`);
     if (template.stage === "pickup" && order.status !== RentalCoreOrderStatus.ReadyForPickup) throw new ConflictException("订单尚未完成配货，不能办理取件检查");
     if (template.stage === "return" && order.status !== RentalCoreOrderStatus.Renting) throw new ConflictException("只有租赁中的订单可以办理归还检查");
+    if (template.stage === "pickup") this.assertOutboundLocationActive(state, order);
     const record: RentalInspectionRecord = {
       id: id("inspection"), tenantId, orderId, stage: template.stage, templateId: template.id,
       templateCode: template.code, templateVersion: template.version, results: input.results,
@@ -1123,6 +1132,45 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   private category(code: RentalCategoryCode) { const found = categories.find((row) => row.code === code); if (!found) throw new BadRequestException("未知经营品类"); return found; }
   private group(state: TenantRentalState, groupId: string) { const found = state.itemGroups.find((row) => row.id === groupId); if (!found) throw new NotFoundException("标的分组不存在"); return found; }
   private location(state: TenantRentalState, locationId: string) { const found = state.locations.find((row) => row.id === locationId); if (!found) throw new NotFoundException("履约网点不存在"); return found; }
+
+  private activeLocation(state: TenantRentalState, locationId: string, capability?: RentalFulfillmentLocation["capabilities"][number]) {
+    const location = this.location(state, locationId);
+    const operator = location.operatorId ? state.operators.find((row) => row.id === location.operatorId) : undefined;
+    if (location.status !== "enabled") throw new ConflictException(`${location.name}已停用`);
+    if (!operator || operator.status !== "enabled") throw new ConflictException(`${location.name}所属经营主体已停用或不存在`);
+    if (capability && !location.capabilities.includes(capability)) throw new ConflictException(`${location.name}不支持${capability === "pickup" ? "领取" : capability === "return" ? "归还" : capability === "delivery" ? "配送" : "仓储"}`);
+    return location;
+  }
+
+  private validateFulfillmentSelection(
+    state: TenantRentalState,
+    mode: RentalFulfillmentMode,
+    fulfillmentLocationId: string,
+    returnLocationId?: string
+  ) {
+    const outboundCapability = mode === "delivery" || mode === "onsite_delivery" ? "delivery" : "pickup";
+    const fulfillmentLocation = this.activeLocation(state, fulfillmentLocationId, outboundCapability);
+    const fulfillmentOperator = fulfillmentLocation.operatorId ? state.operators.find((row) => row.id === fulfillmentLocation.operatorId) : undefined;
+    if (mode === "partner_pickup_return" && fulfillmentOperator?.type !== "partner") throw new ConflictException("合作点取还必须选择合作经营主体的地点");
+    const returnLocation = this.activeLocation(state, returnLocationId ?? fulfillmentLocationId, "return");
+    return { fulfillmentLocation, returnLocation };
+  }
+
+  private locationSnapshot(state: TenantRentalState, location: RentalFulfillmentLocation): RentalFulfillmentLocationSnapshot {
+    const operator = location.operatorId ? state.operators.find((row) => row.id === location.operatorId) : undefined;
+    if (!operator) throw new ConflictException(`${location.name}缺少经营主体，不能生成订单快照`);
+    return {
+      id: location.id, code: location.code, name: location.name, type: location.type,
+      capabilities: [...location.capabilities], address: location.address, contactName: location.contactName,
+      contactPhone: location.contactPhone, businessHours: location.businessHours,
+      operator: { id: operator.id, code: operator.code, name: operator.name, type: operator.type, settlementMode: operator.settlementMode }
+    };
+  }
+
+  private assertOutboundLocationActive(state: TenantRentalState, order: RentalOrder) {
+    const capability = order.fulfillmentMode === "delivery" || order.fulfillmentMode === "onsite_delivery" ? "delivery" : "pickup";
+    this.activeLocation(state, order.fulfillmentLocationId, capability);
+  }
   private async requireOrder(tenantId: string, orderId: string) {
     const order = await this.factStore.findOrder(tenantId, orderId);
     if (!order) throw new NotFoundException("租赁订单不存在");

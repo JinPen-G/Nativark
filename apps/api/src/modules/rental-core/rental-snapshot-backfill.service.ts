@@ -973,6 +973,31 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
         let lines = 0;
         let reservations = 0;
         let allocations = 0;
+        const compatibilityLocationSnapshot = (sourceLocationId: string, historicalName: string) => {
+          const sourceLocation = (core.locations ?? []).find((row) => row.id === sourceLocationId);
+          const sourceOperator = sourceLocation?.operatorId
+            ? (core.operators ?? []).find((row) => row.id === sourceLocation.operatorId)
+            : undefined;
+          if (!sourceLocation || !sourceOperator) return undefined;
+          return {
+            id: locationIdMap.get(sourceLocation.id) ?? sourceLocation.id,
+            code: sourceLocation.code,
+            name: historicalName,
+            type: sourceLocation.type,
+            capabilities: sourceLocation.capabilities,
+            address: sourceLocation.address,
+            contactName: sourceLocation.contactName,
+            contactPhone: sourceLocation.contactPhone,
+            businessHours: sourceLocation.businessHours,
+            operator: {
+              id: operatorIdMap.get(sourceOperator.id) ?? sourceOperator.id,
+              code: sourceOperator.code,
+              name: sourceOperator.name,
+              type: sourceOperator.type,
+              settlementMode: sourceOperator.settlementMode
+            }
+          };
+        };
         for (const order of core.orders ?? []) {
           const fulfillmentLocationId = locationIdMap.get(order.fulfillmentLocationId);
           const returnLocationId = order.returnLocationId
@@ -1007,8 +1032,10 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               fulfillmentMode: order.fulfillmentMode,
               fulfillmentLocationId,
               fulfillmentLocationName: order.fulfillmentLocationName,
+              fulfillmentLocationSnapshot: json(order.fulfillmentLocationSnapshot ?? compatibilityLocationSnapshot(order.fulfillmentLocationId, order.fulfillmentLocationName)),
               returnLocationId: returnLocationId ?? null,
               returnLocationName: order.returnLocationName ?? null,
+              returnLocationSnapshot: json(order.returnLocationSnapshot ?? compatibilityLocationSnapshot(order.returnLocationId ?? order.fulfillmentLocationId, order.returnLocationName ?? order.fulfillmentLocationName)),
               startAt: date(order.startAt, `order(${order.orderNo}).startAt`),
               endAt: date(order.endAt, `order(${order.orderNo}).endAt`),
               quoteId: order.quoteId,

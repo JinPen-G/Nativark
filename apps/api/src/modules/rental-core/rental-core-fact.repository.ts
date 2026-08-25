@@ -9,6 +9,7 @@ import {
   type RentalAllocation,
   type RentalAsset,
   type RentalCategoryCode,
+  type RentalFulfillmentLocationSnapshot,
   type RentalFulfillmentMode,
   type RentalInspectionRecord,
   type RentalOrder,
@@ -189,8 +190,10 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       fulfillmentMode: order.fulfillmentMode,
       fulfillmentLocationId: order.fulfillmentLocationId,
       fulfillmentLocationName: order.fulfillmentLocationName,
+      fulfillmentLocationSnapshot: order.fulfillmentLocationSnapshot as unknown as Prisma.InputJsonValue,
       returnLocationId: order.returnLocationId ?? null,
       returnLocationName: order.returnLocationName ?? null,
+      returnLocationSnapshot: order.returnLocationSnapshot as unknown as Prisma.InputJsonValue,
       startAt: new Date(order.startAt),
       endAt: new Date(order.endAt),
       quoteId: order.quoteId,
@@ -624,8 +627,16 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       fulfillmentMode: row.fulfillmentMode as RentalFulfillmentMode,
       fulfillmentLocationId: row.fulfillmentLocationId,
       fulfillmentLocationName: row.fulfillmentLocationName,
+      fulfillmentLocationSnapshot: (row.fulfillmentLocationSnapshot ?? {
+        id: row.fulfillmentLocationId, code: "", name: row.fulfillmentLocationName, type: "store", capabilities: [],
+        operator: { id: "", code: "", name: "", type: "self_operated" }
+      }) as unknown as RentalFulfillmentLocationSnapshot,
       returnLocationId: row.returnLocationId ?? undefined,
       returnLocationName: row.returnLocationName ?? undefined,
+      returnLocationSnapshot: (row.returnLocationSnapshot ?? row.fulfillmentLocationSnapshot ?? {
+        id: row.returnLocationId ?? row.fulfillmentLocationId, code: "", name: row.returnLocationName ?? row.fulfillmentLocationName,
+        type: "store", capabilities: [], operator: { id: "", code: "", name: "", type: "self_operated" }
+      }) as unknown as RentalFulfillmentLocationSnapshot,
       startAt: iso(row.startAt),
       endAt: iso(row.endAt),
       quoteId: row.quoteId,

@@ -4766,6 +4766,25 @@ export interface RentalFulfillmentOperator {
   updatedAt: string;
 }
 
+export interface RentalFulfillmentLocationSnapshot {
+  id: string;
+  code: string;
+  name: string;
+  type: RentalLocationType;
+  capabilities: Array<"pickup" | "return" | "storage" | "delivery">;
+  address?: string;
+  contactName?: string;
+  contactPhone?: string;
+  businessHours?: string;
+  operator: {
+    id: string;
+    code: string;
+    name: string;
+    type: "self_operated" | "partner";
+    settlementMode?: "self" | "monthly" | "per_order";
+  };
+}
+
 export interface SaveRentalFulfillmentOperatorRequest {
   id?: string;
   code: string;
@@ -4980,8 +4999,10 @@ export interface RentalOrder {
   fulfillmentMode: RentalFulfillmentMode;
   fulfillmentLocationId: string;
   fulfillmentLocationName: string;
+  fulfillmentLocationSnapshot: RentalFulfillmentLocationSnapshot;
   returnLocationId?: string;
   returnLocationName?: string;
+  returnLocationSnapshot: RentalFulfillmentLocationSnapshot;
   startAt: string;
   endAt: string;
   quoteId: string;

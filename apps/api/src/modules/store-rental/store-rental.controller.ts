@@ -84,7 +84,7 @@ export class StoreRentalController {
     const profile = this.rentalCoreService.getProfile(tenantId);
     const category = this.rentalCoreService.listCategories().find((item) => item.code === profile.categoryCode);
     if (!category) throw new Error("租户经营品类定义不存在");
-    return { profile, category, settings: this.rentalCoreService.getBusinessSettings(tenantId), groups: this.rentalCoreService.listItemGroups(tenantId), couponTemplates: this.rentalCoreService.listCouponTemplates(tenantId) };
+    return { profile, category, settings: this.rentalCoreService.getBusinessSettings(tenantId), groups: this.rentalCoreService.listItemGroups(tenantId), couponTemplates: this.rentalCoreService.listCouponTemplates(tenantId), locations: this.rentalCoreService.listLocations(tenantId), operators: this.rentalCoreService.listOperators(tenantId) };
   }
 
   @Get("data-dictionary")

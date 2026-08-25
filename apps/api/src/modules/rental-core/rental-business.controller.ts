@@ -66,7 +66,9 @@ export class RentalBusinessController {
       category,
       settings: this.core.getBusinessSettings(tenantId),
       groups: this.core.listItemGroups(tenantId),
-      couponTemplates: this.core.listCouponTemplates(tenantId)
+      couponTemplates: this.core.listCouponTemplates(tenantId),
+      locations: this.core.listLocations(tenantId),
+      operators: this.core.listOperators(tenantId)
     };
   }
 

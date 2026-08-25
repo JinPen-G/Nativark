@@ -51,7 +51,7 @@ export function RentalOrderDetailPage() {
         { key: "status", label: "状态", children: <Tag>{detail.status}</Tag> },
         { key: "customer", label: "客户", children: detail.customerName },
         { key: "mode", label: "租赁方式", children: detail.fulfillmentMode },
-        { key: "location", label: "领取/归还", children: `${detail.fulfillmentLocationName} → ${detail.returnLocationName ?? detail.fulfillmentLocationName}` },
+        { key: "location", label: "领取/归还", children: `${detail.fulfillmentLocationSnapshot.name}（${detail.fulfillmentLocationSnapshot.operator.name}） → ${detail.returnLocationSnapshot.name}（${detail.returnLocationSnapshot.operator.name}）` },
         { key: "quote", label: "报价", children: detail.quoteNo },
         { key: "pricing", label: "价格版本", children: detail.pricingPlanVersion },
         { key: "rule", label: "规则版本", children: detail.ruleVersion },

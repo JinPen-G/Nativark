@@ -2406,8 +2406,10 @@ model RentalOrder {
   fulfillmentLocation   RentalFulfillmentLocation @relation(fields: [fulfillmentLocationId], references: [id])
   /// 履约地点与归还地点的名称按需求 4.3 存为下单时快照，主档改名不得篡改历史订单。
   fulfillmentLocationName String
+  fulfillmentLocationSnapshot Json?
   returnLocationId      String?
   returnLocationName    String?
+  returnLocationSnapshot Json?
   startAt               DateTime
   endAt                 DateTime
   /// 报价快照：订单已内联保存 quoteNo/版本/规则/费用行，因此不对 rental_quotes 建外键，

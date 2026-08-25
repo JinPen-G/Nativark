@@ -158,7 +158,9 @@ const cameraContext = {
   category: service.listCategories().find((item) => item.code === service.getProfile(cameraTenant).categoryCode),
   settings: service.getBusinessSettings(cameraTenant),
   groups: service.listItemGroups(cameraTenant),
-  couponTemplates: service.listCouponTemplates(cameraTenant)
+  couponTemplates: service.listCouponTemplates(cameraTenant),
+  locations: service.listLocations(cameraTenant),
+  operators: service.listOperators(cameraTenant)
 };
 // ── 订单生命周期与可用量断言已移交 tests/mysql-e2e.test.cjs ──
 // RC-01 阶段 3 把订单、预占、分配、资产、库存和检查记录迁到数据库后，服务不再就地

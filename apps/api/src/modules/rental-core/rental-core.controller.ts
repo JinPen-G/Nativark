@@ -76,7 +76,7 @@ export class RentalCoreController {
     const profile = this.service.getProfile(tenantId);
     const category = this.service.listCategories().find((item) => item.code === profile.categoryCode);
     if (!category) throw new Error("当前经营空间的品类定义不存在");
-    return { profile, category, settings: this.service.getBusinessSettings(tenantId), groups: this.service.listItemGroups(tenantId), couponTemplates: this.service.listCouponTemplates(tenantId) };
+    return { profile, category, settings: this.service.getBusinessSettings(tenantId), groups: this.service.listItemGroups(tenantId), couponTemplates: this.service.listCouponTemplates(tenantId), locations: this.service.listLocations(tenantId), operators: this.service.listOperators(tenantId) };
   }
   // 必须先 await 业务结果再写快照：配置写方法已转为异步，若直接把 Promise 传进来
   // 就会与快照写入并发，快照可能捕获到变更前的状态。

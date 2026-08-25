@@ -60,7 +60,9 @@ const themeSource = read("apps/admin/src/app/theme.tsx");
   "Rental Core v0.1", "序列化资产", "数量库存", "套装", "确认预占", "执行配货"
 ].forEach((label) => requireText(rentalCorePage, label, "Rental Core UI coverage"));
 [
-  "替换套装组成", "部分归还", "allocation.itemGroupId", "allocation.quantity > 1"
+  "替换套装组成", "部分归还", "allocation.itemGroupId", "allocation.quantity > 1",
+  "detail.fulfillmentLocationSnapshot.name", "detail.fulfillmentLocationSnapshot.operator.name",
+  "detail.returnLocationSnapshot.name", "detail.returnLocationSnapshot.operator.name"
 ].forEach((label) => requireText(rentalOrderDetailPage, label, "inventory fulfillment UI coverage"));
 [
   "substitutionGroup", "默认组成", "替代候选"

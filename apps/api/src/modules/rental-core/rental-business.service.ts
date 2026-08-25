@@ -13,6 +13,8 @@ import {
   type RentalCustomerCoupon,
   type RentalDayType,
   type RentalDiscountPlan,
+  type RentalFulfillmentLocation,
+  type RentalFulfillmentOperator,
   type RentalItemGroup,
   type RentalNotificationSendLogV1,
   type RentalNotificationTemplateV1,
@@ -73,6 +75,8 @@ interface BusinessContext {
   settings: TenantRentalBusinessSettings;
   groups: RentalItemGroup[];
   couponTemplates: RentalCouponTemplate[];
+  locations: RentalFulfillmentLocation[];
+  operators: RentalFulfillmentOperator[];
 }
 
 const stamp = () => new Date().toISOString();
@@ -989,6 +993,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     if (new Set(input.lines.map((line) => line.itemGroupId)).size !== input.lines.length) throw new BadRequestException("同一商品在一次报价中只能出现一行");
     if (!context.settings.fulfillment.enabledModes.includes(input.fulfillmentMode)) throw new BadRequestException("当前租户未启用所选租赁履约方式");
     if (input.returnLocationId && input.returnLocationId !== input.fulfillmentLocationId && !context.settings.fulfillment.allowDifferentReturnLocation) throw new BadRequestException("当前租户未启用异地归还");
+    this.validateFulfillmentLocations(context, input);
     const plan = input.pricingPlanId ? state.pricingPlans.find((item) => item.id === input.pricingPlanId && item.status === "enabled") : state.pricingPlans.find((item) => item.status === "enabled");
     if (!plan) throw new ConflictException("当前租户没有已启用的基础定价计划");
     const calendars = this.calendarsForDateRange(tenantId, context, input.startAt, input.endAt);
@@ -1065,6 +1070,22 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const quote = this.state(tenantId, context).quotes.find((item) => item.id === quoteId);
     if (!quote) throw new NotFoundException("报价不存在");
     return quote;
+  }
+
+  private validateFulfillmentLocations(context: BusinessContext, input: RentalQuoteRequest) {
+    const requireLocation = (locationId: string, capability: RentalFulfillmentLocation["capabilities"][number]) => {
+      const location = context.locations.find((row) => row.id === locationId);
+      if (!location) throw new BadRequestException("履约地点不存在");
+      const operator = location.operatorId ? context.operators.find((row) => row.id === location.operatorId) : undefined;
+      if (location.status !== "enabled") throw new ConflictException(`${location.name}已停用`);
+      if (!operator || operator.status !== "enabled") throw new ConflictException(`${location.name}所属经营主体已停用或不存在`);
+      if (!location.capabilities.includes(capability)) throw new ConflictException(`${location.name}不支持${capability === "pickup" ? "领取" : capability === "return" ? "归还" : "配送"}`);
+      return { location, operator };
+    };
+    const outboundCapability = input.fulfillmentMode === "delivery" || input.fulfillmentMode === "onsite_delivery" ? "delivery" : "pickup";
+    const { operator: fulfillmentOperator } = requireLocation(input.fulfillmentLocationId, outboundCapability);
+    if (input.fulfillmentMode === "partner_pickup_return" && fulfillmentOperator.type !== "partner") throw new ConflictException("合作点取还必须选择合作经营主体的地点");
+    requireLocation(input.returnLocationId ?? input.fulfillmentLocationId, "return");
   }
 
   consumeQuote(tenantId: string, context: BusinessContext, quoteId: string) {
