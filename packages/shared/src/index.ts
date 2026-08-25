@@ -3881,6 +3881,28 @@ export interface RentalCategoryTerminology {
 
 export const RENTAL_PRICING_UNIT_CODES = ["hour", "shift", "day_24h", "calendar_day", "night", "week", "month", "usage", "package"] as const;
 export type RentalPricingUnit = (typeof RENTAL_PRICING_UNIT_CODES)[number];
+
+/**
+ * 计价单位的展示文案。**唯一来源**，管理端各页面必须引用它而不是各自维护一份。
+ *
+ * 早前三个页面各写一份 `unitLabels`，三处都把 `month` 写成"月"。需求 4.4.5 要求
+ * 「第一阶段『月』默认指 30×24 小时块，页面必须明确显示『30 日』」——文案分散在
+ * 三处时，改一处就会与另两处不一致，客户看到的口径取决于他打开了哪个页面。
+ *
+ * 「自然月」按需求作为独立计费模型保留，不与 30 日月共用含义；启用前需单独确认
+ * 跨月余量规则，因此当前没有对应的单位代码。
+ */
+export const RENTAL_PRICING_UNIT_LABELS: Record<RentalPricingUnit, string> = {
+  hour: "小时",
+  shift: "班次",
+  day_24h: "24 小时",
+  calendar_day: "自然日",
+  night: "夜",
+  week: "周",
+  month: "30 日月",
+  usage: "使用量",
+  package: "整包"
+};
 export type RentalFulfillmentMode = "store_pickup_return" | "partner_pickup_return" | "warehouse_pickup_return" | "locker_pickup_return" | "delivery" | "onsite_delivery";
 export type RentalLocationType = "store" | "warehouse" | "station" | "locker" | "delivery_hub" | "project_site";
 export type RentalSettingModule = "pricing" | "discounts" | "coupons" | "value_added_services" | "rental_rules" | "business_calendar" | "membership_rewards" | "notification_templates";

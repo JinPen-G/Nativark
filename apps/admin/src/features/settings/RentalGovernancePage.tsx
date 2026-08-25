@@ -5,6 +5,7 @@ import {
   SaveOutlined,
   TeamOutlined,
 } from "@ant-design/icons";
+import { RENTAL_PRICING_UNIT_LABELS } from "@store-rental/shared";
 import type {
   GrantRentalRewardRequest,
   ImportRentalCalendarRequest,
@@ -60,18 +61,8 @@ type TemplateForm = Omit<
 type SendForm = Omit<SendRentalNotificationRequest, "variables"> & {
   variablesText: string;
 };
+const pricingUnitLabels = RENTAL_PRICING_UNIT_LABELS;
 const currentYear = new Date().getFullYear();
-const pricingUnitLabels: Record<string, string> = {
-  hour: "小时",
-  shift: "班次",
-  day_24h: "24 小时",
-  calendar_day: "自然日",
-  night: "夜",
-  week: "周",
-  month: "月",
-  usage: "使用量",
-  package: "套餐",
-};
 const modeLabels: Record<string, string> = {
   store_pickup_return: "门店取还",
   partner_pickup_return: "合作商取还",

@@ -35,10 +35,16 @@ function refreshSession(refreshToken: string): Promise<LoginResponse | undefined
       return session;
     };
     const locks = navigator.locks;
-    refreshPromise = (locks ? locks.request("rental-auth-refresh", rotate) : rotate())
-      .finally(() => {
-        refreshPromise = undefined;
-      });
+    // 用 async 包一层让类型收敛：`LockManager.request` 的 DOM 类型不会解开回调返回的
+    // Promise，直接赋值得到的是 `Promise<Promise<T>>`；await 一次即折叠为 T。
+    const pending: Promise<LoginResponse | undefined> = (async () =>
+      locks ? await locks.request("rental-auth-refresh", rotate) : await rotate())();
+    // 先存局部再赋值：`.finally` 的回调会把 refreshPromise 置回 undefined，
+    // 直接 `return refreshPromise` 会被 TS 判为可能 undefined。
+    refreshPromise = pending.finally(() => {
+      refreshPromise = undefined;
+    });
+    return refreshPromise;
   }
   return refreshPromise;
 }

@@ -1,4 +1,5 @@
 import { EditOutlined, PlusOutlined } from "@ant-design/icons";
+import { RENTAL_PRICING_UNIT_LABELS } from "@store-rental/shared";
 import type { RentalDiscountPlan, RentalPricingPlanV1, RentalValueAddedService, SaveRentalDiscountPlanRequest, SaveRentalPricingPlanRequest, SaveRentalValueAddedServiceRequest } from "@store-rental/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { App, Button, Card, Col, Drawer, Form, Input, InputNumber, Row, Select, Space, Table, Tag, Typography } from "antd";
@@ -10,8 +11,8 @@ import { QueryState } from "@/components/QueryState";
 
 export type RentalCommercialSection = "pricing" | "discounts" | "services";
 
+const unitLabels = RENTAL_PRICING_UNIT_LABELS;
 const money = (value: number | undefined) => `¥${Number(value ?? 0).toFixed(2)}`;
-const unitLabels: Record<string, string> = { hour: "小时", shift: "班次", day_24h: "24 小时", calendar_day: "自然日", night: "夜", week: "周", month: "月", usage: "使用量", package: "套餐" };
 const serviceTypeLabels: Record<string, string> = { insurance: "保险", damage_waiver: "损坏免赔", delivery: "配送/运输", consumable: "耗材/配件", operator: "操作员", support: "技术支持", other: "其他" };
 
 export function RentalCommercialPage({ section }: { section: RentalCommercialSection }) {

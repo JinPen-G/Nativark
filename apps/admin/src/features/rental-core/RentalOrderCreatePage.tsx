@@ -1,4 +1,5 @@
 import { ArrowLeftOutlined, CheckCircleOutlined, PlusOutlined } from "@ant-design/icons";
+import { RENTAL_PRICING_UNIT_LABELS } from "@store-rental/shared";
 import type { CreateRentalOrderRequest, RentalQuoteRequest, RentalQuoteSnapshotV1 } from "@store-rental/shared";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Alert, App, Button, Card, Col, DatePicker, Descriptions, Form, Input, InputNumber, Result, Row, Select, Space, Steps, Table, Typography } from "antd";
@@ -9,8 +10,8 @@ import { rentalCoreApi } from "@/api/rentalCore";
 import { PageHeader } from "@/components/PageHeader";
 
 type FormValues = Omit<RentalQuoteRequest, "startAt" | "endAt"> & { customerName: string; contactPhone?: string; qualificationApproved?: boolean; qualificationValidTo?: string; period: [Dayjs, Dayjs] };
+const unitLabels = RENTAL_PRICING_UNIT_LABELS;
 const money = (value: number) => `¥${Number(value).toFixed(2)}`;
-const unitLabels: Record<string, string> = { hour: "小时", shift: "班次", day_24h: "24 小时", calendar_day: "自然日", night: "夜", week: "周", month: "月", usage: "使用量", package: "套餐" };
 
 export function RentalOrderCreatePage() {
   const { message } = App.useApp();
