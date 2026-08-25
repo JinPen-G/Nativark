@@ -1016,12 +1016,23 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
    * 那与"相同输入可复算"直接冲突。这里不引入新的 priority 字段，
    * 「最近生效的覆盖较早的」本身就是可解释的优先级口径。
    */
-  private resolvePricingPlan(plans: RentalPricingPlanV1[], requestedId: string | undefined, itemGroupIds: string[]) {
-    const now = Date.now();
+  private resolvePricingPlan(
+    plans: RentalPricingPlanV1[],
+    requestedId: string | undefined,
+    itemGroupIds: string[],
+    rentalStartAt: string
+  ) {
+    // 需求 4.4.4：「价格版本按**租期开始时间**匹配，而不是按报价创建时间匹配；
+    // 未来租期必须使用覆盖该租期开始时点的已发布价格版本。」
+    //
+    // 早前用 `Date.now()`，正是需求点名不要的口径：为下个月的租期报价会按今天的
+    // 价格版本算，而下月生效的新价格明明已经发布。改按租期开始时刻判定后，
+    // 「今天为下月报价」与「下月当天报价」得到同一个版本，这也是可复算的前提。
+    const at = new Date(rentalStartAt).getTime();
     const effective = (plan: RentalPricingPlanV1) =>
       plan.status === "enabled" &&
-      new Date(plan.effectiveFrom).getTime() <= now &&
-      (plan.effectiveTo === undefined || new Date(plan.effectiveTo).getTime() >= now);
+      new Date(plan.effectiveFrom).getTime() <= at &&
+      (plan.effectiveTo === undefined || new Date(plan.effectiveTo).getTime() >= at);
     // 适用范围（需求 4.4）：计划必须覆盖本次报价的每个商品组，否则它对这张报价不适用。
     const covers = (plan: RentalPricingPlanV1) =>
       itemGroupIds.every((groupId) => plan.rates.some((rate) => rate.itemGroupId === groupId));
@@ -1031,7 +1042,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       if (!requested) throw new NotFoundException("指定的定价计划不存在");
       if (requested.status !== "enabled") throw new ConflictException("指定的定价计划未启用");
       // 明确报错而不是静默换一个计划：调用方指名了计划，替它挑别的会让报价无从解释。
-      if (!effective(requested)) throw new ConflictException("指定的定价计划不在有效期内");
+      if (!effective(requested)) throw new ConflictException("指定的定价计划在该租期开始时点不生效");
       return requested;
     }
 
@@ -1044,7 +1055,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       const byVersion = right.version.localeCompare(left.version);
       return byVersion !== 0 ? byVersion : left.code.localeCompare(right.code);
     });
-    if (!candidates.length) throw new ConflictException("当前经营空间没有覆盖所选商品且处于有效期内的已启用定价计划");
+    if (!candidates.length) {
+      throw new ConflictException("当前经营空间没有覆盖所选商品、且在该租期开始时点生效的已启用定价计划");
+    }
     return candidates[0];
   }
 
@@ -1068,7 +1081,12 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     if (!context.settings.fulfillment.enabledModes.includes(input.fulfillmentMode)) throw new BadRequestException("当前租户未启用所选租赁履约方式");
     if (input.returnLocationId && input.returnLocationId !== input.fulfillmentLocationId && !context.settings.fulfillment.allowDifferentReturnLocation) throw new BadRequestException("当前租户未启用异地归还");
     this.validateFulfillmentLocations(context, input);
-    const plan = this.resolvePricingPlan(state.pricingPlans, input.pricingPlanId, input.lines.map((line) => line.itemGroupId));
+    const plan = this.resolvePricingPlan(
+      state.pricingPlans,
+      input.pricingPlanId,
+      input.lines.map((line) => line.itemGroupId),
+      input.startAt
+    );
     const calendars = this.calendarsForDateRange(tenantId, context, input.startAt, input.endAt);
     const rule = this.currentRule(tenantId, context);
     if (!rule || rule.status !== "published") throw new ConflictException("当前租户没有已发布的租赁规则");

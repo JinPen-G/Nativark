@@ -1359,7 +1359,10 @@ async function main() {
   const truckPlan = await request(
     "POST",
     "/api/rental/v1/pricing-plans",
-    { effectiveFrom: new Date(Date.now() - 86400000).toISOString(), code: "E2E-TRUCK-PRICE", name: "E2E 货车价格", changeReason: "E2E 品类深度用例", status: "enabled", rates: [{ itemGroupId: truckGroup.body.data.id, unit: "day_24h", baseAmount: 600, weekendMultiplier: 1.1, holidayMultiplier: 1.25, depositAmount: 2000, minimumUnits: 1 }] },
+    // 价格版本按**租期开始时间**匹配（需求 4.4.4），而本节的 vehicleStart 刻意设在
+    // 27 小时前以验证逾期费。生效时间必须早于租期开始，否则该租期没有可用价格版本。
+    // 原来是 now-24h，正好晚于 now-27h 的租期起点。
+    { effectiveFrom: new Date(Date.now() - 30 * 86400000).toISOString(), code: "E2E-TRUCK-PRICE", name: "E2E 货车价格", changeReason: "E2E 品类深度用例", status: "enabled", rates: [{ itemGroupId: truckGroup.body.data.id, unit: "day_24h", baseAmount: 600, weekendMultiplier: 1.1, holidayMultiplier: 1.25, depositAmount: 2000, minimumUnits: 1 }] },
     vehicleA.accessToken
   );
   assert.equal(truckPlan.status, 201, `车辆定价计划失败: ${JSON.stringify(truckPlan.body).slice(0, 200)}`);
@@ -1680,6 +1683,79 @@ async function main() {
     autoPick.body.data.rentalAmount,
     100,
     `自动择一应命中有效期内的计划（1 自然日 = 100）：实际 ${autoPick.body.data.rentalAmount}`
+  );
+
+  // 8b) 价格版本按**租期开始时间**匹配，而不是按报价创建时间（需求 4.4.4）。
+  //
+  // 造一版"从 30 天后才生效"的计划：今天报今天的租期不该命中它，
+  // 今天报 60 天后的租期必须命中它。早前按 Date.now() 判定，后者会漏。
+  const futurePlan = await request(
+    "POST",
+    "/api/rental/v1/pricing-plans",
+    {
+      code: "E2E-PRICE-FUTURE",
+      name: "E2E 未来生效价格",
+      changeReason: "PRICE-01 按租期开始时间选价",
+      status: "enabled",
+      effectiveFrom: new Date(Date.now() + 30 * 86400000).toISOString(),
+      rates: [
+        {
+          itemGroupId: priceGroupId,
+          unit: "calendar_day",
+          baseAmount: 777,
+          weekendMultiplier: 1,
+          holidayMultiplier: 1,
+          depositAmount: 500,
+          minimumUnits: 1
+        }
+      ]
+    },
+    construction.accessToken
+  );
+  assert.equal(futurePlan.status, 201, `未来生效计划创建失败: ${JSON.stringify(futurePlan.body).slice(0, 200)}`);
+  // 指名一个对该租期尚未生效的计划 → 必须拒绝，而不是拿它定价。
+  const tooEarly = await request(
+    "POST",
+    "/api/rental/v1/quotes",
+    {
+      customerType: "corporate",
+      fulfillmentMode: "warehouse_pickup_return",
+      fulfillmentLocationId: constructionLocation.id,
+      startAt: new Date(Date.now() + 2 * 86400000).toISOString(),
+      endAt: new Date(Date.now() + 3 * 86400000).toISOString(),
+      pricingPlanId: futurePlan.body.data.id,
+      lines: [{ itemGroupId: priceGroupId, quantity: 1 }]
+    },
+    construction.accessToken
+  );
+  assert.equal(
+    tooEarly.status,
+    409,
+    `租期开始时点尚未生效的计划必须 409：实际 ${tooEarly.status} ${JSON.stringify(tooEarly.body).slice(0, 200)}`
+  );
+  // 同一个计划，换成 60 天后的租期就必须可用——证明判定基准是租期开始时间。
+  const laterRental = await request(
+    "POST",
+    "/api/rental/v1/quotes",
+    {
+      customerType: "corporate",
+      fulfillmentMode: "warehouse_pickup_return",
+      fulfillmentLocationId: constructionLocation.id,
+      startAt: new Date(Date.now() + 60 * 86400000).toISOString(),
+      endAt: new Date(Date.now() + 61 * 86400000).toISOString(),
+      pricingPlanId: futurePlan.body.data.id,
+      lines: [{ itemGroupId: priceGroupId, quantity: 1 }]
+    },
+    construction.accessToken
+  );
+  assert.equal(laterRental.status, 201, `未来租期应能使用未来生效计划: ${JSON.stringify(laterRental.body).slice(0, 250)}`);
+  // 同一时钟点相隔 1 天 → 占用 2 个营业日期（自然日按日期计，不是按 24 小时块计），
+  // 因此 777 × 2 = 1554。断言写死 777 是我最初算错了单位数，不是产品问题。
+  assert.equal(
+    laterRental.body.data.rentalAmount,
+    1554,
+    `未来租期应按未来价格 777 × 2 个自然日 = 1554：实际 ${laterRental.body.data.rentalAmount}——` +
+      "若为 200（即 100 × 2）说明仍按报价创建时间选价（需求 4.4.4 点名不要的口径）"
   );
 
   // 9) 阶梯档位重复必须被拒：否则"取最高已达档"变成看装载顺序，价格解释不唯一。
