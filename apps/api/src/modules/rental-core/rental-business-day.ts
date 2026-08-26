@@ -16,7 +16,11 @@
  * 同一租户在不同城市的经营空间可以各自正确切分日界。
  */
 
+import type { RentalBusinessHours, RentalTimeWindow } from "@store-rental/shared";
+
 const MS_PER_DAY = 86_400_000;
+
+
 
 /** 未配置时区时的兜底。选国内时区与既有数据的实际用法一致。 */
 export const DEFAULT_BUSINESS_TIME_ZONE = "Asia/Shanghai";
@@ -46,6 +50,56 @@ export function isValidTimeZone(timeZone: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * 校验一组营业时段（需求 4.5.1）。返回错误信息或 null——由调用方包成 400，
+ * 保持本模块不依赖 Nest。规则：每个时段起点早于终点；同类时段互不重叠；
+ * 领取/归还/配送时段必须落在营业时段内（营业时段为空表示不限制，此时不做落域校验）。
+ * 时段是营业时区当地 `HH:mm`，字符串比较即可正确排序。
+ */
+export function businessHoursError(hours: RentalBusinessHours, label: string): string | null {
+  const checkGroup = (windows: RentalTimeWindow[] | undefined, name: string): string | null => {
+    if (!windows?.length) return null;
+    for (const window of windows) {
+      if (window.start >= window.end) {
+        return `${label} 的${name}时段 ${window.start}-${window.end} 起点必须早于终点`;
+      }
+    }
+    const sorted = [...windows].sort((a, b) => a.start.localeCompare(b.start));
+    for (let index = 1; index < sorted.length; index += 1) {
+      if (sorted[index].start < sorted[index - 1].end) {
+        return `${label} 的${name}时段存在重叠：${sorted[index - 1].start}-${sorted[index - 1].end} 与 ${sorted[index].start}-${sorted[index].end}`;
+      }
+    }
+    return null;
+  };
+  const groups: Array<[RentalTimeWindow[] | undefined, string]> = [
+    [hours.windows, "营业"],
+    [hours.pickup, "领取"],
+    [hours.return, "归还"],
+    [hours.delivery, "配送"]
+  ];
+  for (const [windows, name] of groups) {
+    const error = checkGroup(windows, name);
+    if (error) return error;
+  }
+  // 履约动作时段必须落在营业时段内：营业时段未配置（不限制）时跳过落域校验。
+  if (hours.windows?.length) {
+    const within = (windows: RentalTimeWindow[] | undefined, name: string): string | null => {
+      if (!windows?.length) return null;
+      for (const window of windows) {
+        const covered = hours.windows.some((base) => window.start >= base.start && window.end <= base.end);
+        if (!covered) return `${label} 的${name}时段 ${window.start}-${window.end} 必须落在营业时段内`;
+      }
+      return null;
+    };
+    for (const [windows, name] of [[hours.pickup, "领取"], [hours.return, "归还"], [hours.delivery, "配送"]] as const) {
+      const error = within(windows, name);
+      if (error) return error;
+    }
+  }
+  return null;
 }
 
 /** 营业日期键（`YYYY-MM-DD`），与营业日历 `RentalCalendarDay.date` 同一口径。 */

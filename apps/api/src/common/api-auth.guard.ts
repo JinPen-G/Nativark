@@ -154,13 +154,14 @@ function requiredPermissions(method: string, path: string) {
         "store-rental:order:view"
       ];
     }
-    // 发布是独立权限：只有编辑权限的账号在这里必须被拒。
+    // 发布与编辑相互独立：发布端点只认发布权限，编辑端点只认编辑权限，
+    // 因此「只有发布权限」的账号在编辑端点会被拒、「只有编辑权限」的账号在发布端点会被拒。
+    // price:manage 作为既有超集对两类都放行，避免存量部署失去日历能力。
     if (/\/publish$/.test(path)) {
       return ["store-rental:calendar:publish", "store-rental:price:manage"];
     }
-    // 其余写操作（导入官方来源、保存日期、移除覆盖、作废草稿）属编辑；
-    // 发布权限视为编辑的超集（能发布者自然能改）。
-    return ["store-rental:calendar:edit", "store-rental:calendar:publish", "store-rental:price:manage"];
+    // 其余写操作（导入官方来源、保存日期、移除覆盖、作废草稿）属编辑，只认编辑权限。
+    return ["store-rental:calendar:edit", "store-rental:price:manage"];
   }
   if (path.startsWith("/rental/v1/rule-versions") || path.startsWith("/rental/v1/rewards") || path.startsWith("/rental/v1/benefit-accounts") || path.startsWith("/rental/v1/notification-templates") || path.startsWith("/rental/v1/notification-logs") || path === "/rental/v1/notifications/send") {
     return ["store-rental:rules:manage", "store-rental:price:manage"];

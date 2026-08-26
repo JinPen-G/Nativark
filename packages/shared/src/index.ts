@@ -4286,6 +4286,8 @@ export interface RentalCalendarDaySnapshot {
   closed: boolean;
   businessStatus?: RentalCalendarBusinessStatus;
   source: "week_rule" | "official_cn" | "tenant_override";
+  /** 营业时段快照（需求 4.5.3/4.5.5）：只改时段时，审计前后值必须能看出时段变化。 */
+  hours?: RentalBusinessHours;
 }
 
 /**

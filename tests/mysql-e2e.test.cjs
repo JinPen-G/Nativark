@@ -3309,6 +3309,42 @@ async function main() {
   assert.equal(revoid.status, 409, `已作废版本不得再次作废: ${revoid.status}`);
   ok("年度日历草稿作废：草稿可作废并记录原因/时间/操作人且落库、已发布拒绝作废、原因必填、作废后编辑视图回落周模板、重复作废被拒");
 
+  console.log("== 15L. PRICE-02 官方导入整年替换 + 每周时段校验（Codex #4/#8） ==");
+  // #4：官方导入是整年替换——旧版本里本次未再出现的官方节假日必须回落周模板默认，不残留。
+  const impYear = 2033;
+  const importTwoHolidays = await request("POST", "/api/rental/v1/calendars/import", {
+    year: impYear, region: "CN", sourceName: "E2E 整年替换来源A", sourceUrl: "https://example.invalid/e2e-replace-a",
+    sourcePublishedAt: new Date(Date.now() - 86400000).toISOString(),
+    days: [
+      { date: `${impYear}-10-01`, dayType: "statutory_holiday", name: "国庆节", pricingMultiplier: 1.5 },
+      { date: `${impYear}-10-02`, dayType: "statutory_holiday", name: "国庆节次日", pricingMultiplier: 1.5 }
+    ]
+  }, construction.accessToken);
+  assert.equal(importTwoHolidays.status, 201, `首次导入失败: ${importTwoHolidays.status} ${JSON.stringify(importTwoHolidays.body).slice(0, 200)}`);
+  const afterFirstImport = (await request("GET", `/api/rental/v1/calendars/${impYear}`, null, construction.accessToken)).body.data;
+  assert.equal(afterFirstImport.days.find((d) => d.date === `${impYear}-10-02`)?.dayType, "statutory_holiday", "首次导入后 10-02 应为法定节假日");
+  const importOneHoliday = await request("POST", "/api/rental/v1/calendars/import", {
+    year: impYear, region: "CN", sourceName: "E2E 整年替换来源B", sourceUrl: "https://example.invalid/e2e-replace-b",
+    sourcePublishedAt: new Date(Date.now() - 86400000).toISOString(),
+    days: [{ date: `${impYear}-10-01`, dayType: "statutory_holiday", name: "国庆节", pricingMultiplier: 1.5 }]
+  }, construction.accessToken);
+  assert.equal(importOneHoliday.status, 201, `重导失败: ${importOneHoliday.status} ${JSON.stringify(importOneHoliday.body).slice(0, 200)}`);
+  const afterSecondImport = (await request("GET", `/api/rental/v1/calendars/${impYear}`, null, construction.accessToken)).body.data;
+  assert.equal(afterSecondImport.days.find((d) => d.date === `${impYear}-10-01`)?.dayType, "statutory_holiday", "重导后 10-01 仍应为法定节假日");
+  assert.notEqual(afterSecondImport.days.find((d) => d.date === `${impYear}-10-02`)?.dayType, "statutory_holiday", "重导删除的 10-02 必须回落周模板、不再是节假日");
+  assert.notEqual(afterSecondImport.days.find((d) => d.date === `${impYear}-10-02`)?.source, "official_cn", "重导删除的 10-02 来源不应仍是官方");
+  // #8：每周营业时段模板按下标定位星期，必须完整 7 项或留空；时段本身还要校验起止与落域。
+  const badLength = await putSettings({ weeklyHours: Array.from({ length: 5 }, () => weeklyWindow) });
+  assert.equal(badLength.status, 400, `不足 7 项的每周模板必须 400（否则星期错位）: ${badLength.status}`);
+  const badOrder = await putSettings({ weeklyHours: Array.from({ length: 7 }, () => ({ windows: [{ start: "18:00", end: "09:00" }] })) });
+  assert.equal(badOrder.status, 400, `起点不早于终点的时段必须 400: ${badOrder.status}`);
+  const badContain = await putSettings({ weeklyHours: Array.from({ length: 7 }, () => ({ windows: [{ start: "09:00", end: "18:00" }], pickup: [{ start: "08:00", end: "10:00" }] })) });
+  assert.equal(badContain.status, 400, `领取时段超出营业时段必须 400: ${badContain.status}`);
+  const goodHours = await putSettings({ weeklyHours: Array.from({ length: 7 }, () => ({ windows: [{ start: "09:00", end: "18:00" }], pickup: [{ start: "10:00", end: "12:00" }] })) });
+  assert.equal(goodHours.status, 200, `合法的每周时段应放行: ${goodHours.status} ${JSON.stringify(goodHours.body).slice(0, 200)}`);
+  await putSettings({ weeklyHours: [] });
+  ok("官方导入整年替换（删除的节假日回落周模板）+ 每周时段模板校验（非 7 项/起止倒挂/超出营业时段均 400，合法放行）");
+
   console.log("== 16. 双租户并发隔离 ==");
   const rounds = 12;
   const concurrent = [];
@@ -5990,7 +6026,6 @@ async function main() {
     calAdmin.accessToken
   );
   assert.ok([200, 201].includes(calEditorMember.status), `加入空间成员失败: ${calEditorMember.status} ${JSON.stringify(calEditorMember.body).slice(0, 200)}`);
-  // PLACEHOLDER-15K2
   const calEditorTemp = calEditorUser.body.data.temporaryPassword;
   const calEditorFirst = await login("demo", calEditorAccount, calEditorTemp);
   const calEditorPwd = `E2e!${randomBytes(4).toString("hex")}`;
@@ -6042,6 +6077,58 @@ async function main() {
   );
   assert.equal(adminPublish2032.status, 201, `管理员发布应成功: ${adminPublish2032.status} ${JSON.stringify(adminPublish2032.body).slice(0, 200)}`);
   ok("日历编辑与发布分权：仅 calendar:edit 的账号可导入草稿但发布 403，管理员发布 201，证明编辑与发布独立鉴权");
+  console.log("== 61c. PRICE-02 发布权限不含编辑 + 普通运营只见已发布（Codex #2/#3） ==");
+  // #2：发布与编辑相互独立——只有 calendar:publish 的账号不得编辑（导入应 403）。
+  const calPublisherRole = await request("POST", "/api/platform/roles", {
+    code: `E2E-CAL-PUB-${Date.now().toString(36)}`, name: "E2E 日历发布人员", scope: "store", dataScope: "all",
+    enabledBusinessScopes: ["rental"], permissions: ["store-rental:calendar:publish", "store-rental:order:view"], isActive: true
+  }, calAdmin.accessToken);
+  assert.equal(calPublisherRole.status, 201, `建发布角色失败: ${JSON.stringify(calPublisherRole.body).slice(0, 200)}`);
+  const calPublisherAccount = `e2e_cal_pub_${Date.now().toString(36)}`;
+  const calPublisherUser = await request("POST", "/api/platform/users", { account: calPublisherAccount, displayName: "E2E 日历发布", phone: "13900009999", roleIds: [calPublisherRole.body.data.id], isActive: true }, calAdmin.accessToken);
+  assert.equal(calPublisherUser.status, 201, `建发布账号失败: ${JSON.stringify(calPublisherUser.body).slice(0, 200)}`);
+  await request("PUT", `/api/platform/workspaces/${calAdmin.currentWorkspaceId}/members`, { userId: calPublisherUser.body.data.id, roleId: calPublisherRole.body.data.id }, calAdmin.accessToken);
+  const calPubTemp = calPublisherUser.body.data.temporaryPassword;
+  const calPubFirst = await login("demo", calPublisherAccount, calPubTemp);
+  const calPubPwd = `E2e!${randomBytes(4).toString("hex")}`;
+  await request("POST", "/api/auth/change-password", { currentPassword: calPubTemp, newPassword: calPubPwd }, calPubFirst.accessToken);
+  const calPub = await login("demo", calPublisherAccount, calPubPwd);
+  const calPubToken = (await request("POST", "/api/auth/switch-workspace", { workspaceId: calAdmin.currentWorkspaceId }, calPub.accessToken)).body.data.accessToken;
+  const publisherImport = await request("POST", "/api/rental/v1/calendars/import", {
+    year: 2034, region: "CN", sourceName: "发布人尝试导入", sourceUrl: "https://example.invalid/e2e-pub", sourcePublishedAt: new Date(Date.now() - 86400000).toISOString(),
+    days: [{ date: "2034-10-01", dayType: "statutory_holiday", name: "国庆节", pricingMultiplier: 1.5 }]
+  }, calPubToken);
+  assert.equal(publisherImport.status, 403, `只有发布权限的账号不得编辑（导入）: ${publisherImport.status} ${JSON.stringify(publisherImport.body).slice(0, 200)}`);
+  // PLACEHOLDER-61C
+  // #3：普通运营人员（order:view）只看已发布日历，看不到未发布的草稿调整。
+  // 61b 已发布 2032；此处 demo 管理员对 2032 存一个未发布的草稿调整。
+  const draftEdit = await request("PUT", "/api/rental/v1/calendars/2032/days/2032-07-01", {
+    date: "2032-07-01", dayType: "tenant_special", name: "未发布调整", pricingMultiplier: 1.8, closed: false, overrideReason: "草稿可见性用例"
+  }, calAdmin.accessToken);
+  assert.equal(draftEdit.status, 200, `造未发布草稿调整失败: ${draftEdit.status} ${JSON.stringify(draftEdit.body).slice(0, 200)}`);
+  const calViewerRole = await request("POST", "/api/platform/roles", {
+    code: `E2E-CAL-VIEW-${Date.now().toString(36)}`, name: "E2E 只读运营", scope: "store", dataScope: "all",
+    enabledBusinessScopes: ["rental"], permissions: ["store-rental:order:view"], isActive: true
+  }, calAdmin.accessToken);
+  assert.equal(calViewerRole.status, 201, `建只读角色失败: ${JSON.stringify(calViewerRole.body).slice(0, 200)}`);
+  const calViewerAccount = `e2e_cal_view_${Date.now().toString(36)}`;
+  const calViewerUser = await request("POST", "/api/platform/users", { account: calViewerAccount, displayName: "E2E 只读运营", phone: "13900001111", roleIds: [calViewerRole.body.data.id], isActive: true }, calAdmin.accessToken);
+  assert.equal(calViewerUser.status, 201, `建只读账号失败: ${JSON.stringify(calViewerUser.body).slice(0, 200)}`);
+  await request("PUT", `/api/platform/workspaces/${calAdmin.currentWorkspaceId}/members`, { userId: calViewerUser.body.data.id, roleId: calViewerRole.body.data.id }, calAdmin.accessToken);
+  const calViewTemp = calViewerUser.body.data.temporaryPassword;
+  const calViewFirst = await login("demo", calViewerAccount, calViewTemp);
+  const calViewPwd = `E2e!${randomBytes(4).toString("hex")}`;
+  await request("POST", "/api/auth/change-password", { currentPassword: calViewTemp, newPassword: calViewPwd }, calViewFirst.accessToken);
+  const calViewer = await login("demo", calViewerAccount, calViewPwd);
+  const calViewToken = (await request("POST", "/api/auth/switch-workspace", { workspaceId: calAdmin.currentWorkspaceId }, calViewer.accessToken)).body.data.accessToken;
+  const viewerCal = await request("GET", "/api/rental/v1/calendars/2032", null, calViewToken);
+  assert.equal(viewerCal.status, 200, `只读运营读日历失败: ${viewerCal.status}`);
+  assert.equal(viewerCal.body.data.status, "published", `普通运营应看到已发布日历，实际 status=${viewerCal.body.data.status}`);
+  assert.ok(!viewerCal.body.data.days.some((d) => d.date === "2032-07-01" && d.source === "tenant_override"), "普通运营不得看到未发布的草稿调整");
+  const adminCal = await request("GET", "/api/rental/v1/calendars/2032", null, calAdmin.accessToken);
+  assert.equal(adminCal.body.data.status, "draft", `编辑者应看到草稿视图，实际 status=${adminCal.body.data.status}`);
+  assert.ok(adminCal.body.data.days.some((d) => d.date === "2032-07-01" && d.source === "tenant_override"), "编辑者应看到未发布的草稿调整");
+  ok("发布权限不含编辑（发布人员导入 403）+ 普通运营只见已发布日历（看不到未发布草稿、编辑者能看到，证明是视图口径差异）");
   console.log("== 62. 无空间成员关系的账号不得访问经营域 ==");
   // 另一处 fail-open：空间检查曾附加 `accessContext.hasWorkspaces` 条件，
   // 于是「一个空间都没有的账号」跳过检查，随后仓储层的 resolveScopeWorkspaceId

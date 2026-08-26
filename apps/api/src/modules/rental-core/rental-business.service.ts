@@ -60,7 +60,7 @@ import {
 } from "./rental-business-fact.repository";
 import { RentalCoreConfigRepository, type RentalConfigStore, type RentalConfigTx } from "./rental-core-config.repository";
 import { PrismaService } from "../database/prisma.service";
-import { DEFAULT_BUSINESS_TIME_ZONE, businessDateKey, businessTimeOfDay, businessDateKeyFromIndex, businessDayIndex, businessYearFromDateKey, isCalendarDateKey } from "./rental-business-day";
+import { DEFAULT_BUSINESS_TIME_ZONE, businessDateKey, businessTimeOfDay, businessDateKeyFromIndex, businessDayIndex, businessYearFromDateKey, isCalendarDateKey, businessHoursError } from "./rental-business-day";
 import { rentalPricingStrategy } from "./rental-pricing-strategy";
 
 interface RentalBusinessState {
@@ -136,7 +136,17 @@ function compareVersions(left: string, right: string): number {
  */
 function calendarDiff(before: RentalCalendarDay[], after: RentalCalendarDay[]): RentalCalendarPublishDiff {
   const key = (day: RentalCalendarDay) =>
-    [day.dayType, day.name, day.pricingMultiplier, day.closed, day.businessStatus ?? "", day.source].join("|");
+    [
+      day.dayType,
+      day.name,
+      day.pricingMultiplier,
+      day.closed,
+      day.businessStatus ?? "",
+      day.source,
+      // 营业时段也纳入差异签名（需求 4.5.5/4.5.8）：只调整营业/领取/归还/配送时段时，
+      // 若不比时段，发布差异会显示「没有变化」，运营看不出这次改了时段。
+      JSON.stringify(day.hours ?? null)
+    ].join("|");
   const beforeMap = new Map(before.map((day) => [day.date, key(day)]));
   const afterMap = new Map(after.map((day) => [day.date, key(day)]));
   const added: string[] = [];
@@ -513,13 +523,18 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   }
 
   /**
-   * 页面查看用：草稿优先，其次已发布，最后按周模板生成。
+   * 读取年度日历。`includeDraft` 决定看到的是编辑视图还是发布视图（需求 4.5.8）：
+   * - 有编辑/发布权限者（`includeDraft=true`）：草稿优先，其次已发布，最后按周模板生成，
+   *   以便编辑正在起草的版本；
+   * - 只读的普通运营人员（`includeDraft=false`）：只看**已发布**日历，没有则回退到周模板，
+   *   绝不提前看到未发布的草稿调整——需求 4.5.8 明确普通运营人员「查看已发布日历」。
    *
    * 不能像早前那样"取该年度第一条"：同年度现在可能同时存在已被替代的历史版本，
    * 数组顺序取决于装载顺序，会随机返回一个历史版本。
    */
-  getCalendar(tenantId: string, context: BusinessContext, year: number) {
-    return this.editableCalendar(tenantId, context, year);
+  getCalendar(tenantId: string, context: BusinessContext, year: number, includeDraft = true) {
+    if (includeDraft) return this.editableCalendar(tenantId, context, year);
+    return this.publishedCalendar(tenantId, context, year) ?? this.buildCalendar(tenantId, context.settings, year);
   }
 
   /** 同一年度可同时存在草稿、已发布与已被替代（需求 4.5.7），因此按「年度 + 版本」定位。 */
@@ -564,7 +579,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       pricingMultiplier: day.pricingMultiplier,
       closed: day.closed,
       businessStatus: day.businessStatus,
-      source: day.source
+      source: day.source,
+      hours: day.hours
     };
   }
 
@@ -584,7 +600,14 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const state = this.state(tenantId, context);
     const base = this.editableCalendar(tenantId, context, input.year);
     const calendar = structuredClone(base);
-    const dayMap = new Map(calendar.days.map((day) => [day.date, day]));
+    // 官方导入是**整年替换**（需求 4.5.2：官方版本是当年的完整权威数据），不是增量合并。
+    // 以周模板为底重建全年，只把人工覆盖搬过来；旧版本里本次未再出现的官方节假日
+    // 会随之回落到周模板默认值——否则官方删掉某个节假日后，该日期会永久残留旧安排。
+    const template = this.buildCalendar(tenantId, context.settings, input.year);
+    const dayMap = new Map<string, RentalCalendarDay>(template.days.map((day) => [day.date, day]));
+    for (const day of base.days) {
+      if (day.source === "tenant_override") dayMap.set(day.date, structuredClone(day));
+    }
     const seen = new Set<string>();
     const preserved: string[] = [];
     for (const row of input.days) {
@@ -666,6 +689,12 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     if (!Number.isFinite(input.pricingMultiplier) || input.pricingMultiplier < 0) throw new BadRequestException("价格系数无效");
     const reason = input.overrideReason?.trim();
     if (!reason) throw new BadRequestException("人工覆盖必须填写调整原因");
+    // 单日营业时段覆盖同样校验（需求 4.5.1）：起点早于终点、同类不重叠、
+    // 领取/归还/配送落在营业时段内。放行非法时段会在报价时把时点判定算错。
+    if (input.hours) {
+      const hoursError = businessHoursError(input.hours, input.date);
+      if (hoursError) throw new BadRequestException(hoursError);
+    }
     // 已发布版本不可原地修改（需求 4.5.7），必须复制生成新草稿。
     //
     // 早前的实现直接把该行 status 改回 draft 并递增版本号——等于**把已发布版本

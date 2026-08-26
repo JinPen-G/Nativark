@@ -75,6 +75,21 @@ export class RentalBusinessController {
     };
   }
 
+  /**
+   * 是否可看到未发布的日历草稿（需求 4.5.8）：有编辑/发布/价格/规则任一管理权限者可看草稿以便编辑，
+   * 只读的普通运营人员只应看到已发布日历。`*` 与平台管理员放行。
+   */
+  private canSeeCalendarDraft(user: SystemUserRow): boolean {
+    const permissions = user.permissions ?? [];
+    if (permissions.includes("*") || user.isPlatformAdmin) return true;
+    return [
+      "store-rental:calendar:edit",
+      "store-rental:calendar:publish",
+      "store-rental:price:manage",
+      "store-rental:rules:manage"
+    ].some((code) => permissions.includes(code));
+  }
+
   // 必须先 await 业务结果再写快照：核心服务的配置写方法已转为异步，若直接把 Promise
   // 传进来就会与快照写入并发，快照可能捕获到变更前的状态。
   private async committed<T>(tenantId: string, result: T | Promise<T>): Promise<T> {
@@ -95,7 +110,7 @@ export class RentalBusinessController {
   @Post("value-added-services") async createService(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalValueAddedServiceDto) { return this.committed(req.user.tenantId, await this.business.saveService(req.user.tenantId, this.context(req.user.tenantId), body)); }
   @Put("value-added-services/:id") async updateService(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalValueAddedServiceDto) { return this.committed(req.user.tenantId, await this.business.saveService(req.user.tenantId, this.context(req.user.tenantId), { ...body, id })); }
 
-  @Get("calendars/:year") calendar(@Req() req: AuthenticatedRequest, @Param("year") year: string) { return this.business.getCalendar(req.user.tenantId, this.context(req.user.tenantId), Number(year)); }
+  @Get("calendars/:year") calendar(@Req() req: AuthenticatedRequest, @Param("year") year: string) { return this.business.getCalendar(req.user.tenantId, this.context(req.user.tenantId), Number(year), this.canSeeCalendarDraft(req.user)); }
   @Post("calendars/import") async importCalendar(@Req() req: AuthenticatedRequest, @Body() body: ImportRentalCalendarDto) { return this.committed(req.user.tenantId, await this.business.importOfficialCalendar(req.user.tenantId, this.context(req.user.tenantId), body)); }
   @Put("calendars/:year/days/:date") async saveCalendarDay(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Param("date") date: string, @Body() body: SaveRentalCalendarDayDto) { return this.committed(req.user.tenantId, await this.business.saveCalendarDay(req.user.tenantId, this.context(req.user.tenantId), Number(year), { ...body, date }, req.user.displayName)); }
   @Delete("calendars/:year/days/:date") async removeCalendarDayOverride(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Param("date") date: string, @Body() body: RemoveRentalCalendarDayOverrideDto) { return this.committed(req.user.tenantId, await this.business.removeCalendarDayOverride(req.user.tenantId, this.context(req.user.tenantId), Number(year), date, body, req.user.displayName)); }

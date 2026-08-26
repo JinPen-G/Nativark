@@ -44,7 +44,7 @@ import {
 } from "@store-rental/shared";
 import { getRequestWorkspaceId, runWithRequestIdentity } from "../../common/request-identity";
 import { RentalStateRepository } from "./rental-state.repository";
-import { DEFAULT_BUSINESS_TIME_ZONE, isValidTimeZone } from "./rental-business-day";
+import { DEFAULT_BUSINESS_TIME_ZONE, isValidTimeZone, businessHoursError } from "./rental-business-day";
 import { RentalCoreConfigRepository, type RentalConfigStore, type RentalConfigTx } from "./rental-core-config.repository";
 import {
   RentalCoreFactRepository,
@@ -408,6 +408,19 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     // RangeError，表现为下单前 500——错误离配置点很远，排查成本高得多。
     if (input.calendar.timeZone !== undefined && !isValidTimeZone(input.calendar.timeZone)) {
       throw new BadRequestException(`无效的时区标识：${input.calendar.timeZone}`);
+    }
+    // 每周营业模板按下标定位星期（0=周日…6=周六）。允许留空（不配时段），
+    // 但一旦配置就必须是完整 7 项——否则「只配 5 个工作日」会被按下标解读成周日到周四，
+    // 而不是运营以为的周一到周五（需求 4.5.1 的每周模板按星期定位）。
+    if (input.calendar.weeklyHours !== undefined) {
+      if (input.calendar.weeklyHours.length !== 0 && input.calendar.weeklyHours.length !== 7) {
+        throw new BadRequestException("每周营业时段模板必须是 7 项（下标 0=周日…6=周六），或留空表示不配置");
+      }
+      const weekdayNames = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+      input.calendar.weeklyHours.forEach((hours, weekday) => {
+        const error = businessHoursError(hours, weekdayNames[weekday] ?? `星期${weekday}`);
+        if (error) throw new BadRequestException(error);
+      });
     }
     if (!input.fulfillment.enabledModes.length || input.fulfillment.enabledModes.some((mode) => !fulfillmentModes.has(mode))) {
       throw new BadRequestException("存在当前经营品类不支持的履约方式");
