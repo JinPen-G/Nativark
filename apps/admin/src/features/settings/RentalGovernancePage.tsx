@@ -1104,6 +1104,37 @@ export function RentalGovernancePage() {
           layout="vertical"
           onFinish={(values) => saveRule.mutate(values)}
         >
+          <Card size="small" title="计价规则">
+            <Row gutter={12}>
+              <Col span={8}>
+                <Form.Item
+                  name={["pricing", "shiftHours"]}
+                  label="班次时长（小时）"
+                  tooltip="仅按班次计价时生效。留空按 8 小时。"
+                >
+                  <InputNumber min={0.5} max={24} step={0.5} style={{ width: "100%" }} />
+                </Form.Item>
+              </Col>
+              <Col span={16}>
+                <Form.Item
+                  name={["pricing", "shiftStartHours"]}
+                  label="班次起始小时"
+                  tooltip="按营业时区的当地小时，例如 0、8、16 表示三班制。填了边界就按「跨过几个班次窗口」计费；留空则按班次时长整除。"
+                >
+                  <Select
+                    mode="multiple"
+                    allowClear
+                    placeholder="留空表示不按边界计费"
+                    options={Array.from({ length: 24 }, (_, hour) => ({
+                      value: hour,
+                      label: `${String(hour).padStart(2, "0")}:00`,
+                    }))}
+                  />
+                </Form.Item>
+              </Col>
+            </Row>
+          </Card>
+
           <Card size="small" title="支付与履约">
             <Row gutter={12}>
               <Col span={8}>
