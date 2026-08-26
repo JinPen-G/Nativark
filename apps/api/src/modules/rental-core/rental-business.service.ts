@@ -7,6 +7,7 @@ import {
   type ImportRentalCalendarRequest,
   type RentalCalendarBusinessStatus,
   type RentalCalendarDay,
+  type RentalCalendarDayOrigin,
   type RentalCalendarYear,
   type RentalCategoryDefinition,
   type RentalCouponTemplate,
@@ -532,7 +533,13 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return calendar;
   }
 
-  async saveCalendarDay(tenantId: string, context: BusinessContext, year: number, input: SaveRentalCalendarDayRequest) {
+  async saveCalendarDay(
+    tenantId: string,
+    context: BusinessContext,
+    year: number,
+    input: SaveRentalCalendarDayRequest,
+    operator?: string
+  ) {
     const state = this.state(tenantId, context);
     const base = this.editableCalendar(tenantId, context, year);
     if (!input.date.startsWith(`${year}-`) || input.pricingMultiplier < 0) throw new BadRequestException("日期年度或价格系数无效");
@@ -553,13 +560,35 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     // 两态与四态必须一致落库：只写一个会让同一行自相矛盾（closed=true 但 status=open），
     // 而读取口径会优先信四态，等于人工覆盖被静默忽略。
     const businessStatus = input.businessStatus ?? (input.closed ? "closed" : "open");
+    const index = calendar.days.findIndex((item) => item.date === input.date);
+    const replaced = index >= 0 ? calendar.days[index] : undefined;
+    // 保留被覆盖前的原始值（需求 4.5.3）。两个用途：日期详情要展示被覆盖的原始值；
+    // 移除覆盖时要恢复到下一优先级来源，而不是变成"没有来源的空白日"——
+    // 若不留原始值，移除时只能凭周模板重算，官方日历里那天的节日名与类型就永久丢了。
+    //
+    // 反复覆盖同一天时沿用最早的非覆盖原值：`overriddenFrom` 记的是"官方或模板原本
+    // 是什么"，不是"上一次人工改成了什么"，否则移除一次只会退回到另一次人工覆盖。
+    const origin: RentalCalendarDayOrigin | undefined =
+      replaced && replaced.source !== "tenant_override"
+        ? {
+            dayType: replaced.dayType,
+            name: replaced.name,
+            pricingMultiplier: replaced.pricingMultiplier,
+            closed: replaced.closed,
+            businessStatus: replaced.businessStatus,
+            source: replaced.source
+          }
+        : replaced?.overriddenFrom;
     const day: RentalCalendarDay = {
       ...input,
       businessStatus,
       closed: businessStatus === "closed" || businessStatus === "self_service",
-      source: "tenant_override"
+      source: "tenant_override",
+      overrideReason: input.overrideReason,
+      overrideBy: operator,
+      overrideAt: stamp(),
+      overriddenFrom: origin
     };
-    const index = calendar.days.findIndex((item) => item.date === input.date);
     if (index >= 0) calendar.days[index] = day; else calendar.days.push(day);
     calendar.days.sort((a, b) => a.date.localeCompare(b.date));
     await this.configStore.upsertCalendar(calendar);
@@ -574,6 +603,61 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
    * 且历史版本不得被删除或原地改回——因此这里是「新版本置 published +
    * 旧版本置 superseded」两步，而不是覆盖同一行。
    */
+  /**
+   * 移除某日期的人工覆盖，恢复到下一优先级来源（需求 4.5.3）。
+   *
+   * 需求明确「移除人工覆盖表示恢复到下一优先级来源，**不得把该日期变成没有来源的
+   * 空白日**」，因此不是简单地把那天删掉：有 `overriddenFrom` 就恢复它（官方日历或
+   * 周模板的原值），没有就按周模板重算该日期。
+   *
+   * 与编辑同理：已发布版本不可原地改，移除覆盖也要复制生成新草稿。
+   */
+  async removeCalendarDayOverride(tenantId: string, context: BusinessContext, year: number, date: string) {
+    const state = this.state(tenantId, context);
+    const base = this.editableCalendar(tenantId, context, year);
+    if (!date.startsWith(`${year}-`)) throw new BadRequestException("日期不属于该年度");
+    const target = base.days.find((item) => item.date === date);
+    if (!target || target.source !== "tenant_override") {
+      throw new ConflictException(`${date} 没有人工覆盖可移除`);
+    }
+    const calendar = structuredClone(base);
+    if (base.status !== "draft") {
+      calendar.status = "draft";
+      calendar.version = versionAfter(base.version);
+      calendar.previousVersion = base.version;
+      calendar.publishedAt = undefined;
+      calendar.publishedBy = undefined;
+      calendar.supersededAt = undefined;
+    }
+    const origin = target.overriddenFrom;
+    // 没有原始值时按周模板重算该日期，而不是留空——空白日会让后续取价拿不到任何来源。
+    const fallback = this.buildCalendar(tenantId, context.settings, year).days.find((item) => item.date === date);
+    const restored: RentalCalendarDay = origin
+      ? {
+          date,
+          dayType: origin.dayType,
+          name: origin.name,
+          pricingMultiplier: origin.pricingMultiplier,
+          closed: origin.closed,
+          businessStatus: origin.businessStatus ?? (origin.closed ? "closed" : "open"),
+          source: origin.source
+        }
+      : fallback ?? {
+          date,
+          dayType: "workday",
+          name: "工作日",
+          pricingMultiplier: 1,
+          closed: false,
+          businessStatus: "open",
+          source: "week_rule"
+        };
+    const index = calendar.days.findIndex((item) => item.date === date);
+    calendar.days.splice(index, 1, restored);
+    await this.configStore.upsertCalendar(calendar);
+    this.cacheCalendar(state, calendar);
+    return restored;
+  }
+
   async publishCalendar(tenantId: string, context: BusinessContext, year: number, operator?: string) {
     const state = this.state(tenantId, context);
     const draft = this.editableCalendar(tenantId, context, year);

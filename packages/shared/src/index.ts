@@ -4226,6 +4226,23 @@ export type RentalDayType = "workday" | "weekend" | "statutory_holiday" | "makeu
  */
 export type RentalCalendarBusinessStatus = "open" | "limited" | "closed" | "self_service";
 
+/**
+ * 被人工覆盖前的原始值（需求 4.5.3：「日期详情必须能说明当前结果来自人工覆盖、
+ * 官方日历还是每周模板，并展示**被覆盖的原始值**」）。
+ *
+ * 它同时承担第二个职责：需求要求「移除人工覆盖表示恢复到下一优先级来源，
+ * 不得把该日期变成没有来源的空白日」——覆盖时若不留下原始值，移除时就只能
+ * 凭周模板重算，官方日历里那天的节日名与类型就永久丢了。
+ */
+export interface RentalCalendarDayOrigin {
+  dayType: RentalDayType;
+  name: string;
+  pricingMultiplier: number;
+  closed: boolean;
+  businessStatus?: RentalCalendarBusinessStatus;
+  source: "week_rule" | "official_cn";
+}
+
 export interface RentalCalendarDay {
   date: string;
   dayType: RentalDayType;
@@ -4236,6 +4253,12 @@ export interface RentalCalendarDay {
   /** 四态营业状态（需求 4.5.4）。缺省时由 `closed` 推导。 */
   businessStatus?: RentalCalendarBusinessStatus;
   source: "week_rule" | "official_cn" | "tenant_override";
+  /** 人工覆盖的调整原因、操作人与调整时间（需求 4.5.3 要求必须保存）。 */
+  overrideReason?: string;
+  overrideBy?: string;
+  overrideAt?: string;
+  /** 被覆盖掉的原始值，供日期详情展示与移除覆盖时恢复。 */
+  overriddenFrom?: RentalCalendarDayOrigin;
 }
 
 export interface RentalCalendarYear {
@@ -4266,7 +4289,15 @@ export interface RentalCalendarYear {
   days: RentalCalendarDay[];
 }
 
-export interface SaveRentalCalendarDayRequest extends Omit<RentalCalendarDay, "source"> {}
+/**
+ * 保存人工覆盖。`overrideReason` 必填——需求 4.5.3 要求人工覆盖必须保存调整原因；
+ * 操作人与调整时间由服务端从会话与当前时刻填入，不接受调用方自报。
+ * `overriddenFrom` 同理由服务端从被覆盖的那天推导，不接受调用方传入。
+ */
+export interface SaveRentalCalendarDayRequest
+  extends Omit<RentalCalendarDay, "source" | "overrideBy" | "overrideAt" | "overriddenFrom"> {
+  overrideReason: string;
+}
 
 export interface ImportRentalCalendarRequest {
   year: number;

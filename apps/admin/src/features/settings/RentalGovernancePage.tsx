@@ -10,6 +10,7 @@ import type {
   GrantRentalRewardRequest,
   ImportRentalCalendarRequest,
   RentalCalendarDay,
+  SaveRentalCalendarDayRequest,
   RentalNotificationTemplateV1,
   RentalRuleVersion,
   SaveRentalNotificationTemplateRequest,
@@ -88,7 +89,7 @@ export function RentalGovernancePage() {
   const [ruleForm] = Form.useForm<
     RentalRuleVersion["config"] & { changeReason: string }
   >();
-  const [calendarDayForm] = Form.useForm<RentalCalendarDay>();
+  const [calendarDayForm] = Form.useForm<SaveRentalCalendarDayRequest>();
   const [importForm] = Form.useForm<ImportForm>();
   const [rewardForm] = Form.useForm<GrantRentalRewardRequest>();
   const [templateForm] = Form.useForm<TemplateForm>();
@@ -185,7 +186,7 @@ export function RentalGovernancePage() {
     onError: () => message.error("规则发布失败，请检查品类能力和租户设置"),
   });
   const saveDay = useMutation({
-    mutationFn: (value: RentalCalendarDay) =>
+    mutationFn: (value: SaveRentalCalendarDayRequest) =>
       rentalCoreApi.saveCalendarDay(year, value),
     onSuccess: async () => {
       setCalendarDay(undefined);
@@ -301,7 +302,9 @@ export function RentalGovernancePage() {
     setRuleEditor(current);
   }
   function openDay(row: RentalCalendarDay) {
-    calendarDayForm.setFieldsValue({ ...row, source: "tenant_override" });
+    // source 由服务端固定为 tenant_override，不作为表单字段提交。
+    const { source: _source, overrideBy: _by, overrideAt: _at, overriddenFrom: _from, ...editable } = row;
+    calendarDayForm.setFieldsValue({ ...editable, overrideReason: row.overrideReason ?? "" });
     setCalendarDay(row);
   }
   function openTemplate(row?: RentalNotificationTemplateV1) {
@@ -1384,6 +1387,14 @@ export function RentalGovernancePage() {
           </Form.Item>
           <Form.Item name="pricingMultiplier" label="价格系数">
             <InputNumber min={0} step={0.05} />
+          </Form.Item>
+          <Form.Item
+            name="overrideReason"
+            label="调整原因"
+            rules={[{ required: true }]}
+            tooltip="人工覆盖必须留下原因；操作人与调整时间由服务端记录。移除覆盖会恢复到官方日历或每周模板的原值。"
+          >
+            <Input />
           </Form.Item>
           <Form.Item name="closed" label="停业" valuePropName="checked">
             <Switch />

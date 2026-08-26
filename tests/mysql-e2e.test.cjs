@@ -2445,7 +2445,7 @@ async function main() {
 
   // 还原，避免污染后续用例。
   const tzRestored = await putSettings({ timeZone: "Asia/Shanghai" });
-  assert.equal(tzRestored.status, 200, "还原营业时区失败");
+  assert.equal(tzRestored.status, 200, `还原营业时区失败: ${JSON.stringify(tzRestored.body).slice(0, 300)}`);
   ok("营业时区按经营空间生效：非法标识 400、切换后自然日数与金额随之改变、逐日说明同步、配置落库");
 
   console.log("== 15f. PRICE-02 停业日只拦领取与归还时点，不拦租期跨过 ==");
@@ -2477,7 +2477,7 @@ async function main() {
   const saveClosedDay = await request(
     "PUT",
     `/api/rental/v1/calendars/${closedYear}/days/${closedDate}`,
-    { date: closedDate, dayType: "tenant_special", name: "E2E 盘点停业", pricingMultiplier: 1, closed: true },
+    { date: closedDate, dayType: "tenant_special", name: "E2E 盘点停业", pricingMultiplier: 1, closed: true, overrideReason: "E2E 年度盘点" },
     construction.accessToken
   );
   assert.equal(saveClosedDay.status, 200, `保存停业日失败: ${JSON.stringify(saveClosedDay.body).slice(0, 200)}`);
@@ -2589,6 +2589,7 @@ async function main() {
         dayType: "tenant_special",
         name: `E2E ${businessStatus}`,
         pricingMultiplier: 1,
+        overrideReason: `E2E 切换为 ${businessStatus}`,
         // 刻意把两态传成与四态**矛盾**的值：服务端必须以四态为准并把 closed 同步过来，
         // 否则同一行会自相矛盾、人工覆盖被静默忽略。
         closed: false,
@@ -2630,6 +2631,103 @@ async function main() {
 
   // 还原为停止营业，保持本节前面三条断言的前提不变。
   await setDayStatus("closed");
+  // 4b) 人工覆盖的审计与来源（需求 4.5.3）。
+  //     需求要求「人工覆盖必须保存调整原因、操作人、调整时间」，且「日期详情必须能
+  //     说明当前结果来自人工覆盖、官方日历还是每周模板，并展示被覆盖的原始值」，
+  //     以及「移除人工覆盖表示恢复到下一优先级来源，不得把该日期变成没有来源的空白日」。
+  const auditDate = `${closedYear}-10-01`; // 官方导入里是国庆节、系数 1.5
+  const beforeOverride = (await request("GET", `/api/rental/v1/calendars/${closedYear}`, null, construction.accessToken))
+    .body.data.days.find((row) => row.date === auditDate);
+  assert.ok(beforeOverride, `前置条件：官方导入应包含 ${auditDate}`);
+  assert.equal(beforeOverride.source, "official_cn", `覆盖前来源应为官方日历，实际 ${beforeOverride.source}`);
+
+  // 缺调整原因必须 400——需求写的是"必须保存"。
+  const noReason = await request(
+    "PUT",
+    `/api/rental/v1/calendars/${closedYear}/days/${auditDate}`,
+    { date: auditDate, dayType: "tenant_special", name: "E2E 无原因", pricingMultiplier: 2, closed: false },
+    construction.accessToken
+  );
+  assert.equal(noReason.status, 400, `缺调整原因必须 400：实际 ${noReason.status} ${JSON.stringify(noReason.body).slice(0, 180)}`);
+
+  const overridden = await request(
+    "PUT",
+    `/api/rental/v1/calendars/${closedYear}/days/${auditDate}`,
+    {
+      date: auditDate,
+      dayType: "tenant_special",
+      name: "E2E 店庆特价",
+      pricingMultiplier: 2,
+      closed: false,
+      businessStatus: "open",
+      overrideReason: "E2E 店庆活动特价"
+    },
+    construction.accessToken
+  );
+  assert.equal(overridden.status, 200, `人工覆盖失败: ${JSON.stringify(overridden.body).slice(0, 200)}`);
+  const day = overridden.body.data;
+  assert.equal(day.source, "tenant_override", "覆盖后来源必须是人工覆盖");
+  assert.equal(day.overrideReason, "E2E 店庆活动特价", "调整原因必须保存");
+  assert.ok(day.overrideBy, "操作人必须由服务端记录，不能为空");
+  assert.ok(day.overrideAt, "调整时间必须由服务端记录");
+  assert.ok(day.overriddenFrom, "必须保留被覆盖的原始值，否则日期详情无法展示、移除覆盖也无从恢复");
+  assert.equal(day.overriddenFrom.source, "official_cn", "被覆盖的原始来源应为官方日历");
+  assert.equal(
+    day.overriddenFrom.pricingMultiplier,
+    beforeOverride.pricingMultiplier,
+    `被覆盖的原始系数应为 ${beforeOverride.pricingMultiplier}，实际 ${day.overriddenFrom.pricingMultiplier}`
+  );
+
+  // 反复覆盖同一天：overriddenFrom 必须仍指向**官方原值**，而不是上一次人工改的值。
+  const overriddenAgain = await request(
+    "PUT",
+    `/api/rental/v1/calendars/${closedYear}/days/${auditDate}`,
+    {
+      date: auditDate,
+      dayType: "tenant_special",
+      name: "E2E 店庆特价二次调整",
+      pricingMultiplier: 3,
+      closed: false,
+      businessStatus: "open",
+      overrideReason: "E2E 二次调整"
+    },
+    construction.accessToken
+  );
+  assert.equal(overriddenAgain.status, 200, "二次覆盖失败");
+  assert.equal(
+    overriddenAgain.body.data.overriddenFrom.pricingMultiplier,
+    beforeOverride.pricingMultiplier,
+    "二次覆盖后原始值仍应是官方原值，否则移除一次只会退回到另一次人工覆盖"
+  );
+
+  // 移除覆盖：恢复到官方日历原值，且不能变成空白日。
+  const removed = await request(
+    "DELETE",
+    `/api/rental/v1/calendars/${closedYear}/days/${auditDate}`,
+    null,
+    construction.accessToken
+  );
+  assert.equal(removed.status, 200, `移除覆盖失败: ${JSON.stringify(removed.body).slice(0, 200)}`);
+  assert.equal(removed.body.data.source, "official_cn", "移除覆盖后应恢复到官方日历来源");
+  assert.equal(
+    removed.body.data.pricingMultiplier,
+    beforeOverride.pricingMultiplier,
+    "移除覆盖后系数应恢复为官方原值"
+  );
+  assert.equal(removed.body.data.dayType, beforeOverride.dayType, "移除覆盖后日期类型应恢复为官方原值");
+  // 该日期必须仍然存在（不得变成没有来源的空白日）。
+  const afterRemove = (await request("GET", `/api/rental/v1/calendars/${closedYear}`, null, construction.accessToken))
+    .body.data.days.filter((row) => row.date === auditDate);
+  assert.equal(afterRemove.length, 1, `移除覆盖后该日期必须仍有且只有一条记录，实际 ${afterRemove.length}`);
+  // 没有覆盖时再移除必须报错，而不是静默成功。
+  const removeAgain = await request(
+    "DELETE",
+    `/api/rental/v1/calendars/${closedYear}/days/${auditDate}`,
+    null,
+    construction.accessToken
+  );
+  assert.equal(removeAgain.status, 409, `无覆盖可移除时应 409，实际 ${removeAgain.status}`);
+
   // 5) 年度版本历史（需求 4.5.7）：已发布版本不可原地修改，编辑必须复制为新草稿，
   //    新草稿发布后原版本进入「已被替代」，历史版本不得被删除或改回。
   //
@@ -2663,6 +2761,7 @@ async function main() {
       dayType: "tenant_special",
       name: "E2E 版本历史验证",
       pricingMultiplier: 1.2,
+      overrideReason: "E2E 版本历史验证",
       closed: false,
       businessStatus: "open"
     },

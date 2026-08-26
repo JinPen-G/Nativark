@@ -763,6 +763,14 @@ export class SaveRentalCalendarDayDto implements SaveRentalCalendarDayRequest {
   @IsOptional()
   @IsIn(BUSINESS_STATUSES)
   businessStatus?: (typeof BUSINESS_STATUSES)[number];
+
+  /**
+   * 调整原因，必填（需求 4.5.3：人工覆盖必须保存调整原因）。
+   * 操作人与调整时间由服务端填，不接受调用方自报——自报的操作人没有审计价值。
+   */
+  @IsString()
+  @IsNotEmpty()
+  overrideReason!: string;
 }
 
 /* ---------- 通知模板 ---------- */
