@@ -4833,6 +4833,15 @@ export interface RentalQuoteSnapshotV1 {
    * （需求 4.5.5：车辆节假日加价 30%、摄影器材加价 10%）。
    */
   calendarSnapshot: RentalQuoteCalendarDay[];
+  /**
+   * 命中年度里官方日历尚未确认的提示（需求 4.5.2）。
+   *
+   * 未来年度官方日历尚未发布时，系统仍按经营空间每周默认模板允许报价，但必须
+   * 明确提示「该年度官方日历尚未确认」——否则运营无法区分「按已确认官方日历报的价」
+   * 与「按周模板兜底报的价」，而后续官方日历发布后不得反向改动这张已锁价报价。
+   * 每个未确认年度一条；全部年度都有已发布官方日历时为空数组。
+   */
+  calendarWarnings: string[];
   appliedDiscountPlanIds: string[];
   customerCouponId?: string;
   expiresAt: string;

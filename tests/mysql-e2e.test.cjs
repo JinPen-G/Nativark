@@ -3199,6 +3199,41 @@ async function main() {
       "每周默认模板对无覆盖无官方条目的普通日期同样兜底，未声明时段则不限制"
   );
 
+  console.log("== 15i. PRICE-02 未来年度官方日历未确认时报价提示 ==");
+  // 需求 4.5.2：未来年度官方日历尚未发布时仍按每周默认模板允许报价，但必须提示
+  // 「该年度官方日历尚未确认」——否则运营无法区分是按已确认官方日历还是按周模板兜底报的价，
+  // 而后续官方日历发布不得反向改动这张已锁价报价。construction 只发布了 2027 年度日历。
+  const futureQuote = await closedQuote("2028-06-15T09:00:00+08:00", "2028-06-17T09:00:00+08:00");
+  assert.equal(futureQuote.status, 201, `未来年度应允许报价（按周模板兜底）: ${futureQuote.status} ${JSON.stringify(futureQuote.body).slice(0, 200)}`);
+  const futureWarnings = futureQuote.body.data.calendarWarnings ?? [];
+  assert.ok(
+    futureWarnings.some((w) => w.includes("2028") && w.includes("尚未确认")),
+    `未确认年度必须提示官方日历尚未确认: ${JSON.stringify(futureWarnings)}`
+  );
+  // 已发布官方日历的年度不得误报提示。
+  const publishedYearQuote = await closedQuote("2027-06-07T09:00:00+08:00", "2027-06-08T09:00:00+08:00");
+  assert.equal(publishedYearQuote.status, 201, `已发布年度报价应成功: ${publishedYearQuote.status} ${JSON.stringify(publishedYearQuote.body).slice(0, 200)}`);
+  assert.ok(
+    !(publishedYearQuote.body.data.calendarWarnings ?? []).some((w) => w.includes("2027")),
+    `已发布官方日历的年度不得提示尚未确认: ${JSON.stringify(publishedYearQuote.body.data.calendarWarnings)}`
+  );
+  // 提示随报价落库：直接查库，证明 upsertQuote 写映射真的带上了它，而不只是创建响应里的临时值。
+  const persistedWarnings = readScalar(
+    `SELECT JSON_EXTRACT(\`calendarWarnings\`, '$') FROM \`rental_quotes\` WHERE \`id\`='${futureQuote.body.data.id}';`
+  );
+  assert.ok(
+    persistedWarnings && persistedWarnings.includes("2028"),
+    `报价提示必须落库: ${persistedWarnings}`
+  );
+  // 读回接口也应带出提示。
+  const futureReadback = await request("GET", `/api/rental/v1/quotes/${futureQuote.body.data.id}`, null, construction.accessToken);
+  assert.equal(futureReadback.status, 200, `读取报价失败: ${futureReadback.status}`);
+  assert.ok(
+    (futureReadback.body.data.calendarWarnings ?? []).some((w) => w.includes("2028")),
+    `读回的报价必须带提示: ${JSON.stringify(futureReadback.body.data.calendarWarnings)}`
+  );
+  ok("未来年度官方日历未确认：报价按周模板放行且带「尚未确认」提示、已发布年度不误报、提示随报价落库读回一致");
+
   console.log("== 16. 双租户并发隔离 ==");
   const rounds = 12;
   const concurrent = [];

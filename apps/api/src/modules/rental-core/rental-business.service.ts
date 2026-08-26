@@ -1661,6 +1661,17 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       });
     }
     const timestamp = stamp();
+    // 需求 4.5.2：命中年度的官方日历尚未确认时仍按每周默认模板报价，但必须提示。
+    // calendarsForDateRange 对没有已发布日历的年度回退到 buildCalendar（status=draft），
+    // 因此「status 非 published」即该年度尚无已确认的官方日历；仅在启用官方日历的
+    // 地区（CN）提示，NONE 地区本就不依赖官方日历。按年度去重，跨年度各提示一条。
+    const calendarWarnings = [
+      ...new Set(
+        calendars
+          .filter((calendar) => calendar.region === "CN" && calendar.status !== "published")
+          .map((calendar) => `${calendar.year} 年度官方日历尚未确认，本次报价按每周默认营业模板计算`)
+      )
+    ];
     const quote: RentalQuoteSnapshotV1 = {
       id: uid("quote"), tenantId, quoteNo: `RQ${timestamp.replace(/\D/g, "").slice(0, 14)}${String(state.quotes.length + 1).padStart(3, "0")}`,
       categoryCode: context.profile.categoryCode, request: structuredClone(input), chargeLines,
@@ -1668,6 +1679,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       fulfillmentAmount,
       rateSnapshot: hitRates,
       calendarSnapshot,
+      calendarWarnings,
       depositAmount,
       preAuthAmount,
       // 需求 4.4：最终应付 = 基础租金 + 使用量费用 + 履约费用 + 增值服务 + 异常费用 - 优惠 - 券。

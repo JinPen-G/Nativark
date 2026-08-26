@@ -2860,6 +2860,9 @@ model RentalQuote {
   /// 可空且不回填：存量报价只存了拼接的 calendarVersion，其中没有逐日信息，
   /// 无法反推类型、状态与实际价格；留 NULL 是如实记录"当时没有"。
   calendarSnapshot       Json?
+  /// string[]：命中年度里官方日历尚未确认的提示（需求 4.5.2）。可空且不回填：
+  /// 存量报价按当时口径生成，无法回填出"当时是否提示过"，编造一个会误导追溯。
+  calendarWarnings       Json?
   appliedDiscountPlanIds Json
   customerCouponId       String?
   expiresAt              DateTime
