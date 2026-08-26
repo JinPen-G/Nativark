@@ -168,6 +168,8 @@ const permissions = [
   ["store-rental:order:fee-manage", "按钮-费用处理", "门市租赁", PermissionKind.BUTTON],
   ["store-rental:dispatch:manage", "调度管理", "门市租赁", PermissionKind.ACTION],
   ["store-rental:price:manage", "价格规则", "门市租赁", PermissionKind.ACTION],
+  ["store-rental:calendar:edit", "营业日历编辑（草稿）", "门市租赁", PermissionKind.ACTION],
+  ["store-rental:calendar:publish", "营业日历发布", "门市租赁", PermissionKind.ACTION],
   ["store-rental:marketing:manage", "行销方案管理", "门市租赁", PermissionKind.ACTION],
   ["store-rental:station:view", "站点查看", "门市租赁", PermissionKind.ACTION],
   ["store-rental:station:manage", "站点管理", "门市租赁", PermissionKind.ACTION],
@@ -255,6 +257,8 @@ const roleTemplates = [
     permissions: [
       "store-rental:rules:manage",
       "store-rental:price:manage",
+      "store-rental:calendar:edit",
+      "store-rental:calendar:publish",
       "store-rental:marketing:manage",
       "store-rental:service:manage",
       "system:params:manage",

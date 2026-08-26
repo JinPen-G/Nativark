@@ -5951,6 +5951,97 @@ async function main() {
   assert.equal(permAdminList.status, 200, "租户管理员仍应能列出经营空间");
   ok("经营空间管理接口有权限门槛：低权限账号列空间/加成员/建空间均 403，管理员不受影响");
 
+  console.log("== 61b. PRICE-02 日历编辑与发布分权（需求 4.5.8） ==");
+  // 需求 4.5.8：编辑与发布使用独立权限，权限模型必须允许「日历编辑人员只能改草稿、不得发布」。
+  // 造一个只有 calendar:edit 的角色与账号，加入其经营空间验证：编辑可、发布 403、
+  // 管理员发布 201（证明 403 来自权限拆分而非坏接口）。放在平台域审计不变量断言（第 41 节）
+  // 之后，避免本节创建角色/账号/成员的平台域写操作把带空间的平台审计计入那条前置断言。
+  // 用 demo 租户：其管理员口令是测试常量，可随时新登拿到未过期令牌（bootstrap 租户的
+  // 令牌到本节可能已过期，且其口令不外露无法重登）。
+  const calAdmin = await login("demo", "admin", DEMO_PASSWORD);
+  const calEditorRole = await request(
+    "POST",
+    "/api/platform/roles",
+    {
+      code: `E2E-CAL-EDITOR-${Date.now().toString(36)}`,
+      name: "E2E 日历编辑人员",
+      scope: "store",
+      dataScope: "all",
+      enabledBusinessScopes: ["rental"],
+      // 只给编辑权限，不给发布、不给 price:manage：这正是「编辑人不能发布」要能表达的角色。
+      permissions: ["store-rental:calendar:edit", "store-rental:order:view"],
+      isActive: true
+    },
+    calAdmin.accessToken
+  );
+  assert.equal(calEditorRole.status, 201, `建日历编辑角色失败: ${JSON.stringify(calEditorRole.body).slice(0, 200)}`);
+  const calEditorAccount = `e2e_cal_editor_${Date.now().toString(36)}`;
+  const calEditorUser = await request(
+    "POST",
+    "/api/platform/users",
+    { account: calEditorAccount, displayName: "E2E 日历编辑", phone: "13900008888", roleIds: [calEditorRole.body.data.id], isActive: true },
+    calAdmin.accessToken
+  );
+  assert.equal(calEditorUser.status, 201, `建日历编辑账号失败: ${JSON.stringify(calEditorUser.body).slice(0, 200)}`);
+  const calEditorMember = await request(
+    "PUT",
+    `/api/platform/workspaces/${calAdmin.currentWorkspaceId}/members`,
+    { userId: calEditorUser.body.data.id, roleId: calEditorRole.body.data.id },
+    calAdmin.accessToken
+  );
+  assert.ok([200, 201].includes(calEditorMember.status), `加入空间成员失败: ${calEditorMember.status} ${JSON.stringify(calEditorMember.body).slice(0, 200)}`);
+  // PLACEHOLDER-15K2
+  const calEditorTemp = calEditorUser.body.data.temporaryPassword;
+  const calEditorFirst = await login("demo", calEditorAccount, calEditorTemp);
+  const calEditorPwd = `E2e!${randomBytes(4).toString("hex")}`;
+  const calEditorChanged = await request(
+    "POST",
+    "/api/auth/change-password",
+    { currentPassword: calEditorTemp, newPassword: calEditorPwd },
+    calEditorFirst.accessToken
+  );
+  assert.equal(calEditorChanged.status, 201, `日历编辑改密失败: ${JSON.stringify(calEditorChanged.body).slice(0, 200)}`);
+  const calEditor = await login("demo", calEditorAccount, calEditorPwd);
+  const calSwitch = await request(
+    "POST",
+    "/api/auth/switch-workspace",
+    { workspaceId: calAdmin.currentWorkspaceId },
+    calEditor.accessToken
+  );
+  assert.equal(calSwitch.status, 201, `日历编辑切换空间失败: ${calSwitch.status} ${JSON.stringify(calSwitch.body).slice(0, 200)}`);
+  const editorToken = calSwitch.body.data.accessToken;
+  // 编辑权限：导入官方来源（编辑动作）应放行。
+  const editorImport = await request(
+    "POST",
+    "/api/rental/v1/calendars/import",
+    {
+      year: 2032,
+      region: "CN",
+      sourceName: "E2E 分权来源",
+      sourceUrl: "https://example.invalid/e2e-4508",
+      sourcePublishedAt: new Date(Date.now() - 86400000).toISOString(),
+      days: [{ date: "2032-10-01", dayType: "statutory_holiday", name: "国庆节", pricingMultiplier: 1.5 }]
+    },
+    editorToken
+  );
+  assert.equal(editorImport.status, 201, `日历编辑应能导入草稿（编辑权限）: ${editorImport.status} ${JSON.stringify(editorImport.body).slice(0, 200)}`);
+  // 发布权限：只有编辑权限的账号必须 403（本条核心——编辑与发布独立鉴权）。
+  const editorPublish = await request(
+    "POST",
+    "/api/rental/v1/calendars/2032/publish",
+    { changeReason: "编辑人尝试发布" },
+    editorToken
+  );
+  assert.equal(editorPublish.status, 403, `只有编辑权限的账号不得发布日历: ${editorPublish.status} ${JSON.stringify(editorPublish.body).slice(0, 200)}`);
+  // 管理员发布同一年度应成功，证明 403 来自权限拆分而非坏接口。
+  const adminPublish2032 = await request(
+    "POST",
+    "/api/rental/v1/calendars/2032/publish",
+    { changeReason: "管理员发布 2032" },
+    calAdmin.accessToken
+  );
+  assert.equal(adminPublish2032.status, 201, `管理员发布应成功: ${adminPublish2032.status} ${JSON.stringify(adminPublish2032.body).slice(0, 200)}`);
+  ok("日历编辑与发布分权：仅 calendar:edit 的账号可导入草稿但发布 403，管理员发布 201，证明编辑与发布独立鉴权");
   console.log("== 62. 无空间成员关系的账号不得访问经营域 ==");
   // 另一处 fail-open：空间检查曾附加 `accessContext.hasWorkspaces` 条件，
   // 于是「一个空间都没有的账号」跳过检查，随后仓储层的 resolveScopeWorkspaceId

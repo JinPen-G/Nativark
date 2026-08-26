@@ -141,7 +141,28 @@ function requiredPermissions(method: string, path: string) {
   if (path === "/rental/v1/business-settings") {
     return method === "GET" ? ["store-rental:rules:manage", "store-rental:price:manage", "store-rental:order:view", "store-rental:order:create"] : ["store-rental:rules:manage", "store-rental:price:manage"];
   }
-  if (path.startsWith("/rental/v1/rule-versions") || path.startsWith("/rental/v1/calendars") || path.startsWith("/rental/v1/rewards") || path.startsWith("/rental/v1/benefit-accounts") || path.startsWith("/rental/v1/notification-templates") || path.startsWith("/rental/v1/notification-logs") || path === "/rental/v1/notifications/send") {
+  if (path.startsWith("/rental/v1/calendars")) {
+    // 需求 4.5.8：营业日历「编辑」与「发布」使用独立权限，权限模型必须允许
+    // 「日历编辑人员只能改草稿、不得发布」。price:manage 作为既有超集保留，
+    // 避免存量部署（其价格管理员只有 price:manage）在本次拆分后失去日历能力。
+    if (method === "GET") {
+      return [
+        "store-rental:calendar:edit",
+        "store-rental:calendar:publish",
+        "store-rental:price:manage",
+        "store-rental:rules:manage",
+        "store-rental:order:view"
+      ];
+    }
+    // 发布是独立权限：只有编辑权限的账号在这里必须被拒。
+    if (/\/publish$/.test(path)) {
+      return ["store-rental:calendar:publish", "store-rental:price:manage"];
+    }
+    // 其余写操作（导入官方来源、保存日期、移除覆盖、作废草稿）属编辑；
+    // 发布权限视为编辑的超集（能发布者自然能改）。
+    return ["store-rental:calendar:edit", "store-rental:calendar:publish", "store-rental:price:manage"];
+  }
+  if (path.startsWith("/rental/v1/rule-versions") || path.startsWith("/rental/v1/rewards") || path.startsWith("/rental/v1/benefit-accounts") || path.startsWith("/rental/v1/notification-templates") || path.startsWith("/rental/v1/notification-logs") || path === "/rental/v1/notifications/send") {
     return ["store-rental:rules:manage", "store-rental:price:manage"];
   }
   if (path === "/rental/v1/coupon-templates" || path.startsWith("/rental/v1/coupon-templates/")) {
