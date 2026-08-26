@@ -9,6 +9,9 @@ import {
   type RentalBusinessHours,
   type RentalCalendarDay,
   type RentalCalendarDayOrigin,
+  type RentalCalendarDaySnapshot,
+  type RentalCalendarOverrideAudit,
+  type RentalCalendarPublishDiff,
   type RentalCalendarYear,
   type RentalCategoryDefinition,
   type RentalCouponTemplate,
@@ -32,6 +35,8 @@ import {
   type RentalRuleVersion,
   type RentalValueAddedService,
   type SaveRentalCalendarDayRequest,
+  type RemoveRentalCalendarDayOverrideRequest,
+  type PublishRentalCalendarRequest,
   type SaveRentalDiscountPlanRequest,
   type SaveRentalNotificationTemplateRequest,
   type SaveRentalPricingPlanRequest,
@@ -54,7 +59,7 @@ import {
 } from "./rental-business-fact.repository";
 import { RentalCoreConfigRepository, type RentalConfigStore, type RentalConfigTx } from "./rental-core-config.repository";
 import { PrismaService } from "../database/prisma.service";
-import { DEFAULT_BUSINESS_TIME_ZONE, businessDateKey, businessTimeOfDay, businessDateKeyFromIndex, businessDayIndex, businessYearFromDateKey } from "./rental-business-day";
+import { DEFAULT_BUSINESS_TIME_ZONE, businessDateKey, businessTimeOfDay, businessDateKeyFromIndex, businessDayIndex, businessYearFromDateKey, isCalendarDateKey } from "./rental-business-day";
 import { rentalPricingStrategy } from "./rental-pricing-strategy";
 
 interface RentalBusinessState {
@@ -104,6 +109,44 @@ function versionAfter(current?: string) {
   if (!current) return "1.0";
   const [major, minor] = current.split(".").map(Number);
   return `${Number.isFinite(major) ? major : 1}.${(Number.isFinite(minor) ? minor : 0) + 1}`;
+}
+
+/**
+ * 版本号大小比较。必须按段取数值，不能用 `localeCompare`：
+ * 字典序下 `"1.10" < "1.9"`，于是第十次修订会被当成比第九次旧的版本，
+ * 「取最新草稿」和「取最新已发布」两处都会挑错行。
+ */
+function compareVersions(left: string, right: string): number {
+  const parse = (value: string) => value.split(".").map((part) => Number(part) || 0);
+  const a = parse(left);
+  const b = parse(right);
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+    const diff = (a[index] ?? 0) - (b[index] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+/**
+ * 两个年度日历之间的日期差异（需求 4.5.7 的版本可追溯）。
+ *
+ * 比较取值而不是整行：`overrideBy` / `overrideAt` 每次保存都会变，
+ * 按整行比对会把「只是重新保存了一遍」也算成变更，差异列表就失去筛选价值。
+ */
+function calendarDiff(before: RentalCalendarDay[], after: RentalCalendarDay[]): RentalCalendarPublishDiff {
+  const key = (day: RentalCalendarDay) =>
+    [day.dayType, day.name, day.pricingMultiplier, day.closed, day.businessStatus ?? "", day.source].join("|");
+  const beforeMap = new Map(before.map((day) => [day.date, key(day)]));
+  const afterMap = new Map(after.map((day) => [day.date, key(day)]));
+  const added: string[] = [];
+  const changed: string[] = [];
+  for (const [date, signature] of afterMap) {
+    const previous = beforeMap.get(date);
+    if (previous === undefined) added.push(date);
+    else if (previous !== signature) changed.push(date);
+  }
+  const removed = [...beforeMap.keys()].filter((date) => !afterMap.has(date));
+  return { added: added.sort(), removed: removed.sort(), changed: changed.sort() };
 }
 
 function defaultRuleConfig(category: RentalCategoryDefinition, settings: TenantRentalBusinessSettings): RentalRuleConfig {
@@ -493,43 +536,111 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       (item) => item.year === year && item.status === "published"
     );
     // 正常只会有一个；若出现多个，取版本号最大的那个并保持行为确定。
-    return published.sort((left, right) => right.version.localeCompare(left.version))[0];
+    return published.sort((left, right) => compareVersions(right.version, left.version))[0];
   }
 
-  /** 供编辑使用：优先当前草稿，其次已发布版本，最后按周模板生成。 */
+  /**
+   * 供编辑使用：优先当前草稿，其次已发布版本，最后按周模板生成。
+   *
+   * 必须按版本号降序取：同一年度可能存在多个草稿（历史遗留数据，或早前每次导入
+   * 都递增版本的实现留下的），而 `Array.find` 取的是装载顺序里的第一条，
+   * 等于随机返回一个旧草稿——运营刚存的覆盖会"消失"，下一次发布也会发错版本。
+   */
   private editableCalendar(tenantId: string, context: BusinessContext, year: number) {
     const list = this.state(tenantId, context).calendars.filter((item) => item.year === year);
-    return (
-      list.find((item) => item.status === "draft") ??
-      list.find((item) => item.status === "published") ??
-      this.buildCalendar(tenantId, context.settings, year)
-    );
+    const latest = (status: RentalCalendarYear["status"]) =>
+      list
+        .filter((item) => item.status === status)
+        .sort((left, right) => compareVersions(right.version, left.version))[0];
+    return latest("draft") ?? latest("published") ?? this.buildCalendar(tenantId, context.settings, year);
+  }
+
+  /** 审计与差异用的日期取值快照。 */
+  private static daySnapshot(day: RentalCalendarDay): RentalCalendarDaySnapshot {
+    return {
+      dayType: day.dayType,
+      name: day.name,
+      pricingMultiplier: day.pricingMultiplier,
+      closed: day.closed,
+      businessStatus: day.businessStatus,
+      source: day.source
+    };
+  }
+
+  /**
+   * 追加一条覆盖审计。上限 500 条：审计随年度日历整行以 JSON 落库，
+   * 无上限时一年内反复调整同一天会把这一行撑到 MySQL 的 JSON 长度上限，
+   * 届时整个年度日历都写不进去。超出后丢最早的记录——最近的调整才是运营要查的。
+   */
+  private static appendAudit(calendar: RentalCalendarYear, entry: RentalCalendarOverrideAudit) {
+    const audits = [...(calendar.overrideAudits ?? []), entry];
+    calendar.overrideAudits = audits.slice(-500);
   }
 
   async importOfficialCalendar(tenantId: string, context: BusinessContext, input: ImportRentalCalendarRequest) {
     if (!/^https:\/\//.test(input.sourceUrl)) throw new BadRequestException("官方日历来源必须使用 HTTPS 地址");
     if (!input.days.length) throw new BadRequestException("官方日历数据不能为空");
     const state = this.state(tenantId, context);
-    const calendar = structuredClone(this.getCalendar(tenantId, context, input.year));
+    const base = this.editableCalendar(tenantId, context, input.year);
+    const calendar = structuredClone(base);
     const dayMap = new Map(calendar.days.map((day) => [day.date, day]));
+    const seen = new Set<string>();
+    const preserved: string[] = [];
     for (const row of input.days) {
+      // 严格日期校验：`2026-02-30` 会被 `new Date` 静默滚到 3 月 2 日，
+      // 那天的节假日加价就落到了错误的日期上。
+      if (!isCalendarDateKey(row.date)) throw new BadRequestException(`日历日期 ${row.date} 不是有效的 YYYY-MM-DD 日期`);
       if (!row.date.startsWith(`${input.year}-`)) throw new BadRequestException("日历日期与年度不一致");
       if (!["statutory_holiday", "makeup_workday"].includes(row.dayType)) throw new BadRequestException("官方数据只允许法定节假日或调休工作日");
-      dayMap.set(row.date, {
+      // 同一批里重复给同一天，说明来源数据本身有问题；静默取最后一条会让导入结果
+      // 取决于数组顺序，运营无法解释为什么那天不是自己看到的类型。
+      if (seen.has(row.date)) throw new BadRequestException(`日历日期 ${row.date} 在本次导入中重复`);
+      seen.add(row.date);
+      const official: RentalCalendarDay = {
         date: row.date, dayType: row.dayType, name: row.name,
         pricingMultiplier: row.pricingMultiplier ?? (row.dayType === "statutory_holiday" ? 1.25 : 1),
         closed: row.closed ?? false, source: "official_cn"
-      });
+      };
+      const existing = dayMap.get(row.date);
+      // 人工覆盖优先于官方日历（需求 4.5.3 的来源优先级）。早前无条件 set，
+      // 于是每次重导官方数据都会把运营的调整连同调整原因一起抹掉，且毫无提示。
+      if (existing?.source === "tenant_override") {
+        preserved.push(row.date);
+        // 但 `overriddenFrom` 要换成本次的官方值：它的用途是"移除覆盖后恢复到哪里"，
+        // 停在上一版官方数据会让撤销覆盖后恢复出一个已经作废的节假日安排。
+        dayMap.set(row.date, {
+          ...existing,
+          overriddenFrom: {
+            dayType: official.dayType,
+            name: official.name,
+            pricingMultiplier: official.pricingMultiplier,
+            closed: official.closed,
+            businessStatus: official.closed ? "closed" : "open",
+            source: "official_cn"
+          }
+        });
+        continue;
+      }
+      dayMap.set(row.date, official);
     }
     calendar.days = [...dayMap.values()].sort((a, b) => a.date.localeCompare(b.date));
     calendar.region = "CN";
-    calendar.status = "draft";
-    calendar.version = versionAfter(calendar.version);
+    // 已是草稿就原地更新，不递增版本。早前无条件 `versionAfter`，于是连续导入两次
+    // 会留下两个草稿；再叠加 `find` 取首条的旧 bug，页面会随机显示其中一个。
+    if (base.status !== "draft") {
+      calendar.status = "draft";
+      calendar.version = versionAfter(base.version);
+      calendar.previousVersion = base.version;
+    }
     calendar.sourceName = input.sourceName;
     calendar.sourceUrl = input.sourceUrl;
     calendar.sourcePublishedAt = input.sourcePublishedAt;
     calendar.importedAt = stamp();
+    calendar.importPreservedOverrides = preserved.length ? preserved : undefined;
     calendar.publishedAt = undefined;
+    calendar.publishedBy = undefined;
+    calendar.supersededAt = undefined;
+    calendar.publishDiff = undefined;
     await this.configStore.upsertCalendar(calendar);
     this.cacheCalendar(state, calendar);
     return calendar;
@@ -544,7 +655,16 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   ) {
     const state = this.state(tenantId, context);
     const base = this.editableCalendar(tenantId, context, year);
-    if (!input.date.startsWith(`${year}-`) || input.pricingMultiplier < 0) throw new BadRequestException("日期年度或价格系数无效");
+    // 严格校验，逐项都是能绕过的口子：
+    // - `startsWith` 单独用会放过 `2026-02-30`（`new Date` 静默滚到 3 月 2 日）
+    //   和带时间的 `2026-05-01T00:00:00Z`（同一天出现两个日历键）；
+    // - `pricingMultiplier < 0` 放过 `NaN` 与 `Infinity`，两者会把整段租金算成 NaN；
+    // - `@IsNotEmpty()` 放过纯空白原因，落库后审计栏显示为空，等于没记原因。
+    if (!isCalendarDateKey(input.date)) throw new BadRequestException("日历日期必须是有效的 YYYY-MM-DD 日期");
+    if (!input.date.startsWith(`${year}-`)) throw new BadRequestException("日期不属于该年度");
+    if (!Number.isFinite(input.pricingMultiplier) || input.pricingMultiplier < 0) throw new BadRequestException("价格系数无效");
+    const reason = input.overrideReason?.trim();
+    if (!reason) throw new BadRequestException("人工覆盖必须填写调整原因");
     // 已发布版本不可原地修改（需求 4.5.7），必须复制生成新草稿。
     //
     // 早前的实现直接把该行 status 改回 draft 并递增版本号——等于**把已发布版本
@@ -586,25 +706,27 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       businessStatus,
       closed: businessStatus === "closed" || businessStatus === "self_service",
       source: "tenant_override",
-      overrideReason: input.overrideReason,
+      overrideReason: reason,
       overrideBy: operator,
       overrideAt: stamp(),
       overriddenFrom: origin
     };
     if (index >= 0) calendar.days[index] = day; else calendar.days.push(day);
     calendar.days.sort((a, b) => a.date.localeCompare(b.date));
+    RentalBusinessService.appendAudit(calendar, {
+      date: input.date,
+      action: "override",
+      reason,
+      operator,
+      at: day.overrideAt!,
+      before: replaced ? RentalBusinessService.daySnapshot(replaced) : undefined,
+      after: RentalBusinessService.daySnapshot(day)
+    });
     await this.configStore.upsertCalendar(calendar);
     this.cacheCalendar(state, calendar);
     return day;
   }
 
-  /**
-   * 发布年度日历：草稿转已发布，同时把原已发布版本标记为「已被替代」。
-   *
-   * 需求 4.5.7 要求每个经营空间每个年度只能有一个当前使用的已发布版本，
-   * 且历史版本不得被删除或原地改回——因此这里是「新版本置 published +
-   * 旧版本置 superseded」两步，而不是覆盖同一行。
-   */
   /**
    * 移除某日期的人工覆盖，恢复到下一优先级来源（需求 4.5.3）。
    *
@@ -613,10 +735,24 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
    * 周模板的原值），没有就按周模板重算该日期。
    *
    * 与编辑同理：已发布版本不可原地改，移除覆盖也要复制生成新草稿。
+   *
+   * 撤销原因必填、且与前后取值一起进审计流水：撤销和建立覆盖一样是一次经营决策，
+   * 只留「谁在什么时候撤销了」而不留「为什么、从什么改成了什么」，事后既无法判断
+   * 是纠错还是误操作，也无法在争议订单里复原当时的日历口径。
    */
-  async removeCalendarDayOverride(tenantId: string, context: BusinessContext, year: number, date: string) {
+  async removeCalendarDayOverride(
+    tenantId: string,
+    context: BusinessContext,
+    year: number,
+    date: string,
+    input: RemoveRentalCalendarDayOverrideRequest,
+    operator?: string
+  ) {
     const state = this.state(tenantId, context);
     const base = this.editableCalendar(tenantId, context, year);
+    if (!isCalendarDateKey(date)) throw new BadRequestException("日历日期必须是有效的 YYYY-MM-DD 日期");
+    const reason = input?.overrideReason?.trim();
+    if (!reason) throw new BadRequestException("移除人工覆盖必须填写调整原因");
     if (!date.startsWith(`${year}-`)) throw new BadRequestException("日期不属于该年度");
     const target = base.days.find((item) => item.date === date);
     if (!target || target.source !== "tenant_override") {
@@ -655,33 +791,60 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         };
     const index = calendar.days.findIndex((item) => item.date === date);
     calendar.days.splice(index, 1, restored);
+    RentalBusinessService.appendAudit(calendar, {
+      date,
+      action: "revert",
+      reason,
+      operator,
+      at: stamp(),
+      before: RentalBusinessService.daySnapshot(target),
+      after: RentalBusinessService.daySnapshot(restored)
+    });
     await this.configStore.upsertCalendar(calendar);
     this.cacheCalendar(state, calendar);
     return restored;
   }
 
-  async publishCalendar(tenantId: string, context: BusinessContext, year: number, operator?: string) {
+  /**
+   * 发布年度日历：草稿转已发布，同时把原已发布版本标记为「已被替代」。
+   *
+   * 需求 4.5.7 要求每个经营空间每个年度只能有一个当前使用的已发布版本，
+   * 且历史版本不得被删除或原地改回——因此这里是「新版本置 published +
+   * 旧版本置 superseded」两步。两步必须在同一个事务里：早前是两次独立 upsert，
+   * 第二次失败就会留下**两个 published 版本**，而报价按版本号取最大的那个，
+   * 等于旧口径被静默弃用却没有任何替代记录；反序写又会留下"没有已发布日历"的空窗。
+   */
+  async publishCalendar(
+    tenantId: string,
+    context: BusinessContext,
+    year: number,
+    input: PublishRentalCalendarRequest,
+    operator?: string
+  ) {
     const state = this.state(tenantId, context);
     const draft = this.editableCalendar(tenantId, context, year);
     if (draft.region === "CN" && !draft.sourceName) throw new ConflictException("中国大陆日历发布前必须导入并记录官方来源");
+    const changeReason = input?.changeReason?.trim();
+    if (!changeReason) throw new BadRequestException("发布年度日历必须填写变更原因");
     const previous = this.publishedCalendar(tenantId, context, year);
     const calendar = structuredClone(draft);
     if (calendar.status === "published") return calendar;
     calendar.status = "published";
     calendar.publishedAt = stamp();
     calendar.publishedBy = operator;
-    if (previous && previous.version !== calendar.version) calendar.previousVersion = previous.version;
-    await this.configStore.upsertCalendar(calendar);
+    calendar.changeReason = changeReason;
+    const replacing = previous && previous.version !== calendar.version ? previous : undefined;
+    if (replacing) calendar.previousVersion = replacing.version;
+    // 差异在发布时算好存下：事后重算要求被替代的旧版本仍在库里且能被定位，
+    // 而报价追溯往往只拿到一个版本号。首个版本没有可比对象，此时 added 为全年日期
+    // 没有信息量，因此留空。
+    calendar.publishDiff = replacing ? calendarDiff(replacing.days, calendar.days) : undefined;
+    const superseded = replacing
+      ? { ...structuredClone(replacing), status: "superseded" as const, supersededAt: stamp() }
+      : undefined;
+    await this.configStore.publishCalendarVersion(calendar, superseded);
     this.cacheCalendar(state, calendar);
-    // 先写新版本再标记旧版本：反过来的话中途失败会留下"该年度没有已发布日历"，
-    // 报价会静默回落到周模板。
-    if (previous && previous.version !== calendar.version) {
-      const superseded = structuredClone(previous);
-      superseded.status = "superseded";
-      superseded.supersededAt = stamp();
-      await this.configStore.upsertCalendar(superseded);
-      this.cacheCalendar(state, superseded);
-    }
+    if (superseded) this.cacheCalendar(state, superseded);
     return calendar;
   }
 

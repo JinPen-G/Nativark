@@ -1,6 +1,8 @@
 import { RENTAL_PRICING_UNIT_CODES, type RentalDayType, type RentalPricingUnit } from "@store-rental/shared";
 import type {
   ImportRentalCalendarRequest,
+  PublishRentalCalendarRequest,
+  RemoveRentalCalendarDayOverrideRequest,
   RentalRuleConfig,
   SaveRentalCalendarDayRequest,
   SaveRentalDiscountPlanRequest,
@@ -85,6 +87,62 @@ const BILLING_UNITS = ["per_order", "per_day", "per_unit"] as const;
 
 /** 倍率上限。10 倍已远超任何真实节假日加价，写错数量级会在这里被挡下。 */
 const MAX_MULTIPLIER = 10;
+
+/** 日历日期键。只管格式；日期是否真实存在由服务层用回读法确认。 */
+const CALENDAR_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * 至少含一个非空白字符。
+ *
+ * `@IsNotEmpty()` 只拦空串，`" "` 会原样落库——审计栏显示为空，等于没记原因，
+ * 而需求 4.5.3 / 4.5.7 要求人工覆盖与发布必须保存可追溯的原因。
+ */
+const NON_BLANK_PATTERN = /\S/;
+
+/* ---------- 营业时段（被 business-settings 与营业日历共用） ---------- */
+
+/**
+ * 声明顺序有硬约束：`emitDecoratorMetadata` 会在被装饰属性处发出
+ * `__metadata("design:type", RentalBusinessHoursInputDto)`，而那是**运行时求值**。
+ * 若这两个类声明在使用它们的 DTO 之后，加载模块时就会
+ * `ReferenceError: Cannot access 'RentalBusinessHoursInputDto' before initialization`
+ * ——`class` 是 TDZ 绑定，不像函数会提升。因此它们必须排在所有使用者之前。
+ */
+
+/** 营业时段。`HH:mm` 24 小时制，营业时区当地时间。 */
+export class RentalTimeWindowInputDto {
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { message: "时段起点必须是 HH:mm（24 小时制）" })
+  start!: string;
+
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { message: "时段终点必须是 HH:mm（24 小时制）" })
+  end!: string;
+}
+
+/** 某天的营业时段与各履约动作可用时段（需求 4.5.1）。动作时段缺省沿用营业时段。 */
+export class RentalBusinessHoursInputDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RentalTimeWindowInputDto)
+  windows!: RentalTimeWindowInputDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RentalTimeWindowInputDto)
+  pickup?: RentalTimeWindowInputDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RentalTimeWindowInputDto)
+  return?: RentalTimeWindowInputDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RentalTimeWindowInputDto)
+  delivery?: RentalTimeWindowInputDto[];
+}
 
 /* ---------- business-settings 的七个嵌套分组 ---------- */
 
@@ -700,8 +758,12 @@ export class SaveRentalRuleVersionDto implements SaveRentalRuleVersionRequest {
 /* ---------- 营业日历 ---------- */
 
 export class ImportRentalCalendarDayInputDto {
-  /** 只接受 YYYY-MM-DD：日历按日键控，带时间会让同一天出现多个键。 */
-  @IsISO8601()
+  /**
+   * 只接受 `YYYY-MM-DD`。`@IsISO8601()` 会放过带时间的完整时间戳，
+   * 日历按日键控，同一天就会出现两个键。日期是否真实存在由服务层用回读法确认——
+   * 正则拦不住 `2026-02-30`，而它会被 `new Date` 静默滚到 3 月 2 日。
+   */
+  @Matches(CALENDAR_DATE_PATTERN, { message: "日历日期必须是 YYYY-MM-DD" })
   date!: string;
 
   @IsIn(DAY_TYPES)
@@ -750,8 +812,11 @@ export class ImportRentalCalendarDto implements ImportRentalCalendarRequest {
 }
 
 export class SaveRentalCalendarDayDto implements SaveRentalCalendarDayRequest {
-  /** 处理器会用路径参数覆盖它（`{ ...body, date }`），此处仍校验以防直接调用。 */
-  @IsISO8601()
+  /**
+   * 处理器会用路径参数覆盖它（`{ ...body, date }`），此处仍校验以防直接调用。
+   * 与导入同理只接受 `YYYY-MM-DD`；真实性由服务层确认。
+   */
+  @Matches(CALENDAR_DATE_PATTERN, { message: "日历日期必须是 YYYY-MM-DD" })
   date!: string;
 
   @IsIn(DAY_TYPES)
@@ -787,43 +852,25 @@ export class SaveRentalCalendarDayDto implements SaveRentalCalendarDayRequest {
    * 操作人与调整时间由服务端填，不接受调用方自报——自报的操作人没有审计价值。
    */
   @IsString()
-  @IsNotEmpty()
+  @Matches(NON_BLANK_PATTERN, { message: "调整原因不能为空白" })
   overrideReason!: string;
 }
 
-/** 营业时段。`HH:mm` 24 小时制，营业时区当地时间。 */
-export class RentalTimeWindowInputDto {
-  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { message: "时段起点必须是 HH:mm（24 小时制）" })
-  start!: string;
-
-  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { message: "时段终点必须是 HH:mm（24 小时制）" })
-  end!: string;
+/**
+ * 移除人工覆盖的请求体。DELETE 带 body 不常见，但撤销原因必须随请求一起到达：
+ * 放在查询串里会进访问日志，而覆盖原因常包含客户名或事故描述。
+ */
+export class RemoveRentalCalendarDayOverrideDto implements RemoveRentalCalendarDayOverrideRequest {
+  @IsString()
+  @Matches(NON_BLANK_PATTERN, { message: "调整原因不能为空白" })
+  overrideReason!: string;
 }
 
-/** 某天的营业时段与各履约动作可用时段（需求 4.5.1）。动作时段缺省沿用营业时段。 */
-export class RentalBusinessHoursInputDto {
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => RentalTimeWindowInputDto)
-  windows!: RentalTimeWindowInputDto[];
-
-  @IsOptional()
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => RentalTimeWindowInputDto)
-  pickup?: RentalTimeWindowInputDto[];
-
-  @IsOptional()
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => RentalTimeWindowInputDto)
-  return?: RentalTimeWindowInputDto[];
-
-  @IsOptional()
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => RentalTimeWindowInputDto)
-  delivery?: RentalTimeWindowInputDto[];
+/** 发布年度日历（需求 4.5.7：发布记录必须可追溯变更原因）。 */
+export class PublishRentalCalendarDto implements PublishRentalCalendarRequest {
+  @IsString()
+  @Matches(NON_BLANK_PATTERN, { message: "变更原因不能为空白" })
+  changeReason!: string;
 }
 
 /* ---------- 通知模板 ---------- */

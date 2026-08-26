@@ -52,6 +52,11 @@ export interface RentalBusinessConfigStore {
   upsertDiscountPlan(plan: RentalDiscountPlan): Promise<void>;
   upsertService(service: RentalValueAddedService): Promise<void>;
   upsertCalendar(calendar: RentalCalendarYear): Promise<void>;
+  /**
+   * 发布年度日历：新版本置 published 与旧版本置 superseded 必须在同一事务内。
+   * 分两次写在失败时会留下两个 published 版本，或留下该年度没有已发布日历的空窗。
+   */
+  publishCalendarVersion(next: RentalCalendarYear, superseded?: RentalCalendarYear): Promise<void>;
   upsertRuleVersion(version: RentalRuleVersion): Promise<void>;
   /**
    * 发布新规则版本：新版本落库与旧 published 版本退役必须在同一事务内。
@@ -211,9 +216,9 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
     });
   }
 
-  /** 日历按 (租户, 年份) 唯一；整年按日明细随该行一起写。 */
-  async upsertCalendar(calendar: RentalCalendarYear): Promise<void> {
-    const data = {
+  /** 日历按 (租户, 年份, 版本) 唯一；整年按日明细随该行一起写。 */
+  private calendarData(calendar: RentalCalendarYear) {
+    return {
       region: calendar.region,
       version: calendar.version,
       status: calendar.status,
@@ -228,13 +233,47 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       publishedBy: calendar.publishedBy ?? null,
       changeReason: calendar.changeReason ?? null,
       previousVersion: calendar.previousVersion ?? null,
+      publishDiff: (calendar.publishDiff ?? null) as unknown as Prisma.InputJsonValue,
+      overrideAudits: (calendar.overrideAudits ?? null) as unknown as Prisma.InputJsonValue,
+      importPreservedOverrides: (calendar.importPreservedOverrides ?? null) as unknown as Prisma.InputJsonValue,
       days: calendar.days as unknown as Prisma.InputJsonValue
     };
+  }
+
+  async upsertCalendar(calendar: RentalCalendarYear): Promise<void> {
+    const data = this.calendarData(calendar);
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, calendar.tenantId);
     await this.prisma.rentalBusinessCalendar.upsert({
       where: { workspaceId_year_version: { workspaceId, year: calendar.year, version: calendar.version } },
       create: { workspaceId, tenantId: calendar.tenantId, year: calendar.year, ...data },
       update: data
+    });
+  }
+
+  /**
+   * 发布年度日历：新版本置 published 与旧版本置 superseded 必须原子完成。
+   *
+   * 两次独立 upsert 时，第二次失败会留下**两个 published 版本**——报价按版本号取
+   * 最大的那个，于是旧口径被静默弃用却没有任何替代记录，历史报价也无法解释；
+   * 反序写又会在中途失败时留下"该年度没有已发布日历"，报价静默回落到周模板。
+   */
+  async publishCalendarVersion(next: RentalCalendarYear, superseded?: RentalCalendarYear): Promise<void> {
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, next.tenantId);
+    const nextData = this.calendarData(next);
+    const supersededData = superseded ? this.calendarData(superseded) : undefined;
+    await this.prisma.$transaction(async (tx) => {
+      await tx.rentalBusinessCalendar.upsert({
+        where: { workspaceId_year_version: { workspaceId, year: next.year, version: next.version } },
+        create: { workspaceId, tenantId: next.tenantId, year: next.year, ...nextData },
+        update: nextData
+      });
+      if (superseded && supersededData) {
+        await tx.rentalBusinessCalendar.upsert({
+          where: { workspaceId_year_version: { workspaceId, year: superseded.year, version: superseded.version } },
+          create: { workspaceId, tenantId: superseded.tenantId, year: superseded.year, ...supersededData },
+          update: supersededData
+        });
+      }
     });
   }
 
@@ -384,6 +423,9 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       publishedBy: row.publishedBy ?? undefined,
       changeReason: row.changeReason ?? undefined,
       previousVersion: row.previousVersion ?? undefined,
+      publishDiff: (row.publishDiff ?? undefined) as unknown as RentalCalendarYear["publishDiff"],
+      overrideAudits: (row.overrideAudits ?? undefined) as unknown as RentalCalendarYear["overrideAudits"],
+      importPreservedOverrides: (row.importPreservedOverrides ?? undefined) as unknown as string[] | undefined,
       days: (row.days ?? []) as unknown as RentalCalendarDay[]
     };
   }

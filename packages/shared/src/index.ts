@@ -4273,6 +4273,52 @@ export interface RentalCalendarDayOrigin {
   source: "week_rule" | "official_cn";
 }
 
+/**
+ * 审计用的日期取值快照。与 `RentalCalendarDayOrigin` 的唯一区别是 `source` 允许
+ * `tenant_override`：审计要记「从人工覆盖改成了什么」，而 `overriddenFrom` 只记
+ * 「人工覆盖之前的非覆盖来源是什么」，两者的取值域本就不同，共用一个类型会让
+ * `overriddenFrom` 意外接受 `tenant_override`，那正是需求禁止的自我指向。
+ */
+export interface RentalCalendarDaySnapshot {
+  dayType: RentalDayType;
+  name: string;
+  pricingMultiplier: number;
+  closed: boolean;
+  businessStatus?: RentalCalendarBusinessStatus;
+  source: "week_rule" | "official_cn" | "tenant_override";
+}
+
+/**
+ * 人工覆盖的审计流水（需求 4.5.3）。
+ *
+ * 为什么不把撤销原因写回那一天：移除覆盖后该日期已经**不是**人工覆盖了，
+ * 把 `overrideReason` 留在上面会让它自相矛盾（source=official_cn 却带覆盖原因），
+ * 而下一次导入或渲染都会以 source 为准，撤销原因等于静默丢失。
+ * 因此审计挂在年度日历上，与该日期当前取值解耦。
+ */
+export interface RentalCalendarOverrideAudit {
+  date: string;
+  /** `override` 建立或修改人工覆盖；`revert` 移除人工覆盖恢复下一优先级来源。 */
+  action: "override" | "revert";
+  reason: string;
+  operator?: string;
+  at: string;
+  /** 操作前的取值。首次覆盖一个周模板生成、尚未落库的日期时可能为空。 */
+  before?: RentalCalendarDaySnapshot;
+  after: RentalCalendarDaySnapshot;
+}
+
+/**
+ * 发布时相对上一已发布版本的日期差异（需求 4.5.7：发布记录可追溯）。
+ * 只存日期列表而不存整日快照：整年 365 天的前后快照会让这一行 JSON 膨胀数倍，
+ * 而被替代的旧版本本身完整保留在库里，需要逐日对比时读那一行即可。
+ */
+export interface RentalCalendarPublishDiff {
+  added: string[];
+  removed: string[];
+  changed: string[];
+}
+
 export interface RentalCalendarDay {
   date: string;
   dayType: RentalDayType;
@@ -4313,10 +4359,20 @@ export interface RentalCalendarYear {
   publishedBy?: string;
   changeReason?: string;
   previousVersion?: string;
+  /** 相对上一已发布版本的日期差异，发布时算好存下——事后重算需要旧版本仍在库里。 */
+  publishDiff?: RentalCalendarPublishDiff;
+  /** 人工覆盖与撤销的审计流水（需求 4.5.3）。 */
+  overrideAudits?: RentalCalendarOverrideAudit[];
   sourceName?: string;
   sourceUrl?: string;
   sourcePublishedAt?: string;
   importedAt?: string;
+  /**
+   * 最近一次官方导入中因存在人工覆盖而未被写入的日期。
+   * 导入不覆盖人工覆盖，但运营必须知道「官方改了这几天而你的覆盖仍然生效」，
+   * 否则会以为导入失败或以为官方值已生效。
+   */
+  importPreservedOverrides?: string[];
   publishedAt?: string;
   days: RentalCalendarDay[];
 }
@@ -4338,6 +4394,19 @@ export interface ImportRentalCalendarRequest {
   sourceUrl: string;
   sourcePublishedAt: string;
   days: Array<Pick<RentalCalendarDay, "date" | "dayType" | "name"> & Partial<Pick<RentalCalendarDay, "pricingMultiplier" | "closed">>>;
+}
+
+/**
+ * 移除人工覆盖。原因必填：撤销和建立覆盖一样是一次经营决策，
+ * 只记「谁在什么时候撤销了」而不记「为什么」，事后无法判断是纠错还是误操作。
+ */
+export interface RemoveRentalCalendarDayOverrideRequest {
+  overrideReason: string;
+}
+
+/** 发布年度日历。变更原因必填（需求 4.5.7：发布记录可追溯）。 */
+export interface PublishRentalCalendarRequest {
+  changeReason: string;
 }
 
 /** 阶梯价档位：达到 `minUnits` 时整单改用 `unitAmount`（长租折扣口径）。 */

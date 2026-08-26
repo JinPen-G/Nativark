@@ -103,6 +103,14 @@ function createAbsorbingBusinessConfigStore() {
       if (store.failCalendar) return Promise.reject(new Error("calendar write rejected"));
       return record("calendar")(calendar);
     },
+    // 发布是「新版本置 published + 旧版本置 superseded」的原子写。
+    // stub 里同样一次拒绝两条，否则单元测试无法验证失败时缓存不被改脏。
+    publishCalendarVersion: (next, superseded) => {
+      if (store.failCalendar) return Promise.reject(new Error("calendar write rejected"));
+      record("calendar")(next);
+      if (superseded) record("calendar")(superseded);
+      return Promise.resolve();
+    },
     upsertRuleVersion: record("ruleVersion"),
     replacePublishedRuleVersion: (next) => {
       writes.push({ kind: "ruleVersion", id: next?.id });

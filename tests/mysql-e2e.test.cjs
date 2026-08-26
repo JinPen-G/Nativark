@@ -183,6 +183,10 @@ function request(method, requestPath, body, token, extraHeaders) {
         headers: {
           "Content-Type": "application/json",
           Connection: "close",
+          // Content-Length 必须显式给：Node 的 useChunkedEncodingByDefault 只对
+          // POST/PUT/PATCH 为真，DELETE 既不分块也没有长度头，写入的 body 会被
+          // **静默丢弃**——服务端收到空 body，表现为带原因的 DELETE 仍报 400。
+          ...(payload ? { "Content-Length": Buffer.byteLength(payload) } : {}),
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
           ...(extraHeaders || {})
         }
@@ -2484,7 +2488,7 @@ async function main() {
   const publishClosed = await request(
     "POST",
     `/api/rental/v1/calendars/${closedYear}/publish`,
-    {},
+    { changeReason: "E2E 停业日年度版本首发" },
     construction.accessToken
   );
   assert.equal(publishClosed.status, 201, `发布 ${closedYear} 年日历失败: ${JSON.stringify(publishClosed.body).slice(0, 200)}`);
@@ -2598,7 +2602,7 @@ async function main() {
       construction.accessToken
     );
     assert.equal(res.status, 200, `设置营业状态 ${businessStatus} 失败: ${JSON.stringify(res.body).slice(0, 200)}`);
-    const publish = await request("POST", `/api/rental/v1/calendars/${closedYear}/publish`, {}, construction.accessToken);
+    const publish = await request("POST", `/api/rental/v1/calendars/${closedYear}/publish`, { changeReason: `E2E 发布 ${businessStatus}` }, construction.accessToken);
     assert.equal(publish.status, 201, `发布 ${businessStatus} 日历失败: ${JSON.stringify(publish.body).slice(0, 200)}`);
     return res.body.data;
   };
@@ -2609,9 +2613,42 @@ async function main() {
   assert.equal(openDay.closed, false, "正常营业时遗留 closed 应为 false");
   assert.equal((await pickupOnDay()).status, 201, "正常营业日应可领取");
 
-  // 限时营业：当前无营业时段模型，按"当天可办理"放行（缺口已记台账）。
-  await setDayStatus("limited");
-  assert.equal((await pickupOnDay()).status, 201, "限时营业日当前按可办理放行");
+  // 限时营业按营业时段判定（需求 4.5.1/4.5.4：限时营业「只在指定时段提供指定履约能力」）。
+  // setDayStatus 不带时段，这里直接 PUT 带 hours 再发布：营业时段 09-18、领取动作时段 10-11。
+  const limitedHours = await request(
+    "PUT",
+    `/api/rental/v1/calendars/${closedYear}/days/${closedDate}`,
+    {
+      date: closedDate,
+      dayType: "tenant_special",
+      name: "E2E 限时营业时段",
+      pricingMultiplier: 1,
+      overrideReason: "E2E 限时营业时段校验",
+      closed: false,
+      businessStatus: "limited",
+      hours: { windows: [{ start: "09:00", end: "18:00" }], pickup: [{ start: "10:00", end: "11:00" }] }
+    },
+    construction.accessToken
+  );
+  assert.equal(limitedHours.status, 200, `设置限时营业时段失败: ${JSON.stringify(limitedHours.body).slice(0, 200)}`);
+  assert.ok(limitedHours.body.data.hours, "限时营业日必须保存营业时段，否则时段校验无从谈起");
+  assert.equal(
+    (await request("POST", `/api/rental/v1/calendars/${closedYear}/publish`, { changeReason: "E2E 发布限时营业时段" }, construction.accessToken)).status,
+    201,
+    "发布限时营业时段日历失败"
+  );
+  // 领取时点在营业时段(09-18)内、却在领取动作时段(10-11)外 → 拒绝。
+  // 这条区分「营业时段」与「领取动作时段」两道校验：只查营业时段会误放行 09:00。
+  const pickupBeforeActionWindow = await closedQuote(`${closedDate}T09:00:00+08:00`, `${closedYear}-08-12T09:00:00+08:00`);
+  assert.equal(pickupBeforeActionWindow.status, 409, `领取动作时段外必须拒绝: ${pickupBeforeActionWindow.status} ${JSON.stringify(pickupBeforeActionWindow.body).slice(0, 200)}`);
+  assert.match(JSON.stringify(pickupBeforeActionWindow.body), /时段/, `拒绝原因应说明是时段限制: ${JSON.stringify(pickupBeforeActionWindow.body).slice(0, 200)}`);
+  // 领取时点在营业时段外(08:00 < 09:00) → 拒绝，守住「营业时段」这道校验本身。
+  const pickupBeforeBusinessHours = await closedQuote(`${closedDate}T08:00:00+08:00`, `${closedYear}-08-12T09:00:00+08:00`);
+  assert.equal(pickupBeforeBusinessHours.status, 409, `营业时段外领取必须拒绝: ${pickupBeforeBusinessHours.status} ${JSON.stringify(pickupBeforeBusinessHours.body).slice(0, 200)}`);
+  // 领取时点在领取动作时段(10-11)内 → 放行。移除时段校验后本条仍绿、上面两条会变红，
+  // 三条共同锁死「时段校验存在且按动作时段判定」。
+  const pickupInWindow = await closedQuote(`${closedDate}T10:30:00+08:00`, `${closedYear}-08-12T09:00:00+08:00`);
+  assert.equal(pickupInWindow.status, 201, `领取动作时段内必须放行: ${pickupInWindow.status} ${JSON.stringify(pickupInWindow.body).slice(0, 200)}`);
 
   // 停止营业：拒绝，且遗留 closed 必须被同步为 true。
   const closedDay = await setDayStatus("closed");
@@ -2649,6 +2686,35 @@ async function main() {
     construction.accessToken
   );
   assert.equal(noReason.status, 400, `缺调整原因必须 400：实际 ${noReason.status} ${JSON.stringify(noReason.body).slice(0, 180)}`);
+
+  // 原因是纯空白必须 400。`@IsNotEmpty()` 只拦空串，`" "` 会原样落库，
+  // 审计栏显示为空——等于没记原因，而需求写的是"必须保存"。
+  const blankReason = await request(
+    "PUT",
+    `/api/rental/v1/calendars/${closedYear}/days/${auditDate}`,
+    { date: auditDate, dayType: "tenant_special", name: "E2E 空白原因", pricingMultiplier: 2, closed: false, overrideReason: "   " },
+    construction.accessToken
+  );
+  assert.equal(blankReason.status, 400, `纯空白调整原因必须 400：实际 ${blankReason.status} ${JSON.stringify(blankReason.body).slice(0, 180)}`);
+
+  // 不存在的日期必须 400。`2026-02-30` 格式合法但那天不存在，
+  // `new Date` 会静默滚到 3 月 2 日——加价系数就落到了错误的日期上。
+  const impossibleDate = await request(
+    "PUT",
+    `/api/rental/v1/calendars/${closedYear}/days/${closedYear}-02-30`,
+    { date: `${closedYear}-02-30`, dayType: "tenant_special", name: "E2E 不存在的日期", pricingMultiplier: 2, closed: false, overrideReason: "E2E 非法日期" },
+    construction.accessToken
+  );
+  assert.equal(impossibleDate.status, 400, `不存在的日期必须 400：实际 ${impossibleDate.status} ${JSON.stringify(impossibleDate.body).slice(0, 180)}`);
+
+  // 带时间的日期必须 400：日历按日键控，放过它会让同一天出现两个键。
+  const datetimeKey = await request(
+    "PUT",
+    `/api/rental/v1/calendars/${closedYear}/days/${auditDate}T00:00:00Z`,
+    { date: `${auditDate}T00:00:00Z`, dayType: "tenant_special", name: "E2E 带时间", pricingMultiplier: 2, closed: false, overrideReason: "E2E 带时间" },
+    construction.accessToken
+  );
+  assert.equal(datetimeKey.status, 400, `带时间的日期键必须 400：实际 ${datetimeKey.status} ${JSON.stringify(datetimeKey.body).slice(0, 180)}`);
 
   const overridden = await request(
     "PUT",
@@ -2700,30 +2766,159 @@ async function main() {
     "二次覆盖后原始值仍应是官方原值，否则移除一次只会退回到另一次人工覆盖"
   );
 
+  // 4c) 重导官方日历不得覆盖人工覆盖（需求 4.5.3 的来源优先级）。
+  //     早前是无条件 `dayMap.set()`，于是每次重导都会把运营的调整连同调整原因
+  //     一起抹掉，且毫无提示。此处该日期当前是人工覆盖（系数 3）。
+  const draftCountBeforeReimport = readCount(
+    "SELECT COUNT(*) FROM `rental_business_calendars` WHERE `tenantId`='" +
+      construction.tenant.tenantId +
+      `' AND \`year\`=${closedYear} AND \`status\`='draft';`
+  );
+  const reimport = await request(
+    "POST",
+    "/api/rental/v1/calendars/import",
+    {
+      year: closedYear,
+      region: "CN",
+      sourceName: "E2E 重导来源",
+      sourceUrl: "https://example.invalid/e2e-reimport",
+      sourcePublishedAt: new Date().toISOString(),
+      // 官方把国庆节系数改成 1.8，同时新增一个调休工作日。
+      days: [
+        { date: auditDate, dayType: "statutory_holiday", name: "国庆节（官方修订）", pricingMultiplier: 1.8 },
+        { date: `${closedYear}-10-11`, dayType: "makeup_workday", name: "国庆调休上班" }
+      ]
+    },
+    construction.accessToken
+  );
+  assert.equal(reimport.status, 201, `重导官方日历失败: ${JSON.stringify(reimport.body).slice(0, 220)}`);
+  const reimported = reimport.body.data;
+  const keptDay = reimported.days.find((row) => row.date === auditDate);
+  assert.equal(keptDay.source, "tenant_override", "重导官方日历不得把人工覆盖改成官方来源");
+  assert.equal(keptDay.pricingMultiplier, 3, `人工覆盖的系数必须保留为 3，实际 ${keptDay.pricingMultiplier}`);
+  assert.equal(keptDay.overrideReason, "E2E 二次调整", "重导不得抹掉人工覆盖的调整原因");
+  // 但 overriddenFrom 必须换成本次的官方值：它的用途是"撤销后恢复到哪里"，
+  // 停在上一版官方数据会让撤销后恢复出一个已经作废的节假日安排。
+  assert.equal(
+    keptDay.overriddenFrom.pricingMultiplier,
+    1.8,
+    `被覆盖的原始值应更新为本次官方系数 1.8，实际 ${keptDay.overriddenFrom.pricingMultiplier}`
+  );
+  assert.ok(
+    (reimported.importPreservedOverrides ?? []).includes(auditDate),
+    "导入必须回报因人工覆盖而未写入的日期，否则运营会以为官方值已生效"
+  );
+  // 未被覆盖的日期照常写入官方值。
+  const freshDay = reimported.days.find((row) => row.date === `${closedYear}-10-11`);
+  assert.equal(freshDay.source, "official_cn", "没有人工覆盖的日期应写入官方来源");
+  assert.equal(freshDay.dayType, "makeup_workday", "调休工作日类型应按官方数据写入");
+
+  // 连续导入不得堆出多个草稿：早前每次导入都 `versionAfter`，
+  // 叠加"取首条草稿"的旧 bug，页面会随机显示其中一个旧草稿。
+  const reimportAgain = await request(
+    "POST",
+    "/api/rental/v1/calendars/import",
+    {
+      year: closedYear,
+      region: "CN",
+      sourceName: "E2E 第三次导入",
+      sourceUrl: "https://example.invalid/e2e-reimport-2",
+      sourcePublishedAt: new Date().toISOString(),
+      days: [{ date: `${closedYear}-10-12`, dayType: "makeup_workday", name: "再一次调休" }]
+    },
+    construction.accessToken
+  );
+  assert.equal(reimportAgain.status, 201, "第三次导入失败");
+  assert.equal(
+    readCount(
+      "SELECT COUNT(*) FROM `rental_business_calendars` WHERE `tenantId`='" +
+        construction.tenant.tenantId +
+        `' AND \`year\`=${closedYear} AND \`status\`='draft';`
+    ),
+    draftCountBeforeReimport,
+    "连续导入只能原地更新同一个草稿，不能每次都新建一个版本"
+  );
+  // 同一批里重复给同一天必须 400：静默取最后一条会让结果取决于数组顺序。
+  const duplicateInBatch = await request(
+    "POST",
+    "/api/rental/v1/calendars/import",
+    {
+      year: closedYear,
+      region: "CN",
+      sourceName: "E2E 批内重复",
+      sourceUrl: "https://example.invalid/e2e-dup",
+      sourcePublishedAt: new Date().toISOString(),
+      days: [
+        { date: `${closedYear}-10-13`, dayType: "makeup_workday", name: "甲" },
+        { date: `${closedYear}-10-13`, dayType: "statutory_holiday", name: "乙" }
+      ]
+    },
+    construction.accessToken
+  );
+  assert.equal(duplicateInBatch.status, 400, `批内重复日期必须 400，实际 ${duplicateInBatch.status}`);
+
+  // 移除覆盖：缺撤销原因必须 400——撤销与建立覆盖同为经营决策，需求要求可追溯。
+  const removeNoReason = await request(
+    "DELETE",
+    `/api/rental/v1/calendars/${closedYear}/days/${auditDate}`,
+    {},
+    construction.accessToken
+  );
+  assert.equal(removeNoReason.status, 400, `移除覆盖缺原因必须 400，实际 ${removeNoReason.status} ${JSON.stringify(removeNoReason.body).slice(0, 180)}`);
+
   // 移除覆盖：恢复到官方日历原值，且不能变成空白日。
   const removed = await request(
     "DELETE",
     `/api/rental/v1/calendars/${closedYear}/days/${auditDate}`,
-    null,
+    { overrideReason: "E2E 店庆结束，恢复官方安排" },
     construction.accessToken
   );
   assert.equal(removed.status, 200, `移除覆盖失败: ${JSON.stringify(removed.body).slice(0, 200)}`);
   assert.equal(removed.body.data.source, "official_cn", "移除覆盖后应恢复到官方日历来源");
   assert.equal(
     removed.body.data.pricingMultiplier,
-    beforeOverride.pricingMultiplier,
-    "移除覆盖后系数应恢复为官方原值"
+    1.8,
+    `移除覆盖后系数应恢复为最近一次官方原值 1.8，实际 ${removed.body.data.pricingMultiplier}`
   );
-  assert.equal(removed.body.data.dayType, beforeOverride.dayType, "移除覆盖后日期类型应恢复为官方原值");
+  assert.equal(removed.body.data.dayType, "statutory_holiday", "移除覆盖后日期类型应恢复为官方原值");
   // 该日期必须仍然存在（不得变成没有来源的空白日）。
   const afterRemove = (await request("GET", `/api/rental/v1/calendars/${closedYear}`, null, construction.accessToken))
-    .body.data.days.filter((row) => row.date === auditDate);
-  assert.equal(afterRemove.length, 1, `移除覆盖后该日期必须仍有且只有一条记录，实际 ${afterRemove.length}`);
+    .body.data;
+  assert.equal(
+    afterRemove.days.filter((row) => row.date === auditDate).length,
+    1,
+    "移除覆盖后该日期必须仍有且只有一条记录"
+  );
+  // 审计流水必须记下撤销原因、操作人与前后差异。
+  const audits = afterRemove.overrideAudits ?? [];
+  const revertAudit = audits.filter((row) => row.date === auditDate && row.action === "revert").pop();
+  assert.ok(revertAudit, "移除覆盖必须留下 revert 审计记录");
+  assert.equal(revertAudit.reason, "E2E 店庆结束，恢复官方安排", "撤销原因必须进审计");
+  assert.ok(revertAudit.operator, "撤销操作人必须由服务端记录");
+  assert.ok(revertAudit.at, "撤销时间必须由服务端记录");
+  assert.equal(revertAudit.before.source, "tenant_override", "审计的前值应是被撤销的人工覆盖");
+  assert.equal(revertAudit.before.pricingMultiplier, 3, `审计前值系数应为 3，实际 ${revertAudit.before.pricingMultiplier}`);
+  assert.equal(revertAudit.after.source, "official_cn", "审计的后值应是恢复出的官方来源");
+  assert.equal(revertAudit.after.pricingMultiplier, 1.8, `审计后值系数应为 1.8，实际 ${revertAudit.after.pricingMultiplier}`);
+  // 建立覆盖同样要有审计记录，否则只查得到撤销、查不到当初为什么改。
+  const overrideAudit = audits.filter((row) => row.date === auditDate && row.action === "override").pop();
+  assert.ok(overrideAudit, "建立覆盖必须留下 override 审计记录");
+  assert.equal(overrideAudit.reason, "E2E 二次调整", "建立覆盖的原因必须进审计");
+  assert.equal(overrideAudit.after.pricingMultiplier, 3, "建立覆盖的后值系数应为 3");
+  // 审计必须落库，不能只在内存里。
+  assert.ok(
+    readCount(
+      "SELECT JSON_LENGTH(`overrideAudits`) FROM `rental_business_calendars` WHERE `tenantId`='" +
+        construction.tenant.tenantId +
+        `' AND \`year\`=${closedYear} AND \`status\`='draft';`
+    ) >= 2,
+    "覆盖审计流水必须落库"
+  );
   // 没有覆盖时再移除必须报错，而不是静默成功。
   const removeAgain = await request(
     "DELETE",
     `/api/rental/v1/calendars/${closedYear}/days/${auditDate}`,
-    null,
+    { overrideReason: "E2E 重复移除" },
     construction.accessToken
   );
   assert.equal(removeAgain.status, 409, `无覆盖可移除时应 409，实际 ${removeAgain.status}`);
@@ -2780,8 +2975,17 @@ async function main() {
   assert.equal(calRows("draft"), 1, "编辑已发布日历必须复制生成一条新草稿");
   assert.equal(calRows("published"), 1, "编辑期间已发布版本必须仍在，否则报价会回落到周模板");
 
+  // 发布缺变更原因必须 400（需求 4.5.7：发布记录必须可追溯变更原因）。
+  const publishNoReason = await request("POST", `/api/rental/v1/calendars/${closedYear}/publish`, {}, construction.accessToken);
+  assert.equal(publishNoReason.status, 400, `发布缺变更原因必须 400，实际 ${publishNoReason.status} ${JSON.stringify(publishNoReason.body).slice(0, 180)}`);
+
   // 发布新草稿：原版本进入「已被替代」，两条都保留。
-  const republish = await request("POST", `/api/rental/v1/calendars/${closedYear}/publish`, {}, construction.accessToken);
+  const republish = await request(
+    "POST",
+    `/api/rental/v1/calendars/${closedYear}/publish`,
+    { changeReason: "E2E 版本历史验证发布" },
+    construction.accessToken
+  );
   assert.equal(republish.status, 201, `发布新草稿失败: ${JSON.stringify(republish.body).slice(0, 200)}`);
   assert.equal(calRows("published"), 1, "发布后仍只能有一个已发布版本");
   assert.equal(
@@ -2817,9 +3021,182 @@ async function main() {
   );
   assert.ok(calRows(null) >= 3, `该年度应保留草稿→发布→被替代的多条版本，实际 ${calRows(null)} 条`);
 
+  // 发布记录必须带变更原因与相对上一版本的日期差异（需求 4.5.7）。
+  assert.equal(
+    readScalar(
+      "SELECT `changeReason` FROM `rental_business_calendars` WHERE `tenantId`='" +
+        construction.tenant.tenantId +
+        `' AND \`year\`=${closedYear} AND \`status\`='published';`
+    ),
+    "E2E 版本历史验证发布",
+    "发布记录必须保存变更原因"
+  );
+  // 差异必须非空：本次发布至少改了 09-15 那天，差异为空说明根本没算。
+  // COALESCE 是为了让"列为 NULL"落成 0 并撞上下面的断言，
+  // 而不是让 readCount 抛"无数字结果"——那条报错读不出真正的缺陷。
+  assert.ok(
+    readCount(
+      "SELECT COALESCE(JSON_LENGTH(JSON_EXTRACT(`publishDiff`, '$.changed')), 0) " +
+        "+ COALESCE(JSON_LENGTH(JSON_EXTRACT(`publishDiff`, '$.added')), 0) " +
+        "FROM `rental_business_calendars` WHERE `tenantId`='" +
+        construction.tenant.tenantId +
+        `' AND \`year\`=${closedYear} AND \`status\`='published';`
+    ) > 0,
+    "发布记录必须保存相对上一版本的日期差异"
+  );
+  // 被替代的那条必须有替代时间：只改 status 不记时间，无法判断替代发生在哪次发布。
+  assert.equal(
+    readCount(
+      "SELECT COUNT(*) FROM `rental_business_calendars` WHERE `tenantId`='" +
+        construction.tenant.tenantId +
+        `' AND \`year\`=${closedYear} AND \`status\`='superseded' AND \`supersededAt\` IS NULL;`
+    ),
+    0,
+    "所有已被替代的版本都必须记录替代时间"
+  );
+
   ok(
     "停业日语义正确：租期跨过放行且仍计费、领取/归还日停业 409 且原因可区分；" +
-      "四态营业状态生效（正常/限时放行、停止拒绝、自助在能力缺失时 fail-closed），两态字段同步落库"
+      "四态营业状态生效（正常放行、限时营业按营业时段与动作时段双重校验、停止拒绝、" +
+      "自助在能力缺失时 fail-closed），两态字段同步落库"
+  );
+
+  console.log("== 15g. PRICE-02 日历发布必须原子：第二步失败要整体回滚 ==");
+  // 发布是「新版本置 published + 旧版本置 superseded」两步。早前是两次独立 upsert，
+  // 第二次失败就会留下**两个 published 版本**——报价按版本号取最大的那个，
+  // 于是旧口径被静默弃用却没有任何替代记录，历史报价也无法解释。
+  //
+  // 注入手段是一条 CHECK 约束，只挡「被替代的那条带探针原因」，
+  // 因此第一步（草稿→已发布）照常成功，只有第二步被拒——正是要验证的那条路径。
+  // 不能用整表拒绝 superseded：那样第一步就过不去，什么也证明不了。
+  const atomicProbeReason = "E2E 发布原子性探针";
+  const editForProbe = async (date, name) => {
+    const res = await request(
+      "PUT",
+      `/api/rental/v1/calendars/${closedYear}/days/${date}`,
+      { date, dayType: "tenant_special", name, pricingMultiplier: 1.1, closed: false, businessStatus: "open", overrideReason: name },
+      construction.accessToken
+    );
+    assert.equal(res.status, 200, `原子性用例的日期编辑失败: ${JSON.stringify(res.body).slice(0, 200)}`);
+  };
+  // 先让当前已发布版本带上探针原因，它将是下一次发布时要被标记为 superseded 的那条。
+  await editForProbe(`${closedYear}-09-16`, "E2E 原子性前置");
+  const probeBase = await request(
+    "POST",
+    `/api/rental/v1/calendars/${closedYear}/publish`,
+    { changeReason: atomicProbeReason },
+    construction.accessToken
+  );
+  assert.equal(probeBase.status, 201, `原子性前置发布失败: ${JSON.stringify(probeBase.body).slice(0, 200)}`);
+  const versionBeforeAtomic = readScalar(
+    "SELECT `version` FROM `rental_business_calendars` WHERE `tenantId`='" +
+      construction.tenant.tenantId +
+      `' AND \`year\`=${closedYear} AND \`status\`='published';`
+  );
+  const supersededBeforeAtomic = calRows("superseded");
+
+  mysqlQuery(
+    "ALTER TABLE `rental_business_calendars` ADD CONSTRAINT `e2e_block_probe_supersede` " +
+      `CHECK (NOT (\`status\` = 'superseded' AND \`changeReason\` = '${atomicProbeReason}'));`
+  );
+  try {
+    await editForProbe(`${closedYear}-09-17`, "E2E 原子性触发");
+    assert.equal(calRows("draft"), 1, "原子性用例前置条件：应恰好有一个待发布草稿");
+    const blocked = await request(
+      "POST",
+      `/api/rental/v1/calendars/${closedYear}/publish`,
+      { changeReason: "E2E 应当整体回滚的发布" },
+      construction.accessToken
+    );
+    assert.ok(blocked.status >= 500, `第二步被库拒绝时发布应失败，实际 ${blocked.status}`);
+    // 关键断言：新版本也必须被回滚，不能留下两个 published。
+    assert.equal(calRows("published"), 1, "发布第二步失败后仍只能有一个已发布版本");
+    assert.equal(
+      readScalar(
+        "SELECT `version` FROM `rental_business_calendars` WHERE `tenantId`='" +
+          construction.tenant.tenantId +
+          `' AND \`year\`=${closedYear} AND \`status\`='published';`
+      ),
+      versionBeforeAtomic,
+      "发布第二步失败后当前已发布版本必须仍是原版本，新版本不得留在库里"
+    );
+    assert.equal(calRows("superseded"), supersededBeforeAtomic, "发布失败不得产生新的已被替代版本");
+    assert.equal(calRows("draft"), 1, "发布失败后草稿必须原样保留，否则这次编辑就白丢了");
+  } finally {
+    mysqlQuery("ALTER TABLE `rental_business_calendars` DROP CONSTRAINT `e2e_block_probe_supersede`;");
+  }
+  // 约束移除后重发必须成功，证明失败只是被注入的，服务状态没有被搞坏。
+  const recovered = await request(
+    "POST",
+    `/api/rental/v1/calendars/${closedYear}/publish`,
+    { changeReason: "E2E 回滚后重新发布" },
+    construction.accessToken
+  );
+  assert.equal(recovered.status, 201, `回滚后重新发布失败: ${JSON.stringify(recovered.body).slice(0, 200)}`);
+  assert.equal(calRows("published"), 1, "重新发布后仍只能有一个已发布版本");
+  assert.equal(calRows("superseded"), supersededBeforeAtomic + 1, "重新发布后原版本应被标记为已被替代");
+  ok("日历发布原子：第二步被库拒绝时新版本与替代标记一并回滚，草稿保留，约束移除后可正常重发");
+
+  console.log("== 15h. PRICE-02 营业时段：归还动作时段与每周默认模板 ==");
+  // 需求 4.5.1：每周默认模板包含营业时段与领取/归还/配送默认可用时段；
+  // 需求 4.5.3：优先级为「人工覆盖 > 官方日历 > 每周默认模板」，每周模板是最低优先级
+  // 兜底来源，对既无覆盖也无官方条目的普通日期同样生效；
+  // 需求 4.5.4：报价必须分别校验领取与归还时点。
+  //
+  // 1) 归还动作时段：某日营业时段 09-18、但归还只在 14-15。归还时点在营业时段内、
+  //    动作时段外必须拒绝，且原因要与领取区分开——领取用例已在 15 节覆盖，这里锁住归还分支。
+  const returnHoursDate = `${closedYear}-08-22`;
+  const returnHours = await request(
+    "PUT",
+    `/api/rental/v1/calendars/${closedYear}/days/${returnHoursDate}`,
+    {
+      date: returnHoursDate,
+      dayType: "tenant_special",
+      name: "E2E 归还时段",
+      pricingMultiplier: 1,
+      overrideReason: "E2E 归还动作时段校验",
+      closed: false,
+      businessStatus: "open",
+      hours: { windows: [{ start: "09:00", end: "18:00" }], return: [{ start: "14:00", end: "15:00" }] }
+    },
+    construction.accessToken
+  );
+  assert.equal(returnHours.status, 200, `设置归还时段失败: ${JSON.stringify(returnHours.body).slice(0, 200)}`);
+  assert.equal(
+    (await request("POST", `/api/rental/v1/calendars/${closedYear}/publish`, { changeReason: "E2E 发布归还时段" }, construction.accessToken)).status,
+    201,
+    "发布归还时段日历失败"
+  );
+  // 领取日 08-20 无条目、无覆盖、此时尚未配置每周模板 → 领取不受时段限制，只考归还分支。
+  const returnOutside = await closedQuote(`${closedYear}-08-20T10:00:00+08:00`, `${returnHoursDate}T09:00:00+08:00`);
+  assert.equal(returnOutside.status, 409, `归还动作时段外必须拒绝: ${returnOutside.status} ${JSON.stringify(returnOutside.body).slice(0, 200)}`);
+  assert.match(JSON.stringify(returnOutside.body), /归还/, `拒绝原因应指明是归还受限: ${JSON.stringify(returnOutside.body).slice(0, 200)}`);
+  const returnInside = await closedQuote(`${closedYear}-08-20T10:00:00+08:00`, `${returnHoursDate}T14:30:00+08:00`);
+  assert.equal(returnInside.status, 201, `归还动作时段内必须放行: ${returnInside.status} ${JSON.stringify(returnInside.body).slice(0, 200)}`);
+
+  // 2) 每周默认模板兜底：配置每周营业时段 09-18 后，既无覆盖也无官方条目的**普通日期**
+  //    也必须按模板校验时点。早前 assertFulfillmentDayOpen 对没有日历行的日期直接放行，
+  //    等于每周模板只在恰好有条目的节假日才生效——本用例正是那个缺陷的变异守卫：
+  //    去掉修复后，无条目的 08-25 领取会被放行，下面「时段外 409」这条即变红。
+  const weeklyWindow = { windows: [{ start: "09:00", end: "18:00" }] };
+  const weeklySet = await putSettings({ weeklyHours: Array.from({ length: 7 }, () => weeklyWindow) });
+  assert.equal(weeklySet.status, 200, `配置每周默认营业时段失败: ${JSON.stringify(weeklySet.body).slice(0, 300)}`);
+  const weeklyDate = `${closedYear}-08-25`;
+  const weeklyReturnDate = `${closedYear}-08-27`;
+  // 领取 08:00 在每周模板营业时段(09-18)外 → 拒绝，即便该日期在日历里没有任何条目。
+  const weeklyOutside = await closedQuote(`${weeklyDate}T08:00:00+08:00`, `${weeklyReturnDate}T10:00:00+08:00`);
+  assert.equal(weeklyOutside.status, 409, `每周模板营业时段外领取必须拒绝: ${weeklyOutside.status} ${JSON.stringify(weeklyOutside.body).slice(0, 200)}`);
+  // 领取 10:00、归还 11:00 均在模板时段内 → 放行。
+  const weeklyInside = await closedQuote(`${weeklyDate}T10:00:00+08:00`, `${weeklyReturnDate}T11:00:00+08:00`);
+  assert.equal(weeklyInside.status, 201, `每周模板时段内领取归还必须放行: ${weeklyInside.status} ${JSON.stringify(weeklyInside.body).slice(0, 200)}`);
+  // 还原每周模板，避免污染后续用例（未声明 = 不限制时点）。
+  const weeklyCleared = await putSettings({ weeklyHours: [] });
+  assert.equal(weeklyCleared.status, 200, `清除每周默认营业时段失败: ${JSON.stringify(weeklyCleared.body).slice(0, 300)}`);
+  const weeklyAfterClear = await closedQuote(`${weeklyDate}T08:00:00+08:00`, `${weeklyReturnDate}T10:00:00+08:00`);
+  assert.equal(weeklyAfterClear.status, 201, `清除每周模板后应恢复不限制时点: ${weeklyAfterClear.status} ${JSON.stringify(weeklyAfterClear.body).slice(0, 200)}`);
+  ok(
+    "营业时段模型生效：限时/正常营业按营业时段与领取、归还动作时段分别校验时点，" +
+      "每周默认模板对无覆盖无官方条目的普通日期同样兜底，未声明时段则不限制"
   );
 
   console.log("== 16. 双租户并发隔离 ==");
@@ -3026,7 +3403,7 @@ async function main() {
   const publishedCalendar = await request(
     "POST",
     `/api/rental/v1/calendars/${calendarYear}/publish`,
-    null,
+    { changeReason: "E2E 写穿验证首次发布" },
     demoForWriteThrough.accessToken
   );
   assert.equal(publishedCalendar.status, 201, `日历发布失败: ${JSON.stringify(publishedCalendar.body)}`);

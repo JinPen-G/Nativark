@@ -81,6 +81,9 @@ export function RentalGovernancePage() {
   const [ruleEditor, setRuleEditor] = useState<RentalRuleVersion>();
   const [calendarDay, setCalendarDay] = useState<RentalCalendarDay>();
   const [importOpen, setImportOpen] = useState(false);
+  const [publishOpen, setPublishOpen] = useState(false);
+  /** 待移除覆盖的日期。撤销原因必填，因此走确认弹窗而不是直接 DELETE。 */
+  const [revertTarget, setRevertTarget] = useState<RentalCalendarDay>();
   const [templateEditor, setTemplateEditor] =
     useState<RentalNotificationTemplateV1 | null>();
   const [sendTemplate, setSendTemplate] =
@@ -91,6 +94,8 @@ export function RentalGovernancePage() {
   >();
   const [calendarDayForm] = Form.useForm<SaveRentalCalendarDayRequest>();
   const [importForm] = Form.useForm<ImportForm>();
+  const [publishForm] = Form.useForm<{ changeReason: string }>();
+  const [revertForm] = Form.useForm<{ overrideReason: string }>();
   const [rewardForm] = Form.useForm<GrantRentalRewardRequest>();
   const [templateForm] = Form.useForm<TemplateForm>();
   const [sendForm] = Form.useForm<SendForm>();
@@ -206,25 +211,50 @@ export function RentalGovernancePage() {
         days: JSON.parse(daysText) as ImportRentalCalendarRequest["days"],
       });
     },
-    onSuccess: async () => {
+    onSuccess: async (result) => {
       setImportOpen(false);
       importForm.resetFields();
       await queryClient.invalidateQueries({
         queryKey: ["rental-core", "calendar", year],
       });
-      message.success("官方日历已导入草稿，请核对后发布");
+      // 保留的人工覆盖必须显式告知：导入静默跳过这些日期时，运营会以为官方值已生效。
+      const preserved = result?.importPreservedOverrides ?? [];
+      if (preserved.length) {
+        message.warning(
+          `官方日历已导入草稿。${preserved.length} 个日期存在人工覆盖，已保留原覆盖：${preserved.join("、")}`,
+        );
+      } else {
+        message.success("官方日历已导入草稿，请核对后发布");
+      }
     },
     onError: () => message.error("导入失败，请检查官方来源、年度和 JSON 数据"),
   });
   const publishCalendar = useMutation({
-    mutationFn: () => rentalCoreApi.publishCalendar(year),
+    mutationFn: (changeReason: string) =>
+      rentalCoreApi.publishCalendar(year, { changeReason }),
     onSuccess: async () => {
+      setPublishOpen(false);
+      publishForm.resetFields();
       await queryClient.invalidateQueries({
         queryKey: ["rental-core", "calendar", year],
       });
       message.success("年度营业日历已发布，后续报价将记录该版本");
     },
-    onError: () => message.error("发布失败：中国大陆日历必须先导入官方来源"),
+    onError: () =>
+      message.error("发布失败：需填写变更原因，且中国大陆日历必须先导入官方来源"),
+  });
+  const removeDayOverride = useMutation({
+    mutationFn: ({ date, overrideReason }: { date: string; overrideReason: string }) =>
+      rentalCoreApi.removeCalendarDayOverride(year, date, { overrideReason }),
+    onSuccess: async () => {
+      setRevertTarget(undefined);
+      revertForm.resetFields();
+      await queryClient.invalidateQueries({
+        queryKey: ["rental-core", "calendar", year],
+      });
+      message.success("人工覆盖已移除，该日期恢复为官方日历或每周模板");
+    },
+    onError: () => message.error("移除失败：该日期没有人工覆盖，或未填写调整原因"),
   });
   const grantReward = useMutation({
     mutationFn: rentalCoreApi.grantReward,
@@ -718,7 +748,10 @@ export function RentalGovernancePage() {
                     <Button
                       type="primary"
                       loading={publishCalendar.isPending}
-                      onClick={() => publishCalendar.mutate()}
+                      onClick={() => {
+                        publishForm.resetFields();
+                        setPublishOpen(true);
+                      }}
                     >
                       发布年度版本
                     </Button>
@@ -752,11 +785,46 @@ export function RentalGovernancePage() {
                       },
                       { title: "来源", dataIndex: "source" },
                       {
+                        title: "被覆盖的原始值",
+                        // 需求 4.5.3：日期详情必须能说明当前结果的来源并展示被覆盖的原始值。
+                        // 只显示"来源=人工覆盖"而不显示原值，运营无法判断撤销后会恢复成什么。
+                        render: (_, row) =>
+                          row.source === "tenant_override" ? (
+                            <Space direction="vertical" size={0}>
+                              <Typography.Text style={{ fontSize: 12 }}>
+                                {row.overriddenFrom
+                                  ? `${row.overriddenFrom.name} · ${row.overriddenFrom.dayType} · ×${row.overriddenFrom.pricingMultiplier}`
+                                  : "每周模板"}
+                              </Typography.Text>
+                              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                {row.overrideReason ?? "未记录原因"}
+                                {row.overrideBy ? ` · ${row.overrideBy}` : ""}
+                              </Typography.Text>
+                            </Space>
+                          ) : (
+                            <Typography.Text type="secondary">—</Typography.Text>
+                          ),
+                      },
+                      {
                         title: "操作",
                         render: (_, row) => (
-                          <Button type="link" onClick={() => openDay(row)}>
-                            租户覆盖
-                          </Button>
+                          <Space size={0}>
+                            <Button type="link" onClick={() => openDay(row)}>
+                              租户覆盖
+                            </Button>
+                            {row.source === "tenant_override" && (
+                              <Button
+                                type="link"
+                                danger
+                                onClick={() => {
+                                  revertForm.resetFields();
+                                  setRevertTarget(row);
+                                }}
+                              >
+                                移除覆盖
+                              </Button>
+                            )}
+                          </Space>
                         ),
                       },
                     ]}
@@ -1468,6 +1536,81 @@ export function RentalGovernancePage() {
           </Form.Item>
         </Form>
       </Drawer>
+      <Modal
+        title="发布年度营业日历"
+        open={publishOpen}
+        onCancel={() => setPublishOpen(false)}
+        onOk={() => publishForm.submit()}
+        confirmLoading={publishCalendar.isPending}
+        okText="发布"
+        destroyOnHidden
+      >
+        <Form
+          form={publishForm}
+          layout="vertical"
+          onFinish={(values) => publishCalendar.mutate(values.changeReason)}
+        >
+          <Alert
+            type="info"
+            showIcon
+            message="发布后不可原地修改"
+            description="当前已发布版本会被标记为「已被替代」并保留，历史报价仍可追溯原版本；变更原因与相对上一版本的日期差异会一并记录。"
+            style={{ marginBottom: 16 }}
+          />
+          <Form.Item
+            name="changeReason"
+            label="变更原因"
+            rules={[
+              { required: true, whitespace: true, message: "请填写变更原因" },
+            ]}
+          >
+            <Input.TextArea rows={3} placeholder="例如：按国务院办公厅通知更新国庆调休" />
+          </Form.Item>
+        </Form>
+      </Modal>
+      <Modal
+        title={`移除 ${revertTarget?.date ?? ""} 的人工覆盖`}
+        open={Boolean(revertTarget)}
+        onCancel={() => setRevertTarget(undefined)}
+        onOk={() => revertForm.submit()}
+        confirmLoading={removeDayOverride.isPending}
+        okText="移除覆盖"
+        okButtonProps={{ danger: true }}
+        destroyOnHidden
+      >
+        <Form
+          form={revertForm}
+          layout="vertical"
+          onFinish={(values) =>
+            revertTarget &&
+            removeDayOverride.mutate({
+              date: revertTarget.date,
+              overrideReason: values.overrideReason,
+            })
+          }
+        >
+          <Alert
+            type="warning"
+            showIcon
+            message={
+              revertTarget?.overriddenFrom
+                ? `将恢复为：${revertTarget.overriddenFrom.name} · ${revertTarget.overriddenFrom.dayType} · 价格系数 ×${revertTarget.overriddenFrom.pricingMultiplier}`
+                : "该日期没有官方原值，将按每周模板重算"
+            }
+            description="移除不会把该日期变成空白日；原覆盖内容、撤销原因与操作人会进入审计流水。"
+            style={{ marginBottom: 16 }}
+          />
+          <Form.Item
+            name="overrideReason"
+            label="调整原因"
+            rules={[
+              { required: true, whitespace: true, message: "请填写移除原因" },
+            ]}
+          >
+            <Input.TextArea rows={3} placeholder="例如：误将国庆首日标为停业，恢复官方安排" />
+          </Form.Item>
+        </Form>
+      </Modal>
       <Drawer
         title={
           templateForm.getFieldValue("id") ? "编辑通知模板" : "新增通知模板"

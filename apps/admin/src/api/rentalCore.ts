@@ -28,6 +28,8 @@ import type {
   RentalValueAddedService,
   GrantRentalRewardRequest,
   ImportRentalCalendarRequest,
+  PublishRentalCalendarRequest,
+  RemoveRentalCalendarDayOverrideRequest,
   SaveRentalCalendarDayRequest,
   SaveRentalDiscountPlanRequest,
   SaveRentalNotificationTemplateRequest,
@@ -66,7 +68,10 @@ export const rentalCoreApi = {
   calendar: (year: number) => request<RentalCalendarYear>(`/rental/v1/calendars/${year}`),
   importCalendar: (data: ImportRentalCalendarRequest) => request<RentalCalendarYear>("/rental/v1/calendars/import", { method: "post", data }),
   saveCalendarDay: (year: number, data: SaveRentalCalendarDayRequest) => request(`/rental/v1/calendars/${year}/days/${data.date}`, { method: "put", data }),
-  publishCalendar: (year: number) => request<RentalCalendarYear>(`/rental/v1/calendars/${year}/publish`, { method: "post" }),
+  /** 撤销原因走 body 而非查询串：覆盖原因常含客户名或事故描述，不该进访问日志。 */
+  removeCalendarDayOverride: (year: number, date: string, data: RemoveRentalCalendarDayOverrideRequest) =>
+    request(`/rental/v1/calendars/${year}/days/${date}`, { method: "delete", data }),
+  publishCalendar: (year: number, data: PublishRentalCalendarRequest) => request<RentalCalendarYear>(`/rental/v1/calendars/${year}/publish`, { method: "post", data }),
   ruleVersions: () => request<RentalRuleVersion[]>("/rental/v1/rule-versions"),
   currentRule: () => request<RentalRuleVersion>("/rental/v1/rule-versions/current"),
   saveRuleVersion: (data: SaveRentalRuleVersionRequest) => request<RentalRuleVersion>("/rental/v1/rule-versions", { method: "post", data }),

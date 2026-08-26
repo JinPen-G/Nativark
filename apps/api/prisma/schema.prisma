@@ -2770,6 +2770,15 @@ model RentalBusinessCalendar {
   publishedBy        String?
   changeReason       String?
   previousVersion    String?
+  /// RentalCalendarPublishDiff：发布时相对上一已发布版本的日期差异（新增/移除/变更）。
+  /// 发布当时算好存下——事后重算要求被替代的旧版本仍能被定位，而追溯往往只有版本号。
+  publishDiff        Json?
+  /// RentalCalendarOverrideAudit[]：人工覆盖与撤销的审计流水（需求 4.5.3）。
+  /// 不写回当天：撤销后该日期已不是人工覆盖，把撤销原因留在那一行会自相矛盾。
+  overrideAudits     Json?
+  /// String[]：最近一次官方导入中因存在人工覆盖而未写入的日期。
+  /// 导入不覆盖人工覆盖，但运营必须知道官方改了这几天而覆盖仍然生效。
+  importPreservedOverrides Json?
   /// RentalCalendarDay[]：整年按日的类型、倍率与停业标记。定价按年整体加载，
   /// 拆成每年 365 行没有查询收益，因此保留为该年配置行的明细。
   days               Json

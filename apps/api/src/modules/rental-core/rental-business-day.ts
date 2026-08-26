@@ -75,6 +75,22 @@ export function businessYearFromDateKey(dateKey: string): number {
 }
 
 /**
+ * 是否为真实存在的 `YYYY-MM-DD` 日期。
+ *
+ * 为什么不能只靠 DTO 的 `@IsISO8601()`：它接受带时间的完整时间戳，也接受
+ * `2026-02-30` 这种格式合法但日期不存在的值。前者会让同一天出现两个日历键，
+ * 后者会被 `new Date()` 静默滚到 3 月 2 日——那天的加价系数就落到了错误的日期上。
+ * 因此除了格式，还要用回读法确认月份没有被滚动。
+ */
+export function isCalendarDateKey(value: unknown): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  if (month < 1 || month > 12 || day < 1) return false;
+  const probe = new Date(Date.UTC(year, month - 1, day));
+  return probe.getUTCFullYear() === year && probe.getUTCMonth() === month - 1 && probe.getUTCDate() === day;
+}
+
+/**
  * 某个营业日期在营业时区的指定整点，返回对应的绝对时刻（毫秒）。
  *
  * 做法是先假定偏移为 0 取一个候选时刻，再用该候选在目标时区的实际偏移回修一次。

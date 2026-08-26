@@ -63,9 +63,12 @@ const calendar = await business.importOfficialCalendar(tenantId, context(), {
   days: [{ date: startAt.slice(0, 10), dayType: "statutory_holiday", name: "测试法定假日" }]
 });
 assert.equal(calendar.status, "draft");
-const publishedCalendar = await business.publishCalendar(tenantId, context(), calendar.year);
+const publishedCalendar = await business.publishCalendar(tenantId, context(), calendar.year, {
+  changeReason: "测试年度日历首发"
+});
 assert.equal(publishedCalendar.status, "published");
 assert.ok(publishedCalendar.sourceUrl.startsWith("https://"));
+assert.equal(publishedCalendar.changeReason, "测试年度日历首发", "发布必须记录变更原因");
 
 // GET 只能返回缺省视图，不能把尚未保存的年度悄悄塞进缓存。
 // SPACE-03：states 现在按经营空间键，演示租户的默认空间是 ws_<tenantId>。
@@ -83,7 +86,8 @@ await assert.rejects(
     dayType: "tenant_special",
     name: "不得进入缓存",
     pricingMultiplier: 1.5,
-    closed: false
+    closed: false,
+    overrideReason: "写库失败回滚验证"
   }),
   /calendar write rejected/
 );
