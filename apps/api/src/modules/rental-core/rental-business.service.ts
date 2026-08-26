@@ -916,6 +916,28 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return voided;
   }
 
+  /**
+   * 年度日历的全部版本（需求 4.5.7/4.5.8：历史版本与审计可查询、可追溯）。
+   * 含草稿、已发布、已被替代、已作废，按版本号降序，供管理端历史页与差异/审计追溯。
+   */
+  listCalendarVersions(tenantId: string, context: BusinessContext, year: number) {
+    return this.state(tenantId, context).calendars
+      .filter((item) => item.year === year)
+      .sort((left, right) => compareVersions(right.version, left.version));
+  }
+
+  /**
+   * 单个年度日历版本的完整内容（含逐日、`publishDiff` 发布差异与 `overrideAudits` 覆盖审计）。
+   * 供「查看历史版本、差异详情、完整追溯」——只读，不改任何状态。
+   */
+  getCalendarVersion(tenantId: string, context: BusinessContext, year: number, version: string) {
+    const found = this.state(tenantId, context).calendars.find(
+      (item) => item.year === year && item.version === version
+    );
+    if (!found) throw new NotFoundException("指定的年度日历版本不存在");
+    return found;
+  }
+
   listRuleVersions(tenantId: string, context: BusinessContext) { return this.state(tenantId, context).ruleVersions; }
 
   currentRule(tenantId: string, context: BusinessContext) {

@@ -3343,7 +3343,17 @@ async function main() {
   const goodHours = await putSettings({ weeklyHours: Array.from({ length: 7 }, () => ({ windows: [{ start: "09:00", end: "18:00" }], pickup: [{ start: "10:00", end: "12:00" }] })) });
   assert.equal(goodHours.status, 200, `合法的每周时段应放行: ${goodHours.status} ${JSON.stringify(goodHours.body).slice(0, 200)}`);
   await putSettings({ weeklyHours: [] });
-  ok("官方导入整年替换（删除的节假日回落周模板）+ 每周时段模板校验（非 7 项/起止倒挂/超出营业时段均 400，合法放行）");
+  // #6：历史版本可查询（含逐日、发布差异与覆盖审计）。2027 经过多轮编辑→发布，应有多个版本。
+  const versions2027 = await request("GET", "/api/rental/v1/calendars/2027/versions", null, construction.accessToken);
+  assert.equal(versions2027.status, 200, `版本列表失败: ${versions2027.status}`);
+  assert.ok(Array.isArray(versions2027.body.data) && versions2027.body.data.length >= 2, `2027 应有多个历史版本: ${versions2027.body.data?.length}`);
+  const published2027Detail = versions2027.body.data.find((v) => v.status === "published");
+  assert.ok(published2027Detail, "2027 版本列表应含已发布版本");
+  assert.ok(versions2027.body.data.some((v) => v.status === "superseded"), "2027 应有已被替代的历史版本");
+  const versionDetail = await request("GET", `/api/rental/v1/calendars/2027/versions/${published2027Detail.version}`, null, construction.accessToken);
+  assert.equal(versionDetail.status, 200, `版本详情失败: ${versionDetail.status}`);
+  assert.ok(Array.isArray(versionDetail.body.data.days) && versionDetail.body.data.days.length > 0, "版本详情应含逐日");
+  ok("官方导入整年替换（删除的节假日回落周模板）+ 每周时段模板校验（非 7 项/起止倒挂/超出营业时段均 400，合法放行）+ 历史版本可查询（多版本、含已被替代、详情带逐日）");
 
   console.log("== 16. 双租户并发隔离 ==");
   const rounds = 12;
@@ -6128,7 +6138,10 @@ async function main() {
   const adminCal = await request("GET", "/api/rental/v1/calendars/2032", null, calAdmin.accessToken);
   assert.equal(adminCal.body.data.status, "draft", `编辑者应看到草稿视图，实际 status=${adminCal.body.data.status}`);
   assert.ok(adminCal.body.data.days.some((d) => d.date === "2032-07-01" && d.source === "tenant_override"), "编辑者应看到未发布的草稿调整");
-  ok("发布权限不含编辑（发布人员导入 403）+ 普通运营只见已发布日历（看不到未发布草稿、编辑者能看到，证明是视图口径差异）");
+  // #6：历史版本/审计查询属管理视图，只读运营不得访问（版本详情含未发布草稿内容）。
+  const viewerVersions = await request("GET", "/api/rental/v1/calendars/2032/versions", null, calViewToken);
+  assert.equal(viewerVersions.status, 403, `只读运营不得查看版本历史（含草稿内容）: ${viewerVersions.status}`);
+  ok("发布权限不含编辑（发布人员导入 403）+ 普通运营只见已发布日历（看不到未发布草稿、编辑者能看到，证明是视图口径差异）+ 版本历史查询属管理视图（只读运营 403）");
   console.log("== 62. 无空间成员关系的账号不得访问经营域 ==");
   // 另一处 fail-open：空间检查曾附加 `accessContext.hasWorkspaces` 条件，
   // 于是「一个空间都没有的账号」跳过检查，随后仓储层的 resolveScopeWorkspaceId

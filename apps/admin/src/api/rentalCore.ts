@@ -29,6 +29,7 @@ import type {
   GrantRentalRewardRequest,
   ImportRentalCalendarRequest,
   PublishRentalCalendarRequest,
+  VoidRentalCalendarRequest,
   RemoveRentalCalendarDayOverrideRequest,
   SaveRentalCalendarDayRequest,
   SaveRentalDiscountPlanRequest,
@@ -72,6 +73,14 @@ export const rentalCoreApi = {
   removeCalendarDayOverride: (year: number, date: string, data: RemoveRentalCalendarDayOverrideRequest) =>
     request(`/rental/v1/calendars/${year}/days/${date}`, { method: "delete", data }),
   publishCalendar: (year: number, data: PublishRentalCalendarRequest) => request<RentalCalendarYear>(`/rental/v1/calendars/${year}/publish`, { method: "post", data }),
+  /** 作废年度日历草稿（需求 4.5.7）。原因必填，走 body。 */
+  voidCalendarVersion: (year: number, version: string, data: VoidRentalCalendarRequest) =>
+    request<RentalCalendarYear>(`/rental/v1/calendars/${year}/versions/${encodeURIComponent(version)}/void`, { method: "post", data }),
+  /** 年度日历的全部版本（草稿/已发布/已被替代/已作废），供历史与追溯。 */
+  calendarVersions: (year: number) => request<RentalCalendarYear[]>(`/rental/v1/calendars/${year}/versions`),
+  /** 单个版本详情，含逐日、发布差异与覆盖审计。 */
+  calendarVersion: (year: number, version: string) =>
+    request<RentalCalendarYear>(`/rental/v1/calendars/${year}/versions/${encodeURIComponent(version)}`),
   ruleVersions: () => request<RentalRuleVersion[]>("/rental/v1/rule-versions"),
   currentRule: () => request<RentalRuleVersion>("/rental/v1/rule-versions/current"),
   saveRuleVersion: (data: SaveRentalRuleVersionRequest) => request<RentalRuleVersion>("/rental/v1/rule-versions", { method: "post", data }),

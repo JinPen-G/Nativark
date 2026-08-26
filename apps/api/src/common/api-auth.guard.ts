@@ -146,6 +146,11 @@ function requiredPermissions(method: string, path: string) {
     // 「日历编辑人员只能改草稿、不得发布」。price:manage 作为既有超集保留，
     // 避免存量部署（其价格管理员只有 price:manage）在本次拆分后失去日历能力。
     if (method === "GET") {
+      // 历史版本/差异/审计查询属**管理视图**，不放给只读运营（order:view）——
+      // 版本详情含未发布草稿内容，混进只读运营会与「普通运营只见已发布」相悖。
+      if (/\/versions(\/|$)/.test(path)) {
+        return ["store-rental:calendar:edit", "store-rental:calendar:publish", "store-rental:price:manage", "store-rental:rules:manage"];
+      }
       return [
         "store-rental:calendar:edit",
         "store-rental:calendar:publish",
