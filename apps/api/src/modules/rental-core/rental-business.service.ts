@@ -21,6 +21,7 @@ import {
   type RentalNotificationTemplateV1,
   type RentalPricingPlanV1,
   type RentalPricingRate,
+  type RentalQuoteCalendarDay,
   type RentalQuoteRequest,
   type RentalQuoteSnapshotV1,
   type RentalRewardLedgerEntry,
@@ -1124,6 +1125,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const depositBasis: string[] = [];
     // 命中的费率逐条固化进报价：复算不再依赖价格计划仍以该版本存在。
     const hitRates: RentalPricingRate[] = [];
+    // 逐日结构化依据（需求 4.5.6）。按「营业日期 × 商品组」聚合：
+    // 日历事实与商品无关，但实际价格与商品相关——同一天不同商品的系数可以不同。
+    const calendarSnapshot: RentalQuoteCalendarDay[] = [];
     for (const line of input.lines) {
       const group = groups.get(line.itemGroupId);
       if (!group || line.quantity < 1 || !Number.isInteger(line.quantity)) throw new BadRequestException("报价商品或数量无效");
@@ -1187,6 +1191,31 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       // 日历系数与逐日类型、数量，缺一项客服就无法向客户解释这笔钱是怎么来的（验收：可解释来源）。
       // 需求 4.4.5：说明必须展示原始单位数、进位与最低起租、阶梯档位、
       // 各日期或计费块价格、封顶前后金额和商品数量，使运营能据快照复算。
+      // 同一日期可能承载多个计费块（小时粒度），因此先按日期聚合单位数再落快照。
+      const unitAmountForLine = pricingStrategy.amountPerItem(rate, 1, [1]);
+      const perDate = new Map<string, { count: number; factor: (typeof unitFactors)[number] }>();
+      unitDates.slice(0, units).forEach((date, index) => {
+        const existing = perDate.get(date);
+        if (existing) existing.count += 1;
+        else perDate.set(date, { count: 1, factor: unitFactors[index] });
+      });
+      for (const [date, entry] of perDate) {
+        const multiplier = holidayPricing ? entry.factor.value : 1;
+        calendarSnapshot.push({
+          date,
+          year: entry.factor.year,
+          dayType: entry.factor.type,
+          businessStatus: entry.factor.businessStatus,
+          source: entry.factor.source,
+          calendarVersion: entry.factor.calendarVersion,
+          itemGroupId: group.id,
+          itemGroupCode: group.code,
+          unitCount: entry.count,
+          unitAmount: unitAmountForLine,
+          multiplier,
+          amount: roundMoney(entry.count * unitAmountForLine * multiplier)
+        });
+      }
       const dateBreakdown = unitDates
         .slice(0, units)
         .map((date, index) => {
@@ -1326,6 +1355,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       rentalAmount, discountAmount: roundMoney(discountAmount), couponAmount: roundMoney(couponAmount), serviceAmount,
       fulfillmentAmount,
       rateSnapshot: hitRates,
+      calendarSnapshot,
       depositAmount,
       preAuthAmount,
       // 需求 4.4：最终应付 = 基础租金 + 使用量费用 + 履约费用 + 增值服务 + 异常费用 - 优惠 - 券。
@@ -1703,7 +1733,17 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         : type === "weekend"
           ? rate.weekendMultiplier
           : day?.pricingMultiplier ?? 1;
-    return { value, type, overridden };
+    return {
+      value,
+      type,
+      overridden,
+      businessStatus: day ? businessStatusOf(day) : ("open" as RentalCalendarBusinessStatus),
+      // 无该日记录时来源即为每周模板：日历只生成到已知年度，未覆盖的日期按模板处理。
+      source: day?.source ?? ("week_rule" as RentalCalendarDay["source"]),
+      // 未发布年度记为 draft，报价快照要能看出依据当时并未发布（需求 4.5.2）。
+      calendarVersion: calendar ? (calendar.status === "published" ? calendar.version : "draft") : "draft",
+      year: businessYearFromDateKey(date)
+    };
   }
 
   /** 与逐单位取价必须同一日界口径，否则优惠的适用日期与计价的命中日期会错开。 */

@@ -2420,6 +2420,10 @@ model RentalOrder {
   ruleVersion           String
   ruleSnapshot          Json
   calendarVersion       String?
+  /// RentalQuoteCalendarDay[]：从报价拷贝的逐日计价依据。
+  /// 需求 4.5.7「订单始终使用订单快照」，因此与 ruleSnapshot 一样在订单上留一份，
+  /// 报价被清理或日历改版后订单仍可复算。可空：存量订单没有这份快照。
+  calendarSnapshot      Json?
   chargeLines           Json
   rentalAmount          Decimal                   @db.Decimal(12, 2)
   discountAmount        Decimal                   @db.Decimal(12, 2)
@@ -2834,6 +2838,10 @@ model RentalQuote {
   ruleVersion            String
   ruleSnapshot           Json
   calendarVersion        String?
+  /// RentalQuoteCalendarDay[]：命中营业日期的结构化依据（需求 4.5.6）。
+  /// 可空且不回填：存量报价只存了拼接的 calendarVersion，其中没有逐日信息，
+  /// 无法反推类型、状态与实际价格；留 NULL 是如实记录"当时没有"。
+  calendarSnapshot       Json?
   appliedDiscountPlanIds Json
   customerCouponId       String?
   expiresAt              DateTime

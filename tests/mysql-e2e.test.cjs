@@ -2554,6 +2554,31 @@ async function main() {
     /归还/,
     `拒绝原因应指明是归还受限: ${JSON.stringify(returnClosed.body).slice(0, 200)}`
   );
+  // 3b) 结构化日历依据（需求 4.5.6）：报价必须保存**每个**命中营业日期的年度、
+  //     日期类型、营业状态、实际价格、来源和年度日历版本，且跨年度不得只存一个年份。
+  //     拼接的 calendarVersion（如 `2027:1.0`）够人读但无法复算——它说不出哪一天
+  //     是什么类型、按什么系数算了多少钱、依据来自人工覆盖还是官方日历。
+  const snap = across.body.data.calendarSnapshot;
+  assert.ok(Array.isArray(snap) && snap.length >= 3, `逐日依据应覆盖租期内每个营业日期，实际 ${snap && snap.length}`);
+  const closedEntry = snap.find((row) => row.date === closedDate);
+  assert.ok(closedEntry, `逐日依据必须包含停业日 ${closedDate}：${snap.map((r) => r.date).join(",")}`);
+  assert.equal(closedEntry.year, closedYear, "逐日依据必须带年度，跨年度报价靠它区分依据来自哪一年");
+  assert.equal(closedEntry.businessStatus, "closed", `停业日的营业状态应为 closed，实际 ${closedEntry.businessStatus}`);
+  assert.equal(closedEntry.source, "tenant_override", `该日期由人工覆盖写入，来源应为 tenant_override，实际 ${closedEntry.source}`);
+  assert.match(String(closedEntry.calendarVersion), /^\d+\.\d+$/, `已发布年度应记录版本号，实际 ${closedEntry.calendarVersion}`);
+  assert.ok(closedEntry.unitCount >= 1, "逐日依据应记录落在该日期的计费单位数");
+  assert.ok(closedEntry.amount > 0, "停业日仍计费，实际价格应大于 0（停业只拦履约、不免租）");
+  assert.equal(
+    closedEntry.amount,
+    Math.round(closedEntry.unitCount * closedEntry.unitAmount * closedEntry.multiplier * 100) / 100,
+    "逐日实际价格必须等于 单位数 × 单位价 × 日期系数，否则快照无法复算"
+  );
+  // 落库校验：只存在响应里不算保存。
+  const persistedSnap = JSON.parse(
+    readScalar(`SELECT \`calendarSnapshot\` FROM \`rental_quotes\` WHERE \`id\`='${across.body.data.id}';`)
+  );
+  assert.equal(persistedSnap.length, snap.length, "逐日依据必须落库，条数应与响应一致");
+
   // 4) 四态营业状态（需求 4.5.4）。逐个覆盖同一日期并断言领取日的行为差异。
   const setDayStatus = async (businessStatus) => {
     const res = await request(

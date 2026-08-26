@@ -4581,6 +4581,30 @@ export interface RentalQuoteRequest {
   services?: Array<{ serviceId: string; quantity: number }>;
 }
 
+/** 报价命中的单个「营业日期 × 商品组」计价依据（需求 4.5.6）。 */
+export interface RentalQuoteCalendarDay {
+  /** 营业时区下的日期键，与营业日历同一口径。 */
+  date: string;
+  /** 该日期所属年度。跨年度租期靠它区分依据来自哪一年的日历。 */
+  year: number;
+  dayType: RentalDayType;
+  businessStatus: RentalCalendarBusinessStatus;
+  /** 该日期规则的来源：人工覆盖 / 官方日历 / 每周模板（需求 4.5.3 的优先级）。 */
+  source: RentalCalendarDay["source"];
+  /** 该年度日历的版本；未发布年度记为 `draft`。 */
+  calendarVersion: string;
+  itemGroupId: string;
+  itemGroupCode: string;
+  /** 落在该日期上的计费单位数。小时粒度下同一天可能有多个计费块。 */
+  unitCount: number;
+  /** 该日期实际使用的单位价（已含阶梯档位选择，未乘日期系数）。 */
+  unitAmount: number;
+  /** 该日期实际应用的日期价格系数。 */
+  multiplier: number;
+  /** 该日期的实际价格：unitCount × unitAmount × multiplier，未乘商品数量、未封顶。 */
+  amount: number;
+}
+
 export interface RentalQuoteChargeLine {
   code: string;
   name: string;
@@ -4650,6 +4674,19 @@ export interface RentalQuoteSnapshotV1 {
   ruleVersion: string;
   ruleSnapshot: RentalRuleConfig;
   calendarVersion?: string;
+  /**
+   * 命中营业日期的结构化快照（需求 4.5.6）。
+   *
+   * 需求原文要求「保存**每个**命中营业日期的年度、日期类型、营业状态、实际价格、
+   * 来源和年度日历版本；跨年度报价不得只保存一个年份或版本号」。
+   * `calendarVersion` 是把各年度版本拼成的字符串，够用于人读但无法复算：
+   * 它说不出哪一天是什么类型、按什么系数算了多少钱、依据来自人工覆盖还是官方日历。
+   *
+   * 每条记录对应一个「营业日期 × 商品组」组合——日历事实（年度、类型、状态、来源、
+   * 版本）与商品无关，但实际价格与商品相关，同一天不同商品的系数可以不同
+   * （需求 4.5.5：车辆节假日加价 30%、摄影器材加价 10%）。
+   */
+  calendarSnapshot: RentalQuoteCalendarDay[];
   appliedDiscountPlanIds: string[];
   customerCouponId?: string;
   expiresAt: string;
@@ -5156,6 +5193,8 @@ export interface RentalOrder {
   ruleVersion: string;
   ruleSnapshot: RentalRuleConfig;
   calendarVersion?: string;
+  /** 从报价拷贝的逐日计价依据（需求 4.5.7：订单始终使用订单快照）。 */
+  calendarSnapshot?: RentalQuoteCalendarDay[];
   chargeLines: RentalQuoteChargeLine[];
   rentalAmount: number;
   discountAmount: number;

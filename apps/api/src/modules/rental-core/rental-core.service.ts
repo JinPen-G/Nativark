@@ -788,7 +788,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       returnLocationSnapshot: this.locationSnapshot(state, returnLocation),
       startAt: input.startAt, endAt: input.endAt,
       quoteId: quote.id, quoteNo: quote.quoteNo, pricingPlanVersion: quote.pricingPlanVersion,
-      ruleVersion: quote.ruleVersion, ruleSnapshot: structuredClone(quote.ruleSnapshot), calendarVersion: quote.calendarVersion, chargeLines: structuredClone(quote.chargeLines),
+      ruleVersion: quote.ruleVersion, ruleSnapshot: structuredClone(quote.ruleSnapshot), calendarVersion: quote.calendarVersion, calendarSnapshot: structuredClone(quote.calendarSnapshot), chargeLines: structuredClone(quote.chargeLines),
       rentalAmount: quote.rentalAmount, discountAmount: quote.discountAmount, couponAmount: quote.couponAmount,
       serviceAmount: quote.serviceAmount,
       // 履约费与预授权额度必须一并投影：订单只拿总额的话，
