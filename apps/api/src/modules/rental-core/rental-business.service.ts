@@ -1088,6 +1088,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       input.startAt
     );
     const calendars = this.calendarsForDateRange(tenantId, context, input.startAt, input.endAt);
+    // 停业只拦领取与归还时点，不拦租期跨过（需求 4.5.4）。
+    this.assertFulfillmentDayOpen(calendars, input, context.settings.calendar.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE);
     const rule = this.currentRule(tenantId, context);
     if (!rule || rule.status !== "published") throw new ConflictException("当前租户没有已发布的租赁规则");
     // 营业时区解析一次，策略（自然日/夜）与日历（日期类型）必须用同一个值，
@@ -1610,6 +1612,33 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   }
 
   /**
+   * 领取与归还**时点**的营业状态校验（需求 4.5.4）。
+   *
+   * 与逐日取价分开：停业限制的是「当天、该地点」能不能办领取/配送/现场归还，
+   * 而不是租期能不能跨过这一天。因此这里只看两个端点所在的营业日期，
+   * 中间经过的停业日一概不管。
+   *
+   * 需求同时要求「已经在租的订单不能因临时停业而失去归还渠道」，因此归还端
+   * 只在**下单时**拦截，不影响已成立订单的归还动作——归还路径不走本方法。
+   */
+  private assertFulfillmentDayOpen(
+    calendars: RentalCalendarYear[],
+    input: RentalQuoteRequest,
+    timeZone: string
+  ) {
+    const check = (iso: string, label: string) => {
+      const date = businessDateKey(iso, timeZone);
+      const calendar = calendars.find((item) => item.year === businessYearFromDateKey(date));
+      const day = calendar?.days.find((item) => item.date === date);
+      if (day?.closed) {
+        throw new ConflictException(`${date} 为停业日，无法安排${label}；租期可以跨过停业日，但当天不办理履约`);
+      }
+    };
+    check(input.startAt, "领取");
+    check(input.endAt, "归还");
+  }
+
+  /**
    * 单个营业日期的价格系数。逐单位取价与整段明细共用同一判定，避免两处口径分叉。
    *
    * 租户逐日覆盖优先于费率的节假日倍率：判据是 `source === "tenant_override"`，
@@ -1620,7 +1649,15 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   private dateMultiplier(calendars: RentalCalendarYear[], date: string, rate: RentalPricingRate) {
     const calendar = calendars.find((item) => item.year === businessYearFromDateKey(date));
     const day = calendar?.days.find((item) => item.date === date);
-    if (day?.closed) throw new ConflictException(`${day.date} 为停业日，不能报价`);
+    // 停业日**不阻止**报价（需求 4.5.4）。
+    //
+    // 早前这里对租期内任意停业日直接抛「不能报价」，与需求写反了：
+    // 「停业只限制发生在当天和目标地点的领取、配送、现场归还等履约动作，
+    //   不禁止租期跨过该日期；客户周五领取、周一归还时，周末门店停业不影响
+    //   设备继续在租」，且明确「仅租期中间经过停业日不得阻止报价」。
+    // 按原逻辑，任何把周末标为停业的租户都无法接受跨周末的租约——而跨周末
+    // 恰恰是最常见的租期。停业该校验的是**领取与归还时点**，那是下面
+    // assertFulfillmentDayOpen 的职责，不是逐日取价的职责。
     const type: RentalDayType = day?.dayType ?? "workday";
     const overridden = day?.source === "tenant_override";
     const value = overridden

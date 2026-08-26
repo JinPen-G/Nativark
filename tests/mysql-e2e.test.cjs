@@ -2448,6 +2448,114 @@ async function main() {
   assert.equal(tzRestored.status, 200, "还原营业时区失败");
   ok("营业时区按经营空间生效：非法标识 400、切换后自然日数与金额随之改变、逐日说明同步、配置落库");
 
+  console.log("== 15f. PRICE-02 停业日只拦领取与归还时点，不拦租期跨过 ==");
+  // 需求 4.5.4：「停业只限制发生在当天和目标地点的领取、配送、现场归还等履约动作，
+  // 不禁止租期跨过该日期；客户周五领取、周一归还时，周末门店停业不影响设备继续在租」，
+  // 并明确「仅租期中间经过停业日不得阻止报价」。
+  //
+  // 早前的实现对租期内**任意**停业日直接抛「不能报价」，与需求写反：任何把周末标为
+  // 停业的租户都无法接受跨周末的租约，而跨周末恰恰是最常见的租期。此前 E2E 对停业日
+  // 零覆盖，所以这个反向行为一直没被发现。
+  const closedYear = 2027;
+  const closedDate = `${closedYear}-08-10`;
+  // 中国大陆日历发布前必须先导入官方来源（服务端校验，行为正确）——
+  // 需求 4.5.2 也要求官方数据带来源、来源发布日期与版本。
+  const importClosedYear = await request(
+    "POST",
+    "/api/rental/v1/calendars/import",
+    {
+      year: closedYear,
+      region: "CN",
+      sourceName: "E2E 停业日验证来源",
+      sourceUrl: "https://example.invalid/e2e-closed",
+      sourcePublishedAt: new Date(Date.now() - 86400000).toISOString(),
+      days: [{ date: `${closedYear}-10-01`, dayType: "statutory_holiday", name: "国庆节", pricingMultiplier: 1.5 }]
+    },
+    construction.accessToken
+  );
+  assert.equal(importClosedYear.status, 201, `导入 ${closedYear} 官方来源失败: ${JSON.stringify(importClosedYear.body).slice(0, 220)}`);
+  const saveClosedDay = await request(
+    "PUT",
+    `/api/rental/v1/calendars/${closedYear}/days/${closedDate}`,
+    { date: closedDate, dayType: "tenant_special", name: "E2E 盘点停业", pricingMultiplier: 1, closed: true },
+    construction.accessToken
+  );
+  assert.equal(saveClosedDay.status, 200, `保存停业日失败: ${JSON.stringify(saveClosedDay.body).slice(0, 200)}`);
+  const publishClosed = await request(
+    "POST",
+    `/api/rental/v1/calendars/${closedYear}/publish`,
+    {},
+    construction.accessToken
+  );
+  assert.equal(publishClosed.status, 201, `发布 ${closedYear} 年日历失败: ${JSON.stringify(publishClosed.body).slice(0, 200)}`);
+  assert.equal(
+    readCount(
+      "SELECT COUNT(*) FROM `rental_business_calendars` WHERE `tenantId`='" +
+        construction.tenant.tenantId +
+        `' AND \`year\`=${closedYear} AND \`status\`='published';`
+    ),
+    1,
+    "停业日所在年度日历必须已发布，否则报价读不到它"
+  );
+
+  const closedQuote = async (startAt, endAt) =>
+    request(
+      "POST",
+      "/api/rental/v1/quotes",
+      {
+        customerType: "corporate",
+        fulfillmentMode: "warehouse_pickup_return",
+        fulfillmentLocationId: constructionLocation.id,
+        startAt,
+        endAt,
+        pricingPlanId: pricePlan.body.data.id,
+        lines: [{ itemGroupId: priceGroupId, quantity: 1 }]
+      },
+      construction.accessToken
+    );
+
+  // 1) 停业日落在租期**中间**：必须放行。这是本次修复的核心。
+  const across = await closedQuote(`${closedYear}-08-09T09:00:00+08:00`, `${closedYear}-08-12T09:00:00+08:00`);
+  assert.equal(
+    across.status,
+    201,
+    `租期跨过停业日必须放行（需求 4.5.4）：实际 ${across.status} ${JSON.stringify(across.body).slice(0, 220)}`
+  );
+  // 停业日仍然参与计价与逐日说明——不阻止报价不等于不计费。
+  const acrossLine = across.body.data.chargeLines.find((row) => row.type === "rental");
+  assert.match(
+    acrossLine.detail,
+    new RegExp(closedDate),
+    `停业日仍应出现在逐单位取价说明里: ${acrossLine.detail}`
+  );
+
+  // 2) 领取当天停业：必须拒绝。
+  const pickupClosed = await closedQuote(`${closedDate}T09:00:00+08:00`, `${closedYear}-08-12T09:00:00+08:00`);
+  assert.equal(
+    pickupClosed.status,
+    409,
+    `领取日停业必须 409：实际 ${pickupClosed.status} ${JSON.stringify(pickupClosed.body).slice(0, 200)}`
+  );
+  assert.match(
+    JSON.stringify(pickupClosed.body),
+    /领取/,
+    `拒绝原因应指明是领取受限: ${JSON.stringify(pickupClosed.body).slice(0, 200)}`
+  );
+
+  // 3) 归还当天停业：必须拒绝，且原因要与领取区分开。
+  const returnClosed = await closedQuote(`${closedYear}-08-09T09:00:00+08:00`, `${closedDate}T09:00:00+08:00`);
+  assert.equal(
+    returnClosed.status,
+    409,
+    `归还日停业必须 409：实际 ${returnClosed.status} ${JSON.stringify(returnClosed.body).slice(0, 200)}`
+  );
+  assert.match(
+    JSON.stringify(returnClosed.body),
+    /归还/,
+    `拒绝原因应指明是归还受限: ${JSON.stringify(returnClosed.body).slice(0, 200)}`
+  );
+  ok("停业日语义正确：租期跨过放行且仍计费、领取日停业 409、归还日停业 409 且原因可区分");
+
   console.log("== 16. 双租户并发隔离 ==");
   const rounds = 12;
   const concurrent = [];
