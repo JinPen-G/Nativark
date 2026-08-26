@@ -8,16 +8,13 @@ import {
 import { RentalCategoryCode, type RentalCapability, type SystemUserRow } from "@store-rental/shared";
 import { AuthService } from "../modules/auth/auth.service";
 import { enterRequestIdentity } from "./request-identity";
+import { matchableRequestPath } from "./request-path";
 
 interface RequestLike {
   method: string;
   url: string;
   headers: Record<string, string | string[] | undefined>;
   user?: SystemUserRow;
-}
-
-function normalizePath(url: string) {
-  return url.split("?")[0]?.replace(/^\/api/, "") || "/";
 }
 
 function requiredCapability(path: string): RentalCapability | undefined {
@@ -375,7 +372,10 @@ export class ApiAuthGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext) {
     const request = context.switchToHttp().getRequest<RequestLike>();
-    const path = normalizePath(request.url);
+    // 判定一律用归一化 + 小写化后的路径：Express 的路由匹配对大小写与尾斜杠都不敏感，
+    // 而本文件全是字符串前缀与正则判定。两者语义不一致时，变体路径会落到
+    // requiredPermissions 末尾的 `return []` 并被当作"无需权限"放行。详见 request-path.ts。
+    const path = matchableRequestPath(request.url);
     const permissions = requiredPermissions(request.method, path);
 
     if (

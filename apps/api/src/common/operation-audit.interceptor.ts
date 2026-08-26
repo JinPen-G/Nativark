@@ -7,6 +7,7 @@ import {
 import type { SystemUserRow } from "@store-rental/shared";
 import { Observable, tap } from "rxjs";
 import { OperationLogService } from "./operation-log.service";
+import { matchableRequestPath, normalizeRequestPath } from "./request-path";
 
 interface HttpRequestLike {
   method: string;
@@ -23,9 +24,11 @@ export class OperationAuditInterceptor implements NestInterceptor {
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     const request = context.switchToHttp().getRequest<HttpRequestLike>();
     const method = request.method.toUpperCase();
-    const path = this.normalizePath(request.url);
+    // 记录用原始大小写（要能看出攻击者实际请求了什么），是否跳过则按归一化后的判定路径，
+    // 否则 `/API/rental/...` 会被当成非业务域请求而完全不记账。详见 request-path.ts。
+    const path = normalizeRequestPath(request.url);
 
-    if (this.shouldSkip(method, path)) {
+    if (this.shouldSkip(method, matchableRequestPath(request.url))) {
       return next.handle();
     }
 
@@ -58,10 +61,6 @@ export class OperationAuditInterceptor implements NestInterceptor {
         }
       })
     );
-  }
-
-  private normalizePath(url: string) {
-    return url.split("?")[0]?.replace(/^\/api/, "") || "/";
   }
 
   private shouldSkip(method: string, path: string) {
