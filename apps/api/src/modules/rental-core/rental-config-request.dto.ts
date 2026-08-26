@@ -2,6 +2,7 @@ import { RENTAL_PRICING_UNIT_CODES, type RentalDayType, type RentalPricingUnit }
 import type {
   ImportRentalCalendarRequest,
   PublishRentalCalendarRequest,
+  VoidRentalCalendarRequest,
   RemoveRentalCalendarDayOverrideRequest,
   RentalRuleConfig,
   SaveRentalCalendarDayRequest,
@@ -871,6 +872,13 @@ export class PublishRentalCalendarDto implements PublishRentalCalendarRequest {
   @IsString()
   @Matches(NON_BLANK_PATTERN, { message: "变更原因不能为空白" })
   changeReason!: string;
+}
+
+/** 作废年度日历草稿（需求 4.5.7）。原因必填，用于事后解释这条草稿为何被丢弃。 */
+export class VoidRentalCalendarDto implements VoidRentalCalendarRequest {
+  @IsString()
+  @Matches(NON_BLANK_PATTERN, { message: "作废原因不能为空白" })
+  reason!: string;
 }
 
 /* ---------- 通知模板 ---------- */

@@ -4359,6 +4359,14 @@ export interface RentalCalendarYear {
   publishedBy?: string;
   changeReason?: string;
   previousVersion?: string;
+  /**
+   * 作废审计（需求 4.5.7「已作废：人工废弃的草稿或错误版本」）。
+   * 只有草稿可作废；已发布版本须由新版本替代、已被替代版本须保留供历史报价追溯，
+   * 均不走作废。作废时记录时间、操作人与原因，供事后解释这条草稿为何被丢弃。
+   */
+  voidedAt?: string;
+  voidedBy?: string;
+  voidReason?: string;
   /** 相对上一已发布版本的日期差异，发布时算好存下——事后重算需要旧版本仍在库里。 */
   publishDiff?: RentalCalendarPublishDiff;
   /** 人工覆盖与撤销的审计流水（需求 4.5.3）。 */
@@ -4407,6 +4415,11 @@ export interface RemoveRentalCalendarDayOverrideRequest {
 /** 发布年度日历。变更原因必填（需求 4.5.7：发布记录可追溯）。 */
 export interface PublishRentalCalendarRequest {
   changeReason: string;
+}
+
+/** 作废年度日历草稿（需求 4.5.7）。原因必填，用于事后解释这条草稿为何被丢弃。 */
+export interface VoidRentalCalendarRequest {
+  reason: string;
 }
 
 /** 阶梯价档位：达到 `minUnits` 时整单改用 `unitAmount`（长租折扣口径）。 */

@@ -14,6 +14,7 @@ import {
 import {
   ImportRentalCalendarDto,
   PublishRentalCalendarDto,
+  VoidRentalCalendarDto,
   RemoveRentalCalendarDayOverrideDto,
   SaveRentalCalendarDayDto,
   SaveRentalDiscountPlanDto,
@@ -99,6 +100,7 @@ export class RentalBusinessController {
   @Put("calendars/:year/days/:date") async saveCalendarDay(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Param("date") date: string, @Body() body: SaveRentalCalendarDayDto) { return this.committed(req.user.tenantId, await this.business.saveCalendarDay(req.user.tenantId, this.context(req.user.tenantId), Number(year), { ...body, date }, req.user.displayName)); }
   @Delete("calendars/:year/days/:date") async removeCalendarDayOverride(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Param("date") date: string, @Body() body: RemoveRentalCalendarDayOverrideDto) { return this.committed(req.user.tenantId, await this.business.removeCalendarDayOverride(req.user.tenantId, this.context(req.user.tenantId), Number(year), date, body, req.user.displayName)); }
   @Post("calendars/:year/publish") async publishCalendar(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Body() body: PublishRentalCalendarDto) { return this.committed(req.user.tenantId, await this.business.publishCalendar(req.user.tenantId, this.context(req.user.tenantId), Number(year), body, req.user.displayName)); }
+  @Post("calendars/:year/versions/:version/void") async voidCalendarVersion(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Param("version") version: string, @Body() body: VoidRentalCalendarDto) { return this.committed(req.user.tenantId, await this.business.voidCalendarVersion(req.user.tenantId, this.context(req.user.tenantId), Number(year), version, body, req.user.displayName)); }
 
   @Get("rule-versions") ruleVersions(@Req() req: AuthenticatedRequest) { return this.business.listRuleVersions(req.user.tenantId, this.context(req.user.tenantId)); }
   @Get("rule-versions/current") currentRule(@Req() req: AuthenticatedRequest) { return this.business.currentRule(req.user.tenantId, this.context(req.user.tenantId)); }

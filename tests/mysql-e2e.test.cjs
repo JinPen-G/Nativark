@@ -3234,6 +3234,81 @@ async function main() {
   );
   ok("未来年度官方日历未确认：报价按周模板放行且带「尚未确认」提示、已发布年度不误报、提示随报价落库读回一致");
 
+  console.log("== 15j. PRICE-02 年度日历草稿作废 ==");
+  // 需求 4.5.7「已作废：人工废弃的草稿或错误版本」。只有草稿可作废；已发布须由新版本替代、
+  // 已被替代须保留供历史报价追溯。用全新年度 2031 造一个草稿走作废闭环。
+  const voidYear = 2031;
+  const voidDraftDay = await request(
+    "PUT",
+    `/api/rental/v1/calendars/${voidYear}/days/${voidYear}-05-01`,
+    { date: `${voidYear}-05-01`, dayType: "tenant_special", name: "作废用例特殊日", pricingMultiplier: 1.5, closed: false, overrideReason: "作废用例造草稿" },
+    construction.accessToken
+  );
+  assert.equal(voidDraftDay.status, 200, `造 ${voidYear} 草稿失败: ${JSON.stringify(voidDraftDay.body).slice(0, 200)}`);
+  const voidDraftCalendar = await request("GET", `/api/rental/v1/calendars/${voidYear}`, null, construction.accessToken);
+  assert.equal(voidDraftCalendar.body.data.status, "draft", `新造年度应为草稿: ${voidDraftCalendar.body.data.status}`);
+  const voidDraftVersion = voidDraftCalendar.body.data.version;
+
+  // 已发布版本不得作废：否则该年度回落周模板且没有替代记录，历史报价无从解释。
+  const published2027Version = readScalar(
+    `SELECT \`version\` FROM \`rental_business_calendars\` WHERE \`tenantId\`='${construction.tenant.tenantId}' AND \`year\`=${closedYear} AND \`status\`='published' LIMIT 1;`
+  );
+  assert.ok(published2027Version, `前置：${closedYear} 应存在已发布版本供作废拒绝用例: ${published2027Version}`);
+  const voidPublished = await request(
+    "POST",
+    `/api/rental/v1/calendars/${closedYear}/versions/${published2027Version}/void`,
+    { reason: "尝试作废已发布" },
+    construction.accessToken
+  );
+  assert.equal(voidPublished.status, 409, `已发布版本必须拒绝作废: ${voidPublished.status} ${JSON.stringify(voidPublished.body).slice(0, 200)}`);
+
+  // 原因必填。
+  const voidNoReason = await request(
+    "POST",
+    `/api/rental/v1/calendars/${voidYear}/versions/${voidDraftVersion}/void`,
+    { reason: "   " },
+    construction.accessToken
+  );
+  assert.equal(voidNoReason.status, 400, `作废原因不能为空白: ${voidNoReason.status}`);
+
+  // 作废草稿成功并记录审计。
+  const voided = await request(
+    "POST",
+    `/api/rental/v1/calendars/${voidYear}/versions/${voidDraftVersion}/void`,
+    { reason: "录错年度，弃用该草稿" },
+    construction.accessToken
+  );
+  assert.equal(voided.status, 201, `作废草稿失败: ${voided.status} ${JSON.stringify(voided.body).slice(0, 200)}`);
+  assert.equal(voided.body.data.status, "void", `作废后状态应为 void: ${voided.body.data.status}`);
+  assert.ok(
+    voided.body.data.voidReason === "录错年度，弃用该草稿" && voided.body.data.voidedAt,
+    `作废必须记录原因与时间: ${JSON.stringify(voided.body.data).slice(0, 200)}`
+  );
+
+  // 作废状态落库。
+  const persistedVoidStatus = readScalar(
+    `SELECT \`status\` FROM \`rental_business_calendars\` WHERE \`tenantId\`='${construction.tenant.tenantId}' AND \`year\`=${voidYear} AND \`version\`='${voidDraftVersion}';`
+  );
+  assert.equal(persistedVoidStatus, "void", `作废状态必须落库: ${persistedVoidStatus}`);
+
+  // 作废后编辑视图不再返回该草稿：其人工覆盖不应仍生效（回落到周模板）。
+  const afterVoid = await request("GET", `/api/rental/v1/calendars/${voidYear}`, null, construction.accessToken);
+  assert.equal(afterVoid.status, 200, `作废后读日历失败: ${afterVoid.status}`);
+  assert.ok(
+    !afterVoid.body.data.days.some((d) => d.date === `${voidYear}-05-01` && d.source === "tenant_override"),
+    `作废草稿后其人工覆盖不应仍生效: ${JSON.stringify(afterVoid.body.data.days.find((d) => d.date === `${voidYear}-05-01`))}`
+  );
+
+  // 已作废版本不能再次作废（非草稿一律拒绝，与已发布/已被替代同一守卫）。
+  const revoid = await request(
+    "POST",
+    `/api/rental/v1/calendars/${voidYear}/versions/${voidDraftVersion}/void`,
+    { reason: "重复作废" },
+    construction.accessToken
+  );
+  assert.equal(revoid.status, 409, `已作废版本不得再次作废: ${revoid.status}`);
+  ok("年度日历草稿作废：草稿可作废并记录原因/时间/操作人且落库、已发布拒绝作废、原因必填、作废后编辑视图回落周模板、重复作废被拒");
+
   console.log("== 16. 双租户并发隔离 ==");
   const rounds = 12;
   const concurrent = [];

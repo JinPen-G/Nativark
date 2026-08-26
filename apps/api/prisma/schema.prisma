@@ -2770,6 +2770,10 @@ model RentalBusinessCalendar {
   publishedBy        String?
   changeReason       String?
   previousVersion    String?
+  /// 作废审计（需求 4.5.7）。只有草稿可作废；记录时间、操作人与原因。
+  voidedAt           DateTime?
+  voidedBy           String?
+  voidReason         String?
   /// RentalCalendarPublishDiff：发布时相对上一已发布版本的日期差异（新增/移除/变更）。
   /// 发布当时算好存下——事后重算要求被替代的旧版本仍能被定位，而追溯往往只有版本号。
   publishDiff        Json?

@@ -2302,6 +2302,7 @@ function rentalBusinessOperations(): ContractOperation[] { return [
   backlogOperation("put", "/api/rental/v1/calendars/{year}/days/{date}", "RentalBusiness", "updateRentalBusinessCalendarDay", "Update tenant calendar day", ["store-rental:price:manage"]),
   backlogOperation("delete", "/api/rental/v1/calendars/{year}/days/{date}", "RentalBusiness", "removeRentalBusinessCalendarDayOverride", "Remove tenant calendar day override", ["store-rental:price:manage"]),
   backlogOperation("post", "/api/rental/v1/calendars/{year}/publish", "RentalBusiness", "publishRentalBusinessCalendar", "Publish annual business calendar", ["store-rental:price:manage"]),
+  backlogOperation("post", "/api/rental/v1/calendars/{year}/versions/{version}/void", "RentalBusiness", "voidRentalBusinessCalendarVersion", "Void annual business calendar draft", ["store-rental:price:manage"]),
   backlogOperation("get", "/api/rental/v1/rule-versions", "RentalBusiness", "listRentalRuleVersionsV1", "List rental rule versions", ["store-rental:rules:manage"]),
   backlogOperation("get", "/api/rental/v1/rule-versions/current", "RentalBusiness", "getCurrentRentalRuleVersionV1", "Get current rental rule", ["store-rental:rules:manage"]),
   backlogOperation("post", "/api/rental/v1/rule-versions", "RentalBusiness", "createRentalRuleVersionV1", "Create or publish rental rule version", ["store-rental:rules:manage"]),

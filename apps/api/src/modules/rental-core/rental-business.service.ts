@@ -37,6 +37,7 @@ import {
   type SaveRentalCalendarDayRequest,
   type RemoveRentalCalendarDayOverrideRequest,
   type PublishRentalCalendarRequest,
+  type VoidRentalCalendarRequest,
   type SaveRentalDiscountPlanRequest,
   type SaveRentalNotificationTemplateRequest,
   type SaveRentalPricingPlanRequest,
@@ -846,6 +847,44 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     this.cacheCalendar(state, calendar);
     if (superseded) this.cacheCalendar(state, superseded);
     return calendar;
+  }
+
+  /**
+   * 作废年度日历草稿（需求 4.5.7「已作废：人工废弃的草稿或错误版本」）。
+   *
+   * 只有草稿可作废，且理由必填：
+   * - 已发布版本不走作废——纠错的正解是发布一版新的把它替代（`superseded`），
+   *   直接作废唯一的已发布版本会让该年度回落到周模板且没有替代记录可追溯；
+   * - 已被替代版本必须保留：历史报价的 `calendarVersion` 指向它，作废等于抹掉追溯依据。
+   *
+   * 作废是单行状态变更，用 `upsertCalendar` 即可，不涉及发布那种"两行必须原子"的约束。
+   */
+  async voidCalendarVersion(
+    tenantId: string,
+    context: BusinessContext,
+    year: number,
+    version: string,
+    input: VoidRentalCalendarRequest,
+    operator?: string
+  ) {
+    const state = this.state(tenantId, context);
+    const target = state.calendars.find((item) => item.year === year && item.version === version);
+    if (!target) throw new NotFoundException("指定的年度日历版本不存在");
+    const reason = input?.reason?.trim();
+    if (!reason) throw new BadRequestException("作废年度日历必须填写原因");
+    if (target.status !== "draft") {
+      throw new ConflictException(
+        "只能作废草稿版本：已发布版本请发布新版本替代，已被替代版本须保留以供历史报价追溯"
+      );
+    }
+    const voided = structuredClone(target);
+    voided.status = "void";
+    voided.voidedAt = stamp();
+    voided.voidedBy = operator;
+    voided.voidReason = reason;
+    await this.configStore.upsertCalendar(voided);
+    this.cacheCalendar(state, voided);
+    return voided;
   }
 
   listRuleVersions(tenantId: string, context: BusinessContext) { return this.state(tenantId, context).ruleVersions; }
