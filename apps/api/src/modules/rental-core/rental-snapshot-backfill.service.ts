@@ -869,7 +869,10 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
         for (const calendar of business.calendars ?? []) {
           await this.writeOne("rentalBusinessCalendar", divergences, () =>
             tx.rentalBusinessCalendar.upsert({
-            where: { workspaceId_year: { workspaceId, year: calendar.year } },
+            // 唯一键含 version（需求 4.5.7 要求同年度保留多版本），回填按同一键定位。
+            where: {
+              workspaceId_year_version: { workspaceId, year: calendar.year, version: calendar.version ?? "1.0" }
+            },
             update: {},
             create: {
               tenantId,

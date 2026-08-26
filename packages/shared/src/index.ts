@@ -4243,7 +4243,21 @@ export interface RentalCalendarYear {
   year: number;
   region: "CN" | "NONE";
   version: string;
-  status: "draft" | "published";
+  /**
+   * 年度日历状态（需求 4.5.7）。
+   *
+   * - `draft` 草稿：可编辑或删除
+   * - `published` 已发布：**不可直接修改**；每个经营空间每个年度只能有一个
+   * - `superseded` 已被替代：被更新的已发布版本取代，保留供历史报价追溯
+   * - `void` 已作废：人工废弃的草稿或错误版本
+   */
+  status: "draft" | "published" | "superseded" | "void";
+  /** 被替代时间。需求要求历史版本不得被删除或原地改回，只能标记替代。 */
+  supersededAt?: string;
+  /** 发布人、变更原因与上一版本号：需求 4.5.7 要求发布记录可追溯。 */
+  publishedBy?: string;
+  changeReason?: string;
+  previousVersion?: string;
   sourceName?: string;
   sourceUrl?: string;
   sourcePublishedAt?: string;

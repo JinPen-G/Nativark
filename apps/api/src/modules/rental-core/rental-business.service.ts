@@ -465,16 +465,42 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return result;
   }
 
+  /**
+   * 页面查看用：草稿优先，其次已发布，最后按周模板生成。
+   *
+   * 不能像早前那样"取该年度第一条"：同年度现在可能同时存在已被替代的历史版本，
+   * 数组顺序取决于装载顺序，会随机返回一个历史版本。
+   */
   getCalendar(tenantId: string, context: BusinessContext, year: number) {
-    const state = this.state(tenantId, context);
-    return state.calendars.find((item) => item.year === year)
-      ?? this.buildCalendar(tenantId, context.settings, year);
+    return this.editableCalendar(tenantId, context, year);
   }
 
+  /** 同一年度可同时存在草稿、已发布与已被替代（需求 4.5.7），因此按「年度 + 版本」定位。 */
   private cacheCalendar(state: RentalBusinessState, calendar: RentalCalendarYear) {
-    const index = state.calendars.findIndex((item) => item.year === calendar.year);
+    const index = state.calendars.findIndex(
+      (item) => item.year === calendar.year && item.version === calendar.version
+    );
     if (index >= 0) state.calendars.splice(index, 1, calendar);
     else state.calendars.push(calendar);
+  }
+
+  /** 供报价使用的年度日历：只认已发布版本；没有则回退到按周模板生成。 */
+  private publishedCalendar(tenantId: string, context: BusinessContext, year: number) {
+    const published = this.state(tenantId, context).calendars.filter(
+      (item) => item.year === year && item.status === "published"
+    );
+    // 正常只会有一个；若出现多个，取版本号最大的那个并保持行为确定。
+    return published.sort((left, right) => right.version.localeCompare(left.version))[0];
+  }
+
+  /** 供编辑使用：优先当前草稿，其次已发布版本，最后按周模板生成。 */
+  private editableCalendar(tenantId: string, context: BusinessContext, year: number) {
+    const list = this.state(tenantId, context).calendars.filter((item) => item.year === year);
+    return (
+      list.find((item) => item.status === "draft") ??
+      list.find((item) => item.status === "published") ??
+      this.buildCalendar(tenantId, context.settings, year)
+    );
   }
 
   async importOfficialCalendar(tenantId: string, context: BusinessContext, input: ImportRentalCalendarRequest) {
@@ -508,8 +534,22 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
 
   async saveCalendarDay(tenantId: string, context: BusinessContext, year: number, input: SaveRentalCalendarDayRequest) {
     const state = this.state(tenantId, context);
-    const calendar = structuredClone(this.getCalendar(tenantId, context, year));
+    const base = this.editableCalendar(tenantId, context, year);
     if (!input.date.startsWith(`${year}-`) || input.pricingMultiplier < 0) throw new BadRequestException("日期年度或价格系数无效");
+    // 已发布版本不可原地修改（需求 4.5.7），必须复制生成新草稿。
+    //
+    // 早前的实现直接把该行 status 改回 draft 并递增版本号——等于**把已发布版本
+    // 就地抹掉**：引用该版本的历史报价从此指向一个已不存在的版本，而且该年度
+    // 在新草稿发布前处于"没有已发布日历"的状态，报价会静默回落到周模板。
+    const calendar = structuredClone(base);
+    if (base.status !== "draft") {
+      calendar.status = "draft";
+      calendar.version = versionAfter(base.version);
+      calendar.previousVersion = base.version;
+      calendar.publishedAt = undefined;
+      calendar.publishedBy = undefined;
+      calendar.supersededAt = undefined;
+    }
     // 两态与四态必须一致落库：只写一个会让同一行自相矛盾（closed=true 但 status=open），
     // 而读取口径会优先信四态，等于人工覆盖被静默忽略。
     const businessStatus = input.businessStatus ?? (input.closed ? "closed" : "open");
@@ -522,22 +562,40 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const index = calendar.days.findIndex((item) => item.date === input.date);
     if (index >= 0) calendar.days[index] = day; else calendar.days.push(day);
     calendar.days.sort((a, b) => a.date.localeCompare(b.date));
-    calendar.status = "draft";
-    calendar.version = versionAfter(calendar.version);
-    calendar.publishedAt = undefined;
     await this.configStore.upsertCalendar(calendar);
     this.cacheCalendar(state, calendar);
     return day;
   }
 
-  async publishCalendar(tenantId: string, context: BusinessContext, year: number) {
+  /**
+   * 发布年度日历：草稿转已发布，同时把原已发布版本标记为「已被替代」。
+   *
+   * 需求 4.5.7 要求每个经营空间每个年度只能有一个当前使用的已发布版本，
+   * 且历史版本不得被删除或原地改回——因此这里是「新版本置 published +
+   * 旧版本置 superseded」两步，而不是覆盖同一行。
+   */
+  async publishCalendar(tenantId: string, context: BusinessContext, year: number, operator?: string) {
     const state = this.state(tenantId, context);
-    const calendar = structuredClone(this.getCalendar(tenantId, context, year));
-    if (calendar.region === "CN" && !calendar.sourceName) throw new ConflictException("中国大陆日历发布前必须导入并记录官方来源");
+    const draft = this.editableCalendar(tenantId, context, year);
+    if (draft.region === "CN" && !draft.sourceName) throw new ConflictException("中国大陆日历发布前必须导入并记录官方来源");
+    const previous = this.publishedCalendar(tenantId, context, year);
+    const calendar = structuredClone(draft);
+    if (calendar.status === "published") return calendar;
     calendar.status = "published";
     calendar.publishedAt = stamp();
+    calendar.publishedBy = operator;
+    if (previous && previous.version !== calendar.version) calendar.previousVersion = previous.version;
     await this.configStore.upsertCalendar(calendar);
     this.cacheCalendar(state, calendar);
+    // 先写新版本再标记旧版本：反过来的话中途失败会留下"该年度没有已发布日历"，
+    // 报价会静默回落到周模板。
+    if (previous && previous.version !== calendar.version) {
+      const superseded = structuredClone(previous);
+      superseded.status = "superseded";
+      superseded.supersededAt = stamp();
+      await this.configStore.upsertCalendar(superseded);
+      this.cacheCalendar(state, superseded);
+    }
     return calendar;
   }
 
@@ -1657,7 +1715,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       businessDateKey(new Date(Math.max(new Date(endAt).getTime() - 1, new Date(startAt).getTime())).toISOString(), timeZone)
     );
     const years = Array.from({ length: endYear - startYear + 1 }, (_, index) => startYear + index);
-    return years.map((year) => this.state(tenantId, context).calendars.find((item) => item.year === year && item.status === "published") ?? this.getCalendar(tenantId, context, year));
+    return years.map(
+      (year) => this.publishedCalendar(tenantId, context, year) ?? this.buildCalendar(tenantId, context.settings, year)
+    );
   }
 
   /**

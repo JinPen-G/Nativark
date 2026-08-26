@@ -2630,6 +2630,94 @@ async function main() {
 
   // 还原为停止营业，保持本节前面三条断言的前提不变。
   await setDayStatus("closed");
+  // 5) 年度版本历史（需求 4.5.7）：已发布版本不可原地修改，编辑必须复制为新草稿，
+  //    新草稿发布后原版本进入「已被替代」，历史版本不得被删除或改回。
+  //
+  //    早前的实现直接把该行 status 改回 draft 并递增版本号——等于把已发布版本
+  //    就地抹掉：引用它的历史报价指向一个已不存在的版本，且该年度在新草稿发布前
+  //    处于「没有已发布日历」的状态，报价会静默回落到周模板。
+  const calRows = (statusFilter) =>
+    readCount(
+      "SELECT COUNT(*) FROM `rental_business_calendars` WHERE `tenantId`='" +
+        construction.tenant.tenantId +
+        `' AND \`year\`=${closedYear}` +
+        (statusFilter ? ` AND \`status\`='${statusFilter}'` : "")
+    );
+  const publishedVersionBefore = readScalar(
+    "SELECT `version` FROM `rental_business_calendars` WHERE `tenantId`='" +
+      construction.tenant.tenantId +
+      `' AND \`year\`=${closedYear} AND \`status\`='published';`
+  );
+  assert.ok(publishedVersionBefore, "前置条件：该年度应已有已发布版本");
+  assert.equal(calRows("published"), 1, "每个空间每个年度只能有一个已发布版本");
+  // 本节前面的四态用例已经历过多轮"编辑→发布"，因此已被替代的版本不止一条。
+  // 断言用**增量**而不是绝对值：绝对值会绑死在上文的用例条数上，改动上文就会误报。
+  const supersededBefore = calRows("superseded");
+
+  // 编辑已发布日历：必须新增一条草稿，已发布那条不动。
+  const editAfterPublish = await request(
+    "PUT",
+    `/api/rental/v1/calendars/${closedYear}/days/${closedYear}-09-15`,
+    {
+      date: `${closedYear}-09-15`,
+      dayType: "tenant_special",
+      name: "E2E 版本历史验证",
+      pricingMultiplier: 1.2,
+      closed: false,
+      businessStatus: "open"
+    },
+    construction.accessToken
+  );
+  assert.equal(editAfterPublish.status, 200, `编辑已发布日历失败: ${JSON.stringify(editAfterPublish.body).slice(0, 200)}`);
+  assert.equal(
+    readScalar(
+      "SELECT `version` FROM `rental_business_calendars` WHERE `tenantId`='" +
+        construction.tenant.tenantId +
+        `' AND \`year\`=${closedYear} AND \`status\`='published';`
+    ),
+    publishedVersionBefore,
+    "编辑已发布日历不得改动已发布版本本身（需求 4.5.7：已发布版本不可直接修改）"
+  );
+  assert.equal(calRows("draft"), 1, "编辑已发布日历必须复制生成一条新草稿");
+  assert.equal(calRows("published"), 1, "编辑期间已发布版本必须仍在，否则报价会回落到周模板");
+
+  // 发布新草稿：原版本进入「已被替代」，两条都保留。
+  const republish = await request("POST", `/api/rental/v1/calendars/${closedYear}/publish`, {}, construction.accessToken);
+  assert.equal(republish.status, 201, `发布新草稿失败: ${JSON.stringify(republish.body).slice(0, 200)}`);
+  assert.equal(calRows("published"), 1, "发布后仍只能有一个已发布版本");
+  assert.equal(
+    calRows("superseded"),
+    supersededBefore + 1,
+    `原已发布版本必须标记为已被替代而不是删除：应从 ${supersededBefore} 增至 ${supersededBefore + 1}，实际 ${calRows("superseded")}`
+  );
+  assert.notEqual(
+    readScalar(
+      "SELECT `version` FROM `rental_business_calendars` WHERE `tenantId`='" +
+        construction.tenant.tenantId +
+        `' AND \`year\`=${closedYear} AND \`status\`='published';`
+    ),
+    publishedVersionBefore,
+    "发布后当前已发布版本应是新版本"
+  );
+  assert.equal(
+    readScalar(
+      "SELECT `previousVersion` FROM `rental_business_calendars` WHERE `tenantId`='" +
+        construction.tenant.tenantId +
+        `' AND \`year\`=${closedYear} AND \`status\`='published';`
+    ),
+    publishedVersionBefore,
+    "发布记录必须能追溯上一版本号（需求 4.5.7）"
+  );
+  assert.ok(
+    readScalar(
+      "SELECT `publishedBy` FROM `rental_business_calendars` WHERE `tenantId`='" +
+        construction.tenant.tenantId +
+        `' AND \`year\`=${closedYear} AND \`status\`='published';`
+    ),
+    "发布记录必须保存发布人"
+  );
+  assert.ok(calRows(null) >= 3, `该年度应保留草稿→发布→被替代的多条版本，实际 ${calRows(null)} 条`);
+
   ok(
     "停业日语义正确：租期跨过放行且仍计费、领取/归还日停业 409 且原因可区分；" +
       "四态营业状态生效（正常/限时放行、停止拒绝、自助在能力缺失时 fail-closed），两态字段同步落库"

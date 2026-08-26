@@ -222,11 +222,17 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       sourcePublishedAt: calendar.sourcePublishedAt ? new Date(calendar.sourcePublishedAt) : null,
       importedAt: calendar.importedAt ? new Date(calendar.importedAt) : null,
       publishedAt: calendar.publishedAt ? new Date(calendar.publishedAt) : null,
+      // 发布记录字段（需求 4.5.7）。漏掉它们的话 schema 有列、领域对象也有值，
+      // 但落库全是 NULL——E2E 断言「发布记录必须能追溯上一版本号」正是这样报出来的。
+      supersededAt: calendar.supersededAt ? new Date(calendar.supersededAt) : null,
+      publishedBy: calendar.publishedBy ?? null,
+      changeReason: calendar.changeReason ?? null,
+      previousVersion: calendar.previousVersion ?? null,
       days: calendar.days as unknown as Prisma.InputJsonValue
     };
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, calendar.tenantId);
     await this.prisma.rentalBusinessCalendar.upsert({
-      where: { workspaceId_year: { workspaceId, year: calendar.year } },
+      where: { workspaceId_year_version: { workspaceId, year: calendar.year, version: calendar.version } },
       create: { workspaceId, tenantId: calendar.tenantId, year: calendar.year, ...data },
       update: data
     });
@@ -374,6 +380,10 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       sourcePublishedAt: optionalIso(row.sourcePublishedAt),
       importedAt: optionalIso(row.importedAt),
       publishedAt: optionalIso(row.publishedAt),
+      supersededAt: optionalIso(row.supersededAt),
+      publishedBy: row.publishedBy ?? undefined,
+      changeReason: row.changeReason ?? undefined,
+      previousVersion: row.previousVersion ?? undefined,
       days: (row.days ?? []) as unknown as RentalCalendarDay[]
     };
   }

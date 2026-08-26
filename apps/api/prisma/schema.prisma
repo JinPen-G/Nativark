@@ -2765,13 +2765,22 @@ model RentalBusinessCalendar {
   sourcePublishedAt  DateTime?
   importedAt         DateTime?
   publishedAt        DateTime?
+  /// 需求 4.5.7：已发布版本不可原地修改，被取代时只标记，不删除。
+  supersededAt       DateTime?
+  publishedBy        String?
+  changeReason       String?
+  previousVersion    String?
   /// RentalCalendarDay[]：整年按日的类型、倍率与停业标记。定价按年整体加载，
   /// 拆成每年 365 行没有查询收益，因此保留为该年配置行的明细。
   days               Json
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
-  @@unique([workspaceId, year], map: "rental_business_calendars_tenant_year_key")
+  /// 需求 4.5.7：同一年度要同时容纳草稿、已发布与已被替代的多个版本，
+  /// 因此唯一键必须含 version。原键 (workspaceId, year) 只允许一行，
+  /// 结构上就无法保留历史版本，也逼得"编辑已发布日历"只能原地改。
+  @@unique([workspaceId, year, version], map: "rental_business_calendars_ws_year_version_key")
+  @@index([workspaceId, year, status], map: "rental_business_calendars_ws_year_status_idx")
   @@index([tenantId, status])
   @@map("rental_business_calendars")
 }
