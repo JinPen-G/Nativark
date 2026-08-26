@@ -24,6 +24,7 @@ import {
   IsOptional,
   IsString,
   IsUrl,
+  Matches,
   Max,
   Min,
   ValidateNested
@@ -155,6 +156,16 @@ export class BusinessSettingsCalendarInputDto {
 
   @IsIn(["CN", "NONE"])
   officialCalendarRegion!: "CN" | "NONE";
+
+  /**
+   * 每周默认营业模板，下标 0=周日 … 6=周六。未配置视为未声明时段限制。
+   * 不强制长度为 7：只配工作日的空间不该被迫填满一周。
+   */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RentalBusinessHoursInputDto)
+  weeklyHours?: RentalBusinessHoursInputDto[];
 
   /**
    * IANA 时区标识。只校验非空字符串，具体是否为已知时区由服务层用 Intl 判定——
@@ -764,6 +775,13 @@ export class SaveRentalCalendarDayDto implements SaveRentalCalendarDayRequest {
   @IsIn(BUSINESS_STATUSES)
   businessStatus?: (typeof BUSINESS_STATUSES)[number];
 
+  /** 该日期的营业时段覆盖（需求 4.5.3）。 */
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => RentalBusinessHoursInputDto)
+  hours?: RentalBusinessHoursInputDto;
+
   /**
    * 调整原因，必填（需求 4.5.3：人工覆盖必须保存调整原因）。
    * 操作人与调整时间由服务端填，不接受调用方自报——自报的操作人没有审计价值。
@@ -771,6 +789,41 @@ export class SaveRentalCalendarDayDto implements SaveRentalCalendarDayRequest {
   @IsString()
   @IsNotEmpty()
   overrideReason!: string;
+}
+
+/** 营业时段。`HH:mm` 24 小时制，营业时区当地时间。 */
+export class RentalTimeWindowInputDto {
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { message: "时段起点必须是 HH:mm（24 小时制）" })
+  start!: string;
+
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { message: "时段终点必须是 HH:mm（24 小时制）" })
+  end!: string;
+}
+
+/** 某天的营业时段与各履约动作可用时段（需求 4.5.1）。动作时段缺省沿用营业时段。 */
+export class RentalBusinessHoursInputDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RentalTimeWindowInputDto)
+  windows!: RentalTimeWindowInputDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RentalTimeWindowInputDto)
+  pickup?: RentalTimeWindowInputDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RentalTimeWindowInputDto)
+  return?: RentalTimeWindowInputDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RentalTimeWindowInputDto)
+  delivery?: RentalTimeWindowInputDto[];
 }
 
 /* ---------- 通知模板 ---------- */

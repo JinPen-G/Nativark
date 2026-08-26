@@ -104,3 +104,21 @@ function zoneOffsetMs(instant: number, timeZone: string): number {
   const asUtc = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"), get("second"));
   return asUtc - instant;
 }
+
+/**
+ * 该时刻在营业时区的当地时间，格式 `HH:mm`（24 小时制）。
+ *
+ * 营业时段配的是门店挂钟时间，因此校验"领取时点是否落在营业时段内"必须先换算到
+ * 营业时区再比较；直接用 UTC 小时会整体偏移时区差。
+ */
+export function businessTimeOfDay(iso: string, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    hourCycle: "h23",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).formatToParts(new Date(iso));
+  const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "00";
+  return `${get("hour")}:${get("minute")}`;
+}
+

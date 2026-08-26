@@ -4143,6 +4143,13 @@ export interface TenantRentalBusinessSettings {
     holidayPricingEnabled: boolean;
     officialCalendarRegion: "CN" | "NONE";
     /**
+     * 每周默认营业模板，下标 0=周日 … 6=周六（与 `weekendDays` 同一编号口径）。
+     *
+     * 未配置时视为「未声明时段限制」，不校验时点——存量经营空间没有这份模板，
+     * 把缺省当成"全天不营业"会让所有既有租户立刻无法下单。
+     */
+    weeklyHours?: RentalBusinessHours[];
+    /**
      * IANA 时区标识（如 `Asia/Shanghai`），决定营业日界。
      *
      * 自然日、夜与日历日期类型都按这个时区切分日界；缺省视为 `Asia/Shanghai`。
@@ -4226,6 +4233,29 @@ export type RentalDayType = "workday" | "weekend" | "statutory_holiday" | "makeu
  */
 export type RentalCalendarBusinessStatus = "open" | "limited" | "closed" | "self_service";
 
+/** 营业时段。`start`/`end` 是营业时区的当地时间 `HH:mm`，24 小时制。 */
+export interface RentalTimeWindow {
+  start: string;
+  end: string;
+}
+
+/**
+ * 某天的营业时段与各履约动作可用时段（需求 4.5.1）。
+ *
+ * 需求要求「每周默认营业模板至少包含工作日、休息日、每日一个或多个营业时段，
+ * 以及领取、归还和配送的默认可用时段」，因此营业时段是**多段**（午休可拆两段），
+ * 且三个履约动作各自可以有更窄的时段。
+ *
+ * 各动作时段缺省表示沿用 `windows`：多数门店的领取归还就是营业时间，
+ * 要求每家都把三个动作各填一遍只会制造重复配置。
+ */
+export interface RentalBusinessHours {
+  windows: RentalTimeWindow[];
+  pickup?: RentalTimeWindow[];
+  return?: RentalTimeWindow[];
+  delivery?: RentalTimeWindow[];
+}
+
 /**
  * 被人工覆盖前的原始值（需求 4.5.3：「日期详情必须能说明当前结果来自人工覆盖、
  * 官方日历还是每周模板，并展示**被覆盖的原始值**」）。
@@ -4253,6 +4283,8 @@ export interface RentalCalendarDay {
   /** 四态营业状态（需求 4.5.4）。缺省时由 `closed` 推导。 */
   businessStatus?: RentalCalendarBusinessStatus;
   source: "week_rule" | "official_cn" | "tenant_override";
+  /** 该日期的营业时段覆盖（需求 4.5.3：可覆盖营业时段与领取/归还/配送能力）。 */
+  hours?: RentalBusinessHours;
   /** 人工覆盖的调整原因、操作人与调整时间（需求 4.5.3 要求必须保存）。 */
   overrideReason?: string;
   overrideBy?: string;

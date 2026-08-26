@@ -6,6 +6,7 @@ import {
   type GrantRentalRewardRequest,
   type ImportRentalCalendarRequest,
   type RentalCalendarBusinessStatus,
+  type RentalBusinessHours,
   type RentalCalendarDay,
   type RentalCalendarDayOrigin,
   type RentalCalendarYear,
@@ -27,6 +28,7 @@ import {
   type RentalQuoteSnapshotV1,
   type RentalRewardLedgerEntry,
   type RentalRuleConfig,
+  type RentalTimeWindow,
   type RentalRuleVersion,
   type RentalValueAddedService,
   type SaveRentalCalendarDayRequest,
@@ -52,7 +54,7 @@ import {
 } from "./rental-business-fact.repository";
 import { RentalCoreConfigRepository, type RentalConfigStore, type RentalConfigTx } from "./rental-core-config.repository";
 import { PrismaService } from "../database/prisma.service";
-import { DEFAULT_BUSINESS_TIME_ZONE, businessDateKey, businessDateKeyFromIndex, businessDayIndex, businessYearFromDateKey } from "./rental-business-day";
+import { DEFAULT_BUSINESS_TIME_ZONE, businessDateKey, businessTimeOfDay, businessDateKeyFromIndex, businessDayIndex, businessYearFromDateKey } from "./rental-business-day";
 import { rentalPricingStrategy } from "./rental-pricing-strategy";
 
 interface RentalBusinessState {
@@ -1251,7 +1253,12 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     );
     const calendars = this.calendarsForDateRange(tenantId, context, input.startAt, input.endAt);
     // 停业只拦领取与归还时点，不拦租期跨过（需求 4.5.4）。
-    this.assertFulfillmentDayOpen(calendars, input, context.settings.calendar.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE);
+    this.assertFulfillmentDayOpen(
+      calendars,
+      input,
+      context.settings.calendar.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE,
+      context.settings
+    );
     const rule = this.currentRule(tenantId, context);
     if (!rule || rule.status !== "published") throw new ConflictException("当前租户没有已发布的租赁规则");
     // 营业时区解析一次，策略（自然日/夜）与日历（日期类型）必须用同一个值，
@@ -1814,12 +1821,42 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
    * 需求同时要求「已经在租的订单不能因临时停业而失去归还渠道」，因此归还端
    * 只在**下单时**拦截，不影响已成立订单的归还动作——归还路径不走本方法。
    */
+  /**
+   * 解析某营业日期的时段配置（需求 4.5.1 + 4.5.3 的优先级）。
+   *
+   * 具体日期覆盖 > 每周默认模板；两者都没有时返回 undefined，表示**未声明时段限制**。
+   * 未声明时不校验时点：存量经营空间没有这份模板，把缺省当成"全天不营业"
+   * 会让所有既有租户立刻无法下单。
+   */
+  private resolveBusinessHours(
+    calendars: RentalCalendarYear[],
+    settings: TenantRentalBusinessSettings,
+    date: string
+  ): RentalBusinessHours | undefined {
+    const calendar = calendars.find((item) => item.year === businessYearFromDateKey(date));
+    const day = calendar?.days.find((item) => item.date === date);
+    if (day?.hours) return day.hours;
+    const weekly = settings.calendar.weeklyHours;
+    if (!weekly?.length) return undefined;
+    // 下标 0=周日，与 weekendDays 同一编号口径。日期键是营业日期，用 UTC 取星期即可：
+    // `YYYY-MM-DD` 本身已不含时区信息，再叠时区会把星期算错。
+    const weekday = new Date(`${date}T00:00:00.000Z`).getUTCDay();
+    return weekly[weekday];
+  }
+
+  /** 时点是否落在任一时段内。时段用营业时区当地 `HH:mm` 比较，跨零点时段按拆段配置。 */
+  private withinWindows(windows: RentalTimeWindow[] | undefined, localTime: string) {
+    if (!windows?.length) return true;
+    return windows.some((window) => localTime >= window.start && localTime <= window.end);
+  }
+
   private assertFulfillmentDayOpen(
     calendars: RentalCalendarYear[],
     input: RentalQuoteRequest,
-    timeZone: string
+    timeZone: string,
+    settings: TenantRentalBusinessSettings
   ) {
-    const check = (iso: string, label: string) => {
+    const check = (iso: string, label: string, action: "pickup" | "return") => {
       const date = businessDateKey(iso, timeZone);
       const calendar = calendars.find((item) => item.year === businessYearFromDateKey(date));
       const day = calendar?.days.find((item) => item.date === date);
@@ -1840,12 +1877,22 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
           `${date} 为自助营业日，无法安排${label}；该日仅支持自助履约，而当前地点尚未声明自助领取或归还能力`
         );
       }
-      // limited（限时营业）只在指定时段提供指定能力。时段模型（每日营业时段与
-      // 领取/归还/配送可用时段）属需求 4.5.1，尚未建立，因此这里只能按"当天可办理"
-      // 放行，无法校验时点是否落在营业时段内。这一步的缺口已记入开发任务台账。
+      // 时段校验（需求 4.5.1/4.5.4）：正常营业「在配置时段内」提供服务，
+      // 限时营业「只在指定时段」提供指定能力——两者都要按时点判定，
+      // 区别只在于限时营业通常把动作时段配得比营业时段更窄。
+      const hours = this.resolveBusinessHours(calendars, settings, date);
+      if (hours) {
+        const localTime = businessTimeOfDay(iso, timeZone);
+        // 动作时段缺省沿用营业时段：多数门店的领取归还就是营业时间。
+        const actionWindows = action === "pickup" ? hours.pickup ?? hours.windows : hours.return ?? hours.windows;
+        if (!this.withinWindows(hours.windows, localTime) || !this.withinWindows(actionWindows, localTime)) {
+          const shown = (actionWindows ?? []).map((w) => `${w.start}-${w.end}`).join("、") || "未配置";
+          throw new ConflictException(`${date} ${localTime} 不在${label}可用时段内（可用：${shown}）`);
+        }
+      }
     };
-    check(input.startAt, "领取");
-    check(input.endAt, "归还");
+    check(input.startAt, "领取", "pickup");
+    check(input.endAt, "归还", "return");
   }
 
   /**
