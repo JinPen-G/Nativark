@@ -4212,12 +4212,29 @@ export interface SaveRentalCouponTemplateRequest {
 
 export type RentalDayType = "workday" | "weekend" | "statutory_holiday" | "makeup_workday" | "tenant_special";
 
+/**
+ * 营业状态（需求 4.5.4 的四态）。
+ *
+ * | 正常营业 open | 在配置时段内提供允许的领取、归还和配送服务 |
+ * | 限时营业 limited | 只在指定时段提供指定履约能力 |
+ * | 停止营业 closed | 不接受普通现场领取、配送或现场归还 |
+ * | 自助营业 self_service | 人工停业，但允许具备 capability 的智能柜、自助停车场等方式履约 |
+ *
+ * 与 `closed: boolean` 的关系：`closed` 是本字段引入前的两态遗留表示。
+ * 存量日历的 `days` JSON 里没有 `businessStatus`，因此读取时按 `closed` 推导，
+ * 不把历史数据当成"未配置"。新写入一律带 `businessStatus`。
+ */
+export type RentalCalendarBusinessStatus = "open" | "limited" | "closed" | "self_service";
+
 export interface RentalCalendarDay {
   date: string;
   dayType: RentalDayType;
   name: string;
   pricingMultiplier: number;
+  /** 两态遗留表示，保留以兼容存量数据与既有调用方；新逻辑以 `businessStatus` 为准。 */
   closed: boolean;
+  /** 四态营业状态（需求 4.5.4）。缺省时由 `closed` 推导。 */
+  businessStatus?: RentalCalendarBusinessStatus;
   source: "week_rule" | "official_cn" | "tenant_override";
 }
 

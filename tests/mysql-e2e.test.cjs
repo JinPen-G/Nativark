@@ -2554,7 +2554,61 @@ async function main() {
     /归还/,
     `拒绝原因应指明是归还受限: ${JSON.stringify(returnClosed.body).slice(0, 200)}`
   );
-  ok("停业日语义正确：租期跨过放行且仍计费、领取日停业 409、归还日停业 409 且原因可区分");
+  // 4) 四态营业状态（需求 4.5.4）。逐个覆盖同一日期并断言领取日的行为差异。
+  const setDayStatus = async (businessStatus) => {
+    const res = await request(
+      "PUT",
+      `/api/rental/v1/calendars/${closedYear}/days/${closedDate}`,
+      {
+        date: closedDate,
+        dayType: "tenant_special",
+        name: `E2E ${businessStatus}`,
+        pricingMultiplier: 1,
+        // 刻意把两态传成与四态**矛盾**的值：服务端必须以四态为准并把 closed 同步过来，
+        // 否则同一行会自相矛盾、人工覆盖被静默忽略。
+        closed: false,
+        businessStatus
+      },
+      construction.accessToken
+    );
+    assert.equal(res.status, 200, `设置营业状态 ${businessStatus} 失败: ${JSON.stringify(res.body).slice(0, 200)}`);
+    const publish = await request("POST", `/api/rental/v1/calendars/${closedYear}/publish`, {}, construction.accessToken);
+    assert.equal(publish.status, 201, `发布 ${businessStatus} 日历失败: ${JSON.stringify(publish.body).slice(0, 200)}`);
+    return res.body.data;
+  };
+  const pickupOnDay = () => closedQuote(`${closedDate}T09:00:00+08:00`, `${closedYear}-08-12T09:00:00+08:00`);
+
+  // 正常营业：领取放行。
+  const openDay = await setDayStatus("open");
+  assert.equal(openDay.closed, false, "正常营业时遗留 closed 应为 false");
+  assert.equal((await pickupOnDay()).status, 201, "正常营业日应可领取");
+
+  // 限时营业：当前无营业时段模型，按"当天可办理"放行（缺口已记台账）。
+  await setDayStatus("limited");
+  assert.equal((await pickupOnDay()).status, 201, "限时营业日当前按可办理放行");
+
+  // 停止营业：拒绝，且遗留 closed 必须被同步为 true。
+  const closedDay = await setDayStatus("closed");
+  assert.equal(closedDay.closed, true, "停止营业必须把遗留 closed 同步为 true，否则两态与四态自相矛盾");
+  assert.equal((await pickupOnDay()).status, 409, "停止营业日不得领取");
+
+  // 自助营业：地点尚未声明自助能力，必须**拒绝**而不是放行（fail-closed）。
+  const selfDay = await setDayStatus("self_service");
+  assert.equal(selfDay.closed, true, "自助营业属人工停业，遗留 closed 应为 true");
+  const selfPickup = await pickupOnDay();
+  assert.equal(selfPickup.status, 409, "自助营业日在地点未声明自助能力时必须拒绝，不得 fail-open");
+  assert.match(
+    JSON.stringify(selfPickup.body),
+    /自助/,
+    `拒绝原因应说明是自助营业与能力缺失: ${JSON.stringify(selfPickup.body).slice(0, 220)}`
+  );
+
+  // 还原为停止营业，保持本节前面三条断言的前提不变。
+  await setDayStatus("closed");
+  ok(
+    "停业日语义正确：租期跨过放行且仍计费、领取/归还日停业 409 且原因可区分；" +
+      "四态营业状态生效（正常/限时放行、停止拒绝、自助在能力缺失时 fail-closed），两态字段同步落库"
+  );
 
   console.log("== 16. 双租户并发隔离 ==");
   const rounds = 12;

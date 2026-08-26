@@ -58,6 +58,7 @@ const FULFILLMENT_MODES = [
   "delivery",
   "onsite_delivery"
 ] as const;
+const BUSINESS_STATUSES = ["open", "limited", "closed", "self_service"] as const;
 const DAY_TYPES = ["workday", "weekend", "statutory_holiday", "makeup_workday", "tenant_special"] as const;
 const PLAN_STATUSES = ["draft", "enabled", "disabled"] as const;
 const ENABLE_STATUSES = ["enabled", "disabled"] as const;
@@ -754,8 +755,14 @@ export class SaveRentalCalendarDayDto implements SaveRentalCalendarDayRequest {
   @Max(MAX_MULTIPLIER)
   pricingMultiplier!: number;
 
+  /** 两态遗留字段，保留以兼容既有调用方；同时给出四态时以四态为准。 */
   @IsBoolean()
   closed!: boolean;
+
+  /** 四态营业状态（需求 4.5.4）。不传时由 closed 推导。 */
+  @IsOptional()
+  @IsIn(BUSINESS_STATUSES)
+  businessStatus?: (typeof BUSINESS_STATUSES)[number];
 }
 
 /* ---------- 通知模板 ---------- */

@@ -5,6 +5,7 @@ import {
   RentalCategoryCode,
   type GrantRentalRewardRequest,
   type ImportRentalCalendarRequest,
+  type RentalCalendarBusinessStatus,
   type RentalCalendarDay,
   type RentalCalendarYear,
   type RentalCategoryDefinition,
@@ -78,6 +79,16 @@ interface BusinessContext {
   couponTemplates: RentalCouponTemplate[];
   locations: RentalFulfillmentLocation[];
   operators: RentalFulfillmentOperator[];
+}
+
+/**
+ * 营业状态的读取口径：优先用四态字段，缺省时由遗留的 `closed` 推导。
+ *
+ * 存量日历的 `days` JSON 里没有 `businessStatus`，直接读会得到 undefined，
+ * 若把 undefined 当成"正常营业"，历史上标为停业的日期会突然变成可履约。
+ */
+function businessStatusOf(day: RentalCalendarDay): RentalCalendarBusinessStatus {
+  return day.businessStatus ?? (day.closed ? "closed" : "open");
 }
 
 const stamp = () => new Date().toISOString();
@@ -498,7 +509,15 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const state = this.state(tenantId, context);
     const calendar = structuredClone(this.getCalendar(tenantId, context, year));
     if (!input.date.startsWith(`${year}-`) || input.pricingMultiplier < 0) throw new BadRequestException("日期年度或价格系数无效");
-    const day: RentalCalendarDay = { ...input, source: "tenant_override" };
+    // 两态与四态必须一致落库：只写一个会让同一行自相矛盾（closed=true 但 status=open），
+    // 而读取口径会优先信四态，等于人工覆盖被静默忽略。
+    const businessStatus = input.businessStatus ?? (input.closed ? "closed" : "open");
+    const day: RentalCalendarDay = {
+      ...input,
+      businessStatus,
+      closed: businessStatus === "closed" || businessStatus === "self_service",
+      source: "tenant_override"
+    };
     const index = calendar.days.findIndex((item) => item.date === input.date);
     if (index >= 0) calendar.days[index] = day; else calendar.days.push(day);
     calendar.days.sort((a, b) => a.date.localeCompare(b.date));
@@ -1630,9 +1649,26 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       const date = businessDateKey(iso, timeZone);
       const calendar = calendars.find((item) => item.year === businessYearFromDateKey(date));
       const day = calendar?.days.find((item) => item.date === date);
-      if (day?.closed) {
-        throw new ConflictException(`${date} 为停业日，无法安排${label}；租期可以跨过停业日，但当天不办理履约`);
+      if (!day) return;
+      const status = businessStatusOf(day);
+      if (status === "closed") {
+        throw new ConflictException(`${date} 停止营业，无法安排${label}；租期可以跨过停业日，但当天不办理履约`);
       }
+      // 自助营业＝人工停业但允许自助方式履约（需求 4.5.4）。判定它需要地点声明
+      // 自助领取/归还 capability（需求 4.5.1 明确「自助领取或归还作为地点 capability
+      // 单独声明」），而地点能力当前只有 pickup/return/storage/delivery，没有自助项。
+      //
+      // 缺这项能力时**按拒绝处理**而不是放行：放行等于对着一个尚不存在的能力
+      // fail-open，客户会拿到一张当天根本没人也没柜子能履约的报价。
+      // 地点能力属 CAT-04 的模型，按分支规则只报告依赖、不跨任务顺手加。
+      if (status === "self_service") {
+        throw new ConflictException(
+          `${date} 为自助营业日，无法安排${label}；该日仅支持自助履约，而当前地点尚未声明自助领取或归还能力`
+        );
+      }
+      // limited（限时营业）只在指定时段提供指定能力。时段模型（每日营业时段与
+      // 领取/归还/配送可用时段）属需求 4.5.1，尚未建立，因此这里只能按"当天可办理"
+      // 放行，无法校验时点是否落在营业时段内。这一步的缺口已记入开发任务台账。
     };
     check(input.startAt, "领取");
     check(input.endAt, "归还");
