@@ -28,6 +28,7 @@ import {
   IsString,
   IsUrl,
   Matches,
+  MaxLength,
   Max,
   Min,
   ValidateNested
@@ -871,6 +872,9 @@ export class RemoveRentalCalendarDayOverrideDto implements RemoveRentalCalendarD
 export class PublishRentalCalendarDto implements PublishRentalCalendarRequest {
   @IsString()
   @Matches(NON_BLANK_PATTERN, { message: "变更原因不能为空白" })
+  // 落库为 rental_business_calendars.changeReason（VARCHAR(191)）。不限长的话超长文本
+  // 会在 STRICT_TRANS_TABLES 下由数据库抛错、表现为 500，这里改成配置层 400。
+  @MaxLength(191, { message: "变更原因不能超过 191 字" })
   changeReason!: string;
 }
 
@@ -878,6 +882,8 @@ export class PublishRentalCalendarDto implements PublishRentalCalendarRequest {
 export class VoidRentalCalendarDto implements VoidRentalCalendarRequest {
   @IsString()
   @Matches(NON_BLANK_PATTERN, { message: "作废原因不能为空白" })
+  // 落库为 rental_business_calendars.voidReason（VARCHAR(191)），同上限长以免 500。
+  @MaxLength(191, { message: "作废原因不能超过 191 字" })
   reason!: string;
 }
 

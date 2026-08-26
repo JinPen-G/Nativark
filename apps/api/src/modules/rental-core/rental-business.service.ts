@@ -134,6 +134,25 @@ function compareVersions(left: string, right: string): number {
  * 比较取值而不是整行：`overrideBy` / `overrideAt` 每次保存都会变，
  * 按整行比对会把「只是重新保存了一遍」也算成变更，差异列表就失去筛选价值。
  */
+/**
+ * 营业时段的规范化签名。
+ *
+ * 不能直接 `JSON.stringify(hours)`：键顺序与数组顺序都会进签名，于是语义完全相同的时段
+ * 会被判成变更。两条真实触发路径——①MySQL 的 JSON 列会按自己的规则重排对象键，
+ * 已发布版本重启后读回的键序与进程内新写入的 payload 原序不同；②运营把两个营业时段
+ * 前后顺序调换（校验用排序、判定用 some，两者对顺序都不敏感）。
+ * 结果是发布差异里多出一堆点开看不出区别的日期。
+ */
+function businessHoursSignature(hours?: RentalBusinessHours): string {
+  if (!hours) return "-";
+  const windows = (list?: RentalTimeWindow[]) =>
+    (list ?? [])
+      .map((window) => `${window.start}-${window.end}`)
+      .sort()
+      .join(",");
+  return [windows(hours.windows), windows(hours.pickup), windows(hours.return), windows(hours.delivery)].join(";");
+}
+
 function calendarDiff(before: RentalCalendarDay[], after: RentalCalendarDay[]): RentalCalendarPublishDiff {
   const key = (day: RentalCalendarDay) =>
     [
@@ -145,7 +164,7 @@ function calendarDiff(before: RentalCalendarDay[], after: RentalCalendarDay[]): 
       day.source,
       // 营业时段也纳入差异签名（需求 4.5.5/4.5.8）：只调整营业/领取/归还/配送时段时，
       // 若不比时段，发布差异会显示「没有变化」，运营看不出这次改了时段。
-      JSON.stringify(day.hours ?? null)
+      businessHoursSignature(day.hours)
     ].join("|");
   const beforeMap = new Map(before.map((day) => [day.date, key(day)]));
   const afterMap = new Map(after.map((day) => [day.date, key(day)]));
@@ -568,7 +587,26 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       list
         .filter((item) => item.status === status)
         .sort((left, right) => compareVersions(right.version, left.version))[0];
-    return latest("draft") ?? latest("published") ?? this.buildCalendar(tenantId, context.settings, year);
+    const editable = latest("draft") ?? latest("published");
+    if (editable) return editable;
+    // 没有草稿也没有已发布版本时按周模板生成。版本号不能固定用 buildCalendar 的 "1.0"：
+    // 该年度可能存在**已作废**的 1.0（作废后既不算 draft 也不算 published），
+    // 而落库走 upsert (workspaceId, year, version)，撞号会把那条 void 行原地改回 draft，
+    // 作废人/时间/原因与该行的覆盖审计一并被写成 NULL——需求 4.5.7 要求历史版本不得原地改回。
+    return { ...this.buildCalendar(tenantId, context.settings, year), version: this.nextCalendarVersion(list) };
+  }
+
+  /**
+   * 该年度下一个未被占用的版本号。
+   *
+   * 必须把 `void` 与 `superseded` 也算进已占用集合：只按当前可编辑版本 +1 会重新分配到
+   * 一个历史版本号，upsert 撞号即原地改写那条历史行（作废记录或替代记录被静默销毁）。
+   */
+  private nextCalendarVersion(existing: RentalCalendarYear[], base?: string) {
+    const taken = new Set(existing.map((item) => item.version));
+    let candidate = versionAfter(base);
+    while (taken.has(candidate)) candidate = versionAfter(candidate);
+    return candidate;
   }
 
   /** 审计与差异用的日期取值快照。 */
@@ -605,8 +643,28 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     // 会随之回落到周模板默认值——否则官方删掉某个节假日后，该日期会永久残留旧安排。
     const template = this.buildCalendar(tenantId, context.settings, input.year);
     const dayMap = new Map<string, RentalCalendarDay>(template.days.map((day) => [day.date, day]));
+    const templateByDate = new Map(template.days.map((day) => [day.date, day]));
     for (const day of base.days) {
-      if (day.source === "tenant_override") dayMap.set(day.date, structuredClone(day));
+      if (day.source !== "tenant_override") continue;
+      // 人工覆盖搬过来时**重算** overriddenFrom：它的语义是「移除覆盖后恢复到哪里」，
+      // 也就是当前的次优先级来源。整年替换后，本次官方数据未再包含的日期，其次优先级
+      // 已经变成周模板；若沿用上一版官方值，撤销覆盖会恢复出一个当前官方版本里
+      // 并不存在的法定节假日，并按 holidayMultiplier 计价。
+      // 下面的 input.days 循环会把本次仍在官方数据里的日期改写成本次官方值。
+      const carried = structuredClone(day);
+      const fallback = templateByDate.get(day.date);
+      carried.overriddenFrom = fallback
+        ? {
+            dayType: fallback.dayType,
+            name: fallback.name,
+            pricingMultiplier: fallback.pricingMultiplier,
+            closed: fallback.closed,
+            businessStatus: fallback.businessStatus,
+            // 模板日恒为 week_rule；显式写死以满足 overriddenFrom 不接受 tenant_override 的类型约束。
+            source: "week_rule"
+          }
+        : undefined;
+      dayMap.set(day.date, carried);
     }
     const seen = new Set<string>();
     const preserved: string[] = [];
@@ -653,8 +711,16 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     // 会留下两个草稿；再叠加 `find` 取首条的旧 bug，页面会随机显示其中一个。
     if (base.status !== "draft") {
       calendar.status = "draft";
-      calendar.version = versionAfter(base.version);
+      // 版本号跳过已占用的历史版本（含 void / superseded），否则 upsert 会原地改写那条历史行。
+      calendar.version = this.nextCalendarVersion(
+        state.calendars.filter((item) => item.year === input.year),
+        base.version
+      );
       calendar.previousVersion = base.version;
+      // 上一版的发布记录不能被新草稿继承：草稿从未发布过，带着别人的变更原因与差异，
+      // 版本历史与差异查询（需求 4.5.7）会把两次事件混在一起。
+      calendar.changeReason = undefined;
+      calendar.publishDiff = undefined;
     }
     calendar.sourceName = input.sourceName;
     calendar.sourceUrl = input.sourceUrl;
@@ -703,17 +769,36 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const calendar = structuredClone(base);
     if (base.status !== "draft") {
       calendar.status = "draft";
-      calendar.version = versionAfter(base.version);
+      // 跳过已占用版本号（含 void / superseded），避免 upsert 原地改写历史行。
+      calendar.version = this.nextCalendarVersion(
+        state.calendars.filter((item) => item.year === year),
+        base.version
+      );
       calendar.previousVersion = base.version;
       calendar.publishedAt = undefined;
       calendar.publishedBy = undefined;
       calendar.supersededAt = undefined;
+      // 新草稿不继承上一版的发布记录（变更原因与版本差异属于那一次发布事件）。
+      calendar.changeReason = undefined;
+      calendar.publishDiff = undefined;
     }
     // 两态与四态必须一致落库：只写一个会让同一行自相矛盾（closed=true 但 status=open），
     // 而读取口径会优先信四态，等于人工覆盖被静默忽略。
-    const businessStatus = input.businessStatus ?? (input.closed ? "closed" : "open");
     const index = calendar.days.findIndex((item) => item.date === input.date);
     const replaced = index >= 0 ? calendar.days[index] : undefined;
+    // 两态与四态必须一致落库：只写一个会让同一行自相矛盾（closed=true 但 status=open），
+    // 而读取口径会优先信四态，等于人工覆盖被静默忽略。
+    //
+    // 未提供 businessStatus 时**不能**一律按 closed 派生：管理端覆盖抽屉只有「停业」复选框、
+    // 没有四态选择器，若仅改价格就把 limited/self_service 静默降级为 open/closed，属数据丢失。
+    // 因此只有当调用方真正切换了 closed（与被覆盖前不同）时才按 closed 派生，否则沿用原四态。
+    const derivedFromClosed = input.closed ? "closed" : "open";
+    const businessStatus =
+      input.businessStatus ??
+      (replaced && replaced.closed === input.closed ? replaced.businessStatus ?? derivedFromClosed : derivedFromClosed);
+    // hours 同理：抽屉尚无时段编辑，未提供即沿用被覆盖前的时段，避免一次改价清空已配营业时段。
+    // 需要清空时应由带时段编辑的界面显式传空数组，而不是靠"不传"表达清空。
+    const hours = input.hours !== undefined ? input.hours : replaced?.hours;
     // 保留被覆盖前的原始值（需求 4.5.3）。两个用途：日期详情要展示被覆盖的原始值；
     // 移除覆盖时要恢复到下一优先级来源，而不是变成"没有来源的空白日"——
     // 若不留原始值，移除时只能凭周模板重算，官方日历里那天的节日名与类型就永久丢了。
@@ -734,6 +819,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const day: RentalCalendarDay = {
       ...input,
       businessStatus,
+      hours,
       closed: businessStatus === "closed" || businessStatus === "self_service",
       source: "tenant_override",
       overrideReason: reason,
@@ -791,11 +877,17 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const calendar = structuredClone(base);
     if (base.status !== "draft") {
       calendar.status = "draft";
-      calendar.version = versionAfter(base.version);
+      calendar.version = this.nextCalendarVersion(
+        state.calendars.filter((item) => item.year === year),
+        base.version
+      );
       calendar.previousVersion = base.version;
       calendar.publishedAt = undefined;
       calendar.publishedBy = undefined;
       calendar.supersededAt = undefined;
+      // 新草稿不继承上一版的发布记录（变更原因与版本差异属于那一次发布事件）。
+      calendar.changeReason = undefined;
+      calendar.publishDiff = undefined;
     }
     const origin = target.overriddenFrom;
     // 没有原始值时按周模板重算该日期，而不是留空——空白日会让后续取价拿不到任何来源。
@@ -853,7 +945,13 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   ) {
     const state = this.state(tenantId, context);
     const draft = this.editableCalendar(tenantId, context, year);
-    if (draft.region === "CN" && !draft.sourceName) throw new ConflictException("中国大陆日历发布前必须导入并记录官方来源");
+    // 只有当草稿**确实引用了官方日历数据**（存在 official_cn 来源的日期）时，才要求登记官方来源。
+    // 早前用「region 是 CN」判定，而任何新年度的 region 都取 settings 默认 "CN"，于是 CN 空间
+    // 想提前发布一个只含人工覆盖（如装修停业）的未来年度日历会被卡住，停业覆盖进不了报价路径，
+    // 客户仍能在停业当天下单——与 4.5.3/4.5.4 冲突。纯人工覆盖的未来年度允许发布。
+    if (draft.region === "CN" && draft.days.some((day) => day.source === "official_cn") && !draft.sourceName) {
+      throw new ConflictException("引用了官方节假日的中国大陆日历，发布前必须登记官方来源");
+    }
     const changeReason = input?.changeReason?.trim();
     if (!changeReason) throw new BadRequestException("发布年度日历必须填写变更原因");
     const previous = this.publishedCalendar(tenantId, context, year);
@@ -1507,7 +1605,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const calendars = this.calendarsForDateRange(tenantId, context, input.startAt, input.endAt);
     // 停业只拦领取与归还时点，不拦租期跨过（需求 4.5.4）。
     this.assertFulfillmentDayOpen(
-      calendars,
+      tenantId,
+      context,
       input,
       context.settings.calendar.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE,
       context.settings
@@ -2116,15 +2215,21 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   }
 
   private assertFulfillmentDayOpen(
-    calendars: RentalCalendarYear[],
+    tenantId: string,
+    context: BusinessContext,
     input: RentalQuoteRequest,
     timeZone: string,
     settings: TenantRentalBusinessSettings
   ) {
     const check = (iso: string, label: string, action: "pickup" | "return") => {
       const date = businessDateKey(iso, timeZone);
-      const calendar = calendars.find((item) => item.year === businessYearFromDateKey(date));
-      const day = calendar?.days.find((item) => item.date === date);
+      // 按端点**自己的**营业年度解析日历，而不是复用报价区间装载的那批。
+      // 早前用逐日区间那批（结束端按 endAt-1ms 定年度），当归还端正好落在营业时区跨年
+      // 零点（如 endAt=2027-01-01T00:00+08:00）时，该年度根本没被装载，calendar 为空、
+      // day 为 undefined，下面的 `if (!day) return` 会把停业/自助/时段三道校验整段跳过。
+      const year = businessYearFromDateKey(date);
+      const calendar = this.publishedCalendar(tenantId, context, year) ?? this.buildCalendar(tenantId, settings, year);
+      const day = calendar.days.find((item) => item.date === date);
       if (!day) return;
       const status = businessStatusOf(day);
       if (status === "closed") {
@@ -2145,7 +2250,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       // 时段校验（需求 4.5.1/4.5.4）：正常营业「在配置时段内」提供服务，
       // 限时营业「只在指定时段」提供指定能力——两者都要按时点判定，
       // 区别只在于限时营业通常把动作时段配得比营业时段更窄。
-      const hours = this.resolveBusinessHours(calendars, settings, date);
+      const hours = this.resolveBusinessHours([calendar], settings, date);
       if (hours) {
         const localTime = businessTimeOfDay(iso, timeZone);
         // 动作时段缺省沿用营业时段：多数门店的领取归还就是营业时间。

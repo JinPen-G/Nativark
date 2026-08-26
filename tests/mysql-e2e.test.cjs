@@ -146,6 +146,19 @@ function readScalar(sql) {
   return lines.at(-1).trim();
 }
 
+/** 单行多列查询：返回列名→值的对象。取最后两行为表头与数据行，NULL 原样为字符串 "NULL"。 */
+function readRow(sql) {
+  const lines = mysqlQuery(sql).split(/\r?\n/u).filter((line) => line.trim());
+  if (lines.length < 2) fail(`行查询无结果: ${sql}`);
+  const header = lines.at(-2).split("\t");
+  const values = lines.at(-1).split("\t");
+  const row = {};
+  header.forEach((col, index) => {
+    row[col] = values[index];
+  });
+  return row;
+}
+
 /* ---------- 断言与进度输出 ---------- */
 
 let passedGroups = 0;
@@ -311,7 +324,10 @@ async function bootstrapTenant(platformToken, tenantCode, categoryCode) {
     first.accessToken
   );
   if (changed.status !== 201) fail(`车辆租户 ${tenantCode} 改密失败`, JSON.stringify(changed.body).slice(0, 300));
-  return login(tenantCode, "admin", newPassword);
+  // 一并回报口令：`startApi()` 每次都生成新的 AUTH_TOKEN_SECRET，重启后旧令牌一律 401，
+  // 重启后还要复验的用例必须能重新登录，而口令是本函数内随机生成的。
+  const session = await login(tenantCode, "admin", newPassword);
+  return { ...session, password: newPassword };
 }
 
 /* ---------- 主流程 ---------- */
@@ -2824,7 +2840,13 @@ async function main() {
       sourceName: "E2E 第三次导入",
       sourceUrl: "https://example.invalid/e2e-reimport-2",
       sourcePublishedAt: new Date().toISOString(),
-      days: [{ date: `${closedYear}-10-12`, dayType: "makeup_workday", name: "再一次调休" }]
+      // 官方导入是**整年替换**：本次仍要带上 auditDate，否则该日期就不再属于官方数据，
+      // 其 overriddenFrom 会（正确地）回落成周模板，下面「移除覆盖恢复到官方值」这一节
+      // 就测不到目标路径了。「官方撤回某日期后覆盖移除应回落周模板」由 15L 节单独覆盖。
+      days: [
+        { date: auditDate, dayType: "statutory_holiday", name: "国庆节（官方修订）", pricingMultiplier: 1.8 },
+        { date: `${closedYear}-10-12`, dayType: "makeup_workday", name: "再一次调休" }
+      ]
     },
     construction.accessToken
   );
@@ -3285,19 +3307,44 @@ async function main() {
     `作废必须记录原因与时间: ${JSON.stringify(voided.body.data).slice(0, 200)}`
   );
 
-  // 作废状态落库。
-  const persistedVoidStatus = readScalar(
-    `SELECT \`status\` FROM \`rental_business_calendars\` WHERE \`tenantId\`='${construction.tenant.tenantId}' AND \`year\`=${voidYear} AND \`version\`='${voidDraftVersion}';`
+  // 作废状态落库，且作废三要素（原因/操作人/时间）都要落库——只查 status 会放过
+  // 「operator 未传 → voidedBy 为 NULL」「写映射漏接 → 重启后原因/时间全空」这类审计丢失。
+  const persistedVoid = readRow(
+    `SELECT \`status\`, \`voidReason\`, \`voidedBy\`, \`voidedAt\` FROM \`rental_business_calendars\` WHERE \`tenantId\`='${construction.tenant.tenantId}' AND \`year\`=${voidYear} AND \`version\`='${voidDraftVersion}';`
   );
-  assert.equal(persistedVoidStatus, "void", `作废状态必须落库: ${persistedVoidStatus}`);
+  assert.equal(persistedVoid.status, "void", `作废状态必须落库: ${persistedVoid.status}`);
+  assert.equal(persistedVoid.voidReason, "录错年度，弃用该草稿", `作废原因必须落库: ${persistedVoid.voidReason}`);
+  assert.ok(persistedVoid.voidedBy && persistedVoid.voidedBy !== "NULL", `作废操作人必须落库: ${persistedVoid.voidedBy}`);
+  assert.ok(persistedVoid.voidedAt && persistedVoid.voidedAt !== "NULL", `作废时间必须落库: ${persistedVoid.voidedAt}`);
 
-  // 作废后编辑视图不再返回该草稿：其人工覆盖不应仍生效（回落到周模板）。
+  // 作废后编辑视图不再返回该草稿：该日期应**精确**回落到周模板（2031-05-01 是周四 → workday/1/week_rule）。
+  // 只用「不是 tenant_override」的负向断言会放过「source 改回 week_rule 但仍留着运营调的 1.5 系数」。
   const afterVoid = await request("GET", `/api/rental/v1/calendars/${voidYear}`, null, construction.accessToken);
   assert.equal(afterVoid.status, 200, `作废后读日历失败: ${afterVoid.status}`);
-  assert.ok(
-    !afterVoid.body.data.days.some((d) => d.date === `${voidYear}-05-01` && d.source === "tenant_override"),
-    `作废草稿后其人工覆盖不应仍生效: ${JSON.stringify(afterVoid.body.data.days.find((d) => d.date === `${voidYear}-05-01`))}`
+  const afterVoidDay = afterVoid.body.data.days.find((d) => d.date === `${voidYear}-05-01`);
+  assert.ok(afterVoidDay, "作废后该日期仍应存在（回落周模板而非消失）");
+  assert.equal(afterVoidDay.source, "week_rule", `作废后该日期来源应回落周模板: ${afterVoidDay.source}`);
+  assert.equal(afterVoidDay.dayType, "workday", `2031-05-01 是周四，应回落 workday: ${afterVoidDay.dayType}`);
+  assert.equal(afterVoidDay.pricingMultiplier, 1, `作废后不得残留人工覆盖的 1.5 系数: ${afterVoidDay.pricingMultiplier}`);
+
+  // 作废后再编辑该年度**不得复活**那条 void 行：版本号分配要跳过已占用（含 void）的号，
+  // 否则 upsert 撞号会把 void 行原地改回 draft、作废三要素与审计一并写 NULL（需求 4.5.7 禁止原地改回）。
+  const afterVoidEdit = await request(
+    "PUT",
+    `/api/rental/v1/calendars/${voidYear}/days/${voidYear}-06-01`,
+    { date: `${voidYear}-06-01`, dayType: "tenant_special", name: "作废后新草稿", pricingMultiplier: 1.2, closed: false, overrideReason: "作废后继续编辑" },
+    construction.accessToken
   );
+  assert.equal(afterVoidEdit.status, 200, `作废后编辑应成功: ${afterVoidEdit.status} ${JSON.stringify(afterVoidEdit.body).slice(0, 200)}`);
+  const voidRowStillVoid = readRow(
+    `SELECT \`status\`, \`voidReason\` FROM \`rental_business_calendars\` WHERE \`tenantId\`='${construction.tenant.tenantId}' AND \`year\`=${voidYear} AND \`version\`='${voidDraftVersion}';`
+  );
+  assert.equal(voidRowStillVoid.status, "void", `作废行不得被后续编辑复活成草稿: ${voidRowStillVoid.status}`);
+  assert.equal(voidRowStillVoid.voidReason, "录错年度，弃用该草稿", `作废行的作废原因不得被抹掉: ${voidRowStillVoid.voidReason}`);
+  const voidYearVersions = readScalar(
+    `SELECT COUNT(*) FROM \`rental_business_calendars\` WHERE \`tenantId\`='${construction.tenant.tenantId}' AND \`year\`=${voidYear};`
+  );
+  assert.ok(Number(voidYearVersions) >= 2, `作废后编辑应新增版本而非复用 void 版本: ${voidYearVersions}`);
 
   // 已作废版本不能再次作废（非草稿一律拒绝，与已发布/已被替代同一守卫）。
   const revoid = await request(
@@ -3307,7 +3354,7 @@ async function main() {
     construction.accessToken
   );
   assert.equal(revoid.status, 409, `已作废版本不得再次作废: ${revoid.status}`);
-  ok("年度日历草稿作废：草稿可作废并记录原因/时间/操作人且落库、已发布拒绝作废、原因必填、作废后编辑视图回落周模板、重复作废被拒");
+  ok("年度日历草稿作废：草稿可作废并记录原因/操作人/时间且逐列落库、已发布拒绝作废、原因必填、作废后编辑视图回落周模板、作废后再编辑不复活 void 行、重复作废被拒");
 
   console.log("== 15L. PRICE-02 官方导入整年替换 + 每周时段校验（Codex #4/#8） ==");
   // #4：官方导入是整年替换——旧版本里本次未再出现的官方节假日必须回落周模板默认，不残留。
@@ -3331,8 +3378,41 @@ async function main() {
   assert.equal(importOneHoliday.status, 201, `重导失败: ${importOneHoliday.status} ${JSON.stringify(importOneHoliday.body).slice(0, 200)}`);
   const afterSecondImport = (await request("GET", `/api/rental/v1/calendars/${impYear}`, null, construction.accessToken)).body.data;
   assert.equal(afterSecondImport.days.find((d) => d.date === `${impYear}-10-01`)?.dayType, "statutory_holiday", "重导后 10-01 仍应为法定节假日");
-  assert.notEqual(afterSecondImport.days.find((d) => d.date === `${impYear}-10-02`)?.dayType, "statutory_holiday", "重导删除的 10-02 必须回落周模板、不再是节假日");
-  assert.notEqual(afterSecondImport.days.find((d) => d.date === `${impYear}-10-02`)?.source, "official_cn", "重导删除的 10-02 来源不应仍是官方");
+  // 重导删除的 10-02 必须**精确**回落到周模板默认（2033-10-02 是周日 → weekend/week_rule/1.1）。
+  // 用 equal 而非 notEqual：notEqual 会放过「整行被删」「dayType 回落但系数仍留 1.5」等部分回落。
+  const revertedDay = afterSecondImport.days.find((d) => d.date === `${impYear}-10-02`);
+  assert.ok(revertedDay, "重导后 10-02 仍应存在（回落周模板而非被删）");
+  assert.equal(revertedDay.dayType, "weekend", `10-02 应回落为 weekend，实际 ${revertedDay.dayType}`);
+  assert.equal(revertedDay.source, "week_rule", `10-02 来源应回落为 week_rule，实际 ${revertedDay.source}`);
+  assert.equal(revertedDay.pricingMultiplier, 1.1, `10-02 系数应回落为周末 1.1，实际 ${revertedDay.pricingMultiplier}`);
+  // 官方撤回某日期后，该日期上**人工覆盖的 overriddenFrom** 也必须回落到周模板：
+  // 它的语义是「移除覆盖后恢复到哪里」，停在上一版官方值会让撤销覆盖恢复出一个
+  // 当前官方版本里已不存在的法定节假日，并按 holidayMultiplier 计价（需求 4.5.3）。
+  const withdrawnDate = `${impYear}-10-01`;
+  const overrideOnWithdrawn = await request("PUT", `/api/rental/v1/calendars/${impYear}/days/${withdrawnDate}`, {
+    date: withdrawnDate, dayType: "tenant_special", name: "店庆特惠", pricingMultiplier: 2, closed: false, overrideReason: "店庆"
+  }, construction.accessToken);
+  assert.equal(overrideOnWithdrawn.status, 200, `建覆盖失败: ${overrideOnWithdrawn.status}`);
+  assert.equal(overrideOnWithdrawn.body.data.overriddenFrom?.pricingMultiplier, 1.5, `覆盖前原值应是本次官方的 1.5: ${JSON.stringify(overrideOnWithdrawn.body.data.overriddenFrom)}`);
+  const importWithdrawing = await request("POST", "/api/rental/v1/calendars/import", {
+    year: impYear, region: "CN", sourceName: "E2E 官方撤回来源C", sourceUrl: "https://example.invalid/e2e-replace-c",
+    sourcePublishedAt: new Date(Date.now() - 86400000).toISOString(),
+    // 本次官方数据不再包含 10-01（官方撤回该节假日），只留一个无关日期。
+    days: [{ date: `${impYear}-12-25`, dayType: "makeup_workday", name: "年末调休" }]
+  }, construction.accessToken);
+  assert.equal(importWithdrawing.status, 201, `撤回式导入失败: ${importWithdrawing.status} ${JSON.stringify(importWithdrawing.body).slice(0, 200)}`);
+  const withdrawnKept = importWithdrawing.body.data.days.find((d) => d.date === withdrawnDate);
+  assert.equal(withdrawnKept.source, "tenant_override", "人工覆盖本身仍须保留");
+  assert.equal(withdrawnKept.pricingMultiplier, 2, `人工覆盖的系数须保留为 2: ${withdrawnKept.pricingMultiplier}`);
+  assert.equal(withdrawnKept.overriddenFrom?.source, "week_rule", `官方撤回后 overriddenFrom 应回落周模板: ${JSON.stringify(withdrawnKept.overriddenFrom)}`);
+  // 2033-10-01 是周六 → 周模板为 weekend / 1.1。
+  assert.equal(withdrawnKept.overriddenFrom?.dayType, "weekend", `overriddenFrom 类型应为周末: ${withdrawnKept.overriddenFrom?.dayType}`);
+  assert.equal(withdrawnKept.overriddenFrom?.pricingMultiplier, 1.1, `overriddenFrom 系数应为周末 1.1，实际 ${withdrawnKept.overriddenFrom?.pricingMultiplier}`);
+  const removeWithdrawn = await request("DELETE", `/api/rental/v1/calendars/${impYear}/days/${withdrawnDate}`, { overrideReason: "店庆结束" }, construction.accessToken);
+  assert.equal(removeWithdrawn.status, 200, `移除覆盖失败: ${removeWithdrawn.status}`);
+  assert.equal(removeWithdrawn.body.data.source, "week_rule", `官方已撤回该日期，移除覆盖须回落周模板而不是恢复出已作废的节假日: ${removeWithdrawn.body.data.source}`);
+  assert.equal(removeWithdrawn.body.data.dayType, "weekend", `移除覆盖应回落为周末，实际 ${removeWithdrawn.body.data.dayType}`);
+  assert.equal(removeWithdrawn.body.data.pricingMultiplier, 1.1, `移除覆盖后系数应为周末 1.1，实际 ${removeWithdrawn.body.data.pricingMultiplier}`);
   // #8：每周营业时段模板按下标定位星期，必须完整 7 项或留空；时段本身还要校验起止与落域。
   const badLength = await putSettings({ weeklyHours: Array.from({ length: 5 }, () => weeklyWindow) });
   assert.equal(badLength.status, 400, `不足 7 项的每周模板必须 400（否则星期错位）: ${badLength.status}`);
@@ -3342,18 +3422,31 @@ async function main() {
   assert.equal(badContain.status, 400, `领取时段超出营业时段必须 400: ${badContain.status}`);
   const goodHours = await putSettings({ weeklyHours: Array.from({ length: 7 }, () => ({ windows: [{ start: "09:00", end: "18:00" }], pickup: [{ start: "10:00", end: "12:00" }] })) });
   assert.equal(goodHours.status, 200, `合法的每周时段应放行: ${goodHours.status} ${JSON.stringify(goodHours.body).slice(0, 200)}`);
-  await putSettings({ weeklyHours: [] });
+  // 还原每周模板。必须断言还原成功：这条 PUT 一旦失败（例如以后加了「已配置不允许清空」校验），
+  // 该空间会残留全周 09:00-18:00 时段，后续新增的 construction 报价用例会拿到莫名的 409。
+  const restoreWeekly = await putSettings({ weeklyHours: [] });
+  assert.equal(restoreWeekly.status, 200, `还原每周时段必须成功，否则污染后续用例: ${restoreWeekly.status}`);
   // #6：历史版本可查询（含逐日、发布差异与覆盖审计）。2027 经过多轮编辑→发布，应有多个版本。
   const versions2027 = await request("GET", "/api/rental/v1/calendars/2027/versions", null, construction.accessToken);
   assert.equal(versions2027.status, 200, `版本列表失败: ${versions2027.status}`);
   assert.ok(Array.isArray(versions2027.body.data) && versions2027.body.data.length >= 2, `2027 应有多个历史版本: ${versions2027.body.data?.length}`);
   const published2027Detail = versions2027.body.data.find((v) => v.status === "published");
   assert.ok(published2027Detail, "2027 版本列表应含已发布版本");
-  assert.ok(versions2027.body.data.some((v) => v.status === "superseded"), "2027 应有已被替代的历史版本");
+  const superseded2027 = versions2027.body.data.find((v) => v.status === "superseded");
+  assert.ok(superseded2027, "2027 应有已被替代的历史版本");
   const versionDetail = await request("GET", `/api/rental/v1/calendars/2027/versions/${published2027Detail.version}`, null, construction.accessToken);
   assert.equal(versionDetail.status, 200, `版本详情失败: ${versionDetail.status}`);
   assert.ok(Array.isArray(versionDetail.body.data.days) && versionDetail.body.data.days.length > 0, "版本详情应含逐日");
-  ok("官方导入整年替换（删除的节假日回落周模板）+ 每周时段模板校验（非 7 项/起止倒挂/超出营业时段均 400，合法放行）+ 历史版本可查询（多版本、含已被替代、详情带逐日）");
+  assert.equal(versionDetail.body.data.version, published2027Detail.version, `版本详情必须返回被请求的那一版: ${versionDetail.body.data.version}`);
+  // **已被替代版本**的详情也必须能取到，且返回的就是它自己——需求 4.5.7「已被替代版本必须保留
+  // 供历史报价追溯」的执行点。只取已发布版本的详情，会放过「忽略 version 参数、一律返回当前
+  // 已发布版本」这种实现（历史报价的 calendarVersion 指向旧版本，页面却给出最新逐日）。
+  const supersededDetail = await request("GET", `/api/rental/v1/calendars/2027/versions/${superseded2027.version}`, null, construction.accessToken);
+  assert.equal(supersededDetail.status, 200, `已被替代版本详情失败: ${supersededDetail.status}`);
+  assert.equal(supersededDetail.body.data.version, superseded2027.version, `必须返回被请求的历史版本: ${supersededDetail.body.data.version}`);
+  assert.equal(supersededDetail.body.data.status, "superseded", `历史版本状态应为 superseded: ${supersededDetail.body.data.status}`);
+  assert.ok(supersededDetail.body.data.days.length > 0, "历史版本详情应含逐日");
+  ok("官方导入整年替换（删除的节假日精确回落周模板）+ 每周时段模板校验（非 7 项/起止倒挂/超出营业时段均 400，合法放行且还原成功）+ 历史版本可查询（已发布与已被替代各自返回自身版本与逐日）");
 
   console.log("== 16. 双租户并发隔离 ==");
   const rounds = 12;
@@ -3386,7 +3479,22 @@ async function main() {
   assert.ok(restored, "重启后订单丢失");
   assert.equal(restored.status, "completed");
   assert.ok(readCount("SELECT COUNT(*) FROM `rental_core_state_snapshots` WHERE `tenantId`='tenant_001';") >= 1, "租户聚合快照缺失");
-  ok(`重启后订单 ${restored.orderNo} 恢复为 completed，快照在库`);
+  // 报价的「未来年度官方日历尚未确认」提示必须能从库读回（需求 4.5.2/4.5.6）。
+  // 重启前的断言都拿的是同一个内存对象，把 toQuote 的读映射写成常量空数组也照样全绿；
+  // 只有重启后重新装载才验证得到 DB→内存 这一段。重启会换 AUTH_TOKEN_SECRET，故须重登。
+  const constructionAfterRestart = await login("e2e_construction", "admin", construction.password);
+  const warnedQuoteAfterRestart = await request(
+    "GET",
+    `/api/rental/v1/quotes/${futureQuote.body.data.id}`,
+    null,
+    constructionAfterRestart.accessToken
+  );
+  assert.equal(warnedQuoteAfterRestart.status, 200, `重启后读回报价失败: ${warnedQuoteAfterRestart.status} ${JSON.stringify(warnedQuoteAfterRestart.body).slice(0, 160)}`);
+  assert.ok(
+    (warnedQuoteAfterRestart.body.data.calendarWarnings ?? []).some((w) => w.includes("2028")),
+    `重启后报价必须仍带官方日历未确认提示（读映射被守住）: ${JSON.stringify(warnedQuoteAfterRestart.body.data.calendarWarnings)}`
+  );
+  ok(`重启后订单 ${restored.orderNo} 恢复为 completed，快照在库，报价的官方日历未确认提示随读映射恢复`);
 
   console.log("== 18. RC-01 核心事实以数据库为事实源 ==");
   // 阶段 3 后订单、行、预占、分配和检查记录直接写规范化表，聚合快照不再承载事实，
@@ -6109,7 +6217,16 @@ async function main() {
     days: [{ date: "2034-10-01", dayType: "statutory_holiday", name: "国庆节", pricingMultiplier: 1.5 }]
   }, calPubToken);
   assert.equal(publisherImport.status, 403, `只有发布权限的账号不得编辑（导入）: ${publisherImport.status} ${JSON.stringify(publisherImport.body).slice(0, 200)}`);
-  // PLACEHOLDER-61C
+  // 正向控制：必须证明该账号**确实持有** calendar:publish，否则一个「什么日历权限都没有」的
+  // 账号同样会 403，这条 403 就成了装饰品（replaceRolePermissions 对目录里不存在的权限码是
+  // 静默丢弃 + 201，改名/删码都不会报错）。用它发布 2034 草稿：管理员先建草稿再由它发布。
+  const pubYearDraft = await request("PUT", "/api/rental/v1/calendars/2034/days/2034-05-01", {
+    date: "2034-05-01", dayType: "tenant_special", name: "发布人用例草稿", pricingMultiplier: 1.3, closed: false, overrideReason: "发布权限正向控制"
+  }, calAdmin.accessToken);
+  assert.equal(pubYearDraft.status, 200, `管理员建 2034 草稿失败: ${pubYearDraft.status} ${JSON.stringify(pubYearDraft.body).slice(0, 200)}`);
+  const publisherPublish = await request("POST", "/api/rental/v1/calendars/2034/publish", { changeReason: "发布人发布 2034" }, calPubToken);
+  assert.equal(publisherPublish.status, 201, `持有 calendar:publish 的账号必须能发布（否则上面的 403 无区分力）: ${publisherPublish.status} ${JSON.stringify(publisherPublish.body).slice(0, 200)}`);
+  assert.equal(publisherPublish.body.data.status, "published", `发布后状态应为 published: ${publisherPublish.body.data.status}`);
   // #3：普通运营人员（order:view）只看已发布日历，看不到未发布的草稿调整。
   // 61b 已发布 2032；此处 demo 管理员对 2032 存一个未发布的草稿调整。
   const draftEdit = await request("PUT", "/api/rental/v1/calendars/2032/days/2032-07-01", {
@@ -6141,7 +6258,23 @@ async function main() {
   // #6：历史版本/审计查询属管理视图，只读运营不得访问（版本详情含未发布草稿内容）。
   const viewerVersions = await request("GET", "/api/rental/v1/calendars/2032/versions", null, calViewToken);
   assert.equal(viewerVersions.status, 403, `只读运营不得查看版本历史（含草稿内容）: ${viewerVersions.status}`);
-  ok("发布权限不含编辑（发布人员导入 403）+ 普通运营只见已发布日历（看不到未发布草稿、编辑者能看到，证明是视图口径差异）+ 版本历史查询属管理视图（只读运营 403）");
+  // Codex 自审 P0/P1：鉴权路径判定必须与 Express 的路由匹配语义一致（大小写不敏感、容忍尾斜杠），
+  // 否则大小写/尾斜杠变体会落到 requiredPermissions 的 `return []` 被当成无需权限而放行。
+  // (a) 提权面：只读运营用大写 /PLATFORM 建角色必须被拒（这条曾可 201 完成任意提权）。
+  const bypassRole = await request("POST", "/api/PLATFORM/roles", { code: `E2E-BYPASS-${Date.now().toString(36)}`, name: "越权", scope: "store", dataScope: "own", enabledBusinessScopes: ["rental"], permissions: ["store-rental:price:manage"], isActive: true }, calViewToken);
+  assert.equal(bypassRole.status, 403, `大写路径不得绕过平台鉴权（提权面）: ${bypassRole.status} ${JSON.stringify(bypassRole.body).slice(0, 160)}`);
+  // (b) 大写前缀的经营接口同样不得整体放行。
+  const bypassPrefix = await request("POST", "/API/rental/v1/calendars/2035/publish", { changeReason: "x" }, calViewToken);
+  assert.equal(bypassPrefix.status, 403, `大写 /API 前缀不得绕过鉴权: ${bypassPrefix.status}`);
+  // (c) 发布鉴权不得被尾斜杠/大写绕过：仅编辑权限的账号走这些变体仍须 403。
+  const editorPublishSlash = await request("POST", "/api/rental/v1/calendars/2032/publish/", { changeReason: "尾斜杠绕过" }, editorToken);
+  assert.equal(editorPublishSlash.status, 403, `尾斜杠不得让编辑账号绕过发布鉴权: ${editorPublishSlash.status}`);
+  const editorPublishUpper = await request("POST", "/api/rental/v1/calendars/2032/PUBLISH", { changeReason: "大写绕过" }, editorToken);
+  assert.equal(editorPublishUpper.status, 403, `大写 PUBLISH 不得让编辑账号绕过发布鉴权: ${editorPublishUpper.status}`);
+  // (d) 版本历史管理视图不得被大写绕过给只读运营。
+  const viewerVersionsUpper = await request("GET", "/api/rental/v1/calendars/2032/VERSIONS", null, calViewToken);
+  assert.equal(viewerVersionsUpper.status, 403, `大写 VERSIONS 不得让只读运营读到草稿版本: ${viewerVersionsUpper.status}`);
+  ok("发布权限不含编辑（发布人员导入 403）+ 普通运营只见已发布日历（看不到未发布草稿、编辑者能看到）+ 版本历史属管理视图 + 鉴权路径判定对大小写/尾斜杠不可绕过（提权面、发布、版本历史均 403）");
   console.log("== 62. 无空间成员关系的账号不得访问经营域 ==");
   // 另一处 fail-open：空间检查曾附加 `accessContext.hasWorkspaces` 条件，
   // 于是「一个空间都没有的账号」跳过检查，随后仓储层的 resolveScopeWorkspaceId

@@ -167,7 +167,11 @@ export function RentalGovernancePage() {
       });
       message.success("租户经营设置已保存");
     },
-    onError: () => message.error("设置超出当前经营品类允许范围"),
+    onError: (error) =>
+      message.error(
+        (error as { response?: { data?: { message?: string } } })?.response?.data?.message ??
+          "保存租户设置失败，请检查填写内容",
+      ),
   });
   const saveRule = useMutation({
     mutationFn: (
@@ -452,7 +456,13 @@ export function RentalGovernancePage() {
           <Form<TenantRentalBusinessSettings>
             form={settingsForm}
             layout="vertical"
-            onFinish={(values) => saveSettings.mutate(values)}
+            onFinish={() =>
+              // 提交整个 store 而非仅当前 tab 已注册的字段：设置分 tab 条件渲染，未挂载
+              // 分组（如另一 tab 的 calendar/notifications）以及无 Form.Item 的字段（timeZone、
+              // weeklyHours）都只在 store 里。只交已注册字段会让 PUT 缺组而整体 400，
+              // 还会把时区与每周时段静默抹掉。getFieldsValue(true) 取回随 setFieldsValue 载入的全量。
+              saveSettings.mutate(settingsForm.getFieldsValue(true))
+            }
           >
             {tab === "category" && (
               <Space direction="vertical" size={16} style={{ width: "100%" }}>
