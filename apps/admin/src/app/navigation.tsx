@@ -51,7 +51,7 @@ export const APP_ROUTES = {
   discounts: { path: "/rental/discounts", label: "优惠方案", permission: "store-rental:price:manage", audience: "tenant", icon: <TagsOutlined />, menu: true },
   coupons: { path: "/rental/coupons", label: "优惠券", permission: "store-rental:price:manage", audience: "tenant", icon: <TagsOutlined />, menu: true },
   services: { path: "/rental/services", label: "增值服务", permission: "store-rental:price:manage", audience: "tenant", icon: <SafetyCertificateOutlined />, menu: true },
-  rentalSettings: { path: "/rental/settings", label: "品类与业务规则", permission: "store-rental:price:manage", legacyPermissions: ["store-rental:calendar:edit", "store-rental:calendar:publish", "store-rental:rules:manage"], audience: "tenant", icon: <SettingOutlined />, menu: true },
+  rentalSettings: { path: "/rental/settings", label: "品类与业务规则", permission: "store-rental:price:manage", legacyPermissions: ["store-rental:calendar:edit", "store-rental:calendar:publish", "store-rental:calendar:view-history", "store-rental:rules:manage"], audience: "tenant", icon: <SettingOutlined />, menu: true },
   customers: { path: "/customers", label: "客户、会员与企业", permission: "store-rental:member:view", audience: "tenant", icon: <TeamOutlined />, menu: true },
   platformTenants: { path: "/platform/tenants", label: "SaaS 租户", permission: "system:tenant:manage", audience: "saas", icon: <ShopOutlined />, menu: true },
   platformUsers: { path: "/platform/users", label: "组织与权限", permission: "system:user:manage", audience: "saas", icon: <TeamOutlined />, menu: true },

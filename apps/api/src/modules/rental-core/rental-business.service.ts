@@ -13,6 +13,7 @@ import {
   type RentalCalendarOverrideAudit,
   type RentalCalendarPublishDiff,
   type RentalCalendarPublishPreview,
+  type RestoreRentalCalendarVersionRequest,
   type RentalCalendarPublishPreviewDate,
   type RentalCalendarPublishPreviewOrder,
   type RentalCalendarVersionSummary,
@@ -109,6 +110,12 @@ const stamp = () => new Date().toISOString();
 const uid = (prefix: string) => `${prefix}_${randomUUID().slice(0, 8)}`;
 const roundMoney = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 const dayMs = 24 * 60 * 60 * 1000;
+
+/**
+ * 配送类履约方式。这些方式的时点要按营业时段里的 `delivery` 判定（需求 4.5.1 把
+ * 配送可用时段与领取/归还并列声明）；早前 `hours.delivery` 声明了却没有任何路径消费它。
+ */
+const DELIVERY_FULFILLMENT_MODES = new Set<string>(["delivery", "onsite_delivery"]);
 
 function versionAfter(current?: string) {
   if (!current) return "1.0";
@@ -858,6 +865,20 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     // hours 同理：抽屉尚无时段编辑，未提供即沿用被覆盖前的时段，避免一次改价清空已配营业时段。
     // 需要清空时应由带时段编辑的界面显式传空数组，而不是靠"不传"表达清空。
     const hours = input.hours !== undefined ? input.hours : replaced?.hours;
+    // 「限时营业」必须真的限时（需求 4.5.4：「只在指定时段提供指定履约能力」）。
+    // 早前允许保存成「limited 但任何层级都没有时段」，而运行时空时段表示"不限制"，
+    // 于是限时营业实际变成全天可用——配置期就自相矛盾，应在这里 fail-closed 而不是
+    // 等到报价时静默放行。日级时段与每周模板任一有效即可。
+    if (businessStatus === "limited") {
+      const weekly = context.settings.calendar.weeklyHours;
+      const weekday = new Date(`${input.date}T00:00:00.000Z`).getUTCDay();
+      const effective = hours?.windows?.length ? hours : weekly?.[weekday];
+      if (!effective?.windows?.length) {
+        throw new BadRequestException(
+          "限时营业必须配置营业时段：可在本日期上直接配时段，或先在经营设置里配置每周默认营业时段"
+        );
+      }
+    }
     // 保留被覆盖前的原始值（需求 4.5.3）。两个用途：日期详情要展示被覆盖的原始值；
     // 移除覆盖时要恢复到下一优先级来源，而不是变成"没有来源的空白日"——
     // 若不留原始值，移除时只能凭周模板重算，官方日历里那天的节日名与类型就永久丢了。
@@ -1050,6 +1071,54 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
    *
    * 作废是单行状态变更，用 `upsertCalendar` 即可，不涉及发布那种"两行必须原子"的约束。
    */
+  /**
+   * 以某个历史版本的内容生成新草稿（需求 4.5.7：「恢复旧规则也必须以旧内容生成新的
+   * 发布版本，不得删除新版本或把旧版本原地改回」）。
+   *
+   * 只产生草稿：后续仍走发布前预检 → 填写变更原因 → 发布这条正路。被恢复的历史版本
+   * 与当前已发布版本都不做任何改动——这正是「不得原地改回」的执行点。
+   */
+  async restoreCalendarVersion(
+    tenantId: string,
+    context: BusinessContext,
+    year: number,
+    version: string,
+    input: RestoreRentalCalendarVersionRequest
+  ) {
+    const state = this.state(tenantId, context);
+    const source = state.calendars.find((item) => item.year === year && item.version === version);
+    if (!source) throw new NotFoundException("指定的年度日历版本不存在");
+    const reason = input?.reason?.trim();
+    if (!reason) throw new BadRequestException("恢复历史版本必须填写原因");
+    const base = this.editableCalendar(tenantId, context, year);
+    if (base.version === version) {
+      throw new ConflictException("该版本就是当前正在编辑的版本，无需恢复");
+    }
+    const restored = structuredClone(source);
+    restored.status = "draft";
+    // 版本号跳过全部已占用号（含 void / superseded），否则 upsert 会原地改写历史行。
+    restored.version = this.nextCalendarVersion(
+      state.calendars.filter((item) => item.year === year),
+      base.version
+    );
+    restored.previousVersion = base.version;
+    restored.restoredFromVersion = version;
+    restored.restoreReason = reason;
+    // 新草稿从未发布过：不能继承被恢复版本的发布记录与差异，否则版本历史会把两次
+    // 完全不同的发布事件混在一起。
+    restored.publishedAt = undefined;
+    restored.publishedBy = undefined;
+    restored.supersededAt = undefined;
+    restored.changeReason = undefined;
+    restored.publishDiff = undefined;
+    restored.voidedAt = undefined;
+    restored.voidedBy = undefined;
+    restored.voidReason = undefined;
+    restored.importPreservedOverrides = undefined;
+    await this.writeCalendar(state, base, restored);
+    return restored;
+  }
+
   async voidCalendarVersion(
     tenantId: string,
     context: BusinessContext,
@@ -2469,10 +2538,19 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       if (hours) {
         const localTime = businessTimeOfDay(iso, timeZone);
         // 动作时段缺省沿用营业时段：多数门店的领取归还就是营业时间。
-        const actionWindows = action === "pickup" ? hours.pickup ?? hours.windows : hours.return ?? hours.windows;
+        //
+        // 配送类履约方式按 `hours.delivery` 判定（需求 4.5.1 把配送可用时段与领取/归还
+        // 并列声明）。早前 delivery 时段声明了却没有任何路径消费它，等于配了不生效。
+        const isDelivery = DELIVERY_FULFILLMENT_MODES.has(input.fulfillmentMode);
+        const actionWindows = isDelivery
+          ? hours.delivery ?? (action === "pickup" ? hours.pickup ?? hours.windows : hours.return ?? hours.windows)
+          : action === "pickup"
+            ? hours.pickup ?? hours.windows
+            : hours.return ?? hours.windows;
         if (!this.withinWindows(hours.windows, localTime) || !this.withinWindows(actionWindows, localTime)) {
           const shown = (actionWindows ?? []).map((w) => `${w.start}-${w.end}`).join("、") || "未配置";
-          throw new ConflictException(`${date} ${localTime} 不在${label}可用时段内（可用：${shown}）`);
+          const actionLabel = isDelivery ? `${label}（配送）` : label;
+          throw new ConflictException(`${date} ${localTime} 不在${actionLabel}可用时段内（可用：${shown}）`);
         }
       }
     };

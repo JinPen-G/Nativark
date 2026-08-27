@@ -3288,6 +3288,63 @@ async function main() {
   // 领取 10:00、归还 11:00 均在模板时段内 → 放行。
   const weeklyInside = await closedQuote(`${weeklyDate}T10:00:00+08:00`, `${weeklyReturnDate}T11:00:00+08:00`);
   assert.equal(weeklyInside.status, 201, `每周模板时段内领取归还必须放行: ${weeklyInside.status} ${JSON.stringify(weeklyInside.body).slice(0, 200)}`);
+  // 3) 「限时营业」必须真的限时（需求 4.5.4）。早前允许保存成 limited 但任何层级都没有
+  //    时段，而运行时空时段表示"不限制"，于是限时营业实际变成全天可用——配置期就该拒绝。
+  //    先清空每周模板：上面的 15h 用例把 7 天都配了时段，不清空就没有「任何层级都没时段」的场景。
+  const clearWeeklyForLimited = await putSettings({ weeklyHours: [] });
+  assert.equal(clearWeeklyForLimited.status, 200, `清空每周模板失败: ${clearWeeklyForLimited.status}`);
+  const limitedNoHoursDate = `${closedYear}-09-15`;
+  const limitedNoHours = await request("PUT", `/api/rental/v1/calendars/${closedYear}/days/${limitedNoHoursDate}`, {
+    date: limitedNoHoursDate, dayType: "tenant_special", name: "限时但无时段", pricingMultiplier: 1,
+    closed: false, businessStatus: "limited", overrideReason: "限时营业缺时段用例"
+  }, construction.accessToken);
+  assert.equal(limitedNoHours.status, 400, `限时营业但任何层级都没有时段必须 400: ${limitedNoHours.status} ${JSON.stringify(limitedNoHours.body).slice(0, 220)}`);
+  assert.match(JSON.stringify(limitedNoHours.body), /时段/u, `拒绝原因应指向时段: ${JSON.stringify(limitedNoHours.body).slice(0, 200)}`);
+  // 日期上自带时段时必须放行。
+  const limitedWithHours = await request("PUT", `/api/rental/v1/calendars/${closedYear}/days/${limitedNoHoursDate}`, {
+    date: limitedNoHoursDate, dayType: "tenant_special", name: "限时营业", pricingMultiplier: 1,
+    closed: false, businessStatus: "limited", hours: { windows: [{ start: "10:00", end: "16:00" }] },
+    overrideReason: "限时营业带时段用例"
+  }, construction.accessToken);
+  assert.equal(limitedWithHours.status, 200, `限时营业配了时段应放行: ${limitedWithHours.status} ${JSON.stringify(limitedWithHours.body).slice(0, 220)}`);
+  // 每周模板兜底也算"有时段"：先配模板，再存一个不带日级时段的限时营业日。
+  const weeklyForLimited = await putSettings({ weeklyHours: Array.from({ length: 7 }, () => weeklyWindow) });
+  assert.equal(weeklyForLimited.status, 200, `为限时营业配置每周模板失败: ${weeklyForLimited.status}`);
+  const limitedViaWeekly = await request("PUT", `/api/rental/v1/calendars/${closedYear}/days/${closedYear}-09-16`, {
+    date: `${closedYear}-09-16`, dayType: "tenant_special", name: "限时（靠周模板）", pricingMultiplier: 1,
+    closed: false, businessStatus: "limited", overrideReason: "限时靠周模板兜底"
+  }, construction.accessToken);
+  assert.equal(limitedViaWeekly.status, 200, `每周模板有时段时限时营业应放行: ${limitedViaWeekly.status} ${JSON.stringify(limitedViaWeekly.body).slice(0, 220)}`);
+
+  // 4) 配送时段必须被强制（需求 4.5.1 把配送可用时段与领取/归还并列声明）。
+  //    早前 hours.delivery 声明了却没有任何路径消费它，等于配了不生效。
+  const deliveryDate = `${closedYear}-09-20`;
+  const deliverySet = await request("PUT", `/api/rental/v1/calendars/${closedYear}/days/${deliveryDate}`, {
+    date: deliveryDate, dayType: "tenant_special", name: "配送时段用例", pricingMultiplier: 1, closed: false,
+    businessStatus: "open",
+    // 营业 09-18，取还全天可用，但配送只在 13:00-15:00。
+    hours: { windows: [{ start: "09:00", end: "18:00" }], delivery: [{ start: "13:00", end: "15:00" }] },
+    overrideReason: "配送时段用例"
+  }, construction.accessToken);
+  assert.equal(deliverySet.status, 200, `配置配送时段失败: ${deliverySet.status} ${JSON.stringify(deliverySet.body).slice(0, 220)}`);
+  // 报价只认已发布日历（需求 4.5.7），因此把含配送时段的草稿发布后再报价，否则配送窗口在草稿里、
+  // 报价看的是旧的已发布版本，测不到配送时段生效。
+  const deliveryPublish = await request("POST", `/api/rental/v1/calendars/${closedYear}/publish`, { changeReason: "发布配送时段用例" }, construction.accessToken);
+  assert.equal(deliveryPublish.status, 201, `发布配送时段草稿失败: ${deliveryPublish.status} ${JSON.stringify(deliveryPublish.body).slice(0, 220)}`);
+  const deliveryQuote = (startAt, endAt) =>
+    request("POST", "/api/rental/v1/quotes", {
+      customerType: "corporate", fulfillmentMode: "delivery", fulfillmentLocationId: constructionLocation.id,
+      startAt, endAt, pricingPlanId: pricePlan.body.data.id, lines: [{ itemGroupId: priceGroupId, quantity: 1 }]
+    }, construction.accessToken);
+  const deliveryOutside = await deliveryQuote(`${deliveryDate}T10:00:00+08:00`, `${closedYear}-09-22T14:00:00+08:00`);
+  assert.equal(deliveryOutside.status, 409, `配送时段外必须拒绝（营业时段内但不在配送时段内）: ${deliveryOutside.status} ${JSON.stringify(deliveryOutside.body).slice(0, 220)}`);
+  assert.match(JSON.stringify(deliveryOutside.body), /配送/u, `拒绝原因应指明配送受限: ${JSON.stringify(deliveryOutside.body).slice(0, 220)}`);
+  const deliveryInside = await deliveryQuote(`${deliveryDate}T14:00:00+08:00`, `${closedYear}-09-22T14:00:00+08:00`);
+  assert.equal(deliveryInside.status, 201, `配送时段内必须放行: ${deliveryInside.status} ${JSON.stringify(deliveryInside.body).slice(0, 220)}`);
+  // 同一时点用取还方式则不受配送时段限制——证明是按履约方式分流，不是把所有人都收窄。
+  const pickupSameTime = await closedQuote(`${deliveryDate}T10:00:00+08:00`, `${closedYear}-09-22T14:00:00+08:00`);
+  assert.equal(pickupSameTime.status, 201, `取还方式不应受配送时段限制: ${pickupSameTime.status} ${JSON.stringify(pickupSameTime.body).slice(0, 220)}`);
+
   // 还原每周模板，避免污染后续用例（未声明 = 不限制时点）。
   const weeklyCleared = await putSettings({ weeklyHours: [] });
   assert.equal(weeklyCleared.status, 200, `清除每周默认营业时段失败: ${JSON.stringify(weeklyCleared.body).slice(0, 300)}`);
@@ -3295,7 +3352,9 @@ async function main() {
   assert.equal(weeklyAfterClear.status, 201, `清除每周模板后应恢复不限制时点: ${weeklyAfterClear.status} ${JSON.stringify(weeklyAfterClear.body).slice(0, 200)}`);
   ok(
     "营业时段模型生效：限时/正常营业按营业时段与领取、归还动作时段分别校验时点，" +
-      "每周默认模板对无覆盖无官方条目的普通日期同样兜底，未声明时段则不限制"
+      "每周默认模板对无覆盖无官方条目的普通日期同样兜底，未声明时段则不限制；" +
+      "限时营业在任何层级都没有时段时配置期即 400（日级或每周模板任一有效即放行）；" +
+      "配送履约按 hours.delivery 判定且取还方式不受其限制"
   );
 
   console.log("== 15i. PRICE-02 未来年度官方日历未确认时报价提示 ==");
@@ -3791,7 +3850,118 @@ async function main() {
     snapVersion.body.data.id,
     `已引用该版本的历史日历必须原样保留: ${historyIntact.sourceVersionId}`
   );
-  ok("官方来源版本：来源信息按登记时快照（主档改名/改址不改写历史版本，空间引用也用快照）+ 序号原子递增（12 连续版本 1..12、列表按数值序号倒序使 1.11/1.10 排在 1.9 之前）+ 并发登记只有 201/409 且序号不重复、落库条数与成功数一致 + 停用来源后空间列表过滤且新应用 409，而已引用的历史日历不受影响");
+  // 引用关系必须**落库**：领域对象有值但仓储漏接线时，重启后追溯不出这一年的官方
+  // 安排来自哪一版（本仓库历史上多次踩过「schema 有列、落库永远 NULL」）。
+  const persistedSourceRef = readRow(
+    `SELECT \`sourceVersionId\`, \`sourceVersion\` FROM \`rental_business_calendars\` WHERE \`tenantId\`='${construction.tenant.tenantId}' AND \`year\`=${snapYear} ORDER BY \`revision\` DESC LIMIT 1;`
+  );
+  assert.equal(
+    persistedSourceRef.sourceVersionId,
+    snapVersion.body.data.id,
+    `引用的来源版本 id 必须落库: ${persistedSourceRef.sourceVersionId}`
+  );
+  assert.equal(
+    persistedSourceRef.sourceVersion,
+    snapVersion.body.data.version,
+    `引用的来源版本号必须落库: ${persistedSourceRef.sourceVersion}`
+  );
+  ok("官方来源版本：来源信息按登记时快照（主档改名/改址不改写历史版本，空间引用也用快照）+ 序号原子递增（12 连续版本 1..12、列表按数值序号倒序使 1.11/1.10 排在 1.9 之前）+ 并发登记只有 201/409 且序号不重复、落库条数与成功数一致 + 停用来源后空间列表过滤且新应用 409，而已引用的历史日历不受影响且引用关系落库");
+
+  console.log("== 15p. PRICE-02 历史版本恢复必须生成新草稿，不得原地改回（Codex #3） ==");
+  // 需求 4.5.7：「恢复旧规则也必须以旧内容生成新的发布版本，不得删除新版本或把旧版本原地改回」。
+  const restYear = 2042;
+  const restDate = `${restYear}-04-05`;
+  const restSeed = await request("PUT", `/api/rental/v1/calendars/${restYear}/days/${restDate}`, {
+    date: restDate, dayType: "tenant_special", name: "旧版安排", pricingMultiplier: 1.4, closed: false, overrideReason: "恢复用例：第一版"
+  }, construction.accessToken);
+  assert.equal(restSeed.status, 200, `恢复用例建草稿失败: ${restSeed.status} ${JSON.stringify(restSeed.body).slice(0, 200)}`);
+  const restPub1 = await request("POST", `/api/rental/v1/calendars/${restYear}/publish`, { changeReason: "恢复用例首发" }, construction.accessToken);
+  assert.equal(restPub1.status, 201, `恢复用例首发失败: ${restPub1.status} ${JSON.stringify(restPub1.body).slice(0, 200)}`);
+  const oldVersion = restPub1.body.data.version;
+  // 第二版把该日期改成另一套安排并发布，第一版随之进入 superseded。
+  const restEdit = await request("PUT", `/api/rental/v1/calendars/${restYear}/days/${restDate}`, {
+    date: restDate, dayType: "tenant_special", name: "新版安排", pricingMultiplier: 2.2, closed: false, overrideReason: "恢复用例：第二版"
+  }, construction.accessToken);
+  assert.equal(restEdit.status, 200, `恢复用例第二版失败: ${restEdit.status}`);
+  const restPub2 = await request("POST", `/api/rental/v1/calendars/${restYear}/publish`, { changeReason: "恢复用例二发" }, construction.accessToken);
+  assert.equal(restPub2.status, 201, `恢复用例二发失败: ${restPub2.status} ${JSON.stringify(restPub2.body).slice(0, 200)}`);
+  const currentVersion = restPub2.body.data.version;
+  assert.notEqual(currentVersion, oldVersion, "第二次发布必须是新版本号");
+  // 原因必填。
+  const restoreNoReason = await request("POST", `/api/rental/v1/calendars/${restYear}/versions/${encodeURIComponent(oldVersion)}/restore`, {}, construction.accessToken);
+  assert.equal(restoreNoReason.status, 400, `恢复缺原因必须 400: ${restoreNoReason.status}`);
+  // 恢复第一版：必须生成**新草稿**，不得把 v1 原地改回、也不得动当前已发布版本。
+  const restoredDraft = await request("POST", `/api/rental/v1/calendars/${restYear}/versions/${encodeURIComponent(oldVersion)}/restore`, { reason: "新版调休有误，回到上一版" }, construction.accessToken);
+  assert.equal(restoredDraft.status, 201, `恢复历史版本失败: ${restoredDraft.status} ${JSON.stringify(restoredDraft.body).slice(0, 220)}`);
+  assert.equal(restoredDraft.body.data.status, "draft", `恢复只能产生草稿: ${restoredDraft.body.data.status}`);
+  assert.notEqual(restoredDraft.body.data.version, oldVersion, "恢复不得复用被恢复版本的版本号");
+  assert.notEqual(restoredDraft.body.data.version, currentVersion, "恢复不得覆盖当前已发布版本");
+  assert.equal(restoredDraft.body.data.restoredFromVersion, oldVersion, `新草稿必须记录恢复来源版本: ${restoredDraft.body.data.restoredFromVersion}`);
+  assert.equal(restoredDraft.body.data.restoreReason, "新版调休有误，回到上一版", `新草稿必须记录恢复原因: ${restoredDraft.body.data.restoreReason}`);
+  assert.equal(restoredDraft.body.data.previousVersion, currentVersion, `新草稿的上一版本应是当前已发布版本: ${restoredDraft.body.data.previousVersion}`);
+  // 内容必须来自旧版本，而不是当前已发布版本。
+  const restoredDay = restoredDraft.body.data.days.find((d) => d.date === restDate);
+  assert.equal(restoredDay?.name, "旧版安排", `恢复的内容必须来自旧版本: ${restoredDay?.name}`);
+  assert.equal(restoredDay?.pricingMultiplier, 1.4, `恢复的系数必须是旧版本的 1.4: ${restoredDay?.pricingMultiplier}`);
+  // 被恢复的版本与当前已发布版本都必须原样保留。
+  const restVersions = (await request("GET", `/api/rental/v1/calendars/${restYear}/versions`, null, construction.accessToken)).body.data;
+  const oldRow = restVersions.find((v) => v.version === oldVersion);
+  const curRow = restVersions.find((v) => v.version === currentVersion);
+  assert.equal(oldRow?.status, "superseded", `被恢复的版本必须仍是 superseded（不得原地改回）: ${oldRow?.status}`);
+  assert.equal(curRow?.status, "published", `当前已发布版本不得被恢复动作改动: ${curRow?.status}`);
+  assert.equal(
+    restVersions.filter((v) => v.status === "published").length,
+    1,
+    `恢复后该年度仍只能有一个已发布版本: ${JSON.stringify(restVersions.map((v) => [v.version, v.status]))}`
+  );
+  // 恢复出来的草稿仍要走发布这条正路，发布后成为新的已发布版本。
+  const restPub3 = await request("POST", `/api/rental/v1/calendars/${restYear}/publish`, { changeReason: "回滚到上一版官方安排" }, construction.accessToken);
+  assert.equal(restPub3.status, 201, `恢复后的草稿必须能发布: ${restPub3.status} ${JSON.stringify(restPub3.body).slice(0, 200)}`);
+  assert.equal(restPub3.body.data.restoredFromVersion, oldVersion, "发布后仍应保留恢复来源，供追溯");
+  const persistedRestore = readRow(
+    `SELECT \`restoredFromVersion\`, \`restoreReason\` FROM \`rental_business_calendars\` WHERE \`tenantId\`='${construction.tenant.tenantId}' AND \`year\`=${restYear} AND \`version\`='${restoredDraft.body.data.version}';`
+  );
+  assert.equal(persistedRestore.restoredFromVersion, oldVersion, `恢复来源必须落库: ${persistedRestore.restoredFromVersion}`);
+  assert.equal(persistedRestore.restoreReason, "新版调休有误，回到上一版", `恢复原因必须落库: ${persistedRestore.restoreReason}`);
+  // 恢复当前正在编辑的版本没有意义，必须明确拒绝而不是静默建一份重复草稿。
+  const restoreSelf = await request("POST", `/api/rental/v1/calendars/${restYear}/versions/${encodeURIComponent(restPub3.body.data.version)}/restore`, { reason: "重复恢复" }, construction.accessToken);
+  assert.equal(restoreSelf.status, 409, `恢复当前正在编辑的版本必须 409: ${restoreSelf.status}`);
+  ok("历史版本恢复：以旧内容生成新草稿并记录来源版本与原因且落库、被恢复版本仍为 superseded、当前已发布版本不受影响、该年度仍只有一个 published、恢复后的草稿可正常发布、原因必填、恢复当前版本被拒");
+
+  console.log("== 15q. PRICE-02 公共官方来源更新提示（Codex #7） ==");
+  // 需求 4.5.2：平台登记新官方版本后，为相关空间生成「存在官方更新」提示，但不得自动
+  // 覆盖或自动发布。空间日历记录当前引用的 sourceVersionId，与该来源年度最新有效版本比较。
+  const updYear = 2039;
+  const updVersionA = await registerOfficialVersion(updYear, [
+    { date: `${updYear}-10-01`, dayType: "statutory_holiday", name: "国庆节" }
+  ]);
+  const applyA = await applyOfficialVersion(updYear, updVersionA.id, construction.accessToken);
+  assert.equal(applyA.status, 201, `应用来源版本 A 失败: ${applyA.status} ${JSON.stringify(applyA.body).slice(0, 200)}`);
+  // 已应用的就是最新版：不应提示更新。
+  const afterApplyA = (await request("GET", `/api/rental/v1/calendars/${updYear}`, null, construction.accessToken)).body.data;
+  assert.equal(afterApplyA.sourceVersionId, updVersionA.id, `空间日历必须记录引用的来源版本: ${afterApplyA.sourceVersionId}`);
+  assert.equal(afterApplyA.officialSourceUpdateAvailable, false, `已应用最新版时不应提示更新: ${afterApplyA.officialSourceUpdateAvailable}`);
+  // 平台登记更新的来源版本 B。
+  const updVersionB = await registerOfficialVersion(updYear, [
+    { date: `${updYear}-10-01`, dayType: "statutory_holiday", name: "国庆节" },
+    { date: `${updYear}-10-08`, dayType: "makeup_workday", name: "国庆调休" }
+  ], new Date().toISOString());
+  assert.notEqual(updVersionB.version, updVersionA.version, "官方更新必须形成新的来源版本");
+  // 现在必须提示「存在官方更新」，但空间日历本身不得被自动改动。
+  const afterRegisterB = (await request("GET", `/api/rental/v1/calendars/${updYear}`, null, construction.accessToken)).body.data;
+  assert.equal(afterRegisterB.officialSourceUpdateAvailable, true, `登记更新版本后必须提示存在官方更新: ${afterRegisterB.officialSourceUpdateAvailable}`);
+  assert.equal(afterRegisterB.latestOfficialSourceVersion, updVersionB.version, `必须给出最新可用版本号: ${afterRegisterB.latestOfficialSourceVersion}`);
+  assert.equal(afterRegisterB.sourceVersionId, updVersionA.id, "登记新版本不得自动改动空间已引用的版本（不得自动覆盖）");
+  // 全年每天都在 days 里，所以要断言的是「10-08 未被自动灌成官方节假日」，而不是它不存在。
+  const notAutoApplied = afterRegisterB.days.find((d) => d.date === `${updYear}-10-08`);
+  assert.ok(notAutoApplied && notAutoApplied.source !== "official_cn", `登记新官方版本不得自动把新日期灌成官方来源: ${JSON.stringify(notAutoApplied)}`);
+  // 空间主动应用 B 后，提示消失。
+  const applyB = await applyOfficialVersion(updYear, updVersionB.id, construction.accessToken);
+  assert.equal(applyB.status, 201, `应用来源版本 B 失败: ${applyB.status}`);
+  const afterApplyB = (await request("GET", `/api/rental/v1/calendars/${updYear}`, null, construction.accessToken)).body.data;
+  assert.equal(afterApplyB.officialSourceUpdateAvailable, false, `应用最新版后提示应消失: ${afterApplyB.officialSourceUpdateAvailable}`);
+  assert.equal(afterApplyB.sourceVersionId, updVersionB.id, "应用后必须更新引用的来源版本");
+  ok("公共官方来源更新提示：空间记录引用的来源版本，登记更新版本后返回 officialSourceUpdateAvailable 与最新版本号、但不自动覆盖空间日历，空间主动应用后提示消失");
 
   console.log("== 16. 双租户并发隔离 ==");
   const rounds = 12;
@@ -6614,6 +6784,44 @@ async function main() {
   const viewerVersionsUpper = await request("GET", "/api/rental/v1/calendars/2032/VERSIONS", null, calViewToken);
   assert.equal(viewerVersionsUpper.status, 403, `大写 VERSIONS 不得让只读运营读到草稿版本: ${viewerVersionsUpper.status}`);
   ok("发布权限不含编辑（发布人员导入 403）+ 普通运营只见已发布日历（看不到未发布草稿、编辑者能看到）+ 版本历史属管理视图 + 鉴权路径判定对大小写/尾斜杠不可绕过（提权面、发布、版本历史均 403）");
+
+  console.log("== 61c-2. PRICE-02 客服/财务历史只读权限（Codex #5） ==");
+  // 需求 4.5.8：客服或财务「查看历史版本及报价命中的日历依据，不得修改」。
+  // 独立权限 store-rental:calendar:view-history：能读历史/差异/审计，但不能编辑、发布、看发布预检。
+  const historyRole = await request("POST", "/api/platform/roles", {
+    code: `E2E-CAL-HIST-${Date.now().toString(36)}`, name: "E2E 客服历史只读", scope: "store", dataScope: "all",
+    enabledBusinessScopes: ["rental"], permissions: ["store-rental:calendar:view-history", "store-rental:order:view"], isActive: true
+  }, calAdmin.accessToken);
+  assert.equal(historyRole.status, 201, `建历史只读角色失败: ${JSON.stringify(historyRole.body).slice(0, 200)}`);
+  const historyAccount = `e2e_cal_hist_${Date.now().toString(36)}`;
+  const historyUser = await request("POST", "/api/platform/users", { account: historyAccount, displayName: "E2E 客服", phone: "13900002222", roleIds: [historyRole.body.data.id], isActive: true }, calAdmin.accessToken);
+  assert.equal(historyUser.status, 201, `建历史只读账号失败: ${JSON.stringify(historyUser.body).slice(0, 200)}`);
+  await request("PUT", `/api/platform/workspaces/${calAdmin.currentWorkspaceId}/members`, { userId: historyUser.body.data.id, roleId: historyRole.body.data.id }, calAdmin.accessToken);
+  const histTemp = historyUser.body.data.temporaryPassword;
+  const histFirst = await login("demo", historyAccount, histTemp);
+  const histPwd = `E2e!${randomBytes(4).toString("hex")}`;
+  await request("POST", "/api/auth/change-password", { currentPassword: histTemp, newPassword: histPwd }, histFirst.accessToken);
+  const histLogin = await login("demo", historyAccount, histPwd);
+  const histToken = (await request("POST", "/api/auth/switch-workspace", { workspaceId: calAdmin.currentWorkspaceId }, histLogin.accessToken)).body.data.accessToken;
+  // 正向：能读版本列表、版本详情、覆盖审计（2032 在 61b/61c 已发布并有草稿）。
+  const histVersions = await request("GET", "/api/rental/v1/calendars/2032/versions", null, histToken);
+  assert.equal(histVersions.status, 200, `历史只读账号必须能读版本列表: ${histVersions.status} ${JSON.stringify(histVersions.body).slice(0, 200)}`);
+  assert.ok(Array.isArray(histVersions.body.data) && histVersions.body.data.length > 0, "版本列表应有内容");
+  const histOnePub = histVersions.body.data.find((v) => v.status === "published") ?? histVersions.body.data[0];
+  const histDetail = await request("GET", `/api/rental/v1/calendars/2032/versions/${encodeURIComponent(histOnePub.version)}`, null, histToken);
+  assert.equal(histDetail.status, 200, `历史只读账号必须能读版本详情: ${histDetail.status}`);
+  const histAudits = await request("GET", "/api/rental/v1/calendars/2032/override-audits", null, histToken);
+  assert.equal(histAudits.status, 200, `历史只读账号必须能读覆盖审计: ${histAudits.status}`);
+  // 反向：不能改（保存日期覆盖=编辑）、不能发布、不能看发布预检（那是发布决策而非追溯）。
+  const histEdit = await request("PUT", "/api/rental/v1/calendars/2032/days/2032-10-01", {
+    date: "2032-10-01", dayType: "tenant_special", name: "越权编辑", pricingMultiplier: 1.5, closed: false, overrideReason: "越权编辑"
+  }, histToken);
+  assert.equal(histEdit.status, 403, `历史只读账号不得编辑（保存日期覆盖）: ${histEdit.status}`);
+  const histPublish = await request("POST", "/api/rental/v1/calendars/2032/publish", { changeReason: "越权发布" }, histToken);
+  assert.equal(histPublish.status, 403, `历史只读账号不得发布: ${histPublish.status}`);
+  const histPreview = await request("GET", "/api/rental/v1/calendars/2032/publish-preview", null, histToken);
+  assert.equal(histPreview.status, 403, `历史只读账号不得查看发布预检（属发布决策）: ${histPreview.status}`);
+  ok("客服/财务历史只读权限：view-history 账号能读版本列表/详情/覆盖审计（200），但导入、发布、发布预检一律 403，实现了「查看历史但不得修改」而不过度授予编辑或发布权");
 
   console.log("== 61d. 未列入鉴权规则的路由必须默认拒绝（Codex P0 fail-open） ==");
   // `requiredPermissions` 的兜底曾是 `return []`，而 hasAnyPermission 对空数组直接放行，

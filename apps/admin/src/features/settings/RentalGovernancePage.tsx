@@ -110,8 +110,13 @@ export function RentalGovernancePage() {
   const canManageRules = hasPermission("store-rental:rules:manage");
   const canEditCalendar = canManagePrice || hasPermission("store-rental:calendar:edit");
   const canPublishCalendar = canManagePrice || hasPermission("store-rental:calendar:publish");
-  // 历史版本/差异/审计属管理视图，与后端 guard 同一口径。
-  const canViewCalendarHistory = canEditCalendar || canPublishCalendar || canManageRules;
+  // 需求 4.5.8：客服或财务「查看历史版本及报价命中的日历依据，不得修改」——独立的
+  // 历史只读权限，不必顺带授予编辑/发布/规则管理。与后端 guard 同一口径。
+  const canViewCalendarHistory =
+    canEditCalendar ||
+    canPublishCalendar ||
+    canManageRules ||
+    hasPermission("store-rental:calendar:view-history");
   const canSeeCalendar = canViewCalendarHistory;
   const canSeeSettings = canManagePrice || canManageRules;
   const permittedTabs = useMemo<TabKey[]>(
@@ -139,6 +144,8 @@ export function RentalGovernancePage() {
   const [historyVersion, setHistoryVersion] = useState<string>();
   /** 待作废的草稿版本。原因必填，因此走确认弹窗。 */
   const [voidTarget, setVoidTarget] = useState<RentalCalendarVersionSummary>();
+  /** 待恢复的历史版本（需求 4.5.7：以旧内容生成新草稿，不得原地改回）。原因必填。 */
+  const [restoreTarget, setRestoreTarget] = useState<RentalCalendarVersionSummary>();
   /** 待移除覆盖的日期。撤销原因必填，因此走确认弹窗而不是直接 DELETE。 */
   const [revertTarget, setRevertTarget] = useState<RentalCalendarDay>();
   const [templateEditor, setTemplateEditor] =
@@ -153,6 +160,7 @@ export function RentalGovernancePage() {
   const [publishForm] = Form.useForm<{ changeReason: string }>();
   const [revertForm] = Form.useForm<{ overrideReason: string }>();
   const [voidForm] = Form.useForm<{ reason: string }>();
+  const [restoreForm] = Form.useForm<{ reason: string }>();
   const [rewardForm] = Form.useForm<GrantRentalRewardRequest>();
   const [templateForm] = Form.useForm<TemplateForm>();
   const [sendForm] = Form.useForm<SendForm>();
@@ -355,6 +363,30 @@ export function RentalGovernancePage() {
       ),
   });
   /** 作废草稿版本（需求 4.5.7）。原因必填，作废后该草稿不再进入编辑视图。 */
+  /**
+   * 以某个历史版本的内容生成新草稿（需求 4.5.7）。只产生草稿：被恢复的版本与当前
+   * 已发布版本都不改动，后续仍要走发布前预检 → 填变更原因 → 发布。
+   */
+  const restoreVersion = useMutation({
+    mutationFn: ({ version, reason }: { version: string; reason: string }) =>
+      rentalCoreApi.restoreCalendarVersion(year, version, { reason }),
+    onSuccess: async (created) => {
+      setRestoreTarget(undefined);
+      restoreForm.resetFields();
+      await queryClient.invalidateQueries({
+        queryKey: ["rental-core", "calendar-versions", year],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["rental-core", "calendar", year],
+      });
+      message.success(`已按该版本生成新草稿 v${created.version}，请核对后发布`);
+    },
+    onError: (error) =>
+      message.error(
+        (error as { response?: { data?: { message?: string } } })?.response?.data?.message ??
+          "恢复失败：必须填写原因，且不能恢复当前正在编辑的版本",
+      ),
+  });
   const voidVersion = useMutation({
     mutationFn: ({ version, reason }: { version: string; reason: string }) =>
       rentalCoreApi.voidCalendarVersion(year, version, { reason }),
@@ -608,6 +640,10 @@ export function RentalGovernancePage() {
           <Form<TenantRentalBusinessSettings>
             form={settingsForm}
             layout="vertical"
+            // 不渲染原生 <form> 元素：会员激励 tab 里嵌着独立的「人工补发奖励」表单，
+            // 外层若是真正的 <form>，内层 <form> 就成了非法嵌套并触发 React hydration 警告。
+            // 保存按钮走 settingsForm.submit()（显式 onClick），component={false} 下仍会触发 onFinish。
+            component={false}
             onFinish={() =>
               // 提交整个 store 而非仅当前 tab 已注册的字段：设置分 tab 条件渲染，未挂载
               // 分组（如另一 tab 的 calendar/notifications）以及无 Form.Item 的字段（timeZone、
@@ -1938,23 +1974,39 @@ export function RentalGovernancePage() {
                 },
                 {
                   title: "操作",
-                  width: 90,
-                  render: (_, row) =>
-                    canEditCalendar && row.status === "draft" ? (
-                      <Button
-                        type="link"
-                        danger
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          voidForm.resetFields();
-                          setVoidTarget(row);
-                        }}
-                      >
-                        作废
-                      </Button>
-                    ) : (
-                      <Typography.Text type="secondary">—</Typography.Text>
-                    ),
+                  width: 170,
+                  render: (_, row) => {
+                    if (!canEditCalendar) return <Typography.Text type="secondary">只读</Typography.Text>;
+                    return (
+                      <Space size={0}>
+                        {row.status === "draft" ? (
+                          <Button
+                            type="link"
+                            danger
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              voidForm.resetFields();
+                              setVoidTarget(row);
+                            }}
+                          >
+                            作废
+                          </Button>
+                        ) : (
+                          // 需求 4.5.7：恢复旧规则必须以旧内容生成新版本，不得原地改回。
+                          <Button
+                            type="link"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              restoreForm.resetFields();
+                              setRestoreTarget(row);
+                            }}
+                          >
+                            以此版本建新草稿
+                          </Button>
+                        )}
+                      </Space>
+                    );
+                  },
                 },
               ]}
             />
@@ -2081,6 +2133,38 @@ export function RentalGovernancePage() {
             rules={[{ required: true, whitespace: true, message: "请填写作废原因" }]}
           >
             <Input.TextArea rows={3} placeholder="例如：录错年度，弃用该草稿" />
+          </Form.Item>
+        </Form>
+      </Modal>
+      <Modal
+        title={restoreTarget ? `以 v${restoreTarget.version} 的内容建新草稿` : "恢复历史版本"}
+        open={Boolean(restoreTarget)}
+        onCancel={() => setRestoreTarget(undefined)}
+        onOk={() => restoreForm.submit()}
+        confirmLoading={restoreVersion.isPending}
+        okText="生成新草稿"
+        destroyOnHidden
+      >
+        <Form
+          form={restoreForm}
+          layout="vertical"
+          onFinish={(values) =>
+            restoreTarget && restoreVersion.mutate({ version: restoreTarget.version, reason: values.reason })
+          }
+        >
+          <Alert
+            type="info"
+            showIcon
+            message="恢复不会原地改回旧版本"
+            description="会以该版本的逐日内容生成一个新草稿；被恢复的版本与当前已发布版本都保持原样。新草稿仍需经发布前预检、填写变更原因后再发布。"
+            style={{ marginBottom: 16 }}
+          />
+          <Form.Item
+            name="reason"
+            label="恢复原因"
+            rules={[{ required: true, whitespace: true, message: "请填写恢复原因" }]}
+          >
+            <Input.TextArea rows={3} placeholder="例如：新版调休有误，回到上一版官方安排" />
           </Form.Item>
         </Form>
       </Modal>

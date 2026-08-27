@@ -170,6 +170,9 @@ const permissions = [
   ["store-rental:price:manage", "价格规则", "门市租赁", PermissionKind.ACTION],
   ["store-rental:calendar:edit", "营业日历编辑（草稿）", "门市租赁", PermissionKind.ACTION],
   ["store-rental:calendar:publish", "营业日历发布", "门市租赁", PermissionKind.ACTION],
+  // 需求 4.5.8：客服或财务「查看历史版本及报价命中的日历依据，不得修改」。
+  // 没有这个独立权限时，给客服开放历史就只能顺带授予编辑、发布或规则管理权，权限过大。
+  ["store-rental:calendar:view-history", "营业日历历史只读", "门市租赁", PermissionKind.ACTION],
   ["store-rental:marketing:manage", "行销方案管理", "门市租赁", PermissionKind.ACTION],
   ["store-rental:station:view", "站点查看", "门市租赁", PermissionKind.ACTION],
   ["store-rental:station:manage", "站点管理", "门市租赁", PermissionKind.ACTION],
@@ -236,7 +239,9 @@ const roleTemplates = [
       "rental-core:asset:view",
       "store-rental:member:view",
       "store-rental:corporate:view",
-      "store-rental:finance:view"
+      "store-rental:finance:view",
+      // 门店营运兼客服口径：可查营业日历历史与报价命中的日历依据，但不得编辑或发布。
+      "store-rental:calendar:view-history"
     ],
     buttonPermissions: [
       "store-rental:order:create",

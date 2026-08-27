@@ -35,6 +35,7 @@ import type {
   PublishRentalCalendarRequest,
   VoidRentalCalendarRequest,
   RemoveRentalCalendarDayOverrideRequest,
+  RestoreRentalCalendarVersionRequest,
   SaveRentalCalendarDayRequest,
   SaveRentalDiscountPlanRequest,
   SaveRentalNotificationTemplateRequest,
@@ -89,6 +90,9 @@ export const rentalCoreApi = {
   /** 作废年度日历草稿（需求 4.5.7）。原因必填，走 body。 */
   voidCalendarVersion: (year: number, version: string, data: VoidRentalCalendarRequest) =>
     request<RentalCalendarYear>(`/rental/v1/calendars/${year}/versions/${encodeURIComponent(version)}/void`, { method: "post", data }),
+  /** 以某个历史版本的内容生成新草稿（需求 4.5.7 的「恢复旧规则」）。只产生草稿，仍需发布。 */
+  restoreCalendarVersion: (year: number, version: string, data: RestoreRentalCalendarVersionRequest) =>
+    request<RentalCalendarYear>(`/rental/v1/calendars/${year}/versions/${encodeURIComponent(version)}/restore`, { method: "post", data }),
   /** 年度日历的全部版本（草稿/已发布/已被替代/已作废），供历史与追溯。 */
   calendarVersions: (year: number) => request<RentalCalendarVersionSummary[]>(`/rental/v1/calendars/${year}/versions`),
   /** 单个版本详情，含逐日、发布差异与覆盖审计。 */

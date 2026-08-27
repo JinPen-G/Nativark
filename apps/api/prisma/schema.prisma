@@ -2840,6 +2840,11 @@ model RentalBusinessCalendar {
   publishedBy        String?
   changeReason       String?
   previousVersion    String?
+  /// 需求 4.5.7「恢复旧规则也必须以旧内容生成新的发布版本，不得删除新版本或把旧版本
+  /// 原地改回」。这两列记录本草稿是从哪个历史版本恢复出来的以及恢复原因；
+  /// 被恢复的那个版本本身不做任何改动。
+  restoredFromVersion String?
+  restoreReason      String?
   /// 作废审计（需求 4.5.7）。只有草稿可作废；记录时间、操作人与原因。
   voidedAt           DateTime?
   voidedBy           String?

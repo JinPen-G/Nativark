@@ -4371,6 +4371,12 @@ export interface RentalCalendarYear {
   changeReason?: string;
   previousVersion?: string;
   /**
+   * 本草稿是从哪个历史版本恢复出来的（需求 4.5.7：「恢复旧规则也必须以旧内容生成新的
+   * 发布版本，不得删除新版本或把旧版本原地改回」）。被恢复的版本本身不做任何改动。
+   */
+  restoredFromVersion?: string;
+  restoreReason?: string;
+  /**
    * 作废审计（需求 4.5.7「已作废：人工废弃的草稿或错误版本」）。
    * 只有草稿可作废；已发布版本须由新版本替代、已被替代版本须保留供历史报价追溯，
    * 均不走作废。作废时记录时间、操作人与原因，供事后解释这条草稿为何被丢弃。
@@ -4626,6 +4632,17 @@ export interface PublishRentalCalendarRequest {
 
 /** 作废年度日历草稿（需求 4.5.7）。原因必填，用于事后解释这条草稿为何被丢弃。 */
 export interface VoidRentalCalendarRequest {
+  reason: string;
+}
+
+/**
+ * 以某个历史版本的内容生成新草稿（需求 4.5.7：「恢复旧规则也必须以旧内容生成新的
+ * 发布版本，不得删除新版本或把旧版本原地改回」）。
+ *
+ * 恢复只产生草稿：后续仍要走发布前预检、填写变更原因、发布这条正路。
+ * 被恢复的历史版本与当前已发布版本都不做任何改动。
+ */
+export interface RestoreRentalCalendarVersionRequest {
   reason: string;
 }
 

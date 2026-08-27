@@ -185,6 +185,7 @@ export function requiredPermissions(method: string, path: string) {
     // 空间侧只读引用公共来源版本，用于挑选要应用哪一版（需求 4.5.2）。
     // 只给日历相关角色：它不含业务数据，但也没有理由开放给全部经营角色。
     return [
+      "store-rental:calendar:view-history",
       "store-rental:calendar:edit",
       "store-rental:calendar:publish",
       "store-rental:price:manage",
@@ -196,12 +197,26 @@ export function requiredPermissions(method: string, path: string) {
     // 「日历编辑人员只能改草稿、不得发布」。price:manage 作为既有超集保留，
     // 避免存量部署（其价格管理员只有 price:manage）在本次拆分后失去日历能力。
     if (method === "GET") {
-      // 历史版本/差异/审计查询属**管理视图**，不放给只读运营（order:view）——
-      // 版本详情与覆盖审计含未发布草稿内容，混进只读运营会与「普通运营只见已发布」相悖。
-      if (/\/versions(\/|$)/.test(path) || /\/override-audits$/.test(path) || /\/publish-preview$/.test(path)) {
+      // 发布前影响预览属**发布决策**动作，只给能编辑或发布的人；客服/财务的历史只读
+      // 权限不覆盖它——预览的内容是「即将发布的草稿会改什么」，不是历史追溯。
+      if (/\/publish-preview$/.test(path)) {
         return ["store-rental:calendar:edit", "store-rental:calendar:publish", "store-rental:price:manage", "store-rental:rules:manage"];
       }
+      // 历史版本/差异/覆盖审计属**追溯视图**：需求 4.5.8 要求客服或财务「查看历史版本
+      // 及报价命中的日历依据，不得修改」，因此额外接受独立的历史只读权限。
+      // 仍不放给纯 order:view 的只读运营——版本详情含未发布草稿内容，与
+      // 「普通运营只见已发布」相悖；要开放就必须显式配 view-history。
+      if (/\/versions(\/|$)/.test(path) || /\/override-audits$/.test(path)) {
+        return [
+          "store-rental:calendar:view-history",
+          "store-rental:calendar:edit",
+          "store-rental:calendar:publish",
+          "store-rental:price:manage",
+          "store-rental:rules:manage"
+        ];
+      }
       return [
+        "store-rental:calendar:view-history",
         "store-rental:calendar:edit",
         "store-rental:calendar:publish",
         "store-rental:price:manage",

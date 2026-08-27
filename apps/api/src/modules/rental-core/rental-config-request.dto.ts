@@ -3,6 +3,7 @@ import type {
   ApplyOfficialCalendarSourceRequest,
   PublishRentalCalendarRequest,
   RegisterOfficialCalendarSourceVersionRequest,
+  RestoreRentalCalendarVersionRequest,
   SaveOfficialCalendarSourceRequest,
   VoidRentalCalendarRequest,
   RemoveRentalCalendarDayOverrideRequest,
@@ -832,6 +833,15 @@ export class VoidRentalCalendarDto implements VoidRentalCalendarRequest {
   @Matches(NON_BLANK_PATTERN, { message: "作废原因不能为空白" })
   // 落库为 rental_business_calendars.voidReason（VARCHAR(191)），同上限长以免 500。
   @MaxLength(191, { message: "作废原因不能超过 191 字" })
+  reason!: string;
+}
+
+/** 以某个历史版本的内容生成新草稿（需求 4.5.7 的「恢复旧规则」）。原因必填。 */
+export class RestoreRentalCalendarVersionDto implements RestoreRentalCalendarVersionRequest {
+  @IsString()
+  @Matches(NON_BLANK_PATTERN, { message: "恢复原因不能为空白" })
+  // 落库为 rental_business_calendars.restoreReason（VARCHAR(191)），同上限长以免 500。
+  @MaxLength(191, { message: "恢复原因不能超过 191 字" })
   reason!: string;
 }
 
