@@ -41,14 +41,52 @@ function requiresVehicleCategory(path: string) {
   ].some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
 }
 
-function requiredPermissions(method: string, path: string) {
-  if (
-    path === "/health" ||
-    path === "/openapi.json" ||
-    path === "/auth/login" ||
-    path === "/auth/refresh" ||
-    method === "OPTIONS"
-  ) {
+/**
+ * 未匹配任何规则时要求的"权限"。它**不存在于权限目录**，因此任何角色都不可能持有，
+ * 等价于默认拒绝。
+ *
+ * 早前这里是 `return []`，而 `hasAnyPermission` 对空数组直接放行——于是每一个
+ * 没被上面任何分支覆盖的路由都是**完全无鉴权**的写接口。这不是理论风险：
+ * `/store-rental/marketing/plans` 的增改就落在这里，任何能登录的账号都能改本租户营销方案。
+ * 而且这个坑会随每次新增路由复发，靠人记得补分支是不可靠的，
+ * 因此改为默认拒绝 + `scripts/validate-route-permissions.cjs` 在标准验收命令里逐路由核对。
+ */
+export const UNMATCHED_ROUTE_PERMISSION = "__unmatched_route__";
+
+/**
+ * 显式公共路由：不需要登录，或登录后不需要任何业务权限的自助端点。
+ *
+ * 只有这份名单里的路由才允许"零权限放行"。放行范围要能一眼看完——
+ * 会话自助操作（我是谁、登出、改密、切空间）本身不授予任何业务数据访问，
+ * 它们的隔离由各自的处理器按当前会话完成。
+ */
+export const PUBLIC_ROUTES = new Set([
+  "/health",
+  "/openapi.json",
+  "/auth/login",
+  "/auth/refresh",
+  "/auth/logout",
+  "/auth/me",
+  "/auth/change-password",
+  "/auth/switch-workspace",
+  "/auth/session-context"
+]);
+
+/**
+ * 公共前缀：带路径参数、无法用精确匹配表达的自助路由。
+ *
+ * 目前只有筛选预设——它是**租户级列表筛选偏好**，不承载任何业务数据，
+ * 且服务层对非 SaaS 管理员一律用会话的 `user.tenantId`（忽略请求里的 tenantId），
+ * 因此不存在跨租户读写。给它挂一个具体业务权限反而会让普通运营存不了自己的筛选条件。
+ */
+export const PUBLIC_ROUTE_PREFIXES = ["/platform/filter-presets"];
+
+function isPublicRoute(path: string) {
+  return PUBLIC_ROUTES.has(path) || PUBLIC_ROUTE_PREFIXES.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
+}
+
+export function requiredPermissions(method: string, path: string) {
+  if (isPublicRoute(path) || method === "OPTIONS") {
     return [];
   }
 
@@ -349,8 +387,25 @@ function requiredPermissions(method: string, path: string) {
   if (path.startsWith("/store-rental/value-added-services")) {
     return ["store-rental:service:manage"];
   }
+  // 以下五组此前全部落在兜底 `return []` 上，等于完全无鉴权。
+  // `/store-rental/marketing/plans` 的增改尤其严重：任何能登录的账号都能改本租户营销方案。
+  if (path.startsWith("/store-rental/marketing")) {
+    // 与 `/rental/v1/coupon-templates` 同一口径：营销配置由营销权限管，价格管理员为超集。
+    return ["store-rental:marketing:manage", "store-rental:price:manage"];
+  }
+  if (path.startsWith("/store-rental/tbox-devices")) {
+    // 车控设备绑定与下发指令会实际操作车辆，写侧要求车辆管理权限；读侧允许查看权限。
+    // 另有 requiredCapability 的 "iot" 能力门槛，两者是并列条件而非替代关系。
+    return method === "GET"
+      ? ["store-rental:vehicle:view", "store-rental:vehicle:manage"]
+      : ["store-rental:vehicle:manage"];
+  }
+  if (path.startsWith("/store-rental/integrations") || path.startsWith("/store-rental/client-endpoints")) {
+    // 外部接入占位与预留端点清单属系统集成信息，与 `/integrations` 分支同一权限。
+    return ["system:integration:manage", "system:params:manage"];
+  }
 
-  return [];
+  return [UNMATCHED_ROUTE_PERMISSION];
 }
 
 function hasAnyPermission(user: SystemUserRow, permissions: string[]) {

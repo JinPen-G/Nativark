@@ -6275,6 +6275,65 @@ async function main() {
   const viewerVersionsUpper = await request("GET", "/api/rental/v1/calendars/2032/VERSIONS", null, calViewToken);
   assert.equal(viewerVersionsUpper.status, 403, `大写 VERSIONS 不得让只读运营读到草稿版本: ${viewerVersionsUpper.status}`);
   ok("发布权限不含编辑（发布人员导入 403）+ 普通运营只见已发布日历（看不到未发布草稿、编辑者能看到）+ 版本历史属管理视图 + 鉴权路径判定对大小写/尾斜杠不可绕过（提权面、发布、版本历史均 403）");
+
+  console.log("== 61d. 未列入鉴权规则的路由必须默认拒绝（Codex P0 fail-open） ==");
+  // `requiredPermissions` 的兜底曾是 `return []`，而 hasAnyPermission 对空数组直接放行，
+  // 于是每个没被显式分支覆盖的路由都是**完全无鉴权**的接口。营销方案的增改正落在兜底里：
+  // 任何能登录的账号（哪怕只有 order:view）都能改本租户营销方案。兜底已改为默认拒绝。
+  //
+  // 必须用**车辆租户的默认空间**做这一节：`/store-rental/*` 是旧车辆兼容接口，
+  // 非默认车辆空间访问会先被空间闸门 403。若拿日历空间的账号来测，两条 403 都来自
+  // 空间闸门而不是权限判定——那正是"因错误的理由通过"。
+  // vehicleA 的令牌建于第 17 节重启之前，而重启会换 AUTH_TOKEN_SECRET，故须重登。
+  const mktAdmin = await login("e2e_vehicle_a", "admin", vehicleA.password);
+  const mktLowRole = await request("POST", "/api/platform/roles", {
+    code: `E2E-MKT-LOW-${Date.now().toString(36)}`, name: "E2E 营销越权验证角色", scope: "store", dataScope: "all",
+    enabledBusinessScopes: ["rental"], permissions: ["store-rental:order:view"], isActive: true
+  }, mktAdmin.accessToken);
+  assert.equal(mktLowRole.status, 201, `建低权限角色失败: ${JSON.stringify(mktLowRole.body).slice(0, 200)}`);
+  const mktLowAccount = `e2e_mkt_low_${Date.now().toString(36)}`;
+  const mktLowUser = await request("POST", "/api/platform/users", {
+    account: mktLowAccount, displayName: "E2E 营销只读账号", phone: "13900002222",
+    roleIds: [mktLowRole.body.data.id], isActive: true
+  }, mktAdmin.accessToken);
+  assert.equal(mktLowUser.status, 201, `建低权限账号失败: ${JSON.stringify(mktLowUser.body).slice(0, 200)}`);
+  await request("PUT", `/api/platform/workspaces/${mktAdmin.currentWorkspaceId}/members`, { userId: mktLowUser.body.data.id, roleId: mktLowRole.body.data.id }, mktAdmin.accessToken);
+  const mktLowTemp = mktLowUser.body.data.temporaryPassword;
+  const mktLowFirst = await login("e2e_vehicle_a", mktLowAccount, mktLowTemp);
+  const mktLowPwd = `E2e!${randomBytes(4).toString("hex")}`;
+  assert.equal(
+    (await request("POST", "/api/auth/change-password", { currentPassword: mktLowTemp, newPassword: mktLowPwd }, mktLowFirst.accessToken)).status,
+    201,
+    "低权限账号改密应成功（否则后面的 403 来自改密闸门）"
+  );
+  const mktLow = await login("e2e_vehicle_a", mktLowAccount, mktLowPwd);
+  // 前置条件：该账号确实进入了默认车辆空间，因此 403 不可能来自空间闸门。
+  const mktLowOrders = await request("GET", "/api/store-rental/orders", null, mktLow.accessToken);
+  assert.equal(mktLowOrders.status, 200, `前置条件：低权限账号应能进入旧车辆域读订单（证明空间闸门已通过）: ${mktLowOrders.status} ${JSON.stringify(mktLowOrders.body).slice(0, 200)}`);
+  const marketingBody = {
+    name: `E2E 越权方案 ${Date.now().toString(36)}`, displayName: "E2E 越权方案", status: "enabled",
+    customerScope: "all", supportedModes: ["daily"], priority: 1,
+    effectiveFrom: new Date(Date.now() - 86400000).toISOString(), effectiveTo: new Date(Date.now() + 86400000).toISOString(),
+    storeCodes: [], vehicleGroupCodes: [], manualVerification: false,
+    weekdayRate: 1, holidayRate: 1, fixedDeductionAmount: 0, description: "E2E", rules: []
+  };
+  const viewerMarketingWrite = await request("POST", "/api/store-rental/marketing/plans", marketingBody, mktLow.accessToken);
+  assert.equal(
+    viewerMarketingWrite.status,
+    403,
+    `只有 order:view 的账号不得写营销方案（曾因兜底 return [] 而完全无鉴权）: ${viewerMarketingWrite.status} ${JSON.stringify(viewerMarketingWrite.body).slice(0, 200)}`
+  );
+  const viewerMarketingRead = await request("GET", "/api/store-rental/marketing/plans", null, mktLow.accessToken);
+  assert.equal(viewerMarketingRead.status, 403, `只有 order:view 的账号也不得读营销方案配置: ${viewerMarketingRead.status}`);
+  // 正向控制：同一空间内持有营销权限的账号必须能读——否则上面两条 403 可能只是接口坏了。
+  const adminMarketingRead = await request("GET", "/api/store-rental/marketing/plans", null, mktAdmin.accessToken);
+  assert.equal(adminMarketingRead.status, 200, `持有营销权限的账号必须能读营销方案（证明 403 来自鉴权而非坏接口）: ${adminMarketingRead.status} ${JSON.stringify(adminMarketingRead.body).slice(0, 200)}`);
+  // 兜底默认拒绝不得误伤自助会话端点与租户级 UI 偏好：它们在显式公共白名单里。
+  const viewerSessionContext = await request("GET", "/api/auth/session-context", null, mktLow.accessToken);
+  assert.equal(viewerSessionContext.status, 200, `会话自助端点不得被默认拒绝误伤: ${viewerSessionContext.status}`);
+  const viewerPresets = await request("GET", "/api/platform/filter-presets?scopeKey=store-rental.orders", null, mktLow.accessToken);
+  assert.equal(viewerPresets.status, 200, `筛选预设（租户级 UI 偏好）不得被默认拒绝误伤: ${viewerPresets.status}`);
+  ok("未列入鉴权规则的路由默认拒绝：默认车辆空间内只读账号写/读营销方案均 403（此前完全无鉴权），同空间持权限账号 200 为正向控制，自助会话与筛选预设不被误伤");
   console.log("== 62. 无空间成员关系的账号不得访问经营域 ==");
   // 另一处 fail-open：空间检查曾附加 `accessContext.hasWorkspaces` 条件，
   // 于是「一个空间都没有的账号」跳过检查，随后仓储层的 resolveScopeWorkspaceId
