@@ -13,7 +13,15 @@ export type RentalCommercialSection = "pricing" | "discounts" | "services";
 
 const unitLabels = RENTAL_PRICING_UNIT_LABELS;
 const money = (value: number | undefined) => `¥${Number(value ?? 0).toFixed(2)}`;
-const serviceTypeLabels: Record<string, string> = { insurance: "保险", damage_waiver: "损坏免赔", delivery: "配送/运输", consumable: "耗材/配件", operator: "操作员", support: "技术支持", other: "其他" };
+const serviceTypeLabels: Record<string, string> = {
+  insurance: "保险",
+  damage_waiver: "损坏免赔",
+  delivery: "配送/运输",
+  consumable: "耗材/配件",
+  operator: "操作员",
+  support: "技术支持",
+  other: "其他",
+};
 
 export function RentalCommercialPage({ section }: { section: RentalCommercialSection }) {
   const { message } = App.useApp();
@@ -25,32 +33,142 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
   const [pricingForm] = Form.useForm<SaveRentalPricingPlanRequest>();
   const [discountForm] = Form.useForm<SaveRentalDiscountPlanRequest>();
   const [serviceForm] = Form.useForm<SaveRentalValueAddedServiceRequest>();
-  const profile = useQuery({ queryKey: ["rental-core", "profile"], queryFn: rentalCoreApi.profile });
-  const settings = useQuery({ queryKey: ["rental-core", "business-settings"], queryFn: rentalCoreApi.businessSettings });
-  const groups = useQuery({ queryKey: ["rental-core", "groups"], queryFn: rentalCoreApi.itemGroups });
-  const pricing = useQuery({ queryKey: ["rental-core", "pricing-plans"], queryFn: rentalCoreApi.pricingPlans });
-  const discounts = useQuery({ queryKey: ["rental-core", "discount-plans"], queryFn: rentalCoreApi.discountPlans });
-  const services = useQuery({ queryKey: ["rental-core", "value-added-services"], queryFn: rentalCoreApi.valueAddedServices });
+  const profile = useQuery({
+    queryKey: ["rental-core", "profile"],
+    queryFn: rentalCoreApi.profile,
+  });
+  const settings = useQuery({
+    queryKey: ["rental-core", "business-settings"],
+    queryFn: rentalCoreApi.businessSettings,
+  });
+  const groups = useQuery({
+    queryKey: ["rental-core", "groups"],
+    queryFn: rentalCoreApi.itemGroups,
+  });
+  const pricing = useQuery({
+    queryKey: ["rental-core", "pricing-plans"],
+    queryFn: rentalCoreApi.pricingPlans,
+  });
+  const discounts = useQuery({
+    queryKey: ["rental-core", "discount-plans"],
+    queryFn: rentalCoreApi.discountPlans,
+  });
+  const services = useQuery({
+    queryKey: ["rental-core", "value-added-services"],
+    queryFn: rentalCoreApi.valueAddedServices,
+  });
 
-  const savePricing = useMutation({ mutationFn: rentalCoreApi.savePricingPlan, onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["rental-core", "pricing-plans"] }); setPricingEditor(null); pricingForm.resetFields(); message.success("基础定价新版本已保存"); }, onError: () => message.error("保存失败，请检查商品、计价单位和价格参数") });
-  const saveDiscount = useMutation({ mutationFn: rentalCoreApi.saveDiscountPlan, onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["rental-core", "discount-plans"] }); setDiscountEditor(null); discountForm.resetFields(); message.success("优惠方案新版本已保存"); }, onError: () => message.error("保存失败，请检查优惠范围、有效期和叠加规则") });
-  const saveService = useMutation({ mutationFn: rentalCoreApi.saveValueAddedService, onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["rental-core", "value-added-services"] }); setServiceEditor(null); serviceForm.resetFields(); message.success("增值服务及条款版本已保存"); }, onError: () => message.error("保存失败，请检查服务条款、价格和适用商品") });
+  const savePricing = useMutation({
+    mutationFn: rentalCoreApi.savePricingPlan,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ["rental-core", "pricing-plans"],
+      });
+      setPricingEditor(null);
+      pricingForm.resetFields();
+      message.success("基础定价新版本已保存");
+    },
+    onError: () => message.error("保存失败，请检查商品、计价单位和价格参数"),
+  });
+  const saveDiscount = useMutation({
+    mutationFn: rentalCoreApi.saveDiscountPlan,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ["rental-core", "discount-plans"],
+      });
+      setDiscountEditor(null);
+      discountForm.resetFields();
+      message.success("优惠方案新版本已保存");
+    },
+    onError: () => message.error("保存失败，请检查优惠范围、有效期和叠加规则"),
+  });
+  const saveService = useMutation({
+    mutationFn: rentalCoreApi.saveValueAddedService,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ["rental-core", "value-added-services"],
+      });
+      setServiceEditor(null);
+      serviceForm.resetFields();
+      message.success("增值服务及条款版本已保存");
+    },
+    onError: () => message.error("保存失败，请检查服务条款、价格和适用商品"),
+  });
 
   function editPricing(record?: RentalPricingPlanV1) {
     const rates: SaveRentalPricingPlanRequest["rates"] = record
       ? record.rates.map(({ id: _id, itemGroupCode: _code, itemGroupName: _name, ...rate }) => rate)
-      : (groups.data ?? []).map((group) => ({ itemGroupId: group.id, unit: settings.data?.pricing.defaultUnit ?? "calendar_day", baseAmount: 0, weekendMultiplier: 1.1, holidayMultiplier: 1.25, depositAmount: 0, minimumUnits: 1 }));
-    pricingForm.setFieldsValue(record ? { id: record.id, code: record.code, name: record.name, status: record.status, effectiveFrom: record.effectiveFrom, effectiveTo: record.effectiveTo, changeReason: "调整基础价格", rates } : { code: "", name: "", status: "draft", effectiveFrom: new Date().toISOString(), changeReason: "新建定价计划", rates });
+      : (groups.data ?? []).map((group) => ({
+          itemGroupId: group.id,
+          unit: settings.data?.pricing.defaultUnit ?? "calendar_day",
+          baseAmount: 0,
+          weekendMultiplier: 1.1,
+          holidayMultiplier: 1.25,
+          depositAmount: 0,
+          minimumUnits: 1,
+        }));
+    pricingForm.setFieldsValue(
+      record
+        ? {
+            id: record.id,
+            code: record.code,
+            name: record.name,
+            status: record.status,
+            effectiveFrom: record.effectiveFrom,
+            effectiveTo: record.effectiveTo,
+            changeReason: "调整基础价格",
+            rates,
+          }
+        : {
+            code: "",
+            name: "",
+            status: "draft",
+            effectiveFrom: new Date().toISOString(),
+            changeReason: "新建定价计划",
+            rates,
+          },
+    );
     setPricingEditor(record ?? ({} as RentalPricingPlanV1));
   }
 
   function editDiscount(record?: RentalDiscountPlan) {
-    discountForm.setFieldsValue(record ? { ...record, changeReason: "调整优惠方案" } : { code: "", name: "", status: "draft", discountType: "percentage", discountValue: 5, minimumSpend: 0, customerScope: "all", applicableItemGroupIds: [], applicableDayTypes: [], priority: 100, stackableWithCoupon: true, effectiveFrom: new Date().toISOString(), changeReason: "新建优惠方案" });
+    discountForm.setFieldsValue(
+      record
+        ? { ...record, changeReason: "调整优惠方案" }
+        : {
+            code: "",
+            name: "",
+            status: "draft",
+            discountType: "percentage",
+            discountValue: 5,
+            minimumSpend: 0,
+            customerScope: "all",
+            applicableItemGroupIds: [],
+            applicableDayTypes: [],
+            priority: 100,
+            stackableWithCoupon: true,
+            effectiveFrom: new Date().toISOString(),
+            changeReason: "新建优惠方案",
+          },
+    );
     setDiscountEditor(record ?? ({} as RentalDiscountPlan));
   }
 
   function editService(record?: RentalValueAddedService) {
-    serviceForm.setFieldsValue(record ?? { code: "", name: "", serviceType: "other", billingUnit: "per_order", price: 0, maximumQuantity: 1, termsVersion: "1.0", terms: "", applicableItemGroupIds: [], status: "enabled" });
+    serviceForm.setFieldsValue(
+      record ?? {
+        code: "",
+        name: "",
+        serviceType: "other",
+        billingUnit: "per_order",
+        price: 0,
+        maximumQuantity: 1,
+        termsVersion: "1.0",
+        terms: "",
+        applicableItemGroupIds: [],
+        status: "enabled",
+      },
+    );
     setServiceEditor(record ?? ({} as RentalValueAddedService));
   }
 
@@ -59,24 +177,640 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
 
   return (
     <>
-      <PageHeader title={sectionTitle} description={sectionDescription} extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => section === "pricing" ? editPricing() : section === "discounts" ? editDiscount() : editService()}>新增{sectionTitle}</Button>} />
-      <div className="context-note"><span>{profile.data?.terminology.itemGroupLabel ?? "商品"} · {profile.data?.categoryCode ?? "-"}</span><span>订单只能引用服务端报价快照，前端不能直接决定成交单价。</span></div>
-      <div className="commercial-switcher"><Button type={section === "pricing" ? "primary" : "text"} onClick={() => navigate("/rental/pricing")}>基础定价</Button><Button type={section === "discounts" ? "primary" : "text"} onClick={() => navigate("/rental/discounts")}>优惠方案</Button><Button type={section === "services" ? "primary" : "text"} onClick={() => navigate("/rental/services")}>增值服务</Button></div>
+      <PageHeader
+        title={sectionTitle}
+        description={sectionDescription}
+        extra={
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => (section === "pricing" ? editPricing() : section === "discounts" ? editDiscount() : editService())}>
+            新增{sectionTitle}
+          </Button>
+        }
+      />
+      <div className="context-note">
+        <span>
+          {profile.data?.terminology.itemGroupLabel ?? "商品"} · {profile.data?.categoryCode ?? "-"}
+        </span>
+        <span>订单只能引用服务端报价快照，前端不能直接决定成交单价。</span>
+      </div>
+      <div className="commercial-switcher">
+        <Button type={section === "pricing" ? "primary" : "text"} onClick={() => navigate("/rental/pricing")}>
+          基础定价
+        </Button>
+        <Button type={section === "discounts" ? "primary" : "text"} onClick={() => navigate("/rental/discounts")}>
+          优惠方案
+        </Button>
+        <Button type={section === "services" ? "primary" : "text"} onClick={() => navigate("/rental/services")}>
+          增值服务
+        </Button>
+      </div>
 
-      {section === "pricing" && <Card className="data-panel" title={<Space><span>定价计划</span><Tag>{pricing.data?.length ?? 0}</Tag></Space>}><QueryState loading={pricing.isLoading} error={pricing.error}><Table<RentalPricingPlanV1> rowKey="id" dataSource={pricing.data ?? []} columns={[{ title: "计划", render: (_, row) => <><b>{row.name}</b><br /><span className="muted">{row.code} · v{row.version}</span></> }, { title: "价格条目", render: (_, row) => `${row.rates.length} 条` }, { title: "计价单位", render: (_, row) => [...new Set(row.rates.map((rate) => unitLabels[rate.unit] ?? rate.unit))].join("、") }, { title: "生效时间", dataIndex: "effectiveFrom" }, { title: "状态", dataIndex: "status", render: (value) => <Tag color={value === "enabled" ? "success" : "default"}>{value}</Tag> }, { title: "操作", render: (_, row) => <Button type="link" icon={<EditOutlined />} onClick={() => editPricing(row)}>编辑</Button> }]} /></QueryState></Card>}
-      {section === "discounts" && <Card className="data-panel" title={<Space><span>自动优惠方案</span><Tag>{discounts.data?.length ?? 0}</Tag></Space>}><QueryState loading={discounts.isLoading} error={discounts.error}><Table<RentalDiscountPlan> rowKey="id" dataSource={discounts.data ?? []} columns={[{ title: "方案", render: (_, row) => <><b>{row.name}</b><br /><span className="muted">{row.code} · v{row.version}</span></> }, { title: "优惠", render: (_, row) => row.discountType === "percentage" ? `${row.discountValue}%` : money(row.discountValue) }, { title: "门槛", dataIndex: "minimumSpend", render: money }, { title: "客户范围", dataIndex: "customerScope" }, { title: "优先级", dataIndex: "priority" }, { title: "与券叠加", dataIndex: "stackableWithCoupon", render: (value) => value ? "允许" : "不允许" }, { title: "状态", dataIndex: "status", render: (value) => <Tag color={value === "enabled" ? "success" : "default"}>{value}</Tag> }, { title: "操作", render: (_, row) => <Button type="link" icon={<EditOutlined />} onClick={() => editDiscount(row)}>编辑</Button> }]} /></QueryState></Card>}
-      {section === "services" && <Card className="data-panel" title={<Space><span>增值服务及保障</span><Tag>{services.data?.length ?? 0}</Tag></Space>}><QueryState loading={services.isLoading} error={services.error}><Table<RentalValueAddedService> rowKey="id" dataSource={services.data ?? []} columns={[{ title: "服务", render: (_, row) => <><b>{row.name}</b><br /><span className="muted">{row.code} · v{row.version}</span></> }, { title: "类型", dataIndex: "serviceType", render: (value) => <Tag>{serviceTypeLabels[value] ?? value}</Tag> }, { title: "价格", render: (_, row) => `${money(row.price)} / ${row.billingUnit}` }, { title: "保障额度", dataIndex: "coverageLimit", render: (value) => value === undefined ? "-" : money(value) }, { title: "免赔额", dataIndex: "deductible", render: (value) => value === undefined ? "-" : money(value) }, { title: "条款版本", dataIndex: "termsVersion" }, { title: "状态", dataIndex: "status", render: (value) => <Tag color={value === "enabled" ? "success" : "default"}>{value}</Tag> }, { title: "操作", render: (_, row) => <Button type="link" icon={<EditOutlined />} onClick={() => editService(row)}>编辑</Button> }]} /></QueryState></Card>}
+      {section === "pricing" && (
+        <Card
+          className="data-panel"
+          title={
+            <Space>
+              <span>定价计划</span>
+              <Tag>{pricing.data?.length ?? 0}</Tag>
+            </Space>
+          }
+        >
+          <QueryState loading={pricing.isLoading} error={pricing.error}>
+            <Table<RentalPricingPlanV1>
+              rowKey="id"
+              dataSource={pricing.data ?? []}
+              columns={[
+                {
+                  title: "计划",
+                  render: (_, row) => (
+                    <>
+                      <b>{row.name}</b>
+                      <br />
+                      <span className="muted">
+                        {row.code} · v{row.version}
+                      </span>
+                    </>
+                  ),
+                },
+                {
+                  title: "价格条目",
+                  render: (_, row) => `${row.rates.length} 条`,
+                },
+                {
+                  title: "计价单位",
+                  render: (_, row) => [...new Set(row.rates.map((rate) => unitLabels[rate.unit] ?? rate.unit))].join("、"),
+                },
+                { title: "生效时间", dataIndex: "effectiveFrom" },
+                {
+                  title: "状态",
+                  dataIndex: "status",
+                  render: (value) => <Tag color={value === "enabled" ? "success" : "default"}>{value}</Tag>,
+                },
+                {
+                  title: "操作",
+                  render: (_, row) => (
+                    <Button type="link" icon={<EditOutlined />} onClick={() => editPricing(row)}>
+                      编辑
+                    </Button>
+                  ),
+                },
+              ]}
+            />
+          </QueryState>
+        </Card>
+      )}
+      {section === "discounts" && (
+        <Card
+          className="data-panel"
+          title={
+            <Space>
+              <span>自动优惠方案</span>
+              <Tag>{discounts.data?.length ?? 0}</Tag>
+            </Space>
+          }
+        >
+          <QueryState loading={discounts.isLoading} error={discounts.error}>
+            <Table<RentalDiscountPlan>
+              rowKey="id"
+              dataSource={discounts.data ?? []}
+              columns={[
+                {
+                  title: "方案",
+                  render: (_, row) => (
+                    <>
+                      <b>{row.name}</b>
+                      <br />
+                      <span className="muted">
+                        {row.code} · v{row.version}
+                      </span>
+                    </>
+                  ),
+                },
+                {
+                  title: "优惠",
+                  render: (_, row) => (row.discountType === "percentage" ? `${row.discountValue}%` : money(row.discountValue)),
+                },
+                { title: "门槛", dataIndex: "minimumSpend", render: money },
+                { title: "客户范围", dataIndex: "customerScope" },
+                { title: "优先级", dataIndex: "priority" },
+                {
+                  title: "与券叠加",
+                  dataIndex: "stackableWithCoupon",
+                  render: (value) => (value ? "允许" : "不允许"),
+                },
+                {
+                  title: "状态",
+                  dataIndex: "status",
+                  render: (value) => <Tag color={value === "enabled" ? "success" : "default"}>{value}</Tag>,
+                },
+                {
+                  title: "操作",
+                  render: (_, row) => (
+                    <Button type="link" icon={<EditOutlined />} onClick={() => editDiscount(row)}>
+                      编辑
+                    </Button>
+                  ),
+                },
+              ]}
+            />
+          </QueryState>
+        </Card>
+      )}
+      {section === "services" && (
+        <Card
+          className="data-panel"
+          title={
+            <Space>
+              <span>增值服务及保障</span>
+              <Tag>{services.data?.length ?? 0}</Tag>
+            </Space>
+          }
+        >
+          <QueryState loading={services.isLoading} error={services.error}>
+            <Table<RentalValueAddedService>
+              rowKey="id"
+              dataSource={services.data ?? []}
+              columns={[
+                {
+                  title: "服务",
+                  render: (_, row) => (
+                    <>
+                      <b>{row.name}</b>
+                      <br />
+                      <span className="muted">
+                        {row.code} · v{row.version}
+                      </span>
+                    </>
+                  ),
+                },
+                {
+                  title: "类型",
+                  dataIndex: "serviceType",
+                  render: (value) => <Tag>{serviceTypeLabels[value] ?? value}</Tag>,
+                },
+                {
+                  title: "价格",
+                  render: (_, row) => `${money(row.price)} / ${row.billingUnit}`,
+                },
+                {
+                  title: "保障额度",
+                  dataIndex: "coverageLimit",
+                  render: (value) => (value === undefined ? "-" : money(value)),
+                },
+                {
+                  title: "免赔额",
+                  dataIndex: "deductible",
+                  render: (value) => (value === undefined ? "-" : money(value)),
+                },
+                { title: "条款版本", dataIndex: "termsVersion" },
+                {
+                  title: "状态",
+                  dataIndex: "status",
+                  render: (value) => <Tag color={value === "enabled" ? "success" : "default"}>{value}</Tag>,
+                },
+                {
+                  title: "操作",
+                  render: (_, row) => (
+                    <Button type="link" icon={<EditOutlined />} onClick={() => editService(row)}>
+                      编辑
+                    </Button>
+                  ),
+                },
+              ]}
+            />
+          </QueryState>
+        </Card>
+      )}
 
-      <Drawer title={pricingForm.getFieldValue("id") ? "编辑基础定价" : "新增基础定价"} width={820} open={Boolean(pricingEditor)} destroyOnHidden onClose={() => setPricingEditor(null)} extra={<Button type="primary" loading={savePricing.isPending} onClick={() => pricingForm.submit()}>保存新版本</Button>}>
-        <Form<SaveRentalPricingPlanRequest> form={pricingForm} layout="vertical" onFinish={(values) => savePricing.mutate(values)}><Form.Item name="id" hidden><Input /></Form.Item><Row gutter={12}><Col span={8}><Form.Item name="code" label="计划编码" rules={[{ required: true }]}><Input disabled={Boolean(pricingForm.getFieldValue("id"))} /></Form.Item></Col><Col span={10}><Form.Item name="name" label="计划名称" rules={[{ required: true }]}><Input /></Form.Item></Col><Col span={6}><Form.Item name="status" label="状态" rules={[{ required: true }]}><Select options={[{ value: "draft", label: "草稿" }, { value: "enabled", label: "启用" }, { value: "disabled", label: "停用" }]} /></Form.Item></Col></Row><Row gutter={12}><Col span={12}><Form.Item name="effectiveFrom" label="生效时间" rules={[{ required: true }]}><Input /></Form.Item></Col><Col span={12}><Form.Item name="effectiveTo" label="失效时间"><Input /></Form.Item></Col></Row><Form.List name="fulfillmentFees">{(feeFields, { add, remove }) => <Space direction="vertical" size={4} style={{ width: "100%" }}>{feeFields.map((fee) => <Row gutter={10} key={fee.key}><Col span={8}><Form.Item name={[fee.name, "mode"]} label="履约方式" rules={[{ required: true }]}><Select options={(settings.data?.fulfillment.enabledModes ?? []).map((mode) => ({ value: mode, label: mode }))} /></Form.Item></Col><Col span={5}><Form.Item name={[fee.name, "amount"]} label="履约费" rules={[{ required: true }]}><InputNumber min={0} precision={2} style={{ width: "100%" }} /></Form.Item></Col><Col span={6}><Form.Item name={[fee.name, "crossLocationAmount"]} label="异地归还附加费" tooltip="归还地点与取件地点不同时追加；0 表示异地免费"><InputNumber min={0} precision={2} style={{ width: "100%" }} /></Form.Item></Col><Col span={4}><Button danger onClick={() => remove(fee.name)}>移除</Button></Col></Row>)}<Button onClick={() => add({ mode: settings.data?.fulfillment.enabledModes?.[0], amount: 0 })}>新增履约费</Button></Space>}</Form.List><Form.List name="rates">{(fields) => <Space direction="vertical" style={{ width: "100%" }}>{fields.map((field) => <Card size="small" key={field.key}><Row gutter={10}><Col span={7}><Form.Item name={[field.name, "itemGroupId"]} label="商品" rules={[{ required: true }]}><Select options={(groups.data ?? []).map((group) => ({ value: group.id, label: `${group.code} · ${group.name}` }))} /></Form.Item></Col><Col span={5}><Form.Item name={[field.name, "unit"]} label="计价单位" rules={[{ required: true }]}><Select options={(settings.data?.pricing.enabledUnits ?? []).map((unit) => ({ value: unit, label: unitLabels[unit] ?? unit }))} /></Form.Item></Col><Col span={4}><Form.Item name={[field.name, "baseAmount"]} label="基础价"><InputNumber min={0} precision={2} style={{ width: "100%" }} /></Form.Item></Col><Col span={4}><Form.Item name={[field.name, "depositAmount"]} label="押金/预授权"><InputNumber min={0} precision={2} style={{ width: "100%" }} /></Form.Item></Col><Col span={4}><Form.Item name={[field.name, "minimumUnits"]} label="最低单位"><InputNumber min={0} precision={0} style={{ width: "100%" }} /></Form.Item></Col><Col span={6}><Form.Item name={[field.name, "weekendMultiplier"]} label="周末系数"><InputNumber min={0} step={0.05} /></Form.Item></Col><Col span={6}><Form.Item name={[field.name, "holidayMultiplier"]} label="节假日系数"><InputNumber min={0} step={0.05} /></Form.Item></Col></Row><Row gutter={10}><Col span={5}><Form.Item name={[field.name, "maxAmount"]} label="封顶价" tooltip="单件、单次租期的租金上限；留空表示不封顶，填 0 表示免租"><InputNumber min={0} precision={2} style={{ width: "100%" }} /></Form.Item></Col><Col span={5}><Form.Item name={[field.name, "depositMultiple"]} label="租金倍数押金" tooltip="仅当规则的押金模式为「租金倍数」时生效：该行押金 = 该行租金 × 本值"><InputNumber min={0} precision={2} style={{ width: "100%" }} /></Form.Item></Col><Col span={4}><Form.Item name={[field.name, "hourGranularityMinutes"]} label="小时粒度(分)" tooltip="仅小时计价使用；例如 30 表示不足半小时按半小时计。留空按 60"><InputNumber min={1} max={1440} precision={0} style={{ width: "100%" }} /></Form.Item></Col><Col span={5}><Form.Item name={[field.name, "includedUsage"]} label="包含使用量" tooltip="仅使用量计价使用"><InputNumber min={0} precision={2} style={{ width: "100%" }} /></Form.Item></Col><Col span={5}><Form.Item name={[field.name, "excessUsageAmount"]} label="超额单价" tooltip="仅使用量计价使用；留空按基础价"><InputNumber min={0} precision={2} style={{ width: "100%" }} /></Form.Item></Col></Row><Form.List name={[field.name, "tiers"]}>{(tierFields, { add, remove }) => <Space direction="vertical" size={4} style={{ width: "100%" }}>{tierFields.map((tier) => <Row gutter={10} key={tier.key}><Col span={7}><Form.Item name={[tier.name, "minUnits"]} label="阶梯起始单位数" rules={[{ required: true }]}><InputNumber min={1} precision={0} style={{ width: "100%" }} /></Form.Item></Col><Col span={7}><Form.Item name={[tier.name, "unitAmount"]} label="该档单价" rules={[{ required: true }]}><InputNumber min={0} precision={2} style={{ width: "100%" }} /></Form.Item></Col><Col span={4}><Button danger onClick={() => remove(tier.name)}>移除档位</Button></Col></Row>)}<Button onClick={() => add({ minUnits: 1, unitAmount: 0 })}>新增阶梯档位</Button></Space>}</Form.List><Row gutter={10}></Row></Card>)}</Space>}</Form.List><Form.Item name="changeReason" label="变更原因" rules={[{ required: true }]} style={{ marginTop: 16 }}><Input.TextArea rows={3} /></Form.Item></Form>
+      <Drawer
+        title={pricingForm.getFieldValue("id") ? "编辑基础定价" : "新增基础定价"}
+        width={820}
+        open={Boolean(pricingEditor)}
+        destroyOnHidden
+        onClose={() => setPricingEditor(null)}
+        extra={
+          <Button type="primary" loading={savePricing.isPending} onClick={() => pricingForm.submit()}>
+            保存新版本
+          </Button>
+        }
+      >
+        <Form<SaveRentalPricingPlanRequest> form={pricingForm} layout="vertical" onFinish={(values) => savePricing.mutate(values)}>
+          <Form.Item name="id" hidden>
+            <Input />
+          </Form.Item>
+          <Row gutter={12}>
+            <Col span={8}>
+              <Form.Item name="code" label="计划编码" rules={[{ required: true }]}>
+                <Input disabled={Boolean(pricingForm.getFieldValue("id"))} />
+              </Form.Item>
+            </Col>
+            <Col span={10}>
+              <Form.Item name="name" label="计划名称" rules={[{ required: true }]}>
+                <Input />
+              </Form.Item>
+            </Col>
+            <Col span={6}>
+              <Form.Item name="status" label="状态" rules={[{ required: true }]}>
+                <Select
+                  options={[
+                    { value: "draft", label: "草稿" },
+                    { value: "enabled", label: "启用" },
+                    { value: "disabled", label: "停用" },
+                  ]}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item name="effectiveFrom" label="生效时间" rules={[{ required: true }]}>
+                <Input />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="effectiveTo" label="失效时间">
+                <Input />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Form.List name="fulfillmentFees">
+            {(feeFields, { add, remove }) => (
+              <Space direction="vertical" size={4} style={{ width: "100%" }}>
+                {feeFields.map((fee) => (
+                  <Row gutter={10} key={fee.key}>
+                    <Col span={8}>
+                      <Form.Item name={[fee.name, "mode"]} label="履约方式" rules={[{ required: true }]}>
+                        <Select options={(settings.data?.fulfillment.enabledModes ?? []).map((mode) => ({ value: mode, label: mode }))} />
+                      </Form.Item>
+                    </Col>
+                    <Col span={5}>
+                      <Form.Item name={[fee.name, "amount"]} label="履约费" rules={[{ required: true }]}>
+                        <InputNumber min={0} precision={2} style={{ width: "100%" }} />
+                      </Form.Item>
+                    </Col>
+                    <Col span={6}>
+                      <Form.Item name={[fee.name, "crossLocationAmount"]} label="异地归还附加费" tooltip="归还地点与取件地点不同时追加；0 表示异地免费">
+                        <InputNumber min={0} precision={2} style={{ width: "100%" }} />
+                      </Form.Item>
+                    </Col>
+                    <Col span={4}>
+                      <Button danger onClick={() => remove(fee.name)}>
+                        移除
+                      </Button>
+                    </Col>
+                  </Row>
+                ))}
+                <Button
+                  onClick={() =>
+                    add({
+                      mode: settings.data?.fulfillment.enabledModes?.[0],
+                      amount: 0,
+                    })
+                  }
+                >
+                  新增履约费
+                </Button>
+              </Space>
+            )}
+          </Form.List>
+          <Form.List name="rates">
+            {(fields) => (
+              <Space direction="vertical" style={{ width: "100%" }}>
+                {fields.map((field) => (
+                  <Card size="small" key={field.key}>
+                    <Row gutter={10}>
+                      <Col span={7}>
+                        <Form.Item name={[field.name, "itemGroupId"]} label="商品" rules={[{ required: true }]}>
+                          <Select
+                            options={(groups.data ?? []).map((group) => ({
+                              value: group.id,
+                              label: `${group.code} · ${group.name}`,
+                            }))}
+                          />
+                        </Form.Item>
+                      </Col>
+                      <Col span={5}>
+                        <Form.Item name={[field.name, "unit"]} label="计价单位" rules={[{ required: true }]}>
+                          <Select
+                            options={(settings.data?.pricing.enabledUnits ?? []).map((unit) => ({
+                              value: unit,
+                              label: unitLabels[unit] ?? unit,
+                            }))}
+                          />
+                        </Form.Item>
+                      </Col>
+                      <Col span={4}>
+                        <Form.Item name={[field.name, "baseAmount"]} label="基础价">
+                          <InputNumber min={0} precision={2} style={{ width: "100%" }} />
+                        </Form.Item>
+                      </Col>
+                      <Col span={4}>
+                        <Form.Item name={[field.name, "depositAmount"]} label="每件固定押金" tooltip="仅押金规则为按商品固定金额时生效">
+                          <InputNumber min={0} precision={2} style={{ width: "100%" }} />
+                        </Form.Item>
+                      </Col>
+                      <Col span={4}>
+                        <Form.Item name={[field.name, "preAuthAmount"]} label="每件预授权额度" tooltip="与押金独立；仅预授权规则为按商品固定金额时生效">
+                          <InputNumber min={0} precision={2} style={{ width: "100%" }} />
+                        </Form.Item>
+                      </Col>
+                      <Col span={4}>
+                        <Form.Item name={[field.name, "minimumUnits"]} label="最低单位">
+                          <InputNumber min={0} precision={0} style={{ width: "100%" }} />
+                        </Form.Item>
+                      </Col>
+                      <Col span={6}>
+                        <Form.Item name={[field.name, "weekendMultiplier"]} label="周末系数">
+                          <InputNumber min={0} step={0.05} />
+                        </Form.Item>
+                      </Col>
+                      <Col span={6}>
+                        <Form.Item name={[field.name, "holidayMultiplier"]} label="节假日系数">
+                          <InputNumber min={0} step={0.05} />
+                        </Form.Item>
+                      </Col>
+                    </Row>
+                    <Row gutter={10}>
+                      <Col span={5}>
+                        <Form.Item name={[field.name, "maxAmount"]} label="封顶价" tooltip="单件、单次租期的租金上限；留空表示不封顶，填 0 表示免租">
+                          <InputNumber min={0} precision={2} style={{ width: "100%" }} />
+                        </Form.Item>
+                      </Col>
+                      <Col span={5}>
+                        <Form.Item name={[field.name, "depositMultiple"]} label="租金倍数押金" tooltip="仅当规则的押金模式为「租金倍数」时生效：该行押金 = 该行租金 × 本值">
+                          <InputNumber min={0} precision={2} style={{ width: "100%" }} />
+                        </Form.Item>
+                      </Col>
+                      <Col span={5}>
+                        <Form.Item name={[field.name, "preAuthMultiple"]} label="租金倍数预授权" tooltip="与押金倍数独立；仅预授权规则为租金倍数时生效">
+                          <InputNumber min={0} precision={2} style={{ width: "100%" }} />
+                        </Form.Item>
+                      </Col>
+                      <Col span={4}>
+                        <Form.Item name={[field.name, "hourGranularityMinutes"]} label="小时粒度(分)" tooltip="仅小时计价使用；例如 30 表示不足半小时按半小时计。留空按 60">
+                          <InputNumber min={1} max={1440} precision={0} style={{ width: "100%" }} />
+                        </Form.Item>
+                      </Col>
+                      <Col span={5}>
+                        <Form.Item name={[field.name, "includedUsage"]} label="包含使用量" tooltip="仅使用量计价使用">
+                          <InputNumber min={0} precision={2} style={{ width: "100%" }} />
+                        </Form.Item>
+                      </Col>
+                      <Col span={5}>
+                        <Form.Item name={[field.name, "excessUsageAmount"]} label="超额单价" tooltip="仅使用量计价使用；留空按基础价">
+                          <InputNumber min={0} precision={2} style={{ width: "100%" }} />
+                        </Form.Item>
+                      </Col>
+                    </Row>
+                    <Form.List name={[field.name, "tiers"]}>
+                      {(tierFields, { add, remove }) => (
+                        <Space direction="vertical" size={4} style={{ width: "100%" }}>
+                          {tierFields.map((tier) => (
+                            <Row gutter={10} key={tier.key}>
+                              <Col span={7}>
+                                <Form.Item name={[tier.name, "minUnits"]} label="阶梯起始单位数" rules={[{ required: true }]}>
+                                  <InputNumber min={1} precision={0} style={{ width: "100%" }} />
+                                </Form.Item>
+                              </Col>
+                              <Col span={7}>
+                                <Form.Item name={[tier.name, "unitAmount"]} label="该档单价" rules={[{ required: true }]}>
+                                  <InputNumber min={0} precision={2} style={{ width: "100%" }} />
+                                </Form.Item>
+                              </Col>
+                              <Col span={4}>
+                                <Button danger onClick={() => remove(tier.name)}>
+                                  移除档位
+                                </Button>
+                              </Col>
+                            </Row>
+                          ))}
+                          <Button onClick={() => add({ minUnits: 1, unitAmount: 0 })}>新增阶梯档位</Button>
+                        </Space>
+                      )}
+                    </Form.List>
+                    <Row gutter={10}></Row>
+                  </Card>
+                ))}
+              </Space>
+            )}
+          </Form.List>
+          <Form.Item name="changeReason" label="变更原因" rules={[{ required: true }]} style={{ marginTop: 16 }}>
+            <Input.TextArea rows={3} />
+          </Form.Item>
+        </Form>
       </Drawer>
 
-      <Drawer title={discountForm.getFieldValue("id") ? "编辑优惠方案" : "新增优惠方案"} width={680} open={Boolean(discountEditor)} destroyOnHidden onClose={() => setDiscountEditor(null)} extra={<Button type="primary" loading={saveDiscount.isPending} onClick={() => discountForm.submit()}>保存新版本</Button>}>
-        <Form<SaveRentalDiscountPlanRequest> form={discountForm} layout="vertical" onFinish={(values) => saveDiscount.mutate(values)}><Form.Item name="id" hidden><Input /></Form.Item><Row gutter={12}><Col span={8}><Form.Item name="code" label="方案编码" rules={[{ required: true }]}><Input disabled={Boolean(discountForm.getFieldValue("id"))} /></Form.Item></Col><Col span={10}><Form.Item name="name" label="方案名称" rules={[{ required: true }]}><Input /></Form.Item></Col><Col span={6}><Form.Item name="status" label="状态"><Select options={[{ value: "draft", label: "草稿" }, { value: "enabled", label: "启用" }, { value: "disabled", label: "停用" }]} /></Form.Item></Col></Row><Row gutter={12}><Col span={8}><Form.Item name="discountType" label="优惠类型"><Select options={[{ value: "percentage", label: "百分比减免" }, { value: "fixed_amount", label: "固定减免" }]} /></Form.Item></Col><Col span={8}><Form.Item name="discountValue" label="优惠值"><InputNumber min={0} style={{ width: "100%" }} /></Form.Item></Col><Col span={8}><Form.Item name="maximumDiscount" label="最高减免"><InputNumber min={0} style={{ width: "100%" }} /></Form.Item></Col><Col span={8}><Form.Item name="minimumSpend" label="最低消费"><InputNumber min={0} style={{ width: "100%" }} /></Form.Item></Col><Col span={8}><Form.Item name="customerScope" label="客户范围"><Select options={[{ value: "all", label: "全部" }, { value: "personal", label: "个人" }, { value: "corporate", label: "企业" }, { value: "member", label: "会员" }]} /></Form.Item></Col><Col span={8}><Form.Item name="priority" label="优先级"><InputNumber min={0} style={{ width: "100%" }} /></Form.Item></Col></Row><Form.Item name="applicableItemGroupIds" label="适用商品（空为全部）"><Select mode="multiple" allowClear options={(groups.data ?? []).map((group) => ({ value: group.id, label: group.name }))} /></Form.Item><Form.Item name="applicableDayTypes" label="适用日期类型（空为全部）"><Select mode="multiple" allowClear options={["workday", "weekend", "statutory_holiday", "makeup_workday", "tenant_special"].map((value) => ({ value, label: value }))} /></Form.Item><Row gutter={12}><Col span={12}><Form.Item name="effectiveFrom" label="生效时间"><Input /></Form.Item></Col><Col span={12}><Form.Item name="effectiveTo" label="失效时间"><Input /></Form.Item></Col></Row><Form.Item name="stackableWithCoupon" label="允许与优惠券叠加" valuePropName="checked"><Select options={[{ value: true, label: "允许" }, { value: false, label: "不允许" }]} /></Form.Item><Form.Item name="changeReason" label="变更原因" rules={[{ required: true }]}><Input.TextArea rows={3} /></Form.Item></Form>
+      <Drawer
+        title={discountForm.getFieldValue("id") ? "编辑优惠方案" : "新增优惠方案"}
+        width={680}
+        open={Boolean(discountEditor)}
+        destroyOnHidden
+        onClose={() => setDiscountEditor(null)}
+        extra={
+          <Button type="primary" loading={saveDiscount.isPending} onClick={() => discountForm.submit()}>
+            保存新版本
+          </Button>
+        }
+      >
+        <Form<SaveRentalDiscountPlanRequest> form={discountForm} layout="vertical" onFinish={(values) => saveDiscount.mutate(values)}>
+          <Form.Item name="id" hidden>
+            <Input />
+          </Form.Item>
+          <Row gutter={12}>
+            <Col span={8}>
+              <Form.Item name="code" label="方案编码" rules={[{ required: true }]}>
+                <Input disabled={Boolean(discountForm.getFieldValue("id"))} />
+              </Form.Item>
+            </Col>
+            <Col span={10}>
+              <Form.Item name="name" label="方案名称" rules={[{ required: true }]}>
+                <Input />
+              </Form.Item>
+            </Col>
+            <Col span={6}>
+              <Form.Item name="status" label="状态">
+                <Select
+                  options={[
+                    { value: "draft", label: "草稿" },
+                    { value: "enabled", label: "启用" },
+                    { value: "disabled", label: "停用" },
+                  ]}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={12}>
+            <Col span={8}>
+              <Form.Item name="discountType" label="优惠类型">
+                <Select
+                  options={[
+                    { value: "percentage", label: "百分比减免" },
+                    { value: "fixed_amount", label: "固定减免" },
+                  ]}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="discountValue" label="优惠值">
+                <InputNumber min={0} style={{ width: "100%" }} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="maximumDiscount" label="最高减免">
+                <InputNumber min={0} style={{ width: "100%" }} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="minimumSpend" label="最低消费">
+                <InputNumber min={0} style={{ width: "100%" }} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="customerScope" label="客户范围">
+                <Select
+                  options={[
+                    { value: "all", label: "全部" },
+                    { value: "personal", label: "个人" },
+                    { value: "corporate", label: "企业" },
+                    { value: "member", label: "会员" },
+                  ]}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="priority" label="优先级">
+                <InputNumber min={0} style={{ width: "100%" }} />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Form.Item name="applicableItemGroupIds" label="适用商品（空为全部）">
+            <Select
+              mode="multiple"
+              allowClear
+              options={(groups.data ?? []).map((group) => ({
+                value: group.id,
+                label: group.name,
+              }))}
+            />
+          </Form.Item>
+          <Form.Item name="applicableDayTypes" label="适用日期类型（空为全部）">
+            <Select mode="multiple" allowClear options={["workday", "weekend", "statutory_holiday", "makeup_workday", "tenant_special"].map((value) => ({ value, label: value }))} />
+          </Form.Item>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item name="effectiveFrom" label="生效时间">
+                <Input />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="effectiveTo" label="失效时间">
+                <Input />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Form.Item name="stackableWithCoupon" label="允许与优惠券叠加" valuePropName="checked">
+            <Select
+              options={[
+                { value: true, label: "允许" },
+                { value: false, label: "不允许" },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item name="changeReason" label="变更原因" rules={[{ required: true }]}>
+            <Input.TextArea rows={3} />
+          </Form.Item>
+        </Form>
       </Drawer>
 
-      <Drawer title={serviceForm.getFieldValue("id") ? "编辑增值服务" : "新增增值服务"} width={680} open={Boolean(serviceEditor)} destroyOnHidden onClose={() => setServiceEditor(null)} extra={<Button type="primary" loading={saveService.isPending} onClick={() => serviceForm.submit()}>保存服务</Button>}>
-        <Form<SaveRentalValueAddedServiceRequest> form={serviceForm} layout="vertical" onFinish={(values) => saveService.mutate(values)}><Form.Item name="id" hidden><Input /></Form.Item><Row gutter={12}><Col span={8}><Form.Item name="code" label="服务编码"><Input disabled={Boolean(serviceForm.getFieldValue("id"))} /></Form.Item></Col><Col span={10}><Form.Item name="name" label="服务名称"><Input /></Form.Item></Col><Col span={6}><Form.Item name="status" label="状态"><Select options={[{ value: "enabled", label: "启用" }, { value: "disabled", label: "停用" }]} /></Form.Item></Col><Col span={8}><Form.Item name="serviceType" label="服务类型"><Select options={Object.entries(serviceTypeLabels).map(([value, label]) => ({ value, label }))} /></Form.Item></Col><Col span={8}><Form.Item name="billingUnit" label="计费方式"><Select options={[{ value: "per_order", label: "每订单" }, { value: "per_day", label: "每天" }, { value: "per_unit", label: "每件" }]} /></Form.Item></Col><Col span={8}><Form.Item name="price" label="价格"><InputNumber min={0} precision={2} style={{ width: "100%" }} /></Form.Item></Col><Col span={8}><Form.Item name="maximumQuantity" label="最大数量"><InputNumber min={1} style={{ width: "100%" }} /></Form.Item></Col><Col span={8}><Form.Item name="coverageLimit" label="保障限额"><InputNumber min={0} style={{ width: "100%" }} /></Form.Item></Col><Col span={8}><Form.Item name="deductible" label="免赔额"><InputNumber min={0} style={{ width: "100%" }} /></Form.Item></Col></Row><Form.Item name="applicableItemGroupIds" label="适用商品（空为全部）"><Select mode="multiple" options={(groups.data ?? []).map((group) => ({ value: group.id, label: group.name }))} /></Form.Item><Form.Item name="termsVersion" label="条款版本"><Input /></Form.Item><Form.Item name="terms" label="服务/保障条款" rules={[{ required: true }]}><Input.TextArea rows={6} /></Form.Item></Form>
+      <Drawer
+        title={serviceForm.getFieldValue("id") ? "编辑增值服务" : "新增增值服务"}
+        width={680}
+        open={Boolean(serviceEditor)}
+        destroyOnHidden
+        onClose={() => setServiceEditor(null)}
+        extra={
+          <Button type="primary" loading={saveService.isPending} onClick={() => serviceForm.submit()}>
+            保存服务
+          </Button>
+        }
+      >
+        <Form<SaveRentalValueAddedServiceRequest> form={serviceForm} layout="vertical" onFinish={(values) => saveService.mutate(values)}>
+          <Form.Item name="id" hidden>
+            <Input />
+          </Form.Item>
+          <Row gutter={12}>
+            <Col span={8}>
+              <Form.Item name="code" label="服务编码">
+                <Input disabled={Boolean(serviceForm.getFieldValue("id"))} />
+              </Form.Item>
+            </Col>
+            <Col span={10}>
+              <Form.Item name="name" label="服务名称">
+                <Input />
+              </Form.Item>
+            </Col>
+            <Col span={6}>
+              <Form.Item name="status" label="状态">
+                <Select
+                  options={[
+                    { value: "enabled", label: "启用" },
+                    { value: "disabled", label: "停用" },
+                  ]}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="serviceType" label="服务类型">
+                <Select options={Object.entries(serviceTypeLabels).map(([value, label]) => ({ value, label }))} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="billingUnit" label="计费方式">
+                <Select
+                  options={[
+                    { value: "per_order", label: "每订单" },
+                    { value: "per_day", label: "每天" },
+                    { value: "per_unit", label: "每件" },
+                  ]}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="price" label="价格">
+                <InputNumber min={0} precision={2} style={{ width: "100%" }} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="maximumQuantity" label="最大数量">
+                <InputNumber min={1} style={{ width: "100%" }} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="coverageLimit" label="保障限额">
+                <InputNumber min={0} style={{ width: "100%" }} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="deductible" label="免赔额">
+                <InputNumber min={0} style={{ width: "100%" }} />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Form.Item name="applicableItemGroupIds" label="适用商品（空为全部）">
+            <Select
+              mode="multiple"
+              options={(groups.data ?? []).map((group) => ({
+                value: group.id,
+                label: group.name,
+              }))}
+            />
+          </Form.Item>
+          <Form.Item name="termsVersion" label="条款版本">
+            <Input />
+          </Form.Item>
+          <Form.Item name="terms" label="服务/保障条款" rules={[{ required: true }]}>
+            <Input.TextArea rows={6} />
+          </Form.Item>
+        </Form>
       </Drawer>
     </>
   );

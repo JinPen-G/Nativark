@@ -67,6 +67,20 @@ const themeSource = read("apps/admin/src/app/theme.tsx");
 [
   "substitutionGroup", "默认组成", "替代候选"
 ].forEach((label) => requireText(catalogPage, label, "bundle component UI coverage"));
+[
+  'name={["deposit", "mode"]}',
+  'name={["deposit", "maxAmount"]}',
+  'name={["preauthorization", "mode"]}',
+  'name={["preauthorization", "maxAmount"]}',
+  "ruleSecurityGroups",
+  '[["none", securityRuleLabels.none]]'
+].forEach((label) => requireText(governancePage, label, "independent deposit and preauthorization rule UI"));
+[
+  'name={[field.name, "preAuthAmount"]}',
+  'name={[field.name, "preAuthMultiple"]}',
+  "每件固定押金",
+  "每件预授权额度"
+].forEach((label) => requireText(commercialPage, label, "independent deposit and preauthorization rate UI"));
 
 [
   "createPriceSchedule", "previewDispatchOptimization", "applyDispatchOptimization", "manualReassignFromDispatch",

@@ -1986,7 +1986,6 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     let preAuthGross = 0;
     // 押金模式来自**已发布规则**而非当前设置：规则快照要随订单固化，
     // 用实时设置会让同一张报价在设置改动后复算出不同押金。
-    const depositMode = rule.config.payment.depositMode;
     // 押金与预授权**各自独立**取数（需求 4.4.7）。整组缺省时由旧的 payment.depositMode 派生，
     // 使既有已发布规则快照继续按原口径复算——历史订单不得因新增字段换一套押金口径。
     const depositRule = effectiveDepositRule(rule.config);
@@ -2481,7 +2480,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   }
 
   private validateRule(context: BusinessContext, config: RentalRuleConfig) {
-    if (config.payment.preauthorizationRequired && !context.category.businessModel.supportsPreauthorization) throw new BadRequestException("当前品类不支持预授权");
+    const preauthorizationEnabled = effectivePreauthorizationRule(config).mode !== "none";
+    if ((config.payment.preauthorizationRequired || preauthorizationEnabled) && !context.category.businessModel.supportsPreauthorization) {
+      throw new BadRequestException("当前品类不支持预授权");
+    }
     if (config.qualification.required && !context.category.businessModel.supportsQualificationReview) throw new BadRequestException("当前品类不支持资质审核");
     if (config.fulfillment.allowDifferentReturnLocation && !context.settings.fulfillment.allowDifferentReturnLocation) throw new BadRequestException("租户履约设置未启用异地归还");
     if (config.payment.unpaidHoldMinutes < 1 || config.overdue.graceMinutes < 0 || config.overdue.feeMultiplier < 0 || config.cancellation.freeBeforeHours < 0) throw new BadRequestException("规则中的时长或费用参数无效");

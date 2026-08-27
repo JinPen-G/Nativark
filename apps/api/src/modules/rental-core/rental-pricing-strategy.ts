@@ -230,6 +230,35 @@ function shiftWindowStarts(startAt: string, endAt: string, ctx: RentalPricingCon
   return starts.sort((left, right) => left - right);
 }
 
+/** 最低起租量超过实际窗口数时，沿真实班次边界继续生成取价时点。 */
+function shiftWindowStartsForUnits(startAt: string, endAt: string, units: number, ctx: RentalPricingContext): number[] {
+  const target = Math.max(0, units);
+  if (!target) return [];
+  const actual = shiftWindowStarts(startAt, endAt, ctx);
+  if (actual.length >= target) return actual.slice(0, target);
+  const timeZone = ctx.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE;
+  const bounds = [...new Set(ctx.shiftStartHours ?? [])]
+    .filter((hour) => Number.isFinite(hour) && hour >= 0 && hour < 24)
+    .sort((left, right) => left - right);
+  if (!bounds.length) return actual;
+  const starts = [...actual];
+  const seen = new Set(starts);
+  let day = businessDayIndex(startAt, timeZone) - 1;
+  while (starts.length < target) {
+    const dateKey = businessDateKeyFromIndex(day);
+    for (const hour of bounds) {
+      const candidate = businessInstantAt(dateKey, hour, timeZone);
+      if (candidate >= new Date(endAt).getTime() && !seen.has(candidate)) {
+        starts.push(candidate);
+        seen.add(candidate);
+        if (starts.length >= target) break;
+      }
+    }
+    day += 1;
+  }
+  return starts.sort((left, right) => left - right);
+}
+
 const durationStrategy = (unit: RentalPricingUnit, hoursPerUnit: number): RentalPricingStrategy => ({
   unit,
   billableUnits: (startAt, endAt, ctx) => {
@@ -244,10 +273,8 @@ const durationStrategy = (unit: RentalPricingUnit, hoursPerUnit: number): Rental
     const timeZone = ctx?.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE;
     // 班次配了边界时用与计数**同一组**窗口起点，不再按固定块长从起租时刻推算。
     if (unit === "shift" && ctx?.shiftStartHours?.length) {
-      const starts = shiftWindowStarts(startAt, endAt, ctx);
-      return Array.from({ length: Math.max(0, units) }, (_, index) =>
-        businessDateKey(new Date(starts[index] ?? starts[starts.length - 1] ?? new Date(startAt).getTime()).toISOString(), timeZone)
-      );
+      return shiftWindowStartsForUnits(startAt, endAt, units, ctx)
+        .map((value) => businessDateKey(new Date(value).toISOString(), timeZone));
     }
     const hours = blockHours(unit, hoursPerUnit, ctx);
     return Array.from({ length: Math.max(0, units) }, (_, index) =>

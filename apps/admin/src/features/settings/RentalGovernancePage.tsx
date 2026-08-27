@@ -10,8 +10,10 @@ import type {
   GrantRentalRewardRequest,
   RentalCalendarDay,
   RentalCalendarVersionSummary,
+  RentalDepositRule,
   SaveRentalCalendarDayRequest,
   RentalNotificationTemplateV1,
+  RentalPreauthorizationRule,
   RentalRuleVersion,
   SaveRentalNotificationTemplateRequest,
   SendRentalNotificationRequest,
@@ -98,6 +100,29 @@ const modeLabels: Record<string, string> = {  store_pickup_return: "门店取还
   delivery: "配送",
   onsite_delivery: "现场交付",
 };
+const securityRuleLabels: Record<RentalDepositRule["mode"], string> = {
+  none: "不需要",
+  fixed: "按商品固定金额",
+  price_multiple: "按商品行租金倍数",
+};
+
+/** 旧规则只有 payment.depositMode；打开编辑器时显式派生为新的两组独立规则。 */
+function ruleSecurityGroups(config: RentalRuleVersion["config"]): {
+  deposit: RentalDepositRule;
+  preauthorization: RentalPreauthorizationRule;
+} {
+  const legacyMode = config.payment.depositMode;
+  return {
+    deposit:
+      config.deposit ??
+      (legacyMode === "none" || legacyMode === "preauthorization"
+        ? { mode: "none" }
+        : { mode: legacyMode }),
+    preauthorization:
+      config.preauthorization ??
+      (legacyMode === "preauthorization" ? { mode: "fixed" } : { mode: "none" }),
+  };
+}
 
 export function RentalGovernancePage() {
   const { message } = App.useApp();
@@ -280,8 +305,28 @@ export function RentalGovernancePage() {
       values: RentalRuleVersion["config"] & { changeReason: string },
     ) => {
       const { changeReason, ...config } = values;
+      const deposit = config.deposit ?? { mode: "none" as const };
+      // 不支持预授权的品类只能保存 none。即使历史快照或缓存表单残留了旧值，
+      // 也要给用户一条可恢复路径，不能让禁用控件与后端能力校验形成死锁。
+      const preauthorization = category?.businessModel.supportsPreauthorization === false
+        ? { mode: "none" as const }
+        : config.preauthorization ?? { mode: "none" as const };
       return rentalCoreApi.saveRuleVersion({
-        config,
+        config: {
+          ...config,
+          deposit,
+          preauthorization,
+          payment: {
+            ...config.payment,
+            depositMode:
+              deposit.mode !== "none"
+                ? deposit.mode
+                : preauthorization.mode !== "none"
+                  ? "preauthorization"
+                  : "none",
+            preauthorizationRequired: preauthorization.mode !== "none",
+          },
+        },
         changeReason,
         publish: true,
       });
@@ -489,8 +534,14 @@ export function RentalGovernancePage() {
       rules.data?.find((item) => item.status === "published") ??
       rules.data?.[0];
     if (!current) return;
+    const config = structuredClone(current.config);
+    const security = ruleSecurityGroups(config);
+    if (category?.businessModel.supportsPreauthorization === false) {
+      security.preauthorization = { mode: "none" };
+    }
     ruleForm.setFieldsValue({
-      ...structuredClone(current.config),
+      ...config,
+      ...security,
       changeReason: "调整租赁业务规则",
     });
     setRuleEditor(current);
@@ -851,7 +902,10 @@ export function RentalGovernancePage() {
                         {
                           key: "deposit",
                           label: "押金/预授权",
-                          children: `${currentRule.config.payment.depositMode} · ${currentRule.config.payment.preauthorizationRequired ? "必需" : "非必需"}`,
+                          children: (() => {
+                            const security = ruleSecurityGroups(currentRule.config);
+                            return `押金：${securityRuleLabels[security.deposit.mode]} · 预授权：${securityRuleLabels[security.preauthorization.mode]}`;
+                          })(),
                         },
                         {
                           key: "inspection",
@@ -1498,18 +1552,6 @@ export function RentalGovernancePage() {
                 </Form.Item>
               </Col>
               <Col span={8}>
-                <Form.Item name={["payment", "depositMode"]} label="押金方式">
-                  <Select
-                    options={[
-                      "none",
-                      "fixed",
-                      "price_multiple",
-                      "preauthorization",
-                    ].map((value) => ({ value, label: value }))}
-                  />
-                </Form.Item>
-              </Col>
-              <Col span={8}>
                 <Form.Item
                   name={["payment", "unpaidHoldMinutes"]}
                   label="待支付保留分钟"
@@ -1517,13 +1559,31 @@ export function RentalGovernancePage() {
                   <InputNumber min={1} />
                 </Form.Item>
               </Col>
+              <Form.Item name={["payment", "depositMode"]} hidden><Input /></Form.Item>
+              <Form.Item name={["payment", "preauthorizationRequired"]} valuePropName="checked" hidden><Switch /></Form.Item>
               <Col span={8}>
-                <Form.Item
-                  name={["payment", "preauthorizationRequired"]}
-                  label="必须预授权"
-                  valuePropName="checked"
-                >
-                  <Switch />
+                <Form.Item name={["deposit", "mode"]} label="押金规则" rules={[{ required: true }]}>
+                  <Select options={Object.entries(securityRuleLabels).map(([value, label]) => ({ value, label }))} />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name={["deposit", "maxAmount"]} label="订单押金上限" tooltip="留空表示不设上限；0 表示免押。">
+                  <InputNumber min={0} style={{ width: "100%" }} />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name={["preauthorization", "mode"]} label="预授权规则" rules={[{ required: true }]}>
+                  <Select
+                    options={(category?.businessModel.supportsPreauthorization
+                      ? Object.entries(securityRuleLabels)
+                      : [["none", securityRuleLabels.none]]
+                    ).map(([value, label]) => ({ value, label }))}
+                  />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name={["preauthorization", "maxAmount"]} label="订单预授权上限" tooltip="留空表示不设上限；预授权只冻结额度，不计入实收。">
+                  <InputNumber min={0} disabled={!category?.businessModel.supportsPreauthorization} style={{ width: "100%" }} />
                 </Form.Item>
               </Col>
               <Col span={8}>

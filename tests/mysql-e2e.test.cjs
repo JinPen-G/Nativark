@@ -434,37 +434,16 @@ async function main() {
   // 实测确认：迁移与 schema.prisma 之间本就存在 11 张表的历史 drift，旧写法全程没报。
   const driftClean = /No difference detected/iu.test(driftSql);
   if (!driftClean) {
-    // 历史遗留 drift 清单（迁移产物与 schema.prisma 不一致，均早于 SPACE-01）。
-    // 只允许这些表出现在差异里；任何新表进入差异都会让本节失败。
-    // 这不是豁免，而是把既有欠账**显式钉住**，避免它继续掩盖新引入的 drift。
-    const KNOWN_LEGACY_DRIFT = [
-      "MarketingPlan",
-      "MarketingPlanVersion",
-      "OrderContractDocument",
-      "OrderEventSnapshot",
-      "OrderIdempotencyRecord",
-      "OrderNotificationRecord",
-      "OrderOperationLock",
-      "OrderOperationRecord",
-      "OrderRemarkRecord",
-      "Tenant",
-      "VehicleAttachmentRecord"
-    ];
-    const changed = [...driftSql.matchAll(/Changed the `([^`]+)` table/gu)].map((m) => m[1]);
-    const added = [...driftSql.matchAll(/^\s+- (\S+)$/gmu)].map((m) => m[1]);
-    const unexpected = [...new Set([...changed, ...added])].filter((name) => !KNOWN_LEGACY_DRIFT.includes(name));
-    if (unexpected.length) {
-      fail(
-        `迁移结果与 schema.prisma 存在**新增** drift: ${unexpected.join(", ")}`,
-        driftSql.slice(0, 2000)
-      );
-    }
-    ok(
-      `迁移后无新增 drift；历史遗留 drift ${changed.filter((n) => KNOWN_LEGACY_DRIFT.includes(n)).length} 张表待独立任务收口`
+    const driftScript = runNode([
+      PRISMA_CLI, "migrate", "diff", "--from-url", TEST_DATABASE_URL,
+      "--to-schema-datamodel", SCHEMA_PATH, "--script"
+    ]);
+    fail(
+      "空库全量迁移结果与 schema.prisma 不一致",
+      `${driftScript.stdout || ""}${driftScript.stderr || driftSql}`.slice(0, 12000)
     );
-  } else {
-    ok("迁移后库结构与 schema.prisma 完全一致（无 drift）");
   }
+  ok("迁移后库结构与 schema.prisma 完全一致（无 drift）");
 
   console.log("== 3. 二次部署幂等（已迁移库升级路径） ==");
   const countsBefore = {
@@ -613,9 +592,11 @@ async function main() {
          '1.0', '1.0', ${ruleSnapshot}, JSON_ARRAY(), NOW(3), NOW(3));
     `);
   }
-  // 回退纠正迁移，再重新 deploy —— 证明是**迁移**做的分类，而不是插入时就写对了。
-  mysqlQuery("DELETE FROM `_prisma_migrations` WHERE `migration_name` = '20260827000900_fix_legacy_deposit_preauth_receivable';");
+  // 回退两条纠正迁移，再重新 deploy，证明是迁移链做的分类与金额隔离。
+  mysqlQuery("DELETE FROM `_prisma_migrations` WHERE `migration_name` IN ('20260827000900_fix_legacy_deposit_preauth_receivable','20260828000200_preserve_unverified_legacy_security_amount');");
   mysqlQuery(`
+    ALTER TABLE \`rental_quotes\` DROP COLUMN \`legacyDepositUnverifiedAmount\`;
+    ALTER TABLE \`rental_orders\` DROP COLUMN \`legacyDepositUnverifiedAmount\`;
     ALTER TABLE \`rental_quotes\` DROP COLUMN \`legacyDepositUnverified\`;
     ALTER TABLE \`rental_orders\` DROP COLUMN \`legacyDepositUnverified\`;
   `);
@@ -645,7 +626,7 @@ async function main() {
   assert.equal(Number(fixedRow.legacyDepositUnverified), 0, "固定押金口径不应被标为待确认");
   // ③无法判定：标记待确认，且该笔不得计入实收。
   const unknownRow = readRow(
-    "SELECT `depositAmount`, `preAuthAmount`, `receivableAmount`, `legacyDepositUnverified` FROM `rental_quotes` WHERE `id`='e2e_legacy_q_unknown';"
+    "SELECT `depositAmount`, `preAuthAmount`, `receivableAmount`, `legacyDepositUnverified`, `legacyDepositUnverifiedAmount` FROM `rental_quotes` WHERE `id`='e2e_legacy_q_unknown';"
   );
   assert.equal(Number(unknownRow.legacyDepositUnverified), 1, `无法判定归属的记录必须标为待确认: ${unknownRow.legacyDepositUnverified}`);
   assert.equal(
@@ -653,12 +634,13 @@ async function main() {
     legacyQuoteBase.payable,
     `归属未确认的金额不得擅自算进本次实收: ${unknownRow.receivableAmount}`
   );
-  assert.equal(Number(unknownRow.depositAmount), legacyQuoteBase.deposit, "待确认记录的原始金额必须原样保留供人工核对");
+  assert.equal(Number(unknownRow.depositAmount), 0, "待确认金额不得继续留在 depositAmount 被误当成押金");
+  assert.equal(Number(unknownRow.legacyDepositUnverifiedAmount), legacyQuoteBase.deposit, "原始金额必须移到独立待确认字段");
   // 清掉这三条人造存量行：它们会让该经营空间的业务配置快照变成"非空"，
   // 启动时就不再生成样例默认价格，后续第 9 节的报价会因"没有可用定价计划"而失败。
   // 断言已全部完成，删除不影响本节结论。
   mysqlQuery("DELETE FROM `rental_quotes` WHERE `id` IN ('e2e_legacy_q_preauth','e2e_legacy_q_fixed','e2e_legacy_q_unknown');");
-  ok("旧库存量押金/预授权混口径经纠正迁移重新分类：预授权搬到额度且不计实收、固定押金原样计实收、无法判定者标记待确认并从实收剔除");
+  ok("旧库存量押金/预授权混口径经纠正迁移重新分类：预授权搬到额度、固定押金保留、无法判定金额独立隔离");
 
   console.log("== 6. 仓储层 fail-closed（无租户身份必须拒绝） ==");
   require("ts-node").register({
@@ -2396,13 +2378,26 @@ async function main() {
     500,
     "同时存在时预授权必须落库"
   );
+  const campingRules = await request("GET", "/api/rental/v1/rule-versions", null, demo2.accessToken);
+  const campingCurrentRule = campingRules.body.data.find((row) => row.status === "published") ?? campingRules.body.data[0];
+  const unsupportedPreauth = await request("POST", "/api/rental/v1/rule-versions", {
+    changeReason: "验证不支持预授权的品类不能绕过新字段启用",
+    publish: true,
+    config: {
+      ...campingCurrentRule.config,
+      deposit: { mode: "none" },
+      preauthorization: { mode: "fixed" },
+      payment: { ...campingCurrentRule.config.payment, depositMode: "none", preauthorizationRequired: false }
+    }
+  }, demo2.accessToken);
+  assert.equal(unsupportedPreauth.status, 400, "不支持预授权的品类通过新字段启用必须 400");
   // 还原：回到夹具原始规则，避免污染后续用例。
   assert.equal(
     (await request("POST", "/api/rental/v1/rule-versions", { changeReason: "还原押金规则", publish: true, config: depositRule.config }, construction.accessToken)).status,
     201,
     "还原原始规则失败"
   );
-  ok("押金与预授权独立配置：四种组合（都不需要/仅押金/仅预授权/两者同时）各自取数正确，预授权取 preAuthAmount 且永不进本次实收，实收恒为应付+押金，两笔金额分别落库，实收押金明细不再被误名为「预授权额度」");
+  ok("押金与预授权独立配置：四种组合分别取数落库，预授权不进实收，不支持品类无法绕过新字段启用");
 
   console.log("== 15e. PRICE-01 履约费用与异地归还附加费 ==");
   // 需求 4.4 的应付公式里「履约费用」是与增值服务并列的独立一项，此前既无字段也无
