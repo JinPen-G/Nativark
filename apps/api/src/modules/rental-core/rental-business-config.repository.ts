@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { ConflictException, Injectable } from "@nestjs/common";
 import { Prisma, type $Enums } from "@prisma/client";
 import type {
   RentalCalendarDay,
@@ -51,12 +51,22 @@ export interface RentalBusinessConfigStore {
   upsertPricingPlan(plan: RentalPricingPlanV1): Promise<void>;
   upsertDiscountPlan(plan: RentalDiscountPlan): Promise<void>;
   upsertService(service: RentalValueAddedService): Promise<void>;
-  upsertCalendar(calendar: RentalCalendarYear): Promise<void>;
+  upsertCalendar(calendar: RentalCalendarYear, expectedRevision?: number): Promise<void>;
+  /**
+   * 重新读取某年度的全部版本。乐观锁冲突后必须用它刷新进程内缓存：
+   * 冲突说明缓存里那一版已经落后于库，继续基于它计算只会一直冲突，
+   * 而把它简单丢弃又会让下一次编辑走「新建版本」路径、撞上库里已存在的版本号。
+   */
+  loadCalendarsForYear(tenantId: string, year: number): Promise<RentalCalendarYear[]>;
   /**
    * 发布年度日历：新版本置 published 与旧版本置 superseded 必须在同一事务内。
    * 分两次写在失败时会留下两个 published 版本，或留下该年度没有已发布日历的空窗。
    */
-  publishCalendarVersion(next: RentalCalendarYear, superseded?: RentalCalendarYear): Promise<void>;
+  publishCalendarVersion(
+    next: RentalCalendarYear,
+    superseded?: RentalCalendarYear,
+    expectedRevisions?: { next: number; superseded: number }
+  ): Promise<void>;
   upsertRuleVersion(version: RentalRuleVersion): Promise<void>;
   /**
    * 发布新规则版本：新版本落库与旧 published 版本退役必须在同一事务内。
@@ -239,18 +249,57 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       publishDiff: (calendar.publishDiff ?? null) as unknown as Prisma.InputJsonValue,
       overrideAudits: (calendar.overrideAudits ?? null) as unknown as Prisma.InputJsonValue,
       importPreservedOverrides: (calendar.importPreservedOverrides ?? null) as unknown as Prisma.InputJsonValue,
-      days: calendar.days as unknown as Prisma.InputJsonValue
+      days: calendar.days as unknown as Prisma.InputJsonValue,
+      revision: calendar.revision ?? 0
     };
   }
 
-  async upsertCalendar(calendar: RentalCalendarYear): Promise<void> {
+  /**
+   * 写入年度日历。`expectedRevision` 给出**读到该行时的 revision**，写入即以它为条件。
+   *
+   * 为什么必须条件写：整年日期在同一个 JSON 字段里，两个编辑人同时改不同日期时都会
+   * 复制全年再写回，无条件 upsert 会让后写者整体覆盖先写者，双方都收到成功。
+   * 条件不匹配时抛 409，由调用方刷新后重试——静默覆盖比报错难查得多。
+   *
+   * `expectedRevision` 为 undefined 表示调用方认为该行不存在（新建）或不参与并发保护
+   * （启动预热等场景），此时退回无条件 upsert。
+   */
+  async upsertCalendar(calendar: RentalCalendarYear, expectedRevision?: number): Promise<void> {
     const data = this.calendarData(calendar);
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, calendar.tenantId);
-    await this.prisma.rentalBusinessCalendar.upsert({
-      where: { workspaceId_year_version: { workspaceId, year: calendar.year, version: calendar.version } },
-      create: { workspaceId, tenantId: calendar.tenantId, year: calendar.year, ...data },
-      update: data
+    if (expectedRevision === undefined) {
+      await this.prisma.rentalBusinessCalendar.upsert({
+        where: { workspaceId_year_version: { workspaceId, year: calendar.year, version: calendar.version } },
+        create: { workspaceId, tenantId: calendar.tenantId, year: calendar.year, ...data },
+        update: data
+      });
+      return;
+    }
+    // 条件更新：只有 revision 仍是读到的值时才写入。
+    const updated = await this.prisma.rentalBusinessCalendar.updateMany({
+      where: { workspaceId, year: calendar.year, version: calendar.version, revision: expectedRevision },
+      data
     });
+    if (updated.count > 0) return;
+    // 没更新到：要么该行还不存在（首次写这个版本号），要么 revision 已被别人推进。
+    const existing = await this.prisma.rentalBusinessCalendar.findUnique({
+      where: { workspaceId_year_version: { workspaceId, year: calendar.year, version: calendar.version } },
+      select: { revision: true }
+    });
+    if (existing) {
+      throw new ConflictException(
+        `${calendar.year} 年度日历已被其他人修改（当前版本 ${existing.revision}，你基于 ${expectedRevision}），请刷新后重试`
+      );
+    }
+    await this.prisma.rentalBusinessCalendar.create({
+      data: { workspaceId, tenantId: calendar.tenantId, year: calendar.year, ...data }
+    });
+  }
+
+  async loadCalendarsForYear(tenantId: string, year: number): Promise<RentalCalendarYear[]> {
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
+    const rows = await this.prisma.rentalBusinessCalendar.findMany({ where: { workspaceId, year } });
+    return rows.map((row) => this.toCalendar(row));
   }
 
   /**
@@ -260,22 +309,51 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
    * 最大的那个，于是旧口径被静默弃用却没有任何替代记录，历史报价也无法解释；
    * 反序写又会在中途失败时留下"该年度没有已发布日历"，报价静默回落到周模板。
    */
-  async publishCalendarVersion(next: RentalCalendarYear, superseded?: RentalCalendarYear): Promise<void> {
+  async publishCalendarVersion(
+    next: RentalCalendarYear,
+    superseded?: RentalCalendarYear,
+    expectedRevisions?: { next: number; superseded: number }
+  ): Promise<void> {
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, next.tenantId);
     const nextData = this.calendarData(next);
     const supersededData = superseded ? this.calendarData(superseded) : undefined;
     await this.prisma.$transaction(async (tx) => {
-      await tx.rentalBusinessCalendar.upsert({
-        where: { workspaceId_year_version: { workspaceId, year: next.year, version: next.version } },
-        create: { workspaceId, tenantId: next.tenantId, year: next.year, ...nextData },
-        update: nextData
-      });
-      if (superseded && supersededData) {
-        await tx.rentalBusinessCalendar.upsert({
-          where: { workspaceId_year_version: { workspaceId, year: superseded.year, version: superseded.version } },
-          create: { workspaceId, tenantId: superseded.tenantId, year: superseded.year, ...supersededData },
-          update: supersededData
+      // 条件更新，条件是「读到的 revision」：两人同时发布同一年度时，后者会更新到 0 行
+      // 并在这里整体回滚，而不是两次都成功留下两个 published 版本。
+      const conditional = async (
+        target: RentalCalendarYear,
+        data: ReturnType<RentalBusinessConfigRepository["calendarData"]>,
+        expected: number | undefined
+      ) => {
+        if (expected === undefined) {
+          await tx.rentalBusinessCalendar.upsert({
+            where: { workspaceId_year_version: { workspaceId, year: target.year, version: target.version } },
+            create: { workspaceId, tenantId: target.tenantId, year: target.year, ...data },
+            update: data
+          });
+          return;
+        }
+        const updated = await tx.rentalBusinessCalendar.updateMany({
+          where: { workspaceId, year: target.year, version: target.version, revision: expected },
+          data
         });
+        if (updated.count > 0) return;
+        const existing = await tx.rentalBusinessCalendar.findUnique({
+          where: { workspaceId_year_version: { workspaceId, year: target.year, version: target.version } },
+          select: { revision: true }
+        });
+        if (existing) {
+          throw new ConflictException(
+            `${target.year} 年度日历已被其他人修改（当前版本 ${existing.revision}，你基于 ${expected}），请刷新后重试`
+          );
+        }
+        await tx.rentalBusinessCalendar.create({
+          data: { workspaceId, tenantId: target.tenantId, year: target.year, ...data }
+        });
+      };
+      await conditional(next, nextData, expectedRevisions?.next);
+      if (superseded && supersededData) {
+        await conditional(superseded, supersededData, expectedRevisions?.superseded);
       }
     });
   }
@@ -432,7 +510,8 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       publishDiff: (row.publishDiff ?? undefined) as unknown as RentalCalendarYear["publishDiff"],
       overrideAudits: (row.overrideAudits ?? undefined) as unknown as RentalCalendarYear["overrideAudits"],
       importPreservedOverrides: (row.importPreservedOverrides ?? undefined) as unknown as string[] | undefined,
-      days: (row.days ?? []) as unknown as RentalCalendarDay[]
+      days: (row.days ?? []) as unknown as RentalCalendarDay[],
+      revision: row.revision
     };
   }
 

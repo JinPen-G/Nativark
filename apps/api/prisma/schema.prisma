@@ -2786,6 +2786,10 @@ model RentalBusinessCalendar {
   /// RentalCalendarDay[]：整年按日的类型、倍率与停业标记。定价按年整体加载，
   /// 拆成每年 365 行没有查询收益，因此保留为该年配置行的明细。
   days               Json
+  /// 乐观锁版本号（并发编辑保护）。整年日期在同一个 JSON 字段里，两个编辑人同时改
+  /// 不同日期都会复制全年再写回，后写者会整体覆盖先写者。写入以「读到的 revision」
+  /// 为条件，不匹配即 409。version 解决不了这件事：同一草稿内连续编辑共用一个版本号。
+  revision           Int       @default(0)
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 

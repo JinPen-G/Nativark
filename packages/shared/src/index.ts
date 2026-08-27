@@ -4384,7 +4384,38 @@ export interface RentalCalendarYear {
    */
   importPreservedOverrides?: string[];
   publishedAt?: string;
+  /**
+   * 乐观锁版本号（需求 4.5.3 的并发编辑保护）。
+   *
+   * 整年日期存在同一个 JSON 字段里，两个编辑人同时改**不同日期**时，各自都会读到
+   * 同一份草稿、复制全年、改自己那天、再写回整份 JSON——后写入者把先写入者的改动
+   * 整体覆盖，且双方都收到成功。年度版本号（`version`）解决不了这件事：它只在
+   * 「编辑已发布版本」时递增，同一草稿内的连续编辑共用一个版本号。
+   *
+   * 因此每次写入都递增本字段，落库时以「读到的 revision」为条件（条件更新），
+   * 不匹配即说明中途有人改过，接口返回 409 让前端刷新后重试。
+   */
+  revision?: number;
   days: RentalCalendarDay[];
+}
+
+/**
+ * 年度日历版本的**轻量摘要**（用于版本历史列表）。
+ *
+ * 列表不能直接返回 `RentalCalendarYear`：那会把每个版本的全年 365 条日期与全部
+ * 覆盖审计一并塞进响应，版本一多响应体就迅速膨胀到无法使用。列表只回可用于
+ * 挑选版本的元数据与计数，逐日与审计由版本详情接口按需返回。
+ */
+export interface RentalCalendarVersionSummary
+  extends Omit<RentalCalendarYear, "days" | "overrideAudits" | "publishDiff"> {
+  /** 该版本的日期条目数，用于判断是否为完整年度。 */
+  dayCount: number;
+  /** 该版本的人工覆盖日期数。 */
+  overrideCount: number;
+  /** 该版本的覆盖审计条数。 */
+  overrideAuditCount: number;
+  /** 相对上一已发布版本的差异条数，详情里才给出具体日期。 */
+  publishDiffCounts?: { added: number; removed: number; changed: number };
 }
 
 /**

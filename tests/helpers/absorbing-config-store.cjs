@@ -103,6 +103,9 @@ function createAbsorbingBusinessConfigStore() {
       if (store.failCalendar) return Promise.reject(new Error("calendar write rejected"));
       return record("calendar")(calendar);
     },
+    // 乐观锁冲突后的自愈路径。stub 里没有真实存储，返回空数组即"库里没有该年度"，
+    // 单元测试不覆盖冲突场景（冲突需要真实并发，由 MySQL E2E 第 15m 节验证）。
+    loadCalendarsForYear: () => Promise.resolve([]),
     // 发布是「新版本置 published + 旧版本置 superseded」的原子写。
     // stub 里同样一次拒绝两条，否则单元测试无法验证失败时缓存不被改脏。
     publishCalendarVersion: (next, superseded) => {

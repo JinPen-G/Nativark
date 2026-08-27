@@ -3228,9 +3228,10 @@ async function main() {
   const futureQuote = await closedQuote("2028-06-15T09:00:00+08:00", "2028-06-17T09:00:00+08:00");
   assert.equal(futureQuote.status, 201, `未来年度应允许报价（按周模板兜底）: ${futureQuote.status} ${JSON.stringify(futureQuote.body).slice(0, 200)}`);
   const futureWarnings = futureQuote.body.data.calendarWarnings ?? [];
+  // 未发布年度与「已发布但官方来源未确认」是两条不同提示，这里断言前者的确切措辞。
   assert.ok(
-    futureWarnings.some((w) => w.includes("2028") && w.includes("尚未确认")),
-    `未确认年度必须提示官方日历尚未确认: ${JSON.stringify(futureWarnings)}`
+    futureWarnings.some((w) => w.includes("2028") && w.includes("尚未发布")),
+    `未发布年度必须提示按周模板计算: ${JSON.stringify(futureWarnings)}`
   );
   // 已发布官方日历的年度不得误报提示。
   const publishedYearQuote = await closedQuote("2027-06-07T09:00:00+08:00", "2027-06-08T09:00:00+08:00");
@@ -3254,7 +3255,28 @@ async function main() {
     (futureReadback.body.data.calendarWarnings ?? []).some((w) => w.includes("2028")),
     `读回的报价必须带提示: ${JSON.stringify(futureReadback.body.data.calendarWarnings)}`
   );
-  ok("未来年度官方日历未确认：报价按周模板放行且带「尚未确认」提示、已发布年度不误报、提示随报价落库读回一致");
+  // 「空间日历是否发布」与「公共官方来源是否确认」必须是两个状态，不能用一个 published 代替：
+  // 一个只含人工覆盖（如装修停业）的年度日历可以合法发布，但该年度官方节假日仍未确认。
+  // 若因为 status=published 就不再提示，运营会以为节假日安排已经到位。
+  const manualYear = 2036;
+  const manualOnlyDay = await request("PUT", `/api/rental/v1/calendars/${manualYear}/days/${manualYear}-06-01`, {
+    date: `${manualYear}-06-01`, dayType: "tenant_special", name: "装修停业", pricingMultiplier: 1,
+    closed: true, businessStatus: "closed", overrideReason: "提前声明装修停业"
+  }, construction.accessToken);
+  assert.equal(manualOnlyDay.status, 200, `纯人工覆盖建草稿失败: ${manualOnlyDay.status} ${JSON.stringify(manualOnlyDay.body).slice(0, 200)}`);
+  const manualPublish = await request("POST", `/api/rental/v1/calendars/${manualYear}/publish`, { changeReason: "发布纯人工停业日历" }, construction.accessToken);
+  assert.equal(manualPublish.status, 201, `纯人工覆盖的未来年度必须允许发布: ${manualPublish.status} ${JSON.stringify(manualPublish.body).slice(0, 200)}`);
+  assert.equal(manualPublish.body.data.status, "published", `发布后状态应为 published: ${manualPublish.body.data.status}`);
+  const manualQuote = await closedQuote(`${manualYear}-06-10T09:00:00+08:00`, `${manualYear}-06-12T09:00:00+08:00`);
+  assert.equal(manualQuote.status, 201, `已发布年度报价应成功: ${manualQuote.status} ${JSON.stringify(manualQuote.body).slice(0, 200)}`);
+  assert.ok(
+    (manualQuote.body.data.calendarWarnings ?? []).some((w) => w.includes(String(manualYear)) && w.includes("官方")),
+    `日历已发布但公共官方来源未确认时仍须提示: ${JSON.stringify(manualQuote.body.data.calendarWarnings)}`
+  );
+  // 停业覆盖必须真的进了报价路径：发布后当天不得再安排领取。
+  const manualClosedPickup = await closedQuote(`${manualYear}-06-01T09:00:00+08:00`, `${manualYear}-06-03T09:00:00+08:00`);
+  assert.equal(manualClosedPickup.status, 409, `纯人工停业日发布后必须拦住当天领取: ${manualClosedPickup.status}`);
+  ok("未来年度官方日历未确认：报价按周模板放行且带「尚未确认」提示、已发布年度不误报、提示随报价落库读回一致；「日历已发布」与「官方来源已确认」是两个独立状态（纯人工停业日历可发布、发布后仍提示官方未确认、停业覆盖真的进入报价路径）");
 
   console.log("== 15j. PRICE-02 年度日历草稿作废 ==");
   // 需求 4.5.7「已作废：人工废弃的草稿或错误版本」。只有草稿可作废；已发布须由新版本替代、
@@ -3437,6 +3459,16 @@ async function main() {
   const versionDetail = await request("GET", `/api/rental/v1/calendars/2027/versions/${published2027Detail.version}`, null, construction.accessToken);
   assert.equal(versionDetail.status, 200, `版本详情失败: ${versionDetail.status}`);
   assert.ok(Array.isArray(versionDetail.body.data.days) && versionDetail.body.data.days.length > 0, "版本详情应含逐日");
+  // 版本列表必须是**轻量摘要**：直接返回领域对象会把每个版本的全年 365 条日期与
+  // 全部覆盖审计塞进响应，版本一多就膨胀到不可用。列表只给计数，明细走详情接口。
+  assert.equal(published2027Detail.days, undefined, `版本列表不得返回逐日明细: ${JSON.stringify(Object.keys(published2027Detail)).slice(0, 200)}`);
+  assert.equal(published2027Detail.overrideAudits, undefined, "版本列表不得返回覆盖审计明细");
+  assert.ok(Number(published2027Detail.dayCount) > 300, `版本列表应给出日期条数: ${published2027Detail.dayCount}`);
+  assert.equal(
+    Number(published2027Detail.dayCount),
+    versionDetail.body.data.days.length,
+    `列表里的 dayCount 必须与详情的逐日条数一致: ${published2027Detail.dayCount} vs ${versionDetail.body.data.days.length}`
+  );
   assert.equal(versionDetail.body.data.version, published2027Detail.version, `版本详情必须返回被请求的那一版: ${versionDetail.body.data.version}`);
   // **已被替代版本**的详情也必须能取到，且返回的就是它自己——需求 4.5.7「已被替代版本必须保留
   // 供历史报价追溯」的执行点。只取已发布版本的详情，会放过「忽略 version 参数、一律返回当前
@@ -3446,7 +3478,58 @@ async function main() {
   assert.equal(supersededDetail.body.data.version, superseded2027.version, `必须返回被请求的历史版本: ${supersededDetail.body.data.version}`);
   assert.equal(supersededDetail.body.data.status, "superseded", `历史版本状态应为 superseded: ${supersededDetail.body.data.status}`);
   assert.ok(supersededDetail.body.data.days.length > 0, "历史版本详情应含逐日");
-  ok("官方导入整年替换（删除的节假日精确回落周模板）+ 每周时段模板校验（非 7 项/起止倒挂/超出营业时段均 400，合法放行且还原成功）+ 历史版本可查询（已发布与已被替代各自返回自身版本与逐日）");
+  ok("官方导入整年替换（删除的节假日精确回落周模板）+ 每周时段模板校验（非 7 项/起止倒挂/超出营业时段均 400，合法放行且还原成功）+ 历史版本可查询（已发布与已被替代各自返回自身版本与逐日）+ 版本列表为轻量摘要（不含逐日与审计明细，只给计数）");
+
+  console.log("== 15m. PRICE-02 日历并发编辑必须用乐观锁，不得静默覆盖 ==");
+  // 整年日期存在同一个 JSON 字段里：两个编辑人同时改**不同日期**时，各自都读到同一份草稿、
+  // 复制全年、改自己那天、再写回整份 JSON——后写者把先写者的改动整体覆盖，双方都收到成功。
+  // 年度版本号解决不了这件事（同一草稿内连续编辑共用一个版本号），因此加 revision 条件写。
+  const raceYear = 2037;
+  const raceSeed = await request("PUT", `/api/rental/v1/calendars/${raceYear}/days/${raceYear}-03-01`, {
+    date: `${raceYear}-03-01`, dayType: "tenant_special", name: "并发用例基线", pricingMultiplier: 1.1, closed: false, overrideReason: "建立基线草稿"
+  }, construction.accessToken);
+  assert.equal(raceSeed.status, 200, `建并发基线失败: ${raceSeed.status} ${JSON.stringify(raceSeed.body).slice(0, 200)}`);
+  const raceBaseRevision = Number(readScalar(
+    `SELECT \`revision\` FROM \`rental_business_calendars\` WHERE \`tenantId\`='${construction.tenant.tenantId}' AND \`year\`=${raceYear} ORDER BY \`revision\` DESC LIMIT 1;`
+  ));
+  assert.ok(Number.isFinite(raceBaseRevision) && raceBaseRevision > 0, `revision 必须落库并递增: ${raceBaseRevision}`);
+  // 两个并发写落在**不同日期**上：无锁实现下两者都会成功，而库里只留后写者那一天。
+  const [raceA, raceB] = await Promise.all([
+    request("PUT", `/api/rental/v1/calendars/${raceYear}/days/${raceYear}-04-01`, {
+      date: `${raceYear}-04-01`, dayType: "tenant_special", name: "编辑人A", pricingMultiplier: 1.2, closed: false, overrideReason: "A 改四月"
+    }, construction.accessToken),
+    request("PUT", `/api/rental/v1/calendars/${raceYear}/days/${raceYear}-05-01`, {
+      date: `${raceYear}-05-01`, dayType: "tenant_special", name: "编辑人B", pricingMultiplier: 1.3, closed: false, overrideReason: "B 改五月"
+    }, construction.accessToken)
+  ]);
+  const raceStatuses = [raceA.status, raceB.status].sort();
+  assert.deepEqual(
+    raceStatuses,
+    [200, 409],
+    `并发编辑同一年度必须一方成功一方 409（不得双双成功而静默丢数据）: ${JSON.stringify(raceStatuses)} ${JSON.stringify([raceA.body, raceB.body]).slice(0, 300)}`
+  );
+  const raceLoser = raceA.status === 409 ? raceA : raceB;
+  assert.ok(
+    String(raceLoser.body?.message ?? "").includes("刷新"),
+    `409 必须说明需要刷新后重试: ${JSON.stringify(raceLoser.body).slice(0, 200)}`
+  );
+  // 失败方刷新后重试必须能成功，且两天的改动最终都在（证明 409 不是把编辑能力堵死）。
+  const loserDate = raceA.status === 409 ? `${raceYear}-04-01` : `${raceYear}-05-01`;
+  const loserName = raceA.status === 409 ? "编辑人A" : "编辑人B";
+  const retry = await request("PUT", `/api/rental/v1/calendars/${raceYear}/days/${loserDate}`, {
+    date: loserDate, dayType: "tenant_special", name: loserName, pricingMultiplier: 1.4, closed: false, overrideReason: "刷新后重试"
+  }, construction.accessToken);
+  assert.equal(retry.status, 200, `冲突方刷新后重试应成功: ${retry.status} ${JSON.stringify(retry.body).slice(0, 200)}`);
+  const raceFinal = (await request("GET", `/api/rental/v1/calendars/${raceYear}`, null, construction.accessToken)).body.data;
+  for (const date of [`${raceYear}-04-01`, `${raceYear}-05-01`]) {
+    const row = raceFinal.days.find((d) => d.date === date);
+    assert.equal(row?.source, "tenant_override", `${date} 的覆盖必须都在（不得被并发覆盖掉）: ${JSON.stringify(row)}`);
+  }
+  assert.ok(
+    Number(raceFinal.revision) > raceBaseRevision,
+    `revision 必须随每次写入递增: ${raceFinal.revision} <= ${raceBaseRevision}`
+  );
+  ok("日历并发编辑乐观锁：同一年度并发改不同日期时一方 200 一方 409（不再双双成功而静默覆盖），409 提示刷新重试，重试后两天改动都在，revision 随写入递增并落库");
 
   console.log("== 16. 双租户并发隔离 ==");
   const rounds = 12;

@@ -6,6 +6,7 @@ import type {
   RentalAvailabilityRequest,
   RentalAvailabilityResult,
   RentalCategoryDefinition,
+  RentalCalendarVersionSummary,
   RentalCalendarYear,
   RentalCouponTemplate,
   RentalCustomerBenefitAccount,
@@ -77,7 +78,7 @@ export const rentalCoreApi = {
   voidCalendarVersion: (year: number, version: string, data: VoidRentalCalendarRequest) =>
     request<RentalCalendarYear>(`/rental/v1/calendars/${year}/versions/${encodeURIComponent(version)}/void`, { method: "post", data }),
   /** 年度日历的全部版本（草稿/已发布/已被替代/已作废），供历史与追溯。 */
-  calendarVersions: (year: number) => request<RentalCalendarYear[]>(`/rental/v1/calendars/${year}/versions`),
+  calendarVersions: (year: number) => request<RentalCalendarVersionSummary[]>(`/rental/v1/calendars/${year}/versions`),
   /** 单个版本详情，含逐日、发布差异与覆盖审计。 */
   calendarVersion: (year: number, version: string) =>
     request<RentalCalendarYear>(`/rental/v1/calendars/${year}/versions/${encodeURIComponent(version)}`),

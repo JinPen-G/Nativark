@@ -12,6 +12,7 @@ import {
   type RentalCalendarDaySnapshot,
   type RentalCalendarOverrideAudit,
   type RentalCalendarPublishDiff,
+  type RentalCalendarVersionSummary,
   type RentalCalendarYear,
   type RentalCategoryDefinition,
   type RentalCouponTemplate,
@@ -731,9 +732,41 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     calendar.publishedBy = undefined;
     calendar.supersededAt = undefined;
     calendar.publishDiff = undefined;
-    await this.configStore.upsertCalendar(calendar);
-    this.cacheCalendar(state, calendar);
+    await this.writeCalendar(state, base, calendar);
     return calendar;
+  }
+
+  /**
+   * 落库一次年度日历写入，带乐观锁。
+   *
+   * `base` 是本次编辑读到的那一版。写同一行时以它的 `revision` 为条件更新——
+   * 整年日期在同一个 JSON 字段里，两个编辑人同时改不同日期都会复制全年再写回，
+   * 无条件写会让后写者整体覆盖先写者且双方都收到成功。冲突时仓储抛 409，
+   * 这里顺手把内存缓存里那一版丢掉，避免后续请求继续基于陈旧副本计算。
+   */
+  private async writeCalendar(state: RentalBusinessState, base: RentalCalendarYear, next: RentalCalendarYear) {
+    const sameRow = next.version === base.version;
+    const expectedRevision = sameRow ? base.revision ?? 0 : 0;
+    next.revision = sameRow ? (base.revision ?? 0) + 1 : 1;
+    try {
+      await this.configStore.upsertCalendar(next, expectedRevision);
+    } catch (error) {
+      if (error instanceof ConflictException) {
+        // 缓存里那一版已经落后于库。不能只是丢弃它：下一次编辑会因为找不到草稿而走
+        // 「新建版本」路径，再撞上库里已存在的版本号，于是永远修不回来。必须从库重读该年度。
+        await this.refreshCalendarYear(state, base.tenantId, base.year);
+      }
+      throw error;
+    }
+    this.cacheCalendar(state, next);
+  }
+
+  /** 从库重读某年度全部版本并整体替换缓存。乐观锁冲突后的自愈路径。 */
+  private async refreshCalendarYear(state: RentalBusinessState, tenantId: string, year: number) {
+    const fresh = await this.configStore.loadCalendarsForYear(tenantId, year);
+    const others = state.calendars.filter((item) => item.year !== year);
+    state.calendars.length = 0;
+    state.calendars.push(...others, ...fresh);
   }
 
   async saveCalendarDay(
@@ -838,8 +871,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       before: replaced ? RentalBusinessService.daySnapshot(replaced) : undefined,
       after: RentalBusinessService.daySnapshot(day)
     });
-    await this.configStore.upsertCalendar(calendar);
-    this.cacheCalendar(state, calendar);
+    await this.writeCalendar(state, base, calendar);
     return day;
   }
 
@@ -922,8 +954,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       before: RentalBusinessService.daySnapshot(target),
       after: RentalBusinessService.daySnapshot(restored)
     });
-    await this.configStore.upsertCalendar(calendar);
-    this.cacheCalendar(state, calendar);
+    await this.writeCalendar(state, base, calendar);
     return restored;
   }
 
@@ -970,7 +1001,14 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const superseded = replacing
       ? { ...structuredClone(replacing), status: "superseded" as const, supersededAt: stamp() }
       : undefined;
-    await this.configStore.publishCalendarVersion(calendar, superseded);
+    // 发布同样走乐观锁：两人同时发布同一年度时，后者的条件更新会失败并得到 409，
+    // 而不是两次都成功、留下两个 published 版本。
+    calendar.revision = (draft.revision ?? 0) + 1;
+    if (superseded) superseded.revision = (replacing?.revision ?? 0) + 1;
+    await this.configStore.publishCalendarVersion(calendar, superseded, {
+      next: draft.revision ?? 0,
+      superseded: replacing?.revision ?? 0
+    });
     this.cacheCalendar(state, calendar);
     if (superseded) this.cacheCalendar(state, superseded);
     return calendar;
@@ -1009,19 +1047,37 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     voided.voidedAt = stamp();
     voided.voidedBy = operator;
     voided.voidReason = reason;
-    await this.configStore.upsertCalendar(voided);
-    this.cacheCalendar(state, voided);
+    await this.writeCalendar(state, target, voided);
     return voided;
   }
 
   /**
-   * 年度日历的全部版本（需求 4.5.7/4.5.8：历史版本与审计可查询、可追溯）。
-   * 含草稿、已发布、已被替代、已作废，按版本号降序，供管理端历史页与差异/审计追溯。
+   * 年度日历的全部版本**摘要**（需求 4.5.7/4.5.8：历史版本与审计可查询、可追溯）。
+   *
+   * 只回元数据与计数，不回逐日与审计明细：早前直接返回领域对象，于是每个版本都带上
+   * 全年 365 条日期与全部覆盖审计，版本一多响应体就膨胀到不可用。逐日、发布差异
+   * 与审计明细由 `getCalendarVersion` 按需返回。
    */
-  listCalendarVersions(tenantId: string, context: BusinessContext, year: number) {
+  listCalendarVersions(tenantId: string, context: BusinessContext, year: number): RentalCalendarVersionSummary[] {
     return this.state(tenantId, context).calendars
       .filter((item) => item.year === year)
-      .sort((left, right) => compareVersions(right.version, left.version));
+      .sort((left, right) => compareVersions(right.version, left.version))
+      .map((item) => {
+        const { days, overrideAudits, publishDiff, ...rest } = item;
+        return {
+          ...rest,
+          dayCount: days.length,
+          overrideCount: days.filter((day) => day.source === "tenant_override").length,
+          overrideAuditCount: overrideAudits?.length ?? 0,
+          publishDiffCounts: publishDiff
+            ? {
+                added: publishDiff.added.length,
+                removed: publishDiff.removed.length,
+                changed: publishDiff.changed.length
+              }
+            : undefined
+        };
+      });
   }
 
   /**
@@ -1851,16 +1907,24 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     }
     const timestamp = stamp();
     // 需求 4.5.2：命中年度的官方日历尚未确认时仍按每周默认模板报价，但必须提示。
-    // calendarsForDateRange 对没有已发布日历的年度回退到 buildCalendar（status=draft），
-    // 因此「status 非 published」即该年度尚无已确认的官方日历；仅在启用官方日历的
-    // 地区（CN）提示，NONE 地区本就不依赖官方日历。按年度去重，跨年度各提示一条。
-    const calendarWarnings = [
-      ...new Set(
-        calendars
-          .filter((calendar) => calendar.region === "CN" && calendar.status !== "published")
-          .map((calendar) => `${calendar.year} 年度官方日历尚未确认，本次报价按每周默认营业模板计算`)
-      )
-    ];
+    // 「空间日历是否发布」与「公共官方来源是否确认」是两件事，不能用一个 published 代替：
+    // 一个只含人工覆盖（如装修停业）的年度日历完全可以合法发布，但该年度的官方节假日
+    // 依旧没有确认，此时若因为 status=published 就不再提示，运营会以为节假日安排已经到位。
+    // 仅在启用官方日历的地区（CN）提示，NONE 地区本就不依赖官方数据。
+    const calendarWarnings: string[] = [];
+    for (const calendar of calendars) {
+      if (calendar.region !== "CN") continue;
+      if (calendar.status !== "published") {
+        calendarWarnings.push(`${calendar.year} 年度日历尚未发布，本次报价按每周默认营业模板计算`);
+        continue;
+      }
+      const officialConfirmed = Boolean(calendar.sourceName) && calendar.days.some((day) => day.source === "official_cn");
+      if (!officialConfirmed) {
+        calendarWarnings.push(
+          `${calendar.year} 年度公共官方日历尚未确认，本次报价的节假日与调休安排仅来自人工维护`
+        );
+      }
+    }
     const quote: RentalQuoteSnapshotV1 = {
       id: uid("quote"), tenantId, quoteNo: `RQ${timestamp.replace(/\D/g, "").slice(0, 14)}${String(state.quotes.length + 1).padStart(3, "0")}`,
       categoryCode: context.profile.categoryCode, request: structuredClone(input), chargeLines,
