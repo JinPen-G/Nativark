@@ -99,13 +99,30 @@ function createAbsorbingBusinessConfigStore() {
     upsertPricingPlan: record("pricingPlan"),
     upsertDiscountPlan: record("discountPlan"),
     upsertService: record("service"),
-    upsertCalendar: (calendar) => {
+    upsertCalendar: (calendar, _expectedRevision, audits = []) => {
       if (store.failCalendar) return Promise.reject(new Error("calendar write rejected"));
+      // 审计与日历同事务落库；stub 里同样一起记下，失败时都不记。
+      store.calendarAudits = [...(store.calendarAudits ?? []), ...audits];
       return record("calendar")(calendar);
     },
     // 乐观锁冲突后的自愈路径。stub 里没有真实存储，返回空数组即"库里没有该年度"，
     // 单元测试不覆盖冲突场景（冲突需要真实并发，由 MySQL E2E 第 15m 节验证）。
     loadCalendarsForYear: () => Promise.resolve([]),
+    // 覆盖审计已搬到独立只追加表。stub 里按内存数组模拟，供单元测试断言追加与不截断。
+    loadCalendarOverrideAudits: (_tenantId, year, version) =>
+      Promise.resolve(
+        (store.calendarAudits ?? []).filter(
+          (entry) => entry.year === year && (version === undefined || entry.version === version)
+        )
+      ),
+    countCalendarOverrideAudits: (_tenantId, year) => {
+      const counts = {};
+      for (const entry of store.calendarAudits ?? []) {
+        if (entry.year !== year) continue;
+        counts[entry.version] = (counts[entry.version] ?? 0) + 1;
+      }
+      return Promise.resolve(counts);
+    },
     // 发布是「新版本置 published + 旧版本置 superseded」的原子写。
     // stub 里同样一次拒绝两条，否则单元测试无法验证失败时缓存不被改脏。
     publishCalendarVersion: (next, superseded) => {

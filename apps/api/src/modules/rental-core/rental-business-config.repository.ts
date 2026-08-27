@@ -2,6 +2,7 @@ import { ConflictException, Injectable } from "@nestjs/common";
 import { Prisma, type $Enums } from "@prisma/client";
 import type {
   RentalCalendarDay,
+  RentalCalendarOverrideAudit,
   RentalCalendarYear,
   RentalCategoryCode,
   RentalDayType,
@@ -51,13 +52,24 @@ export interface RentalBusinessConfigStore {
   upsertPricingPlan(plan: RentalPricingPlanV1): Promise<void>;
   upsertDiscountPlan(plan: RentalDiscountPlan): Promise<void>;
   upsertService(service: RentalValueAddedService): Promise<void>;
-  upsertCalendar(calendar: RentalCalendarYear, expectedRevision?: number): Promise<void>;
+  upsertCalendar(
+    calendar: RentalCalendarYear,
+    expectedRevision?: number,
+    audits?: RentalCalendarOverrideAudit[]
+  ): Promise<void>;
   /**
    * 重新读取某年度的全部版本。乐观锁冲突后必须用它刷新进程内缓存：
    * 冲突说明缓存里那一版已经落后于库，继续基于它计算只会一直冲突，
    * 而把它简单丢弃又会让下一次编辑走「新建版本」路径、撞上库里已存在的版本号。
    */
   loadCalendarsForYear(tenantId: string, year: number): Promise<RentalCalendarYear[]>;
+  /**
+   * 读取某年度的人工覆盖审计（只追加表，按时间升序，**不截断**）。
+   * `version` 给定时只回该版本的记录，供版本详情回放。
+   */
+  loadCalendarOverrideAudits(tenantId: string, year: number, version?: string): Promise<RentalCalendarOverrideAudit[]>;
+  /** 某年度各版本的审计条数，供版本列表给出计数而不拉明细。 */
+  countCalendarOverrideAudits(tenantId: string, year: number): Promise<Record<string, number>>;
   /**
    * 发布年度日历：新版本置 published 与旧版本置 superseded 必须在同一事务内。
    * 分两次写在失败时会留下两个 published 版本，或留下该年度没有已发布日历的空窗。
@@ -247,7 +259,10 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       voidedBy: calendar.voidedBy ?? null,
       voidReason: calendar.voidReason ?? null,
       publishDiff: (calendar.publishDiff ?? null) as unknown as Prisma.InputJsonValue,
-      overrideAudits: (calendar.overrideAudits ?? null) as unknown as Prisma.InputJsonValue,
+      // 审计已搬到只追加的独立表（JSON 里的 slice(-500) 截断会静默删掉最早记录，
+      // 与需求 4.5.8「完整审计」冲突）。这里恒写 null：迁移已把历史 JSON 回填成行，
+      // 保留双写只会让两份数据分叉。
+      overrideAudits: Prisma.DbNull,
       importPreservedOverrides: (calendar.importPreservedOverrides ?? null) as unknown as Prisma.InputJsonValue,
       days: calendar.days as unknown as Prisma.InputJsonValue,
       revision: calendar.revision ?? 0
@@ -255,45 +270,102 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
   }
 
   /**
-   * 写入年度日历。`expectedRevision` 给出**读到该行时的 revision**，写入即以它为条件。
+   * 写入年度日历，并在**同一事务**内追加本次产生的覆盖审计。
    *
-   * 为什么必须条件写：整年日期在同一个 JSON 字段里，两个编辑人同时改不同日期时都会
-   * 复制全年再写回，无条件 upsert 会让后写者整体覆盖先写者，双方都收到成功。
-   * 条件不匹配时抛 409，由调用方刷新后重试——静默覆盖比报错难查得多。
+   * `expectedRevision` 给出读到该行时的 revision，写入即以它为条件。为什么必须条件写：
+   * 整年日期在同一个 JSON 字段里，两个编辑人同时改不同日期时都会复制全年再写回，
+   * 无条件 upsert 会让后写者整体覆盖先写者，双方都收到成功。条件不匹配时抛 409。
    *
-   * `expectedRevision` 为 undefined 表示调用方认为该行不存在（新建）或不参与并发保护
-   * （启动预热等场景），此时退回无条件 upsert。
+   * 审计与日历同事务：审计留在一个被回滚的编辑上（或反之）比没有审计更难排查。
    */
-  async upsertCalendar(calendar: RentalCalendarYear, expectedRevision?: number): Promise<void> {
+  async upsertCalendar(
+    calendar: RentalCalendarYear,
+    expectedRevision?: number,
+    audits: RentalCalendarOverrideAudit[] = []
+  ): Promise<void> {
     const data = this.calendarData(calendar);
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, calendar.tenantId);
-    if (expectedRevision === undefined) {
-      await this.prisma.rentalBusinessCalendar.upsert({
-        where: { workspaceId_year_version: { workspaceId, year: calendar.year, version: calendar.version } },
-        create: { workspaceId, tenantId: calendar.tenantId, year: calendar.year, ...data },
-        update: data
-      });
-      return;
-    }
-    // 条件更新：只有 revision 仍是读到的值时才写入。
-    const updated = await this.prisma.rentalBusinessCalendar.updateMany({
-      where: { workspaceId, year: calendar.year, version: calendar.version, revision: expectedRevision },
-      data
+    await this.prisma.$transaction(async (tx) => {
+      if (expectedRevision === undefined) {
+        await tx.rentalBusinessCalendar.upsert({
+          where: { workspaceId_year_version: { workspaceId, year: calendar.year, version: calendar.version } },
+          create: { workspaceId, tenantId: calendar.tenantId, year: calendar.year, ...data },
+          update: data
+        });
+      } else {
+        // 条件更新：只有 revision 仍是读到的值时才写入。
+        const updated = await tx.rentalBusinessCalendar.updateMany({
+          where: { workspaceId, year: calendar.year, version: calendar.version, revision: expectedRevision },
+          data
+        });
+        if (updated.count === 0) {
+          // 没更新到：要么该行还不存在（首次写这个版本号），要么 revision 已被别人推进。
+          const existing = await tx.rentalBusinessCalendar.findUnique({
+            where: { workspaceId_year_version: { workspaceId, year: calendar.year, version: calendar.version } },
+            select: { revision: true }
+          });
+          if (existing) {
+            throw new ConflictException(
+              `${calendar.year} 年度日历已被其他人修改（当前版本 ${existing.revision}，你基于 ${expectedRevision}），请刷新后重试`
+            );
+          }
+          await tx.rentalBusinessCalendar.create({
+            data: { workspaceId, tenantId: calendar.tenantId, year: calendar.year, ...data }
+          });
+        }
+      }
+      if (audits.length) {
+        await tx.rentalCalendarOverrideAuditEntry.createMany({
+          data: audits.map((entry) => ({
+            tenantId: calendar.tenantId,
+            workspaceId,
+            year: entry.year ?? calendar.year,
+            version: entry.version ?? calendar.version,
+            date: entry.date,
+            action: entry.action,
+            reason: entry.reason,
+            operator: entry.operator ?? null,
+            at: new Date(entry.at),
+            before: (entry.before ?? null) as unknown as Prisma.InputJsonValue,
+            after: (entry.after ?? null) as unknown as Prisma.InputJsonValue
+          }))
+        });
+      }
     });
-    if (updated.count > 0) return;
-    // 没更新到：要么该行还不存在（首次写这个版本号），要么 revision 已被别人推进。
-    const existing = await this.prisma.rentalBusinessCalendar.findUnique({
-      where: { workspaceId_year_version: { workspaceId, year: calendar.year, version: calendar.version } },
-      select: { revision: true }
+  }
+
+  async loadCalendarOverrideAudits(
+    tenantId: string,
+    year: number,
+    version?: string
+  ): Promise<RentalCalendarOverrideAudit[]> {
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
+    const rows = await this.prisma.rentalCalendarOverrideAuditEntry.findMany({
+      where: { workspaceId, year, ...(version ? { version } : {}) },
+      orderBy: [{ at: "asc" }, { createdAt: "asc" }]
     });
-    if (existing) {
-      throw new ConflictException(
-        `${calendar.year} 年度日历已被其他人修改（当前版本 ${existing.revision}，你基于 ${expectedRevision}），请刷新后重试`
-      );
-    }
-    await this.prisma.rentalBusinessCalendar.create({
-      data: { workspaceId, tenantId: calendar.tenantId, year: calendar.year, ...data }
+    return rows.map((row) => ({
+      date: row.date,
+      action: row.action as RentalCalendarOverrideAudit["action"],
+      reason: row.reason,
+      operator: row.operator ?? undefined,
+      at: iso(row.at),
+      before: (row.before ?? undefined) as unknown as RentalCalendarOverrideAudit["before"],
+      after: (row.after ?? undefined) as unknown as RentalCalendarOverrideAudit["after"],
+      year: row.year,
+      version: row.version
+    }));
+  }
+
+  /** 某年度各版本的审计条数。版本列表只需要计数，不需要把明细拉出来。 */
+  async countCalendarOverrideAudits(tenantId: string, year: number): Promise<Record<string, number>> {
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
+    const rows = await this.prisma.rentalCalendarOverrideAuditEntry.groupBy({
+      by: ["version"],
+      where: { workspaceId, year },
+      _count: { _all: true }
     });
+    return Object.fromEntries(rows.map((row) => [row.version, row._count._all]));
   }
 
   async loadCalendarsForYear(tenantId: string, year: number): Promise<RentalCalendarYear[]> {
@@ -508,7 +580,8 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       voidedBy: row.voidedBy ?? undefined,
       voidReason: row.voidReason ?? undefined,
       publishDiff: (row.publishDiff ?? undefined) as unknown as RentalCalendarYear["publishDiff"],
-      overrideAudits: (row.overrideAudits ?? undefined) as unknown as RentalCalendarYear["overrideAudits"],
+      // 审计不再随年度日历加载：它在独立表里且不设上限，整体带进内存没有意义。
+      // 需要时由 loadCalendarOverrideAudits 按年度/版本查询（版本详情与审计页各自按需取）。
       importPreservedOverrides: (row.importPreservedOverrides ?? undefined) as unknown as string[] | undefined,
       days: (row.days ?? []) as unknown as RentalCalendarDay[],
       revision: row.revision

@@ -2911,8 +2911,11 @@ async function main() {
     1,
     "移除覆盖后该日期必须仍有且只有一条记录"
   );
-  // 审计流水必须记下撤销原因、操作人与前后差异。
-  const audits = afterRemove.overrideAudits ?? [];
+  // 审计流水必须记下撤销原因、操作人与前后差异。审计已搬到独立的只追加表，
+  // 因此从专用端点读，而不是从年度日历行的 JSON 里读（那里只能保留最近 500 条）。
+  const auditsResponse = await request("GET", `/api/rental/v1/calendars/${closedYear}/override-audits`, null, construction.accessToken);
+  assert.equal(auditsResponse.status, 200, `读取覆盖审计失败: ${auditsResponse.status} ${JSON.stringify(auditsResponse.body).slice(0, 200)}`);
+  const audits = auditsResponse.body.data ?? [];
   const revertAudit = audits.filter((row) => row.date === auditDate && row.action === "revert").pop();
   assert.ok(revertAudit, "移除覆盖必须留下 revert 审计记录");
   assert.equal(revertAudit.reason, "E2E 店庆结束，恢复官方安排", "撤销原因必须进审计");
@@ -2922,19 +2925,43 @@ async function main() {
   assert.equal(revertAudit.before.pricingMultiplier, 3, `审计前值系数应为 3，实际 ${revertAudit.before.pricingMultiplier}`);
   assert.equal(revertAudit.after.source, "official_cn", "审计的后值应是恢复出的官方来源");
   assert.equal(revertAudit.after.pricingMultiplier, 1.8, `审计后值系数应为 1.8，实际 ${revertAudit.after.pricingMultiplier}`);
+  assert.equal(revertAudit.year, closedYear, `审计必须自带年度: ${revertAudit.year}`);
+  assert.ok(revertAudit.version, "审计必须自带版本号，否则无法按版本回放");
   // 建立覆盖同样要有审计记录，否则只查得到撤销、查不到当初为什么改。
   const overrideAudit = audits.filter((row) => row.date === auditDate && row.action === "override").pop();
   assert.ok(overrideAudit, "建立覆盖必须留下 override 审计记录");
   assert.equal(overrideAudit.reason, "E2E 二次调整", "建立覆盖的原因必须进审计");
   assert.equal(overrideAudit.after.pricingMultiplier, 3, "建立覆盖的后值系数应为 3");
-  // 审计必须落库，不能只在内存里。
+  // 审计必须落进独立表，不能只在内存里，也不能再塞回年度日历 JSON。
   assert.ok(
     readCount(
-      "SELECT JSON_LENGTH(`overrideAudits`) FROM `rental_business_calendars` WHERE `tenantId`='" +
+      "SELECT COUNT(*) FROM `rental_calendar_override_audits` WHERE `tenantId`='" +
+        construction.tenant.tenantId +
+        `' AND \`year\`=${closedYear};`
+    ) >= 2,
+    "覆盖审计流水必须落进独立审计表"
+  );
+  assert.equal(
+    readScalar(
+      "SELECT IFNULL(JSON_LENGTH(`overrideAudits`), 'NULL') FROM `rental_business_calendars` WHERE `tenantId`='" +
         construction.tenant.tenantId +
         `' AND \`year\`=${closedYear} AND \`status\`='draft';`
-    ) >= 2,
-    "覆盖审计流水必须落库"
+    ),
+    "NULL",
+    "审计不得再双写回年度日历 JSON（那条路径有 500 条截断）"
+  );
+  // 按版本过滤必须生效：版本详情要能只回放该版本上的调整。
+  const auditsForVersion = await request(
+    "GET",
+    `/api/rental/v1/calendars/${closedYear}/override-audits?version=${encodeURIComponent(revertAudit.version)}`,
+    null,
+    construction.accessToken
+  );
+  assert.equal(auditsForVersion.status, 200, `按版本读审计失败: ${auditsForVersion.status}`);
+  assert.ok(
+    (auditsForVersion.body.data ?? []).length > 0 &&
+      (auditsForVersion.body.data ?? []).every((row) => row.version === revertAudit.version),
+    `按版本过滤必须只回该版本的审计: ${JSON.stringify((auditsForVersion.body.data ?? []).map((r) => r.version))}`
   );
   // 没有覆盖时再移除必须报错，而不是静默成功。
   const removeAgain = await request(

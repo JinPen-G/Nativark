@@ -318,6 +318,7 @@ model Tenant {
   rentalValueAddedServices  RentalValueAddedService[]
   rentalRuleVersions        RentalRuleVersion[]
   rentalBusinessCalendars   RentalBusinessCalendar[]
+  rentalCalendarOverrideAudits RentalCalendarOverrideAuditEntry[]
   rentalIdempotencyRecords  RentalOrderIdempotencyRecord[]
   customerProfiles          CustomerProfile[]
   customerWorkspaceLinks    CustomerWorkspaceLink[]
@@ -378,6 +379,7 @@ model BusinessWorkspace {
   rentalValueAddedServices    RentalValueAddedService[]
   rentalRuleVersions          RentalRuleVersion[]
   rentalBusinessCalendars     RentalBusinessCalendar[]
+  rentalCalendarOverrideAudits RentalCalendarOverrideAuditEntry[]
   rentalNotificationTemplates RentalNotificationTemplate[]
   rentalQuotes                RentalQuote[]
   rentalCustomerCoupons       RentalCustomerCoupon[]
@@ -2800,6 +2802,40 @@ model RentalBusinessCalendar {
   @@index([workspaceId, year, status], map: "rental_business_calendars_ws_year_status_idx")
   @@index([tenantId, status])
   @@map("rental_business_calendars")
+}
+
+/// 人工覆盖与撤销的审计流水（需求 4.5.3 + 4.5.8「完整审计」）。
+///
+/// 为什么必须独立成表：早前这些记录塞在年度日历行的 `overrideAudits` JSON 里，
+/// 而 JSON 会随整年日历一起被反复重写，实现只能靠 `slice(-500)` 截断，
+/// 最早的记录被静默删除——与「完整审计」直接冲突。审计是**只追加**的事实，
+/// 不属于年度日历这份可变配置，因此按条落行、永不改写、永不截断。
+model RentalCalendarOverrideAuditEntry {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId String
+  /// 复合外键保证空间与事实同租户，杜绝把审计挂到别的租户的空间上。
+  workspace   BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  year        Int
+  /// 记录发生在哪一个年度版本上，供版本详情按版本回放。
+  version     String
+  /// 被调整的营业日期，`YYYY-MM-DD`。
+  date        String
+  /// `override` 建立人工覆盖 / `revert` 撤销人工覆盖。
+  action      String
+  reason      String   @db.Text
+  operator    String?
+  at          DateTime
+  /// RentalCalendarDaySnapshot：调整前后的取值，供差异回放。
+  before      Json?
+  after       Json?
+  createdAt   DateTime @default(now())
+
+  @@index([workspaceId, year, version])
+  @@index([workspaceId, year, date])
+  @@index([tenantId, year])
+  @@map("rental_calendar_override_audits")
 }
 
 model RentalNotificationTemplate {

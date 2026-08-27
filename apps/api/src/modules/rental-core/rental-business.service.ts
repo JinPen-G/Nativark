@@ -628,9 +628,16 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
    * 无上限时一年内反复调整同一天会把这一行撑到 MySQL 的 JSON 长度上限，
    * 届时整个年度日历都写不进去。超出后丢最早的记录——最近的调整才是运营要查的。
    */
-  private static appendAudit(calendar: RentalCalendarYear, entry: RentalCalendarOverrideAudit) {
-    const audits = [...(calendar.overrideAudits ?? []), entry];
-    calendar.overrideAudits = audits.slice(-500);
+  /**
+   * 记录一条人工覆盖/撤销审计。
+   *
+   * 审计写进**独立的只追加表**，不再挂在年度日历的 JSON 上：那里只能靠 `slice(-500)`
+   * 截断，最早的记录被静默删除，与需求 4.5.8「完整审计」直接冲突。这里只收集，
+   * 由 `writeCalendar` 与日历改动在同一事务内落库——审计留在一个被回滚的编辑上
+   * （或反之）比没有审计更难排查。
+   */
+  private static pendingAudit(calendar: RentalCalendarYear, entry: RentalCalendarOverrideAudit) {
+    return { ...entry, year: calendar.year, version: calendar.version };
   }
 
   async importOfficialCalendar(tenantId: string, context: BusinessContext, input: ImportRentalCalendarRequest) {
@@ -744,12 +751,17 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
    * 无条件写会让后写者整体覆盖先写者且双方都收到成功。冲突时仓储抛 409，
    * 这里顺手把内存缓存里那一版丢掉，避免后续请求继续基于陈旧副本计算。
    */
-  private async writeCalendar(state: RentalBusinessState, base: RentalCalendarYear, next: RentalCalendarYear) {
+  private async writeCalendar(
+    state: RentalBusinessState,
+    base: RentalCalendarYear,
+    next: RentalCalendarYear,
+    audits: RentalCalendarOverrideAudit[] = []
+  ) {
     const sameRow = next.version === base.version;
     const expectedRevision = sameRow ? base.revision ?? 0 : 0;
     next.revision = sameRow ? (base.revision ?? 0) + 1 : 1;
     try {
-      await this.configStore.upsertCalendar(next, expectedRevision);
+      await this.configStore.upsertCalendar(next, expectedRevision, audits);
     } catch (error) {
       if (error instanceof ConflictException) {
         // 缓存里那一版已经落后于库。不能只是丢弃它：下一次编辑会因为找不到草稿而走
@@ -862,7 +874,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     };
     if (index >= 0) calendar.days[index] = day; else calendar.days.push(day);
     calendar.days.sort((a, b) => a.date.localeCompare(b.date));
-    RentalBusinessService.appendAudit(calendar, {
+    const audit = RentalBusinessService.pendingAudit(calendar, {
       date: input.date,
       action: "override",
       reason,
@@ -871,7 +883,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       before: replaced ? RentalBusinessService.daySnapshot(replaced) : undefined,
       after: RentalBusinessService.daySnapshot(day)
     });
-    await this.writeCalendar(state, base, calendar);
+    await this.writeCalendar(state, base, calendar, [audit]);
     return day;
   }
 
@@ -945,7 +957,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         };
     const index = calendar.days.findIndex((item) => item.date === date);
     calendar.days.splice(index, 1, restored);
-    RentalBusinessService.appendAudit(calendar, {
+    const audit = RentalBusinessService.pendingAudit(calendar, {
       date,
       action: "revert",
       reason,
@@ -954,7 +966,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       before: RentalBusinessService.daySnapshot(target),
       after: RentalBusinessService.daySnapshot(restored)
     });
-    await this.writeCalendar(state, base, calendar);
+    await this.writeCalendar(state, base, calendar, [audit]);
     return restored;
   }
 
@@ -1058,17 +1070,23 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
    * 全年 365 条日期与全部覆盖审计，版本一多响应体就膨胀到不可用。逐日、发布差异
    * 与审计明细由 `getCalendarVersion` 按需返回。
    */
-  listCalendarVersions(tenantId: string, context: BusinessContext, year: number): RentalCalendarVersionSummary[] {
+  async listCalendarVersions(
+    tenantId: string,
+    context: BusinessContext,
+    year: number
+  ): Promise<RentalCalendarVersionSummary[]> {
+    // 审计条数来自独立表的分组计数，不把明细拉进内存。
+    const auditCounts = await this.configStore.countCalendarOverrideAudits(tenantId, year);
     return this.state(tenantId, context).calendars
       .filter((item) => item.year === year)
       .sort((left, right) => compareVersions(right.version, left.version))
       .map((item) => {
-        const { days, overrideAudits, publishDiff, ...rest } = item;
+        const { days, overrideAudits: _audits, publishDiff, ...rest } = item;
         return {
           ...rest,
           dayCount: days.length,
           overrideCount: days.filter((day) => day.source === "tenant_override").length,
-          overrideAuditCount: overrideAudits?.length ?? 0,
+          overrideAuditCount: auditCounts[item.version] ?? 0,
           publishDiffCounts: publishDiff
             ? {
                 added: publishDiff.added.length,
@@ -1081,15 +1099,25 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   }
 
   /**
+   * 某年度的人工覆盖审计流水（需求 4.5.3/4.5.8）。**不截断**：审计在独立的只追加表里，
+   * 早前挂在年度日历 JSON 上时只能保留最近 500 条，最早记录被静默删除。
+   */
+  listCalendarOverrideAudits(tenantId: string, _context: BusinessContext, year: number, version?: string) {
+    return this.configStore.loadCalendarOverrideAudits(tenantId, year, version);
+  }
+
+  /**
    * 单个年度日历版本的完整内容（含逐日、`publishDiff` 发布差异与 `overrideAudits` 覆盖审计）。
    * 供「查看历史版本、差异详情、完整追溯」——只读，不改任何状态。
    */
-  getCalendarVersion(tenantId: string, context: BusinessContext, year: number, version: string) {
+  async getCalendarVersion(tenantId: string, context: BusinessContext, year: number, version: string) {
     const found = this.state(tenantId, context).calendars.find(
       (item) => item.year === year && item.version === version
     );
     if (!found) throw new NotFoundException("指定的年度日历版本不存在");
-    return found;
+    // 审计按版本从独立表取回，不再随年度日历常驻内存。
+    const overrideAudits = await this.configStore.loadCalendarOverrideAudits(tenantId, year, version);
+    return { ...found, overrideAudits };
   }
 
   listRuleVersions(tenantId: string, context: BusinessContext) { return this.state(tenantId, context).ruleVersions; }

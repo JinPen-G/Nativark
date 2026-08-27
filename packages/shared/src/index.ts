@@ -4308,6 +4308,15 @@ export interface RentalCalendarOverrideAudit {
   /** 操作前的取值。首次覆盖一个周模板生成、尚未落库的日期时可能为空。 */
   before?: RentalCalendarDaySnapshot;
   after: RentalCalendarDaySnapshot;
+  /**
+   * 记录发生在哪一个年度版本上。
+   *
+   * 审计已从年度日历的 JSON 字段搬到独立的只追加表（那里的 `slice(-500)` 截断会
+   * 静默删掉最早的记录，与需求 4.5.8「完整审计」冲突），因此每条记录必须自带
+   * 年度与版本，才能按版本回放。
+   */
+  year?: number;
+  version?: string;
 }
 
 /**
