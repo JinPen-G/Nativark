@@ -4394,6 +4394,15 @@ export interface RentalCalendarYear {
   sourceVersionId?: string;
   sourceVersion?: string;
   /**
+   * 该年度公共官方来源是否有比本日历所引用版本**更新**的有效版本（需求 4.5.2：
+   * 平台登记新官方版本后，为空间生成更新提示，**不得自动影响空间**）。
+   *
+   * 读取时派生、不落库：它取决于平台注册表的当前状态，存下来就会立刻过期。
+   */
+  officialSourceUpdateAvailable?: boolean;
+  latestOfficialSourceVersionId?: string;
+  latestOfficialSourceVersion?: string;
+  /**
    * 最近一次官方导入中因存在人工覆盖而未被写入的日期。
    * 导入不覆盖人工覆盖，但运营必须知道「官方改了这几天而你的覆盖仍然生效」，
    * 否则会以为导入失败或以为官方值已生效。
@@ -4474,12 +4483,21 @@ export interface OfficialCalendarSource {
 export interface OfficialCalendarSourceVersion {
   id: string;
   sourceId: string;
-  /** 便于列表直接展示，不必再查来源表。 */
+  /**
+   * 登记当时的来源信息**快照**。
+   *
+   * 不是 join 来源主档得到的当前值：主档允许改名称、URL、地区，一改就会让昨天登记的
+   * 旧版本显示成新名称新 URL，租户引用旧版本时也拿到改后的信息，等于历史版本的含义
+   * 被事后改写。主档继续维护，历史版本一律按快照解释。
+   */
   sourceName: string;
   sourceUrl: string;
   region: "CN";
   year: number;
+  /** 展示用版本号（1.0/1.1…）。排序与并发分配一律用 `sequence`。 */
   version: string;
+  /** 版本序号（1 起）。字符串版本号在 1.10 之后会被字典序排到 1.9 之前。 */
+  sequence: number;
   /** 官方公告的发布日期。与 `importedAt` 不同：追溯要能区分官方何时发布与平台何时入库。 */
   publishedAt: string;
   importedAt: string;
@@ -4491,6 +4509,8 @@ export interface OfficialCalendarSourceVersion {
 export interface OfficialCalendarSourceVersionSummary
   extends Omit<OfficialCalendarSourceVersion, "days"> {
   dayCount: number;
+  /** 来源主档当前是否启用。停用来源的旧版本不再供空间新应用，但历史引用必须保留。 */
+  sourceActive: boolean;
 }
 
 /** 登记或更新一个公共官方日历来源（仅 SaaS 平台管理员）。 */
@@ -4578,6 +4598,14 @@ export interface RentalCalendarPublishPreview {
   /** 当前已发布版本号；该年度尚无已发布版本时为空（此时是首次发布）。 */
   publishedVersion?: string;
   /** 首次发布：没有可比对象，逐日差异没有信息量，界面应提示「全年首次发布」。 */
+  /**
+   * 首次发布：该年度还没有已发布版本。
+   *
+   * 此时逐日差异的基准是**每周默认营业模板**生成的基准年历，而不是"空日历"——
+   * 与空日历比会把全年 365 天都列成变更，没有筛选价值；与周模板比得到的恰好是
+   * 这次发布真正带来的业务变化（人工覆盖、官方节假日、停业/限时、特殊价格）。
+   * 界面应据此说明基准是周模板，但**不得**因为首发就不展示受影响日期与未来订单提示。
+   */
   firstPublish: boolean;
   diff: RentalCalendarPublishDiff;
   dates: RentalCalendarPublishPreviewDate[];

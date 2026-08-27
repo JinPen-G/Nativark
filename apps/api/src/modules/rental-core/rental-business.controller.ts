@@ -112,7 +112,27 @@ export class RentalBusinessController {
   @Post("value-added-services") async createService(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalValueAddedServiceDto) { return this.committed(req.user.tenantId, await this.business.saveService(req.user.tenantId, this.context(req.user.tenantId), body)); }
   @Put("value-added-services/:id") async updateService(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalValueAddedServiceDto) { return this.committed(req.user.tenantId, await this.business.saveService(req.user.tenantId, this.context(req.user.tenantId), { ...body, id })); }
 
-  @Get("calendars/:year") calendar(@Req() req: AuthenticatedRequest, @Param("year") year: string) { return this.business.getCalendar(req.user.tenantId, this.context(req.user.tenantId), Number(year), this.canSeeCalendarDraft(req.user)); }
+  /**
+   * 读取年度日历。附带「是否有官方更新」（需求 4.5.2：平台登记新官方版本后，为空间生成
+   * 更新提示，**不得自动影响空间**）。因此这里只做比较与提示，不改任何状态。
+   */
+  @Get("calendars/:year") async calendar(@Req() req: AuthenticatedRequest, @Param("year") year: string) {
+    const calendar = this.business.getCalendar(
+      req.user.tenantId,
+      this.context(req.user.tenantId),
+      Number(year),
+      this.canSeeCalendarDraft(req.user)
+    );
+    const latest = await this.officialSources.latestVersionForYear(Number(year));
+    if (!latest) return calendar;
+    return {
+      ...calendar,
+      latestOfficialSourceVersionId: latest.id,
+      latestOfficialSourceVersion: latest.version,
+      // 已引用的就是最新版时不提示；从未引用过任何版本（纯周模板或纯人工）也算"有可用官方数据"。
+      officialSourceUpdateAvailable: calendar.sourceVersionId !== latest.id
+    };
+  }
   @Get("calendars/:year/versions") calendarVersions(@Req() req: AuthenticatedRequest, @Param("year") year: string) { return this.business.listCalendarVersions(req.user.tenantId, this.context(req.user.tenantId), Number(year)); }
   @Get("calendars/:year/versions/:version") calendarVersion(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Param("version") version: string) { return this.business.getCalendarVersion(req.user.tenantId, this.context(req.user.tenantId), Number(year), version); }
   /**
@@ -126,7 +146,7 @@ export class RentalBusinessController {
     @Param("year") year: string,
     @Body() body: ApplyOfficialCalendarSourceDto
   ) {
-    const version = await this.officialSources.getVersion(body.sourceVersionId);
+    const version = await this.officialSources.getApplicableVersion(body.sourceVersionId);
     if (version.year !== Number(year)) {
       throw new BadRequestException(`该来源版本属于 ${version.year} 年度，与请求的 ${year} 年度不一致`);
     }
@@ -144,9 +164,9 @@ export class RentalBusinessController {
       })
     );
   }
-  /** 可引用的公共官方来源版本（只读）。空间人员据此选择要应用哪一版。 */
+  /** 可引用的公共官方来源版本（只读）。空间人员据此选择要应用哪一版；只回有效来源。 */
   @Get("official-calendar-sources") officialSourceVersions(@Query("year") year?: string) {
-    return this.officialSources.listVersions(undefined, year ? Number(year) : undefined);
+    return this.officialSources.listVersions(undefined, year ? Number(year) : undefined, true);
   }
   /** 发布前影响预览（需求 4.5.8）。只读推演，不改任何状态、不触碰未来订单。 */
   @Get("calendars/:year/publish-preview") async calendarPublishPreview(@Req() req: AuthenticatedRequest, @Param("year") year: string) {

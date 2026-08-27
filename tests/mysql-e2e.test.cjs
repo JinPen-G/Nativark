@@ -3614,6 +3614,34 @@ async function main() {
     businessStatus: "open", hours: { windows: [{ start: "09:00", end: "18:00" }] }, overrideReason: "预览用例基线"
   }, construction.accessToken);
   assert.equal(previewSeed.status, 200, `预览基线建立失败: ${previewSeed.status} ${JSON.stringify(previewSeed.body).slice(0, 200)}`);
+  // **首次发布**同样必须给出受影响日期与未来订单提示（Codex 高优先级 #1）。
+  // 早前 `replacing` 为空时直接返回空差异，于是首发一份含停业/限时/特殊价格的日历时
+  // dates 为空、未来订单一条都匹配不上。基准是每周默认模板，不是"空日历"。
+  const firstPubOrderQuote = await closedQuote(`${previewYear}-07-14T10:00:00+08:00`, `${previewYear}-07-16T10:00:00+08:00`);
+  assert.equal(firstPubOrderQuote.status, 201, `首发预检用例报价失败: ${firstPubOrderQuote.status} ${JSON.stringify(firstPubOrderQuote.body).slice(0, 220)}`);
+  const firstPubOrder = await request("POST", "/api/rental/v1/orders", {
+    quoteId: firstPubOrderQuote.body.data.id, customerType: "corporate", customerName: "E2E 首发预检客户",
+    fulfillmentMode: "warehouse_pickup_return", fulfillmentLocationId: constructionLocation.id,
+    startAt: `${previewYear}-07-14T10:00:00+08:00`, endAt: `${previewYear}-07-16T10:00:00+08:00`,
+    lines: [{ itemGroupId: priceGroupId, quantity: 1 }], qualificationApproved: true
+  }, construction.accessToken);
+  assert.equal(firstPubOrder.status, 201, `首发预检用例订单失败: ${firstPubOrder.status} ${JSON.stringify(firstPubOrder.body).slice(0, 220)}`);
+  const firstPreview = await request("GET", `/api/rental/v1/calendars/${previewYear}/publish-preview`, null, construction.accessToken);
+  assert.equal(firstPreview.status, 200, `首发预检失败: ${firstPreview.status} ${JSON.stringify(firstPreview.body).slice(0, 220)}`);
+  const fpv = firstPreview.body.data;
+  assert.equal(fpv.firstPublish, true, "尚无已发布版本时应标记为首次发布");
+  assert.ok(
+    (fpv.dates ?? []).some((d) => d.date === previewDate),
+    `首次发布也必须列出受影响日期（相对周模板的业务变化）: ${JSON.stringify((fpv.dates ?? []).map((d) => d.date)).slice(0, 200)}`
+  );
+  assert.ok(
+    (fpv.dates ?? []).length < 200,
+    `首发差异基准必须是周模板而不是空日历（否则全年 365 天都被列出）: ${(fpv.dates ?? []).length}`
+  );
+  assert.ok(
+    (fpv.futureOrders ?? []).some((o) => o.orderId === firstPubOrder.body.data.id),
+    `首次发布也必须提示重叠的未来订单: ${JSON.stringify((fpv.futureOrders ?? []).map((o) => o.orderNo))}`
+  );
   const previewFirstPublish = await request("POST", `/api/rental/v1/calendars/${previewYear}/publish`, { changeReason: "预览用例首发" }, construction.accessToken);
   assert.equal(previewFirstPublish.status, 201, `预览基线发布失败: ${previewFirstPublish.status} ${JSON.stringify(previewFirstPublish.body).slice(0, 200)}`);
   // 在已发布日历上下一张覆盖该日期的未来订单，用于验证「存在未来订单时必须提示」。
@@ -3664,7 +3692,106 @@ async function main() {
     stillDraft.some((v) => v.version === pv.draftVersion && v.status === "draft"),
     `预览后草稿必须仍是草稿: ${JSON.stringify(stillDraft.map((v) => [v.version, v.status]))}`
   );
-  ok("发布前影响预览：指出当前已发布版本与待发布草稿、逐日变化维度（停业/时段/特殊价格各自成清单）、前后取值、官方来源未确认、重叠的未来订单被提示且订单本身与草稿状态均未被改动");
+  ok("发布前影响预览：首次发布也列出受影响日期并提示重叠未来订单（基准是周模板而非空日历）、指出当前已发布版本与待发布草稿、逐日变化维度（停业/时段/特殊价格各自成清单）、前后取值、官方来源未确认、订单与草稿状态均未被改动");
+
+  console.log("== 15o. PRICE-02 官方来源版本：快照不可变 + 序号原子性与排序 + 停用来源不可再应用 ==");
+  // #2 来源版本必须不可变：读取历史版本不得 join 主档当前值，否则主档改名就改写了历史含义。
+  const snapSourceName = `E2E 快照来源-${Date.now().toString(36)}`;
+  const snapPlatform = await login("platform", "admin", PLATFORM_PASSWORD);
+  const snapSource = await request("POST", "/api/platform/official-calendars", {
+    region: "CN", name: snapSourceName, url: "https://example.invalid/e2e-snap-a"
+  }, snapPlatform.accessToken);
+  assert.equal(snapSource.status, 201, `建快照用例来源失败: ${snapSource.status} ${JSON.stringify(snapSource.body).slice(0, 200)}`);
+  const snapSourceId = snapSource.body.data.id;
+  const snapYear = 2039;
+  const snapVersion = await request("POST", `/api/platform/official-calendars/${snapSourceId}/versions`, {
+    year: snapYear, publishedAt: new Date(Date.now() - 86400000).toISOString(),
+    days: [{ date: `${snapYear}-10-01`, dayType: "statutory_holiday", name: "国庆节" }]
+  }, snapPlatform.accessToken);
+  assert.equal(snapVersion.status, 201, `登记快照用例版本失败: ${snapVersion.status} ${JSON.stringify(snapVersion.body).slice(0, 200)}`);
+  assert.equal(snapVersion.body.data.sequence, 1, `首个版本序号应为 1: ${snapVersion.body.data.sequence}`);
+  assert.equal(snapVersion.body.data.sourceName, snapSourceName, "版本必须带来源名称快照");
+  // 改主档名称与地址后，历史版本必须仍显示登记当时的值。
+  const renamed = await request("PUT", `/api/platform/official-calendars/${snapSourceId}`, {
+    region: "CN", name: `${snapSourceName}（已改名）`, url: "https://example.invalid/e2e-snap-CHANGED"
+  }, snapPlatform.accessToken);
+  assert.equal(renamed.status, 200, `改来源主档失败: ${renamed.status} ${JSON.stringify(renamed.body).slice(0, 200)}`);
+  const afterRename = (await request("GET", `/api/platform/official-calendars/${snapSourceId}/versions`, null, snapPlatform.accessToken)).body.data;
+  const snapAfter = afterRename.find((v) => v.id === snapVersion.body.data.id);
+  assert.ok(snapAfter, "改名后仍应查得到该历史版本");
+  assert.equal(snapAfter.sourceName, snapSourceName, `历史版本的来源名称不得随主档改名而变: ${snapAfter.sourceName}`);
+  assert.equal(snapAfter.sourceUrl, "https://example.invalid/e2e-snap-a", `历史版本的来源地址不得随主档变更而变: ${snapAfter.sourceUrl}`);
+  // 空间引用该历史版本时，写进空间日历的也必须是快照值。
+  const snapApply = await applyOfficialVersion(snapYear, snapVersion.body.data.id, construction.accessToken);
+  assert.equal(snapApply.status, 201, `应用快照版本失败: ${snapApply.status} ${JSON.stringify(snapApply.body).slice(0, 200)}`);
+  assert.equal(snapApply.body.data.sourceName, snapSourceName, `空间日历记录的来源名称应是版本快照值: ${snapApply.body.data.sourceName}`);
+
+  // #9 序号原子性与排序：连续登记 12 个版本，序号必须 1..12，且列表按数值序号倒序
+  //    （字符串倒序会把 1.9 排在 1.10 之前）。
+  const seqYear = 2040;
+  const seqSeen = [];
+  for (let i = 0; i < 12; i += 1) {
+    const res = await request("POST", `/api/platform/official-calendars/${snapSourceId}/versions`, {
+      year: seqYear, publishedAt: new Date(Date.now() - 86400000).toISOString(),
+      days: [{ date: `${seqYear}-10-01`, dayType: "statutory_holiday", name: `国庆节 v${i}` }]
+    }, snapPlatform.accessToken);
+    assert.equal(res.status, 201, `第 ${i + 1} 次登记失败: ${res.status} ${JSON.stringify(res.body).slice(0, 200)}`);
+    seqSeen.push(res.body.data.sequence);
+  }
+  assert.deepEqual(seqSeen, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], `12 个连续版本的序号必须严格递增: ${JSON.stringify(seqSeen)}`);
+  const seqList = (await request("GET", `/api/platform/official-calendars/${snapSourceId}/versions?year=${seqYear}`, null, snapPlatform.accessToken)).body.data;
+  assert.equal(seqList.length, 12, `该年度应有 12 个版本: ${seqList.length}`);
+  assert.equal(seqList[0].sequence, 12, `列表必须按数值序号倒序，首条应是序号 12: ${seqList[0].sequence}`);
+  assert.equal(seqList[0].version, "1.11", `序号 12 的展示版本号应为 1.11: ${seqList[0].version}`);
+  // 关键：1.10/1.11 必须排在 1.9 之前——这正是字符串排序会出错的地方。
+  const idx = (label) => seqList.findIndex((v) => v.version === label);
+  assert.ok(idx("1.11") < idx("1.9"), `1.11 必须排在 1.9 之前（字符串倒序会反）: ${JSON.stringify(seqList.map((v) => v.version))}`);
+  assert.ok(idx("1.10") < idx("1.9"), `1.10 必须排在 1.9 之前: ${JSON.stringify(seqList.map((v) => v.version))}`);
+
+  // 并发登记：4 路同时登记同一 (来源, 年度)，不得出现重复序号，也不得因为"先查后写"
+  // 而静默丢版本；落败者要么拿到新序号（重试成功），要么明确 409。
+  const concurrentYear = 2041;
+  const concurrentRegistrations = await Promise.all(
+    [0, 1, 2, 3].map((i) =>
+      request("POST", `/api/platform/official-calendars/${snapSourceId}/versions`, {
+        year: concurrentYear, publishedAt: new Date(Date.now() - 86400000).toISOString(),
+        days: [{ date: `${concurrentYear}-10-0${i + 1}`, dayType: "statutory_holiday", name: `并发 ${i}` }]
+      }, snapPlatform.accessToken)
+    )
+  );
+  const okSequences = concurrentRegistrations.filter((r) => r.status === 201).map((r) => r.body.data.sequence);
+  const conflicts = concurrentRegistrations.filter((r) => r.status === 409);
+  assert.equal(
+    okSequences.length + conflicts.length,
+    4,
+    `并发登记只允许 201 或 409，实际状态: ${JSON.stringify(concurrentRegistrations.map((r) => r.status))}`
+  );
+  assert.ok(okSequences.length >= 1, "并发登记至少要有一路成功");
+  assert.equal(new Set(okSequences).size, okSequences.length, `并发成功的序号不得重复: ${JSON.stringify(okSequences)}`);
+  const concurrentRows = readCount(
+    `SELECT COUNT(*) FROM \`official_calendar_source_versions\` WHERE \`sourceId\`='${snapSourceId}' AND \`year\`=${concurrentYear};`
+  );
+  assert.equal(concurrentRows, okSequences.length, `落库条数必须与成功次数一致: ${concurrentRows} vs ${okSequences.length}`);
+
+  // #8 停用来源后不得再被空间新应用，但已引用它的历史日历必须原样保留。
+  const deactivated = await request("PUT", `/api/platform/official-calendars/${snapSourceId}`, {
+    region: "CN", name: `${snapSourceName}（已改名）`, url: "https://example.invalid/e2e-snap-CHANGED", isActive: false
+  }, snapPlatform.accessToken);
+  assert.equal(deactivated.status, 200, `停用来源失败: ${deactivated.status}`);
+  const tenantVisible = (await request("GET", `/api/rental/v1/official-calendar-sources?year=${snapYear}`, null, construction.accessToken)).body.data;
+  assert.ok(
+    !tenantVisible.some((v) => v.sourceId === snapSourceId),
+    `停用来源的版本不得出现在空间可选列表里: ${JSON.stringify(tenantVisible.map((v) => v.sourceName))}`
+  );
+  const applyDeactivated = await applyOfficialVersion(snapYear, snapVersion.body.data.id, construction.accessToken);
+  assert.equal(applyDeactivated.status, 409, `停用来源的版本不得再被应用: ${applyDeactivated.status} ${JSON.stringify(applyDeactivated.body).slice(0, 200)}`);
+  const historyIntact = (await request("GET", `/api/rental/v1/calendars/${snapYear}`, null, construction.accessToken)).body.data;
+  assert.equal(
+    historyIntact.sourceVersionId,
+    snapVersion.body.data.id,
+    `已引用该版本的历史日历必须原样保留: ${historyIntact.sourceVersionId}`
+  );
+  ok("官方来源版本：来源信息按登记时快照（主档改名/改址不改写历史版本，空间引用也用快照）+ 序号原子递增（12 连续版本 1..12、列表按数值序号倒序使 1.11/1.10 排在 1.9 之前）+ 并发登记只有 201/409 且序号不重复、落库条数与成功数一致 + 停用来源后空间列表过滤且新应用 409，而已引用的历史日历不受影响");
 
   console.log("== 16. 双租户并发隔离 ==");
   const rounds = 12;

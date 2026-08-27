@@ -1130,10 +1130,16 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const draft = this.editableCalendar(tenantId, context, year);
     const published = this.publishedCalendar(tenantId, context, year);
     const replacing = published && published.version !== draft.version ? published : undefined;
-    const diff = replacing
-      ? calendarDiff(replacing.days, draft.days)
-      : { added: [], removed: [], changed: [] };
-    const beforeByDate = new Map((replacing?.days ?? []).map((day) => [day.date, day]));
+    // 首次发布也必须给出受影响日期。早前 `replacing` 为空时直接返回空差异，于是首发一份
+    // 含停业日、限时营业或特殊价格的日历时 `dates` 为空、未来订单一条都匹配不上，
+    // 与需求 4.5.8「发布前展示受影响日期，存在未来订单时必须提示」直接冲突。
+    //
+    // 基准不能用「空日历」（那会把全年 365 天都列成变更，没有筛选价值），
+    // 而是用**同一份每周默认模板**生成的基准年历：与它的差异恰好就是这次发布真正带来的
+    // 业务变化——人工覆盖、官方节假日、停业/限时、特殊价格系数。
+    const baseline = replacing ?? this.buildCalendar(tenantId, context.settings, year);
+    const diff = calendarDiff(baseline.days, draft.days);
+    const beforeByDate = new Map(baseline.days.map((day) => [day.date, day]));
     const afterByDate = new Map(draft.days.map((day) => [day.date, day]));
 
     const dates: RentalCalendarPublishPreviewDate[] = [];

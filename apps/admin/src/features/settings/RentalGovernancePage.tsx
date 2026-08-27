@@ -1784,15 +1784,15 @@ export function RentalGovernancePage() {
                     )}
                   </Descriptions.Item>
                 </Descriptions>
-                {publishPreview.data.firstPublish ? (
+                {publishPreview.data.firstPublish && (
                   <Alert
                     type="info"
                     showIcon
-                    message="该年度首次发布"
-                    description="没有可比对象，全年日期都将首次生效，因此不展示逐日差异。"
+                    message="该年度首次发布：差异基准是每周默认营业模板"
+                    description="下面列出的是这次发布相对周模板真正带来的业务变化（人工覆盖、官方节假日、停业或限时、特殊价格）；与「空日历」比会把全年 365 天都列出来，没有筛选价值。"
                   />
-                ) : (
-                  <>
+                )}
+                <>
                     <Space size={8} wrap>
                       <Tag color="volcano">
                         营业状态/停业 {publishPreview.data.closureChanges.length} 天
@@ -1844,7 +1844,6 @@ export function RentalGovernancePage() {
                       />
                     )}
                   </>
-                )}
                 {publishPreview.data.futureOrders.length > 0 && (
                   <Alert
                     type="warning"

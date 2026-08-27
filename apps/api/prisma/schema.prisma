@@ -2784,8 +2784,19 @@ model OfficialCalendarSourceVersion {
   sourceId    String
   source      OfficialCalendarSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
   year        Int
-  /// 来源版本号，由平台按 1.0/1.1… 递增。
+  /// 来源版本号，由平台按 1.0/1.1… 递增。展示用；排序与并发分配一律用 sequence。
   version     String
+  /// 版本序号（1 起）。字符串版本号在 1.10 之后会被字典序排到 1.9 之前，
+  /// 因此列表排序与「下一个版本号」分配都用这个整数，并靠唯一键把并发登记挡成冲突。
+  sequence    Int
+  /// 登记当时的来源信息**快照**。
+  ///
+  /// 不能在读取历史版本时去 join 来源主档：主档允许改名称、URL、地区，一改就会让
+  /// 昨天登记的旧版本显示成新名称、新 URL，租户引用旧版本时也拿到改后的信息——
+  /// 与「来源版本不可变、可历史追溯」冲突。主档继续维护，但不得改写历史版本的含义。
+  sourceNameSnapshot String
+  sourceUrlSnapshot  String
+  regionSnapshot     String
   /// 官方公告的发布日期，与导入时间不同：追溯要能区分「官方什么时候发的」与「我们什么时候入的库」。
   publishedAt DateTime
   importedAt  DateTime @default(now())
@@ -2795,6 +2806,9 @@ model OfficialCalendarSourceVersion {
   createdAt   DateTime @default(now())
 
   @@unique([sourceId, year, version], map: "official_calendar_source_versions_source_year_version_key")
+  /// 并发登记的关口：两个平台管理员同时算出同一个 sequence 时，其中一个必然撞唯一键，
+  /// 由服务层转成明确的 409/重试，而不是靠"先查后写"这种在并发下必然出错的时序。
+  @@unique([sourceId, year, sequence], map: "official_calendar_source_versions_source_year_sequence_key")
   @@index([year], map: "official_calendar_source_versions_year_idx")
   @@map("official_calendar_source_versions")
 }

@@ -54,16 +54,31 @@ export class OfficialCalendarSourceService {
     return this.toSource(await this.prisma.officialCalendarSource.create({ data }));
   }
 
-  /** 某来源的全部年度版本摘要（不含整年 days，只给条数）。 */
-  async listVersions(sourceId?: string, year?: number): Promise<OfficialCalendarSourceVersionSummary[]> {
+  /**
+   * 某来源的全部年度版本摘要（不含整年 days，只给条数）。
+   *
+   * `activeOnly` 用于**空间侧**可选列表：停用一个错误或过期来源后，空间不应再新应用它的
+   * 旧版本；但已经引用该版本的历史日历与报价必须原样保留，所以这里只过滤"可选"，
+   * 不删除也不改写任何历史。排序用整数 `sequence`：字符串版本号在 1.10 之后会被
+   * 字典序排到 1.9 之前。
+   */
+  async listVersions(
+    sourceId?: string,
+    year?: number,
+    activeOnly = false
+  ): Promise<OfficialCalendarSourceVersionSummary[]> {
     const rows = await this.prisma.officialCalendarSourceVersion.findMany({
-      where: { ...(sourceId ? { sourceId } : {}), ...(year ? { year } : {}) },
+      where: {
+        ...(sourceId ? { sourceId } : {}),
+        ...(year ? { year } : {}),
+        ...(activeOnly ? { source: { isActive: true } } : {})
+      },
       include: { source: true },
-      orderBy: [{ year: "desc" }, { version: "desc" }]
+      orderBy: [{ year: "desc" }, { sequence: "desc" }]
     });
     return rows.map((row) => {
       const { days, ...rest } = this.toVersion(row);
-      return { ...rest, dayCount: days.length };
+      return { ...rest, dayCount: days.length, sourceActive: row.source.isActive };
     });
   }
 
@@ -77,8 +92,39 @@ export class OfficialCalendarSourceService {
   }
 
   /**
-   * 登记一个新的年度来源版本。版本号由服务端在该 (来源, 年度) 下递增——
-   * 让调用方自报版本号会让「再次调整必须形成新版本」这条要求可以被绕过。
+   * 取一个可供**新应用**的来源版本。来源已停用时拒绝：停用的语义就是"不要再用它"，
+   * 只在登记新版本时拦住、却允许继续应用它的旧版本，等于停用只是个装饰。
+   * 已经引用过该版本的历史日历与报价不受影响。
+   */
+  async getApplicableVersion(id: string): Promise<OfficialCalendarSourceVersion> {
+    const row = await this.prisma.officialCalendarSourceVersion.findUnique({
+      where: { id },
+      include: { source: true }
+    });
+    if (!row) throw new NotFoundException("指定的官方来源版本不存在");
+    if (!row.source.isActive) {
+      throw new ConflictException("该官方来源已停用，不能再应用它的版本；已引用它的历史日历不受影响");
+    }
+    return this.toVersion(row);
+  }
+
+  /** 某来源某年度**最新有效版本**，供空间比较「是否有官方更新」（需求 4.5.2）。 */
+  async latestVersionForYear(year: number, sourceId?: string) {
+    const row = await this.prisma.officialCalendarSourceVersion.findFirst({
+      where: { year, source: { isActive: true }, ...(sourceId ? { sourceId } : {}) },
+      include: { source: true },
+      orderBy: [{ sequence: "desc" }]
+    });
+    return row ? this.toVersion(row) : undefined;
+  }
+
+  /**
+   * 登记一个新的年度来源版本。
+   *
+   * 序号在**事务内**按 `max(sequence) + 1` 分配，并由 `(sourceId, year, sequence)` 唯一键
+   * 兜住并发：两个平台管理员同时登记时，落败的一方撞唯一键，这里转成一次安全重试，
+   * 重试仍失败才报 409——「先查后写」在并发下必然出错，不能只靠它。
+   * 版本号由服务端从序号派生，调用方自报版本号就能绕过「再次调整必须形成新版本」。
    */
   async registerVersion(
     sourceId: string,
@@ -109,23 +155,44 @@ export class OfficialCalendarSourceService {
       if (seen.has(day.date)) throw new BadRequestException(`日期 ${day.date} 在本次登记中重复`);
       seen.add(day.date);
     }
-    const latest = await this.prisma.officialCalendarSourceVersion.findMany({
-      where: { sourceId, year: input.year },
-      select: { version: true }
-    });
-    const version = nextSourceVersion(latest.map((row) => row.version));
-    const created = await this.prisma.officialCalendarSourceVersion.create({
-      data: {
-        sourceId,
-        year: input.year,
-        version,
-        publishedAt: new Date(input.publishedAt),
-        importedBy: operator ?? null,
-        days: input.days as unknown as object
-      },
-      include: { source: true }
-    });
-    return this.toVersion(created);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const created = await this.prisma.$transaction(async (tx) => {
+          const latest = await tx.officialCalendarSourceVersion.findFirst({
+            where: { sourceId, year: input.year },
+            orderBy: { sequence: "desc" },
+            select: { sequence: true }
+          });
+          const sequence = (latest?.sequence ?? 0) + 1;
+          return tx.officialCalendarSourceVersion.create({
+            data: {
+              sourceId,
+              year: input.year,
+              sequence,
+              version: versionLabel(sequence),
+              // 快照登记当时的主档信息：主档以后改名或改地址都不得改写历史版本的含义。
+              sourceNameSnapshot: source.name,
+              sourceUrlSnapshot: source.url,
+              regionSnapshot: source.region,
+              publishedAt: new Date(input.publishedAt),
+              importedBy: operator ?? null,
+              days: input.days as unknown as object
+            },
+            include: { source: true }
+          });
+        });
+        return this.toVersion(created);
+      } catch (error) {
+        const code = (error as { code?: string }).code;
+        if (code !== "P2002" || attempt === 1) {
+          if (code === "P2002") {
+            throw new ConflictException("同时有另一次登记占用了该版本序号，请重试");
+          }
+          throw error;
+        }
+      }
+    }
+    throw new ConflictException("登记来源版本失败：版本序号并发冲突，请重试");
   }
 
   private toSource(row: {
@@ -155,20 +222,25 @@ export class OfficialCalendarSourceService {
     sourceId: string;
     year: number;
     version: string;
+    sequence: number;
+    sourceNameSnapshot: string;
+    sourceUrlSnapshot: string;
+    regionSnapshot: string;
     publishedAt: Date;
     importedAt: Date;
     importedBy: string | null;
     days: unknown;
-    source: { name: string; url: string; region: string };
   }): OfficialCalendarSourceVersion {
     return {
       id: row.id,
       sourceId: row.sourceId,
-      sourceName: row.source.name,
-      sourceUrl: row.source.url,
-      region: row.source.region as OfficialCalendarSourceVersion["region"],
+      // 一律用登记当时的快照，不读主档当前值——否则主档改名会改写历史版本的含义。
+      sourceName: row.sourceNameSnapshot,
+      sourceUrl: row.sourceUrlSnapshot,
+      region: row.regionSnapshot as OfficialCalendarSourceVersion["region"],
       year: row.year,
       version: row.version,
+      sequence: row.sequence,
       publishedAt: row.publishedAt.toISOString(),
       importedAt: row.importedAt.toISOString(),
       importedBy: row.importedBy ?? undefined,
@@ -177,16 +249,7 @@ export class OfficialCalendarSourceService {
   }
 }
 
-/** 来源版本号按段取数值递增，避免字典序把 1.10 排在 1.9 之前。 */
-function nextSourceVersion(existing: string[]): string {
-  if (!existing.length) return "1.0";
-  let best = { major: 1, minor: 0 };
-  for (const value of existing) {
-    const [major, minor] = value.split(".").map(Number);
-    const candidate = { major: Number.isFinite(major) ? major : 1, minor: Number.isFinite(minor) ? minor : 0 };
-    if (candidate.major > best.major || (candidate.major === best.major && candidate.minor > best.minor)) {
-      best = candidate;
-    }
-  }
-  return `${best.major}.${best.minor + 1}`;
+/** 序号 → 展示用版本号。序号 1 是 1.0，与既有数据的编号习惯一致。 */
+function versionLabel(sequence: number): string {
+  return `1.${sequence - 1}`;
 }
