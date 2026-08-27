@@ -643,6 +643,14 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return { ...entry, year: calendar.year, version: calendar.version };
   }
 
+  /**
+   * 把一个**公共官方来源版本**应用到本经营空间的年度草稿（需求 4.5.2）。
+   *
+   * 空间侧不再接受原始官方日期：官方数据是公共基础来源，由 SaaS 平台管理员在注册表里
+   * 维护并形成来源版本，空间只能引用某一版生成/更新自己的草稿，再由有权限的人确认发布。
+   * 早前空间可以直接 POST 任意 days，等于让每个租户自行编造公共数据，
+   * 且「导入即生效」与需求「不得导入后自动影响全部经营空间」相反。
+   */
   async importOfficialCalendar(tenantId: string, context: BusinessContext, input: ImportRentalCalendarRequest) {
     if (!/^https:\/\//.test(input.sourceUrl)) throw new BadRequestException("官方日历来源必须使用 HTTPS 地址");
     if (!input.days.length) throw new BadRequestException("官方日历数据不能为空");
@@ -736,6 +744,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     calendar.sourceName = input.sourceName;
     calendar.sourceUrl = input.sourceUrl;
     calendar.sourcePublishedAt = input.sourcePublishedAt;
+    // 记住引用的是哪一个公共来源版本（需求 4.5.7：发布记录必须保存官方来源版本）。
+    calendar.sourceVersionId = input.sourceVersionId;
+    calendar.sourceVersion = input.sourceVersion;
     calendar.importedAt = stamp();
     calendar.importPreservedOverrides = preserved.length ? preserved : undefined;
     calendar.publishedAt = undefined;

@@ -29,6 +29,8 @@ import { StoreRentalService } from "./modules/store-rental/store-rental.service"
 import { RentalCoreController } from "./modules/rental-core/rental-core.controller";
 import { RentalCoreService } from "./modules/rental-core/rental-core.service";
 import { RentalBusinessController } from "./modules/rental-core/rental-business.controller";
+import { OfficialCalendarSourceController } from "./modules/rental-core/official-calendar-source.controller";
+import { OfficialCalendarSourceService } from "./modules/rental-core/official-calendar-source.service";
 import { RentalBusinessService } from "./modules/rental-core/rental-business.service";
 import { RentalStateRepository } from "./modules/rental-core/rental-state.repository";
 import { RentalSnapshotBackfillService } from "./modules/rental-core/rental-snapshot-backfill.service";
@@ -57,6 +59,7 @@ import { RentalOrderConfirmationService } from "./modules/rental-core/rental-ord
     StoreRentalController,
     RentalCoreController,
     RentalBusinessController,
+    OfficialCalendarSourceController,
     IntegrationsController,
     FilesController,
     NotificationsController,
@@ -74,6 +77,7 @@ import { RentalOrderConfirmationService } from "./modules/rental-core/rental-ord
     StoreRentalRepository,
     RentalCoreService,
     RentalBusinessService,
+    OfficialCalendarSourceService,
     RentalStateRepository,
     RentalSnapshotBackfillService,
     RentalCoreConfigRepository,

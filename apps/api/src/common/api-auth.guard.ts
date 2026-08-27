@@ -90,6 +90,11 @@ export function requiredPermissions(method: string, path: string) {
     return [];
   }
 
+  if (path.startsWith("/platform/official-calendars")) {
+    // 公共官方日历来源注册表（需求 4.5.2/4.5.8）。仅 SaaS 平台管理员；
+    // canActivate 里另有一道 fail-closed 检查，不依赖本权限码单点把关。
+    return ["system:calendar-source:manage"];
+  }
   if (path === "/platform/permission-tree") {
     return ["system:role:manage"];
   }
@@ -175,6 +180,16 @@ export function requiredPermissions(method: string, path: string) {
   }
   if (path === "/rental/v1/business-settings") {
     return method === "GET" ? ["store-rental:rules:manage", "store-rental:price:manage", "store-rental:order:view", "store-rental:order:create"] : ["store-rental:rules:manage", "store-rental:price:manage"];
+  }
+  if (path.startsWith("/rental/v1/official-calendar-sources")) {
+    // 空间侧只读引用公共来源版本，用于挑选要应用哪一版（需求 4.5.2）。
+    // 只给日历相关角色：它不含业务数据，但也没有理由开放给全部经营角色。
+    return [
+      "store-rental:calendar:edit",
+      "store-rental:calendar:publish",
+      "store-rental:price:manage",
+      "store-rental:rules:manage"
+    ];
   }
   if (path.startsWith("/rental/v1/calendars")) {
     // 需求 4.5.8：营业日历「编辑」与「发布」使用独立权限，权限模型必须允许
@@ -413,7 +428,12 @@ function hasAnyPermission(user: SystemUserRow, permissions: string[]) {
     return true;
   }
   if (user.isSaasAdmin) {
-    return permissions.some((permission) => permission.startsWith("system:tenant:"));
+    // SaaS 平台管理员只拿到跨租户的平台能力：租户管理，以及公共官方日历来源注册表
+    // （需求 4.5.8：「导入和维护公共官方日历来源」）。后者是跨租户的公共基础数据、
+    // 不含任何空间业务数据，因此不违反同款「不得借此查看空间业务数据」。
+    return permissions.some(
+      (permission) => permission.startsWith("system:tenant:") || permission.startsWith("system:calendar-source:")
+    );
   }
   if (user.isPlatformAdmin || user.permissions.includes("*")) {
     return true;
@@ -466,7 +486,8 @@ export class ApiAuthGuard implements CanActivate {
         "/rental/v1/categories"
       ].includes(path) &&
       !path.startsWith("/platform/tenants") &&
-      !path.startsWith("/platform/tenant-bootstrap")
+      !path.startsWith("/platform/tenant-bootstrap") &&
+      !path.startsWith("/platform/official-calendars")
     ) {
       throw new ForbiddenException("SaaS 平台管理员只能访问租户管理能力");
     }
@@ -481,6 +502,12 @@ export class ApiAuthGuard implements CanActivate {
       !user.isSaasAdmin
     ) {
       throw new ForbiddenException("仅 SaaS 平台管理员可以管理租户");
+    }
+    // 公共官方日历来源是跨租户的公共基础数据（需求 4.5.8）。必须显式 fail-closed：
+    // 租户内的 isPlatformAdmin 在 hasAnyPermission 里对任何权限都放行，
+    // 不加这一道的话任一租户管理员都能改所有租户共用的官方节假日数据。
+    if (path.startsWith("/platform/official-calendars") && !user.isSaasAdmin) {
+      throw new ForbiddenException("仅 SaaS 平台管理员可以维护公共官方日历来源");
     }
     if (!hasAnyPermission(user, permissions)) {
       throw new ForbiddenException("当前账号无权访问该功能");

@@ -8,7 +8,6 @@ import {
 import { RENTAL_PRICING_UNIT_LABELS } from "@store-rental/shared";
 import type {
   GrantRentalRewardRequest,
-  ImportRentalCalendarRequest,
   RentalCalendarDay,
   RentalCalendarVersionSummary,
   SaveRentalCalendarDayRequest,
@@ -54,9 +53,6 @@ type TabKey =
   | "calendar"
   | "membership"
   | "notifications";
-type ImportForm = Omit<ImportRentalCalendarRequest, "days"> & {
-  daysText: string;
-};
 type TemplateForm = Omit<
   SaveRentalNotificationTemplateRequest,
   "variableSchema"
@@ -154,7 +150,6 @@ export function RentalGovernancePage() {
     RentalRuleVersion["config"] & { changeReason: string }
   >();
   const [calendarDayForm] = Form.useForm<SaveRentalCalendarDayRequest>();
-  const [importForm] = Form.useForm<ImportForm>();
   const [publishForm] = Form.useForm<{ changeReason: string }>();
   const [revertForm] = Form.useForm<{ overrideReason: string }>();
   const [voidForm] = Form.useForm<{ reason: string }>();
@@ -200,6 +195,12 @@ export function RentalGovernancePage() {
     queryKey: ["rental-core", "calendar-audits", year, historyVersion],
     queryFn: () => rentalCoreApi.calendarOverrideAudits(year, historyVersion),
     enabled: historyOpen && canViewCalendarHistory,
+  });
+  /** 可引用的公共官方来源版本：只在「应用官方来源」抽屉打开时拉。 */
+  const officialSourceVersions = useQuery({
+    queryKey: ["rental-core", "official-calendar-sources", year],
+    queryFn: () => rentalCoreApi.officialCalendarSourceVersions(year),
+    enabled: importOpen && canEditCalendar,
   });
   /** 发布前影响预览：只在发布抽屉打开时拉一次（需求 4.5.8）。 */
   const publishPreview = useQuery({
@@ -299,32 +300,39 @@ export function RentalGovernancePage() {
     },
     onError: () => message.error("日期或价格系数无效"),
   });
-  const importCalendar = useMutation({
-    mutationFn: (values: ImportForm) => {
-      const { daysText, ...rest } = values;
-      return rentalCoreApi.importCalendar({
-        ...rest,
-        year,
-        days: JSON.parse(daysText) as ImportRentalCalendarRequest["days"],
-      });
-    },
+  /**
+   * 引用公共官方来源版本生成/更新本空间年度草稿（需求 4.5.2）。
+   *
+   * 空间侧不再提交原始官方日期：公共官方数据由 SaaS 平台管理员在注册表里维护并形成
+   * 来源版本，空间只能挑一版应用，再自行确认发布——否则「租户自行编造公共数据」
+   * 且「导入即影响全部经营空间」。
+   */
+  const applyOfficialSource = useMutation({
+    mutationFn: (sourceVersionId: string) =>
+      rentalCoreApi.applyOfficialCalendarSource(year, { sourceVersionId }),
     onSuccess: async (result) => {
       setImportOpen(false);
-      importForm.resetFields();
       await queryClient.invalidateQueries({
         queryKey: ["rental-core", "calendar", year],
       });
-      // 保留的人工覆盖必须显式告知：导入静默跳过这些日期时，运营会以为官方值已生效。
+      await queryClient.invalidateQueries({
+        queryKey: ["rental-core", "calendar-versions", year],
+      });
+      // 保留的人工覆盖必须显式告知：应用来源时静默跳过这些日期，运营会以为官方值已生效。
       const preserved = result?.importPreservedOverrides ?? [];
       if (preserved.length) {
         message.warning(
-          `官方日历已导入草稿。${preserved.length} 个日期存在人工覆盖，已保留原覆盖：${preserved.join("、")}`,
+          `官方来源已应用到草稿。${preserved.length} 个日期存在人工覆盖，已保留原覆盖：${preserved.join("、")}`,
         );
       } else {
-        message.success("官方日历已导入草稿，请核对后发布");
+        message.success("官方来源已应用到草稿，请核对后发布");
       }
     },
-    onError: () => message.error("导入失败，请检查官方来源、年度和 JSON 数据"),
+    onError: (error) =>
+      message.error(
+        (error as { response?: { data?: { message?: string } } })?.response?.data?.message ??
+          "应用官方来源失败",
+      ),
   });
   const publishCalendar = useMutation({
     mutationFn: (changeReason: string) =>
@@ -893,21 +901,7 @@ export function RentalGovernancePage() {
                       历史版本
                     </Button>
                     {canEditCalendar && (
-                      <Button
-                        onClick={() => {
-                          importForm.setFieldsValue({
-                            year,
-                            region: "CN",
-                            sourceName: "国务院办公厅年度放假通知",
-                            sourceUrl: "https://www.gov.cn/",
-                            sourcePublishedAt: new Date().toISOString(),
-                            daysText: "[]",
-                          });
-                          setImportOpen(true);
-                        }}
-                      >
-                        导入官方日历
-                      </Button>
+                      <Button onClick={() => setImportOpen(true)}>应用官方来源</Button>
                     )}
                     {canPublishCalendar && (
                       <Button
@@ -1694,69 +1688,56 @@ export function RentalGovernancePage() {
           </Form.Item>
         </Form>
       </Drawer>
+      {/* 引用公共官方来源版本（需求 4.5.2/4.5.8）。空间侧不再手填原始官方 JSON：
+          公共数据由 SaaS 平台管理员在注册表里维护，这里只能挑一版应用到本空间草稿。 */}
       <Drawer
-        title={`导入 ${year} 年官方日历`}
-        width={680}
+        title={`应用 ${year} 年公共官方日历来源`}
+        width={720}
         open={importOpen}
         onClose={() => setImportOpen(false)}
         destroyOnHidden
-        extra={
-          <Button
-            type="primary"
-            loading={importCalendar.isPending}
-            onClick={() => importForm.submit()}
-          >
-            导入草稿
-          </Button>
-        }
       >
-        <Form
-          form={importForm}
-          layout="vertical"
-          onFinish={(values) => importCalendar.mutate(values)}
-        >
+        <Space direction="vertical" size={16} style={{ width: "100%" }}>
           <Alert
-            type="warning"
+            type="info"
             showIcon
-            message="只接受可信官方来源"
-            description="系统记录来源名称、HTTPS 地址、发布日期和导入时间；发布前应人工核对调休工作日。"
-            style={{ marginBottom: 16 }}
+            message="官方数据是公共基础来源，由平台维护、按版本发布"
+            description="应用某一版只会生成或更新本经营空间的草稿；已有的人工覆盖会被保留，本版未包含的日期会回落到每周模板。确认后仍需你自己发布。"
           />
-          <Form.Item
-            name="sourceName"
-            label="来源名称"
-            rules={[{ required: true }]}
-          >
-            <Input />
-          </Form.Item>
-          <Form.Item
-            name="sourceUrl"
-            label="来源 URL"
-            rules={[{ required: true }]}
-          >
-            <Input />
-          </Form.Item>
-          <Form.Item
-            name="sourcePublishedAt"
-            label="来源发布日期"
-            rules={[{ required: true }]}
-          >
-            <Input />
-          </Form.Item>
-          <Form.Item name="region" hidden>
-            <Input />
-          </Form.Item>
-          <Form.Item
-            name="daysText"
-            label="官方日期 JSON"
-            rules={[{ required: true }]}
-          >
-            <Input.TextArea
-              rows={14}
-              placeholder='[{"date":"2026-10-01","dayType":"statutory_holiday","name":"国庆节"}]'
+          <QueryState loading={officialSourceVersions.isLoading} error={officialSourceVersions.error}>
+            <Table
+              rowKey="id"
+              size="small"
+              dataSource={officialSourceVersions.data ?? []}
+              pagination={false}
+              locale={{ emptyText: `平台尚未登记 ${year} 年度的官方来源版本，请联系 SaaS 平台管理员` }}
+              columns={[
+                { title: "来源", dataIndex: "sourceName" },
+                { title: "来源版本", dataIndex: "version", width: 100, render: (value) => `v${value}` },
+                {
+                  title: "官方发布日期",
+                  dataIndex: "publishedAt",
+                  width: 130,
+                  render: (value) => dayjs(value as string).format("YYYY-MM-DD"),
+                },
+                { title: "日期条数", dataIndex: "dayCount", width: 90 },
+                {
+                  title: "操作",
+                  width: 110,
+                  render: (_, row) => (
+                    <Button
+                      type="link"
+                      loading={applyOfficialSource.isPending}
+                      onClick={() => applyOfficialSource.mutate(row.id)}
+                    >
+                      应用到草稿
+                    </Button>
+                  ),
+                },
+              ]}
             />
-          </Form.Item>
-        </Form>
+          </QueryState>
+        </Space>
       </Drawer>
       <Modal
         title="发布年度营业日历"

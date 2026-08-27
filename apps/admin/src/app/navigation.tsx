@@ -2,6 +2,7 @@ import {
   ApartmentOutlined,
   AppstoreOutlined,
   BoxPlotOutlined,
+  CalendarOutlined,
   ControlOutlined,
   DashboardOutlined,
   FileTextOutlined,
@@ -56,7 +57,8 @@ export const APP_ROUTES = {
   platformUsers: { path: "/platform/users", label: "组织与权限", permission: "system:user:manage", audience: "saas", icon: <TeamOutlined />, menu: true },
   platformSystem: { path: "/platform/system", label: "平台参数", permission: "system:params:manage", audience: "saas", icon: <SettingOutlined />, menu: true },
   platformOperations: { path: "/platform/operations", label: "平台运维", permission: "system:params:manage", audience: "saas", icon: <SafetyCertificateOutlined />, menu: true },
-  platformTools: { path: "/platform/tools", label: "平台工具与治理", permission: "system:params:manage", audience: "saas", icon: <ControlOutlined />, menu: true }
+  platformTools: { path: "/platform/tools", label: "平台工具与治理", permission: "system:params:manage", audience: "saas", icon: <ControlOutlined />, menu: true },
+  platformOfficialCalendars: { path: "/platform/official-calendars", label: "公共官方日历", permission: "system:calendar-source:manage", audience: "saas", icon: <CalendarOutlined />, menu: true }
 } satisfies Record<string, AppRouteDefinition>;
 
 export const APP_NAVIGATION: AppNavigationSection[] = [
@@ -66,7 +68,7 @@ export const APP_NAVIGATION: AppNavigationSection[] = [
   { key: "commercial", label: "定价与营销", icon: <FundOutlined />, routes: [APP_ROUTES.pricing, APP_ROUTES.discounts, APP_ROUTES.coupons, APP_ROUTES.services] },
   { key: "customers", label: "客户管理", icon: <TeamOutlined />, routes: [APP_ROUTES.customers] },
   { key: "tenant-settings", label: "经营设置", icon: <SettingOutlined />, routes: [APP_ROUTES.rentalSettings] },
-  { key: "platform-management", label: "平台管理", icon: <SettingOutlined />, routes: [APP_ROUTES.platformTenants, APP_ROUTES.platformUsers, APP_ROUTES.platformSystem, APP_ROUTES.platformOperations, APP_ROUTES.platformTools] }
+  { key: "platform-management", label: "平台管理", icon: <SettingOutlined />, routes: [APP_ROUTES.platformTenants, APP_ROUTES.platformOfficialCalendars, APP_ROUTES.platformUsers, APP_ROUTES.platformSystem, APP_ROUTES.platformOperations, APP_ROUTES.platformTools] }
 ];
 
 export function canAccessRoute(

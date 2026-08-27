@@ -20,6 +20,7 @@ const CustomerPage = lazy(() => import("@/features/customers/CustomerPage").then
 const PlatformPage = lazy(() => import("@/features/platform/PlatformPage").then((module) => ({ default: module.PlatformPage })));
 const PlatformOperationsPage = lazy(() => import("@/features/platform/PlatformOperationsPage").then((module) => ({ default: module.PlatformOperationsPage })));
 const PlatformToolsPage = lazy(() => import("@/features/platform/PlatformToolsPage").then((module) => ({ default: module.PlatformToolsPage })));
+const OfficialCalendarSourcePage = lazy(() => import("@/features/platform/OfficialCalendarSourcePage").then((module) => ({ default: module.OfficialCalendarSourcePage })));
 const TenantManagementPage = lazy(() => import("@/features/platform/TenantManagementPage").then((module) => ({ default: module.TenantManagementPage })));
 const RentalCorePage = lazy(() => import("@/features/rental-core/RentalCorePage").then((module) => ({ default: module.RentalCorePage })));
 const RentalSettingsPage = lazy(() => import("@/features/settings/RentalGovernancePage").then((module) => ({ default: module.RentalGovernancePage })));
@@ -88,6 +89,7 @@ function ProtectedRoutes() {
             <Route path={APP_ROUTES.platformSystem.path} element={guard(APP_ROUTES.platformSystem, <PlatformPage />)} />
             <Route path={APP_ROUTES.platformOperations.path} element={guard(APP_ROUTES.platformOperations, <PlatformOperationsPage />)} />
             <Route path={APP_ROUTES.platformTools.path} element={guard(APP_ROUTES.platformTools, <PlatformToolsPage />)} />
+            <Route path={APP_ROUTES.platformOfficialCalendars.path} element={guard(APP_ROUTES.platformOfficialCalendars, <OfficialCalendarSourcePage />)} />
 
             <Route path="/rental/commercial" element={<Navigate to={APP_ROUTES.pricing.path} replace />} />
             <Route path="/new-order" element={<Navigate to={APP_ROUTES.orderCreate.path} replace />} />

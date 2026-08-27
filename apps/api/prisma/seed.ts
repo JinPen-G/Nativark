@@ -199,6 +199,9 @@ const permissions = [
   ["system:integration:manage", "外部接入与任务", "系统设置", PermissionKind.ACTION],
   ["system:button:export", "按钮-导出", "系统设置", PermissionKind.BUTTON],
   ["system:tenant:manage", "租户配置", "系统设置", PermissionKind.ACTION],
+  // 公共官方日历来源注册表（需求 4.5.8）。跨租户的公共基础数据，只授予 SaaS 平台管理员；
+  // 它不含任何经营空间业务数据，因此与「不得借此查看空间业务数据」不冲突。
+  ["system:calendar-source:manage", "公共官方日历来源维护", "系统设置", PermissionKind.ACTION],
   ["system:tenant:bootstrap", "租户初始化", "系统设置", PermissionKind.ACTION]
 ] as const;
 

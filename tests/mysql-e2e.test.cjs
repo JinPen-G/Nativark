@@ -330,6 +330,70 @@ async function bootstrapTenant(platformToken, tenantCode, categoryCode) {
   return { ...session, password: newPassword };
 }
 
+/**
+ * 公共官方日历来源（需求 4.5.2/4.5.8）。
+ *
+ * 官方节假日数据是**跨租户的公共基础来源**，由 SaaS 平台管理员在平台注册表里登记来源
+ * 与年度来源版本；经营空间不能直接提交原始官方日期，只能引用某一版生成自己的年度草稿
+ * 再自行确认发布。因此测试里凡是"某年度需要官方数据"的地方，都要走这两步。
+ *
+ * 复用同一个来源：同一 (来源, 年度) 下每次登记都会新增一个来源版本，正好也验证了
+ * 「官方日历再次调整时必须形成新的来源版本」。
+ */
+let officialSourceId;
+async function ensureOfficialSource() {
+  // 每次都重新登录取平台令牌：本套件在第 17 节会重启 API，而 startApi() 每次生成新的
+  // AUTH_TOKEN_SECRET，重启前拿到的任何令牌都会在之后变成 401。缓存令牌是个陷阱，
+  // 缓存来源 id 则没问题（库里那一行会一直在）。
+  const platformSession = await login("platform", "admin", PLATFORM_PASSWORD);
+  if (!officialSourceId) {
+    const created = await request(
+      "POST",
+      "/api/platform/official-calendars",
+      {
+        region: "CN",
+        name: "E2E 国务院办公厅放假通知",
+        url: "https://example.invalid/e2e-official-source",
+        notes: "MySQL E2E 用的公共官方来源"
+      },
+      platformSession.accessToken
+    );
+    if (created.status !== 201) fail("登记公共官方来源失败", JSON.stringify(created.body).slice(0, 300));
+    officialSourceId = created.body.data.id;
+  }
+  return { sourceId: officialSourceId, token: platformSession.accessToken };
+}
+
+/** 登记年度来源版本，返回原始响应（供断言失败分支）。 */
+async function postOfficialVersion(year, days, publishedAt) {
+  const { sourceId, token } = await ensureOfficialSource();
+  return request(
+    "POST",
+    `/api/platform/official-calendars/${sourceId}/versions`,
+    { year, publishedAt: publishedAt ?? new Date(Date.now() - 86400000).toISOString(), days },
+    token
+  );
+}
+
+/** 登记一个年度来源版本并返回它，供经营空间引用。 */
+async function registerOfficialVersion(year, days, publishedAt) {
+  const registered = await postOfficialVersion(year, days, publishedAt);
+  if (registered.status !== 201) {
+    fail(`登记 ${year} 年度官方来源版本失败`, JSON.stringify(registered.body).slice(0, 300));
+  }
+  return registered.body.data;
+}
+
+/** 经营空间引用某个来源版本，生成/更新本空间年度草稿。 */
+function applyOfficialVersion(year, sourceVersionId, token) {
+  return request(
+    "POST",
+    `/api/rental/v1/calendars/${year}/apply-official-source`,
+    { sourceVersionId },
+    token
+  );
+}
+
 /* ---------- 主流程 ---------- */
 
 async function main() {
@@ -2480,20 +2544,22 @@ async function main() {
   const closedDate = `${closedYear}-08-10`;
   // 中国大陆日历发布前必须先导入官方来源（服务端校验，行为正确）——
   // 需求 4.5.2 也要求官方数据带来源、来源发布日期与版本。
-  const importClosedYear = await request(
-    "POST",
-    "/api/rental/v1/calendars/import",
-    {
-      year: closedYear,
-      region: "CN",
-      sourceName: "E2E 停业日验证来源",
-      sourceUrl: "https://example.invalid/e2e-closed",
-      sourcePublishedAt: new Date(Date.now() - 86400000).toISOString(),
-      days: [{ date: `${closedYear}-10-01`, dayType: "statutory_holiday", name: "国庆节", pricingMultiplier: 1.5 }]
-    },
-    construction.accessToken
+  // 官方数据是公共基础来源：平台登记来源版本，空间引用它生成草稿（需求 4.5.2/4.5.8）。
+  const closedYearVersion = await registerOfficialVersion(closedYear, [
+    { date: `${closedYear}-10-01`, dayType: "statutory_holiday", name: "国庆节", pricingMultiplier: 1.5 }
+  ]);
+  const importClosedYear = await applyOfficialVersion(closedYear, closedYearVersion.id, construction.accessToken);
+  assert.equal(importClosedYear.status, 201, `应用 ${closedYear} 官方来源失败: ${JSON.stringify(importClosedYear.body).slice(0, 220)}`);
+  assert.equal(
+    importClosedYear.body.data.sourceVersionId,
+    closedYearVersion.id,
+    `空间日历必须记录引用的公共来源版本（需求 4.5.7）: ${importClosedYear.body.data.sourceVersionId}`
   );
-  assert.equal(importClosedYear.status, 201, `导入 ${closedYear} 官方来源失败: ${JSON.stringify(importClosedYear.body).slice(0, 220)}`);
+  assert.equal(
+    importClosedYear.body.data.sourceVersion,
+    closedYearVersion.version,
+    `空间日历必须记录来源版本号: ${importClosedYear.body.data.sourceVersion}`
+  );
   const saveClosedDay = await request(
     "PUT",
     `/api/rental/v1/calendars/${closedYear}/days/${closedDate}`,
@@ -2790,24 +2856,22 @@ async function main() {
       construction.tenant.tenantId +
       `' AND \`year\`=${closedYear} AND \`status\`='draft';`
   );
-  const reimport = await request(
-    "POST",
-    "/api/rental/v1/calendars/import",
-    {
-      year: closedYear,
-      region: "CN",
-      sourceName: "E2E 重导来源",
-      sourceUrl: "https://example.invalid/e2e-reimport",
-      sourcePublishedAt: new Date().toISOString(),
-      // 官方把国庆节系数改成 1.8，同时新增一个调休工作日。
-      days: [
-        { date: auditDate, dayType: "statutory_holiday", name: "国庆节（官方修订）", pricingMultiplier: 1.8 },
-        { date: `${closedYear}-10-11`, dayType: "makeup_workday", name: "国庆调休上班" }
-      ]
-    },
-    construction.accessToken
+  // 官方修订形成**新的来源版本**（需求 4.5.2），空间再引用新版本。
+  const reimportVersion = await registerOfficialVersion(
+    closedYear,
+    [
+      { date: auditDate, dayType: "statutory_holiday", name: "国庆节（官方修订）", pricingMultiplier: 1.8 },
+      { date: `${closedYear}-10-11`, dayType: "makeup_workday", name: "国庆调休上班" }
+    ],
+    new Date().toISOString()
   );
-  assert.equal(reimport.status, 201, `重导官方日历失败: ${JSON.stringify(reimport.body).slice(0, 220)}`);
+  assert.notEqual(
+    reimportVersion.version,
+    closedYearVersion.version,
+    `官方再次调整必须形成新的来源版本，实际仍是 ${reimportVersion.version}`
+  );
+  const reimport = await applyOfficialVersion(closedYear, reimportVersion.id, construction.accessToken);
+  assert.equal(reimport.status, 201, `重新应用官方来源失败: ${JSON.stringify(reimport.body).slice(0, 220)}`);
   const reimported = reimport.body.data;
   const keptDay = reimported.days.find((row) => row.date === auditDate);
   assert.equal(keptDay.source, "tenant_override", "重导官方日历不得把人工覆盖改成官方来源");
@@ -2829,28 +2893,21 @@ async function main() {
   assert.equal(freshDay.source, "official_cn", "没有人工覆盖的日期应写入官方来源");
   assert.equal(freshDay.dayType, "makeup_workday", "调休工作日类型应按官方数据写入");
 
-  // 连续导入不得堆出多个草稿：早前每次导入都 `versionAfter`，
+  // 连续应用来源版本不得堆出多个草稿：早前每次导入都 `versionAfter`，
   // 叠加"取首条草稿"的旧 bug，页面会随机显示其中一个旧草稿。
-  const reimportAgain = await request(
-    "POST",
-    "/api/rental/v1/calendars/import",
-    {
-      year: closedYear,
-      region: "CN",
-      sourceName: "E2E 第三次导入",
-      sourceUrl: "https://example.invalid/e2e-reimport-2",
-      sourcePublishedAt: new Date().toISOString(),
+  const thirdVersion = await registerOfficialVersion(
+    closedYear,
+    [
       // 官方导入是**整年替换**：本次仍要带上 auditDate，否则该日期就不再属于官方数据，
       // 其 overriddenFrom 会（正确地）回落成周模板，下面「移除覆盖恢复到官方值」这一节
       // 就测不到目标路径了。「官方撤回某日期后覆盖移除应回落周模板」由 15L 节单独覆盖。
-      days: [
-        { date: auditDate, dayType: "statutory_holiday", name: "国庆节（官方修订）", pricingMultiplier: 1.8 },
-        { date: `${closedYear}-10-12`, dayType: "makeup_workday", name: "再一次调休" }
-      ]
-    },
-    construction.accessToken
+      { date: auditDate, dayType: "statutory_holiday", name: "国庆节（官方修订）", pricingMultiplier: 1.8 },
+      { date: `${closedYear}-10-12`, dayType: "makeup_workday", name: "再一次调休" }
+    ],
+    new Date().toISOString()
   );
-  assert.equal(reimportAgain.status, 201, "第三次导入失败");
+  const reimportAgain = await applyOfficialVersion(closedYear, thirdVersion.id, construction.accessToken);
+  assert.equal(reimportAgain.status, 201, "第三次应用来源版本失败");
   assert.equal(
     readCount(
       "SELECT COUNT(*) FROM `rental_business_calendars` WHERE `tenantId`='" +
@@ -2861,21 +2918,14 @@ async function main() {
     "连续导入只能原地更新同一个草稿，不能每次都新建一个版本"
   );
   // 同一批里重复给同一天必须 400：静默取最后一条会让结果取决于数组顺序。
-  const duplicateInBatch = await request(
-    "POST",
-    "/api/rental/v1/calendars/import",
-    {
-      year: closedYear,
-      region: "CN",
-      sourceName: "E2E 批内重复",
-      sourceUrl: "https://example.invalid/e2e-dup",
-      sourcePublishedAt: new Date().toISOString(),
-      days: [
-        { date: `${closedYear}-10-13`, dayType: "makeup_workday", name: "甲" },
-        { date: `${closedYear}-10-13`, dayType: "statutory_holiday", name: "乙" }
-      ]
-    },
-    construction.accessToken
+  // 这道校验现在在**平台登记来源版本**时执行——公共数据的正确性该在入库时把住。
+  const duplicateInBatch = await postOfficialVersion(
+    closedYear,
+    [
+      { date: `${closedYear}-10-13`, dayType: "makeup_workday", name: "甲" },
+      { date: `${closedYear}-10-13`, dayType: "statutory_holiday", name: "乙" }
+    ],
+    new Date().toISOString()
   );
   assert.equal(duplicateInBatch.status, 400, `批内重复日期必须 400，实际 ${duplicateInBatch.status}`);
 
@@ -3408,23 +3458,19 @@ async function main() {
   console.log("== 15L. PRICE-02 官方导入整年替换 + 每周时段校验（Codex #4/#8） ==");
   // #4：官方导入是整年替换——旧版本里本次未再出现的官方节假日必须回落周模板默认，不残留。
   const impYear = 2033;
-  const importTwoHolidays = await request("POST", "/api/rental/v1/calendars/import", {
-    year: impYear, region: "CN", sourceName: "E2E 整年替换来源A", sourceUrl: "https://example.invalid/e2e-replace-a",
-    sourcePublishedAt: new Date(Date.now() - 86400000).toISOString(),
-    days: [
-      { date: `${impYear}-10-01`, dayType: "statutory_holiday", name: "国庆节", pricingMultiplier: 1.5 },
-      { date: `${impYear}-10-02`, dayType: "statutory_holiday", name: "国庆节次日", pricingMultiplier: 1.5 }
-    ]
-  }, construction.accessToken);
-  assert.equal(importTwoHolidays.status, 201, `首次导入失败: ${importTwoHolidays.status} ${JSON.stringify(importTwoHolidays.body).slice(0, 200)}`);
+  const impVersionA = await registerOfficialVersion(impYear, [
+    { date: `${impYear}-10-01`, dayType: "statutory_holiday", name: "国庆节", pricingMultiplier: 1.5 },
+    { date: `${impYear}-10-02`, dayType: "statutory_holiday", name: "国庆节次日", pricingMultiplier: 1.5 }
+  ]);
+  const importTwoHolidays = await applyOfficialVersion(impYear, impVersionA.id, construction.accessToken);
+  assert.equal(importTwoHolidays.status, 201, `首次应用来源失败: ${importTwoHolidays.status} ${JSON.stringify(importTwoHolidays.body).slice(0, 200)}`);
   const afterFirstImport = (await request("GET", `/api/rental/v1/calendars/${impYear}`, null, construction.accessToken)).body.data;
-  assert.equal(afterFirstImport.days.find((d) => d.date === `${impYear}-10-02`)?.dayType, "statutory_holiday", "首次导入后 10-02 应为法定节假日");
-  const importOneHoliday = await request("POST", "/api/rental/v1/calendars/import", {
-    year: impYear, region: "CN", sourceName: "E2E 整年替换来源B", sourceUrl: "https://example.invalid/e2e-replace-b",
-    sourcePublishedAt: new Date(Date.now() - 86400000).toISOString(),
-    days: [{ date: `${impYear}-10-01`, dayType: "statutory_holiday", name: "国庆节", pricingMultiplier: 1.5 }]
-  }, construction.accessToken);
-  assert.equal(importOneHoliday.status, 201, `重导失败: ${importOneHoliday.status} ${JSON.stringify(importOneHoliday.body).slice(0, 200)}`);
+  assert.equal(afterFirstImport.days.find((d) => d.date === `${impYear}-10-02`)?.dayType, "statutory_holiday", "首次应用后 10-02 应为法定节假日");
+  const impVersionB = await registerOfficialVersion(impYear, [
+    { date: `${impYear}-10-01`, dayType: "statutory_holiday", name: "国庆节", pricingMultiplier: 1.5 }
+  ]);
+  const importOneHoliday = await applyOfficialVersion(impYear, impVersionB.id, construction.accessToken);
+  assert.equal(importOneHoliday.status, 201, `重新应用失败: ${importOneHoliday.status} ${JSON.stringify(importOneHoliday.body).slice(0, 200)}`);
   const afterSecondImport = (await request("GET", `/api/rental/v1/calendars/${impYear}`, null, construction.accessToken)).body.data;
   assert.equal(afterSecondImport.days.find((d) => d.date === `${impYear}-10-01`)?.dayType, "statutory_holiday", "重导后 10-01 仍应为法定节假日");
   // 重导删除的 10-02 必须**精确**回落到周模板默认（2033-10-02 是周日 → weekend/week_rule/1.1）。
@@ -3443,13 +3489,12 @@ async function main() {
   }, construction.accessToken);
   assert.equal(overrideOnWithdrawn.status, 200, `建覆盖失败: ${overrideOnWithdrawn.status}`);
   assert.equal(overrideOnWithdrawn.body.data.overriddenFrom?.pricingMultiplier, 1.5, `覆盖前原值应是本次官方的 1.5: ${JSON.stringify(overrideOnWithdrawn.body.data.overriddenFrom)}`);
-  const importWithdrawing = await request("POST", "/api/rental/v1/calendars/import", {
-    year: impYear, region: "CN", sourceName: "E2E 官方撤回来源C", sourceUrl: "https://example.invalid/e2e-replace-c",
-    sourcePublishedAt: new Date(Date.now() - 86400000).toISOString(),
+  const impVersionC = await registerOfficialVersion(impYear, [
     // 本次官方数据不再包含 10-01（官方撤回该节假日），只留一个无关日期。
-    days: [{ date: `${impYear}-12-25`, dayType: "makeup_workday", name: "年末调休" }]
-  }, construction.accessToken);
-  assert.equal(importWithdrawing.status, 201, `撤回式导入失败: ${importWithdrawing.status} ${JSON.stringify(importWithdrawing.body).slice(0, 200)}`);
+    { date: `${impYear}-12-25`, dayType: "makeup_workday", name: "年末调休" }
+  ]);
+  const importWithdrawing = await applyOfficialVersion(impYear, impVersionC.id, construction.accessToken);
+  assert.equal(importWithdrawing.status, 201, `撤回式应用失败: ${importWithdrawing.status} ${JSON.stringify(importWithdrawing.body).slice(0, 200)}`);
   const withdrawnKept = importWithdrawing.body.data.days.find((d) => d.date === withdrawnDate);
   assert.equal(withdrawnKept.source, "tenant_override", "人工覆盖本身仍须保留");
   assert.equal(withdrawnKept.pricingMultiplier, 2, `人工覆盖的系数须保留为 2: ${withdrawnKept.pricingMultiplier}`);
@@ -3815,27 +3860,22 @@ async function main() {
       );
     }
   }
-  // 营业日历：经 API 导入官方来源并发布，然后直查库确认状态与来源都落了盘。
+  // 营业日历：平台登记来源版本、空间引用它生成草稿并发布，然后直查库确认状态与来源都落了盘。
   // 此前 E2E 完全没碰日历接口，而它是阶段 4a 迁移的集合之一。
   const calendarYear = new Date().getUTCFullYear() + 1;
-  const importedCalendar = await request(
-    "POST",
-    "/api/rental/v1/calendars/import",
-    {
-      year: calendarYear,
-      region: "CN",
-      sourceName: "E2E 官方节假日来源",
-      sourceUrl: "https://example.invalid/e2e-holidays",
-      sourcePublishedAt: new Date(Date.now() - 86400000).toISOString(),
-      days: [{ date: `${calendarYear}-10-01`, dayType: "statutory_holiday", name: "国庆节", pricingMultiplier: 1.5 }]
-    },
+  const writeThroughVersion = await registerOfficialVersion(calendarYear, [
+    { date: `${calendarYear}-10-01`, dayType: "statutory_holiday", name: "国庆节", pricingMultiplier: 1.5 }
+  ]);
+  const importedCalendar = await applyOfficialVersion(
+    calendarYear,
+    writeThroughVersion.id,
     demoForWriteThrough.accessToken
   );
-  assert.equal(importedCalendar.status, 201, `日历导入失败: ${JSON.stringify(importedCalendar.body)}`);
+  assert.equal(importedCalendar.status, 201, `应用官方来源失败: ${JSON.stringify(importedCalendar.body)}`);
   assert.equal(
     readCount(`SELECT COUNT(*) FROM \`rental_business_calendars\` WHERE \`tenantId\`='tenant_001' AND \`year\`=${calendarYear} AND \`status\`='draft';`),
     1,
-    "导入后的日历必须以 draft 落库"
+    "应用来源后的日历必须以 draft 落库"
   );
   const publishedCalendar = await request(
     "POST",
@@ -6336,21 +6376,20 @@ async function main() {
   );
   assert.equal(calSwitch.status, 201, `日历编辑切换空间失败: ${calSwitch.status} ${JSON.stringify(calSwitch.body).slice(0, 200)}`);
   const editorToken = calSwitch.body.data.accessToken;
-  // 编辑权限：导入官方来源（编辑动作）应放行。
-  const editorImport = await request(
+  // 编辑权限：应用公共官方来源版本（编辑动作）应放行。
+  const editor2032Version = await registerOfficialVersion(2032, [
+    { date: "2032-10-01", dayType: "statutory_holiday", name: "国庆节", pricingMultiplier: 1.5 }
+  ]);
+  const editorImport = await applyOfficialVersion(2032, editor2032Version.id, editorToken);
+  assert.equal(editorImport.status, 201, `日历编辑应能应用官方来源（编辑权限）: ${editorImport.status} ${JSON.stringify(editorImport.body).slice(0, 200)}`);
+  // 公共来源是平台级资源：租户侧（含租户管理员）不得写它，否则一个租户能改所有租户共用的官方数据。
+  const tenantWriteSource = await request(
     "POST",
-    "/api/rental/v1/calendars/import",
-    {
-      year: 2032,
-      region: "CN",
-      sourceName: "E2E 分权来源",
-      sourceUrl: "https://example.invalid/e2e-4508",
-      sourcePublishedAt: new Date(Date.now() - 86400000).toISOString(),
-      days: [{ date: "2032-10-01", dayType: "statutory_holiday", name: "国庆节", pricingMultiplier: 1.5 }]
-    },
-    editorToken
+    "/api/platform/official-calendars",
+    { region: "CN", name: "租户越权登记", url: "https://example.invalid/tenant-write" },
+    calAdmin.accessToken
   );
-  assert.equal(editorImport.status, 201, `日历编辑应能导入草稿（编辑权限）: ${editorImport.status} ${JSON.stringify(editorImport.body).slice(0, 200)}`);
+  assert.equal(tenantWriteSource.status, 403, `租户不得维护公共官方来源: ${tenantWriteSource.status} ${JSON.stringify(tenantWriteSource.body).slice(0, 200)}`);
   // 发布权限：只有编辑权限的账号必须 403（本条核心——编辑与发布独立鉴权）。
   const editorPublish = await request(
     "POST",
@@ -6385,11 +6424,11 @@ async function main() {
   await request("POST", "/api/auth/change-password", { currentPassword: calPubTemp, newPassword: calPubPwd }, calPubFirst.accessToken);
   const calPub = await login("demo", calPublisherAccount, calPubPwd);
   const calPubToken = (await request("POST", "/api/auth/switch-workspace", { workspaceId: calAdmin.currentWorkspaceId }, calPub.accessToken)).body.data.accessToken;
-  const publisherImport = await request("POST", "/api/rental/v1/calendars/import", {
-    year: 2034, region: "CN", sourceName: "发布人尝试导入", sourceUrl: "https://example.invalid/e2e-pub", sourcePublishedAt: new Date(Date.now() - 86400000).toISOString(),
-    days: [{ date: "2034-10-01", dayType: "statutory_holiday", name: "国庆节", pricingMultiplier: 1.5 }]
-  }, calPubToken);
-  assert.equal(publisherImport.status, 403, `只有发布权限的账号不得编辑（导入）: ${publisherImport.status} ${JSON.stringify(publisherImport.body).slice(0, 200)}`);
+  const pub2034Version = await registerOfficialVersion(2034, [
+    { date: "2034-10-01", dayType: "statutory_holiday", name: "国庆节", pricingMultiplier: 1.5 }
+  ]);
+  const publisherImport = await applyOfficialVersion(2034, pub2034Version.id, calPubToken);
+  assert.equal(publisherImport.status, 403, `只有发布权限的账号不得编辑（应用官方来源）: ${publisherImport.status} ${JSON.stringify(publisherImport.body).slice(0, 200)}`);
   // 正向控制：必须证明该账号**确实持有** calendar:publish，否则一个「什么日历权限都没有」的
   // 账号同样会 403，这条 403 就成了装饰品（replaceRolePermissions 对目录里不存在的权限码是
   // 静默丢弃 + 201，改名/删码都不会报错）。用它发布 2034 草稿：管理员先建草稿再由它发布。
@@ -6665,7 +6704,7 @@ async function main() {
     { path: "value-added-services", body: { code: "E2E-VD-S1", name: "x" }, why: "缺 serviceType/billingUnit/terms 等" },
     { path: "rule-versions", body: { changeReason: "缺 config" }, why: "缺 config" },
     { path: "notification-templates", body: { eventCode: "e", name: "x" }, why: "缺 channel/title/body 等" },
-    { path: "calendars/import", body: { year: 2027 }, why: "缺 region/sourceName/sourceUrl/days" }
+    { path: "calendars/2027/apply-official-source", body: {}, why: "缺 sourceVersionId" }
   ];
   for (const item of vdCases3) {
     const res = await request("POST", `/api/rental/v1/${item.path}`, item.body, vdDemo.accessToken);

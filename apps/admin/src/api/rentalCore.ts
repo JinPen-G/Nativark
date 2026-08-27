@@ -30,7 +30,8 @@ import type {
   RentalStockBalance,
   RentalValueAddedService,
   GrantRentalRewardRequest,
-  ImportRentalCalendarRequest,
+  ApplyOfficialCalendarSourceRequest,
+  OfficialCalendarSourceVersionSummary,
   PublishRentalCalendarRequest,
   VoidRentalCalendarRequest,
   RemoveRentalCalendarDayOverrideRequest,
@@ -70,7 +71,16 @@ export const rentalCoreApi = {
   valueAddedServices: () => request<RentalValueAddedService[]>("/rental/v1/value-added-services"),
   saveValueAddedService: (data: SaveRentalValueAddedServiceRequest) => request<RentalValueAddedService>(data.id ? `/rental/v1/value-added-services/${data.id}` : "/rental/v1/value-added-services", { method: data.id ? "put" : "post", data }),
   calendar: (year: number) => request<RentalCalendarYear>(`/rental/v1/calendars/${year}`),
-  importCalendar: (data: ImportRentalCalendarRequest) => request<RentalCalendarYear>("/rental/v1/calendars/import", { method: "post", data }),
+  /**
+   * 可引用的公共官方来源版本（需求 4.5.2）。空间侧不再直接提交原始官方日期：
+   * 公共数据由 SaaS 平台管理员在注册表里维护，空间只能引用某一版生成草稿再自行发布。
+   */
+  officialCalendarSourceVersions: (year?: number) =>
+    request<OfficialCalendarSourceVersionSummary[]>(
+      `/rental/v1/official-calendar-sources${year ? `?year=${year}` : ""}`
+    ),
+  applyOfficialCalendarSource: (year: number, data: ApplyOfficialCalendarSourceRequest) =>
+    request<RentalCalendarYear>(`/rental/v1/calendars/${year}/apply-official-source`, { method: "post", data }),
   saveCalendarDay: (year: number, data: SaveRentalCalendarDayRequest) => request(`/rental/v1/calendars/${year}/days/${data.date}`, { method: "put", data }),
   /** 撤销原因走 body 而非查询串：覆盖原因常含客户名或事故描述，不该进访问日志。 */
   removeCalendarDayOverride: (year: number, date: string, data: RemoveRentalCalendarDayOverrideRequest) =>

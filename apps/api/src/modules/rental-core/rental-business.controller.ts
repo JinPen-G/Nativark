@@ -12,7 +12,7 @@ import {
   SendRentalNotificationDto,
 } from "./rental-order-request.dto";
 import {
-  ImportRentalCalendarDto,
+  ApplyOfficialCalendarSourceDto,
   PublishRentalCalendarDto,
   VoidRentalCalendarDto,
   RemoveRentalCalendarDayOverrideDto,
@@ -23,6 +23,7 @@ import {
   SaveRentalRuleVersionDto,
   SaveRentalValueAddedServiceDto,
 } from "./rental-config-request.dto";
+import { OfficialCalendarSourceService } from "./official-calendar-source.service";
 import { RentalCoreService } from "./rental-core.service";
 import { RentalIdempotentActionService } from "./rental-idempotent-action.service";
 
@@ -57,7 +58,8 @@ export class RentalBusinessController {
   constructor(
     private readonly business: RentalBusinessService,
     private readonly core: RentalCoreService,
-    private readonly idempotent: RentalIdempotentActionService
+    private readonly idempotent: RentalIdempotentActionService,
+    private readonly officialSources: OfficialCalendarSourceService
   ) {}
 
   private context(tenantId: string): BusinessContext {
@@ -113,6 +115,39 @@ export class RentalBusinessController {
   @Get("calendars/:year") calendar(@Req() req: AuthenticatedRequest, @Param("year") year: string) { return this.business.getCalendar(req.user.tenantId, this.context(req.user.tenantId), Number(year), this.canSeeCalendarDraft(req.user)); }
   @Get("calendars/:year/versions") calendarVersions(@Req() req: AuthenticatedRequest, @Param("year") year: string) { return this.business.listCalendarVersions(req.user.tenantId, this.context(req.user.tenantId), Number(year)); }
   @Get("calendars/:year/versions/:version") calendarVersion(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Param("version") version: string) { return this.business.getCalendarVersion(req.user.tenantId, this.context(req.user.tenantId), Number(year), version); }
+  /**
+   * 经营空间引用某个**公共官方来源版本**生成/更新本年度草稿（需求 4.5.2/4.5.8）。
+   *
+   * 空间侧不再接受原始官方日期：公共官方数据由 SaaS 平台管理员在注册表里维护，
+   * 空间只能引用某一版并自行确认发布，否则「租户自行编造公共数据」且「导入即生效」。
+   */
+  @Post("calendars/:year/apply-official-source") async applyOfficialSource(
+    @Req() req: AuthenticatedRequest,
+    @Param("year") year: string,
+    @Body() body: ApplyOfficialCalendarSourceDto
+  ) {
+    const version = await this.officialSources.getVersion(body.sourceVersionId);
+    if (version.year !== Number(year)) {
+      throw new BadRequestException(`该来源版本属于 ${version.year} 年度，与请求的 ${year} 年度不一致`);
+    }
+    return this.committed(
+      req.user.tenantId,
+      await this.business.importOfficialCalendar(req.user.tenantId, this.context(req.user.tenantId), {
+        year: version.year,
+        region: version.region,
+        sourceName: version.sourceName,
+        sourceUrl: version.sourceUrl,
+        sourcePublishedAt: version.publishedAt,
+        sourceVersionId: version.id,
+        sourceVersion: version.version,
+        days: version.days
+      })
+    );
+  }
+  /** 可引用的公共官方来源版本（只读）。空间人员据此选择要应用哪一版。 */
+  @Get("official-calendar-sources") officialSourceVersions(@Query("year") year?: string) {
+    return this.officialSources.listVersions(undefined, year ? Number(year) : undefined);
+  }
   /** 发布前影响预览（需求 4.5.8）。只读推演，不改任何状态、不触碰未来订单。 */
   @Get("calendars/:year/publish-preview") async calendarPublishPreview(@Req() req: AuthenticatedRequest, @Param("year") year: string) {
     const orders = await this.core.listOrders(req.user.tenantId);
@@ -125,7 +160,6 @@ export class RentalBusinessController {
   }
   /** 覆盖审计流水（需求 4.5.3/4.5.8）。独立只追加表，不截断；可按版本过滤。 */
   @Get("calendars/:year/override-audits") calendarOverrideAudits(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Query("version") version?: string) { return this.business.listCalendarOverrideAudits(req.user.tenantId, this.context(req.user.tenantId), Number(year), version); }
-  @Post("calendars/import") async importCalendar(@Req() req: AuthenticatedRequest, @Body() body: ImportRentalCalendarDto) { return this.committed(req.user.tenantId, await this.business.importOfficialCalendar(req.user.tenantId, this.context(req.user.tenantId), body)); }
   @Put("calendars/:year/days/:date") async saveCalendarDay(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Param("date") date: string, @Body() body: SaveRentalCalendarDayDto) { return this.committed(req.user.tenantId, await this.business.saveCalendarDay(req.user.tenantId, this.context(req.user.tenantId), Number(year), { ...body, date }, req.user.displayName)); }
   @Delete("calendars/:year/days/:date") async removeCalendarDayOverride(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Param("date") date: string, @Body() body: RemoveRentalCalendarDayOverrideDto) { return this.committed(req.user.tenantId, await this.business.removeCalendarDayOverride(req.user.tenantId, this.context(req.user.tenantId), Number(year), date, body, req.user.displayName)); }
   @Post("calendars/:year/publish") async publishCalendar(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Body() body: PublishRentalCalendarDto) { return this.committed(req.user.tenantId, await this.business.publishCalendar(req.user.tenantId, this.context(req.user.tenantId), Number(year), body, req.user.displayName)); }

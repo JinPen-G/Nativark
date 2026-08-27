@@ -4387,6 +4387,13 @@ export interface RentalCalendarYear {
   sourcePublishedAt?: string;
   importedAt?: string;
   /**
+   * 引用的公共官方来源版本（需求 4.5.7：发布记录必须保存官方来源版本）。
+   * 空间日历不再自带原始官方数据，而是指向平台注册表里的某一版，追溯时能说清
+   * 「这一年的节假日安排来自哪个来源的哪一版」。
+   */
+  sourceVersionId?: string;
+  sourceVersion?: string;
+  /**
    * 最近一次官方导入中因存在人工覆盖而未被写入的日期。
    * 导入不覆盖人工覆盖，但运营必须知道「官方改了这几天而你的覆盖仍然生效」，
    * 否则会以为导入失败或以为官方值已生效。
@@ -4437,13 +4444,92 @@ export interface SaveRentalCalendarDayRequest
   overrideReason: string;
 }
 
+export type OfficialCalendarDayInput = Array<
+  Pick<RentalCalendarDay, "date" | "dayType" | "name"> &
+    Partial<Pick<RentalCalendarDay, "pricingMultiplier" | "closed">>
+>;
+
+/**
+ * 公共官方日历来源（需求 4.5.2/4.5.8）。
+ *
+ * 平台级资源，**不属于任何租户**：官方节假日数据是公共基础来源，由 SaaS 平台管理员
+ * 维护。经营空间不能直接导入原始官方数据，只能引用某个来源版本生成自己的年度草稿，
+ * 再由有权限的空间人员确认并发布——否则「导入即影响全部经营空间」，与需求相反。
+ */
+export interface OfficialCalendarSource {
+  id: string;
+  region: "CN";
+  name: string;
+  url: string;
+  notes?: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * 公共官方日历的**来源版本**（需求 4.5.2：官方日历再次调整时必须形成新的来源版本）。
+ * 只追加：旧版本保留，供空间日历追溯自己当初引用的是哪一版官方数据。
+ */
+export interface OfficialCalendarSourceVersion {
+  id: string;
+  sourceId: string;
+  /** 便于列表直接展示，不必再查来源表。 */
+  sourceName: string;
+  sourceUrl: string;
+  region: "CN";
+  year: number;
+  version: string;
+  /** 官方公告的发布日期。与 `importedAt` 不同：追溯要能区分官方何时发布与平台何时入库。 */
+  publishedAt: string;
+  importedAt: string;
+  importedBy?: string;
+  days: OfficialCalendarDayInput;
+}
+
+/** 来源版本的轻量摘要：列表不返回整年 days，只给条数。 */
+export interface OfficialCalendarSourceVersionSummary
+  extends Omit<OfficialCalendarSourceVersion, "days"> {
+  dayCount: number;
+}
+
+/** 登记或更新一个公共官方日历来源（仅 SaaS 平台管理员）。 */
+export interface SaveOfficialCalendarSourceRequest {
+  id?: string;
+  region: "CN";
+  name: string;
+  url: string;
+  notes?: string;
+  isActive?: boolean;
+}
+
+/** 为某来源登记一个新的年度来源版本（仅 SaaS 平台管理员）。版本号由服务端递增。 */
+export interface RegisterOfficialCalendarSourceVersionRequest {
+  year: number;
+  publishedAt: string;
+  days: OfficialCalendarDayInput;
+}
+
+/**
+ * 经营空间引用某个公共来源版本生成/更新本空间年度草稿（需求 4.5.2）。
+ *
+ * 空间侧**不再接受原始官方日期**：那等于让租户自行编造公共数据，与 4.5.8
+ * 「SaaS 平台管理员导入和维护公共官方日历来源」冲突。
+ */
+export interface ApplyOfficialCalendarSourceRequest {
+  sourceVersionId: string;
+}
+
 export interface ImportRentalCalendarRequest {
   year: number;
   region: "CN";
   sourceName: string;
   sourceUrl: string;
   sourcePublishedAt: string;
-  days: Array<Pick<RentalCalendarDay, "date" | "dayType" | "name"> & Partial<Pick<RentalCalendarDay, "pricingMultiplier" | "closed">>>;
+  days: OfficialCalendarDayInput;
+  /** 引用的公共来源版本（需求 4.5.2）。空间侧应用来源版本时由服务端填入，供追溯。 */
+  sourceVersionId?: string;
+  sourceVersion?: string;
 }
 
 /**

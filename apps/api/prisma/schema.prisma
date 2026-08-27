@@ -2750,6 +2750,55 @@ model RentalRuleVersion {
   @@map("rental_rule_versions")
 }
 
+/// 公共官方日历来源（需求 4.5.2/4.5.8）。
+///
+/// 平台级资源，**不属于任何租户**：官方节假日数据是公共基础来源，由 SaaS 平台管理员
+/// 维护，不得由经营空间直接导入原始数据、也不得导入后自动影响全部经营空间。
+/// 因此这里没有 tenantId/workspaceId——加上它们就等于又把公共数据切回租户私有。
+model OfficialCalendarSource {
+  id        String   @id @default(uuid())
+  /// 目前只有中国大陆；预留以便后续接其他地区的公共假日数据。
+  region    String   @default("CN")
+  /// 来源机构或文件名，例如「国务院办公厅年度放假通知」。
+  name      String
+  /// 官方公告地址，必须 HTTPS——来源不可验证的数据不该进入公共来源库。
+  url       String
+  notes     String?  @db.Text
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  versions  OfficialCalendarSourceVersion[]
+
+  @@unique([region, name], map: "official_calendar_sources_region_name_key")
+  @@map("official_calendar_sources")
+}
+
+/// 公共官方日历的**来源版本**（需求 4.5.2：「官方日历再次调整时必须形成新的来源版本；
+/// 已发布的经营空间日历、有效报价和订单不得被静默覆盖」）。
+///
+/// 只追加：同一来源同一年度的每次调整都新增一行，旧版本保留，供空间日历追溯自己
+/// 当初引用的是哪一版官方数据。
+model OfficialCalendarSourceVersion {
+  id          String   @id @default(uuid())
+  sourceId    String
+  source      OfficialCalendarSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  year        Int
+  /// 来源版本号，由平台按 1.0/1.1… 递增。
+  version     String
+  /// 官方公告的发布日期，与导入时间不同：追溯要能区分「官方什么时候发的」与「我们什么时候入的库」。
+  publishedAt DateTime
+  importedAt  DateTime @default(now())
+  importedBy  String?
+  /// ImportRentalCalendarDayInput[]：该版本的整年官方日期（法定节假日与调休工作日）。
+  days        Json
+  createdAt   DateTime @default(now())
+
+  @@unique([sourceId, year, version], map: "official_calendar_source_versions_source_year_version_key")
+  @@index([year], map: "official_calendar_source_versions_year_idx")
+  @@map("official_calendar_source_versions")
+}
+
 model RentalBusinessCalendar {
   id                 String    @id @default(uuid())
   tenantId           String
@@ -2765,6 +2814,11 @@ model RentalBusinessCalendar {
   sourceName         String?
   sourceUrl          String?
   sourcePublishedAt  DateTime?
+  /// 引用的公共官方来源版本（需求 4.5.7：发布记录必须保存官方来源版本）。
+  /// 只存标识与版本号，不存外键：来源注册表是平台级资源，租户日历行不该在删除
+  /// 公共来源时被级联影响——追溯需要的是「当时引用了哪一版」这个事实。
+  sourceVersionId    String?
+  sourceVersion      String?
   importedAt         DateTime?
   publishedAt        DateTime?
   /// 需求 4.5.7：已发布版本不可原地修改，被取代时只标记，不删除。

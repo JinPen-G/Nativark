@@ -1,7 +1,9 @@
 import { RENTAL_PRICING_UNIT_CODES, type RentalDayType, type RentalPricingUnit } from "@store-rental/shared";
 import type {
-  ImportRentalCalendarRequest,
+  ApplyOfficialCalendarSourceRequest,
   PublishRentalCalendarRequest,
+  RegisterOfficialCalendarSourceVersionRequest,
+  SaveOfficialCalendarSourceRequest,
   VoidRentalCalendarRequest,
   RemoveRentalCalendarDayOverrideRequest,
   RentalRuleConfig,
@@ -759,60 +761,6 @@ export class SaveRentalRuleVersionDto implements SaveRentalRuleVersionRequest {
 
 /* ---------- 营业日历 ---------- */
 
-export class ImportRentalCalendarDayInputDto {
-  /**
-   * 只接受 `YYYY-MM-DD`。`@IsISO8601()` 会放过带时间的完整时间戳，
-   * 日历按日键控，同一天就会出现两个键。日期是否真实存在由服务层用回读法确认——
-   * 正则拦不住 `2026-02-30`，而它会被 `new Date` 静默滚到 3 月 2 日。
-   */
-  @Matches(CALENDAR_DATE_PATTERN, { message: "日历日期必须是 YYYY-MM-DD" })
-  date!: string;
-
-  @IsIn(DAY_TYPES)
-  dayType!: RentalDayType;
-
-  @IsString()
-  @IsNotEmpty()
-  name!: string;
-
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  @Max(MAX_MULTIPLIER)
-  pricingMultiplier?: number;
-
-  @IsOptional()
-  @IsBoolean()
-  closed?: boolean;
-}
-
-export class ImportRentalCalendarDto implements ImportRentalCalendarRequest {
-  @IsInt()
-  @Min(2000)
-  @Max(2999)
-  year!: number;
-
-  @IsIn(["CN"])
-  region!: "CN";
-
-  @IsString()
-  @IsNotEmpty()
-  sourceName!: string;
-
-  /** 官方来源地址进配置版本记录，用于日后追溯这批日期的出处。 */
-  @IsUrl({ require_tld: false })
-  sourceUrl!: string;
-
-  @IsISO8601()
-  sourcePublishedAt!: string;
-
-  @IsArray()
-  @ArrayNotEmpty()
-  @ValidateNested({ each: true })
-  @Type(() => ImportRentalCalendarDayInputDto)
-  days!: ImportRentalCalendarDayInputDto[];
-}
-
 export class SaveRentalCalendarDayDto implements SaveRentalCalendarDayRequest {
   /**
    * 处理器会用路径参数覆盖它（`{ ...body, date }`），此处仍校验以防直接调用。
@@ -885,6 +833,82 @@ export class VoidRentalCalendarDto implements VoidRentalCalendarRequest {
   // 落库为 rental_business_calendars.voidReason（VARCHAR(191)），同上限长以免 500。
   @MaxLength(191, { message: "作废原因不能超过 191 字" })
   reason!: string;
+}
+
+/* ---------- 公共官方日历来源注册表（平台级，需求 4.5.2/4.5.8） ---------- */
+
+export class SaveOfficialCalendarSourceDto implements SaveOfficialCalendarSourceRequest {
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  id?: string;
+
+  @IsIn(["CN"])
+  region!: "CN";
+
+  @IsString()
+  @Matches(NON_BLANK_PATTERN, { message: "来源名称不能为空白" })
+  @MaxLength(191, { message: "来源名称不能超过 191 字" })
+  name!: string;
+
+  /** 只接受 HTTPS：这份数据会被所有租户引用，来源不可验证时出错面是全平台。 */
+  @IsUrl({ require_tld: false, protocols: ["https"], require_protocol: true })
+  @MaxLength(191, { message: "来源地址不能超过 191 字" })
+  url!: string;
+
+  @IsOptional()
+  @IsString()
+  notes?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
+}
+
+export class OfficialCalendarSourceDayInputDto {
+  /** 只接受 YYYY-MM-DD：带时间会让同一天出现多个键。 */
+  @IsISO8601()
+  date!: string;
+
+  @IsIn(["statutory_holiday", "makeup_workday"])
+  dayType!: RentalDayType;
+
+  @IsString()
+  @Matches(NON_BLANK_PATTERN, { message: "节日或调休名称不能为空白" })
+  name!: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(MAX_MULTIPLIER)
+  pricingMultiplier?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  closed?: boolean;
+}
+
+export class RegisterOfficialCalendarSourceVersionDto implements RegisterOfficialCalendarSourceVersionRequest {
+  @IsInt()
+  @Min(2000)
+  @Max(2999)
+  year!: number;
+
+  @IsISO8601()
+  publishedAt!: string;
+
+  @IsArray()
+  @ArrayNotEmpty()
+  @ValidateNested({ each: true })
+  @Type(() => OfficialCalendarSourceDayInputDto)
+  days!: OfficialCalendarSourceDayInputDto[];
+}
+
+/** 经营空间引用某个公共来源版本生成/更新本空间年度草稿（需求 4.5.2）。 */
+export class ApplyOfficialCalendarSourceDto implements ApplyOfficialCalendarSourceRequest {
+  @IsString()
+  @IsNotEmpty()
+  sourceVersionId!: string;
 }
 
 /* ---------- 通知模板 ---------- */
