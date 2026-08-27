@@ -127,8 +127,10 @@ export class RentalBusinessController {
     // 「有官方更新」只能在**同一来源**内比较：sequence 是 (来源, 年度) 内的局部序号，
     // 跨来源比大小会把「来源 A 的 v1.9」误报成「引用了来源 B v1.0 的空间该更新」。
     if (calendar.sourceVersionId) {
-      // 已引用某来源：只和它自己的最新版比。取不到（版本被删/来源停用）就不提示。
-      const referenced = await this.officialSources.getVersion(calendar.sourceVersionId).catch(() => undefined);
+      // 已引用某来源：只和它自己的最新版比。版本不存在（被删/来源清理）就不提示，
+      // 但**只**吞「不存在」——用 findVersionById 返回 undefined，数据库故障照常抛 5xx，
+      // 不能用 getVersion().catch(() => undefined) 把基础设施错误也当成「无更新」。
+      const referenced = await this.officialSources.findVersionById(calendar.sourceVersionId);
       if (!referenced) return calendar;
       const latest = await this.officialSources.latestVersionForYear(Number(year), referenced.sourceId);
       if (!latest) return calendar;

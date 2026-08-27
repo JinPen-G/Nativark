@@ -3952,6 +3952,20 @@ async function main() {
   // 恢复当前正在编辑的版本没有意义，必须明确拒绝而不是静默建一份重复草稿。
   const restoreSelf = await request("POST", `/api/rental/v1/calendars/${restYear}/versions/${encodeURIComponent(restPub3.body.data.version)}/restore`, { reason: "重复恢复" }, construction.accessToken);
   assert.equal(restoreSelf.status, 409, `恢复当前正在编辑的版本必须 409: ${restoreSelf.status}`);
+  // [P2] 并发恢复：两路同时恢复同一历史版本，只能一成一败。进程内「已有草稿」检查与落库不在
+  // 同一事务，二者可能都通过检查并算出同一新版本号；唯一键挡住第二条，落败方必须转成 409
+  // 而不是 500。此刻该年度无草稿（restPub3 已发布），是干净的并发起点。
+  const [raceRestoreA, raceRestoreB] = await Promise.all([
+    request("POST", `/api/rental/v1/calendars/${restYear}/versions/${encodeURIComponent(oldVersion)}/restore`, { reason: "并发恢复A" }, construction.accessToken),
+    request("POST", `/api/rental/v1/calendars/${restYear}/versions/${encodeURIComponent(oldVersion)}/restore`, { reason: "并发恢复B" }, construction.accessToken)
+  ]);
+  assert.deepEqual(
+    [raceRestoreA.status, raceRestoreB.status].sort(),
+    [201, 409],
+    `并发恢复只能一成一败（落败方须 409 不得 500）: ${JSON.stringify([raceRestoreA.status, raceRestoreB.status])} ${JSON.stringify([raceRestoreA.body, raceRestoreB.body]).slice(0, 300)}`
+  );
+  const draftsAfterRace = (await request("GET", `/api/rental/v1/calendars/${restYear}/versions`, null, construction.accessToken)).body.data.filter((v) => v.status === "draft");
+  assert.equal(draftsAfterRace.length, 1, `并发恢复后只能有一个草稿: ${JSON.stringify(draftsAfterRace.map((v) => v.version))}`);
   // 存在未发布草稿时恢复必须冲突：否则会留下两个有效草稿，旧草稿发布后 editableCalendar
   // 会重新选中它，让已被放弃的旧修改再次进入发布路径。
   const draftBlockDay = await request("PUT", `/api/rental/v1/calendars/${restYear}/days/${restYear}-03-01`, {
@@ -3962,7 +3976,7 @@ async function main() {
   assert.equal(restoreWithDraft.status, 409, `存在未发布草稿时恢复必须 409（不得留下两个草稿）: ${restoreWithDraft.status} ${JSON.stringify(restoreWithDraft.body).slice(0, 200)}`);
   const draftsNow = (await request("GET", `/api/rental/v1/calendars/${restYear}/versions`, null, construction.accessToken)).body.data.filter((v) => v.status === "draft");
   assert.equal(draftsNow.length, 1, `恢复被拒后不得新增草稿，应仍只有 1 个草稿: ${JSON.stringify(draftsNow.map((v) => v.version))}`);
-  ok("历史版本恢复：以旧内容生成新草稿并记录来源版本与原因且落库、被恢复版本仍为 superseded、当前已发布版本不受影响、该年度仍只有一个 published、恢复后的草稿可正常发布、原因必填、恢复当前版本被拒、存在未发布草稿时恢复被拒（不留两个草稿）");
+  ok("历史版本恢复：以旧内容生成新草稿并记录来源版本与原因且落库、被恢复版本仍为 superseded、当前已发布版本不受影响、该年度仍只有一个 published、恢复后的草稿可正常发布、原因必填、恢复当前版本被拒、存在未发布草稿时恢复被拒（不留两个草稿）、并发恢复只一成一败（落败 409 非 500）最终仅一个草稿");
 
   console.log("== 15q. PRICE-02 公共官方来源更新提示（Codex #7） ==");
   // 需求 4.5.2：平台登记新官方版本后，为相关空间生成「存在官方更新」提示，但不得自动

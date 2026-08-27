@@ -83,12 +83,24 @@ export class OfficialCalendarSourceService {
   }
 
   async getVersion(id: string): Promise<OfficialCalendarSourceVersion> {
+    const found = await this.findVersionById(id);
+    if (!found) throw new NotFoundException("指定的官方来源版本不存在");
+    return found;
+  }
+
+  /**
+   * 按 id 取来源版本，不存在时返回 `undefined`（而不是抛异常）。
+   *
+   * 供「有官方更新吗」这类**可选**查询使用：调用方只想区分「版本不存在」与「存在」，
+   * 用 `getVersion().catch(() => undefined)` 会把数据库连接/查询故障也一并吞掉、
+   * 让接口返回一个悄悄丢失更新状态的 200；基础设施错误必须照常抛成 5xx。
+   */
+  async findVersionById(id: string): Promise<OfficialCalendarSourceVersion | undefined> {
     const row = await this.prisma.officialCalendarSourceVersion.findUnique({
       where: { id },
       include: { source: true }
     });
-    if (!row) throw new NotFoundException("指定的官方来源版本不存在");
-    return this.toVersion(row);
+    return row ? this.toVersion(row) : undefined;
   }
 
   /**

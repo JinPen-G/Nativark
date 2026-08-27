@@ -924,7 +924,7 @@ export function RentalGovernancePage() {
                       {calendar.data?.status} · v{calendar.data?.version}
                     </Tag>
                     <Typography.Text type="secondary">
-                      {calendar.data?.sourceName ?? "尚未导入官方来源"}
+                      {calendar.data?.sourceName ?? "未引用官方来源"}
                     </Typography.Text>
                   </Space>
                   <Space>
@@ -953,6 +953,45 @@ export function RentalGovernancePage() {
                     )}
                   </Space>
                 </div>
+                {/* 需求 4.5.2：平台登记官方来源后必须为空间生成「更新/可选择」提示，
+                    而不只是把状态放在 API 响应里。三态互斥：当前来源有新版 > 有来源可选择 >
+                    平台尚未登记。应用属编辑动作，只读/历史角色看得到提示但没有应用入口。 */}
+                {calendar.data?.officialSourceUpdateAvailable ? (
+                  <Alert
+                    type="warning"
+                    showIcon
+                    message={`当前引用的官方来源有新版本 v${calendar.data.latestOfficialSourceVersion}`}
+                    description="平台已登记该年度更新的官方节假日数据。应用后会在草稿上生成新的一版，仍需发布才生效，且不会改动已有报价与订单。"
+                    action={
+                      canEditCalendar ? (
+                        <Button size="small" onClick={() => setImportOpen(true)}>
+                          查看 / 应用
+                        </Button>
+                      ) : undefined
+                    }
+                  />
+                ) : calendar.data?.officialSourceAvailableToSelect ? (
+                  <Alert
+                    type="info"
+                    showIcon
+                    message={`平台已登记该年度官方来源（最新 v${calendar.data.latestOfficialSourceVersion}），可选择应用`}
+                    description="本经营空间尚未引用任何官方来源版本；当前日历按每周默认模板与人工覆盖生成。"
+                    action={
+                      canEditCalendar ? (
+                        <Button size="small" onClick={() => setImportOpen(true)}>
+                          选择官方来源
+                        </Button>
+                      ) : undefined
+                    }
+                  />
+                ) : !calendar.data?.sourceName ? (
+                  <Alert
+                    type="info"
+                    showIcon
+                    message="平台尚未登记该年度公共官方来源"
+                    description="官方节假日来源由 SaaS 平台管理员维护；登记后这里会提示可选择应用。"
+                  />
+                ) : null}
                 <Alert
                   type="info"
                   showIcon

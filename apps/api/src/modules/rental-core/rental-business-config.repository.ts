@@ -291,7 +291,8 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
   ): Promise<void> {
     const data = this.calendarData(calendar);
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, calendar.tenantId);
-    await this.prisma.$transaction(async (tx) => {
+    try {
+      await this.prisma.$transaction(async (tx) => {
       if (expectedRevision === undefined) {
         await tx.rentalBusinessCalendar.upsert({
           where: { workspaceId_year_version: { workspaceId, year: calendar.year, version: calendar.version } },
@@ -338,6 +339,19 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
         });
       }
     });
+    } catch (error) {
+      // 并发落库冲突转 409：条件更新前的「先查后写」在并发下必然有窗口——两路恢复/编辑
+      // 可能都查到无该版本号、算出同一个新版本号并进入 create，唯一键 (ws,year,version)
+      // 会挡住第二条，但那是 P2002；写事务相互死锁则是 P2034。二者都应表现为「请刷新后重试」
+      // 而不是 500。ConflictException（revision 不匹配那条）不带 code，会照原样抛出。
+      const code = (error as { code?: string }).code;
+      if (code === "P2002" || code === "P2034") {
+        throw new ConflictException(
+          `${calendar.year} 年度日历正被并发修改（版本 ${calendar.version} 已被占用），请刷新后重试`
+        );
+      }
+      throw error;
+    }
   }
 
   async loadCalendarOverrideAudits(
