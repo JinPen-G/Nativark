@@ -4031,20 +4031,55 @@ async function main() {
     false,
     `不得跨来源误报更新：空间引用来源 S 的最新版，另一来源 T 序号更高不该触发更新提示: ${JSON.stringify({ upd: afterOtherSource.officialSourceUpdateAvailable, latest: afterOtherSource.latestOfficialSourceVersion })}`
   );
-  // #1 从未引用来源：应提示「有官方来源可选择」而不是伪装成当前来源更新。
+  // #1 从未引用来源 + 同年度存在**两个**来源：只提示「有可用来源可选择（N 个）」，
+  // 绝不显示跨来源的「最新 vX」——sequence/v1.x 只在各自来源内有效，跨来源没有全局最新版。
   const selectYear = 2044;
   await registerOfficialVersion(selectYear, [{ date: `${selectYear}-10-01`, dayType: "statutory_holiday", name: "国庆节" }]);
+  const platformSel = await login("platform", "admin", PLATFORM_PASSWORD);
+  const sourceSel2 = await request("POST", "/api/platform/official-calendars", {
+    region: "CN", name: `E2E 选择来源2 ${Date.now().toString(36)}`, url: "https://example.invalid/e2e-select-2"
+  }, platformSel.accessToken);
+  assert.equal(sourceSel2.status, 201, `建第二可选来源失败: ${JSON.stringify(sourceSel2.body).slice(0, 200)}`);
+  const sel2ver = await request("POST", `/api/platform/official-calendars/${sourceSel2.body.data.id}/versions`, {
+    year: selectYear, publishedAt: new Date().toISOString(), days: [{ date: `${selectYear}-10-01`, dayType: "statutory_holiday", name: "国庆节" }]
+  }, platformSel.accessToken);
+  assert.equal(sel2ver.status, 201, `第二可选来源登记版本失败: ${JSON.stringify(sel2ver.body).slice(0, 200)}`);
   const neverApplied = (await request("GET", `/api/rental/v1/calendars/${selectYear}`, null, construction.accessToken)).body.data;
   assert.ok(!neverApplied.sourceVersionId, "该年度空间从未应用任何官方来源");
   assert.equal(neverApplied.officialSourceUpdateAvailable, false, `从未引用来源时不得报「更新」: ${neverApplied.officialSourceUpdateAvailable}`);
   assert.equal(neverApplied.officialSourceAvailableToSelect, true, `有可选官方来源时应提示可选择: ${neverApplied.officialSourceAvailableToSelect}`);
+  assert.ok(
+    !neverApplied.latestOfficialSourceVersion && !neverApplied.latestOfficialSourceVersionId,
+    `未引用来源时不得返回跨来源的「最新 vX」（无业务意义）: ${JSON.stringify({ v: neverApplied.latestOfficialSourceVersion, id: neverApplied.latestOfficialSourceVersionId })}`
+  );
+  assert.equal(neverApplied.availableOfficialSourceCount, 2, `应返回可用来源数量（两个来源）: ${neverApplied.availableOfficialSourceCount}`);
+  // 登记过但全部停用：空状态应是「当前没有可用来源」，不能误报「尚未登记」。
+  const deactYear = 2045;
+  const deactSource = await request("POST", "/api/platform/official-calendars", {
+    region: "CN", name: `E2E 待停用来源 ${Date.now().toString(36)}`, url: "https://example.invalid/e2e-deact"
+  }, platformSel.accessToken);
+  assert.equal(deactSource.status, 201, `建待停用来源失败: ${JSON.stringify(deactSource.body).slice(0, 200)}`);
+  const deactVer = await request("POST", `/api/platform/official-calendars/${deactSource.body.data.id}/versions`, {
+    year: deactYear, publishedAt: new Date().toISOString(), days: [{ date: `${deactYear}-10-01`, dayType: "statutory_holiday", name: "国庆节" }]
+  }, platformSel.accessToken);
+  assert.equal(deactVer.status, 201, `待停用来源登记版本失败: ${JSON.stringify(deactVer.body).slice(0, 200)}`);
+  const deactivate = await request("PUT", `/api/platform/official-calendars/${deactSource.body.data.id}`, {
+    region: "CN", name: deactSource.body.data.name, url: deactSource.body.data.url, isActive: false
+  }, platformSel.accessToken);
+  assert.equal(deactivate.status, 200, `停用来源失败: ${JSON.stringify(deactivate.body).slice(0, 200)}`);
+  const allDeactivated = (await request("GET", `/api/rental/v1/calendars/${deactYear}`, null, construction.accessToken)).body.data;
+  assert.ok(!allDeactivated.officialSourceAvailableToSelect, `全部停用时不得报「可选择」: ${allDeactivated.officialSourceAvailableToSelect}`);
+  assert.equal(allDeactivated.officialSourceRegisteredButUnavailable, true, `登记过但全部停用应报「当前没有可用来源」: ${allDeactivated.officialSourceRegisteredButUnavailable}`);
+  // 从未登记：两个字段都不设，前端据此显示「尚未登记」。
+  const neverRegistered = (await request("GET", `/api/rental/v1/calendars/2046`, null, construction.accessToken)).body.data;
+  assert.ok(!neverRegistered.officialSourceAvailableToSelect && !neverRegistered.officialSourceRegisteredButUnavailable, `从未登记年度不得设可选择/已停用标记: ${JSON.stringify({ s: neverRegistered.officialSourceAvailableToSelect, u: neverRegistered.officialSourceRegisteredButUnavailable })}`);
   // Codex 复审 #5：来源→版本外键必须 RESTRICT，不能 CASCADE——否则删一个来源会级联清空
   // 全部不可变历史版本，与「只追加、旧版本保留」相悖。当前没有删除来源的 API，这是库层兜底。
   const fkRule = readScalar(
     "SELECT `DELETE_RULE` FROM information_schema.REFERENTIAL_CONSTRAINTS WHERE `CONSTRAINT_SCHEMA`=DATABASE() AND `CONSTRAINT_NAME`='official_calendar_source_versions_sourceId_fkey';"
   );
   assert.equal(fkRule, "RESTRICT", `来源→版本外键必须 RESTRICT（不可级联删除不可变历史版本），实际 ${fkRule}`);
-  ok("公共官方来源更新提示：空间记录引用的来源版本，登记更新版本后返回 officialSourceUpdateAvailable 与最新版本号、但不自动覆盖空间日历，空间主动应用后提示消失；跨来源不误报（另一来源序号更高不触发更新）；从未引用来源时报「可选择」而非「更新」；来源→版本外键为 RESTRICT 不可级联删除");
+  ok("公共官方来源更新提示：空间记录引用的来源版本，登记更新版本后返回 officialSourceUpdateAvailable 与最新版本号、但不自动覆盖空间日历，空间主动应用后提示消失；跨来源不误报（另一来源序号更高不触发更新）；从未引用来源时报「可选择」+ 来源数量而非跨来源「最新 vX」（含双来源用例）；登记过但全部停用报「当前无可用来源」、从未登记两标记皆空；来源→版本外键为 RESTRICT 不可级联删除");
 
   console.log("== 16. 双租户并发隔离 ==");
   const rounds = 12;

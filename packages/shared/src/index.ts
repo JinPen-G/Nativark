@@ -4407,11 +4407,22 @@ export interface RentalCalendarYear {
    */
   officialSourceUpdateAvailable?: boolean;
   /**
-   * 从未引用过任何官方来源、但该年度存在可选公共来源版本时为 true。
+   * 从未引用过任何官方来源、但该年度存在**启用**的可选公共来源时为 true。
    * 与 `officialSourceUpdateAvailable` 分开：前者是「当前引用的来源出了新版」，
    * 这条是「有官方来源可供选择」，不能把后者伪装成前者（那会跨来源误报）。
    */
   officialSourceAvailableToSelect?: boolean;
+  /** `officialSourceAvailableToSelect` 为 true 时，可供选择的**启用来源数量**（不是版本号）。 */
+  availableOfficialSourceCount?: number;
+  /**
+   * 该年度登记过公共来源、但当前**全部已停用**时为 true。
+   * 用于把空状态区分成「当前没有可用来源」与「从未登记」——后者是两个字段都为空且无 sourceName。
+   */
+  officialSourceRegisteredButUnavailable?: boolean;
+  /**
+   * 已引用来源时，同来源的最新版本号（在 `officialSourceUpdateAvailable` 分支才有意义）。
+   * 未引用来源的分支**不返回**它：跨来源没有全局最新版，显示任意「最新 vX」会误导。
+   */
   latestOfficialSourceVersionId?: string;
   latestOfficialSourceVersion?: string;
   /**

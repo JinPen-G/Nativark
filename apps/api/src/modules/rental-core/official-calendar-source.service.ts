@@ -120,14 +120,33 @@ export class OfficialCalendarSourceService {
     return this.toVersion(row);
   }
 
-  /** 某来源某年度**最新有效版本**，供空间比较「是否有官方更新」（需求 4.5.2）。 */
-  async latestVersionForYear(year: number, sourceId?: string) {
+  /**
+   * 某来源某年度**最新有效版本**，供空间比较「是否有官方更新」（需求 4.5.2）。
+   * 只有传入 `sourceId`（同来源内比较）才有业务意义——不带 `sourceId` 跨来源按 `sequence`
+   * 排序选不出真正的「最新」，因为 sequence 与 v1.x 只在各自来源内有效。
+   */
+  async latestVersionForYear(year: number, sourceId: string) {
     const row = await this.prisma.officialCalendarSourceVersion.findFirst({
-      where: { year, source: { isActive: true }, ...(sourceId ? { sourceId } : {}) },
+      where: { year, sourceId, source: { isActive: true } },
       include: { source: true },
       orderBy: [{ sequence: "desc" }]
     });
     return row ? this.toVersion(row) : undefined;
+  }
+
+  /**
+   * 某年度可供空间**选择应用**的官方来源概况（需求 4.5.2）。
+   *
+   * 未引用任何来源时不能报「最新 vX」：跨来源没有全局最新版这一概念。这里只回**来源数量**：
+   * `available` 为有该年度版本且启用的来源数，`total` 含已停用的。据此区分三种空状态——
+   * 有可用来源（可选择）、登记过但全部停用（当前无可用）、从未登记。
+   */
+  async availableSourceSummaryForYear(year: number): Promise<{ available: number; total: number }> {
+    const [available, total] = await Promise.all([
+      this.prisma.officialCalendarSource.count({ where: { isActive: true, versions: { some: { year } } } }),
+      this.prisma.officialCalendarSource.count({ where: { versions: { some: { year } } } })
+    ]);
+    return { available, total };
   }
 
   /**

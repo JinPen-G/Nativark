@@ -974,8 +974,8 @@ export function RentalGovernancePage() {
                   <Alert
                     type="info"
                     showIcon
-                    message={`平台已登记该年度官方来源（最新 v${calendar.data.latestOfficialSourceVersion}），可选择应用`}
-                    description="本经营空间尚未引用任何官方来源版本；当前日历按每周默认模板与人工覆盖生成。"
+                    message={`平台已登记该年度可用的官方来源（${calendar.data.availableOfficialSourceCount ?? 0} 个），可选择应用`}
+                    description="本经营空间尚未引用任何官方来源版本；当前日历按每周默认模板与人工覆盖生成。选择来源时可查看各来源的公告日期与版本。"
                     action={
                       canEditCalendar ? (
                         <Button size="small" onClick={() => setImportOpen(true)}>
@@ -983,6 +983,13 @@ export function RentalGovernancePage() {
                         </Button>
                       ) : undefined
                     }
+                  />
+                ) : calendar.data?.officialSourceRegisteredButUnavailable ? (
+                  <Alert
+                    type="info"
+                    showIcon
+                    message="当前没有可用的官方来源"
+                    description="平台登记过该年度官方来源，但目前全部已停用；如需应用请联系平台管理员恢复来源。"
                   />
                 ) : !calendar.data?.sourceName ? (
                   <Alert

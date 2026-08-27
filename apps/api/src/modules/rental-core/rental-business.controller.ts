@@ -141,16 +141,23 @@ export class RentalBusinessController {
         officialSourceUpdateAvailable: latest.id !== calendar.sourceVersionId
       };
     }
-    // 从未引用任何官方来源：有可选来源时提示「有官方来源可选择」，而不是伪装成当前来源更新。
-    const anyLatest = await this.officialSources.latestVersionForYear(Number(year));
-    if (!anyLatest) return calendar;
-    return {
-      ...calendar,
-      latestOfficialSourceVersionId: anyLatest.id,
-      latestOfficialSourceVersion: anyLatest.version,
-      officialSourceUpdateAvailable: false,
-      officialSourceAvailableToSelect: true
-    };
+    // 从未引用任何官方来源：跨来源没有「全局最新版」概念（sequence/v1.x 只在各自来源内有效），
+    // 因此**不返回** latestOfficialSourceVersion*，只按来源数量区分三种空状态：
+    // 有可用来源（可选择）、登记过但全部停用（当前无可用）、从未登记。
+    const summary = await this.officialSources.availableSourceSummaryForYear(Number(year));
+    if (summary.available > 0) {
+      return {
+        ...calendar,
+        officialSourceUpdateAvailable: false,
+        officialSourceAvailableToSelect: true,
+        availableOfficialSourceCount: summary.available
+      };
+    }
+    if (summary.total > 0) {
+      // 登记过但当前全部停用——不能显示「尚未登记」，那与事实不符。
+      return { ...calendar, officialSourceUpdateAvailable: false, officialSourceRegisteredButUnavailable: true };
+    }
+    return calendar;
   }
   @Get("calendars/:year/versions") calendarVersions(@Req() req: AuthenticatedRequest, @Param("year") year: string) { return this.business.listCalendarVersions(req.user.tenantId, this.context(req.user.tenantId), Number(year)); }
   @Get("calendars/:year/versions/:version") calendarVersion(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Param("version") version: string) { return this.business.getCalendarVersion(req.user.tenantId, this.context(req.user.tenantId), Number(year), version); }
