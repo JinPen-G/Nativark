@@ -2782,7 +2782,10 @@ model OfficialCalendarSource {
 model OfficialCalendarSourceVersion {
   id          String   @id @default(uuid())
   sourceId    String
-  source      OfficialCalendarSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  /// Restrict 而非 Cascade：来源版本声明为「只追加、旧版本保留」，若允许级联删除，
+  /// 直接删来源就会连带清空全部不可变历史版本，与不可变承诺相悖。来源只能停用，
+  /// 仍有版本时不得删除（当前也没有删除来源的 API，这是数据库层的兜底）。
+  source      OfficialCalendarSource @relation(fields: [sourceId], references: [id], onDelete: Restrict)
   year        Int
   /// 来源版本号，由平台按 1.0/1.1… 递增。展示用；排序与并发分配一律用 sequence。
   version     String

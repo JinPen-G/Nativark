@@ -4406,6 +4406,12 @@ export interface RentalCalendarYear {
    * 读取时派生、不落库：它取决于平台注册表的当前状态，存下来就会立刻过期。
    */
   officialSourceUpdateAvailable?: boolean;
+  /**
+   * 从未引用过任何官方来源、但该年度存在可选公共来源版本时为 true。
+   * 与 `officialSourceUpdateAvailable` 分开：前者是「当前引用的来源出了新版」，
+   * 这条是「有官方来源可供选择」，不能把后者伪装成前者（那会跨来源误报）。
+   */
+  officialSourceAvailableToSelect?: boolean;
   latestOfficialSourceVersionId?: string;
   latestOfficialSourceVersion?: string;
   /**

@@ -1094,6 +1094,15 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     if (base.version === version) {
       throw new ConflictException("该版本就是当前正在编辑的版本，无需恢复");
     }
+    // 存在未发布草稿时必须先处理，不能再生成第二个草稿：恢复无条件新建草稿，
+    // 若该年度已有草稿 v3，恢复出的 v4 发布后 v3 仍是草稿，editableCalendar 会重新选中 v3，
+    // 让已被放弃的旧修改再次进入发布路径。要求先发布或作废现有草稿，保证同年度只有一个有效草稿。
+    const existingDraft = state.calendars.find((item) => item.year === year && item.status === "draft");
+    if (existingDraft) {
+      throw new ConflictException(
+        `${year} 年度存在未发布草稿（v${existingDraft.version}），请先发布或作废后再恢复历史版本，避免同时存在两个草稿`
+      );
+    }
     const restored = structuredClone(source);
     restored.status = "draft";
     // 版本号跳过全部已占用号（含 void / superseded），否则 upsert 会原地改写历史行。
@@ -2537,20 +2546,28 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       const hours = this.resolveBusinessHours([calendar], settings, date);
       if (hours) {
         const localTime = businessTimeOfDay(iso, timeZone);
-        // 动作时段缺省沿用营业时段：多数门店的领取归还就是营业时间。
-        //
-        // 配送类履约方式按 `hours.delivery` 判定（需求 4.5.1 把配送可用时段与领取/归还
-        // 并列声明）。早前 delivery 时段声明了却没有任何路径消费它，等于配了不生效。
         const isDelivery = DELIVERY_FULFILLMENT_MODES.has(input.fulfillmentMode);
-        const actionWindows = isDelivery
-          ? hours.delivery ?? (action === "pickup" ? hours.pickup ?? hours.windows : hours.return ?? hours.windows)
-          : action === "pickup"
-            ? hours.pickup ?? hours.windows
-            : hours.return ?? hours.windows;
-        if (!this.withinWindows(hours.windows, localTime) || !this.withinWindows(actionWindows, localTime)) {
-          const shown = (actionWindows ?? []).map((w) => `${w.start}-${w.end}`).join("、") || "未配置";
-          const actionLabel = isDelivery ? `${label}（配送）` : label;
-          throw new ConflictException(`${date} ${localTime} 不在${actionLabel}可用时段内（可用：${shown}）`);
+        if (isDelivery) {
+          // 配送时段三态（需求 4.5.1 把配送可用时段与领取/归还并列声明）：
+          // - `hours.delivery` 缺省（undefined）＝未单独限制配送，继承营业时段；
+          // - `hours.delivery: []` 空数组＝**当天不提供配送**，必须拒绝——不能像 withinWindows
+          //   那样把空数组当成"不限制"，否则「今天不配送」反而变成「全天可配送」；
+          // - 非空数组＝只在这些时段配送。
+          if (Array.isArray(hours.delivery) && hours.delivery.length === 0) {
+            throw new ConflictException(`${date} 当天不提供配送服务（配送时段为空），无法安排${label}`);
+          }
+          const deliveryWindows = hours.delivery ?? hours.windows;
+          if (!this.withinWindows(hours.windows, localTime) || !this.withinWindows(deliveryWindows, localTime)) {
+            const shown = (deliveryWindows ?? []).map((w) => `${w.start}-${w.end}`).join("、") || "未配置";
+            throw new ConflictException(`${date} ${localTime} 不在${label}（配送）可用时段内（可用：${shown}）`);
+          }
+        } else {
+          // 动作时段缺省沿用营业时段：多数门店的领取归还就是营业时间。
+          const actionWindows = action === "pickup" ? hours.pickup ?? hours.windows : hours.return ?? hours.windows;
+          if (!this.withinWindows(hours.windows, localTime) || !this.withinWindows(actionWindows, localTime)) {
+            const shown = (actionWindows ?? []).map((w) => `${w.start}-${w.end}`).join("、") || "未配置";
+            throw new ConflictException(`${date} ${localTime} 不在${label}可用时段内（可用：${shown}）`);
+          }
         }
       }
     };

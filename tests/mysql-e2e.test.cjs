@@ -3344,6 +3344,32 @@ async function main() {
   // 同一时点用取还方式则不受配送时段限制——证明是按履约方式分流，不是把所有人都收窄。
   const pickupSameTime = await closedQuote(`${deliveryDate}T10:00:00+08:00`, `${closedYear}-09-22T14:00:00+08:00`);
   assert.equal(pickupSameTime.status, 201, `取还方式不应受配送时段限制: ${pickupSameTime.status} ${JSON.stringify(pickupSameTime.body).slice(0, 220)}`);
+  // Codex 复审 #4：配送时段三态。缺失=继承营业时段（放行）；空数组=当天不提供配送（必须拒绝，
+  // 不能像 withinWindows 把空数组当"不限制"）。两者都要发布后经报价验证，而不是只看 13-15 能拦。
+  const deliveryEmptyDate = `${closedYear}-09-21`;
+  const deliveryInheritDate = `${closedYear}-09-23`;
+  const setEmptyDelivery = await request("PUT", `/api/rental/v1/calendars/${closedYear}/days/${deliveryEmptyDate}`, {
+    date: deliveryEmptyDate, dayType: "tenant_special", name: "当天不配送", pricingMultiplier: 1, closed: false,
+    businessStatus: "open", hours: { windows: [{ start: "09:00", end: "18:00" }], delivery: [] }, overrideReason: "配送时段为空用例"
+  }, construction.accessToken);
+  assert.equal(setEmptyDelivery.status, 200, `配置空配送时段失败: ${setEmptyDelivery.status} ${JSON.stringify(setEmptyDelivery.body).slice(0, 220)}`);
+  const setInheritDelivery = await request("PUT", `/api/rental/v1/calendars/${closedYear}/days/${deliveryInheritDate}`, {
+    date: deliveryInheritDate, dayType: "tenant_special", name: "配送继承营业时段", pricingMultiplier: 1, closed: false,
+    businessStatus: "open", hours: { windows: [{ start: "09:00", end: "18:00" }] }, overrideReason: "配送时段缺失继承用例"
+  }, construction.accessToken);
+  assert.equal(setInheritDelivery.status, 200, `配置继承配送时段失败: ${setInheritDelivery.status} ${JSON.stringify(setInheritDelivery.body).slice(0, 220)}`);
+  const deliveryTriPublish = await request("POST", `/api/rental/v1/calendars/${closedYear}/publish`, { changeReason: "发布配送三态用例" }, construction.accessToken);
+  assert.equal(deliveryTriPublish.status, 201, `发布配送三态草稿失败: ${deliveryTriPublish.status} ${JSON.stringify(deliveryTriPublish.body).slice(0, 220)}`);
+  // 空数组：当天不提供配送，无论时点一律拒绝。
+  const deliveryEmptyQuote = await deliveryQuote(`${deliveryEmptyDate}T10:00:00+08:00`, `${closedYear}-09-25T14:00:00+08:00`);
+  assert.equal(deliveryEmptyQuote.status, 409, `配送时段为空必须拒绝（当天不提供配送）: ${deliveryEmptyQuote.status} ${JSON.stringify(deliveryEmptyQuote.body).slice(0, 220)}`);
+  assert.match(JSON.stringify(deliveryEmptyQuote.body), /配送/u, `拒绝原因应指明配送: ${JSON.stringify(deliveryEmptyQuote.body).slice(0, 200)}`);
+  // 缺失 delivery：继承营业时段，营业时段内的配送应放行。
+  const deliveryInheritQuote = await deliveryQuote(`${deliveryInheritDate}T10:00:00+08:00`, `${closedYear}-09-25T14:00:00+08:00`);
+  assert.equal(deliveryInheritQuote.status, 201, `配送时段缺失应继承营业时段（营业时段内放行）: ${deliveryInheritQuote.status} ${JSON.stringify(deliveryInheritQuote.body).slice(0, 220)}`);
+  // 缺失 delivery 但落在营业时段外的配送仍应被营业时段拦下（继承而非放开）。
+  const deliveryInheritOutside = await deliveryQuote(`${deliveryInheritDate}T20:00:00+08:00`, `${closedYear}-09-25T14:00:00+08:00`);
+  assert.equal(deliveryInheritOutside.status, 409, `继承营业时段时，营业时段外的配送仍应拒绝: ${deliveryInheritOutside.status} ${JSON.stringify(deliveryInheritOutside.body).slice(0, 220)}`);
 
   // 还原每周模板，避免污染后续用例（未声明 = 不限制时点）。
   const weeklyCleared = await putSettings({ weeklyHours: [] });
@@ -3354,7 +3380,7 @@ async function main() {
     "营业时段模型生效：限时/正常营业按营业时段与领取、归还动作时段分别校验时点，" +
       "每周默认模板对无覆盖无官方条目的普通日期同样兜底，未声明时段则不限制；" +
       "限时营业在任何层级都没有时段时配置期即 400（日级或每周模板任一有效即放行）；" +
-      "配送履约按 hours.delivery 判定且取还方式不受其限制"
+      "配送履约按 hours.delivery 判定且取还方式不受其限制；配送时段缺失继承营业时段、空数组表示当天不配送（拒绝）"
   );
 
   console.log("== 15i. PRICE-02 未来年度官方日历未确认时报价提示 ==");
@@ -3926,7 +3952,17 @@ async function main() {
   // 恢复当前正在编辑的版本没有意义，必须明确拒绝而不是静默建一份重复草稿。
   const restoreSelf = await request("POST", `/api/rental/v1/calendars/${restYear}/versions/${encodeURIComponent(restPub3.body.data.version)}/restore`, { reason: "重复恢复" }, construction.accessToken);
   assert.equal(restoreSelf.status, 409, `恢复当前正在编辑的版本必须 409: ${restoreSelf.status}`);
-  ok("历史版本恢复：以旧内容生成新草稿并记录来源版本与原因且落库、被恢复版本仍为 superseded、当前已发布版本不受影响、该年度仍只有一个 published、恢复后的草稿可正常发布、原因必填、恢复当前版本被拒");
+  // 存在未发布草稿时恢复必须冲突：否则会留下两个有效草稿，旧草稿发布后 editableCalendar
+  // 会重新选中它，让已被放弃的旧修改再次进入发布路径。
+  const draftBlockDay = await request("PUT", `/api/rental/v1/calendars/${restYear}/days/${restYear}-03-01`, {
+    date: `${restYear}-03-01`, dayType: "tenant_special", name: "占位草稿", pricingMultiplier: 1.1, closed: false, overrideReason: "制造一个未发布草稿"
+  }, construction.accessToken);
+  assert.equal(draftBlockDay.status, 200, `制造草稿失败: ${draftBlockDay.status} ${JSON.stringify(draftBlockDay.body).slice(0, 200)}`);
+  const restoreWithDraft = await request("POST", `/api/rental/v1/calendars/${restYear}/versions/${encodeURIComponent(oldVersion)}/restore`, { reason: "存在草稿时恢复" }, construction.accessToken);
+  assert.equal(restoreWithDraft.status, 409, `存在未发布草稿时恢复必须 409（不得留下两个草稿）: ${restoreWithDraft.status} ${JSON.stringify(restoreWithDraft.body).slice(0, 200)}`);
+  const draftsNow = (await request("GET", `/api/rental/v1/calendars/${restYear}/versions`, null, construction.accessToken)).body.data.filter((v) => v.status === "draft");
+  assert.equal(draftsNow.length, 1, `恢复被拒后不得新增草稿，应仍只有 1 个草稿: ${JSON.stringify(draftsNow.map((v) => v.version))}`);
+  ok("历史版本恢复：以旧内容生成新草稿并记录来源版本与原因且落库、被恢复版本仍为 superseded、当前已发布版本不受影响、该年度仍只有一个 published、恢复后的草稿可正常发布、原因必填、恢复当前版本被拒、存在未发布草稿时恢复被拒（不留两个草稿）");
 
   console.log("== 15q. PRICE-02 公共官方来源更新提示（Codex #7） ==");
   // 需求 4.5.2：平台登记新官方版本后，为相关空间生成「存在官方更新」提示，但不得自动
@@ -3961,7 +3997,40 @@ async function main() {
   const afterApplyB = (await request("GET", `/api/rental/v1/calendars/${updYear}`, null, construction.accessToken)).body.data;
   assert.equal(afterApplyB.officialSourceUpdateAvailable, false, `应用最新版后提示应消失: ${afterApplyB.officialSourceUpdateAvailable}`);
   assert.equal(afterApplyB.sourceVersionId, updVersionB.id, "应用后必须更新引用的来源版本");
-  ok("公共官方来源更新提示：空间记录引用的来源版本，登记更新版本后返回 officialSourceUpdateAvailable 与最新版本号、但不自动覆盖空间日历，空间主动应用后提示消失");
+  // #1 跨来源不得误报：另建来源 T 并登记比 S 序号更高的多个版本。sequence 是 (来源,年度) 内的
+  // 局部序号，跨来源比大小是错的——空间引用的是来源 S 的最新版，不得被提示"更新到来源 T"。
+  const platformForT = await login("platform", "admin", PLATFORM_PASSWORD);
+  const sourceT = await request("POST", "/api/platform/official-calendars", {
+    region: "CN", name: `E2E 第二来源 ${Date.now().toString(36)}`, url: "https://example.invalid/e2e-source-t"
+  }, platformForT.accessToken);
+  assert.equal(sourceT.status, 201, `建第二官方来源失败: ${JSON.stringify(sourceT.body).slice(0, 200)}`);
+  for (let i = 0; i < 3; i += 1) {
+    const v = await request("POST", `/api/platform/official-calendars/${sourceT.body.data.id}/versions`, {
+      year: updYear, publishedAt: new Date(Date.now() - 86400000).toISOString(),
+      days: [{ date: `${updYear}-10-01`, dayType: "statutory_holiday", name: `来源T第${i + 1}版` }]
+    }, platformForT.accessToken);
+    assert.equal(v.status, 201, `来源T第${i + 1}版登记失败: ${JSON.stringify(v.body).slice(0, 200)}`);
+  }
+  const afterOtherSource = (await request("GET", `/api/rental/v1/calendars/${updYear}`, null, construction.accessToken)).body.data;
+  assert.equal(
+    afterOtherSource.officialSourceUpdateAvailable,
+    false,
+    `不得跨来源误报更新：空间引用来源 S 的最新版，另一来源 T 序号更高不该触发更新提示: ${JSON.stringify({ upd: afterOtherSource.officialSourceUpdateAvailable, latest: afterOtherSource.latestOfficialSourceVersion })}`
+  );
+  // #1 从未引用来源：应提示「有官方来源可选择」而不是伪装成当前来源更新。
+  const selectYear = 2044;
+  await registerOfficialVersion(selectYear, [{ date: `${selectYear}-10-01`, dayType: "statutory_holiday", name: "国庆节" }]);
+  const neverApplied = (await request("GET", `/api/rental/v1/calendars/${selectYear}`, null, construction.accessToken)).body.data;
+  assert.ok(!neverApplied.sourceVersionId, "该年度空间从未应用任何官方来源");
+  assert.equal(neverApplied.officialSourceUpdateAvailable, false, `从未引用来源时不得报「更新」: ${neverApplied.officialSourceUpdateAvailable}`);
+  assert.equal(neverApplied.officialSourceAvailableToSelect, true, `有可选官方来源时应提示可选择: ${neverApplied.officialSourceAvailableToSelect}`);
+  // Codex 复审 #5：来源→版本外键必须 RESTRICT，不能 CASCADE——否则删一个来源会级联清空
+  // 全部不可变历史版本，与「只追加、旧版本保留」相悖。当前没有删除来源的 API，这是库层兜底。
+  const fkRule = readScalar(
+    "SELECT `DELETE_RULE` FROM information_schema.REFERENTIAL_CONSTRAINTS WHERE `CONSTRAINT_SCHEMA`=DATABASE() AND `CONSTRAINT_NAME`='official_calendar_source_versions_sourceId_fkey';"
+  );
+  assert.equal(fkRule, "RESTRICT", `来源→版本外键必须 RESTRICT（不可级联删除不可变历史版本），实际 ${fkRule}`);
+  ok("公共官方来源更新提示：空间记录引用的来源版本，登记更新版本后返回 officialSourceUpdateAvailable 与最新版本号、但不自动覆盖空间日历，空间主动应用后提示消失；跨来源不误报（另一来源序号更高不触发更新）；从未引用来源时报「可选择」而非「更新」；来源→版本外键为 RESTRICT 不可级联删除");
 
   console.log("== 16. 双租户并发隔离 ==");
   const rounds = 12;
@@ -6788,6 +6857,17 @@ async function main() {
   console.log("== 61c-2. PRICE-02 客服/财务历史只读权限（Codex #5） ==");
   // 需求 4.5.8：客服或财务「查看历史版本及报价命中的日历依据，不得修改」。
   // 独立权限 store-rental:calendar:view-history：能读历史/差异/审计，但不能编辑、发布、看发布预检。
+  //
+  // Codex 复审 #3：三个日历权限必须出现在 /permission-tree 目录里，否则角色管理页面
+  // 根本列不出这些选项，管理员无法给自定义角色分配（页面选项完全来自该目录）。
+  const permTree = await request("GET", "/api/platform/permission-tree", null, calAdmin.accessToken);
+  assert.equal(permTree.status, 200, `读取权限目录失败: ${permTree.status}`);
+  const permCodes = new Set(
+    (permTree.body.data ?? []).flatMap((mod) => (mod.children ?? []).map((child) => child.code))
+  );
+  for (const code of ["store-rental:calendar:edit", "store-rental:calendar:publish", "store-rental:calendar:view-history"]) {
+    assert.ok(permCodes.has(code), `权限目录必须包含 ${code}，否则角色管理页面无法分配`);
+  }
   const historyRole = await request("POST", "/api/platform/roles", {
     code: `E2E-CAL-HIST-${Date.now().toString(36)}`, name: "E2E 客服历史只读", scope: "store", dataScope: "all",
     enabledBusinessScopes: ["rental"], permissions: ["store-rental:calendar:view-history", "store-rental:order:view"], isActive: true

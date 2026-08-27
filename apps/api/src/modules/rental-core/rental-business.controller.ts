@@ -124,14 +124,30 @@ export class RentalBusinessController {
       Number(year),
       this.canSeeCalendarDraft(req.user)
     );
-    const latest = await this.officialSources.latestVersionForYear(Number(year));
-    if (!latest) return calendar;
+    // 「有官方更新」只能在**同一来源**内比较：sequence 是 (来源, 年度) 内的局部序号，
+    // 跨来源比大小会把「来源 A 的 v1.9」误报成「引用了来源 B v1.0 的空间该更新」。
+    if (calendar.sourceVersionId) {
+      // 已引用某来源：只和它自己的最新版比。取不到（版本被删/来源停用）就不提示。
+      const referenced = await this.officialSources.getVersion(calendar.sourceVersionId).catch(() => undefined);
+      if (!referenced) return calendar;
+      const latest = await this.officialSources.latestVersionForYear(Number(year), referenced.sourceId);
+      if (!latest) return calendar;
+      return {
+        ...calendar,
+        latestOfficialSourceVersionId: latest.id,
+        latestOfficialSourceVersion: latest.version,
+        officialSourceUpdateAvailable: latest.id !== calendar.sourceVersionId
+      };
+    }
+    // 从未引用任何官方来源：有可选来源时提示「有官方来源可选择」，而不是伪装成当前来源更新。
+    const anyLatest = await this.officialSources.latestVersionForYear(Number(year));
+    if (!anyLatest) return calendar;
     return {
       ...calendar,
-      latestOfficialSourceVersionId: latest.id,
-      latestOfficialSourceVersion: latest.version,
-      // 已引用的就是最新版时不提示；从未引用过任何版本（纯周模板或纯人工）也算"有可用官方数据"。
-      officialSourceUpdateAvailable: calendar.sourceVersionId !== latest.id
+      latestOfficialSourceVersionId: anyLatest.id,
+      latestOfficialSourceVersion: anyLatest.version,
+      officialSourceUpdateAvailable: false,
+      officialSourceAvailableToSelect: true
     };
   }
   @Get("calendars/:year/versions") calendarVersions(@Req() req: AuthenticatedRequest, @Param("year") year: string) { return this.business.listCalendarVersions(req.user.tenantId, this.context(req.user.tenantId), Number(year)); }
