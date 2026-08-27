@@ -12,6 +12,9 @@ import {
   type RentalCalendarDaySnapshot,
   type RentalCalendarOverrideAudit,
   type RentalCalendarPublishDiff,
+  type RentalCalendarPublishPreview,
+  type RentalCalendarPublishPreviewDate,
+  type RentalCalendarPublishPreviewOrder,
   type RentalCalendarVersionSummary,
   type RentalCalendarYear,
   type RentalCategoryDefinition,
@@ -1096,6 +1099,109 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
             : undefined
         };
       });
+  }
+
+  /**
+   * 发布前影响预览（需求 4.5.8）。
+   *
+   * 纯只读推演：不写任何状态，也不触碰未来订单——需求明确「存在未来订单时必须提示，
+   * 但不得直接改变这些订单」，处置由发布人决定。
+   *
+   * 逐日差异按**取值**比较而不是整行比较：`overrideBy`/`overrideAt` 每次保存都会变，
+   * 按整行比会把「只是重新保存了一遍」也算成变更，预览列表就失去筛选价值。
+   */
+  previewCalendarPublish(
+    tenantId: string,
+    context: BusinessContext,
+    year: number,
+    orders: Array<{ id: string; orderNo: string; status: string; startAt: string; endAt: string }>
+  ): RentalCalendarPublishPreview {
+    const draft = this.editableCalendar(tenantId, context, year);
+    const published = this.publishedCalendar(tenantId, context, year);
+    const replacing = published && published.version !== draft.version ? published : undefined;
+    const diff = replacing
+      ? calendarDiff(replacing.days, draft.days)
+      : { added: [], removed: [], changed: [] };
+    const beforeByDate = new Map((replacing?.days ?? []).map((day) => [day.date, day]));
+    const afterByDate = new Map(draft.days.map((day) => [day.date, day]));
+
+    const dates: RentalCalendarPublishPreviewDate[] = [];
+    const closureChanges: string[] = [];
+    const hoursChanges: string[] = [];
+    const pricingChanges: string[] = [];
+    for (const date of [...diff.added, ...diff.changed, ...diff.removed].sort()) {
+      const before = beforeByDate.get(date);
+      const after = afterByDate.get(date);
+      const change: RentalCalendarPublishPreviewDate["change"] = !before
+        ? "added"
+        : !after
+          ? "removed"
+          : "changed";
+      const changedFields: RentalCalendarPublishPreviewDate["changedFields"] = [];
+      if (before && after) {
+        if (before.dayType !== after.dayType) changedFields.push("dayType");
+        if (before.name !== after.name) changedFields.push("name");
+        if ((before.businessStatus ?? "") !== (after.businessStatus ?? "")) changedFields.push("businessStatus");
+        if (before.closed !== after.closed) changedFields.push("closed");
+        if (businessHoursSignature(before.hours) !== businessHoursSignature(after.hours)) changedFields.push("hours");
+        if (before.pricingMultiplier !== after.pricingMultiplier) changedFields.push("pricingMultiplier");
+        if (before.source !== after.source) changedFields.push("source");
+      }
+      if (changedFields.includes("businessStatus") || changedFields.includes("closed") || change !== "changed") {
+        closureChanges.push(date);
+      }
+      if (changedFields.includes("hours")) hoursChanges.push(date);
+      if (changedFields.includes("pricingMultiplier")) pricingChanges.push(date);
+      dates.push({
+        date,
+        change,
+        before: before ? RentalBusinessService.daySnapshot(before) : undefined,
+        after: after ? RentalBusinessService.daySnapshot(after) : undefined,
+        changedFields
+      });
+    }
+
+    // 未来订单：租期与受影响日期有重叠、且尚未走完的订单。按营业时区切日期键，
+    // 与日历同一口径——用 UTC 会在跨日边界把订单算进或漏掉一天。
+    const timeZone = context.settings.calendar.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE;
+    const affected = new Set(dates.map((item) => item.date));
+    const closedStatuses = new Set(["completed", "closed", "cancelled"]);
+    const now = Date.now();
+    const futureOrders: RentalCalendarPublishPreviewOrder[] = [];
+    for (const order of orders) {
+      if (closedStatuses.has(order.status)) continue;
+      if (new Date(order.endAt).getTime() < now) continue;
+      const overlap: string[] = [];
+      for (let cursor = businessDayIndex(order.startAt, timeZone); cursor <= businessDayIndex(order.endAt, timeZone); cursor += 1) {
+        const key = businessDateKeyFromIndex(cursor);
+        if (affected.has(key)) overlap.push(key);
+      }
+      if (overlap.length) {
+        futureOrders.push({
+          orderId: order.id,
+          orderNo: order.orderNo,
+          status: order.status,
+          startAt: order.startAt,
+          endAt: order.endAt,
+          affectedDates: overlap
+        });
+      }
+    }
+
+    return {
+      year,
+      draftVersion: draft.version,
+      publishedVersion: published?.version,
+      firstPublish: !replacing,
+      diff,
+      dates,
+      closureChanges,
+      hoursChanges,
+      pricingChanges,
+      futureOrders,
+      officialSourceConfirmed:
+        Boolean(draft.sourceName) && draft.days.some((day) => day.source === "official_cn")
+    };
   }
 
   /**

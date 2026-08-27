@@ -4455,6 +4455,57 @@ export interface RemoveRentalCalendarDayOverrideRequest {
 }
 
 /** 发布年度日历。变更原因必填（需求 4.5.7：发布记录可追溯）。 */
+/**
+ * 发布前影响预览（需求 4.5.8：发布前必须展示受影响日期以及停业、营业时间、履约能力和
+ * 特殊价格变化；存在未来订单时必须提示，但不得直接改变这些订单）。
+ *
+ * 纯只读推演：调用它不写任何状态，也不触碰未来订单——提示的作用是让发布人知道
+ * 这次发布会影响到谁，处置由人决定。
+ */
+export interface RentalCalendarPublishPreviewDate {
+  date: string;
+  /** 相对当前已发布版本：新增日期 / 该日期在新版本里消失 / 取值发生变化。 */
+  change: "added" | "removed" | "changed";
+  before?: RentalCalendarDaySnapshot;
+  after?: RentalCalendarDaySnapshot;
+  /** 发生变化的维度，供界面按「停业/时段/价格」分组展示。 */
+  changedFields: Array<
+    "dayType" | "name" | "businessStatus" | "closed" | "hours" | "pricingMultiplier" | "source"
+  >;
+}
+
+/** 发布前影响预览里被提示的未来订单。只提示，不修改。 */
+export interface RentalCalendarPublishPreviewOrder {
+  orderId: string;
+  orderNo: string;
+  status: string;
+  startAt: string;
+  endAt: string;
+  /** 该订单与本次变化重叠的营业日期。 */
+  affectedDates: string[];
+}
+
+export interface RentalCalendarPublishPreview {
+  year: number;
+  /** 待发布草稿的版本号。 */
+  draftVersion: string;
+  /** 当前已发布版本号；该年度尚无已发布版本时为空（此时是首次发布）。 */
+  publishedVersion?: string;
+  /** 首次发布：没有可比对象，逐日差异没有信息量，界面应提示「全年首次发布」。 */
+  firstPublish: boolean;
+  diff: RentalCalendarPublishDiff;
+  dates: RentalCalendarPublishPreviewDate[];
+  /** 营业状态或停业标记发生变化的日期。 */
+  closureChanges: string[];
+  /** 营业时段或领取/归还/配送可用时段发生变化的日期。 */
+  hoursChanges: string[];
+  /** 特殊价格（日期系数）发生变化的日期。 */
+  pricingChanges: string[];
+  futureOrders: RentalCalendarPublishPreviewOrder[];
+  /** 该年度是否已确认公共官方来源（与「日历是否发布」是两个状态）。 */
+  officialSourceConfirmed: boolean;
+}
+
 export interface PublishRentalCalendarRequest {
   changeReason: string;
 }

@@ -3558,6 +3558,69 @@ async function main() {
   );
   ok("日历并发编辑乐观锁：同一年度并发改不同日期时一方 200 一方 409（不再双双成功而静默覆盖），409 提示刷新重试，重试后两天改动都在，revision 随写入递增并落库");
 
+  console.log("== 15n. PRICE-02 发布前影响预览（Codex #5） ==");
+  // 需求 4.5.8：发布前必须展示受影响日期以及停业、营业时间、履约能力和特殊价格变化；
+  // 存在未来订单时必须提示，但**不得直接改变**这些订单。
+  const previewYear = 2038;
+  const previewDate = `${previewYear}-07-15`;
+  // 先造一版已发布：该日期正常营业、系数 1、有营业时段。
+  const previewSeed = await request("PUT", `/api/rental/v1/calendars/${previewYear}/days/${previewDate}`, {
+    date: previewDate, dayType: "tenant_special", name: "预览基线", pricingMultiplier: 1, closed: false,
+    businessStatus: "open", hours: { windows: [{ start: "09:00", end: "18:00" }] }, overrideReason: "预览用例基线"
+  }, construction.accessToken);
+  assert.equal(previewSeed.status, 200, `预览基线建立失败: ${previewSeed.status} ${JSON.stringify(previewSeed.body).slice(0, 200)}`);
+  const previewFirstPublish = await request("POST", `/api/rental/v1/calendars/${previewYear}/publish`, { changeReason: "预览用例首发" }, construction.accessToken);
+  assert.equal(previewFirstPublish.status, 201, `预览基线发布失败: ${previewFirstPublish.status} ${JSON.stringify(previewFirstPublish.body).slice(0, 200)}`);
+  // 在已发布日历上下一张覆盖该日期的未来订单，用于验证「存在未来订单时必须提示」。
+  const previewQuote = await closedQuote(`${previewYear}-07-14T10:00:00+08:00`, `${previewYear}-07-16T10:00:00+08:00`);
+  assert.equal(previewQuote.status, 201, `预览用例报价失败: ${previewQuote.status} ${JSON.stringify(previewQuote.body).slice(0, 220)}`);
+  const previewOrder = await request("POST", "/api/rental/v1/orders", {
+    quoteId: previewQuote.body.data.id, customerType: "corporate", customerName: "E2E 预览客户",
+    fulfillmentMode: "warehouse_pickup_return", fulfillmentLocationId: constructionLocation.id,
+    startAt: `${previewYear}-07-14T10:00:00+08:00`, endAt: `${previewYear}-07-16T10:00:00+08:00`,
+    lines: [{ itemGroupId: priceGroupId, quantity: 1 }], qualificationApproved: true
+  }, construction.accessToken);
+  assert.equal(previewOrder.status, 201, `预览用例订单失败: ${previewOrder.status} ${JSON.stringify(previewOrder.body).slice(0, 220)}`);
+  // 再改草稿：同一天改成停业 + 改系数 + 改时段，三个维度一次性覆盖。
+  const previewEdit = await request("PUT", `/api/rental/v1/calendars/${previewYear}/days/${previewDate}`, {
+    date: previewDate, dayType: "tenant_special", name: "预览变更", pricingMultiplier: 2, closed: true,
+    businessStatus: "closed", hours: { windows: [{ start: "10:00", end: "12:00" }] }, overrideReason: "预览用例变更"
+  }, construction.accessToken);
+  assert.equal(previewEdit.status, 200, `预览变更失败: ${previewEdit.status} ${JSON.stringify(previewEdit.body).slice(0, 200)}`);
+  const preview = await request("GET", `/api/rental/v1/calendars/${previewYear}/publish-preview`, null, construction.accessToken);
+  assert.equal(preview.status, 200, `发布预览失败: ${preview.status} ${JSON.stringify(preview.body).slice(0, 220)}`);
+  const pv = preview.body.data;
+  assert.equal(pv.firstPublish, false, "已有已发布版本时不应标记为首次发布");
+  assert.equal(pv.publishedVersion, previewFirstPublish.body.data.version, `预览必须指出当前已发布版本: ${pv.publishedVersion}`);
+  assert.notEqual(pv.draftVersion, pv.publishedVersion, "待发布草稿必须是另一个版本");
+  const previewChanged = (pv.dates ?? []).find((d) => d.date === previewDate);
+  assert.ok(previewChanged, `受影响日期必须包含被改的那天: ${JSON.stringify((pv.dates ?? []).map((d) => d.date)).slice(0, 200)}`);
+  assert.equal(previewChanged.change, "changed", `该日期应判为变更: ${previewChanged.change}`);
+  for (const field of ["businessStatus", "closed", "pricingMultiplier", "hours"]) {
+    assert.ok(previewChanged.changedFields.includes(field), `变化维度必须含 ${field}: ${JSON.stringify(previewChanged.changedFields)}`);
+  }
+  assert.equal(previewChanged.before.pricingMultiplier, 1, `前值系数应为 1: ${previewChanged.before.pricingMultiplier}`);
+  assert.equal(previewChanged.after.pricingMultiplier, 2, `后值系数应为 2: ${previewChanged.after.pricingMultiplier}`);
+  assert.ok(pv.closureChanges.includes(previewDate), `停业变化清单必须含该日期: ${JSON.stringify(pv.closureChanges)}`);
+  assert.ok(pv.hoursChanges.includes(previewDate), `营业时段变化清单必须含该日期: ${JSON.stringify(pv.hoursChanges)}`);
+  assert.ok(pv.pricingChanges.includes(previewDate), `特殊价格变化清单必须含该日期: ${JSON.stringify(pv.pricingChanges)}`);
+  assert.equal(pv.officialSourceConfirmed, false, "纯人工覆盖的年度不得声称官方来源已确认");
+  // 未来订单必须被提示，且**不得被改动**。
+  const flagged = (pv.futureOrders ?? []).find((o) => o.orderId === previewOrder.body.data.id);
+  assert.ok(flagged, `覆盖受影响日期的未来订单必须被提示: ${JSON.stringify((pv.futureOrders ?? []).map((o) => o.orderNo))}`);
+  assert.ok(flagged.affectedDates.includes(previewDate), `提示必须指出重叠的日期: ${JSON.stringify(flagged.affectedDates)}`);
+  const orderAfterPreview = readRow(
+    `SELECT \`status\`, \`startAt\`, \`endAt\` FROM \`rental_orders\` WHERE \`id\`='${previewOrder.body.data.id}';`
+  );
+  assert.equal(orderAfterPreview.status, previewOrder.body.data.status, `预览不得改变订单状态: ${orderAfterPreview.status}`);
+  // 预览是只读的：调用它不得把草稿发布掉。
+  const stillDraft = (await request("GET", `/api/rental/v1/calendars/${previewYear}/versions`, null, construction.accessToken)).body.data;
+  assert.ok(
+    stillDraft.some((v) => v.version === pv.draftVersion && v.status === "draft"),
+    `预览后草稿必须仍是草稿: ${JSON.stringify(stillDraft.map((v) => [v.version, v.status]))}`
+  );
+  ok("发布前影响预览：指出当前已发布版本与待发布草稿、逐日变化维度（停业/时段/特殊价格各自成清单）、前后取值、官方来源未确认、重叠的未来订单被提示且订单本身与草稿状态均未被改动");
+
   console.log("== 16. 双租户并发隔离 ==");
   const rounds = 12;
   const concurrent = [];

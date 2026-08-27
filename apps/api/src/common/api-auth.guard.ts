@@ -183,7 +183,7 @@ export function requiredPermissions(method: string, path: string) {
     if (method === "GET") {
       // 历史版本/差异/审计查询属**管理视图**，不放给只读运营（order:view）——
       // 版本详情与覆盖审计含未发布草稿内容，混进只读运营会与「普通运营只见已发布」相悖。
-      if (/\/versions(\/|$)/.test(path) || /\/override-audits$/.test(path)) {
+      if (/\/versions(\/|$)/.test(path) || /\/override-audits$/.test(path) || /\/publish-preview$/.test(path)) {
         return ["store-rental:calendar:edit", "store-rental:calendar:publish", "store-rental:price:manage", "store-rental:rules:manage"];
       }
       return [

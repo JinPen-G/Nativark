@@ -6,6 +6,8 @@ import type {
   RentalAvailabilityRequest,
   RentalAvailabilityResult,
   RentalCategoryDefinition,
+  RentalCalendarOverrideAudit,
+  RentalCalendarPublishPreview,
   RentalCalendarVersionSummary,
   RentalCalendarYear,
   RentalCouponTemplate,
@@ -82,6 +84,14 @@ export const rentalCoreApi = {
   /** 单个版本详情，含逐日、发布差异与覆盖审计。 */
   calendarVersion: (year: number, version: string) =>
     request<RentalCalendarYear>(`/rental/v1/calendars/${year}/versions/${encodeURIComponent(version)}`),
+  /** 覆盖审计流水（独立只追加表，不截断）。可按版本过滤。 */
+  calendarOverrideAudits: (year: number, version?: string) =>
+    request<RentalCalendarOverrideAudit[]>(
+      `/rental/v1/calendars/${year}/override-audits${version ? `?version=${encodeURIComponent(version)}` : ""}`
+    ),
+  /** 发布前影响预览（需求 4.5.8）。只读推演，不改状态、不触碰未来订单。 */
+  calendarPublishPreview: (year: number) =>
+    request<RentalCalendarPublishPreview>(`/rental/v1/calendars/${year}/publish-preview`),
   ruleVersions: () => request<RentalRuleVersion[]>("/rental/v1/rule-versions"),
   currentRule: () => request<RentalRuleVersion>("/rental/v1/rule-versions/current"),
   saveRuleVersion: (data: SaveRentalRuleVersionRequest) => request<RentalRuleVersion>("/rental/v1/rule-versions", { method: "post", data }),

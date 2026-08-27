@@ -10,6 +10,7 @@ import type {
   GrantRentalRewardRequest,
   ImportRentalCalendarRequest,
   RentalCalendarDay,
+  RentalCalendarVersionSummary,
   SaveRentalCalendarDayRequest,
   RentalNotificationTemplateV1,
   RentalRuleVersion,
@@ -45,6 +46,7 @@ import { useEffect, useMemo, useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
+import { useAuthStore } from "@/features/auth/authStore";
 
 type TabKey =
   | "category"
@@ -64,8 +66,36 @@ type SendForm = Omit<SendRentalNotificationRequest, "variables"> & {
 };
 const pricingUnitLabels = RENTAL_PRICING_UNIT_LABELS;
 const currentYear = new Date().getFullYear();
-const modeLabels: Record<string, string> = {
-  store_pickup_return: "门店取还",
+/** 四态营业状态（需求 4.5.4）。界面必须能看出限时/自助，否则状态翻转是不可见的。 */
+const businessStatusLabels: Record<string, string> = {
+  open: "正常营业",
+  limited: "限时营业",
+  closed: "停止营业",
+  self_service: "自助营业",
+};
+/** 覆盖审计动作。 */
+const auditActionLabels: Record<string, string> = {
+  override: "建立覆盖",
+  revert: "移除覆盖",
+};
+/** 版本状态（需求 4.5.7 的四态）。 */
+const calendarStatusLabels: Record<string, string> = {
+  draft: "草稿",
+  published: "已发布",
+  superseded: "已被替代",
+  void: "已作废",
+};
+/** 发布预览里的变化维度标签（需求 4.5.8 要求按停业/时段/价格分别展示）。 */
+const previewFieldLabels: Record<string, string> = {
+  dayType: "日期类型",
+  name: "名称",
+  businessStatus: "营业状态",
+  closed: "停业",
+  hours: "营业时段",
+  pricingMultiplier: "特殊价格",
+  source: "来源",
+};
+const modeLabels: Record<string, string> = {  store_pickup_return: "门店取还",
   partner_pickup_return: "合作商取还",
   warehouse_pickup_return: "仓库取还",
   locker_pickup_return: "自提柜取还",
@@ -76,12 +106,43 @@ const modeLabels: Record<string, string> = {
 export function RentalGovernancePage() {
   const { message } = App.useApp();
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<TabKey>("category");
+  // 需求 4.5.8 的角色矩阵要在界面上成立：日历编辑人员不该看到「发布」，发布人员不该
+  // 看到「导入/覆盖/移除覆盖」，而且不该发出注定 403 的请求（页面会满屏报错，
+  // 专门配置的日历角色拿不到一个能用的工作界面）。
+  const hasPermission = useAuthStore((state) => state.hasPermission);
+  const canManagePrice = hasPermission("store-rental:price:manage");
+  const canManageRules = hasPermission("store-rental:rules:manage");
+  const canEditCalendar = canManagePrice || hasPermission("store-rental:calendar:edit");
+  const canPublishCalendar = canManagePrice || hasPermission("store-rental:calendar:publish");
+  // 历史版本/差异/审计属管理视图，与后端 guard 同一口径。
+  const canViewCalendarHistory = canEditCalendar || canPublishCalendar || canManageRules;
+  const canSeeCalendar = canViewCalendarHistory;
+  const canSeeSettings = canManagePrice || canManageRules;
+  const permittedTabs = useMemo<TabKey[]>(
+    () =>
+      [
+        canSeeSettings ? ("category" as const) : undefined,
+        canManageRules || canManagePrice ? ("rules" as const) : undefined,
+        canSeeCalendar ? ("calendar" as const) : undefined,
+        canSeeSettings ? ("membership" as const) : undefined,
+        canManageRules || canManagePrice ? ("notifications" as const) : undefined
+      ].filter((key): key is TabKey => Boolean(key)),
+    [canSeeSettings, canManageRules, canManagePrice, canSeeCalendar]
+  );
+  const [tab, setTab] = useState<TabKey>(permittedTabs[0] ?? "calendar");
+  useEffect(() => {
+    if (permittedTabs.length && !permittedTabs.includes(tab)) setTab(permittedTabs[0]);
+  }, [permittedTabs, tab]);
   const [year, setYear] = useState(currentYear);
   const [ruleEditor, setRuleEditor] = useState<RentalRuleVersion>();
   const [calendarDay, setCalendarDay] = useState<RentalCalendarDay>();
   const [importOpen, setImportOpen] = useState(false);
   const [publishOpen, setPublishOpen] = useState(false);
+  /** 历史版本抽屉。选中版本后展开逐日差异与覆盖审计（需求 4.5.7/4.5.8）。 */
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyVersion, setHistoryVersion] = useState<string>();
+  /** 待作废的草稿版本。原因必填，因此走确认弹窗。 */
+  const [voidTarget, setVoidTarget] = useState<RentalCalendarVersionSummary>();
   /** 待移除覆盖的日期。撤销原因必填，因此走确认弹窗而不是直接 DELETE。 */
   const [revertTarget, setRevertTarget] = useState<RentalCalendarDay>();
   const [templateEditor, setTemplateEditor] =
@@ -96,6 +157,7 @@ export function RentalGovernancePage() {
   const [importForm] = Form.useForm<ImportForm>();
   const [publishForm] = Form.useForm<{ changeReason: string }>();
   const [revertForm] = Form.useForm<{ overrideReason: string }>();
+  const [voidForm] = Form.useForm<{ reason: string }>();
   const [rewardForm] = Form.useForm<GrantRentalRewardRequest>();
   const [templateForm] = Form.useForm<TemplateForm>();
   const [sendForm] = Form.useForm<SendForm>();
@@ -111,33 +173,64 @@ export function RentalGovernancePage() {
     queryKey: ["rental-core", "business-settings"],
     queryFn: rentalCoreApi.businessSettings,
   });
+  // 每个查询都按权限 gate：日历角色没有规则/奖励/通知权限，无条件发请求会让页面
+  // 满屏 403，专门配置的角色拿不到一个能用的界面（需求 4.5.8 的角色矩阵）。
   const rules = useQuery({
     queryKey: ["rental-core", "rule-versions"],
     queryFn: rentalCoreApi.ruleVersions,
+    enabled: canManageRules || canManagePrice,
   });
   const calendar = useQuery({
     queryKey: ["rental-core", "calendar", year],
     queryFn: () => rentalCoreApi.calendar(year),
+    enabled: canSeeCalendar,
+  });
+  /** 版本历史只在抽屉打开时拉，且属管理视图。 */
+  const calendarVersions = useQuery({
+    queryKey: ["rental-core", "calendar-versions", year],
+    queryFn: () => rentalCoreApi.calendarVersions(year),
+    enabled: historyOpen && canViewCalendarHistory,
+  });
+  const calendarVersionDetail = useQuery({
+    queryKey: ["rental-core", "calendar-version", year, historyVersion],
+    queryFn: () => rentalCoreApi.calendarVersion(year, historyVersion!),
+    enabled: Boolean(historyOpen && historyVersion && canViewCalendarHistory),
+  });
+  const calendarAudits = useQuery({
+    queryKey: ["rental-core", "calendar-audits", year, historyVersion],
+    queryFn: () => rentalCoreApi.calendarOverrideAudits(year, historyVersion),
+    enabled: historyOpen && canViewCalendarHistory,
+  });
+  /** 发布前影响预览：只在发布抽屉打开时拉一次（需求 4.5.8）。 */
+  const publishPreview = useQuery({
+    queryKey: ["rental-core", "calendar-publish-preview", year],
+    queryFn: () => rentalCoreApi.calendarPublishPreview(year),
+    enabled: publishOpen && canPublishCalendar,
   });
   const rewards = useQuery({
     queryKey: ["rental-core", "rewards"],
     queryFn: () => rentalCoreApi.rewards(),
+    enabled: canSeeSettings,
   });
   const benefitAccounts = useQuery({
     queryKey: ["rental-core", "benefit-accounts"],
     queryFn: () => rentalCoreApi.benefitAccounts(),
+    enabled: canSeeSettings,
   });
   const couponTemplates = useQuery({
     queryKey: ["rental-core", "coupon-templates"],
     queryFn: rentalCoreApi.couponTemplates,
+    enabled: canSeeSettings,
   });
   const templates = useQuery({
     queryKey: ["rental-core", "notification-templates"],
     queryFn: rentalCoreApi.notificationTemplates,
+    enabled: canManageRules || canManagePrice,
   });
   const logs = useQuery({
     queryKey: ["rental-core", "notification-logs"],
     queryFn: rentalCoreApi.notificationLogs,
+    enabled: canManageRules || canManagePrice,
   });
   const category = useMemo(
     () =>
@@ -242,10 +335,37 @@ export function RentalGovernancePage() {
       await queryClient.invalidateQueries({
         queryKey: ["rental-core", "calendar", year],
       });
+      await queryClient.invalidateQueries({
+        queryKey: ["rental-core", "calendar-versions", year],
+      });
       message.success("年度营业日历已发布，后续报价将记录该版本");
     },
-    onError: () =>
-      message.error("发布失败：需填写变更原因，且中国大陆日历必须先导入官方来源"),
+    onError: (error) =>
+      message.error(
+        (error as { response?: { data?: { message?: string } } })?.response?.data?.message ??
+          "发布失败：需填写变更原因",
+      ),
+  });
+  /** 作废草稿版本（需求 4.5.7）。原因必填，作废后该草稿不再进入编辑视图。 */
+  const voidVersion = useMutation({
+    mutationFn: ({ version, reason }: { version: string; reason: string }) =>
+      rentalCoreApi.voidCalendarVersion(year, version, { reason }),
+    onSuccess: async () => {
+      setVoidTarget(undefined);
+      voidForm.resetFields();
+      await queryClient.invalidateQueries({
+        queryKey: ["rental-core", "calendar-versions", year],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["rental-core", "calendar", year],
+      });
+      message.success("草稿版本已作废，并记录了作废原因");
+    },
+    onError: (error) =>
+      message.error(
+        (error as { response?: { data?: { message?: string } } })?.response?.data?.message ??
+          "作废失败：只能作废草稿版本，且必须填写原因",
+      ),
   });
   const removeDayOverride = useMutation({
     mutationFn: ({ date, overrideReason }: { date: string; overrideReason: string }) =>
@@ -337,7 +457,15 @@ export function RentalGovernancePage() {
   }
   function openDay(row: RentalCalendarDay) {
     // source 由服务端固定为 tenant_override，不作为表单字段提交。
-    const { source: _source, overrideBy: _by, overrideAt: _at, overriddenFrom: _from, ...editable } = row;
+    // hours 也不进表单（结构化对象，无编辑器），提交时从 calendarDay 原样带回。
+    const {
+      source: _source,
+      overrideBy: _by,
+      overrideAt: _at,
+      overriddenFrom: _from,
+      hours: _hours,
+      ...editable
+    } = row;
     calendarDayForm.setFieldsValue({ ...editable, overrideReason: row.overrideReason ?? "" });
     setCalendarDay(row);
   }
@@ -409,43 +537,59 @@ export function RentalGovernancePage() {
         activeKey={tab}
         onChange={(key) => setTab(key as TabKey)}
         items={[
-          { key: "category", label: "品类与租赁方式" },
-          {
-            key: "rules",
-            label: (
-              <span>
-                <SafetyCertificateOutlined />
-                业务规则
-              </span>
-            ),
-          },
-          {
-            key: "calendar",
-            label: (
-              <span>
-                <CalendarOutlined />
-                营业日历
-              </span>
-            ),
-          },
-          {
-            key: "membership",
-            label: (
-              <span>
-                <TeamOutlined />
-                会员激励
-              </span>
-            ),
-          },
-          {
-            key: "notifications",
-            label: (
-              <span>
-                <NotificationOutlined />
-                通知模板
-              </span>
-            ),
-          },
+          ...(canSeeSettings ? [{ key: "category", label: "品类与租赁方式" }] : []),
+          ...(canManageRules || canManagePrice
+            ? [
+                {
+                  key: "rules",
+                  label: (
+                    <span>
+                      <SafetyCertificateOutlined />
+                      业务规则
+                    </span>
+                  ),
+                },
+              ]
+            : []),
+          ...(canSeeCalendar
+            ? [
+                {
+                  key: "calendar",
+                  label: (
+                    <span>
+                      <CalendarOutlined />
+                      营业日历
+                    </span>
+                  ),
+                },
+              ]
+            : []),
+          ...(canSeeSettings
+            ? [
+                {
+                  key: "membership",
+                  label: (
+                    <span>
+                      <TeamOutlined />
+                      会员激励
+                    </span>
+                  ),
+                },
+              ]
+            : []),
+          ...(canManageRules || canManagePrice
+            ? [
+                {
+                  key: "notifications",
+                  label: (
+                    <span>
+                      <NotificationOutlined />
+                      通知模板
+                    </span>
+                  ),
+                },
+              ]
+            : []),
         ]}
       />
       <QueryState
@@ -742,29 +886,41 @@ export function RentalGovernancePage() {
                   <Space>
                     <Button
                       onClick={() => {
-                        importForm.setFieldsValue({
-                          year,
-                          region: "CN",
-                          sourceName: "国务院办公厅年度放假通知",
-                          sourceUrl: "https://www.gov.cn/",
-                          sourcePublishedAt: new Date().toISOString(),
-                          daysText: "[]",
-                        });
-                        setImportOpen(true);
+                        setHistoryVersion(undefined);
+                        setHistoryOpen(true);
                       }}
                     >
-                      导入官方日历
+                      历史版本
                     </Button>
-                    <Button
-                      type="primary"
-                      loading={publishCalendar.isPending}
-                      onClick={() => {
-                        publishForm.resetFields();
-                        setPublishOpen(true);
-                      }}
-                    >
-                      发布年度版本
-                    </Button>
+                    {canEditCalendar && (
+                      <Button
+                        onClick={() => {
+                          importForm.setFieldsValue({
+                            year,
+                            region: "CN",
+                            sourceName: "国务院办公厅年度放假通知",
+                            sourceUrl: "https://www.gov.cn/",
+                            sourcePublishedAt: new Date().toISOString(),
+                            daysText: "[]",
+                          });
+                          setImportOpen(true);
+                        }}
+                      >
+                        导入官方日历
+                      </Button>
+                    )}
+                    {canPublishCalendar && (
+                      <Button
+                        type="primary"
+                        loading={publishCalendar.isPending}
+                        onClick={() => {
+                          publishForm.resetFields();
+                          setPublishOpen(true);
+                        }}
+                      >
+                        发布年度版本
+                      </Button>
+                    )}
                   </Space>
                 </div>
                 <Alert
@@ -793,6 +949,38 @@ export function RentalGovernancePage() {
                         dataIndex: "closed",
                         render: (value) => (value ? "是" : "否"),
                       },
+                      {
+                        // 四态营业状态与营业时段此前在表格上完全不可见，于是「限时营业 →
+                        // 正常营业」这种翻转在界面上看不出来（需求 4.5.4/4.5.1）。
+                        title: "营业状态",
+                        dataIndex: "businessStatus",
+                        render: (value, row) => (
+                          <Tag>{businessStatusLabels[(value as string) ?? (row.closed ? "closed" : "open")] ?? value}</Tag>
+                        ),
+                      },
+                      {
+                        title: "营业时段",
+                        render: (_, row) =>
+                          row.hours?.windows?.length ? (
+                            <Space direction="vertical" size={0}>
+                              <Typography.Text style={{ fontSize: 12 }}>
+                                {row.hours.windows.map((w) => `${w.start}-${w.end}`).join("、")}
+                              </Typography.Text>
+                              {(row.hours.pickup?.length || row.hours.return?.length) && (
+                                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                  {row.hours.pickup?.length
+                                    ? `取 ${row.hours.pickup.map((w) => `${w.start}-${w.end}`).join("、")}`
+                                    : ""}
+                                  {row.hours.return?.length
+                                    ? ` 还 ${row.hours.return.map((w) => `${w.start}-${w.end}`).join("、")}`
+                                    : ""}
+                                </Typography.Text>
+                              )}
+                            </Space>
+                          ) : (
+                            <Typography.Text type="secondary">沿用每周模板</Typography.Text>
+                          ),
+                      },
                       { title: "来源", dataIndex: "source" },
                       {
                         title: "被覆盖的原始值",
@@ -817,25 +1005,28 @@ export function RentalGovernancePage() {
                       },
                       {
                         title: "操作",
-                        render: (_, row) => (
-                          <Space size={0}>
-                            <Button type="link" onClick={() => openDay(row)}>
-                              租户覆盖
-                            </Button>
-                            {row.source === "tenant_override" && (
-                              <Button
-                                type="link"
-                                danger
-                                onClick={() => {
-                                  revertForm.resetFields();
-                                  setRevertTarget(row);
-                                }}
-                              >
-                                移除覆盖
+                        render: (_, row) =>
+                          canEditCalendar ? (
+                            <Space size={0}>
+                              <Button type="link" onClick={() => openDay(row)}>
+                                租户覆盖
                               </Button>
-                            )}
-                          </Space>
-                        ),
+                              {row.source === "tenant_override" && (
+                                <Button
+                                  type="link"
+                                  danger
+                                  onClick={() => {
+                                    revertForm.resetFields();
+                                    setRevertTarget(row);
+                                  }}
+                                >
+                                  移除覆盖
+                                </Button>
+                              )}
+                            </Space>
+                          ) : (
+                            <Typography.Text type="secondary">只读</Typography.Text>
+                          ),
                       },
                     ]}
                   />
@@ -1444,7 +1635,11 @@ export function RentalGovernancePage() {
         <Form
           form={calendarDayForm}
           layout="vertical"
-          onFinish={(values) => saveDay.mutate(values)}
+          onFinish={(values) =>
+            // 营业时段原样带回被编辑那一行的值：抽屉里没有时段编辑器，而 PUT 是整日覆盖，
+            // 不带回就会让一次改价把已配置的营业/领取/归还时段清空。
+            saveDay.mutate({ ...values, hours: calendarDay?.hours })
+          }
         >
           <Form.Item name="date" label="日期">
             <Input disabled />
@@ -1477,6 +1672,23 @@ export function RentalGovernancePage() {
           <Form.Item name="closed" label="停业" valuePropName="checked">
             <Switch />
           </Form.Item>
+          {/* 四态营业状态（需求 4.5.4）。此前抽屉只有「停业」开关、没有四态选择器，
+              于是限时营业与自助营业在界面上既看不到也配不了；服务端在未提供时会沿用原值，
+              这里显式给出选择器让运营能真正改它。 */}
+          <Form.Item
+            name="businessStatus"
+            label="营业状态"
+            tooltip="留空表示按「停业」开关推导（停业=停止营业、否则正常营业）。限时营业需要配营业时段才会真正限制时点；自助营业需要地点声明自助能力。"
+          >
+            <Select
+              allowClear
+              placeholder="留空按停业开关推导"
+              options={Object.entries(businessStatusLabels).map(([value, label]) => ({ value, label }))}
+            />
+          </Form.Item>
+          {/* 营业时段是结构化对象，本轮不做可视化时段编辑器。它**不注册为表单字段**：
+              rc-field-form 只提交已注册字段，而把对象塞进隐藏 Input 会让 React 收到
+              非字符串 value。改为提交时从被编辑的那一行原样带回（见 onFinish）。 */}
           <Form.Item name="source" hidden>
             <Input />
           </Form.Item>
@@ -1553,6 +1765,7 @@ export function RentalGovernancePage() {
         onOk={() => publishForm.submit()}
         confirmLoading={publishCalendar.isPending}
         okText="发布"
+        width={760}
         destroyOnHidden
       >
         <Form
@@ -1567,6 +1780,112 @@ export function RentalGovernancePage() {
             description="当前已发布版本会被标记为「已被替代」并保留，历史报价仍可追溯原版本；变更原因与相对上一版本的日期差异会一并记录。"
             style={{ marginBottom: 16 }}
           />
+          {/* 需求 4.5.8：发布前必须展示受影响日期以及停业、营业时间、履约能力和特殊价格变化；
+              存在未来订单时必须提示。预览是只读推演，不会改动这些订单。 */}
+          <QueryState loading={publishPreview.isLoading} error={publishPreview.error}>
+            {publishPreview.data && (
+              <Space direction="vertical" size={12} style={{ width: "100%", marginBottom: 16 }}>
+                <Descriptions size="small" column={2} bordered>
+                  <Descriptions.Item label="待发布版本">v{publishPreview.data.draftVersion}</Descriptions.Item>
+                  <Descriptions.Item label="当前已发布">
+                    {publishPreview.data.publishedVersion
+                      ? `v${publishPreview.data.publishedVersion}`
+                      : "无（首次发布）"}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="受影响日期">
+                    {publishPreview.data.dates.length} 天
+                  </Descriptions.Item>
+                  <Descriptions.Item label="公共官方来源">
+                    {publishPreview.data.officialSourceConfirmed ? (
+                      <Tag color="success">已确认</Tag>
+                    ) : (
+                      <Tag color="warning">尚未确认</Tag>
+                    )}
+                  </Descriptions.Item>
+                </Descriptions>
+                {publishPreview.data.firstPublish ? (
+                  <Alert
+                    type="info"
+                    showIcon
+                    message="该年度首次发布"
+                    description="没有可比对象，全年日期都将首次生效，因此不展示逐日差异。"
+                  />
+                ) : (
+                  <>
+                    <Space size={8} wrap>
+                      <Tag color="volcano">
+                        营业状态/停业 {publishPreview.data.closureChanges.length} 天
+                      </Tag>
+                      <Tag color="geekblue">
+                        营业与履约时段 {publishPreview.data.hoursChanges.length} 天
+                      </Tag>
+                      <Tag color="gold">
+                        特殊价格 {publishPreview.data.pricingChanges.length} 天
+                      </Tag>
+                    </Space>
+                    {publishPreview.data.dates.length > 0 && (
+                      <Table
+                        rowKey="date"
+                        size="small"
+                        dataSource={publishPreview.data.dates}
+                        pagination={{ pageSize: 6, showSizeChanger: false }}
+                        columns={[
+                          { title: "日期", dataIndex: "date", width: 110 },
+                          {
+                            title: "变化",
+                            dataIndex: "changedFields",
+                            render: (fields: string[], row) =>
+                              row.change !== "changed" ? (
+                                <Tag>{row.change === "added" ? "新增日期" : "移除日期"}</Tag>
+                              ) : (
+                                <Space size={4} wrap>
+                                  {fields.map((field) => (
+                                    <Tag key={field}>{previewFieldLabels[field] ?? field}</Tag>
+                                  ))}
+                                </Space>
+                              ),
+                          },
+                          {
+                            title: "发布前 → 发布后",
+                            render: (_, row) => (
+                              <Typography.Text style={{ fontSize: 12 }}>
+                                {row.before
+                                  ? `${businessStatusLabels[row.before.businessStatus ?? (row.before.closed ? "closed" : "open")]} ×${row.before.pricingMultiplier}`
+                                  : "（无）"}
+                                {" → "}
+                                {row.after
+                                  ? `${businessStatusLabels[row.after.businessStatus ?? (row.after.closed ? "closed" : "open")]} ×${row.after.pricingMultiplier}`
+                                  : "（无）"}
+                              </Typography.Text>
+                            ),
+                          },
+                        ]}
+                      />
+                    )}
+                  </>
+                )}
+                {publishPreview.data.futureOrders.length > 0 && (
+                  <Alert
+                    type="warning"
+                    showIcon
+                    message={`有 ${publishPreview.data.futureOrders.length} 张未来订单落在受影响日期上`}
+                    description={
+                      <Space direction="vertical" size={0}>
+                        <Typography.Text style={{ fontSize: 12 }}>
+                          发布不会改动这些订单，它们继续按各自的订单快照执行；如需调整请单独处理。
+                        </Typography.Text>
+                        {publishPreview.data.futureOrders.slice(0, 5).map((order) => (
+                          <Typography.Text key={order.orderId} type="secondary" style={{ fontSize: 12 }}>
+                            {order.orderNo} · {order.status} · 重叠 {order.affectedDates.join("、")}
+                          </Typography.Text>
+                        ))}
+                      </Space>
+                    }
+                  />
+                )}
+              </Space>
+            )}
+          </QueryState>
           <Form.Item
             name="changeReason"
             label="变更原因"
@@ -1575,6 +1894,213 @@ export function RentalGovernancePage() {
             ]}
           >
             <Input.TextArea rows={3} placeholder="例如：按国务院办公厅通知更新国庆调休" />
+          </Form.Item>
+        </Form>
+      </Modal>
+      {/* 历史版本、差异详情、覆盖审计与作废入口（需求 4.5.7/4.5.8）。
+          后端端点早已就绪，但此前没有任何界面入口，「客服/财务查看历史版本」「完整追溯」
+          都没形成闭环。 */}
+      <Drawer
+        title={`${year} 年度日历历史版本`}
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        width={880}
+        destroyOnHidden
+      >
+        <Space direction="vertical" size={16} style={{ width: "100%" }}>
+          <Alert
+            type="info"
+            showIcon
+            message="历史版本只读保留，不得删除或原地改回"
+            description="已发布版本被新版本取代后进入「已被替代」，历史报价仍按原版本追溯；只有草稿可以作废。"
+          />
+          <QueryState loading={calendarVersions.isLoading} error={calendarVersions.error}>
+            <Table<RentalCalendarVersionSummary>
+              rowKey="version"
+              size="small"
+              dataSource={calendarVersions.data ?? []}
+              pagination={false}
+              onRow={(row) => ({ onClick: () => setHistoryVersion(row.version) })}
+              rowClassName={(row) => (row.version === historyVersion ? "ant-table-row-selected" : "")}
+              columns={[
+                { title: "版本", dataIndex: "version", width: 90, render: (value) => `v${value}` },
+                {
+                  title: "状态",
+                  dataIndex: "status",
+                  width: 100,
+                  render: (value) => <Tag>{calendarStatusLabels[value as string] ?? value}</Tag>,
+                },
+                { title: "上一版本", dataIndex: "previousVersion", width: 100, render: (value) => (value ? `v${value}` : "—") },
+                {
+                  title: "日期/覆盖/审计",
+                  width: 130,
+                  render: (_, row) => `${row.dayCount} / ${row.overrideCount} / ${row.overrideAuditCount}`,
+                },
+                {
+                  title: "差异",
+                  width: 150,
+                  render: (_, row) =>
+                    row.publishDiffCounts
+                      ? `+${row.publishDiffCounts.added} -${row.publishDiffCounts.removed} ~${row.publishDiffCounts.changed}`
+                      : "—",
+                },
+                {
+                  title: "变更原因/发布人",
+                  render: (_, row) => (
+                    <Space direction="vertical" size={0}>
+                      <Typography.Text style={{ fontSize: 12 }}>{row.changeReason ?? "—"}</Typography.Text>
+                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                        {row.publishedBy ?? ""}
+                        {row.voidReason ? `作废：${row.voidReason}` : ""}
+                      </Typography.Text>
+                    </Space>
+                  ),
+                },
+                {
+                  title: "操作",
+                  width: 90,
+                  render: (_, row) =>
+                    canEditCalendar && row.status === "draft" ? (
+                      <Button
+                        type="link"
+                        danger
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          voidForm.resetFields();
+                          setVoidTarget(row);
+                        }}
+                      >
+                        作废
+                      </Button>
+                    ) : (
+                      <Typography.Text type="secondary">—</Typography.Text>
+                    ),
+                },
+              ]}
+            />
+          </QueryState>
+          {historyVersion && (
+            <Card
+              className="data-panel"
+              title={`v${historyVersion} 差异与覆盖审计`}
+              extra={
+                <Button size="small" onClick={() => setHistoryVersion(undefined)}>
+                  收起
+                </Button>
+              }
+            >
+              <QueryState loading={calendarVersionDetail.isLoading} error={calendarVersionDetail.error}>
+                {calendarVersionDetail.data && (
+                  <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                    <Descriptions size="small" column={2} bordered>
+                      <Descriptions.Item label="状态">
+                        {calendarStatusLabels[calendarVersionDetail.data.status] ?? calendarVersionDetail.data.status}
+                      </Descriptions.Item>
+                      <Descriptions.Item label="官方来源">
+                        {calendarVersionDetail.data.sourceName ?? "无"}
+                      </Descriptions.Item>
+                      <Descriptions.Item label="发布时间">
+                        {calendarVersionDetail.data.publishedAt
+                          ? dayjs(calendarVersionDetail.data.publishedAt).format("YYYY-MM-DD HH:mm")
+                          : "未发布"}
+                      </Descriptions.Item>
+                      <Descriptions.Item label="被替代时间">
+                        {calendarVersionDetail.data.supersededAt
+                          ? dayjs(calendarVersionDetail.data.supersededAt).format("YYYY-MM-DD HH:mm")
+                          : "—"}
+                      </Descriptions.Item>
+                    </Descriptions>
+                    {calendarVersionDetail.data.publishDiff ? (
+                      <Descriptions size="small" column={3} bordered>
+                        <Descriptions.Item label="新增日期">
+                          {calendarVersionDetail.data.publishDiff.added.join("、") || "—"}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="移除日期">
+                          {calendarVersionDetail.data.publishDiff.removed.join("、") || "—"}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="变更日期">
+                          {calendarVersionDetail.data.publishDiff.changed.join("、") || "—"}
+                        </Descriptions.Item>
+                      </Descriptions>
+                    ) : (
+                      <Typography.Text type="secondary">该版本没有相对上一版本的差异记录（首次发布或尚未发布）。</Typography.Text>
+                    )}
+                  </Space>
+                )}
+              </QueryState>
+              <QueryState loading={calendarAudits.isLoading} error={calendarAudits.error}>
+                <Table
+                  rowKey={(row) => `${row.date}-${row.action}-${row.at}`}
+                  size="small"
+                  style={{ marginTop: 12 }}
+                  dataSource={(calendarAudits.data ?? []).filter((row) => row.version === historyVersion)}
+                  pagination={{ pageSize: 8, showSizeChanger: false }}
+                  locale={{ emptyText: "该版本没有人工覆盖调整" }}
+                  columns={[
+                    { title: "日期", dataIndex: "date", width: 110 },
+                    {
+                      title: "动作",
+                      dataIndex: "action",
+                      width: 100,
+                      render: (value) => <Tag>{auditActionLabels[value as string] ?? value}</Tag>,
+                    },
+                    { title: "原因", dataIndex: "reason" },
+                    { title: "操作人", dataIndex: "operator", width: 120, render: (value) => value ?? "—" },
+                    {
+                      title: "时间",
+                      dataIndex: "at",
+                      width: 150,
+                      render: (value) => dayjs(value as string).format("YYYY-MM-DD HH:mm"),
+                    },
+                    {
+                      title: "前 → 后",
+                      render: (_, row) => (
+                        <Typography.Text style={{ fontSize: 12 }}>
+                          {row.before
+                            ? `${row.before.dayType} ×${row.before.pricingMultiplier}`
+                            : "（无）"}
+                          {" → "}
+                          {row.after ? `${row.after.dayType} ×${row.after.pricingMultiplier}` : "（无）"}
+                        </Typography.Text>
+                      ),
+                    },
+                  ]}
+                />
+              </QueryState>
+            </Card>
+          )}
+        </Space>
+      </Drawer>
+      <Modal
+        title={voidTarget ? `作废草稿 v${voidTarget.version}` : "作废草稿"}
+        open={Boolean(voidTarget)}
+        onCancel={() => setVoidTarget(undefined)}
+        onOk={() => voidForm.submit()}
+        confirmLoading={voidVersion.isPending}
+        okText="确认作废"
+        okButtonProps={{ danger: true }}
+        destroyOnHidden
+      >
+        <Form
+          form={voidForm}
+          layout="vertical"
+          onFinish={(values) =>
+            voidTarget && voidVersion.mutate({ version: voidTarget.version, reason: values.reason })
+          }
+        >
+          <Alert
+            type="warning"
+            showIcon
+            message="只有草稿可以作废"
+            description="作废后该草稿不再进入编辑视图，但记录本身保留并写入作废原因、操作人与时间；已发布版本请发布新版本替代，已被替代版本必须保留以供历史报价追溯。"
+            style={{ marginBottom: 16 }}
+          />
+          <Form.Item
+            name="reason"
+            label="作废原因"
+            rules={[{ required: true, whitespace: true, message: "请填写作废原因" }]}
+          >
+            <Input.TextArea rows={3} placeholder="例如：录错年度，弃用该草稿" />
           </Form.Item>
         </Form>
       </Modal>

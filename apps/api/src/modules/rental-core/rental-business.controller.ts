@@ -113,6 +113,16 @@ export class RentalBusinessController {
   @Get("calendars/:year") calendar(@Req() req: AuthenticatedRequest, @Param("year") year: string) { return this.business.getCalendar(req.user.tenantId, this.context(req.user.tenantId), Number(year), this.canSeeCalendarDraft(req.user)); }
   @Get("calendars/:year/versions") calendarVersions(@Req() req: AuthenticatedRequest, @Param("year") year: string) { return this.business.listCalendarVersions(req.user.tenantId, this.context(req.user.tenantId), Number(year)); }
   @Get("calendars/:year/versions/:version") calendarVersion(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Param("version") version: string) { return this.business.getCalendarVersion(req.user.tenantId, this.context(req.user.tenantId), Number(year), version); }
+  /** 发布前影响预览（需求 4.5.8）。只读推演，不改任何状态、不触碰未来订单。 */
+  @Get("calendars/:year/publish-preview") async calendarPublishPreview(@Req() req: AuthenticatedRequest, @Param("year") year: string) {
+    const orders = await this.core.listOrders(req.user.tenantId);
+    return this.business.previewCalendarPublish(
+      req.user.tenantId,
+      this.context(req.user.tenantId),
+      Number(year),
+      orders.map((order) => ({ id: order.id, orderNo: order.orderNo, status: order.status, startAt: order.startAt, endAt: order.endAt }))
+    );
+  }
   /** 覆盖审计流水（需求 4.5.3/4.5.8）。独立只追加表，不截断；可按版本过滤。 */
   @Get("calendars/:year/override-audits") calendarOverrideAudits(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Query("version") version?: string) { return this.business.listCalendarOverrideAudits(req.user.tenantId, this.context(req.user.tenantId), Number(year), version); }
   @Post("calendars/import") async importCalendar(@Req() req: AuthenticatedRequest, @Body() body: ImportRentalCalendarDto) { return this.committed(req.user.tenantId, await this.business.importOfficialCalendar(req.user.tenantId, this.context(req.user.tenantId), body)); }
