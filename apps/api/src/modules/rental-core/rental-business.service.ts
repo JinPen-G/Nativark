@@ -17,6 +17,8 @@ import {
   type RentalCalendarPublishPreviewDate,
   type RentalCalendarPublishPreviewOrder,
   type RentalCalendarVersionSummary,
+  type RentalDepositRule,
+  type RentalPreauthorizationRule,
   type RentalCalendarYear,
   type RentalCategoryDefinition,
   type RentalCouponTemplate,
@@ -116,6 +118,33 @@ const dayMs = 24 * 60 * 60 * 1000;
  * 配送可用时段与领取/归还并列声明）；早前 `hours.delivery` 声明了却没有任何路径消费它。
  */
 const DELIVERY_FULFILLMENT_MODES = new Set<string>(["delivery", "onsite_delivery"]);
+
+/**
+ * 应付押金规则：优先用显式的 `config.deposit`，缺省时由旧的 `payment.depositMode` 派生。
+ *
+ * 为什么需要派生：既有已发布规则快照里只有 `payment.depositMode`，而需求 4.4.7 要求押金与
+ * 预授权独立配置。历史订单必须继续按原快照复算，不能因为新增字段就换一套押金口径。
+ * 旧口径下 `depositMode === "preauthorization"` 表示「只冻结不收押金」，故押金为 none。
+ */
+function effectiveDepositRule(config: RentalRuleConfig): RentalDepositRule {
+  if (config.deposit) return config.deposit;
+  const mode = config.payment.depositMode;
+  if (mode === "preauthorization" || mode === "none") return { mode: "none" };
+  return { mode };
+}
+
+/**
+ * 预授权规则：优先用显式的 `config.preauthorization`，缺省时由旧口径派生。
+ *
+ * 旧口径只有 `depositMode === "preauthorization"` 才真的产出过预授权金额；
+ * `preauthorizationRequired` 在旧实现里只是个「金额必须非零」的校验位，从未单独计过额度。
+ * 因此派生时**不**据它产生预授权，否则会给存量租户凭空加一笔冻结额度——那是改写历史金额。
+ * 名实不符的明细命名问题在收费行侧单独修正。
+ */
+function effectivePreauthorizationRule(config: RentalRuleConfig): RentalPreauthorizationRule {
+  if (config.preauthorization) return config.preauthorization;
+  return config.payment.depositMode === "preauthorization" ? { mode: "fixed" } : { mode: "none" };
+}
 
 function versionAfter(current?: string) {
   if (!current) return "1.0";
@@ -485,6 +514,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     if (input.id && !existing) throw new NotFoundException("定价计划不存在");
     if (state.pricingPlans.some((plan) => plan.code === input.code.trim() && plan.id !== input.id)) throw new ConflictException("定价计划编码已存在");
     const timestamp = stamp();
+    // 需求 4.4.3/4.4.4：同一经营空间、同一商品、同一计价单位在任一时点只能有唯一生效价格。
+    // 早前只在报价阶段从多个候选里"择一"，等于把冲突留到用钱的那一刻才随机决定。
+    // 冲突必须在**保存/启用**时就拒绝——只检查 enabled 计划：草稿与停用不参与报价。
+    this.assertNoOverlappingPricingPlan(state, input, rates, existing?.id);
     const result: RentalPricingPlanV1 = {
       id: existing?.id ?? uid("pricing"), tenantId, categoryCode: context.profile.categoryCode,
       code: input.code.trim(), name: input.name.trim(), currency: "CNY", status: input.status ?? "draft",
@@ -499,6 +532,46 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
 
     if (existing) Object.assign(existing, result); else state.pricingPlans.unshift(result);
     return result;
+  }
+
+  /**
+   * 拒绝**同刻生效**的重叠价格（需求 4.4.3/4.4.4）。
+   *
+   * 判据是「同一商品 × 同一计价单位 × `effectiveFrom` 完全相同」：这种组合下"哪一版生效"
+   * 没有任何业务答案，报价只能靠排序兜底——而排序兜底正是 Codex 指出的问题根源
+   * （早前还用 `localeCompare`，"1.10" 会排在 "1.9" 之后）。同刻冲突在保存时直接 409 后，
+   * 那条兜底就不可能再被用来决定钱。
+   *
+   * **不**拒绝「生效时间不同的开口计划」：那是正常的排期调价（旧价无结束时间、新价从某日
+   * 起生效），报价按租期开始时间取生效时间最晚者，结果唯一且可解释。把它也判成重叠会让
+   * 任何一次调价都必须先手工给旧计划补结束时间。完整的不可变价格版本与「按空间×商品×
+   * 计价单位×生效区间」全面查冲突属 PRICE-03 的范围，本任务不越界实现。
+   *
+   * 只比 `enabled`：草稿与停用计划不参与报价。样例默认价格（`*_pricing_default`）是开箱
+   * 兜底、按默认单位覆盖当时全部商品，把它当成对等计划会让租户配不进任何具体价格。
+   */
+  private assertNoOverlappingPricingPlan(
+    state: RentalBusinessState,
+    input: SaveRentalPricingPlanRequest,
+    rates: RentalPricingRate[],
+    excludeId?: string
+  ) {
+    if ((input.status ?? "draft") !== "enabled") return;
+    const from = new Date(input.effectiveFrom).getTime();
+    const mine = new Set(rates.map((rate) => `${rate.itemGroupId}:${rate.unit}`));
+    for (const plan of state.pricingPlans) {
+      if (plan.id === excludeId || plan.status !== "enabled") continue;
+      if (plan.id.endsWith("_pricing_default")) continue;
+      if (new Date(plan.effectiveFrom).getTime() !== from) continue;
+      const clash = plan.rates.find((rate) => mine.has(`${rate.itemGroupId}:${rate.unit}`));
+      if (clash) {
+        throw new ConflictException(
+          `与已启用的定价计划 ${plan.code}（v${plan.version}）生效时间完全相同：` +
+            `${clash.itemGroupName ?? clash.itemGroupId} 的 ${clash.unit} 会有两个同刻生效的版本，` +
+            `报价无法确定用哪一版，请调整生效时间或停用原计划`
+        );
+      }
+    }
   }
 
   listDiscountPlans(tenantId: string, context: BusinessContext) { return this.state(tenantId, context).discountPlans; }
@@ -1852,12 +1925,17 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const candidates = plans.filter((plan) => effective(plan) && covers(plan)).sort((left, right) => {
       const byEffective = new Date(right.effectiveFrom).getTime() - new Date(left.effectiveFrom).getTime();
       if (byEffective !== 0) return byEffective;
-      const byVersion = right.version.localeCompare(left.version);
+      // 版本号必须按段取数值比较：`localeCompare` 下 "1.10" < "1.9"，第十次调价会被当成
+      // 比第九次旧的版本而落选。同刻生效时最终由 code 兜底，保证结果稳定可复算。
+      const byVersion = compareVersions(right.version, left.version);
       return byVersion !== 0 ? byVersion : left.code.localeCompare(right.code);
     });
     if (!candidates.length) {
       throw new ConflictException("当前经营空间没有覆盖所选商品、且在该租期开始时点生效的已启用定价计划");
     }
+    // 报价阶段不该在多个候选里"择一"：需求要求同一空间、同一商品、同一计价单位在任一
+    // 时点只有唯一生效价格。真正的收口是保存时就拒绝重叠（见 assertNoOverlappingPricingPlan），
+    // 这里保留确定性排序只是为了让存量重叠数据仍能得到稳定且可解释的结果。
     return candidates[0];
   }
 
@@ -1905,10 +1983,16 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const chargeLines: RentalQuoteSnapshotV1["chargeLines"] = [];
     let rentalAmount = 0;
     let depositAmount = 0;
+    let preAuthGross = 0;
     // 押金模式来自**已发布规则**而非当前设置：规则快照要随订单固化，
     // 用实时设置会让同一张报价在设置改动后复算出不同押金。
     const depositMode = rule.config.payment.depositMode;
+    // 押金与预授权**各自独立**取数（需求 4.4.7）。整组缺省时由旧的 payment.depositMode 派生，
+    // 使既有已发布规则快照继续按原口径复算——历史订单不得因新增字段换一套押金口径。
+    const depositRule = effectiveDepositRule(rule.config);
+    const preauthRule = effectivePreauthorizationRule(rule.config);
     const depositBasis: string[] = [];
+    const preAuthBasis: string[] = [];
     // 命中的费率逐条固化进报价：复算不再依赖价格计划仍以该版本存在。
     const hitRates: RentalPricingRate[] = [];
     // 逐日结构化依据（需求 4.5.6）。按「营业日期 × 商品组」聚合：
@@ -1950,35 +2034,53 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       // 计费块开始时所在的营业日期取价。日期序列由策略给出——单位语义在策略里，
       // 日历知识在服务层，两边各管一段。
       const holidayPricing = context.settings.pricing.holidayPricingEnabled && calendars.length > 0;
-      const unitDates = pricingStrategy.billableUnitDates(input.startAt, units, pricingContext);
+      const unitDates = pricingStrategy.billableUnitDates(input.startAt, input.endAt, units, pricingContext);
       const unitFactors = unitDates.map((date) => this.dateMultiplier(calendars, date, rate));
       const unitMultipliers = holidayPricing ? unitFactors.map((item) => item.value) : undefined;
       // 停业日必须拦住：即使关掉了节假日定价，停业日也不能接单。
       if (!holidayPricing) for (const date of unitDates) this.dateMultiplier(calendars, date, rate);
       // 顺序按需求 4.4.5：阶梯单价 → 逐单位日期价格 → 单件封顶 → 乘商品数量。
-      const amount = roundMoney(pricingStrategy.amountPerItem(rate, units, unitMultipliers) * line.quantity);
+      // 金额、说明与日历快照都消费**同一份** breakdown：早前快照里的单位价用
+      // `amountPerItem(rate, 1, [1])` 现算，等于按 1 个单位选阶梯档，租 7 天命中 80 元档时
+      // 快照仍记基础价 100，无法据快照复算。
+      const breakdown = pricingStrategy.priceBreakdown(rate, units, unitMultipliers);
+      const amount = roundMoney(breakdown.amount * line.quantity);
       rentalAmount += amount;
       // 拷贝而非引用：当前没有任何路径会就地改这些费率对象（savePricingPlan 是重建数组），
       // 因此**变异测试证明不了**这行的必要性——它是廉价的防御，防的是将来出现就地修改。
       // 真正让历史报价可复算的是"报价自带费率快照"这件事本身，那一条有断言覆盖。
       hitRates.push(structuredClone(rate));
-      // 押金按规则的模式取数（需求 4.4「固定押金、租金倍数押金、预授权或免押」）。
-      // `price_multiple` 此前枚举、DTO 与管理端都有、服务层却无任何消费者——
-      // 选它等于选 `fixed`，是个只在界面上存在的选项。倍数按**行租金**乘，
-      // 而不是整单租金再分摊，这样每行押金与该行租金一一对应、可逐行解释。
-      depositAmount +=
-        depositMode === "price_multiple" ? amount * (rate.depositMultiple ?? 0) : rate.depositAmount * line.quantity;
-      depositBasis.push(
-        depositMode === "price_multiple"
-          ? `${group.name} 租金 ${amount} × ${rate.depositMultiple ?? 0} 倍`
-          : `${group.name} 固定 ${rate.depositAmount} × ${line.quantity}`
-      );
+      // 押金与预授权按各自规则独立取数（需求 4.4.7），两者可同时非零。
+      // 倍数按**行租金**乘而不是整单租金再分摊，这样每行金额与该行租金一一对应、可逐行解释。
+      if (depositRule.mode !== "none") {
+        depositAmount +=
+          depositRule.mode === "price_multiple"
+            ? amount * (rate.depositMultiple ?? 0)
+            : rate.depositAmount * line.quantity;
+        depositBasis.push(
+          depositRule.mode === "price_multiple"
+            ? `${group.name} 租金 ${amount} × ${rate.depositMultiple ?? 0} 倍`
+            : `${group.name} 固定 ${rate.depositAmount} × ${line.quantity}`
+        );
+      }
+      if (preauthRule.mode !== "none") {
+        // 预授权取数优先用费率的预授权字段；缺省回落到押金字段（存量费率行只配了押金）。
+        const preAuthUnit = rate.preAuthAmount ?? rate.depositAmount;
+        const preAuthMultiple = rate.preAuthMultiple ?? rate.depositMultiple ?? 0;
+        preAuthGross +=
+          preauthRule.mode === "price_multiple" ? amount * preAuthMultiple : preAuthUnit * line.quantity;
+        preAuthBasis.push(
+          preauthRule.mode === "price_multiple"
+            ? `${group.name} 租金 ${amount} × ${preAuthMultiple} 倍`
+            : `${group.name} 固定 ${preAuthUnit} × ${line.quantity}`
+        );
+      }
       // 计算说明必须能复算：单价来源（基础价/阶梯档/封顶）、单位数、起租量是否生效、
       // 日历系数与逐日类型、数量，缺一项客服就无法向客户解释这笔钱是怎么来的（验收：可解释来源）。
       // 需求 4.4.5：说明必须展示原始单位数、进位与最低起租、阶梯档位、
       // 各日期或计费块价格、封顶前后金额和商品数量，使运营能据快照复算。
       // 同一日期可能承载多个计费块（小时粒度），因此先按日期聚合单位数再落快照。
-      const unitAmountForLine = pricingStrategy.amountPerItem(rate, 1, [1]);
+      const unitAmountForLine = breakdown.unitAmount;
       const perDate = new Map<string, { count: number; factor: (typeof unitFactors)[number] }>();
       unitDates.slice(0, units).forEach((date, index) => {
         const existing = perDate.get(date);
@@ -2024,23 +2126,16 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     // 押金与预授权额度独立计算（需求 4.4「同时独立计算：应付押金；预授权金额」）。
     //
     // 先算出「保证金基数」，再按模式决定它是**实收押金**还是**冻结额度**：
-    // 预授权时钱没有收，押金必须是 0，否则财务口径上会凭空多出一笔实收。
-    // 早前二者共用一个字段、只把明细行改个名，于是"实收 500"与"冻结 500"
-    // 在数据上无法区分，对账、退款与风控都读不出真实资金状态。
-    const securityBase = depositMode === "none" ? 0 : roundMoney(depositAmount);
-    // 只由 depositMode 决定「冻结还是实收」。
-    //
-    // 不能把 `preauthorizationRequired` 也当成模式开关：需求 4.4 把押金列为
-    // 「固定押金、租金倍数押金、预授权或免押」**四种互斥模式**，而
-    // `preauthorizationRequired` 在原实现里一直只是个校验位（要求金额非零）。
-    // 把它并进模式判定会让「固定押金 + 要求预授权」的租户押金凭空变成 0——
-    // 实测就是这样：工程品类正是该组合，固定押金 200 被算成 0。
-    const freezeInsteadOfCollect = depositMode === "preauthorization";
-    depositAmount = freezeInsteadOfCollect ? 0 : securityBase;
-    const preAuthAmount = freezeInsteadOfCollect ? securityBase : 0;
-    // 判据必须是保证金基数而不是 depositAmount：预授权时押金已被置 0，
-    // 沿用旧判据会让每一次预授权报价都误报"未配置额度"。
-    if ((freezeInsteadOfCollect || rule.config.payment.preauthorizationRequired) && securityBase <= 0) {
+    // 押金与预授权是两笔**独立**的钱（需求 4.4.7）：可以只收押金、只冻结额度，
+    // 也可以两者同时存在。早前用一个 `depositMode` 在二者间切换，表达不了「收 500 押金
+    // 并冻结 2000 额度」；而 `fixed + preauthorizationRequired=true` 时金额进了押金与实收、
+    // preAuthAmount 为 0，明细却叫「预授权额度」——名实不符。
+    depositAmount = depositRule.mode === "none" ? 0 : roundMoney(depositAmount);
+    if (depositRule.maxAmount !== undefined) depositAmount = Math.min(depositAmount, depositRule.maxAmount);
+    let preAuthAmount = preauthRule.mode === "none" ? 0 : roundMoney(preAuthGross);
+    if (preauthRule.maxAmount !== undefined) preAuthAmount = Math.min(preAuthAmount, preauthRule.maxAmount);
+    // 要求预授权却取不到额度必须报错，否则会产出一张「声称要冻结却冻结 0」的报价。
+    if (preauthRule.mode !== "none" && preAuthAmount <= 0) {
       throw new ConflictException("当前规则要求预授权，但所选商品未配置预授权额度");
     }
     const quotedDayTypes = new Set(this.dayTypesForRange(calendars, input.startAt, input.endAt, quoteTimeZone));
@@ -2112,26 +2207,22 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         amount: preAuthAmount,
         sourceId: rule.id,
         sourceVersion: rule.version,
-        detail: `冻结额度（不计入应付）：${depositBasis.join("、")}`
+        // 说明用**预授权自己的**取数依据，而不是押金的：两者独立取数，可能不是同一个数。
+        detail: `冻结额度（不计入应付）：${(preAuthBasis.length ? preAuthBasis : depositBasis).join("、")}`
       });
     }
     if (depositAmount > 0) {
-      // 预授权与固定押金取同一个来源（rate.depositAmount），但语义不同：
-      // 一个是冻结额度、一个是实收押金，标签必须能区分，否则明细读起来是错的。
-      const modeLabel =
-        depositMode === "price_multiple"
-          ? "租金倍数押金"
-          : depositMode === "preauthorization"
-            ? "预授权额度（按固定额）"
-            : "固定押金";
+      // 名称与说明必须跟着**实际入账的桶**走：这一行是实收押金，名字不能叫「预授权额度」。
+      // 早前按 `preauthorizationRequired` 命名，于是「固定押金 + 要求预授权」时
+      // 金额进了押金与本次实收，明细却显示「预授权额度」，名实不符。
       chargeLines.push({
         code: "deposit",
-        name: rule.config.payment.preauthorizationRequired ? "预授权额度" : "押金",
+        name: "押金",
         type: "deposit",
         amount: depositAmount,
         sourceId: rule.id,
         sourceVersion: rule.version,
-        detail: `${modeLabel}：${depositBasis.join("、")}`
+        detail: `${depositRule.mode === "price_multiple" ? "租金倍数押金" : "固定押金"}：${depositBasis.join("、")}`
       });
     }
     const timestamp = stamp();

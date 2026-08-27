@@ -576,6 +576,90 @@ async function main() {
   );
   ok("旧通知数据经升级完整保留并正确映射（tenantId/orderNo/event/截断规则）");
 
+  console.log("== 5b. 旧库存量押金/预授权混口径必须被重新分类，不得错算进本次实收 ==");
+  // Codex 复审 P1：`add_quote_receivable_amount` 无条件把 receivable 算成 payable + deposit，
+  // 而紧随其后的 `split_deposit_and_preauth` 自己承认存量 depositAmount 里可能装的是预授权额度。
+  // 于是旧库里的预授权报价升级后被解释成「已收押金」。纠正迁移按规则快照重新分类。
+  //
+  // 造三条存量报价：①预授权口径 ②固定押金口径 ③规则快照缺 depositMode（无法判定）。
+  // 手工插入以模拟"升级前就存在"的行：把三列改回旧口径（preAuthAmount=0、金额都在 depositAmount）。
+  const legacyQuoteBase = {
+    tenantId: sampleTenantId,
+    payable: 1000,
+    deposit: 500
+  };
+  const legacyWorkspaceId = readScalar(
+    `SELECT \`id\` FROM \`business_workspaces\` WHERE \`tenantId\`='${legacyQuoteBase.tenantId}' ORDER BY \`createdAt\` LIMIT 1;`
+  );
+  const legacyRows = [
+    { id: "e2e_legacy_q_preauth", mode: "preauthorization" },
+    { id: "e2e_legacy_q_fixed", mode: "fixed" },
+    { id: "e2e_legacy_q_unknown", mode: null }
+  ];
+  for (const row of legacyRows) {
+    const ruleSnapshot = row.mode
+      ? `JSON_OBJECT('payment', JSON_OBJECT('depositMode', '${row.mode}', 'timing', 'order', 'preauthorizationRequired', false, 'unpaidHoldMinutes', 15))`
+      : `JSON_OBJECT('payment', JSON_OBJECT('timing', 'order'))`;
+    mysqlQuery(`
+      INSERT INTO \`rental_quotes\`
+        (\`id\`, \`tenantId\`, \`workspaceId\`, \`quoteNo\`, \`categoryCode\`, \`request\`, \`chargeLines\`,
+         \`rentalAmount\`, \`discountAmount\`, \`couponAmount\`, \`serviceAmount\`, \`fulfillmentAmount\`,
+         \`depositAmount\`, \`preAuthAmount\`, \`payableAmount\`, \`receivableAmount\`,
+         \`pricingPlanVersion\`, \`ruleVersion\`, \`ruleSnapshot\`, \`appliedDiscountPlanIds\`, \`expiresAt\`, \`createdAt\`)
+      VALUES
+        ('${row.id}', '${legacyQuoteBase.tenantId}', '${legacyWorkspaceId}', '${row.id}', 'VEHICLE',
+         JSON_OBJECT(), JSON_ARRAY(), ${legacyQuoteBase.payable}, 0, 0, 0, 0,
+         ${legacyQuoteBase.deposit}, 0, ${legacyQuoteBase.payable}, ${legacyQuoteBase.payable + legacyQuoteBase.deposit},
+         '1.0', '1.0', ${ruleSnapshot}, JSON_ARRAY(), NOW(3), NOW(3));
+    `);
+  }
+  // 回退纠正迁移，再重新 deploy —— 证明是**迁移**做的分类，而不是插入时就写对了。
+  mysqlQuery("DELETE FROM `_prisma_migrations` WHERE `migration_name` = '20260827000900_fix_legacy_deposit_preauth_receivable';");
+  mysqlQuery(`
+    ALTER TABLE \`rental_quotes\` DROP COLUMN \`legacyDepositUnverified\`;
+    ALTER TABLE \`rental_orders\` DROP COLUMN \`legacyDepositUnverified\`;
+  `);
+  const reclassifyDeploy = deploy();
+  if (reclassifyDeploy.status !== 0) {
+    fail("纠正迁移重放失败", `${reclassifyDeploy.stdout || ""}${reclassifyDeploy.stderr || ""}`.slice(-2000));
+  }
+  // ①预授权口径：金额搬到 preAuthAmount，押金归 0，实收回落为应付（冻结不是实收）。
+  const preauthRow = readRow(
+    "SELECT `depositAmount`, `preAuthAmount`, `receivableAmount`, `legacyDepositUnverified` FROM `rental_quotes` WHERE `id`='e2e_legacy_q_preauth';"
+  );
+  assert.equal(Number(preauthRow.depositAmount), 0, `预授权口径的存量押金必须归 0: ${preauthRow.depositAmount}`);
+  assert.equal(Number(preauthRow.preAuthAmount), legacyQuoteBase.deposit, `金额必须搬到预授权额度: ${preauthRow.preAuthAmount}`);
+  assert.equal(Number(preauthRow.receivableAmount), legacyQuoteBase.payable, `预授权额度不得计入本次实收: ${preauthRow.receivableAmount}`);
+  assert.equal(Number(preauthRow.legacyDepositUnverified), 0, "口径明确的记录不应被标为待确认");
+  // ②固定押金口径：原值本就正确，不得被改动。
+  const fixedRow = readRow(
+    "SELECT `depositAmount`, `preAuthAmount`, `receivableAmount`, `legacyDepositUnverified` FROM `rental_quotes` WHERE `id`='e2e_legacy_q_fixed';"
+  );
+  assert.equal(Number(fixedRow.depositAmount), legacyQuoteBase.deposit, `固定押金口径的押金不得被搬走: ${fixedRow.depositAmount}`);
+  assert.equal(Number(fixedRow.preAuthAmount), 0, `固定押金口径不得凭空产生预授权额度: ${fixedRow.preAuthAmount}`);
+  assert.equal(
+    Number(fixedRow.receivableAmount),
+    legacyQuoteBase.payable + legacyQuoteBase.deposit,
+    `固定押金仍应计入本次实收: ${fixedRow.receivableAmount}`
+  );
+  assert.equal(Number(fixedRow.legacyDepositUnverified), 0, "固定押金口径不应被标为待确认");
+  // ③无法判定：标记待确认，且该笔不得计入实收。
+  const unknownRow = readRow(
+    "SELECT `depositAmount`, `preAuthAmount`, `receivableAmount`, `legacyDepositUnverified` FROM `rental_quotes` WHERE `id`='e2e_legacy_q_unknown';"
+  );
+  assert.equal(Number(unknownRow.legacyDepositUnverified), 1, `无法判定归属的记录必须标为待确认: ${unknownRow.legacyDepositUnverified}`);
+  assert.equal(
+    Number(unknownRow.receivableAmount),
+    legacyQuoteBase.payable,
+    `归属未确认的金额不得擅自算进本次实收: ${unknownRow.receivableAmount}`
+  );
+  assert.equal(Number(unknownRow.depositAmount), legacyQuoteBase.deposit, "待确认记录的原始金额必须原样保留供人工核对");
+  // 清掉这三条人造存量行：它们会让该经营空间的业务配置快照变成"非空"，
+  // 启动时就不再生成样例默认价格，后续第 9 节的报价会因"没有可用定价计划"而失败。
+  // 断言已全部完成，删除不影响本节结论。
+  mysqlQuery("DELETE FROM `rental_quotes` WHERE `id` IN ('e2e_legacy_q_preauth','e2e_legacy_q_fixed','e2e_legacy_q_unknown');");
+  ok("旧库存量押金/预授权混口径经纠正迁移重新分类：预授权搬到额度且不计实收、固定押金原样计实收、无法判定者标记待确认并从实收剔除");
+
   console.log("== 6. 仓储层 fail-closed（无租户身份必须拒绝） ==");
   require("ts-node").register({
     transpileOnly: true,
@@ -1705,6 +1789,26 @@ async function main() {
   assert.match(capLine.detail, /10 calendar_day/, `说明应指明单位数: ${capLine.detail}`);
   assert.equal(capLine.sourceVersion, pricePlan.body.data.version, "明细必须带价格计划版本，否则无从复算");
 
+  // 4b) Codex 复审 P1：日历快照里的**实际单位价**必须是按总单位数选出的阶梯档单价，
+  //     而不是按「1 个单位」现算的基础价。早前 unitAmount 用 amountPerItem(rate, 1, [1])
+  //     现算，租 4 天命中 90 元档时快照仍记 100，据快照复算不出报价金额。
+  const tierSnapshot = tierHit.calendarSnapshot ?? [];
+  assert.ok(tierSnapshot.length > 0, "阶梯报价必须带逐日快照");
+  for (const day of tierSnapshot) {
+    assert.equal(day.unitAmount, 90, `快照单位价必须是命中的阶梯档 90（不是基础价 100）: ${day.unitAmount} @ ${day.date}`);
+  }
+  // 快照必须能复算：Σ(unitCount × unitAmount × multiplier) = 租金（本例无节假日系数，故为 4×90）。
+  const tierSnapshotTotal = tierSnapshot.reduce((sum, day) => sum + day.unitCount * day.unitAmount * day.multiplier, 0);
+  assert.equal(tierSnapshotTotal, 360, `按快照复算应等于租金 360：实际 ${tierSnapshotTotal}`);
+  // 封顶用例：快照记的是封顶**前**的逐日单价（70），封顶是行级结果，两者都要能读出来。
+  const capSnapshot = capHit.calendarSnapshot ?? [];
+  assert.ok(capSnapshot.every((day) => day.unitAmount === 70), `封顶用例的快照单位价应为阶梯档 70: ${JSON.stringify(capSnapshot.map((d) => d.unitAmount))}`);
+  assert.equal(
+    capSnapshot.reduce((sum, day) => sum + day.unitCount * day.unitAmount * day.multiplier, 0),
+    700,
+    "封顶前的逐日合计应为 700，封顶后的 600 由行金额体现"
+  );
+
   // 5) 相同输入必须复算出相同结果——这是可复算的直接证据。
   const priceReplay = await priceQuoteFor("2027-03-02T09:00:00+08:00", "2027-03-11T09:00:00+08:00");
   assert.equal(priceReplay.rentalAmount, capHit.rentalAmount, "相同输入必须算出相同租金");
@@ -1883,7 +1987,9 @@ async function main() {
       changeReason: "PRICE-01 有效期验收",
       status: "enabled",
       effectiveFrom: new Date(Date.now() - 30 * 86400000).toISOString(),
-      effectiveTo: new Date(Date.now() - 86400000).toISOString(),
+      // 结束时间必须**严格早于**上面 E2E-PRICE-TIER 的生效时间（now-1d）：两者若首尾相接到
+      // 同一毫秒级别就会被「同商品同单位不得重叠」判为重叠。过期留档计划本就该在现行计划开始前结束。
+      effectiveTo: new Date(Date.now() - 3 * 86400000).toISOString(),
       rates: [
         {
           itemGroupId: priceGroupId,
@@ -2204,6 +2310,99 @@ async function main() {
     "租金倍数押金已生效：固定 200 / 倍数 300 可区分，押金明细讲清取数方式，倍数落库；" +
       "押金与预授权额度已分开存：预授权时押金 0 / 额度 200，二者都不进应付，均落库"
   );
+
+  console.log("== 15d2. PRICE-01 押金与预授权独立配置：四种组合（Codex 复审 P1） ==");
+  // 需求 4.4.7 要求押金与预授权**独立配置、独立计算**，并允许同一订单同时存在。
+  // 旧口径用一个 depositMode 二选一，表达不了「收 500 押金 + 冻结 2000 额度」；
+  // 而 `fixed + preauthorizationRequired=true` 时金额进了押金与实收、preAuthAmount 为 0，
+  // 明细却叫「预授权额度」——名实不符。现在用 deposit / preauthorization 两组独立表达。
+  const publishRules = (deposit, preauthorization, reason) =>
+    request(
+      "POST",
+      "/api/rental/v1/rule-versions",
+      {
+        changeReason: reason,
+        publish: true,
+        config: { ...depositRule.config, deposit, preauthorization }
+      },
+      construction.accessToken
+    );
+  // 费率：固定押金 200、预授权固定额 500（刻意与押金不同，两个数必须能各自取到）。
+  const dpPlan = await request(
+    "POST",
+    "/api/rental/v1/pricing-plans",
+    {
+      code: "E2E-DEPOSIT-PREAUTH",
+      name: "E2E 押金与预授权",
+      changeReason: "PRICE-01 押金预授权独立验收",
+      status: "enabled",
+      effectiveFrom: new Date(Date.now() - 7200000).toISOString(),
+      rates: [
+        {
+          itemGroupId: priceGroupId, unit: "calendar_day", baseAmount: 100,
+          weekendMultiplier: 1, holidayMultiplier: 1, minimumUnits: 1,
+          depositAmount: 200, preAuthAmount: 500
+        }
+      ]
+    },
+    construction.accessToken
+  );
+  assert.equal(dpPlan.status, 201, `押金预授权计划失败: ${JSON.stringify(dpPlan.body).slice(0, 250)}`);
+  const dpQuote = async () => {
+    const res = await request("POST", "/api/rental/v1/quotes", {
+      customerType: "corporate", fulfillmentMode: "warehouse_pickup_return",
+      fulfillmentLocationId: constructionLocation.id,
+      startAt: "2027-04-06T09:00:00+08:00", endAt: "2027-04-08T09:00:00+08:00",
+      pricingPlanId: dpPlan.body.data.id, lines: [{ itemGroupId: priceGroupId, quantity: 1 }]
+    }, construction.accessToken);
+    assert.equal(res.status, 201, `押金预授权报价失败: ${JSON.stringify(res.body).slice(0, 250)}`);
+    return res.body.data;
+  };
+  // ① 都不需要：两笔都是 0，且不产生任何押金/预授权明细行。
+  assert.equal((await publishRules({ mode: "none" }, { mode: "none" }, "都不需要")).status, 201, "发布「都不需要」失败");
+  const dpNone = await dpQuote();
+  assert.equal(dpNone.depositAmount, 0, `都不需要时押金应为 0: ${dpNone.depositAmount}`);
+  assert.equal(dpNone.preAuthAmount, 0, `都不需要时预授权应为 0: ${dpNone.preAuthAmount}`);
+  assert.equal(dpNone.chargeLines.filter((r) => r.type === "deposit" || r.type === "preauthorization").length, 0, "都不需要时不应有押金或预授权明细");
+  assert.equal(dpNone.receivableAmount, dpNone.payableAmount, "本次实收 = 应付 + 押金，押金 0 时应等于应付");
+  // ② 仅押金：押金 200 进实收，预授权 0，明细名必须是「押金」。
+  assert.equal((await publishRules({ mode: "fixed" }, { mode: "none" }, "仅押金")).status, 201, "发布「仅押金」失败");
+  const dpDeposit = await dpQuote();
+  assert.equal(dpDeposit.depositAmount, 200, `仅押金时押金应为 200: ${dpDeposit.depositAmount}`);
+  assert.equal(dpDeposit.preAuthAmount, 0, `仅押金时预授权必须为 0: ${dpDeposit.preAuthAmount}`);
+  assert.equal(dpDeposit.receivableAmount, dpDeposit.payableAmount + 200, `本次实收应为应付 + 押金: ${dpDeposit.receivableAmount}`);
+  assert.equal(dpDeposit.chargeLines.find((r) => r.type === "deposit")?.name, "押金", "实收押金的明细名不得叫「预授权额度」");
+  // ③ 仅预授权：冻结 500（取 preAuthAmount 而不是 depositAmount），押金 0，不进实收。
+  assert.equal((await publishRules({ mode: "none" }, { mode: "fixed" }, "仅预授权")).status, 201, "发布「仅预授权」失败");
+  const dpPreauth = await dpQuote();
+  assert.equal(dpPreauth.depositAmount, 0, `仅预授权时押金必须为 0: ${dpPreauth.depositAmount}`);
+  assert.equal(dpPreauth.preAuthAmount, 500, `预授权应取费率的 preAuthAmount 500（不是押金 200）: ${dpPreauth.preAuthAmount}`);
+  assert.equal(dpPreauth.receivableAmount, dpPreauth.payableAmount, "预授权永远不进本次实收");
+  // ④ 两者同时存在——旧的二选一模型根本表达不了这种组合。
+  assert.equal((await publishRules({ mode: "fixed" }, { mode: "fixed" }, "押金与预授权同时")).status, 201, "发布「两者同时」失败");
+  const dpBoth = await dpQuote();
+  assert.equal(dpBoth.depositAmount, 200, `同时存在时押金应为 200: ${dpBoth.depositAmount}`);
+  assert.equal(dpBoth.preAuthAmount, 500, `同时存在时预授权应为 500: ${dpBoth.preAuthAmount}`);
+  assert.equal(dpBoth.receivableAmount, dpBoth.payableAmount + 200, `实收只含押金不含预授权: ${dpBoth.receivableAmount}`);
+  assert.equal(dpBoth.chargeLines.filter((r) => r.type === "deposit").length, 1, "应有一条押金明细");
+  assert.equal(dpBoth.chargeLines.filter((r) => r.type === "preauthorization").length, 1, "应有一条预授权明细");
+  assert.equal(
+    Number(readScalar(`SELECT \`depositAmount\` FROM \`rental_quotes\` WHERE \`id\`='${dpBoth.id}';`)),
+    200,
+    "同时存在时押金必须落库"
+  );
+  assert.equal(
+    Number(readScalar(`SELECT \`preAuthAmount\` FROM \`rental_quotes\` WHERE \`id\`='${dpBoth.id}';`)),
+    500,
+    "同时存在时预授权必须落库"
+  );
+  // 还原：回到夹具原始规则，避免污染后续用例。
+  assert.equal(
+    (await request("POST", "/api/rental/v1/rule-versions", { changeReason: "还原押金规则", publish: true, config: depositRule.config }, construction.accessToken)).status,
+    201,
+    "还原原始规则失败"
+  );
+  ok("押金与预授权独立配置：四种组合（都不需要/仅押金/仅预授权/两者同时）各自取数正确，预授权取 preAuthAmount 且永不进本次实收，实收恒为应付+押金，两笔金额分别落库，实收押金明细不再被误名为「预授权额度」");
 
   console.log("== 15e. PRICE-01 履约费用与异地归还附加费 ==");
   // 需求 4.4 的应付公式里「履约费用」是与增值服务并列的独立一项，此前既无字段也无

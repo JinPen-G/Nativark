@@ -191,4 +191,3 @@ export function businessTimeOfDay(iso: string, timeZone: string): string {
   const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "00";
   return `${get("hour")}:${get("minute")}`;
 }
-

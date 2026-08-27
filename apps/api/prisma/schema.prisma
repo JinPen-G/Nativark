@@ -2434,8 +2434,10 @@ model RentalOrder {
   /// 履约费用合计。与报价同口径，便于订单侧逐项对账。
   fulfillmentAmount     Decimal                   @default(0) @db.Decimal(12, 2)
   depositAmount         Decimal                   @db.Decimal(12, 2)
-  /// 预授权额度。与 depositAmount 互斥。
+  /// 预授权额度。需求 4.4.7 起与 depositAmount 独立，可同时非零。
   preAuthAmount         Decimal                   @default(0) @db.Decimal(12, 2)
+  /// 同 rental_quotes.legacyDepositUnverified：存量混口径且无法可靠判定归属的订单标记。
+  legacyDepositUnverified Boolean                 @default(false)
   payableAmount         Decimal                   @db.Decimal(12, 2)
   adjustmentAmount      Decimal                   @db.Decimal(12, 2)
   finalPayableAmount    Decimal                   @db.Decimal(12, 2)
@@ -2964,11 +2966,15 @@ model RentalQuote {
   /// 履约费用合计（需求 4.4 公式的独立一项）。存量报价按 0 回填。
   fulfillmentAmount      Decimal            @default(0) @db.Decimal(12, 2)
   depositAmount          Decimal            @db.Decimal(12, 2)
-  /// 预授权额度。与 depositAmount 互斥：预授权模式下押金为 0，钱是冻结的没有收。
+  /// 预授权额度。需求 4.4.7 起与 depositAmount **独立**，可同时非零（收押金且冻结额度）。
   preAuthAmount          Decimal            @default(0) @db.Decimal(12, 2)
   payableAmount          Decimal            @db.Decimal(12, 2)
-  /// 本次实收 = 租赁应付 + 应付押金（需求 4.4.1）。迁移里按既有字段补算，不留 0。
+  /// 本次实收 = 租赁应付 + 应付押金（需求 4.4.1）。预授权额度不计入。
   receivableAmount       Decimal            @default(0) @db.Decimal(12, 2)
+  /// 存量「押金/预授权混在 depositAmount」的记录中，无法从规则快照可靠判定归属的那些。
+  /// 只由纠正迁移置位、应用写入不碰它：金额归属未确认前，该笔不得计入 receivableAmount，
+  /// 需要财务人工确认后再定性。为 false 表示归属已明确（或本就是新口径记录）。
+  legacyDepositUnverified Boolean           @default(false)
   pricingPlanVersion     String
   /// RentalPricingRate[]：本次报价实际命中的费率，使复算不依赖计划仍以该版本存在。
   /// 存量报价按空数组回填——它们当时确实没有保存费率，空数组是如实记录而非猜测。

@@ -49,12 +49,39 @@ export interface RentalPricingStrategy {
    * 自然日与夜按每个计费日期取价；小时、班次、24 小时、周、30 日月按**每个计费块
    * 开始时所在的营业日期**取价。使用量与整包没有逐单位日期，返回单元素或空数组。
    * 逐单位取价替代了早前的"整段平均倍率"——需求 4.4.5 明确禁止用平均代替。
+   *
+   * 必须同时收 `endAt`：单位数量与取价时点要来自**同一组计费块**。班次配了边界时数量按
+   * 「跨过几个班次窗口」计，若这里再按固定 `shiftHours` 从租期开始时刻推算，两套算法就会
+   * 分叉——非等长班次（如边界 [0,6,18]）下取价日期会整体偏移，跨平假日直接算错钱。
    */
-  billableUnitDates(startAt: string, units: number, ctx?: RentalPricingContext): string[];
+  billableUnitDates(startAt: string, endAt: string, units: number, ctx?: RentalPricingContext): string[];
   /** `unitMultipliers[i]` 为第 i 个单位的日期价格系数，缺省视为 1。 */
   amountPerItem(rate: RentalPricingRate, units: number, unitMultipliers?: number[]): number;
+  /**
+   * 单件租金的**结构化**结果，供金额、计算说明与日历快照消费同一份计算。
+   *
+   * 早前三处各算一遍：快照里的单价用 `amountPerItem(rate, 1, [1])` 现算，等于按「1 个单位」
+   * 选阶梯档——租 7 天命中 80 元档时快照仍记基础价 100，快照无法复算报价。
+   */
+  priceBreakdown(rate: RentalPricingRate, units: number, unitMultipliers?: number[]): RentalPriceBreakdown;
   /** 行金额的推导说明，进入报价明细的"计算说明"。验收要求"相同输入可复算并解释来源"。 */
   explain(rate: RentalPricingRate, units: number, unitMultipliers?: number[]): string;
+}
+
+/** 单件租金的结构化推导结果（需求 4.4.5：报价、说明与快照必须能复算同一笔钱）。 */
+export interface RentalPriceBreakdown {
+  /** 计费单位数（已含最低起租量兜底）。 */
+  units: number;
+  /** 实际采用的单位价：命中阶梯档时是该档单价，否则是基础价。 */
+  unitAmount: number;
+  /** 命中的阶梯档起始单位数；未命中阶梯时为 undefined。 */
+  tierMinUnits?: number;
+  /** 封顶前的原始金额（单价 × 逐单位系数之和）。 */
+  grossAmount: number;
+  /** 封顶后的单件金额；未配置封顶时等于 grossAmount。 */
+  amount: number;
+  /** 是否被封顶截断。 */
+  capped: boolean;
 }
 
 const durationHours = (startAt: string, endAt: string) =>
@@ -103,8 +130,30 @@ function grossForUnits(rate: RentalPricingRate, units: number, unitMultipliers?:
   return money(total);
 }
 
-function describeLine(rate: RentalPricingRate, units: number, gross: number, unitMultipliers?: number[]) {
+/**
+ * 单件租金的结构化推导：金额、说明与日历快照都从这里取，避免三处各算一遍。
+ * 快照里的「实际单位价」必须按**总单位数**选阶梯档，按 1 个单位现算会记成基础价。
+ */
+function breakdownFor(
+  rate: RentalPricingRate,
+  units: number,
+  unitMultipliers?: number[]
+): RentalPriceBreakdown {
   const tier = tierFor(rate, units);
+  const unitAmount = tier?.unitAmount ?? rate.baseAmount;
+  const grossAmount = grossForUnits(rate, units, unitMultipliers);
+  const amount = applyCap(rate, grossAmount);
+  return {
+    units,
+    unitAmount,
+    tierMinUnits: tier?.minUnits,
+    grossAmount,
+    amount,
+    capped: amount < grossAmount
+  };
+}
+
+function describeLine(rate: RentalPricingRate, units: number, gross: number, unitMultipliers?: number[]) {  const tier = tierFor(rate, units);
   const parts = [
     tier
       ? `阶梯价 ${tier.unitAmount}/${rate.unit}（满 ${tier.minUnits} ${rate.unit}）× ${units}`
@@ -143,37 +192,42 @@ const blockHours = (unit: RentalPricingUnit, fixedHours: number, ctx?: RentalPri
  *
  * 边界按**营业时区**的当地小时解释，与自然日、日历同一日界口径。
  */
-function shiftWindowsSpanned(startAt: string, endAt: string, ctx: RentalPricingContext) {
+/**
+ * 被租期跨过的班次窗口的**起始时点**（毫秒）。
+ *
+ * 单位数量与取价时点都从这一组时点派生，避免两套算法分叉：非等长班次（如边界
+ * [0,6,18] 的 6/12/6 小时三班）下，按固定 `shiftHours` 从租期开始时刻推算会让取价日期
+ * 整体偏移——17:00 起租跨 4 个班次时，真实块起点是 28 日 06:00、28 日 18:00、
+ * 29 日 00:00、29 日 06:00，而固定 8 小时推算会得出 28、29、29、29。
+ */
+function shiftWindowStarts(startAt: string, endAt: string, ctx: RentalPricingContext): number[] {
   const timeZone = ctx.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE;
   const start = new Date(startAt).getTime();
   const end = new Date(endAt).getTime();
-  if (end <= start) return 0;
+  if (end <= start) return [];
   // 去重并排序：配置是人填的，不能要求它有序或不重复。
   const bounds = [...new Set(ctx.shiftStartHours ?? [])]
     .filter((hour) => Number.isFinite(hour) && hour >= 0 && hour < 24)
     .sort((left, right) => left - right);
-  if (!bounds.length) return Math.ceil(durationHours(startAt, endAt) / (ctx.shiftHours ?? 8));
+  if (!bounds.length) return [];
 
-  // 逐营业日枚举该日的班次起点，落在 [start, end) 内的窗口即被跨过。
-  // 起租时刻本身所在的窗口一定算一个，因此从"起租时刻之前最近的边界"开始计。
-  let count = 0;
+  // 逐营业日枚举该日的班次起点，与 [start, end) 半开相交的窗口即被跨过。
+  // 起租时刻本身所在的窗口一定算一个，因此从"起租日的前一天"开始枚举。
+  const starts: number[] = [];
   const firstDay = businessDayIndex(startAt, timeZone);
   const lastDay = businessDayIndex(new Date(end - 1).toISOString(), timeZone);
   for (let day = firstDay - 1; day <= lastDay; day += 1) {
     const dateKey = businessDateKeyFromIndex(day);
-    for (const hour of bounds) {
-      // 用带偏移的字面量构造该营业日当地时刻，避免再手工换算偏移。
-      const windowStart = businessInstantAt(dateKey, hour, timeZone);
-      const nextIndex = bounds.indexOf(hour) + 1;
+    for (let index = 0; index < bounds.length; index += 1) {
+      const windowStart = businessInstantAt(dateKey, bounds[index], timeZone);
       const windowEnd =
-        nextIndex < bounds.length
-          ? businessInstantAt(dateKey, bounds[nextIndex], timeZone)
+        index + 1 < bounds.length
+          ? businessInstantAt(dateKey, bounds[index + 1], timeZone)
           : businessInstantAt(businessDateKeyFromIndex(day + 1), bounds[0], timeZone);
-      // 半开区间相交即算跨过。
-      if (windowStart < end && windowEnd > start) count += 1;
+      if (windowStart < end && windowEnd > start) starts.push(windowStart);
     }
   }
-  return count;
+  return starts.sort((left, right) => left - right);
 }
 
 const durationStrategy = (unit: RentalPricingUnit, hoursPerUnit: number): RentalPricingStrategy => ({
@@ -181,19 +235,27 @@ const durationStrategy = (unit: RentalPricingUnit, hoursPerUnit: number): Rental
   billableUnits: (startAt, endAt, ctx) => {
     // 班次配了边界就按「跨过几个班次窗口」计数（需求："每开始一个配置班次计一个单位"）。
     if (unit === "shift" && ctx?.shiftStartHours?.length) {
-      return shiftWindowsSpanned(startAt, endAt, ctx);
+      return shiftWindowStarts(startAt, endAt, ctx).length;
     }
     return Math.ceil(durationHours(startAt, endAt) / blockHours(unit, hoursPerUnit, ctx));
   },
   // 每个计费块按**块开始时刻**所在的营业日期取价（需求 4.4.5）。
-  billableUnitDates: (startAt, units, ctx) => {
-    const hours = blockHours(unit, hoursPerUnit, ctx);
+  billableUnitDates: (startAt, endAt, units, ctx) => {
     const timeZone = ctx?.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE;
+    // 班次配了边界时用与计数**同一组**窗口起点，不再按固定块长从起租时刻推算。
+    if (unit === "shift" && ctx?.shiftStartHours?.length) {
+      const starts = shiftWindowStarts(startAt, endAt, ctx);
+      return Array.from({ length: Math.max(0, units) }, (_, index) =>
+        businessDateKey(new Date(starts[index] ?? starts[starts.length - 1] ?? new Date(startAt).getTime()).toISOString(), timeZone)
+      );
+    }
+    const hours = blockHours(unit, hoursPerUnit, ctx);
     return Array.from({ length: Math.max(0, units) }, (_, index) =>
       businessDateKey(new Date(new Date(startAt).getTime() + index * hours * 3_600_000).toISOString(), timeZone)
     );
   },
   amountPerItem: (rate, units, unitMultipliers) => applyCap(rate, grossForUnits(rate, units, unitMultipliers)),
+  priceBreakdown: (rate, units, unitMultipliers) => breakdownFor(rate, units, unitMultipliers),
   explain: (rate, units, unitMultipliers) =>
     describeLine(rate, units, grossForUnits(rate, units, unitMultipliers), unitMultipliers)
 });
@@ -226,11 +288,12 @@ const strategies: Record<RentalPricingUnit, RentalPricingStrategy> = {
       );
     },
     // 自然日按**每个计费日期**取价（需求 4.4.5）。
-    billableUnitDates: (startAt, units, ctx) => {
+    billableUnitDates: (startAt, _endAt, units, ctx) => {
       const first = businessDayIndex(startAt, ctx?.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE);
       return Array.from({ length: Math.max(0, units) }, (_, index) => businessDateKeyFromIndex(first + index));
     },
     amountPerItem: (rate, units, unitMultipliers) => applyCap(rate, grossForUnits(rate, units, unitMultipliers)),
+    priceBreakdown: (rate, units, unitMultipliers) => breakdownFor(rate, units, unitMultipliers),
     explain: (rate, units, unitMultipliers) =>
       describeLine(rate, units, grossForUnits(rate, units, unitMultipliers), unitMultipliers)
   },
@@ -252,11 +315,12 @@ const strategies: Record<RentalPricingUnit, RentalPricingStrategy> = {
       );
     },
     // 第 i 夜按**入住那一天**取价：第 1 夜是入住日的价格，而不是次日的。
-    billableUnitDates: (startAt, units, ctx) => {
+    billableUnitDates: (startAt, _endAt, units, ctx) => {
       const first = businessDayIndex(startAt, ctx?.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE);
       return Array.from({ length: Math.max(0, units) }, (_, index) => businessDateKeyFromIndex(first + index));
     },
     amountPerItem: (rate, units, unitMultipliers) => applyCap(rate, grossForUnits(rate, units, unitMultipliers)),
+    priceBreakdown: (rate, units, unitMultipliers) => breakdownFor(rate, units, unitMultipliers),
     explain: (rate, units, unitMultipliers) =>
       describeLine(rate, units, grossForUnits(rate, units, unitMultipliers), unitMultipliers)
   },
@@ -265,8 +329,9 @@ const strategies: Record<RentalPricingUnit, RentalPricingStrategy> = {
     unit: "package",
     billableUnits: () => 1,
     // 整包只有一个单位，按起租日取价。
-    billableUnitDates: (startAt, _units, ctx) => [businessDateKey(startAt, ctx?.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE)],
+    billableUnitDates: (startAt, _endAt, _units, ctx) => [businessDateKey(startAt, ctx?.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE)],
     amountPerItem: (rate, units, unitMultipliers) => applyCap(rate, grossForUnits(rate, units, unitMultipliers)),
+    priceBreakdown: (rate, units, unitMultipliers) => breakdownFor(rate, units, unitMultipliers),
     explain: (rate, units, unitMultipliers) =>
       describeLine(rate, units, grossForUnits(rate, units, unitMultipliers), unitMultipliers)
   },
@@ -286,6 +351,15 @@ const strategies: Record<RentalPricingUnit, RentalPricingStrategy> = {
       const included = rate.includedUsage ?? 0;
       const excessRate = rate.excessUsageAmount ?? rate.baseAmount;
       return applyCap(rate, rate.baseAmount + Math.max(0, units - included) * excessRate);
+    },
+    // 使用量不走阶梯/逐单位系数：金额是「包干 + 超额 × 超额单价」。
+    // 快照里的「单位价」记超额单价，原始金额记封顶前的合计，口径与 explain 一致。
+    priceBreakdown: (rate, units) => {
+      const included = rate.includedUsage ?? 0;
+      const excessRate = rate.excessUsageAmount ?? rate.baseAmount;
+      const grossAmount = money(rate.baseAmount + Math.max(0, units - included) * excessRate);
+      const amount = applyCap(rate, grossAmount);
+      return { units, unitAmount: excessRate, grossAmount, amount, capped: amount < grossAmount };
     },
     explain: (rate, units) => {
       const included = rate.includedUsage ?? 0;

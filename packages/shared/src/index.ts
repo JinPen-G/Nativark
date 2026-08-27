@@ -4694,6 +4694,15 @@ export interface RentalPricingRate {
    */
   depositMultiple?: number;
   /**
+   * 预授权额度的固定金额（需求 4.4.7：押金与预授权独立计算）。
+   *
+   * 与 `depositAmount` 分开：同一订单可能「收 500 押金 + 冻结 2000 额度」，两个数不同。
+   * 缺省时回落到 `depositAmount`——存量费率行只配了押金字段，回落保证既有报价口径不变。
+   */
+  preAuthAmount?: number;
+  /** 预授权额度的租金倍数。缺省时回落到 `depositMultiple`，理由同上。 */
+  preAuthMultiple?: number;
+  /**
    * 小时粒度（分钟），仅 `unit: "hour"` 使用。缺省 60。
    *
    * 需求 4.4.5：「按价格配置的小时粒度向上取整，例如每 1 小时或每 30 分钟；
@@ -4799,8 +4808,30 @@ export interface SaveRentalValueAddedServiceRequest extends Omit<RentalValueAdde
   id?: string;
 }
 
-export interface RentalRuleConfig {
-  /**
+/**
+ * 应付押金规则（需求 4.4.7）。
+ *
+ * `mode` 决定金额来源：`fixed` 取费率的 `depositAmount`，`price_multiple` 取
+ * `depositMultiple × 该行租金`，`none` 不收。`maxAmount` 是单笔订单押金上限。
+ */
+export interface RentalDepositRule {
+  mode: "none" | "fixed" | "price_multiple";
+  /** 单笔订单的押金上限。留空表示不设上限；0 是合法值（等于免押）。 */
+  maxAmount?: number;
+}
+
+/**
+ * 预授权规则（需求 4.4.7）。与押金**完全独立**：可以只冻结不收押金、只收押金不冻结，
+ * 也可以两者同时存在。金额来源取费率的 `preAuthAmount`/`preAuthMultiple`，
+ * 二者缺省时回落到 `depositAmount`/`depositMultiple`——存量费率行只有押金字段。
+ */
+export interface RentalPreauthorizationRule {
+  mode: "none" | "fixed" | "price_multiple";
+  /** 单笔订单的预授权额度上限。留空表示不设上限。 */
+  maxAmount?: number;
+}
+
+export interface RentalRuleConfig {  /**
    * 计价相关的经营空间规则（需求 4.4.5：「班次时长及边界由经营空间规则定义」）。
    *
    * 可选，且整组可缺省：既有规则快照里没有这一组，订单必须继续按原快照复算，
@@ -4821,6 +4852,17 @@ export interface RentalRuleConfig {
     preauthorizationRequired: boolean;
     unpaidHoldMinutes: number;
   };
+  /**
+   * 应付押金规则（需求 4.4.7：押金与预授权**独立配置、独立计算**，可同时存在）。
+   *
+   * 与 `payment.depositMode` 的关系：后者是旧的「二选一」口径，一个字段在押金与预授权之间
+   * 切换，表达不了「同时收 500 押金并冻结 2000 额度」。新配置用本组与 `preauthorization`
+   * 两组独立表达；整组可缺省，缺省时由 `payment.depositMode` 派生，使既有已发布规则快照
+   * 继续按原口径复算（历史订单不得因新增字段换一套押金口径）。
+   */
+  deposit?: RentalDepositRule;
+  /** 预授权规则（需求 4.4.7）。独立于押金，可与押金同时存在。 */
+  preauthorization?: RentalPreauthorizationRule;
   fulfillment: {
     pickupInspectionRequired: boolean;
     returnInspectionRequired: boolean;

@@ -72,6 +72,9 @@ const PLAN_STATUSES = ["draft", "enabled", "disabled"] as const;
 const ENABLE_STATUSES = ["enabled", "disabled"] as const;
 const PAYMENT_TIMINGS = ["order", "confirmation", "pickup", "offline_terms"] as const;
 const DEPOSIT_MODES = ["none", "fixed", "price_multiple", "preauthorization"] as const;
+/** 押金与预授权各自的模式：不含 `preauthorization`——它是旧「二选一」口径里的模式值，
+ *  在拆分后由 `preauthorization` 规则组本身表达，留在这里会让两套口径互相污染。 */
+const DEPOSIT_RULE_MODES = ["none", "fixed", "price_multiple"] as const;
 const OVERDUE_FEE_MODES = ["none", "hourly", "next_period", "multiplier", "manual_review"] as const;
 const CANCELLATION_FEE_TYPES = ["none", "fixed_amount", "percentage"] as const;
 const REWARD_TYPES = ["points", "balance", "coupon"] as const;
@@ -417,6 +420,19 @@ export class RentalPricingRateInputDto {
   @Max(MAX_MULTIPLIER)
   depositMultiple?: number;
 
+  /** 预授权额度的固定金额（需求 4.4.7）。缺省回落到 depositAmount。 */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  preAuthAmount?: number;
+
+  /** 预授权额度的租金倍数。缺省回落到 depositMultiple。 */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(MAX_MULTIPLIER)
+  preAuthMultiple?: number;
+
   @IsOptional()
   @IsNumber()
   @Min(0)
@@ -617,6 +633,32 @@ export class RuleConfigPaymentInputDto {
   unpaidHoldMinutes!: number;
 }
 
+/**
+ * 应付押金规则（需求 4.4.7）。与预授权**独立**配置，可同时存在。
+ * 整组可选：缺省时服务端由旧的 `payment.depositMode` 派生，既有规则快照口径不变。
+ */
+export class RuleConfigDepositInputDto {
+  @IsIn(DEPOSIT_RULE_MODES)
+  mode!: (typeof DEPOSIT_RULE_MODES)[number];
+
+  /** 单笔订单押金上限。0 是合法值（等于免押），因此判空用 undefined。 */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  maxAmount?: number;
+}
+
+/** 预授权规则（需求 4.4.7）。与押金独立，可同时存在。 */
+export class RuleConfigPreauthorizationInputDto {
+  @IsIn(DEPOSIT_RULE_MODES)
+  mode!: (typeof DEPOSIT_RULE_MODES)[number];
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  maxAmount?: number;
+}
+
 export class RuleConfigFulfillmentInputDto {
   @IsBoolean()
   pickupInspectionRequired!: boolean;
@@ -718,6 +760,20 @@ export class RentalRuleConfigInputDto implements RentalRuleConfig {
   @ValidateNested()
   @Type(() => RuleConfigPaymentInputDto)
   payment!: RuleConfigPaymentInputDto;
+
+  /** 押金规则（需求 4.4.7）。整组可缺省：缺省时由 `payment.depositMode` 派生。 */
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => RuleConfigDepositInputDto)
+  deposit?: RuleConfigDepositInputDto;
+
+  /** 预授权规则（需求 4.4.7）。独立于押金，可同时存在。 */
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => RuleConfigPreauthorizationInputDto)
+  preauthorization?: RuleConfigPreauthorizationInputDto;
 
   @IsObject()
   @ValidateNested()

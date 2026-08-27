@@ -262,8 +262,15 @@ assert.match(explain("day_24h", tiered, 7), /阶梯价 70\/day_24h（满 7 day_2
 
 /* ---------- 逐单位日期价格（需求 4.4.5 禁止整段平均倍率）---------- */
 
-const dates = (unit, start, unitCount, tz = DEFAULT_BUSINESS_TIME_ZONE, extra) =>
-  rentalPricingStrategy(unit).billableUnitDates(iso(start), unitCount, { timeZone: tz, ...extra });
+// `endAt` 参与签名：单位数量与取价时点必须来自同一组计费块。除班次外的单位不依赖它，
+// 因此默认给一个足够远的结束时刻；班次用例显式传真实结束时刻。
+const dates = (unit, start, unitCount, tz = DEFAULT_BUSINESS_TIME_ZONE, extra, end) =>
+  rentalPricingStrategy(unit).billableUnitDates(
+    iso(start),
+    iso(end ?? "2099-01-01T00:00:00Z"),
+    unitCount,
+    { timeZone: tz, ...extra }
+  );
 
 // 自然日：逐个计费日期。
 assert.deepEqual(
@@ -413,6 +420,34 @@ assert.equal(
   unitsWith("shift", "2026-03-02T08:00:00Z", "2026-03-02T17:00:00Z", { shiftStartHours: [], shiftHours: 8 }),
   2,
   "空边界回落到按班次时长整除"
+);
+
+/* ---------- 非等长班次：单位数量与取价时点必须来自同一组计费块 ---------- */
+// 边界 [0, 6, 18] 是 6/12/6 小时的三班制。Codex 复审给的场景：当地 8-28 17:00 → 8-29 07:00。
+// 真实跨过的窗口起点是 28 日 06:00、28 日 18:00、29 日 00:00、29 日 06:00 → 取价日期 28,28,29,29。
+// 早前 billableUnitDates 按固定 shiftHours 从起租时刻推算，会得出 28,29,29,29 —— 跨平假日直接算错钱。
+const unevenCtx = { timeZone: "Asia/Shanghai", shiftStartHours: [0, 6, 18] };
+assert.equal(
+  unitsWith("shift", "2026-08-28T17:00:00+08:00", "2026-08-29T07:00:00+08:00", unevenCtx),
+  4,
+  "非等长班次 [0,6,18]：17:00→次日 07:00 跨 4 个班次窗口"
+);
+assert.deepEqual(
+  dates("shift", "2026-08-28T17:00:00+08:00", 4, "Asia/Shanghai", { shiftStartHours: [0, 6, 18] }, "2026-08-29T07:00:00+08:00"),
+  ["2026-08-28", "2026-08-28", "2026-08-29", "2026-08-29"],
+  "非等长班次的取价日期必须来自真实窗口起点（28,28,29,29），不是按固定块长推算的 28,29,29,29"
+);
+// 完全落在单个窗口内时，取价日期是该窗口起点所在营业日——即使起租时刻在窗口中段。
+assert.deepEqual(
+  dates("shift", "2026-08-28T23:00:00+08:00", 1, "Asia/Shanghai", { shiftStartHours: [0, 6, 18] }, "2026-08-28T23:30:00+08:00"),
+  ["2026-08-28"],
+  "18:00 窗口内 23:00 起租，取价日期是窗口起点所在的 28 日"
+);
+// 跨零点：00:00 边界让新窗口从次日零点开始，取价日期随之进入次日。
+assert.deepEqual(
+  dates("shift", "2026-08-28T23:00:00+08:00", 2, "Asia/Shanghai", { shiftStartHours: [0, 6, 18] }, "2026-08-29T01:00:00+08:00"),
+  ["2026-08-28", "2026-08-29"],
+  "跨零点时第二个窗口起点落在次日，取价日期必须跟着走"
 );
 
 console.log("rental pricing strategy tests passed: 单位语义、边界、非法输入、阶梯价、封顶价与计算说明均已覆盖");
