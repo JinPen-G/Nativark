@@ -24,6 +24,7 @@ const OfficialCalendarSourcePage = lazy(() => import("@/features/platform/Offici
 const TenantManagementPage = lazy(() => import("@/features/platform/TenantManagementPage").then((module) => ({ default: module.TenantManagementPage })));
 const RentalCorePage = lazy(() => import("@/features/rental-core/RentalCorePage").then((module) => ({ default: module.RentalCorePage })));
 const RentalSettingsPage = lazy(() => import("@/features/settings/RentalGovernancePage").then((module) => ({ default: module.RentalGovernancePage })));
+const CapabilityGovernancePage = lazy(() => import("@/features/rental-core/CapabilityGovernancePage").then((module) => ({ default: module.CapabilityGovernancePage })));
 
 function PageLoader() {
   return <div className="route-loader"><Spin size="large" /></div>;
@@ -82,6 +83,7 @@ function ProtectedRoutes() {
             <Route path={APP_ROUTES.coupons.path} element={guard(APP_ROUTES.coupons, <CouponPage />)} />
             <Route path={APP_ROUTES.services.path} element={guard(APP_ROUTES.services, <RentalCommercialPage section="services" />)} />
             <Route path={APP_ROUTES.rentalSettings.path} element={guard(APP_ROUTES.rentalSettings, <RentalSettingsPage />)} />
+            <Route path={APP_ROUTES.rentalCapabilities.path} element={guard(APP_ROUTES.rentalCapabilities, <CapabilityGovernancePage />)} />
             <Route path={APP_ROUTES.customers.path} element={guard(APP_ROUTES.customers, <CustomerPage />)} />
             <Route path="/platform" element={<Navigate to={APP_ROUTES.platformUsers.path} replace />} />
             <Route path={APP_ROUTES.platformTenants.path} element={guard(APP_ROUTES.platformTenants, <TenantManagementPage />)} />

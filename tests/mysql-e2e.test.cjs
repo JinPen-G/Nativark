@@ -8176,6 +8176,134 @@ async function main() {
   );
   ok("Hook 审计表：重复部署无差异、与 schema.prisma 一致、重启后能力与订单状态均从库读回");
 
+  console.log("== 67. CORE-EXT-02C API 门禁按已启用实例判定（暂停即刻收回放行） ==");
+  // 本节证的是 02C 的核心口径：`API 可执行 = capability 已启用 AND 用户具备权限 AND 空间匹配`。
+  //
+  // 改造前判据是品类定义的 `defaultCapabilities` 数组——vehicle 品类声明了 dispatch，
+  // 于是任何 vehicle 空间的 `/store-rental/dispatch/*` 都直接放行，且暂停与停用
+  // 完全无法表达（数组里永远有它）。用**同一个账号、同一个空间、同一个接口**，
+  // 只改能力状态来观察放行与拒绝，才能证明判据真的换成了实例。
+  const gatePlatform = await login("platform", "admin", PLATFORM_PASSWORD);
+  const gateTenant = await bootstrapTenant(gatePlatform.accessToken, "e2e_gate_vehicle", "vehicle");
+  const dispatchBoard = (token) => request("GET", "/api/store-rental/dispatch/board", null, token);
+
+  // 1) 未启用：必须 403。租户是 vehicle 品类、账号是租户管理员（权限齐备），
+  //    因此这次拒绝只可能来自能力门禁。
+  const gateBefore = await dispatchBoard(gateTenant.accessToken);
+  assert.equal(
+    gateBefore.status,
+    403,
+    `dispatch 未启用时必须拒绝（品类声明不等于已启用），实际 ${gateBefore.status}: ${JSON.stringify(gateBefore.body).slice(0, 200)}`
+  );
+  assert.match(JSON.stringify(gateBefore.body), /未启用该业务能力/u, "拒绝原因应指向能力未启用");
+  // 正向控制：同账号访问不受能力门禁保护的车辆域接口必须 200，
+  // 否则上面的 403 可能只是权限或品类不符，与能力无关。
+  assert.equal(
+    (await request("GET", "/api/store-rental/vehicles", null, gateTenant.accessToken)).status,
+    200,
+    "同账号访问无能力门禁的车辆域接口必须成功（否则 403 无区分力）"
+  );
+
+  // 2) 启用依赖后再启用 dispatch。dispatch 依赖 serialized_inventory，
+  //    顺序错会被 409 拦住——这同时复验了 02A 的依赖校验在真库上成立。
+  const gateDepMissing = await request(
+    "PUT",
+    "/api/rental/v1/capabilities",
+    { code: "dispatch", status: "enabled", reason: "先启调度（应被依赖拦住）" },
+    gateTenant.accessToken
+  );
+  assert.equal(gateDepMissing.status, 409, `缺依赖时启用 dispatch 应 409，实际 ${gateDepMissing.status}`);
+  for (const code of ["serialized_inventory", "dispatch"]) {
+    const enabled = await request(
+      "PUT",
+      "/api/rental/v1/capabilities",
+      { code, status: "enabled", reason: "第 67 节验证门禁" },
+      gateTenant.accessToken
+    );
+    assert.equal(enabled.status, 200, `启用 ${code} 失败: ${enabled.status} ${JSON.stringify(enabled.body).slice(0, 200)}`);
+  }
+  const gateAfterEnable = await dispatchBoard(gateTenant.accessToken);
+  assert.equal(
+    gateAfterEnable.status,
+    200,
+    `启用 dispatch 后必须放行，实际 ${gateAfterEnable.status}: ${JSON.stringify(gateAfterEnable.body).slice(0, 200)}`
+  );
+
+  // 3) 暂停：同一接口必须立刻回到 403。这是旧模型完全表达不了的状态。
+  const gatePauseRevision = Number(
+    readScalar(
+      `SELECT \`revision\` FROM \`workspace_capability_instances\` WHERE \`workspaceId\`='${gateTenant.currentWorkspaceId}' AND \`code\`='dispatch';`
+    )
+  );
+  const gatePaused = await request(
+    "PUT",
+    "/api/rental/v1/capabilities",
+    { code: "dispatch", status: "paused", reason: "调度暂停演练", expectedRevision: gatePauseRevision },
+    gateTenant.accessToken
+  );
+  assert.equal(gatePaused.status, 200, `暂停 dispatch 失败: ${gatePaused.status}`);
+  const gateAfterPause = await dispatchBoard(gateTenant.accessToken);
+  assert.equal(
+    gateAfterPause.status,
+    403,
+    `暂停后必须立刻收回放行，实际 ${gateAfterPause.status}（仍 200 说明判据还在读品类声明）`
+  );
+
+  // 4) 重新启用后恢复：证明 403 来自状态而非一次性副作用。
+  const gateResumeRevision = Number(
+    readScalar(
+      `SELECT \`revision\` FROM \`workspace_capability_instances\` WHERE \`workspaceId\`='${gateTenant.currentWorkspaceId}' AND \`code\`='dispatch';`
+    )
+  );
+  assert.equal(
+    (await request(
+      "PUT",
+      "/api/rental/v1/capabilities",
+      { code: "dispatch", status: "enabled", reason: "演练结束恢复", expectedRevision: gateResumeRevision },
+      gateTenant.accessToken
+    )).status,
+    200,
+    "恢复启用失败"
+  );
+  assert.equal((await dispatchBoard(gateTenant.accessToken)).status, 200, "恢复启用后必须重新放行");
+  ok("API 门禁按实例判定：未启用 403 → 启用 200 → 暂停 403 → 恢复 200，且缺依赖启用被 409 拦下");
+
+  console.log("== 67b. CORE-EXT-02C 会话上下文：入口可见性与生产就绪分开表示 ==");
+  // 菜单入口取自会话上下文的 `tenant.capabilities`。它必须是**已启用集**，
+  // 否则前端会长出「只有 code、没有模块」的入口，点进去才 403（或反之）。
+  const gateSession = await request("GET", "/api/auth/session-context", null, gateTenant.accessToken);
+  assert.equal(gateSession.status, 200, `读会话上下文失败: ${gateSession.status}`);
+  const gateCaps = gateSession.body.data.tenant.capabilities ?? [];
+  assert.ok(gateCaps.includes("dispatch"), `已启用的 dispatch 必须出现在会话能力集里，实际 ${gateCaps.join("、")}`);
+  assert.ok(gateCaps.includes("serialized_inventory"), "已启用的 serialized_inventory 必须出现在会话能力集里");
+  // vehicle 品类声明了 qualification / usage_reading 等，但它们没有实例 → 不得出现。
+  // 这一条是整节的关键：它区分「品类声明」与「已启用」两种口径。
+  assert.ok(
+    !gateCaps.includes("qualification"),
+    `品类声明但未启用的能力不得出现在会话能力集里（否则菜单会长出点进去 403 的入口）：${gateCaps.join("、")}`
+  );
+  // 「可访问」与「已达生产经营条件」必须分开：能进空间不等于品类能力齐备。
+  assert.equal(
+    gateSession.body.data.capabilityProductionReady,
+    false,
+    "必选能力未齐备时不得报告生产就绪"
+  );
+  assert.ok(
+    Array.isArray(gateSession.body.data.missingRequiredCapabilities) &&
+      gateSession.body.data.missingRequiredCapabilities.length > 0,
+    `未就绪时必须列出缺失的必选能力，实际 ${JSON.stringify(gateSession.body.data.missingRequiredCapabilities)}`
+  );
+  // 暂停一个必选能力后，缺失列表必须把它算进来——证明该字段是实时判定而非静态文案。
+  const gateReqCode = gateSession.body.data.missingRequiredCapabilities[0];
+  assert.ok(
+    !gateCaps.includes(gateReqCode),
+    `缺失列表里的能力不应同时出现在已启用集里：${gateReqCode}`
+  );
+  ok(
+    `会话上下文：已启用能力如实带出（含 dispatch），品类声明但未启用的 qualification 不带出；` +
+      `生产就绪为 false 且缺失必选能力可枚举（${gateSession.body.data.missingRequiredCapabilities.join("、")}）`
+  );
+
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);
 }
 

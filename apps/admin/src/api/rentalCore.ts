@@ -29,6 +29,11 @@ import type {
   RentalRuleVersion,
   RentalStockBalance,
   RentalValueAddedService,
+  SaveWorkspaceCapabilityRequest,
+  UpgradeWorkspaceCapabilityRequest,
+  WorkspaceCapabilityAuditEvent,
+  WorkspaceCapabilityInstance,
+  WorkspaceCapabilityOverview,
   GrantRentalRewardRequest,
   ApplyOfficialCalendarSourceRequest,
   OfficialCalendarSourceVersionSummary,
@@ -143,5 +148,11 @@ export const rentalCoreApi = {
   handoverOrder: (id: string, stage: "pickup" | "return") => request<RentalOrder>(`/rental/v1/orders/${id}/handover/${stage}`, { method: "post" }),
   inspectionTemplates: (stage?: "pickup" | "return") => request<RentalInspectionTemplate[]>("/rental/v1/inspection-templates", { params: { stage } }),
   inspections: (id: string) => request<RentalInspectionRecord[]>(`/rental/v1/orders/${id}/inspections`),
-  createInspection: (id: string, data: CreateRentalInspectionRequest) => request<{ inspection: RentalInspectionRecord; order: RentalOrder }>(`/rental/v1/orders/${id}/inspections`, { method: "post", data })
+  createInspection: (id: string, data: CreateRentalInspectionRequest) => request<{ inspection: RentalInspectionRecord; order: RentalOrder }>(`/rental/v1/orders/${id}/inspections`, { method: "post", data }),
+  // CORE-EXT-02C：经营空间能力治理。读写都不带 workspaceId——空间取自会话，
+  // 客户端无法指定要治理哪个空间的能力，因此也伪造不了能力范围。
+  capabilities: () => request<WorkspaceCapabilityOverview>("/rental/v1/capabilities"),
+  saveCapability: (data: SaveWorkspaceCapabilityRequest) => request<WorkspaceCapabilityInstance>("/rental/v1/capabilities", { method: "put", data }),
+  upgradeCapability: (code: string, data: UpgradeWorkspaceCapabilityRequest) => request<WorkspaceCapabilityInstance>(`/rental/v1/capabilities/${code}/upgrade`, { method: "post", data }),
+  capabilityAudits: (code?: string) => request<WorkspaceCapabilityAuditEvent[]>("/rental/v1/capability-audits", { params: { code } })
 };
