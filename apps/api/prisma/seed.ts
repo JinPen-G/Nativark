@@ -159,6 +159,8 @@ const permissions = [
   // 因此这两个权限**不**进 STORE_OPERATOR 模板；租户管理员靠 fixedAllPermissions 覆盖。
   ["rental-core:capability:view", "经营空间能力查看", "Rental Core", PermissionKind.ACTION],
   ["rental-core:capability:manage", "经营空间能力治理", "Rental Core", PermissionKind.ACTION],
+  // CAM-01A：确认能力风险提示后才能带风险下单。与 :manage 分开授权（见 platform.service 注释）。
+  ["rental-core:capability:override", "能力风险例外确认", "Rental Core", PermissionKind.ACTION],
   ["store-rental:rules:manage", "业务规则配置", "门市租赁", PermissionKind.ACTION],
   ["store-rental:order:view", "订单查看", "门市租赁", PermissionKind.ACTION],
   ["store-rental:order:operate", "订单操作", "门市租赁", PermissionKind.ACTION],

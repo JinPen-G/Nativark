@@ -197,11 +197,27 @@ export class PartialReturnRentalOrderDto implements PartialReturnRentalOrderRequ
   items!: PartialReturnAllocationInputDto[];
 }
 
+/**
+ * CAM-01A：对能力风险提示的例外确认项。原因必填——空确认没有追溯价值，
+ * 且会让「已确认带风险」与「未确认」在审计里无法区分。
+ */
+export class CapabilityExceptionInputDto {
+  @IsIn(RENTAL_CAPABILITY_CODES)
+  capability!: RentalCapability;
+
+  @IsString()
+  @IsNotEmpty()
+  code!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  reason!: string;
+}
+
 export class CreateRentalOrderDto implements CreateRentalOrderRequest {
   @IsString()
   @IsNotEmpty()
   quoteId!: string;
-
   @IsIn(CUSTOMER_TYPES)
   customerType!: (typeof CUSTOMER_TYPES)[number];
 
@@ -247,6 +263,12 @@ export class CreateRentalOrderDto implements CreateRentalOrderRequest {
   @ValidateNested({ each: true })
   @Type(() => CreateRentalOrderLineInputDto)
   lines!: CreateRentalOrderLineInputDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CapabilityExceptionInputDto)
+  capabilityExceptions?: CapabilityExceptionInputDto[];
 
   @IsOptional()
   @IsString()

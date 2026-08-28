@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Param, Post, Put, Query, Req } from "@nestjs/common";
+import { BadRequestException, Body, Controller, ForbiddenException, Get, Param, Post, Put, Query, Req } from "@nestjs/common";
 import { RentalCoreOrderStatus } from "@store-rental/shared";
 import { createHash } from "node:crypto";
 import type {
@@ -63,6 +63,18 @@ function idempotencyKeyOf(req: { headers?: Record<string, unknown> }): string | 
 
 interface AuthenticatedRequest { user: SystemUserRow; headers?: Record<string, unknown>; }
 
+/**
+ * CAM-01A：控制器内的权限判定，口径与 Guard 的 hasAnyPermission 一致。
+ *
+ * 租户管理员（isPlatformAdmin）与通配 `*` 视为具备；SaaS 平台管理员不参与经营域动作。
+ * 必须与 Guard 同口径，否则会出现「Guard 放行、控制器拒绝」或反之的错位。
+ */
+function hasPermissionCode(user: SystemUserRow, code: string) {
+  if (user.isSaasAdmin) return false;
+  if (user.isPlatformAdmin || user.permissions?.includes("*")) return true;
+  return Boolean(user.permissions?.includes(code));
+}
+
 @Controller("rental/v1")
 export class RentalCoreController {
   constructor(
@@ -115,6 +127,12 @@ export class RentalCoreController {
   @Get("orders/:id") order(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.service.getOrder(req.user.tenantId, id); }
   @Post("orders") async createOrder(@Req() req: AuthenticatedRequest, @Body() body: CreateRentalOrderDto) {
     const context = this.context(req.user.tenantId);
+    // CAM-01A：带风险下单必须「有权限 + 填原因」。原因由 DTO 与能力 Hook 共同保证
+    // （空原因不算确认），权限只能在这里判——Hook 上下文里没有鉴权信息，
+    // 而 Guard 按路径判权限、看不到请求体，因此这道检查必须落在控制器。
+    if (body.capabilityExceptions?.length && !hasPermissionCode(req.user, "rental-core:capability:override")) {
+      throw new ForbiddenException("确认能力风险提示需要「能力风险例外确认」权限");
+    }
     // 幂等键取标准的 Idempotency-Key 请求头；未传时下单侧退回 quoteId（报价一次性使用）。
     const { order, replayed } = await this.orderConfirmation.createOrder(
       req.user.tenantId,

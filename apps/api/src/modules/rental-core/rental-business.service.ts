@@ -2296,13 +2296,26 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   private async runQuoteHook(tenantId: string, context: BusinessContext, quote: RentalQuoteSnapshotV1) {
     if (!this.hooks) return undefined;
     const workspaceId = this.workspaceOf(tenantId);
+    const groups = new Map(context.groups.map((group) => [group.id, group]));
+    // 富化：把报价行解析成带属性的器材行，能力据此判定卡口/画幅/供电等兼容性。
+    // 这是与品类无关的数据透传，Core 不读这些属性也不做任何品类判断。
+    const equipment = quote.request.lines.map((line) => {
+      const group = groups.get(line.itemGroupId);
+      return {
+        itemGroupId: line.itemGroupId,
+        itemGroupName: group?.name ?? line.itemGroupId,
+        inventoryMode: group?.inventoryMode as never,
+        quantity: line.quantity,
+        attributes: { ...(group?.attributes ?? {}) }
+      };
+    });
     return this.hooks.evaluate({
       point: "quote_validation",
       tenantId,
       workspaceId,
       categoryCode: context.category.code,
       subjectRef: { type: "quote", id: quote.id },
-      subject: quote,
+      subject: { ...quote, equipment, capabilityExceptions: [] },
       // 用报价自己固化的能力快照判定，而不是当前实例。报价生成与校验之间若有并发升级，
       // 也必须按写进这张报价的版本判定——快照即事实。
       instances: quote.capabilitySnapshot

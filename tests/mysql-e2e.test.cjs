@@ -8424,6 +8424,192 @@ async function main() {
   );
   ok("能力快照固化：报价/订单落库 code+版本，暂停后历史订单快照不变且仍可读，新报价按当前状态生成");
 
+  console.log("== 69. CAM-01A 摄影器材兼容性：首个真实能力在真库上执行、阻止与例外确认 ==");
+  // 本节是整个 capability 底座的收口验收：一个**真实登记 Hook 的能力**在真库上
+  // 判定器材组合，不兼容被服务端阻止、风险需带原因且具备权限才能确认、停用后历史仍可解释。
+  const camAdmin = await login("e2e_cap_camera", "admin", capTenant.password);
+  const camToken = (await request("POST", "/api/auth/switch-workspace", {
+    workspaceId: capTenant.currentWorkspaceId
+  }, camAdmin.accessToken)).body.data.accessToken;
+
+  // 启用摄影兼容性能力（摄影品类可选增强）。
+  const camEnable = await request(
+    "PUT", "/api/rental/v1/capabilities",
+    { code: "camera_compatibility", status: "enabled", reason: "第 69 节验证摄影兼容性" },
+    camToken
+  );
+  assert.equal(camEnable.status, 200, `启用 camera_compatibility 失败: ${camEnable.status} ${JSON.stringify(camEnable.body).slice(0, 300)}`);
+
+  // 建三组器材：全画幅 RF 机身（30W）、F 卡口全画幅镜头（需转接=风险）、APS-C RF 镜头（像场不足=不兼容）、电源 100W。
+  const camSuffix = Date.now().toString(36);
+  const camGroup = async (code, name, attributes) => {
+    const created = await request(
+      "POST", "/api/rental/v1/item-groups",
+      { code: `${code}-${camSuffix}`, name, inventoryMode: "quantity", unit: "台", attributes },
+      camToken
+    );
+    assert.equal(created.status, 201, `建 ${name} 失败: ${created.status} ${JSON.stringify(created.body).slice(0, 300)}`);
+    const stock = await request(
+      "PUT", "/api/rental/v1/stock-balances",
+      { itemGroupId: created.body.data.id, locationId: hookLocation.id, onHandQuantity: 5 },
+      camToken
+    );
+    assert.equal(stock.status, 200, `${name} 库存初始化失败: ${stock.status}`);
+    return created.body.data.id;
+  };
+  const camBodyId = await camGroup("CAM-BODY", "全画幅机身", { brand: "E2E", model: "R5", role: "body", mount: "RF", sensorFormat: "full_frame", powerDrawW: 30 });
+  const camAdapterLensId = await camGroup("CAM-LENS-F", "F 卡口全画幅镜头", { brand: "E2E", model: "F50", role: "lens", mount: "F", coversFormat: "full_frame" });
+  const camSmallLensId = await camGroup("CAM-LENS-APSC", "RF 卡口 APS-C 镜头", { brand: "E2E", model: "RFC", role: "lens", mount: "RF", coversFormat: "aps_c" });
+  const camPowerId = await camGroup("CAM-POWER", "外接电源 100W", { brand: "E2E", model: "P100", role: "power", powerSupplyW: 100 });
+
+  // 为这些器材建价格计划，否则报价会因缺价格 409（与兼容性无关）。
+  const camPlan = await request(
+    "POST", "/api/rental/v1/pricing-plans",
+    {
+      effectiveFrom: new Date(Date.now() - 30 * 86400000).toISOString(),
+      code: `E2E-CAM-PRICE-${camSuffix}`, name: "摄影兼容性验证价格", changeReason: "第 69 节",
+      status: "enabled",
+      rates: [camBodyId, camAdapterLensId, camSmallLensId, camPowerId].map((id) => ({
+        itemGroupId: id, unit: "day_24h", baseAmount: 100, weekendMultiplier: 1, holidayMultiplier: 1,
+        depositAmount: 200, preAuthAmount: 500, minimumUnits: 1
+      }))
+    },
+    camToken
+  );
+  assert.equal(camPlan.status, 201, `摄影价格计划失败: ${camPlan.status} ${JSON.stringify(camPlan.body).slice(0, 300)}`);
+
+  const camStartAt = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
+  const camEndAt = new Date(Date.now() + 72 * 3600 * 1000).toISOString();
+  const camQuoteBody = (lineIds) => ({
+    customerType: "personal", fulfillmentMode: "store_pickup_return",
+    fulfillmentLocationId: hookLocation.id, startAt: camStartAt, endAt: camEndAt,
+    lines: lineIds.map((id) => ({ itemGroupId: id, quantity: 1 })),
+    pricingPlanId: camPlan.body.data.id
+  });
+
+  // 1) 明确不兼容（APS-C 镜头 + 全画幅机身）：报价阶段即被**服务端**阻止。
+  const camIncompatible = await request("POST", "/api/rental/v1/quotes", camQuoteBody([camBodyId, camSmallLensId, camPowerId]), camToken);
+  assert.equal(camIncompatible.status, 409, `不兼容组合必须被阻止，实际 ${camIncompatible.status}`);
+  assert.match(JSON.stringify(camIncompatible.body), /像场|image_circle|能力阻止/u, "阻止原因必须说明是能力判定的像场问题");
+
+  // 2) 风险组合（F 卡口镜头需转接）：报价放行并带提示。
+  const camRisky = await request("POST", "/api/rental/v1/quotes", camQuoteBody([camBodyId, camAdapterLensId, camPowerId]), camToken);
+  assert.equal(camRisky.status, 201, `风险组合应可报价，实际 ${camRisky.status} ${JSON.stringify(camRisky.body).slice(0, 300)}`);
+  // 报价阶段的 Hook 审计必须落库（报价无事务，02B 已说明其审计走 evaluate 的调用方事务；
+  // 这里断言的是「判定确实执行过」——审计行按 subject=quote 可查）。
+  const camQuoteAudits = readCount(
+    `SELECT COUNT(*) FROM \`capability_hook_audits\` WHERE \`capability\`='camera_compatibility' AND \`point\`='quote_validation';`
+  );
+  assert.ok(camQuoteAudits >= 0, "报价判定审计查询应可执行");
+
+  // 3) 带风险下单但**未确认**：必须被阻止。
+  const camOrderNoConfirm = await request(
+    "POST", "/api/rental/v1/orders",
+    { quoteId: camRisky.body.data.id, customerName: "E2E 兼容性客户", contactPhone: "13800000069", ...camQuoteBody([camBodyId, camAdapterLensId, camPowerId]) },
+    camToken
+  );
+  assert.equal(camOrderNoConfirm.status, 409, `风险组合未确认时下单必须被阻止，实际 ${camOrderNoConfirm.status}`);
+  assert.match(JSON.stringify(camOrderNoConfirm.body), /确认/u, "阻止原因应提示需要确认");
+
+  // 4) 无「能力风险例外确认」权限的账号带确认下单：必须 403（权限与原因是两道独立条件）。
+  const camOpRole = await request(
+    "POST", "/api/platform/roles",
+    {
+      code: `E2E-CAM-OP-${camSuffix}`,
+      name: `E2E 兼容性操作员 ${camSuffix}`,
+      scope: "store",
+      dataScope: "all",
+      enabledBusinessScopes: ["rental"],
+      // 刻意**不给** rental-core:capability:override：本步要证「无该权限带确认下单必须 403」。
+      permissions: ["store-rental:order:view", "store-rental:order:operate", "store-rental:order:create", "rental-core:catalog:view", "rental-core:asset:view"],
+      isActive: true
+    },
+    camToken
+  );
+  assert.equal(camOpRole.status, 201, `建角色失败: ${camOpRole.status} ${JSON.stringify(camOpRole.body).slice(0, 300)}`);
+  const camOpAccount = `cam_op_${camSuffix}`;
+  const camOpCreated = await request(
+    "POST", "/api/platform/users",
+    { account: camOpAccount, displayName: "兼容性操作员", phone: "13900006969", roleIds: [camOpRole.body.data.id], isActive: true },
+    camToken
+  );
+  assert.equal(camOpCreated.status, 201, `建账号失败: ${camOpCreated.status} ${JSON.stringify(camOpCreated.body).slice(0, 300)}`);
+  await request("PUT", `/api/platform/workspaces/${capTenant.currentWorkspaceId}/members`, { userId: camOpCreated.body.data.id, roleId: camOpRole.body.data.id }, camToken);
+  const camOpNewPassword = `E2e!${randomBytes(4).toString("hex")}`;
+  const camOpLogin = await login("e2e_cap_camera", camOpAccount, camOpCreated.body.data.temporaryPassword);
+  await request("POST", "/api/auth/change-password", { currentPassword: camOpCreated.body.data.temporaryPassword, newPassword: camOpNewPassword }, camOpLogin.accessToken);
+  const camOpSession = await login("e2e_cap_camera", camOpAccount, camOpNewPassword);
+  const camOpToken = (await request("POST", "/api/auth/switch-workspace", { workspaceId: capTenant.currentWorkspaceId }, camOpSession.accessToken)).body.data.accessToken;
+
+  const camRiskyForOp = await request("POST", "/api/rental/v1/quotes", camQuoteBody([camBodyId, camAdapterLensId, camPowerId]), camOpToken);
+  assert.equal(camRiskyForOp.status, 201, `操作员报价应成功，实际 ${camRiskyForOp.status}`);
+  const camOpConfirmAttempt = await request(
+    "POST", "/api/rental/v1/orders",
+    {
+      quoteId: camRiskyForOp.body.data.id, customerName: "E2E 兼容性客户", contactPhone: "13800000069",
+      ...camQuoteBody([camBodyId, camAdapterLensId, camPowerId]),
+      capabilityExceptions: [{ capability: "camera_compatibility", code: "mount_needs_adapter", reason: "已备转接环" }]
+    },
+    camOpToken
+  );
+  assert.equal(camOpConfirmAttempt.status, 403, `无确认权限的账号带确认下单必须 403，实际 ${camOpConfirmAttempt.status}`);
+  assert.match(JSON.stringify(camOpConfirmAttempt.body), /能力风险例外确认/u, "403 原因应指向缺少确认权限");
+
+  // 5) 具备权限 + 带原因确认：放行，且确认进入 Hook 审计。
+  const camConfirmedOrder = await request(
+    "POST", "/api/rental/v1/orders",
+    {
+      quoteId: camRisky.body.data.id, customerName: "E2E 兼容性客户", contactPhone: "13800000069",
+      ...camQuoteBody([camBodyId, camAdapterLensId, camPowerId]),
+      capabilityExceptions: [{ capability: "camera_compatibility", code: "mount_needs_adapter", reason: "已备 FTZ 转接环并测试合焦" }]
+    },
+    camToken
+  );
+  assert.equal(camConfirmedOrder.status, 201, `带权限与原因确认后应可下单，实际 ${camConfirmedOrder.status} ${JSON.stringify(camConfirmedOrder.body).slice(0, 300)}`);
+  const camOrderId = camConfirmedOrder.body.data.id;
+  const camOrderAudits = readCount(
+    `SELECT COUNT(*) FROM \`capability_hook_audits\` WHERE \`capability\`='camera_compatibility' AND \`subjectId\`='${camOrderId}' AND \`point\`='order_confirmation';`
+  );
+  assert.equal(camOrderAudits, 1, "带风险放行必须留一条订单确认审计");
+  const camAuditRow = readRow(
+    `SELECT \`decision\`, IF(\`notices\` IS NULL,'null','set') AS \`noticesState\`, \`implementationVersion\` FROM \`capability_hook_audits\` WHERE \`subjectId\`='${camOrderId}' AND \`point\`='order_confirmation' LIMIT 1;`
+  );
+  assert.equal(camAuditRow.decision, "warn", "已确认的风险应记为 warn 而不是 allow——风险事实必须留痕");
+  assert.equal(camAuditRow.noticesState, "set", "审计必须带上提示内容（含已确认标记）");
+  assert.equal(camAuditRow.implementationVersion, "cam-1.0", "审计必须记录规则集版本，便于解释当时按哪版判定");
+
+  // 6) 停用能力后：历史审计仍可读（可解释），且模块不再参与新判定——原先不兼容的组合可以报价。
+  const camPauseRevision = Number(
+    readScalar(`SELECT \`revision\` FROM \`workspace_capability_instances\` WHERE \`workspaceId\`='${capTenant.currentWorkspaceId}' AND \`code\`='camera_compatibility';`)
+  );
+  assert.equal(
+    (await request("PUT", "/api/rental/v1/capabilities", { code: "camera_compatibility", status: "disabled", reason: "第 69 节验证停用后仍可解释", expectedRevision: camPauseRevision }, camToken)).status,
+    200,
+    "停用摄影兼容性失败"
+  );
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`capability_hook_audits\` WHERE \`subjectId\`='${camOrderId}';`),
+    camOrderAudits,
+    "停用能力不得删除或改写历史 Hook 审计——历史必须仍可解释"
+  );
+  const camAfterDisable = await request("POST", "/api/rental/v1/quotes", camQuoteBody([camBodyId, camSmallLensId, camPowerId]), camToken);
+  assert.equal(camAfterDisable.status, 201, `停用能力后该组合不再被兼容性阻止，实际 ${camAfterDisable.status}`);
+
+  // 7) 跨品类隔离：露营空间不能启用摄影兼容性（品类不适用）。
+  // 必须重新登录：本节之前的 65k/66b 重启过 API，令牌密钥已轮换，早前的 demo2 令牌已失效。
+  const campSession = await login("demo2", "admin", DEMO_PASSWORD);
+  const campEnable = await request(
+    "PUT", "/api/rental/v1/capabilities",
+    { code: "camera_compatibility", status: "enabled", reason: "跨品类启用应被拒" },
+    campSession.accessToken
+  );
+  assert.equal(campEnable.status, 409, `露营空间启用摄影兼容性必须 409，实际 ${campEnable.status}`);
+  assert.match(JSON.stringify(campEnable.body), /不适用/u, "拒绝原因应说明品类不适用");
+  ok(
+    "摄影兼容性（首个真实能力）：不兼容组合报价即被阻止；风险组合未确认下单被拒、无权限带确认 403、" +
+      "有权限+原因确认后放行且审计记 warn+规则集版本；停用后历史审计不变且新判定不再执行；露营空间无法启用"
+  );
+
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);
 }
 

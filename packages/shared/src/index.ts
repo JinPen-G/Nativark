@@ -3849,7 +3849,10 @@ export const RENTAL_CAPABILITY_CODES = [
   "dispatch",
   "usage_reading",
   "qualification",
-  "iot"
+  "iot",
+  // CAM-01A：首个真实产品能力——摄影器材兼容性。仅摄影品类适用（applicableCategories 收口），
+  // 只做兼容性判定，不代替 CAM-01 的附件清点、使用量、检查与养护。
+  "camera_compatibility"
 ] as const;
 
 export type RentalCapability = (typeof RENTAL_CAPABILITY_CODES)[number];
@@ -4227,6 +4230,19 @@ export const RENTAL_CAPABILITY_MODULES: RentalCapabilityModuleDefinition[] = [
     configSchema: [{ key: "provider", label: "遥测服务商", type: "string", required: true }],
     // 同 dispatch：`/store-rental/tbox-devices` 在历史车辆域里已实现。
     implementationVersion: "legacy-1.0"
+  },
+  {
+    // CAM-01A：首个真实运行模块。仅摄影品类适用（applicableCategories 收口，
+    // 因此露营/车辆/工程既不会声明也无法启用它）。规则由 camera-compatibility 模块以
+    // implementationVersion 版本化维护；配置项是可调阈值，不是规则本体。
+    code: "camera_compatibility", label: "摄影器材兼容性", kind: "category_optional",
+    extensionPoints: ["order_validation"],
+    applicableCategories: [RentalCategoryCode.Camera], dependsOn: [], conflictsWith: [],
+    configSchema: [
+      // 供电余量下限：机身+配件峰值功率相对供电额定的余量低于此值即判风险。
+      { key: "powerMarginPercent", label: "供电余量下限(%)", type: "number", required: false, min: 0, max: 90 }
+    ],
+    implementationVersion: "cam-1.0"
   }
 ];
 
@@ -5549,7 +5565,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     name: "摄影设备",
     description: "机身、镜头、灯光和拍摄套装租赁",
     supportedInventoryModes: [RentalInventoryMode.Serialized, RentalInventoryMode.Quantity, RentalInventoryMode.Bundle],
-    defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery", "usage_reading"],
+    defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery", "usage_reading", "camera_compatibility"],
     terminology: { itemLabel: "器材", itemGroupLabel: "器材型号", assetLabel: "器材资产", fulfillmentLabel: "器材门店", pickupLabel: "取机", returnLabel: "还机", identifierLabel: "资产编号", usageMetricLabel: "快门次数" },
     attributeSchema: { brand: "string", model: "string", mount: "string", sensor: "string", serialNo: "string", shutterCount: "number" },
     businessModel: {
@@ -5565,7 +5581,16 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
         { code: "sensor", label: "传感器规格", scope: "item_group", type: "string" },
         { code: "serialNo", label: "设备序列号", scope: "asset", type: "string", required: true, unique: true },
         { code: "shutterCount", label: "快门次数", scope: "transaction", type: "number", unit: "次" },
-        { code: "conditionGrade", label: "成色等级", scope: "asset", type: "select", options: ["A", "B", "C"] }
+        { code: "conditionGrade", label: "成色等级", scope: "asset", type: "select", options: ["A", "B", "C"] },
+        // CAM-01A：兼容性判定所需的规范化字段。兼容规则（卡口、画幅覆盖、供电）只能读
+        // **已声明**的字段——动态字段校验会拒绝未定义的属性，因此这些字段必须登记在品类里，
+        // 运营才能填、能力才能判。它们只描述器材本身，不含任何判定逻辑。
+        { code: "role", label: "器材角色", scope: "item_group", type: "select", options: ["body", "lens", "power", "storage", "accessory"] },
+        { code: "sensorFormat", label: "画幅（规范化）", scope: "item_group", type: "select", options: ["m43", "aps_c", "full_frame", "medium_format"] },
+        { code: "coversFormat", label: "镜头像场覆盖", scope: "item_group", type: "select", options: ["m43", "aps_c", "full_frame", "medium_format"] },
+        { code: "adapterMounts", label: "可转接卡口（逗号分隔）", scope: "item_group", type: "string" },
+        { code: "powerDrawW", label: "峰值功耗", scope: "item_group", type: "number", unit: "W" },
+        { code: "powerSupplyW", label: "供电额定", scope: "item_group", type: "number", unit: "W" }
       ],
       supportsHolidayPricing: true,
       supportsUsagePricing: true,
@@ -5947,7 +5972,35 @@ export interface CreateRentalOrderRequest {
     quantity: number;
     note?: string;
   }>;
+  /**
+   * CAM-01A：对能力**风险提示（warn）**的例外确认。
+   *
+   * 风险组合（如非原生卡口需转接环）默认在下单时被阻止；只有携带带原因的确认，
+   * 且提交者具备确认权限（由控制器校验），才允许带风险下单，并把确认记入审计。
+   * 不兼容组合（block）不可确认——无论是否带确认都必须被服务端拒绝。
+   */
+  capabilityExceptions?: Array<{
+    capability: RentalCapability;
+    code: string;
+    reason: string;
+  }>;
   operator?: string;
+}
+
+/**
+ * CAM-01A：传给能力 Hook 的**已解析器材行**（通用富化，非摄影专属）。
+ *
+ * 报价/订单的原始行只有 itemGroupId + quantity；能力要判定兼容性必须看到器材的
+ * 卡口、画幅、供电、存储、接口等属性。Core 把这些属性解析后随 subject 一并传入——
+ * 这是与品类无关的数据透传（「本次涉及哪些商品、各自属性是什么」），
+ * 不是在 Core 里写摄影逻辑。
+ */
+export interface RentalCapabilityEquipmentLine {
+  itemGroupId: string;
+  itemGroupName: string;
+  inventoryMode: RentalInventoryMode;
+  quantity: number;
+  attributes: Record<string, unknown>;
 }
 
 export interface CancelRentalOrderRequest {

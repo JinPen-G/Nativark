@@ -170,7 +170,11 @@ export class PlatformService {
         { code: "rental-core:asset:view", name: "通用资产库存查看" },
         { code: "rental-core:asset:manage", name: "通用资产库存管理" },
         { code: "rental-core:capability:view", name: "经营空间能力查看" },
-        { code: "rental-core:capability:manage", name: "经营空间能力治理" }
+        { code: "rental-core:capability:manage", name: "经营空间能力治理" },
+        // CAM-01A：确认能力给出的风险提示（如需转接环的器材组合）才能带风险下单。
+        // 与 :manage 分开：治理能力启停是配置动作，带风险下单是一次经营决策，
+        // 两者的授权对象通常不同（店长可确认风险，但不一定负责能力启停）。
+        { code: "rental-core:capability:override", name: "能力风险例外确认" }
       ]
     },
     {

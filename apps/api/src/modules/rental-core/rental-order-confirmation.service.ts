@@ -137,9 +137,18 @@ export class RentalOrderConfirmationService {
           workspaceId: this.core.resolveWorkspaceId(tenantId),
           categoryCode: context.category.code,
           subjectRef: { type: "order", id: order.id },
-          subject: order,
+          // 富化：随订单一并传入已解析器材行与本次的例外确认，能力据此判定兼容性。
+          // 器材属性与确认都是数据，Core 不读它们、不做品类判断。
+          subject: {
+            ...order,
+            equipment: this.core.buildCapabilityEquipment(tenantId, order.lines.map((line) => ({ itemGroupId: line.itemGroupId, quantity: line.quantity }))),
+            capabilityExceptions: input.capabilityExceptions ?? []
+          },
           operator: input.operator || userName,
-          tx
+          tx,
+          instances: order.capabilitySnapshot
+            ? this.core.capabilityInstancesFromSnapshot(tenantId, order.capabilitySnapshot)
+            : undefined
         });
         await this.coreFacts.saveOrderAggregate(order, [], tx);
 

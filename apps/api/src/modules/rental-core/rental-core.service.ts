@@ -45,7 +45,8 @@ import {
   type SubstituteRentalBundleComponentRequest,
   type TenantRentalBusinessSettings,
   type TenantRentalProfile,
-  type WorkspaceCapabilityInstance
+  type WorkspaceCapabilityInstance,
+  type RentalCapabilityEquipmentLine
 } from "@store-rental/shared";
 import { getRequestWorkspaceId, runWithRequestIdentity } from "../../common/request-identity";
 import { RentalStateRepository } from "./rental-state.repository";
@@ -907,7 +908,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     this.assertOutboundLocationActive(state, order);
     // Hook 位置：状态与地点校验之后、取库存锁之前。放在取锁之后会让被能力阻止的
     // 请求白持有一批行锁直到事务回滚，无谓地加重并发争用。
-    await this.runHook(tenantId, "allocation_dispatch", { type: "order", id: order.id }, order, tx, operator, this.orderHookInstances(tenantId, order));
+    await this.runHook(tenantId, "allocation_dispatch", { type: "order", id: order.id }, { ...order, equipment: this.buildCapabilityEquipment(tenantId, order.lines.map((line) => ({ itemGroupId: line.itemGroupId, quantity: line.quantity }))), capabilityExceptions: [] }, tx, operator, this.orderHookInstances(tenantId, order));
     // 先锁候选资产行，再在**同一事务内**读资产与既有分配。
     //
     // 顺序不可反，也不能省锁：只锁订单行时两张订单锁的是不同的行、互不争锁，
@@ -1243,6 +1244,36 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
    */
   resolveWorkspaceId(tenantId: string): string {
     return this.workspaceOf(tenantId);
+  }
+
+  /**
+   * CAM-01A：把订单/报价的行解析成「已解析器材行」（带 itemGroup 属性）供能力 Hook 判定。   *
+   * 这是与品类无关的**数据富化**——只是把 itemGroupId 展开成它的名称、库存模式与属性，
+   * 让能力看得到卡口/画幅/供电等信息。Core 自身不读这些属性、不做任何摄影判断。
+   */
+  buildCapabilityEquipment(
+    tenantId: string,
+    lines: Array<{ itemGroupId: string; quantity: number }>
+  ): RentalCapabilityEquipmentLine[] {
+    const state = this.state(tenantId);
+    return lines.map((line) => {
+      const group = this.group(state, line.itemGroupId);
+      return {
+        itemGroupId: group.id,
+        itemGroupName: group.name,
+        inventoryMode: group.inventoryMode,
+        quantity: line.quantity,
+        attributes: { ...(group.attributes ?? {}) }
+      };
+    });
+  }
+
+  /** 供订单确认应用服务复用：把订单固化的能力快照还原成 Hook 执行名单（CORE-EXT-02D）。 */
+  capabilityInstancesFromSnapshot(
+    tenantId: string,
+    snapshot: NonNullable<RentalOrder["capabilitySnapshot"]>
+  ): WorkspaceCapabilityInstance[] {
+    return WorkspaceCapabilityService.instancesFromSnapshot(tenantId, this.workspaceOf(tenantId), snapshot);
   }
 
   private workspaceOf(tenantId: string): string {

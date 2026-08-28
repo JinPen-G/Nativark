@@ -79,7 +79,8 @@ const CAMERA_DECLARED = [
   "pickup",
   "return",
   "delivery",
-  "usage_reading"
+  "usage_reading",
+  "camera_compatibility"
 ];
 const IMPLEMENTED_REQUIRED = ["serialized_inventory", "quantity_inventory", "pickup", "return"];
 
