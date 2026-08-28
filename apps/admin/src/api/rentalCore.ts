@@ -42,6 +42,14 @@ import type {
   RemoveRentalCalendarDayOverrideRequest,
   RestoreRentalCalendarVersionRequest,
   SaveRentalCalendarDayRequest,
+  PreviewRentalCalendarRangeOverrideRequest,
+  ApplyRentalCalendarRangeOverrideRequest,
+  ApplyRentalCalendarRangeOverrideResult,
+  RentalCalendarRangeOverridePreview,
+  PreviewRentalCalendarRangeRemoveRequest,
+  ApplyRentalCalendarRangeRemoveRequest,
+  ApplyRentalCalendarRangeRemoveResult,
+  RentalCalendarRangeRemovePreview,
   SaveRentalDiscountPlanRequest,
   SaveRentalNotificationTemplateRequest,
   SaveRentalPricingPlanRequest,
@@ -91,6 +99,18 @@ export const rentalCoreApi = {
   /** 撤销原因走 body 而非查询串：覆盖原因常含客户名或事故描述，不该进访问日志。 */
   removeCalendarDayOverride: (year: number, date: string, data: RemoveRentalCalendarDayOverrideRequest) =>
     request(`/rental/v1/calendars/${year}/days/${date}`, { method: "delete", data }),
+  /** 范围覆盖预览（需求 4.5.9）：提交前展示冲突日期、当前值与将替换的字段。 */
+  calendarRangePreview: (year: number, data: PreviewRentalCalendarRangeOverrideRequest) =>
+    request<RentalCalendarRangeOverridePreview>(`/rental/v1/calendars/${year}/days/range-preview`, { method: "post", data }),
+  /** 应用范围覆盖：一次提交原子生效，共用原因/批次，只推进一次 revision。 */
+  calendarRangeApply: (year: number, data: ApplyRentalCalendarRangeOverrideRequest) =>
+    request<ApplyRentalCalendarRangeOverrideResult>(`/rental/v1/calendars/${year}/days/range`, { method: "post", data }),
+  /** 范围移除预览：展示每个日期恢复后的取值与来源。 */
+  calendarRangeRemovePreview: (year: number, data: PreviewRentalCalendarRangeRemoveRequest) =>
+    request<RentalCalendarRangeRemovePreview>(`/rental/v1/calendars/${year}/days/range-remove-preview`, { method: "post", data }),
+  /** 应用范围移除：只移除范围内带人工覆盖的日期，恢复下一优先级来源。 */
+  calendarRangeRemove: (year: number, data: ApplyRentalCalendarRangeRemoveRequest) =>
+    request<ApplyRentalCalendarRangeRemoveResult>(`/rental/v1/calendars/${year}/days/range-remove`, { method: "post", data }),
   publishCalendar: (year: number, data: PublishRentalCalendarRequest) => request<RentalCalendarYear>(`/rental/v1/calendars/${year}/publish`, { method: "post", data }),
   /** 作废年度日历草稿（需求 4.5.7）。原因必填，走 body。 */
   voidCalendarVersion: (year: number, version: string, data: VoidRentalCalendarRequest) =>

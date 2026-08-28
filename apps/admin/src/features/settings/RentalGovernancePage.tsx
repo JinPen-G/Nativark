@@ -48,6 +48,8 @@ import { rentalCoreApi } from "@/api/rentalCore";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
+import { CalendarMonthGrid } from "@/features/settings/CalendarMonthGrid";
+import { CalendarRangeModal } from "@/features/settings/CalendarRangeModal";
 
 type TabKey =
   | "category"
@@ -160,6 +162,11 @@ export function RentalGovernancePage() {
     if (permittedTabs.length && !permittedTabs.includes(tab)) setTab(permittedTabs[0]);
   }, [permittedTabs, tab]);
   const [year, setYear] = useState(currentYear);
+  // PRICE-02A（需求 4.5.9）：默认按自然月运营日历；全年列表仅作为可选视图保留。
+  const [calendarMonth, setCalendarMonth] = useState(new Date().getMonth() + 1);
+  const [calendarListView, setCalendarListView] = useState(false);
+  const [rangeOpen, setRangeOpen] = useState(false);
+  const [rangeMode, setRangeMode] = useState<"override" | "remove">("override");
   const [ruleEditor, setRuleEditor] = useState<RentalRuleVersion>();
   const [calendarDay, setCalendarDay] = useState<RentalCalendarDay>();
   const [importOpen, setImportOpen] = useState(false);
@@ -982,6 +989,13 @@ export function RentalGovernancePage() {
                     </Typography.Text>
                   </Space>
                   <Space>
+                    {/* 需求 4.5.9：默认月历视图，全年逐日长列表仅作为可选视图保留。 */}
+                    <Switch
+                      checkedChildren="列表"
+                      unCheckedChildren="月历"
+                      checked={calendarListView}
+                      onChange={setCalendarListView}
+                    />
                     <Button
                       onClick={() => {
                         setHistoryVersion(undefined);
@@ -990,6 +1004,27 @@ export function RentalGovernancePage() {
                     >
                       历史版本
                     </Button>
+                    {canEditCalendar && (
+                      <Button
+                        type="primary"
+                        onClick={() => {
+                          setRangeMode("override");
+                          setRangeOpen(true);
+                        }}
+                      >
+                        新增日期范围覆盖
+                      </Button>
+                    )}
+                    {canEditCalendar && (
+                      <Button
+                        onClick={() => {
+                          setRangeMode("remove");
+                          setRangeOpen(true);
+                        }}
+                      >
+                        移除日期范围覆盖
+                      </Button>
+                    )}
                     {canEditCalendar && (
                       <Button onClick={() => setImportOpen(true)}>应用官方来源</Button>
                     )}
@@ -1059,7 +1094,18 @@ export function RentalGovernancePage() {
                   message="法定节假日与调休工作日必须来自有来源记录的年度数据"
                   description="租户可以覆盖特殊营业日、停业日和旺季价格系数；报价会记录命中的年度日历版本。"
                 />
-                <Card className="data-panel">
+                {/* 需求 4.5.9：默认渲染自然月七列月历，点击日期查看/编辑；全年长列表按需切换。 */}
+                {!calendarListView && (
+                  <CalendarMonthGrid
+                    year={year}
+                    month={calendarMonth}
+                    onMonthChange={setCalendarMonth}
+                    days={calendar.data?.days ?? []}
+                    onDayClick={(day) => openDay(day)}
+                  />
+                )}
+                {calendarListView && (
+                <Card className="data-panel" title="全年逐日列表（可选视图）">
                   <Table<RentalCalendarDay>
                     rowKey="date"
                     size="small"
@@ -1161,6 +1207,16 @@ export function RentalGovernancePage() {
                     ]}
                   />
                 </Card>
+                )}
+                {/* PRICE-02A（需求 4.5.9）：范围覆盖/移除的统一抽屉（预览 → 确认 → 原子应用）。 */}
+                <CalendarRangeModal
+                  mode={rangeMode}
+                  year={year}
+                  currentRevision={calendar.data?.revision}
+                  open={rangeOpen}
+                  onClose={() => setRangeOpen(false)}
+                  onApplied={() => setRangeOpen(false)}
+                />
               </Space>
             )}
             {tab === "membership" && (
@@ -1777,6 +1833,25 @@ export function RentalGovernancePage() {
             saveDay.mutate({ ...values, hours: calendarDay?.hours })
           }
         >
+          {/* PRICE-02A：范围覆盖的来源信息（批次与日期时间边界），在日期详情里可见。 */}
+          {calendarDay?.overrideScope && (
+            <Alert
+              style={{ marginBottom: 16 }}
+              type="info"
+              showIcon
+              message={
+                calendarDay.overrideScope.kind === "range"
+                  ? `属于范围覆盖：${calendarDay.overrideScope.rangeStart} ~ ${calendarDay.overrideScope.rangeEnd}`
+                  : "单日覆盖"
+              }
+              description={
+                `批次 ${calendarDay.overrideScope.batchId}` +
+                (calendarDay.overrideScope.startDateTime
+                  ? `；起止时点 ${calendarDay.overrideScope.startDateTime} ~ ${calendarDay.overrideScope.endDateTime}`
+                  : "")
+              }
+            />
+          )}
           <Form.Item name="date" label="日期">
             <Input disabled />
           </Form.Item>
