@@ -221,60 +221,158 @@ const probeInstance = (version, config = { threshold: 50 }) => ({
   implementationVersion: version, configVersion: "v1", config, revision: 1, createdAt: "", updatedAt: ""
 });
 const probeCapabilities = (instances) => ({ async enabledInstances() { return instances; } });
+/**
+ * 测试能力只适用于 test_lab，因此**所有**判定都必须在 test_lab 品类下发起。
+ * 早前这里传的是 `vehicle` 并断言执行成功——那等于在验证「运行时不检查适用品类」，
+ * 恰好是本轮修掉的 fail-open。跨品类不执行由第 7 节反向验证。
+ */
+const probeRun = (extra = {}) => ({
+  point: "order_confirmation",
+  tenantId: TEST_TENANT,
+  workspaceId: TEST_WS,
+  categoryCode: TEST_CATEGORY_CODE,
+  subject: { id: "order_ext", amount: 100 },
+  ...extra
+});
 
 // 生产注册表**不含** test_probe，因此默认运行时登记它必须失败——证明它不在生产运行时。
 assert.throws(
-  () => new CapabilityHookRuntime(probeCapabilities([])).register({ code: TEST_CAPABILITY_CODE, order: 10, hooks: { order_confirmation: () => ({ decision: "allow" }) } }),
+  () => new CapabilityHookRuntime(probeCapabilities([])).register({ code: TEST_CAPABILITY_CODE, implementationVersion: "test-1.0", order: 10, hooks: { order_confirmation: () => ({ decision: "allow" }) } }),
   /未注册的能力/u,
   "测试能力不在生产注册表里，默认运行时必须拒绝登记（不污染生产）"
 );
 
-// 注入候选注册表（prod + 测试能力）后即可登记并运行。
-const registry = candidateModules();
-const runtimeV2 = new CapabilityHookRuntime(probeCapabilities([probeInstance("test-2.0")]), undefined, registry);
-let observedVersion;
-runtimeV2.register({
-  code: TEST_CAPABILITY_CODE,
-  order: 10,
-  hooks: {
-    order_confirmation: (context) => {
-      observedVersion = context.capability.implementationVersion;
-      // 能力按自己的配置给出费用依据与提示——只是意见，不改 Core。
-      if (context.subject.amount > context.capability.config.threshold) {
-        return { decision: "warn", notices: [{ code: "over_threshold", message: "金额超过阈值" }], feeBases: [{ code: "probe_fee", label: "探针费", amount: 9, currency: "CNY", basis: "超阈值固定 9 元" }] };
+/**
+ * 两版实现的**行为不同**，不是同一个 handler 读版本字符串：
+ *   test-1.0：只在超阈值时给提示，放行；
+ *   test-2.0：超阈值直接阻止（规则收紧）。
+ * 只有行为不同，才能证明「在途订单执行的是 v1 而不是 v2」。
+ */
+const registerProbeV1 = (runtime, calls) =>
+  runtime.register({
+    code: TEST_CAPABILITY_CODE,
+    implementationVersion: "test-1.0",
+    order: 10,
+    hooks: {
+      order_confirmation: (context) => {
+        calls.push(`v1:${context.capability.config.threshold}`);
+        if (context.subject.amount > context.capability.config.threshold) {
+          return {
+            decision: "warn",
+            notices: [{ code: "over_threshold", message: "金额超过阈值" }],
+            feeBases: [{ code: "probe_fee", label: "探针费", amount: 9, currency: "CNY", basis: "超阈值固定 9 元" }]
+          };
+        }
+        return { decision: "allow" };
       }
-      return { decision: "allow" };
     }
+  });
+const registerProbeV2 = (runtime, calls) =>
+  runtime.register({
+    code: TEST_CAPABILITY_CODE,
+    implementationVersion: "test-2.0",
+    order: 10,
+    hooks: {
+      order_confirmation: (context) => {
+        calls.push(`v2:${context.capability.config.threshold}`);
+        if (context.subject.amount > context.capability.config.threshold) {
+          return { decision: "block", blockReasons: [{ code: "over_threshold_v2", message: "v2 起超阈值一律阻止" }] };
+        }
+        return { decision: "allow" };
+      }
+    }
+  });
+
+const registry = candidateModules();
+
+// 6a. 接入即运行：注入候选注册表后即可登记并真的执行，产物进入合并结论。
+{
+  const calls = [];
+  const runtime = new CapabilityHookRuntime(probeCapabilities([probeInstance("test-1.0")]), undefined, registry);
+  registerProbeV1(runtime, calls);
+  const outcome = await runtime.run(probeRun());
+  assert.deepEqual(calls, ["v1:50"], "接入的测试能力必须真的被执行，且看到自己的配置");
+  assert.deepEqual(outcome.executed.map((row) => row.capability), [TEST_CAPABILITY_CODE], "executed 必须含测试能力");
+  assert.equal(outcome.executed[0].implementationVersion, "test-1.0");
+  assert.equal(outcome.notices[0]?.code, "over_threshold", "测试能力的提示必须进入合并结论");
+  assert.equal(outcome.feeBases[0]?.amount, 9, "测试能力的费用依据必须进入合并结论");
+  assert.equal(outcome.blocked, false, "v1 的行为是放行");
+}
+
+// 6b. 升级隔离（行为可分辨）：当前实例升到 test-2.0，在途订单固化的是 test-1.0。
+{
+  const calls = [];
+  // 两版实现同时登记——旧版必须保留，否则引用它的在途订单会 fail-closed。
+  const runtime = new CapabilityHookRuntime(probeCapabilities([probeInstance("test-2.0")]), undefined, registry);
+  registerProbeV1(runtime, calls);
+  registerProbeV2(runtime, calls);
+  assert.deepEqual(
+    runtime.registeredVersions(),
+    [`${TEST_CAPABILITY_CODE}@test-1.0`, `${TEST_CAPABILITY_CODE}@test-2.0`],
+    "同一能力的两个版本必须共存"
+  );
+
+  // 新业务：走当前实例的 test-2.0 → 超阈值被阻止。
+  const fresh = await runtime.run(probeRun());
+  assert.deepEqual(calls, ["v2:50"], "新业务必须执行升级后的 v2 实现");
+  assert.equal(fresh.blocked, true, "v2 收紧后新业务被阻止");
+  assert.equal(fresh.blockReasons[0].code, "over_threshold_v2");
+
+  // 在途订单：带 test-1.0 快照 → 必须执行 v1 并**放行**（v1 只提示）。
+  // 旧实现（按 code 取唯一 handler）在这里会被 v2 阻止，因此这条断言真的有区分力。
+  calls.length = 0;
+  const inflight = await runtime.run(probeRun({ instances: [probeInstance("test-1.0")] }));
+  assert.deepEqual(calls, ["v1:50"], "在途订单必须执行固化快照的 v1 实现");
+  assert.equal(inflight.blocked, false, "升级到 v2 不得改写在途订单的判定结果");
+  assert.equal(inflight.notices[0]?.code, "over_threshold", "在途订单仍得到 v1 的提示");
+  assert.equal(inflight.executed[0].implementationVersion, "test-1.0", "审计记的是实际执行的版本");
+}
+
+// 6c. 旧版本未登记（例如被误删）时，引用它的在途订单必须明确失败，不得静默执行 v2。
+{
+  const calls = [];
+  const runtime = new CapabilityHookRuntime(probeCapabilities([probeInstance("test-2.0")]), undefined, registry);
+  registerProbeV2(runtime, calls);
+  const outcome = await runtime.run(probeRun({ instances: [probeInstance("test-1.0")] }));
+  assert.deepEqual(calls, [], "快照版本缺失时不得退回任何其他版本执行");
+  assert.equal(outcome.blocked, true, "快照版本缺失必须 fail-closed");
+  assert.equal(outcome.blockReasons[0].code, "capability_implementation_version_missing");
+  assert.match(outcome.blockReasons[0].message, /test-1\.0/u);
+}
+
+// 6d. 必选能力的 Hook 抛错必须 fail-closed（把测试能力当作必选来验证）。
+{
+  const requiredRegistry = candidateModules({ kind: "category_required" });
+  const runtime = new CapabilityHookRuntime(probeCapabilities([probeInstance("test-1.0")]), undefined, requiredRegistry);
+  runtime.register({ code: TEST_CAPABILITY_CODE, implementationVersion: "test-1.0", order: 10, hooks: { order_confirmation: () => { throw new Error("探针故障"); } } });
+  const outcome = await runtime.run(probeRun({ subject: { id: "o", amount: 1 } }));
+  assert.equal(outcome.blocked, true, "必选测试能力 Hook 抛错必须 fail-closed 阻止");
+}
+console.log("  ✓ 测试能力接入即运行：v1/v2 行为不同可分辨，在途走 v1、新业务走 v2、缺版本 fail-closed、必选故障 fail-closed");
+
+// ============ 7. 反向隔离：测试能力不得在其他品类上执行 ============
+// 第五品类接入的另一半——正向能跑不代表没漏到别处。运行时必须**独立**校验适用品类，
+// 不能只依赖「启用接口不让启」：一条脏实例或脏快照就能绕过启用接口。
+{
+  for (const categoryCode of ["camera", "camping", "vehicle", "construction"]) {
+    const calls = [];
+    const runtime = new CapabilityHookRuntime(probeCapabilities([probeInstance("test-1.0")]), undefined, registry);
+    registerProbeV1(runtime, calls);
+    const outcome = await runtime.run(probeRun({ categoryCode }));
+    assert.deepEqual(calls, [], `${categoryCode} 品类下不得执行仅适用于 ${TEST_CATEGORY_CODE} 的测试能力`);
+    assert.equal(outcome.blocked, true, `${categoryCode} 品类下必须 fail-closed`);
+    assert.equal(outcome.blockReasons[0].code, "capability_not_applicable_to_category");
+    assert.match(outcome.blockReasons[0].message, new RegExp(categoryCode, "u"), "错误必须点明是哪个品类");
   }
-});
-const ranOutcome = await runtimeV2.run({
-  point: "order_confirmation", tenantId: TEST_TENANT, workspaceId: TEST_WS, categoryCode: "vehicle",
-  subject: { id: "order_ext", amount: 100 }
-});
-assert.equal(observedVersion, "test-2.0", "接入的测试能力必须真的被执行");
-assert.deepEqual(ranOutcome.executed.map((row) => row.capability), [TEST_CAPABILITY_CODE], "executed 必须含测试能力");
-assert.equal(ranOutcome.notices[0]?.code, "over_threshold", "测试能力的提示必须进入合并结论");
-assert.equal(ranOutcome.feeBases[0]?.amount, 9, "测试能力的费用依据必须进入合并结论");
-
-// 升级隔离：当前实例已是 test-2.0，但在途订单固化的快照是 test-1.0。
-// 传入 v1 快照后能力必须看到 v1——升级不得改写在途订单的判定版本。
-observedVersion = undefined;
-await runtimeV2.run({
-  point: "order_confirmation", tenantId: TEST_TENANT, workspaceId: TEST_WS, categoryCode: "vehicle",
-  subject: { id: "order_ext", amount: 10 },
-  instances: [probeInstance("test-1.0")]
-});
-assert.equal(observedVersion, "test-1.0", "在途订单必须按固化快照的实现版本判定，升级到 test-2.0 不改写历史");
-
-// 必选能力的 Hook 抛错必须 fail-closed（把测试能力当作必选来验证）。
-const requiredRegistry = candidateModules({ kind: "category_required" });
-const runtimeReq = new CapabilityHookRuntime(probeCapabilities([probeInstance("test-1.0")]), undefined, requiredRegistry);
-runtimeReq.register({ code: TEST_CAPABILITY_CODE, order: 10, hooks: { order_confirmation: () => { throw new Error("探针故障"); } } });
-const failOutcome = await runtimeReq.run({
-  point: "order_confirmation", tenantId: TEST_TENANT, workspaceId: TEST_WS, categoryCode: "vehicle", subject: { id: "o", amount: 1 }
-});
-assert.equal(failOutcome.blocked, true, "必选测试能力 Hook 抛错必须 fail-closed 阻止");
-console.log("  ✓ 测试能力接入即运行：仅注入注册表即可登记执行，升级后在途按原版本、必选故障 fail-closed");
+  // 同一份快照在 test_lab 下必须照常执行——证明上面的拒绝来自品类判定，而不是快照本身无效。
+  const calls = [];
+  const runtime = new CapabilityHookRuntime(probeCapabilities([probeInstance("test-1.0")]), undefined, registry);
+  registerProbeV1(runtime, calls);
+  const ok = await runtime.run(probeRun({ categoryCode: TEST_CATEGORY_CODE }));
+  assert.deepEqual(calls, ["v1:50"], "同一快照在适用品类下必须执行（否则上面的断言没有区分力）");
+  assert.equal(ok.blocked, false);
+  console.log("  ✓ 反向隔离：测试能力在四个生产品类上一律拒绝执行，仅在 test_lab 下运行");
+}
 
 console.log("\nCORE-EXT-03 扩展一致性与第五品类门禁用例全部通过");
 })();

@@ -4127,11 +4127,19 @@ export interface RentalCapabilityHookResult {
 /**
  * 能力模块的 Hook 实现。一个能力可以只实现自己关心的节点。
  *
+ * `implementationVersion` 是**这份实现**的版本，登记表按 `(code, implementationVersion)`
+ * 而不是只按 `code` 索引。这一点是历史隔离的前提：报价与订单固化了下单当时的实现版本，
+ * 运行时必须调用**那个版本的实现**。若只按 code 解析，升级后历史订单会执行新规则，
+ * 而上下文里仍标着旧版本号——快照看起来对了，行为却已经被改写。
+ *
+ * 因此仍有在途业务引用的旧版本实现必须继续登记，不能因为发布了新版就删掉。
+ *
  * `order` 是同节点内多能力之间的**确定性执行序**：Core 按 (order, code) 升序执行，
  * 不依赖注册表数组下标或 Map 插入序——那两者都会因为有人重排注册表而静默改变判定顺序。
  */
 export interface RentalCapabilityHookModule {
   code: RentalCapability;
+  implementationVersion: string;
   order: number;
   hooks: Partial<Record<RentalCapabilityHookPoint, RentalCapabilityHookHandler>>;
 }

@@ -58,18 +58,18 @@ void (async () => {
 {
   const runtime = new CapabilityHookRuntime(fakeCapabilities([]));
   assert.throws(
-    () => runtime.register({ code: "not_a_capability", order: 10, hooks: { quote_validation: () => ({ decision: "allow" }) } }),
+    () => runtime.register({ code: "not_a_capability", implementationVersion: "core-1.0", order: 10, hooks: { quote_validation: () => ({ decision: "allow" }) } }),
     /未注册的能力/u,
     "拼错的 code 必须直接失败，否则会被静默登记成永不执行的 Hook"
   );
   assert.throws(
-    () => runtime.register({ code: "delivery", order: 10, hooks: {} }),
+    () => runtime.register({ code: "delivery", implementationVersion: "core-1.0", order: 10, hooks: {} }),
     /没有任何触发点/u,
     "登记了 Hook 却没有触发点属配置错误"
   );
-  runtime.register({ code: "delivery", order: 10, hooks: { quote_validation: () => ({ decision: "allow" }) } });
+  runtime.register({ code: "delivery", implementationVersion: "core-1.0", order: 10, hooks: { quote_validation: () => ({ decision: "allow" }) } });
   assert.throws(
-    () => runtime.register({ code: "delivery", order: 20, hooks: { quote_validation: () => ({ decision: "allow" }) } }),
+    () => runtime.register({ code: "delivery", implementationVersion: "core-1.0", order: 20, hooks: { quote_validation: () => ({ decision: "allow" }) } }),
     /不能重复登记/u,
     "重复登记会让两份实现互相覆盖"
   );
@@ -92,10 +92,10 @@ void (async () => {
       // qualification 连实例行都没有 = 从未启用
     ])
   );
-  runtime.register({ code: "delivery", order: 10, hooks: { quote_validation: record("delivery") } });
-  runtime.register({ code: "locker", order: 20, hooks: { quote_validation: record("locker") } });
-  runtime.register({ code: "usage_reading", order: 30, hooks: { quote_validation: record("usage_reading") } });
-  runtime.register({ code: "qualification", order: 40, hooks: { quote_validation: record("qualification") } });
+  runtime.register({ code: "delivery", implementationVersion: "core-1.0", order: 10, hooks: { quote_validation: record("delivery") } });
+  runtime.register({ code: "locker", implementationVersion: "core-1.0", order: 20, hooks: { quote_validation: record("locker") } });
+  runtime.register({ code: "usage_reading", implementationVersion: "core-1.0", order: 30, hooks: { quote_validation: record("usage_reading") } });
+  runtime.register({ code: "qualification", implementationVersion: "core-1.0", order: 40, hooks: { quote_validation: record("qualification") } });
 
   const outcome = await runtime.run(baseRun());
   assert.deepEqual(calls, ["delivery"], "只有 enabled 的能力可以执行；paused/disabled/无实例一律不执行");
@@ -114,6 +114,7 @@ void (async () => {
   const runtime = new CapabilityHookRuntime(fakeCapabilities([instance("delivery")]));
   runtime.register({
     code: "delivery",
+    implementationVersion: "core-1.0",
     order: 10,
     hooks: {
       quote_validation: () => {
@@ -142,10 +143,10 @@ void (async () => {
     const runtime = new CapabilityHookRuntime(fakeCapabilities(instancesInAnyOrder));
     // order 相同的两个能力（locker/qualification）必须按 code 升序，
     // 不能依赖注册顺序或实例数组顺序。
-    runtime.register({ code: "usage_reading", order: 5, hooks: { quote_validation: () => (calls.push("usage_reading"), { decision: "allow" }) } });
-    runtime.register({ code: "locker", order: 10, hooks: { quote_validation: () => (calls.push("locker"), { decision: "allow" }) } });
-    runtime.register({ code: "qualification", order: 10, hooks: { quote_validation: () => (calls.push("qualification"), { decision: "allow" }) } });
-    runtime.register({ code: "delivery", order: 1, hooks: { quote_validation: () => (calls.push("delivery"), { decision: "allow" }) } });
+    runtime.register({ code: "usage_reading", implementationVersion: "core-1.0", order: 5, hooks: { quote_validation: () => (calls.push("usage_reading"), { decision: "allow" }) } });
+    runtime.register({ code: "locker", implementationVersion: "core-1.0", order: 10, hooks: { quote_validation: () => (calls.push("locker"), { decision: "allow" }) } });
+    runtime.register({ code: "qualification", implementationVersion: "core-1.0", order: 10, hooks: { quote_validation: () => (calls.push("qualification"), { decision: "allow" }) } });
+    runtime.register({ code: "delivery", implementationVersion: "core-1.0", order: 1, hooks: { quote_validation: () => (calls.push("delivery"), { decision: "allow" }) } });
     return { runtime, calls };
   };
 
@@ -172,6 +173,7 @@ void (async () => {
   const runtime = new CapabilityHookRuntime(fakeCapabilities([instance("delivery")]));
   runtime.register({
     code: "delivery",
+    implementationVersion: "core-1.0",
     order: 10,
     hooks: {
       order_confirmation: (context) => {
@@ -215,6 +217,7 @@ void (async () => {
   );
   runtime.register({
     code: "serialized_inventory",
+    implementationVersion: "core-1.0",
     order: 10,
     hooks: {
       order_confirmation: () => {
@@ -224,6 +227,7 @@ void (async () => {
   });
   runtime.register({
     code: "delivery",
+    implementationVersion: "core-1.0",
     order: 20,
     hooks: {
       order_confirmation: () => {
@@ -254,7 +258,7 @@ void (async () => {
 {
   const runtime = new CapabilityHookRuntime(fakeCapabilities([instance("delivery")]));
   let payload = { decision: "block" };
-  runtime.register({ code: "delivery", order: 10, hooks: { quote_validation: () => payload } });
+  runtime.register({ code: "delivery", implementationVersion: "core-1.0", order: 10, hooks: { quote_validation: () => payload } });
 
   await assert.rejects(
     runtime.run(baseRun()),
@@ -281,6 +285,7 @@ void (async () => {
   );
   runtime.register({
     code: "delivery",
+    implementationVersion: "core-1.0",
     order: 10,
     hooks: {
       settlement: (context) => {
@@ -300,6 +305,9 @@ void (async () => {
   });
   runtime.register({
     code: "locker",
+    // 实例固化的是 shared-2.0，因此必须登记同名版本才能被解析到。
+    // 版本不一致时运行时会 fail-closed（第 11 节专门验证），不会退回其他版本。
+    implementationVersion: "shared-2.0",
     order: 20,
     hooks: {
       settlement: (context) => {
@@ -364,6 +372,7 @@ void (async () => {
     const runtime = new CapabilityHookRuntime(fakeCapabilities([instance("delivery")]), fakeAudits);
     runtime.register({
       code: "delivery",
+      implementationVersion: "core-1.0",
       order: 10,
       hooks: {
         order_confirmation: (context) => {
@@ -387,6 +396,7 @@ void (async () => {
     const runtime = new CapabilityHookRuntime(fakeCapabilities([instance("delivery")]), fakeAudits);
     runtime.register({
       code: "delivery",
+      implementationVersion: "core-1.0",
       order: 10,
       hooks: {
         order_confirmation: () => ({ decision: "block", blockReasons: [{ code: "no_slot", message: "无可用配送时段" }] })
@@ -416,7 +426,7 @@ void (async () => {
   // 装配缺仓储时必须明确失败，不能静默跳过审计。
   {
     const runtime = new CapabilityHookRuntime(fakeCapabilities([instance("delivery")]));
-    runtime.register({ code: "delivery", order: 10, hooks: { order_confirmation: () => ({ decision: "allow" }) } });
+    runtime.register({ code: "delivery", implementationVersion: "core-1.0", order: 10, hooks: { order_confirmation: () => ({ decision: "allow" }) } });
     await assert.rejects(
       runtime.evaluate(evaluateInput()),
       /未注入，无法落 Hook 审计/u,
@@ -431,6 +441,7 @@ void (async () => {
     const runtime = new CapabilityHookRuntime(fakeCapabilities([instance("delivery")]), fakeAudits);
     runtime.register({
       code: "delivery",
+      implementationVersion: "core-1.0",
       order: 10,
       hooks: {
         order_confirmation: () => ({ decision: "block", blockReasons: [{ code: "x", message: "无事务也要拦" }] })
@@ -446,46 +457,197 @@ void (async () => {
   console.log("  ✓ evaluate：阻止抛 409 且不落审计，放行用调用方事务落审计，无事务仍强制判定，缺仓储明确失败");
 }
 
-// ============ 11. CORE-EXT-02D：传入的能力快照优先于当前实例（在途订单按原版本履约） ============
+// ============ 11. 快照版本必须选中对应实现（行为隔离，而不是只读版本号） ============
 {
-  // 当前实例是 v2，但订单固化的快照是 v1。传入快照后，能力必须看到 v1——
-  // 否则升级会悄悄改写在途订单的判定版本。
+  // 两个版本的**行为不同**：v1 放行，v2 收紧为阻止。
+  // 只比较 context.capability.implementationVersion 字符串是证明不了隔离的——
+  // 那种测试在「运行时按 code 取唯一 handler」的实现下同样会绿。
+  const buildRuntime = (currentInstances, register = ["shared-1.0", "shared-2.0"]) => {
+    const calls = [];
+    const runtime = new CapabilityHookRuntime(fakeCapabilities(currentInstances));
+    if (register.includes("shared-1.0")) {
+      runtime.register({
+        code: "delivery",
+        implementationVersion: "shared-1.0",
+        order: 10,
+        hooks: {
+          allocation_dispatch: (context) => {
+            calls.push(`v1:${context.capability.configVersion}:${context.capability.config.maxKm}`);
+            return { decision: "allow" };
+          }
+        }
+      });
+    }
+    if (register.includes("shared-2.0")) {
+      runtime.register({
+        code: "delivery",
+        implementationVersion: "shared-2.0",
+        order: 10,
+        hooks: {
+          allocation_dispatch: (context) => {
+            calls.push(`v2:${context.capability.configVersion}:${context.capability.config.maxKm}`);
+            return { decision: "block", blockReasons: [{ code: "v2_tightened", message: "v2 收紧了配送半径规则" }] };
+          }
+        }
+      });
+    }
+    return { runtime, calls };
+  };
+
   const currentV2 = [instance("delivery", "enabled", { implementationVersion: "shared-2.0", configVersion: "v2", config: { maxKm: 50 } })];
   const pinnedV1 = [instance("delivery", "enabled", { implementationVersion: "shared-1.0", configVersion: "v1", config: { maxKm: 30 } })];
-  const seen = {};
-  const runtime = new CapabilityHookRuntime(fakeCapabilities(currentV2));
+
+  // 同一 code 可以登记多个版本，且互不覆盖。
+  {
+    const { runtime } = buildRuntime(currentV2);
+    assert.deepEqual(
+      runtime.registeredVersions(),
+      ["delivery@shared-1.0", "delivery@shared-2.0"],
+      "同一能力的多个版本必须共存，否则旧版本一发布就没了"
+    );
+    assert.deepEqual(runtime.registeredCodes(), ["delivery"], "registeredCodes 仍按能力去重");
+  }
+
+  // 新业务（不传快照）→ 当前实例 v2 → 必须执行 v2 的实现并被它阻止。
+  {
+    const { runtime, calls } = buildRuntime(currentV2);
+    const outcome = await runtime.run(baseRun({ point: "allocation_dispatch" }));
+    assert.deepEqual(calls, ["v2:v2:50"], "新业务必须执行当前版本 v2 的实现");
+    assert.equal(outcome.blocked, true, "v2 的行为是阻止，新业务必须真的被阻止");
+    assert.equal(outcome.blockReasons[0].code, "v2_tightened");
+    assert.equal(outcome.executed[0].implementationVersion, "shared-2.0");
+  }
+
+  // 在途业务（传 v1 快照）→ 必须执行 v1 的实现，且**不被 v2 的新规则阻止**。
+  // 这是与旧实现的分水岭：旧实现会调用同一个 handler，于是这里会被 v2 阻止。
+  {
+    const { runtime, calls } = buildRuntime(currentV2);
+    const outcome = await runtime.run(baseRun({ point: "allocation_dispatch", instances: pinnedV1 }));
+    assert.deepEqual(calls, ["v1:v1:30"], "在途业务必须执行快照固化的 v1 实现，配置也来自快照");
+    assert.equal(outcome.blocked, false, "升级到 v2 不得改写在途业务的判定结果");
+    assert.equal(outcome.executed[0].implementationVersion, "shared-1.0", "审计里记的是实际执行的版本");
+  }
+
+  // 旧版本被删（只登记 v2）→ 引用 v1 的在途业务必须**明确失败**，
+  // 绝不能静默退回 v2 用新规则重放历史。
+  {
+    const { runtime, calls } = buildRuntime(currentV2, ["shared-2.0"]);
+    const outcome = await runtime.run(baseRun({ point: "allocation_dispatch", instances: pinnedV1 }));
+    assert.deepEqual(calls, [], "快照版本不存在时不得执行任何其他版本");
+    assert.equal(outcome.blocked, true, "快照版本缺失必须 fail-closed");
+    assert.equal(outcome.blockReasons[0].code, "capability_implementation_version_missing");
+    assert.match(outcome.blockReasons[0].message, /shared-1\.0/u, "错误必须点明缺的是哪个版本");
+    assert.match(outcome.blockReasons[0].message, /shared-2\.0/u, "错误必须列出实际登记了哪些版本");
+    assert.equal(outcome.executed[0].failed, true, "版本缺失属基础设施问题，必须标记 failed 而不是伪装成业务判定");
+  }
+
+  // 完全没有登记 Hook 的能力（三种库存、取还等由 Core 主流程实现的能力）→ 静默跳过，
+  // 不能与「缺版本」混为一谈，否则每张订单都会被这些能力阻止。
+  {
+    const runtime = new CapabilityHookRuntime(
+      fakeCapabilities([instance("serialized_inventory", "enabled", { implementationVersion: "core-1.0" })])
+    );
+    const outcome = await runtime.run(baseRun({ point: "allocation_dispatch" }));
+    assert.equal(outcome.blocked, false, "没有任何 Hook 实现的能力不参与判定，不得阻止");
+    assert.deepEqual(outcome.executed, [], "它也不该出现在 executed 里");
+  }
+
+  // 发布自检：注册表当前版本没有实现时必须启动即失败。
+  {
+    const { runtime } = buildRuntime(currentV2, ["shared-1.0"]);
+    // delivery 在生产注册表里没有 implementationVersion，因此自检跳过它；
+    // 用一个当前版本为 core-1.0 的能力来验证自检真的会报。
+    runtime.register({ code: "pickup", implementationVersion: "core-0.9", order: 5, hooks: { allocation_dispatch: () => ({ decision: "allow" }) } });
+    assert.throws(
+      () => runtime.assertCurrentVersionsRegistered(),
+      /注册表当前实现版本是 core-1\.0/u,
+      "升了注册表版本却没发实现时必须启动即失败，而不是等第一张订单 fail-closed"
+    );
+  }
+  console.log("  ✓ 版本化实现：多版本共存、新业务走当前版、在途走快照版（行为不同可分辨）、缺版本 fail-closed、无 Hook 静默跳过、发布自检报错");
+}
+
+// ============ 12. 运行时独立兜底适用品类（不只在启用接口校验） ============
+{
+  // camera_compatibility 的 applicableCategories 是 [camera]。
+  // 若一条错误的实例或快照把它带到别的品类上，运行时必须自己拒绝——
+  // 只靠「启用时校验」的话，一条脏快照就能让能力在它根本不适用的品类上判定。
+  const camInstance = [instance("camera_compatibility", "enabled", { implementationVersion: "cam-1.0" })];
+  const build = () => {
+    const calls = [];
+    const runtime = new CapabilityHookRuntime(fakeCapabilities(camInstance));
+    runtime.register({
+      code: "camera_compatibility",
+      implementationVersion: "cam-1.0",
+      order: 20,
+      hooks: { order_confirmation: () => (calls.push("ran"), { decision: "allow" }) }
+    });
+    return { runtime, calls };
+  };
+
+  // 适用品类：正常执行。
+  {
+    const { runtime, calls } = build();
+    const outcome = await runtime.run(baseRun({ point: "order_confirmation", categoryCode: "camera" }));
+    assert.deepEqual(calls, ["ran"], "适用品类下必须正常执行");
+    assert.equal(outcome.blocked, false);
+  }
+
+  // 不适用品类：不得执行，且必须明确拒绝而不是静默跳过。
+  for (const categoryCode of ["camping", "vehicle", "construction"]) {
+    const { runtime, calls } = build();
+    const outcome = await runtime.run(baseRun({ point: "order_confirmation", categoryCode }));
+    assert.deepEqual(calls, [], `${categoryCode} 品类下不得执行仅适用于 camera 的能力`);
+    assert.equal(outcome.blocked, true, `${categoryCode} 品类下必须 fail-closed`);
+    assert.equal(outcome.blockReasons[0].code, "capability_not_applicable_to_category");
+    assert.match(outcome.blockReasons[0].message, new RegExp(categoryCode, "u"), "错误必须点明是哪个品类");
+    assert.equal(outcome.executed[0].failed, true, "数据不一致属基础设施问题，必须标记 failed");
+  }
+
+  // applicableCategories 为 "all" 的共享能力在任何品类都可执行。
+  {
+    const calls = [];
+    const runtime = new CapabilityHookRuntime(fakeCapabilities([instance("delivery")]));
+    runtime.register({
+      code: "delivery",
+      implementationVersion: "core-1.0",
+      order: 10,
+      hooks: { order_confirmation: () => (calls.push("ran"), { decision: "allow" }) }
+    });
+    await runtime.run(baseRun({ point: "order_confirmation", categoryCode: "vehicle" }));
+    assert.deepEqual(calls, ["ran"], "applicableCategories 为 all 的能力不受品类限制");
+  }
+  console.log("  ✓ 适用品类兜底：适用则执行，不适用则拒绝执行并明确报错，shared 能力不受限");
+}
+
+// ============ 13. 能力已被停用，但在途订单仍按固化快照履约 ============
+{
+  // 当前 enabledInstances 为空（能力已被暂停或停用），传入订单固化的快照后仍必须执行：
+  // 否则运营暂停一个能力就会让所有在途订单中途改变履约规则。
+  const pinned = [instance("delivery", "enabled", { implementationVersion: "shared-1.0", configVersion: "v3", config: { maxKm: 42 } })];
+  const seen = [];
+  const runtime = new CapabilityHookRuntime(fakeCapabilities([]));
   runtime.register({
     code: "delivery",
+    implementationVersion: "shared-1.0",
     order: 10,
     hooks: {
       allocation_dispatch: (context) => {
-        seen.version = context.capability.implementationVersion;
-        seen.configVersion = context.capability.configVersion;
-        seen.maxKm = context.capability.config.maxKm;
+        seen.push(`${context.capability.implementationVersion}:${context.capability.configVersion}:${context.capability.config.maxKm}`);
         return { decision: "allow" };
       }
     }
   });
 
-  // 不传 instances：用当前实例 v2。
-  await runtime.run(baseRun({ point: "allocation_dispatch" }));
-  assert.equal(seen.version, "shared-2.0", "不传快照时应使用当前实例版本");
+  // 不传快照 → 当前没有任何已启用能力 → 什么都不执行。
+  const withoutSnapshot = await runtime.run(baseRun({ point: "allocation_dispatch" }));
+  assert.deepEqual(seen, [], "能力已停用且不带快照时不得执行");
+  assert.deepEqual(withoutSnapshot.executed, []);
 
-  // 传入订单固化的 v1 快照：必须覆盖当前实例。
-  await runtime.run(baseRun({ point: "allocation_dispatch", instances: pinnedV1 }));
-  assert.equal(seen.version, "shared-1.0", "传入快照后在途订单必须按快照版本判定，而不是升级后的当前版本");
-  assert.equal(seen.configVersion, "v1", "配置版本也必须来自快照");
-  assert.equal(seen.maxKm, 30, "配置本体必须来自快照");
-
-  // 能力当前已全部停用（enabledInstances 为空），但传入快照仍让它执行——
-  // 在途订单不因能力被暂停而中断履约。
-  const pinnedStill = [instance("delivery", "enabled", { implementationVersion: "shared-1.0" })];
-  const calls = [];
-  const r2 = new CapabilityHookRuntime(fakeCapabilities([]));
-  r2.register({ code: "delivery", order: 10, hooks: { allocation_dispatch: () => (calls.push("ran"), { decision: "allow" }) } });
-  await r2.run(baseRun({ point: "allocation_dispatch", instances: pinnedStill }));
-  assert.deepEqual(calls, ["ran"], "能力当前已停用时，在途订单仍按其固化快照继续履约");
-  console.log("  ✓ 快照优先：在途订单按固化的实现版本/配置判定，且能力停用后仍继续履约");
+  // 传快照 → 按快照继续履约，版本与配置都来自快照。
+  await runtime.run(baseRun({ point: "allocation_dispatch", instances: pinned }));
+  assert.deepEqual(seen, ["shared-1.0:v3:42"], "能力停用后，在途订单仍按其固化快照继续履约");
+  console.log("  ✓ 停用不破坏在途：无快照不执行，带快照按原版本与原配置继续履约");
 }
 
 console.log("\nCORE-EXT-02B Hook 运行时用例全部通过");

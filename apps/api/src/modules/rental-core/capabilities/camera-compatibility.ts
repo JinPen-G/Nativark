@@ -201,6 +201,10 @@ export function buildCameraCompatibilityHookModule(): RentalCapabilityHookModule
 
   return {
     code: "camera_compatibility",
+    // 规则本体的版本。登记表按 (code, implementationVersion) 索引，因此这个值
+    // 决定了哪些报价/订单快照会落到这份实现上。规则改变行为时必须发新版本并**保留旧版**，
+    // 否则在途订单会落到「快照版本找不到」的 fail-closed 分支。
+    implementationVersion: CAMERA_COMPATIBILITY_RULESET_VERSION,
     order: 20,
     hooks: {
       quote_validation: (context) => evaluate("quote_validation", context.subject as CameraCompatibilitySubject, context.capability.config),

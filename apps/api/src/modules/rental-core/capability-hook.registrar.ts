@@ -21,7 +21,14 @@ export class CapabilityHookRegistrar implements OnApplicationBootstrap {
 
   onApplicationBootstrap() {
     // CAM-01A：摄影器材兼容性（仅摄影品类适用，由注册表的 applicableCategories 收口）。
+    //
+    // 规则行为变更时的做法：新增一个 `buildCameraCompatibilityHookModule("cam-2.0")` 并
+    // **同时保留** cam-1.0 的登记，直到没有在途订单再引用它。登记表按
+    // (code, implementationVersion) 索引，删掉旧版会让引用它的在途订单 fail-closed。
     this.runtime.register(buildCameraCompatibilityHookModule());
-    this.logger.log(`已登记 capability Hook：${this.runtime.registeredCodes().join("、")}`);
+    // 发布自检：注册表当前声明的实现版本必须真的有实现。
+    // 捕捉「升了注册表版本号却忘了发实现」——那会让该能力对新业务全面 fail-closed。
+    this.runtime.assertCurrentVersionsRegistered();
+    this.logger.log(`已登记 capability Hook：${this.runtime.registeredVersions().join("、")}`);
   }
 }

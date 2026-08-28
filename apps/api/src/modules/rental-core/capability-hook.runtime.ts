@@ -92,7 +92,16 @@ export class CapabilityBlockedException extends ConflictException {
 @Injectable()
 export class CapabilityHookRuntime {
   private readonly logger = new Logger(CapabilityHookRuntime.name);
-  private readonly modules = new Map<RentalCapability, RentalCapabilityHookModule>();
+  /**
+   * 登记表按 `code@implementationVersion` 索引。
+   *
+   * 只按 code 索引是不够的：报价与订单固化了下单当时的实现版本，运行时必须调用
+   * **那个版本**的实现。只按 code 解析会让升级后的历史订单执行新规则，
+   * 而上下文里仍标着旧版本号——快照看起来对了，行为已经被改写。
+   */
+  private readonly modules = new Map<string, RentalCapabilityHookModule>();
+  /** 每个 code 已登记的版本集合，用于区分「本来就没有 Hook」与「缺这个版本」。 */
+  private readonly versionsByCode = new Map<RentalCapability, Set<string>>();
 
   constructor(
     private readonly capabilities: WorkspaceCapabilityService,
@@ -111,31 +120,74 @@ export class CapabilityHookRuntime {
 
   private readonly definitions: Map<RentalCapability, RentalCapabilityDefinition>;
 
+  private static key(code: RentalCapability, implementationVersion: string) {
+    return `${code}@${implementationVersion}`;
+  }
+
   /**
-   * 登记一个能力的 Hook 实现。由各能力模块在自身初始化时调用。
+   * 登记某个能力**某一版本**的 Hook 实现。由各能力模块在自身初始化时调用。
    *
    * 只接受注册表里已登记的 code：否则一个拼错的 code 会被静默登记成一个永不执行的
-   * Hook，而开发者以为已经接入。重复登记同一 code 直接失败，避免两份实现互相覆盖。
+   * Hook，而开发者以为已经接入。同一 `(code, version)` 重复登记直接失败，
+   * 避免两份实现互相覆盖。
+   *
+   * 刻意**允许**登记非当前版本：仍有在途订单引用的旧版本必须继续可执行，
+   * 否则升级就等于把在途业务推到「快照版本找不到」的失败分支上。
    */
   register(module: RentalCapabilityHookModule) {
     if (!this.definitions.has(module.code)) {
       throw new Error(`capability Hook 引用了未注册的能力：${module.code}`);
     }
-    if (this.modules.has(module.code)) {
-      throw new Error(`capability ${module.code} 的 Hook 已登记，不能重复登记`);
+    if (!module.implementationVersion?.trim()) {
+      throw new Error(`capability ${module.code} 的 Hook 必须声明 implementationVersion`);
+    }
+    const key = CapabilityHookRuntime.key(module.code, module.implementationVersion);
+    if (this.modules.has(key)) {
+      throw new Error(
+        `capability ${module.code} 的 ${module.implementationVersion} 版 Hook 已登记，不能重复登记`
+      );
     }
     const points = Object.keys(module.hooks) as RentalCapabilityHookPoint[];
     if (!points.length) throw new Error(`capability ${module.code} 登记了 Hook 但没有任何触发点`);
-    this.modules.set(module.code, module);
+    this.modules.set(key, module);
+    const versions = this.versionsByCode.get(module.code) ?? new Set<string>();
+    versions.add(module.implementationVersion);
+    this.versionsByCode.set(module.code, versions);
   }
 
   /** 测试与重启用：清空登记表。生产路径不调用。 */
   reset() {
     this.modules.clear();
+    this.versionsByCode.clear();
   }
 
   registeredCodes(): RentalCapability[] {
+    return [...this.versionsByCode.keys()].sort();
+  }
+
+  /** 已登记的 `code@version` 全集，供启动自检与排查。 */
+  registeredVersions(): string[] {
     return [...this.modules.keys()].sort();
+  }
+
+  /**
+   * 启动自检：凡是**已经有 Hook 实现**的能力，注册表当前声明的实现版本必须也有实现。
+   *
+   * 捕捉的是「把注册表的 implementationVersion 升到了 v2，却忘了发 v2 的实现」这类发布事故。
+   * 那种情况下新报价会固化 v2，随后每次判定都落到「快照版本找不到」的 fail-closed 分支，
+   * 等于该能力对新业务全面瘫痪——必须在启动时就暴露，而不是等第一张订单。
+   */
+  assertCurrentVersionsRegistered() {
+    for (const [code, versions] of this.versionsByCode) {
+      const current = this.definitions.get(code)?.implementationVersion;
+      if (!current) continue;
+      if (!versions.has(current)) {
+        throw new Error(
+          `capability ${code} 的注册表当前实现版本是 ${current}，但只登记了 ${[...versions].sort().join("、")}；` +
+            `新业务会固化一个没有实现的版本`
+        );
+      }
+    }
   }
 
   /**
@@ -159,18 +211,88 @@ export class CapabilityHookRuntime {
       executed: []
     };
 
-    // 只执行「已启用 且 登记了本节点 Hook」的能力，并按 (order, code) 固定排序。
-    const runnable = instances
-      .map((instance) => ({ instance, module: this.modules.get(instance.code) }))
-      .filter(
-        (row): row is { instance: WorkspaceCapabilityInstance; module: RentalCapabilityHookModule } =>
-          Boolean(row.module?.hooks[input.point])
-      )
-      .sort((left, right) =>
-        left.module.order !== right.module.order
-          ? left.module.order - right.module.order
-          : left.instance.code.localeCompare(right.instance.code)
-      );
+    // 执行名单的三道解析，顺序与理由见各分支注释。
+    const runnable: Array<{ instance: WorkspaceCapabilityInstance; module: RentalCapabilityHookModule }> = [];
+    for (const instance of instances) {
+      const definition = this.definitions.get(instance.code);
+      const required = definition?.kind === "category_required";
+
+      // 1) 适用品类。`save()` 启用时已校验过，因此这里为真只可能是数据不一致
+      //    （错误的快照、手工改库、或品类定义事后收窄）。运行时必须独立兜底：
+      //    只靠启用接口校验的话，一条错误的快照就能让能力在它根本不适用的品类上判定。
+      //    不适用一律 fail-closed 并给出明确错误，而不是静默跳过——静默跳过会让
+      //    「为什么这个能力没生效」变成无从排查的问题。
+      if (definition && definition.applicableCategories !== "all" &&
+          !definition.applicableCategories.includes(input.categoryCode)) {
+        outcome.blocked = true;
+        outcome.blockReasons.push({
+          capability: instance.code,
+          code: "capability_not_applicable_to_category",
+          message:
+            `能力 ${instance.code} 不适用于经营品类 ${input.categoryCode}，` +
+            `却出现在本次判定的执行名单里（数据不一致，已拒绝本次操作）`,
+          evidence: {
+            point: input.point,
+            categoryCode: input.categoryCode,
+            applicableCategories: definition.applicableCategories.join("、")
+          }
+        });
+        outcome.executed.push({
+          capability: instance.code,
+          implementationVersion: instance.implementationVersion,
+          configVersion: instance.configVersion,
+          decision: "block",
+          failed: true
+        });
+        continue;
+      }
+
+      // 2) 该能力有没有 Hook 实现。完全没有登记过任何版本 = 这个能力不参与 Hook
+      //    （三种库存、取还等由 Core 主流程实现的能力就是这一类），静默跳过是正确的。
+      const versions = this.versionsByCode.get(instance.code);
+      if (!versions?.size) continue;
+
+      // 3) 有实现，但缺**快照固化的那个版本**。这是发布事故（旧版本被删、新版本没发），
+      //    不是「能力不存在」。退回最新版会悄悄用新规则重放历史订单，正是本轮要消除的问题；
+      //    吞成"跳过"则把基础设施异常伪装成业务事实。因此一律 fail-closed。
+      const module = this.modules.get(CapabilityHookRuntime.key(instance.code, instance.implementationVersion));
+      if (!module) {
+        outcome.blocked = true;
+        outcome.blockReasons.push({
+          capability: instance.code,
+          code: "capability_implementation_version_missing",
+          message:
+            `能力 ${instance.code} 需要 ${instance.implementationVersion} 版实现，` +
+            `但当前只登记了 ${[...versions].sort().join("、")}；` +
+            `为避免用其他版本改写该业务的判定，已拒绝本次操作`,
+          evidence: {
+            point: input.point,
+            requested: instance.implementationVersion,
+            registered: [...versions].sort().join("、"),
+            required
+          }
+        });
+        outcome.executed.push({
+          capability: instance.code,
+          implementationVersion: instance.implementationVersion,
+          configVersion: instance.configVersion,
+          decision: "block",
+          failed: true
+        });
+        continue;
+      }
+
+      // 4) 该版本存在，但没实现这个节点 —— 正常情况，跳过。
+      if (!module.hooks[input.point]) continue;
+      runnable.push({ instance, module });
+    }
+
+    // 按 (order, code) 固定排序，不依赖登记序或实例数组序。
+    runnable.sort((left, right) =>
+      left.module.order !== right.module.order
+        ? left.module.order - right.module.order
+        : left.instance.code.localeCompare(right.instance.code)
+    );
 
     for (const { instance, module } of runnable) {
       const handler = module.hooks[input.point]!;
