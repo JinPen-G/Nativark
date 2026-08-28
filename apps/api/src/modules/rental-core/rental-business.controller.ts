@@ -22,6 +22,8 @@ import {
   ApplyRentalCalendarRangeOverrideDto,
   PreviewRentalCalendarRangeRemoveDto,
   ApplyRentalCalendarRangeRemoveDto,
+  CreateRentalPriceAdjustmentDto,
+  CancelRentalPriceAdjustmentDto,
   SaveRentalDiscountPlanDto,
   SaveRentalNotificationTemplateDto,
   SaveRentalPricingPlanDto,
@@ -108,6 +110,18 @@ export class RentalBusinessController {
   @Get("pricing-plans") pricingPlans(@Req() req: AuthenticatedRequest) { return this.business.listPricingPlans(req.user.tenantId, this.context(req.user.tenantId)); }
   @Post("pricing-plans") async createPricingPlan(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalPricingPlanDto) { return this.committed(req.user.tenantId, await this.business.savePricingPlan(req.user.tenantId, this.context(req.user.tenantId), body)); }
   @Put("pricing-plans/:id") async updatePricingPlan(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalPricingPlanDto) { return this.committed(req.user.tenantId, await this.business.savePricingPlan(req.user.tenantId, this.context(req.user.tenantId), { ...body, id })); }
+  /** PRICE-03：计划的价格版本历史（不可变，只追加）。 */
+  @Get("pricing-plans/:id/versions") priceVersions(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.business.listPriceVersions(req.user.tenantId, this.context(req.user.tenantId), id); }
+  /** PRICE-03：调价计划列表。 */
+  @Get("pricing-plans/:id/adjustments") listPriceAdjustments(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.business.listPriceAdjustments(req.user.tenantId, this.context(req.user.tenantId), id); }
+  /** PRICE-03：执行到期的待生效调价（定时执行与立即执行走同一版本机制）。 */
+  @Post("pricing-plans/adjustments/run-due") runDuePriceAdjustments(@Req() req: AuthenticatedRequest) { return this.committed(req.user.tenantId, this.business.runDuePriceAdjustments(req.user.tenantId, this.context(req.user.tenantId))); }
+  /** PRICE-03：创建调价计划（差异 + 逐行最终价预览）。 */
+  @Post("pricing-plans/:id/adjustments") createPriceAdjustment(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: CreateRentalPriceAdjustmentDto) { return this.business.createPriceAdjustment(req.user.tenantId, this.context(req.user.tenantId), id, body, req.user.displayName); }
+  /** PRICE-03：确认——立即执行生成新版本；scheduledAt 在未来则进入待生效。 */
+  @Post("pricing-plans/:id/adjustments/:aid/confirm") confirmPriceAdjustment(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Param("aid") aid: string) { return this.committed(req.user.tenantId, this.business.confirmPriceAdjustment(req.user.tenantId, this.context(req.user.tenantId), id, aid, req.user.displayName)); }
+  /** PRICE-03：取消（草稿/待生效可取消，已生效不可撤回）。 */
+  @Post("pricing-plans/:id/adjustments/:aid/cancel") cancelPriceAdjustment(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Param("aid") aid: string, @Body() body: CancelRentalPriceAdjustmentDto) { return this.business.cancelPriceAdjustment(req.user.tenantId, id, aid, body.reason); }
 
   @Get("discount-plans") discountPlans(@Req() req: AuthenticatedRequest) { return this.business.listDiscountPlans(req.user.tenantId, this.context(req.user.tenantId)); }
   @Post("discount-plans") async createDiscountPlan(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalDiscountPlanDto) { return this.committed(req.user.tenantId, await this.business.saveDiscountPlan(req.user.tenantId, this.context(req.user.tenantId), body)); }

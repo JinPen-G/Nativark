@@ -319,6 +319,8 @@ model Tenant {
   rentalRuleVersions        RentalRuleVersion[]
   rentalBusinessCalendars   RentalBusinessCalendar[]
   rentalCalendarOverrideAudits RentalCalendarOverrideAuditEntry[]
+  rentalPriceVersions       RentalPriceVersion[]
+  rentalPriceAdjustmentPlans RentalPriceAdjustmentPlan[]
   workspaceCapabilityInstances WorkspaceCapabilityInstance[]
   workspaceCapabilityAudits   WorkspaceCapabilityAuditEntry[]
   capabilityHookAudits        CapabilityHookAuditEntry[]
@@ -388,6 +390,8 @@ model BusinessWorkspace {
   rentalRuleVersions          RentalRuleVersion[]
   rentalBusinessCalendars     RentalBusinessCalendar[]
   rentalCalendarOverrideAudits RentalCalendarOverrideAuditEntry[]
+  rentalPriceVersions        RentalPriceVersion[]
+  rentalPriceAdjustmentPlans RentalPriceAdjustmentPlan[]
   rentalNotificationTemplates RentalNotificationTemplate[]
   rentalQuotes                RentalQuote[]
   rentalCustomerCoupons       RentalCustomerCoupon[]
@@ -2788,12 +2792,79 @@ model RentalPricingPlan {
   /// RentalFulfillmentFee[]：按履约方式的履约费与异地归还附加费（需求 4.4）。
   /// 与 rates 同为「版本化 JSON 明细」，随计划版本一起发布与快照。
   fulfillmentFees Json?
+  /// PRICE-03：该计划的不可变版本历史（v1 起，只追加）。
+  priceVersions   RentalPriceVersion[]
+  /// PRICE-03：针对该计划的调价计划。
+  adjustmentPlans RentalPriceAdjustmentPlan[]
   createdAt     DateTime           @default(now())
   updatedAt     DateTime           @updatedAt
 
   @@unique([workspaceId, code, version], map: "rental_pricing_plans_tenant_code_version_key")
   @@index([tenantId, status, effectiveFrom, effectiveTo], map: "rental_pricing_plans_tenant_status_effective_idx")
   @@map("rental_pricing_plans")
+}
+
+/// PRICE-03：不可变价格版本（需求 4.4.3）。
+///
+/// 每一行是某一生效时点、该价格计划全部有效商品价格的**完整、不可变**结果。
+/// 每次调价（立即保存或调价计划执行）追加新行；旧版本永久保留，
+/// 历史报价按「租期开始时点 ≤ 生效时刻」的最新版本复算——禁止
+/// 「计划行就地修改 + version+1 + 旧值消失」的伪版本方式。
+model RentalPriceVersion {
+  id            String             @id @default(uuid())
+  tenantId      String
+  tenant        Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId   String
+  workspace     BusinessWorkspace  @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  planId        String
+  plan          RentalPricingPlan  @relation(fields: [planId], references: [id], onDelete: Cascade)
+  /// 计划内版本号（v1, v2…）。
+  version       String
+  /// 生效时刻：报价按「租期开始时点 ≤ 生效时刻」的最新版本取价（需求 4.4.4）。
+  effectiveFrom DateTime
+  /// RentalPricingRate[]：该版本的完整费率结果（不只是差异）。
+  rates         Json
+  changeReason  String?
+  createdBy     String?
+  createdAt     DateTime           @default(now())
+
+  @@unique([planId, version])
+  @@index([planId, effectiveFrom])
+  @@map("rental_price_versions")
+}
+
+/// PRICE-03：调价计划（需求 4.4.3）。
+///
+/// 只保存差异（op + 受影响行）；确认（立即）或到期（定时）执行时基于当前版本
+/// 生成完整新版本。状态机：草稿 → 待生效 → 已生效；草稿/待生效可取消；
+/// 执行异常进入执行失败。已生效不可编辑、撤回或删除。
+model RentalPriceAdjustmentPlan {
+  id             String             @id @default(uuid())
+  tenantId       String
+  tenant         Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId    String
+  workspace      BusinessWorkspace  @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  planId         String
+  plan           RentalPricingPlan  @relation(fields: [planId], references: [id], onDelete: Cascade)
+  code           String
+  /// 草稿 / 待生效 / 已生效 / 已取消 / 执行失败。
+  status         String             @default("draft")
+  /// RentalPriceAdjustmentChange[]：差异（op + 受影响商品 + 值）。
+  changes        Json
+  /// 定时执行的生效时刻；缺省 = 立即执行。
+  scheduledAt    DateTime?
+  resultVersionId String?
+  changeReason   String
+  createdBy      String?
+  confirmedBy    String?
+  confirmedAt    DateTime?
+  failureReason  String?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  @@unique([workspaceId, code])
+  @@index([planId, status, scheduledAt])
+  @@map("rental_price_adjustment_plans")
 }
 
 model RentalDiscountPlan {

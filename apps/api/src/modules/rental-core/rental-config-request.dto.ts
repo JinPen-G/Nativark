@@ -19,7 +19,11 @@ import type {
   SaveRentalPricingPlanRequest,
   SaveRentalRuleVersionRequest,
   SaveRentalValueAddedServiceRequest,
-  SaveTenantRentalBusinessSettingsRequest
+  SaveTenantRentalBusinessSettingsRequest,
+  CreateRentalPriceAdjustmentRequest,
+  CancelRentalPriceAdjustmentRequest,
+  RentalPeriodicPriceWindow,
+  RentalDatetimePriceOverride
 } from "@store-rental/shared";
 import { Type } from "class-transformer";
 import {
@@ -362,6 +366,46 @@ export class RentalFulfillmentFeeInputDto {
   crossLocationAmount?: number;
 }
 
+/** PRICE-03：周期性计价时段输入（fromWeekday 0-6、HH:mm）。 */
+export class RentalPeriodicPriceWindowInputDto implements RentalPeriodicPriceWindow {
+  @IsInt()
+  @Min(0)
+  @Max(6)
+  fromWeekday!: number;
+
+  @IsString()
+  @Matches(/^[0-9]{1,2}:[0-9]{2}$/, { message: "起始时刻必须是 HH:mm" })
+  fromTime!: string;
+
+  @IsInt()
+  @Min(0)
+  @Max(6)
+  toWeekday!: number;
+
+  @IsString()
+  @Matches(/^[0-9]{1,2}:[0-9]{2}$/, { message: "结束时刻必须是 HH:mm" })
+  toTime!: string;
+
+  @IsNumber()
+  @Min(0)
+  @Max(MAX_MULTIPLIER)
+  multiplier!: number;
+}
+
+/** PRICE-03：一次性日期时间价格覆盖输入。 */
+export class RentalDatetimePriceOverrideInputDto implements RentalDatetimePriceOverride {
+  @IsISO8601()
+  start!: string;
+
+  @IsISO8601()
+  end!: string;
+
+  @IsNumber()
+  @Min(0)
+  @Max(MAX_MULTIPLIER)
+  multiplier!: number;
+}
+
 export class RentalPricingRateInputDto {
   @IsString()
   @IsNotEmpty()
@@ -417,6 +461,25 @@ export class RentalPricingRateInputDto {
   @Min(1)
   @Max(1440)
   hourGranularityMinutes?: number;
+
+  /** PRICE-03：商品在该日期类型下的价格系数（v2.9 4.5.5）。 */
+  @IsOptional()
+  @IsObject()
+  dayTypePrices?: Record<string, number>;
+
+  /** PRICE-03：周期性计价时段（跨星期边界，按取价时点命中）。 */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RentalPeriodicPriceWindowInputDto)
+  periodicWindows?: RentalPeriodicPriceWindowInputDto[];
+
+  /** PRICE-03：一次性日期时间价格覆盖的价格值（适用范围在日历侧）。 */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RentalDatetimePriceOverrideInputDto)
+  datetimeOverrides?: RentalDatetimePriceOverrideInputDto[];
 
   /** 租金倍数押金的倍数。上界复用 MAX_MULTIPLIER：押金 10 倍租金已远超任何真实场景。 */
   @IsOptional()
@@ -992,6 +1055,50 @@ export class PreviewRentalCalendarRangeRemoveDto implements PreviewRentalCalenda
   @IsOptional()
   @IsISO8601()
   endDateTime?: string;
+}
+
+/** PRICE-03：创建调价计划（差异 + 定时/立即 + 原因）。 */
+export class RentalPriceAdjustmentChangeInputDto {
+  @IsString()
+  @IsNotEmpty()
+  itemGroupId!: string;
+
+  @IsIn(RENTAL_PRICING_UNIT_CODES)
+  unit!: (typeof RENTAL_PRICING_UNIT_CODES)[number];
+
+  @IsIn(["set_base", "percent", "fixed"])
+  op!: "set_base" | "percent" | "fixed";
+
+  @IsNumber()
+  value!: number;
+}
+
+export class CreateRentalPriceAdjustmentDto implements CreateRentalPriceAdjustmentRequest {
+  @IsString()
+  @Matches(NON_BLANK_PATTERN, { message: "调价计划编码不能为空白" })
+  @MaxLength(191)
+  code!: string;
+
+  @IsArray()
+  @ArrayNotEmpty()
+  @ValidateNested({ each: true })
+  @Type(() => RentalPriceAdjustmentChangeInputDto)
+  changes!: RentalPriceAdjustmentChangeInputDto[];
+
+  @IsOptional()
+  @IsISO8601()
+  scheduledAt?: string;
+
+  @IsString()
+  @Matches(NON_BLANK_PATTERN, { message: "变更原因不能为空白" })
+  @MaxLength(191)
+  changeReason!: string;
+}
+
+export class CancelRentalPriceAdjustmentDto implements CancelRentalPriceAdjustmentRequest {
+  @IsString()
+  @Matches(NON_BLANK_PATTERN, { message: "取消原因不能为空白" })
+  reason!: string;
 }
 
 /** 应用范围移除：只移除范围内带人工覆盖的日期，其余保持不变。 */

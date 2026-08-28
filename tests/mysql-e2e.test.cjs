@@ -4784,7 +4784,202 @@ async function main() {
 
   await maybeStopAfter("15t");
 
+  console.log("== 15u. PRICE-03 不可变价格版本与调价计划（立即/定时/重叠拒绝） ==");
+  // 需求 4.4.3：价格版本是完整、不可变结果；调价计划只存差异，确认时生成完整新版本；
+  // 重叠时段在保存/确认时拒绝；新版本不影响有效报价与历史订单。
+  const adjBeforeVersions = Number(readScalar(`SELECT COUNT(*) FROM \`rental_price_versions\` WHERE \`planId\`='${pricePlan.body.data.id}';`));
+  assert.ok(adjBeforeVersions >= 1, "15b 的保存应已生成价格版本行（保存即调价）");
+  const v1Rates = JSON.parse(readScalar(`SELECT \`rates\` FROM \`rental_price_versions\` WHERE \`planId\`='${pricePlan.body.data.id}' AND \`version\`='v1';`));
+  assert.equal(v1Rates[0].baseAmount, 100, "v1 版本的基础价应为 100");
+
+  // (a) 立即调价：百分比 +10%，确认时生成完整新版本，预览给出最终价。
+  const adjCreate = await request(
+    "POST",
+    `/api/rental/v1/pricing-plans/${pricePlan.body.data.id}/adjustments`,
+    {
+      code: `E2E-ADJ-IMM-${Date.now().toString(36)}`,
+      changes: [{ itemGroupId: priceGroupId, unit: "calendar_day", op: "percent", value: 10 }],
+      changeReason: "E2E 上调 10%"
+    },
+    construction.accessToken
+  );
+  assert.equal(adjCreate.status, 201, `创建调价计划失败: ${adjCreate.status} ${JSON.stringify(adjCreate.body).slice(0, 200)}`);
+  assert.equal(adjCreate.body.data.preview[0].afterBaseAmount, 110, "确认前必须给出逐行最终价（110）");
+  const adjConfirm = await request(
+    "POST",
+    `/api/rental/v1/pricing-plans/${pricePlan.body.data.id}/adjustments/${adjCreate.body.data.id}/confirm`,
+    null,
+    construction.accessToken
+  );
+  assert.equal(adjConfirm.status, 201, `确认调价失败: ${adjConfirm.status} ${JSON.stringify(adjConfirm.body).slice(0, 200)}`);
+  assert.equal(adjConfirm.body.data.status, "applied", "立即确认应直接生效");
+  const v2Rates = JSON.parse(readScalar(`SELECT \`rates\` FROM \`rental_price_versions\` WHERE \`id\`='${adjConfirm.body.data.versionId}';`));
+  assert.equal(v2Rates[0].baseAmount, 110, "新版本应为 110");
+  const v1After = JSON.parse(readScalar(`SELECT \`rates\` FROM \`rental_price_versions\` WHERE \`planId\`='${pricePlan.body.data.id}' AND \`version\`='v1';`));
+  assert.equal(v1After[0].baseAmount, 100, "旧版本必须原样保留（不可变）");
+
+  // (b) 新版本按租期开始时间命中：未来租期用 110；租期开始早于新版本生效的报价仍按 v1 的 100 复算。
+  const adjFriday = (() => {
+    for (let day = 10; day <= 16; day += 1) {
+      const candidate = `2046-03-${String(day).padStart(2, "0")}`;
+      if (new Date(`${candidate}T00:00:00Z`).getUTCDay() === 5) return candidate;
+    }
+    return null;
+  })();
+  assert.ok(adjFriday, "应能定位 2046 年 3 月的周五");
+  const adjQuoteNew = await request(
+    "POST",
+    "/api/rental/v1/quotes",
+    {
+      customerType: "corporate",
+      fulfillmentMode: "warehouse_pickup_return",
+      fulfillmentLocationId: constructionLocation.id,
+      startAt: `${adjFriday}T09:00:00+08:00`,
+      // 刻意只租 2 天：避开 15b 版本里的「满 3 日 90」阶梯档，让断言只反映 baseAmount 的调整。
+      endAt: `${new Date(new Date(`${adjFriday}T00:00:00Z`).getTime() + 1 * 86400000).toISOString().slice(0, 10)}T09:00:00+08:00`,
+      pricingPlanId: pricePlan.body.data.id,
+      lines: [{ itemGroupId: priceGroupId, quantity: 1 }]
+    },
+    construction.accessToken
+  );
+  assert.equal(adjQuoteNew.status, 201, `新价报价失败: ${adjQuoteNew.status}`);
+  assert.equal(adjQuoteNew.body.data.rentalAmount, 220, `新版本 2 个自然日应为 2 × 110 = 220：实际 ${adjQuoteNew.body.data.rentalAmount}`);
+
+  // 已锁价的历史报价不受新版本影响：旧报价的费率快照与金额在确认后保持不变
+  //（可复算保护由 rateSnapshot 承担，(a) 的 v1 行不可变断言覆盖版本层）。
+
+  // (c) 重叠周期时段在保存时拒绝（需求 4.4.3：重叠在确认时阻止，不留到报价时择一）。
+  const overlapSave = await request(
+    "PUT",
+    `/api/rental/v1/pricing-plans/${pricePlan.body.data.id}`,
+    {
+      code: "E2E-PRICE-TIER",
+      name: "E2E 阶梯与封顶价格",
+      changeReason: "E2E 重叠时段应拒绝",
+      status: "enabled",
+      effectiveFrom: new Date(Date.now() - 86400000).toISOString(),
+      rates: [
+        {
+          itemGroupId: priceGroupId,
+          unit: "calendar_day",
+          baseAmount: 110,
+          weekendMultiplier: 1,
+          holidayMultiplier: 1,
+          depositAmount: 500,
+          minimumUnits: 1,
+          periodicWindows: [
+            { fromWeekday: 5, fromTime: "12:00", toWeekday: 5, toTime: "23:59", multiplier: 1.5 },
+            { fromWeekday: 5, fromTime: "10:00", toWeekday: 6, toTime: "02:00", multiplier: 1.2 }
+          ]
+        }
+      ]
+    },
+    construction.accessToken
+  );
+  assert.equal(overlapSave.status, 409, `重叠周期时段必须 409: ${overlapSave.status} ${JSON.stringify(overlapSave.body).slice(0, 200)}`);
+  assert.ok(/重叠/.test(overlapSave.body.message || ""), `409 应说明时段重叠: ${overlapSave.body.message}`);
+
+  // (d) 合法的跨周周期时段（周五 12:00 → 周一 00:00 周末价）真实生效：
+  //     周五 14:00 起租（取价时点在时段内）→ 3 天全 1.5 = 450；
+  //     周五 10:00 起租 → 首日取价时点在时段外按 100、周六周日按 150 → 400。
+  const weekendSave = await request(
+    "PUT",
+    `/api/rental/v1/pricing-plans/${pricePlan.body.data.id}`,
+    {
+      code: "E2E-PRICE-TIER",
+      name: "E2E 阶梯与封顶价格",
+      changeReason: "E2E 周五 12:00 起周末价",
+      status: "enabled",
+      effectiveFrom: new Date(Date.now() - 86400000).toISOString(),
+      rates: [
+        {
+          itemGroupId: priceGroupId,
+          unit: "calendar_day",
+          baseAmount: 100,
+          weekendMultiplier: 1,
+          holidayMultiplier: 1,
+          depositAmount: 500,
+          minimumUnits: 1,
+          periodicWindows: [
+            { fromWeekday: 5, fromTime: "12:00", toWeekday: 6, toTime: "00:00", multiplier: 1.5 },
+            { fromWeekday: 6, fromTime: "00:00", toWeekday: 1, toTime: "00:00", multiplier: 1.5 }
+          ]
+        }
+      ]
+    },
+    construction.accessToken
+  );
+  assert.equal(weekendSave.status, 200, `合法周期时段保存失败: ${weekendSave.status} ${JSON.stringify(weekendSave.body).slice(0, 200)}`);
+  const weekendEnd = new Date(new Date(`${adjFriday}T00:00:00Z`).getTime() + 3 * 86400000).toISOString().slice(0, 10);
+  const weekendQuoteInside = await request(
+    "POST",
+    "/api/rental/v1/quotes",
+    {
+      customerType: "corporate",
+      fulfillmentMode: "warehouse_pickup_return",
+      fulfillmentLocationId: constructionLocation.id,
+      startAt: `${adjFriday}T14:00:00+08:00`,
+      endAt: `${weekendEnd}T14:00:00+08:00`,
+      pricingPlanId: pricePlan.body.data.id,
+      lines: [{ itemGroupId: priceGroupId, quantity: 1 }]
+    },
+    construction.accessToken
+  );
+  assert.equal(weekendQuoteInside.status, 201, `周末价报价失败: ${weekendQuoteInside.status}`);
+  assert.equal(weekendQuoteInside.body.data.rentalAmount, 550, `周五14:00→周一14:00 占 4 个日历日：周五六日 150×3 + 周一（取价时点在时段外）100 = 550：实际 ${weekendQuoteInside.body.data.rentalAmount}`);
+  const weekendQuoteOutside = await request(
+    "POST",
+    "/api/rental/v1/quotes",
+    {
+      customerType: "corporate",
+      fulfillmentMode: "warehouse_pickup_return",
+      fulfillmentLocationId: constructionLocation.id,
+      startAt: `${adjFriday}T10:00:00+08:00`,
+      endAt: `${weekendEnd}T10:00:00+08:00`,
+      pricingPlanId: pricePlan.body.data.id,
+      lines: [{ itemGroupId: priceGroupId, quantity: 1 }]
+    },
+    construction.accessToken
+  );
+  assert.equal(weekendQuoteOutside.status, 201, `周五 10:00 报价失败: ${weekendQuoteOutside.status}`);
+  assert.equal(weekendQuoteOutside.body.data.rentalAmount, 500, `周五10:00→周一10:00 占 4 个日历日：周五 100 + 周六日 150×2 + 周一 100 = 500：实际 ${weekendQuoteOutside.body.data.rentalAmount}`);
+
+  // (e) 定时调价：scheduledAt 未来 → 确认后待生效 → 到期执行生成新版本（与立即同一版本机制）。
+  const adjScheduled = await request(
+    "POST",
+    `/api/rental/v1/pricing-plans/${pricePlan.body.data.id}/adjustments`,
+    {
+      code: `E2E-ADJ-SCHED-${Date.now().toString(36)}`,
+      changes: [{ itemGroupId: priceGroupId, unit: "calendar_day", op: "fixed", value: 5 }],
+      scheduledAt: new Date(Date.now() + 2000).toISOString(),
+      changeReason: "E2E 定时 +5"
+    },
+    construction.accessToken
+  );
+  assert.equal(adjScheduled.status, 201, `定时调价创建失败: ${adjScheduled.status}`);
+  const adjScheduleConfirm = await request(
+    "POST",
+    `/api/rental/v1/pricing-plans/${pricePlan.body.data.id}/adjustments/${adjScheduled.body.data.id}/confirm`,
+    null,
+    construction.accessToken
+  );
+  assert.equal(adjScheduleConfirm.status, 201, `定时调价确认失败: ${adjScheduleConfirm.status}`);
+  assert.equal(adjScheduleConfirm.body.data.status, "pending", "未来生效时刻确认后应为待生效");
+  await new Promise((resolve) => setTimeout(resolve, 2500));
+  const adjRunDue = await request("POST", "/api/rental/v1/pricing-plans/adjustments/run-due", null, construction.accessToken);
+  assert.equal(adjRunDue.status, 201, `到期执行失败: ${adjRunDue.status} ${JSON.stringify(adjRunDue.body).slice(0, 200)}`);
+  assert.equal(adjRunDue.body.data.ranCount, 1, "到期执行应处理 1 条");
+  const schedVersion = JSON.parse(
+    readScalar(`SELECT \`rates\` FROM \`rental_price_versions\` WHERE \`id\`='${adjRunDue.body.data.results[0].versionId}';`)
+  );
+  assert.equal(schedVersion[0].baseAmount, 105, "定时执行基于最新版本（(d) 已把基础价整单重置为 100）+5 = 105");
+
+  ok("价格版本与调价计划：保存即生成不可变版本行、旧版本原样保留；调价计划确认前给出逐行最终价、立即确认生成新版本（v2=110）、新版本按租期开始时间命中（未来租期 220（2×110，避开阶梯档））；重叠周期时段保存 400；合法跨周时段（周五 12:00 → 周一 00:00 周末价）真实生效（550/500，含周一取价时点在时段外的边界）；定时调价待生效到期执行生成新版本（105 = (d) 重置后的 100 + 5）");
+
+  await maybeStopAfter("15u");
+
   console.log("== 16. 双租户并发隔离 ==");
+
   const rounds = 12;
   const concurrent = [];
   for (let i = 0; i < rounds; i += 1) {

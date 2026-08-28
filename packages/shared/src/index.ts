@@ -5368,6 +5368,119 @@ export interface RentalPricingRate {
    * 不足一个粒度按一个粒度计」——因此它属于**价格**而不是经营空间规则。
    */
   hourGranularityMinutes?: number;
+  /**
+   * 商品在该日期类型下的单价系数（需求 4.5.5 v2.9：商品×计价单位×日期类型的价格）。
+   * 与 weekendMultiplier/holidayMultiplier 并存且**优先于**它们：weekend/holiday 是
+   * 既有兼容字段，新配置按五类日期类型逐类设置，无需新增报价代码分支。
+   */
+  dayTypePrices?: Partial<Record<RentalDayType, number>>;
+  /**
+   * 周期性计价时段（需求 4.5.5 v2.9）：「每周五 12:00 至周一 00:00 按周末价」等
+   * 重复规则。命中按计费单位的取价时点（营业时区的星期 + 分钟）判定；
+   * 同一商品同一计价单位的时段不得重叠（保存/发布时拒绝）。
+   */
+  periodicWindows?: RentalPeriodicPriceWindow[];
+  /**
+   * 一次性日期时间价格覆盖的价格值（需求 4.5.5 v2.9：适用范围在日历侧，价格值在
+   * 价格模块）。按取价时点命中 [start, end)；两条覆盖区间重叠时拒绝保存。
+   */
+  datetimeOverrides?: RentalDatetimePriceOverride[];
+}
+
+/** 周期性计价时段：营业时区的一周内、[fromWeekday+fromTime, toWeekday+toTime) 连续生效。 */
+export interface RentalPeriodicPriceWindow {
+  /** 起始星期（0=周日…6=周六，与 Date.getUTCDay 一致）。 */
+  fromWeekday: number;
+  /** 起始时刻 HH:mm（营业时区）。 */
+  fromTime: string;
+  /** 结束星期。可与 fromWeekday 相同（同日内时段），跨星期时按周循环解释。 */
+  toWeekday: number;
+  toTime: string;
+  /** 该时段的价格系数。 */
+  multiplier: number;
+}
+
+/** 一次性日期时间价格覆盖的价格值（绝对时刻，营业时区书写）。 */
+export interface RentalDatetimePriceOverride {
+  start: string;
+  end: string;
+  multiplier: number;
+}
+
+/** 调价计划的单条变更（需求 4.4.3：计划只保存差异，确认时展示每个受影响商品的最终价）。 */
+export interface RentalPriceAdjustmentChange {
+  itemGroupId: string;
+  unit: RentalPricingUnit;
+  /** `set_base` 直接设价；`percent` 按百分比（正上调/负下调）；`fixed` 加减固定金额。 */
+  op: "set_base" | "percent" | "fixed";
+  value: number;
+}
+
+/**
+ * 不可变价格版本（需求 4.4.3）：某一生效时点、某价格计划全部有效商品价格的
+ * **完整、不可变**结果。禁止就地修改；每次调价（立即保存或计划执行）追加新行。
+ */
+export interface RentalPriceVersion {
+  id: string;
+  tenantId: string;
+  planId: string;
+  /** 计划内版本号（v1, v2…）。 */
+  version: string;
+  /** 生效时刻：报价按「租期开始时点 ≤ 生效时刻」的最新版本取价（需求 4.4.4）。 */
+  effectiveFrom: string;
+  /** 该版本的全部有效费率（完整结果，不只是差异）。 */
+  rates: RentalPricingRate[];
+  changeReason?: string;
+  createdBy?: string;
+  createdAt: string;
+}
+
+/**
+ * 调价计划（需求 4.4.3）：草稿、待生效、已生效、已取消、执行失败。
+ * 只保存差异（op + 受影响行）；确认时生成完整新版本。
+ */
+export interface RentalPriceAdjustmentPlan {
+  id: string;
+  tenantId: string;
+  planId: string;
+  code: string;
+  status: "draft" | "pending" | "applied" | "cancelled" | "failed";
+  changes: RentalPriceAdjustmentChange[];
+  /** 定时执行的生效时刻；缺省 = 立即执行。 */
+  scheduledAt?: string;
+  resultVersionId?: string;
+  changeReason: string;
+  createdBy?: string;
+  confirmedBy?: string;
+  confirmedAt?: string;
+  /** 执行失败的错误信息（执行成功后为空）。 */
+  failureReason?: string;
+  createdAt: string;
+}
+
+/** 创建调价计划请求（需求 4.4.3：差异 + 定时/立即 + 原因）。 */
+export interface CreateRentalPriceAdjustmentRequest {
+  code: string;
+  changes: RentalPriceAdjustmentChange[];
+  /** 定时执行的生效时刻；缺省 = 确认后立即执行。 */
+  scheduledAt?: string;
+  changeReason: string;
+}
+
+/** 取消调价计划请求（已生效不可取消）。 */
+export interface CancelRentalPriceAdjustmentRequest {
+  reason: string;
+}
+
+/** 创建调价计划的响应：附带逐行最终价预览（需求 4.4.3：不得只展示公式）。 */
+export interface RentalPriceAdjustmentPreviewRow {
+  itemGroupId: string;
+  itemGroupCode: string;
+  unit: RentalPricingUnit;
+  /** 调整前基础价。 */
+  beforeBaseAmount: number;
+  /** 调整后基础价（op 直接算出的最终值）。 */
+  afterBaseAmount: number;
 }
 
 /**
