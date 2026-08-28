@@ -4295,6 +4295,190 @@ async function main() {
   assert.equal(fkRule, "RESTRICT", `来源→版本外键必须 RESTRICT（不可级联删除不可变历史版本），实际 ${fkRule}`);
   ok("公共官方来源更新提示：空间记录引用的来源版本，登记更新版本后返回 officialSourceUpdateAvailable 与最新版本号、但不自动覆盖空间日历，空间主动应用后提示消失；跨来源不误报（另一来源序号更高不触发更新）；从未引用来源时报「可选择」+ 来源数量而非跨来源「最新 vX」（含双来源用例）；登记过但全部停用报「当前无可用来源」、从未登记两标记皆空；来源→版本外键为 RESTRICT 不可级联删除");
 
+  console.log("== 15r. PRICE-02A 日期范围覆盖：批量预览、原子应用、批次审计与权限 ==");
+  // 需求 4.5.9：租户只能在基础日历上新增人工覆盖；范围提交全部成功或全部失败，
+  // 共用原因/batchId/操作者/时间，只推进一次 revision；既有覆盖必须显式确认；
+  // 移除恢复下一优先级来源；跨年度单次请求被拒绝；无编辑权限一律 403。
+  // 用 construction 空间 + 未触碰过的 2044 年：无既有日历行，基础值全部来自每周模板。
+  const rangeYear = 2044;
+  const rangeBase = (await request("GET", `/api/rental/v1/calendars/${rangeYear}`, null, construction.accessToken)).body.data;
+  assert.ok(rangeBase.days.length >= 365, `2044 基础日历应为全年: ${rangeBase.days.length}`);
+  const rangeFields = {
+    dayType: "tenant_special",
+    name: "试点特殊周",
+    pricingMultiplier: 1.3,
+    businessStatus: "limited",
+    hours: { windows: [{ start: "09:00", end: "18:00" }] }
+  };
+  const rangePreview1 = await request("POST", `/api/rental/v1/calendars/${rangeYear}/days/range-preview`, {
+    startDate: `${rangeYear}-05-01`, endDate: `${rangeYear}-05-10`, fields: rangeFields
+  }, construction.accessToken);
+  assert.equal(rangePreview1.status, 200, `范围预览失败: ${rangePreview1.status} ${JSON.stringify(rangePreview1.body).slice(0, 300)}`);
+  assert.equal(rangePreview1.body.data.totalDays, 10, "预览应覆盖 10 天");
+  assert.equal(rangePreview1.body.data.conflictCount, 0, "空白年度不应有冲突");
+  assert.equal(rangePreview1.body.data.version, rangeBase.version, "预览应基于当前可编辑版本");
+  assert.ok(
+    rangePreview1.body.data.days.every((row) => row.base.source === "week_rule" && row.current.source === "week_rule"),
+    "无既有日历时基础值与当前值都应来自每周模板"
+  );
+  assert.ok(
+    rangePreview1.body.data.days.every((row) => row.changedFields.includes("dayType") && row.changedFields.includes("businessStatus") && row.changedFields.includes("hours")),
+    `预览行应列出将修改的字段: ${JSON.stringify(rangePreview1.body.data.days[0])}`
+  );
+  // 审计基线：本节开始前 2044 年不应有任何覆盖审计。
+  const rangeWs = construction.currentWorkspaceId;
+  const auditCountBefore = Number(readScalar(`SELECT COUNT(*) FROM \`rental_calendar_override_audits\` WHERE \`workspaceId\`='${rangeWs}' AND \`year\`=${rangeYear};`));
+  assert.equal(auditCountBefore, 0, "2044 年不应有历史覆盖审计");
+
+  const rangeApply1 = await request("POST", `/api/rental/v1/calendars/${rangeYear}/days/range`, {
+    startDate: `${rangeYear}-05-01`, endDate: `${rangeYear}-05-10`, fields: rangeFields, overrideReason: "E2E 范围覆盖第一批"
+  }, construction.accessToken);
+  assert.equal(rangeApply1.status, 201, `范围应用失败: ${rangeApply1.status} ${JSON.stringify(rangeApply1.body).slice(0, 300)}`);
+  const rangeBatch1 = rangeApply1.body.data.batchId;
+  assert.match(rangeBatch1, /^[A-Za-z0-9_.:-]{1,64}$/u, "服务端必须返回批次标识");
+  assert.equal(rangeApply1.body.data.appliedCount, 10, "应应用 10 天");
+  assert.equal(rangeApply1.body.data.revision, 1, "首写 revision 应为 1");
+  const rangeAfter1 = (await request("GET", `/api/rental/v1/calendars/${rangeYear}`, null, construction.accessToken)).body.data;
+  for (let day = 1; day <= 10; day += 1) {
+    const date = `${rangeYear}-05-${String(day).padStart(2, "0")}`;
+    const row = rangeAfter1.days.find((item) => item.date === date);
+    assert.ok(row, `${date} 应存在于日历`);
+    assert.equal(row.source, "tenant_override", `${date} 应为人工覆盖`);
+    assert.equal(row.dayType, "tenant_special", `${date} 类型应为 tenant_special`);
+    assert.equal(row.businessStatus, "limited", `${date} 应为限时营业`);
+    assert.equal(row.closed, false, "限时营业不属于停业，closed 必须为 false");
+    assert.equal(row.pricingMultiplier, 1.3, `${date} 系数应为 1.3`);
+    assert.ok(row.hours?.windows?.length, `${date} 应带营业时段`);
+    assert.equal(row.overrideScope?.kind, "range", `${date} 应记录范围 scope`);
+    assert.equal(row.overrideScope?.batchId, rangeBatch1, `${date} 应记录批次标识`);
+  }
+  // 审计：10 行、同一批次、同一操作时间。
+  const batch1Rows = Number(readScalar(`SELECT COUNT(*) FROM \`rental_calendar_override_audits\` WHERE \`workspaceId\`='${rangeWs}' AND \`year\`=${rangeYear} AND \`batchId\`='${rangeBatch1}';`));
+  assert.equal(batch1Rows, 10, "第一批应产生 10 行审计");
+  const batchDistinct = Number(readScalar(`SELECT COUNT(DISTINCT \`batchId\`) FROM \`rental_calendar_override_audits\` WHERE \`workspaceId\`='${rangeWs}' AND \`year\`=${rangeYear};`));
+  assert.equal(batchDistinct, 1, "本节此点应只有一个批次");
+
+  // 重叠范围：既有覆盖必须显式确认；只改选择的字段，未选字段保持原值。
+  const rangePreview2 = await request("POST", `/api/rental/v1/calendars/${rangeYear}/days/range-preview`, {
+    startDate: `${rangeYear}-05-03`, endDate: `${rangeYear}-05-06`, fields: { businessStatus: "open" }
+  }, construction.accessToken);
+  assert.equal(rangePreview2.status, 200, "重叠范围预览应成功");
+  assert.equal(rangePreview2.body.data.conflictCount, 4, "4 天已有覆盖应全部标为冲突");
+  assert.ok(
+    rangePreview2.body.data.days.every((row) => row.current.source === "tenant_override" && row.changedFields.includes("businessStatus")),
+    "冲突行应展示当前值与将修改的字段"
+  );
+  assert.ok(
+    rangePreview2.body.data.days.every((row) => row.after.dayType === "tenant_special"),
+    "未选择的字段（dayType）在应用后保持原值"
+  );
+  const rangeApplyNoAck = await request("POST", `/api/rental/v1/calendars/${rangeYear}/days/range`, {
+    startDate: `${rangeYear}-05-03`, endDate: `${rangeYear}-05-06`, fields: { businessStatus: "open" }, overrideReason: "未确认的覆盖"
+  }, construction.accessToken);
+  assert.equal(rangeApplyNoAck.status, 409, `未确认覆盖必须 409: ${rangeApplyNoAck.status}`);
+  assert.ok(/人工覆盖/.test(rangeApplyNoAck.body.message || ""), `409 应说明冲突原因: ${rangeApplyNoAck.body.message}`);
+  const rangeApply2 = await request("POST", `/api/rental/v1/calendars/${rangeYear}/days/range`, {
+    startDate: `${rangeYear}-05-03`, endDate: `${rangeYear}-05-06`, fields: { businessStatus: "open" },
+    overrideReason: "E2E 范围覆盖第二批（改状态保类型）", batchId: "e2e-15r-batch2", expectedRevision: rangeApply1.body.data.revision,
+    overrideConfirmed: true
+  }, construction.accessToken);
+  assert.equal(rangeApply2.status, 201, `确认后范围应用失败: ${rangeApply2.status} ${JSON.stringify(rangeApply2.body).slice(0, 300)}`);
+  assert.equal(rangeApply2.body.data.batchId, "e2e-15r-batch2", "应沿用调用方批次标识");
+  assert.equal(rangeApply2.body.data.revision, 2, "第二次范围提交只推进一次 revision");
+  const rangeAfter2 = (await request("GET", `/api/rental/v1/calendars/${rangeYear}`, null, construction.accessToken)).body.data;
+  for (let day = 3; day <= 6; day += 1) {
+    const date = `${rangeYear}-05-${String(day).padStart(2, "0")}`;
+    const row = rangeAfter2.days.find((item) => item.date === date);
+    assert.equal(row.businessStatus, "open", `${date} 状态应改为 open`);
+    assert.equal(row.closed, false, "open 不得把 closed 置真");
+    assert.equal(row.dayType, "tenant_special", `${date} 未选择的 dayType 必须保持原值`);
+    assert.equal(row.overrideReason, "E2E 范围覆盖第二批（改状态保类型）", `${date} 覆盖原因应更新`);
+    assert.equal(row.overrideScope?.batchId, "e2e-15r-batch2", `${date} scope 应记录第二批`);
+  }
+  assert.equal(rangeAfter2.days.find((item) => item.date === `${rangeYear}-05-01`).overrideScope?.batchId, rangeBatch1, "范围外的批次 1 日期不得被改动");
+
+  // 并发：携带过期 revision 的提交必须 409，且不落任何审计行（无部分写入）。
+  const auditCountMid = Number(readScalar(`SELECT COUNT(*) FROM \`rental_calendar_override_audits\` WHERE \`workspaceId\`='${rangeWs}' AND \`year\`=${rangeYear};`));
+  assert.equal(auditCountMid, 14, "两批共 14 行审计");
+  const rangeStale = await request("POST", `/api/rental/v1/calendars/${rangeYear}/days/range`, {
+    startDate: `${rangeYear}-05-01`, endDate: `${rangeYear}-05-02`, fields: { pricingMultiplier: 2 },
+    overrideReason: "过期 revision 的提交", expectedRevision: 1, overrideConfirmed: true
+  }, construction.accessToken);
+  assert.equal(rangeStale.status, 409, `过期 revision 必须 409: ${rangeStale.status}`);
+  const auditCountAfterStale = Number(readScalar(`SELECT COUNT(*) FROM \`rental_calendar_override_audits\` WHERE \`workspaceId\`='${rangeWs}' AND \`year\`=${rangeYear};`));
+  assert.equal(auditCountAfterStale, 14, "被 409 拒绝的提交不得留下任何审计行（无部分保存）");
+
+  // 跨年度单次请求必须拒绝（需求 4.5.9：跨年拆成两个年度批次，由前端拆分提交）。
+  const rangeCrossYear = await request("POST", `/api/rental/v1/calendars/${rangeYear}/days/range`, {
+    startDate: `${rangeYear}-12-31`, endDate: `${rangeYear + 1}-01-01`, fields: { dayType: "workday" }, overrideReason: "跨年请求"
+  }, construction.accessToken);
+  assert.equal(rangeCrossYear.status, 400, `跨年度请求必须 400: ${rangeCrossYear.status}`);
+  assert.ok(/跨年度|拆分/.test(rangeCrossYear.body.message || ""), `400 应提示按年度拆分: ${rangeCrossYear.body.message}`);
+
+  // 范围移除：先预览恢复值，再原子移除；恢复到每周模板（无 overriddenFrom 的空白年度）。
+  const removePreview = await request("POST", `/api/rental/v1/calendars/${rangeYear}/days/range-remove-preview`, {
+    startDate: `${rangeYear}-05-01`, endDate: `${rangeYear}-05-10`
+  }, construction.accessToken);
+  assert.equal(removePreview.status, 200, "移除预览应成功");
+  assert.equal(removePreview.body.data.overrideCount, 10, "移除预览应发现 10 天覆盖");
+  assert.ok(
+    removePreview.body.data.days.every((row) => row.restoredSource === "week_rule" && row.restored.source === "week_rule"),
+    "空白年度的移除应全部恢复到每周模板"
+  );
+  const rangeRemove = await request("POST", `/api/rental/v1/calendars/${rangeYear}/days/range-remove`, {
+    startDate: `${rangeYear}-05-01`, endDate: `${rangeYear}-05-10`, overrideReason: "E2E 范围移除", expectedRevision: rangeApply2.body.data.revision
+  }, construction.accessToken);
+  assert.equal(rangeRemove.status, 201, `范围移除失败: ${rangeRemove.status} ${JSON.stringify(rangeRemove.body).slice(0, 300)}`);
+  assert.equal(rangeRemove.body.data.removedCount, 10, "应移除 10 天覆盖");
+  assert.equal(rangeRemove.body.data.revision, 3, "移除也只推进一次 revision");
+  const rangeAfterRemove = (await request("GET", `/api/rental/v1/calendars/${rangeYear}`, null, construction.accessToken)).body.data;
+  for (let day = 1; day <= 10; day += 1) {
+    const date = `${rangeYear}-05-${String(day).padStart(2, "0")}`;
+    const row = rangeAfterRemove.days.find((item) => item.date === date);
+    assert.equal(row.source, "week_rule", `${date} 应恢复每周模板来源`);
+    assert.equal(row.overrideReason, undefined, `${date} 不得残留覆盖原因`);
+    assert.ok(row.dayType !== "tenant_special", `${date} 不得残留特殊类型`);
+  }
+  const revertRows = Number(readScalar(`SELECT COUNT(*) FROM \`rental_calendar_override_audits\` WHERE \`workspaceId\`='${rangeWs}' AND \`year\`=${rangeYear} AND \`action\`='revert';`));
+  assert.equal(revertRows, 10, "移除应产生 10 行 revert 审计");
+  const removeEmpty = await request("POST", `/api/rental/v1/calendars/${rangeYear}/days/range-remove`, {
+    startDate: `${rangeYear}-06-01`, endDate: `${rangeYear}-06-02`, overrideReason: "无覆盖可移除"
+  }, construction.accessToken);
+  assert.equal(removeEmpty.status, 409, `范围内无覆盖必须 409: ${removeEmpty.status}`);
+
+  // 权限：只有 order:view 的账号对范围端点一律 403（服务端独立校验，不靠前端隐藏按钮）。
+  const rangeRole = await request("POST", "/api/platform/roles", {
+    code: `E2E-RANGE-VIEW-${Date.now().toString(36)}`, name: "E2E 范围只读", scope: "store", dataScope: "all",
+    enabledBusinessScopes: ["rental"], permissions: ["store-rental:order:view"], isActive: true
+  }, construction.accessToken);
+  assert.equal(rangeRole.status, 201, `建只读角色失败: ${JSON.stringify(rangeRole.body).slice(0, 200)}`);
+  const rangeAccount = `e2e_range_view_${Date.now().toString(36)}`;
+  const rangeUser = await request("POST", "/api/platform/users", {
+    account: rangeAccount, displayName: "E2E 范围只读", phone: "13900007777", roleIds: [rangeRole.body.data.id], isActive: true
+  }, construction.accessToken);
+  assert.equal(rangeUser.status, 201, `建只读账号失败: ${JSON.stringify(rangeUser.body).slice(0, 200)}`);
+  const rangeMember = await request("PUT", `/api/platform/workspaces/${rangeWs}/members`, { userId: rangeUser.body.data.id, roleId: rangeRole.body.data.id }, construction.accessToken);
+  assert.ok([200, 201].includes(rangeMember.status), `加入成员失败: ${rangeMember.status}`);
+  const rangeTemp = rangeUser.body.data.temporaryPassword;
+  const rangeFirst = await login("e2e_construction", rangeAccount, rangeTemp);
+  const rangePwd = `E2e!${randomBytes(4).toString("hex")}`;
+  assert.equal((await request("POST", "/api/auth/change-password", { currentPassword: rangeTemp, newPassword: rangePwd }, rangeFirst.accessToken)).status, 201, "只读账号改密失败");
+  const rangeViewer = await login("e2e_construction", rangeAccount, rangePwd);
+  const rangeViewDenied = await request("POST", `/api/rental/v1/calendars/${rangeYear}/days/range-preview`, {
+    startDate: `${rangeYear}-05-01`, endDate: `${rangeYear}-05-02`, fields: { businessStatus: "open" }
+  }, rangeViewer.accessToken);
+  assert.equal(rangeViewDenied.status, 403, `只读账号范围预览必须 403: ${rangeViewDenied.status}`);
+  const rangeWriteDenied = await request("POST", `/api/rental/v1/calendars/${rangeYear}/days/range`, {
+    startDate: `${rangeYear}-05-01`, endDate: `${rangeYear}-05-02`, fields: { businessStatus: "open" }, overrideReason: "无权提交"
+  }, rangeViewer.accessToken);
+  assert.equal(rangeWriteDenied.status, 403, `只读账号范围应用必须 403: ${rangeWriteDenied.status}`);
+
+  ok("范围覆盖：预览返回基础/当前/应用后与冲突标记；应用 10 天原子落库（一次 revision、10 行同批次审计、scope 记录批次与范围）；既有覆盖未确认 409、确认后只改所选字段；过期 revision 409 且零审计行（无部分保存）；跨年度 400；移除预览展示恢复值与来源、应用后恢复每周模板且产生 revert 审计；无覆盖范围 409；只读账号预览与应用均 403");
+
+  // E2E_STOP_AFTER=<marker>：前缀分段运行——跑完 marker 所在分段后立即收尾（清理测试库）。
+  // 只在显式设置环境变量时生效；不跳过、不削弱任何断言，仅供复测「目标段 + 全部前置段」。
+  await maybeStopAfter("15r");
+
   console.log("== 16. 双租户并发隔离 ==");
   const rounds = 12;
   const concurrent = [];
@@ -9303,17 +9487,39 @@ async function main() {
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);
 }
 
+/**
+ * 前缀分段门禁：`E2E_STOP_AFTER=<marker>` 时，跑到 marker 分段末尾即视为完成。
+ * 分段之间共享状态（租户、令牌、日历版本），因此「分段」= 目标段 + 全部前置段；
+ * 本机制只提前结束、不跳过任何断言，被 409/事务回滚断言消费的库状态不受影响。
+ */
+class E2EPrefixStop extends Error {
+  constructor(marker) {
+    super(`E2E_STOP_AFTER=${marker} 命中：前缀分段结束（${passedGroups} 项断言组），后续分段按计划跳过`);
+    this.__e2ePrefixStop = true;
+  }
+}
+async function maybeStopAfter(marker) {
+  if (process.env.E2E_STOP_AFTER !== marker) return;
+  console.log(`\n${new E2EPrefixStop(marker).message}`);
+  throw new E2EPrefixStop(marker);
+}
+
 (async () => {
   try {
     await main();
   } catch (error) {
-    console.error(`\nE2E 失败: ${error.message}`);
-    // 断言层只看到状态码，成因在 API 子进程里；附上日志尾部避免无从下手。
-    if (apiLogRef && apiLogRef.length) {
-      console.error("--- API 日志尾部 ---");
-      console.error(apiLogRef.join("").slice(-3000));
+    if (error && error.__e2ePrefixStop) {
+      // 前缀分段按计划结束：不算失败，finally 仍会清理测试库。
+      process.exitCode = 0;
+    } else {
+      console.error(`\nE2E 失败: ${error.message}`);
+      // 断言层只看到状态码，成因在 API 子进程里；附上日志尾部避免无从下手。
+      if (apiLogRef && apiLogRef.length) {
+        console.error("--- API 日志尾部 ---");
+        console.error(apiLogRef.join("").slice(-3000));
+      }
+      process.exitCode = 1;
     }
-    process.exitCode = 1;
   } finally {
     await stopApi();
     try {
