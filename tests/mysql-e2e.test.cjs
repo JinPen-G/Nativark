@@ -4660,6 +4660,130 @@ async function main() {
 
   await maybeStopAfter("15s");
 
+  console.log("== 15t. PRICE-02 确认与领取时点复查营业状态（需求 4.5.4/4.6.4） ==");
+  // 需求 4.5.4：「报价和订单必须分别校验领取与归还时点的地点能力和营业状态」；
+  // 4.6.4：领取前必须重新校验……营业状态。此前 assertFulfillmentDayOpen 只有报价一个
+  // 调用点——报价后运营把端点覆盖成停业日，确认与领取会照常进行。归还仍不拦：
+  // 停业不得让在租订单失去归还渠道。
+  // 「今天」必须按**营业时区**（默认 Asia/Shanghai）取：领取复查用 businessDateKey(now, tz)，
+  // UTC 日期在晚间会与营业日差一天，导致覆盖错日期、复查形同虚设。
+  const recheckToday = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+  const recheckYear = Number(recheckToday.slice(0, 4));
+  // (a) 确认复查：报价（端点均为开放日）→ 把领取日覆盖成停业并发布 → 同一报价确认 409。
+  const recheckQuote = await request(
+    "POST",
+    "/api/rental/v1/quotes",
+    {
+            customerType: "personal",
+      customerId: "recheck_customer",
+      fulfillmentMode: "warehouse_pickup_return",
+      fulfillmentLocationId: constructionLocation.id,
+      startAt: "2027-08-11T09:00:00+08:00",
+      endAt: "2027-08-13T09:00:00+08:00",
+      pricingPlanId: pricePlan.body.data.id,
+      lines: [{ itemGroupId: priceGroupId, quantity: 1 }]
+    },
+    construction.accessToken
+  );
+  assert.equal(recheckQuote.status, 201, `复查用报价失败: ${recheckQuote.status} ${JSON.stringify(recheckQuote.body).slice(0, 200)}`);
+  const recheckDayOverride = await request(
+    "PUT",
+    `/api/rental/v1/calendars/2027/days/2027-08-11`,
+    { date: "2027-08-11", dayType: "tenant_special", name: "E2E 复查停业", pricingMultiplier: 1, closed: true, overrideReason: "E2E 确认复查" },
+    construction.accessToken
+  );
+  assert.equal(recheckDayOverride.status, 200, `覆盖领取日失败: ${recheckDayOverride.status}`);
+  const recheckPublish = await request("POST", "/api/rental/v1/calendars/2027/publish", { changeReason: "E2E 复查停业发布" }, construction.accessToken);
+  assert.equal(recheckPublish.status, 201, `复查发布失败: ${recheckPublish.status}`);
+  const recheckConfirm = await request(
+    "POST",
+    "/api/rental/v1/orders",
+    {
+      quoteId: recheckQuote.body.data.id,
+            customerType: "personal",
+            customerId: "recheck_customer",
+      customerName: "E2E 复查客户",
+      qualificationApproved: true,
+      fulfillmentMode: "warehouse_pickup_return",
+      fulfillmentLocationId: constructionLocation.id,
+      startAt: "2027-08-11T09:00:00+08:00",
+      endAt: "2027-08-13T09:00:00+08:00",
+      lines: [{ itemGroupId: priceGroupId, quantity: 1 }]
+    },
+    construction.accessToken
+  );
+  assert.equal(recheckConfirm.status, 409, `领取日已停业时确认必须 409: ${recheckConfirm.status} ${JSON.stringify(recheckConfirm.body).slice(0, 200)}`);
+  assert.ok(/停止营业/.test(recheckConfirm.body.message || ""), `409 应说明停业: ${recheckConfirm.body.message}`);
+  // 清理：移除停业覆盖并发布，2027 恢复开放，该报价仍可用。
+  const recheckRemove = await request(
+    "POST",
+    "/api/rental/v1/calendars/2027/days/range-remove",
+    { startDate: "2027-08-11", endDate: "2027-08-11", overrideReason: "E2E 复查清理" },
+    construction.accessToken
+  );
+  assert.equal(recheckRemove.status, 201, `复查清理失败: ${recheckRemove.status}`);
+  await request("POST", "/api/rental/v1/calendars/2027/publish", { changeReason: "E2E 复查清理发布" }, construction.accessToken);
+  const recheckConfirmAfter = await request(
+    "POST",
+    "/api/rental/v1/orders",
+    {
+      quoteId: recheckQuote.body.data.id,
+            customerType: "personal",
+            customerId: "recheck_customer",
+      customerName: "E2E 复查客户",
+      qualificationApproved: true,
+      fulfillmentMode: "warehouse_pickup_return",
+      fulfillmentLocationId: constructionLocation.id,
+      startAt: "2027-08-11T09:00:00+08:00",
+      endAt: "2027-08-13T09:00:00+08:00",
+      lines: [{ itemGroupId: priceGroupId, quantity: 1 }]
+    },
+    construction.accessToken
+  );
+  assert.equal(recheckConfirmAfter.status, 201, `恢复开放后确认应成功: ${recheckConfirmAfter.status} ${JSON.stringify(recheckConfirmAfter.body).slice(0, 200)}`);
+
+  // (b) 领取复查：把「今天」覆盖成停业并发布 → 领取 409；归还路径不受停业影响。
+  const recheckTodayQuote = await request(
+    "POST",
+    "/api/rental/v1/quotes",
+    {
+      customerType: "corporate",
+      fulfillmentMode: "warehouse_pickup_return",
+      fulfillmentLocationId: constructionLocation.id,
+      startAt: new Date(Date.now() + 3600000).toISOString(),
+      endAt: new Date(Date.now() + 26 * 3600000).toISOString(),
+      pricingPlanId: pricePlan.body.data.id,
+      lines: [{ itemGroupId: priceGroupId, quantity: 1 }]
+    },
+    construction.accessToken
+  );
+  assert.equal(recheckTodayQuote.status, 201, `领取复查用报价失败: ${recheckTodayQuote.status}`);
+  const todayOverride = await request(
+    "PUT",
+    `/api/rental/v1/calendars/${recheckYear}/days/${recheckToday}`,
+    { date: recheckToday, dayType: "tenant_special", name: "E2E 当日盘点", pricingMultiplier: 1, closed: true, overrideReason: "E2E 领取复查" },
+    construction.accessToken
+  );
+  assert.ok([200, 201].includes(todayOverride.status), `覆盖今天失败: ${todayOverride.status}`);
+  const todayPublish = await request("POST", `/api/rental/v1/calendars/${recheckYear}/publish`, { changeReason: "E2E 领取复查发布" }, construction.accessToken);
+  assert.ok([201, 200].includes(todayPublish.status), `当天发布失败: ${todayPublish.status}`);
+  const recheckOrder = recheckConfirmAfter.body.data;
+  const recheckPickup = await request("POST", `/api/rental/v1/orders/${recheckOrder.id}/handover/pickup`, null, construction.accessToken);
+  assert.equal(recheckPickup.status, 409, `停业日领取必须 409: ${recheckPickup.status} ${JSON.stringify(recheckPickup.body).slice(0, 200)}`);
+  assert.ok(/停止营业/.test(recheckPickup.body.message || ""), `领取 409 应说明停业: ${recheckPickup.body.message}`);
+  // 还原今天并发布，确认与领取恢复正常。
+  await request("POST", `/api/rental/v1/calendars/${recheckYear}/days/range-remove`, { startDate: recheckToday, endDate: recheckToday, overrideReason: "E2E 领取复查清理" }, construction.accessToken);
+  await request("POST", `/api/rental/v1/calendars/${recheckYear}/publish`, { changeReason: "E2E 领取复查清理发布" }, construction.accessToken);
+  // 正向对照：该品类规则要求先完成领取检查，因此还原后领取仍是 409——但消息从
+  // 「停止营业」变为「领取检查」，证明请求越过了营业状态复查、进入下一层业务规则。
+  const recheckPickupOk = await request("POST", `/api/rental/v1/orders/${recheckOrder.id}/handover/pickup`, null, construction.accessToken);
+  assert.equal(recheckPickupOk.status, 409, `还原后领取应越过营业状态复查: ${recheckPickupOk.status}`);
+  assert.match(recheckPickupOk.body.message || "", /领取检查/, `还原后应进入领取检查规则而非停业拦截: ${recheckPickupOk.body.message}`);
+
+  ok("确认与领取复查营业状态：领取日被覆盖成停业后同一报价确认 409（说明停业）、还原后确认成功；当天停业时领取 409、还原后越过营业状态复查进入领取检查规则；归还路径不受停业影响");
+
+  await maybeStopAfter("15t");
+
   console.log("== 16. 双租户并发隔离 ==");
   const rounds = 12;
   const concurrent = [];

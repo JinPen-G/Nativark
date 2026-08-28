@@ -3081,6 +3081,52 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   }
 
   /**
+   * 订单确认时的营业状态复查（需求 4.5.4「报价和订单必须分别校验领取与归还时点的
+   * 地点能力和营业状态」）：报价之后、确认之前，运营可能把租期端点覆盖成停业日；
+   * 确认动作必须按订单固化的领取/归还时点重新校验，不能只信报价时的旧判断。
+   */
+  assertOrderDaysOpenForConfirmation(
+    tenantId: string,
+    context: BusinessContext,
+    order: {
+      fulfillmentLocationId: string;
+      returnLocationId?: string;
+      startAt: string;
+      endAt: string;
+      fulfillmentMode: RentalQuoteRequest["fulfillmentMode"];
+    }
+  ) {
+    this.assertFulfillmentDayOpen(
+      tenantId,
+      context,
+      order as RentalQuoteRequest,
+      context.settings.calendar.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE,
+      context.settings
+    );
+  }
+
+  /**
+   * 领取动作时的营业状态复查（需求 4.6.4：领取前必须重新校验……营业状态）。
+   * 按**实际领取时刻**判定：早取、迟取都要看当前门店是否还在办理领取。
+   * 归还动作刻意不复查——停业不得让在租订单失去归还渠道（需求 4.5.4）。
+   */
+  assertPickupOpenAt(
+    tenantId: string,
+    context: BusinessContext,
+    fulfillmentLocationId: string,
+    at: string,
+    fulfillmentMode: RentalQuoteRequest["fulfillmentMode"]
+  ) {
+    this.assertFulfillmentDayOpen(
+      tenantId,
+      context,
+      { fulfillmentLocationId, startAt: at, endAt: at, fulfillmentMode } as RentalQuoteRequest,
+      context.settings.calendar.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE,
+      context.settings
+    );
+  }
+
+  /**
    * 单个营业日期的价格系数。逐单位取价与整段明细共用同一判定，避免两处口径分叉。
    *
    * 租户逐日覆盖优先于费率的节假日倍率：判据是 `source === "tenant_override"`，
