@@ -399,7 +399,32 @@ assert.deepEqual(afterPause.missingRequired, ["pickup"], "暂停的必选能力�
 assert.equal(afterPause.productionReady, false, "必选能力被暂停后不得仍判定为生产就绪");
 console.log("  ✓ 生产就绪：必选齐备为 true，任一必选被暂停立刻回落为 false");
 
-// ============ 9. 审计可按能力筛选且只增不改 ============
+// ============ 9. 已启用名单：Hook 运行时的执行依据 ============
+// CORE-EXT-02B 的 Hook 运行时按这份名单决定执行哪些能力，因此它必须只含 enabled。
+// 若退化为「有实例即返回」，暂停的能力仍会参与判定，暂停就成了只改显示的空操作。
+const lifecycleStates = (await service.overview(TENANT)).capabilities
+  .filter((row) => row.instance)
+  .map((row) => `${row.definition.code}:${row.instance.status}`)
+  .sort();
+assert.ok(
+  lifecycleStates.some((row) => row.endsWith(":enabled")) &&
+    lifecycleStates.some((row) => row.endsWith(":paused")) &&
+    lifecycleStates.some((row) => row.endsWith(":disabled")),
+  `前置条件：本用例需要同时存在 enabled/paused/disabled 三种实例，实际 ${lifecycleStates.join("、")}`
+);
+const enabledOnly = await service.enabledInstances(TENANT);
+assert.ok(enabledOnly.length > 0, "已启用名单不应为空（否则下面的断言没有区分力）");
+assert.ok(
+  enabledOnly.every((row) => row.status === "enabled"),
+  `已启用名单只能含 enabled，实际 ${enabledOnly.map((row) => `${row.code}:${row.status}`).join("、")}`
+);
+assert.ok(
+  enabledOnly.length < lifecycleStates.length,
+  "已启用名单必须真的过滤掉了 paused/disabled（数量与实例总数相同说明没过滤）"
+);
+console.log("  ✓ 已启用名单只含 enabled，paused 与 disabled 均被排除");
+
+// ============ 10. 审计可按能力筛选且只增不改 ============
 const allAudits = await service.listAudits(TENANT);
 const bundleAudits = await service.listAudits(TENANT, "bundle_inventory");
 assert.ok(allAudits.length >= bundleAudits.length && bundleAudits.length >= 2, "审计应可按能力筛选");
@@ -414,8 +439,3 @@ console.log("  ✓ 审计只增不改、可按能力筛选、动作序列完整"
 
 console.log("\nCORE-EXT-02A capability 运行时用例全部通过");
 })();
-
-
-
-
-

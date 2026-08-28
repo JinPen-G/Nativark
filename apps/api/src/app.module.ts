@@ -44,6 +44,7 @@ import { RentalOrderConfirmationService } from "./modules/rental-core/rental-ord
 import { WorkspaceCapabilityController } from "./modules/rental-core/workspace-capability.controller";
 import { WorkspaceCapabilityRepository } from "./modules/rental-core/workspace-capability.repository";
 import { WorkspaceCapabilityService } from "./modules/rental-core/workspace-capability.service";
+import { CapabilityHookRuntime } from "./modules/rental-core/capability-hook.runtime";
 
 @Module({
   imports: [
@@ -93,6 +94,7 @@ import { WorkspaceCapabilityService } from "./modules/rental-core/workspace-capa
     RentalOrderConfirmationService,
     WorkspaceCapabilityRepository,
     WorkspaceCapabilityService,
+    CapabilityHookRuntime,
     IntegrationsService,
     IntegrationsRepository,
     {

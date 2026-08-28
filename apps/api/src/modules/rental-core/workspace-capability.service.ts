@@ -47,6 +47,18 @@ export class WorkspaceCapabilityService {
   }
 
   /**
+   * 该空间**已启用**的能力实例。CORE-EXT-02B 的 Hook 运行时按此决定执行哪些能力。
+   *
+   * 刻意只返回 `enabled`：`paused` 与 `disabled` 都有实例行，若这里按"有实例"返回，
+   * 暂停的能力仍会参与判定，暂停就成了只改显示的空操作。
+   */
+  async enabledInstances(tenantId: string, workspaceId?: string): Promise<WorkspaceCapabilityInstance[]> {
+    const scope = workspaceId ?? (await this.repository.currentWorkspaceId(tenantId));
+    const instances = await this.repository.listInstances(tenantId, scope);
+    return instances.filter((instance) => instance.status === "enabled");
+  }
+
+  /**
    * 空间能力总览。品类与声明集由仓储从空间行解析，**不做参数**：
    * 让调用方传品类等于允许请求方自选判定口径。
    */

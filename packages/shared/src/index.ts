@@ -4000,6 +4000,158 @@ export interface UpgradeWorkspaceCapabilityRequest {
 }
 
 /**
+ * CORE-EXT-02B：capability Hook 的七个触发点。
+ *
+ * 这个列表就是 Rental Core 愿意对外开放的**全部**扩展时机。它刻意是封闭枚举而不是
+ * 任意字符串：能力模块只能挂在 Core 认得的节点上，不能自己发明一个 Core 从未调用的
+ * 节点名然后声称"已接入"。值同时作为审计里的节点标识。
+ */
+export const RENTAL_CAPABILITY_HOOK_POINTS = [
+  "item_onboarding",
+  "quote_validation",
+  "order_confirmation",
+  "allocation_dispatch",
+  "pickup_delivery",
+  "return_inspection",
+  "settlement"
+] as const;
+
+export type RentalCapabilityHookPoint = (typeof RENTAL_CAPABILITY_HOOK_POINTS)[number];
+
+/**
+ * Hook 判定。三值刻意不含"修改"：
+ * - `allow` 放行；
+ * - `warn` 放行但留提示（必须可审计）；
+ * - `block` 拒绝，且必须给出原因。
+ */
+export type RentalCapabilityHookDecision = "allow" | "warn" | "block";
+
+/** 阻止原因或提示。`code` 供程序判定，`message` 供人阅读，两者都要能落进审计。 */
+export interface RentalCapabilityHookNotice {
+  code: string;
+  message: string;
+  /** 触发该结论的关键输入摘要，供事后解释"当时为什么这么判"（CORE-EXT-02D 会引用）。 */
+  evidence?: Record<string, string | number | boolean>;
+}
+
+/**
+ * 关联任务。能力**不能**自己去建单、改库存或推状态，只能声明"这件事需要有人做"，
+ * 由 Core 在自己的事务里落库。
+ */
+export interface RentalCapabilityLinkedTask {
+  code: string;
+  title: string;
+  /** 建议负责人或角色；Core 不保证据此派单，只如实记录能力的建议。 */
+  assigneeHint?: string;
+  dueAt?: string;
+  detail?: string;
+}
+
+/**
+ * 费用**依据**，不是费用结果。
+ *
+ * 能力给出金额与计算依据，但由 Core 决定是否计入、以哪条收费行计入、记谁的版本。
+ * 这条边界是刻意的：允许能力直接写 `order.totalAmount` 就等于把金额事实源交给扩展模块，
+ * 那之后任何一笔账都无法只看 Core 解释清楚。
+ */
+export interface RentalCapabilityFeeBasis {
+  code: string;
+  label: string;
+  amount: number;
+  currency: "CNY";
+  /** 计算依据的可读说明，必填：一笔说不出理由的费用不允许进入结算。 */
+  basis: string;
+  evidence?: Record<string, string | number | boolean>;
+}
+
+/** 深只读。Hook 拿到的业务对象必须是不可变视图——见 `RentalCapabilityHookContext.subject`。 */
+export type RentalDeepReadonly<T> = T extends (infer U)[]
+  ? ReadonlyArray<RentalDeepReadonly<U>>
+  : T extends object
+    ? { readonly [K in keyof T]: RentalDeepReadonly<T[K]> }
+    : T;
+
+/**
+ * Hook 上下文。**只读**，且刻意不含任何仓储、事务或服务句柄。
+ *
+ * 这是"能力不能改写 Core 事实"的结构性保证，而不是靠约定：Hook 函数签名里根本拿不到
+ * 可以写库的东西，因此它**只能**通过返回值表达意见。若把 `tx` 或仓储传进来，
+ * 那条禁令就退化成一句注释，任何一个能力模块都能绕过 Core 直接落库。
+ */
+export interface RentalCapabilityHookContext<TSubject> {
+  point: RentalCapabilityHookPoint;
+  tenantId: string;
+  workspaceId: string;
+  categoryCode: RentalCategoryCode;
+  /** 操作人。部分 Core 动作（确认、配货）历史上没有操作人参数，因此可缺省。 */
+  operator?: string;
+  /** 判定时刻，由 Core 统一提供，能力不得自取当前时间——否则同一次判定各能力时间不一。 */
+  at: string;
+  /** 本次判定的业务对象只读视图。 */
+  subject: RentalDeepReadonly<TSubject>;
+  /** 该能力在本经营空间的实例信息，供能力按自己的配置与版本判定。 */
+  capability: {
+    readonly code: RentalCapability;
+    readonly implementationVersion: string;
+    readonly configVersion: string;
+    readonly config: Readonly<Record<string, string | number | boolean>>;
+  };
+}
+
+/**
+ * Hook 结果。能力能表达的**全部**东西就是这四项。
+ * `block` 必须带至少一条 `blockReasons`：拒绝而说不出理由的能力等于随机故障。
+ */
+export interface RentalCapabilityHookResult {
+  decision: RentalCapabilityHookDecision;
+  blockReasons?: RentalCapabilityHookNotice[];
+  notices?: RentalCapabilityHookNotice[];
+  linkedTasks?: RentalCapabilityLinkedTask[];
+  feeBases?: RentalCapabilityFeeBasis[];
+}
+
+/**
+ * 能力模块的 Hook 实现。一个能力可以只实现自己关心的节点。
+ *
+ * `order` 是同节点内多能力之间的**确定性执行序**：Core 按 (order, code) 升序执行，
+ * 不依赖注册表数组下标或 Map 插入序——那两者都会因为有人重排注册表而静默改变判定顺序。
+ */
+export interface RentalCapabilityHookModule {
+  code: RentalCapability;
+  order: number;
+  hooks: Partial<Record<RentalCapabilityHookPoint, RentalCapabilityHookHandler>>;
+}
+
+export type RentalCapabilityHookHandler = (
+  context: RentalCapabilityHookContext<unknown>
+) => RentalCapabilityHookResult | Promise<RentalCapabilityHookResult>;
+
+/**
+ * 一个节点上全部能力的合并结论，由 Core 消费。
+ *
+ * `blocked` 只由**必选**能力（`category_required`）或显式 `block` 造成；
+ * 可选能力的 `block` 同样阻止，但它是否必选决定了「能力自身抛异常」时的处理：
+ * 必选能力异常 = fail-closed 阻止，可选能力异常 = 记录降级提示后放行。
+ */
+export interface RentalCapabilityHookOutcome {
+  point: RentalCapabilityHookPoint;
+  blocked: boolean;
+  blockReasons: Array<RentalCapabilityHookNotice & { code: string; capability: RentalCapability }>;
+  notices: Array<RentalCapabilityHookNotice & { capability: RentalCapability }>;
+  linkedTasks: Array<RentalCapabilityLinkedTask & { capability: RentalCapability }>;
+  feeBases: Array<RentalCapabilityFeeBasis & { capability: RentalCapability }>;
+  /** 实际执行过的能力及其版本，供审计与 CORE-EXT-02D 快照引用。 */
+  executed: Array<{
+    capability: RentalCapability;
+    implementationVersion: string;
+    configVersion: string;
+    decision: RentalCapabilityHookDecision;
+    /** 能力自身抛异常时为真；必选能力此时必然 blocked。 */
+    failed?: boolean;
+  }>;
+}
+
+/**
  * 品类能力的统一注册表。新增专属能力时先登记扩展点，再由独立模块实现；
  * Rental Core 只识别 capability code，不在订单主流程里判断具体品类。
  */
