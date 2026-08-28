@@ -8304,6 +8304,126 @@ async function main() {
       `生产就绪为 false 且缺失必选能力可枚举（${gateSession.body.data.missingRequiredCapabilities.join("、")}）`
   );
 
+  console.log("== 68. CORE-EXT-02D 能力快照固化：报价/订单保存版本，暂停不破坏历史、新报价用新状态 ==");
+  // 本节证的是：报价与订单在生成时固化「当时已启用能力的版本快照」，此后暂停/停用能力
+  // 都不改写历史读取，而**新**报价按当前状态生成。用第 66 节已备好的 e2e_cap_camera
+  // 空间（已启用 serialized/quantity/pickup/return/bundle）与其数量商品+价格计划。
+  const snapAdmin = await login("e2e_cap_camera", "admin", capTenant.password);
+  const snapToken = (await request("POST", "/api/auth/switch-workspace", {
+    workspaceId: capTenant.currentWorkspaceId
+  }, snapAdmin.accessToken)).body.data.accessToken;
+
+  const snapStartAt = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
+  const snapEndAt = new Date(Date.now() + 72 * 3600 * 1000).toISOString();
+  const snapQuoteBody = {
+    customerType: "personal",
+    fulfillmentMode: "store_pickup_return",
+    fulfillmentLocationId: hookLocation.id,
+    startAt: snapStartAt,
+    endAt: snapEndAt,
+    lines: [{ itemGroupId: hookGroup.body.data.id, quantity: 1 }],
+    pricingPlanId: hookPlan.body.data.id
+  };
+
+  // 1) 报价固化快照：非空、含版本、按 code 排序、含已启用的 quantity_inventory。
+  const snapQuote = await request("POST", "/api/rental/v1/quotes", snapQuoteBody, snapToken);
+  assert.equal(snapQuote.status, 201, `快照用例报价失败: ${snapQuote.status} ${JSON.stringify(snapQuote.body).slice(0, 300)}`);
+  const quoteSnap = snapQuote.body.data.capabilitySnapshot;
+  assert.ok(Array.isArray(quoteSnap) && quoteSnap.length > 0, "报价必须固化非空的能力快照");
+  assert.ok(
+    quoteSnap.every((entry) => entry.code && entry.implementationVersion && entry.configVersion),
+    "快照每条必须含 code、实现版本与配置版本"
+  );
+  assert.deepEqual(
+    quoteSnap.map((entry) => entry.code),
+    [...quoteSnap.map((entry) => entry.code)].sort(),
+    "快照必须按 code 稳定排序"
+  );
+  assert.ok(quoteSnap.some((entry) => entry.code === "quantity_inventory"), "当时已启用的 quantity_inventory 必须在快照里");
+  // DB 侧确认落库而非仅在响应里。
+  assert.equal(
+    readScalar(`SELECT IF(\`capabilitySnapshot\` IS NULL,'null','set') FROM \`rental_quotes\` WHERE \`id\`='${snapQuote.body.data.id}';`),
+    "set",
+    "报价能力快照必须落库"
+  );
+
+  // 2) 订单从报价拷贝快照，且下单后重新读取仍带同一份快照。
+  const snapOrder = await request(
+    "POST",
+    "/api/rental/v1/orders",
+    { quoteId: snapQuote.body.data.id, customerName: "E2E 快照客户", contactPhone: "13800000068", ...snapQuoteBody },
+    snapToken
+  );
+  assert.equal(snapOrder.status, 201, `快照用例下单失败: ${snapOrder.status} ${JSON.stringify(snapOrder.body).slice(0, 300)}`);
+  const snapOrderId = snapOrder.body.data.id;
+  const orderRead = await request("GET", `/api/rental/v1/orders/${snapOrderId}`, null, snapToken);
+  assert.deepEqual(
+    orderRead.body.data.capabilitySnapshot?.map((entry) => `${entry.code}@${entry.implementationVersion}`).sort(),
+    quoteSnap.map((entry) => `${entry.code}@${entry.implementationVersion}`).sort(),
+    "订单快照必须与报价快照一致（下单时拷贝，且从库读回后仍在）"
+  );
+  assert.equal(
+    readScalar(`SELECT IF(\`capabilitySnapshot\` IS NULL,'null','set') FROM \`rental_orders\` WHERE \`id\`='${snapOrderId}';`),
+    "set",
+    "订单能力快照必须落库"
+  );
+
+  // 3) 暂停 quantity_inventory。
+  const snapPauseRevision = Number(
+    readScalar(
+      `SELECT \`revision\` FROM \`workspace_capability_instances\` WHERE \`workspaceId\`='${capTenant.currentWorkspaceId}' AND \`code\`='quantity_inventory';`
+    )
+  );
+  assert.equal(
+    (await request(
+      "PUT",
+      "/api/rental/v1/capabilities",
+      { code: "quantity_inventory", status: "paused", reason: "第 68 节验证暂停不破坏历史", expectedRevision: snapPauseRevision },
+      snapToken
+    )).status,
+    200,
+    "暂停 quantity_inventory 失败"
+  );
+
+  // 4) 暂停不破坏历史读取：已存在订单重新读回，其快照仍**包含** quantity_inventory。
+  const orderAfterPause = await request("GET", `/api/rental/v1/orders/${snapOrderId}`, null, snapToken);
+  assert.equal(orderAfterPause.status, 200, "暂停能力后历史订单必须仍可读");
+  assert.ok(
+    orderAfterPause.body.data.capabilitySnapshot?.some((entry) => entry.code === "quantity_inventory"),
+    "暂停能力不得改写历史订单的快照——在途订单仍按下单当时的能力履约"
+  );
+
+  // 5) 新报价按**当前**状态生成：暂停后的新报价快照不再包含 quantity_inventory。
+  const quoteAfterPause = await request("POST", "/api/rental/v1/quotes", snapQuoteBody, snapToken);
+  // quantity_inventory 暂停后该商品是否还能报价取决于库存模式校验；这里只要拿到快照即可，
+  // 若报价因暂停被拒也说明状态生效。两种情况分别断言。
+  if (quoteAfterPause.status === 201) {
+    assert.ok(
+      !(quoteAfterPause.body.data.capabilitySnapshot ?? []).some((entry) => entry.code === "quantity_inventory"),
+      "暂停后的新报价快照不得再包含 quantity_inventory（新业务按当前状态）"
+    );
+  } else {
+    assert.equal(quoteAfterPause.status, 409, `暂停后新报价应成功或因能力状态被拒，实际 ${quoteAfterPause.status}`);
+  }
+
+  // 6) 恢复启用，保持空间可用（并复验并发升级前置已在第 65 节以四路并发 save 覆盖）。
+  const snapResumeRevision = Number(
+    readScalar(
+      `SELECT \`revision\` FROM \`workspace_capability_instances\` WHERE \`workspaceId\`='${capTenant.currentWorkspaceId}' AND \`code\`='quantity_inventory';`
+    )
+  );
+  assert.equal(
+    (await request(
+      "PUT",
+      "/api/rental/v1/capabilities",
+      { code: "quantity_inventory", status: "enabled", reason: "第 68 节验证结束恢复", expectedRevision: snapResumeRevision },
+      snapToken
+    )).status,
+    200,
+    "恢复启用失败"
+  );
+  ok("能力快照固化：报价/订单落库 code+版本，暂停后历史订单快照不变且仍可读，新报价按当前状态生成");
+
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);
 }
 

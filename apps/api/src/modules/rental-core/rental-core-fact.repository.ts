@@ -203,6 +203,8 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       ruleSnapshot: order.ruleSnapshot as unknown as Prisma.InputJsonValue,
       calendarVersion: order.calendarVersion ?? null,
       calendarSnapshot: (order.calendarSnapshot ?? null) as unknown as Prisma.InputJsonValue,
+      // CORE-EXT-02D：能力版本快照随订单固化，在途环节的 Hook 判定都用它。
+      capabilitySnapshot: (order.capabilitySnapshot ?? null) as unknown as Prisma.InputJsonValue,
       chargeLines: order.chargeLines as unknown as Prisma.InputJsonValue,
       rentalAmount: new Prisma.Decimal(order.rentalAmount),
       discountAmount: new Prisma.Decimal(order.discountAmount),
@@ -649,6 +651,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       ruleSnapshot: row.ruleSnapshot as unknown as RentalRuleConfig,
       calendarVersion: row.calendarVersion ?? undefined,
       calendarSnapshot: (row.calendarSnapshot ?? undefined) as unknown as RentalOrder["calendarSnapshot"],
+      capabilitySnapshot: (row.capabilitySnapshot ?? undefined) as unknown as RentalOrder["capabilitySnapshot"],
       chargeLines: (row.chargeLines ?? []) as unknown as RentalQuoteChargeLine[],
       rentalAmount: num(row.rentalAmount),
       discountAmount: num(row.discountAmount),

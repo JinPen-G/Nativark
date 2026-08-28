@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Inject, Injectable, NotFoundExc
 import { randomUUID } from "node:crypto";
 import { CapabilityHookRuntime } from "./capability-hook.runtime";
 import type { CapabilityHookSubjectType } from "./capability-hook.repository";
+import { WorkspaceCapabilityService } from "./workspace-capability.service";
 import {
   RENTAL_CATEGORY_DEFINITIONS,
   RentalAssetStatus,
@@ -43,7 +44,8 @@ import {
   type SaveTenantRentalProfileRequest,
   type SubstituteRentalBundleComponentRequest,
   type TenantRentalBusinessSettings,
-  type TenantRentalProfile
+  type TenantRentalProfile,
+  type WorkspaceCapabilityInstance
 } from "@store-rental/shared";
 import { getRequestWorkspaceId, runWithRequestIdentity } from "../../common/request-identity";
 import { RentalStateRepository } from "./rental-state.repository";
@@ -198,7 +200,10 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     subjectRef: { type: CapabilityHookSubjectType; id: string },
     subject: unknown,
     tx?: RentalFactTx,
-    operator?: string
+    operator?: string,
+    // CORE-EXT-02D：在途订单环节传入订单固化的能力快照，让判定按下单当时的
+    // 实现版本与配置执行；不传则用当前已启用实例（商品建档等无订单快照的节点）。
+    instances?: WorkspaceCapabilityInstance[]
   ) {
     if (!this.hooks) return undefined;
     return this.hooks.evaluate({
@@ -209,8 +214,25 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       subjectRef,
       subject,
       tx,
-      operator
+      operator,
+      instances
     });
+  }
+
+  /**
+   * CORE-EXT-02D：把订单固化的能力快照还原成 Hook 执行名单。
+   *
+   * 在途订单的每个环节都用它，而不是当前实例：能力升级或暂停后，这张订单必须继续按
+   * 下单当时的版本与配置履约。订单没有快照（旧订单或未注入能力服务时下的单）返回
+   * undefined，`runHook` 退回按当前已启用实例判定——这与升级前的行为一致，不是回退。
+   */
+  private orderHookInstances(tenantId: string, order: RentalOrder): WorkspaceCapabilityInstance[] | undefined {
+    if (!order.capabilitySnapshot?.length) return undefined;
+    return WorkspaceCapabilityService.instancesFromSnapshot(
+      tenantId,
+      this.workspaceOf(tenantId),
+      order.capabilitySnapshot
+    );
   }
 
   /**
@@ -846,6 +868,9 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       startAt: input.startAt, endAt: input.endAt,
       quoteId: quote.id, quoteNo: quote.quoteNo, pricingPlanVersion: quote.pricingPlanVersion,
       ruleVersion: quote.ruleVersion, ruleSnapshot: structuredClone(quote.ruleSnapshot), calendarVersion: quote.calendarVersion, calendarSnapshot: structuredClone(quote.calendarSnapshot), chargeLines: structuredClone(quote.chargeLines),
+      // CORE-EXT-02D：能力版本快照随订单固化。在途环节的 Hook 判定都用它，
+      // 因此升级或暂停能力都不改写这张已存在订单的履约规则。
+      capabilitySnapshot: quote.capabilitySnapshot ? structuredClone(quote.capabilitySnapshot) : undefined,
       rentalAmount: quote.rentalAmount, discountAmount: quote.discountAmount, couponAmount: quote.couponAmount,
       serviceAmount: quote.serviceAmount,
       // 履约费与预授权额度必须一并投影：订单只拿总额的话，
@@ -868,7 +893,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (order.reservations.some((row) => row.expiresAt && new Date(row.expiresAt).getTime() < Date.now())) throw new ConflictException("软预占已过期，请重新下单");
     // Hook 位置：状态与预占校验之后、改写之前。放在这里才能让阻止真正拦下本次确认；
     // 放在 saveOrderAggregate 之后就只是"事后告知"，订单已经变成 reserved 了。
-    await this.runHook(tenantId, "order_confirmation", { type: "order", id: order.id }, order, tx, operator);
+    await this.runHook(tenantId, "order_confirmation", { type: "order", id: order.id }, order, tx, operator, this.orderHookInstances(tenantId, order));
     order.reservations.forEach((row) => { row.status = RentalReservationStatus.Confirmed; row.expiresAt = undefined; });
     order.status = RentalCoreOrderStatus.Reserved; order.updatedAt = now();
     await this.factStore.saveOrderAggregate(order, [], tx);
@@ -882,7 +907,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     this.assertOutboundLocationActive(state, order);
     // Hook 位置：状态与地点校验之后、取库存锁之前。放在取锁之后会让被能力阻止的
     // 请求白持有一批行锁直到事务回滚，无谓地加重并发争用。
-    await this.runHook(tenantId, "allocation_dispatch", { type: "order", id: order.id }, order, tx, operator);
+    await this.runHook(tenantId, "allocation_dispatch", { type: "order", id: order.id }, order, tx, operator, this.orderHookInstances(tenantId, order));
     // 先锁候选资产行，再在**同一事务内**读资产与既有分配。
     //
     // 顺序不可反，也不能省锁：只锁订单行时两张订单锁的是不同的行、互不争锁，
@@ -986,7 +1011,9 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       "return_inspection",
       { type: "order", id: order.id },
       { order, partialReturn: input.items },
-      tx
+      tx,
+      undefined,
+      this.orderHookInstances(tenantId, order)
     );
     const assets = await this.factStore.listAssets(tenantId, tx);
     const assetById = new Map(assets.map((asset) => [asset.id, asset]));
@@ -1041,7 +1068,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       { type: "order", id: order.id },
       { order, settlement: { kind: "cancellation", chargeAmount, reason: reason.trim() } },
       tx,
-      operator
+      operator,
+      this.orderHookInstances(tenantId, order)
     );
     const assetChanges: AssetStatusChange[] = [];
     order.reservations.forEach((row) => { row.status = RentalReservationStatus.Cancelled; });
@@ -1069,12 +1097,12 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       this.assertOutboundLocationActive(state, order);
       // 领取/交付与归还检查是两个不同的触发点，因此按 stage 分发。
       // 这不是品类分支：stage 是履约阶段，与经营品类无关。
-      await this.runHook(tenantId, "pickup_delivery", { type: "order", id: order.id }, order, tx, operator);
+      await this.runHook(tenantId, "pickup_delivery", { type: "order", id: order.id }, order, tx, operator, this.orderHookInstances(tenantId, order));
       this.markPickedUp(order, assetChanges);
     } else {
       if (order.ruleSnapshot.fulfillment.returnInspectionRequired) throw new ConflictException("当前规则要求完成归还检查");
       if (order.status !== RentalCoreOrderStatus.Renting) throw new ConflictException("只有租赁中的订单可以归还");
-      await this.runHook(tenantId, "return_inspection", { type: "order", id: order.id }, order, tx, operator);
+      await this.runHook(tenantId, "return_inspection", { type: "order", id: order.id }, order, tx, operator, this.orderHookInstances(tenantId, order));
       // 归还即结算：逾期费在这一步计入。归还检查判定"物"，结算判定"钱"，
       // 因此是两个触发点，能力可以只关心其中一个。
       await this.runHook(
@@ -1083,7 +1111,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
         { type: "order", id: order.id },
         { order, settlement: { kind: "return", overdueCharge } },
         tx,
-        operator
+        operator,
+        this.orderHookInstances(tenantId, order)
       );
       this.finishReturn(order, overdueCharge, assetChanges);
     }
@@ -1134,7 +1163,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       { type: "order", id: order.id },
       { order, stage: template.stage, results: input.results, exceptions: input.exceptions ?? [], charges },
       tx,
-      input.operator || userName
+      input.operator || userName,
+      this.orderHookInstances(tenantId, order)
     );
     const record: RentalInspectionRecord = {
       id: id("inspection"), tenantId, orderId, stage: template.stage, templateId: template.id,

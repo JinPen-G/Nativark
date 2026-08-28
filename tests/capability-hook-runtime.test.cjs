@@ -446,5 +446,47 @@ void (async () => {
   console.log("  ✓ evaluate：阻止抛 409 且不落审计，放行用调用方事务落审计，无事务仍强制判定，缺仓储明确失败");
 }
 
+// ============ 11. CORE-EXT-02D：传入的能力快照优先于当前实例（在途订单按原版本履约） ============
+{
+  // 当前实例是 v2，但订单固化的快照是 v1。传入快照后，能力必须看到 v1——
+  // 否则升级会悄悄改写在途订单的判定版本。
+  const currentV2 = [instance("delivery", "enabled", { implementationVersion: "shared-2.0", configVersion: "v2", config: { maxKm: 50 } })];
+  const pinnedV1 = [instance("delivery", "enabled", { implementationVersion: "shared-1.0", configVersion: "v1", config: { maxKm: 30 } })];
+  const seen = {};
+  const runtime = new CapabilityHookRuntime(fakeCapabilities(currentV2));
+  runtime.register({
+    code: "delivery",
+    order: 10,
+    hooks: {
+      allocation_dispatch: (context) => {
+        seen.version = context.capability.implementationVersion;
+        seen.configVersion = context.capability.configVersion;
+        seen.maxKm = context.capability.config.maxKm;
+        return { decision: "allow" };
+      }
+    }
+  });
+
+  // 不传 instances：用当前实例 v2。
+  await runtime.run(baseRun({ point: "allocation_dispatch" }));
+  assert.equal(seen.version, "shared-2.0", "不传快照时应使用当前实例版本");
+
+  // 传入订单固化的 v1 快照：必须覆盖当前实例。
+  await runtime.run(baseRun({ point: "allocation_dispatch", instances: pinnedV1 }));
+  assert.equal(seen.version, "shared-1.0", "传入快照后在途订单必须按快照版本判定，而不是升级后的当前版本");
+  assert.equal(seen.configVersion, "v1", "配置版本也必须来自快照");
+  assert.equal(seen.maxKm, 30, "配置本体必须来自快照");
+
+  // 能力当前已全部停用（enabledInstances 为空），但传入快照仍让它执行——
+  // 在途订单不因能力被暂停而中断履约。
+  const pinnedStill = [instance("delivery", "enabled", { implementationVersion: "shared-1.0" })];
+  const calls = [];
+  const r2 = new CapabilityHookRuntime(fakeCapabilities([]));
+  r2.register({ code: "delivery", order: 10, hooks: { allocation_dispatch: () => (calls.push("ran"), { decision: "allow" }) } });
+  await r2.run(baseRun({ point: "allocation_dispatch", instances: pinnedStill }));
+  assert.deepEqual(calls, ["ran"], "能力当前已停用时，在途订单仍按其固化快照继续履约");
+  console.log("  ✓ 快照优先：在途订单按固化的实现版本/配置判定，且能力停用后仍继续履约");
+}
+
 console.log("\nCORE-EXT-02B Hook 运行时用例全部通过");
 })();

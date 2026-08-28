@@ -9,7 +9,8 @@ import {
   type WorkspaceCapabilityAuditEvent,
   type WorkspaceCapabilityInstance,
   type WorkspaceCapabilityOverview,
-  type WorkspaceCapabilityView
+  type WorkspaceCapabilityView,
+  type RentalWorkspaceCapabilitySnapshotEntry
 } from "@store-rental/shared";
 import { WorkspaceCapabilityRepository } from "./workspace-capability.repository";
 
@@ -56,6 +57,55 @@ export class WorkspaceCapabilityService {
     const scope = workspaceId ?? (await this.repository.currentWorkspaceId(tenantId));
     const instances = await this.repository.listInstances(tenantId, scope);
     return instances.filter((instance) => instance.status === "enabled");
+  }
+
+  /**
+   * CORE-EXT-02D：该空间已启用能力的**版本快照**，固化进报价与订单。
+   *
+   * 只保留判定所需的 code、实现版本、配置版本与配置本体，不含 revision/时间戳——
+   * 那些会随实例变动，而快照必须是不可变历史事实。重建在途订单的 Hook 执行名单时
+   * 由它构造「状态恒 enabled」的实例视图，因此能力被暂停或升级都不改写在途订单的判定。
+   */
+  async snapshotEnabled(
+    tenantId: string,
+    workspaceId?: string
+  ): Promise<RentalWorkspaceCapabilitySnapshotEntry[]> {
+    const enabled = await this.enabledInstances(tenantId, workspaceId);
+    return enabled
+      .map((instance) => ({
+        code: instance.code,
+        implementationVersion: instance.implementationVersion,
+        configVersion: instance.configVersion,
+        config: { ...instance.config }
+      }))
+      // 稳定排序：快照要可复现比对，不能受查库返回序影响。
+      .sort((left, right) => left.code.localeCompare(right.code));
+  }
+
+  /**
+   * 把报价 / 订单固化的能力快照还原成 Hook 运行时能吃的实例视图。
+   *
+   * 状态一律填 `enabled`：快照里的能力都是下单当时启用的，在途订单必须继续按它们履约；
+   * 若某能力此后被暂停，读当前实例会把它排除，等于中途改变了这张订单的判定规则。
+   */
+  static instancesFromSnapshot(
+    tenantId: string,
+    workspaceId: string,
+    snapshot: RentalWorkspaceCapabilitySnapshotEntry[]
+  ): WorkspaceCapabilityInstance[] {
+    const now = stamp();
+    return snapshot.map((entry) => ({
+      tenantId,
+      workspaceId,
+      code: entry.code,
+      status: "enabled" as const,
+      implementationVersion: entry.implementationVersion,
+      configVersion: entry.configVersion,
+      config: { ...entry.config },
+      revision: 0,
+      createdAt: now,
+      updatedAt: now
+    }));
   }
 
   /**

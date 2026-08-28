@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Inject, Injectable, NotFoundExc
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { CapabilityHookRuntime } from "./capability-hook.runtime";
+import { WorkspaceCapabilityService } from "./workspace-capability.service";
 import {
   RentalCategoryCode,
   type GrantRentalRewardRequest,
@@ -275,7 +276,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     @Optional() private readonly stateRepository?: RentalStateRepository,
     @Optional() private readonly prisma?: PrismaService,
     // CORE-EXT-02B：报价校验节点的 Hook 运行时。可选同 RentalCoreService 的理由。
-    @Optional() private readonly hooks?: CapabilityHookRuntime
+    @Optional() private readonly hooks?: CapabilityHookRuntime,
+    // CORE-EXT-02D：报价生成时固化已启用能力的版本快照。可选同上。
+    @Optional() private readonly capabilities?: WorkspaceCapabilityService
   ) {}
 
   /**
@@ -2266,6 +2269,11 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       ),
       pricingPlanVersion: plan.version, ruleVersion: rule.version, ruleSnapshot: structuredClone(rule.config), calendarVersion: calendars.map((calendar) => `${calendar.year}:${calendar.status === "published" ? calendar.version : "draft"}`).join("|"),
       appliedDiscountPlanIds: discountPlans.map((item) => item.id), customerCouponId: customerCoupon?.id,
+      // CORE-EXT-02D：固化本次报价生成时该空间已启用能力的版本与配置。
+      // 升级或改配置后，这张报价及由它下单的在途订单仍按此快照校验与履约。
+      capabilitySnapshot: this.capabilities
+        ? await this.capabilities.snapshotEnabled(tenantId, this.workspaceOf(tenantId))
+        : undefined,
       expiresAt: new Date(Date.now() + rule.config.payment.unpaidHoldMinutes * 60_000).toISOString(), createdAt: timestamp
     };
     await this.runQuoteHook(tenantId, context, quote);
@@ -2287,13 +2295,19 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
    */
   private async runQuoteHook(tenantId: string, context: BusinessContext, quote: RentalQuoteSnapshotV1) {
     if (!this.hooks) return undefined;
+    const workspaceId = this.workspaceOf(tenantId);
     return this.hooks.evaluate({
       point: "quote_validation",
       tenantId,
-      workspaceId: this.workspaceOf(tenantId),
+      workspaceId,
       categoryCode: context.category.code,
       subjectRef: { type: "quote", id: quote.id },
-      subject: quote
+      subject: quote,
+      // 用报价自己固化的能力快照判定，而不是当前实例。报价生成与校验之间若有并发升级，
+      // 也必须按写进这张报价的版本判定——快照即事实。
+      instances: quote.capabilitySnapshot
+        ? WorkspaceCapabilityService.instancesFromSnapshot(tenantId, workspaceId, quote.capabilitySnapshot)
+        : undefined
     });
   }
   getQuote(tenantId: string, context: BusinessContext, quoteId: string) {

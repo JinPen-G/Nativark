@@ -424,6 +424,54 @@ assert.ok(
 );
 console.log("  ✓ 已启用名单只含 enabled，paused 与 disabled 均被排除");
 
+// ============ 9b. CORE-EXT-02D：能力版本快照与快照→实例还原 ============
+// 报价/订单固化的快照必须只含已启用能力、按 code 稳定排序、只保留判定所需字段。
+const snapshot = await service.snapshotEnabled(TENANT);
+assert.ok(snapshot.length > 0, "快照不应为空（前置已启用若干能力）");
+assert.ok(
+  snapshot.every((entry) => entry.code && entry.implementationVersion && entry.configVersion && entry.config),
+  "快照每条必须含 code、实现版本、配置版本与配置本体"
+);
+assert.ok(
+  snapshot.every((entry) => !("revision" in entry) && !("status" in entry) && !("updatedAt" in entry)),
+  "快照是不可变历史事实，不得携带 revision/status/时间戳等会变动的字段"
+);
+const snapCodes = snapshot.map((entry) => entry.code);
+assert.deepEqual(snapCodes, [...snapCodes].sort(), "快照必须按 code 稳定排序，便于复现比对");
+// 上一条对「本就有序」的数据没有区分力，因此再用一个**逆序**返回实例的替身验证排序真的发生：
+// 若 snapshotEnabled 不排序，逆序输入会原样逆序输出，这里必然变红。
+const reverseStore = {
+  async currentWorkspaceId() { return "ws_camera"; },
+  async listInstances() {
+    return [
+      { tenantId: TENANT, workspaceId: "ws_camera", code: "return", status: "enabled", implementationVersion: "core-1.0", configVersion: "v1", config: {}, revision: 1, createdAt: "", updatedAt: "" },
+      { tenantId: TENANT, workspaceId: "ws_camera", code: "pickup", status: "enabled", implementationVersion: "core-1.0", configVersion: "v1", config: {}, revision: 1, createdAt: "", updatedAt: "" },
+      { tenantId: TENANT, workspaceId: "ws_camera", code: "bundle_inventory", status: "enabled", implementationVersion: "core-1.0", configVersion: "v1", config: {}, revision: 1, createdAt: "", updatedAt: "" }
+    ];
+  }
+};
+const reverseSnapshot = await new WorkspaceCapabilityService(reverseStore).snapshotEnabled(TENANT);
+assert.deepEqual(
+  reverseSnapshot.map((entry) => entry.code),
+  ["bundle_inventory", "pickup", "return"],
+  "逆序返回的实例必须被 snapshotEnabled 排成 code 升序（证明排序确实发生）"
+);
+// 快照里不得出现 paused / disabled 的能力（bundle_inventory 在上面已被暂停）。
+assert.ok(!snapCodes.includes("bundle_inventory"), "已暂停的能力不得进入快照");
+
+// 还原：状态一律 enabled，让在途订单不因能力停用而中断履约。
+const restored = WorkspaceCapabilityService.instancesFromSnapshot(TENANT, "ws_camera", snapshot);
+assert.equal(restored.length, snapshot.length);
+assert.ok(restored.every((row) => row.status === "enabled"), "还原出的实例状态必须恒为 enabled");
+assert.ok(
+  restored.every((row, index) => row.implementationVersion === snapshot[index].implementationVersion),
+  "还原必须逐条保留快照的实现版本"
+);
+// 篡改还原结果的 config 不得回写快照（深拷贝隔离）。
+restored[0].config.__tamper = "x";
+assert.ok(!("__tamper" in snapshot[0].config), "还原实例与快照必须是独立对象，改一个不影响另一个");
+console.log("  ✓ 能力快照：只含已启用、稳定排序、字段最小；还原为恒 enabled 实例且与快照隔离");
+
 // ============ 10. 审计可按能力筛选且只增不改 ============
 const allAudits = await service.listAudits(TENANT);
 const bundleAudits = await service.listAudits(TENANT, "bundle_inventory");

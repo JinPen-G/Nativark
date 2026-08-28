@@ -5502,10 +5502,34 @@ export interface RentalQuoteSnapshotV1 {
   calendarWarnings: string[];
   appliedDiscountPlanIds: string[];
   customerCouponId?: string;
+  /**
+   * CORE-EXT-02D：报价生成时该经营空间**已启用能力**的版本快照。
+   *
+   * 存在的理由：capability 升级或改配置后，已发出的有效报价与由它下单的在途订单
+   * 必须继续按**当时**的实现版本与配置版本校验和履约，不能被升级悄悄改写。
+   * 因此这里固化每个已启用能力的 code、实现版本、配置版本与配置本体——
+   * 下单时原样拷进订单，后续在途环节的 Hook 判定都用它，而不是当前实例。
+   * 快照足以解释「这张单当时为什么这么放行/阻止/收费」，即使能力已被暂停或升级。
+   */
+  capabilitySnapshot?: RentalWorkspaceCapabilitySnapshotEntry[];
   expiresAt: string;
   createdAt: string;
   consumedAt?: string;
   consumedOrderId?: string;
+}
+
+/**
+ * CORE-EXT-02D：报价 / 订单固化的单条能力版本快照。
+ *
+ * 与 `WorkspaceCapabilityInstance` 的区别：这是**不可变的历史事实**，只保留判定所需的
+ * 版本与配置，不含 revision、时间戳等会随实例变动的字段。重建 Hook 执行名单时，
+ * 由它构造出「状态恒为 enabled」的实例视图——在途订单不因能力被暂停而中断履约。
+ */
+export interface RentalWorkspaceCapabilitySnapshotEntry {
+  code: RentalCapability;
+  implementationVersion: string;
+  configVersion: string;
+  config: Record<string, string | number | boolean>;
 }
 
 const commonSettingModules: RentalSettingModule[] = [
@@ -6008,6 +6032,13 @@ export interface RentalOrder {
   calendarVersion?: string;
   /** 从报价拷贝的逐日计价依据（需求 4.5.7：订单始终使用订单快照）。 */
   calendarSnapshot?: RentalQuoteCalendarDay[];
+  /**
+   * CORE-EXT-02D：下单时从报价拷贝的能力版本快照。
+   *
+   * 在途订单的 allocation / pickup / return / settlement 各环节 Hook 都用它重建执行名单，
+   * 因此即便能力随后被升级或暂停，这张订单仍按下单当时的实现版本与配置履约。
+   */
+  capabilitySnapshot?: RentalWorkspaceCapabilitySnapshotEntry[];
   chargeLines: RentalQuoteChargeLine[];
   rentalAmount: number;
   discountAmount: number;
