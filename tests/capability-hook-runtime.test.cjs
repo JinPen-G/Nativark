@@ -343,7 +343,3 @@ void (async () => {
 
 console.log("\nCORE-EXT-02B Hook 运行时用例全部通过");
 })();
-
-
-
-
