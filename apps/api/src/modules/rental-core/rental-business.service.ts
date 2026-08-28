@@ -48,6 +48,18 @@ import {
   type RentalValueAddedService,
   type SaveRentalCalendarDayRequest,
   type RemoveRentalCalendarDayOverrideRequest,
+  type PreviewRentalCalendarRangeOverrideRequest,
+  type ApplyRentalCalendarRangeOverrideRequest,
+  type ApplyRentalCalendarRangeOverrideResult,
+  type RentalCalendarRangeOverridePreview,
+  type RentalCalendarRangePreviewRow,
+  type PreviewRentalCalendarRangeRemoveRequest,
+  type ApplyRentalCalendarRangeRemoveRequest,
+  type ApplyRentalCalendarRangeRemoveResult,
+  type RentalCalendarRangeRemovePreview,
+  type RentalCalendarRangeRemovePreviewRow,
+  type RentalCalendarRangeFields,
+  type RentalCalendarOverrideScope,
   type PublishRentalCalendarRequest,
   type VoidRentalCalendarRequest,
   type SaveRentalDiscountPlanRequest,
@@ -73,6 +85,14 @@ import {
 import { RentalCoreConfigRepository, type RentalConfigStore, type RentalConfigTx } from "./rental-core-config.repository";
 import { PrismaService } from "../database/prisma.service";
 import { DEFAULT_BUSINESS_TIME_ZONE, businessDateKey, businessTimeOfDay, businessDateKeyFromIndex, businessDayIndex, businessYearFromDateKey, isCalendarDateKey, businessHoursError } from "./rental-business-day";
+import {
+  applyRangeFieldsToDay,
+  assertRangeDateTimeScope,
+  changedFieldNames,
+  deriveRestoredDay,
+  expandCalendarRange,
+  originSnapshotOf
+} from "./calendar-range";
 import { rentalPricingStrategy } from "./rental-pricing-strategy";
 
 interface RentalBusinessState {
@@ -1087,6 +1107,294 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     });
     await this.writeCalendar(state, base, calendar, [audit]);
     return restored;
+  }
+
+  /**
+   * 编辑已发布/已被替代版本时复制生成新草稿（需求 4.5.7：已发布版本不可原地修改）。
+   * 单日编辑（saveCalendarDay/removeCalendarDayOverride）与本文件的范围编辑共用同一规则；
+   * 新草稿不继承上一版的发布记录（变更原因与差异属于那一次发布事件）。
+   */
+  private cloneCalendarForEdit(state: RentalBusinessState, base: RentalCalendarYear, year: number): RentalCalendarYear {
+    const calendar = structuredClone(base);
+    if (base.status === "draft") return calendar;
+    calendar.status = "draft";
+    // 版本号跳过已占用的历史版本（含 void / superseded），避免 upsert 原地改写历史行。
+    calendar.version = this.nextCalendarVersion(state.calendars.filter((item) => item.year === year), base.version);
+    calendar.previousVersion = base.version;
+    calendar.publishedAt = undefined;
+    calendar.publishedBy = undefined;
+    calendar.supersededAt = undefined;
+    calendar.changeReason = undefined;
+    calendar.publishDiff = undefined;
+    return calendar;
+  }
+
+  /** 范围字段的准入校验：至少选择一个字段；数值与时点合法（需求 4.5.9：只修改明确选择的字段）。 */
+  private assertRangeFields(fields: RentalCalendarRangeFields) {
+    const provided = Object.entries(fields).filter(([, value]) => value !== undefined);
+    if (!provided.length) throw new BadRequestException("范围覆盖必须至少选择一个要设置的字段");
+    if (fields.pricingMultiplier !== undefined && (!Number.isFinite(fields.pricingMultiplier) || fields.pricingMultiplier < 0)) {
+      throw new BadRequestException("价格系数无效");
+    }
+    if (fields.name !== undefined && !fields.name.trim()) throw new BadRequestException("节日或调休名称不能为空白");
+    if (fields.hours) {
+      // 时段合法性按范围起点校验即可：周内星期只影响每周模板兜底判定，时段自身的
+      // 起止/重叠/包含关系与日期无关（businessHoursError 的 label 只用于错误文案）。
+      const hoursError = businessHoursError(fields.hours, fields.hours.windows?.length ? "范围覆盖时段" : "范围覆盖时段");
+      if (hoursError) throw new BadRequestException(hoursError);
+    }
+  }
+
+  /**
+   * 「限时营业」必须真的限时（需求 4.5.4），范围覆盖逐日校验：
+   * 结果日（新时段或既有时段）与每周模板任一有窗口即可，否则 400。
+   */
+  private assertRangeLimitedHasHours(
+    context: BusinessContext,
+    result: { businessStatus?: RentalCalendarBusinessStatus; hours?: RentalBusinessHours },
+    date: string
+  ) {
+    if ((result.businessStatus ?? undefined) !== "limited") return;
+    const weekday = new Date(`${date}T00:00:00.000Z`).getUTCDay();
+    const weekly = context.settings.calendar.weeklyHours?.[weekday];
+    if (!result.hours?.windows?.length && !weekly?.windows?.length) {
+      throw new BadRequestException(
+        `${date}：限时营业必须配置营业时段（本日期时段或每周默认营业时段至少其一）`
+      );
+    }
+  }
+
+  private assertBatchId(batchId?: string): string {
+    if (batchId === undefined) return uid("calbatch");
+    if (!/^[A-Za-z0-9_.:-]{1,64}$/.test(batchId)) throw new BadRequestException("批次标识只能是 1-64 位字母数字与 . _ : -");
+    return batchId;
+  }
+
+  /** 范围覆盖预览（需求 4.5.9）。纯推演：不写状态、不推进 revision、不产生审计。 */
+  async previewCalendarRangeOverride(
+    tenantId: string,
+    context: BusinessContext,
+    year: number,
+    input: PreviewRentalCalendarRangeOverrideRequest
+  ): Promise<RentalCalendarRangeOverridePreview> {
+    const dates = expandCalendarRange(year, input.startDate, input.endDate);
+    assertRangeDateTimeScope(input.startDate, input.endDate, input.startDateTime, input.endDateTime);
+    this.assertRangeFields(input.fields);
+    const base = this.editableCalendar(tenantId, context, year);
+    const templateByDate = new Map(this.buildCalendar(tenantId, context.settings, year).days.map((day) => [day.date, day]));
+    const byDate = new Map(base.days.map((day) => [day.date, day]));
+    const days: RentalCalendarRangePreviewRow[] = dates.map((date) => {
+      const current = byDate.get(date);
+      const baseDay =
+        current && current.source !== "tenant_override"
+          ? current
+          : templateByDate.get(date) ?? current ?? this.buildCalendar(tenantId, context.settings, year).days[0];
+      // 基础值 = 下一优先级来源（有覆盖用 overriddenFrom，否则就是当前基础日）。
+      const baseValue = current?.source === "tenant_override" && current.overriddenFrom
+        ? { ...current.overriddenFrom, date }
+        : baseDay;
+      const after = applyRangeFieldsToDay(current, baseDay, input.fields, {
+        kind: dates.length === 1 && !input.startDateTime ? "single" : "range",
+        batchId: "preview",
+        rangeStart: input.startDate,
+        rangeEnd: input.endDate,
+        startDateTime: input.startDateTime,
+        endDateTime: input.endDateTime
+      }, { reason: "preview", at: stamp() });
+      const currentSnapshot = RentalBusinessService.daySnapshot(current ?? baseDay);
+      const afterSnapshot = RentalBusinessService.daySnapshot(after);
+      return {
+        date,
+        conflict: current?.source === "tenant_override",
+        base: RentalBusinessService.daySnapshot(baseValue),
+        current: currentSnapshot,
+        after: afterSnapshot,
+        changedFields: changedFieldNames(currentSnapshot, afterSnapshot)
+      };
+    });
+    return {
+      year,
+      version: base.version,
+      startDate: input.startDate,
+      endDate: input.endDate,
+      totalDays: days.length,
+      conflictCount: days.filter((row) => row.conflict).length,
+      days
+    };
+  }
+
+  /**
+   * 应用范围覆盖（需求 4.5.9）。
+   *
+   * 原子性由结构保证：全部日期在一次 `writeCalendar`（即一次库事务、一次 revision 推进、
+   * 一批审计行）内写入，不存在"部分日期已保存"的中间状态；并发冲突由 expectedRevision
+   * 预检与 upsertCalendar 的条件更新共同拦截，返回明确 409。
+   * 既有覆盖必须经 `overrideConfirmed` 显式确认——预览展示冲突后由用户确认，绝不静默覆盖。
+   */
+  async applyCalendarRangeOverride(
+    tenantId: string,
+    context: BusinessContext,
+    year: number,
+    input: ApplyRentalCalendarRangeOverrideRequest,
+    operator?: string
+  ): Promise<ApplyRentalCalendarRangeOverrideResult> {
+    const dates = expandCalendarRange(year, input.startDate, input.endDate);
+    assertRangeDateTimeScope(input.startDate, input.endDate, input.startDateTime, input.endDateTime);
+    this.assertRangeFields(input.fields);
+    const reason = input.overrideReason?.trim();
+    if (!reason) throw new BadRequestException("人工覆盖必须填写调整原因");
+    const batchId = this.assertBatchId(input.batchId);
+    const state = this.state(tenantId, context);
+    const base = this.editableCalendar(tenantId, context, year);
+    // 乐观并发预检：与 writeCalendar 的条件更新是两道防线，这里先给出更可读的 409。
+    if (input.expectedRevision !== undefined && input.expectedRevision !== (base.revision ?? 0)) {
+      throw new ConflictException(
+        `${year} 年度日历已被其他人修改（当前版本 ${base.revision ?? 0}，你基于 ${input.expectedRevision}），请刷新后重试`
+      );
+    }
+    const templateByDate = new Map(this.buildCalendar(tenantId, context.settings, year).days.map((day) => [day.date, day]));
+    const byDate = new Map(base.days.map((day) => [day.date, day]));
+    const conflicts = dates.filter((date) => byDate.get(date)?.source === "tenant_override");
+    if (conflicts.length && !input.overrideConfirmed) {
+      throw new ConflictException(
+        `范围内有 ${conflicts.length} 天已存在人工覆盖（${conflicts.slice(0, 8).join("、")}${conflicts.length > 8 ? "…" : ""}），` +
+          "请先预览确认后携带 overrideConfirmed 重试，不得静默覆盖"
+      );
+    }
+    const calendar = this.cloneCalendarForEdit(state, base, year);
+    const at = stamp();
+    const scope: RentalCalendarOverrideScope = {
+      kind: dates.length === 1 && !input.startDateTime ? "single" : "range",
+      batchId,
+      rangeStart: input.startDate,
+      rangeEnd: input.endDate,
+      startDateTime: input.startDateTime,
+      endDateTime: input.endDateTime
+    };
+    const audits: RentalCalendarOverrideAudit[] = [];
+    for (const date of dates) {
+      const replaced = byDate.get(date);
+      const baseDay =
+        replaced && replaced.source !== "tenant_override"
+          ? replaced
+          : templateByDate.get(date) ?? this.buildCalendar(tenantId, context.settings, year).days[0];
+      const after = applyRangeFieldsToDay(replaced, baseDay, input.fields, scope, { reason, operator, at });
+      this.assertRangeLimitedHasHours(context, after, date);
+      const index = calendar.days.findIndex((item) => item.date === date);
+      if (index >= 0) calendar.days[index] = after; else calendar.days.push(after);
+      audits.push(
+        RentalBusinessService.pendingAudit(calendar, {
+          date,
+          action: "override",
+          reason,
+          operator,
+          at,
+          batchId,
+          before: replaced ? RentalBusinessService.daySnapshot(replaced) : undefined,
+          after: RentalBusinessService.daySnapshot(after)
+        })
+      );
+    }
+    calendar.days.sort((a, b) => a.date.localeCompare(b.date));
+    await this.writeCalendar(state, base, calendar, audits);
+    return { batchId, year, version: calendar.version, revision: calendar.revision ?? 0, appliedCount: dates.length };
+  }
+
+  /** 范围移除预览（需求 4.5.9：移除前展示恢复后的日期类型、营业状态和引用变化）。 */
+  async previewCalendarRangeRemove(
+    tenantId: string,
+    context: BusinessContext,
+    year: number,
+    input: PreviewRentalCalendarRangeRemoveRequest
+  ): Promise<RentalCalendarRangeRemovePreview> {
+    const dates = expandCalendarRange(year, input.startDate, input.endDate);
+    const base = this.editableCalendar(tenantId, context, year);
+    const templateByDate = new Map(this.buildCalendar(tenantId, context.settings, year).days.map((day) => [day.date, day]));
+    const byDate = new Map(base.days.map((day) => [day.date, day]));
+    const days: RentalCalendarRangeRemovePreviewRow[] = dates.map((date) => {
+      const current = byDate.get(date) ?? templateByDate.get(date)!;
+      const hasOverride = current.source === "tenant_override";
+      const { day: restored } = hasOverride
+        ? deriveRestoredDay(current, templateByDate.get(date))
+        : { day: current };
+      return {
+        date,
+        hasOverride,
+        current: RentalBusinessService.daySnapshot(current),
+        restored: RentalBusinessService.daySnapshot(restored),
+        restoredSource: hasOverride ? (restored.source === "official_cn" ? "official_cn" : "week_rule") : (current.source === "official_cn" ? "official_cn" : "week_rule")
+      };
+    });
+    return {
+      year,
+      version: base.version,
+      startDate: input.startDate,
+      endDate: input.endDate,
+      totalDays: days.length,
+      overrideCount: days.filter((row) => row.hasOverride).length,
+      days
+    };
+  }
+
+  /**
+   * 应用范围移除：只移除范围内带人工覆盖的日期（其余保持原样，不算失败），
+   * 恢复到 `overriddenFrom` 或按当前每周模板重算——绝不产生空白日或恢复成过期快照
+   * （需求 4.5.3/4.5.9）。同一事务、一次 revision、审计带批次号。
+   */
+  async applyCalendarRangeRemove(
+    tenantId: string,
+    context: BusinessContext,
+    year: number,
+    input: ApplyRentalCalendarRangeRemoveRequest,
+    operator?: string
+  ): Promise<ApplyRentalCalendarRangeRemoveResult> {
+    const dates = expandCalendarRange(year, input.startDate, input.endDate);
+    const reason = input.overrideReason?.trim();
+    if (!reason) throw new BadRequestException("移除人工覆盖必须填写调整原因");
+    const batchId = this.assertBatchId(input.batchId);
+    const state = this.state(tenantId, context);
+    const base = this.editableCalendar(tenantId, context, year);
+    if (input.expectedRevision !== undefined && input.expectedRevision !== (base.revision ?? 0)) {
+      throw new ConflictException(
+        `${year} 年度日历已被其他人修改（当前版本 ${base.revision ?? 0}，你基于 ${input.expectedRevision}），请刷新后重试`
+      );
+    }
+    const templateByDate = new Map(this.buildCalendar(tenantId, context.settings, year).days.map((day) => [day.date, day]));
+    const byDate = new Map(base.days.map((day) => [day.date, day]));
+    const removable = dates.filter((date) => byDate.get(date)?.source === "tenant_override");
+    if (!removable.length) {
+      throw new ConflictException("范围内没有人工覆盖可移除");
+    }
+    const calendar = this.cloneCalendarForEdit(state, base, year);
+    const at = stamp();
+    const audits: RentalCalendarOverrideAudit[] = [];
+    for (const date of removable) {
+      const target = byDate.get(date)!;
+      const { day: restored } = deriveRestoredDay(target, templateByDate.get(date));
+      const index = calendar.days.findIndex((item) => item.date === date);
+      calendar.days.splice(index, 1, restored);
+      audits.push(
+        RentalBusinessService.pendingAudit(calendar, {
+          date,
+          action: "revert",
+          reason,
+          operator,
+          at,
+          batchId,
+          before: RentalBusinessService.daySnapshot(target),
+          after: RentalBusinessService.daySnapshot(restored)
+        })
+      );
+    }
+    await this.writeCalendar(state, base, calendar, audits);
+    return {
+      batchId,
+      year,
+      version: calendar.version,
+      revision: calendar.revision ?? 0,
+      removedCount: removable.length,
+      unchangedCount: dates.length - removable.length
+    };
   }
 
   /**

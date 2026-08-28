@@ -3038,6 +3038,9 @@ model RentalCalendarOverrideAuditEntry {
   /// RentalCalendarDaySnapshot：调整前后的取值，供差异回放。
   before      Json?
   after       Json?
+  /// 范围覆盖的批次标识（需求 4.5.9：一次范围提交共用原因/操作者/时间/批次）。
+  /// 单日编辑为 NULL。同一批次的日期各落一行，批次号把回放聚合成一次操作。
+  batchId     String?
   createdAt   DateTime @default(now())
 
   @@index([workspaceId, year, version])

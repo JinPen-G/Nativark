@@ -4830,6 +4830,34 @@ export interface RentalCalendarOverrideAudit {
    */
   year?: number;
   version?: string;
+  /**
+   * 范围覆盖的批次标识（需求 4.5.9：一次范围提交共用原因、操作者与批次标识）。
+   * 单日编辑没有批次，留空。
+   */
+  batchId?: string;
+}
+
+/**
+ * 范围覆盖的适用范围记录（需求 4.5.9：日期详情须能展示日期时间覆盖信息）。
+ *
+ * 记录在每个被覆盖日期上：范围覆盖产生的一批日期共享同一个 `batchId` 与范围边界，
+ * 点击范围内任意日期都能还原「这次覆盖是哪一次范围操作的一部分」。
+ */
+export interface RentalCalendarOverrideScope {
+  kind: "single" | "range";
+  batchId: string;
+  /** 覆盖的日期范围（含端点）。单日时 start === end。 */
+  rangeStart: string;
+  rangeEnd: string;
+  /**
+   * 日期时间范围的起止时点（需求 4.5.5/4.5.9：一次性覆盖须展示开始和结束时点）。
+   *
+   * 边界语义：日历字段（日期类型、营业状态、时段）按**整天**生效——它们在数据模型上
+   * 就是逐日属性；起止时点记录的是这次范围选择的原始输入，供详情展示，以及供
+   * PRICE-03 的一次性日期时间价格覆盖引用消费。不在本层做半天截断。
+   */
+  startDateTime?: string;
+  endDateTime?: string;
 }
 
 /**
@@ -4861,6 +4889,8 @@ export interface RentalCalendarDay {
   overrideAt?: string;
   /** 被覆盖掉的原始值，供日期详情展示与移除覆盖时恢复。 */
   overriddenFrom?: RentalCalendarDayOrigin;
+  /** 本次覆盖所属的范围操作（需求 4.5.9）。单日覆盖也有 scope（kind: "single"）。 */
+  overrideScope?: RentalCalendarOverrideScope;
 }
 
 export interface RentalCalendarYear {
@@ -4985,7 +5015,7 @@ export interface RentalCalendarVersionSummary
  * `overriddenFrom` 同理由服务端从被覆盖的那天推导，不接受调用方传入。
  */
 export interface SaveRentalCalendarDayRequest
-  extends Omit<RentalCalendarDay, "source" | "overrideBy" | "overrideAt" | "overriddenFrom"> {
+  extends Omit<RentalCalendarDay, "source" | "overrideBy" | "overrideAt" | "overriddenFrom" | "overrideScope"> {
   overrideReason: string;
 }
 
@@ -5094,6 +5124,122 @@ export interface ImportRentalCalendarRequest {
  */
 export interface RemoveRentalCalendarDayOverrideRequest {
   overrideReason: string;
+}
+
+/**
+ * 范围覆盖可设置的字段（需求 4.5.9：范围操作只修改用户明确选择的字段）。
+ *
+ * 提供了哪个字段就覆盖哪个字段；未提供的字段保持该日期当前值（有覆盖沿用覆盖，
+ * 无覆盖沿用基础值）。「一次性特殊价格覆盖」按 v2.9 边界由 PRICE-03 保存价格值，
+ * 日历侧的 `pricingMultiplier` 是既有的逐日系数位，范围保存与显示透传它，不新造价格模型。
+ */
+export interface RentalCalendarRangeFields {
+  dayType?: RentalDayType;
+  name?: string;
+  pricingMultiplier?: number;
+  businessStatus?: RentalCalendarBusinessStatus;
+  hours?: RentalBusinessHours;
+}
+
+/** 范围覆盖预览/应用的公共范围入参。整日覆盖可跨月，不得跨年度（需求 4.5.9）。 */
+export interface RentalCalendarRangeScopeInput {
+  startDate: string;
+  endDate: string;
+  /** 日期时间范围的起止时点。给出时必须落在 startDate/endDate 当天。 */
+  startDateTime?: string;
+  endDateTime?: string;
+}
+
+/** 范围覆盖预览（需求 4.5.9：提交前展示冲突日期、当前值与将替换的字段）。 */
+export interface PreviewRentalCalendarRangeOverrideRequest extends RentalCalendarRangeScopeInput {
+  fields: RentalCalendarRangeFields;
+}
+
+export interface RentalCalendarRangePreviewRow {
+  date: string;
+  /** 该日期已有人工覆盖：应用必须经用户明确确认，不得静默覆盖。 */
+  conflict: boolean;
+  /** 每周模板或官方来源形成的基础值。 */
+  base: RentalCalendarDaySnapshot;
+  /** 当前生效值（无覆盖时等于基础值）。 */
+  current: RentalCalendarDaySnapshot;
+  /** 应用后的结果值。 */
+  after: RentalCalendarDaySnapshot;
+  /** 将被修改的字段名。 */
+  changedFields: string[];
+}
+
+export interface RentalCalendarRangeOverridePreview {
+  year: number;
+  /** 预览基于的年度版本（草稿优先，其次已发布，再次周模板）。 */
+  version: string;
+  startDate: string;
+  endDate: string;
+  totalDays: number;
+  conflictCount: number;
+  days: RentalCalendarRangePreviewRow[];
+}
+
+/** 应用范围覆盖（需求 4.5.9：全部成功或全部失败，共用原因/批次/操作者/时间，一次 revision）。 */
+export interface ApplyRentalCalendarRangeOverrideRequest extends PreviewRentalCalendarRangeOverrideRequest {
+  overrideReason: string;
+  /** 缺省由服务端生成并返回。前端可用它把预览与提交关联到同一次范围操作。 */
+  batchId?: string;
+  /** 读取草稿时的 revision；不匹配返回 409（需求：并发冲突返回明确 409）。 */
+  expectedRevision?: number;
+  /** 范围内存在既有覆盖时必须显式确认；缺省且存在冲突 → 409，绝不静默覆盖。 */
+  overrideConfirmed?: boolean;
+}
+
+export interface ApplyRentalCalendarRangeOverrideResult {
+  batchId: string;
+  year: number;
+  /** 写入的年度版本（编辑已发布版本时会生成新草稿版本）。 */
+  version: string;
+  revision: number;
+  appliedCount: number;
+}
+
+/** 范围移除预览（需求 4.5.9：按范围移除前展示恢复后的日期类型、营业状态和引用变化）。 */
+export interface PreviewRentalCalendarRangeRemoveRequest extends RentalCalendarRangeScopeInput {}
+
+export interface RentalCalendarRangeRemovePreviewRow {
+  date: string;
+  hasOverride: boolean;
+  current: RentalCalendarDaySnapshot;
+  /** 移除后恢复到的值（`overriddenFrom`，缺省按周模板重算）。无覆盖时等于 current。 */
+  restored: RentalCalendarDaySnapshot;
+  restoredSource: "official_cn" | "week_rule";
+}
+
+export interface RentalCalendarRangeRemovePreview {
+  year: number;
+  version: string;
+  startDate: string;
+  endDate: string;
+  totalDays: number;
+  overrideCount: number;
+  days: RentalCalendarRangeRemovePreviewRow[];
+}
+
+/** 应用范围移除：只移除范围内带人工覆盖的日期，其余保持不变（不算错误）。 */
+export interface ApplyRentalCalendarRangeRemoveRequest {
+  startDate: string;
+  endDate: string;
+  overrideReason: string;
+  batchId?: string;
+  expectedRevision?: number;
+}
+
+export interface ApplyRentalCalendarRangeRemoveResult {
+  batchId: string;
+  year: number;
+  version: string;
+  revision: number;
+  /** 实际移除覆盖的日期数。 */
+  removedCount: number;
+  /** 范围内本就没有覆盖的日期数（保持原样，不是失败）。 */
+  unchangedCount: number;
 }
 
 /** 发布年度日历。变更原因必填（需求 4.5.7：发布记录可追溯）。 */

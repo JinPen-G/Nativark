@@ -333,6 +333,7 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
             reason: entry.reason,
             operator: entry.operator ?? null,
             at: new Date(entry.at),
+            batchId: entry.batchId ?? null,
             before: (entry.before ?? null) as unknown as Prisma.InputJsonValue,
             after: (entry.after ?? null) as unknown as Prisma.InputJsonValue
           }))
@@ -373,7 +374,8 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       before: (row.before ?? undefined) as unknown as RentalCalendarOverrideAudit["before"],
       after: (row.after ?? undefined) as unknown as RentalCalendarOverrideAudit["after"],
       year: row.year,
-      version: row.version
+      version: row.version,
+      batchId: row.batchId ?? undefined
     }));
   }
 

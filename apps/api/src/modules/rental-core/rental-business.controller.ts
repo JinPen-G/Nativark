@@ -18,6 +18,10 @@ import {
   VoidRentalCalendarDto,
   RemoveRentalCalendarDayOverrideDto,
   SaveRentalCalendarDayDto,
+  PreviewRentalCalendarRangeOverrideDto,
+  ApplyRentalCalendarRangeOverrideDto,
+  PreviewRentalCalendarRangeRemoveDto,
+  ApplyRentalCalendarRangeRemoveDto,
   SaveRentalDiscountPlanDto,
   SaveRentalNotificationTemplateDto,
   SaveRentalPricingPlanDto,
@@ -208,6 +212,14 @@ export class RentalBusinessController {
   @Get("calendars/:year/override-audits") calendarOverrideAudits(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Query("version") version?: string) { return this.business.listCalendarOverrideAudits(req.user.tenantId, this.context(req.user.tenantId), Number(year), version); }
   @Put("calendars/:year/days/:date") async saveCalendarDay(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Param("date") date: string, @Body() body: SaveRentalCalendarDayDto) { return this.committed(req.user.tenantId, await this.business.saveCalendarDay(req.user.tenantId, this.context(req.user.tenantId), Number(year), { ...body, date }, req.user.displayName)); }
   @Delete("calendars/:year/days/:date") async removeCalendarDayOverride(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Param("date") date: string, @Body() body: RemoveRentalCalendarDayOverrideDto) { return this.committed(req.user.tenantId, await this.business.removeCalendarDayOverride(req.user.tenantId, this.context(req.user.tenantId), Number(year), date, body, req.user.displayName)); }
+  /** 范围覆盖预览（需求 4.5.9）。POST 而非 GET：预览内容含未发布草稿，走编辑鉴权分支。 */
+  @Post("calendars/:year/days/range-preview") calendarRangePreview(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Body() body: PreviewRentalCalendarRangeOverrideDto) { return this.business.previewCalendarRangeOverride(req.user.tenantId, this.context(req.user.tenantId), Number(year), body); }
+  /** 应用范围覆盖：同事务全部成功或全部失败，一次 revision；既有覆盖须 overrideConfirmed。 */
+  @Post("calendars/:year/days/range") async applyCalendarRange(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Body() body: ApplyRentalCalendarRangeOverrideDto) { return this.committed(req.user.tenantId, await this.business.applyCalendarRangeOverride(req.user.tenantId, this.context(req.user.tenantId), Number(year), body, req.user.displayName)); }
+  /** 范围移除预览：展示每个日期恢复后的取值与来源。 */
+  @Post("calendars/:year/days/range-remove-preview") calendarRangeRemovePreview(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Body() body: PreviewRentalCalendarRangeRemoveDto) { return this.business.previewCalendarRangeRemove(req.user.tenantId, this.context(req.user.tenantId), Number(year), body); }
+  /** 应用范围移除：只移除范围内带人工覆盖的日期，恢复下一优先级来源。 */
+  @Post("calendars/:year/days/range-remove") async applyCalendarRangeRemove(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Body() body: ApplyRentalCalendarRangeRemoveDto) { return this.committed(req.user.tenantId, await this.business.applyCalendarRangeRemove(req.user.tenantId, this.context(req.user.tenantId), Number(year), body, req.user.displayName)); }
   @Post("calendars/:year/publish") async publishCalendar(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Body() body: PublishRentalCalendarDto) { return this.committed(req.user.tenantId, await this.business.publishCalendar(req.user.tenantId, this.context(req.user.tenantId), Number(year), body, req.user.displayName)); }
   @Post("calendars/:year/versions/:version/void") async voidCalendarVersion(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Param("version") version: string, @Body() body: VoidRentalCalendarDto) { return this.committed(req.user.tenantId, await this.business.voidCalendarVersion(req.user.tenantId, this.context(req.user.tenantId), Number(year), version, body, req.user.displayName)); }
   /** 以某个历史版本的内容生成新草稿（需求 4.5.7 的「恢复旧规则」）。只产生草稿，仍需预检与发布。 */
