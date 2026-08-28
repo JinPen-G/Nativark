@@ -69,12 +69,18 @@ export function assertRentalCapabilityRegistry(
 /**
  * 品类扩展契约门禁。新增品类只能引用已注册的计费策略与 capability；
  * 这样扩展失败会在启动/测试阶段暴露，而不是在某个订单运行到一半时才报错。
+ *
+ * `modules` 默认取生产注册表；CORE-EXT-03 用它传入「生产注册表 + 一个测试专用能力」的
+ * 候选集，证明「新增品类 + 独立能力」只靠追加注册定义即可通过门禁，无需改动既有能力。
+ * 生产启动路径不传此参，因此测试能力绝不会进入生产注册表、Seed 或菜单。
  */
-export function assertRentalCategoryExtensions(categories: RentalCategoryDefinition[]) {
+export function assertRentalCategoryExtensions(
+  categories: RentalCategoryDefinition[],
+  modules: RentalCapabilityDefinition[] = RENTAL_CAPABILITY_MODULES
+) {
   assertRentalPricingStrategiesComplete();
-  assertRentalCapabilityRegistry();
-  const byCode = new Map(RENTAL_CAPABILITY_MODULES.map((module) => [module.code, module]));
-  const capabilityCodes = new Set(byCode.keys());
+  assertRentalCapabilityRegistry(modules);
+  const byCode = new Map(modules.map((module) => [module.code, module]));
   const categoryCodes = new Set<string>();
 
   for (const category of categories) {

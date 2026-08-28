@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import {
   RENTAL_CAPABILITY_MODULES,
   type RentalCapability,
+  type RentalCapabilityDefinition,
   type RentalCapabilityHookModule,
   type RentalCapabilityHookOutcome,
   type RentalCapabilityHookPoint,
@@ -12,8 +13,6 @@ import {
 } from "@store-rental/shared";
 import { CapabilityHookRepository, type CapabilityHookSubjectType } from "./capability-hook.repository";
 import { WorkspaceCapabilityService } from "./workspace-capability.service";
-
-const DEFINITIONS = new Map(RENTAL_CAPABILITY_MODULES.map((module) => [module.code, module]));
 
 /**
  * 传给 Hook 的业务对象必须是**克隆后冻结**的，不能冻结活对象。
@@ -97,8 +96,20 @@ export class CapabilityHookRuntime {
 
   constructor(
     private readonly capabilities: WorkspaceCapabilityService,
-    @Optional() private readonly audits?: CapabilityHookRepository
-  ) {}
+    @Optional() private readonly audits?: CapabilityHookRepository,
+    // CORE-EXT-03：可注入的能力注册表。默认取生产注册表；测试传入
+    // 「生产注册表 + 测试专用能力」的候选集，以证明测试能力只靠追加注册定义即可登记并运行，
+    // 且不污染生产注册表。生产装配不传此参——测试能力绝不会进入生产运行时。
+    //
+    // 必须 @Optional()：它是一个带默认值的普通数组，不是可注入的 provider。
+    // 少了它，Nest 会把第三个位置参数当成待注入依赖去解析并在启动时抛
+    // "can't resolve dependencies"。@Optional() 下 Nest 传入 undefined，默认值随即生效。
+    @Optional() registry: RentalCapabilityDefinition[] = RENTAL_CAPABILITY_MODULES
+  ) {
+    this.definitions = new Map(registry.map((module) => [module.code, module]));
+  }
+
+  private readonly definitions: Map<RentalCapability, RentalCapabilityDefinition>;
 
   /**
    * 登记一个能力的 Hook 实现。由各能力模块在自身初始化时调用。
@@ -107,7 +118,7 @@ export class CapabilityHookRuntime {
    * Hook，而开发者以为已经接入。重复登记同一 code 直接失败，避免两份实现互相覆盖。
    */
   register(module: RentalCapabilityHookModule) {
-    if (!DEFINITIONS.has(module.code)) {
+    if (!this.definitions.has(module.code)) {
       throw new Error(`capability Hook 引用了未注册的能力：${module.code}`);
     }
     if (this.modules.has(module.code)) {
@@ -163,7 +174,7 @@ export class CapabilityHookRuntime {
 
     for (const { instance, module } of runnable) {
       const handler = module.hooks[input.point]!;
-      const required = DEFINITIONS.get(instance.code)?.kind === "category_required";
+      const required = this.definitions.get(instance.code)?.kind === "category_required";
       let result: RentalCapabilityHookResult;
       try {
         result = await handler({
