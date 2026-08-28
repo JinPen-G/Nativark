@@ -7977,6 +7977,205 @@ async function main() {
   );
   ok("重启恢复：启用/暂停/未启用/已声明未实现四种状态与审计条数全部从库中读回");
 
+  console.log("== 66. CORE-EXT-02B Hook 运行时接入七个 Core 节点 ==");
+  // 本节要证的是**接入**本身没有破坏既有流程，以及运行时在没有能力登记 Hook 时
+  // 是真正的空操作。判定逻辑（未启用不执行、确定性顺序、必选 fail-closed、
+  // 结果契约）在 tests/capability-hook-runtime.test.cjs 里以 19 项变异测试覆盖。
+  //
+  // 为什么这一节的价值不只是"跑通"：在第 65 节之前，全套 E2E 的订单流程都跑在
+  // **零个已启用能力**的空间上，`enabledInstances` 恒为空数组，因此 11 个 Hook 调用点
+  // 全都走的是"没有能力可执行"的短路。第 65 节刚刚在 e2e_cap_camera 空间启用了
+  // serialized_inventory 等能力，于是这里第一次让运行时真的去遍历已启用实例。
+  assert.equal(
+    readCount("SELECT COUNT(*) FROM `capability_hook_audits`;"),
+    0,
+    "尚无任何能力登记 Hook，接入本身不得凭空产生审计行"
+  );
+
+  // 在**已启用能力**的空间里跑一遍完整订单流程：报价 → 下单 → 确认 → 配货 → 领取 → 归还。
+  // 任一 Hook 调用点位置放错（例如放到状态改写之后、或漏传事务）都会在这里暴露。
+  const hookEnabled = await request("GET", "/api/rental/v1/capabilities", null, capRestartToken);
+  const hookEnabledCodes = hookEnabled.body.data.capabilities
+    .filter((row) => row.state === "enabled")
+    .map((row) => row.definition.code)
+    .sort();
+  assert.ok(
+    hookEnabledCodes.includes("serialized_inventory"),
+    `前置条件：本节需要空间里确有已启用能力，实际 ${hookEnabledCodes.join("、") || "（无）"}`
+  );
+
+  // 在第 65 节新建的 e2e_cap_camera 空间里跑一遍完整订单流程。
+  //
+  // 刻意**不用** demo 空间：demo 的价格计划被前面 PRICE-01/PRICE-02 十几个小节反复
+  // 改过（新增计划、重叠计划拒绝、日历发布），到这里已经没有覆盖任意商品且在
+  // 「此刻+24h」生效的计划，报价会 409。这与 Hook 接入无关，属夹具污染。
+  // 新引导的租户带完整样本数据（商品、资产、地点、默认价格计划），且未被那些小节触碰。
+  const hookAdmin = await login("e2e_cap_camera", "admin", capTenant.password);
+  const hookToken = (await request("POST", "/api/auth/switch-workspace", {
+    workspaceId: capTenant.currentWorkspaceId
+  }, hookAdmin.accessToken)).body.data.accessToken;
+  // 该空间已启用 serialized_inventory 与 bundle_inventory（第 65 节），这里补齐
+  // 履约必选的 pickup / return 与数量库存，让四个 Hook 节点都在"有已启用能力"的前提下执行。
+  for (const code of ["pickup", "return", "quantity_inventory"]) {
+    const enabled = await request(
+      "PUT",
+      "/api/rental/v1/capabilities",
+      { code, status: "enabled", reason: "第 66 节验证 Hook 接入" },
+      hookToken
+    );
+    assert.equal(enabled.status, 200, `启用 ${code} 失败: ${enabled.status} ${JSON.stringify(enabled.body).slice(0, 200)}`);
+  }
+  const hookInstanceCount = readCount(
+    `SELECT COUNT(*) FROM \`workspace_capability_instances\` WHERE \`workspaceId\`='${capTenant.currentWorkspaceId}' AND \`status\`='enabled';`
+  );
+  assert.ok(
+    hookInstanceCount >= 4,
+    `前置条件：该空间应有多个已启用能力（运行时才会真的去遍历），实际 ${hookInstanceCount}`
+  );
+
+  // 新引导的租户只带地点，不带样本商品（样本资产只落给演示租户），因此这里自建夹具。
+  // 用数量库存：它不需要登记序列化资产，也不依赖品类专属的资产字段，
+  // 而配货、领取、归还、结算四个 Hook 节点同样会全部走到。
+  const hookLocation = (await request("GET", "/api/rental/v1/locations", null, hookToken)).body.data[0];
+  assert.ok(hookLocation, "前置条件：新引导的租户应带履约地点");
+  const hookGroup = await request(
+    "POST",
+    "/api/rental/v1/item-groups",
+    { code: `E2E-HOOK-G-${Date.now().toString(36)}`, name: "Hook 验证数量商品", inventoryMode: "quantity", unit: "件", attributes: { brand: "E2E", model: "HOOK" } },
+    hookToken
+  );
+  assert.equal(hookGroup.status, 201, `Hook 用例商品创建失败: ${hookGroup.status} ${JSON.stringify(hookGroup.body).slice(0, 300)}`);
+  const hookStock = await request(
+    "PUT",
+    "/api/rental/v1/stock-balances",
+    { itemGroupId: hookGroup.body.data.id, locationId: hookLocation.id, onHandQuantity: 5 },
+    hookToken
+  );
+  assert.equal(hookStock.status, 200, `Hook 用例库存初始化失败: ${hookStock.status}`);
+  const hookPlan = await request(
+    "POST",
+    "/api/rental/v1/pricing-plans",
+    {
+      effectiveFrom: new Date(Date.now() - 30 * 86400000).toISOString(),
+      code: `E2E-HOOK-PRICE-${Date.now().toString(36)}`,
+      name: "Hook 验证价格",
+      changeReason: "第 66 节 Hook 接入验证",
+      status: "enabled",
+      // 摄影品类默认规则要求预授权，因此费率必须给出 preAuthAmount，
+      // 否则报价会因「要求预授权却取不到额度」而 409（与 Hook 接入无关）。
+      rates: [{ itemGroupId: hookGroup.body.data.id, unit: "day_24h", baseAmount: 100, weekendMultiplier: 1, holidayMultiplier: 1, depositAmount: 200, preAuthAmount: 500, minimumUnits: 1 }]
+    },
+    hookToken
+  );
+  assert.equal(hookPlan.status, 201, `Hook 用例定价计划失败: ${hookPlan.status} ${JSON.stringify(hookPlan.body).slice(0, 300)}`);
+
+  const hookStartAt = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
+  const hookEndAt = new Date(Date.now() + 72 * 3600 * 1000).toISOString();
+  const hookLines = [{ itemGroupId: hookGroup.body.data.id, quantity: 1 }];
+  const hookQuoteBody = {
+    customerType: "personal",
+    fulfillmentMode: "store_pickup_return",
+    fulfillmentLocationId: hookLocation.id,
+    startAt: hookStartAt,
+    endAt: hookEndAt,
+    lines: hookLines,
+    pricingPlanId: hookPlan.body.data.id
+  };
+  // 报价校验 Hook 就在报价算完、落库之前；位置放错这里会 500 或报价拿不到。
+  const hookQuote = await request("POST", "/api/rental/v1/quotes", hookQuoteBody, hookToken);
+  assert.equal(hookQuote.status, 201, `已启用能力的空间报价失败: ${hookQuote.status} ${JSON.stringify(hookQuote.body).slice(0, 300)}`);
+  const hookOrder = await request(
+    "POST",
+    "/api/rental/v1/orders",
+    { quoteId: hookQuote.body.data.id, customerName: "E2E Hook 客户", contactPhone: "13800000066", ...hookQuoteBody },
+    hookToken
+  );
+  assert.equal(hookOrder.status, 201, `已启用能力的空间下单失败: ${hookOrder.status} ${JSON.stringify(hookOrder.body).slice(0, 300)}`);
+  const hookOrderId = hookOrder.body.data.id;
+  assert.equal(
+    (await request("POST", `/api/rental/v1/orders/${hookOrderId}/confirm`, {}, hookToken)).body.data.status,
+    "reserved",
+    "订单确认 Hook 接入后确认必须仍然成功"
+  );
+  assert.equal(
+    (await request("POST", `/api/rental/v1/orders/${hookOrderId}/allocate`, {}, hookToken)).body.data.status,
+    "ready_for_pickup",
+    "配货 Hook 接入后配货必须仍然成功"
+  );
+  const hookPickupTemplate = (await request("GET", "/api/rental/v1/inspection-templates?stage=pickup", null, hookToken)).body.data[0];
+  const hookPickedUp = await request(
+    "POST",
+    `/api/rental/v1/orders/${hookOrderId}/inspections`,
+    { templateId: hookPickupTemplate.id, results: { appearance_ok: true, function_ok: true, shutter_count: 100 } },
+    hookToken
+  );
+  assert.equal(hookPickedUp.status, 201, `领取检查失败: ${hookPickedUp.status} ${JSON.stringify(hookPickedUp.body).slice(0, 300)}`);
+  assert.equal(hookPickedUp.body.data.order.status, "renting", "领取/交付 Hook 接入后领取必须仍然成功");
+  const hookReturnTemplate = (await request("GET", "/api/rental/v1/inspection-templates?stage=return", null, hookToken)).body.data[0];
+  const hookReturned = await request(
+    "POST",
+    `/api/rental/v1/orders/${hookOrderId}/inspections`,
+    { templateId: hookReturnTemplate.id, results: { appearance_ok: true, function_ok: true, shutter_count: 120 } },
+    hookToken
+  );
+  assert.equal(hookReturned.status, 201, `归还检查失败: ${hookReturned.status} ${JSON.stringify(hookReturned.body).slice(0, 300)}`);
+  assert.equal(hookReturned.body.data.order.status, "completed", "归还检查与结算 Hook 接入后归还必须仍然成功");
+
+  // 商品建档 Hook：saveItemGroup 已在上面建夹具时走过一次（数量商品），
+  // 这里再建一个，确认建档节点在能力已启用后仍然放行。
+  const hookNewGroup = await request(
+    "POST",
+    "/api/rental/v1/item-groups",
+    { code: `E2E-HOOK-${Date.now().toString(36)}`, name: "Hook 接入验证商品", inventoryMode: "quantity", unit: "件", attributes: { brand: "E2E", model: "HOOK2" } },
+    hookToken
+  );
+  assert.equal(hookNewGroup.status, 201, `商品建档失败: ${hookNewGroup.status} ${JSON.stringify(hookNewGroup.body).slice(0, 300)}`);
+
+  // 全流程跑完，仍然一条 Hook 审计都没有：因为当前没有任何能力登记 Hook。
+  // 这条断言的意义是「接入不会凭空造审计」；能力真正执行并落审计的验收依赖
+  // CORE-EXT-03 引入的测试专用 capability，本任务未实现。
+  assert.equal(
+    readCount("SELECT COUNT(*) FROM `capability_hook_audits`;"),
+    0,
+    "没有能力登记 Hook 时，全流程跑完也不得产生审计行"
+  );
+  ok(
+    "Hook 接入七个节点后全链路无回退：已启用能力的空间中报价→下单→确认→配货→领取→归还→建档全部成功，" +
+      "且无能力登记 Hook 时零审计行"
+  );
+
+  // 66b. 新表的部署与重启语义。
+  const hookRedeploy = deploy();
+  if (hookRedeploy.status !== 0) fail("Hook 审计表所在库重复部署失败", `${hookRedeploy.stdout || ""}${hookRedeploy.stderr || ""}`.slice(-2000));
+  const hookDrift = runNode([
+    PRISMA_CLI, "migrate", "diff", "--from-url", TEST_DATABASE_URL,
+    "--to-schema-datamodel", SCHEMA_PATH, "--script"
+  ]);
+  const hookDriftText = `${hookDrift.stdout || ""}${hookDrift.stderr || ""}`.replace(/\x1B\[[0-?]*[ -/]*[@-~]/gu, "");
+  const hookDriftLines = hookDriftText.split(/\r?\n/u).filter((line) => /capability_hook_audits/u.test(line));
+  if (hookDriftLines.length) {
+    fail("capability_hook_audits 与 schema.prisma 不一致", hookDriftLines.join("\n").slice(0, 4000));
+  }
+  // 重启后已启用能力仍在，订单已完成状态仍可读——证明接入没有把状态挪到内存里。
+  await stopApi();
+  startApi();
+  if (!(await waitHealth())) fail("第 66 节的 API 重启超时");
+  const hookAfterRestart = await login("e2e_cap_camera", "admin", capTenant.password);
+  const hookRestartToken = (await request("POST", "/api/auth/switch-workspace", {
+    workspaceId: capTenant.currentWorkspaceId
+  }, hookAfterRestart.accessToken)).body.data.accessToken;
+  const hookRestartOverview = await request("GET", "/api/rental/v1/capabilities", null, hookRestartToken);
+  assert.ok(
+    hookRestartOverview.body.data.capabilities.filter((row) => row.state === "enabled").length >= 3,
+    "重启后该空间的已启用能力必须仍然成立"
+  );
+  assert.equal(
+    (await request("GET", `/api/rental/v1/orders/${hookOrderId}`, null, hookRestartToken)).body.data.status,
+    "completed",
+    "重启后订单终态仍必须从库中读回"
+  );
+  ok("Hook 审计表：重复部署无差异、与 schema.prisma 一致、重启后能力与订单状态均从库读回");
+
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);
 }
 
