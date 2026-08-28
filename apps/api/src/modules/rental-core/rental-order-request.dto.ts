@@ -212,6 +212,18 @@ export class CapabilityExceptionInputDto {
   @IsString()
   @IsNotEmpty()
   reason!: string;
+
+  /**
+   * 被确认的报价判断记录 id。可选：缺省时服务端按「能力 + 风险代码」在报价判断里回查。
+   * 传了就必须命中——指向不存在的判断不构成确认。
+   */
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  decisionId?: string;
+
+  // confirmedBy / confirmedWithPermission / confirmedAt **刻意不在 DTO 里**：
+  // 它们由控制器按鉴权上下文补齐。放进 DTO 就等于允许客户端自报确认人与权限。
 }
 
 export class CreateRentalOrderDto implements CreateRentalOrderRequest {

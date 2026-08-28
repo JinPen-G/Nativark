@@ -2,6 +2,7 @@ import {
   RENTAL_CAPABILITY_CODES,
   RENTAL_CAPABILITY_LIFECYCLE_STATUSES,
   type RentalCapability,
+  type RentalCapabilityConfig,
   type RentalCapabilityLifecycleStatus,
   type SaveWorkspaceCapabilityRequest,
   type UpgradeWorkspaceCapabilityRequest
@@ -28,7 +29,7 @@ export class SaveWorkspaceCapabilityDto implements SaveWorkspaceCapabilityReques
 
   @IsOptional()
   @IsObject()
-  config?: Record<string, string | number | boolean>;
+  config?: RentalCapabilityConfig;
 
   // 原因必填且限长：生命周期变更要能事后解释，而 reason 列是 TEXT，
   // 这里的上限是为了防止把整段日志粘进审计，不是为了迁就列宽。

@@ -235,6 +235,7 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       appliedDiscountPlanIds: quote.appliedDiscountPlanIds as unknown as Prisma.InputJsonValue,
       // CORE-EXT-02D：固化报价生成时已启用能力的版本快照，下单时拷进订单。
       capabilitySnapshot: (quote.capabilitySnapshot ?? null) as unknown as Prisma.InputJsonValue,
+      capabilityDecisions: (quote.capabilityDecisions ?? null) as unknown as Prisma.InputJsonValue,
       customerCouponId: quote.customerCouponId ?? null,
       expiresAt: date(quote.expiresAt),
       consumedAt: optionalDate(quote.consumedAt),
@@ -430,6 +431,7 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       calendarVersion: row.calendarVersion ?? undefined,
       appliedDiscountPlanIds: (row.appliedDiscountPlanIds ?? []) as string[],
       capabilitySnapshot: (row.capabilitySnapshot ?? undefined) as unknown as RentalQuoteSnapshotV1["capabilitySnapshot"],
+      capabilityDecisions: (row.capabilityDecisions ?? undefined) as unknown as RentalQuoteSnapshotV1["capabilityDecisions"],
       customerCouponId: row.customerCouponId ?? undefined,
       expiresAt: iso(row.expiresAt),
       createdAt: iso(row.createdAt),

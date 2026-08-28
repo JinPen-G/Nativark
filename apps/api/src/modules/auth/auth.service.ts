@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Injectable,
   InternalServerErrorException,
+  Logger,
   Optional,
   UnauthorizedException
 } from "@nestjs/common";
@@ -14,6 +15,7 @@ import type {
   LoginRequest,
   LoginResponse,
   RefreshSessionRequest,
+  RentalCapability,
   SystemUserRow
 } from "@store-rental/shared";
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
@@ -45,6 +47,7 @@ interface AccessTokenPayload {
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
   private readonly loginFailures = new Map<string, LoginFailureState>();
   private readonly accessTtlSeconds = 15 * 60;
   private readonly refreshTtlMs = 30 * 24 * 60 * 60 * 1000;
@@ -213,7 +216,8 @@ export class AuthService {
       workspaces: await this.platformService.listUserWorkspaces(user.id),
       currentWorkspaceId: workspaceId,
       missingRequiredCapabilities: capabilityView?.missingRequired ?? [],
-      capabilityProductionReady: capabilityView?.productionReady ?? false
+      capabilityProductionReady: capabilityView?.productionReady ?? false,
+      workspaceRunMode: capabilityView?.runMode
     };
   }
 
@@ -224,13 +228,29 @@ export class AuthService {
    * 回退会让菜单在装配被改坏时重新按声明放行，正是本任务要消除的 fail-open。
    */
   private async capabilityOverviewFor(tenantId: string, workspaceId: string) {
-    if (!this.capabilities) return { enabled: [], missingRequired: [], productionReady: false };
-    const overview = await this.capabilities.overview(tenantId, workspaceId);
-    return {
-      enabled: overview.capabilities.filter((row) => row.state === "enabled").map((row) => row.definition.code),
-      missingRequired: overview.missingRequired,
-      productionReady: overview.productionReady
-    };
+    const failClosed = { enabled: [] as RentalCapability[], missingRequired: [] as RentalCapability[], productionReady: false, runMode: undefined };
+    if (!this.capabilities) return failClosed;
+    try {
+      const overview = await this.capabilities.overview(tenantId, workspaceId);
+      return {
+        enabled: overview.capabilities.filter((row) => row.state === "enabled").map((row) => row.definition.code),
+        missingRequired: overview.missingRequired,
+        productionReady: overview.productionReady,
+        // 前端据此明确标注「演示 / 开发空间」，而不是只靠 productionReady 猜。
+        runMode: await this.capabilities.workspaceRunMode(tenantId, workspaceId)
+      };
+    } catch (error) {
+      // 能力范围解析失败**不得**让登录或会话上下文整体失败。
+      //
+      // 这里的取值只服务于「菜单入口显示什么」；解析不出来时返回空启用集是 fail-closed
+      // 的方向（少显示入口，不多显示），而 API 侧的放行由 Guard 独立判定，不依赖这份结果。
+      // 反过来，让它把登录打成 500 才是真的危险：运营连不进来，连去修的入口都没有。
+      // 失败必须留日志，不能静默——它通常意味着空间或品类数据不一致。
+      this.logger.warn(
+        `解析经营空间 ${workspaceId} 的能力范围失败，本次会话按空启用集处理：${(error as Error).message}`
+      );
+      return failClosed;
+    }
   }
 
   /** SPACE-03：有会话空间时按空间取品类与能力；无空间时退回租户级档案。 */

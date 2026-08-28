@@ -1,6 +1,7 @@
 import { ConflictException, ForbiddenException, Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import type {
+  BusinessWorkspaceRunMode,
   RentalCapability,
   RentalCapabilityLifecycleStatus,
   RentalCategoryCode,
@@ -47,6 +48,15 @@ export class WorkspaceCapabilityRepository {
     if (!workspace) {
       throw new ForbiddenException("当前经营空间不存在或经营品类缺失，请重新选择经营空间");
     }
+    // 品类关联行可能查不到（品类定义尚未落库、或启动期回填还没跑完）。
+    // 直接取 `workspace.category.defaultCapabilities` 会抛 TypeError 并变成 500，
+    // 而调用方（登录、会话上下文）拿到的是一个无法解释的内部错误。明确成 Forbidden：
+    // 语义上确实是「这个空间此刻不可用」，且调用方能按业务异常处理。
+    if (!workspace.category) {
+      throw new ForbiddenException(
+        `经营空间 ${workspaceId} 的品类 ${workspace.categoryCode} 尚未登记，无法解析能力范围`
+      );
+    }
     return {
       categoryCode: workspace.categoryCode.toLowerCase() as RentalCategoryCode,
       declaredCodes: (workspace.category.defaultCapabilities ?? []) as RentalCapability[]
@@ -59,6 +69,104 @@ export class WorkspaceCapabilityRepository {
       orderBy: { code: "asc" }
     });
     return rows.map((row) => this.toInstance(row));
+  }
+
+  /** 同上，但在调用方的事务里读。空间创建时的初始化必须与建空间同事务。 */
+  async listInstancesInTx(
+    tenantId: string,
+    workspaceId: string,
+    tx: Prisma.TransactionClient
+  ): Promise<WorkspaceCapabilityInstance[]> {
+    const rows = await tx.workspaceCapabilityInstance.findMany({
+      where: { tenantId, workspaceId },
+      orderBy: { code: "asc" }
+    });
+    return rows.map((row) => this.toInstance(row));
+  }
+
+  /**
+   * 供显式对账使用：开一个事务并把客户端交给回调，保持「初始化必须在事务里」的约束。
+   *
+   * 对账是幂等的「只补缺项」操作；两个请求同时补同一批唯一键时，MySQL 可能把落败事务
+   * 以 P2034（死锁/写冲突）回滚。这里最多重试两次，让落败方在赢家提交后重新读取，
+   * 随后按「已存在则跳过」正常返回。只重试数据库已整体回滚的 P2034，不重试其他异常。
+   */
+  async runInTransaction<T>(run: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        return await this.prisma.$transaction(run);
+      } catch (error) {
+        if ((error as { code?: string }).code !== "P2034" || attempt === 3) throw error;
+        await new Promise<void>((resolve) => setTimeout(resolve, 25 * attempt));
+      }
+    }
+    throw new Error("能力对账事务重试状态异常");
+  }
+
+  /** 空间的运行模式。查不到空间时按最保守的 production 处理，宁可挡住也不放开。 */
+  async workspaceRunMode(tenantId: string, workspaceId: string): Promise<BusinessWorkspaceRunMode> {
+    const workspace = await this.prisma.businessWorkspace.findFirst({
+      where: { tenantId, id: workspaceId },
+      select: { runMode: true }
+    });
+    if (!workspace) return "production";
+    return (workspace.runMode as BusinessWorkspaceRunMode) ?? "production";
+  }
+
+  /**
+   * 创建空间时批量初始化必选能力实例与其审计（Review P1-3）。
+   *
+   * 只接受事务客户端：空间档案与能力实例必须原子创建。`skipDuplicates` 让并发或重放
+   * 不会因唯一键失败——已存在的实例保持原状，不覆盖运营后来的暂停/停用决定。
+   */
+  async initializeInstances(
+    instances: WorkspaceCapabilityInstance[],
+    audits: WorkspaceCapabilityAuditEvent[],
+    tx: Prisma.TransactionClient
+  ): Promise<RentalCapability[]> {
+    if (!instances.length) return [];
+    const inserted: RentalCapability[] = [];
+    for (const instance of instances) {
+      const result = await tx.workspaceCapabilityInstance.createMany({
+        data: [{
+        tenantId: instance.tenantId,
+        workspaceId: instance.workspaceId,
+        code: instance.code,
+        status: instance.status,
+        implementationVersion: instance.implementationVersion,
+        configVersion: instance.configVersion,
+        config: instance.config as unknown as Prisma.InputJsonValue,
+        revision: instance.revision,
+        enabledAt: instance.enabledAt ? new Date(instance.enabledAt) : null,
+        updatedBy: instance.updatedBy ?? null
+        }],
+        skipDuplicates: true
+      });
+      if (result.count === 1) inserted.push(instance.code);
+    }
+    const insertedSet = new Set(inserted);
+    const insertedAudits = audits.filter((audit) => insertedSet.has(audit.code));
+    if (insertedAudits.length) {
+      await tx.workspaceCapabilityAuditEntry.createMany({
+        data: insertedAudits.map((audit) => ({
+          tenantId: instances[0].tenantId,
+          workspaceId: instances[0].workspaceId,
+          code: audit.code,
+          action: audit.action,
+          fromStatus: audit.fromStatus ?? null,
+          toStatus: audit.toStatus,
+          implementationVersion: audit.implementationVersion ?? null,
+          configVersion: audit.configVersion ?? null,
+          configSnapshot: audit.configSnapshot
+            ? (audit.configSnapshot as unknown as Prisma.InputJsonValue)
+            : undefined,
+          reason: audit.reason,
+          operator: audit.operator ?? null,
+          at: new Date(audit.at)
+        }))
+      });
+    }
+    return inserted;
   }
 
   async findInstance(
@@ -88,6 +196,7 @@ export class WorkspaceCapabilityRepository {
       toStatus: row.toStatus as RentalCapabilityLifecycleStatus,
       implementationVersion: row.implementationVersion ?? undefined,
       configVersion: row.configVersion ?? undefined,
+      configSnapshot: (row.configSnapshot ?? undefined) as WorkspaceCapabilityAuditEvent["configSnapshot"],
       reason: row.reason,
       operator: row.operator ?? undefined,
       at: row.at.toISOString()
@@ -153,6 +262,9 @@ export class WorkspaceCapabilityRepository {
             toStatus: audit.toStatus,
             implementationVersion: audit.implementationVersion ?? null,
             configVersion: audit.configVersion ?? null,
+            configSnapshot: audit.configSnapshot
+              ? (audit.configSnapshot as unknown as Prisma.InputJsonValue)
+              : undefined,
             reason: audit.reason,
             operator: audit.operator ?? null,
             at: new Date(audit.at)

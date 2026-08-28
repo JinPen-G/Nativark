@@ -205,6 +205,8 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       calendarSnapshot: (order.calendarSnapshot ?? null) as unknown as Prisma.InputJsonValue,
       // CORE-EXT-02D：能力版本快照随订单固化，在途环节的 Hook 判定都用它。
       capabilitySnapshot: (order.capabilitySnapshot ?? null) as unknown as Prisma.InputJsonValue,
+      capabilityDecisions: (order.capabilityDecisions ?? null) as unknown as Prisma.InputJsonValue,
+      capabilityExceptions: (order.capabilityExceptions ?? null) as unknown as Prisma.InputJsonValue,
       chargeLines: order.chargeLines as unknown as Prisma.InputJsonValue,
       rentalAmount: new Prisma.Decimal(order.rentalAmount),
       discountAmount: new Prisma.Decimal(order.discountAmount),
@@ -652,6 +654,10 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       calendarVersion: row.calendarVersion ?? undefined,
       calendarSnapshot: (row.calendarSnapshot ?? undefined) as unknown as RentalOrder["calendarSnapshot"],
       capabilitySnapshot: (row.capabilitySnapshot ?? undefined) as unknown as RentalOrder["capabilitySnapshot"],
+      capabilityDecisions: (row.capabilityDecisions ?? undefined) as unknown as RentalOrder["capabilityDecisions"],
+      capabilityExceptions: (row.capabilityExceptions ?? undefined) as unknown as RentalOrder["capabilityExceptions"],
+      // Review P1-10：NULL 快照明确解释为 legacy empty，不回退到当前已启用能力。
+      capabilityPolicy: row.capabilitySnapshot ? "snapshot" : "legacy_empty",
       chargeLines: (row.chargeLines ?? []) as unknown as RentalQuoteChargeLine[],
       rentalAmount: num(row.rentalAmount),
       discountAmount: num(row.discountAmount),

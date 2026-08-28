@@ -1,8 +1,13 @@
-import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, OnApplicationBootstrap, OnModuleInit, Optional } from "@nestjs/common";
+import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException, OnApplicationBootstrap, OnModuleInit, Optional } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { CapabilityHookRuntime } from "./capability-hook.runtime";
 import type { CapabilityHookSubjectType } from "./capability-hook.repository";
 import { WorkspaceCapabilityService } from "./workspace-capability.service";
+import {
+  buildCapabilityEquipment,
+  buildCapabilityEquipmentFromAssets,
+  type CapabilityEquipmentGroup
+} from "./capability-equipment";
 import {
   RENTAL_CATEGORY_DEFINITIONS,
   RentalAssetStatus,
@@ -46,7 +51,8 @@ import {
   type TenantRentalBusinessSettings,
   type TenantRentalProfile,
   type WorkspaceCapabilityInstance,
-  type RentalCapabilityEquipmentLine
+  type RentalCapabilityEquipmentLine,
+  type RentalCapabilityExceptionSnapshot
 } from "@store-rental/shared";
 import { getRequestWorkspaceId, runWithRequestIdentity } from "../../common/request-identity";
 import { RentalStateRepository } from "./rental-state.repository";
@@ -169,6 +175,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   private readonly defaultWorkspaceByTenant = new Map<string, string>();
   private readonly categoryByWorkspace = new Map<string, RentalCategoryCode>();
   private readonly tenantByWorkspace = new Map<string, string>();
+  private readonly logger = new Logger(RentalCoreService.name);
   /** 同一空间首次并发读取时，只允许一条请求执行配置与样本补落。 */
   private readonly initializationByWorkspace = new Map<string, Promise<void>>();
 
@@ -228,7 +235,20 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
    * undefined，`runHook` 退回按当前已启用实例判定——这与升级前的行为一致，不是回退。
    */
   private orderHookInstances(tenantId: string, order: RentalOrder): WorkspaceCapabilityInstance[] | undefined {
-    if (!order.capabilitySnapshot?.length) return undefined;
+    // Review P1-10：没有快照的存量订单 → **空执行名单**，不是「按当前已启用能力判定」。
+    //
+    // 回退到当前实例意味着订单创建后新启用的任何 capability 都会反向影响这张旧订单的
+    // 履约判定——一条新规则可以让一张早就成立的订单突然无法归还或结算。
+    // 空名单如实表达「当时没有能力参与判定」，并由 `capabilityPolicy: legacy_empty`
+    // 在响应里标明这是历史兼容订单。
+    if (!order.capabilitySnapshot?.length) {
+      if (order.capabilityPolicy === "legacy_empty") {
+        this.logger.warn(
+          `订单 ${order.id} 没有能力快照（历史兼容订单），本次判定按空名单执行，不会执行下单后新增的 capability`
+        );
+      }
+      return [];
+    }
     return WorkspaceCapabilityService.instancesFromSnapshot(
       tenantId,
       this.workspaceOf(tenantId),
@@ -819,6 +839,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   async prepareOrder(tenantId: string, input: CreateRentalOrderRequest, userName: string, quote: RentalQuoteSnapshotV1) {
     const state = this.state(tenantId);
     if (!input.customerName?.trim()) throw new BadRequestException("客户名称不能为空");
+    // 正式经营门禁只作用于“创建新报价”。这里消费的是已经生成并冻结能力快照的报价；
+    // 能力随后暂停或升级都不得反向废掉这份报价，更不能卡住由它形成的在途订单。
     if (quote.ruleSnapshot.qualification.required) {
       if (!input.qualificationApproved) throw new ConflictException(`当前品类要求先通过资质审核：${quote.ruleSnapshot.qualification.documentTypes.join("、")}`);
       if (input.qualificationValidTo) {
@@ -872,6 +894,13 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       // CORE-EXT-02D：能力版本快照随订单固化。在途环节的 Hook 判定都用它，
       // 因此升级或暂停能力都不改写这张已存在订单的履约规则。
       capabilitySnapshot: quote.capabilitySnapshot ? structuredClone(quote.capabilitySnapshot) : undefined,
+      // Review P1-5：判断记录从报价拷贝，下单侧**不重新构造**——重构一份就等于
+      // 允许下单时给出与报价不同的判断，而客户看到的是报价里的那一份。
+      capabilityDecisions: quote.capabilityDecisions ? structuredClone(quote.capabilityDecisions) : undefined,
+      // Review P1-6：完整例外快照。风险代码之外还要留原因、确认人、权限、时间与
+      // 被确认的判断 id，否则配货与后续履约无从还原「风险已被谁按什么依据裁决」。
+      capabilityExceptions: this.buildExceptionSnapshots(input, quote),
+      capabilityPolicy: quote.capabilitySnapshot?.length ? "snapshot" : "legacy_empty",
       rentalAmount: quote.rentalAmount, discountAmount: quote.discountAmount, couponAmount: quote.couponAmount,
       serviceAmount: quote.serviceAmount,
       // 履约费与预授权额度必须一并投影：订单只拿总额的话，
@@ -885,6 +914,67 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       reservations, allocations: [], createdBy: input.operator || userName, createdAt: timestamp, updatedAt: timestamp
     };
     return order;
+  }
+
+  /**
+   * Review P1-6：把请求里的例外确认与报价的判断记录**对齐**后固化成不可变快照。
+   *
+   * 每条确认都必须指向报价里真实存在的一条 **warn** 判断：`decisionId` 传了就必须同时
+   * 匹配能力与风险代码，没传才按「能力 + 风险代码」回查。任何不匹配都 fail-closed，
+   * 不能静默丢弃，否则 Hook 仍可能消费请求里的原始确认并形成绕过。
+   *
+   * 版本与器材组合从被确认的那条判断上取，不从当前实例取：确认针对的是报价当时的
+   * 那个结论，事后升级能力不应改变这条确认的含义。
+   */
+  private buildExceptionSnapshots(
+    input: CreateRentalOrderRequest,
+    quote: RentalQuoteSnapshotV1
+  ): RentalCapabilityExceptionSnapshot[] | undefined {
+    const confirmations = input.capabilityExceptions ?? [];
+    if (!confirmations.length) return undefined;
+    const decisions = quote.capabilityDecisions ?? [];
+    const snapshots: RentalCapabilityExceptionSnapshot[] = [];
+    const confirmedRisks = new Set<string>();
+    for (const confirmation of confirmations) {
+      if (!confirmation.reason?.trim()) throw new BadRequestException("能力风险例外确认必须填写原因");
+      const decision = confirmation.decisionId
+        ? decisions.find((row) => row.id === confirmation.decisionId)
+        : decisions.find(
+            (row) => row.capability === confirmation.capability && row.notices.some((notice) => notice.code === confirmation.code)
+          );
+      if (
+        !decision ||
+        decision.decision !== "warn" ||
+        decision.capability !== confirmation.capability ||
+        !decision.notices.some((notice) => notice.code === confirmation.code)
+      ) {
+        throw new BadRequestException(
+          `能力风险例外 ${confirmation.capability}/${confirmation.code} 未匹配报价中的可确认风险判断`
+        );
+      }
+      if (!confirmation.confirmedBy || !confirmation.confirmedWithPermission || !confirmation.confirmedAt) {
+        throw new BadRequestException("能力风险例外缺少服务端确认身份、权限或时间");
+      }
+      const confirmedAt = new Date(confirmation.confirmedAt);
+      if (Number.isNaN(confirmedAt.getTime())) throw new BadRequestException("能力风险例外确认时间无效");
+      const riskKey = `${confirmation.capability}:${confirmation.code}`;
+      if (confirmedRisks.has(riskKey)) throw new BadRequestException(`能力风险例外 ${riskKey} 重复确认`);
+      confirmedRisks.add(riskKey);
+      snapshots.push({
+        capability: confirmation.capability,
+        riskCode: confirmation.code,
+        reason: confirmation.reason.trim(),
+        confirmedBy: confirmation.confirmedBy,
+        confirmedWithPermission: confirmation.confirmedWithPermission,
+        confirmedAt: confirmedAt.toISOString(),
+        decisionId: decision.id,
+        implementationVersion: decision.implementationVersion,
+        configVersion: decision.configVersion,
+        rulesetVersion: decision.rulesetVersion,
+        equipment: decision.equipment
+      });
+    }
+    return snapshots.length ? snapshots : undefined;
   }
 
   async confirmOrder(tenantId: string, orderId: string, tx?: RentalFactTx, operator?: string) {
@@ -906,9 +996,15 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const order = await this.lockedOrder(tenantId, orderId, tx);
     if (order.status !== RentalCoreOrderStatus.Reserved) throw new ConflictException("只有已确认预占的订单可以配货");
     this.assertOutboundLocationActive(state, order);
-    // Hook 位置：状态与地点校验之后、取库存锁之前。放在取锁之后会让被能力阻止的
-    // 请求白持有一批行锁直到事务回滚，无谓地加重并发争用。
-    await this.runHook(tenantId, "allocation_dispatch", { type: "order", id: order.id }, { ...order, equipment: this.buildCapabilityEquipment(tenantId, order.lines.map((line) => ({ itemGroupId: line.itemGroupId, quantity: line.quantity }))), capabilityExceptions: [] }, tx, operator, this.orderHookInstances(tenantId, order));
+    // Hook **不**在这里执行（Review P1-8）。
+    //
+    // 原先在取锁之前按**商品组**属性判定，检查的不是最终分配到的机身、镜头、电池。
+    // 同商品组下某台资产存在属性覆盖、型号差异或附件缺失时，那种检查一个都发现不了。
+    // 现在改为：先锁定并挑选候选资产 → 用**实际资产组合**在同一事务内判定 →
+    // 判定通过才保存 Allocation。判定失败时事务回滚，锁与占用一起释放。
+    //
+    // 代价是被阻止的请求会短暂持有一批行锁直到回滚；这个代价必须付——
+    // 在选出资产之前根本无法知道要判定什么。
     // 先锁候选资产行，再在**同一事务内**读资产与既有分配。
     //
     // 顺序不可反，也不能省锁：只锁订单行时两张订单锁的是不同的行、互不争锁，
@@ -955,6 +1051,41 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
         allocations.push({ id: id("allocation"), orderId, orderLineId: reservation.orderLineId, itemGroupId: reservation.itemGroupId, quantity: reservation.quantity, status: "allocated" });
       }
     }
+    // Review P1-8：用**实际挑中的资产**判定，而不是商品组。
+    //
+    // 序列化行按资产逐台展开（带 assetId/assetNo 与「商品组属性 + 资产属性」合并结果）；
+    // 数量库存行没有具体资产，仍按商品组展开——那类库存本来就不区分个体。
+    // 判定所需的例外确认从**订单固化的例外快照**读（Review P1-6），
+    // 不再传空数组：传空等于让配货重新判一遍风险，而下单时已经有人裁决过了。
+    const pickedAssets = allocations
+      .filter((row) => row.assetId)
+      .map((row) => assets.find((asset) => asset.id === row.assetId))
+      .filter((asset): asset is RentalAsset => Boolean(asset));
+    const quantityLines = allocations
+      .filter((row) => !row.assetId)
+      .map((row) => ({ itemGroupId: row.itemGroupId!, quantity: row.quantity }));
+    const groups = this.capabilityEquipmentGroups(tenantId);
+    const actualEquipment = [
+      ...buildCapabilityEquipmentFromAssets(groups, pickedAssets),
+      ...buildCapabilityEquipment(groups, quantityLines)
+    ];
+    await this.runHook(
+      tenantId,
+      "allocation_dispatch",
+      { type: "order", id: order.id },
+      {
+        ...order,
+        equipment: actualEquipment,
+        capabilityExceptions: (order.capabilityExceptions ?? []).map((row) => ({
+          capability: row.capability,
+          code: row.riskCode,
+          reason: row.reason
+        }))
+      },
+      tx,
+      operator,
+      this.orderHookInstances(tenantId, order)
+    );
     order.allocations = allocations; order.status = RentalCoreOrderStatus.ReadyForPickup; order.updatedAt = now();
     await this.factStore.saveOrderAggregate(order, assetChanges, tx);
     return order;
@@ -1247,25 +1378,28 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   }
 
   /**
-   * CAM-01A：把订单/报价的行解析成「已解析器材行」（带 itemGroup 属性）供能力 Hook 判定。   *
-   * 这是与品类无关的**数据富化**——只是把 itemGroupId 展开成它的名称、库存模式与属性，
-   * 让能力看得到卡口/画幅/供电等信息。Core 自身不读这些属性、不做任何摄影判断。
+   * CAM-01A：把订单/报价的行解析成「已解析器材行」供能力 Hook 判定。
+   *
+   * 实现委托给与品类无关的公共富化（`capability-equipment.ts`），报价、订单与配货三处
+   * 共用同一份逻辑与同一套错误处理——早前报价侧另有一份实现，找不到商品时用 id
+   * 冒充名称，于是同一条脏数据在报价与下单得出不同结果。
    */
   buildCapabilityEquipment(
     tenantId: string,
     lines: Array<{ itemGroupId: string; quantity: number }>
   ): RentalCapabilityEquipmentLine[] {
+    return buildCapabilityEquipment(this.capabilityEquipmentGroups(tenantId), lines);
+  }
+
+  /** 商品组查找表，供公共富化使用。 */
+  private capabilityEquipmentGroups(tenantId: string): Map<string, CapabilityEquipmentGroup> {
     const state = this.state(tenantId);
-    return lines.map((line) => {
-      const group = this.group(state, line.itemGroupId);
-      return {
-        itemGroupId: group.id,
-        itemGroupName: group.name,
-        inventoryMode: group.inventoryMode,
-        quantity: line.quantity,
-        attributes: { ...(group.attributes ?? {}) }
-      };
-    });
+    return new Map(
+      state.itemGroups.map((group) => [
+        group.id,
+        { id: group.id, name: group.name, inventoryMode: group.inventoryMode, attributes: group.attributes }
+      ])
+    );
   }
 
   /** 供订单确认应用服务复用：把订单固化的能力快照还原成 Hook 执行名单（CORE-EXT-02D）。 */

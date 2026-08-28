@@ -69,6 +69,9 @@ const themeSource = read("apps/admin/src/app/theme.tsx");
   "品类必选", "可选增强", "跨品类共享",
   "依赖 / 互斥", "configSchema", "upgradeAvailable",
   "该经营空间尚未达到生产经营条件", "该经营空间已达到生产经营条件",
+  // P2-2：本页不得再使用 Ant Design 6 的弃用 API（`message` / `direction` / Drawer `width`）。
+  // 用「新 API 必须出现」来表达，因为弃用 API 的字符串在别处也可能合法出现。
+  "title=\"该经营空间尚未达到生产经营条件\"", "orientation=\"vertical\"", "size={560}",
   "missingRequired", "expectedRevision", "变更能力状态必须填写原因"
 ].forEach((label) => requireText(capabilityPage, label, "capability governance UI coverage"));
 [

@@ -130,13 +130,22 @@ export class RentalCoreController {
     // CAM-01A：带风险下单必须「有权限 + 填原因」。原因由 DTO 与能力 Hook 共同保证
     // （空原因不算确认），权限只能在这里判——Hook 上下文里没有鉴权信息，
     // 而 Guard 按路径判权限、看不到请求体，因此这道检查必须落在控制器。
-    if (body.capabilityExceptions?.length && !hasPermissionCode(req.user, "rental-core:capability:override")) {
+    const OVERRIDE_PERMISSION = "rental-core:capability:override";
+    if (body.capabilityExceptions?.length && !hasPermissionCode(req.user, OVERRIDE_PERMISSION)) {
       throw new ForbiddenException("确认能力风险提示需要「能力风险例外确认」权限");
     }
+    // Review P1-6：把「谁、凭什么权限、什么时候」补齐后交给下单流程固化成不可变例外快照。
+    // 这三项只有控制器知道（鉴权上下文在这里），因此必须在这里补，不能让客户端自报。
+    const confirmations = (body.capabilityExceptions ?? []).map((row) => ({
+      ...row,
+      confirmedBy: req.user.displayName,
+      confirmedWithPermission: OVERRIDE_PERMISSION,
+      confirmedAt: new Date().toISOString()
+    }));
     // 幂等键取标准的 Idempotency-Key 请求头；未传时下单侧退回 quoteId（报价一次性使用）。
     const { order, replayed } = await this.orderConfirmation.createOrder(
       req.user.tenantId,
-      body,
+      { ...body, capabilityExceptions: confirmations },
       req.user.displayName,
       context,
       idempotencyKeyOf(req)

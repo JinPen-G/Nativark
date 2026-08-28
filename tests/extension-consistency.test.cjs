@@ -40,6 +40,8 @@ function makeTestCategory(overrides = {}) {
   clone.code = TEST_CATEGORY_CODE;
   clone.name = "测试专用品类";
   clone.defaultCapabilities = [...camera.defaultCapabilities, TEST_CAPABILITY_CODE];
+  // 新品类必须自己声明必选清单，不能继承摄影品类的专属必选能力。
+  clone.requiredCapabilities = ["serialized_inventory"];
   return { ...clone, ...overrides };
 }
 
@@ -87,6 +89,16 @@ assert.throws(
   /引用了未注册 capability/u,
   "品类引用未注册能力必须报红"
 );
+assert.throws(
+  () => assertRentalCategoryExtensions(candidateCategories({ requiredCapabilities: ["qualification"] }), candidateModules()),
+  /未列入 defaultCapabilities/u,
+  "必选能力未进入品类声明集必须报红"
+);
+assert.throws(
+  () => assertRentalCategoryExtensions(candidateCategories({ requiredCapabilities: ["camera_compatibility"] }), candidateModules()),
+  /不适用于该品类/u,
+  "必选能力不适用于当前品类必须报红"
+);
 // (b) 漏依赖：测试能力依赖一个未注册的 code。
 assert.throws(
   () => assertRentalCategoryExtensions(candidateCategories(), candidateModules({ dependsOn: ["nonexistent_dep"] })),
@@ -120,7 +132,7 @@ assert.throws(
   /不能依赖自身/u,
   "自依赖必须报红"
 );
-console.log("  ✓ 变异：未注册引用、两类漏依赖、枚举无值、上下界倒挂、自依赖全部报红");
+console.log("  ✓ 变异：未注册引用、必选清单漂移、两类漏依赖、枚举无值、上下界倒挂、自依赖全部报红");
 
 // ============ 3. 反向扫描：测试夹具不得进入生产 Seed / 菜单 / 品类目录 ============
 // 生产的品类目录（platform.service 用它 provisioning 与 Seed）只认四个真实品类。

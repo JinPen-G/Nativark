@@ -1,6 +1,7 @@
 import { HistoryOutlined, SettingOutlined } from "@ant-design/icons";
 import type {
   RentalCapabilityConfigField,
+  RentalCapabilityConfig,
   RentalCapabilityLifecycleStatus,
   SaveWorkspaceCapabilityRequest,
   WorkspaceCapabilityView
@@ -52,6 +53,17 @@ function ConfigField({ field }: { field: RentalCapabilityConfigField }) {
       </Form.Item>
     );
   }
+  if (field.type === "compatibility_relations") {
+    return (
+      <Form.Item name={["config", field.key]} label={field.label} rules={rules} extra={field.description}>
+        <Input.TextArea
+          rows={12}
+          spellCheck={false}
+          placeholder={'[{"id":"adapter-rf-ef","relationType":"mount_adapter","source":{"kind":"attribute","field":"mount","value":"EF"},"target":{"kind":"attribute","field":"mount","value":"RF"},"outcome":"allow","sourceName":"厂商规格","reason":"使用原厂转接环"}]'}
+        />
+      </Form.Item>
+    );
+  }
   return (
     <Form.Item name={["config", field.key]} label={field.label} rules={rules} extra={field.description}>
       <Input />
@@ -62,7 +74,7 @@ function ConfigField({ field }: { field: RentalCapabilityConfigField }) {
 interface LifecycleFormValues {
   status: RentalCapabilityLifecycleStatus;
   reason: string;
-  config?: Record<string, string | number | boolean>;
+  config?: RentalCapabilityConfig;
 }
 
 export function CapabilityGovernancePage() {
@@ -119,8 +131,45 @@ export function CapabilityGovernancePage() {
     form.setFieldsValue({
       status: view.instance?.status ?? "enabled",
       reason: "",
-      config: (view.instance?.config ?? {}) as LifecycleFormValues["config"]
+      config: Object.fromEntries(
+        Object.entries(view.instance?.config ?? {}).map(([key, value]) => [
+          key,
+          Array.isArray(value) ? JSON.stringify(value, null, 2) : value
+        ])
+      ) as LifecycleFormValues["config"]
     });
+  }
+
+  function normalizedConfig(view: WorkspaceCapabilityView, config: RentalCapabilityConfig | undefined): RentalCapabilityConfig | undefined {
+    if (!config) return undefined;
+    const relationKeys = new Set(
+      view.definition.configSchema.filter((field) => field.type === "compatibility_relations").map((field) => field.key)
+    );
+    return Object.fromEntries(
+      Object.entries(config).map(([key, value]) => {
+        if (!relationKeys.has(key) || typeof value !== "string") return [key, value];
+        try {
+          return [key, JSON.parse(value)];
+        } catch {
+          throw new Error(`配置项 ${view.definition.configSchema.find((field) => field.key === key)?.label ?? key} 不是有效 JSON`);
+        }
+      })
+    );
+  }
+
+  function submitLifecycle(values: LifecycleFormValues) {
+    if (!editing) return;
+    try {
+      save.mutate({
+        code: editing.definition.code,
+        status: values.status,
+        reason: values.reason,
+        config: normalizedConfig(editing, values.config),
+        expectedRevision: editing.instance?.revision ?? 0
+      });
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "兼容关系格式无效");
+    }
   }
 
   const data = overview.data;
@@ -139,7 +188,7 @@ export function CapabilityGovernancePage() {
           <Alert
             type="success"
             showIcon
-            message="该经营空间已达到生产经营条件"
+            title="该经营空间已达到生产经营条件"
             description="本品类声明的必选能力均已启用。"
             style={{ marginBottom: 16 }}
           />
@@ -147,7 +196,7 @@ export function CapabilityGovernancePage() {
           <Alert
             type="warning"
             showIcon
-            message="该经营空间尚未达到生产经营条件"
+            title="该经营空间尚未达到生产经营条件"
             description={
               missing.length
                 ? `仍缺少必选能力：${missing.join("、")}。缺失期间可以继续验证通用 Rental Core 流程，但不应据此认定品类能力已具备。`
@@ -160,7 +209,7 @@ export function CapabilityGovernancePage() {
           <Alert
             type="info"
             showIcon
-            message="当前账号只有查看权限"
+            title="当前账号只有查看权限"
             description="启用、暂停、停用与升级需要「经营空间能力治理」权限。"
             style={{ marginBottom: 16 }}
           />
@@ -183,13 +232,18 @@ export function CapabilityGovernancePage() {
                 )
               },
               {
-                title: "种类",
-                render: (_, row) => <Tag color={kindMeta[row.definition.kind].color}>{kindMeta[row.definition.kind].label}</Tag>
+                title: "当前品类定位",
+                render: (_, row) =>
+                  row.requiredForCategory ? (
+                    <Tag color="red">品类必选</Tag>
+                  ) : (
+                    <Tag color={kindMeta[row.definition.kind].color}>{kindMeta[row.definition.kind].label}</Tag>
+                  )
               },
               {
                 title: "状态",
                 render: (_, row) => (
-                  <Space direction="vertical" size={2}>
+                  <Space orientation="vertical" size={2}>
                     <Tag color={stateMeta[row.state].color}>{stateMeta[row.state].label}</Tag>
                     {!row.applicable && <span className="muted">不适用于当前品类</span>}
                     {row.applicable && !row.declaredByCategory && <span className="muted">本品类未声明</span>}
@@ -199,7 +253,7 @@ export function CapabilityGovernancePage() {
               {
                 title: "依赖 / 互斥",
                 render: (_, row) => (
-                  <Space direction="vertical" size={2}>
+                  <Space orientation="vertical" size={2}>
                     {row.definition.dependsOn.length ? <span>依赖：{row.definition.dependsOn.join("、")}</span> : <span className="muted">无依赖</span>}
                     {row.definition.conflictsWith.length ? <span>互斥：{row.definition.conflictsWith.join("、")}</span> : null}
                   </Space>
@@ -208,7 +262,7 @@ export function CapabilityGovernancePage() {
               {
                 title: "版本",
                 render: (_, row) => (
-                  <Space direction="vertical" size={2}>
+                  <Space orientation="vertical" size={2}>
                     <span>实现：{row.instance?.implementationVersion ?? row.definition.implementationVersion ?? "未实现"}</span>
                     <span className="muted">配置：{row.instance?.configVersion ?? "-"}</span>
                     {row.upgradeAvailable && <Tag color="processing">可升级到 {row.definition.implementationVersion}</Tag>}
@@ -219,7 +273,7 @@ export function CapabilityGovernancePage() {
                 title: "配置",
                 render: (_, row) =>
                   row.definition.configSchema.length ? (
-                    <Space direction="vertical" size={2}>
+                    <Space orientation="vertical" size={2}>
                       {row.definition.configSchema.map((field) => (
                         <span key={field.key}>
                           {field.label}：{String(row.instance?.config?.[field.key] ?? "-")}
@@ -293,6 +347,12 @@ export function CapabilityGovernancePage() {
               { title: "动作", dataIndex: "action" },
               { title: "状态变化", render: (_, row) => `${row.fromStatus ?? "（无实例）"} → ${row.toStatus}` },
               { title: "实现 / 配置版本", render: (_, row) => `${row.implementationVersion ?? "-"} / ${row.configVersion ?? "-"}` },
+              {
+                title: "配置快照",
+                render: (_, row) => row.configSnapshot
+                  ? <Tooltip title={<pre style={{ margin: 0, whiteSpace: "pre-wrap" }}>{JSON.stringify(row.configSnapshot, null, 2)}</pre>}><Button type="link" size="small">查看</Button></Tooltip>
+                  : "-"
+              },
               { title: "原因", dataIndex: "reason" },
               { title: "操作人", dataIndex: "operator" }
             ]}
@@ -302,7 +362,7 @@ export function CapabilityGovernancePage() {
 
       <Drawer
         title={editing ? `${editing.definition.label} · 状态与配置` : "状态与配置"}
-        width={560}
+        size={560}
         open={Boolean(editing)}
         destroyOnHidden
         onClose={() => setEditing(undefined)}
@@ -316,21 +376,12 @@ export function CapabilityGovernancePage() {
           <Form<LifecycleFormValues>
             form={form}
             layout="vertical"
-            onFinish={(values) =>
-              save.mutate({
-                code: editing.definition.code,
-                status: values.status,
-                reason: values.reason,
-                config: values.config,
-                // 带上读到的 revision：并发修改时服务端返回 409 而不是静默覆盖别人的变更。
-                expectedRevision: editing.instance?.revision ?? 0
-              })
-            }
+            onFinish={submitLifecycle}
           >
             <Alert
               type="info"
               showIcon
-              message="暂停与停用会立即收回菜单入口与 API 放行"
+              title="暂停与停用会立即收回菜单入口与 API 放行"
               description="已启用是唯一可用状态。暂停后该能力的接口会返回 403，历史数据不受影响。"
               style={{ marginBottom: 16 }}
             />

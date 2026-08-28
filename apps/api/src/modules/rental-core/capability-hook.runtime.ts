@@ -2,12 +2,15 @@ import { ConflictException, Injectable, Logger, Optional } from "@nestjs/common"
 import { Prisma } from "@prisma/client";
 import {
   RENTAL_CAPABILITY_MODULES,
+  RENTAL_CATEGORY_DEFINITIONS,
   type RentalCapability,
   type RentalCapabilityDefinition,
   type RentalCapabilityHookModule,
   type RentalCapabilityHookOutcome,
   type RentalCapabilityHookPoint,
   type RentalCapabilityHookResult,
+  type RentalCapabilityDecisionSnapshot,
+  type RentalCapabilityEquipmentLine,
   type RentalCategoryCode,
   type WorkspaceCapabilityInstance
 } from "@store-rental/shared";
@@ -83,7 +86,7 @@ export class CapabilityBlockedException extends ConflictException {
  *      不是注册表也不是品类声明数组。暂停/停用的能力一律不参与判定。
  *   2. **确定性顺序**。按 `(order, code)` 升序，不用注册表下标或 Map 插入序——
  *      那两者会因为有人重排注册表而静默改变判定顺序，同样输入得出不同结论。
- *   3. **必选能力 fail-closed**。`category_required` 能力抛异常时按阻止处理；
+ *   3. **必选能力 fail-closed**。按当前品类 `requiredCapabilities` 判定必选；
  *      可选能力抛异常则记一条降级提示后放行。把基础设施异常一律吞成"能力不存在"
  *      是任务明确禁止的，所以异常必须留痕，不能静默跳过。
  *   4. **能力只能返回意见**。上下文里没有事务、没有仓储、业务对象是冻结快照，
@@ -119,6 +122,14 @@ export class CapabilityHookRuntime {
   }
 
   private readonly definitions: Map<RentalCapability, RentalCapabilityDefinition>;
+
+  private requiredForCategory(categoryCode: RentalCategoryCode, code: RentalCapability): boolean {
+    const category = RENTAL_CATEGORY_DEFINITIONS.find((item) => item.code === categoryCode);
+    // 测试或未来动态品类尚未进入生产注册表时，保留模块级 category_required 作为兜底。
+    return category
+      ? category.requiredCapabilities.includes(code)
+      : this.definitions.get(code)?.kind === "category_required";
+  }
 
   private static key(code: RentalCapability, implementationVersion: string) {
     return `${code}@${implementationVersion}`;
@@ -215,7 +226,7 @@ export class CapabilityHookRuntime {
     const runnable: Array<{ instance: WorkspaceCapabilityInstance; module: RentalCapabilityHookModule }> = [];
     for (const instance of instances) {
       const definition = this.definitions.get(instance.code);
-      const required = definition?.kind === "category_required";
+      const required = this.requiredForCategory(input.categoryCode, instance.code);
 
       // 1) 适用品类。`save()` 启用时已校验过，因此这里为真只可能是数据不一致
       //    （错误的快照、手工改库、或品类定义事后收窄）。运行时必须独立兜底：
@@ -296,7 +307,7 @@ export class CapabilityHookRuntime {
 
     for (const { instance, module } of runnable) {
       const handler = module.hooks[input.point]!;
-      const required = this.definitions.get(instance.code)?.kind === "category_required";
+      const required = this.requiredForCategory(input.categoryCode, instance.code);
       let result: RentalCapabilityHookResult;
       try {
         result = await handler({
@@ -311,7 +322,10 @@ export class CapabilityHookRuntime {
             code: instance.code,
             implementationVersion: instance.implementationVersion,
             configVersion: instance.configVersion,
-            config: Object.freeze({ ...instance.config })
+            // 配置现在可包含结构化关系数组；浅冻结只挡得住顶层赋值，挡不住
+            // `relations.push()`。必须和业务 subject 一样深克隆、深冻结，避免 Hook
+            // 污染能力实例或订单中固化的历史配置快照。
+            config: frozenSnapshot(instance.config)
           }
         });
       } catch (error) {
@@ -402,6 +416,43 @@ export class CapabilityHookRuntime {
       at
     );
     return outcome;
+  }
+
+  /**
+   * Review P1-5：把一次判定结果转成可固化的**判断记录**。
+   *
+   * 报价与订单存的就是这个结构：能力、实现版本、配置版本、规则集版本、判定、
+   * 风险代码、提示、证据、费用依据与当时器材组合，并带一个 id 供下单引用。
+   * 静态 helper 而非实例方法：它是纯映射，不依赖任何运行时状态。
+   */
+  static toDecisionSnapshots(
+    outcome: RentalCapabilityHookOutcome,
+    options: { at?: string; equipment?: RentalCapabilityEquipmentLine[]; idPrefix?: string } = {}
+  ): RentalCapabilityDecisionSnapshot[] {
+    const at = options.at ?? new Date().toISOString();
+    const prefix = options.idPrefix ?? "dec";
+    return outcome.executed.map((executed, index) => {
+      const blockReasons = outcome.blockReasons.filter((row) => row.capability === executed.capability);
+      const notices = outcome.notices.filter((row) => row.capability === executed.capability);
+      const feeBases = outcome.feeBases.filter((row) => row.capability === executed.capability);
+      return {
+        id: `${prefix}_${executed.capability}_${outcome.point}_${index + 1}`,
+        point: outcome.point,
+        capability: executed.capability,
+        implementationVersion: executed.implementationVersion,
+        configVersion: executed.configVersion,
+        // 规则集版本与实现版本同源；单列一份是为了让能力可以在证据里给出更细的规则集标识。
+        rulesetVersion: executed.implementationVersion,
+        decision: executed.decision,
+        // 风险代码取自两类产物的 code：程序判定与例外确认都按它引用。
+        riskCodes: [...new Set([...blockReasons, ...notices].map((row) => row.code))],
+        blockReasons: blockReasons.map(({ capability: _capability, ...rest }) => rest),
+        notices: notices.map(({ capability: _capability, ...rest }) => rest),
+        feeBases: feeBases.map(({ capability: _capability, ...rest }) => rest),
+        equipment: options.equipment,
+        at
+      };
+    });
   }
 
   /**

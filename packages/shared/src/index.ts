@@ -207,6 +207,11 @@ export interface SessionContextResponse {
    */
   missingRequiredCapabilities?: RentalCapability[];
   capabilityProductionReady?: boolean;
+  /**
+   * 当前空间的运行模式。前端据此明确标注「非生产」，而不是只靠 productionReady 猜。
+   * 服务端的经营门禁也以它为准（`production` 且缺必选能力时拒绝业务写入）。
+   */
+  workspaceRunMode?: BusinessWorkspaceRunMode;
 }
 
 export interface RefreshSessionRequest {
@@ -3852,7 +3857,15 @@ export const RENTAL_CAPABILITY_CODES = [
   "iot",
   // CAM-01A：首个真实产品能力——摄影器材兼容性。仅摄影品类适用（applicableCategories 收口），
   // 只做兼容性判定，不代替 CAM-01 的附件清点、使用量、检查与养护。
-  "camera_compatibility"
+  "camera_compatibility",
+  // 各品类首期经营闭环的独立 capability。先登记、后实现：没有 implementationVersion
+  // 时会明确显示「已声明但未实现」，并阻止该品类空间进入 production。
+  "camera_kit_handover",
+  "camping_kit_integrity",
+  "camping_cleaning_turnaround",
+  "inspection_care",
+  "vehicle_relocation",
+  "construction_transport"
 ] as const;
 
 export type RentalCapability = (typeof RENTAL_CAPABILITY_CODES)[number];
@@ -3860,8 +3873,8 @@ export type RentalCapability = (typeof RENTAL_CAPABILITY_CODES)[number];
 /**
  * capability 种类（CORE-EXT-02A）。
  *
- * - `category_required` 品类必选：该品类要达到「可以生产经营」必须启用；缺失时空间只能
- *   继续验证通用 Rental Core，不得当成完整品类能力。
+ * - `category_required` 模块自身只适合作为品类必选；最终是否必选以各品类定义中的
+ *   `requiredCapabilities` 为准。同一个 `shared` 能力可以对某品类必选、对另一品类可选。
  * - `category_optional` 可选增强：启用与否都不影响该品类的生产就绪判定。
  * - `shared` 跨品类共享：多个品类都可引用的通用能力（物流、资质、IoT 等）。
  */
@@ -3872,6 +3885,28 @@ export const RENTAL_CAPABILITY_LIFECYCLE_STATUSES = ["enabled", "paused", "disab
 
 export type RentalCapabilityLifecycleStatus = (typeof RENTAL_CAPABILITY_LIFECYCLE_STATUSES)[number];
 
+/** 可由运营维护、并随 capability 配置版本固化的实体引用。 */
+export interface RentalCompatibilityEntityRef {
+  kind: "item_group" | "asset" | "attribute";
+  id?: string;
+  field?: string;
+  value?: string;
+}
+
+/** 商品、资产或属性值之间的结构化兼容关系事实。 */
+export interface RentalCompatibilityRelation {
+  id: string;
+  relationType: "equipment_target" | "mount_adapter" | "battery_support" | "storage_support" | "port_support" | "model_fit";
+  source: RentalCompatibilityEntityRef;
+  target: RentalCompatibilityEntityRef;
+  outcome: "allow" | "warn" | "block";
+  sourceName: string;
+  reason: string;
+}
+
+export type RentalCapabilityConfigValue = string | number | boolean | RentalCompatibilityRelation[];
+export type RentalCapabilityConfig = Record<string, RentalCapabilityConfigValue>;
+
 /**
  * capability 配置字段描述。用描述符而不是 JSON Schema 字符串：服务端要能逐字段校验并给出
  * 可读原因，管理端要能据同一份描述渲染表单——两边共用一份定义才不会各写一套校验。
@@ -3879,13 +3914,20 @@ export type RentalCapabilityLifecycleStatus = (typeof RENTAL_CAPABILITY_LIFECYCL
 export interface RentalCapabilityConfigField {
   key: string;
   label: string;
-  type: "string" | "number" | "boolean" | "enum";
+  type: "string" | "number" | "boolean" | "enum" | "compatibility_relations";
   required: boolean;
   /** `type: "enum"` 时的可选值。 */
   options?: string[];
   /** 数值下/上界，仅 `type: "number"` 使用。 */
   min?: number;
   max?: number;
+  /**
+   * 创建经营空间时自动启用该能力所用的默认值。
+   *
+   * 只有**全部必填配置项都有默认值**的必选能力才会被自动初始化；否则空间保持
+   * 非生产就绪，等人补配置后再启用。给必填项编造一个值等于伪装启用。
+   */
+  defaultValue?: RentalCapabilityConfigValue;
   description?: string;
 }
 
@@ -3914,7 +3956,20 @@ export interface RentalCapabilityModuleDefinition {
 export type RentalCapabilityDefinition = RentalCapabilityModuleDefinition;
 
 /** capability 生命周期动作。`configure` 只改配置、不改状态。 */
-export type RentalCapabilityAuditAction = "enable" | "pause" | "disable" | "upgrade" | "configure";
+export type RentalCapabilityAuditAction =
+  | "enable"
+  | "pause"
+  | "disable"
+  | "upgrade"
+  | "configure"
+  /**
+   * 系统在创建经营空间时自动启用品类必选能力。
+   *
+   * 与 `enable` 分开是刻意的：前者是系统按品类定义做的初始化，后者是有人做的经营决策。
+   * 混成一个动作会让审计里分不清「谁开的」，而「空间创建时自动开的」和
+   * 「某个管理员手工开的」在追责与排查上完全不是一回事。
+   */
+  | "system_initialize";
 
 /**
  * 经营空间的 capability 实例（CORE-EXT-02A）。
@@ -3931,7 +3986,7 @@ export interface WorkspaceCapabilityInstance {
   implementationVersion: string;
   /** 配置版本号，每次改配置递增。报价/订单快照引用它解释「当时按哪一版配置判定」。 */
   configVersion: string;
-  config: Record<string, string | number | boolean>;
+  config: RentalCapabilityConfig;
   /** 乐观并发版本号。写入以读到的值为条件，冲突返回 409。 */
   revision: number;
   enabledAt?: string;
@@ -3950,6 +4005,8 @@ export interface WorkspaceCapabilityAuditEvent {
   toStatus: RentalCapabilityLifecycleStatus;
   implementationVersion?: string;
   configVersion?: string;
+  /** 本次变更后的完整配置快照；不能只留版本号而丢失历史关系内容。 */
+  configSnapshot?: RentalCapabilityConfig;
   reason: string;
   operator?: string;
   at: string;
@@ -3963,6 +4020,8 @@ export interface WorkspaceCapabilityAuditEvent {
  */
 export interface WorkspaceCapabilityView {
   definition: RentalCapabilityDefinition;
+  /** 是否属于当前空间品类的必选能力；该口径优先于模块的全局 kind。 */
+  requiredForCategory: boolean;
   /** 该能力是否被当前空间的品类声明（品类 defaultCapabilities 或 shared 能力）。 */
   declaredByCategory: boolean;
   /** 是否有可执行模块（注册表带 implementationVersion）。 */
@@ -4001,7 +4060,7 @@ export interface WorkspaceCapabilityOverview {
 export interface SaveWorkspaceCapabilityRequest {
   code: RentalCapability;
   status: RentalCapabilityLifecycleStatus;
-  config?: Record<string, string | number | boolean>;
+  config?: RentalCapabilityConfig;
   reason: string;
   /** 读到的 revision。提供时以它为条件写入，冲突返回 409。 */
   expectedRevision?: number;
@@ -4108,7 +4167,7 @@ export interface RentalCapabilityHookContext<TSubject> {
     readonly code: RentalCapability;
     readonly implementationVersion: string;
     readonly configVersion: string;
-    readonly config: Readonly<Record<string, string | number | boolean>>;
+    readonly config: Readonly<RentalCapabilityConfig>;
   };
 }
 
@@ -4151,7 +4210,7 @@ export type RentalCapabilityHookHandler = (
 /**
  * 一个节点上全部能力的合并结论，由 Core 消费。
  *
- * `blocked` 只由**必选**能力（`category_required`）或显式 `block` 造成；
+ * `blocked` 只由当前品类 `requiredCapabilities` 中的能力故障或显式 `block` 造成；
  * 可选能力的 `block` 同样阻止，但它是否必选决定了「能力自身抛异常」时的处理：
  * 必选能力异常 = fail-closed 阻止，可选能力异常 = 记录降级提示后放行。
  */
@@ -4240,15 +4299,59 @@ export const RENTAL_CAPABILITY_MODULES: RentalCapabilityModuleDefinition[] = [
     implementationVersion: "legacy-1.0"
   },
   {
+    code: "camera_kit_handover", label: "摄影套装交接与附件清点", kind: "category_required",
+    extensionPoints: ["order_validation", "fulfillment"],
+    applicableCategories: [RentalCategoryCode.Camera], dependsOn: ["bundle_inventory"], conflictsWith: [],
+    configSchema: []
+  },
+  {
+    code: "camping_kit_integrity", label: "露营套装完整性", kind: "category_required",
+    extensionPoints: ["order_validation", "fulfillment"],
+    applicableCategories: [RentalCategoryCode.Camping], dependsOn: ["bundle_inventory"], conflictsWith: [],
+    configSchema: []
+  },
+  {
+    code: "camping_cleaning_turnaround", label: "露营清洁周转", kind: "category_required",
+    extensionPoints: ["fulfillment"],
+    applicableCategories: [RentalCategoryCode.Camping], dependsOn: ["return"], conflictsWith: [],
+    configSchema: []
+  },
+  {
+    code: "inspection_care", label: "检查与养护", kind: "shared",
+    extensionPoints: ["fulfillment"],
+    applicableCategories: [RentalCategoryCode.Camera, RentalCategoryCode.Vehicle, RentalCategoryCode.Construction],
+    dependsOn: ["return"], conflictsWith: [], configSchema: []
+  },
+  {
+    code: "vehicle_relocation", label: "车辆异地还车", kind: "category_required",
+    extensionPoints: ["order_validation", "fulfillment"],
+    applicableCategories: [RentalCategoryCode.Vehicle], dependsOn: ["dispatch"], conflictsWith: [],
+    configSchema: []
+  },
+  {
+    code: "construction_transport", label: "工程设备运输交付", kind: "category_required",
+    extensionPoints: ["order_validation", "fulfillment"],
+    applicableCategories: [RentalCategoryCode.Construction], dependsOn: ["dispatch"], conflictsWith: [],
+    configSchema: []
+  },
+  {
     // CAM-01A：首个真实运行模块。仅摄影品类适用（applicableCategories 收口，
     // 因此露营/车辆/工程既不会声明也无法启用它）。规则由 camera-compatibility 模块以
     // implementationVersion 版本化维护；配置项是可调阈值，不是规则本体。
-    code: "camera_compatibility", label: "摄影器材兼容性", kind: "category_optional",
+    code: "camera_compatibility", label: "摄影器材兼容性", kind: "category_required",
     extensionPoints: ["order_validation"],
     applicableCategories: [RentalCategoryCode.Camera], dependsOn: [], conflictsWith: [],
     configSchema: [
       // 供电余量下限：机身+配件峰值功率相对供电额定的余量低于此值即判风险。
-      { key: "powerMarginPercent", label: "供电余量下限(%)", type: "number", required: false, min: 0, max: 90 }
+      { key: "powerMarginPercent", label: "供电余量下限(%)", type: "number", required: false, min: 0, max: 90 },
+      {
+        key: "relations",
+        label: "商品/资产兼容关系",
+        type: "compatibility_relations",
+        required: false,
+        defaultValue: [],
+        description: "结构化关系数据；每条包含 id、关系类型、来源、目标、结论、资料来源和原因，随配置版本与审计快照固化。"
+      }
     ],
     implementationVersion: "cam-1.0"
   }
@@ -4356,6 +4459,8 @@ export interface RentalCategoryDefinition {
   description: string;
   supportedInventoryModes: RentalInventoryMode[];
   defaultCapabilities: RentalCapability[];
+  /** 该品类进入 production 必须启用的能力；共享能力也可以在某个品类中成为必选。 */
+  requiredCapabilities: RentalCapability[];
   terminology: RentalCategoryTerminology;
   attributeSchema: Record<string, unknown>;
   businessModel: RentalCategoryBusinessModel;
@@ -4372,6 +4477,24 @@ export type BusinessWorkspaceStatus = "active" | "frozen" | "disabled";
  * 品类在创建时确定，不通过普通设置切换——变更品类必须新建空间或显式迁移，
  * 因此更新接口不接受 categoryCode。
  */
+/**
+ * CORE-EXT-02C：经营空间的运行模式。决定「缺必选能力」是提示还是**服务端拒绝**。
+ *
+ * 为什么需要它：只在页面上显示「尚未达到生产经营条件」是不够的——按钮隐藏挡不住
+ * 直接调 API。但反过来，一律拒绝又会让演示与开发空间无法继续验证通用 Rental Core
+ * （那是本阶段明确要保留的能力）。因此把这件事变成空间的显式属性：
+ *   - `production`：正式经营。缺任一必选能力时，报价与订单推进类写入一律 fail-closed；
+ *   - `demo`：演示。可以跑通用流程，但响应与页面都必须标明非生产；
+ *   - `development`：开发自测，同 demo。
+ *
+ * 存量空间由迁移置为 `development`：它们此前从未被门禁约束过，直接标成 production
+ * 会让所有缺能力的既有空间立刻停业——那是无法解释的回归。新建空间默认 `production`，
+ * 因为创建时会同事务初始化品类必选能力，本来就应当达到生产条件。
+ */
+export type BusinessWorkspaceRunMode = "production" | "demo" | "development";
+
+export const BUSINESS_WORKSPACE_RUN_MODES: BusinessWorkspaceRunMode[] = ["production", "demo", "development"];
+
 export interface BusinessWorkspace {
   id: string;
   tenantId: string;
@@ -4381,6 +4504,7 @@ export interface BusinessWorkspace {
   status: BusinessWorkspaceStatus;
   /** 升级兼容层：既有业务全部归属租户的默认空间。每租户至多一个。 */
   isDefault: boolean;
+  runMode: BusinessWorkspaceRunMode;
   createdAt: string;
   updatedAt: string;
 }
@@ -4407,12 +4531,15 @@ export interface CreateBusinessWorkspaceRequest {
   code: string;
   name: string;
   categoryCode: RentalCategoryCode;
+  /** 缺省为 `development`；只有显式转正且全部品类必选能力齐备时才进入正式经营。 */
+  runMode?: BusinessWorkspaceRunMode;
 }
 
 /** 不含 categoryCode：品类创建后不可通过普通设置变更（需求 3）。 */
 export interface UpdateBusinessWorkspaceRequest {
   name?: string;
   status?: BusinessWorkspaceStatus;
+  runMode?: BusinessWorkspaceRunMode;
 }
 
 export interface SaveWorkspaceMemberRequest {
@@ -5536,6 +5663,11 @@ export interface RentalQuoteSnapshotV1 {
    * 快照足以解释「这张单当时为什么这么放行/阻止/收费」，即使能力已被暂停或升级。
    */
   capabilitySnapshot?: RentalWorkspaceCapabilitySnapshotEntry[];
+  /**
+   * Review P1-5：报价阶段的 capability 判断记录。API 必须把它连同 warning 一起返回，
+   * 否则「需转接环」这类风险虽被发现，用户却不知道要确认什么。
+   */
+  capabilityDecisions?: RentalCapabilityDecisionSnapshot[];
   expiresAt: string;
   createdAt: string;
   consumedAt?: string;
@@ -5553,7 +5685,58 @@ export interface RentalWorkspaceCapabilitySnapshotEntry {
   code: RentalCapability;
   implementationVersion: string;
   configVersion: string;
-  config: Record<string, string | number | boolean>;
+  config: RentalCapabilityConfig;
+}
+
+/**
+ * Review P1-5：一次 capability 判断的**不可变记录**，写进报价与订单。
+ *
+ * `capabilitySnapshot` 只回答「当时启用了哪些能力、什么版本」，回答不了
+ * 「当时判成了什么、依据是什么」。缺了后者，报价发现的风险既返回不给用户，
+ * 也无法在下单时被引用——运营只看到一个 201，不知道要确认什么。
+ *
+ * `id` 是下单时引用的凭据：下单侧只能引用报价里已有的判断，不得凭空重构一份。
+ */
+export interface RentalCapabilityDecisionSnapshot {
+  id: string;
+  point: RentalCapabilityHookPoint;
+  capability: RentalCapability;
+  implementationVersion: string;
+  configVersion: string;
+  /** 能力自报的规则集版本（与实现版本同源，但由能力在证据里给出，便于跨版本比对）。 */
+  rulesetVersion?: string;
+  decision: RentalCapabilityHookDecision;
+  /** 风险代码集合。取自 blockReasons 与 notices 的 code，供程序判定与例外确认引用。 */
+  riskCodes: string[];
+  blockReasons: RentalCapabilityHookNotice[];
+  notices: RentalCapabilityHookNotice[];
+  feeBases: RentalCapabilityFeeBasis[];
+  /** 判定当时的器材组合（商品级），供事后解释「基于什么组合得出这个结论」。 */
+  equipment?: RentalCapabilityEquipmentLine[];
+  at: string;
+}
+
+/**
+ * Review P1-6：带风险继续的**完整例外快照**，写进订单。
+ *
+ * 早前只把确认压缩成一个风险代码集合，于是原因、确认人、权限与时间全部丢失，
+ * 配货及后续履约也无从还原「这单的风险已经有人裁决过」。审计里只剩
+ * `confirmed: true` 是不够的——那解释不了谁在什么依据下批准了它。
+ */
+export interface RentalCapabilityExceptionSnapshot {
+  capability: RentalCapability;
+  riskCode: string;
+  reason: string;
+  confirmedBy: string;
+  /** 确认时依据的权限码。留痕是为了事后能核对「他当时确实有这个权限」。 */
+  confirmedWithPermission: string;
+  confirmedAt: string;
+  /** 被确认的报价判断记录 id。空表示该风险不来自报价阶段（例如配货时才出现）。 */
+  decisionId?: string;
+  implementationVersion: string;
+  configVersion: string;
+  rulesetVersion?: string;
+  equipment?: RentalCapabilityEquipmentLine[];
 }
 
 const commonSettingModules: RentalSettingModule[] = [
@@ -5573,7 +5756,8 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     name: "摄影设备",
     description: "机身、镜头、灯光和拍摄套装租赁",
     supportedInventoryModes: [RentalInventoryMode.Serialized, RentalInventoryMode.Quantity, RentalInventoryMode.Bundle],
-    defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery", "usage_reading", "camera_compatibility"],
+    defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery", "usage_reading", "camera_compatibility", "camera_kit_handover", "inspection_care"],
+    requiredCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "camera_compatibility", "camera_kit_handover", "usage_reading", "inspection_care"],
     terminology: { itemLabel: "器材", itemGroupLabel: "器材型号", assetLabel: "器材资产", fulfillmentLabel: "器材门店", pickupLabel: "取机", returnLabel: "还机", identifierLabel: "资产编号", usageMetricLabel: "快门次数" },
     attributeSchema: { brand: "string", model: "string", mount: "string", sensor: "string", serialNo: "string", shutterCount: "number" },
     businessModel: {
@@ -5593,12 +5777,23 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
         // CAM-01A：兼容性判定所需的规范化字段。兼容规则（卡口、画幅覆盖、供电）只能读
         // **已声明**的字段——动态字段校验会拒绝未定义的属性，因此这些字段必须登记在品类里，
         // 运营才能填、能力才能判。它们只描述器材本身，不含任何判定逻辑。
-        { code: "role", label: "器材角色", scope: "item_group", type: "select", options: ["body", "lens", "power", "storage", "accessory"] },
+        { code: "role", label: "器材角色", scope: "item_group", type: "select", options: ["body", "lens", "power", "storage", "accessory", "battery", "charger", "monitor"] },
         { code: "sensorFormat", label: "画幅（规范化）", scope: "item_group", type: "select", options: ["m43", "aps_c", "full_frame", "medium_format"] },
         { code: "coversFormat", label: "镜头像场覆盖", scope: "item_group", type: "select", options: ["m43", "aps_c", "full_frame", "medium_format"] },
-        { code: "adapterMounts", label: "可转接卡口（逗号分隔）", scope: "item_group", type: "string" },
         { code: "powerDrawW", label: "峰值功耗", scope: "item_group", type: "number", unit: "W" },
-        { code: "powerSupplyW", label: "供电额定", scope: "item_group", type: "number", unit: "W" }
+        { code: "powerSupplyW", label: "供电额定", scope: "item_group", type: "number", unit: "W" },
+        // 多对多兼容关系进入 camera_compatibility 的结构化、版本化配置；
+        // 商品字段只保留器材自身的单值物理属性，不再用逗号字符串伪装关系表。
+        { code: "batteryModel", label: "电池型号", scope: "item_group", type: "string" },
+        { code: "storageType", label: "存储卡介质", scope: "item_group", type: "select", options: ["sd", "sdxc", "cfexpress_a", "cfexpress_b", "cfast", "xqd", "microsd"] },
+        { code: "accessoryKind", label: "配件类型", scope: "item_group", type: "select", options: ["stabilizer", "flash", "cage", "other"] },
+        { code: "maxPayloadG", label: "稳定器最大载重", scope: "item_group", type: "number", unit: "g" },
+        { code: "weightG", label: "自重", scope: "item_group", type: "number", unit: "g" },
+        { code: "shoeType", label: "热靴类型", scope: "item_group", type: "string" },
+        // 资产级覆盖（Review P1-8）：同一商品组下个别资产的实际差异（改装、配件缺失、
+        // 型号小改款）必须能在资产上登记，配货阶段按**实际挑中的资产**判定时才看得见。
+        { code: "assetMountOverride", label: "资产实际卡口（覆盖商品组）", scope: "asset", type: "string" },
+        { code: "assetPowerDrawW", label: "资产实际峰值功耗（覆盖商品组）", scope: "asset", type: "number", unit: "W" }
       ],
       supportsHolidayPricing: true,
       supportsUsagePricing: true,
@@ -5627,7 +5822,8 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     name: "露营设备",
     description: "帐篷、桌椅、炊具和露营套装租赁",
     supportedInventoryModes: [RentalInventoryMode.Serialized, RentalInventoryMode.Quantity, RentalInventoryMode.Bundle],
-    defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery"],
+    defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery", "camping_kit_integrity", "camping_cleaning_turnaround"],
+    requiredCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "camping_kit_integrity", "camping_cleaning_turnaround"],
     terminology: { itemLabel: "装备", itemGroupLabel: "装备品类", assetLabel: "装备资产", fulfillmentLabel: "装备仓", pickupLabel: "领用", returnLabel: "归还", identifierLabel: "装备编号" },
     attributeSchema: { brand: "string", model: "string", people: "number", season: "string", material: "string", batchNo: "string" },
     businessModel: {
@@ -5672,7 +5868,8 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     name: "车辆载具",
     description: "汽车、摩托车和其他载具租赁",
     supportedInventoryModes: [RentalInventoryMode.Serialized, RentalInventoryMode.Bundle],
-    defaultCapabilities: ["serialized_inventory", "bundle_inventory", "pickup", "return", "dispatch", "usage_reading", "qualification", "iot"],
+    defaultCapabilities: ["serialized_inventory", "bundle_inventory", "pickup", "return", "dispatch", "usage_reading", "qualification", "iot", "inspection_care", "vehicle_relocation"],
+    requiredCapabilities: ["serialized_inventory", "bundle_inventory", "pickup", "return", "dispatch", "usage_reading", "qualification", "inspection_care", "vehicle_relocation"],
     terminology: { itemLabel: "车辆", itemGroupLabel: "车型组", assetLabel: "车辆", fulfillmentLabel: "门店", pickupLabel: "取车", returnLabel: "还车", identifierLabel: "车辆编号", usageMetricLabel: "里程" },
     attributeSchema: { manufacturer: "string", brand: "string", model: "string", trim: "string", energyType: "string", licensePlate: "string", vin: "string", mileage: "number" },
     businessModel: {
@@ -5719,7 +5916,8 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     name: "工程设备",
     description: "工程机械、工具和配套设备租赁",
     supportedInventoryModes: [RentalInventoryMode.Serialized, RentalInventoryMode.Quantity, RentalInventoryMode.Bundle],
-    defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery", "dispatch", "usage_reading", "qualification", "iot"],
+    defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery", "dispatch", "usage_reading", "qualification", "iot", "inspection_care", "construction_transport"],
+    requiredCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "dispatch", "usage_reading", "qualification", "inspection_care", "construction_transport"],
     terminology: { itemLabel: "设备", itemGroupLabel: "设备型号", assetLabel: "设备资产", fulfillmentLabel: "设备仓", pickupLabel: "出库", returnLabel: "入库", identifierLabel: "设备编号", usageMetricLabel: "工时" },
     attributeSchema: { manufacturer: "string", brand: "string", model: "string", power: "string", ratedLoad: "number", factoryNo: "string", hourMeter: "number" },
     businessModel: {
@@ -5991,6 +6189,20 @@ export interface CreateRentalOrderRequest {
     capability: RentalCapability;
     code: string;
     reason: string;
+    /**
+     * Review P1-6：被确认的报价判断记录 id（`RentalQuoteSnapshotV1.capabilityDecisions[].id`）。
+     *
+     * 要求提交它是为了让确认**指向报价里真实存在的那条判断**，而不是凭空声明一个风险代码。
+     * 缺省时服务端按「能力 + 风险代码」在报价判断里回查；查不到则该确认不作数。
+     */
+    decisionId?: string;
+    /**
+     * 以下三项由**服务端控制器**补齐，客户端提交无效（会被 whitelist 剥离）。
+     * 它们只有鉴权上下文知道，让客户端自报等于允许伪造确认人与权限。
+     */
+    confirmedBy?: string;
+    confirmedWithPermission?: string;
+    confirmedAt?: string;
   }>;
   operator?: string;
 }
@@ -6008,6 +6220,15 @@ export interface RentalCapabilityEquipmentLine {
   itemGroupName: string;
   inventoryMode: RentalInventoryMode;
   quantity: number;
+  /**
+   * Review P1-8：配货阶段的**实际资产**标识。
+   *
+   * 报价阶段按商品组判定，此时没有这两个字段；配货阶段按真正挑中的资产判定，
+   * 必须带上它们——否则事后无法解释「当时判的是哪一台机身、哪一支镜头」，
+   * 同商品组下资产属性存在差异时也无从追溯。
+   */
+  assetId?: string;
+  assetNo?: string;
   attributes: Record<string, unknown>;
 }
 
@@ -6100,6 +6321,19 @@ export interface RentalOrder {
    * 因此即便能力随后被升级或暂停，这张订单仍按下单当时的实现版本与配置履约。
    */
   capabilitySnapshot?: RentalWorkspaceCapabilitySnapshotEntry[];
+  /** Review P1-5：下单时从报价拷贝的判断记录（不可变）。 */
+  capabilityDecisions?: RentalCapabilityDecisionSnapshot[];
+  /** Review P1-6：带风险继续的完整例外快照（不可变），配货与后续履约据此还原裁决。 */
+  capabilityExceptions?: RentalCapabilityExceptionSnapshot[];
+  /**
+   * Review P1-10：能力快照的解释口径。
+   *
+   * `snapshot`：订单带自己的能力快照，在途环节按它判定。
+   * `legacy_empty`：迁移前的存量订单没有快照。**明确解释为空快照**——
+   * 不执行订单创建后新增或启用的 capability，也绝不回退到「当前已启用的能力」，
+   * 否则新启用一个能力就会反向影响所有旧订单的履约判定。
+   */
+  capabilityPolicy?: "snapshot" | "legacy_empty";
   chargeLines: RentalQuoteChargeLine[];
   rentalAmount: number;
   discountAmount: number;

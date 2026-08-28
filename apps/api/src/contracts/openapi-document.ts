@@ -2296,6 +2296,13 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     permissions: ["rental-core:capability:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
   },
   {
+    // Review P1-3：存量空间的显式对账入口。迁移与租户初始化都不静默补启用，
+    // 因此必须有一条由人触发、留 system_initialize 审计的转正路径。
+    method: "post", path: "/api/rental/v1/capabilities/initialize-required", tag: "RentalCore", operationId: "initializeRequiredWorkspaceCapabilities",
+    summary: "Initialize the category-required capabilities of the current workspace (idempotent reconciliation)",
+    permissions: ["rental-core:capability:manage"], responseSchema: "GenericObject"
+  },
+  {
     method: "get", path: "/api/rental/v1/capability-audits", tag: "RentalCore", operationId: "listWorkspaceCapabilityAudits",
     summary: "List workspace capability lifecycle audit events",
     permissions: ["rental-core:capability:view", "rental-core:capability:manage"], responseSchema: "GenericObject"

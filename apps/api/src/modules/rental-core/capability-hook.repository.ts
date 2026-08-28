@@ -88,6 +88,49 @@ export class CapabilityHookRepository {
     return rows.length;
   }
 
+  /**
+   * Review P1-5：写一条**被阻止**判定的拒绝审计。
+   *
+   * 与 `recordOutcome` 不同，这里刻意**不要求事务**：被阻止的请求没有任何业务变更需要
+   * 回滚（报价根本没生成、订单根本没建），因此这条审计不属于任何业务事务。
+   * 若跟着业务事务一起回滚，拒绝就完全不留痕——而「为什么这单报不出价」正是
+   * 最需要事后追溯的问题之一。
+   *
+   * 只追加，不更新、不删除。
+   */
+  async recordRejection(
+    tenantId: string,
+    workspaceId: string,
+    subject: { type: CapabilityHookSubjectType; id: string },
+    outcome: RentalCapabilityHookOutcome,
+    operator?: string,
+    at = new Date().toISOString()
+  ): Promise<number> {
+    const rows = outcome.executed
+      .filter((executed) => executed.decision === "block")
+      .map((executed) => ({
+        tenantId,
+        workspaceId,
+        point: outcome.point,
+        capability: executed.capability,
+        implementationVersion: executed.implementationVersion,
+        configVersion: executed.configVersion,
+        decision: "block",
+        failed: Boolean(executed.failed),
+        subjectType: subject.type,
+        subjectId: subject.id,
+        blockReasons: outcome.blockReasons.filter((row) => row.capability === executed.capability) as unknown as Prisma.InputJsonValue,
+        notices: outcome.notices.filter((row) => row.capability === executed.capability).length
+          ? (outcome.notices.filter((row) => row.capability === executed.capability) as unknown as Prisma.InputJsonValue)
+          : undefined,
+        operator: operator ?? null,
+        at: new Date(at)
+      }));
+    if (!rows.length) return 0;
+    await this.prisma.capabilityHookAuditEntry.createMany({ data: rows });
+    return rows.length;
+  }
+
   /** 按判定对象读回审计，供追溯「这张订单当时为什么被放行并带了提示」。 */
   async listBySubject(
     tenantId: string,

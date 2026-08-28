@@ -100,6 +100,21 @@ export function assertRentalCategoryExtensions(
       // 既有 capability 定义，而 CORE-EXT-03 要求新品类接入只需新增定义、模块、迁移和页面，
       // 不得改动既有品类与共享能力——那条要求会被这道门禁直接否掉。
     }
+    const declared = new Set(category.defaultCapabilities);
+    for (const capability of category.requiredCapabilities) {
+      if (!declared.has(capability)) {
+        throw new Error(`品类 ${category.code} 的必选 capability ${capability} 未列入 defaultCapabilities`);
+      }
+      const definition = byCode.get(capability);
+      if (!definition) {
+        throw new Error(`品类 ${category.code} 的必选 capability ${capability} 未注册`);
+      }
+      const applicable =
+        definition.applicableCategories === "all" || definition.applicableCategories.includes(category.code);
+      if (!applicable) {
+        throw new Error(`品类 ${category.code} 的必选 capability ${capability} 不适用于该品类`);
+      }
+    }
     if (!category.businessModel.locationTypes.includes(category.businessModel.defaults.initialSetup.locationType)) {
       throw new Error(`品类 ${category.code} 的初始地点类型未列入支持范围`);
     }

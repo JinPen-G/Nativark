@@ -359,6 +359,11 @@ model BusinessWorkspace {
   /// MySQL 没有部分索引，因此默认空间写 'default'、非默认写自身 id：
   /// 前者在租户内必然冲突，后者天然唯一。
   defaultMarker String
+  /// CORE-EXT-02C：运行模式 production / demo / development。
+  /// 决定「缺品类必选能力」是提示还是服务端拒绝业务写入。
+  /// 默认 development：存量空间此前从未被门禁约束，直接标 production 会让它们立刻停业。
+  /// 新建空间由应用层显式传 production（创建时会同事务初始化必选能力）。
+  runMode      String              @default("development")
   members      WorkspaceMember[]
   authSessions AuthSession[]
   operationLogs OperationLog[]
@@ -2261,6 +2266,8 @@ model WorkspaceCapabilityAuditEntry {
   toStatus    String
   implementationVersion String?
   configVersion String?
+  /// 本次变更后的完整配置快照。关系数据不能只靠 configVersion 追溯。
+  configSnapshot Json?
   reason      String   @db.Text
   operator    String?
   at          DateTime
@@ -2540,6 +2547,13 @@ model RentalOrder {
   /// CORE-EXT-02D：RentalWorkspaceCapabilitySnapshotEntry[]。下单时固化的已启用能力版本快照，
   /// 在途环节 Hook 判定都用它，升级或暂停能力都不改写这张订单。可空：存量订单没有这份快照。
   capabilitySnapshot    Json?
+  /// Review P1-5：RentalCapabilityDecisionSnapshot[]。下单时从报价拷贝的判断记录，
+  /// 下单侧只能引用、不得凭空重构。
+  capabilityDecisions   Json?
+  /// Review P1-6：RentalCapabilityExceptionSnapshot[]。带风险继续的完整例外快照
+  /// （原因、确认人、权限、时间、被确认的判断 id、版本与当时器材组合）。
+  /// 审计里不能只剩 confirmed: true，否则配货与后续履约无从还原风险已被裁决。
+  capabilityExceptions  Json?
   chargeLines           Json
   rentalAmount          Decimal                   @db.Decimal(12, 2)
   discountAmount        Decimal                   @db.Decimal(12, 2)
@@ -3111,6 +3125,9 @@ model RentalQuote {
   /// CORE-EXT-02D：RentalWorkspaceCapabilitySnapshotEntry[]。报价生成时已启用能力的版本快照，
   /// 下单时拷进订单。可空：存量报价没有这份快照，留 NULL 是如实记录"当时没有"。
   capabilitySnapshot     Json?
+  /// Review P1-5：RentalCapabilityDecisionSnapshot[]。报价阶段的兼容性判断记录，
+  /// 含风险代码、提示、证据与费用依据；下单时被引用。
+  capabilityDecisions    Json?
   customerCouponId       String?
   expiresAt              DateTime
   consumedAt             DateTime?

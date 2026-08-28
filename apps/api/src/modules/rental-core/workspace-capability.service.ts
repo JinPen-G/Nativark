@@ -1,9 +1,14 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import {
   RENTAL_CAPABILITY_MODULES,
+  RENTAL_CATEGORY_DEFINITIONS,
   type RentalCapability,
+  type RentalCapabilityConfig,
+  type RentalCategoryCode,
   type RentalCapabilityConfigField,
   type RentalCapabilityDefinition,
+  type RentalCompatibilityEntityRef,
+  type RentalCompatibilityRelation,
   type SaveWorkspaceCapabilityRequest,
   type UpgradeWorkspaceCapabilityRequest,
   type WorkspaceCapabilityAuditEvent,
@@ -13,6 +18,9 @@ import {
   type RentalWorkspaceCapabilitySnapshotEntry
 } from "@store-rental/shared";
 import { WorkspaceCapabilityRepository } from "./workspace-capability.repository";
+
+/** 初始化必须在调用方的事务里执行，因此显式收窄为事务客户端。 */
+type CapabilityTx = Parameters<WorkspaceCapabilityRepository["initializeInstances"]>[2];
 
 const DEFINITIONS = new Map<string, RentalCapabilityDefinition>(
   RENTAL_CAPABILITY_MODULES.map((module) => [module.code, module])
@@ -73,10 +81,10 @@ export class WorkspaceCapabilityService {
     const enabled = await this.enabledInstances(tenantId, workspaceId);
     return enabled
       .map((instance) => ({
-        code: instance.code,
-        implementationVersion: instance.implementationVersion,
-        configVersion: instance.configVersion,
-        config: { ...instance.config }
+      code: instance.code,
+      implementationVersion: instance.implementationVersion,
+      configVersion: instance.configVersion,
+      config: structuredClone(instance.config)
       }))
       // 稳定排序：快照要可复现比对，不能受查库返回序影响。
       .sort((left, right) => left.code.localeCompare(right.code));
@@ -101,11 +109,187 @@ export class WorkspaceCapabilityService {
       status: "enabled" as const,
       implementationVersion: entry.implementationVersion,
       configVersion: entry.configVersion,
-      config: { ...entry.config },
+      config: structuredClone(entry.config),
       revision: 0,
       createdAt: now,
       updatedAt: now
     }));
+  }
+
+  /**
+   * 品类必选能力的初始化名单。
+   *
+   * 名单是 `overview.missingRequired` 中**已经有实现且具备安全默认配置**的子集。
+   * 未实现的必选能力仍保留在总览缺失清单里，不能为了让初始化后变绿而伪装启用。
+   *
+   * 未实现的必选能力不在名单里，也不得伪装启用——空间保持非生产就绪是正确结果。
+   * 可选能力一律不自动启用：那是经营决策，不是系统默认。
+   */
+  static requiredInitializationTargets(
+    categoryCode: RentalCategoryCode,
+    declaredCodes: RentalCapability[],
+    // 可注入的注册表。默认取生产注册表；测试传入含「未实现的必选能力」「必填配置无默认值的
+    // 必选能力」的候选集，以证明这两道过滤真的生效。
+    //
+    // 必须可注入：真实注册表无法覆盖所有「未实现/缺默认配置」的组合，
+    // 因此**用真实注册表根本构造不出**能触发这两道过滤的输入——变异测试会因此存活，
+    // 那不是断言写错，而是缺少能区分的夹具。
+    registry: RentalCapabilityDefinition[] = RENTAL_CAPABILITY_MODULES,
+    requiredCodes: RentalCapability[] =
+      RENTAL_CATEGORY_DEFINITIONS.find((category) => category.code === categoryCode)?.requiredCapabilities ?? []
+  ): RentalCapabilityDefinition[] {
+    const declared = new Set(declaredCodes);
+    const required = new Set(requiredCodes);
+    return registry.filter((definition) => {
+      if (!required.has(definition.code)) return false;
+      if (definition.implementationVersion === undefined) return false;
+      const applicable =
+        definition.applicableCategories === "all" || definition.applicableCategories.includes(categoryCode);
+      if (!applicable) return false;
+      // 只初始化品类**已声明**的必选能力。这与 overview 的 missingRequired 判据一致。
+      // 必选性来自品类定义；同一个 shared 能力可以对一个品类必选、对另一个品类可选。
+      return declared.has(definition.code);
+    });
+  }
+
+  /**
+   * 创建经营空间时自动启用品类必选能力（Review P1-3）。
+   *
+   * 必须在**调用方的事务里**执行：需求要求空间档案与其品类能力原子创建，
+   * 任一步失败整体回滚，否则会留下「空间已建、能力没开」的半成品，
+   * 而那种空间在生产模式下连报价都做不了。
+   *
+   * 幂等：已存在实例的 code 一律跳过（不覆盖运营后来的暂停/停用决定）。
+   * 因此重复调用安全，也可以作为存量空间的显式对账入口。
+   *
+   * 必填配置项没有默认值的必选能力会被跳过并计入返回值的 `skipped`——
+   * 编造一个配置值等于伪装启用，空间应当保持非生产就绪，由人补配置后再启用。
+   */
+  async initializeRequiredCapabilities(
+    tenantId: string,
+    workspaceId: string,
+    categoryCode: RentalCategoryCode,
+    declaredCodes: RentalCapability[],
+    tx: CapabilityTx,
+    options: {
+      operator?: string;
+      reason?: string;
+      registry?: RentalCapabilityDefinition[];
+      requiredCodes?: RentalCapability[];
+    } = {}
+  ): Promise<{ enabled: RentalCapability[]; skipped: Array<{ code: RentalCapability; why: string }> }> {
+    const targets = WorkspaceCapabilityService.requiredInitializationTargets(
+      categoryCode,
+      declaredCodes,
+      options.registry,
+      options.requiredCodes
+    );
+    const existing = new Set(
+      (await this.repository.listInstancesInTx(tenantId, workspaceId, tx)).map((instance) => instance.code)
+    );
+    const now = stamp();
+    const reason = options.reason?.trim() || `创建经营空间时按品类 ${categoryCode} 自动启用必选能力`;
+    const rows: WorkspaceCapabilityInstance[] = [];
+    const audits: WorkspaceCapabilityAuditEvent[] = [];
+    const skipped: Array<{ code: RentalCapability; why: string }> = [];
+
+    for (const definition of targets) {
+      if (existing.has(definition.code)) {
+        skipped.push({ code: definition.code, why: "已存在实例，保留现状（幂等）" });
+        continue;
+      }
+      const missingConfig = definition.configSchema.filter((field) => field.required && field.defaultValue === undefined);
+      if (missingConfig.length) {
+        skipped.push({
+          code: definition.code,
+          why: `必填配置项 ${missingConfig.map((field) => field.label).join("、")} 没有默认值，不能自动启用`
+        });
+        continue;
+      }
+      const config: RentalCapabilityConfig = {};
+      for (const field of definition.configSchema) {
+        if (field.defaultValue !== undefined) config[field.key] = field.defaultValue;
+      }
+      rows.push({
+        tenantId,
+        workspaceId,
+        code: definition.code,
+        status: "enabled",
+        implementationVersion: definition.implementationVersion!,
+        configVersion: "v1",
+        config,
+        revision: 1,
+        enabledAt: now,
+        updatedBy: options.operator,
+        createdAt: now,
+        updatedAt: now
+      });
+      audits.push({
+        code: definition.code,
+        // 与 `enable` 分开：这是系统按品类定义做的初始化，不是某个人的经营决策。
+        action: "system_initialize",
+        toStatus: "enabled",
+        implementationVersion: definition.implementationVersion,
+        configVersion: "v1",
+        configSnapshot: config,
+        reason,
+        operator: options.operator,
+        at: now
+      });
+    }
+    const enabled = rows.length ? await this.repository.initializeInstances(rows, audits, tx) : [];
+    return { enabled, skipped };
+  }
+
+  /** 空间的运行模式，供会话上下文与管理端明确标注「非生产」。 */
+  async workspaceRunMode(tenantId: string, workspaceId?: string) {
+    const scope = workspaceId ?? (await this.repository.currentWorkspaceId(tenantId));
+    return this.repository.workspaceRunMode(tenantId, scope);
+  }
+
+  /**
+   * Review P1-3：存量空间的显式对账。在自己的事务里跑一次必选能力初始化。
+   *
+   * 与创建空间时的初始化共用同一份实现与同一套判据，因此两条路径不会给出不同结果。
+   * 事务由这里开：调用方是一个独立的运营动作，没有别的业务变更要一起提交。
+   */
+  async reconcileRequiredCapabilities(tenantId: string, operator?: string) {
+    const workspaceId = await this.repository.currentWorkspaceId(tenantId);
+    const { categoryCode, declaredCodes } = await this.repository.workspaceScope(tenantId, workspaceId);
+    const result = await this.repository.runInTransaction((tx) =>
+      this.initializeRequiredCapabilities(tenantId, workspaceId, categoryCode, declaredCodes, tx, {
+        operator,
+        reason: `运营显式对账：按品类 ${categoryCode} 初始化缺失的必选能力`
+      })
+    );
+    const overview = await this.overview(tenantId, workspaceId);
+    return {
+      tenantId,
+      workspaceId,
+      categoryCode,
+      enabled: result.enabled,
+      skipped: result.skipped,
+      missingRequired: overview.missingRequired,
+      productionReady: overview.productionReady
+    };
+  }
+
+  /**
+   * 正式空间的经营门禁（Review P1-4）。
+   *
+   * `production` 且缺任一必选能力 → 拒绝。demo / development 放行，
+   * 由响应与页面标明非生产。只在服务端判定：隐藏按钮挡不住直接调 API。
+   */
+  async assertWorkspaceOperable(tenantId: string, workspaceId?: string): Promise<void> {
+    const scope = workspaceId ?? (await this.repository.currentWorkspaceId(tenantId));
+    const runMode = await this.repository.workspaceRunMode(tenantId, scope);
+    if (runMode !== "production") return;
+    const overview = await this.overview(tenantId, scope);
+    if (overview.productionReady) return;
+    throw new ConflictException(
+      `当前经营空间为正式经营模式，但尚未达到生产经营条件：缺少必选能力 ${overview.missingRequired.join("、")}。` +
+        `请先在「经营空间能力」页启用这些能力，或将该空间标记为演示/开发模式。`
+    );
   }
 
   /**
@@ -119,6 +303,9 @@ export class WorkspaceCapabilityService {
       (await this.repository.listInstances(tenantId, scope)).map((instance) => [instance.code, instance])
     );
     const declared = new Set(declaredCodes);
+    const required = new Set(
+      RENTAL_CATEGORY_DEFINITIONS.find((category) => category.code === categoryCode)?.requiredCapabilities ?? []
+    );
     const capabilities: WorkspaceCapabilityView[] = RENTAL_CAPABILITY_MODULES.map((definition) => {
       const instance = instances.get(definition.code);
       const implemented = definition.implementationVersion !== undefined;
@@ -126,6 +313,7 @@ export class WorkspaceCapabilityService {
         definition.applicableCategories === "all" || definition.applicableCategories.includes(categoryCode);
       return {
         definition,
+        requiredForCategory: required.has(definition.code),
         declaredByCategory: declared.has(definition.code) || definition.kind === "shared",
         implemented,
         applicable,
@@ -142,12 +330,12 @@ export class WorkspaceCapabilityService {
         )
       };
     });
-    // 生产就绪：该品类声明的、必选的、且**有可执行模块**的能力全部处于 enabled。
+    // 生产就绪：该品类 requiredCapabilities 声明的能力全部处于 enabled。
     // 只有 code 没有模块的必选能力同样算缺失——否则「已声明」会被当成「已具备」。
     const missingRequired = capabilities
       .filter(
         (view) =>
-          view.definition.kind === "category_required" &&
+          required.has(view.definition.code) &&
           view.applicable &&
           view.declaredByCategory &&
           view.state !== "enabled"
@@ -258,6 +446,7 @@ export class WorkspaceCapabilityService {
         toStatus: input.status,
         implementationVersion: instance.implementationVersion,
         configVersion: instance.configVersion,
+        configSnapshot: instance.config,
         reason,
         operator,
         at: now
@@ -307,6 +496,7 @@ export class WorkspaceCapabilityService {
         toStatus: existing.status,
         implementationVersion: definition.implementationVersion,
         configVersion: existing.configVersion,
+        configSnapshot: existing.config,
         reason,
         operator,
         at: now
@@ -318,9 +508,9 @@ export class WorkspaceCapabilityService {
   /** 按注册表的 configSchema 逐字段校验。缺必填、类型不符、枚举越界、越界数值一律拒绝。 */
   private validatedConfig(
     definition: RentalCapabilityDefinition,
-    input: Record<string, string | number | boolean>
-  ): Record<string, string | number | boolean> {
-    const result: Record<string, string | number | boolean> = {};
+    input: RentalCapabilityConfig
+  ): RentalCapabilityConfig {
+    const result: RentalCapabilityConfig = {};
     const known = new Map<string, RentalCapabilityConfigField>(
       definition.configSchema.map((field) => [field.key, field])
     );
@@ -350,6 +540,12 @@ export class WorkspaceCapabilityService {
         result[field.key] = value;
         continue;
       }
+      if (field.type === "compatibility_relations") {
+        if (!Array.isArray(value)) throw new BadRequestException(`配置项 ${field.label} 必须是关系数组`);
+        const ids = new Set<string>();
+        result[field.key] = value.map((row, index) => this.validatedRelation(row, index, ids));
+        continue;
+      }
       if (typeof value !== "string") throw new BadRequestException(`配置项 ${field.label} 必须是字符串`);
       if (field.type === "enum" && !(field.options ?? []).includes(value)) {
         throw new BadRequestException(`配置项 ${field.label} 只能是 ${(field.options ?? []).join("、")}`);
@@ -357,5 +553,39 @@ export class WorkspaceCapabilityService {
       result[field.key] = value;
     }
     return result;
+  }
+
+  private validatedRelation(value: unknown, index: number, ids: Set<string>): RentalCompatibilityRelation {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new BadRequestException(`兼容关系第 ${index + 1} 条必须是对象`);
+    }
+    const row = value as Partial<RentalCompatibilityRelation>;
+    const relationTypes = new Set(["equipment_target", "mount_adapter", "battery_support", "storage_support", "port_support", "model_fit"]);
+    const outcomes = new Set(["allow", "warn", "block"]);
+    if (!row.id?.trim() || ids.has(row.id.trim())) throw new BadRequestException(`兼容关系第 ${index + 1} 条 id 为空或重复`);
+    ids.add(row.id.trim());
+    if (!row.relationType || !relationTypes.has(row.relationType)) throw new BadRequestException(`兼容关系 ${row.id} 的 relationType 无效`);
+    if (!row.outcome || !outcomes.has(row.outcome)) throw new BadRequestException(`兼容关系 ${row.id} 的 outcome 无效`);
+    if (!row.sourceName?.trim() || !row.reason?.trim()) throw new BadRequestException(`兼容关系 ${row.id} 必须填写来源和原因`);
+    return {
+      id: row.id.trim(),
+      relationType: row.relationType,
+      source: this.validatedRelationRef(row.source, row.id, "source"),
+      target: this.validatedRelationRef(row.target, row.id, "target"),
+      outcome: row.outcome,
+      sourceName: row.sourceName.trim(),
+      reason: row.reason.trim()
+    };
+  }
+
+  private validatedRelationRef(value: unknown, id: string, side: string): RentalCompatibilityEntityRef {
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new BadRequestException(`兼容关系 ${id} 的 ${side} 无效`);
+    const ref = value as Partial<RentalCompatibilityEntityRef>;
+    if (!ref.kind || !["item_group", "asset", "attribute"].includes(ref.kind)) throw new BadRequestException(`兼容关系 ${id} 的 ${side}.kind 无效`);
+    if ((ref.kind === "item_group" || ref.kind === "asset") && !ref.id?.trim()) throw new BadRequestException(`兼容关系 ${id} 的 ${side}.id 不能为空`);
+    if (ref.kind === "attribute" && (!ref.field?.trim() || !ref.value?.trim())) throw new BadRequestException(`兼容关系 ${id} 的 ${side} 属性和值不能为空`);
+    return ref.kind === "attribute"
+      ? { kind: ref.kind, field: ref.field!.trim(), value: ref.value!.trim() }
+      : { kind: ref.kind, id: ref.id!.trim() };
   }
 }

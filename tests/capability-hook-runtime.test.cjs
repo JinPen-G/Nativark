@@ -209,6 +209,36 @@ void (async () => {
   console.log("  ✓ 只读快照：逐层冻结且为克隆，严格模式写入抛错，活对象未被污染");
 }
 
+// 配置同样可能包含嵌套关系数组，不能只冻结顶层对象。
+{
+  const liveInstance = instance("delivery");
+  liveInstance.config = { relations: [{ id: "r1", reason: "原始" }] };
+  let nestedConfigError;
+  const runtime = new CapabilityHookRuntime(fakeCapabilities([liveInstance]));
+  runtime.register({
+    code: "delivery",
+    implementationVersion: "core-1.0",
+    order: 10,
+    hooks: {
+      order_confirmation: (context) => {
+        try {
+          (function () {
+            "use strict";
+            context.capability.config.relations.push({ id: "r2" });
+          })();
+        } catch (error) {
+          nestedConfigError = error;
+        }
+        return { decision: "allow" };
+      }
+    }
+  });
+  await runtime.run(baseRun({ point: "order_confirmation" }));
+  assert.ok(nestedConfigError, "嵌套配置数组必须被冻结");
+  assert.deepEqual(liveInstance.config.relations, [{ id: "r1", reason: "原始" }], "Hook 不得污染能力实例配置");
+  console.log("  ✓ 配置快照：结构化关系被深克隆、深冻结，Hook 无法污染历史配置");
+}
+
 // ============ 6. 必选能力 fail-closed，可选能力降级放行 ============
 {
   // serialized_inventory 是 category_required；delivery 是 shared（非必选）。
@@ -251,7 +281,23 @@ void (async () => {
     ["block", "warn"],
     "必选故障记为 block，可选故障记为 warn"
   );
-  console.log("  ✓ 故障处理：必选能力故障 fail-closed 阻止，可选能力故障降级但留痕");
+console.log("  ✓ 故障处理：必选能力故障 fail-closed 阻止，可选能力故障降级但留痕");
+}
+
+// ============ 6b. shared 能力可由具体品类声明为必选 ============
+{
+  // bundle_inventory 的模块类型是 shared/category_optional，但摄影品类把它列入 requiredCapabilities。
+  const runtime = new CapabilityHookRuntime(fakeCapabilities([instance("bundle_inventory")]));
+  runtime.register({
+    code: "bundle_inventory",
+    implementationVersion: "core-1.0",
+    order: 10,
+    hooks: { order_confirmation: () => { throw new Error("套装库存故障"); } }
+  });
+  const outcome = await runtime.run(baseRun({ point: "order_confirmation", categoryCode: "camera" }));
+  assert.equal(outcome.blocked, true, "被摄影品类列为必选的共享能力故障必须 fail-closed");
+  assert.equal(outcome.blockReasons[0]?.capability, "bundle_inventory");
+  console.log("  ✓ 品类级必选：共享能力在被当前品类列为 required 时故障同样 fail-closed");
 }
 
 // ============ 7. 结果契约的运行期校验 ============
