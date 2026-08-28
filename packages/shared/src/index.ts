@@ -196,6 +196,17 @@ export interface SessionContextResponse {
    */
   workspaces?: BusinessWorkspace[];
   currentWorkspaceId?: string;
+  /**
+   * CORE-EXT-02C：本空间**缺失的首期必选能力**，与生产就绪标记配套。
+   *
+   * 两者与 `tenant.capabilities` 是不同的东西，必须分开表示（验收明确要求
+   * 「空间『可访问』与『品类能力已达到生产经营条件』分开表示」）：
+   * `tenant.capabilities` 决定**入口可见性**，而这两个字段决定管理端要不要显示
+   * 「该空间尚未达到生产经营条件」。开发/演示空间可以继续验证通用 Core，
+   * 但不得因为能进得去就被当成已具备完整品类能力。
+   */
+  missingRequiredCapabilities?: RentalCapability[];
+  capabilityProductionReady?: boolean;
 }
 
 export interface RefreshSessionRequest {
@@ -4185,7 +4196,14 @@ export const RENTAL_CAPABILITY_MODULES: RentalCapabilityModuleDefinition[] = [
     code: "dispatch", label: "调度", kind: "category_optional",
     extensionPoints: ["menu", "api", "fulfillment"],
     applicableCategories: [RentalCategoryCode.Vehicle, RentalCategoryCode.Construction], dependsOn: ["serialized_inventory"], conflictsWith: [],
-    configSchema: []
+    configSchema: [],
+    // `legacy-1.0` 而不是缺省：`/store-rental/dispatch/*` 在历史车辆域里确有十余个
+    // 已实现端点（看板、任务领取与处理、优化、硬锁、人工改派…）。CORE-EXT-02A 起初把它
+    // 记成「已声明但无可执行模块」，那与现有业务事实不符——而 CORE-EXT-02C 把 API 门禁
+    // 改为只认实例后，「无模块因而永不可启用」会让所有车辆空间**永久失去**调度功能，
+    // 属于无法解释的回归。标为 legacy 实现版本后，车辆空间显式启用即可继续使用，
+    // 且这次启用会留下审计——这正是本任务要的「从品类声明放行改为有人明确开启」。
+    implementationVersion: "legacy-1.0"
   },
   {
     code: "usage_reading", label: "使用量读数", kind: "shared",
@@ -4206,7 +4224,9 @@ export const RENTAL_CAPABILITY_MODULES: RentalCapabilityModuleDefinition[] = [
     code: "iot", label: "IoT", kind: "shared",
     extensionPoints: ["menu", "api", "integration"],
     applicableCategories: [RentalCategoryCode.Vehicle, RentalCategoryCode.Construction], dependsOn: [], conflictsWith: [],
-    configSchema: [{ key: "provider", label: "遥测服务商", type: "string", required: true }]
+    configSchema: [{ key: "provider", label: "遥测服务商", type: "string", required: true }],
+    // 同 dispatch：`/store-rental/tbox-devices` 在历史车辆域里已实现。
+    implementationVersion: "legacy-1.0"
   }
 ];
 
