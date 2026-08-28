@@ -7,7 +7,7 @@ import {
   type RentalCalendarOverrideScope,
   type RentalCalendarRangeFields
 } from "@store-rental/shared";
-import { isCalendarDateKey } from "./rental-business-day";
+import { isCalendarDateKey, businessDateKey, DEFAULT_BUSINESS_TIME_ZONE } from "./rental-business-day";
 
 const DAY_MS = 86_400_000;
 
@@ -57,12 +57,17 @@ export function expandCalendarRange(year: number, startDate: string, endDate: st
  * 就是**逐日**属性，因此按整天生效；起止时点作为范围选择的原样记录进入
  * `overrideScope.startDateTime/endDateTime`，供日期详情展示，并供 PRICE-03 的
  * 一次性日期时间价格覆盖引用消费——本层不做半天截断。
+ *
+ * 起止时点必须落在范围端点日期的**营业时区**日界内（如「周一 00:00 +08:00」的
+ * UTC 日期是周日，按营业时区才是周一）；用 UTC 日期比对会把需求 4.5.5 的
+ * 「周五 12:00 至周一 00:00」这类边界误判为不匹配。
  */
 export function assertRangeDateTimeScope(
   startDate: string,
   endDate: string,
   startDateTime?: string,
-  endDateTime?: string
+  endDateTime?: string,
+  timeZone: string = DEFAULT_BUSINESS_TIME_ZONE
 ): void {
   if (startDateTime === undefined && endDateTime === undefined) return;
   if (!startDateTime || !endDateTime) {
@@ -74,8 +79,8 @@ export function assertRangeDateTimeScope(
     throw rangeError("range_datetime_mismatch", "日期时间范围必须是有效的 ISO 时间");
   }
   if (start.getTime() >= end.getTime()) throw rangeError("range_datetime_mismatch", "日期时间范围结束时点必须晚于开始时点");
-  if (start.toISOString().slice(0, 10) !== startDate || end.toISOString().slice(0, 10) !== endDate) {
-    throw rangeError("range_datetime_mismatch", "起止时点必须分别落在范围的起始与结束日期当天");
+  if (businessDateKey(startDateTime, timeZone) !== startDate || businessDateKey(endDateTime, timeZone) !== endDate) {
+    throw rangeError("range_datetime_mismatch", "起止时点必须分别落在范围的起始与结束日期当天（按营业时区）");
   }
 }
 

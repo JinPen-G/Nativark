@@ -5704,6 +5704,22 @@ export interface RentalQuoteCalendarDay {
   multiplier: number;
   /** 该日期的实际价格：unitCount × unitAmount × multiplier，未乘商品数量、未封顶。 */
   amount: number;
+  /**
+   * 该计费单位的**取价时点**（需求 4.5.6 v2.9：每个计费单位必须有明确的取价时点）。
+   * 自然日首个单位 = 实际租期开始时点、后续单位 = 对应营业日期的开始时点；
+   * 小时/班次/夜/24 小时/周/30 日月 = 计费块开始时点；整包 = 起租时点。
+   * 使用量与日期无对应关系，省略。分时价格按取价时点命中。
+   */
+  priceAt?: string;
+  /**
+   * 命中的价格解析层（需求 4.4.5/4.5.5 v2.9 的四级优先级）：
+   * `date_override` 具体日期时间覆盖 > `periodic` 周期性计价时段 >
+   * `day_type` 商品日期类型价格 > `base` 商品基础价格。
+   * 周期性时段由 PRICE-03 提供价格事实；该层就绪前不会出现在快照里。
+   */
+  hitLayer?: "date_override" | "periodic" | "day_type" | "base";
+  /** 该单位命中时的价格计划版本（需求 4.4.8：逐计费单位保存价格版本）。 */
+  pricingPlanVersion?: string;
 }
 
 export interface RentalQuoteChargeLine {

@@ -265,6 +265,16 @@ assert.match(explain("day_24h", tiered, 7), /阶梯价 70\/day_24h（满 7 day_2
 // `endAt` 参与签名：单位数量与取价时点必须来自同一组计费块。除班次外的单位不依赖它，
 // 因此默认给一个足够远的结束时刻；班次用例显式传真实结束时刻。
 const dates = (unit, start, unitCount, tz = DEFAULT_BUSINESS_TIME_ZONE, extra, end) =>
+  rentalPricingStrategy(unit)
+    .billableUnitDates(
+      iso(start),
+      iso(end ?? "2099-01-01T00:00:00Z"),
+      unitCount,
+      { timeZone: tz, ...extra }
+    )
+    .map((point) => point.date);
+// PRICE-01：取价时点（需求 4.5.6 v2.9）——每个计费单位的命中时点必须显式可查。
+const pricingPoints = (unit, start, unitCount, tz = DEFAULT_BUSINESS_TIME_ZONE, extra, end) =>
   rentalPricingStrategy(unit).billableUnitDates(
     iso(start),
     iso(end ?? "2099-01-01T00:00:00Z"),
@@ -296,6 +306,18 @@ assert.deepEqual(dates("week", "2026-03-02T09:00:00+08:00", 2), ["2026-03-02", "
 assert.deepEqual(dates("package", "2026-03-02T09:00:00+08:00", 1), ["2026-03-02"], "整包按起租日取价");
 // 使用量与日期无一一对应。
 assert.deepEqual(dates("usage", "2026-03-02T09:00:00+08:00", 5), [], "使用量不参与逐日取价");
+// 取价时点：自然日首单位 = 实际租期开始时点，后续 = 营业日期开始时点（上海 00:00 = 前一日 16:00Z）。
+assert.deepEqual(
+  pricingPoints("calendar_day", "2026-03-02T09:00:00+08:00", 3).map((point) => point.at),
+  ["2026-03-02T01:00:00.000Z", "2026-03-02T16:00:00.000Z", "2026-03-03T16:00:00.000Z"],
+  "自然日取价时点：首单位用租期开始时点，后续用营业日期开始时点"
+);
+// 24 小时块：取价时点 = 每个块开始时刻。
+assert.deepEqual(
+  pricingPoints("day_24h", "2026-03-02T15:00:00+08:00", 2).map((point) => point.at),
+  ["2026-03-02T07:00:00.000Z", "2026-03-03T07:00:00.000Z"],
+  "24 小时块取价时点 = 块开始时刻"
+);
 // 时区必须影响日期序列。
 assert.deepEqual(
   dates("calendar_day", "2026-03-02T06:00:00+08:00", 1, "UTC"),

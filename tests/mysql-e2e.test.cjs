@@ -4479,6 +4479,187 @@ async function main() {
   // 只在显式设置环境变量时生效；不跳过、不削弱任何断言，仅供复测「目标段 + 全部前置段」。
   await maybeStopAfter("15r");
 
+  console.log("== 15s. PRICE-01 取价时点与分时命中：周五 10:00 与 14:00 的 24 小时块不同价 ==");
+  // 需求 4.5.6 v2.9：每个计费单位按其**取价时点**命中分时价格；4.4.5：默认不因
+  // 跨过分时边界拆分完整计费块。造一个「周五 12:00 → 周一 00:00 系数 1.5」的
+  // 一次性日期时间覆盖（PRICE-02A 范围覆盖 API），断言：
+  //   周五 10:00 起的 24h 块（取价时点 10:00，覆盖外）→ 基础价 100；
+  //   周五 14:00 起的 24h 块（取价时点 14:00，覆盖内）→ 150；
+  //   周五 10:00 → 周六 10:30 = 2 个完整块，不因跨过 12:00 边界拆块 → 100 + 150 = 250
+  //   （若按边界拆分会得 100×(2/24)+150×(22/24) ≈ 145.83）。
+  // 周期性计价时段（每周五 12:00 起按周末价）的价格事实由 PRICE-03 承接；这里用
+  // 同一解析点验证一次性覆盖。快照逐单位保存 priceAt / hitLayer / 价格计划版本。
+  let fridayKey = null;
+  for (let day = 1; day <= 7; day += 1) {
+    const candidate = `2045-01-${String(day).padStart(2, "0")}`;
+    if (new Date(`${candidate}T00:00:00Z`).getUTCDay() === 5) {
+      fridayKey = candidate;
+      break;
+    }
+  }
+  assert.ok(fridayKey, "应能定位 2045 年第一个周五");
+  // camera 品类支持 day_24h 计价单位（construction 不支持），因此夹具放 demo 空间。
+  const dtDemo = await login("demo", "admin", DEMO_PASSWORD);
+  const dtLocations = (await request("GET", "/api/rental/v1/locations", null, dtDemo.accessToken)).body.data;
+  const dtLocation = dtLocations.find((row) => row.status === "enabled" && row.capabilities.includes("pickup") && row.capabilities.includes("return") && row.capabilities.includes("storage"));
+  assert.ok(dtLocation, "demo 空间应有一个支持领取/归还/仓储的启用地点");
+  const mondayKey = new Date(new Date(`${fridayKey}T00:00:00Z`).getTime() + 3 * 86400000).toISOString().slice(0, 10);
+  assert.equal(new Date(`${mondayKey}T00:00:00Z`).getUTCDay(), 1, "覆盖终点应为周一");
+
+  const dtGroup = await request(
+    "POST",
+    "/api/rental/v1/item-groups",
+    { code: "E2E-PRICE-DT", name: "E2E 分时取价组", inventoryMode: "quantity", unit: "套", attributes: { brand: "E2E影像", model: "PRICE-DT", role: "lens" } },
+    dtDemo.accessToken
+  );
+  assert.equal(dtGroup.status, 201, `分时取价商品组创建失败: ${JSON.stringify(dtGroup.body).slice(0, 200)}`);
+  const dtStock = await request(
+    "PUT",
+    "/api/rental/v1/stock-balances",
+    { itemGroupId: dtGroup.body.data.id, locationId: dtLocation.id, onHandQuantity: 10, maintenanceQuantity: 0 },
+    dtDemo.accessToken
+  );
+  assert.equal(dtStock.status, 200, `分时取价库存登记失败: ${JSON.stringify(dtStock.body).slice(0, 200)}`);
+  const dtPlan = await request(
+    "POST",
+    "/api/rental/v1/pricing-plans",
+    {
+      code: "E2E-PRICE-DT24",
+      name: "E2E 分时取价计划",
+      changeReason: "PRICE-01 取价时点验收",
+      status: "enabled",
+      effectiveFrom: new Date(Date.now() - 86400000).toISOString(),
+      rates: [
+        {
+          itemGroupId: dtGroup.body.data.id,
+          unit: "day_24h",
+          baseAmount: 100,
+          weekendMultiplier: 1,
+          holidayMultiplier: 1,
+          depositAmount: 500,
+          minimumUnits: 1
+        }
+      ]
+    },
+    dtDemo.accessToken
+  );
+  assert.equal(dtPlan.status, 201, `分时取价计划创建失败: ${JSON.stringify(dtPlan.body).slice(0, 200)}`);
+
+  // 差异定价开关必须开启，否则日历系数不参与取价；用完还原，避免污染后续用例。
+  const dtSettingsBefore = (await request("GET", "/api/rental/v1/business-settings", null, dtDemo.accessToken)).body.data;
+  const holidayWasEnabled = dtSettingsBefore.pricing.holidayPricingEnabled;
+  if (!holidayWasEnabled) {
+    const toggle = await request(
+      "PUT",
+      "/api/rental/v1/business-settings",
+      { ...dtSettingsBefore, pricing: { ...dtSettingsBefore.pricing, holidayPricingEnabled: true } },
+      dtDemo.accessToken
+    );
+    assert.ok([200, 201].includes(toggle.status), `开启日历差异定价失败: ${toggle.status} ${JSON.stringify(toggle.body).slice(0, 200)}`);
+  }
+
+  const dtRangeApply = await request(
+    "POST",
+    `/api/rental/v1/calendars/2045/days/range`,
+    {
+      startDate: fridayKey,
+      endDate: mondayKey,
+      startDateTime: `${fridayKey}T12:00:00+08:00`,
+      endDateTime: `${mondayKey}T00:00:00+08:00`,
+      fields: { pricingMultiplier: 1.5 },
+      overrideReason: "E2E 周五 12:00 起分时价格"
+    },
+    dtDemo.accessToken
+  );
+  assert.equal(dtRangeApply.status, 201, `分时覆盖应用失败: ${dtRangeApply.status} ${JSON.stringify(dtRangeApply.body).slice(0, 250)}`);
+  // 报价只读**已发布**日历（calendarsForDateRange → publishedCalendar），草稿不参与取价；
+  // 因此与 15f 同一口径：覆盖应用后必须发布，2045 年的报价才能看到它。
+  const dtPublish1 = await request("POST", "/api/rental/v1/calendars/2045/publish", { changeReason: "E2E 分时价格发布" }, dtDemo.accessToken);
+  assert.equal(dtPublish1.status, 201, `2045 首次发布失败: ${dtPublish1.status} ${JSON.stringify(dtPublish1.body).slice(0, 200)}`);
+  const dtPublishedRevision = (await request("GET", "/api/rental/v1/calendars/2045", null, dtDemo.accessToken)).body.data.revision;
+
+  const dtQuoteFor = async (startAt, endAt) => {
+    const res = await request(
+      "POST",
+      "/api/rental/v1/quotes",
+      {
+        customerType: "corporate",
+        fulfillmentMode: "store_pickup_return",
+        fulfillmentLocationId: dtLocation.id,
+        startAt,
+        endAt,
+        pricingPlanId: dtPlan.body.data.id,
+        lines: [{ itemGroupId: dtGroup.body.data.id, quantity: 1 }]
+      },
+      dtDemo.accessToken
+    );
+    assert.equal(res.status, 201, `分时取价报价失败: ${res.status} ${JSON.stringify(res.body).slice(0, 250)}`);
+    return res.body.data;
+  };
+
+  // ① 覆盖外取价：周五 10:00 块（时点早于 12:00）按基础价。
+  const satKey = new Date(new Date(`${fridayKey}T00:00:00Z`).getTime() + 86400000).toISOString().slice(0, 10);
+  const dtOutsideFix = await dtQuoteFor(`${fridayKey}T10:00:00+08:00`, `${satKey}T10:00:00+08:00`);
+  assert.equal(dtOutsideFix.rentalAmount, 100, `覆盖外的 24h 块应为基础价 100：实际 ${dtOutsideFix.rentalAmount}`);
+  const outsideRow = dtOutsideFix.calendarSnapshot.find((row) => row.date === fridayKey);
+  assert.equal(outsideRow.hitLayer, "base", `覆盖外命中层应为 base: ${JSON.stringify(outsideRow)}`);
+  assert.equal(outsideRow.multiplier, 1, "覆盖外系数应为 1");
+  assert.ok(outsideRow.priceAt, "快照必须保存取价时点");
+  assert.equal(outsideRow.pricingPlanVersion, dtPlan.body.data.version, "快照必须保存价格计划版本");
+
+  // ② 覆盖内取价：周五 14:00 块（时点在 12:00 之后）命中一次性覆盖 → 150。
+  const dtInside = await dtQuoteFor(`${fridayKey}T14:00:00+08:00`, `${satKey}T14:00:00+08:00`);
+  assert.equal(dtInside.rentalAmount, 150, `覆盖内的 24h 块应为 100 × 1.5 = 150：实际 ${dtInside.rentalAmount}`);
+  const insideRow = dtInside.calendarSnapshot.find((row) => row.date === fridayKey);
+  assert.equal(insideRow.hitLayer, "date_override", `覆盖内命中层应为 date_override: ${JSON.stringify(insideRow)}`);
+  assert.equal(insideRow.multiplier, 1.5, "覆盖内系数应为 1.5");
+  assert.equal(insideRow.source, "tenant_override", "命中覆盖时来源应为人工覆盖");
+
+  // ③ 不拆块：两个用例。
+  // (a) 周五 10:00 → 周六 10:30 = 2 个完整 24h 块（24.5h 进位为 2）；块 1 跨过 12:00
+  //     边界仍**完全按其开始时点**取价，不拆成 2h×基础 + 22h×1.5（那样会得 ≈145.83）。
+  const dtNoSplit = await dtQuoteFor(`${fridayKey}T10:00:00+08:00`, `${satKey}T10:30:00+08:00`);
+  assert.equal(dtNoSplit.rentalAmount, 250, `两块应为 100 + 150 = 250（按边界拆分块 1 会得 ≈145.83）：实际 ${dtNoSplit.rentalAmount}`);
+  const noSplitRows = dtNoSplit.calendarSnapshot.filter((row) => row.itemGroupId === dtGroup.body.data.id);
+  assert.equal(noSplitRows.length, 2, "应有两个取价行（周五/周六）");
+  assert.equal(noSplitRows.find((row) => row.date === fridayKey).hitLayer, "base", "周五块未命中覆盖");
+  assert.equal(noSplitRows.find((row) => row.date === satKey).hitLayer, "date_override", "周六块应命中覆盖");
+  // (b) 周五 10:00 → 周日 10:30 = 3 个完整块 → 100 + 150 + 150 = 400；3 个块若按日期
+  //     集合平均 1.25 会得 375，按单位逐个取价才是 400。
+  const sunKey = new Date(new Date(`${fridayKey}T00:00:00Z`).getTime() + 2 * 86400000).toISOString().slice(0, 10);
+  const dtThreeBlocks = await dtQuoteFor(`${fridayKey}T10:00:00+08:00`, `${sunKey}T10:30:00+08:00`);
+  assert.equal(dtThreeBlocks.rentalAmount, 400, `三块应为 100 + 150 + 150 = 400（平均倍率会得 375）：实际 ${dtThreeBlocks.rentalAmount}`);
+
+  // 清理：移除分时覆盖，还原差异定价开关。
+  const dtRemove = await request(
+    "POST",
+    `/api/rental/v1/calendars/2045/days/range-remove`,
+    {
+      startDate: fridayKey,
+      endDate: mondayKey,
+      overrideReason: "E2E 分时覆盖清理",
+      expectedRevision: dtPublishedRevision
+    },
+    dtDemo.accessToken
+  );
+  assert.equal(dtRemove.status, 201, `分时覆盖移除失败: ${dtRemove.status} ${JSON.stringify(dtRemove.body).slice(0, 200)}`);
+  // 把移除后的周模板结果发布为当前版本，避免 2045 的已发布版本残留覆盖影响后续。
+  const dtPublish2 = await request("POST", "/api/rental/v1/calendars/2045/publish", { changeReason: "E2E 移除后发布周模板" }, dtDemo.accessToken);
+  assert.equal(dtPublish2.status, 201, `2045 移除后发布失败: ${dtPublish2.status}`);
+  if (!holidayWasEnabled) {
+    const restoreToggle = await request(
+      "PUT",
+      "/api/rental/v1/business-settings",
+      dtSettingsBefore,
+      dtDemo.accessToken
+    );
+    assert.ok([200, 201].includes(restoreToggle.status), `还原日历差异定价失败: ${restoreToggle.status}`);
+  }
+
+  ok("取价时点与分时命中：快照逐单位保存 priceAt/hitLayer/价格计划版本；周五 10:00 块（覆盖外）按基础价、14:00 块（覆盖内）命中一次性日期时间覆盖得 150；周五 10:00 → 周六 10:30 的两个完整块不因跨过分时边界拆块（100+150=250，拆分价 ≈145.83 被排除）；覆盖移除与差异定价开关已还原");
+
+  await maybeStopAfter("15s");
+
   console.log("== 16. 双租户并发隔离 ==");
   const rounds = 12;
   const concurrent = [];

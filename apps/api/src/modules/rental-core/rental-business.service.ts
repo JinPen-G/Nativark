@@ -1178,7 +1178,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     input: PreviewRentalCalendarRangeOverrideRequest
   ): Promise<RentalCalendarRangeOverridePreview> {
     const dates = expandCalendarRange(year, input.startDate, input.endDate);
-    assertRangeDateTimeScope(input.startDate, input.endDate, input.startDateTime, input.endDateTime);
+    assertRangeDateTimeScope(input.startDate, input.endDate, input.startDateTime, input.endDateTime, context.settings.calendar.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE);
     this.assertRangeFields(input.fields);
     const base = this.editableCalendar(tenantId, context, year);
     const templateByDate = new Map(this.buildCalendar(tenantId, context.settings, year).days.map((day) => [day.date, day]));
@@ -1239,7 +1239,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     operator?: string
   ): Promise<ApplyRentalCalendarRangeOverrideResult> {
     const dates = expandCalendarRange(year, input.startDate, input.endDate);
-    assertRangeDateTimeScope(input.startDate, input.endDate, input.startDateTime, input.endDateTime);
+    assertRangeDateTimeScope(input.startDate, input.endDate, input.startDateTime, input.endDateTime, context.settings.calendar.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE);
     this.assertRangeFields(input.fields);
     const reason = input.overrideReason?.trim();
     if (!reason) throw new BadRequestException("人工覆盖必须填写调整原因");
@@ -2355,10 +2355,11 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       // 日历知识在服务层，两边各管一段。
       const holidayPricing = context.settings.pricing.holidayPricingEnabled && calendars.length > 0;
       const unitDates = pricingStrategy.billableUnitDates(input.startAt, input.endAt, units, pricingContext);
-      const unitFactors = unitDates.map((date) => this.dateMultiplier(calendars, date, rate));
+      // 逐单位解析价格层并记录**取价时点**（需求 4.5.6 v2.9）：分时价格按取价时点命中。
+      const unitFactors = unitDates.map((unitPoint) => this.resolveUnitPrice(calendars, unitPoint.date, unitPoint.at, rate));
       const unitMultipliers = holidayPricing ? unitFactors.map((item) => item.value) : undefined;
       // 停业日必须拦住：即使关掉了节假日定价，停业日也不能接单。
-      if (!holidayPricing) for (const date of unitDates) this.dateMultiplier(calendars, date, rate);
+      if (!holidayPricing) for (const unitPoint of unitDates) this.resolveUnitPrice(calendars, unitPoint.date, unitPoint.at, rate);
       // 顺序按需求 4.4.5：阶梯单价 → 逐单位日期价格 → 单件封顶 → 乘商品数量。
       // 金额、说明与日历快照都消费**同一份** breakdown：早前快照里的单位价用
       // `amountPerItem(rate, 1, [1])` 现算，等于按 1 个单位选阶梯档，租 7 天命中 80 元档时
@@ -2399,15 +2400,20 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       // 日历系数与逐日类型、数量，缺一项客服就无法向客户解释这笔钱是怎么来的（验收：可解释来源）。
       // 需求 4.4.5：说明必须展示原始单位数、进位与最低起租、阶梯档位、
       // 各日期或计费块价格、封顶前后金额和商品数量，使运营能据快照复算。
-      // 同一日期可能承载多个计费块（小时粒度），因此先按日期聚合单位数再落快照。
+      // 同一日期可能承载多个计费块（小时粒度），且不同计费块可能命中**不同价格层**
+      // （12:00 起的日期时间覆盖只命中 12:00 之后的块），因此聚合键是
+      // 「日期 × 命中层 × 系数」：层或系数不同就拆成多行，逐单位金额之和保持不变。
       const unitAmountForLine = breakdown.unitAmount;
-      const perDate = new Map<string, { count: number; factor: (typeof unitFactors)[number] }>();
-      unitDates.slice(0, units).forEach((date, index) => {
-        const existing = perDate.get(date);
+      const perDate = new Map<string, { count: number; factor: (typeof unitFactors)[number]; priceAt: string }>();
+      unitDates.slice(0, units).forEach((unitPoint, index) => {
+        const factor = unitFactors[index];
+        const key = `${unitPoint.date}|${factor.layer ?? "base"}|${factor.value}`;
+        const existing = perDate.get(key);
         if (existing) existing.count += 1;
-        else perDate.set(date, { count: 1, factor: unitFactors[index] });
+        else perDate.set(key, { count: 1, factor, priceAt: unitPoint.at });
       });
-      for (const [date, entry] of perDate) {
+      for (const [key, entry] of perDate) {
+        const date = key.split("|")[0];
         const multiplier = holidayPricing ? entry.factor.value : 1;
         calendarSnapshot.push({
           date,
@@ -2421,15 +2427,19 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
           unitCount: entry.count,
           unitAmount: unitAmountForLine,
           multiplier,
-          amount: roundMoney(entry.count * unitAmountForLine * multiplier)
+          amount: roundMoney(entry.count * unitAmountForLine * multiplier),
+          priceAt: entry.priceAt,
+          hitLayer: holidayPricing ? entry.factor.layer ?? "base" : "base",
+          pricingPlanVersion: plan.version
         });
       }
       const dateBreakdown = unitDates
         .slice(0, units)
-        .map((date, index) => {
+        .map((unitPoint, index) => {
           const factor = unitFactors[index];
           const shown = holidayPricing ? factor.value : 1;
-          return `${date} ${factor.type}×${shown.toFixed(2)}${factor.overridden && holidayPricing ? "(覆盖)" : ""}`;
+          const at = unitPoint.at ? ` @${unitPoint.at.slice(11, 16)}` : "";
+          return `${unitPoint.date}${at} ${factor.type}×${shown.toFixed(2)}${factor.overridden && holidayPricing ? "(覆盖)" : ""}`;
         })
         .join("、");
       const detail = [
@@ -3078,38 +3088,72 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
    * 填的默认值」（导入的法定节假日默认 1.25、周末 1.1，不加区分地优先取它
    * 等于把费率级倍率整体废掉）。
    */
-  private dateMultiplier(calendars: RentalCalendarYear[], date: string, rate: RentalPricingRate) {
+  /**
+   * 单个计费单位的价格解析（需求 4.4.5/4.5.5 v2.9 的四级优先级）：
+   * `date_override` 具体日期时间覆盖 > `periodic` 周期性计价时段 >
+   * `day_type` 商品日期类型价格 > `base` 商品基础价格。
+   *
+   * 与旧 `dateMultiplier` 的差别：多收 `priceAt`（取价时点），带时间边界的一次性
+   * 覆盖按「取价时点是否落在 [start, end)」命中，而不是整日命中——这正是
+   * 「周五 10:00 与 14:00 开始的 24 小时计费块可以得到不同价格」的解析点。
+   * **周期性计价时段层**（周五 12:00 起按周末价等重复规则）由 PRICE-03 提供
+   * 价格事实；该层未就绪，这里留出解析位置而不伪造价格源。
+   * 停业日**不阻止**报价（需求 4.5.4）——拦领取/归还时点是 assertFulfillmentDayOpen
+   * 的职责，不是逐日取价的职责。
+   */
+  private resolveUnitPrice(calendars: RentalCalendarYear[], date: string, priceAt: string | undefined, rate: RentalPricingRate) {
     const calendar = calendars.find((item) => item.year === businessYearFromDateKey(date));
     const day = calendar?.days.find((item) => item.date === date);
-    // 停业日**不阻止**报价（需求 4.5.4）。
-    //
-    // 早前这里对租期内任意停业日直接抛「不能报价」，与需求写反了：
-    // 「停业只限制发生在当天和目标地点的领取、配送、现场归还等履约动作，
-    //   不禁止租期跨过该日期；客户周五领取、周一归还时，周末门店停业不影响
-    //   设备继续在租」，且明确「仅租期中间经过停业日不得阻止报价」。
-    // 按原逻辑，任何把周末标为停业的租户都无法接受跨周末的租约——而跨周末
-    // 恰恰是最常见的租期。停业该校验的是**领取与归还时点**，那是下面
-    // assertFulfillmentDayOpen 的职责，不是逐日取价的职责。
     const type: RentalDayType = day?.dayType ?? "workday";
     const overridden = day?.source === "tenant_override";
-    const value = overridden
-      ? day.pricingMultiplier
-      : type === "statutory_holiday" || type === "tenant_special"
-        ? rate.holidayMultiplier
-        : type === "weekend"
-          ? rate.weekendMultiplier
-          : day?.pricingMultiplier ?? 1;
-    return {
-      value,
+    const calendarVersion = calendar ? (calendar.status === "published" ? calendar.version : "draft") : "draft";
+    const baseResult = {
       type,
       overridden,
       businessStatus: day ? businessStatusOf(day) : ("open" as RentalCalendarBusinessStatus),
       // 无该日记录时来源即为每周模板：日历只生成到已知年度，未覆盖的日期按模板处理。
       source: day?.source ?? ("week_rule" as RentalCalendarDay["source"]),
-      // 未发布年度记为 draft，报价快照要能看出依据当时并未发布（需求 4.5.2）。
-      calendarVersion: calendar ? (calendar.status === "published" ? calendar.version : "draft") : "draft",
+      calendarVersion,
       year: businessYearFromDateKey(date)
     };
+
+    // 第 1 层：具体日期时间覆盖（人工覆盖，可带时间边界）。
+    if (overridden) {
+      const scope = day?.overrideScope;
+      const bounded = scope?.startDateTime && scope?.endDateTime;
+      // 无时间边界 → 整天生效（既有单日覆盖语义）；有边界 → 按取价时点命中。
+      // 时点比较必须按**时刻**而不是字符串：priceAt 是 Z 格式、覆盖边界可能带
+      // +08:00 偏移，字典序比较会把「14:00+08 vs 12:00+08」判成命中之外。
+      const atMs = priceAt !== undefined ? new Date(priceAt).getTime() : Number.NaN;
+      const hit =
+        !bounded ||
+        (Number.isFinite(atMs) &&
+          atMs >= new Date(scope!.startDateTime!).getTime() &&
+          atMs < new Date(scope!.endDateTime!).getTime());
+      if (hit) {
+        return { ...baseResult, value: day!.pricingMultiplier, layer: "date_override" as const };
+      }
+      // 覆盖带边界但取价时点不在其中：落到下一层——这正是「边界前的块不拆分、
+      // 按其开始时点取价」与「12:00 起的覆盖只命中 12:00 之后的块」的交汇处。
+    }
+
+    // 第 2 层：周期性计价时段（PRICE-03 承接）。价格事实未提供，此处不产生命中。
+
+    // 第 3 层：商品在该日期类型下的价格（费率上的类型系数）。
+    if (type === "weekend") {
+      return { ...baseResult, value: rate.weekendMultiplier, layer: "day_type" as const };
+    }
+    if (type === "statutory_holiday" || type === "tenant_special") {
+      return { ...baseResult, value: rate.holidayMultiplier, layer: "day_type" as const };
+    }
+    // 官方/模板日自带的日期系数（如官方节假日的 1.25）也属于日期相关价格层。
+    // **人工覆盖日不在此层**：覆盖系数属于第 1 层，未命中其时间边界时不能再
+    // 从这里漏进来，否则「12:00 起生效」的边界形同虚设。
+    if (!overridden && day?.pricingMultiplier !== undefined && day.pricingMultiplier !== 1) {
+      return { ...baseResult, value: day.pricingMultiplier, layer: "day_type" as const };
+    }
+    // 第 4 层：商品基础价格。
+    return { ...baseResult, value: 1, layer: "base" as const };
   }
 
   /** 与逐单位取价必须同一日界口径，否则优惠的适用日期与计价的命中日期会错开。 */
