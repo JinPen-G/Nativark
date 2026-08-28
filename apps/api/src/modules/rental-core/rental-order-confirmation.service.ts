@@ -1,10 +1,11 @@
-import { BadRequestException, ConflictException, Inject, Injectable } from "@nestjs/common";
+import { BadRequestException, ConflictException, Inject, Injectable, Optional } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import type {
   CreateRentalOrderRequest,
   RentalQuoteSnapshotV1
 } from "@store-rental/shared";
 import { PrismaService } from "../database/prisma.service";
+import { CapabilityHookRuntime } from "./capability-hook.runtime";
 import {
   RentalIdempotencyRepository,
   assertSameRequest,
@@ -73,7 +74,8 @@ export class RentalOrderConfirmationService {
     private readonly business: RentalBusinessService,
     @Inject(RentalCoreFactRepository) private readonly coreFacts: RentalCoreFactStore,
     @Inject(RentalBusinessFactRepository) private readonly businessFacts: RentalBusinessFactStore,
-    @Inject(RentalIdempotencyRepository) private readonly idempotency: RentalIdempotencyStore
+    @Inject(RentalIdempotencyRepository) private readonly idempotency: RentalIdempotencyStore,
+    @Optional() private readonly hooks?: CapabilityHookRuntime
   ) {}
 
   /**
@@ -125,6 +127,20 @@ export class RentalOrderConfirmationService {
 
         // 故意先写订单聚合，再校验并消费报价、锁券；后续任一步失败都必须证明
         // 前面的订单、订单行和库存预占会随同一事务整体回滚。
+        //
+        // 订单确认 Hook 放在写聚合**之前**、且在事务内：阻止时整个事务回滚，
+        // 订单、预占与 Hook 审计一起消失，不留半成品；放事务外则拿不到 tx，
+        // 审计就无法与业务变更同生共死。
+        await this.hooks?.evaluate({
+          point: "order_confirmation",
+          tenantId,
+          workspaceId: this.core.resolveWorkspaceId(tenantId),
+          categoryCode: context.category.code,
+          subjectRef: { type: "order", id: order.id },
+          subject: order,
+          operator: input.operator || userName,
+          tx
+        });
         await this.coreFacts.saveOrderAggregate(order, [], tx);
 
         const storedQuote = await this.businessFacts.findQuote(tenantId, quote.id, tx);

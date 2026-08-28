@@ -1,4 +1,5 @@
-import { ConflictException, Injectable, Logger } from "@nestjs/common";
+import { ConflictException, Injectable, Logger, Optional } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import {
   RENTAL_CAPABILITY_MODULES,
   type RentalCapability,
@@ -9,6 +10,7 @@ import {
   type RentalCategoryCode,
   type WorkspaceCapabilityInstance
 } from "@store-rental/shared";
+import { CapabilityHookRepository, type CapabilityHookSubjectType } from "./capability-hook.repository";
 import { WorkspaceCapabilityService } from "./workspace-capability.service";
 
 const DEFINITIONS = new Map(RENTAL_CAPABILITY_MODULES.map((module) => [module.code, module]));
@@ -45,6 +47,35 @@ export interface CapabilityHookRunInput<TSubject> {
   instances?: WorkspaceCapabilityInstance[];
 }
 
+/** `evaluate` 的入参：在 `run` 之外还需要知道判定对象与调用方的事务。 */
+export interface CapabilityHookEvaluateInput<TSubject> extends CapabilityHookRunInput<TSubject> {
+  subjectRef: { type: CapabilityHookSubjectType; id: string };
+  /**
+   * 调用方的事务客户端。
+   *
+   * 可缺省是为了兼容 Core 里仍存在的无事务旧路径（`confirmOrder`、`cancelOrder`、
+   * `createInspection` 的 `tx` 至今是可选参数）。缺事务时**仍然执行并强制阻止判定**，
+   * 只跳过审计——审计必须与业务变更同事务，拿不到事务就无法保证这一点。
+   * 反过来，若因为拿不到事务就连判定一起跳过，那就是一个 fail-open 缺口。
+   */
+  tx?: Prisma.TransactionClient;
+}
+
+/**
+ * 能力阻止时抛出。带上完整结论，便于调用方或异常过滤器解释「谁、基于什么依据阻止了」。
+ * 用 409 而不是 400：阻止来自当前经营空间的能力配置与业务状态，不是请求本身格式错误。
+ */
+export class CapabilityBlockedException extends ConflictException {
+  constructor(readonly outcome: RentalCapabilityHookOutcome) {
+    super(
+      `操作被能力阻止：${outcome.blockReasons
+        .map((reason) => `${reason.capability} - ${reason.message}`)
+        .join("；")}`
+    );
+  }
+}
+
+
 /**
  * CORE-EXT-02B：capability Hook 运行时。
  *
@@ -64,7 +95,10 @@ export class CapabilityHookRuntime {
   private readonly logger = new Logger(CapabilityHookRuntime.name);
   private readonly modules = new Map<RentalCapability, RentalCapabilityHookModule>();
 
-  constructor(private readonly capabilities: WorkspaceCapabilityService) {}
+  constructor(
+    private readonly capabilities: WorkspaceCapabilityService,
+    @Optional() private readonly audits?: CapabilityHookRepository
+  ) {}
 
   /**
    * 登记一个能力的 Hook 实现。由各能力模块在自身初始化时调用。
@@ -191,6 +225,49 @@ export class CapabilityHookRuntime {
       for (const fee of result.feeBases ?? []) outcome.feeBases.push({ ...fee, capability: instance.code });
     }
 
+    return outcome;
+  }
+
+  /**
+   * Core 的唯一推荐入口：执行 → 阻止则抛 → 放行则在**调用方的事务**里落审计。
+   *
+   * 为什么不让七个节点各自 `run()` 后自己判断：任何一处忘了写
+   * `if (outcome.blocked) throw` 就是一个 fail-open 缺口，而那种遗漏在代码评审里
+   * 极难发现（少一行 if，测试照样绿）。把「阻止即抛」和「放行即审计」收进这里，
+   * 调用点就无法只做一半。
+   *
+   * 审计用调用方的 `tx`：事务回滚时审计一并消失，不会留下
+   * 「提示已记、业务已回滚」的半成品。反过来，**被阻止的判定不落审计**——
+   * 它所在的事务必然回滚。阻止原因随异常返回给调用方；持久化的拒绝快照
+   * 属 CORE-EXT-02D「快照足以解释当时为何放行、阻止或收费」的范围。
+   */
+  async evaluate<TSubject>(input: CapabilityHookEvaluateInput<TSubject>): Promise<RentalCapabilityHookOutcome> {
+    const at = input.at ?? new Date().toISOString();
+    const outcome = await this.run({ ...input, at });
+    if (outcome.blocked) throw new CapabilityBlockedException(outcome);
+    if (!outcome.executed.length) return outcome;
+    if (!input.tx) {
+      // 无事务的旧路径：判定已生效（阻止仍会抛），但审计无法与业务变更同事务，
+      // 因此明确跳过并留日志，而不是写一条可能与业务状态不一致的审计。
+      this.logger.warn(
+        `节点 ${input.point} 在无事务路径上执行，已跳过 Hook 审计（判定仍生效）：${input.subjectRef.type}:${input.subjectRef.id}`
+      );
+      return outcome;
+    }
+    if (!this.audits) {
+      // 生产装配里 Nest 必然注入仓储；缺失只会发生在装配被改坏时。
+      // 静默跳过审计会让「可选提示可审计」变成一句空话，因此明确失败。
+      throw new Error("CapabilityHookRepository 未注入，无法落 Hook 审计");
+    }
+    await this.audits.recordOutcome(
+      input.tenantId,
+      input.workspaceId,
+      input.subjectRef,
+      outcome,
+      input.tx,
+      input.operator,
+      at
+    );
     return outcome;
   }
 

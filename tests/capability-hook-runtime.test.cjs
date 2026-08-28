@@ -341,5 +341,110 @@ void (async () => {
   console.log("  ✓ 触发点枚举覆盖任务定义的七个节点");
 }
 
+// ============ 10. evaluate：阻止即抛、放行即在调用方事务里落审计 ============
+{
+  const written = [];
+  const fakeAudits = {
+    async recordOutcome(tenantId, workspaceId, subjectRef, outcome, tx, operator, at) {
+      written.push({ tenantId, workspaceId, subjectRef, point: outcome.point, tx, operator, at, rows: outcome.executed.length });
+      return outcome.executed.length;
+    }
+  };
+  const tx = { marker: "caller-tx" };
+  const evaluateInput = (extra = {}) => ({
+    ...baseRun({ point: "order_confirmation", operator: "李四" }),
+    subjectRef: { type: "order", id: "order_9" },
+    tx,
+    ...extra
+  });
+
+  // 放行：审计必须用**调用方的事务**写入，否则事务回滚时审计留了下来。
+  {
+    let seenAtInEvaluate;
+    const runtime = new CapabilityHookRuntime(fakeCapabilities([instance("delivery")]), fakeAudits);
+    runtime.register({
+      code: "delivery",
+      order: 10,
+      hooks: {
+        order_confirmation: (context) => {
+          seenAtInEvaluate = context.at;
+          return { decision: "warn", notices: [{ code: "n", message: "提示" }] };
+        }
+      }
+    });
+    const outcome = await runtime.evaluate(evaluateInput());
+    assert.equal(outcome.blocked, false);
+    assert.equal(written.length, 1, "放行的判定必须落审计（否则「可选提示可审计」不成立）");
+    assert.equal(written[0].tx, tx, "审计必须使用调用方传入的事务客户端");
+    assert.equal(written[0].subjectRef.id, "order_9", "审计必须能按判定对象追溯");
+    assert.equal(written[0].operator, "李四", "审计必须记录操作人");
+    assert.equal(written[0].at, seenAtInEvaluate, "审计时刻必须与能力看到的判定时刻一致，不能各取一次当前时间");
+  }
+
+  // 阻止：必须抛 409，且**不落审计**（它所在的事务必然回滚）。
+  {
+    written.length = 0;
+    const runtime = new CapabilityHookRuntime(fakeCapabilities([instance("delivery")]), fakeAudits);
+    runtime.register({
+      code: "delivery",
+      order: 10,
+      hooks: {
+        order_confirmation: () => ({ decision: "block", blockReasons: [{ code: "no_slot", message: "无可用配送时段" }] })
+      }
+    });
+    await assert.rejects(
+      runtime.evaluate(evaluateInput()),
+      (error) => {
+        assert.equal(error.constructor.name, "CapabilityBlockedException");
+        assert.match(error.message, /delivery - 无可用配送时段/u, "异常必须说明是谁、基于什么依据阻止的");
+        assert.equal(error.outcome.blocked, true, "异常必须带完整结论供调用方解释");
+        return true;
+      }
+    );
+    assert.equal(written.length, 0, "被阻止的判定不得落审计：它所在的事务必然回滚");
+  }
+
+  // 没有任何能力执行时不写审计，也不报错。
+  {
+    written.length = 0;
+    const runtime = new CapabilityHookRuntime(fakeCapabilities([]), fakeAudits);
+    const outcome = await runtime.evaluate(evaluateInput());
+    assert.equal(outcome.executed.length, 0);
+    assert.equal(written.length, 0, "没有能力参与判定时不应产生审计行");
+  }
+
+  // 装配缺仓储时必须明确失败，不能静默跳过审计。
+  {
+    const runtime = new CapabilityHookRuntime(fakeCapabilities([instance("delivery")]));
+    runtime.register({ code: "delivery", order: 10, hooks: { order_confirmation: () => ({ decision: "allow" }) } });
+    await assert.rejects(
+      runtime.evaluate(evaluateInput()),
+      /未注入，无法落 Hook 审计/u,
+      "缺仓储时静默跳过审计会让「可选提示可审计」变成空话"
+    );
+  }
+
+  // 无事务的旧路径：判定仍必须生效（阻止仍抛），只是跳过审计。
+  // 若因为拿不到事务就把判定一起跳过，那就是 fail-open。
+  {
+    written.length = 0;
+    const runtime = new CapabilityHookRuntime(fakeCapabilities([instance("delivery")]), fakeAudits);
+    runtime.register({
+      code: "delivery",
+      order: 10,
+      hooks: {
+        order_confirmation: () => ({ decision: "block", blockReasons: [{ code: "x", message: "无事务也要拦" }] })
+      }
+    });
+    await assert.rejects(
+      runtime.evaluate({ ...evaluateInput(), tx: undefined }),
+      /无事务也要拦/u,
+      "无事务路径上阻止判定仍必须生效"
+    );
+    assert.equal(written.length, 0, "无事务时不得写审计");
+  }
+  console.log("  ✓ evaluate：阻止抛 409 且不落审计，放行用调用方事务落审计，无事务仍强制判定，缺仓储明确失败");
+}
+
 console.log("\nCORE-EXT-02B Hook 运行时用例全部通过");
 })();

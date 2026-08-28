@@ -321,6 +321,7 @@ model Tenant {
   rentalCalendarOverrideAudits RentalCalendarOverrideAuditEntry[]
   workspaceCapabilityInstances WorkspaceCapabilityInstance[]
   workspaceCapabilityAudits   WorkspaceCapabilityAuditEntry[]
+  capabilityHookAudits        CapabilityHookAuditEntry[]
   rentalIdempotencyRecords  RentalOrderIdempotencyRecord[]
   customerProfiles          CustomerProfile[]
   customerWorkspaceLinks    CustomerWorkspaceLink[]
@@ -392,6 +393,7 @@ model BusinessWorkspace {
   rentalOrderIdempotencyRecords RentalOrderIdempotencyRecord[]
   workspaceCapabilityInstances  WorkspaceCapabilityInstance[]
   workspaceCapabilityAudits     WorkspaceCapabilityAuditEntry[]
+  capabilityHookAudits          CapabilityHookAuditEntry[]
   attributeUniqueValues RentalAttributeUniqueValue[]
   createdAt    DateTime            @default(now())
   updatedAt    DateTime            @updatedAt
@@ -2267,6 +2269,47 @@ model WorkspaceCapabilityAuditEntry {
   @@index([workspaceId, code], map: "workspace_capability_audits_ws_code_idx")
   @@index([tenantId, at], map: "workspace_capability_audits_tenant_at_idx")
   @@map("workspace_capability_audits")
+}
+
+/// CORE-EXT-02B：capability Hook 的执行审计。
+///
+/// 一次判定里每个执行过的能力一行。存在的理由是验收要求「可选提示可审计」——
+/// 一条被放行但带提示的判定，事后必须能查出是哪个能力、哪个版本、在哪个节点、
+/// 基于什么依据给出的提示。
+///
+/// 四类产物用 JSON 列而不是四张子表：它们只被整体读取（"这次判定发生了什么"），
+/// 不需要按内部字段检索；拆表会让一次判定的写入变成五次，而它们必须在
+/// **同一事务**里落库才能保证事务回滚后不留半成品。
+model CapabilityHookAuditEntry {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId String
+  workspace   BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  /// 七个触发点之一
+  point       String
+  capability  String
+  implementationVersion String
+  configVersion String
+  /// allow / warn / block
+  decision    String
+  /// 能力自身抛异常时为真；必选能力此时必然 block。
+  failed      Boolean  @default(false)
+  /// 判定对象，供按订单/报价追溯。order / quote / item_group / asset
+  subjectType String
+  subjectId   String
+  blockReasons Json?
+  notices     Json?
+  linkedTasks Json?
+  feeBases    Json?
+  operator    String?
+  at          DateTime
+  createdAt   DateTime @default(now())
+
+  @@index([workspaceId, point], map: "capability_hook_audits_ws_point_idx")
+  @@index([tenantId, subjectType, subjectId], map: "capability_hook_audits_tenant_subject_idx")
+  @@index([tenantId, at], map: "capability_hook_audits_tenant_at_idx")
+  @@map("capability_hook_audits")
 }
 
 model RentalCouponTemplate {

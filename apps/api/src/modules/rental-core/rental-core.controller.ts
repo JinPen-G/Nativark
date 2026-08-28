@@ -141,7 +141,7 @@ export class RentalCoreController {
       request: { orderId: id },
       orderId: id,
       run: async (tx) => {
-        const confirmed = await this.service.confirmOrder(tenantId, id, tx);
+        const confirmed = await this.service.confirmOrder(tenantId, id, tx, req.user.displayName);
         await this.business.redeemCouponInTransaction(tenantId, id, tx);
         return confirmed;
       },
@@ -166,7 +166,7 @@ export class RentalCoreController {
       fallbackKey: `order.allocate:${id}`,
       request: { orderId: id },
       orderId: id,
-      run: (tx) => this.service.allocateOrder(tenantId, id, tx),
+      run: (tx) => this.service.allocateOrder(tenantId, id, tx, req.user.displayName),
       replay: async () => {
         const current = await this.service.getOrder(tenantId, id);
         return current.status === RentalCoreOrderStatus.ReadyForPickup ? current : undefined;
@@ -238,7 +238,7 @@ export class RentalCoreController {
       request: { orderId: id, reason: body.reason, weatherException: Boolean(body.weatherException) },
       orderId: id,
       run: async (tx) => {
-        const cancelled = await this.service.cancelOrder(req.user.tenantId, id, body.reason, charge, tx);
+        const cancelled = await this.service.cancelOrder(req.user.tenantId, id, body.reason, charge, tx, req.user.displayName);
         await this.business.releaseCouponInTransaction(req.user.tenantId, id, tx);
         return cancelled;
       },
@@ -319,7 +319,7 @@ export class RentalCoreController {
       request: { orderId: id, stage },
       orderId: id,
       run: async (tx) => {
-        const completed = await this.service.completeHandoverWithoutInspection(tenantId, id, stage, overdueCharge, tx);
+        const completed = await this.service.completeHandoverWithoutInspection(tenantId, id, stage, overdueCharge, tx, req.user.displayName);
         if (stage === "return") await this.business.completeCustomerOrderEventInTransaction(tenantId, context, completed.customerId, tx);
         return completed;
       },

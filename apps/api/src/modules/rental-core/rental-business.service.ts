@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, OnApplicationBootstrap, OnModuleInit, Optional } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
+import { CapabilityHookRuntime } from "./capability-hook.runtime";
 import {
   RentalCategoryCode,
   type GrantRentalRewardRequest,
@@ -272,7 +273,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     @Inject(RentalBusinessFactRepository) private readonly factStore: RentalBusinessFactStore,
     @Inject(RentalCoreConfigRepository) private readonly coreConfigStore: RentalConfigStore,
     @Optional() private readonly stateRepository?: RentalStateRepository,
-    @Optional() private readonly prisma?: PrismaService
+    @Optional() private readonly prisma?: PrismaService,
+    // CORE-EXT-02B：报价校验节点的 Hook 运行时。可选同 RentalCoreService 的理由。
+    @Optional() private readonly hooks?: CapabilityHookRuntime
   ) {}
 
   /**
@@ -2265,11 +2268,34 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       appliedDiscountPlanIds: discountPlans.map((item) => item.id), customerCouponId: customerCoupon?.id,
       expiresAt: new Date(Date.now() + rule.config.payment.unpaidHoldMinutes * 60_000).toISOString(), createdAt: timestamp
     };
+    await this.runQuoteHook(tenantId, context, quote);
     state.quotes.unshift(quote);
     await this.factStore.upsertQuote(quote);
     return quote;
   }
 
+  /**
+   * 报价校验 Hook。在报价**算完之后、落库之前**判定。
+   *
+   * 为什么不在算之前：能力要判定的是这份报价本身（金额、日历依据、履约方式、
+   * 命中的费率），算之前那些都还不存在。为什么不在落库之后：那时阻止已经晚了，
+   * 报价已经可以被下单引用。
+   *
+   * 报价没有事务（`upsertQuote` 是独立写入），因此这里的 Hook 判定生效但不落审计——
+   * 审计必须与业务变更同事务，否则会留下与实际状态不一致的记录。
+   * 报价侧的判定依据由 CORE-EXT-02D 的报价快照承接。
+   */
+  private async runQuoteHook(tenantId: string, context: BusinessContext, quote: RentalQuoteSnapshotV1) {
+    if (!this.hooks) return undefined;
+    return this.hooks.evaluate({
+      point: "quote_validation",
+      tenantId,
+      workspaceId: this.workspaceOf(tenantId),
+      categoryCode: context.category.code,
+      subjectRef: { type: "quote", id: quote.id },
+      subject: quote
+    });
+  }
   getQuote(tenantId: string, context: BusinessContext, quoteId: string) {
     const quote = this.state(tenantId, context).quotes.find((item) => item.id === quoteId);
     if (!quote) throw new NotFoundException("报价不存在");
