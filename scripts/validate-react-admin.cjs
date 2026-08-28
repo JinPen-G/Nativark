@@ -35,6 +35,7 @@ const rentalCorePage = read("apps/admin/src/features/rental-core/RentalCorePage.
 const rentalOrderDetailPage = read("apps/admin/src/features/rental-core/RentalOrderDetailPage.tsx");
 const catalogPage = read("apps/admin/src/features/catalog/CatalogPage.tsx");
 const rentalCoreApi = read("apps/admin/src/api/rentalCore.ts");
+const capabilityPage = read("apps/admin/src/features/rental-core/CapabilityGovernancePage.tsx");
 const appRoot = read("apps/admin/src/app/App.tsx");
 const queryClientSource = read("apps/admin/src/app/queryClient.ts");
 const authStoreSource = read("apps/admin/src/features/auth/authStore.ts");
@@ -42,7 +43,7 @@ const themeSource = read("apps/admin/src/app/theme.tsx");
 
 [
   "/workbench", "/rental/core", "/rental/orders", "/rental/item-groups", "/rental/assets",
-  "/rental/locations", "/rental/pricing", "/rental/discounts", "/rental/coupons", "/rental/services", "/rental/settings", "/customers",
+  "/rental/locations", "/rental/pricing", "/rental/discounts", "/rental/coupons", "/rental/services", "/rental/settings", "/rental/capabilities", "/customers",
   "/platform/tenants", "/platform/users", "/platform/system", "/platform/operations", "/platform/tools"
 ].forEach((route) => requireText(navigation, `path: "${route}"`, "route registry coverage"));
 
@@ -54,11 +55,25 @@ const themeSource = read("apps/admin/src/app/theme.tsx");
 
 [
   "categories", "profile", "businessSettings", "saveBusinessSettings", "couponTemplates", "saveCouponTemplate", "operators", "saveOperator", "locations", "saveLocation", "itemGroups", "assets", "stockBalances", "availability", "orders",
-  "createOrder", "confirmOrder", "allocateOrder", "substituteBundleComponent", "partialReturnOrder", "cancelOrder", "inspectionTemplates", "createInspection", "pricingPlans", "discountPlans", "valueAddedServices", "calendar", "ruleVersions", "rewards", "notificationTemplates", "createQuote"
+  "createOrder", "confirmOrder", "allocateOrder", "substituteBundleComponent", "partialReturnOrder", "cancelOrder", "inspectionTemplates", "createInspection", "pricingPlans", "discountPlans", "valueAddedServices", "calendar", "ruleVersions", "rewards", "notificationTemplates", "createQuote",
+  // CORE-EXT-02C：能力治理的读写入口必须存在，否则页面只能变成静态展示。
+  "capabilities", "saveCapability", "upgradeCapability", "capabilityAudits"
 ].forEach((method) => requireText(rentalCoreApi, `${method}:`, "Rental Core API coverage"));
 [
   "Rental Core v0.1", "序列化资产", "数量库存", "套装", "确认预占", "执行配货"
 ].forEach((label) => requireText(rentalCorePage, label, "Rental Core UI coverage"));
+// CORE-EXT-02C：能力页必须同时表达五种状态、三种种类、依赖、配置、版本与升级，
+// 并把「可访问」与「已达生产经营条件」分开显示。少任何一项，页面就退化成开关列表。
+[
+  "已声明但未实现", "已暂停", "已启用", "未启用",
+  "品类必选", "可选增强", "跨品类共享",
+  "依赖 / 互斥", "configSchema", "upgradeAvailable",
+  "该经营空间尚未达到生产经营条件", "该经营空间已达到生产经营条件",
+  // P2-2：本页不得再使用 Ant Design 6 的弃用 API（`message` / `direction` / Drawer `width`）。
+  // 用「新 API 必须出现」来表达，因为弃用 API 的字符串在别处也可能合法出现。
+  "title=\"该经营空间尚未达到生产经营条件\"", "orientation=\"vertical\"", "size={560}",
+  "missingRequired", "expectedRevision", "变更能力状态必须填写原因"
+].forEach((label) => requireText(capabilityPage, label, "capability governance UI coverage"));
 [
   "替换套装组成", "部分归还", "allocation.itemGroupId", "allocation.quantity > 1",
   "detail.fulfillmentLocationSnapshot.name", "detail.fulfillmentLocationSnapshot.operator.name",

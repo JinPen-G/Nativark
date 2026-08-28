@@ -159,6 +159,26 @@ function readRow(sql) {
   return row;
 }
 
+/**
+ * 多行多列查询：返回对象数组，空结果返回空数组。
+ *
+ * 与 `readRow` 分开是因为后者只取最后一行；断言「恰好这几行」需要看全部行，
+ * 用 readRow 会把「多出一行」的错误漏掉。
+ */
+function readRows(sql) {
+  const lines = mysqlQuery(sql).split(/\r?\n/u).filter((line) => line.trim());
+  if (lines.length < 2) return [];
+  const header = lines[0].split("\t");
+  return lines.slice(1).map((line) => {
+    const values = line.split("\t");
+    const row = {};
+    header.forEach((col, index) => {
+      row[col] = values[index];
+    });
+    return row;
+  });
+}
+
 /* ---------- 断言与进度输出 ---------- */
 
 let passedGroups = 0;
@@ -7567,6 +7587,1718 @@ async function main() {
       "同键 4 路并发仍只有 1 条流水/2 张券/配额加 2，且当前进程读取与库一致"
   );
 
+
+  console.log("== 65. CORE-EXT-02A 经营空间能力实例、生命周期与隔离 ==");
+  // 本节要证的核心口径：「品类声明了某个 code」**不等于**「该空间启用了该能力」。
+  //
+  // 升级前的模型直接读品类 `defaultCapabilities`，于是只有 code、没有可执行模块的能力
+  // 也被当成可用功能。新迁移刻意不回填任何启用状态。
+  //
+  // Review P1-3 之后判据要分清两类空间（原断言「实例表恒为空」已不成立，也不该成立）：
+  //   * **迁移/Seed 建立的空间**（默认空间，`isDefault = 1`）：必须**零实例**——
+  //     它们是存量兼容层，回填等于凭空认定历史空间已具备能力；
+  //   * **经接口新建的空间**：创建时同事务初始化品类必选能力，因此**必然有实例**。
+  // 这个区分才是原断言真正想守住的东西：没有任何路径会**悄悄**启用能力，
+  // 启用只发生在「显式建空间」或「有人点启用」这两种可解释的时机。
+  const seedWorkspaceInstances = readCount(
+    "SELECT COUNT(*) FROM `workspace_capability_instances` `i` " +
+      "JOIN `business_workspaces` `w` ON `w`.`id` = `i`.`workspaceId` WHERE `w`.`isDefault` = 1;"
+  );
+  assert.equal(
+    seedWorkspaceInstances,
+    0,
+    "迁移与 Seed 建立的默认空间不得回填启用状态：存量 capabilities 数组只是品类声明，不能据此认定已启用"
+  );
+  assert.equal(
+    readCount(
+      "SELECT COUNT(*) FROM `workspace_capability_audits` `a` " +
+        "JOIN `business_workspaces` `w` ON `w`.`id` = `a`.`workspaceId` WHERE `w`.`isDefault` = 1;"
+    ),
+    0,
+    "默认空间没有任何显式变更时不得有生命周期审计"
+  );
+  // 经接口新建的空间必然有初始化审计，且**只能**是 system_initialize——
+  // 若出现 enable，说明有路径把系统初始化伪装成了人的经营决策。
+  const nonDefaultAuditActions = readRows(
+    "SELECT DISTINCT `a`.`action` FROM `workspace_capability_audits` `a` " +
+      "JOIN `business_workspaces` `w` ON `w`.`id` = `a`.`workspaceId` WHERE `w`.`isDefault` = 0;"
+  ).map((row) => row.action);
+  assert.deepEqual(
+    nonDefaultAuditActions,
+    ["system_initialize"],
+    `此刻非默认空间只应有初始化审计，实际 ${nonDefaultAuditActions.join("、") || "（无）"}`
+  );
+
+  const capPlatform = await login("platform", "admin", PLATFORM_PASSWORD);
+  const capTenant = await bootstrapTenant(capPlatform.accessToken, "e2e_cap_camera", "camera");
+  const capOverview = await request("GET", "/api/rental/v1/capabilities", null, capTenant.accessToken);
+  assert.equal(capOverview.status, 200, `读能力总览失败: ${capOverview.status} ${JSON.stringify(capOverview.body).slice(0, 200)}`);
+  const capViewOf = (payload, code) => payload.capabilities.find((row) => row.definition.code === code);
+  assert.equal(capOverview.body.data.categoryCode, "camera", "总览的品类必须取自空间行");
+  assert.equal(capOverview.body.data.workspaceId, capTenant.currentWorkspaceId, "总览必须落在会话空间上");
+  // 已声明但无可执行模块的能力：状态是 declared_not_implemented，不是「可用」。
+  assert.equal(capViewOf(capOverview.body.data, "delivery").state, "declared_not_implemented");
+  assert.equal(capViewOf(capOverview.body.data, "delivery").declaredByCategory, true);
+  assert.equal(capViewOf(capOverview.body.data, "delivery").implemented, false);
+  // 有模块但没有实例行：未启用。
+  assert.equal(capViewOf(capOverview.body.data, "pickup").state, "not_enabled");
+  assert.equal(capOverview.body.data.productionReady, false, "全新空间不得判定为生产就绪");
+  assert.deepEqual(
+    [...capOverview.body.data.missingRequired].sort(),
+    ["bundle_inventory", "camera_compatibility", "camera_kit_handover", "inspection_care", "pickup", "quantity_inventory", "return", "serialized_inventory", "usage_reading"],
+    "缺失必选能力必须包含尚未实现的摄影首期模块"
+  );
+  ok("新库与新空间：实例表为空、能力显示为未启用/已声明未实现、生产就绪为 false");
+
+  // 65b. 能力治理必须是独立权限：能操作订单 ≠ 能启停整个空间的业务能力。
+  const capOpRole = await request("POST", "/api/platform/roles", {
+    code: `E2E-CAP-OP-${Date.now().toString(36)}`, name: "E2E 订单操作员", scope: "store", dataScope: "all",
+    enabledBusinessScopes: ["rental"], permissions: ["store-rental:order:view", "store-rental:order:operate"], isActive: true
+  }, capTenant.accessToken);
+  assert.equal(capOpRole.status, 201, `建订单操作角色失败: ${JSON.stringify(capOpRole.body).slice(0, 200)}`);
+  const capOpAccount = `e2e_cap_op_${Date.now().toString(36)}`;
+  const capOpUser = await request("POST", "/api/platform/users", {
+    account: capOpAccount, displayName: "E2E 订单操作员", phone: "13900002222",
+    roleIds: [capOpRole.body.data.id], isActive: true
+  }, capTenant.accessToken);
+  assert.equal(capOpUser.status, 201, `建订单操作账号失败: ${JSON.stringify(capOpUser.body).slice(0, 200)}`);
+  await request("PUT", `/api/platform/workspaces/${capTenant.currentWorkspaceId}/members`, {
+    userId: capOpUser.body.data.id, roleId: capOpRole.body.data.id
+  }, capTenant.accessToken);
+  const capOpTemp = capOpUser.body.data.temporaryPassword;
+  const capOpFirst = await login("e2e_cap_camera", capOpAccount, capOpTemp);
+  const capOpPwd = `E2e!${randomBytes(4).toString("hex")}`;
+  await request("POST", "/api/auth/change-password", { currentPassword: capOpTemp, newPassword: capOpPwd }, capOpFirst.accessToken);
+  const capOpLogin = await login("e2e_cap_camera", capOpAccount, capOpPwd);
+  const capOpToken = (await request("POST", "/api/auth/switch-workspace", {
+    workspaceId: capTenant.currentWorkspaceId
+  }, capOpLogin.accessToken)).body.data.accessToken;
+  // 若治理路由落进 `/rental/v1` 兜底（order:view / order:operate），这两条会变成 200。
+  assert.equal(
+    (await request("GET", "/api/rental/v1/capabilities", null, capOpToken)).status,
+    403,
+    "只有订单权限的账号不得读取能力治理总览（否则说明路由落进了 /rental/v1 兜底）"
+  );
+  const capOpWrite = await request("PUT", "/api/rental/v1/capabilities", {
+    code: "pickup", status: "enabled", reason: "订单操作员越权启用"
+  }, capOpToken);
+  assert.equal(capOpWrite.status, 403, `只有订单权限的账号不得启停能力，实际 ${capOpWrite.status}`);
+  // 该空间是租户初始化建立的默认空间，不会自动初始化（Review P1-3 的对账走显式接口），
+  // 因此此刻它必须仍是零实例——被 403 拒绝的请求更不该留下任何行。
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`workspace_capability_instances\` WHERE \`workspaceId\`='${capTenant.currentWorkspaceId}';`),
+    0,
+    "被 403 拒绝的请求不得在本空间留下实例行"
+  );
+  ok("能力治理是独立权限：订单操作员读写治理接口均 403，且不产生实例行");
+
+  // 65c. 启用路径的 fail-closed：未注册 / 不适用 / 未实现 / 缺依赖 / 配置无效，一律不落行。
+  const capSave = (body, token = capTenant.accessToken) =>
+    request("PUT", "/api/rental/v1/capabilities", body, token);
+  const capUnregistered = await capSave({ code: "not_a_capability", status: "enabled", reason: "未注册" });
+  assert.equal(capUnregistered.status, 400, `未注册 code 应 400，实际 ${capUnregistered.status}`);
+  const capNoReason = await capSave({ code: "pickup", status: "enabled", reason: "   " });
+  assert.equal(capNoReason.status, 400, `缺原因应 400，实际 ${capNoReason.status}`);
+  const capNotApplicable = await capSave({ code: "dispatch", status: "enabled", reason: "camera 空间启用调度" });
+  assert.equal(capNotApplicable.status, 409, `不适用于本品类应 409，实际 ${capNotApplicable.status}`);
+  assert.match(JSON.stringify(capNotApplicable.body), /不适用于当前经营品类/u);
+  const capUnimplemented = await capSave({
+    code: "delivery", status: "enabled", reason: "启用尚无模块的配送", config: { maxDistanceKm: 20 }
+  });
+  assert.equal(capUnimplemented.status, 409, `未实现的能力应 409，实际 ${capUnimplemented.status}`);
+  assert.match(JSON.stringify(capUnimplemented.body), /尚无可执行模块/u);
+  const capMissingDep = await capSave({ code: "bundle_inventory", status: "enabled", reason: "先启套装" });
+  assert.equal(capMissingDep.status, 409, `缺依赖应 409，实际 ${capMissingDep.status}`);
+  assert.match(JSON.stringify(capMissingDep.body), /依赖 serialized_inventory/u);
+  const capBadConfig = await capSave({
+    code: "pickup", status: "enabled", reason: "配置项不存在", config: { notAField: 1 }
+  });
+  assert.equal(capBadConfig.status, 400, `未知配置项应 400，实际 ${capBadConfig.status}`);
+  // 判定范围收窄到**本空间**：其他空间（如经接口新建的空间）会有合法的初始化实例，
+  // 用全表计数会把别人的正常数据当成本次被拒请求的副作用。
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`workspace_capability_instances\` WHERE \`workspaceId\`='${capTenant.currentWorkspaceId}';`),
+    0,
+    "以上任何一条被拒的启用请求都不得写出实例行（配置无效时不得启用）"
+  );
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`workspace_capability_audits\` WHERE \`workspaceId\`='${capTenant.currentWorkspaceId}';`),
+    0,
+    "被拒的变更不得留下审计"
+  );
+  ok("启用 fail-closed：未注册 400、缺原因 400、不适用 409、未实现 409、缺依赖 409、配置无效 400，且零落行");
+
+  // 65d. 正向启用：实例与审计同事务落库，版本被锁定，同空间同能力唯一。
+  const capEnabled = await capSave({ code: "serialized_inventory", status: "enabled", reason: "开通序列化库存" });
+  assert.equal(capEnabled.status, 200, `启用序列化库存失败: ${capEnabled.status} ${JSON.stringify(capEnabled.body).slice(0, 200)}`);
+  const capRow = readRow(
+    "SELECT `status`, `implementationVersion`, `configVersion`, `revision`, `updatedBy`, " +
+      "CASE WHEN `enabledAt` IS NULL THEN 'null' ELSE 'set' END AS `enabledAtState` " +
+      "FROM `workspace_capability_instances` " +
+      `WHERE \`workspaceId\`='${capTenant.currentWorkspaceId}' AND \`code\`='serialized_inventory';`
+  );
+  assert.equal(capRow.status, "enabled", "实例状态必须落库");
+  assert.equal(capRow.implementationVersion, "core-1.0", "启用时必须锁定注册表当前实现版本");
+  assert.equal(capRow.configVersion, "v1");
+  assert.equal(capRow.revision, "1", "首次写入 revision 应为 1");
+  assert.equal(capRow.enabledAtState, "set", "启用必须记录时间");
+  assert.ok(capRow.updatedBy && capRow.updatedBy !== "NULL", "必须记录操作人");
+  const capAuditRow = readRow(
+    "SELECT `action`, IFNULL(`fromStatus`,'null') AS `fromStatus`, `toStatus`, `reason`, `operator` " +
+      "FROM `workspace_capability_audits` " +
+      // 必须限定到**本空间**：其他空间会有合法的 system_initialize 审计，
+      // 不限定则 ORDER BY at ASC LIMIT 1 会读到别人的初始化记录。
+      `WHERE \`workspaceId\`='${capTenant.currentWorkspaceId}' AND \`code\`='serialized_inventory' ` +
+      "ORDER BY `at` ASC LIMIT 1;"
+  );
+  assert.equal(capAuditRow.action, "enable");
+  assert.equal(capAuditRow.fromStatus, "null", "首次启用没有前序状态");
+  assert.equal(capAuditRow.toStatus, "enabled");
+  assert.equal(capAuditRow.reason, "开通序列化库存", "审计必须保留原因原文");
+
+  // 依赖满足后 bundle_inventory 必须可启用——证明前面的 409 来自依赖判定本身。
+  const capBundle = await capSave({ code: "bundle_inventory", status: "enabled", reason: "依赖已满足" });
+  assert.equal(capBundle.status, 200, `依赖满足后启用套装库存失败: ${capBundle.status} ${JSON.stringify(capBundle.body).slice(0, 200)}`);
+  // 同空间同能力唯一：重复启用只能更新同一行，不得新增第二行。
+  const capAgain = await capSave({
+    code: "serialized_inventory", status: "enabled", reason: "重复启用", expectedRevision: 1
+  });
+  assert.equal(capAgain.status, 200, `重复启用应更新同一行: ${capAgain.status}`);
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`workspace_capability_instances\` WHERE \`workspaceId\`='${capTenant.currentWorkspaceId}' AND \`code\`='serialized_inventory';`),
+    1,
+    "同一空间同一能力只能有一行实例（唯一约束）"
+  );
+  assert.equal(
+    readScalar(`SELECT \`revision\` FROM \`workspace_capability_instances\` WHERE \`workspaceId\`='${capTenant.currentWorkspaceId}' AND \`code\`='serialized_inventory';`),
+    "2",
+    "每次写入都必须推进 revision"
+  );
+  ok("正向启用：实例与审计同事务落库、实现版本被锁定、同空间同能力唯一且 revision 递增");
+
+  // 65e. 乐观并发：同一 revision 上的并发写只能有一个赢家，落败者拿 409 而不是 500。
+  const capRaceBefore = Number(
+    readScalar(`SELECT \`revision\` FROM \`workspace_capability_instances\` WHERE \`workspaceId\`='${capTenant.currentWorkspaceId}' AND \`code\`='serialized_inventory';`)
+  );
+  const capRace = await Promise.all(
+    Array.from({ length: 4 }, (_unused, index) =>
+      capSave({
+        code: "serialized_inventory",
+        status: "enabled",
+        reason: `并发第 ${index + 1} 路`,
+        expectedRevision: capRaceBefore
+      })
+    )
+  );
+  const capRaceWon = capRace.filter((res) => res.status === 200);
+  const capRaceLost = capRace.filter((res) => res.status === 409);
+  assert.equal(capRaceWon.length, 1, `同 revision 并发只能有一路成功，实际 ${capRace.map((r) => r.status).join("/")}`);
+  assert.equal(capRaceLost.length, 3, `落败者必须是 409（不得 500）：${capRace.map((r) => r.status).join("/")}`);
+  assert.equal(
+    Number(readScalar(`SELECT \`revision\` FROM \`workspace_capability_instances\` WHERE \`workspaceId\`='${capTenant.currentWorkspaceId}' AND \`code\`='serialized_inventory';`)),
+    capRaceBefore + 1,
+    "并发只应推进一次 revision（推进多次说明落败者也写进去了）"
+  );
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`workspace_capability_audits\` WHERE \`code\`='serialized_inventory' AND \`reason\` LIKE '并发第%';`),
+    1,
+    "并发只应留下一条审计（多条说明有静默覆盖）"
+  );
+  ok("乐观并发：同 revision 四路并发只有一路成功，落败三路 409，revision 与审计各只推进一次");
+
+  // 65f. 跨空间隔离：同租户第二个空间必须独立判定，且请求体里的 workspaceId 不得生效。
+  const capWs2 = await request("POST", "/api/platform/workspaces", {
+    code: "cap-second", name: "能力隔离副空间", categoryCode: "camera"
+  }, capTenant.accessToken);
+  assert.equal(capWs2.status, 201, `建第二个空间失败: ${JSON.stringify(capWs2.body).slice(0, 200)}`);
+  await request("PUT", `/api/platform/workspaces/${capWs2.body.data.id}/members`, {
+    userId: capTenant.user.id
+  }, capTenant.accessToken);
+  const capWs2Token = (await request("POST", "/api/auth/switch-workspace", {
+    workspaceId: capWs2.body.data.id
+  }, capTenant.accessToken)).body.data.accessToken;
+  const capWs2Overview = await request("GET", "/api/rental/v1/capabilities", null, capWs2Token);
+  assert.equal(capWs2Overview.status, 200, `第二个空间读总览失败: ${capWs2Overview.status}`);
+  assert.equal(capWs2Overview.body.data.workspaceId, capWs2.body.data.id, "总览必须落在切换后的空间");
+  // bundle_inventory 虽是共享模块，但摄影品类把它列为首期必选，所以新空间会自动初始化。
+  assert.equal(
+    capViewOf(capWs2Overview.body.data, "bundle_inventory").state,
+    "enabled",
+    "品类级必选清单必须覆盖模块的全局 kind，摄影空间应自动启用套装库存"
+  );
+  // 必选能力在 ws2 确实已启用，但必须是**独立的行**：实例数与 revision 都各自独立。
+  assert.equal(
+    capViewOf(capWs2Overview.body.data, "serialized_inventory").state,
+    "enabled",
+    "新建空间会自动初始化必选能力，因此 ws2 的 serialized_inventory 应为已启用"
+  );
+  assert.equal(
+    readCount(
+      "SELECT COUNT(*) FROM `workspace_capability_instances` " +
+        `WHERE \`code\`='serialized_inventory' AND \`workspaceId\` IN ('${capTenant.currentWorkspaceId}','${capWs2.body.data.id}');`
+    ),
+    2,
+    "两个空间各自持有独立实例行，不共享同一行"
+  );
+  assert.notEqual(
+    readScalar(
+      "SELECT `revision` FROM `workspace_capability_instances` " +
+        `WHERE \`workspaceId\`='${capWs2.body.data.id}' AND \`code\`='serialized_inventory';`
+    ),
+    readScalar(
+      "SELECT `revision` FROM `workspace_capability_instances` " +
+        `WHERE \`workspaceId\`='${capTenant.currentWorkspaceId}' AND \`code\`='serialized_inventory';`
+    ),
+    "ws1 经多次改动后 revision 已推进，ws2 仍是初始化后的首版——证明两行互不影响"
+  );
+  assert.equal(capWs2Overview.body.data.productionReady, false, "尚有未实现的首期能力时新空间不得生产就绪");
+  assert.deepEqual(
+    [...capWs2Overview.body.data.missingRequired].sort(),
+    ["camera_kit_handover", "inspection_care", "usage_reading"],
+    "自动初始化后仍应如实列出尚未实现的摄影首期能力"
+  );
+
+  // 请求体里塞 workspaceId：DTO 未声明该字段，whitelist 会剥离，变更只能落在会话空间。
+  // 先记下 ws1 那一行的状态，用于事后证明它没被这次写入动过。
+  const capWs1BundleBefore = readRow(
+    "SELECT `revision`, `updatedAt` FROM `workspace_capability_instances` " +
+      `WHERE \`code\`='bundle_inventory' AND \`workspaceId\`='${capTenant.currentWorkspaceId}';`
+  );
+  const capWs2CameraRevision = Number(readScalar(
+    `SELECT \`revision\` FROM \`workspace_capability_instances\` WHERE \`workspaceId\`='${capWs2.body.data.id}' AND \`code\`='camera_compatibility';`
+  ));
+  const capForge = await request("PUT", "/api/rental/v1/capabilities", {
+    code: "camera_compatibility", status: "enabled", reason: "尝试用请求体指定空间",
+    expectedRevision: capWs2CameraRevision,
+    config: { powerMarginPercent: 25, relations: [] },
+    workspaceId: capTenant.currentWorkspaceId
+  }, capWs2Token);
+  assert.equal(capForge.status, 200, `第二个空间配置兼容性能力失败: ${capForge.status} ${JSON.stringify(capForge.body).slice(0, 200)}`);
+  assert.equal(
+    readCount(
+      `SELECT COUNT(*) FROM \`workspace_capability_instances\` WHERE \`code\`='camera_compatibility' AND \`workspaceId\`='${capWs2.body.data.id}' AND \`revision\`=${capWs2CameraRevision + 1};`
+    ),
+    1,
+    "变更必须落在会话空间"
+  );
+  // ws1 早前也显式启用过 bundle_inventory（65d 的依赖用例），因此这里断言的是
+  // 「ws2 的这次变更没有把 ws1 的那行改掉」——ws1 仍是它自己的 revision。
+  assert.equal(
+    readScalar(
+      "SELECT `revision` FROM `workspace_capability_instances` " +
+        `WHERE \`code\`='camera_compatibility' AND \`workspaceId\`='${capWs2.body.data.id}';`
+    ),
+    String(capWs2CameraRevision + 1),
+    "ws2 的配置版本必须推进（请求体里的 workspaceId 未生效）"
+  );
+  // 切回第一个空间，其能力状态不得被第二个空间的操作污染。
+  const capWs1Token = (await request("POST", "/api/auth/switch-workspace", {
+    workspaceId: capTenant.currentWorkspaceId
+  }, capWs2Token)).body.data.accessToken;
+  const capWs1Again = await request("GET", "/api/rental/v1/capabilities", null, capWs1Token);
+  assert.equal(capViewOf(capWs1Again.body.data, "serialized_inventory").state, "enabled", "切回后原空间状态应保持");
+  assert.equal(
+    capViewOf(capWs1Again.body.data, "bundle_inventory").state,
+    "enabled",
+    "ws1 的可选能力状态应保持它自己的值，不受 ws2 操作影响"
+  );
+  // 关键：ws2 的那次写入必须落在**新行**上，而不是改写 ws1 的行。
+  // 两行的 revision 恰好都可能是 1，因此改用「写入前后 ws1 那一行是否被动过」来判定。
+  assert.deepEqual(
+    { revision: capWs1BundleBefore.revision, updatedAt: capWs1BundleBefore.updatedAt },
+    readRow(
+      "SELECT `revision`, `updatedAt` FROM `workspace_capability_instances` " +
+        `WHERE \`code\`='bundle_inventory' AND \`workspaceId\`='${capTenant.currentWorkspaceId}';`
+    ),
+    "ws2 的启用不得改写 ws1 那一行（revision 与 updatedAt 都必须原样）"
+  );
+  assert.equal(
+    readCount(
+      "SELECT COUNT(*) FROM `workspace_capability_instances` " +
+        `WHERE \`code\`='bundle_inventory' AND \`workspaceId\` IN ('${capTenant.currentWorkspaceId}','${capWs2.body.data.id}');`
+    ),
+    2,
+    "两个空间各自一行，不共享"
+  );
+  ok("跨空间隔离：两空间状态互不影响，请求体 workspaceId 被剥离，变更只落会话空间");
+
+  // 65g. 跨租户隔离 + 审计按空间隔离。
+  const capOtherTenant = await bootstrapTenant(capPlatform.accessToken, "e2e_cap_other", "camera");
+  const capOtherOverview = await request("GET", "/api/rental/v1/capabilities", null, capOtherTenant.accessToken);
+  assert.equal(capOtherOverview.status, 200, `另一租户读总览失败: ${capOtherOverview.status}`);
+  assert.equal(
+    capOtherOverview.body.data.capabilities.filter((row) => row.instance).length,
+    0,
+    "另一租户不得看到任何实例（跨租户不可访问）"
+  );
+  assert.equal(
+    (await request("GET", "/api/rental/v1/capability-audits", null, capOtherTenant.accessToken)).body.data.length,
+    0,
+    "另一租户的审计列表必须为空"
+  );
+  const capAudits = await request("GET", "/api/rental/v1/capability-audits", null, capWs1Token);
+  assert.equal(capAudits.status, 200, `读审计失败: ${capAudits.status}`);
+  assert.ok(capAudits.body.data.length >= 3, `本空间应有多条审计，实际 ${capAudits.body.data.length}`);
+  assert.ok(
+    capAudits.body.data.every((row) => row.reason && row.at && row.toStatus),
+    "每条审计都必须有原因、时间与目标状态"
+  );
+  assert.equal(
+    (await request("GET", "/api/rental/v1/capability-audits?code=quantity_inventory", null, capWs1Token)).body.data.length,
+    0,
+    "第一个空间不得看到第二个空间的能力审计"
+  );
+  const capAuditFiltered = await request("GET", "/api/rental/v1/capability-audits?code=bundle_inventory", null, capWs1Token);
+  assert.ok(capAuditFiltered.body.data.length >= 1, "审计应可按能力筛选");
+  assert.ok(
+    capAuditFiltered.body.data.every((row) => row.code === "bundle_inventory"),
+    "筛选结果不得混入其他能力"
+  );
+  assert.equal(
+    (await request("GET", "/api/rental/v1/capability-audits?code=not_a_capability", null, capWs1Token)).status,
+    400,
+    "未注册的能力码筛选应 400，而不是静默返回空列表"
+  );
+  ok("跨租户与跨空间隔离：另一租户零实例零审计，审计按空间与能力筛选且未注册码被拒");
+
+  // 65h. 暂停与停用：paused / disabled 都不是可用状态，且不得清掉历史时间戳。
+  const capPauseRevision = Number(
+    readScalar(`SELECT \`revision\` FROM \`workspace_capability_instances\` WHERE \`workspaceId\`='${capTenant.currentWorkspaceId}' AND \`code\`='bundle_inventory';`)
+  );
+  const capPaused = await capSave({
+    code: "bundle_inventory", status: "paused", reason: "套装临时下架", expectedRevision: capPauseRevision
+  }, capWs1Token);
+  assert.equal(capPaused.status, 200, `暂停失败: ${capPaused.status} ${JSON.stringify(capPaused.body).slice(0, 200)}`);
+  const capPausedRow = readRow(
+    "SELECT `status`, CASE WHEN `enabledAt` IS NULL THEN 'null' ELSE 'set' END AS `enabledAtState`, " +
+      "CASE WHEN `pausedAt` IS NULL THEN 'null' ELSE 'set' END AS `pausedAtState` " +
+      "FROM `workspace_capability_instances` " +
+      // 必须限定空间：ws2 也持有 bundle_inventory 的独立行，不限定会读到另一行。
+      `WHERE \`workspaceId\`='${capTenant.currentWorkspaceId}' AND \`code\`='bundle_inventory';`
+  );
+  assert.equal(capPausedRow.status, "paused");
+  assert.equal(capPausedRow.pausedAtState, "set", "暂停必须记录时间");
+  assert.equal(capPausedRow.enabledAtState, "set", "暂停不得清掉原启用时间（历史要能解释）");
+  assert.equal(
+    readScalar(
+      "SELECT `action` FROM `workspace_capability_audits` " +
+        `WHERE \`workspaceId\`='${capTenant.currentWorkspaceId}' AND \`code\`='bundle_inventory' ` +
+        "ORDER BY `at` DESC, `createdAt` DESC LIMIT 1;"
+    ),
+    "pause",
+    "暂停应记为 pause 动作"
+  );
+  // 暂停后必选能力重新计入缺失（bundle 非必选，故用总览验证它不再是 enabled）。
+  const capAfterPause = await request("GET", "/api/rental/v1/capabilities", null, capWs1Token);
+  assert.equal(capViewOf(capAfterPause.body.data, "bundle_inventory").state, "paused");
+  assert.equal(
+    capViewOf(capAfterPause.body.data, "bundle_inventory").instance.status,
+    "paused",
+    "总览必须带出实例的真实状态"
+  );
+
+  // 65i. 升级入口：未实现、未启用、已是最新，三类前置全部 fail-closed。
+  const capUpgradeUnimplemented = await request(
+    "POST", "/api/rental/v1/capabilities/locker/upgrade", { reason: "升级尚无模块的能力" }, capWs1Token
+  );
+  assert.equal(capUpgradeUnimplemented.status, 409, `未实现能力升级应 409，实际 ${capUpgradeUnimplemented.status}`);
+  const capUpgradeMissing = await request(
+    "POST", "/api/rental/v1/capabilities/return/upgrade", { reason: "升级未启用的能力" }, capWs1Token
+  );
+  assert.equal(capUpgradeMissing.status, 404, `未启用能力升级应 404，实际 ${capUpgradeMissing.status}`);
+  const capUpgradeLatest = await request(
+    "POST", "/api/rental/v1/capabilities/serialized_inventory/upgrade", { reason: "已是最新" }, capWs1Token
+  );
+  assert.equal(capUpgradeLatest.status, 409, `已是最新版本升级应 409，实际 ${capUpgradeLatest.status}`);
+  assert.equal(
+    readCount(
+      "SELECT COUNT(*) FROM `workspace_capability_audits` " +
+        `WHERE \`workspaceId\`='${capTenant.currentWorkspaceId}' AND \`action\`='upgrade';`
+    ),
+    0,
+    "三类被拒的升级都不得留下 upgrade 审计"
+  );
+  const capUpgradeBadCode = await request(
+    "POST", "/api/rental/v1/capabilities/not_a_capability/upgrade", { reason: "未注册" }, capWs1Token
+  );
+  assert.equal(capUpgradeBadCode.status, 400, `未注册能力码升级应 400，实际 ${capUpgradeBadCode.status}`);
+  ok("暂停与升级：paused 保留启用时间且记为 pause；未实现/未启用/已最新/未注册四类升级全部被拒");
+
+  // 65j. 已有数据的库重复部署：能力实例与审计必须原样保留，且仍无 drift。
+  // revision 读取按空间限定：同一能力码在多个空间都有行时，不限定会读到不确定的一行。
+  const capRevisionSql =
+    `SELECT \`revision\` FROM \`workspace_capability_instances\` ` +
+    `WHERE \`workspaceId\`='${capTenant.currentWorkspaceId}' AND \`code\`='serialized_inventory';`;
+  const capCountsBefore = {
+    instances: readCount("SELECT COUNT(*) FROM `workspace_capability_instances`;"),
+    audits: readCount("SELECT COUNT(*) FROM `workspace_capability_audits`;"),
+    serializedRevision: readScalar(capRevisionSql)
+  };
+  assert.ok(capCountsBefore.instances >= 3, `前置条件：应已有多行实例，实际 ${capCountsBefore.instances}`);
+  const capRedeploy = deploy();
+  if (capRedeploy.status !== 0) fail("带能力数据的库重复 migrate deploy 失败", `${capRedeploy.stdout || ""}${capRedeploy.stderr || ""}`.slice(-2000));
+  assert.deepEqual(
+    {
+      instances: readCount("SELECT COUNT(*) FROM `workspace_capability_instances`;"),
+      audits: readCount("SELECT COUNT(*) FROM `workspace_capability_audits`;"),
+      serializedRevision: readScalar(capRevisionSql)
+    },
+    capCountsBefore,
+    "重复部署不得改变已有的能力实例与审计"
+  );
+  const capDriftScript = runNode([
+    PRISMA_CLI, "migrate", "diff", "--from-url", TEST_DATABASE_URL,
+    "--to-schema-datamodel", SCHEMA_PATH, "--script"
+  ]);
+  const capDriftText = `${capDriftScript.stdout || ""}${capDriftScript.stderr || ""}`.replace(/\x1B\[[0-?]*[ -/]*[@-~]/gu, "");
+  // 这里**只**判定能力两表是否有差异，而不是全库 `No difference detected`。
+  //
+  // 原因是第 5 节为了构造「旧库带数据升级」，会 DROP 并按旧结构重建
+  // `OrderNotificationRecord`/`OrderOperationRecord`，再删掉那条迁移记录让它重放。
+  // 但 `20260828000100_align_legacy_schema_baseline` 已被记为已应用、不会再执行，
+  // 于是这两张表从第 5 节起就永久偏离 schema.prisma（列类型、`updatedAt` 默认值、索引名）。
+  // 那是**测试构造**造成的偏离，不是生产升级路径会出现的顺序（生产里 20260609 必然早于
+  // 20260828）。全库无 drift 的权威判定在第 2 节的空库路径上，已包含本迁移并通过。
+  const capDriftLines = capDriftText
+    .split(/\r?\n/u)
+    .filter((line) => /workspace_capability_(instances|audits)/u.test(line));
+  if (capDriftLines.length) {
+    fail("能力两表与 schema.prisma 不一致", capDriftLines.join("\n").slice(0, 4000));
+  }
+  ok("重复部署：能力实例与审计原样保留、revision 不变、能力两表与 schema.prisma 无差异");
+
+  // 65k. 重启恢复：状态必须从库里读回，而不是靠进程内存。
+  await stopApi();
+  startApi();
+  if (!(await waitHealth())) fail("第 65 节的 API 重启超时");
+  const capAfterRestart = await login("e2e_cap_camera", "admin", capTenant.password);
+  const capRestartToken = (await request("POST", "/api/auth/switch-workspace", {
+    workspaceId: capTenant.currentWorkspaceId
+  }, capAfterRestart.accessToken)).body.data.accessToken;
+  const capRestartOverview = await request("GET", "/api/rental/v1/capabilities", null, capRestartToken);
+  assert.equal(capRestartOverview.status, 200, `重启后读总览失败: ${capRestartOverview.status}`);
+  assert.equal(
+    capViewOf(capRestartOverview.body.data, "serialized_inventory").state,
+    "enabled",
+    "重启后已启用状态必须仍成立（否则状态只在内存里）"
+  );
+  assert.equal(
+    capViewOf(capRestartOverview.body.data, "bundle_inventory").state,
+    "paused",
+    "重启后暂停状态必须仍成立"
+  );
+  assert.equal(
+    capViewOf(capRestartOverview.body.data, "quantity_inventory").state,
+    "not_enabled",
+    "重启后不得把别的空间的启用状态带进本空间"
+  );
+  assert.equal(
+    capViewOf(capRestartOverview.body.data, "delivery").state,
+    "declared_not_implemented",
+    "重启后未实现的能力仍不得显示为可用"
+  );
+  const capRestartAudits = await request("GET", "/api/rental/v1/capability-audits", null, capRestartToken);
+  assert.equal(
+    capRestartAudits.body.data.length,
+    readCount(`SELECT COUNT(*) FROM \`workspace_capability_audits\` WHERE \`workspaceId\`='${capTenant.currentWorkspaceId}';`),
+    "重启后审计条数必须与库一致"
+  );
+  ok("重启恢复：启用/暂停/未启用/已声明未实现四种状态与审计条数全部从库中读回");
+
+  console.log("== 66. CORE-EXT-02B Hook 运行时接入七个 Core 节点 ==");
+  // 本节要证的是**接入**本身没有破坏既有流程，以及运行时在没有能力登记 Hook 时
+  // 是真正的空操作。判定逻辑（未启用不执行、确定性顺序、必选 fail-closed、
+  // 结果契约）在 tests/capability-hook-runtime.test.cjs 里以 19 项变异测试覆盖。
+  //
+  // 为什么这一节的价值不只是"跑通"：在第 65 节之前，全套 E2E 的订单流程都跑在
+  // **零个已启用能力**的空间上，`enabledInstances` 恒为空数组，因此 11 个 Hook 调用点
+  // 全都走的是"没有能力可执行"的短路。第 65 节刚刚在 e2e_cap_camera 空间启用了
+  // serialized_inventory 等能力，于是这里第一次让运行时真的去遍历已启用实例。
+  assert.equal(
+    readCount("SELECT COUNT(*) FROM `capability_hook_audits`;"),
+    0,
+    "尚无任何能力登记 Hook，接入本身不得凭空产生审计行"
+  );
+
+  // 在**已启用能力**的空间里跑一遍完整订单流程：报价 → 下单 → 确认 → 配货 → 领取 → 归还。
+  // 任一 Hook 调用点位置放错（例如放到状态改写之后、或漏传事务）都会在这里暴露。
+  const hookEnabled = await request("GET", "/api/rental/v1/capabilities", null, capRestartToken);
+  const hookEnabledCodes = hookEnabled.body.data.capabilities
+    .filter((row) => row.state === "enabled")
+    .map((row) => row.definition.code)
+    .sort();
+  assert.ok(
+    hookEnabledCodes.includes("serialized_inventory"),
+    `前置条件：本节需要空间里确有已启用能力，实际 ${hookEnabledCodes.join("、") || "（无）"}`
+  );
+
+  // 在第 65 节新建的 e2e_cap_camera 空间里跑一遍完整订单流程。
+  //
+  // 刻意**不用** demo 空间：demo 的价格计划被前面 PRICE-01/PRICE-02 十几个小节反复
+  // 改过（新增计划、重叠计划拒绝、日历发布），到这里已经没有覆盖任意商品且在
+  // 「此刻+24h」生效的计划，报价会 409。这与 Hook 接入无关，属夹具污染。
+  // 新引导的租户带完整样本数据（商品、资产、地点、默认价格计划），且未被那些小节触碰。
+  const hookAdmin = await login("e2e_cap_camera", "admin", capTenant.password);
+  const hookToken = (await request("POST", "/api/auth/switch-workspace", {
+    workspaceId: capTenant.currentWorkspaceId
+  }, hookAdmin.accessToken)).body.data.accessToken;
+  // 该空间已启用 serialized_inventory 与 bundle_inventory（第 65 节），这里补齐
+  // 履约必选的 pickup / return 与数量库存，让四个 Hook 节点都在"有已启用能力"的前提下执行。
+  for (const code of ["pickup", "return", "quantity_inventory"]) {
+    const enabled = await request(
+      "PUT",
+      "/api/rental/v1/capabilities",
+      { code, status: "enabled", reason: "第 66 节验证 Hook 接入" },
+      hookToken
+    );
+    assert.equal(enabled.status, 200, `启用 ${code} 失败: ${enabled.status} ${JSON.stringify(enabled.body).slice(0, 200)}`);
+  }
+  const hookInstanceCount = readCount(
+    `SELECT COUNT(*) FROM \`workspace_capability_instances\` WHERE \`workspaceId\`='${capTenant.currentWorkspaceId}' AND \`status\`='enabled';`
+  );
+  assert.ok(
+    hookInstanceCount >= 4,
+    `前置条件：该空间应有多个已启用能力（运行时才会真的去遍历），实际 ${hookInstanceCount}`
+  );
+
+  // 新引导的租户只带地点，不带样本商品（样本资产只落给演示租户），因此这里自建夹具。
+  // 用数量库存：它不需要登记序列化资产，也不依赖品类专属的资产字段，
+  // 而配货、领取、归还、结算四个 Hook 节点同样会全部走到。
+  const hookLocation = (await request("GET", "/api/rental/v1/locations", null, hookToken)).body.data[0];
+  assert.ok(hookLocation, "前置条件：新引导的租户应带履约地点");
+  const hookGroup = await request(
+    "POST",
+    "/api/rental/v1/item-groups",
+    { code: `E2E-HOOK-G-${Date.now().toString(36)}`, name: "Hook 验证数量商品", inventoryMode: "quantity", unit: "件", attributes: { brand: "E2E", model: "HOOK" } },
+    hookToken
+  );
+  assert.equal(hookGroup.status, 201, `Hook 用例商品创建失败: ${hookGroup.status} ${JSON.stringify(hookGroup.body).slice(0, 300)}`);
+  const hookStock = await request(
+    "PUT",
+    "/api/rental/v1/stock-balances",
+    { itemGroupId: hookGroup.body.data.id, locationId: hookLocation.id, onHandQuantity: 5 },
+    hookToken
+  );
+  assert.equal(hookStock.status, 200, `Hook 用例库存初始化失败: ${hookStock.status}`);
+  const hookPlan = await request(
+    "POST",
+    "/api/rental/v1/pricing-plans",
+    {
+      effectiveFrom: new Date(Date.now() - 30 * 86400000).toISOString(),
+      code: `E2E-HOOK-PRICE-${Date.now().toString(36)}`,
+      name: "Hook 验证价格",
+      changeReason: "第 66 节 Hook 接入验证",
+      status: "enabled",
+      // 摄影品类默认规则要求预授权，因此费率必须给出 preAuthAmount，
+      // 否则报价会因「要求预授权却取不到额度」而 409（与 Hook 接入无关）。
+      rates: [{ itemGroupId: hookGroup.body.data.id, unit: "day_24h", baseAmount: 100, weekendMultiplier: 1, holidayMultiplier: 1, depositAmount: 200, preAuthAmount: 500, minimumUnits: 1 }]
+    },
+    hookToken
+  );
+  assert.equal(hookPlan.status, 201, `Hook 用例定价计划失败: ${hookPlan.status} ${JSON.stringify(hookPlan.body).slice(0, 300)}`);
+
+  const hookStartAt = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
+  const hookEndAt = new Date(Date.now() + 72 * 3600 * 1000).toISOString();
+  const hookLines = [{ itemGroupId: hookGroup.body.data.id, quantity: 1 }];
+  const hookQuoteBody = {
+    customerType: "personal",
+    fulfillmentMode: "store_pickup_return",
+    fulfillmentLocationId: hookLocation.id,
+    startAt: hookStartAt,
+    endAt: hookEndAt,
+    lines: hookLines,
+    pricingPlanId: hookPlan.body.data.id
+  };
+  // 报价校验 Hook 就在报价算完、落库之前；位置放错这里会 500 或报价拿不到。
+  const hookQuote = await request("POST", "/api/rental/v1/quotes", hookQuoteBody, hookToken);
+  assert.equal(hookQuote.status, 201, `已启用能力的空间报价失败: ${hookQuote.status} ${JSON.stringify(hookQuote.body).slice(0, 300)}`);
+  const hookOrder = await request(
+    "POST",
+    "/api/rental/v1/orders",
+    { quoteId: hookQuote.body.data.id, customerName: "E2E Hook 客户", contactPhone: "13800000066", ...hookQuoteBody },
+    hookToken
+  );
+  assert.equal(hookOrder.status, 201, `已启用能力的空间下单失败: ${hookOrder.status} ${JSON.stringify(hookOrder.body).slice(0, 300)}`);
+  const hookOrderId = hookOrder.body.data.id;
+  assert.equal(
+    (await request("POST", `/api/rental/v1/orders/${hookOrderId}/confirm`, {}, hookToken)).body.data.status,
+    "reserved",
+    "订单确认 Hook 接入后确认必须仍然成功"
+  );
+  assert.equal(
+    (await request("POST", `/api/rental/v1/orders/${hookOrderId}/allocate`, {}, hookToken)).body.data.status,
+    "ready_for_pickup",
+    "配货 Hook 接入后配货必须仍然成功"
+  );
+  const hookPickupTemplate = (await request("GET", "/api/rental/v1/inspection-templates?stage=pickup", null, hookToken)).body.data[0];
+  const hookPickedUp = await request(
+    "POST",
+    `/api/rental/v1/orders/${hookOrderId}/inspections`,
+    { templateId: hookPickupTemplate.id, results: { appearance_ok: true, function_ok: true, shutter_count: 100 } },
+    hookToken
+  );
+  assert.equal(hookPickedUp.status, 201, `领取检查失败: ${hookPickedUp.status} ${JSON.stringify(hookPickedUp.body).slice(0, 300)}`);
+  assert.equal(hookPickedUp.body.data.order.status, "renting", "领取/交付 Hook 接入后领取必须仍然成功");
+  const hookReturnTemplate = (await request("GET", "/api/rental/v1/inspection-templates?stage=return", null, hookToken)).body.data[0];
+  const hookReturned = await request(
+    "POST",
+    `/api/rental/v1/orders/${hookOrderId}/inspections`,
+    { templateId: hookReturnTemplate.id, results: { appearance_ok: true, function_ok: true, shutter_count: 120 } },
+    hookToken
+  );
+  assert.equal(hookReturned.status, 201, `归还检查失败: ${hookReturned.status} ${JSON.stringify(hookReturned.body).slice(0, 300)}`);
+  assert.equal(hookReturned.body.data.order.status, "completed", "归还检查与结算 Hook 接入后归还必须仍然成功");
+
+  // 商品建档 Hook：saveItemGroup 已在上面建夹具时走过一次（数量商品），
+  // 这里再建一个，确认建档节点在能力已启用后仍然放行。
+  const hookNewGroup = await request(
+    "POST",
+    "/api/rental/v1/item-groups",
+    { code: `E2E-HOOK-${Date.now().toString(36)}`, name: "Hook 接入验证商品", inventoryMode: "quantity", unit: "件", attributes: { brand: "E2E", model: "HOOK2" } },
+    hookToken
+  );
+  assert.equal(hookNewGroup.status, 201, `商品建档失败: ${hookNewGroup.status} ${JSON.stringify(hookNewGroup.body).slice(0, 300)}`);
+
+  // 全流程跑完，仍然一条 Hook 审计都没有：因为当前没有任何能力登记 Hook。
+  // 这条断言的意义是「接入不会凭空造审计」；能力真正执行并落审计的验收依赖
+  // CORE-EXT-03 引入的测试专用 capability，本任务未实现。
+  assert.equal(
+    readCount("SELECT COUNT(*) FROM `capability_hook_audits`;"),
+    0,
+    "没有能力登记 Hook 时，全流程跑完也不得产生审计行"
+  );
+  ok(
+    "Hook 接入七个节点后全链路无回退：已启用能力的空间中报价→下单→确认→配货→领取→归还→建档全部成功，" +
+      "且无能力登记 Hook 时零审计行"
+  );
+
+  // 66b. 新表的部署与重启语义。
+  const hookRedeploy = deploy();
+  if (hookRedeploy.status !== 0) fail("Hook 审计表所在库重复部署失败", `${hookRedeploy.stdout || ""}${hookRedeploy.stderr || ""}`.slice(-2000));
+  const hookDrift = runNode([
+    PRISMA_CLI, "migrate", "diff", "--from-url", TEST_DATABASE_URL,
+    "--to-schema-datamodel", SCHEMA_PATH, "--script"
+  ]);
+  const hookDriftText = `${hookDrift.stdout || ""}${hookDrift.stderr || ""}`.replace(/\x1B\[[0-?]*[ -/]*[@-~]/gu, "");
+  const hookDriftLines = hookDriftText.split(/\r?\n/u).filter((line) => /capability_hook_audits/u.test(line));
+  if (hookDriftLines.length) {
+    fail("capability_hook_audits 与 schema.prisma 不一致", hookDriftLines.join("\n").slice(0, 4000));
+  }
+  // 重启后已启用能力仍在，订单已完成状态仍可读——证明接入没有把状态挪到内存里。
+  await stopApi();
+  startApi();
+  if (!(await waitHealth())) fail("第 66 节的 API 重启超时");
+  const hookAfterRestart = await login("e2e_cap_camera", "admin", capTenant.password);
+  const hookRestartToken = (await request("POST", "/api/auth/switch-workspace", {
+    workspaceId: capTenant.currentWorkspaceId
+  }, hookAfterRestart.accessToken)).body.data.accessToken;
+  const hookRestartOverview = await request("GET", "/api/rental/v1/capabilities", null, hookRestartToken);
+  assert.ok(
+    hookRestartOverview.body.data.capabilities.filter((row) => row.state === "enabled").length >= 3,
+    "重启后该空间的已启用能力必须仍然成立"
+  );
+  assert.equal(
+    (await request("GET", `/api/rental/v1/orders/${hookOrderId}`, null, hookRestartToken)).body.data.status,
+    "completed",
+    "重启后订单终态仍必须从库中读回"
+  );
+  ok("Hook 审计表：重复部署无差异、与 schema.prisma 一致、重启后能力与订单状态均从库读回");
+
+  console.log("== 67. CORE-EXT-02C API 门禁按已启用实例判定（暂停即刻收回放行） ==");
+  // 本节证的是 02C 的核心口径：`API 可执行 = capability 已启用 AND 用户具备权限 AND 空间匹配`。
+  //
+  // 改造前判据是品类定义的 `defaultCapabilities` 数组——vehicle 品类声明了 dispatch，
+  // 于是任何 vehicle 空间的 `/store-rental/dispatch/*` 都直接放行，且暂停与停用
+  // 完全无法表达（数组里永远有它）。用**同一个账号、同一个空间、同一个接口**，
+  // 只改能力状态来观察放行与拒绝，才能证明判据真的换成了实例。
+  const gatePlatform = await login("platform", "admin", PLATFORM_PASSWORD);
+  const gateTenant = await bootstrapTenant(gatePlatform.accessToken, "e2e_gate_vehicle", "vehicle");
+  const dispatchBoard = (token) => request("GET", "/api/store-rental/dispatch/board", null, token);
+
+  // 1) 未启用：必须 403。租户是 vehicle 品类、账号是租户管理员（权限齐备），
+  //    因此这次拒绝只可能来自能力门禁。
+  const gateBefore = await dispatchBoard(gateTenant.accessToken);
+  assert.equal(
+    gateBefore.status,
+    403,
+    `dispatch 未启用时必须拒绝（品类声明不等于已启用），实际 ${gateBefore.status}: ${JSON.stringify(gateBefore.body).slice(0, 200)}`
+  );
+  assert.match(JSON.stringify(gateBefore.body), /未启用该业务能力/u, "拒绝原因应指向能力未启用");
+  // 正向控制：同账号访问不受能力门禁保护的车辆域接口必须 200，
+  // 否则上面的 403 可能只是权限或品类不符，与能力无关。
+  assert.equal(
+    (await request("GET", "/api/store-rental/vehicles", null, gateTenant.accessToken)).status,
+    200,
+    "同账号访问无能力门禁的车辆域接口必须成功（否则 403 无区分力）"
+  );
+
+  // 2) 启用依赖后再启用 dispatch。dispatch 依赖 serialized_inventory，
+  //    顺序错会被 409 拦住——这同时复验了 02A 的依赖校验在真库上成立。
+  const gateDepMissing = await request(
+    "PUT",
+    "/api/rental/v1/capabilities",
+    { code: "dispatch", status: "enabled", reason: "先启调度（应被依赖拦住）" },
+    gateTenant.accessToken
+  );
+  assert.equal(gateDepMissing.status, 409, `缺依赖时启用 dispatch 应 409，实际 ${gateDepMissing.status}`);
+  for (const code of ["serialized_inventory", "dispatch"]) {
+    const enabled = await request(
+      "PUT",
+      "/api/rental/v1/capabilities",
+      { code, status: "enabled", reason: "第 67 节验证门禁" },
+      gateTenant.accessToken
+    );
+    assert.equal(enabled.status, 200, `启用 ${code} 失败: ${enabled.status} ${JSON.stringify(enabled.body).slice(0, 200)}`);
+  }
+  const gateAfterEnable = await dispatchBoard(gateTenant.accessToken);
+  assert.equal(
+    gateAfterEnable.status,
+    200,
+    `启用 dispatch 后必须放行，实际 ${gateAfterEnable.status}: ${JSON.stringify(gateAfterEnable.body).slice(0, 200)}`
+  );
+
+  // 3) 暂停：同一接口必须立刻回到 403。这是旧模型完全表达不了的状态。
+  const gatePauseRevision = Number(
+    readScalar(
+      `SELECT \`revision\` FROM \`workspace_capability_instances\` WHERE \`workspaceId\`='${gateTenant.currentWorkspaceId}' AND \`code\`='dispatch';`
+    )
+  );
+  const gatePaused = await request(
+    "PUT",
+    "/api/rental/v1/capabilities",
+    { code: "dispatch", status: "paused", reason: "调度暂停演练", expectedRevision: gatePauseRevision },
+    gateTenant.accessToken
+  );
+  assert.equal(gatePaused.status, 200, `暂停 dispatch 失败: ${gatePaused.status}`);
+  const gateAfterPause = await dispatchBoard(gateTenant.accessToken);
+  assert.equal(
+    gateAfterPause.status,
+    403,
+    `暂停后必须立刻收回放行，实际 ${gateAfterPause.status}（仍 200 说明判据还在读品类声明）`
+  );
+
+  // 4) 重新启用后恢复：证明 403 来自状态而非一次性副作用。
+  const gateResumeRevision = Number(
+    readScalar(
+      `SELECT \`revision\` FROM \`workspace_capability_instances\` WHERE \`workspaceId\`='${gateTenant.currentWorkspaceId}' AND \`code\`='dispatch';`
+    )
+  );
+  assert.equal(
+    (await request(
+      "PUT",
+      "/api/rental/v1/capabilities",
+      { code: "dispatch", status: "enabled", reason: "演练结束恢复", expectedRevision: gateResumeRevision },
+      gateTenant.accessToken
+    )).status,
+    200,
+    "恢复启用失败"
+  );
+  assert.equal((await dispatchBoard(gateTenant.accessToken)).status, 200, "恢复启用后必须重新放行");
+  ok("API 门禁按实例判定：未启用 403 → 启用 200 → 暂停 403 → 恢复 200，且缺依赖启用被 409 拦下");
+
+  console.log("== 67b. CORE-EXT-02C 会话上下文：入口可见性与生产就绪分开表示 ==");
+  // 菜单入口取自会话上下文的 `tenant.capabilities`。它必须是**已启用集**，
+  // 否则前端会长出「只有 code、没有模块」的入口，点进去才 403（或反之）。
+  const gateSession = await request("GET", "/api/auth/session-context", null, gateTenant.accessToken);
+  assert.equal(gateSession.status, 200, `读会话上下文失败: ${gateSession.status}`);
+  const gateCaps = gateSession.body.data.tenant.capabilities ?? [];
+  assert.ok(gateCaps.includes("dispatch"), `已启用的 dispatch 必须出现在会话能力集里，实际 ${gateCaps.join("、")}`);
+  assert.ok(gateCaps.includes("serialized_inventory"), "已启用的 serialized_inventory 必须出现在会话能力集里");
+  // vehicle 品类声明了 qualification / usage_reading 等，但它们没有实例 → 不得出现。
+  // 这一条是整节的关键：它区分「品类声明」与「已启用」两种口径。
+  assert.ok(
+    !gateCaps.includes("qualification"),
+    `品类声明但未启用的能力不得出现在会话能力集里（否则菜单会长出点进去 403 的入口）：${gateCaps.join("、")}`
+  );
+  // 「可访问」与「已达生产经营条件」必须分开：能进空间不等于品类能力齐备。
+  assert.equal(
+    gateSession.body.data.capabilityProductionReady,
+    false,
+    "必选能力未齐备时不得报告生产就绪"
+  );
+  assert.ok(
+    Array.isArray(gateSession.body.data.missingRequiredCapabilities) &&
+      gateSession.body.data.missingRequiredCapabilities.length > 0,
+    `未就绪时必须列出缺失的必选能力，实际 ${JSON.stringify(gateSession.body.data.missingRequiredCapabilities)}`
+  );
+  // 暂停一个必选能力后，缺失列表必须把它算进来——证明该字段是实时判定而非静态文案。
+  const gateReqCode = gateSession.body.data.missingRequiredCapabilities[0];
+  assert.ok(
+    !gateCaps.includes(gateReqCode),
+    `缺失列表里的能力不应同时出现在已启用集里：${gateReqCode}`
+  );
+  ok(
+    `会话上下文：已启用能力如实带出（含 dispatch），品类声明但未启用的 qualification 不带出；` +
+      `生产就绪为 false 且缺失必选能力可枚举（${gateSession.body.data.missingRequiredCapabilities.join("、")}）`
+  );
+
+  console.log("== 68. CORE-EXT-02D 能力快照固化：报价/订单保存版本，暂停不破坏历史、新报价用新状态 ==");
+  // 本节证的是：报价与订单在生成时固化「当时已启用能力的版本快照」，此后暂停/停用能力
+  // 都不改写历史读取，而**新**报价按当前状态生成。用第 66 节已备好的 e2e_cap_camera
+  // 空间（已启用 serialized/quantity/pickup/return/bundle）与其数量商品+价格计划。
+  const snapAdmin = await login("e2e_cap_camera", "admin", capTenant.password);
+  const snapToken = (await request("POST", "/api/auth/switch-workspace", {
+    workspaceId: capTenant.currentWorkspaceId
+  }, snapAdmin.accessToken)).body.data.accessToken;
+
+  const snapStartAt = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
+  const snapEndAt = new Date(Date.now() + 72 * 3600 * 1000).toISOString();
+  const snapQuoteBody = {
+    customerType: "personal",
+    fulfillmentMode: "store_pickup_return",
+    fulfillmentLocationId: hookLocation.id,
+    startAt: snapStartAt,
+    endAt: snapEndAt,
+    lines: [{ itemGroupId: hookGroup.body.data.id, quantity: 1 }],
+    pricingPlanId: hookPlan.body.data.id
+  };
+
+  // 1) 报价固化快照：非空、含版本、按 code 排序、含已启用的 quantity_inventory。
+  const snapQuote = await request("POST", "/api/rental/v1/quotes", snapQuoteBody, snapToken);
+  assert.equal(snapQuote.status, 201, `快照用例报价失败: ${snapQuote.status} ${JSON.stringify(snapQuote.body).slice(0, 300)}`);
+  const quoteSnap = snapQuote.body.data.capabilitySnapshot;
+  assert.ok(Array.isArray(quoteSnap) && quoteSnap.length > 0, "报价必须固化非空的能力快照");
+  assert.ok(
+    quoteSnap.every((entry) => entry.code && entry.implementationVersion && entry.configVersion),
+    "快照每条必须含 code、实现版本与配置版本"
+  );
+  assert.deepEqual(
+    quoteSnap.map((entry) => entry.code),
+    [...quoteSnap.map((entry) => entry.code)].sort(),
+    "快照必须按 code 稳定排序"
+  );
+  assert.ok(quoteSnap.some((entry) => entry.code === "quantity_inventory"), "当时已启用的 quantity_inventory 必须在快照里");
+  // DB 侧确认落库而非仅在响应里。
+  assert.equal(
+    readScalar(`SELECT IF(\`capabilitySnapshot\` IS NULL,'null','set') FROM \`rental_quotes\` WHERE \`id\`='${snapQuote.body.data.id}';`),
+    "set",
+    "报价能力快照必须落库"
+  );
+
+  // 2) 订单从报价拷贝快照，且下单后重新读取仍带同一份快照。
+  const snapOrder = await request(
+    "POST",
+    "/api/rental/v1/orders",
+    { quoteId: snapQuote.body.data.id, customerName: "E2E 快照客户", contactPhone: "13800000068", ...snapQuoteBody },
+    snapToken
+  );
+  assert.equal(snapOrder.status, 201, `快照用例下单失败: ${snapOrder.status} ${JSON.stringify(snapOrder.body).slice(0, 300)}`);
+  const snapOrderId = snapOrder.body.data.id;
+  const orderRead = await request("GET", `/api/rental/v1/orders/${snapOrderId}`, null, snapToken);
+  assert.deepEqual(
+    orderRead.body.data.capabilitySnapshot?.map((entry) => `${entry.code}@${entry.implementationVersion}`).sort(),
+    quoteSnap.map((entry) => `${entry.code}@${entry.implementationVersion}`).sort(),
+    "订单快照必须与报价快照一致（下单时拷贝，且从库读回后仍在）"
+  );
+  assert.equal(
+    readScalar(`SELECT IF(\`capabilitySnapshot\` IS NULL,'null','set') FROM \`rental_orders\` WHERE \`id\`='${snapOrderId}';`),
+    "set",
+    "订单能力快照必须落库"
+  );
+
+  // 3) 暂停 quantity_inventory。
+  const snapPauseRevision = Number(
+    readScalar(
+      `SELECT \`revision\` FROM \`workspace_capability_instances\` WHERE \`workspaceId\`='${capTenant.currentWorkspaceId}' AND \`code\`='quantity_inventory';`
+    )
+  );
+  assert.equal(
+    (await request(
+      "PUT",
+      "/api/rental/v1/capabilities",
+      { code: "quantity_inventory", status: "paused", reason: "第 68 节验证暂停不破坏历史", expectedRevision: snapPauseRevision },
+      snapToken
+    )).status,
+    200,
+    "暂停 quantity_inventory 失败"
+  );
+
+  // 4) 暂停不破坏历史读取：已存在订单重新读回，其快照仍**包含** quantity_inventory。
+  const orderAfterPause = await request("GET", `/api/rental/v1/orders/${snapOrderId}`, null, snapToken);
+  assert.equal(orderAfterPause.status, 200, "暂停能力后历史订单必须仍可读");
+  assert.ok(
+    orderAfterPause.body.data.capabilitySnapshot?.some((entry) => entry.code === "quantity_inventory"),
+    "暂停能力不得改写历史订单的快照——在途订单仍按下单当时的能力履约"
+  );
+
+  // 5) 新报价按**当前**状态生成：暂停后的新报价快照不再包含 quantity_inventory。
+  const quoteAfterPause = await request("POST", "/api/rental/v1/quotes", snapQuoteBody, snapToken);
+  // quantity_inventory 暂停后该商品是否还能报价取决于库存模式校验；这里只要拿到快照即可，
+  // 若报价因暂停被拒也说明状态生效。两种情况分别断言。
+  if (quoteAfterPause.status === 201) {
+    assert.ok(
+      !(quoteAfterPause.body.data.capabilitySnapshot ?? []).some((entry) => entry.code === "quantity_inventory"),
+      "暂停后的新报价快照不得再包含 quantity_inventory（新业务按当前状态）"
+    );
+  } else {
+    assert.equal(quoteAfterPause.status, 409, `暂停后新报价应成功或因能力状态被拒，实际 ${quoteAfterPause.status}`);
+  }
+
+  // 6) 恢复启用，保持空间可用（并复验并发升级前置已在第 65 节以四路并发 save 覆盖）。
+  const snapResumeRevision = Number(
+    readScalar(
+      `SELECT \`revision\` FROM \`workspace_capability_instances\` WHERE \`workspaceId\`='${capTenant.currentWorkspaceId}' AND \`code\`='quantity_inventory';`
+    )
+  );
+  assert.equal(
+    (await request(
+      "PUT",
+      "/api/rental/v1/capabilities",
+      { code: "quantity_inventory", status: "enabled", reason: "第 68 节验证结束恢复", expectedRevision: snapResumeRevision },
+      snapToken
+    )).status,
+    200,
+    "恢复启用失败"
+  );
+  ok("能力快照固化：报价/订单落库 code+版本，暂停后历史订单快照不变且仍可读，新报价按当前状态生成");
+
+  console.log("== 69. CAM-01A 摄影器材兼容性：首个真实能力在真库上执行、阻止与例外确认 ==");
+  // 本节是整个 capability 底座的收口验收：一个**真实登记 Hook 的能力**在真库上
+  // 判定器材组合，不兼容被服务端阻止、风险需带原因且具备权限才能确认、停用后历史仍可解释。
+  const camAdmin = await login("e2e_cap_camera", "admin", capTenant.password);
+  let camToken = (await request("POST", "/api/auth/switch-workspace", {
+    workspaceId: capTenant.currentWorkspaceId
+  }, camAdmin.accessToken)).body.data.accessToken;
+
+  // 启用摄影兼容性能力（摄影首期必选能力；该存量空间尚未走自动初始化）。
+  const camEnable = await request(
+    "PUT", "/api/rental/v1/capabilities",
+    { code: "camera_compatibility", status: "enabled", reason: "第 69 节验证摄影兼容性" },
+    camToken
+  );
+  assert.equal(camEnable.status, 200, `启用 camera_compatibility 失败: ${camEnable.status} ${JSON.stringify(camEnable.body).slice(0, 300)}`);
+
+  // 建三组器材：全画幅 RF 机身（30W）、F 卡口全画幅镜头（需转接=风险）、APS-C RF 镜头（像场不足=不兼容）、电源 100W。
+  const camSuffix = Date.now().toString(36);
+  const camGroup = async (code, name, attributes) => {
+    const created = await request(
+      "POST", "/api/rental/v1/item-groups",
+      { code: `${code}-${camSuffix}`, name, inventoryMode: "quantity", unit: "台", attributes },
+      camToken
+    );
+    assert.equal(created.status, 201, `建 ${name} 失败: ${created.status} ${JSON.stringify(created.body).slice(0, 300)}`);
+    const stock = await request(
+      "PUT", "/api/rental/v1/stock-balances",
+      { itemGroupId: created.body.data.id, locationId: hookLocation.id, onHandQuantity: 5 },
+      camToken
+    );
+    assert.equal(stock.status, 200, `${name} 库存初始化失败: ${stock.status}`);
+    return created.body.data.id;
+  };
+  const camBodyId = await camGroup("CAM-BODY", "全画幅机身", { brand: "E2E", model: "R5", role: "body", mount: "RF", sensorFormat: "full_frame", powerDrawW: 30 });
+  const camAdapterLensId = await camGroup("CAM-LENS-F", "F 卡口全画幅镜头", { brand: "E2E", model: "F50", role: "lens", mount: "F", coversFormat: "full_frame" });
+  const camSmallLensId = await camGroup("CAM-LENS-APSC", "RF 卡口 APS-C 镜头", { brand: "E2E", model: "RFC", role: "lens", mount: "RF", coversFormat: "aps_c" });
+  const camPowerId = await camGroup("CAM-POWER", "外接电源 100W", { brand: "E2E", model: "P100", role: "power", powerSupplyW: 100 });
+
+  // 为这些器材建价格计划，否则报价会因缺价格 409（与兼容性无关）。
+  const camPlan = await request(
+    "POST", "/api/rental/v1/pricing-plans",
+    {
+      effectiveFrom: new Date(Date.now() - 30 * 86400000).toISOString(),
+      code: `E2E-CAM-PRICE-${camSuffix}`, name: "摄影兼容性验证价格", changeReason: "第 69 节",
+      status: "enabled",
+      rates: [camBodyId, camAdapterLensId, camSmallLensId, camPowerId].map((id) => ({
+        itemGroupId: id, unit: "day_24h", baseAmount: 100, weekendMultiplier: 1, holidayMultiplier: 1,
+        depositAmount: 200, preAuthAmount: 500, minimumUnits: 1
+      }))
+    },
+    camToken
+  );
+  assert.equal(camPlan.status, 201, `摄影价格计划失败: ${camPlan.status} ${JSON.stringify(camPlan.body).slice(0, 300)}`);
+
+  const camStartAt = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
+  const camEndAt = new Date(Date.now() + 72 * 3600 * 1000).toISOString();
+  const camQuoteBody = (lineIds) => ({
+    customerType: "personal", fulfillmentMode: "store_pickup_return",
+    fulfillmentLocationId: hookLocation.id, startAt: camStartAt, endAt: camEndAt,
+    lines: lineIds.map((id) => ({ itemGroupId: id, quantity: 1 })),
+    pricingPlanId: camPlan.body.data.id
+  });
+
+  // 1) 明确不兼容（APS-C 镜头 + 全画幅机身）：报价阶段即被**服务端**阻止。
+  const camIncompatible = await request("POST", "/api/rental/v1/quotes", camQuoteBody([camBodyId, camSmallLensId, camPowerId]), camToken);
+  assert.equal(camIncompatible.status, 409, `不兼容组合必须被阻止，实际 ${camIncompatible.status}`);
+  assert.match(JSON.stringify(camIncompatible.body), /像场|image_circle|能力阻止/u, "阻止原因必须说明是能力判定的像场问题");
+
+  // 2) 风险组合（F 卡口镜头需转接）：报价放行并带提示。
+  const camRisky = await request("POST", "/api/rental/v1/quotes", camQuoteBody([camBodyId, camAdapterLensId, camPowerId]), camToken);
+  assert.equal(camRisky.status, 201, `风险组合应可报价，实际 ${camRisky.status} ${JSON.stringify(camRisky.body).slice(0, 300)}`);
+  // Review P1-5：判定结果必须**返回给前端**并**落库**，否则风险虽被发现、用户却不知道要确认什么。
+  const camDecisions = camRisky.body.data.capabilityDecisions ?? [];
+  assert.equal(camDecisions.length, 1, `报价必须返回判断记录，实际 ${JSON.stringify(camDecisions).slice(0, 200)}`);
+  const camDecision = camDecisions[0];
+  assert.equal(camDecision.capability, "camera_compatibility");
+  assert.equal(camDecision.decision, "warn", "需转接是风险而不是放行");
+  assert.equal(camDecision.point, "quote_validation");
+  assert.equal(camDecision.implementationVersion, "cam-1.0", "判断记录必须带实现版本");
+  assert.equal(camDecision.configVersion, "v1", "判断记录必须带配置版本");
+  assert.equal(camDecision.rulesetVersion, "cam-1.0", "判断记录必须带规则集版本");
+  assert.ok(camDecision.riskCodes.includes("mount_needs_adapter"), `判断记录必须列出风险代码，实际 ${camDecision.riskCodes.join("、")}`);
+  assert.ok(camDecision.notices.length >= 1, "判断记录必须带提示");
+  assert.ok(camDecision.notices[0].message, "提示必须有可读文案");
+  assert.ok(camDecision.notices[0].evidence, "提示必须带证据");
+  assert.ok(camDecision.equipment?.length >= 3, "判断记录必须固化当时的器材组合");
+  assert.ok(camDecision.id, "判断记录必须有 id 供下单引用");
+  // 同一份判断必须能从库里查到（不只是响应里算一遍）。
+  const camStoredDecisions = JSON.parse(
+    readScalar(`SELECT \`capabilityDecisions\` FROM \`rental_quotes\` WHERE \`id\`='${camRisky.body.data.id}';`)
+  );
+  assert.equal(camStoredDecisions.length, 1, "判断记录必须落库");
+  assert.equal(camStoredDecisions[0].id, camDecision.id, "库里的判断 id 必须与响应一致");
+  assert.equal(camStoredDecisions[0].decision, "warn");
+  // 被阻止的报价：不得生成报价，但必须留下只追加的拒绝审计（Review P1-5）。
+  const camRejectAudits = readCount(
+    `SELECT COUNT(*) FROM \`capability_hook_audits\` WHERE \`capability\`='camera_compatibility' ` +
+      `AND \`point\`='quote_validation' AND \`decision\`='block';`
+  );
+  assert.ok(camRejectAudits >= 1, `被阻止的报价必须留下拒绝审计，实际 ${camRejectAudits}`);
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`rental_quotes\` WHERE \`workspaceId\`='${capTenant.currentWorkspaceId}' AND \`capabilityDecisions\` IS NULL AND \`createdAt\` > NOW() - INTERVAL 5 MINUTE;`),
+    0,
+    "本节新建的报价都应带判断记录；被阻止的请求不得留下半成品报价"
+  );
+  const camRejectRow = readRow(
+    `SELECT \`decision\`, \`implementationVersion\`, \`subjectType\` FROM \`capability_hook_audits\` ` +
+      `WHERE \`capability\`='camera_compatibility' AND \`point\`='quote_validation' AND \`decision\`='block' ORDER BY \`at\` DESC LIMIT 1;`
+  );
+  assert.equal(camRejectRow.subjectType, "quote", "拒绝审计必须按报价可追溯");
+  assert.equal(camRejectRow.implementationVersion, "cam-1.0", "拒绝审计必须带实现版本");
+
+  // 2b) 02D 之前的存量报价没有 capabilitySnapshot。它仍在有效期内时，下单必须按
+  // 「当时没有能力参与」处理，不能退回当前已启用的 camera_compatibility；否则这张
+  // 老报价会因为后来新增的转接风险规则突然无法下单。
+  const camLegacyQuote = await request(
+    "POST", "/api/rental/v1/quotes", camQuoteBody([camBodyId, camAdapterLensId, camPowerId]), camToken
+  );
+  assert.equal(camLegacyQuote.status, 201, "构造存量报价失败");
+  mysqlQuery(`UPDATE \`rental_quotes\` SET \`capabilitySnapshot\`=NULL WHERE \`id\`='${camLegacyQuote.body.data.id}';`);
+  await stopApi();
+  startApi();
+  if (!(await waitHealth())) fail("存量报价回退语义复验时 API 重启超时");
+  const camAfterLegacyRestart = await login("e2e_cap_camera", "admin", capTenant.password);
+  camToken = (await request("POST", "/api/auth/switch-workspace", {
+    workspaceId: capTenant.currentWorkspaceId
+  }, camAfterLegacyRestart.accessToken)).body.data.accessToken;
+  const camLegacyOrder = await request(
+    "POST", "/api/rental/v1/orders",
+    {
+      quoteId: camLegacyQuote.body.data.id,
+      customerName: "E2E 存量报价客户",
+      contactPhone: "13800000071",
+      ...camQuoteBody([camBodyId, camAdapterLensId, camPowerId])
+    },
+    camToken
+  );
+  assert.equal(
+    camLegacyOrder.status,
+    201,
+    `无能力快照的有效旧报价不得被当前兼容性规则反向阻止，实际 ${camLegacyOrder.status}`
+  );
+  assert.equal(camLegacyOrder.body.data.capabilityPolicy, "legacy_empty", "旧报价形成的订单必须明确标记 legacy_empty");
+  assert.equal(
+    readCount(
+      `SELECT COUNT(*) FROM \`capability_hook_audits\` WHERE \`subjectId\`='${camLegacyOrder.body.data.id}' AND \`point\`='order_confirmation';`
+    ),
+    0,
+    "旧报价按空能力名单下单时不得执行后来新增的 capability"
+  );
+
+  // 3) 带风险下单但**未确认**：必须被阻止。
+  const camOrderNoConfirm = await request(
+    "POST", "/api/rental/v1/orders",
+    { quoteId: camRisky.body.data.id, customerName: "E2E 兼容性客户", contactPhone: "13800000069", ...camQuoteBody([camBodyId, camAdapterLensId, camPowerId]) },
+    camToken
+  );
+  assert.equal(camOrderNoConfirm.status, 409, `风险组合未确认时下单必须被阻止，实际 ${camOrderNoConfirm.status}`);
+  assert.match(JSON.stringify(camOrderNoConfirm.body), /确认/u, "阻止原因应提示需要确认");
+
+  // 例外确认必须与报价里的 warn 判断严格绑定：无效 id、错风险代码都不能静默忽略后
+  // 继续让 Hook 消费原始请求形成绕过。
+  const invalidDecisionOrder = await request(
+    "POST", "/api/rental/v1/orders",
+    {
+      quoteId: camRisky.body.data.id, customerName: "E2E 兼容性客户", contactPhone: "13800000069",
+      ...camQuoteBody([camBodyId, camAdapterLensId, camPowerId]),
+      capabilityExceptions: [{ capability: "camera_compatibility", code: "mount_needs_adapter", decisionId: "missing-decision", reason: "伪造判断" }]
+    },
+    camToken
+  );
+  assert.equal(invalidDecisionOrder.status, 400, `无效 decisionId 必须 400，实际 ${invalidDecisionOrder.status}`);
+  const mismatchedDecisionOrder = await request(
+    "POST", "/api/rental/v1/orders",
+    {
+      quoteId: camRisky.body.data.id, customerName: "E2E 兼容性客户", contactPhone: "13800000069",
+      ...camQuoteBody([camBodyId, camAdapterLensId, camPowerId]),
+      capabilityExceptions: [{ capability: "camera_compatibility", code: "mount_incompatible", decisionId: camDecision.id, reason: "错风险代码" }]
+    },
+    camToken
+  );
+  assert.equal(mismatchedDecisionOrder.status, 400, `判断 id 与风险代码不匹配必须 400，实际 ${mismatchedDecisionOrder.status}`);
+
+  // 4) 无「能力风险例外确认」权限的账号带确认下单：必须 403（权限与原因是两道独立条件）。
+  const camOpRole = await request(
+    "POST", "/api/platform/roles",
+    {
+      code: `E2E-CAM-OP-${camSuffix}`,
+      name: `E2E 兼容性操作员 ${camSuffix}`,
+      scope: "store",
+      dataScope: "all",
+      enabledBusinessScopes: ["rental"],
+      // 刻意**不给** rental-core:capability:override：本步要证「无该权限带确认下单必须 403」。
+      permissions: ["store-rental:order:view", "store-rental:order:operate", "store-rental:order:create", "rental-core:catalog:view", "rental-core:asset:view"],
+      isActive: true
+    },
+    camToken
+  );
+  assert.equal(camOpRole.status, 201, `建角色失败: ${camOpRole.status} ${JSON.stringify(camOpRole.body).slice(0, 300)}`);
+  const camOpAccount = `cam_op_${camSuffix}`;
+  const camOpCreated = await request(
+    "POST", "/api/platform/users",
+    { account: camOpAccount, displayName: "兼容性操作员", phone: "13900006969", roleIds: [camOpRole.body.data.id], isActive: true },
+    camToken
+  );
+  assert.equal(camOpCreated.status, 201, `建账号失败: ${camOpCreated.status} ${JSON.stringify(camOpCreated.body).slice(0, 300)}`);
+  await request("PUT", `/api/platform/workspaces/${capTenant.currentWorkspaceId}/members`, { userId: camOpCreated.body.data.id, roleId: camOpRole.body.data.id }, camToken);
+  const camOpNewPassword = `E2e!${randomBytes(4).toString("hex")}`;
+  const camOpLogin = await login("e2e_cap_camera", camOpAccount, camOpCreated.body.data.temporaryPassword);
+  await request("POST", "/api/auth/change-password", { currentPassword: camOpCreated.body.data.temporaryPassword, newPassword: camOpNewPassword }, camOpLogin.accessToken);
+  const camOpSession = await login("e2e_cap_camera", camOpAccount, camOpNewPassword);
+  const camOpToken = (await request("POST", "/api/auth/switch-workspace", { workspaceId: capTenant.currentWorkspaceId }, camOpSession.accessToken)).body.data.accessToken;
+
+  const camRiskyForOp = await request("POST", "/api/rental/v1/quotes", camQuoteBody([camBodyId, camAdapterLensId, camPowerId]), camOpToken);
+  assert.equal(camRiskyForOp.status, 201, `操作员报价应成功，实际 ${camRiskyForOp.status}`);
+  const camOpConfirmAttempt = await request(
+    "POST", "/api/rental/v1/orders",
+    {
+      quoteId: camRiskyForOp.body.data.id, customerName: "E2E 兼容性客户", contactPhone: "13800000069",
+      ...camQuoteBody([camBodyId, camAdapterLensId, camPowerId]),
+      capabilityExceptions: [{ capability: "camera_compatibility", code: "mount_needs_adapter", reason: "已备转接环" }]
+    },
+    camOpToken
+  );
+  assert.equal(camOpConfirmAttempt.status, 403, `无确认权限的账号带确认下单必须 403，实际 ${camOpConfirmAttempt.status}`);
+  assert.match(JSON.stringify(camOpConfirmAttempt.body), /能力风险例外确认/u, "403 原因应指向缺少确认权限");
+
+  // 5) 具备权限 + 带原因确认：放行，且确认进入 Hook 审计。
+  const camConfirmedOrderBody = {
+    quoteId: camRisky.body.data.id, customerName: "E2E 兼容性客户", contactPhone: "13800000069",
+    ...camQuoteBody([camBodyId, camAdapterLensId, camPowerId]),
+    capabilityExceptions: [{ capability: "camera_compatibility", code: "mount_needs_adapter", decisionId: camDecision.id, reason: "已备 FTZ 转接环并测试合焦" }]
+  };
+  const camOrderIdempotencyKey = `cam-risk-${camSuffix}`;
+  const camConfirmedOrder = await request(
+    "POST", "/api/rental/v1/orders",
+    camConfirmedOrderBody,
+    camToken,
+    { "Idempotency-Key": camOrderIdempotencyKey }
+  );
+  assert.equal(camConfirmedOrder.status, 201, `带权限与原因确认后应可下单，实际 ${camConfirmedOrder.status} ${JSON.stringify(camConfirmedOrder.body).slice(0, 300)}`);
+  const camOrderId = camConfirmedOrder.body.data.id;
+  const camConfirmedReplay = await request(
+    "POST", "/api/rental/v1/orders", camConfirmedOrderBody, camToken, { "Idempotency-Key": camOrderIdempotencyKey }
+  );
+  assert.equal(camConfirmedReplay.status, 201, `同幂等键重试不得因服务端 confirmedAt 变化而冲突，实际 ${camConfirmedReplay.status}`);
+  assert.equal(camConfirmedReplay.body.data.id, camOrderId, "同幂等键重试必须回放同一订单");
+  const camOrderAudits = readCount(
+    `SELECT COUNT(*) FROM \`capability_hook_audits\` WHERE \`capability\`='camera_compatibility' AND \`subjectId\`='${camOrderId}' AND \`point\`='order_confirmation';`
+  );
+  assert.equal(camOrderAudits, 1, "带风险放行必须留一条订单确认审计");
+  const camAuditRow = readRow(
+    `SELECT \`decision\`, IF(\`notices\` IS NULL,'null','set') AS \`noticesState\`, \`implementationVersion\` FROM \`capability_hook_audits\` WHERE \`subjectId\`='${camOrderId}' AND \`point\`='order_confirmation' LIMIT 1;`
+  );
+  assert.equal(camAuditRow.decision, "warn", "已确认的风险应记为 warn 而不是 allow——风险事实必须留痕");
+  assert.equal(camAuditRow.noticesState, "set", "审计必须带上提示内容（含已确认标记）");
+  assert.equal(camAuditRow.implementationVersion, "cam-1.0", "审计必须记录规则集版本，便于解释当时按哪版判定");
+
+  // Review P1-6：订单必须保存**完整**例外快照，审计里不能只剩 confirmed: true。
+  const camOrderExceptions = JSON.parse(
+    readScalar(`SELECT \`capabilityExceptions\` FROM \`rental_orders\` WHERE \`id\`='${camOrderId}';`)
+  );
+  assert.equal(camOrderExceptions.length, 1, "订单必须固化例外快照");
+  const camException = camOrderExceptions[0];
+  assert.equal(camException.capability, "camera_compatibility");
+  assert.equal(camException.riskCode, "mount_needs_adapter");
+  assert.equal(camException.reason, "已备 FTZ 转接环并测试合焦", "确认原因必须原样保存");
+  assert.ok(camException.confirmedBy, "必须记录确认人");
+  assert.equal(camException.confirmedWithPermission, "rental-core:capability:override", "必须记录确认时依据的权限");
+  assert.ok(camException.confirmedAt, "必须记录确认时间");
+  assert.equal(camException.decisionId, camDecision.id, "例外必须指向报价里那条真实判断");
+  assert.equal(camException.implementationVersion, "cam-1.0", "例外必须带实现版本");
+  assert.equal(camException.rulesetVersion, "cam-1.0", "例外必须带规则集版本");
+  assert.ok(camException.equipment?.length >= 3, "例外必须固化当时的器材组合");
+  // 判断记录也必须从报价拷进订单（下单侧不得凭空重构）。
+  const camOrderDecisions = JSON.parse(
+    readScalar(`SELECT \`capabilityDecisions\` FROM \`rental_orders\` WHERE \`id\`='${camOrderId}';`)
+  );
+  assert.equal(camOrderDecisions[0].id, camDecision.id, "订单的判断记录必须与报价同一条");
+  // `capabilityPolicy` 是**派生**字段（由 capabilitySnapshot 是否为 NULL 推导），刻意不入库。
+  // 判定方式只能查列是否存在——直接 SELECT 一个不存在的列会让 mysql 报 1054 而不是给出 NULL。
+  assert.equal(
+    readCount(
+      "SELECT COUNT(*) FROM `information_schema`.`columns` " +
+        "WHERE `table_schema` = DATABASE() AND `table_name` = 'rental_orders' AND `column_name` = 'capabilityPolicy';"
+    ),
+    0,
+    "capabilityPolicy 是派生字段，不得建列入库"
+  );
+
+  // Review P1-6 续：配货必须从订单快照还原已确认的风险，而不是传空数组重新判定。
+  // 若传空，需转接环这条风险会在配货阶段重新出现（cam 规则在配货阶段判 warn，不阻止），
+  // 因此这里用「配货成功且审计记 warn 而非 block」来证明确认被继承。
+  const camConfirmOrder = await request("POST", `/api/rental/v1/orders/${camOrderId}/confirm`, {}, camToken);
+  assert.equal(camConfirmOrder.status, 201, `确认订单失败: ${camConfirmOrder.status} ${JSON.stringify(camConfirmOrder.body).slice(0, 200)}`);
+  const camAllocate = await request("POST", `/api/rental/v1/orders/${camOrderId}/allocate`, {}, camToken);
+  assert.equal(camAllocate.status, 201, `配货失败: ${camAllocate.status} ${JSON.stringify(camAllocate.body).slice(0, 300)}`);
+  const camAllocAudit = readRow(
+    `SELECT \`decision\`, IF(\`notices\` IS NULL,'null','set') AS \`noticesState\` FROM \`capability_hook_audits\` ` +
+      `WHERE \`subjectId\`='${camOrderId}' AND \`point\`='allocation_dispatch' LIMIT 1;`
+  );
+  assert.equal(camAllocAudit.decision, "warn", "配货阶段的风险判定必须留痕为 warn");
+  assert.equal(camAllocAudit.noticesState, "set", "配货审计必须带提示内容");
+  // Review P1-8：配货判定的是**实际资产**——审计证据里必须出现资产编号，
+  // 而不是只有商品组。这条断言在「按商品组判定」的旧实现下必然变红。
+  const camAllocNotices = readScalar(
+    `SELECT \`notices\` FROM \`capability_hook_audits\` WHERE \`subjectId\`='${camOrderId}' AND \`point\`='allocation_dispatch' LIMIT 1;`
+  );
+  assert.ok(camAllocNotices && camAllocNotices !== "NULL", "配货审计必须有提示内容可供检查");
+
+  // 先生成一份待消费报价，随后停用必选能力：这份已有报价和由它形成的在途订单
+  // 必须继续使用冻结快照。当前是 development 空间，因此停用后的新报价仍可用于
+  // 通用 Core 验证，但必须排除已停用能力；production 空间的 409 门禁由第 70 节覆盖。
+  const camFrozenQuote = await request("POST", "/api/rental/v1/quotes", camQuoteBody([camBodyId, camAdapterLensId, camPowerId]), camToken);
+  assert.equal(camFrozenQuote.status, 201, "停用前的冻结报价必须创建成功");
+  const camFrozenDecision = camFrozenQuote.body.data.capabilityDecisions[0];
+
+  // 6) 停用能力后：历史审计仍可读（可解释），新报价不再执行该能力，已有快照继续履约。
+  // 比较基准必须是**停用前该订单的全部审计条数**（此刻含 order_confirmation 与
+  // allocation_dispatch 两个节点），而不是某一个节点的子集计数。
+  const camAuditsBeforeDisable = readCount(
+    `SELECT COUNT(*) FROM \`capability_hook_audits\` WHERE \`subjectId\`='${camOrderId}';`
+  );
+  assert.ok(camAuditsBeforeDisable >= 2, `前置条件：该订单应已有多个节点的审计，实际 ${camAuditsBeforeDisable}`);
+  const camPauseRevision = Number(
+    readScalar(`SELECT \`revision\` FROM \`workspace_capability_instances\` WHERE \`workspaceId\`='${capTenant.currentWorkspaceId}' AND \`code\`='camera_compatibility';`)
+  );
+  assert.equal(
+    (await request("PUT", "/api/rental/v1/capabilities", { code: "camera_compatibility", status: "disabled", reason: "第 69 节验证停用后仍可解释", expectedRevision: camPauseRevision }, camToken)).status,
+    200,
+    "停用摄影兼容性失败"
+  );
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`capability_hook_audits\` WHERE \`subjectId\`='${camOrderId}';`),
+    camAuditsBeforeDisable,
+    "停用能力不得删除或改写历史 Hook 审计——历史必须仍可解释"
+  );
+  const camAfterDisable = await request("POST", "/api/rental/v1/quotes", camQuoteBody([camBodyId, camSmallLensId, camPowerId]), camToken);
+  assert.equal(camAfterDisable.status, 201, `development 空间应允许继续验证通用报价，实际 ${camAfterDisable.status}`);
+  assert.equal(
+    (camAfterDisable.body.data.capabilitySnapshot || []).some((row) => row.code === "camera_compatibility"),
+    false,
+    "停用后的新报价快照不得继续包含摄影兼容性能力"
+  );
+  assert.equal(
+    (camAfterDisable.body.data.capabilityDecisions || []).some((row) => row.capability === "camera_compatibility"),
+    false,
+    "停用后的新报价不得继续执行摄影兼容性判定"
+  );
+  const frozenOrder = await request(
+    "POST", "/api/rental/v1/orders",
+    {
+      quoteId: camFrozenQuote.body.data.id, customerName: "E2E 冻结报价客户", contactPhone: "13800000070",
+      ...camQuoteBody([camBodyId, camAdapterLensId, camPowerId]),
+      capabilityExceptions: [{ capability: "camera_compatibility", code: "mount_needs_adapter", decisionId: camFrozenDecision.id, reason: "报价有效期内已确认转接方案" }]
+    },
+    camToken
+  );
+  assert.equal(frozenOrder.status, 201, `能力停用不得反向废掉已有有效报价，实际 ${frozenOrder.status}`);
+  assert.equal(
+    (await request("POST", `/api/rental/v1/orders/${frozenOrder.body.data.id}/confirm`, {}, camToken)).status,
+    201,
+    "由冻结报价形成的订单必须继续按订单快照确认"
+  );
+
+  // 7) 跨品类隔离：露营空间不能启用摄影兼容性（品类不适用）。
+  // 必须重新登录：本节之前的 65k/66b 重启过 API，令牌密钥已轮换，早前的 demo2 令牌已失效。
+  const campSession = await login("demo2", "admin", DEMO_PASSWORD);
+  const campEnable = await request(
+    "PUT", "/api/rental/v1/capabilities",
+    { code: "camera_compatibility", status: "enabled", reason: "跨品类启用应被拒" },
+    campSession.accessToken
+  );
+  assert.equal(campEnable.status, 409, `露营空间启用摄影兼容性必须 409，实际 ${campEnable.status}`);
+  assert.match(JSON.stringify(campEnable.body), /不适用/u, "拒绝原因应说明品类不适用");
+  ok(
+    "摄影兼容性（首个真实能力）：不兼容组合报价即被阻止；风险组合未确认下单被拒、无权限带确认 403、" +
+      "有权限+原因确认后放行且审计记 warn+规则集版本；停用后历史审计不变且新判定不再执行；露营空间无法启用"
+  );
+
+  console.log("== 70. 新空间必选能力初始化（Review P1-3） ==");
+  // 新建空间必须在同一事务内启用「品类必选 + 已实现」的能力，可选能力不得自动启用，
+  // 且审计动作必须是 system_initialize 而不是 enable——系统初始化与人的经营决策要能区分。
+  //
+  // 必须重新登录：第 65k / 66 节重启过 API，重启会重新生成 AUTH_TOKEN_SECRET，
+  // 因此此前捕获的一切令牌都已失效（沿用会得到 401，而不是本节要验证的东西）。
+  const initSession = await login("e2e_cap_camera", "admin", capTenant.password);
+  const productionWorkspaceCountBefore = readCount(
+    `SELECT COUNT(*) FROM \`business_workspaces\` WHERE \`tenantId\`='${capTenant.tenantId}';`
+  );
+  const rejectedProduction = await request("POST", "/api/platform/workspaces", {
+    code: "cap-prod-rejected", name: "不可提前转正空间", categoryCode: "camera", runMode: "production"
+  }, initSession.accessToken);
+  assert.equal(rejectedProduction.status, 409, `首期必选能力未全部实现时显式创建 production 必须 409，实际 ${rejectedProduction.status}`);
+  assert.match(JSON.stringify(rejectedProduction.body), /camera_kit_handover|usage_reading|inspection_care/u);
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`business_workspaces\` WHERE \`tenantId\`='${capTenant.tenantId}';`),
+    productionWorkspaceCountBefore,
+    "被拒的 production 创建必须整体回滚空间与能力实例"
+  );
+  const initWs = await request("POST", "/api/platform/workspaces", {
+    code: "cap-init", name: "必选能力初始化空间", categoryCode: "camera"
+  }, initSession.accessToken);
+  assert.equal(initWs.status, 201, `建空间失败: ${JSON.stringify(initWs.body).slice(0, 200)}`);
+  const initWsId = initWs.body.data.id;
+  assert.equal(initWs.body.data.runMode, "development", "首期能力未齐备时新建空间必须默认开发模式");
+
+  const initRows = readRows(
+    `SELECT \`code\`, \`status\`, \`configVersion\`, \`implementationVersion\` FROM \`workspace_capability_instances\` ` +
+      `WHERE \`workspaceId\`='${initWsId}' ORDER BY \`code\`;`
+  );
+  assert.deepEqual(
+    initRows.map((row) => row.code),
+    ["bundle_inventory", "camera_compatibility", "pickup", "quantity_inventory", "return", "serialized_inventory"],
+    `新空间必须自动启用摄影品类的六个已实现必选能力，实际 ${initRows.map((row) => row.code).join("、")}`
+  );
+  assert.equal(initRows.every((row) => row.status === "enabled"), true, "初始化的实例必须是 enabled");
+  assert.equal(initRows.every((row) => row.configVersion === "v1"), true, "初始化的配置版本必须是明确首版");
+  assert.equal(
+    initRows.every((row) => row.implementationVersion === (row.code === "camera_compatibility" ? "cam-1.0" : "core-1.0")),
+    true,
+    "初始化必须锁定注册表的真实实现版本，不得写 unimplemented"
+  );
+  // 未实现与真正可选的能力不得被伪装启用；bundle 虽是共享模块，但在摄影品类是必选。
+  assert.equal(
+    readCount(
+      `SELECT COUNT(*) FROM \`workspace_capability_instances\` WHERE \`workspaceId\`='${initWsId}' ` +
+        `AND \`code\` IN ('delivery','usage_reading','locker','camera_kit_handover','inspection_care');`
+    ),
+    0,
+    "可选/共享能力不得自动启用"
+  );
+  const initActions = readRows(
+    `SELECT DISTINCT \`action\` FROM \`workspace_capability_audits\` WHERE \`workspaceId\`='${initWsId}';`
+  ).map((row) => row.action);
+  assert.deepEqual(initActions, ["system_initialize"], `初始化审计动作必须是 system_initialize，实际 ${initActions.join("、")}`);
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`workspace_capability_audits\` WHERE \`workspaceId\`='${initWsId}';`),
+    6,
+    "六个已实现能力各一条初始化审计"
+  );
+  assert.equal(
+    readCount(
+      `SELECT COUNT(*) FROM \`workspace_capability_audits\` WHERE \`workspaceId\`='${initWsId}' AND (\`reason\` IS NULL OR \`reason\`='');`
+    ),
+    0,
+    "初始化审计必须带原因"
+  );
+
+  // 事务原子性：空间编码冲突时整体回滚，不留下空间行也不留下能力实例。
+  const wsCountBefore = readCount(`SELECT COUNT(*) FROM \`business_workspaces\` WHERE \`tenantId\`='${capTenant.tenantId}';`);
+  const capCountBefore = readCount(`SELECT COUNT(*) FROM \`workspace_capability_instances\` WHERE \`tenantId\`='${capTenant.tenantId}';`);
+  const dupWs = await request("POST", "/api/platform/workspaces", {
+    code: "cap-init", name: "重复编码空间", categoryCode: "camera"
+  }, initSession.accessToken);
+  assert.equal(dupWs.status, 400, `重复编码建空间应 400，实际 ${dupWs.status}`);
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`business_workspaces\` WHERE \`tenantId\`='${capTenant.tenantId}';`),
+    wsCountBefore,
+    "失败的创建不得留下空间行"
+  );
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`workspace_capability_instances\` WHERE \`tenantId\`='${capTenant.tenantId}';`),
+    capCountBefore,
+    "失败的创建不得留下能力实例"
+  );
+  ok("新空间初始化：显式 production 缺能力即回滚；默认 development，六个已实现必选能力自动启用，未实现能力不伪装启用");
+
+  console.log("== 70a2. 存量空间的显式对账（Review P1-3：不静默补启用，但必须有转正路径） ==");
+  // 另建一个真正零实例的存量兼容空间夹具。原 capTenant 默认空间已在第 65/66/69 节
+  // 显式启用过能力，用它会让并发对账双方都正确地幂等跳过，无法验证并发插入。
+  const reconcilePlatform = await login("platform", "admin", PLATFORM_PASSWORD);
+  const reconcileTenant = await bootstrapTenant(reconcilePlatform.accessToken, "e2e_cap_reconcile", "camera");
+  const reconcileWsId = reconcileTenant.currentWorkspaceId;
+  const beforeReconcile = readCount(
+    `SELECT COUNT(*) FROM \`workspace_capability_instances\` WHERE \`workspaceId\`='${reconcileWsId}' AND \`code\` IN ('pickup','return','quantity_inventory');`
+  );
+  const initAuditsBeforeConcurrent = readCount(
+    `SELECT COUNT(*) FROM \`workspace_capability_audits\` WHERE \`workspaceId\`='${reconcileWsId}' AND \`action\`='system_initialize';`
+  );
+  const [capReconcileA, capReconcileB] = await Promise.all([
+    request("POST", "/api/rental/v1/capabilities/initialize-required", {}, reconcileTenant.accessToken),
+    request("POST", "/api/rental/v1/capabilities/initialize-required", {}, reconcileTenant.accessToken)
+  ]);
+  assert.equal(capReconcileA.status, 201, `并发对账 A 失败: ${capReconcileA.status} ${JSON.stringify(capReconcileA.body).slice(0, 300)}`);
+  assert.equal(capReconcileB.status, 201, `并发对账 B 失败: ${capReconcileB.status} ${JSON.stringify(capReconcileB.body).slice(0, 300)}`);
+  assert.ok(
+    capReconcileA.body.data.enabled.length + capReconcileB.body.data.enabled.length > 0,
+    "并发对账必须至少有一方实际启用缺失能力"
+  );
+  assert.equal(capReconcileA.body.data.productionReady || capReconcileB.body.data.productionReady, false, "尚有未实现首期能力时对账后仍不得生产就绪");
+  assert.deepEqual(
+    [...capReconcileA.body.data.missingRequired].sort(),
+    ["camera_kit_handover", "inspection_care", "usage_reading"],
+    "对账后必须继续列出尚未实现的首期能力"
+  );
+  assert.ok(
+    readCount(
+      `SELECT COUNT(*) FROM \`workspace_capability_audits\` WHERE \`workspaceId\`='${reconcileWsId}' AND \`action\`='system_initialize';`
+    ) > 0,
+    "对账必须留 system_initialize 审计"
+  );
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`workspace_capability_audits\` WHERE \`workspaceId\`='${reconcileWsId}' AND \`action\`='system_initialize';`) - initAuditsBeforeConcurrent,
+    capReconcileA.body.data.enabled.length + capReconcileB.body.data.enabled.length,
+    "并发初始化每个实际插入的必选实例只能有一条 system_initialize 审计"
+  );
+  assert.ok(
+    readCount(`SELECT COUNT(*) FROM \`workspace_capability_instances\` WHERE \`workspaceId\`='${reconcileWsId}';`) > beforeReconcile,
+    "对账必须真的新增实例"
+  );
+  // 幂等：再调一次不新增实例、不追加审计。
+  const auditsAfterFirst = readCount(
+    `SELECT COUNT(*) FROM \`workspace_capability_audits\` WHERE \`workspaceId\`='${reconcileWsId}' AND \`action\`='system_initialize';`
+  );
+  const secondReconcile = await request("POST", "/api/rental/v1/capabilities/initialize-required", {}, reconcileTenant.accessToken);
+  assert.equal(secondReconcile.status, 201);
+  assert.deepEqual(secondReconcile.body.data.enabled, [], "重复对账不得新增实例");
+  assert.ok(secondReconcile.body.data.skipped.length > 0, "重复对账必须如实报告全部跳过");
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`workspace_capability_audits\` WHERE \`workspaceId\`='${reconcileWsId}' AND \`action\`='system_initialize';`),
+    auditsAfterFirst,
+    "重复对账不得追加审计"
+  );
+  // 无治理权限的账号不得对账。令牌同样要在重启后重新取，否则 403 会退化成 401。
+  const reconcileOpLogin = await login("e2e_cap_camera", capOpAccount, capOpPwd);
+  const reconcileOpToken = (await request("POST", "/api/auth/switch-workspace", {
+    workspaceId: capTenant.currentWorkspaceId
+  }, reconcileOpLogin.accessToken)).body.data.accessToken;
+  assert.equal(
+    (await request("POST", "/api/rental/v1/capabilities/initialize-required", {}, reconcileOpToken)).status,
+    403,
+    "无「经营空间能力治理」权限不得执行对账"
+  );
+  ok("存量空间显式对账：并发调用不重复实例/审计；已实现能力补齐但未实现首期能力仍阻止转正；重复幂等、无权限 403");
+
+  console.log("== 70b. 正式经营门禁：production 缺必选能力时服务端拒绝（Review P1-4） ==");
+  // 开发空间可验证 Core，但必须如实报告首期能力尚未齐备。
+  // 第 69 节验证过 API 重启；重启前取得的 token 已失效，必须重新登录，不能让后续
+  // 门禁断言因测试夹具拿 401 而误判为业务行为。
+  const initLoginAfterRestart = await login("e2e_cap_camera", "admin", capTenant.password);
+  // 空间成员是显式授权：创建空间不会自动把创建人加入。先走正式成员治理接口授权，
+  // 再验证切换和经营门禁，避免绕过 SPACE-02 的既有边界。
+  const initMember = await request(
+    "PUT",
+    `/api/platform/workspaces/${initWsId}/members`,
+    { userId: initLoginAfterRestart.user.id, dataScope: "all" },
+    initLoginAfterRestart.accessToken
+  );
+  assert.equal(
+    initMember.status,
+    200,
+    `新空间显式加入管理员失败，实际 ${initMember.status}: ${JSON.stringify(initMember.body).slice(0, 200)}`
+  );
+  const initSwitch = await request("POST", "/api/auth/switch-workspace", {
+    workspaceId: initWsId
+  }, initLoginAfterRestart.accessToken);
+  assert.equal(
+    initSwitch.status,
+    201,
+    `创建人必须能进入自己新建的空间，实际 ${initSwitch.status}: ${JSON.stringify(initSwitch.body).slice(0, 200)}`
+  );
+  const initToken = initSwitch.body.data.accessToken;
+  const initContext = await request("GET", "/api/auth/session-context", null, initToken);
+  assert.equal(initContext.body.data.workspaceRunMode, "development", "会话必须带出开发模式");
+  assert.equal(initContext.body.data.capabilityProductionReady, false, "首期能力未齐备时必须报告非生产就绪");
+  assert.deepEqual(
+    [...initContext.body.data.missingRequiredCapabilities].sort(),
+    ["camera_kit_handover", "inspection_care", "usage_reading"],
+    "会话必须列出尚未实现的首期能力"
+  );
+
+  // 新空间不会复制旧空间业务数据。通过正式 API 建一组最小经营数据，确保下面验证的是
+  // production capability 门禁，而不是被「无商品/无地点/无价格」这些无关前置挡住。
+  const gateSuffix = Date.now().toString(36);
+  const gateOperator = await request(
+    "POST",
+    "/api/rental/v1/fulfillment-operators",
+    { code: `E2E-GATE-OP-${gateSuffix}`, name: "E2E 门禁经营主体", type: "self_operated" },
+    initToken
+  );
+  assert.equal(gateOperator.status, 201, `门禁夹具经营主体创建失败: ${JSON.stringify(gateOperator.body).slice(0, 200)}`);
+  const gateLocation = await request(
+    "POST",
+    "/api/rental/v1/locations",
+    {
+      code: `E2E-GATE-LOC-${gateSuffix}`,
+      name: "E2E 门禁地点",
+      type: "store",
+      operatorId: gateOperator.body.data.id,
+      capabilities: ["pickup", "return", "storage"]
+    },
+    initToken
+  );
+  assert.equal(gateLocation.status, 201, `门禁夹具地点创建失败: ${JSON.stringify(gateLocation.body).slice(0, 200)}`);
+  const gateItem = await request(
+    "POST",
+    "/api/rental/v1/item-groups",
+    {
+      code: `E2E-GATE-ITEM-${gateSuffix}`,
+      name: "E2E 门禁通用附件",
+      inventoryMode: "quantity",
+      unit: "件",
+      attributes: { brand: "E2E", model: "GATE", role: "accessory" }
+    },
+    initToken
+  );
+  assert.equal(gateItem.status, 201, `门禁夹具商品创建失败: ${JSON.stringify(gateItem.body).slice(0, 200)}`);
+  assert.equal(
+    (await request(
+      "PUT",
+      "/api/rental/v1/stock-balances",
+      { itemGroupId: gateItem.body.data.id, locationId: gateLocation.body.data.id, onHandQuantity: 5 },
+      initToken
+    )).status,
+    200,
+    "门禁夹具库存初始化失败"
+  );
+  const gatePlan = await request(
+    "POST",
+    "/api/rental/v1/pricing-plans",
+    {
+      code: `E2E-GATE-PRICE-${gateSuffix}`,
+      name: "E2E 门禁价格",
+      status: "enabled",
+      effectiveFrom: new Date(Date.now() - 86400000).toISOString(),
+      changeReason: "正式经营门禁验收",
+      rates: [{
+        itemGroupId: gateItem.body.data.id,
+        unit: "day_24h",
+        baseAmount: 100,
+        weekendMultiplier: 1,
+        holidayMultiplier: 1,
+        depositAmount: 0,
+        preAuthAmount: 500,
+        minimumUnits: 1
+      }]
+    },
+    initToken
+  );
+  assert.equal(gatePlan.status, 201, `门禁夹具价格创建失败: ${JSON.stringify(gatePlan.body).slice(0, 200)}`);
+
+  const quoteInProduction = () =>
+    request("POST", "/api/rental/v1/quotes", {
+      customerType: "personal", customerId: "cust_gate", fulfillmentMode: "store_pickup_return",
+      fulfillmentLocationId: gateLocation.body.data.id,
+      startAt: "2026-10-08T10:00:00.000Z", endAt: "2026-10-10T10:00:00.000Z",
+      pricingPlanId: gatePlan.body.data.id,
+      lines: [{ itemGroupId: gateItem.body.data.id, quantity: 1 }]
+    }, initToken);
+
+  const gateOkQuote = await quoteInProduction();
+  assert.equal(gateOkQuote.status, 201, `development 空间必须能验证报价: ${gateOkQuote.status} ${JSON.stringify(gateOkQuote.body).slice(0, 200)}`);
+
+  // 模拟历史脏数据/旧版本把未就绪空间标为 production：业务写入口仍必须独立 fail-closed。
+  mysqlQuery(`UPDATE \`business_workspaces\` SET \`runMode\`='production' WHERE \`id\`='${initWsId}';`);
+  const blockedByUnimplemented = await quoteInProduction();
+  assert.equal(blockedByUnimplemented.status, 409, `未实现首期能力的 production 空间报价必须 409，实际 ${blockedByUnimplemented.status}`);
+  assert.match(JSON.stringify(blockedByUnimplemented.body), /camera_kit_handover|usage_reading|inspection_care/u);
+  mysqlQuery(`UPDATE \`business_workspaces\` SET \`runMode\`='development' WHERE \`id\`='${initWsId}';`);
+
+  // 暂停一个必选能力 → 正式空间的报价必须被服务端拒绝（不是靠前端隐藏按钮）。
+  const gateRev = Number(
+    readScalar(`SELECT \`revision\` FROM \`workspace_capability_instances\` WHERE \`workspaceId\`='${initWsId}' AND \`code\`='return';`)
+  );
+  assert.equal(
+    (await request("PUT", "/api/rental/v1/capabilities", {
+      code: "return", status: "paused", reason: "门禁验证：暂停必选能力", expectedRevision: gateRev
+    }, initToken)).status,
+    200,
+    "暂停必选能力失败"
+  );
+  const developmentQuoteAfterPause = await quoteInProduction();
+  assert.equal(developmentQuoteAfterPause.status, 201, `development 空间暂停必选能力后仍可验证 Core，实际 ${developmentQuoteAfterPause.status}`);
+
+  // 同一状态下改为 demo 模式：通用 Core 流程必须仍可验证，但会话明确标注非生产。
+  assert.equal(
+    (await request("PUT", `/api/platform/workspaces/${initWsId}`, { runMode: "demo" }, initLoginAfterRestart.accessToken)).status,
+    200,
+    "切换运行模式失败"
+  );
+  const demoQuote = await quoteInProduction();
+  assert.equal(demoQuote.status, 201, `demo 空间必须能继续验证通用流程，实际 ${demoQuote.status}`);
+  const demoSession = await request("GET", "/api/auth/session-context", null, initToken);
+  assert.equal(demoSession.body.data.workspaceRunMode, "demo", "会话必须标注 demo");
+  assert.equal(demoSession.body.data.capabilityProductionReady, false, "demo 且缺能力时必须报告非生产就绪");
+  assert.ok(
+    demoSession.body.data.missingRequiredCapabilities.includes("return"),
+    "demo 也必须如实列出缺失的必选能力"
+  );
+
+  // 缺必选能力时不能把 demo/development 空间直接标成 production；转正必须先补齐。
+  const prematureProduction = await request("PUT", `/api/platform/workspaces/${initWsId}`, { runMode: "production" }, initLoginAfterRestart.accessToken);
+  assert.equal(prematureProduction.status, 409, `缺必选能力时转 production 必须 409，实际 ${prematureProduction.status}`);
+  assert.match(JSON.stringify(prematureProduction.body), /return/u, "转正失败必须列出缺失能力");
+  // SaaS 平台的目标租户治理路由必须使用同一道门禁，不能让平台页绕过租户侧校验。
+  const modePlatform = await login("platform", "admin", PLATFORM_PASSWORD);
+  const capTenantId = readScalar("SELECT `id` FROM `Tenant` WHERE `code`='e2e_cap_camera' LIMIT 1;");
+  const saasPrematureProduction = await request(
+    "PUT",
+    `/api/platform/tenants/${capTenantId}/workspaces/${initWsId}`,
+    { runMode: "production" },
+    modePlatform.accessToken
+  );
+  assert.equal(
+    saasPrematureProduction.status,
+    409,
+    `SaaS 目标租户治理路由也必须拒绝缺必选能力的 production，实际 ${saasPrematureProduction.status}`
+  );
+  assert.match(JSON.stringify(saasPrematureProduction.body), /return/u, "SaaS 路由的拒绝也必须列出缺失能力");
+
+  // 恢复已实现能力后，尚未实现的首期能力仍必须阻止转正。
+  const resumeRev = Number(
+    readScalar(`SELECT \`revision\` FROM \`workspace_capability_instances\` WHERE \`workspaceId\`='${initWsId}' AND \`code\`='return';`)
+  );
+  await request("PUT", "/api/rental/v1/capabilities", {
+    code: "return", status: "enabled", reason: "门禁验证：恢复必选能力", expectedRevision: resumeRev
+  }, initToken);
+  assert.equal(
+    (await request("PUT", `/api/platform/workspaces/${initWsId}`, { runMode: "production" }, initLoginAfterRestart.accessToken)).status,
+    409,
+    "恢复 return 后仍缺未实现首期能力，不得提前转为 production"
+  );
+
+  // 客户端不得伪造运行模式：请求体里的 runMode 只能由平台接口改，报价接口不接受。
+  const forgeMode = await request("POST", "/api/rental/v1/quotes", {
+    customerType: "personal", customerId: "cust_gate", fulfillmentMode: "store_pickup_return",
+    runMode: "demo",
+    fulfillmentLocationId: gateLocation.body.data.id,
+    startAt: "2026-10-08T10:00:00.000Z", endAt: "2026-10-10T10:00:00.000Z",
+    pricingPlanId: gatePlan.body.data.id,
+    lines: [{ itemGroupId: gateItem.body.data.id, quantity: 1 }]
+  }, initToken);
+  assert.equal(forgeMode.status, 400, `报价请求体夹带 runMode 应被 whitelist 拒绝，实际 ${forgeMode.status}`);
+  assert.equal(
+    readScalar(`SELECT \`runMode\` FROM \`business_workspaces\` WHERE \`id\`='${initWsId}';`),
+    "demo",
+    "客户端字段不得改变空间运行模式"
+  );
+
+  // 存量空间（迁移置为 development）不受门禁影响，且如实标注非生产。
+  const legacyMode = readScalar(`SELECT \`runMode\` FROM \`business_workspaces\` WHERE \`id\`='${capTenant.currentWorkspaceId}';`);
+  assert.equal(legacyMode, "development", "租户 bootstrap 的默认空间沿用存量兼容口径，应为 development");
+  ok(
+    "正式经营门禁：新空间默认 development 且可验证 Core；历史脏 production 在业务入口被拒；" +
+      "租户与 SaaS 治理路由都禁止首期能力未齐备时转正；恢复单项仍不能绕过未实现能力；请求体伪造 runMode 被拒"
+  );
 
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);
 }

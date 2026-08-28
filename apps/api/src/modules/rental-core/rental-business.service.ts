@@ -1,6 +1,10 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, OnApplicationBootstrap, OnModuleInit, Optional } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
+import { CapabilityBlockedException, CapabilityHookRuntime } from "./capability-hook.runtime";
+import { CapabilityHookRepository } from "./capability-hook.repository";
+import { WorkspaceCapabilityService } from "./workspace-capability.service";
+import { buildCapabilityEquipment } from "./capability-equipment";
 import {
   RentalCategoryCode,
   type GrantRentalRewardRequest,
@@ -36,6 +40,7 @@ import {
   type RentalQuoteCalendarDay,
   type RentalQuoteRequest,
   type RentalQuoteSnapshotV1,
+  type RentalCapabilityDecisionSnapshot,
   type RentalRewardLedgerEntry,
   type RentalRuleConfig,
   type RentalTimeWindow,
@@ -272,7 +277,13 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     @Inject(RentalBusinessFactRepository) private readonly factStore: RentalBusinessFactStore,
     @Inject(RentalCoreConfigRepository) private readonly coreConfigStore: RentalConfigStore,
     @Optional() private readonly stateRepository?: RentalStateRepository,
-    @Optional() private readonly prisma?: PrismaService
+    @Optional() private readonly prisma?: PrismaService,
+    // CORE-EXT-02B：报价校验节点的 Hook 运行时。可选同 RentalCoreService 的理由。
+    @Optional() private readonly hooks?: CapabilityHookRuntime,
+    // CORE-EXT-02D：报价生成时固化已启用能力的版本快照。可选同上。
+    @Optional() private readonly capabilities?: WorkspaceCapabilityService,
+    // Review P1-5：被阻止的报价要写只追加的拒绝审计。可选同上。
+    @Optional() private readonly hookAudits?: CapabilityHookRepository
   ) {}
 
   /**
@@ -1953,6 +1964,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
 
   async createQuote(tenantId: string, context: BusinessContext, input: RentalQuoteRequest) {
     const state = this.state(tenantId, context);
+    // 正式经营门禁：缺品类必选能力的 production 空间不得出新报价（Review P1-4）。
+    if (this.capabilities) await this.capabilities.assertWorkspaceOperable(tenantId, this.workspaceOf(tenantId));
     if (new Date(input.startAt).getTime() >= new Date(input.endAt).getTime()) throw new BadRequestException("租赁结束时间必须晚于开始时间");
     if (!input.lines.length) throw new BadRequestException("报价至少需要一个商品");
     if (new Set(input.lines.map((line) => line.itemGroupId)).size !== input.lines.length) throw new BadRequestException("同一商品在一次报价中只能出现一行");
@@ -2263,13 +2276,94 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       ),
       pricingPlanVersion: plan.version, ruleVersion: rule.version, ruleSnapshot: structuredClone(rule.config), calendarVersion: calendars.map((calendar) => `${calendar.year}:${calendar.status === "published" ? calendar.version : "draft"}`).join("|"),
       appliedDiscountPlanIds: discountPlans.map((item) => item.id), customerCouponId: customerCoupon?.id,
+      // CORE-EXT-02D：固化本次报价生成时该空间已启用能力的版本与配置。
+      // 升级或改配置后，这张报价及由它下单的在途订单仍按此快照校验与履约。
+      capabilitySnapshot: this.capabilities
+        ? await this.capabilities.snapshotEnabled(tenantId, this.workspaceOf(tenantId))
+        : undefined,
       expiresAt: new Date(Date.now() + rule.config.payment.unpaidHoldMinutes * 60_000).toISOString(), createdAt: timestamp
     };
+    // Review P1-5：判定结果必须写进报价并返回，否则「需转接环」这类风险虽被发现，
+    // 用户却无从知道要确认什么，下单侧也只能凭空重构一遍判断。
+    quote.capabilityDecisions = await this.runQuoteHook(tenantId, context, quote);
     state.quotes.unshift(quote);
     await this.factStore.upsertQuote(quote);
     return quote;
   }
 
+  /**
+   * 报价校验 Hook。在报价**算完之后、落库之前**判定，并把判断记录返回给调用方固化。
+   *
+   * 为什么不在算之前：能力要判定的是这份报价本身（金额、日历依据、履约方式、
+   * 命中的费率），算之前那些都还不存在。为什么不在落库之后：那时阻止已经晚了，
+   * 报价已经可以被下单引用。
+   *
+   * 报价没有事务（`upsertQuote` 是独立写入），因此放行时的 Hook 审计跳过——
+   * 审计必须与业务变更同事务，否则会留下与实际状态不一致的记录；判定依据由返回的
+   * `capabilityDecisions` 随报价固化承接。
+   *
+   * 被阻止时（Review P1-5）：**不生成报价**，但写一条独立的、只追加的拒绝审计，
+   * 然后把异常抛给调用方。拒绝审计不属于任何业务事务（没有业务变更要回滚），
+   * 否则「为什么这单报不出价」事后完全无从追溯。
+   */
+  private async runQuoteHook(
+    tenantId: string,
+    context: BusinessContext,
+    quote: RentalQuoteSnapshotV1
+  ): Promise<RentalCapabilityDecisionSnapshot[] | undefined> {
+    if (!this.hooks) return undefined;
+    const workspaceId = this.workspaceOf(tenantId);
+    // 富化走与订单、配货**同一份**公共实现（P2-1）：早前这里另写一遍，
+    // 找不到商品时用 id 冒充名称、`inventoryMode as never`，与订单侧对同一条脏数据
+    // 给出不同结果。现在两处的错误处理也一致——找不到商品一律明确报错。
+    const groups = new Map(
+      context.groups.map((group) => [
+        group.id,
+        { id: group.id, name: group.name, inventoryMode: group.inventoryMode, attributes: group.attributes }
+      ])
+    );
+    const equipment = buildCapabilityEquipment(groups, quote.request.lines.map((line) => ({
+      itemGroupId: line.itemGroupId,
+      quantity: line.quantity
+    })));
+    const instances = quote.capabilitySnapshot
+      ? WorkspaceCapabilityService.instancesFromSnapshot(tenantId, workspaceId, quote.capabilitySnapshot)
+      : undefined;
+    const at = quote.createdAt;
+    try {
+      const outcome = await this.hooks.evaluate({
+        point: "quote_validation",
+        tenantId,
+        workspaceId,
+        categoryCode: context.category.code,
+        subjectRef: { type: "quote", id: quote.id },
+        subject: { ...quote, equipment, capabilityExceptions: [] },
+        at,
+        // 用报价自己固化的能力快照判定，而不是当前实例。报价生成与校验之间若有并发升级，
+        // 也必须按写进这张报价的版本判定——快照即事实。
+        instances
+      });
+      if (!outcome.executed.length) return undefined;
+      return CapabilityHookRuntime.toDecisionSnapshots(outcome, {
+        at,
+        equipment,
+        idPrefix: quote.id
+      });
+    } catch (error) {
+      if (error instanceof CapabilityBlockedException) {
+        // 只追加的拒绝审计，写在事务之外——报价并未生成，没有业务变更需要回滚。
+        await this.hookAudits?.recordRejection(
+          tenantId,
+          workspaceId,
+          { type: "quote", id: quote.id },
+          error.outcome,
+          undefined,
+          at
+        );
+      }
+      throw error;
+    }
+  }
   getQuote(tenantId: string, context: BusinessContext, quoteId: string) {
     const quote = this.state(tenantId, context).quotes.find((item) => item.id === quoteId);
     if (!quote) throw new NotFoundException("报价不存在");

@@ -3,10 +3,12 @@ import {
   ExecutionContext,
   ForbiddenException,
   Injectable,
+  Optional,
   UnauthorizedException
 } from "@nestjs/common";
 import { RentalCategoryCode, type RentalCapability, type SystemUserRow } from "@store-rental/shared";
 import { AuthService } from "../modules/auth/auth.service";
+import { WorkspaceCapabilityService } from "../modules/rental-core/workspace-capability.service";
 import { enterRequestIdentity } from "./request-identity";
 import { matchableRequestPath } from "./request-path";
 
@@ -271,6 +273,21 @@ export function requiredPermissions(method: string, path: string) {
   }
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/cancel$/)) return ["store-rental:order:cancel", "store-rental:order:operate"];
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/(confirm|allocate|substitute-bundle-component|partial-return|handover\/[^/]+)$/)) return ["store-rental:order:operate"];
+  if (
+    path === "/rental/v1/capabilities" ||
+    path.startsWith("/rental/v1/capabilities/") ||
+    path === "/rental/v1/capability-audits"
+  ) {
+    // CORE-EXT-02A：能力治理是**经营空间级配置**，不是订单动作。
+    //
+    // 必须显式声明，否则会落进下面的 `/rental/v1` 兜底，拿到
+    // `order:view` / `order:operate`——那等于任何能操作订单的门店人员都可以
+    // 启用、暂停或停用整个空间的业务能力。菜单与 API 门禁（CORE-EXT-02C）
+    // 将以这些实例为准，因此这里放宽一格就是放宽整个门禁。
+    return method === "GET"
+      ? ["rental-core:capability:view", "rental-core:capability:manage"]
+      : ["rental-core:capability:manage"];
+  }
   if (path.startsWith("/rental/v1")) {
     return method === "GET"
       ? ["store-rental:order:view", "store-rental:vehicle:view"]
@@ -458,7 +475,12 @@ function hasAnyPermission(user: SystemUserRow, permissions: string[]) {
 
 @Injectable()
 export class ApiAuthGuard implements CanActivate {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    // CORE-EXT-02C：能力门禁的判定依据。可选是为了让既有单测继续用一个假 AuthService
+    // 直接构造守卫；缺失时能力门禁**拒绝**而不是放行（见 canActivate 内注释）。
+    @Optional() private readonly capabilities?: WorkspaceCapabilityService
+  ) {}
 
   async canActivate(context: ExecutionContext) {
     const request = context.switchToHttp().getRequest<RequestLike>();
@@ -541,8 +563,29 @@ export class ApiAuthGuard implements CanActivate {
       if (vehicleCategoryRequired && scope.categoryCode !== RentalCategoryCode.Vehicle) {
         throw new ForbiddenException("该接口属于历史门市租赁参考模块，当前经营空间不可用");
       }
-      if (capability && !scope.capabilities?.includes(capability)) {
-        throw new ForbiddenException("当前经营空间品类未启用该业务能力");
+      if (capability) {
+        // CORE-EXT-02C：能力门禁只认**实例**。
+        //
+        // 早前判据是 `scope.capabilities?.includes(capability)`，即品类定义的
+        // `defaultCapabilities` 数组——那等于「品类声明了这个 code」== 「该空间启用了它」，
+        // 是 fail-open：只有 code、没有可执行模块的能力照样放行，而暂停与停用
+        // 根本无法表达（数组里永远有它）。现在改为查该空间的能力实例，
+        // 只有 `status === "enabled"` 才放行，因此暂停即刻生效。
+        //
+        // 三处 fail-closed，缺一不可：
+        //   1. 没有会话空间 → 拒绝。绝不回退到租户默认空间：那会让一个本该被拒的
+        //      无空间会话拿到某个空间的能力集（与 P0-01 的默认租户回退同型）。
+        //   2. 没有注入能力服务 → 拒绝。装配被改坏时应当失败，而不是静默放行。
+        //   3. 实例不是 enabled → 拒绝。包含「从未启用」「已暂停」「已停用」三种。
+        if (!workspaceId) {
+          throw new ForbiddenException("当前会话没有经营空间，请先选择经营空间");
+        }
+        if (!this.capabilities) {
+          throw new ForbiddenException("能力门禁未就绪，已拒绝该请求");
+        }
+        if (!(await this.capabilities.isEnabled(user.tenantId, capability, workspaceId))) {
+          throw new ForbiddenException("当前经营空间未启用该业务能力");
+        }
       }
     }
 

@@ -388,7 +388,10 @@ export class PlatformRepository {
           categoryCode,
           status: PrismaWorkspaceStatus.ACTIVE,
           isDefault: false,
-          defaultMarker: workspaceId
+          defaultMarker: workspaceId,
+          // 新建空间默认 development：首期品类能力未全部实现前不能伪装为正式经营。
+          // 调用方可显式请求 production；服务层会在同一事务里校验全部品类必选能力。
+          runMode: input.runMode ?? "development"
         }
       });
       await onBeforeCommit?.(tx, workspaceId, tenantId);
@@ -420,7 +423,10 @@ export class PlatformRepository {
         where: { id },
         data: {
           ...(name ? { name } : {}),
-          ...(input.status ? { status: this.toPrismaWorkspaceStatus(input.status) } : {})
+          ...(input.status ? { status: this.toPrismaWorkspaceStatus(input.status) } : {}),
+          // 运行模式可改：存量空间补齐必选能力后需要一条显式「转正」路径。
+          // 是否允许转正由服务层的能力门禁校验，不在这里放开。
+          ...(input.runMode ? { runMode: input.runMode } : {})
         }
       });
     });
@@ -481,6 +487,7 @@ export class PlatformRepository {
     categoryCode: PrismaRentalCategoryCode;
     status: PrismaWorkspaceStatus;
     isDefault: boolean;
+    runMode?: string;
     createdAt: Date;
     updatedAt: Date;
   }): BusinessWorkspace {
@@ -492,6 +499,8 @@ export class PlatformRepository {
       categoryCode: this.toDomainCategoryCode(row.categoryCode) as BusinessWorkspace["categoryCode"],
       status: row.status.toLowerCase() as BusinessWorkspaceStatus,
       isDefault: row.isDefault,
+      // 未选到该列时按最保守的 production 处理：宁可挡住也不放开一个未核验的空间。
+      runMode: (row.runMode as BusinessWorkspace["runMode"]) ?? "production",
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString()
     };

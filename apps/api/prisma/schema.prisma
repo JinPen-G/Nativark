@@ -319,6 +319,9 @@ model Tenant {
   rentalRuleVersions        RentalRuleVersion[]
   rentalBusinessCalendars   RentalBusinessCalendar[]
   rentalCalendarOverrideAudits RentalCalendarOverrideAuditEntry[]
+  workspaceCapabilityInstances WorkspaceCapabilityInstance[]
+  workspaceCapabilityAudits   WorkspaceCapabilityAuditEntry[]
+  capabilityHookAudits        CapabilityHookAuditEntry[]
   rentalIdempotencyRecords  RentalOrderIdempotencyRecord[]
   customerProfiles          CustomerProfile[]
   customerWorkspaceLinks    CustomerWorkspaceLink[]
@@ -356,6 +359,11 @@ model BusinessWorkspace {
   /// MySQL 没有部分索引，因此默认空间写 'default'、非默认写自身 id：
   /// 前者在租户内必然冲突，后者天然唯一。
   defaultMarker String
+  /// CORE-EXT-02C：运行模式 production / demo / development。
+  /// 决定「缺品类必选能力」是提示还是服务端拒绝业务写入。
+  /// 默认 development：存量空间此前从未被门禁约束，直接标 production 会让它们立刻停业。
+  /// 新建空间由应用层显式传 production（创建时会同事务初始化必选能力）。
+  runMode      String              @default("development")
   members      WorkspaceMember[]
   authSessions AuthSession[]
   operationLogs OperationLog[]
@@ -388,6 +396,9 @@ model BusinessWorkspace {
   rentalReferrals             RentalReferral[]
   rentalNotificationLogs      RentalNotificationLog[]
   rentalOrderIdempotencyRecords RentalOrderIdempotencyRecord[]
+  workspaceCapabilityInstances  WorkspaceCapabilityInstance[]
+  workspaceCapabilityAudits     WorkspaceCapabilityAuditEntry[]
+  capabilityHookAudits          CapabilityHookAuditEntry[]
   attributeUniqueValues RentalAttributeUniqueValue[]
   createdAt    DateTime            @default(now())
   updatedAt    DateTime            @updatedAt
@@ -2201,6 +2212,113 @@ model TenantRentalProfile {
   @@map("tenant_rental_profiles")
 }
 
+/// CORE-EXT-02A：经营空间的 capability **实例**。
+///
+/// 为什么必须独立成表：早前空间能力直接读品类定义的 `defaultCapabilities` 数组，于是
+/// 「品类声明了这个 code」== 「这个空间已启用该功能」。那让只有 code、没有可执行模块的
+/// 能力被当成可用功能，也没有任何地方能表达暂停、停用、配置版本与升级审计。
+///
+/// 「没有实例行」与「实例为 disabled」是两种不同事实：前者从未启用过，后者停用且留有审计。
+model WorkspaceCapabilityInstance {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId String
+  /// 复合外键保证空间与实例同租户，杜绝把能力实例挂到别的租户的空间上。
+  workspace   BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  /// capability code。只校验它在注册表里，不做数据库枚举——注册表是代码里的唯一事实源。
+  code        String
+  /// enabled / paused / disabled。
+  status      String
+  /// 启用时锁定的实现版本，来自注册表的 implementationVersion；升级即换这个值并留审计。
+  implementationVersion String
+  /// 配置版本号，每次改配置递增；报价与订单快照引用它来解释「当时按哪一版配置判定」。
+  configVersion String
+  /// 该能力的配置值，形状由注册表的 configSchema 描述。
+  config      Json
+  /// 乐观并发：写入以读到的 revision 为条件，冲突返回 409。
+  revision    Int      @default(0)
+  enabledAt   DateTime?
+  pausedAt    DateTime?
+  disabledAt  DateTime?
+  updatedBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  /// 同一空间同一能力只能有一个实例（需求：同空间实例与版本唯一）。
+  @@unique([workspaceId, code], map: "workspace_capability_instances_ws_code_key")
+  @@index([tenantId, code], map: "workspace_capability_instances_tenant_code_idx")
+  @@map("workspace_capability_instances")
+}
+
+/// CORE-EXT-02A：capability 生命周期审计（只追加）。
+/// 启用、暂停、停用、升级与改配置各留一行，永不改写——审计是事实而不是可变配置。
+model WorkspaceCapabilityAuditEntry {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId String
+  workspace   BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  code        String
+  /// enable / pause / disable / upgrade / configure
+  action      String
+  fromStatus  String?
+  toStatus    String
+  implementationVersion String?
+  configVersion String?
+  /// 本次变更后的完整配置快照。关系数据不能只靠 configVersion 追溯。
+  configSnapshot Json?
+  reason      String   @db.Text
+  operator    String?
+  at          DateTime
+  createdAt   DateTime @default(now())
+
+  @@index([workspaceId, code], map: "workspace_capability_audits_ws_code_idx")
+  @@index([tenantId, at], map: "workspace_capability_audits_tenant_at_idx")
+  @@map("workspace_capability_audits")
+}
+
+/// CORE-EXT-02B：capability Hook 的执行审计。
+///
+/// 一次判定里每个执行过的能力一行。存在的理由是验收要求「可选提示可审计」——
+/// 一条被放行但带提示的判定，事后必须能查出是哪个能力、哪个版本、在哪个节点、
+/// 基于什么依据给出的提示。
+///
+/// 四类产物用 JSON 列而不是四张子表：它们只被整体读取（"这次判定发生了什么"），
+/// 不需要按内部字段检索；拆表会让一次判定的写入变成五次，而它们必须在
+/// **同一事务**里落库才能保证事务回滚后不留半成品。
+model CapabilityHookAuditEntry {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId String
+  workspace   BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  /// 七个触发点之一
+  point       String
+  capability  String
+  implementationVersion String
+  configVersion String
+  /// allow / warn / block
+  decision    String
+  /// 能力自身抛异常时为真；必选能力此时必然 block。
+  failed      Boolean  @default(false)
+  /// 判定对象，供按订单/报价追溯。order / quote / item_group / asset
+  subjectType String
+  subjectId   String
+  blockReasons Json?
+  notices     Json?
+  linkedTasks Json?
+  feeBases    Json?
+  operator    String?
+  at          DateTime
+  createdAt   DateTime @default(now())
+
+  @@index([workspaceId, point], map: "capability_hook_audits_ws_point_idx")
+  @@index([tenantId, subjectType, subjectId], map: "capability_hook_audits_tenant_subject_idx")
+  @@index([tenantId, at], map: "capability_hook_audits_tenant_at_idx")
+  @@map("capability_hook_audits")
+}
+
 model RentalCouponTemplate {
   id                     String   @id @default(uuid())
   tenantId               String
@@ -2426,6 +2544,16 @@ model RentalOrder {
   /// 需求 4.5.7「订单始终使用订单快照」，因此与 ruleSnapshot 一样在订单上留一份，
   /// 报价被清理或日历改版后订单仍可复算。可空：存量订单没有这份快照。
   calendarSnapshot      Json?
+  /// CORE-EXT-02D：RentalWorkspaceCapabilitySnapshotEntry[]。下单时固化的已启用能力版本快照，
+  /// 在途环节 Hook 判定都用它，升级或暂停能力都不改写这张订单。可空：存量订单没有这份快照。
+  capabilitySnapshot    Json?
+  /// Review P1-5：RentalCapabilityDecisionSnapshot[]。下单时从报价拷贝的判断记录，
+  /// 下单侧只能引用、不得凭空重构。
+  capabilityDecisions   Json?
+  /// Review P1-6：RentalCapabilityExceptionSnapshot[]。带风险继续的完整例外快照
+  /// （原因、确认人、权限、时间、被确认的判断 id、版本与当时器材组合）。
+  /// 审计里不能只剩 confirmed: true，否则配货与后续履约无从还原风险已被裁决。
+  capabilityExceptions  Json?
   chargeLines           Json
   rentalAmount          Decimal                   @db.Decimal(12, 2)
   discountAmount        Decimal                   @db.Decimal(12, 2)
@@ -2994,6 +3122,12 @@ model RentalQuote {
   /// 存量报价按当时口径生成，无法回填出"当时是否提示过"，编造一个会误导追溯。
   calendarWarnings       Json?
   appliedDiscountPlanIds Json
+  /// CORE-EXT-02D：RentalWorkspaceCapabilitySnapshotEntry[]。报价生成时已启用能力的版本快照，
+  /// 下单时拷进订单。可空：存量报价没有这份快照，留 NULL 是如实记录"当时没有"。
+  capabilitySnapshot     Json?
+  /// Review P1-5：RentalCapabilityDecisionSnapshot[]。报价阶段的兼容性判断记录，
+  /// 含风险代码、提示、证据与费用依据；下单时被引用。
+  capabilityDecisions    Json?
   customerCouponId       String?
   expiresAt              DateTime
   consumedAt             DateTime?

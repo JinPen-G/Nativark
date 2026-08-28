@@ -1,5 +1,6 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException, Optional } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { getRequestWorkspaceId, requireRequestTenantId, requireRequestWorkspaceId } from "../../common/request-identity";
 import {
@@ -49,6 +50,7 @@ import {
 } from "../../common/data-permission";
 import { PlatformRepository } from "./platform.repository";
 import { SharedCustomerRepository } from "./shared-customer.repository";
+import { WorkspaceCapabilityService } from "../rental-core/workspace-capability.service";
 import { RentalCoreService } from "../rental-core/rental-core.service";
 
 interface StoredUser extends Omit<SaveSystemUserRequest, "tenantId"> {
@@ -82,8 +84,13 @@ export class PlatformService {
     // （`new PlatformService(config, undefined, rentalCore)`），插在中间会让
     // rentalCore 落到错误的槽位，租户初始化的回调不再注册默认经营空间，
     // 表现为后续调用报「当前 SaaS 租户尚未建立经营空间」——实测踩过。
-    @Optional() private readonly sharedCustomers?: SharedCustomerRepository
+    @Optional() private readonly sharedCustomers?: SharedCustomerRepository,
+    // Review P1-3：创建空间时同事务初始化品类必选能力。
+    // 同样必须放在最后且 @Optional()，理由见上：位置参数构造的测试会错位。
+    @Optional() private readonly workspaceCapabilityService?: WorkspaceCapabilityService
   ) {}
+
+  private readonly logger = new Logger(PlatformService.name);
 
   private readonly tenants: TenantSummary[] = [
     {
@@ -168,7 +175,13 @@ export class PlatformService {
         { code: "rental-core:catalog:view", name: "通用商品目录查看" },
         { code: "rental-core:catalog:manage", name: "通用商品目录管理" },
         { code: "rental-core:asset:view", name: "通用资产库存查看" },
-        { code: "rental-core:asset:manage", name: "通用资产库存管理" }
+        { code: "rental-core:asset:manage", name: "通用资产库存管理" },
+        { code: "rental-core:capability:view", name: "经营空间能力查看" },
+        { code: "rental-core:capability:manage", name: "经营空间能力治理" },
+        // CAM-01A：确认能力给出的风险提示（如需转接环的器材组合）才能带风险下单。
+        // 与 :manage 分开：治理能力启停是配置动作，带风险下单是一次经营决策，
+        // 两者的授权对象通常不同（店长可确认风险，但不一定负责能力启停）。
+        { code: "rental-core:capability:override", name: "能力风险例外确认" }
       ]
     },
     {
@@ -1414,6 +1427,15 @@ export class PlatformService {
       input,
       async (tx, workspaceId) => {
         await this.rentalCoreService?.registerWorkspace(workspaceId, tenantId, input.categoryCode, tx);
+        // 与 createBusinessWorkspace 同一口径：必选能力与空间档案原子创建。
+        await this.initializeWorkspaceCapabilities(
+          tenantId,
+          workspaceId,
+          input.categoryCode,
+          tx,
+          undefined,
+          input.runMode ?? "development"
+        );
         const tenantAdmins = await tx.user.findMany({
           where: { tenantId, isPlatformAdmin: true, isActive: true },
           select: { id: true }
@@ -1439,6 +1461,7 @@ export class PlatformService {
     this.assertSaasAdmin(currentUser);
     this.requireWorkspaceDataSource();
     await this.platformRepository.getTenant(tenantId);
+    await this.assertProductionModeAllowed(tenantId, workspaceId, input);
     return this.platformRepository.updateBusinessWorkspaceForTenant(tenantId, workspaceId, input);
   }
 
@@ -1549,15 +1572,96 @@ export class PlatformService {
     // 需求 4.1：空间档案与其品类配置同事务创建，任一步失败整体回滚。
     const result = await this.platformRepository.createBusinessWorkspace(input, currentUser, async (tx, workspaceId, tenantId) => {
       await this.rentalCoreService?.registerWorkspace(workspaceId, tenantId, input.categoryCode, tx);
+      // Review P1-3：品类必选能力必须与空间档案原子创建。放在同一 tx 里，
+      // 任一步失败则空间与能力实例一起回滚，不会留下「空间已建、能力没开」的半成品
+      // ——那种空间在正式经营模式下连报价都做不了。
+      await this.initializeWorkspaceCapabilities(
+        tenantId,
+        workspaceId,
+        input.categoryCode,
+        tx,
+        currentUser,
+        input.runMode ?? "development"
+      );
     });
     // 仓储事务已经提交，才允许将新空间发布到本进程缓存。
     await this.rentalCoreService?.onApplicationBootstrap();
     return result;
   }
 
-  updateBusinessWorkspace(id: string, input: UpdateBusinessWorkspaceRequest, currentUser?: SystemUserRow) {
+  /**
+   * 在给定事务内初始化某空间的品类必选能力。
+   *
+   * 品类声明集从**品类定义**读取，与能力服务的 `overview` 同源；不接受调用方传入，
+   * 否则调用方可以声明一份自选的必选清单。
+   */
+  private async initializeWorkspaceCapabilities(
+    tenantId: string,
+    workspaceId: string,
+    categoryCode: RentalCategoryCode,
+    tx: Prisma.TransactionClient,
+    currentUser?: SystemUserRow,
+    runMode: "production" | "demo" | "development" = "development"
+  ) {
+    if (!this.workspaceCapabilityService) {
+      if (runMode === "production") {
+        throw new ConflictException("能力服务不可用，不能创建正式经营空间");
+      }
+      return;
+    }
+    const category = RENTAL_CATEGORY_DEFINITIONS.find((row) => row.code === categoryCode);
+    const declared = category?.defaultCapabilities ?? [];
+    const required = category?.requiredCapabilities ?? [];
+    const result = await this.workspaceCapabilityService.initializeRequiredCapabilities(
+      tenantId,
+      workspaceId,
+      categoryCode,
+      declared,
+      tx,
+      { operator: currentUser?.displayName, requiredCodes: required }
+    );
+    if (result.skipped.length) {
+      // 跳过的必选能力不是错误（未实现、或必填配置无默认值），但必须留痕：
+      // 空间会保持非生产就绪，运营需要知道还差什么。
+      this.logger.warn(
+        `空间 ${workspaceId} 初始化必选能力时跳过：` +
+          result.skipped.map((row) => `${row.code}（${row.why}）`).join("；")
+      );
+    }
+    if (runMode === "production") {
+      const enabled = new Set(result.enabled);
+      const missing = required.filter((code) => !enabled.has(code));
+      if (missing.length) {
+        throw new ConflictException(
+          `正式经营空间初始化失败：缺少可自动启用的必选能力 ${missing.join("、")}。` +
+            "请改为演示/开发模式创建，或先补齐能力实现与默认配置。"
+        );
+      }
+    }
+  }
+
+  async updateBusinessWorkspace(id: string, input: UpdateBusinessWorkspaceRequest, currentUser?: SystemUserRow) {
     this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    await this.assertProductionModeAllowed(tenantId, id, input);
     return this.platformRepository.updateBusinessWorkspace(id, input, currentUser);
+  }
+
+  private async assertProductionModeAllowed(
+    tenantId: string,
+    workspaceId: string,
+    input: UpdateBusinessWorkspaceRequest
+  ) {
+    if (input.runMode !== "production") return;
+    if (!this.workspaceCapabilityService) {
+      throw new ConflictException("能力服务不可用，不能将经营空间切换为正式经营模式");
+    }
+    const overview = await this.workspaceCapabilityService.overview(tenantId, workspaceId);
+    if (!overview.productionReady) {
+      throw new ConflictException(
+        `经营空间尚未达到正式经营条件：缺少必选能力 ${overview.missingRequired.join("、")}`
+      );
+    }
   }
 
   listWorkspaceMembers(workspaceId: string, currentUser?: SystemUserRow) {

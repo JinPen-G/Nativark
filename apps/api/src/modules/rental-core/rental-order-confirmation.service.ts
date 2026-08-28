@@ -1,10 +1,11 @@
-import { BadRequestException, ConflictException, Inject, Injectable } from "@nestjs/common";
+import { BadRequestException, ConflictException, Inject, Injectable, Optional } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import type {
   CreateRentalOrderRequest,
   RentalQuoteSnapshotV1
 } from "@store-rental/shared";
 import { PrismaService } from "../database/prisma.service";
+import { CapabilityHookRuntime } from "./capability-hook.runtime";
 import {
   RentalIdempotencyRepository,
   assertSameRequest,
@@ -44,16 +45,38 @@ function quoteSnapshotFingerprint(quote: RentalQuoteSnapshotV1) {
     discountAmount: quote.discountAmount,
     couponAmount: quote.couponAmount,
     serviceAmount: quote.serviceAmount,
+    fulfillmentAmount: quote.fulfillmentAmount,
     depositAmount: quote.depositAmount,
+    preAuthAmount: quote.preAuthAmount,
     payableAmount: quote.payableAmount,
+    receivableAmount: quote.receivableAmount,
     pricingPlanVersion: quote.pricingPlanVersion,
+    rateSnapshot: quote.rateSnapshot,
     ruleVersion: quote.ruleVersion,
     ruleSnapshot: quote.ruleSnapshot,
     calendarVersion: quote.calendarVersion,
+    calendarSnapshot: quote.calendarSnapshot,
+    calendarWarnings: quote.calendarWarnings,
     appliedDiscountPlanIds: quote.appliedDiscountPlanIds,
     customerCouponId: quote.customerCouponId,
+    capabilitySnapshot: quote.capabilitySnapshot,
+    capabilityDecisions: quote.capabilityDecisions,
     expiresAt: quote.expiresAt
   }));
+}
+
+/**
+ * 幂等键比较只看客户端业务请求。确认人、权限与时间是控制器按当前鉴权上下文补入的
+ * 服务端事实，同一次客户端重试会得到不同的 confirmedAt，不能把它纳入请求指纹。
+ */
+function orderRequestFingerprint(input: CreateRentalOrderRequest) {
+  return requestFingerprint({
+    ...input,
+    capabilityExceptions: input.capabilityExceptions?.map(
+      ({ confirmedBy: _confirmedBy, confirmedWithPermission: _permission, confirmedAt: _confirmedAt, ...confirmation }) =>
+        confirmation
+    )
+  });
 }
 
 const ORDER_CREATE_ACTION = "rental.order.create";
@@ -73,7 +96,8 @@ export class RentalOrderConfirmationService {
     private readonly business: RentalBusinessService,
     @Inject(RentalCoreFactRepository) private readonly coreFacts: RentalCoreFactStore,
     @Inject(RentalBusinessFactRepository) private readonly businessFacts: RentalBusinessFactStore,
-    @Inject(RentalIdempotencyRepository) private readonly idempotency: RentalIdempotencyStore
+    @Inject(RentalIdempotencyRepository) private readonly idempotency: RentalIdempotencyStore,
+    @Optional() private readonly hooks?: CapabilityHookRuntime
   ) {}
 
   /**
@@ -89,7 +113,7 @@ export class RentalOrderConfirmationService {
   ) {
     // 未显式传键时退回 quoteId：报价一次性使用，天然是这次下单的唯一标识。
     const key = idempotencyKey?.trim() || `quote:${input.quoteId}`;
-    const fingerprint = requestFingerprint(input);
+    const fingerprint = orderRequestFingerprint(input);
 
     // 事务外先快速命中，避免重复请求白跑一遍报价校验与库存锁。
     const early = await this.idempotency.find(tenantId, ORDER_CREATE_ACTION, key);
@@ -125,6 +149,37 @@ export class RentalOrderConfirmationService {
 
         // 故意先写订单聚合，再校验并消费报价、锁券；后续任一步失败都必须证明
         // 前面的订单、订单行和库存预占会随同一事务整体回滚。
+        //
+        // 订单确认 Hook 放在写聚合**之前**、且在事务内：阻止时整个事务回滚，
+        // 订单、预占与 Hook 审计一起消失，不留半成品；放事务外则拿不到 tx，
+        // 审计就无法与业务变更同生共死。
+        await this.hooks?.evaluate({
+          point: "order_confirmation",
+          tenantId,
+          workspaceId: this.core.resolveWorkspaceId(tenantId),
+          categoryCode: context.category.code,
+          subjectRef: { type: "order", id: order.id },
+          // 富化：随订单一并传入已解析器材行与本次的例外确认，能力据此判定兼容性。
+          // 器材属性与确认都是数据，Core 不读它们、不做品类判断。
+          subject: {
+            ...order,
+            equipment: this.core.buildCapabilityEquipment(tenantId, order.lines.map((line) => ({ itemGroupId: line.itemGroupId, quantity: line.quantity }))),
+            // 只把 prepareOrder 已严格校验、且与报价判断绑定的不可变快照交给 Hook。
+            // 绝不能再消费原始请求，否则无效 decisionId 会绕过快照校验。
+            capabilityExceptions: (order.capabilityExceptions ?? []).map((row) => ({
+              capability: row.capability,
+              code: row.riskCode,
+              reason: row.reason
+            }))
+          },
+          operator: input.operator || userName,
+          tx,
+          // 旧报价没有能力快照时按「当时没有能力参与」处理，绝不能退回当前实例；
+          // 否则订单创建后新启用的规则会反向卡住一张仍在有效期内的旧报价。
+          instances: order.capabilitySnapshot?.length
+            ? this.core.capabilityInstancesFromSnapshot(tenantId, order.capabilitySnapshot)
+            : []
+        });
         await this.coreFacts.saveOrderAggregate(order, [], tx);
 
         const storedQuote = await this.businessFacts.findQuote(tenantId, quote.id, tx);

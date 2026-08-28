@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Param, Post, Put, Query, Req } from "@nestjs/common";
+import { BadRequestException, Body, Controller, ForbiddenException, Get, Param, Post, Put, Query, Req } from "@nestjs/common";
 import { RentalCoreOrderStatus } from "@store-rental/shared";
 import { createHash } from "node:crypto";
 import type {
@@ -63,6 +63,18 @@ function idempotencyKeyOf(req: { headers?: Record<string, unknown> }): string | 
 
 interface AuthenticatedRequest { user: SystemUserRow; headers?: Record<string, unknown>; }
 
+/**
+ * CAM-01A：控制器内的权限判定，口径与 Guard 的 hasAnyPermission 一致。
+ *
+ * 租户管理员（isPlatformAdmin）与通配 `*` 视为具备；SaaS 平台管理员不参与经营域动作。
+ * 必须与 Guard 同口径，否则会出现「Guard 放行、控制器拒绝」或反之的错位。
+ */
+function hasPermissionCode(user: SystemUserRow, code: string) {
+  if (user.isSaasAdmin) return false;
+  if (user.isPlatformAdmin || user.permissions?.includes("*")) return true;
+  return Boolean(user.permissions?.includes(code));
+}
+
 @Controller("rental/v1")
 export class RentalCoreController {
   constructor(
@@ -115,10 +127,25 @@ export class RentalCoreController {
   @Get("orders/:id") order(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.service.getOrder(req.user.tenantId, id); }
   @Post("orders") async createOrder(@Req() req: AuthenticatedRequest, @Body() body: CreateRentalOrderDto) {
     const context = this.context(req.user.tenantId);
+    // CAM-01A：带风险下单必须「有权限 + 填原因」。原因由 DTO 与能力 Hook 共同保证
+    // （空原因不算确认），权限只能在这里判——Hook 上下文里没有鉴权信息，
+    // 而 Guard 按路径判权限、看不到请求体，因此这道检查必须落在控制器。
+    const OVERRIDE_PERMISSION = "rental-core:capability:override";
+    if (body.capabilityExceptions?.length && !hasPermissionCode(req.user, OVERRIDE_PERMISSION)) {
+      throw new ForbiddenException("确认能力风险提示需要「能力风险例外确认」权限");
+    }
+    // Review P1-6：把「谁、凭什么权限、什么时候」补齐后交给下单流程固化成不可变例外快照。
+    // 这三项只有控制器知道（鉴权上下文在这里），因此必须在这里补，不能让客户端自报。
+    const confirmations = (body.capabilityExceptions ?? []).map((row) => ({
+      ...row,
+      confirmedBy: req.user.displayName,
+      confirmedWithPermission: OVERRIDE_PERMISSION,
+      confirmedAt: new Date().toISOString()
+    }));
     // 幂等键取标准的 Idempotency-Key 请求头；未传时下单侧退回 quoteId（报价一次性使用）。
     const { order, replayed } = await this.orderConfirmation.createOrder(
       req.user.tenantId,
-      body,
+      { ...body, capabilityExceptions: confirmations },
       req.user.displayName,
       context,
       idempotencyKeyOf(req)
@@ -141,7 +168,7 @@ export class RentalCoreController {
       request: { orderId: id },
       orderId: id,
       run: async (tx) => {
-        const confirmed = await this.service.confirmOrder(tenantId, id, tx);
+        const confirmed = await this.service.confirmOrder(tenantId, id, tx, req.user.displayName);
         await this.business.redeemCouponInTransaction(tenantId, id, tx);
         return confirmed;
       },
@@ -166,7 +193,7 @@ export class RentalCoreController {
       fallbackKey: `order.allocate:${id}`,
       request: { orderId: id },
       orderId: id,
-      run: (tx) => this.service.allocateOrder(tenantId, id, tx),
+      run: (tx) => this.service.allocateOrder(tenantId, id, tx, req.user.displayName),
       replay: async () => {
         const current = await this.service.getOrder(tenantId, id);
         return current.status === RentalCoreOrderStatus.ReadyForPickup ? current : undefined;
@@ -238,7 +265,7 @@ export class RentalCoreController {
       request: { orderId: id, reason: body.reason, weatherException: Boolean(body.weatherException) },
       orderId: id,
       run: async (tx) => {
-        const cancelled = await this.service.cancelOrder(req.user.tenantId, id, body.reason, charge, tx);
+        const cancelled = await this.service.cancelOrder(req.user.tenantId, id, body.reason, charge, tx, req.user.displayName);
         await this.business.releaseCouponInTransaction(req.user.tenantId, id, tx);
         return cancelled;
       },
@@ -319,7 +346,7 @@ export class RentalCoreController {
       request: { orderId: id, stage },
       orderId: id,
       run: async (tx) => {
-        const completed = await this.service.completeHandoverWithoutInspection(tenantId, id, stage, overdueCharge, tx);
+        const completed = await this.service.completeHandoverWithoutInspection(tenantId, id, stage, overdueCharge, tx, req.user.displayName);
         if (stage === "return") await this.business.completeCustomerOrderEventInTransaction(tenantId, context, completed.customerId, tx);
         return completed;
       },

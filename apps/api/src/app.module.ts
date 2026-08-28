@@ -41,6 +41,12 @@ import { RentalBusinessFactRepository } from "./modules/rental-core/rental-busin
 import { RentalIdempotencyRepository } from "./modules/rental-core/rental-idempotency.repository";
 import { RentalIdempotentActionService } from "./modules/rental-core/rental-idempotent-action.service";
 import { RentalOrderConfirmationService } from "./modules/rental-core/rental-order-confirmation.service";
+import { WorkspaceCapabilityController } from "./modules/rental-core/workspace-capability.controller";
+import { WorkspaceCapabilityRepository } from "./modules/rental-core/workspace-capability.repository";
+import { WorkspaceCapabilityService } from "./modules/rental-core/workspace-capability.service";
+import { CapabilityHookRuntime } from "./modules/rental-core/capability-hook.runtime";
+import { CapabilityHookRepository } from "./modules/rental-core/capability-hook.repository";
+import { CapabilityHookRegistrar } from "./modules/rental-core/capability-hook.registrar";
 
 @Module({
   imports: [
@@ -60,6 +66,7 @@ import { RentalOrderConfirmationService } from "./modules/rental-core/rental-ord
     RentalCoreController,
     RentalBusinessController,
     OfficialCalendarSourceController,
+    WorkspaceCapabilityController,
     IntegrationsController,
     FilesController,
     NotificationsController,
@@ -87,6 +94,11 @@ import { RentalOrderConfirmationService } from "./modules/rental-core/rental-ord
     RentalIdempotencyRepository,
     RentalIdempotentActionService,
     RentalOrderConfirmationService,
+    WorkspaceCapabilityRepository,
+    WorkspaceCapabilityService,
+    CapabilityHookRuntime,
+    CapabilityHookRegistrar,
+    CapabilityHookRepository,
     IntegrationsService,
     IntegrationsRepository,
     {

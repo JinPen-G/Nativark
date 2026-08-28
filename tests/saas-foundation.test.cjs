@@ -73,15 +73,37 @@ function requestContext(method, url, accessToken) {
   assert.equal(demo.user.isPlatformAdmin, true);
   assert.equal(demo.tenant.categoryCode, "camera");
   assert.equal(demo.tenant.categoryName, "摄影设备");
-  assert.ok(demo.tenant.capabilities.includes("serialized_inventory"));
   assert.equal(demo2.tenant.categoryCode, "camping");
   assert.equal(demo2.tenant.categoryName, "露营设备");
-  assert.ok(demo2.tenant.capabilities.includes("quantity_inventory"));
+  // CORE-EXT-02C：会话里的能力集是「该空间**已启用**的能力实例」，不再是品类
+  // `defaultCapabilities` 声明。本用例的 AuthService 只注入两个依赖、没有能力服务，
+  // 因此必须 fail-closed 得到空集；若哪天有人把它改回读品类声明，这里会立刻变红
+  // （camera 声明了 serialized_inventory/delivery 等，断言会拿到非空数组）。
+  //
+  // 原断言是 `capabilities.includes("serialized_inventory")` / `includes("delivery")`，
+  // 那恰好在验证被本任务判定为 fail-open 的旧口径——`delivery` 至今没有可执行模块，
+  // 却因为品类声明了它而被当成"可用能力"送给前端渲染菜单。
+  assert.deepEqual(
+    demo.tenant.capabilities,
+    [],
+    "未注入能力服务时会话能力集必须为空（fail-closed），不得回退到品类声明"
+  );
+  assert.deepEqual(demo2.tenant.capabilities, [], "同上，露营租户亦然");
   const refreshedDemo2Context = await auth.getSessionContext(`Bearer ${demo2.accessToken}`);
   assert.equal(refreshedDemo2Context.tenant.categoryCode, "camping");
   const refreshedContext = await auth.getSessionContext(`Bearer ${demo.accessToken}`);
   assert.equal(refreshedContext.tenant.categoryCode, "camera");
-  assert.ok(refreshedContext.tenant.capabilities.includes("delivery"));
+  assert.deepEqual(
+    refreshedContext.tenant.capabilities,
+    [],
+    "session-context 必须与 login 同口径：都取已启用实例，不取品类声明"
+  );
+  // 「可访问」与「生产就绪」必须分开表示（验收要求）：能进入空间不等于品类能力齐备。
+  assert.equal(
+    refreshedContext.capabilityProductionReady,
+    false,
+    "没有任何已启用能力时不得报告生产就绪"
+  );
   const demoTenants = platform.listTenants(saas.user);
   assert.equal(demoTenants.length, 2);
   assert.deepEqual(

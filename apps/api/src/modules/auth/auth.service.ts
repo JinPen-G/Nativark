@@ -4,6 +4,8 @@ import {
   ForbiddenException,
   Injectable,
   InternalServerErrorException,
+  Logger,
+  Optional,
   UnauthorizedException
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
@@ -13,11 +15,13 @@ import type {
   LoginRequest,
   LoginResponse,
   RefreshSessionRequest,
+  RentalCapability,
   SystemUserRow
 } from "@store-rental/shared";
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { hashOpaqueToken } from "../../common/password";
 import { PlatformService } from "../platform/platform.service";
+import { WorkspaceCapabilityService } from "../rental-core/workspace-capability.service";
 
 interface LoginFailureState {
   count: number;
@@ -43,13 +47,17 @@ interface AccessTokenPayload {
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
   private readonly loginFailures = new Map<string, LoginFailureState>();
   private readonly accessTtlSeconds = 15 * 60;
   private readonly refreshTtlMs = 30 * 24 * 60 * 60 * 1000;
 
   constructor(
     private readonly platformService: PlatformService,
-    private readonly configService: ConfigService
+    private readonly configService: ConfigService,
+    // CORE-EXT-02C：会话上下文里的能力集改为「已启用实例」。可选是为了让既有单测
+    // 继续用两个参数构造本服务；缺失时返回空启用集（fail-closed），不回退到品类声明。
+    @Optional() private readonly capabilities?: WorkspaceCapabilityService
   ) {}
 
   async login(input: LoginRequest): Promise<LoginResponse> {
@@ -185,6 +193,14 @@ export class AuthService {
     // 沿用旧品类的界面。这与 Guard 的判定口径也不一致。
     const scope = await this.getCategoryContext(user.tenantId, workspaceId);
     const tenant = await this.platformService.findTenantByIdForAuth(user.tenantId);
+    // CORE-EXT-02C：菜单入口按**已启用能力**判定，不再按品类声明。
+    //
+    // `scope.capabilities` 是品类定义的 `defaultCapabilities`，即「这个品类可能相关的
+    // 能力」。前端 `hasCapability` 早前直接用它渲染菜单，于是只有 code、没有可执行模块
+    // 的能力也会长出入口，暂停与停用更是完全无法反映（数组里永远有它）。
+    // 现在换成该空间的已启用实例，与 Guard 的判定口径一致——否则会出现
+    // 「菜单可见但一点就 403」或反之的错位。
+    const capabilityView = workspaceId ? await this.capabilityOverviewFor(user.tenantId, workspaceId) : undefined;
     return {
       tenant: {
         tenantId: tenant.tenantId,
@@ -193,13 +209,48 @@ export class AuthService {
         tenantStatus: tenant.tenantStatus,
         categoryCode: scope.categoryCode,
         categoryName: scope.categoryName,
-        capabilities: scope.capabilities
+        capabilities: capabilityView?.enabled ?? []
       },
       user: this.toAuthUser(user),
       // 刷新页面后切换器仍需知道「在哪、能去哪」，因此这里必须带出空间列表。
       workspaces: await this.platformService.listUserWorkspaces(user.id),
-      currentWorkspaceId: workspaceId
+      currentWorkspaceId: workspaceId,
+      missingRequiredCapabilities: capabilityView?.missingRequired ?? [],
+      capabilityProductionReady: capabilityView?.productionReady ?? false,
+      workspaceRunMode: capabilityView?.runMode
     };
+  }
+
+  /**
+   * 该空间的已启用能力、缺失必选能力与生产就绪标记。
+   *
+   * 没有注入能力服务时返回「空启用集 + 未就绪」而不是回退到品类声明：
+   * 回退会让菜单在装配被改坏时重新按声明放行，正是本任务要消除的 fail-open。
+   */
+  private async capabilityOverviewFor(tenantId: string, workspaceId: string) {
+    const failClosed = { enabled: [] as RentalCapability[], missingRequired: [] as RentalCapability[], productionReady: false, runMode: undefined };
+    if (!this.capabilities) return failClosed;
+    try {
+      const overview = await this.capabilities.overview(tenantId, workspaceId);
+      return {
+        enabled: overview.capabilities.filter((row) => row.state === "enabled").map((row) => row.definition.code),
+        missingRequired: overview.missingRequired,
+        productionReady: overview.productionReady,
+        // 前端据此明确标注「演示 / 开发空间」，而不是只靠 productionReady 猜。
+        runMode: await this.capabilities.workspaceRunMode(tenantId, workspaceId)
+      };
+    } catch (error) {
+      // 能力范围解析失败**不得**让登录或会话上下文整体失败。
+      //
+      // 这里的取值只服务于「菜单入口显示什么」；解析不出来时返回空启用集是 fail-closed
+      // 的方向（少显示入口，不多显示），而 API 侧的放行由 Guard 独立判定，不依赖这份结果。
+      // 反过来，让它把登录打成 500 才是真的危险：运营连不进来，连去修的入口都没有。
+      // 失败必须留日志，不能静默——它通常意味着空间或品类数据不一致。
+      this.logger.warn(
+        `解析经营空间 ${workspaceId} 的能力范围失败，本次会话按空启用集处理：${(error as Error).message}`
+      );
+      return failClosed;
+    }
   }
 
   /** SPACE-03：有会话空间时按空间取品类与能力；无空间时退回租户级档案。 */
@@ -334,6 +385,9 @@ export class AuthService {
     });
     const workspaces = await this.platformService.listUserWorkspaces(user.id);
     const sessionScope = await this.getCategoryContext(user.tenantId, workspaceId);
+    // 与 session-context 完全同口径：能力集是**已启用实例**，不是品类声明。
+    // 两处若不一致，前端会在「刚登录」与「刷新后」看到两套菜单。
+    const capabilityView = workspaceId ? await this.capabilityOverviewFor(user.tenantId, workspaceId) : undefined;
     return {
       accessToken,
       refreshToken: refreshToken ?? "",
@@ -346,7 +400,7 @@ export class AuthService {
         // 与 session-context 同口径：品类和能力取当前经营空间，不取租户级档案。
         categoryCode: sessionScope.categoryCode,
         categoryName: sessionScope.categoryName,
-        capabilities: sessionScope.capabilities
+        capabilities: capabilityView?.enabled ?? []
       },
       user: this.toAuthUser(user),
       // SPACE-02：登录返回可进入的空间与当前空间，供前端渲染切换器（前端属 SPACE-05）。

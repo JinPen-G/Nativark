@@ -49,6 +49,7 @@ const extensionCategory = {
   ...categories[0],
   code: "test_equipment",
   name: "扩展测试品类",
+  requiredCapabilities: ["serialized_inventory"],
   businessModel: {
     ...categories[0].businessModel,
     pricingUnits: ["hour", "usage"],
