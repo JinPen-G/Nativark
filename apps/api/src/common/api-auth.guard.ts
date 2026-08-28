@@ -271,6 +271,21 @@ export function requiredPermissions(method: string, path: string) {
   }
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/cancel$/)) return ["store-rental:order:cancel", "store-rental:order:operate"];
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/(confirm|allocate|substitute-bundle-component|partial-return|handover\/[^/]+)$/)) return ["store-rental:order:operate"];
+  if (
+    path === "/rental/v1/capabilities" ||
+    path.startsWith("/rental/v1/capabilities/") ||
+    path === "/rental/v1/capability-audits"
+  ) {
+    // CORE-EXT-02A：能力治理是**经营空间级配置**，不是订单动作。
+    //
+    // 必须显式声明，否则会落进下面的 `/rental/v1` 兜底，拿到
+    // `order:view` / `order:operate`——那等于任何能操作订单的门店人员都可以
+    // 启用、暂停或停用整个空间的业务能力。菜单与 API 门禁（CORE-EXT-02C）
+    // 将以这些实例为准，因此这里放宽一格就是放宽整个门禁。
+    return method === "GET"
+      ? ["rental-core:capability:view", "rental-core:capability:manage"]
+      : ["rental-core:capability:manage"];
+  }
   if (path.startsWith("/rental/v1")) {
     return method === "GET"
       ? ["store-rental:order:view", "store-rental:vehicle:view"]

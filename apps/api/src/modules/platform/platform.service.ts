@@ -168,7 +168,9 @@ export class PlatformService {
         { code: "rental-core:catalog:view", name: "通用商品目录查看" },
         { code: "rental-core:catalog:manage", name: "通用商品目录管理" },
         { code: "rental-core:asset:view", name: "通用资产库存查看" },
-        { code: "rental-core:asset:manage", name: "通用资产库存管理" }
+        { code: "rental-core:asset:manage", name: "通用资产库存管理" },
+        { code: "rental-core:capability:view", name: "经营空间能力查看" },
+        { code: "rental-core:capability:manage", name: "经营空间能力治理" }
       ]
     },
     {

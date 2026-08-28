@@ -155,6 +155,10 @@ const permissions = [
   ["rental-core:catalog:manage", "通用商品目录管理", "Rental Core", PermissionKind.ACTION],
   ["rental-core:asset:view", "通用资产库存查看", "Rental Core", PermissionKind.ACTION],
   ["rental-core:asset:manage", "通用资产库存管理", "Rental Core", PermissionKind.ACTION],
+  // CORE-EXT-02A：能力治理与订单操作分权。门店营运不该能停用整个空间的业务能力，
+  // 因此这两个权限**不**进 STORE_OPERATOR 模板；租户管理员靠 fixedAllPermissions 覆盖。
+  ["rental-core:capability:view", "经营空间能力查看", "Rental Core", PermissionKind.ACTION],
+  ["rental-core:capability:manage", "经营空间能力治理", "Rental Core", PermissionKind.ACTION],
   ["store-rental:rules:manage", "业务规则配置", "门市租赁", PermissionKind.ACTION],
   ["store-rental:order:view", "订单查看", "门市租赁", PermissionKind.ACTION],
   ["store-rental:order:operate", "订单操作", "门市租赁", PermissionKind.ACTION],

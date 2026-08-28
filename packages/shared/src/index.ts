@@ -3843,11 +3843,160 @@ export const RENTAL_CAPABILITY_CODES = [
 
 export type RentalCapability = (typeof RENTAL_CAPABILITY_CODES)[number];
 
+/**
+ * capability 种类（CORE-EXT-02A）。
+ *
+ * - `category_required` 品类必选：该品类要达到「可以生产经营」必须启用；缺失时空间只能
+ *   继续验证通用 Rental Core，不得当成完整品类能力。
+ * - `category_optional` 可选增强：启用与否都不影响该品类的生产就绪判定。
+ * - `shared` 跨品类共享：多个品类都可引用的通用能力（物流、资质、IoT 等）。
+ */
+export type RentalCapabilityKind = "category_required" | "category_optional" | "shared";
+
+/** capability 生命周期。`disabled` 与「从未启用」不同：前者有实例与审计，后者没有实例行。 */
+export const RENTAL_CAPABILITY_LIFECYCLE_STATUSES = ["enabled", "paused", "disabled"] as const;
+
+export type RentalCapabilityLifecycleStatus = (typeof RENTAL_CAPABILITY_LIFECYCLE_STATUSES)[number];
+
+/**
+ * capability 配置字段描述。用描述符而不是 JSON Schema 字符串：服务端要能逐字段校验并给出
+ * 可读原因，管理端要能据同一份描述渲染表单——两边共用一份定义才不会各写一套校验。
+ */
+export interface RentalCapabilityConfigField {
+  key: string;
+  label: string;
+  type: "string" | "number" | "boolean" | "enum";
+  required: boolean;
+  /** `type: "enum"` 时的可选值。 */
+  options?: string[];
+  /** 数值下/上界，仅 `type: "number"` 使用。 */
+  min?: number;
+  max?: number;
+  description?: string;
+}
+
 export interface RentalCapabilityModuleDefinition {
   code: RentalCapability;
   label: string;
-  kind: "core" | "category_extension";
+  kind: RentalCapabilityKind;
   extensionPoints: Array<"menu" | "api" | "order_validation" | "fulfillment" | "integration">;
+  /** 适用品类。`"all"` 表示跨品类共享能力对全部品类可用。 */
+  applicableCategories: "all" | RentalCategoryCode[];
+  /** 依赖的其他 capability：它们必须先处于 `enabled` 才允许启用本能力。 */
+  dependsOn: RentalCapability[];
+  /** 互斥 capability：任一处于 `enabled` 时不允许启用本能力。 */
+  conflictsWith: RentalCapability[];
+  /** 配置 schema。空数组表示该能力无需配置。 */
+  configSchema: RentalCapabilityConfigField[];
+  /**
+   * 可执行模块的实现版本。**缺省即「已声明但未实现」**——只有 code 没有模块的能力
+   * 不得被启用，也不得开放菜单或 API。CORE-EXT-02A 的迁移据此拒绝把旧
+   * `capabilities` 数组里的 code 自动认定为已启用功能。
+   */
+  implementationVersion?: string;
+}
+
+/** `RentalCapabilityModuleDefinition` 的语义别名，新代码用这个名字表达"定义"。 */
+export type RentalCapabilityDefinition = RentalCapabilityModuleDefinition;
+
+/** capability 生命周期动作。`configure` 只改配置、不改状态。 */
+export type RentalCapabilityAuditAction = "enable" | "pause" | "disable" | "upgrade" | "configure";
+
+/**
+ * 经营空间的 capability 实例（CORE-EXT-02A）。
+ *
+ * 「没有实例」与「实例为 disabled」是两种不同事实：前者从未启用过，后者停用且留有审计。
+ * 因此判定「是否可用」只能看 `status === "enabled"`，不能看实例是否存在。
+ */
+export interface WorkspaceCapabilityInstance {
+  tenantId: string;
+  workspaceId: string;
+  code: RentalCapability;
+  status: RentalCapabilityLifecycleStatus;
+  /** 启用时锁定的实现版本；升级即换这个值并留审计。 */
+  implementationVersion: string;
+  /** 配置版本号，每次改配置递增。报价/订单快照引用它解释「当时按哪一版配置判定」。 */
+  configVersion: string;
+  config: Record<string, string | number | boolean>;
+  /** 乐观并发版本号。写入以读到的值为条件，冲突返回 409。 */
+  revision: number;
+  enabledAt?: string;
+  pausedAt?: string;
+  disabledAt?: string;
+  updatedBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** capability 生命周期审计条目（只追加）。 */
+export interface WorkspaceCapabilityAuditEvent {
+  code: RentalCapability;
+  action: RentalCapabilityAuditAction;
+  fromStatus?: RentalCapabilityLifecycleStatus;
+  toStatus: RentalCapabilityLifecycleStatus;
+  implementationVersion?: string;
+  configVersion?: string;
+  reason: string;
+  operator?: string;
+  at: string;
+}
+
+/**
+ * 管理端与门禁共用的**三态视图**：声明 / 已实现 / 已启用。
+ *
+ * 需求要求把「空间可访问」与「品类能力已达到生产经营条件」分开表示，因此这里既给出
+ * 定义与实例，也直接给出派生结论，避免各端各写一套判定而口径分叉。
+ */
+export interface WorkspaceCapabilityView {
+  definition: RentalCapabilityDefinition;
+  /** 该能力是否被当前空间的品类声明（品类 defaultCapabilities 或 shared 能力）。 */
+  declaredByCategory: boolean;
+  /** 是否有可执行模块（注册表带 implementationVersion）。 */
+  implemented: boolean;
+  /** 是否适用于当前空间的品类。 */
+  applicable: boolean;
+  /** 实例；从未启用过时为 undefined。 */
+  instance?: WorkspaceCapabilityInstance;
+  /** 派生状态：`enabled` / `paused` / `disabled` / `declared_not_implemented` / `not_enabled`。 */
+  state:
+    | "enabled"
+    | "paused"
+    | "disabled"
+    | "declared_not_implemented"
+    | "not_enabled";
+  /** 注册表当前实现版本与实例锁定版本不同时为 true，供管理端提示可升级。 */
+  upgradeAvailable: boolean;
+}
+
+/** 某经营空间的能力总览与生产就绪判定。 */
+export interface WorkspaceCapabilityOverview {
+  tenantId: string;
+  workspaceId: string;
+  categoryCode: RentalCategoryCode;
+  capabilities: WorkspaceCapabilityView[];
+  /** 品类必选但尚未启用的能力（缺一个就不算生产就绪）。 */
+  missingRequired: RentalCapability[];
+  /**
+   * 是否达到「具备完整品类能力、可以生产经营」。
+   * 开发/演示空间可以继续验证通用 Rental Core，但这里必须如实为 false。
+   */
+  productionReady: boolean;
+}
+
+/** 启用/暂停/停用/改配置。原因必填：生命周期变更是经营决策，要能事后解释。 */
+export interface SaveWorkspaceCapabilityRequest {
+  code: RentalCapability;
+  status: RentalCapabilityLifecycleStatus;
+  config?: Record<string, string | number | boolean>;
+  reason: string;
+  /** 读到的 revision。提供时以它为条件写入，冲突返回 409。 */
+  expectedRevision?: number;
+}
+
+/** 升级到注册表当前实现版本。原因必填，历史快照不受影响（CORE-EXT-02D 另行验收）。 */
+export interface UpgradeWorkspaceCapabilityRequest {
+  reason: string;
+  expectedRevision?: number;
 }
 
 /**
@@ -3855,17 +4004,58 @@ export interface RentalCapabilityModuleDefinition {
  * Rental Core 只识别 capability code，不在订单主流程里判断具体品类。
  */
 export const RENTAL_CAPABILITY_MODULES: RentalCapabilityModuleDefinition[] = [
-  { code: "serialized_inventory", label: "序列化库存", kind: "core", extensionPoints: ["order_validation", "fulfillment"] },
-  { code: "quantity_inventory", label: "数量库存", kind: "core", extensionPoints: ["order_validation", "fulfillment"] },
-  { code: "bundle_inventory", label: "套装库存", kind: "core", extensionPoints: ["order_validation", "fulfillment"] },
-  { code: "pickup", label: "领取", kind: "core", extensionPoints: ["fulfillment"] },
-  { code: "return", label: "归还", kind: "core", extensionPoints: ["fulfillment"] },
-  { code: "delivery", label: "配送", kind: "category_extension", extensionPoints: ["menu", "api", "fulfillment", "integration"] },
-  { code: "locker", label: "智能柜", kind: "category_extension", extensionPoints: ["menu", "api", "fulfillment", "integration"] },
-  { code: "dispatch", label: "调度", kind: "category_extension", extensionPoints: ["menu", "api", "fulfillment"] },
-  { code: "usage_reading", label: "使用量读数", kind: "category_extension", extensionPoints: ["order_validation", "fulfillment"] },
-  { code: "qualification", label: "资质审核", kind: "category_extension", extensionPoints: ["menu", "api", "order_validation"] },
-  { code: "iot", label: "IoT", kind: "category_extension", extensionPoints: ["menu", "api", "integration"] }
+  // 三种库存与取还是 Rental Core 自身实现的能力，因此带 `core-1.0` 实现版本：
+  // 它们确实有可执行模块（库存与履约主流程），不属于"只有 code"。
+  { code: "serialized_inventory", label: "序列化库存", kind: "category_required", extensionPoints: ["order_validation", "fulfillment"], applicableCategories: "all", dependsOn: [], conflictsWith: [], configSchema: [], implementationVersion: "core-1.0" },
+  { code: "quantity_inventory", label: "数量库存", kind: "category_required", extensionPoints: ["order_validation", "fulfillment"], applicableCategories: "all", dependsOn: [], conflictsWith: [], configSchema: [], implementationVersion: "core-1.0" },
+  { code: "bundle_inventory", label: "套装库存", kind: "category_optional", extensionPoints: ["order_validation", "fulfillment"], applicableCategories: "all", dependsOn: ["serialized_inventory"], conflictsWith: [], configSchema: [], implementationVersion: "core-1.0" },
+  { code: "pickup", label: "领取", kind: "category_required", extensionPoints: ["fulfillment"], applicableCategories: "all", dependsOn: [], conflictsWith: [], configSchema: [], implementationVersion: "core-1.0" },
+  { code: "return", label: "归还", kind: "category_required", extensionPoints: ["fulfillment"], applicableCategories: "all", dependsOn: [], conflictsWith: [], configSchema: [], implementationVersion: "core-1.0" },
+  // 以下能力**只登记了 code 与扩展点，尚无可执行模块**（缺 implementationVersion）。
+  // 它们在管理端显示为「已声明但未实现」，不得启用、不得开放菜单或 API。
+  // 各自的真实模块由 SHARED-*/CAM-*/VEH-* 等任务实现，实现时再补 implementationVersion。
+  {
+    code: "delivery", label: "配送", kind: "shared",
+    extensionPoints: ["menu", "api", "fulfillment", "integration"],
+    applicableCategories: "all", dependsOn: [], conflictsWith: [],
+    configSchema: [
+      { key: "maxDistanceKm", label: "最大配送半径（公里）", type: "number", required: true, min: 0, max: 500 },
+      { key: "requireSignature", label: "是否需要签收", type: "boolean", required: false }
+    ]
+  },
+  {
+    code: "locker", label: "智能柜", kind: "shared",
+    extensionPoints: ["menu", "api", "fulfillment", "integration"],
+    applicableCategories: "all", dependsOn: [], conflictsWith: [],
+    configSchema: [{ key: "provider", label: "柜体服务商", type: "string", required: true }]
+  },
+  {
+    code: "dispatch", label: "调度", kind: "category_optional",
+    extensionPoints: ["menu", "api", "fulfillment"],
+    applicableCategories: [RentalCategoryCode.Vehicle, RentalCategoryCode.Construction], dependsOn: ["serialized_inventory"], conflictsWith: [],
+    configSchema: []
+  },
+  {
+    code: "usage_reading", label: "使用量读数", kind: "shared",
+    extensionPoints: ["order_validation", "fulfillment"],
+    // 摄影按快门次数、车辆按里程、工程按工时——读数本身是通用能力，因此对全部品类适用。
+    // 写成 "all" 也让新增品类不必回头修改这条定义（CORE-EXT-03 的接入约束）。
+    applicableCategories: "all",
+    dependsOn: [], conflictsWith: [],
+    configSchema: [{ key: "metric", label: "读数指标", type: "enum", required: true, options: ["mileage", "hours", "shutter"] }]
+  },
+  {
+    code: "qualification", label: "资质审核", kind: "shared",
+    extensionPoints: ["menu", "api", "order_validation"],
+    applicableCategories: "all", dependsOn: [], conflictsWith: [],
+    configSchema: [{ key: "minimumValidityDays", label: "证件最短剩余有效天数", type: "number", required: true, min: 0, max: 3650 }]
+  },
+  {
+    code: "iot", label: "IoT", kind: "shared",
+    extensionPoints: ["menu", "api", "integration"],
+    applicableCategories: [RentalCategoryCode.Vehicle, RentalCategoryCode.Construction], dependsOn: [], conflictsWith: [],
+    configSchema: [{ key: "provider", label: "遥测服务商", type: "string", required: true }]
+  }
 ];
 
 export interface RentalCategoryTerminology {

@@ -7568,6 +7568,415 @@ async function main() {
   );
 
 
+  console.log("== 65. CORE-EXT-02A 经营空间能力实例、生命周期与隔离 ==");
+  // 本节要证的核心口径：「品类声明了某个 code」**不等于**「该空间启用了该能力」。
+  //
+  // 升级前的模型直接读品类 `defaultCapabilities`，于是只有 code、没有可执行模块的能力
+  // 也被当成可用功能。新迁移刻意不回填任何启用状态，因此这里第一条断言就是：
+  // 跑完前面全部 64 节业务流程之后，实例表仍然是空的——没有任何路径会悄悄启用能力。
+  assert.equal(
+    readCount("SELECT COUNT(*) FROM `workspace_capability_instances`;"),
+    0,
+    "迁移与 Seed 都不得回填启用状态：存量 capabilities 数组只是品类声明，不能据此认定已启用"
+  );
+  assert.equal(
+    readCount("SELECT COUNT(*) FROM `workspace_capability_audits`;"),
+    0,
+    "没有任何显式变更时不得有生命周期审计"
+  );
+
+  const capPlatform = await login("platform", "admin", PLATFORM_PASSWORD);
+  const capTenant = await bootstrapTenant(capPlatform.accessToken, "e2e_cap_camera", "camera");
+  const capOverview = await request("GET", "/api/rental/v1/capabilities", null, capTenant.accessToken);
+  assert.equal(capOverview.status, 200, `读能力总览失败: ${capOverview.status} ${JSON.stringify(capOverview.body).slice(0, 200)}`);
+  const capViewOf = (payload, code) => payload.capabilities.find((row) => row.definition.code === code);
+  assert.equal(capOverview.body.data.categoryCode, "camera", "总览的品类必须取自空间行");
+  assert.equal(capOverview.body.data.workspaceId, capTenant.currentWorkspaceId, "总览必须落在会话空间上");
+  // 已声明但无可执行模块的能力：状态是 declared_not_implemented，不是「可用」。
+  assert.equal(capViewOf(capOverview.body.data, "delivery").state, "declared_not_implemented");
+  assert.equal(capViewOf(capOverview.body.data, "delivery").declaredByCategory, true);
+  assert.equal(capViewOf(capOverview.body.data, "delivery").implemented, false);
+  // 有模块但没有实例行：未启用。
+  assert.equal(capViewOf(capOverview.body.data, "pickup").state, "not_enabled");
+  assert.equal(capOverview.body.data.productionReady, false, "全新空间不得判定为生产就绪");
+  assert.deepEqual(
+    [...capOverview.body.data.missingRequired].sort(),
+    ["pickup", "quantity_inventory", "return", "serialized_inventory"],
+    "缺失必选能力应可枚举"
+  );
+  ok("新库与新空间：实例表为空、能力显示为未启用/已声明未实现、生产就绪为 false");
+
+  // 65b. 能力治理必须是独立权限：能操作订单 ≠ 能启停整个空间的业务能力。
+  const capOpRole = await request("POST", "/api/platform/roles", {
+    code: `E2E-CAP-OP-${Date.now().toString(36)}`, name: "E2E 订单操作员", scope: "store", dataScope: "all",
+    enabledBusinessScopes: ["rental"], permissions: ["store-rental:order:view", "store-rental:order:operate"], isActive: true
+  }, capTenant.accessToken);
+  assert.equal(capOpRole.status, 201, `建订单操作角色失败: ${JSON.stringify(capOpRole.body).slice(0, 200)}`);
+  const capOpAccount = `e2e_cap_op_${Date.now().toString(36)}`;
+  const capOpUser = await request("POST", "/api/platform/users", {
+    account: capOpAccount, displayName: "E2E 订单操作员", phone: "13900002222",
+    roleIds: [capOpRole.body.data.id], isActive: true
+  }, capTenant.accessToken);
+  assert.equal(capOpUser.status, 201, `建订单操作账号失败: ${JSON.stringify(capOpUser.body).slice(0, 200)}`);
+  await request("PUT", `/api/platform/workspaces/${capTenant.currentWorkspaceId}/members`, {
+    userId: capOpUser.body.data.id, roleId: capOpRole.body.data.id
+  }, capTenant.accessToken);
+  const capOpTemp = capOpUser.body.data.temporaryPassword;
+  const capOpFirst = await login("e2e_cap_camera", capOpAccount, capOpTemp);
+  const capOpPwd = `E2e!${randomBytes(4).toString("hex")}`;
+  await request("POST", "/api/auth/change-password", { currentPassword: capOpTemp, newPassword: capOpPwd }, capOpFirst.accessToken);
+  const capOpLogin = await login("e2e_cap_camera", capOpAccount, capOpPwd);
+  const capOpToken = (await request("POST", "/api/auth/switch-workspace", {
+    workspaceId: capTenant.currentWorkspaceId
+  }, capOpLogin.accessToken)).body.data.accessToken;
+  // 若治理路由落进 `/rental/v1` 兜底（order:view / order:operate），这两条会变成 200。
+  assert.equal(
+    (await request("GET", "/api/rental/v1/capabilities", null, capOpToken)).status,
+    403,
+    "只有订单权限的账号不得读取能力治理总览（否则说明路由落进了 /rental/v1 兜底）"
+  );
+  const capOpWrite = await request("PUT", "/api/rental/v1/capabilities", {
+    code: "pickup", status: "enabled", reason: "订单操作员越权启用"
+  }, capOpToken);
+  assert.equal(capOpWrite.status, 403, `只有订单权限的账号不得启停能力，实际 ${capOpWrite.status}`);
+  assert.equal(
+    readCount("SELECT COUNT(*) FROM `workspace_capability_instances`;"),
+    0,
+    "被 403 拒绝的请求不得留下实例行"
+  );
+  ok("能力治理是独立权限：订单操作员读写治理接口均 403，且不产生实例行");
+
+  // 65c. 启用路径的 fail-closed：未注册 / 不适用 / 未实现 / 缺依赖 / 配置无效，一律不落行。
+  const capSave = (body, token = capTenant.accessToken) =>
+    request("PUT", "/api/rental/v1/capabilities", body, token);
+  const capUnregistered = await capSave({ code: "not_a_capability", status: "enabled", reason: "未注册" });
+  assert.equal(capUnregistered.status, 400, `未注册 code 应 400，实际 ${capUnregistered.status}`);
+  const capNoReason = await capSave({ code: "pickup", status: "enabled", reason: "   " });
+  assert.equal(capNoReason.status, 400, `缺原因应 400，实际 ${capNoReason.status}`);
+  const capNotApplicable = await capSave({ code: "dispatch", status: "enabled", reason: "camera 空间启用调度" });
+  assert.equal(capNotApplicable.status, 409, `不适用于本品类应 409，实际 ${capNotApplicable.status}`);
+  assert.match(JSON.stringify(capNotApplicable.body), /不适用于当前经营品类/u);
+  const capUnimplemented = await capSave({
+    code: "delivery", status: "enabled", reason: "启用尚无模块的配送", config: { maxDistanceKm: 20 }
+  });
+  assert.equal(capUnimplemented.status, 409, `未实现的能力应 409，实际 ${capUnimplemented.status}`);
+  assert.match(JSON.stringify(capUnimplemented.body), /尚无可执行模块/u);
+  const capMissingDep = await capSave({ code: "bundle_inventory", status: "enabled", reason: "先启套装" });
+  assert.equal(capMissingDep.status, 409, `缺依赖应 409，实际 ${capMissingDep.status}`);
+  assert.match(JSON.stringify(capMissingDep.body), /依赖 serialized_inventory/u);
+  const capBadConfig = await capSave({
+    code: "pickup", status: "enabled", reason: "配置项不存在", config: { notAField: 1 }
+  });
+  assert.equal(capBadConfig.status, 400, `未知配置项应 400，实际 ${capBadConfig.status}`);
+  assert.equal(
+    readCount("SELECT COUNT(*) FROM `workspace_capability_instances`;"),
+    0,
+    "以上任何一条被拒的启用请求都不得写出实例行（配置无效时不得启用）"
+  );
+  assert.equal(
+    readCount("SELECT COUNT(*) FROM `workspace_capability_audits`;"),
+    0,
+    "被拒的变更不得留下审计"
+  );
+  ok("启用 fail-closed：未注册 400、缺原因 400、不适用 409、未实现 409、缺依赖 409、配置无效 400，且零落行");
+
+  // 65d. 正向启用：实例与审计同事务落库，版本被锁定，同空间同能力唯一。
+  const capEnabled = await capSave({ code: "serialized_inventory", status: "enabled", reason: "开通序列化库存" });
+  assert.equal(capEnabled.status, 200, `启用序列化库存失败: ${capEnabled.status} ${JSON.stringify(capEnabled.body).slice(0, 200)}`);
+  const capRow = readRow(
+    "SELECT `status`, `implementationVersion`, `configVersion`, `revision`, `updatedBy`, " +
+      "CASE WHEN `enabledAt` IS NULL THEN 'null' ELSE 'set' END AS `enabledAtState` " +
+      "FROM `workspace_capability_instances` WHERE `code`='serialized_inventory';"
+  );
+  assert.equal(capRow.status, "enabled", "实例状态必须落库");
+  assert.equal(capRow.implementationVersion, "core-1.0", "启用时必须锁定注册表当前实现版本");
+  assert.equal(capRow.configVersion, "v1");
+  assert.equal(capRow.revision, "1", "首次写入 revision 应为 1");
+  assert.equal(capRow.enabledAtState, "set", "启用必须记录时间");
+  assert.ok(capRow.updatedBy && capRow.updatedBy !== "NULL", "必须记录操作人");
+  const capAuditRow = readRow(
+    "SELECT `action`, IFNULL(`fromStatus`,'null') AS `fromStatus`, `toStatus`, `reason`, `operator` " +
+      "FROM `workspace_capability_audits` WHERE `code`='serialized_inventory' ORDER BY `at` ASC LIMIT 1;"
+  );
+  assert.equal(capAuditRow.action, "enable");
+  assert.equal(capAuditRow.fromStatus, "null", "首次启用没有前序状态");
+  assert.equal(capAuditRow.toStatus, "enabled");
+  assert.equal(capAuditRow.reason, "开通序列化库存", "审计必须保留原因原文");
+
+  // 依赖满足后 bundle_inventory 必须可启用——证明前面的 409 来自依赖判定本身。
+  const capBundle = await capSave({ code: "bundle_inventory", status: "enabled", reason: "依赖已满足" });
+  assert.equal(capBundle.status, 200, `依赖满足后启用套装库存失败: ${capBundle.status} ${JSON.stringify(capBundle.body).slice(0, 200)}`);
+  // 同空间同能力唯一：重复启用只能更新同一行，不得新增第二行。
+  const capAgain = await capSave({
+    code: "serialized_inventory", status: "enabled", reason: "重复启用", expectedRevision: 1
+  });
+  assert.equal(capAgain.status, 200, `重复启用应更新同一行: ${capAgain.status}`);
+  assert.equal(
+    readCount("SELECT COUNT(*) FROM `workspace_capability_instances` WHERE `code`='serialized_inventory';"),
+    1,
+    "同一空间同一能力只能有一行实例（唯一约束）"
+  );
+  assert.equal(
+    readScalar("SELECT `revision` FROM `workspace_capability_instances` WHERE `code`='serialized_inventory';"),
+    "2",
+    "每次写入都必须推进 revision"
+  );
+  ok("正向启用：实例与审计同事务落库、实现版本被锁定、同空间同能力唯一且 revision 递增");
+
+  // 65e. 乐观并发：同一 revision 上的并发写只能有一个赢家，落败者拿 409 而不是 500。
+  const capRaceBefore = Number(
+    readScalar("SELECT `revision` FROM `workspace_capability_instances` WHERE `code`='serialized_inventory';")
+  );
+  const capRace = await Promise.all(
+    Array.from({ length: 4 }, (_unused, index) =>
+      capSave({
+        code: "serialized_inventory",
+        status: "enabled",
+        reason: `并发第 ${index + 1} 路`,
+        expectedRevision: capRaceBefore
+      })
+    )
+  );
+  const capRaceWon = capRace.filter((res) => res.status === 200);
+  const capRaceLost = capRace.filter((res) => res.status === 409);
+  assert.equal(capRaceWon.length, 1, `同 revision 并发只能有一路成功，实际 ${capRace.map((r) => r.status).join("/")}`);
+  assert.equal(capRaceLost.length, 3, `落败者必须是 409（不得 500）：${capRace.map((r) => r.status).join("/")}`);
+  assert.equal(
+    Number(readScalar("SELECT `revision` FROM `workspace_capability_instances` WHERE `code`='serialized_inventory';")),
+    capRaceBefore + 1,
+    "并发只应推进一次 revision（推进多次说明落败者也写进去了）"
+  );
+  assert.equal(
+    readCount(`SELECT COUNT(*) FROM \`workspace_capability_audits\` WHERE \`code\`='serialized_inventory' AND \`reason\` LIKE '并发第%';`),
+    1,
+    "并发只应留下一条审计（多条说明有静默覆盖）"
+  );
+  ok("乐观并发：同 revision 四路并发只有一路成功，落败三路 409，revision 与审计各只推进一次");
+
+  // 65f. 跨空间隔离：同租户第二个空间必须独立判定，且请求体里的 workspaceId 不得生效。
+  const capWs2 = await request("POST", "/api/platform/workspaces", {
+    code: "cap-second", name: "能力隔离副空间", categoryCode: "camera"
+  }, capTenant.accessToken);
+  assert.equal(capWs2.status, 201, `建第二个空间失败: ${JSON.stringify(capWs2.body).slice(0, 200)}`);
+  await request("PUT", `/api/platform/workspaces/${capWs2.body.data.id}/members`, {
+    userId: capTenant.user.id
+  }, capTenant.accessToken);
+  const capWs2Token = (await request("POST", "/api/auth/switch-workspace", {
+    workspaceId: capWs2.body.data.id
+  }, capTenant.accessToken)).body.data.accessToken;
+  const capWs2Overview = await request("GET", "/api/rental/v1/capabilities", null, capWs2Token);
+  assert.equal(capWs2Overview.status, 200, `第二个空间读总览失败: ${capWs2Overview.status}`);
+  assert.equal(capWs2Overview.body.data.workspaceId, capWs2.body.data.id, "总览必须落在切换后的空间");
+  assert.equal(
+    capViewOf(capWs2Overview.body.data, "serialized_inventory").state,
+    "not_enabled",
+    "在第一个空间启用的能力不得在第二个空间显示为已启用"
+  );
+  assert.equal(capWs2Overview.body.data.productionReady, false, "第二个空间未启用任何能力，不得判定为生产就绪");
+
+  // 请求体里塞 workspaceId：DTO 未声明该字段，whitelist 会剥离，变更只能落在会话空间。
+  const capForge = await request("PUT", "/api/rental/v1/capabilities", {
+    code: "quantity_inventory", status: "enabled", reason: "尝试用请求体指定空间",
+    workspaceId: capTenant.currentWorkspaceId
+  }, capWs2Token);
+  assert.equal(capForge.status, 200, `第二个空间启用数量库存失败: ${capForge.status} ${JSON.stringify(capForge.body).slice(0, 200)}`);
+  assert.equal(
+    readCount(
+      `SELECT COUNT(*) FROM \`workspace_capability_instances\` WHERE \`code\`='quantity_inventory' AND \`workspaceId\`='${capWs2.body.data.id}';`
+    ),
+    1,
+    "变更必须落在会话空间"
+  );
+  assert.equal(
+    readCount(
+      `SELECT COUNT(*) FROM \`workspace_capability_instances\` WHERE \`code\`='quantity_inventory' AND \`workspaceId\`='${capTenant.currentWorkspaceId}';`
+    ),
+    0,
+    "请求体里的 workspaceId 不得改变落库空间（否则可跨空间改配置）"
+  );
+  // 切回第一个空间，其能力状态不得被第二个空间的操作污染。
+  const capWs1Token = (await request("POST", "/api/auth/switch-workspace", {
+    workspaceId: capTenant.currentWorkspaceId
+  }, capWs2Token)).body.data.accessToken;
+  const capWs1Again = await request("GET", "/api/rental/v1/capabilities", null, capWs1Token);
+  assert.equal(capViewOf(capWs1Again.body.data, "serialized_inventory").state, "enabled", "切回后原空间状态应保持");
+  assert.equal(
+    capViewOf(capWs1Again.body.data, "quantity_inventory").state,
+    "not_enabled",
+    "第二个空间的启用不得泄漏到第一个空间"
+  );
+  ok("跨空间隔离：两空间状态互不影响，请求体 workspaceId 被剥离，变更只落会话空间");
+
+  // 65g. 跨租户隔离 + 审计按空间隔离。
+  const capOtherTenant = await bootstrapTenant(capPlatform.accessToken, "e2e_cap_other", "camera");
+  const capOtherOverview = await request("GET", "/api/rental/v1/capabilities", null, capOtherTenant.accessToken);
+  assert.equal(capOtherOverview.status, 200, `另一租户读总览失败: ${capOtherOverview.status}`);
+  assert.equal(
+    capOtherOverview.body.data.capabilities.filter((row) => row.instance).length,
+    0,
+    "另一租户不得看到任何实例（跨租户不可访问）"
+  );
+  assert.equal(
+    (await request("GET", "/api/rental/v1/capability-audits", null, capOtherTenant.accessToken)).body.data.length,
+    0,
+    "另一租户的审计列表必须为空"
+  );
+  const capAudits = await request("GET", "/api/rental/v1/capability-audits", null, capWs1Token);
+  assert.equal(capAudits.status, 200, `读审计失败: ${capAudits.status}`);
+  assert.ok(capAudits.body.data.length >= 3, `本空间应有多条审计，实际 ${capAudits.body.data.length}`);
+  assert.ok(
+    capAudits.body.data.every((row) => row.reason && row.at && row.toStatus),
+    "每条审计都必须有原因、时间与目标状态"
+  );
+  assert.equal(
+    (await request("GET", "/api/rental/v1/capability-audits?code=quantity_inventory", null, capWs1Token)).body.data.length,
+    0,
+    "第一个空间不得看到第二个空间的能力审计"
+  );
+  const capAuditFiltered = await request("GET", "/api/rental/v1/capability-audits?code=bundle_inventory", null, capWs1Token);
+  assert.ok(capAuditFiltered.body.data.length >= 1, "审计应可按能力筛选");
+  assert.ok(
+    capAuditFiltered.body.data.every((row) => row.code === "bundle_inventory"),
+    "筛选结果不得混入其他能力"
+  );
+  assert.equal(
+    (await request("GET", "/api/rental/v1/capability-audits?code=not_a_capability", null, capWs1Token)).status,
+    400,
+    "未注册的能力码筛选应 400，而不是静默返回空列表"
+  );
+  ok("跨租户与跨空间隔离：另一租户零实例零审计，审计按空间与能力筛选且未注册码被拒");
+
+  // 65h. 暂停与停用：paused / disabled 都不是可用状态，且不得清掉历史时间戳。
+  const capPauseRevision = Number(
+    readScalar("SELECT `revision` FROM `workspace_capability_instances` WHERE `code`='bundle_inventory';")
+  );
+  const capPaused = await capSave({
+    code: "bundle_inventory", status: "paused", reason: "套装临时下架", expectedRevision: capPauseRevision
+  }, capWs1Token);
+  assert.equal(capPaused.status, 200, `暂停失败: ${capPaused.status} ${JSON.stringify(capPaused.body).slice(0, 200)}`);
+  const capPausedRow = readRow(
+    "SELECT `status`, CASE WHEN `enabledAt` IS NULL THEN 'null' ELSE 'set' END AS `enabledAtState`, " +
+      "CASE WHEN `pausedAt` IS NULL THEN 'null' ELSE 'set' END AS `pausedAtState` " +
+      "FROM `workspace_capability_instances` WHERE `code`='bundle_inventory';"
+  );
+  assert.equal(capPausedRow.status, "paused");
+  assert.equal(capPausedRow.pausedAtState, "set", "暂停必须记录时间");
+  assert.equal(capPausedRow.enabledAtState, "set", "暂停不得清掉原启用时间（历史要能解释）");
+  assert.equal(
+    readScalar("SELECT `action` FROM `workspace_capability_audits` WHERE `code`='bundle_inventory' ORDER BY `at` DESC, `createdAt` DESC LIMIT 1;"),
+    "pause",
+    "暂停应记为 pause 动作"
+  );
+  // 暂停后必选能力重新计入缺失（bundle 非必选，故用总览验证它不再是 enabled）。
+  const capAfterPause = await request("GET", "/api/rental/v1/capabilities", null, capWs1Token);
+  assert.equal(capViewOf(capAfterPause.body.data, "bundle_inventory").state, "paused");
+  assert.equal(
+    capViewOf(capAfterPause.body.data, "bundle_inventory").instance.status,
+    "paused",
+    "总览必须带出实例的真实状态"
+  );
+
+  // 65i. 升级入口：未实现、未启用、已是最新，三类前置全部 fail-closed。
+  const capUpgradeUnimplemented = await request(
+    "POST", "/api/rental/v1/capabilities/locker/upgrade", { reason: "升级尚无模块的能力" }, capWs1Token
+  );
+  assert.equal(capUpgradeUnimplemented.status, 409, `未实现能力升级应 409，实际 ${capUpgradeUnimplemented.status}`);
+  const capUpgradeMissing = await request(
+    "POST", "/api/rental/v1/capabilities/return/upgrade", { reason: "升级未启用的能力" }, capWs1Token
+  );
+  assert.equal(capUpgradeMissing.status, 404, `未启用能力升级应 404，实际 ${capUpgradeMissing.status}`);
+  const capUpgradeLatest = await request(
+    "POST", "/api/rental/v1/capabilities/serialized_inventory/upgrade", { reason: "已是最新" }, capWs1Token
+  );
+  assert.equal(capUpgradeLatest.status, 409, `已是最新版本升级应 409，实际 ${capUpgradeLatest.status}`);
+  assert.equal(
+    readCount("SELECT COUNT(*) FROM `workspace_capability_audits` WHERE `action`='upgrade';"),
+    0,
+    "三类被拒的升级都不得留下 upgrade 审计"
+  );
+  const capUpgradeBadCode = await request(
+    "POST", "/api/rental/v1/capabilities/not_a_capability/upgrade", { reason: "未注册" }, capWs1Token
+  );
+  assert.equal(capUpgradeBadCode.status, 400, `未注册能力码升级应 400，实际 ${capUpgradeBadCode.status}`);
+  ok("暂停与升级：paused 保留启用时间且记为 pause；未实现/未启用/已最新/未注册四类升级全部被拒");
+
+  // 65j. 已有数据的库重复部署：能力实例与审计必须原样保留，且仍无 drift。
+  const capCountsBefore = {
+    instances: readCount("SELECT COUNT(*) FROM `workspace_capability_instances`;"),
+    audits: readCount("SELECT COUNT(*) FROM `workspace_capability_audits`;"),
+    serializedRevision: readScalar("SELECT `revision` FROM `workspace_capability_instances` WHERE `code`='serialized_inventory';")
+  };
+  assert.ok(capCountsBefore.instances >= 3, `前置条件：应已有多行实例，实际 ${capCountsBefore.instances}`);
+  const capRedeploy = deploy();
+  if (capRedeploy.status !== 0) fail("带能力数据的库重复 migrate deploy 失败", `${capRedeploy.stdout || ""}${capRedeploy.stderr || ""}`.slice(-2000));
+  assert.deepEqual(
+    {
+      instances: readCount("SELECT COUNT(*) FROM `workspace_capability_instances`;"),
+      audits: readCount("SELECT COUNT(*) FROM `workspace_capability_audits`;"),
+      serializedRevision: readScalar("SELECT `revision` FROM `workspace_capability_instances` WHERE `code`='serialized_inventory';")
+    },
+    capCountsBefore,
+    "重复部署不得改变已有的能力实例与审计"
+  );
+  const capDriftScript = runNode([
+    PRISMA_CLI, "migrate", "diff", "--from-url", TEST_DATABASE_URL,
+    "--to-schema-datamodel", SCHEMA_PATH, "--script"
+  ]);
+  const capDriftText = `${capDriftScript.stdout || ""}${capDriftScript.stderr || ""}`.replace(/\x1B\[[0-?]*[ -/]*[@-~]/gu, "");
+  // 这里**只**判定能力两表是否有差异，而不是全库 `No difference detected`。
+  //
+  // 原因是第 5 节为了构造「旧库带数据升级」，会 DROP 并按旧结构重建
+  // `OrderNotificationRecord`/`OrderOperationRecord`，再删掉那条迁移记录让它重放。
+  // 但 `20260828000100_align_legacy_schema_baseline` 已被记为已应用、不会再执行，
+  // 于是这两张表从第 5 节起就永久偏离 schema.prisma（列类型、`updatedAt` 默认值、索引名）。
+  // 那是**测试构造**造成的偏离，不是生产升级路径会出现的顺序（生产里 20260609 必然早于
+  // 20260828）。全库无 drift 的权威判定在第 2 节的空库路径上，已包含本迁移并通过。
+  const capDriftLines = capDriftText
+    .split(/\r?\n/u)
+    .filter((line) => /workspace_capability_(instances|audits)/u.test(line));
+  if (capDriftLines.length) {
+    fail("能力两表与 schema.prisma 不一致", capDriftLines.join("\n").slice(0, 4000));
+  }
+  ok("重复部署：能力实例与审计原样保留、revision 不变、能力两表与 schema.prisma 无差异");
+
+  // 65k. 重启恢复：状态必须从库里读回，而不是靠进程内存。
+  await stopApi();
+  startApi();
+  if (!(await waitHealth())) fail("第 65 节的 API 重启超时");
+  const capAfterRestart = await login("e2e_cap_camera", "admin", capTenant.password);
+  const capRestartToken = (await request("POST", "/api/auth/switch-workspace", {
+    workspaceId: capTenant.currentWorkspaceId
+  }, capAfterRestart.accessToken)).body.data.accessToken;
+  const capRestartOverview = await request("GET", "/api/rental/v1/capabilities", null, capRestartToken);
+  assert.equal(capRestartOverview.status, 200, `重启后读总览失败: ${capRestartOverview.status}`);
+  assert.equal(
+    capViewOf(capRestartOverview.body.data, "serialized_inventory").state,
+    "enabled",
+    "重启后已启用状态必须仍成立（否则状态只在内存里）"
+  );
+  assert.equal(
+    capViewOf(capRestartOverview.body.data, "bundle_inventory").state,
+    "paused",
+    "重启后暂停状态必须仍成立"
+  );
+  assert.equal(
+    capViewOf(capRestartOverview.body.data, "quantity_inventory").state,
+    "not_enabled",
+    "重启后不得把别的空间的启用状态带进本空间"
+  );
+  assert.equal(
+    capViewOf(capRestartOverview.body.data, "delivery").state,
+    "declared_not_implemented",
+    "重启后未实现的能力仍不得显示为可用"
+  );
+  const capRestartAudits = await request("GET", "/api/rental/v1/capability-audits", null, capRestartToken);
+  assert.equal(
+    capRestartAudits.body.data.length,
+    readCount(`SELECT COUNT(*) FROM \`workspace_capability_audits\` WHERE \`workspaceId\`='${capTenant.currentWorkspaceId}';`),
+    "重启后审计条数必须与库一致"
+  );
+  ok("重启恢复：启用/暂停/未启用/已声明未实现四种状态与审计条数全部从库中读回");
+
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);
 }
 

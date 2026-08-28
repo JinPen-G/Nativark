@@ -319,6 +319,8 @@ model Tenant {
   rentalRuleVersions        RentalRuleVersion[]
   rentalBusinessCalendars   RentalBusinessCalendar[]
   rentalCalendarOverrideAudits RentalCalendarOverrideAuditEntry[]
+  workspaceCapabilityInstances WorkspaceCapabilityInstance[]
+  workspaceCapabilityAudits   WorkspaceCapabilityAuditEntry[]
   rentalIdempotencyRecords  RentalOrderIdempotencyRecord[]
   customerProfiles          CustomerProfile[]
   customerWorkspaceLinks    CustomerWorkspaceLink[]
@@ -388,6 +390,8 @@ model BusinessWorkspace {
   rentalReferrals             RentalReferral[]
   rentalNotificationLogs      RentalNotificationLog[]
   rentalOrderIdempotencyRecords RentalOrderIdempotencyRecord[]
+  workspaceCapabilityInstances  WorkspaceCapabilityInstance[]
+  workspaceCapabilityAudits     WorkspaceCapabilityAuditEntry[]
   attributeUniqueValues RentalAttributeUniqueValue[]
   createdAt    DateTime            @default(now())
   updatedAt    DateTime            @updatedAt
@@ -2199,6 +2203,70 @@ model TenantRentalProfile {
 
   @@index([categoryCode])
   @@map("tenant_rental_profiles")
+}
+
+/// CORE-EXT-02A：经营空间的 capability **实例**。
+///
+/// 为什么必须独立成表：早前空间能力直接读品类定义的 `defaultCapabilities` 数组，于是
+/// 「品类声明了这个 code」== 「这个空间已启用该功能」。那让只有 code、没有可执行模块的
+/// 能力被当成可用功能，也没有任何地方能表达暂停、停用、配置版本与升级审计。
+///
+/// 「没有实例行」与「实例为 disabled」是两种不同事实：前者从未启用过，后者停用且留有审计。
+model WorkspaceCapabilityInstance {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId String
+  /// 复合外键保证空间与实例同租户，杜绝把能力实例挂到别的租户的空间上。
+  workspace   BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  /// capability code。只校验它在注册表里，不做数据库枚举——注册表是代码里的唯一事实源。
+  code        String
+  /// enabled / paused / disabled。
+  status      String
+  /// 启用时锁定的实现版本，来自注册表的 implementationVersion；升级即换这个值并留审计。
+  implementationVersion String
+  /// 配置版本号，每次改配置递增；报价与订单快照引用它来解释「当时按哪一版配置判定」。
+  configVersion String
+  /// 该能力的配置值，形状由注册表的 configSchema 描述。
+  config      Json
+  /// 乐观并发：写入以读到的 revision 为条件，冲突返回 409。
+  revision    Int      @default(0)
+  enabledAt   DateTime?
+  pausedAt    DateTime?
+  disabledAt  DateTime?
+  updatedBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  /// 同一空间同一能力只能有一个实例（需求：同空间实例与版本唯一）。
+  @@unique([workspaceId, code], map: "workspace_capability_instances_ws_code_key")
+  @@index([tenantId, code], map: "workspace_capability_instances_tenant_code_idx")
+  @@map("workspace_capability_instances")
+}
+
+/// CORE-EXT-02A：capability 生命周期审计（只追加）。
+/// 启用、暂停、停用、升级与改配置各留一行，永不改写——审计是事实而不是可变配置。
+model WorkspaceCapabilityAuditEntry {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId String
+  workspace   BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  code        String
+  /// enable / pause / disable / upgrade / configure
+  action      String
+  fromStatus  String?
+  toStatus    String
+  implementationVersion String?
+  configVersion String?
+  reason      String   @db.Text
+  operator    String?
+  at          DateTime
+  createdAt   DateTime @default(now())
+
+  @@index([workspaceId, code], map: "workspace_capability_audits_ws_code_idx")
+  @@index([tenantId, at], map: "workspace_capability_audits_tenant_at_idx")
+  @@map("workspace_capability_audits")
 }
 
 model RentalCouponTemplate {

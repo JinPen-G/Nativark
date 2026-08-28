@@ -2280,6 +2280,26 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     method: "post", path: "/api/rental/v1/orders/{id}/inspections", tag: "RentalCore", operationId: "createRentalOrderInspection",
     summary: "Complete pickup or return inspection", permissions: ["store-rental:order:operate", "store-rental:vehicle:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
   },
+  {
+    method: "get", path: "/api/rental/v1/capabilities", tag: "RentalCore", operationId: "listWorkspaceCapabilities",
+    summary: "List workspace capability instances with declared/implemented/enabled state",
+    permissions: ["rental-core:capability:view", "rental-core:capability:manage"], responseSchema: "GenericObject"
+  },
+  {
+    method: "put", path: "/api/rental/v1/capabilities", tag: "RentalCore", operationId: "saveWorkspaceCapability",
+    summary: "Enable, pause, disable or reconfigure a workspace capability",
+    permissions: ["rental-core:capability:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+  },
+  {
+    method: "post", path: "/api/rental/v1/capabilities/{code}/upgrade", tag: "RentalCore", operationId: "upgradeWorkspaceCapability",
+    summary: "Upgrade a workspace capability to the registry implementation version",
+    permissions: ["rental-core:capability:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+  },
+  {
+    method: "get", path: "/api/rental/v1/capability-audits", tag: "RentalCore", operationId: "listWorkspaceCapabilityAudits",
+    summary: "List workspace capability lifecycle audit events",
+    permissions: ["rental-core:capability:view", "rental-core:capability:manage"], responseSchema: "GenericObject"
+  },
   ...rentalBusinessOperations(),
   ...INTEGRATION_BACKLOG_OPERATIONS
 ];
