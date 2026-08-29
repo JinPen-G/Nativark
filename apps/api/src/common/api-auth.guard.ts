@@ -175,6 +175,26 @@ export function requiredPermissions(method: string, path: string) {
         ? ["store-rental:corporate:view", "store-rental:corporate:manage"]
         : ["store-rental:corporate:manage"];
     }
+    // CUSTOMER-01D：需求 4.8.14 要求合并与注销**分别授权**。两者都不可逆，
+    // 且影响面不同（合并改身份归属、注销终止业务资格），因此不能共用「会员管理」
+    // 一个权限——否则任何能改会员等级的人都能合并或注销客户。同样置于通用分支之前。
+    if (path === "/platform/customers/merge") {
+      return ["store-rental:customer:merge"];
+    }
+    // 预览与候选是只读的，但它们暴露「哪些主档可能是同一人」，属合并决策信息，
+    // 因此同样按合并权限判定，而不是按「会员查看」放行。
+    if (/\/(merge-preview|duplicates)$/u.test(path)) {
+      return ["store-rental:customer:merge"];
+    }
+    if (/\/closability$/u.test(path)) {
+      return ["store-rental:customer:close"];
+    }
+    // 账号注销走 account-status，其请求体里 status=closed 才是注销；Guard 按路径判权限、
+    // 看不到请求体，因此这条路由「会员管理」或「客户注销」之一即可进入，
+    // 真正的注销门禁（前置检查 + 人工确认）在服务层 assertClosableForClose。
+    if (/\/account-status$/u.test(path)) {
+      return ["store-rental:member:manage", "store-rental:customer:close"];
+    }
     return method === "GET"
       ? ["store-rental:member:view", "store-rental:member:manage"]
       : ["store-rental:member:manage"];

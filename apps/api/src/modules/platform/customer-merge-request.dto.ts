@@ -1,4 +1,4 @@
-import { IsBoolean, IsNotEmpty, IsObject, IsOptional, IsString, MaxLength } from "class-validator";
+import { IsNotEmpty, IsObject, IsOptional, IsString, MaxLength } from "class-validator";
 import type { MergeCustomersRequest } from "@store-rental/shared";
 
 /**
@@ -32,11 +32,4 @@ export class MergeCustomersDto implements MergeCustomersRequest {
   @IsOptional()
   @IsObject()
   fieldResolutions?: Record<string, string>;
-}
-
-/** CUSTOMER-01D：注销前置检查的显式确认。用于 UI 在提交注销前回显待人工核对项。 */
-export class AcknowledgeManualChecksDto {
-  @IsOptional()
-  @IsBoolean()
-  acknowledgedManualChecks?: boolean;
 }

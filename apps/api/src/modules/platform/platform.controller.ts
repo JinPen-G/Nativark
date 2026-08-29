@@ -15,6 +15,7 @@ import {
   SaveCustomerCreditDto,
   SaveCustomerInvoiceProfileDto
 } from "./customer-corporate-request.dto";
+import { MergeCustomersDto } from "./customer-merge-request.dto";
 import { CreateBusinessWorkspaceDto, LinkCustomerToWorkspaceDto, SaveSharedCustomerDto, SaveWorkspaceMemberDto, UpdateBusinessWorkspaceDto } from "./workspace-request.dto";
 import {
   GeneratePlatformNumberDto,
@@ -190,6 +191,42 @@ export class PlatformController {
   @Get("customers/:customerId/sensitive-access")
   customerSensitiveAccess(@Param("customerId") customerId: string, @Req() req: RequestWithUser) {
     return this.platformService.listCustomerSensitiveAccess(customerId, req.user);
+  }
+
+
+  /**
+   * CUSTOMER-01D：重复客户候选（需求 4.8.3）。只在同租户内查找。
+   * 候选带 matchedBy——运营要知道「为什么系统认为这两个是同一人」，否则人工合并变成盲签。
+   */
+  @Get("customers/:customerId/duplicates")
+  customerDuplicates(@Param("customerId") customerId: string, @Req() req: RequestWithUser) {
+    return this.platformService.findCustomerDuplicates(customerId, req.user);
+  }
+
+  /** CUSTOMER-01D：合并冲突预览。只读，不写任何东西；供人工确认后再提交。 */
+  @Get("customers/:customerId/merge-preview")
+  customerMergePreview(
+    @Param("customerId") customerId: string,
+    @Query("targetCustomerId") targetCustomerId: string,
+    @Req() req: RequestWithUser
+  ) {
+    return this.platformService.previewCustomerMerge(customerId, targetCustomerId, req.user);
+  }
+
+  /** CUSTOMER-01D：提交人工合并。不搬订单、不合并空间权益，只写映射并标记被合并方。 */
+  @Post("customers/merge")
+  mergeCustomers(@Body() body: MergeCustomersDto, @Req() req: RequestWithUser) {
+    return this.platformService.mergeCustomers(body, req.user);
+  }
+
+  /**
+   * CUSTOMER-01D：注销前置检查（需求 4.8.13）。
+   * blockers 来自真实事实，非空即禁止注销；manualConfirmations 是本系统尚无数据源的类别，
+   * 必须人工确认——把它们当成「检查通过」就是借注销规避欠款。
+   */
+  @Get("customers/:customerId/closability")
+  customerClosability(@Param("customerId") customerId: string, @Req() req: RequestWithUser) {
+    return this.platformService.getCustomerClosability(customerId, req.user);
   }
 
   /** CUSTOMER-01B：该客户此刻能否在本空间开展新业务，以及被拒的具体原因。 */

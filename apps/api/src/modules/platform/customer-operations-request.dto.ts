@@ -1,4 +1,4 @@
-import { IsIn, IsNotEmpty, IsOptional, IsString, MaxLength } from "class-validator";
+import { IsBoolean, IsIn, IsNotEmpty, IsOptional, IsString, MaxLength } from "class-validator";
 import {
   CUSTOMER_ACCOUNT_STATUSES,
   CUSTOMER_MEMBERSHIP_STATUSES,
@@ -26,6 +26,13 @@ export class ChangeCustomerAccountStatusDto implements ChangeCustomerAccountStat
   @IsNotEmpty()
   @MaxLength(500)
   reason!: string;
+  /**
+   * CUSTOMER-01D：注销时对「系统无数据源、只能人工核对项」的显式确认。
+   * 必须在 DTO 里声明：whitelist:true 会剥离未声明字段，漏声明会让注销永远拿不到确认、恒被拒绝。
+   */
+  @IsOptional()
+  @IsBoolean()
+  acknowledgedManualChecks?: boolean;
 }
 
 export class ChangeCustomerMembershipStatusDto implements ChangeCustomerMembershipStatusRequest {
@@ -42,4 +49,11 @@ export class ChangeCustomerMembershipStatusDto implements ChangeCustomerMembersh
   @IsString()
   @MaxLength(60)
   levelName?: string;
+  /**
+   * CUSTOMER-01D：注销时对「系统无数据源、只能人工核对项」的显式确认。
+   * 必须在 DTO 里声明：whitelist:true 会剥离未声明字段，漏声明会让注销永远拿不到确认、恒被拒绝。
+   */
+  @IsOptional()
+  @IsBoolean()
+  acknowledgedManualChecks?: boolean;
 }

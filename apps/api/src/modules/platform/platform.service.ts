@@ -9,6 +9,7 @@ import {
   SaveWorkspaceMemberRequest,
   ChangeCustomerAccountStatusRequest,
   ChangeCustomerMembershipStatusRequest,
+  MergeCustomersRequest,
   SaveCustomerContractRequest,
   SaveCustomerCreditRequest,
   SaveCustomerInvoiceProfileRequest,
@@ -56,6 +57,7 @@ import {
 import { PlatformRepository } from "./platform.repository";
 import { SharedCustomerRepository } from "./shared-customer.repository";
 import { CustomerOperationsService } from "./customer-operations.service";
+import { CustomerMergeService } from "./customer-merge.service";
 import { CustomerCorporateService } from "./customer-corporate.service";
 import { WorkspaceCapabilityService } from "../rental-core/workspace-capability.service";
 import { RentalCoreService } from "../rental-core/rental-core.service";
@@ -100,7 +102,9 @@ export class PlatformService {
     @Optional() private readonly customerOperations?: CustomerOperationsService,
     // CUSTOMER-01C：企业资料（开票/合同/授信账期）与订单主体解析。
     // 同样追加在最后且 @Optional()，理由同上——位置参数构造的既有测试会错位。
-    @Optional() private readonly customerCorporate?: CustomerCorporateService
+    @Optional() private readonly customerCorporate?: CustomerCorporateService,
+    // CUSTOMER-01D：重复识别、人工合并与注销前置检查。同样追加在最后且 @Optional()。
+    @Optional() private readonly customerMerge?: CustomerMergeService
   ) {}
 
   private readonly logger = new Logger(PlatformService.name);
@@ -230,6 +234,8 @@ export class PlatformService {
         // CUSTOMER-01B：敏感资料解密查看单独授权。必须出现在权限目录里——
         // 角色管理页的可选项完全来自这棵树，漏了它就没人能被授予该权限。
         { code: "store-rental:customer:reveal-sensitive", name: "客户敏感资料解密", description: "查看客户证件号等明文，并可查阅敏感访问审计" },
+        { code: "store-rental:customer:merge", name: "客户合并", description: "人工合并重复客户主档，不可逆" },
+        { code: "store-rental:customer:close", name: "客户注销", description: "注销客户账号或空间会员关系，不可逆" },
         { code: "store-rental:corporate:view", name: "企业客户查看" },
         { code: "store-rental:corporate:manage", name: "企业客户管理" },
         { code: "store-rental:corporate:monthly-settle", name: "按钮-企业月结回款", description: "登记企业账单回款" },
@@ -1625,6 +1631,40 @@ export class PlatformService {
     this.requireWorkspaceDataSource();
     const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
     return this.requireCustomerOperations().listSensitiveAccess(tenantId, customerId, currentUser);
+  }
+
+
+  private requireCustomerMerge() {
+    if (!this.customerMerge) throw new ConflictException("客户合并服务未就绪");
+    return this.customerMerge;
+  }
+
+  findCustomerDuplicates(customerId: string, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerMerge().findDuplicates(tenantId, customerId);
+  }
+
+  previewCustomerMerge(customerId: string, targetCustomerId: string, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    if (!targetCustomerId?.trim()) throw new BadRequestException("必须指定保留主档 targetCustomerId");
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerMerge().previewMerge(tenantId, customerId, targetCustomerId.trim());
+  }
+
+  mergeCustomers(input: MergeCustomersRequest, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    // 合并是租户级动作，不绑定空间：被合并方的空间会员关系原样保留，不做跨空间搬迁。
+    return this.requireCustomerMerge().mergeCustomers(tenantId, input, currentUser?.displayName);
+  }
+
+  getCustomerClosability(customerId: string, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    // 不传 workspaceId：本接口回答「整个租户客户账号能否注销」。
+    // 空间会员注销的检查在改状态时按空间范围各自进行。
+    return this.requireCustomerMerge().assertClosable(tenantId, customerId);
   }
 
   getCustomerTransactability(customerId: string, currentUser?: SystemUserRow) {
