@@ -4612,6 +4612,13 @@ export interface CustomerTransactability {
 export interface ChangeCustomerAccountStatusRequest {
   status: CustomerAccountStatus;
   reason: string;
+  /**
+   * CUSTOMER-01D：注销时必须显式确认那些系统无数据源、只能人工核对的项
+   * （退款、押金退还、争议追偿）。缺少确认时服务端拒绝并回传待确认清单——
+   * 默认放行等于把「没检查」当成「检查通过」，正是需求 4.8.13 禁止的
+   * 「借注销规避欠款、追偿或风险限制」。
+   */
+  acknowledgedManualChecks?: boolean;
 }
 
 /** CUSTOMER-01B：空间会员状态变更请求。只影响**当前会话空间**。 */
@@ -4620,6 +4627,8 @@ export interface ChangeCustomerMembershipStatusRequest {
   reason: string;
   /** 目标等级（仅在恢复/激活时允许调整）。 */
   levelName?: string;
+  /** 同账号注销：注销空间会员关系时也必须显式确认人工核对项（见上）。 */
+  acknowledgedManualChecks?: boolean;
 }
 
 /** CUSTOMER-01B：敏感资料访问审计条目。只追加。 */
@@ -4667,6 +4676,79 @@ export interface CustomerAccount {
   lastOperator?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * CUSTOMER-01D：重复客户候选（需求 4.8.3）。
+ *
+ * 个人优先以**已验证手机号**识别，可结合实名证件核验；企业结合统一社会信用代码
+ * 与已验证联系人识别。`matchedBy` 必须带出来——运营要知道「为什么系统认为这两个是同一人」，
+ * 否则人工合并就变成盲签。
+ */
+export interface CustomerDuplicateCandidate {
+  customerId: string;
+  name: string;
+  phoneMasked: string;
+  customerType: "personal" | "corporate";
+  /** phone / identity / uscc / contact_phone */
+  matchedBy: string;
+  matchedValueMasked?: string;
+  /** 该候选是否已被合并进别的主档（已合并的不应再作为合并目标）。 */
+  mergedIntoCustomerId?: string;
+  createdAt: string;
+}
+
+/**
+ * CUSTOMER-01D：合并冲突预览（需求 4.8.3「明确保留主档、字段取舍、资质处理和冲突项」）。
+ *
+ * 预览是**只读**的：它不做任何写入，供人工确认后再提交合并。
+ */
+export interface CustomerMergePreview {
+  sourceCustomerId: string;
+  targetCustomerId: string;
+  /** 逐字段差异。`conflict` 为真表示两边都有值且不同，需要人工取舍。 */
+  fieldDiff: Array<{
+    field: string;
+    sourceValue?: string;
+    targetValue?: string;
+    conflict: boolean;
+  }>;
+  /**
+   * 双方的空间会员关系。合并**不合并权益**：各空间等级、积分、券分别保留，
+   * 因此这里只如实列出，供人工确认「合并后客户在哪些空间各是什么状态」。
+   */
+  sourceMemberships: Array<{ workspaceId: string; levelName: string; status: CustomerMembershipStatus }>;
+  targetMemberships: Array<{ workspaceId: string; levelName: string; status: CustomerMembershipStatus }>;
+  /** 两边都有会员关系的空间。这些空间需要人工决定保留哪一份等级。 */
+  overlappingWorkspaceIds: string[];
+  /** 被合并方将保留的历史引用数量（订单等），合并后仍指向原主档。 */
+  preservedReferences: Array<{ kind: string; count: number }>;
+  /** 阻止合并的原因；非空时不允许提交。 */
+  blockers: Array<{ code: string; message: string }>;
+}
+
+/** CUSTOMER-01D：提交人工合并。原因与审批人必填——合并不可逆。 */
+export interface MergeCustomersRequest {
+  sourceCustomerId: string;
+  targetCustomerId: string;
+  reason: string;
+  approver?: string;
+  /** 人工对冲突字段的取舍结论，原样固化进合并映射，供事后解释保留了谁的值。 */
+  fieldResolutions?: Record<string, string>;
+}
+
+/**
+ * CUSTOMER-01D：注销前置检查（需求 4.8.13）。
+ *
+ * `blockers` 来自**真实存在的事实**，非空即禁止注销。
+ * `manualConfirmations` 是本分支尚无数据源的类别（退款、争议、追偿、已完成订单的
+ * 押金退还状态）——系统不能假装检查过，因此显式列出、要求人工签字确认后才允许继续。
+ * 把它们当成「检查通过」是「借注销规避欠款」的入口。
+ */
+export interface CustomerClosability {
+  closable: boolean;
+  blockers: Array<{ code: string; message: string; count?: number }>;
+  manualConfirmations: Array<{ code: string; message: string }>;
 }
 
 /**

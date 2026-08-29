@@ -21,6 +21,7 @@ import { PlatformRepository } from "./modules/platform/platform.repository";
 import { SharedCustomerRepository } from "./modules/platform/shared-customer.repository";
 import { CustomerOperationsRepository } from "./modules/platform/customer-operations.repository";
 import { CustomerOperationsService } from "./modules/platform/customer-operations.service";
+import { CustomerMergeService } from "./modules/platform/customer-merge.service";
 import { CustomerCorporateService } from "./modules/platform/customer-corporate.service";
 import { PlatformService } from "./modules/platform/platform.service";
 import { ReportsController } from "./modules/reports/reports.controller";
@@ -82,6 +83,7 @@ import { CapabilityHookRegistrar } from "./modules/rental-core/capability-hook.r
     SharedCustomerRepository,
     CustomerOperationsRepository,
     CustomerOperationsService,
+    CustomerMergeService,
     CustomerCorporateService,
     OperationLogService,
     ReportsService,

@@ -35,6 +35,7 @@ const {
   CustomerOperationsService,
   CUSTOMER_REVEAL_PERMISSION
 } = require(path.join(ROOT, "apps/api/src/modules/platform/customer-operations.service"));
+const { CustomerMergeService } = require(path.join(ROOT, "apps/api/src/modules/platform/customer-merge.service"));
 
 const suffix = Date.now().toString(36);
 const tenantA = `t_op_a_${suffix}`;
@@ -46,7 +47,10 @@ const wsB1 = `ws_op_b1_${suffix}`;
 const prisma = new PrismaClient();
 const customers = new SharedCustomerRepository(prisma);
 const operations = new CustomerOperationsRepository(prisma);
-const service = new CustomerOperationsService(prisma, customers, operations);
+// CUSTOMER-01D 起注销要过前置检查，因此装配真实的检查服务——
+// 传 undefined 会让注销一律被拒（fail-closed），那不是本用例要验证的东西。
+const closability = new CustomerMergeService(prisma, customers, operations);
+const service = new CustomerOperationsService(prisma, customers, operations, closability);
 
 /** 只有 member:view 的普通运营：不得看到明文。 */
 const viewer = { id: "u_view", tenantId: tenantA, displayName: "运营小王", permissions: ["store-rental:member:view"], isPlatformAdmin: false, isSaasAdmin: false };
@@ -218,7 +222,7 @@ void (async () => {
 
   // ============ 5. 状态迁移合法性与并发 ============
   // 已注销是终态：不得直接改回正常，必须显式 reopen。
-  await service.changeMembershipStatus(tenantA, wsA2, alice.id, { status: "closed", reason: "客户要求注销该空间会员" }, "运营小王");
+  await service.changeMembershipStatus(tenantA, wsA2, alice.id, { status: "closed", reason: "客户要求注销该空间会员", acknowledgedManualChecks: true }, "运营小王");
   await rejects(
     service.changeMembershipStatus(tenantA, wsA2, alice.id, { status: "active", reason: "直接改回正常" }),
     /不能从 closed 直接变为 active/u,
@@ -336,7 +340,7 @@ void (async () => {
   );
 
   // 注销是终态：注销后不得改回 active，也不得再次注销。
-  await service.changeAccountStatus(tenantA, acctCase.id, { status: "closed", reason: "客户申请注销账号" }, "风控老李");
+  await service.changeAccountStatus(tenantA, acctCase.id, { status: "closed", reason: "客户申请注销账号", acknowledgedManualChecks: true }, "风控老李");
   await rejects(
     service.changeAccountStatus(tenantA, acctCase.id, { status: "active", reason: "直接改回正常" }),
     /不能从 closed 直接变为 active/u,

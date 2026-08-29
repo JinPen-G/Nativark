@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import type {
   ChangeCustomerAccountStatusRequest,
   ChangeCustomerMembershipStatusRequest,
@@ -14,6 +14,7 @@ import { CUSTOMER_ACCOUNT_STATUSES, CUSTOMER_MEMBERSHIP_STATUSES } from "@store-
 import { PrismaService } from "../database/prisma.service";
 import { CustomerOperationsRepository } from "./customer-operations.repository";
 import { SharedCustomerRepository } from "./shared-customer.repository";
+import { CustomerMergeService } from "./customer-merge.service";
 
 /** 敏感字段的解密查看权限。与「查看客户」分开授权（需求 4.8.5）。 */
 export const CUSTOMER_REVEAL_PERMISSION = "store-rental:customer:reveal-sensitive";
@@ -78,8 +79,39 @@ export class CustomerOperationsService {
   constructor(
     private readonly prisma: PrismaService,
     @Inject(SharedCustomerRepository) private readonly customers: SharedCustomerRepository,
-    @Inject(CustomerOperationsRepository) private readonly operations: CustomerOperationsRepository
+    @Inject(CustomerOperationsRepository) private readonly operations: CustomerOperationsRepository,
+    // CUSTOMER-01D：注销前置检查。可选注入——既有测试用位置参数构造本服务；
+    // 缺失时**拒绝注销**而不是放行（见 assertClosableForClose）。
+    @Optional() private readonly closability?: CustomerMergeService
   ) {}
+
+  /**
+   * 注销专用门禁（需求 4.8.13）。
+   *
+   * 缺注入时拒绝而不是跳过：注销是不可逆动作，拿不到检查能力就不该继续。
+   * 硬阻断项非空一律拒绝；人工核对项必须由调用方显式确认，否则同样拒绝并回传清单。
+   */
+  private async assertClosableForClose(
+    tenantId: string,
+    customerId: string,
+    acknowledged: boolean | undefined,
+    workspaceId?: string
+  ) {
+    if (!this.closability) {
+      throw new ConflictException("注销前置检查服务未就绪，已拒绝本次注销");
+    }
+    const result = await this.closability.assertClosable(tenantId, customerId, workspaceId);
+    if (!result.closable) {
+      throw new ConflictException(
+        `注销前必须先处理：${result.blockers.map((row) => row.message).join("；")}`
+      );
+    }
+    if (!acknowledged) {
+      throw new ConflictException(
+        `以下项系统无法自动核对，必须人工确认后重试：${result.manualConfirmations.map((row) => row.message).join("；")}`
+      );
+    }
+  }
 
   private mask(value: string) {
     const trimmed = value.trim();
@@ -224,6 +256,11 @@ export class CustomerOperationsService {
           (account.status === "closed" ? "：已注销账号需重新开户" : "")
       );
     }
+    // 注销是不可逆动作：先过前置检查（未完成订单、归属未厘清的保证金、未关闭风险、
+    // 仍生效的企业授信），再要求人工确认系统无法自动核对的项。
+    if (input.status === "closed") {
+      await this.assertClosableForClose(tenantId, customerId, input.acknowledgedManualChecks);
+    }
     const at = stamp();
     const changed = await this.prisma.$transaction((tx) =>
       this.operations.updateAccountStatus(
@@ -288,6 +325,11 @@ export class CustomerOperationsService {
         `空间会员状态不能从 ${link.status} 直接变为 ${input.status}` +
           (link.status === "closed" ? "：已注销的会员关系需先重新激活" : "")
       );
+    }
+    if (input.status === "closed") {
+      // 传 workspaceId：注销的是**本空间**会员关系，只检查本空间的在途业务，
+      // 用全租户口径会让另一个空间的在途订单挡住本空间的正常注销。
+      await this.assertClosableForClose(tenantId, customerId, input.acknowledgedManualChecks, workspaceId);
     }
     const at = stamp();
     const changed = await this.prisma.$transaction((tx) =>
