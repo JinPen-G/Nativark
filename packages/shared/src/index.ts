@@ -5415,8 +5415,14 @@ export interface RentalDatetimePriceOverride {
 export interface RentalCalendarTimePriceDay {
   date: string;
   entries: Array<{
-    planId: string;
-    planCode: string;
+    /**
+     * PRICE-03 起价格版本是**空间级**的，版本里的费率不带计划标识。
+     * 这两个字段按「商品 × 计价单位」回查当前拥有该价格的在用计划，仅用于展示；
+     * 价格已从计划下线但版本仍生效时为空——编一个计划编码会让月历看起来仍受它管辖。
+     */
+    planId?: string;
+    planCode?: string;
+    /** 空间级价格版本号（v1、v2…）。 */
     version: string;
     itemGroupCodes: string[];
     unit: string;
@@ -5436,14 +5442,20 @@ export interface RentalPriceAdjustmentChange {
 }
 
 /**
- * 不可变价格版本（需求 4.4.3）：某一生效时点、某价格计划全部有效商品价格的
+ * 不可变价格版本（需求 4.4.3）：某一生效时点、**某经营空间**全部有效商品价格的
  * **完整、不可变**结果。禁止就地修改；每次调价（立即保存或计划执行）追加新行。
+ *
+ * 粒度是空间而不是价格计划：同一空间同一「商品 × 计价单位」在任一时点只能有唯一
+ * 生效价格，若按计划各留一条版本链，两个计划各自"合法"的版本合起来仍可能给同一
+ * 商品两个价格，报价就只能在冲突里择一。
  */
 export interface RentalPriceVersion {
   id: string;
   tenantId: string;
-  planId: string;
-  /** 计划内版本号（v1, v2…）。 */
+  workspaceId: string;
+  /** 空间内原子序号（1 起）。字符串版本号在 v10 之后排序不可靠，故以整数为准。 */
+  sequence: number;
+  /** 展示用版本号（`v${sequence}`）。 */
   version: string;
   /** 生效时刻：报价按「租期开始时点 ≤ 生效时刻」的最新版本取价（需求 4.4.4）。 */
   effectiveFrom: string;

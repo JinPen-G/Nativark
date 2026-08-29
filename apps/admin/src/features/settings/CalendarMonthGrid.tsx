@@ -171,7 +171,7 @@ export function CalendarMonthGrid({
                   <Space size={2}>
                   {day.source === "tenant_override" && <Tag color="volcano" style={{ marginInlineEnd: 0 }}>覆盖</Tag>}
                   {summaryByDate.get(cell.date)?.entries.length ? (
-                    <Tooltip title={summaryByDate.get(cell.date)!.entries.map((entry) => `${entry.planCode} · ${entry.timeLabel} ×${entry.multiplier}`).join("；")}>
+                    <Tooltip title={summaryByDate.get(cell.date)!.entries.map((entry) => `${entry.planCode ?? `价格版本 ${entry.version}`} · ${entry.timeLabel} ×${entry.multiplier}`).join("；")}>
                       <Tag color="gold" style={{ marginInlineEnd: 0 }}>分时</Tag>
                     </Tooltip>
                   ) : null}

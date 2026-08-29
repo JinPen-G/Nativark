@@ -121,7 +121,7 @@ export class RentalBusinessController {
   /** PRICE-03：确认——立即执行生成新版本；scheduledAt 在未来则进入待生效。 */
   @Post("pricing-plans/:id/adjustments/:aid/confirm") confirmPriceAdjustment(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Param("aid") aid: string) { return this.committed(req.user.tenantId, this.business.confirmPriceAdjustment(req.user.tenantId, this.context(req.user.tenantId), id, aid, req.user.displayName)); }
   /** PRICE-03：取消（草稿/待生效可取消，已生效不可撤回）。 */
-  @Post("pricing-plans/:id/adjustments/:aid/cancel") cancelPriceAdjustment(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Param("aid") aid: string, @Body() body: CancelRentalPriceAdjustmentDto) { return this.business.cancelPriceAdjustment(req.user.tenantId, id, aid, body.reason); }
+  @Post("pricing-plans/:id/adjustments/:aid/cancel") cancelPriceAdjustment(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Param("aid") aid: string, @Body() body: CancelRentalPriceAdjustmentDto) { return this.business.cancelPriceAdjustment(req.user.tenantId, this.context(req.user.tenantId), id, aid, body.reason); }
 
   @Get("discount-plans") discountPlans(@Req() req: AuthenticatedRequest) { return this.business.listDiscountPlans(req.user.tenantId, this.context(req.user.tenantId)); }
   @Post("discount-plans") async createDiscountPlan(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalDiscountPlanDto) { return this.committed(req.user.tenantId, await this.business.saveDiscountPlan(req.user.tenantId, this.context(req.user.tenantId), body)); }

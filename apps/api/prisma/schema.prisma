@@ -2558,6 +2558,9 @@ model RentalOrder {
   /// （原因、确认人、权限、时间、被确认的判断 id、版本与当时器材组合）。
   /// 审计里不能只剩 confirmed: true，否则配货与后续履约无从还原风险已被裁决。
   capabilityExceptions  Json?
+  /// PRICE-03：订单继承报价命中的不可变价格版本引用。
+  priceVersionId  String?
+  priceVersion    String?
   chargeLines           Json
   rentalAmount          Decimal                   @db.Decimal(12, 2)
   discountAmount        Decimal                   @db.Decimal(12, 2)
@@ -2793,7 +2796,6 @@ model RentalPricingPlan {
   /// 与 rates 同为「版本化 JSON 明细」，随计划版本一起发布与快照。
   fulfillmentFees Json?
   /// PRICE-03：该计划的不可变版本历史（v1 起，只追加）。
-  priceVersions   RentalPriceVersion[]
   /// PRICE-03：针对该计划的调价计划。
   adjustmentPlans RentalPriceAdjustmentPlan[]
   createdAt     DateTime           @default(now())
@@ -2804,32 +2806,29 @@ model RentalPricingPlan {
   @@map("rental_pricing_plans")
 }
 
-/// PRICE-03：不可变价格版本（需求 4.4.3）。
+/// PRICE-03：不可变价格版本（需求 4.4.3，Codex 复审 P1-2 空间级粒度）。
 ///
-/// 每一行是某一生效时点、该价格计划全部有效商品价格的**完整、不可变**结果。
-/// 每次调价（立即保存或调价计划执行）追加新行；旧版本永久保留，
-/// 历史报价按「租期开始时点 ≤ 生效时刻」的最新版本复算——禁止
-/// 「计划行就地修改 + version+1 + 旧值消失」的伪版本方式。
+/// 每一行是某一生效时点、**当前经营空间全部有效商品价格**的完整、不可变结果
+/// （覆盖空间内全部"商品 × 计价单位"，跨计划聚合）；每次调价追加新行，旧版本
+/// 永久保留。计划行只是编辑与变更来源，不再承载版本链——禁止
+/// 「计划行就地修改 + version+1 + 旧值消失」的伪版本路径。
 model RentalPriceVersion {
-  id            String             @id @default(uuid())
+  id            String            @id @default(uuid())
   tenantId      String
-  tenant        Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant        Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   workspaceId   String
-  workspace     BusinessWorkspace  @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
-  planId        String
-  plan          RentalPricingPlan  @relation(fields: [planId], references: [id], onDelete: Cascade)
-  /// 计划内版本号（v1, v2…）。
-  version       String
-  /// 生效时刻：报价按「租期开始时点 ≤ 生效时刻」的最新版本取价（需求 4.4.4）。
+  workspace     BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  /// 空间内原子序号（1 起）。字符串版本号在 v10 之后排序不可靠，故只存整数。
+  sequence      Int
   effectiveFrom DateTime
-  /// RentalPricingRate[]：该版本的完整费率结果（不只是差异）。
+  /// 该版本的完整费率结果：空间内全部有效"商品 × 计价单位"（不只是差异）。
   rates         Json
   changeReason  String?
   createdBy     String?
-  createdAt     DateTime           @default(now())
+  createdAt     DateTime          @default(now())
 
-  @@unique([planId, version])
-  @@index([planId, effectiveFrom])
+  @@unique([workspaceId, sequence])
+  @@index([workspaceId, effectiveFrom])
   @@map("rental_price_versions")
 }
 
@@ -2845,7 +2844,7 @@ model RentalPriceAdjustmentPlan {
   workspaceId    String
   workspace      BusinessWorkspace  @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   planId         String
-  plan           RentalPricingPlan  @relation(fields: [planId], references: [id], onDelete: Cascade)
+  plan           RentalPricingPlan  @relation(fields: [planId], references: [id], onDelete: Restrict)
   code           String
   /// 草稿 / 待生效 / 已生效 / 已取消 / 执行失败。
   status         String             @default("draft")
@@ -2854,6 +2853,12 @@ model RentalPriceAdjustmentPlan {
   /// 定时执行的生效时刻；缺省 = 立即执行。
   scheduledAt    DateTime?
   resultVersionId String?
+  /// 确认（进入待生效）时锁定的基础版本：到期执行必须仍基于它，否则结果与确认展示不符。
+  baseVersionId  String?
+  /// 确认时基于基础版本算出的完整最终费率：到期执行直接采用，不重放差异。
+  finalRates     Json?
+  /// 主动取消的原因。与 failureReason（执行失败原因）分开，语义不得混用。
+  cancelReason   String?
   changeReason   String
   createdBy      String?
   confirmedBy    String?
@@ -3202,6 +3207,9 @@ model RentalQuote {
   /// Review P1-5：RentalCapabilityDecisionSnapshot[]。报价阶段的兼容性判断记录，
   /// 含风险代码、提示、证据与费用依据；下单时被引用。
   capabilityDecisions    Json?
+  /// PRICE-03：报价命中的不可变价格版本（空间级）。可空：存量报价无此事实，不回填。
+  priceVersionId  String?
+  priceVersion    String?
   customerCouponId       String?
   expiresAt              DateTime
   consumedAt             DateTime?
