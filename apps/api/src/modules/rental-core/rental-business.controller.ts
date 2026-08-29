@@ -142,6 +142,8 @@ export class RentalBusinessController {
       Number(year),
       this.canSeeCalendarDraft(req.user)
     );
+    // PRICE-02B：分时价格摘要（只读消费价格版本，与报价同一命中助手与营业时区）。
+    const timePriceSummary = await this.business.timePriceSummaryForYear(req.user.tenantId, this.context(req.user.tenantId), Number(year));
     // 「有官方更新」只能在**同一来源**内比较：sequence 是 (来源, 年度) 内的局部序号，
     // 跨来源比大小会把「来源 A 的 v1.9」误报成「引用了来源 B v1.0 的空间该更新」。
     if (calendar.sourceVersionId) {
@@ -149,12 +151,12 @@ export class RentalBusinessController {
       // 但**只**吞「不存在」——用 findVersionById 返回 undefined，数据库故障照常抛 5xx，
       // 不能用 getVersion().catch(() => undefined) 把基础设施错误也当成「无更新」。
       const referenced = await this.officialSources.findVersionById(calendar.sourceVersionId);
-      if (!referenced) return calendar;
+      if (!referenced) return { ...calendar, timePriceSummary };
       const latest = await this.officialSources.latestVersionForYear(Number(year), referenced.sourceId);
-      if (!latest) return calendar;
+      if (!latest) return { ...calendar, timePriceSummary };
       return {
         ...calendar,
-        latestOfficialSourceVersionId: latest.id,
+        timePriceSummary,
         latestOfficialSourceVersion: latest.version,
         officialSourceUpdateAvailable: latest.id !== calendar.sourceVersionId
       };
@@ -166,6 +168,7 @@ export class RentalBusinessController {
     if (summary.available > 0) {
       return {
         ...calendar,
+        timePriceSummary,
         officialSourceUpdateAvailable: false,
         officialSourceAvailableToSelect: true,
         availableOfficialSourceCount: summary.available
@@ -173,9 +176,9 @@ export class RentalBusinessController {
     }
     if (summary.total > 0) {
       // 登记过但当前全部停用——不能显示「尚未登记」，那与事实不符。
-      return { ...calendar, officialSourceUpdateAvailable: false, officialSourceRegisteredButUnavailable: true };
+      return { ...calendar, timePriceSummary, officialSourceUpdateAvailable: false, officialSourceRegisteredButUnavailable: true };
     }
-    return calendar;
+    return { ...calendar, timePriceSummary };
   }
   @Get("calendars/:year/versions") calendarVersions(@Req() req: AuthenticatedRequest, @Param("year") year: string) { return this.business.listCalendarVersions(req.user.tenantId, this.context(req.user.tenantId), Number(year)); }
   @Get("calendars/:year/versions/:version") calendarVersion(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Param("version") version: string) { return this.business.getCalendarVersion(req.user.tenantId, this.context(req.user.tenantId), Number(year), version); }

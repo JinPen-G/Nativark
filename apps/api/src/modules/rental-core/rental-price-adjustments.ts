@@ -42,6 +42,24 @@ export function minuteOfWeek(iso: string, timeZone: string = DEFAULT_BUSINESS_TI
   return weekday * 1440 + minutes;
 }
 
+/**
+ * 某个营业日期上，周期时段是否有任意一分钟生效（供月历分时标记使用）。
+ * 判定与 periodicWindowHits 同一周环数学，保证「月历展示」与「报价命中」同源。
+ */
+export function periodicWindowCoversDate(
+  window: RentalPeriodicPriceWindow,
+  dateKey: string,
+  timeZone: string = DEFAULT_BUSINESS_TIME_ZONE
+): boolean {
+  const from = window.fromWeekday * 1440 + timeToMinutes(window.fromTime);
+  const span = periodicWindowSpanMinutes(window);
+  if (span <= 0) return false;
+  const dayStart = minuteOfWeek(dateKey + "T00:00:00Z", timeZone);
+  const deltaStart = (dayStart - from + WEEK_MINUTES) % WEEK_MINUTES;
+  const deltaEnd = (dayStart + 1439 - from + WEEK_MINUTES) % WEEK_MINUTES;
+  return (from - dayStart + WEEK_MINUTES) % WEEK_MINUTES < 1440 || deltaStart < span || deltaEnd < span;
+}
+
 /** 取价时点是否命中周期时段（营业时区）。 */
 export function periodicWindowHits(window: RentalPeriodicPriceWindow, priceAt: string, timeZone?: string): boolean {
   const from = window.fromWeekday * 1440 + timeToMinutes(window.fromTime);

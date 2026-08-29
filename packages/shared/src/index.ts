@@ -5407,6 +5407,25 @@ export interface RentalDatetimePriceOverride {
   multiplier: number;
 }
 
+/**
+ * PRICE-02B：月历分时价格摘要的单日条目（只读消费 PRICE-03 的已发布价格事实）。
+ * 由服务端用与报价**同一个**命中助手（periodicWindowHits）计算，月历不复制价格值、
+ * 不建立第二套价格事实；timeLabel 仅用于展示。
+ */
+export interface RentalCalendarTimePriceDay {
+  date: string;
+  entries: Array<{
+    planId: string;
+    planCode: string;
+    version: string;
+    itemGroupCodes: string[];
+    unit: string;
+    timeLabel: string;
+    multiplier: number;
+    source: "periodic" | "datetime_override";
+  }>;
+}
+
 /** 调价计划的单条变更（需求 4.4.3：计划只保存差异，确认时展示每个受影响商品的最终价）。 */
 export interface RentalPriceAdjustmentChange {
   itemGroupId: string;

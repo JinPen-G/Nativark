@@ -1,7 +1,7 @@
 import { Button, Card, Space, Tag, Tooltip, Typography } from "antd";
 import { LeftOutlined, RightOutlined } from "@ant-design/icons";
 import type { CSSProperties } from "react";
-import type { RentalCalendarDay } from "@store-rental/shared";
+import type { RentalCalendarDay, RentalCalendarTimePriceDay } from "@store-rental/shared";
 
 /**
  * PRICE-02A（需求 4.5.9）：按自然月展示的七列月历。
@@ -84,15 +84,19 @@ export function CalendarMonthGrid({
   month,
   onMonthChange,
   days,
+  timePriceSummary,
   onDayClick,
 }: {
   year: number;
   month: number;
   onMonthChange: (next: number) => void;
   days: RentalCalendarDay[];
+  /** PRICE-02B：服务端用与报价同一命中助手生成的分时价格摘要（只读）。 */
+  timePriceSummary?: RentalCalendarTimePriceDay[];
   onDayClick: (day: RentalCalendarDay) => void;
 }) {
   const byDate = new Map(days.map((day) => [day.date, day]));
+  const summaryByDate = new Map((timePriceSummary ?? []).map((row) => [row.date, row]));
   const leading = firstWeekdayOfMonth(year, month);
   const total = daysInMonth(year, month);
   const cells: Array<{ date: string; dayNumber: number } | null> = [
@@ -164,7 +168,14 @@ export function CalendarMonthGrid({
                   <Typography.Text strong={day?.source === "tenant_override"} style={{ fontSize: 13 }}>
                     {cell.dayNumber}
                   </Typography.Text>
+                  <Space size={2}>
                   {day.source === "tenant_override" && <Tag color="volcano" style={{ marginInlineEnd: 0 }}>覆盖</Tag>}
+                  {summaryByDate.get(cell.date)?.entries.length ? (
+                    <Tooltip title={summaryByDate.get(cell.date)!.entries.map((entry) => `${entry.planCode} · ${entry.timeLabel} ×${entry.multiplier}`).join("；")}>
+                      <Tag color="gold" style={{ marginInlineEnd: 0 }}>分时</Tag>
+                    </Tooltip>
+                  ) : null}
+                  </Space>
                 </Space>
                 <Space size={2} wrap style={{ rowGap: 0 }}>
                   <Tag color={dayTypeColors[day.dayType]} style={{ marginInlineEnd: 0, fontSize: 11 }}>

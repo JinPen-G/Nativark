@@ -60,6 +60,7 @@ import {
   type RentalCalendarRangeRemovePreviewRow,
   type RentalCalendarRangeFields,
   type RentalCalendarOverrideScope,
+  type RentalCalendarTimePriceDay,
   type PublishRentalCalendarRequest,
   type VoidRentalCalendarRequest,
   type SaveRentalDiscountPlanRequest,
@@ -95,7 +96,7 @@ import {
   expandCalendarRange,
   originSnapshotOf
 } from "./calendar-range";
-import { applyPriceAdjustment, assertNoDatetimeOverrideOverlap, assertNoPeriodicOverlap, periodicWindowHits } from "./rental-price-adjustments";
+import { applyPriceAdjustment, assertNoDatetimeOverrideOverlap, assertNoPeriodicOverlap, periodicWindowCoversDate, periodicWindowHits } from "./rental-price-adjustments";
 import { rentalPricingStrategy } from "./rental-pricing-strategy";
 
 interface RentalBusinessState {
@@ -954,6 +955,71 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   getCalendar(tenantId: string, context: BusinessContext, year: number, includeDraft = true) {
     if (includeDraft) return this.editableCalendar(tenantId, context, year);
     return this.publishedCalendar(tenantId, context, year) ?? this.buildCalendar(tenantId, context.settings, year);
+  }
+
+  /**
+   * PRICE-02B：月历分时价格摘要（需求 4.5.9）。只读消费 PRICE-03 的当前价格版本，
+   * 用与报价**同一个**命中助手计算每个日期的分时规则摘要；月历不复制价格值、
+   * 不建立第二套价格事实。内存模式无价格版本事实，返回空。
+   */
+  async timePriceSummaryForYear(tenantId: string, context: BusinessContext, year: number): Promise<RentalCalendarTimePriceDay[]> {
+    const prisma = this.prisma;
+    if (!prisma || (process.env.PLATFORM_DATA_SOURCE ?? "mysql").toLowerCase() !== "mysql") return [];
+    const timeZone = context.settings.calendar.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE;
+    const calendar = this.buildCalendar(tenantId, context.settings, year);
+    const plans = this.state(tenantId, context).pricingPlans.filter((plan) => plan.status === "enabled");
+    const weeklyNames = ["日", "一", "二", "三", "四", "五", "六"];
+    const planVersions: Array<{ planId: string; planCode: string; version: string; rates: RentalPricingRate[] }> = [];
+    for (const plan of plans) {
+      const row = await prisma.rentalPriceVersion.findFirst({
+        where: { planId: plan.id },
+        orderBy: [{ effectiveFrom: "desc" }, { version: "desc" }],
+        take: 1
+      });
+      if (row) {
+        planVersions.push({ planId: plan.id, planCode: plan.code, version: row.version, rates: row.rates as unknown as RentalPricingRate[] });
+      }
+    }
+    const result: RentalCalendarTimePriceDay[] = [];
+    for (const day of calendar.days) {
+      const entries: RentalCalendarTimePriceDay["entries"] = [];
+      for (const fact of planVersions) {
+        for (const rate of fact.rates) {
+          for (const window of rate.periodicWindows ?? []) {
+            if (periodicWindowCoversDate(window, day.date, timeZone)) {
+              entries.push({
+                planId: fact.planId,
+                planCode: fact.planCode,
+                version: fact.version,
+                itemGroupCodes: [rate.itemGroupCode],
+                unit: rate.unit,
+                timeLabel: weeklyNames[window.fromWeekday] + " " + window.fromTime + " 起",
+                multiplier: window.multiplier,
+                source: "periodic"
+              });
+            }
+          }
+          for (const override of rate.datetimeOverrides ?? []) {
+            const startDay = businessDateKey(override.start, timeZone);
+            const endDay = businessDateKey(override.end, timeZone);
+            if (day.date >= startDay && day.date < endDay) {
+              entries.push({
+                planId: fact.planId,
+                planCode: fact.planCode,
+                version: fact.version,
+                itemGroupCodes: [rate.itemGroupCode],
+                unit: rate.unit,
+                timeLabel: "一次性特殊价",
+                multiplier: override.multiplier,
+                source: "datetime_override"
+              });
+            }
+          }
+        }
+      }
+      if (entries.length) result.push({ date: day.date, entries });
+    }
+    return result;
   }
 
   /** 同一年度可同时存在草稿、已发布与已被替代（需求 4.5.7），因此按「年度 + 版本」定位。 */

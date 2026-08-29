@@ -4978,7 +4978,32 @@ async function main() {
 
   await maybeStopAfter("15u");
 
+  console.log("== 15v. PRICE-02B 月历分时摘要：与报价同一命中助手、同一价格版本 ==");
+  // 需求 4.5.9：月历只读消费 PRICE-03 的价格事实，周五仍显示工作日但可叠加分时标记；
+  // 摘要由服务端用与报价同一个命中助手（periodicWindowCoversDate）计算，月历不复制
+  // 价格值、不建立第二套事实。15u(d) 已给 E2E-PRICE-TIER 配了「周五 12:00 → 周一 00:00」
+  // 的跨周时段（系数 1.5），2046-03-10 是周五。
+  const sumCalendar = (await request("GET", "/api/rental/v1/calendars/2046", null, construction.accessToken)).body.data;
+  assert.ok(Array.isArray(sumCalendar.timePriceSummary), "日历 GET 必须返回 timePriceSummary");
+  const sumFriday = sumCalendar.timePriceSummary.find((row) => row.date === adjFriday);
+  assert.ok(sumFriday, "周五应有分时摘要");
+  const sumEntry = sumFriday.entries.find((entry) => entry.source === "periodic");
+  assert.ok(sumEntry, "周五摘要应含周期时段条目");
+  assert.equal(sumEntry.planCode, "E2E-PRICE-TIER", "摘要应带计划编码");
+  assert.equal(sumEntry.multiplier, 1.5, "摘要应带系数 1.5");
+  assert.match(sumEntry.version, /^v/, "摘要必须带价格版本号（与报价命中同源）");
+  assert.ok(sumEntry.itemGroupCodes.includes("E2E-PRICE-KIT"), "摘要应列适用商品组编码");
+  const sumTuesday = sumCalendar.timePriceSummary.find((row) => row.date === "2046-03-13");
+  assert.ok(!sumTuesday, "周二（时段右端开之后）不得有分时摘要");
+  const sumSunday = sumCalendar.timePriceSummary.find((row) => row.date === "2046-03-11");
+  assert.ok(sumSunday && sumSunday.entries.some((entry) => entry.source === "periodic"), "周日应被跨周时段覆盖");
+
+  ok("月历分时摘要：服务端按与报价同一命中助手与营业时区计算，周五（含时段内周日）有摘要且带计划编码/系数/版本号，时段右端开（周一 00:00）无摘要；月历不复制价格值、不建第二套事实");
+
+  await maybeStopAfter("15v");
+
   console.log("== 16. 双租户并发隔离 ==");
+
 
   const rounds = 12;
   const concurrent = [];
