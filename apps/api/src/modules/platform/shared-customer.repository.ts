@@ -1,6 +1,8 @@
 import { Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import type {
+  CustomerAccountStatus,
+  CustomerMembershipStatus,
   CustomerWorkspaceLink,
   SaveSharedCustomerRequest,
   SharedCustomerProfile
@@ -23,6 +25,10 @@ export type SharedCustomerTx = Prisma.TransactionClient;
 export class SharedCustomerRepository {
   constructor(private readonly prisma: PrismaService) {}
 
+  private db(tx?: SharedCustomerTx) {
+    return tx ?? this.prisma;
+  }
+
   private mask(phone: string) {
     const trimmed = phone.trim();
     if (trimmed.length <= 4) return trimmed;
@@ -39,10 +45,23 @@ export class SharedCustomerRepository {
     return rows.map((row) => this.toDomain(row));
   }
 
-  async findById(tenantId: string, customerId: string, workspaceId?: string): Promise<SharedCustomerProfile | undefined> {
-    const row = await this.prisma.customerProfile.findFirst({
+  async findById(
+    tenantId: string,
+    customerId: string,
+    workspaceId?: string,
+    tx?: SharedCustomerTx
+  ): Promise<SharedCustomerProfile | undefined> {
+    const row = await this.db(tx).customerProfile.findFirst({
       where: { id: customerId, tenantId },
-      include: { workspaceLinks: workspaceId ? { where: { workspaceId } } : false }
+      include: {
+        workspaceLinks: workspaceId ? { where: { workspaceId } } : false,
+        // CUSTOMER-01E：详情才带联系人与经办人；列表不带，避免 N+1 且列表并不展示它们。
+        contacts: { where: { status: "active" }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
+        authorizedAgents: { orderBy: { validFrom: "desc" } },
+        // CUSTOMER-01E：账号只取判断状态所需的四列。刻意不 select loginPhone——
+        // 明文登录标识是凭据，管理端页面没有任何场景需要它。
+        account: { select: { status: true, loginPhoneMasked: true, suspendedAt: true, closedAt: true } }
+      }
     });
     return row ? this.toDomain(row) : undefined;
   }
@@ -139,12 +158,41 @@ export class SharedCustomerRepository {
   async findLink(
     tenantId: string,
     workspaceId: string,
-    customerId: string
+    customerId: string,
+    tx?: SharedCustomerTx
   ): Promise<CustomerWorkspaceLink | undefined> {
-    const row = await this.prisma.customerWorkspaceLink.findFirst({
+    const row = await this.db(tx).customerWorkspaceLink.findFirst({
       where: { tenantId, workspaceId, customerId }
     });
     return row ? this.toLink(row) : undefined;
+  }
+
+  /**
+   * 新业务门禁只取四个最小事实，避免订单高频路径加载联系人、经办人等详情数据。
+   * `tx` 存在时必须与调用方取得的客户行锁使用同一连接，才能读到锁后的权威状态。
+   */
+  async findBusinessGate(tenantId: string, workspaceId: string, customerId: string, tx?: SharedCustomerTx) {
+    const row = await this.db(tx).customerProfile.findFirst({
+      where: { tenantId, id: customerId },
+      select: {
+        mergedIntoCustomerId: true,
+        account: { select: { status: true } },
+        workspaceLinks: {
+          where: { tenantId, workspaceId },
+          select: { status: true },
+          take: 1
+        }
+      }
+    });
+    return row
+      ? {
+          mergedIntoCustomerId: row.mergedIntoCustomerId,
+          account: row.account ? { status: row.account.status as CustomerAccountStatus } : null,
+          workspaceLinks: row.workspaceLinks.map((link) => ({
+            status: link.status as CustomerMembershipStatus
+          }))
+        }
+      : null;
   }
 
   private toDomain(row: {
@@ -162,9 +210,23 @@ export class SharedCustomerRepository {
     corporateTaxNo: string | null;
     status: string;
     sourceMemberId: string | null;
+    mergedIntoCustomerId: string | null;
     createdAt: Date;
     updatedAt: Date;
     workspaceLinks?: Array<Parameters<SharedCustomerRepository["toLinkPublic"]>[0]>;
+    contacts?: Array<{
+      id: string; kind: string; name: string; phoneMasked: string;
+      relation: string | null; isPrimary: boolean; status: string; linkedCustomerId: string | null;
+    }>;
+    authorizedAgents?: Array<{
+      id: string; agentName: string; agentPhoneMasked: string; authorityScope: Prisma.JsonValue;
+      validFrom: Date; validTo: Date | null; status: string;
+    }>;
+    // 三态刻意用「键缺失 / null / 有值」区分：缺失=列表没查账号，
+    // null=查了但没开通，有值=已开通。少了中间那态，页面就分不出「未开通」与「已停用」。
+    account?: {
+      status: string; loginPhoneMasked: string; suspendedAt: Date | null; closedAt: Date | null;
+    } | null;
   }): SharedCustomerProfile {
     return {
       id: row.id,
@@ -181,9 +243,45 @@ export class SharedCustomerRepository {
       corporateTaxNo: row.corporateTaxNo ?? undefined,
       status: row.status as SharedCustomerProfile["status"],
       sourceMemberId: row.sourceMemberId ?? undefined,
+      // CUSTOMER-01A/B：必须带出来。少了它，`assertTransactable` 永远读到 undefined，
+      // 已被合并的主档会继续通过下单判定——实测踩过，由 01B 专项用例抓到。
+      mergedIntoCustomerId: row.mergedIntoCustomerId ?? undefined,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
-      workspaceLinks: row.workspaceLinks?.map((link) => this.toLink(link))
+      workspaceLinks: row.workspaceLinks?.map((link) => this.toLink(link)),
+      // CUSTOMER-01E：仅详情查询带这两个关联；列表不带，故为 undefined。
+      // 号码一律只给脱敏值——明文由服务层按解密权限单独决定并留访问审计。
+      contacts: row.contacts?.map((contact) => ({
+        id: contact.id,
+        kind: contact.kind as "emergency" | "corporate" | "other",
+        name: contact.name,
+        phoneMasked: contact.phoneMasked,
+        relation: contact.relation ?? undefined,
+        isPrimary: contact.isPrimary,
+        status: contact.status,
+        linkedCustomerId: contact.linkedCustomerId ?? undefined
+      })),
+      authorizedAgents: row.authorizedAgents?.map((agent) => ({
+        id: agent.id,
+        agentName: agent.agentName,
+        agentPhoneMasked: agent.agentPhoneMasked,
+        authorityScope: (agent.authorityScope ?? {}) as Record<string, unknown>,
+        validFrom: agent.validFrom.toISOString(),
+        validTo: agent.validTo?.toISOString(),
+        status: agent.status
+      })),
+      accountSummary:
+        row.account === undefined
+          ? undefined
+          : row.account === null
+            ? { provisioned: false }
+            : {
+                provisioned: true,
+                status: row.account.status as CustomerAccountStatus,
+                loginPhoneMasked: row.account.loginPhoneMasked,
+                suspendedAt: row.account.suspendedAt?.toISOString(),
+                closedAt: row.account.closedAt?.toISOString()
+              }
     };
   }
 

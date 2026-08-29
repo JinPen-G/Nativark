@@ -8,6 +8,7 @@ import {
   FileTextOutlined,
   FormOutlined,
   FundOutlined,
+  IdcardOutlined,
   SafetyCertificateOutlined,
   SettingOutlined,
   ShopOutlined,
@@ -56,6 +57,9 @@ export const APP_ROUTES = {
   // 若也要求某个能力已启用，全新空间就会陷入「没有入口去启用第一个能力」的死锁。
   rentalCapabilities: { path: "/rental/capabilities", label: "经营空间能力", permission: "rental-core:capability:view", legacyPermissions: ["rental-core:capability:manage"], audience: "tenant", icon: <ControlOutlined />, menu: true },
   customers: { path: "/customers", label: "客户、会员与企业", permission: "store-rental:member:view", audience: "tenant", icon: <TeamOutlined />, menu: true },
+  // CUSTOMER-01E：主档页与旧「客户、会员与企业」并列而不是取代它——旧页面服务于门市租赁
+  // 的会员与积分，本页面管的是租户级主档、账号与空间会员三层关系，两者口径不同。
+  customerMaster: { path: "/customers/master", label: "客户主档与空间会员", permission: "store-rental:member:view", audience: "tenant", icon: <IdcardOutlined />, menu: true },
   platformTenants: { path: "/platform/tenants", label: "SaaS 租户", permission: "system:tenant:manage", audience: "saas", icon: <ShopOutlined />, menu: true },
   platformUsers: { path: "/platform/users", label: "组织与权限", permission: "system:user:manage", audience: "saas", icon: <TeamOutlined />, menu: true },
   platformSystem: { path: "/platform/system", label: "平台参数", permission: "system:params:manage", audience: "saas", icon: <SettingOutlined />, menu: true },
@@ -69,7 +73,7 @@ export const APP_NAVIGATION: AppNavigationSection[] = [
   { key: "transactions", label: "租赁交易", icon: <ApartmentOutlined />, routes: [APP_ROUTES.rentalCore, APP_ROUTES.orderCreate, APP_ROUTES.orders] },
   { key: "inventory", label: "商品与资产", icon: <AppstoreOutlined />, routes: [APP_ROUTES.itemGroups, APP_ROUTES.assets, APP_ROUTES.locations] },
   { key: "commercial", label: "定价与营销", icon: <FundOutlined />, routes: [APP_ROUTES.pricing, APP_ROUTES.discounts, APP_ROUTES.coupons, APP_ROUTES.services] },
-  { key: "customers", label: "客户管理", icon: <TeamOutlined />, routes: [APP_ROUTES.customers] },
+  { key: "customers", label: "客户管理", icon: <TeamOutlined />, routes: [APP_ROUTES.customerMaster, APP_ROUTES.customers] },
   { key: "tenant-settings", label: "经营设置", icon: <SettingOutlined />, routes: [APP_ROUTES.rentalSettings, APP_ROUTES.rentalCapabilities] },
   { key: "platform-management", label: "平台管理", icon: <SettingOutlined />, routes: [APP_ROUTES.platformTenants, APP_ROUTES.platformOfficialCalendars, APP_ROUTES.platformUsers, APP_ROUTES.platformSystem, APP_ROUTES.platformOperations, APP_ROUTES.platformTools] }
 ];

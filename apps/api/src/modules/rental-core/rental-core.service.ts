@@ -37,6 +37,7 @@ import {
   type RentalItemGroup,
   type RentalOrder,
   type RentalQuoteSnapshotV1,
+  type CustomerOrderSubjects,
   type RentalReservation,
   type RentalStockBalance,
   type SaveRentalAssetRequest,
@@ -836,7 +837,20 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
    * 校验下单条件并构造完整订单聚合，但不落库。
    * RC-02 由订单确认应用服务把该聚合与报价消费、优惠券锁定放进同一事务。
    */
-  async prepareOrder(tenantId: string, input: CreateRentalOrderRequest, userName: string, quote: RentalQuoteSnapshotV1) {
+  async prepareOrder(
+    tenantId: string,
+    input: CreateRentalOrderRequest,
+    userName: string,
+    quote: RentalQuoteSnapshotV1,
+    /**
+     * CUSTOMER-01C：已校验并解析好的四类主体。
+     *
+     * 由调用方（订单确认服务）先行解析后传入，本方法只负责原样固化——
+     * Core 不去查客户、合同与授权，那属于客户域的判定。缺省时不写主体列，
+     * 读取侧回落到 `customerId`，既有下单路径行为完全不变。
+     */
+    subjects?: CustomerOrderSubjects
+  ) {
     const state = this.state(tenantId);
     if (!input.customerName?.trim()) throw new BadRequestException("客户名称不能为空");
     // 正式经营门禁只作用于“创建新报价”。这里消费的是已经生成并冻结能力快照的报价；
@@ -903,6 +917,12 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       // 被确认的判断 id，否则配货与后续履约无从还原「风险已被谁按什么依据裁决」。
       capabilityExceptions: this.buildExceptionSnapshots(input, quote),
       capabilityPolicy: quote.capabilitySnapshot?.length ? "snapshot" : "legacy_empty",
+      // CUSTOMER-01C：四类主体原样固化。Core 不做客户域判定，只存已解析的结果。
+      contractSubjectCustomerId: subjects?.contractSubjectCustomerId,
+      payerSubjectCustomerId: subjects?.payerSubjectCustomerId,
+      userSubjectCustomerId: subjects?.userSubjectCustomerId,
+      agentId: subjects?.agentId,
+      subjectSnapshot: subjects?.snapshot,
       rentalAmount: quote.rentalAmount, discountAmount: quote.discountAmount, couponAmount: quote.couponAmount,
       serviceAmount: quote.serviceAmount,
       // 履约费与预授权额度必须一并投影：订单只拿总额的话，

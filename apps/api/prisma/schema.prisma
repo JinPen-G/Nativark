@@ -327,6 +327,18 @@ model Tenant {
   rentalIdempotencyRecords  RentalOrderIdempotencyRecord[]
   customerProfiles          CustomerProfile[]
   customerWorkspaceLinks    CustomerWorkspaceLink[]
+  customerAccounts          CustomerAccount[]
+  customerCorporateProfiles CustomerCorporateProfile[]
+  customerContacts          CustomerContact[]
+  customerAuthorizedAgents  CustomerAuthorizedAgent[]
+  customerStatusHistory     CustomerStatusHistoryEntry[]
+  customerRiskRecords       CustomerRiskRecord[]
+  customerQualificationRefs CustomerQualificationRef[]
+  customerMergeMappings     CustomerMergeMapping[]
+  customerSensitiveAccess   CustomerSensitiveAccessAudit[]
+  customerInvoiceProfiles   CustomerCorporateInvoiceProfile[]
+  customerContracts         CustomerCorporateContract[]
+  customerCredits           CustomerCorporateCredit[]
   rentalCoreStateSnapshot   RentalCoreStateSnapshot[]
   rentalBusinessStateSnapshot RentalBusinessStateSnapshot[]
   businessWorkspaces        BusinessWorkspace[]
@@ -999,10 +1011,26 @@ model CustomerProfile {
   status                String   @default("active")
   /// 回填来源：旧车辆域 Member 的主键。用于对账与幂等回填，不参与业务判定。
   sourceMemberId        String?
+  /// CUSTOMER-01A：本主档已被合并进哪个主档。非空即终态，不得再产生新业务。
+  /// 权威事实在 customer_merge_mappings，这里冗余一份供高频判定，避免漏查映射表。
+  mergedIntoCustomerId  String?
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
   workspaceLinks        CustomerWorkspaceLink[]
+  account               CustomerAccount?
+  corporateProfile      CustomerCorporateProfile?
+  contacts              CustomerContact[]
+  authorizedAgents      CustomerAuthorizedAgent[]
+  statusHistory         CustomerStatusHistoryEntry[]
+  riskRecords           CustomerRiskRecord[]
+  qualificationRefs     CustomerQualificationRef[]
+  mergeAsSource         CustomerMergeMapping[] @relation("CustomerMergeSource")
+  mergeAsTarget         CustomerMergeMapping[] @relation("CustomerMergeTarget")
+  sensitiveAccess       CustomerSensitiveAccessAudit[]
+  invoiceProfiles       CustomerCorporateInvoiceProfile[]
+  contracts             CustomerCorporateContract[]
+  credit                CustomerCorporateCredit?
 
   /// 供复合外键引用：让「权益/关系必须与客户同租户」可以在库层表达。
   /// 与 BusinessWorkspace 的 (tenantId, id) 同一手法。
@@ -1032,14 +1060,405 @@ model CustomerWorkspaceLink {
   customer    CustomerProfile   @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
   /// 该客户在本空间的会员等级：等级按空间隔离（需求第 41 行）。
   levelName   String   @default("普通会员")
+  /// CUSTOMER-01A：需求 4.8.6 的六态之一
+  /// （pending_activation / active / suspended / risk_restricted / exited / closed）。
+  /// 只用 active/suspended 两态无法表达「为什么不能下单」，而那是客服每天要回答的问题。
   status      String   @default("active")
   firstOrderAt DateTime?
+  /// 各限制态与终态的发生时间。解除限制时**不清空**原时间戳：
+  /// 需求 4.8.6 要求解除也形成独立记录，不得删除原限制事实。
+  suspendedAt  DateTime?
+  restrictedAt DateTime?
+  exitedAt     DateTime?
+  closedAt     DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   @@unique([workspaceId, customerId], map: "customer_workspace_links_ws_customer_key")
   @@index([tenantId, customerId], map: "customer_workspace_links_tenant_customer_idx")
+  @@index([tenantId, workspaceId, status], map: "customer_workspace_links_ws_status_idx")
   @@map("customer_workspace_links")
+}
+
+/// CUSTOMER-01A：客户账号（需求 4.8.1）。
+///
+/// 与客户主档 1:1，但**必须是独立实体**：主档回答「客户是谁」，账号回答「客户如何登录」。
+/// 停用账号阻止登录全部经营空间，且不删除主档与历史业务事实；
+/// 而暂停某个空间的会员关系不影响登录与其他空间业务（需求 4.8.1 末段、4.8.6 末段）。
+/// 两者共用一个状态字段是本任务明确要避免的建模错误。
+model CustomerAccount {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId  String
+  customer    CustomerProfile @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
+  /// 登录标识（当前为手机号）。租户内唯一——同一手机号不得对应两个可登录账号。
+  loginPhone  String
+  loginPhoneMasked String
+  /// active / suspended / closed
+  status      String   @default("active")
+  suspendedAt DateTime?
+  closedAt    DateTime?
+  /// 最近一次状态变更的原因与操作人。完整历史在 customer_status_history。
+  lastReason  String?  @db.Text
+  lastOperator String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  /// 一个客户主档至多一个账号：主档是身份，账号是该身份的登录方式。
+  @@unique([tenantId, customerId], map: "customer_accounts_tenant_customer_key")
+  @@unique([tenantId, loginPhone], map: "customer_accounts_tenant_login_key")
+  @@index([tenantId, status], map: "customer_accounts_tenant_status_idx")
+  @@map("customer_accounts")
+}
+
+/// CUSTOMER-01A：企业客户资料（需求 4.8.4）。
+///
+/// 与主档 1:1，只在 `customerType = corporate` 时存在。个人与企业共用统一客户框架，
+/// 但资料结构分开——把企业字段平铺进主档会让个人客户带一堆恒空列，
+/// 也无法表达「企业必须有统一社会信用代码」这类只对企业成立的约束。
+/// 开票、合同、授信与账期属 CUSTOMER-01C，本阶段只建企业身份本体。
+model CustomerCorporateProfile {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId  String
+  customer    CustomerProfile @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
+  legalName   String
+  /// 统一社会信用代码。需求 4.8.3 要求企业重复识别以它为主要依据，故租户内唯一。
+  unifiedSocialCreditCode String
+  unifiedSocialCreditCodeMasked String
+  registeredAddress String?
+  legalRepName      String?
+  legalRepPhoneMasked String?
+  industry    String?
+  scale       String?
+  status      String   @default("active")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([tenantId, customerId], map: "customer_corporate_profiles_tenant_customer_key")
+  @@unique([tenantId, unifiedSocialCreditCode], map: "customer_corporate_profiles_tenant_uscc_key")
+  @@map("customer_corporate_profiles")
+}
+
+/// CUSTOMER-01C：企业开票资料（需求 4.8.4）。
+///
+/// 与企业资料分表而不是平铺：一家企业可能有多份开票资料（不同分支机构、专票/普票），
+/// 且开票资料会随税务变更而版本化，平铺进企业资料就只能存最后一份、覆盖掉历史。
+/// `isDefault` 标记默认使用的一份，同企业至多一份默认。
+model CustomerCorporateInvoiceProfile {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId  String
+  customer    CustomerProfile @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
+  /// vat_special（增值税专用发票）/ vat_normal（普通发票）
+  invoiceType String
+  /// 开票名称。通常等于法定名称，但允许分支机构使用自己的名称。
+  title       String
+  taxNo       String
+  registeredAddress String?
+  bankName    String?
+  bankAccountMasked String?
+  contactPhoneMasked String?
+  receiveEmail String?
+  /// 同企业至多一份默认开票资料，用 defaultMarker 做「部分唯一」的替代方案：
+  /// 默认行写 'default'、非默认写自身 id（MySQL 没有部分索引）。
+  isDefault   Boolean  @default(false)
+  defaultMarker String
+  status      String   @default("active")
+  revision    Int      @default(1)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([tenantId, customerId, defaultMarker], map: "customer_invoice_profiles_default_key")
+  @@index([tenantId, customerId], map: "customer_invoice_profiles_tenant_customer_idx")
+  @@map("customer_corporate_invoice_profiles")
+}
+
+/// CUSTOMER-01C：企业合同（需求 4.8.4）。
+///
+/// 合同是独立事实：一家企业可以同时持有多份有效合同（不同项目、不同期限），
+/// 订单引用的是「下单当时生效的那一份」，因此合同必须能各自留存起止与状态。
+model CustomerCorporateContract {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId  String
+  customer    CustomerProfile @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
+  contractNo  String
+  name        String
+  signedAt    DateTime?
+  effectiveFrom DateTime
+  effectiveTo DateTime?
+  /// draft / active / expired / terminated
+  status      String   @default("draft")
+  /// 合同文件引用。原件不入库。
+  fileRef     String?
+  terminatedReason String? @db.Text
+  revision    Int      @default(1)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([tenantId, contractNo], map: "customer_contracts_tenant_no_key")
+  @@index([tenantId, customerId, status], map: "customer_contracts_customer_status_idx")
+  @@map("customer_corporate_contracts")
+}
+
+/// CUSTOMER-01C：企业授信与账期（需求 4.8.4）。
+///
+/// **只存事实，不参与定价**：本阶段刻意不把授信额度接进报价或订单确认链路
+/// （任务明确「不重写订单状态机和定价链」）。额度占用与释放需要与订单、支付、
+/// 退款联动，属于后续任务；这里先把额度、账期与状态存下来并可读，
+/// 避免管理端无处维护，也避免在没有联动设计的情况下先改动金额链路。
+model CustomerCorporateCredit {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId  String
+  customer    CustomerProfile @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
+  /// 授信额度。Decimal 而不是浮点：金额一律不用 float。
+  creditLimit Decimal  @db.Decimal(12, 2)
+  /// 账期天数（月结 30 / 45 …）。
+  settlementTermDays Int @default(0)
+  /// monthly / semi_monthly / per_order
+  billingCycle String  @default("monthly")
+  /// active / suspended / revoked
+  status      String   @default("active")
+  approvedBy  String?
+  approvedAt  DateTime?
+  reason      String?  @db.Text
+  revision    Int      @default(1)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  /// 一家企业一条当前授信记录；额度调整走更新 + 状态历史，不新建行。
+  @@unique([tenantId, customerId], map: "customer_credits_tenant_customer_key")
+  @@map("customer_corporate_credits")
+}
+
+/// CUSTOMER-01A：客户联系人（需求 4.8.4）。
+///
+/// 个人客户的紧急联系人与企业客户的企业联系人共用本表：两者都是「除客户本人以外、
+/// 可被联系到的人」，字段一致。`kind` 区分用途，`linkedCustomerId` 允许指向另一份主档
+/// ——需求明确「企业联系人可以同时是个人客户」，但那不等于该联系人就是责任主体。
+model CustomerContact {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId  String
+  customer    CustomerProfile @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
+  /// emergency（个人紧急联系人）/ corporate（企业联系人）/ other
+  kind        String
+  name        String
+  phone       String
+  phoneMasked String
+  email       String?
+  relation    String?
+  /// 该联系人本身若也是本租户客户，指向其主档；仅作关联，不代表责任主体。
+  linkedCustomerId String?
+  isPrimary   Boolean  @default(false)
+  status      String   @default("active")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantId, customerId], map: "customer_contacts_tenant_customer_idx")
+  @@index([tenantId, phone], map: "customer_contacts_tenant_phone_idx")
+  @@map("customer_contacts")
+}
+
+/// CUSTOMER-01A：授权经办人（需求 4.8.4）。
+///
+/// 经办人是「被客户授权代为办理业务的人」，与联系人不同：联系人只用于联系，
+/// 经办人可以在订单上作为经办主体出现（CUSTOMER-01C）。因此它需要授权范围与有效期
+/// ——没有有效期的授权在事后无法判断当时是否有效。
+model CustomerAuthorizedAgent {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// 委托方客户（通常是企业客户）。
+  customerId  String
+  customer    CustomerProfile @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
+  agentName   String
+  agentPhone  String
+  agentPhoneMasked String
+  agentIdNoMasked  String?
+  /// 授权范围。结构化保存（可下单/可签约/可付款/可取还），便于后续按动作校验。
+  authorityScope Json
+  validFrom   DateTime
+  validTo     DateTime?
+  status      String   @default("active")
+  /// 授权凭证引用（授权书文件等）。敏感原件不入本表。
+  evidenceRef String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantId, customerId], map: "customer_agents_tenant_customer_idx")
+  @@index([tenantId, agentPhone], map: "customer_agents_tenant_phone_idx")
+  @@map("customer_authorized_agents")
+}
+
+/// CUSTOMER-01A：客户状态历史（需求 4.8.6 末段、4.8.14）。
+///
+/// 只追加，不更新、不删除。`scope` 区分账号级与空间级：同一张表承载两者是刻意的——
+/// 需求要求「支持按客户和经营空间还原完整时间线」，拆成两张表就得在读取侧再合并排序，
+/// 而合并排序最容易出的错正是把空间级事件误算进账号级时间线。
+///
+/// 解除限制（release）同样是一条记录，绝不回改或删除原限制记录。
+model CustomerStatusHistoryEntry {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId  String
+  customer    CustomerProfile @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
+  /// account | workspace
+  scope       String
+  /// 空间级事件必填；账号级为空。不用两张表的代价是这一列可空，收益是时间线天然有序。
+  workspaceId String?
+  /// activate / suspend / restrict / release / exit / close / reopen / merge
+  action      String
+  fromStatus  String?
+  toStatus    String
+  reason      String   @db.Text
+  operator    String?
+  /// 审批人。人工合并与注销按需求需要审批留痕。
+  approver    String?
+  at          DateTime
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId, customerId, at], map: "customer_status_history_customer_at_idx")
+  @@index([tenantId, workspaceId, at], map: "customer_status_history_ws_at_idx")
+  @@map("customer_status_history")
+}
+
+/// CUSTOMER-01A：客户风险记录（需求 4.8.6 的「风险受限」与 4.8.14 的风险审核授权）。
+///
+/// 风险是**独立事实**而不是主档上的一个布尔位：一个客户可能同时存在多条风险
+/// （逾期、损坏争议、身份异常），各自有自己的处理状态与复核结论。
+/// 压成一个字段就无法回答「因为哪条风险被限制」。
+model CustomerRiskRecord {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId  String
+  customer    CustomerProfile @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
+  /// 风险作用范围：租户级风险影响全部空间，空间级只影响该空间。
+  workspaceId String?
+  riskType    String
+  /// low / medium / high
+  level       String
+  detail      String   @db.Text
+  /// 来源：manual（人工登记）/ system（规则命中）/ external（外部风控）
+  source      String
+  /// open / reviewing / closed
+  status      String   @default("open")
+  raisedBy    String?
+  raisedAt    DateTime
+  reviewedBy  String?
+  reviewedAt  DateTime?
+  closeReason String?  @db.Text
+  closedAt    DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantId, customerId, status], map: "customer_risk_customer_status_idx")
+  @@index([tenantId, workspaceId, status], map: "customer_risk_ws_status_idx")
+  @@map("customer_risk_records")
+}
+
+/// CUSTOMER-01A：品类资质引用（需求 4.8.5）。
+///
+/// 本表只保存资质**原始事实的引用**（证件类型、有效期、脱敏号码、证据引用）。
+/// **不**保存「是否适用于某空间」的结论——那由 SHARED-QUAL-01 按目标空间品类判断，
+/// 本任务不得越界实现审核流程。需求明确：一个空间通过不得自动绕过另一个空间的适用性校验。
+model CustomerQualificationRef {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId  String
+  customer    CustomerProfile @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
+  /// 证件/资质类型（driver_license、operator_certificate…）。取值域由 SHARED-QUAL-01 收口。
+  qualificationType String
+  /// 证件号码只存脱敏值。原件与影像不入本表（需求 4.8.5 要求限制访问与脱敏展示）。
+  referenceNoMasked String?
+  issuedAt    DateTime?
+  expiresAt   DateTime?
+  /// 租户级实名/资质核验结果。是否**适用**由目标空间判断，不在此表。
+  verifiedAt  DateTime?
+  /// not_submitted / pending / approved / rejected / expired / revoked（需求 4.8.5 六态）
+  status      String   @default("not_submitted")
+  evidenceRef String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([tenantId, customerId, qualificationType], map: "customer_qualification_refs_unique_type_key")
+  @@index([tenantId, status], map: "customer_qualification_refs_tenant_status_idx")
+  @@map("customer_qualification_refs")
+}
+
+/// CUSTOMER-01A：客户合并映射（需求 4.8.3）。
+///
+/// 合并后订单、支付、合同与历史事件继续引用**原**主档，因此必须永久保留
+/// 「原主档 → 保留主档」的映射，否则历史引用会变成悬空 id。
+/// 两侧客户都用 (tenantId, customerId) 复合外键指向主档——这是「禁止跨租户合并」的
+/// **库层**保证，而不是只靠服务层判断。
+model CustomerMergeMapping {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// 被合并掉的主档（合并后为终态）。
+  sourceCustomerId String
+  sourceCustomer   CustomerProfile @relation("CustomerMergeSource", fields: [tenantId, sourceCustomerId], references: [tenantId, id], onDelete: Cascade)
+  /// 保留的主档。
+  targetCustomerId String
+  targetCustomer   CustomerProfile @relation("CustomerMergeTarget", fields: [tenantId, targetCustomerId], references: [tenantId, id], onDelete: Cascade)
+  reason      String   @db.Text
+  operator    String?
+  approver    String?
+  /// 合并时的字段差异与取舍快照。需求要求保存字段差异，事后要能解释保留了谁的值。
+  fieldDiff   Json?
+  /// 合并时两侧空间会员关系的快照。各空间权益分别保留，不得因合并转成跨空间权益。
+  membershipSnapshot Json?
+  mergedAt    DateTime
+  createdAt   DateTime @default(now())
+
+  /// 一份主档只能被合并一次：允许合并两次等于让历史引用指向一条已失效的链。
+  @@unique([tenantId, sourceCustomerId], map: "customer_merge_mappings_source_key")
+  @@index([tenantId, targetCustomerId], map: "customer_merge_mappings_target_idx")
+  @@map("customer_merge_mappings")
+}
+
+/// CUSTOMER-01B：敏感资料访问审计（需求 4.8.5 / 4.8.14）。
+///
+/// 与状态历史分开是刻意的：状态历史回答「谁改了什么」，每行都要求 toStatus；
+/// 一次纯读取没有目标状态，硬塞一个假状态会污染状态时间线。
+/// 访问审计回答「谁看过什么」，只追加，不更新、不删除。
+model CustomerSensitiveAccessAudit {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// 从哪个空间发起。主档租户内共享，跨空间读取是允许的，但必须能按空间还原访问时间线。
+  workspaceId String?
+  customerId  String
+  customer    CustomerProfile @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
+  /// identity_no / qualification_ref / contact_phone / corporate_uscc …
+  field       String
+  /// list / detail / export / reveal
+  action      String
+  /// true = 看到明文（需单独授权）；false = 只看到脱敏值。追责粒度不同。
+  revealed    Boolean  @default(false)
+  operator    String?
+  /// 依据的权限码。事后要能解释「他当时凭什么能看」。
+  permission  String?
+  reason      String?  @db.Text
+  at          DateTime
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId, customerId, at], map: "customer_sensitive_access_customer_at_idx")
+  @@index([tenantId, workspaceId, at], map: "customer_sensitive_access_ws_at_idx")
+  @@index([tenantId, operator, at], map: "customer_sensitive_access_operator_at_idx")
+  @@map("customer_sensitive_access_audits")
 }
 
 model MembershipPlan {
@@ -2561,6 +2980,19 @@ model RentalOrder {
   /// PRICE-03：订单继承报价命中的不可变价格版本引用。
   priceVersionId  String?
   priceVersion    String?
+  /// CUSTOMER-01C：订单主体（需求 4.8.4「订单必须明确签约主体、付款主体、使用人或经办人，
+  /// 不能只保存一个联系人代替企业责任主体」）。
+  ///
+  /// 四个角色各存一个可索引的 id 列 + 一份 `subjectSnapshot` 快照：
+  ///   * id 列用于「这个客户作为签约主体/使用人的订单」这类按角色反查；
+  ///   * 快照保存下单当时的名称、脱敏证件与授权范围——主体后续改名或授权到期
+  ///     都不得篡改历史订单（与 fulfillmentLocationSnapshot 同一手法）。
+  /// 全部可空：存量订单没有主体拆分，读取侧回落到 customerId 作为三个主体。
+  contractSubjectCustomerId String?
+  payerSubjectCustomerId    String?
+  userSubjectCustomerId     String?
+  agentId                   String?
+  subjectSnapshot           Json?
   chargeLines           Json
   rentalAmount          Decimal                   @db.Decimal(12, 2)
   discountAmount        Decimal                   @db.Decimal(12, 2)
@@ -2596,6 +3028,11 @@ model RentalOrder {
   @@index([tenantId, status, startAt])
   @@index([tenantId, customerType, customerId])
   @@index([tenantId, quoteId])
+  /// CUSTOMER-01C：按主体角色反查订单。合并与注销（01D）都需要「这个客户
+  /// 作为签约主体/付款主体/使用人有哪些订单」，没有索引就只能全表扫。
+  @@index([tenantId, contractSubjectCustomerId], map: "rental_orders_contract_subject_idx")
+  @@index([tenantId, payerSubjectCustomerId], map: "rental_orders_payer_subject_idx")
+  @@index([tenantId, userSubjectCustomerId], map: "rental_orders_user_subject_idx")
   @@map("rental_orders")
 }
 

@@ -7,6 +7,12 @@ import {
   RENTAL_CATEGORY_DEFINITIONS,
   CreateBusinessWorkspaceRequest,
   SaveWorkspaceMemberRequest,
+  ChangeCustomerAccountStatusRequest,
+  ChangeCustomerMembershipStatusRequest,
+  MergeCustomersRequest,
+  SaveCustomerContractRequest,
+  SaveCustomerCreditRequest,
+  SaveCustomerInvoiceProfileRequest,
   SaveSharedCustomerRequest,
   LinkCustomerToWorkspaceRequest,
   UpdateBusinessWorkspaceRequest,
@@ -50,6 +56,9 @@ import {
 } from "../../common/data-permission";
 import { PlatformRepository } from "./platform.repository";
 import { SharedCustomerRepository } from "./shared-customer.repository";
+import { CustomerOperationsService } from "./customer-operations.service";
+import { CustomerMergeService } from "./customer-merge.service";
+import { CustomerCorporateService } from "./customer-corporate.service";
 import { WorkspaceCapabilityService } from "../rental-core/workspace-capability.service";
 import { RentalCoreService } from "../rental-core/rental-core.service";
 
@@ -87,7 +96,15 @@ export class PlatformService {
     @Optional() private readonly sharedCustomers?: SharedCustomerRepository,
     // Review P1-3：创建空间时同事务初始化品类必选能力。
     // 同样必须放在最后且 @Optional()，理由见上：位置参数构造的测试会错位。
-    @Optional() private readonly workspaceCapabilityService?: WorkspaceCapabilityService
+    @Optional() private readonly workspaceCapabilityService?: WorkspaceCapabilityService,
+    // CUSTOMER-01B：客户账号与空间会员状态治理。同样追加在最后且 @Optional()，
+    // 理由同上——既有测试用位置参数构造本服务，插到中间会让前面的依赖错位。
+    @Optional() private readonly customerOperations?: CustomerOperationsService,
+    // CUSTOMER-01C：企业资料（开票/合同/授信账期）与订单主体解析。
+    // 同样追加在最后且 @Optional()，理由同上——位置参数构造的既有测试会错位。
+    @Optional() private readonly customerCorporate?: CustomerCorporateService,
+    // CUSTOMER-01D：重复识别、人工合并与注销前置检查。同样追加在最后且 @Optional()。
+    @Optional() private readonly customerMerge?: CustomerMergeService
   ) {}
 
   private readonly logger = new Logger(PlatformService.name);
@@ -214,6 +231,11 @@ export class PlatformService {
         { code: "store-rental:member:view", name: "会员查看" },
         { code: "store-rental:member:manage", name: "会员管理" },
         { code: "store-rental:member:risk-action", name: "按钮-会员风控动作", description: "暂停、拉黑和恢复会员" },
+        // CUSTOMER-01B：敏感资料解密查看单独授权。必须出现在权限目录里——
+        // 角色管理页的可选项完全来自这棵树，漏了它就没人能被授予该权限。
+        { code: "store-rental:customer:reveal-sensitive", name: "客户敏感资料解密", description: "查看客户证件号等明文，并可查阅敏感访问审计" },
+        { code: "store-rental:customer:merge", name: "客户合并", description: "人工合并重复客户主档，不可逆" },
+        { code: "store-rental:customer:close", name: "客户注销", description: "注销客户账号或空间会员关系，不可逆" },
         { code: "store-rental:corporate:view", name: "企业客户查看" },
         { code: "store-rental:corporate:manage", name: "企业客户管理" },
         { code: "store-rental:corporate:monthly-settle", name: "按钮-企业月结回款", description: "登记企业账单回款" },
@@ -1525,6 +1547,231 @@ export class PlatformService {
   }
 
   /**
+   * CUSTOMER-01B 的入口一律在这里解析 `tenantId` 与 `workspaceId` 后转交
+   * `CustomerOperationsService`，与本文件其他经营入口同一口径：
+   * 空间只从会话取，客户端传什么都不作数。
+   */
+  private requireCustomerOperations() {
+    if (!this.customerOperations) {
+      throw new ConflictException("客户运营服务未就绪");
+    }
+    return this.customerOperations;
+  }
+
+  getCustomerDetail(customerId: string, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerOperations().getCustomerDetail(
+      tenantId,
+      requireRequestWorkspaceId(),
+      customerId,
+      currentUser
+    );
+  }
+
+  listSharedCustomersMasked(currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerOperations().listCustomers(
+      tenantId,
+      requireRequestWorkspaceId(),
+      currentUser
+    );
+  }
+
+  ensureCustomerAccount(customerId: string, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerOperations().ensureAccount(tenantId, customerId, currentUser?.displayName);
+  }
+
+  changeCustomerAccountStatus(
+    customerId: string,
+    input: ChangeCustomerAccountStatusRequest,
+    currentUser?: SystemUserRow
+  ) {
+    this.requireWorkspaceDataSource();
+    this.assertCustomerActionPermission(
+      currentUser,
+      input.status === "closed" ? "store-rental:customer:close" : "store-rental:member:manage",
+      input.status === "closed" ? "注销客户账号" : "变更客户账号状态"
+    );
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    // 账号级动作**不**解析 workspaceId：它影响全部空间，绑定某个空间会造成误解。
+    return this.requireCustomerOperations().changeAccountStatus(
+      tenantId,
+      customerId,
+      input,
+      currentUser?.displayName
+    );
+  }
+
+  changeCustomerMembershipStatus(
+    customerId: string,
+    input: ChangeCustomerMembershipStatusRequest,
+    currentUser?: SystemUserRow
+  ) {
+    this.requireWorkspaceDataSource();
+    this.assertCustomerActionPermission(
+      currentUser,
+      input.status === "closed"
+        ? "store-rental:customer:close"
+        : input.status === "risk_restricted"
+          ? "store-rental:member:risk-action"
+          : "store-rental:member:manage",
+      input.status === "closed"
+        ? "注销空间会员关系"
+        : input.status === "risk_restricted"
+          ? "限制客户风险状态"
+          : "变更空间会员状态"
+    );
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerOperations().changeMembershipStatus(
+      tenantId,
+      requireRequestWorkspaceId(),
+      customerId,
+      input,
+      currentUser?.displayName
+    );
+  }
+
+  listCustomerStatusHistory(customerId: string, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerOperations().listStatusHistory(
+      tenantId,
+      customerId,
+      requireRequestWorkspaceId()
+    );
+  }
+
+  listCustomerSensitiveAccess(customerId: string, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerOperations().listSensitiveAccess(tenantId, customerId, currentUser);
+  }
+
+
+  private requireCustomerMerge() {
+    if (!this.customerMerge) throw new ConflictException("客户合并服务未就绪");
+    return this.customerMerge;
+  }
+
+  findCustomerDuplicates(customerId: string, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerMerge().findDuplicates(tenantId, customerId);
+  }
+
+  previewCustomerMerge(customerId: string, targetCustomerId: string, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    if (!targetCustomerId?.trim()) throw new BadRequestException("必须指定保留主档 targetCustomerId");
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerMerge().previewMerge(tenantId, customerId, targetCustomerId.trim());
+  }
+
+  mergeCustomers(input: MergeCustomersRequest, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    // 合并是租户级动作，不绑定空间：被合并方的空间会员关系原样保留，不做跨空间搬迁。
+    return this.requireCustomerMerge().mergeCustomers(tenantId, input, currentUser?.displayName);
+  }
+
+  getCustomerClosability(customerId: string, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    // 不传 workspaceId：本接口回答「整个租户客户账号能否注销」。
+    // 空间会员注销的检查在改状态时按空间范围各自进行。
+    return this.requireCustomerMerge().assertClosable(tenantId, customerId);
+  }
+
+  getCustomerMembershipClosability(customerId: string, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerMerge().assertClosable(
+      tenantId,
+      customerId,
+      requireRequestWorkspaceId()
+    );
+  }
+
+  getCustomerTransactability(customerId: string, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerOperations().assertTransactable(
+      tenantId,
+      requireRequestWorkspaceId(),
+      customerId
+    );
+  }
+
+  /**
+   * CUSTOMER-01C：企业资料入口。
+   *
+   * 与客户主档一样按 `tenantId` 解析——企业资料属于租户级客户身份，不按空间隔离
+   * （同一家企业在两个空间是同一家企业，开票与合同不该各存一份）。
+   */
+  private requireCustomerCorporate() {
+    if (!this.customerCorporate) {
+      throw new ConflictException("企业客户服务未就绪");
+    }
+    return this.customerCorporate;
+  }
+
+  listCustomerInvoiceProfiles(customerId: string, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerCorporate().listInvoiceProfiles(tenantId, customerId);
+  }
+
+  saveCustomerInvoiceProfile(
+    customerId: string,
+    input: SaveCustomerInvoiceProfileRequest,
+    currentUser?: SystemUserRow
+  ) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerCorporate().saveInvoiceProfile(tenantId, customerId, input);
+  }
+
+  listCustomerContracts(customerId: string, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerCorporate().listContracts(tenantId, customerId);
+  }
+
+  saveCustomerContract(
+    customerId: string,
+    input: SaveCustomerContractRequest,
+    currentUser?: SystemUserRow
+  ) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerCorporate().saveContract(tenantId, customerId, input);
+  }
+
+  getCustomerCredit(customerId: string, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerCorporate().getCredit(tenantId, customerId);
+  }
+
+  saveCustomerCredit(
+    customerId: string,
+    input: SaveCustomerCreditRequest,
+    currentUser?: SystemUserRow
+  ) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerCorporate().saveCredit(
+      tenantId,
+      customerId,
+      input,
+      currentUser?.displayName
+    );
+  }
+
+  /**
    * 在当前空间登记客户。
    *
    * 手机号已存在时**不报错也不改主档**，而是把既有客户接入当前空间——
@@ -2512,6 +2759,14 @@ export class PlatformService {
     if (!user?.isSaasAdmin) {
       throw new ForbiddenException("仅 SaaS 平台管理员可以管理租户");
     }
+  }
+
+  /** Guard 只能按路径放行候选权限；具体目标状态必须在服务层再次授权。 */
+  private assertCustomerActionPermission(user: SystemUserRow | undefined, permission: string, action: string) {
+    const allowed = Boolean(
+      user && (user.isPlatformAdmin || user.permissions.includes("*") || user.permissions.includes(permission))
+    );
+    if (!allowed) throw new ForbiddenException(`${action}需要权限：${permission}`);
   }
 
   private resolveTargetTenantId(requestedTenantId: string | undefined, user?: SystemUserRow) {

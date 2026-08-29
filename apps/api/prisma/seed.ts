@@ -189,6 +189,13 @@ const permissions = [
   ["store-rental:member:view", "会员查看", "门市租赁", PermissionKind.ACTION],
   ["store-rental:member:manage", "会员管理", "门市租赁", PermissionKind.ACTION],
   ["store-rental:member:risk-action", "按钮-会员风控动作", "门市租赁", PermissionKind.BUTTON],
+  // CUSTOMER-01B：敏感资料解密查看单独授权（需求 4.8.5 / 4.8.14）。
+  // 与「会员查看」分开：日常查客户只该看到脱敏值，看明文是另一件需要单独追责的事。
+  ["store-rental:customer:reveal-sensitive", "客户敏感资料解密", "门市租赁", PermissionKind.ACTION],
+  // CUSTOMER-01D：需求 4.8.14 要求客户合并与注销**分别授权**。
+  // 两者都不可逆，且影响面不同：合并改变身份归属，注销终止业务资格。
+  ["store-rental:customer:merge", "客户合并", "门市租赁", PermissionKind.ACTION],
+  ["store-rental:customer:close", "客户注销", "门市租赁", PermissionKind.ACTION],
   ["store-rental:corporate:view", "企业客户查看", "门市租赁", PermissionKind.ACTION],
   ["store-rental:corporate:manage", "企业客户管理", "门市租赁", PermissionKind.ACTION],
   ["store-rental:corporate:monthly-settle", "按钮-企业月结回款", "门市租赁", PermissionKind.BUTTON],
