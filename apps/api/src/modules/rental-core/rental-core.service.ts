@@ -904,6 +904,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       returnLocationSnapshot: this.locationSnapshot(state, returnLocation),
       startAt: input.startAt, endAt: input.endAt,
       quoteId: quote.id, quoteNo: quote.quoteNo, pricingPlanVersion: quote.pricingPlanVersion,
+      // PRICE-03：价格版本引用随订单固化，与 ruleSnapshot/calendarSnapshot 同理。
+      priceVersionId: quote.priceVersionId, priceVersion: quote.priceVersion,
       ruleVersion: quote.ruleVersion, ruleSnapshot: structuredClone(quote.ruleSnapshot), calendarVersion: quote.calendarVersion, calendarSnapshot: structuredClone(quote.calendarSnapshot), chargeLines: structuredClone(quote.chargeLines),
       // CORE-EXT-02D：能力版本快照随订单固化。在途环节的 Hook 判定都用它，
       // 因此升级或暂停能力都不改写这张已存在订单的履约规则。

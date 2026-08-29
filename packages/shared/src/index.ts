@@ -5232,6 +5232,8 @@ export interface RentalCalendarDaySnapshot {
   source: "week_rule" | "official_cn" | "tenant_override";
   /** 营业时段快照（需求 4.5.3/4.5.5）：只改时段时，审计前后值必须能看出时段变化。 */
   hours?: RentalBusinessHours;
+  /** 日历只保存一次性特殊价格规则的稳定引用，价格值仍在价格版本内。 */
+  pricingOverrideRef?: string;
 }
 
 /**
@@ -5261,6 +5263,34 @@ export interface RentalCalendarOverrideAudit {
    */
   year?: number;
   version?: string;
+  /**
+   * 范围覆盖的批次标识（需求 4.5.9：一次范围提交共用原因、操作者与批次标识）。
+   * 单日编辑没有批次，留空。
+   */
+  batchId?: string;
+}
+
+/**
+ * 范围覆盖的适用范围记录（需求 4.5.9：日期详情须能展示日期时间覆盖信息）。
+ *
+ * 记录在每个被覆盖日期上：范围覆盖产生的一批日期共享同一个 `batchId` 与范围边界，
+ * 点击范围内任意日期都能还原「这次覆盖是哪一次范围操作的一部分」。
+ */
+export interface RentalCalendarOverrideScope {
+  kind: "single" | "range";
+  batchId: string;
+  /** 覆盖的日期范围（含端点）。单日时 start === end。 */
+  rangeStart: string;
+  rangeEnd: string;
+  /**
+   * 日期时间范围的起止时点（需求 4.5.5/4.5.9：一次性覆盖须展示开始和结束时点）。
+   *
+   * 边界语义：日历字段（日期类型、营业状态、时段）按**整天**生效——它们在数据模型上
+   * 就是逐日属性；起止时点记录的是这次范围选择的原始输入，供详情展示，以及供
+   * PRICE-03 的一次性日期时间价格覆盖引用消费。不在本层做半天截断。
+   */
+  startDateTime?: string;
+  endDateTime?: string;
 }
 
 /**
@@ -5286,12 +5316,16 @@ export interface RentalCalendarDay {
   source: "week_rule" | "official_cn" | "tenant_override";
   /** 该日期的营业时段覆盖（需求 4.5.3：可覆盖营业时段与领取/归还/配送能力）。 */
   hours?: RentalBusinessHours;
+  /** 一次性特殊价格规则引用；不得在日历内保存商品价格或统一价格系数。 */
+  pricingOverrideRef?: string;
   /** 人工覆盖的调整原因、操作人与调整时间（需求 4.5.3 要求必须保存）。 */
   overrideReason?: string;
   overrideBy?: string;
   overrideAt?: string;
   /** 被覆盖掉的原始值，供日期详情展示与移除覆盖时恢复。 */
   overriddenFrom?: RentalCalendarDayOrigin;
+  /** 本次覆盖所属的范围操作（需求 4.5.9）。单日覆盖也有 scope（kind: "single"）。 */
+  overrideScope?: RentalCalendarOverrideScope;
 }
 
 export interface RentalCalendarYear {
@@ -5416,7 +5450,7 @@ export interface RentalCalendarVersionSummary
  * `overriddenFrom` 同理由服务端从被覆盖的那天推导，不接受调用方传入。
  */
 export interface SaveRentalCalendarDayRequest
-  extends Omit<RentalCalendarDay, "source" | "overrideBy" | "overrideAt" | "overriddenFrom"> {
+  extends Omit<RentalCalendarDay, "source" | "overrideBy" | "overrideAt" | "overriddenFrom" | "overrideScope"> {
   overrideReason: string;
 }
 
@@ -5527,6 +5561,122 @@ export interface RemoveRentalCalendarDayOverrideRequest {
   overrideReason: string;
 }
 
+/**
+ * 范围覆盖可设置的字段（需求 4.5.9：范围操作只修改用户明确选择的字段）。
+ *
+ * 提供了哪个字段就覆盖哪个字段；未提供的字段保持该日期当前值（有覆盖沿用覆盖，
+ * 无覆盖沿用基础值）。「一次性特殊价格覆盖」按 v2.9 边界由 PRICE-03 保存价格值，
+ * 日历只保存稳定引用，不保存商品价格或空间统一价格系数。
+ */
+export interface RentalCalendarRangeFields {
+  dayType?: RentalDayType;
+  name?: string;
+  pricingOverrideRef?: string;
+  businessStatus?: RentalCalendarBusinessStatus;
+  hours?: RentalBusinessHours;
+}
+
+/** 范围覆盖预览/应用的公共范围入参。整日覆盖可跨月，不得跨年度（需求 4.5.9）。 */
+export interface RentalCalendarRangeScopeInput {
+  startDate: string;
+  endDate: string;
+  /** 日期时间范围的起止时点。给出时必须落在 startDate/endDate 当天。 */
+  startDateTime?: string;
+  endDateTime?: string;
+}
+
+/** 范围覆盖预览（需求 4.5.9：提交前展示冲突日期、当前值与将替换的字段）。 */
+export interface PreviewRentalCalendarRangeOverrideRequest extends RentalCalendarRangeScopeInput {
+  fields: RentalCalendarRangeFields;
+}
+
+export interface RentalCalendarRangePreviewRow {
+  date: string;
+  /** 该日期已有人工覆盖：应用必须经用户明确确认，不得静默覆盖。 */
+  conflict: boolean;
+  /** 每周模板或官方来源形成的基础值。 */
+  base: RentalCalendarDaySnapshot;
+  /** 当前生效值（无覆盖时等于基础值）。 */
+  current: RentalCalendarDaySnapshot;
+  /** 应用后的结果值。 */
+  after: RentalCalendarDaySnapshot;
+  /** 将被修改的字段名。 */
+  changedFields: string[];
+}
+
+export interface RentalCalendarRangeOverridePreview {
+  year: number;
+  /** 预览基于的年度版本（草稿优先，其次已发布，再次周模板）。 */
+  version: string;
+  startDate: string;
+  endDate: string;
+  totalDays: number;
+  conflictCount: number;
+  days: RentalCalendarRangePreviewRow[];
+}
+
+/** 应用范围覆盖（需求 4.5.9：全部成功或全部失败，共用原因/批次/操作者/时间，一次 revision）。 */
+export interface ApplyRentalCalendarRangeOverrideRequest extends PreviewRentalCalendarRangeOverrideRequest {
+  overrideReason: string;
+  /** 缺省由服务端生成并返回。前端可用它把预览与提交关联到同一次范围操作。 */
+  batchId?: string;
+  /** 读取草稿时的 revision；不匹配返回 409（需求：并发冲突返回明确 409）。 */
+  expectedRevision?: number;
+  /** 范围内存在既有覆盖时必须显式确认；缺省且存在冲突 → 409，绝不静默覆盖。 */
+  overrideConfirmed?: boolean;
+}
+
+export interface ApplyRentalCalendarRangeOverrideResult {
+  batchId: string;
+  year: number;
+  /** 写入的年度版本（编辑已发布版本时会生成新草稿版本）。 */
+  version: string;
+  revision: number;
+  appliedCount: number;
+}
+
+/** 范围移除预览（需求 4.5.9：按范围移除前展示恢复后的日期类型、营业状态和引用变化）。 */
+export interface PreviewRentalCalendarRangeRemoveRequest extends RentalCalendarRangeScopeInput {}
+
+export interface RentalCalendarRangeRemovePreviewRow {
+  date: string;
+  hasOverride: boolean;
+  current: RentalCalendarDaySnapshot;
+  /** 移除后恢复到的值（`overriddenFrom`，缺省按周模板重算）。无覆盖时等于 current。 */
+  restored: RentalCalendarDaySnapshot;
+  restoredSource: "official_cn" | "week_rule";
+}
+
+export interface RentalCalendarRangeRemovePreview {
+  year: number;
+  version: string;
+  startDate: string;
+  endDate: string;
+  totalDays: number;
+  overrideCount: number;
+  days: RentalCalendarRangeRemovePreviewRow[];
+}
+
+/** 应用范围移除：只移除范围内带人工覆盖的日期，其余保持不变（不算错误）。 */
+export interface ApplyRentalCalendarRangeRemoveRequest {
+  startDate: string;
+  endDate: string;
+  overrideReason: string;
+  batchId?: string;
+  expectedRevision?: number;
+}
+
+export interface ApplyRentalCalendarRangeRemoveResult {
+  batchId: string;
+  year: number;
+  version: string;
+  revision: number;
+  /** 实际移除覆盖的日期数。 */
+  removedCount: number;
+  /** 范围内本就没有覆盖的日期数（保持原样，不是失败）。 */
+  unchangedCount: number;
+}
+
 /** 发布年度日历。变更原因必填（需求 4.5.7：发布记录可追溯）。 */
 /**
  * 发布前影响预览（需求 4.5.8：发布前必须展示受影响日期以及停业、营业时间、履约能力和
@@ -5543,7 +5693,7 @@ export interface RentalCalendarPublishPreviewDate {
   after?: RentalCalendarDaySnapshot;
   /** 发生变化的维度，供界面按「停业/时段/价格」分组展示。 */
   changedFields: Array<
-    "dayType" | "name" | "businessStatus" | "closed" | "hours" | "pricingMultiplier" | "source"
+    "dayType" | "name" | "businessStatus" | "closed" | "hours" | "pricingMultiplier" | "pricingOverrideRef" | "source"
   >;
 }
 
@@ -5653,6 +5803,162 @@ export interface RentalPricingRate {
    * 不足一个粒度按一个粒度计」——因此它属于**价格**而不是经营空间规则。
    */
   hourGranularityMinutes?: number;
+  /**
+   * 商品在该日期类型下的单价系数（需求 4.5.5 v2.9：商品×计价单位×日期类型的价格）。
+   * 与 weekendMultiplier/holidayMultiplier 并存且**优先于**它们：weekend/holiday 是
+   * 既有兼容字段，新配置按五类日期类型逐类设置，无需新增报价代码分支。
+   */
+  dayTypePrices?: Partial<Record<RentalDayType, number>>;
+  /**
+   * 周期性计价时段（需求 4.5.5 v2.9）：「每周五 12:00 至周一 00:00 按周末价」等
+   * 重复规则。命中按计费单位的取价时点（营业时区的星期 + 分钟）判定；
+   * 同一商品同一计价单位的时段不得重叠（保存/发布时拒绝）。
+   */
+  periodicWindows?: RentalPeriodicPriceWindow[];
+  /**
+   * 一次性日期时间价格覆盖的价格值（需求 4.5.5 v2.9：适用范围在日历侧，价格值在
+   * 价格模块）。按取价时点命中 [start, end)；两条覆盖区间重叠时拒绝保存。
+   */
+  datetimeOverrides?: RentalDatetimePriceOverride[];
+}
+
+/** 周期性计价时段：营业时区的一周内、[fromWeekday+fromTime, toWeekday+toTime) 连续生效。 */
+export interface RentalPeriodicPriceWindow {
+  /** 起始星期（0=周日…6=周六，与 Date.getUTCDay 一致）。 */
+  fromWeekday: number;
+  /** 起始时刻 HH:mm（营业时区）。 */
+  fromTime: string;
+  /** 结束星期。可与 fromWeekday 相同（同日内时段），跨星期时按周循环解释。 */
+  toWeekday: number;
+  toTime: string;
+  /** 该时段的价格系数。 */
+  multiplier: number;
+}
+
+/** 一次性日期时间价格覆盖的价格值（绝对时刻，营业时区书写）。 */
+export interface RentalDatetimePriceOverride {
+  /** 被营业日历引用的稳定规则标识。存量规则可为空，新建规则应填写。 */
+  id?: string;
+  start: string;
+  end: string;
+  multiplier: number;
+}
+
+/**
+ * PRICE-02B：月历分时价格摘要的单日条目（只读消费 PRICE-03 的已发布价格事实）。
+ * 由服务端用与报价**同一个**命中助手（periodicWindowHits）计算，月历不复制价格值、
+ * 不建立第二套价格事实；timeLabel 仅用于展示。
+ */
+export interface RentalCalendarTimePriceDay {
+  date: string;
+  entries: Array<{
+    /**
+     * PRICE-03 起价格版本是**空间级**的，版本里的费率不带计划标识。
+     * 这两个字段按「商品 × 计价单位」回查当前拥有该价格的在用计划，仅用于展示；
+     * 价格已从计划下线但版本仍生效时为空——编一个计划编码会让月历看起来仍受它管辖。
+     */
+    planId?: string;
+    planCode?: string;
+    /** 空间级价格版本号（v1、v2…）。 */
+    version: string;
+    itemGroupCodes: string[];
+    unit: string;
+    timeLabel: string;
+    multiplier: number;
+    source: "periodic" | "datetime_override";
+    /** 一次性覆盖条目对应的日历引用。 */
+    overrideRef?: string;
+  }>;
+}
+
+/** 调价计划的单条变更（需求 4.4.3：计划只保存差异，确认时展示每个受影响商品的最终价）。 */
+export interface RentalPriceAdjustmentChange {
+  itemGroupId: string;
+  unit: RentalPricingUnit;
+  /** `set_base` 直接设价；`percent` 按百分比（正上调/负下调）；`fixed` 加减固定金额。 */
+  op: "set_base" | "percent" | "fixed";
+  value: number;
+}
+
+/**
+ * 不可变价格版本（需求 4.4.3）：某一生效时点、**某经营空间**全部有效商品价格的
+ * **完整、不可变**结果。禁止就地修改；每次调价（立即保存或计划执行）追加新行。
+ *
+ * 粒度是空间而不是价格计划：同一空间同一「商品 × 计价单位」在任一时点只能有唯一
+ * 生效价格，若按计划各留一条版本链，两个计划各自"合法"的版本合起来仍可能给同一
+ * 商品两个价格，报价就只能在冲突里择一。
+ */
+export interface RentalPriceVersion {
+  id: string;
+  tenantId: string;
+  workspaceId: string;
+  /** 空间内原子序号（1 起）。字符串版本号在 v10 之后排序不可靠，故以整数为准。 */
+  sequence: number;
+  /** 展示用版本号（`v${sequence}`）。 */
+  version: string;
+  /** 生效时刻：报价按「租期开始时点 ≤ 生效时刻」的最新版本取价（需求 4.4.4）。 */
+  effectiveFrom: string;
+  /** 该版本的全部有效费率（完整结果，不只是差异）。 */
+  rates: RentalPricingRate[];
+  changeReason?: string;
+  createdBy?: string;
+  createdAt: string;
+}
+
+/**
+ * 调价计划（需求 4.4.3）：草稿、待生效、已生效、已取消、执行失败。
+ * 只保存差异（op + 受影响行）；确认时生成完整新版本。
+ */
+export interface RentalPriceAdjustmentPlan {
+  id: string;
+  tenantId: string;
+  planId: string;
+  code: string;
+  name: string;
+  status: "draft" | "pending" | "applied" | "cancelled" | "failed";
+  changes: RentalPriceAdjustmentChange[];
+  /** 定时执行的生效时刻；缺省 = 立即执行。 */
+  scheduledAt?: string;
+  resultVersionId?: string;
+  changeReason: string;
+  createdBy?: string;
+  confirmedBy?: string;
+  confirmedAt?: string;
+  /** 执行失败的错误信息（执行成功后为空）。 */
+  failureReason?: string;
+  cancelReason?: string;
+  createdAt: string;
+}
+
+/** 以历史价格快照生成新的当前版本；历史版本本身保持不可变。 */
+export interface RestoreRentalPriceVersionRequest {
+  reason: string;
+}
+
+/** 创建调价计划请求（需求 4.4.3：差异 + 定时/立即 + 原因）。 */
+export interface CreateRentalPriceAdjustmentRequest {
+  code: string;
+  name: string;
+  changes: RentalPriceAdjustmentChange[];
+  /** 定时执行的生效时刻；缺省 = 确认后立即执行。 */
+  scheduledAt?: string;
+  changeReason: string;
+}
+
+/** 取消调价计划请求（已生效不可取消）。 */
+export interface CancelRentalPriceAdjustmentRequest {
+  reason: string;
+}
+
+/** 创建调价计划的响应：附带逐行最终价预览（需求 4.4.3：不得只展示公式）。 */
+export interface RentalPriceAdjustmentPreviewRow {
+  itemGroupId: string;
+  itemGroupCode: string;
+  unit: RentalPricingUnit;
+  /** 调整前基础价。 */
+  beforeBaseAmount: number;
+  /** 调整后基础价（op 直接算出的最终值）。 */
+  afterBaseAmount: number;
 }
 
 /**
@@ -5989,6 +6295,22 @@ export interface RentalQuoteCalendarDay {
   multiplier: number;
   /** 该日期的实际价格：unitCount × unitAmount × multiplier，未乘商品数量、未封顶。 */
   amount: number;
+  /**
+   * 该计费单位的**取价时点**（需求 4.5.6 v2.9：每个计费单位必须有明确的取价时点）。
+   * 自然日首个单位 = 实际租期开始时点、后续单位 = 对应营业日期的开始时点；
+   * 小时/班次/夜/24 小时/周/30 日月 = 计费块开始时点；整包 = 起租时点。
+   * 使用量与日期无对应关系，省略。分时价格按取价时点命中。
+   */
+  priceAt?: string;
+  /**
+   * 命中的价格解析层（需求 4.4.5/4.5.5 v2.9 的四级优先级）：
+   * `date_override` 具体日期时间覆盖 > `periodic` 周期性计价时段 >
+   * `day_type` 商品日期类型价格 > `base` 商品基础价格。
+   * 周期性时段由 PRICE-03 提供价格事实；该层就绪前不会出现在快照里。
+   */
+  hitLayer?: "date_override" | "periodic" | "day_type" | "base";
+  /** 该单位命中时的价格计划版本（需求 4.4.8：逐计费单位保存价格版本）。 */
+  pricingPlanVersion?: string;
 }
 
 export interface RentalQuoteChargeLine {
@@ -6057,6 +6379,15 @@ export interface RentalQuoteSnapshotV1 {
    * 这里固化命中的费率本体，复算不再依赖计划仍以该版本存在。
    */
   rateSnapshot: RentalPricingRate[];
+  /**
+   * PRICE-03：本次报价命中的**空间级不可变价格版本**引用。
+   *
+   * 与 `rateSnapshot` 并存而不重复：快照回答「按什么价算的」，版本引用回答
+   * 「这份价格是空间的哪一次调价结果」——追责与对账要的是后者。
+   * 内存数据源没有版本事实，因此可空。
+   */
+  priceVersionId?: string;
+  priceVersion?: string;
   ruleVersion: string;
   ruleSnapshot: RentalRuleConfig;
   calendarVersion?: string;
@@ -6748,6 +7079,9 @@ export interface RentalOrder {
   quoteId: string;
   quoteNo: string;
   pricingPlanVersion: string;
+  /** PRICE-03：下单时从报价拷贝的空间级价格版本引用（内存数据源下为空）。 */
+  priceVersionId?: string;
+  priceVersion?: string;
   ruleVersion: string;
   ruleSnapshot: RentalRuleConfig;
   calendarVersion?: string;

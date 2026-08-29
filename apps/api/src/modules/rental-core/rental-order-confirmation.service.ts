@@ -53,6 +53,9 @@ function quoteSnapshotFingerprint(quote: RentalQuoteSnapshotV1) {
     payableAmount: quote.payableAmount,
     receivableAmount: quote.receivableAmount,
     pricingPlanVersion: quote.pricingPlanVersion,
+    // PRICE-03：订单继承报价命中的价格版本，后续调价不改写这张订单的计价依据。
+    priceVersionId: quote.priceVersionId,
+    priceVersion: quote.priceVersion,
     rateSnapshot: quote.rateSnapshot,
     ruleVersion: quote.ruleVersion,
     ruleSnapshot: quote.ruleSnapshot,
@@ -146,6 +149,15 @@ export class RentalOrderConfirmationService {
 
     const quote = this.business.consumeQuote(tenantId, context, input.quoteId);
     this.assertOrderMatchesQuote(input, quote);
+    // 需求 4.5.4：订单确认按租期端点复查营业状态——报价之后运营可能把领取/归还日
+    // 覆盖成停业日，确认不能只信报价时的旧判断。
+    this.business.assertOrderDaysOpenForConfirmation(tenantId, context, {
+      fulfillmentLocationId: input.fulfillmentLocationId,
+      returnLocationId: input.returnLocationId,
+      startAt: input.startAt,
+      endAt: input.endAt,
+      fulfillmentMode: input.fulfillmentMode
+    });
 
     const committedAt = new Date().toISOString();
     /**

@@ -4295,7 +4295,724 @@ async function main() {
   assert.equal(fkRule, "RESTRICT", `来源→版本外键必须 RESTRICT（不可级联删除不可变历史版本），实际 ${fkRule}`);
   ok("公共官方来源更新提示：空间记录引用的来源版本，登记更新版本后返回 officialSourceUpdateAvailable 与最新版本号、但不自动覆盖空间日历，空间主动应用后提示消失；跨来源不误报（另一来源序号更高不触发更新）；从未引用来源时报「可选择」+ 来源数量而非跨来源「最新 vX」（含双来源用例）；登记过但全部停用报「当前无可用来源」、从未登记两标记皆空；来源→版本外键为 RESTRICT 不可级联删除");
 
+  console.log("== 15r. PRICE-02A 日期范围覆盖：批量预览、原子应用、批次审计与权限 ==");
+  // 需求 4.5.9：租户只能在基础日历上新增人工覆盖；范围提交全部成功或全部失败，
+  // 共用原因/batchId/操作者/时间，只推进一次 revision；既有覆盖必须显式确认；
+  // 移除恢复下一优先级来源；跨年度单次请求被拒绝；无编辑权限一律 403。
+  // 用 construction 空间 + 未触碰过的 2044 年：无既有日历行，基础值全部来自每周模板。
+  const rangeYear = 2044;
+  const rangeBase = (await request("GET", `/api/rental/v1/calendars/${rangeYear}`, null, construction.accessToken)).body.data;
+  assert.ok(rangeBase.days.length >= 365, `2044 基础日历应为全年: ${rangeBase.days.length}`);
+  const rangeFields = {
+    dayType: "tenant_special",
+    name: "试点特殊周",
+    pricingOverrideRef: "E2E-RANGE-SPECIAL",
+    businessStatus: "limited",
+    hours: { windows: [{ start: "09:00", end: "18:00" }] }
+  };
+  const rangePreview1 = await request("POST", `/api/rental/v1/calendars/${rangeYear}/days/range-preview`, {
+    startDate: `${rangeYear}-05-01`, endDate: `${rangeYear}-05-10`, fields: rangeFields
+  }, construction.accessToken);
+  assert.equal(rangePreview1.status, 200, `范围预览失败: ${rangePreview1.status} ${JSON.stringify(rangePreview1.body).slice(0, 300)}`);
+  assert.equal(rangePreview1.body.data.totalDays, 10, "预览应覆盖 10 天");
+  assert.equal(rangePreview1.body.data.conflictCount, 0, "空白年度不应有冲突");
+  assert.equal(rangePreview1.body.data.version, rangeBase.version, "预览应基于当前可编辑版本");
+  assert.ok(
+    rangePreview1.body.data.days.every((row) => row.base.source === "week_rule" && row.current.source === "week_rule"),
+    "无既有日历时基础值与当前值都应来自每周模板"
+  );
+  assert.ok(
+    rangePreview1.body.data.days.every((row) => row.changedFields.includes("dayType") && row.changedFields.includes("businessStatus") && row.changedFields.includes("hours")),
+    `预览行应列出将修改的字段: ${JSON.stringify(rangePreview1.body.data.days[0])}`
+  );
+  // 审计基线：本节开始前 2044 年不应有任何覆盖审计。
+  const rangeWs = construction.currentWorkspaceId;
+  const auditCountBefore = Number(readScalar(`SELECT COUNT(*) FROM \`rental_calendar_override_audits\` WHERE \`workspaceId\`='${rangeWs}' AND \`year\`=${rangeYear};`));
+  assert.equal(auditCountBefore, 0, "2044 年不应有历史覆盖审计");
+
+  const rangeApply1 = await request("POST", `/api/rental/v1/calendars/${rangeYear}/days/range`, {
+    startDate: `${rangeYear}-05-01`, endDate: `${rangeYear}-05-10`, fields: rangeFields, overrideReason: "E2E 范围覆盖第一批"
+  }, construction.accessToken);
+  assert.equal(rangeApply1.status, 201, `范围应用失败: ${rangeApply1.status} ${JSON.stringify(rangeApply1.body).slice(0, 300)}`);
+  const rangeBatch1 = rangeApply1.body.data.batchId;
+  assert.match(rangeBatch1, /^[A-Za-z0-9_.:-]{1,64}$/u, "服务端必须返回批次标识");
+  assert.equal(rangeApply1.body.data.appliedCount, 10, "应应用 10 天");
+  assert.equal(rangeApply1.body.data.revision, 1, "首写 revision 应为 1");
+  const rangeAfter1 = (await request("GET", `/api/rental/v1/calendars/${rangeYear}`, null, construction.accessToken)).body.data;
+  for (let day = 1; day <= 10; day += 1) {
+    const date = `${rangeYear}-05-${String(day).padStart(2, "0")}`;
+    const row = rangeAfter1.days.find((item) => item.date === date);
+    assert.ok(row, `${date} 应存在于日历`);
+    assert.equal(row.source, "tenant_override", `${date} 应为人工覆盖`);
+    assert.equal(row.dayType, "tenant_special", `${date} 类型应为 tenant_special`);
+    assert.equal(row.businessStatus, "limited", `${date} 应为限时营业`);
+    assert.equal(row.closed, false, "限时营业不属于停业，closed 必须为 false");
+    assert.equal(row.pricingOverrideRef, "E2E-RANGE-SPECIAL", `${date} 应保存特殊价格引用`);
+    assert.ok(row.hours?.windows?.length, `${date} 应带营业时段`);
+    assert.equal(row.overrideScope?.kind, "range", `${date} 应记录范围 scope`);
+    assert.equal(row.overrideScope?.batchId, rangeBatch1, `${date} 应记录批次标识`);
+  }
+  // 审计：10 行、同一批次、同一操作时间。
+  const batch1Rows = Number(readScalar(`SELECT COUNT(*) FROM \`rental_calendar_override_audits\` WHERE \`workspaceId\`='${rangeWs}' AND \`year\`=${rangeYear} AND \`batchId\`='${rangeBatch1}';`));
+  assert.equal(batch1Rows, 10, "第一批应产生 10 行审计");
+  const batchDistinct = Number(readScalar(`SELECT COUNT(DISTINCT \`batchId\`) FROM \`rental_calendar_override_audits\` WHERE \`workspaceId\`='${rangeWs}' AND \`year\`=${rangeYear};`));
+  assert.equal(batchDistinct, 1, "本节此点应只有一个批次");
+
+  // 重叠范围：既有覆盖必须显式确认；只改选择的字段，未选字段保持原值。
+  const rangePreview2 = await request("POST", `/api/rental/v1/calendars/${rangeYear}/days/range-preview`, {
+    startDate: `${rangeYear}-05-03`, endDate: `${rangeYear}-05-06`, fields: { businessStatus: "open" }
+  }, construction.accessToken);
+  assert.equal(rangePreview2.status, 200, "重叠范围预览应成功");
+  assert.equal(rangePreview2.body.data.conflictCount, 4, "4 天已有覆盖应全部标为冲突");
+  assert.ok(
+    rangePreview2.body.data.days.every((row) => row.current.source === "tenant_override" && row.changedFields.includes("businessStatus")),
+    "冲突行应展示当前值与将修改的字段"
+  );
+  assert.ok(
+    rangePreview2.body.data.days.every((row) => row.after.dayType === "tenant_special"),
+    "未选择的字段（dayType）在应用后保持原值"
+  );
+  const rangeApplyNoAck = await request("POST", `/api/rental/v1/calendars/${rangeYear}/days/range`, {
+    startDate: `${rangeYear}-05-03`, endDate: `${rangeYear}-05-06`, fields: { businessStatus: "open" }, overrideReason: "未确认的覆盖"
+  }, construction.accessToken);
+  assert.equal(rangeApplyNoAck.status, 409, `未确认覆盖必须 409: ${rangeApplyNoAck.status}`);
+  assert.ok(/人工覆盖/.test(rangeApplyNoAck.body.message || ""), `409 应说明冲突原因: ${rangeApplyNoAck.body.message}`);
+  const rangeApply2 = await request("POST", `/api/rental/v1/calendars/${rangeYear}/days/range`, {
+    startDate: `${rangeYear}-05-03`, endDate: `${rangeYear}-05-06`, fields: { businessStatus: "open" },
+    overrideReason: "E2E 范围覆盖第二批（改状态保类型）", batchId: "e2e-15r-batch2", expectedRevision: rangeApply1.body.data.revision,
+    overrideConfirmed: true
+  }, construction.accessToken);
+  assert.equal(rangeApply2.status, 201, `确认后范围应用失败: ${rangeApply2.status} ${JSON.stringify(rangeApply2.body).slice(0, 300)}`);
+  assert.equal(rangeApply2.body.data.batchId, "e2e-15r-batch2", "应沿用调用方批次标识");
+  assert.equal(rangeApply2.body.data.revision, 2, "第二次范围提交只推进一次 revision");
+  const rangeAfter2 = (await request("GET", `/api/rental/v1/calendars/${rangeYear}`, null, construction.accessToken)).body.data;
+  for (let day = 3; day <= 6; day += 1) {
+    const date = `${rangeYear}-05-${String(day).padStart(2, "0")}`;
+    const row = rangeAfter2.days.find((item) => item.date === date);
+    assert.equal(row.businessStatus, "open", `${date} 状态应改为 open`);
+    assert.equal(row.closed, false, "open 不得把 closed 置真");
+    assert.equal(row.dayType, "tenant_special", `${date} 未选择的 dayType 必须保持原值`);
+    assert.equal(row.overrideReason, "E2E 范围覆盖第二批（改状态保类型）", `${date} 覆盖原因应更新`);
+    assert.equal(row.overrideScope?.batchId, "e2e-15r-batch2", `${date} scope 应记录第二批`);
+  }
+  assert.equal(rangeAfter2.days.find((item) => item.date === `${rangeYear}-05-01`).overrideScope?.batchId, rangeBatch1, "范围外的批次 1 日期不得被改动");
+
+  // 并发：携带过期 revision 的提交必须 409，且不落任何审计行（无部分写入）。
+  const auditCountMid = Number(readScalar(`SELECT COUNT(*) FROM \`rental_calendar_override_audits\` WHERE \`workspaceId\`='${rangeWs}' AND \`year\`=${rangeYear};`));
+  assert.equal(auditCountMid, 14, "两批共 14 行审计");
+  const rangeStale = await request("POST", `/api/rental/v1/calendars/${rangeYear}/days/range`, {
+    startDate: `${rangeYear}-05-01`, endDate: `${rangeYear}-05-02`, fields: { pricingOverrideRef: "E2E-STALE" },
+    overrideReason: "过期 revision 的提交", expectedRevision: 1, overrideConfirmed: true
+  }, construction.accessToken);
+  assert.equal(rangeStale.status, 409, `过期 revision 必须 409: ${rangeStale.status}`);
+  const auditCountAfterStale = Number(readScalar(`SELECT COUNT(*) FROM \`rental_calendar_override_audits\` WHERE \`workspaceId\`='${rangeWs}' AND \`year\`=${rangeYear};`));
+  assert.equal(auditCountAfterStale, 14, "被 409 拒绝的提交不得留下任何审计行（无部分保存）");
+
+  // 跨年度单次请求必须拒绝（需求 4.5.9：跨年拆成两个年度批次，由前端拆分提交）。
+  const rangeCrossYear = await request("POST", `/api/rental/v1/calendars/${rangeYear}/days/range`, {
+    startDate: `${rangeYear}-12-31`, endDate: `${rangeYear + 1}-01-01`, fields: { dayType: "workday" }, overrideReason: "跨年请求"
+  }, construction.accessToken);
+  assert.equal(rangeCrossYear.status, 400, `跨年度请求必须 400: ${rangeCrossYear.status}`);
+  assert.ok(/跨年度|拆分/.test(rangeCrossYear.body.message || ""), `400 应提示按年度拆分: ${rangeCrossYear.body.message}`);
+
+  // 范围移除：先预览恢复值，再原子移除；恢复到每周模板（无 overriddenFrom 的空白年度）。
+  const removePreview = await request("POST", `/api/rental/v1/calendars/${rangeYear}/days/range-remove-preview`, {
+    startDate: `${rangeYear}-05-01`, endDate: `${rangeYear}-05-10`
+  }, construction.accessToken);
+  assert.equal(removePreview.status, 200, "移除预览应成功");
+  assert.equal(removePreview.body.data.overrideCount, 10, "移除预览应发现 10 天覆盖");
+  assert.ok(
+    removePreview.body.data.days.every((row) => row.restoredSource === "week_rule" && row.restored.source === "week_rule"),
+    "空白年度的移除应全部恢复到每周模板"
+  );
+  const rangeRemove = await request("POST", `/api/rental/v1/calendars/${rangeYear}/days/range-remove`, {
+    startDate: `${rangeYear}-05-01`, endDate: `${rangeYear}-05-10`, overrideReason: "E2E 范围移除", expectedRevision: rangeApply2.body.data.revision
+  }, construction.accessToken);
+  assert.equal(rangeRemove.status, 201, `范围移除失败: ${rangeRemove.status} ${JSON.stringify(rangeRemove.body).slice(0, 300)}`);
+  assert.equal(rangeRemove.body.data.removedCount, 10, "应移除 10 天覆盖");
+  assert.equal(rangeRemove.body.data.revision, 3, "移除也只推进一次 revision");
+  const rangeAfterRemove = (await request("GET", `/api/rental/v1/calendars/${rangeYear}`, null, construction.accessToken)).body.data;
+  for (let day = 1; day <= 10; day += 1) {
+    const date = `${rangeYear}-05-${String(day).padStart(2, "0")}`;
+    const row = rangeAfterRemove.days.find((item) => item.date === date);
+    assert.equal(row.source, "week_rule", `${date} 应恢复每周模板来源`);
+    assert.equal(row.overrideReason, undefined, `${date} 不得残留覆盖原因`);
+    assert.ok(row.dayType !== "tenant_special", `${date} 不得残留特殊类型`);
+  }
+  const revertRows = Number(readScalar(`SELECT COUNT(*) FROM \`rental_calendar_override_audits\` WHERE \`workspaceId\`='${rangeWs}' AND \`year\`=${rangeYear} AND \`action\`='revert';`));
+  assert.equal(revertRows, 10, "移除应产生 10 行 revert 审计");
+  const removeEmpty = await request("POST", `/api/rental/v1/calendars/${rangeYear}/days/range-remove`, {
+    startDate: `${rangeYear}-06-01`, endDate: `${rangeYear}-06-02`, overrideReason: "无覆盖可移除"
+  }, construction.accessToken);
+  assert.equal(removeEmpty.status, 409, `范围内无覆盖必须 409: ${removeEmpty.status}`);
+
+  // 权限：只有 order:view 的账号对范围端点一律 403（服务端独立校验，不靠前端隐藏按钮）。
+  const rangeRole = await request("POST", "/api/platform/roles", {
+    code: `E2E-RANGE-VIEW-${Date.now().toString(36)}`, name: "E2E 范围只读", scope: "store", dataScope: "all",
+    enabledBusinessScopes: ["rental"], permissions: ["store-rental:order:view"], isActive: true
+  }, construction.accessToken);
+  assert.equal(rangeRole.status, 201, `建只读角色失败: ${JSON.stringify(rangeRole.body).slice(0, 200)}`);
+  const rangeAccount = `e2e_range_view_${Date.now().toString(36)}`;
+  const rangeUser = await request("POST", "/api/platform/users", {
+    account: rangeAccount, displayName: "E2E 范围只读", phone: "13900007777", roleIds: [rangeRole.body.data.id], isActive: true
+  }, construction.accessToken);
+  assert.equal(rangeUser.status, 201, `建只读账号失败: ${JSON.stringify(rangeUser.body).slice(0, 200)}`);
+  const rangeMember = await request("PUT", `/api/platform/workspaces/${rangeWs}/members`, { userId: rangeUser.body.data.id, roleId: rangeRole.body.data.id }, construction.accessToken);
+  assert.ok([200, 201].includes(rangeMember.status), `加入成员失败: ${rangeMember.status}`);
+  const rangeTemp = rangeUser.body.data.temporaryPassword;
+  const rangeFirst = await login("e2e_construction", rangeAccount, rangeTemp);
+  const rangePwd = `E2e!${randomBytes(4).toString("hex")}`;
+  assert.equal((await request("POST", "/api/auth/change-password", { currentPassword: rangeTemp, newPassword: rangePwd }, rangeFirst.accessToken)).status, 201, "只读账号改密失败");
+  const rangeViewer = await login("e2e_construction", rangeAccount, rangePwd);
+  const rangeViewDenied = await request("POST", `/api/rental/v1/calendars/${rangeYear}/days/range-preview`, {
+    startDate: `${rangeYear}-05-01`, endDate: `${rangeYear}-05-02`, fields: { businessStatus: "open" }
+  }, rangeViewer.accessToken);
+  assert.equal(rangeViewDenied.status, 403, `只读账号范围预览必须 403: ${rangeViewDenied.status}`);
+  const rangeWriteDenied = await request("POST", `/api/rental/v1/calendars/${rangeYear}/days/range`, {
+    startDate: `${rangeYear}-05-01`, endDate: `${rangeYear}-05-02`, fields: { businessStatus: "open" }, overrideReason: "无权提交"
+  }, rangeViewer.accessToken);
+  assert.equal(rangeWriteDenied.status, 403, `只读账号范围应用必须 403: ${rangeWriteDenied.status}`);
+
+  ok("范围覆盖：预览返回基础/当前/应用后与冲突标记；应用 10 天原子落库（一次 revision、10 行同批次审计、scope 记录批次与范围）；既有覆盖未确认 409、确认后只改所选字段；过期 revision 409 且零审计行（无部分保存）；跨年度 400；移除预览展示恢复值与来源、应用后恢复每周模板且产生 revert 审计；无覆盖范围 409；只读账号预览与应用均 403");
+
+  // E2E_STOP_AFTER=<marker>：前缀分段运行——跑完 marker 所在分段后立即收尾（清理测试库）。
+  // 只在显式设置环境变量时生效；不跳过、不削弱任何断言，仅供复测「目标段 + 全部前置段」。
+  await maybeStopAfter("15r");
+
+  console.log("== 15s. PRICE-01 取价时点与分时命中：周五 10:00 与 14:00 的 24 小时块不同价 ==");
+  // 需求 4.5.6 v2.9：每个计费单位按其**取价时点**命中分时价格；4.4.5：默认不因
+  // 跨过分时边界拆分完整计费块。造一个「周五 12:00 → 周一 00:00 系数 1.5」的
+  // 一次性日期时间覆盖（PRICE-02A 范围覆盖 API），断言：
+  //   周五 10:00 起的 24h 块（取价时点 10:00，覆盖外）→ 基础价 100；
+  //   周五 14:00 起的 24h 块（取价时点 14:00，覆盖内）→ 150；
+  //   周五 10:00 → 周六 10:30 = 2 个完整块，不因跨过 12:00 边界拆块 → 100 + 150 = 250
+  //   （若按边界拆分会得 100×(2/24)+150×(22/24) ≈ 145.83）。
+  // 周期性计价时段（每周五 12:00 起按周末价）的价格事实由 PRICE-03 承接；这里用
+  // 同一解析点验证一次性覆盖。快照逐单位保存 priceAt / hitLayer / 价格计划版本。
+  let fridayKey = null;
+  for (let day = 1; day <= 7; day += 1) {
+    const candidate = `2045-01-${String(day).padStart(2, "0")}`;
+    if (new Date(`${candidate}T00:00:00Z`).getUTCDay() === 5) {
+      fridayKey = candidate;
+      break;
+    }
+  }
+  assert.ok(fridayKey, "应能定位 2045 年第一个周五");
+  // camera 品类支持 day_24h 计价单位（construction 不支持），因此夹具放 demo 空间。
+  const dtDemo = await login("demo", "admin", DEMO_PASSWORD);
+  const dtLocations = (await request("GET", "/api/rental/v1/locations", null, dtDemo.accessToken)).body.data;
+  const dtLocation = dtLocations.find((row) => row.status === "enabled" && row.capabilities.includes("pickup") && row.capabilities.includes("return") && row.capabilities.includes("storage"));
+  assert.ok(dtLocation, "demo 空间应有一个支持领取/归还/仓储的启用地点");
+  const mondayKey = new Date(new Date(`${fridayKey}T00:00:00Z`).getTime() + 3 * 86400000).toISOString().slice(0, 10);
+  assert.equal(new Date(`${mondayKey}T00:00:00Z`).getUTCDay(), 1, "覆盖终点应为周一");
+
+  const dtGroup = await request(
+    "POST",
+    "/api/rental/v1/item-groups",
+    { code: "E2E-PRICE-DT", name: "E2E 分时取价组", inventoryMode: "quantity", unit: "套", attributes: { brand: "E2E影像", model: "PRICE-DT", role: "lens" } },
+    dtDemo.accessToken
+  );
+  assert.equal(dtGroup.status, 201, `分时取价商品组创建失败: ${JSON.stringify(dtGroup.body).slice(0, 200)}`);
+  const dtStock = await request(
+    "PUT",
+    "/api/rental/v1/stock-balances",
+    { itemGroupId: dtGroup.body.data.id, locationId: dtLocation.id, onHandQuantity: 10, maintenanceQuantity: 0 },
+    dtDemo.accessToken
+  );
+  assert.equal(dtStock.status, 200, `分时取价库存登记失败: ${JSON.stringify(dtStock.body).slice(0, 200)}`);
+  const dtPlan = await request(
+    "POST",
+    "/api/rental/v1/pricing-plans",
+    {
+      code: "E2E-PRICE-DT24",
+      name: "E2E 分时取价计划",
+      changeReason: "PRICE-01 取价时点验收",
+      status: "enabled",
+      effectiveFrom: new Date(Date.now() - 86400000).toISOString(),
+      rates: [
+        {
+          itemGroupId: dtGroup.body.data.id,
+          unit: "day_24h",
+          baseAmount: 100,
+          weekendMultiplier: 1,
+          holidayMultiplier: 1,
+          depositAmount: 500,
+          minimumUnits: 1,
+          datetimeOverrides: [{
+            id: "E2E-DT-2045",
+            start: `${fridayKey}T12:00:00+08:00`,
+            end: `${mondayKey}T00:00:00+08:00`,
+            multiplier: 1.5
+          }]
+        }
+      ]
+    },
+    dtDemo.accessToken
+  );
+  assert.equal(dtPlan.status, 201, `分时取价计划创建失败: ${JSON.stringify(dtPlan.body).slice(0, 200)}`);
+
+  // 差异定价开关必须开启，否则日历系数不参与取价；用完还原，避免污染后续用例。
+  const dtSettingsBefore = (await request("GET", "/api/rental/v1/business-settings", null, dtDemo.accessToken)).body.data;
+  const holidayWasEnabled = dtSettingsBefore.pricing.holidayPricingEnabled;
+  if (!holidayWasEnabled) {
+    const toggle = await request(
+      "PUT",
+      "/api/rental/v1/business-settings",
+      { ...dtSettingsBefore, pricing: { ...dtSettingsBefore.pricing, holidayPricingEnabled: true } },
+      dtDemo.accessToken
+    );
+    assert.ok([200, 201].includes(toggle.status), `开启日历差异定价失败: ${toggle.status} ${JSON.stringify(toggle.body).slice(0, 200)}`);
+  }
+
+  const dtRangeApply = await request(
+    "POST",
+    `/api/rental/v1/calendars/2045/days/range`,
+    {
+      startDate: fridayKey,
+      endDate: mondayKey,
+      startDateTime: `${fridayKey}T12:00:00+08:00`,
+      endDateTime: `${mondayKey}T00:00:00+08:00`,
+      fields: { pricingOverrideRef: "E2E-DT-2045" },
+      overrideReason: "E2E 周五 12:00 起分时价格"
+    },
+    dtDemo.accessToken
+  );
+  assert.equal(dtRangeApply.status, 201, `分时覆盖应用失败: ${dtRangeApply.status} ${JSON.stringify(dtRangeApply.body).slice(0, 250)}`);
+  // 报价只读**已发布**日历（calendarsForDateRange → publishedCalendar），草稿不参与取价；
+  // 因此与 15f 同一口径：覆盖应用后必须发布，2045 年的报价才能看到它。
+  const dtPublish1 = await request("POST", "/api/rental/v1/calendars/2045/publish", { changeReason: "E2E 分时价格发布" }, dtDemo.accessToken);
+  assert.equal(dtPublish1.status, 201, `2045 首次发布失败: ${dtPublish1.status} ${JSON.stringify(dtPublish1.body).slice(0, 200)}`);
+  const dtPublishedRevision = (await request("GET", "/api/rental/v1/calendars/2045", null, dtDemo.accessToken)).body.data.revision;
+
+  const dtQuoteFor = async (startAt, endAt) => {
+    const res = await request(
+      "POST",
+      "/api/rental/v1/quotes",
+      {
+        customerType: "corporate",
+        fulfillmentMode: "store_pickup_return",
+        fulfillmentLocationId: dtLocation.id,
+        startAt,
+        endAt,
+        pricingPlanId: dtPlan.body.data.id,
+        lines: [{ itemGroupId: dtGroup.body.data.id, quantity: 1 }]
+      },
+      dtDemo.accessToken
+    );
+    assert.equal(res.status, 201, `分时取价报价失败: ${res.status} ${JSON.stringify(res.body).slice(0, 250)}`);
+    return res.body.data;
+  };
+
+  // ① 覆盖外取价：周五 10:00 块（时点早于 12:00）按基础价。
+  const satKey = new Date(new Date(`${fridayKey}T00:00:00Z`).getTime() + 86400000).toISOString().slice(0, 10);
+  const dtOutsideFix = await dtQuoteFor(`${fridayKey}T10:00:00+08:00`, `${satKey}T10:00:00+08:00`);
+  assert.equal(dtOutsideFix.rentalAmount, 100, `覆盖外的 24h 块应为基础价 100：实际 ${dtOutsideFix.rentalAmount}`);
+  const outsideRow = dtOutsideFix.calendarSnapshot.find((row) => row.date === fridayKey);
+  assert.equal(outsideRow.hitLayer, "base", `覆盖外命中层应为 base: ${JSON.stringify(outsideRow)}`);
+  assert.equal(outsideRow.multiplier, 1, "覆盖外系数应为 1");
+  assert.ok(outsideRow.priceAt, "快照必须保存取价时点");
+  assert.equal(outsideRow.pricingPlanVersion, dtPlan.body.data.version, "快照必须保存价格计划版本");
+
+  // ② 覆盖内取价：周五 14:00 块（时点在 12:00 之后）命中一次性覆盖 → 150。
+  const dtInside = await dtQuoteFor(`${fridayKey}T14:00:00+08:00`, `${satKey}T14:00:00+08:00`);
+  assert.equal(dtInside.rentalAmount, 150, `覆盖内的 24h 块应为 100 × 1.5 = 150：实际 ${dtInside.rentalAmount}`);
+  const insideRow = dtInside.calendarSnapshot.find((row) => row.date === fridayKey);
+  assert.equal(insideRow.hitLayer, "date_override", `覆盖内命中层应为 date_override: ${JSON.stringify(insideRow)}`);
+  assert.equal(insideRow.multiplier, 1.5, "覆盖内系数应为 1.5");
+  assert.equal(insideRow.source, "tenant_override", "命中覆盖时来源应为人工覆盖");
+
+  // ③ 不拆块：两个用例。
+  // (a) 周五 10:00 → 周六 10:30 = 2 个完整 24h 块（24.5h 进位为 2）；块 1 跨过 12:00
+  //     边界仍**完全按其开始时点**取价，不拆成 2h×基础 + 22h×1.5（那样会得 ≈145.83）。
+  const dtNoSplit = await dtQuoteFor(`${fridayKey}T10:00:00+08:00`, `${satKey}T10:30:00+08:00`);
+  assert.equal(dtNoSplit.rentalAmount, 250, `两块应为 100 + 150 = 250（按边界拆分块 1 会得 ≈145.83）：实际 ${dtNoSplit.rentalAmount}`);
+  const noSplitRows = dtNoSplit.calendarSnapshot.filter((row) => row.itemGroupId === dtGroup.body.data.id);
+  assert.equal(noSplitRows.length, 2, "应有两个取价行（周五/周六）");
+  assert.equal(noSplitRows.find((row) => row.date === fridayKey).hitLayer, "base", "周五块未命中覆盖");
+  assert.equal(noSplitRows.find((row) => row.date === satKey).hitLayer, "date_override", "周六块应命中覆盖");
+  // (b) 周五 10:00 → 周日 10:30 = 3 个完整块 → 100 + 150 + 150 = 400；3 个块若按日期
+  //     集合平均 1.25 会得 375，按单位逐个取价才是 400。
+  const sunKey = new Date(new Date(`${fridayKey}T00:00:00Z`).getTime() + 2 * 86400000).toISOString().slice(0, 10);
+  const dtThreeBlocks = await dtQuoteFor(`${fridayKey}T10:00:00+08:00`, `${sunKey}T10:30:00+08:00`);
+  assert.equal(dtThreeBlocks.rentalAmount, 400, `三块应为 100 + 150 + 150 = 400（平均倍率会得 375）：实际 ${dtThreeBlocks.rentalAmount}`);
+
+  // 清理：移除分时覆盖，还原差异定价开关。
+  const dtRemove = await request(
+    "POST",
+    `/api/rental/v1/calendars/2045/days/range-remove`,
+    {
+      startDate: fridayKey,
+      endDate: mondayKey,
+      overrideReason: "E2E 分时覆盖清理",
+      expectedRevision: dtPublishedRevision
+    },
+    dtDemo.accessToken
+  );
+  assert.equal(dtRemove.status, 201, `分时覆盖移除失败: ${dtRemove.status} ${JSON.stringify(dtRemove.body).slice(0, 200)}`);
+  // 把移除后的周模板结果发布为当前版本，避免 2045 的已发布版本残留覆盖影响后续。
+  const dtPublish2 = await request("POST", "/api/rental/v1/calendars/2045/publish", { changeReason: "E2E 移除后发布周模板" }, dtDemo.accessToken);
+  assert.equal(dtPublish2.status, 201, `2045 移除后发布失败: ${dtPublish2.status}`);
+  if (!holidayWasEnabled) {
+    const restoreToggle = await request(
+      "PUT",
+      "/api/rental/v1/business-settings",
+      dtSettingsBefore,
+      dtDemo.accessToken
+    );
+    assert.ok([200, 201].includes(restoreToggle.status), `还原日历差异定价失败: ${restoreToggle.status}`);
+  }
+
+  ok("取价时点与分时命中：快照逐单位保存 priceAt/hitLayer/价格计划版本；周五 10:00 块（覆盖外）按基础价、14:00 块（覆盖内）命中一次性日期时间覆盖得 150；周五 10:00 → 周六 10:30 的两个完整块不因跨过分时边界拆块（100+150=250，拆分价 ≈145.83 被排除）；覆盖移除与差异定价开关已还原");
+
+  await maybeStopAfter("15s");
+
+  console.log("== 15t. PRICE-02 确认与领取时点复查营业状态（需求 4.5.4/4.6.4） ==");
+  // 需求 4.5.4：「报价和订单必须分别校验领取与归还时点的地点能力和营业状态」；
+  // 4.6.4：领取前必须重新校验……营业状态。此前 assertFulfillmentDayOpen 只有报价一个
+  // 调用点——报价后运营把端点覆盖成停业日，确认与领取会照常进行。归还仍不拦：
+  // 停业不得让在租订单失去归还渠道。
+  // 「今天」必须按**营业时区**（默认 Asia/Shanghai）取：领取复查用 businessDateKey(now, tz)，
+  // UTC 日期在晚间会与营业日差一天，导致覆盖错日期、复查形同虚设。
+  const recheckToday = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+  const recheckYear = Number(recheckToday.slice(0, 4));
+  // (a) 确认复查：报价（端点均为开放日）→ 把领取日覆盖成停业并发布 → 同一报价确认 409。
+  const recheckQuote = await request(
+    "POST",
+    "/api/rental/v1/quotes",
+    {
+            customerType: "personal",
+      customerId: "recheck_customer",
+      fulfillmentMode: "warehouse_pickup_return",
+      fulfillmentLocationId: constructionLocation.id,
+      startAt: "2027-08-11T09:00:00+08:00",
+      endAt: "2027-08-13T09:00:00+08:00",
+      pricingPlanId: pricePlan.body.data.id,
+      lines: [{ itemGroupId: priceGroupId, quantity: 1 }]
+    },
+    construction.accessToken
+  );
+  assert.equal(recheckQuote.status, 201, `复查用报价失败: ${recheckQuote.status} ${JSON.stringify(recheckQuote.body).slice(0, 200)}`);
+  const recheckDayOverride = await request(
+    "PUT",
+    `/api/rental/v1/calendars/2027/days/2027-08-11`,
+    { date: "2027-08-11", dayType: "tenant_special", name: "E2E 复查停业", pricingMultiplier: 1, closed: true, overrideReason: "E2E 确认复查" },
+    construction.accessToken
+  );
+  assert.equal(recheckDayOverride.status, 200, `覆盖领取日失败: ${recheckDayOverride.status}`);
+  const recheckPublish = await request("POST", "/api/rental/v1/calendars/2027/publish", { changeReason: "E2E 复查停业发布" }, construction.accessToken);
+  assert.equal(recheckPublish.status, 201, `复查发布失败: ${recheckPublish.status}`);
+  const recheckConfirm = await request(
+    "POST",
+    "/api/rental/v1/orders",
+    {
+      quoteId: recheckQuote.body.data.id,
+            customerType: "personal",
+            customerId: "recheck_customer",
+      customerName: "E2E 复查客户",
+      qualificationApproved: true,
+      fulfillmentMode: "warehouse_pickup_return",
+      fulfillmentLocationId: constructionLocation.id,
+      startAt: "2027-08-11T09:00:00+08:00",
+      endAt: "2027-08-13T09:00:00+08:00",
+      lines: [{ itemGroupId: priceGroupId, quantity: 1 }]
+    },
+    construction.accessToken
+  );
+  assert.equal(recheckConfirm.status, 409, `领取日已停业时确认必须 409: ${recheckConfirm.status} ${JSON.stringify(recheckConfirm.body).slice(0, 200)}`);
+  assert.ok(/停止营业/.test(recheckConfirm.body.message || ""), `409 应说明停业: ${recheckConfirm.body.message}`);
+  // 清理：移除停业覆盖并发布，2027 恢复开放，该报价仍可用。
+  const recheckRemove = await request(
+    "POST",
+    "/api/rental/v1/calendars/2027/days/range-remove",
+    { startDate: "2027-08-11", endDate: "2027-08-11", overrideReason: "E2E 复查清理" },
+    construction.accessToken
+  );
+  assert.equal(recheckRemove.status, 201, `复查清理失败: ${recheckRemove.status}`);
+  await request("POST", "/api/rental/v1/calendars/2027/publish", { changeReason: "E2E 复查清理发布" }, construction.accessToken);
+  const recheckConfirmAfter = await request(
+    "POST",
+    "/api/rental/v1/orders",
+    {
+      quoteId: recheckQuote.body.data.id,
+            customerType: "personal",
+            customerId: "recheck_customer",
+      customerName: "E2E 复查客户",
+      qualificationApproved: true,
+      fulfillmentMode: "warehouse_pickup_return",
+      fulfillmentLocationId: constructionLocation.id,
+      startAt: "2027-08-11T09:00:00+08:00",
+      endAt: "2027-08-13T09:00:00+08:00",
+      lines: [{ itemGroupId: priceGroupId, quantity: 1 }]
+    },
+    construction.accessToken
+  );
+  assert.equal(recheckConfirmAfter.status, 201, `恢复开放后确认应成功: ${recheckConfirmAfter.status} ${JSON.stringify(recheckConfirmAfter.body).slice(0, 200)}`);
+
+  // (b) 领取复查：把「今天」覆盖成停业并发布 → 领取 409；归还路径不受停业影响。
+  const recheckTodayQuote = await request(
+    "POST",
+    "/api/rental/v1/quotes",
+    {
+      customerType: "corporate",
+      fulfillmentMode: "warehouse_pickup_return",
+      fulfillmentLocationId: constructionLocation.id,
+      startAt: new Date(Date.now() + 3600000).toISOString(),
+      endAt: new Date(Date.now() + 26 * 3600000).toISOString(),
+      pricingPlanId: pricePlan.body.data.id,
+      lines: [{ itemGroupId: priceGroupId, quantity: 1 }]
+    },
+    construction.accessToken
+  );
+  assert.equal(recheckTodayQuote.status, 201, `领取复查用报价失败: ${recheckTodayQuote.status}`);
+  const todayOverride = await request(
+    "PUT",
+    `/api/rental/v1/calendars/${recheckYear}/days/${recheckToday}`,
+    { date: recheckToday, dayType: "tenant_special", name: "E2E 当日盘点", pricingMultiplier: 1, closed: true, overrideReason: "E2E 领取复查" },
+    construction.accessToken
+  );
+  assert.ok([200, 201].includes(todayOverride.status), `覆盖今天失败: ${todayOverride.status}`);
+  const todayPublish = await request("POST", `/api/rental/v1/calendars/${recheckYear}/publish`, { changeReason: "E2E 领取复查发布" }, construction.accessToken);
+  assert.ok([201, 200].includes(todayPublish.status), `当天发布失败: ${todayPublish.status}`);
+  const recheckOrder = recheckConfirmAfter.body.data;
+  const recheckPickup = await request("POST", `/api/rental/v1/orders/${recheckOrder.id}/handover/pickup`, null, construction.accessToken);
+  assert.equal(recheckPickup.status, 409, `停业日领取必须 409: ${recheckPickup.status} ${JSON.stringify(recheckPickup.body).slice(0, 200)}`);
+  assert.ok(/停止营业/.test(recheckPickup.body.message || ""), `领取 409 应说明停业: ${recheckPickup.body.message}`);
+  // 还原今天并发布，确认与领取恢复正常。
+  await request("POST", `/api/rental/v1/calendars/${recheckYear}/days/range-remove`, { startDate: recheckToday, endDate: recheckToday, overrideReason: "E2E 领取复查清理" }, construction.accessToken);
+  await request("POST", `/api/rental/v1/calendars/${recheckYear}/publish`, { changeReason: "E2E 领取复查清理发布" }, construction.accessToken);
+  // 正向对照：该品类规则要求先完成领取检查，因此还原后领取仍是 409——但消息从
+  // 「停止营业」变为「领取检查」，证明请求越过了营业状态复查、进入下一层业务规则。
+  const recheckPickupOk = await request("POST", `/api/rental/v1/orders/${recheckOrder.id}/handover/pickup`, null, construction.accessToken);
+  assert.equal(recheckPickupOk.status, 409, `还原后领取应越过营业状态复查: ${recheckPickupOk.status}`);
+  assert.match(recheckPickupOk.body.message || "", /领取检查/, `还原后应进入领取检查规则而非停业拦截: ${recheckPickupOk.body.message}`);
+
+  ok("确认与领取复查营业状态：领取日被覆盖成停业后同一报价确认 409（说明停业）、还原后确认成功；当天停业时领取 409、还原后越过营业状态复查进入领取检查规则；归还路径不受停业影响");
+
+  await maybeStopAfter("15t");
+
+  console.log("== 15u. PRICE-03 不可变价格版本与调价计划（立即/定时/重叠拒绝） ==");
+  // 需求 4.4.3：价格版本是完整、不可变结果；调价计划只存差异，确认时生成完整新版本；
+  // 重叠时段在保存/确认时拒绝；新版本不影响有效报价与历史订单。
+  const adjBeforeVersions = Number(readScalar(`SELECT COUNT(*) FROM \`rental_price_versions\` WHERE \`planId\`='${pricePlan.body.data.id}';`));
+  assert.ok(adjBeforeVersions >= 1, "15b 的保存应已生成价格版本行（保存即调价）");
+  const v1Rates = JSON.parse(readScalar(`SELECT \`rates\` FROM \`rental_price_versions\` WHERE \`planId\`='${pricePlan.body.data.id}' AND \`version\`='v1';`));
+  assert.equal(v1Rates[0].baseAmount, 100, "v1 版本的基础价应为 100");
+
+  // (a) 立即调价：百分比 +10%，确认时生成完整新版本，预览给出最终价。
+  const adjCreate = await request(
+    "POST",
+    `/api/rental/v1/pricing-plans/${pricePlan.body.data.id}/adjustments`,
+    {
+      code: `E2E-ADJ-IMM-${Date.now().toString(36)}`,
+      name: "E2E 立即调价",
+      changes: [{ itemGroupId: priceGroupId, unit: "calendar_day", op: "percent", value: 10 }],
+      changeReason: "E2E 上调 10%"
+    },
+    construction.accessToken
+  );
+  assert.equal(adjCreate.status, 201, `创建调价计划失败: ${adjCreate.status} ${JSON.stringify(adjCreate.body).slice(0, 200)}`);
+  assert.equal(adjCreate.body.data.preview[0].afterBaseAmount, 110, "确认前必须给出逐行最终价（110）");
+  const adjConfirm = await request(
+    "POST",
+    `/api/rental/v1/pricing-plans/${pricePlan.body.data.id}/adjustments/${adjCreate.body.data.id}/confirm`,
+    null,
+    construction.accessToken
+  );
+  assert.equal(adjConfirm.status, 201, `确认调价失败: ${adjConfirm.status} ${JSON.stringify(adjConfirm.body).slice(0, 200)}`);
+  assert.equal(adjConfirm.body.data.status, "applied", "立即确认应直接生效");
+  const v2Rates = JSON.parse(readScalar(`SELECT \`rates\` FROM \`rental_price_versions\` WHERE \`id\`='${adjConfirm.body.data.versionId}';`));
+  assert.equal(v2Rates[0].baseAmount, 110, "新版本应为 110");
+  const v1After = JSON.parse(readScalar(`SELECT \`rates\` FROM \`rental_price_versions\` WHERE \`planId\`='${pricePlan.body.data.id}' AND \`version\`='v1';`));
+  assert.equal(v1After[0].baseAmount, 100, "旧版本必须原样保留（不可变）");
+
+  // (b) 新版本按租期开始时间命中：未来租期用 110；租期开始早于新版本生效的报价仍按 v1 的 100 复算。
+  const adjFriday = (() => {
+    for (let day = 10; day <= 16; day += 1) {
+      const candidate = `2046-03-${String(day).padStart(2, "0")}`;
+      if (new Date(`${candidate}T00:00:00Z`).getUTCDay() === 5) return candidate;
+    }
+    return null;
+  })();
+  assert.ok(adjFriday, "应能定位 2046 年 3 月的周五");
+  const adjQuoteNew = await request(
+    "POST",
+    "/api/rental/v1/quotes",
+    {
+      customerType: "corporate",
+      fulfillmentMode: "warehouse_pickup_return",
+      fulfillmentLocationId: constructionLocation.id,
+      startAt: `${adjFriday}T09:00:00+08:00`,
+      // 刻意只租 2 天：避开 15b 版本里的「满 3 日 90」阶梯档，让断言只反映 baseAmount 的调整。
+      endAt: `${new Date(new Date(`${adjFriday}T00:00:00Z`).getTime() + 1 * 86400000).toISOString().slice(0, 10)}T09:00:00+08:00`,
+      pricingPlanId: pricePlan.body.data.id,
+      lines: [{ itemGroupId: priceGroupId, quantity: 1 }]
+    },
+    construction.accessToken
+  );
+  assert.equal(adjQuoteNew.status, 201, `新价报价失败: ${adjQuoteNew.status}`);
+  assert.equal(adjQuoteNew.body.data.rentalAmount, 220, `新版本 2 个自然日应为 2 × 110 = 220：实际 ${adjQuoteNew.body.data.rentalAmount}`);
+
+  // 已锁价的历史报价不受新版本影响：旧报价的费率快照与金额在确认后保持不变
+  //（可复算保护由 rateSnapshot 承担，(a) 的 v1 行不可变断言覆盖版本层）。
+
+  // (c) 重叠周期时段在保存时拒绝（需求 4.4.3：重叠在确认时阻止，不留到报价时择一）。
+  const overlapSave = await request(
+    "PUT",
+    `/api/rental/v1/pricing-plans/${pricePlan.body.data.id}`,
+    {
+      code: "E2E-PRICE-TIER",
+      name: "E2E 阶梯与封顶价格",
+      changeReason: "E2E 重叠时段应拒绝",
+      status: "enabled",
+      effectiveFrom: new Date(Date.now() - 86400000).toISOString(),
+      rates: [
+        {
+          itemGroupId: priceGroupId,
+          unit: "calendar_day",
+          baseAmount: 110,
+          weekendMultiplier: 1,
+          holidayMultiplier: 1,
+          depositAmount: 500,
+          minimumUnits: 1,
+          periodicWindows: [
+            { fromWeekday: 5, fromTime: "12:00", toWeekday: 5, toTime: "23:59", multiplier: 1.5 },
+            { fromWeekday: 5, fromTime: "10:00", toWeekday: 6, toTime: "02:00", multiplier: 1.2 }
+          ]
+        }
+      ]
+    },
+    construction.accessToken
+  );
+  assert.equal(overlapSave.status, 409, `重叠周期时段必须 409: ${overlapSave.status} ${JSON.stringify(overlapSave.body).slice(0, 200)}`);
+  assert.ok(/重叠/.test(overlapSave.body.message || ""), `409 应说明时段重叠: ${overlapSave.body.message}`);
+
+  // (d) 合法的跨周周期时段（周五 12:00 → 周一 00:00 周末价）真实生效：
+  //     周五 14:00 起租（取价时点在时段内）→ 3 天全 1.5 = 450；
+  //     周五 10:00 起租 → 首日取价时点在时段外按 100、周六周日按 150 → 400。
+  const weekendSave = await request(
+    "PUT",
+    `/api/rental/v1/pricing-plans/${pricePlan.body.data.id}`,
+    {
+      code: "E2E-PRICE-TIER",
+      name: "E2E 阶梯与封顶价格",
+      changeReason: "E2E 周五 12:00 起周末价",
+      status: "enabled",
+      effectiveFrom: new Date(Date.now() - 86400000).toISOString(),
+      rates: [
+        {
+          itemGroupId: priceGroupId,
+          unit: "calendar_day",
+          baseAmount: 100,
+          weekendMultiplier: 1,
+          holidayMultiplier: 1,
+          depositAmount: 500,
+          minimumUnits: 1,
+          periodicWindows: [
+            { fromWeekday: 5, fromTime: "12:00", toWeekday: 6, toTime: "00:00", multiplier: 1.5 },
+            { fromWeekday: 6, fromTime: "00:00", toWeekday: 1, toTime: "00:00", multiplier: 1.5 }
+          ]
+        }
+      ]
+    },
+    construction.accessToken
+  );
+  assert.equal(weekendSave.status, 200, `合法周期时段保存失败: ${weekendSave.status} ${JSON.stringify(weekendSave.body).slice(0, 200)}`);
+  const weekendEnd = new Date(new Date(`${adjFriday}T00:00:00Z`).getTime() + 3 * 86400000).toISOString().slice(0, 10);
+  const weekendQuoteInside = await request(
+    "POST",
+    "/api/rental/v1/quotes",
+    {
+      customerType: "corporate",
+      fulfillmentMode: "warehouse_pickup_return",
+      fulfillmentLocationId: constructionLocation.id,
+      startAt: `${adjFriday}T14:00:00+08:00`,
+      endAt: `${weekendEnd}T14:00:00+08:00`,
+      pricingPlanId: pricePlan.body.data.id,
+      lines: [{ itemGroupId: priceGroupId, quantity: 1 }]
+    },
+    construction.accessToken
+  );
+  assert.equal(weekendQuoteInside.status, 201, `周末价报价失败: ${weekendQuoteInside.status}`);
+  assert.equal(weekendQuoteInside.body.data.rentalAmount, 550, `周五14:00→周一14:00 占 4 个日历日：周五六日 150×3 + 周一（取价时点在时段外）100 = 550：实际 ${weekendQuoteInside.body.data.rentalAmount}`);
+  const weekendQuoteOutside = await request(
+    "POST",
+    "/api/rental/v1/quotes",
+    {
+      customerType: "corporate",
+      fulfillmentMode: "warehouse_pickup_return",
+      fulfillmentLocationId: constructionLocation.id,
+      startAt: `${adjFriday}T10:00:00+08:00`,
+      endAt: `${weekendEnd}T10:00:00+08:00`,
+      pricingPlanId: pricePlan.body.data.id,
+      lines: [{ itemGroupId: priceGroupId, quantity: 1 }]
+    },
+    construction.accessToken
+  );
+  assert.equal(weekendQuoteOutside.status, 201, `周五 10:00 报价失败: ${weekendQuoteOutside.status}`);
+  assert.equal(weekendQuoteOutside.body.data.rentalAmount, 500, `周五10:00→周一10:00 占 4 个日历日：周五 100 + 周六日 150×2 + 周一 100 = 500：实际 ${weekendQuoteOutside.body.data.rentalAmount}`);
+
+  // (e) 定时调价：scheduledAt 未来 → 确认后待生效 → 到期执行生成新版本（与立即同一版本机制）。
+  const adjScheduled = await request(
+    "POST",
+    `/api/rental/v1/pricing-plans/${pricePlan.body.data.id}/adjustments`,
+    {
+      code: `E2E-ADJ-SCHED-${Date.now().toString(36)}`,
+      name: "E2E 定时调价",
+      changes: [{ itemGroupId: priceGroupId, unit: "calendar_day", op: "fixed", value: 5 }],
+      scheduledAt: new Date(Date.now() + 2000).toISOString(),
+      changeReason: "E2E 定时 +5"
+    },
+    construction.accessToken
+  );
+  assert.equal(adjScheduled.status, 201, `定时调价创建失败: ${adjScheduled.status}`);
+  const adjScheduleConfirm = await request(
+    "POST",
+    `/api/rental/v1/pricing-plans/${pricePlan.body.data.id}/adjustments/${adjScheduled.body.data.id}/confirm`,
+    null,
+    construction.accessToken
+  );
+  assert.equal(adjScheduleConfirm.status, 201, `定时调价确认失败: ${adjScheduleConfirm.status}`);
+  assert.equal(adjScheduleConfirm.body.data.status, "pending", "未来生效时刻确认后应为待生效");
+  await new Promise((resolve) => setTimeout(resolve, 2500));
+  const adjRunDue = await request("POST", "/api/rental/v1/pricing-plans/adjustments/run-due", null, construction.accessToken);
+  assert.equal(adjRunDue.status, 201, `到期执行失败: ${adjRunDue.status} ${JSON.stringify(adjRunDue.body).slice(0, 200)}`);
+  assert.equal(adjRunDue.body.data.ranCount, 1, "到期执行应处理 1 条");
+  const schedVersion = JSON.parse(
+    readScalar(`SELECT \`rates\` FROM \`rental_price_versions\` WHERE \`id\`='${adjRunDue.body.data.results[0].versionId}';`)
+  );
+  assert.equal(schedVersion[0].baseAmount, 105, "定时执行基于最新版本（(d) 已把基础价整单重置为 100）+5 = 105");
+
+  ok("价格版本与调价计划：保存即生成不可变版本行、旧版本原样保留；调价计划确认前给出逐行最终价、立即确认生成新版本（v2=110）、新版本按租期开始时间命中（未来租期 220（2×110，避开阶梯档））；重叠周期时段保存 400；合法跨周时段（周五 12:00 → 周一 00:00 周末价）真实生效（550/500，含周一取价时点在时段外的边界）；定时调价待生效到期执行生成新版本（105 = (d) 重置后的 100 + 5）");
+
+  await maybeStopAfter("15u");
+
+  console.log("== 15v. PRICE-02B 月历分时摘要：与报价同一命中助手、同一价格版本 ==");
+  // 需求 4.5.9：月历只读消费 PRICE-03 的价格事实，周五仍显示工作日但可叠加分时标记；
+  // 摘要由服务端用与报价同一个命中助手（periodicWindowCoversDate）计算，月历不复制
+  // 价格值、不建立第二套事实。15u(d) 已给 E2E-PRICE-TIER 配了「周五 12:00 → 周一 00:00」
+  // 的跨周时段（系数 1.5），2046-03-10 是周五。
+  const sumCalendar = (await request("GET", "/api/rental/v1/calendars/2046", null, construction.accessToken)).body.data;
+  assert.ok(Array.isArray(sumCalendar.timePriceSummary), "日历 GET 必须返回 timePriceSummary");
+  const sumFriday = sumCalendar.timePriceSummary.find((row) => row.date === adjFriday);
+  assert.ok(sumFriday, "周五应有分时摘要");
+  const sumEntry = sumFriday.entries.find((entry) => entry.source === "periodic");
+  assert.ok(sumEntry, "周五摘要应含周期时段条目");
+  assert.equal(sumEntry.planCode, "E2E-PRICE-TIER", "摘要应带计划编码");
+  assert.equal(sumEntry.multiplier, 1.5, "摘要应带系数 1.5");
+  assert.match(sumEntry.version, /^v/, "摘要必须带价格版本号（与报价命中同源）");
+  assert.ok(sumEntry.itemGroupCodes.includes("E2E-PRICE-KIT"), "摘要应列适用商品组编码");
+  const sumTuesday = sumCalendar.timePriceSummary.find((row) => row.date === "2046-03-13");
+  assert.ok(!sumTuesday, "周二（时段右端开之后）不得有分时摘要");
+  const sumSunday = sumCalendar.timePriceSummary.find((row) => row.date === "2046-03-11");
+  assert.ok(sumSunday && sumSunday.entries.some((entry) => entry.source === "periodic"), "周日应被跨周时段覆盖");
+
+  ok("月历分时摘要：服务端按与报价同一命中助手与营业时区计算，周五（含时段内周日）有摘要且带计划编码/系数/版本号，时段右端开（周一 00:00）无摘要；月历不复制价格值、不建第二套事实");
+
+  await maybeStopAfter("15v");
+
   console.log("== 16. 双租户并发隔离 ==");
+
+
   const rounds = 12;
   const concurrent = [];
   for (let i = 0; i < rounds; i += 1) {
@@ -9303,17 +10020,39 @@ async function main() {
   console.log(`\nMySQL E2E 全部通过（${passedGroups} 项断言组）`);
 }
 
+/**
+ * 前缀分段门禁：`E2E_STOP_AFTER=<marker>` 时，跑到 marker 分段末尾即视为完成。
+ * 分段之间共享状态（租户、令牌、日历版本），因此「分段」= 目标段 + 全部前置段；
+ * 本机制只提前结束、不跳过任何断言，被 409/事务回滚断言消费的库状态不受影响。
+ */
+class E2EPrefixStop extends Error {
+  constructor(marker) {
+    super(`E2E_STOP_AFTER=${marker} 命中：前缀分段结束（${passedGroups} 项断言组），后续分段按计划跳过`);
+    this.__e2ePrefixStop = true;
+  }
+}
+async function maybeStopAfter(marker) {
+  if (process.env.E2E_STOP_AFTER !== marker) return;
+  console.log(`\n${new E2EPrefixStop(marker).message}`);
+  throw new E2EPrefixStop(marker);
+}
+
 (async () => {
   try {
     await main();
   } catch (error) {
-    console.error(`\nE2E 失败: ${error.message}`);
-    // 断言层只看到状态码，成因在 API 子进程里；附上日志尾部避免无从下手。
-    if (apiLogRef && apiLogRef.length) {
-      console.error("--- API 日志尾部 ---");
-      console.error(apiLogRef.join("").slice(-3000));
+    if (error && error.__e2ePrefixStop) {
+      // 前缀分段按计划结束：不算失败，finally 仍会清理测试库。
+      process.exitCode = 0;
+    } else {
+      console.error(`\nE2E 失败: ${error.message}`);
+      // 断言层只看到状态码，成因在 API 子进程里；附上日志尾部避免无从下手。
+      if (apiLogRef && apiLogRef.length) {
+        console.error("--- API 日志尾部 ---");
+        console.error(apiLogRef.join("").slice(-3000));
+      }
+      process.exitCode = 1;
     }
-    process.exitCode = 1;
   } finally {
     await stopApi();
     try {

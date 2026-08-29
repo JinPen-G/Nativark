@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Put, Query, Req } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Delete, Get, HttpCode, Param, Post, Put, Query, Req } from "@nestjs/common";
 import type {
   RentalCouponTemplate,
   RentalCustomerCoupon,
@@ -18,6 +18,13 @@ import {
   VoidRentalCalendarDto,
   RemoveRentalCalendarDayOverrideDto,
   SaveRentalCalendarDayDto,
+  PreviewRentalCalendarRangeOverrideDto,
+  ApplyRentalCalendarRangeOverrideDto,
+  PreviewRentalCalendarRangeRemoveDto,
+  ApplyRentalCalendarRangeRemoveDto,
+  CreateRentalPriceAdjustmentDto,
+  CancelRentalPriceAdjustmentDto,
+  RestoreRentalPriceVersionDto,
   SaveRentalDiscountPlanDto,
   SaveRentalNotificationTemplateDto,
   SaveRentalPricingPlanDto,
@@ -104,6 +111,32 @@ export class RentalBusinessController {
   @Get("pricing-plans") pricingPlans(@Req() req: AuthenticatedRequest) { return this.business.listPricingPlans(req.user.tenantId, this.context(req.user.tenantId)); }
   @Post("pricing-plans") async createPricingPlan(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalPricingPlanDto) { return this.committed(req.user.tenantId, await this.business.savePricingPlan(req.user.tenantId, this.context(req.user.tenantId), body)); }
   @Put("pricing-plans/:id") async updatePricingPlan(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalPricingPlanDto) { return this.committed(req.user.tenantId, await this.business.savePricingPlan(req.user.tenantId, this.context(req.user.tenantId), { ...body, id })); }
+  /** PRICE-03：空间级不可变价格版本历史。版本粒度是当前会话经营空间，不依赖 planId。 */
+  @Get("pricing-versions") priceVersions(@Req() req: AuthenticatedRequest, @Query("page") page?: string, @Query("pageSize") pageSize?: string) {
+    return this.business.listSpacePriceVersions(req.user.tenantId, this.context(req.user.tenantId), Number(page) || 1, Number(pageSize) || 20);
+  }
+  /** PRICE-03：空间级价格版本完整回放。 */
+  @Get("pricing-versions/:sequence") priceVersion(@Req() req: AuthenticatedRequest, @Param("sequence") sequence: string) {
+    return this.business.getSpacePriceVersion(req.user.tenantId, this.context(req.user.tenantId), Number(sequence));
+  }
+  /** 以历史完整快照追加一条恢复版本，历史版本不原地修改。 */
+  @Post("pricing-versions/:sequence/restore") restorePriceVersion(@Req() req: AuthenticatedRequest, @Param("sequence") sequence: string, @Body() body: RestoreRentalPriceVersionDto) {
+    return this.committed(req.user.tenantId, this.business.restoreSpacePriceVersion(req.user.tenantId, this.context(req.user.tenantId), Number(sequence), body.reason, req.user.displayName));
+  }
+  /** PRICE-03 兼容入口：planId 只作当前空间归属校验，实际返回仍是空间版本。 */
+  @Get("pricing-plans/:id/versions") legacyPriceVersions(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Query("page") page?: string, @Query("pageSize") pageSize?: string) {
+    return this.business.listPriceVersions(req.user.tenantId, this.context(req.user.tenantId), id, Number(page) || 1, Number(pageSize) || 20);
+  }
+  /** PRICE-03：调价计划列表，planId 仍代表发起调整的编辑计划。 */
+  @Get("pricing-plans/:id/adjustments") listPriceAdjustments(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.business.listPriceAdjustments(req.user.tenantId, this.context(req.user.tenantId), id); }
+  /** PRICE-03：执行到期的待生效调价（定时执行与立即执行走同一版本机制）。 */
+  @Post("pricing-plans/adjustments/run-due") runDuePriceAdjustments(@Req() req: AuthenticatedRequest) { return this.committed(req.user.tenantId, this.business.runDuePriceAdjustments(req.user.tenantId, this.context(req.user.tenantId))); }
+  /** PRICE-03：创建调价计划（差异 + 逐行最终价预览）。 */
+  @Post("pricing-plans/:id/adjustments") createPriceAdjustment(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: CreateRentalPriceAdjustmentDto) { return this.business.createPriceAdjustment(req.user.tenantId, this.context(req.user.tenantId), id, body, req.user.displayName); }
+  /** PRICE-03：确认——立即执行生成新版本；scheduledAt 在未来则进入待生效。 */
+  @Post("pricing-plans/:id/adjustments/:aid/confirm") confirmPriceAdjustment(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Param("aid") aid: string) { return this.committed(req.user.tenantId, this.business.confirmPriceAdjustment(req.user.tenantId, this.context(req.user.tenantId), id, aid, req.user.displayName)); }
+  /** PRICE-03：取消（草稿/待生效可取消，已生效不可撤回）。 */
+  @Post("pricing-plans/:id/adjustments/:aid/cancel") cancelPriceAdjustment(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Param("aid") aid: string, @Body() body: CancelRentalPriceAdjustmentDto) { return this.business.cancelPriceAdjustment(req.user.tenantId, this.context(req.user.tenantId), id, aid, body.reason); }
 
   @Get("discount-plans") discountPlans(@Req() req: AuthenticatedRequest) { return this.business.listDiscountPlans(req.user.tenantId, this.context(req.user.tenantId)); }
   @Post("discount-plans") async createDiscountPlan(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalDiscountPlanDto) { return this.committed(req.user.tenantId, await this.business.saveDiscountPlan(req.user.tenantId, this.context(req.user.tenantId), body)); }
@@ -124,6 +157,8 @@ export class RentalBusinessController {
       Number(year),
       this.canSeeCalendarDraft(req.user)
     );
+    // PRICE-02B：分时价格摘要（只读消费价格版本，与报价同一命中助手与营业时区）。
+    const timePriceSummary = await this.business.timePriceSummaryForYear(req.user.tenantId, this.context(req.user.tenantId), Number(year));
     // 「有官方更新」只能在**同一来源**内比较：sequence 是 (来源, 年度) 内的局部序号，
     // 跨来源比大小会把「来源 A 的 v1.9」误报成「引用了来源 B v1.0 的空间该更新」。
     if (calendar.sourceVersionId) {
@@ -131,12 +166,12 @@ export class RentalBusinessController {
       // 但**只**吞「不存在」——用 findVersionById 返回 undefined，数据库故障照常抛 5xx，
       // 不能用 getVersion().catch(() => undefined) 把基础设施错误也当成「无更新」。
       const referenced = await this.officialSources.findVersionById(calendar.sourceVersionId);
-      if (!referenced) return calendar;
+      if (!referenced) return { ...calendar, timePriceSummary };
       const latest = await this.officialSources.latestVersionForYear(Number(year), referenced.sourceId);
-      if (!latest) return calendar;
+      if (!latest) return { ...calendar, timePriceSummary };
       return {
         ...calendar,
-        latestOfficialSourceVersionId: latest.id,
+        timePriceSummary,
         latestOfficialSourceVersion: latest.version,
         officialSourceUpdateAvailable: latest.id !== calendar.sourceVersionId
       };
@@ -148,6 +183,7 @@ export class RentalBusinessController {
     if (summary.available > 0) {
       return {
         ...calendar,
+        timePriceSummary,
         officialSourceUpdateAvailable: false,
         officialSourceAvailableToSelect: true,
         availableOfficialSourceCount: summary.available
@@ -155,9 +191,9 @@ export class RentalBusinessController {
     }
     if (summary.total > 0) {
       // 登记过但当前全部停用——不能显示「尚未登记」，那与事实不符。
-      return { ...calendar, officialSourceUpdateAvailable: false, officialSourceRegisteredButUnavailable: true };
+      return { ...calendar, timePriceSummary, officialSourceUpdateAvailable: false, officialSourceRegisteredButUnavailable: true };
     }
-    return calendar;
+    return { ...calendar, timePriceSummary };
   }
   @Get("calendars/:year/versions") calendarVersions(@Req() req: AuthenticatedRequest, @Param("year") year: string) { return this.business.listCalendarVersions(req.user.tenantId, this.context(req.user.tenantId), Number(year)); }
   @Get("calendars/:year/versions/:version") calendarVersion(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Param("version") version: string) { return this.business.getCalendarVersion(req.user.tenantId, this.context(req.user.tenantId), Number(year), version); }
@@ -208,6 +244,18 @@ export class RentalBusinessController {
   @Get("calendars/:year/override-audits") calendarOverrideAudits(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Query("version") version?: string) { return this.business.listCalendarOverrideAudits(req.user.tenantId, this.context(req.user.tenantId), Number(year), version); }
   @Put("calendars/:year/days/:date") async saveCalendarDay(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Param("date") date: string, @Body() body: SaveRentalCalendarDayDto) { return this.committed(req.user.tenantId, await this.business.saveCalendarDay(req.user.tenantId, this.context(req.user.tenantId), Number(year), { ...body, date }, req.user.displayName)); }
   @Delete("calendars/:year/days/:date") async removeCalendarDayOverride(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Param("date") date: string, @Body() body: RemoveRentalCalendarDayOverrideDto) { return this.committed(req.user.tenantId, await this.business.removeCalendarDayOverride(req.user.tenantId, this.context(req.user.tenantId), Number(year), date, body, req.user.displayName)); }
+  /** 范围覆盖预览（需求 4.5.9）。POST 而非 GET：预览内容含未发布草稿，走编辑鉴权分支。 */
+  @Post("calendars/:year/days/range-preview")
+  @HttpCode(200)
+  calendarRangePreview(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Body() body: PreviewRentalCalendarRangeOverrideDto) { return this.business.previewCalendarRangeOverride(req.user.tenantId, this.context(req.user.tenantId), Number(year), body); }
+  /** 应用范围覆盖：同事务全部成功或全部失败，一次 revision；既有覆盖须 overrideConfirmed。 */
+  @Post("calendars/:year/days/range") async applyCalendarRange(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Body() body: ApplyRentalCalendarRangeOverrideDto) { return this.committed(req.user.tenantId, await this.business.applyCalendarRangeOverride(req.user.tenantId, this.context(req.user.tenantId), Number(year), body, req.user.displayName)); }
+  /** 范围移除预览：展示每个日期恢复后的取值与来源。 */
+  @Post("calendars/:year/days/range-remove-preview")
+  @HttpCode(200)
+  calendarRangeRemovePreview(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Body() body: PreviewRentalCalendarRangeRemoveDto) { return this.business.previewCalendarRangeRemove(req.user.tenantId, this.context(req.user.tenantId), Number(year), body); }
+  /** 应用范围移除：只移除范围内带人工覆盖的日期，恢复下一优先级来源。 */
+  @Post("calendars/:year/days/range-remove") async applyCalendarRangeRemove(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Body() body: ApplyRentalCalendarRangeRemoveDto) { return this.committed(req.user.tenantId, await this.business.applyCalendarRangeRemove(req.user.tenantId, this.context(req.user.tenantId), Number(year), body, req.user.displayName)); }
   @Post("calendars/:year/publish") async publishCalendar(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Body() body: PublishRentalCalendarDto) { return this.committed(req.user.tenantId, await this.business.publishCalendar(req.user.tenantId, this.context(req.user.tenantId), Number(year), body, req.user.displayName)); }
   @Post("calendars/:year/versions/:version/void") async voidCalendarVersion(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Param("version") version: string, @Body() body: VoidRentalCalendarDto) { return this.committed(req.user.tenantId, await this.business.voidCalendarVersion(req.user.tenantId, this.context(req.user.tenantId), Number(year), version, body, req.user.displayName)); }
   /** 以某个历史版本的内容生成新草稿（需求 4.5.7 的「恢复旧规则」）。只产生草稿，仍需预检与发布。 */

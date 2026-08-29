@@ -7,6 +7,11 @@ import type {
   SaveOfficialCalendarSourceRequest,
   VoidRentalCalendarRequest,
   RemoveRentalCalendarDayOverrideRequest,
+  PreviewRentalCalendarRangeOverrideRequest,
+  ApplyRentalCalendarRangeOverrideRequest,
+  PreviewRentalCalendarRangeRemoveRequest,
+  ApplyRentalCalendarRangeRemoveRequest,
+  RentalCalendarRangeFields,
   RentalRuleConfig,
   SaveRentalCalendarDayRequest,
   SaveRentalDiscountPlanRequest,
@@ -14,7 +19,12 @@ import type {
   SaveRentalPricingPlanRequest,
   SaveRentalRuleVersionRequest,
   SaveRentalValueAddedServiceRequest,
-  SaveTenantRentalBusinessSettingsRequest
+  SaveTenantRentalBusinessSettingsRequest,
+  CreateRentalPriceAdjustmentRequest,
+  CancelRentalPriceAdjustmentRequest,
+  RestoreRentalPriceVersionRequest,
+  RentalPeriodicPriceWindow,
+  RentalDatetimePriceOverride
 } from "@store-rental/shared";
 import { Type } from "class-transformer";
 import {
@@ -357,6 +367,51 @@ export class RentalFulfillmentFeeInputDto {
   crossLocationAmount?: number;
 }
 
+/** PRICE-03：周期性计价时段输入（fromWeekday 0-6、HH:mm）。 */
+export class RentalPeriodicPriceWindowInputDto implements RentalPeriodicPriceWindow {
+  @IsInt()
+  @Min(0)
+  @Max(6)
+  fromWeekday!: number;
+
+  @IsString()
+  @Matches(/^[0-9]{1,2}:[0-9]{2}$/, { message: "起始时刻必须是 HH:mm" })
+  fromTime!: string;
+
+  @IsInt()
+  @Min(0)
+  @Max(6)
+  toWeekday!: number;
+
+  @IsString()
+  @Matches(/^[0-9]{1,2}:[0-9]{2}$/, { message: "结束时刻必须是 HH:mm" })
+  toTime!: string;
+
+  @IsNumber()
+  @Min(0)
+  @Max(MAX_MULTIPLIER)
+  multiplier!: number;
+}
+
+/** PRICE-03：一次性日期时间价格覆盖输入。 */
+export class RentalDatetimePriceOverrideInputDto implements RentalDatetimePriceOverride {
+  @IsOptional()
+  @IsString()
+  @Matches(/^[A-Za-z0-9_.:-]{1,64}$/, { message: "一次性价格引用只能是 1-64 位字母数字与 . _ : -" })
+  id?: string;
+
+  @IsISO8601()
+  start!: string;
+
+  @IsISO8601()
+  end!: string;
+
+  @IsNumber()
+  @Min(0)
+  @Max(MAX_MULTIPLIER)
+  multiplier!: number;
+}
+
 export class RentalPricingRateInputDto {
   @IsString()
   @IsNotEmpty()
@@ -412,6 +467,25 @@ export class RentalPricingRateInputDto {
   @Min(1)
   @Max(1440)
   hourGranularityMinutes?: number;
+
+  /** PRICE-03：商品在该日期类型下的价格系数（v2.9 4.5.5）。 */
+  @IsOptional()
+  @IsObject()
+  dayTypePrices?: Record<string, number>;
+
+  /** PRICE-03：周期性计价时段（跨星期边界，按取价时点命中）。 */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RentalPeriodicPriceWindowInputDto)
+  periodicWindows?: RentalPeriodicPriceWindowInputDto[];
+
+  /** PRICE-03：一次性日期时间价格覆盖的价格值（适用范围在日历侧）。 */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RentalDatetimePriceOverrideInputDto)
+  datetimeOverrides?: RentalDatetimePriceOverrideInputDto[];
 
   /** 租金倍数押金的倍数。上界复用 MAX_MULTIPLIER：押金 10 倍租金已远超任何真实场景。 */
   @IsOptional()
@@ -854,6 +928,11 @@ export class SaveRentalCalendarDayDto implements SaveRentalCalendarDayRequest {
   @Type(() => RentalBusinessHoursInputDto)
   hours?: RentalBusinessHoursInputDto;
 
+  @IsOptional()
+  @IsString()
+  @Matches(/^[A-Za-z0-9_.:-]{1,64}$/, { message: "一次性价格引用只能是 1-64 位字母数字与 . _ : -" })
+  pricingOverrideRef?: string;
+
   /**
    * 调整原因，必填（需求 4.5.3：人工覆盖必须保存调整原因）。
    * 操作人与调整时间由服务端填，不接受调用方自报——自报的操作人没有审计价值。
@@ -871,6 +950,212 @@ export class RemoveRentalCalendarDayOverrideDto implements RemoveRentalCalendarD
   @IsString()
   @Matches(NON_BLANK_PATTERN, { message: "调整原因不能为空白" })
   overrideReason!: string;
+}
+
+/** DATE_KEY：范围端点的日期键格式校验；有效性（如 2026-02-30）由服务层 isCalendarDateKey 兜底。 */
+const DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+/** 范围覆盖可设置的字段（需求 4.5.9：只修改明确选择的字段，未选择保持原值）。 */
+export class RentalCalendarRangeFieldsDto implements RentalCalendarRangeFields {
+  @IsOptional()
+  @IsIn(DAY_TYPES)
+  dayType?: (typeof DAY_TYPES)[number];
+
+  @IsOptional()
+  @IsString()
+  @Matches(NON_BLANK_PATTERN, { message: "节日或调休名称不能为空白" })
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^[A-Za-z0-9_.:-]{1,64}$/, { message: "一次性价格引用只能是 1-64 位字母数字与 . _ : -" })
+  pricingOverrideRef?: string;
+
+  @IsOptional()
+  @IsIn(BUSINESS_STATUSES)
+  businessStatus?: (typeof BUSINESS_STATUSES)[number];
+
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => RentalBusinessHoursInputDto)
+  hours?: RentalBusinessHoursInputDto;
+}
+
+/** 范围覆盖预览（需求 4.5.9：提交前展示冲突日期、当前值与将替换的字段）。 */
+export class PreviewRentalCalendarRangeOverrideDto implements PreviewRentalCalendarRangeOverrideRequest {
+  @IsString()
+  @Matches(DATE_KEY_PATTERN, { message: "起始日期必须是 YYYY-MM-DD" })
+  startDate!: string;
+
+  @IsString()
+  @Matches(DATE_KEY_PATTERN, { message: "结束日期必须是 YYYY-MM-DD" })
+  endDate!: string;
+
+  @IsOptional()
+  @IsISO8601()
+  startDateTime?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  endDateTime?: string;
+
+  @IsObject()
+  @ValidateNested()
+  @Type(() => RentalCalendarRangeFieldsDto)
+  fields!: RentalCalendarRangeFieldsDto;
+}
+
+/** 应用范围覆盖：全部成功或全部失败，一次 revision，既有覆盖须显式确认。 */
+export class ApplyRentalCalendarRangeOverrideDto implements ApplyRentalCalendarRangeOverrideRequest {
+  @IsString()
+  @Matches(DATE_KEY_PATTERN, { message: "起始日期必须是 YYYY-MM-DD" })
+  startDate!: string;
+
+  @IsString()
+  @Matches(DATE_KEY_PATTERN, { message: "结束日期必须是 YYYY-MM-DD" })
+  endDate!: string;
+
+  @IsOptional()
+  @IsISO8601()
+  startDateTime?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  endDateTime?: string;
+
+  @IsObject()
+  @ValidateNested()
+  @Type(() => RentalCalendarRangeFieldsDto)
+  fields!: RentalCalendarRangeFieldsDto;
+
+  @IsString()
+  @Matches(NON_BLANK_PATTERN, { message: "调整原因不能为空白" })
+  @MaxLength(191, { message: "调整原因不能超过 191 字" })
+  overrideReason!: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^[A-Za-z0-9_.:-]{1,64}$/, { message: "批次标识只能是 1-64 位字母数字与 . _ : -" })
+  batchId?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  expectedRevision?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  overrideConfirmed?: boolean;
+}
+
+/** 范围移除预览（需求 4.5.9：移除前展示恢复后的取值与来源）。 */
+export class PreviewRentalCalendarRangeRemoveDto implements PreviewRentalCalendarRangeRemoveRequest {
+  @IsString()
+  @Matches(DATE_KEY_PATTERN, { message: "起始日期必须是 YYYY-MM-DD" })
+  startDate!: string;
+
+  @IsString()
+  @Matches(DATE_KEY_PATTERN, { message: "结束日期必须是 YYYY-MM-DD" })
+  endDate!: string;
+
+  @IsOptional()
+  @IsISO8601()
+  startDateTime?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  endDateTime?: string;
+}
+
+/** PRICE-03：创建调价计划（差异 + 定时/立即 + 原因）。 */
+export class RentalPriceAdjustmentChangeInputDto {
+  @IsString()
+  @IsNotEmpty()
+  itemGroupId!: string;
+
+  @IsIn(RENTAL_PRICING_UNIT_CODES)
+  unit!: (typeof RENTAL_PRICING_UNIT_CODES)[number];
+
+  @IsIn(["set_base", "percent", "fixed"])
+  op!: "set_base" | "percent" | "fixed";
+
+  @IsNumber()
+  value!: number;
+}
+
+export class CreateRentalPriceAdjustmentDto implements CreateRentalPriceAdjustmentRequest {
+  @IsString()
+  @Matches(NON_BLANK_PATTERN, { message: "调价计划编码不能为空白" })
+  @MaxLength(191)
+  code!: string;
+
+  @IsString()
+  @Matches(NON_BLANK_PATTERN, { message: "调价计划名称不能为空白" })
+  @MaxLength(191)
+  name!: string;
+
+  @IsArray()
+  @ArrayNotEmpty()
+  @ValidateNested({ each: true })
+  @Type(() => RentalPriceAdjustmentChangeInputDto)
+  changes!: RentalPriceAdjustmentChangeInputDto[];
+
+  @IsOptional()
+  @IsISO8601()
+  scheduledAt?: string;
+
+  @IsString()
+  @Matches(NON_BLANK_PATTERN, { message: "变更原因不能为空白" })
+  @MaxLength(191)
+  changeReason!: string;
+}
+
+export class CancelRentalPriceAdjustmentDto implements CancelRentalPriceAdjustmentRequest {
+  @IsString()
+  @Matches(NON_BLANK_PATTERN, { message: "取消原因不能为空白" })
+  reason!: string;
+}
+
+export class RestoreRentalPriceVersionDto implements RestoreRentalPriceVersionRequest {
+  @IsString()
+  @Matches(NON_BLANK_PATTERN, { message: "恢复原因不能为空白" })
+  @MaxLength(191)
+  reason!: string;
+}
+
+/** 应用范围移除：只移除范围内带人工覆盖的日期，其余保持不变。 */
+export class ApplyRentalCalendarRangeRemoveDto implements ApplyRentalCalendarRangeRemoveRequest {
+  @IsString()
+  @Matches(DATE_KEY_PATTERN, { message: "起始日期必须是 YYYY-MM-DD" })
+  startDate!: string;
+
+  @IsString()
+  @Matches(DATE_KEY_PATTERN, { message: "结束日期必须是 YYYY-MM-DD" })
+  endDate!: string;
+
+  @IsOptional()
+  @IsISO8601()
+  startDateTime?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  endDateTime?: string;
+
+  @IsString()
+  @Matches(NON_BLANK_PATTERN, { message: "调整原因不能为空白" })
+  @MaxLength(191, { message: "调整原因不能超过 191 字" })
+  overrideReason!: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^[A-Za-z0-9_.:-]{1,64}$/, { message: "批次标识只能是 1-64 位字母数字与 . _ : -" })
+  batchId?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  expectedRevision?: number;
 }
 
 /** 发布年度日历（需求 4.5.7：发布记录必须可追溯变更原因）。 */

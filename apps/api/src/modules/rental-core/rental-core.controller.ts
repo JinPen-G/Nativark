@@ -336,6 +336,12 @@ export class RentalCoreController {
     const context = this.context(tenantId);
     const current = await this.service.getOrder(tenantId, id);
     const returnedAt = new Date().toISOString();
+    if (stage === "pickup") {
+      // 需求 4.6.4：领取前必须重新校验……营业状态（4.5.4：报价与订单分别校验端点）。
+      // 按实际领取时刻判定，早取/迟取都要看当前门店是否还办理领取。
+      // 归还刻意不复查——停业不得让在租订单失去归还渠道（需求 4.5.4）。
+      await this.business.assertPickupOpenAt(tenantId, context, current.fulfillmentLocationId, returnedAt, current.fulfillmentMode);
+    }
     const overdueCharge = stage === "return" ? this.business.calculateOverdueCharge(tenantId, context, this.business.getQuote(tenantId, context, current.quoteId), returnedAt) : 0;
     const targetStatus = stage === "pickup" ? RentalCoreOrderStatus.Renting : RentalCoreOrderStatus.Completed;
     const { result: order, replayed } = await this.idempotent.executeWithReplayFlag({

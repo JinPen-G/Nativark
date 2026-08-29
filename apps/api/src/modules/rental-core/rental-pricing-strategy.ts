@@ -44,17 +44,18 @@ export interface RentalPricingStrategy {
    */
   billableUnits(startAt: string, endAt: string, ctx?: RentalPricingContext): number;
   /**
-   * 每个计费单位定价所依据的营业日期（需求 4.4.5）。
+   * 每个计费单位的取价依据：营业日期 + **取价时点**（需求 4.4.5/4.5.6 v2.9）。
    *
    * 自然日与夜按每个计费日期取价；小时、班次、24 小时、周、30 日月按**每个计费块
-   * 开始时所在的营业日期**取价。使用量与整包没有逐单位日期，返回单元素或空数组。
-   * 逐单位取价替代了早前的"整段平均倍率"——需求 4.4.5 明确禁止用平均代替。
+   * 开始时点**取价（at = 该时刻的 ISO 时间）；自然日首个单位用实际租期开始时点、
+   * 后续单位用对应营业日期的开始时点。取价时点是分时价格（周期性时段/日期时间
+   * 覆盖）的命中依据；使用量与日期无对应关系，返回空数组。
    *
    * 必须同时收 `endAt`：单位数量与取价时点要来自**同一组计费块**。班次配了边界时数量按
    * 「跨过几个班次窗口」计，若这里再按固定 `shiftHours` 从租期开始时刻推算，两套算法就会
    * 分叉——非等长班次（如边界 [0,6,18]）下取价日期会整体偏移，跨平假日直接算错钱。
    */
-  billableUnitDates(startAt: string, endAt: string, units: number, ctx?: RentalPricingContext): string[];
+  billableUnitDates(startAt: string, endAt: string, units: number, ctx?: RentalPricingContext): Array<{ date: string; at: string }>;
   /** `unitMultipliers[i]` 为第 i 个单位的日期价格系数，缺省视为 1。 */
   amountPerItem(rate: RentalPricingRate, units: number, unitMultipliers?: number[]): number;
   /**
@@ -268,18 +269,19 @@ const durationStrategy = (unit: RentalPricingUnit, hoursPerUnit: number): Rental
     }
     return Math.ceil(durationHours(startAt, endAt) / blockHours(unit, hoursPerUnit, ctx));
   },
-  // 每个计费块按**块开始时刻**所在的营业日期取价（需求 4.4.5）。
+  // 每个计费块按**块开始时刻**取价：date = 块开始所在的营业日期，at = 块开始时点（需求 4.4.5/4.5.6）。
   billableUnitDates: (startAt, endAt, units, ctx) => {
     const timeZone = ctx?.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE;
     // 班次配了边界时用与计数**同一组**窗口起点，不再按固定块长从起租时刻推算。
     if (unit === "shift" && ctx?.shiftStartHours?.length) {
       return shiftWindowStartsForUnits(startAt, endAt, units, ctx)
-        .map((value) => businessDateKey(new Date(value).toISOString(), timeZone));
+        .map((value) => ({ date: businessDateKey(new Date(value).toISOString(), timeZone), at: new Date(value).toISOString() }));
     }
     const hours = blockHours(unit, hoursPerUnit, ctx);
-    return Array.from({ length: Math.max(0, units) }, (_, index) =>
-      businessDateKey(new Date(new Date(startAt).getTime() + index * hours * 3_600_000).toISOString(), timeZone)
-    );
+    return Array.from({ length: Math.max(0, units) }, (_, index) => {
+      const at = new Date(startAt).getTime() + index * hours * 3_600_000;
+      return { date: businessDateKey(new Date(at).toISOString(), timeZone), at: new Date(at).toISOString() };
+    });
   },
   amountPerItem: (rate, units, unitMultipliers) => applyCap(rate, grossForUnits(rate, units, unitMultipliers)),
   priceBreakdown: (rate, units, unitMultipliers) => breakdownFor(rate, units, unitMultipliers),
@@ -314,10 +316,15 @@ const strategies: Record<RentalPricingUnit, RentalPricingStrategy> = {
         businessDayIndex(new Date(end - 1).toISOString(), timeZone) - businessDayIndex(startAt, timeZone) + 1
       );
     },
-    // 自然日按**每个计费日期**取价（需求 4.4.5）。
+    // 自然日按**每个计费日期**取价；首个单位取价时点 = 实际租期开始时点，后续 = 当日开始时点。
     billableUnitDates: (startAt, _endAt, units, ctx) => {
-      const first = businessDayIndex(startAt, ctx?.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE);
-      return Array.from({ length: Math.max(0, units) }, (_, index) => businessDateKeyFromIndex(first + index));
+      const timeZone = ctx?.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE;
+      const first = businessDayIndex(startAt, timeZone);
+      return Array.from({ length: Math.max(0, units) }, (_, index) => {
+        const date = businessDateKeyFromIndex(first + index);
+        const at = index === 0 ? new Date(startAt).toISOString() : new Date(businessInstantAt(date, 0, timeZone)).toISOString();
+        return { date, at };
+      });
     },
     amountPerItem: (rate, units, unitMultipliers) => applyCap(rate, grossForUnits(rate, units, unitMultipliers)),
     priceBreakdown: (rate, units, unitMultipliers) => breakdownFor(rate, units, unitMultipliers),
@@ -341,10 +348,15 @@ const strategies: Record<RentalPricingUnit, RentalPricingStrategy> = {
         businessDayIndex(new Date(end - 1).toISOString(), timeZone) - businessDayIndex(startAt, timeZone)
       );
     },
-    // 第 i 夜按**入住那一天**取价：第 1 夜是入住日的价格，而不是次日的。
+    // 第 i 夜按**入住那一天**取价：首夜取价时点 = 实际入住时刻，后续夜 = 当日开始时点。
     billableUnitDates: (startAt, _endAt, units, ctx) => {
-      const first = businessDayIndex(startAt, ctx?.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE);
-      return Array.from({ length: Math.max(0, units) }, (_, index) => businessDateKeyFromIndex(first + index));
+      const timeZone = ctx?.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE;
+      const first = businessDayIndex(startAt, timeZone);
+      return Array.from({ length: Math.max(0, units) }, (_, index) => {
+        const date = businessDateKeyFromIndex(first + index);
+        const at = index === 0 ? new Date(startAt).toISOString() : new Date(businessInstantAt(date, 0, timeZone)).toISOString();
+        return { date, at };
+      });
     },
     amountPerItem: (rate, units, unitMultipliers) => applyCap(rate, grossForUnits(rate, units, unitMultipliers)),
     priceBreakdown: (rate, units, unitMultipliers) => breakdownFor(rate, units, unitMultipliers),
@@ -355,8 +367,10 @@ const strategies: Record<RentalPricingUnit, RentalPricingStrategy> = {
   package: {
     unit: "package",
     billableUnits: () => 1,
-    // 整包只有一个单位，按起租日取价。
-    billableUnitDates: (startAt, _endAt, _units, ctx) => [businessDateKey(startAt, ctx?.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE)],
+    // 整包只有一个单位，按起租时点取价。
+    billableUnitDates: (startAt, _endAt, _units, ctx) => [
+      { date: businessDateKey(startAt, ctx?.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE), at: new Date(startAt).toISOString() }
+    ],
     amountPerItem: (rate, units, unitMultipliers) => applyCap(rate, grossForUnits(rate, units, unitMultipliers)),
     priceBreakdown: (rate, units, unitMultipliers) => breakdownFor(rate, units, unitMultipliers),
     explain: (rate, units, unitMultipliers) =>

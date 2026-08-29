@@ -15,6 +15,7 @@ import type {
   RentalValueAddedService
 } from "@store-rental/shared";
 import { PrismaService } from "../database/prisma.service";
+import type { RentalConfigTx } from "./rental-core-config.repository";
 import { resolveScopeWorkspaceId } from "./workspace-scope";
 
 /** 单个租户的业务配置，用于启动预热写穿缓存。 */
@@ -49,7 +50,7 @@ export interface TenantBusinessConfigSnapshot {
  */
 export interface RentalBusinessConfigStore {
   loadAll(): Promise<TenantBusinessConfigSnapshot[]>;
-  upsertPricingPlan(plan: RentalPricingPlanV1): Promise<void>;
+  upsertPricingPlan(plan: RentalPricingPlanV1, tx?: RentalConfigTx): Promise<void>;
   upsertDiscountPlan(plan: RentalDiscountPlan): Promise<void>;
   upsertService(service: RentalValueAddedService): Promise<void>;
   upsertCalendar(
@@ -160,7 +161,7 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
     });
   }
 
-  async upsertPricingPlan(plan: RentalPricingPlanV1): Promise<void> {
+  async upsertPricingPlan(plan: RentalPricingPlanV1, tx?: RentalConfigTx): Promise<void> {
     const data = {
       tenantId: plan.tenantId,
       categoryCode: upper<$Enums.RentalCategoryCode>(plan.categoryCode),
@@ -176,8 +177,9 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       // 与"配了一个空清单"在语义上同义，但省掉一次无意义的 JSON 解析。
       fulfillmentFees: (plan.fulfillmentFees ?? null) as unknown as Prisma.InputJsonValue
     };
-    const workspaceId = await resolveScopeWorkspaceId(this.prisma, plan.tenantId);
-    await this.prisma.rentalPricingPlan.upsert({
+    const client = tx ?? this.prisma;
+    const workspaceId = await resolveScopeWorkspaceId(client, plan.tenantId);
+    await client.rentalPricingPlan.upsert({
       where: { id: plan.id },
       create: { workspaceId, id: plan.id, ...data, createdAt: new Date(plan.createdAt) },
       update: data
@@ -333,6 +335,7 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
             reason: entry.reason,
             operator: entry.operator ?? null,
             at: new Date(entry.at),
+            batchId: entry.batchId ?? null,
             before: (entry.before ?? null) as unknown as Prisma.InputJsonValue,
             after: (entry.after ?? null) as unknown as Prisma.InputJsonValue
           }))
@@ -373,7 +376,8 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       before: (row.before ?? undefined) as unknown as RentalCalendarOverrideAudit["before"],
       after: (row.after ?? undefined) as unknown as RentalCalendarOverrideAudit["after"],
       year: row.year,
-      version: row.version
+      version: row.version,
+      batchId: row.batchId ?? undefined
     }));
   }
 

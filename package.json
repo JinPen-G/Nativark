@@ -41,11 +41,14 @@
     "test:rental-persistence": "npm run build -w @store-rental/shared && node tests/rental-state-persistence.test.cjs",
     "test:saas-foundation": "npm run build -w @store-rental/shared && node tests/saas-foundation.test.cjs",
     "test:tenant-members": "npm run build -w @store-rental/shared && node tests/tenant-member-isolation.test.cjs",
-    "test:rental-foundation": "npm run lint && npm run test:admin && npm run contract:validate && npm run db:validate && npm run test:seed-types && npm run test:pricing-strategy && npm run test:rental-core && npm run test:workspace-capability && npm run test:capability-hook && npm run test:capability-equipment && npm run test:extension-consistency && npm run test:camera-compatibility && npm run test:rental-business && npm run test:rental-persistence && npm run test:saas-foundation && npm run test:tenant-members && npm run test:reports",
+    "test:rental-foundation": "npm run lint && npm run test:admin && npm run contract:validate && npm run db:validate && npm run test:seed-types && npm run test:pricing-strategy && npm run test:price-adjustment && npm run test:rental-core && npm run test:calendar-range && npm run test:workspace-capability && npm run test:capability-hook && npm run test:capability-equipment && npm run test:extension-consistency && npm run test:camera-compatibility && npm run test:rental-business && npm run test:rental-persistence && npm run test:saas-foundation && npm run test:tenant-members && npm run test:reports",
     "test:seed-types": "tsc --noEmit --skipLibCheck --target ES2022 --module commonjs --moduleResolution node --esModuleInterop apps/api/prisma/seed.ts",
     "contract:validate": "node scripts/validate-api-contracts.cjs && node scripts/validate-dto-coverage.cjs && node scripts/validate-route-permissions.cjs",
     "format": "prettier --write \"apps/**/*.{ts,tsx,css}\" \"packages/**/*.ts\"",
-    "dto:validate": "node scripts/validate-dto-coverage.cjs"
+    "dto:validate": "node scripts/validate-dto-coverage.cjs",
+    "test:calendar-range": "npm run build -w @store-rental/shared && node tests/rental-calendar-range.test.cjs",
+    "test:price-adjustment": "npm run build -w @store-rental/shared && node tests/rental-price-adjustment.test.cjs",
+    "test:price-version": "npm run build -w @store-rental/shared && node tests/rental-price-version.test.cjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",
