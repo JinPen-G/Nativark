@@ -3760,10 +3760,21 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return weekly[weekday];
   }
 
-  /** 时点是否落在任一时段内。时段用营业时区当地 `HH:mm` 比较，跨零点时段按拆段配置。 */
-  private withinWindows(windows: RentalTimeWindow[] | undefined, localTime: string) {
-    if (!windows?.length) return true;
-    return windows.some((window) => localTime >= window.start && localTime <= window.end);
+  /**
+   * 时段判定的三态（需求 4.5.1）。区分「未声明」与「空数组」是本方法存在的全部理由：
+   *
+   * - `undefined` → `inherit`：未单独声明，由调用方决定继承哪一层；
+   * - `[]` → `closed`：当天**不提供**该服务。早前与 undefined 一样被当成"不限制"，
+   *   于是「今天不配送」反而变成「全天可配送」，「今天不办领取」变成「随时可领」；
+   * - 非空 → 命中则 `open`，未命中则 `outside`。
+   */
+  private windowVerdict(
+    windows: RentalTimeWindow[] | undefined,
+    localTime: string
+  ): "inherit" | "closed" | "open" | "outside" {
+    if (windows === undefined) return "inherit";
+    if (windows.length === 0) return "closed";
+    return windows.some((window) => localTime >= window.start && localTime <= window.end) ? "open" : "outside";
   }
 
   private assertFulfillmentDayOpen(
@@ -3802,32 +3813,35 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       // 时段校验（需求 4.5.1/4.5.4）：正常营业「在配置时段内」提供服务，
       // 限时营业「只在指定时段」提供指定能力——两者都要按时点判定，
       // 区别只在于限时营业通常把动作时段配得比营业时段更窄。
+      //
+      // 营业时段与动作时段（领取/归还/配送）都是三态，判定统一交给 windowVerdict：
+      // 缺省继承、空数组表示当天停用、非空按时点命中。早前只有配送分支单独处理了
+      // 空数组，领取与归还的空数组、以及营业时段本身的空数组都被当成"不限制"，
+      // 于是「当天不办领取」「当天不营业」反而变成随时可办。
       const hours = this.resolveBusinessHours([calendar], settings, date);
       if (hours) {
         const localTime = businessTimeOfDay(iso, timeZone);
         const isDelivery = DELIVERY_FULFILLMENT_MODES.has(input.fulfillmentMode);
-        if (isDelivery) {
-          // 配送时段三态（需求 4.5.1 把配送可用时段与领取/归还并列声明）：
-          // - `hours.delivery` 缺省（undefined）＝未单独限制配送，继承营业时段；
-          // - `hours.delivery: []` 空数组＝**当天不提供配送**，必须拒绝——不能像 withinWindows
-          //   那样把空数组当成"不限制"，否则「今天不配送」反而变成「全天可配送」；
-          // - 非空数组＝只在这些时段配送。
-          if (Array.isArray(hours.delivery) && hours.delivery.length === 0) {
-            throw new ConflictException(`${date} 当天不提供配送服务（配送时段为空），无法安排${label}`);
-          }
-          const deliveryWindows = hours.delivery ?? hours.windows;
-          if (!this.withinWindows(hours.windows, localTime) || !this.withinWindows(deliveryWindows, localTime)) {
-            const shown = (deliveryWindows ?? []).map((w) => `${w.start}-${w.end}`).join("、") || "未配置";
-            throw new ConflictException(`${date} ${localTime} 不在${label}（配送）可用时段内（可用：${shown}）`);
-          }
-        } else {
-          // 动作时段缺省沿用营业时段：多数门店的领取归还就是营业时间。
-          const actionWindows = action === "pickup" ? hours.pickup ?? hours.windows : hours.return ?? hours.windows;
-          if (!this.withinWindows(hours.windows, localTime) || !this.withinWindows(actionWindows, localTime)) {
-            const shown = (actionWindows ?? []).map((w) => `${w.start}-${w.end}`).join("、") || "未配置";
-            throw new ConflictException(`${date} ${localTime} 不在${label}可用时段内（可用：${shown}）`);
-          }
+        const actionLabel = isDelivery ? `${label}（配送）` : label;
+        const businessVerdict = this.windowVerdict(hours.windows, localTime);
+        if (businessVerdict === "closed") {
+          throw new ConflictException(`${date} 当天营业时段为空（不营业），无法安排${label}`);
         }
+        if (businessVerdict === "outside") {
+          const shown = hours.windows.map((w) => `${w.start}-${w.end}`).join("、");
+          throw new ConflictException(`${date} ${localTime} 不在营业时段内（营业：${shown}），无法安排${label}`);
+        }
+        const actionWindows = isDelivery ? hours.delivery : action === "pickup" ? hours.pickup : hours.return;
+        const actionVerdict = this.windowVerdict(actionWindows, localTime);
+        if (actionVerdict === "closed") {
+          throw new ConflictException(`${date} 当天不提供${actionLabel}服务（该动作时段为空）`);
+        }
+        if (actionVerdict === "outside") {
+          const shown = (actionWindows ?? []).map((w) => `${w.start}-${w.end}`).join("、");
+          throw new ConflictException(`${date} ${localTime} 不在${actionLabel}可用时段内（可用：${shown}）`);
+        }
+        // actionVerdict === "inherit" 时不再单独判定：动作时段未声明即继承营业时段，
+        // 而营业时段已在上面按同一时点校验过。
       }
     };
     check(input.startAt, "领取", "pickup");

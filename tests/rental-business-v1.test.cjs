@@ -329,6 +329,54 @@ assert.equal(
 assert.equal(layerPlan.code, "LAYER-COMPAT", "前一个计划仍然存在，用于对比两种来源");
 await core.saveBusinessSettings(tenantId, layerSettingsBefore, "test");
 
+// ============ 营业与履约时段三态：缺省继承、空数组停用、非空按时点命中 ============
+// 需求 4.5.1 把营业时段与领取/归还/配送时段并列声明。三者都必须区分「未声明」与
+// 「空数组」：早前只有配送分支处理了空数组，营业时段与领取/归还的空数组都走
+// withinWindows 的 `!windows?.length → true`，于是「当天不营业」「当天不办领取」
+// 反而变成随时可办。校验只看**已发布**日历，因此每次覆盖后都要发布。
+const hoursDay = layerCalendar.days.find(
+  (day) => day.dayType !== "weekend" && (day.businessStatus ?? "open") === "open" && day.date > new Date(now).toISOString().slice(0, 10)
+);
+assert.ok(hoursDay, "夹具日历里必须存在一个可营业的工作日");
+const publishHours = async (hours, reason) => {
+  const day = business.getCalendar(tenantId, context(), layerYear).days.find((item) => item.date === hoursDay.date);
+  const { source: _s, overrideBy: _b, overrideAt: _a, overriddenFrom: _o, overrideScope: _c, ...rest } = day;
+  await business.saveCalendarDay(tenantId, context(), layerYear, { ...rest, hours, overrideReason: reason }, "test");
+  await business.publishCalendar(tenantId, context(), layerYear, { changeReason: reason }, "test");
+};
+// 12:00 领取、14:00 归还（Asia/Shanghai）。
+const hoursQuote = async () => business.createQuote(tenantId, context(), {
+  customerType: "personal",
+  fulfillmentMode: "store_pickup_return",
+  fulfillmentLocationId: location.id,
+  startAt: `${hoursDay.date}T04:00:00.000Z`,
+  endAt: `${hoursDay.date}T06:00:00.000Z`,
+  lines: [{ itemGroupId: layerGroup.id, quantity: 1, pricingUnit: "calendar_day" }]
+});
+
+// 1) 动作时段未声明：继承营业时段，时点落在营业时段内即可下单。
+await publishHours({ windows: [{ start: "09:00", end: "18:00" }] }, "时段三态：仅声明营业时段");
+const inheritedQuote = await hoursQuote();
+assert.ok(inheritedQuote.quoteNo, "动作时段未声明时应继承营业时段并允许下单");
+
+// 2) 营业时段为空数组＝当天不营业，必须拒绝，而不是当成"不限制"。
+await publishHours({ windows: [] }, "时段三态：营业时段置空");
+await assert.rejects(hoursQuote, /营业时段为空/, "营业时段为空数组必须拒绝下单");
+
+// 3) 领取时段为空数组＝当天不办领取；营业时段仍开放。
+await publishHours({ windows: [{ start: "09:00", end: "18:00" }], pickup: [] }, "时段三态：领取时段置空");
+await assert.rejects(hoursQuote, /不提供领取/, "领取时段为空数组必须拒绝下单");
+
+// 4) 非空动作时段按时点命中：12:00 领取落在 10:00-11:00 之外。
+await publishHours({ windows: [{ start: "09:00", end: "18:00" }], pickup: [{ start: "10:00", end: "11:00" }] }, "时段三态：领取时段收窄");
+await assert.rejects(hoursQuote, /不在领取可用时段内/, "时点落在领取时段外必须拒绝下单");
+
+// 5) 归还时段为空同样拒绝——下单时两个端点都要校验（需求 4.5.4）。
+await publishHours({ windows: [{ start: "09:00", end: "18:00" }], return: [] }, "时段三态：归还时段置空");
+await assert.rejects(hoursQuote, /不提供归还/, "归还时段为空数组必须拒绝下单");
+// 恢复成可营业，避免影响后续用例。
+await publishHours({ windows: [{ start: "09:00", end: "18:00" }] }, "时段三态：恢复");
+
 const crossYearQuote = await business.createQuote(tenantId, context(), {
   customerType: "personal",
   fulfillmentMode: "store_pickup_return",

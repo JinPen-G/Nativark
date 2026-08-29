@@ -5202,6 +5202,16 @@ export interface RentalTimeWindow {
  * 各动作时段缺省表示沿用 `windows`：多数门店的领取归还就是营业时间，
  * 要求每家都把三个动作各填一遍只会制造重复配置。
  */
+/**
+ * 营业与履约时段（需求 4.5.1）。四个字段各自三态，语义不能混：
+ *
+ * - `windows`：当天的营业时段。空数组 = **当天不营业**（不是"不限制"）；
+ * - `pickup` / `return` / `delivery`：动作时段。`undefined` = 未单独声明，
+ *   **继承 `windows`**；空数组 = 当天**不提供**该动作；非空 = 只在这些时段内提供。
+ *
+ * 把空数组当成"不限制"会把「今天不配送」直接变成「全天可配送」，
+ * 因此判定必须区分 `undefined` 与 `[]`（见服务层 windowVerdict）。
+ */
 export interface RentalBusinessHours {
   windows: RentalTimeWindow[];
   pickup?: RentalTimeWindow[];
