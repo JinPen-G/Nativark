@@ -1035,7 +1035,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         const { rates: finalRates } = applyPriceAdjustment(base.rates, adjustment.changes as unknown as RentalPriceAdjustmentChange[]);
         const baseVersionId = "versionId" in base ? base.versionId : undefined;
         const pending = await tx.rentalPriceAdjustmentPlan.updateMany({
-          where: { id: adjustmentId, status: "draft" },
+          where: { id: adjustmentId, tenantId, workspaceId, status: "draft" },
           data: {
             status: "pending",
             baseVersionId: baseVersionId ?? null,
@@ -1098,7 +1098,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         await prisma.rentalPriceAdjustmentPlan.updateMany({
-          where: { id: adjustment.id, status: "pending" },
+          where: { id: adjustment.id, tenantId, workspaceId, status: "pending" },
           data: { status: "failed", failureReason: message.slice(0, 191) }
         });
         results.push({ id: adjustment.id, status: "failed" });
@@ -1190,7 +1190,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       });
       await this.configStore.upsertPricingPlan(nextPlan, tx);
       const applied = await tx.rentalPriceAdjustmentPlan.updateMany({
-        where: { id: adjustmentId, status: { in: ["draft", "pending"] } },
+        where: { id: adjustmentId, tenantId, workspaceId, status: { in: ["draft", "pending"] } },
         data: { status: "applied", resultVersionId: row.id, confirmedBy: operator ?? undefined, confirmedAt: new Date() }
       });
       if (!applied.count) throw new ConflictException("调价计划已被其他人处理，请刷新后重试");
