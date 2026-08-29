@@ -567,11 +567,13 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       createdAt: existing?.createdAt ?? timestamp,
       updatedAt: timestamp
     };
-    await this.configStore.upsertPricingPlan(result);
 
     // PRICE-03（需求 4.4.3 + Codex P1-4 原子性）：保存即调价。计划行更新与**空间级**
     // 完整版本追加在同一事务：版本创建失败则计划现值一并回滚，不会出现
     // 「已变价但没有不可变历史」。rates 是空间全集（其他计划的现值 + 本计划新值）。
+    //
+    // 这里刻意**没有**事务外的那一次 upsertPricingPlan：早前先写一次再进事务写一次，
+    // 版本创建失败时计划现值已经落库，恰好留下这段注释声称要避免的状态。
     const prisma = this.prisma;
     if (prisma && (process.env.PLATFORM_DATA_SOURCE ?? "mysql").toLowerCase() === "mysql") {
       const workspaceId = this.workspaceOf(tenantId);
