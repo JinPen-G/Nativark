@@ -78,6 +78,10 @@ function context() {
 async function cleanup(workspaceId) {
   // 只清本专项造的行，按固定前缀而不是本次 TAG——上一轮中途失败留下的行也必须清掉，
   // 否则它的版本序号更大，会把本轮报价的取价拉到一份陈旧（甚至空的）版本上。
+  //
+  // 顺序不能反：调价计划对 planId 是 ON DELETE RESTRICT（删计划不得静默带走调价历史），
+  // 因此必须先删调价计划再删定价计划。
+  await prisma.rentalPriceAdjustmentPlan.deleteMany({ where: { workspaceId, code: { startsWith: "P03-" } } });
   await prisma.rentalPriceVersion.deleteMany({ where: { workspaceId, changeReason: { startsWith: "P03-" } } });
   await prisma.rentalPricingPlan.deleteMany({ where: { workspaceId, code: { startsWith: "P03-" } } });
 }
@@ -188,6 +192,48 @@ void (async () => {
     "失败的保存不得留下半截版本"
   );
   ok("原子性：事务内失败时计划现值一并回滚，且不留半截版本");
+
+  // ============ 4. 定时调价到期执行前必须校验基础版本未被推进 ============
+  // 场景：确认时基于 vN 锁定最终价，到期前别人又调了价（vN+1）。若直接采用锁定的
+  // finalRates，vN+1 会被静默还原——改价的人事后才发现，且没有任何失败记录。
+  const adjustment = await business.createPriceAdjustment(tenantId, ctx, saved.id, {
+    code: `${TAG}-ADJ`,
+    changes: [{ itemGroupId: group.id, unit: "hour", op: "percent", value: 10 }],
+    scheduledAt: new Date(Date.now() + 3600_000).toISOString(),
+    changeReason: `${TAG} 定时调价`
+  }, "专项用例");
+  const confirmed = await business.confirmPriceAdjustment(tenantId, ctx, saved.id, adjustment.id, "专项用例");
+  assert.equal(confirmed.status, "pending", "未来时刻的调价确认后应进入待生效");
+  const pendingRow = await prisma.rentalPriceAdjustmentPlan.findFirst({ where: { id: adjustment.id } });
+  assert.ok(pendingRow.baseVersionId, "确认时必须锁定基础版本");
+  assert.ok(pendingRow.finalRates, "确认时必须锁定完整最终费率");
+
+  // 中间插一次调价，把空间版本推进一格。用另一个已启用单位，避开与 TAG-A 的键重叠。
+  const otherUnit = ctx.settings.pricing.enabledUnits.find((unit) => unit !== "hour");
+  assert.ok(otherUnit, "夹具需要至少两个已启用计价单位");
+  await business.savePricingPlan(tenantId, ctx, {
+    code: `${TAG}-B`, name: "PRICE-03 中途调价", status: "enabled",
+    effectiveFrom: new Date(Date.now() - 86_400_000).toISOString(),
+    changeReason: `${TAG} 中途推进版本`,
+    rates: [rate(group.id, otherUnit, 88)]
+  }, "专项用例");
+  // 让它到期。
+  await prisma.rentalPriceAdjustmentPlan.updateMany({
+    where: { id: adjustment.id },
+    data: { scheduledAt: new Date(Date.now() - 60_000) }
+  });
+  const versionsBeforeRun = await prisma.rentalPriceVersion.count({ where: { tenantId, workspaceId } });
+  const run = await business.runDuePriceAdjustments(tenantId, ctx);
+  assert.equal(run.results.find((row) => row.id === adjustment.id)?.status, "failed", "基础版本被推进时到期执行必须失败");
+  const failedRow = await prisma.rentalPriceAdjustmentPlan.findFirst({ where: { id: adjustment.id } });
+  assert.equal(failedRow.status, "failed", "失败必须落库为 failed，而不是永远待生效");
+  assert.match(failedRow.failureReason ?? "", /覆盖/u, "失败原因必须说清是「会覆盖中间的调价」");
+  assert.equal(
+    await prisma.rentalPriceVersion.count({ where: { tenantId, workspaceId } }),
+    versionsBeforeRun,
+    "失败的到期执行不得写出新版本"
+  );
+  ok("定时调价：基础版本被推进时到期执行失败并留原因，不静默覆盖中间调价");
 
   await cleanup(workspaceId);
   await prisma.rentalQuote.deleteMany({ where: { id: quote.id } });

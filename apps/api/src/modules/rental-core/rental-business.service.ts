@@ -99,6 +99,14 @@ import {
 import { applyPriceAdjustment, assertNoDatetimeOverrideOverlap, assertNoPeriodicOverlap, periodicWindowCoversDate, periodicWindowHits } from "./rental-price-adjustments";
 import { rentalPricingStrategy } from "./rental-pricing-strategy";
 
+/**
+ * 定时调价到期执行时，确认时锁定的基础版本已被别的调价推进。
+ *
+ * 单独一个错误类型而不是直接抛 ConflictException：这次失败要在**事务之外**
+ * 把调价计划置为 failed 并记原因，因此 catch 里必须能把它和「并发撞序号」区分开。
+ */
+class StalePriceBaseError extends Error {}
+
 interface RentalBusinessState {
   categoryCode: RentalCategoryCode;
   pricingPlans: RentalPricingPlanV1[];
@@ -905,6 +913,22 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         where: { tenantId, workspaceId }
       });
       const sequence = (agg._max.sequence ?? 0) + 1;
+      // 到期执行必须仍基于确认时锁定的那一版。中间若有别的调价推进了版本，
+      // 直接采用 finalRates 会把那次调价**静默覆盖**掉：改价的人一小时后
+      // 发现自己的价格被无声还原，且没有任何失败记录。宁可失败让人重做。
+      if (adjustment.status === "pending" && adjustment.finalRates) {
+        const latest = await tx.rentalPriceVersion.findFirst({
+          where: { tenantId, workspaceId },
+          orderBy: [{ sequence: "desc" }],
+          select: { id: true, sequence: true }
+        });
+        if ((latest?.id ?? null) !== (adjustment.baseVersionId ?? null)) {
+          throw new StalePriceBaseError(
+            `调价计划确认时基于版本 ${adjustment.baseVersionId ?? "（无）"}，但当前已是 ` +
+              `${latest ? `v${latest.sequence}` : "（无版本）"}，到期执行会覆盖中间的调价，已置为执行失败`
+          );
+        }
+      }
       const effectiveFrom =
         adjustment.status === "pending" && adjustment.scheduledAt
           ? adjustment.scheduledAt
@@ -934,6 +958,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       if (!applied.count) throw new ConflictException("调价计划已被其他人处理，请刷新后重试");
       return row;
     }).catch((error) => {
+      // 基础版本被推进 → 409。失败的落库由调用方 runDuePriceAdjustments 统一记
+      // （它已按 message 写 failureReason），这里不重复写一遍。
+      if (error instanceof StalePriceBaseError) throw new ConflictException(error.message);
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
         throw new ConflictException("价格版本并发写入冲突，请刷新后重试");
       }

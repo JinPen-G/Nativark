@@ -10,6 +10,10 @@ const FACT = "apps/api/src/modules/rental-core/rental-business-fact.repository.t
 /** 每个变异都是本轮真实修掉的缺陷，用来证明新用例不是「跟着实现写的绿灯」。 */
 const mutations = [
   [SERVICE,
+   `        if ((latest?.id ?? null) !== (adjustment.baseVersionId ?? null)) {`,
+   `        if (false) {`,
+   "到期执行不校验基础版本是否被推进（原缺陷）"],
+  [SERVICE,
    "    // 版本创建失败时计划现值已经落库，恰好留下这段注释声称要避免的状态。",
    "    // 版本创建失败时计划现值已经落库，恰好留下这段注释声称要避免的状态。\n    await this.configStore.upsertPricingPlan(result);",
    "计划现值又在事务外先写一次（原缺陷）"],
