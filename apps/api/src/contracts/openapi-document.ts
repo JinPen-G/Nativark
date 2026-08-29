@@ -820,6 +820,32 @@ const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
   backlogOperation("post", "/api/platform/customers", "Platform", "registerSharedCustomer", "Register shared customer in current workspace", ["store-rental:member:manage"]),
   backlogOperation("get", "/api/platform/workspace-customers", "Platform", "listWorkspaceCustomers", "List customers linked to current workspace", ["store-rental:member:view"]),
   backlogOperation("post", "/api/platform/workspace-customers", "Platform", "linkCustomerToWorkspace", "Link existing shared customer to current workspace", ["store-rental:member:manage"]),
+  // CUSTOMER-01B：客户账号（租户级）与空间会员状态（空间级）是两条独立入口。
+  // 合并成一个会让「只停这个空间」与「停掉全部空间的登录」无法区分。
+  backlogOperation("get", "/api/platform/customers/{customerId}", "Platform", "getCustomerDetail", "Get customer detail with masked sensitive fields", ["store-rental:member:view"]),
+  backlogOperation("post", "/api/platform/customers/{customerId}/account", "Platform", "ensureCustomerAccount", "Open a login account for the customer (idempotent)", ["store-rental:member:manage"]),
+  backlogOperation("put", "/api/platform/customers/{customerId}/account-status", "Platform", "changeCustomerAccountStatus", "Change customer account status; close requires customer:close, other states require member:manage", ["store-rental:member:manage", "store-rental:customer:close"]),
+  backlogOperation("get", "/api/platform/customers/{customerId}/status-history", "Platform", "listCustomerStatusHistory", "List customer status timeline (account and workspace scope)", ["store-rental:member:view"]),
+  backlogOperation("get", "/api/platform/customers/{customerId}/sensitive-access", "Platform", "listCustomerSensitiveAccess", "List sensitive data access audit for the customer", ["store-rental:customer:reveal-sensitive"]),
+  backlogOperation("put", "/api/platform/workspace-customers/{customerId}/status", "Platform", "changeCustomerMembershipStatus", "Change workspace membership status; close and risk restriction use separate permissions", ["store-rental:member:manage", "store-rental:member:risk-action", "store-rental:customer:close"]),
+  backlogOperation("get", "/api/platform/workspace-customers/{customerId}/transactability", "Platform", "getCustomerTransactability", "Check whether the customer may start new business in the current workspace", ["store-rental:member:view"]),
+  // CUSTOMER-01C：企业开票资料、合同、授信账期。按租户级客户身份维护，不按空间隔离——
+  // 同一家企业在两个空间是同一家企业，开票与合同不该各存一份。
+  backlogOperation("get", "/api/platform/customers/{customerId}/invoice-profiles", "Platform", "listCustomerInvoiceProfiles", "List corporate invoice profiles", ["store-rental:corporate:view"]),
+  backlogOperation("put", "/api/platform/customers/{customerId}/invoice-profiles", "Platform", "saveCustomerInvoiceProfile", "Create or update a corporate invoice profile", ["store-rental:corporate:manage"]),
+  backlogOperation("get", "/api/platform/customers/{customerId}/contracts", "Platform", "listCustomerContracts", "List corporate contracts", ["store-rental:corporate:view"]),
+  backlogOperation("put", "/api/platform/customers/{customerId}/contracts", "Platform", "saveCustomerContract", "Create or update a corporate contract", ["store-rental:corporate:manage"]),
+  backlogOperation("get", "/api/platform/customers/{customerId}/credit", "Platform", "getCustomerCredit", "Get corporate credit limit and settlement terms", ["store-rental:corporate:view"]),
+  backlogOperation("put", "/api/platform/customers/{customerId}/credit", "Platform", "saveCustomerCredit", "Set corporate credit limit and settlement terms (stored only, not wired into pricing)", ["store-rental:corporate:manage"]),
+  // CUSTOMER-01D：重复识别、人工合并与注销。需求 4.8.14 要求合并与注销**分别授权**——
+  // 两者都不可逆且影响面不同（合并改身份归属、注销终止业务资格），共用「会员管理」
+  // 等于让任何能改会员等级的人都能合并或注销客户。
+  // 候选与预览虽是只读，但暴露「哪些主档可能是同一人」，属合并决策信息，同按合并权限。
+  backlogOperation("get", "/api/platform/customers/{customerId}/duplicates", "Platform", "findCustomerDuplicates", "List possible duplicate customers within the tenant", ["store-rental:customer:merge"]),
+  backlogOperation("get", "/api/platform/customers/{customerId}/merge-preview", "Platform", "previewCustomerMerge", "Preview a manual customer merge (read-only conflict report)", ["store-rental:customer:merge"]),
+  backlogOperation("post", "/api/platform/customers/merge", "Platform", "mergeCustomers", "Submit a manual customer merge (keeps original business references)", ["store-rental:customer:merge"]),
+  backlogOperation("get", "/api/platform/customers/{customerId}/closability", "Platform", "getCustomerClosability", "Check whether the customer account may be closed", ["store-rental:customer:close"]),
+  backlogOperation("get", "/api/platform/workspace-customers/{customerId}/closability", "Platform", "getCustomerMembershipClosability", "Check whether the current-workspace membership may be closed", ["store-rental:customer:close"]),
   backlogOperation("post", "/api/platform/organizations", "Platform", "createOrganization", "Create organization", ["system:org:manage"]),  backlogOperation("put", "/api/platform/organizations/{id}", "Platform", "updateOrganization", "Update organization", ["system:org:manage"]),
   backlogOperation("put", "/api/platform/organizations/{id}/status", "Platform", "setOrganizationStatus", "Set organization status", ["system:org:manage"]),
   backlogOperation("get", "/api/reports/dashboard", "Reports", "getReportsDashboard", "Get reports dashboard", ["reports:view"]),

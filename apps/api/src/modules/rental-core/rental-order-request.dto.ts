@@ -226,16 +226,41 @@ export class CapabilityExceptionInputDto {
   // 它们由控制器按鉴权上下文补齐。放进 DTO 就等于允许客户端自报确认人与权限。
 }
 
+/**
+ * CUSTOMER-01C：订单主体选择。四个字段都可省略——
+ * 省略的角色由服务层回落为下单客户本人，因此本 DTO 是纯附加，不改变既有调用方行为。
+ */
+export class CreateRentalOrderSubjectsInputDto {
+  @IsOptional() @IsString() contractSubjectCustomerId?: string;
+  @IsOptional() @IsString() payerSubjectCustomerId?: string;
+  @IsOptional() @IsString() userSubjectCustomerId?: string;
+  @IsOptional() @IsString() agentId?: string;
+  @IsOptional() @IsString() contractId?: string;
+  @IsOptional() @IsString() invoiceProfileId?: string;
+}
+
 export class CreateRentalOrderDto implements CreateRentalOrderRequest {
   @IsString()
   @IsNotEmpty()
   quoteId!: string;
+
   @IsIn(CUSTOMER_TYPES)
   customerType!: (typeof CUSTOMER_TYPES)[number];
 
   @IsOptional()
   @IsString()
   customerId?: string;
+
+  /**
+   * CUSTOMER-01C：订单四类主体。省略即回落为「三个主体都是下单客户本人」。
+   *
+   * 嵌套对象必须 `@ValidateNested` + `@Type`，否则 whitelist 会把整个对象剥掉，
+   * 表现为「传了主体但订单里没有」——静默丢失比报错更难排查。
+   */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CreateRentalOrderSubjectsInputDto)
+  subjects?: CreateRentalOrderSubjectsInputDto;
 
   @IsString()
   @IsNotEmpty()

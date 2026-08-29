@@ -17,6 +17,7 @@ const OrderDetailPage = lazy(() => import("@/features/rental-core/RentalOrderDet
 const RentalCommercialPage = lazy(() => import("@/features/commercial/RentalCommercialPage").then((module) => ({ default: module.RentalCommercialPage })));
 const CouponPage = lazy(() => import("@/features/commercial/CouponPage").then((module) => ({ default: module.CouponPage })));
 const CustomerPage = lazy(() => import("@/features/customers/CustomerPage").then((module) => ({ default: module.CustomerPage })));
+const CustomerMasterPage = lazy(() => import("@/features/customers/CustomerMasterPage").then((module) => ({ default: module.CustomerMasterPage })));
 const PlatformPage = lazy(() => import("@/features/platform/PlatformPage").then((module) => ({ default: module.PlatformPage })));
 const PlatformOperationsPage = lazy(() => import("@/features/platform/PlatformOperationsPage").then((module) => ({ default: module.PlatformOperationsPage })));
 const PlatformToolsPage = lazy(() => import("@/features/platform/PlatformToolsPage").then((module) => ({ default: module.PlatformToolsPage })));
@@ -84,6 +85,7 @@ function ProtectedRoutes() {
             <Route path={APP_ROUTES.services.path} element={guard(APP_ROUTES.services, <RentalCommercialPage section="services" />)} />
             <Route path={APP_ROUTES.rentalSettings.path} element={guard(APP_ROUTES.rentalSettings, <RentalSettingsPage />)} />
             <Route path={APP_ROUTES.rentalCapabilities.path} element={guard(APP_ROUTES.rentalCapabilities, <CapabilityGovernancePage />)} />
+            <Route path={APP_ROUTES.customerMaster.path} element={guard(APP_ROUTES.customerMaster, <CustomerMasterPage />)} />
             <Route path={APP_ROUTES.customers.path} element={guard(APP_ROUTES.customers, <CustomerPage />)} />
             <Route path="/platform" element={<Navigate to={APP_ROUTES.platformUsers.path} replace />} />
             <Route path={APP_ROUTES.platformTenants.path} element={guard(APP_ROUTES.platformTenants, <TenantManagementPage />)} />

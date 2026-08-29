@@ -141,11 +141,21 @@ export function requiredPermissions(method: string, path: string) {
   if (path.startsWith("/platform/workspace-customers")) {
     // SPACE-04：共享客户主档按会员权限判定，与旧车辆域会员页面一致。
     // 读写分开：查看不应要求管理权限，否则运营查客户就得给写权限。
+    if (/\/closability$/u.test(path)) {
+      return ["store-rental:customer:close"];
+    }
+    if (/\/status$/u.test(path)) {
+      // 目标状态在请求体中；具体动作由 PlatformService 按权限二次校验。
+      return [
+        "store-rental:member:manage",
+        "store-rental:member:risk-action",
+        "store-rental:customer:close"
+      ];
+    }
     return method === "GET"
       ? ["store-rental:member:view", "store-rental:member:manage"]
       : ["store-rental:member:manage"];
-  }
-  // SPACE-01/02：经营空间主档与成员关系属于租户管理能力。
+  }  // SPACE-01/02：经营空间主档与成员关系属于租户管理能力。
   //
   // 必须显式列出：本函数末尾兜底 `return []`，而 hasAnyPermission 对空数组
   // 直接放行。漏列等于把「新建空间、改空间状态、增删空间成员」开放给任何
@@ -163,6 +173,39 @@ export function requiredPermissions(method: string, path: string) {
       : ["system:tenant:manage"];
   }
   if (path.startsWith("/platform/customers")) {
+    // CUSTOMER-01B：敏感资料访问审计本身就是一份访问画像（谁在什么时候查过谁），
+    // 因此它需要**解密权限**，不能只凭「会员查看」。必须放在下面的通用分支之前，
+    // 否则会被 `/platform/customers` 前缀吃掉，退化成只要会员查看权限即可读取。
+    if (/\/sensitive-access$/u.test(path)) {
+      return ["store-rental:customer:reveal-sensitive"];
+    }
+    // CUSTOMER-01C：企业开票、合同、授信账期属**企业客户**权限，与个人会员权限分开。
+    // 同样必须放在通用分支之前，否则「会员管理」就能改企业授信与账期。
+    if (/\/(invoice-profiles|contracts|credit)$/u.test(path)) {
+      return method === "GET"
+        ? ["store-rental:corporate:view", "store-rental:corporate:manage"]
+        : ["store-rental:corporate:manage"];
+    }
+    // CUSTOMER-01D：需求 4.8.14 要求合并与注销**分别授权**。两者都不可逆，
+    // 且影响面不同（合并改身份归属、注销终止业务资格），因此不能共用「会员管理」
+    // 一个权限——否则任何能改会员等级的人都能合并或注销客户。同样置于通用分支之前。
+    if (path === "/platform/customers/merge") {
+      return ["store-rental:customer:merge"];
+    }
+    // 预览与候选是只读的，但它们暴露「哪些主档可能是同一人」，属合并决策信息，
+    // 因此同样按合并权限判定，而不是按「会员查看」放行。
+    if (/\/(merge-preview|duplicates)$/u.test(path)) {
+      return ["store-rental:customer:merge"];
+    }
+    if (/\/closability$/u.test(path)) {
+      return ["store-rental:customer:close"];
+    }
+    // 账号注销走 account-status，其请求体里 status=closed 才是注销；Guard 按路径判权限、
+    // 看不到请求体，因此这条路由「会员管理」或「客户注销」之一即可进入，
+    // 真正的动作级权限与注销前置检查在服务层完成。
+    if (/\/account-status$/u.test(path)) {
+      return ["store-rental:member:manage", "store-rental:customer:close"];
+    }
     return method === "GET"
       ? ["store-rental:member:view", "store-rental:member:manage"]
       : ["store-rental:member:manage"];

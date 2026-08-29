@@ -4550,6 +4550,383 @@ export interface SaveWorkspaceMemberRequest {
 }
 
 /**
+ * CUSTOMER-01A：空间会员状态（需求 4.8.6 的六态）。
+ *
+ * 六态必须都在类型里，不能用 active/suspended 两态凑：需求给每一态定义了不同的业务含义
+ * （待激活尚未完成认证、风险受限只限制部分能力、已退出是客户主动、已注销是终态），
+ * 合并成两态就无法表达「为什么不能下单」，而那正是运营与客服每天要回答的问题。
+ */
+export const CUSTOMER_MEMBERSHIP_STATUSES = [
+  "pending_activation",
+  "active",
+  "suspended",
+  "risk_restricted",
+  "exited",
+  "closed"
+] as const;
+export type CustomerMembershipStatus = (typeof CUSTOMER_MEMBERSHIP_STATUSES)[number];
+
+/**
+ * CUSTOMER-01A：客户账号状态（需求 4.8.1 / 4.8.13）。
+ *
+ * 与空间会员状态**分开**：账号是「客户如何登录」，会员关系是「客户在某空间有什么资格」。
+ * 停用账号阻止登录全部空间；暂停某个空间的会员关系不影响登录与其他空间业务。
+ * 两者共用一个字段是本任务明确要避免的建模错误。
+ */
+export const CUSTOMER_ACCOUNT_STATUSES = ["active", "suspended", "closed"] as const;
+export type CustomerAccountStatus = (typeof CUSTOMER_ACCOUNT_STATUSES)[number];
+
+/** 状态变更动作。解除限制也是独立记录，不允许删除原限制事实（需求 4.8.6）。 */
+export const CUSTOMER_STATUS_ACTIONS = [
+  "activate",
+  "suspend",
+  "restrict",
+  "release",
+  "exit",
+  "close",
+  "reopen",
+  "merge"
+] as const;
+export type CustomerStatusAction = (typeof CUSTOMER_STATUS_ACTIONS)[number];
+
+/** 状态历史的作用域：账号级（全租户）或空间级（仅目标空间）。 */
+export type CustomerStatusScope = "account" | "workspace";
+
+/**
+ * CUSTOMER-01B：客户在某个经营空间**能否开展新业务**的判定结果。
+ *
+ * 为什么要把结论结构化返回，而不是返回一个布尔：被拒时业务侧要能告诉客服
+ * 「是账号被停了，还是这个空间的会员被暂停了，还是风险受限」——三者的处理人
+ * 和处理方式完全不同。只回 false 会把这三种情况压成同一句「不可下单」。
+ */
+export interface CustomerTransactability {
+  allowed: boolean;
+  /** account_suspended / account_closed / membership_missing / membership_* / customer_merged */
+  reasonCode?: string;
+  message?: string;
+  accountStatus?: CustomerAccountStatus;
+  membershipStatus?: CustomerMembershipStatus;
+}
+
+/**
+ * CUSTOMER-01E：详情附带的登录账号摘要。
+ *
+ * 刻意**不复用** `CustomerAccount`：后者带 `loginPhone` 明文，那是登录凭据本身。
+ * 管理端只需要判断「有没有开通、现在什么状态」，拿不到也不该拿到凭据。
+ *
+ * `provisioned` 单独成字段而不是用 `status` 兼表：「未开通」与「已停用」
+ * 要走完全不同的入口（前者给开通按钮、后者给状态变更），
+ * 用一个可空的 status 表达两者，页面迟早会把 undefined 当成正常。
+ */
+export interface CustomerAccountSummary {
+  provisioned: boolean;
+  status?: CustomerAccountStatus;
+  loginPhoneMasked?: string;
+  suspendedAt?: string;
+  closedAt?: string;
+}
+
+/** CUSTOMER-01B：账号级状态变更请求。影响该客户在**全部**空间的登录。 */
+export interface ChangeCustomerAccountStatusRequest {
+  status: CustomerAccountStatus;
+  reason: string;
+  /**
+   * CUSTOMER-01D：注销时必须显式确认那些系统无数据源、只能人工核对的项
+   * （退款、押金退还、争议追偿）。缺少确认时服务端拒绝并回传待确认清单——
+   * 默认放行等于把「没检查」当成「检查通过」，正是需求 4.8.13 禁止的
+   * 「借注销规避欠款、追偿或风险限制」。
+   */
+  acknowledgedManualChecks?: boolean;
+}
+
+/** CUSTOMER-01B：空间会员状态变更请求。只影响**当前会话空间**。 */
+export interface ChangeCustomerMembershipStatusRequest {
+  status: CustomerMembershipStatus;
+  reason: string;
+  /** 目标等级（仅在恢复/激活时允许调整）。 */
+  levelName?: string;
+  /** 同账号注销：注销空间会员关系时也必须显式确认人工核对项（见上）。 */
+  acknowledgedManualChecks?: boolean;
+}
+
+/** CUSTOMER-01B：敏感资料访问审计条目。只追加。 */
+export interface CustomerSensitiveAccessAuditEntry {
+  id: string;
+  tenantId: string;
+  workspaceId?: string;
+  customerId: string;
+  field: string;
+  action: "list" | "detail" | "export" | "reveal";
+  revealed: boolean;
+  operator?: string;
+  permission?: string;
+  reason?: string;
+  at: string;
+}
+
+/** CUSTOMER-01B：客户状态历史条目（账号级与空间级同一时间线）。 */
+export interface CustomerStatusHistoryEntry {
+  id: string;
+  tenantId: string;
+  customerId: string;
+  scope: CustomerStatusScope;
+  workspaceId?: string;
+  action: CustomerStatusAction;
+  fromStatus?: string;
+  toStatus: string;
+  reason: string;
+  operator?: string;
+  approver?: string;
+  at: string;
+}
+
+/** CUSTOMER-01B：客户账号。 */
+export interface CustomerAccount {
+  id: string;
+  tenantId: string;
+  customerId: string;
+  loginPhone: string;
+  loginPhoneMasked: string;
+  status: CustomerAccountStatus;
+  suspendedAt?: string;
+  closedAt?: string;
+  lastReason?: string;
+  lastOperator?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * CUSTOMER-01D：重复客户候选（需求 4.8.3）。
+ *
+ * 个人优先以**已验证手机号**识别，可结合实名证件核验；企业结合统一社会信用代码
+ * 与已验证联系人识别。`matchedBy` 必须带出来——运营要知道「为什么系统认为这两个是同一人」，
+ * 否则人工合并就变成盲签。
+ */
+export interface CustomerDuplicateCandidate {
+  customerId: string;
+  name: string;
+  phoneMasked: string;
+  customerType: "personal" | "corporate";
+  /** phone / identity / uscc / contact_phone */
+  matchedBy: string;
+  matchedValueMasked?: string;
+  /** 该候选是否已被合并进别的主档（已合并的不应再作为合并目标）。 */
+  mergedIntoCustomerId?: string;
+  createdAt: string;
+}
+
+/**
+ * CUSTOMER-01D：合并冲突预览（需求 4.8.3「明确保留主档、字段取舍、资质处理和冲突项」）。
+ *
+ * 预览是**只读**的：它不做任何写入，供人工确认后再提交合并。
+ */
+export interface CustomerMergePreview {
+  sourceCustomerId: string;
+  targetCustomerId: string;
+  /** 逐字段差异。`conflict` 为真表示两边都有值且不同，需要人工取舍。 */
+  fieldDiff: Array<{
+    field: string;
+    sourceValue?: string;
+    targetValue?: string;
+    conflict: boolean;
+  }>;
+  /**
+   * 双方的空间会员关系。合并**不合并权益**：各空间等级、积分、券分别保留，
+   * 因此这里只如实列出，供人工确认「合并后客户在哪些空间各是什么状态」。
+   */
+  sourceMemberships: Array<{ workspaceId: string; levelName: string; status: CustomerMembershipStatus }>;
+  targetMemberships: Array<{ workspaceId: string; levelName: string; status: CustomerMembershipStatus }>;
+  /** 两边都有会员关系的空间。这些空间需要人工决定保留哪一份等级。 */
+  overlappingWorkspaceIds: string[];
+  /** 被合并方将保留的历史引用数量（订单等），合并后仍指向原主档。 */
+  preservedReferences: Array<{ kind: string; count: number }>;
+  /** 阻止合并的原因；非空时不允许提交。 */
+  blockers: Array<{ code: string; message: string }>;
+}
+
+/** CUSTOMER-01D：提交人工合并。原因与审批人必填——合并不可逆。 */
+export interface MergeCustomersRequest {
+  sourceCustomerId: string;
+  targetCustomerId: string;
+  reason: string;
+  approver?: string;
+  /** 人工对冲突字段的取舍结论，原样固化进合并映射，供事后解释保留了谁的值。 */
+  fieldResolutions?: Record<string, string>;
+}
+
+/**
+ * CUSTOMER-01D：注销前置检查（需求 4.8.13）。
+ *
+ * `blockers` 来自**真实存在的事实**，非空即禁止注销。
+ * `manualConfirmations` 是本分支尚无数据源的类别（退款、争议、追偿、已完成订单的
+ * 押金退还状态）——系统不能假装检查过，因此显式列出、要求人工签字确认后才允许继续。
+ * 把它们当成「检查通过」是「借注销规避欠款」的入口。
+ */
+export interface CustomerClosability {
+  closable: boolean;
+  blockers: Array<{ code: string; message: string; count?: number }>;
+  manualConfirmations: Array<{ code: string; message: string }>;
+}
+
+/**
+ * CUSTOMER-01C：订单主体角色（需求 4.8.4）。
+ *
+ * 四个角色分开保存，不允许「只存一个联系人代替企业责任主体」：
+ *   * `contract` 签约主体——合同与法律责任归属；
+ *   * `payer`    付款主体——账单与收款归属，可与签约主体不同（如总部付款、分公司签约）；
+ *   * `user`     使用人——实际取还与使用设备的人；
+ *   * `agent`    经办人——受授权代办的人，本身不是责任主体。
+ */
+export type CustomerOrderSubjectRole = "contract" | "payer" | "user" | "agent";
+
+/**
+ * 下单当时的主体快照。名称与脱敏证件都固化——主体后续改名或授权到期
+ * 都不得篡改历史订单。
+ */
+export interface CustomerOrderSubjectSnapshot {
+  role: CustomerOrderSubjectRole;
+  customerId?: string;
+  customerType?: "personal" | "corporate";
+  name: string;
+  phoneMasked?: string;
+  corporateName?: string;
+  unifiedSocialCreditCodeMasked?: string;
+  /** 经办人专用：授权范围与有效期在下单当时的取值。 */
+  agentId?: string;
+  authorityScope?: Record<string, boolean>;
+  authorityValidFrom?: string;
+  authorityValidTo?: string;
+  /** 引用的企业合同与开票资料（下单当时生效的那一份）。 */
+  contractId?: string;
+  contractNo?: string;
+  invoiceProfileId?: string;
+}
+
+/** 下单时提交的主体选择。省略时回落为「三个主体都是下单客户本人」。 */
+export interface CustomerOrderSubjectInput {
+  contractSubjectCustomerId?: string;
+  payerSubjectCustomerId?: string;
+  userSubjectCustomerId?: string;
+  agentId?: string;
+  contractId?: string;
+  invoiceProfileId?: string;
+}
+
+/** 校验并解析后的主体集合，由订单侧原样固化。 */
+export interface CustomerOrderSubjects {
+  contractSubjectCustomerId: string;
+  payerSubjectCustomerId: string;
+  userSubjectCustomerId: string;
+  agentId?: string;
+  snapshot: CustomerOrderSubjectSnapshot[];
+}
+
+/** CUSTOMER-01C：企业开票资料。 */
+export interface CustomerCorporateInvoiceProfile {
+  id: string;
+  tenantId: string;
+  customerId: string;
+  invoiceType: "vat_special" | "vat_normal";
+  title: string;
+  taxNo: string;
+  registeredAddress?: string;
+  bankName?: string;
+  bankAccountMasked?: string;
+  contactPhoneMasked?: string;
+  receiveEmail?: string;
+  isDefault: boolean;
+  status: "active" | "disabled";
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** CUSTOMER-01C：企业合同。 */
+export interface CustomerCorporateContract {
+  id: string;
+  tenantId: string;
+  customerId: string;
+  contractNo: string;
+  name: string;
+  signedAt?: string;
+  effectiveFrom: string;
+  effectiveTo?: string;
+  status: "draft" | "active" | "expired" | "terminated";
+  fileRef?: string;
+  terminatedReason?: string;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * CUSTOMER-01C：企业授信与账期。
+ *
+ * 本阶段**只存事实**：额度不接进报价与订单确认链路。额度占用与释放需要与订单、
+ * 支付、退款联动，属后续任务；在没有联动设计前先改金额链路会留下对不上的账。
+ */
+export interface CustomerCorporateCredit {
+  id: string;
+  tenantId: string;
+  customerId: string;
+  creditLimit: number;
+  settlementTermDays: number;
+  billingCycle: "monthly" | "semi_monthly" | "per_order";
+  status: "active" | "suspended" | "revoked";
+  approvedBy?: string;
+  approvedAt?: string;
+  reason?: string;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SaveCustomerInvoiceProfileRequest {
+  id?: string;
+  /** 编辑时必传，用于阻止两名运营人员静默覆盖彼此的修改。 */
+  expectedRevision?: number;
+  invoiceType: "vat_special" | "vat_normal";
+  title: string;
+  taxNo: string;
+  registeredAddress?: string;
+  bankName?: string;
+  bankAccount?: string;
+  /** 编辑时显式清除已保存的银行账号掩码；两个字段都省略表示保留原值。 */
+  clearBankAccount?: boolean;
+  contactPhone?: string;
+  /** 编辑时显式清除已保存的联系电话掩码；两个字段都省略表示保留原值。 */
+  clearContactPhone?: boolean;
+  receiveEmail?: string;
+  isDefault?: boolean;
+  status?: "active" | "disabled";
+}
+
+export interface SaveCustomerContractRequest {
+  id?: string;
+  /** 编辑时必传，用于乐观并发控制。 */
+  expectedRevision?: number;
+  contractNo: string;
+  name: string;
+  signedAt?: string;
+  effectiveFrom: string;
+  effectiveTo?: string;
+  status?: "draft" | "active" | "expired" | "terminated";
+  fileRef?: string;
+  terminatedReason?: string;
+}
+
+export interface SaveCustomerCreditRequest {
+  /** 已存在授信记录时必传，用于乐观并发控制；首次授信省略。 */
+  expectedRevision?: number;
+  creditLimit: number;
+  settlementTermDays: number;
+  billingCycle?: "monthly" | "semi_monthly" | "per_order";
+  status?: "active" | "suspended" | "revoked";
+  reason: string;
+}
+
+/**
  * SPACE-04：租户级共享客户主档。
  *
  * 身份在租户内共享（同一手机号只有一份主档），而订单、优惠券、积分、
@@ -4574,21 +4951,75 @@ export interface SharedCustomerProfile {
   status: "active" | "suspended";
   /** 回填来源的旧会员主键，仅用于对账追溯，不参与业务判定。 */
   sourceMemberId?: string;
+  /**
+   * CUSTOMER-01A：本主档已被合并进哪个主档（合并后为终态，不得再用于新业务）。
+   *
+   * 冗余在主档上是刻意的：合并映射表是权威事实，但「这份主档还能不能用」
+   * 是每次下单、报价都要判的高频问题，若每次都去查映射表，
+   * 漏查一处就会让一个已被合并的主档继续产生新业务。
+   */
+  mergedIntoCustomerId?: string;
   createdAt: string;
   updatedAt: string;
   /** 该客户已接入的经营空间关系。列表接口默认带出，便于判断"是否需要接入本空间"。 */
   workspaceLinks?: CustomerWorkspaceLink[];
+  /**
+   * CUSTOMER-01E：详情接口带出的联系人与授权经办人。
+   *
+   * 只在**详情**里带（列表不带）：列表要的是"这个人是谁、在本空间什么状态"，
+   * 把每个客户的联系人与授权都拉出来会让列表查询变成 N+1，且列表页并不展示它们。
+   * 两者刻意分成两个字段而不是一个"关联人"数组——联系人只用于联系，
+   * 经办人被授权代办业务，合并成一个数组会让运营把联系人误当成责任主体。
+   */
+  contacts?: CustomerContactSummary[];
+  authorizedAgents?: CustomerAuthorizedAgentSummary[];
+  /**
+   * CUSTOMER-01E：登录账号摘要。**仅详情**带出，列表为 undefined。
+   *
+   * 详情里一定有值（`provisioned` 明确给出真假），因此页面不必把
+   * "没查到" 与 "没开通" 混为一谈。
+   */
+  accountSummary?: CustomerAccountSummary;
 }
 
-/** SPACE-04：客户在某个经营空间的业务关系。会员等级按空间隔离。 */
+/** CUSTOMER-01E：联系人摘要。号码一律只给脱敏值。 */
+export interface CustomerContactSummary {
+  id: string;
+  kind: "emergency" | "corporate" | "other";
+  name: string;
+  phoneMasked: string;
+  relation?: string;
+  isPrimary: boolean;
+  status: string;
+  /** 该联系人本身若也是本租户客户，指向其主档；仅作关联，不代表责任主体。 */
+  linkedCustomerId?: string;
+}
+
+/** CUSTOMER-01E：授权经办人摘要。带授权范围与有效期，供事后判断当时是否有效。 */
+export interface CustomerAuthorizedAgentSummary {
+  id: string;
+  agentName: string;
+  agentPhoneMasked: string;
+  authorityScope: Record<string, unknown>;
+  validFrom: string;
+  validTo?: string;
+  status: string;
+}
+
+/** SPACE-04 / CUSTOMER-01A：客户在某个经营空间的业务关系。会员等级与状态按空间隔离。 */
 export interface CustomerWorkspaceLink {
   id: string;
   tenantId: string;
   workspaceId: string;
   customerId: string;
   levelName: string;
-  status: "active" | "suspended";
+  status: CustomerMembershipStatus;
   firstOrderAt?: string;
+  /** 各终态/限制态的发生时间。历史必须留痕，解除时不清空原时间戳。 */
+  suspendedAt?: string;
+  restrictedAt?: string;
+  exitedAt?: string;
+  closedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -6166,6 +6597,14 @@ export interface CreateRentalOrderRequest {
   customerId?: string;
   customerName: string;
   contactPhone?: string;
+  /**
+   * CUSTOMER-01C：订单四类主体的选择（需求 4.8.4）。
+   *
+   * 省略即回落为「签约/付款/使用人都是下单客户本人」——既有下单路径与存量订单
+   * 都是这个语义，因此本字段是**纯附加**，不改变任何现有调用方的行为。
+   * 企业订单可据此显式区分总部付款、分公司签约、司机使用、行政经办。
+   */
+  subjects?: CustomerOrderSubjectInput;
   qualificationApproved?: boolean;
   qualificationValidTo?: string;
   fulfillmentMode: RentalFulfillmentMode;
@@ -6325,6 +6764,18 @@ export interface RentalOrder {
   capabilityDecisions?: RentalCapabilityDecisionSnapshot[];
   /** Review P1-6：带风险继续的完整例外快照（不可变），配货与后续履约据此还原裁决。 */
   capabilityExceptions?: RentalCapabilityExceptionSnapshot[];
+  /**
+   * CUSTOMER-01C：订单四类主体（需求 4.8.4）。
+   *
+   * 三个 id 列服务于按角色反查（合并与注销要用），`subjectSnapshot` 固化下单当时的
+   * 名称、脱敏证件与授权范围——主体改名或授权到期都不得篡改历史订单。
+   * 全部可空：存量订单没有主体拆分，读取侧回落到 `customerId` 作为三个主体。
+   */
+  contractSubjectCustomerId?: string;
+  payerSubjectCustomerId?: string;
+  userSubjectCustomerId?: string;
+  agentId?: string;
+  subjectSnapshot?: CustomerOrderSubjectSnapshot[];
   /**
    * Review P1-10：能力快照的解释口径。
    *

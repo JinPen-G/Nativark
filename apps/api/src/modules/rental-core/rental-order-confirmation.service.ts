@@ -22,6 +22,8 @@ import {
   type RentalCoreFactStore
 } from "./rental-core-fact.repository";
 import { RentalCoreService } from "./rental-core.service";
+import { CustomerCorporateService } from "../platform/customer-corporate.service";
+import { CustomerOperationsService } from "../platform/customer-operations.service";
 
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalize);
@@ -97,7 +99,20 @@ export class RentalOrderConfirmationService {
     @Inject(RentalCoreFactRepository) private readonly coreFacts: RentalCoreFactStore,
     @Inject(RentalBusinessFactRepository) private readonly businessFacts: RentalBusinessFactStore,
     @Inject(RentalIdempotencyRepository) private readonly idempotency: RentalIdempotencyStore,
-    @Optional() private readonly hooks?: CapabilityHookRuntime
+    @Optional() private readonly hooks?: CapabilityHookRuntime,
+    /**
+     * CUSTOMER-01C：订单主体的解析与校验。
+     *
+     * 可选注入：不涉及客户主体的既有单测用位置参数构造本服务；缺失时不解析主体，
+     * 订单按原语义只存 `customerId`（读取侧回落为三个主体都是该客户）。
+     * 这不是 fail-open——主体是**附加**的责任归属信息，缺失不会放宽任何既有校验。
+     */
+    @Optional() private readonly subjects?: CustomerCorporateService,
+    /**
+     * CUSTOMER-01：真实订单创建必须消费客户可交易门禁。
+     * 保留可选注入仅兼容直接 new 本服务的既有单测；生产 Nest 容器始终注册该服务。
+     */
+    @Optional() private readonly customerOperations?: CustomerOperationsService
   ) {}
 
   /**
@@ -123,10 +138,30 @@ export class RentalOrderConfirmationService {
       if (replayed) return { order: replayed, replayed: true };
     }
 
+    const workspaceId = this.core.resolveWorkspaceId(tenantId);
+    if (this.customerOperations && input.customerId) {
+      const customerGate = await this.customerOperations.assertTransactable(tenantId, workspaceId, input.customerId);
+      if (!customerGate.allowed) throw new ConflictException(customerGate.message);
+    }
+
     const quote = this.business.consumeQuote(tenantId, context, input.quoteId);
     this.assertOrderMatchesQuote(input, quote);
 
     const committedAt = new Date().toISOString();
+    /**
+     * CUSTOMER-01C：解析并校验四类主体。
+     *
+     * 放在事务**之前**：主体校验是纯读判定（客户归属、合同有效期、经办人授权），
+     * 被拒时不该已经锁过库存。校验失败直接抛，绝不降级为「按下单客户本人处理」——
+     * 那会把一次显式的企业主体声明静默改成个人订单。
+     *
+     * 用 `committedAt` 作为判定时点，与报价消费、券锁定同一时刻：
+     * 各步取各自的 now() 会让「授权刚好在这一秒过期」产生自相矛盾的结论。
+     */
+    const resolvedSubjects =
+      this.subjects && input.customerId
+        ? await this.subjects.resolveOrderSubjects(tenantId, input.customerId, committedAt, input.subjects)
+        : undefined;
     const coupon = this.business.validateCouponForOrder(
       tenantId,
       context,
@@ -134,10 +169,21 @@ export class RentalOrderConfirmationService {
       quote.request.customerId,
       committedAt
     );
-    const order = await this.core.prepareOrder(tenantId, input, userName, quote);
+    const order = await this.core.prepareOrder(tenantId, input, userName, quote, resolvedSubjects);
 
     try {
       await this.prisma.$transaction(async (tx) => {
+        // 快速预检只改善反馈；这里才是权威判定。它与客户暂停、注销、合并共用
+        // customer_profiles 行锁，消除“检查通过后状态才变化”的竞态窗口。
+        if (this.customerOperations && input.customerId) {
+          const customerGate = await this.customerOperations.assertTransactableForNewBusiness(
+            tenantId,
+            workspaceId,
+            input.customerId,
+            tx
+          );
+          if (!customerGate.allowed) throw new ConflictException(customerGate.message);
+        }
         // 先锁定序列化资产或数量余额，再在同一事务内按最新预占重新计算。
         // 并发请求会在这里串行，后到者不能继续使用事务外看到的陈旧可用量。
         await this.core.assertAvailabilityWithLocks(tenantId, {
@@ -156,7 +202,7 @@ export class RentalOrderConfirmationService {
         await this.hooks?.evaluate({
           point: "order_confirmation",
           tenantId,
-          workspaceId: this.core.resolveWorkspaceId(tenantId),
+          workspaceId,
           categoryCode: context.category.code,
           subjectRef: { type: "order", id: order.id },
           // 富化：随订单一并传入已解析器材行与本次的例外确认，能力据此判定兼容性。
