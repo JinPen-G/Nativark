@@ -12,6 +12,9 @@ import type {
   CustomerStatusHistoryEntry,
   CustomerWorkspaceLink,
   MergeCustomersRequest,
+  SaveCustomerContractRequest,
+  SaveCustomerCreditRequest,
+  SaveCustomerInvoiceProfileRequest,
   SharedCustomerProfile
 } from "@store-rental/shared";
 import { request } from "./http";
@@ -58,8 +61,19 @@ export const customerApi = {
 
   invoiceProfiles: (customerId: string) =>
     request<CustomerCorporateInvoiceProfile[]>(`/platform/customers/${customerId}/invoice-profiles`),
+  /** 新增或编辑开票资料。带 id 即编辑；设为默认由服务端负责降级旧默认。 */
+  saveInvoiceProfile: (customerId: string, data: SaveCustomerInvoiceProfileRequest) =>
+    request<CustomerCorporateInvoiceProfile>(`/platform/customers/${customerId}/invoice-profiles`, { method: "put", data }),
   contracts: (customerId: string) =>
     request<CustomerCorporateContract[]>(`/platform/customers/${customerId}/contracts`),
+  saveContract: (customerId: string, data: SaveCustomerContractRequest) =>
+    request<CustomerCorporateContract>(`/platform/customers/${customerId}/contracts`, { method: "put", data }),
   credit: (customerId: string) =>
-    request<CustomerCorporateCredit | undefined>(`/platform/customers/${customerId}/credit`)
+    request<CustomerCorporateCredit | undefined>(`/platform/customers/${customerId}/credit`),
+  /**
+   * 维护授信与账期。**只存事实**：本阶段不接进报价、支付或订单额度占用——
+   * 额度占用要与订单、支付、退款联动，缺这层联动就先改金额链路会留下对不上的账。
+   */
+  saveCredit: (customerId: string, data: SaveCustomerCreditRequest) =>
+    request<CustomerCorporateCredit>(`/platform/customers/${customerId}/credit`, { method: "put", data })
 };

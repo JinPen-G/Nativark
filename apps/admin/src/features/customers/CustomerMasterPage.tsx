@@ -1,12 +1,17 @@
 import { HistoryOutlined, IdcardOutlined, MergeCellsOutlined, SafetyCertificateOutlined, StopOutlined } from "@ant-design/icons";
 import type {
+  CustomerCorporateContract,
+  CustomerCorporateInvoiceProfile,
   CustomerDuplicateCandidate,
   CustomerMembershipStatus,
   CustomerMergePreview,
+  SaveCustomerContractRequest,
+  SaveCustomerCreditRequest,
+  SaveCustomerInvoiceProfileRequest,
   SharedCustomerProfile
 } from "@store-rental/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Button, Card, Descriptions, Drawer, Form, Input, Select, Space, Table, Tabs, Tag, Timeline, Tooltip, Typography } from "antd";
+import { Alert, App, Button, Card, Descriptions, Drawer, Form, Input, InputNumber, Select, Space, Table, Tabs, Tag, Timeline, Tooltip, Typography } from "antd";
 import { useState } from "react";
 import { customerApi } from "@/api/customer";
 import { PageHeader } from "@/components/PageHeader";
@@ -52,6 +57,27 @@ const fieldLabel: Record<string, string> = {
   corporateTaxNo: "统一社会信用代码"
 };
 
+/** 企业资料展示文案。状态一律逐态给文案——「停用/终止/吊销」处理人不同。 */
+const invoiceTypeLabel: Record<string, string> = { vat_special: "增值税专用发票", vat_normal: "增值税普通发票" };
+const invoiceStatusMeta: Record<string, { label: string; color: string }> = {
+  active: { label: "启用", color: "success" },
+  disabled: { label: "停用", color: "default" }
+};
+const contractStatusMeta: Record<string, { label: string; color: string }> = {
+  draft: { label: "草稿", color: "default" },
+  active: { label: "生效", color: "success" },
+  expired: { label: "已到期", color: "warning" },
+  terminated: { label: "已终止", color: "volcano" }
+};
+const creditStatusMeta: Record<string, { label: string; color: string }> = {
+  active: { label: "生效", color: "success" },
+  suspended: { label: "暂停", color: "warning" },
+  revoked: { label: "已吊销", color: "volcano" }
+};
+const billingCycleLabel: Record<string, string> = {
+  monthly: "月结", semi_monthly: "半月结", per_order: "按单结"
+};
+
 /** 合并后仍指向被合并方的历史引用。这些**不搬迁**，否则历史凭证与当时事实不一致。 */
 const referenceLabel: Record<string, string> = {
   order_customer: "订单客户",
@@ -83,6 +109,13 @@ export function CustomerMasterPage() {
   const canMerge = hasPermission("store-rental:customer:merge");
   const canClose = hasPermission("store-rental:customer:close");
   const canReveal = hasPermission("store-rental:customer:reveal-sensitive");
+  /**
+   * 企业资料与个人会员分属两套权限（需求 4.8.4）：能改会员等级不等于能改企业授信与账期。
+   * manage 是 view 的超集——服务端 GET 接受两者之一，这里保持同一口径，
+   * 否则只有 manage 的账号会看不到自己有权编辑的数据。
+   */
+  const canCorporateManage = hasPermission("store-rental:corporate:manage");
+  const canCorporateView = hasPermission("store-rental:corporate:view") || canCorporateManage;
 
   const [selected, setSelected] = useState<SharedCustomerProfile>();
   const [statusScope, setStatusScope] = useState<"account" | "workspace">();
@@ -92,6 +125,9 @@ export function CustomerMasterPage() {
   /** 冲突字段的人工取舍：字段 → "target"（保留方的值）/"source"（被合并方的值）。 */
   const [fieldResolutions, setFieldResolutions] = useState<Record<string, string>>({});
   const [statusForm] = Form.useForm<StatusFormValues>();
+  /** 企业资料编辑：kind 决定表单形态，id 为空即新增。授信是单条记录，不带 id。 */
+  const [corporateEdit, setCorporateEdit] = useState<{ kind: "invoice" | "contract" | "credit"; id?: string }>();
+  const [corporateForm] = Form.useForm<Record<string, unknown>>();
   const [mergeForm] = Form.useForm<{ reason: string; approver?: string }>();
 
   const customers = useQuery({ queryKey: ["customer-master"], queryFn: customerApi.list });
@@ -127,12 +163,46 @@ export function CustomerMasterPage() {
     enabled: Boolean(mergeFor)
   });
 
+  /**
+   * 企业资料三查询。两道 enabled 条件都不能省：
+   *   - 个人客户根本没有这三类资料，请求只会拿回空数组并制造噪声；
+   *   - 无企业查看权限时不发请求。前端隐藏**不能**替代后端鉴权（守卫已按
+   *     corporate:view / corporate:manage 判定），但明知会 403 还发一遍，
+   *     只会在审计里堆一串注定失败的调用。
+   */
+  const isCorporate = (detail.data ?? selected)?.customerType === "corporate";
+  const corporateEnabled = Boolean(selected) && isCorporate && canCorporateView;
+  const invoiceProfiles = useQuery({
+    queryKey: ["customer-invoice-profiles", selected?.id],
+    queryFn: () => customerApi.invoiceProfiles(selected!.id),
+    enabled: corporateEnabled
+  });
+  const contracts = useQuery({
+    queryKey: ["customer-contracts", selected?.id],
+    queryFn: () => customerApi.contracts(selected!.id),
+    enabled: corporateEnabled
+  });
+  const credit = useQuery({
+    queryKey: ["customer-credit", selected?.id],
+    queryFn: () => customerApi.credit(selected!.id),
+    enabled: corporateEnabled
+  });
+
   const refreshAll = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["customer-master"] }),
       queryClient.invalidateQueries({ queryKey: ["customer-detail"] }),
       queryClient.invalidateQueries({ queryKey: ["customer-history"] }),
       queryClient.invalidateQueries({ queryKey: ["customer-closability"] })
+    ]);
+  };
+
+  /** 企业资料保存后单独刷新这三项；不必连带重拉主档列表与状态历史。 */
+  const refreshCorporate = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["customer-invoice-profiles"] }),
+      queryClient.invalidateQueries({ queryKey: ["customer-contracts"] }),
+      queryClient.invalidateQueries({ queryKey: ["customer-credit"] })
     ]);
   };
 
@@ -170,6 +240,45 @@ export function CustomerMasterPage() {
     },
     onError: (error: Error) => message.error(error.message || "开通登录账号失败")
   });
+
+  const saveCorporate = useMutation<unknown, Error, Record<string, unknown>>({
+    mutationFn: (values) => {
+      const id = selected!.id;
+      if (corporateEdit!.kind === "invoice") {
+        return customerApi.saveInvoiceProfile(id, { ...values, id: corporateEdit!.id } as SaveCustomerInvoiceProfileRequest);
+      }
+      if (corporateEdit!.kind === "contract") {
+        return customerApi.saveContract(id, { ...values, id: corporateEdit!.id } as SaveCustomerContractRequest);
+      }
+      return customerApi.saveCredit(id, values as unknown as SaveCustomerCreditRequest);
+    },
+    onSuccess: async () => {
+      await refreshCorporate();
+      setCorporateEdit(undefined);
+      corporateForm.resetFields();
+      message.success("企业资料已保存");
+    },
+    onError: (error: Error) => message.error(error.message || "保存失败")
+  });
+
+  /**
+   * 打开编辑抽屉并回填。回填用**服务端返回的值**，脱敏字段保持脱敏、不在前端还原。
+   *
+   * 日期字段要截成 YYYY-MM-DD：服务端返回的是完整 ISO 串，直接灌进
+   * `placeholder="YYYY-MM-DD"` 的输入框会显示成 `2026-01-10T00:00:00.000Z`，
+   * 运营看不懂也编辑不动。
+   */
+  function openCorporateEdit(kind: "invoice" | "contract" | "credit", row?: Record<string, unknown>) {
+    setCorporateEdit({ kind, id: row?.id as string | undefined });
+    corporateForm.resetFields();
+    if (!row) return;
+    const values = { ...row };
+    for (const field of ["signedAt", "effectiveFrom", "effectiveTo"]) {
+      const value = values[field];
+      if (typeof value === "string") values[field] = value.slice(0, 10);
+    }
+    corporateForm.setFieldsValue(values);
+  }
 
   function closeMerge() {
     setMergeFor(undefined);
@@ -305,6 +414,126 @@ export function CustomerMasterPage() {
       )
     }
   ];
+
+  /** 开票资料列。银行账号与联系电话只展示服务端给的掩码，不在前端拼回明文。 */
+  const invoiceColumns = [
+    {
+      title: "开票信息",
+      render: (_: unknown, row: CustomerCorporateInvoiceProfile) => (
+        <Space orientation="vertical" size={0}>
+          <span>
+            <b>{row.title}</b>
+            {row.isDefault && <Tag color="blue" style={{ marginLeft: 6 }}>默认</Tag>}
+          </span>
+          <span className="muted">{invoiceTypeLabel[row.invoiceType] ?? row.invoiceType} · {row.taxNo}</span>
+        </Space>
+      )
+    },
+    {
+      title: "银行与联系",
+      render: (_: unknown, row: CustomerCorporateInvoiceProfile) => (
+        <Space orientation="vertical" size={0}>
+          <span className="muted">{row.bankName ?? "-"} {row.bankAccountMasked ?? ""}</span>
+          <span className="muted">{row.contactPhoneMasked ?? "-"} {row.receiveEmail ?? ""}</span>
+        </Space>
+      )
+    },
+    {
+      title: "状态",
+      render: (_: unknown, row: CustomerCorporateInvoiceProfile) => {
+        const meta = invoiceStatusMeta[row.status] ?? { label: row.status, color: "default" };
+        return <Tag color={meta.color}>{meta.label}</Tag>;
+      }
+    },
+    {
+      title: "操作",
+      render: (_: unknown, row: CustomerCorporateInvoiceProfile) => (
+        <Tooltip title={canCorporateManage ? undefined : "需要「企业客户管理」权限"}>
+          <Button
+            type="link"
+            size="small"
+            disabled={!canCorporateManage}
+            onClick={() => openCorporateEdit("invoice", row as unknown as Record<string, unknown>)}
+          >
+            编辑
+          </Button>
+        </Tooltip>
+      )
+    }
+  ];
+
+  /** 合同列。有效期与终止原因必须能看到——「为什么这份合同不能用了」是高频追问。 */
+  const contractColumns = [
+    {
+      title: "合同",
+      render: (_: unknown, row: CustomerCorporateContract) => (
+        <Space orientation="vertical" size={0}>
+          <b>{row.name}</b>
+          <span className="muted">{row.contractNo}</span>
+        </Space>
+      )
+    },
+    {
+      title: "有效期",
+      render: (_: unknown, row: CustomerCorporateContract) => (
+        <Space orientation="vertical" size={0}>
+          <span>{row.effectiveFrom.slice(0, 10)} ~ {row.effectiveTo?.slice(0, 10) ?? "长期"}</span>
+          {row.signedAt && <span className="muted">签署于 {row.signedAt.slice(0, 10)}</span>}
+        </Space>
+      )
+    },
+    {
+      title: "状态",
+      render: (_: unknown, row: CustomerCorporateContract) => {
+        const meta = contractStatusMeta[row.status] ?? { label: row.status, color: "default" };
+        return (
+          <Space orientation="vertical" size={0}>
+            <Tag color={meta.color}>{meta.label}</Tag>
+            {row.terminatedReason && <span className="muted">{row.terminatedReason}</span>}
+          </Space>
+        );
+      }
+    },
+    {
+      title: "合同文件",
+      render: (_: unknown, row: CustomerCorporateContract) =>
+        row.fileRef ? <span className="muted">{row.fileRef}</span> : <span className="muted">未上传</span>
+    },
+    {
+      title: "操作",
+      render: (_: unknown, row: CustomerCorporateContract) => (
+        <Tooltip title={canCorporateManage ? undefined : "需要「企业客户管理」权限"}>
+          <Button
+            type="link"
+            size="small"
+            disabled={!canCorporateManage}
+            onClick={() => openCorporateEdit("contract", row as unknown as Record<string, unknown>)}
+          >
+            编辑
+          </Button>
+        </Tooltip>
+      )
+    }
+  ];
+
+  /** 授信摘要。审批人与原因一并展示——额度变更要能追溯到人。 */
+  const creditItems = (row: NonNullable<typeof credit.data>) => {
+    const meta = creditStatusMeta[row.status] ?? { label: row.status, color: "default" };
+    return [
+      { key: "limit", label: "授信额度", children: `¥ ${row.creditLimit.toLocaleString("zh-CN")}` },
+      { key: "term", label: "账期", children: `${row.settlementTermDays} 天` },
+      { key: "cycle", label: "账单周期", children: billingCycleLabel[row.billingCycle] ?? row.billingCycle },
+      { key: "status", label: "状态", children: <Tag color={meta.color}>{meta.label}</Tag> },
+      {
+        key: "approve",
+        label: "审批",
+        children: row.approvedBy
+          ? `${row.approvedBy}${row.approvedAt ? ` · ${row.approvedAt.slice(0, 10)}` : ""}`
+          : "-"
+      },
+      { key: "reason", label: "变更原因", children: row.reason ?? "-" }
+    ];
+  };
 
   // 候选列表刻意展示判据与掩码值：运营要先知道「凭什么判定重复」，才能负责地点下合并。
   const dupColumns = [
@@ -533,6 +762,97 @@ export function CustomerMasterPage() {
               )}
             </Card>
 
+            {/* 企业资料只对企业客户加载与展示：个人客户没有开票、合同与授信这三类事实。 */}
+            {isCorporate && !canCorporateView && (
+              <Alert
+                type="info"
+                showIcon
+                title="企业开票、合同与授信需要企业客户权限"
+                description="查看需要「企业客户查看」或「企业客户管理」权限，编辑仅限「企业客户管理」。未取得权限时本页不会发起这些请求。"
+                style={{ marginTop: 16 }}
+              />
+            )}
+            {isCorporate && canCorporateView && (
+              <>
+                <Card
+                  size="small"
+                  title="企业开票资料"
+                  style={{ marginTop: 16 }}
+                  extra={
+                    <Tooltip title={canCorporateManage ? undefined : "需要「企业客户管理」权限"}>
+                      <Button size="small" disabled={!canCorporateManage} onClick={() => openCorporateEdit("invoice")}>
+                        新增
+                      </Button>
+                    </Tooltip>
+                  }
+                >
+                  {/* 一家企业可以持有多份开票资料，订单引用的是下单当时的默认/指定那一份，
+                      因此这里如实列出全部，并标出哪一份是默认。 */}
+                  <QueryState loading={invoiceProfiles.isLoading} error={invoiceProfiles.error}>
+                    <Table<CustomerCorporateInvoiceProfile>
+                      size="small"
+                      rowKey="id"
+                      dataSource={invoiceProfiles.data ?? []}
+                      pagination={false}
+                      locale={{ emptyText: "尚未登记开票资料" }}
+                      columns={invoiceColumns}
+                    />
+                  </QueryState>
+                </Card>
+                <Card
+                  size="small"
+                  title="企业合同"
+                  style={{ marginTop: 16 }}
+                  extra={
+                    <Tooltip title={canCorporateManage ? undefined : "需要「企业客户管理」权限"}>
+                      <Button size="small" disabled={!canCorporateManage} onClick={() => openCorporateEdit("contract")}>
+                        新增
+                      </Button>
+                    </Tooltip>
+                  }
+                >
+                  <QueryState loading={contracts.isLoading} error={contracts.error}>
+                    <Table<CustomerCorporateContract>
+                      size="small"
+                      rowKey="id"
+                      dataSource={contracts.data ?? []}
+                      pagination={false}
+                      locale={{ emptyText: "尚未登记企业合同" }}
+                      columns={contractColumns}
+                    />
+                  </QueryState>
+                </Card>
+
+                <Card
+                  size="small"
+                  title="授信与账期"
+                  style={{ marginTop: 16 }}
+                  extra={
+                    <Tooltip title={canCorporateManage ? undefined : "需要「企业客户管理」权限"}>
+                      <Button
+                        size="small"
+                        disabled={!canCorporateManage}
+                        onClick={() => openCorporateEdit("credit", credit.data as unknown as Record<string, unknown>)}
+                      >
+                        {credit.data ? "编辑" : "设置"}
+                      </Button>
+                    </Tooltip>
+                  }
+                >
+                  <QueryState loading={credit.isLoading} error={credit.error}>
+                    {credit.data ? (
+                      <Descriptions column={1} size="small" items={creditItems(credit.data)} />
+                    ) : (
+                      <span className="muted">尚未设置授信与账期</span>
+                    )}
+                  </QueryState>
+                  <Typography.Paragraph type="secondary" style={{ marginTop: 8, marginBottom: 0 }}>
+                    本阶段授信只维护事实：额度尚未接入报价、支付与订单额度占用。
+                    额度占用要与订单、支付、退款联动，缺这层联动就先改金额链路会留下对不上的账。
+                  </Typography.Paragraph>
+                </Card>
+              </>
+            )}
             <Card
               size="small"
               title={<Space><HistoryOutlined /><span>状态历史时间线</span></Space>}
@@ -830,6 +1150,128 @@ export function CustomerMasterPage() {
             </Form>
           </>
         )}
+      </Drawer>
+
+      <Drawer
+        title={
+          corporateEdit?.kind === "invoice" ? (corporateEdit.id ? "编辑开票资料" : "新增开票资料")
+            : corporateEdit?.kind === "contract" ? (corporateEdit.id ? "编辑企业合同" : "新增企业合同")
+              : "授信与账期"
+        }
+        size={560}
+        open={Boolean(corporateEdit)}
+        destroyOnHidden
+        onClose={() => { setCorporateEdit(undefined); corporateForm.resetFields(); }}
+        extra={
+          <Button type="primary" loading={saveCorporate.isPending} onClick={() => corporateForm.submit()}>
+            保存
+          </Button>
+        }
+      >
+        <Form form={corporateForm} layout="vertical" onFinish={(values) => saveCorporate.mutate(values)}>
+          {corporateEdit?.kind === "invoice" && (
+            <>
+              <Form.Item name="invoiceType" label="发票类型" rules={[{ required: true, message: "请选择发票类型" }]}>
+                <Select options={Object.entries(invoiceTypeLabel).map(([value, label]) => ({ value, label }))} />
+              </Form.Item>
+              <Form.Item name="title" label="开票名称" rules={[{ required: true, message: "开票名称不能为空" }]}>
+                <Input placeholder="与营业执照一致的企业全称" />
+              </Form.Item>
+              <Form.Item name="taxNo" label="开票税号" rules={[{ required: true, message: "开票税号不能为空" }]}>
+                <Input />
+              </Form.Item>
+              <Form.Item name="registeredAddress" label="注册地址"><Input /></Form.Item>
+              <Form.Item name="bankName" label="开户银行"><Input /></Form.Item>
+              {/* 库里只存脱敏值，页面拿不到明文，也不做还原。因此编辑时必须说清：
+                  留空等于清除——否则运营会以为「不动这一栏」就是保留原值。 */}
+              <Form.Item
+                name="bankAccount"
+                label="银行账号"
+                extra={
+                  corporateEdit.id
+                    ? `当前已存脱敏值${invoiceProfiles.data?.find((row) => row.id === corporateEdit.id)?.bankAccountMasked
+                        ? `：${invoiceProfiles.data.find((row) => row.id === corporateEdit.id)!.bankAccountMasked}`
+                        : "：无"}。需要保留请重新填写完整账号，留空将清除。`
+                    : "只保存脱敏值，明文不入库。"
+                }
+              >
+                <Input placeholder="完整银行账号" />
+              </Form.Item>
+              <Form.Item
+                name="contactPhone"
+                label="开票联系电话"
+                extra={corporateEdit.id ? "同上：只存脱敏值，留空将清除。" : undefined}
+              >
+                <Input />
+              </Form.Item>
+              <Form.Item name="receiveEmail" label="收票邮箱"><Input /></Form.Item>
+              <Form.Item name="isDefault" label="设为默认开票资料">
+                <Select
+                  options={[{ value: false, label: "否" }, { value: true, label: "是（原默认将自动降级）" }]}
+                />
+              </Form.Item>
+              <Form.Item name="status" label="状态">
+                <Select options={Object.entries(invoiceStatusMeta).map(([value, meta]) => ({ value, label: meta.label }))} />
+              </Form.Item>
+            </>
+          )}
+          {corporateEdit?.kind === "contract" && (
+            <>
+              <Form.Item name="contractNo" label="合同编号" rules={[{ required: true, message: "合同编号不能为空" }]}>
+                <Input />
+              </Form.Item>
+              <Form.Item name="name" label="合同名称" rules={[{ required: true, message: "合同名称不能为空" }]}>
+                <Input />
+              </Form.Item>
+              <Form.Item name="signedAt" label="签署日期"><Input placeholder="YYYY-MM-DD" /></Form.Item>
+              {/* 有效期倒挂由服务端拒绝；这里只提示口径，不在前端重复实现判定逻辑。 */}
+              <Form.Item name="effectiveFrom" label="生效日期" rules={[{ required: true, message: "生效日期不能为空" }]}>
+                <Input placeholder="YYYY-MM-DD" />
+              </Form.Item>
+              <Form.Item name="effectiveTo" label="到期日期" extra="留空表示长期有效；不得早于生效日期。">
+                <Input placeholder="YYYY-MM-DD" />
+              </Form.Item>
+              <Form.Item name="status" label="状态">
+                <Select options={Object.entries(contractStatusMeta).map(([value, meta]) => ({ value, label: meta.label }))} />
+              </Form.Item>
+              {/* 终止必须给原因（服务端强校验）：「这份合同为什么不能用了」是高频追问。 */}
+              <Form.Item
+                name="terminatedReason"
+                label="终止原因"
+                extra="状态选「已终止」时必填。"
+                dependencies={["status"]}
+                rules={[({ getFieldValue }) => ({
+                  required: getFieldValue("status") === "terminated",
+                  message: "终止合同必须填写原因"
+                })]}
+              >
+                <Input.TextArea rows={2} maxLength={300} showCount />
+              </Form.Item>
+              <Form.Item name="fileRef" label="合同文件引用" extra="文件资产 id 或存档路径。">
+                <Input />
+              </Form.Item>
+            </>
+          )}
+          {corporateEdit?.kind === "credit" && (
+            <>
+              <Form.Item name="creditLimit" label="授信额度（元）" rules={[{ required: true, message: "授信额度不能为空" }]}>
+                <InputNumber min={0} precision={2} style={{ width: "100%" }} />
+              </Form.Item>
+              <Form.Item name="settlementTermDays" label="账期（天）" rules={[{ required: true, message: "账期不能为空" }]}>
+                <InputNumber min={0} precision={0} style={{ width: "100%" }} />
+              </Form.Item>
+              <Form.Item name="billingCycle" label="账单周期">
+                <Select options={Object.entries(billingCycleLabel).map(([value, label]) => ({ value, label }))} />
+              </Form.Item>
+              <Form.Item name="status" label="状态">
+                <Select options={Object.entries(creditStatusMeta).map(([value, meta]) => ({ value, label: meta.label }))} />
+              </Form.Item>
+              <Form.Item name="reason" label="变更原因" extra="额度与账期变更要能追溯到人和理由。">
+                <Input.TextArea rows={3} maxLength={300} showCount />
+              </Form.Item>
+            </>
+          )}
+        </Form>
       </Drawer>
     </>
   );
