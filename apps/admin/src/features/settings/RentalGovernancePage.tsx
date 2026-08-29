@@ -752,7 +752,8 @@ export function RentalGovernancePage() {
                       </Form.Item>
                       <Form.Item
                         name={["pricing", "holidayPricingEnabled"]}
-                        label="启用日历差异定价"
+                        label="启用旧版周末/节假日倍率"
+                        tooltip="兼容开关，只作用于价格里的旧字段「周末系数」「节假日系数」。关闭后这两个系数不再参与计价，落回商品基础价；逐商品配置的日期类型价格、周期性计价时段与一次性日期时间覆盖不受影响，照常生效。"
                         valuePropName="checked"
                       >
                         <Switch />

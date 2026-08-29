@@ -755,6 +755,35 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   }
 
   /**
+   * 内存数据源下的空间级费率全集：与数据库里的价格版本**同一构造规则**。
+   *
+   * 数据库模式的一条版本 = 该时刻空间内全部启用计划的「商品 × 计价单位」全集，
+   * 同键取 `effectiveFrom` 最晚者、同刻按 `code` 稳定排序（见迁移与 mergeSpaceRates）。
+   * 内存模式早前取「第一个 enabled 计划」的费率，于是同一份输入两种模式可能算出
+   * 不同的钱；更糟的是报价里 `pricingPlanVersion` 记的是 `resolvePricingPlan` 择定的
+   * 计划，费率却来自数组里排在前面的另一个计划，快照与实际算价来源对不上。
+   */
+  private memorySpaceRates(tenantId: string, context: BusinessContext, rentalStartAt: string): RentalPricingRate[] {
+    const at = new Date(rentalStartAt).getTime();
+    const effective = this.state(tenantId, context).pricingPlans.filter(
+      (plan) =>
+        plan.status === "enabled" &&
+        new Date(plan.effectiveFrom).getTime() <= at &&
+        (plan.effectiveTo === undefined || new Date(plan.effectiveTo).getTime() > at)
+    );
+    // 生效早的先写、晚的后写，同刻按 code 兜稳定序——后写覆盖同键，等价于「取生效最晚者」。
+    const ordered = [...effective].sort((left, right) => {
+      const byEffective = new Date(left.effectiveFrom).getTime() - new Date(right.effectiveFrom).getTime();
+      return byEffective !== 0 ? byEffective : left.code.localeCompare(right.code);
+    });
+    const merged = new Map<string, RentalPricingRate>();
+    for (const plan of ordered) {
+      for (const rate of plan.rates) merged.set(`${rate.itemGroupId}:${rate.unit}`, rate);
+    }
+    return [...merged.values()];
+  }
+
+  /**
    * PRICE-03：报价取价——命中租期开始时刻的价格版本。
    *
    * 没有覆盖该时刻的版本时**明确拒绝**，不回落计划行现值：计划行是编辑工作区，
@@ -769,9 +798,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   ): Promise<{ versionId: string; version: string; effectiveFrom: string; rates: RentalPricingRate[] } | { rates: RentalPricingRate[] }> {
     const prisma = this.prisma;
     if (!prisma || (process.env.PLATFORM_DATA_SOURCE ?? "mysql").toLowerCase() !== "mysql") {
-      // 内存数据源根本没有版本表，不存在「版本没覆盖到」这件事，因此取启用计划现值。
-      // 这不是 MySQL 路径上的回落——那条路径下无版本一律拒绝。
-      return { rates: this.state(tenantId, context).pricingPlans.find((plan) => plan.status === "enabled")?.rates ?? [] };
+      // 内存数据源根本没有版本表，不存在「版本没覆盖到」这件事，因此按与版本相同的
+      // 规则从启用计划现值合成空间全集。这不是 MySQL 路径上的回落——那条路径下无版本一律拒绝。
+      return { rates: this.memorySpaceRates(tenantId, context, rentalStartAt) };
     }
     const workspaceId = this.workspaceOf(tenantId);
     const row = await this.findSpaceVersionAt(tenantId, workspaceId, new Date(rentalStartAt), client);
@@ -3065,15 +3094,20 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       // 自然日与夜按每个计费日期取价；小时、班次、24 小时、周、30 日月按每个
       // 计费块开始时所在的营业日期取价。日期序列由策略给出——单位语义在策略里，
       // 日历知识在服务层，两边各管一段。
-      const holidayPricing = context.settings.pricing.holidayPricingEnabled && calendars.length > 0;
+      // 兼容开关 `pricing.holidayPricingEnabled` 只关**旧的**空间级周末/节假日倍率，
+      // 不关逐商品的 `dayTypePrices`，也不关时间窗规则（日期时间覆盖、周期性时段）。
+      // 判定与取值都在 resolveUnitPrice 内一次算完，这里不再二次筛选。
+      const legacyDayTypeMultipliers = context.settings.pricing.holidayPricingEnabled;
       const unitDates = pricingStrategy.billableUnitDates(input.startAt, input.endAt, units, pricingContext);
       // 逐单位解析价格层并记录**取价时点**（需求 4.5.6 v2.9）：分时价格按取价时点命中。
-      const unitFactors = unitDates.map((unitPoint) => this.resolveUnitPrice(calendars, unitPoint.date, unitPoint.at, rate, quoteTimeZone));
-      const unitMultipliers = unitFactors.map((item) =>
-        holidayPricing || item.priceModule ? item.value : 1
+      const unitFactors = unitDates.map((unitPoint) =>
+        this.resolveUnitPrice(calendars, unitPoint.date, unitPoint.at, rate, quoteTimeZone, legacyDayTypeMultipliers)
       );
-      // 停业日必须拦住：即使关掉了节假日定价，停业日也不能接单。
-      if (!holidayPricing) for (const unitPoint of unitDates) this.resolveUnitPrice(calendars, unitPoint.date, unitPoint.at, rate, quoteTimeZone);
+      const unitMultipliers = unitFactors.map((item) => item.value);
+      // 停业日不在这里拦：报价可以跨过停业日，只有领取/归还**时点**受限，
+      // 那道校验在 assertFulfillmentDayOpen（需求 4.5.4）。早前此处有一个调用后
+      // 丢弃结果的循环，注释声称"停业日必须拦住"，实际什么也没拦——留着会让
+      // 后来者以为报价路径上还有一道停业校验。
       // 顺序按需求 4.4.5：阶梯单价 → 逐单位日期价格 → 单件封顶 → 乘商品数量。
       // 金额、说明与日历快照都消费**同一份** breakdown：早前快照里的单位价用
       // `amountPerItem(rate, 1, [1])` 现算，等于按 1 个单位选阶梯档，租 7 天命中 80 元档时
@@ -3128,8 +3162,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       });
       for (const [key, entry] of perDate) {
         const date = key.split("|")[0];
-        const multiplier = holidayPricing || entry.factor.priceModule ? entry.factor.value : 1;
-        const hitLayer = holidayPricing || entry.factor.priceModule ? entry.factor.layer ?? "base" : "base";
+        const multiplier = entry.factor.value;
+        const hitLayer = entry.factor.layer;
         calendarSnapshot.push({
           date,
           year: entry.factor.year,
@@ -3152,9 +3186,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         .slice(0, units)
         .map((unitPoint, index) => {
           const factor = unitFactors[index];
-          const shown = holidayPricing ? factor.value : 1;
           const at = unitPoint.at ? ` @${unitPoint.at.slice(11, 16)}` : "";
-          return `${unitPoint.date}${at} ${factor.type}×${shown.toFixed(2)}${factor.overridden && holidayPricing ? "(覆盖)" : ""}`;
+          // 说明里展示的必须是**实际采用的**系数与层，而不是再按开关折算一遍：
+          // 折算已在 resolveUnitPrice 内完成，这里二次判断只会让说明与金额对不上。
+          return `${unitPoint.date}${at} ${factor.type}×${factor.value.toFixed(2)}${factor.overridden ? "(覆盖)" : ""}`;
         })
         .join("、");
       const detail = [
@@ -3861,12 +3896,24 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
    * 与旧 `dateMultiplier` 的差别：多收 `priceAt`（取价时点），带时间边界的一次性
    * 覆盖按「取价时点是否落在 [start, end)」命中，而不是整日命中——这正是
    * 「周五 10:00 与 14:00 开始的 24 小时计费块可以得到不同价格」的解析点。
-   * **周期性计价时段层**（周五 12:00 起按周末价等重复规则）由 PRICE-03 提供
-   * 价格事实；该层未就绪，这里留出解析位置而不伪造价格源。
    * 停业日**不阻止**报价（需求 4.5.4）——拦领取/归还时点是 assertFulfillmentDayOpen
    * 的职责，不是逐日取价的职责。
+   *
+   * `legacyDayTypeMultipliers` 对应经营设置里的 `pricing.holidayPricingEnabled`，
+   * 只控制**旧的** `weekendMultiplier` / `holidayMultiplier` 兼容回落：
+   * 关掉后这两个字段不再参与计价，逐商品的 `dayTypePrices`、周期性时段与
+   * 日期时间覆盖都照常生效。取价结论（value 与 layer）在本方法内一次算完，
+   * 不留给调用方二次判断——早前调用方各写一遍三元表达式，两处口径分叉，
+   * 而每个分支都返回"属于价格模块"，开关实际上从未生效。
    */
-  private resolveUnitPrice(calendars: RentalCalendarYear[], date: string, priceAt: string | undefined, rate: RentalPricingRate, timeZone: string) {
+  private resolveUnitPrice(
+    calendars: RentalCalendarYear[],
+    date: string,
+    priceAt: string | undefined,
+    rate: RentalPricingRate,
+    timeZone: string,
+    legacyDayTypeMultipliers: boolean
+  ) {
     const calendar = calendars.find((item) => item.year === businessYearFromDateKey(date));
     const day = calendar?.days.find((item) => item.date === date);
     const type: RentalDayType = day?.dayType ?? "workday";
@@ -3893,29 +3940,36 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
           atMs >= new Date(override.start).getTime() &&
           atMs < new Date(override.end).getTime()
       );
-      if (hit) return { ...baseResult, value: hit.multiplier, layer: "date_override" as const, priceModule: true };
+      if (hit) return { ...baseResult, value: hit.multiplier, layer: "date_override" as const };
     }
 
     // 第 2 层：周期性计价时段（PRICE-03）。按取价时点的营业时区星期与时分命中。
     if (priceAt && rate.periodicWindows?.length) {
       const hitWindow = rate.periodicWindows.find((window) => periodicWindowHits(window, priceAt, timeZone));
       if (hitWindow) {
-        return { ...baseResult, value: hitWindow.multiplier, layer: "periodic" as const, priceModule: true };
+        return { ...baseResult, value: hitWindow.multiplier, layer: "periodic" as const };
       }
     }
-    // 第 3 层：商品在该日期类型下的价格（PRICE-03 的逐类型价格优先于既有兼容倍率）。
+
+    // 第 3 层：商品在该日期类型下的价格（PRICE-03 的逐类型价格）。
+    // 这是显式按商品配置的价格事实，**不**受兼容开关影响：运营配了「节假日 1.5」
+    // 就该按 1.5 收，否则配置只是摆设。
     const dayTypePrice = rate.dayTypePrices?.[type];
     if (dayTypePrice !== undefined) {
-      return { ...baseResult, value: dayTypePrice, layer: "day_type" as const, priceModule: true };
+      return { ...baseResult, value: dayTypePrice, layer: "day_type" as const };
     }
-    if (type === "weekend") {
-      return { ...baseResult, value: rate.weekendMultiplier, layer: "day_type" as const, priceModule: true };
-    }
-    if (type === "statutory_holiday" || type === "tenant_special") {
-      return { ...baseResult, value: rate.holidayMultiplier, layer: "day_type" as const, priceModule: true };
+    // 第 3 层的兼容回落：整个空间共用的旧周末/节假日倍率。它是 PRICE-03 之前的口径，
+    // 由 `holidayPricingEnabled` 控制；关掉后落到基础价，而不是继续悄悄加价。
+    if (legacyDayTypeMultipliers) {
+      if (type === "weekend") {
+        return { ...baseResult, value: rate.weekendMultiplier, layer: "day_type_legacy" as const };
+      }
+      if (type === "statutory_holiday" || type === "tenant_special") {
+        return { ...baseResult, value: rate.holidayMultiplier, layer: "day_type_legacy" as const };
+      }
     }
     // 第 4 层：商品基础价格。
-    return { ...baseResult, value: 1, layer: "base" as const, priceModule: true };
+    return { ...baseResult, value: 1, layer: "base" as const };
   }
 
   /** 与逐单位取价必须同一日界口径，否则优惠的适用日期与计价的命中日期会错开。 */

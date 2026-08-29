@@ -5066,6 +5066,15 @@ export interface TenantRentalBusinessSettings {
     defaultUnit: RentalPricingUnit;
     currency: "CNY";
     taxIncluded: boolean;
+    /**
+     * **兼容开关**：是否仍启用 PRICE-03 之前的空间级 `weekendMultiplier` /
+     * `holidayMultiplier` 倍率。
+     *
+     * 只作用于这两个旧字段。逐商品的 `dayTypePrices`、周期性计价时段与日期时间覆盖
+     * 都是价格版本里的显式配置，关掉本开关后照常生效；旧倍率关掉后落回商品基础价。
+     * 若将来需要「整体关闭按日期类型加价」，应新增语义明确的 `dateTypePricingEnabled`，
+     * 不要复用本字段——复用会让同一个布尔同时表达两种不同范围。
+     */
     holidayPricingEnabled: boolean;
   };
   fulfillment: {
@@ -6306,9 +6315,14 @@ export interface RentalQuoteCalendarDay {
    * 命中的价格解析层（需求 4.4.5/4.5.5 v2.9 的四级优先级）：
    * `date_override` 具体日期时间覆盖 > `periodic` 周期性计价时段 >
    * `day_type` 商品日期类型价格 > `base` 商品基础价格。
-   * 周期性时段由 PRICE-03 提供价格事实；该层就绪前不会出现在快照里。
+   *
+   * `day_type_legacy` 是 PRICE-03 之前的兼容层：整个空间共用的
+   * `weekendMultiplier` / `holidayMultiplier`，由经营设置的
+   * `pricing.holidayPricingEnabled` 控制。它与 `day_type` 分开记录，
+   * 快照才能说清这一单位是按**逐商品配置的日期类型价格**算的，
+   * 还是按旧的空间级倍率算的——两者的后续处置不同（前者保留，后者待迁移移除）。
    */
-  hitLayer?: "date_override" | "periodic" | "day_type" | "base";
+  hitLayer?: "date_override" | "periodic" | "day_type" | "day_type_legacy" | "base";
   /** 该单位命中时的价格计划版本（需求 4.4.8：逐计费单位保存价格版本）。 */
   pricingPlanVersion?: string;
 }
