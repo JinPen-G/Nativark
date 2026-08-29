@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import type {
+  CustomerAccountStatus,
   CustomerWorkspaceLink,
   SaveSharedCustomerRequest,
   SharedCustomerProfile
@@ -46,7 +47,10 @@ export class SharedCustomerRepository {
         workspaceLinks: workspaceId ? { where: { workspaceId } } : false,
         // CUSTOMER-01E：详情才带联系人与经办人；列表不带，避免 N+1 且列表并不展示它们。
         contacts: { where: { status: "active" }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
-        authorizedAgents: { orderBy: { validFrom: "desc" } }
+        authorizedAgents: { orderBy: { validFrom: "desc" } },
+        // CUSTOMER-01E：账号只取判断状态所需的四列。刻意不 select loginPhone——
+        // 明文登录标识是凭据，管理端页面没有任何场景需要它。
+        account: { select: { status: true, loginPhoneMasked: true, suspendedAt: true, closedAt: true } }
       }
     });
     return row ? this.toDomain(row) : undefined;
@@ -179,6 +183,11 @@ export class SharedCustomerRepository {
       id: string; agentName: string; agentPhoneMasked: string; authorityScope: Prisma.JsonValue;
       validFrom: Date; validTo: Date | null; status: string;
     }>;
+    // 三态刻意用「键缺失 / null / 有值」区分：缺失=列表没查账号，
+    // null=查了但没开通，有值=已开通。少了中间那态，页面就分不出「未开通」与「已停用」。
+    account?: {
+      status: string; loginPhoneMasked: string; suspendedAt: Date | null; closedAt: Date | null;
+    } | null;
   }): SharedCustomerProfile {
     return {
       id: row.id,
@@ -221,7 +230,19 @@ export class SharedCustomerRepository {
         validFrom: agent.validFrom.toISOString(),
         validTo: agent.validTo?.toISOString(),
         status: agent.status
-      }))
+      })),
+      accountSummary:
+        row.account === undefined
+          ? undefined
+          : row.account === null
+            ? { provisioned: false }
+            : {
+                provisioned: true,
+                status: row.account.status as CustomerAccountStatus,
+                loginPhoneMasked: row.account.loginPhoneMasked,
+                suspendedAt: row.account.suspendedAt?.toISOString(),
+                closedAt: row.account.closedAt?.toISOString()
+              }
     };
   }
 

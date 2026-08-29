@@ -4608,6 +4608,24 @@ export interface CustomerTransactability {
   membershipStatus?: CustomerMembershipStatus;
 }
 
+/**
+ * CUSTOMER-01E：详情附带的登录账号摘要。
+ *
+ * 刻意**不复用** `CustomerAccount`：后者带 `loginPhone` 明文，那是登录凭据本身。
+ * 管理端只需要判断「有没有开通、现在什么状态」，拿不到也不该拿到凭据。
+ *
+ * `provisioned` 单独成字段而不是用 `status` 兼表：「未开通」与「已停用」
+ * 要走完全不同的入口（前者给开通按钮、后者给状态变更），
+ * 用一个可空的 status 表达两者，页面迟早会把 undefined 当成正常。
+ */
+export interface CustomerAccountSummary {
+  provisioned: boolean;
+  status?: CustomerAccountStatus;
+  loginPhoneMasked?: string;
+  suspendedAt?: string;
+  closedAt?: string;
+}
+
 /** CUSTOMER-01B：账号级状态变更请求。影响该客户在**全部**空间的登录。 */
 export interface ChangeCustomerAccountStatusRequest {
   status: CustomerAccountStatus;
@@ -4942,6 +4960,13 @@ export interface SharedCustomerProfile {
    */
   contacts?: CustomerContactSummary[];
   authorizedAgents?: CustomerAuthorizedAgentSummary[];
+  /**
+   * CUSTOMER-01E：登录账号摘要。**仅详情**带出，列表为 undefined。
+   *
+   * 详情里一定有值（`provisioned` 明确给出真假），因此页面不必把
+   * "没查到" 与 "没开通" 混为一谈。
+   */
+  accountSummary?: CustomerAccountSummary;
 }
 
 /** CUSTOMER-01E：联系人摘要。号码一律只给脱敏值。 */

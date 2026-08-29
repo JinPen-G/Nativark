@@ -1,4 +1,4 @@
-import { HistoryOutlined, MergeCellsOutlined, SafetyCertificateOutlined, StopOutlined } from "@ant-design/icons";
+import { HistoryOutlined, IdcardOutlined, MergeCellsOutlined, SafetyCertificateOutlined, StopOutlined } from "@ant-design/icons";
 import type {
   CustomerDuplicateCandidate,
   CustomerMembershipStatus,
@@ -158,6 +158,19 @@ export function CustomerMasterPage() {
     onError: (error: Error) => message.error(error.message || "变更失败")
   });
 
+  /**
+   * CUSTOMER-01E：开通登录账号。服务端幂等，但页面仍只在「未开通」时给入口——
+   * 让已有账号的客户也能点，等于把幂等当成功能，运营会以为自己重置了账号。
+   */
+  const ensureAccount = useMutation({
+    mutationFn: () => customerApi.ensureAccount(selected!.id),
+    onSuccess: async () => {
+      await refreshAll();
+      message.success("登录账号已开通，可以管理账号状态了");
+    },
+    onError: (error: Error) => message.error(error.message || "开通登录账号失败")
+  });
+
   function closeMerge() {
     setMergeFor(undefined);
     setMergeTarget(undefined);
@@ -213,6 +226,25 @@ export function CustomerMasterPage() {
   const personal = rows.filter((row) => row.customerType === "personal");
   const corporate = rows.filter((row) => row.customerType === "corporate");
   const current = detail.data ?? selected;
+  /**
+   * 账号摘要只有**详情**接口带；列表行没有这个字段。因此判定必须以详情到位为前提——
+   * 否则打开抽屉的那一瞬间会把「还没查到」显示成「未开通」，并给出一个错误的开通入口。
+   */
+  const account = detail.data?.accountSummary;
+  const accountLoaded = Boolean(detail.data);
+  const accountProvisioned = Boolean(account?.provisioned);
+  /** 未开通就不给状态入口：让人提交完再收 404，等于把契约错误伪装成操作失误。 */
+  const accountActionBlockReason = !accountLoaded
+    ? "正在读取账号状态"
+    : !accountProvisioned
+      ? "该客户尚未开通登录账号，请先开通"
+      : account?.status === "closed"
+        // 注销是不可逆终态。留一个「改状态」入口会让人以为能恢复，
+        // 点进去才发现无可选项——不如在入口处就说清楚。
+        ? "账号已注销，注销不可逆，无可变更的状态"
+        : !canManageMember && !canClose
+          ? "需要「会员管理」或「客户注销」权限"
+          : undefined;
 
   const columns = [
     {
@@ -362,6 +394,19 @@ export function CustomerMasterPage() {
         onClose={() => setSelected(undefined)}
         extra={
           <Space>
+            {accountLoaded && !accountProvisioned && (
+              <Tooltip title={canManageMember ? undefined : "需要「会员管理」权限"}>
+                <Button
+                  type="primary"
+                  icon={<IdcardOutlined />}
+                  disabled={!canManageMember}
+                  loading={ensureAccount.isPending}
+                  onClick={() => ensureAccount.mutate()}
+                >
+                  开通登录账号
+                </Button>
+              </Tooltip>
+            )}
             <Tooltip title={canManageMember ? undefined : "需要「会员管理」权限"}>
               <Button
                 disabled={!canManageMember}
@@ -370,11 +415,11 @@ export function CustomerMasterPage() {
                 本空间会员状态
               </Button>
             </Tooltip>
-            <Tooltip title={canClose || canManageMember ? undefined : "需要「会员管理」或「客户注销」权限"}>
+            <Tooltip title={accountActionBlockReason}>
               <Button
                 danger
                 icon={<StopOutlined />}
-                disabled={!canManageMember && !canClose}
+                disabled={Boolean(accountActionBlockReason)}
                 onClick={() => { setStatusScope("account"); statusForm.resetFields(); }}
               >
                 账号状态 / 注销
@@ -389,6 +434,34 @@ export function CustomerMasterPage() {
               { key: "type", label: "客户类型", children: current.customerType === "corporate" ? "企业客户" : "个人客户" },
               { key: "phone", label: "手机号", children: current.phone ?? current.phoneMasked },
               { key: "identity", label: "实名认证", children: current.identityVerified ? `已实名（${current.identityNoMasked ?? "证件已脱敏"}）` : "未实名" },
+              {
+                key: "account",
+                label: "登录账号",
+                children: !accountLoaded
+                  ? <span className="muted">读取中…</span>
+                  : !accountProvisioned
+                    // 四态分别给文案（需求要求「未开通」可辨识）：未开通不是一种异常状态，
+                    // 而是「还没做这一步」，因此提示的是下一步动作而不是错误。
+                    ? <Space><Tag>未开通</Tag><span className="muted">该客户还不能登录任何经营空间</span></Space>
+                    : (
+                      <Space orientation="vertical" size={0}>
+                        <Space>
+                          <Tag color={accountMeta[account!.status!]?.color ?? "default"}>
+                            {accountMeta[account!.status!]?.label ?? account!.status}
+                          </Tag>
+                          <span className="muted">{account!.loginPhoneMasked}</span>
+                        </Space>
+                        {account!.status === "suspended" && account!.suspendedAt && (
+                          <span className="muted">停用于 {account!.suspendedAt.slice(0, 19).replace("T", " ")}；全部经营空间均无法登录</span>
+                        )}
+                        {account!.status === "closed" && (
+                          <span className="muted">
+                            注销于 {account!.closedAt?.slice(0, 19).replace("T", " ") ?? "—"}；注销为不可逆终态，不提供恢复入口
+                          </span>
+                        )}
+                      </Space>
+                    )
+              },
               ...(current.customerType === "corporate"
                 ? [
                     { key: "corp", label: "企业名称", children: current.corporateName ?? "-" },
