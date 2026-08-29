@@ -22,6 +22,7 @@ import {
   type RentalCoreFactStore
 } from "./rental-core-fact.repository";
 import { RentalCoreService } from "./rental-core.service";
+import { CustomerCorporateService } from "../platform/customer-corporate.service";
 
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalize);
@@ -97,7 +98,15 @@ export class RentalOrderConfirmationService {
     @Inject(RentalCoreFactRepository) private readonly coreFacts: RentalCoreFactStore,
     @Inject(RentalBusinessFactRepository) private readonly businessFacts: RentalBusinessFactStore,
     @Inject(RentalIdempotencyRepository) private readonly idempotency: RentalIdempotencyStore,
-    @Optional() private readonly hooks?: CapabilityHookRuntime
+    @Optional() private readonly hooks?: CapabilityHookRuntime,
+    /**
+     * CUSTOMER-01C：订单主体的解析与校验。
+     *
+     * 可选注入：不涉及客户主体的既有单测用位置参数构造本服务；缺失时不解析主体，
+     * 订单按原语义只存 `customerId`（读取侧回落为三个主体都是该客户）。
+     * 这不是 fail-open——主体是**附加**的责任归属信息，缺失不会放宽任何既有校验。
+     */
+    @Optional() private readonly subjects?: CustomerCorporateService
   ) {}
 
   /**
@@ -127,6 +136,20 @@ export class RentalOrderConfirmationService {
     this.assertOrderMatchesQuote(input, quote);
 
     const committedAt = new Date().toISOString();
+    /**
+     * CUSTOMER-01C：解析并校验四类主体。
+     *
+     * 放在事务**之前**：主体校验是纯读判定（客户归属、合同有效期、经办人授权），
+     * 被拒时不该已经锁过库存。校验失败直接抛，绝不降级为「按下单客户本人处理」——
+     * 那会把一次显式的企业主体声明静默改成个人订单。
+     *
+     * 用 `committedAt` 作为判定时点，与报价消费、券锁定同一时刻：
+     * 各步取各自的 now() 会让「授权刚好在这一秒过期」产生自相矛盾的结论。
+     */
+    const resolvedSubjects =
+      this.subjects && input.customerId
+        ? await this.subjects.resolveOrderSubjects(tenantId, input.customerId, committedAt, input.subjects)
+        : undefined;
     const coupon = this.business.validateCouponForOrder(
       tenantId,
       context,
@@ -134,7 +157,7 @@ export class RentalOrderConfirmationService {
       quote.request.customerId,
       committedAt
     );
-    const order = await this.core.prepareOrder(tenantId, input, userName, quote);
+    const order = await this.core.prepareOrder(tenantId, input, userName, quote, resolvedSubjects);
 
     try {
       await this.prisma.$transaction(async (tx) => {
