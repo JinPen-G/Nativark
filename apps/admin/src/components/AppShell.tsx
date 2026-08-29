@@ -1,9 +1,11 @@
 import { BoxPlotOutlined, HomeOutlined, LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from "@ant-design/icons";
 import { Avatar, Breadcrumb, Button, Dropdown, Layout, Menu, Space } from "antd";
 import type { MenuProps } from "antd";
+import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { APP_NAVIGATION, canAccessRoute } from "@/app/navigation";
+import { rentalCoreApi } from "@/api/rentalCore";
+import { buildNavigationSections, canAccessRoute } from "@/app/navigation";
 import { useAppearance } from "@/app/theme";
 import { useAuthStore } from "@/features/auth/authStore";
 import { AppearanceSwitcher } from "./AppearanceSwitcher";
@@ -23,10 +25,27 @@ export function AppShell({ children }: { children: ReactNode }) {
   const hasPermission = useAuthStore((state) => state.hasPermission);
   const hasCapability = useAuthStore((state) => state.hasCapability);
   const homePath = user?.isSaasAdmin ? "/platform/tenants" : "/workbench";
-  const sections = useMemo(() => APP_NAVIGATION.map((section) => ({
+  /**
+   * UI-NAV-01：导航文案取自**当前经营空间**的品类档案。
+   *
+   * 复用业务页面已有的查询键，命中同一份缓存，不额外增加一次请求；
+   * 空间切换时 `switchWorkspace()` 已清空查询缓存、`ProtectedRoutes` 又以
+   * `租户:空间` 为 key 重挂本组件，因此这里会重新取数，菜单、面包屑与标题
+   * 随即换成新品类的说法，不会残留上一个空间的术语。
+   *
+   * SaaS 平台账号不发这个请求：它不属于任何经营空间，租户品类档案对它没有意义，
+   * 发出去只会拿到 403 并把平台导航染上某个租户的术语。
+   */
+  const categoryProfile = useQuery({
+    queryKey: ["rental-core", "profile"],
+    queryFn: rentalCoreApi.profile,
+    enabled: !user?.isSaasAdmin
+  });
+  const terminology = categoryProfile.data?.terminology;
+  const sections = useMemo(() => buildNavigationSections(terminology).map((section) => ({
     ...section,
     routes: section.routes.filter((route) => route.menu && canAccessRoute(route, hasPermission, hasCapability, tenant?.categoryCode, Boolean(user?.isSaasAdmin)))
-  })).filter((section) => section.routes.length > 0), [hasCapability, hasPermission, tenant?.categoryCode, user?.isSaasAdmin]);
+  })).filter((section) => section.routes.length > 0), [hasCapability, hasPermission, tenant?.categoryCode, terminology, user?.isSaasAdmin]);
   const menuItems = useMemo<MenuProps["items"]>(() => sections.map((section) => ({
     key: section.key,
     icon: section.icon,

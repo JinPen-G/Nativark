@@ -23,6 +23,7 @@
     "ops:mysql:restore": "powershell -ExecutionPolicy Bypass -File scripts/restore-mysql.ps1",
     "test:reports": "node tests/reports-metrics.test.cjs",
     "test:admin": "node scripts/validate-react-admin.cjs",
+    "test:ui-nav": "npm run build -w @store-rental/shared && node tests/admin-navigation-terminology.test.cjs",
     "test:mysql-e2e": "npm run build -w @store-rental/shared && npm run build -w @store-rental/api && node tests/mysql-e2e.test.cjs",
     "test:pricing-strategy": "npm run build -w @store-rental/shared && node tests/rental-pricing-strategy.test.cjs",
     "test:rental-core": "npm run build -w @store-rental/shared && node tests/rental-core-v01.test.cjs",

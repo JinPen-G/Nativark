@@ -157,7 +157,11 @@ for (const legacyPage of ["ContractsPage", "FinancePage", "OperationsPage", "Ass
   forbidText(router, `const ${legacyPage} = lazy`, "legacy store-rental page must not be routed");
 }
 
-requireText(shell, "APP_NAVIGATION", "shell consumes unified navigation registry");
+// UI-NAV-01：外壳改为消费 `buildNavigationSections(terminology)`——它在 navigation.tsx 内
+// 由 APP_NAVIGATION 派生，只覆盖 label。因此这里同时钉住两端：外壳必须走构建器，
+// 构建器必须派生自注册表。少了后一条，外壳可以拿一份自造菜单照样通过。
+requireText(shell, "buildNavigationSections", "shell consumes unified navigation registry");
+requireText(navigation, "applyTenantNavigationLabels(APP_NAVIGATION", "navigation builder derives from unified registry");
 requireText(router, "APP_ROUTES", "router consumes unified route registry");
 requireText(router, "workspaceScopeKey", "workspace switch remount boundary");
 requireText(router, '<AppShell key={workspaceScopeKey}>', "workspace switch remounts active data pages");

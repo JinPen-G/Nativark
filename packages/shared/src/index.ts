@@ -4366,6 +4366,15 @@ export interface RentalCategoryTerminology {
   returnLabel: string;
   identifierLabel: string;
   usageMetricLabel?: string;
+  /**
+   * UI-NAV-01：这批资产作为一个整体时的行业称呼（车辆品类叫「车队」）。
+   *
+   * 单独成字段而不是由 `assetLabel` 推导：中文集合名词不是后缀派生
+   * （车辆→车队而非「车辆队」，飞机→机队而非「飞机队」），任何构词规则
+   * 都会在下一个品类上出错。缺省表示该品类没有专门的集合说法，
+   * 由展示层按「库存」表述。
+   */
+  assetCollectionLabel?: string;
 }
 
 export const RENTAL_PRICING_UNIT_CODES = ["hour", "shift", "day_24h", "calendar_day", "night", "week", "month", "usage", "package"] as const;
@@ -6632,7 +6641,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     supportedInventoryModes: [RentalInventoryMode.Serialized, RentalInventoryMode.Bundle],
     defaultCapabilities: ["serialized_inventory", "bundle_inventory", "pickup", "return", "dispatch", "usage_reading", "qualification", "iot", "inspection_care", "vehicle_relocation"],
     requiredCapabilities: ["serialized_inventory", "bundle_inventory", "pickup", "return", "dispatch", "usage_reading", "qualification", "inspection_care", "vehicle_relocation"],
-    terminology: { itemLabel: "车辆", itemGroupLabel: "车型组", assetLabel: "车辆", fulfillmentLabel: "门店", pickupLabel: "取车", returnLabel: "还车", identifierLabel: "车辆编号", usageMetricLabel: "里程" },
+    terminology: { itemLabel: "车辆", itemGroupLabel: "车型组", assetLabel: "车辆", fulfillmentLabel: "门店", pickupLabel: "取车", returnLabel: "还车", identifierLabel: "车辆编号", usageMetricLabel: "里程", assetCollectionLabel: "车队" },
     attributeSchema: { manufacturer: "string", brand: "string", model: "string", trim: "string", energyType: "string", licensePlate: "string", vin: "string", mileage: "number" },
     businessModel: {
       pricingUnits: ["hour", "day_24h", "calendar_day", "week", "month", "usage", "package"],
