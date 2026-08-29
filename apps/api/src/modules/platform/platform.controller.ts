@@ -5,6 +5,11 @@ import type {
   SystemUserRow,
 } from "@store-rental/shared";
 import { PlatformService } from "./platform.service";
+import { CustomerOperationsService } from "./customer-operations.service";
+import {
+  ChangeCustomerAccountStatusDto,
+  ChangeCustomerMembershipStatusDto
+} from "./customer-operations-request.dto";
 import { CreateBusinessWorkspaceDto, LinkCustomerToWorkspaceDto, SaveSharedCustomerDto, SaveWorkspaceMemberDto, UpdateBusinessWorkspaceDto } from "./workspace-request.dto";
 import {
   GeneratePlatformNumberDto,
@@ -33,7 +38,10 @@ interface RequestWithUser {
 
 @Controller("platform")
 export class PlatformController {
-  constructor(private readonly platformService: PlatformService) {}
+  constructor(
+    private readonly platformService: PlatformService,
+    private readonly customerOperations: CustomerOperationsService
+  ) {}
 
   @Get("tenants")
   tenants(@Req() req: RequestWithUser) {
@@ -124,6 +132,65 @@ export class PlatformController {
   @Post("workspace-customers")
   linkCustomer(@Body() body: LinkCustomerToWorkspaceDto, @Req() req: RequestWithUser) {
     return this.platformService.linkCustomerToWorkspace(body, req.user);
+  }
+
+  /**
+   * CUSTOMER-01B：客户详情。
+   *
+   * 敏感字段按权限脱敏，且每次读取都写访问审计（需求 4.8.5 / 4.8.14）。
+   * 审计在服务层写，不在这里——绕过控制器的内部调用同样要留痕。
+   */
+  @Get("customers/:customerId")
+  customerDetail(@Param("customerId") customerId: string, @Req() req: RequestWithUser) {
+    return this.platformService.getCustomerDetail(customerId, req.user);
+  }
+
+  /** CUSTOMER-01B：为客户开通登录账号。幂等，已有账号直接返回。 */
+  @Post("customers/:customerId/account")
+  ensureCustomerAccount(@Param("customerId") customerId: string, @Req() req: RequestWithUser) {
+    return this.platformService.ensureCustomerAccount(customerId, req.user);
+  }
+
+  /**
+   * CUSTOMER-01B：改**账号**状态。影响该客户在全部经营空间的登录。
+   * 与下面的空间会员状态是两个入口，刻意不合并——合并就无法表达
+   * 「只停这个空间」与「停掉全部空间的登录」的区别。
+   */
+  @Put("customers/:customerId/account-status")
+  changeCustomerAccountStatus(
+    @Param("customerId") customerId: string,
+    @Body() body: ChangeCustomerAccountStatusDto,
+    @Req() req: RequestWithUser
+  ) {
+    return this.platformService.changeCustomerAccountStatus(customerId, body, req.user);
+  }
+
+  /** CUSTOMER-01B：改**当前空间**的会员状态。只影响会话空间，不动账号与其他空间。 */
+  @Put("workspace-customers/:customerId/status")
+  changeCustomerMembershipStatus(
+    @Param("customerId") customerId: string,
+    @Body() body: ChangeCustomerMembershipStatusDto,
+    @Req() req: RequestWithUser
+  ) {
+    return this.platformService.changeCustomerMembershipStatus(customerId, body, req.user);
+  }
+
+  /** CUSTOMER-01B：客户状态时间线（账号级 + 当前空间级同一条线）。 */
+  @Get("customers/:customerId/status-history")
+  customerStatusHistory(@Param("customerId") customerId: string, @Req() req: RequestWithUser) {
+    return this.platformService.listCustomerStatusHistory(customerId, req.user);
+  }
+
+  /** CUSTOMER-01B：敏感资料访问审计。本身就是访问画像，需解密权限才能查。 */
+  @Get("customers/:customerId/sensitive-access")
+  customerSensitiveAccess(@Param("customerId") customerId: string, @Req() req: RequestWithUser) {
+    return this.platformService.listCustomerSensitiveAccess(customerId, req.user);
+  }
+
+  /** CUSTOMER-01B：该客户此刻能否在本空间开展新业务，以及被拒的具体原因。 */
+  @Get("workspace-customers/:customerId/transactability")
+  customerTransactability(@Param("customerId") customerId: string, @Req() req: RequestWithUser) {
+    return this.platformService.getCustomerTransactability(customerId, req.user);
   }
 
   @Post("workspaces")

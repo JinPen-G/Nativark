@@ -820,6 +820,15 @@ const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
   backlogOperation("post", "/api/platform/customers", "Platform", "registerSharedCustomer", "Register shared customer in current workspace", ["store-rental:member:manage"]),
   backlogOperation("get", "/api/platform/workspace-customers", "Platform", "listWorkspaceCustomers", "List customers linked to current workspace", ["store-rental:member:view"]),
   backlogOperation("post", "/api/platform/workspace-customers", "Platform", "linkCustomerToWorkspace", "Link existing shared customer to current workspace", ["store-rental:member:manage"]),
+  // CUSTOMER-01B：客户账号（租户级）与空间会员状态（空间级）是两条独立入口。
+  // 合并成一个会让「只停这个空间」与「停掉全部空间的登录」无法区分。
+  backlogOperation("get", "/api/platform/customers/{customerId}", "Platform", "getCustomerDetail", "Get customer detail with masked sensitive fields", ["store-rental:member:view"]),
+  backlogOperation("post", "/api/platform/customers/{customerId}/account", "Platform", "ensureCustomerAccount", "Open a login account for the customer (idempotent)", ["store-rental:member:manage"]),
+  backlogOperation("put", "/api/platform/customers/{customerId}/account-status", "Platform", "changeCustomerAccountStatus", "Change customer account status (affects login in all workspaces)", ["store-rental:member:manage"]),
+  backlogOperation("get", "/api/platform/customers/{customerId}/status-history", "Platform", "listCustomerStatusHistory", "List customer status timeline (account and workspace scope)", ["store-rental:member:view"]),
+  backlogOperation("get", "/api/platform/customers/{customerId}/sensitive-access", "Platform", "listCustomerSensitiveAccess", "List sensitive data access audit for the customer", ["store-rental:customer:reveal-sensitive"]),
+  backlogOperation("put", "/api/platform/workspace-customers/{customerId}/status", "Platform", "changeCustomerMembershipStatus", "Change workspace membership status (current workspace only)", ["store-rental:member:manage"]),
+  backlogOperation("get", "/api/platform/workspace-customers/{customerId}/transactability", "Platform", "getCustomerTransactability", "Check whether the customer may start new business in the current workspace", ["store-rental:member:view"]),
   backlogOperation("post", "/api/platform/organizations", "Platform", "createOrganization", "Create organization", ["system:org:manage"]),  backlogOperation("put", "/api/platform/organizations/{id}", "Platform", "updateOrganization", "Update organization", ["system:org:manage"]),
   backlogOperation("put", "/api/platform/organizations/{id}/status", "Platform", "setOrganizationStatus", "Set organization status", ["system:org:manage"]),
   backlogOperation("get", "/api/reports/dashboard", "Reports", "getReportsDashboard", "Get reports dashboard", ["reports:view"]),

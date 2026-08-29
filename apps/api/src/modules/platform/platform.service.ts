@@ -7,6 +7,8 @@ import {
   RENTAL_CATEGORY_DEFINITIONS,
   CreateBusinessWorkspaceRequest,
   SaveWorkspaceMemberRequest,
+  ChangeCustomerAccountStatusRequest,
+  ChangeCustomerMembershipStatusRequest,
   SaveSharedCustomerRequest,
   LinkCustomerToWorkspaceRequest,
   UpdateBusinessWorkspaceRequest,
@@ -50,6 +52,7 @@ import {
 } from "../../common/data-permission";
 import { PlatformRepository } from "./platform.repository";
 import { SharedCustomerRepository } from "./shared-customer.repository";
+import { CustomerOperationsService } from "./customer-operations.service";
 import { WorkspaceCapabilityService } from "../rental-core/workspace-capability.service";
 import { RentalCoreService } from "../rental-core/rental-core.service";
 
@@ -87,7 +90,10 @@ export class PlatformService {
     @Optional() private readonly sharedCustomers?: SharedCustomerRepository,
     // Review P1-3：创建空间时同事务初始化品类必选能力。
     // 同样必须放在最后且 @Optional()，理由见上：位置参数构造的测试会错位。
-    @Optional() private readonly workspaceCapabilityService?: WorkspaceCapabilityService
+    @Optional() private readonly workspaceCapabilityService?: WorkspaceCapabilityService,
+    // CUSTOMER-01B：客户账号与空间会员状态治理。同样追加在最后且 @Optional()，
+    // 理由同上——既有测试用位置参数构造本服务，插到中间会让前面的依赖错位。
+    @Optional() private readonly customerOperations?: CustomerOperationsService
   ) {}
 
   private readonly logger = new Logger(PlatformService.name);
@@ -214,6 +220,9 @@ export class PlatformService {
         { code: "store-rental:member:view", name: "会员查看" },
         { code: "store-rental:member:manage", name: "会员管理" },
         { code: "store-rental:member:risk-action", name: "按钮-会员风控动作", description: "暂停、拉黑和恢复会员" },
+        // CUSTOMER-01B：敏感资料解密查看单独授权。必须出现在权限目录里——
+        // 角色管理页的可选项完全来自这棵树，漏了它就没人能被授予该权限。
+        { code: "store-rental:customer:reveal-sensitive", name: "客户敏感资料解密", description: "查看客户证件号等明文，并可查阅敏感访问审计" },
         { code: "store-rental:corporate:view", name: "企业客户查看" },
         { code: "store-rental:corporate:manage", name: "企业客户管理" },
         { code: "store-rental:corporate:monthly-settle", name: "按钮-企业月结回款", description: "登记企业账单回款" },
@@ -1522,6 +1531,103 @@ export class PlatformService {
     const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
     const workspaceId = requireRequestWorkspaceId();
     return this.requireSharedCustomers().listLinksByWorkspace(tenantId, workspaceId);
+  }
+
+  /**
+   * CUSTOMER-01B 的入口一律在这里解析 `tenantId` 与 `workspaceId` 后转交
+   * `CustomerOperationsService`，与本文件其他经营入口同一口径：
+   * 空间只从会话取，客户端传什么都不作数。
+   */
+  private requireCustomerOperations() {
+    if (!this.customerOperations) {
+      throw new ConflictException("客户运营服务未就绪");
+    }
+    return this.customerOperations;
+  }
+
+  getCustomerDetail(customerId: string, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerOperations().getCustomerDetail(
+      tenantId,
+      requireRequestWorkspaceId(),
+      customerId,
+      currentUser
+    );
+  }
+
+  listSharedCustomersMasked(currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerOperations().listCustomers(
+      tenantId,
+      requireRequestWorkspaceId(),
+      currentUser
+    );
+  }
+
+  ensureCustomerAccount(customerId: string, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerOperations().ensureAccount(tenantId, customerId, currentUser?.displayName);
+  }
+
+  changeCustomerAccountStatus(
+    customerId: string,
+    input: ChangeCustomerAccountStatusRequest,
+    currentUser?: SystemUserRow
+  ) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    // 账号级动作**不**解析 workspaceId：它影响全部空间，绑定某个空间会造成误解。
+    return this.requireCustomerOperations().changeAccountStatus(
+      tenantId,
+      customerId,
+      input,
+      currentUser?.displayName
+    );
+  }
+
+  changeCustomerMembershipStatus(
+    customerId: string,
+    input: ChangeCustomerMembershipStatusRequest,
+    currentUser?: SystemUserRow
+  ) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerOperations().changeMembershipStatus(
+      tenantId,
+      requireRequestWorkspaceId(),
+      customerId,
+      input,
+      currentUser?.displayName
+    );
+  }
+
+  listCustomerStatusHistory(customerId: string, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerOperations().listStatusHistory(
+      tenantId,
+      customerId,
+      requireRequestWorkspaceId()
+    );
+  }
+
+  listCustomerSensitiveAccess(customerId: string, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerOperations().listSensitiveAccess(tenantId, customerId, currentUser);
+  }
+
+  getCustomerTransactability(customerId: string, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerOperations().assertTransactable(
+      tenantId,
+      requireRequestWorkspaceId(),
+      customerId
+    );
   }
 
   /**

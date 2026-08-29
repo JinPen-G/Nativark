@@ -144,8 +144,7 @@ export function requiredPermissions(method: string, path: string) {
     return method === "GET"
       ? ["store-rental:member:view", "store-rental:member:manage"]
       : ["store-rental:member:manage"];
-  }
-  // SPACE-01/02：经营空间主档与成员关系属于租户管理能力。
+  }  // SPACE-01/02：经营空间主档与成员关系属于租户管理能力。
   //
   // 必须显式列出：本函数末尾兜底 `return []`，而 hasAnyPermission 对空数组
   // 直接放行。漏列等于把「新建空间、改空间状态、增删空间成员」开放给任何
@@ -163,6 +162,12 @@ export function requiredPermissions(method: string, path: string) {
       : ["system:tenant:manage"];
   }
   if (path.startsWith("/platform/customers")) {
+    // CUSTOMER-01B：敏感资料访问审计本身就是一份访问画像（谁在什么时候查过谁），
+    // 因此它需要**解密权限**，不能只凭「会员查看」。必须放在下面的通用分支之前，
+    // 否则会被 `/platform/customers` 前缀吃掉，退化成只要会员查看权限即可读取。
+    if (/\/sensitive-access$/u.test(path)) {
+      return ["store-rental:customer:reveal-sensitive"];
+    }
     return method === "GET"
       ? ["store-rental:member:view", "store-rental:member:manage"]
       : ["store-rental:member:manage"];

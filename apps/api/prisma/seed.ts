@@ -189,6 +189,9 @@ const permissions = [
   ["store-rental:member:view", "会员查看", "门市租赁", PermissionKind.ACTION],
   ["store-rental:member:manage", "会员管理", "门市租赁", PermissionKind.ACTION],
   ["store-rental:member:risk-action", "按钮-会员风控动作", "门市租赁", PermissionKind.BUTTON],
+  // CUSTOMER-01B：敏感资料解密查看单独授权（需求 4.8.5 / 4.8.14）。
+  // 与「会员查看」分开：日常查客户只该看到脱敏值，看明文是另一件需要单独追责的事。
+  ["store-rental:customer:reveal-sensitive", "客户敏感资料解密", "门市租赁", PermissionKind.ACTION],
   ["store-rental:corporate:view", "企业客户查看", "门市租赁", PermissionKind.ACTION],
   ["store-rental:corporate:manage", "企业客户管理", "门市租赁", PermissionKind.ACTION],
   ["store-rental:corporate:monthly-settle", "按钮-企业月结回款", "门市租赁", PermissionKind.BUTTON],

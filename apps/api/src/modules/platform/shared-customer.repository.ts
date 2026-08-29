@@ -162,6 +162,7 @@ export class SharedCustomerRepository {
     corporateTaxNo: string | null;
     status: string;
     sourceMemberId: string | null;
+    mergedIntoCustomerId: string | null;
     createdAt: Date;
     updatedAt: Date;
     workspaceLinks?: Array<Parameters<SharedCustomerRepository["toLinkPublic"]>[0]>;
@@ -181,6 +182,9 @@ export class SharedCustomerRepository {
       corporateTaxNo: row.corporateTaxNo ?? undefined,
       status: row.status as SharedCustomerProfile["status"],
       sourceMemberId: row.sourceMemberId ?? undefined,
+      // CUSTOMER-01A/B：必须带出来。少了它，`assertTransactable` 永远读到 undefined，
+      // 已被合并的主档会继续通过下单判定——实测踩过，由 01B 专项用例抓到。
+      mergedIntoCustomerId: row.mergedIntoCustomerId ?? undefined,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
       workspaceLinks: row.workspaceLinks?.map((link) => this.toLink(link))

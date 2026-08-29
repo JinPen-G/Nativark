@@ -4593,6 +4593,83 @@ export type CustomerStatusAction = (typeof CUSTOMER_STATUS_ACTIONS)[number];
 export type CustomerStatusScope = "account" | "workspace";
 
 /**
+ * CUSTOMER-01B：客户在某个经营空间**能否开展新业务**的判定结果。
+ *
+ * 为什么要把结论结构化返回，而不是返回一个布尔：被拒时业务侧要能告诉客服
+ * 「是账号被停了，还是这个空间的会员被暂停了，还是风险受限」——三者的处理人
+ * 和处理方式完全不同。只回 false 会把这三种情况压成同一句「不可下单」。
+ */
+export interface CustomerTransactability {
+  allowed: boolean;
+  /** account_suspended / account_closed / membership_missing / membership_* / customer_merged */
+  reasonCode?: string;
+  message?: string;
+  accountStatus?: CustomerAccountStatus;
+  membershipStatus?: CustomerMembershipStatus;
+}
+
+/** CUSTOMER-01B：账号级状态变更请求。影响该客户在**全部**空间的登录。 */
+export interface ChangeCustomerAccountStatusRequest {
+  status: CustomerAccountStatus;
+  reason: string;
+}
+
+/** CUSTOMER-01B：空间会员状态变更请求。只影响**当前会话空间**。 */
+export interface ChangeCustomerMembershipStatusRequest {
+  status: CustomerMembershipStatus;
+  reason: string;
+  /** 目标等级（仅在恢复/激活时允许调整）。 */
+  levelName?: string;
+}
+
+/** CUSTOMER-01B：敏感资料访问审计条目。只追加。 */
+export interface CustomerSensitiveAccessAuditEntry {
+  id: string;
+  tenantId: string;
+  workspaceId?: string;
+  customerId: string;
+  field: string;
+  action: "list" | "detail" | "export" | "reveal";
+  revealed: boolean;
+  operator?: string;
+  permission?: string;
+  reason?: string;
+  at: string;
+}
+
+/** CUSTOMER-01B：客户状态历史条目（账号级与空间级同一时间线）。 */
+export interface CustomerStatusHistoryEntry {
+  id: string;
+  tenantId: string;
+  customerId: string;
+  scope: CustomerStatusScope;
+  workspaceId?: string;
+  action: CustomerStatusAction;
+  fromStatus?: string;
+  toStatus: string;
+  reason: string;
+  operator?: string;
+  approver?: string;
+  at: string;
+}
+
+/** CUSTOMER-01B：客户账号。 */
+export interface CustomerAccount {
+  id: string;
+  tenantId: string;
+  customerId: string;
+  loginPhone: string;
+  loginPhoneMasked: string;
+  status: CustomerAccountStatus;
+  suspendedAt?: string;
+  closedAt?: string;
+  lastReason?: string;
+  lastOperator?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
  * SPACE-04：租户级共享客户主档。
  *
  * 身份在租户内共享（同一手机号只有一份主档），而订单、优惠券、积分、
