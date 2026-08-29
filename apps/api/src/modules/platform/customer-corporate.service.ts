@@ -81,6 +81,19 @@ export class CustomerCorporateService {
     const wantDefault = input.isDefault ?? false;
     const id = input.id;
     const saved = await this.prisma.$transaction(async (tx) => {
+      const existing = id
+        ? await tx.customerCorporateInvoiceProfile.findFirst({ where: { tenantId, customerId, id } })
+        : undefined;
+      if (id && !existing) throw new NotFoundException("开票资料不存在");
+      if (existing && !input.expectedRevision) {
+        throw new BadRequestException("编辑开票资料必须携带读取时的版本号");
+      }
+      if (input.clearBankAccount && input.bankAccount?.trim()) {
+        throw new BadRequestException("银行账号不能同时填写新值并选择清除");
+      }
+      if (input.clearContactPhone && input.contactPhone?.trim()) {
+        throw new BadRequestException("联系电话不能同时填写新值并选择清除");
+      }
       if (wantDefault) {
         // 先把现有默认降级；defaultMarker 写回自身 id 以恢复唯一性。
         const currentDefaults = await tx.customerCorporateInvoiceProfile.findMany({
@@ -91,7 +104,7 @@ export class CustomerCorporateService {
           if (row.id === id) continue;
           await tx.customerCorporateInvoiceProfile.update({
             where: { id: row.id },
-            data: { isDefault: false, defaultMarker: row.id }
+            data: { isDefault: false, defaultMarker: row.id, revision: { increment: 1 } }
           });
         }
       }
@@ -102,19 +115,25 @@ export class CustomerCorporateService {
         registeredAddress: input.registeredAddress?.trim() || null,
         bankName: input.bankName?.trim() || null,
         // 银行账号只存脱敏值：它是资金信息，明文不该留在业务库里。
-        bankAccountMasked: mask(input.bankAccount) ?? null,
-        contactPhoneMasked: mask(input.contactPhone) ?? null,
+        bankAccountMasked: input.clearBankAccount
+          ? null
+          : mask(input.bankAccount) ?? existing?.bankAccountMasked ?? null,
+        contactPhoneMasked: input.clearContactPhone
+          ? null
+          : mask(input.contactPhone) ?? existing?.contactPhoneMasked ?? null,
         receiveEmail: input.receiveEmail?.trim() || null,
         isDefault: wantDefault,
         status: input.status ?? "active"
       };
       if (id) {
-        const existing = await tx.customerCorporateInvoiceProfile.findFirst({ where: { tenantId, customerId, id } });
-        if (!existing) throw new NotFoundException("开票资料不存在");
-        return tx.customerCorporateInvoiceProfile.update({
-          where: { id },
-          data: { ...data, defaultMarker: wantDefault ? "default" : id }
+        const changed = await tx.customerCorporateInvoiceProfile.updateMany({
+          where: { id, revision: input.expectedRevision },
+          data: { ...data, defaultMarker: wantDefault ? "default" : id, revision: { increment: 1 } }
         });
+        if (changed.count === 0) {
+          throw new ConflictException("开票资料已被其他人修改，请刷新后重试");
+        }
+        return tx.customerCorporateInvoiceProfile.findUniqueOrThrow({ where: { id } });
       }
       const newId = `cinv_${randomId()}`;
       return tx.customerCorporateInvoiceProfile.create({
@@ -126,6 +145,14 @@ export class CustomerCorporateService {
           defaultMarker: wantDefault ? "default" : newId
         }
       });
+    }).catch((error: unknown) => {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        (error.code === "P2002" || error.code === "P2034")
+      ) {
+        throw new ConflictException("开票资料已被其他人修改，请刷新后重试");
+      }
+      throw error;
     });
     return this.toInvoice(saved);
   }
@@ -173,8 +200,14 @@ export class CustomerCorporateService {
           where: { tenantId, customerId, id: input.id }
         });
         if (!existing) throw new NotFoundException("合同不存在");
+        if (!input.expectedRevision) throw new BadRequestException("编辑合同必须携带读取时的版本号");
+        const changed = await this.prisma.customerCorporateContract.updateMany({
+          where: { id: input.id, revision: input.expectedRevision },
+          data: { ...data, revision: { increment: 1 } }
+        });
+        if (changed.count === 0) throw new ConflictException("合同已被其他人修改，请刷新后重试");
         return this.toContract(
-          await this.prisma.customerCorporateContract.update({ where: { id: input.id }, data })
+          await this.prisma.customerCorporateContract.findUniqueOrThrow({ where: { id: input.id } })
         );
       }
       return this.toContract(
@@ -208,6 +241,8 @@ export class CustomerCorporateService {
     operator?: string
   ): Promise<CustomerCorporateCredit> {
     await this.requireCorporate(tenantId, customerId);
+    const reason = input.reason?.trim();
+    if (!reason) throw new BadRequestException("调整授信与账期必须填写变更原因");
     if (!Number.isFinite(input.creditLimit) || input.creditLimit < 0) {
       throw new BadRequestException("授信额度必须是非负数值");
     }
@@ -219,15 +254,30 @@ export class CustomerCorporateService {
       settlementTermDays: input.settlementTermDays,
       billingCycle: input.billingCycle ?? "monthly",
       status: input.status ?? "active",
-      reason: input.reason?.trim() || null,
+      reason,
       approvedBy: operator ?? null,
       approvedAt: new Date()
     };
-    const row = await this.prisma.customerCorporateCredit.upsert({
-      where: { tenantId_customerId: { tenantId, customerId } },
-      create: { tenantId, customerId, ...data },
-      update: data
-    });
+    const existing = await this.prisma.customerCorporateCredit.findFirst({ where: { tenantId, customerId } });
+    let row;
+    if (existing) {
+      if (!input.expectedRevision) throw new BadRequestException("调整已有授信必须携带读取时的版本号");
+      const changed = await this.prisma.customerCorporateCredit.updateMany({
+        where: { id: existing.id, revision: input.expectedRevision },
+        data: { ...data, revision: { increment: 1 } }
+      });
+      if (changed.count === 0) throw new ConflictException("授信与账期已被其他人修改，请刷新后重试");
+      row = await this.prisma.customerCorporateCredit.findUniqueOrThrow({ where: { id: existing.id } });
+    } else {
+      try {
+        row = await this.prisma.customerCorporateCredit.create({ data: { tenantId, customerId, ...data } });
+      } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+          throw new ConflictException("授信记录已由其他人创建，请刷新后重试");
+        }
+        throw error;
+      }
+    }
     return this.toCredit(row);
   }
 
@@ -361,7 +411,7 @@ export class CustomerCorporateService {
     id: string; tenantId: string; customerId: string; invoiceType: string; title: string; taxNo: string;
     registeredAddress: string | null; bankName: string | null; bankAccountMasked: string | null;
     contactPhoneMasked: string | null; receiveEmail: string | null; isDefault: boolean; status: string;
-    createdAt: Date; updatedAt: Date;
+    revision: number; createdAt: Date; updatedAt: Date;
   }): CustomerCorporateInvoiceProfile {
     return {
       id: row.id,
@@ -377,6 +427,7 @@ export class CustomerCorporateService {
       receiveEmail: row.receiveEmail ?? undefined,
       isDefault: row.isDefault,
       status: row.status as CustomerCorporateInvoiceProfile["status"],
+      revision: row.revision,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString()
     };
@@ -385,7 +436,7 @@ export class CustomerCorporateService {
   private toContract(row: {
     id: string; tenantId: string; customerId: string; contractNo: string; name: string;
     signedAt: Date | null; effectiveFrom: Date; effectiveTo: Date | null; status: string;
-    fileRef: string | null; terminatedReason: string | null; createdAt: Date; updatedAt: Date;
+    fileRef: string | null; terminatedReason: string | null; revision: number; createdAt: Date; updatedAt: Date;
   }): CustomerCorporateContract {
     return {
       id: row.id,
@@ -399,6 +450,7 @@ export class CustomerCorporateService {
       status: row.status as CustomerCorporateContract["status"],
       fileRef: row.fileRef ?? undefined,
       terminatedReason: row.terminatedReason ?? undefined,
+      revision: row.revision,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString()
     };
@@ -407,7 +459,7 @@ export class CustomerCorporateService {
   private toCredit(row: {
     id: string; tenantId: string; customerId: string; creditLimit: Prisma.Decimal;
     settlementTermDays: number; billingCycle: string; status: string; approvedBy: string | null;
-    approvedAt: Date | null; reason: string | null; createdAt: Date; updatedAt: Date;
+    approvedAt: Date | null; reason: string | null; revision: number; createdAt: Date; updatedAt: Date;
   }): CustomerCorporateCredit {
     return {
       id: row.id,
@@ -420,6 +472,7 @@ export class CustomerCorporateService {
       approvedBy: row.approvedBy ?? undefined,
       approvedAt: row.approvedAt?.toISOString(),
       reason: row.reason ?? undefined,
+      revision: row.revision,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString()
     };

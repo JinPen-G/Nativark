@@ -11,7 +11,7 @@ import type {
   SharedCustomerProfile
 } from "@store-rental/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Button, Card, Descriptions, Drawer, Form, Input, InputNumber, Select, Space, Table, Tabs, Tag, Timeline, Tooltip, Typography } from "antd";
+import { Alert, App, Button, Card, Checkbox, Descriptions, Drawer, Form, Input, InputNumber, Select, Space, Table, Tabs, Tag, Timeline, Tooltip, Typography } from "antd";
 import { useState } from "react";
 import { customerApi } from "@/api/customer";
 import { PageHeader } from "@/components/PageHeader";
@@ -106,6 +106,7 @@ export function CustomerMasterPage() {
   const queryClient = useQueryClient();
   const hasPermission = useAuthStore((state) => state.hasPermission);
   const canManageMember = hasPermission("store-rental:member:manage");
+  const canRiskAction = hasPermission("store-rental:member:risk-action");
   const canMerge = hasPermission("store-rental:customer:merge");
   const canClose = hasPermission("store-rental:customer:close");
   const canReveal = hasPermission("store-rental:customer:reveal-sensitive");
@@ -125,8 +126,13 @@ export function CustomerMasterPage() {
   /** 冲突字段的人工取舍：字段 → "target"（保留方的值）/"source"（被合并方的值）。 */
   const [fieldResolutions, setFieldResolutions] = useState<Record<string, string>>({});
   const [statusForm] = Form.useForm<StatusFormValues>();
+  const statusTarget = Form.useWatch("status", statusForm);
   /** 企业资料编辑：kind 决定表单形态，id 为空即新增。授信是单条记录，不带 id。 */
-  const [corporateEdit, setCorporateEdit] = useState<{ kind: "invoice" | "contract" | "credit"; id?: string }>();
+  const [corporateEdit, setCorporateEdit] = useState<{
+    kind: "invoice" | "contract" | "credit";
+    id?: string;
+    expectedRevision?: number;
+  }>();
   const [corporateForm] = Form.useForm<Record<string, unknown>>();
   const [mergeForm] = Form.useForm<{ reason: string; approver?: string }>();
 
@@ -152,9 +158,14 @@ export function CustomerMasterPage() {
     queryFn: () => customerApi.sensitiveAccess(selected!.id),
     enabled: Boolean(selected) && canReveal && detail.isSuccess
   });
-  const closability = useQuery({
+  const accountClosability = useQuery({
     queryKey: ["customer-closability", selected?.id],
     queryFn: () => customerApi.closability(selected!.id),
+    enabled: Boolean(selected) && canClose
+  });
+  const workspaceClosability = useQuery({
+    queryKey: ["customer-workspace-closability", selected?.id],
+    queryFn: () => customerApi.workspaceClosability(selected!.id),
     enabled: Boolean(selected) && canClose
   });
   const duplicates = useQuery({
@@ -193,7 +204,8 @@ export function CustomerMasterPage() {
       queryClient.invalidateQueries({ queryKey: ["customer-master"] }),
       queryClient.invalidateQueries({ queryKey: ["customer-detail"] }),
       queryClient.invalidateQueries({ queryKey: ["customer-history"] }),
-      queryClient.invalidateQueries({ queryKey: ["customer-closability"] })
+      queryClient.invalidateQueries({ queryKey: ["customer-closability"] }),
+      queryClient.invalidateQueries({ queryKey: ["customer-workspace-closability"] })
     ]);
   };
 
@@ -217,7 +229,8 @@ export function CustomerMasterPage() {
         : customerApi.changeMembershipStatus(selected!.id, {
             status: values.status as CustomerMembershipStatus,
             reason: values.reason,
-            levelName: values.levelName
+            levelName: values.levelName,
+            acknowledgedManualChecks: values.acknowledgedManualChecks
           }),
     onSuccess: async () => {
       await refreshAll();
@@ -245,12 +258,23 @@ export function CustomerMasterPage() {
     mutationFn: (values) => {
       const id = selected!.id;
       if (corporateEdit!.kind === "invoice") {
-        return customerApi.saveInvoiceProfile(id, { ...values, id: corporateEdit!.id } as SaveCustomerInvoiceProfileRequest);
+        return customerApi.saveInvoiceProfile(id, {
+          ...values,
+          id: corporateEdit!.id,
+          expectedRevision: corporateEdit!.expectedRevision
+        } as SaveCustomerInvoiceProfileRequest);
       }
       if (corporateEdit!.kind === "contract") {
-        return customerApi.saveContract(id, { ...values, id: corporateEdit!.id } as SaveCustomerContractRequest);
+        return customerApi.saveContract(id, {
+          ...values,
+          id: corporateEdit!.id,
+          expectedRevision: corporateEdit!.expectedRevision
+        } as SaveCustomerContractRequest);
       }
-      return customerApi.saveCredit(id, values as unknown as SaveCustomerCreditRequest);
+      return customerApi.saveCredit(id, {
+        ...values,
+        expectedRevision: corporateEdit!.expectedRevision
+      } as unknown as SaveCustomerCreditRequest);
     },
     onSuccess: async () => {
       await refreshCorporate();
@@ -269,10 +293,21 @@ export function CustomerMasterPage() {
    * 运营看不懂也编辑不动。
    */
   function openCorporateEdit(kind: "invoice" | "contract" | "credit", row?: Record<string, unknown>) {
-    setCorporateEdit({ kind, id: row?.id as string | undefined });
+    setCorporateEdit({
+      kind,
+      id: row?.id as string | undefined,
+      expectedRevision: row?.revision as number | undefined
+    });
     corporateForm.resetFields();
-    if (!row) return;
+    if (!row) {
+      if (kind === "invoice") corporateForm.setFieldsValue({ isDefault: false, status: "active" });
+      return;
+    }
     const values = { ...row };
+    if (kind === "invoice") {
+      values.clearBankAccount = false;
+      values.clearContactPhone = false;
+    }
     for (const field of ["signedAt", "effectiveFrom", "effectiveTo"]) {
       const value = values[field];
       if (typeof value === "string") values[field] = value.slice(0, 10);
@@ -286,6 +321,14 @@ export function CustomerMasterPage() {
     setPreview(undefined);
     setFieldResolutions({});
     mergeForm.resetFields();
+  }
+
+  function closeCustomerDetail() {
+    setSelected(undefined);
+    setStatusScope(undefined);
+    setCorporateEdit(undefined);
+    statusForm.resetFields();
+    corporateForm.resetFields();
   }
 
   const merge = useMutation({
@@ -354,6 +397,9 @@ export function CustomerMasterPage() {
         : !canManageMember && !canClose
           ? "需要「会员管理」或「客户注销」权限"
           : undefined;
+  const workspaceActionAllowed = canManageMember || canRiskAction || canClose;
+  const activeClosability = statusScope === "account" ? accountClosability.data : workspaceClosability.data;
+  const statusSubmitBlocked = statusTarget === "closed" && (!activeClosability || !activeClosability.closable);
 
   const columns = [
     {
@@ -620,7 +666,7 @@ export function CustomerMasterPage() {
         size={720}
         open={Boolean(selected)}
         destroyOnHidden
-        onClose={() => setSelected(undefined)}
+        onClose={closeCustomerDetail}
         extra={
           <Space>
             {accountLoaded && !accountProvisioned && (
@@ -636,9 +682,9 @@ export function CustomerMasterPage() {
                 </Button>
               </Tooltip>
             )}
-            <Tooltip title={canManageMember ? undefined : "需要「会员管理」权限"}>
+            <Tooltip title={workspaceActionAllowed ? undefined : "需要会员管理、风险处理或客户注销权限"}>
               <Button
-                disabled={!canManageMember}
+                disabled={!workspaceActionAllowed}
                 onClick={() => { setStatusScope("workspace"); statusForm.resetFields(); }}
               >
                 本空间会员状态
@@ -702,12 +748,12 @@ export function CustomerMasterPage() {
                 : [])
             ]} />
 
-            {closability.data && !closability.data.closable && (
+            {accountClosability.data && !accountClosability.data.closable && (
               <Alert
                 type="warning"
                 showIcon
                 title="当前不可注销"
-                description={`必须先处理：${closability.data.blockers.map((row) => row.message).join("；")}`}
+                description={`必须先处理：${accountClosability.data.blockers.map((row) => row.message).join("；")}`}
                 style={{ marginTop: 12 }}
               />
             )}
@@ -927,7 +973,18 @@ export function CustomerMasterPage() {
         open={Boolean(statusScope)}
         destroyOnHidden
         onClose={() => setStatusScope(undefined)}
-        extra={<Button type="primary" loading={changeStatus.isPending} onClick={() => statusForm.submit()}>提交</Button>}
+        extra={
+          <Tooltip title={statusSubmitBlocked ? "注销前置检查尚未通过" : undefined}>
+            <Button
+              type="primary"
+              loading={changeStatus.isPending}
+              disabled={statusSubmitBlocked}
+              onClick={() => statusForm.submit()}
+            >
+              提交
+            </Button>
+          </Tooltip>
+        }
       >
         <Alert
           type={statusScope === "account" ? "warning" : "info"}
@@ -940,23 +997,23 @@ export function CustomerMasterPage() {
           }
           style={{ marginBottom: 16 }}
         />
-        {statusScope === "account" && closability.data && !closability.data.closable && (
+        {statusTarget === "closed" && activeClosability && !activeClosability.closable && (
           <Alert
             type="error"
             showIcon
             title="注销被前置检查阻止"
-            description={closability.data.blockers.map((row) => row.message).join("；")}
+            description={activeClosability.blockers.map((row) => row.message).join("；")}
             style={{ marginBottom: 16 }}
           />
         )}
-        {statusScope === "account" && closability.data?.manualConfirmations?.length ? (
+        {statusTarget === "closed" && activeClosability?.manualConfirmations?.length ? (
           <Alert
             type="warning"
             showIcon
             title="以下项系统无数据源，必须人工核对"
             description={
               <>
-                {closability.data.manualConfirmations.map((row) => <div key={row.code}>· {row.message}</div>)}
+                {activeClosability.manualConfirmations.map((row) => <div key={row.code}>· {row.message}</div>)}
                 <div style={{ marginTop: 6 }}>勾选下方确认后才允许注销——系统不会假装已核对。</div>
               </>
             }
@@ -969,18 +1026,22 @@ export function CustomerMasterPage() {
               options={
                 statusScope === "account"
                   ? [
-                      { value: "active", label: "正常（恢复登录）" },
-                      { value: "suspended", label: "停用（阻止登录全部空间）" },
-                      { value: "closed", label: "注销（不可逆终态）" }
-                    ]
+                      ...(canManageMember ? [
+                        { value: "active", label: "正常（恢复登录）" },
+                        { value: "suspended", label: "停用（阻止登录全部空间）" }
+                      ] : []),
+                      ...(canClose ? [{ value: "closed", label: "注销（不可逆终态）" }] : [])
+                    ].filter((option) => option.value !== account?.status)
                   : [
-                      { value: "pending_activation", label: "待激活" },
-                      { value: "active", label: "正常" },
-                      { value: "suspended", label: "已暂停" },
-                      { value: "risk_restricted", label: "风险受限" },
-                      { value: "exited", label: "已退出" },
-                      { value: "closed", label: "已注销（本空间）" }
-                    ]
+                      ...(canManageMember ? [
+                        { value: "pending_activation", label: "待激活" },
+                        { value: "active", label: "正常" },
+                        { value: "suspended", label: "已暂停" },
+                        { value: "exited", label: "已退出" }
+                      ] : []),
+                      ...(canRiskAction ? [{ value: "risk_restricted", label: "风险受限" }] : []),
+                      ...(canClose ? [{ value: "closed", label: "已注销（本空间）" }] : [])
+                    ].filter((option) => option.value !== current?.workspaceLinks?.[0]?.status)
               }
             />
           </Form.Item>
@@ -989,14 +1050,17 @@ export function CustomerMasterPage() {
               <Input placeholder="留空则保持原等级" />
             </Form.Item>
           )}
-          {statusScope === "account" && (
-            <Form.Item name="acknowledgedManualChecks" label="人工核对确认" valuePropName="checked">
-              <Select
-                options={[
-                  { value: false, label: "未确认" },
-                  { value: true, label: "已人工核对退款、争议与追偿" }
-                ]}
-              />
+          {statusTarget === "closed" && (
+            <Form.Item
+              name="acknowledgedManualChecks"
+              valuePropName="checked"
+              rules={[{
+                validator: (_, value) => value
+                  ? Promise.resolve()
+                  : Promise.reject(new Error("注销前必须确认人工核对项"))
+              }]}
+            >
+              <Checkbox>已人工核对退款、押金/预授权、争议与追偿</Checkbox>
             </Form.Item>
           )}
           {/* 原因必填：需求 4.8.6 要求暂停、限制、退出、注销与解除都记录原因与操作人。 */}
@@ -1182,8 +1246,8 @@ export function CustomerMasterPage() {
               </Form.Item>
               <Form.Item name="registeredAddress" label="注册地址"><Input /></Form.Item>
               <Form.Item name="bankName" label="开户银行"><Input /></Form.Item>
-              {/* 库里只存脱敏值，页面拿不到明文，也不做还原。因此编辑时必须说清：
-                  留空等于清除——否则运营会以为「不动这一栏」就是保留原值。 */}
+              {/* 库里只存脱敏值，页面拿不到明文。编辑时留空必须保留原值；
+                  清除是独立显式动作，避免只改开票名称却把资金信息误删。 */}
               <Form.Item
                 name="bankAccount"
                 label="银行账号"
@@ -1191,19 +1255,29 @@ export function CustomerMasterPage() {
                   corporateEdit.id
                     ? `当前已存脱敏值${invoiceProfiles.data?.find((row) => row.id === corporateEdit.id)?.bankAccountMasked
                         ? `：${invoiceProfiles.data.find((row) => row.id === corporateEdit.id)!.bankAccountMasked}`
-                        : "：无"}。需要保留请重新填写完整账号，留空将清除。`
+                        : "：无"}。留空保留，填写新值将替换。`
                     : "只保存脱敏值，明文不入库。"
                 }
               >
                 <Input placeholder="完整银行账号" />
               </Form.Item>
+              {corporateEdit.id && (
+                <Form.Item name="clearBankAccount" valuePropName="checked">
+                  <Checkbox>清除已保存的银行账号</Checkbox>
+                </Form.Item>
+              )}
               <Form.Item
                 name="contactPhone"
                 label="开票联系电话"
-                extra={corporateEdit.id ? "同上：只存脱敏值，留空将清除。" : undefined}
+                extra={corporateEdit.id ? "只存脱敏值；留空保留，填写新值将替换。" : undefined}
               >
                 <Input />
               </Form.Item>
+              {corporateEdit.id && (
+                <Form.Item name="clearContactPhone" valuePropName="checked">
+                  <Checkbox>清除已保存的联系电话</Checkbox>
+                </Form.Item>
+              )}
               <Form.Item name="receiveEmail" label="收票邮箱"><Input /></Form.Item>
               <Form.Item name="isDefault" label="设为默认开票资料">
                 <Select
@@ -1266,7 +1340,12 @@ export function CustomerMasterPage() {
               <Form.Item name="status" label="状态">
                 <Select options={Object.entries(creditStatusMeta).map(([value, meta]) => ({ value, label: meta.label }))} />
               </Form.Item>
-              <Form.Item name="reason" label="变更原因" extra="额度与账期变更要能追溯到人和理由。">
+              <Form.Item
+                name="reason"
+                label="变更原因"
+                extra="额度与账期变更要能追溯到人和理由。"
+                rules={[{ required: true, message: "调整授信与账期必须填写变更原因" }]}
+              >
                 <Input.TextArea rows={3} maxLength={300} showCount />
               </Form.Item>
             </>
@@ -1276,6 +1355,3 @@ export function CustomerMasterPage() {
     </>
   );
 }
-
-
-

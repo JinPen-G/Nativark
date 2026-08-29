@@ -36,6 +36,7 @@ const {
   CUSTOMER_REVEAL_PERMISSION
 } = require(path.join(ROOT, "apps/api/src/modules/platform/customer-operations.service"));
 const { CustomerMergeService } = require(path.join(ROOT, "apps/api/src/modules/platform/customer-merge.service"));
+const { RentalOrderConfirmationService } = require(path.join(ROOT, "apps/api/src/modules/rental-core/rental-order-confirmation.service"));
 
 const suffix = Date.now().toString(36);
 const tenantA = `t_op_a_${suffix}`;
@@ -356,6 +357,71 @@ void (async () => {
   assert.equal(closedCheck.allowed, false);
   assert.equal(closedCheck.reasonCode, "account_closed", "注销与停用必须是不同的拒绝原因");
   ok("账号状态迁移与并发：并发只一路成功且只留一条历史、注销为终态不可回改、注销与停用原因可区分");
+
+  // ============ 8c. 真实订单创建链必须执行事务内权威门禁 ============
+  // 第一次快速检查放行，第二次（事务内）模拟客户刚被暂停；订单不得继续写聚合。
+  let savedOrder = false;
+  const orderInput = {
+    quoteId: "q_customer_gate",
+    customerId: alice.id,
+    customerType: "individual",
+    fulfillmentMode: "pickup",
+    fulfillmentLocationId: "loc_gate",
+    returnLocationId: "loc_gate",
+    startAt: new Date(Date.now() + 86_400_000).toISOString(),
+    endAt: new Date(Date.now() + 172_800_000).toISOString(),
+    lines: []
+  };
+  const quote = {
+    id: orderInput.quoteId,
+    request: { ...orderInput, id: undefined, quoteId: undefined },
+    chargeLines: [],
+    expiresAt: new Date(Date.now() + 3_600_000).toISOString()
+  };
+  // 报价请求本身没有 quoteId；显式构造，避免把测试夹具的辅助字段带进指纹。
+  delete quote.request.quoteId;
+  const orderConfirmation = new RentalOrderConfirmationService(
+    { $transaction: async (fn) => fn({}) },
+    {
+      resolveWorkspaceId: () => wsA1,
+      prepareOrder: async () => ({ id: "order_customer_gate", lines: [], capabilitySnapshot: [] }),
+      assertAvailabilityWithLocks: async () => undefined
+    },
+    {
+      consumeQuote: () => quote,
+      validateCouponForOrder: () => undefined,
+      applyOrderConfirmationToCache: () => undefined
+    },
+    {
+      saveOrderAggregate: async () => { savedOrder = true; },
+      findOrder: async () => undefined
+    },
+    {
+      findQuote: async () => quote,
+      consumeQuoteIfAvailable: async () => true
+    },
+    {
+      find: async () => undefined,
+      record: async () => undefined
+    },
+    undefined,
+    undefined,
+    {
+      assertTransactable: async () => ({ allowed: true }),
+      assertTransactableForNewBusiness: async () => ({
+        allowed: false,
+        reasonCode: "membership_suspended",
+        message: "该客户在本空间已暂停"
+      })
+    }
+  );
+  await rejects(
+    orderConfirmation.createOrder(tenantA, orderInput, "运营小王", { category: { code: "camera" } }),
+    /已暂停/u,
+    "订单事务内客户门禁"
+  );
+  assert.equal(savedOrder, false, "客户门禁拒绝后不得写订单聚合");
+  ok("订单门禁：事务外预检后状态变化，事务内仍会阻止新订单且不落半成品");
 
   // ============ 9. 重启（重连）后状态与审计仍在 ============
   await prisma.$disconnect();

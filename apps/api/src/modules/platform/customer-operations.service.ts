@@ -12,7 +12,7 @@ import type {
 } from "@store-rental/shared";
 import { CUSTOMER_ACCOUNT_STATUSES, CUSTOMER_MEMBERSHIP_STATUSES } from "@store-rental/shared";
 import { PrismaService } from "../database/prisma.service";
-import { CustomerOperationsRepository } from "./customer-operations.repository";
+import { CustomerOperationsRepository, type CustomerTx } from "./customer-operations.repository";
 import { SharedCustomerRepository } from "./shared-customer.repository";
 import { CustomerMergeService } from "./customer-merge.service";
 
@@ -95,12 +95,13 @@ export class CustomerOperationsService {
     tenantId: string,
     customerId: string,
     acknowledged: boolean | undefined,
-    workspaceId?: string
+    workspaceId?: string,
+    tx?: CustomerTx
   ) {
     if (!this.closability) {
       throw new ConflictException("注销前置检查服务未就绪，已拒绝本次注销");
     }
-    const result = await this.closability.assertClosable(tenantId, customerId, workspaceId);
+    const result = await this.closability.assertClosable(tenantId, customerId, workspaceId, tx);
     if (!result.closable) {
       throw new ConflictException(
         `注销前必须先处理：${result.blockers.map((row) => row.message).join("；")}`
@@ -245,25 +246,33 @@ export class CustomerOperationsService {
     if (!CUSTOMER_ACCOUNT_STATUSES.includes(input.status)) {
       throw new BadRequestException(`未知的客户账号状态：${input.status}`);
     }
-    const account = await this.operations.findAccountByCustomer(tenantId, customerId);
-    if (!account) throw new NotFoundException("该客户尚未开通登录账号");
-    if (account.status === input.status) {
-      throw new ConflictException(`客户账号已处于 ${input.status} 状态`);
-    }
-    if (!ACCOUNT_TRANSITIONS[account.status].includes(input.status)) {
-      throw new ConflictException(
-        `客户账号不能从 ${account.status} 直接变为 ${input.status}` +
-          (account.status === "closed" ? "：已注销账号需重新开户" : "")
-      );
-    }
-    // 注销是不可逆动作：先过前置检查（未完成订单、归属未厘清的保证金、未关闭风险、
-    // 仍生效的企业授信），再要求人工确认系统无法自动核对的项。
-    if (input.status === "closed") {
-      await this.assertClosableForClose(tenantId, customerId, input.acknowledgedManualChecks);
-    }
     const at = stamp();
-    const changed = await this.prisma.$transaction((tx) =>
-      this.operations.updateAccountStatus(
+    const changed = await this.prisma.$transaction(async (tx) => {
+      if (!(await this.operations.lockCustomerBusinessGate(tenantId, customerId, tx))) {
+        throw new NotFoundException("客户不存在");
+      }
+      const account = await this.operations.findAccountByCustomer(tenantId, customerId, tx);
+      if (!account) throw new NotFoundException("该客户尚未开通登录账号");
+      if (account.status === input.status) {
+        throw new ConflictException(`客户账号已处于 ${input.status} 状态`);
+      }
+      if (!ACCOUNT_TRANSITIONS[account.status].includes(input.status)) {
+        throw new ConflictException(
+          `客户账号不能从 ${account.status} 直接变为 ${input.status}` +
+            (account.status === "closed" ? "：已注销账号需重新开户" : "")
+        );
+      }
+      // 注销检查与状态落库必须同锁、同事务。否则检查通过后仍可插入一张新订单。
+      if (input.status === "closed") {
+        await this.assertClosableForClose(
+          tenantId,
+          customerId,
+          input.acknowledgedManualChecks,
+          undefined,
+          tx
+        );
+      }
+      return this.operations.updateAccountStatus(
         tenantId,
         account.id,
         {
@@ -286,8 +295,8 @@ export class CustomerOperationsService {
           at
         },
         tx
-      )
-    );
+      );
+    });
     if (changed === 0) {
       throw new ConflictException("客户账号状态已被其他人修改，请刷新后重试");
     }
@@ -315,25 +324,34 @@ export class CustomerOperationsService {
     if (!CUSTOMER_MEMBERSHIP_STATUSES.includes(input.status)) {
       throw new BadRequestException(`未知的空间会员状态：${input.status}`);
     }
-    const link = await this.customers.findLink(tenantId, workspaceId, customerId);
-    if (!link) throw new NotFoundException("该客户尚未接入当前经营空间");
-    if (link.status === input.status) {
-      throw new ConflictException(`该客户在本空间已处于 ${input.status} 状态`);
-    }
-    if (!MEMBERSHIP_TRANSITIONS[link.status].includes(input.status)) {
-      throw new ConflictException(
-        `空间会员状态不能从 ${link.status} 直接变为 ${input.status}` +
-          (link.status === "closed" ? "：已注销的会员关系需先重新激活" : "")
-      );
-    }
-    if (input.status === "closed") {
-      // 传 workspaceId：注销的是**本空间**会员关系，只检查本空间的在途业务，
-      // 用全租户口径会让另一个空间的在途订单挡住本空间的正常注销。
-      await this.assertClosableForClose(tenantId, customerId, input.acknowledgedManualChecks, workspaceId);
-    }
     const at = stamp();
-    const changed = await this.prisma.$transaction((tx) =>
-      this.operations.updateMembershipStatus(
+    const changed = await this.prisma.$transaction(async (tx) => {
+      if (!(await this.operations.lockCustomerBusinessGate(tenantId, customerId, tx))) {
+        throw new NotFoundException("客户不存在");
+      }
+      const link = await this.customers.findLink(tenantId, workspaceId, customerId, tx);
+      if (!link) throw new NotFoundException("该客户尚未接入当前经营空间");
+      if (link.status === input.status) {
+        throw new ConflictException(`该客户在本空间已处于 ${input.status} 状态`);
+      }
+      if (!MEMBERSHIP_TRANSITIONS[link.status].includes(input.status)) {
+        throw new ConflictException(
+          `空间会员状态不能从 ${link.status} 直接变为 ${input.status}` +
+            (link.status === "closed" ? "：已注销的会员关系需先重新激活" : "")
+        );
+      }
+      if (input.status === "closed") {
+        // 传 workspaceId：注销的是**本空间**会员关系，只检查本空间的在途业务，
+        // 用全租户口径会让另一个空间的在途订单挡住本空间的正常注销。
+        await this.assertClosableForClose(
+          tenantId,
+          customerId,
+          input.acknowledgedManualChecks,
+          workspaceId,
+          tx
+        );
+      }
+      return this.operations.updateMembershipStatus(
         tenantId,
         link.id,
         {
@@ -358,8 +376,8 @@ export class CustomerOperationsService {
           at
         },
         tx
-      )
-    );
+      );
+    });
     if (changed === 0) {
       throw new ConflictException("空间会员状态已被其他人修改，请刷新后重试");
     }
@@ -383,18 +401,40 @@ export class CustomerOperationsService {
     workspaceId: string,
     customerId: string
   ): Promise<CustomerTransactability> {
-    const profile = await this.customers.findById(tenantId, customerId, workspaceId);
-    if (!profile) {
+    return this.evaluateTransactability(tenantId, workspaceId, customerId);
+  }
+
+  /** 订单事务内的权威门禁：先取得与状态变更共用的行锁，再读取最新事实。 */
+  async assertTransactableForNewBusiness(
+    tenantId: string,
+    workspaceId: string,
+    customerId: string,
+    tx: CustomerTx
+  ): Promise<CustomerTransactability> {
+    if (!(await this.operations.lockCustomerBusinessGate(tenantId, customerId, tx))) {
       return { allowed: false, reasonCode: "customer_not_found", message: "客户不存在" };
     }
-    if (profile.mergedIntoCustomerId) {
+    return this.evaluateTransactability(tenantId, workspaceId, customerId, tx);
+  }
+
+  private async evaluateTransactability(
+    tenantId: string,
+    workspaceId: string,
+    customerId: string,
+    tx?: CustomerTx
+  ): Promise<CustomerTransactability> {
+    const gate = await this.customers.findBusinessGate(tenantId, workspaceId, customerId, tx);
+    if (!gate) {
+      return { allowed: false, reasonCode: "customer_not_found", message: "客户不存在" };
+    }
+    if (gate.mergedIntoCustomerId) {
       return {
         allowed: false,
         reasonCode: "customer_merged",
         message: "该客户主档已被合并，请使用保留主档下单"
       };
     }
-    const account = await this.operations.findAccountByCustomer(tenantId, customerId);
+    const account = gate.account;
     // 没有账号不阻止业务：线下客户可以由门店代客下单，需求并未要求人人有登录账号。
     if (account && account.status !== "active") {
       return {
@@ -407,7 +447,7 @@ export class CustomerOperationsService {
         accountStatus: account.status
       };
     }
-    const link = profile.workspaceLinks?.find((row) => row.workspaceId === workspaceId);
+    const link = gate.workspaceLinks[0];
     if (!link) {
       return {
         allowed: false,

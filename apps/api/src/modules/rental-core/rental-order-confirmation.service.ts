@@ -23,6 +23,7 @@ import {
 } from "./rental-core-fact.repository";
 import { RentalCoreService } from "./rental-core.service";
 import { CustomerCorporateService } from "../platform/customer-corporate.service";
+import { CustomerOperationsService } from "../platform/customer-operations.service";
 
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalize);
@@ -106,7 +107,12 @@ export class RentalOrderConfirmationService {
      * 订单按原语义只存 `customerId`（读取侧回落为三个主体都是该客户）。
      * 这不是 fail-open——主体是**附加**的责任归属信息，缺失不会放宽任何既有校验。
      */
-    @Optional() private readonly subjects?: CustomerCorporateService
+    @Optional() private readonly subjects?: CustomerCorporateService,
+    /**
+     * CUSTOMER-01：真实订单创建必须消费客户可交易门禁。
+     * 保留可选注入仅兼容直接 new 本服务的既有单测；生产 Nest 容器始终注册该服务。
+     */
+    @Optional() private readonly customerOperations?: CustomerOperationsService
   ) {}
 
   /**
@@ -130,6 +136,12 @@ export class RentalOrderConfirmationService {
       assertSameRequest(early, fingerprint);
       const replayed = early.orderId ? await this.coreFacts.findOrder(tenantId, early.orderId) : undefined;
       if (replayed) return { order: replayed, replayed: true };
+    }
+
+    const workspaceId = this.core.resolveWorkspaceId(tenantId);
+    if (this.customerOperations && input.customerId) {
+      const customerGate = await this.customerOperations.assertTransactable(tenantId, workspaceId, input.customerId);
+      if (!customerGate.allowed) throw new ConflictException(customerGate.message);
     }
 
     const quote = this.business.consumeQuote(tenantId, context, input.quoteId);
@@ -161,6 +173,17 @@ export class RentalOrderConfirmationService {
 
     try {
       await this.prisma.$transaction(async (tx) => {
+        // 快速预检只改善反馈；这里才是权威判定。它与客户暂停、注销、合并共用
+        // customer_profiles 行锁，消除“检查通过后状态才变化”的竞态窗口。
+        if (this.customerOperations && input.customerId) {
+          const customerGate = await this.customerOperations.assertTransactableForNewBusiness(
+            tenantId,
+            workspaceId,
+            input.customerId,
+            tx
+          );
+          if (!customerGate.allowed) throw new ConflictException(customerGate.message);
+        }
         // 先锁定序列化资产或数量余额，再在同一事务内按最新预占重新计算。
         // 并发请求会在这里串行，后到者不能继续使用事务外看到的陈旧可用量。
         await this.core.assertAvailabilityWithLocks(tenantId, {
@@ -179,7 +202,7 @@ export class RentalOrderConfirmationService {
         await this.hooks?.evaluate({
           point: "order_confirmation",
           tenantId,
-          workspaceId: this.core.resolveWorkspaceId(tenantId),
+          workspaceId,
           categoryCode: context.category.code,
           subjectRef: { type: "order", id: order.id },
           // 富化：随订单一并传入已解析器材行与本次的例外确认，能力据此判定兼容性。

@@ -58,6 +58,8 @@ export const customerApi = {
     request<unknown>("/platform/customers/merge", { method: "post", data }),
   closability: (customerId: string) =>
     request<CustomerClosability>(`/platform/customers/${customerId}/closability`),
+  workspaceClosability: (customerId: string) =>
+    request<CustomerClosability>(`/platform/workspace-customers/${customerId}/closability`),
 
   invoiceProfiles: (customerId: string) =>
     request<CustomerCorporateInvoiceProfile[]>(`/platform/customers/${customerId}/invoice-profiles`),

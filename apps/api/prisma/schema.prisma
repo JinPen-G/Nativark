@@ -1164,6 +1164,7 @@ model CustomerCorporateInvoiceProfile {
   isDefault   Boolean  @default(false)
   defaultMarker String
   status      String   @default("active")
+  revision    Int      @default(1)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -1192,6 +1193,7 @@ model CustomerCorporateContract {
   /// 合同文件引用。原件不入库。
   fileRef     String?
   terminatedReason String? @db.Text
+  revision    Int      @default(1)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -1223,6 +1225,7 @@ model CustomerCorporateCredit {
   approvedBy  String?
   approvedAt  DateTime?
   reason      String?  @db.Text
+  revision    Int      @default(1)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

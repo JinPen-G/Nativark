@@ -116,6 +116,29 @@ void (async () => {
   assert.equal(rawInv.bankAccountMasked.includes("0202"), true, "脱敏值保留尾号便于核对");
   assert.equal(Object.keys(rawInv).includes("bankAccount"), false, "库里不该有存明文账号的列");
 
+  const inv1Edited = await service.saveInvoiceProfile(tenantA, corp.id, {
+    id: inv1.id, expectedRevision: inv1.revision,
+    invoiceType: inv1.invoiceType, title: "示例影视有限公司（更新）", taxNo: inv1.taxNo,
+    bankName: inv1.bankName, isDefault: inv1.isDefault, status: inv1.status
+  });
+  assert.equal(inv1Edited.bankAccountMasked, inv1.bankAccountMasked, "编辑其他字段时留空银行账号必须保留原掩码");
+  assert.equal(inv1Edited.contactPhoneMasked, inv1.contactPhoneMasked, "编辑其他字段时留空联系电话必须保留原掩码");
+  const inv1Cleared = await service.saveInvoiceProfile(tenantA, corp.id, {
+    id: inv1.id, expectedRevision: inv1Edited.revision,
+    invoiceType: inv1.invoiceType, title: inv1Edited.title, taxNo: inv1.taxNo,
+    bankName: inv1.bankName, isDefault: inv1.isDefault, status: inv1.status, clearContactPhone: true
+  });
+  assert.equal(inv1Cleared.bankAccountMasked, inv1.bankAccountMasked, "显式清除联系电话不得连带清除银行账号");
+  assert.equal(inv1Cleared.contactPhoneMasked, undefined, "只有显式清除才删除已有联系电话掩码");
+  await rejects(
+    service.saveInvoiceProfile(tenantA, corp.id, {
+      id: inv1.id, expectedRevision: inv1.revision,
+      invoiceType: inv1.invoiceType, title: "用旧页面覆盖", taxNo: inv1.taxNo
+    }),
+    /已被其他人修改/u,
+    "用过期版本覆盖开票资料"
+  );
+
   const inv2 = await service.saveInvoiceProfile(tenantA, corp.id, {
     invoiceType: "vat_normal", title: "示例影视上海分公司", taxNo: "91310000BBB", isDefault: true
   });
@@ -131,6 +154,21 @@ void (async () => {
     contractNo: `C-${suffix}-1`, name: "2026 年度框架协议",
     effectiveFrom: "2026-01-01T00:00:00.000Z", effectiveTo: "2026-12-31T23:59:59.000Z", status: "active"
   });
+  const editedContract = await service.saveContract(tenantA, corp.id, {
+    id: activeContract.id, expectedRevision: activeContract.revision,
+    contractNo: activeContract.contractNo, name: "2026 年度框架协议（修订名称）",
+    effectiveFrom: activeContract.effectiveFrom, effectiveTo: activeContract.effectiveTo, status: activeContract.status
+  });
+  assert.equal(editedContract.name.includes("修订名称"), true);
+  await rejects(
+    service.saveContract(tenantA, corp.id, {
+      id: activeContract.id, expectedRevision: activeContract.revision,
+      contractNo: activeContract.contractNo, name: "旧页面覆盖合同",
+      effectiveFrom: activeContract.effectiveFrom, effectiveTo: activeContract.effectiveTo, status: activeContract.status
+    }),
+    /已被其他人修改/u,
+    "用过期版本覆盖合同"
+  );
   await rejects(
     service.saveContract(tenantA, hq.id, { contractNo: `C-${suffix}-1`, name: "撞号合同", effectiveFrom: AT }),
     /合同编号在本租户已存在/u,
@@ -160,20 +198,36 @@ void (async () => {
   assert.equal(credit.creditLimit, 200000);
   assert.equal(credit.settlementTermDays, 45);
   assert.equal(credit.approvedBy, "财务老王", "授信必须记录审批人");
-  const credit2 = await service.saveCredit(tenantA, corp.id, { creditLimit: 300000, settlementTermDays: 30 }, "财务老王");
+  const credit2 = await service.saveCredit(tenantA, corp.id, {
+    creditLimit: 300000, settlementTermDays: 30, reason: "季度复审上调",
+    expectedRevision: credit.revision
+  }, "财务老王");
   assert.equal(credit2.id, credit.id, "额度调整走更新，一家企业只有一条当前授信记录");
+  await rejects(
+    service.saveCredit(tenantA, corp.id, {
+      creditLimit: 400000, settlementTermDays: 60, reason: "旧页面覆盖",
+      expectedRevision: credit.revision
+    }, "财务老王"),
+    /已被其他人修改/u,
+    "用过期版本覆盖授信"
+  );
   assert.equal(
     await prisma.customerCorporateCredit.count({ where: { tenantId: tenantA, customerId: corp.id } }),
     1,
     "不得因调整额度新增行"
   );
   for (const [bad, pattern] of [
-    [{ creditLimit: -1, settlementTermDays: 30 }, /额度必须是非负数值/u],
-    [{ creditLimit: 100, settlementTermDays: -1 }, /账期天数必须是非负整数/u],
-    [{ creditLimit: 100, settlementTermDays: 1.5 }, /账期天数必须是非负整数/u]
+    [{ creditLimit: -1, settlementTermDays: 30, reason: "非法额度" }, /额度必须是非负数值/u],
+    [{ creditLimit: 100, settlementTermDays: -1, reason: "非法账期" }, /账期天数必须是非负整数/u],
+    [{ creditLimit: 100, settlementTermDays: 1.5, reason: "非法账期" }, /账期天数必须是非负整数/u]
   ]) {
     await rejects(service.saveCredit(tenantA, corp.id, bad), pattern, `非法授信入参 ${JSON.stringify(bad)}`);
   }
+  await rejects(
+    service.saveCredit(tenantA, corp.id, { creditLimit: 100, settlementTermDays: 30, reason: "   " }),
+    /必须填写变更原因/u,
+    "授信调整不填原因"
+  );
   ok("授信与账期：记录审批人、额度调整走更新不新增行、负额度与非整数账期被拒");
 
   // ============ 5. 订单主体：省略即回落为下单客户本人 ============

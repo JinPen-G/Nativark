@@ -4837,6 +4837,7 @@ export interface CustomerCorporateInvoiceProfile {
   receiveEmail?: string;
   isDefault: boolean;
   status: "active" | "disabled";
+  revision: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -4854,6 +4855,7 @@ export interface CustomerCorporateContract {
   status: "draft" | "active" | "expired" | "terminated";
   fileRef?: string;
   terminatedReason?: string;
+  revision: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -4875,19 +4877,26 @@ export interface CustomerCorporateCredit {
   approvedBy?: string;
   approvedAt?: string;
   reason?: string;
+  revision: number;
   createdAt: string;
   updatedAt: string;
 }
 
 export interface SaveCustomerInvoiceProfileRequest {
   id?: string;
+  /** 编辑时必传，用于阻止两名运营人员静默覆盖彼此的修改。 */
+  expectedRevision?: number;
   invoiceType: "vat_special" | "vat_normal";
   title: string;
   taxNo: string;
   registeredAddress?: string;
   bankName?: string;
   bankAccount?: string;
+  /** 编辑时显式清除已保存的银行账号掩码；两个字段都省略表示保留原值。 */
+  clearBankAccount?: boolean;
   contactPhone?: string;
+  /** 编辑时显式清除已保存的联系电话掩码；两个字段都省略表示保留原值。 */
+  clearContactPhone?: boolean;
   receiveEmail?: string;
   isDefault?: boolean;
   status?: "active" | "disabled";
@@ -4895,6 +4904,8 @@ export interface SaveCustomerInvoiceProfileRequest {
 
 export interface SaveCustomerContractRequest {
   id?: string;
+  /** 编辑时必传，用于乐观并发控制。 */
+  expectedRevision?: number;
   contractNo: string;
   name: string;
   signedAt?: string;
@@ -4906,11 +4917,13 @@ export interface SaveCustomerContractRequest {
 }
 
 export interface SaveCustomerCreditRequest {
+  /** 已存在授信记录时必传，用于乐观并发控制；首次授信省略。 */
+  expectedRevision?: number;
   creditLimit: number;
   settlementTermDays: number;
   billingCycle?: "monthly" | "semi_monthly" | "per_order";
   status?: "active" | "suspended" | "revoked";
-  reason?: string;
+  reason: string;
 }
 
 /**

@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import type {
   CustomerAccountStatus,
+  CustomerMembershipStatus,
   CustomerWorkspaceLink,
   SaveSharedCustomerRequest,
   SharedCustomerProfile
@@ -24,6 +25,10 @@ export type SharedCustomerTx = Prisma.TransactionClient;
 export class SharedCustomerRepository {
   constructor(private readonly prisma: PrismaService) {}
 
+  private db(tx?: SharedCustomerTx) {
+    return tx ?? this.prisma;
+  }
+
   private mask(phone: string) {
     const trimmed = phone.trim();
     if (trimmed.length <= 4) return trimmed;
@@ -40,8 +45,13 @@ export class SharedCustomerRepository {
     return rows.map((row) => this.toDomain(row));
   }
 
-  async findById(tenantId: string, customerId: string, workspaceId?: string): Promise<SharedCustomerProfile | undefined> {
-    const row = await this.prisma.customerProfile.findFirst({
+  async findById(
+    tenantId: string,
+    customerId: string,
+    workspaceId?: string,
+    tx?: SharedCustomerTx
+  ): Promise<SharedCustomerProfile | undefined> {
+    const row = await this.db(tx).customerProfile.findFirst({
       where: { id: customerId, tenantId },
       include: {
         workspaceLinks: workspaceId ? { where: { workspaceId } } : false,
@@ -148,12 +158,41 @@ export class SharedCustomerRepository {
   async findLink(
     tenantId: string,
     workspaceId: string,
-    customerId: string
+    customerId: string,
+    tx?: SharedCustomerTx
   ): Promise<CustomerWorkspaceLink | undefined> {
-    const row = await this.prisma.customerWorkspaceLink.findFirst({
+    const row = await this.db(tx).customerWorkspaceLink.findFirst({
       where: { tenantId, workspaceId, customerId }
     });
     return row ? this.toLink(row) : undefined;
+  }
+
+  /**
+   * 新业务门禁只取四个最小事实，避免订单高频路径加载联系人、经办人等详情数据。
+   * `tx` 存在时必须与调用方取得的客户行锁使用同一连接，才能读到锁后的权威状态。
+   */
+  async findBusinessGate(tenantId: string, workspaceId: string, customerId: string, tx?: SharedCustomerTx) {
+    const row = await this.db(tx).customerProfile.findFirst({
+      where: { tenantId, id: customerId },
+      select: {
+        mergedIntoCustomerId: true,
+        account: { select: { status: true } },
+        workspaceLinks: {
+          where: { tenantId, workspaceId },
+          select: { status: true },
+          take: 1
+        }
+      }
+    });
+    return row
+      ? {
+          mergedIntoCustomerId: row.mergedIntoCustomerId,
+          account: row.account ? { status: row.account.status as CustomerAccountStatus } : null,
+          workspaceLinks: row.workspaceLinks.map((link) => ({
+            status: link.status as CustomerMembershipStatus
+          }))
+        }
+      : null;
   }
 
   private toDomain(row: {

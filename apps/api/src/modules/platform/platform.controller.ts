@@ -229,6 +229,12 @@ export class PlatformController {
     return this.platformService.getCustomerClosability(customerId, req.user);
   }
 
+  /** 注销当前空间会员关系的前置检查，只检查当前会话空间的业务事实。 */
+  @Get("workspace-customers/:customerId/closability")
+  customerMembershipClosability(@Param("customerId") customerId: string, @Req() req: RequestWithUser) {
+    return this.platformService.getCustomerMembershipClosability(customerId, req.user);
+  }
+
   /** CUSTOMER-01B：该客户此刻能否在本空间开展新业务，以及被拒的具体原因。 */
   @Get("workspace-customers/:customerId/transactability")
   customerTransactability(@Param("customerId") customerId: string, @Req() req: RequestWithUser) {

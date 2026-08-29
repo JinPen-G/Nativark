@@ -6,7 +6,7 @@ import type {
   CustomerMergePreview,
   MergeCustomersRequest
 } from "@store-rental/shared";
-import { $Enums } from "@prisma/client";
+import { $Enums, Prisma } from "@prisma/client";
 import { PrismaService } from "../database/prisma.service";
 import { CustomerOperationsRepository } from "./customer-operations.repository";
 import { SharedCustomerRepository } from "./shared-customer.repository";
@@ -48,6 +48,10 @@ export class CustomerMergeService {
     @Inject(SharedCustomerRepository) private readonly customers: SharedCustomerRepository,
     @Inject(CustomerOperationsRepository) private readonly operations: CustomerOperationsRepository
   ) {}
+
+  private db(tx?: Prisma.TransactionClient) {
+    return tx ?? this.prisma;
+  }
 
   /**
    * 找出可能与该客户重复的主档（需求 4.8.3）。
@@ -131,10 +135,16 @@ export class CustomerMergeService {
    * 预览与提交分开是需求要求的人工闭环：运营先看清字段冲突、双方空间会员关系
    * 与将被保留的历史引用，再决定是否提交。直接一步合并没有回头路。
    */
-  async previewMerge(tenantId: string, sourceCustomerId: string, targetCustomerId: string): Promise<CustomerMergePreview> {
+  async previewMerge(
+    tenantId: string,
+    sourceCustomerId: string,
+    targetCustomerId: string,
+    tx?: Prisma.TransactionClient
+  ): Promise<CustomerMergePreview> {
+    const db = this.db(tx);
     const [source, target] = await Promise.all([
-      this.customers.findById(tenantId, sourceCustomerId),
-      this.customers.findById(tenantId, targetCustomerId)
+      this.customers.findById(tenantId, sourceCustomerId, undefined, tx),
+      this.customers.findById(tenantId, targetCustomerId, undefined, tx)
     ]);
     const blockers: CustomerMergePreview["blockers"] = [];
     if (!source || !target) throw new NotFoundException("待合并的客户不存在");
@@ -169,8 +179,8 @@ export class CustomerMergeService {
     }));
 
     const [sourceLinks, targetLinks] = await Promise.all([
-      this.prisma.customerWorkspaceLink.findMany({ where: { tenantId, customerId: sourceCustomerId } }),
-      this.prisma.customerWorkspaceLink.findMany({ where: { tenantId, customerId: targetCustomerId } })
+      db.customerWorkspaceLink.findMany({ where: { tenantId, customerId: sourceCustomerId } }),
+      db.customerWorkspaceLink.findMany({ where: { tenantId, customerId: targetCustomerId } })
     ]);
     const toMembership = (row: { workspaceId: string; levelName: string; status: string }) => ({
       workspaceId: row.workspaceId,
@@ -181,10 +191,10 @@ export class CustomerMergeService {
 
     // 将被保留的历史引用：合并后这些仍指向被合并方，不搬迁。
     const [asCustomer, asContract, asPayer, asUser] = await Promise.all([
-      this.prisma.rentalOrder.count({ where: { tenantId, customerId: sourceCustomerId } }),
-      this.prisma.rentalOrder.count({ where: { tenantId, contractSubjectCustomerId: sourceCustomerId } }),
-      this.prisma.rentalOrder.count({ where: { tenantId, payerSubjectCustomerId: sourceCustomerId } }),
-      this.prisma.rentalOrder.count({ where: { tenantId, userSubjectCustomerId: sourceCustomerId } })
+      db.rentalOrder.count({ where: { tenantId, customerId: sourceCustomerId } }),
+      db.rentalOrder.count({ where: { tenantId, contractSubjectCustomerId: sourceCustomerId } }),
+      db.rentalOrder.count({ where: { tenantId, payerSubjectCustomerId: sourceCustomerId } }),
+      db.rentalOrder.count({ where: { tenantId, userSubjectCustomerId: sourceCustomerId } })
     ]);
 
     return {
@@ -225,9 +235,19 @@ export class CustomerMergeService {
       throw new ConflictException(`不能合并：${preview.blockers.map((row) => row.message).join("；")}`);
     }
     const at = stamp();
-    const sourceAccount = await this.operations.findAccountByCustomer(tenantId, input.sourceCustomerId);
-
     await this.prisma.$transaction(async (tx) => {
+      // 与订单创建共用主档行锁。按 id 排序依次加锁，避免两路反向合并形成死锁。
+      for (const customerId of [input.sourceCustomerId, input.targetCustomerId].sort()) {
+        if (!(await this.operations.lockCustomerBusinessGate(tenantId, customerId, tx))) {
+          throw new NotFoundException("待合并的客户不存在");
+        }
+      }
+      // 事务外预览只服务于快速反馈；真正提交必须在锁后重算，不能使用陈旧快照。
+      const lockedPreview = await this.previewMerge(tenantId, input.sourceCustomerId, input.targetCustomerId, tx);
+      if (lockedPreview.blockers.length) {
+        throw new ConflictException(`不能合并：${lockedPreview.blockers.map((row) => row.message).join("；")}`);
+      }
+      const sourceAccount = await this.operations.findAccountByCustomer(tenantId, input.sourceCustomerId, tx);
       // 以「尚未被合并」为写入条件：并发两路合并同一主档时，后到者更新 0 行并拿到 409，
       // 而不是双双写出映射（唯一键也会挡，但这里先给出可解释的错误）。
       const marked = await tx.customerProfile.updateMany({
@@ -247,15 +267,15 @@ export class CustomerMergeService {
           approver: input.approver ?? null,
           // 字段差异与人工取舍结论一并固化：事后要能解释「保留了谁的值、谁决定的」。
           fieldDiff: {
-            diff: preview.fieldDiff,
+            diff: lockedPreview.fieldDiff,
             resolutions: input.fieldResolutions ?? {}
           } as unknown as object,
           // 双方空间会员关系快照：证明合并当时各空间权益是分开的，没有被合成一份。
           membershipSnapshot: {
-            source: preview.sourceMemberships,
-            target: preview.targetMemberships,
-            overlappingWorkspaceIds: preview.overlappingWorkspaceIds,
-            preservedReferences: preview.preservedReferences
+            source: lockedPreview.sourceMemberships,
+            target: lockedPreview.targetMemberships,
+            overlappingWorkspaceIds: lockedPreview.overlappingWorkspaceIds,
+            preservedReferences: lockedPreview.preservedReferences
           } as unknown as object,
           mergedAt: new Date(at)
         }
@@ -334,9 +354,11 @@ export class CustomerMergeService {
   async assertClosable(
     tenantId: string,
     customerId: string,
-    workspaceId?: string
+    workspaceId?: string,
+    tx?: Prisma.TransactionClient
   ): Promise<CustomerClosability> {
-    const profile = await this.customers.findById(tenantId, customerId);
+    const db = this.db(tx);
+    const profile = await this.customers.findById(tenantId, customerId, undefined, tx);
     if (!profile) throw new NotFoundException("客户不存在");
     const blockers: CustomerClosability["blockers"] = [];
 
@@ -351,7 +373,7 @@ export class CustomerMergeService {
       ]
     };
     const scope = workspaceId ? { workspaceId } : {};
-    const openOrders = await this.prisma.rentalOrder.count({
+    const openOrders = await db.rentalOrder.count({
       where: { tenantId, ...scope, status: { in: OPEN_ORDER_STATUSES }, ...roleFilter }
     });
     if (openOrders > 0) {
@@ -364,7 +386,7 @@ export class CustomerMergeService {
 
     // 归属无法判定的存量保证金：金额到底是押金还是预授权都说不清，
     // 放它过去等于默认「不用退」。必须先人工厘清。
-    const unverifiedDeposit = await this.prisma.rentalOrder.count({
+    const unverifiedDeposit = await db.rentalOrder.count({
       where: { tenantId, ...scope, legacyDepositUnverified: true, ...roleFilter }
     });
     if (unverifiedDeposit > 0) {
@@ -376,7 +398,7 @@ export class CustomerMergeService {
     }
 
     // 未关闭的风险记录：需求 4.8.13 明确不得借注销规避风险限制。
-    if (await this.operations.hasOpenRisk(tenantId, customerId, workspaceId)) {
+    if (await this.operations.hasOpenRisk(tenantId, customerId, workspaceId, tx)) {
       blockers.push({
         code: "open_risk",
         message: "存在未关闭的风险记录，必须先完成复核或关闭"
@@ -385,7 +407,7 @@ export class CustomerMergeService {
 
     // 企业授信仍生效：账期意味着可能存在未到期应收。撤销授信是独立动作，
     // 必须先做，否则注销会把一个仍有账期的企业留在系统外。
-    const credit = await this.prisma.customerCorporateCredit.findFirst({
+    const credit = await db.customerCorporateCredit.findFirst({
       where: { tenantId, customerId, status: "active" }
     });
     if (credit) {

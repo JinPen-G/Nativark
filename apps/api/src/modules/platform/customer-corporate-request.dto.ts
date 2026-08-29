@@ -28,6 +28,8 @@ export class SaveCustomerInvoiceProfileDto implements SaveCustomerInvoiceProfile
   @IsString()
   id?: string;
 
+  @Type(() => Number) @IsOptional() @IsInt() @Min(1) expectedRevision?: number;
+
   @IsIn(["vat_special", "vat_normal"])
   invoiceType!: "vat_special" | "vat_normal";
 
@@ -45,7 +47,9 @@ export class SaveCustomerInvoiceProfileDto implements SaveCustomerInvoiceProfile
   @IsOptional() @IsString() @MaxLength(120) bankName?: string;
   /** 明文只用于计算掩码，服务层不落库原值。 */
   @IsOptional() @IsString() @MaxLength(64) bankAccount?: string;
+  @IsOptional() @IsBoolean() clearBankAccount?: boolean;
   @IsOptional() @IsString() @MaxLength(32) contactPhone?: string;
+  @IsOptional() @IsBoolean() clearContactPhone?: boolean;
   @IsOptional() @IsString() @MaxLength(200) receiveEmail?: string;
   @IsOptional() @IsBoolean() isDefault?: boolean;
   @IsOptional() @IsIn(["active", "disabled"]) status?: "active" | "disabled";
@@ -53,6 +57,7 @@ export class SaveCustomerInvoiceProfileDto implements SaveCustomerInvoiceProfile
 
 export class SaveCustomerContractDto implements SaveCustomerContractRequest {
   @IsOptional() @IsString() id?: string;
+  @Type(() => Number) @IsOptional() @IsInt() @Min(1) expectedRevision?: number;
 
   @IsString() @IsNotEmpty() @MaxLength(120) contractNo!: string;
   @IsString() @IsNotEmpty() @MaxLength(200) name!: string;
@@ -68,6 +73,7 @@ export class SaveCustomerContractDto implements SaveCustomerContractRequest {
 }
 
 export class SaveCustomerCreditDto implements SaveCustomerCreditRequest {
+  @Type(() => Number) @IsOptional() @IsInt() @Min(1) expectedRevision?: number;
   @Type(() => Number)
   @IsNumber()
   @Min(0)
@@ -80,5 +86,5 @@ export class SaveCustomerCreditDto implements SaveCustomerCreditRequest {
 
   @IsOptional() @IsIn(["monthly", "semi_monthly", "per_order"]) billingCycle?: "monthly" | "semi_monthly" | "per_order";
   @IsOptional() @IsIn(["active", "suspended", "revoked"]) status?: "active" | "suspended" | "revoked";
-  @IsOptional() @IsString() @MaxLength(500) reason?: string;
+  @IsString() @IsNotEmpty() @MaxLength(500) reason!: string;
 }

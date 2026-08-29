@@ -38,6 +38,8 @@ const {
   CUSTOMER_REVEAL_PERMISSION
 } = require(path.join(ROOT, "apps/api/src/modules/platform/customer-operations.service"));
 const { CustomerMergeService } = require(path.join(ROOT, "apps/api/src/modules/platform/customer-merge.service"));
+const { PlatformService } = require(path.join(ROOT, "apps/api/src/modules/platform/platform.service"));
+const { runWithRequestIdentity } = require(path.join(ROOT, "apps/api/src/common/request-identity"));
 
 const suffix = Date.now().toString(36);
 const tenantA = `t_ad_a_${suffix}`;
@@ -229,7 +231,56 @@ void (async () => {
   );
   ok("隔离：主档按租户共享、会员关系按空间隔离、跨租户读取被拒");
 
-  // ============ 9. 页面契约：入口、权限门禁与四类不可省的展示 ============
+  // ============ 9. 同一路由内的动作级权限不能互相借用 ============
+  const permissionCalls = [];
+  const platform = new PlatformService(
+    { get: () => "mysql" },
+    {},
+    undefined,
+    undefined,
+    undefined,
+    {
+      changeAccountStatus: async (...args) => { permissionCalls.push(["account", ...args]); return { ok: true }; },
+      changeMembershipStatus: async (...args) => { permissionCalls.push(["workspace", ...args]); return { ok: true }; }
+    }
+  );
+  const actor = (permissions) => ({
+    id: `u_${permissions.join("_")}`, tenantId: tenantA, displayName: "权限测试", permissions,
+    isSaasAdmin: false, isPlatformAdmin: false
+  });
+  const memberActor = actor(["store-rental:member:manage"]);
+  const closeActor = actor(["store-rental:customer:close"]);
+  const riskActor = actor(["store-rental:member:risk-action"]);
+  await rejects(
+    Promise.resolve().then(() => platform.changeCustomerAccountStatus(person.id, { status: "closed", reason: "越权注销" }, memberActor)),
+    /customer:close/u,
+    "会员管理员借账号状态接口注销客户"
+  );
+  await rejects(
+    Promise.resolve().then(() => platform.changeCustomerAccountStatus(person.id, { status: "suspended", reason: "越权停用" }, closeActor)),
+    /member:manage/u,
+    "只有注销权限的人借账号状态接口停用账号"
+  );
+  await platform.changeCustomerAccountStatus(person.id, { status: "suspended", reason: "正常停用" }, memberActor);
+  await platform.changeCustomerAccountStatus(person.id, { status: "closed", reason: "正常注销" }, closeActor);
+  await runWithRequestIdentity({ tenantId: tenantA, workspaceId: wsA1 }, async () => {
+    await rejects(
+      Promise.resolve().then(() => platform.changeCustomerMembershipStatus(person.id, { status: "closed", reason: "越权注销" }, memberActor)),
+      /customer:close/u,
+      "会员管理员借空间状态接口注销会员关系"
+    );
+    await rejects(
+      Promise.resolve().then(() => platform.changeCustomerMembershipStatus(person.id, { status: "risk_restricted", reason: "越权风控" }, memberActor)),
+      /risk-action/u,
+      "会员管理员借空间状态接口执行风险限制"
+    );
+    await platform.changeCustomerMembershipStatus(person.id, { status: "closed", reason: "正常注销" }, closeActor);
+    await platform.changeCustomerMembershipStatus(person.id, { status: "risk_restricted", reason: "正常风控" }, riskActor);
+  });
+  assert.equal(permissionCalls.length, 4, "只有四个具备动作权限的请求能进入业务服务");
+  ok("动作级权限：会员管理、风险处理和客户注销不能借同一路由互相越权");
+
+  // ============ 10. 页面契约：入口、权限门禁与四类不可省的展示 ============
   // 后端守住不等于界面守住：这些断言防的是「页面把服务端的口径绕过去」。
   const read = (relative) => fs.readFileSync(path.join(ROOT, relative), "utf8");
   const nav = read("apps/admin/src/app/navigation.tsx");
@@ -244,6 +295,7 @@ void (async () => {
 
   for (const [permission, label] of [
     ["store-rental:member:manage", "会员管理"],
+    ["store-rental:member:risk-action", "风险处理"],
     ["store-rental:customer:merge", "客户合并"],
     ["store-rental:customer:close", "客户注销"],
     ["store-rental:customer:reveal-sensitive", "敏感资料解密"]
@@ -261,7 +313,7 @@ void (async () => {
   );
   ok("页面契约：入口已注册，四类权限分别门禁，六态与联系人/经办人/时间线齐备");
 
-  // ============ 10. 合并与注销在界面上是「有闸的动作」，不是一键 ============
+  // ============ 11. 合并与注销在界面上是「有闸的动作」，不是一键 ============
   assert.ok(page.includes("preservedReferences"), "合并预览必须展示将保留的历史引用——它解释了「为什么不搬数据」");
   assert.ok(page.includes("overlappingWorkspaceIds"), "合并预览必须展示两边都有会员关系的空间，供人工决定保留哪份等级");
   // 这几条刻意断言到**结构**而不是「源码里出现过这个词」：变量声明在、但请求里没带，
@@ -374,6 +426,22 @@ void (async () => {
     assert.ok(page.includes(`customerApi.${method}`), `页面未调用 ${method}，${label} 只能看不能改`);
   }
   assert.match(api, /saveCredit[\s\S]{0,200}method: "put"/u, "授信保存必须是 PUT，不能只有 GET");
+  assert.match(
+    page,
+    /name="clearBankAccount"[\s\S]{0,180}清除已保存的银行账号/u,
+    "编辑开票资料必须把「保留脱敏值」与「显式清除」分成两个动作"
+  );
+  assert.match(
+    page,
+    /name="reason"[\s\S]{0,220}调整授信与账期必须填写变更原因/u,
+    "授信调整原因必须在管理端必填，不能只写提示文案"
+  );
+  assert.match(
+    page,
+    /changeMembershipStatus[\s\S]{0,300}acknowledgedManualChecks: values\.acknowledgedManualChecks/u,
+    "注销空间会员关系也必须回传人工核对确认"
+  );
+  assert.ok(api.includes("workspaceClosability"), "空间会员注销必须有按当前空间检查的预览接口");
   ok("页面契约：企业资料受 view/manage 分别门禁，无权限不发请求，三类资料都有保存闭环");
 
   // ============ 14. 无账号客户：状态入口先禁用，开通后才可管理 ============

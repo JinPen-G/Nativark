@@ -61,6 +61,20 @@ export class CustomerOperationsRepository {
     return tx ?? this.prisma;
   }
 
+  /**
+   * 串行化“客户状态变化”与“开展新业务”。所有会改变可交易性的动作，
+   * 以及订单创建的最终门禁，都必须先锁同一条主档记录。
+   */
+  async lockCustomerBusinessGate(tenantId: string, customerId: string, tx: CustomerTx): Promise<boolean> {
+    const rows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT \`id\`
+      FROM \`customer_profiles\`
+      WHERE \`tenantId\` = ${tenantId} AND \`id\` = ${customerId}
+      FOR UPDATE
+    `);
+    return rows.length > 0;
+  }
+
   async findAccountByCustomer(
     tenantId: string,
     customerId: string,
@@ -262,8 +276,8 @@ export class CustomerOperationsRepository {
   }
 
   /** 该客户在本空间是否存在**未关闭**的风险记录。风险受限判定用它，不用主档上的位。 */
-  async hasOpenRisk(tenantId: string, customerId: string, workspaceId?: string): Promise<boolean> {
-    const count = await this.prisma.customerRiskRecord.count({
+  async hasOpenRisk(tenantId: string, customerId: string, workspaceId?: string, tx?: CustomerTx): Promise<boolean> {
+    const count = await this.db(tx).customerRiskRecord.count({
       where: {
         tenantId,
         customerId,

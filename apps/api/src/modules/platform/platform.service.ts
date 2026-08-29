@@ -1591,6 +1591,11 @@ export class PlatformService {
     currentUser?: SystemUserRow
   ) {
     this.requireWorkspaceDataSource();
+    this.assertCustomerActionPermission(
+      currentUser,
+      input.status === "closed" ? "store-rental:customer:close" : "store-rental:member:manage",
+      input.status === "closed" ? "注销客户账号" : "变更客户账号状态"
+    );
     const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
     // 账号级动作**不**解析 workspaceId：它影响全部空间，绑定某个空间会造成误解。
     return this.requireCustomerOperations().changeAccountStatus(
@@ -1607,6 +1612,19 @@ export class PlatformService {
     currentUser?: SystemUserRow
   ) {
     this.requireWorkspaceDataSource();
+    this.assertCustomerActionPermission(
+      currentUser,
+      input.status === "closed"
+        ? "store-rental:customer:close"
+        : input.status === "risk_restricted"
+          ? "store-rental:member:risk-action"
+          : "store-rental:member:manage",
+      input.status === "closed"
+        ? "注销空间会员关系"
+        : input.status === "risk_restricted"
+          ? "限制客户风险状态"
+          : "变更空间会员状态"
+    );
     const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
     return this.requireCustomerOperations().changeMembershipStatus(
       tenantId,
@@ -1665,6 +1683,16 @@ export class PlatformService {
     // 不传 workspaceId：本接口回答「整个租户客户账号能否注销」。
     // 空间会员注销的检查在改状态时按空间范围各自进行。
     return this.requireCustomerMerge().assertClosable(tenantId, customerId);
+  }
+
+  getCustomerMembershipClosability(customerId: string, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerMerge().assertClosable(
+      tenantId,
+      customerId,
+      requireRequestWorkspaceId()
+    );
   }
 
   getCustomerTransactability(customerId: string, currentUser?: SystemUserRow) {
@@ -2731,6 +2759,14 @@ export class PlatformService {
     if (!user?.isSaasAdmin) {
       throw new ForbiddenException("仅 SaaS 平台管理员可以管理租户");
     }
+  }
+
+  /** Guard 只能按路径放行候选权限；具体目标状态必须在服务层再次授权。 */
+  private assertCustomerActionPermission(user: SystemUserRow | undefined, permission: string, action: string) {
+    const allowed = Boolean(
+      user && (user.isPlatformAdmin || user.permissions.includes("*") || user.permissions.includes(permission))
+    );
+    if (!allowed) throw new ForbiddenException(`${action}需要权限：${permission}`);
   }
 
   private resolveTargetTenantId(requestedTenantId: string | undefined, user?: SystemUserRow) {

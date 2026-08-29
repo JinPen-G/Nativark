@@ -824,10 +824,10 @@ const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
   // 合并成一个会让「只停这个空间」与「停掉全部空间的登录」无法区分。
   backlogOperation("get", "/api/platform/customers/{customerId}", "Platform", "getCustomerDetail", "Get customer detail with masked sensitive fields", ["store-rental:member:view"]),
   backlogOperation("post", "/api/platform/customers/{customerId}/account", "Platform", "ensureCustomerAccount", "Open a login account for the customer (idempotent)", ["store-rental:member:manage"]),
-  backlogOperation("put", "/api/platform/customers/{customerId}/account-status", "Platform", "changeCustomerAccountStatus", "Change customer account status (affects login in all workspaces)", ["store-rental:member:manage"]),
+  backlogOperation("put", "/api/platform/customers/{customerId}/account-status", "Platform", "changeCustomerAccountStatus", "Change customer account status; close requires customer:close, other states require member:manage", ["store-rental:member:manage", "store-rental:customer:close"]),
   backlogOperation("get", "/api/platform/customers/{customerId}/status-history", "Platform", "listCustomerStatusHistory", "List customer status timeline (account and workspace scope)", ["store-rental:member:view"]),
   backlogOperation("get", "/api/platform/customers/{customerId}/sensitive-access", "Platform", "listCustomerSensitiveAccess", "List sensitive data access audit for the customer", ["store-rental:customer:reveal-sensitive"]),
-  backlogOperation("put", "/api/platform/workspace-customers/{customerId}/status", "Platform", "changeCustomerMembershipStatus", "Change workspace membership status (current workspace only)", ["store-rental:member:manage"]),
+  backlogOperation("put", "/api/platform/workspace-customers/{customerId}/status", "Platform", "changeCustomerMembershipStatus", "Change workspace membership status; close and risk restriction use separate permissions", ["store-rental:member:manage", "store-rental:member:risk-action", "store-rental:customer:close"]),
   backlogOperation("get", "/api/platform/workspace-customers/{customerId}/transactability", "Platform", "getCustomerTransactability", "Check whether the customer may start new business in the current workspace", ["store-rental:member:view"]),
   // CUSTOMER-01C：企业开票资料、合同、授信账期。按租户级客户身份维护，不按空间隔离——
   // 同一家企业在两个空间是同一家企业，开票与合同不该各存一份。
@@ -845,6 +845,7 @@ const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
   backlogOperation("get", "/api/platform/customers/{customerId}/merge-preview", "Platform", "previewCustomerMerge", "Preview a manual customer merge (read-only conflict report)", ["store-rental:customer:merge"]),
   backlogOperation("post", "/api/platform/customers/merge", "Platform", "mergeCustomers", "Submit a manual customer merge (keeps original business references)", ["store-rental:customer:merge"]),
   backlogOperation("get", "/api/platform/customers/{customerId}/closability", "Platform", "getCustomerClosability", "Check whether the customer account may be closed", ["store-rental:customer:close"]),
+  backlogOperation("get", "/api/platform/workspace-customers/{customerId}/closability", "Platform", "getCustomerMembershipClosability", "Check whether the current-workspace membership may be closed", ["store-rental:customer:close"]),
   backlogOperation("post", "/api/platform/organizations", "Platform", "createOrganization", "Create organization", ["system:org:manage"]),  backlogOperation("put", "/api/platform/organizations/{id}", "Platform", "updateOrganization", "Update organization", ["system:org:manage"]),
   backlogOperation("put", "/api/platform/organizations/{id}/status", "Platform", "setOrganizationStatus", "Set organization status", ["system:org:manage"]),
   backlogOperation("get", "/api/reports/dashboard", "Reports", "getReportsDashboard", "Get reports dashboard", ["reports:view"]),

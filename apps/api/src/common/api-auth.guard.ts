@@ -141,6 +141,17 @@ export function requiredPermissions(method: string, path: string) {
   if (path.startsWith("/platform/workspace-customers")) {
     // SPACE-04：共享客户主档按会员权限判定，与旧车辆域会员页面一致。
     // 读写分开：查看不应要求管理权限，否则运营查客户就得给写权限。
+    if (/\/closability$/u.test(path)) {
+      return ["store-rental:customer:close"];
+    }
+    if (/\/status$/u.test(path)) {
+      // 目标状态在请求体中；具体动作由 PlatformService 按权限二次校验。
+      return [
+        "store-rental:member:manage",
+        "store-rental:member:risk-action",
+        "store-rental:customer:close"
+      ];
+    }
     return method === "GET"
       ? ["store-rental:member:view", "store-rental:member:manage"]
       : ["store-rental:member:manage"];
@@ -191,7 +202,7 @@ export function requiredPermissions(method: string, path: string) {
     }
     // 账号注销走 account-status，其请求体里 status=closed 才是注销；Guard 按路径判权限、
     // 看不到请求体，因此这条路由「会员管理」或「客户注销」之一即可进入，
-    // 真正的注销门禁（前置检查 + 人工确认）在服务层 assertClosableForClose。
+    // 真正的动作级权限与注销前置检查在服务层完成。
     if (/\/account-status$/u.test(path)) {
       return ["store-rental:member:manage", "store-rental:customer:close"];
     }
