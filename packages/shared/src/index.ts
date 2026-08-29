@@ -4550,6 +4550,49 @@ export interface SaveWorkspaceMemberRequest {
 }
 
 /**
+ * CUSTOMER-01A：空间会员状态（需求 4.8.6 的六态）。
+ *
+ * 六态必须都在类型里，不能用 active/suspended 两态凑：需求给每一态定义了不同的业务含义
+ * （待激活尚未完成认证、风险受限只限制部分能力、已退出是客户主动、已注销是终态），
+ * 合并成两态就无法表达「为什么不能下单」，而那正是运营与客服每天要回答的问题。
+ */
+export const CUSTOMER_MEMBERSHIP_STATUSES = [
+  "pending_activation",
+  "active",
+  "suspended",
+  "risk_restricted",
+  "exited",
+  "closed"
+] as const;
+export type CustomerMembershipStatus = (typeof CUSTOMER_MEMBERSHIP_STATUSES)[number];
+
+/**
+ * CUSTOMER-01A：客户账号状态（需求 4.8.1 / 4.8.13）。
+ *
+ * 与空间会员状态**分开**：账号是「客户如何登录」，会员关系是「客户在某空间有什么资格」。
+ * 停用账号阻止登录全部空间；暂停某个空间的会员关系不影响登录与其他空间业务。
+ * 两者共用一个字段是本任务明确要避免的建模错误。
+ */
+export const CUSTOMER_ACCOUNT_STATUSES = ["active", "suspended", "closed"] as const;
+export type CustomerAccountStatus = (typeof CUSTOMER_ACCOUNT_STATUSES)[number];
+
+/** 状态变更动作。解除限制也是独立记录，不允许删除原限制事实（需求 4.8.6）。 */
+export const CUSTOMER_STATUS_ACTIONS = [
+  "activate",
+  "suspend",
+  "restrict",
+  "release",
+  "exit",
+  "close",
+  "reopen",
+  "merge"
+] as const;
+export type CustomerStatusAction = (typeof CUSTOMER_STATUS_ACTIONS)[number];
+
+/** 状态历史的作用域：账号级（全租户）或空间级（仅目标空间）。 */
+export type CustomerStatusScope = "account" | "workspace";
+
+/**
  * SPACE-04：租户级共享客户主档。
  *
  * 身份在租户内共享（同一手机号只有一份主档），而订单、优惠券、积分、
@@ -4574,21 +4617,34 @@ export interface SharedCustomerProfile {
   status: "active" | "suspended";
   /** 回填来源的旧会员主键，仅用于对账追溯，不参与业务判定。 */
   sourceMemberId?: string;
+  /**
+   * CUSTOMER-01A：本主档已被合并进哪个主档（合并后为终态，不得再用于新业务）。
+   *
+   * 冗余在主档上是刻意的：合并映射表是权威事实，但「这份主档还能不能用」
+   * 是每次下单、报价都要判的高频问题，若每次都去查映射表，
+   * 漏查一处就会让一个已被合并的主档继续产生新业务。
+   */
+  mergedIntoCustomerId?: string;
   createdAt: string;
   updatedAt: string;
   /** 该客户已接入的经营空间关系。列表接口默认带出，便于判断"是否需要接入本空间"。 */
   workspaceLinks?: CustomerWorkspaceLink[];
 }
 
-/** SPACE-04：客户在某个经营空间的业务关系。会员等级按空间隔离。 */
+/** SPACE-04 / CUSTOMER-01A：客户在某个经营空间的业务关系。会员等级与状态按空间隔离。 */
 export interface CustomerWorkspaceLink {
   id: string;
   tenantId: string;
   workspaceId: string;
   customerId: string;
   levelName: string;
-  status: "active" | "suspended";
+  status: CustomerMembershipStatus;
   firstOrderAt?: string;
+  /** 各终态/限制态的发生时间。历史必须留痕，解除时不清空原时间戳。 */
+  suspendedAt?: string;
+  restrictedAt?: string;
+  exitedAt?: string;
+  closedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
