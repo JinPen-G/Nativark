@@ -22,6 +22,7 @@ import type {
   SaveTenantRentalBusinessSettingsRequest,
   CreateRentalPriceAdjustmentRequest,
   CancelRentalPriceAdjustmentRequest,
+  RestoreRentalPriceVersionRequest,
   RentalPeriodicPriceWindow,
   RentalDatetimePriceOverride
 } from "@store-rental/shared";
@@ -394,6 +395,11 @@ export class RentalPeriodicPriceWindowInputDto implements RentalPeriodicPriceWin
 
 /** PRICE-03：一次性日期时间价格覆盖输入。 */
 export class RentalDatetimePriceOverrideInputDto implements RentalDatetimePriceOverride {
+  @IsOptional()
+  @IsString()
+  @Matches(/^[A-Za-z0-9_.:-]{1,64}$/, { message: "一次性价格引用只能是 1-64 位字母数字与 . _ : -" })
+  id?: string;
+
   @IsISO8601()
   start!: string;
 
@@ -922,6 +928,11 @@ export class SaveRentalCalendarDayDto implements SaveRentalCalendarDayRequest {
   @Type(() => RentalBusinessHoursInputDto)
   hours?: RentalBusinessHoursInputDto;
 
+  @IsOptional()
+  @IsString()
+  @Matches(/^[A-Za-z0-9_.:-]{1,64}$/, { message: "一次性价格引用只能是 1-64 位字母数字与 . _ : -" })
+  pricingOverrideRef?: string;
+
   /**
    * 调整原因，必填（需求 4.5.3：人工覆盖必须保存调整原因）。
    * 操作人与调整时间由服务端填，不接受调用方自报——自报的操作人没有审计价值。
@@ -956,9 +967,9 @@ export class RentalCalendarRangeFieldsDto implements RentalCalendarRangeFields {
   name?: string;
 
   @IsOptional()
-  @IsNumber()
-  @Min(0)
-  pricingMultiplier?: number;
+  @IsString()
+  @Matches(/^[A-Za-z0-9_.:-]{1,64}$/, { message: "一次性价格引用只能是 1-64 位字母数字与 . _ : -" })
+  pricingOverrideRef?: string;
 
   @IsOptional()
   @IsIn(BUSINESS_STATUSES)
@@ -1079,6 +1090,11 @@ export class CreateRentalPriceAdjustmentDto implements CreateRentalPriceAdjustme
   @MaxLength(191)
   code!: string;
 
+  @IsString()
+  @Matches(NON_BLANK_PATTERN, { message: "调价计划名称不能为空白" })
+  @MaxLength(191)
+  name!: string;
+
   @IsArray()
   @ArrayNotEmpty()
   @ValidateNested({ each: true })
@@ -1098,6 +1114,13 @@ export class CreateRentalPriceAdjustmentDto implements CreateRentalPriceAdjustme
 export class CancelRentalPriceAdjustmentDto implements CancelRentalPriceAdjustmentRequest {
   @IsString()
   @Matches(NON_BLANK_PATTERN, { message: "取消原因不能为空白" })
+  reason!: string;
+}
+
+export class RestoreRentalPriceVersionDto implements RestoreRentalPriceVersionRequest {
+  @IsString()
+  @Matches(NON_BLANK_PATTERN, { message: "恢复原因不能为空白" })
+  @MaxLength(191)
   reason!: string;
 }
 

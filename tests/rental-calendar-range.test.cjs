@@ -99,7 +99,7 @@ ok("日期时间范围：纯日期范围不需要时点");
 const fullApply = applyRangeFieldsToDay(
   undefined,
   baseDay(),
-  { dayType: "tenant_special", name: "特殊周", pricingMultiplier: 1.3, businessStatus: "limited", hours: { windows: [{ start: "09:00", end: "18:00" }] } },
+  { dayType: "tenant_special", name: "特殊周", pricingOverrideRef: "SPECIAL-WEEK", businessStatus: "limited", hours: { windows: [{ start: "09:00", end: "18:00" }] } },
   scope,
   meta
 );
@@ -109,6 +109,7 @@ assert.equal(fullApply.businessStatus, "limited");
 assert.equal(fullApply.closed, false, "限时营业不是停业");
 assert.equal(fullApply.overrideBy, "张三");
 assert.deepEqual(fullApply.overrideScope, scope);
+assert.equal(fullApply.pricingOverrideRef, "SPECIAL-WEEK");
 assert.equal(fullApply.overriddenFrom.source, "week_rule");
 ok("字段叠加：全新覆盖写入全部所选字段并记录 scope/操作者");
 

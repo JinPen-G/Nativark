@@ -10,6 +10,7 @@ import type {
   RentalCalendarPublishPreview,
   RentalCalendarVersionSummary,
   RentalCalendarYear,
+  RentalCalendarTimePriceDay,
   RentalCouponTemplate,
   RentalCustomerBenefitAccount,
   RentalCustomerCoupon,
@@ -24,6 +25,7 @@ import type {
   RentalNotificationTemplateV1,
   RentalPricingPlanV1,
   RentalPriceAdjustmentPlan,
+  RentalPriceAdjustmentPreviewRow,
   RentalPriceVersion,
   RentalQuoteRequest,
   RentalQuoteSnapshotV1,
@@ -43,6 +45,7 @@ import type {
   VoidRentalCalendarRequest,
   RemoveRentalCalendarDayOverrideRequest,
   RestoreRentalCalendarVersionRequest,
+  RestoreRentalPriceVersionRequest,
   SaveRentalCalendarDayRequest,
   PreviewRentalCalendarRangeOverrideRequest,
   ApplyRentalCalendarRangeOverrideRequest,
@@ -86,8 +89,9 @@ export const rentalCoreApi = {
   /** PRICE-03：空间级不可变版本，不按计划拆分。 */
   priceVersions: (page?: number, pageSize?: number) => request<{ total: number; rows: Array<RentalPriceVersion & { rateCount: number }> }>("/rental/v1/pricing-versions", { params: { page, pageSize } }),
   priceVersion: (sequence: number) => request<RentalPriceVersion>(`/rental/v1/pricing-versions/${sequence}`),
+  restorePriceVersion: (sequence: number, data: RestoreRentalPriceVersionRequest) => request<{ id: string; sequence: number; version: string; restoredFromVersion: string }>(`/rental/v1/pricing-versions/${sequence}/restore`, { method: "post", data }),
   priceAdjustments: (planId: string) => request<RentalPriceAdjustmentPlan[]>(`/rental/v1/pricing-plans/${planId}/adjustments`),
-  createPriceAdjustment: (planId: string, data: CreateRentalPriceAdjustmentRequest) => request<unknown>(`/rental/v1/pricing-plans/${planId}/adjustments`, { method: "post", data }),
+  createPriceAdjustment: (planId: string, data: CreateRentalPriceAdjustmentRequest) => request<{ id: string; code: string; name: string; status: string; preview: RentalPriceAdjustmentPreviewRow[] }>(`/rental/v1/pricing-plans/${planId}/adjustments`, { method: "post", data }),
   confirmPriceAdjustment: (planId: string, adjustmentId: string) => request<unknown>(`/rental/v1/pricing-plans/${planId}/adjustments/${adjustmentId}/confirm`, { method: "post" }),
   cancelPriceAdjustment: (planId: string, adjustmentId: string, data: CancelRentalPriceAdjustmentRequest) => request<unknown>(`/rental/v1/pricing-plans/${planId}/adjustments/${adjustmentId}/cancel`, { method: "post", data }),
   savePricingPlan: (data: SaveRentalPricingPlanRequest) => request<RentalPricingPlanV1>(data.id ? `/rental/v1/pricing-plans/${data.id}` : "/rental/v1/pricing-plans", { method: data.id ? "put" : "post", data }),
@@ -95,7 +99,7 @@ export const rentalCoreApi = {
   saveDiscountPlan: (data: SaveRentalDiscountPlanRequest) => request<RentalDiscountPlan>(data.id ? `/rental/v1/discount-plans/${data.id}` : "/rental/v1/discount-plans", { method: data.id ? "put" : "post", data }),
   valueAddedServices: () => request<RentalValueAddedService[]>("/rental/v1/value-added-services"),
   saveValueAddedService: (data: SaveRentalValueAddedServiceRequest) => request<RentalValueAddedService>(data.id ? `/rental/v1/value-added-services/${data.id}` : "/rental/v1/value-added-services", { method: data.id ? "put" : "post", data }),
-  calendar: (year: number) => request<RentalCalendarYear>(`/rental/v1/calendars/${year}`),
+  calendar: (year: number) => request<RentalCalendarYear & { timePriceSummary: RentalCalendarTimePriceDay[] }>(`/rental/v1/calendars/${year}`),
   /**
    * 可引用的公共官方来源版本（需求 4.5.2）。空间侧不再直接提交原始官方日期：
    * 公共数据由 SaaS 平台管理员在注册表里维护，空间只能引用某一版生成草稿再自行发布。

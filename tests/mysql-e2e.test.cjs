@@ -4306,7 +4306,7 @@ async function main() {
   const rangeFields = {
     dayType: "tenant_special",
     name: "试点特殊周",
-    pricingMultiplier: 1.3,
+    pricingOverrideRef: "E2E-RANGE-SPECIAL",
     businessStatus: "limited",
     hours: { windows: [{ start: "09:00", end: "18:00" }] }
   };
@@ -4347,7 +4347,7 @@ async function main() {
     assert.equal(row.dayType, "tenant_special", `${date} 类型应为 tenant_special`);
     assert.equal(row.businessStatus, "limited", `${date} 应为限时营业`);
     assert.equal(row.closed, false, "限时营业不属于停业，closed 必须为 false");
-    assert.equal(row.pricingMultiplier, 1.3, `${date} 系数应为 1.3`);
+    assert.equal(row.pricingOverrideRef, "E2E-RANGE-SPECIAL", `${date} 应保存特殊价格引用`);
     assert.ok(row.hours?.windows?.length, `${date} 应带营业时段`);
     assert.equal(row.overrideScope?.kind, "range", `${date} 应记录范围 scope`);
     assert.equal(row.overrideScope?.batchId, rangeBatch1, `${date} 应记录批次标识`);
@@ -4401,7 +4401,7 @@ async function main() {
   const auditCountMid = Number(readScalar(`SELECT COUNT(*) FROM \`rental_calendar_override_audits\` WHERE \`workspaceId\`='${rangeWs}' AND \`year\`=${rangeYear};`));
   assert.equal(auditCountMid, 14, "两批共 14 行审计");
   const rangeStale = await request("POST", `/api/rental/v1/calendars/${rangeYear}/days/range`, {
-    startDate: `${rangeYear}-05-01`, endDate: `${rangeYear}-05-02`, fields: { pricingMultiplier: 2 },
+    startDate: `${rangeYear}-05-01`, endDate: `${rangeYear}-05-02`, fields: { pricingOverrideRef: "E2E-STALE" },
     overrideReason: "过期 revision 的提交", expectedRevision: 1, overrideConfirmed: true
   }, construction.accessToken);
   assert.equal(rangeStale.status, 409, `过期 revision 必须 409: ${rangeStale.status}`);
@@ -4537,7 +4537,13 @@ async function main() {
           weekendMultiplier: 1,
           holidayMultiplier: 1,
           depositAmount: 500,
-          minimumUnits: 1
+          minimumUnits: 1,
+          datetimeOverrides: [{
+            id: "E2E-DT-2045",
+            start: `${fridayKey}T12:00:00+08:00`,
+            end: `${mondayKey}T00:00:00+08:00`,
+            multiplier: 1.5
+          }]
         }
       ]
     },
@@ -4566,7 +4572,7 @@ async function main() {
       endDate: mondayKey,
       startDateTime: `${fridayKey}T12:00:00+08:00`,
       endDateTime: `${mondayKey}T00:00:00+08:00`,
-      fields: { pricingMultiplier: 1.5 },
+      fields: { pricingOverrideRef: "E2E-DT-2045" },
       overrideReason: "E2E 周五 12:00 起分时价格"
     },
     dtDemo.accessToken
@@ -4798,6 +4804,7 @@ async function main() {
     `/api/rental/v1/pricing-plans/${pricePlan.body.data.id}/adjustments`,
     {
       code: `E2E-ADJ-IMM-${Date.now().toString(36)}`,
+      name: "E2E 立即调价",
       changes: [{ itemGroupId: priceGroupId, unit: "calendar_day", op: "percent", value: 10 }],
       changeReason: "E2E 上调 10%"
     },
@@ -4950,6 +4957,7 @@ async function main() {
     `/api/rental/v1/pricing-plans/${pricePlan.body.data.id}/adjustments`,
     {
       code: `E2E-ADJ-SCHED-${Date.now().toString(36)}`,
+      name: "E2E 定时调价",
       changes: [{ itemGroupId: priceGroupId, unit: "calendar_day", op: "fixed", value: 5 }],
       scheduledAt: new Date(Date.now() + 2000).toISOString(),
       changeReason: "E2E 定时 +5"

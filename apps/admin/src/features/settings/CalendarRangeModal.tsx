@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
+  App,
   Button,
   Checkbox,
   DatePicker,
@@ -9,13 +10,11 @@ import {
   Drawer,
   Form,
   Input,
-  InputNumber,
   Select,
   Space,
   Table,
   Tag,
   Typography,
-  message,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import type { Dayjs } from "dayjs";
@@ -57,7 +56,7 @@ const businessStatusOptions: Array<{ value: RentalCalendarBusinessStatus; label:
   { value: "self_service", label: "自助营业" },
 ];
 
-type FieldKey = "dayType" | "name" | "pricingMultiplier" | "businessStatus" | "hours";
+type FieldKey = "dayType" | "name" | "pricingOverrideRef" | "businessStatus" | "hours";
 
 /** 需求 4.5.9：周期性分时价格由 PRICE-03 价格计划维护，月历只消费其只读摘要。 */
 function PricePlaceholder() {
@@ -66,7 +65,7 @@ function PricePlaceholder() {
       type="info"
       showIcon
       message="一次性特殊价格由价格模块提供"
-      description="价格覆盖由价格计划维护；当前范围覆盖只支持日历字段（类型/状态/时段/系数）。请在基础定价页面创建调价计划，以便预览、确认并形成不可变价格版本。"
+      description="价格值由价格计划维护；日历范围覆盖只保存一次性价格规则的稳定引用，不保存商品价格或空间统一系数。"
     />
   );
 }
@@ -87,6 +86,7 @@ export function CalendarRangeModal({
   onClose: () => void;
   onApplied: (result: ApplyRentalCalendarRangeOverrideResult | ApplyRentalCalendarRangeRemoveResult, mode: "override" | "remove") => void;
 }) {
+  const { message } = App.useApp();
   const queryClient = useQueryClient();
   const [form] = Form.useForm();
   const [step, setStep] = useState<"input" | "preview">("input");
@@ -97,7 +97,7 @@ export function CalendarRangeModal({
   const [selectedFields, setSelectedFields] = useState<Record<FieldKey, boolean>>({
     dayType: true,
     name: false,
-    pricingMultiplier: false,
+    pricingOverrideRef: false,
     businessStatus: false,
     hours: false,
   });
@@ -124,7 +124,7 @@ export function CalendarRangeModal({
         endDateTime?: Dayjs;
         dayType?: RentalDayType;
         name?: string;
-        pricingMultiplier?: number;
+        pricingOverrideRef?: string;
         businessStatus?: RentalCalendarBusinessStatus;
         hoursStart?: string;
         hoursEnd?: string;
@@ -147,7 +147,7 @@ export function CalendarRangeModal({
               fields: {
                 ...(selectedFields.dayType ? { dayType: values.dayType } : {}),
                 ...(selectedFields.name ? { name: values.name } : {}),
-                ...(selectedFields.pricingMultiplier ? { pricingMultiplier: values.pricingMultiplier } : {}),
+                ...(selectedFields.pricingOverrideRef ? { pricingOverrideRef: values.pricingOverrideRef } : {}),
                 ...(selectedFields.businessStatus ? { businessStatus: values.businessStatus } : {}),
                 ...(selectedFields.hours && values.hoursStart && values.hoursEnd
                   ? { hours: { windows: [{ start: values.hoursStart, end: values.hoursEnd }] } }
@@ -181,7 +181,7 @@ export function CalendarRangeModal({
         endDateTime?: Dayjs;
         dayType?: RentalDayType;
         name?: string;
-        pricingMultiplier?: number;
+        pricingOverrideRef?: string;
         businessStatus?: RentalCalendarBusinessStatus;
         hoursStart?: string;
         hoursEnd?: string;
@@ -200,7 +200,7 @@ export function CalendarRangeModal({
           fields: {
             ...(selectedFields.dayType ? { dayType: values.dayType } : {}),
             ...(selectedFields.name ? { name: values.name } : {}),
-            ...(selectedFields.pricingMultiplier ? { pricingMultiplier: values.pricingMultiplier } : {}),
+            ...(selectedFields.pricingOverrideRef ? { pricingOverrideRef: values.pricingOverrideRef } : {}),
             ...(selectedFields.businessStatus ? { businessStatus: values.businessStatus } : {}),
             ...(selectedFields.hours && values.hoursStart && values.hoursEnd
               ? { hours: { windows: [{ start: values.hoursStart, end: values.hoursEnd }] } }
@@ -319,7 +319,7 @@ export function CalendarRangeModal({
             <Typography.Text style={{ fontSize: 12 }}>
               {row.after.dayType} · {row.after.businessStatus ?? (row.after.closed ? "closed" : "open")}
               {row.after.hours?.windows?.length ? ` · ${row.after.hours.windows.map((w) => `${w.start}-${w.end}`).join("、")}` : ""}
-              {` · ×${row.after.pricingMultiplier}`}
+              {row.after.pricingOverrideRef ? ` · 特殊价格引用 ${row.after.pricingOverrideRef}` : ""}
             </Typography.Text>
           );
         },
@@ -409,7 +409,7 @@ export function CalendarRangeModal({
                 [
                   ["dayType", "日期类型"],
                   ["name", "名称"],
-                  ["pricingMultiplier", "价格系数"],
+                  ["pricingOverrideRef", "一次性价格引用"],
                   ["businessStatus", "营业状态"],
                   ["hours", "营业时段"],
                 ] as Array<[FieldKey, string]>
@@ -433,9 +433,9 @@ export function CalendarRangeModal({
                 <Input />
               </Form.Item>
             )}
-            {selectedFields.pricingMultiplier && (
-              <Form.Item name="pricingMultiplier" label="价格系数" tooltip="留空不改动；这是既有的一次性特殊价格系数位，逐商品的日期价格与分时价格由 PRICE-03 承接。" rules={[{ required: selectedFields.pricingMultiplier }]}>
-                <InputNumber min={0} step={0.05} style={{ width: 160 }} />
+            {selectedFields.pricingOverrideRef && (
+              <Form.Item name="pricingOverrideRef" label="一次性价格引用" tooltip="填写基础定价中一次性特殊价格规则的引用标识；价格值仍由商品价格版本维护。" rules={[{ required: selectedFields.pricingOverrideRef }]}>
+                <Input placeholder="例如 NATIONAL-DAY-2026" />
               </Form.Item>
             )}
             {selectedFields.businessStatus && (

@@ -2346,6 +2346,7 @@ function rentalBusinessOperations(): ContractOperation[] { return [
   backlogOperation("put", "/api/rental/v1/pricing-plans/{id}", "RentalBusiness", "updateRentalPricingPlan", "Update generic pricing plan", ["store-rental:price:manage"]),
   backlogOperation("get", "/api/rental/v1/pricing-versions", "RentalBusiness", "listRentalPriceVersions", "List immutable space price versions", ["store-rental:price:manage", "store-rental:order:view", "store-rental:order:create"]),
   backlogOperation("get", "/api/rental/v1/pricing-versions/{sequence}", "RentalBusiness", "getRentalPriceVersion", "Get immutable space price version", ["store-rental:price:manage", "store-rental:order:view", "store-rental:order:create"]),
+  backlogOperation("post", "/api/rental/v1/pricing-versions/{sequence}/restore", "RentalBusiness", "restoreRentalPriceVersion", "Restore an immutable price snapshot by appending a new version", ["store-rental:price:manage"]),
   backlogOperation("get", "/api/rental/v1/pricing-plans/{id}/versions", "RentalBusiness", "listLegacyRentalPricingPlanVersions", "Compatibility entry for space price versions", ["store-rental:price:manage", "store-rental:order:view", "store-rental:order:create"]),
 
   backlogOperation("get", "/api/rental/v1/pricing-plans/{id}/adjustments", "RentalBusiness", "listRentalPriceAdjustments", "List price adjustment plans", ["store-rental:price:manage"]),

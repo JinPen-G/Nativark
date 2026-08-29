@@ -85,7 +85,7 @@ export function assertRangeDateTimeScope(
 }
 
 /** 范围覆盖允许设置的字段集合，用于计算「将被修改的字段」。 */
-const RANGE_FIELD_KEYS = ["dayType", "name", "pricingMultiplier", "businessStatus", "hours"] as const;
+const RANGE_FIELD_KEYS = ["dayType", "name", "pricingOverrideRef", "businessStatus", "hours"] as const;
 export type RentalCalendarRangeFieldKey = (typeof RANGE_FIELD_KEYS)[number];
 
 /**
@@ -107,10 +107,11 @@ export function applyRangeFieldsToDay(
     date: source.date,
     dayType: fields.dayType ?? source.dayType,
     name: fields.name ?? source.name,
-    pricingMultiplier: fields.pricingMultiplier ?? source.pricingMultiplier,
+    pricingMultiplier: source.pricingMultiplier,
     closed: source.closed,
     businessStatus: fields.businessStatus ?? source.businessStatus ?? (source.closed ? "closed" : "open"),
     hours: fields.hours !== undefined ? fields.hours : source.hours,
+    pricingOverrideRef: fields.pricingOverrideRef ?? source.pricingOverrideRef,
     source: "tenant_override",
     overrideReason: meta.reason,
     overrideBy: meta.operator,
@@ -180,6 +181,7 @@ export function changedFieldNames(before: RentalCalendarDaySnapshot, after: Rent
   if (before.dayType !== after.dayType) changed.push("dayType");
   if (before.name !== after.name) changed.push("name");
   if (before.pricingMultiplier !== after.pricingMultiplier) changed.push("pricingMultiplier");
+  if (before.pricingOverrideRef !== after.pricingOverrideRef) changed.push("pricingOverrideRef");
   if ((before.businessStatus ?? undefined) !== (after.businessStatus ?? undefined)) changed.push("businessStatus");
   if (JSON.stringify(before.hours ?? null) !== JSON.stringify(after.hours ?? null)) changed.push("hours");
   return changed;

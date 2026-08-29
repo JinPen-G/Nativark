@@ -87,7 +87,7 @@ import {
 } from "./rental-business-fact.repository";
 import { RentalCoreConfigRepository, type RentalConfigStore, type RentalConfigTx } from "./rental-core-config.repository";
 import { PrismaService } from "../database/prisma.service";
-import { DEFAULT_BUSINESS_TIME_ZONE, businessDateKey, businessTimeOfDay, businessDateKeyFromIndex, businessDayIndex, businessYearFromDateKey, isCalendarDateKey, businessHoursError } from "./rental-business-day";
+import { DEFAULT_BUSINESS_TIME_ZONE, businessDateKey, businessTimeOfDay, businessDateKeyFromIndex, businessDayIndex, businessInstantAt, businessYearFromDateKey, isCalendarDateKey, businessHoursError } from "./rental-business-day";
 import {
   applyRangeFieldsToDay,
   assertRangeDateTimeScope,
@@ -764,7 +764,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   private async resolveSpaceRates(
     tenantId: string,
     context: BusinessContext,
-    rentalStartAt: string
+    rentalStartAt: string,
+    client?: Prisma.TransactionClient
   ): Promise<{ versionId: string; version: string; effectiveFrom: string; rates: RentalPricingRate[] } | { rates: RentalPricingRate[] }> {
     const prisma = this.prisma;
     if (!prisma || (process.env.PLATFORM_DATA_SOURCE ?? "mysql").toLowerCase() !== "mysql") {
@@ -773,7 +774,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       return { rates: this.state(tenantId, context).pricingPlans.find((plan) => plan.status === "enabled")?.rates ?? [] };
     }
     const workspaceId = this.workspaceOf(tenantId);
-    const row = await this.findSpaceVersionAt(tenantId, workspaceId, new Date(rentalStartAt));
+    const row = await this.findSpaceVersionAt(tenantId, workspaceId, new Date(rentalStartAt), client);
     if (!row) {
       throw new ConflictException(
         `该租期开始时（${new Date(rentalStartAt).toISOString()}）无有效价格版本，` +
@@ -812,6 +813,62 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return { id: row.id, tenantId: row.tenantId, workspaceId: row.workspaceId, sequence: row.sequence, version: `v${row.sequence}`, effectiveFrom: row.effectiveFrom.toISOString(), changeReason: row.changeReason ?? undefined, createdBy: row.createdBy ?? undefined, createdAt: row.createdAt.toISOString(), rates: row.rates as unknown as RentalPricingRate[] };
   }
 
+  /** PRICE-03：历史快照只能通过追加新版本恢复，原版本与中间版本均保持不可变。 */
+  async restoreSpacePriceVersion(tenantId: string, context: BusinessContext, sequence: number, reason: string, operator?: string) {
+    const prisma = this.prisma;
+    if (!prisma) throw new BadRequestException("价格版本仅在 MySQL 数据源下可用");
+    if (!reason?.trim()) throw new BadRequestException("恢复原因不能为空");
+    const workspaceId = this.workspaceOf(tenantId);
+    const state = this.state(tenantId, context);
+    const enabledPlans = state.pricingPlans.filter((plan) => plan.status === "enabled");
+    const restored = await prisma.$transaction(async (tx) => {
+      const target = await tx.rentalPriceVersion.findFirst({ where: { tenantId, workspaceId, sequence } });
+      if (!target) throw new NotFoundException("要恢复的价格版本不存在");
+      const pending = await tx.rentalPriceAdjustmentPlan.findFirst({
+        where: { tenantId, workspaceId, status: "pending" },
+        select: { code: true }
+      });
+      if (pending) throw new ConflictException(`空间已有待生效调价 ${pending.code}，请先执行或取消后再恢复历史价格`);
+      const targetRates = target.rates as unknown as RentalPricingRate[];
+      const current = await this.findSpaceVersionAt(tenantId, workspaceId, new Date(), tx);
+      if (current && RentalBusinessService.sameRates(current.rates as unknown as RentalPricingRate[], targetRates)) {
+        throw new ConflictException(`当前价格已与 v${sequence} 相同，无需重复恢复`);
+      }
+      const key = (rate: { itemGroupId: string; unit: string }) => `${rate.itemGroupId}:${rate.unit}`;
+      const targetByKey = new Map(targetRates.map((rate) => [key(rate), rate]));
+      const activeKeys = new Set(enabledPlans.flatMap((plan) => plan.rates.map(key)));
+      if (activeKeys.size !== targetByKey.size || [...activeKeys].some((item) => !targetByKey.has(item))) {
+        throw new ConflictException("历史版本的商品与计价单位结构已和当前启用计划不同，请先处理新增或下线的价格行后再恢复");
+      }
+      const updatedPlans = enabledPlans.map((plan) => ({
+        ...plan,
+        version: versionAfter(plan.version),
+        rates: plan.rates.map((rate) => structuredClone(targetByKey.get(key(rate))!)),
+        updatedAt: stamp()
+      }));
+      const row = await this.appendSpaceVersion(tx, {
+        tenantId,
+        workspaceId,
+        effectiveFrom: new Date(),
+        rates: targetRates,
+        changeReason: `恢复 v${sequence}：${reason.trim()}`,
+        createdBy: operator
+      });
+      for (const plan of updatedPlans) await this.configStore.upsertPricingPlan(plan, tx);
+      return { row, updatedPlans };
+    }).catch((error) => {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        throw new ConflictException("价格版本并发写入冲突，请刷新后重试");
+      }
+      throw error;
+    });
+    for (const updated of restored.updatedPlans) {
+      const plan = state.pricingPlans.find((item) => item.id === updated.id);
+      if (plan) Object.assign(plan, updated);
+    }
+    return { id: restored.row.id, sequence: restored.row.sequence, version: `v${restored.row.sequence}`, restoredFromVersion: `v${sequence}` };
+  }
+
   /** 兼容旧入口：明确按空间级读取，planId 只作归属校验。 */
   async listPriceVersions(tenantId: string, context: BusinessContext, planId: string, page = 1, pageSize = 20) {
     const plan = this.state(tenantId, context).pricingPlans.find((row) => row.id === planId);
@@ -842,6 +899,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       id: row.id,
       planId: row.planId,
       code: row.code,
+      name: row.name,
       status: row.status,
       changes: row.changes,
       scheduledAt: row.scheduledAt ? row.scheduledAt.toISOString() : undefined,
@@ -871,12 +929,17 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const prisma = this.prisma;
     if (!prisma) throw new BadRequestException("调价计划仅在 MySQL 数据源下可用");
     if (!input.code?.trim()) throw new BadRequestException("调价计划编码不能为空");
+    if (!input.name?.trim()) throw new BadRequestException("调价计划名称不能为空");
     if (!input.changeReason?.trim()) throw new BadRequestException("调价计划必须填写变更原因");
     const plan = this.state(tenantId, context).pricingPlans.find((row) => row.id === planId);
     if (!plan) throw new NotFoundException("定价计划不存在");
     const scheduledAt = input.scheduledAt ? new Date(input.scheduledAt) : undefined;
     if (scheduledAt && Number.isNaN(scheduledAt.getTime())) throw new BadRequestException("定时生效时间无效");
-    const base = await this.resolveSpaceRates(tenantId, context, new Date().toISOString());
+    const targetAt = scheduledAt ?? new Date();
+    const planKeys = new Set(plan.rates.map((rate) => `${rate.itemGroupId}:${rate.unit}`));
+    const outsidePlan = input.changes.find((change) => !planKeys.has(`${change.itemGroupId}:${change.unit}`));
+    if (outsidePlan) throw new BadRequestException("调价差异只能修改当前定价计划内的商品与计价单位");
+    const base = await this.resolveSpaceRates(tenantId, context, targetAt.toISOString());
     const { rates: nextRates, preview } = applyPriceAdjustment(base.rates, input.changes);
     for (const rate of nextRates) {
       assertNoPeriodicOverlap(rate.periodicWindows, plan.name + " · " + rate.itemGroupCode);
@@ -890,6 +953,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
           workspaceId,
           planId,
           code: input.code.trim(),
+          name: input.name.trim(),
           status: "draft",
           changes: input.changes as unknown as Prisma.InputJsonValue,
           scheduledAt: scheduledAt ?? null,
@@ -903,7 +967,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         }
         throw error;
       });
-    return { id: adjustment.id, code: adjustment.code, status: adjustment.status, preview };
+    return { id: adjustment.id, code: adjustment.code, name: adjustment.name, status: adjustment.status, preview };
   }
 
   /**
@@ -926,21 +990,33 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     if (adjustment.status !== "draft") throw new ConflictException("调价计划当前状态为 " + adjustment.status + "，只有草稿可以确认");
     const scheduledAt = adjustment.scheduledAt ? adjustment.scheduledAt.getTime() : 0;
     if (scheduledAt > Date.now()) {
-      // 定时：锁定基础版本与完整最终结果（需求 4.4.3：确认时展示的最终价就是最终生效价）。
-      const base = await this.resolveSpaceRates(tenantId, context, new Date().toISOString());
-      const { rates: finalRates } = applyPriceAdjustment(base.rates, adjustment.changes as unknown as RentalPriceAdjustmentChange[]);
-      const baseVersionId = "versionId" in base ? base.versionId : undefined;
-      const pending = await prisma.rentalPriceAdjustmentPlan.updateMany({
-        where: { id: adjustmentId, status: "draft" },
-        data: {
-          status: "pending",
-          baseVersionId: baseVersionId ?? null,
-          finalRates: finalRates as unknown as Prisma.InputJsonValue,
-          confirmedBy: operator,
-          confirmedAt: new Date()
+      // 定时计划按计划生效时点预览并锁定。一个空间同一时刻只允许一条待生效链：
+      // 否则多个计划会同时基于同一旧版本，到期后只能让后执行者失败，确认页却无法说明最终价。
+      await prisma.$transaction(async (tx) => {
+        const otherPending = await tx.rentalPriceAdjustmentPlan.findFirst({
+          where: { tenantId, workspaceId, status: "pending", id: { not: adjustmentId } },
+          select: { code: true, scheduledAt: true }
+        });
+        if (otherPending) {
+          throw new ConflictException(`空间已有待生效调价 ${otherPending.code}，请先执行或取消后再确认新的定时调价`);
         }
+        const targetAt = adjustment.scheduledAt!;
+        await this.assertAppendOnlyTimeline(tx, tenantId, workspaceId, targetAt);
+        const base = await this.resolveSpaceRates(tenantId, context, targetAt.toISOString(), tx);
+        const { rates: finalRates } = applyPriceAdjustment(base.rates, adjustment.changes as unknown as RentalPriceAdjustmentChange[]);
+        const baseVersionId = "versionId" in base ? base.versionId : undefined;
+        const pending = await tx.rentalPriceAdjustmentPlan.updateMany({
+          where: { id: adjustmentId, status: "draft" },
+          data: {
+            status: "pending",
+            baseVersionId: baseVersionId ?? null,
+            finalRates: finalRates as unknown as Prisma.InputJsonValue,
+            confirmedBy: operator,
+            confirmedAt: new Date()
+          }
+        });
+        if (!pending.count) throw new ConflictException("调价计划已被其他人处理，请刷新后重试");
       });
-      if (!pending.count) throw new ConflictException("调价计划已被其他人处理，请刷新后重试");
       return { id: adjustmentId, status: "pending" as const };
     }
     const versionId = await this.applyPriceAdjustmentInternal(tenantId, context, planId, adjustmentId, operator);
@@ -1020,21 +1096,26 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     if (!adjustment || (adjustment.status !== "draft" && adjustment.status !== "pending")) {
       throw new ConflictException("调价计划不存在或不在可执行状态");
     }
-    const version = await prisma.$transaction(async (tx) => {
-      const agg = await tx.rentalPriceVersion.aggregate({
-        _max: { sequence: true },
-        where: { tenantId, workspaceId }
-      });
-      const sequence = (agg._max.sequence ?? 0) + 1;
+    const plan = this.state(tenantId, context).pricingPlans.find((row) => row.id === planId);
+    if (!plan) throw new NotFoundException("定价计划不存在");
+    const changes = adjustment.changes as unknown as RentalPriceAdjustmentChange[];
+    const planKeys = new Set(plan.rates.map((rate) => `${rate.itemGroupId}:${rate.unit}`));
+    if (changes.some((change) => !planKeys.has(`${change.itemGroupId}:${change.unit}`))) {
+      throw new BadRequestException("调价差异只能修改当前定价计划内的商品与计价单位");
+    }
+    const appliedResult = await prisma.$transaction(async (tx) => {
+      if (adjustment.status === "draft") {
+        const pending = await tx.rentalPriceAdjustmentPlan.findFirst({
+          where: { tenantId, workspaceId, status: "pending" },
+          select: { code: true }
+        });
+        if (pending) throw new ConflictException(`空间已有待生效调价 ${pending.code}，请先执行或取消后再立即调价`);
+      }
       // 到期执行必须仍基于确认时锁定的那一版。中间若有别的调价推进了版本，
       // 直接采用 finalRates 会把那次调价**静默覆盖**掉：改价的人一小时后
       // 发现自己的价格被无声还原，且没有任何失败记录。宁可失败让人重做。
       if (adjustment.status === "pending" && adjustment.finalRates) {
-        const latest = await tx.rentalPriceVersion.findFirst({
-          where: { tenantId, workspaceId },
-          orderBy: [{ sequence: "desc" }],
-          select: { id: true, sequence: true }
-        });
+        const latest = await this.findSpaceVersionAt(tenantId, workspaceId, adjustment.scheduledAt ?? new Date(), tx);
         if ((latest?.id ?? null) !== (adjustment.baseVersionId ?? null)) {
           throw new StalePriceBaseError(
             `调价计划确认时基于版本 ${adjustment.baseVersionId ?? "（无）"}，但当前已是 ` +
@@ -1050,26 +1131,41 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         adjustment.status === "pending" && adjustment.finalRates
           ? (adjustment.finalRates as unknown as RentalPricingRate[])
           : applyPriceAdjustment(
-              (await this.resolveSpaceRates(tenantId, context, new Date().toISOString())).rates,
-              adjustment.changes as unknown as RentalPriceAdjustmentChange[]
+              (await this.resolveSpaceRates(tenantId, context, effectiveFrom.toISOString(), tx)).rates,
+              changes
             ).rates;
-      const row = await tx.rentalPriceVersion.create({
-        data: {
-          tenantId,
-          workspaceId,
-          sequence,
-          effectiveFrom,
-          rates: rates as unknown as Prisma.InputJsonValue,
-          changeReason: adjustment.changeReason,
-          createdBy: operator ?? undefined
-        }
+      // 计划现值必须从事务内看到的数据库行和本次完整结果派生。若两条调价相邻执行，
+      // 用事务外缓存计算会让后执行者把先执行者的计划现值覆盖回去，尽管空间版本是对的。
+      const storedPlan = await tx.rentalPricingPlan.findFirst({ where: { id: planId, tenantId, workspaceId } });
+      if (!storedPlan) throw new NotFoundException("定价计划不存在");
+      const completeByKey = new Map(rates.map((rate) => [`${rate.itemGroupId}:${rate.unit}`, rate]));
+      const storedRates = storedPlan.rates as unknown as RentalPricingRate[];
+      const nextPlanRates = storedRates.map((rate) => {
+        const updated = completeByKey.get(`${rate.itemGroupId}:${rate.unit}`);
+        if (!updated) throw new ConflictException("调价后的完整版本缺少当前计划价格行，请刷新后重试");
+        return structuredClone(updated);
       });
+      const nextPlan: RentalPricingPlanV1 = {
+        ...plan,
+        version: versionAfter(storedPlan.version),
+        rates: nextPlanRates,
+        updatedAt: stamp()
+      };
+      const row = await this.appendSpaceVersion(tx, {
+        tenantId,
+        workspaceId,
+        effectiveFrom,
+        rates,
+        changeReason: adjustment.changeReason,
+        createdBy: operator
+      });
+      await this.configStore.upsertPricingPlan(nextPlan, tx);
       const applied = await tx.rentalPriceAdjustmentPlan.updateMany({
         where: { id: adjustmentId, status: { in: ["draft", "pending"] } },
         data: { status: "applied", resultVersionId: row.id, confirmedBy: operator ?? undefined, confirmedAt: new Date() }
       });
       if (!applied.count) throw new ConflictException("调价计划已被其他人处理，请刷新后重试");
-      return row;
+      return { row, nextPlan };
     }).catch((error) => {
       // 基础版本被推进 → 409。失败的落库由调用方 runDuePriceAdjustments 统一记
       // （它已按 message 写 failureReason），这里不重复写一遍。
@@ -1079,12 +1175,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       }
       throw error;
     });
-    // 事务提交成功后同步计划行现值（缓存），供后续同进程报价兜底使用。
-    if (adjustment.finalRates) {
-      const plan = this.state(tenantId, context).pricingPlans.find((row) => row.id === planId);
-      if (plan) plan.rates = adjustment.finalRates as unknown as RentalPricingRate[];
-    }
-    return version.id;
+    // 事务提交成功后再同步内存计划；失败时数据库和缓存都保持旧值。
+    Object.assign(plan, appliedResult.nextPlan);
+    return appliedResult.row.id;
   }
 
   /**
@@ -1206,13 +1299,22 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const plans = this.state(tenantId, context).pricingPlans.filter((plan) => plan.status === "enabled");
     const weeklyNames = ["日", "一", "二", "三", "四", "五", "六"];
     const workspaceId = this.workspaceOf(tenantId);
-    // 版本已是**空间级**：同一空间任一时点只有一个生效版本，因此不再按计划各查一条。
-    // 查询必须带 tenantId + workspaceId——只按 planId 查会越过租户与空间边界。
-    const current = await prisma.rentalPriceVersion.findFirst({
-      where: { tenantId, workspaceId },
-      orderBy: [{ effectiveFrom: "desc" }, { sequence: "desc" }],
-      take: 1
-    });
+    // 按版本的真实生效区间生成摘要，不能拿“数据库最新一版”覆盖全年：未来版本会把
+    // 尚未生效的规则提前显示，历史月份也会被当前规则改写。这里一次读取年度边界前
+    // 的基准版及年度内版本，再按 [effectiveFrom, nextEffectiveFrom) 与自然日求交集。
+    const yearStart = new Date(businessInstantAt(`${year}-01-01`, 0, timeZone));
+    const yearEnd = new Date(businessInstantAt(`${year + 1}-01-01`, 0, timeZone));
+    const [beforeYear, withinYear] = await Promise.all([
+      prisma.rentalPriceVersion.findFirst({
+        where: { tenantId, workspaceId, effectiveFrom: { lte: yearStart } },
+        orderBy: [{ effectiveFrom: "desc" }, { sequence: "desc" }]
+      }),
+      prisma.rentalPriceVersion.findMany({
+        where: { tenantId, workspaceId, effectiveFrom: { gt: yearStart, lt: yearEnd } },
+        orderBy: [{ effectiveFrom: "asc" }, { sequence: "asc" }]
+      })
+    ]);
+    const versions = [...(beforeYear ? [beforeYear] : []), ...withinYear];
     // 计划归属只用于展示。版本里的费率不带计划标识，按「商品 × 计价单位」回查当前
     // 拥有该价格的在用计划；查不到就留空——价格已从计划下线但版本仍是生效事实，
     // 编一个计划编码会让月历看起来仍受某个计划管辖。
@@ -1222,21 +1324,29 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         ownerOf.set(`${rate.itemGroupId}:${rate.unit}`, { planId: plan.id, planCode: plan.code });
       }
     }
-    const planVersions = current
-      ? [{ version: `v${current.sequence}`, rates: current.rates as unknown as RentalPricingRate[] }]
-      : [];
     const result: RentalCalendarTimePriceDay[] = [];
     for (const day of calendar.days) {
       const entries: RentalCalendarTimePriceDay["entries"] = [];
-      for (const fact of planVersions) {
-        for (const rate of fact.rates) {
+      const dayStart = businessInstantAt(day.date, 0, timeZone);
+      const nextDate = businessDateKeyFromIndex(Math.floor(Date.parse(`${day.date}T00:00:00Z`) / 86_400_000) + 1);
+      const dayEnd = businessInstantAt(nextDate, 0, timeZone);
+      const dayVersions = versions
+        .map((row, index) => ({
+          row,
+          start: row.effectiveFrom.getTime(),
+          end: versions[index + 1]?.effectiveFrom.getTime() ?? Number.POSITIVE_INFINITY
+        }))
+        .filter((range) => range.start < dayEnd && range.end > dayStart);
+      for (const fact of dayVersions) {
+        const version = `v${fact.row.sequence}`;
+        for (const rate of fact.row.rates as unknown as RentalPricingRate[]) {
           const owner = ownerOf.get(`${rate.itemGroupId}:${rate.unit}`);
           for (const window of rate.periodicWindows ?? []) {
             if (periodicWindowCoversDate(window, day.date, timeZone)) {
               entries.push({
                 planId: owner?.planId,
                 planCode: owner?.planCode,
-                version: fact.version,
+                version,
                 itemGroupCodes: [rate.itemGroupCode],
                 unit: rate.unit,
                 timeLabel: weeklyNames[window.fromWeekday] + " " + window.fromTime + " 起",
@@ -1246,18 +1356,19 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
             }
           }
           for (const override of rate.datetimeOverrides ?? []) {
-            const startDay = businessDateKey(override.start, timeZone);
-            const endDay = businessDateKey(override.end, timeZone);
-            if (day.date >= startDay && day.date < endDay) {
+            const startAt = new Date(override.start).getTime();
+            const endAt = new Date(override.end).getTime();
+            if (override.id && day.pricingOverrideRef === override.id && startAt < dayEnd && endAt > dayStart) {
               entries.push({
                 planId: owner?.planId,
                 planCode: owner?.planCode,
-                version: fact.version,
+                version,
                 itemGroupCodes: [rate.itemGroupCode],
                 unit: rate.unit,
                 timeLabel: "一次性特殊价",
                 multiplier: override.multiplier,
-                source: "datetime_override"
+                source: "datetime_override",
+                overrideRef: override.id
               });
             }
           }
@@ -1330,7 +1441,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       closed: day.closed,
       businessStatus: day.businessStatus,
       source: day.source,
-      hours: day.hours
+      hours: day.hours,
+      pricingOverrideRef: day.pricingOverrideRef
     };
   }
 
@@ -1730,9 +1842,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   private assertRangeFields(fields: RentalCalendarRangeFields) {
     const provided = Object.entries(fields).filter(([, value]) => value !== undefined);
     if (!provided.length) throw new BadRequestException("范围覆盖必须至少选择一个要设置的字段");
-    if (fields.pricingMultiplier !== undefined && (!Number.isFinite(fields.pricingMultiplier) || fields.pricingMultiplier < 0)) {
-      throw new BadRequestException("价格系数无效");
-    }
+    if (fields.pricingOverrideRef !== undefined && !fields.pricingOverrideRef.trim()) throw new BadRequestException("一次性价格引用不能为空白");
     if (fields.name !== undefined && !fields.name.trim()) throw new BadRequestException("节日或调休名称不能为空白");
     if (fields.hours) {
       // 时段合法性按范围起点校验即可：周内星期只影响每周模板兜底判定，时段自身的
@@ -2229,13 +2339,14 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         if (before.closed !== after.closed) changedFields.push("closed");
         if (businessHoursSignature(before.hours) !== businessHoursSignature(after.hours)) changedFields.push("hours");
         if (before.pricingMultiplier !== after.pricingMultiplier) changedFields.push("pricingMultiplier");
+        if (before.pricingOverrideRef !== after.pricingOverrideRef) changedFields.push("pricingOverrideRef");
         if (before.source !== after.source) changedFields.push("source");
       }
       if (changedFields.includes("businessStatus") || changedFields.includes("closed") || change !== "changed") {
         closureChanges.push(date);
       }
       if (changedFields.includes("hours")) hoursChanges.push(date);
-      if (changedFields.includes("pricingMultiplier")) pricingChanges.push(date);
+      if (changedFields.includes("pricingMultiplier") || changedFields.includes("pricingOverrideRef")) pricingChanges.push(date);
       dates.push({
         date,
         change,
@@ -3771,24 +3882,18 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       year: businessYearFromDateKey(date)
     };
 
-    // 第 1 层：具体日期时间覆盖（人工覆盖，可带时间边界）。
-    if (overridden) {
-      const scope = day?.overrideScope;
-      const bounded = scope?.startDateTime && scope?.endDateTime;
-      // 无时间边界 → 整天生效（既有单日覆盖语义）；有边界 → 按取价时点命中。
-      // 时点比较必须按**时刻**而不是字符串：priceAt 是 Z 格式、覆盖边界可能带
-      // +08:00 偏移，字典序比较会把「14:00+08 vs 12:00+08」判成命中之外。
-      const atMs = priceAt !== undefined ? new Date(priceAt).getTime() : Number.NaN;
-      const hit =
-        !bounded ||
-        (Number.isFinite(atMs) &&
-          atMs >= new Date(scope!.startDateTime!).getTime() &&
-          atMs < new Date(scope!.endDateTime!).getTime());
-      if (hit) {
-        return { ...baseResult, value: day!.pricingMultiplier, layer: "date_override" as const, priceModule: false };
-      }
-      // 覆盖带边界但取价时点不在其中：落到下一层——这正是「边界前的块不拆分、
-      // 按其开始时点取价」与「12:00 起的覆盖只命中 12:00 之后的块」的交汇处。
+    // 第 1 层：日历只给出稳定引用，价格值和绝对时段都来自当前价格版本。
+    // 这避免把一个空间统一倍率误当成所有商品的价格事实。
+    if (overridden && day?.pricingOverrideRef && priceAt) {
+      const atMs = new Date(priceAt).getTime();
+      const hit = rate.datetimeOverrides?.find(
+        (override) =>
+          override.id === day.pricingOverrideRef &&
+          Number.isFinite(atMs) &&
+          atMs >= new Date(override.start).getTime() &&
+          atMs < new Date(override.end).getTime()
+      );
+      if (hit) return { ...baseResult, value: hit.multiplier, layer: "date_override" as const, priceModule: true };
     }
 
     // 第 2 层：周期性计价时段（PRICE-03）。按取价时点的营业时区星期与时分命中。
@@ -3808,12 +3913,6 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     }
     if (type === "statutory_holiday" || type === "tenant_special") {
       return { ...baseResult, value: rate.holidayMultiplier, layer: "day_type" as const, priceModule: true };
-    }
-    // 官方/模板日自带的日期系数（如官方节假日的 1.25）也属于日期相关价格层。
-    // **人工覆盖日不在此层**：覆盖系数属于第 1 层，未命中其时间边界时不能再
-    // 从这里漏进来，否则「12:00 起生效」的边界形同虚设。
-    if (!overridden && day?.pricingMultiplier !== undefined && day.pricingMultiplier !== 1) {
-      return { ...baseResult, value: day.pricingMultiplier, layer: "day_type" as const, priceModule: false };
     }
     // 第 4 层：商品基础价格。
     return { ...baseResult, value: 1, layer: "base" as const, priceModule: true };

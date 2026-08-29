@@ -1,8 +1,9 @@
-import { EditOutlined, PlusOutlined } from "@ant-design/icons";
+import { EditOutlined, HistoryOutlined, PlusOutlined } from "@ant-design/icons";
 import { RENTAL_PRICING_UNIT_LABELS } from "@store-rental/shared";
-import type { RentalDiscountPlan, RentalPricingPlanV1, RentalValueAddedService, SaveRentalDiscountPlanRequest, SaveRentalPricingPlanRequest, SaveRentalValueAddedServiceRequest } from "@store-rental/shared";
+import type { CreateRentalPriceAdjustmentRequest, RentalDiscountPlan, RentalPriceAdjustmentPreviewRow, RentalPricingPlanV1, RentalValueAddedService, SaveRentalDiscountPlanRequest, SaveRentalPricingPlanRequest, SaveRentalValueAddedServiceRequest } from "@store-rental/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { App, Button, Card, Col, Drawer, Form, Input, InputNumber, Row, Select, Space, Table, Tag, Typography } from "antd";
+import { Alert, App, Button, Card, Col, DatePicker, Drawer, Form, Input, InputNumber, Modal, Popconfirm, Row, Select, Space, Table, Tag, Typography } from "antd";
+import dayjs from "dayjs";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { rentalCoreApi } from "@/api/rentalCore";
@@ -28,9 +29,18 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [pricingEditor, setPricingEditor] = useState<RentalPricingPlanV1 | null>();
+  const [adjustmentPlan, setAdjustmentPlan] = useState<RentalPricingPlanV1 | null>();
+  const [adjustmentPreview, setAdjustmentPreview] = useState<RentalPriceAdjustmentPreviewRow[]>([]);
+  const [versionsOpen, setVersionsOpen] = useState(false);
+  const [versionSequence, setVersionSequence] = useState<number>();
+  const [restoreSequence, setRestoreSequence] = useState<number>();
+  const [restoreReason, setRestoreReason] = useState("");
+  const [cancelAdjustmentId, setCancelAdjustmentId] = useState<string>();
+  const [cancelReason, setCancelReason] = useState("");
   const [discountEditor, setDiscountEditor] = useState<RentalDiscountPlan | null>();
   const [serviceEditor, setServiceEditor] = useState<RentalValueAddedService | null>();
   const [pricingForm] = Form.useForm<SaveRentalPricingPlanRequest>();
+  const [adjustmentForm] = Form.useForm<CreateRentalPriceAdjustmentRequest & { scheduledAtValue?: dayjs.Dayjs }>();
   const [discountForm] = Form.useForm<SaveRentalDiscountPlanRequest>();
   const [serviceForm] = Form.useForm<SaveRentalValueAddedServiceRequest>();
   const profile = useQuery({
@@ -57,6 +67,26 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
     queryKey: ["rental-core", "value-added-services"],
     queryFn: rentalCoreApi.valueAddedServices,
   });
+  const versions = useQuery({
+    queryKey: ["rental-core", "price-versions"],
+    queryFn: () => rentalCoreApi.priceVersions(1, 100),
+    enabled: versionsOpen,
+  });
+  const versionDetail = useQuery({
+    queryKey: ["rental-core", "price-version", versionSequence],
+    queryFn: () => rentalCoreApi.priceVersion(versionSequence!),
+    enabled: versionSequence !== undefined,
+  });
+  const previousVersion = useQuery({
+    queryKey: ["rental-core", "price-version", versionSequence ? versionSequence - 1 : undefined],
+    queryFn: () => rentalCoreApi.priceVersion(versionSequence! - 1),
+    enabled: versionSequence !== undefined && versionSequence > 1,
+  });
+  const adjustments = useQuery({
+    queryKey: ["rental-core", "price-adjustments", adjustmentPlan?.id],
+    queryFn: () => rentalCoreApi.priceAdjustments(adjustmentPlan!.id),
+    enabled: Boolean(adjustmentPlan?.id),
+  });
 
   const savePricing = useMutation({
     mutationFn: rentalCoreApi.savePricingPlan,
@@ -69,6 +99,55 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
       message.success("基础定价新版本已保存");
     },
     onError: () => message.error("保存失败，请检查商品、计价单位和价格参数"),
+  });
+  const createAdjustment = useMutation({
+    mutationFn: (values: CreateRentalPriceAdjustmentRequest & { scheduledAtValue?: dayjs.Dayjs }) => {
+      const { scheduledAtValue, ...request } = values;
+      return rentalCoreApi.createPriceAdjustment(adjustmentPlan!.id, {
+        ...request,
+        scheduledAt: scheduledAtValue?.toISOString(),
+      });
+    },
+    onSuccess: async (result) => {
+      setAdjustmentPreview(result.preview);
+      await queryClient.invalidateQueries({ queryKey: ["rental-core", "price-adjustments", adjustmentPlan?.id] });
+      message.success("调价计划草稿已创建，请核对最终价后确认");
+    },
+    onError: () => message.error("创建调价计划失败，请检查时间线、范围与调价值"),
+  });
+  const confirmAdjustment = useMutation({
+    mutationFn: (id: string) => rentalCoreApi.confirmPriceAdjustment(adjustmentPlan!.id, id),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["rental-core", "price-adjustments", adjustmentPlan?.id] }),
+        queryClient.invalidateQueries({ queryKey: ["rental-core", "pricing-plans"] }),
+        queryClient.invalidateQueries({ queryKey: ["rental-core", "price-versions"] }),
+      ]);
+      message.success("调价计划已确认");
+    },
+    onError: () => message.error("确认失败：请检查是否存在待生效调价或未来价格版本"),
+  });
+  const cancelAdjustment = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) => rentalCoreApi.cancelPriceAdjustment(adjustmentPlan!.id, id, { reason }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["rental-core", "price-adjustments", adjustmentPlan?.id] });
+      setCancelAdjustmentId(undefined);
+      setCancelReason("");
+      message.success("调价计划已取消");
+    },
+  });
+  const restoreVersion = useMutation({
+    mutationFn: ({ sequence, reason }: { sequence: number; reason: string }) => rentalCoreApi.restorePriceVersion(sequence, { reason }),
+    onSuccess: async (result) => {
+      setRestoreSequence(undefined);
+      setRestoreReason("");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["rental-core", "price-versions"] }),
+        queryClient.invalidateQueries({ queryKey: ["rental-core", "pricing-plans"] }),
+      ]);
+      message.success(`已基于 ${result.restoredFromVersion} 生成新版本 ${result.version}`);
+    },
+    onError: () => message.error("恢复失败：请检查未来版本、待生效调价或价格行结构变化"),
   });
   const saveDiscount = useMutation({
     mutationFn: rentalCoreApi.saveDiscountPlan,
@@ -131,6 +210,17 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
     setPricingEditor(record ?? ({} as RentalPricingPlanV1));
   }
 
+  function openAdjustment(record: RentalPricingPlanV1) {
+    setAdjustmentPreview([]);
+    adjustmentForm.setFieldsValue({
+      code: `ADJ-${dayjs().format("YYYYMMDD-HHmm")}`,
+      name: `${record.name} 调价`,
+      changeReason: "经营价格调整",
+      changes: [{ itemGroupId: record.rates[0]?.itemGroupId, unit: record.rates[0]?.unit, op: "set_base", value: record.rates[0]?.baseAmount ?? 0 }],
+    });
+    setAdjustmentPlan(record);
+  }
+
   function editDiscount(record?: RentalDiscountPlan) {
     discountForm.setFieldsValue(
       record
@@ -181,9 +271,12 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
         title={sectionTitle}
         description={sectionDescription}
         extra={
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => (section === "pricing" ? editPricing() : section === "discounts" ? editDiscount() : editService())}>
-            新增{sectionTitle}
-          </Button>
+          <Space>
+            {section === "pricing" && <Button icon={<HistoryOutlined />} onClick={() => setVersionsOpen(true)}>价格版本</Button>}
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => (section === "pricing" ? editPricing() : section === "discounts" ? editDiscount() : editService())}>
+              新增{sectionTitle}
+            </Button>
+          </Space>
         }
       />
       <div className="context-note">
@@ -248,9 +341,12 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
                 {
                   title: "操作",
                   render: (_, row) => (
-                    <Button type="link" icon={<EditOutlined />} onClick={() => editPricing(row)}>
-                      编辑
-                    </Button>
+                    <Space size={0}>
+                      <Button type="link" icon={<EditOutlined />} onClick={() => editPricing(row)}>
+                        {row.status === "enabled" ? "编辑资料" : "编辑"}
+                      </Button>
+                      {row.status === "enabled" && <Button type="link" onClick={() => openAdjustment(row)}>调价计划</Button>}
+                    </Space>
                   ),
                 },
               ]}
@@ -587,7 +683,54 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
                         </Space>
                       )}
                     </Form.List>
-                    <Row gutter={10}></Row>
+                    <Typography.Title level={5}>日期类型价格系数</Typography.Title>
+                    <Row gutter={10}>
+                      {[
+                        ["workday", "工作日"], ["weekend", "周末"], ["statutory_holiday", "法定节假日"],
+                        ["makeup_workday", "调休工作日"], ["tenant_special", "空间特殊日"],
+                      ].map(([key, label]) => (
+                        <Col span={4} key={key}>
+                          <Form.Item name={[field.name, "dayTypePrices", key]} label={label}>
+                            <InputNumber min={0} step={0.05} style={{ width: "100%" }} />
+                          </Form.Item>
+                        </Col>
+                      ))}
+                    </Row>
+                    <Form.List name={[field.name, "periodicWindows"]}>
+                      {(windowFields, { add, remove }) => (
+                        <Space direction="vertical" size={4} style={{ width: "100%" }}>
+                          <Typography.Text strong>周期性计价时段</Typography.Text>
+                          {windowFields.map((windowField) => (
+                            <Row gutter={8} key={windowField.key}>
+                              <Col span={4}><Form.Item name={[windowField.name, "fromWeekday"]} label="起始星期" rules={[{ required: true }]}><Select options={[0,1,2,3,4,5,6].map((value) => ({ value, label: `周${"日一二三四五六"[value]}` }))} /></Form.Item></Col>
+                              <Col span={4}><Form.Item name={[windowField.name, "fromTime"]} label="起始时刻" rules={[{ required: true }]}><Input placeholder="12:00" /></Form.Item></Col>
+                              <Col span={4}><Form.Item name={[windowField.name, "toWeekday"]} label="结束星期" rules={[{ required: true }]}><Select options={[0,1,2,3,4,5,6].map((value) => ({ value, label: `周${"日一二三四五六"[value]}` }))} /></Form.Item></Col>
+                              <Col span={4}><Form.Item name={[windowField.name, "toTime"]} label="结束时刻" rules={[{ required: true }]}><Input placeholder="00:00" /></Form.Item></Col>
+                              <Col span={4}><Form.Item name={[windowField.name, "multiplier"]} label="价格系数" rules={[{ required: true }]}><InputNumber min={0} step={0.05} style={{ width: "100%" }} /></Form.Item></Col>
+                              <Col span={4}><Button danger onClick={() => remove(windowField.name)}>移除</Button></Col>
+                            </Row>
+                          ))}
+                          <Button onClick={() => add({ fromWeekday: 5, fromTime: "12:00", toWeekday: 1, toTime: "00:00", multiplier: 1.1 })}>新增周期时段</Button>
+                        </Space>
+                      )}
+                    </Form.List>
+                    <Form.List name={[field.name, "datetimeOverrides"]}>
+                      {(overrideFields, { add, remove }) => (
+                        <Space direction="vertical" size={4} style={{ width: "100%", marginTop: 12 }}>
+                          <Typography.Text strong>一次性日期时间价格</Typography.Text>
+                          {overrideFields.map((overrideField) => (
+                            <Row gutter={8} key={overrideField.key}>
+                              <Col span={5}><Form.Item name={[overrideField.name, "id"]} label="引用标识" rules={[{ required: true }]}><Input placeholder="NATIONAL-DAY-2026" /></Form.Item></Col>
+                              <Col span={6}><Form.Item name={[overrideField.name, "start"]} label="开始时点" rules={[{ required: true }]}><Input placeholder="2026-10-01T00:00:00+08:00" /></Form.Item></Col>
+                              <Col span={6}><Form.Item name={[overrideField.name, "end"]} label="结束时点" rules={[{ required: true }]}><Input placeholder="2026-10-08T00:00:00+08:00" /></Form.Item></Col>
+                              <Col span={3}><Form.Item name={[overrideField.name, "multiplier"]} label="系数" rules={[{ required: true }]}><InputNumber min={0} step={0.05} style={{ width: "100%" }} /></Form.Item></Col>
+                              <Col span={4}><Button danger onClick={() => remove(overrideField.name)}>移除</Button></Col>
+                            </Row>
+                          ))}
+                          <Button onClick={() => add({ id: "", start: "", end: "", multiplier: 1 })}>新增一次性价格</Button>
+                        </Space>
+                      )}
+                    </Form.List>
                   </Card>
                 ))}
               </Space>
@@ -598,6 +741,120 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
           </Form.Item>
         </Form>
       </Drawer>
+
+      <Drawer
+        title={`调价计划 · ${adjustmentPlan?.name ?? ""}`}
+        size={900}
+        open={Boolean(adjustmentPlan)}
+        destroyOnHidden
+        onClose={() => { setAdjustmentPlan(null); setAdjustmentPreview([]); adjustmentForm.resetFields(); }}
+      >
+        <Alert
+          type="info"
+          showIcon
+          title="已启用价格只通过调价计划变更"
+          description="草稿先保存差异并展示最终价；确认后立即生效或进入待生效。空间存在未来价格版本或其他待生效调价时会阻止确认。"
+          style={{ marginBottom: 16 }}
+        />
+        <Form form={adjustmentForm} layout="vertical" onFinish={(values) => createAdjustment.mutate(values)}>
+          <Row gutter={12}>
+            <Col span={8}><Form.Item name="code" label="计划编码" rules={[{ required: true }]}><Input /></Form.Item></Col>
+            <Col span={10}><Form.Item name="name" label="计划名称" rules={[{ required: true }]}><Input /></Form.Item></Col>
+            <Col span={6}><Form.Item name="scheduledAtValue" label="定时生效（留空立即）"><DatePicker showTime style={{ width: "100%" }} /></Form.Item></Col>
+          </Row>
+          <Form.List name="changes">
+            {(fields, { add, remove }) => (
+              <Space orientation="vertical" style={{ width: "100%" }}>
+                {fields.map((field) => (
+                  <Row gutter={8} key={field.key}>
+                    <Col span={7}><Form.Item name={[field.name, "itemGroupId"]} label="商品" rules={[{ required: true }]}><Select options={(adjustmentPlan?.rates ?? []).map((rate) => ({ value: rate.itemGroupId, label: `${rate.itemGroupCode} · ${rate.itemGroupName}` }))} /></Form.Item></Col>
+                    <Col span={5}><Form.Item name={[field.name, "unit"]} label="计价单位" rules={[{ required: true }]}><Select options={(adjustmentPlan?.rates ?? []).map((rate) => ({ value: rate.unit, label: unitLabels[rate.unit] ?? rate.unit }))} /></Form.Item></Col>
+                    <Col span={5}><Form.Item name={[field.name, "op"]} label="调整方式" rules={[{ required: true }]}><Select options={[{ value: "set_base", label: "设为指定价格" }, { value: "percent", label: "按百分比增减" }, { value: "fixed", label: "按固定金额增减" }]} /></Form.Item></Col>
+                    <Col span={4}><Form.Item name={[field.name, "value"]} label="调整值" rules={[{ required: true }]}><InputNumber precision={2} style={{ width: "100%" }} /></Form.Item></Col>
+                    <Col span={3}><Button danger onClick={() => remove(field.name)}>移除</Button></Col>
+                  </Row>
+                ))}
+                <Button onClick={() => add({ op: "set_base", value: 0 })}>新增调价条目</Button>
+              </Space>
+            )}
+          </Form.List>
+          <Form.Item name="changeReason" label="调价原因" rules={[{ required: true }]} style={{ marginTop: 12 }}><Input.TextArea rows={2} /></Form.Item>
+          <Button type="primary" htmlType="submit" loading={createAdjustment.isPending}>创建草稿并预览</Button>
+        </Form>
+        {adjustmentPreview.length > 0 && (
+          <Card title="本次最终价预览" size="small" style={{ marginTop: 16 }}>
+            <Table rowKey={(row) => `${row.itemGroupId}:${row.unit}`} pagination={false} dataSource={adjustmentPreview} columns={[
+              { title: "商品", dataIndex: "itemGroupCode" },
+              { title: "计价单位", dataIndex: "unit", render: (value) => unitLabels[value as keyof typeof unitLabels] ?? value },
+              { title: "调整前", dataIndex: "beforeBaseAmount", render: money },
+              { title: "调整后", dataIndex: "afterBaseAmount", render: money },
+            ]} />
+          </Card>
+        )}
+        <Card title="调价计划记录" size="small" style={{ marginTop: 16 }}>
+          <Table rowKey="id" loading={adjustments.isLoading} dataSource={adjustments.data ?? []} columns={[
+            { title: "计划", render: (_, row) => <><b>{row.name}</b><br/><Typography.Text type="secondary">{row.code}</Typography.Text></> },
+            { title: "生效时间", render: (_, row) => row.scheduledAt ?? "确认后立即" },
+            { title: "状态", dataIndex: "status", render: (value) => <Tag>{value}</Tag> },
+            { title: "原因", dataIndex: "changeReason" },
+            { title: "操作", render: (_, row) => row.status === "draft" ? <Space size={0}><Popconfirm title="确认后将立即生效或进入待生效，是否继续？" onConfirm={() => confirmAdjustment.mutate(row.id)}><Button type="link">确认</Button></Popconfirm><Button type="link" danger onClick={() => setCancelAdjustmentId(row.id)}>取消</Button></Space> : row.status === "pending" ? <Button type="link" danger onClick={() => setCancelAdjustmentId(row.id)}>取消</Button> : <Typography.Text type="secondary">—</Typography.Text> },
+          ]} />
+        </Card>
+      </Drawer>
+
+      <Modal
+        title="取消调价计划"
+        open={Boolean(cancelAdjustmentId)}
+        okText="确认取消"
+        okButtonProps={{ danger: true, disabled: !cancelReason.trim(), loading: cancelAdjustment.isPending }}
+        onCancel={() => { setCancelAdjustmentId(undefined); setCancelReason(""); }}
+        onOk={() => cancelAdjustmentId && cancelAdjustment.mutate({ id: cancelAdjustmentId, reason: cancelReason.trim() })}
+      >
+        <Input.TextArea rows={3} value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} placeholder="请填写取消原因" />
+      </Modal>
+
+      <Drawer title="空间价格版本" size={760} open={versionsOpen} destroyOnHidden onClose={() => setVersionsOpen(false)}>
+        <Alert type="info" showIcon title="每一版都是该经营空间全部有效商品价格的完整不可变快照" style={{ marginBottom: 16 }} />
+        <Table rowKey="id" loading={versions.isLoading} dataSource={versions.data?.rows ?? []} columns={[
+          { title: "版本", dataIndex: "version" },
+          { title: "生效时间", dataIndex: "effectiveFrom" },
+          { title: "价格条目", dataIndex: "rateCount", render: (value) => `${value} 条` },
+          { title: "变更原因", dataIndex: "changeReason" },
+          { title: "创建人", dataIndex: "createdBy" },
+          { title: "操作", render: (_, row) => <Space size={0}><Button type="link" onClick={() => setVersionSequence(row.sequence)}>查看 / 对比</Button><Button type="link" onClick={() => setRestoreSequence(row.sequence)}>恢复</Button></Space> },
+        ]} />
+      </Drawer>
+
+      <Drawer title={`价格版本详情 · v${versionSequence ?? ""}`} size={820} open={versionSequence !== undefined} destroyOnHidden onClose={() => setVersionSequence(undefined)}>
+        <Alert type="info" showIcon title={versionSequence && versionSequence > 1 ? `以下价格与 v${versionSequence - 1} 对比` : "首个价格版本"} style={{ marginBottom: 16 }} />
+        <Table
+          rowKey={(row) => `${row.itemGroupId}:${row.unit}`}
+          loading={versionDetail.isLoading || previousVersion.isLoading}
+          dataSource={versionDetail.data?.rates ?? []}
+          columns={[
+            { title: "商品", render: (_, row) => `${row.itemGroupCode} · ${row.itemGroupName}` },
+            { title: "计价单位", dataIndex: "unit", render: (value) => unitLabels[value as keyof typeof unitLabels] ?? value },
+            { title: "上一版基础价", render: (_, row) => money(previousVersion.data?.rates.find((item) => item.itemGroupId === row.itemGroupId && item.unit === row.unit)?.baseAmount) },
+            { title: "本版基础价", dataIndex: "baseAmount", render: money },
+            { title: "变化", render: (_, row) => {
+              const before = previousVersion.data?.rates.find((item) => item.itemGroupId === row.itemGroupId && item.unit === row.unit)?.baseAmount;
+              return before === undefined ? "新增" : before === row.baseAmount ? "未变" : `${row.baseAmount - before > 0 ? "+" : ""}${(row.baseAmount - before).toFixed(2)}`;
+            } },
+          ]}
+        />
+      </Drawer>
+
+      <Modal
+        title={`恢复价格版本 v${restoreSequence ?? ""}`}
+        open={restoreSequence !== undefined}
+        okText="生成恢复版本"
+        okButtonProps={{ disabled: !restoreReason.trim(), loading: restoreVersion.isPending }}
+        onCancel={() => { setRestoreSequence(undefined); setRestoreReason(""); }}
+        onOk={() => restoreSequence !== undefined && restoreVersion.mutate({ sequence: restoreSequence, reason: restoreReason.trim() })}
+      >
+        <Alert type="warning" showIcon title="不会修改或删除历史版本，而是以旧快照追加一个新的当前版本。" style={{ marginBottom: 12 }} />
+        <Input.TextArea rows={3} value={restoreReason} onChange={(event) => setRestoreReason(event.target.value)} placeholder="请填写恢复原因" />
+      </Modal>
 
       <Drawer
         title={discountForm.getFieldValue("id") ? "编辑优惠方案" : "新增优惠方案"}

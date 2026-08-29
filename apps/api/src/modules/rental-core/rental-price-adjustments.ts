@@ -101,6 +101,12 @@ export function assertNoPeriodicOverlap(windows: RentalPeriodicPriceWindow[] | u
 
 export function assertNoDatetimeOverrideOverlap(overrides: RentalDatetimePriceOverride[] | undefined, label: string) {
   const list = overrides ?? [];
+  const ids = new Set<string>();
+  for (const row of list) {
+    if (!row.id) continue;
+    if (ids.has(row.id)) throw new ConflictException(`${label} 的一次性价格引用 ${row.id} 重复，日历无法唯一引用`);
+    ids.add(row.id);
+  }
   const parsed = list.map((row) => ({ row, start: new Date(row.start).getTime(), end: new Date(row.end).getTime() }));
   for (const item of parsed) {
     if (!Number.isFinite(item.start) || !Number.isFinite(item.end) || item.start >= item.end) {
@@ -131,7 +137,11 @@ export function applyPriceAdjustment(
 ): { rates: RentalPricingRate[]; preview: RentalPriceAdjustmentPreviewRow[] } {
   const preview: RentalPriceAdjustmentPreviewRow[] = [];
   const rates = structuredClone(currentRates);
+  const changedKeys = new Set<string>();
   for (const change of changes) {
+    const changeKey = `${change.itemGroupId}:${change.unit}`;
+    if (changedKeys.has(changeKey)) throw new BadRequestException("同一商品和计价单位在一个调价计划中只能出现一次");
+    changedKeys.add(changeKey);
     const rate = rates.find((row) => row.itemGroupId === change.itemGroupId && row.unit === change.unit);
     if (!rate) {
       throw new BadRequestException(

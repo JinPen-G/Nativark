@@ -288,7 +288,9 @@ export function requiredPermissions(method: string, path: string) {
     return method === "GET" ? ["store-rental:marketing:manage", "store-rental:price:manage", "store-rental:order:view"] : ["store-rental:marketing:manage", "store-rental:price:manage", "store-rental:order:operate"];
   }
   if (path.startsWith("/rental/v1/pricing-versions")) {
-    return ["store-rental:price:manage", "store-rental:order:view", "store-rental:order:create"];
+    return method === "GET"
+      ? ["store-rental:price:manage", "store-rental:order:view", "store-rental:order:create"]
+      : ["store-rental:price:manage"];
   }
   if (path.startsWith("/rental/v1/pricing-plans") || path.startsWith("/rental/v1/value-added-services")) {
     return method === "GET" ? ["store-rental:price:manage", "store-rental:order:view", "store-rental:order:create"] : ["store-rental:price:manage"];

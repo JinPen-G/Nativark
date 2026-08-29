@@ -3283,6 +3283,7 @@ model RentalPriceAdjustmentPlan {
   planId         String
   plan           RentalPricingPlan  @relation(fields: [planId], references: [id], onDelete: Restrict)
   code           String
+  name           String
   /// 草稿 / 待生效 / 已生效 / 已取消 / 执行失败。
   status         String             @default("draft")
   /// RentalPriceAdjustmentChange[]：差异（op + 受影响商品 + 值）。

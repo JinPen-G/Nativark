@@ -92,6 +92,16 @@ const missing = (() => {
   try { applyPriceAdjustment(current, [{ itemGroupId: "nope", unit: "calendar_day", op: "percent", value: 10 }]); return null; } catch (caught) { return caught; }
 })();
 assert.ok(missing && /不存在/.test(missing.message), "差异指向不存在的费率必须拒绝");
+const duplicateChange = (() => {
+  try {
+    applyPriceAdjustment(current, [
+      { itemGroupId: "g1", unit: "calendar_day", op: "fixed", value: 1 },
+      { itemGroupId: "g1", unit: "calendar_day", op: "percent", value: 5 }
+    ]);
+    return null;
+  } catch (caught) { return caught; }
+})();
+assert.ok(duplicateChange && /只能出现一次/.test(duplicateChange.message), "同一价格行重复调整必须拒绝");
 ok("调价应用：负价与不存在的费率行均 fail-closed");
 
 /* ---------- assertNoDatetimeOverrideOverlap ---------- */

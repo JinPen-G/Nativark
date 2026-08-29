@@ -24,6 +24,7 @@ import {
   ApplyRentalCalendarRangeRemoveDto,
   CreateRentalPriceAdjustmentDto,
   CancelRentalPriceAdjustmentDto,
+  RestoreRentalPriceVersionDto,
   SaveRentalDiscountPlanDto,
   SaveRentalNotificationTemplateDto,
   SaveRentalPricingPlanDto,
@@ -117,6 +118,10 @@ export class RentalBusinessController {
   /** PRICE-03：空间级价格版本完整回放。 */
   @Get("pricing-versions/:sequence") priceVersion(@Req() req: AuthenticatedRequest, @Param("sequence") sequence: string) {
     return this.business.getSpacePriceVersion(req.user.tenantId, this.context(req.user.tenantId), Number(sequence));
+  }
+  /** 以历史完整快照追加一条恢复版本，历史版本不原地修改。 */
+  @Post("pricing-versions/:sequence/restore") restorePriceVersion(@Req() req: AuthenticatedRequest, @Param("sequence") sequence: string, @Body() body: RestoreRentalPriceVersionDto) {
+    return this.committed(req.user.tenantId, this.business.restoreSpacePriceVersion(req.user.tenantId, this.context(req.user.tenantId), Number(sequence), body.reason, req.user.displayName));
   }
   /** PRICE-03 兼容入口：planId 只作当前空间归属校验，实际返回仍是空间版本。 */
   @Get("pricing-plans/:id/versions") legacyPriceVersions(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Query("page") page?: string, @Query("pageSize") pageSize?: string) {

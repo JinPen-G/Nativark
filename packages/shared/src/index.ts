@@ -5232,6 +5232,8 @@ export interface RentalCalendarDaySnapshot {
   source: "week_rule" | "official_cn" | "tenant_override";
   /** 营业时段快照（需求 4.5.3/4.5.5）：只改时段时，审计前后值必须能看出时段变化。 */
   hours?: RentalBusinessHours;
+  /** 日历只保存一次性特殊价格规则的稳定引用，价格值仍在价格版本内。 */
+  pricingOverrideRef?: string;
 }
 
 /**
@@ -5314,6 +5316,8 @@ export interface RentalCalendarDay {
   source: "week_rule" | "official_cn" | "tenant_override";
   /** 该日期的营业时段覆盖（需求 4.5.3：可覆盖营业时段与领取/归还/配送能力）。 */
   hours?: RentalBusinessHours;
+  /** 一次性特殊价格规则引用；不得在日历内保存商品价格或统一价格系数。 */
+  pricingOverrideRef?: string;
   /** 人工覆盖的调整原因、操作人与调整时间（需求 4.5.3 要求必须保存）。 */
   overrideReason?: string;
   overrideBy?: string;
@@ -5562,12 +5566,12 @@ export interface RemoveRentalCalendarDayOverrideRequest {
  *
  * 提供了哪个字段就覆盖哪个字段；未提供的字段保持该日期当前值（有覆盖沿用覆盖，
  * 无覆盖沿用基础值）。「一次性特殊价格覆盖」按 v2.9 边界由 PRICE-03 保存价格值，
- * 日历侧的 `pricingMultiplier` 是既有的逐日系数位，范围保存与显示透传它，不新造价格模型。
+ * 日历只保存稳定引用，不保存商品价格或空间统一价格系数。
  */
 export interface RentalCalendarRangeFields {
   dayType?: RentalDayType;
   name?: string;
-  pricingMultiplier?: number;
+  pricingOverrideRef?: string;
   businessStatus?: RentalCalendarBusinessStatus;
   hours?: RentalBusinessHours;
 }
@@ -5689,7 +5693,7 @@ export interface RentalCalendarPublishPreviewDate {
   after?: RentalCalendarDaySnapshot;
   /** 发生变化的维度，供界面按「停业/时段/价格」分组展示。 */
   changedFields: Array<
-    "dayType" | "name" | "businessStatus" | "closed" | "hours" | "pricingMultiplier" | "source"
+    "dayType" | "name" | "businessStatus" | "closed" | "hours" | "pricingMultiplier" | "pricingOverrideRef" | "source"
   >;
 }
 
@@ -5833,6 +5837,8 @@ export interface RentalPeriodicPriceWindow {
 
 /** 一次性日期时间价格覆盖的价格值（绝对时刻，营业时区书写）。 */
 export interface RentalDatetimePriceOverride {
+  /** 被营业日历引用的稳定规则标识。存量规则可为空，新建规则应填写。 */
+  id?: string;
   start: string;
   end: string;
   multiplier: number;
@@ -5860,6 +5866,8 @@ export interface RentalCalendarTimePriceDay {
     timeLabel: string;
     multiplier: number;
     source: "periodic" | "datetime_override";
+    /** 一次性覆盖条目对应的日历引用。 */
+    overrideRef?: string;
   }>;
 }
 
@@ -5906,6 +5914,7 @@ export interface RentalPriceAdjustmentPlan {
   tenantId: string;
   planId: string;
   code: string;
+  name: string;
   status: "draft" | "pending" | "applied" | "cancelled" | "failed";
   changes: RentalPriceAdjustmentChange[];
   /** 定时执行的生效时刻；缺省 = 立即执行。 */
@@ -5917,12 +5926,19 @@ export interface RentalPriceAdjustmentPlan {
   confirmedAt?: string;
   /** 执行失败的错误信息（执行成功后为空）。 */
   failureReason?: string;
+  cancelReason?: string;
   createdAt: string;
+}
+
+/** 以历史价格快照生成新的当前版本；历史版本本身保持不可变。 */
+export interface RestoreRentalPriceVersionRequest {
+  reason: string;
 }
 
 /** 创建调价计划请求（需求 4.4.3：差异 + 定时/立即 + 原因）。 */
 export interface CreateRentalPriceAdjustmentRequest {
   code: string;
+  name: string;
   changes: RentalPriceAdjustmentChange[];
   /** 定时执行的生效时刻；缺省 = 确认后立即执行。 */
   scheduledAt?: string;

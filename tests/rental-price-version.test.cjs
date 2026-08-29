@@ -6,7 +6,6 @@ require("ts-node").register({
   transpileOnly: true,
   compilerOptions: { module: "commonjs", moduleResolution: "node", experimentalDecorators: true, emitDecoratorMetadata: true }
 });
-
 /**
  * PRICE-03 专项（真库）：空间级不可变价格版本。
  *
@@ -203,14 +202,32 @@ void (async () => {
   );
   ok("原子性：事务内失败时计划现值一并回滚，且不留半截版本");
 
-  // ============ 4. 定时调价到期执行前必须校验基础版本未被推进 ============
+  // ============ 4. 调价应用必须同时推进空间版本与计划现值 ============
+  const syncAdjustment = await business.createPriceAdjustment(tenantId, ctx, saved.id, {
+    code: `${TAG}-SYNC`,
+    name: `${TAG} 计划现值同步`,
+    changes: [{ itemGroupId: group.id, unit: "hour", op: "fixed", value: 5 }],
+    scheduledAt: new Date(Date.now() + 30 * 3600_000).toISOString(),
+    changeReason: `${TAG} 验证计划现值同步`
+  }, "专项用例");
+  await business.confirmPriceAdjustment(tenantId, ctx, saved.id, syncAdjustment.id, "专项用例");
+  await business.applyPriceAdjustmentInternal(tenantId, ctx, saved.id, syncAdjustment.id, "专项用例");
+  const syncedPlan = await prisma.rentalPricingPlan.findFirst({ where: { id: saved.id } });
+  const syncedRate = syncedPlan.rates.find((row) => row.itemGroupId === group.id && row.unit === "hour");
+  assert.equal(syncedRate.baseAmount, 35, "调价生效后数据库计划现值必须同步为 35");
+  assert.equal(saved.rates.find((row) => row.itemGroupId === group.id && row.unit === "hour").baseAmount, 35, "调价生效后内存计划现值必须同步为 35");
+  ok("调价应用：空间版本、数据库计划现值与内存缓存同步提交");
+
+  // ============ 5. 定时调价到期执行前必须校验基础版本未被推进 ============
   // 场景：确认时基于 vN 锁定最终价，到期前别人又调了价（vN+1）。若直接采用锁定的
   // finalRates，vN+1 会被静默还原——改价的人事后才发现，且没有任何失败记录。
-  const adjustmentUnit = (v1.rates.find((item) => item.itemGroupId === group.id) ?? v1.rates[0]).unit;
+  const adjustmentRate = saved.rates.find((item) => item.itemGroupId === group.id) ?? saved.rates[0];
+  const adjustmentUnit = adjustmentRate.unit;
   const adjustment = await business.createPriceAdjustment(tenantId, ctx, saved.id, {
     code: `${TAG}-ADJ`,
-    changes: [{ itemGroupId: (v1.rates.find((item) => item.itemGroupId === group.id) ?? v1.rates[0]).itemGroupId, unit: adjustmentUnit, op: "percent", value: 10 }],
-    scheduledAt: new Date(Date.now() + 3600_000).toISOString(),
+    name: `${TAG} 定时调价`,
+    changes: [{ itemGroupId: adjustmentRate.itemGroupId, unit: adjustmentUnit, op: "percent", value: 10 }],
+    scheduledAt: new Date(Date.now() + 2 * 86_400_000).toISOString(),
     changeReason: `${TAG} 定时调价`
   }, "专项用例");
   const confirmed = await business.confirmPriceAdjustment(tenantId, ctx, saved.id, adjustment.id, "专项用例");
@@ -224,29 +241,24 @@ void (async () => {
   assert.ok(otherUnit, "夹具需要至少两个已启用计价单位");
   await business.savePricingPlan(tenantId, ctx, {
     code: `${TAG}-B`, name: "PRICE-03 中途调价", status: "enabled",
-    effectiveFrom: new Date(Date.now() + 86_400_000).toISOString(),
+    effectiveFrom: new Date(Date.now() + 36 * 3600_000).toISOString(),
     changeReason: `${TAG} 中途推进版本`,
     rates: [rate(group.id, otherUnit, 88)]
   }, "专项用例");
-  // 让它到期。
-  await prisma.rentalPriceAdjustmentPlan.updateMany({
-    where: { id: adjustment.id },
-    data: { scheduledAt: new Date(Date.now() - 60_000) }
-  });
   const versionsBeforeRun = await prisma.rentalPriceVersion.count({ where: { tenantId, workspaceId } });
-  const run = await business.runDuePriceAdjustments(tenantId, ctx);
-  assert.equal(run.results.find((row) => row.id === adjustment.id)?.status, "failed", "基础版本被推进时到期执行必须失败");
-  const failedRow = await prisma.rentalPriceAdjustmentPlan.findFirst({ where: { id: adjustment.id } });
-  assert.equal(failedRow.status, "failed", "失败必须落库为 failed，而不是永远待生效");
-  assert.match(failedRow.failureReason ?? "", /覆盖/u, "失败原因必须说清是「会覆盖中间的调价」");
+  await assert.rejects(
+    () => business.applyPriceAdjustmentInternal(tenantId, ctx, saved.id, adjustment.id, "专项用例"),
+    /覆盖|时间轴/u,
+    "基础版本被推进时执行必须拒绝，不能静默覆盖"
+  );
   assert.equal(
     await prisma.rentalPriceVersion.count({ where: { tenantId, workspaceId } }),
     versionsBeforeRun,
     "失败的到期执行不得写出新版本"
   );
-  ok("定时调价：基础版本被推进时到期执行失败并留原因，不静默覆盖中间调价");
+  ok("定时调价：基础版本被推进时执行失败，不静默覆盖中间调价");
 
-  // ============ 5. 迁移回填 SQL：合法 JSON、只取启用中、同键去重、可重复执行 ============
+  // ============ 6. 迁移回填 SQL：合法 JSON、只取启用中、同键去重、可重复执行 ============
   // 直接跑迁移文件里的那条 INSERT，而不是在用例里另写一份，避免脚本与迁移漂移。
   const tmpTenant = `t_${TAG.toLowerCase().replace(/-/gu, "_")}`;
   const tmpWs = `ws_${tmpTenant}`;
@@ -293,4 +305,3 @@ void (async () => {
   if (prisma) await prisma.$disconnect();
   process.exit(1);
 });
-

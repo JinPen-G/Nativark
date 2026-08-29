@@ -44,6 +44,7 @@ import {
 } from "antd";
 import dayjs from "dayjs";
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
@@ -129,6 +130,7 @@ function ruleSecurityGroups(config: RentalRuleVersion["config"]): {
 export function RentalGovernancePage() {
   const { message } = App.useApp();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   // 需求 4.5.8 的角色矩阵要在界面上成立：日历编辑人员不该看到「发布」，发布人员不该
   // 看到「导入/覆盖/移除覆盖」，而且不该发出注定 403 的请求（页面会满屏报错，
   // 专门配置的日历角色拿不到一个能用的工作界面）。
@@ -1092,7 +1094,7 @@ export function RentalGovernancePage() {
                   type="info"
                   showIcon
                   message="法定节假日与调休工作日必须来自有来源记录的年度数据"
-                  description="租户可以覆盖特殊营业日、停业日和旺季价格系数；报价会记录命中的年度日历版本。"
+                  description="租户可以覆盖特殊营业日、停业日和营业时段；特殊价格只在价格模块维护，日历保存规则引用。报价会记录命中的年度日历与价格版本。"
                 />
                 {/* 需求 4.5.9：默认渲染自然月七列月历，点击日期查看/编辑；全年长列表按需切换。 */}
                 {!calendarListView && (
@@ -1101,6 +1103,7 @@ export function RentalGovernancePage() {
                     month={calendarMonth}
                     onMonthChange={setCalendarMonth}
                     days={calendar.data?.days ?? []}
+                    timePriceSummary={calendar.data?.timePriceSummary ?? []}
                     onDayClick={(day) => openDay(day)}
                   />
                 )}
@@ -1119,7 +1122,7 @@ export function RentalGovernancePage() {
                         render: (value) => <Tag>{value}</Tag>,
                       },
                       { title: "名称", dataIndex: "name" },
-                      { title: "价格系数", dataIndex: "pricingMultiplier" },
+                      { title: "历史系数（兼容）", dataIndex: "pricingMultiplier" },
                       {
                         title: "停业",
                         dataIndex: "closed",
@@ -1852,6 +1855,23 @@ export function RentalGovernancePage() {
               }
             />
           )}
+          {calendarDay && (calendar.data?.timePriceSummary ?? []).find((row) => row.date === calendarDay.date)?.entries.length ? (
+            <Card
+              size="small"
+              title="当日分时价格摘要"
+              style={{ marginBottom: 16 }}
+              extra={canManagePrice ? <Button type="link" onClick={() => navigate("/rental/pricing")}>进入基础定价</Button> : undefined}
+            >
+              <Space direction="vertical" size={4}>
+                {(calendar.data?.timePriceSummary ?? []).find((row) => row.date === calendarDay.date)!.entries.map((entry, index) => (
+                  <Typography.Text key={`${entry.version}-${entry.unit}-${entry.timeLabel}-${index}`}>
+                    {entry.planCode ?? `价格版本 ${entry.version}`} · {entry.itemGroupCodes.join("、")} · {entry.timeLabel} ×{entry.multiplier}
+                    {entry.overrideRef ? ` · 引用 ${entry.overrideRef}` : ""}
+                  </Typography.Text>
+                ))}
+              </Space>
+            </Card>
+          ) : null}
           <Form.Item name="date" label="日期">
             <Input disabled />
           </Form.Item>
@@ -1869,8 +1889,18 @@ export function RentalGovernancePage() {
           <Form.Item name="name" label="名称">
             <Input />
           </Form.Item>
-          <Form.Item name="pricingMultiplier" label="价格系数">
-            <InputNumber min={0} step={0.05} />
+          <Form.Item name="pricingMultiplier" hidden>
+            <InputNumber />
+          </Form.Item>
+          <Alert
+            style={{ marginBottom: 16 }}
+            type="info"
+            showIcon
+            message="日历不再直接设置价格系数"
+            description="逐商品价格、日期类型价格和一次性分时价格都在基础定价中维护；日期范围覆盖只保存一次性规则引用。"
+          />
+          <Form.Item name="pricingOverrideRef" label="一次性价格引用" tooltip="填写基础定价中一次性日期时间价格规则的引用标识；留空表示不引用特殊价格。">
+            <Input allowClear placeholder="例如 NATIONAL-DAY-2026" />
           </Form.Item>
           <Form.Item
             name="overrideReason"
