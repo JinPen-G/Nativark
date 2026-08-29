@@ -298,6 +298,114 @@ void (async () => {
   );
   ok("持久化：断连重连后联系人、经办人与状态历史仍可读");
 
+  // ============ 12. 账号摘要：四态可辨，且不外传登录凭据 ============
+  // 「未开通」与「已停用」必须能分开：前者要给开通入口，后者要给状态变更入口。
+  // 少了这一层，页面只能让人先提交、再从 404 里猜出「原来还没开通」。
+  const noAccount = await ops.getCustomerDetail(tenantA, wsA1, corporate.id, revealer);
+  assert.ok(noAccount.accountSummary, "详情必须带账号摘要，哪怕还没开通");
+  assert.equal(noAccount.accountSummary.provisioned, false, "未开通账号时 provisioned 必须为 false");
+  assert.equal(noAccount.accountSummary.status, undefined, "未开通就没有状态——不得伪装成 active");
+
+  // person 在第 7 段已开通并被停用，正好覆盖「已开通 + 非正常态」。
+  const withAccount = await ops.getCustomerDetail(tenantA, wsA1, person.id, revealer);
+  assert.equal(withAccount.accountSummary.provisioned, true, "已开通账号必须 provisioned=true");
+  assert.equal(withAccount.accountSummary.status, "suspended", "账号状态必须如实带出");
+  assert.ok(withAccount.accountSummary.suspendedAt, "停用时间要带出——界面据此说明「从何时起全部空间无法登录」");
+  assert.match(withAccount.accountSummary.loginPhoneMasked, /\*{4}/u, "登录标识只能给掩码");
+  // 这条与解密权限无关：登录标识是凭据本身，任何权限都不该顺着详情把它带出去。
+  assert.equal(
+    "loginPhone" in withAccount.accountSummary,
+    false,
+    "账号摘要不得包含明文登录标识——那是登录凭据，不是客户资料"
+  );
+  const listedForAccount = (await ops.listCustomers(tenantA, wsA1, revealer)).find((row) => row.id === person.id);
+  assert.equal(
+    listedForAccount.accountSummary,
+    undefined,
+    "列表不查账号：列表并不展示账号状态，逐行查会变成 N+1"
+  );
+  ok("账号摘要：未开通/正常/停用/注销四态可辨，只给掩码登录标识，列表不带");
+
+  // 出参不含明文只是最后一道；库层也不该把凭据列取进进程内存——
+  // 一旦有人日志打印整行、或后来加个 spread，明文就顺着出去了。
+  const repoSource = read("apps/api/src/modules/platform/shared-customer.repository.ts");
+  const accountInclude = repoSource.match(/account:\s*\{[^}]*\}[^}]*\}/u)?.[0] ?? "";
+  assert.match(accountInclude, /select:/u, "详情查账号必须显式 select，不能整行取出");
+  assert.equal(
+    /loginPhone\b(?!Masked)/u.test(accountInclude),
+    false,
+    "账号 select 不得包含明文 loginPhone——它是登录凭据，判断状态用不到"
+  );
+  ok("账号查询：库层显式 select，明文登录标识不进进程内存");
+
+  // ============ 13. 页面契约：企业资料与账号入口 ============
+  // 与第 9、10 段同一理由：服务端守住不等于界面守住。这里断言到**结构**，
+  // 因为「源码里出现过这个词」不能证明请求真的受门禁、按钮真的被禁用。
+  assert.match(
+    page,
+    /const canCorporateManage = hasPermission\("store-rental:corporate:manage"\)/u,
+    "企业资料编辑必须按「企业客户管理」权限门禁"
+  );
+  assert.match(
+    page,
+    /canCorporateView\s*=\s*hasPermission\("store-rental:corporate:view"\)\s*\|\|\s*canCorporateManage/u,
+    "manage 必须视为 view 的超集，否则只有 manage 的账号看不到自己有权改的数据"
+  );
+  // 两个 enabled 条件都要在：个人客户没有这三类资料，无权限时更不该发注定 403 的请求。
+  assert.match(
+    page,
+    /corporateEnabled\s*=\s*Boolean\(selected\)\s*&&\s*isCorporate\s*&&\s*canCorporateView/u,
+    "企业资料查询必须同时受「是企业客户」与「有企业查看权限」两个条件门禁"
+  );
+  for (const query of ["customer-invoice-profiles", "customer-contracts", "customer-credit"]) {
+    assert.match(
+      page,
+      new RegExp(`queryKey: \\["${query}"[\\s\\S]{0,200}?enabled: corporateEnabled`, "u"),
+      `${query} 查询必须挂在 corporateEnabled 上，不能无条件发起`
+    );
+  }
+  // 只有 GET 等于只读：编辑闭环必须真的调用 PUT。
+  for (const [method, label] of [
+    ["saveInvoiceProfile", "开票资料"],
+    ["saveContract", "企业合同"],
+    ["saveCredit", "授信与账期"]
+  ]) {
+    assert.ok(api.includes(method), `customerApi 缺少 ${label} 的保存方法 ${method}`);
+    assert.ok(page.includes(`customerApi.${method}`), `页面未调用 ${method}，${label} 只能看不能改`);
+  }
+  assert.match(api, /saveCredit[\s\S]{0,200}method: "put"/u, "授信保存必须是 PUT，不能只有 GET");
+  ok("页面契约：企业资料受 view/manage 分别门禁，无权限不发请求，三类资料都有保存闭环");
+
+  // ============ 14. 无账号客户：状态入口先禁用，开通后才可管理 ============
+  assert.match(
+    page,
+    /accountActionBlockReason[\s\S]{0,400}尚未开通登录账号/u,
+    "未开通账号时必须给出禁用理由，而不是让人提交后收 404"
+  );
+  assert.match(
+    page,
+    /disabled=\{Boolean\(accountActionBlockReason\)\}/u,
+    "禁用理由必须真的禁用「账号状态 / 注销」按钮"
+  );
+  // 断言必须落到「真的产出了禁用理由」上：只断言 `status === "closed"` 这个条件存在，
+  // 把理由文案换成 undefined 也照样通过——那时按钮又变回可点，闸门等于没有。
+  assert.match(
+    page,
+    /account\?\.status === "closed"[\s\S]{0,200}\?\s*[\s\S]{0,120}"[^"]*注销不可逆[^"]*"/u,
+    "已注销是不可逆终态：条件命中时必须真的产出禁用理由，而不只是判断一下"
+  );
+  assert.match(
+    page,
+    /accountLoaded && !accountProvisioned[\s\S]{0,400}customerApi\.ensureAccount|ensureAccount\.mutate\(\)/u,
+    "未开通时必须给「开通登录账号」入口并调用 ensureAccount"
+  );
+  assert.match(
+    page,
+    /ensureAccount = useMutation\([\s\S]{0,400}refreshAll\(\)/u,
+    "开通成功后必须刷新详情与状态历史，否则界面仍显示「未开通」"
+  );
+  ok("账号入口：未开通先禁用状态变更、给开通入口，开通后刷新详情与历史");
+
   await cleanup();
   await prisma.$disconnect();
   console.log("\nCUSTOMER-01E 管理端与验收专项：全部通过");
