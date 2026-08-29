@@ -4932,6 +4932,40 @@ export interface SharedCustomerProfile {
   updatedAt: string;
   /** 该客户已接入的经营空间关系。列表接口默认带出，便于判断"是否需要接入本空间"。 */
   workspaceLinks?: CustomerWorkspaceLink[];
+  /**
+   * CUSTOMER-01E：详情接口带出的联系人与授权经办人。
+   *
+   * 只在**详情**里带（列表不带）：列表要的是"这个人是谁、在本空间什么状态"，
+   * 把每个客户的联系人与授权都拉出来会让列表查询变成 N+1，且列表页并不展示它们。
+   * 两者刻意分成两个字段而不是一个"关联人"数组——联系人只用于联系，
+   * 经办人被授权代办业务，合并成一个数组会让运营把联系人误当成责任主体。
+   */
+  contacts?: CustomerContactSummary[];
+  authorizedAgents?: CustomerAuthorizedAgentSummary[];
+}
+
+/** CUSTOMER-01E：联系人摘要。号码一律只给脱敏值。 */
+export interface CustomerContactSummary {
+  id: string;
+  kind: "emergency" | "corporate" | "other";
+  name: string;
+  phoneMasked: string;
+  relation?: string;
+  isPrimary: boolean;
+  status: string;
+  /** 该联系人本身若也是本租户客户，指向其主档；仅作关联，不代表责任主体。 */
+  linkedCustomerId?: string;
+}
+
+/** CUSTOMER-01E：授权经办人摘要。带授权范围与有效期，供事后判断当时是否有效。 */
+export interface CustomerAuthorizedAgentSummary {
+  id: string;
+  agentName: string;
+  agentPhoneMasked: string;
+  authorityScope: Record<string, unknown>;
+  validFrom: string;
+  validTo?: string;
+  status: string;
 }
 
 /** SPACE-04 / CUSTOMER-01A：客户在某个经营空间的业务关系。会员等级与状态按空间隔离。 */

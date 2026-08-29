@@ -42,7 +42,12 @@ export class SharedCustomerRepository {
   async findById(tenantId: string, customerId: string, workspaceId?: string): Promise<SharedCustomerProfile | undefined> {
     const row = await this.prisma.customerProfile.findFirst({
       where: { id: customerId, tenantId },
-      include: { workspaceLinks: workspaceId ? { where: { workspaceId } } : false }
+      include: {
+        workspaceLinks: workspaceId ? { where: { workspaceId } } : false,
+        // CUSTOMER-01E：详情才带联系人与经办人；列表不带，避免 N+1 且列表并不展示它们。
+        contacts: { where: { status: "active" }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
+        authorizedAgents: { orderBy: { validFrom: "desc" } }
+      }
     });
     return row ? this.toDomain(row) : undefined;
   }
@@ -166,6 +171,14 @@ export class SharedCustomerRepository {
     createdAt: Date;
     updatedAt: Date;
     workspaceLinks?: Array<Parameters<SharedCustomerRepository["toLinkPublic"]>[0]>;
+    contacts?: Array<{
+      id: string; kind: string; name: string; phoneMasked: string;
+      relation: string | null; isPrimary: boolean; status: string; linkedCustomerId: string | null;
+    }>;
+    authorizedAgents?: Array<{
+      id: string; agentName: string; agentPhoneMasked: string; authorityScope: Prisma.JsonValue;
+      validFrom: Date; validTo: Date | null; status: string;
+    }>;
   }): SharedCustomerProfile {
     return {
       id: row.id,
@@ -187,7 +200,28 @@ export class SharedCustomerRepository {
       mergedIntoCustomerId: row.mergedIntoCustomerId ?? undefined,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
-      workspaceLinks: row.workspaceLinks?.map((link) => this.toLink(link))
+      workspaceLinks: row.workspaceLinks?.map((link) => this.toLink(link)),
+      // CUSTOMER-01E：仅详情查询带这两个关联；列表不带，故为 undefined。
+      // 号码一律只给脱敏值——明文由服务层按解密权限单独决定并留访问审计。
+      contacts: row.contacts?.map((contact) => ({
+        id: contact.id,
+        kind: contact.kind as "emergency" | "corporate" | "other",
+        name: contact.name,
+        phoneMasked: contact.phoneMasked,
+        relation: contact.relation ?? undefined,
+        isPrimary: contact.isPrimary,
+        status: contact.status,
+        linkedCustomerId: contact.linkedCustomerId ?? undefined
+      })),
+      authorizedAgents: row.authorizedAgents?.map((agent) => ({
+        id: agent.id,
+        agentName: agent.agentName,
+        agentPhoneMasked: agent.agentPhoneMasked,
+        authorityScope: (agent.authorityScope ?? {}) as Record<string, unknown>,
+        validFrom: agent.validFrom.toISOString(),
+        validTo: agent.validTo?.toISOString(),
+        status: agent.status
+      }))
     };
   }
 
