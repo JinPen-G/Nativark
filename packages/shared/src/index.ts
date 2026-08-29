@@ -5932,6 +5932,15 @@ export interface RentalQuoteSnapshotV1 {
    * 这里固化命中的费率本体，复算不再依赖计划仍以该版本存在。
    */
   rateSnapshot: RentalPricingRate[];
+  /**
+   * PRICE-03：本次报价命中的**空间级不可变价格版本**引用。
+   *
+   * 与 `rateSnapshot` 并存而不重复：快照回答「按什么价算的」，版本引用回答
+   * 「这份价格是空间的哪一次调价结果」——追责与对账要的是后者。
+   * 内存数据源没有版本事实，因此可空。
+   */
+  priceVersionId?: string;
+  priceVersion?: string;
   ruleVersion: string;
   ruleSnapshot: RentalRuleConfig;
   calendarVersion?: string;
@@ -6615,6 +6624,9 @@ export interface RentalOrder {
   quoteId: string;
   quoteNo: string;
   pricingPlanVersion: string;
+  /** PRICE-03：下单时从报价拷贝的空间级价格版本引用（内存数据源下为空）。 */
+  priceVersionId?: string;
+  priceVersion?: string;
   ruleVersion: string;
   ruleSnapshot: RentalRuleConfig;
   calendarVersion?: string;

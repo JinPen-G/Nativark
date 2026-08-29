@@ -51,6 +51,9 @@ function quoteSnapshotFingerprint(quote: RentalQuoteSnapshotV1) {
     payableAmount: quote.payableAmount,
     receivableAmount: quote.receivableAmount,
     pricingPlanVersion: quote.pricingPlanVersion,
+    // PRICE-03：订单继承报价命中的价格版本，后续调价不改写这张订单的计价依据。
+    priceVersionId: quote.priceVersionId,
+    priceVersion: quote.priceVersion,
     rateSnapshot: quote.rateSnapshot,
     ruleVersion: quote.ruleVersion,
     ruleSnapshot: quote.ruleSnapshot,

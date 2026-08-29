@@ -3057,6 +3057,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         rentalAmount - discountAmount - couponAmount + serviceAmount + fulfillmentAmount + depositAmount
       ),
       pricingPlanVersion: plan.version, ruleVersion: rule.version, ruleSnapshot: structuredClone(rule.config), calendarVersion: calendars.map((calendar) => `${calendar.year}:${calendar.status === "published" ? calendar.version : "draft"}`).join("|"),
+      // PRICE-03：记下命中的空间级价格版本。内存数据源没有版本事实，此时留空——
+      // 编一个版本号会让「按哪一版算的」这条追溯线索变成假的。
+      priceVersionId: "versionId" in spaceVersion ? spaceVersion.versionId : undefined,
+      priceVersion: "version" in spaceVersion ? spaceVersion.version : undefined,
       appliedDiscountPlanIds: discountPlans.map((item) => item.id), customerCouponId: customerCoupon?.id,
       // CORE-EXT-02D：固化本次报价生成时该空间已启用能力的版本与配置。
       // 升级或改配置后，这张报价及由它下单的在途订单仍按此快照校验与履约。
