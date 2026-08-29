@@ -82,25 +82,49 @@ ALTER TABLE `rental_orders` ADD COLUMN `priceVersion` VARCHAR(191) NULL;
 -- 会造出报价取不到、但版本里存在的幽灵价格。
 --
 -- 幂等：已存在 sequence=1 的空间跳过，重复执行不再撞 (workspaceId, sequence) 唯一键。
+-- 同键去重：同一「商品 × 计价单位」可能被多个启用中计划各配一次——那不是非法数据，
+-- 而是正常的排期调价（旧价无结束时间、新价从某日起生效；保存时只拒绝**同刻**重叠）。
+-- 直接把所有计划的费率拼进一个数组，会让版本里同一键出现两条，报价 `find()` 取哪条
+-- 取决于聚合顺序，等于让钱由数组顺序决定。这里按「生效时间较晚者胜、同时以计划编码
+-- 兜稳定序」取唯一一条。
+-- effectiveFrom 仍取该空间**全部**启用计划里最早的生效时刻（不是获胜行的），
+-- 否则起租时间早于该时刻的报价会取不到任何版本。
 INSERT INTO `rental_price_versions`
   (`id`, `tenantId`, `workspaceId`, `sequence`, `effectiveFrom`, `rates`, `changeReason`, `createdBy`)
 SELECT
   UUID(),
-  f.`tenantId`,
-  f.`workspaceId`,
+  d.`tenantId`,
+  d.`workspaceId`,
   1,
-  MIN(f.`effectiveFrom`),
-  JSON_ARRAYAGG(f.`rate`),
+  MIN(d.`spaceFrom`),
+  JSON_ARRAYAGG(d.`rate`),
   'PRICE-03 存量版本回填',
   NULL
 FROM (
-  SELECT p.`tenantId`, p.`workspaceId`, p.`effectiveFrom`, jt.`rate`
-  FROM `rental_pricing_plans` p
-  JOIN JSON_TABLE(p.`rates`, '$[*]' COLUMNS (`rate` JSON PATH '$')) jt
-  WHERE p.`status` = 'enabled'
-    AND NOT EXISTS (
-      SELECT 1 FROM `rental_price_versions` v
-      WHERE v.`tenantId` = p.`tenantId` AND v.`workspaceId` = p.`workspaceId` AND v.`sequence` = 1
-    )
-) f
-GROUP BY f.`tenantId`, f.`workspaceId`;
+  SELECT
+    f.*,
+    MIN(f.`planEffectiveFrom`) OVER (PARTITION BY f.`tenantId`, f.`workspaceId`) AS `spaceFrom`,
+    ROW_NUMBER() OVER (
+      PARTITION BY f.`tenantId`, f.`workspaceId`, f.`itemGroupId`, f.`unit`
+      ORDER BY f.`planEffectiveFrom` DESC, f.`planCode` ASC
+    ) AS `rn`
+  FROM (
+    SELECT
+      p.`tenantId`, p.`workspaceId`,
+      p.`effectiveFrom` AS `planEffectiveFrom`, p.`code` AS `planCode`,
+      jt.`rate`, jt.`itemGroupId`, jt.`unit`
+    FROM `rental_pricing_plans` p
+    JOIN JSON_TABLE(p.`rates`, '$[*]' COLUMNS (
+      `rate` JSON PATH '$',
+      `itemGroupId` VARCHAR(191) PATH '$.itemGroupId',
+      `unit` VARCHAR(64) PATH '$.unit'
+    )) jt
+    WHERE p.`status` = 'enabled'
+      AND NOT EXISTS (
+        SELECT 1 FROM `rental_price_versions` v
+        WHERE v.`tenantId` = p.`tenantId` AND v.`workspaceId` = p.`workspaceId` AND v.`sequence` = 1
+      )
+  ) f
+) d
+WHERE d.`rn` = 1
+GROUP BY d.`tenantId`, d.`workspaceId`;

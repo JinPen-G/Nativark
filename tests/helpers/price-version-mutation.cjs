@@ -5,10 +5,19 @@ const { execFileSync } = require("node:child_process");
 const ROOT = path.resolve(__dirname, "..", "..");
 const TEST = path.join(ROOT, "tests/rental-price-version.test.cjs");
 const SERVICE = "apps/api/src/modules/rental-core/rental-business.service.ts";
+const MIGRATION = "apps/api/prisma/migrations/20260829000200_price_03_price_version_model/migration.sql";
 const FACT = "apps/api/src/modules/rental-core/rental-business-fact.repository.ts";
 
 /** 每个变异都是本轮真实修掉的缺陷，用来证明新用例不是「跟着实现写的绿灯」。 */
 const mutations = [
+  [MIGRATION,
+   "  WHERE p.`status` = 'enabled'",
+   "  WHERE p.`status` <> ''",
+   "回填把草稿与停用计划也算进有效价格"],
+  [MIGRATION,
+   "WHERE d.`rn` = 1",
+   "WHERE d.`rn` >= 1",
+   "回填不做同键去重（同一商品×单位留两条价格）"],
   [SERVICE,
    `        if ((latest?.id ?? null) !== (adjustment.baseVersionId ?? null)) {`,
    `        if (false) {`,

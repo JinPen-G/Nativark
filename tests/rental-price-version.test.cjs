@@ -84,6 +84,9 @@ async function cleanup(workspaceId) {
   await prisma.rentalPriceAdjustmentPlan.deleteMany({ where: { workspaceId, code: { startsWith: "P03-" } } });
   await prisma.rentalPriceVersion.deleteMany({ where: { workspaceId, changeReason: { startsWith: "P03-" } } });
   await prisma.rentalPricingPlan.deleteMany({ where: { workspaceId, code: { startsWith: "P03-" } } });
+  // 第 5 组的回填夹具租户。用例中途失败时它会留下来，且它的计划会被下一轮回填算进去，
+  // 因此每轮开头都按前缀清一次（级联带走空间、计划与版本）。
+  await prisma.tenant.deleteMany({ where: { id: { startsWith: "t_p03_" } } });
 }
 
 void (async () => {
@@ -234,6 +237,44 @@ void (async () => {
     "失败的到期执行不得写出新版本"
   );
   ok("定时调价：基础版本被推进时到期执行失败并留原因，不静默覆盖中间调价");
+
+  // ============ 5. 迁移回填 SQL：合法 JSON、只取启用中、同键去重、可重复执行 ============
+  // 直接跑迁移文件里的那条 INSERT，而不是在用例里另写一份，避免脚本与迁移漂移。
+  const tmpTenant = `t_${TAG.toLowerCase().replace(/-/gu, "_")}`;
+  const tmpWs = `ws_${tmpTenant}`;
+  await prisma.tenant.create({ data: { id: tmpTenant, code: tmpTenant, name: "PRICE-03 回填夹具" } });
+  await prisma.businessWorkspace.create({
+    data: { id: tmpWs, tenantId: tmpTenant, code: tmpWs, name: "回填夹具空间", categoryCode: "CAMPING", isDefault: true, defaultMarker: "default" }
+  });
+  const planRow = (code, status, effectiveFrom, amount) => ({
+    tenantId: tmpTenant, workspaceId: tmpWs, categoryCode: "CAMPING", code, name: code,
+    status, version: "1.0", effectiveFrom: new Date(effectiveFrom),
+    rates: [{ id: `r_${code}`, itemGroupId: "g1", itemGroupCode: "G1", itemGroupName: "G1", unit: "calendar_day", baseAmount: amount, weekendMultiplier: 1, holidayMultiplier: 1, depositAmount: 0, minimumUnits: 1 }]
+  });
+  // 同一「商品 × 计价单位」被两个启用计划各配一次：这是正常排期调价，不是脏数据。
+  await prisma.rentalPricingPlan.create({ data: planRow(`${TAG}-OLD`, "enabled", "2026-01-01T00:00:00.000Z", 100) });
+  await prisma.rentalPricingPlan.create({ data: planRow(`${TAG}-NEW`, "enabled", "2026-06-01T00:00:00.000Z", 200) });
+  await prisma.rentalPricingPlan.create({ data: planRow(`${TAG}-DRAFT`, "draft", "2026-07-01T00:00:00.000Z", 999) });
+
+  const migrationSql = fs.readFileSync(
+    path.join(ROOT, "apps/api/prisma/migrations/20260829000200_price_03_price_version_model/migration.sql"), "utf8"
+  );
+  const backfill = migrationSql.slice(migrationSql.lastIndexOf("INSERT INTO `rental_price_versions`")).replace(/;\s*$/u, "").trim();
+  const inserted = await prisma.$executeRawUnsafe(backfill);
+  const repeated = await prisma.$executeRawUnsafe(backfill);
+  assert.equal(repeated, 0, "回填必须幂等：重复执行不得再插入（也就不会撞唯一键）");
+  const backfilled = await prisma.rentalPriceVersion.findMany({ where: { tenantId: tmpTenant } });
+  assert.equal(backfilled.length, 1, `每个空间只应回填一条 v1，实际 ${backfilled.length}（本次插入 ${inserted}）`);
+  assert.equal(backfilled[0].sequence, 1);
+  assert.ok(Array.isArray(backfilled[0].rates), "回填出的 rates 必须是合法 JSON 数组——迁移原先正是在这里产出非法 JSON");
+  assert.equal(backfilled[0].rates.length, 1, "同一「商品 × 计价单位」在版本里只能有一条，否则报价取哪条由数组顺序决定");
+  assert.equal(backfilled[0].rates[0].baseAmount, 200, "同键去重必须取生效时间较晚的那条价格");
+  assert.equal(
+    backfilled[0].effectiveFrom.toISOString(), "2026-01-01T00:00:00.000Z",
+    "版本生效时刻取全部启用计划里最早的，否则更早起租的报价取不到任何版本"
+  );
+  await prisma.tenant.delete({ where: { id: tmpTenant } });
+  ok("迁移回填：产出合法 JSON、只取启用中计划、同键取较晚生效者、可重复执行");
 
   await cleanup(workspaceId);
   await prisma.rentalQuote.deleteMany({ where: { id: quote.id } });
