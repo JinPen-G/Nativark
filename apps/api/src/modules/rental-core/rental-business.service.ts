@@ -633,7 +633,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
    */
   private async resolvePlanRates(tenantId: string, plan: RentalPricingPlanV1, rentalStartAt: string): Promise<RentalPricingRate[]> {
     const prisma = this.prisma;
-    if (!prisma) throw new BadRequestException("价格版本仅在 MySQL 数据源下可用");
+    if (!prisma) return plan.rates;
     await this.ensurePriceVersion(tenantId, plan);
     const version = await prisma.rentalPriceVersion.findFirst({
       where: { planId: plan.id, effectiveFrom: { lte: new Date(rentalStartAt) } },
