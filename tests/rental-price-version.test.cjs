@@ -116,7 +116,7 @@ void (async () => {
   // 用 hour 单位避免与夹具里 calendar_day 的价格在「商品 × 单位」上重叠。
   const saved = await business.savePricingPlan(tenantId, ctx, {
     code: `${TAG}-A`, name: "PRICE-03 专项计划", status: "enabled",
-    effectiveFrom: new Date(Date.now() - 86_400_000).toISOString(),
+    effectiveFrom: new Date(Date.now() + 86_400_000).toISOString(),
     changeReason: `${TAG} 首次保存`,
     rates: [rate(group.id, "hour", 30)]
   }, "专项用例");
@@ -165,16 +165,23 @@ void (async () => {
   // ============ 3. 事务内任一步失败时，计划现值不得已经落库 ============
   // 注入故障：只让**事务内**那次计划行写入失败。旧实现在进事务前先无条件写过一次，
   // 那一次不会被回滚，于是留下「已变价但没有不可变历史」——正是这条断言要抓的。
+  // 已启用价格现在禁止普通编辑，因此先建一个草稿，再测试「草稿发布」的原子路径。
+  const draft = await business.savePricingPlan(tenantId, ctx, {
+    code: `${TAG}-D`, name: "PRICE-03 原子草稿", status: "draft",
+    effectiveFrom: new Date(Date.now() + 2 * 86_400_000).toISOString(),
+    changeReason: `${TAG} 草稿`,
+    rates: [rate(group.id, "hour", 70)]
+  }, "专项用例");
   const realUpsert = businessConfig.upsertPricingPlan.bind(businessConfig);
   businessConfig.upsertPricingPlan = async (plan, tx) => {
     if (tx) throw new Error(`${TAG} 注入故障：事务内写计划行失败`);
     return realUpsert(plan, tx);
   };
-  const planBefore = await prisma.rentalPricingPlan.findFirst({ where: { workspaceId, code: `${TAG}-A` } });
+  const planBefore = await prisma.rentalPricingPlan.findFirst({ where: { workspaceId, code: `${TAG}-D` } });
   await assert.rejects(
     business.savePricingPlan(tenantId, ctx, {
-      id: saved.id, code: `${TAG}-A`, name: "PRICE-03 专项计划", status: "enabled",
-      effectiveFrom: saved.effectiveFrom, changeReason: `${TAG} 二次保存应失败`,
+      id: draft.id, code: `${TAG}-D`, name: "PRICE-03 原子草稿", status: "enabled",
+      effectiveFrom: draft.effectiveFrom, changeReason: `${TAG} 草稿发布失败`,
       rates: [rate(group.id, "hour", 99)]
     }, "专项用例"),
     (error) => {
@@ -184,7 +191,7 @@ void (async () => {
     "事务内写入失败时保存必须失败"
   );
   businessConfig.upsertPricingPlan = realUpsert;
-  const planAfter = await prisma.rentalPricingPlan.findFirst({ where: { workspaceId, code: `${TAG}-A` } });
+  const planAfter = await prisma.rentalPricingPlan.findFirst({ where: { workspaceId, code: `${TAG}-D` } });
   assert.deepEqual(
     planAfter.rates, planBefore.rates,
     "版本事务失败时计划现值必须一并回滚——否则就是「已变价但没有不可变历史」"
@@ -199,9 +206,10 @@ void (async () => {
   // ============ 4. 定时调价到期执行前必须校验基础版本未被推进 ============
   // 场景：确认时基于 vN 锁定最终价，到期前别人又调了价（vN+1）。若直接采用锁定的
   // finalRates，vN+1 会被静默还原——改价的人事后才发现，且没有任何失败记录。
+  const adjustmentUnit = (v1.rates.find((item) => item.itemGroupId === group.id) ?? v1.rates[0]).unit;
   const adjustment = await business.createPriceAdjustment(tenantId, ctx, saved.id, {
     code: `${TAG}-ADJ`,
-    changes: [{ itemGroupId: group.id, unit: "hour", op: "percent", value: 10 }],
+    changes: [{ itemGroupId: (v1.rates.find((item) => item.itemGroupId === group.id) ?? v1.rates[0]).itemGroupId, unit: adjustmentUnit, op: "percent", value: 10 }],
     scheduledAt: new Date(Date.now() + 3600_000).toISOString(),
     changeReason: `${TAG} 定时调价`
   }, "专项用例");
@@ -216,7 +224,7 @@ void (async () => {
   assert.ok(otherUnit, "夹具需要至少两个已启用计价单位");
   await business.savePricingPlan(tenantId, ctx, {
     code: `${TAG}-B`, name: "PRICE-03 中途调价", status: "enabled",
-    effectiveFrom: new Date(Date.now() - 86_400_000).toISOString(),
+    effectiveFrom: new Date(Date.now() + 86_400_000).toISOString(),
     changeReason: `${TAG} 中途推进版本`,
     rates: [rate(group.id, otherUnit, 88)]
   }, "专项用例");

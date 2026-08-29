@@ -59,14 +59,14 @@ const businessStatusOptions: Array<{ value: RentalCalendarBusinessStatus; label:
 
 type FieldKey = "dayType" | "name" | "pricingMultiplier" | "businessStatus" | "hours";
 
-/** 需求 4.5.9：周期性分时价格属 PRICE-03、月历分时摘要属 PRICE-02B——这里只留禁用位说明。 */
+/** 需求 4.5.9：周期性分时价格由 PRICE-03 价格计划维护，月历只消费其只读摘要。 */
 function PricePlaceholder() {
   return (
     <Alert
       type="info"
       showIcon
       message="一次性特殊价格由价格模块提供"
-      description="PRICE-03 的价格版本尚未提供可引用的特殊价格值；当前范围覆盖只支持日历字段（类型/状态/时段/系数）。届时这里会出现价格覆盖版本的选择入口。"
+      description="价格覆盖由价格计划维护；当前范围覆盖只支持日历字段（类型/状态/时段/系数）。请在基础定价页面创建调价计划，以便预览、确认并形成不可变价格版本。"
     />
   );
 }

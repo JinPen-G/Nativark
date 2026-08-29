@@ -110,9 +110,19 @@ export class RentalBusinessController {
   @Get("pricing-plans") pricingPlans(@Req() req: AuthenticatedRequest) { return this.business.listPricingPlans(req.user.tenantId, this.context(req.user.tenantId)); }
   @Post("pricing-plans") async createPricingPlan(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalPricingPlanDto) { return this.committed(req.user.tenantId, await this.business.savePricingPlan(req.user.tenantId, this.context(req.user.tenantId), body)); }
   @Put("pricing-plans/:id") async updatePricingPlan(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalPricingPlanDto) { return this.committed(req.user.tenantId, await this.business.savePricingPlan(req.user.tenantId, this.context(req.user.tenantId), { ...body, id })); }
-  /** PRICE-03：计划的价格版本历史（不可变，只追加）。 */
-  @Get("pricing-plans/:id/versions") priceVersions(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.business.listPriceVersions(req.user.tenantId, this.context(req.user.tenantId), id); }
-  /** PRICE-03：调价计划列表。 */
+  /** PRICE-03：空间级不可变价格版本历史。版本粒度是当前会话经营空间，不依赖 planId。 */
+  @Get("pricing-versions") priceVersions(@Req() req: AuthenticatedRequest, @Query("page") page?: string, @Query("pageSize") pageSize?: string) {
+    return this.business.listSpacePriceVersions(req.user.tenantId, this.context(req.user.tenantId), Number(page) || 1, Number(pageSize) || 20);
+  }
+  /** PRICE-03：空间级价格版本完整回放。 */
+  @Get("pricing-versions/:sequence") priceVersion(@Req() req: AuthenticatedRequest, @Param("sequence") sequence: string) {
+    return this.business.getSpacePriceVersion(req.user.tenantId, this.context(req.user.tenantId), Number(sequence));
+  }
+  /** PRICE-03 兼容入口：planId 只作当前空间归属校验，实际返回仍是空间版本。 */
+  @Get("pricing-plans/:id/versions") legacyPriceVersions(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Query("page") page?: string, @Query("pageSize") pageSize?: string) {
+    return this.business.listPriceVersions(req.user.tenantId, this.context(req.user.tenantId), id, Number(page) || 1, Number(pageSize) || 20);
+  }
+  /** PRICE-03：调价计划列表，planId 仍代表发起调整的编辑计划。 */
   @Get("pricing-plans/:id/adjustments") listPriceAdjustments(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.business.listPriceAdjustments(req.user.tenantId, this.context(req.user.tenantId), id); }
   /** PRICE-03：执行到期的待生效调价（定时执行与立即执行走同一版本机制）。 */
   @Post("pricing-plans/adjustments/run-due") runDuePriceAdjustments(@Req() req: AuthenticatedRequest) { return this.committed(req.user.tenantId, this.business.runDuePriceAdjustments(req.user.tenantId, this.context(req.user.tenantId))); }
