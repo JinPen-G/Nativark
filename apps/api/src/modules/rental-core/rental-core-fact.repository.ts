@@ -207,6 +207,13 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       capabilitySnapshot: (order.capabilitySnapshot ?? null) as unknown as Prisma.InputJsonValue,
       capabilityDecisions: (order.capabilityDecisions ?? null) as unknown as Prisma.InputJsonValue,
       capabilityExceptions: (order.capabilityExceptions ?? null) as unknown as Prisma.InputJsonValue,
+      // CUSTOMER-01C：订单四类主体。id 列可反查，快照固化下单当时的名称与授权范围。
+      // 全部可空：存量订单与未指定主体的订单保持原语义（读取侧回落到 customerId）。
+      contractSubjectCustomerId: order.contractSubjectCustomerId ?? null,
+      payerSubjectCustomerId: order.payerSubjectCustomerId ?? null,
+      userSubjectCustomerId: order.userSubjectCustomerId ?? null,
+      agentId: order.agentId ?? null,
+      subjectSnapshot: (order.subjectSnapshot ?? null) as unknown as Prisma.InputJsonValue,
       chargeLines: order.chargeLines as unknown as Prisma.InputJsonValue,
       rentalAmount: new Prisma.Decimal(order.rentalAmount),
       discountAmount: new Prisma.Decimal(order.discountAmount),
@@ -656,6 +663,12 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       capabilitySnapshot: (row.capabilitySnapshot ?? undefined) as unknown as RentalOrder["capabilitySnapshot"],
       capabilityDecisions: (row.capabilityDecisions ?? undefined) as unknown as RentalOrder["capabilityDecisions"],
       capabilityExceptions: (row.capabilityExceptions ?? undefined) as unknown as RentalOrder["capabilityExceptions"],
+      // CUSTOMER-01C：主体 id 与快照。存量订单为空，读取侧据此回落到 customerId。
+      contractSubjectCustomerId: row.contractSubjectCustomerId ?? undefined,
+      payerSubjectCustomerId: row.payerSubjectCustomerId ?? undefined,
+      userSubjectCustomerId: row.userSubjectCustomerId ?? undefined,
+      agentId: row.agentId ?? undefined,
+      subjectSnapshot: (row.subjectSnapshot ?? undefined) as unknown as RentalOrder["subjectSnapshot"],
       // Review P1-10：NULL 快照明确解释为 legacy empty，不回退到当前已启用能力。
       capabilityPolicy: row.capabilitySnapshot ? "snapshot" : "legacy_empty",
       chargeLines: (row.chargeLines ?? []) as unknown as RentalQuoteChargeLine[],

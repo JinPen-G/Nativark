@@ -10,6 +10,11 @@ import {
   ChangeCustomerAccountStatusDto,
   ChangeCustomerMembershipStatusDto
 } from "./customer-operations-request.dto";
+import {
+  SaveCustomerContractDto,
+  SaveCustomerCreditDto,
+  SaveCustomerInvoiceProfileDto
+} from "./customer-corporate-request.dto";
 import { CreateBusinessWorkspaceDto, LinkCustomerToWorkspaceDto, SaveSharedCustomerDto, SaveWorkspaceMemberDto, UpdateBusinessWorkspaceDto } from "./workspace-request.dto";
 import {
   GeneratePlatformNumberDto,
@@ -191,6 +196,58 @@ export class PlatformController {
   @Get("workspace-customers/:customerId/transactability")
   customerTransactability(@Param("customerId") customerId: string, @Req() req: RequestWithUser) {
     return this.platformService.getCustomerTransactability(customerId, req.user);
+  }
+
+  /**
+   * CUSTOMER-01C：企业开票资料、合同、授信账期。
+   *
+   * 三者各自成表而不是平铺进企业资料：一家企业可以同时持有多份开票资料与多份有效合同，
+   * 而订单引用的是「下单当时生效的那一份」。
+   */
+  @Get("customers/:customerId/invoice-profiles")
+  customerInvoiceProfiles(@Param("customerId") customerId: string, @Req() req: RequestWithUser) {
+    return this.platformService.listCustomerInvoiceProfiles(customerId, req.user);
+  }
+
+  @Put("customers/:customerId/invoice-profiles")
+  saveCustomerInvoiceProfile(
+    @Param("customerId") customerId: string,
+    @Body() body: SaveCustomerInvoiceProfileDto,
+    @Req() req: RequestWithUser
+  ) {
+    return this.platformService.saveCustomerInvoiceProfile(customerId, body, req.user);
+  }
+
+  @Get("customers/:customerId/contracts")
+  customerContracts(@Param("customerId") customerId: string, @Req() req: RequestWithUser) {
+    return this.platformService.listCustomerContracts(customerId, req.user);
+  }
+
+  @Put("customers/:customerId/contracts")
+  saveCustomerContract(
+    @Param("customerId") customerId: string,
+    @Body() body: SaveCustomerContractDto,
+    @Req() req: RequestWithUser
+  ) {
+    return this.platformService.saveCustomerContract(customerId, body, req.user);
+  }
+
+  @Get("customers/:customerId/credit")
+  customerCredit(@Param("customerId") customerId: string, @Req() req: RequestWithUser) {
+    return this.platformService.getCustomerCredit(customerId, req.user);
+  }
+
+  /**
+   * 授信与账期**只存事实**：本阶段不接进报价与订单确认链路。
+   * 额度占用与释放需要与订单、支付、退款联动，属后续任务。
+   */
+  @Put("customers/:customerId/credit")
+  saveCustomerCredit(
+    @Param("customerId") customerId: string,
+    @Body() body: SaveCustomerCreditDto,
+    @Req() req: RequestWithUser
+  ) {
+    return this.platformService.saveCustomerCredit(customerId, body, req.user);
   }
 
   @Post("workspaces")

@@ -168,6 +168,13 @@ export function requiredPermissions(method: string, path: string) {
     if (/\/sensitive-access$/u.test(path)) {
       return ["store-rental:customer:reveal-sensitive"];
     }
+    // CUSTOMER-01C：企业开票、合同、授信账期属**企业客户**权限，与个人会员权限分开。
+    // 同样必须放在通用分支之前，否则「会员管理」就能改企业授信与账期。
+    if (/\/(invoice-profiles|contracts|credit)$/u.test(path)) {
+      return method === "GET"
+        ? ["store-rental:corporate:view", "store-rental:corporate:manage"]
+        : ["store-rental:corporate:manage"];
+    }
     return method === "GET"
       ? ["store-rental:member:view", "store-rental:member:manage"]
       : ["store-rental:member:manage"];

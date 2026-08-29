@@ -30,6 +30,7 @@
     "test:capability-equipment": "npm run build -w @store-rental/shared && node tests/capability-equipment.test.cjs",
     "test:customer-master": "npm run build -w @store-rental/shared && node tests/customer-master-data.test.cjs",
     "test:customer-operations": "npm run build -w @store-rental/shared && node tests/customer-operations.test.cjs",
+    "test:customer-corporate": "npm run build -w @store-rental/shared && node tests/customer-corporate.test.cjs",
     "test:capability-hook": "npm run build -w @store-rental/shared && node tests/capability-hook-runtime.test.cjs",
     "test:extension-consistency": "npm run build -w @store-rental/shared && node tests/extension-consistency.test.cjs",
     "test:camera-compatibility": "npm run build -w @store-rental/shared && node tests/camera-compatibility.test.cjs",

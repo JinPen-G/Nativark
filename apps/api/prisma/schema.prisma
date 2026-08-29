@@ -334,6 +334,9 @@ model Tenant {
   customerQualificationRefs CustomerQualificationRef[]
   customerMergeMappings     CustomerMergeMapping[]
   customerSensitiveAccess   CustomerSensitiveAccessAudit[]
+  customerInvoiceProfiles   CustomerCorporateInvoiceProfile[]
+  customerContracts         CustomerCorporateContract[]
+  customerCredits           CustomerCorporateCredit[]
   rentalCoreStateSnapshot   RentalCoreStateSnapshot[]
   rentalBusinessStateSnapshot RentalBusinessStateSnapshot[]
   businessWorkspaces        BusinessWorkspace[]
@@ -1021,6 +1024,9 @@ model CustomerProfile {
   mergeAsSource         CustomerMergeMapping[] @relation("CustomerMergeSource")
   mergeAsTarget         CustomerMergeMapping[] @relation("CustomerMergeTarget")
   sensitiveAccess       CustomerSensitiveAccessAudit[]
+  invoiceProfiles       CustomerCorporateInvoiceProfile[]
+  contracts             CustomerCorporateContract[]
+  credit                CustomerCorporateCredit?
 
   /// 供复合外键引用：让「权益/关系必须与客户同租户」可以在库层表达。
   /// 与 BusinessWorkspace 的 (tenantId, id) 同一手法。
@@ -1130,6 +1136,99 @@ model CustomerCorporateProfile {
   @@unique([tenantId, customerId], map: "customer_corporate_profiles_tenant_customer_key")
   @@unique([tenantId, unifiedSocialCreditCode], map: "customer_corporate_profiles_tenant_uscc_key")
   @@map("customer_corporate_profiles")
+}
+
+/// CUSTOMER-01C：企业开票资料（需求 4.8.4）。
+///
+/// 与企业资料分表而不是平铺：一家企业可能有多份开票资料（不同分支机构、专票/普票），
+/// 且开票资料会随税务变更而版本化，平铺进企业资料就只能存最后一份、覆盖掉历史。
+/// `isDefault` 标记默认使用的一份，同企业至多一份默认。
+model CustomerCorporateInvoiceProfile {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId  String
+  customer    CustomerProfile @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
+  /// vat_special（增值税专用发票）/ vat_normal（普通发票）
+  invoiceType String
+  /// 开票名称。通常等于法定名称，但允许分支机构使用自己的名称。
+  title       String
+  taxNo       String
+  registeredAddress String?
+  bankName    String?
+  bankAccountMasked String?
+  contactPhoneMasked String?
+  receiveEmail String?
+  /// 同企业至多一份默认开票资料，用 defaultMarker 做「部分唯一」的替代方案：
+  /// 默认行写 'default'、非默认写自身 id（MySQL 没有部分索引）。
+  isDefault   Boolean  @default(false)
+  defaultMarker String
+  status      String   @default("active")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([tenantId, customerId, defaultMarker], map: "customer_invoice_profiles_default_key")
+  @@index([tenantId, customerId], map: "customer_invoice_profiles_tenant_customer_idx")
+  @@map("customer_corporate_invoice_profiles")
+}
+
+/// CUSTOMER-01C：企业合同（需求 4.8.4）。
+///
+/// 合同是独立事实：一家企业可以同时持有多份有效合同（不同项目、不同期限），
+/// 订单引用的是「下单当时生效的那一份」，因此合同必须能各自留存起止与状态。
+model CustomerCorporateContract {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId  String
+  customer    CustomerProfile @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
+  contractNo  String
+  name        String
+  signedAt    DateTime?
+  effectiveFrom DateTime
+  effectiveTo DateTime?
+  /// draft / active / expired / terminated
+  status      String   @default("draft")
+  /// 合同文件引用。原件不入库。
+  fileRef     String?
+  terminatedReason String? @db.Text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([tenantId, contractNo], map: "customer_contracts_tenant_no_key")
+  @@index([tenantId, customerId, status], map: "customer_contracts_customer_status_idx")
+  @@map("customer_corporate_contracts")
+}
+
+/// CUSTOMER-01C：企业授信与账期（需求 4.8.4）。
+///
+/// **只存事实，不参与定价**：本阶段刻意不把授信额度接进报价或订单确认链路
+/// （任务明确「不重写订单状态机和定价链」）。额度占用与释放需要与订单、支付、
+/// 退款联动，属于后续任务；这里先把额度、账期与状态存下来并可读，
+/// 避免管理端无处维护，也避免在没有联动设计的情况下先改动金额链路。
+model CustomerCorporateCredit {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId  String
+  customer    CustomerProfile @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
+  /// 授信额度。Decimal 而不是浮点：金额一律不用 float。
+  creditLimit Decimal  @db.Decimal(12, 2)
+  /// 账期天数（月结 30 / 45 …）。
+  settlementTermDays Int @default(0)
+  /// monthly / semi_monthly / per_order
+  billingCycle String  @default("monthly")
+  /// active / suspended / revoked
+  status      String   @default("active")
+  approvedBy  String?
+  approvedAt  DateTime?
+  reason      String?  @db.Text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  /// 一家企业一条当前授信记录；额度调整走更新 + 状态历史，不新建行。
+  @@unique([tenantId, customerId], map: "customer_credits_tenant_customer_key")
+  @@map("customer_corporate_credits")
 }
 
 /// CUSTOMER-01A：客户联系人（需求 4.8.4）。
@@ -2871,6 +2970,19 @@ model RentalOrder {
   /// （原因、确认人、权限、时间、被确认的判断 id、版本与当时器材组合）。
   /// 审计里不能只剩 confirmed: true，否则配货与后续履约无从还原风险已被裁决。
   capabilityExceptions  Json?
+  /// CUSTOMER-01C：订单主体（需求 4.8.4「订单必须明确签约主体、付款主体、使用人或经办人，
+  /// 不能只保存一个联系人代替企业责任主体」）。
+  ///
+  /// 四个角色各存一个可索引的 id 列 + 一份 `subjectSnapshot` 快照：
+  ///   * id 列用于「这个客户作为签约主体/使用人的订单」这类按角色反查；
+  ///   * 快照保存下单当时的名称、脱敏证件与授权范围——主体后续改名或授权到期
+  ///     都不得篡改历史订单（与 fulfillmentLocationSnapshot 同一手法）。
+  /// 全部可空：存量订单没有主体拆分，读取侧回落到 customerId 作为三个主体。
+  contractSubjectCustomerId String?
+  payerSubjectCustomerId    String?
+  userSubjectCustomerId     String?
+  agentId                   String?
+  subjectSnapshot           Json?
   chargeLines           Json
   rentalAmount          Decimal                   @db.Decimal(12, 2)
   discountAmount        Decimal                   @db.Decimal(12, 2)
@@ -2906,6 +3018,11 @@ model RentalOrder {
   @@index([tenantId, status, startAt])
   @@index([tenantId, customerType, customerId])
   @@index([tenantId, quoteId])
+  /// CUSTOMER-01C：按主体角色反查订单。合并与注销（01D）都需要「这个客户
+  /// 作为签约主体/付款主体/使用人有哪些订单」，没有索引就只能全表扫。
+  @@index([tenantId, contractSubjectCustomerId], map: "rental_orders_contract_subject_idx")
+  @@index([tenantId, payerSubjectCustomerId], map: "rental_orders_payer_subject_idx")
+  @@index([tenantId, userSubjectCustomerId], map: "rental_orders_user_subject_idx")
   @@map("rental_orders")
 }
 

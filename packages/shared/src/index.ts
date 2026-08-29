@@ -4670,6 +4670,150 @@ export interface CustomerAccount {
 }
 
 /**
+ * CUSTOMER-01C：订单主体角色（需求 4.8.4）。
+ *
+ * 四个角色分开保存，不允许「只存一个联系人代替企业责任主体」：
+ *   * `contract` 签约主体——合同与法律责任归属；
+ *   * `payer`    付款主体——账单与收款归属，可与签约主体不同（如总部付款、分公司签约）；
+ *   * `user`     使用人——实际取还与使用设备的人；
+ *   * `agent`    经办人——受授权代办的人，本身不是责任主体。
+ */
+export type CustomerOrderSubjectRole = "contract" | "payer" | "user" | "agent";
+
+/**
+ * 下单当时的主体快照。名称与脱敏证件都固化——主体后续改名或授权到期
+ * 都不得篡改历史订单。
+ */
+export interface CustomerOrderSubjectSnapshot {
+  role: CustomerOrderSubjectRole;
+  customerId?: string;
+  customerType?: "personal" | "corporate";
+  name: string;
+  phoneMasked?: string;
+  corporateName?: string;
+  unifiedSocialCreditCodeMasked?: string;
+  /** 经办人专用：授权范围与有效期在下单当时的取值。 */
+  agentId?: string;
+  authorityScope?: Record<string, boolean>;
+  authorityValidFrom?: string;
+  authorityValidTo?: string;
+  /** 引用的企业合同与开票资料（下单当时生效的那一份）。 */
+  contractId?: string;
+  contractNo?: string;
+  invoiceProfileId?: string;
+}
+
+/** 下单时提交的主体选择。省略时回落为「三个主体都是下单客户本人」。 */
+export interface CustomerOrderSubjectInput {
+  contractSubjectCustomerId?: string;
+  payerSubjectCustomerId?: string;
+  userSubjectCustomerId?: string;
+  agentId?: string;
+  contractId?: string;
+  invoiceProfileId?: string;
+}
+
+/** 校验并解析后的主体集合，由订单侧原样固化。 */
+export interface CustomerOrderSubjects {
+  contractSubjectCustomerId: string;
+  payerSubjectCustomerId: string;
+  userSubjectCustomerId: string;
+  agentId?: string;
+  snapshot: CustomerOrderSubjectSnapshot[];
+}
+
+/** CUSTOMER-01C：企业开票资料。 */
+export interface CustomerCorporateInvoiceProfile {
+  id: string;
+  tenantId: string;
+  customerId: string;
+  invoiceType: "vat_special" | "vat_normal";
+  title: string;
+  taxNo: string;
+  registeredAddress?: string;
+  bankName?: string;
+  bankAccountMasked?: string;
+  contactPhoneMasked?: string;
+  receiveEmail?: string;
+  isDefault: boolean;
+  status: "active" | "disabled";
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** CUSTOMER-01C：企业合同。 */
+export interface CustomerCorporateContract {
+  id: string;
+  tenantId: string;
+  customerId: string;
+  contractNo: string;
+  name: string;
+  signedAt?: string;
+  effectiveFrom: string;
+  effectiveTo?: string;
+  status: "draft" | "active" | "expired" | "terminated";
+  fileRef?: string;
+  terminatedReason?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * CUSTOMER-01C：企业授信与账期。
+ *
+ * 本阶段**只存事实**：额度不接进报价与订单确认链路。额度占用与释放需要与订单、
+ * 支付、退款联动，属后续任务；在没有联动设计前先改金额链路会留下对不上的账。
+ */
+export interface CustomerCorporateCredit {
+  id: string;
+  tenantId: string;
+  customerId: string;
+  creditLimit: number;
+  settlementTermDays: number;
+  billingCycle: "monthly" | "semi_monthly" | "per_order";
+  status: "active" | "suspended" | "revoked";
+  approvedBy?: string;
+  approvedAt?: string;
+  reason?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SaveCustomerInvoiceProfileRequest {
+  id?: string;
+  invoiceType: "vat_special" | "vat_normal";
+  title: string;
+  taxNo: string;
+  registeredAddress?: string;
+  bankName?: string;
+  bankAccount?: string;
+  contactPhone?: string;
+  receiveEmail?: string;
+  isDefault?: boolean;
+  status?: "active" | "disabled";
+}
+
+export interface SaveCustomerContractRequest {
+  id?: string;
+  contractNo: string;
+  name: string;
+  signedAt?: string;
+  effectiveFrom: string;
+  effectiveTo?: string;
+  status?: "draft" | "active" | "expired" | "terminated";
+  fileRef?: string;
+  terminatedReason?: string;
+}
+
+export interface SaveCustomerCreditRequest {
+  creditLimit: number;
+  settlementTermDays: number;
+  billingCycle?: "monthly" | "semi_monthly" | "per_order";
+  status?: "active" | "suspended" | "revoked";
+  reason?: string;
+}
+
+/**
  * SPACE-04：租户级共享客户主档。
  *
  * 身份在租户内共享（同一手机号只有一份主档），而订单、优惠券、积分、
@@ -6299,6 +6443,14 @@ export interface CreateRentalOrderRequest {
   customerId?: string;
   customerName: string;
   contactPhone?: string;
+  /**
+   * CUSTOMER-01C：订单四类主体的选择（需求 4.8.4）。
+   *
+   * 省略即回落为「签约/付款/使用人都是下单客户本人」——既有下单路径与存量订单
+   * 都是这个语义，因此本字段是**纯附加**，不改变任何现有调用方的行为。
+   * 企业订单可据此显式区分总部付款、分公司签约、司机使用、行政经办。
+   */
+  subjects?: CustomerOrderSubjectInput;
   qualificationApproved?: boolean;
   qualificationValidTo?: string;
   fulfillmentMode: RentalFulfillmentMode;
@@ -6458,6 +6610,18 @@ export interface RentalOrder {
   capabilityDecisions?: RentalCapabilityDecisionSnapshot[];
   /** Review P1-6：带风险继续的完整例外快照（不可变），配货与后续履约据此还原裁决。 */
   capabilityExceptions?: RentalCapabilityExceptionSnapshot[];
+  /**
+   * CUSTOMER-01C：订单四类主体（需求 4.8.4）。
+   *
+   * 三个 id 列服务于按角色反查（合并与注销要用），`subjectSnapshot` 固化下单当时的
+   * 名称、脱敏证件与授权范围——主体改名或授权到期都不得篡改历史订单。
+   * 全部可空：存量订单没有主体拆分，读取侧回落到 `customerId` 作为三个主体。
+   */
+  contractSubjectCustomerId?: string;
+  payerSubjectCustomerId?: string;
+  userSubjectCustomerId?: string;
+  agentId?: string;
+  subjectSnapshot?: CustomerOrderSubjectSnapshot[];
   /**
    * Review P1-10：能力快照的解释口径。
    *

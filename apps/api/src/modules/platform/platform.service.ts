@@ -9,6 +9,9 @@ import {
   SaveWorkspaceMemberRequest,
   ChangeCustomerAccountStatusRequest,
   ChangeCustomerMembershipStatusRequest,
+  SaveCustomerContractRequest,
+  SaveCustomerCreditRequest,
+  SaveCustomerInvoiceProfileRequest,
   SaveSharedCustomerRequest,
   LinkCustomerToWorkspaceRequest,
   UpdateBusinessWorkspaceRequest,
@@ -53,6 +56,7 @@ import {
 import { PlatformRepository } from "./platform.repository";
 import { SharedCustomerRepository } from "./shared-customer.repository";
 import { CustomerOperationsService } from "./customer-operations.service";
+import { CustomerCorporateService } from "./customer-corporate.service";
 import { WorkspaceCapabilityService } from "../rental-core/workspace-capability.service";
 import { RentalCoreService } from "../rental-core/rental-core.service";
 
@@ -93,7 +97,10 @@ export class PlatformService {
     @Optional() private readonly workspaceCapabilityService?: WorkspaceCapabilityService,
     // CUSTOMER-01B：客户账号与空间会员状态治理。同样追加在最后且 @Optional()，
     // 理由同上——既有测试用位置参数构造本服务，插到中间会让前面的依赖错位。
-    @Optional() private readonly customerOperations?: CustomerOperationsService
+    @Optional() private readonly customerOperations?: CustomerOperationsService,
+    // CUSTOMER-01C：企业资料（开票/合同/授信账期）与订单主体解析。
+    // 同样追加在最后且 @Optional()，理由同上——位置参数构造的既有测试会错位。
+    @Optional() private readonly customerCorporate?: CustomerCorporateService
   ) {}
 
   private readonly logger = new Logger(PlatformService.name);
@@ -1627,6 +1634,72 @@ export class PlatformService {
       tenantId,
       requireRequestWorkspaceId(),
       customerId
+    );
+  }
+
+  /**
+   * CUSTOMER-01C：企业资料入口。
+   *
+   * 与客户主档一样按 `tenantId` 解析——企业资料属于租户级客户身份，不按空间隔离
+   * （同一家企业在两个空间是同一家企业，开票与合同不该各存一份）。
+   */
+  private requireCustomerCorporate() {
+    if (!this.customerCorporate) {
+      throw new ConflictException("企业客户服务未就绪");
+    }
+    return this.customerCorporate;
+  }
+
+  listCustomerInvoiceProfiles(customerId: string, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerCorporate().listInvoiceProfiles(tenantId, customerId);
+  }
+
+  saveCustomerInvoiceProfile(
+    customerId: string,
+    input: SaveCustomerInvoiceProfileRequest,
+    currentUser?: SystemUserRow
+  ) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerCorporate().saveInvoiceProfile(tenantId, customerId, input);
+  }
+
+  listCustomerContracts(customerId: string, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerCorporate().listContracts(tenantId, customerId);
+  }
+
+  saveCustomerContract(
+    customerId: string,
+    input: SaveCustomerContractRequest,
+    currentUser?: SystemUserRow
+  ) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerCorporate().saveContract(tenantId, customerId, input);
+  }
+
+  getCustomerCredit(customerId: string, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerCorporate().getCredit(tenantId, customerId);
+  }
+
+  saveCustomerCredit(
+    customerId: string,
+    input: SaveCustomerCreditRequest,
+    currentUser?: SystemUserRow
+  ) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerCorporate().saveCredit(
+      tenantId,
+      customerId,
+      input,
+      currentUser?.displayName
     );
   }
 
