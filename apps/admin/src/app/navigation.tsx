@@ -15,8 +15,9 @@ import {
   TagsOutlined,
   TeamOutlined
 } from "@ant-design/icons";
-import { RentalCategoryCode, type RentalCapability } from "@store-rental/shared";
+import { RentalCategoryCode, type RentalCapability, type RentalCategoryTerminology } from "@store-rental/shared";
 import type { ReactNode } from "react";
+import { applyTenantNavigationLabels } from "./navigation-terminology";
 
 export interface AppRouteDefinition {
   path: string;
@@ -77,6 +78,25 @@ export const APP_NAVIGATION: AppNavigationSection[] = [
   { key: "tenant-settings", label: "经营设置", icon: <SettingOutlined />, routes: [APP_ROUTES.rentalSettings, APP_ROUTES.rentalCapabilities] },
   { key: "platform-management", label: "平台管理", icon: <SettingOutlined />, routes: [APP_ROUTES.platformTenants, APP_ROUTES.platformOfficialCalendars, APP_ROUTES.platformUsers, APP_ROUTES.platformSystem, APP_ROUTES.platformOperations, APP_ROUTES.platformTools] }
 ];
+
+/**
+ * UI-NAV-01：按当前经营空间的品类术语生成导航分组与菜单。
+ *
+ * 只覆盖 `label`，**不碰** `path`、`permission`、`capability`、`audience`——
+ * 路由与鉴权是契约，换个说法不该换掉入口或门禁。
+ * `APP_NAVIGATION` 常量本身保持不变，这里返回派生副本，
+ * 因此固定文案在无品类档案（SaaS 平台账号、档案未就绪）时依然可用。
+ *
+ * 实际套用逻辑放在无 JSX 的纯模块里，好让专项直接断言「文案真的被套上了」；
+ * 本函数只负责把路由注册表里的路径喂进去。
+ */
+export function buildNavigationSections(terminology?: RentalCategoryTerminology): AppNavigationSection[] {
+  return applyTenantNavigationLabels(APP_NAVIGATION, terminology, {
+    itemGroups: APP_ROUTES.itemGroups.path,
+    assets: APP_ROUTES.assets.path,
+    locations: APP_ROUTES.locations.path
+  });
+}
 
 export function canAccessRoute(
   route: AppRouteDefinition,

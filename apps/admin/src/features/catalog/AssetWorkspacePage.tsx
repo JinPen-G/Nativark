@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Button, Card, Col, Drawer, Form, Input, InputNumber, Row, Select, Space, Switch, Table, Tabs, Tag } from "antd";
 import { useMemo, useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
+import { resolveTenantNavigationLabels } from "@/app/navigation-terminology";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
@@ -60,7 +61,7 @@ export function AssetWorkspacePage() {
 
   return (
     <>
-      <PageHeader title="资产与库存" description="统一维护序列化资产和数量库存，字段由租户经营品类 schema 决定。" extra={canManage ? <Button type="primary" icon={<PlusOutlined />} onClick={() => activeTab === "assets" ? openAssetEditor() : openStockEditor()}>{activeTab === "assets" ? `新增${profile.data?.terminology.assetLabel ?? "资产"}` : "维护数量库存"}</Button> : undefined} />
+      <PageHeader title={resolveTenantNavigationLabels(profile.data?.terminology).routes.assets ?? "资产与库存"} description="统一维护序列化资产和数量库存，字段由租户经营品类 schema 决定。" extra={canManage ? <Button type="primary" icon={<PlusOutlined />} onClick={() => activeTab === "assets" ? openAssetEditor() : openStockEditor()}>{activeTab === "assets" ? `新增${profile.data?.terminology.assetLabel ?? "资产"}` : "维护数量库存"}</Button> : undefined} />
       <Tabs className="standalone-tabs" activeKey={activeTab} onChange={(key) => setActiveTab(key as "assets" | "stock")} items={[{ key: "assets", label: `序列化资产（${assets.data?.length ?? 0}）` }, { key: "stock", label: `数量库存（${stocks.data?.length ?? 0}）` }]} />
       <Alert type="info" showIcon message={`${category?.name ?? "当前品类"}资产模型`} description={`独立资产使用“${profile.data?.terminology.identifierLabel ?? "资产编号"}”；厂商和型号在商品目录维护，领取/归还使用量属于履约记录。`} style={{ marginBottom: 16 }} />
       <Card className="data-panel" styles={{ body: { paddingBottom: 0 } }}>

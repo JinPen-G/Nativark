@@ -4366,6 +4366,28 @@ export interface RentalCategoryTerminology {
   returnLabel: string;
   identifierLabel: string;
   usageMetricLabel?: string;
+  /**
+   * UI-NAV-01：这批资产作为一个整体时的行业称呼（车辆品类叫「车队」）。
+   *
+   * 单独成字段而不是由 `assetLabel` 推导：中文集合名词不是后缀派生
+   * （车辆→车队而非「车辆队」，飞机→机队而非「飞机队」），任何构词规则
+   * 都会在下一个品类上出错。缺省表示该品类没有专门的集合说法，
+   * 由展示层按「库存」表述。
+   */
+  assetCollectionLabel?: string;
+  /**
+   * UI-NAV-01：通用管理入口的完整显示文案。
+   *
+   * 中文管理术语不能由单数名词稳定拼接出来（例如「车型组」对应「车型管理」，
+   * 「门店」对应「门店管理」）。因此精确文案随品类定义注册；未配置时展示层才按
+   * 上面的基础术语生成通用兜底。新增品类只需补定义，不修改导航组件。
+   */
+  navigationLabels?: {
+    inventoryGroup?: string;
+    itemGroups?: string;
+    assets?: string;
+    locations?: string;
+  };
 }
 
 export const RENTAL_PRICING_UNIT_CODES = ["hour", "shift", "day_24h", "calendar_day", "night", "week", "month", "usage", "package"] as const;
@@ -6544,7 +6566,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     supportedInventoryModes: [RentalInventoryMode.Serialized, RentalInventoryMode.Quantity, RentalInventoryMode.Bundle],
     defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery", "usage_reading", "camera_compatibility", "camera_kit_handover", "inspection_care"],
     requiredCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "camera_compatibility", "camera_kit_handover", "usage_reading", "inspection_care"],
-    terminology: { itemLabel: "器材", itemGroupLabel: "器材型号", assetLabel: "器材资产", fulfillmentLabel: "器材门店", pickupLabel: "取机", returnLabel: "还机", identifierLabel: "资产编号", usageMetricLabel: "快门次数" },
+    terminology: { itemLabel: "器材", itemGroupLabel: "器材型号", assetLabel: "器材资产", fulfillmentLabel: "器材门店", pickupLabel: "取机", returnLabel: "还机", identifierLabel: "资产编号", usageMetricLabel: "快门次数", navigationLabels: { inventoryGroup: "摄影器材", itemGroups: "器材型号", assets: "器材资产与库存", locations: "器材门店" } },
     attributeSchema: { brand: "string", model: "string", mount: "string", sensor: "string", serialNo: "string", shutterCount: "number" },
     businessModel: {
       pricingUnits: ["hour", "day_24h", "calendar_day", "week", "package", "usage"],
@@ -6610,7 +6632,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     supportedInventoryModes: [RentalInventoryMode.Serialized, RentalInventoryMode.Quantity, RentalInventoryMode.Bundle],
     defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery", "camping_kit_integrity", "camping_cleaning_turnaround"],
     requiredCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "camping_kit_integrity", "camping_cleaning_turnaround"],
-    terminology: { itemLabel: "装备", itemGroupLabel: "装备品类", assetLabel: "装备资产", fulfillmentLabel: "装备仓", pickupLabel: "领用", returnLabel: "归还", identifierLabel: "装备编号" },
+    terminology: { itemLabel: "装备", itemGroupLabel: "装备品类", assetLabel: "装备资产", fulfillmentLabel: "装备仓", pickupLabel: "领用", returnLabel: "归还", identifierLabel: "装备编号", navigationLabels: { inventoryGroup: "户外装备", itemGroups: "装备品类", assets: "装备资产与库存", locations: "装备仓库" } },
     attributeSchema: { brand: "string", model: "string", people: "number", season: "string", material: "string", batchNo: "string" },
     businessModel: {
       pricingUnits: ["calendar_day", "night", "week", "package"],
@@ -6656,7 +6678,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     supportedInventoryModes: [RentalInventoryMode.Serialized, RentalInventoryMode.Bundle],
     defaultCapabilities: ["serialized_inventory", "bundle_inventory", "pickup", "return", "dispatch", "usage_reading", "qualification", "iot", "inspection_care", "vehicle_relocation"],
     requiredCapabilities: ["serialized_inventory", "bundle_inventory", "pickup", "return", "dispatch", "usage_reading", "qualification", "inspection_care", "vehicle_relocation"],
-    terminology: { itemLabel: "车辆", itemGroupLabel: "车型组", assetLabel: "车辆", fulfillmentLabel: "门店", pickupLabel: "取车", returnLabel: "还车", identifierLabel: "车辆编号", usageMetricLabel: "里程" },
+    terminology: { itemLabel: "车辆", itemGroupLabel: "车型组", assetLabel: "车辆", fulfillmentLabel: "门店", pickupLabel: "取车", returnLabel: "还车", identifierLabel: "车辆编号", usageMetricLabel: "里程", assetCollectionLabel: "车队", navigationLabels: { inventoryGroup: "车辆与车队", itemGroups: "车型管理", assets: "车辆管理", locations: "门店管理" } },
     attributeSchema: { manufacturer: "string", brand: "string", model: "string", trim: "string", energyType: "string", licensePlate: "string", vin: "string", mileage: "number" },
     businessModel: {
       pricingUnits: ["hour", "day_24h", "calendar_day", "week", "month", "usage", "package"],
@@ -6704,7 +6726,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     supportedInventoryModes: [RentalInventoryMode.Serialized, RentalInventoryMode.Quantity, RentalInventoryMode.Bundle],
     defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery", "dispatch", "usage_reading", "qualification", "iot", "inspection_care", "construction_transport"],
     requiredCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "dispatch", "usage_reading", "qualification", "inspection_care", "construction_transport"],
-    terminology: { itemLabel: "设备", itemGroupLabel: "设备型号", assetLabel: "设备资产", fulfillmentLabel: "设备仓", pickupLabel: "出库", returnLabel: "入库", identifierLabel: "设备编号", usageMetricLabel: "工时" },
+    terminology: { itemLabel: "设备", itemGroupLabel: "设备型号", assetLabel: "设备资产", fulfillmentLabel: "设备仓", pickupLabel: "出库", returnLabel: "入库", identifierLabel: "设备编号", usageMetricLabel: "工时", navigationLabels: { inventoryGroup: "工程设备", itemGroups: "设备型号", assets: "设备台账与库存", locations: "设备仓库" } },
     attributeSchema: { manufacturer: "string", brand: "string", model: "string", power: "string", ratedLoad: "number", factoryNo: "string", hourMeter: "number" },
     businessModel: {
       pricingUnits: ["hour", "shift", "calendar_day", "week", "month", "usage", "package"],

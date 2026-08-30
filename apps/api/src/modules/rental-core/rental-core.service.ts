@@ -473,7 +473,23 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     for (const template of state.couponTemplates) await this.configStore.upsertCouponTemplate(template, tx);
     for (const template of state.inspectionTemplates) await this.configStore.upsertInspectionTemplate(template, tx);
   }
-  getProfile(tenantId: string) { return this.state(tenantId).profile; }
+  getProfile(tenantId: string) {
+    const profile = this.state(tenantId).profile;
+    const defaults = this.category(profile.categoryCode).terminology;
+    return {
+      ...profile,
+      // 旧空间的术语 JSON 不会凭空获得后来新增的导航显示配置。读时补齐定义默认值，
+      // 同时保留租户已保存的基础术语与逐项导航覆盖，避免 UI-NAV-01 只对新空间生效。
+      terminology: {
+        ...defaults,
+        ...profile.terminology,
+        navigationLabels: {
+          ...defaults.navigationLabels,
+          ...profile.terminology.navigationLabels
+        }
+      }
+    };
+  }
   getBusinessSettings(tenantId: string) { return this.state(tenantId).businessSettings; }
 
   async saveBusinessSettings(tenantId: string, input: SaveTenantRentalBusinessSettingsRequest, operator: string) {
@@ -587,7 +603,15 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       ...state.profile,
       categoryCode: input.categoryCode,
       capabilities,
-      terminology: { ...definition.terminology, ...input.terminology },
+      terminology: {
+        ...definition.terminology,
+        ...input.terminology,
+        navigationLabels: {
+          ...definition.terminology.navigationLabels,
+          ...state.profile.terminology.navigationLabels,
+          ...input.terminology?.navigationLabels
+        }
+      },
       configVersion: definition.version,
       updatedAt: now()
     };
