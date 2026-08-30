@@ -273,6 +273,19 @@ void withCleanup(async () => {
   assert.equal(outOfRange.orderCount, 0, "区间之外应为零，而不是忽略区间");
   assert.equal(outOfRange.rentalRevenue, 0);
   assert.deepEqual(outOfRange.range, { from: "2026-07-01T00:00:00.000Z", to: "2026-07-31T00:00:00.000Z" }, "出参必须回显区间");
+  await assert.rejects(
+    reports.getOperationReport(tenantA, wsA1, "CAMERA", { from: "not-a-date" }),
+    /统计开始时间不是有效日期时间/,
+    "非法日期必须明确返回业务错误，不能落成 Prisma 500"
+  );
+  await assert.rejects(
+    reports.getOperationReport(tenantA, wsA1, "CAMERA", {
+      from: "2026-07-02T00:00:00.000Z",
+      to: "2026-07-01T00:00:00.000Z"
+    }),
+    /统计开始时间不能晚于结束时间/,
+    "倒置区间必须明确拒绝"
+  );
   ok("区间：按起租时间过滤，区间外为零并回显所用区间");
 
   // ============ 6. 口径纯度：不得出现车辆/门市/旧 Store Rental 专用字段 ============
@@ -295,6 +308,7 @@ void withCleanup(async () => {
     );
   }
   assert.match(repoSource, /prisma\.rentalOrder\./u, "只读 Rental Core 规范化事实 rental_orders");
+  assert.match(repoSource, /take: 500/u, "异常费用 JSON 必须分批读取，不能无界载入全部历史订单");
   // 每一处查询都必须同时带 tenantId 与 workspaceId：少一个就会把别的空间算进来。
   assert.match(repoSource, /tenantId,\s*\n\s*workspaceId,/u, "查询条件必须同时包含 tenantId 与 workspaceId");
   ok("口径纯度：只读 rental_orders，出参与实现均无车辆/门市/旧 Store Rental 字段");

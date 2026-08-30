@@ -291,6 +291,8 @@ void (() => {
   const seed = fs.readFileSync(path.join(ROOT, "scripts/ops/restore-source.cjs"), "utf8");
   assert.match(seed, /缺少 \.sha256 旁文件：只接受已验证的备份/u, "必须要求校验和旁文件");
   assert.match(seed, /备份校验和不匹配/u, "校验和不匹配必须失败");
+  assert.match(seed, /quoteSqlString\(target\.user\)/u, "应用账号必须先编码再进入管理权限 SQL");
+  assert.equal(seed.includes("TO '${target.user}'@'%'"), false, "应用账号不得直接拼入 GRANT");
   assert.match(seed, /buildCloneDatabaseName\(target\.database, "legacy"\)/u, "目标库必须走守卫化的 legacy 命名");
   assert.match(seed, /拒绝复用既有库/u, "必须是新库，不复用既有库");
   assert.match(seed, /rewriteBackupForTarget\(text, sourceName, legacyDb\)/u, "必须用共用内核改写并做残留检查");

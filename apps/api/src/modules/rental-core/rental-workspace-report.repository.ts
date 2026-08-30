@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { BadRequestException, Injectable } from "@nestjs/common";
 import { Prisma, RentalOrderV1Status } from "@prisma/client";
 import type {
   RentalCategoryCode,
@@ -25,6 +25,14 @@ import { PrismaService } from "../database/prisma.service";
 export class RentalWorkspaceReportRepository {
   constructor(private readonly prisma: PrismaService) {}
 
+  private rangeInstant(value: string | undefined, label: string): Date | undefined {
+    if (value === undefined) return undefined;
+    if (!value.trim()) throw new BadRequestException(`${label}不能为空`);
+    const instant = new Date(value);
+    if (!Number.isFinite(instant.getTime())) throw new BadRequestException(`${label}不是有效日期时间`);
+    return instant;
+  }
+
   /** 金额列在库里是 Decimal；统一转 number 并保留两位，避免 0.30000000000000004 进页面。 */
   private money(value: Prisma.Decimal | null | undefined): number {
     return Math.round(Number(value ?? 0) * 100) / 100;
@@ -38,11 +46,14 @@ export class RentalWorkspaceReportRepository {
   ): Promise<RentalWorkspaceOperationReport> {
     // 区间按**起租时间**归入：经营口径关心「这段时间的租赁业务」，
     // 而不是「这段时间录入了哪些单」。缺省两端即不限。
+    const from = this.rangeInstant(range.from, "统计开始时间");
+    const to = this.rangeInstant(range.to, "统计结束时间");
+    if (from && to && from > to) throw new BadRequestException("统计开始时间不能晚于结束时间");
     const startAt =
-      range.from || range.to
+      from || to
         ? {
-            ...(range.from ? { gte: new Date(range.from) } : {}),
-            ...(range.to ? { lte: new Date(range.to) } : {})
+            ...(from ? { gte: from } : {}),
+            ...(to ? { lte: to } : {})
           }
         : undefined;
     const where: Prisma.RentalOrderWhereInput = {
@@ -55,13 +66,12 @@ export class RentalWorkspaceReportRepository {
     };
 
     // 计数与求和交给数据库；只有异常费用需要读费用行（JSON 列无法在 SQL 里可移植地聚合）。
-    const [grouped, sums, chargeRows] = await Promise.all([
+    const [grouped, sums] = await Promise.all([
       this.prisma.rentalOrder.groupBy({ by: ["status"], where, _count: { _all: true } }),
       this.prisma.rentalOrder.aggregate({
         where,
         _sum: { rentalAmount: true, discountAmount: true, couponAmount: true, finalPayableAmount: true }
-      }),
-      this.prisma.rentalOrder.findMany({ where, select: { id: true, chargeLines: true } })
+      })
     ]);
 
     const exceptionTypes = new Set<string>(RENTAL_EXCEPTION_CHARGE_TYPES);
@@ -69,20 +79,33 @@ export class RentalWorkspaceReportRepository {
     for (const type of RENTAL_EXCEPTION_CHARGE_TYPES) {
       perType.set(type, { amount: 0, orders: new Set() });
     }
-    for (const row of chargeRows) {
-      // 费用行是历史快照，形状可能早于某次契约调整；逐行做防御性判定，
-      // 遇到不认识的行跳过而不是让整张报表 500。
-      const lines = Array.isArray(row.chargeLines) ? row.chargeLines : [];
-      for (const line of lines as Array<{ type?: unknown; amount?: unknown }>) {
-        const type = typeof line?.type === "string" ? line.type : undefined;
-        if (!type || !exceptionTypes.has(type)) continue;
-        const amount = Number(line?.amount ?? 0);
-        if (!Number.isFinite(amount)) continue;
-        const bucket = perType.get(type as RentalExceptionChargeType)!;
-        bucket.amount += amount;
-        bucket.orders.add(row.id);
+    // 默认区间不限时也不能一次把整个经营空间的历史 JSON 快照载入内存。
+    // 这里按稳定主键分页，内存上限与总订单量解耦；计数和金额仍由数据库聚合。
+    let cursor: string | undefined;
+    do {
+      const chargeRows = await this.prisma.rentalOrder.findMany({
+        where,
+        select: { id: true, chargeLines: true },
+        orderBy: { id: "asc" },
+        take: 500,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {})
+      });
+      for (const row of chargeRows) {
+        // 费用行是历史快照，形状可能早于某次契约调整；逐行做防御性判定，
+        // 遇到不认识的行跳过而不是让整张报表 500。
+        const lines = Array.isArray(row.chargeLines) ? row.chargeLines : [];
+        for (const line of lines as Array<{ type?: unknown; amount?: unknown }>) {
+          const type = typeof line?.type === "string" ? line.type : undefined;
+          if (!type || !exceptionTypes.has(type)) continue;
+          const amount = Number(line?.amount ?? 0);
+          if (!Number.isFinite(amount)) continue;
+          const bucket = perType.get(type as RentalExceptionChargeType)!;
+          bucket.amount += amount;
+          bucket.orders.add(row.id);
+        }
       }
-    }
+      cursor = chargeRows.length === 500 ? chargeRows.at(-1)?.id : undefined;
+    } while (cursor);
     const exceptionFeeBreakdown = RENTAL_EXCEPTION_CHARGE_TYPES.map((type) => {
       const bucket = perType.get(type)!;
       return {

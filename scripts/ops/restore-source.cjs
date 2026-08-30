@@ -18,7 +18,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const { buildCloneDatabaseName, redact, OpsTargetError } = require("./dedicated-env.cjs");
+const { buildCloneDatabaseName, quoteSqlString, redact, OpsTargetError } = require("./dedicated-env.cjs");
 const { rewriteBackupForTarget, SAMPLE_TABLES } = require("./restore-core.cjs");
 const { ROOT, requireTarget, requireAdminTarget, assertContainerEndpoint, log, fail, containerRunning, runMysql, sql } = require("./runtime.cjs");
 
@@ -44,10 +44,13 @@ function detectSourceName(sqlText) {
 void (async () => {
   let target;
   let admin;
+  let applicationAccount;
   try {
     // 目标库名以当前专用库为基底（`<专用库>_legacy_<时间戳>`），因此仍需先解析 env。
     target = assertContainerEndpoint(requireTarget());
     admin = requireAdminTarget(target);
+    // 账号来自 DATABASE_URL，不能直接拼进以管理权限执行的 GRANT/REVOKE。
+    applicationAccount = `${quoteSqlString(target.user)}@'%'`;
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
     return;
@@ -120,7 +123,7 @@ void (async () => {
 
     // 应用账号要能连上它：后续演练里 API 以应用账号连接克隆库，
     // 而克隆库的校验需要同时读源库与克隆库。授权在清理阶段回收。
-    sql(admin, `GRANT ALL PRIVILEGES ON \`${legacyDb}\`.* TO '${target.user}'@'%'`);
+    sql(admin, `GRANT ALL PRIVILEGES ON \`${legacyDb}\`.* TO ${applicationAccount}`);
     sql(admin, "FLUSH PRIVILEGES");
 
     log(`  ✓ 表数量：${tables}`);
@@ -131,14 +134,14 @@ void (async () => {
     log("  下一步（演练时把 DATABASE_URL 指向该库）：");
     log(`    DATABASE_URL=\"<同一连接串，库名改为 ${legacyDb}>\" npm run ops:upgrade-drill -- --file ${path.relative(ROOT, file)}`);
     log("  清理（演练结束后）：");
-    log(`    REVOKE ALL PRIVILEGES ON \`${legacyDb}\`.* FROM '${target.user}'@'%';`);
+    log(`    REVOKE ALL PRIVILEGES ON \`${legacyDb}\`.* FROM ${applicationAccount};`);
     log(`    DROP DATABASE \`${legacyDb}\`;`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`\n✗ 造历史源库失败：${redact(message, secrets)}`);
     if (created) {
       console.error(`  该库按设计保留供排查：${legacyDb}`);
-      console.error(`  清理：REVOKE ALL PRIVILEGES ON \`${legacyDb}\`.* FROM '${target.user}'@'%'; DROP DATABASE \`${legacyDb}\`;`);
+      console.error(`  清理：REVOKE ALL PRIVILEGES ON \`${legacyDb}\`.* FROM ${applicationAccount}; DROP DATABASE \`${legacyDb}\`;`);
     } else {
       console.error("  本次未创建任何库，无残留。");
     }
