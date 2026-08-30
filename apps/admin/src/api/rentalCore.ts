@@ -37,6 +37,7 @@ import type {
   RentalStockBalance,
   RentalValueAddedService,
   RentalWorkspaceOperationReport,
+  RentalWorkspaceReportFilter,
   RentalServiceCapacity,
   SaveWorkspaceCapabilityRequest,
   UpgradeWorkspaceCapabilityRequest,
@@ -81,7 +82,7 @@ import type {
   TenantRentalProfile,
   SubstituteRentalBundleComponentRequest
 } from "@store-rental/shared";
-import { request } from "./http";
+import { request, requestText } from "./http";
 
 export const rentalCoreApi = {
   categories: () => request<RentalCategoryDefinition[]>("/rental/v1/categories"),
@@ -91,8 +92,16 @@ export const rentalCoreApi = {
    * 刻意不接受 workspaceId：空间一律由服务端按会话解析。
    * 让页面传空间等于允许查自己无权进入的空间的经营数据。
    */
-  operationReport: (params?: { from?: string; to?: string }) =>
+  operationReport: (params?: RentalWorkspaceReportFilter) =>
     request<RentalWorkspaceOperationReport>("/rental/v1/reports/operations", { params }),
+  /**
+   * REPORT-01B：导出当前经营空间报表（CSV）。
+   *
+   * 走原始文本请求而不是 `request()`：后者会剥掉 `{ data }` 信封，
+   * 而 CSV 本身就不是信封结构。同样不接受 workspaceId——空间取自会话。
+   */
+  exportOperationReport: (params?: RentalWorkspaceReportFilter) =>
+    requestText("/rental/v1/reports/operations/export", params),
   profile: () => request<TenantRentalProfile>("/rental/v1/tenant-profile"),
   saveProfile: (data: SaveTenantRentalProfileRequest) => request<TenantRentalProfile>("/rental/v1/tenant-profile", { method: "put", data }),
   businessSettings: () => request<TenantRentalBusinessSettings>("/rental/v1/business-settings"),

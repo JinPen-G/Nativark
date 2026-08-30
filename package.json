@@ -31,6 +31,7 @@
     "test:ops-release": "node tests/ops-release-gate.test.cjs",
     "test:ops-upgrade": "node tests/ops-upgrade-drill.test.cjs",
     "test:report-workspace": "npm run build -w @store-rental/shared && node tests/report-workspace-operations.test.cjs",
+    "test:report-dimensions": "npm run build -w @store-rental/shared && node tests/report-workspace-dimensions.test.cjs",
     "ops:mysql:backup": "powershell -ExecutionPolicy Bypass -File scripts/backup-mysql.ps1",
     "ops:mysql:restore": "powershell -ExecutionPolicy Bypass -File scripts/restore-mysql.ps1",
     "test:reports": "node tests/reports-metrics.test.cjs",

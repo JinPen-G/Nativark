@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, ForbiddenException, Get, Param, Post, Put, Query, Req } from "@nestjs/common";
+import { BadRequestException, Body, Controller, ForbiddenException, Get, Param, Post, Put, Query, Req, Res } from "@nestjs/common";
 import { RentalCoreOrderStatus } from "@store-rental/shared";
 import { createHash } from "node:crypto";
 import type {
@@ -14,6 +14,7 @@ import type {
   SaveRentalStockBalanceRequest,
   SaveTenantRentalBusinessSettingsRequest,
   SaveTenantRentalProfileRequest,
+  RentalWorkspaceReportFilter,
   SystemUserRow
 } from "@store-rental/shared";
 import {
@@ -36,6 +37,7 @@ import {
 import {
   SaveTenantRentalBusinessSettingsDto,
 } from "./rental-config-request.dto";
+import { renderOperationReportCsv } from "./rental-workspace-report.csv";
 import { RentalCoreService } from "./rental-core.service";
 import { RentalBusinessService, type BusinessContext } from "./rental-business.service";
 import { RentalOrderConfirmationService } from "./rental-order-confirmation.service";
@@ -119,7 +121,10 @@ export class RentalCoreController {
   async operationReport(
     @Req() req: AuthenticatedRequest,
     @Query("from") from?: string,
-    @Query("to") to?: string
+    @Query("to") to?: string,
+    @Query("locationId") locationId?: string,
+    @Query("customerId") customerId?: string,
+    @Query("customerType") customerType?: string
   ) {
     const tenantId = req.user.tenantId;
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
@@ -127,8 +132,55 @@ export class RentalCoreController {
       tenantId,
       workspaceId,
       this.service.getProfile(tenantId).categoryCode,
-      { from, to }
+      this.reportFilter({ from, to, locationId, customerId, customerType })
     );
+  }
+
+  /**
+   * REPORT-01B：报表导出（CSV）。
+   *
+   * 与上面的读取接口共用**同一个**仓储方法与同一组筛选解析，因此导出与页面
+   * 必然是同一份数字。若导出自己再查一遍库，就会出现「页面一个数、导出另一个数」，
+   * 且没人能说清哪个对。
+   *
+   * 权限与空间同样走会话：路由前缀命中 `reports` 分支，鉴权与页面读取一致。
+   */
+  @Get("reports/operations/export")
+  async exportOperationReport(
+    @Req() req: AuthenticatedRequest,
+    @Res({ passthrough: true }) res: { setHeader: (name: string, value: string) => void },
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+    @Query("locationId") locationId?: string,
+    @Query("customerId") customerId?: string,
+    @Query("customerType") customerType?: string
+  ) {
+    const tenantId = req.user.tenantId;
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
+    const report = await this.workspaceReports.getOperationReport(
+      tenantId,
+      workspaceId,
+      this.service.getProfile(tenantId).categoryCode,
+      this.reportFilter({ from, to, locationId, customerId, customerType })
+    );
+    const stamp = report.generatedAt.replace(/[-:T]/g, "").slice(0, 14);
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    // 文件名只用空间 id 与时间戳：客户名等业务数据不进 header，避免非 ASCII 与注入。
+    res.setHeader("Content-Disposition", `attachment; filename="operation-report-${workspaceId}-${stamp}.csv"`);
+    return renderOperationReportCsv(report);
+  }
+
+  /** 只收白名单里的筛选项；空串按未传处理，避免 `?locationId=` 变成"查 id 为空串的地点"。 */
+  private reportFilter(input: Record<string, string | undefined>): RentalWorkspaceReportFilter {
+    const pick = (value: string | undefined) => (value && value.trim() ? value.trim() : undefined);
+    const customerType = pick(input.customerType);
+    return {
+      from: pick(input.from),
+      to: pick(input.to),
+      locationId: pick(input.locationId),
+      customerId: pick(input.customerId),
+      customerType: customerType as RentalWorkspaceReportFilter["customerType"]
+    };
   }
   @Get("tenant-profile") profile(@Req() req: AuthenticatedRequest) { return this.service.getProfile(req.user.tenantId); }
   @Put("tenant-profile") saveProfile(@Req() req: AuthenticatedRequest, @Body() body: SaveTenantRentalProfileDto) { return this.committed(req.user.tenantId, this.service.saveProfile(req.user.tenantId, body)); }

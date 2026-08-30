@@ -308,7 +308,18 @@ void withCleanup(async () => {
     );
   }
   assert.match(repoSource, /prisma\.rentalOrder\./u, "只读 Rental Core 规范化事实 rental_orders");
-  assert.match(repoSource, /take: 500/u, "异常费用 JSON 必须分批读取，不能无界载入全部历史订单");
+  // 分页读取：断言到「有界常量 + take 用它」，而不是字面量 500。
+  // 只钉字面量的话，改成 take: 100000 也能通过；这里同时要求常量本身是有界小值。
+  const pageSizeMatch = repoSource.match(/const SCAN_PAGE_SIZE = (\d+);/u);
+  assert.ok(pageSizeMatch, "必须用具名常量声明分页大小");
+  assert.ok(Number(pageSizeMatch[1]) > 0 && Number(pageSizeMatch[1]) <= 2000,
+    `分页大小必须是有界小值，实际 ${pageSizeMatch[1]}`);
+  assert.match(repoSource, /take: SCAN_PAGE_SIZE/u, "异常费用 JSON 必须分批读取，不能无界载入全部历史订单");
+  // 维度汇总必须交给数据库聚合，不能把订单全捞回来在内存里分组。
+  assert.match(repoSource, /groupBy\(\{\s*\n?\s*by: \["fulfillmentLocationId", "fulfillmentLocationName"\]/u,
+    "地点维度必须由数据库 groupBy 聚合");
+  assert.match(repoSource, /groupBy\(\{\s*\n?\s*by: \["customerId", "customerName", "customerType"\]/u,
+    "客户维度必须由数据库 groupBy 聚合");
   // 每一处查询都必须同时带 tenantId 与 workspaceId：少一个就会把别的空间算进来。
   assert.match(repoSource, /tenantId,\s*\n\s*workspaceId,/u, "查询条件必须同时包含 tenantId 与 workspaceId");
   ok("口径纯度：只读 rental_orders，出参与实现均无车辆/门市/旧 Store Rental 字段");

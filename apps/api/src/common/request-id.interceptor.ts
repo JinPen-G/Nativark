@@ -15,6 +15,7 @@ interface HttpRequestLike {
 
 interface HttpResponseLike {
   setHeader(name: string, value: string): void;
+  getHeader?(name: string): string | number | string[] | undefined;
 }
 
 @Injectable()
@@ -38,6 +39,15 @@ export class RequestIdInterceptor implements NestInterceptor {
     return next.handle().pipe(
       map((body: unknown) => {
         if (body && typeof body === "object" && "data" in body) {
+          return body;
+        }
+
+        // REPORT-01B：处理器已经显式声明了非 JSON 响应类型（如 CSV 导出）时不要包信封。
+        // 包上去会把一份可下载的 CSV 变成 `{"data":"..."}`，文件打开即是乱码。
+        // 判据用「已设置的 Content-Type」而不是「路径白名单」：白名单每加一个
+        // 导出接口就要改这里一次，而漏改的那次只有下载文件时才会发现。
+        const contentType = String(response.getHeader?.("content-type") ?? "");
+        if (contentType && !contentType.includes("application/json")) {
           return body;
         }
 

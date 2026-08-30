@@ -2188,6 +2188,11 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: "Get current workspace operation report", permissions: ["store-rental:report:view"], responseSchema: "GenericObject"
   },
   {
+    // REPORT-01B：同一份报表的 CSV 导出。与页面共用仓储方法、筛选、权限与空间范围。
+    method: "get", path: "/api/rental/v1/reports/operations/export", tag: "RentalCore", operationId: "exportRentalWorkspaceOperationReport",
+    summary: "Export current workspace operation report as CSV", permissions: ["store-rental:report:view"], responseSchema: "GenericObject"
+  },
+  {
     method: "get", path: "/api/rental/v1/tenant-profile", tag: "RentalCore", operationId: "getRentalTenantProfile",
     summary: "Get tenant rental profile", permissions: ["store-rental:order:view", "store-rental:vehicle:view"], responseSchema: "GenericObject"
   },

@@ -120,3 +120,24 @@ export async function request<T>(path: string, options: { method?: "get" | "post
   });
   return response.data.data;
 }
+
+/**
+ * REPORT-01B：取原始文本响应（CSV 导出）。
+ *
+ * 与 `request()` 分开而不是加一个 flag：`request()` 的契约是「返回 `{ data }`
+ * 信封里的业务对象」，而导出返回的就是文件正文本身。混在一个函数里会让
+ * 返回类型变成 `T | string`，每个调用点都要再判一次。
+ *
+ * 走同一个 `http` 实例，因此鉴权头、令牌刷新与错误处理与其他接口完全一致。
+ */
+export async function requestText(path: string, params?: unknown) {
+  const response = await http.request<string>({
+    url: path,
+    method: "get",
+    params,
+    responseType: "text",
+    // 拦截器默认按 JSON 解析；导出必须原样拿到文本，否则 CSV 会被解析坏。
+    transformResponse: [(body: unknown) => String(body ?? "")]
+  });
+  return response.data;
+}

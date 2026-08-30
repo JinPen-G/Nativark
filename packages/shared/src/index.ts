@@ -7697,7 +7697,9 @@ export type RentalExceptionChargeType = (typeof RENTAL_EXCEPTION_CHARGE_TYPES)[n
  * 3. **严格按 tenantId + workspaceId 隔离**。空间是数据边界，不是页头标签；
  *    空空间返回全零，而不是回退到租户汇总。
  *
- * 本轮不含库存利用率、跨空间汇总与导出。
+ * REPORT-01B 在此基础上补了库存/资产口径、地点与客户维度、筛选与导出。
+ * 仍**不含**跨空间汇总——数据模型保留未来按租户汇总的可能，但不提前开放
+ * 绕过空间权限的查询（需求 4.10）。
  */
 export interface RentalWorkspaceOperationReport {
   tenantId: string;
@@ -7705,6 +7707,13 @@ export interface RentalWorkspaceOperationReport {
   categoryCode: RentalCategoryCode;
   /** 统计区间（按订单起租时间归入）。两端可缺省，缺省即不限。 */
   range: { from?: string; to?: string };
+  /**
+   * REPORT-01B：本次实际生效的全部筛选条件回显。
+   *
+   * 导出与页面必须用同一份筛选，因此把它随出参带回：对账时能直接看出
+   * 这份数字是在哪个区间、哪个地点、哪个客户口径下算出来的。
+   */
+  filter: RentalWorkspaceReportFilter;
   /** 订单量：**非草稿**订单数。草稿还没成为经营事实，计入会虚增经营规模。 */
   orderCount: number;
   /**
@@ -7726,7 +7735,132 @@ export interface RentalWorkspaceOperationReport {
   exceptionOrderCount: number;
   /** 异常费用按类型拆分：逾期/损坏/取消各自的金额与涉及订单数。 */
   exceptionFeeBreakdown: Array<{ type: RentalExceptionChargeType; amount: number; orderCount: number }>;
+  /** REPORT-01B：库存与资产口径。分子、分母与统计时点写在各自类型上。 */
+  utilization: RentalWorkspaceUtilization;
+  /** REPORT-01B：地点维度汇总。逐行金额与订单数相加等于总量，可与订单明细对账。 */
+  locationBreakdown: RentalWorkspaceLocationBreakdownRow[];
+  /** REPORT-01B：客户维度汇总。同样可与订单明细对账。 */
+  customerBreakdown: RentalWorkspaceCustomerBreakdownRow[];
+  /**
+   * REPORT-01B：当前事实无法还原的口径，逐条列出。
+   *
+   * 放进出参而不是只写在文档里：页面必须把「这个数是快照、不是区间利用率」
+   * 告诉看报表的人。少了这一条，运营会把快照当成区间利用率去做决策。
+   */
+  historicalCaliberGaps: string[];
   generatedAt: string;
+}
+
+/**
+ * REPORT-01B：报表筛选条件。
+ *
+ * 刻意**不含** `workspaceId`：空间一律由服务端按会话解析。让客户端传空间
+ * 等于允许查自己无权进入的空间（需求 4.10「必须使用会话中的租户、经营空间
+ * 和数据范围，不能接受客户端覆盖」）。
+ */
+export interface RentalWorkspaceReportFilter {
+  /** 统计区间，按订单**起租时间**归入。两端可缺省，缺省即不限。 */
+  from?: string;
+  to?: string;
+  /** 履约地点。按下单时的履约地点 id 过滤。 */
+  locationId?: string;
+  /** 客户主档 id。 */
+  customerId?: string;
+  /** 客户类型：个人 / 企业。 */
+  customerType?: "personal" | "corporate";
+}
+
+/**
+ * REPORT-01B：序列化资产口径。**当前快照**，不是区间利用率。
+ *
+ * 为什么只能是快照：`rental_assets` 只存当前 `status`，没有状态变更历史表，
+ * 因此「这段区间里有多少可出租小时」在库里根本不存在。用当前状态去乘区间长度
+ * 得到的比率会被读成历史利用率，而它只是「今天的状态 × 区间长度」——
+ * 那是伪造，不是估算。历史口径缺口登记在 `historicalCaliberGaps`。
+ */
+export interface RentalSerializedAssetUtilization {
+  /** 统计时点：读取这批资产状态的瞬间。区间筛选**不影响**本指标。 */
+  snapshotAt: string;
+  /** 在册资产总数（含停用）。 */
+  totalCount: number;
+  /** 分母：可运营资产数 = 在册总数 - 停用（`disabled`）。 */
+  operableCount: number;
+  /** 分子：当前处于 `rented` 的资产数。 */
+  rentedCount: number;
+  /** `rentedCount / operableCount`；分母为 0 时为 0，不返回 NaN。 */
+  rentedRatio: number;
+  /** 各状态资产数，供解释「不可租的都卡在哪一环」。 */
+  statusBreakdown: Array<{ status: RentalAssetStatus; count: number }>;
+}
+
+/**
+ * REPORT-01B：数量库存口径。同样是**当前快照**。
+ *
+ * `rental_stock_balances` 只存当前三个数量列，没有历史；理由同序列化资产。
+ */
+export interface RentalQuantityStockUtilization {
+  snapshotAt: string;
+  /** 分母：在库总量 `sum(onHandQuantity)`。 */
+  onHandTotal: number;
+  /** 分子：已占用 `sum(reservedQuantity)`。 */
+  reservedTotal: number;
+  /** 维修占用 `sum(maintenanceQuantity)`，既不可租也不算已出租。 */
+  maintenanceTotal: number;
+  /** 可租余量 = 在库 - 已占用 - 维修；负数按 0 截断（数据异常时不返回负库存）。 */
+  availableTotal: number;
+  /** `reservedTotal / onHandTotal`；分母为 0 时为 0。 */
+  reservedRatio: number;
+}
+
+/**
+ * REPORT-01B：区间内订单占用时长。**只有分子，没有比率**。
+ *
+ * 这是区间口径里唯一能从现有事实算出的量：订单的租期时长是订单自己的字段。
+ * 但「可出租时长」需要历史可用状态，库里没有，因此这里刻意不给比率——
+ * 给一个分母靠猜的比率，比不给更糟。
+ */
+export interface RentalOrderOccupancy {
+  /** 参与统计的订单数（与 `orderCount` 同一口径：非草稿 + 筛选后）。 */
+  orderCount: number;
+  /** 租期时长合计（小时，保留两位）。 */
+  totalHours: number;
+  /** 平均租期时长（小时）；订单数为 0 时为 0。 */
+  averageHours: number;
+}
+
+export interface RentalWorkspaceUtilization {
+  serializedAssets: RentalSerializedAssetUtilization;
+  quantityStock: RentalQuantityStockUtilization;
+  orderOccupancy: RentalOrderOccupancy;
+}
+
+/** REPORT-01B：地点维度汇总行。名称取下单时快照，主档改名不改写历史。 */
+export interface RentalWorkspaceLocationBreakdownRow {
+  locationId: string;
+  locationName: string;
+  orderCount: number;
+  rentalRevenue: number;
+  discountTotal: number;
+  receivableTotal: number;
+  exceptionFeeTotal: number;
+}
+
+/**
+ * REPORT-01B：客户维度汇总行。
+ *
+ * 只带客户名与类型。手机号、证件号一概不进报表与导出——报表是给经营看趋势的，
+ * 不是客户资料的第二个出口。
+ */
+export interface RentalWorkspaceCustomerBreakdownRow {
+  /** 存量订单可能没有客户主档 id，此时按订单上的客户名归并。 */
+  customerId?: string;
+  customerName: string;
+  customerType: string;
+  orderCount: number;
+  rentalRevenue: number;
+  discountTotal: number;
+  receivableTotal: number;
+  exceptionFeeTotal: number;
 }
 
 export interface RentalInspectionTemplate {
