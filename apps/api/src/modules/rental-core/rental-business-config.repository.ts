@@ -18,6 +18,11 @@ import { PrismaService } from "../database/prisma.service";
 import type { RentalConfigTx } from "./rental-core-config.repository";
 import { resolveScopeWorkspaceId } from "./workspace-scope";
 
+const canonicalJson = (value: unknown) => JSON.stringify(value, (_key, item: unknown) => {
+  if (!item || typeof item !== "object" || Array.isArray(item)) return item;
+  return Object.fromEntries(Object.entries(item as Record<string, unknown>).sort(([left], [right]) => left.localeCompare(right)));
+});
+
 /** 单个租户的业务配置，用于启动预热写穿缓存。 */
 /**
  * SPACE-03：单个**经营空间**的业务配置。同租户两个空间各有独立的定价、
@@ -227,20 +232,62 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       serviceType: service.serviceType,
       billingUnit: service.billingUnit,
       price: new Prisma.Decimal(service.price),
+      minimumQuantity: service.minimumQuantity,
       maximumQuantity: service.maximumQuantity,
       coverageLimit: money(service.coverageLimit),
       deductible: money(service.deductible),
       termsVersion: service.termsVersion,
       terms: service.terms,
       applicableItemGroupIds: service.applicableItemGroupIds as unknown as Prisma.InputJsonValue,
+      applicableFulfillmentModes: service.applicableFulfillmentModes as unknown as Prisma.InputJsonValue,
+      applicableLocationIds: service.applicableLocationIds as unknown as Prisma.InputJsonValue,
+      customerScope: service.customerScope,
+      selectionMode: service.selectionMode,
+      mandatoryRule: (service.mandatoryRule ?? null) as unknown as Prisma.InputJsonValue,
+      insuranceProviderStatus: service.insuranceProviderStatus ?? null,
+      insuranceProviderName: service.insuranceProviderName ?? null,
+      requiresCapacity: service.requiresCapacity,
       status: service.status,
       version: service.version
     };
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, service.tenantId);
-    await this.prisma.rentalValueAddedService.upsert({
-      where: { id: service.id },
-      create: { workspaceId, id: service.id, ...data, createdAt: new Date(service.createdAt) },
-      update: data
+    const snapshot = JSON.parse(JSON.stringify({ ...service, workspaceId })) as Prisma.InputJsonValue;
+    await this.prisma.$transaction(async (tx) => {
+      await tx.rentalValueAddedService.upsert({
+        where: { id: service.id },
+        create: { workspaceId, id: service.id, ...data, createdAt: new Date(service.createdAt) },
+        update: data
+      });
+      // 当前主档可继续前进，但每个服务版本只追加一次。报价和订单另存正文快照，
+      // 版本表用于运营回放与证明“旧版本没有被原地改写”。
+      const existingVersion = await tx.rentalValueAddedServiceVersion.findUnique({
+        where: {
+          serviceId_serviceVersion: {
+            serviceId: service.id,
+            serviceVersion: service.version
+          }
+        },
+        select: { snapshot: true }
+      });
+      if (existingVersion) {
+        if (canonicalJson(existingVersion.snapshot) !== canonicalJson(snapshot)) {
+          throw new ConflictException(
+            `增值服务 ${service.code} 的版本 ${service.version} 已存在，不能原地改写；请递增服务版本后再保存`
+          );
+        }
+        return;
+      }
+      await tx.rentalValueAddedServiceVersion.create({
+        data: {
+          tenantId: service.tenantId,
+          workspaceId,
+          serviceId: service.id,
+          serviceVersion: service.version,
+          termsVersion: service.termsVersion,
+          snapshot,
+          createdAt: new Date(service.updatedAt)
+        }
+      });
     });
   }
 
@@ -579,12 +626,21 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       serviceType: row.serviceType as RentalValueAddedService["serviceType"],
       billingUnit: row.billingUnit as RentalValueAddedService["billingUnit"],
       price: num(row.price),
+      minimumQuantity: row.minimumQuantity,
       maximumQuantity: row.maximumQuantity,
       coverageLimit: optionalNum(row.coverageLimit),
       deductible: optionalNum(row.deductible),
       termsVersion: row.termsVersion,
       terms: row.terms,
       applicableItemGroupIds: (row.applicableItemGroupIds ?? []) as string[],
+      applicableFulfillmentModes: (row.applicableFulfillmentModes ?? []) as RentalValueAddedService["applicableFulfillmentModes"],
+      applicableLocationIds: (row.applicableLocationIds ?? []) as string[],
+      customerScope: row.customerScope as RentalValueAddedService["customerScope"],
+      selectionMode: row.selectionMode as RentalValueAddedService["selectionMode"],
+      mandatoryRule: (row.mandatoryRule ?? undefined) as RentalValueAddedService["mandatoryRule"],
+      insuranceProviderStatus: (row.insuranceProviderStatus ?? undefined) as RentalValueAddedService["insuranceProviderStatus"],
+      insuranceProviderName: row.insuranceProviderName ?? undefined,
+      requiresCapacity: row.requiresCapacity,
       status: row.status as RentalValueAddedService["status"],
       version: row.version,
       createdAt: iso(row.createdAt),

@@ -138,6 +138,19 @@ export class RentalQuoteServiceInputDto {
   @IsNumber()
   @Min(1)
   quantity!: number;
+
+  @IsOptional()
+  @IsISO8601()
+  scheduledStartAt?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  scheduledEndAt?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  serviceLocationId?: string;
 }
 
 export class RentalInspectionExceptionInputDto {

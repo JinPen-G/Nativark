@@ -170,6 +170,20 @@ assert.equal(quote.couponEvaluation.templateVersion, "1.0", "报价必须记录�
 assert.ok(quote.serviceAmount > 0);
 assert.equal(quote.calendarVersion, `${publishedCalendar.year}:${publishedCalendar.version}`);
 assert.ok(quote.chargeLines.some((line) => line.type === "coupon"));
+// MKT-02A：报价必须固化命中的服务快照（服务、价格、单位数、资格判据与条款正文）。
+// 只有 chargeLines 的话，服务改价改条款后就无从复算这张报价按哪一版收的。
+const quotedService = quote.serviceSnapshots.find((row) => row.serviceId === selectedService.id);
+assert.ok(quotedService, "报价必须保存命中的增值服务快照");
+assert.equal(quotedService.serviceVersion, selectedService.version, "服务快照必须带服务版本");
+assert.equal(quotedService.termsVersion, selectedService.termsVersion, "服务快照必须带条款版本");
+assert.equal(quotedService.terms, selectedService.terms, "服务快照必须整段固化条款正文");
+assert.equal(quotedService.insuredDisplayable, false, "未接入真实保险服务商时不得显示已投保");
+assert.ok(quotedService.eligibility.length >= 5, "服务快照必须逐条记录资格判据");
+assert.equal(
+  quotedService.amount,
+  quote.chargeLines.filter((line) => line.sourceId === selectedService.id).reduce((sum, line) => sum + line.amount, 0),
+  "服务快照金额必须与明细行一致"
+);
 
 // 券状态机（锁定→核销→释放）是业务状态，仍在内存，这里继续断言。
 // 但订单本体已随 RC-01 阶段 3 迁入数据库：core.createOrder 会先查可用量，
@@ -237,12 +251,18 @@ const damageWaiver = await business.saveService(tenantId, context(), {
   serviceType: "damage_waiver",
   billingUnit: "per_order",
   price: 80,
+  minimumQuantity: 1,
   maximumQuantity: 1,
   coverageLimit: 5000,
   deductible: 200,
   termsVersion: "1.0",
   terms: "每单免赔上限 5000 元，免赔额 200 元。",
   applicableItemGroupIds: [],
+  applicableFulfillmentModes: [],
+  applicableLocationIds: [],
+  customerScope: "all",
+  selectionMode: "optional",
+  requiresCapacity: false,
   status: "enabled"
 });
 const damageQuote = { ...quote, request: { ...quote.request, services: [{ serviceId: damageWaiver.id, quantity: 1 }] } };

@@ -62,6 +62,8 @@
     "test:calendar-range": "npm run build -w @store-rental/shared && node tests/rental-calendar-range.test.cjs",
     "test:price-adjustment": "npm run build -w @store-rental/shared && node tests/rental-price-adjustment.test.cjs",
     "test:discount-selection": "npm run build -w @store-rental/shared && node tests/rental-discount-selection.test.cjs",
+    "test:service-catalog": "npm run build -w @store-rental/shared && node tests/rental-service-catalog.test.cjs",
+    "test:service-capacity": "npm run build -w @store-rental/shared && node tests/rental-service-capacity.test.cjs",
     "test:coupon-budget": "npm run build -w @store-rental/shared && node tests/rental-coupon-budget.test.cjs",
     "test:coupon-budget-mutation": "node tests/rental-coupon-budget-mutation.test.cjs",
     "test:price-version": "npm run build -w @store-rental/shared && node tests/rental-price-version.test.cjs"

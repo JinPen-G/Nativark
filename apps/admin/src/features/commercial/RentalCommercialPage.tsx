@@ -1,8 +1,8 @@
 import { EditOutlined, HistoryOutlined, PlusOutlined } from "@ant-design/icons";
 import { RENTAL_PRICING_UNIT_LABELS } from "@store-rental/shared";
-import type { CreateRentalPriceAdjustmentRequest, RentalDiscountPlan, RentalPriceAdjustmentPreviewRow, RentalPricingPlanV1, RentalValueAddedService, SaveRentalDiscountPlanRequest, SaveRentalPricingPlanRequest, SaveRentalValueAddedServiceRequest } from "@store-rental/shared";
+import type { CreateRentalPriceAdjustmentRequest, RentalDiscountPlan, RentalPriceAdjustmentPreviewRow, RentalPricingPlanV1, RentalServiceCapacity, RentalValueAddedService, SaveRentalDiscountPlanRequest, SaveRentalPricingPlanRequest, SaveRentalServiceCapacityRequest, SaveRentalValueAddedServiceRequest } from "@store-rental/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Button, Card, Col, DatePicker, Drawer, Form, Input, InputNumber, Modal, Popconfirm, Row, Select, Space, Table, Tag, Typography } from "antd";
+import { Alert, App, Button, Card, Col, DatePicker, Drawer, Form, Input, InputNumber, Modal, Popconfirm, Row, Select, Space, Switch, Table, Tag, Typography } from "antd";
 import dayjs from "dayjs";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -39,10 +39,13 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
   const [cancelReason, setCancelReason] = useState("");
   const [discountEditor, setDiscountEditor] = useState<RentalDiscountPlan | null>();
   const [serviceEditor, setServiceEditor] = useState<RentalValueAddedService | null>();
+  const [capacityService, setCapacityService] = useState<RentalValueAddedService | null>();
+  const [capacityEditor, setCapacityEditor] = useState<RentalServiceCapacity | null>();
   const [pricingForm] = Form.useForm<SaveRentalPricingPlanRequest>();
   const [adjustmentForm] = Form.useForm<CreateRentalPriceAdjustmentRequest & { scheduledAtValue?: dayjs.Dayjs }>();
   const [discountForm] = Form.useForm<SaveRentalDiscountPlanRequest>();
   const [serviceForm] = Form.useForm<SaveRentalValueAddedServiceRequest>();
+  const [capacityForm] = Form.useForm<SaveRentalServiceCapacityRequest & { window?: [dayjs.Dayjs, dayjs.Dayjs] }>();
   const profile = useQuery({
     queryKey: ["rental-core", "profile"],
     queryFn: rentalCoreApi.profile,
@@ -63,9 +66,18 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
     queryKey: ["rental-core", "discount-plans"],
     queryFn: rentalCoreApi.discountPlans,
   });
+  const locations = useQuery({
+    queryKey: ["rental-core", "locations"],
+    queryFn: rentalCoreApi.locations,
+  });
   const services = useQuery({
     queryKey: ["rental-core", "value-added-services"],
     queryFn: rentalCoreApi.valueAddedServices,
+  });
+  const capacities = useQuery({
+    queryKey: ["rental-core", "service-capacities", capacityService?.id],
+    queryFn: () => rentalCoreApi.serviceCapacities(capacityService!.id),
+    enabled: Boolean(capacityService?.id),
   });
   const versions = useQuery({
     queryKey: ["rental-core", "price-versions"],
@@ -173,6 +185,24 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
     },
     onError: () => message.error("保存失败，请检查服务条款、价格和适用商品"),
   });
+  const saveCapacity = useMutation({
+    mutationFn: (values: SaveRentalServiceCapacityRequest & { window?: [dayjs.Dayjs, dayjs.Dayjs] }) => {
+      const { window, ...rest } = values;
+      return rentalCoreApi.saveServiceCapacity({
+        ...rest,
+        serviceId: capacityService!.id,
+        windowStart: window?.[0].toISOString() ?? rest.windowStart,
+        windowEnd: window?.[1].toISOString() ?? rest.windowEnd,
+      });
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["rental-core", "service-capacities", capacityService?.id] });
+      setCapacityEditor(null);
+      capacityForm.resetFields();
+      message.success("服务容量窗口已保存");
+    },
+    onError: () => message.error("保存失败，请检查时段是否重叠及容量是否小于已占用数量"),
+  });
 
   function editPricing(record?: RentalPricingPlanV1) {
     const rates: SaveRentalPricingPlanRequest["rates"] = record
@@ -254,14 +284,32 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
         serviceType: "other",
         billingUnit: "per_order",
         price: 0,
+        minimumQuantity: 1,
         maximumQuantity: 1,
         termsVersion: "1.0",
         terms: "",
         applicableItemGroupIds: [],
+        applicableFulfillmentModes: [],
+        applicableLocationIds: [],
+        customerScope: "all",
+        selectionMode: "optional",
+        requiresCapacity: false,
         status: "enabled",
       },
     );
     setServiceEditor(record ?? ({} as RentalValueAddedService));
+  }
+
+  function editCapacity(record?: RentalServiceCapacity) {
+    capacityForm.setFieldsValue(record
+      ? { ...record, window: [dayjs(record.windowStart), dayjs(record.windowEnd)] }
+      : {
+          serviceId: capacityService!.id,
+          locationId: locations.data?.[0]?.id,
+          totalCapacity: 1,
+          status: "enabled",
+        });
+    setCapacityEditor(record ?? ({} as RentalServiceCapacity));
   }
 
   const sectionTitle = section === "pricing" ? "基础定价" : section === "discounts" ? "优惠方案" : "增值服务";
@@ -461,6 +509,11 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
                 },
                 { title: "条款版本", dataIndex: "termsVersion" },
                 {
+                  title: "容量",
+                  dataIndex: "requiresCapacity",
+                  render: (value) => <Tag color={value ? "processing" : "default"}>{value ? "需要预留" : "无容量限制"}</Tag>,
+                },
+                {
                   title: "状态",
                   dataIndex: "status",
                   render: (value) => <Tag color={value === "enabled" ? "success" : "default"}>{value}</Tag>,
@@ -468,9 +521,12 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
                 {
                   title: "操作",
                   render: (_, row) => (
-                    <Button type="link" icon={<EditOutlined />} onClick={() => editService(row)}>
-                      编辑
-                    </Button>
+                    <Space>
+                      {row.requiresCapacity && <Button type="link" onClick={() => setCapacityService(row)}>容量窗口</Button>}
+                      <Button type="link" icon={<EditOutlined />} onClick={() => editService(row)}>
+                        编辑
+                      </Button>
+                    </Space>
                   ),
                 },
               ]}
@@ -1057,8 +1113,11 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
                 <Select
                   options={[
                     { value: "per_order", label: "每订单" },
-                    { value: "per_day", label: "每天" },
-                    { value: "per_unit", label: "每件" },
+                    { value: "per_unit", label: "每份/每件" },
+                    { value: "per_day", label: "每自然日" },
+                    { value: "per_night", label: "每晚" },
+                    { value: "per_hour", label: "每小时" },
+                    { value: "per_rental_period", label: "每租期" },
                   ]}
                 />
               </Form.Item>
@@ -1068,19 +1127,39 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
                 <InputNumber min={0} precision={2} style={{ width: "100%" }} />
               </Form.Item>
             </Col>
-            <Col span={8}>
+            <Col span={6}>
+              <Form.Item name="minimumQuantity" label="最小数量">
+                <InputNumber min={1} style={{ width: "100%" }} />
+              </Form.Item>
+            </Col>
+            <Col span={6}>
               <Form.Item name="maximumQuantity" label="最大数量">
                 <InputNumber min={1} style={{ width: "100%" }} />
               </Form.Item>
             </Col>
-            <Col span={8}>
+            <Col span={6}>
               <Form.Item name="coverageLimit" label="保障限额">
                 <InputNumber min={0} style={{ width: "100%" }} />
               </Form.Item>
             </Col>
-            <Col span={8}>
+            <Col span={6}>
               <Form.Item name="deductible" label="免赔额">
                 <InputNumber min={0} style={{ width: "100%" }} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="customerScope" label="适用客户">
+                <Select options={[{ value: "all", label: "全部" }, { value: "personal", label: "个人" }, { value: "corporate", label: "企业" }]} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="selectionMode" label="选择方式">
+                <Select options={[{ value: "optional", label: "客户可选" }, { value: "recommended", label: "系统推荐" }, { value: "mandatory", label: "条件强制" }]} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="requiresCapacity" label="需要容量预留" valuePropName="checked">
+                <Switch />
               </Form.Item>
             </Col>
           </Row>
@@ -1093,6 +1172,43 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
               }))}
             />
           </Form.Item>
+          <Form.Item name="applicableFulfillmentModes" label="适用履约方式（空为全部）">
+            <Select mode="multiple" options={(settings.data?.fulfillment.enabledModes ?? []).map((value) => ({ value, label: value }))} />
+          </Form.Item>
+          <Form.Item name="applicableLocationIds" label="适用地点（空为全部）">
+            <Select mode="multiple" options={(locations.data ?? []).map((row) => ({ value: row.id, label: row.name }))} />
+          </Form.Item>
+          <Form.Item noStyle shouldUpdate={(previous, current) => previous.selectionMode !== current.selectionMode}>
+            {({ getFieldValue }) => getFieldValue("selectionMode") === "mandatory" ? (
+              <Card size="small" title="条件强制触发规则">
+                <Form.Item name={["mandatoryRule", "itemGroupIds"]} label="命中商品">
+                  <Select mode="multiple" options={(groups.data ?? []).map((row) => ({ value: row.id, label: row.name }))} />
+                </Form.Item>
+                <Form.Item name={["mandatoryRule", "fulfillmentModes"]} label="命中履约方式">
+                  <Select mode="multiple" options={(settings.data?.fulfillment.enabledModes ?? []).map((value) => ({ value, label: value }))} />
+                </Form.Item>
+                <Form.Item name={["mandatoryRule", "minRentalAmount"]} label="最低租金">
+                  <InputNumber min={0} precision={2} style={{ width: "100%" }} />
+                </Form.Item>
+              </Card>
+            ) : null}
+          </Form.Item>
+          <Form.Item noStyle shouldUpdate={(previous, current) => previous.serviceType !== current.serviceType}>
+            {({ getFieldValue }) => getFieldValue("serviceType") === "insurance" ? (
+              <Row gutter={12}>
+                <Col span={12}>
+                  <Form.Item name="insuranceProviderStatus" label="保险接入状态">
+                    <Select options={[{ value: "simulated", label: "模拟" }, { value: "reserved", label: "预留能力" }]} />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item name="insuranceProviderName" label="服务商名称">
+                    <Input />
+                  </Form.Item>
+                </Col>
+              </Row>
+            ) : null}
+          </Form.Item>
           <Form.Item name="termsVersion" label="条款版本">
             <Input />
           </Form.Item>
@@ -1101,6 +1217,67 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
           </Form.Item>
         </Form>
       </Drawer>
+      <Drawer
+        title={`${capacityService?.name ?? "服务"} · 容量窗口`}
+        width={760}
+        open={Boolean(capacityService)}
+        onClose={() => { setCapacityService(null); setCapacityEditor(null); }}
+        extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => editCapacity()}>新增容量窗口</Button>}
+      >
+        <Alert
+          type="info"
+          showIcon
+          message="报价只检查容量；订单创建后预留，确认后锁定，取消或超时释放。"
+          style={{ marginBottom: 16 }}
+        />
+        <QueryState loading={capacities.isLoading} error={capacities.error}>
+          <Table<RentalServiceCapacity>
+            rowKey="id"
+            dataSource={capacities.data ?? []}
+            columns={[
+              { title: "地点", dataIndex: "locationId", render: (value) => locations.data?.find((row) => row.id === value)?.name ?? value },
+              { title: "开始", dataIndex: "windowStart", render: (value) => dayjs(value).format("YYYY-MM-DD HH:mm") },
+              { title: "结束", dataIndex: "windowEnd", render: (value) => dayjs(value).format("YYYY-MM-DD HH:mm") },
+              { title: "总量", dataIndex: "totalCapacity" },
+              { title: "已预留", dataIndex: "reservedQuantity" },
+              { title: "已确认/使用", dataIndex: "usedQuantity" },
+              { title: "状态", dataIndex: "status", render: (value) => <Tag color={value === "enabled" ? "success" : "default"}>{value}</Tag> },
+              { title: "操作", render: (_, row) => <Button type="link" onClick={() => editCapacity(row)}>编辑</Button> },
+            ]}
+          />
+        </QueryState>
+      </Drawer>
+      <Modal
+        title={capacityEditor?.id ? "编辑容量窗口" : "新增容量窗口"}
+        open={Boolean(capacityEditor)}
+        confirmLoading={saveCapacity.isPending}
+        onCancel={() => setCapacityEditor(null)}
+        onOk={() => capacityForm.submit()}
+        destroyOnHidden
+      >
+        <Form form={capacityForm} layout="vertical" onFinish={(values) => saveCapacity.mutate(values)}>
+          <Form.Item name="id" hidden><Input /></Form.Item>
+          <Form.Item name="serviceId" hidden><Input /></Form.Item>
+          <Form.Item name="locationId" label="服务地点" rules={[{ required: true }]}>
+            <Select options={(locations.data ?? []).map((row) => ({ value: row.id, label: row.name }))} />
+          </Form.Item>
+          <Form.Item name="window" label="可服务时段" rules={[{ required: true }]}>
+            <DatePicker.RangePicker showTime style={{ width: "100%" }} />
+          </Form.Item>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item name="totalCapacity" label="同时服务数量" rules={[{ required: true }]}>
+                <InputNumber min={1} precision={0} style={{ width: "100%" }} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="status" label="状态" rules={[{ required: true }]}>
+                <Select options={[{ value: "enabled", label: "启用" }, { value: "disabled", label: "停用" }]} />
+              </Form.Item>
+            </Col>
+          </Row>
+        </Form>
+      </Modal>
     </>
   );
 }

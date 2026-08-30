@@ -30,10 +30,12 @@ import {
   SaveRentalPricingPlanDto,
   SaveRentalRuleVersionDto,
   SaveRentalValueAddedServiceDto,
+  SaveRentalServiceCapacityDto,
 } from "./rental-config-request.dto";
 import { OfficialCalendarSourceService } from "./official-calendar-source.service";
 import { RentalCoreService } from "./rental-core.service";
 import { RentalIdempotentActionService } from "./rental-idempotent-action.service";
+import { RentalServiceCapacityService } from "./rental-service-capacity.service";
 
 interface AuthenticatedRequest { user: SystemUserRow; headers?: Record<string, unknown>; }
 
@@ -67,7 +69,8 @@ export class RentalBusinessController {
     private readonly business: RentalBusinessService,
     private readonly core: RentalCoreService,
     private readonly idempotent: RentalIdempotentActionService,
-    private readonly officialSources: OfficialCalendarSourceService
+    private readonly officialSources: OfficialCalendarSourceService,
+    private readonly serviceCapacities: RentalServiceCapacityService
   ) {}
 
   private context(tenantId: string): BusinessContext {
@@ -145,6 +148,15 @@ export class RentalBusinessController {
   @Get("value-added-services") services(@Req() req: AuthenticatedRequest) { return this.business.listServices(req.user.tenantId, this.context(req.user.tenantId)); }
   @Post("value-added-services") async createService(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalValueAddedServiceDto) { return this.committed(req.user.tenantId, await this.business.saveService(req.user.tenantId, this.context(req.user.tenantId), body)); }
   @Put("value-added-services/:id") async updateService(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalValueAddedServiceDto) { return this.committed(req.user.tenantId, await this.business.saveService(req.user.tenantId, this.context(req.user.tenantId), { ...body, id })); }
+  @Get("service-capacities") serviceCapacityList(@Req() req: AuthenticatedRequest, @Query("serviceId") serviceId?: string) {
+    return this.serviceCapacities.listCapacities(req.user.tenantId, serviceId);
+  }
+  @Post("service-capacities") createServiceCapacity(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalServiceCapacityDto) {
+    return this.serviceCapacities.saveCapacity(req.user.tenantId, body);
+  }
+  @Put("service-capacities/:id") updateServiceCapacity(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalServiceCapacityDto) {
+    return this.serviceCapacities.saveCapacity(req.user.tenantId, { ...body, id });
+  }
 
   /**
    * 读取年度日历。附带「是否有官方更新」（需求 4.5.2：平台登记新官方版本后，为空间生成

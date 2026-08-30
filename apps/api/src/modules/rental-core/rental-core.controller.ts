@@ -43,6 +43,7 @@ import { RentalIdempotentActionService } from "./rental-idempotent-action.servic
 import { RentalWorkspaceReportRepository } from "./rental-workspace-report.repository";
 import { resolveScopeWorkspaceId } from "./workspace-scope";
 import { PrismaService } from "../database/prisma.service";
+import { RentalServiceCapacityService } from "./rental-service-capacity.service";
 
 /** 读取标准 Idempotency-Key 请求头。大小写不敏感，超长键直接拒绝。 */
 /**
@@ -86,7 +87,8 @@ export class RentalCoreController {
     private readonly orderConfirmation: RentalOrderConfirmationService,
     private readonly idempotent: RentalIdempotentActionService,
     private readonly workspaceReports: RentalWorkspaceReportRepository,
-    private readonly prisma: PrismaService
+    private readonly prisma: PrismaService,
+    private readonly serviceCapacities: RentalServiceCapacityService
   ) {}
 
   private context(tenantId: string): BusinessContext {
@@ -196,6 +198,7 @@ export class RentalCoreController {
       orderId: id,
       run: async (tx) => {
         const confirmed = await this.service.confirmOrder(tenantId, id, tx, req.user.displayName);
+        await this.serviceCapacities.confirmForOrder(tenantId, id, new Date().toISOString(), tx);
         await this.business.redeemCouponInTransaction(tenantId, id, tx);
         return confirmed;
       },
@@ -295,6 +298,7 @@ export class RentalCoreController {
       run: async (tx) => {
         const cancelled = await this.service.cancelOrder(req.user.tenantId, id, body.reason, charge, tx, req.user.displayName);
         await this.business.releaseCouponInTransaction(req.user.tenantId, id, tx);
+        await this.serviceCapacities.releaseForOrder(req.user.tenantId, id, "order_cancelled", new Date().toISOString(), tx);
         return cancelled;
       },
       replay: async () => {
@@ -343,7 +347,10 @@ export class RentalCoreController {
       orderId: id,
       run: async (tx) => {
         const created = await this.service.createInspection(tenantId, id, body, req.user.displayName, charges, tx);
-        if (stage === "return") await this.business.completeCustomerOrderEventInTransaction(tenantId, context, created.order.customerId, tx);
+        if (stage === "return") {
+          await this.serviceCapacities.markUsedForOrder(tenantId, id, returnedAt, tx);
+          await this.business.completeCustomerOrderEventInTransaction(tenantId, context, created.order.customerId, tx);
+        }
         return created;
       },
       replay: async () => {
@@ -382,7 +389,10 @@ export class RentalCoreController {
       orderId: id,
       run: async (tx) => {
         const completed = await this.service.completeHandoverWithoutInspection(tenantId, id, stage, overdueCharge, tx, req.user.displayName);
-        if (stage === "return") await this.business.completeCustomerOrderEventInTransaction(tenantId, context, completed.customerId, tx);
+        if (stage === "return") {
+          await this.serviceCapacities.markUsedForOrder(tenantId, id, returnedAt, tx);
+          await this.business.completeCustomerOrderEventInTransaction(tenantId, context, completed.customerId, tx);
+        }
         return completed;
       },
       replay: async () => {

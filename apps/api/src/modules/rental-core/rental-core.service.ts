@@ -947,6 +947,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       // Review P1-6：完整例外快照。风险代码之外还要留原因、确认人、权限、时间与
       // 被确认的判断 id，否则配货与后续履约无从还原「风险已被谁按什么依据裁决」。
       capabilityExceptions: this.buildExceptionSnapshots(input, quote),
+      // MKT-02A：订单直接继承报价已经确认的服务事实，不回读可变服务主档。
+      serviceSnapshots: quote.serviceSnapshots?.length ? structuredClone(quote.serviceSnapshots) : undefined,
       capabilityPolicy: quote.capabilitySnapshot?.length ? "snapshot" : "legacy_empty",
       // CUSTOMER-01C：四类主体原样固化。Core 不做客户域判定，只存已解析的结果。
       contractSubjectCustomerId: subjects?.contractSubjectCustomerId,

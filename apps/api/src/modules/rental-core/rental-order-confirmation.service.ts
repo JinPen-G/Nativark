@@ -24,6 +24,7 @@ import {
 import { RentalCoreService } from "./rental-core.service";
 import { CustomerCorporateService } from "../platform/customer-corporate.service";
 import { CustomerOperationsService } from "../platform/customer-operations.service";
+import { RentalServiceCapacityService } from "./rental-service-capacity.service";
 
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalize);
@@ -65,6 +66,7 @@ function quoteSnapshotFingerprint(quote: RentalQuoteSnapshotV1) {
     appliedDiscountPlanIds: quote.appliedDiscountPlanIds,
     customerCouponId: quote.customerCouponId,
     couponEvaluation: quote.couponEvaluation,
+    serviceSnapshots: quote.serviceSnapshots,
     capabilitySnapshot: quote.capabilitySnapshot,
     capabilityDecisions: quote.capabilityDecisions,
     expiresAt: quote.expiresAt
@@ -116,7 +118,8 @@ export class RentalOrderConfirmationService {
      * CUSTOMER-01：真实订单创建必须消费客户可交易门禁。
      * 保留可选注入仅兼容直接 new 本服务的既有单测；生产 Nest 容器始终注册该服务。
      */
-    @Optional() private readonly customerOperations?: CustomerOperationsService
+    @Optional() private readonly customerOperations?: CustomerOperationsService,
+    @Optional() private readonly serviceCapacities?: RentalServiceCapacityService
   ) {}
 
   /**
@@ -240,6 +243,10 @@ export class RentalOrderConfirmationService {
             : []
         });
         await this.coreFacts.saveOrderAggregate(order, [], tx);
+
+        // 服务容量与订单聚合、库存预占、报价消费、券锁定同一事务。
+        // 任一步失败时容量增量和预留流水必须一起回滚，不能留下“没订单但占容量”。
+        await this.serviceCapacities?.reserveForOrder(tenantId, order, key, tx);
 
         const storedQuote = await this.businessFacts.findQuote(tenantId, quote.id, tx);
         if (!storedQuote) throw new ConflictException("报价事实不存在，请重新报价");

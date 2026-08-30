@@ -52,6 +52,7 @@ import { WorkspaceCapabilityService } from "./modules/rental-core/workspace-capa
 import { CapabilityHookRuntime } from "./modules/rental-core/capability-hook.runtime";
 import { CapabilityHookRepository } from "./modules/rental-core/capability-hook.repository";
 import { CapabilityHookRegistrar } from "./modules/rental-core/capability-hook.registrar";
+import { RentalServiceCapacityService } from "./modules/rental-core/rental-service-capacity.service";
 
 @Module({
   imports: [
@@ -104,6 +105,7 @@ import { CapabilityHookRegistrar } from "./modules/rental-core/capability-hook.r
     RentalIdempotencyRepository,
     RentalIdempotentActionService,
     RentalOrderConfirmationService,
+    RentalServiceCapacityService,
     WorkspaceCapabilityRepository,
     WorkspaceCapabilityService,
     CapabilityHookRuntime,
