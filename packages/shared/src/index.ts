@@ -6046,6 +6046,20 @@ export interface SaveRentalPricingPlanRequest {
   fulfillmentFees?: RentalFulfillmentFee[];
 }
 
+/**
+ * 优惠可作用的费用对象（需求 4.4.10）。
+ *
+ * 刻意不含押金、预授权与异常费用：需求明确「标准租金优惠不得含糊地减免押金、
+ * 预授权或异常费用」。把它们排除在类型之外，而不是靠运行时判断——
+ * 判断可以漏写，类型不会。
+ */
+export const RENTAL_DISCOUNT_TARGETS = ["rental", "fulfillment", "service"] as const;
+export type RentalDiscountTarget = (typeof RENTAL_DISCOUNT_TARGETS)[number];
+
+/** 优惠类型（需求 4.4.10 第一阶段三种）。复杂规则须另建模型，不得塞进这三个字段。 */
+export const RENTAL_DISCOUNT_TYPES = ["percentage", "fixed_amount", "threshold_amount"] as const;
+export type RentalDiscountType = (typeof RENTAL_DISCOUNT_TYPES)[number];
+
 export interface RentalDiscountPlan {
   id: string;
   tenantId: string;
@@ -6053,14 +6067,29 @@ export interface RentalDiscountPlan {
   code: string;
   name: string;
   status: "draft" | "enabled" | "disabled";
-  discountType: "percentage" | "fixed_amount";
+  /**
+   * `percentage` 按基数百分比；`fixed_amount` 固定减免；
+   * `threshold_amount` 满 `thresholdAmount` 减 `discountValue`（满额固定减免）。
+   */
+  discountType: RentalDiscountType;
   discountValue: number;
   minimumSpend: number;
+  /** 满额固定减免的门槛。`discountType === "threshold_amount"` 时必填。 */
+  thresholdAmount?: number;
   maximumDiscount?: number;
+  /** 作用的费用对象。缺省 `rental`（商品租金与使用量费用）。 */
+  appliesTo: RentalDiscountTarget;
   customerScope: "all" | "personal" | "corporate" | "member";
   applicableItemGroupIds: string[];
   applicableDayTypes: RentalDayType[];
   priority: number;
+  /**
+   * 互斥组（需求 4.4.10「同一互斥组只能应用一个优惠」）。
+   * 留空表示自成一组：它只与自己互斥，不会挤掉别的方案。
+   */
+  exclusiveGroup?: string;
+  /** 是否允许与**其他优惠方案**同时应用（跨互斥组叠加需双方都允许）。 */
+  stackableWithOtherPlans: boolean;
   stackableWithCoupon: boolean;
   effectiveFrom: string;
   effectiveTo?: string;
@@ -6072,6 +6101,62 @@ export interface RentalDiscountPlan {
 export interface SaveRentalDiscountPlanRequest extends Omit<RentalDiscountPlan, "id" | "tenantId" | "categoryCode" | "version" | "createdAt" | "updatedAt"> {
   id?: string;
   changeReason: string;
+}
+
+/** 优惠方案未被应用的原因码（需求 4.4.10：未应用优惠必须有可解释的原因）。 */
+export const RENTAL_DISCOUNT_SKIP_REASONS = [
+  "status_not_enabled",
+  "outside_effective_period",
+  "below_minimum_spend",
+  "below_threshold",
+  "customer_scope_mismatch",
+  "item_group_mismatch",
+  "day_type_mismatch",
+  "no_chargeable_target",
+  "exclusive_group_lost",
+  "not_stackable_with_applied",
+  "zero_discount"
+] as const;
+export type RentalDiscountSkipReason = (typeof RENTAL_DISCOUNT_SKIP_REASONS)[number];
+
+/**
+ * 单个优惠方案在一张报价里的评估结论。
+ *
+ * `candidateAmount` 与 `discountAmount` 必须分开：互斥竞争要按「若应用会减免多少」
+ * 比大小，而落选方案的实际减免是 0。只存后者就无法解释「它输给谁、差多少」。
+ */
+export interface RentalQuoteDiscountEvaluation {
+  planId: string;
+  planCode: string;
+  planName: string;
+  planVersion: string;
+  /** 方案所属经营空间。营销权益按空间隔离，快照必须能证明用的是本空间的方案。 */
+  workspaceId: string;
+  appliesTo: RentalDiscountTarget;
+  discountType: RentalDiscountType;
+  priority: number;
+  exclusiveGroup?: string;
+  stackableWithOtherPlans: boolean;
+  stackableWithCoupon: boolean;
+  applied: boolean;
+  skipReason?: RentalDiscountSkipReason;
+  /** 人类可读的落选说明，含竞争对手编码与金额差。 */
+  skipDetail?: string;
+  /** 逐项资格判据，按需求「生成报价时校验并展示资格」。 */
+  eligibility: Array<{ rule: string; passed: boolean; detail?: string }>;
+  /** 该作用对象的优惠前金额。 */
+  grossAmount: number;
+  /** 实际计算基数：已扣除本作用对象上先前叠加的优惠。 */
+  base: number;
+  /** 计算公式文本，供报价明细直接展示。 */
+  formula: string;
+  /** 若被应用，本方案能减免多少（互斥比较用的就是这个值）。 */
+  candidateAmount: number;
+  /** 实际减免；未应用时为 0。 */
+  discountAmount: number;
+  maximumDiscount?: number;
+  /** 是否被最大优惠金额截断。 */
+  capped: boolean;
 }
 
 export interface RentalValueAddedService {
@@ -6460,6 +6545,16 @@ export interface RentalQuoteSnapshotV1 {
    */
   calendarWarnings: string[];
   appliedDiscountPlanIds: string[];
+  /**
+   * 每个候选优惠方案的评估结论（需求 4.4.10「报价必须展示已应用优惠、满足但因互斥
+   * 未应用的优惠及原因」，以及「保存资格判断、优惠前金额、每项计算基数、优惠公式、
+   * 实际减免金额和作用对象」）。
+   *
+   * 与 `appliedDiscountPlanIds` 并存而非替代：后者是「应用了哪些」的索引，
+   * 这里是「每个候选为什么被应用或落选」的完整依据。客服要向客户解释
+   * 「为什么用的是 A 券不是 B 券」时，只有这份记录能回答。
+   */
+  discountEvaluations: RentalQuoteDiscountEvaluation[];
   customerCouponId?: string;
   /**
    * CORE-EXT-02D：报价生成时该经营空间**已启用能力**的版本快照。

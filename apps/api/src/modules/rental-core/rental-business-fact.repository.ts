@@ -235,6 +235,8 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       ruleSnapshot: quote.ruleSnapshot as unknown as Prisma.InputJsonValue,
       calendarVersion: quote.calendarVersion ?? null,
       appliedDiscountPlanIds: quote.appliedDiscountPlanIds as unknown as Prisma.InputJsonValue,
+      // MKT-01A：逐方案评估随报价固化。方案后续改配置不得改变这张报价的解释。
+      discountEvaluations: (quote.discountEvaluations ?? []) as unknown as Prisma.InputJsonValue,
       // CORE-EXT-02D：固化报价生成时已启用能力的版本快照，下单时拷进订单。
       capabilitySnapshot: (quote.capabilitySnapshot ?? null) as unknown as Prisma.InputJsonValue,
       capabilityDecisions: (quote.capabilityDecisions ?? null) as unknown as Prisma.InputJsonValue,
@@ -434,6 +436,7 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       ruleSnapshot: row.ruleSnapshot as unknown as RentalRuleConfig,
       calendarVersion: row.calendarVersion ?? undefined,
       appliedDiscountPlanIds: (row.appliedDiscountPlanIds ?? []) as string[],
+      discountEvaluations: (row.discountEvaluations ?? []) as unknown as RentalQuoteSnapshotV1["discountEvaluations"],
       capabilitySnapshot: (row.capabilitySnapshot ?? undefined) as unknown as RentalQuoteSnapshotV1["capabilitySnapshot"],
       capabilityDecisions: (row.capabilityDecisions ?? undefined) as unknown as RentalQuoteSnapshotV1["capabilityDecisions"],
       customerCouponId: row.customerCouponId ?? undefined,
