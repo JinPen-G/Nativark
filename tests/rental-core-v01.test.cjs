@@ -35,6 +35,18 @@ void (async () => {
 await service.onApplicationBootstrap();
 await business.onApplicationBootstrap();
 
+// R1：普通新空间不得自动生成演示地址、电话或经营主体。缺少经营配置时应保持空白待配置。
+const realTenant = "tenant_real_r1";
+const realWorkspace = "ws_tenant_real_r1";
+const realService = new RentalCoreService(
+  createAbsorbingConfigStore([{ id: realWorkspace, tenantId: realTenant, categoryCode: "camera", isDefault: true }]),
+  createAbsorbingFactStore()
+);
+await realService.onApplicationBootstrap();
+assert.deepEqual(realService.listOperators(realTenant), [], "普通空间不得生成演示经营主体");
+assert.deepEqual(realService.listLocations(realTenant), [], "普通空间不得生成演示地址和电话");
+assert.deepEqual(realService.listItemGroups(realTenant), [], "普通空间不得生成演示商品");
+
 const cameraProfile = service.getProfile(cameraTenant);
 const campingProfile = service.getProfile(campingTenant);
 assert.equal(cameraProfile.categoryCode, "camera");
@@ -219,7 +231,15 @@ const constructionGroup = await service.saveItemGroup(newTenant, {
   attributes: { manufacturer: "测试重工", model: "E20" },
   status: "enabled"
 });
-const constructionLocation = service.listLocations(newTenant)[0];
+const constructionLocation = await service.saveLocation(newTenant, {
+  code: "CON-WH-01",
+  name: "工程设备仓",
+  type: "warehouse",
+  operatorType: "self_operated",
+  operatorName: "自营工程团队",
+  capabilities: ["pickup", "return", "storage"],
+  status: "enabled"
+});
 await assert.rejects(async () => service.saveAsset(newTenant, {
   itemGroupId: constructionGroup.id,
   assetNo: "EXC-ASSET-001",

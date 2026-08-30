@@ -323,4 +323,3 @@ function ReportBody({ data }: { data: RentalWorkspaceOperationReport }) {
     </>
   );
 }
-

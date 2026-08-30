@@ -1,5 +1,5 @@
 import { ApartmentOutlined, LockOutlined, SafetyCertificateOutlined, UserOutlined } from "@ant-design/icons";
-import { Alert, App, Button, Card, Form, Input, Typography } from "antd";
+import { App, Button, Card, Form, Input, Typography } from "antd";
 import { isAxiosError } from "axios";
 import { useNavigate } from "react-router-dom";
 import { AppearanceSwitcher } from "@/components/AppearanceSwitcher";
@@ -24,8 +24,7 @@ export function LoginPage() {
               <Typography.Title level={2}>登录运营台</Typography.Title>
               <Typography.Paragraph type="secondary">使用租户账号进入对应品类的租赁工作区。</Typography.Paragraph>
             </div>
-          <Alert type="info" showIcon message="租户演示：demo / admin / RentalDemo!2026；SaaS 管理：platform / admin / RentalOS!2026" />
-          <Form form={form} layout="vertical" requiredMark={false} initialValues={{ tenantCode: "demo", account: "admin", password: "RentalDemo!2026" }} onFinish={async (values) => {
+          <Form form={form} layout="vertical" requiredMark={false} onFinish={async (values) => {
               try {
                 await login(values.tenantCode, values.account, values.password);
                 message.success("登录成功");

@@ -1749,7 +1749,19 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       ? buildRentalCategorySamples({ tenantId, idPrefix, categoryCode, location, timestamp })
       : { itemGroups: [], assets: [], stockBalances: [] };
     const templates = this.buildInspectionTemplates(tenantId, categoryCode, idPrefix);
-    return { profile: { tenantId, categoryCode, capabilities: [...definition.defaultCapabilities] as RentalCapability[], terminology: { ...definition.terminology }, configVersion: definition.version, initializedAt: timestamp, updatedAt: timestamp }, businessSettings: defaultBusinessSettings(tenantId, definition), couponTemplates: [], operators: [operator], locations: [location], itemGroups: samples.itemGroups, inspectionTemplates: templates, sampleAssets: samples.assets, sampleStockBalances: samples.stockBalances };
+    return {
+      profile: { tenantId, categoryCode, capabilities: [...definition.defaultCapabilities] as RentalCapability[], terminology: { ...definition.terminology }, configVersion: definition.version, initializedAt: timestamp, updatedAt: timestamp },
+      businessSettings: defaultBusinessSettings(tenantId, definition),
+      couponTemplates: [],
+      // 只有明确的演示租户才生成演示经营主体与地址。普通租户/新空间保持待配置，
+      // 避免把虚构电话和地址当成真实履约事实进入报价与订单快照。
+      operators: isSampleTenant ? [operator] : [],
+      locations: isSampleTenant ? [location] : [],
+      itemGroups: samples.itemGroups,
+      inspectionTemplates: templates,
+      sampleAssets: samples.assets,
+      sampleStockBalances: samples.stockBalances
+    };
   }
 
   private buildInspectionTemplates(tenantId: string, categoryCode: RentalCategoryCode, idPrefix: string): RentalInspectionTemplate[] {
