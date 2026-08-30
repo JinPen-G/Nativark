@@ -3839,6 +3839,7 @@ export enum RentalCoreOrderStatus {
   ReadyForPickup = "ready_for_pickup",
   Renting = "renting",
   ReturnInspection = "return_inspection",
+  Settling = "settling",
   Completed = "completed",
   Cancelled = "cancelled"
 }

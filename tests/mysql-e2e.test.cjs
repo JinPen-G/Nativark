@@ -350,6 +350,40 @@ async function bootstrapTenant(platformToken, tenantCode, categoryCode) {
   return { ...session, password: newPassword };
 }
 
+async function prepareMockFunding(order, token, keyPrefix) {
+  if (Number(order.depositAmount) > 0) {
+    const deposit = await request("POST", `/api/rental/v1/orders/${order.id}/funding-events/initiate`, {
+      instrument: "deposit", idempotencyKey: `${keyPrefix}:deposit`, reason: "E2E 领取前模拟收取押金"
+    }, token);
+    assert.equal(deposit.status, 201, `模拟押金收取失败: ${JSON.stringify(deposit.body).slice(0, 200)}`);
+  }
+  if (Number(order.preAuthAmount) > 0) {
+    const preauth = await request("POST", `/api/rental/v1/orders/${order.id}/funding-events/initiate`, {
+      instrument: "preauthorization", idempotencyKey: `${keyPrefix}:preauth`, reason: "E2E 领取前模拟冻结预授权"
+    }, token);
+    assert.equal(preauth.status, 201, `模拟预授权冻结失败: ${JSON.stringify(preauth.body).slice(0, 200)}`);
+  }
+}
+
+async function closeMockFundedOrder(orderId, token, keyPrefix) {
+  const balance = await request("GET", `/api/rental/v1/orders/${orderId}/funding-events`, null, token);
+  assert.equal(balance.status, 200, "结算前读取模拟资金余额失败");
+  if (Number(balance.body.data.deposit.balance) > 0) {
+    const refunded = await request("POST", `/api/rental/v1/orders/${orderId}/funding-events/refund`, {
+      instrument: "deposit", amount: balance.body.data.deposit.balance,
+      idempotencyKey: `${keyPrefix}:deposit-refund`, reason: "E2E 结算退还剩余押金"
+    }, token);
+    assert.equal(refunded.status, 201, "结算退还模拟押金失败");
+  }
+  if (Number(balance.body.data.preauthorization.balance) > 0) {
+    const released = await request("POST", `/api/rental/v1/orders/${orderId}/funding-events/release`, {
+      idempotencyKey: `${keyPrefix}:preauth-release`, reason: "E2E 结算释放剩余预授权"
+    }, token);
+    assert.equal(released.status, 201, "结算释放模拟预授权失败");
+  }
+  return request("POST", `/api/rental/v1/orders/${orderId}/settle`, {}, token);
+}
+
 /**
  * 公共官方日历来源（需求 4.5.2/4.5.8）。
  *
@@ -765,16 +799,20 @@ async function main() {
   assert.ok(allocated.allocations.length >= 3, "序列化+套装组件应完成分配");
   const trackedAssetId = allocated.allocations[0].assetId;
   assert.equal((await assetStatus()).find((row) => row.id === trackedAssetId).status, "reserved", "分配后资产应为 reserved");
+  await prepareMockFunding(order.body.data, demo.accessToken, `e2e:${orderId}`);
   const pickupTemplate = (await request("GET", "/api/rental/v1/inspection-templates?stage=pickup", null, demo.accessToken)).body.data[0];
   const pickedUp = (await request("POST", `/api/rental/v1/orders/${orderId}/inspections`, { templateId: pickupTemplate.id, results: { appearance_ok: true, function_ok: true, shutter_count: 9000 } }, demo.accessToken)).body.data;
   assert.equal(pickedUp.order.status, "renting");
   assert.equal((await assetStatus()).find((row) => row.id === trackedAssetId).status, "rented", "领取后资产应为 rented");
   const returnTemplate = (await request("GET", "/api/rental/v1/inspection-templates?stage=return", null, demo.accessToken)).body.data[0];
   const returned = (await request("POST", `/api/rental/v1/orders/${orderId}/inspections`, { templateId: returnTemplate.id, results: { appearance_ok: true, function_ok: true, shutter_count: 9100 }, exceptions: [{ code: "damage", description: "E2E 损坏", chargeAmount: 66 }] }, demo.accessToken)).body.data;
-  assert.equal(returned.order.status, "completed");
+  assert.equal(returned.order.status, "settling");
   assert.ok(returned.order.finalPayableAmount > returned.order.payableAmount, "损坏费应进入最终应付");
   assert.equal((await assetStatus()).find((row) => row.id === trackedAssetId).status, "available", "归还后资产应释放为 available");
-  ok(`全链路完成 ${returned.order.orderNo}，套装+损坏费+资产状态流转正确`);
+  const r1Settled = await closeMockFundedOrder(orderId, demo.accessToken, `e2e:${orderId}`);
+  assert.equal(r1Settled.status, 201, "资金归零后应能结算关闭");
+  assert.equal(r1Settled.body.data.status, "completed");
+  ok(`全链路完成 ${returned.order.orderNo}，套装+损坏费+资产状态+资金结算正确`);
 
   console.log("== 9.1 CAT-03 套装替代、组成拆分与部分归还 ==");
   const cat03Groups = [];
@@ -861,6 +899,7 @@ async function main() {
     [alternateBattery.id, cable.id].sort(),
     "套装拆分后的分配必须保存实际组成商品"
   );
+  await prepareMockFunding(cat03Order.body.data, demo.accessToken, `e2e:${cat03OrderId}`);
   const cat03Pickup = await request(
     "POST", `/api/rental/v1/orders/${cat03OrderId}/inspections`,
     { templateId: pickupTemplate.id, results: { appearance_ok: true, function_ok: true, shutter_count: 100 } },
@@ -892,8 +931,10 @@ async function main() {
     demo.accessToken
   );
   assert.equal(cat03Returned.status, 201, "CAT-03 最终归还检查失败");
-  assert.equal(cat03Returned.body.data.order.status, "completed");
+  assert.equal(cat03Returned.body.data.order.status, "settling");
   assert.ok(cat03Returned.body.data.order.reservations.every((row) => row.status === "released" && row.releasedQuantity === row.quantity), "最终归还必须释放全部组成预占");
+  const cat03Settled = await closeMockFundedOrder(cat03OrderId, demo.accessToken, `e2e:${cat03OrderId}`);
+  assert.equal(cat03Settled.body.data.status, "completed", "CAT-03 资金归零后必须关闭");
   const cat03PricingDisabled = await request(
     "PUT", `/api/rental/v1/pricing-plans/${cat03Pricing.body.data.id}`,
     { effectiveFrom: cat03Pricing.body.data.effectiveFrom, code: "E2E-CAT03-PRICE", name: "CAT-03 套装定价", changeReason: "CAT-03 用例完成后停用，避免影响后续默认定价", status: "disabled", rates: [{ itemGroupId: cat03Bundle.id, unit: "day_24h", baseAmount: 80, weekendMultiplier: 1, holidayMultiplier: 1, depositAmount: 200, minimumUnits: 1 }] },
@@ -1002,6 +1043,7 @@ async function main() {
     3,
     "套装展开后帐篷合并占用应为 2+1=3"
   );
+  await prepareMockFunding(campingOrder.body.data, demo2.accessToken, `e2e:${campingOrderId}`);
   const campingPickupTemplate = (await request("GET", "/api/rental/v1/inspection-templates?stage=pickup", null, demo2.accessToken)).body.data[0];
   await request(
     "POST",
@@ -1016,8 +1058,10 @@ async function main() {
     { templateId: campingReturnTemplate.id, results: { count_ok: false, cleanliness: "严重污损" }, exceptions: [{ code: "missing_part", description: "帐篷地钉缺失 2 枚", chargeAmount: 35 }, { code: "soiled", description: "折叠椅严重污损", chargeAmount: 20 }] },
     demo2.accessToken
   )).body.data;
-  assert.equal(campingReturned.order.status, "completed");
+  assert.equal(campingReturned.order.status, "settling");
   assert.equal(campingReturned.order.finalPayableAmount, campingReturned.order.payableAmount + 55, "缺件与污损费用应进入最终应付");
+  const campingSettled = await closeMockFundedOrder(campingOrderId, demo2.accessToken, `e2e:${campingOrderId}`);
+  assert.equal(campingSettled.body.data.status, "completed", "露营订单资金归零后必须关闭");
   const campingStockAfter = (await request("GET", "/api/rental/v1/stock-balances", null, demo2.accessToken)).body.data.find((row) => row.itemGroupId === tent.id);
   assert.equal(campingStockAfter.availableQuantity, tentStockBefore.availableQuantity, "完成后数量库存应完整释放");
   const demo2Orders = (await request("GET", "/api/rental/v1/orders", null, demo2.accessToken)).body.data;
@@ -1566,6 +1610,7 @@ async function main() {
   await request("POST", `/api/rental/v1/orders/${vehicleOrderId}/confirm`, {}, vehicleA.accessToken);
   const vehicleAllocated = (await request("POST", `/api/rental/v1/orders/${vehicleOrderId}/allocate`, {}, vehicleA.accessToken)).body.data;
   assert.ok(vehicleAllocated.allocations.length === 1 && vehicleAllocated.allocations[0].assetId, "序列化资产应绑定具体车辆");
+  await prepareMockFunding(vehicleOrder.body.data, vehicleA.accessToken, `e2e:${vehicleOrderId}`);
   const vehiclePickupTemplate = (await request("GET", "/api/rental/v1/inspection-templates?stage=pickup", null, vehicleA.accessToken)).body.data[0];
   await request(
     "POST",
@@ -1580,12 +1625,14 @@ async function main() {
     { templateId: vehicleReturnTemplate.id, results: { appearance_ok: true, function_ok: true, usage_reading: 1580 } },
     vehicleA.accessToken
   )).body.data;
-  assert.equal(vehicleReturned.order.status, "completed");
+  assert.equal(vehicleReturned.order.status, "settling");
   assert.ok(
     vehicleReturned.order.chargeLines.some((line) => line.type === "overdue"),
     "逾期还车应产生逾期费用行"
   );
   assert.ok(vehicleReturned.order.finalPayableAmount > vehicleReturned.order.payableAmount, "逾期费应进入最终应付");
+  const vehicleSettled = await closeMockFundedOrder(vehicleOrderId, vehicleA.accessToken, `e2e:${vehicleOrderId}`);
+  assert.equal(vehicleSettled.body.data.status, "completed", "车辆订单资金归零后必须关闭");
   ok("车辆 Rental Core 闭环：资质拦截、序列化绑定、逾期费联动");
 
   console.log("== 15. 工程设备品类深度用例：班次计价、资质拦截与损坏费 ==");
@@ -1644,6 +1691,7 @@ async function main() {
   const constructionOrderId = constructionOrder.body.data.id;
   await request("POST", `/api/rental/v1/orders/${constructionOrderId}/confirm`, {}, construction.accessToken);
   await request("POST", `/api/rental/v1/orders/${constructionOrderId}/allocate`, {}, construction.accessToken);
+  await prepareMockFunding(constructionOrder.body.data, construction.accessToken, `e2e:${constructionOrderId}`);
   const constructionPickupTemplate = (await request("GET", "/api/rental/v1/inspection-templates?stage=pickup", null, construction.accessToken)).body.data[0];
   await request(
     "POST",
@@ -1658,7 +1706,7 @@ async function main() {
     { templateId: constructionReturnTemplate.id, results: { appearance_ok: false, function_ok: true, usage_reading: 356 }, exceptions: [{ code: "damage", description: "铲斗液压油管破损", chargeAmount: 800 }] },
     construction.accessToken
   )).body.data;
-  assert.equal(constructionReturned.order.status, "completed");
+  assert.equal(constructionReturned.order.status, "settling");
   assert.equal(constructionReturned.order.finalPayableAmount, constructionReturned.order.payableAmount + 800, "工程损坏费应进入最终应付");
   // 订单侧的明细与总额同样要自洽（需求 4.4.1「明细之和等于对应总额」）。
   // 订单的明细是报价明细的拷贝，再追加取消/逾期/损坏这类异常费用，因此对应关系是：
@@ -1684,6 +1732,8 @@ async function main() {
     orderLines.some((row) => adjustmentTypes.has(row.type)),
     `前置条件：本节应已产生异常费用明细，实际类型：${orderLines.map((row) => row.type).join("/")}`
   );
+  const constructionSettled = await closeMockFundedOrder(constructionOrderId, construction.accessToken, `e2e:${constructionOrderId}`);
+  assert.equal(constructionSettled.body.data.status, "completed", "工程订单资金归零后必须关闭");
   ok("工程设备闭环：班次计价、资质拦截、损坏费联动，订单明细与总额对账一致");
 
   console.log("== 15b. PRICE-01 报价可复算、阶梯价与封顶价 ==");
@@ -4803,6 +4853,7 @@ async function main() {
   // 还原今天并发布，确认与领取恢复正常。
   await request("POST", `/api/rental/v1/calendars/${recheckYear}/days/range-remove`, { startDate: recheckToday, endDate: recheckToday, overrideReason: "E2E 领取复查清理" }, construction.accessToken);
   await request("POST", `/api/rental/v1/calendars/${recheckYear}/publish`, { changeReason: "E2E 领取复查清理发布" }, construction.accessToken);
+  await prepareMockFunding(recheckOrder, construction.accessToken, `e2e:${recheckOrder.id}`);
   // 正向对照：该品类规则要求先完成领取检查，因此还原后领取仍是 409——但消息从
   // 「停止营业」变为「领取检查」，证明请求越过了营业状态复查、进入下一层业务规则。
   const recheckPickupOk = await request("POST", `/api/rental/v1/orders/${recheckOrder.id}/handover/pickup`, null, construction.accessToken);
@@ -8979,6 +9030,7 @@ async function main() {
     "ready_for_pickup",
     "配货 Hook 接入后配货必须仍然成功"
   );
+  await prepareMockFunding(hookOrder.body.data, hookToken, `e2e:${hookOrderId}`);
   const hookPickupTemplate = (await request("GET", "/api/rental/v1/inspection-templates?stage=pickup", null, hookToken)).body.data[0];
   const hookPickedUp = await request(
     "POST",
@@ -8996,7 +9048,9 @@ async function main() {
     hookToken
   );
   assert.equal(hookReturned.status, 201, `归还检查失败: ${hookReturned.status} ${JSON.stringify(hookReturned.body).slice(0, 300)}`);
-  assert.equal(hookReturned.body.data.order.status, "completed", "归还检查与结算 Hook 接入后归还必须仍然成功");
+  assert.equal(hookReturned.body.data.order.status, "settling", "归还检查后必须进入待结算");
+  const hookSettled = await closeMockFundedOrder(hookOrderId, hookToken, `e2e:${hookOrderId}`);
+  assert.equal(hookSettled.body.data.status, "completed", "结算 Hook 接入后订单必须关闭");
 
   // 商品建档 Hook：saveItemGroup 已在上面建夹具时走过一次（数量商品），
   // 这里再建一个，确认建档节点在能力已启用后仍然放行。

@@ -75,6 +75,12 @@ void (async () => {
     }
   });
 
+  await assert.rejects(
+    prisma.$transaction((tx) => funding.assertReadyForPickup(tenantId, workspace.id, orderId, tx)),
+    /足额收取押金/,
+    "未处理押金与预授权时不得领取"
+  );
+
   const deposit = await funding.recordEvent(tenantId, workspace.id, orderId, {
     instrument: "deposit", action: "initiate", idempotencyKey: `${tag}:deposit`, reason: "按订单快照收取"
   }, "专项");
@@ -85,9 +91,21 @@ void (async () => {
   assert.equal(replay.id, deposit.id, "同键重放返回原事件");
   assert.equal(await prisma.rentalFundingEvent.count({ where: { orderId, instrument: "deposit", action: "initiate" } }), 1);
 
+  await assert.rejects(
+    prisma.$transaction((tx) => funding.assertReadyForPickup(tenantId, workspace.id, orderId, tx)),
+    /足额冻结预授权/,
+    "只收押金但未冻结预授权时仍不得领取"
+  );
+
   await funding.recordEvent(tenantId, workspace.id, orderId, {
     instrument: "preauthorization", action: "initiate", idempotencyKey: `${tag}:preauth`, reason: "按订单快照冻结"
   }, "专项");
+  await prisma.$transaction((tx) => funding.assertReadyForPickup(tenantId, workspace.id, orderId, tx));
+  await assert.rejects(
+    prisma.$transaction((tx) => funding.assertReadyToClose(tenantId, workspace.id, orderId, tx)),
+    /押金余额/,
+    "资金余额未处理完不得关闭"
+  );
   const raced = await Promise.allSettled([
     funding.recordEvent(tenantId, workspace.id, orderId, {
       instrument: "preauthorization", action: "capture", amount: 500, idempotencyKey: `${tag}:capture-a`, reason: "并发转扣 A"
@@ -110,6 +128,10 @@ void (async () => {
   }, "专项");
   assert.equal(released.amount, beforeRelease.preauthorization.balance, "不传金额时释放服务端计算的全部余额");
   assert.equal((await funding.listEvents(tenantId, workspace.id, orderId)).preauthorization.balance, 0);
+  await funding.recordEvent(tenantId, workspace.id, orderId, {
+    instrument: "deposit", action: "refund", amount: 500, idempotencyKey: `${tag}:refund`, reason: "退还全部押金"
+  }, "专项");
+  await prisma.$transaction((tx) => funding.assertReadyToClose(tenantId, workspace.id, orderId, tx));
 
   await prisma.rentalOrder.delete({ where: { id: orderId } });
   console.log("Funding service DB assertions passed.");

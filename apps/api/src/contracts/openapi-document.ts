@@ -2305,6 +2305,10 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: "Complete pickup or return handover when inspection is not required", permissions: ["store-rental:order:operate", "store-rental:vehicle:manage"], responseSchema: "GenericObject"
   },
   {
+    method: "post", path: "/api/rental/v1/orders/{id}/settle", tag: "RentalCore", operationId: "settleRentalCoreOrder",
+    summary: "Settle and close a returned Rental Core order", permissions: ["store-rental:order:settle"], responseSchema: "GenericObject"
+  },
+  {
     method: "get", path: "/api/rental/v1/inspection-templates", tag: "RentalCore", operationId: "listRentalInspectionTemplates",
     summary: "List category inspection templates", permissions: ["store-rental:order:view", "store-rental:vehicle:view"], responseSchema: "GenericObject"
   },

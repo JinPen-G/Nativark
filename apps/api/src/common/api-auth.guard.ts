@@ -342,6 +342,7 @@ export function requiredPermissions(method: string, path: string) {
   }
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/cancel$/)) return ["store-rental:order:cancel", "store-rental:order:operate"];
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/(confirm|allocate|substitute-bundle-component|partial-return|handover\/[^/]+)$/)) return ["store-rental:order:operate"];
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/settle$/)) return ["store-rental:order:settle"];
   // RULE-01B：押金/预授权模拟资金事件。读用 order:view 或 order:settle；
   // 发起/追加/抵扣/退款/释放/失败是资金动作，只认 order:settle（订单结算权限）。
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/funding-events(\/[^/]+)?$/)) {

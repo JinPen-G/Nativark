@@ -32,7 +32,8 @@ const statusLabels: Record<string, string> = {
   [RentalCoreOrderStatus.ReadyForPickup]: "待取",
   [RentalCoreOrderStatus.Renting]: "在租",
   [RentalCoreOrderStatus.ReturnInspection]: "归还检查",
-  [RentalCoreOrderStatus.Completed]: "已完成",
+  [RentalCoreOrderStatus.Settling]: "待结算",
+  [RentalCoreOrderStatus.Completed]: "已关闭",
   [RentalCoreOrderStatus.Cancelled]: "已取消"
 };
 

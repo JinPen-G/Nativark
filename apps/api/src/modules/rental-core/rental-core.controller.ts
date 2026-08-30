@@ -46,6 +46,7 @@ import { RentalWorkspaceReportRepository } from "./rental-workspace-report.repos
 import { resolveScopeWorkspaceId } from "./workspace-scope";
 import { PrismaService } from "../database/prisma.service";
 import { RentalServiceCapacityService } from "./rental-service-capacity.service";
+import { RentalFundingService } from "./rental-funding.service";
 
 /** 读取标准 Idempotency-Key 请求头。大小写不敏感，超长键直接拒绝。 */
 /**
@@ -90,7 +91,8 @@ export class RentalCoreController {
     private readonly idempotent: RentalIdempotentActionService,
     private readonly workspaceReports: RentalWorkspaceReportRepository,
     private readonly prisma: PrismaService,
-    private readonly serviceCapacities: RentalServiceCapacityService
+    private readonly serviceCapacities: RentalServiceCapacityService,
+    private readonly funding: RentalFundingService
   ) {}
 
   private context(tenantId: string): BusinessContext {
@@ -389,8 +391,8 @@ export class RentalCoreController {
         }
       : {};
     const stage = template?.stage;
-    // 目标状态：取件检查后进入 renting，归还检查后进入 completed。
-    const targetStatus = stage === "pickup" ? RentalCoreOrderStatus.Renting : RentalCoreOrderStatus.Completed;
+    // 归还只进入待结算；资金账处理完后再独立关闭订单。
+    const targetStatus = stage === "pickup" ? RentalCoreOrderStatus.Renting : RentalCoreOrderStatus.Settling;
     const { result, replayed } = await this.idempotent.executeWithReplayFlag({
       tenantId,
       action: "order.inspection",
@@ -403,10 +405,10 @@ export class RentalCoreController {
       request: { orderId: id, templateId: body.templateId, results: body.results, exceptions: body.exceptions ?? [] },
       orderId: id,
       run: async (tx) => {
+        if (stage === "pickup") await this.funding.assertReadyForPickup(tenantId, this.service.resolveWorkspaceId(tenantId), id, tx);
         const created = await this.service.createInspection(tenantId, id, body, req.user.displayName, charges, tx);
         if (stage === "return") {
           await this.serviceCapacities.markUsedForOrder(tenantId, id, returnedAt, tx);
-          await this.business.completeCustomerOrderEventInTransaction(tenantId, context, created.order.customerId, tx);
         }
         return created;
       },
@@ -441,7 +443,7 @@ export class RentalCoreController {
       await this.business.assertPickupOpenAt(tenantId, context, current.fulfillmentLocationId, returnedAt, current.fulfillmentMode);
     }
     const overdueCharge = stage === "return" ? this.business.calculateOverdueCharge(tenantId, context, this.business.getQuote(tenantId, context, current.quoteId), returnedAt) : 0;
-    const targetStatus = stage === "pickup" ? RentalCoreOrderStatus.Renting : RentalCoreOrderStatus.Completed;
+    const targetStatus = stage === "pickup" ? RentalCoreOrderStatus.Renting : RentalCoreOrderStatus.Settling;
     const { result: order, replayed } = await this.idempotent.executeWithReplayFlag({
       tenantId,
       action: "order.handover",
@@ -450,10 +452,10 @@ export class RentalCoreController {
       request: { orderId: id, stage },
       orderId: id,
       run: async (tx) => {
+        if (stage === "pickup") await this.funding.assertReadyForPickup(tenantId, this.service.resolveWorkspaceId(tenantId), id, tx);
         const completed = await this.service.completeHandoverWithoutInspection(tenantId, id, stage, overdueCharge, tx, req.user.displayName);
         if (stage === "return") {
           await this.serviceCapacities.markUsedForOrder(tenantId, id, returnedAt, tx);
-          await this.business.completeCustomerOrderEventInTransaction(tenantId, context, completed.customerId, tx);
         }
         return completed;
       },
@@ -470,6 +472,31 @@ export class RentalCoreController {
         await this.emitOrderEvent(tenantId, "order.overdue", order);
       }
     }
+    return this.committed(tenantId, order);
+  }
+
+  @Post("orders/:id/settle") async settle(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
+    const tenantId = req.user.tenantId;
+    const context = this.context(tenantId);
+    const order = await this.idempotent.execute({
+      tenantId,
+      action: "order.settle",
+      key: idempotencyKeyOf(req),
+      fallbackKey: `order.settle:${id}`,
+      request: { orderId: id },
+      orderId: id,
+      run: async (tx) => {
+        await this.funding.assertReadyToClose(tenantId, this.service.resolveWorkspaceId(tenantId), id, tx);
+        const settled = await this.service.settleOrder(tenantId, id, tx, req.user.displayName);
+        await this.business.completeCustomerOrderEventInTransaction(tenantId, context, settled.customerId, tx);
+        return settled;
+      },
+      replay: async () => {
+        const current = await this.service.getOrder(tenantId, id);
+        return current.status === RentalCoreOrderStatus.Completed ? current : undefined;
+      }
+    });
+    await this.business.refreshFromDatabase();
     return this.committed(tenantId, order);
   }
 }

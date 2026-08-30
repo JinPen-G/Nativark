@@ -231,6 +231,7 @@ export const rentalCoreApi = {
   partialReturnOrder: (id: string, data: PartialReturnRentalOrderRequest) => request<RentalOrder>(`/rental/v1/orders/${id}/partial-return`, { method: "post", data }),
   cancelOrder: (id: string, data: { reason: string; weatherException?: boolean }) => request<RentalOrder>(`/rental/v1/orders/${id}/cancel`, { method: "post", data }),
   handoverOrder: (id: string, stage: "pickup" | "return") => request<RentalOrder>(`/rental/v1/orders/${id}/handover/${stage}`, { method: "post" }),
+  settleOrder: (id: string) => request<RentalOrder>(`/rental/v1/orders/${id}/settle`, { method: "post" }),
   inspectionTemplates: (stage?: "pickup" | "return") => request<RentalInspectionTemplate[]>("/rental/v1/inspection-templates", { params: { stage } }),
   inspections: (id: string) => request<RentalInspectionRecord[]>(`/rental/v1/orders/${id}/inspections`),
   createInspection: (id: string, data: CreateRentalInspectionRequest) => request<{ inspection: RentalInspectionRecord; order: RentalOrder }>(`/rental/v1/orders/${id}/inspections`, { method: "post", data }),

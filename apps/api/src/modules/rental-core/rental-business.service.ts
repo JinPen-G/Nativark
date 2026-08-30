@@ -2501,7 +2501,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     // 与日历同一口径——用 UTC 会在跨日边界把订单算进或漏掉一天。
     const timeZone = context.settings.calendar.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE;
     const affected = new Set(dates.map((item) => item.date));
-    const closedStatuses = new Set(["completed", "closed", "cancelled"]);
+    const closedStatuses = new Set(["settling", "completed", "closed", "cancelled"]);
     const now = Date.now();
     const futureOrders: RentalCalendarPublishPreviewOrder[] = [];
     for (const order of orders) {

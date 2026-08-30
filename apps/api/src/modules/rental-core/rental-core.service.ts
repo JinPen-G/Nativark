@@ -1245,7 +1245,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   async cancelOrder(tenantId: string, orderId: string, reason: string, chargeAmount = 0, tx?: RentalFactTx, operator?: string) {
     this.state(tenantId);
     const order = await this.lockedOrder(tenantId, orderId, tx);
-    if ([RentalCoreOrderStatus.Renting, RentalCoreOrderStatus.Completed, RentalCoreOrderStatus.Cancelled].includes(order.status)) throw new ConflictException("当前订单状态不能取消");
+    if ([RentalCoreOrderStatus.Renting, RentalCoreOrderStatus.Settling, RentalCoreOrderStatus.Completed, RentalCoreOrderStatus.Cancelled].includes(order.status)) throw new ConflictException("当前订单状态不能取消");
     if (!reason?.trim()) throw new BadRequestException("取消原因不能为空");
     // 结算 Hook：取消费用是一笔真实结算。能力可以给出费用**依据**或提示，
     // 但金额如何计入由下面的 Core 逻辑决定——能力拿到的是冻结快照，改不了 order。
@@ -1290,17 +1290,6 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       if (order.ruleSnapshot.fulfillment.returnInspectionRequired) throw new ConflictException("当前规则要求完成归还检查");
       if (order.status !== RentalCoreOrderStatus.Renting) throw new ConflictException("只有租赁中的订单可以归还");
       await this.runHook(tenantId, "return_inspection", { type: "order", id: order.id }, order, tx, operator, this.orderHookInstances(tenantId, order));
-      // 归还即结算：逾期费在这一步计入。归还检查判定"物"，结算判定"钱"，
-      // 因此是两个触发点，能力可以只关心其中一个。
-      await this.runHook(
-        tenantId,
-        "settlement",
-        { type: "order", id: order.id },
-        { order, settlement: { kind: "return", overdueCharge } },
-        tx,
-        operator,
-        this.orderHookInstances(tenantId, order)
-      );
       this.finishReturn(order, overdueCharge, assetChanges);
     }
     order.updatedAt = now();
@@ -1400,13 +1389,33 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   }
 
   private finishReturn(order: RentalOrder, overdueCharge: number, assetChanges: AssetStatusChange[]) {
-    order.status = RentalCoreOrderStatus.Completed; order.completedAt = now();
+    // 归还只代表实物已回库。资金余额和异常费用仍须独立结算，不能直接冒充订单已关闭。
+    order.status = RentalCoreOrderStatus.Settling;
     order.reservations.forEach((row) => { row.status = RentalReservationStatus.Released; row.releasedQuantity = row.quantity; });
     order.allocations.forEach((row) => {
       row.status = "returned";
       if (row.assetId) assetChanges.push({ assetId: row.assetId, status: RentalAssetStatus.Available });
     });
-    if (overdueCharge > 0) this.applyOverdueTo(order, overdueCharge, order.completedAt);
+    if (overdueCharge > 0) this.applyOverdueTo(order, overdueCharge, now());
+  }
+
+  async settleOrder(tenantId: string, orderId: string, tx: RentalFactTx, operator?: string) {
+    const order = await this.lockedOrder(tenantId, orderId, tx);
+    if (order.status !== RentalCoreOrderStatus.Settling) throw new ConflictException("只有已归还待结算的订单可以关闭");
+    await this.runHook(
+      tenantId,
+      "settlement",
+      { type: "order", id: order.id },
+      { order, settlement: { kind: "close", finalPayableAmount: order.finalPayableAmount } },
+      tx,
+      operator,
+      this.orderHookInstances(tenantId, order)
+    );
+    order.status = RentalCoreOrderStatus.Completed;
+    order.completedAt = now();
+    order.updatedAt = order.completedAt;
+    await this.factStore.saveOrderAggregate(order, [], tx);
+    return order;
   }
 
   /**

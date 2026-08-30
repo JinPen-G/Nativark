@@ -510,14 +510,15 @@ const crossYearQuote = await business.createQuote(tenantId, context(), {
 });
 assert.match(crossYearQuote.calendarVersion, /\|/, "cross-year quotes must snapshot every calendar year");
 
-const template = business.listNotificationTemplates(tenantId, context())[0];
+const template = business.listNotificationTemplates(tenantId, context()).find((item) => item.eventCode === "order.created");
+assert.ok(template, "必须存在订单创建通知模板");
 const sendLog = await business.sendNotification(tenantId, context(), {
   templateId: template.id,
   recipient: "member_001",
   variables: { customerName: "露营测试会员", orderNo: "RC-NOTIFY-TEST-001" }
 });
-assert.equal(sendLog.status, "sent");
-assert.equal(sendLog.provider, "mock-notification-adapter");
+assert.equal(sendLog.status, "simulated");
+assert.equal(sendLog.provider, "simulation");
 assert.equal(sendLog.templateVersion, template.version);
 await assert.rejects(async () => business.sendNotification(tenantId, context(), { templateId: template.id, recipient: "member_001", variables: {} }), /缺少通知变量/);
 

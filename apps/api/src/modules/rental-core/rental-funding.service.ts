@@ -96,6 +96,45 @@ export class RentalFundingService {
     };
   }
 
+  private async lockedOrderScope(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    workspaceId: string,
+    orderId: string
+  ): Promise<{ depositAmount: number; preAuthAmount: number }> {
+    const rows = await tx.$queryRaw<Array<{ depositAmount: Prisma.Decimal; preAuthAmount: Prisma.Decimal }>>(Prisma.sql`
+      SELECT depositAmount, preAuthAmount
+        FROM rental_orders
+       WHERE id = ${orderId} AND tenantId = ${tenantId} AND workspaceId = ${workspaceId}
+       FOR UPDATE
+    `);
+    const order = rows[0];
+    if (!order) throw new NotFoundException("订单不存在或不属于当前经营空间");
+    return { depositAmount: Number(order.depositAmount), preAuthAmount: Number(order.preAuthAmount) };
+  }
+
+  /** 领取前必须已经按订单快照足额收取押金、冻结预授权。 */
+  async assertReadyForPickup(tenantId: string, workspaceId: string, orderId: string, tx: Prisma.TransactionClient): Promise<void> {
+    const order = await this.lockedOrderScope(tx, tenantId, workspaceId, orderId);
+    const ledgers = deriveFundingLedgers(await this.loadEvents(tx, tenantId, workspaceId, orderId));
+    if (order.depositAmount > 0 && ledgers.deposit.collected < order.depositAmount) {
+      throw new ConflictException(`领取前须足额收取押金 ¥${order.depositAmount.toFixed(2)}`);
+    }
+    if (order.preAuthAmount > 0 && ledgers.preauthorization.frozen < order.preAuthAmount) {
+      throw new ConflictException(`领取前须足额冻结预授权 ¥${order.preAuthAmount.toFixed(2)}`);
+    }
+  }
+
+  /** 关闭前两条模拟资金账都必须已经走完事件链并归零。 */
+  async assertReadyToClose(tenantId: string, workspaceId: string, orderId: string, tx: Prisma.TransactionClient): Promise<void> {
+    const order = await this.lockedOrderScope(tx, tenantId, workspaceId, orderId);
+    const ledgers = deriveFundingLedgers(await this.loadEvents(tx, tenantId, workspaceId, orderId));
+    if (order.depositAmount > 0 && ledgers.deposit.collected < order.depositAmount) throw new ConflictException("订单押金尚未足额收取，不能关闭");
+    if (order.preAuthAmount > 0 && ledgers.preauthorization.frozen < order.preAuthAmount) throw new ConflictException("订单预授权尚未足额冻结，不能关闭");
+    if (ledgers.deposit.balance > 0) throw new ConflictException("仍有押金余额，请先抵扣或退款");
+    if (ledgers.preauthorization.balance > 0) throw new ConflictException("仍有预授权冻结额度，请先转扣或释放");
+  }
+
   /**
    * 记录一次资金事件。amount 对 fail 以外的动作必须为正。failureCode 只在 fail 时有意义。
    * 幂等：命中既有同键事件时校验请求一致后回放；并发下靠唯一键兜底（P2002 → 回读回放）。
