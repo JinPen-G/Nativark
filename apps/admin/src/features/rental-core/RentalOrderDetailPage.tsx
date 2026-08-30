@@ -130,14 +130,23 @@ export function RentalOrderDetailPage() {
         { title: "操作", render: (_, row) => detail.status === RentalCoreOrderStatus.Reserved && canSubstituteReservation(row) ? <Button type="link" icon={<RetweetOutlined />} onClick={() => setSubstitution({ orderLineId: row.orderLineId, fromItemGroupId: row.itemGroupId })}>替换组成</Button> : "-" }
       ]} />}</Card>
       <Card title="费用与版本快照"><Table rowKey="code" pagination={false} dataSource={detail.chargeLines} columns={[{ title: "费用项", dataIndex: "name" }, { title: "类型", dataIndex: "type" }, { title: "来源版本", dataIndex: "sourceVersion", render: (value) => value ?? "-" }, { title: "说明", dataIndex: "detail", render: (value) => value ?? "-" }, { title: "金额", dataIndex: "amount", render: (value) => `¥${Number(value).toFixed(2)}` }]} /></Card>
-      <Card title="检查与异常审核"><Table rowKey={(row) => `${row.inspectionId}:${row.exceptionIndex}`} pagination={false} dataSource={(inspections.data ?? []).flatMap((record) => record.exceptions.map((exception, exceptionIndex) => ({ ...exception, inspectionId: record.id, exceptionIndex, stage: record.stage, operator: record.operator })))} columns={[
+      <Card title="检查、使用量与异常审核"><Space direction="vertical" style={{ width: "100%" }} size={16}>
+        <Table rowKey={(row) => `${row.inspectionId}:${row.fieldCode}`} size="small" pagination={false} dataSource={(inspections.data ?? []).flatMap((record) => (record.usageReadings ?? []).map((reading) => ({ ...reading, inspectionId: record.id, stage: record.stage })))} columns={[
+          { title: "阶段", dataIndex: "stage", render: (value) => value === "pickup" ? "领取基线" : "归还读数" },
+          { title: "读数字段", dataIndex: "fieldCode" },
+          { title: "领取基线", dataIndex: "baseline", render: (value) => value ?? "-" },
+          { title: "归还原始值", dataIndex: "current" },
+          { title: "使用量", dataIndex: "delta", render: (value) => value ?? "-" }
+        ]} />
+        <Table rowKey={(row) => `${row.inspectionId}:${row.exceptionIndex}`} pagination={false} dataSource={(inspections.data ?? []).flatMap((record) => record.exceptions.map((exception, exceptionIndex) => ({ ...exception, inspectionId: record.id, exceptionIndex, stage: record.stage, operator: record.operator })))} columns={[
         { title: "阶段", dataIndex: "stage", render: (value) => value === "pickup" ? "领取" : "归还" },
         { title: "异常", render: (_, row) => `${row.code} · ${row.description}` },
         { title: "建议费用", dataIndex: "suggestedChargeAmount", render: (value) => value === undefined ? "-" : `¥${Number(value).toFixed(2)}` },
         { title: "审核", dataIndex: "reviewStatus", render: (value) => <Tag color={value === "approved" ? "green" : value === "rejected" ? "default" : "orange"}>{value === "approved" ? "已通过" : value === "rejected" ? "已驳回" : "待审核"}</Tag> },
         { title: "最终费用", dataIndex: "approvedChargeAmount", render: (value) => value === undefined ? "-" : `¥${Number(value).toFixed(2)}` },
         { title: "操作", render: (_, row) => canSettleFunding && row.reviewStatus === "pending" ? <Button type="link" onClick={() => { setExceptionReview({ inspectionId: row.inspectionId, exceptionIndex: row.exceptionIndex, description: row.description, suggested: row.suggestedChargeAmount }); exceptionReviewForm.setFieldsValue({ decision: "approved", approvedChargeAmount: row.suggestedChargeAmount }); }}>审核</Button> : "-" }
-      ]} /></Card>
+        ]} />
+      </Space></Card>
       {canViewFunding && <Card title={<Space><DollarOutlined />押金与预授权 <Tag color="orange">模拟资金</Tag></Space>}>
         <Alert type="warning" showIcon message="当前未接入真实支付机构；以下操作只记录可追溯的模拟资金事件，不代表真实收款、冻结或退款。" style={{ marginBottom: 16 }} />
         <Descriptions column={{ xs: 1, md: 2 }} items={[

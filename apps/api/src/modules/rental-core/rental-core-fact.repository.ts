@@ -556,20 +556,30 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       where: { tenantId, workspaceId, orderId },
       orderBy: { createdAt: "desc" }
     });
-    return rows.map((row) => ({
-      id: row.id,
-      tenantId: row.tenantId,
-      orderId: row.orderId,
-      stage: row.stage as "pickup" | "return",
-      templateId: row.templateId,
-      templateCode: row.templateCode,
-      templateVersion: row.templateVersion,
-      results: (row.results ?? {}) as Record<string, unknown>,
-      exceptions: (row.exceptions ?? []) as RentalInspectionRecord["exceptions"],
-      attachments: (row.attachments ?? []) as string[],
-      operator: row.operator,
-      createdAt: iso(row.createdAt)
-    }));
+    return rows.map((row) => {
+      const results = structuredClone((row.results ?? {}) as Record<string, unknown>);
+      const meta = results.__r1InspectionMeta as
+        | Pick<RentalInspectionRecord, "baselineInspectionId" | "comparisons" | "usageReadings">
+        | undefined;
+      delete results.__r1InspectionMeta;
+      return {
+        id: row.id,
+        tenantId: row.tenantId,
+        orderId: row.orderId,
+        stage: row.stage as "pickup" | "return",
+        templateId: row.templateId,
+        templateCode: row.templateCode,
+        templateVersion: row.templateVersion,
+        results,
+        baselineInspectionId: meta?.baselineInspectionId,
+        comparisons: meta?.comparisons,
+        usageReadings: meta?.usageReadings,
+        exceptions: (row.exceptions ?? []) as RentalInspectionRecord["exceptions"],
+        attachments: (row.attachments ?? []) as string[],
+        operator: row.operator,
+        createdAt: iso(row.createdAt)
+      };
+    });
   }
 
   async insertInspection(record: RentalInspectionRecord, tx?: RentalFactTx): Promise<void> {
@@ -584,7 +594,14 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
         templateId: record.templateId,
         templateCode: record.templateCode,
         templateVersion: record.templateVersion,
-        results: record.results as Prisma.InputJsonValue,
+        results: {
+          ...record.results,
+          __r1InspectionMeta: {
+            baselineInspectionId: record.baselineInspectionId,
+            comparisons: record.comparisons ?? [],
+            usageReadings: record.usageReadings ?? []
+          }
+        } as Prisma.InputJsonValue,
         exceptions: record.exceptions as unknown as Prisma.InputJsonValue,
         attachments: record.attachments as unknown as Prisma.InputJsonValue,
         operator: record.operator,

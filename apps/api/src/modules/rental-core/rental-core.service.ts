@@ -1342,9 +1342,31 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       input.operator || userName,
       this.orderHookInstances(tenantId, order)
     );
+    const pickupBaseline = template.stage === "return"
+      ? (await this.factStore.listInspections(tenantId, orderId)).find((row) => row.stage === "pickup")
+      : undefined;
+    const comparisons = template.stage === "return"
+      ? template.fields.map((field) => ({
+          fieldCode: field.code,
+          baseline: pickupBaseline?.results[field.code],
+          current: input.results[field.code],
+          changed: JSON.stringify(pickupBaseline?.results[field.code]) !== JSON.stringify(input.results[field.code])
+        }))
+      : undefined;
+    const usageFields = template.fields.filter((field) => field.usageMetric);
+    const usageReadings = usageFields.flatMap((field) => {
+      const current = Number(input.results[field.code]);
+      if (!Number.isFinite(current)) return [];
+      const baselineValue = Number(pickupBaseline?.results[field.code]);
+      const baseline = Number.isFinite(baselineValue) ? baselineValue : undefined;
+      return [{ fieldCode: field.code, baseline, current, delta: baseline === undefined ? undefined : current - baseline }];
+    });
     const record: RentalInspectionRecord = {
       id: id("inspection"), tenantId, orderId, stage: template.stage, templateId: template.id,
       templateCode: template.code, templateVersion: template.version, results: input.results,
+      baselineInspectionId: pickupBaseline?.id,
+      comparisons,
+      usageReadings,
       exceptions: (input.exceptions ?? []).map((exception) => ({
         code: exception.code,
         description: exception.description,
@@ -1359,6 +1381,10 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       this.markPickedUp(order, assetChanges);
     } else {
       this.finishReturn(order, 0, assetChanges);
+      if (input.exceptions?.length) {
+        // 有异常的序列化资产先进入维护，不能在工单处理前重新出租。
+        for (const change of assetChanges) change.status = RentalAssetStatus.Maintenance;
+      }
       if (charges.overdue && charges.overdue.amount > 0) this.applyOverdueTo(order, charges.overdue.amount, charges.overdue.returnedAt);
       // 检查员提交的是损失建议，不能直接决定客户应付；审核通过后才追加订单费用。
     }

@@ -819,9 +819,11 @@ async function main() {
   const returnTemplate = (await request("GET", "/api/rental/v1/inspection-templates?stage=return", null, demo.accessToken)).body.data[0];
   const returned = (await request("POST", `/api/rental/v1/orders/${orderId}/inspections`, { templateId: returnTemplate.id, results: { appearance_ok: true, function_ok: true, shutter_count: 9100 }, exceptions: [{ code: "damage", description: "E2E 损坏", chargeAmount: 66 }] }, demo.accessToken)).body.data;
   assert.equal(returned.order.status, "settling");
+  assert.equal(returned.inspection.baselineInspectionId, pickedUp.inspection.id, "归还检查必须引用领取基线");
+  assert.equal(returned.inspection.usageReadings.find((row) => row.fieldCode === "shutter_count").delta, 100, "快门使用量必须由领取与归还原始值计算");
   const reviewedReturnOrder = await reviewInspectionException(orderId, returned.inspection.id, 0, 66, demo.accessToken, `e2e:${orderId}`);
   assert.ok(reviewedReturnOrder.finalPayableAmount > reviewedReturnOrder.payableAmount, "审核通过后损坏费应进入最终应付");
-  assert.equal((await assetStatus()).find((row) => row.id === trackedAssetId).status, "available", "归还后资产应释放为 available");
+  assert.equal((await assetStatus()).find((row) => row.id === trackedAssetId).status, "maintenance", "带异常归还后资产必须等待养护，不能立即恢复可用");
   const r1Settled = await closeMockFundedOrder(orderId, demo.accessToken, `e2e:${orderId}`);
   assert.equal(r1Settled.status, 201, "资金归零后应能结算关闭");
   assert.equal(r1Settled.body.data.status, "completed");

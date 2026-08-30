@@ -4440,6 +4440,8 @@ export interface RentalInspectionFieldDefinition {
   required: boolean;
   unit?: string;
   options?: string[];
+  /** 该数值是需在领取/归还之间计算差值的累计读数。 */
+  usageMetric?: boolean;
 }
 
 export interface RentalCategoryDefaults {
@@ -7113,7 +7115,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
         inspectionFields: [
           { code: "appearance_ok", label: "外观完好", type: "boolean", required: true },
           { code: "function_ok", label: "功能正常", type: "boolean", required: true },
-          { code: "shutter_count", label: "快门次数", type: "number", required: true, unit: "次" }
+          { code: "shutter_count", label: "快门次数", type: "number", required: true, unit: "次", usageMetric: true }
         ],
         sampleBaseAmount: 180,
         sampleAmountIncrement: 80
@@ -7207,7 +7209,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
         inspectionFields: [
           { code: "appearance_ok", label: "外观完好", type: "boolean", required: true },
           { code: "function_ok", label: "功能正常", type: "boolean", required: true },
-          { code: "usage_reading", label: "里程", type: "number", required: false, unit: "km" }
+          { code: "usage_reading", label: "里程", type: "number", required: false, unit: "km", usageMetric: true }
         ],
         sampleBaseAmount: 380,
         sampleAmountIncrement: 100
@@ -7254,7 +7256,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
         inspectionFields: [
           { code: "appearance_ok", label: "外观完好", type: "boolean", required: true },
           { code: "function_ok", label: "功能正常", type: "boolean", required: true },
-          { code: "usage_reading", label: "工时", type: "number", required: false, unit: "小时" }
+          { code: "usage_reading", label: "工时", type: "number", required: false, unit: "小时", usageMetric: true }
         ],
         sampleBaseAmount: 680,
         sampleAmountIncrement: 180
@@ -7907,6 +7909,11 @@ export interface RentalInspectionRecord {
   templateCode: string;
   templateVersion: string;
   results: Record<string, unknown>;
+  /** 归还检查引用的领取基线；领取记录本身为空。 */
+  baselineInspectionId?: string;
+  comparisons?: Array<{ fieldCode: string; baseline?: unknown; current?: unknown; changed: boolean }>;
+  /** 通用使用量读数（快门、里程、工时等由字段编码识别），保留原始值与差值。 */
+  usageReadings?: Array<{ fieldCode: string; baseline?: number; current: number; delta?: number }>;
   exceptions: Array<{
     code: string;
     description: string;
