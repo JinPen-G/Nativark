@@ -54,17 +54,26 @@ function rewriteBackupForTarget(sqlText, sourceDatabase, targetDatabase) {
   return script;
 }
 
-/** 抽样清单。表名取自实际 schema（Prisma 未 @@map 的模型是 PascalCase）。 */
-const SAMPLE_TABLES = ["Tenant", "business_workspaces", "customer_profiles", "_prisma_migrations"];
+/**
+ * 业务抽样清单。表名取自实际 schema（Prisma 未 @@map 的模型是 PascalCase）。
+ *
+ * 与迁移账本分开：升级后 `_prisma_migrations` **必然**增长，把它混进
+ * 「行数必须一致」的比对里，会让一次成功的升级被判成失败（实测踩过）。
+ */
+const BUSINESS_SAMPLE_TABLES = ["Tenant", "business_workspaces", "customer_profiles"];
+
+/** 恢复校验（升级前）用的完整抽样：业务表 + 迁移账本，两者都应与源库一致。 */
+const SAMPLE_TABLES = [...BUSINESS_SAMPLE_TABLES, "_prisma_migrations"];
 
 /**
  * 比对克隆库与源库：表数量、已应用迁移条数、抽样表行数。
  *
  * `query` 由调用方注入（`(statement) => string`），因此本函数可在无库环境下被断言。
- * `expectSameMigrations` 为假时跳过迁移条数比对——升级演练会**故意**让克隆库
- * 比源库多出若干条迁移，那时相等才是异常。
+ * `expectSameMigrations` 为假时跳过表数量与迁移条数的**相等**判定——升级演练会
+ * 故意让克隆库多出迁移与表，那时相等才是异常。
+ * `sampleTables` 允许升级后只比业务表：迁移账本的增长是升级的结果，不是数据丢失。
  */
-function verifyClone(query, sourceDatabase, targetDatabase, { expectSameMigrations = true } = {}) {
+function verifyClone(query, sourceDatabase, targetDatabase, { expectSameMigrations = true, sampleTables = SAMPLE_TABLES } = {}) {
   const countTables = (db) => Number(query(`SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${db}'`));
   const sourceTables = countTables(sourceDatabase);
   const targetTables = countTables(targetDatabase);
@@ -83,7 +92,7 @@ function verifyClone(query, sourceDatabase, targetDatabase, { expectSameMigratio
   }
 
   const rows = [];
-  for (const table of SAMPLE_TABLES) {
+  for (const table of sampleTables) {
     const exists = query(`SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${targetDatabase}' AND table_name='${table}'`);
     if (Number(exists) === 0) continue;
     const a = Number(query(`SELECT COUNT(*) FROM \`${sourceDatabase}\`.\`${table}\``));
@@ -94,9 +103,9 @@ function verifyClone(query, sourceDatabase, targetDatabase, { expectSameMigratio
   // 一张都没比上就说明抽样清单和真实 schema 脱节了。此时「行数一致」是空话，
   // 让它通过等于给出一个看起来合格、实际什么都没验的结论。
   if (!rows.length) {
-    throw new OpsTargetError(`抽样表在克隆库中全部不存在（清单：${SAMPLE_TABLES.join("、")}），无法证明数据已恢复`);
+    throw new OpsTargetError(`抽样表在克隆库中全部不存在（清单：${sampleTables.join("、")}），无法证明数据已恢复`);
   }
   return { sourceTables, targetTables, sourceMigrations, targetMigrations, sampled: rows };
 }
 
-module.exports = { SAMPLE_TABLES, rewriteBackupForTarget, verifyClone };
+module.exports = { SAMPLE_TABLES, BUSINESS_SAMPLE_TABLES, rewriteBackupForTarget, verifyClone };

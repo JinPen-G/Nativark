@@ -42,7 +42,33 @@ void (() => {
   rejects(() => env.buildCloneDatabaseName(SOURCE, "prod"), /未知的克隆库种类/u, "非法种类");
   rejects(() => env.buildCloneDatabaseName("store_rental", "upgrade"), /共享或系统库/u, "为共享库生成克隆库");
   rejects(() => env.buildCloneDatabaseName("store_rental_prod_claude", "upgrade"), /生产\/共享环境标记/u, "源库带生产标记");
-  ok("克隆库命名：种类与时间戳齐备、升级与回滚分库、共享/生产源库被拒");
+  // `legacy` 用于把历史备份恢复成一个**落后于当前 schema** 的专用源库，
+  // 否则 migrate deploy 只会新增 0 条，升级路径其实没被演练到。
+  const legacy = env.buildCloneDatabaseName("store_rental_claude", "legacy", STAMP);
+  assert.equal(legacy, "store_rental_claude_legacy_20260830010203");
+  assert.ok(env.isOwnedCloneDatabase(legacy), "legacy 源库也必须可被识别为本工具创建");
+  ok("克隆库命名：种类（含 legacy）与时间戳齐备、升级与回滚分库、共享/生产源库被拒");
+
+  // ============ 1-B. 名字超长时截断基底但**不得**弄坏时间戳 ============
+  // 实测踩过：`..._legacy_<14位>` 再套 `_rollback_<14位>` 共 65 字符，
+  // 旧实现直接砍末位，得到 `..._2026083007582` 这种看起来像坏数据的名字，
+  // 且两个仅末位不同的基底会撞成同名。
+  const longBase = "store_rental_claude_legacy_20260830075826";
+  assert.equal(longBase.length, 41, "夹具前提：基底 41 字符");
+  const longRollback = env.buildCloneDatabaseName(longBase, "rollback", STAMP);
+  assert.ok(longRollback.length <= 64, `生成名不得超过 64，实际 ${longRollback.length}`);
+  assert.ok(longRollback.endsWith("_rollback_20260830010203"), "种类与完整时间戳必须原样保留");
+  assert.equal(
+    /_2026083007582_/u.test(longRollback),
+    false,
+    "不得出现被砍掉末位的残缺时间戳"
+  );
+  assert.match(longRollback, /_[0-9a-f]{4}_rollback_/u, "截断时必须补基底摘要，保持可追溯");
+  // 仅末位不同的两个基底不能撞成同名。
+  const sibling = env.buildCloneDatabaseName("store_rental_claude_legacy_20260830075827", "rollback", STAMP);
+  assert.notEqual(longRollback, sibling, "仅末位不同的基底必须得到不同的克隆库名");
+  assert.ok(env.isOwnedCloneDatabase(longRollback), "截断后的名字仍须被识别为本工具创建");
+  ok("超长名：截断基底并补摘要，时间戳完整、不同基底不撞名");
 
   assert.equal(env.quoteSqlString("store_rental"), "'store_rental'");
   assert.equal(env.quoteSqlString("svc' OR 1=1 --"), "'svc'' OR 1=1 --'", "账号名必须安全编码后再进入 GRANT/REVOKE");
@@ -170,7 +196,40 @@ void (() => {
     { expectSameMigrations: false }
   );
   assert.equal(afterDeploy.targetMigrations, 72, "关掉迁移比对后仍应如实返回克隆库迁移条数");
-  ok("克隆库校验：表数/迁移/行数不一致与空抽样均失败，升级后可按需跳过迁移比对");
+
+  // 关键回归：升级后 `_prisma_migrations` 的**行数**必然增长。
+  // 旧实现把它留在抽样清单里，导致一次真实成功的升级（新增 11 条迁移）
+  // 被判成「表 _prisma_migrations 行数不一致」而失败——实测踩过。
+  const postDeploy = {
+    tableCount: { [SOURCE]: 118, [upgrade]: 132 },
+    migrations: { [SOURCE]: 60, [upgrade]: 71 },
+    tablesPresent: { [upgrade]: ["Tenant", "_prisma_migrations"] },
+    rows: { [SOURCE]: 6, [upgrade]: 6 }
+  };
+  const migrationRowStub = (statement) => {
+    // 迁移账本按「行数」查询时返回增长后的值，业务表返回一致值。
+    if (/`[^`]+`\.`_prisma_migrations`/u.test(statement)) {
+      const [, db] = statement.match(/`([^`]+)`\.`_prisma_migrations`/u);
+      return String(db === upgrade ? 73 : 62);
+    }
+    return stub(postDeploy)(statement);
+  };
+  rejects(
+    () => core.verifyClone(migrationRowStub, SOURCE, upgrade, { expectSameMigrations: false }),
+    /_prisma_migrations 行数不一致/u,
+    "默认抽样把迁移账本算进行数比对（旧行为，必须仍能复现）"
+  );
+  const businessOnly = core.verifyClone(migrationRowStub, SOURCE, upgrade, {
+    expectSameMigrations: false,
+    sampleTables: core.BUSINESS_SAMPLE_TABLES
+  });
+  assert.deepEqual(businessOnly.sampled, ["Tenant=6"], "只比业务表时，成功的升级必须通过");
+  assert.equal(
+    core.BUSINESS_SAMPLE_TABLES.includes("_prisma_migrations"),
+    false,
+    "业务抽样清单不得含迁移账本——它在升级后必然增长"
+  );
+  ok("克隆库校验：表数/迁移/行数不一致与空抽样均失败；升级后只比业务表，迁移账本增长不算失败");
 
   // ============ 5. 源码契约：源库只读、回滚靠重建、不动别人的服务 ============
   const drill = fs.readFileSync(path.join(ROOT, "scripts/ops/upgrade-drill.cjs"), "utf8");
@@ -225,6 +284,24 @@ void (() => {
   assert.match(drill, /upgradeExercised: newlyApplied > 0/u, "报告必须如实标注本次是否真的应用了新迁移");
   assert.match(drill, /notCovered/u, "报告必须写明未覆盖边界");
   ok("报告：源库只读、人工切换步骤、是否真的演练了升级、未覆盖边界均写明");
+
+  // ============ 8. 造历史源库脚本：只接受已验证备份，且不连原库 ============
+  // 这一步是「真实升级演练」的前提：源库必须落后于当前 schema，
+  // 否则 migrate deploy 新增 0 条，升级路径其实没被演练到。
+  const seed = fs.readFileSync(path.join(ROOT, "scripts/ops/restore-source.cjs"), "utf8");
+  assert.match(seed, /缺少 \.sha256 旁文件：只接受已验证的备份/u, "必须要求校验和旁文件");
+  assert.match(seed, /备份校验和不匹配/u, "校验和不匹配必须失败");
+  assert.match(seed, /buildCloneDatabaseName\(target\.database, "legacy"\)/u, "目标库必须走守卫化的 legacy 命名");
+  assert.match(seed, /拒绝复用既有库/u, "必须是新库，不复用既有库");
+  assert.match(seed, /rewriteBackupForTarget\(text, sourceName, legacyDb\)/u, "必须用共用内核改写并做残留检查");
+  assert.match(seed, /目标库与备份原库同名，拒绝执行/u, "目标库与备份原库同名必须拒绝");
+  assert.match(seed, /无法从备份头部识别原库名/u, "识别不出原库名时必须要求显式指定，不得猜测");
+  // 备份原库可能是共享库；脚本只读文件、只连新建的专用库，绝不连原库。
+  assert.match(seed, /备份原库未被连接，也未被修改/u, "必须声明未连接备份原库");
+  for (const forbidden of ["USE `store_rental`", 'sql(admin, "USE', "requireTarget(sourceName"]) {
+    assert.equal(seed.includes(forbidden), false, `不得连接备份原库：命中 ${forbidden}`);
+  }
+  ok("造历史源库：只接受已验证备份、目标必须是新专用库、不连备份原库");
 
   console.log("\nOPS-01C 升级与回滚演练专项：全部通过");
 })();

@@ -26,6 +26,7 @@
     "ops:release-build": "node scripts/ops/release-build.cjs",
     "ops:release-gate": "node scripts/ops/release-gate.cjs",
     "ops:upgrade-drill": "node scripts/ops/upgrade-drill.cjs",
+    "ops:restore-source": "node scripts/ops/restore-source.cjs",
     "test:ops-dedicated": "node tests/ops-dedicated-env.test.cjs",
     "test:ops-release": "node tests/ops-release-gate.test.cjs",
     "test:ops-upgrade": "node tests/ops-upgrade-drill.test.cjs",

@@ -22,7 +22,7 @@ const crypto = require("node:crypto");
 const net = require("node:net");
 const { spawn } = require("node:child_process");
 const { buildCloneDatabaseName, buildDatabaseUrl, isOwnedCloneDatabase, redact, quoteSqlString, OpsTargetError } = require("./dedicated-env.cjs");
-const { rewriteBackupForTarget, verifyClone } = require("./restore-core.cjs");
+const { rewriteBackupForTarget, verifyClone, BUSINESS_SAMPLE_TABLES } = require("./restore-core.cjs");
 const { ROOT, requireTarget, requireAdminTarget, assertContainerEndpoint, loadDatabaseUrl, log, fail, runPackageCommand, containerRunning, runMysql, sql } = require("./runtime.cjs");
 
 const ARTIFACT_DIR = process.env.OPS_ARTIFACT_DIR || path.join(ROOT, "artifacts", "release");
@@ -212,11 +212,14 @@ void (async () => {
     if (newlyApplied < 0) {
       throw new OpsTargetError(`升级后迁移条数从 ${restored.targetMigrations} 降为 ${appliedNow}，拒绝继续`);
     }
+    // 升级后只比**业务表**行数：`_prisma_migrations` 与表数量在升级后必然增长，
+    // 把它们混进「必须一致」的比对里，会让一次成功的升级被判成失败（实测踩过）。
+    // 业务数据必须一行不差——升级不该丢数据。
     const verifiedAfterDeploy = verifyClone(
       (statement) => sql(admin, statement),
       target.database,
       upgradeDb,
-      { expectSameMigrations: false }
+      { expectSameMigrations: false, sampleTables: BUSINESS_SAMPLE_TABLES }
     );
     // 新增 0 条不是失败——它只说明这份备份已经包含全部迁移。但必须说清楚，
     // 否则「migrate deploy 通过」会被读成「升级路径已验证」，而实际什么都没升。

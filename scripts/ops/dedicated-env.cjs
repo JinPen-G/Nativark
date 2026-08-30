@@ -10,6 +10,8 @@
  *   3. 任何对外输出都经过 `redact()`，口令不得进日志、报错或报告。
  */
 
+const { createHash } = require("node:crypto");
+
 /** 明确禁止的库名（共享开发库与常见生产命名）。判定用规范化小写全等，不做模糊匹配。 */
 const PROTECTED_DATABASES = new Set([
   "store_rental",
@@ -179,7 +181,7 @@ function isDrillDatabase(name) {
  * 而是从同一份已验证备份再恢复出一个干净库。种类写进库名，事后一眼能看出
  * 哪个库是升级后的、哪个是回滚目标。
  */
-const CLONE_KINDS = ["drill", "upgrade", "rollback"];
+const CLONE_KINDS = ["drill", "upgrade", "rollback", "legacy"];
 
 /**
  * 生成指定种类的克隆库名，形如 `<源库>_<种类>_<14位时间戳>`。
@@ -195,7 +197,15 @@ function buildCloneDatabaseName(sourceDatabase, kind, stamp = new Date()) {
   if (reason) throw new OpsTargetError(reason);
   const iso = stamp.toISOString().replace(/[-:T]/g, "").slice(0, 14);
   const suffix = `_${kind}_${iso}`;
-  const head = String(sourceDatabase).slice(0, 64 - suffix.length);
+  const limit = 64 - suffix.length;
+  const base = String(sourceDatabase);
+  // 需要截断时**不能**直接砍掉尾巴：这里的基底常常自己就带时间戳
+  // （`..._legacy_20260830075826`），砍掉末位会得到 `..._2026083007582` 这种
+  // 看起来像坏数据的名字，也让两个仅末位不同的基底可能撞成同名。
+  // 因此截断后拼上基底摘要的前 4 位十六进制，保持可追溯且不易碰撞。
+  const head = base.length <= limit
+    ? base
+    : `${base.slice(0, limit - 5)}_${createHash("sha256").update(base).digest("hex").slice(0, 4)}`;
   const name = `${head}${suffix}`;
   const cloneReason = rejectionReason(name);
   if (cloneReason) throw new OpsTargetError(cloneReason);
