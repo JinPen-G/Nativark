@@ -2756,9 +2756,19 @@ model RentalCouponTemplate {
   discountValue          Decimal  @db.Decimal(12, 2)
   minimumSpend           Decimal  @db.Decimal(12, 2)
   maximumDiscount        Decimal? @db.Decimal(12, 2)
+  appliesTo              String   @default("rental")
+  stackableWithDiscountPlans Boolean @default(true)
   totalQuota             Int
   claimedQuantity        Int      @default(0)
   perCustomerLimit       Int      @default(1)
+  /// MKT-01B：每人**使用**次数上限。与 perCustomerLimit（每人领取次数）分开：
+  /// 需求把两者并列要求，一个字段表达不了「可领 3 张、只能用 1 张」。
+  perCustomerUseLimit    Int      @default(1)
+  /// MKT-01B：总优惠预算。为空表示不限。
+  totalBudget            Decimal? @db.Decimal(12, 2)
+  /// MKT-01B：已锁定与已核销优惠金额。可用预算 = totalBudget - lockedBudget - redeemedBudget。
+  lockedBudget           Decimal  @default(0) @db.Decimal(12, 2)
+  redeemedBudget         Decimal  @default(0) @db.Decimal(12, 2)
   effectiveFrom          DateTime
   effectiveTo            DateTime
   applicableItemGroupIds Json
@@ -3652,6 +3662,8 @@ model RentalQuote {
   /// MKT-01A：逐优惠方案的评估结论（已应用/未应用及原因、基数、公式、版本、空间）。
   /// 随报价固化：方案后续改配置、调优先级或停用都不得改变这张报价的解释。
   discountEvaluations    Json?
+  /// MKT-01B：报价实际命中的客户券权益与计算过程；模板后续修改不得改变历史报价。
+  couponEvaluation       Json?
   /// CORE-EXT-02D：RentalWorkspaceCapabilitySnapshotEntry[]。报价生成时已启用能力的版本快照，
   /// 下单时拷进订单。可空：存量报价没有这份快照，留 NULL 是如实记录"当时没有"。
   capabilitySnapshot     Json?
@@ -3687,20 +3699,41 @@ model RentalCustomerCoupon {
   /// 模板编码与名称存为领取时快照，模板改名不影响已发出的券。
   templateCode    String
   templateName    String
+  /// MKT-01B：发放当时的模板版本，供券指回它固化的那一版配置。
+  templateVersion String
+  /// MKT-01B：发放时固化的权益快照。模板后续改面值、暂停或结束都不得改变已发券
+  /// （需求 4.4.10）。报价计算一律读这里，不回读模板。
+  discountType    String
+  discountValue   Decimal              @db.Decimal(12, 2)
+  minimumSpend    Decimal              @db.Decimal(12, 2)
+  maximumDiscount Decimal?             @db.Decimal(12, 2)
+  appliesTo       String               @default("rental")
+  stackableWithDiscountPlans Boolean   @default(true)
+  applicableItemGroupIds Json
+  /// MKT-01B：发放原因（系统事件、运营定向、客户领取、奖励发放等）。
+  grantReason     String
   status          String               @default("claimed")
   claimedAt       DateTime             @default(now())
   effectiveFrom   DateTime
   effectiveTo     DateTime
   lockedOrderId   String?
   lockedAt        DateTime?
+  /// MKT-01B：锁定时预占的优惠金额。释放按它退还预算，不按「当前重算值」退，
+  /// 否则价格或规则变动后预算会漂移。
+  lockedDiscountAmount Decimal?        @db.Decimal(12, 2)
   redeemedOrderId String?
   redeemedAt      DateTime?
   releasedAt      DateTime?
+  releaseReason   String?
+  expiredAt       DateTime?
+  voidedAt        DateTime?
+  voidReason      String?
 
   @@index([tenantId, customerId, status], map: "rental_customer_coupons_tenant_customer_status_idx")
   @@index([tenantId, templateId, customerId], map: "rental_customer_coupons_tenant_template_customer_idx")
   @@index([lockedOrderId])
   @@index([redeemedOrderId])
+  @@index([tenantId, templateId, status], map: "rental_customer_coupons_template_status_idx")
   @@map("rental_customer_coupons")
 }
 

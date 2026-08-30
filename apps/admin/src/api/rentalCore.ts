@@ -151,6 +151,7 @@ export const rentalCoreApi = {
   saveRuleVersion: (data: SaveRentalRuleVersionRequest) => request<RentalRuleVersion>("/rental/v1/rule-versions", { method: "post", data }),
   customerCoupons: (customerId?: string) => request<RentalCustomerCoupon[]>("/rental/v1/customer-coupons", { params: { customerId } }),
   claimCoupon: (templateId: string, customerId: string) => request<RentalCustomerCoupon>("/rental/v1/customer-coupons/claim", { method: "post", data: { templateId, customerId } }),
+  voidCustomerCoupon: (id: string, reason: string) => request<RentalCustomerCoupon>(`/rental/v1/customer-coupons/${id}/void`, { method: "post", data: { reason } }),
   rewards: (customerId?: string) => request<RentalRewardLedgerEntry[]>("/rental/v1/rewards", { params: { customerId } }),
   benefitAccounts: (customerId?: string) => request<RentalCustomerBenefitAccount[]>("/rental/v1/benefit-accounts", { params: { customerId } }),
   grantReward: (data: GrantRentalRewardRequest) => request<RentalRewardLedgerEntry[]>("/rental/v1/rewards/grant", { method: "post", data }),

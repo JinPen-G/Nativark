@@ -5164,13 +5164,21 @@ export interface RentalCouponTemplate {
   discountValue: number;
   minimumSpend: number;
   maximumDiscount?: number;
+  /** 优惠作用对象；普通券不得作用于押金、预授权或异常费用。 */
+  appliesTo: RentalDiscountTarget;
+  /** 是否允许与已应用的自动优惠方案叠加。 */
+  stackableWithDiscountPlans: boolean;
   totalQuota: number;
   claimedQuantity: number;
   perCustomerLimit: number;
+  perCustomerUseLimit: number;
+  totalBudget?: number;
+  lockedBudget: number;
+  redeemedBudget: number;
   effectiveFrom: string;
   effectiveTo: string;
   applicableItemGroupIds: string[];
-  status: "draft" | "enabled" | "disabled";
+  status: "draft" | "scheduled" | "active" | "paused" | "ended" | "void";
   version: string;
   createdAt: string;
   updatedAt: string;
@@ -5184,12 +5192,16 @@ export interface SaveRentalCouponTemplateRequest {
   discountValue: number;
   minimumSpend: number;
   maximumDiscount?: number;
+  appliesTo?: RentalDiscountTarget;
+  stackableWithDiscountPlans?: boolean;
   totalQuota: number;
   perCustomerLimit: number;
+  perCustomerUseLimit?: number;
+  totalBudget?: number;
   effectiveFrom: string;
   effectiveTo: string;
   applicableItemGroupIds?: string[];
-  status?: "draft" | "enabled" | "disabled";
+  status?: RentalCouponTemplate["status"];
 }
 
 export type RentalDayType = "workday" | "weekend" | "statutory_holiday" | "makeup_workday" | "tenant_special";
@@ -6296,15 +6308,47 @@ export interface RentalCustomerCoupon {
   templateId: string;
   templateCode: string;
   templateName: string;
+  templateVersion: string;
+  discountType: RentalCouponTemplate["discountType"];
+  discountValue: number;
+  minimumSpend: number;
+  maximumDiscount?: number;
+  appliesTo: RentalDiscountTarget;
+  stackableWithDiscountPlans: boolean;
+  applicableItemGroupIds: string[];
+  grantReason: string;
   status: RentalCustomerCouponStatus;
   claimedAt: string;
   effectiveFrom: string;
   effectiveTo: string;
   lockedOrderId?: string;
   lockedAt?: string;
+  lockedDiscountAmount?: number;
   redeemedOrderId?: string;
   redeemedAt?: string;
   releasedAt?: string;
+  releaseReason?: string;
+  expiredAt?: string;
+  voidedAt?: string;
+  voidReason?: string;
+}
+
+export interface RentalQuoteCouponEvaluation {
+  couponId: string;
+  templateId: string;
+  templateCode: string;
+  templateName: string;
+  templateVersion: string;
+  appliesTo: RentalDiscountTarget;
+  discountType: RentalCouponTemplate["discountType"];
+  discountValue: number;
+  minimumSpend: number;
+  maximumDiscount?: number;
+  stackableWithDiscountPlans: boolean;
+  baseBeforeDiscount: number;
+  runningBase: number;
+  formula: string;
+  discountAmount: number;
 }
 
 export interface RentalRewardLedgerEntry {
@@ -6556,6 +6600,8 @@ export interface RentalQuoteSnapshotV1 {
    */
   discountEvaluations: RentalQuoteDiscountEvaluation[];
   customerCouponId?: string;
+  /** MKT-01B：报价时命中的客户券权益与计算结果，不回读可变模板。 */
+  couponEvaluation?: RentalQuoteCouponEvaluation;
   /**
    * CORE-EXT-02D：报价生成时该经营空间**已启用能力**的版本快照。
    *

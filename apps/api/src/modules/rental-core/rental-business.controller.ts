@@ -265,7 +265,10 @@ export class RentalBusinessController {
   @Get("rule-versions/current") currentRule(@Req() req: AuthenticatedRequest) { return this.business.currentRule(req.user.tenantId, this.context(req.user.tenantId)); }
   @Post("rule-versions") async saveRule(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalRuleVersionDto) { return this.committed(req.user.tenantId, await this.business.saveRuleVersion(req.user.tenantId, this.context(req.user.tenantId), body, req.user.displayName)); }
 
-  @Get("customer-coupons") customerCoupons(@Req() req: AuthenticatedRequest, @Query("customerId") customerId?: string) { return this.business.listCustomerCoupons(req.user.tenantId, this.context(req.user.tenantId), customerId); }
+  @Get("customer-coupons") async customerCoupons(@Req() req: AuthenticatedRequest, @Query("customerId") customerId?: string) { return this.business.listCurrentCustomerCoupons(req.user.tenantId, this.context(req.user.tenantId), customerId); }
+  @Post("customer-coupons/:id/void") async voidCustomerCoupon(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: { reason: string }) {
+    return this.committed(req.user.tenantId, await this.business.voidCustomerCoupon(req.user.tenantId, this.context(req.user.tenantId), id, body.reason));
+  }
   @Post("customer-coupons/claim") async claimCoupon(@Req() req: AuthenticatedRequest, @Body() body: { templateId: string; customerId: string }) {
     const tenantId = req.user.tenantId;
     const key = explicitIdempotencyKey(req);

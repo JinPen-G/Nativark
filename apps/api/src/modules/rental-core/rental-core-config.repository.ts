@@ -378,9 +378,15 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       discountValue: new Prisma.Decimal(template.discountValue),
       minimumSpend: new Prisma.Decimal(template.minimumSpend),
       maximumDiscount: template.maximumDiscount === undefined ? null : new Prisma.Decimal(template.maximumDiscount),
+      appliesTo: template.appliesTo,
+      stackableWithDiscountPlans: template.stackableWithDiscountPlans,
       totalQuota: template.totalQuota,
       claimedQuantity: template.claimedQuantity,
       perCustomerLimit: template.perCustomerLimit,
+      perCustomerUseLimit: template.perCustomerUseLimit,
+      totalBudget: template.totalBudget === undefined ? null : new Prisma.Decimal(template.totalBudget),
+      lockedBudget: new Prisma.Decimal(template.lockedBudget),
+      redeemedBudget: new Prisma.Decimal(template.redeemedBudget),
       effectiveFrom: new Date(template.effectiveFrom),
       effectiveTo: new Date(template.effectiveTo),
       applicableItemGroupIds: template.applicableItemGroupIds as unknown as Prisma.InputJsonValue,
@@ -406,11 +412,11 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       WHERE \`id\` = ${templateId}
         AND \`tenantId\` = ${tenantId}
         AND \`workspaceId\` = ${workspaceId}
-        AND \`status\` = 'enabled'
+        AND \`status\` = 'active'
       FOR UPDATE
     `);
     const row = await tx.rentalCouponTemplate.findFirst({
-      where: { id: templateId, tenantId, workspaceId, status: "enabled" }
+      where: { id: templateId, tenantId, workspaceId, status: "active" }
     });
     return row ? this.toCouponTemplate(row) : undefined;
   }
@@ -537,7 +543,9 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
   private toCouponTemplate(row: {
     id: string; tenantId: string; code: string; name: string; discountType: string;
     discountValue: Prisma.Decimal; minimumSpend: Prisma.Decimal; maximumDiscount: Prisma.Decimal | null;
-    totalQuota: number; claimedQuantity: number; perCustomerLimit: number;
+    appliesTo: string; stackableWithDiscountPlans: boolean;
+    totalQuota: number; claimedQuantity: number; perCustomerLimit: number; perCustomerUseLimit: number;
+    totalBudget: Prisma.Decimal | null; lockedBudget: Prisma.Decimal; redeemedBudget: Prisma.Decimal;
     effectiveFrom: Date; effectiveTo: Date; applicableItemGroupIds: Prisma.JsonValue;
     status: string; version: string; createdAt: Date; updatedAt: Date;
   }): RentalCouponTemplate {
@@ -550,9 +558,15 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       discountValue: num(row.discountValue),
       minimumSpend: num(row.minimumSpend),
       maximumDiscount: row.maximumDiscount === null ? undefined : num(row.maximumDiscount),
+      appliesTo: row.appliesTo as RentalCouponTemplate["appliesTo"],
+      stackableWithDiscountPlans: row.stackableWithDiscountPlans,
       totalQuota: row.totalQuota,
       claimedQuantity: row.claimedQuantity,
       perCustomerLimit: row.perCustomerLimit,
+      perCustomerUseLimit: row.perCustomerUseLimit,
+      totalBudget: row.totalBudget === null ? undefined : num(row.totalBudget),
+      lockedBudget: num(row.lockedBudget),
+      redeemedBudget: num(row.redeemedBudget),
       effectiveFrom: iso(row.effectiveFrom),
       effectiveTo: iso(row.effectiveTo),
       applicableItemGroupIds: (row.applicableItemGroupIds ?? []) as string[],

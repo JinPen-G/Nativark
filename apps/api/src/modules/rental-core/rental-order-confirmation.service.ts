@@ -64,6 +64,7 @@ function quoteSnapshotFingerprint(quote: RentalQuoteSnapshotV1) {
     calendarWarnings: quote.calendarWarnings,
     appliedDiscountPlanIds: quote.appliedDiscountPlanIds,
     customerCouponId: quote.customerCouponId,
+    couponEvaluation: quote.couponEvaluation,
     capabilitySnapshot: quote.capabilitySnapshot,
     capabilityDecisions: quote.capabilityDecisions,
     expiresAt: quote.expiresAt
@@ -266,6 +267,8 @@ export class RentalOrderConfirmationService {
             quote.request.customerId,
             order.id,
             committedAt,
+            quote.request.startAt,
+            quote.couponAmount,
             tx
           );
           if (!couponLocked) throw new ConflictException("优惠券已失效或被占用，请重新报价");
@@ -333,7 +336,7 @@ export class RentalOrderConfirmationService {
       throw error;
     }
 
-    this.business.applyOrderConfirmationToCache(quote, coupon, order.id, committedAt);
+    this.business.applyOrderConfirmationToCache(quote, coupon, order.id, committedAt, context);
     return { order, replayed: false };
   }
 

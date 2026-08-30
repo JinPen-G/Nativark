@@ -111,6 +111,12 @@ const byCode = (evaluations, code) => evaluations.find((row) => row.planCode ===
   const blocked = single.evaluations.find((row) => !row.applied);
   assert.equal(blocked.skipReason, "not_stackable_with_applied");
   assert.match(blocked.skipDetail, /不可叠加/);
+
+  const bestAcrossGroups = selectDiscountPlans([
+    plan({ id: "p_tiny", code: "TINY", exclusiveGroup: "G1", priority: 1, stackableWithOtherPlans: false, discountType: "fixed_amount", discountValue: 5 }),
+    plan({ id: "p_large", code: "LARGE", exclusiveGroup: "G2", priority: 100, stackableWithOtherPlans: false, discountType: "fixed_amount", discountValue: 60 })
+  ], ctx());
+  assert.equal(bestAcrossGroups.applied[0].code, "LARGE", "跨组不可叠加时也必须选实际减免更大的方案，不能按优先级先到先得");
   ok("跨组叠加：双方都允许才叠，基数依次递减，被挡方案记明原因");
 }
 

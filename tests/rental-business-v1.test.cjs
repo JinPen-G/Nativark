@@ -120,7 +120,7 @@ const couponTemplate = await core.saveCouponTemplate(tenantId, {
   effectiveFrom: new Date(now - 24 * 60 * 60 * 1000).toISOString(),
   effectiveTo: new Date(now + 30 * 24 * 60 * 60 * 1000).toISOString(),
   applicableItemGroupIds: [],
-  status: "enabled"
+  status: "active"
 });
 // claimCoupon 现在返回 { coupon, template }：模板的 claimedQuantity 也是本次写入的一部分，
 // 调用方需要它才能在事务提交后正确更新缓存。
@@ -129,6 +129,25 @@ const customerCoupon = claimResult.coupon;
 assert.equal(customerCoupon.status, "claimed");
 assert.equal(claimResult.template.claimedQuantity, 1, "领取应使模板已领数量加一");
 await assert.rejects(async () => business.claimCoupon(tenantId, context(), couponTemplate.id, "member_001"), /限领/);
+await core.saveCouponTemplate(tenantId, {
+  id: couponTemplate.id,
+  code: couponTemplate.code,
+  name: couponTemplate.name,
+  discountType: couponTemplate.discountType,
+  discountValue: 1,
+  minimumSpend: couponTemplate.minimumSpend,
+  maximumDiscount: couponTemplate.maximumDiscount,
+  appliesTo: couponTemplate.appliesTo,
+  stackableWithDiscountPlans: couponTemplate.stackableWithDiscountPlans,
+  totalQuota: couponTemplate.totalQuota,
+  perCustomerLimit: couponTemplate.perCustomerLimit,
+  perCustomerUseLimit: couponTemplate.perCustomerUseLimit,
+  totalBudget: couponTemplate.totalBudget,
+  effectiveFrom: couponTemplate.effectiveFrom,
+  effectiveTo: couponTemplate.effectiveTo,
+  applicableItemGroupIds: couponTemplate.applicableItemGroupIds,
+  status: "active"
+});
 
 const group = context().groups.find((item) => item.code === "CAMP-TENT");
 const location = core.listLocations(tenantId)[0];
@@ -146,6 +165,8 @@ const quote = await business.createQuote(tenantId, context(), {
 });
 assert.ok(quote.rentalAmount > 0);
 assert.ok(quote.couponAmount > 0);
+assert.equal(quote.couponAmount, 30, "已发券必须按领取时的 30 元权益快照计算，不能跟随模板改成 1 元");
+assert.equal(quote.couponEvaluation.templateVersion, "1.0", "报价必须记录客户券固化的模板版本");
 assert.ok(quote.serviceAmount > 0);
 assert.equal(quote.calendarVersion, `${publishedCalendar.year}:${publishedCalendar.version}`);
 assert.ok(quote.chargeLines.some((line) => line.type === "coupon"));

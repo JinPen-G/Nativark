@@ -181,35 +181,49 @@ export function selectDiscountPlans(
     }
   }
 
-  // 跨组叠加：按稳定顺序尝试，双方都允许才叠。
-  const applied: RentalDiscountPlan[] = [];
-  const running: RentalDiscountBases = { ...ctx.bases };
-  const discountByTarget: RentalDiscountBases = { rental: 0, fulfillment: 0, service: 0 };
-  const actual = new Map<string, { amount: number; base: number }>();
-  const blocked = new Map<string, string>();
+  // 跨组不允许叠加时也必须按客户实际减免择优，不能又退回按优先级先到先得。
+  // 可叠加方案组成一个候选组合；每个不允许叠加的方案各自是单独候选，选择总减免最大者。
+  // 这样「优先级 1 减 5 元」不会挡掉「优先级 100 减 60 元」。
   const orderedWinners = judged
     .filter((row) => winners.has(row.plan.id))
     .sort((left, right) => comparePlans(left.plan, right.plan));
+  const calculate = (rows: typeof orderedWinners) => {
+    const running: RentalDiscountBases = { ...ctx.bases };
+    const discountByTarget: RentalDiscountBases = { rental: 0, fulfillment: 0, service: 0 };
+    const actual = new Map<string, { amount: number; base: number }>();
+    const applied: RentalDiscountPlan[] = [];
+    for (const row of rows) {
+      const target: RentalDiscountTarget = row.plan.appliesTo;
+      const base = running[target];
+      const amount = amountFor(row.plan, base);
+      actual.set(row.plan.id, { amount, base });
+      if (amount <= 0) continue;
+      running[target] = money(base - amount);
+      discountByTarget[target] = money(discountByTarget[target] + amount);
+      applied.push(row.plan);
+    }
+    const total = money(discountByTarget.rental + discountByTarget.fulfillment + discountByTarget.service);
+    return { rows, applied, actual, discountByTarget, total };
+  };
+  const stackable = orderedWinners.filter((row) => row.plan.stackableWithOtherPlans);
+  const options = [
+    ...(stackable.length ? [calculate(stackable)] : []),
+    ...orderedWinners.filter((row) => !row.plan.stackableWithOtherPlans).map((row) => calculate([row]))
+  ].sort((left, right) => {
+    if (right.total !== left.total) return right.total - left.total;
+    const leftPlan = left.applied[0] ?? left.rows[0]?.plan;
+    const rightPlan = right.applied[0] ?? right.rows[0]?.plan;
+    if (!leftPlan) return 1;
+    if (!rightPlan) return -1;
+    return comparePlans(leftPlan, rightPlan);
+  });
+  const selected = options[0] ?? calculate([]);
+  const { applied, actual, discountByTarget } = selected;
+  const selectedIds = new Set(selected.rows.map((row) => row.plan.id));
+  const blockingCode = applied[0]?.code ?? selected.rows[0]?.plan.code;
+  const blocked = new Map<string, string>();
   for (const row of orderedWinners) {
-    const conflict = applied.find(
-      (existing) => !existing.stackableWithOtherPlans || !row.plan.stackableWithOtherPlans
-    );
-    if (conflict) {
-      blocked.set(row.plan.id, conflict.code);
-      continue;
-    }
-    const target: RentalDiscountTarget = row.plan.appliesTo;
-    const base = running[target];
-    const amount = amountFor(row.plan, base);
-    if (amount <= 0) {
-      // 基数已被前面的优惠吃光，或本方案在当前基数上算不出减免：如实记 0 而不是应用一条 0 元优惠。
-      actual.set(row.plan.id, { amount: 0, base });
-      continue;
-    }
-    running[target] = money(base - amount);
-    discountByTarget[target] = money(discountByTarget[target] + amount);
-    actual.set(row.plan.id, { amount, base });
-    applied.push(row.plan);
+    if (!selectedIds.has(row.plan.id) && blockingCode) blocked.set(row.plan.id, blockingCode);
   }
 
   const evaluations: RentalQuoteDiscountEvaluation[] = judged
