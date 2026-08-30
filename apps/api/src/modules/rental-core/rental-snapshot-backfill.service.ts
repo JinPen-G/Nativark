@@ -686,6 +686,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
         let customerCoupons = 0;
         for (const coupon of business.customerCoupons ?? []) {
           const templateId = couponTemplateIdMap.get(coupon.templateId);
+          const template = (core.couponTemplates ?? []).find((row) => row.id === coupon.templateId);
           if (!templateId) {
             divergences.push(`rentalCustomerCoupon(${coupon.id}):template-missing`);
             continue;
@@ -702,15 +703,31 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               templateId,
               templateCode: coupon.templateCode,
               templateName: coupon.templateName,
+              templateVersion: coupon.templateVersion ?? template?.version ?? "legacy",
+              discountType: coupon.discountType ?? template?.discountType ?? "fixed",
+              discountValue: amount(coupon.discountValue ?? template?.discountValue ?? 0),
+              minimumSpend: amount(coupon.minimumSpend ?? template?.minimumSpend ?? 0),
+              maximumDiscount: (coupon.maximumDiscount ?? template?.maximumDiscount) === undefined
+                ? null
+                : amount(coupon.maximumDiscount ?? template?.maximumDiscount ?? 0),
+              appliesTo: coupon.appliesTo ?? template?.appliesTo ?? "rental",
+              stackableWithDiscountPlans: coupon.stackableWithDiscountPlans ?? template?.stackableWithDiscountPlans ?? true,
+              applicableItemGroupIds: jsonArray(coupon.applicableItemGroupIds ?? template?.applicableItemGroupIds ?? []),
+              grantReason: coupon.grantReason ?? "legacy_snapshot_backfill",
               status: coupon.status ?? "claimed",
               claimedAt: optionalDate(coupon.claimedAt) ?? new Date(),
               effectiveFrom: date(coupon.effectiveFrom, `customerCoupon(${coupon.id}).effectiveFrom`),
               effectiveTo: date(coupon.effectiveTo, `customerCoupon(${coupon.id}).effectiveTo`),
               lockedOrderId: coupon.lockedOrderId ?? null,
               lockedAt: optionalDate(coupon.lockedAt),
+              lockedDiscountAmount: coupon.lockedDiscountAmount === undefined ? null : amount(coupon.lockedDiscountAmount),
               redeemedOrderId: coupon.redeemedOrderId ?? null,
               redeemedAt: optionalDate(coupon.redeemedAt),
-              releasedAt: optionalDate(coupon.releasedAt)
+              releasedAt: optionalDate(coupon.releasedAt),
+              releaseReason: coupon.releaseReason ?? null,
+              expiredAt: optionalDate(coupon.expiredAt),
+              voidedAt: optionalDate(coupon.voidedAt),
+              voidReason: coupon.voidReason ?? null
             }
           }));
           customerCoupons += 1;

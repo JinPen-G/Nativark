@@ -232,10 +232,12 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
             discountType: "percentage",
             discountValue: 5,
             minimumSpend: 0,
+            appliesTo: "rental",
             customerScope: "all",
             applicableItemGroupIds: [],
             applicableDayTypes: [],
             priority: 100,
+            stackableWithOtherPlans: false,
             stackableWithCoupon: true,
             effectiveFrom: new Date().toISOString(),
             changeReason: "新建优惠方案",
@@ -902,8 +904,30 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
                   options={[
                     { value: "percentage", label: "百分比减免" },
                     { value: "fixed_amount", label: "固定减免" },
+                    { value: "threshold_amount", label: "满额固定减免" },
                   ]}
                 />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="appliesTo" label="作用费用对象" tooltip="押金、预授权与异常费用不可被普通优惠减免，因此不在可选项内。">
+                <Select
+                  options={[
+                    { value: "rental", label: "商品租金与使用量" },
+                    { value: "fulfillment", label: "履约费用" },
+                    { value: "service", label: "增值服务" },
+                  ]}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="thresholdAmount" label="满减门槛" tooltip="仅「满额固定减免」使用：优惠前租金达到该金额才减免。">
+                <InputNumber min={0} style={{ width: "100%" }} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="exclusiveGroup" label="互斥组" tooltip="同组只应用一个方案；留空表示自成一组，不会挤掉其他方案。">
+                <Input allowClear />
               </Form.Item>
             </Col>
             <Col span={8}>
@@ -964,6 +988,14 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
               </Form.Item>
             </Col>
           </Row>
+          <Form.Item name="stackableWithOtherPlans" label="允许与其他优惠方案叠加" tooltip="跨互斥组叠加需双方都允许；关闭时本方案一旦应用，其余方案不再叠加。">
+            <Select
+              options={[
+                { value: true, label: "允许" },
+                { value: false, label: "不允许" },
+              ]}
+            />
+          </Form.Item>
           <Form.Item name="stackableWithCoupon" label="允许与优惠券叠加" valuePropName="checked">
             <Select
               options={[

@@ -68,7 +68,8 @@ const FULFILLMENT_MODES = [
 ] as const;
 const REWARD_TRIGGERS = ["registration", "identity_verified", "first_order_completed", "referral"] as const;
 const DISCOUNT_TYPES = ["fixed_amount", "percentage"] as const;
-const TEMPLATE_STATUSES = ["draft", "enabled", "disabled"] as const;
+const COUPON_TARGETS = ["rental", "fulfillment", "service"] as const;
+const TEMPLATE_STATUSES = ["draft", "scheduled", "active", "paused", "ended", "void"] as const;
 
 /* ---------- 嵌套值对象 ---------- */
 
@@ -508,6 +509,14 @@ export class SaveRentalCouponTemplateDto implements SaveRentalCouponTemplateRequ
   @Min(0)
   maximumDiscount?: number;
 
+  @IsOptional()
+  @IsIn(COUPON_TARGETS)
+  appliesTo?: (typeof COUPON_TARGETS)[number];
+
+  @IsOptional()
+  @IsBoolean()
+  stackableWithDiscountPlans?: boolean;
+
   @IsNumber()
   @Min(1)
   totalQuota!: number;
@@ -515,6 +524,16 @@ export class SaveRentalCouponTemplateDto implements SaveRentalCouponTemplateRequ
   @IsNumber()
   @Min(1)
   perCustomerLimit!: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  perCustomerUseLimit?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  totalBudget?: number;
 
   @IsISO8601()
   effectiveFrom!: string;

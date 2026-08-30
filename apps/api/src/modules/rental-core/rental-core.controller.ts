@@ -180,6 +180,7 @@ export class RentalCoreController {
     });
     // 内部权益已与订单同事务提交；此处只发布已提交的数据到进程缓存。
     await this.business.refreshFromDatabase();
+    await this.business.refreshCouponTemplateCache(tenantId, this.context(tenantId));
     // 回放时跳过通知：通知是外部副作用，同键重试不该让客户收到第二条短信。
     if (!replayed) await this.emitOrderEvent(tenantId, "order.confirmed", order);
     return this.committed(tenantId, order);
@@ -275,6 +276,7 @@ export class RentalCoreController {
       }
     });
     await this.business.refreshFromDatabase();
+    await this.business.refreshCouponTemplateCache(req.user.tenantId, context);
     if (!cancelReplayed) await this.emitOrderEvent(req.user.tenantId, "order.cancelled", order);
     return this.committed(req.user.tenantId, order);
   }

@@ -1062,7 +1062,7 @@ async function main() {
   const couponTemplate = await request(
     "POST",
     "/api/rental/v1/coupon-templates",
-    { code: "E2E-COUPON-50", name: "E2E 满 300 减 50", discountType: "fixed_amount", discountValue: 50, minimumSpend: 300, totalQuota: 1, perCustomerLimit: 1, effectiveFrom: new Date(Date.now() - 86400000).toISOString(), effectiveTo: new Date(Date.now() + 30 * 86400000).toISOString(), status: "enabled" },
+    { code: "E2E-COUPON-50", name: "E2E 满 300 减 50", discountType: "fixed_amount", discountValue: 50, minimumSpend: 300, totalQuota: 1, perCustomerLimit: 1, effectiveFrom: new Date(Date.now() - 86400000).toISOString(), effectiveTo: new Date(Date.now() + 30 * 86400000).toISOString(), status: "active" },
     demo.accessToken
   );
   assert.equal(couponTemplate.status, 201, `券模板创建失败: ${JSON.stringify(couponTemplate.body).slice(0, 200)}`);
@@ -1122,7 +1122,7 @@ async function main() {
   const template2 = await request(
     "POST",
     "/api/rental/v1/coupon-templates",
-    { code: "E2E-COUPON-30", name: "E2E 满 300 减 30", discountType: "fixed_amount", discountValue: 30, minimumSpend: 300, totalQuota: 5, perCustomerLimit: 1, effectiveFrom: new Date(Date.now() - 86400000).toISOString(), effectiveTo: new Date(Date.now() + 30 * 86400000).toISOString(), status: "enabled" },
+    { code: "E2E-COUPON-30", name: "E2E 满 300 减 30", discountType: "fixed_amount", discountValue: 30, minimumSpend: 300, totalQuota: 5, perCustomerLimit: 1, effectiveFrom: new Date(Date.now() - 86400000).toISOString(), effectiveTo: new Date(Date.now() + 30 * 86400000).toISOString(), status: "active" },
     demo.accessToken
   );
   assert.equal(template2.status, 201);
@@ -1133,7 +1133,7 @@ async function main() {
   const atomicTemplate = await request(
     "POST",
     "/api/rental/v1/coupon-templates",
-    { code: "RC02-ATOMIC-20", name: "RC-02 事务券", discountType: "fixed_amount", discountValue: 20, minimumSpend: 0, totalQuota: 2, perCustomerLimit: 1, effectiveFrom: new Date(Date.now() - 86400000).toISOString(), effectiveTo: new Date(Date.now() + 180 * 86400000).toISOString(), status: "enabled" },
+    { code: "RC02-ATOMIC-20", name: "RC-02 事务券", discountType: "fixed_amount", discountValue: 20, minimumSpend: 0, totalQuota: 2, perCustomerLimit: 1, effectiveFrom: new Date(Date.now() - 86400000).toISOString(), effectiveTo: new Date(Date.now() + 180 * 86400000).toISOString(), status: "active" },
     demo.accessToken
   );
   assert.equal(atomicTemplate.status, 201, `RC-02 券模板创建失败: ${JSON.stringify(atomicTemplate.body)}`);
@@ -5135,7 +5135,7 @@ async function main() {
       perCustomerLimit: 1,
       effectiveFrom: new Date(Date.now() - 86400000).toISOString(),
       effectiveTo: new Date(Date.now() + 30 * 86400000).toISOString(),
-      status: "enabled"
+      status: "active"
     },
     demoForWriteThrough.accessToken
   );
@@ -8179,7 +8179,7 @@ async function main() {
       perCustomerLimit: 20,
       effectiveFrom: new Date(Date.now() - 86400000).toISOString(),
       effectiveTo: new Date(Date.now() + 30 * 86400000).toISOString(),
-      status: "enabled"
+      status: "active"
     },
     rwDemo.accessToken
   );

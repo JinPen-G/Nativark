@@ -1270,7 +1270,7 @@ export function RentalGovernancePage() {
                         <Select
                           allowClear
                           options={(couponTemplates.data ?? [])
-                            .filter((item) => item.status === "enabled")
+                            .filter((item) => item.status === "active")
                             .map((item) => ({ value: item.id, label: item.name }))}
                         />
                       </Form.Item>
@@ -1343,7 +1343,7 @@ export function RentalGovernancePage() {
                         <Select
                           allowClear
                           options={(couponTemplates.data ?? [])
-                            .filter((item) => item.status === "enabled")
+                            .filter((item) => item.status === "active")
                             .map((item) => ({ value: item.id, label: item.name }))}
                         />
                       </Form.Item>

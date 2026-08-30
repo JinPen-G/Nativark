@@ -110,7 +110,7 @@ const coupon = await service.saveCouponTemplate(cameraTenant, {
   effectiveFrom: startAt,
   effectiveTo: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString(),
   applicableItemGroupIds: [],
-  status: "enabled"
+  status: "active"
 });
 assert.equal(coupon.version, "1.0");
 assert.equal(service.listCouponTemplates(cameraTenant).length, 1);

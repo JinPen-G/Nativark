@@ -540,7 +540,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const validateRewardCoupon = (enabled: boolean, type: string, amount: number, templateId: string | undefined) => {
       if (!enabled || type !== "coupon" || amount <= 0) return;
       if (!Number.isInteger(amount)) throw new BadRequestException("优惠券奖励数量必须是整数");
-      if (!templateId || !state.couponTemplates.some((template) => template.id === templateId && template.status === "enabled")) throw new BadRequestException("优惠券奖励必须选择已启用的券模板");
+      if (!templateId || !state.couponTemplates.some((template) => template.id === templateId && template.status === "active")) throw new BadRequestException("优惠券奖励必须选择进行中的券模板");
     };
     validateRewardCoupon(input.membership.signupRewardEnabled, input.membership.signupRewardType, input.membership.signupRewardAmount, input.membership.signupRewardCouponTemplateId);
     validateRewardCoupon(input.membership.referralRewardEnabled, input.membership.referralRewardType, Math.max(input.membership.referrerRewardAmount, input.membership.inviteeRewardAmount), input.membership.referralRewardCouponTemplateId);
@@ -568,6 +568,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (input.discountType === "percentage" && input.discountValue > 100) throw new BadRequestException("折扣百分比不能超过 100");
     if (!Number.isFinite(input.minimumSpend) || input.minimumSpend < 0 || (input.maximumDiscount !== undefined && input.maximumDiscount < 0)) throw new BadRequestException("优惠门槛或封顶金额无效");
     if (!Number.isInteger(input.totalQuota) || input.totalQuota < 0 || !Number.isInteger(input.perCustomerLimit) || input.perCustomerLimit <= 0) throw new BadRequestException("发行量或每客限领数量无效");
+    if (input.perCustomerUseLimit !== undefined && (!Number.isInteger(input.perCustomerUseLimit) || input.perCustomerUseLimit <= 0)) throw new BadRequestException("每客使用次数上限无效");
+    if (input.totalBudget !== undefined && (!Number.isFinite(input.totalBudget) || input.totalBudget < 0)) throw new BadRequestException("总优惠预算无效");
     if (new Date(input.effectiveFrom).getTime() >= new Date(input.effectiveTo).getTime()) throw new BadRequestException("优惠券有效期无效");
     const duplicate = state.couponTemplates.find((row) => row.code === input.code.trim() && row.id !== input.id);
     if (duplicate) throw new ConflictException("优惠券编码已存在");
@@ -576,13 +578,18 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const existing = input.id ? state.couponTemplates.find((row) => row.id === input.id) : undefined;
     if (input.id && !existing) throw new NotFoundException("优惠券模板不存在");
     if (existing && input.totalQuota < existing.claimedQuantity) throw new BadRequestException("发行量不能低于已领取数量");
+    if (existing && input.totalBudget !== undefined && input.totalBudget < existing.lockedBudget + existing.redeemedBudget) throw new BadRequestException("总预算不能低于已锁定与已核销预算");
     const timestamp = now();
     const nextVersion = existing ? `${Number(existing.version.split(".")[0] ?? 0) + 1}.0` : "1.0";
     const result: RentalCouponTemplate = {
       id: existing?.id ?? id("coupon"), tenantId, code: input.code.trim(), name: input.name.trim(),
       discountType: input.discountType, discountValue: input.discountValue, minimumSpend: input.minimumSpend,
       maximumDiscount: input.maximumDiscount, totalQuota: input.totalQuota, claimedQuantity: existing?.claimedQuantity ?? 0,
-      perCustomerLimit: input.perCustomerLimit, effectiveFrom: input.effectiveFrom, effectiveTo: input.effectiveTo,
+      appliesTo: input.appliesTo ?? existing?.appliesTo ?? "rental",
+      stackableWithDiscountPlans: input.stackableWithDiscountPlans ?? existing?.stackableWithDiscountPlans ?? true,
+      perCustomerLimit: input.perCustomerLimit, perCustomerUseLimit: input.perCustomerUseLimit ?? existing?.perCustomerUseLimit ?? 1,
+      totalBudget: input.totalBudget ?? existing?.totalBudget, lockedBudget: existing?.lockedBudget ?? 0, redeemedBudget: existing?.redeemedBudget ?? 0,
+      effectiveFrom: input.effectiveFrom, effectiveTo: input.effectiveTo,
       applicableItemGroupIds: [...new Set(input.applicableItemGroupIds ?? [])], status: input.status ?? existing?.status ?? "draft",
       version: nextVersion, createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp
     };

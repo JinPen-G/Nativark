@@ -98,6 +98,7 @@ import {
 } from "./calendar-range";
 import { applyPriceAdjustment, assertNoDatetimeOverrideOverlap, assertNoPeriodicOverlap, periodicWindowCoversDate, periodicWindowHits } from "./rental-price-adjustments";
 import { rentalPricingStrategy } from "./rental-pricing-strategy";
+import { selectDiscountPlans } from "./rental-discount-selection";
 
 /**
  * 定时调价到期执行时，确认时锁定的基础版本已被别的调价推进。
@@ -1258,6 +1259,21 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     if (!input.code?.trim() || !input.name?.trim() || !input.changeReason?.trim()) throw new BadRequestException("优惠编码、名称和变更原因不能为空");
     if (input.discountType === "percentage" && (input.discountValue <= 0 || input.discountValue > 100)) throw new BadRequestException("百分比优惠必须大于 0 且不超过 100");
     if (input.discountType === "fixed_amount" && input.discountValue <= 0) throw new BadRequestException("固定减免必须大于 0");
+    // MKT-01A：满额固定减免必须同时给出门槛与减免额，否则「满 0 减 50」等于无门槛固定减免，
+    // 两种优惠类型的业务含义会被悄悄合并（需求 4.4.10 把它们列为不同类型）。
+    if (input.discountType === "threshold_amount") {
+      if (input.discountValue <= 0) throw new BadRequestException("满额固定减免的减免金额必须大于 0");
+      if (!Number.isFinite(input.thresholdAmount ?? NaN) || (input.thresholdAmount ?? 0) <= 0) {
+        throw new BadRequestException("满额固定减免必须填写大于 0 的满减门槛");
+      }
+    }
+    // 门槛只对满额减免有意义；给别的类型配上它会让人以为也有门槛判定。
+    if (input.discountType !== "threshold_amount" && input.thresholdAmount !== undefined) {
+      throw new BadRequestException("满减门槛只适用于满额固定减免");
+    }
+    if (input.maximumDiscount !== undefined && input.maximumDiscount <= 0) {
+      throw new BadRequestException("最高减免必须大于 0；不限制请留空");
+    }
     if (!Number.isFinite(new Date(input.effectiveFrom).getTime())) throw new BadRequestException("优惠方案生效时间无效");
     if (input.effectiveTo && new Date(input.effectiveFrom).getTime() >= new Date(input.effectiveTo).getTime()) throw new BadRequestException("优惠方案有效期无效");
     const groupIds = new Set(context.groups.map((group) => group.id));
@@ -2489,6 +2505,44 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return this.state(tenantId, context).customerCoupons.filter((coupon) => !customerId || coupon.customerId === customerId);
   }
 
+  async listCurrentCustomerCoupons(tenantId: string, context: BusinessContext, customerId?: string) {
+    const timestamp = stamp();
+    if (this.prisma && (process.env.PLATFORM_DATA_SOURCE ?? "mysql").toLowerCase() === "mysql") {
+      const changed = await this.factStore.expireClaimedCoupons(tenantId, timestamp);
+      if (changed) await this.refreshFromDatabase();
+    } else {
+      for (const coupon of this.state(tenantId, context).customerCoupons) {
+        if (coupon.status === "claimed" && new Date(coupon.effectiveTo).getTime() < new Date(timestamp).getTime()) {
+          coupon.status = "expired";
+          coupon.expiredAt = timestamp;
+        }
+      }
+    }
+    return this.listCustomerCoupons(tenantId, context, customerId);
+  }
+
+  async voidCustomerCoupon(tenantId: string, context: BusinessContext, couponId: string, reason: string) {
+    if (!reason?.trim()) throw new BadRequestException("作废原因不能为空");
+    const coupon = this.state(tenantId, context).customerCoupons.find((row) => row.id === couponId);
+    if (!coupon) throw new NotFoundException("客户优惠券不存在");
+    if (coupon.status === "void") return coupon;
+    if (coupon.status !== "claimed") throw new ConflictException("只有未占用的可用优惠券可以作废；已锁定券请先取消关联订单");
+    const voidedAt = stamp();
+    if (this.prisma && (process.env.PLATFORM_DATA_SOURCE ?? "mysql").toLowerCase() === "mysql") {
+      const changed = await this.prisma.$transaction((tx) =>
+        this.factStore.voidClaimedCoupon(tenantId, couponId, reason.trim(), voidedAt, tx)
+      );
+      if (!changed) throw new ConflictException("优惠券状态已变化，请刷新后重试");
+      await this.refreshFromDatabase();
+      return this.state(tenantId, context).customerCoupons.find((row) => row.id === couponId)!;
+    }
+    coupon.status = "void";
+    coupon.voidedAt = voidedAt;
+    coupon.voidReason = reason.trim();
+    await this.factStore.upsertCustomerCoupon(coupon);
+    return coupon;
+  }
+
   /**
    * 领券。传入 `tx` 时（幂等执行器包裹的路径）数据库写入全部走该事务，
    * 且**不碰内存缓存**——缓存必须等事务提交成功后由调用方用
@@ -2514,11 +2568,11 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const state = this.state(tenantId, context);
     const template = tx
       ? await this.coreConfigStore.lockCouponTemplateForClaim(tenantId, templateId, tx)
-      : context.couponTemplates.find((item) => item.id === templateId && item.status === "enabled");
+      : context.couponTemplates.find((item) => item.id === templateId && item.status === "active");
     if (!template) throw new NotFoundException("优惠券模板不存在或未启用");
     // 锁行只保证配额读写串行，不代表模板仍可投放。运营可能在领取请求
     // 等待行锁期间把模板停用；事务路径必须与内存路径使用同一准入规则。
-    if (template.status !== "enabled") throw new NotFoundException("优惠券模板不存在或未启用");
+    if (template.status !== "active") throw new NotFoundException("优惠券模板不存在或不在进行中");
     const now = Date.now();
     if (now < new Date(template.effectiveFrom).getTime() || now > new Date(template.effectiveTo).getTime()) throw new ConflictException("优惠券不在可领取有效期");
     if (template.claimedQuantity >= template.totalQuota) throw new ConflictException("优惠券已领完");
@@ -2528,7 +2582,12 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     if (customerClaimCount >= template.perCustomerLimit) throw new ConflictException("已达到每客限领数量");
     const coupon: RentalCustomerCoupon = {
       id: uid("customer_coupon"), tenantId, customerId, templateId, templateCode: template.code,
-      templateName: template.name, status: "claimed", claimedAt: stamp(), effectiveFrom: template.effectiveFrom, effectiveTo: template.effectiveTo
+      templateName: template.name, templateVersion: template.version,
+      discountType: template.discountType, discountValue: template.discountValue,
+      minimumSpend: template.minimumSpend, maximumDiscount: template.maximumDiscount,
+      appliesTo: template.appliesTo, stackableWithDiscountPlans: template.stackableWithDiscountPlans,
+      applicableItemGroupIds: [...template.applicableItemGroupIds], grantReason: "customer_claim",
+      status: "claimed", claimedAt: stamp(), effectiveFrom: template.effectiveFrom, effectiveTo: template.effectiveTo
     };
     // 构造候选模板而不是就地改 template：就地改会在事务回滚后留下多加的配额。
     const nextTemplate: RentalCouponTemplate = { ...template, claimedQuantity: template.claimedQuantity + 1, updatedAt: stamp() };
@@ -2574,7 +2633,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     quote: RentalQuoteSnapshotV1,
     coupon: RentalCustomerCoupon | undefined,
     orderId: string,
-    committedAt: string
+    committedAt: string,
+    context: BusinessContext
   ) {
     quote.consumedAt = committedAt;
     quote.consumedOrderId = orderId;
@@ -2582,7 +2642,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       coupon.status = "locked";
       coupon.lockedOrderId = orderId;
       coupon.lockedAt = committedAt;
+      coupon.lockedDiscountAmount = quote.couponAmount;
       coupon.releasedAt = undefined;
+      const template = context.couponTemplates.find((row) => row.id === coupon.templateId);
+      if (template) template.lockedBudget = roundMoney(template.lockedBudget + quote.couponAmount);
     }
   }
 
@@ -2786,7 +2849,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   }
 
   /** 奖励会修改核心配置中的券模板配额；业务事实预热不拥有这份缓存，需在提交后单独同步。 */
-  private async refreshCouponTemplateCache(tenantId: string, context: BusinessContext) {
+  async refreshCouponTemplateCache(tenantId: string, context: BusinessContext) {
     const workspaceId = this.workspaceOf(tenantId);
     const config = (await this.coreConfigStore.loadAll()).find((row) => row.workspaceId === workspaceId);
     if (config) context.couponTemplates.splice(0, context.couponTemplates.length, ...config.couponTemplates);
@@ -3221,25 +3284,11 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       throw new ConflictException("当前规则要求预授权，但所选商品未配置预授权额度");
     }
     const quotedDayTypes = new Set(this.dayTypesForRange(calendars, input.startAt, input.endAt, quoteTimeZone));
-    const eligible = state.discountPlans.filter((item) => item.status === "enabled" && this.inPeriod(item.effectiveFrom, item.effectiveTo, input.startAt) && item.minimumSpend <= rentalAmount && (item.customerScope === "all" || item.customerScope === input.customerType || (item.customerScope === "member" && Boolean(input.customerId))) && (!item.applicableItemGroupIds.length || input.lines.some((line) => item.applicableItemGroupIds.includes(line.itemGroupId))) && (!item.applicableDayTypes.length || item.applicableDayTypes.some((dayType) => quotedDayTypes.has(dayType)))).sort((a, b) => a.priority - b.priority);
-    const discountPlans = input.discountPlanId ? eligible.filter((item) => item.id === input.discountPlanId) : eligible.slice(0, 1);
-    if (input.discountPlanId && !discountPlans.length) throw new ConflictException("指定优惠方案不满足本次报价条件");
-    let discountAmount = 0;
-    for (const discount of discountPlans) {
-      const amount = this.discountAmount(rentalAmount - discountAmount, discount.discountType, discount.discountValue, discount.maximumDiscount);
-      discountAmount += amount;
-      chargeLines.push({ code: `discount:${discount.code}`, name: discount.name, type: "discount", amount: -amount, sourceId: discount.id, sourceVersion: discount.version });
-    }
-    const customerCoupon = input.customerCouponId ? this.customerCoupon(state, input.customerCouponId) : undefined;
-    let couponAmount = 0;
-    if (customerCoupon) {
-      if (customerCoupon.customerId !== input.customerId || customerCoupon.status !== "claimed") throw new ConflictException("优惠券不属于当前客户或不可用");
-      const template = context.couponTemplates.find((item) => item.id === customerCoupon.templateId && item.status === "enabled");
-      if (!template || rentalAmount < template.minimumSpend || !this.inPeriod(template.effectiveFrom, template.effectiveTo, input.startAt) || (template.applicableItemGroupIds.length > 0 && !input.lines.some((line) => template.applicableItemGroupIds.includes(line.itemGroupId)))) throw new ConflictException("优惠券不满足本次报价条件");
-      if (discountPlans.some((item) => !item.stackableWithCoupon)) throw new ConflictException("当前优惠方案不能与优惠券叠加");
-      couponAmount = this.discountAmount(rentalAmount - discountAmount, template.discountType === "percentage" ? "percentage" : "fixed_amount", template.discountValue, template.maximumDiscount);
-      chargeLines.push({ code: `coupon:${template.code}`, name: template.name, type: "coupon", amount: -couponAmount, sourceId: template.id, sourceVersion: template.version });
-    }
+
+    // MKT-01A：增值服务与履约费必须在**优惠之前**算出金额，因为优惠可以指定作用于
+    // 它们（需求 4.4.10）。明细行仍按原顺序（租金 → 优惠 → 券 → 服务 → 履约）push，
+    // 因此这里只先算金额、把行暂存起来，避免报价明细的阅读顺序被实现顺序带跑。
+    const pendingServiceLines: RentalQuoteSnapshotV1["chargeLines"] = [];
     let serviceAmount = 0;
     for (const selected of input.services ?? []) {
       const service = state.services.find((item) => item.id === selected.serviceId && item.status === "enabled");
@@ -3248,7 +3297,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       const units = service.billingUnit === "per_day" ? Math.max(1, Math.ceil((new Date(input.endAt).getTime() - new Date(input.startAt).getTime()) / dayMs)) : 1;
       const amount = roundMoney(service.price * selected.quantity * units);
       serviceAmount += amount;
-      chargeLines.push({ code: `service:${service.code}`, name: service.name, type: "service", amount, sourceId: service.id, sourceVersion: `${service.version}/${service.termsVersion}`, detail: service.terms });
+      pendingServiceLines.push({ code: `service:${service.code}`, name: service.name, type: "service", amount, sourceId: service.id, sourceVersion: `${service.version}/${service.termsVersion}`, detail: service.terms });
     }
     serviceAmount = roundMoney(serviceAmount);
 
@@ -3259,6 +3308,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     //
     // 异地归还附加费按"归还地点与取件地点不同"判定，而不是按履约方式判定——
     // 门店自提也可能异地归还（规则允许时），那同样要收跨点费。
+    const pendingFulfillmentLines: RentalQuoteSnapshotV1["chargeLines"] = [];
     let fulfillmentAmount = 0;
     const fee = (plan.fulfillmentFees ?? []).find((row) => row.mode === input.fulfillmentMode);
     if (fee) {
@@ -3266,7 +3316,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       const crossAmount = crossLocation ? fee.crossLocationAmount ?? 0 : 0;
       fulfillmentAmount = roundMoney(fee.amount + crossAmount);
       if (fulfillmentAmount > 0) {
-        chargeLines.push({
+        pendingFulfillmentLines.push({
           code: `fulfillment:${input.fulfillmentMode}`,
           name: "履约费用",
           type: "fulfillment",
@@ -3279,6 +3329,105 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         });
       }
     }
+
+    // MKT-01A：自动优惠方案的资格、互斥与叠加交给纯函数收口（需求 4.4.10）。
+    //
+    // 早前是 `eligible.sort(按优先级).slice(0, 1)`：既只可能应用一个方案（叠加规则
+    // 无从表达），又按优先级而不是**实际减免最大**择一——需求点名禁止后者。
+    // 最低消费按「商品租金 + 使用量费用」的优惠前金额判定（使用量已并入 rentalAmount），
+    // 不含履约费、增值服务、押金、预授权与异常费用。
+    const discountSelection = selectDiscountPlans(state.discountPlans, {
+      bases: { rental: rentalAmount, fulfillment: fulfillmentAmount, service: serviceAmount },
+      minimumSpendBase: rentalAmount,
+      customerType: input.customerType,
+      hasCustomer: Boolean(input.customerId),
+      itemGroupIds: input.lines.map((line) => line.itemGroupId),
+      dayTypes: quotedDayTypes,
+      rentalStartAt: input.startAt,
+      workspaceId: this.workspaceOf(tenantId),
+      requestedPlanId: input.discountPlanId
+    });
+    if (input.discountPlanId && !discountSelection.applied.some((item) => item.id === input.discountPlanId)) {
+      const rejected = discountSelection.evaluations.find((row) => row.planId === input.discountPlanId);
+      throw new ConflictException(
+        `指定优惠方案不满足本次报价条件${rejected?.skipReason ? `：${rejected.skipDetail ?? rejected.skipReason}` : ""}`
+      );
+    }
+    const discountPlans = discountSelection.applied;
+    const discountAmount = roundMoney(
+      discountSelection.discountByTarget.rental +
+        discountSelection.discountByTarget.fulfillment +
+        discountSelection.discountByTarget.service
+    );
+    for (const evaluation of discountSelection.evaluations) {
+      if (!evaluation.applied) continue;
+      chargeLines.push({
+        code: `discount:${evaluation.planCode}`,
+        name: evaluation.planName,
+        type: "discount",
+        amount: -evaluation.discountAmount,
+        sourceId: evaluation.planId,
+        sourceVersion: evaluation.planVersion,
+        // 明细直接带上作用对象、基数与公式：客服解释优惠不必再去翻方案配置。
+        detail: `作用于${evaluation.appliesTo}；基数 ${evaluation.base}；${evaluation.formula}`
+      });
+    }
+    const customerCoupon = input.customerCouponId ? this.customerCoupon(state, input.customerCouponId) : undefined;
+    let couponAmount = 0;
+    let couponEvaluation: RentalQuoteSnapshotV1["couponEvaluation"];
+    if (customerCoupon) {
+      if (customerCoupon.customerId !== input.customerId || customerCoupon.status !== "claimed") throw new ConflictException("优惠券不属于当前客户或不可用");
+      if (!this.inPeriod(customerCoupon.effectiveFrom, customerCoupon.effectiveTo, input.startAt)) throw new ConflictException("优惠券不在本次租期的有效期");
+      if (customerCoupon.applicableItemGroupIds.length > 0 && !input.lines.some((line) => customerCoupon.applicableItemGroupIds.includes(line.itemGroupId))) throw new ConflictException("优惠券不适用于本次商品");
+      if (!customerCoupon.stackableWithDiscountPlans && discountPlans.length) throw new ConflictException("所选优惠券不能与自动优惠方案叠加");
+      if (discountPlans.some((item) => !item.stackableWithCoupon)) throw new ConflictException("当前优惠方案不能与优惠券叠加");
+      const baseBeforeDiscount = customerCoupon.appliesTo === "rental"
+        ? rentalAmount
+        : customerCoupon.appliesTo === "fulfillment" ? fulfillmentAmount : serviceAmount;
+      if (baseBeforeDiscount < customerCoupon.minimumSpend) throw new ConflictException("优惠券未达到适用费用的最低消费");
+      const automaticDiscount = discountSelection.discountByTarget[customerCoupon.appliesTo];
+      const runningBase = roundMoney(Math.max(0, baseBeforeDiscount - automaticDiscount));
+      // 券在自动方案之后作用于它自己的费用对象；押金、预授权和异常费用不在取值域。
+      couponAmount = this.discountAmount(
+        runningBase,
+        customerCoupon.discountType,
+        customerCoupon.discountValue,
+        customerCoupon.maximumDiscount
+      );
+      if (couponAmount <= 0) throw new ConflictException("优惠券在当前费用基数下没有可用优惠");
+      const formula = customerCoupon.discountType === "percentage"
+        ? `${runningBase} × ${customerCoupon.discountValue}%${customerCoupon.maximumDiscount === undefined ? "" : `，封顶 ${customerCoupon.maximumDiscount}`}`
+        : `min(${runningBase}, ${customerCoupon.discountValue}${customerCoupon.maximumDiscount === undefined ? "" : `, 封顶 ${customerCoupon.maximumDiscount}`})`;
+      couponEvaluation = {
+        couponId: customerCoupon.id,
+        templateId: customerCoupon.templateId,
+        templateCode: customerCoupon.templateCode,
+        templateName: customerCoupon.templateName,
+        templateVersion: customerCoupon.templateVersion,
+        appliesTo: customerCoupon.appliesTo,
+        discountType: customerCoupon.discountType,
+        discountValue: customerCoupon.discountValue,
+        minimumSpend: customerCoupon.minimumSpend,
+        maximumDiscount: customerCoupon.maximumDiscount,
+        stackableWithDiscountPlans: customerCoupon.stackableWithDiscountPlans,
+        baseBeforeDiscount,
+        runningBase,
+        formula,
+        discountAmount: couponAmount
+      };
+      chargeLines.push({
+        code: `coupon:${customerCoupon.templateCode}`,
+        name: customerCoupon.templateName,
+        type: "coupon",
+        amount: -couponAmount,
+        sourceId: customerCoupon.id,
+        sourceVersion: customerCoupon.templateVersion,
+        detail: `作用于${customerCoupon.appliesTo}；基数 ${runningBase}；${formula}`
+      });
+    }
+    for (const line of pendingServiceLines) chargeLines.push(line);
+    for (const line of pendingFulfillmentLines) chargeLines.push(line);
+
     // 押金明细必须讲清取数方式：固定押金与倍数押金金额可能相同，
     // 只给一个数字客服无法回答"为什么是这个数"。
     if (preAuthAmount > 0) {
@@ -3339,6 +3488,11 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       preAuthAmount,
       // 需求 4.4：最终应付 = 基础租金 + 使用量费用 + 履约费用 + 增值服务 + 异常费用 - 优惠 - 券。
       // 使用量费用已并入租金（由 usage 策略计），异常费用在订单侧按快照追加。
+      //
+      // `discountAmount` 是三个作用对象（租金/履约/服务）减免额之和，因此这条总式
+      // 与「逐对象各自扣减再相加」恒等。各对象的减免在 selectDiscountPlans 内已按
+      // 该对象的运行基数封顶，券也只在租金余额上算，因此任何一项都不会被优惠成负数
+      // （需求 4.4.10「任何费用项不得被优惠成负数」）。押金与预授权不参与优惠。
       payableAmount: roundMoney(rentalAmount - discountAmount - couponAmount + serviceAmount + fulfillmentAmount),
       // 需求 4.4.1：`本次实收 = 租赁应付 + 应付押金`；预授权只是冻结，不计入。
       receivableAmount: roundMoney(
@@ -3349,7 +3503,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       // 编一个版本号会让「按哪一版算的」这条追溯线索变成假的。
       priceVersionId: "versionId" in spaceVersion ? spaceVersion.versionId : undefined,
       priceVersion: "version" in spaceVersion ? spaceVersion.version : undefined,
-      appliedDiscountPlanIds: discountPlans.map((item) => item.id), customerCouponId: customerCoupon?.id,
+      appliedDiscountPlanIds: discountPlans.map((item) => item.id),
+      discountEvaluations: discountSelection.evaluations,
+      couponEvaluation,
+      customerCouponId: customerCoupon?.id,
       // CORE-EXT-02D：固化本次报价生成时该空间已启用能力的版本与配置。
       // 升级或改配置后，这张报价及由它下单的在途订单仍按此快照校验与履约。
       capabilitySnapshot: this.capabilities
@@ -3535,7 +3692,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       minimumUnits: 1
     }));
     const pricingPlans: RentalPricingPlanV1[] = [{ id: `${idPrefix}_pricing_default`, tenantId, categoryCode: context.profile.categoryCode, code: "STANDARD", name: `${context.category.name}标准价格`, currency: "CNY", status: "enabled", version: "1.0", effectiveFrom: timestamp, rates, createdAt: timestamp, updatedAt: timestamp }];
-    const discountPlans: RentalDiscountPlan[] = [{ id: `${idPrefix}_discount_long`, tenantId, categoryCode: context.profile.categoryCode, code: "LONG_RENTAL", name: "长期租赁优惠", status: "enabled", discountType: "percentage", discountValue: 5, minimumSpend: 500, customerScope: "all", applicableItemGroupIds: [], applicableDayTypes: [], priority: 100, stackableWithCoupon: true, effectiveFrom: timestamp, version: "1.0", createdAt: timestamp, updatedAt: timestamp }];
+    const discountPlans: RentalDiscountPlan[] = [{ id: `${idPrefix}_discount_long`, tenantId, categoryCode: context.profile.categoryCode, code: "LONG_RENTAL", name: "长期租赁优惠", status: "enabled", discountType: "percentage", discountValue: 5, minimumSpend: 500, appliesTo: "rental", customerScope: "all", applicableItemGroupIds: [], applicableDayTypes: [], priority: 100, stackableWithOtherPlans: false, stackableWithCoupon: true, effectiveFrom: timestamp, version: "1.0", createdAt: timestamp, updatedAt: timestamp }];
     const services: RentalValueAddedService[] = context.category.businessModel.valueAddedServicePresets.slice(0, 4).map((name, index) => ({ id: `${idPrefix}_service_${index + 1}`, tenantId, categoryCode: context.profile.categoryCode, code: `SERVICE_${index + 1}`, name, serviceType: serviceType(name), billingUnit: name.includes("配送") || name.includes("运输") ? "per_order" : "per_day", price: 20 + index * 30, maximumQuantity: 5, coverageLimit: name.includes("保险") || name.includes("免赔") ? 5000 : undefined, deductible: name.includes("免赔") ? 200 : undefined, termsVersion: "1.0", terms: `${name}服务条款：以订单保存的本版本范围、限额及除外责任为准。`, applicableItemGroupIds: [], status: "enabled", version: "1.0", createdAt: timestamp, updatedAt: timestamp }));
     const ruleVersions: RentalRuleVersion[] = [{ id: `${idPrefix}_rule_v1`, tenantId, categoryCode: context.profile.categoryCode, version: "1.0", status: "published", config: defaultRuleConfig(context.category, context.settings), changeReason: "品类初始化规则", createdBy: "system", createdAt: timestamp, publishedAt: timestamp }];
     const defaultVariables = { customerName: { label: "客户名称", required: true }, orderNo: { label: "订单号", required: true } };
@@ -3568,13 +3725,22 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     else {
       if (!Number.isInteger(amount)) throw new BadRequestException("优惠券奖励数量必须是整数");
       if (!couponTemplateId) throw new BadRequestException("优惠券奖励必须选择优惠券模板");
-      const template = context.couponTemplates.find((row) => row.id === couponTemplateId && row.status === "enabled");
+      const template = context.couponTemplates.find((row) => row.id === couponTemplateId && row.status === "active");
       if (!template) throw new BadRequestException("奖励优惠券模板不存在或未启用");
       const existingCount = state.customerCoupons.filter((row) => row.templateId === template.id && row.customerId === customerId && row.status !== "void").length;
       if (existingCount + amount > template.perCustomerLimit) throw new ConflictException("奖励优惠券超过每客限领数量");
       if (template.claimedQuantity + amount > template.totalQuota) throw new ConflictException("奖励优惠券库存不足");
       for (let index = 0; index < amount; index += 1) {
-        const coupon: RentalCustomerCoupon = { id: uid("reward_coupon"), tenantId: context.profile.tenantId, customerId, templateId: template.id, templateCode: template.code, templateName: template.name, status: "claimed", claimedAt: appliedAt, effectiveFrom: template.effectiveFrom, effectiveTo: template.effectiveTo };
+        const coupon: RentalCustomerCoupon = {
+          id: uid("reward_coupon"), tenantId: context.profile.tenantId, customerId,
+          templateId: template.id, templateCode: template.code, templateName: template.name,
+          templateVersion: template.version, discountType: template.discountType,
+          discountValue: template.discountValue, minimumSpend: template.minimumSpend,
+          maximumDiscount: template.maximumDiscount, appliesTo: template.appliesTo,
+          stackableWithDiscountPlans: template.stackableWithDiscountPlans,
+          applicableItemGroupIds: [...template.applicableItemGroupIds], grantReason: "membership_reward",
+          status: "claimed", claimedAt: appliedAt, effectiveFrom: template.effectiveFrom, effectiveTo: template.effectiveTo
+        };
         state.customerCoupons.unshift(coupon); referenceIds.push(coupon.id);
         grantedCoupons.push(coupon);
       }
@@ -3599,7 +3765,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     for (const plan of couponPlans) {
       if (!Number.isInteger(plan.amount)) throw new BadRequestException("优惠券奖励数量必须是整数");
       if (!plan.couponTemplateId) throw new BadRequestException("优惠券奖励必须选择优惠券模板");
-      const template = context.couponTemplates.find((row) => row.id === plan.couponTemplateId && row.status === "enabled");
+      const template = context.couponTemplates.find((row) => row.id === plan.couponTemplateId && row.status === "active");
       if (!template) throw new BadRequestException("奖励优惠券模板不存在或未启用");
       byTemplate.set(template.id, (byTemplate.get(template.id) ?? 0) + plan.amount);
       const customerKey = `${plan.customerId}:${template.id}`;

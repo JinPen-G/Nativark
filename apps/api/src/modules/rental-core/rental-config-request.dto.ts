@@ -1,4 +1,4 @@
-import { RENTAL_PRICING_UNIT_CODES, type RentalDayType, type RentalPricingUnit } from "@store-rental/shared";
+import { RENTAL_DISCOUNT_TARGETS, RENTAL_DISCOUNT_TYPES, RENTAL_PRICING_UNIT_CODES, type RentalDayType, type RentalDiscountTarget, type RentalPricingUnit } from "@store-rental/shared";
 import type {
   ApplyOfficialCalendarSourceRequest,
   PublishRentalCalendarRequest,
@@ -90,7 +90,9 @@ const CANCELLATION_FEE_TYPES = ["none", "fixed_amount", "percentage"] as const;
 const REWARD_TYPES = ["points", "balance", "coupon"] as const;
 const REFERRAL_TRIGGERS = ["registration", "identity_verified", "first_order_completed"] as const;
 const NOTIFICATION_CHANNELS = ["sms", "app_push", "wechat", "email"] as const;
-const DISCOUNT_TYPES = ["percentage", "fixed_amount"] as const;
+// MKT-01A：需求 4.4.10 第一阶段三种优惠类型。复杂规则（满租期赠送、指定商品固定价、
+// 免履约费、指定服务减免）必须另建模型，不得塞进这三个字段。
+const DISCOUNT_TYPES = RENTAL_DISCOUNT_TYPES;
 const CUSTOMER_SCOPES = ["all", "personal", "corporate", "member"] as const;
 const SERVICE_TYPES = [
   "insurance",
@@ -617,6 +619,30 @@ export class SaveRentalDiscountPlanDto implements SaveRentalDiscountPlanRequest 
   @IsInt()
   @Min(0)
   priority!: number;
+
+  /**
+   * MKT-01A：优惠作用的费用对象。取值域只有 rental / fulfillment / service——
+   * 需求 4.4.10 明确普通优惠不得减免押金、预授权与异常费用，因此它们不在枚举里，
+   * 请求里写了也会被 DTO 直接拒掉，而不是靠服务层再判一次。
+   */
+  @IsIn(RENTAL_DISCOUNT_TARGETS)
+  appliesTo!: RentalDiscountTarget;
+
+  /** 满额固定减免的门槛；仅 discountType = threshold_amount 使用。 */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  thresholdAmount?: number;
+
+  /** 互斥组。留空表示自成一组，只与自己互斥。 */
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  exclusiveGroup?: string;
+
+  /** 是否允许与其他优惠方案同时应用（跨互斥组叠加需双方都允许）。 */
+  @IsBoolean()
+  stackableWithOtherPlans!: boolean;
 
   @IsBoolean()
   stackableWithCoupon!: boolean;

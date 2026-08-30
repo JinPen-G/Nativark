@@ -47,9 +47,11 @@ export interface RentalBusinessFactStore {
   loadAll(): Promise<TenantBusinessFactSnapshot[]>;
   findQuote(tenantId: string, quoteId: string, tx?: RentalBusinessFactTx): Promise<RentalQuoteSnapshotV1 | undefined>;
   consumeQuoteIfAvailable(tenantId: string, quoteId: string, orderId: string, consumedAt: string, tx: RentalBusinessFactTx): Promise<boolean>;
-  lockCouponIfAvailable(tenantId: string, couponId: string, customerId: string | undefined, orderId: string, lockedAt: string, tx: RentalBusinessFactTx): Promise<boolean>;
+  lockCouponIfAvailable(tenantId: string, couponId: string, customerId: string | undefined, orderId: string, lockedAt: string, validAt: string, discountAmount: number, tx: RentalBusinessFactTx): Promise<boolean>;
   redeemCouponForOrder(tenantId: string, orderId: string, redeemedAt: string, tx: RentalBusinessFactTx): Promise<"none" | "redeemed" | "already_redeemed" | "invalid">;
   releaseCouponForOrder(tenantId: string, orderId: string, releasedAt: string, tx: RentalBusinessFactTx): Promise<void>;
+  expireClaimedCoupons(tenantId: string, expiredAt: string): Promise<number>;
+  voidClaimedCoupon(tenantId: string, couponId: string, reason: string, voidedAt: string, tx: RentalBusinessFactTx): Promise<boolean>;
   upsertQuote(quote: RentalQuoteSnapshotV1): Promise<void>;
   /**
    * 传入 tx 时必须使用它。领券由幂等执行器包在事务里，若这里另起连接独立提交，
@@ -162,51 +164,198 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
     customerId: string | undefined,
     orderId: string,
     lockedAt: string,
+    validAt: string,
+    discountAmount: number,
     tx: RentalBusinessFactTx
   ): Promise<boolean> {
+    if (!Number.isFinite(discountAmount) || discountAmount <= 0) return false;
+    const workspaceId = await resolveScopeWorkspaceId(tx, tenantId);
     const timestamp = date(lockedAt);
+    const validityTimestamp = date(validAt);
+    // 券行和模板行都在外层「下单」事务中加锁。不同券并发消耗同一模板预算时，
+    // 模板锁把预算判断串行化；同一张券并发时，券锁保证只有一个订单能占用。
+    await tx.$queryRaw(Prisma.sql`
+      SELECT id FROM rental_customer_coupons
+      WHERE id = ${couponId} AND tenantId = ${tenantId} AND workspaceId = ${workspaceId}
+      FOR UPDATE
+    `);
+    const coupon = await tx.rentalCustomerCoupon.findFirst({
+      where: { id: couponId, tenantId, workspaceId },
+      select: { customerId: true, templateId: true, status: true, effectiveFrom: true, effectiveTo: true }
+    });
+    if (!coupon || (customerId && coupon.customerId !== customerId) || coupon.status !== "claimed"
+      || coupon.effectiveFrom > validityTimestamp || coupon.effectiveTo < validityTimestamp) return false;
+
+    const templates = await tx.$queryRaw<Array<{ perCustomerUseLimit: number }>>(Prisma.sql`
+      SELECT perCustomerUseLimit FROM rental_coupon_templates
+      WHERE id = ${coupon.templateId} AND tenantId = ${tenantId} AND workspaceId = ${workspaceId}
+      FOR UPDATE
+    `);
+    const template = templates[0];
+    if (!template) return false;
+    const used = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT id FROM rental_customer_coupons
+      WHERE tenantId = ${tenantId} AND workspaceId = ${workspaceId}
+        AND templateId = ${coupon.templateId} AND customerId = ${coupon.customerId}
+        AND status IN ('locked', 'redeemed')
+      FOR UPDATE
+    `);
+    if (used.length >= template.perCustomerUseLimit) return false;
+    const amount = new Prisma.Decimal(discountAmount.toFixed(2));
+    const budgetUpdated = await tx.$executeRaw(Prisma.sql`
+      UPDATE rental_coupon_templates
+      SET lockedBudget = lockedBudget + ${amount}
+      WHERE id = ${coupon.templateId} AND tenantId = ${tenantId} AND workspaceId = ${workspaceId}
+        AND (totalBudget IS NULL OR lockedBudget + redeemedBudget + ${amount} <= totalBudget)
+    `);
+    if (budgetUpdated !== 1) return false;
     const result = await tx.rentalCustomerCoupon.updateMany({
       where: {
         id: couponId,
         tenantId,
+        workspaceId,
         ...(customerId ? { customerId } : {}),
         status: "claimed",
         effectiveFrom: { lte: timestamp },
         effectiveTo: { gte: timestamp }
       },
-      data: { status: "locked", lockedOrderId: orderId, lockedAt: timestamp, releasedAt: null }
+      data: {
+        status: "locked",
+        lockedOrderId: orderId,
+        lockedAt: timestamp,
+        lockedDiscountAmount: amount,
+        releasedAt: null,
+        releaseReason: null,
+        expiredAt: null
+      }
     });
-    return result.count === 1;
+    if (result.count !== 1) throw new Error("优惠券状态并发变化，拒绝锁定");
+    return true;
   }
 
   async redeemCouponForOrder(tenantId: string, orderId: string, redeemedAt: string, tx: RentalBusinessFactTx): Promise<"none" | "redeemed" | "already_redeemed" | "invalid"> {
     const workspaceId = await resolveScopeWorkspaceId(tx, tenantId);
     const timestamp = date(redeemedAt);
+    await tx.$queryRaw(Prisma.sql`
+      SELECT id FROM rental_customer_coupons
+      WHERE tenantId = ${tenantId} AND workspaceId = ${workspaceId}
+        AND (lockedOrderId = ${orderId} OR redeemedOrderId = ${orderId})
+      FOR UPDATE
+    `);
     const coupon = await tx.rentalCustomerCoupon.findFirst({
       where: { tenantId, workspaceId, OR: [{ lockedOrderId: orderId }, { redeemedOrderId: orderId }] },
-      select: { status: true, redeemedOrderId: true }
+      select: { id: true, templateId: true, status: true, redeemedOrderId: true, lockedDiscountAmount: true }
     });
     if (!coupon) return "none";
     if (coupon.status === "redeemed" && coupon.redeemedOrderId === orderId) return "already_redeemed";
-    if (coupon.status !== "locked") return "invalid";
+    if (coupon.status !== "locked" || !coupon.lockedDiscountAmount) return "invalid";
+    await tx.$queryRaw(Prisma.sql`
+      SELECT id FROM rental_coupon_templates
+      WHERE id = ${coupon.templateId} AND tenantId = ${tenantId} AND workspaceId = ${workspaceId}
+      FOR UPDATE
+    `);
+    const budgetUpdated = await tx.$executeRaw(Prisma.sql`
+      UPDATE rental_coupon_templates
+      SET lockedBudget = lockedBudget - ${coupon.lockedDiscountAmount},
+          redeemedBudget = redeemedBudget + ${coupon.lockedDiscountAmount}
+      WHERE id = ${coupon.templateId} AND tenantId = ${tenantId} AND workspaceId = ${workspaceId}
+        AND lockedBudget >= ${coupon.lockedDiscountAmount}
+    `);
+    if (budgetUpdated !== 1) return "invalid";
     // 条件更新同时防住读取后到更新前的状态竞争；0 行必须由上层拒绝订单确认。
     const result = await tx.rentalCustomerCoupon.updateMany({
-      where: { tenantId, workspaceId, lockedOrderId: orderId, status: "locked" },
+      where: { id: coupon.id, tenantId, workspaceId, lockedOrderId: orderId, status: "locked" },
       data: { status: "redeemed", redeemedOrderId: orderId, redeemedAt: timestamp }
     });
-    return result.count === 1 ? "redeemed" : "invalid";
+    if (result.count !== 1) throw new Error("优惠券状态并发变化，拒绝核销");
+    return "redeemed";
   }
 
   async releaseCouponForOrder(tenantId: string, orderId: string, releasedAt: string, tx: RentalBusinessFactTx): Promise<void> {
     const workspaceId = await resolveScopeWorkspaceId(tx, tenantId);
-    await tx.rentalCustomerCoupon.updateMany({
-      where: {
-        tenantId,
-        workspaceId,
-        OR: [{ lockedOrderId: orderId, status: "locked" }, { redeemedOrderId: orderId, status: "redeemed" }]
-      },
-      data: { status: "claimed", lockedOrderId: null, lockedAt: null, redeemedOrderId: null, redeemedAt: null, releasedAt: date(releasedAt) }
+    const timestamp = date(releasedAt);
+    await tx.$queryRaw(Prisma.sql`
+      SELECT id FROM rental_customer_coupons
+      WHERE tenantId = ${tenantId} AND workspaceId = ${workspaceId}
+        AND (lockedOrderId = ${orderId} OR redeemedOrderId = ${orderId})
+      FOR UPDATE
+    `);
+    const coupon = await tx.rentalCustomerCoupon.findFirst({
+      where: { tenantId, workspaceId, OR: [{ lockedOrderId: orderId }, { redeemedOrderId: orderId }] },
+      select: { id: true, templateId: true, status: true, effectiveTo: true, lockedDiscountAmount: true }
     });
+    if (!coupon || !["locked", "redeemed"].includes(coupon.status) || !coupon.lockedDiscountAmount) return;
+    await tx.$queryRaw(Prisma.sql`
+      SELECT id FROM rental_coupon_templates
+      WHERE id = ${coupon.templateId} AND tenantId = ${tenantId} AND workspaceId = ${workspaceId}
+      FOR UPDATE
+    `);
+    const budgetUpdated = coupon.status === "locked"
+      ? await tx.$executeRaw(Prisma.sql`
+          UPDATE rental_coupon_templates SET lockedBudget = lockedBudget - ${coupon.lockedDiscountAmount}
+          WHERE id = ${coupon.templateId} AND tenantId = ${tenantId} AND workspaceId = ${workspaceId}
+            AND lockedBudget >= ${coupon.lockedDiscountAmount}
+        `)
+      : await tx.$executeRaw(Prisma.sql`
+          UPDATE rental_coupon_templates SET redeemedBudget = redeemedBudget - ${coupon.lockedDiscountAmount}
+          WHERE id = ${coupon.templateId} AND tenantId = ${tenantId} AND workspaceId = ${workspaceId}
+            AND redeemedBudget >= ${coupon.lockedDiscountAmount}
+        `);
+    if (budgetUpdated !== 1) throw new Error("优惠券预算账不平，拒绝释放");
+    const expired = coupon.effectiveTo < timestamp;
+    const result = await tx.rentalCustomerCoupon.updateMany({
+      where: { id: coupon.id, tenantId, workspaceId, status: coupon.status },
+      data: {
+        status: expired ? "expired" : "claimed",
+        lockedOrderId: null,
+        lockedAt: null,
+        redeemedOrderId: null,
+        redeemedAt: null,
+        releasedAt: timestamp,
+        releaseReason: "order_cancelled",
+        expiredAt: expired ? timestamp : null
+      }
+    });
+    if (result.count !== 1) throw new Error("优惠券状态并发变化，拒绝释放");
+  }
+
+  async expireClaimedCoupons(tenantId: string, expiredAt: string): Promise<number> {
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
+    const timestamp = date(expiredAt);
+    const result = await this.prisma.rentalCustomerCoupon.updateMany({
+      where: { tenantId, workspaceId, status: "claimed", effectiveTo: { lt: timestamp } },
+      data: { status: "expired", expiredAt: timestamp }
+    });
+    return result.count;
+  }
+
+  async voidClaimedCoupon(
+    tenantId: string,
+    couponId: string,
+    reason: string,
+    voidedAt: string,
+    tx: RentalBusinessFactTx
+  ): Promise<boolean> {
+    const workspaceId = await resolveScopeWorkspaceId(tx, tenantId);
+    await tx.$queryRaw(Prisma.sql`
+      SELECT id FROM rental_customer_coupons
+      WHERE id = ${couponId} AND tenantId = ${tenantId} AND workspaceId = ${workspaceId}
+      FOR UPDATE
+    `);
+    const coupon = await tx.rentalCustomerCoupon.findFirst({
+      where: { id: couponId, tenantId, workspaceId },
+      select: { status: true }
+    });
+    if (!coupon) return false;
+    if (coupon.status === "void") return true;
+    // 已锁定券关联着一张按该优惠金额创建的订单。单独作废会让订单金额与券预算分离，
+    // 所以必须先走订单取消（它会在同一事务释放券与预算），再作废可用券。
+    if (coupon.status !== "claimed") return false;
+    const result = await tx.rentalCustomerCoupon.updateMany({
+      where: { id: couponId, tenantId, workspaceId, status: "claimed" },
+      data: { status: "void", voidedAt: date(voidedAt), voidReason: reason }
+    });
+    return result.count === 1;
   }
 
   async upsertQuote(quote: RentalQuoteSnapshotV1): Promise<void> {
@@ -235,6 +384,9 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       ruleSnapshot: quote.ruleSnapshot as unknown as Prisma.InputJsonValue,
       calendarVersion: quote.calendarVersion ?? null,
       appliedDiscountPlanIds: quote.appliedDiscountPlanIds as unknown as Prisma.InputJsonValue,
+      // MKT-01A：逐方案评估随报价固化。方案后续改配置不得改变这张报价的解释。
+      discountEvaluations: (quote.discountEvaluations ?? []) as unknown as Prisma.InputJsonValue,
+      couponEvaluation: (quote.couponEvaluation ?? null) as unknown as Prisma.InputJsonValue,
       // CORE-EXT-02D：固化报价生成时已启用能力的版本快照，下单时拷进订单。
       capabilitySnapshot: (quote.capabilitySnapshot ?? null) as unknown as Prisma.InputJsonValue,
       capabilityDecisions: (quote.capabilityDecisions ?? null) as unknown as Prisma.InputJsonValue,
@@ -258,15 +410,29 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       templateId: coupon.templateId,
       templateCode: coupon.templateCode,
       templateName: coupon.templateName,
+      templateVersion: coupon.templateVersion,
+      discountType: coupon.discountType,
+      discountValue: new Prisma.Decimal(coupon.discountValue),
+      minimumSpend: new Prisma.Decimal(coupon.minimumSpend),
+      maximumDiscount: coupon.maximumDiscount === undefined ? null : new Prisma.Decimal(coupon.maximumDiscount),
+      appliesTo: coupon.appliesTo,
+      stackableWithDiscountPlans: coupon.stackableWithDiscountPlans,
+      applicableItemGroupIds: coupon.applicableItemGroupIds as unknown as Prisma.InputJsonValue,
+      grantReason: coupon.grantReason,
       status: coupon.status,
       claimedAt: date(coupon.claimedAt),
       effectiveFrom: date(coupon.effectiveFrom),
       effectiveTo: date(coupon.effectiveTo),
       lockedOrderId: coupon.lockedOrderId ?? null,
       lockedAt: optionalDate(coupon.lockedAt),
+      lockedDiscountAmount: coupon.lockedDiscountAmount === undefined ? null : new Prisma.Decimal(coupon.lockedDiscountAmount),
       redeemedOrderId: coupon.redeemedOrderId ?? null,
       redeemedAt: optionalDate(coupon.redeemedAt),
-      releasedAt: optionalDate(coupon.releasedAt)
+      releasedAt: optionalDate(coupon.releasedAt),
+      releaseReason: coupon.releaseReason ?? null,
+      expiredAt: optionalDate(coupon.expiredAt),
+      voidedAt: optionalDate(coupon.voidedAt),
+      voidReason: coupon.voidReason ?? null
     };
     const workspaceId = await resolveScopeWorkspaceId(tx ?? this.prisma, coupon.tenantId);
     await (tx ?? this.prisma).rentalCustomerCoupon.upsert({
@@ -434,6 +600,8 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       ruleSnapshot: row.ruleSnapshot as unknown as RentalRuleConfig,
       calendarVersion: row.calendarVersion ?? undefined,
       appliedDiscountPlanIds: (row.appliedDiscountPlanIds ?? []) as string[],
+      discountEvaluations: (row.discountEvaluations ?? []) as unknown as RentalQuoteSnapshotV1["discountEvaluations"],
+      couponEvaluation: (row.couponEvaluation ?? undefined) as unknown as RentalQuoteSnapshotV1["couponEvaluation"],
       capabilitySnapshot: (row.capabilitySnapshot ?? undefined) as unknown as RentalQuoteSnapshotV1["capabilitySnapshot"],
       capabilityDecisions: (row.capabilityDecisions ?? undefined) as unknown as RentalQuoteSnapshotV1["capabilityDecisions"],
       customerCouponId: row.customerCouponId ?? undefined,
@@ -452,15 +620,29 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       templateId: row.templateId,
       templateCode: row.templateCode,
       templateName: row.templateName,
+      templateVersion: row.templateVersion,
+      discountType: row.discountType as RentalCustomerCoupon["discountType"],
+      discountValue: num(row.discountValue),
+      minimumSpend: num(row.minimumSpend),
+      maximumDiscount: row.maximumDiscount === null ? undefined : num(row.maximumDiscount),
+      appliesTo: row.appliesTo as RentalCustomerCoupon["appliesTo"],
+      stackableWithDiscountPlans: row.stackableWithDiscountPlans,
+      applicableItemGroupIds: (row.applicableItemGroupIds ?? []) as string[],
+      grantReason: row.grantReason,
       status: row.status as RentalCustomerCouponStatus,
       claimedAt: iso(row.claimedAt),
       effectiveFrom: iso(row.effectiveFrom),
       effectiveTo: iso(row.effectiveTo),
       lockedOrderId: row.lockedOrderId ?? undefined,
       lockedAt: optionalIso(row.lockedAt),
+      lockedDiscountAmount: row.lockedDiscountAmount === null ? undefined : num(row.lockedDiscountAmount),
       redeemedOrderId: row.redeemedOrderId ?? undefined,
       redeemedAt: optionalIso(row.redeemedAt),
-      releasedAt: optionalIso(row.releasedAt)
+      releasedAt: optionalIso(row.releasedAt),
+      releaseReason: row.releaseReason ?? undefined,
+      expiredAt: optionalIso(row.expiredAt),
+      voidedAt: optionalIso(row.voidedAt),
+      voidReason: row.voidReason ?? undefined
     };
   }
 

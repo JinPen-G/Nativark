@@ -34,6 +34,8 @@ function context() {
 // 核心服务的配置写方法已随「配置落库」转为异步，.cjs 无顶层 await，故包一层异步 IIFE。
 void (async () => {
 
+const ok2 = (message) => console.log(`  PASS  ${message}`);
+
 // SPACE-03：状态按经营空间取，先跑启动预热建立查找表（夹具提供演示空间）。
 await core.onApplicationBootstrap();
 await business.onApplicationBootstrap();
@@ -118,7 +120,7 @@ const couponTemplate = await core.saveCouponTemplate(tenantId, {
   effectiveFrom: new Date(now - 24 * 60 * 60 * 1000).toISOString(),
   effectiveTo: new Date(now + 30 * 24 * 60 * 60 * 1000).toISOString(),
   applicableItemGroupIds: [],
-  status: "enabled"
+  status: "active"
 });
 // claimCoupon 现在返回 { coupon, template }：模板的 claimedQuantity 也是本次写入的一部分，
 // 调用方需要它才能在事务提交后正确更新缓存。
@@ -127,6 +129,25 @@ const customerCoupon = claimResult.coupon;
 assert.equal(customerCoupon.status, "claimed");
 assert.equal(claimResult.template.claimedQuantity, 1, "领取应使模板已领数量加一");
 await assert.rejects(async () => business.claimCoupon(tenantId, context(), couponTemplate.id, "member_001"), /限领/);
+await core.saveCouponTemplate(tenantId, {
+  id: couponTemplate.id,
+  code: couponTemplate.code,
+  name: couponTemplate.name,
+  discountType: couponTemplate.discountType,
+  discountValue: 1,
+  minimumSpend: couponTemplate.minimumSpend,
+  maximumDiscount: couponTemplate.maximumDiscount,
+  appliesTo: couponTemplate.appliesTo,
+  stackableWithDiscountPlans: couponTemplate.stackableWithDiscountPlans,
+  totalQuota: couponTemplate.totalQuota,
+  perCustomerLimit: couponTemplate.perCustomerLimit,
+  perCustomerUseLimit: couponTemplate.perCustomerUseLimit,
+  totalBudget: couponTemplate.totalBudget,
+  effectiveFrom: couponTemplate.effectiveFrom,
+  effectiveTo: couponTemplate.effectiveTo,
+  applicableItemGroupIds: couponTemplate.applicableItemGroupIds,
+  status: "active"
+});
 
 const group = context().groups.find((item) => item.code === "CAMP-TENT");
 const location = core.listLocations(tenantId)[0];
@@ -144,6 +165,8 @@ const quote = await business.createQuote(tenantId, context(), {
 });
 assert.ok(quote.rentalAmount > 0);
 assert.ok(quote.couponAmount > 0);
+assert.equal(quote.couponAmount, 30, "已发券必须按领取时的 30 元权益快照计算，不能跟随模板改成 1 元");
+assert.equal(quote.couponEvaluation.templateVersion, "1.0", "报价必须记录客户券固化的模板版本");
 assert.ok(quote.serviceAmount > 0);
 assert.equal(quote.calendarVersion, `${publishedCalendar.year}:${publishedCalendar.version}`);
 assert.ok(quote.chargeLines.some((line) => line.type === "coupon"));
@@ -395,6 +418,65 @@ assert.doesNotThrow(
 );
 // 恢复成可营业，避免影响后续用例。
 await publishHours({ windows: [{ start: "09:00", end: "18:00" }] }, "时段三态：恢复");
+
+// ============ MKT-01A：报价必须保存逐方案评估，且优惠不得触碰押金与预授权 ============
+// 需求 4.4.10：报价保存已应用与未应用方案、原因、计算基数、公式、版本和空间范围；
+// 标准租金优惠不得含糊地减免押金、预授权或异常费用。
+const mktGroup = context().groups.find((item) => item.code !== "CAMP-TENT") ?? context().groups[0];
+const mktStartAt = new Date(now + 10 * 24 * 60 * 60 * 1000).toISOString();
+const mktEndAt = new Date(now + 12 * 24 * 60 * 60 * 1000).toISOString();
+// 两个同互斥组的方案：减免小者优先级更高，用来验证「按实际减免最大择一」在报价链路上成立。
+await business.saveDiscountPlan(tenantId, context(), {
+  code: "MKT-SMALL", name: "小额优惠", status: "enabled",
+  discountType: "fixed_amount", discountValue: 10, minimumSpend: 0,
+  appliesTo: "rental", customerScope: "all", applicableItemGroupIds: [], applicableDayTypes: [],
+  priority: 1, exclusiveGroup: "MKT-G", stackableWithOtherPlans: false, stackableWithCoupon: true,
+  effectiveFrom: new Date(now - 86_400_000).toISOString(), changeReason: "MKT-01A 专项"
+});
+await business.saveDiscountPlan(tenantId, context(), {
+  code: "MKT-BIG", name: "大额优惠", status: "enabled",
+  discountType: "fixed_amount", discountValue: 60, minimumSpend: 0,
+  appliesTo: "rental", customerScope: "all", applicableItemGroupIds: [], applicableDayTypes: [],
+  priority: 90, exclusiveGroup: "MKT-G", stackableWithOtherPlans: false, stackableWithCoupon: true,
+  effectiveFrom: new Date(now - 86_400_000).toISOString(), changeReason: "MKT-01A 专项"
+});
+const mktQuote = await business.createQuote(tenantId, context(), {
+  customerType: "personal",
+  fulfillmentMode: "store_pickup_return",
+  fulfillmentLocationId: location.id,
+  startAt: mktStartAt,
+  endAt: mktEndAt,
+  lines: [{ itemGroupId: mktGroup.id, quantity: 1, pricingUnit: "calendar_day" }]
+});
+assert.ok(Array.isArray(mktQuote.discountEvaluations), "报价必须保存逐方案评估");
+const mktBig = mktQuote.discountEvaluations.find((row) => row.planCode === "MKT-BIG");
+const mktSmall = mktQuote.discountEvaluations.find((row) => row.planCode === "MKT-SMALL");
+assert.equal(mktBig.applied, true, "报价链路上必须选实际减免更大的方案");
+assert.equal(mktSmall.applied, false, "同互斥组的另一方案必须落选");
+assert.equal(mktSmall.skipReason, "exclusive_group_lost", "落选必须带原因码");
+assert.match(mktSmall.skipDetail, /MKT-BIG/, "落选原因必须点明竞争对手");
+assert.ok(mktBig.formula && mktBig.base > 0, "已应用方案必须记录计算基数与公式");
+assert.equal(mktBig.planVersion, "1.0", "评估必须带方案版本");
+assert.ok(mktBig.workspaceId, "评估必须带经营空间范围");
+assert.equal(mktQuote.appliedDiscountPlanIds.length, 1, "只应用一个互斥方案");
+// 优惠只作用于租金：押金与预授权必须与「无优惠」时完全一致。
+const mktDepositProbe = await business.createQuote(tenantId, context(), {
+  customerType: "personal",
+  fulfillmentMode: "store_pickup_return",
+  fulfillmentLocationId: location.id,
+  startAt: mktStartAt,
+  endAt: mktEndAt,
+  lines: [{ itemGroupId: mktGroup.id, quantity: 1, pricingUnit: "calendar_day" }]
+});
+assert.equal(mktQuote.depositAmount, mktDepositProbe.depositAmount, "优惠不得改变押金");
+assert.equal(mktQuote.preAuthAmount, mktDepositProbe.preAuthAmount, "优惠不得改变预授权额度");
+assert.equal(
+  mktQuote.payableAmount,
+  Math.round((mktQuote.rentalAmount - mktQuote.discountAmount - mktQuote.couponAmount + mktQuote.serviceAmount + mktQuote.fulfillmentAmount) * 100) / 100,
+  "应付必须等于各费用项减去优惠，押金不参与"
+);
+assert.ok(mktQuote.discountAmount > 0 && mktQuote.payableAmount < mktQuote.rentalAmount, "优惠必须真的减少应付");
+ok2("MKT-01A：报价保存逐方案评估与落选原因，优惠不触碰押金与预授权");
 
 const crossYearQuote = await business.createQuote(tenantId, context(), {
   customerType: "personal",

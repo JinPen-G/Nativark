@@ -2385,6 +2385,7 @@ function rentalBusinessOperations(): ContractOperation[] { return [
   backlogOperation("get", "/api/rental/v1/rule-versions/current", "RentalBusiness", "getCurrentRentalRuleVersionV1", "Get current rental rule", ["store-rental:rules:manage"]),
   backlogOperation("post", "/api/rental/v1/rule-versions", "RentalBusiness", "createRentalRuleVersionV1", "Create or publish rental rule version", ["store-rental:rules:manage"]),
   backlogOperation("get", "/api/rental/v1/customer-coupons", "RentalBusiness", "listRentalCustomerCoupons", "List customer coupons", ["store-rental:marketing:manage"]),
+  backlogOperation("post", "/api/rental/v1/customer-coupons/{id}/void", "RentalBusiness", "voidRentalCustomerCoupon", "Void an available customer coupon with a reason", ["store-rental:marketing:manage"]),
   backlogOperation("post", "/api/rental/v1/customer-coupons/claim", "RentalBusiness", "claimRentalCustomerCoupon", "Claim customer coupon", ["store-rental:marketing:manage"]),
   backlogOperation("get", "/api/rental/v1/rewards", "RentalBusiness", "listRentalRewardLedger", "List reward ledger", ["store-rental:member:manage"]),
   backlogOperation("get", "/api/rental/v1/benefit-accounts", "RentalBusiness", "listRentalBenefitAccounts", "List customer benefit accounts", ["store-rental:member:manage"]),
