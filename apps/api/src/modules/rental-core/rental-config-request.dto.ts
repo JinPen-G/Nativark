@@ -87,8 +87,10 @@ const ENABLE_STATUSES = ["enabled", "disabled"] as const;
 const PAYMENT_TIMINGS = ["order", "confirmation", "pickup", "offline_terms"] as const;
 const DEPOSIT_MODES = ["none", "fixed", "price_multiple", "preauthorization"] as const;
 /** 押金与预授权各自的模式：不含 `preauthorization`——它是旧「二选一」口径里的模式值，
- *  在拆分后由 `preauthorization` 规则组本身表达，留在这里会让两套口径互相污染。 */
-const DEPOSIT_RULE_MODES = ["none", "fixed", "price_multiple"] as const;
+ *  在拆分后由 `preauthorization` 规则组本身表达，留在这里会让两套口径互相污染。
+ *  RULE-01B：押金新增 `order_fixed`（每单固定）；预授权另有 `risk_surcharge`（风险附加）。 */
+const DEPOSIT_RULE_MODES = ["none", "fixed", "price_multiple", "order_fixed"] as const;
+const PREAUTH_RULE_MODES = ["none", "fixed", "price_multiple", "order_fixed", "risk_surcharge"] as const;
 const OVERDUE_FEE_MODES = ["none", "hourly", "next_period", "multiplier", "manual_review"] as const;
 const CANCELLATION_FEE_TYPES = ["none", "fixed_amount", "percentage"] as const;
 const REWARD_TYPES = ["points", "balance", "coupon"] as const;
@@ -840,17 +842,35 @@ export class RuleConfigDepositInputDto {
   @IsNumber()
   @Min(0)
   maxAmount?: number;
+
+  /** 每单固定押金，仅 order_fixed 使用。 */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  fixedAmount?: number;
 }
 
-/** 预授权规则（需求 4.4.7）。与押金独立，可同时存在。 */
+/** 预授权规则（需求 4.4.7）。与押金独立，可同时存在；另有风险附加模式。 */
 export class RuleConfigPreauthorizationInputDto {
-  @IsIn(DEPOSIT_RULE_MODES)
-  mode!: (typeof DEPOSIT_RULE_MODES)[number];
+  @IsIn(PREAUTH_RULE_MODES)
+  mode!: (typeof PREAUTH_RULE_MODES)[number];
 
   @IsOptional()
   @IsNumber()
   @Min(0)
   maxAmount?: number;
+
+  /** 订单固定额度，仅 order_fixed 使用。 */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  fixedAmount?: number;
+
+  /** 风险附加额度，仅 risk_surcharge 使用；加在按行租金倍数求和之上。 */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  riskSurchargeAmount?: number;
 }
 
 export class RuleConfigFulfillmentInputDto {

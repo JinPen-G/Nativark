@@ -128,6 +128,11 @@ const securityRuleLabels: Record<RentalDepositRule["mode"], string> = {
   none: "不需要",
   fixed: "按商品固定金额",
   price_multiple: "按商品行租金倍数",
+  order_fixed: "每单固定金额",
+};
+const preauthorizationRuleLabels: Record<RentalPreauthorizationRule["mode"], string> = {
+  ...securityRuleLabels,
+  risk_surcharge: "租金倍数 + 风险附加",
 };
 
 /** 规则链的冲突信息（时点重叠、已发布不可改）必须原样透出，否则用户无从改正。 */
@@ -394,7 +399,7 @@ export function RentalGovernancePage() {
             ...config.payment,
             depositMode:
               deposit.mode !== "none"
-                ? deposit.mode
+                ? deposit.mode === "order_fixed" ? "fixed" : deposit.mode
                 : preauthorization.mode !== "none"
                   ? "preauthorization"
                   : "none",
@@ -1059,7 +1064,7 @@ export function RentalGovernancePage() {
                           label: "押金/预授权",
                           children: (() => {
                             const security = ruleSecurityGroups(currentRule.config);
-                            return `押金：${securityRuleLabels[security.deposit.mode]} · 预授权：${securityRuleLabels[security.preauthorization.mode]}`;
+                            return `押金：${securityRuleLabels[security.deposit.mode]} · 预授权：${preauthorizationRuleLabels[security.preauthorization.mode]}`;
                           })(),
                         },
                         {
@@ -1875,10 +1880,15 @@ export function RentalGovernancePage() {
                 </Form.Item>
               </Col>
               <Col span={8}>
+                <Form.Item name={["deposit", "fixedAmount"]} label="每单固定押金" tooltip="仅在押金规则选择“每单固定金额”时使用。">
+                  <InputNumber min={0} style={{ width: "100%" }} />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
                 <Form.Item name={["preauthorization", "mode"]} label="预授权规则" rules={[{ required: true }]}>
                   <Select
                     options={(category?.businessModel.supportsPreauthorization
-                      ? Object.entries(securityRuleLabels)
+                      ? Object.entries(preauthorizationRuleLabels)
                       : [["none", securityRuleLabels.none]]
                     ).map(([value, label]) => ({ value, label }))}
                   />
@@ -1886,6 +1896,16 @@ export function RentalGovernancePage() {
               </Col>
               <Col span={8}>
                 <Form.Item name={["preauthorization", "maxAmount"]} label="订单预授权上限" tooltip="留空表示不设上限；预授权只冻结额度，不计入实收。">
+                  <InputNumber min={0} disabled={!category?.businessModel.supportsPreauthorization} style={{ width: "100%" }} />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name={["preauthorization", "fixedAmount"]} label="订单固定预授权" tooltip="仅在预授权规则选择“每单固定金额”时使用。">
+                  <InputNumber min={0} disabled={!category?.businessModel.supportsPreauthorization} style={{ width: "100%" }} />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name={["preauthorization", "riskSurchargeAmount"]} label="风险附加额度" tooltip="仅在预授权规则选择“租金倍数 + 风险附加”时使用。">
                   <InputNumber min={0} disabled={!category?.businessModel.supportsPreauthorization} style={{ width: "100%" }} />
                 </Form.Item>
               </Col>

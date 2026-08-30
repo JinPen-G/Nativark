@@ -539,11 +539,18 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
   async upsertRuleVersion(version: RentalRuleVersion): Promise<void> {
     const data = this.ruleVersionData(version);
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, version.tenantId);
-    await this.prisma.rentalRuleVersion.upsert({
-      where: { id: version.id },
-      create: { workspaceId, id: version.id, ...data, createdAt: new Date(version.createdAt) },
-      update: data
-    });
+    try {
+      await this.prisma.rentalRuleVersion.upsert({
+        where: { id: version.id },
+        create: { workspaceId, id: version.id, ...data, createdAt: new Date(version.createdAt) },
+        update: data
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        throw new ConflictException("规则版本号已被其他操作占用，请刷新后重试");
+      }
+      throw error;
+    }
   }
 
   async writeRuleVersionWithAudit(
@@ -552,31 +559,69 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
     alsoWrite: RentalRuleVersion[] = []
   ): Promise<void> {
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, version.tenantId);
-    await this.prisma.$transaction(async (tx) => {
-      for (const row of [version, ...alsoWrite]) {
-        const data = this.ruleVersionData(row);
-        await tx.rentalRuleVersion.upsert({
-          where: { id: row.id },
-          create: { workspaceId, id: row.id, ...data, createdAt: new Date(row.createdAt) },
-          update: data
-        });
-      }
-      await tx.rentalRuleVersionAudit.create({
-        data: {
-          id: audit.id,
-          tenantId: audit.tenantId,
-          workspaceId: audit.workspaceId,
-          ruleVersionId: audit.ruleVersionId,
-          version: audit.version,
-          action: audit.action,
-          fromStatus: audit.fromStatus ?? null,
-          toStatus: audit.toStatus,
-          reason: audit.reason,
-          operator: audit.operator ?? null,
-          at: new Date(audit.at)
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        // 同一空间的发布、恢复与作废必须串行。只在服务层检查缓存挡不住多进程并发。
+        await tx.$queryRaw(Prisma.sql`
+          SELECT id FROM business_workspaces
+           WHERE tenantId = ${version.tenantId} AND id = ${workspaceId}
+           FOR UPDATE
+        `);
+        if (audit.action === "publish") {
+          const persisted = await tx.rentalRuleVersion.findFirst({
+            where: { id: version.id, tenantId: version.tenantId, workspaceId },
+            select: { status: true }
+          });
+          if (!persisted || persisted.status !== "draft") {
+            throw new ConflictException("规则草稿状态已变化，请刷新后重试");
+          }
+          const effectiveFrom = version.effectiveFrom ? new Date(version.effectiveFrom) : undefined;
+          if (!effectiveFrom) throw new ConflictException("发布规则缺少生效时间");
+          const issuedStatuses = ["pending", "published", "superseded"];
+          const clash = await tx.rentalRuleVersion.findFirst({
+            where: { workspaceId, id: { not: version.id }, status: { in: issuedStatuses }, effectiveFrom },
+            select: { version: true }
+          });
+          if (clash) throw new ConflictException(`规则版本 ${clash.version} 已占用该生效时点`);
+          const latest = await tx.rentalRuleVersion.findFirst({
+            where: { workspaceId, id: { not: version.id }, status: { in: issuedStatuses }, effectiveFrom: { not: null } },
+            orderBy: { effectiveFrom: "desc" },
+            select: { version: true, effectiveFrom: true }
+          });
+          if (latest?.effectiveFrom && latest.effectiveFrom.getTime() > effectiveFrom.getTime()) {
+            throw new ConflictException(`生效时点必须晚于已发布的最新规则版本 ${latest.version}`);
+          }
         }
+        for (const row of [version, ...alsoWrite]) {
+          const data = this.ruleVersionData(row);
+          await tx.rentalRuleVersion.upsert({
+            where: { id: row.id },
+            create: { workspaceId, id: row.id, ...data, createdAt: new Date(row.createdAt) },
+            update: data
+          });
+        }
+        await tx.rentalRuleVersionAudit.create({
+          data: {
+            id: audit.id,
+            tenantId: audit.tenantId,
+            workspaceId: audit.workspaceId,
+            ruleVersionId: audit.ruleVersionId,
+            version: audit.version,
+            action: audit.action,
+            fromStatus: audit.fromStatus ?? null,
+            toStatus: audit.toStatus,
+            reason: audit.reason,
+            operator: audit.operator ?? null,
+            at: new Date(audit.at)
+          }
+        });
       });
-    });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        throw new ConflictException("规则版本已被其他操作推进，请刷新后重试");
+      }
+      throw error;
+    }
   }
 
   async loadRuleVersionAudits(

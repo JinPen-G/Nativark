@@ -105,6 +105,7 @@ import { applyPriceAdjustment, assertNoDatetimeOverrideOverlap, assertNoPeriodic
 import { rentalPricingStrategy } from "./rental-pricing-strategy";
 import { selectDiscountPlans } from "./rental-discount-selection";
 import { resolveQuoteServices } from "./rental-service-catalog";
+import { computeSecurityAmounts, type SecurityLineInput } from "./rental-security-deposit";
 import {
   assertRuleEffectiveFromAvailable,
   assertRuleVersionEditable,
@@ -3342,16 +3343,14 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const groups = new Map(context.groups.map((group) => [group.id, group]));
     const chargeLines: RentalQuoteSnapshotV1["chargeLines"] = [];
     let rentalAmount = 0;
-    let depositAmount = 0;
-    let preAuthGross = 0;
     // 押金模式来自**已发布规则**而非当前设置：规则快照要随订单固化，
     // 用实时设置会让同一张报价在设置改动后复算出不同押金。
     // 押金与预授权**各自独立**取数（需求 4.4.7）。整组缺省时由旧的 payment.depositMode 派生，
     // 使既有已发布规则快照继续按原口径复算——历史订单不得因新增字段换一套押金口径。
     const depositRule = effectiveDepositRule(rule.config);
     const preauthRule = effectivePreauthorizationRule(rule.config);
-    const depositBasis: string[] = [];
-    const preAuthBasis: string[] = [];
+    // 逐行押金/预授权事实，循环结束后交给 computeSecurityAmounts 求和封顶（先逐行再封顶）。
+    const securityLines: SecurityLineInput[] = [];
     // 命中的费率逐条固化进报价：复算不再依赖价格计划仍以该版本存在。
     const hitRates: RentalPricingRate[] = [];
     // 逐日结构化依据（需求 4.5.6）。按「营业日期 × 商品组」聚合：
@@ -3417,31 +3416,19 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       // 因此**变异测试证明不了**这行的必要性——它是廉价的防御，防的是将来出现就地修改。
       // 真正让历史报价可复算的是"报价自带费率快照"这件事本身，那一条有断言覆盖。
       hitRates.push(structuredClone(rate));
-      // 押金与预授权按各自规则独立取数（需求 4.4.7），两者可同时非零。
-      // 倍数按**行租金**乘而不是整单租金再分摊，这样每行金额与该行租金一一对应、可逐行解释。
-      if (depositRule.mode !== "none") {
-        depositAmount +=
-          depositRule.mode === "price_multiple"
-            ? amount * (rate.depositMultiple ?? 0)
-            : rate.depositAmount * line.quantity;
-        depositBasis.push(
-          depositRule.mode === "price_multiple"
-            ? `${group.name} 租金 ${amount} × ${rate.depositMultiple ?? 0} 倍`
-            : `${group.name} 固定 ${rate.depositAmount} × ${line.quantity}`
-        );
-      }
-      if (preauthRule.mode !== "none") {
+      // 押金与预授权按各自规则独立取数（需求 4.4.7）。这里只收集逐行事实，
+      // 求和、订单级固定/风险项与封顶交给纯函数 computeSecurityAmounts，逐行倍数以
+      // **行租金**（amount，已含日期价格与封顶）为基数，与该行金额一一对应、可逐行解释。
+      securityLines.push({
+        groupName: group.name,
+        quantity: line.quantity,
+        lineRental: amount,
+        depositUnit: rate.depositAmount,
+        depositMultiple: rate.depositMultiple ?? 0,
         // 预授权取数优先用费率的预授权字段；缺省回落到押金字段（存量费率行只配了押金）。
-        const preAuthUnit = rate.preAuthAmount ?? rate.depositAmount;
-        const preAuthMultiple = rate.preAuthMultiple ?? rate.depositMultiple ?? 0;
-        preAuthGross +=
-          preauthRule.mode === "price_multiple" ? amount * preAuthMultiple : preAuthUnit * line.quantity;
-        preAuthBasis.push(
-          preauthRule.mode === "price_multiple"
-            ? `${group.name} 租金 ${amount} × ${preAuthMultiple} 倍`
-            : `${group.name} 固定 ${preAuthUnit} × ${line.quantity}`
-        );
-      }
+        preAuthUnit: rate.preAuthAmount ?? rate.depositAmount,
+        preAuthMultiple: rate.preAuthMultiple ?? rate.depositMultiple ?? 0
+      });
       // 计算说明必须能复算：单价来源（基础价/阶梯档/封顶）、单位数、起租量是否生效、
       // 日历系数与逐日类型、数量，缺一项客服就无法向客户解释这笔钱是怎么来的（验收：可解释来源）。
       // 需求 4.4.5：说明必须展示原始单位数、进位与最低起租、阶梯档位、
@@ -3501,17 +3488,14 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       chargeLines.push({ code: `rental:${group.code}`, name: `${group.name}租金`, type: "rental", amount, sourceId: plan.id, sourceVersion: plan.version, detail });
     }
     rentalAmount = roundMoney(rentalAmount);
-    // 押金与预授权额度独立计算（需求 4.4「同时独立计算：应付押金；预授权金额」）。
-    //
-    // 先算出「保证金基数」，再按模式决定它是**实收押金**还是**冻结额度**：
-    // 押金与预授权是两笔**独立**的钱（需求 4.4.7）：可以只收押金、只冻结额度，
-    // 也可以两者同时存在。早前用一个 `depositMode` 在二者间切换，表达不了「收 500 押金
-    // 并冻结 2000 额度」；而 `fixed + preauthorizationRequired=true` 时金额进了押金与实收、
-    // preAuthAmount 为 0，明细却叫「预授权额度」——名实不符。
-    depositAmount = depositRule.mode === "none" ? 0 : roundMoney(depositAmount);
-    if (depositRule.maxAmount !== undefined) depositAmount = Math.min(depositAmount, depositRule.maxAmount);
-    let preAuthAmount = preauthRule.mode === "none" ? 0 : roundMoney(preAuthGross);
-    if (preauthRule.maxAmount !== undefined) preAuthAmount = Math.min(preAuthAmount, preauthRule.maxAmount);
+    // 押金与预授权额度独立计算（需求 4.4.7）：两笔独立的钱，可只收押金、只冻结额度，
+    // 或两者同时存在。逐行求和 → 订单级固定/风险项 → 订单级封顶全部交给纯函数，
+    // 使「这笔押金/预授权凭什么算这么多」可逐条回放。
+    const security = computeSecurityAmounts(securityLines, depositRule, preauthRule);
+    const depositAmount = security.deposit.amount;
+    const depositBasis = security.deposit.basis;
+    const preAuthAmount = security.preauthorization.amount;
+    const preAuthBasis = security.preauthorization.basis;
     // 要求预授权却取不到额度必须报错，否则会产出一张「声称要冻结却冻结 0」的报价。
     if (preauthRule.mode !== "none" && preAuthAmount <= 0) {
       throw new ConflictException("当前规则要求预授权，但所选商品未配置预授权额度");

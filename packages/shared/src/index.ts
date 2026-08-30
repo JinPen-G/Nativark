@@ -6355,22 +6355,135 @@ export interface SaveRentalServiceCapacityRequest {
  * `mode` 决定金额来源：`fixed` 取费率的 `depositAmount`，`price_multiple` 取
  * `depositMultiple × 该行租金`，`none` 不收。`maxAmount` 是单笔订单押金上限。
  */
+/**
+ * 押金模式（需求 4.4.7）。押金是**实收可退可抵扣**的资金，与预授权独立。
+ * - `none` 免押；`fixed` 每件固定（费率 depositAmount × 数量）；
+ * - `price_multiple` 商品行租金倍数（以该行日期价格与封顶处理后的租金为基数）；
+ * - `order_fixed` 每单固定（规则级 fixedAmount，整单一笔，不随行数或数量放大）。
+ * `maxAmount` 是**订单级上限**，按各行求和后再应用（需求 4.4.7：先逐行求和再封顶）。
+ */
+export type RentalDepositMode = "none" | "fixed" | "price_multiple" | "order_fixed";
+
 export interface RentalDepositRule {
-  mode: "none" | "fixed" | "price_multiple";
+  mode: RentalDepositMode;
   /** 单笔订单的押金上限。留空表示不设上限；0 是合法值（等于免押）。 */
   maxAmount?: number;
+  /** 每单固定押金金额，仅 `order_fixed` 使用。整单一笔，不随行数放大。 */
+  fixedAmount?: number;
 }
 
 /**
- * 预授权规则（需求 4.4.7）。与押金**完全独立**：可以只冻结不收押金、只收押金不冻结，
- * 也可以两者同时存在。金额来源取费率的 `preAuthAmount`/`preAuthMultiple`，
- * 二者缺省时回落到 `depositAmount`/`depositMultiple`——存量费率行只有押金字段。
+ * 预授权模式（需求 4.4.7）。预授权是**冻结额度**、不是收款，与押金完全独立，可同时存在。
+ * 相较押金多两种：
+ * - `order_fixed` 订单固定额度（规则级 fixedAmount）；
+ * - `risk_surcharge` 风险附加额度：按行租金倍数求和后，再加规则级 `riskSurchargeAmount`
+ *   风险缓冲（冻结租金价值之外再冻一笔风险准备金）。
+ * `maxAmount` 为订单级预授权上限，逐行求和后再应用。
  */
+export type RentalPreauthorizationMode =
+  | "none"
+  | "fixed"
+  | "price_multiple"
+  | "order_fixed"
+  | "risk_surcharge";
+
 export interface RentalPreauthorizationRule {
-  mode: "none" | "fixed" | "price_multiple";
+  mode: RentalPreauthorizationMode;
   /** 单笔订单的预授权额度上限。留空表示不设上限。 */
   maxAmount?: number;
+  /** 订单固定额度，仅 `order_fixed` 使用。 */
+  fixedAmount?: number;
+  /** 风险附加额度，仅 `risk_surcharge` 使用；加在按行租金倍数求和之上。 */
+  riskSurchargeAmount?: number;
 }
+
+/**
+ * RULE-01B：押金减免依据（需求 4.4.7 line 526）。会员权益、企业合同或人工审批导致
+ * 免押/减押/降低预授权时，必须保存**减免类型、依据、审批人及当时规则快照**，
+ * 不能只保存金额为 0。客户端不得直接传最终减免金额——必须引用可信事实由服务端计算。
+ */
+export type RentalSecurityReductionType = "member_benefit" | "corporate_contract" | "manual_approval";
+
+export interface RentalSecurityReduction {
+  /** 作用对象：押金还是预授权。两者独立减免。 */
+  instrument: "deposit" | "preauthorization";
+  type: RentalSecurityReductionType;
+  /** 引用的可信事实标识：会员权益 id、企业合同号或审批单号。 */
+  factReference: string;
+  /** 减免后的目标金额，由服务端依据 fact 计算，不接受客户端直接传最终减免额。 */
+  reducedTo: number;
+  approver?: string;
+  reason: string;
+}
+
+/**
+ * RULE-01B：模拟资金事件（需求 4.4.7 line 527、4.6.3）。押金与预授权的每一次
+ * 发起、追加、抵扣、退款、释放、失败都是一条**独立、只追加**的资金事件，
+ * 不得通过修改原报价明细表达。未接真实支付供应商前 provider 恒为明确标记的 mock。
+ */
+export type RentalFundingInstrument = "deposit" | "preauthorization";
+
+/**
+ * 资金动作。押金：initiate（收取）、capture（抵扣）、refund（退款）、fail（失败）；
+ * 预授权：initiate（冻结）、append（追加）、capture（转扣）、release（释放）、fail（失败）。
+ */
+export type RentalFundingAction = "initiate" | "append" | "capture" | "refund" | "release" | "fail";
+
+export interface RentalFundingEvent {
+  id: string;
+  tenantId: string;
+  workspaceId: string;
+  orderId: string;
+  instrument: RentalFundingInstrument;
+  action: RentalFundingAction;
+  amount: number;
+  /** 该 instrument 在本事件后的余额（押金实收余额 / 预授权冻结余额）。由服务端结算。 */
+  balanceAfter: number;
+  /** 只使用明确标记的 mock（需求 4.6.3），不接真实支付 Provider。 */
+  provider: "mock";
+  /** 幂等键：同一 (order, instrument, action, idempotencyKey) 重复提交只落一条。 */
+  idempotencyKey: string;
+  reason: string;
+  operator?: string;
+  /** 失败事件记录失败原因码，供恢复流程判断可否重试。 */
+  failureCode?: string;
+  at: string;
+  createdAt: string;
+}
+
+export interface InitiateRentalFundingRequest {
+  instrument: RentalFundingInstrument;
+  /** 首次金额由服务端从订单快照的押金/预授权字段取得，客户端不得提交。 */
+  idempotencyKey: string;
+  reason: string;
+}
+
+export interface RentalFundingAmountRequest {
+  instrument: RentalFundingInstrument;
+  amount: number;
+  idempotencyKey: string;
+  reason: string;
+}
+
+export interface RentalFundingReleaseRequest {
+  idempotencyKey: string;
+  reason: string;
+}
+
+export interface RentalFundingFailureRequest {
+  instrument: RentalFundingInstrument;
+  failureCode: string;
+  idempotencyKey: string;
+  reason: string;
+}
+
+export interface RentalFundingBalance {
+  orderId: string;
+  deposit: { collected: number; captured: number; refunded: number; balance: number };
+  preauthorization: { frozen: number; captured: number; released: number; balance: number };
+  events: RentalFundingEvent[];
+}
+
 
 export interface RentalRuleConfig {  /**
    * 计价相关的经营空间规则（需求 4.4.5：「班次时长及边界由经营空间规则定义」）。

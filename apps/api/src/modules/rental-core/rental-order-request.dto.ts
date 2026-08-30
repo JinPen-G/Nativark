@@ -11,6 +11,10 @@ import {
   type RentalAvailabilityRequest,
   type RentalCapability,
   type RentalFulfillmentMode,
+  type InitiateRentalFundingRequest,
+  type RentalFundingAmountRequest,
+  type RentalFundingFailureRequest,
+  type RentalFundingReleaseRequest,
   type RentalPricingUnit,
   type RentalQuoteRequest,
   type SaveRentalAssetRequest,
@@ -594,4 +598,74 @@ export class SendRentalNotificationDto implements SendRentalNotificationRequest 
   /** 变量键集由模板的 variableSchema 决定，在服务层按模板校验。 */
   @IsObject()
   variables!: Record<string, unknown>;
+}
+
+/* ---------- RULE-01B：模拟资金事件（押金/预授权） ---------- */
+
+const FUNDING_INSTRUMENTS = ["deposit", "preauthorization"] as const;
+
+/** 发起押金收取 / 预授权冻结。发起后同订单同 instrument 不能再发起，追加请用 append。 */
+export class InitiateRentalFundingDto implements InitiateRentalFundingRequest {
+  @IsIn(FUNDING_INSTRUMENTS)
+  instrument!: (typeof FUNDING_INSTRUMENTS)[number];
+
+  @IsString()
+  @IsNotEmpty()
+  idempotencyKey!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  reason!: string;
+}
+
+/** 追加、抵扣/转扣、退款：都带金额与幂等键。 */
+export class RentalFundingAmountDto implements RentalFundingAmountRequest {
+  @IsIn(FUNDING_INSTRUMENTS)
+  instrument!: (typeof FUNDING_INSTRUMENTS)[number];
+
+  @IsNumber()
+  @Min(0.01)
+  amount!: number;
+
+  @IsString()
+  @IsNotEmpty()
+  idempotencyKey!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  reason!: string;
+}
+
+/** 释放预授权。金额可选：不传即释放当前全部剩余冻结额度，由服务端结算。 */
+export class RentalFundingReleaseDto implements RentalFundingReleaseRequest {
+  @IsOptional()
+  @IsNumber()
+  @Min(0.01)
+  amount?: number;
+
+  @IsString()
+  @IsNotEmpty()
+  idempotencyKey!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  reason!: string;
+}
+
+/** 标记资金动作失败（需求 4.6.3：失败必须独立记录）。 */
+export class RentalFundingFailureDto implements RentalFundingFailureRequest {
+  @IsIn(FUNDING_INSTRUMENTS)
+  instrument!: (typeof FUNDING_INSTRUMENTS)[number];
+
+  @IsString()
+  @IsNotEmpty()
+  failureCode!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  idempotencyKey!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  reason!: string;
 }

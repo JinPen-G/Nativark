@@ -321,6 +321,7 @@ model Tenant {
   rentalServiceReservations RentalServiceReservation[]
   rentalRuleVersions        RentalRuleVersion[]
   rentalRuleVersionAudits   RentalRuleVersionAudit[]
+  rentalFundingEvents       RentalFundingEvent[]
   rentalBusinessCalendars   RentalBusinessCalendar[]
   rentalCalendarOverrideAudits RentalCalendarOverrideAuditEntry[]
   rentalPriceVersions       RentalPriceVersion[]
@@ -408,6 +409,7 @@ model BusinessWorkspace {
   rentalServiceReservations RentalServiceReservation[]
   rentalRuleVersions          RentalRuleVersion[]
   rentalRuleVersionAudits     RentalRuleVersionAudit[]
+  rentalFundingEvents         RentalFundingEvent[]
   rentalBusinessCalendars     RentalBusinessCalendar[]
   rentalCalendarOverrideAudits RentalCalendarOverrideAuditEntry[]
   rentalPriceVersions        RentalPriceVersion[]
@@ -3044,6 +3046,7 @@ model RentalOrder {
   inspections           RentalInspectionRecord[]
   idempotencyRecords    RentalOrderIdempotencyRecord[]
   serviceReservations   RentalServiceReservation[]
+  fundingEvents         RentalFundingEvent[]
   auditLogs             OperationLog[]
   createdAt             DateTime                  @default(now())
   updatedAt             DateTime                  @updatedAt
@@ -3059,6 +3062,42 @@ model RentalOrder {
   @@index([tenantId, payerSubjectCustomerId], map: "rental_orders_payer_subject_idx")
   @@index([tenantId, userSubjectCustomerId], map: "rental_orders_user_subject_idx")
   @@map("rental_orders")
+}
+
+/// RULE-01B：押金与预授权的模拟资金事件（需求 4.4.7 line 527、4.6.3）。
+///
+/// 只追加：押金与预授权的每一次发起、追加、抵扣、退款、释放、失败都是独立一行，
+/// 不通过修改原报价/订单明细表达。provider 恒为明确标记的 mock——未接真实支付供应商前
+/// 不得把内部状态展示为真实收款或真实预授权（需求 4.6.3）。
+/// 幂等：`(workspaceId, orderId, instrument, action, idempotencyKey)` 唯一，重复提交只落一条。
+/// 不进入订单状态机：本表记录资金事实，不改写 rental_orders.status（RULE-01B 边界）。
+model RentalFundingEvent {
+  id             String   @id @default(uuid())
+  tenantId       String
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId    String
+  workspace      BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  orderId        String
+  order          RentalOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  /// deposit（实收押金）| preauthorization（冻结额度）。两者独立记账。
+  instrument     String   @db.VarChar(20)
+  /// initiate | append | capture | refund | release | fail。
+  action         String   @db.VarChar(20)
+  amount         Decimal  @db.Decimal(12, 2)
+  /// 该 instrument 在本事件后的余额，落库便于对账，避免每次都重放全流水。
+  balanceAfter   Decimal  @db.Decimal(12, 2)
+  provider       String   @default("mock")
+  idempotencyKey String
+  reason         String   @db.VarChar(500)
+  operator       String?
+  failureCode    String?
+  at             DateTime
+  createdAt      DateTime @default(now())
+
+  @@unique([workspaceId, orderId, instrument, action, idempotencyKey], map: "rental_funding_events_idem_key")
+  @@index([tenantId, workspaceId, orderId], map: "rental_funding_events_scope_idx")
+  @@index([orderId, instrument, at], map: "rental_funding_events_instrument_idx")
+  @@map("rental_funding_events")
 }
 
 model RentalOrderLine {

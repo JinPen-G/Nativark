@@ -38,7 +38,14 @@ import {
 import { OfficialCalendarSourceService } from "./official-calendar-source.service";
 import { RentalCoreService } from "./rental-core.service";
 import { RentalIdempotentActionService } from "./rental-idempotent-action.service";
+import { RentalFundingService } from "./rental-funding.service";
 import { RentalServiceCapacityService } from "./rental-service-capacity.service";
+import {
+  InitiateRentalFundingDto,
+  RentalFundingAmountDto,
+  RentalFundingReleaseDto,
+  RentalFundingFailureDto,
+} from "./rental-order-request.dto";
 
 interface AuthenticatedRequest { user: SystemUserRow; headers?: Record<string, unknown>; }
 
@@ -72,6 +79,7 @@ export class RentalBusinessController {
     private readonly business: RentalBusinessService,
     private readonly core: RentalCoreService,
     private readonly idempotent: RentalIdempotentActionService,
+    private readonly funding: RentalFundingService,
     private readonly officialSources: OfficialCalendarSourceService,
     private readonly serviceCapacities: RentalServiceCapacityService
   ) {}
@@ -289,6 +297,15 @@ export class RentalBusinessController {
   /** 发布级动作，只认 rules:publish。 */
   @Post("rule-versions/:version/publish") async publishRule(@Req() req: AuthenticatedRequest, @Param("version") version: string, @Body() body: PublishRentalRuleVersionDto) { return this.committed(req.user.tenantId, await this.business.publishRuleVersion(req.user.tenantId, this.context(req.user.tenantId), version, body, req.user.displayName)); }
   @Post("rule-versions/:version/void") async voidRule(@Req() req: AuthenticatedRequest, @Param("version") version: string, @Body() body: VoidRentalRuleVersionDto) { return this.committed(req.user.tenantId, await this.business.voidRuleVersion(req.user.tenantId, this.context(req.user.tenantId), version, body.reason, req.user.displayName)); }
+
+  // RULE-01B：押金/预授权模拟资金事件（需求 4.4.7、4.6.3）。只记录资金事实，不改订单状态机。
+  @Get("orders/:orderId/funding-events") fundingEvents(@Req() req: AuthenticatedRequest, @Param("orderId") orderId: string) { return this.funding.listEvents(req.user.tenantId, this.core.resolveWorkspaceId(req.user.tenantId), orderId); }
+  @Post("orders/:orderId/funding-events/initiate") @HttpCode(201) async initiateFunding(@Req() req: AuthenticatedRequest, @Param("orderId") orderId: string, @Body() body: InitiateRentalFundingDto) { return this.committed(req.user.tenantId, await this.funding.recordEvent(req.user.tenantId, this.core.resolveWorkspaceId(req.user.tenantId), orderId, { instrument: body.instrument, action: "initiate", idempotencyKey: body.idempotencyKey, reason: body.reason }, req.user.displayName)); }
+  @Post("orders/:orderId/funding-events/append") @HttpCode(201) async appendFunding(@Req() req: AuthenticatedRequest, @Param("orderId") orderId: string, @Body() body: RentalFundingAmountDto) { return this.committed(req.user.tenantId, await this.funding.recordEvent(req.user.tenantId, this.core.resolveWorkspaceId(req.user.tenantId), orderId, { instrument: body.instrument, action: "append", amount: body.amount, idempotencyKey: body.idempotencyKey, reason: body.reason }, req.user.displayName)); }
+  @Post("orders/:orderId/funding-events/capture") @HttpCode(201) async captureFunding(@Req() req: AuthenticatedRequest, @Param("orderId") orderId: string, @Body() body: RentalFundingAmountDto) { return this.committed(req.user.tenantId, await this.funding.recordEvent(req.user.tenantId, this.core.resolveWorkspaceId(req.user.tenantId), orderId, { instrument: body.instrument, action: "capture", amount: body.amount, idempotencyKey: body.idempotencyKey, reason: body.reason }, req.user.displayName)); }
+  @Post("orders/:orderId/funding-events/refund") @HttpCode(201) async refundFunding(@Req() req: AuthenticatedRequest, @Param("orderId") orderId: string, @Body() body: RentalFundingAmountDto) { return this.committed(req.user.tenantId, await this.funding.recordEvent(req.user.tenantId, this.core.resolveWorkspaceId(req.user.tenantId), orderId, { instrument: body.instrument, action: "refund", amount: body.amount, idempotencyKey: body.idempotencyKey, reason: body.reason }, req.user.displayName)); }
+  @Post("orders/:orderId/funding-events/release") @HttpCode(201) async releaseFunding(@Req() req: AuthenticatedRequest, @Param("orderId") orderId: string, @Body() body: RentalFundingReleaseDto) { return this.committed(req.user.tenantId, await this.funding.recordEvent(req.user.tenantId, this.core.resolveWorkspaceId(req.user.tenantId), orderId, { instrument: "preauthorization", action: "release", amount: body.amount, idempotencyKey: body.idempotencyKey, reason: body.reason }, req.user.displayName)); }
+  @Post("orders/:orderId/funding-events/fail") @HttpCode(201) async failFunding(@Req() req: AuthenticatedRequest, @Param("orderId") orderId: string, @Body() body: RentalFundingFailureDto) { return this.committed(req.user.tenantId, await this.funding.recordEvent(req.user.tenantId, this.core.resolveWorkspaceId(req.user.tenantId), orderId, { instrument: body.instrument, action: "fail", amount: 0, idempotencyKey: body.idempotencyKey, reason: body.reason, failureCode: body.failureCode }, req.user.displayName)); }
 
   @Get("customer-coupons") async customerCoupons(@Req() req: AuthenticatedRequest, @Query("customerId") customerId?: string) { return this.business.listCurrentCustomerCoupons(req.user.tenantId, this.context(req.user.tenantId), customerId); }
   @Post("customer-coupons/:id/void") async voidCustomerCoupon(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: { reason: string }) {
