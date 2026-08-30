@@ -225,6 +225,177 @@ const damageWaiver = await business.saveService(tenantId, context(), {
 const damageQuote = { ...quote, request: { ...quote.request, services: [{ serviceId: damageWaiver.id, quantity: 1 }] } };
 assert.ok(business.calculateDamageCharge(tenantId, context(), damageQuote, [{ chargeAmount: 1000 }]) < 1000, "damage waiver must reduce the customer charge according to its saved terms");
 
+// ============ 兼容开关只关旧倍率：dayTypePrices 与时间窗规则照常生效 ============
+// 需求 4.4.5 的第 3 层有两个来源：逐商品配置的 dayTypePrices（价格版本里的显式配置）
+// 与 PRICE-03 之前的空间级 weekendMultiplier/holidayMultiplier。
+// `pricing.holidayPricingEnabled` 只管后者：关掉它，配好的日期类型价格仍要按配置收钱。
+// 早前 resolveUnitPrice 的每个分支都返回「属于价格模块」，于是这个开关无论开关都不生效。
+const layerGroup = context().groups.find((item) => item.code !== "CAMP-TENT") ?? context().groups[0];
+const layerYear = new Date(now).getUTCFullYear();
+const layerCalendar = business.getCalendar(tenantId, context(), layerYear);
+// 从日历里挑一个真正的周末且可营业的日期，而不是自己推算星期：
+// 周末口径由 settings.calendar.weekendDays 决定，硬编码会在改配置后静默失效。
+const weekendDay = layerCalendar.days.find(
+  (day) => day.dayType === "weekend" && (day.businessStatus ?? "open") === "open" && day.date > new Date(now).toISOString().slice(0, 10)
+);
+assert.ok(weekendDay, "夹具日历里必须存在一个可营业的周末日期");
+// 12:00–18:00（+08:00）：同一营业日内 1 个自然日单位，且落在常规营业时段内。
+const layerStartAt = `${weekendDay.date}T04:00:00.000Z`;
+const layerEndAt = `${weekendDay.date}T10:00:00.000Z`;
+const layerRate = {
+  itemGroupId: layerGroup.id,
+  unit: "calendar_day",
+  baseAmount: 100,
+  weekendMultiplier: 1.5,
+  holidayMultiplier: 2,
+  depositAmount: 0,
+  minimumUnits: 1,
+  preAuthAmount: 0
+};
+const layerPlan = await business.savePricingPlan(tenantId, context(), {
+  code: "LAYER-COMPAT",
+  name: "兼容开关专项计划",
+  status: "enabled",
+  // 生效时间必须晚于夹具计划：空间全集同键取「生效最晚者」，早于夹具的话本用例
+  // 断言的其实是夹具的价格，改坏取价层也照样绿。
+  effectiveFrom: new Date(now + 60 * 60 * 1000).toISOString(),
+  changeReason: "兼容开关专项",
+  rates: [layerRate]
+}, "test");
+
+const layerSettingsBefore = core.getBusinessSettings(tenantId);
+const setLegacySwitch = async (enabled) => {
+  const current = core.getBusinessSettings(tenantId);
+  await core.saveBusinessSettings(tenantId, { ...current, pricing: { ...current.pricing, holidayPricingEnabled: enabled } }, "test");
+};
+const layerQuote = async () => business.createQuote(tenantId, context(), {
+  customerType: "personal",
+  fulfillmentMode: "store_pickup_return",
+  fulfillmentLocationId: location.id,
+  startAt: layerStartAt,
+  endAt: layerEndAt,
+  lines: [{ itemGroupId: layerGroup.id, quantity: 1, pricingUnit: "calendar_day" }]
+});
+const layerRentalOf = (quoteResult) =>
+  quoteResult.chargeLines.filter((line) => line.type === "rental").reduce((sum, line) => sum + line.amount, 0);
+
+// 1) 开关打开：旧周末倍率生效，快照记 day_type_legacy——它是兼容层，不能和
+//    逐商品配置的 day_type 混在一起，否则将来移除旧字段时无从筛选。
+await setLegacySwitch(true);
+const legacyOnQuote = await layerQuote();
+// 先证明取价用的确实是本用例的费率：夹具计划同样覆盖该商品，若被它胜出，
+// 下面的金额断言就变成在测夹具而不是测取价层。
+assert.equal(
+  legacyOnQuote.rateSnapshot.find((row) => row.itemGroupId === layerGroup.id)?.weekendMultiplier,
+  1.5,
+  "取价必须命中本用例的费率（生效最晚者）"
+);
+assert.equal(layerRentalOf(legacyOnQuote), 150, "开关打开时旧周末倍率必须生效（100 × 1.5）");
+assert.equal(
+  legacyOnQuote.calendarSnapshot.find((row) => row.itemGroupId === layerGroup.id)?.hitLayer,
+  "day_type_legacy",
+  "旧倍率命中必须记为 day_type_legacy"
+);
+
+// 2) 开关关闭且未配 dayTypePrices：落回商品基础价，而不是继续按周末倍率收钱。
+await setLegacySwitch(false);
+const legacyOffQuote = await layerQuote();
+assert.equal(layerRentalOf(legacyOffQuote), 100, "开关关闭时旧周末倍率不得生效，应回落基础价");
+assert.equal(
+  legacyOffQuote.calendarSnapshot.find((row) => row.itemGroupId === layerGroup.id)?.hitLayer,
+  "base",
+  "旧倍率被关闭后命中层必须是 base"
+);
+
+// 3) 开关仍关闭，但配了逐商品的日期类型价格：必须按配置生效。
+//    这是本轮口径的核心——兼容开关不得连带关掉 PRICE-03 的显式配置。
+//    用一个生效更晚的计划来承载它，走的是与生产相同的「同键取生效最晚者」路径，
+//    而不是就地改写一个已启用计划（那条路在数据库模式下要求走调价计划）。
+await business.savePricingPlan(tenantId, context(), {
+  code: "LAYER-COMPAT-DT",
+  name: "兼容开关专项计划（日期类型价）",
+  status: "enabled",
+  effectiveFrom: new Date(now + 2 * 60 * 60 * 1000).toISOString(),
+  changeReason: "补配日期类型价格",
+  rates: [{ ...layerRate, dayTypePrices: { weekend: 2 } }]
+}, "test");
+const dayTypeQuote = await layerQuote();
+assert.equal(layerRentalOf(dayTypeQuote), 200, "兼容开关关闭时，配好的日期类型价格仍必须生效（100 × 2）");
+assert.equal(
+  dayTypeQuote.calendarSnapshot.find((row) => row.itemGroupId === layerGroup.id)?.hitLayer,
+  "day_type",
+  "逐商品日期类型价格命中必须记为 day_type"
+);
+assert.equal(layerPlan.code, "LAYER-COMPAT", "前一个计划仍然存在，用于对比两种来源");
+await core.saveBusinessSettings(tenantId, layerSettingsBefore, "test");
+
+// ============ 营业与履约时段三态：缺省继承、空数组停用、非空按时点命中 ============
+// 需求 4.5.1 把营业时段与领取/归还/配送时段并列声明。三者都必须区分「未声明」与
+// 「空数组」：早前只有配送分支处理了空数组，营业时段与领取/归还的空数组都走
+// withinWindows 的 `!windows?.length → true`，于是「当天不营业」「当天不办领取」
+// 反而变成随时可办。校验只看**已发布**日历，因此每次覆盖后都要发布。
+const hoursDay = layerCalendar.days.find(
+  (day) => day.dayType !== "weekend" && (day.businessStatus ?? "open") === "open" && day.date > new Date(now).toISOString().slice(0, 10)
+);
+assert.ok(hoursDay, "夹具日历里必须存在一个可营业的工作日");
+const publishHours = async (hours, reason) => {
+  const day = business.getCalendar(tenantId, context(), layerYear).days.find((item) => item.date === hoursDay.date);
+  const { source: _s, overrideBy: _b, overrideAt: _a, overriddenFrom: _o, overrideScope: _c, ...rest } = day;
+  await business.saveCalendarDay(tenantId, context(), layerYear, { ...rest, hours, overrideReason: reason }, "test");
+  await business.publishCalendar(tenantId, context(), layerYear, { changeReason: reason }, "test");
+};
+// 12:00 领取、14:00 归还（Asia/Shanghai）。
+const hoursQuote = async () => business.createQuote(tenantId, context(), {
+  customerType: "personal",
+  fulfillmentMode: "store_pickup_return",
+  fulfillmentLocationId: location.id,
+  startAt: `${hoursDay.date}T04:00:00.000Z`,
+  endAt: `${hoursDay.date}T06:00:00.000Z`,
+  lines: [{ itemGroupId: layerGroup.id, quantity: 1, pricingUnit: "calendar_day" }]
+});
+
+// 1) 动作时段未声明：继承营业时段，时点落在营业时段内即可下单。
+await publishHours({ windows: [{ start: "09:00", end: "18:00" }] }, "时段三态：仅声明营业时段");
+const inheritedQuote = await hoursQuote();
+assert.ok(inheritedQuote.quoteNo, "动作时段未声明时应继承营业时段并允许下单");
+
+// 2) 营业时段为空数组＝当天不营业，必须拒绝，而不是当成"不限制"。
+await publishHours({ windows: [] }, "时段三态：营业时段置空");
+await assert.rejects(hoursQuote, /营业时段为空/, "营业时段为空数组必须拒绝下单");
+
+// 3) 领取时段为空数组＝当天不办领取；营业时段仍开放。
+await publishHours({ windows: [{ start: "09:00", end: "18:00" }], pickup: [] }, "时段三态：领取时段置空");
+await assert.rejects(hoursQuote, /不提供领取/, "领取时段为空数组必须拒绝下单");
+
+// 4) 非空动作时段按时点命中：12:00 领取落在 10:00-11:00 之外。
+await publishHours({ windows: [{ start: "09:00", end: "18:00" }], pickup: [{ start: "10:00", end: "11:00" }] }, "时段三态：领取时段收窄");
+await assert.rejects(hoursQuote, /不在领取可用时段内/, "时点落在领取时段外必须拒绝下单");
+
+// 5) 归还时段为空同样拒绝——下单时两个端点都要校验（需求 4.5.4）。
+await publishHours({ windows: [{ start: "09:00", end: "18:00" }], return: [] }, "时段三态：归还时段置空");
+await assert.rejects(hoursQuote, /不提供归还/, "归还时段为空数组必须拒绝下单");
+
+// 6) 实际领取复查只检查领取动作，不能把同一时刻再当作归还时刻校验。
+//    领取 12:00 在 pickup 时段内，而 return 明确停用；报价需要同时检查两端会拒绝，
+//    但领取动作本身必须允许。早前 assertPickupOpenAt 把 startAt/endAt 都设为领取时刻，
+//    又调用双端点校验，合法领取会被 return: [] 错误拦截。
+await publishHours(
+  { windows: [{ start: "09:00", end: "18:00" }], pickup: [{ start: "11:00", end: "13:00" }], return: [] },
+  "时段三态：领取动作独立复查"
+);
+assert.doesNotThrow(
+  () => business.assertPickupOpenAt(
+    tenantId,
+    context(),
+    location.id,
+    `${hoursDay.date}T04:00:00.000Z`,
+    "store_pickup_return"
+  ),
+  "实际领取复查不得同时校验归还时段"
+);
+// 恢复成可营业，避免影响后续用例。
+await publishHours({ windows: [{ start: "09:00", end: "18:00" }] }, "时段三态：恢复");
+
 const crossYearQuote = await business.createQuote(tenantId, context(), {
   customerType: "personal",
   fulfillmentMode: "store_pickup_return",
