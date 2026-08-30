@@ -55,7 +55,8 @@ export function isValidTimeZone(timeZone: string): boolean {
 /**
  * 校验一组营业时段（需求 4.5.1）。返回错误信息或 null——由调用方包成 400，
  * 保持本模块不依赖 Nest。规则：每个时段起点早于终点；同类时段互不重叠；
- * 领取/归还/配送时段必须落在营业时段内（营业时段为空表示不限制，此时不做落域校验）。
+ * 领取/归还/配送时段必须落在营业时段内。营业时段为空数组表示当天不营业；
+ * 此处无需再做动作时段落域校验，运行时会统一拒绝该日履约。
  * 时段是营业时区当地 `HH:mm`，字符串比较即可正确排序。
  */
 export function businessHoursError(hours: RentalBusinessHours, label: string): string | null {

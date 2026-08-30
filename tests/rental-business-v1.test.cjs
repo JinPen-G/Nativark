@@ -374,6 +374,25 @@ await assert.rejects(hoursQuote, /不在领取可用时段内/, "时点落在领
 // 5) 归还时段为空同样拒绝——下单时两个端点都要校验（需求 4.5.4）。
 await publishHours({ windows: [{ start: "09:00", end: "18:00" }], return: [] }, "时段三态：归还时段置空");
 await assert.rejects(hoursQuote, /不提供归还/, "归还时段为空数组必须拒绝下单");
+
+// 6) 实际领取复查只检查领取动作，不能把同一时刻再当作归还时刻校验。
+//    领取 12:00 在 pickup 时段内，而 return 明确停用；报价需要同时检查两端会拒绝，
+//    但领取动作本身必须允许。早前 assertPickupOpenAt 把 startAt/endAt 都设为领取时刻，
+//    又调用双端点校验，合法领取会被 return: [] 错误拦截。
+await publishHours(
+  { windows: [{ start: "09:00", end: "18:00" }], pickup: [{ start: "11:00", end: "13:00" }], return: [] },
+  "时段三态：领取动作独立复查"
+);
+assert.doesNotThrow(
+  () => business.assertPickupOpenAt(
+    tenantId,
+    context(),
+    location.id,
+    `${hoursDay.date}T04:00:00.000Z`,
+    "store_pickup_return"
+  ),
+  "实际领取复查不得同时校验归还时段"
+);
 // 恢复成可营业，避免影响后续用例。
 await publishHours({ windows: [{ start: "09:00", end: "18:00" }] }, "时段三态：恢复");
 

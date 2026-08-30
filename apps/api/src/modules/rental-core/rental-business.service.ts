@@ -771,10 +771,12 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         new Date(plan.effectiveFrom).getTime() <= at &&
         (plan.effectiveTo === undefined || new Date(plan.effectiveTo).getTime() > at)
     );
-    // 生效早的先写、晚的后写，同刻按 code 兜稳定序——后写覆盖同键，等价于「取生效最晚者」。
+    // 生效早的先写、晚的后写；同刻时按 code **降序**写入，让字典序较小的计划最后
+    // 覆盖同键。这与迁移回填的 `ORDER BY effectiveFrom DESC, planCode ASC` 取首条一致。
+    // 早前这里同刻按 code 升序写入，实际让字典序较大的计划胜出，仍会造成内存/数据库分叉。
     const ordered = [...effective].sort((left, right) => {
       const byEffective = new Date(left.effectiveFrom).getTime() - new Date(right.effectiveFrom).getTime();
-      return byEffective !== 0 ? byEffective : left.code.localeCompare(right.code);
+      return byEffective !== 0 ? byEffective : right.code.localeCompare(left.code);
     });
     const merged = new Map<string, RentalPricingRate>();
     for (const plan of ordered) {
@@ -3782,7 +3784,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     context: BusinessContext,
     input: RentalQuoteRequest,
     timeZone: string,
-    settings: TenantRentalBusinessSettings
+    settings: TenantRentalBusinessSettings,
+    onlyAction?: "pickup" | "return"
   ) {
     const check = (iso: string, label: string, action: "pickup" | "return") => {
       const date = businessDateKey(iso, timeZone);
@@ -3844,8 +3847,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         // 而营业时段已在上面按同一时点校验过。
       }
     };
-    check(input.startAt, "领取", "pickup");
-    check(input.endAt, "归还", "return");
+    if (onlyAction !== "return") check(input.startAt, "领取", "pickup");
+    if (onlyAction !== "pickup") check(input.endAt, "归还", "return");
   }
 
   /**
@@ -3890,7 +3893,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       context,
       { fulfillmentLocationId, startAt: at, endAt: at, fulfillmentMode } as RentalQuoteRequest,
       context.settings.calendar.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE,
-      context.settings
+      context.settings,
+      "pickup"
     );
   }
 
