@@ -20,10 +20,10 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const net = require("node:net");
-const { spawn, spawnSync } = require("node:child_process");
+const { spawn } = require("node:child_process");
 const { buildCloneDatabaseName, buildDatabaseUrl, isOwnedCloneDatabase, redact, quoteSqlString, OpsTargetError } = require("./dedicated-env.cjs");
 const { rewriteBackupForTarget, verifyClone } = require("./restore-core.cjs");
-const { ROOT, requireTarget, requireAdminTarget, assertContainerEndpoint, loadDatabaseUrl, log, fail, containerRunning, runMysql, sql } = require("./runtime.cjs");
+const { ROOT, requireTarget, requireAdminTarget, assertContainerEndpoint, loadDatabaseUrl, log, fail, runPackageCommand, containerRunning, runMysql, sql } = require("./runtime.cjs");
 
 const ARTIFACT_DIR = process.env.OPS_ARTIFACT_DIR || path.join(ROOT, "artifacts", "release");
 const API_DIR = path.join(ROOT, "apps", "api");
@@ -198,8 +198,7 @@ void (async () => {
     const appProbe = sql(target, "SELECT 1", { database: upgradeDb });
     if (appProbe !== "1") throw new OpsTargetError("应用账号无法读取升级克隆库，拒绝启动健康检查");
     step("应用账号克隆库连通", true, `${upgradeDb} / SELECT 1`);
-    const deployCommand = process.platform === "win32" ? "npx.cmd" : "npx";
-    const deploy = spawnSync(deployCommand, ["prisma", "migrate", "deploy"], {
+    const deploy = runPackageCommand("npx", ["prisma", "migrate", "deploy"], {
       cwd: API_DIR,
       encoding: "utf8",
       env: { ...process.env, DATABASE_URL: adminUrl }

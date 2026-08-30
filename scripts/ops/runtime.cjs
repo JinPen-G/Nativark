@@ -90,6 +90,23 @@ function hasCommand(command) {
   return probe.status === 0;
 }
 
+/**
+ * 不经过 shell 调用当前 npm 安装自带的 npm/npx CLI。
+ * Windows 直接 spawn `npm.cmd` 会返回 EINVAL；开启 shell 又会触发参数拼接告警。
+ */
+function runPackageCommand(kind, args, options = {}) {
+  if (!new Set(["npm", "npx"]).has(kind)) throw new OpsTargetError(`不支持的包命令 ${kind}`);
+  const npmCli = process.env.npm_execpath;
+  const cli = npmCli
+    ? kind === "npm" ? npmCli : path.join(path.dirname(npmCli), "npx-cli.js")
+    : undefined;
+  if (cli && fs.existsSync(cli)) {
+    return spawnSync(process.execPath, [cli, ...args], options);
+  }
+  // 非 npm script 场景的兜底；参数均由调用方固定，不接收用户输入。
+  return spawnSync(kind, args, { ...options, shell: process.platform === "win32" });
+}
+
 function containerRunning(name = CONTAINER) {
   const probe = spawnSync("docker", ["inspect", "-f", "{{.State.Running}}", name], { encoding: "utf8" });
   return probe.status === 0 && probe.stdout.trim() === "true";
@@ -130,4 +147,4 @@ function sql(target, statement, { database } = {}) {
   return String(run.stdout ?? "").trim();
 }
 
-module.exports = { ROOT, CONTAINER, readEnvFile, loadDatabaseUrl, requireTarget, requireAdminTarget, assertContainerEndpoint, log, fail, hasCommand, containerRunning, runMysql, sql };
+module.exports = { ROOT, CONTAINER, readEnvFile, loadDatabaseUrl, requireTarget, requireAdminTarget, assertContainerEndpoint, log, fail, hasCommand, runPackageCommand, containerRunning, runMysql, sql };

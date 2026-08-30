@@ -190,6 +190,8 @@ void (() => {
   );
   // migrate deploy 的目标必须是克隆库连接串，不能是源库连接串。
   assert.match(drill, /DATABASE_URL: adminUrl/u, "migrate deploy 必须指向克隆库（管理凭据）");
+  assert.match(drill, /runPackageCommand\("npx", \["prisma", "migrate", "deploy"\]/u,
+    "迁移命令必须使用跨平台 npm CLI 调用，不得在 Windows 直接 spawn npx.cmd");
   assert.match(drill, /buildDatabaseUrl\([\s\S]{0,120}database: upgradeDb/u, "克隆库连接串必须由共用 helper 安全改库名");
   assert.match(drill, /DATABASE_CONNECT_ON_START: "true"/u, "临时 API 必须在启动阶段强制连接克隆库");
   assert.match(drill, /sql\(target, "SELECT 1", \{ database: upgradeDb \}\)/u,

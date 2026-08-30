@@ -10,13 +10,13 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
-const { ROOT, log, fail } = require("./runtime.cjs");
+const { ROOT, log, fail, runPackageCommand } = require("./runtime.cjs");
 const { summarizeWorktree, assertNoSecrets } = require("./release-facts.cjs");
 const { ARTIFACT_DIR, BUILD_PROVENANCE_FILE, summarizeBuilds } = require("./release-artifacts.cjs");
 
 function run(command, args, options = {}) {
-  const executable = process.platform === "win32" && command === "npm" ? "npm.cmd" : command;
-  return spawnSync(executable, args, { cwd: ROOT, encoding: "utf8", ...options });
+  if (command === "npm") return runPackageCommand("npm", args, { cwd: ROOT, encoding: "utf8", ...options });
+  return spawnSync(command, args, { cwd: ROOT, encoding: "utf8", ...options });
 }
 
 const head = String(run("git", ["rev-parse", "HEAD"]).stdout ?? "").trim();

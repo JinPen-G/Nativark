@@ -15,7 +15,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const { redact, rejectionReason } = require("./dedicated-env.cjs");
-const { ROOT, readEnvFile, loadDatabaseUrl, requireTarget, assertContainerEndpoint, log, hasCommand } = require("./runtime.cjs");
+const { ROOT, readEnvFile, loadDatabaseUrl, requireTarget, assertContainerEndpoint, log, hasCommand, runPackageCommand } = require("./runtime.cjs");
 const {
   RELEASE_ENV_VARS,
   HEALTH_ENTRYPOINTS,
@@ -29,8 +29,10 @@ const { ARTIFACT_DIR, summarizeBuilds, readBuildProvenance } = require("./releas
 const flag = (name) => process.argv.includes(`--${name}`);
 
 function run(command, args, options = {}) {
-  const executable = process.platform === "win32" && ["npm", "npx"].includes(command) ? `${command}.cmd` : command;
-  const result = spawnSync(executable, args, { cwd: ROOT, encoding: "utf8", ...options });
+  const settings = { cwd: ROOT, encoding: "utf8", ...options };
+  const result = ["npm", "npx"].includes(command)
+    ? runPackageCommand(command, args, settings)
+    : spawnSync(command, args, settings);
   return { status: result.status, out: String(result.stdout ?? "").trim(), err: String(result.stderr ?? "").trim() };
 }
 
