@@ -316,6 +316,9 @@ model Tenant {
   rentalPricingPlans        RentalPricingPlan[]
   rentalDiscountPlans       RentalDiscountPlan[]
   rentalValueAddedServices  RentalValueAddedService[]
+  rentalValueAddedServiceVersions RentalValueAddedServiceVersion[]
+  rentalServiceCapacities RentalServiceCapacity[]
+  rentalServiceReservations RentalServiceReservation[]
   rentalRuleVersions        RentalRuleVersion[]
   rentalBusinessCalendars   RentalBusinessCalendar[]
   rentalCalendarOverrideAudits RentalCalendarOverrideAuditEntry[]
@@ -399,6 +402,9 @@ model BusinessWorkspace {
   rentalPricingPlans          RentalPricingPlan[]
   rentalDiscountPlans         RentalDiscountPlan[]
   rentalValueAddedServices    RentalValueAddedService[]
+  rentalValueAddedServiceVersions RentalValueAddedServiceVersion[]
+  rentalServiceCapacities  RentalServiceCapacity[]
+  rentalServiceReservations RentalServiceReservation[]
   rentalRuleVersions          RentalRuleVersion[]
   rentalBusinessCalendars     RentalBusinessCalendar[]
   rentalCalendarOverrideAudits RentalCalendarOverrideAuditEntry[]
@@ -2809,10 +2815,12 @@ model RentalFulfillmentLocation {
   stockBalances RentalStockBalance[]
   orders        RentalOrder[]
   reservations  RentalReservation[]
+  serviceCapacities RentalServiceCapacity[]
   createdAt     DateTime             @default(now())
   updatedAt     DateTime             @updatedAt
 
   @@unique([workspaceId, code], map: "rental_locations_ws_code_key")
+  @@unique([tenantId, workspaceId, id], map: "rental_locations_scope_id_key")
   @@index([tenantId, status])
   @@index([operatorId])
   @@map("rental_fulfillment_locations")
@@ -2987,6 +2995,9 @@ model RentalOrder {
   /// （原因、确认人、权限、时间、被确认的判断 id、版本与当时器材组合）。
   /// 审计里不能只剩 confirmed: true，否则配货与后续履约无从还原风险已被裁决。
   capabilityExceptions  Json?
+  /// MKT-02A：从报价拷贝的服务、价格、资格、计划时段与条款正文快照。
+  /// 可空仅用于迁移前存量订单；新订单必须直接继承报价快照。
+  serviceSnapshots       Json?
   /// PRICE-03：订单继承报价命中的不可变价格版本引用。
   priceVersionId  String?
   priceVersion    String?
@@ -3030,11 +3041,13 @@ model RentalOrder {
   allocations           RentalAllocation[]
   inspections           RentalInspectionRecord[]
   idempotencyRecords    RentalOrderIdempotencyRecord[]
+  serviceReservations   RentalServiceReservation[]
   auditLogs             OperationLog[]
   createdAt             DateTime                  @default(now())
   updatedAt             DateTime                  @updatedAt
 
   @@unique([workspaceId, orderNo], map: "rental_orders_ws_order_no_key")
+  @@unique([tenantId, workspaceId, id], map: "rental_orders_scope_id_key")
   @@index([tenantId, status, startAt])
   @@index([tenantId, customerType, customerId])
   @@index([tenantId, quoteId])
@@ -3362,6 +3375,70 @@ model RentalDiscountPlan {
   @@map("rental_discount_plans")
 }
 
+/// MKT-02B：增值服务容量窗口（需求 4.4.11「容量、资源与预留」）。
+///
+/// 粒度 = 经营空间 × 服务 × 地点 × 时间范围。容量必须落到真实履约地点，避免空地点
+/// 在多个地点同时被重复解释。可用量 = totalCapacity - reservedQuantity - usedQuantity。
+/// 预留与已用分两列：需求要求分别记录「已预留数量、已确认数量」，合成一列就分不清
+/// 「占着还没履约」与「已经用掉」，取消时也不知道该退哪一部分。
+model RentalServiceCapacity {
+  id               String   @id @default(uuid())
+  tenantId         String
+  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId      String
+  workspace        BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  serviceId        String
+  service          RentalValueAddedService @relation(fields: [tenantId, workspaceId, serviceId], references: [tenantId, workspaceId, id], onDelete: Restrict)
+  locationId       String
+  location         RentalFulfillmentLocation @relation(fields: [tenantId, workspaceId, locationId], references: [tenantId, workspaceId, id], onDelete: Restrict)
+  windowStart      DateTime
+  windowEnd        DateTime
+  totalCapacity    Int
+  reservedQuantity Int      @default(0)
+  usedQuantity     Int      @default(0)
+  status           String   @default("enabled")
+  reservations     RentalServiceReservation[]
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([workspaceId, serviceId, locationId, windowStart, windowEnd], map: "rental_service_capacities_window_key")
+  @@unique([tenantId, workspaceId, id], map: "rental_service_capacities_scope_id_key")
+  @@index([tenantId, workspaceId, serviceId, windowStart], map: "rental_service_capacities_scope_idx")
+  @@map("rental_service_capacities")
+}
+
+/// MKT-02B：容量预留流水。一条 = 某订单对某容量窗口的一次占用。
+/// 释放与转已用都按它反查，不靠重算——重算会在服务配置或价格变动后退错数量。
+/// `idempotencyKey` 唯一，因此同一订单同一服务的重复预留请求落在同一行，重试不会重复占用。
+model RentalServiceReservation {
+  id             String   @id @default(uuid())
+  tenantId       String
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId    String
+  workspace      BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  capacityId     String
+  capacity       RentalServiceCapacity @relation(fields: [tenantId, workspaceId, capacityId], references: [tenantId, workspaceId, id], onDelete: Restrict)
+  serviceId      String
+  service        RentalValueAddedService @relation(fields: [tenantId, workspaceId, serviceId], references: [tenantId, workspaceId, id], onDelete: Restrict)
+  orderId        String
+  order          RentalOrder @relation(fields: [tenantId, workspaceId, orderId], references: [tenantId, workspaceId, id], onDelete: Restrict)
+  quantity       Int
+  /// reserved（软预留）→ confirmed（订单确认）→ used（已履约），或 released / expired。
+  status         String   @default("reserved")
+  idempotencyKey String
+  reservedAt     DateTime @default(now())
+  expiresAt      DateTime?
+  confirmedAt    DateTime?
+  usedAt         DateTime?
+  releasedAt     DateTime?
+  releaseReason  String?
+
+  @@unique([tenantId, idempotencyKey], map: "rental_service_reservations_idempotency_key")
+  @@index([tenantId, orderId, status], map: "rental_service_reservations_order_idx")
+  @@index([capacityId, status], map: "rental_service_reservations_capacity_idx")
+  @@map("rental_service_reservations")
+}
+
 model RentalValueAddedService {
   id                     String             @id @default(uuid())
   tenantId               String
@@ -3399,15 +3476,41 @@ model RentalValueAddedService {
   /// 损坏免赔（damage_waiver）配它即冒充保险，服务端拒绝。
   insuranceProviderStatus String?
   insuranceProviderName  String?
+  /// MKT-02B：启用后报价必须提供服务时段与地点，并通过容量检查。
+  requiresCapacity       Boolean            @default(false)
   status                 String             @default("enabled")
   version                String
   createdAt              DateTime           @default(now())
   updatedAt              DateTime           @updatedAt
+  versions               RentalValueAddedServiceVersion[]
+  capacities             RentalServiceCapacity[]
+  reservations           RentalServiceReservation[]
 
   @@unique([workspaceId, code, version], map: "rental_value_added_services_tenant_code_version_key")
+  @@unique([tenantId, workspaceId, id], map: "rental_value_added_services_scope_id_key")
   @@index([tenantId, status, serviceType], map: "rental_value_added_services_tenant_status_type_idx")
   @@index([workspaceId, status, selectionMode], map: "rental_value_added_services_selection_idx")
   @@map("rental_value_added_services")
+}
+
+/// MKT-02A Review：服务主档保存当前版本；本表只追加保存每次发布的完整不可变事实。
+/// 报价与订单仍内联正文快照，避免历史查询依赖主档或版本行继续存在。
+model RentalValueAddedServiceVersion {
+  id             String   @id @default(uuid())
+  tenantId       String
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId    String
+  workspace      BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  serviceId      String
+  service        RentalValueAddedService @relation(fields: [tenantId, workspaceId, serviceId], references: [tenantId, workspaceId, id], onDelete: Restrict)
+  serviceVersion String
+  termsVersion   String
+  snapshot       Json
+  createdAt      DateTime @default(now())
+
+  @@unique([serviceId, serviceVersion], map: "rental_value_added_service_versions_service_version_key")
+  @@index([tenantId, workspaceId, serviceId, createdAt], map: "rental_value_added_service_versions_scope_idx")
+  @@map("rental_value_added_service_versions")
 }
 
 model RentalRuleVersion {

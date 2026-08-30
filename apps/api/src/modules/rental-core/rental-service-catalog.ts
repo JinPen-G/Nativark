@@ -19,7 +19,13 @@ import { businessDayIndex } from "./rental-business-day";
 
 export interface RentalServiceContext {
   /** 报价选择的服务与数量。 */
-  selections: Array<{ serviceId: string; quantity: number }>;
+  selections: Array<{
+    serviceId: string;
+    quantity: number;
+    scheduledStartAt?: string;
+    scheduledEndAt?: string;
+    serviceLocationId?: string;
+  }>;
   itemGroupIds: string[];
   fulfillmentMode: RentalFulfillmentMode;
   /** 领取地点；异地归还时归还地点也参与判定。 */
@@ -85,7 +91,7 @@ export function mandatoryRuleHit(
 }
 
 /** 逐条资格判据。留空的适用范围表示不限制，不是「都不适用」。 */
-function eligibilityOf(service: RentalValueAddedService, ctx: RentalServiceContext) {
+function eligibilityOf(service: RentalValueAddedService, ctx: RentalServiceContext, locationIds = ctx.locationIds) {
   const rows: RentalQuoteServiceSnapshot["eligibility"] = [];
   const record = (rule: string, passed: boolean, detail?: string) => {
     rows.push({ rule, passed, detail });
@@ -103,7 +109,7 @@ function eligibilityOf(service: RentalValueAddedService, ctx: RentalServiceConte
   );
   const locationOk = record(
     "location",
-    !service.applicableLocationIds.length || ctx.locationIds.some((id) => service.applicableLocationIds.includes(id))
+    !service.applicableLocationIds.length || locationIds.some((id) => service.applicableLocationIds.includes(id))
   );
   const scopeOk = record(
     "customer_scope",
@@ -127,20 +133,35 @@ export function resolveQuoteServices(
   ctx: RentalServiceContext
 ): { snapshots: RentalQuoteServiceSnapshot[]; totalAmount: number } {
   const byId = new Map(services.map((service) => [service.id, service]));
-  const selected = new Map<string, number>();
+  const selected = new Map<string, RentalServiceContext["selections"][number]>();
   for (const selection of ctx.selections) {
     if (selected.has(selection.serviceId)) {
       throw new BadRequestException("同一增值服务在一次报价中只能出现一行，请用数量表达多份");
     }
-    selected.set(selection.serviceId, selection.quantity);
+    selected.set(selection.serviceId, selection);
   }
 
   const snapshots: RentalQuoteServiceSnapshot[] = [];
   let totalAmount = 0;
-  for (const [serviceId, quantity] of selected) {
+  for (const [serviceId, selection] of selected) {
     const service = byId.get(serviceId);
     if (!service) throw new BadRequestException("增值服务不存在");
-    const { rows, eligible } = eligibilityOf(service, ctx);
+    const quantity = selection.quantity;
+    if (service.billingUnit === "per_hour" && (!selection.scheduledStartAt || !selection.scheduledEndAt)) {
+      throw new BadRequestException(`${service.name} 按实际服务时段计费，必须填写服务开始和结束时间`);
+    }
+    if (service.requiresCapacity && (!selection.scheduledStartAt || !selection.scheduledEndAt || !selection.serviceLocationId)) {
+      throw new BadRequestException(`${service.name} 需要预留容量，必须填写服务地点、开始时间和结束时间`);
+    }
+    const scheduledStartAt = selection.scheduledStartAt ?? ctx.startAt;
+    const scheduledEndAt = selection.scheduledEndAt ?? ctx.endAt;
+    const serviceLocationId = selection.serviceLocationId ?? ctx.locationIds[0];
+    const startMs = new Date(scheduledStartAt).getTime();
+    const endMs = new Date(scheduledEndAt).getTime();
+    if (!serviceLocationId || !Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+      throw new BadRequestException(`${service.name} 的服务地点或计划时段无效`);
+    }
+    const { rows, eligible } = eligibilityOf(service, ctx, [serviceLocationId]);
     if (!eligible) {
       const failed = rows.find((row) => !row.passed);
       throw new ConflictException(
@@ -152,7 +173,7 @@ export function resolveQuoteServices(
         `${service.name} 的数量必须是 ${service.minimumQuantity} 到 ${service.maximumQuantity} 之间的整数`
       );
     }
-    const billingUnits = serviceBillingUnits(service.billingUnit, ctx.startAt, ctx.endAt, ctx.timeZone);
+    const billingUnits = serviceBillingUnits(service.billingUnit, scheduledStartAt, scheduledEndAt, ctx.timeZone);
     // 按件计价乘商品数量没有意义（服务数量本身就是份数），因此单位数与数量分开相乘。
     const amount = money(service.price * quantity * billingUnits);
     totalAmount = money(totalAmount + amount);
@@ -182,7 +203,12 @@ export function resolveQuoteServices(
       // 保险占位也只是预留能力，两者都不得向客户显示「已投保」。
       insuredDisplayable: false,
       insuranceProviderStatus: service.serviceType === "insurance" ? service.insuranceProviderStatus : undefined,
-      insuranceProviderName: service.serviceType === "insurance" ? service.insuranceProviderName : undefined
+      insuranceProviderName: service.serviceType === "insurance" ? service.insuranceProviderName : undefined,
+      requiresCapacity: service.requiresCapacity,
+      scheduledStartAt,
+      scheduledEndAt,
+      serviceLocationId,
+      capacityQuantity: quantity
     });
   }
 

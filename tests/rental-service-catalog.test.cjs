@@ -39,6 +39,7 @@ const service = (over = {}) => ({
   applicableLocationIds: [],
   customerScope: "all",
   selectionMode: "optional",
+  requiresCapacity: false,
   status: "enabled",
   version: "1.0",
   createdAt: "2026-01-01T00:00:00.000Z",
@@ -97,6 +98,9 @@ const rejects = (fn, pattern, label) => {
   assert.equal(snapshots[0].termsVersion, "1.0");
   assert.equal(snapshots[0].terms, "默认条款", "条款正文必须整段固化，只存版本号取不回历史正文");
   assert.equal(snapshots[0].workspaceId, "ws1", "快照必须带经营空间");
+  assert.equal(snapshots[0].scheduledStartAt, ctx().startAt);
+  assert.equal(snapshots[0].scheduledEndAt, ctx().endAt);
+  assert.equal(snapshots[0].serviceLocationId, "loc1");
   ok("金额与快照：单价 × 份数 × 单位数，公式、版本、条款正文与空间齐备");
 }
 
@@ -210,6 +214,31 @@ const rejects = (fn, pattern, label) => {
   });
   assert.deepEqual(results, [90, 90, 90, 90], "四品类必须复用同一服务模型，判定与计价不得按品类分支");
   ok("四品类复用：同一服务定义在四个品类下结果一致");
+}
+
+// ============ 9. 按小时与容量服务必须使用明确的服务时段 ============
+{
+  const hourly = service({ code: "ASSISTANT", billingUnit: "per_hour", price: 80, requiresCapacity: true });
+  rejects(
+    () => resolveQuoteServices([hourly], ctx({ selections: [{ serviceId: hourly.id, quantity: 1 }] })),
+    /必须填写服务开始和结束时间|需要预留容量/u,
+    "按小时服务不得默认按设备完整租期收费"
+  );
+  const resolved = resolveQuoteServices([hourly], ctx({
+    selections: [{
+      serviceId: hourly.id,
+      quantity: 1,
+      scheduledStartAt: "2026-06-01T03:00:00.000Z",
+      scheduledEndAt: "2026-06-01T05:30:00.000Z",
+      serviceLocationId: "loc1"
+    }]
+  })).snapshots[0];
+  assert.equal(resolved.billingUnits, 3, "2.5 小时按小时进位为 3，不能按两天租期收费");
+  assert.equal(resolved.amount, 240);
+  assert.equal(resolved.requiresCapacity, true);
+  assert.equal(resolved.capacityQuantity, 1);
+  assert.equal(resolved.serviceLocationId, "loc1");
+  ok("实际服务时段：按小时计价与容量预留共用明确的服务地点、开始和结束时间");
 }
 
 console.log("\nMKT-02A 增值服务目录与条款快照专项：全部通过");

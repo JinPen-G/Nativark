@@ -33,6 +33,7 @@ import type {
   RentalRuleVersion,
   RentalStockBalance,
   RentalValueAddedService,
+  RentalServiceCapacity,
   SaveWorkspaceCapabilityRequest,
   UpgradeWorkspaceCapabilityRequest,
   WorkspaceCapabilityAuditEvent,
@@ -62,6 +63,7 @@ import type {
   SaveRentalPricingPlanRequest,
   SaveRentalRuleVersionRequest,
   SaveRentalValueAddedServiceRequest,
+  SaveRentalServiceCapacityRequest,
   SendRentalNotificationRequest,
   SaveRentalAssetRequest,
   SaveRentalCouponTemplateRequest,
@@ -99,6 +101,8 @@ export const rentalCoreApi = {
   saveDiscountPlan: (data: SaveRentalDiscountPlanRequest) => request<RentalDiscountPlan>(data.id ? `/rental/v1/discount-plans/${data.id}` : "/rental/v1/discount-plans", { method: data.id ? "put" : "post", data }),
   valueAddedServices: () => request<RentalValueAddedService[]>("/rental/v1/value-added-services"),
   saveValueAddedService: (data: SaveRentalValueAddedServiceRequest) => request<RentalValueAddedService>(data.id ? `/rental/v1/value-added-services/${data.id}` : "/rental/v1/value-added-services", { method: data.id ? "put" : "post", data }),
+  serviceCapacities: (serviceId?: string) => request<RentalServiceCapacity[]>(`/rental/v1/service-capacities${serviceId ? `?serviceId=${encodeURIComponent(serviceId)}` : ""}`),
+  saveServiceCapacity: (data: SaveRentalServiceCapacityRequest) => request<RentalServiceCapacity>(data.id ? `/rental/v1/service-capacities/${data.id}` : "/rental/v1/service-capacities", { method: data.id ? "put" : "post", data }),
   calendar: (year: number) => request<RentalCalendarYear & { timePriceSummary: RentalCalendarTimePriceDay[] }>(`/rental/v1/calendars/${year}`),
   /**
    * 可引用的公共官方来源版本（需求 4.5.2）。空间侧不再直接提交原始官方日期：

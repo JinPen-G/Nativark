@@ -19,6 +19,7 @@ import type {
   SaveRentalPricingPlanRequest,
   SaveRentalRuleVersionRequest,
   SaveRentalValueAddedServiceRequest,
+  SaveRentalServiceCapacityRequest,
   SaveTenantRentalBusinessSettingsRequest,
   CreateRentalPriceAdjustmentRequest,
   CancelRentalPriceAdjustmentRequest,
@@ -753,8 +754,39 @@ export class SaveRentalValueAddedServiceDto implements SaveRentalValueAddedServi
   @MaxLength(191)
   insuranceProviderName?: string;
 
+  @IsBoolean()
+  requiresCapacity!: boolean;
+
   @IsIn(ENABLE_STATUSES)
   status!: (typeof ENABLE_STATUSES)[number];
+}
+
+export class SaveRentalServiceCapacityDto implements SaveRentalServiceCapacityRequest {
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  id?: string;
+
+  @IsString()
+  @IsNotEmpty()
+  serviceId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  locationId!: string;
+
+  @IsISO8601()
+  windowStart!: string;
+
+  @IsISO8601()
+  windowEnd!: string;
+
+  @IsInt()
+  @Min(1)
+  totalCapacity!: number;
+
+  @IsIn(ENABLE_STATUSES)
+  status!: "enabled" | "disabled";
 }
 
 /** MKT-02A：条件强制服务的触发规则。留空的维度表示不限制。 */

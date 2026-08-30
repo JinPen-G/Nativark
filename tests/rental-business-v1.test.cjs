@@ -262,6 +262,7 @@ const damageWaiver = await business.saveService(tenantId, context(), {
   applicableLocationIds: [],
   customerScope: "all",
   selectionMode: "optional",
+  requiresCapacity: false,
   status: "enabled"
 });
 const damageQuote = { ...quote, request: { ...quote.request, services: [{ serviceId: damageWaiver.id, quantity: 1 }] } };

@@ -858,6 +858,34 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               createdAt: optionalDate(service.createdAt) ?? new Date()
             }
           }));
+          const serviceVersion = service.version ?? "1.0";
+          const termsVersion = service.termsVersion ?? "1.0";
+          await this.writeOne("rentalValueAddedServiceVersion", divergences, () =>
+            tx.rentalValueAddedServiceVersion.upsert({
+              where: {
+                serviceId_serviceVersion: {
+                  serviceId: service.id,
+                  serviceVersion
+                }
+              },
+              update: {},
+              create: {
+                tenantId,
+                workspaceId,
+                serviceId: service.id,
+                serviceVersion,
+                termsVersion,
+                snapshot: json({
+                  ...service,
+                  tenantId,
+                  workspaceId,
+                  serviceVersion,
+                  termsVersion
+                }),
+                createdAt: optionalDate(service.updatedAt) ?? optionalDate(service.createdAt) ?? new Date()
+              }
+            })
+          );
         }
         count("valueAddedServices", (business.services ?? []).length);
 

@@ -87,6 +87,7 @@ import {
 } from "./rental-business-fact.repository";
 import { RentalCoreConfigRepository, type RentalConfigStore, type RentalConfigTx } from "./rental-core-config.repository";
 import { PrismaService } from "../database/prisma.service";
+import { RentalServiceCapacityService } from "./rental-service-capacity.service";
 import { DEFAULT_BUSINESS_TIME_ZONE, businessDateKey, businessTimeOfDay, businessDateKeyFromIndex, businessDayIndex, businessInstantAt, businessYearFromDateKey, isCalendarDateKey, businessHoursError } from "./rental-business-day";
 import {
   applyRangeFieldsToDay,
@@ -317,7 +318,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     // CORE-EXT-02D：报价生成时固化已启用能力的版本快照。可选同上。
     @Optional() private readonly capabilities?: WorkspaceCapabilityService,
     // Review P1-5：被阻止的报价要写只追加的拒绝审计。可选同上。
-    @Optional() private readonly hookAudits?: CapabilityHookRepository
+    @Optional() private readonly hookAudits?: CapabilityHookRepository,
+    @Optional() private readonly serviceCapacities?: RentalServiceCapacityService
   ) {}
 
   /**
@@ -3346,7 +3348,13 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     // 早前这里只查了商品组与最大数量，履约方式、地点、客户类型、最小数量与强制服务
     // 一概不判；`per_day` 还按 24 小时折算，与「每自然日」差一天。
     const serviceResolution = resolveQuoteServices(state.services, {
-      selections: (input.services ?? []).map((row) => ({ serviceId: row.serviceId, quantity: row.quantity })),
+      selections: (input.services ?? []).map((row) => ({
+        serviceId: row.serviceId,
+        quantity: row.quantity,
+        scheduledStartAt: row.scheduledStartAt,
+        scheduledEndAt: row.scheduledEndAt,
+        serviceLocationId: row.serviceLocationId
+      })),
       itemGroupIds: input.lines.map((line) => line.itemGroupId),
       fulfillmentMode: input.fulfillmentMode,
       // 异地归还时归还地点同样参与判定：只按取件地点判会让「只在 A 店提供」的服务
@@ -3360,6 +3368,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       workspaceId: this.workspaceOf(tenantId)
     });
     const serviceSnapshots = serviceResolution.snapshots;
+    // 报价只做可用性检查，不写预留。权威预留发生在下单事务中；否则客户只是试算
+    // 就会长期占住操作员、安装工位或指定配送时段。
+    await this.serviceCapacities?.assertAvailableForQuote(tenantId, serviceSnapshots);
     const pendingServiceLines: RentalQuoteSnapshotV1["chargeLines"] = serviceSnapshots.map((snapshot) => ({
       code: `service:${snapshot.serviceCode}`,
       name: snapshot.serviceName,
@@ -3772,7 +3783,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     }));
     const pricingPlans: RentalPricingPlanV1[] = [{ id: `${idPrefix}_pricing_default`, tenantId, categoryCode: context.profile.categoryCode, code: "STANDARD", name: `${context.category.name}标准价格`, currency: "CNY", status: "enabled", version: "1.0", effectiveFrom: timestamp, rates, createdAt: timestamp, updatedAt: timestamp }];
     const discountPlans: RentalDiscountPlan[] = [{ id: `${idPrefix}_discount_long`, tenantId, categoryCode: context.profile.categoryCode, code: "LONG_RENTAL", name: "长期租赁优惠", status: "enabled", discountType: "percentage", discountValue: 5, minimumSpend: 500, appliesTo: "rental", customerScope: "all", applicableItemGroupIds: [], applicableDayTypes: [], priority: 100, stackableWithOtherPlans: false, stackableWithCoupon: true, effectiveFrom: timestamp, version: "1.0", createdAt: timestamp, updatedAt: timestamp }];
-    const services: RentalValueAddedService[] = context.category.businessModel.valueAddedServicePresets.slice(0, 4).map((name, index) => ({ id: `${idPrefix}_service_${index + 1}`, tenantId, categoryCode: context.profile.categoryCode, code: `SERVICE_${index + 1}`, name, serviceType: serviceType(name), billingUnit: name.includes("配送") || name.includes("运输") ? "per_order" : "per_day", price: 20 + index * 30, minimumQuantity: 1, maximumQuantity: 5, applicableFulfillmentModes: [], applicableLocationIds: [], customerScope: "all", selectionMode: "optional", coverageLimit: name.includes("保险") || name.includes("免赔") ? 5000 : undefined, deductible: name.includes("免赔") ? 200 : undefined, termsVersion: "1.0", terms: `${name}服务条款：以订单保存的本版本范围、限额及除外责任为准。`, applicableItemGroupIds: [], status: "enabled", version: "1.0", createdAt: timestamp, updatedAt: timestamp }));
+    const services: RentalValueAddedService[] = context.category.businessModel.valueAddedServicePresets.slice(0, 4).map((name, index) => ({ id: `${idPrefix}_service_${index + 1}`, tenantId, categoryCode: context.profile.categoryCode, code: `SERVICE_${index + 1}`, name, serviceType: serviceType(name), billingUnit: name.includes("配送") || name.includes("运输") ? "per_order" : "per_day", price: 20 + index * 30, minimumQuantity: 1, maximumQuantity: 5, applicableFulfillmentModes: [], applicableLocationIds: [], customerScope: "all", selectionMode: "optional", coverageLimit: name.includes("保险") || name.includes("免赔") ? 5000 : undefined, deductible: name.includes("免赔") ? 200 : undefined, termsVersion: "1.0", terms: `${name}服务条款：以订单保存的本版本范围、限额及除外责任为准。`, applicableItemGroupIds: [], requiresCapacity: false, status: "enabled", version: "1.0", createdAt: timestamp, updatedAt: timestamp }));
     const ruleVersions: RentalRuleVersion[] = [{ id: `${idPrefix}_rule_v1`, tenantId, categoryCode: context.profile.categoryCode, version: "1.0", status: "published", config: defaultRuleConfig(context.category, context.settings), changeReason: "品类初始化规则", createdBy: "system", createdAt: timestamp, publishedAt: timestamp }];
     const defaultVariables = { customerName: { label: "客户名称", required: true }, orderNo: { label: "订单号", required: true } };
     const notificationTemplates: RentalNotificationTemplateV1[] = context.settings.notifications.enabledEvents.slice(0, 12).map((eventCode, index) => {

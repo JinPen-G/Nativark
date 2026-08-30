@@ -6251,6 +6251,8 @@ export interface RentalValueAddedService {
    */
   insuranceProviderStatus?: RentalInsuranceProviderStatus;
   insuranceProviderName?: string;
+  /** 是否必须按服务地点与计划时段检查并预留容量。 */
+  requiresCapacity: boolean;
   status: "enabled" | "disabled";
   version: string;
   createdAt: string;
@@ -6313,6 +6315,38 @@ export interface RentalQuoteServiceSnapshot {
   insuredDisplayable: false;
   insuranceProviderStatus?: RentalInsuranceProviderStatus;
   insuranceProviderName?: string;
+  requiresCapacity: boolean;
+  /** 有容量服务与按小时服务使用自己的计划时段，不得默认套用完整租期。 */
+  scheduledStartAt: string;
+  scheduledEndAt: string;
+  serviceLocationId: string;
+  capacityQuantity: number;
+}
+
+export interface RentalServiceCapacity {
+  id: string;
+  tenantId: string;
+  workspaceId: string;
+  serviceId: string;
+  locationId: string;
+  windowStart: string;
+  windowEnd: string;
+  totalCapacity: number;
+  reservedQuantity: number;
+  usedQuantity: number;
+  status: "enabled" | "disabled";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SaveRentalServiceCapacityRequest {
+  id?: string;
+  serviceId: string;
+  locationId: string;
+  windowStart: string;
+  windowEnd: string;
+  totalCapacity: number;
+  status: "enabled" | "disabled";
 }
 
 /**
@@ -6559,7 +6593,14 @@ export interface RentalQuoteRequest {
   discountPlanId?: string;
   customerCouponId?: string;
   lines: Array<{ itemGroupId: string; quantity: number; pricingUnit?: RentalPricingUnit; usageQuantity?: number; note?: string }>;
-  services?: Array<{ serviceId: string; quantity: number }>;
+  services?: Array<{
+    serviceId: string;
+    quantity: number;
+    /** 省略时使用租赁起止；有容量服务和按小时服务必须明确提供。 */
+    scheduledStartAt?: string;
+    scheduledEndAt?: string;
+    serviceLocationId?: string;
+  }>;
 }
 
 /** 报价命中的单个「营业日期 × 商品组」计价依据（需求 4.5.6）。 */
@@ -7412,6 +7453,8 @@ export interface RentalOrder {
   capabilityDecisions?: RentalCapabilityDecisionSnapshot[];
   /** Review P1-6：带风险继续的完整例外快照（不可变），配货与后续履约据此还原裁决。 */
   capabilityExceptions?: RentalCapabilityExceptionSnapshot[];
+  /** MKT-02A：从报价直接继承的服务、价格、资格、时段与条款正文快照。 */
+  serviceSnapshots?: RentalQuoteServiceSnapshot[];
   /**
    * CUSTOMER-01C：订单四类主体（需求 4.8.4）。
    *

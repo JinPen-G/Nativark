@@ -292,8 +292,11 @@ export function requiredPermissions(method: string, path: string) {
       ? ["store-rental:price:manage", "store-rental:order:view", "store-rental:order:create"]
       : ["store-rental:price:manage"];
   }
-  if (path.startsWith("/rental/v1/pricing-plans") || path.startsWith("/rental/v1/value-added-services")) {
+  if (path.startsWith("/rental/v1/pricing-plans")) {
     return method === "GET" ? ["store-rental:price:manage", "store-rental:order:view", "store-rental:order:create"] : ["store-rental:price:manage"];
+  }
+  if (path.startsWith("/rental/v1/value-added-services") || path.startsWith("/rental/v1/service-capacities")) {
+    return ["store-rental:service:manage"];
   }
   if (path === "/rental/v1/locations" || path.startsWith("/rental/v1/locations/") || path.startsWith("/rental/v1/fulfillment-operators")) {
     return method === "GET" ? ["store-rental:station:view"] : ["store-rental:station:manage"];
