@@ -166,12 +166,20 @@ void (() => {
   assert.match(backupSource, /createHash\("sha256"\)/u, "备份必须产出校验和");
   const drillSource = fs.readFileSync(path.join(opsDir, "restore-drill.cjs"), "utf8");
   assert.match(drillSource, /校验和不匹配/u, "演练必须比对校验和");
-  assert.match(drillSource, /可执行语句/u, "改写不彻底时必须拒绝导入，以免写回源库");
-  assert.match(drillSource, /\(\?!\[!\]\)/u, "MySQL 可执行版本注释不能被当普通注释忽略");
   assert.match(drillSource, /演练库已保留供排查/u, "失败时必须保留演练库并给出清理指引");
+  // OPS-01C 起，改写与校验移入共用内核 restore-core.cjs：这两段是数据安全的
+  // 关键判定，两处各留一份拷贝时修好一处、另一处照旧漏，而漏的那次才是事故。
+  // 因此断言「演练确实走内核」+「内核里的判定仍在」，而不是在演练脚本里找字面量。
+  assert.match(drillSource, /require\("\.\/restore-core\.cjs"\)/u, "演练必须复用共用恢复内核，不得自带一份改写逻辑");
+  assert.match(drillSource, /rewriteBackupForTarget\(body\.toString\("utf8"\), target\.database, drill\)/u, "改写必须由内核执行");
+  assert.match(drillSource, /verifyClone\(\(statement\) => sql\(admin, statement\), target\.database, drill\)/u, "校验必须由内核执行");
+  const coreSource = fs.readFileSync(path.join(opsDir, "restore-core.cjs"), "utf8");
+  assert.match(coreSource, /可执行语句/u, "改写不彻底时必须拒绝导入，以免写回源库");
+  assert.match(coreSource, /\(\?!\[!\]\)/u, "MySQL 可执行版本注释不能被当普通注释忽略");
   // 抽样一张都没比上时必须失败：空抽样下的「行数一致」是空话。
-  assert.match(drillSource, /if \(!rows\.length\)/u, "抽样表全部缺失时必须失败，不得给出空洞的通过结论");
-  assert.match(drillSource, /"Tenant"/u, "抽样清单必须使用真实表名（未 @@map 的模型是 PascalCase）");
+  assert.match(coreSource, /if \(!rows\.length\)/u, "抽样表全部缺失时必须失败，不得给出空洞的通过结论");
+  assert.match(coreSource, /"Tenant"/u, "抽样清单必须使用真实表名（未 @@map 的模型是 PascalCase）");
+  assert.match(coreSource, /目标库与源库同名/u, "内核必须拒绝把备份改写回源库");
   // DDL 只能用单独配置的管理凭据，不得回退到应用账号。
   assert.match(drillSource, /requireAdminTarget/u, "建/删演练库必须使用单独的管理凭据");
   assert.match(drillSource, /sql\(admin, `CREATE DATABASE/u, "CREATE DATABASE 必须走管理账号");

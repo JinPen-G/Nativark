@@ -14,6 +14,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { buildDrillDatabaseName, isDrillDatabase, redact, OpsTargetError } = require("./dedicated-env.cjs");
+const { rewriteBackupForTarget, verifyClone } = require("./restore-core.cjs");
 const { ROOT, requireTarget, requireAdminTarget, log, fail, containerRunning, runMysql, sql } = require("./runtime.cjs");
 
 function arg(name) {
@@ -80,65 +81,18 @@ void (() => {
     sql(admin, `CREATE DATABASE \`${drill}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
     created = true;
 
-    // 备份带 `--databases`，其中的 CREATE DATABASE / USE 指向源库；必须改写成演练库，
-    // 否则导入会直接写回源库——那就从「验证备份」变成了「覆盖生产数据」。
-    const quoted = `\`${target.database}\``;
-    const script = body.toString("utf8")
-      .replace(new RegExp(`CREATE DATABASE[^;]*${quoted.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[^;]*;`, "gu"), "")
-      .replace(new RegExp(`USE ${quoted.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")};`, "gu"), `USE \`${drill}\`;`)
-      // 限定名 `src`.`table` 也要改写，否则单条语句仍会落到源库。
-      .split(`${quoted}.`).join(`\`${drill}\`.`);
-    // 只检查**可执行**语句里的残留：mysqldump 的头部与分节注释里也有库名
-    // （`-- Current Database: ...`），那些不会被执行，不该因此拒绝一份好备份。
-    const executable = script
-      .split(/\r?\n/)
-      .filter((line) => !/^\s*--/u.test(line))
-      .join("\n")
-      // 普通块注释可以忽略；`/*!...*/` 是 MySQL 会执行的版本注释，必须保留并扫描。
-      .replace(/\/\*(?![!])[\s\S]*?\*\//gu, "");
-    const sourceName = target.database.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const sourceIdentifier = `(?:\`${sourceName}\`|${sourceName})`;
-    const dangerous = new RegExp(
-      `(?:USE\\s+${sourceIdentifier}(?=\\s|;)|CREATE\\s+DATABASE[^;]*${sourceIdentifier}(?=\\s|;)|${sourceIdentifier}\\s*\\.)`,
-      "imu"
-    );
-    if (dangerous.test(executable)) {
-      throw new OpsTargetError("备份脚本中仍有指向源库的可执行语句，拒绝导入以免写回源库");
-    }
+    // 改写与校验都走共用内核（scripts/ops/restore-core.cjs）：
+    // 这两段是数据安全的关键判定，两处各留一份拷贝时，将来修好一处、
+    // 另一处照旧漏，而漏的那次才是事故。
+    const script = rewriteBackupForTarget(body.toString("utf8"), target.database, drill);
     const load = runMysql("mysql", admin, [drill], { input: script });
     if (load.status !== 0) {
       throw new OpsTargetError(`导入失败：${redact(String(load.stderr ?? ""), [target.password, admin.password])}`);
     }
-
-    // 最小结构与状态校验：表数、迁移条数、几张关键表的行数都要与源库一致。
-    const countTables = (db) => Number(sql(admin, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${db}'`));
-    const sourceTables = countTables(target.database);
-    const drillTables = countTables(drill);
-    if (!drillTables || sourceTables !== drillTables) {
-      throw new OpsTargetError(`表数量不一致：源库 ${sourceTables}，演练库 ${drillTables}`);
-    }
-    const migrationsOf = (db) => Number(sql(admin, `SELECT COUNT(*) FROM \`${db}\`._prisma_migrations WHERE finished_at IS NOT NULL`));
-    const sourceMigrations = migrationsOf(target.database);
-    const drillMigrations = migrationsOf(drill);
-    if (sourceMigrations !== drillMigrations) {
-      throw new OpsTargetError(`迁移记录不一致：源库 ${sourceMigrations}，演练库 ${drillMigrations}`);
-    }
-    // 抽样比对行数。表名取自实际 schema（Prisma 未 @@map 的模型是 PascalCase）。
-    const sample = ["Tenant", "business_workspaces", "customer_profiles", "_prisma_migrations"];
-    const rows = [];
-    for (const table of sample) {
-      const exists = sql(admin, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${drill}' AND table_name='${table}'`);
-      if (Number(exists) === 0) continue;
-      const a = Number(sql(admin, `SELECT COUNT(*) FROM \`${target.database}\`.\`${table}\``));
-      const b = Number(sql(admin, `SELECT COUNT(*) FROM \`${drill}\`.\`${table}\``));
-      if (a !== b) throw new OpsTargetError(`表 ${table} 行数不一致：源库 ${a}，演练库 ${b}`);
-      rows.push(`${table}=${b}`);
-    }
-    // 一张都没比上就说明抽样清单和真实 schema 脱节了。此时「行数一致」是空话，
-    // 让它通过等于给出一个看起来合格、实际什么都没验的演练结论。
-    if (!rows.length) {
-      throw new OpsTargetError(`抽样表在演练库中全部不存在（清单：${sample.join("、")}），无法证明数据已恢复`);
-    }
+    const verified = verifyClone((statement) => sql(admin, statement), target.database, drill);
+    const drillTables = verified.targetTables;
+    const drillMigrations = verified.targetMigrations;
+    const rows = verified.sampled;
 
     log(`  ✓ 表数量一致：${drillTables}`);
     log(`  ✓ 已应用迁移一致：${drillMigrations}`);

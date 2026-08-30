@@ -139,14 +139,60 @@ function isDrillDatabase(name) {
   return !rejectionReason(value) && /_drill_\d{14}$/u.test(value);
 }
 
+/**
+ * OPS-01C：演练克隆库的种类。
+ *
+ * 升级演练与回滚演练要落在**两个不同的新库**上：回滚不是把升级库改回去
+ * （那需要 down migration，而 down migration 在真实事故里既不可靠也常常不存在），
+ * 而是从同一份已验证备份再恢复出一个干净库。种类写进库名，事后一眼能看出
+ * 哪个库是升级后的、哪个是回滚目标。
+ */
+const CLONE_KINDS = ["drill", "upgrade", "rollback"];
+
+/**
+ * 生成指定种类的克隆库名，形如 `<源库>_<种类>_<14位时间戳>`。
+ *
+ * 与 `buildDrillDatabaseName` 同一套守卫：源库先过专用库判定，生成结果再过一次。
+ * 名字里带时间戳保证每次都是新库；带种类保证升级与回滚不会互相覆盖。
+ */
+function buildCloneDatabaseName(sourceDatabase, kind, stamp = new Date()) {
+  if (!CLONE_KINDS.includes(kind)) {
+    throw new OpsTargetError(`未知的克隆库种类 ${kind}，只允许 ${CLONE_KINDS.join(" / ")}`);
+  }
+  const reason = rejectionReason(sourceDatabase);
+  if (reason) throw new OpsTargetError(reason);
+  const iso = stamp.toISOString().replace(/[-:T]/g, "").slice(0, 14);
+  const suffix = `_${kind}_${iso}`;
+  const head = String(sourceDatabase).slice(0, 64 - suffix.length);
+  const name = `${head}${suffix}`;
+  const cloneReason = rejectionReason(name);
+  if (cloneReason) throw new OpsTargetError(cloneReason);
+  return name;
+}
+
+/**
+ * 只有本工具生成的克隆库才允许被自动删除。
+ *
+ * 判据同时要求「过专用库守卫」与「符合 `_<种类>_<14位时间戳>` 形态」：
+ * 少了前者，一个叫 `store_rental_upgrade_20260830010203` 的**生产**库也会被认成可删。
+ */
+function isOwnedCloneDatabase(name) {
+  const value = String(name ?? "");
+  if (rejectionReason(value)) return false;
+  return new RegExp(`_(?:${CLONE_KINDS.join("|")})_\\d{14}$`, "u").test(value);
+}
+
 module.exports = {
   DEDICATED_MARKERS,
   PROTECTED_DATABASES,
+  CLONE_KINDS,
   OpsTargetError,
   redact,
   parseDatabaseUrl,
   rejectionReason,
   resolveDedicatedTarget,
   buildDrillDatabaseName,
-  isDrillDatabase
+  isDrillDatabase,
+  buildCloneDatabaseName,
+  isOwnedCloneDatabase
 };
