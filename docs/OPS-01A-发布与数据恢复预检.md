@@ -17,6 +17,11 @@
 不命中即**默认拒绝**——黑名单永远漏项，`store_rental_backup` 这类名字不在黑名单里，
 但同样不该被当作演练目标。
 
+本阶段客户端固定在 `OPS_MYSQL_CONTAINER` 内运行，只支持该容器自身的本地 `3306`
+端点（`localhost` / `127.0.0.1` / `mysql` / 容器名）。远程主机、其他端口以及名称中
+带 `prod` / `production` / `staging` / `live` / `primary` 的库全部拒绝，避免连接串写着
+远端目标、脚本却静默操作本地容器。远程环境发布归完整 `OPS-01`，不在本阶段猜测连接。
+
 ## 2. 准备条件
 
 ```bash
@@ -34,7 +39,8 @@ docker compose --project-name rental-platform up -d mysql
 | `OPS_MYSQL_CONTAINER` | 容器名 | 可选，默认 `store-rental-mysql` |
 | `OPS_KEEP_DRILL=1` | 保留演练库 | 可选，排查时用 |
 
-口令一律经 `MYSQL_PWD` 传给客户端，**不用** `-p<password>`（后者会进入容器内进程列表并触发明文告警）。
+口令一律经子进程环境变量 `MYSQL_PWD` 传给客户端；docker 命令参数中只出现变量名，
+不用 `-p<password>`，也不拼接 `MYSQL_PWD=<value>`，避免口令进入宿主机或容器进程参数。
 所有输出都过脱敏：日志、报错与报告里不会出现口令。
 
 > 脱敏是「宁可多掩」：凡是与口令字面相同的片段都会被掩成 `***`。

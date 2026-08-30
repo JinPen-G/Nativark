@@ -11,6 +11,7 @@ const path = require("node:path");
 
 const ROOT = path.resolve(__dirname, "..");
 const ops = require(path.join(ROOT, "scripts/ops/dedicated-env.cjs"));
+const runtime = require(path.join(ROOT, "scripts/ops/runtime.cjs"));
 const { OpsTargetError } = ops;
 
 const ok = (m) => console.log(`  ✓ ${m}`);
@@ -45,6 +46,22 @@ void (() => {
   }
   ok("共享开发库、生产命名与系统库全部被拒（大小写无关）");
 
+  for (const database of ["store_rental_prod_claude", "store_rental_staging_e2e", "store_rental_live_sandbox"]) {
+    rejects(
+      () => ops.resolveDedicatedTarget(`mysql://u:p@localhost:3306/${database}`),
+      /生产\/共享环境标记/u,
+      `混入专用标记的生产库 ${database}`
+    );
+  }
+  for (const database of ["store_rental_claudedev", "store_rental_e2etest", "store-rental-claude", "store_rental_claude%60evil"]) {
+    rejects(
+      () => ops.resolveDedicatedTarget(`mysql://u:p@localhost:3306/${database}`),
+      /缺少专用库标记|不是安全的数据库名/u,
+      `模糊标记或危险库名 ${database}`
+    );
+  }
+  ok("生产标记不能用专用词绕过，库名与专用标记均按安全边界校验");
+
   // ============ 3. 没有专用标记的库默认拒绝，而不是默认放行 ============
   // 黑名单永远漏项；`store_rental_backup` 这类名字不在黑名单里，但同样不该被当作演练目标。
   for (const database of ["store_rental_backup", "rentaldb", "app_main", "temp1"]) {
@@ -67,6 +84,16 @@ void (() => {
     assert.equal(ops.rejectionReason(`store_rental_${marker}`), undefined, `带 ${marker} 标记的库应放行`);
   }
   ok("带专用标记的库放行，主机、端口、账号与库名如实解析");
+  assert.equal(
+    runtime.assertContainerEndpoint(ops.resolveDedicatedTarget("mysql://svc:p@localhost:3306/store_rental_claude")).database,
+    "store_rental_claude"
+  );
+  rejects(
+    () => runtime.assertContainerEndpoint(target),
+    /只支持容器.*本地 3306/u,
+    "远程主机或非 3306 端口"
+  );
+  ok("运行时不会把远程连接串静默改连本地 MySQL 容器");
 
   // ============ 5. 演练库必须是新库，且与源库不同名 ============
   const drill = ops.buildDrillDatabaseName("store_rental_claude", new Date("2026-08-30T01:02:03.000Z"));
@@ -74,9 +101,11 @@ void (() => {
   assert.notEqual(drill, "store_rental_claude", "演练库不得与源库同名——往源库恢复是覆盖数据，不是验证备份");
   assert.ok(ops.isDrillDatabase(drill), "生成的演练库必须能被识别为本次演练库");
   assert.ok(drill.length <= 64, "库名不得超过 MySQL 上限");
-  const longName = ops.buildDrillDatabaseName(`store_rental_claude_${"x".repeat(60)}`);
-  assert.ok(longName.length <= 64, `超长源库名也必须截断到 64 内，实际 ${longName.length}`);
-  assert.ok(ops.isDrillDatabase(longName), "截断后仍须可识别为演练库");
+  rejects(
+    () => ops.buildDrillDatabaseName(`store_rental_claude_${"x".repeat(60)}`),
+    /不超过 64 字符/u,
+    "MySQL 本身不可能存在的超长源库名"
+  );
   // 源库本身不合法时不允许生成演练库：否则可以借演练绕过守卫在共享库旁建库。
   rejects(() => ops.buildDrillDatabaseName("store_rental"), /共享或系统库/u, "为共享库生成演练库");
   ok("演练库为带时间戳的新库、可识别、不超长，且不能为共享库生成");
@@ -138,6 +167,7 @@ void (() => {
   const drillSource = fs.readFileSync(path.join(opsDir, "restore-drill.cjs"), "utf8");
   assert.match(drillSource, /校验和不匹配/u, "演练必须比对校验和");
   assert.match(drillSource, /可执行语句/u, "改写不彻底时必须拒绝导入，以免写回源库");
+  assert.match(drillSource, /\(\?!\[!\]\)/u, "MySQL 可执行版本注释不能被当普通注释忽略");
   assert.match(drillSource, /演练库已保留供排查/u, "失败时必须保留演练库并给出清理指引");
   // 抽样一张都没比上时必须失败：空抽样下的「行数一致」是空话。
   assert.match(drillSource, /if \(!rows\.length\)/u, "抽样表全部缺失时必须失败，不得给出空洞的通过结论");
@@ -148,7 +178,9 @@ void (() => {
   assert.match(drillSource, /sql\(admin, `DROP DATABASE/u, "DROP DATABASE 必须走管理账号");
   const runtimeSource = fs.readFileSync(path.join(opsDir, "runtime.cjs"), "utf8");
   assert.match(runtimeSource, /缺少管理凭据/u, "未配置管理凭据时必须明确失败，不得用应用账号试一把");
-  assert.match(runtimeSource, /MYSQL_PWD=/u, "口令必须经 MYSQL_PWD 传入，不用 -p<password>");
+  assert.match(runtimeSource, /"-e", "MYSQL_PWD"/u, "docker 参数只能出现 MYSQL_PWD 变量名");
+  assert.match(runtimeSource, /env: \{ \.\.\.process\.env, MYSQL_PWD: target\.password \}/u, "口令值必须经子进程环境传入");
+  assert.equal(/`MYSQL_PWD=\$\{target\.password\}`/u.test(runtimeSource), false, "口令值不得拼进宿主机 docker 命令参数");
   const statusSource = fs.readFileSync(path.join(opsDir, "migration-status.cjs"), "utf8");
   assert.equal(/migrate deploy["']\]|"deploy"/u.test(statusSource), false, "状态检查不得自动应用迁移");
   ok("产物校验：空/截断备份被拒，演练比对校验和，状态检查不自动改库");

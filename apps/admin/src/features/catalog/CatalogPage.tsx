@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Button, Card, Col, Drawer, Form, Input, InputNumber, Row, Select, Space, Switch, Table, Tag } from "antd";
 import { useMemo, useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
+import { resolveTenantNavigationLabels } from "@/app/navigation-terminology";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
@@ -60,7 +61,7 @@ export function CatalogPage() {
 
   return (
     <>
-      <PageHeader title={profile.data?.terminology.itemGroupLabel ?? "商品目录"} description="按经营品类维护商品型号、库存方式、规格字段和套装组成。" extra={canManage ? <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>新增{profile.data?.terminology.itemGroupLabel ?? "商品"}</Button> : undefined} />
+      <PageHeader title={resolveTenantNavigationLabels(profile.data?.terminology).routes.itemGroups ?? "商品目录"} description="按经营品类维护商品型号、库存方式、规格字段和套装组成。" extra={canManage ? <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>新增{profile.data?.terminology.itemGroupLabel ?? "商品"}</Button> : undefined} />
       <Alert type="info" showIcon message={`${category?.name ?? "当前品类"}商品模型`} description="厂商、型号等共享属性保存在商品型号；车牌、SN 等单件信息保存在资产实例；基础价格不再直接写进商品主数据。" style={{ marginBottom: 16 }} />
       <Card className="data-panel" styles={{ body: { paddingBottom: 0 } }}>
         <Space style={{ marginBottom: 16 }}><Input allowClear prefix={<SearchOutlined />} placeholder="搜索编码、名称或规格" value={keyword} onChange={(event) => setKeyword(event.target.value)} style={{ width: 300 }} /></Space>

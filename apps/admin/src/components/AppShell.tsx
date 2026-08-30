@@ -39,7 +39,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const categoryProfile = useQuery({
     queryKey: ["rental-core", "profile"],
     queryFn: rentalCoreApi.profile,
-    enabled: !user?.isSaasAdmin
+    enabled: Boolean(user && !user.isSaasAdmin)
   });
   const terminology = categoryProfile.data?.terminology;
   const sections = useMemo(() => buildNavigationSections(terminology).map((section) => ({

@@ -49,28 +49,16 @@ const byCode = (code) => {
 
 void (() => {
   // ============ 1. 四个品类都由同一个纯函数解析出各自术语 ============
-  const codes = ["camera", "camping", "vehicle", "construction"];
-  for (const code of codes) {
+  const expectedByCode = {
+    camera: { groups: { inventory: "摄影器材" }, routes: { itemGroups: "器材型号", assets: "器材资产与库存", locations: "器材门店" } },
+    camping: { groups: { inventory: "户外装备" }, routes: { itemGroups: "装备品类", assets: "装备资产与库存", locations: "装备仓库" } },
+    vehicle: { groups: { inventory: "车辆与车队" }, routes: { itemGroups: "车型管理", assets: "车辆管理", locations: "门店管理" } },
+    construction: { groups: { inventory: "工程设备" }, routes: { itemGroups: "设备型号", assets: "设备台账与库存", locations: "设备仓库" } }
+  };
+  for (const [code, expected] of Object.entries(expectedByCode)) {
     const { terminology } = byCode(code);
     const labels = resolveTenantNavigationLabels(terminology);
-    assert.ok(
-      labels.routes.itemGroups.includes(terminology.itemGroupLabel),
-      `${code} 商品目录菜单必须使用品类自己的型号说法，实际 ${labels.routes.itemGroups}`
-    );
-    assert.ok(
-      labels.routes.assets.includes(terminology.assetLabel),
-      `${code} 资产菜单必须使用品类自己的资产说法，实际 ${labels.routes.assets}`
-    );
-    assert.equal(
-      labels.routes.locations,
-      terminology.fulfillmentLabel,
-      `${code} 履约地点菜单必须与地点页标题同源`
-    );
-    assert.ok(
-      labels.groups.inventory.includes(terminology.itemGroupLabel) &&
-        labels.groups.inventory.includes(terminology.assetLabel),
-      `${code} 导航分组必须同时反映型号与资产说法，实际 ${labels.groups.inventory}`
-    );
+    assert.deepEqual(labels, expected, `${code} 必须严格符合需求文档的四项导航文案`);
     // 固定的"商品""资产"字样必须消失——这正是 UI-NAV-01 要解决的问题。
     assert.equal(
       labels.routes.itemGroups.startsWith("商品"),
@@ -82,10 +70,10 @@ void (() => {
 
   // ============ 2. 车辆空间必须呈现 车辆 / 车型 / 车队 / 门店 语义 ============
   const vehicle = resolveTenantNavigationLabels(byCode("vehicle").terminology);
-  assert.equal(vehicle.routes.itemGroups, "车型组目录", "车辆空间的目录菜单应为车型语义");
-  assert.equal(vehicle.routes.assets, "车辆与车队", "车辆空间的资产菜单应为车辆与车队语义");
-  assert.equal(vehicle.routes.locations, "门店", "车辆空间的履约地点应为门店");
-  assert.equal(vehicle.groups.inventory, "车型组与车辆", "车辆空间的导航分组应为车型组与车辆");
+  assert.equal(vehicle.routes.itemGroups, "车型管理", "车辆空间的目录菜单应为车型管理");
+  assert.equal(vehicle.routes.assets, "车辆管理", "车辆空间的资产菜单应为车辆管理");
+  assert.equal(vehicle.routes.locations, "门店管理", "车辆空间的履约地点应为门店管理");
+  assert.equal(vehicle.groups.inventory, "车辆与车队", "车辆空间的导航分组应为车辆与车队");
   const vehicleText = JSON.stringify(vehicle);
   for (const word of ["车辆", "车型", "车队", "门店"]) {
     assert.ok(vehicleText.includes(word), `车辆空间导航缺少「${word}」语义`);
@@ -129,10 +117,10 @@ void (() => {
   ];
   const applied = applyTenantNavigationLabels(registry, byCode("vehicle").terminology, PATHS);
   const inventory = applied.find((section) => section.key === "inventory");
-  assert.equal(inventory.label, "车型组与车辆", "分组文案必须被套用");
-  assert.equal(inventory.routes.find((r) => r.path === PATHS.itemGroups).label, "车型组目录", "目录菜单文案必须被套用");
-  assert.equal(inventory.routes.find((r) => r.path === PATHS.assets).label, "车辆与车队", "资产菜单文案必须被套用");
-  assert.equal(inventory.routes.find((r) => r.path === PATHS.locations).label, "门店", "履约地点文案必须被套用");
+  assert.equal(inventory.label, "车辆与车队", "分组文案必须被套用");
+  assert.equal(inventory.routes.find((r) => r.path === PATHS.itemGroups).label, "车型管理", "目录菜单文案必须被套用");
+  assert.equal(inventory.routes.find((r) => r.path === PATHS.assets).label, "车辆管理", "资产菜单文案必须被套用");
+  assert.equal(inventory.routes.find((r) => r.path === PATHS.locations).label, "门店管理", "履约地点文案必须被套用");
   // 只覆盖 label：其余路由元数据必须原样透传，否则「换说法」会顺手改掉门禁。
   assert.equal(
     inventory.routes.find((r) => r.path === PATHS.assets).permission,
@@ -178,7 +166,7 @@ void (() => {
   );
   assert.match(
     shell,
-    /enabled: !user\?\.isSaasAdmin/u,
+    /enabled: Boolean\(user && !user\.isSaasAdmin\)/u,
     "SaaS 平台账号不属于任何经营空间，不得发起租户品类档案请求"
   );
   // 面包屑与菜单共用 sections，故只需断言 sections 由术语派生。
@@ -222,8 +210,11 @@ void (() => {
   );
   const catalogPage = read("apps/admin/src/features/catalog/CatalogPage.tsx");
   const locationPage = read("apps/admin/src/features/fulfillment/LocationPage.tsx");
-  assert.match(catalogPage, /title=\{profile\.data\?\.terminology\.itemGroupLabel/u, "商品目录页标题应由术语驱动");
-  assert.match(locationPage, /title=\{profile\.data\?\.terminology\.fulfillmentLabel/u, "履约地点页标题应由术语驱动");
+  assert.match(catalogPage, /resolveTenantNavigationLabels\(profile\.data\?\.terminology\)\.routes\.itemGroups/u, "商品目录页标题必须与菜单使用同一解析结果");
+  assert.match(locationPage, /resolveTenantNavigationLabels\(profile\.data\?\.terminology\)\.routes\.locations/u, "履约地点页标题必须与菜单使用同一解析结果");
+  const coreService = read("apps/api/src/modules/rental-core/rental-core.service.ts");
+  assert.match(coreService, /navigationLabels:[\s\S]{0,180}defaults\.navigationLabels[\s\S]{0,180}profile\.terminology\.navigationLabels/u,
+    "旧空间读取档案时必须补入品类定义的导航配置，不能只让新空间生效");
   ok("页面标题：资产、目录与地点页标题均由当前品类术语驱动");
 
   console.log("\nUI-NAV-01 导航术语专项：全部通过");

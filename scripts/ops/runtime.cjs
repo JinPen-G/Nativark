@@ -3,8 +3,8 @@
 /**
  * OPS-01A：共用运行时helper——读 env、跑容器内 mysql 客户端、统一日志。
  *
- * 口令一律通过 `MYSQL_PWD` 环境变量传给客户端，**不用** `-p<password>`：
- * 后者会出现在容器内的进程列表里，也会触发 mysql 的明文告警。
+ * 口令一律通过 `MYSQL_PWD` 环境变量传给客户端，**不用** `-p<password>`，
+ * 也不把 `MYSQL_PWD=<value>` 拼进 docker 命令参数：两者都会让口令出现在进程参数里。
  * 所有 stdout/stderr 在打印前都过 `redact()`。
  */
 
@@ -36,7 +36,23 @@ function loadDatabaseUrl(envFile = ".env") {
 }
 
 function requireTarget(envFile = ".env") {
-  return resolveDedicatedTarget(loadDatabaseUrl(envFile));
+  return assertContainerEndpoint(resolveDedicatedTarget(loadDatabaseUrl(envFile)));
+}
+
+/**
+ * 本阶段的 mysql 客户端固定在 `OPS_MYSQL_CONTAINER` 内执行，因此只支持该容器
+ * 自身的 3306 端点。若 URL 指向远程主机或另一个端口却仍静默连接本地容器，日志
+ * 显示的目标与实际操作目标会不一致；这种情况必须拒绝，而不是猜测网络映射。
+ */
+function assertContainerEndpoint(target) {
+  const allowedHosts = new Set(["localhost", "127.0.0.1", "mysql", CONTAINER.toLowerCase()]);
+  if (!allowedHosts.has(String(target.host).toLowerCase()) || target.port !== 3306) {
+    throw new OpsTargetError(
+      `当前 OPS-01A 只支持容器 ${CONTAINER} 的本地 3306 端点；实际为 ${target.host}:${target.port}。`
+      + "远程环境必须使用后续发布编排，不能让本脚本静默改连本地容器。"
+    );
+  }
+  return target;
 }
 
 /**
@@ -83,12 +99,12 @@ function containerRunning(name = CONTAINER) {
  * 在容器里执行 mysql 客户端。
  *
  * `binary` 为 `mysql` 或 `mysqldump`；`input` 走 stdin（恢复用），
- * `capture` 为真时返回 stdout（备份用）。口令只经 `-e MYSQL_PWD` 传入。
+ * `capture` 为真时返回 stdout（备份用）。docker 参数只出现变量名，值由子进程环境传入。
  */
 function runMysql(binary, target, args, { input, capture = false } = {}) {
   const dockerArgs = [
     "exec", "-i",
-    "-e", `MYSQL_PWD=${target.password}`,
+    "-e", "MYSQL_PWD",
     CONTAINER, binary,
     `-u${target.user}`,
     "--protocol=TCP", "-h", "127.0.0.1", "-P", "3306",
@@ -97,7 +113,8 @@ function runMysql(binary, target, args, { input, capture = false } = {}) {
   const result = spawnSync("docker", dockerArgs, {
     encoding: capture ? "buffer" : "utf8",
     input,
-    maxBuffer: 1024 * 1024 * 512
+    maxBuffer: 1024 * 1024 * 512,
+    env: { ...process.env, MYSQL_PWD: target.password }
   });
   return result;
 }
@@ -113,4 +130,4 @@ function sql(target, statement, { database } = {}) {
   return String(run.stdout ?? "").trim();
 }
 
-module.exports = { ROOT, CONTAINER, readEnvFile, loadDatabaseUrl, requireTarget, requireAdminTarget, log, fail, hasCommand, containerRunning, runMysql, sql };
+module.exports = { ROOT, CONTAINER, readEnvFile, loadDatabaseUrl, requireTarget, requireAdminTarget, assertContainerEndpoint, log, fail, hasCommand, containerRunning, runMysql, sql };

@@ -29,6 +29,7 @@ const PROTECTED_DATABASES = new Set([
  * 而新建一个叫 `store_rental_backup` 的库并把它当演练目标是很容易发生的事。
  */
 const DEDICATED_MARKERS = ["claude", "e2e", "drill", "dedicated", "sandbox"];
+const FORBIDDEN_ENV_MARKERS = new Set(["prod", "production", "staging", "live", "primary"]);
 
 class OpsTargetError extends Error {
   constructor(message) {
@@ -85,10 +86,20 @@ function parseDatabaseUrl(rawUrl) {
 function rejectionReason(database) {
   const name = String(database ?? "").trim().toLowerCase();
   if (!name) return "数据库名为空";
+  // 后续 SQL 需要把库名作为标识符使用。这里只接受项目约定的安全字符，
+  // 避免引号、反引号或路径字符进入 SHOW/CREATE/DROP DATABASE 语句。
+  if (!/^[a-z0-9_]+$/u.test(name) || name.length > 64) {
+    return `「${database}」不是安全的数据库名（只允许字母、数字、下划线且不超过 64 字符）`;
+  }
   if (PROTECTED_DATABASES.has(name)) {
     return `「${database}」是共享或系统库，OPS-01A 只允许在专用库上执行`;
   }
-  if (!DEDICATED_MARKERS.some((marker) => name.includes(marker))) {
+  const tokens = name.split("_").filter(Boolean);
+  const forbidden = tokens.find((token) => FORBIDDEN_ENV_MARKERS.has(token));
+  if (forbidden) {
+    return `「${database}」包含生产/共享环境标记 ${forbidden}，即使同时带专用标记也拒绝`;
+  }
+  if (!DEDICATED_MARKERS.some((marker) => tokens.includes(marker))) {
     return `「${database}」缺少专用库标记（需包含 ${DEDICATED_MARKERS.join(" / ")} 之一），默认拒绝`;
   }
   return undefined;
@@ -124,7 +135,8 @@ function buildDrillDatabaseName(sourceDatabase, stamp = new Date()) {
 
 /** 演练库必须是本次生成的：只有匹配这个形态的库才允许被脚本删除。 */
 function isDrillDatabase(name) {
-  return /_drill_\d{14}$/u.test(String(name ?? ""));
+  const value = String(name ?? "");
+  return !rejectionReason(value) && /_drill_\d{14}$/u.test(value);
 }
 
 module.exports = {

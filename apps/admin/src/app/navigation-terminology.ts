@@ -47,16 +47,17 @@ function assetCollectionLabel(terminology: RentalCategoryTerminology): string {
  */
 export function resolveTenantNavigationLabels(terminology?: RentalCategoryTerminology): TenantNavigationLabels {
   if (!terminology) return { routes: {}, groups: {} };
+  const configured = terminology.navigationLabels;
   return {
     routes: {
-      itemGroups: `${terminology.itemGroupLabel}目录`,
-      assets: assetCollectionLabel(terminology),
+      itemGroups: configured?.itemGroups ?? `${terminology.itemGroupLabel}目录`,
+      assets: configured?.assets ?? assetCollectionLabel(terminology),
       // 履约地点直接用品类自己的说法（门店 / 器材门店 / 装备仓 / 设备仓），
       // 与地点页标题同源，避免菜单叫「履约地点」而页面叫「装备仓」。
-      locations: terminology.fulfillmentLabel
+      locations: configured?.locations ?? terminology.fulfillmentLabel
     },
     groups: {
-      inventory: `${terminology.itemGroupLabel}与${terminology.assetLabel}`
+      inventory: configured?.inventoryGroup ?? `${terminology.itemGroupLabel}与${terminology.assetLabel}`
     }
   };
 }

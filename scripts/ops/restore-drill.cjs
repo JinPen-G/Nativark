@@ -90,10 +90,17 @@ void (() => {
       .split(`${quoted}.`).join(`\`${drill}\`.`);
     // 只检查**可执行**语句里的残留：mysqldump 的头部与分节注释里也有库名
     // （`-- Current Database: ...`），那些不会被执行，不该因此拒绝一份好备份。
-    const executable = script.split(/\r?\n/).filter((line) => !/^\s*--/u.test(line)).join("\n");
+    const executable = script
+      .split(/\r?\n/)
+      .filter((line) => !/^\s*--/u.test(line))
+      .join("\n")
+      // 普通块注释可以忽略；`/*!...*/` 是 MySQL 会执行的版本注释，必须保留并扫描。
+      .replace(/\/\*(?![!])[\s\S]*?\*\//gu, "");
+    const sourceName = target.database.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const sourceIdentifier = `(?:\`${sourceName}\`|${sourceName})`;
     const dangerous = new RegExp(
-      `(USE\\s+${quoted.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})|(CREATE\\s+DATABASE[^;]*${quoted.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})|(${quoted.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\.)`,
-      "u"
+      `(?:USE\\s+${sourceIdentifier}(?=\\s|;)|CREATE\\s+DATABASE[^;]*${sourceIdentifier}(?=\\s|;)|${sourceIdentifier}\\s*\\.)`,
+      "imu"
     );
     if (dangerous.test(executable)) {
       throw new OpsTargetError("备份脚本中仍有指向源库的可执行语句，拒绝导入以免写回源库");
