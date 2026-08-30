@@ -40,6 +40,7 @@ import { RentalStateRepository } from "./modules/rental-core/rental-state.reposi
 import { RentalSnapshotBackfillService } from "./modules/rental-core/rental-snapshot-backfill.service";
 import { RentalCoreConfigRepository } from "./modules/rental-core/rental-core-config.repository";
 import { RentalCoreFactRepository } from "./modules/rental-core/rental-core-fact.repository";
+import { RentalWorkspaceReportRepository } from "./modules/rental-core/rental-workspace-report.repository";
 import { RentalBusinessConfigRepository } from "./modules/rental-core/rental-business-config.repository";
 import { RentalBusinessFactRepository } from "./modules/rental-core/rental-business-fact.repository";
 import { RentalIdempotencyRepository } from "./modules/rental-core/rental-idempotency.repository";
@@ -97,6 +98,7 @@ import { CapabilityHookRegistrar } from "./modules/rental-core/capability-hook.r
     RentalSnapshotBackfillService,
     RentalCoreConfigRepository,
     RentalCoreFactRepository,
+    RentalWorkspaceReportRepository,
     RentalBusinessConfigRepository,
     RentalBusinessFactRepository,
     RentalIdempotencyRepository,

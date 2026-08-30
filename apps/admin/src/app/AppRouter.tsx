@@ -8,6 +8,7 @@ import { useAuthStore } from "@/features/auth/authStore";
 
 const LoginPage = lazy(() => import("@/features/auth/LoginPage").then((module) => ({ default: module.LoginPage })));
 const WorkbenchPage = lazy(() => import("@/features/workbench/WorkbenchPage").then((module) => ({ default: module.WorkbenchPage })));
+const WorkspaceOperationReportPage = lazy(() => import("@/features/reports/WorkspaceOperationReportPage").then((module) => ({ default: module.WorkspaceOperationReportPage })));
 const CatalogPage = lazy(() => import("@/features/catalog/CatalogPage").then((module) => ({ default: module.CatalogPage })));
 const AssetWorkspacePage = lazy(() => import("@/features/catalog/AssetWorkspacePage").then((module) => ({ default: module.AssetWorkspacePage })));
 const LocationPage = lazy(() => import("@/features/fulfillment/LocationPage").then((module) => ({ default: module.LocationPage })));
@@ -72,6 +73,7 @@ function ProtectedRoutes() {
           <Routes>
             <Route path="/" element={<DefaultRoute />} />
             <Route path={APP_ROUTES.workbench.path} element={guard(APP_ROUTES.workbench, <WorkbenchPage />)} />
+            <Route path={APP_ROUTES.operationReport.path} element={guard(APP_ROUTES.operationReport, <WorkspaceOperationReportPage />)} />
             <Route path={APP_ROUTES.rentalCore.path} element={guard(APP_ROUTES.rentalCore, <RentalCorePage />)} />
             <Route path={APP_ROUTES.orderCreate.path} element={guard(APP_ROUTES.orderCreate, <OrderCreatePage />)} />
             <Route path={APP_ROUTES.orders.path} element={guard(APP_ROUTES.orders, <OrdersPage />)} />

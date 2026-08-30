@@ -40,6 +40,9 @@ import { RentalCoreService } from "./rental-core.service";
 import { RentalBusinessService, type BusinessContext } from "./rental-business.service";
 import { RentalOrderConfirmationService } from "./rental-order-confirmation.service";
 import { RentalIdempotentActionService } from "./rental-idempotent-action.service";
+import { RentalWorkspaceReportRepository } from "./rental-workspace-report.repository";
+import { resolveScopeWorkspaceId } from "./workspace-scope";
+import { PrismaService } from "../database/prisma.service";
 
 /** 读取标准 Idempotency-Key 请求头。大小写不敏感，超长键直接拒绝。 */
 /**
@@ -81,7 +84,9 @@ export class RentalCoreController {
     private readonly service: RentalCoreService,
     private readonly business: RentalBusinessService,
     private readonly orderConfirmation: RentalOrderConfirmationService,
-    private readonly idempotent: RentalIdempotentActionService
+    private readonly idempotent: RentalIdempotentActionService,
+    private readonly workspaceReports: RentalWorkspaceReportRepository,
+    private readonly prisma: PrismaService
   ) {}
 
   private context(tenantId: string): BusinessContext {
@@ -101,6 +106,28 @@ export class RentalCoreController {
     return await this.business.emitNotificationEvent(tenantId, this.context(tenantId), eventCode, order.contactPhone ?? order.customerId, { customerName: order.customerName, orderNo: order.orderNo });
   }
   @Get("categories") categories() { return this.service.listCategories(); }
+  /**
+   * REPORT-01A：当前经营空间的经营报表。
+   *
+   * 空间**不由客户端传入**，一律从会话解析（`resolveScopeWorkspaceId`）：
+   * 让页面传 workspaceId 等于允许查自己无权进入的空间的经营数据。
+   * 品类只用于页面文案，指标公式与它无关。
+   */
+  @Get("reports/operations")
+  async operationReport(
+    @Req() req: AuthenticatedRequest,
+    @Query("from") from?: string,
+    @Query("to") to?: string
+  ) {
+    const tenantId = req.user.tenantId;
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
+    return this.workspaceReports.getOperationReport(
+      tenantId,
+      workspaceId,
+      this.service.getProfile(tenantId).categoryCode,
+      { from, to }
+    );
+  }
   @Get("tenant-profile") profile(@Req() req: AuthenticatedRequest) { return this.service.getProfile(req.user.tenantId); }
   @Put("tenant-profile") saveProfile(@Req() req: AuthenticatedRequest, @Body() body: SaveTenantRentalProfileDto) { return this.committed(req.user.tenantId, this.service.saveProfile(req.user.tenantId, body)); }
   @Get("business-settings") businessSettings(@Req() req: AuthenticatedRequest) { return this.service.getBusinessSettings(req.user.tenantId); }

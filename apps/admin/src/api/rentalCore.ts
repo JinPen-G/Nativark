@@ -33,6 +33,7 @@ import type {
   RentalRuleVersion,
   RentalStockBalance,
   RentalValueAddedService,
+  RentalWorkspaceOperationReport,
   SaveWorkspaceCapabilityRequest,
   UpgradeWorkspaceCapabilityRequest,
   WorkspaceCapabilityAuditEvent,
@@ -79,6 +80,14 @@ import { request } from "./http";
 
 export const rentalCoreApi = {
   categories: () => request<RentalCategoryDefinition[]>("/rental/v1/categories"),
+  /**
+   * REPORT-01A：当前经营空间经营报表。
+   *
+   * 刻意不接受 workspaceId：空间一律由服务端按会话解析。
+   * 让页面传空间等于允许查自己无权进入的空间的经营数据。
+   */
+  operationReport: (params?: { from?: string; to?: string }) =>
+    request<RentalWorkspaceOperationReport>("/rental/v1/reports/operations", { params }),
   profile: () => request<TenantRentalProfile>("/rental/v1/tenant-profile"),
   saveProfile: (data: SaveTenantRentalProfileRequest) => request<TenantRentalProfile>("/rental/v1/tenant-profile", { method: "put", data }),
   businessSettings: () => request<TenantRentalBusinessSettings>("/rental/v1/business-settings"),

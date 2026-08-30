@@ -7331,6 +7331,61 @@ export interface RentalOrder {
   updatedAt: string;
 }
 
+/**
+ * REPORT-01A：异常费用的口径。
+ *
+ * 取自订单费用行的 `type`，不另立一套判据：报表说的「异常」必须和账单上
+ * 那几行费用是同一件事，否则运营对不上账。三类都是「本不该发生、发生了要收钱」：
+ * 逾期、损坏、取消。押金与预授权不是费用，不计入。
+ */
+export const RENTAL_EXCEPTION_CHARGE_TYPES = ["overdue", "damage", "cancellation"] as const;
+export type RentalExceptionChargeType = (typeof RENTAL_EXCEPTION_CHARGE_TYPES)[number];
+
+/**
+ * REPORT-01A：当前经营空间的经营报表。
+ *
+ * 三条口径，写在类型上而不是只写在实现里：
+ *
+ * 1. **只取 Rental Core 规范化事实**（`rental_orders`）。不读车辆、门市或旧
+ *    Store Rental 的任何专用字段——那些字段在非车辆品类里根本不存在，
+ *    用它们做指标等于让报表只对一个品类成立。
+ * 2. **指标定义不随品类变化**。四个品类走同一套公式；页面标题可以用品类术语
+ *    （器材/装备/车辆/设备），但「租赁收入」是什么永远是同一个算法。
+ * 3. **严格按 tenantId + workspaceId 隔离**。空间是数据边界，不是页头标签；
+ *    空空间返回全零，而不是回退到租户汇总。
+ *
+ * 本轮不含库存利用率、跨空间汇总与导出。
+ */
+export interface RentalWorkspaceOperationReport {
+  tenantId: string;
+  workspaceId: string;
+  categoryCode: RentalCategoryCode;
+  /** 统计区间（按订单起租时间归入）。两端可缺省，缺省即不限。 */
+  range: { from?: string; to?: string };
+  /** 订单量：**非草稿**订单数。草稿还没成为经营事实，计入会虚增经营规模。 */
+  orderCount: number;
+  /**
+   * 订单量按状态拆分。
+   *
+   * 需要它才能解释「为什么收入和订单量不成比例」——在租与已完成的收入确认程度
+   * 本来就不同，只给一个总数会让人以为是数据错了。
+   */
+  statusBreakdown: Array<{ status: RentalCoreOrderStatus; count: number }>;
+  /** 租赁收入：`sum(rentalAmount)`。只含租金，不含增值服务、履约费与押金。 */
+  rentalRevenue: number;
+  /** 优惠金额：`sum(discountAmount + couponAmount)`。方案优惠与券优惠合计。 */
+  discountTotal: number;
+  /** 应收金额：`sum(finalPayableAmount)`，即调账后的应收，与账单口径一致。 */
+  receivableTotal: number;
+  /** 异常费用：订单费用行中 `RENTAL_EXCEPTION_CHARGE_TYPES` 的金额合计。 */
+  exceptionFeeTotal: number;
+  /** 异常订单数：**产生过**异常费用行的订单数（不是「取消的订单数」）。 */
+  exceptionOrderCount: number;
+  /** 异常费用按类型拆分：逾期/损坏/取消各自的金额与涉及订单数。 */
+  exceptionFeeBreakdown: Array<{ type: RentalExceptionChargeType; amount: number; orderCount: number }>;
+  generatedAt: string;
+}
+
 export interface RentalInspectionTemplate {
   id: string;
   tenantId: string;

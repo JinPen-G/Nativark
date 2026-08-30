@@ -2183,6 +2183,11 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: "List supported rental categories", permissions: ["store-rental:order:view", "store-rental:vehicle:view"], responseSchema: "GenericObject"
   },
   {
+    // REPORT-01A：当前经营空间的经营报表。空间取自会话，客户端不得传入。
+    method: "get", path: "/api/rental/v1/reports/operations", tag: "RentalCore", operationId: "getRentalWorkspaceOperationReport",
+    summary: "Get current workspace operation report", permissions: ["store-rental:report:view"], responseSchema: "GenericObject"
+  },
+  {
     method: "get", path: "/api/rental/v1/tenant-profile", tag: "RentalCore", operationId: "getRentalTenantProfile",
     summary: "Get tenant rental profile", permissions: ["store-rental:order:view", "store-rental:vehicle:view"], responseSchema: "GenericObject"
   },
