@@ -12,6 +12,7 @@ import type {
   RentalPricingRate,
   RentalRuleConfig,
   RentalRuleVersion,
+  RentalRuleVersionAudit,
   RentalValueAddedService
 } from "@store-rental/shared";
 import { PrismaService } from "../database/prisma.service";
@@ -87,10 +88,17 @@ export interface RentalBusinessConfigStore {
   ): Promise<void>;
   upsertRuleVersion(version: RentalRuleVersion): Promise<void>;
   /**
-   * 发布新规则版本：新版本落库与旧 published 版本退役必须在同一事务内。
-   * 分两次写会让库里短暂（失败时则永久）同时存在多个 published 版本。
+   * RULE-01A：写规则版本并追加一条审计。发布、恢复、作废三类动作都走这里。
+   * 版本行与审计必须同一事务：分两次写，失败时会留下一个没有原因、没有操作者的生效版本，
+   * 而需求 4.6.14 要求这三类动作**必须**有完整审计。
    */
-  replacePublishedRuleVersion(next: RentalRuleVersion, retiring: RentalRuleVersion[]): Promise<void>;
+  writeRuleVersionWithAudit(
+    version: RentalRuleVersion,
+    audit: RentalRuleVersionAudit,
+    /** 一并落库的其它版本行（如被替代版本的状态与时间戳）。 */
+    alsoWrite?: RentalRuleVersion[]
+  ): Promise<void>;
+  loadRuleVersionAudits(tenantId: string, workspaceId: string, ruleVersionId?: string): Promise<RentalRuleVersionAudit[]>;
   upsertNotificationTemplate(template: RentalNotificationTemplateV1): Promise<void>;
 }
 
@@ -514,7 +522,17 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       config: version.config as unknown as Prisma.InputJsonValue,
       changeReason: version.changeReason,
       createdBy: version.createdBy,
-      publishedAt: version.publishedAt ? new Date(version.publishedAt) : null
+      publishedAt: version.publishedAt ? new Date(version.publishedAt) : null,
+      // RULE-01A：生效时点是匹配键，必须与状态一起落库，否则重启后版本无从匹配。
+      effectiveFrom: version.effectiveFrom ? new Date(version.effectiveFrom) : null,
+      publishedBy: version.publishedBy ?? null,
+      supersededAt: version.supersededAt ? new Date(version.supersededAt) : null,
+      previousVersion: version.previousVersion ?? null,
+      restoredFromVersion: version.restoredFromVersion ?? null,
+      restoreReason: version.restoreReason ?? null,
+      voidedAt: version.voidedAt ? new Date(version.voidedAt) : null,
+      voidedBy: version.voidedBy ?? null,
+      voidReason: version.voidReason ?? null
     };
   }
 
@@ -528,22 +546,61 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
     });
   }
 
-  async replacePublishedRuleVersion(next: RentalRuleVersion, retiring: RentalRuleVersion[]): Promise<void> {
-    const data = this.ruleVersionData(next);
-    const workspaceId = await resolveScopeWorkspaceId(this.prisma, next.tenantId);
+  async writeRuleVersionWithAudit(
+    version: RentalRuleVersion,
+    audit: RentalRuleVersionAudit,
+    alsoWrite: RentalRuleVersion[] = []
+  ): Promise<void> {
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, version.tenantId);
     await this.prisma.$transaction(async (tx) => {
-      for (const row of retiring) {
-        await tx.rentalRuleVersion.update({
+      for (const row of [version, ...alsoWrite]) {
+        const data = this.ruleVersionData(row);
+        await tx.rentalRuleVersion.upsert({
           where: { id: row.id },
-          data: { status: "retired" }
+          create: { workspaceId, id: row.id, ...data, createdAt: new Date(row.createdAt) },
+          update: data
         });
       }
-      await tx.rentalRuleVersion.upsert({
-        where: { id: next.id },
-        create: { workspaceId, id: next.id, ...data, createdAt: new Date(next.createdAt) },
-        update: data
+      await tx.rentalRuleVersionAudit.create({
+        data: {
+          id: audit.id,
+          tenantId: audit.tenantId,
+          workspaceId: audit.workspaceId,
+          ruleVersionId: audit.ruleVersionId,
+          version: audit.version,
+          action: audit.action,
+          fromStatus: audit.fromStatus ?? null,
+          toStatus: audit.toStatus,
+          reason: audit.reason,
+          operator: audit.operator ?? null,
+          at: new Date(audit.at)
+        }
       });
     });
+  }
+
+  async loadRuleVersionAudits(
+    tenantId: string,
+    workspaceId: string,
+    ruleVersionId?: string
+  ): Promise<RentalRuleVersionAudit[]> {
+    const rows = await this.prisma.rentalRuleVersionAudit.findMany({
+      where: { tenantId, workspaceId, ...(ruleVersionId ? { ruleVersionId } : {}) },
+      orderBy: { at: "desc" }
+    });
+    return rows.map((row) => ({
+      id: row.id,
+      tenantId: row.tenantId,
+      workspaceId: row.workspaceId,
+      ruleVersionId: row.ruleVersionId,
+      version: row.version,
+      action: row.action as RentalRuleVersionAudit["action"],
+      fromStatus: (row.fromStatus ?? undefined) as RentalRuleVersionAudit["fromStatus"],
+      toStatus: row.toStatus as RentalRuleVersionAudit["toStatus"],
+      reason: row.reason,
+      operator: row.operator ?? undefined,
+      at: iso(row.at)
+    }));
   }
 
   async upsertNotificationTemplate(template: RentalNotificationTemplateV1): Promise<void> {
@@ -691,7 +748,16 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       changeReason: row.changeReason,
       createdBy: row.createdBy,
       createdAt: iso(row.createdAt),
-      publishedAt: optionalIso(row.publishedAt)
+      publishedAt: optionalIso(row.publishedAt),
+      effectiveFrom: optionalIso(row.effectiveFrom),
+      publishedBy: row.publishedBy ?? undefined,
+      supersededAt: optionalIso(row.supersededAt),
+      previousVersion: row.previousVersion ?? undefined,
+      restoredFromVersion: row.restoredFromVersion ?? undefined,
+      restoreReason: row.restoreReason ?? undefined,
+      voidedAt: optionalIso(row.voidedAt),
+      voidedBy: row.voidedBy ?? undefined,
+      voidReason: row.voidReason ?? undefined
     };
   }
 

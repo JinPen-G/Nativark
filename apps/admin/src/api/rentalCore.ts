@@ -31,6 +31,9 @@ import type {
   RentalQuoteSnapshotV1,
   RentalRewardLedgerEntry,
   RentalRuleVersion,
+  RentalRuleVersionAudit,
+  RentalRulePublishPreview,
+  PublishRentalRuleVersionRequest,
   RentalStockBalance,
   RentalValueAddedService,
   RentalWorkspaceOperationReport,
@@ -160,8 +163,19 @@ export const rentalCoreApi = {
   calendarPublishPreview: (year: number) =>
     request<RentalCalendarPublishPreview>(`/rental/v1/calendars/${year}/publish-preview`),
   ruleVersions: () => request<RentalRuleVersion[]>("/rental/v1/rule-versions"),
-  currentRule: () => request<RentalRuleVersion>("/rental/v1/rule-versions/current"),
+  currentRule: (at?: string) => request<RentalRuleVersion>("/rental/v1/rule-versions/current", { params: { at } }),
+  ruleVersionAudits: (version?: string) => request<RentalRuleVersionAudit[]>("/rental/v1/rule-versions/audits", { params: { version } }),
+  /** 发布前影响预览（需求 4.6.1）。只读推演，不改状态、不动已锁定报价。 */
+  ruleVersionPublishPreview: (version: string, effectiveFrom?: string) =>
+    request<RentalRulePublishPreview>(`/rental/v1/rule-versions/${version}/publish-preview`, { params: { effectiveFrom } }),
+  /** 只存草稿；已发布版本不可修改，需先 restoreRuleVersion 成新草稿。 */
   saveRuleVersion: (data: SaveRentalRuleVersionRequest) => request<RentalRuleVersion>("/rental/v1/rule-versions", { method: "post", data }),
+  restoreRuleVersion: (version: string, reason: string) =>
+    request<RentalRuleVersion>(`/rental/v1/rule-versions/${version}/restore`, { method: "post", data: { reason } }),
+  publishRuleVersion: (version: string, data: PublishRentalRuleVersionRequest) =>
+    request<RentalRuleVersion>(`/rental/v1/rule-versions/${version}/publish`, { method: "post", data }),
+  voidRuleVersion: (version: string, reason: string) =>
+    request<RentalRuleVersion>(`/rental/v1/rule-versions/${version}/void`, { method: "post", data: { reason } }),
   customerCoupons: (customerId?: string) => request<RentalCustomerCoupon[]>("/rental/v1/customer-coupons", { params: { customerId } }),
   claimCoupon: (templateId: string, customerId: string) => request<RentalCustomerCoupon>("/rental/v1/customer-coupons/claim", { method: "post", data: { templateId, customerId } }),
   voidCustomerCoupon: (id: string, reason: string) => request<RentalCustomerCoupon>(`/rental/v1/customer-coupons/${id}/void`, { method: "post", data: { reason } }),

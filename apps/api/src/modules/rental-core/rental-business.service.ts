@@ -45,6 +45,10 @@ import {
   type RentalRuleConfig,
   type RentalTimeWindow,
   type RentalRuleVersion,
+  type RentalRuleVersionAudit,
+  type RentalRuleVersionStatus,
+  type RentalRulePublishPreview,
+  type PublishRentalRuleVersionRequest,
   type RentalValueAddedService,
   type SaveRentalCalendarDayRequest,
   type RemoveRentalCalendarDayOverrideRequest,
@@ -101,6 +105,18 @@ import { applyPriceAdjustment, assertNoDatetimeOverrideOverlap, assertNoPeriodic
 import { rentalPricingStrategy } from "./rental-pricing-strategy";
 import { selectDiscountPlans } from "./rental-discount-selection";
 import { resolveQuoteServices } from "./rental-service-catalog";
+import {
+  assertRuleEffectiveFromAvailable,
+  assertRuleVersionEditable,
+  assertRuleVersionPublishable,
+  assertRuleVersionVoidable,
+  isIssuedRuleVersion,
+  matchRuleVersionAt,
+  nextRuleVersionNumber,
+  previewRulePublish,
+  resolveRuleVersionStatus,
+  withResolvedRuleVersionStatuses
+} from "./rental-rule-version-chain";
 
 /**
  * 定时调价到期执行时，确认时锁定的基础版本已被别的调价推进。
@@ -2523,37 +2539,198 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return { ...found, overrideAudits };
   }
 
-  listRuleVersions(tenantId: string, context: BusinessContext) { return this.state(tenantId, context).ruleVersions; }
-
-  currentRule(tenantId: string, context: BusinessContext) {
-    return this.state(tenantId, context).ruleVersions.find((item) => item.status === "published") ?? this.state(tenantId, context).ruleVersions[0];
+  /** 列表返回**按当前时间现算**的展示状态，库里存的标签只是上次写入时的快照。 */
+  listRuleVersions(tenantId: string, context: BusinessContext) {
+    return withResolvedRuleVersionStatuses(this.state(tenantId, context).ruleVersions, stamp());
   }
 
+  getRuleVersion(tenantId: string, context: BusinessContext, version: string) {
+    const rows = this.listRuleVersions(tenantId, context);
+    const found = rows.find((row) => row.version === version);
+    if (!found) throw new NotFoundException("规则版本不存在");
+    return found;
+  }
+
+  /**
+   * 按时点匹配唯一规则版本（需求 4.6.1）。报价必须传**租期开始时间**，
+   * 不传等于按「现在」匹配，未来租期就会套上今天的条款。
+   */
+  currentRule(tenantId: string, context: BusinessContext, at = stamp()) {
+    return matchRuleVersionAt(this.state(tenantId, context).ruleVersions, at);
+  }
+
+  /** 草稿保存。已发布版本不可修改（需求 4.6.1），改它只能先恢复为新草稿。 */
   async saveRuleVersion(tenantId: string, context: BusinessContext, input: SaveRentalRuleVersionRequest, operator: string) {
     const state = this.state(tenantId, context);
     this.validateRule(context, input.config);
     if (!input.changeReason?.trim()) throw new BadRequestException("规则变更原因不能为空");
-    // 退役旧版本延后到写库成功之后：早前在此处直接改内存，
-    // 一旦新版本写库失败，缓存里的旧规则已被改成 retired，
-    // 而库中仍是 published，重启后会重新加载出多个 published 版本。
-    const retiring = input.publish
-      ? state.ruleVersions.filter((row) => row.status === "published")
-      : [];
-    const result: RentalRuleVersion = {
-      id: uid("rule"), tenantId, categoryCode: context.profile.categoryCode,
-      version: versionAfter(state.ruleVersions[0]?.version), status: input.publish ? "published" : "draft",
-      config: structuredClone(input.config), changeReason: input.changeReason.trim(), createdBy: operator,
-      createdAt: stamp(), publishedAt: input.publish ? stamp() : undefined
-    };
-    // 新版本与旧版本退役必须一起落库，否则库里会同时存在多个 published。
-    await this.configStore.replacePublishedRuleVersion(
-      result,
-      retiring.map((row) => ({ ...row, status: "retired" as const }))
-    );
-    for (const row of retiring) row.status = "retired";
+    const existing = input.versionId ? state.ruleVersions.find((row) => row.id === input.versionId) : undefined;
+    if (input.versionId && !existing) throw new NotFoundException("规则版本不存在");
+    if (existing) assertRuleVersionEditable(existing.status, existing.version);
+    const draft: RentalRuleVersion = existing
+      ? { ...existing, config: structuredClone(input.config), changeReason: input.changeReason.trim(), createdBy: operator }
+      : {
+          id: uid("rule"),
+          tenantId,
+          categoryCode: context.profile.categoryCode,
+          version: nextRuleVersionNumber(state.ruleVersions),
+          status: "draft",
+          config: structuredClone(input.config),
+          changeReason: input.changeReason.trim(),
+          createdBy: operator,
+          createdAt: stamp()
+        };
+    // 草稿不改变对外生效的条款，因此不进审计表（审计只记发布、恢复、作废）。
+    await this.configStore.upsertRuleVersion(draft);
+    if (existing) Object.assign(existing, draft);
+    else state.ruleVersions.unshift(draft);
+    return draft;
+  }
 
-    state.ruleVersions.unshift(result);
-    return result;
+  /**
+   * 发布或安排生效（需求 4.6.1、4.6.14）。effectiveFrom 省略即立即生效。
+   * 内存状态在**写库成功之后**才更新：早前的实现先改内存再写库，一旦写库失败，
+   * 缓存里的旧版本已被标成退役而库里仍然生效，重启后两边对不上。
+   */
+  async publishRuleVersion(
+    tenantId: string,
+    context: BusinessContext,
+    version: string,
+    input: PublishRentalRuleVersionRequest,
+    operator: string
+  ) {
+    const state = this.state(tenantId, context);
+    const reason = input.reason?.trim();
+    if (!reason) throw new BadRequestException("发布原因不能为空");
+    const target = state.ruleVersions.find((row) => row.version === version);
+    if (!target) throw new NotFoundException("规则版本不存在");
+    assertRuleVersionPublishable(target.status, target.version);
+    const now = stamp();
+    const effectiveFrom = input.effectiveFrom ? new Date(input.effectiveFrom).toISOString() : now;
+    assertRuleEffectiveFromAvailable(state.ruleVersions, effectiveFrom, target.id);
+    const scheduled = new Date(effectiveFrom).getTime() > new Date(now).getTime();
+    const previous = this.effectiveRuleVersionAt(state.ruleVersions, now);
+    const next: RentalRuleVersion = {
+      ...target,
+      status: scheduled ? "pending" : "published",
+      effectiveFrom,
+      publishedAt: now,
+      publishedBy: operator,
+      previousVersion: previous?.version
+    };
+    // 立即生效才产生替代：安排在未来生效时，当前版本在那之前仍然是生效版本。
+    const alsoWrite: RentalRuleVersion[] =
+      !scheduled && previous ? [{ ...previous, status: "superseded", supersededAt: now }] : [];
+    await this.configStore.writeRuleVersionWithAudit(
+      next,
+      this.ruleVersionAudit(tenantId, next, "publish", target.status, next.status, reason, operator, now),
+      alsoWrite
+    );
+    Object.assign(target, next);
+    for (const row of alsoWrite) Object.assign(state.ruleVersions.find((item) => item.id === row.id)!, row);
+    return next;
+  }
+
+  /** 恢复历史版本：生成**新草稿**，被恢复的版本原样保留（需求 4.6.1）。 */
+  async restoreRuleVersion(tenantId: string, context: BusinessContext, version: string, reason: string, operator: string) {
+    const state = this.state(tenantId, context);
+    const trimmed = reason?.trim();
+    if (!trimmed) throw new BadRequestException("恢复原因不能为空");
+    const source = state.ruleVersions.find((row) => row.version === version);
+    if (!source) throw new NotFoundException("规则版本不存在");
+    const now = stamp();
+    const draft: RentalRuleVersion = {
+      id: uid("rule"),
+      tenantId,
+      categoryCode: source.categoryCode,
+      version: nextRuleVersionNumber(state.ruleVersions),
+      status: "draft",
+      config: structuredClone(source.config),
+      changeReason: `恢复自版本 ${source.version}：${trimmed}`,
+      createdBy: operator,
+      createdAt: now,
+      previousVersion: source.version,
+      restoredFromVersion: source.version,
+      restoreReason: trimmed
+    };
+    await this.configStore.writeRuleVersionWithAudit(
+      draft,
+      this.ruleVersionAudit(tenantId, draft, "restore", undefined, "draft", trimmed, operator, now)
+    );
+    state.ruleVersions.unshift(draft);
+    return draft;
+  }
+
+  /** 作废待生效或已生效版本（需求 4.6.14）。已被替代的历史版本不可作废。 */
+  async voidRuleVersion(tenantId: string, context: BusinessContext, version: string, reason: string, operator: string) {
+    const state = this.state(tenantId, context);
+    const trimmed = reason?.trim();
+    if (!trimmed) throw new BadRequestException("作废原因不能为空");
+    const target = state.ruleVersions.find((row) => row.version === version);
+    if (!target) throw new NotFoundException("规则版本不存在");
+    const now = stamp();
+    const displayStatus = resolveRuleVersionStatus(target, state.ruleVersions, now);
+    assertRuleVersionVoidable(displayStatus, target.version);
+    const next: RentalRuleVersion = { ...target, status: "void", voidedAt: now, voidedBy: operator, voidReason: trimmed };
+    await this.configStore.writeRuleVersionWithAudit(
+      next,
+      this.ruleVersionAudit(tenantId, next, "void", displayStatus, "void", trimmed, operator, now)
+    );
+    Object.assign(target, next);
+    return next;
+  }
+
+  /** 发布前影响预览。只读推演，不改状态、不动已锁定的报价与订单。 */
+  previewRuleVersionPublish(tenantId: string, context: BusinessContext, version: string, effectiveFrom?: string) {
+    const state = this.state(tenantId, context);
+    const target = state.ruleVersions.find((row) => row.version === version);
+    if (!target) throw new NotFoundException("规则版本不存在");
+    const now = stamp();
+    const preview = previewRulePublish(state.ruleVersions, target, effectiveFrom ?? now, now);
+    // 已锁定的报价带着各自的规则快照，发布不会改变它们的结算口径（需求 4.6.1）。
+    return {
+      ...preview,
+      lockedQuoteCount: state.quotes.filter((quote) => !!quote.ruleSnapshot).length
+    } satisfies RentalRulePublishPreview;
+  }
+
+  listRuleVersionAudits(tenantId: string, context: BusinessContext, version?: string) {
+    const state = this.state(tenantId, context);
+    const target = version ? state.ruleVersions.find((row) => row.version === version) : undefined;
+    if (version && !target) throw new NotFoundException("规则版本不存在");
+    return this.configStore.loadRuleVersionAudits(tenantId, this.workspaceOf(tenantId), target?.id);
+  }
+
+  /** 某个时点实际生效的版本；没有则返回 undefined（发布路径要区分首发与替代）。 */
+  private effectiveRuleVersionAt(versions: RentalRuleVersion[], at: string) {
+    return versions
+      .filter((row) => isIssuedRuleVersion(row.status) && row.effectiveFrom && new Date(row.effectiveFrom).getTime() <= new Date(at).getTime())
+      .sort((a, b) => new Date(b.effectiveFrom!).getTime() - new Date(a.effectiveFrom!).getTime())[0];
+  }
+
+  private ruleVersionAudit(
+    tenantId: string,
+    version: RentalRuleVersion,
+    action: RentalRuleVersionAudit["action"],
+    fromStatus: RentalRuleVersionStatus | undefined,
+    toStatus: RentalRuleVersionStatus,
+    reason: string,
+    operator: string,
+    at: string
+  ): RentalRuleVersionAudit {
+    return {
+      id: uid("rulaud"),
+      tenantId,
+      workspaceId: this.workspaceOf(tenantId),
+      ruleVersionId: version.id,
+      version: version.version,
+      action,
+      fromStatus,
+      toStatus,
+      reason,
+      operator,
+      at
+    };
   }
 
   listCustomerCoupons(tenantId: string, context: BusinessContext, customerId?: string) {
@@ -3156,8 +3333,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       context.settings.calendar.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE,
       context.settings
     );
-    const rule = this.currentRule(tenantId, context);
-    if (!rule || rule.status !== "published") throw new ConflictException("当前租户没有已发布的租赁规则");
+    // RULE-01A：按**租期开始时间**匹配规则版本（需求 4.6.1）。未来租期因此套用
+    // 覆盖它开始时点的版本，而不是「现在生效」的那一版；匹配不到直接报错，不回落。
+    const rule = this.currentRule(tenantId, context, input.startAt);
     // 营业时区解析一次，策略（自然日/夜）与日历（日期类型）必须用同一个值，
     // 否则同一张报价里两处按不同日界切分，金额与说明会互相矛盾。
     const quoteTimeZone = context.settings.calendar.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE;
@@ -3784,7 +3962,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const pricingPlans: RentalPricingPlanV1[] = [{ id: `${idPrefix}_pricing_default`, tenantId, categoryCode: context.profile.categoryCode, code: "STANDARD", name: `${context.category.name}标准价格`, currency: "CNY", status: "enabled", version: "1.0", effectiveFrom: timestamp, rates, createdAt: timestamp, updatedAt: timestamp }];
     const discountPlans: RentalDiscountPlan[] = [{ id: `${idPrefix}_discount_long`, tenantId, categoryCode: context.profile.categoryCode, code: "LONG_RENTAL", name: "长期租赁优惠", status: "enabled", discountType: "percentage", discountValue: 5, minimumSpend: 500, appliesTo: "rental", customerScope: "all", applicableItemGroupIds: [], applicableDayTypes: [], priority: 100, stackableWithOtherPlans: false, stackableWithCoupon: true, effectiveFrom: timestamp, version: "1.0", createdAt: timestamp, updatedAt: timestamp }];
     const services: RentalValueAddedService[] = context.category.businessModel.valueAddedServicePresets.slice(0, 4).map((name, index) => ({ id: `${idPrefix}_service_${index + 1}`, tenantId, categoryCode: context.profile.categoryCode, code: `SERVICE_${index + 1}`, name, serviceType: serviceType(name), billingUnit: name.includes("配送") || name.includes("运输") ? "per_order" : "per_day", price: 20 + index * 30, minimumQuantity: 1, maximumQuantity: 5, applicableFulfillmentModes: [], applicableLocationIds: [], customerScope: "all", selectionMode: "optional", coverageLimit: name.includes("保险") || name.includes("免赔") ? 5000 : undefined, deductible: name.includes("免赔") ? 200 : undefined, termsVersion: "1.0", terms: `${name}服务条款：以订单保存的本版本范围、限额及除外责任为准。`, applicableItemGroupIds: [], requiresCapacity: false, status: "enabled", version: "1.0", createdAt: timestamp, updatedAt: timestamp }));
-    const ruleVersions: RentalRuleVersion[] = [{ id: `${idPrefix}_rule_v1`, tenantId, categoryCode: context.profile.categoryCode, version: "1.0", status: "published", config: defaultRuleConfig(context.category, context.settings), changeReason: "品类初始化规则", createdBy: "system", createdAt: timestamp, publishedAt: timestamp }];
+    // effectiveFrom 与 publishedAt 同为初始化时刻：没有生效时点的版本不参与时点匹配，
+    // 新建空间会立刻因「没有覆盖该时点的规则」报不出价。
+    const ruleVersions: RentalRuleVersion[] = [{ id: `${idPrefix}_rule_v1`, tenantId, categoryCode: context.profile.categoryCode, version: "1.0", status: "published", config: defaultRuleConfig(context.category, context.settings), changeReason: "品类初始化规则", createdBy: "system", createdAt: timestamp, publishedAt: timestamp, effectiveFrom: timestamp }];
     const defaultVariables = { customerName: { label: "客户名称", required: true }, orderNo: { label: "订单号", required: true } };
     const notificationTemplates: RentalNotificationTemplateV1[] = context.settings.notifications.enabledEvents.slice(0, 12).map((eventCode, index) => {
       const memberEvent = eventCode === "member.registered";
@@ -3930,7 +4110,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   }
 
   calculateCancellationCharge(tenantId: string, context: BusinessContext, quote: RentalQuoteSnapshotV1, nowAt = stamp(), weatherException = false) {
-    const rule = quote.ruleSnapshot ?? this.currentRule(tenantId, context)?.config;
+    const rule = quote.ruleSnapshot;
     if (!rule) throw new ConflictException("订单缺少租赁规则快照");
     if (weatherException && rule.cancellation.weatherExceptionEnabled) return 0;
     const hoursBeforeStart = (new Date(quote.request.startAt).getTime() - new Date(nowAt).getTime()) / 3_600_000;
@@ -3939,7 +4119,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   }
 
   calculateOverdueCharge(tenantId: string, context: BusinessContext, quote: RentalQuoteSnapshotV1, returnedAt: string) {
-    const rule = quote.ruleSnapshot ?? this.currentRule(tenantId, context)?.config;
+    const rule = quote.ruleSnapshot;
     if (!rule) throw new ConflictException("订单缺少租赁规则快照");
     const overdueMinutes = Math.max(0, (new Date(returnedAt).getTime() - new Date(quote.request.endAt).getTime()) / 60_000 - rule.overdue.graceMinutes);
     if (overdueMinutes <= 0 || rule.overdue.feeMode === "none" || rule.overdue.feeMode === "manual_review") return 0;
@@ -3951,7 +4131,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   }
 
   calculateDamageCharge(tenantId: string, context: BusinessContext, quote: RentalQuoteSnapshotV1, exceptions: Array<{ chargeAmount?: number }>) {
-    const rule = quote.ruleSnapshot ?? this.currentRule(tenantId, context)?.config;
+    const rule = quote.ruleSnapshot;
     if (!rule) throw new ConflictException("订单缺少租赁规则快照");
     let amount = exceptions.reduce((sum, item) => sum + Math.max(0, Number(item.chargeAmount) || 0), 0);
     const state = this.state(tenantId, context);

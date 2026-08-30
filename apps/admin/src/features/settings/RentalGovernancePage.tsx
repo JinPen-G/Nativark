@@ -86,6 +86,27 @@ const calendarStatusLabels: Record<string, string> = {
   superseded: "已被替代",
   void: "已作废",
 };
+/** 规则版本五态（需求 4.6.1）。服务端按当前时间现算，前端只负责显示。 */
+const ruleStatusLabels: Record<string, string> = {
+  draft: "草稿",
+  pending: "待生效",
+  published: "已生效",
+  superseded: "已被替代",
+  void: "已作废",
+};
+const ruleStatusColors: Record<string, string> = {
+  draft: "default",
+  pending: "processing",
+  published: "success",
+  superseded: "warning",
+  void: "error",
+};
+/** 规则版本审计动作（需求 4.6.14）。 */
+const ruleAuditActionLabels: Record<string, string> = {
+  publish: "发布",
+  restore: "恢复为草稿",
+  void: "作废",
+};
 /** 发布预览里的变化维度标签（需求 4.5.8 要求按停业/时段/价格分别展示）。 */
 const previewFieldLabels: Record<string, string> = {
   dayType: "日期类型",
@@ -108,6 +129,13 @@ const securityRuleLabels: Record<RentalDepositRule["mode"], string> = {
   fixed: "按商品固定金额",
   price_multiple: "按商品行租金倍数",
 };
+
+/** 规则链的冲突信息（时点重叠、已发布不可改）必须原样透出，否则用户无从改正。 */
+function errorText(error: unknown, fallback: string): string {
+  return (
+    (error as { response?: { data?: { message?: string } } })?.response?.data?.message ?? fallback
+  );
+}
 
 /** 旧规则只有 payment.depositMode；打开编辑器时显式派生为新的两组独立规则。 */
 function ruleSecurityGroups(config: RentalRuleVersion["config"]): {
@@ -136,7 +164,11 @@ export function RentalGovernancePage() {
   // 专门配置的日历角色拿不到一个能用的工作界面）。
   const hasPermission = useAuthStore((state) => state.hasPermission);
   const canManagePrice = hasPermission("store-rental:price:manage");
-  const canManageRules = hasPermission("store-rental:rules:manage");
+  // 需求 4.6.14：「权限分为规则编辑、规则发布……」。编辑草稿与对客户生效是两个责任，
+  // 因此按钮分别判权；读取（列表、详情、预览、审计）两者任一即可，与后端 guard 同口径。
+  const canEditRules = hasPermission("store-rental:rules:manage");
+  const canPublishRules = hasPermission("store-rental:rules:publish");
+  const canSeeRules = canEditRules || canPublishRules || canManagePrice;
   const canEditCalendar = canManagePrice || hasPermission("store-rental:calendar:edit");
   const canPublishCalendar = canManagePrice || hasPermission("store-rental:calendar:publish");
   // 需求 4.5.8：客服或财务「查看历史版本及报价命中的日历依据，不得修改」——独立的
@@ -144,20 +176,21 @@ export function RentalGovernancePage() {
   const canViewCalendarHistory =
     canEditCalendar ||
     canPublishCalendar ||
-    canManageRules ||
+    canEditRules ||
     hasPermission("store-rental:calendar:view-history");
   const canSeeCalendar = canViewCalendarHistory;
-  const canSeeSettings = canManagePrice || canManageRules;
+  const canSeeSettings = canManagePrice || canEditRules;
   const permittedTabs = useMemo<TabKey[]>(
     () =>
       [
         canSeeSettings ? ("category" as const) : undefined,
-        canManageRules || canManagePrice ? ("rules" as const) : undefined,
+        canSeeRules ? ("rules" as const) : undefined,
         canSeeCalendar ? ("calendar" as const) : undefined,
         canSeeSettings ? ("membership" as const) : undefined,
-        canManageRules || canManagePrice ? ("notifications" as const) : undefined
+        // 通知模板走 rules:manage，单有发布权限不覆盖它。
+        canEditRules || canManagePrice ? ("notifications" as const) : undefined
       ].filter((key): key is TabKey => Boolean(key)),
-    [canSeeSettings, canManageRules, canManagePrice, canSeeCalendar]
+    [canSeeSettings, canSeeRules, canEditRules, canManagePrice, canSeeCalendar]
   );
   const [tab, setTab] = useState<TabKey>(permittedTabs[0] ?? "calendar");
   useEffect(() => {
@@ -170,6 +203,14 @@ export function RentalGovernancePage() {
   const [rangeOpen, setRangeOpen] = useState(false);
   const [rangeMode, setRangeMode] = useState<"override" | "remove">("override");
   const [ruleEditor, setRuleEditor] = useState<RentalRuleVersion>();
+  /** 待发布的草稿。发布原因必填、生效时点可选，因此走独立弹窗并带影响预览。 */
+  const [rulePublishTarget, setRulePublishTarget] = useState<RentalRuleVersion>();
+  /** 预览用的生效时点（ISO）。与表单分开存，表单值变化才好触发重新预览。 */
+  const [rulePublishEffectiveFrom, setRulePublishEffectiveFrom] = useState<string>();
+  /** 待恢复的历史规则版本（需求 4.6.1：只能生成新草稿，不得原地改回）。 */
+  const [ruleRestoreTarget, setRuleRestoreTarget] = useState<RentalRuleVersion>();
+  /** 待作废的待生效或已生效规则版本。 */
+  const [ruleVoidTarget, setRuleVoidTarget] = useState<RentalRuleVersion>();
   const [calendarDay, setCalendarDay] = useState<RentalCalendarDay>();
   const [importOpen, setImportOpen] = useState(false);
   const [publishOpen, setPublishOpen] = useState(false);
@@ -192,6 +233,9 @@ export function RentalGovernancePage() {
   >();
   const [calendarDayForm] = Form.useForm<SaveRentalCalendarDayRequest>();
   const [publishForm] = Form.useForm<{ changeReason: string }>();
+  const [rulePublishForm] = Form.useForm<{ reason: string; effectiveFrom?: dayjs.Dayjs }>();
+  const [ruleRestoreForm] = Form.useForm<{ reason: string }>();
+  const [ruleVoidForm] = Form.useForm<{ reason: string }>();
   const [revertForm] = Form.useForm<{ overrideReason: string }>();
   const [voidForm] = Form.useForm<{ reason: string }>();
   const [restoreForm] = Form.useForm<{ reason: string }>();
@@ -215,7 +259,28 @@ export function RentalGovernancePage() {
   const rules = useQuery({
     queryKey: ["rental-core", "rule-versions"],
     queryFn: rentalCoreApi.ruleVersions,
-    enabled: canManageRules || canManagePrice,
+    enabled: canSeeRules,
+  });
+  /** 规则版本审计（需求 4.6.14）：发布、恢复、作废的原因与操作者。 */
+  const ruleAudits = useQuery({
+    queryKey: ["rental-core", "rule-version-audits"],
+    queryFn: () => rentalCoreApi.ruleVersionAudits(),
+    enabled: canSeeRules && tab === "rules",
+  });
+  /** 发布影响预览。只在发布弹窗打开时拉，随生效时点变化重取。 */
+  const rulePublishPreview = useQuery({
+    queryKey: [
+      "rental-core",
+      "rule-publish-preview",
+      rulePublishTarget?.version,
+      rulePublishEffectiveFrom,
+    ],
+    queryFn: () =>
+      rentalCoreApi.ruleVersionPublishPreview(
+        rulePublishTarget!.version,
+        rulePublishEffectiveFrom,
+      ),
+    enabled: !!rulePublishTarget && canPublishRules,
   });
   const calendar = useQuery({
     queryKey: ["rental-core", "calendar", year],
@@ -268,12 +333,12 @@ export function RentalGovernancePage() {
   const templates = useQuery({
     queryKey: ["rental-core", "notification-templates"],
     queryFn: rentalCoreApi.notificationTemplates,
-    enabled: canManageRules || canManagePrice,
+    enabled: canEditRules || canManagePrice,
   });
   const logs = useQuery({
     queryKey: ["rental-core", "notification-logs"],
     queryFn: rentalCoreApi.notificationLogs,
-    enabled: canManageRules || canManagePrice,
+    enabled: canEditRules || canManagePrice,
   });
   const category = useMemo(
     () =>
@@ -337,7 +402,8 @@ export function RentalGovernancePage() {
           },
         },
         changeReason,
-        publish: true,
+        // 只存草稿：已发布版本不可修改（需求 4.6.1），发布是独立的、需要发布权限的动作。
+        versionId: ruleEditor?.status === "draft" ? ruleEditor.id : undefined,
       });
     },
     onSuccess: async () => {
@@ -346,9 +412,51 @@ export function RentalGovernancePage() {
       await queryClient.invalidateQueries({
         queryKey: ["rental-core", "rule-versions"],
       });
-      message.success("租赁规则新版本已发布");
+      message.success("规则草稿已保存，仍需具备发布权限的人发布后才对客户生效");
     },
-    onError: () => message.error("规则发布失败，请检查品类能力和租户设置"),
+    onError: () => message.error("草稿保存失败，请检查品类能力和租户设置"),
+  });
+  const publishRule = useMutation({
+    mutationFn: (values: { reason: string; effectiveFrom?: dayjs.Dayjs }) =>
+      rentalCoreApi.publishRuleVersion(rulePublishTarget!.version, {
+        reason: values.reason,
+        effectiveFrom: values.effectiveFrom?.toISOString(),
+      }),
+    onSuccess: async (row) => {
+      setRulePublishTarget(undefined);
+      setRulePublishEffectiveFrom(undefined);
+      rulePublishForm.resetFields();
+      await queryClient.invalidateQueries({ queryKey: ["rental-core", "rule-versions"] });
+      await queryClient.invalidateQueries({ queryKey: ["rental-core", "rule-version-audits"] });
+      message.success(
+        row.status === "pending" ? "已安排生效，到点后自动按新版本报价" : "新版本已生效",
+      );
+    },
+    onError: (error) => message.error(errorText(error, "发布失败")),
+  });
+  const restoreRule = useMutation({
+    mutationFn: (values: { reason: string }) =>
+      rentalCoreApi.restoreRuleVersion(ruleRestoreTarget!.version, values.reason),
+    onSuccess: async () => {
+      setRuleRestoreTarget(undefined);
+      ruleRestoreForm.resetFields();
+      await queryClient.invalidateQueries({ queryKey: ["rental-core", "rule-versions"] });
+      await queryClient.invalidateQueries({ queryKey: ["rental-core", "rule-version-audits"] });
+      message.success("已按历史版本生成新草稿，原版本保持不变");
+    },
+    onError: (error) => message.error(errorText(error, "恢复失败")),
+  });
+  const voidRule = useMutation({
+    mutationFn: (values: { reason: string }) =>
+      rentalCoreApi.voidRuleVersion(ruleVoidTarget!.version, values.reason),
+    onSuccess: async () => {
+      setRuleVoidTarget(undefined);
+      ruleVoidForm.resetFields();
+      await queryClient.invalidateQueries({ queryKey: ["rental-core", "rule-versions"] });
+      await queryClient.invalidateQueries({ queryKey: ["rental-core", "rule-version-audits"] });
+      message.success("版本已作废");
+    },
+    onError: (error) => message.error(errorText(error, "作废失败")),
   });
   const saveDay = useMutation({
     mutationFn: (value: SaveRentalCalendarDayRequest) =>
@@ -538,12 +646,18 @@ export function RentalGovernancePage() {
     onError: () => message.error("发送失败，请检查必填变量和接收人"),
   });
 
-  function openRule() {
-    const current =
+  /**
+   * 打开规则编辑器。传入草稿即继续编辑该草稿；不传则以当前生效版本的内容开一份新草稿。
+   * 已发布版本不能直接编辑（需求 4.6.1），要改它须先恢复为新草稿。
+   */
+  function openRule(row?: RentalRuleVersion) {
+    const source =
+      row ??
+      rules.data?.find((item) => item.status === "draft") ??
       rules.data?.find((item) => item.status === "published") ??
       rules.data?.[0];
-    if (!current) return;
-    const config = structuredClone(current.config);
+    if (!source) return;
+    const config = structuredClone(source.config);
     const security = ruleSecurityGroups(config);
     if (category?.businessModel.supportsPreauthorization === false) {
       security.preauthorization = { mode: "none" };
@@ -551,9 +665,14 @@ export function RentalGovernancePage() {
     ruleForm.setFieldsValue({
       ...config,
       ...security,
-      changeReason: "调整租赁业务规则",
+      changeReason: source.status === "draft" ? source.changeReason : "调整租赁业务规则",
     });
-    setRuleEditor(current);
+    setRuleEditor(source);
+  }
+  function openRulePublish(row: RentalRuleVersion) {
+    rulePublishForm.resetFields();
+    setRulePublishEffectiveFrom(undefined);
+    setRulePublishTarget(row);
   }
   function openDay(row: RentalCalendarDay) {
     // source 由服务端固定为 tenant_override，不作为表单字段提交。
@@ -615,7 +734,9 @@ export function RentalGovernancePage() {
     setSendTemplate(row);
   }
 
+  // 服务端已按当前时间现算展示状态，因此 published 就是「此刻生效」的唯一一条。
   const currentRule = rules.data?.find((item) => item.status === "published");
+  const pendingRules = (rules.data ?? []).filter((item) => item.status === "pending");
   return (
     <>
       <PageHeader
@@ -638,7 +759,7 @@ export function RentalGovernancePage() {
         onChange={(key) => setTab(key as TabKey)}
         items={[
           ...(canSeeSettings ? [{ key: "category", label: "品类与租赁方式" }] : []),
-          ...(canManageRules || canManagePrice
+          ...(canSeeRules
             ? [
                 {
                   key: "rules",
@@ -677,7 +798,7 @@ export function RentalGovernancePage() {
                 },
               ]
             : []),
-          ...(canManageRules || canManagePrice
+          ...(canEditRules || canManagePrice
             ? [
                 {
                   key: "notifications",
@@ -890,15 +1011,39 @@ export function RentalGovernancePage() {
               <Space direction="vertical" size={16} style={{ width: "100%" }}>
                 <div className="table-toolbar">
                   <Space>
-                    <Tag color="success">已发布 v{currentRule?.version}</Tag>
+                    {currentRule ? (
+                      <Tag color="success">
+                        已生效 v{currentRule.version}
+                        {currentRule.effectiveFrom
+                          ? ` · ${dayjs(currentRule.effectiveFrom).format("YYYY-MM-DD HH:mm")} 起`
+                          : ""}
+                      </Tag>
+                    ) : (
+                      <Tag color="error">当前没有生效版本</Tag>
+                    )}
                     <Typography.Text type="secondary">
-                      订单与报价保存采用的规则版本
+                      报价按租期开始时间匹配版本，未来租期使用覆盖其开始时点的版本
                     </Typography.Text>
                   </Space>
-                  <Button type="primary" onClick={openRule}>
-                    发布新版本
-                  </Button>
+                  {canEditRules && (
+                    <Button type="primary" onClick={() => openRule()}>
+                      新建草稿
+                    </Button>
+                  )}
                 </div>
+                {pendingRules.length > 0 && (
+                  <Alert
+                    type="info"
+                    showIcon
+                    message={`有 ${pendingRules.length} 个待生效版本`}
+                    description={pendingRules
+                      .map(
+                        (row) =>
+                          `v${row.version} 自 ${dayjs(row.effectiveFrom).format("YYYY-MM-DD HH:mm")} 起生效`,
+                      )
+                      .join("；")}
+                  />
+                )}
                 {currentRule && (
                   <Card>
                     <Descriptions
@@ -955,13 +1100,107 @@ export function RentalGovernancePage() {
                       {
                         title: "状态",
                         dataIndex: "status",
-                        render: (value) => <Tag>{value}</Tag>,
+                        render: (value: string) => (
+                          <Tag color={ruleStatusColors[value]}>
+                            {ruleStatusLabels[value] ?? value}
+                          </Tag>
+                        ),
+                      },
+                      {
+                        title: "生效时点",
+                        dataIndex: "effectiveFrom",
+                        render: (value?: string) =>
+                          value ? dayjs(value).format("YYYY-MM-DD HH:mm") : "—",
                       },
                       { title: "变更原因", dataIndex: "changeReason" },
+                      {
+                        title: "来源",
+                        dataIndex: "restoredFromVersion",
+                        render: (value?: string) => (value ? `恢复自 v${value}` : "—"),
+                      },
                       { title: "操作人", dataIndex: "createdBy" },
-                      { title: "创建时间", dataIndex: "createdAt" },
+                      {
+                        title: "创建时间",
+                        dataIndex: "createdAt",
+                        render: (value: string) => dayjs(value).format("YYYY-MM-DD HH:mm"),
+                      },
+                      {
+                        title: "操作",
+                        key: "actions",
+                        render: (_, row) => (
+                          <Space size={4}>
+                            {row.status === "draft" && canEditRules && (
+                              <Button type="link" size="small" onClick={() => openRule(row)}>
+                                编辑
+                              </Button>
+                            )}
+                            {row.status === "draft" && canPublishRules && (
+                              <Button type="link" size="small" onClick={() => openRulePublish(row)}>
+                                发布
+                              </Button>
+                            )}
+                            {row.status !== "draft" && canEditRules && (
+                              <Button
+                                type="link"
+                                size="small"
+                                onClick={() => {
+                                  ruleRestoreForm.resetFields();
+                                  setRuleRestoreTarget(row);
+                                }}
+                              >
+                                恢复为草稿
+                              </Button>
+                            )}
+                            {(row.status === "pending" || row.status === "published") &&
+                              canPublishRules && (
+                                <Button
+                                  type="link"
+                                  size="small"
+                                  danger
+                                  onClick={() => {
+                                    ruleVoidForm.resetFields();
+                                    setRuleVoidTarget(row);
+                                  }}
+                                >
+                                  作废
+                                </Button>
+                              )}
+                          </Space>
+                        ),
+                      },
                     ]}
                   />
+                </Card>
+                <Card title="发布与作废审计">
+                  <QueryState loading={ruleAudits.isLoading} error={ruleAudits.error}>
+                    <Table
+                      rowKey="id"
+                      size="small"
+                      pagination={false}
+                      dataSource={ruleAudits.data ?? []}
+                      columns={[
+                        { title: "版本", dataIndex: "version" },
+                        {
+                          title: "动作",
+                          dataIndex: "action",
+                          render: (value: string) => ruleAuditActionLabels[value] ?? value,
+                        },
+                        {
+                          title: "状态变化",
+                          key: "status",
+                          render: (_, row) =>
+                            `${row.fromStatus ? (ruleStatusLabels[row.fromStatus] ?? row.fromStatus) : "—"} → ${ruleStatusLabels[row.toStatus] ?? row.toStatus}`,
+                        },
+                        { title: "原因", dataIndex: "reason" },
+                        { title: "操作人", dataIndex: "operator" },
+                        {
+                          title: "时间",
+                          dataIndex: "at",
+                          render: (value: string) => dayjs(value).format("YYYY-MM-DD HH:mm"),
+                        },
+                      ]}
+                    />
+                  </QueryState>
                 </Card>
               </Space>
             )}
@@ -1546,7 +1785,11 @@ export function RentalGovernancePage() {
       </QueryState>
 
       <Drawer
-        title={`发布规则新版本 · 当前 v${ruleEditor?.version ?? ""}`}
+        title={
+          ruleEditor?.status === "draft"
+            ? `编辑规则草稿 v${ruleEditor.version}`
+            : `新建规则草稿 · 基于 v${ruleEditor?.version ?? ""}`
+        }
         width={760}
         open={Boolean(ruleEditor)}
         onClose={() => setRuleEditor(undefined)}
@@ -1557,7 +1800,7 @@ export function RentalGovernancePage() {
             loading={saveRule.isPending}
             onClick={() => ruleForm.submit()}
           >
-            发布
+            保存草稿
           </Button>
         }
       >
@@ -1812,6 +2055,137 @@ export function RentalGovernancePage() {
           </Form.Item>
         </Form>
       </Drawer>
+      <Modal
+        title={`发布规则版本 v${rulePublishTarget?.version ?? ""}`}
+        open={Boolean(rulePublishTarget)}
+        onOk={() => rulePublishForm.submit()}
+        confirmLoading={publishRule.isPending}
+        onCancel={() => {
+          setRulePublishTarget(undefined);
+          setRulePublishEffectiveFrom(undefined);
+        }}
+        okText="确认发布"
+        destroyOnHidden
+        width={640}
+      >
+        <Form
+          form={rulePublishForm}
+          layout="vertical"
+          onFinish={(values) => publishRule.mutate(values)}
+        >
+          <Form.Item
+            name="effectiveFrom"
+            label="生效时点"
+            extra="留空表示立即生效；填未来时点即安排生效，到点后自动按新版本报价。生效时点必须晚于已发布的最新版本。"
+          >
+            <DatePicker
+              showTime
+              style={{ width: "100%" }}
+              onChange={(value) => setRulePublishEffectiveFrom(value?.toISOString())}
+            />
+          </Form.Item>
+          <Form.Item
+            name="reason"
+            label="发布原因"
+            rules={[{ required: true, message: "发布原因必填并写入审计" }]}
+          >
+            <Input.TextArea rows={2} maxLength={500} showCount />
+          </Form.Item>
+        </Form>
+        <QueryState loading={rulePublishPreview.isLoading} error={rulePublishPreview.error}>
+          {rulePublishPreview.data && (
+            <Descriptions
+              size="small"
+              column={1}
+              items={[
+                {
+                  key: "effectiveFrom",
+                  label: "生效时点",
+                  children: `${dayjs(rulePublishPreview.data.effectiveFrom).format("YYYY-MM-DD HH:mm")}（${rulePublishPreview.data.scheduled ? "待生效" : "立即生效"}）`,
+                },
+                {
+                  key: "current",
+                  label: "当前生效版本",
+                  children: rulePublishPreview.data.currentVersion
+                    ? `v${rulePublishPreview.data.currentVersion}`
+                    : "无（首次发布）",
+                },
+                {
+                  key: "superseded",
+                  label: "生效后被替代",
+                  children: rulePublishPreview.data.supersededVersions.length
+                    ? rulePublishPreview.data.supersededVersions
+                        .map((value) => `v${value}`)
+                        .join("、")
+                    : "无",
+                },
+                {
+                  key: "locked",
+                  label: "已锁定报价",
+                  children: `${rulePublishPreview.data.lockedQuoteCount} 张，仍按各自规则快照结算，不受本次发布影响`,
+                },
+              ]}
+            />
+          )}
+        </QueryState>
+      </Modal>
+      <Modal
+        title={`恢复规则版本 v${ruleRestoreTarget?.version ?? ""}`}
+        open={Boolean(ruleRestoreTarget)}
+        onOk={() => ruleRestoreForm.submit()}
+        confirmLoading={restoreRule.isPending}
+        onCancel={() => setRuleRestoreTarget(undefined)}
+        okText="生成新草稿"
+        destroyOnHidden
+      >
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="恢复只会按该版本的内容生成新草稿"
+          description="被恢复的版本原样保留，已发布版本不可修改；新草稿仍需具备发布权限的人发布后才对客户生效。"
+        />
+        <Form
+          form={ruleRestoreForm}
+          layout="vertical"
+          onFinish={(values) => restoreRule.mutate(values)}
+        >
+          <Form.Item
+            name="reason"
+            label="恢复原因"
+            rules={[{ required: true, message: "恢复原因必填并写入审计" }]}
+          >
+            <Input.TextArea rows={2} maxLength={191} showCount />
+          </Form.Item>
+        </Form>
+      </Modal>
+      <Modal
+        title={`作废规则版本 v${ruleVoidTarget?.version ?? ""}`}
+        open={Boolean(ruleVoidTarget)}
+        onOk={() => ruleVoidForm.submit()}
+        confirmLoading={voidRule.isPending}
+        onCancel={() => setRuleVoidTarget(undefined)}
+        okText="确认作废"
+        okButtonProps={{ danger: true }}
+        destroyOnHidden
+      >
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="作废后该版本不再参与任何租期的规则匹配"
+          description="若它是当前唯一生效版本，作废后落在该时段的报价会直接失败而不是回落到旧规则；请先发布替代版本。已锁定的报价与订单按各自快照结算，不受影响。"
+        />
+        <Form form={ruleVoidForm} layout="vertical" onFinish={(values) => voidRule.mutate(values)}>
+          <Form.Item
+            name="reason"
+            label="作废原因"
+            rules={[{ required: true, message: "作废原因必填并写入审计" }]}
+          >
+            <Input.TextArea rows={2} maxLength={191} showCount />
+          </Form.Item>
+        </Form>
+      </Modal>
       <Drawer
         title={`覆盖营业日 · ${calendarDay?.date ?? ""}`}
         width={480}

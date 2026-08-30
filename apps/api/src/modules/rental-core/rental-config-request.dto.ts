@@ -18,6 +18,9 @@ import type {
   SaveRentalNotificationTemplateRequest,
   SaveRentalPricingPlanRequest,
   SaveRentalRuleVersionRequest,
+  PublishRentalRuleVersionRequest,
+  RestoreRentalRuleVersionRequest,
+  VoidRentalRuleVersionRequest,
   SaveRentalValueAddedServiceRequest,
   SaveRentalServiceCapacityRequest,
   SaveTenantRentalBusinessSettingsRequest,
@@ -1002,9 +1005,41 @@ export class SaveRentalRuleVersionDto implements SaveRentalRuleVersionRequest {
   @IsNotEmpty()
   changeReason!: string;
 
+  /** 省略即新建草稿。传已发布版本的 id 会被拒——已发布版本不可修改（需求 4.6.1）。 */
   @IsOptional()
-  @IsBoolean()
-  publish?: boolean;
+  @IsString()
+  @IsNotEmpty()
+  versionId?: string;
+}
+
+/** 发布或安排生效（需求 4.6.14：必须填写原因）。 */
+export class PublishRentalRuleVersionDto implements PublishRentalRuleVersionRequest {
+  /** 省略即立即生效；给未来时点即安排生效（待生效）。 */
+  @IsOptional()
+  @IsISO8601()
+  effectiveFrom?: string;
+
+  @IsString()
+  @Matches(NON_BLANK_PATTERN, { message: "发布原因不能为空白" })
+  // 落库为 rental_rule_version_audits.reason（VARCHAR(500)），同上限长以免 500。
+  @MaxLength(500, { message: "发布原因不能超过 500 字" })
+  reason!: string;
+}
+
+export class RestoreRentalRuleVersionDto implements RestoreRentalRuleVersionRequest {
+  @IsString()
+  @Matches(NON_BLANK_PATTERN, { message: "恢复原因不能为空白" })
+  // 同时落库为 rental_rule_versions.restoreReason（VARCHAR(191)），取更短的上限。
+  @MaxLength(191, { message: "恢复原因不能超过 191 字" })
+  reason!: string;
+}
+
+export class VoidRentalRuleVersionDto implements VoidRentalRuleVersionRequest {
+  @IsString()
+  @Matches(NON_BLANK_PATTERN, { message: "作废原因不能为空白" })
+  // 同时落库为 rental_rule_versions.voidReason（VARCHAR(191)），取更短的上限。
+  @MaxLength(191, { message: "作废原因不能超过 191 字" })
+  reason!: string;
 }
 
 /* ---------- 营业日历 ---------- */

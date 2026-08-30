@@ -29,6 +29,9 @@ import {
   SaveRentalNotificationTemplateDto,
   SaveRentalPricingPlanDto,
   SaveRentalRuleVersionDto,
+  PublishRentalRuleVersionDto,
+  RestoreRentalRuleVersionDto,
+  VoidRentalRuleVersionDto,
   SaveRentalValueAddedServiceDto,
   SaveRentalServiceCapacityDto,
 } from "./rental-config-request.dto";
@@ -274,8 +277,18 @@ export class RentalBusinessController {
   @Post("calendars/:year/versions/:version/restore") async restoreCalendarVersion(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Param("version") version: string, @Body() body: RestoreRentalCalendarVersionDto) { return this.committed(req.user.tenantId, await this.business.restoreCalendarVersion(req.user.tenantId, this.context(req.user.tenantId), Number(year), version, body)); }
 
   @Get("rule-versions") ruleVersions(@Req() req: AuthenticatedRequest) { return this.business.listRuleVersions(req.user.tenantId, this.context(req.user.tenantId)); }
-  @Get("rule-versions/current") currentRule(@Req() req: AuthenticatedRequest) { return this.business.currentRule(req.user.tenantId, this.context(req.user.tenantId)); }
+  /** at 省略即按当前时间匹配；报价按租期开始时间匹配，因此这里也允许指定时点回放。 */
+  @Get("rule-versions/current") currentRule(@Req() req: AuthenticatedRequest, @Query("at") at?: string) { return this.business.currentRule(req.user.tenantId, this.context(req.user.tenantId), at || undefined); }
+  @Get("rule-versions/audits") ruleVersionAudits(@Req() req: AuthenticatedRequest, @Query("version") version?: string) { return this.business.listRuleVersionAudits(req.user.tenantId, this.context(req.user.tenantId), version || undefined); }
+  @Get("rule-versions/:version") ruleVersion(@Req() req: AuthenticatedRequest, @Param("version") version: string) { return this.business.getRuleVersion(req.user.tenantId, this.context(req.user.tenantId), version); }
+  @Get("rule-versions/:version/publish-preview") ruleVersionPublishPreview(@Req() req: AuthenticatedRequest, @Param("version") version: string, @Query("effectiveFrom") effectiveFrom?: string) { return this.business.previewRuleVersionPublish(req.user.tenantId, this.context(req.user.tenantId), version, effectiveFrom || undefined); }
+  /** 只存草稿。已发布版本不可修改（需求 4.6.1），要改先 restore 成新草稿。 */
   @Post("rule-versions") async saveRule(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalRuleVersionDto) { return this.committed(req.user.tenantId, await this.business.saveRuleVersion(req.user.tenantId, this.context(req.user.tenantId), body, req.user.displayName)); }
+  /** 以某个历史版本的内容生成新草稿。属编辑级动作，只认 rules:manage。 */
+  @Post("rule-versions/:version/restore") async restoreRule(@Req() req: AuthenticatedRequest, @Param("version") version: string, @Body() body: RestoreRentalRuleVersionDto) { return this.committed(req.user.tenantId, await this.business.restoreRuleVersion(req.user.tenantId, this.context(req.user.tenantId), version, body.reason, req.user.displayName)); }
+  /** 发布级动作，只认 rules:publish。 */
+  @Post("rule-versions/:version/publish") async publishRule(@Req() req: AuthenticatedRequest, @Param("version") version: string, @Body() body: PublishRentalRuleVersionDto) { return this.committed(req.user.tenantId, await this.business.publishRuleVersion(req.user.tenantId, this.context(req.user.tenantId), version, body, req.user.displayName)); }
+  @Post("rule-versions/:version/void") async voidRule(@Req() req: AuthenticatedRequest, @Param("version") version: string, @Body() body: VoidRentalRuleVersionDto) { return this.committed(req.user.tenantId, await this.business.voidRuleVersion(req.user.tenantId, this.context(req.user.tenantId), version, body.reason, req.user.displayName)); }
 
   @Get("customer-coupons") async customerCoupons(@Req() req: AuthenticatedRequest, @Query("customerId") customerId?: string) { return this.business.listCurrentCustomerCoupons(req.user.tenantId, this.context(req.user.tenantId), customerId); }
   @Post("customer-coupons/:id/void") async voidCustomerCoupon(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: { reason: string }) {

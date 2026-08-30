@@ -6433,23 +6433,83 @@ export interface RentalRuleConfig {  /**
   };
 }
 
+/**
+ * RULE-01A：规则版本五态（需求 4.6.1）。
+ * pending 与 published 的区别只是生效时点是否已到，superseded 的判据是有更新的版本
+ * 已经生效——三者都由服务端按当前时间现算，客户端不要据此推断可否编辑，编辑判据是 draft。
+ */
+export type RentalRuleVersionStatus = "draft" | "pending" | "published" | "superseded" | "void";
+
 export interface RentalRuleVersion {
   id: string;
   tenantId: string;
   categoryCode: RentalCategoryCode;
   version: string;
-  status: "draft" | "published" | "retired";
+  status: RentalRuleVersionStatus;
   config: RentalRuleConfig;
   changeReason: string;
   createdBy: string;
   createdAt: string;
   publishedAt?: string;
+  /** 生效时点。报价按**租期开始时间**匹配覆盖该时点的版本，缺失即不参与匹配。 */
+  effectiveFrom?: string;
+  publishedBy?: string;
+  /** 被更新版本替代的时刻。由发布动作写入，不作为匹配依据。 */
+  supersededAt?: string;
+  /** 上一版本号，构成版本链；恢复产生的草稿另记 restoredFromVersion。 */
+  previousVersion?: string;
+  restoredFromVersion?: string;
+  restoreReason?: string;
+  voidedAt?: string;
+  voidedBy?: string;
+  voidReason?: string;
+}
+
+/** 规则版本审计（只追加）：发布、恢复、作废各记一条，含原因与操作者（需求 4.6.14）。 */
+export interface RentalRuleVersionAudit {
+  id: string;
+  tenantId: string;
+  workspaceId: string;
+  ruleVersionId: string;
+  version: string;
+  action: "publish" | "restore" | "void";
+  fromStatus?: RentalRuleVersionStatus;
+  toStatus: RentalRuleVersionStatus;
+  reason: string;
+  operator?: string;
+  at: string;
 }
 
 export interface SaveRentalRuleVersionRequest {
   config: RentalRuleConfig;
   changeReason: string;
-  publish?: boolean;
+  /** 只改草稿。省略时新建草稿；已发布版本不接受修改，需先恢复为新草稿。 */
+  versionId?: string;
+}
+
+/** 发布或安排生效。effectiveFrom 省略即立即生效。 */
+export interface PublishRentalRuleVersionRequest {
+  effectiveFrom?: string;
+  reason: string;
+}
+
+export interface RestoreRentalRuleVersionRequest {
+  reason: string;
+}
+
+export interface VoidRentalRuleVersionRequest {
+  reason: string;
+}
+
+export interface RentalRulePublishPreview {
+  draftVersion: string;
+  effectiveFrom: string;
+  /** true 表示未来生效（待生效），false 表示立即生效。 */
+  scheduled: boolean;
+  currentVersion?: string;
+  supersededVersions: string[];
+  /** 已固化规则快照、发布后仍按原条款结算的报价数量（需求 4.6.1）。 */
+  lockedQuoteCount: number;
 }
 
 export type RentalCustomerCouponStatus = "claimed" | "locked" | "redeemed" | "expired" | "void";

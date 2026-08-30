@@ -2218,21 +2218,28 @@ async function main() {
     return res.body.data;
   };
 
-  // 不依赖夹具的初始押金模式（工程品类默认是 preauthorization），显式发布一版固定押金。
-  const publishDepositMode = (mode, reason) =>
-    request(
+  // RULE-01A：发布是独立的两步——先存草稿（编辑权限），再对该草稿版本调用 publish
+  // （发布权限）。旧的一步 `publish: true` 字段已随分权移除，写它会被 whitelist 静默剥离。
+  const publishDepositMode = async (mode, reason) => {
+    const draft = await request(
       "POST",
       "/api/rental/v1/rule-versions",
       {
         changeReason: reason,
-        // 契约字段是 publish 而不是 status。写错名字不会报错——全局 ValidationPipe
-        // 开了 whitelist，未声明字段被静默剥离，规则会以 draft 落库而 currentRule
-        // 仍返回旧版本，表现为改了却没生效。
-        publish: true,
         config: { ...depositRule.config, payment: { ...depositRule.config.payment, depositMode: mode } }
       },
       construction.accessToken
     );
+    if (draft.status !== 201) return draft;
+    // 不带 effectiveFrom = 立即生效；每次 publish 的生效时点是当下，逐次递增不会撞点。
+    return request(
+      "POST",
+      `/api/rental/v1/rule-versions/${draft.body.data.version}/publish`,
+      { reason },
+      construction.accessToken
+    );
+  };
+
   const toFixed = await publishDepositMode("fixed", "PRICE-01 切换为固定押金");
   assert.equal(toFixed.status, 201, `切换固定押金失败: ${JSON.stringify(toFixed.body).slice(0, 250)}`);
   const fixedQuote = await depositQuoteWith(multiplePlan.body.data.id);
@@ -2318,17 +2325,21 @@ async function main() {
   // 旧口径用一个 depositMode 二选一，表达不了「收 500 押金 + 冻结 2000 额度」；
   // 而 `fixed + preauthorizationRequired=true` 时金额进了押金与实收、preAuthAmount 为 0，
   // 明细却叫「预授权额度」——名实不符。现在用 deposit / preauthorization 两组独立表达。
-  const publishRules = (deposit, preauthorization, reason) =>
-    request(
+  const publishRules = async (deposit, preauthorization, reason) => {
+    const draft = await request(
       "POST",
       "/api/rental/v1/rule-versions",
-      {
-        changeReason: reason,
-        publish: true,
-        config: { ...depositRule.config, deposit, preauthorization }
-      },
+      { changeReason: reason, config: { ...depositRule.config, deposit, preauthorization } },
       construction.accessToken
     );
+    if (draft.status !== 201) return draft;
+    return request(
+      "POST",
+      `/api/rental/v1/rule-versions/${draft.body.data.version}/publish`,
+      { reason },
+      construction.accessToken
+    );
+  };
   // 费率：固定押金 200、预授权固定额 500（刻意与押金不同，两个数必须能各自取到）。
   const dpPlan = await request(
     "POST",
@@ -2402,7 +2413,7 @@ async function main() {
   const campingCurrentRule = campingRules.body.data.find((row) => row.status === "published") ?? campingRules.body.data[0];
   const unsupportedPreauth = await request("POST", "/api/rental/v1/rule-versions", {
     changeReason: "验证不支持预授权的品类不能绕过新字段启用",
-    publish: true,
+    // 存草稿即触发 validateRule，不支持预授权的品类在此处就被 400 拒绝，不需要走到发布。
     config: {
       ...campingCurrentRule.config,
       deposit: { mode: "none" },
@@ -2411,9 +2422,21 @@ async function main() {
     }
   }, demo2.accessToken);
   assert.equal(unsupportedPreauth.status, 400, "不支持预授权的品类通过新字段启用必须 400");
-  // 还原：回到夹具原始规则，避免污染后续用例。
+  // 还原：回到夹具原始规则，避免污染后续用例。先存草稿再发布。
+  const restoreDraft = await request(
+    "POST",
+    "/api/rental/v1/rule-versions",
+    { changeReason: "还原押金规则", config: depositRule.config },
+    construction.accessToken
+  );
+  assert.equal(restoreDraft.status, 201, "还原草稿创建失败");
   assert.equal(
-    (await request("POST", "/api/rental/v1/rule-versions", { changeReason: "还原押金规则", publish: true, config: depositRule.config }, construction.accessToken)).status,
+    (await request(
+      "POST",
+      `/api/rental/v1/rule-versions/${restoreDraft.body.data.version}/publish`,
+      { reason: "还原押金规则" },
+      construction.accessToken
+    )).status,
     201,
     "还原原始规则失败"
   );
@@ -5847,26 +5870,34 @@ async function main() {
   );
   ok("业务键冲突映射：保留现存通知模板，并将快照通知日志关联到现存主键");
 
-  console.log("== 26. RC-01 规则发布后库中只保留一个 published 版本 ==");
+  console.log("== 26. RULE-01A 规则发布后库中只保留一个已生效版本，旧版本置为已被替代 ==");
   // 退役旧版本原先只改内存：重启后库里会重新加载出多个 published；
-  // 且退役发生在写库之前，新版本写库失败会让缓存里的旧规则被错误地标成 retired。
+  // 且退役发生在写库之前，新版本写库失败会让缓存里的旧规则被错误地标成已替代。
+  // RULE-01A 后：立即发布时新版本写 published、旧生效版本写 superseded，同事务落库。
   const demoRules = await login("demo", "admin", DEMO_PASSWORD);
   const currentRule = (await request("GET", "/api/rental/v1/rule-versions/current", null, demoRules.accessToken)).body.data;
-  const publishRes = await request(
+  const publishDraft = await request(
     "POST",
     "/api/rental/v1/rule-versions",
-    { config: currentRule.config, changeReason: "E2E 单一 published 校验", publish: true },
+    { config: currentRule.config, changeReason: "E2E 单一 published 校验" },
+    demoRules.accessToken
+  );
+  assert.equal(publishDraft.status, 201, `规则草稿创建失败: ${JSON.stringify(publishDraft.body)}`);
+  const publishRes = await request(
+    "POST",
+    `/api/rental/v1/rule-versions/${publishDraft.body.data.version}/publish`,
+    { reason: "E2E 单一 published 校验" },
     demoRules.accessToken
   );
   assert.equal(publishRes.status, 201, `发布规则版本失败: ${JSON.stringify(publishRes.body)}`);
   assert.equal(
     readCount("SELECT COUNT(*) FROM `rental_rule_versions` WHERE `tenantId`='tenant_001' AND `status`='published';"),
     1,
-    "发布后库中只能有一个 published 规则版本"
+    "发布后库中只能有一个已生效（published）规则版本"
   );
   assert.ok(
-    readCount("SELECT COUNT(*) FROM `rental_rule_versions` WHERE `tenantId`='tenant_001' AND `status`='retired';") > 0,
-    "旧 published 版本的退役必须落库"
+    readCount("SELECT COUNT(*) FROM `rental_rule_versions` WHERE `tenantId`='tenant_001' AND `status`='superseded';") > 0,
+    "旧已生效版本的替代（superseded）必须落库"
   );
   await stopApi();
   startApi();
@@ -5874,9 +5905,9 @@ async function main() {
   assert.equal(
     readCount("SELECT COUNT(*) FROM `rental_rule_versions` WHERE `tenantId`='tenant_001' AND `status`='published';"),
     1,
-    "重启后仍只能有一个 published 规则版本"
+    "重启后仍只能有一个已生效（published）规则版本"
   );
-  ok("规则发布：新版本与旧版本退役同事务落库，重启后库中仍只有一个 published");
+  ok("规则发布：新版本 published 与旧版本 superseded 同事务落库，重启后库中仍只有一个已生效版本");
 
   console.log("== 27. RC-01 复合键集合不能退化为数量比较 ==");
   const compositeTenant = readScalar(

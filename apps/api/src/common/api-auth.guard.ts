@@ -284,7 +284,19 @@ export function requiredPermissions(method: string, path: string) {
     // 其余写操作（导入官方来源、保存日期、移除覆盖、作废草稿）属编辑，只认编辑权限。
     return ["store-rental:calendar:edit", "store-rental:price:manage"];
   }
-  if (path.startsWith("/rental/v1/rule-versions") || path.startsWith("/rental/v1/rewards") || path.startsWith("/rental/v1/benefit-accounts") || path.startsWith("/rental/v1/notification-templates") || path.startsWith("/rental/v1/notification-logs") || path === "/rental/v1/notifications/send") {
+  // RULE-01A：规则读取（列表、详情、发布预览、历史）manage 或 publish 任一即可；
+  // 发布级动作（publish / void）只认 rules:publish，编辑级动作（存草稿、恢复为新草稿）
+  // 只认 rules:manage。必须放在下面的合并分支之前，否则会被前缀吃掉退化成共用一个码。
+  if (path.startsWith("/rental/v1/rule-versions")) {
+    if (method === "GET") {
+      return ["store-rental:rules:manage", "store-rental:rules:publish", "store-rental:price:manage"];
+    }
+    if (/\/(publish|void)$/u.test(path)) {
+      return ["store-rental:rules:publish"];
+    }
+    return ["store-rental:rules:manage"];
+  }
+  if (path.startsWith("/rental/v1/rewards") || path.startsWith("/rental/v1/benefit-accounts") || path.startsWith("/rental/v1/notification-templates") || path.startsWith("/rental/v1/notification-logs") || path === "/rental/v1/notifications/send") {
     return ["store-rental:rules:manage", "store-rental:price:manage"];
   }
   if (path === "/rental/v1/coupon-templates" || path.startsWith("/rental/v1/coupon-templates/")) {

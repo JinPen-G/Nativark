@@ -66,7 +66,10 @@
     "test:service-capacity": "npm run build -w @store-rental/shared && node tests/rental-service-capacity.test.cjs",
     "test:coupon-budget": "npm run build -w @store-rental/shared && node tests/rental-coupon-budget.test.cjs",
     "test:coupon-budget-mutation": "node tests/rental-coupon-budget-mutation.test.cjs",
-    "test:price-version": "npm run build -w @store-rental/shared && node tests/rental-price-version.test.cjs"
+    "test:price-version": "npm run build -w @store-rental/shared && node tests/rental-price-version.test.cjs",
+    "test:rule-version-chain": "npm run build -w @store-rental/shared && node tests/rental-rule-version-chain.test.cjs",
+    "test:rule-version-chain-mutation": "node tests/helpers/rule-version-chain-mutation.cjs",
+    "test:rule-permission-split": "npm run build -w @store-rental/shared && node tests/rental-rule-permission-split.test.cjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",

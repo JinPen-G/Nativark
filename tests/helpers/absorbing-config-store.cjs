@@ -132,10 +132,18 @@ function createAbsorbingBusinessConfigStore() {
       return Promise.resolve();
     },
     upsertRuleVersion: record("ruleVersion"),
-    replacePublishedRuleVersion: (next) => {
-      writes.push({ kind: "ruleVersion", id: next?.id });
+    // RULE-01A：发布/恢复/作废是「版本行 + 一条审计」的原子写。stub 里一并吸收，
+    // 便于单元测试断言审计随每次发布落库。
+    writeRuleVersionWithAudit: (version, audit, alsoWrite = []) => {
+      record("ruleVersion")(version);
+      for (const row of alsoWrite) record("ruleVersion")(row);
+      (store.ruleVersionAudits = store.ruleVersionAudits ?? []).push(audit);
       return Promise.resolve();
     },
+    loadRuleVersionAudits: (_tenantId, _workspaceId, ruleVersionId) =>
+      Promise.resolve(
+        (store.ruleVersionAudits ?? []).filter((row) => !ruleVersionId || row.ruleVersionId === ruleVersionId)
+      ),
     upsertNotificationTemplate: record("notificationTemplate")
   };
   return store;

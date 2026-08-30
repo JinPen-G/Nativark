@@ -101,13 +101,15 @@ assert.deepEqual(
 businessConfigStore.failCalendar = false;
 
 const currentRule = business.currentRule(tenantId, context());
+// RULE-01A：保存草稿与发布是两步。saveRuleVersion 只产出草稿，publishRuleVersion 才生效。
 const savedRule = await business.saveRuleVersion(tenantId, context(), {
   config: { ...structuredClone(currentRule.config), cancellation: { ...currentRule.config.cancellation, weatherExceptionEnabled: true } },
-  changeReason: "测试露营天气取消规则",
-  publish: true
+  changeReason: "测试露营天气取消规则"
 }, "test");
-assert.equal(savedRule.status, "published");
-assert.equal(business.currentRule(tenantId, context()).version, "1.1");
+assert.equal(savedRule.status, "draft", "保存只产出草稿，不直接生效");
+const publishedRule = await business.publishRuleVersion(tenantId, context(), savedRule.version, { reason: "发布天气取消规则" }, "test");
+assert.equal(publishedRule.status, "published", "立即发布即已生效");
+assert.equal(business.currentRule(tenantId, context()).version, "1.1", "按当前时间匹配到新发布的 1.1");
 
 const couponTemplate = await core.saveCouponTemplate(tenantId, {
   code: "CAMP-WELCOME",

@@ -320,6 +320,7 @@ model Tenant {
   rentalServiceCapacities RentalServiceCapacity[]
   rentalServiceReservations RentalServiceReservation[]
   rentalRuleVersions        RentalRuleVersion[]
+  rentalRuleVersionAudits   RentalRuleVersionAudit[]
   rentalBusinessCalendars   RentalBusinessCalendar[]
   rentalCalendarOverrideAudits RentalCalendarOverrideAuditEntry[]
   rentalPriceVersions       RentalPriceVersion[]
@@ -406,6 +407,7 @@ model BusinessWorkspace {
   rentalServiceCapacities  RentalServiceCapacity[]
   rentalServiceReservations RentalServiceReservation[]
   rentalRuleVersions          RentalRuleVersion[]
+  rentalRuleVersionAudits     RentalRuleVersionAudit[]
   rentalBusinessCalendars     RentalBusinessCalendar[]
   rentalCalendarOverrideAudits RentalCalendarOverrideAuditEntry[]
   rentalPriceVersions        RentalPriceVersion[]
@@ -3513,6 +3515,32 @@ model RentalValueAddedServiceVersion {
   @@map("rental_value_added_service_versions")
 }
 
+/// RULE-01A：规则版本审计（只追加）。发布、恢复、作废各记一条，含原因、操作者与前后状态。
+/// 独立成表而不是挂在版本行上：挂在行上只能留最后一次操作，恢复与作废的历史会被覆盖，
+/// 而需求 4.6.14 要求发布与人工覆盖「填写原因并记录完整审计」。
+model RentalRuleVersionAudit {
+  id            String   @id @default(uuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId   String
+  workspace     BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  ruleVersionId String
+  ruleVersion   RentalRuleVersion @relation(fields: [ruleVersionId], references: [id], onDelete: Cascade)
+  version       String
+  /// publish（发布）/ restore（恢复旧版生成新草稿）/ void（作废）/ supersede（被替代）。
+  action        String
+  fromStatus    String?
+  toStatus      String
+  reason        String   @db.VarChar(500)
+  operator      String?
+  at            DateTime
+  createdAt     DateTime @default(now())
+
+  @@index([tenantId, workspaceId, at], map: "rental_rule_version_audits_scope_idx")
+  @@index([ruleVersionId, at], map: "rental_rule_version_audits_version_idx")
+  @@map("rental_rule_version_audits")
+}
+
 model RentalRuleVersion {
   id           String             @id @default(uuid())
   tenantId     String
@@ -3528,11 +3556,25 @@ model RentalRuleVersion {
   config       Json
   changeReason String
   createdBy    String
+  /// RULE-01A：规则生效时点。报价按**租期开始时间**匹配覆盖该时点的已发布规则
+  /// （需求 4.6.1），因此这是匹配键；靠「唯一一条 published」匹配表达不了未来生效。
+  effectiveFrom DateTime?
   createdAt    DateTime           @default(now())
   publishedAt  DateTime?
+  publishedBy  String?
+  supersededAt DateTime?
+  previousVersion String?
+  /// RULE-01A：恢复旧版必须生成**新版本**（需求 4.6.1），这里记它来自哪一版。
+  restoredFromVersion String?
+  restoreReason String?
+  voidedAt     DateTime?
+  voidedBy     String?
+  voidReason   String?
+  audits       RentalRuleVersionAudit[]
 
   @@unique([workspaceId, version], map: "rental_rule_versions_tenant_version_key")
   @@index([tenantId, status, publishedAt], map: "rental_rule_versions_tenant_status_published_idx")
+  @@index([workspaceId, status, effectiveFrom], map: "rental_rule_versions_effective_idx")
   @@map("rental_rule_versions")
 }
 

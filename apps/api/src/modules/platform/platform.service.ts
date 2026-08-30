@@ -206,6 +206,9 @@ export class PlatformService {
       name: "门市租赁",
       children: [
         { code: "store-rental:rules:manage", name: "业务规则配置" },
+        // RULE-01A：发布与编辑分权（需求 4.6.14）。发布改变对外生效条款，
+        // 与「改草稿」是两个责任；共用一个码会让任何能编辑的人直接对客户生效。
+        { code: "store-rental:rules:publish", name: "业务规则发布", description: "发布或安排规则版本生效、作废已发布或待生效版本" },
         { code: "store-rental:order:view", name: "订单查看", description: "查看门市订单列表和详情" },
         { code: "store-rental:order:operate", name: "订单操作", description: "新建订单、取车验车、还车验车" },
         { code: "store-rental:order:settle", name: "订单结算", description: "确认费用、补缴、退款或月结入账" },
@@ -322,6 +325,7 @@ export class PlatformService {
       isActive: true,
       permissions: [
         "store-rental:rules:manage",
+        "store-rental:rules:publish",
         "store-rental:price:manage",
         "store-rental:marketing:manage",
         "store-rental:service:manage",
