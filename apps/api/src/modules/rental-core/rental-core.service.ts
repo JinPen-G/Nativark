@@ -1345,7 +1345,14 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const record: RentalInspectionRecord = {
       id: id("inspection"), tenantId, orderId, stage: template.stage, templateId: template.id,
       templateCode: template.code, templateVersion: template.version, results: input.results,
-      exceptions: input.exceptions ?? [], attachments: input.attachments ?? [], operator: input.operator || userName, createdAt: now()
+      exceptions: (input.exceptions ?? []).map((exception) => ({
+        code: exception.code,
+        description: exception.description,
+        suggestedChargeAmount: exception.chargeAmount,
+        evidenceAttachments: exception.evidenceAttachments ?? input.attachments ?? [],
+        reviewStatus: "pending" as const
+      })),
+      attachments: input.attachments ?? [], operator: input.operator || userName, createdAt: now()
     };
     const assetChanges: AssetStatusChange[] = [];
     if (template.stage === "pickup") {
@@ -1353,7 +1360,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     } else {
       this.finishReturn(order, 0, assetChanges);
       if (charges.overdue && charges.overdue.amount > 0) this.applyOverdueTo(order, charges.overdue.amount, charges.overdue.returnedAt);
-      if (charges.damage && charges.damage.amount > 0) this.applyDamageTo(order, charges.damage.amount, charges.damage.detail);
+      // 检查员提交的是损失建议，不能直接决定客户应付；审核通过后才追加订单费用。
     }
     order.updatedAt = now();
     // 检查记录与订单状态推进必须同事务：分两次写时中途失败会留下
@@ -1397,6 +1404,31 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       if (row.assetId) assetChanges.push({ assetId: row.assetId, status: RentalAssetStatus.Available });
     });
     if (overdueCharge > 0) this.applyOverdueTo(order, overdueCharge, now());
+  }
+
+  async approveInspectionException(
+    tenantId: string,
+    orderId: string,
+    inspectionId: string,
+    exceptionIndex: number,
+    amount: number,
+    detail: string,
+    tx: RentalFactTx
+  ) {
+    const order = await this.lockedOrder(tenantId, orderId, tx);
+    if (order.status !== RentalCoreOrderStatus.Settling) throw new ConflictException("只有待结算订单可以审核异常费用");
+    if (amount > 0) {
+      const code = `damage:${order.id}:${inspectionId}:${exceptionIndex}`;
+      if (!order.chargeLines.some((line) => line.code === code)) {
+        order.chargeLines.push({ code, name: "检查异常费用", type: "damage", amount, sourceVersion: order.ruleVersion, detail });
+        order.adjustmentAmount = Math.round((order.adjustmentAmount + amount) * 100) / 100;
+        order.finalPayableAmount = Math.round((order.payableAmount + order.adjustmentAmount) * 100) / 100;
+        order.totalAmount = order.finalPayableAmount;
+      }
+    }
+    order.updatedAt = now();
+    await this.factStore.saveOrderAggregate(order, [], tx);
+    return order;
   }
 
   async settleOrder(tenantId: string, orderId: string, tx: RentalFactTx, operator?: string) {

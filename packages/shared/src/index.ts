@@ -7892,7 +7892,8 @@ export interface RentalInspectionTemplate {
 export interface CreateRentalInspectionRequest {
   templateId: string;
   results: Record<string, unknown>;
-  exceptions?: Array<{ code: string; description: string; chargeAmount?: number }>;
+  /** 检查员只能提交建议损失额；最终计费必须由结算权限人员独立审核。 */
+  exceptions?: Array<{ code: string; description: string; chargeAmount?: number; evidenceAttachments?: string[] }>;
   attachments?: string[];
   operator?: string;
 }
@@ -7906,8 +7907,25 @@ export interface RentalInspectionRecord {
   templateCode: string;
   templateVersion: string;
   results: Record<string, unknown>;
-  exceptions: Array<{ code: string; description: string; chargeAmount?: number }>;
+  exceptions: Array<{
+    code: string;
+    description: string;
+    /** 检查员提交的建议额，不直接进入订单应付。 */
+    suggestedChargeAmount?: number;
+    evidenceAttachments?: string[];
+    reviewStatus: "pending" | "approved" | "rejected";
+    approvedChargeAmount?: number;
+    reviewReason?: string;
+    reviewedBy?: string;
+    reviewedAt?: string;
+  }>;
   attachments: string[];
   operator: string;
   createdAt: string;
+}
+
+export interface ReviewRentalInspectionExceptionRequest {
+  decision: "approved" | "rejected";
+  approvedChargeAmount?: number;
+  reason: string;
 }

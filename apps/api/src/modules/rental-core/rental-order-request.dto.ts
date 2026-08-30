@@ -8,6 +8,7 @@ import {
   type CreateRentalOrderRequest,
   type GrantRentalRewardRequest,
   type PartialReturnRentalOrderRequest,
+  type ReviewRentalInspectionExceptionRequest,
   type RentalAvailabilityRequest,
   type RentalCapability,
   type RentalFulfillmentMode,
@@ -170,6 +171,25 @@ export class RentalInspectionExceptionInputDto {
   @IsNumber()
   @Min(0)
   chargeAmount?: number;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  evidenceAttachments?: string[];
+}
+
+export class ReviewRentalInspectionExceptionDto implements ReviewRentalInspectionExceptionRequest {
+  @IsIn(["approved", "rejected"])
+  decision!: "approved" | "rejected";
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  approvedChargeAmount?: number;
+
+  @IsString()
+  @IsNotEmpty()
+  reason!: string;
 }
 
 /* ---------- 顶层请求 DTO ---------- */

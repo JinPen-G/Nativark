@@ -1,4 +1,5 @@
-import { BadRequestException, Body, Controller, ForbiddenException, Get, Param, Post, Put, Query, Req, Res } from "@nestjs/common";
+import { BadRequestException, Body, ConflictException, Controller, ForbiddenException, Get, Param, Post, Put, Query, Req, Res } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { RentalCoreOrderStatus } from "@store-rental/shared";
 import { createHash } from "node:crypto";
 import type {
@@ -27,6 +28,7 @@ import {
   CreateRentalInspectionDto,
   CreateRentalOrderDto,
   PartialReturnRentalOrderDto,
+  ReviewRentalInspectionExceptionDto,
   RentalAvailabilityDto,
   SaveRentalAssetDto,
   SaveRentalCouponTemplateDto,
@@ -378,16 +380,11 @@ export class RentalCoreController {
     const current = await this.service.getOrder(tenantId, id);
     const template = this.service.listInspectionTemplates(tenantId).find((row) => row.id === body.templateId);
     const returnedAt = new Date().toISOString();
-    // 逾期费与损坏费先按报价算好再一次性交给 service：迁库后每次"加载订单→改→存"
-    // 都是独立事务，分三次调用会把一个业务动作拆成三个事务。
+    // 逾期费可按规则直接计算；检查异常只保存建议，必须由结算人员另行审核。
     const quote = this.business.getQuote(tenantId, context, current.quoteId);
     const charges = template?.stage === "return"
       ? {
           overdue: { amount: this.business.calculateOverdueCharge(tenantId, context, quote, returnedAt), returnedAt },
-          damage: {
-            amount: this.business.calculateDamageCharge(tenantId, context, quote, body.exceptions ?? []),
-            detail: (body.exceptions ?? []).map((item) => item.description).join("；") || "归还检查损坏费用"
-          }
         }
       : {};
     const stage = template?.stage;
@@ -486,6 +483,14 @@ export class RentalCoreController {
       request: { orderId: id },
       orderId: id,
       run: async (tx) => {
+        const inspectionRows = await tx.rentalInspectionRecord.findMany({
+          where: { tenantId, workspaceId: this.service.resolveWorkspaceId(tenantId), orderId: id },
+          select: { exceptions: true }
+        });
+        const hasPendingException = inspectionRows.some((row) =>
+          (row.exceptions as unknown as Array<{ reviewStatus?: string }>).some((exception) => exception.reviewStatus === "pending")
+        );
+        if (hasPendingException) throw new ConflictException("仍有检查异常待审核，不能关闭订单");
         await this.funding.assertReadyToClose(tenantId, this.service.resolveWorkspaceId(tenantId), id, tx);
         const settled = await this.service.settleOrder(tenantId, id, tx, req.user.displayName);
         await this.business.completeCustomerOrderEventInTransaction(tenantId, context, settled.customerId, tx);
@@ -498,5 +503,58 @@ export class RentalCoreController {
     });
     await this.business.refreshFromDatabase();
     return this.committed(tenantId, order);
+  }
+
+  @Post("orders/:id/inspections/:inspectionId/exceptions/:exceptionIndex/review")
+  async reviewInspectionException(
+    @Req() req: AuthenticatedRequest,
+    @Param("id") id: string,
+    @Param("inspectionId") inspectionId: string,
+    @Param("exceptionIndex") exceptionIndexText: string,
+    @Body() body: ReviewRentalInspectionExceptionDto
+  ) {
+    const tenantId = req.user.tenantId;
+    const workspaceId = this.service.resolveWorkspaceId(tenantId);
+    const exceptionIndex = Number(exceptionIndexText);
+    if (!Number.isInteger(exceptionIndex) || exceptionIndex < 0) throw new BadRequestException("异常序号无效");
+    if (body.decision === "approved" && body.approvedChargeAmount === undefined) throw new BadRequestException("审核通过时必须填写最终费用");
+    const result = await this.idempotent.execute({
+      tenantId,
+      action: "order.inspection-exception.review",
+      key: idempotencyKeyOf(req),
+      fallbackKey: `inspection-exception.review:${inspectionId}:${exceptionIndex}`,
+      request: { orderId: id, inspectionId, exceptionIndex, ...body },
+      orderId: id,
+      run: async (tx) => {
+        const row = await tx.rentalInspectionRecord.findFirst({ where: { id: inspectionId, tenantId, workspaceId, orderId: id } });
+        if (!row) throw new BadRequestException("检查记录不存在");
+        const exceptions = structuredClone(row.exceptions as unknown as Array<Record<string, unknown>>);
+        const exception = exceptions[exceptionIndex];
+        if (!exception) throw new BadRequestException("检查异常不存在");
+        if (exception.reviewStatus !== "pending") throw new ConflictException("该检查异常已经审核，不能重复改写");
+        const approvedAmount = body.decision === "approved" ? Number(body.approvedChargeAmount) : 0;
+        const order = await this.service.approveInspectionException(
+          tenantId, id, inspectionId, exceptionIndex, approvedAmount,
+          `${String(exception.description)}；审核：${body.reason}`, tx
+        );
+        Object.assign(exception, {
+          reviewStatus: body.decision,
+          approvedChargeAmount: approvedAmount,
+          reviewReason: body.reason,
+          reviewedBy: req.user.displayName,
+          reviewedAt: new Date().toISOString()
+        });
+        await tx.rentalInspectionRecord.update({ where: { id: inspectionId }, data: { exceptions: exceptions as Prisma.InputJsonValue } });
+        return { order, inspectionId, exceptionIndex, exception };
+      },
+      replay: async () => {
+        const row = await this.prisma.rentalInspectionRecord.findFirst({ where: { id: inspectionId, tenantId, workspaceId, orderId: id } });
+        const exception = (row?.exceptions as unknown as Array<Record<string, unknown>> | undefined)?.[exceptionIndex];
+        const expectedAmount = body.decision === "approved" ? Number(body.approvedChargeAmount) : 0;
+        if (!exception || exception.reviewStatus !== body.decision || Number(exception.approvedChargeAmount) !== expectedAmount) return undefined;
+        return { order: await this.service.getOrder(tenantId, id), inspectionId, exceptionIndex, exception };
+      }
+    });
+    return this.committed(tenantId, result);
   }
 }

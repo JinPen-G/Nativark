@@ -384,6 +384,18 @@ async function closeMockFundedOrder(orderId, token, keyPrefix) {
   return request("POST", `/api/rental/v1/orders/${orderId}/settle`, {}, token);
 }
 
+async function reviewInspectionException(orderId, inspectionId, exceptionIndex, amount, token, keyPrefix) {
+  const reviewed = await request(
+    "POST",
+    `/api/rental/v1/orders/${orderId}/inspections/${inspectionId}/exceptions/${exceptionIndex}/review`,
+    { decision: "approved", approvedChargeAmount: amount, reason: "E2E 结算人员核定" },
+    token,
+    { "Idempotency-Key": `${keyPrefix}:exception:${exceptionIndex}` }
+  );
+  assert.equal(reviewed.status, 201, `检查异常审核失败: ${JSON.stringify(reviewed.body).slice(0, 200)}`);
+  return reviewed.body.data.order;
+}
+
 /**
  * 公共官方日历来源（需求 4.5.2/4.5.8）。
  *
@@ -807,7 +819,8 @@ async function main() {
   const returnTemplate = (await request("GET", "/api/rental/v1/inspection-templates?stage=return", null, demo.accessToken)).body.data[0];
   const returned = (await request("POST", `/api/rental/v1/orders/${orderId}/inspections`, { templateId: returnTemplate.id, results: { appearance_ok: true, function_ok: true, shutter_count: 9100 }, exceptions: [{ code: "damage", description: "E2E 损坏", chargeAmount: 66 }] }, demo.accessToken)).body.data;
   assert.equal(returned.order.status, "settling");
-  assert.ok(returned.order.finalPayableAmount > returned.order.payableAmount, "损坏费应进入最终应付");
+  const reviewedReturnOrder = await reviewInspectionException(orderId, returned.inspection.id, 0, 66, demo.accessToken, `e2e:${orderId}`);
+  assert.ok(reviewedReturnOrder.finalPayableAmount > reviewedReturnOrder.payableAmount, "审核通过后损坏费应进入最终应付");
   assert.equal((await assetStatus()).find((row) => row.id === trackedAssetId).status, "available", "归还后资产应释放为 available");
   const r1Settled = await closeMockFundedOrder(orderId, demo.accessToken, `e2e:${orderId}`);
   assert.equal(r1Settled.status, 201, "资金归零后应能结算关闭");
@@ -1059,7 +1072,9 @@ async function main() {
     demo2.accessToken
   )).body.data;
   assert.equal(campingReturned.order.status, "settling");
-  assert.equal(campingReturned.order.finalPayableAmount, campingReturned.order.payableAmount + 55, "缺件与污损费用应进入最终应付");
+  await reviewInspectionException(campingOrderId, campingReturned.inspection.id, 0, 35, demo2.accessToken, `e2e:${campingOrderId}`);
+  const campingReviewedOrder = await reviewInspectionException(campingOrderId, campingReturned.inspection.id, 1, 20, demo2.accessToken, `e2e:${campingOrderId}`);
+  assert.equal(campingReviewedOrder.finalPayableAmount, campingReviewedOrder.payableAmount + 55, "审核后的缺件与污损费用应进入最终应付");
   const campingSettled = await closeMockFundedOrder(campingOrderId, demo2.accessToken, `e2e:${campingOrderId}`);
   assert.equal(campingSettled.body.data.status, "completed", "露营订单资金归零后必须关闭");
   const campingStockAfter = (await request("GET", "/api/rental/v1/stock-balances", null, demo2.accessToken)).body.data.find((row) => row.itemGroupId === tent.id);
@@ -1707,25 +1722,26 @@ async function main() {
     construction.accessToken
   )).body.data;
   assert.equal(constructionReturned.order.status, "settling");
-  assert.equal(constructionReturned.order.finalPayableAmount, constructionReturned.order.payableAmount + 800, "工程损坏费应进入最终应付");
+  const constructionReviewedOrder = await reviewInspectionException(constructionOrderId, constructionReturned.inspection.id, 0, 800, construction.accessToken, `e2e:${constructionOrderId}`);
+  assert.equal(constructionReviewedOrder.finalPayableAmount, constructionReviewedOrder.payableAmount + 800, "审核后的工程损坏费应进入最终应付");
   // 订单侧的明细与总额同样要自洽（需求 4.4.1「明细之和等于对应总额」）。
   // 订单的明细是报价明细的拷贝，再追加取消/逾期/损坏这类异常费用，因此对应关系是：
   //   报价类明细（非押金、非预授权、非异常）之和 = 租赁应付
   //   异常类明细之和 = 调整金额
   // 这条把报价侧的对账延伸到订单侧；只在报价侧成立不足以说明账目在订单上也对得起来。
-  const orderLines = constructionReturned.order.chargeLines;
+  const orderLines = constructionReviewedOrder.chargeLines;
   const adjustmentTypes = new Set(["cancellation", "overdue", "damage"]);
   const sumBy = (predicate) =>
     Math.round(orderLines.filter(predicate).reduce((total, row) => total + row.amount, 0) * 100) / 100;
   assert.equal(
     sumBy((row) => !adjustmentTypes.has(row.type) && row.type !== "deposit" && row.type !== "preauthorization"),
-    constructionReturned.order.payableAmount,
-    `订单的报价类明细之和应等于租赁应付 ${constructionReturned.order.payableAmount}`
+    constructionReviewedOrder.payableAmount,
+    `订单的报价类明细之和应等于租赁应付 ${constructionReviewedOrder.payableAmount}`
   );
   assert.equal(
     sumBy((row) => adjustmentTypes.has(row.type)),
-    constructionReturned.order.adjustmentAmount,
-    `订单的异常类明细之和应等于调整金额 ${constructionReturned.order.adjustmentAmount}`
+    constructionReviewedOrder.adjustmentAmount,
+    `订单的异常类明细之和应等于调整金额 ${constructionReviewedOrder.adjustmentAmount}`
   );
   // 确认异常明细确实存在，否则上面第二条是拿 0 比 0（本节刻意造了 800 元损坏费）。
   assert.ok(

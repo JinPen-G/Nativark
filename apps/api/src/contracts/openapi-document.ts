@@ -2321,6 +2321,10 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: "Complete pickup or return inspection", permissions: ["store-rental:order:operate", "store-rental:vehicle:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
   },
   {
+    method: "post", path: "/api/rental/v1/orders/{id}/inspections/{inspectionId}/exceptions/{exceptionIndex}/review", tag: "RentalCore", operationId: "reviewRentalOrderInspectionException",
+    summary: "Approve or reject a suggested inspection exception charge", permissions: ["store-rental:order:settle"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+  },
+  {
     method: "get", path: "/api/rental/v1/capabilities", tag: "RentalCore", operationId: "listWorkspaceCapabilities",
     summary: "List workspace capability instances with declared/implemented/enabled state",
     permissions: ["rental-core:capability:view", "rental-core:capability:manage"], responseSchema: "GenericObject"
