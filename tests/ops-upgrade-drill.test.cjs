@@ -44,6 +44,21 @@ void (() => {
   rejects(() => env.buildCloneDatabaseName("store_rental_prod_claude", "upgrade"), /生产\/共享环境标记/u, "源库带生产标记");
   ok("克隆库命名：种类与时间戳齐备、升级与回滚分库、共享/生产源库被拒");
 
+  assert.equal(env.quoteSqlString("store_rental"), "'store_rental'");
+  assert.equal(env.quoteSqlString("svc' OR 1=1 --"), "'svc'' OR 1=1 --'", "账号名必须安全编码后再进入 GRANT/REVOKE");
+  rejects(() => env.quoteSqlString("bad\nuser"), /控制字符/u, "账号名控制字符");
+  ok("SQL 字符串：账号名不能改变 GRANT/REVOKE 语句结构");
+
+  const specialUrl = env.buildDatabaseUrl(
+    "mysql://old:old@127.0.0.1:3306/store_rental_claude",
+    { user: "svc.user", password: "p@ss:/?#%", database: upgrade }
+  );
+  const parsedSpecialUrl = new URL(specialUrl);
+  assert.equal(decodeURIComponent(parsedSpecialUrl.username), "svc.user");
+  assert.equal(decodeURIComponent(parsedSpecialUrl.password), "p@ss:/?#%", "特殊字符口令不得被二次编码");
+  assert.equal(parsedSpecialUrl.pathname, `/${upgrade}`);
+  ok("克隆库连接串：账号与特殊字符口令只编码一次，并准确切换库名");
+
   // ============ 2. 只有本工具形态的克隆库才允许被自动删除 ============
   for (const name of [
     SOURCE,                                        // 源库
@@ -175,7 +190,11 @@ void (() => {
   );
   // migrate deploy 的目标必须是克隆库连接串，不能是源库连接串。
   assert.match(drill, /DATABASE_URL: adminUrl/u, "migrate deploy 必须指向克隆库（管理凭据）");
-  assert.match(drill, /url\.pathname = `\/\$\{upgradeDb\}`/u, "克隆库连接串必须改库名");
+  assert.match(drill, /buildDatabaseUrl\([\s\S]{0,120}database: upgradeDb/u, "克隆库连接串必须由共用 helper 安全改库名");
+  assert.match(drill, /DATABASE_CONNECT_ON_START: "true"/u, "临时 API 必须在启动阶段强制连接克隆库");
+  assert.match(drill, /sql\(target, "SELECT 1", \{ database: upgradeDb \}\)/u,
+    "健康检查前必须用应用账号直连克隆库，不能把进程存活当数据库健康");
+  assert.match(drill, /verifiedAfterDeploy = verifyClone/u, "migrate deploy 后必须再次核对关键表和抽样数据");
   // 回滚必须是「从同一份备份恢复到另一个新库」，不得写 down migration。
   assert.match(drill, /buildCloneDatabaseName\(target\.database, "rollback"\)/u, "回滚必须落在独立的新库上");
   assert.match(drill, /不写 down migration/u, "回滚策略必须显式声明不写 down migration");
@@ -193,6 +212,7 @@ void (() => {
   assert.match(drill, /if \(!isOwnedCloneDatabase\(db\)\) throw new OpsTargetError/u, "删库前必须校验克隆库形态");
   assert.match(drill, /for \(const db of created\)/u, "只允许删除本次 created 列表内的库");
   assert.match(drill, /REVOKE ALL PRIVILEGES ON/u, "删库前必须回收授权——DROP DATABASE 不会清 mysql.db 的库级授权");
+  assert.match(drill, /if \(keep\)[\s\S]*REVOKE ALL PRIVILEGES ON/u, "--keep 的人工清理指引也必须先给 REVOKE");
   assert.match(drill, /按设计\*\*保留\*\*供排查/u, "失败时必须保留克隆库并给出精确清理指引");
   assert.match(drill, /本次未创建任何克隆库，无残留/u, "未创建资源时必须明确说明无残留");
   ok("资源边界：端口占用即失败、不停外部进程、只删本次创建且形态正确的库并先回收授权");

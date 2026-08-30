@@ -49,6 +49,38 @@ function redact(text, secrets = []) {
   return output.replace(/(\/\/[^/:@\s]+):[^@\s]+@/g, "$1:***@");
 }
 
+/** 把受信配置值编码为 SQL 字符串字面量，避免账号名进入 GRANT/REVOKE 时改变语句结构。 */
+function quoteSqlString(value) {
+  const text = String(value ?? "");
+  if (!text || /[\u0000\r\n]/u.test(text)) {
+    throw new OpsTargetError("SQL 字符串值为空或含控制字符，拒绝拼入语句");
+  }
+  return `'${text.replace(/'/g, "''")}'`;
+}
+
+/**
+ * 基于既有连接串生成指向克隆库的新连接串。
+ * userinfo 必须先编码一次再交给 URL 组装；尤其裸 `%` 不会由属性赋值自动补成 `%25`。
+ * 编码逻辑集中在这里，调用方不得各自拼连接串。
+ */
+function buildDatabaseUrl(rawUrl, { user, password, database }) {
+  let url;
+  try {
+    url = new URL(String(rawUrl ?? ""));
+  } catch {
+    throw new OpsTargetError("无法基于 DATABASE_URL 构造克隆库连接串");
+  }
+  if (url.protocol !== "mysql:") throw new OpsTargetError("克隆库连接串只支持 mysql");
+  const reason = rejectionReason(database);
+  if (reason) throw new OpsTargetError(reason);
+  // WHATWG URL 对 userinfo 的赋值不会替调用方编码裸 `%`，但会保留合法 `%XX`；
+  // 因此这里先编码一次，再交给 URL 组装，不能直接赋原始口令。
+  url.username = encodeURIComponent(String(user ?? ""));
+  url.password = encodeURIComponent(String(password ?? ""));
+  url.pathname = `/${database}`;
+  return url.toString();
+}
+
 /**
  * 解析并校验 `DATABASE_URL`。
  *
@@ -188,6 +220,8 @@ module.exports = {
   CLONE_KINDS,
   OpsTargetError,
   redact,
+  quoteSqlString,
+  buildDatabaseUrl,
   parseDatabaseUrl,
   rejectionReason,
   resolveDedicatedTarget,

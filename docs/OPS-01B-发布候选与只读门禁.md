@@ -8,6 +8,14 @@
 
 ## 1. 命令
 
+先显式生成发布构建并绑定当前 Git 提交（该命令会写 `dist` 和来源证明）：
+
+```bash
+npm run ops:release-build
+```
+
+再执行默认只读的发布门禁：
+
 ```bash
 npm run ops:release-gate
 ```
@@ -32,7 +40,8 @@ npm run test:ops-release
 | 工作区干净 | `git status --porcelain` 为空 | 有未提交或未跟踪文件；清单里的提交号名不副实，产物可能包含未入库内容 |
 | Node / npm 版本 | 均可取到 | 环境不完整 |
 | Prisma 版本已锁定 | `apps/api/package.json` 里声明了 `prisma` 与 `@prisma/client` | 未锁定版本，发布与验证环境可能用不同 Prisma |
-| 构建产物可摘要 | `apps/api/dist`、`apps/admin/dist`、`packages/shared/dist` 均非空并算出指纹 | 产物缺失，先 `npm run build` |
+| 构建产物可摘要 | `apps/api/dist`、`apps/admin/dist`、`packages/shared/dist` 均非空并算出指纹 | 产物缺失，先跑 `npm run ops:release-build` |
+| 构建来源可证明 | `artifacts/release/build-provenance.json` 的 Git 提交等于当前 HEAD，三个产物摘要也与当前文件一致 | 旧 `dist`、切换提交或产物被改写；必须重新执行发布构建 |
 | 必需环境变量 | `DATABASE_URL`、`AUTH_TOKEN_SECRET` 存在且非空白 | 缺失即不可发布（见 §3） |
 | 目标库守卫 | 通过 OPS-01A 的专用库与容器端点守卫 | 目标配错，或指向共享/生产库 |
 | 迁移状态（只读） | `prisma migrate status` 已同步 | 有待应用迁移；由人工按 OPS-01A §5 决定 deploy 时机 |
@@ -70,12 +79,15 @@ npm run test:ops-release
 > （`store_rental` 与 `store_rental_claude`），子串匹配会把一个本就不是秘密的库名判成泄露。
 > 一个总在误报的检查很快会被人关掉，那比没有检查更糟。
 
-产物指纹按「路径归一 → 逐文件 sha256 → 按路径排序 → 合成总摘要」计算，
-因此同一份产物在不同机器上得到同一个值，「验过的产物」与「要发的产物」可被证明是同一份。
+产物指纹按「路径归一 → 逐文件 sha256 → 按路径排序 → 合成总摘要」计算。
+仅有摘要仍不够：旧 `dist` 也能稳定摘要。因此 `ops:release-build` 必须在干净工作区执行完整
+`npm run build`，并把当前 Git 提交与三个摘要写进来源证明；只读门禁同时核对提交和摘要，
+才能证明「当前源码构建出的产物」就是即将发布的产物。
 
 ## 5. 门禁不做的事
 
 - 不执行 `prisma migrate dev/deploy`：发布前最该知道的是差什么，而不是已经替你改了；
+- 不执行构建：构建会写 `dist`，必须由显式的 `ops:release-build` 先完成；
 - 不启动、不重启、不替换任何服务或容器；
 - 不写除清单以外的任何文件（专项断言了脚本里只有建目录与写清单两种写盘动作）；
 - 不连接共享库或生产库：目标库必须先过专用库守卫。

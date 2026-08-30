@@ -20,40 +20,23 @@ const {
   RELEASE_ENV_VARS,
   HEALTH_ENTRYPOINTS,
   inspectEnvNames,
-  digestFiles,
   summarizeWorktree,
+  inspectBuildProvenance,
   assertNoSecrets
 } = require("./release-facts.cjs");
-
-const ARTIFACT_DIR = process.env.OPS_ARTIFACT_DIR || path.join(ROOT, "artifacts", "release");
-const BUILD_TARGETS = [
-  { name: "@store-rental/api", dir: path.join(ROOT, "apps", "api", "dist") },
-  { name: "@store-rental/admin", dir: path.join(ROOT, "apps", "admin", "dist") },
-  { name: "@store-rental/shared", dir: path.join(ROOT, "packages", "shared", "dist") }
-];
+const { ARTIFACT_DIR, summarizeBuilds, readBuildProvenance } = require("./release-artifacts.cjs");
 
 const flag = (name) => process.argv.includes(`--${name}`);
 
 function run(command, args, options = {}) {
-  const result = spawnSync(command, args, { cwd: ROOT, encoding: "utf8", ...options });
+  const executable = process.platform === "win32" && ["npm", "npx"].includes(command) ? `${command}.cmd` : command;
+  const result = spawnSync(executable, args, { cwd: ROOT, encoding: "utf8", ...options });
   return { status: result.status, out: String(result.stdout ?? "").trim(), err: String(result.stderr ?? "").trim() };
-}
-
-/** 递归收集产物文件。产物不存在时返回空数组，由调用方判定为门禁失败。 */
-function collectFiles(dir) {
-  if (!fs.existsSync(dir)) return [];
-  const files = [];
-  for (const entry of fs.readdirSync(dir, { recursive: true, withFileTypes: true })) {
-    if (!entry.isFile()) continue;
-    const full = path.join(entry.parentPath ?? entry.path, entry.name);
-    files.push({ path: path.relative(ROOT, full), bytes: fs.statSync(full).size, contents: fs.readFileSync(full) });
-  }
-  return files;
 }
 
 function toolVersions() {
   const node = process.version;
-  const npm = run("npm", ["--version"], { shell: true }).out || "未知";
+  const npm = run("npm", ["--version"]).out || "未知";
   // Prisma 版本取自锁定的依赖声明，而不是全局 CLI：发布要固定的是**仓库锁定**的版本。
   const apiPkg = JSON.parse(fs.readFileSync(path.join(ROOT, "apps", "api", "package.json"), "utf8"));
   const prisma = apiPkg.devDependencies?.prisma ?? apiPkg.dependencies?.prisma ?? "未声明";
@@ -94,10 +77,7 @@ void (async () => {
   );
 
   // ---------- 3. 构建产物摘要 ----------
-  const builds = BUILD_TARGETS.map((target) => {
-    const digest = digestFiles(collectFiles(target.dir));
-    return { name: target.name, dir: path.relative(ROOT, target.dir), ...digest };
-  });
+  const builds = summarizeBuilds();
   for (const build of builds) {
     record(
       `构建产物存在并可摘要：${build.name}`,
@@ -107,6 +87,12 @@ void (async () => {
   }
   // 清单里只保留总摘要与计数，不逐文件展开：几千行文件表会把清单变成噪声。
   const buildSummary = builds.map(({ name, dir, fileCount, totalBytes, digest }) => ({ name, dir, fileCount, totalBytes, digest }));
+  const provenance = inspectBuildProvenance(readBuildProvenance(), head, buildSummary);
+  record(
+    "构建产物来自当前 Git 提交",
+    provenance.ok,
+    provenance.ok ? `${shortHead} 的显式发布构建，摘要一致` : provenance.problems.join("；")
+  );
 
   // ---------- 4. 环境变量名（只记名，不记值） ----------
   const env = { ...readEnvFile(".env"), ...process.env };
@@ -132,7 +118,6 @@ void (async () => {
   if (target) {
     const status = run("npx", ["prisma", "migrate", "status"], {
       cwd: path.join(ROOT, "apps", "api"),
-      shell: true,
       env: { ...process.env, DATABASE_URL: loadDatabaseUrl() }
     });
     const output = redact(`${status.out}\n${status.err}`, [target.password]);
@@ -168,6 +153,7 @@ void (async () => {
     git: { commit: head, shortCommit: shortHead, branch, commitTime, worktreeClean: worktree.clean, changedCount: worktree.changedCount },
     toolchain: versions,
     builds: buildSummary,
+    buildProvenance: { verified: provenance.ok, commit: provenance.ok ? head : undefined },
     env: {
       declared: RELEASE_ENV_VARS.map(({ name, required, purpose }) => ({ name, required, purpose })),
       present: envNames.present,

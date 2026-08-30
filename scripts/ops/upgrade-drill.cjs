@@ -21,7 +21,7 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const net = require("node:net");
 const { spawn, spawnSync } = require("node:child_process");
-const { buildCloneDatabaseName, isOwnedCloneDatabase, redact, OpsTargetError } = require("./dedicated-env.cjs");
+const { buildCloneDatabaseName, buildDatabaseUrl, isOwnedCloneDatabase, redact, quoteSqlString, OpsTargetError } = require("./dedicated-env.cjs");
 const { rewriteBackupForTarget, verifyClone } = require("./restore-core.cjs");
 const { ROOT, requireTarget, requireAdminTarget, assertContainerEndpoint, loadDatabaseUrl, log, fail, containerRunning, runMysql, sql } = require("./runtime.cjs");
 
@@ -73,6 +73,9 @@ function startApi(cloneUrl, port, secrets) {
     env: {
       ...process.env,
       DATABASE_URL: cloneUrl,
+      // 健康端点本身不查库，因此必须让应用启动阶段强制完成 Prisma 连接；
+      // 否则一个完全没接上克隆库的进程也可能返回 status=ok。
+      DATABASE_CONNECT_ON_START: "true",
       API_PORT: String(port),
       // 演练进程不应因缺密钥而回落到公开的开发密钥；给一个仅本次进程使用的随机值。
       AUTH_TOKEN_SECRET: process.env.AUTH_TOKEN_SECRET || crypto.randomBytes(32).toString("hex"),
@@ -89,18 +92,22 @@ function startApi(cloneUrl, port, secrets) {
 /**
  * 轮询健康检查。
  *
- * 只看 HTTP 200 是不够的：反向代理、静态兜底页、甚至一个还没接上库的进程都能回 200。
- * 因此必须读到 `status === "ok"`。响应可能被全局拦截器包一层 `{ data: ... }`，
+ * 只看 HTTP 200 是不够的：反向代理或静态兜底页也能回 200。数据库连通由启动时
+ * `DATABASE_CONNECT_ON_START=true` 与应用账号直连探针共同保证；本检查再要求应用自身
+ * 返回 `status === "ok"`。响应可能被全局拦截器包一层 `{ data: ... }`，
  * 两种形状都接受，但**不接受**取不到 status 的情况。
  */
 function readHealthStatus(payload) {
   return payload?.status ?? payload?.data?.status;
 }
 
-async function probeHealth(port, attempts = 40) {
+async function probeHealth(port, child, attempts = 40) {
   let lastStatus;
   let lastBody;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    if (child?.exitCode !== null) {
+      return { ok: false, attempt, status: lastStatus, health: lastBody, processExitCode: child.exitCode };
+    }
     try {
       const response = await fetch(`http://127.0.0.1:${port}${HEALTH_PATH}`);
       lastStatus = response.status;
@@ -178,22 +185,23 @@ void (async () => {
     // 迁移用**管理账号**执行，与真实发布一致：DDL 由特权账号做，应用账号不该持有。
     // 而 API 仍以应用账号连接，因此要把克隆库的读写权限授给它——新建的库对应用账号
     // 默认不可见（实测 P1010 Access denied）。授权在清理阶段回收。
-    const cloneUrlFor = (user, password) => {
-      const url = new URL(loadDatabaseUrl());
-      url.username = encodeURIComponent(user);
-      url.password = encodeURIComponent(password);
-      url.pathname = `/${upgradeDb}`;
-      return url.toString();
-    };
+    const cloneUrlFor = (user, password) => buildDatabaseUrl(
+      loadDatabaseUrl(),
+      { user, password, database: upgradeDb }
+    );
     const adminUrl = cloneUrlFor(admin.user, admin.password);
     const appUrl = cloneUrlFor(target.user, target.password);
-    sql(admin, `GRANT ALL PRIVILEGES ON \`${upgradeDb}\`.* TO '${target.user}'@'%'`);
+    const appAccount = `${quoteSqlString(target.user)}@'%'`;
+    sql(admin, `GRANT ALL PRIVILEGES ON \`${upgradeDb}\`.* TO ${appAccount}`);
     granted.push(upgradeDb);
     sql(admin, "FLUSH PRIVILEGES");
-    const deploy = spawnSync("npx", ["prisma", "migrate", "deploy"], {
+    const appProbe = sql(target, "SELECT 1", { database: upgradeDb });
+    if (appProbe !== "1") throw new OpsTargetError("应用账号无法读取升级克隆库，拒绝启动健康检查");
+    step("应用账号克隆库连通", true, `${upgradeDb} / SELECT 1`);
+    const deployCommand = process.platform === "win32" ? "npx.cmd" : "npx";
+    const deploy = spawnSync(deployCommand, ["prisma", "migrate", "deploy"], {
       cwd: API_DIR,
       encoding: "utf8",
-      shell: true,
       env: { ...process.env, DATABASE_URL: adminUrl }
     });
     const deployOut = redact(`${deploy.stdout ?? ""}${deploy.stderr ?? ""}`, secrets);
@@ -202,6 +210,15 @@ void (async () => {
     }
     const appliedNow = Number(sql(admin, `SELECT COUNT(*) FROM \`${upgradeDb}\`._prisma_migrations WHERE finished_at IS NOT NULL`));
     const newlyApplied = appliedNow - restored.targetMigrations;
+    if (newlyApplied < 0) {
+      throw new OpsTargetError(`升级后迁移条数从 ${restored.targetMigrations} 降为 ${appliedNow}，拒绝继续`);
+    }
+    const verifiedAfterDeploy = verifyClone(
+      (statement) => sql(admin, statement),
+      target.database,
+      upgradeDb,
+      { expectSameMigrations: false }
+    );
     // 新增 0 条不是失败——它只说明这份备份已经包含全部迁移。但必须说清楚，
     // 否则「migrate deploy 通过」会被读成「升级路径已验证」，而实际什么都没升。
     step("克隆库 migrate deploy", true,
@@ -209,6 +226,8 @@ void (async () => {
         ? `已应用 ${appliedNow} 条（本次新增 ${newlyApplied} 条）；源库未被迁移`
         : `已应用 ${appliedNow} 条，本次新增 0 条——备份时点已含全部迁移，`
           + "本次只证明 deploy 在克隆库上可干净执行，未实际演练迁移变更；源库未被迁移");
+    step("升级后关键表复核", true,
+      `表 ${verifiedAfterDeploy.targetTables}｜迁移 ${verifiedAfterDeploy.targetMigrations}｜${verifiedAfterDeploy.sampled.join("，")}`);
 
     // ---------- 4. 独立端口起 API ----------
     await assertPortFree(DRILL_PORT);
@@ -216,11 +235,12 @@ void (async () => {
     step("独立端口启动 API", true, `127.0.0.1:${DRILL_PORT}（临时进程，不替换任何运行实例）`);
 
     // ---------- 5. 健康检查 ----------
-    const health = await probeHealth(DRILL_PORT);
+    const health = await probeHealth(DRILL_PORT, apiHandle.child);
     if (!health.ok) {
       throw new OpsTargetError(
         `健康检查未通过（${HEALTH_PATH} 在 ${health.attempt} 次尝试内未回 status=ok；`
-        + `最后 HTTP ${health.status ?? "无响应"}、status=${JSON.stringify(health.health ?? null)}）。`
+        + `最后 HTTP ${health.status ?? "无响应"}、status=${JSON.stringify(health.health ?? null)}`
+        + `${health.processExitCode === undefined ? "" : `、进程退出码=${health.processExitCode}`}）。`
         + `进程输出末尾：${apiHandle.output().split(/\r?\n/).filter(Boolean).slice(-4).join(" | ")}`
       );
     }
@@ -250,6 +270,7 @@ void (async () => {
       `${rollbackDb}｜停在备份时点迁移 ${rolledBack.targetMigrations} 条`);
 
     // ---------- 7. 结果 ----------
+    const keep = flag("keep") || process.env.OPS_KEEP_DRILL === "1";
     const report = {
       task: "OPS-01C",
       kind: "upgrade-rollback-drill",
@@ -261,6 +282,8 @@ void (async () => {
         migrationsAtRestore: restored.targetMigrations,
         migrationsAfterDeploy: appliedNow,
         newlyApplied,
+        tableCountAfterDeploy: verifiedAfterDeploy.targetTables,
+        sampledRowsAfterDeploy: verifiedAfterDeploy.sampled,
         health: { path: HEALTH_PATH, port: DRILL_PORT, httpStatus: health.status, reported: health.health, attempt: health.attempt },
         upgradeExercised: newlyApplied > 0,
         upgradeNote: newlyApplied > 0
@@ -273,6 +296,7 @@ void (async () => {
         strategy: "从同一份已验证备份恢复出干净库；不写 down migration，不覆盖源库"
       },
       manualCutover: [
+        `0. 这是演练生成的人工切换模板；本次克隆库${keep ? "按 --keep 保留，可供继续核查" : "将在成功后删除，不能直接作为可切换目标"}。`,
         `1. 停止写入：将应用置为维护态（本脚本不做，也不会停止任何运行中的服务）。`,
         `2. 确认目标：升级后使用 ${upgradeDb}；需要回退时使用 ${rollbackDb}。`,
         `3. 切换连接：把 DATABASE_URL 的库名改为目标库，逐个实例重启（人工执行）。`,
@@ -294,17 +318,19 @@ void (async () => {
 
     // ---------- 8. 清理：只删本次创建且已验证成功的资源 ----------
     if (apiHandle) { apiHandle.child.kill(); apiHandle = undefined; }
-    const keep = flag("keep") || process.env.OPS_KEEP_DRILL === "1";
     if (keep) {
       log(`\n✓ 演练通过。按要求保留克隆库：${created.join("、")}`);
-      for (const db of created) log(`  清理：DROP DATABASE \`${db}\`;`);
+      for (const db of created) {
+        if (granted.includes(db)) log(`  清理 1：REVOKE ALL PRIVILEGES ON \`${db}\`.* FROM ${appAccount};`);
+        log(`  清理 ${granted.includes(db) ? "2" : "1"}：DROP DATABASE \`${db}\`;`);
+      }
     } else {
       for (const db of created) {
         // 双重判定：既要是本次 created 列表里的，也要符合本工具的克隆库形态。
         if (!isOwnedCloneDatabase(db)) throw new OpsTargetError(`拒绝删除：${db} 不符合本工具克隆库形态`);
         // 先回收授权再删库：DROP DATABASE 不会清 mysql.db 里的库级授权，
         // 顺序反了会留下一条指向已删库的孤立授权。
-        if (granted.includes(db)) sql(admin, `REVOKE ALL PRIVILEGES ON \`${db}\`.* FROM '${target.user}'@'%'`);
+        if (granted.includes(db)) sql(admin, `REVOKE ALL PRIVILEGES ON \`${db}\`.* FROM ${appAccount}`);
         sql(admin, `DROP DATABASE \`${db}\``);
       }
       if (granted.length) sql(admin, "FLUSH PRIVILEGES");
@@ -319,7 +345,7 @@ void (async () => {
       console.error("  以下克隆库按设计**保留**供排查（失败时不自动删除）：");
       for (const db of created) console.error(`    - ${db}    清理：DROP DATABASE \`${db}\`;`);
       for (const db of granted) {
-        console.error(`      该库已授权给应用账号，删库前先回收：REVOKE ALL PRIVILEGES ON \`${db}\`.* FROM '${target.user}'@'%';`);
+        console.error(`      该库已授权给应用账号，删库前先回收：REVOKE ALL PRIVILEGES ON \`${db}\`.* FROM ${quoteSqlString(target.user)}@'%';`);
       }
     } else {
       console.error("  本次未创建任何克隆库，无残留。");

@@ -93,6 +93,39 @@ function summarizeWorktree(porcelain) {
 }
 
 /**
+ * 校验构建产物是否确实由当前 Git 提交生成。
+ *
+ * 仅对现有 dist 做摘要不能证明它来自当前源码：切换提交或改坏源码后，旧 dist 仍可能
+ * 完整存在。发布门禁必须同时核对「构建时提交」和「当前产物摘要」，缺一不可。
+ */
+function inspectBuildProvenance(provenance, head, builds) {
+  const problems = [];
+  if (!provenance || provenance.kind !== "release-build-provenance") {
+    problems.push("缺少有效的构建来源证明，请先运行 npm run ops:release-build");
+    return { ok: false, problems };
+  }
+  if (!head || provenance.git?.commit !== head) {
+    problems.push(`构建提交 ${provenance.git?.commit || "未知"} 与当前提交 ${head || "未知"} 不一致`);
+  }
+  const recorded = new Map((provenance.builds ?? []).map((build) => [build.name, build]));
+  for (const build of builds) {
+    const before = recorded.get(build.name);
+    if (!before) {
+      problems.push(`${build.name} 缺少构建来源记录`);
+      continue;
+    }
+    if (
+      before.digest !== build.digest
+      || before.fileCount !== build.fileCount
+      || before.totalBytes !== build.totalBytes
+    ) {
+      problems.push(`${build.name} 当前产物与构建来源记录不一致`);
+    }
+  }
+  return { ok: problems.length === 0, problems };
+}
+
+/**
  * 清单落盘前的最后一道闸：不允许任何口令、令牌或连接串明文进入。
  *
  * 判定刻意**不用**「整份 JSON 里搜子串」。本地夹具的库口令恰好是库名前缀
@@ -147,5 +180,6 @@ module.exports = {
   inspectEnvNames,
   digestFiles,
   summarizeWorktree,
+  inspectBuildProvenance,
   assertNoSecrets
 };

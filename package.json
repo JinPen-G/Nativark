@@ -23,6 +23,7 @@
     "ops:migration-status": "node scripts/ops/migration-status.cjs",
     "ops:backup": "node scripts/ops/backup.cjs",
     "ops:restore-drill": "node scripts/ops/restore-drill.cjs",
+    "ops:release-build": "node scripts/ops/release-build.cjs",
     "ops:release-gate": "node scripts/ops/release-gate.cjs",
     "ops:upgrade-drill": "node scripts/ops/upgrade-drill.cjs",
     "test:ops-dedicated": "node tests/ops-dedicated-env.test.cjs",

@@ -58,6 +58,18 @@ void (() => {
   assert.equal(windows.digest, first.digest, "路径分隔符必须归一化后再摘要");
   ok("产物指纹：与顺序无关、随内容与路径变化、缺失不伪造、分隔符归一");
 
+  const currentBuilds = [{ name: "api", fileCount: 2, totalBytes: 5, digest: first.digest }];
+  const proof = { kind: "release-build-provenance", git: { commit: "abc" }, builds: currentBuilds };
+  assert.equal(facts.inspectBuildProvenance(proof, "abc", currentBuilds).ok, true, "同提交同摘要应通过");
+  assert.equal(facts.inspectBuildProvenance(proof, "def", currentBuilds).ok, false, "旧提交产物必须失败");
+  assert.equal(
+    facts.inspectBuildProvenance(proof, "abc", [{ ...currentBuilds[0], digest: "changed" }]).ok,
+    false,
+    "产物在构建后被改写必须失败"
+  );
+  assert.equal(facts.inspectBuildProvenance(undefined, "abc", currentBuilds).ok, false, "没有来源证明的旧 dist 必须失败");
+  ok("构建来源证明：当前提交和当前产物摘要必须同时匹配");
+
   // ============ 3. 工作区状态 ============
   assert.equal(facts.summarizeWorktree("").clean, true, "空 porcelain 表示干净");
   assert.equal(facts.summarizeWorktree("   \n\n").clean, true, "只有空行同样算干净");
@@ -112,6 +124,12 @@ void (() => {
   assert.match(gate, /dry-run/u, "默认模式必须标明 dry-run");
   assert.match(gate, /assertNoSecrets\(manifest, secrets\)/u, "清单落盘前必须过敏感值闸门");
   assert.match(gate, /assertContainerEndpoint\(requireTarget\(\)\)/u, "目标库必须过专用库与端点守卫");
+  assert.match(gate, /inspectBuildProvenance\(readBuildProvenance\(\), head, buildSummary\)/u,
+    "只读门禁必须把现有产物绑定到当前提交，不能只认旧 dist 摘要");
+  const builder = fs.readFileSync(path.join(ROOT, "scripts/ops/release-build.cjs"), "utf8");
+  assert.match(builder, /run\("npm", \["run", "build"\]/u, "显式发布构建必须真的执行完整 build");
+  assert.match(builder, /worktree\.clean/u, "发布构建前必须拒绝脏工作区");
+  assert.match(builder, /BUILD_PROVENANCE_FILE/u, "发布构建必须写出当前提交的来源证明");
   ok("门禁默认只读：只查迁移状态不 deploy、不起服务、只有 --emit 才写清单");
 
   // ============ 6. 清单字段齐备（发布要固定的东西一个都不能少） ============
