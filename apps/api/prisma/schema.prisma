@@ -4037,9 +4037,18 @@ model RentalNotificationLog {
   providerMessageId String?
   errorMessage      String?
   attempts          Int                        @default(0)
+  /// NOTICE-01A：触发本条通知的业务对象（如 order / <订单id>）。
+  /// 手工发送没有业务对象，因此可空。
+  businessObjectType String?
+  businessObjectId   String?
+  /// NOTICE-01A：空间级幂等键，形如 `<eventCode>:<businessObjectId>`。
+  /// 由业务事件驱动的通知带键，手工发送不带（NULL）。MySQL 唯一索引对 NULL
+  /// 互不冲突，因此手工发送不受去重约束，而同一业务事件重放不会二次落库。
+  idempotencyKey     String?
   sentAt            DateTime?
   createdAt         DateTime                   @default(now())
 
+  @@unique([workspaceId, idempotencyKey], map: "rental_notification_logs_ws_idempotency_key")
   @@index([tenantId, eventCode, createdAt], map: "rental_notification_logs_tenant_event_created_idx")
   @@index([tenantId, status, createdAt], map: "rental_notification_logs_tenant_status_created_idx")
   @@index([templateId])

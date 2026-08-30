@@ -106,8 +106,13 @@ export class RentalCoreController {
     await Promise.all([this.service.persist(tenantId), this.business.persist(tenantId)]);
     return resolved;
   }
-  private async emitOrderEvent(tenantId: string, eventCode: string, order: { orderNo: string; customerName: string; contactPhone?: string; customerId?: string }) {
-    return await this.business.emitNotificationEvent(tenantId, this.context(tenantId), eventCode, order.contactPhone ?? order.customerId, { customerName: order.customerName, orderNo: order.orderNo });
+  private async emitOrderEvent(tenantId: string, eventCode: string, order: { id: string; orderNo: string; customerName: string; contactPhone?: string; customerId?: string }) {
+    // 业务对象随事件传入，服务端据此生成空间级幂等键——同一订单同一事件重放不再二次发信。
+    return await this.business.emitNotificationEvent(
+      tenantId, this.context(tenantId), eventCode, order.contactPhone ?? order.customerId,
+      { customerName: order.customerName, orderNo: order.orderNo },
+      { type: "order", id: order.id }
+    );
   }
   @Get("categories") categories() { return this.service.listCategories(); }
   /**
@@ -415,6 +420,11 @@ export class RentalCoreController {
     if (stage === "return") await this.business.refreshFromDatabase();
     if (!replayed) {
       await this.emitOrderEvent(tenantId, result.inspection.stage === "pickup" ? "pickup.completed" : "return.completed", result.order);
+      // 归还确实逾期（费用 > 0）才发逾期通知——这是真实业务事实，不是凭空造事件。
+      // 与 return.completed 各自独立幂等，因此同一次归还两条通知都只发一次。
+      if (stage === "return" && charges.overdue && charges.overdue.amount > 0) {
+        await this.emitOrderEvent(tenantId, "order.overdue", result.order);
+      }
     }
     return this.committed(tenantId, result);
   }
@@ -455,6 +465,10 @@ export class RentalCoreController {
     if (stage === "return") await this.business.refreshFromDatabase();
     if (!replayed) {
       await this.emitOrderEvent(tenantId, stage === "pickup" ? "pickup.completed" : "return.completed", order);
+      // 无检查直接交接的归还路径同样按真实逾期费判断是否发逾期通知。
+      if (stage === "return" && overdueCharge > 0) {
+        await this.emitOrderEvent(tenantId, "order.overdue", order);
+      }
     }
     return this.committed(tenantId, order);
   }

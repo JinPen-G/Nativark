@@ -360,7 +360,8 @@ export class RentalBusinessController {
       run: (tx) => this.business.sendNotification(tenantId, context, body, tx),
       replay: async (response) => (response ?? undefined) as RentalNotificationSendLogV1 | undefined
     });
-    if (!replayed) this.business.applyNotificationLogToCache(tenantId, context, result);
+    // 人工发送不带幂等键，正常必得一条日志；`result` 为空只可能是并发回放，跳过入缓存即可。
+    if (!replayed && result) this.business.applyNotificationLogToCache(tenantId, context, result);
     return this.committed(tenantId, result);
   }
 

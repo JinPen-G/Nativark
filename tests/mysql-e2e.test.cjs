@@ -6547,9 +6547,10 @@ async function main() {
   assert.ok(snTemplate, "前置条件：需要一个启用的通知模板");
   const snVars = Object.fromEntries(Object.keys(snTemplate.variableSchema).map((k) => [k, `E2E-${k}`]));
   const snRecipient = "13900003333";
+  const snMaskedRecipient = "139****3333";
   const snKey = `e2e-send-race-${Date.now().toString(36)}`;
   const snLogsBefore = readCount(
-    `SELECT COUNT(*) FROM \`rental_notification_logs\` WHERE \`tenantId\`='tenant_001' AND \`recipient\`='${snRecipient}';`
+    `SELECT COUNT(*) FROM \`rental_notification_logs\` WHERE \`tenantId\`='tenant_001' AND \`recipient\`='${snMaskedRecipient}';`
   );
   const SEND_CONCURRENCY = 4;
   const snResults = await Promise.all(
@@ -6573,13 +6574,13 @@ async function main() {
   assert.equal(snIds.size, 1, `同键并发发送必须回放同一条记录，实际 ${snIds.size} 个不同 id`);
   assert.equal(
     readCount(
-      `SELECT COUNT(*) FROM \`rental_notification_logs\` WHERE \`tenantId\`='tenant_001' AND \`recipient\`='${snRecipient}';`
+      `SELECT COUNT(*) FROM \`rental_notification_logs\` WHERE \`tenantId\`='tenant_001' AND \`recipient\`='${snMaskedRecipient}';`
     ),
     snLogsBefore + 1,
     "同键并发发送只能在库中留下一条通知日志（多于一条=写入未随事务回滚）"
   );
   const snFromApi = (await request("GET", "/api/rental/v1/notification-logs", null, clDemo.accessToken)).body.data
-    .filter((row) => row.recipient === snRecipient);
+    .filter((row) => row.recipient === snMaskedRecipient);
   assert.equal(snFromApi.length, 1, `当前进程通知列表只能新增一条，实际 ${snFromApi.length}`);
   assert.equal(snFromApi[0].id, [...snIds][0], "当前进程读取到的通知记录必须就是库里那一条");
   const snTamper = await request(

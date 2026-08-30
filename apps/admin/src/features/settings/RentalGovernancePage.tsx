@@ -1749,7 +1749,7 @@ export function RentalGovernancePage() {
                               编辑
                             </Button>
                             <Button type="link" onClick={() => openSend(row)}>
-                              测试发送
+                              模拟发送
                             </Button>
                           </Space>
                         ),
@@ -1757,7 +1757,7 @@ export function RentalGovernancePage() {
                     ]}
                   />
                 </Card>
-                <Card title="发送日志与供应商回执">
+                <Card title="通知记录（未接真实供应商时仅模拟）">
                   <Table
                     rowKey="id"
                     dataSource={logs.data ?? []}
@@ -1769,12 +1769,12 @@ export function RentalGovernancePage() {
                       },
                       { title: "模板版本", dataIndex: "templateVersion" },
                       { title: "提供商", dataIndex: "provider" },
-                      { title: "回执", dataIndex: "providerMessageId" },
+                      { title: "外部回执", dataIndex: "providerMessageId", render: (value) => value || "—" },
                       {
                         title: "状态",
                         dataIndex: "status",
                         render: (value) => (
-                          <Tag color={value === "sent" ? "success" : "error"}>
+                          <Tag color={value === "sent" ? "success" : value === "simulated" ? "processing" : "error"}>
                             {value}
                           </Tag>
                         ),

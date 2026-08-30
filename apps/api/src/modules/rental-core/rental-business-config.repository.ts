@@ -100,6 +100,10 @@ export interface RentalBusinessConfigStore {
   ): Promise<void>;
   loadRuleVersionAudits(tenantId: string, workspaceId: string, ruleVersionId?: string): Promise<RentalRuleVersionAudit[]>;
   upsertNotificationTemplate(template: RentalNotificationTemplateV1): Promise<void>;
+  replaceNotificationTemplateVersion(
+    previous: RentalNotificationTemplateV1,
+    next: RentalNotificationTemplateV1
+  ): Promise<void>;
 }
 
 function iso(value: Date): string {
@@ -648,8 +652,8 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
     }));
   }
 
-  async upsertNotificationTemplate(template: RentalNotificationTemplateV1): Promise<void> {
-    const data = {
+  private notificationTemplateData(template: RentalNotificationTemplateV1) {
+    return {
       tenantId: template.tenantId,
       eventCode: template.eventCode,
       channel: template.channel,
@@ -660,12 +664,49 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       status: template.status,
       version: template.version
     };
+  }
+
+  async upsertNotificationTemplate(template: RentalNotificationTemplateV1): Promise<void> {
+    const data = this.notificationTemplateData(template);
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, template.tenantId);
     await this.prisma.rentalNotificationTemplate.upsert({
       where: { id: template.id },
       create: { workspaceId, id: template.id, ...data },
       update: data
     });
+  }
+
+  async replaceNotificationTemplateVersion(
+    previous: RentalNotificationTemplateV1,
+    next: RentalNotificationTemplateV1
+  ): Promise<void> {
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, next.tenantId);
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        // 锁旧版本，避免两个编辑请求都基于同一版创建相同的新版本号。
+        await tx.$queryRaw(Prisma.sql`
+          SELECT id FROM rental_notification_templates
+           WHERE id = ${previous.id} AND tenantId = ${previous.tenantId} AND workspaceId = ${workspaceId}
+           FOR UPDATE
+        `);
+        const current = await tx.rentalNotificationTemplate.findFirst({
+          where: { id: previous.id, tenantId: previous.tenantId, workspaceId }
+        });
+        if (!current) throw new ConflictException("通知模板版本已变化，请刷新后重试");
+        await tx.rentalNotificationTemplate.update({
+          where: { id: previous.id },
+          data: { status: "disabled" }
+        });
+        await tx.rentalNotificationTemplate.create({
+          data: { workspaceId, id: next.id, ...this.notificationTemplateData(next) }
+        });
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        throw new ConflictException("通知模板版本已被其他操作推进，请刷新后重试");
+      }
+      throw error;
+    }
   }
 
   /* ---------- 行 → 领域对象 ---------- */

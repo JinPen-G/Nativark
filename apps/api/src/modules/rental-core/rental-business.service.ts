@@ -171,6 +171,28 @@ const roundMoney = (value: number) => Math.round((value + Number.EPSILON) * 100)
 const dayMs = 24 * 60 * 60 * 1000;
 
 /**
+ * NOTICE-01A：发送目标脱敏。发送记录会被运营、客服反复查看，明文手机号/邮箱进日志
+ * 等于开了客户资料的第二个出口。宁可多掩：认不出的形态一律粗掩。
+ */
+function maskRecipient(recipient: string): string {
+  const value = String(recipient ?? "").trim();
+  if (!value) return "";
+  if (value.includes("@")) {
+    const [name, domain] = value.split("@");
+    const head = name.slice(0, 1);
+    return `${head}***@${domain}`;
+  }
+  const digits = value.replace(/\D/g, "");
+  if (digits.length >= 7) {
+    // 手机号：留前 3 后 4，中间一律掩掉。
+    return `${value.slice(0, 3)}****${value.slice(-4)}`;
+  }
+  // push token、openid 等：只露前两位。
+  return value.length <= 2 ? "***" : `${value.slice(0, 2)}***`;
+}
+
+
+/**
  * 配送类履约方式。这些方式的时点要按营业时段里的 `delivery` 判定（需求 4.5.1 把
  * 配送可用时段与领取/归还并列声明）；早前 `hours.delivery` 声明了却没有任何路径消费它。
  */
@@ -3159,16 +3181,36 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     if (!context.settings.notifications.editableChannels.includes(input.channel)) throw new BadRequestException("通知渠道未在租户经营设置中启用");
     const existing = input.id ? state.notificationTemplates.find((item) => item.id === input.id) : undefined;
     if (input.id && !existing) throw new NotFoundException("通知模板不存在");
+    const activePeer = state.notificationTemplates.find(
+      (item) => item.id !== existing?.id && item.eventCode === input.eventCode && item.channel === input.channel && item.status === "enabled"
+    );
+    if (input.status === "enabled" && activePeer) {
+      throw new ConflictException("该事件与渠道已有启用模板，请编辑现有模板或先停用它");
+    }
     const variables = new Set(Object.keys(input.variableSchema));
     const used = [...input.title.matchAll(/\{\{(\w+)\}\}/g), ...input.body.matchAll(/\{\{(\w+)\}\}/g)].map((match) => match[1]);
     if (used.some((key) => !variables.has(key))) throw new BadRequestException("模板使用了未注册变量");
+    const sameChannelVersions = state.notificationTemplates.filter(
+      (row) => row.eventCode === input.eventCode && row.channel === input.channel
+    );
+    const latestVersion = sameChannelVersions
+      .map((row) => row.version)
+      .sort((a, b) => Number.parseFloat(b) - Number.parseFloat(a))[0];
     const result: RentalNotificationTemplateV1 = {
-      ...input, id: existing?.id ?? uid("notification_template"), tenantId,
-      version: versionAfter(existing?.version), updatedAt: stamp()
+      ...input,
+      id: uid("notification_template"),
+      tenantId,
+      version: versionAfter(latestVersion),
+      updatedAt: stamp()
     };
-    await this.configStore.upsertNotificationTemplate(result);
-
-    if (existing) Object.assign(existing, result); else state.notificationTemplates.unshift(result);
+    if (existing) {
+      await this.configStore.replaceNotificationTemplateVersion(existing, result);
+      existing.status = "disabled";
+      state.notificationTemplates.unshift(result);
+    } else {
+      await this.configStore.upsertNotificationTemplate(result);
+      state.notificationTemplates.unshift(result);
+    }
     return result;
   }
 
@@ -3183,24 +3225,50 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
    * 撤不回已发出的短信，那时必须改用 provider 幂等键或 transactional outbox。
    * 本任务不虚构外部 provider，因此不在此实现 outbox。
    */
-  async sendNotification(tenantId: string, context: BusinessContext, input: SendRentalNotificationRequest, tx?: RentalBusinessFactTx) {
+  async sendNotification(
+    tenantId: string,
+    context: BusinessContext,
+    input: SendRentalNotificationRequest,
+    tx?: RentalBusinessFactTx,
+    options: { businessObjectType?: string; businessObjectId?: string; idempotencyKey?: string } = {}
+  ) {
     const state = this.state(tenantId, context);
+    // 停用模板明确失败（需求 4.9 / NOTICE-01A 3）：查不到「启用」模板即拒绝。
     const template = state.notificationTemplates.find((item) => item.id === input.templateId && item.status === "enabled");
     if (!template) throw new NotFoundException("通知模板不存在或未启用");
+    const schemaKeys = new Set(Object.keys(template.variableSchema));
+    // 未知变量必须明确失败：调用方多塞一个变量往往是拼错了变量名，
+    // 静默丢弃会让「模板里 {{amuont}} 永远为空」这类错误查不出来。
+    const unknown = Object.keys(input.variables).filter((key) => !schemaKeys.has(key));
+    if (unknown.length) throw new BadRequestException(`通知变量未在模板注册：${unknown.join("、")}`);
     const missing = Object.entries(template.variableSchema).filter(([key, value]) => value.required && (input.variables[key] === undefined || input.variables[key] === ""));
     if (missing.length) throw new BadRequestException(`缺少通知变量：${missing.map(([key]) => key).join("、")}`);
+
+    // 幂等：同一空间同一业务事件（带 idempotencyKey）只落一条。
+    // 先查缓存快速短路；DB 唯一索引是最终裁决，兜住并发与缓存未命中。
+    if (options.idempotencyKey && state.notificationLogs.some((item) => item.idempotencyKey === options.idempotencyKey)) {
+      return undefined;
+    }
+
     const render = (source: string) => source.replace(/\{\{(\w+)\}\}/g, (_match, key: string) => String(input.variables[key] ?? ""));
     const timestamp = stamp();
     const log: RentalNotificationSendLogV1 = {
       id: uid("notification"), tenantId, templateId: template.id, templateVersion: template.version,
-      eventCode: template.eventCode, channel: template.channel, recipient: input.recipient,
+      eventCode: template.eventCode, channel: template.channel,
+      // 目标一律脱敏后留存；明文不进发送记录。
+      recipient: maskRecipient(input.recipient),
       renderedTitle: render(template.title), renderedBody: render(template.body), variables: structuredClone(input.variables),
-      status: "sent", provider: "mock-notification-adapter", providerMessageId: uid("mock"), attempts: 1,
-      createdAt: timestamp, sentAt: timestamp
+      status: "simulated", provider: "simulation", attempts: 1,
+      businessObjectType: options.businessObjectType,
+      businessObjectId: options.businessObjectId,
+      idempotencyKey: options.idempotencyKey,
+      createdAt: timestamp
     };
+    const outcome = await this.factStore.insertNotificationLog(log, tx);
+    // 唯一键撞了 → 说明这条业务事件已发过；不是错误，静默跳过不重复通知。
+    if (outcome === "duplicate") return undefined;
     // 事务路径下不动缓存：回滚后内存里会留下库中不存在的幽灵通知记录。
     if (!tx) state.notificationLogs.unshift(log);
-    await this.factStore.insertNotificationLog(log, tx);
     return log;
   }
 
@@ -3216,14 +3284,38 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
    * 必须逐个 await：`sendNotification` 现在落库后返回 Promise，而同步 `try/catch`
    * 捕不到异步拒绝——未处理的拒绝会直接终止 Node 进程（E2E 表现为 ECONNRESET）。
    * 单个模板失败不应中断其余模板与主业务动作，因此在循环内单独捕获。
+   *
+   * NOTICE-01A：传入 `businessObject` 后，每个模板按 `事件:类型:对象:渠道` 生成
+   * 空间级幂等键——重复的同一业务事件不再二次发信，但不同渠道各发一条。
    */
-  async emitNotificationEvent(tenantId: string, context: BusinessContext, eventCode: string, recipient: string | undefined, variables: Record<string, unknown>) {
+  async emitNotificationEvent(
+    tenantId: string,
+    context: BusinessContext,
+    eventCode: string,
+    recipient: string | undefined,
+    variables: Record<string, unknown>,
+    businessObject?: { type: string; id: string }
+  ) {
     if (!recipient || !context.settings.notifications.enabledEvents.includes(eventCode)) return [];
     const templates = this.state(tenantId, context).notificationTemplates.filter((item) => item.eventCode === eventCode && item.status === "enabled");
     const logs: RentalNotificationSendLogV1[] = [];
     for (const template of templates) {
       try {
-        logs.push(await this.sendNotification(tenantId, context, { templateId: template.id, recipient, variables }));
+        // 只传模板注册过的变量：事件发射方持有一个变量词表，各模板按需登记子集；
+        // 把整个词表塞给模板会撞上「未知变量」拦截，而那是给人工发送用的护栏。
+        const scoped = Object.fromEntries(
+          Object.entries(variables).filter(([key]) => key in template.variableSchema)
+        );
+        const idempotencyKey = businessObject
+          ? `${eventCode}:${businessObject.type}:${businessObject.id}:${template.channel}`
+          : undefined;
+        const log = await this.sendNotification(
+          tenantId, context,
+          { templateId: template.id, recipient, variables: scoped },
+          undefined,
+          { businessObjectType: businessObject?.type, businessObjectId: businessObject?.id, idempotencyKey }
+        );
+        if (log) logs.push(log);
       } catch {
         // 模板停用、渠道不可用等单点失败不冒泡到订单动作。
       }

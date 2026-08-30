@@ -6735,15 +6735,28 @@ export interface RentalNotificationSendLogV1 {
   templateVersion: string;
   eventCode: string;
   channel: RentalNotificationTemplateV1["channel"];
+  /** 发送目标一律脱敏后留存（需求 4.9）。手机号 → 138****8888，邮箱 → a***@b.com。 */
   recipient: string;
   renderedTitle: string;
   renderedBody: string;
   variables: Record<string, unknown>;
-  status: "queued" | "sent" | "failed";
+  /** 未接真实 Provider 时只能使用 simulated / simulation_failed，不得冒充真实发送或送达。 */
+  status: "queued" | "sent" | "failed" | "simulated" | "simulation_failed";
   provider: string;
   providerMessageId?: string;
   errorMessage?: string;
   attempts: number;
+  /**
+   * NOTICE-01A：触发本条通知的业务对象。业务事件驱动的通知带上它（如 order / 订单id），
+   * 手工发送没有业务对象。
+   */
+  businessObjectType?: string;
+  businessObjectId?: string;
+  /**
+   * NOTICE-01A：空间级幂等键，形如 `<eventCode>:<businessObjectId>`。
+   * 同一空间同一业务事件只落一条；手工发送不带键，不参与去重。
+   */
+  idempotencyKey?: string;
   createdAt: string;
   sentAt?: string;
 }

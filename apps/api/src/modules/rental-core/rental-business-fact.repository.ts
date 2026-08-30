@@ -69,7 +69,7 @@ export interface RentalBusinessFactStore {
   upsertBenefitAccount(account: RentalCustomerBenefitAccount, tx?: RentalBusinessFactTx): Promise<void>;
   incrementBenefitAccount(tenantId: string, customerId: string, delta: { points: number; marketing: number; rewardCoupons: number }, tx: RentalBusinessFactTx): Promise<void>;
   upsertReferral(tenantId: string, referral: RentalReferralRecord): Promise<void>;
-  insertNotificationLog(log: RentalNotificationSendLogV1, tx?: RentalBusinessFactTx): Promise<void>;
+  insertNotificationLog(log: RentalNotificationSendLogV1, tx?: RentalBusinessFactTx): Promise<"inserted" | "duplicate">;
 }
 
 function iso(value: Date): string {
@@ -547,30 +547,48 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
   }
 
   /** 发送记录是追加式流水，用 create 而非 upsert：同一条记录不应被改写。 */
-  async insertNotificationLog(log: RentalNotificationSendLogV1, tx?: RentalBusinessFactTx): Promise<void> {
+  async insertNotificationLog(log: RentalNotificationSendLogV1, tx?: RentalBusinessFactTx): Promise<"inserted" | "duplicate"> {
     const workspaceId = await resolveScopeWorkspaceId(tx ?? this.prisma, log.tenantId);
-    await (tx ?? this.prisma).rentalNotificationLog.create({
-      data: {
-        id: log.id,
-        tenantId: log.tenantId,
-        workspaceId,
-        templateId: log.templateId,
-        templateVersion: log.templateVersion,
-        eventCode: log.eventCode,
-        channel: log.channel,
-        recipient: log.recipient,
-        renderedTitle: log.renderedTitle,
-        renderedBody: log.renderedBody,
-        variables: log.variables as Prisma.InputJsonValue,
-        status: log.status,
-        provider: log.provider,
-        providerMessageId: log.providerMessageId ?? null,
-        errorMessage: log.errorMessage ?? null,
-        attempts: log.attempts,
-        sentAt: optionalDate(log.sentAt),
-        createdAt: date(log.createdAt)
+    try {
+      await (tx ?? this.prisma).rentalNotificationLog.create({
+        data: {
+          id: log.id,
+          tenantId: log.tenantId,
+          workspaceId,
+          templateId: log.templateId,
+          templateVersion: log.templateVersion,
+          eventCode: log.eventCode,
+          channel: log.channel,
+          recipient: log.recipient,
+          renderedTitle: log.renderedTitle,
+          renderedBody: log.renderedBody,
+          variables: log.variables as Prisma.InputJsonValue,
+          status: log.status,
+          provider: log.provider,
+          providerMessageId: log.providerMessageId ?? null,
+          errorMessage: log.errorMessage ?? null,
+          attempts: log.attempts,
+          businessObjectType: log.businessObjectType ?? null,
+          businessObjectId: log.businessObjectId ?? null,
+          idempotencyKey: log.idempotencyKey ?? null,
+          sentAt: optionalDate(log.sentAt),
+          createdAt: date(log.createdAt)
+        }
+      });
+      return "inserted";
+    } catch (error) {
+      // 空间级幂等键撞了：同一业务事件已发过。返回 duplicate 让服务层静默跳过，
+      // 而不是把「不重复通知」当成错误抛出。仅对该唯一键的 P2002 生效，其余照抛。
+      // MySQL 的重复键错误只回滚当前语句、不中止外层事务，因此 tx 路径也安全。
+      if (
+        log.idempotencyKey &&
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002"
+      ) {
+        return "duplicate";
       }
-    });
+      throw error;
+    }
   }
 
   /* ---------- 行 → 领域对象 ---------- */
@@ -696,6 +714,9 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       providerMessageId: row.providerMessageId ?? undefined,
       errorMessage: row.errorMessage ?? undefined,
       attempts: row.attempts,
+      businessObjectType: row.businessObjectType ?? undefined,
+      businessObjectId: row.businessObjectId ?? undefined,
+      idempotencyKey: row.idempotencyKey ?? undefined,
       createdAt: iso(row.createdAt),
       sentAt: optionalIso(row.sentAt)
     };
