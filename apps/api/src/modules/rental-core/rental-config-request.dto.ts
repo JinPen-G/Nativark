@@ -1,4 +1,4 @@
-import { RENTAL_DISCOUNT_TARGETS, RENTAL_DISCOUNT_TYPES, RENTAL_PRICING_UNIT_CODES, type RentalDayType, type RentalDiscountTarget, type RentalPricingUnit } from "@store-rental/shared";
+import { RENTAL_DISCOUNT_TARGETS, RENTAL_DISCOUNT_TYPES, RENTAL_INSURANCE_PROVIDER_STATUSES, RENTAL_PRICING_UNIT_CODES, RENTAL_SERVICE_BILLING_UNITS, RENTAL_SERVICE_SELECTION_MODES, type RentalDayType, type RentalDiscountTarget, type RentalInsuranceProviderStatus, type RentalPricingUnit, type RentalServiceMandatoryRule, type RentalServiceSelectionMode } from "@store-rental/shared";
 import type {
   ApplyOfficialCalendarSourceRequest,
   PublishRentalCalendarRequest,
@@ -103,7 +103,8 @@ const SERVICE_TYPES = [
   "support",
   "other"
 ] as const;
-const BILLING_UNITS = ["per_order", "per_day", "per_unit"] as const;
+// MKT-02A：服务计费单位独立于商品租金单位（需求 4.4.11）。per_day 是**自然日**。
+const BILLING_UNITS = RENTAL_SERVICE_BILLING_UNITS;
 
 /** 倍率上限。10 倍已远超任何真实节假日加价，写错数量级会在这里被挡下。 */
 const MAX_MULTIPLIER = 10;
@@ -687,6 +688,10 @@ export class SaveRentalValueAddedServiceDto implements SaveRentalValueAddedServi
 
   @IsInt()
   @Min(1)
+  minimumQuantity!: number;
+
+  @IsInt()
+  @Min(1)
   maximumQuantity!: number;
 
   @IsOptional()
@@ -712,8 +717,62 @@ export class SaveRentalValueAddedServiceDto implements SaveRentalValueAddedServi
   @IsString({ each: true })
   applicableItemGroupIds!: string[];
 
+  /** MKT-02A：适用履约方式与地点。空数组＝不限制。 */
+  @IsArray()
+  @IsIn(FULFILLMENT_MODES, { each: true })
+  applicableFulfillmentModes!: (typeof FULFILLMENT_MODES)[number][];
+
+  @IsArray()
+  @IsString({ each: true })
+  applicableLocationIds!: string[];
+
+  @IsIn(["all", "personal", "corporate"])
+  customerScope!: "all" | "personal" | "corporate";
+
+  /** MKT-02A：客户可选 / 系统推荐 / 条件强制（需求 4.4.11）。 */
+  @IsIn(RENTAL_SERVICE_SELECTION_MODES)
+  selectionMode!: RentalServiceSelectionMode;
+
+  /** 条件强制服务的触发规则。嵌套对象，逐字段校验。 */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => RentalServiceMandatoryRuleInputDto)
+  mandatoryRule?: RentalServiceMandatoryRuleInputDto;
+
+  /**
+   * MKT-02A：第三方保险接入状态。取值域刻意没有「已投保」——未接入真实服务商前
+   * 不得展示已投保或虚构保单号（需求 4.4.11）。损坏免赔配它属于冒充保险，
+   * 由服务层按 serviceType 拒绝。
+   */
+  @IsOptional()
+  @IsIn(RENTAL_INSURANCE_PROVIDER_STATUSES)
+  insuranceProviderStatus?: RentalInsuranceProviderStatus;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(191)
+  insuranceProviderName?: string;
+
   @IsIn(ENABLE_STATUSES)
   status!: (typeof ENABLE_STATUSES)[number];
+}
+
+/** MKT-02A：条件强制服务的触发规则。留空的维度表示不限制。 */
+export class RentalServiceMandatoryRuleInputDto implements RentalServiceMandatoryRule {
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  itemGroupIds?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsIn(FULFILLMENT_MODES, { each: true })
+  fulfillmentModes?: (typeof FULFILLMENT_MODES)[number][];
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  minRentalAmount?: number;
 }
 
 /* ---------- 规则版本 ---------- */

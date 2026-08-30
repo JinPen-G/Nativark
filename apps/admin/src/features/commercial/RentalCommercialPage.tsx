@@ -63,6 +63,10 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
     queryKey: ["rental-core", "discount-plans"],
     queryFn: rentalCoreApi.discountPlans,
   });
+  const locations = useQuery({
+    queryKey: ["rental-core", "locations"],
+    queryFn: rentalCoreApi.locations,
+  });
   const services = useQuery({
     queryKey: ["rental-core", "value-added-services"],
     queryFn: rentalCoreApi.valueAddedServices,

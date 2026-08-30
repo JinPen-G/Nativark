@@ -99,6 +99,7 @@ import {
 import { applyPriceAdjustment, assertNoDatetimeOverrideOverlap, assertNoPeriodicOverlap, periodicWindowCoversDate, periodicWindowHits } from "./rental-price-adjustments";
 import { rentalPricingStrategy } from "./rental-pricing-strategy";
 import { selectDiscountPlans } from "./rental-discount-selection";
+import { resolveQuoteServices } from "./rental-service-catalog";
 
 /**
  * 定时调价到期执行时，确认时锁定的基础版本已被别的调价推进。
@@ -1300,12 +1301,64 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const state = this.state(tenantId, context);
     if (!input.code?.trim() || !input.name?.trim() || !input.terms?.trim() || !input.termsVersion?.trim()) throw new BadRequestException("服务编码、名称及条款不能为空");
     if (input.price < 0 || input.maximumQuantity < 1) throw new BadRequestException("服务价格或数量限制无效");
+    if (input.minimumQuantity < 1 || input.minimumQuantity > input.maximumQuantity) {
+      throw new BadRequestException("服务最小数量必须不小于 1 且不大于最大数量");
+    }
     if ((input.coverageLimit !== undefined && input.coverageLimit < 0) || (input.deductible !== undefined && input.deductible < 0)) throw new BadRequestException("保障额度和免赔额不能为负数");
+    // 免赔额超过保障上限时，客户自付额永远吃掉全部保障，配置本身自相矛盾。
+    if (input.coverageLimit !== undefined && input.deductible !== undefined && input.deductible > input.coverageLimit) {
+      throw new BadRequestException("免赔额不能超过保障上限");
+    }
     const groupIds = new Set(context.groups.map((group) => group.id));
     if (input.applicableItemGroupIds.some((id) => !groupIds.has(id))) throw new BadRequestException("增值服务包含不存在的商品");
+    // 适用地点必须是本空间的履约地点：写一个别的空间的地点 id 等于配了一条永不命中的规则，
+    // 而运营看不出问题在哪。
+    const locationIds = new Set(context.locations.map((location) => location.id));
+    if (input.applicableLocationIds.some((id) => !locationIds.has(id))) throw new BadRequestException("增值服务包含不存在的履约地点");
+    const enabledModes = new Set(context.settings.fulfillment.enabledModes);
+    if (input.applicableFulfillmentModes.some((mode) => !enabledModes.has(mode))) {
+      throw new BadRequestException("增值服务包含当前经营空间未启用的履约方式");
+    }
+    // MKT-02A：条件强制必须带触发规则（需求 4.4.11「强制服务必须保存触发规则」）。
+    // 没有规则的「强制」等于对所有单子无条件强制，且事后无从解释为什么强制。
+    if (input.selectionMode === "mandatory") {
+      const rule = input.mandatoryRule;
+      const hasCondition = Boolean(rule?.itemGroupIds?.length || rule?.fulfillmentModes?.length || rule?.minRentalAmount !== undefined);
+      if (!hasCondition) throw new BadRequestException("条件强制服务必须至少配置一条触发规则（商品、履约方式或最低租金）");
+      if (rule?.itemGroupIds?.some((id) => !groupIds.has(id))) throw new BadRequestException("强制触发规则包含不存在的商品");
+      if (rule?.fulfillmentModes?.some((mode) => !enabledModes.has(mode))) {
+        throw new BadRequestException("强制触发规则包含当前经营空间未启用的履约方式");
+      }
+    } else if (input.mandatoryRule) {
+      throw new BadRequestException("只有条件强制服务才能配置触发规则");
+    }
+    // MKT-02A：损坏免赔是租赁商自己的合同责任减免，不是保险。给它配保险服务商状态
+    // 等于把免赔冒充成保险，正是需求 4.4.11 禁止的；反之保险占位必须声明接入状态，
+    // 否则页面无从区分「预留能力」与「真的投保了」。
+    if (input.serviceType === "insurance") {
+      if (!input.insuranceProviderStatus) {
+        throw new BadRequestException("保险类服务必须声明接入状态（simulated 模拟 / reserved 预留），未接入真实服务商不得展示已投保");
+      }
+    } else if (input.insuranceProviderStatus || input.insuranceProviderName) {
+      throw new BadRequestException("只有保险类服务可以声明保险服务商；损坏免赔属租赁商责任减免，不得冒充第三方保险");
+    }
     const existing = input.id ? state.services.find((service) => service.id === input.id) : undefined;
     if (input.id && !existing) throw new NotFoundException("增值服务不存在");
     if (state.services.some((service) => service.code === input.code.trim() && service.id !== input.id)) throw new ConflictException("服务编码已存在");
+    // MKT-02A：条款发布后不可原地修改（需求 4.4.11）。改正文、保障上限或免赔额
+    // 必须同时递增 termsVersion——否则历史订单的 termsVersion 会指向一份已被改写的正文，
+    // 「不得用当前网页条款替代历史订单条款」就落不了地。
+    if (existing && existing.termsVersion === input.termsVersion) {
+      const termsChanged =
+        existing.terms !== input.terms ||
+        existing.coverageLimit !== input.coverageLimit ||
+        existing.deductible !== input.deductible;
+      if (termsChanged) {
+        throw new ConflictException(
+          `条款与保障范围不可原地修改：请发布新的条款版本（当前 ${existing.termsVersion}）。已有报价与历史订单继续使用原快照`
+        );
+      }
+    }
     const timestamp = stamp();
     const result: RentalValueAddedService = {
       ...input, id: existing?.id ?? uid("service"), tenantId, categoryCode: context.profile.categoryCode,
@@ -3288,17 +3341,42 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     // MKT-01A：增值服务与履约费必须在**优惠之前**算出金额，因为优惠可以指定作用于
     // 它们（需求 4.4.10）。明细行仍按原顺序（租金 → 优惠 → 券 → 服务 → 履约）push，
     // 因此这里只先算金额、把行暂存起来，避免报价明细的阅读顺序被实现顺序带跑。
-    const pendingServiceLines: RentalQuoteSnapshotV1["chargeLines"] = [];
-    let serviceAmount = 0;
-    for (const selected of input.services ?? []) {
-      const service = state.services.find((item) => item.id === selected.serviceId && item.status === "enabled");
-      if (!service || selected.quantity < 1 || selected.quantity > service.maximumQuantity) throw new BadRequestException("增值服务或数量无效");
-      if (service.applicableItemGroupIds.length && !input.lines.some((line) => service.applicableItemGroupIds.includes(line.itemGroupId))) throw new ConflictException(`${service.name} 不适用于所选商品`);
-      const units = service.billingUnit === "per_day" ? Math.max(1, Math.ceil((new Date(input.endAt).getTime() - new Date(input.startAt).getTime()) / dayMs)) : 1;
-      const amount = roundMoney(service.price * selected.quantity * units);
-      serviceAmount += amount;
-      pendingServiceLines.push({ code: `service:${service.code}`, name: service.name, type: "service", amount, sourceId: service.id, sourceVersion: `${service.version}/${service.termsVersion}`, detail: service.terms });
-    }
+    //
+    // MKT-02A：适用性、数量范围、计费单位与条件强制的判定交给纯函数收口（需求 4.4.11）。
+    // 早前这里只查了商品组与最大数量，履约方式、地点、客户类型、最小数量与强制服务
+    // 一概不判；`per_day` 还按 24 小时折算，与「每自然日」差一天。
+    const serviceResolution = resolveQuoteServices(state.services, {
+      selections: (input.services ?? []).map((row) => ({ serviceId: row.serviceId, quantity: row.quantity })),
+      itemGroupIds: input.lines.map((line) => line.itemGroupId),
+      fulfillmentMode: input.fulfillmentMode,
+      // 异地归还时归还地点同样参与判定：只按取件地点判会让「只在 A 店提供」的服务
+      // 出现在 A 取 B 还的单子上。
+      locationIds: [input.fulfillmentLocationId, input.returnLocationId].filter((value): value is string => Boolean(value)),
+      customerType: input.customerType,
+      startAt: input.startAt,
+      endAt: input.endAt,
+      timeZone: quoteTimeZone,
+      rentalAmount,
+      workspaceId: this.workspaceOf(tenantId)
+    });
+    const serviceSnapshots = serviceResolution.snapshots;
+    const pendingServiceLines: RentalQuoteSnapshotV1["chargeLines"] = serviceSnapshots.map((snapshot) => ({
+      code: `service:${snapshot.serviceCode}`,
+      name: snapshot.serviceName,
+      type: "service",
+      amount: snapshot.amount,
+      sourceId: snapshot.serviceId,
+      sourceVersion: `${snapshot.serviceVersion}/${snapshot.termsVersion}`,
+      // 明细带上计费口径与强制标记：强制服务不得看起来像客户自愿加购。
+      detail: [
+        snapshot.formula,
+        snapshot.requiredByRule ? `业务规则要求（${snapshot.mandatoryRuleHit}）` : undefined,
+        snapshot.terms
+      ]
+        .filter(Boolean)
+        .join("；")
+    }));
+    let serviceAmount = serviceResolution.totalAmount;
     serviceAmount = roundMoney(serviceAmount);
 
     // 履约费用（需求 4.4 公式的独立一项，与增值服务分开计）。
@@ -3505,6 +3583,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       priceVersion: "version" in spaceVersion ? spaceVersion.version : undefined,
       appliedDiscountPlanIds: discountPlans.map((item) => item.id),
       discountEvaluations: discountSelection.evaluations,
+      serviceSnapshots,
       couponEvaluation,
       customerCouponId: customerCoupon?.id,
       // CORE-EXT-02D：固化本次报价生成时该空间已启用能力的版本与配置。
@@ -3693,7 +3772,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     }));
     const pricingPlans: RentalPricingPlanV1[] = [{ id: `${idPrefix}_pricing_default`, tenantId, categoryCode: context.profile.categoryCode, code: "STANDARD", name: `${context.category.name}标准价格`, currency: "CNY", status: "enabled", version: "1.0", effectiveFrom: timestamp, rates, createdAt: timestamp, updatedAt: timestamp }];
     const discountPlans: RentalDiscountPlan[] = [{ id: `${idPrefix}_discount_long`, tenantId, categoryCode: context.profile.categoryCode, code: "LONG_RENTAL", name: "长期租赁优惠", status: "enabled", discountType: "percentage", discountValue: 5, minimumSpend: 500, appliesTo: "rental", customerScope: "all", applicableItemGroupIds: [], applicableDayTypes: [], priority: 100, stackableWithOtherPlans: false, stackableWithCoupon: true, effectiveFrom: timestamp, version: "1.0", createdAt: timestamp, updatedAt: timestamp }];
-    const services: RentalValueAddedService[] = context.category.businessModel.valueAddedServicePresets.slice(0, 4).map((name, index) => ({ id: `${idPrefix}_service_${index + 1}`, tenantId, categoryCode: context.profile.categoryCode, code: `SERVICE_${index + 1}`, name, serviceType: serviceType(name), billingUnit: name.includes("配送") || name.includes("运输") ? "per_order" : "per_day", price: 20 + index * 30, maximumQuantity: 5, coverageLimit: name.includes("保险") || name.includes("免赔") ? 5000 : undefined, deductible: name.includes("免赔") ? 200 : undefined, termsVersion: "1.0", terms: `${name}服务条款：以订单保存的本版本范围、限额及除外责任为准。`, applicableItemGroupIds: [], status: "enabled", version: "1.0", createdAt: timestamp, updatedAt: timestamp }));
+    const services: RentalValueAddedService[] = context.category.businessModel.valueAddedServicePresets.slice(0, 4).map((name, index) => ({ id: `${idPrefix}_service_${index + 1}`, tenantId, categoryCode: context.profile.categoryCode, code: `SERVICE_${index + 1}`, name, serviceType: serviceType(name), billingUnit: name.includes("配送") || name.includes("运输") ? "per_order" : "per_day", price: 20 + index * 30, minimumQuantity: 1, maximumQuantity: 5, applicableFulfillmentModes: [], applicableLocationIds: [], customerScope: "all", selectionMode: "optional", coverageLimit: name.includes("保险") || name.includes("免赔") ? 5000 : undefined, deductible: name.includes("免赔") ? 200 : undefined, termsVersion: "1.0", terms: `${name}服务条款：以订单保存的本版本范围、限额及除外责任为准。`, applicableItemGroupIds: [], status: "enabled", version: "1.0", createdAt: timestamp, updatedAt: timestamp }));
     const ruleVersions: RentalRuleVersion[] = [{ id: `${idPrefix}_rule_v1`, tenantId, categoryCode: context.profile.categoryCode, version: "1.0", status: "published", config: defaultRuleConfig(context.category, context.settings), changeReason: "品类初始化规则", createdBy: "system", createdAt: timestamp, publishedAt: timestamp }];
     const defaultVariables = { customerName: { label: "客户名称", required: true }, orderNo: { label: "订单号", required: true } };
     const notificationTemplates: RentalNotificationTemplateV1[] = context.settings.notifications.enabledEvents.slice(0, 12).map((eventCode, index) => {

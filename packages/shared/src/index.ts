@@ -6171,6 +6171,54 @@ export interface RentalQuoteDiscountEvaluation {
   capped: boolean;
 }
 
+/**
+ * 增值服务的计费单位（需求 4.4.11「服务计费单位独立于商品租金单位」）。
+ *
+ * `per_day` 是**自然日**而不是 24 小时块：需求写的是「每自然日」「每日服务逐日取价」，
+ * 周一 22:00 到周二 08:00 的清洁服务占用两个工作日，按 24 小时折算只会算成一天。
+ * `per_night` 按过夜数；`per_rental_period` 整段租期一次；`per_hour` 按小时进位。
+ * 人员/班次/里程类单位需要排班或采集数据，属 SHARED-PEOPLE-01 与品类扩展，不在此。
+ */
+export const RENTAL_SERVICE_BILLING_UNITS = [
+  "per_order",
+  "per_unit",
+  "per_day",
+  "per_night",
+  "per_hour",
+  "per_rental_period"
+] as const;
+export type RentalServiceBillingUnit = (typeof RENTAL_SERVICE_BILLING_UNITS)[number];
+
+/** 服务被选中的方式（需求 4.4.11「可选、推荐、强制和人工服务」）。 */
+export const RENTAL_SERVICE_SELECTION_MODES = ["optional", "recommended", "mandatory"] as const;
+export type RentalServiceSelectionMode = (typeof RENTAL_SERVICE_SELECTION_MODES)[number];
+
+/**
+ * 条件强制服务的触发规则（需求 4.4.11：强制服务必须保存触发规则，
+ * 并标记「业务规则要求」，不得伪装成客户自愿选择）。
+ *
+ * 判据留空表示该维度不限制。改变商品、履约方式或金额后必须重新判断，
+ * 因此规则只描述**条件**，不缓存判断结果。
+ */
+export interface RentalServiceMandatoryRule {
+  /** 命中任一商品组即触发。 */
+  itemGroupIds?: string[];
+  /** 命中任一履约方式即触发。 */
+  fulfillmentModes?: RentalFulfillmentMode[];
+  /** 优惠前租金达到该金额即触发（高价值商品强制基础保障的落点）。 */
+  minRentalAmount?: number;
+}
+
+/**
+ * 第三方保险的接入状态（需求 4.4.11）。
+ *
+ * 刻意**没有**「已投保」这个取值：未接入真实服务商前不得向客户展示已投保、
+ * 虚构保单号，也不得把商户损坏免赔称为保险。真实 Provider 接入属 EXT-02，
+ * 到那时才会新增带保单号与理赔状态的取值，而不是现在先留一个可以被误用的字段。
+ */
+export const RENTAL_INSURANCE_PROVIDER_STATUSES = ["simulated", "reserved"] as const;
+export type RentalInsuranceProviderStatus = (typeof RENTAL_INSURANCE_PROVIDER_STATUSES)[number];
+
 export interface RentalValueAddedService {
   id: string;
   tenantId: string;
@@ -6178,14 +6226,31 @@ export interface RentalValueAddedService {
   code: string;
   name: string;
   serviceType: "insurance" | "damage_waiver" | "delivery" | "consumable" | "operator" | "support" | "other";
-  billingUnit: "per_order" | "per_day" | "per_unit";
+  billingUnit: RentalServiceBillingUnit;
   price: number;
+  /** 最小可选数量。可重复选择的服务用它表达「至少两份」。 */
+  minimumQuantity: number;
   maximumQuantity: number;
   coverageLimit?: number;
   deductible?: number;
   termsVersion: string;
   terms: string;
   applicableItemGroupIds: string[];
+  /** 适用履约方式。留空表示不限制。 */
+  applicableFulfillmentModes: RentalFulfillmentMode[];
+  /** 适用履约地点。留空表示不限制。 */
+  applicableLocationIds: string[];
+  /** 适用客户类型。 */
+  customerScope: "all" | "personal" | "corporate";
+  selectionMode: RentalServiceSelectionMode;
+  /** `selectionMode === "mandatory"` 时必填：触发规则。 */
+  mandatoryRule?: RentalServiceMandatoryRule;
+  /**
+   * 仅 `serviceType === "insurance"` 使用。损坏免赔（damage_waiver）是租赁商自己的
+   * 合同责任减免，配它等于把免赔冒充成保险，因此服务端拒绝。
+   */
+  insuranceProviderStatus?: RentalInsuranceProviderStatus;
+  insuranceProviderName?: string;
   status: "enabled" | "disabled";
   version: string;
   createdAt: string;
@@ -6194,6 +6259,60 @@ export interface RentalValueAddedService {
 
 export interface SaveRentalValueAddedServiceRequest extends Omit<RentalValueAddedService, "id" | "tenantId" | "categoryCode" | "version" | "createdAt" | "updatedAt"> {
   id?: string;
+}
+
+/** 服务未通过资格判定的原因码（需求 4.4.11：不适用时服务端必须明确拒绝）。 */
+export const RENTAL_SERVICE_SKIP_REASONS = [
+  "status_not_enabled",
+  "item_group_mismatch",
+  "fulfillment_mode_mismatch",
+  "location_mismatch",
+  "customer_scope_mismatch",
+  "quantity_out_of_range",
+  "mandatory_missing"
+] as const;
+export type RentalServiceSkipReason = (typeof RENTAL_SERVICE_SKIP_REASONS)[number];
+
+/**
+ * 报价/订单里固化的服务快照（需求 4.4.11「报价与订单保存实际命中的服务、价格、
+ * 资格和条款快照」，以及「条款发布后不可原地修改；有效报价与历史订单继续使用原快照」）。
+ *
+ * 条款正文整段固化而不是只存版本号：需求明确「不得用当前网页条款替代历史订单条款」，
+ * 只存版本号在服务被删除或改写后就取不回当时的正文。
+ */
+export interface RentalQuoteServiceSnapshot {
+  serviceId: string;
+  serviceCode: string;
+  serviceName: string;
+  serviceType: RentalValueAddedService["serviceType"];
+  serviceVersion: string;
+  workspaceId: string;
+  billingUnit: RentalServiceBillingUnit;
+  selectionMode: RentalServiceSelectionMode;
+  /** 强制服务必须标记「业务规则要求」，不得显示为客户自愿选择。 */
+  requiredByRule: boolean;
+  mandatoryRuleHit?: string;
+  unitPrice: number;
+  quantity: number;
+  /** 计费单位数（按 billingUnit 与租期算出）。 */
+  billingUnits: number;
+  amount: number;
+  /** 计算说明：单价 × 数量 × 单位数。 */
+  formula: string;
+  coverageLimit?: number;
+  deductible?: number;
+  termsVersion: string;
+  /** 条款正文快照。 */
+  terms: string;
+  /** 逐条资格判据，供报价直接展示「为什么这个服务可用」。 */
+  eligibility: Array<{ rule: string; passed: boolean; detail?: string }>;
+  /**
+   * 保障服务的展示口径。`damage_waiver` 恒为 false 且不带 provider；
+   * `insurance` 在接入真实 Provider 前也恒为 false——未投保就不能显示已投保。
+   */
+  insuredDisplayable: false;
+  insuranceProviderStatus?: RentalInsuranceProviderStatus;
+  insuranceProviderName?: string;
 }
 
 /**
@@ -6599,6 +6718,14 @@ export interface RentalQuoteSnapshotV1 {
    * 「为什么用的是 A 券不是 B 券」时，只有这份记录能回答。
    */
   discountEvaluations: RentalQuoteDiscountEvaluation[];
+  /**
+   * MKT-02A：报价命中的增值服务快照（服务、价格、单位数、资格判据与条款正文）。
+   *
+   * 与 chargeLines 里的 `service:` 行并存：明细行只回答「收了多少」，
+   * 快照回答「按哪一版服务与条款收的、凭什么资格可用、强制还是可选」。
+   * 服务后续改价、改条款或停用都不得改变这张报价与由它下单的订单。
+   */
+  serviceSnapshots: RentalQuoteServiceSnapshot[];
   customerCouponId?: string;
   /** MKT-01B：报价时命中的客户券权益与计算结果，不回读可变模板。 */
   couponEvaluation?: RentalQuoteCouponEvaluation;
