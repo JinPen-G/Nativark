@@ -86,7 +86,7 @@ function fail(message, secrets = []) {
 }
 
 function hasCommand(command) {
-  const probe = spawnSync(command, ["--version"], { encoding: "utf8", shell: true });
+  const probe = spawnSync(command, ["--version"], { encoding: "utf8" });
   return probe.status === 0;
 }
 
