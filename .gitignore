@@ -26,6 +26,9 @@ apps/api/uploads/
 *.sqlite
 backups/
 
+# OPS-01B/01C 产物：发布清单与演练报告，随环境而变，不入库
+artifacts/
+
 # OS/editor noise
 .DS_Store
 Thumbs.db
