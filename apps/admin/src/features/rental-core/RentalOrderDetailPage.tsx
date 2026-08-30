@@ -1,30 +1,56 @@
-import { ArrowLeftOutlined, CheckCircleOutlined, MinusCircleOutlined, PlusOutlined, RetweetOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
-import { RentalCoreOrderStatus, type CreateRentalInspectionRequest, type RentalAllocation, type RentalInspectionTemplate, type RentalReservation } from "@store-rental/shared";
+import { ArrowLeftOutlined, CheckCircleOutlined, DollarOutlined, MinusCircleOutlined, PlusOutlined, RetweetOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
+import { RentalCoreOrderStatus, type CreateRentalInspectionRequest, type RentalAllocation, type RentalFundingAction, type RentalFundingInstrument, type RentalInspectionTemplate, type RentalReservation } from "@store-rental/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { App, Button, Card, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Table, Tag } from "antd";
+import { Alert, App, Button, Card, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Table, Tag } from "antd";
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
+import { useAuthStore } from "@/features/auth/authStore";
+
+type FundingOperation = {
+  instrument: RentalFundingInstrument;
+  action: RentalFundingAction;
+};
+
+const FUNDING_ACTION_LABELS: Record<RentalFundingAction, string> = {
+  initiate: "发起",
+  append: "追加",
+  capture: "抵扣",
+  refund: "退款",
+  release: "释放",
+  fail: "记录失败"
+};
+
+const FUNDING_INSTRUMENT_LABELS: Record<RentalFundingInstrument, string> = {
+  deposit: "押金",
+  preauthorization: "预授权"
+};
 
 export function RentalOrderDetailPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
   const { message } = App.useApp();
   const queryClient = useQueryClient();
+  const hasPermission = useAuthStore((state) => state.hasPermission);
+  const canViewFunding = hasPermission("store-rental:order:view") || hasPermission("store-rental:order:settle");
+  const canSettleFunding = hasPermission("store-rental:order:settle");
   const [inspection, setInspection] = useState<RentalInspectionTemplate>();
   const [cancelOpen, setCancelOpen] = useState(false);
   const [substitution, setSubstitution] = useState<{ orderLineId: string; fromItemGroupId: string }>();
   const [partialReturnOpen, setPartialReturnOpen] = useState(false);
+  const [fundingOperation, setFundingOperation] = useState<FundingOperation>();
   const [inspectionForm] = Form.useForm<Record<string, unknown> & { exceptionCode?: string; exceptionDescription?: string; exceptionChargeAmount?: number }>();
   const [cancelForm] = Form.useForm<{ reason: string; weatherException?: boolean }>();
   const [substitutionForm] = Form.useForm<{ toItemGroupId: string }>();
   const [partialReturnForm] = Form.useForm<{ items: Array<{ allocationId: string; quantity: number }> }>();
+  const [fundingForm] = Form.useForm<{ amount?: number; reason: string; failureCode?: string }>();
   const order = useQuery({ queryKey: ["rental-core", "order", id], queryFn: () => rentalCoreApi.order(id), enabled: Boolean(id) });
   const profile = useQuery({ queryKey: ["rental-core", "profile"], queryFn: rentalCoreApi.profile });
   const templates = useQuery({ queryKey: ["rental-core", "templates"], queryFn: () => rentalCoreApi.inspectionTemplates() });
   const groups = useQuery({ queryKey: ["rental-core", "groups"], queryFn: rentalCoreApi.itemGroups });
+  const funding = useQuery({ queryKey: ["rental-core", "order", id, "funding"], queryFn: () => rentalCoreApi.fundingEvents(id), enabled: Boolean(id) && canViewFunding });
   const refresh = async () => { await Promise.all([queryClient.invalidateQueries({ queryKey: ["rental-core", "order", id] }), queryClient.invalidateQueries({ queryKey: ["rental-core", "orders"] })]); };
   const action = useMutation({ mutationFn: (type: "confirm" | "allocate") => type === "confirm" ? rentalCoreApi.confirmOrder(id) : rentalCoreApi.allocateOrder(id), onSuccess: async () => { await refresh(); message.success("订单状态已更新"); }, onError: () => message.error("操作失败，请检查状态、库存或优惠券") });
   const cancel = useMutation({ mutationFn: (values: { reason: string; weatherException?: boolean }) => rentalCoreApi.cancelOrder(id, values), onSuccess: async () => { setCancelOpen(false); cancelForm.resetFields(); await refresh(); message.success("订单已取消，费用和优惠券状态已更新"); }, onError: () => message.error("取消失败，请检查规则与订单状态") });
@@ -32,6 +58,26 @@ export function RentalOrderDetailPage() {
   const substitute = useMutation({ mutationFn: (values: { toItemGroupId: string }) => rentalCoreApi.substituteBundleComponent(id, { ...substitution!, toItemGroupId: values.toItemGroupId }), onSuccess: async () => { setSubstitution(undefined); substitutionForm.resetFields(); await refresh(); message.success("套装组成已替换并重新预占"); }, onError: () => message.error("替换失败，请检查替代组、订单状态和候选库存") });
   const partialReturn = useMutation({ mutationFn: rentalCoreApi.partialReturnOrder.bind(null, id), onSuccess: async () => { setPartialReturnOpen(false); partialReturnForm.resetFields(); await refresh(); message.success("部分归还已完成，剩余项目继续在租"); }, onError: () => message.error("部分归还失败；最后一批请使用归还检查或整单归还") });
   const inspect = useMutation({ mutationFn: (values: Record<string, unknown> & { exceptionCode?: string; exceptionDescription?: string; exceptionChargeAmount?: number }) => { const { exceptionCode, exceptionDescription, exceptionChargeAmount, ...results } = values; const exceptions: CreateRentalInspectionRequest["exceptions"] = exceptionDescription ? [{ code: exceptionCode || "damage", description: exceptionDescription, chargeAmount: Number(exceptionChargeAmount) || undefined }] : []; return rentalCoreApi.createInspection(id, { templateId: inspection!.id, results, exceptions }); }, onSuccess: async () => { setInspection(undefined); inspectionForm.resetFields(); await refresh(); message.success("检查记录及应计费用已保存"); }, onError: () => message.error("检查提交失败") });
+  const fundingAction = useMutation({
+    mutationFn: async (values: { amount?: number; reason: string; failureCode?: string }) => {
+      const operation = fundingOperation!;
+      const idempotencyKey = crypto.randomUUID();
+      if (operation.action === "initiate") return rentalCoreApi.initiateFunding(id, { instrument: operation.instrument, idempotencyKey, reason: values.reason });
+      if (operation.action === "release") return rentalCoreApi.releaseFunding(id, { idempotencyKey, reason: values.reason });
+      if (operation.action === "fail") return rentalCoreApi.failFunding(id, { instrument: operation.instrument, failureCode: values.failureCode!, idempotencyKey, reason: values.reason });
+      const request = { instrument: operation.instrument, amount: Number(values.amount), idempotencyKey, reason: values.reason };
+      if (operation.action === "append") return rentalCoreApi.appendFunding(id, request);
+      if (operation.action === "capture") return rentalCoreApi.captureFunding(id, request);
+      return rentalCoreApi.refundFunding(id, request);
+    },
+    onSuccess: async () => {
+      setFundingOperation(undefined);
+      fundingForm.resetFields();
+      await queryClient.invalidateQueries({ queryKey: ["rental-core", "order", id, "funding"] });
+      message.success("模拟资金事件已记录");
+    },
+    onError: () => message.error("操作失败，请检查当前余额、动作顺序和订单范围")
+  });
   const detail = order.data;
   const substitutionLine = detail?.lines.find((line) => line.id === substitution?.orderLineId);
   const substitutionBundle = groups.data?.find((group) => group.id === substitutionLine?.itemGroupId);
@@ -70,6 +116,33 @@ export function RentalOrderDetailPage() {
         { title: "操作", render: (_, row) => detail.status === RentalCoreOrderStatus.Reserved && canSubstituteReservation(row) ? <Button type="link" icon={<RetweetOutlined />} onClick={() => setSubstitution({ orderLineId: row.orderLineId, fromItemGroupId: row.itemGroupId })}>替换组成</Button> : "-" }
       ]} />}</Card>
       <Card title="费用与版本快照"><Table rowKey="code" pagination={false} dataSource={detail.chargeLines} columns={[{ title: "费用项", dataIndex: "name" }, { title: "类型", dataIndex: "type" }, { title: "来源版本", dataIndex: "sourceVersion", render: (value) => value ?? "-" }, { title: "说明", dataIndex: "detail", render: (value) => value ?? "-" }, { title: "金额", dataIndex: "amount", render: (value) => `¥${Number(value).toFixed(2)}` }]} /></Card>
+      {canViewFunding && <Card title={<Space><DollarOutlined />押金与预授权 <Tag color="orange">模拟资金</Tag></Space>}>
+        <Alert type="warning" showIcon message="当前未接入真实支付机构；以下操作只记录可追溯的模拟资金事件，不代表真实收款、冻结或退款。" style={{ marginBottom: 16 }} />
+        <Descriptions column={{ xs: 1, md: 2 }} items={[
+          { key: "deposit", label: `应收押金 ¥${detail.depositAmount.toFixed(2)}`, children: funding.data ? `已收 ¥${funding.data.deposit.collected.toFixed(2)} / 已抵扣 ¥${funding.data.deposit.captured.toFixed(2)} / 已退 ¥${funding.data.deposit.refunded.toFixed(2)} / 余额 ¥${funding.data.deposit.balance.toFixed(2)}` : "加载中" },
+          { key: "preauth", label: `应冻结预授权 ¥${detail.preAuthAmount.toFixed(2)}`, children: funding.data ? `已冻结 ¥${funding.data.preauthorization.frozen.toFixed(2)} / 已转扣 ¥${funding.data.preauthorization.captured.toFixed(2)} / 已释放 ¥${funding.data.preauthorization.released.toFixed(2)} / 余额 ¥${funding.data.preauthorization.balance.toFixed(2)}` : "加载中" }
+        ]} />
+        {canSettleFunding && <Space wrap style={{ margin: "12px 0" }}>
+          {detail.depositAmount > 0 && !funding.data?.deposit.collected && <Button onClick={() => setFundingOperation({ instrument: "deposit", action: "initiate" })}>模拟收取押金</Button>}
+          {(funding.data?.deposit.collected ?? 0) > 0 && <Button onClick={() => setFundingOperation({ instrument: "deposit", action: "append" })}>追加押金</Button>}
+          {(funding.data?.deposit.balance ?? 0) > 0 && <Button onClick={() => setFundingOperation({ instrument: "deposit", action: "capture" })}>押金抵扣</Button>}
+          {(funding.data?.deposit.balance ?? 0) > 0 && <Button onClick={() => setFundingOperation({ instrument: "deposit", action: "refund" })}>押金退款</Button>}
+          {detail.preAuthAmount > 0 && !funding.data?.preauthorization.frozen && <Button onClick={() => setFundingOperation({ instrument: "preauthorization", action: "initiate" })}>模拟冻结预授权</Button>}
+          {(funding.data?.preauthorization.frozen ?? 0) > 0 && <Button onClick={() => setFundingOperation({ instrument: "preauthorization", action: "append" })}>追加预授权</Button>}
+          {(funding.data?.preauthorization.balance ?? 0) > 0 && <Button onClick={() => setFundingOperation({ instrument: "preauthorization", action: "capture" })}>预授权转扣</Button>}
+          {(funding.data?.preauthorization.balance ?? 0) > 0 && <Button onClick={() => setFundingOperation({ instrument: "preauthorization", action: "release" })}>释放全部预授权</Button>}
+          <Button danger onClick={() => setFundingOperation({ instrument: detail.preAuthAmount > 0 ? "preauthorization" : "deposit", action: "fail" })}>记录资金失败</Button>
+        </Space>}
+        <Table rowKey="id" size="small" pagination={false} loading={funding.isLoading} dataSource={funding.data?.events ?? []} columns={[
+          { title: "时间", dataIndex: "at", render: (value) => new Date(String(value)).toLocaleString() },
+          { title: "对象", dataIndex: "instrument", render: (value) => FUNDING_INSTRUMENT_LABELS[value as RentalFundingInstrument] },
+          { title: "动作", dataIndex: "action", render: (value) => FUNDING_ACTION_LABELS[value as RentalFundingAction] },
+          { title: "金额", dataIndex: "amount", render: (value) => `¥${Number(value).toFixed(2)}` },
+          { title: "事件后余额", dataIndex: "balanceAfter", render: (value) => `¥${Number(value).toFixed(2)}` },
+          { title: "原因", dataIndex: "reason" },
+          { title: "状态", render: (_, row) => <Tag color={row.action === "fail" ? "red" : "orange"}>{row.action === "fail" ? `失败 · ${row.failureCode}` : "模拟成功"}</Tag> }
+        ]} />
+      </Card>}
       <Space>
         {detail.status === RentalCoreOrderStatus.Draft && <Button type="primary" onClick={() => action.mutate("confirm")}>确认订单并核销优惠券</Button>}
         {detail.status === RentalCoreOrderStatus.Reserved && <Button type="primary" onClick={() => action.mutate("allocate")}>执行配货</Button>}
@@ -83,6 +156,14 @@ export function RentalOrderDetailPage() {
     <Modal title="取消租赁订单" open={cancelOpen} onCancel={() => setCancelOpen(false)} onOk={() => cancelForm.submit()} confirmLoading={cancel.isPending} destroyOnHidden><Form form={cancelForm} layout="vertical" onFinish={(values) => cancel.mutate(values)}><Form.Item name="reason" label="取消原因" rules={[{ required: true }]}><Input.TextArea rows={3} /></Form.Item><Form.Item name="weatherException" label="适用天气例外"><Select options={[{ value: false, label: "否" }, { value: true, label: "是" }]} /></Form.Item></Form></Modal>
     <Modal title="替换套装组成" open={Boolean(substitution)} onCancel={() => setSubstitution(undefined)} onOk={() => substitutionForm.submit()} confirmLoading={substitute.isPending} destroyOnHidden><Form form={substitutionForm} layout="vertical" onFinish={(values) => substitute.mutate(values)}><Form.Item label="当前组成"><Input disabled value={groups.data?.find((group) => group.id === substitution?.fromItemGroupId)?.name} /></Form.Item><Form.Item name="toItemGroupId" label="替代商品" rules={[{ required: true }]}><Select options={substitutionOptions} placeholder="选择同一替代组的候选商品" /></Form.Item></Form></Modal>
     <Modal title="部分归还" open={partialReturnOpen} onCancel={() => setPartialReturnOpen(false)} onOk={() => partialReturnForm.submit()} confirmLoading={partialReturn.isPending} destroyOnHidden><Form form={partialReturnForm} layout="vertical" onFinish={(values) => partialReturn.mutate(values)}><Form.List name="items">{(fields, { add, remove }) => <Space direction="vertical" style={{ width: "100%" }}>{fields.map((field) => <Space key={field.key} align="start"><Form.Item {...field} name={[field.name, "allocationId"]} rules={[{ required: true }]}><Select style={{ width: 320 }} placeholder="选择待归还资产或数量项" options={detail?.allocations.filter((allocation) => allocation.status === "picked_up").map((allocation) => ({ value: allocation.id, label: allocation.assetNo ?? `${groups.data?.find((group) => group.id === allocation.itemGroupId)?.name ?? "数量库存"} · 剩余 ${allocation.quantity}` }))} /></Form.Item><Form.Item {...field} name={[field.name, "quantity"]} rules={[{ required: true }]}><InputNumber min={1} precision={0} style={{ width: 100 }} /></Form.Item><Button type="text" danger icon={<MinusCircleOutlined />} onClick={() => remove(field.name)} /></Space>)}<Button type="dashed" icon={<PlusOutlined />} onClick={() => add({ quantity: 1 })}>增加归还项</Button></Space>}</Form.List></Form></Modal>
+    <Modal title={fundingOperation ? `${FUNDING_ACTION_LABELS[fundingOperation.action]}${FUNDING_INSTRUMENT_LABELS[fundingOperation.instrument]}（模拟）` : "模拟资金操作"} open={Boolean(fundingOperation)} onCancel={() => { setFundingOperation(undefined); fundingForm.resetFields(); }} onOk={() => fundingForm.submit()} confirmLoading={fundingAction.isPending} destroyOnHidden>
+      <Alert type="warning" showIcon message="本操作仅写入模拟资金流水，不会发起真实扣款或冻结。" style={{ marginBottom: 16 }} />
+      <Form form={fundingForm} layout="vertical" onFinish={(values) => fundingAction.mutate(values)}>
+        {fundingOperation && !["initiate", "release", "fail"].includes(fundingOperation.action) && <Form.Item name="amount" label="金额" rules={[{ required: true }]}><InputNumber min={0.01} precision={2} prefix="¥" style={{ width: "100%" }} /></Form.Item>}
+        {fundingOperation?.action === "fail" && <Form.Item name="failureCode" label="失败原因码" rules={[{ required: true }]}><Input placeholder="例如 provider_timeout" /></Form.Item>}
+        <Form.Item name="reason" label="操作原因" rules={[{ required: true }]}><Input.TextArea rows={3} /></Form.Item>
+      </Form>
+    </Modal>
   </>;
 }
 
