@@ -66,6 +66,7 @@ export const PUBLIC_ROUTES = new Set([
   "/health",
   "/openapi.json",
   "/auth/login",
+  "/auth/development/reset-demo-password",
   "/auth/refresh",
   "/auth/logout",
   "/auth/me",
@@ -617,6 +618,7 @@ export class ApiAuthGuard implements CanActivate {
       path === "/health" ||
       path === "/openapi.json" ||
       path === "/auth/login" ||
+      path === "/auth/development/reset-demo-password" ||
       path === "/auth/refresh" ||
       request.method === "OPTIONS"
     ) {

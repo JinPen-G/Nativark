@@ -172,6 +172,14 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     },
     ["tenantCode", "account", "password"]
   ),
+  ResetLocalDemoPasswordRequest: objectOf(
+    { password: { type: "string", format: "password" } },
+    ["password"]
+  ),
+  ResetLocalDemoPasswordResult: objectOf(
+    { reset: { type: "boolean" }, accounts: arrayOf(stringSchema) },
+    ["reset", "accounts"]
+  ),
   LoginResponse: objectOf(
     {
       accessToken: stringSchema,
@@ -944,6 +952,16 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     permissions: [],
     requestSchema: "LoginRequest",
     responseSchema: "LoginResponse"
+  },
+  {
+    method: "post",
+    path: "/api/auth/development/reset-demo-password",
+    tag: "Auth",
+    operationId: "resetLocalDemoPassword",
+    summary: "Set local development demo account password",
+    permissions: [],
+    requestSchema: "ResetLocalDemoPasswordRequest",
+    responseSchema: "ResetLocalDemoPasswordResult"
   },
   {
     method: "get",

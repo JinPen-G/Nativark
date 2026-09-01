@@ -166,6 +166,16 @@ export interface LoginRequest {
   password: string;
 }
 
+/** 仅本机开发环境可用：提交后服务端只存哈希，不返回密码。 */
+export interface ResetLocalDemoPasswordRequest {
+  password: string;
+}
+
+export interface ResetLocalDemoPasswordResult {
+  reset: true;
+  accounts: string[];
+}
+
 export interface LoginResponse {
   accessToken: string;
   refreshToken: string;

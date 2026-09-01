@@ -16,6 +16,7 @@ import type {
   LoginResponse,
   RefreshSessionRequest,
   RentalCapability,
+  ResetLocalDemoPasswordResult,
   SystemUserRow
 } from "@store-rental/shared";
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
@@ -96,6 +97,24 @@ export class AuthService {
       detail: "登录成功。"
     });
     return this.issueSession(loginResult.user, loginResult.tenant);
+  }
+
+  /**
+   * 仅非生产环境的本地演示重置。此处刻意只返回固定账号标识，不返回提交的密码；
+   * 密码由下游立即哈希，且全部既有会话都会失效。
+   */
+  async resetLocalDemoPassword(password: string): Promise<ResetLocalDemoPasswordResult> {
+    if (this.configService.get<string>("NODE_ENV") === "production") {
+      throw new ForbiddenException("生产环境不提供演示账号密码重置入口");
+    }
+    const security = await this.platformService.getSecurityBaseline();
+    this.assertPasswordPolicy(password, security.passwordPolicy);
+    await this.platformService.setLocalDemoAccountPassword(password);
+    this.loginFailures.clear();
+    return {
+      reset: true,
+      accounts: ["demo/admin", "demo2/admin", "platform/admin"]
+    };
   }
 
   async refresh(input: RefreshSessionRequest): Promise<LoginResponse> {

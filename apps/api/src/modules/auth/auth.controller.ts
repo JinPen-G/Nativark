@@ -2,7 +2,7 @@ import { Body, Controller, Get, Headers, Post } from "@nestjs/common";
 import type { ChangePasswordRequest, RefreshSessionRequest, SwitchWorkspaceRequest } from "@store-rental/shared";
 import { IsNotEmpty, IsString } from "class-validator";
 import { AuthService } from "./auth.service";
-import { ChangePasswordDto, RefreshSessionDto, SwitchWorkspaceDto } from "./auth-request.dto";
+import { ChangePasswordDto, RefreshSessionDto, ResetLocalDemoPasswordDto, SwitchWorkspaceDto } from "./auth-request.dto";
 
 export class LoginDto {
   @IsString()
@@ -25,6 +25,15 @@ export class AuthController {
   @Post("login")
   login(@Body() body: LoginDto) {
     return this.authService.login(body);
+  }
+
+  /**
+   * 本机开发登录页的兜底入口：让非技术使用者自行设置演示账号密码，
+   * 不把任何可登录密码写进源码、构建产物或响应。
+   */
+  @Post("development/reset-demo-password")
+  resetLocalDemoPassword(@Body() body: ResetLocalDemoPasswordDto) {
+    return this.authService.resetLocalDemoPassword(body.password);
   }
 
   @Get("me")

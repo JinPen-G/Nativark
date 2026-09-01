@@ -300,6 +300,39 @@ export class PlatformRepository {
     ]);
   }
 
+  /** 本机开发演示账号的统一重置；调用方已完成非生产环境与密码策略校验。 */
+  async setLocalDemoAccountPassword(password: string) {
+    const users = await this.prisma.user.findMany({
+      where: { account: "admin", tenant: { code: { in: ["demo", "demo2", "platform"] } } },
+      select: { id: true, tenant: { select: { code: true } } }
+    });
+    if (users.length !== 3) {
+      throw new BadRequestException("本地演示账号尚未初始化，请先完成数据库初始化");
+    }
+    const expected = new Set(["demo", "demo2", "platform"]);
+    if (users.some((user) => !expected.delete(user.tenant.code)) || expected.size > 0) {
+      throw new BadRequestException("本地演示账号不完整，请先完成数据库初始化");
+    }
+    const now = new Date();
+    await this.prisma.$transaction(async (tx) => {
+      for (const user of users) {
+        await tx.user.update({
+          where: { id: user.id },
+          data: {
+            passwordHash: hashPassword(password),
+            mustChangePassword: false,
+            passwordChangedAt: now,
+            tokenVersion: { increment: 1 }
+          }
+        });
+      }
+      await tx.authSession.updateMany({
+        where: { userId: { in: users.map((user) => user.id) }, revokedAt: null },
+        data: { revokedAt: now }
+      });
+    });
+  }
+
   /* ---------- SPACE-01：经营空间主档与成员关系 ---------- */
 
   /**

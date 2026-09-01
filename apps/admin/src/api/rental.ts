@@ -22,6 +22,8 @@ import type {
   LoginResponse,
   ChangePasswordRequest,
   RefreshSessionRequest,
+  ResetLocalDemoPasswordRequest,
+  ResetLocalDemoPasswordResult,
   SessionContextResponse,
   MemberDetail,
   MemberListResult,
@@ -95,6 +97,7 @@ import { request } from "./http";
 
 export const api = {
   login: (payload: LoginRequest) => request<LoginResponse>("/auth/login", { method: "post", data: payload }),
+  resetLocalDemoPassword: (payload: ResetLocalDemoPasswordRequest) => request<ResetLocalDemoPasswordResult>("/auth/development/reset-demo-password", { method: "post", data: payload }),
   refresh: (payload: RefreshSessionRequest) => request<LoginResponse>("/auth/refresh", { method: "post", data: payload }),
   logout: (payload: RefreshSessionRequest) => request<{ loggedOut: boolean }>("/auth/logout", { method: "post", data: payload }),
   changePassword: (payload: ChangePasswordRequest) => request<LoginResponse>("/auth/change-password", { method: "post", data: payload }),

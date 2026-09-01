@@ -2534,6 +2534,27 @@ export class PlatformService {
     await this.revokeUserSessions(userId);
   }
 
+  /** 仅由本机开发环境入口调用；详情与环境限制由 AuthService 负责。 */
+  async setLocalDemoAccountPassword(password: string) {
+    if (this.useMysqlDataSource()) {
+      return this.platformRepository.setLocalDemoAccountPassword(password);
+    }
+    const accounts = [
+      { tenantId: "tenant_001", account: "admin" },
+      { tenantId: "tenant_002", account: "admin" },
+      { tenantId: "tenant_platform", account: "admin" }
+    ];
+    const users = accounts.map(({ tenantId, account }) => this.users.find((user) => user.tenantId === tenantId && user.account === account));
+    if (users.some((user) => !user)) {
+      throw new BadRequestException("本地演示账号尚未初始化，请先完成数据库初始化");
+    }
+    for (const user of users) {
+      user!.password = password;
+      user!.mustChangePassword = false;
+      await this.revokeUserSessions(user!.id);
+    }
+  }
+
   getDefaultAdmin() {
     return this.toUserRow(this.users[0]);
   }
