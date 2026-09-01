@@ -1,15 +1,28 @@
 import { ApartmentOutlined, LockOutlined, SafetyCertificateOutlined, UserOutlined } from "@ant-design/icons";
-import { App, Button, Card, Form, Input, Typography } from "antd";
+import { Alert, App, Button, Card, Form, Input, Space, Typography } from "antd";
 import { isAxiosError } from "axios";
 import { useNavigate } from "react-router-dom";
 import { AppearanceSwitcher } from "@/components/AppearanceSwitcher";
 import { useAuthStore } from "./authStore";
 
+type LoginValues = { tenantCode: string; account: string; password: string };
+
+const LOCAL_DEMO_ACCOUNTS = [
+  { label: "演示香港租户管理员", tenantCode: "demo", account: "admin" },
+  { label: "演示深圳租户管理员", tenantCode: "demo2", account: "admin" },
+  { label: "SaaS 平台管理员", tenantCode: "platform", account: "admin" },
+] as const;
+
 export function LoginPage() {
-  const [form] = Form.useForm<{ tenantCode: string; account: string; password: string }>();
+  const [form] = Form.useForm<LoginValues>();
   const { message } = App.useApp();
   const login = useAuthStore((state) => state.login);
   const navigate = useNavigate();
+
+  const fillLocalDemoAccount = (demo: (typeof LOCAL_DEMO_ACCOUNTS)[number]) => {
+    form.setFieldsValue({ tenantCode: demo.tenantCode, account: demo.account, password: "" });
+    message.info("已填入示例群组与账号，请输入本机初始化时配置的密码");
+  };
 
   return (
     <div className="login-stage">
@@ -44,6 +57,32 @@ export function LoginPage() {
               <Form.Item label="密码" name="password" rules={[{ required: true, message: "请输入密码" }]}><Input.Password prefix={<LockOutlined />} autoComplete="current-password" /></Form.Item>
               <Button type="primary" htmlType="submit" block>进入工作台</Button>
             </Form>
+            {import.meta.env.DEV ? (
+              <Alert
+                className="login-demo-hints"
+                type="info"
+                showIcon
+                message="本地开发示例群组"
+                description={(
+                  <div>
+                    <Typography.Paragraph>
+                      点击可填入群组和账号。密码不写入前端源码，请使用本机初始化时设置的
+                      <Typography.Text code> SEED_DEMO_PASSWORD </Typography.Text>
+                      或
+                      <Typography.Text code> SEED_PLATFORM_PASSWORD </Typography.Text>
+                      （兼容对应的 <Typography.Text code>E2E_*</Typography.Text> 变量）。
+                    </Typography.Paragraph>
+                    <Space className="login-demo-accounts" wrap>
+                      {LOCAL_DEMO_ACCOUNTS.map((demo) => (
+                        <Button key={`${demo.tenantCode}:${demo.account}`} size="small" onClick={() => fillLocalDemoAccount(demo)}>
+                          {demo.label}（{demo.tenantCode} / {demo.account}）
+                        </Button>
+                      ))}
+                    </Space>
+                  </div>
+                )}
+              />
+            ) : null}
             <Typography.Text className="login-support" type="secondary">登录即表示你正在访问获授权的租户数据范围。</Typography.Text>
           </Card>
         </main>

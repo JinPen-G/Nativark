@@ -323,10 +323,14 @@ button, input, textarea, select { font: inherit; }
 .login-brand { display: flex; align-items: center; gap: 8px; color: var(--rental-color-text-heading); }
 .login-brand b { font-size: 16px; font-weight: 600; }
 .login-workspace { display: grid; min-height: 0; place-items: center; padding: 32px 24px; background: var(--rental-color-bg-layout); }
-.login-panel { width: min(420px, 100%); }
+.login-panel { width: min(520px, 100%); }
 .login-panel-heading h2 { margin: 0 0 4px !important; font-size: 24px !important; font-weight: 600 !important; line-height: 32px !important; }
 .login-panel-heading p { margin-bottom: 24px !important; }
 .login-panel .ant-alert { margin-bottom: 24px; }
+.login-demo-hints { margin: 20px 0 0 !important; }
+.login-demo-hints .ant-alert-description { font-size: 12px; line-height: 20px; }
+.login-demo-hints .ant-typography { margin-bottom: 8px; }
+.login-demo-accounts { display: flex; }
 .login-panel .ant-form-item { margin-bottom: 16px; }
 .login-panel .ant-btn-primary { margin-top: 8px; }
 .login-support { display: block; margin-top: 24px; font-size: 12px; line-height: 20px; text-align: center; }
