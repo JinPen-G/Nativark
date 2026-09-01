@@ -18,6 +18,7 @@ import {
   type RentalFundingReleaseRequest,
   type RentalPricingUnit,
   type RentalQuoteRequest,
+  type RentalBookingIdentityInput,
   type SaveRentalAssetRequest,
   type SaveRentalCouponTemplateRequest,
   type SaveRentalStockBalanceRequest,
@@ -277,6 +278,20 @@ export class CreateRentalOrderSubjectsInputDto {
   @IsOptional() @IsString() invoiceProfileId?: string;
 }
 
+export class RentalBookingIdentityInputDto implements RentalBookingIdentityInput {
+  @IsOptional()
+  @IsIn(["personal", "enterprise_employee"])
+  bookingIdentity?: "personal" | "enterprise_employee";
+
+  @IsOptional()
+  @IsString()
+  corporateCustomerId?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  enterpriseContractAndPayer?: boolean;
+}
+
 export class CreateRentalOrderDto implements CreateRentalOrderRequest {
   @IsString()
   @IsNotEmpty()
@@ -288,6 +303,11 @@ export class CreateRentalOrderDto implements CreateRentalOrderRequest {
   @IsOptional()
   @IsString()
   customerId?: string;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => RentalBookingIdentityInputDto)
+  bookingIdentity?: RentalBookingIdentityInputDto;
 
   /**
    * CUSTOMER-01C：订单四类主体。省略即回落为「三个主体都是下单客户本人」。
@@ -393,6 +413,11 @@ export class RentalQuoteDto implements RentalQuoteRequest {
   @IsOptional()
   @IsString()
   customerId?: string;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => RentalBookingIdentityInputDto)
+  bookingIdentity?: RentalBookingIdentityInputDto;
 
   @IsIn(FULFILLMENT_MODES)
   fulfillmentMode!: RentalFulfillmentMode;

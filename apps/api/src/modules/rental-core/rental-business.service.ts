@@ -92,6 +92,7 @@ import {
 import { RentalCoreConfigRepository, type RentalConfigStore, type RentalConfigTx } from "./rental-core-config.repository";
 import { PrismaService } from "../database/prisma.service";
 import { RentalServiceCapacityService } from "./rental-service-capacity.service";
+import { MembershipService } from "../platform/membership.service";
 import { DEFAULT_BUSINESS_TIME_ZONE, businessDateKey, businessTimeOfDay, businessDateKeyFromIndex, businessDayIndex, businessInstantAt, businessYearFromDateKey, isCalendarDateKey, businessHoursError } from "./rental-business-day";
 import {
   applyRangeFieldsToDay,
@@ -358,7 +359,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     @Optional() private readonly capabilities?: WorkspaceCapabilityService,
     // Review P1-5：被阻止的报价要写只追加的拒绝审计。可选同上。
     @Optional() private readonly hookAudits?: CapabilityHookRepository,
-    @Optional() private readonly serviceCapacities?: RentalServiceCapacityService
+    @Optional() private readonly serviceCapacities?: RentalServiceCapacityService,
+    /** 新会员订单的预约身份、企业关系与权益只能在会员域解析。 */
+    @Optional() private readonly memberships?: MembershipService
   ) {}
 
   /**
@@ -3403,6 +3406,15 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     if (this.capabilities) await this.capabilities.assertWorkspaceOperable(tenantId, this.workspaceOf(tenantId));
     if (new Date(input.startAt).getTime() >= new Date(input.endAt).getTime()) throw new BadRequestException("租赁结束时间必须晚于开始时间");
     if (!input.lines.length) throw new BadRequestException("报价至少需要一个商品");
+    const membershipSnapshot = input.bookingIdentity
+      ? (() => {
+          if (!input.customerId || input.customerType !== "personal") {
+            throw new BadRequestException("新会员预约必须选择个人会员");
+          }
+          if (!this.memberships) throw new ConflictException("会员预约服务未就绪");
+          return this.memberships.resolveBookingIdentity(tenantId, this.workspaceOf(tenantId), input.customerId, input.bookingIdentity);
+        })()
+      : undefined;
     if (new Set(input.lines.map((line) => line.itemGroupId)).size !== input.lines.length) throw new BadRequestException("同一商品在一次报价中只能出现一行");
     if (!context.settings.fulfillment.enabledModes.includes(input.fulfillmentMode)) throw new BadRequestException("当前租户未启用所选租赁履约方式");
     if (input.returnLocationId && input.returnLocationId !== input.fulfillmentLocationId && !context.settings.fulfillment.allowDifferentReturnLocation) throw new BadRequestException("当前租户未启用异地归还");
@@ -3821,7 +3833,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     }
     const quote: RentalQuoteSnapshotV1 = {
       id: uid("quote"), tenantId, quoteNo: `RQ${timestamp.replace(/\D/g, "").slice(0, 14)}${String(state.quotes.length + 1).padStart(3, "0")}`,
-      categoryCode: context.profile.categoryCode, request: structuredClone(input), chargeLines,
+      categoryCode: context.profile.categoryCode, request: structuredClone(input), membershipSnapshot: membershipSnapshot ? await membershipSnapshot : undefined, chargeLines,
       rentalAmount, discountAmount: roundMoney(discountAmount), couponAmount: roundMoney(couponAmount), serviceAmount,
       fulfillmentAmount,
       rateSnapshot: hitRates,

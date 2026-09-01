@@ -887,10 +887,23 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     // 正式经营门禁只作用于“创建新报价”。这里消费的是已经生成并冻结能力快照的报价；
     // 能力随后暂停或升级都不得反向废掉这份报价，更不能卡住由它形成的在途订单。
     if (quote.ruleSnapshot.qualification.required) {
-      if (!input.qualificationApproved) throw new ConflictException(`当前品类要求先通过资质审核：${quote.ruleSnapshot.qualification.documentTypes.join("、")}`);
-      if (input.qualificationValidTo) {
-        const validDays = (new Date(input.qualificationValidTo).getTime() - new Date(input.startAt).getTime()) / 86_400_000;
-        if (validDays < quote.ruleSnapshot.qualification.minimumValidityDays) throw new ConflictException("资质有效期不满足租赁规则");
+      if (quote.membershipSnapshot) {
+        const qualification = quote.membershipSnapshot.qualifications.find((item) =>
+          quote.ruleSnapshot.qualification.documentTypes.includes(item.qualificationType)
+          && item.status === "approved"
+        );
+        if (!qualification) throw new ConflictException(`当前品类要求先通过资质审核：${quote.ruleSnapshot.qualification.documentTypes.join("、")}`);
+        if (qualification.expiresAt) {
+          const validDays = (new Date(qualification.expiresAt).getTime() - new Date(input.startAt).getTime()) / 86_400_000;
+          if (validDays < quote.ruleSnapshot.qualification.minimumValidityDays) throw new ConflictException("资质有效期不满足租赁规则");
+        }
+      } else {
+        // 仅保留给迁移前旧调用方；新会员订单不接受前端声明资质已通过。
+        if (!input.qualificationApproved) throw new ConflictException(`当前品类要求先通过资质审核：${quote.ruleSnapshot.qualification.documentTypes.join("、")}`);
+        if (input.qualificationValidTo) {
+          const validDays = (new Date(input.qualificationValidTo).getTime() - new Date(input.startAt).getTime()) / 86_400_000;
+          if (validDays < quote.ruleSnapshot.qualification.minimumValidityDays) throw new ConflictException("资质有效期不满足租赁规则");
+        }
       }
     }
     const checked = await this.availability(tenantId, {
@@ -928,6 +941,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       id: orderId, tenantId, orderNo: `RC${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}${String(sequence).padStart(3, "0")}`,
       categoryCode: state.profile.categoryCode, status: RentalCoreOrderStatus.Draft,
       customerType: input.customerType, customerId: input.customerId, customerName: input.customerName.trim(), contactPhone: input.contactPhone?.trim(),
+      membershipSnapshot: quote.membershipSnapshot ? structuredClone(quote.membershipSnapshot) : undefined,
       fulfillmentMode: input.fulfillmentMode,
       fulfillmentLocationId: location.id, fulfillmentLocationName: location.name,
       fulfillmentLocationSnapshot: this.locationSnapshot(state, location),

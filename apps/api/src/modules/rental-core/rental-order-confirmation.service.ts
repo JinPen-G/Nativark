@@ -25,6 +25,7 @@ import { RentalCoreService } from "./rental-core.service";
 import { CustomerCorporateService } from "../platform/customer-corporate.service";
 import { CustomerOperationsService } from "../platform/customer-operations.service";
 import { RentalServiceCapacityService } from "./rental-service-capacity.service";
+import { MembershipService } from "../platform/membership.service";
 
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalize);
@@ -43,6 +44,7 @@ function quoteSnapshotFingerprint(quote: RentalQuoteSnapshotV1) {
   return JSON.stringify(canonicalize({
     categoryCode: quote.categoryCode,
     request: quote.request,
+    membershipSnapshot: quote.membershipSnapshot,
     chargeLines: quote.chargeLines,
     rentalAmount: quote.rentalAmount,
     discountAmount: quote.discountAmount,
@@ -119,7 +121,8 @@ export class RentalOrderConfirmationService {
      * 保留可选注入仅兼容直接 new 本服务的既有单测；生产 Nest 容器始终注册该服务。
      */
     @Optional() private readonly customerOperations?: CustomerOperationsService,
-    @Optional() private readonly serviceCapacities?: RentalServiceCapacityService
+    @Optional() private readonly serviceCapacities?: RentalServiceCapacityService,
+    @Optional() private readonly memberships?: MembershipService
   ) {}
 
   /**
@@ -153,6 +156,20 @@ export class RentalOrderConfirmationService {
 
     const quote = this.business.consumeQuote(tenantId, context, input.quoteId);
     this.assertOrderMatchesQuote(input, quote);
+    // 报价可锁定权益版本，但提交订单仍须确认“当前员工关系仍有效”。企业主体和
+    // 客户姓名都由这里的服务端解析结果覆盖，客户端不能伪造企业付款或历史身份。
+    const membershipAtCommit = quote.membershipSnapshot
+      ? await this.resolveMembershipAtCommit(tenantId, workspaceId, quote)
+      : undefined;
+    const orderInput: CreateRentalOrderRequest = membershipAtCommit
+      ? {
+          ...input,
+          customerType: "personal",
+          customerId: membershipAtCommit.personalCustomerId,
+          customerName: membershipAtCommit.personalCustomerName,
+          bookingIdentity: quote.request.bookingIdentity
+        }
+      : input;
     // 需求 4.5.4：订单确认按租期端点复查营业状态——报价之后运营可能把领取/归还日
     // 覆盖成停业日，确认不能只信报价时的旧判断。
     this.business.assertOrderDaysOpenForConfirmation(tenantId, context, {
@@ -174,9 +191,21 @@ export class RentalOrderConfirmationService {
      * 用 `committedAt` 作为判定时点，与报价消费、券锁定同一时刻：
      * 各步取各自的 now() 会让「授权刚好在这一秒过期」产生自相矛盾的结论。
      */
+    const membershipSubjects = membershipAtCommit
+      ? {
+          ...(input.subjects ?? {}),
+          contractSubjectCustomerId: membershipAtCommit.enterpriseContractAndPayer
+            ? membershipAtCommit.corporateCustomerId
+            : membershipAtCommit.personalCustomerId,
+          payerSubjectCustomerId: membershipAtCommit.enterpriseContractAndPayer
+            ? membershipAtCommit.corporateCustomerId
+            : membershipAtCommit.personalCustomerId,
+          userSubjectCustomerId: membershipAtCommit.personalCustomerId
+        }
+      : input.subjects;
     const resolvedSubjects =
-      this.subjects && input.customerId
-        ? await this.subjects.resolveOrderSubjects(tenantId, input.customerId, committedAt, input.subjects)
+      this.subjects && orderInput.customerId
+        ? await this.subjects.resolveOrderSubjects(tenantId, orderInput.customerId, committedAt, membershipSubjects)
         : undefined;
     const coupon = this.business.validateCouponForOrder(
       tenantId,
@@ -185,7 +214,7 @@ export class RentalOrderConfirmationService {
       quote.request.customerId,
       committedAt
     );
-    const order = await this.core.prepareOrder(tenantId, input, userName, quote, resolvedSubjects);
+    const order = await this.core.prepareOrder(tenantId, orderInput, userName, quote, resolvedSubjects);
 
     try {
       await this.prisma.$transaction(async (tx) => {
@@ -358,9 +387,30 @@ export class RentalOrderConfirmationService {
       quote.request.endAt !== input.endAt ||
       quote.request.customerType !== input.customerType ||
       quote.request.customerId !== input.customerId ||
+      JSON.stringify(quote.request.bookingIdentity ?? {}) !== JSON.stringify(input.bookingIdentity ?? {}) ||
       JSON.stringify(quotedLines) !== JSON.stringify(orderLines)
     ) {
       throw new BadRequestException("订单内容与服务端报价快照不一致");
     }
+  }
+
+  private async resolveMembershipAtCommit(tenantId: string, workspaceId: string, quote: RentalQuoteSnapshotV1) {
+    if (!this.memberships) throw new ConflictException("会员预约服务未就绪");
+    const snapshot = quote.membershipSnapshot!;
+    const current = await this.memberships.resolveBookingIdentity(
+      tenantId,
+      workspaceId,
+      snapshot.personalCustomerId,
+      quote.request.bookingIdentity
+    );
+    if (
+      current.bookingIdentity !== snapshot.bookingIdentity ||
+      current.corporateCustomerId !== snapshot.corporateCustomerId ||
+      current.corporateMembershipId !== snapshot.corporateMembershipId ||
+      current.enterpriseContractAndPayer !== snapshot.enterpriseContractAndPayer
+    ) {
+      throw new ConflictException("会员预约身份或企业员工关系已变化，请重新报价");
+    }
+    return snapshot;
   }
 }

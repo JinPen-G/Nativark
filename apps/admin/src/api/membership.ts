@@ -3,6 +3,7 @@ import type {
   CorporateMembershipMember,
   CustomerCorporateMembership,
   CustomerMembershipPlan,
+  CustomerMembershipBookingOption,
   CustomerMembershipQualificationType,
   CustomerMembershipRegistrationSettings,
   CustomerMembershipReview,
@@ -49,5 +50,7 @@ export const membershipApi = {
   publishPlan: (planId: string, versionId: string) =>
     request<CustomerMembershipPlan>(`/membership/plans/${planId}/versions/${versionId}/publish`, { method: "post" }),
   assignPlan: (data: AssignCustomerMembershipPlanRequest) =>
-    request<unknown>("/membership/plans/assignments", { method: "post", data })
+    request<unknown>("/membership/plans/assignments", { method: "post", data }),
+  bookingOptions: (customerId: string) =>
+    request<CustomerMembershipBookingOption[]>(`/membership/personal/${customerId}/booking-options`)
 };

@@ -11,6 +11,7 @@ import type {
   CustomerMembershipQualificationType,
   CustomerMembershipRegistrationSettings,
   CustomerMembershipReview,
+  CustomerMembershipBookingOption,
   CustomerQualificationRef,
   CustomerQualificationStatus,
   PersonalMembershipMember,
@@ -21,7 +22,9 @@ import type {
   SaveCustomerMembershipQualificationTypeRequest,
   SaveCorporateMembershipRequest,
   SavePersonalMembershipRequest,
-  SubmitCustomerQualificationRequest
+  SubmitCustomerQualificationRequest,
+  RentalBookingIdentityInput,
+  RentalMembershipSnapshot
 } from "@store-rental/shared";
 import { PrismaService } from "../database/prisma.service";
 
@@ -559,6 +562,90 @@ export class MembershipService {
       corporate = assignment ? this.toAssignment(assignment) : undefined;
     }
     return { personal: personal ? this.toAssignment(personal) : undefined, corporate };
+  }
+
+  /**
+   * 订单域唯一允许的预约身份解析。个人永远是使用人与资质事实来源；企业只来自
+   * 当前空间有效员工关系，不能由管理端或 App 自报一个企业 id 来取得权益或主体。
+   */
+  async resolveBookingIdentity(
+    tenantId: string,
+    workspaceId: string,
+    personalCustomerId: string,
+    input?: RentalBookingIdentityInput
+  ): Promise<RentalMembershipSnapshot> {
+    const personal = await this.requireCustomer(tenantId, personalCustomerId, "personal");
+    const personalLink = await this.requireWorkspaceLink(tenantId, workspaceId, personalCustomerId);
+    const qualifications = (await this.prisma.customerQualificationRef.findMany({
+      where: { tenantId, customerId: personalCustomerId }, orderBy: { qualificationType: "asc" }
+    })).map((row) => this.toQualification(row));
+    if (personalLink.status !== "active") throw new ConflictException("个人会员当前状态不允许新建订单");
+    const bookingIdentity = input?.bookingIdentity ?? "personal";
+    if (bookingIdentity === "personal") {
+      if (input?.corporateCustomerId || input?.enterpriseContractAndPayer) {
+        throw new BadRequestException("个人预约不能携带企业主体或企业付款选择");
+      }
+      const benefits = await this.resolveBenefits(tenantId, workspaceId, personalCustomerId);
+      return {
+        bookingIdentity,
+        personalCustomerId,
+        personalCustomerName: personal.name,
+        enterpriseContractAndPayer: false,
+        benefitSource: "personal",
+        personalPlan: benefits.personal,
+        qualifications,
+        resolvedAt: new Date().toISOString()
+      };
+    }
+    const corporateCustomerId = input?.corporateCustomerId;
+    if (!corporateCustomerId) throw new BadRequestException("企业员工预约必须选择企业会员");
+    const corporate = await this.requireCustomer(tenantId, corporateCustomerId, "corporate");
+    const corporateLink = await this.requireWorkspaceLink(tenantId, workspaceId, corporateCustomerId);
+    if (corporateLink.status !== "active") throw new ConflictException("企业会员当前状态不允许作为订单主体");
+    const now = new Date();
+    const relationship = await this.prisma.customerCorporateMembership.findFirst({
+      where: {
+        tenantId, workspaceId, corporateCustomerId, personalCustomerId, status: "active",
+        effectiveFrom: { lte: now }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }]
+      }
+    });
+    if (!relationship) throw new ConflictException("该个人会员不是当前企业的有效员工，不能使用企业身份或权益");
+    const benefits = await this.resolveBenefits(tenantId, workspaceId, personalCustomerId, corporateCustomerId);
+    return {
+      bookingIdentity,
+      personalCustomerId,
+      personalCustomerName: personal.name,
+      corporateCustomerId,
+      corporateCustomerName: corporate.name,
+      corporateMembershipId: relationship.id,
+      enterpriseContractAndPayer: Boolean(input?.enterpriseContractAndPayer),
+      benefitSource: "corporate",
+      personalPlan: benefits.personal,
+      corporatePlan: benefits.corporate,
+      qualifications,
+      resolvedAt: now.toISOString()
+    };
+  }
+
+  async listBookingOptions(tenantId: string, workspaceId: string, personalCustomerId: string): Promise<CustomerMembershipBookingOption[]> {
+    await this.requireCustomer(tenantId, personalCustomerId, "personal");
+    await this.requireWorkspaceLink(tenantId, workspaceId, personalCustomerId);
+    const now = new Date();
+    const rows = await this.prisma.customerCorporateMembership.findMany({
+      where: {
+        tenantId, workspaceId, personalCustomerId, status: "active", effectiveFrom: { lte: now },
+        OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }],
+        corporateCustomer: { customerType: "corporate" }
+      },
+      include: { corporateCustomer: { select: { name: true } } }, orderBy: { createdAt: "desc" }
+    });
+    return rows.map((row) => ({
+      corporateCustomerId: row.corporateCustomerId,
+      corporateCustomerName: row.corporateCustomer.name,
+      corporateMembershipId: row.id,
+      role: row.role as CustomerMembershipBookingOption["role"],
+      effectiveTo: row.effectiveTo?.toISOString()
+    }));
   }
 
   private planVersionData(input: SaveCustomerMembershipPlanRequest) {

@@ -3164,6 +3164,8 @@ model RentalOrder {
   customerId            String?
   customerName          String
   contactPhone          String?
+  /// 新会员体系：预约身份、企业员工关系、主体和权益的不可变快照。
+  membershipSnapshot    Json?
   fulfillmentMode       String
   fulfillmentLocationId String
   fulfillmentLocation   RentalFulfillmentLocation @relation(fields: [fulfillmentLocationId], references: [id])
@@ -4023,6 +4025,8 @@ model RentalQuote {
   categoryCode           RentalCategoryCode
   /// RentalQuoteRequest：报价入参原样留存，用于下单时比对与复算。
   request                Json
+  /// 新会员体系：由服务端解析的预约身份、企业关系和权益快照。
+  membershipSnapshot     Json?
   /// RentalQuoteChargeLine[]：费用行明细，是报价可解释性的依据。
   chargeLines            Json
   rentalAmount           Decimal            @db.Decimal(12, 2)

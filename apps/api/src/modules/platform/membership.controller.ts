@@ -168,4 +168,10 @@ export class MembershipController {
     const { tenantId, workspaceId } = this.scope();
     return this.memberships.resolveBenefits(tenantId, workspaceId, customerId, corporateCustomerId);
   }
+
+  @Get("personal/:customerId/booking-options")
+  bookingOptions(@Param("customerId") customerId: string) {
+    const { tenantId, workspaceId } = this.scope();
+    return this.memberships.listBookingOptions(tenantId, workspaceId, customerId);
+  }
 }

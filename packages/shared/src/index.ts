@@ -5338,6 +5338,40 @@ export interface CustomerMembershipPlanAssignment {
   createdAt: string;
 }
 
+/** 新建报价/订单的预约身份。个人始终是实际使用人与资质校验来源。 */
+export interface RentalBookingIdentityInput {
+  /** 默认 personal；enterprise_employee 必须同时指定当前空间的有效企业员工关系。 */
+  bookingIdentity?: "personal" | "enterprise_employee";
+  corporateCustomerId?: string;
+  /** 默认 false；开启后企业同时成为签约与付款主体，个人仍是使用人。 */
+  enterpriseContractAndPayer?: boolean;
+}
+
+/** 由服务端解析并冻结，页面和客户端不能自行构造。 */
+export interface RentalMembershipSnapshot {
+  bookingIdentity: "personal" | "enterprise_employee";
+  personalCustomerId: string;
+  personalCustomerName: string;
+  corporateCustomerId?: string;
+  corporateCustomerName?: string;
+  corporateMembershipId?: string;
+  enterpriseContractAndPayer: boolean;
+  benefitSource: "personal" | "corporate";
+  personalPlan?: CustomerMembershipPlanAssignment;
+  corporatePlan?: CustomerMembershipPlanAssignment;
+  /** 本次下单时实际使用的个人证件状态；后续资料修改不改写历史判断。 */
+  qualifications: CustomerQualificationRef[];
+  resolvedAt: string;
+}
+
+export interface CustomerMembershipBookingOption {
+  corporateCustomerId: string;
+  corporateCustomerName: string;
+  corporateMembershipId: string;
+  role: CustomerCorporateMembership["role"];
+  effectiveTo?: string;
+}
+
 export interface AssignCustomerMembershipPlanRequest {
   customerId: string;
   planVersionId: string;
@@ -7048,6 +7082,8 @@ export interface SendRentalNotificationRequest {
 export interface RentalQuoteRequest {
   customerType: "personal" | "corporate";
   customerId?: string;
+  /** 新会员订单使用。customerId 必须是个人会员，企业不能直接替代个人。 */
+  bookingIdentity?: RentalBookingIdentityInput;
   fulfillmentMode: RentalFulfillmentMode;
   fulfillmentLocationId: string;
   returnLocationId?: string;
@@ -7139,6 +7175,8 @@ export interface RentalQuoteSnapshotV1 {
   quoteNo: string;
   categoryCode: RentalCategoryCode;
   request: RentalQuoteRequest;
+  /** 新会员预约身份、主体与权益版本的服务端快照。 */
+  membershipSnapshot?: RentalMembershipSnapshot;
   chargeLines: RentalQuoteChargeLine[];
   rentalAmount: number;
   discountAmount: number;
@@ -7745,6 +7783,8 @@ export interface CreateRentalOrderRequest {
   quoteId: string;
   customerType: "personal" | "corporate";
   customerId?: string;
+  /** 必须与报价请求一致；服务端重新解析后覆盖客户端主体字段。 */
+  bookingIdentity?: RentalBookingIdentityInput;
   customerName: string;
   contactPhone?: string;
   /**
@@ -7886,6 +7926,8 @@ export interface RentalOrder {
   customerId?: string;
   customerName: string;
   contactPhone?: string;
+  /** 报价生成时解析的会员预约身份、企业关系与权益快照。 */
+  membershipSnapshot?: RentalMembershipSnapshot;
   fulfillmentMode: RentalFulfillmentMode;
   fulfillmentLocationId: string;
   fulfillmentLocationName: string;
