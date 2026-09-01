@@ -233,6 +233,11 @@ export class PlatformService {
         { code: "store-rental:vehicle:status-action", name: "按钮-车辆状态动作", description: "启停、维保、事故和状态处置" },
         { code: "store-rental:member:view", name: "会员查看" },
         { code: "store-rental:member:manage", name: "会员管理" },
+        { code: "store-rental:member:review", name: "会员注册审核", description: "处理个人会员注册审核，不含证件审核" },
+        { code: "store-rental:member:qualification-review", name: "会员证件审核", description: "处理身份证件和品类资质审核" },
+        { code: "store-rental:member:account-manage", name: "会员账号与密码管理", description: "开通账号、设置临时密码和管理账号状态" },
+        { code: "store-rental:member:plan:manage", name: "会员方案编辑", description: "编辑个人和企业会员方案草稿、授予方案" },
+        { code: "store-rental:member:plan:publish", name: "会员方案发布", description: "发布会员方案版本" },
         { code: "store-rental:member:risk-action", name: "按钮-会员风控动作", description: "暂停、拉黑和恢复会员" },
         // CUSTOMER-01B：敏感资料解密查看单独授权。必须出现在权限目录里——
         // 角色管理页的可选项完全来自这棵树，漏了它就没人能被授予该权限。
@@ -241,6 +246,7 @@ export class PlatformService {
         { code: "store-rental:customer:close", name: "客户注销", description: "注销客户账号或空间会员关系，不可逆" },
         { code: "store-rental:corporate:view", name: "企业客户查看" },
         { code: "store-rental:corporate:manage", name: "企业客户管理" },
+        { code: "store-rental:corporate:employee-manage", name: "企业员工管理", description: "维护企业管理员和员工关系" },
         { code: "store-rental:corporate:monthly-settle", name: "按钮-企业月结回款", description: "登记企业账单回款" },
         { code: "store-rental:finance:view", name: "财务查看", description: "查看资金流水、发票收据、调账和对账" },
         { code: "store-rental:finance:manage", name: "财务管理", description: "维护财务单据和处理资金状态" },

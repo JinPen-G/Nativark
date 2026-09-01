@@ -344,6 +344,13 @@ model Tenant {
   customerInvoiceProfiles   CustomerCorporateInvoiceProfile[]
   customerContracts         CustomerCorporateContract[]
   customerCredits           CustomerCorporateCredit[]
+  membershipRegistrationSettings CustomerMembershipRegistrationSettings[]
+  membershipReviews        CustomerMembershipReview[]
+  membershipQualificationTypes CustomerMembershipQualificationType[]
+  corporateMemberships     CustomerCorporateMembership[]
+  customerMembershipPlans  CustomerMembershipPlan[]
+  customerMembershipPlanVersions CustomerMembershipPlanVersion[]
+  customerMembershipPlanAssignments CustomerMembershipPlanAssignment[]
   rentalCoreStateSnapshot   RentalCoreStateSnapshot[]
   rentalBusinessStateSnapshot RentalBusinessStateSnapshot[]
   businessWorkspaces        BusinessWorkspace[]
@@ -387,6 +394,13 @@ model BusinessWorkspace {
   authSessions AuthSession[]
   operationLogs OperationLog[]
   customerWorkspaceLinks CustomerWorkspaceLink[]
+  membershipRegistrationSettings CustomerMembershipRegistrationSettings?
+  membershipReviews        CustomerMembershipReview[]
+  membershipQualificationTypes CustomerMembershipQualificationType[]
+  corporateMemberships     CustomerCorporateMembership[]
+  customerMembershipPlans  CustomerMembershipPlan[]
+  customerMembershipPlanVersions CustomerMembershipPlanVersion[]
+  customerMembershipPlanAssignments CustomerMembershipPlanAssignment[]
   coreStateSnapshot RentalCoreStateSnapshot?
   businessStateSnapshot RentalBusinessStateSnapshot?
   // SPACE-03：经营事实的反向关系。字段仅供 Prisma 关系解析，不用于查询。
@@ -1041,6 +1055,10 @@ model CustomerProfile {
   invoiceProfiles       CustomerCorporateInvoiceProfile[]
   contracts             CustomerCorporateContract[]
   credit                CustomerCorporateCredit?
+  membershipReviews     CustomerMembershipReview[]
+  corporateMembershipsAsCompany CustomerCorporateMembership[] @relation("CorporateMembershipCompany")
+  corporateMembershipsAsPersonal CustomerCorporateMembership[] @relation("CorporateMembershipPersonal")
+  membershipPlanAssignments CustomerMembershipPlanAssignment[]
 
   /// 供复合外键引用：让「权益/关系必须与客户同租户」可以在库层表达。
   /// 与 BusinessWorkspace 的 (tenantId, id) 同一手法。
@@ -1112,6 +1130,10 @@ model CustomerAccount {
   /// 最近一次状态变更的原因与操作人。完整历史在 customer_status_history。
   lastReason  String?  @db.Text
   lastOperator String?
+  /// 新会员体系仅存口令哈希；管理端永不读取或回显原密码。
+  passwordHash String?
+  passwordUpdatedAt DateTime?
+  mustChangePassword Boolean @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -1405,6 +1427,182 @@ model CustomerQualificationRef {
   @@unique([tenantId, customerId, qualificationType], map: "customer_qualification_refs_unique_type_key")
   @@index([tenantId, status], map: "customer_qualification_refs_tenant_status_idx")
   @@map("customer_qualification_refs")
+}
+
+/// MEMBER-01B：每个经营空间独立配置个人会员注册审核方式。
+model CustomerMembershipRegistrationSettings {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId String   @unique
+  workspace   BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  /// automatic / manual。默认人工审核，避免新空间在未配置时意外放开注册。
+  registrationMode String @default("manual")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([tenantId, workspaceId], map: "customer_membership_registration_settings_scope_key")
+  @@map("customer_membership_registration_settings")
+}
+
+/// MEMBER-01B/01C：注册审核与证件审核均为只追加的独立任务。
+model CustomerMembershipReview {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId String
+  workspace   BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  customerId  String
+  customer    CustomerProfile @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
+  /// registration / qualification
+  reviewType  String
+  qualificationType String?
+  /// pending / approved / rejected / supplement_required / cancelled
+  status      String   @default("pending")
+  channel     String
+  requestKey  String?
+  payload     Json?
+  reason      String?  @db.Text
+  reviewedBy  String?
+  reviewedAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantId, workspaceId, status, reviewType], map: "customer_membership_reviews_scope_status_type_idx")
+  @@unique([tenantId, workspaceId, requestKey], map: "customer_membership_reviews_scope_request_key")
+  @@index([tenantId, customerId, createdAt], map: "customer_membership_reviews_customer_created_idx")
+  @@map("customer_membership_reviews")
+}
+
+/// MEMBER-01C：经营空间的可维护证件类型注册表。品类或 capability 可以扩展它，会员主流程不写死车辆字段。
+model CustomerMembershipQualificationType {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId String
+  workspace   BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  code        String
+  name        String
+  categoryCode String
+  capabilityCode String?
+  requiredForBooking Boolean @default(false)
+  status      String   @default("enabled")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([workspaceId, code], map: "customer_membership_qualification_types_workspace_code_key")
+  @@index([tenantId, workspaceId, status], map: "customer_membership_qualification_types_scope_status_idx")
+  @@map("customer_membership_qualification_types")
+}
+
+/// MEMBER-01D：企业管理员与员工均引用真实个人会员，不单独创建账号。
+model CustomerCorporateMembership {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId String
+  workspace   BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  corporateCustomerId String
+  corporateCustomer CustomerProfile @relation("CorporateMembershipCompany", fields: [tenantId, corporateCustomerId], references: [tenantId, id], onDelete: Cascade)
+  personalCustomerId String
+  personalCustomer CustomerProfile @relation("CorporateMembershipPersonal", fields: [tenantId, personalCustomerId], references: [tenantId, id], onDelete: Cascade)
+  /// admin / employee。管理员也是企业员工关系的一种角色。
+  role        String   @default("employee")
+  department  String?
+  employeeNo  String?
+  status      String   @default("active")
+  effectiveFrom DateTime @default(now())
+  effectiveTo DateTime?
+  reason      String?  @db.Text
+  createdBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([workspaceId, corporateCustomerId, personalCustomerId], map: "customer_corporate_memberships_workspace_company_person_key")
+  @@index([tenantId, workspaceId, personalCustomerId, status], map: "customer_corporate_memberships_person_scope_status_idx")
+  @@map("customer_corporate_memberships")
+}
+
+/// MEMBER-01E：新会员方案主体。版本内容不回写本表，已发布版本必须不可变。
+model CustomerMembershipPlan {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId String
+  workspace   BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  code        String
+  name        String
+  /// personal / corporate
+  targetType  String
+  status      String   @default("draft")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  versions    CustomerMembershipPlanVersion[]
+  assignments CustomerMembershipPlanAssignment[]
+
+  @@unique([workspaceId, code], map: "customer_membership_plans_workspace_code_key")
+  @@unique([tenantId, id], map: "customer_membership_plans_tenant_id_key")
+  @@index([tenantId, workspaceId, targetType, status], map: "customer_membership_plans_scope_type_status_idx")
+  @@map("customer_membership_plans")
+}
+
+model CustomerMembershipPlanVersion {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId String
+  workspace   BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  planId      String
+  plan        CustomerMembershipPlan @relation(fields: [tenantId, planId], references: [tenantId, id], onDelete: Cascade)
+  version     Int
+  status      String   @default("draft")
+  levelRank   Int      @default(1)
+  isDefault   Boolean  @default(false)
+  isRecommended Boolean @default(false)
+  appVisible  Boolean  @default(false)
+  effectiveFrom DateTime?
+  effectiveTo DateTime?
+  eligibility Json
+  benefits    Json
+  createdBy   String?
+  publishedBy String?
+  publishedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  assignments CustomerMembershipPlanAssignment[]
+
+  @@unique([planId, version], map: "customer_membership_plan_versions_plan_version_key")
+  @@unique([tenantId, id], map: "customer_membership_plan_versions_tenant_id_key")
+  @@index([tenantId, workspaceId, status, effectiveFrom], map: "customer_membership_plan_versions_scope_status_effective_idx")
+  @@map("customer_membership_plan_versions")
+}
+
+/// 会员方案授予事实。企业员工订单将以它和企业关系构造权益快照。
+model CustomerMembershipPlanAssignment {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId String
+  workspace   BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  customerId  String
+  customer    CustomerProfile @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
+  planId      String
+  plan        CustomerMembershipPlan @relation(fields: [tenantId, planId], references: [tenantId, id], onDelete: Restrict)
+  planVersionId String
+  planVersion CustomerMembershipPlanVersion @relation(fields: [tenantId, planVersionId], references: [tenantId, id], onDelete: Restrict)
+  /// manual / system / corporate_contract
+  source      String
+  status      String   @default("active")
+  effectiveFrom DateTime @default(now())
+  effectiveTo DateTime?
+  reason      String?  @db.Text
+  grantedBy   String?
+  snapshot    Json
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantId, workspaceId, customerId, status], map: "customer_membership_plan_assignments_scope_customer_status_idx")
+  @@map("customer_membership_plan_assignments")
 }
 
 /// CUSTOMER-01A：客户合并映射（需求 4.8.3）。

@@ -17,8 +17,10 @@ const OrderCreatePage = lazy(() => import("@/features/rental-core/RentalOrderCre
 const OrderDetailPage = lazy(() => import("@/features/rental-core/RentalOrderDetailPage").then((module) => ({ default: module.RentalOrderDetailPage })));
 const RentalCommercialPage = lazy(() => import("@/features/commercial/RentalCommercialPage").then((module) => ({ default: module.RentalCommercialPage })));
 const CouponPage = lazy(() => import("@/features/commercial/CouponPage").then((module) => ({ default: module.CouponPage })));
-const CustomerPage = lazy(() => import("@/features/customers/CustomerPage").then((module) => ({ default: module.CustomerPage })));
-const CustomerMasterPage = lazy(() => import("@/features/customers/CustomerMasterPage").then((module) => ({ default: module.CustomerMasterPage })));
+const MembershipReviewPage = lazy(() => import("@/features/membership/MembershipReviewPage").then((module) => ({ default: module.MembershipReviewPage })));
+const PersonalMembershipPage = lazy(() => import("@/features/membership/PersonalMembershipPage").then((module) => ({ default: module.PersonalMembershipPage })));
+const CorporateMembershipPage = lazy(() => import("@/features/membership/CorporateMembershipPage").then((module) => ({ default: module.CorporateMembershipPage })));
+const MembershipPlanPage = lazy(() => import("@/features/membership/MembershipPlanPage").then((module) => ({ default: module.MembershipPlanPage })));
 const PlatformPage = lazy(() => import("@/features/platform/PlatformPage").then((module) => ({ default: module.PlatformPage })));
 const PlatformOperationsPage = lazy(() => import("@/features/platform/PlatformOperationsPage").then((module) => ({ default: module.PlatformOperationsPage })));
 const PlatformToolsPage = lazy(() => import("@/features/platform/PlatformToolsPage").then((module) => ({ default: module.PlatformToolsPage })));
@@ -87,8 +89,10 @@ function ProtectedRoutes() {
             <Route path={APP_ROUTES.services.path} element={guard(APP_ROUTES.services, <RentalCommercialPage section="services" />)} />
             <Route path={APP_ROUTES.rentalSettings.path} element={guard(APP_ROUTES.rentalSettings, <RentalSettingsPage />)} />
             <Route path={APP_ROUTES.rentalCapabilities.path} element={guard(APP_ROUTES.rentalCapabilities, <CapabilityGovernancePage />)} />
-            <Route path={APP_ROUTES.customerMaster.path} element={guard(APP_ROUTES.customerMaster, <CustomerMasterPage />)} />
-            <Route path={APP_ROUTES.customers.path} element={guard(APP_ROUTES.customers, <CustomerPage />)} />
+            <Route path={APP_ROUTES.membershipReviews.path} element={guard(APP_ROUTES.membershipReviews, <MembershipReviewPage />)} />
+            <Route path={APP_ROUTES.personalMembers.path} element={guard(APP_ROUTES.personalMembers, <PersonalMembershipPage />)} />
+            <Route path={APP_ROUTES.corporateMembers.path} element={guard(APP_ROUTES.corporateMembers, <CorporateMembershipPage />)} />
+            <Route path={APP_ROUTES.membershipPlans.path} element={guard(APP_ROUTES.membershipPlans, <MembershipPlanPage />)} />
             <Route path="/platform" element={<Navigate to={APP_ROUTES.platformUsers.path} replace />} />
             <Route path={APP_ROUTES.platformTenants.path} element={guard(APP_ROUTES.platformTenants, <TenantManagementPage />)} />
             <Route path={APP_ROUTES.platformUsers.path} element={guard(APP_ROUTES.platformUsers, <PlatformPage />)} />
@@ -109,7 +113,10 @@ function ProtectedRoutes() {
             <Route path="/stations" element={<Navigate to={APP_ROUTES.locations.path} replace />} />
             <Route path="/vehicle-groups" element={<Navigate to={APP_ROUTES.itemGroups.path} replace />} />
             <Route path="/vehicles" element={<Navigate to={APP_ROUTES.assets.path} replace />} />
-            {["/members", "/members/:id", "/member-reviews", "/membership-plans", "/corporates", "/corporates/:id"].map((path) => <Route key={path} path={path} element={<Navigate to={APP_ROUTES.customers.path} replace />} />)}
+            {["/customers", "/customers/master", "/members", "/members/:id"].map((path) => <Route key={path} path={path} element={<Navigate to={APP_ROUTES.personalMembers.path} replace />} />)}
+            {["/member-reviews"].map((path) => <Route key={path} path={path} element={<Navigate to={APP_ROUTES.membershipReviews.path} replace />} />)}
+            {["/membership-plans"].map((path) => <Route key={path} path={path} element={<Navigate to={APP_ROUTES.membershipPlans.path} replace />} />)}
+            {["/corporates", "/corporates/:id"].map((path) => <Route key={path} path={path} element={<Navigate to={APP_ROUTES.corporateMembers.path} replace />} />)}
             {["/organizations", "/users", "/permissions"].map((path) => <Route key={path} path={path} element={<Navigate to={APP_ROUTES.platformUsers.path} replace />} />)}
             <Route path="/system-rules" element={<Navigate to={APP_ROUTES.platformSystem.path} replace />} />
             {["/security-baseline", "/integrations", "/notifications"].map((path) => <Route key={path} path={path} element={<Navigate to={APP_ROUTES.platformOperations.path} replace />} />)}

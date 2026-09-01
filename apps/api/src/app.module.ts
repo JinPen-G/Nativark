@@ -23,6 +23,8 @@ import { CustomerOperationsRepository } from "./modules/platform/customer-operat
 import { CustomerOperationsService } from "./modules/platform/customer-operations.service";
 import { CustomerMergeService } from "./modules/platform/customer-merge.service";
 import { CustomerCorporateService } from "./modules/platform/customer-corporate.service";
+import { MembershipController } from "./modules/platform/membership.controller";
+import { MembershipService } from "./modules/platform/membership.service";
 import { PlatformService } from "./modules/platform/platform.service";
 import { ReportsController } from "./modules/reports/reports.controller";
 import { ReportsRepository } from "./modules/reports/reports.repository";
@@ -68,6 +70,7 @@ import { RentalServiceCapacityService } from "./modules/rental-core/rental-servi
     OpenApiController,
     AuthController,
     PlatformController,
+    MembershipController,
     ReportsController,
     StoreRentalController,
     RentalCoreController,
@@ -88,6 +91,7 @@ import { RentalServiceCapacityService } from "./modules/rental-core/rental-servi
     CustomerOperationsService,
     CustomerMergeService,
     CustomerCorporateService,
+    MembershipService,
     OperationLogService,
     ReportsService,
     ReportsRepository,

@@ -216,6 +216,51 @@ export function requiredPermissions(method: string, path: string) {
   if (path.startsWith("/reports")) {
     return ["store-rental:report:view"];
   }
+  if (path.startsWith("/membership")) {
+    if (path === "/membership/registration-settings") {
+      return method === "GET"
+        ? ["store-rental:member:view", "store-rental:member:manage"]
+        : ["store-rental:member:manage"];
+    }
+    if (path.startsWith("/membership/reviews")) {
+      return method === "GET"
+        ? ["store-rental:member:view", "store-rental:member:review", "store-rental:member:qualification-review"]
+        : ["store-rental:member:review", "store-rental:member:qualification-review"];
+    }
+    if (path.startsWith("/membership/qualification-types")) {
+      return method === "GET" ? ["store-rental:member:view", "store-rental:member:manage"] : ["store-rental:member:manage"];
+    }
+    if (/^\/membership\/personal\/[^/]+\/temporary-password$/u.test(path)) {
+      return ["store-rental:member:account-manage"];
+    }
+    if (path.startsWith("/membership/personal")) {
+      return method === "GET"
+        ? ["store-rental:member:view", "store-rental:member:manage"]
+        : ["store-rental:member:manage"];
+    }
+    if (/^\/membership\/corporate\/[^/]+\/employees$/u.test(path)) {
+      return method === "GET"
+        ? ["store-rental:corporate:view", "store-rental:corporate:manage", "store-rental:corporate:employee-manage"]
+        : ["store-rental:corporate:employee-manage"];
+    }
+    if (path.startsWith("/membership/corporate")) {
+      return method === "GET"
+        ? ["store-rental:corporate:view", "store-rental:corporate:manage", "store-rental:corporate:employee-manage"]
+        : ["store-rental:corporate:manage"];
+    }
+    if (/^\/membership\/plans\/[^/]+\/versions\/[^/]+\/publish$/u.test(path)) {
+      return ["store-rental:member:plan:publish"];
+    }
+    if (path === "/membership/plans/assignments") {
+      return ["store-rental:member:plan:manage"];
+    }
+    if (path.startsWith("/membership/plans")) {
+      return method === "GET"
+        ? ["store-rental:member:view", "store-rental:member:plan:manage", "store-rental:member:plan:publish"]
+        : ["store-rental:member:plan:manage"];
+    }
+    return ["store-rental:member:view"];
+  }
 
   if (path === "/rental/v1/categories") {
     return ["system:tenant:manage", "store-rental:order:view", "store-rental:vehicle:view"];
@@ -698,7 +743,9 @@ export class ApiAuthGuard implements CanActivate {
         path === "/platform/workspace-customers" ||
         path.startsWith("/platform/workspace-customers/") ||
         path === "/platform/customers" ||
-        path.startsWith("/platform/customers/"))
+        path.startsWith("/platform/customers/") ||
+        path === "/membership" ||
+        path.startsWith("/membership/"))
     ) {
       throw new ForbiddenException("当前会话没有经营空间，请先选择经营空间");
     }

@@ -5072,6 +5072,281 @@ export interface LinkCustomerToWorkspaceRequest {
   levelName?: string;
 }
 
+/** MEMBER-01：经营空间注册审核模式。 */
+export const CUSTOMER_MEMBERSHIP_REGISTRATION_MODES = ["automatic", "manual"] as const;
+export type CustomerMembershipRegistrationMode = (typeof CUSTOMER_MEMBERSHIP_REGISTRATION_MODES)[number];
+
+export const CUSTOMER_MEMBERSHIP_REVIEW_TYPES = ["registration", "qualification"] as const;
+export type CustomerMembershipReviewType = (typeof CUSTOMER_MEMBERSHIP_REVIEW_TYPES)[number];
+
+export const CUSTOMER_MEMBERSHIP_REVIEW_STATUSES = [
+  "pending", "approved", "rejected", "supplement_required", "cancelled"
+] as const;
+export type CustomerMembershipReviewStatus = (typeof CUSTOMER_MEMBERSHIP_REVIEW_STATUSES)[number];
+
+export const CUSTOMER_QUALIFICATION_STATUSES = [
+  "not_submitted", "pending", "approved", "rejected", "expired", "revoked"
+] as const;
+export type CustomerQualificationStatus = (typeof CUSTOMER_QUALIFICATION_STATUSES)[number];
+
+export interface CustomerMembershipRegistrationSettings {
+  registrationMode: CustomerMembershipRegistrationMode;
+  updatedAt?: string;
+}
+
+export interface UpdateCustomerMembershipRegistrationSettingsRequest {
+  registrationMode: CustomerMembershipRegistrationMode;
+}
+
+/** APP 和后台均使用这份注册契约；workspaceId 永远从服务端会话解析。 */
+export interface RegisterPersonalMembershipRequest {
+  name: string;
+  phone: string;
+  email?: string;
+  identityNo?: string;
+  /** admin / app。客户端不得伪造后台直通过标记。 */
+  channel: "admin" | "app";
+  /** 管理端仅能设置一次性临时密码；服务端只保存哈希。 */
+  temporaryPassword?: string;
+  /** 后台有审核权限时可直接通过；APP 请求永远忽略它。 */
+  directApprove?: boolean;
+  /** 客户端重试键。服务端以客户主档和空间关系保证最终幂等。 */
+  idempotencyKey?: string;
+}
+
+/** 管理端编辑个人会员主档；证件号只接收一次并以脱敏形式保存。 */
+export interface SavePersonalMembershipRequest {
+  name: string;
+  /** 留空则保留现有手机号；变更时只保存新的掩码展示值。 */
+  phone?: string;
+  email?: string;
+  identityNo?: string;
+}
+
+/** 企业会员主档。企业管理员、员工均通过 CustomerCorporateMembership 另行关联个人会员。 */
+export interface SaveCorporateMembershipRequest {
+  id?: string;
+  name: string;
+  /** 新建企业必填；编辑留空则保留现有手机号。 */
+  phone?: string;
+  email?: string;
+  corporateName: string;
+  corporateTaxNo?: string;
+}
+
+export interface CustomerMembershipReview {
+  id: string;
+  tenantId: string;
+  workspaceId: string;
+  customerId: string;
+  customerName?: string;
+  reviewType: CustomerMembershipReviewType;
+  qualificationType?: string;
+  status: CustomerMembershipReviewStatus;
+  channel: string;
+  reason?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ReviewCustomerMembershipRequest {
+  status: Extract<CustomerMembershipReviewStatus, "approved" | "rejected" | "supplement_required" | "cancelled">;
+  reason?: string;
+}
+
+export interface CustomerMembershipQualificationType {
+  id: string;
+  workspaceId: string;
+  code: string;
+  name: string;
+  categoryCode: RentalCategoryCode;
+  capabilityCode?: string;
+  requiredForBooking: boolean;
+  status: "enabled" | "disabled";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SaveCustomerMembershipQualificationTypeRequest {
+  id?: string;
+  code: string;
+  name: string;
+  capabilityCode?: string;
+  requiredForBooking?: boolean;
+  status?: "enabled" | "disabled";
+}
+
+export interface CustomerQualificationRef {
+  id: string;
+  customerId: string;
+  qualificationType: string;
+  referenceNoMasked?: string;
+  issuedAt?: string;
+  expiresAt?: string;
+  status: CustomerQualificationStatus;
+  evidenceRef?: string;
+  verifiedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 当前空间个人会员管理列表。账号、空间关系与证件状态同时展示，但不包含任何明文凭据。 */
+export interface PersonalMembershipMember {
+  customerId: string;
+  name: string;
+  phoneMasked: string;
+  email?: string;
+  identityNoMasked?: string;
+  membershipStatus: CustomerMembershipStatus;
+  levelName: string;
+  account: CustomerAccountSummary;
+  qualifications: CustomerQualificationRef[];
+  createdAt: string;
+}
+
+export interface CorporateMembershipMember {
+  customerId: string;
+  name: string;
+  corporateName?: string;
+  phoneMasked: string;
+  membershipStatus: CustomerMembershipStatus;
+  employeeCount: number;
+  adminCount: number;
+  createdAt: string;
+}
+
+export interface SubmitCustomerQualificationRequest {
+  qualificationType: string;
+  referenceNo?: string;
+  issuedAt?: string;
+  expiresAt?: string;
+  evidenceRef?: string;
+}
+
+export interface SetCustomerMembershipTemporaryPasswordRequest {
+  temporaryPassword: string;
+}
+
+export interface CustomerCorporateMembership {
+  id: string;
+  corporateCustomerId: string;
+  personalCustomerId: string;
+  personalCustomerName?: string;
+  role: "admin" | "employee";
+  department?: string;
+  employeeNo?: string;
+  status: "active" | "suspended" | "exited";
+  effectiveFrom: string;
+  effectiveTo?: string;
+  reason?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SaveCustomerCorporateMembershipRequest {
+  personalCustomerId: string;
+  role: "admin" | "employee";
+  department?: string;
+  employeeNo?: string;
+  status?: "active" | "suspended" | "exited";
+  effectiveFrom?: string;
+  effectiveTo?: string;
+  reason?: string;
+}
+
+export const CUSTOMER_MEMBERSHIP_PLAN_TARGET_TYPES = ["personal", "corporate"] as const;
+export type CustomerMembershipPlanTargetType = (typeof CUSTOMER_MEMBERSHIP_PLAN_TARGET_TYPES)[number];
+
+export type CustomerMembershipBenefitType =
+  | "rental_discount"
+  | "deposit_reduction"
+  | "preauth_reduction"
+  | "service_benefit"
+  | "priority_reservation"
+  | "quote_validity_extension";
+
+export interface CustomerMembershipBenefit {
+  type: CustomerMembershipBenefitType;
+  /** percentage / amount / quota / priority */
+  calculation: "percentage" | "amount" | "quota" | "priority";
+  value: number;
+  maximum?: number;
+  applicableServiceIds?: string[];
+  stackable?: boolean;
+  conditions?: Record<string, unknown>;
+}
+
+export interface CustomerMembershipPlanVersion {
+  id: string;
+  planId: string;
+  version: number;
+  status: "draft" | "published" | "disabled";
+  levelRank: number;
+  isDefault: boolean;
+  isRecommended: boolean;
+  appVisible: boolean;
+  effectiveFrom?: string;
+  effectiveTo?: string;
+  eligibility: Record<string, unknown>;
+  benefits: CustomerMembershipBenefit[];
+  createdAt: string;
+  updatedAt: string;
+  publishedAt?: string;
+}
+
+export interface CustomerMembershipPlan {
+  id: string;
+  workspaceId: string;
+  code: string;
+  name: string;
+  targetType: CustomerMembershipPlanTargetType;
+  status: "draft" | "active" | "disabled";
+  currentVersion?: CustomerMembershipPlanVersion;
+  versions?: CustomerMembershipPlanVersion[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SaveCustomerMembershipPlanRequest {
+  id?: string;
+  code: string;
+  name: string;
+  targetType: CustomerMembershipPlanTargetType;
+  levelRank: number;
+  isDefault?: boolean;
+  isRecommended?: boolean;
+  appVisible?: boolean;
+  effectiveFrom?: string;
+  effectiveTo?: string;
+  eligibility?: Record<string, unknown>;
+  benefits: CustomerMembershipBenefit[];
+}
+
+export interface CustomerMembershipPlanAssignment {
+  id: string;
+  customerId: string;
+  planId: string;
+  planVersionId: string;
+  source: "manual" | "system" | "corporate_contract";
+  status: "active" | "expired" | "revoked";
+  effectiveFrom: string;
+  effectiveTo?: string;
+  reason?: string;
+  snapshot: { planName: string; targetType: CustomerMembershipPlanTargetType; benefits: CustomerMembershipBenefit[] };
+  createdAt: string;
+}
+
+export interface AssignCustomerMembershipPlanRequest {
+  customerId: string;
+  planVersionId: string;
+  source?: "manual" | "system" | "corporate_contract";
+  effectiveFrom?: string;
+  effectiveTo?: string;
+  reason?: string;
+}
+
 export interface TenantRentalProfile {
   tenantId: string;
   categoryCode: RentalCategoryCode;

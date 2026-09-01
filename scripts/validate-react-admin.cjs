@@ -43,7 +43,7 @@ const themeSource = read("apps/admin/src/app/theme.tsx");
 
 [
   "/workbench", "/rental/core", "/rental/orders", "/rental/item-groups", "/rental/assets",
-  "/rental/locations", "/rental/pricing", "/rental/discounts", "/rental/coupons", "/rental/services", "/rental/settings", "/rental/capabilities", "/customers",
+  "/rental/locations", "/rental/pricing", "/rental/discounts", "/rental/coupons", "/rental/services", "/rental/settings", "/rental/capabilities", "/membership/reviews", "/membership/personal", "/membership/corporate", "/membership/plans",
   "/platform/tenants", "/platform/users", "/platform/system", "/platform/operations", "/platform/tools"
 ].forEach((route) => requireText(navigation, `path: "${route}"`, "route registry coverage"));
 
@@ -143,7 +143,7 @@ if (sessionCacheClearCount < 4) {
 ].forEach(([source, expected, label]) => requireText(source, expected, label));
 
 [
-  "租赁工作台", "基础定价", "优惠方案", "优惠券", "增值服务", "品类与业务规则", "客户、会员与企业", "组织与权限", "平台工具与治理"
+  "租赁工作台", "基础定价", "优惠方案", "优惠券", "增值服务", "品类与业务规则", "会员审核", "个人会员", "企业会员", "会员方案", "组织与权限", "平台工具与治理"
 ].forEach((label) => requireText(navigation, label, "navigation registry coverage"));
 requireText(navigation, "categories?: RentalCategoryCode[]", "category-specific route metadata");
 requireText(navigation, "route.categories.includes(categoryCode)", "category-specific route guard");
