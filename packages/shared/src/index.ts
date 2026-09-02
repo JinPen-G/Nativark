@@ -4396,6 +4396,7 @@ export interface RentalCategoryTerminology {
   navigationLabels?: {
     inventoryGroup?: string;
     itemGroups?: string;
+    pricingGroups?: string;
     assets?: string;
     locations?: string;
   };
@@ -6140,6 +6141,10 @@ export interface RentalPricingTier {
 
 export interface RentalPricingRate {
   id: string;
+  /** PRICE-GROUP-01：新价格事实以定价分组为对象；旧快照可只含 itemGroupId。 */
+  pricingGroupId?: string;
+  pricingGroupCode?: string;
+  pricingGroupName?: string;
   itemGroupId: string;
   itemGroupCode: string;
   itemGroupName: string;
@@ -6248,6 +6253,8 @@ export interface RentalCalendarTimePriceDay {
 
 /** 调价计划的单条变更（需求 4.4.3：计划只保存差异，确认时展示每个受影响商品的最终价）。 */
 export interface RentalPriceAdjustmentChange {
+  /** 新调价以定价分组为对象；itemGroupId 仅用于读取迁移前历史计划。 */
+  pricingGroupId?: string;
   itemGroupId: string;
   unit: RentalPricingUnit;
   /** `set_base` 直接设价；`percent` 按百分比（正上调/负下调）；`fixed` 加减固定金额。 */
@@ -6415,6 +6422,8 @@ export interface RentalDiscountPlan {
   appliesTo: RentalDiscountTarget;
   customerScope: "all" | "personal" | "corporate" | "member";
   applicableItemGroupIds: string[];
+  /** MKT-01C：面向客户的适用范围。空数组表示全部定价分组。 */
+  applicablePricingGroupIds?: string[];
   applicableDayTypes: RentalDayType[];
   priority: number;
   /**
@@ -7102,7 +7111,16 @@ export interface RentalQuoteRequest {
   pricingPlanId?: string;
   discountPlanId?: string;
   customerCouponId?: string;
-  lines: Array<{ itemGroupId: string; quantity: number; pricingUnit?: RentalPricingUnit; usageQuantity?: number; note?: string }>;
+  lines: Array<{
+    /** 新订单由定价分组进入；服务端解析为实际承接库存的产品型号。 */
+    pricingGroupId?: string;
+    /** 服务端解析后的产品型号；迁移前调用方仍可直接提交。 */
+    itemGroupId?: string;
+    quantity: number;
+    pricingUnit?: RentalPricingUnit;
+    usageQuantity?: number;
+    note?: string;
+  }>;
   services?: Array<{
     serviceId: string;
     quantity: number;
@@ -7387,7 +7405,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     supportedInventoryModes: [RentalInventoryMode.Serialized, RentalInventoryMode.Quantity, RentalInventoryMode.Bundle],
     defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery", "usage_reading", "camera_compatibility", "camera_kit_handover", "inspection_care"],
     requiredCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "camera_compatibility", "camera_kit_handover", "usage_reading", "inspection_care"],
-    terminology: { itemLabel: "器材", itemGroupLabel: "器材型号", assetLabel: "器材资产", fulfillmentLabel: "器材门店", pickupLabel: "取机", returnLabel: "还机", identifierLabel: "资产编号", usageMetricLabel: "快门次数", navigationLabels: { inventoryGroup: "摄影器材", itemGroups: "器材型号", assets: "器材资产与库存", locations: "器材门店" } },
+    terminology: { itemLabel: "器材", itemGroupLabel: "器材型号", assetLabel: "器材资产", fulfillmentLabel: "器材门店", pickupLabel: "取机", returnLabel: "还机", identifierLabel: "资产编号", usageMetricLabel: "快门次数", navigationLabels: { inventoryGroup: "摄影器材", itemGroups: "器材型号", pricingGroups: "器材定价分组", assets: "器材资产与库存", locations: "器材门店" } },
     attributeSchema: { brand: "string", model: "string", mount: "string", sensor: "string", serialNo: "string", shutterCount: "number" },
     businessModel: {
       pricingUnits: ["hour", "day_24h", "calendar_day", "week", "package", "usage"],
@@ -7453,7 +7471,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     supportedInventoryModes: [RentalInventoryMode.Serialized, RentalInventoryMode.Quantity, RentalInventoryMode.Bundle],
     defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery", "camping_kit_integrity", "camping_cleaning_turnaround"],
     requiredCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "camping_kit_integrity", "camping_cleaning_turnaround"],
-    terminology: { itemLabel: "装备", itemGroupLabel: "装备品类", assetLabel: "装备资产", fulfillmentLabel: "装备仓", pickupLabel: "领用", returnLabel: "归还", identifierLabel: "装备编号", navigationLabels: { inventoryGroup: "户外装备", itemGroups: "装备品类", assets: "装备资产与库存", locations: "装备仓库" } },
+    terminology: { itemLabel: "装备", itemGroupLabel: "装备型号", assetLabel: "装备资产", fulfillmentLabel: "装备仓", pickupLabel: "领用", returnLabel: "归还", identifierLabel: "装备编号", navigationLabels: { inventoryGroup: "户外装备", itemGroups: "装备型号", pricingGroups: "装备定价分组", assets: "装备资产与库存", locations: "装备仓库" } },
     attributeSchema: { brand: "string", model: "string", people: "number", season: "string", material: "string", batchNo: "string" },
     businessModel: {
       pricingUnits: ["calendar_day", "night", "week", "package"],
@@ -7499,7 +7517,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     supportedInventoryModes: [RentalInventoryMode.Serialized, RentalInventoryMode.Bundle],
     defaultCapabilities: ["serialized_inventory", "bundle_inventory", "pickup", "return", "dispatch", "usage_reading", "qualification", "iot", "inspection_care", "vehicle_relocation"],
     requiredCapabilities: ["serialized_inventory", "bundle_inventory", "pickup", "return", "dispatch", "usage_reading", "qualification", "inspection_care", "vehicle_relocation"],
-    terminology: { itemLabel: "车辆", itemGroupLabel: "车型组", assetLabel: "车辆", fulfillmentLabel: "门店", pickupLabel: "取车", returnLabel: "还车", identifierLabel: "车辆编号", usageMetricLabel: "里程", assetCollectionLabel: "车队", navigationLabels: { inventoryGroup: "车辆与车队", itemGroups: "车型管理", assets: "车辆管理", locations: "门店管理" } },
+    terminology: { itemLabel: "车辆", itemGroupLabel: "车辆型号", assetLabel: "车辆", fulfillmentLabel: "门店", pickupLabel: "取车", returnLabel: "还车", identifierLabel: "车辆编号", usageMetricLabel: "里程", assetCollectionLabel: "车队", navigationLabels: { inventoryGroup: "车辆型号与车队", itemGroups: "车辆型号管理", pricingGroups: "车组管理", assets: "车辆管理", locations: "门店管理" } },
     attributeSchema: { manufacturer: "string", brand: "string", model: "string", trim: "string", energyType: "string", licensePlate: "string", vin: "string", mileage: "number" },
     businessModel: {
       pricingUnits: ["hour", "day_24h", "calendar_day", "week", "month", "usage", "package"],
@@ -7547,7 +7565,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     supportedInventoryModes: [RentalInventoryMode.Serialized, RentalInventoryMode.Quantity, RentalInventoryMode.Bundle],
     defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery", "dispatch", "usage_reading", "qualification", "iot", "inspection_care", "construction_transport"],
     requiredCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "dispatch", "usage_reading", "qualification", "inspection_care", "construction_transport"],
-    terminology: { itemLabel: "设备", itemGroupLabel: "设备型号", assetLabel: "设备资产", fulfillmentLabel: "设备仓", pickupLabel: "出库", returnLabel: "入库", identifierLabel: "设备编号", usageMetricLabel: "工时", navigationLabels: { inventoryGroup: "工程设备", itemGroups: "设备型号", assets: "设备台账与库存", locations: "设备仓库" } },
+    terminology: { itemLabel: "设备", itemGroupLabel: "设备型号", assetLabel: "设备资产", fulfillmentLabel: "设备仓", pickupLabel: "出库", returnLabel: "入库", identifierLabel: "设备编号", usageMetricLabel: "工时", navigationLabels: { inventoryGroup: "工程设备", itemGroups: "设备型号", pricingGroups: "设备定价分组", assets: "设备台账与库存", locations: "设备仓库" } },
     attributeSchema: { manufacturer: "string", brand: "string", model: "string", power: "string", ratedLoad: "number", factoryNo: "string", hourMeter: "number" },
     businessModel: {
       pricingUnits: ["hour", "shift", "calendar_day", "week", "month", "usage", "package"],
@@ -7700,6 +7718,36 @@ export interface RentalItemGroup {
   updatedAt: string;
 }
 
+/**
+ * 面向客户销售与定价的分组。产品型号保存规格，资产保存实体；定价分组只保存
+ * “哪些型号可以承接这档商品”。同一型号可加入多个分组，库存仍只在型号层维护。
+ */
+export interface RentalPricingGroup {
+  id: string;
+  tenantId: string;
+  categoryCode: RentalCategoryCode;
+  code: string;
+  name: string;
+  description?: string;
+  defaultPricingUnit?: RentalPricingUnit;
+  memberItemGroupIds: string[];
+  members: Array<Pick<RentalItemGroup, "id" | "code" | "name" | "inventoryMode" | "unit" | "status">>;
+  status: "enabled" | "disabled";
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SaveRentalPricingGroupRequest {
+  id?: string;
+  code: string;
+  name: string;
+  description?: string;
+  defaultPricingUnit?: RentalPricingUnit;
+  memberItemGroupIds: string[];
+  status?: "enabled" | "disabled";
+}
+
 export interface SaveRentalItemGroupRequest {
   id?: string;
   code: string;
@@ -7814,6 +7862,7 @@ export interface CreateRentalOrderRequest {
   endAt: string;
   lines: Array<{
     itemGroupId: string;
+    pricingGroupId?: string;
     quantity: number;
     note?: string;
   }>;
@@ -7878,6 +7927,11 @@ export interface CancelRentalOrderRequest {
 
 export interface RentalOrderLine {
   id: string;
+  pricingGroupId?: string;
+  pricingGroupCode?: string;
+  pricingGroupName?: string;
+  /** 下单时的成员范围；之后修改分组不会改写历史订单。 */
+  pricingGroupMemberItemGroupIds?: string[];
   itemGroupId: string;
   itemGroupCode: string;
   itemGroupName: string;

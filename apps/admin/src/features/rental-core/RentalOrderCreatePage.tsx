@@ -74,7 +74,7 @@ export function RentalOrderCreatePage() {
   const bookingIdentity = Form.useWatch("bookingIdentity", form);
   const profile = useQuery({ queryKey: ["rental-core", "profile"], queryFn: rentalCoreApi.profile });
   const settings = useQuery({ queryKey: ["rental-core", "business-settings"], queryFn: rentalCoreApi.businessSettings });
-  const groups = useQuery({ queryKey: ["rental-core", "groups"], queryFn: rentalCoreApi.itemGroups });
+  const pricingGroups = useQuery({ queryKey: ["rental-core", "pricing-groups"], queryFn: rentalCoreApi.pricingGroups });
   const locations = useQuery({ queryKey: ["rental-core", "locations"], queryFn: rentalCoreApi.locations });
   const pricing = useQuery({ queryKey: ["rental-core", "pricing-plans"], queryFn: rentalCoreApi.pricingPlans });
   const discounts = useQuery({ queryKey: ["rental-core", "discount-plans"], queryFn: rentalCoreApi.discountPlans });
@@ -104,10 +104,10 @@ export function RentalOrderCreatePage() {
   });
 
   useEffect(() => {
-    if (locations.data?.length && groups.data?.length && pricing.data?.length && !form.getFieldValue("fulfillmentLocationId")) {
+    if (locations.data?.length && pricingGroups.data?.length && pricing.data?.length && !form.getFieldValue("fulfillmentLocationId")) {
       setInitialValues();
     }
-  }, [locations.data, groups.data, pricing.data, settings.data]);
+  }, [locations.data, pricingGroups.data, pricing.data, settings.data]);
 
   function setInitialValues() {
     form.setFieldsValue({
@@ -117,7 +117,7 @@ export function RentalOrderCreatePage() {
       fulfillmentLocationId: locations.data?.[0]?.id,
       period: [dayjs().add(1, "day").hour(9).minute(0), dayjs().add(2, "day").hour(18).minute(0)],
       pricingPlanId: pricing.data?.find((item) => item.status === "enabled")?.id,
-      lines: [{ itemGroupId: groups.data?.[0]?.id ?? "", quantity: 1 }],
+      lines: [{ pricingGroupId: pricingGroups.data?.find((item) => item.status === "enabled")?.id ?? "", quantity: 1 }],
     });
   }
 
@@ -173,7 +173,7 @@ export function RentalOrderCreatePage() {
       returnLocationId: quote.request.returnLocationId,
       startAt: quote.request.startAt,
       endAt: quote.request.endAt,
-      lines: quote.request.lines.map(({ itemGroupId, quantity, note }) => ({ itemGroupId, quantity, note })),
+      lines: quote.request.lines.map(({ itemGroupId, pricingGroupId, quantity, note }) => ({ itemGroupId: itemGroupId!, pricingGroupId, quantity, note })),
     };
     createOrder.mutate(input);
   }
@@ -205,7 +205,7 @@ export function RentalOrderCreatePage() {
   }
 
   const itemLabel = profile.data?.terminology.itemLabel ?? "商品";
-  const itemGroupLabel = profile.data?.terminology.itemGroupLabel ?? "商品";
+  const itemGroupLabel = `${profile.data?.terminology.itemLabel ?? "商品"}定价分组`;
   const pickupLabel = profile.data?.terminology.pickupLabel ?? "领取";
   const returnLabel = profile.data?.terminology.returnLabel ?? "归还";
 
@@ -307,8 +307,8 @@ export function RentalOrderCreatePage() {
                   {fields.map((field, index) => <Card key={field.key} size="small" styles={{ body: { paddingBottom: 0 } }}>
                     <Row gutter={12} align="middle">
                       <Col xs={24} md={10}>
-                        <Form.Item name={[field.name, "itemGroupId"]} label={`${itemLabel} ${index + 1}`} rules={[{ required: true }]}>
-                          <Select showSearch={{ optionFilterProp: "label" }} options={(groups.data ?? []).filter((item) => item.status === "enabled").map((item) => ({ value: item.id, label: `${item.code} · ${item.name}` }))} />
+                        <Form.Item name={[field.name, "pricingGroupId"]} label={`${itemGroupLabel} ${index + 1}`} rules={[{ required: true }]}>
+                          <Select showSearch={{ optionFilterProp: "label" }} options={(pricingGroups.data ?? []).filter((item) => item.status === "enabled").map((item) => ({ value: item.id, label: `${item.code} · ${item.name}（${item.members.map((member) => member.name).join("、")}）` }))} />
                         </Form.Item>
                       </Col>
                       <Col xs={8} md={4}>
@@ -331,7 +331,7 @@ export function RentalOrderCreatePage() {
                       </Col>
                     </Row>
                   </Card>)}
-                  <Button block type="dashed" icon={<PlusOutlined />} onClick={() => add({ quantity: 1 })}>继续添加{itemLabel}</Button>
+                  <Button block type="dashed" icon={<PlusOutlined />} onClick={() => add({ quantity: 1 })}>继续添加定价分组</Button>
                 </Space>}
               </Form.List>
             </Card>

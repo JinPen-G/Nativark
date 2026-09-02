@@ -247,6 +247,10 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       for (const line of order.lines) {
         const lineData = {
           orderId: order.id,
+          pricingGroupId: line.pricingGroupId ?? null,
+          pricingGroupCode: line.pricingGroupCode ?? null,
+          pricingGroupName: line.pricingGroupName ?? null,
+          pricingGroupMemberItemGroupIds: (line.pricingGroupMemberItemGroupIds ?? null) as Prisma.InputJsonValue,
           itemGroupId: line.itemGroupId,
           itemGroupCode: line.itemGroupCode,
           itemGroupName: line.itemGroupName,
@@ -618,6 +622,10 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
   }>): RentalOrder {
     const lines: RentalOrderLine[] = row.lines.map((line) => ({
       id: line.id,
+      pricingGroupId: line.pricingGroupId ?? undefined,
+      pricingGroupCode: line.pricingGroupCode ?? undefined,
+      pricingGroupName: line.pricingGroupName ?? undefined,
+      pricingGroupMemberItemGroupIds: (line.pricingGroupMemberItemGroupIds ?? undefined) as string[] | undefined,
       itemGroupId: line.itemGroupId,
       itemGroupCode: line.itemGroupCode,
       itemGroupName: line.itemGroupName,

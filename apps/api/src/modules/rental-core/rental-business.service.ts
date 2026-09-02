@@ -33,6 +33,7 @@ import {
   type RentalFulfillmentLocation,
   type RentalFulfillmentOperator,
   type RentalItemGroup,
+  type RentalPricingGroup,
   type RentalNotificationSendLogV1,
   type RentalNotificationTemplateV1,
   type RentalPricingPlanV1,
@@ -151,6 +152,7 @@ interface BusinessContext {
   category: RentalCategoryDefinition;
   settings: TenantRentalBusinessSettings;
   groups: RentalItemGroup[];
+  pricingGroups?: RentalPricingGroup[];
   couponTemplates: RentalCouponTemplate[];
   locations: RentalFulfillmentLocation[];
   operators: RentalFulfillmentOperator[];
@@ -170,6 +172,8 @@ const stamp = () => new Date().toISOString();
 const uid = (prefix: string) => `${prefix}_${randomUUID().slice(0, 8)}`;
 const roundMoney = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 const dayMs = 24 * 60 * 60 * 1000;
+/** 新价格按定价分组寻址；迁移前快照仍用 itemGroupId，同 id 回填保证可继续复算。 */
+const pricingTargetId = (rate: Pick<RentalPricingRate, "itemGroupId" | "pricingGroupId">) => rate.pricingGroupId ?? rate.itemGroupId;
 
 /**
  * NOTICE-01A：发送目标脱敏。发送记录会被运营、客服反复查看，明文手机号/邮箱进日志
@@ -572,19 +576,23 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     if (!Number.isFinite(new Date(input.effectiveFrom).getTime())) throw new BadRequestException("定价计划生效时间无效");
     if (input.effectiveTo && new Date(input.effectiveFrom).getTime() >= new Date(input.effectiveTo).getTime()) throw new BadRequestException("定价计划有效期无效");
     const supportedUnits = new Set(context.settings.pricing.enabledUnits);
-    const groupMap = new Map(context.groups.map((group) => [group.id, group]));
+    const pricingGroupMap = new Map((context.pricingGroups ?? []).map((group) => [group.id, group]));
+    const legacyGroupMap = new Map(context.groups.map((group) => [group.id, group]));
     const seen = new Set<string>();
     const rates: RentalPricingRate[] = input.rates.map((row) => {
-      const group = groupMap.get(row.itemGroupId);
-      if (!group) throw new BadRequestException("定价包含不存在的商品");
-      if (!supportedUnits.has(row.unit)) throw new BadRequestException(`${group.name} 使用了当前品类未启用的计价单位`);
-      const unique = `${row.itemGroupId}:${row.unit}`;
-      if (seen.has(unique)) throw new BadRequestException("同一商品和计价单位不能重复配置");
+      const targetId = row.pricingGroupId ?? row.itemGroupId;
+      const pricingGroup = pricingGroupMap.get(targetId);
+      const legacyGroup = legacyGroupMap.get(targetId);
+      if (!pricingGroup && !legacyGroup) throw new BadRequestException("定价包含不存在的定价分组");
+      const target = pricingGroup ?? legacyGroup!;
+      if (!supportedUnits.has(row.unit)) throw new BadRequestException(`${target.name} 使用了当前品类未启用的计价单位`);
+      const unique = `${targetId}:${row.unit}`;
+      if (seen.has(unique)) throw new BadRequestException("同一定价分组和计价单位不能重复配置");
       seen.add(unique);
       // PRICE-03：分时/一次性覆盖的重叠在**保存**时拒绝（需求 4.4.3：重叠在确认时阻止，
       // 不留到报价时才"随机择一"）。
-      assertNoPeriodicOverlap(row.periodicWindows, `${group.name} · ${row.unit}`);
-      assertNoDatetimeOverrideOverlap(row.datetimeOverrides, `${group.name} · ${row.unit}`);
+      assertNoPeriodicOverlap(row.periodicWindows, `${target.name} · ${row.unit}`);
+      assertNoDatetimeOverrideOverlap(row.datetimeOverrides, `${target.name} · ${row.unit}`);
       for (const value of [row.baseAmount, row.weekendMultiplier, row.holidayMultiplier, row.depositAmount, row.minimumUnits]) {
         if (!Number.isFinite(value) || value < 0) throw new BadRequestException("价格、倍率、押金和最低计费单位必须是非负数");
       }
@@ -592,16 +600,25 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       const tierKeys = new Set<number>();
       for (const tier of row.tiers ?? []) {
         if (!Number.isFinite(tier.minUnits) || !Number.isFinite(tier.unitAmount) || tier.minUnits < 1 || tier.unitAmount < 0) {
-          throw new BadRequestException(`${group.name} 的阶梯价档位必须是起始单位数 ≥ 1、单价非负`);
+          throw new BadRequestException(`${target.name} 的阶梯价档位必须是起始单位数 ≥ 1、单价非负`);
         }
-        if (tierKeys.has(tier.minUnits)) throw new BadRequestException(`${group.name} 的阶梯价存在重复的起始单位数 ${tier.minUnits}`);
+        if (tierKeys.has(tier.minUnits)) throw new BadRequestException(`${target.name} 的阶梯价存在重复的起始单位数 ${tier.minUnits}`);
         tierKeys.add(tier.minUnits);
       }
       // 用 undefined 判空而不是真值判断：封顶 0 是合法配置（免租）。
       if (row.maxAmount !== undefined && (!Number.isFinite(row.maxAmount) || row.maxAmount < 0)) {
-        throw new BadRequestException(`${group.name} 的封顶价必须是非负数`);
+        throw new BadRequestException(`${target.name} 的封顶价必须是非负数`);
       }
-      return { ...row, id: uid("rate"), itemGroupCode: group.code, itemGroupName: group.name };
+      return {
+        ...row,
+        id: uid("rate"),
+        itemGroupId: targetId,
+        itemGroupCode: target.code,
+        itemGroupName: target.name,
+        pricingGroupId: pricingGroup?.id,
+        pricingGroupCode: pricingGroup?.code,
+        pricingGroupName: pricingGroup?.name
+      };
     });
     const existing = input.id ? state.pricingPlans.find((plan) => plan.id === input.id) : undefined;
     if (input.id && !existing) throw new NotFoundException("定价计划不存在");
@@ -782,7 +799,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     remove: RentalPricingRate[],
     add: RentalPricingRate[]
   ): RentalPricingRate[] {
-    const key = (rate: { itemGroupId: string; unit: string }) => `${rate.itemGroupId}:${rate.unit}`;
+    const key = (rate: RentalPricingRate) => `${pricingTargetId(rate)}:${rate.unit}`;
     const merged = new Map(base.map((row) => [key(row), row]));
     for (const row of remove) merged.delete(key(row));
     for (const row of add) merged.set(key(row), row);
@@ -795,7 +812,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       JSON.stringify(
         rates
           .map(({ id: _id, ...rest }) => rest)
-          .sort((a, b) => `${a.itemGroupId}:${a.unit}`.localeCompare(`${b.itemGroupId}:${b.unit}`))
+          .sort((a, b) => `${pricingTargetId(a)}:${a.unit}`.localeCompare(`${pricingTargetId(b)}:${b.unit}`))
       );
     return normalize(left) === normalize(right);
   }
@@ -826,7 +843,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     });
     const merged = new Map<string, RentalPricingRate>();
     for (const plan of ordered) {
-      for (const rate of plan.rates) merged.set(`${rate.itemGroupId}:${rate.unit}`, rate);
+      for (const rate of plan.rates) merged.set(`${pricingTargetId(rate)}:${rate.unit}`, rate);
     }
     return [...merged.values()];
   }
@@ -1281,12 +1298,12 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   ) {
     if ((input.status ?? "draft") !== "enabled") return;
     const from = new Date(input.effectiveFrom).getTime();
-    const mine = new Set(rates.map((rate) => `${rate.itemGroupId}:${rate.unit}`));
+    const mine = new Set(rates.map((rate) => `${pricingTargetId(rate)}:${rate.unit}`));
     for (const plan of state.pricingPlans) {
       if (plan.id === excludeId || plan.status !== "enabled") continue;
       if (plan.id.endsWith("_pricing_default")) continue;
       if (new Date(plan.effectiveFrom).getTime() !== from) continue;
-      const clash = plan.rates.find((rate) => mine.has(`${rate.itemGroupId}:${rate.unit}`));
+      const clash = plan.rates.find((rate) => mine.has(`${pricingTargetId(rate)}:${rate.unit}`));
       if (clash) {
         throw new ConflictException(
           `与已启用的定价计划 ${plan.code}（v${plan.version}）生效时间完全相同：` +
@@ -1323,6 +1340,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     if (input.effectiveTo && new Date(input.effectiveFrom).getTime() >= new Date(input.effectiveTo).getTime()) throw new BadRequestException("优惠方案有效期无效");
     const groupIds = new Set(context.groups.map((group) => group.id));
     if (input.applicableItemGroupIds.some((id) => !groupIds.has(id))) throw new BadRequestException("优惠方案包含不存在的商品");
+    const pricingGroupIds = new Set((context.pricingGroups ?? []).map((group) => group.id));
+    if ((input.applicablePricingGroupIds ?? []).some((id) => !pricingGroupIds.has(id))) throw new BadRequestException("优惠方案包含不存在的定价分组");
     const existing = input.id ? state.discountPlans.find((plan) => plan.id === input.id) : undefined;
     if (input.id && !existing) throw new NotFoundException("优惠方案不存在");
     if (state.discountPlans.some((plan) => plan.code === input.code.trim() && plan.id !== input.id)) throw new ConflictException("优惠方案编码已存在");
@@ -3357,7 +3376,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       (plan.effectiveTo === undefined || new Date(plan.effectiveTo).getTime() >= at);
     // 适用范围（需求 4.4）：计划必须覆盖本次报价的每个商品组，否则它对这张报价不适用。
     const covers = (plan: RentalPricingPlanV1) =>
-      itemGroupIds.every((groupId) => plan.rates.some((rate) => rate.itemGroupId === groupId));
+      itemGroupIds.every((groupId) => plan.rates.some((rate) => pricingTargetId(rate) === groupId));
 
     if (requestedId) {
       const requested = plans.find((plan) => plan.id === requestedId);
@@ -3406,6 +3425,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     if (this.capabilities) await this.capabilities.assertWorkspaceOperable(tenantId, this.workspaceOf(tenantId));
     if (new Date(input.startAt).getTime() >= new Date(input.endAt).getTime()) throw new BadRequestException("租赁结束时间必须晚于开始时间");
     if (!input.lines.length) throw new BadRequestException("报价至少需要一个商品");
+    if (input.lines.some((line) => !line.itemGroupId)) throw new BadRequestException("报价行尚未解析到可承接库存的产品型号");
     const membershipSnapshot = input.bookingIdentity
       ? (() => {
           if (!input.customerId || input.customerType !== "personal") {
@@ -3415,14 +3435,14 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
           return this.memberships.resolveBookingIdentity(tenantId, this.workspaceOf(tenantId), input.customerId, input.bookingIdentity);
         })()
       : undefined;
-    if (new Set(input.lines.map((line) => line.itemGroupId)).size !== input.lines.length) throw new BadRequestException("同一商品在一次报价中只能出现一行");
+    if (new Set(input.lines.map((line) => line.pricingGroupId ?? line.itemGroupId)).size !== input.lines.length) throw new BadRequestException("同一定价分组在一次报价中只能出现一行");
     if (!context.settings.fulfillment.enabledModes.includes(input.fulfillmentMode)) throw new BadRequestException("当前租户未启用所选租赁履约方式");
     if (input.returnLocationId && input.returnLocationId !== input.fulfillmentLocationId && !context.settings.fulfillment.allowDifferentReturnLocation) throw new BadRequestException("当前租户未启用异地归还");
     this.validateFulfillmentLocations(context, input);
     const plan = this.resolvePricingPlan(
       state.pricingPlans,
       input.pricingPlanId,
-      input.lines.map((line) => line.itemGroupId),
+      input.lines.map((line) => line.pricingGroupId ?? line.itemGroupId!),
       input.startAt
     );
     // PRICE-03：费率取自**不可变价格版本**（按租期开始时点命中的最新版本），
@@ -3445,6 +3465,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     // 否则同一张报价里两处按不同日界切分，金额与说明会互相矛盾。
     const quoteTimeZone = context.settings.calendar.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE;
     const groups = new Map(context.groups.map((group) => [group.id, group]));
+    const pricingGroups = new Map((context.pricingGroups ?? []).map((group) => [group.id, group]));
     const chargeLines: RentalQuoteSnapshotV1["chargeLines"] = [];
     let rentalAmount = 0;
     // 押金模式来自**已发布规则**而非当前设置：规则快照要随订单固化，
@@ -3461,19 +3482,24 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     // 日历事实与商品无关，但实际价格与商品相关——同一天不同商品的系数可以不同。
     const calendarSnapshot: RentalQuoteCalendarDay[] = [];
     for (const line of input.lines) {
-      const group = groups.get(line.itemGroupId);
+      const group = groups.get(line.itemGroupId!);
       if (!group || line.quantity < 1 || !Number.isInteger(line.quantity)) throw new BadRequestException("报价商品或数量无效");
+      const pricingGroup = line.pricingGroupId ? pricingGroups.get(line.pricingGroupId) : undefined;
+      if (line.pricingGroupId && (!pricingGroup || !pricingGroup.memberItemGroupIds.includes(group.id))) {
+        throw new BadRequestException("报价行的产品型号不属于所选定价分组");
+      }
+      const targetId = pricingGroup?.id ?? group.id;
       // 调用方显式指定计价单位时**不得**回退到别的单位。
       // 早前用 `?? plan.rates.find(同商品组)` 兜底：请求快照写着"按小时"、
       // 金额却按自然日算出，报价既解释不通又可能直接算错钱。
       const rate = line.pricingUnit
-        ? planRates.find((item) => item.itemGroupId === line.itemGroupId && item.unit === line.pricingUnit)
-        : planRates.find((item) => item.itemGroupId === line.itemGroupId);
+        ? planRates.find((item) => pricingTargetId(item) === targetId && item.unit === line.pricingUnit)
+        : planRates.find((item) => pricingTargetId(item) === targetId);
       if (!rate) {
         throw new ConflictException(
           line.pricingUnit
-            ? `${group.name} 未配置计价单位 ${line.pricingUnit} 的价格`
-            : `${group.name} 尚未配置基础价格`
+            ? `${pricingGroup?.name ?? group.name} 未配置计价单位 ${line.pricingUnit} 的价格`
+            : `${pricingGroup?.name ?? group.name} 尚未配置基础价格`
         );
       }
       const pricingStrategy = rentalPricingStrategy(rate.unit);
@@ -3589,7 +3615,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       ]
         .filter(Boolean)
         .join("；");
-      chargeLines.push({ code: `rental:${group.code}`, name: `${group.name}租金`, type: "rental", amount, sourceId: plan.id, sourceVersion: plan.version, detail });
+      chargeLines.push({ code: `rental:${pricingGroup?.code ?? group.code}`, name: `${pricingGroup?.name ?? group.name}租金`, type: "rental", amount, sourceId: plan.id, sourceVersion: plan.version, detail });
     }
     rentalAmount = roundMoney(rentalAmount);
     // 押金与预授权额度独立计算（需求 4.4.7）：两笔独立的钱，可只收押金、只冻结额度，
@@ -3621,7 +3647,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         scheduledEndAt: row.scheduledEndAt,
         serviceLocationId: row.serviceLocationId
       })),
-      itemGroupIds: input.lines.map((line) => line.itemGroupId),
+      itemGroupIds: input.lines.map((line) => line.itemGroupId!),
       fulfillmentMode: input.fulfillmentMode,
       // 异地归还时归还地点同样参与判定：只按取件地点判会让「只在 A 店提供」的服务
       // 出现在 A 取 B 还的单子上。
@@ -3696,7 +3722,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       minimumSpendBase: rentalAmount,
       customerType: input.customerType,
       hasCustomer: Boolean(input.customerId),
-      itemGroupIds: input.lines.map((line) => line.itemGroupId),
+      itemGroupIds: input.lines.map((line) => line.itemGroupId!),
+      pricingGroupIds: input.lines.map((line) => line.pricingGroupId).filter((value): value is string => Boolean(value)),
       dayTypes: quotedDayTypes,
       rentalStartAt: input.startAt,
       workspaceId: this.workspaceOf(tenantId),
@@ -3733,7 +3760,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     if (customerCoupon) {
       if (customerCoupon.customerId !== input.customerId || customerCoupon.status !== "claimed") throw new ConflictException("优惠券不属于当前客户或不可用");
       if (!this.inPeriod(customerCoupon.effectiveFrom, customerCoupon.effectiveTo, input.startAt)) throw new ConflictException("优惠券不在本次租期的有效期");
-      if (customerCoupon.applicableItemGroupIds.length > 0 && !input.lines.some((line) => customerCoupon.applicableItemGroupIds.includes(line.itemGroupId))) throw new ConflictException("优惠券不适用于本次商品");
+      if (customerCoupon.applicableItemGroupIds.length > 0 && !input.lines.some((line) => customerCoupon.applicableItemGroupIds.includes(line.itemGroupId!))) throw new ConflictException("优惠券不适用于本次商品");
       if (!customerCoupon.stackableWithDiscountPlans && discountPlans.length) throw new ConflictException("所选优惠券不能与自动优惠方案叠加");
       if (discountPlans.some((item) => !item.stackableWithCoupon)) throw new ConflictException("当前优惠方案不能与优惠券叠加");
       const baseBeforeDiscount = customerCoupon.appliesTo === "rental"
@@ -3910,7 +3937,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       ])
     );
     const equipment = buildCapabilityEquipment(groups, quote.request.lines.map((line) => ({
-      itemGroupId: line.itemGroupId,
+      itemGroupId: line.itemGroupId!,
       quantity: line.quantity
     })));
     const instances = quote.capabilitySnapshot
@@ -4039,8 +4066,12 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
    */
   private seedState(tenantId: string, context: BusinessContext, idPrefix: string = tenantId): RentalBusinessState {
     const timestamp = stamp();
-    const rates: RentalPricingRate[] = context.groups.filter((group) => group.status === "enabled").map((group, index) => ({
+    const commercialGroups = context.pricingGroups?.length ? context.pricingGroups : context.groups;
+    const rates: RentalPricingRate[] = commercialGroups.filter((group) => group.status === "enabled").map((group, index) => ({
       id: uid("rate"), itemGroupId: group.id, itemGroupCode: group.code, itemGroupName: group.name,
+      pricingGroupId: "memberItemGroupIds" in group ? group.id : undefined,
+      pricingGroupCode: "memberItemGroupIds" in group ? group.code : undefined,
+      pricingGroupName: "memberItemGroupIds" in group ? group.name : undefined,
       unit: context.settings.pricing.defaultUnit,
       baseAmount: context.category.businessModel.defaults.sampleBaseAmount + index * context.category.businessModel.defaults.sampleAmountIncrement,
       weekendMultiplier: 1.1, holidayMultiplier: 1.25,
@@ -4048,7 +4079,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       minimumUnits: 1
     }));
     const pricingPlans: RentalPricingPlanV1[] = [{ id: `${idPrefix}_pricing_default`, tenantId, categoryCode: context.profile.categoryCode, code: "STANDARD", name: `${context.category.name}标准价格`, currency: "CNY", status: "enabled", version: "1.0", effectiveFrom: timestamp, rates, createdAt: timestamp, updatedAt: timestamp }];
-    const discountPlans: RentalDiscountPlan[] = [{ id: `${idPrefix}_discount_long`, tenantId, categoryCode: context.profile.categoryCode, code: "LONG_RENTAL", name: "长期租赁优惠", status: "enabled", discountType: "percentage", discountValue: 5, minimumSpend: 500, appliesTo: "rental", customerScope: "all", applicableItemGroupIds: [], applicableDayTypes: [], priority: 100, stackableWithOtherPlans: false, stackableWithCoupon: true, effectiveFrom: timestamp, version: "1.0", createdAt: timestamp, updatedAt: timestamp }];
+    const discountPlans: RentalDiscountPlan[] = [{ id: `${idPrefix}_discount_long`, tenantId, categoryCode: context.profile.categoryCode, code: "LONG_RENTAL", name: "长期租赁优惠", status: "enabled", discountType: "percentage", discountValue: 5, minimumSpend: 500, appliesTo: "rental", customerScope: "all", applicableItemGroupIds: [], applicablePricingGroupIds: [], applicableDayTypes: [], priority: 100, stackableWithOtherPlans: false, stackableWithCoupon: true, effectiveFrom: timestamp, version: "1.0", createdAt: timestamp, updatedAt: timestamp }];
     const services: RentalValueAddedService[] = context.category.businessModel.valueAddedServicePresets.slice(0, 4).map((name, index) => ({ id: `${idPrefix}_service_${index + 1}`, tenantId, categoryCode: context.profile.categoryCode, code: `SERVICE_${index + 1}`, name, serviceType: serviceType(name), billingUnit: name.includes("配送") || name.includes("运输") ? "per_order" : "per_day", price: 20 + index * 30, minimumQuantity: 1, maximumQuantity: 5, applicableFulfillmentModes: [], applicableLocationIds: [], customerScope: "all", selectionMode: "optional", coverageLimit: name.includes("保险") || name.includes("免赔") ? 5000 : undefined, deductible: name.includes("免赔") ? 200 : undefined, termsVersion: "1.0", terms: `${name}服务条款：以订单保存的本版本范围、限额及除外责任为准。`, applicableItemGroupIds: [], requiresCapacity: false, status: "enabled", version: "1.0", createdAt: timestamp, updatedAt: timestamp }));
     // effectiveFrom 与 publishedAt 同为初始化时刻：没有生效时点的版本不参与时点匹配，
     // 新建空间会立刻因「没有覆盖该时点的规则」报不出价。

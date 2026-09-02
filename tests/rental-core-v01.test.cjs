@@ -231,6 +231,31 @@ const constructionGroup = await service.saveItemGroup(newTenant, {
   attributes: { manufacturer: "测试重工", model: "E20" },
   status: "enabled"
 });
+const constructionPricingGroup = await service.savePricingGroup(newTenant, {
+  code: "EXC-COMPACT",
+  name: "小型挖掘机组",
+  defaultPricingUnit: "day_24h",
+  memberItemGroupIds: [constructionGroup.id],
+  status: "enabled"
+});
+assert.deepEqual(constructionPricingGroup.memberItemGroupIds, [constructionGroup.id], "定价分组必须保存产品型号成员，而不是复制产品型号字段");
+assert.equal(constructionPricingGroup.members[0].name, "测试挖掘机");
+assert.equal(constructionPricingGroup.version, 1);
+const updatedConstructionPricingGroup = await service.savePricingGroup(newTenant, {
+  id: constructionPricingGroup.id,
+  code: constructionPricingGroup.code,
+  name: "小型工程设备组",
+  defaultPricingUnit: "day_24h",
+  memberItemGroupIds: [constructionGroup.id],
+  status: "enabled"
+});
+assert.equal(updatedConstructionPricingGroup.version, 2, "定价分组成员或资料变更必须推进版本号");
+await assert.rejects(async () => service.savePricingGroup(newTenant, {
+  code: "EXC-DUPLICATE",
+  name: "重复成员组",
+  memberItemGroupIds: [constructionGroup.id, constructionGroup.id],
+  status: "enabled"
+}), /不能重复选择/);
 const constructionLocation = await service.saveLocation(newTenant, {
   code: "CON-WH-01",
   name: "工程设备仓",

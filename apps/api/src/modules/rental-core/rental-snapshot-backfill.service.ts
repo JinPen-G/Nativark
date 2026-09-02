@@ -818,6 +818,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               applicableItemGroupIds: jsonArray(
                 (plan.applicableItemGroupIds ?? []).map((id) => itemGroupIdMap.get(id) ?? id)
               ),
+              applicablePricingGroupIds: jsonArray(plan.applicablePricingGroupIds ?? []),
               applicableDayTypes: jsonArray(plan.applicableDayTypes),
               priority: plan.priority ?? 0,
               stackableWithCoupon: plan.stackableWithCoupon ?? true,

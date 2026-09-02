@@ -34,6 +34,7 @@ export interface RentalDiscountContext {
   /** 有客户 id 即视为会员场景（member scope 的判据）。 */
   hasCustomer: boolean;
   itemGroupIds: string[];
+  pricingGroupIds?: string[];
   /** 报价租期覆盖的日期类型集合，与逐单位取价同一日界口径。 */
   dayTypes: Set<string>;
   /** 租期开始时点，用于有效期判定——不是报价创建时刻。 */
@@ -119,10 +120,11 @@ function evaluateEligibility(plan: RentalDiscountPlan, ctx: RentalDiscountContex
   if (!record("customer_scope", scopeOk, `方案范围 ${plan.customerScope}`) && !skipReason) {
     skipReason = "customer_scope_mismatch";
   }
-  const groupOk =
-    !plan.applicableItemGroupIds.length ||
-    ctx.itemGroupIds.some((id) => plan.applicableItemGroupIds.includes(id));
-  if (!record("item_group", groupOk) && !skipReason) skipReason = "item_group_mismatch";
+  const pricingScope = plan.applicablePricingGroupIds ?? [];
+  const groupOk = pricingScope.length
+    ? (ctx.pricingGroupIds ?? []).some((id) => pricingScope.includes(id))
+    : !plan.applicableItemGroupIds.length || ctx.itemGroupIds.some((id) => plan.applicableItemGroupIds.includes(id));
+  if (!record("pricing_group", groupOk) && !skipReason) skipReason = "item_group_mismatch";
   const dayTypeOk =
     !plan.applicableDayTypes.length || plan.applicableDayTypes.some((dayType) => ctx.dayTypes.has(dayType));
   if (!record("day_type", dayTypeOk) && !skipReason) skipReason = "day_type_mismatch";

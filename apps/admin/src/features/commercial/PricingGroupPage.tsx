@@ -1,0 +1,97 @@
+import { EditOutlined, PlusOutlined, SearchOutlined } from "@ant-design/icons";
+import { RENTAL_PRICING_UNIT_LABELS, type RentalPricingGroup, type SaveRentalPricingGroupRequest } from "@store-rental/shared";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Alert, App, Button, Card, Drawer, Form, Input, Select, Space, Table, Tag } from "antd";
+import { useMemo, useState } from "react";
+import { rentalCoreApi } from "@/api/rentalCore";
+import { resolveTenantNavigationLabels } from "@/app/navigation-terminology";
+import { PageHeader } from "@/components/PageHeader";
+import { QueryState } from "@/components/QueryState";
+
+export function PricingGroupPage() {
+  const { message } = App.useApp();
+  const queryClient = useQueryClient();
+  const [keyword, setKeyword] = useState("");
+  const [editing, setEditing] = useState<RentalPricingGroup>();
+  const [open, setOpen] = useState(false);
+  const [form] = Form.useForm<SaveRentalPricingGroupRequest>();
+  const profile = useQuery({ queryKey: ["rental-core", "profile"], queryFn: rentalCoreApi.profile });
+  const models = useQuery({ queryKey: ["rental-core", "groups"], queryFn: rentalCoreApi.itemGroups });
+  const pricingGroups = useQuery({ queryKey: ["rental-core", "pricing-groups"], queryFn: rentalCoreApi.pricingGroups });
+  const settings = useQuery({ queryKey: ["rental-core", "business-settings"], queryFn: rentalCoreApi.businessSettings });
+  const save = useMutation({
+    mutationFn: rentalCoreApi.savePricingGroup,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["rental-core", "pricing-groups"] });
+      setOpen(false);
+      setEditing(undefined);
+      form.resetFields();
+      message.success("定价分组已保存");
+    },
+    onError: () => message.error("保存失败，请检查编码、成员型号和库存方式")
+  });
+  const rows = useMemo(
+    () => (pricingGroups.data ?? []).filter((row) => `${row.code}${row.name}${row.members.map((item) => item.name).join("")}`.toLowerCase().includes(keyword.toLowerCase())),
+    [pricingGroups.data, keyword]
+  );
+  const routeLabel = resolveTenantNavigationLabels(profile.data?.terminology).routes.pricingGroups ?? "定价分组";
+
+  function edit(record?: RentalPricingGroup) {
+    setEditing(record);
+    form.setFieldsValue(record ? {
+      id: record.id,
+      code: record.code,
+      name: record.name,
+      description: record.description,
+      defaultPricingUnit: record.defaultPricingUnit,
+      memberItemGroupIds: record.memberItemGroupIds,
+      status: record.status
+    } : {
+      code: "",
+      name: "",
+      memberItemGroupIds: [],
+      defaultPricingUnit: settings.data?.pricing.defaultUnit,
+      status: "enabled"
+    });
+    setOpen(true);
+  }
+
+  return <>
+    <PageHeader
+      title={routeLabel}
+      description={`建立面向客户的${profile.data?.terminology.itemLabel ?? "商品"}价格档位，并选择可承接该档位的${profile.data?.terminology.itemGroupLabel ?? "产品型号"}。`}
+      extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => edit()}>新增定价分组</Button>}
+    />
+    <Alert
+      type="info"
+      showIcon
+      title="定价分组不是产品型号"
+      description={`例如“舒适轿车组”可包含宝马 3 系、奔驰 C 级。一个型号可进入多个分组，但资产与库存只维护一份，报价后由系统选择实际承接型号。`}
+      style={{ marginBottom: 16 }}
+    />
+    <Card className="data-panel">
+      <Input allowClear prefix={<SearchOutlined />} value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索分组或成员型号" style={{ width: 320, marginBottom: 16 }} />
+      <QueryState loading={pricingGroups.isLoading || models.isLoading} error={pricingGroups.error || models.error}>
+        <Table<RentalPricingGroup> rowKey="id" dataSource={rows} columns={[
+          { title: "定价分组", render: (_, row) => <><b>{row.name}</b><br /><span className="muted">{row.code} · v{row.version}</span></> },
+          { title: "包含型号", render: (_, row) => <Space size={[4, 4]} wrap>{row.members.map((member) => <Tag key={member.id}>{member.name}</Tag>)}</Space> },
+          { title: "默认计价", render: (_, row) => row.defaultPricingUnit ? RENTAL_PRICING_UNIT_LABELS[row.defaultPricingUnit] : "跟随价格配置" },
+          { title: "状态", dataIndex: "status", render: (value) => <Tag color={value === "enabled" ? "success" : "default"}>{value === "enabled" ? "启用" : "停用"}</Tag> },
+          { title: "操作", width: 100, render: (_, row) => <Button type="link" icon={<EditOutlined />} onClick={() => edit(row)}>编辑</Button> }
+        ]} />
+      </QueryState>
+    </Card>
+    <Drawer title={editing ? "编辑定价分组" : "新增定价分组"} size={640} open={open} destroyOnHidden onClose={() => setOpen(false)} extra={<Button type="primary" loading={save.isPending} onClick={() => form.submit()}>保存</Button>}>
+      <Form<SaveRentalPricingGroupRequest> form={form} layout="vertical" onFinish={(values) => save.mutate({ ...values, id: editing?.id })}>
+        <Form.Item name="code" label="分组编码" rules={[{ required: true }]}><Input disabled={Boolean(editing)} placeholder="COMFORT_SEDAN" /></Form.Item>
+        <Form.Item name="name" label="分组名称" rules={[{ required: true }]}><Input placeholder="舒适轿车组" /></Form.Item>
+        <Form.Item name="memberItemGroupIds" label={`包含的${profile.data?.terminology.itemGroupLabel ?? "产品型号"}`} rules={[{ required: true, type: "array", min: 1 }]} extra="同一型号可以加入多个定价分组；库存不会因此复制。">
+          <Select mode="multiple" showSearch={{ optionFilterProp: "label" }} options={(models.data ?? []).filter((item) => item.status === "enabled").map((item) => ({ value: item.id, label: `${item.code} · ${item.name}` }))} />
+        </Form.Item>
+        <Form.Item name="defaultPricingUnit" label="默认计价单位"><Select allowClear options={(settings.data?.pricing.enabledUnits ?? []).map((value) => ({ value, label: RENTAL_PRICING_UNIT_LABELS[value] ?? value }))} /></Form.Item>
+        <Form.Item name="description" label="说明"><Input.TextArea rows={3} /></Form.Item>
+        <Form.Item name="status" label="状态" rules={[{ required: true }]}><Select options={[{ value: "enabled", label: "启用" }, { value: "disabled", label: "停用" }]} /></Form.Item>
+      </Form>
+    </Drawer>
+  </>;
+}

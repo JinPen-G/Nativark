@@ -3,8 +3,11 @@ import type {
   RentalLocationType,
   SaveRentalFulfillmentLocationRequest,
   SaveRentalFulfillmentOperatorRequest,
-  SaveRentalItemGroupRequest
+  SaveRentalItemGroupRequest,
+  SaveRentalPricingGroupRequest,
+  RentalPricingUnit
 } from "@store-rental/shared";
+import { RENTAL_PRICING_UNIT_CODES } from "@store-rental/shared";
 import { Type } from "class-transformer";
 import {
   IsArray,
@@ -199,4 +202,35 @@ export class SaveRentalItemGroupDto implements SaveRentalItemGroupRequest {
   @IsOptional()
   @IsString()
   operator?: string;
+}
+
+export class SaveRentalPricingGroupDto implements SaveRentalPricingGroupRequest {
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  id?: string;
+
+  @IsString()
+  @IsNotEmpty()
+  code!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  name!: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  @IsIn(RENTAL_PRICING_UNIT_CODES)
+  defaultPricingUnit?: RentalPricingUnit;
+
+  @IsArray()
+  @IsString({ each: true })
+  memberItemGroupIds!: string[];
+
+  @IsOptional()
+  @IsIn(ENABLE_STATUSES)
+  status?: (typeof ENABLE_STATUSES)[number];
 }

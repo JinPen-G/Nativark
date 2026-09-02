@@ -9,6 +9,7 @@ import type {
   RentalInspectionTemplate,
   RentalInventoryMode,
   RentalItemGroup,
+  RentalPricingGroup,
   RentalLocationType,
   TenantRentalBusinessSettings,
   TenantRentalProfile
@@ -33,6 +34,7 @@ export interface TenantConfigSnapshot {
   operators: RentalFulfillmentOperator[];
   locations: RentalFulfillmentLocation[];
   itemGroups: RentalItemGroup[];
+  pricingGroups?: RentalPricingGroup[];
   couponTemplates: RentalCouponTemplate[];
   inspectionTemplates: RentalInspectionTemplate[];
   /**
@@ -70,6 +72,7 @@ export interface RentalConfigStore {
   upsertOperator(operator: RentalFulfillmentOperator, tx?: RentalConfigTx): Promise<void>;
   upsertLocation(location: RentalFulfillmentLocation, tx?: RentalConfigTx): Promise<void>;
   upsertItemGroup(group: RentalItemGroup, tx?: RentalConfigTx): Promise<void>;
+  upsertPricingGroup?(group: RentalPricingGroup, tx?: RentalConfigTx): Promise<void>;
   upsertCouponTemplate(template: RentalCouponTemplate, tx?: RentalConfigTx): Promise<void>;
   /** 在领券事务内锁定模板行，串行化不同幂等键对同一配额的竞争。 */
   lockCouponTemplateForClaim(tenantId: string, templateId: string, tx: RentalConfigTx): Promise<RentalCouponTemplate | undefined>;
@@ -115,7 +118,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
   }
 
   async loadAll(): Promise<TenantConfigSnapshot[]> {
-    const [workspaces, profiles, settings, operators, locations, itemGroups, couponTemplates, inspectionTemplates] =
+    const [workspaces, profiles, settings, operators, locations, itemGroups, pricingGroups, couponTemplates, inspectionTemplates] =
       await Promise.all([
         this.listWorkspaces(),
         this.prisma.tenantRentalProfile.findMany(),
@@ -130,6 +133,10 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
             }
           }
         }),
+        this.prisma.rentalPricingGroup.findMany({
+          orderBy: { createdAt: "desc" },
+          include: { members: { orderBy: { sortOrder: "asc" }, include: { itemGroup: true } } }
+        }),
         this.prisma.rentalCouponTemplate.findMany({ orderBy: { createdAt: "desc" } }),
         this.prisma.rentalInspectionTemplate.findMany({ orderBy: { createdAt: "desc" } })
       ]);
@@ -143,6 +150,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       const wsOperators = mine(operators);
       const wsLocations = mine(locations);
       const wsItemGroups = mine(itemGroups);
+      const wsPricingGroups = mine(pricingGroups);
       const wsCouponTemplates = mine(couponTemplates);
       const wsInspectionTemplates = mine(inspectionTemplates);
       const wsSettings = mine(settings)[0];
@@ -156,6 +164,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
         operators: wsOperators.map((row) => this.toOperator(row)),
         locations: wsLocations.map((row) => this.toLocation(row)),
         itemGroups: wsItemGroups.map((row) => this.toItemGroup(row)),
+        pricingGroups: wsPricingGroups.map((row) => this.toPricingGroup(row)),
         couponTemplates: wsCouponTemplates.map((row) => this.toCouponTemplate(row)),
         inspectionTemplates: wsInspectionTemplates.map((row) => this.toInspectionTemplate(row)),
         // 品类档案不计入：seed 只建档案，不代表该空间的配置写过库。
@@ -164,6 +173,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
             wsOperators.length ||
             wsLocations.length ||
             wsItemGroups.length ||
+            wsPricingGroups.length ||
             wsCouponTemplates.length ||
             wsInspectionTemplates.length
         )
@@ -369,6 +379,45 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
     await this.prisma.$transaction(write);
   }
 
+  /** 定价分组与成员一次提交，避免主档已更新但成员范围仍是旧值。 */
+  async upsertPricingGroup(group: RentalPricingGroup, tx?: RentalConfigTx): Promise<void> {
+    const write = async (client: RentalConfigTx) => {
+      const workspaceId = await resolveScopeWorkspaceId(client, group.tenantId);
+      await client.rentalPricingGroup.upsert({
+        where: { id: group.id },
+        create: {
+          id: group.id,
+          tenantId: group.tenantId,
+          workspaceId,
+          categoryCode: upper<$Enums.RentalCategoryCode>(group.categoryCode),
+          code: group.code,
+          name: group.name,
+          description: group.description ?? null,
+          defaultPricingUnit: group.defaultPricingUnit ?? null,
+          status: group.status,
+          version: group.version,
+          createdAt: new Date(group.createdAt)
+        },
+        update: {
+          code: group.code,
+          name: group.name,
+          description: group.description ?? null,
+          defaultPricingUnit: group.defaultPricingUnit ?? null,
+          status: group.status,
+          version: group.version
+        }
+      });
+      await client.rentalPricingGroupMember.deleteMany({ where: { pricingGroupId: group.id } });
+      if (group.memberItemGroupIds.length) {
+        await client.rentalPricingGroupMember.createMany({
+          data: group.memberItemGroupIds.map((itemGroupId, sortOrder) => ({ pricingGroupId: group.id, itemGroupId, sortOrder }))
+        });
+      }
+    };
+    if (tx) return void await write(tx);
+    await this.prisma.$transaction(write);
+  }
+
   async upsertCouponTemplate(template: RentalCouponTemplate, tx?: RentalConfigTx): Promise<void> {
     const data = {
       tenantId: template.tenantId,
@@ -535,6 +584,38 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       attributes: (row.attributes ?? {}) as Record<string, unknown>,
       bundleComponents,
       status: row.status as RentalItemGroup["status"],
+      createdAt: iso(row.createdAt),
+      updatedAt: iso(row.updatedAt)
+    };
+  }
+
+  private toPricingGroup(row: {
+    id: string; tenantId: string; categoryCode: string; code: string; name: string;
+    description: string | null; defaultPricingUnit: string | null; status: string; version: number;
+    createdAt: Date; updatedAt: Date;
+    members: Array<{ itemGroupId: string; itemGroup: {
+      id: string; code: string; name: string; inventoryMode: string; unit: string; status: string;
+    } }>;
+  }): RentalPricingGroup {
+    return {
+      id: row.id,
+      tenantId: row.tenantId,
+      categoryCode: lower<RentalCategoryCode>(row.categoryCode),
+      code: row.code,
+      name: row.name,
+      description: row.description ?? undefined,
+      defaultPricingUnit: (row.defaultPricingUnit ?? undefined) as RentalPricingGroup["defaultPricingUnit"],
+      memberItemGroupIds: row.members.map((member) => member.itemGroupId),
+      members: row.members.map(({ itemGroup }) => ({
+        id: itemGroup.id,
+        code: itemGroup.code,
+        name: itemGroup.name,
+        inventoryMode: lower<RentalInventoryMode>(itemGroup.inventoryMode),
+        unit: itemGroup.unit,
+        status: itemGroup.status as RentalItemGroup["status"]
+      })),
+      status: row.status as RentalPricingGroup["status"],
+      version: row.version,
       createdAt: iso(row.createdAt),
       updatedAt: iso(row.updatedAt)
     };

@@ -35,8 +35,10 @@ import {
   type RentalInspectionRecord,
   type RentalInspectionTemplate,
   type RentalItemGroup,
+  type RentalPricingGroup,
   type RentalOrder,
   type RentalQuoteSnapshotV1,
+  type RentalQuoteRequest,
   type CustomerOrderSubjects,
   type RentalReservation,
   type RentalStockBalance,
@@ -45,6 +47,7 @@ import {
   type SaveRentalFulfillmentLocationRequest,
   type SaveRentalFulfillmentOperatorRequest,
   type SaveRentalItemGroupRequest,
+  type SaveRentalPricingGroupRequest,
   type SaveRentalStockBalanceRequest,
   type SaveTenantRentalBusinessSettingsRequest,
   type SaveTenantRentalProfileRequest,
@@ -83,6 +86,7 @@ interface TenantRentalState {
   operators: RentalFulfillmentOperator[];
   locations: RentalFulfillmentLocation[];
   itemGroups: RentalItemGroup[];
+  pricingGroups: RentalPricingGroup[];
   inspectionTemplates: RentalInspectionTemplate[];
   /** 演示租户的样本资产/库存模板，仅在该租户库中尚无事实时落库一次。 */
   sampleAssets: RentalAsset[];
@@ -374,6 +378,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
         base.operators = snapshot.operators;
         base.locations = snapshot.locations;
         base.itemGroups = snapshot.itemGroups;
+        base.pricingGroups = snapshot.pricingGroups ?? snapshot.itemGroups.map((group) => this.defaultPricingGroup(group));
         base.couponTemplates = snapshot.couponTemplates;
         base.inspectionTemplates = snapshot.inspectionTemplates;
         base.configPersisted = true;
@@ -470,6 +475,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       (left, right) => Number(left.inventoryMode === RentalInventoryMode.Bundle) - Number(right.inventoryMode === RentalInventoryMode.Bundle)
     );
     for (const group of ordered) await this.configStore.upsertItemGroup(group, tx);
+    for (const pricingGroup of state.pricingGroups) await this.configStore.upsertPricingGroup?.(pricingGroup, tx);
     for (const template of state.couponTemplates) await this.configStore.upsertCouponTemplate(template, tx);
     for (const template of state.inspectionTemplates) await this.configStore.upsertInspectionTemplate(template, tx);
   }
@@ -695,6 +701,44 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   }
   listItemGroups(tenantId: string) { return this.state(tenantId).itemGroups; }
 
+  listPricingGroups(tenantId: string) { return this.state(tenantId).pricingGroups; }
+
+  async savePricingGroup(tenantId: string, input: SaveRentalPricingGroupRequest) {
+    const state = this.state(tenantId);
+    if (!input.code?.trim() || !input.name?.trim()) throw new BadRequestException("定价分组编码和名称不能为空");
+    if (!input.memberItemGroupIds?.length) throw new BadRequestException("定价分组至少选择一个产品型号");
+    if (new Set(input.memberItemGroupIds).size !== input.memberItemGroupIds.length) throw new BadRequestException("定价分组不能重复选择同一产品型号");
+    const members = input.memberItemGroupIds.map((memberId) => this.group(state, memberId));
+    if (members.some((member) => member.status !== "enabled")) throw new BadRequestException("定价分组只能包含启用的产品型号");
+    const modes = new Set(members.map((member) => member.inventoryMode));
+    if (modes.size !== 1) throw new BadRequestException("同一定价分组的产品型号必须使用相同库存方式");
+    const existing = input.id ? state.pricingGroups.find((row) => row.id === input.id) : undefined;
+    if (input.id && !existing) throw new NotFoundException("定价分组不存在");
+    if (state.pricingGroups.some((row) => row.code === input.code.trim() && row.id !== input.id)) {
+      throw new ConflictException("定价分组编码已存在");
+    }
+    const timestamp = now();
+    const result: RentalPricingGroup = {
+      id: existing?.id ?? id("pricing_group"),
+      tenantId,
+      categoryCode: state.profile.categoryCode,
+      code: input.code.trim(),
+      name: input.name.trim(),
+      description: input.description?.trim() || undefined,
+      defaultPricingUnit: input.defaultPricingUnit,
+      memberItemGroupIds: members.map((member) => member.id),
+      members: members.map(({ id, code, name, inventoryMode, unit, status }) => ({ id, code, name, inventoryMode, unit, status })),
+      status: input.status ?? existing?.status ?? "enabled",
+      version: (existing?.version ?? 0) + 1,
+      createdAt: existing?.createdAt ?? timestamp,
+      updatedAt: timestamp
+    };
+    await this.configStore.upsertPricingGroup?.(result);
+    if (existing) state.pricingGroups.splice(state.pricingGroups.indexOf(existing), 1, result);
+    else state.pricingGroups.unshift(result);
+    return result;
+  }
+
   async saveItemGroup(tenantId: string, input: SaveRentalItemGroupRequest) {
     const state = this.state(tenantId);
     const definition = this.category(state.profile.categoryCode);
@@ -736,6 +780,16 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     await this.configStore.upsertItemGroup(result);
 
     if (existing) state.itemGroups.splice(state.itemGroups.indexOf(existing), 1, result); else state.itemGroups.unshift(result);
+    // 定价分组只保存型号引用，成员摘要由当前型号事实派生。型号更名或停用后同步
+    // 当前进程缓存，避免必须重启 API 才能在分组页看到最新资料；成员关系和分组版本不变。
+    state.pricingGroups = state.pricingGroups.map((pricingGroup) => pricingGroup.memberItemGroupIds.includes(result.id)
+      ? {
+          ...pricingGroup,
+          members: pricingGroup.members.map((member) => member.id === result.id
+            ? { id: result.id, code: result.code, name: result.name, inventoryMode: result.inventoryMode, unit: result.unit, status: result.status }
+            : member)
+        }
+      : pricingGroup);
     return result;
   }
 
@@ -918,10 +972,30 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const orderId = id("order");
     const orderLines = input.lines.map((line) => {
       const group = this.group(state, line.itemGroupId);
-      const rentalCharge = quote.chargeLines.find((item) => item.code === `rental:${group.code}`);
-      if (!rentalCharge) throw new BadRequestException(`${group.name} 缺少服务端租金明细`);
+      const pricingGroup = line.pricingGroupId
+        ? state.pricingGroups.find((row) => row.id === line.pricingGroupId)
+        : undefined;
+      if (line.pricingGroupId && (!pricingGroup || !pricingGroup.memberItemGroupIds.includes(group.id))) {
+        throw new BadRequestException("订单行的产品型号不属于报价定价分组");
+      }
+      const rentalCharge = quote.chargeLines.find((item) => item.code === `rental:${pricingGroup?.code ?? group.code}`);
+      if (!rentalCharge) throw new BadRequestException(`${pricingGroup?.name ?? group.name} 缺少服务端租金明细`);
       const amount = rentalCharge.amount;
-      return { id: id("line"), itemGroupId: group.id, itemGroupCode: group.code, itemGroupName: group.name, inventoryMode: group.inventoryMode, quantity: line.quantity, unitPrice: amount / line.quantity, amount, note: line.note };
+      return {
+        id: id("line"),
+        pricingGroupId: pricingGroup?.id,
+        pricingGroupCode: pricingGroup?.code,
+        pricingGroupName: pricingGroup?.name,
+        pricingGroupMemberItemGroupIds: pricingGroup ? [...pricingGroup.memberItemGroupIds] : undefined,
+        itemGroupId: group.id,
+        itemGroupCode: group.code,
+        itemGroupName: group.name,
+        inventoryMode: group.inventoryMode,
+        quantity: line.quantity,
+        unitPrice: amount / line.quantity,
+        amount,
+        note: line.note
+      };
     });
     const reservations: RentalReservation[] = [];
     for (const line of orderLines) {
@@ -1446,6 +1520,54 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (overdueCharge > 0) this.applyOverdueTo(order, overdueCharge, now());
   }
 
+  /**
+   * 把客户选择的定价分组解析为真正占用库存的产品型号。
+   *
+   * 解析使用同一份库存快照，并把此前已选行的需求一起计算；因此两个有重叠成员的
+   * 定价分组不会各自看到同一份库存后同时承诺。报价快照保留 pricingGroupId，订单
+   * 再把当时成员范围固化，后续修改分组不影响已成立订单。
+   */
+  async resolvePricingGroupQuoteRequest(tenantId: string, input: RentalQuoteRequest): Promise<RentalQuoteRequest> {
+    const state = await this.factContext(tenantId);
+    const snapshot = await this.loadInventorySnapshot(tenantId);
+    const resolved: Array<RentalQuoteRequest["lines"][number] & { itemGroupId: string }> = [];
+    const seenPricingGroups = new Set<string>();
+    for (const line of input.lines) {
+      if (!Number.isInteger(line.quantity) || line.quantity <= 0) throw new BadRequestException("租赁数量必须是正整数");
+      if (!line.pricingGroupId) {
+        if (!line.itemGroupId) throw new BadRequestException("请选择定价分组");
+        this.group(state, line.itemGroupId);
+        resolved.push({ ...line, itemGroupId: line.itemGroupId });
+        continue;
+      }
+      if (seenPricingGroups.has(line.pricingGroupId)) throw new BadRequestException("同一定价分组在一次报价中只能出现一行");
+      seenPricingGroups.add(line.pricingGroupId);
+      const pricingGroup = state.pricingGroups.find((row) => row.id === line.pricingGroupId && row.status === "enabled");
+      if (!pricingGroup) throw new NotFoundException("定价分组不存在或已停用");
+      const candidateIds = line.itemGroupId
+        ? pricingGroup.memberItemGroupIds.filter((id) => id === line.itemGroupId)
+        : pricingGroup.memberItemGroupIds;
+      if (!candidateIds.length) throw new BadRequestException("所选产品型号不属于该定价分组");
+      const candidates = candidateIds
+        .map((memberId) => this.group(state, memberId))
+        .filter((member) => member.status === "enabled")
+        .sort((left, right) => {
+          const leftAvailable = this.availableQuantity(state, snapshot, left, input.fulfillmentLocationId, input.startAt, input.endAt, new Set());
+          const rightAvailable = this.availableQuantity(state, snapshot, right, input.fulfillmentLocationId, input.startAt, input.endAt, new Set());
+          return rightAvailable - leftAvailable || left.code.localeCompare(right.code);
+        });
+      const selected = candidates.find((candidate) => this.computeAvailability(state, snapshot, {
+        locationId: input.fulfillmentLocationId,
+        startAt: input.startAt,
+        endAt: input.endAt,
+        lines: [...resolved, { ...line, itemGroupId: candidate.id }].map((row) => ({ itemGroupId: row.itemGroupId, quantity: row.quantity }))
+      }).available);
+      if (!selected) throw new ConflictException(`${pricingGroup.name} 在所选时段没有可承接的产品型号库存`);
+      resolved.push({ ...line, itemGroupId: selected.id });
+    }
+    return { ...input, lines: resolved };
+  }
+
   async approveInspectionException(
     tenantId: string,
     orderId: string,
@@ -1578,6 +1700,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     state.couponTemplates ??= [];
     state.inspectionTemplates ??= [];
     state.itemGroups ??= [];
+    state.pricingGroups ??= state.itemGroups.map((group) => this.defaultPricingGroup(group));
     state.locations ??= [];
     if (!state.businessSettings) {
       const definition = this.category(state.profile.categoryCode);
@@ -1839,9 +1962,34 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       operators: isSampleTenant ? [operator] : [],
       locations: isSampleTenant ? [location] : [],
       itemGroups: samples.itemGroups,
+      pricingGroups: samples.itemGroups.map((group) => this.defaultPricingGroup(group)),
       inspectionTemplates: templates,
       sampleAssets: samples.assets,
       sampleStockBalances: samples.stockBalances
+    };
+  }
+
+  private defaultPricingGroup(group: RentalItemGroup): RentalPricingGroup {
+    return {
+      id: group.id,
+      tenantId: group.tenantId,
+      categoryCode: group.categoryCode,
+      code: group.code,
+      name: group.name,
+      description: group.description,
+      memberItemGroupIds: [group.id],
+      members: [{
+        id: group.id,
+        code: group.code,
+        name: group.name,
+        inventoryMode: group.inventoryMode,
+        unit: group.unit,
+        status: group.status
+      }],
+      status: group.status,
+      version: 1,
+      createdAt: group.createdAt,
+      updatedAt: group.updatedAt
     };
   }
 

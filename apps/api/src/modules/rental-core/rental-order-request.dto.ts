@@ -94,6 +94,10 @@ export class CreateRentalOrderLineInputDto {
   @IsNotEmpty()
   itemGroupId!: string;
 
+  @IsOptional()
+  @IsString()
+  pricingGroupId?: string;
+
   @IsNumber()
   @Min(1)
   quantity!: number;
@@ -114,9 +118,15 @@ export class PartialReturnAllocationInputDto {
 }
 
 export class RentalQuoteLineInputDto {
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
-  itemGroupId!: string;
+  itemGroupId?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  pricingGroupId?: string;
 
   @IsNumber()
   @Min(1)

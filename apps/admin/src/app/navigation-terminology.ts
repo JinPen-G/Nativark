@@ -19,6 +19,7 @@ import type { RentalCategoryTerminology } from "@store-rental/shared";
 export interface TenantNavigationLabels {
   routes: {
     itemGroups?: string;
+    pricingGroups?: string;
     assets?: string;
     locations?: string;
   };
@@ -51,6 +52,7 @@ export function resolveTenantNavigationLabels(terminology?: RentalCategoryTermin
   return {
     routes: {
       itemGroups: configured?.itemGroups ?? `${terminology.itemGroupLabel}目录`,
+      pricingGroups: configured?.pricingGroups ?? `${terminology.itemLabel}定价分组`,
       assets: configured?.assets ?? assetCollectionLabel(terminology),
       // 履约地点直接用品类自己的说法（门店 / 器材门店 / 装备仓 / 设备仓），
       // 与地点页标题同源，避免菜单叫「履约地点」而页面叫「装备仓」。
@@ -82,11 +84,12 @@ export interface NavigationSectionShape {
 export function applyTenantNavigationLabels<S extends NavigationSectionShape>(
   sections: readonly S[],
   terminology: RentalCategoryTerminology | undefined,
-  routePaths: { itemGroups: string; assets: string; locations: string }
+  routePaths: { itemGroups: string; pricingGroups: string; assets: string; locations: string }
 ): S[] {
   const labels = resolveTenantNavigationLabels(terminology);
   const labelByPath = new Map<string, string>();
   if (labels.routes.itemGroups) labelByPath.set(routePaths.itemGroups, labels.routes.itemGroups);
+  if (labels.routes.pricingGroups) labelByPath.set(routePaths.pricingGroups, labels.routes.pricingGroups);
   if (labels.routes.assets) labelByPath.set(routePaths.assets, labels.routes.assets);
   if (labels.routes.locations) labelByPath.set(routePaths.locations, labels.routes.locations);
   return sections.map((section) => ({

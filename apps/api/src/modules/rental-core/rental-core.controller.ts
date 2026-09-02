@@ -21,7 +21,8 @@ import type {
 import {
   SaveRentalFulfillmentLocationDto,
   SaveRentalFulfillmentOperatorDto,
-  SaveRentalItemGroupDto
+  SaveRentalItemGroupDto,
+  SaveRentalPricingGroupDto,
 } from "./rental-core-request.dto";
 import {
   CancelRentalOrderDto,
@@ -101,7 +102,7 @@ export class RentalCoreController {
     const profile = this.service.getProfile(tenantId);
     const category = this.service.listCategories().find((item) => item.code === profile.categoryCode);
     if (!category) throw new Error("当前经营空间的品类定义不存在");
-    return { profile, category, settings: this.service.getBusinessSettings(tenantId), groups: this.service.listItemGroups(tenantId), couponTemplates: this.service.listCouponTemplates(tenantId), locations: this.service.listLocations(tenantId), operators: this.service.listOperators(tenantId) };
+    return { profile, category, settings: this.service.getBusinessSettings(tenantId), groups: this.service.listItemGroups(tenantId), pricingGroups: this.service.listPricingGroups(tenantId), couponTemplates: this.service.listCouponTemplates(tenantId), locations: this.service.listLocations(tenantId), operators: this.service.listOperators(tenantId) };
   }
   // 必须先 await 业务结果再写快照：配置写方法已转为异步，若直接把 Promise 传进来
   // 就会与快照写入并发，快照可能捕获到变更前的状态。
@@ -207,6 +208,9 @@ export class RentalCoreController {
   @Get("item-groups") groups(@Req() req: AuthenticatedRequest) { return this.service.listItemGroups(req.user.tenantId); }
   @Post("item-groups") saveGroup(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalItemGroupDto) { return this.committed(req.user.tenantId, this.service.saveItemGroup(req.user.tenantId, body)); }
   @Put("item-groups/:id") updateGroup(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalItemGroupDto) { return this.committed(req.user.tenantId, this.service.saveItemGroup(req.user.tenantId, { ...body, id })); }
+  @Get("pricing-groups") pricingGroups(@Req() req: AuthenticatedRequest) { return this.service.listPricingGroups(req.user.tenantId); }
+  @Post("pricing-groups") savePricingGroup(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalPricingGroupDto) { return this.committed(req.user.tenantId, this.service.savePricingGroup(req.user.tenantId, body)); }
+  @Put("pricing-groups/:id") updatePricingGroup(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalPricingGroupDto) { return this.committed(req.user.tenantId, this.service.savePricingGroup(req.user.tenantId, { ...body, id })); }
   @Get("assets") assets(@Req() req: AuthenticatedRequest) { return this.service.listAssets(req.user.tenantId); }
   @Post("assets") saveAsset(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalAssetDto) { return this.committed(req.user.tenantId, this.service.saveAsset(req.user.tenantId, body)); }
   @Put("assets/:id") updateAsset(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalAssetDto) { return this.committed(req.user.tenantId, this.service.saveAsset(req.user.tenantId, { ...body, id })); }

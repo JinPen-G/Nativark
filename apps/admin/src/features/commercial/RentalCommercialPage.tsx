@@ -1,6 +1,6 @@
 import { EditOutlined, HistoryOutlined, PlusOutlined } from "@ant-design/icons";
 import { RENTAL_PRICING_UNIT_LABELS } from "@store-rental/shared";
-import type { CreateRentalPriceAdjustmentRequest, RentalDiscountPlan, RentalPriceAdjustmentPreviewRow, RentalPricingPlanV1, RentalServiceCapacity, RentalValueAddedService, SaveRentalDiscountPlanRequest, SaveRentalPricingPlanRequest, SaveRentalServiceCapacityRequest, SaveRentalValueAddedServiceRequest } from "@store-rental/shared";
+import type { CreateRentalPriceAdjustmentRequest, RentalDiscountPlan, RentalPriceAdjustmentPreviewRow, RentalPricingGroup, RentalPricingPlanV1, RentalServiceCapacity, RentalValueAddedService, SaveRentalDiscountPlanRequest, SaveRentalPricingPlanRequest, SaveRentalServiceCapacityRequest, SaveRentalValueAddedServiceRequest } from "@store-rental/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Button, Card, Col, DatePicker, Drawer, Form, Input, InputNumber, Modal, Popconfirm, Row, Select, Space, Switch, Table, Tag, Typography } from "antd";
 import dayjs from "dayjs";
@@ -23,6 +23,12 @@ const serviceTypeLabels: Record<string, string> = {
   support: "技术支持",
   other: "其他",
 };
+const customerScopeLabels: Record<string, string> = {
+  all: "全部客户",
+  personal: "个人客户",
+  corporate: "企业客户",
+  member: "会员",
+};
 
 export function RentalCommercialPage({ section }: { section: RentalCommercialSection }) {
   const { message } = App.useApp();
@@ -44,6 +50,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
   const [pricingForm] = Form.useForm<SaveRentalPricingPlanRequest>();
   const [adjustmentForm] = Form.useForm<CreateRentalPriceAdjustmentRequest & { scheduledAtValue?: dayjs.Dayjs }>();
   const [discountForm] = Form.useForm<SaveRentalDiscountPlanRequest>();
+  const discountType = Form.useWatch("discountType", discountForm);
   const [serviceForm] = Form.useForm<SaveRentalValueAddedServiceRequest>();
   const [capacityForm] = Form.useForm<SaveRentalServiceCapacityRequest & { window?: [dayjs.Dayjs, dayjs.Dayjs] }>();
   const profile = useQuery({
@@ -57,6 +64,10 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
   const groups = useQuery({
     queryKey: ["rental-core", "groups"],
     queryFn: rentalCoreApi.itemGroups,
+  });
+  const pricingGroups = useQuery({
+    queryKey: ["rental-core", "pricing-groups"],
+    queryFn: rentalCoreApi.pricingGroups,
   });
   const pricing = useQuery({
     queryKey: ["rental-core", "pricing-plans"],
@@ -204,49 +215,37 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
     onError: () => message.error("保存失败，请检查时段是否重叠及容量是否小于已占用数量"),
   });
 
-  function editPricing(record?: RentalPricingPlanV1) {
-    const rates: SaveRentalPricingPlanRequest["rates"] = record
-      ? record.rates.map(({ id: _id, itemGroupCode: _code, itemGroupName: _name, ...rate }) => rate)
-      : (groups.data ?? []).map((group) => ({
+  function editPricing() {
+    const pricedIds = new Set((pricing.data ?? []).flatMap((plan) => plan.rates.map((rate) => rate.pricingGroupId ?? rate.itemGroupId)));
+    const targets = (pricingGroups.data ?? []).filter((group) => group.status === "enabled" && !pricedIds.has(group.id));
+    const rates: SaveRentalPricingPlanRequest["rates"] = targets.map((group) => ({
+          pricingGroupId: group.id,
           itemGroupId: group.id,
-          unit: settings.data?.pricing.defaultUnit ?? "calendar_day",
+          unit: group.defaultPricingUnit ?? settings.data?.pricing.defaultUnit ?? "calendar_day",
           baseAmount: 0,
           weekendMultiplier: 1.1,
           holidayMultiplier: 1.25,
           depositAmount: 0,
           minimumUnits: 1,
         }));
-    pricingForm.setFieldsValue(
-      record
-        ? {
-            id: record.id,
-            code: record.code,
-            name: record.name,
-            status: record.status,
-            effectiveFrom: record.effectiveFrom,
-            effectiveTo: record.effectiveTo,
-            changeReason: "调整基础价格",
-            rates,
-          }
-        : {
-            code: "",
-            name: "",
-            status: "draft",
-            effectiveFrom: new Date().toISOString(),
-            changeReason: "新建定价计划",
-            rates,
-          },
-    );
-    setPricingEditor(record ?? ({} as RentalPricingPlanV1));
+    pricingForm.setFieldsValue({
+      code: `BASE-${dayjs().format("YYYYMMDD-HHmm")}`,
+      name: "新增分组基础价格",
+      status: "enabled",
+      effectiveFrom: new Date().toISOString(),
+      changeReason: "初始化新增定价分组的基础价格",
+      rates,
+    });
+    setPricingEditor({} as RentalPricingPlanV1);
   }
 
-  function openAdjustment(record: RentalPricingPlanV1) {
+  function openAdjustment(record: RentalPricingPlanV1, targetRate: RentalPricingPlanV1["rates"][number]) {
     setAdjustmentPreview([]);
     adjustmentForm.setFieldsValue({
       code: `ADJ-${dayjs().format("YYYYMMDD-HHmm")}`,
       name: `${record.name} 调价`,
       changeReason: "经营价格调整",
-      changes: [{ itemGroupId: record.rates[0]?.itemGroupId, unit: record.rates[0]?.unit, op: "set_base", value: record.rates[0]?.baseAmount ?? 0 }],
+      changes: [{ pricingGroupId: targetRate.pricingGroupId ?? targetRate.itemGroupId, itemGroupId: targetRate.pricingGroupId ?? targetRate.itemGroupId, unit: targetRate.unit, op: "set_base", value: targetRate.baseAmount }],
     });
     setAdjustmentPlan(record);
   }
@@ -265,6 +264,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
             appliesTo: "rental",
             customerScope: "all",
             applicableItemGroupIds: [],
+            applicablePricingGroupIds: [],
             applicableDayTypes: [],
             priority: 100,
             stackableWithOtherPlans: false,
@@ -313,7 +313,13 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
   }
 
   const sectionTitle = section === "pricing" ? "基础定价" : section === "discounts" ? "优惠方案" : "增值服务";
-  const sectionDescription = section === "pricing" ? "按当前经营品类、商品型号和计价单位维护服务端基础价格。" : section === "discounts" ? "在基础价格之上配置自动优惠、客户范围、日期范围与优惠券叠加规则。" : "维护配送、保险、损坏免赔等可选服务，并对保障条款进行版本化。";
+  const sectionDescription = section === "pricing" ? "查看全部定价分组的当前基础价；已有价格只能通过调价计划变更。" : section === "discounts" ? "在基础价格之上配置自动优惠、客户范围、日期范围与优惠券叠加规则。" : "维护配送、保险、损坏免赔等可选服务，并对保障条款进行版本化。";
+  const enabledPlans = [...(pricing.data ?? [])].filter((plan) => plan.status === "enabled").sort((left, right) => new Date(right.effectiveFrom).getTime() - new Date(left.effectiveFrom).getTime());
+  const currentPricingRows = (pricingGroups.data ?? []).map((group) => {
+    const hit = enabledPlans.flatMap((plan) => plan.rates.map((rate) => ({ plan, rate }))).find(({ rate }) => (rate.pricingGroupId ?? rate.itemGroupId) === group.id);
+    return { group, plan: hit?.plan, rate: hit?.rate };
+  });
+  const unpricedCount = currentPricingRows.filter((row) => row.group.status === "enabled" && !row.rate).length;
 
   return (
     <>
@@ -323,15 +329,15 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
         extra={
           <Space>
             {section === "pricing" && <Button icon={<HistoryOutlined />} onClick={() => setVersionsOpen(true)}>价格版本</Button>}
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => (section === "pricing" ? editPricing() : section === "discounts" ? editDiscount() : editService())}>
-              新增{sectionTitle}
-            </Button>
+            {section === "pricing" ? (
+              unpricedCount > 0 && <Button type="primary" icon={<PlusOutlined />} onClick={() => editPricing()}>初始化未定价分组（{unpricedCount}）</Button>
+            ) : <Button type="primary" icon={<PlusOutlined />} onClick={() => section === "discounts" ? editDiscount() : editService()}>新增{sectionTitle}</Button>}
           </Space>
         }
       />
       <div className="context-note">
         <span>
-          {profile.data?.terminology.itemGroupLabel ?? "商品"} · {profile.data?.categoryCode ?? "-"}
+          {profile.data?.terminology.itemLabel ?? "商品"}定价分组 · {profile.data?.categoryCode ?? "-"}
         </span>
         <span>订单只能引用服务端报价快照，前端不能直接决定成交单价。</span>
       </div>
@@ -352,52 +358,41 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
           className="data-panel"
           title={
             <Space>
-              <span>定价计划</span>
-              <Tag>{pricing.data?.length ?? 0}</Tag>
+              <span>当前基础价格</span>
+              <Tag>{currentPricingRows.length}</Tag>
             </Space>
           }
         >
-          <QueryState loading={pricing.isLoading} error={pricing.error}>
-            <Table<RentalPricingPlanV1>
-              rowKey="id"
-              dataSource={pricing.data ?? []}
+          <QueryState loading={pricing.isLoading || pricingGroups.isLoading} error={pricing.error || pricingGroups.error}>
+            <Table<{ group: RentalPricingGroup; plan?: RentalPricingPlanV1; rate?: RentalPricingPlanV1["rates"][number] }>
+              rowKey={(row) => row.group.id}
+              dataSource={currentPricingRows}
               columns={[
                 {
-                  title: "计划",
+                  title: "定价分组",
                   render: (_, row) => (
                     <>
-                      <b>{row.name}</b>
+                      <b>{row.group.name}</b>
                       <br />
-                      <span className="muted">
-                        {row.code} · v{row.version}
-                      </span>
+                      <span className="muted">{row.group.code} · {row.group.members.map((item) => item.name).join("、")}</span>
                     </>
                   ),
                 },
                 {
-                  title: "价格条目",
-                  render: (_, row) => `${row.rates.length} 条`,
+                  title: "当前基础价",
+                  render: (_, row) => row.rate ? <b>{money(row.rate.baseAmount)}</b> : <Tag color="warning">待初始化</Tag>,
                 },
                 {
                   title: "计价单位",
-                  render: (_, row) => [...new Set(row.rates.map((rate) => unitLabels[rate.unit] ?? rate.unit))].join("、"),
+                  render: (_, row) => row.rate ? unitLabels[row.rate.unit] ?? row.rate.unit : "-",
                 },
-                { title: "生效时间", dataIndex: "effectiveFrom" },
                 {
-                  title: "状态",
-                  dataIndex: "status",
-                  render: (value) => <Tag color={value === "enabled" ? "success" : "default"}>{value}</Tag>,
+                  title: "生效版本",
+                  render: (_, row) => row.plan ? <><span>v{row.plan.version}</span><br /><span className="muted">{dayjs(row.plan.effectiveFrom).format("YYYY-MM-DD HH:mm")}</span></> : "-",
                 },
                 {
                   title: "操作",
-                  render: (_, row) => (
-                    <Space size={0}>
-                      <Button type="link" icon={<EditOutlined />} onClick={() => editPricing(row)}>
-                        {row.status === "enabled" ? "编辑资料" : "编辑"}
-                      </Button>
-                      {row.status === "enabled" && <Button type="link" onClick={() => openAdjustment(row)}>调价计划</Button>}
-                    </Space>
-                  ),
+                  render: (_, row) => row.plan && row.rate ? <Button type="link" onClick={() => openAdjustment(row.plan!, row.rate!)}>新建调价计划</Button> : "请先初始化",
                 },
               ]}
             />
@@ -432,21 +427,30 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
                   ),
                 },
                 {
-                  title: "优惠",
-                  render: (_, row) => (row.discountType === "percentage" ? `${row.discountValue}%` : money(row.discountValue)),
+                  title: "优惠规则",
+                  render: (_, row) => row.discountType === "percentage"
+                    ? `${row.discountValue}% 折扣${row.maximumDiscount ? `，最高减 ${money(row.maximumDiscount)}` : ""}`
+                    : row.discountType === "threshold_amount"
+                      ? `满 ${money(row.thresholdAmount)} 减 ${money(row.discountValue)}`
+                      : `减 ${money(row.discountValue)}`,
                 },
-                { title: "门槛", dataIndex: "minimumSpend", render: money },
-                { title: "客户范围", dataIndex: "customerScope" },
-                { title: "优先级", dataIndex: "priority" },
                 {
-                  title: "与券叠加",
-                  dataIndex: "stackableWithCoupon",
-                  render: (value) => (value ? "允许" : "不允许"),
+                  title: "适用范围",
+                  render: (_, row) => {
+                    const selectedGroups = row.applicablePricingGroupIds?.length
+                      ? row.applicablePricingGroupIds.map((id) => pricingGroups.data?.find((group) => group.id === id)?.name ?? "已删除分组").join("、")
+                      : "全部定价分组";
+                    return <>{customerScopeLabels[row.customerScope] ?? row.customerScope}<br /><span className="muted">{selectedGroups}</span></>;
+                  },
+                },
+                {
+                  title: "互斥与叠加",
+                  render: (_, row) => <>{row.exclusiveGroup ? `互斥组：${row.exclusiveGroup}` : "独立方案"}<br /><span className="muted">其他方案：{row.stackableWithOtherPlans ? "可叠加" : "不叠加"} · 优惠券：{row.stackableWithCoupon ? "可叠加" : "不叠加"}</span></>,
                 },
                 {
                   title: "状态",
                   dataIndex: "status",
-                  render: (value) => <Tag color={value === "enabled" ? "success" : "default"}>{value}</Tag>,
+                  render: (value) => <Tag color={value === "enabled" ? "success" : "default"}>{value === "enabled" ? "启用" : value === "draft" ? "草稿" : "停用"}</Tag>,
                 },
                 {
                   title: "操作",
@@ -536,14 +540,14 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
       )}
 
       <Drawer
-        title={pricingForm.getFieldValue("id") ? "编辑基础定价" : "新增基础定价"}
-        width={820}
+        title="初始化未定价分组"
+        size={820}
         open={Boolean(pricingEditor)}
         destroyOnHidden
         onClose={() => setPricingEditor(null)}
         extra={
           <Button type="primary" loading={savePricing.isPending} onClick={() => pricingForm.submit()}>
-            保存新版本
+            发布基础价格 v1
           </Button>
         }
       >
@@ -588,7 +592,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
           </Row>
           <Form.List name="fulfillmentFees">
             {(feeFields, { add, remove }) => (
-              <Space direction="vertical" size={4} style={{ width: "100%" }}>
+              <Space orientation="vertical" size={4} style={{ width: "100%" }}>
                 {feeFields.map((fee) => (
                   <Row gutter={10} key={fee.key}>
                     <Col span={8}>
@@ -628,14 +632,16 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
           </Form.List>
           <Form.List name="rates">
             {(fields) => (
-              <Space direction="vertical" style={{ width: "100%" }}>
+              <Space orientation="vertical" style={{ width: "100%" }}>
                 {fields.map((field) => (
                   <Card size="small" key={field.key}>
                     <Row gutter={10}>
                       <Col span={7}>
-                        <Form.Item name={[field.name, "itemGroupId"]} label="商品" rules={[{ required: true }]}>
+                        <Form.Item name={[field.name, "pricingGroupId"]} hidden><Input /></Form.Item>
+                        <Form.Item name={[field.name, "itemGroupId"]} label="定价分组" rules={[{ required: true }]}>
                           <Select
-                            options={(groups.data ?? []).map((group) => ({
+                            disabled
+                            options={(pricingGroups.data ?? []).map((group) => ({
                               value: group.id,
                               label: `${group.code} · ${group.name}`,
                             }))}
@@ -717,7 +723,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
                     </Row>
                     <Form.List name={[field.name, "tiers"]}>
                       {(tierFields, { add, remove }) => (
-                        <Space direction="vertical" size={4} style={{ width: "100%" }}>
+                        <Space orientation="vertical" size={4} style={{ width: "100%" }}>
                           {tierFields.map((tier) => (
                             <Row gutter={10} key={tier.key}>
                               <Col span={7}>
@@ -756,7 +762,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
                     </Row>
                     <Form.List name={[field.name, "periodicWindows"]}>
                       {(windowFields, { add, remove }) => (
-                        <Space direction="vertical" size={4} style={{ width: "100%" }}>
+                        <Space orientation="vertical" size={4} style={{ width: "100%" }}>
                           <Typography.Text strong>周期性计价时段</Typography.Text>
                           {windowFields.map((windowField) => (
                             <Row gutter={8} key={windowField.key}>
@@ -774,7 +780,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
                     </Form.List>
                     <Form.List name={[field.name, "datetimeOverrides"]}>
                       {(overrideFields, { add, remove }) => (
-                        <Space direction="vertical" size={4} style={{ width: "100%", marginTop: 12 }}>
+                        <Space orientation="vertical" size={4} style={{ width: "100%", marginTop: 12 }}>
                           <Typography.Text strong>一次性日期时间价格</Typography.Text>
                           {overrideFields.map((overrideField) => (
                             <Row gutter={8} key={overrideField.key}>
@@ -916,7 +922,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
 
       <Drawer
         title={discountForm.getFieldValue("id") ? "编辑优惠方案" : "新增优惠方案"}
-        width={680}
+        size={680}
         open={Boolean(discountEditor)}
         destroyOnHidden
         onClose={() => setDiscountEditor(null)}
@@ -927,148 +933,60 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
         }
       >
         <Form<SaveRentalDiscountPlanRequest> form={discountForm} layout="vertical" onFinish={(values) => saveDiscount.mutate(values)}>
-          <Form.Item name="id" hidden>
-            <Input />
-          </Form.Item>
-          <Row gutter={12}>
-            <Col span={8}>
-              <Form.Item name="code" label="方案编码" rules={[{ required: true }]}>
-                <Input disabled={Boolean(discountForm.getFieldValue("id"))} />
-              </Form.Item>
-            </Col>
-            <Col span={10}>
-              <Form.Item name="name" label="方案名称" rules={[{ required: true }]}>
-                <Input />
-              </Form.Item>
-            </Col>
-            <Col span={6}>
-              <Form.Item name="status" label="状态">
-                <Select
-                  options={[
-                    { value: "draft", label: "草稿" },
-                    { value: "enabled", label: "启用" },
-                    { value: "disabled", label: "停用" },
-                  ]}
-                />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Row gutter={12}>
-            <Col span={8}>
-              <Form.Item name="discountType" label="优惠类型">
-                <Select
-                  options={[
-                    { value: "percentage", label: "百分比减免" },
-                    { value: "fixed_amount", label: "固定减免" },
-                    { value: "threshold_amount", label: "满额固定减免" },
-                  ]}
-                />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="appliesTo" label="作用费用对象" tooltip="押金、预授权与异常费用不可被普通优惠减免，因此不在可选项内。">
-                <Select
-                  options={[
-                    { value: "rental", label: "商品租金与使用量" },
-                    { value: "fulfillment", label: "履约费用" },
-                    { value: "service", label: "增值服务" },
-                  ]}
-                />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="thresholdAmount" label="满减门槛" tooltip="仅「满额固定减免」使用：优惠前租金达到该金额才减免。">
-                <InputNumber min={0} style={{ width: "100%" }} />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="exclusiveGroup" label="互斥组" tooltip="同组只应用一个方案；留空表示自成一组，不会挤掉其他方案。">
-                <Input allowClear />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="discountValue" label="优惠值">
-                <InputNumber min={0} style={{ width: "100%" }} />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="maximumDiscount" label="最高减免">
-                <InputNumber min={0} style={{ width: "100%" }} />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="minimumSpend" label="最低消费">
-                <InputNumber min={0} style={{ width: "100%" }} />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="customerScope" label="客户范围">
-                <Select
-                  options={[
-                    { value: "all", label: "全部" },
-                    { value: "personal", label: "个人" },
-                    { value: "corporate", label: "企业" },
-                    { value: "member", label: "会员" },
-                  ]}
-                />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="priority" label="优先级">
-                <InputNumber min={0} style={{ width: "100%" }} />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Form.Item name="applicableItemGroupIds" label="适用商品（空为全部）">
-            <Select
-              mode="multiple"
-              allowClear
-              options={(groups.data ?? []).map((group) => ({
-                value: group.id,
-                label: group.name,
-              }))}
-            />
-          </Form.Item>
-          <Form.Item name="applicableDayTypes" label="适用日期类型（空为全部）">
-            <Select mode="multiple" allowClear options={["workday", "weekend", "statutory_holiday", "makeup_workday", "tenant_special"].map((value) => ({ value, label: value }))} />
-          </Form.Item>
-          <Row gutter={12}>
-            <Col span={12}>
-              <Form.Item name="effectiveFrom" label="生效时间">
-                <Input />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="effectiveTo" label="失效时间">
-                <Input />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Form.Item name="stackableWithOtherPlans" label="允许与其他优惠方案叠加" tooltip="跨互斥组叠加需双方都允许；关闭时本方案一旦应用，其余方案不再叠加。">
-            <Select
-              options={[
-                { value: true, label: "允许" },
-                { value: false, label: "不允许" },
-              ]}
-            />
-          </Form.Item>
-          <Form.Item name="stackableWithCoupon" label="允许与优惠券叠加" valuePropName="checked">
-            <Select
-              options={[
-                { value: true, label: "允许" },
-                { value: false, label: "不允许" },
-              ]}
-            />
-          </Form.Item>
-          <Form.Item name="changeReason" label="变更原因" rules={[{ required: true }]}>
-            <Input.TextArea rows={3} />
-          </Form.Item>
+          <Alert type="info" showIcon title="按四个业务区完成配置；第一阶段一个方案对应一条优惠规则。" style={{ marginBottom: 16 }} />
+          <Form.Item name="id" hidden><Input /></Form.Item>
+          <Form.Item name="applicableItemGroupIds" hidden><Select mode="multiple" /></Form.Item>
+          <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+            <Card size="small" title="1. 基本信息">
+              <Row gutter={12}>
+                <Col span={8}><Form.Item name="code" label="方案编码" rules={[{ required: true }]}><Input disabled={Boolean(discountForm.getFieldValue("id"))} /></Form.Item></Col>
+                <Col span={10}><Form.Item name="name" label="方案名称" rules={[{ required: true }]}><Input /></Form.Item></Col>
+                <Col span={6}><Form.Item name="status" label="状态"><Select options={[{ value: "draft", label: "草稿" }, { value: "enabled", label: "启用" }, { value: "disabled", label: "停用" }]} /></Form.Item></Col>
+                <Col span={12}><Form.Item name="effectiveFrom" label="生效时间"><Input /></Form.Item></Col>
+                <Col span={12}><Form.Item name="effectiveTo" label="失效时间"><Input placeholder="留空表示长期有效" /></Form.Item></Col>
+              </Row>
+            </Card>
+
+            <Card size="small" title="2. 适用条件">
+              <Row gutter={12}>
+                <Col span={12}><Form.Item name="customerScope" label="客户范围"><Select options={[{ value: "all", label: "全部客户" }, { value: "personal", label: "个人客户" }, { value: "corporate", label: "企业客户" }, { value: "member", label: "会员" }]} /></Form.Item></Col>
+                <Col span={12}><Form.Item name="minimumSpend" label="最低消费"><InputNumber min={0} precision={2} prefix="¥" style={{ width: "100%" }} /></Form.Item></Col>
+                <Col span={24}>
+                  <Form.Item name="applicablePricingGroupIds" label="适用定价分组" tooltip="留空表示适用于当前经营空间的全部定价分组。">
+                    <Select mode="multiple" allowClear showSearch={{ optionFilterProp: "label" }} placeholder="全部定价分组" options={(pricingGroups.data ?? []).map((group) => ({ value: group.id, label: `${group.code} · ${group.name}` }))} />
+                  </Form.Item>
+                </Col>
+                <Col span={24}><Form.Item name="applicableDayTypes" label="适用日期类型" tooltip="留空表示全部日期类型。"><Select mode="multiple" allowClear placeholder="全部日期类型" options={[{ value: "workday", label: "工作日" }, { value: "weekend", label: "周末" }, { value: "statutory_holiday", label: "法定节假日" }, { value: "makeup_workday", label: "调休工作日" }, { value: "tenant_special", label: "租户特殊日" }]} /></Form.Item></Col>
+              </Row>
+            </Card>
+
+            <Card size="small" title="3. 优惠动作">
+              <Row gutter={12}>
+                <Col span={8}><Form.Item name="discountType" label="优惠类型"><Select options={[{ value: "percentage", label: "百分比减免" }, { value: "fixed_amount", label: "固定减免" }, { value: "threshold_amount", label: "满额固定减免" }]} /></Form.Item></Col>
+                <Col span={8}><Form.Item name="appliesTo" label="作用费用" tooltip="押金、预授权与异常费用不可被普通优惠减免。"><Select options={[{ value: "rental", label: "租金与使用量" }, { value: "fulfillment", label: "履约费用" }, { value: "service", label: "增值服务" }]} /></Form.Item></Col>
+                <Col span={8}><Form.Item name="discountValue" label={discountType === "percentage" ? "减免比例（%）" : "减免金额"} rules={[{ required: true }]}><InputNumber min={0} max={discountType === "percentage" ? 100 : undefined} precision={2} suffix={discountType === "percentage" ? "%" : undefined} prefix={discountType === "percentage" ? undefined : "¥"} style={{ width: "100%" }} /></Form.Item></Col>
+                {discountType === "threshold_amount" ? <Col span={12}><Form.Item name="thresholdAmount" label="满减门槛" rules={[{ required: true }]}><InputNumber min={0} precision={2} prefix="¥" style={{ width: "100%" }} /></Form.Item></Col> : null}
+                {discountType === "percentage" ? <Col span={12}><Form.Item name="maximumDiscount" label="最高减免金额"><InputNumber min={0} precision={2} prefix="¥" style={{ width: "100%" }} /></Form.Item></Col> : null}
+              </Row>
+            </Card>
+
+            <Card size="small" title="4. 互斥与叠加">
+              <Row gutter={12}>
+                <Col span={8}><Form.Item name="exclusiveGroup" label="互斥组" tooltip="同组仅应用实际减免最大的方案；留空表示独立分组。"><Input allowClear placeholder="例如：会员折扣" /></Form.Item></Col>
+                <Col span={8}><Form.Item name="priority" label="同额优先级"><InputNumber min={0} style={{ width: "100%" }} /></Form.Item></Col>
+                <Col span={8}><Form.Item name="stackableWithOtherPlans" label="与其他方案叠加"><Select options={[{ value: true, label: "允许" }, { value: false, label: "不允许" }]} /></Form.Item></Col>
+                <Col span={8}><Form.Item name="stackableWithCoupon" label="与优惠券叠加"><Select options={[{ value: true, label: "允许" }, { value: false, label: "不允许" }]} /></Form.Item></Col>
+              </Row>
+            </Card>
+
+            <Form.Item name="changeReason" label="本次变更原因" rules={[{ required: true }]}><Input.TextArea rows={3} /></Form.Item>
+          </Space>
         </Form>
       </Drawer>
 
       <Drawer
         title={serviceForm.getFieldValue("id") ? "编辑增值服务" : "新增增值服务"}
-        width={680}
+        size={680}
         open={Boolean(serviceEditor)}
         destroyOnHidden
         onClose={() => setServiceEditor(null)}
@@ -1219,7 +1137,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
       </Drawer>
       <Drawer
         title={`${capacityService?.name ?? "服务"} · 容量窗口`}
-        width={760}
+        size={760}
         open={Boolean(capacityService)}
         onClose={() => { setCapacityService(null); setCapacityEditor(null); }}
         extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => editCapacity()}>新增容量窗口</Button>}
@@ -1227,7 +1145,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
         <Alert
           type="info"
           showIcon
-          message="报价只检查容量；订单创建后预留，确认后锁定，取消或超时释放。"
+          title="报价只检查容量；订单创建后预留，确认后锁定，取消或超时释放。"
           style={{ marginBottom: 16 }}
         />
         <QueryState loading={capacities.isLoading} error={capacities.error}>

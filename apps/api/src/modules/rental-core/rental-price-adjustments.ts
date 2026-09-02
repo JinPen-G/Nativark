@@ -139,13 +139,14 @@ export function applyPriceAdjustment(
   const rates = structuredClone(currentRates);
   const changedKeys = new Set<string>();
   for (const change of changes) {
-    const changeKey = `${change.itemGroupId}:${change.unit}`;
+    const targetId = change.pricingGroupId ?? change.itemGroupId;
+    const changeKey = `${targetId}:${change.unit}`;
     if (changedKeys.has(changeKey)) throw new BadRequestException("同一商品和计价单位在一个调价计划中只能出现一次");
     changedKeys.add(changeKey);
-    const rate = rates.find((row) => row.itemGroupId === change.itemGroupId && row.unit === change.unit);
+    const rate = rates.find((row) => (row.pricingGroupId ?? row.itemGroupId) === targetId && row.unit === change.unit);
     if (!rate) {
       throw new BadRequestException(
-        `调价差异指向不存在的费率：商品 ${change.itemGroupId} 的 ${change.unit} 计价单位`
+        `调价差异指向不存在的费率：定价分组 ${targetId} 的 ${change.unit} 计价单位`
       );
     }
     if (!Number.isFinite(change.value)) throw new BadRequestException("调价值必须是有效数值");
@@ -160,7 +161,7 @@ export function applyPriceAdjustment(
     }
     rate.baseAmount = Math.round((after + Number.EPSILON) * 100) / 100;
     preview.push({
-      itemGroupId: change.itemGroupId,
+      itemGroupId: targetId,
       itemGroupCode: rate.itemGroupCode,
       unit: change.unit,
       beforeBaseAmount: before,

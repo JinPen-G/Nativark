@@ -93,6 +93,7 @@ export class RentalBusinessController {
       category,
       settings: this.core.getBusinessSettings(tenantId),
       groups: this.core.listItemGroups(tenantId),
+      pricingGroups: this.core.listPricingGroups(tenantId),
       couponTemplates: this.core.listCouponTemplates(tenantId),
       locations: this.core.listLocations(tenantId),
       operators: this.core.listOperators(tenantId)
@@ -365,6 +366,9 @@ export class RentalBusinessController {
     return this.committed(tenantId, result);
   }
 
-  @Post("quotes") async quote(@Req() req: AuthenticatedRequest, @Body() body: RentalQuoteDto) { return this.committed(req.user.tenantId, await this.business.createQuote(req.user.tenantId, this.context(req.user.tenantId), body)); }
+  @Post("quotes") async quote(@Req() req: AuthenticatedRequest, @Body() body: RentalQuoteDto) {
+    const resolved = await this.core.resolvePricingGroupQuoteRequest(req.user.tenantId, body);
+    return this.committed(req.user.tenantId, await this.business.createQuote(req.user.tenantId, this.context(req.user.tenantId), resolved));
+  }
   @Get("quotes/:id") quoteDetail(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.business.getQuote(req.user.tenantId, this.context(req.user.tenantId), id); }
 }

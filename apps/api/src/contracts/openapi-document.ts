@@ -2285,6 +2285,18 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: "Update generic rental item group", permissions: ["rental-core:catalog:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
   },
   {
+    method: "get", path: "/api/rental/v1/pricing-groups", tag: "RentalCore", operationId: "listRentalPricingGroups",
+    summary: "List tenant-defined pricing groups and their product-model members", permissions: ["store-rental:price:manage", "store-rental:order:view", "store-rental:order:create"], responseSchema: "GenericObject"
+  },
+  {
+    method: "post", path: "/api/rental/v1/pricing-groups", tag: "RentalCore", operationId: "createRentalPricingGroup",
+    summary: "Create a tenant pricing group", permissions: ["store-rental:price:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+  },
+  {
+    method: "put", path: "/api/rental/v1/pricing-groups/{id}", tag: "RentalCore", operationId: "updateRentalPricingGroup",
+    summary: "Update a tenant pricing group and its member models", permissions: ["store-rental:price:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+  },
+  {
     method: "get", path: "/api/rental/v1/assets", tag: "RentalCore", operationId: "listRentalAssets",
     summary: "List serialized rental assets", permissions: ["rental-core:asset:view"], responseSchema: "GenericObject"
   },

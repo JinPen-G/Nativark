@@ -50,15 +50,15 @@ const byCode = (code) => {
 void (() => {
   // ============ 1. 四个品类都由同一个纯函数解析出各自术语 ============
   const expectedByCode = {
-    camera: { groups: { inventory: "摄影器材" }, routes: { itemGroups: "器材型号", assets: "器材资产与库存", locations: "器材门店" } },
-    camping: { groups: { inventory: "户外装备" }, routes: { itemGroups: "装备品类", assets: "装备资产与库存", locations: "装备仓库" } },
-    vehicle: { groups: { inventory: "车辆与车队" }, routes: { itemGroups: "车型管理", assets: "车辆管理", locations: "门店管理" } },
-    construction: { groups: { inventory: "工程设备" }, routes: { itemGroups: "设备型号", assets: "设备台账与库存", locations: "设备仓库" } }
+    camera: { groups: { inventory: "摄影器材" }, routes: { itemGroups: "器材型号", pricingGroups: "器材定价分组", assets: "器材资产与库存", locations: "器材门店" } },
+    camping: { groups: { inventory: "户外装备" }, routes: { itemGroups: "装备型号", pricingGroups: "装备定价分组", assets: "装备资产与库存", locations: "装备仓库" } },
+    vehicle: { groups: { inventory: "车辆型号与车队" }, routes: { itemGroups: "车辆型号管理", pricingGroups: "车组管理", assets: "车辆管理", locations: "门店管理" } },
+    construction: { groups: { inventory: "工程设备" }, routes: { itemGroups: "设备型号", pricingGroups: "设备定价分组", assets: "设备台账与库存", locations: "设备仓库" } }
   };
   for (const [code, expected] of Object.entries(expectedByCode)) {
     const { terminology } = byCode(code);
     const labels = resolveTenantNavigationLabels(terminology);
-    assert.deepEqual(labels, expected, `${code} 必须严格符合需求文档的四项导航文案`);
+    assert.deepEqual(labels, expected, `${code} 必须严格符合需求文档的五项导航文案`);
     // 固定的"商品""资产"字样必须消失——这正是 UI-NAV-01 要解决的问题。
     assert.equal(
       labels.routes.itemGroups.startsWith("商品"),
@@ -68,17 +68,18 @@ void (() => {
   }
   ok("四个品类：菜单、分组与履约地点文案均由各自术语解析，不再是固定「商品/资产」");
 
-  // ============ 2. 车辆空间必须呈现 车辆 / 车型 / 车队 / 门店 语义 ============
+  // ============ 2. 车辆空间必须区分 车辆型号 / 车组 / 车辆 / 车队 / 门店 ============
   const vehicle = resolveTenantNavigationLabels(byCode("vehicle").terminology);
-  assert.equal(vehicle.routes.itemGroups, "车型管理", "车辆空间的目录菜单应为车型管理");
+  assert.equal(vehicle.routes.itemGroups, "车辆型号管理", "车辆空间的目录菜单应为车辆型号管理");
+  assert.equal(vehicle.routes.pricingGroups, "车组管理", "车辆空间的定价分组菜单应为车组管理");
   assert.equal(vehicle.routes.assets, "车辆管理", "车辆空间的资产菜单应为车辆管理");
   assert.equal(vehicle.routes.locations, "门店管理", "车辆空间的履约地点应为门店管理");
-  assert.equal(vehicle.groups.inventory, "车辆与车队", "车辆空间的导航分组应为车辆与车队");
+  assert.equal(vehicle.groups.inventory, "车辆型号与车队", "车辆空间的导航分组应为车辆型号与车队");
   const vehicleText = JSON.stringify(vehicle);
-  for (const word of ["车辆", "车型", "车队", "门店"]) {
+  for (const word of ["车辆型号", "车组", "车辆", "车队", "门店"]) {
     assert.ok(vehicleText.includes(word), `车辆空间导航缺少「${word}」语义`);
   }
-  ok("车辆空间：车辆 / 车型 / 车队 / 门店 四种语义齐备");
+  ok("车辆空间：车辆型号 / 车组 / 车辆 / 车队 / 门店 五种语义齐备");
 
   // ============ 3. 换术语立刻换文案，且不依赖品类编码 ============
   const camera = resolveTenantNavigationLabels(byCode("camera").terminology);
@@ -105,10 +106,11 @@ void (() => {
 
   // ============ 4-B. 套用：文案必须真的落到分组与菜单项上 ============
   // 只测解析函数是不够的——算对了却漏了套用那一行，界面照样是固定文案。
-  const PATHS = { itemGroups: "/rental/item-groups", assets: "/rental/assets", locations: "/rental/locations" };
+  const PATHS = { itemGroups: "/rental/item-groups", pricingGroups: "/rental/pricing-groups", assets: "/rental/assets", locations: "/rental/locations" };
   const registry = [
     { key: "inventory", label: "商品与资产", routes: [
       { path: PATHS.itemGroups, label: "商品目录", permission: "rental-core:catalog:view" },
+      { path: PATHS.pricingGroups, label: "定价分组", permission: "store-rental:price:manage" },
       { path: PATHS.assets, label: "资产与库存", permission: "rental-core:asset:view" },
       { path: PATHS.locations, label: "履约地点", permission: "store-rental:station:view" }
     ] },
@@ -117,8 +119,9 @@ void (() => {
   ];
   const applied = applyTenantNavigationLabels(registry, byCode("vehicle").terminology, PATHS);
   const inventory = applied.find((section) => section.key === "inventory");
-  assert.equal(inventory.label, "车辆与车队", "分组文案必须被套用");
-  assert.equal(inventory.routes.find((r) => r.path === PATHS.itemGroups).label, "车型管理", "目录菜单文案必须被套用");
+  assert.equal(inventory.label, "车辆型号与车队", "分组文案必须被套用");
+  assert.equal(inventory.routes.find((r) => r.path === PATHS.itemGroups).label, "车辆型号管理", "目录菜单文案必须被套用");
+  assert.equal(inventory.routes.find((r) => r.path === PATHS.pricingGroups).label, "车组管理", "定价分组菜单文案必须被套用");
   assert.equal(inventory.routes.find((r) => r.path === PATHS.assets).label, "车辆管理", "资产菜单文案必须被套用");
   assert.equal(inventory.routes.find((r) => r.path === PATHS.locations).label, "门店管理", "履约地点文案必须被套用");
   // 只覆盖 label：其余路由元数据必须原样透传，否则「换说法」会顺手改掉门禁。
@@ -178,6 +181,7 @@ void (() => {
   // ============ 7. 只改文案，不改路由与鉴权契约 ============
   for (const [routePath, permission] of [
     ["/rental/item-groups", "rental-core:catalog:view"],
+    ["/rental/pricing-groups", "store-rental:price:manage"],
     ["/rental/assets", "rental-core:asset:view"],
     ["/rental/locations", "store-rental:station:view"]
   ]) {

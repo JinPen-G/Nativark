@@ -16,6 +16,7 @@ const OrdersPage = lazy(() => import("@/features/rental-core/RentalOrdersPage").
 const OrderCreatePage = lazy(() => import("@/features/rental-core/RentalOrderCreatePage").then((module) => ({ default: module.RentalOrderCreatePage })));
 const OrderDetailPage = lazy(() => import("@/features/rental-core/RentalOrderDetailPage").then((module) => ({ default: module.RentalOrderDetailPage })));
 const RentalCommercialPage = lazy(() => import("@/features/commercial/RentalCommercialPage").then((module) => ({ default: module.RentalCommercialPage })));
+const PricingGroupPage = lazy(() => import("@/features/commercial/PricingGroupPage").then((module) => ({ default: module.PricingGroupPage })));
 const CouponPage = lazy(() => import("@/features/commercial/CouponPage").then((module) => ({ default: module.CouponPage })));
 const MembershipReviewPage = lazy(() => import("@/features/membership/MembershipReviewPage").then((module) => ({ default: module.MembershipReviewPage })));
 const PersonalMembershipPage = lazy(() => import("@/features/membership/PersonalMembershipPage").then((module) => ({ default: module.PersonalMembershipPage })));
@@ -83,6 +84,7 @@ function ProtectedRoutes() {
             <Route path={APP_ROUTES.itemGroups.path} element={guard(APP_ROUTES.itemGroups, <CatalogPage />)} />
             <Route path={APP_ROUTES.assets.path} element={guard(APP_ROUTES.assets, <AssetWorkspacePage />)} />
             <Route path={APP_ROUTES.locations.path} element={guard(APP_ROUTES.locations, <LocationPage />)} />
+            <Route path={APP_ROUTES.pricingGroups.path} element={guard(APP_ROUTES.pricingGroups, <PricingGroupPage />)} />
             <Route path={APP_ROUTES.pricing.path} element={guard(APP_ROUTES.pricing, <RentalCommercialPage section="pricing" />)} />
             <Route path={APP_ROUTES.discounts.path} element={guard(APP_ROUTES.discounts, <RentalCommercialPage section="discounts" />)} />
             <Route path={APP_ROUTES.coupons.path} element={guard(APP_ROUTES.coupons, <CouponPage />)} />

@@ -422,6 +422,11 @@ export class RentalDatetimePriceOverrideInputDto implements RentalDatetimePriceO
 }
 
 export class RentalPricingRateInputDto {
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  pricingGroupId?: string;
+
   @IsString()
   @IsNotEmpty()
   itemGroupId!: string;
@@ -617,6 +622,11 @@ export class SaveRentalDiscountPlanDto implements SaveRentalDiscountPlanRequest 
   @IsArray()
   @IsString({ each: true })
   applicableItemGroupIds!: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  applicablePricingGroupIds?: string[];
 
   @IsArray()
   @IsIn(DAY_TYPES, { each: true })
@@ -1242,6 +1252,11 @@ export class PreviewRentalCalendarRangeRemoveDto implements PreviewRentalCalenda
 
 /** PRICE-03：创建调价计划（差异 + 定时/立即 + 原因）。 */
 export class RentalPriceAdjustmentChangeInputDto {
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  pricingGroupId?: string;
+
   @IsString()
   @IsNotEmpty()
   itemGroupId!: string;
