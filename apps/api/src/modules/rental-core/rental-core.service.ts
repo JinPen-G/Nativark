@@ -1530,14 +1530,21 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   async resolvePricingGroupQuoteRequest(tenantId: string, input: RentalQuoteRequest): Promise<RentalQuoteRequest> {
     const state = await this.factContext(tenantId);
     const snapshot = await this.loadInventorySnapshot(tenantId);
-    const resolved: Array<RentalQuoteRequest["lines"][number] & { itemGroupId: string }> = [];
+    type ResolvedLine = RentalQuoteRequest["lines"][number] & { itemGroupId: string };
+    const resolved: Array<ResolvedLine | undefined> = new Array(input.lines.length);
+    const choices: Array<{
+      index: number;
+      line: RentalQuoteRequest["lines"][number];
+      pricingGroup: RentalPricingGroup;
+      candidates: RentalItemGroup[];
+    }> = [];
     const seenPricingGroups = new Set<string>();
-    for (const line of input.lines) {
+    for (const [index, line] of input.lines.entries()) {
       if (!Number.isInteger(line.quantity) || line.quantity <= 0) throw new BadRequestException("租赁数量必须是正整数");
       if (!line.pricingGroupId) {
         if (!line.itemGroupId) throw new BadRequestException("请选择定价分组");
         this.group(state, line.itemGroupId);
-        resolved.push({ ...line, itemGroupId: line.itemGroupId });
+        resolved[index] = { ...line, itemGroupId: line.itemGroupId };
         continue;
       }
       if (seenPricingGroups.has(line.pricingGroupId)) throw new BadRequestException("同一定价分组在一次报价中只能出现一行");
@@ -1556,16 +1563,34 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
           const rightAvailable = this.availableQuantity(state, snapshot, right, input.fulfillmentLocationId, input.startAt, input.endAt, new Set());
           return rightAvailable - leftAvailable || left.code.localeCompare(right.code);
         });
-      const selected = candidates.find((candidate) => this.computeAvailability(state, snapshot, {
-        locationId: input.fulfillmentLocationId,
-        startAt: input.startAt,
-        endAt: input.endAt,
-        lines: [...resolved, { ...line, itemGroupId: candidate.id }].map((row) => ({ itemGroupId: row.itemGroupId, quantity: row.quantity }))
-      }).available);
-      if (!selected) throw new ConflictException(`${pricingGroup.name} 在所选时段没有可承接的产品型号库存`);
-      resolved.push({ ...line, itemGroupId: selected.id });
+      if (!candidates.length) throw new ConflictException(`${pricingGroup.name} 没有启用的承接产品型号`);
+      choices.push({ index, line, pricingGroup, candidates });
     }
-    return { ...input, lines: resolved };
+
+    // 先分配候选最少的分组，并在冲突时回溯。只按单行贪心会把公共型号先给
+    // 选择较多的分组，导致另一个只有该型号可用的分组被误报无库存。
+    choices.sort((left, right) => left.candidates.length - right.candidates.length || left.index - right.index);
+    const assign = (position: number): boolean => {
+      if (position >= choices.length) return true;
+      const choice = choices[position];
+      for (const candidate of choice.candidates) {
+        resolved[choice.index] = { ...choice.line, itemGroupId: candidate.id };
+        const demand = resolved.filter((row): row is ResolvedLine => Boolean(row));
+        const available = this.computeAvailability(state, snapshot, {
+          locationId: input.fulfillmentLocationId,
+          startAt: input.startAt,
+          endAt: input.endAt,
+          lines: demand.map((row) => ({ itemGroupId: row.itemGroupId, quantity: row.quantity }))
+        }).available;
+        if (available && assign(position + 1)) return true;
+        resolved[choice.index] = undefined;
+      }
+      return false;
+    };
+    if (!assign(0)) {
+      throw new ConflictException("所选定价分组在该时段没有可同时承接的产品型号库存");
+    }
+    return { ...input, lines: resolved.filter((row): row is ResolvedLine => Boolean(row)) };
   }
 
   async approveInspectionException(
