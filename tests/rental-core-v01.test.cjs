@@ -1,4 +1,7 @@
 const assert = require("node:assert/strict");
+const { mkdtempSync, rmSync } = require("node:fs");
+const { tmpdir } = require("node:os");
+const { join } = require("node:path");
 
 require("ts-node").register({
   transpileOnly: false,
@@ -246,6 +249,42 @@ const constructionGroup = await service.saveItemGroup(newTenant, {
   attributes: { manufacturer: "测试重工", model: "E20" },
   status: "enabled"
 });
+const previousUploadRoot = process.env.RENTAL_UPLOAD_DIR;
+const uploadRoot = mkdtempSync(join(tmpdir(), "rental-model-images-"));
+const onePixelPng = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZJ7sAAAAASUVORK5CYII=", "base64");
+process.env.RENTAL_UPLOAD_DIR = uploadRoot;
+try {
+  await assert.rejects(
+    () => service.addItemGroupImage(newTenant, constructionGroup.id, { originalname: "fake.png", mimetype: "image/png", size: 4, buffer: Buffer.from("html") }),
+    /图片内容与文件格式不一致/,
+    "产品型号图片必须校验实际文件签名，不能只相信浏览器 MIME"
+  );
+  const withImage = await service.addItemGroupImage(newTenant, constructionGroup.id, { originalname: "挖掘机标准图.png", mimetype: "image/png", size: onePixelPng.length, buffer: onePixelPng });
+  assert.equal(withImage.images.length, 1);
+  assert.equal(withImage.images[0].isCover, true, "首张型号图片必须成为封面");
+  assert.match(withImage.images[0].url, new RegExp(`/item-groups/${constructionGroup.id}/images/`));
+  assert.equal("__itemGroupMedia" in withImage.attributes, false, "内部图片元数据不得随型号接口返回");
+  assert.equal("storageKey" in withImage.images[0], false, "服务器存储路径不得返回客户端");
+  const storedImage = await service.readItemGroupImage(newTenant, constructionGroup.id, withImage.images[0].id);
+  assert.deepEqual(storedImage.content, onePixelPng, "鉴权图片读取应返回刚写入的内容");
+  const editedWithImage = await service.saveItemGroup(newTenant, {
+    id: constructionGroup.id,
+    code: constructionGroup.code,
+    name: constructionGroup.name,
+    inventoryMode: constructionGroup.inventoryMode,
+    unit: constructionGroup.unit,
+    description: "更新说明但保留型号图片",
+    attributes: constructionGroup.attributes,
+    status: "enabled"
+  });
+  assert.equal(editedWithImage.images.length, 1, "普通型号资料编辑不得丢失相册");
+  const withoutImage = await service.removeItemGroupImage(newTenant, constructionGroup.id, withImage.images[0].id);
+  assert.deepEqual(withoutImage.images, [], "删除最后一张图片后相册应为空");
+} finally {
+  if (previousUploadRoot === undefined) delete process.env.RENTAL_UPLOAD_DIR;
+  else process.env.RENTAL_UPLOAD_DIR = previousUploadRoot;
+  rmSync(uploadRoot, { recursive: true, force: true });
+}
 const constructionPricingGroup = await service.savePricingGroup(newTenant, {
   code: "EXC-COMPACT",
   name: "小型挖掘机组",

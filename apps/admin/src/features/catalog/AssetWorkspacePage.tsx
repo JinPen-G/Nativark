@@ -8,6 +8,7 @@ import { resolveTenantNavigationLabels } from "@/app/navigation-terminology";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
+import { ItemGroupPhoto } from "./ItemGroupPhoto";
 
 const statusMap: Record<string, { label: string; color: string }> = {
   available: { label: "可用", color: "success" }, reserved: { label: "已预占", color: "processing" }, rented: { label: "租赁中", color: "blue" },
@@ -32,6 +33,7 @@ export function AssetWorkspacePage() {
   const [stockDrawerOpen, setStockDrawerOpen] = useState(false);
   const [assetForm] = Form.useForm<SaveRentalAssetRequest>();
   const [stockForm] = Form.useForm<SaveRentalStockBalanceRequest>();
+  const selectedItemGroupId = Form.useWatch("itemGroupId", assetForm);
   const assets = useQuery({ queryKey: ["rental-core", "assets"], queryFn: rentalCoreApi.assets });
   const stocks = useQuery({ queryKey: ["rental-core", "stocks"], queryFn: rentalCoreApi.stockBalances });
   const groups = useQuery({ queryKey: ["rental-core", "groups"], queryFn: rentalCoreApi.itemGroups });
@@ -57,6 +59,8 @@ export function AssetWorkspacePage() {
   const stockRows = useMemo(() => (stocks.data ?? []).filter((stock) => !keyword || `${stock.itemGroupCode}${stock.itemGroupName}${stock.locationName}`.toLowerCase().includes(keyword.toLowerCase())), [stocks.data, keyword]);
   const serializedGroups = (groups.data ?? []).filter((group) => group.inventoryMode === RentalInventoryMode.Serialized && group.status === "enabled");
   const quantityGroups = (groups.data ?? []).filter((group) => group.inventoryMode === RentalInventoryMode.Quantity && group.status === "enabled");
+  const selectedItemGroup = (groups.data ?? []).find((group) => group.id === selectedItemGroupId);
+  const selectedItemGroupCover = selectedItemGroup?.images?.find((image) => image.isCover) ?? selectedItemGroup?.images?.[0];
 
   useEffect(() => {
     if (category && !supportsAssets && supportsStock) setActiveTab("stock");
@@ -83,6 +87,11 @@ export function AssetWorkspacePage() {
         <Space wrap style={{ marginBottom: 16 }}><Input allowClear prefix={<SearchOutlined />} placeholder={`${profile.data?.terminology.identifierLabel ?? "资产编号"}、车牌/VIN、型号或${profile.data?.terminology.fulfillmentLabel ?? "履约地点"}`} value={keyword} onChange={(event) => setKeyword(event.target.value)} style={{ width: 360 }} /></Space>
         <QueryState loading={assets.isLoading || stocks.isLoading || groups.isLoading || locations.isLoading || profile.isLoading || categories.isLoading} error={assets.error || stocks.error || groups.error || locations.error || profile.error || categories.error}>
           {activeTab === "assets" ? <Table<RentalAsset> rowKey="id" dataSource={assetRows} scroll={{ x: 960 }} columns={[
+            { title: `${profile.data?.terminology.itemGroupLabel ?? "产品型号"}照片`, width: 110, fixed: "left", render: (_, row) => {
+              const group = (groups.data ?? []).find((item) => item.id === row.itemGroupId);
+              const image = group?.images?.find((item) => item.isCover) ?? group?.images?.[0];
+              return group && image ? <ItemGroupPhoto groupId={group.id} image={image} /> : <span className="muted">未上传</span>;
+            } },
             { title: profile.data?.terminology.identifierLabel ?? "资产编号", dataIndex: "assetNo", fixed: "left", render: (value) => <b>{value}</b> },
             ...(serialNoField ? [{ title: serialNoField.label, dataIndex: "serialNo", render: (value: string | undefined) => value || "-" }] : []),
             { title: profile.data?.terminology.itemGroupLabel ?? "产品型号", render: (_, row) => <><b>{row.itemGroupName}</b><br /><span className="muted">{row.itemGroupCode}</span></> },
@@ -104,6 +113,9 @@ export function AssetWorkspacePage() {
 
       <Drawer title={editing ? `编辑${profile.data?.terminology.assetLabel ?? "资产"}` : `新增${profile.data?.terminology.assetLabel ?? "资产"}`} size={640} open={assetDrawerOpen} destroyOnHidden onClose={() => setAssetDrawerOpen(false)} extra={<Button type="primary" loading={saveAsset.isPending} onClick={() => assetForm.submit()}>保存</Button>}>
         <Form<SaveRentalAssetRequest> form={assetForm} layout="vertical" onFinish={(values) => saveAsset.mutate({ ...values, id: editing?.id })}>
+          {selectedItemGroup && <Card size="small" title={`${profile.data?.terminology.itemGroupLabel ?? "产品型号"}照片`} style={{ marginBottom: 16 }}>
+            {selectedItemGroupCover ? <Space align="start"><ItemGroupPhoto groupId={selectedItemGroup.id} image={selectedItemGroupCover} size={128} /><span className="muted">{selectedItemGroup.name}<br />照片来自{profile.data?.terminology.itemGroupLabel ?? "产品型号"}主档；该资产的实拍、状态和损伤照片将在具体资产档案中独立维护。</span></Space> : <Alert type="info" showIcon title={`该${profile.data?.terminology.itemGroupLabel ?? "产品型号"}尚未上传照片`} description={`请先到“${resolveTenantNavigationLabels(profile.data?.terminology).routes.itemGroups ?? "产品型号管理"}”上传标准展示图。`} />}
+          </Card>}
           <Card size="small" title={`${profile.data?.terminology.assetLabel ?? "资产"}基本资料`} style={{ marginBottom: 16 }}>
             <Row gutter={12}>
             <Col span={12}><Form.Item name="itemGroupId" label={profile.data?.terminology.itemGroupLabel ?? "产品型号"} extra="厂商、品牌和型号从所选主档带入。" rules={[{ required: true }]}><Select disabled={Boolean(editing)} showSearch={{ optionFilterProp: "label" }} options={serializedGroups.map((item) => ({ value: item.id, label: `${item.name} · ${item.code}` }))} /></Form.Item></Col>

@@ -7744,10 +7744,22 @@ export interface RentalItemGroup {
   unit: string;
   description?: string;
   attributes: Record<string, unknown>;
+  /** 产品型号主档图片；第一张或 `isCover=true` 的图片作为列表封面。 */
+  images?: RentalItemGroupImage[];
   bundleComponents: RentalBundleComponent[];
   status: "enabled" | "disabled";
   createdAt: string;
   updatedAt: string;
+}
+
+export interface RentalItemGroupImage {
+  id: string;
+  fileName: string;
+  mimeType: "image/jpeg" | "image/png" | "image/webp" | string;
+  sizeBytes: number;
+  isCover: boolean;
+  /** 鉴权图片地址；客户端应使用当前运营会话读取，不得拼接本地存储路径。 */
+  url: string;
 }
 
 /**

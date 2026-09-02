@@ -23,6 +23,7 @@ pnpm-debug.log*
 
 # Runtime uploads and local database exports
 apps/api/uploads/
+**/var/uploads/
 *.sqlite
 backups/
 

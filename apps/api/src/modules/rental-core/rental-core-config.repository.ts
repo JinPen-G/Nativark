@@ -572,6 +572,11 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       optional: component.optional || undefined,
       substitutionGroup: component.substitutionGroup ?? undefined
     }));
+    const attributes = (row.attributes ?? {}) as Record<string, unknown>;
+    const media = attributes.__itemGroupMedia;
+    const storedImages = media && typeof media === "object" && !Array.isArray(media) && Array.isArray((media as { images?: unknown }).images)
+      ? (media as { images: Array<{ id: string; fileName: string; mimeType: string; sizeBytes: number; isCover: boolean }> }).images
+      : [];
     return {
       id: row.id,
       tenantId: row.tenantId,
@@ -581,7 +586,8 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       inventoryMode: lower<RentalInventoryMode>(row.inventoryMode),
       unit: row.unit,
       description: row.description ?? undefined,
-      attributes: (row.attributes ?? {}) as Record<string, unknown>,
+      attributes,
+      images: storedImages.map((image) => ({ ...image, url: `/api/rental/v1/item-groups/${encodeURIComponent(row.id)}/images/${encodeURIComponent(image.id)}` })),
       bundleComponents,
       status: row.status as RentalItemGroup["status"],
       createdAt: iso(row.createdAt),

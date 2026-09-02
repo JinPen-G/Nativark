@@ -2285,6 +2285,18 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: "Update generic rental item group", permissions: ["rental-core:catalog:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
   },
   {
+    method: "post", path: "/api/rental/v1/item-groups/{id}/images", tag: "RentalCore", operationId: "uploadRentalItemGroupImage",
+    summary: "Upload an authenticated product-model image", permissions: ["rental-core:catalog:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+  },
+  {
+    method: "get", path: "/api/rental/v1/item-groups/{id}/images/{imageId}", tag: "RentalCore", operationId: "getRentalItemGroupImage",
+    summary: "Read an authenticated product-model image", permissions: ["rental-core:catalog:view"], responseSchema: "GenericObject"
+  },
+  {
+    method: "delete", path: "/api/rental/v1/item-groups/{id}/images/{imageId}", tag: "RentalCore", operationId: "deleteRentalItemGroupImage",
+    summary: "Delete a product-model image", permissions: ["rental-core:catalog:manage"], responseSchema: "GenericObject"
+  },
+  {
     method: "get", path: "/api/rental/v1/pricing-groups", tag: "RentalCore", operationId: "listRentalPricingGroups",
     summary: "List tenant-defined pricing groups and their product-model members", permissions: ["store-rental:price:manage", "store-rental:order:view", "store-rental:order:create"], responseSchema: "GenericObject"
   },

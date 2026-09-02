@@ -1,5 +1,6 @@
 import type {
   CreateRentalInspectionRequest,
+  ApiResult,
   CreateRentalOrderRequest,
   PartialReturnRentalOrderRequest,
   RentalAsset,
@@ -91,7 +92,7 @@ import type {
   TenantRentalProfile,
   SubstituteRentalBundleComponentRequest
 } from "@store-rental/shared";
-import { request, requestText } from "./http";
+import { http, request, requestText } from "./http";
 
 export const rentalCoreApi = {
   categories: () => request<RentalCategoryDefinition[]>("/rental/v1/categories"),
@@ -213,6 +214,17 @@ export const rentalCoreApi = {
   saveLocation: (data: SaveRentalFulfillmentLocationRequest) => request<RentalFulfillmentLocation>(data.id ? `/rental/v1/locations/${data.id}` : "/rental/v1/locations", { method: data.id ? "put" : "post", data }),
   itemGroups: () => request<RentalItemGroup[]>("/rental/v1/item-groups"),
   saveItemGroup: (data: SaveRentalItemGroupRequest) => request<RentalItemGroup>(data.id ? `/rental/v1/item-groups/${data.id}` : "/rental/v1/item-groups", { method: data.id ? "put" : "post", data }),
+  uploadItemGroupImage: async (id: string, file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    const response = await http.post<ApiResult<RentalItemGroup>>(`/rental/v1/item-groups/${id}/images`, form);
+    return response.data.data;
+  },
+  removeItemGroupImage: (id: string, imageId: string) => request<RentalItemGroup>(`/rental/v1/item-groups/${id}/images/${imageId}`, { method: "delete" }),
+  itemGroupImageBlob: async (id: string, imageId: string) => {
+    const response = await http.get<Blob>(`/rental/v1/item-groups/${id}/images/${imageId}`, { responseType: "blob" });
+    return response.data;
+  },
   pricingGroups: () => request<RentalPricingGroup[]>("/rental/v1/pricing-groups"),
   savePricingGroup: (data: SaveRentalPricingGroupRequest) => request<RentalPricingGroup>(data.id ? `/rental/v1/pricing-groups/${data.id}` : "/rental/v1/pricing-groups", { method: data.id ? "put" : "post", data }),
   assets: () => request<RentalAsset[]>("/rental/v1/assets"),

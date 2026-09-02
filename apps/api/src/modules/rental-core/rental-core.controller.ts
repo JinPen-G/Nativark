@@ -1,4 +1,5 @@
-import { BadRequestException, Body, ConflictException, Controller, ForbiddenException, Get, Param, Post, Put, Query, Req, Res } from "@nestjs/common";
+import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, Param, Post, Put, Query, Req, Res, UploadedFile, UseInterceptors } from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
 import { Prisma } from "@prisma/client";
 import { RentalCoreOrderStatus } from "@store-rental/shared";
 import { createHash } from "node:crypto";
@@ -72,6 +73,8 @@ function idempotencyKeyOf(req: { headers?: Record<string, unknown> }): string | 
 }
 
 interface AuthenticatedRequest { user: SystemUserRow; headers?: Record<string, unknown>; }
+interface UploadedImageFile { originalname: string; mimetype: string; size: number; buffer: Buffer; }
+interface BinaryResponse { setHeader(name: string, value: string): void; send(body: Buffer): void; }
 
 /**
  * CAM-01A：控制器内的权限判定，口径与 Guard 的 hasAnyPermission 一致。
@@ -208,6 +211,24 @@ export class RentalCoreController {
   @Get("item-groups") groups(@Req() req: AuthenticatedRequest) { return this.service.listItemGroups(req.user.tenantId); }
   @Post("item-groups") saveGroup(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalItemGroupDto) { return this.committed(req.user.tenantId, this.service.saveItemGroup(req.user.tenantId, body)); }
   @Put("item-groups/:id") updateGroup(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalItemGroupDto) { return this.committed(req.user.tenantId, this.service.saveItemGroup(req.user.tenantId, { ...body, id })); }
+  @Post("item-groups/:id/images")
+  @UseInterceptors(FileInterceptor("file", { limits: { fileSize: 5 * 1024 * 1024, files: 1 } }))
+  uploadItemGroupImage(@Req() req: AuthenticatedRequest, @Param("id") id: string, @UploadedFile() file?: UploadedImageFile) {
+    if (!file) throw new BadRequestException("请选择要上传的产品型号图片");
+    return this.committed(req.user.tenantId, this.service.addItemGroupImage(req.user.tenantId, id, file));
+  }
+  @Delete("item-groups/:id/images/:imageId")
+  removeItemGroupImage(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Param("imageId") imageId: string) {
+    return this.committed(req.user.tenantId, this.service.removeItemGroupImage(req.user.tenantId, id, imageId));
+  }
+  @Get("item-groups/:id/images/:imageId")
+  async itemGroupImage(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Param("imageId") imageId: string, @Res() res: BinaryResponse) {
+    const image = await this.service.readItemGroupImage(req.user.tenantId, id, imageId);
+    res.setHeader("Content-Type", image.mimeType);
+    res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(image.fileName)}`);
+    res.setHeader("Cache-Control", "private, max-age=300");
+    res.send(image.content);
+  }
   @Get("pricing-groups") pricingGroups(@Req() req: AuthenticatedRequest) { return this.service.listPricingGroups(req.user.tenantId); }
   @Post("pricing-groups") savePricingGroup(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalPricingGroupDto) { return this.committed(req.user.tenantId, this.service.savePricingGroup(req.user.tenantId, body)); }
   @Put("pricing-groups/:id") updatePricingGroup(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalPricingGroupDto) { return this.committed(req.user.tenantId, this.service.savePricingGroup(req.user.tenantId, { ...body, id })); }

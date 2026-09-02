@@ -1,13 +1,15 @@
-import { MinusCircleOutlined, PlusOutlined, SearchOutlined } from "@ant-design/icons";
+import { DeleteOutlined, MinusCircleOutlined, PlusOutlined, SearchOutlined, UploadOutlined } from "@ant-design/icons";
 import { RentalInventoryMode, type RentalAttributeDefinition, type RentalItemGroup, type SaveRentalItemGroupRequest } from "@store-rental/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Button, Card, Col, Drawer, Form, Input, InputNumber, Row, Select, Space, Switch, Table, Tag, Typography } from "antd";
+import { Alert, App, Button, Card, Col, Drawer, Empty, Form, Input, InputNumber, Row, Select, Space, Switch, Table, Tag, Typography, Upload } from "antd";
+import type { UploadFile } from "antd";
 import { useMemo, useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { resolveTenantNavigationLabels } from "@/app/navigation-terminology";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
+import { ItemGroupPhoto } from "./ItemGroupPhoto";
 
 const inventoryLabels: Record<string, string> = { serialized: "序列化资产", quantity: "数量库存", bundle: "套装" };
 
@@ -25,6 +27,7 @@ export function CatalogPage() {
   const [keyword, setKeyword] = useState("");
   const [editing, setEditing] = useState<RentalItemGroup>();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [pendingFiles, setPendingFiles] = useState<UploadFile[]>([]);
   const [form] = Form.useForm<SaveRentalItemGroupRequest>();
   const groups = useQuery({ queryKey: ["rental-core", "groups"], queryFn: rentalCoreApi.itemGroups });
   const pricingGroups = useQuery({ queryKey: ["rental-core", "pricing-groups"], queryFn: rentalCoreApi.pricingGroups });
@@ -38,20 +41,37 @@ export function CatalogPage() {
     .filter((field): field is RentalAttributeDefinition => Boolean(field));
   const itemGroupLabel = profile.data?.terminology.itemGroupLabel ?? "产品型号";
   const save = useMutation({
-    mutationFn: rentalCoreApi.saveItemGroup,
+    mutationFn: async (values: SaveRentalItemGroupRequest) => {
+      let group = await rentalCoreApi.saveItemGroup(values);
+      for (const file of pendingFiles) {
+        if (file.originFileObj) group = await rentalCoreApi.uploadItemGroupImage(group.id, file.originFileObj);
+      }
+      return group;
+    },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["rental-core", "groups"] });
       setDrawerOpen(false);
       setEditing(undefined);
       form.resetFields();
+      setPendingFiles([]);
       message.success(`${profile.data?.terminology.itemGroupLabel ?? "商品"}已保存`);
     },
     onError: () => message.error("保存失败，请检查编码、库存模式、品类字段和套装组成")
+  });
+  const removeImage = useMutation({
+    mutationFn: ({ groupId, imageId }: { groupId: string; imageId: string }) => rentalCoreApi.removeItemGroupImage(groupId, imageId),
+    onSuccess: async (group) => {
+      await queryClient.invalidateQueries({ queryKey: ["rental-core", "groups"] });
+      setEditing(group);
+      message.success("照片已删除");
+    },
+    onError: () => message.error("照片删除失败")
   });
   const rows = useMemo(() => (groups.data ?? []).filter((item) => `${item.code}${item.name}${Object.values(item.attributes).join("")}`.toLowerCase().includes(keyword.toLowerCase())), [groups.data, keyword]);
 
   function openEditor(record?: RentalItemGroup) {
     setEditing(record);
+    setPendingFiles([]);
     form.setFieldsValue(record ?? {
       code: "",
       name: "",
@@ -73,6 +93,7 @@ export function CatalogPage() {
         <Space style={{ marginBottom: 16 }}><Input allowClear prefix={<SearchOutlined />} placeholder="搜索编码、名称或规格" value={keyword} onChange={(event) => setKeyword(event.target.value)} style={{ width: 300 }} /></Space>
         <QueryState loading={groups.isLoading || pricingGroups.isLoading || profile.isLoading || categories.isLoading} error={groups.error || pricingGroups.error || profile.error || categories.error}>
           <Table<RentalItemGroup> rowKey="id" dataSource={rows} scroll={{ x: 960 }} columns={[
+            { title: "照片", width: 82, render: (_, row) => row.images?.[0] ? <ItemGroupPhoto groupId={row.id} image={row.images.find((image) => image.isCover) ?? row.images[0]} /> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={false} styles={{ image: { height: 36 } }} /> },
             { title: itemGroupLabel, fixed: "left", render: (_, row) => <><b>{row.name}</b><br /><span className="muted">{row.code}</span></> },
             ...summaryFields.map((field) => ({ title: field.label, render: (_: unknown, row: RentalItemGroup) => String(row.attributes[field.code] ?? "-") })),
             { title: resolveTenantNavigationLabels(profile.data?.terminology).routes.pricingGroups ?? "所属定价分组", render: (_, row) => {
@@ -90,6 +111,26 @@ export function CatalogPage() {
 
       <Drawer title={editing ? `编辑${itemGroupLabel}` : `新增${itemGroupLabel}`} size={760} open={drawerOpen} destroyOnHidden onClose={() => setDrawerOpen(false)} extra={<Button type="primary" loading={save.isPending} onClick={() => form.submit()}>保存</Button>}>
         <Form<SaveRentalItemGroupRequest> form={form} layout="vertical" onFinish={(values) => save.mutate({ ...values, inventoryMode: presentation?.fixedInventoryMode ?? values.inventoryMode, unit: presentation?.fixedUnit ?? values.unit, id: editing?.id })}>
+          <Card size="small" title={`${itemGroupLabel}照片`} style={{ marginBottom: 16 }}>
+            <Typography.Paragraph type="secondary">上传厂牌车型或产品型号的标准展示图，第一张作为列表封面；具体车辆的实车、车况和损伤照片仍在车辆管理中维护。</Typography.Paragraph>
+            {editing?.images?.length ? <Space size={[12, 12]} wrap style={{ marginBottom: 12 }}>{editing.images.map((image) => <div key={image.id} style={{ position: "relative" }}><ItemGroupPhoto groupId={editing.id} image={image} size={112} />{image.isCover && <Tag color="blue" style={{ position: "absolute", left: 6, top: 6 }}>封面</Tag>}<Button danger size="small" shape="circle" icon={<DeleteOutlined />} loading={removeImage.isPending} onClick={() => removeImage.mutate({ groupId: editing.id, imageId: image.id })} style={{ position: "absolute", right: 6, top: 6 }} /></div>)}</Space> : null}
+            <Upload
+              accept="image/jpeg,image/png,image/webp"
+              multiple
+              listType="picture"
+              fileList={pendingFiles}
+              maxCount={Math.max(0, 6 - (editing?.images?.length ?? 0))}
+              beforeUpload={(file) => {
+                if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) { message.error("只支持 JPG、PNG 或 WebP 图片"); return Upload.LIST_IGNORE; }
+                if (file.size > 5 * 1024 * 1024) { message.error("单张图片不能超过 5MB"); return Upload.LIST_IGNORE; }
+                return false;
+              }}
+              onChange={({ fileList }) => setPendingFiles(fileList)}
+            >
+              {(editing?.images?.length ?? 0) + pendingFiles.length < 6 && <Button icon={<UploadOutlined />}>选择照片</Button>}
+            </Upload>
+            {pendingFiles.length > 0 && <Typography.Text type="secondary">所选照片将在点击右上角“保存”后上传。</Typography.Text>}
+          </Card>
           <Card size="small" title="型号基本资料" style={{ marginBottom: 16 }}>
           <Row gutter={12}>
             <Col span={12}><Form.Item name="code" label={presentation?.itemGroupCodeLabel ?? `${itemGroupLabel}编码`} rules={[{ required: true }]}><Input disabled={Boolean(editing)} placeholder="用于内部检索和接口引用" /></Form.Item></Col>

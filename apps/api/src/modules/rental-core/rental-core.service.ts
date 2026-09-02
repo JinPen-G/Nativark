@@ -1,5 +1,7 @@
 import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException, OnApplicationBootstrap, OnModuleInit, Optional } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { dirname, resolve, sep } from "node:path";
 import { CapabilityHookRuntime } from "./capability-hook.runtime";
 import type { CapabilityHookSubjectType } from "./capability-hook.repository";
 import { WorkspaceCapabilityService } from "./workspace-capability.service";
@@ -35,6 +37,7 @@ import {
   type RentalInspectionRecord,
   type RentalInspectionTemplate,
   type RentalItemGroup,
+  type RentalItemGroupImage,
   type RentalPricingGroup,
   type RentalOrder,
   type RentalQuoteSnapshotV1,
@@ -95,6 +98,19 @@ interface TenantRentalState {
   /** 该租户的配置是否已确认落库。initializeTenant 会置为 true；懒加载路径为 false。 */
   configPersisted?: boolean;
 }
+
+type StoredItemGroupImage = Omit<RentalItemGroupImage, "url">;
+
+interface UploadedItemGroupImage {
+  originalname: string;
+  mimetype: string;
+  size: number;
+  buffer: Buffer;
+}
+
+const ITEM_GROUP_MEDIA_KEY = "__itemGroupMedia";
+const ITEM_GROUP_IMAGE_LIMIT = 6;
+const ITEM_GROUP_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 
 /** 一次取齐的库存事实，供同步的可用量计算使用。 */
 interface InventorySnapshot {
@@ -699,7 +715,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (existing) state.locations.splice(state.locations.indexOf(existing), 1, result); else state.locations.unshift(result);
     return result;
   }
-  listItemGroups(tenantId: string) { return this.state(tenantId).itemGroups; }
+  listItemGroups(tenantId: string) { return this.state(tenantId).itemGroups.map((group) => this.publicItemGroup(group)); }
 
   listPricingGroups(tenantId: string) { return this.state(tenantId).pricingGroups; }
 
@@ -766,10 +782,13 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const timestamp = now();
     const existing = input.id ? state.itemGroups.find((row) => row.id === input.id) : undefined;
     if (input.id && !existing) throw new NotFoundException("标的分组不存在");
+    const media = existing?.attributes[ITEM_GROUP_MEDIA_KEY];
     const result: RentalItemGroup = {
       id: existing?.id ?? id("group"), tenantId, categoryCode: state.profile.categoryCode,
       code: input.code.trim(), name: input.name.trim(), inventoryMode: input.inventoryMode,
-      unit: input.unit?.trim() || "件", description: input.description?.trim(), attributes: input.attributes ?? {},
+      unit: input.unit?.trim() || "件", description: input.description?.trim(),
+      attributes: { ...(input.attributes ?? {}), ...(media ? { [ITEM_GROUP_MEDIA_KEY]: media } : {}) },
+      images: existing?.images ?? [],
       bundleComponents: components, status: input.status ?? existing?.status ?? "enabled",
       createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp
     };
@@ -790,7 +809,66 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
             : member)
         }
       : pricingGroup);
-    return result;
+    return this.publicItemGroup(result);
+  }
+
+  async addItemGroupImage(tenantId: string, itemGroupId: string, file: UploadedItemGroupImage) {
+    const state = this.state(tenantId);
+    const group = this.group(state, itemGroupId);
+    const mimeExtensions: Record<string, string> = {
+      "image/jpeg": "jpg",
+      "image/png": "png",
+      "image/webp": "webp"
+    };
+    const extension = mimeExtensions[file.mimetype];
+    if (!extension) throw new BadRequestException("只支持 JPG、PNG 或 WebP 图片");
+    if (!file.buffer?.length || file.size <= 0) throw new BadRequestException("图片文件为空");
+    if (file.size > ITEM_GROUP_IMAGE_MAX_BYTES || file.buffer.length > ITEM_GROUP_IMAGE_MAX_BYTES) throw new BadRequestException("单张图片不能超过 5MB");
+    if (!this.matchesImageSignature(file.mimetype, file.buffer)) throw new BadRequestException("图片内容与文件格式不一致");
+    const current = this.storedItemGroupImages(group);
+    if (current.length >= ITEM_GROUP_IMAGE_LIMIT) throw new BadRequestException(`每个产品型号最多上传 ${ITEM_GROUP_IMAGE_LIMIT} 张图片`);
+
+    const imageId = `img_${randomUUID().replace(/-/g, "")}`;
+    const nextImage: StoredItemGroupImage = {
+      id: imageId,
+      fileName: file.originalname.slice(0, 180),
+      mimeType: file.mimetype,
+      sizeBytes: file.buffer.length,
+      isCover: current.length === 0
+    };
+    const absolutePath = this.itemGroupImagePath(group, nextImage);
+    await mkdir(dirname(absolutePath), { recursive: true });
+    await writeFile(absolutePath, file.buffer);
+    const next: StoredItemGroupImage[] = [...current, nextImage];
+    try {
+      await this.persistItemGroupImages(group, next);
+    } catch (error) {
+      await rm(absolutePath, { force: true });
+      throw error;
+    }
+    return this.publicItemGroup(group);
+  }
+
+  async removeItemGroupImage(tenantId: string, itemGroupId: string, imageId: string) {
+    const group = this.group(this.state(tenantId), itemGroupId);
+    const current = this.storedItemGroupImages(group);
+    const target = current.find((image) => image.id === imageId);
+    if (!target) throw new NotFoundException("产品型号图片不存在");
+    const remaining = current.filter((image) => image.id !== imageId).map((image, index) => ({ ...image, isCover: index === 0 }));
+    await this.persistItemGroupImages(group, remaining);
+    await rm(this.itemGroupImagePath(group, target), { force: true });
+    return this.publicItemGroup(group);
+  }
+
+  async readItemGroupImage(tenantId: string, itemGroupId: string, imageId: string) {
+    const group = this.group(this.state(tenantId), itemGroupId);
+    const image = this.storedItemGroupImages(group).find((item) => item.id === imageId);
+    if (!image) throw new NotFoundException("产品型号图片不存在");
+    try {
+      return { content: await readFile(this.itemGroupImagePath(group, image)), mimeType: image.mimeType, fileName: image.fileName };
+    } catch {
+      throw new NotFoundException("产品型号图片文件不存在，请重新上传");
+    }
   }
 
   async listAssets(tenantId: string) {
@@ -1992,6 +2070,88 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       sampleAssets: samples.assets,
       sampleStockBalances: samples.stockBalances
     };
+  }
+
+  private storedItemGroupImages(group: RentalItemGroup): StoredItemGroupImage[] {
+    const media = group.attributes[ITEM_GROUP_MEDIA_KEY];
+    if (!media || typeof media !== "object" || Array.isArray(media)) return [];
+    const images = (media as { images?: unknown }).images;
+    if (!Array.isArray(images)) return [];
+    return images.filter((image): image is StoredItemGroupImage => Boolean(
+      image && typeof image === "object" &&
+      typeof (image as StoredItemGroupImage).id === "string" &&
+      typeof (image as StoredItemGroupImage).fileName === "string" &&
+      typeof (image as StoredItemGroupImage).mimeType === "string" &&
+      typeof (image as StoredItemGroupImage).sizeBytes === "number"
+    ));
+  }
+
+  private publicItemGroupImages(group: RentalItemGroup, images = this.storedItemGroupImages(group)): RentalItemGroupImage[] {
+    return images.map((image) => ({
+      ...image,
+      url: `/api/rental/v1/item-groups/${encodeURIComponent(group.id)}/images/${encodeURIComponent(image.id)}`
+    }));
+  }
+
+  private publicItemGroup(group: RentalItemGroup): RentalItemGroup {
+    const { [ITEM_GROUP_MEDIA_KEY]: _media, ...attributes } = group.attributes;
+    return {
+      ...group,
+      attributes,
+      images: this.publicItemGroupImages(group)
+    };
+  }
+
+  private async persistItemGroupImages(group: RentalItemGroup, images: StoredItemGroupImage[]) {
+    group.attributes = { ...group.attributes, [ITEM_GROUP_MEDIA_KEY]: { images } };
+    group.images = this.publicItemGroupImages(group, images);
+    group.updatedAt = now();
+    await this.configStore.upsertItemGroup(group);
+  }
+
+  private itemGroupUploadRoot() {
+    return resolve(process.env.RENTAL_UPLOAD_DIR ?? resolve(process.cwd(), "var", "uploads"));
+  }
+
+  private itemGroupImagePath(group: RentalItemGroup, image: StoredItemGroupImage) {
+    const mimeExtensions: Record<string, string> = {
+      "image/jpeg": "jpg",
+      "image/png": "png",
+      "image/webp": "webp"
+    };
+    const extension = mimeExtensions[image.mimeType];
+    if (!extension) throw new BadRequestException("不支持的产品型号图片格式");
+    const workspaceId = getRequestWorkspaceId() ?? "memory";
+    const storageKey = [
+      this.safePathSegment(group.tenantId),
+      this.safePathSegment(workspaceId),
+      "item-groups",
+      this.safePathSegment(group.id),
+      `${this.safePathSegment(image.id)}.${extension}`
+    ].join("/");
+    return this.itemGroupUploadPath(storageKey);
+  }
+
+  private matchesImageSignature(mimeType: string, content: Buffer) {
+    if (mimeType === "image/jpeg") return content.length >= 3 && content[0] === 0xff && content[1] === 0xd8 && content[2] === 0xff;
+    if (mimeType === "image/png") return content.length >= 8 && content.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    if (mimeType === "image/webp") return content.length >= 12 && content.subarray(0, 4).toString("ascii") === "RIFF" && content.subarray(8, 12).toString("ascii") === "WEBP";
+    return false;
+  }
+
+  private itemGroupUploadPath(storageKey: string) {
+    const root = this.itemGroupUploadRoot();
+    const target = resolve(root, ...storageKey.split("/"));
+    if (target !== root && !target.startsWith(`${root}${sep}`)) {
+      throw new BadRequestException("非法的图片存储路径");
+    }
+    return target;
+  }
+
+  private safePathSegment(value: string) {
+    const safe = value.replace(/[^a-zA-Z0-9_-]/g, "_");
+    if (!safe) throw new BadRequestException("非法的图片归属标识");
+    return safe;
   }
 
   private defaultPricingGroup(group: RentalItemGroup, sampleName?: string): RentalPricingGroup {
