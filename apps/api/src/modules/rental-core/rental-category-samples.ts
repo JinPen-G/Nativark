@@ -20,6 +20,8 @@ interface RentalCategorySampleCatalog {
   itemGroups: RentalItemGroup[];
   assets: RentalAsset[];
   stockBalances: RentalStockBalance[];
+  /** 演示用商业分组名称；产品型号名称不得再次承担“车组/器材组”语义。 */
+  pricingGroupNames?: Record<string, string>;
 }
 
 type RentalCategorySampleFactory = (input: RentalCategorySampleInput) => RentalCategorySampleCatalog;
@@ -115,11 +117,11 @@ const campingSamples: RentalCategorySampleFactory = (input) => {
 };
 
 const vehicleSamples: RentalCategorySampleFactory = (input) => {
-  const sedan = itemGroup(input, "VEH-SEDAN", "标准轿车", RentalInventoryMode.Serialized, "辆", {
-    manufacturer: "上汽集团", brand: "荣威", model: "D7", trim: "标准版", energyType: "混动"
+  const sedan = itemGroup(input, "VEH-ROEWE-D7", "荣威 D7 标准版", RentalInventoryMode.Serialized, "辆", {
+    manufacturer: "上汽集团", brand: "荣威", model: "D7", trim: "标准版", modelYear: 2026, seats: 5, transmission: "自动", energyType: "混动"
   });
-  const suv = itemGroup(input, "VEH-SUV", "城市 SUV", RentalInventoryMode.Serialized, "辆", {
-    manufacturer: "吉利汽车", brand: "领克", model: "08", trim: "Pro", energyType: "混动"
+  const suv = itemGroup(input, "VEH-LYNK-08", "领克 08 Pro", RentalInventoryMode.Serialized, "辆", {
+    manufacturer: "吉利汽车", brand: "领克", model: "08", trim: "Pro", modelYear: 2026, seats: 5, transmission: "自动", energyType: "混动"
   });
   const assets = [sedan, suv].flatMap((group, groupIndex) => Array.from({ length: 2 }, (_, index) => {
     const sequence = groupIndex * 2 + index + 1;
@@ -133,12 +135,17 @@ const vehicleSamples: RentalCategorySampleFactory = (input) => {
       locationId: input.location.id,
       locationName: input.location.name,
       status: RentalAssetStatus.Available,
-      attributes: { licensePlate: `粤B·R${String(sequence).padStart(4, "0")}`, vin: `LDEMO2026VEH${String(sequence).padStart(4, "0")}` },
+      attributes: { licensePlate: `粤B·R${String(sequence).padStart(4, "0")}`, vin: `LDEMO2026VEH${String(sequence).padStart(4, "0")}`, color: index === 0 ? "白色" : "黑色", firstRegistrationDate: "2026-01-15" },
       createdAt: input.timestamp,
       updatedAt: input.timestamp
     };
   }));
-  return { itemGroups: [sedan, suv], assets, stockBalances: [] };
+  return {
+    itemGroups: [sedan, suv],
+    assets,
+    stockBalances: [],
+    pricingGroupNames: { [sedan.id]: "标准轿车组", [suv.id]: "城市 SUV 组" }
+  };
 };
 
 const constructionSamples: RentalCategorySampleFactory = (input) => {

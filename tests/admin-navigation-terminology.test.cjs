@@ -52,7 +52,7 @@ void (() => {
   const expectedByCode = {
     camera: { groups: { inventory: "摄影器材" }, routes: { itemGroups: "器材型号", pricingGroups: "器材定价分组", assets: "器材资产与库存", locations: "器材门店" } },
     camping: { groups: { inventory: "户外装备" }, routes: { itemGroups: "装备型号", pricingGroups: "装备定价分组", assets: "装备资产与库存", locations: "装备仓库" } },
-    vehicle: { groups: { inventory: "车辆型号与车队" }, routes: { itemGroups: "车辆型号管理", pricingGroups: "车组管理", assets: "车辆管理", locations: "门店管理" } },
+    vehicle: { groups: { inventory: "车辆型号与车队" }, routes: { itemGroups: "厂牌车型管理", pricingGroups: "车组管理", assets: "车辆管理", locations: "门店管理" } },
     construction: { groups: { inventory: "工程设备" }, routes: { itemGroups: "设备型号", pricingGroups: "设备定价分组", assets: "设备台账与库存", locations: "设备仓库" } }
   };
   for (const [code, expected] of Object.entries(expectedByCode)) {
@@ -70,7 +70,7 @@ void (() => {
 
   // ============ 2. 车辆空间必须区分 车辆型号 / 车组 / 车辆 / 车队 / 门店 ============
   const vehicle = resolveTenantNavigationLabels(byCode("vehicle").terminology);
-  assert.equal(vehicle.routes.itemGroups, "车辆型号管理", "车辆空间的目录菜单应为车辆型号管理");
+  assert.equal(vehicle.routes.itemGroups, "厂牌车型管理", "车辆空间的目录菜单应明确这是厂商车型主档");
   assert.equal(vehicle.routes.pricingGroups, "车组管理", "车辆空间的定价分组菜单应为车组管理");
   assert.equal(vehicle.routes.assets, "车辆管理", "车辆空间的资产菜单应为车辆管理");
   assert.equal(vehicle.routes.locations, "门店管理", "车辆空间的履约地点应为门店管理");
@@ -120,7 +120,7 @@ void (() => {
   const applied = applyTenantNavigationLabels(registry, byCode("vehicle").terminology, PATHS);
   const inventory = applied.find((section) => section.key === "inventory");
   assert.equal(inventory.label, "车辆型号与车队", "分组文案必须被套用");
-  assert.equal(inventory.routes.find((r) => r.path === PATHS.itemGroups).label, "车辆型号管理", "目录菜单文案必须被套用");
+  assert.equal(inventory.routes.find((r) => r.path === PATHS.itemGroups).label, "厂牌车型管理", "目录菜单文案必须被套用");
   assert.equal(inventory.routes.find((r) => r.path === PATHS.pricingGroups).label, "车组管理", "定价分组菜单文案必须被套用");
   assert.equal(inventory.routes.find((r) => r.path === PATHS.assets).label, "车辆管理", "资产菜单文案必须被套用");
   assert.equal(inventory.routes.find((r) => r.path === PATHS.locations).label, "门店管理", "履约地点文案必须被套用");
@@ -213,8 +213,12 @@ void (() => {
     "资产页标题必须与菜单同源解析，并保留固定回落"
   );
   const catalogPage = read("apps/admin/src/features/catalog/CatalogPage.tsx");
+  const pricingGroupPage = read("apps/admin/src/features/commercial/PricingGroupPage.tsx");
   const locationPage = read("apps/admin/src/features/fulfillment/LocationPage.tsx");
   assert.match(catalogPage, /resolveTenantNavigationLabels\(profile\.data\?\.terminology\)\.routes\.itemGroups/u, "商品目录页标题必须与菜单使用同一解析结果");
+  assert.match(catalogPage, /pricingGroup\.memberItemGroupIds\.includes\(row\.id\)/u, "产品型号页必须反向显示所属的全部定价分组");
+  assert.match(pricingGroupPage, /row\.members\.length[\s\S]{0,180}member\.name[\s\S]{0,80}member\.code/u, "定价分组页必须显示包含的型号名称和编码");
+  assert.doesNotMatch(catalogPage, /category(Code)?\s*===?\s*["']vehicle["']/u, "品类主档页面不得通过 vehicle 硬编码分支实现展示差异");
   assert.match(locationPage, /resolveTenantNavigationLabels\(profile\.data\?\.terminology\)\.routes\.locations/u, "履约地点页标题必须与菜单使用同一解析结果");
   const coreService = read("apps/api/src/modules/rental-core/rental-core.service.ts");
   assert.match(coreService, /navigationLabels:[\s\S]{0,180}defaults\.navigationLabels[\s\S]{0,180}profile\.terminology\.navigationLabels/u,

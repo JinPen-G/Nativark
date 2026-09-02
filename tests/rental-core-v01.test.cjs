@@ -83,6 +83,10 @@ assert.equal(rentalPricingStrategy("usage").amountPerItem({ baseAmount: 50, incl
 assert.ok(categories.every((category) => category.businessModel.assetFields.length > 0));
 assert.ok(categories.find((category) => category.code === "camera").businessModel.assetFields.some((field) => field.code === "serialNo" && field.unique));
 assert.ok(categories.find((category) => category.code === "vehicle").businessModel.assetFields.filter((field) => ["licensePlate", "vin"].includes(field.code)).every((field) => field.unique));
+const vehicleDefinition = categories.find((category) => category.code === "vehicle");
+assert.deepEqual(vehicleDefinition.supportedInventoryModes, [RentalInventoryMode.Serialized], "车辆型号首期只能登记序列化单车，车组应使用独立定价分组");
+assert.equal(vehicleDefinition.businessModel.catalogPresentation.fixedUnit, "辆");
+assert.deepEqual(vehicleDefinition.businessModel.catalogPresentation.assetSummaryFields, ["licensePlate", "vin", "color"]);
 assert.deepEqual(
   Object.fromEntries(categories.map((category) => [category.code, [category.businessModel.defaults.sampleBaseAmount, category.businessModel.defaults.sampleAmountIncrement]])),
   { camera: [180, 80], camping: [80, 20], vehicle: [380, 100], construction: [680, 180] },
@@ -96,6 +100,17 @@ assert.ok(service.listItemGroups(campingTenant).some((group) => group.code === "
 assert.ok(service.listItemGroups(campingTenant).every((group) => !group.code.startsWith("CAM-")));
 assert.equal(service.listItemGroups(cameraTenant).find((group) => group.code === "CAM-BODY").attributes.model, "Alpha 7 IV");
 assert.equal(service.listItemGroups(campingTenant).find((group) => group.code === "CAMP-TENT").attributes.brand, "Naturehike");
+
+const vehicleConfigStore = createAbsorbingConfigStore();
+vehicleConfigStore.listWorkspaces = () => Promise.resolve([
+  { id: "ws_vehicle_sample", tenantId: cameraTenant, categoryCode: "vehicle", isDefault: true }
+]);
+const vehicleSampleService = new RentalCoreService(vehicleConfigStore, createAbsorbingFactStore());
+await vehicleSampleService.onApplicationBootstrap();
+const vehicleModels = vehicleSampleService.listItemGroups(cameraTenant);
+assert.deepEqual(vehicleModels.map((group) => group.name), ["荣威 D7 标准版", "领克 08 Pro"], "车辆样本必须是厂商车型，不得使用商业车组名称");
+assert.deepEqual(vehicleSampleService.listPricingGroups(cameraTenant).map((group) => group.name), ["标准轿车组", "城市 SUV 组"], "商业车组名称只保存在定价分组");
+assert.ok(vehicleModels.every((group) => group.inventoryMode === RentalInventoryMode.Serialized && group.unit === "辆"));
 
 const cameraSettings = service.getBusinessSettings(cameraTenant);
 assert.equal(cameraSettings.categoryCode, "camera");

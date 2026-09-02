@@ -74,7 +74,7 @@ export function PricingGroupPage() {
       <QueryState loading={pricingGroups.isLoading || models.isLoading} error={pricingGroups.error || models.error}>
         <Table<RentalPricingGroup> rowKey="id" dataSource={rows} columns={[
           { title: "定价分组", render: (_, row) => <><b>{row.name}</b><br /><span className="muted">{row.code} · v{row.version}</span></> },
-          { title: "包含型号", render: (_, row) => <Space size={[4, 4]} wrap>{row.members.map((member) => <Tag key={member.id}>{member.name}</Tag>)}</Space> },
+          { title: `包含的${profile.data?.terminology.itemGroupLabel ?? "产品型号"}`, render: (_, row) => <Space size={[4, 4]} wrap>{row.members.length ? row.members.map((member) => <Tag color="blue" key={member.id}>{member.name} · {member.code}</Tag>) : <Tag>未配置</Tag>}</Space> },
           { title: "默认计价", render: (_, row) => row.defaultPricingUnit ? RENTAL_PRICING_UNIT_LABELS[row.defaultPricingUnit] : "跟随价格配置" },
           { title: "状态", dataIndex: "status", render: (value) => <Tag color={value === "enabled" ? "success" : "default"}>{value === "enabled" ? "启用" : "停用"}</Tag> },
           { title: "操作", width: 100, render: (_, row) => <Button type="link" icon={<EditOutlined />} onClick={() => edit(row)}>编辑</Button> }
@@ -86,7 +86,11 @@ export function PricingGroupPage() {
         <Form.Item name="code" label="分组编码" rules={[{ required: true }]}><Input disabled={Boolean(editing)} placeholder="COMFORT_SEDAN" /></Form.Item>
         <Form.Item name="name" label="分组名称" rules={[{ required: true }]}><Input placeholder="舒适轿车组" /></Form.Item>
         <Form.Item name="memberItemGroupIds" label={`包含的${profile.data?.terminology.itemGroupLabel ?? "产品型号"}`} rules={[{ required: true, type: "array", min: 1 }]} extra="同一型号可以加入多个定价分组；库存不会因此复制。">
-          <Select mode="multiple" showSearch={{ optionFilterProp: "label" }} options={(models.data ?? []).filter((item) => item.status === "enabled").map((item) => ({ value: item.id, label: `${item.code} · ${item.name}` }))} />
+          <Select mode="multiple" showSearch={{ optionFilterProp: "label" }} optionRender={(option) => {
+            const model = (models.data ?? []).find((item) => item.id === option.value);
+            const specification = model ? [model.attributes.manufacturer, model.attributes.brand, model.attributes.model, model.attributes.trim].filter(Boolean).join(" · ") : "";
+            return <Space orientation="vertical" size={0}><span>{option.label}</span>{specification && <span className="muted">{specification}</span>}</Space>;
+          }} options={(models.data ?? []).filter((item) => item.status === "enabled").map((item) => ({ value: item.id, label: `${item.name} · ${item.code}` }))} />
         </Form.Item>
         <Form.Item name="defaultPricingUnit" label="默认计价单位"><Select allowClear options={(settings.data?.pricing.enabledUnits ?? []).map((value) => ({ value, label: RENTAL_PRICING_UNIT_LABELS[value] ?? value }))} /></Form.Item>
         <Form.Item name="description" label="说明"><Input.TextArea rows={3} /></Form.Item>

@@ -4481,6 +4481,22 @@ export interface RentalCategoryBusinessModel {
   locationTypes: RentalLocationType[];
   settingModules: RentalSettingModule[];
   assetFields: RentalAttributeDefinition[];
+  /**
+   * 品类主档在通用管理页面中的展示约定。这里只描述文案、固定事实和摘要字段，
+   * 不改变 Rental Core 的产品型号、资产或库存结构；新增品类可以通过定义扩展，
+   * 无需在 React 页面散落 categoryCode 判断。
+   */
+  catalogPresentation?: {
+    itemGroupDescription?: string;
+    itemGroupCodeLabel?: string;
+    itemGroupNameLabel?: string;
+    itemGroupNamePlaceholder?: string;
+    fixedInventoryMode?: RentalInventoryMode;
+    fixedUnit?: string;
+    itemGroupSummaryFields?: string[];
+    assetDescription?: string;
+    assetSummaryFields?: string[];
+  };
   supportsHolidayPricing: boolean;
   supportsUsagePricing: boolean;
   supportsPreauthorization: boolean;
@@ -7514,11 +7530,11 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     code: RentalCategoryCode.Vehicle,
     name: "车辆载具",
     description: "汽车、摩托车和其他载具租赁",
-    supportedInventoryModes: [RentalInventoryMode.Serialized, RentalInventoryMode.Bundle],
-    defaultCapabilities: ["serialized_inventory", "bundle_inventory", "pickup", "return", "dispatch", "usage_reading", "qualification", "iot", "inspection_care", "vehicle_relocation"],
-    requiredCapabilities: ["serialized_inventory", "bundle_inventory", "pickup", "return", "dispatch", "usage_reading", "qualification", "inspection_care", "vehicle_relocation"],
-    terminology: { itemLabel: "车辆", itemGroupLabel: "车辆型号", assetLabel: "车辆", fulfillmentLabel: "门店", pickupLabel: "取车", returnLabel: "还车", identifierLabel: "车辆编号", usageMetricLabel: "里程", assetCollectionLabel: "车队", navigationLabels: { inventoryGroup: "车辆型号与车队", itemGroups: "车辆型号管理", pricingGroups: "车组管理", assets: "车辆管理", locations: "门店管理" } },
-    attributeSchema: { manufacturer: "string", brand: "string", model: "string", trim: "string", energyType: "string", licensePlate: "string", vin: "string", mileage: "number" },
+    supportedInventoryModes: [RentalInventoryMode.Serialized],
+    defaultCapabilities: ["serialized_inventory", "pickup", "return", "dispatch", "usage_reading", "qualification", "iot", "inspection_care", "vehicle_relocation"],
+    requiredCapabilities: ["serialized_inventory", "pickup", "return", "dispatch", "usage_reading", "qualification", "inspection_care", "vehicle_relocation"],
+    terminology: { itemLabel: "车辆", itemGroupLabel: "车辆型号", assetLabel: "车辆", fulfillmentLabel: "门店", pickupLabel: "取车", returnLabel: "还车", identifierLabel: "车辆编号", usageMetricLabel: "里程", assetCollectionLabel: "车队", navigationLabels: { inventoryGroup: "车辆型号与车队", itemGroups: "厂牌车型管理", pricingGroups: "车组管理", assets: "车辆管理", locations: "门店管理" } },
+    attributeSchema: { manufacturer: "string", brand: "string", model: "string", trim: "string", modelYear: "number", seats: "number", transmission: "string", energyType: "string", licensePlate: "string", vin: "string", color: "string", firstRegistrationDate: "date", mileage: "number" },
     businessModel: {
       pricingUnits: ["hour", "day_24h", "calendar_day", "week", "month", "usage", "package"],
       defaultPricingUnit: "day_24h",
@@ -7528,14 +7544,30 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
       assetFields: [
         { code: "manufacturer", label: "制造商", scope: "item_group", type: "string", required: true },
         { code: "brand", label: "品牌", scope: "item_group", type: "string", required: true },
-        { code: "model", label: "车系", scope: "item_group", type: "string", required: true },
-        { code: "trim", label: "款型", scope: "item_group", type: "string" },
+        { code: "model", label: "车系 / 车型", scope: "item_group", type: "string", required: true },
+        { code: "trim", label: "具体款型", scope: "item_group", type: "string" },
+        { code: "modelYear", label: "年款", scope: "item_group", type: "number" },
+        { code: "seats", label: "座位数", scope: "item_group", type: "number", unit: "座" },
+        { code: "transmission", label: "变速方式", scope: "item_group", type: "select", options: ["自动", "手动", "其他"] },
         { code: "energyType", label: "能源类型", scope: "item_group", type: "select", options: ["燃油", "纯电", "混动", "其他"] },
         { code: "licensePlate", label: "车牌号", scope: "asset", type: "string", required: true, unique: true },
-        { code: "vin", label: "VIN", scope: "asset", type: "string", required: true, unique: true },
+        { code: "vin", label: "VIN（车辆识别代号）", scope: "asset", type: "string", required: true, unique: true },
+        { code: "color", label: "车身颜色", scope: "asset", type: "string" },
+        { code: "firstRegistrationDate", label: "首次登记日期", scope: "asset", type: "date" },
         { code: "mileage", label: "里程", scope: "transaction", type: "number", unit: "km" },
         { code: "energyLevel", label: "油量/电量", scope: "transaction", type: "number", unit: "%" }
       ],
+      catalogPresentation: {
+        itemGroupDescription: "维护厂商发布的车辆型号主档，例如宝马 3 系 325Li、奔驰 C 级 C260L。舒适轿车组、城市 SUV 组属于车组管理，不在这里建立。",
+        itemGroupCodeLabel: "型号编码",
+        itemGroupNameLabel: "车型显示名称",
+        itemGroupNamePlaceholder: "如：荣威 D7 标准版",
+        fixedInventoryMode: RentalInventoryMode.Serialized,
+        fixedUnit: "辆",
+        itemGroupSummaryFields: ["manufacturer", "brand", "model", "trim", "modelYear", "energyType"],
+        assetDescription: "每条记录代表一辆具体车辆。先选择车辆型号，再登记车辆编号、车牌、VIN、所在门店和当前状态。",
+        assetSummaryFields: ["licensePlate", "vin", "color"]
+      },
       supportsHolidayPricing: true,
       supportsUsagePricing: true,
       supportsPreauthorization: true,
@@ -7556,7 +7588,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
         sampleAmountIncrement: 100
       }
     },
-    version: "0.3.0"
+    version: "0.4.0"
   },
   {
     code: RentalCategoryCode.Construction,

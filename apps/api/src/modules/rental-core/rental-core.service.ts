@@ -1987,20 +1987,20 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       operators: isSampleTenant ? [operator] : [],
       locations: isSampleTenant ? [location] : [],
       itemGroups: samples.itemGroups,
-      pricingGroups: samples.itemGroups.map((group) => this.defaultPricingGroup(group)),
+      pricingGroups: samples.itemGroups.map((group) => this.defaultPricingGroup(group, samples.pricingGroupNames?.[group.id])),
       inspectionTemplates: templates,
       sampleAssets: samples.assets,
       sampleStockBalances: samples.stockBalances
     };
   }
 
-  private defaultPricingGroup(group: RentalItemGroup): RentalPricingGroup {
+  private defaultPricingGroup(group: RentalItemGroup, sampleName?: string): RentalPricingGroup {
     return {
       id: group.id,
       tenantId: group.tenantId,
       categoryCode: group.categoryCode,
       code: group.code,
-      name: group.name,
+      name: sampleName ?? group.name,
       description: group.description,
       memberItemGroupIds: [group.id],
       members: [{
