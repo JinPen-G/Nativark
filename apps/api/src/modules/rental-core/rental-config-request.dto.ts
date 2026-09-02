@@ -668,6 +668,24 @@ export class SaveRentalDiscountPlanDto implements SaveRentalDiscountPlanRequest 
 
 /* ---------- 增值服务 ---------- */
 
+/** MKT-02A：条件强制服务的触发规则。留空的维度表示不限制。 */
+export class RentalServiceMandatoryRuleInputDto implements RentalServiceMandatoryRule {
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  itemGroupIds?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsIn(FULFILLMENT_MODES, { each: true })
+  fulfillmentModes?: (typeof FULFILLMENT_MODES)[number][];
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  minRentalAmount?: number;
+}
+
 export class SaveRentalValueAddedServiceDto implements SaveRentalValueAddedServiceRequest {
   @IsOptional()
   @IsString()
@@ -792,24 +810,6 @@ export class SaveRentalServiceCapacityDto implements SaveRentalServiceCapacityRe
 
   @IsIn(ENABLE_STATUSES)
   status!: "enabled" | "disabled";
-}
-
-/** MKT-02A：条件强制服务的触发规则。留空的维度表示不限制。 */
-export class RentalServiceMandatoryRuleInputDto implements RentalServiceMandatoryRule {
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  itemGroupIds?: string[];
-
-  @IsOptional()
-  @IsArray()
-  @IsIn(FULFILLMENT_MODES, { each: true })
-  fulfillmentModes?: (typeof FULFILLMENT_MODES)[number][];
-
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  minRentalAmount?: number;
 }
 
 /* ---------- 规则版本 ---------- */

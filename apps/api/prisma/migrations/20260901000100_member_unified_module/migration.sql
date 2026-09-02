@@ -159,14 +159,14 @@ CREATE TABLE `customer_membership_plan_assignments` (
 
 -- AddForeignKey
 ALTER TABLE `customer_membership_registration_settings` ADD CONSTRAINT `customer_membership_registration_settings_tenantId_fkey` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE `customer_membership_registration_settings` ADD CONSTRAINT `customer_membership_registration_settings_tenantId_workspaceId_fkey` FOREIGN KEY (`tenantId`, `workspaceId`) REFERENCES `business_workspaces`(`tenantId`, `id`) ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE `customer_membership_registration_settings` ADD CONSTRAINT `customer_membership_registration_settings_tenantId_workspac_fkey` FOREIGN KEY (`tenantId`, `workspaceId`) REFERENCES `business_workspaces`(`tenantId`, `id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 ALTER TABLE `customer_membership_reviews` ADD CONSTRAINT `customer_membership_reviews_tenantId_fkey` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 ALTER TABLE `customer_membership_reviews` ADD CONSTRAINT `customer_membership_reviews_tenantId_workspaceId_fkey` FOREIGN KEY (`tenantId`, `workspaceId`) REFERENCES `business_workspaces`(`tenantId`, `id`) ON DELETE CASCADE ON UPDATE CASCADE;
 ALTER TABLE `customer_membership_reviews` ADD CONSTRAINT `customer_membership_reviews_tenantId_customerId_fkey` FOREIGN KEY (`tenantId`, `customerId`) REFERENCES `customer_profiles`(`tenantId`, `id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 ALTER TABLE `customer_membership_qualification_types` ADD CONSTRAINT `customer_membership_qualification_types_tenantId_fkey` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
-ALTER TABLE `customer_membership_qualification_types` ADD CONSTRAINT `customer_membership_qualification_types_tenantId_workspaceId_fkey` FOREIGN KEY (`tenantId`, `workspaceId`) REFERENCES `business_workspaces`(`tenantId`, `id`) ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE `customer_membership_qualification_types` ADD CONSTRAINT `customer_membership_qualification_types_tenantId_workspaceI_fkey` FOREIGN KEY (`tenantId`, `workspaceId`) REFERENCES `business_workspaces`(`tenantId`, `id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 ALTER TABLE `customer_corporate_memberships` ADD CONSTRAINT `customer_corporate_memberships_tenantId_fkey` FOREIGN KEY (`tenantId`) REFERENCES `Tenant`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 ALTER TABLE `customer_corporate_memberships` ADD CONSTRAINT `customer_corporate_memberships_tenantId_workspaceId_fkey` FOREIGN KEY (`tenantId`, `workspaceId`) REFERENCES `business_workspaces`(`tenantId`, `id`) ON DELETE CASCADE ON UPDATE CASCADE;
