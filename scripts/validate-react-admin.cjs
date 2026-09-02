@@ -25,6 +25,7 @@ const pageHeader = read("apps/admin/src/components/PageHeader.tsx");
 const loginPage = read("apps/admin/src/features/auth/LoginPage.tsx");
 const styles = read("apps/admin/src/styles.css");
 const commercialPage = read("apps/admin/src/features/commercial/RentalCommercialPage.tsx");
+const pricingGroupPage = read("apps/admin/src/features/commercial/PricingGroupPage.tsx");
 const governancePage = read("apps/admin/src/features/settings/RentalGovernancePage.tsx");
 const locationPage = read("apps/admin/src/features/fulfillment/LocationPage.tsx");
 const platformPage = read("apps/admin/src/features/platform/PlatformPage.tsx");
@@ -105,6 +106,8 @@ const themeSource = read("apps/admin/src/app/theme.tsx");
 [
   "新增统一调价计划",
   "一次计划统一调整当前整体价格",
+  "currentByKey",
+  "价格没有变化，请先填写至少一个新的价格",
   'queryKey: ["rental-core", "price-adjustments"]'
 ].forEach((label) => requireText(commercialPage, label, "workspace-wide price adjustment UI"));
 [
@@ -214,7 +217,7 @@ forbidText(tenantManagementPage, "经营品类创建后固定；租户", "retire
   [styles, 'transform: scale(.97)', "direct press feedback"]
 ].forEach(([source, expected, label]) => requireText(source, expected, label));
 
-if (pageHeader.includes("Typography.Title") || pageHeader.includes("Typography.Paragraph")) {
+if (/<Typography\.(Title|Paragraph)\b/u.test(pageHeader)) {
   failures.push("Ant Design dashboard layout contract: legacy title-and-subtitle PageHeader returned");
 }
 if (pageHeader.includes("Segmented")) {

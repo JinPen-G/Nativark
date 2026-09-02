@@ -29,12 +29,20 @@ const customerScopeLabels: Record<string, string> = {
   corporate: "企业客户",
   member: "会员",
 };
+const adjustmentStatusLabels: Record<string, string> = {
+  draft: "草稿",
+  pending: "待生效",
+  applied: "已生效",
+  cancelled: "已取消",
+  failed: "执行失败",
+};
 
 export function RentalCommercialPage({ section }: { section: RentalCommercialSection }) {
   const { message } = App.useApp();
   const queryClient = useQueryClient();
   const [adjustmentPlan, setAdjustmentPlan] = useState<RentalPricingPlanV1 | null>();
   const [adjustmentPreview, setAdjustmentPreview] = useState<RentalPriceAdjustmentPreviewRow[]>([]);
+  const [createdAdjustmentId, setCreatedAdjustmentId] = useState<string>();
   const [versionsOpen, setVersionsOpen] = useState(false);
   const [versionSequence, setVersionSequence] = useState<number>();
   const [restoreSequence, setRestoreSequence] = useState<number>();
@@ -123,6 +131,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
     },
     onSuccess: async (result) => {
       setAdjustmentPreview(result.preview);
+      setCreatedAdjustmentId(result.id);
       await queryClient.invalidateQueries({ queryKey: ["rental-core", "price-adjustments"] });
       message.success("调价计划草稿已创建，请核对最终价后确认");
     },
@@ -137,6 +146,9 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
         queryClient.invalidateQueries({ queryKey: ["rental-core", "price-versions"] }),
       ]);
       message.success("调价计划已确认");
+      setAdjustmentPlan(null);
+      setAdjustmentPreview([]);
+      setCreatedAdjustmentId(undefined);
     },
     onError: () => message.error("确认失败：请检查是否存在待生效调价或未来价格版本"),
   });
@@ -209,6 +221,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
     const record = enabledPlans[0];
     if (!record || !currentPriceVersionDetail.data?.rates.length) return;
     setAdjustmentPreview([]);
+    setCreatedAdjustmentId(undefined);
     adjustmentForm.setFieldsValue({
       code: `ADJ-${dayjs().format("YYYYMMDD-HHmm")}`,
       name: `${dayjs().format("YYYY-MM-DD")} 统一调价`,
@@ -222,6 +235,19 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
       })),
     });
     setAdjustmentPlan(record);
+  }
+
+  function submitAdjustment(values: CreateRentalPriceAdjustmentRequest & { scheduledAtValue?: dayjs.Dayjs }) {
+    const currentByKey = new Map((currentPriceVersionDetail.data?.rates ?? []).map((rate) => [pricingRateKey(rate), rate.baseAmount]));
+    const changes = values.changes.filter((change) => {
+      const key = `${change.pricingGroupId ?? change.itemGroupId}:${change.unit}`;
+      return Number(change.value) !== currentByKey.get(key);
+    });
+    if (!changes.length) {
+      message.warning("价格没有变化，请先填写至少一个新的价格");
+      return;
+    }
+    createAdjustment.mutate({ ...values, changes });
   }
 
   function editDiscount(record?: RentalDiscountPlan) {
@@ -367,7 +393,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
               { title: "计划", render: (_, row) => <><b>{row.name}</b><br/><Typography.Text type="secondary">{row.code}</Typography.Text></> },
               { title: "生效时间", render: (_, row) => row.scheduledAt ? dayjs(row.scheduledAt).format("YYYY-MM-DD HH:mm") : "确认后立即" },
               { title: "调整范围", render: (_, row) => `${row.changes.length} 个价格项` },
-              { title: "状态", dataIndex: "status", render: (value) => <Tag>{value}</Tag> },
+              { title: "状态", dataIndex: "status", render: (value) => <Tag>{adjustmentStatusLabels[value] ?? value}</Tag> },
               { title: "原因", dataIndex: "changeReason" },
               { title: "操作", render: (_, row) => row.status === "draft" ? <Space size={0}><Popconfirm title="确认后将立即生效或进入待生效，是否继续？" onConfirm={() => confirmAdjustment.mutate(row.id)}><Button type="link">确认</Button></Popconfirm><Button type="link" danger onClick={() => setCancelAdjustmentId(row.id)}>取消</Button></Space> : row.status === "pending" ? <Button type="link" danger onClick={() => setCancelAdjustmentId(row.id)}>取消</Button> : <Typography.Text type="secondary">—</Typography.Text> },
             ]} />
@@ -519,7 +545,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
         size={900}
         open={Boolean(adjustmentPlan)}
         destroyOnHidden
-        onClose={() => { setAdjustmentPlan(null); setAdjustmentPreview([]); adjustmentForm.resetFields(); }}
+        onClose={() => { setAdjustmentPlan(null); setAdjustmentPreview([]); setCreatedAdjustmentId(undefined); adjustmentForm.resetFields(); }}
       >
         <Alert
           type="info"
@@ -528,7 +554,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
           description="只修改需要调整的价格，保持不变的项目无需改动。创建后先预览，确认时才会立即生效或进入待生效。"
           style={{ marginBottom: 16 }}
         />
-        <Form form={adjustmentForm} layout="vertical" onFinish={(values) => createAdjustment.mutate(values)}>
+        <Form form={adjustmentForm} layout="vertical" onFinish={submitAdjustment}>
           <Form.Item name="code" hidden><Input /></Form.Item>
           <Row gutter={12}>
             <Col span={14}><Form.Item name="name" label="计划名称" rules={[{ required: true, message: "请填写计划名称" }]}><Input placeholder="例如：国庆档统一调价" /></Form.Item></Col>
@@ -557,9 +583,9 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
           <Button type="primary" htmlType="submit" loading={createAdjustment.isPending}>创建草稿并预览</Button>
         </Form>
         {adjustmentPreview.length > 0 && (
-          <Card title="本次最终价预览" size="small" style={{ marginTop: 16 }}>
+          <Card title="本次最终价预览" size="small" style={{ marginTop: 16 }} extra={createdAdjustmentId && <Popconfirm title="确认后将立即生效或进入待生效，是否继续？" onConfirm={() => confirmAdjustment.mutate(createdAdjustmentId)}><Button type="primary" loading={confirmAdjustment.isPending}>确认计划</Button></Popconfirm>}>
             <Table rowKey={(row) => `${row.itemGroupId}:${row.unit}`} pagination={false} dataSource={adjustmentPreview} columns={[
-              { title: "商品", dataIndex: "itemGroupCode" },
+              { title: "定价分组", dataIndex: "itemGroupCode" },
               { title: "计价单位", dataIndex: "unit", render: (value) => unitLabels[value as keyof typeof unitLabels] ?? value },
               { title: "调整前", dataIndex: "beforeBaseAmount", render: money },
               { title: "调整后", dataIndex: "afterBaseAmount", render: money },
