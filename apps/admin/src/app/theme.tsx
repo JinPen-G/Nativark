@@ -62,22 +62,23 @@ export function createThemeConfig(mode: AppearanceMode): ThemeConfig {
         ...(light ? {
           bodyBg: "#f5f8ff",
           footerBg: "#f5f8ff",
-          headerBg: "#ffffff",
-          headerColor: "rgba(0, 0, 0, 0.88)",
-          siderBg: "#ffffff",
+          // 侧栏与外框同底：侧栏不再是白色面板，白色留给内容区，
+          // 两者靠间隙与描边区分（顶栏已取消，headerBg/headerHeight 不再使用）。
+          siderBg: "transparent",
           triggerBg: "#f0f5ff",
           triggerColor: "rgba(0, 0, 0, 0.88)"
-        } : {}),
-        headerHeight: 56,
-        headerPadding: "0 24px"
+        } : { siderBg: "transparent" })
       },
       Menu: {
         activeBarBorderWidth: 0,
         itemBg: "transparent",
         subMenuItemBg: "transparent",
-        itemHeight: 40,
+        // 二级全部常显后侧栏很长，行高压到 36 让首屏多放两三项；
+        // 选中态的白卡在 .sider-nav 里用 inset 阴影画，不靠 itemSelectedBg。
+        itemHeight: 36,
         itemBorderRadius: 8,
-        subMenuItemBorderRadius: 8
+        subMenuItemBorderRadius: 8,
+        itemMarginInline: 0
       },
       Card: {
         headerHeight: 56,

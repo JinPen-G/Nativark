@@ -1,5 +1,13 @@
-import { BoxPlotOutlined, HomeOutlined, LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from "@ant-design/icons";
-import { Avatar, Breadcrumb, Button, Dropdown, Layout, Menu, Space } from "antd";
+import {
+  BellOutlined,
+  BoxPlotOutlined,
+  HomeOutlined,
+  LayoutOutlined,
+  LogoutOutlined,
+  MenuOutlined,
+  MoreOutlined
+} from "@ant-design/icons";
+import { Avatar, Badge, Breadcrumb, Button, Drawer, Dropdown, Layout, Menu, Tooltip } from "antd";
 import type { MenuProps } from "antd";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -11,14 +19,44 @@ import { useAuthStore } from "@/features/auth/authStore";
 import { AppearanceSwitcher } from "./AppearanceSwitcher";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 
-const { Header, Sider, Content } = Layout;
+const { Sider, Content } = Layout;
 
+/**
+ * 面包屑暂不展示。
+ *
+ * 二级菜单已经全部常显，面包屑那个「同组内跳转」的下拉在信息上是冗余的；
+ * 但导航层级本身还没定论，所以**保留计算与渲染代码**，只用这个开关关掉显示，
+ * 需要时改回 `true` 即可，不必重新实现。
+ */
+const SHOW_BREADCRUMB = false;
+
+/**
+ * 侧栏 / 抽屉的切换点。
+ *
+ * 刻意不用 antd 的 `Grid.useBreakpoint()`：它首帧返回空对象（`screens.lg` 为
+ * `undefined`），而且实测视口变窄后没有更新，结果 768px 仍被判成桌面、抽屉永远出不来。
+ * `matchMedia` 是同一件事的直接表达，首帧就有确定值，也能被直接断言。
+ */
+function useMinWidth(query: string) {
+  const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
+  useEffect(() => {
+    const mql = window.matchMedia(query);
+    const sync = () => setMatches(mql.matches);
+    sync();
+    mql.addEventListener("change", sync);
+    return () => mql.removeEventListener("change", sync);
+  }, [query]);
+  return matches;
+}
+
+/** 侧栏在窄屏改成抽屉：`lg` 以下（<992px）没有常驻侧栏，由悬浮按钮唤出。 */
 export function AppShell({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
-  const [openKeys, setOpenKeys] = useState<string[]>([]);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const { mode } = useAppearance();
+  const isDesktop = useMinWidth("(min-width: 992px)");
   const tenant = useAuthStore((state) => state.tenant);
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
@@ -30,7 +68,7 @@ export function AppShell({ children }: { children: ReactNode }) {
    *
    * 复用业务页面已有的查询键，命中同一份缓存，不额外增加一次请求；
    * 空间切换时 `switchWorkspace()` 已清空查询缓存、`ProtectedRoutes` 又以
-   * `租户:空间` 为 key 重挂本组件，因此这里会重新取数，菜单、面包屑与标题
+   * `租户:空间` 为 key 重挂本组件，因此这里会重新取数，菜单与标题
    * 随即换成新品类的说法，不会残留上一个空间的术语。
    *
    * SaaS 平台账号不发这个请求：它不属于任何经营空间，租户品类档案对它没有意义，
@@ -46,12 +84,25 @@ export function AppShell({ children }: { children: ReactNode }) {
     ...section,
     routes: section.routes.filter((route) => route.menu && canAccessRoute(route, hasPermission, hasCapability, tenant?.categoryCode, Boolean(user?.isSaasAdmin)))
   })).filter((section) => section.routes.length > 0), [hasCapability, hasPermission, tenant?.categoryCode, terminology, user?.isSaasAdmin]);
-  const menuItems = useMemo<MenuProps["items"]>(() => sections.map((section) => ({
-    key: section.key,
-    icon: section.icon,
-    label: section.label,
-    children: section.routes.map((route) => ({ key: route.path, icon: route.icon, label: route.label }))
-  })), [sections]);
+  /**
+   * 一级分组变成**不可点的分组标题**，二级直接铺开（`type: "group"`）。
+   *
+   * 收起态例外：分组标题在窄侧栏里没有位置，`group` 会退化成一串没有归属的图标。
+   * 因此收起时改成平铺 items，只留图标，语义交给 tooltip。
+   */
+  const menuItems = useMemo<MenuProps["items"]>(() => {
+    if (collapsed) {
+      return sections.flatMap((section) => section.routes.map((route) => ({
+        key: route.path, icon: route.icon, label: route.label
+      })));
+    }
+    return sections.map((section) => ({
+      type: "group" as const,
+      key: section.key,
+      label: section.label,
+      children: section.routes.map((route) => ({ key: route.path, icon: route.icon, label: route.label }))
+    }));
+  }, [collapsed, sections]);
   const routes = useMemo(() => sections.flatMap((section) => section.routes), [sections]);
   const current = useMemo(() => {
     const route = routes.find((entry) => entry.path === location.pathname)
@@ -65,6 +116,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     ? "/rental/orders/new"
     : location.pathname.startsWith("/rental/orders/") ? "/rental/orders" : location.pathname;
   const accountInitial = (user?.displayName ?? "运营用户").slice(0, 1).toUpperCase();
+  const accountCaption = user?.roleNames?.join(" · ") || user?.organizationName || tenant?.tenantCode || "运营账号";
   const breadcrumbMenuItems = useMemo(() => current.section?.routes.map((entry) => ({
     key: entry.path,
     label: entry.label,
@@ -77,53 +129,117 @@ export function AppShell({ children }: { children: ReactNode }) {
     onClick: () => navigate(section.routes[0].path)
   })), [current.section, navigate, sections]);
 
-  useEffect(() => {
-    if (current.section) setOpenKeys([current.section.key]);
-  }, [current.section]);
+  // 路由变化即关抽屉：窄屏点完菜单还压着一层浮层，等于点了没反应。
+  useEffect(() => { setDrawerOpen(false); }, [location.pathname]);
+  /**
+   * 侧栏内容抽成一个渲染函数：常驻侧栏与窄屏抽屉必须是同一份导航，
+   * 各写一份迟早会只改其中一处。`inDrawer` 只影响收起态（抽屉里没有收起的意义）。
+   */
+  const renderSider = (inDrawer = false) => (
+    <div className={`sider-shell${collapsed && !inDrawer ? " is-collapsed" : ""}`}>
+      <div className="sider-brand">
+        <button className="app-brand" type="button" onClick={() => navigate(homePath)}>
+          <span className="app-brand-mark"><BoxPlotOutlined /></span>
+          {(!collapsed || inDrawer) && <span className="app-brand-copy"><b>Rental OS</b></span>}
+        </button>
+        {!inDrawer && (
+          <Tooltip title={collapsed ? "展开导航" : "收起导航"} placement="right">
+            <Button
+              type="text"
+              className="sider-collapse"
+              aria-label={collapsed ? "展开导航" : "收起导航"}
+              icon={<LayoutOutlined />}
+              onClick={() => setCollapsed((value) => !value)}
+            />
+          </Tooltip>
+        )}
+      </div>
+
+      {(!collapsed || inDrawer) && (
+        <div className="sider-workspace"><WorkspaceSwitcher /></div>
+      )}
+
+      <div className="sider-nav">
+        <Menu
+          mode="inline"
+          inlineCollapsed={collapsed && !inDrawer}
+          selectedKeys={[selectedKey]}
+          items={menuItems}
+          onClick={({ key }) => { if (String(key).startsWith("/")) navigate(String(key)); }}
+        />
+      </div>
+
+      <div className="sider-tools">
+        <AppearanceSwitcher showLabel={!collapsed || inDrawer} />
+        <Tooltip title="通知" placement={collapsed && !inDrawer ? "right" : "top"}>
+          {/* 通知目前只是入口占位：没有运营侧提醒的数据源，不放角标，避免暗示有未读。 */}
+          <Button type="text" aria-label="通知" icon={<Badge dot={false}><BellOutlined /></Badge>} />
+        </Tooltip>
+      </div>
+
+      <div className="sider-account">
+        <Dropdown
+          placement="topLeft"
+          menu={{ items: [{ key: "logout", icon: <LogoutOutlined />, label: "退出登录", onClick: () => { logout(); navigate("/login"); } }] }}
+        >
+          <button className="account-card" type="button">
+            <Avatar size={32} className="account-avatar">{accountInitial}</Avatar>
+            {(!collapsed || inDrawer) && (
+              <>
+                <span className="account-copy">
+                  <b>{user?.displayName ?? "运营用户"}</b>
+                  <small>{accountCaption}</small>
+                </span>
+                <MoreOutlined className="account-more" />
+              </>
+            )}
+          </button>
+        </Dropdown>
+      </div>
+    </div>
+  );
 
   return (
     <div className="app-frame-stage">
       <Layout className="app-shell">
-        <Header className="app-global-header">
-          <button className="app-brand" type="button" onClick={() => navigate(homePath)}>
-            <span className="app-brand-mark"><BoxPlotOutlined /></span>
-            <span className="app-brand-copy"><b>Rental OS</b></span>
-          </button>
-          <div />
-          <Space className="header-actions" size={8}>
-            <WorkspaceSwitcher />
-            <AppearanceSwitcher />
-            <span className="header-divider" />
-            <Dropdown placement="bottomRight" menu={{ items: [{ key: "logout", icon: <LogoutOutlined />, label: "退出登录", onClick: () => { logout(); navigate("/login"); } }] }}>
-              <Button type="text" className="account-button">
-                <Avatar size={32} className="account-avatar">{accountInitial}</Avatar>
-                <span className="account-copy"><b>{user?.displayName ?? "运营用户"}</b><small>{tenant?.tenantCode ?? "DEMO"}</small></span>
-              </Button>
-            </Dropdown>
-          </Space>
-        </Header>
-
-        <Layout className="app-body">
-          <Sider className="app-sider" width={216} collapsedWidth={56} trigger={null} collapsible collapsed={collapsed} theme={mode === "dark" ? "dark" : "light"}>
-            <Menu
-              mode="inline"
-              selectedKeys={[selectedKey]}
-              openKeys={collapsed ? undefined : openKeys}
-              items={menuItems}
-              onOpenChange={(keys) => {
-                const latest = keys.find((key) => !openKeys.includes(String(key)));
-                setOpenKeys(latest ? [String(latest)] : []);
-              }}
-              onClick={({ key }) => { if (String(key).startsWith("/")) navigate(String(key)); }}
-            />
-            <div className="sider-footer">
-              <Button block type="text" onClick={() => setCollapsed((value) => !value)} icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}>
-                {!collapsed && "收起导航"}
-              </Button>
-            </div>
+        {isDesktop ? (
+          <Sider
+            className="app-sider"
+            width={240}
+            collapsedWidth={64}
+            trigger={null}
+            collapsible
+            collapsed={collapsed}
+            theme={mode === "dark" ? "dark" : "light"}
+          >
+            {renderSider()}
           </Sider>
+        ) : (
+          <>
+            <Button
+              className="sider-drawer-trigger"
+              type="text"
+              aria-label="打开导航"
+              icon={<MenuOutlined />}
+              onClick={() => setDrawerOpen(true)}
+            />
+            <Drawer
+              className="sider-drawer"
+              placement="left"
+              size={272}
+              open={drawerOpen}
+              destroyOnHidden
+              closable={false}
+              styles={{ body: { padding: 0 } }}
+              onClose={() => setDrawerOpen(false)}
+            >
+              {renderSider(true)}
+            </Drawer>
+          </>
+        )}
 
-          <Layout className="app-workspace">
+        <Layout className="app-workspace">
+          {SHOW_BREADCRUMB && (
             <div className="workspace-context">
               <Breadcrumb items={[
                 { title: <HomeOutlined className="breadcrumb-home" onClick={() => navigate(homePath)} /> },
@@ -131,8 +247,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                 { title: current.route?.label ?? "租赁运营台" }
               ]} />
             </div>
-            <Content className="app-content"><main className="content-canvas">{children}</main></Content>
-          </Layout>
+          )}
+          <Content className="app-content"><main className="content-canvas">{children}</main></Content>
         </Layout>
       </Layout>
     </div>
