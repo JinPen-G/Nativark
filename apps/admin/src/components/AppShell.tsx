@@ -2,12 +2,14 @@ import {
   BellOutlined,
   BoxPlotOutlined,
   HomeOutlined,
-  LayoutOutlined,
   LogoutOutlined,
+  MenuFoldOutlined,
   MenuOutlined,
-  MoreOutlined
+  MenuUnfoldOutlined,
+  MoreOutlined,
+  SettingOutlined
 } from "@ant-design/icons";
-import { Avatar, Badge, Breadcrumb, Button, Drawer, Dropdown, Layout, Menu, Tooltip } from "antd";
+import { App, Avatar, Breadcrumb, Button, Drawer, Dropdown, Layout, Menu, Tooltip } from "antd";
 import type { MenuProps } from "antd";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -55,6 +57,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
+  const { message } = App.useApp();
   const { mode } = useAppearance();
   const isDesktop = useMinWidth("(min-width: 992px)");
   const tenant = useAuthStore((state) => state.tenant);
@@ -85,24 +88,21 @@ export function AppShell({ children }: { children: ReactNode }) {
     routes: section.routes.filter((route) => route.menu && canAccessRoute(route, hasPermission, hasCapability, tenant?.categoryCode, Boolean(user?.isSaasAdmin)))
   })).filter((section) => section.routes.length > 0), [hasCapability, hasPermission, tenant?.categoryCode, terminology, user?.isSaasAdmin]);
   /**
-   * 一级分组变成**不可点的分组标题**，二级直接铺开（`type: "group"`）。
+   * 展开态：一级是**不可点的分组标题**，二级直接铺开（`type: "group"`）。
    *
-   * 收起态例外：分组标题在窄侧栏里没有位置，`group` 会退化成一串没有归属的图标。
-   * 因此收起时改成平铺 items，只留图标，语义交给 tooltip。
+   * 收起态：一级换成**只有图标的父项**（去掉 `type`，即 SubMenu），二级收进悬浮浮层。
+   * 64px 宽放不下分组标题，但把二级平铺成一串图标会丢掉归属关系；保留一级、
+   * 悬停才展开二级，层级和展开态是同一套说法。
+   *
+   * 收起判据传参而不是直接读 `collapsed`：抽屉里永远是展开态，两处必须一致，
+   * 否则抽屉会拿到收起态的结构。
    */
-  const menuItems = useMemo<MenuProps["items"]>(() => {
-    if (collapsed) {
-      return sections.flatMap((section) => section.routes.map((route) => ({
-        key: route.path, icon: route.icon, label: route.label
-      })));
-    }
-    return sections.map((section) => ({
-      type: "group" as const,
-      key: section.key,
-      label: section.label,
-      children: section.routes.map((route) => ({ key: route.path, icon: route.icon, label: route.label }))
-    }));
-  }, [collapsed, sections]);
+  const buildMenuItems = (isCollapsed: boolean): MenuProps["items"] => sections.map((section) => {
+    const children = section.routes.map((route) => ({ key: route.path, icon: route.icon, label: route.label }));
+    return isCollapsed
+      ? { key: section.key, icon: section.icon, label: section.label, children }
+      : { type: "group" as const, key: section.key, label: section.label, children };
+  });
   const routes = useMemo(() => sections.flatMap((section) => section.routes), [sections]);
   const current = useMemo(() => {
     const route = routes.find((entry) => entry.path === location.pathname)
@@ -148,7 +148,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               type="text"
               className="sider-collapse"
               aria-label={collapsed ? "展开导航" : "收起导航"}
-              icon={<LayoutOutlined />}
+              icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
               onClick={() => setCollapsed((value) => !value)}
             />
           </Tooltip>
@@ -164,21 +164,31 @@ export function AppShell({ children }: { children: ReactNode }) {
           mode="inline"
           inlineCollapsed={collapsed && !inDrawer}
           selectedKeys={[selectedKey]}
-          items={menuItems}
+          items={buildMenuItems(collapsed && !inDrawer)}
           onClick={({ key }) => { if (String(key).startsWith("/")) navigate(String(key)); }}
         />
       </div>
 
       <div className="sider-tools">
-        <AppearanceSwitcher showLabel={!collapsed || inDrawer} />
-        <Tooltip title="通知" placement={collapsed && !inDrawer ? "right" : "top"}>
-          {/* 通知目前只是入口占位：没有运营侧提醒的数据源，不放角标，避免暗示有未读。 */}
-          <Button type="text" aria-label="通知" icon={<Badge dot={false}><BellOutlined /></Badge>} />
-        </Tooltip>
+        <AppearanceSwitcher collapsed={collapsed && !inDrawer} />
+        {[
+          { key: "notice", label: "通知", icon: <BellOutlined />, hint: "通知中心尚未接入" },
+          { key: "settings", label: "设置", icon: <SettingOutlined />, hint: "偏好设置尚未接入" }
+        ].map((row) => (
+          <Tooltip key={row.key} title={collapsed && !inDrawer ? row.label : row.hint} placement={collapsed && !inDrawer ? "right" : "top"}>
+            {/* 占位入口：还没有数据源，因此点击如实说明「未接入」，而不是静默无反应。 */}
+            <button className="sider-link" type="button" aria-label={row.label} onClick={() => message.info(row.hint)}>
+              {row.icon}
+              {(!collapsed || inDrawer) && <span className="sider-link-label">{row.label}</span>}
+            </button>
+          </Tooltip>
+        ))}
       </div>
 
       <div className="sider-account">
+        {/* 必须点击才展开：antd 默认是悬浮触发，鼠标路过账号卡就弹出「退出登录」，太容易误点。 */}
         <Dropdown
+          trigger={["click"]}
           placement="topLeft"
           menu={{ items: [{ key: "logout", icon: <LogoutOutlined />, label: "退出登录", onClick: () => { logout(); navigate("/login"); } }] }}
         >

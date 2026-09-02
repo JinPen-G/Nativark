@@ -36,10 +36,17 @@ button, input, textarea, select { font: inherit; }
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  height: 56px;
+  height: 48px;
   padding: 0 12px 0 16px;
 }
 .sider-collapse { color: var(--rental-color-text-description) !important; }
+/* 收起态只有 64px：logo 与折叠按钮并排会互相压住，改成上下两行居中。 */
+.is-collapsed .sider-brand {
+  flex-direction: column;
+  gap: 4px;
+  height: auto;
+  padding: 10px 0 2px;
+}
 .app-brand {
   display: inline-flex;
   align-items: center;
@@ -75,47 +82,52 @@ button, input, textarea, select { font: inherit; }
 .appearance-option { display: grid; min-width: 192px; gap: 4px; padding-block: 4px; }
 
 
-/* 空间选择卡：上行租户、下行当前空间。占固定槽位，单空间/无空间也渲染。 */
+/* 空间选择框：单行「图标 + 空间名 + 箭头」。占固定槽位，单空间/无空间也渲染。 */
 .sider-workspace { padding: 4px 12px 12px; }
-.workspace-card {
+.workspace-select {
   display: flex;
   align-items: center;
   gap: 10px;
   width: 100%;
-  padding: 8px 10px;
-  border: 1px solid var(--rental-color-border-secondary);
-  border-radius: 10px;
-  color: inherit;
+  min-height: 40px;
+  padding: 0 10px;
+  border: 1px solid var(--rental-color-border);
+  border-radius: 8px;
+  color: var(--rental-color-text);
   background: var(--rental-color-bg-container);
+  text-align: left;
   cursor: pointer;
   transition: border-color .2s, box-shadow .2s;
 }
-.workspace-card:hover:not(.is-static) {
-  border-color: var(--rental-color-primary-border);
+.workspace-select:hover:not(.is-static) {
+  border-color: var(--rental-color-primary-hover);
   box-shadow: 0 1px 4px rgba(0, 0, 0, .06);
 }
-.workspace-card.is-static { cursor: default; }
-.workspace-card-mark {
+/* 无可切换目标时是纯展示：去掉手型，但描边与底色保留，槽位不塌。
+   原生 disabled 会把文字冲淡成灰，所以显式写回文本色。 */
+.workspace-select.is-static { color: var(--rental-color-text); cursor: default; }
+.workspace-select-mark {
   display: grid;
   flex: none;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   place-items: center;
-  border-radius: 8px;
+  border-radius: 6px;
   color: var(--rental-color-primary);
   background: var(--rental-color-primary-bg);
+  font-size: 13px;
 }
-.workspace-card-copy { display: grid; flex: 1; min-width: 0; text-align: left; line-height: 1.35; }
-.workspace-card-copy small { color: var(--rental-color-text-description); font-size: 12px; }
-.workspace-card-copy b {
+.workspace-select-name {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   color: var(--rental-color-text-heading);
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 500;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-.workspace-card-arrow { flex: none; color: var(--rental-color-text-quaternary); font-size: 12px; }
+.workspace-select-arrow { flex: none; color: var(--rental-color-text-quaternary); font-size: 12px; }
 .workspace-option { display: inline-flex; flex-direction: column; line-height: 1.25; }
 .workspace-option small { opacity: .6; font-size: 12px; }
 
@@ -145,6 +157,11 @@ button, input, textarea, select { font: inherit; }
   font-size: 12px;
   line-height: 1.4;
 }
+/* 分组之间画细线：二级全部常显时，只靠标题的字号差不足以断句。第一组不画。 */
+.sider-nav .ant-menu-item-group + .ant-menu-item-group {
+  margin-top: 8px;
+  border-top: 1px solid var(--rental-color-border-secondary);
+}
 .sider-nav .ant-menu-item { margin-block: 2px; }
 /* 选中项做成"浮起的白卡"：用 inset 阴影画边框，避免加 border 造成 2px 位移。 */
 .sider-nav .ant-menu-item-selected {
@@ -155,15 +172,40 @@ button, input, textarea, select { font: inherit; }
 }
 .sider-nav .ant-menu-item-selected .ant-menu-item-icon { color: var(--rental-color-text-heading); }
 
+/* 底部工具区：主题 / 通知 / 设置各占一行，与上方菜单用分隔线断开。 */
 .sider-tools {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 8px 12px;
+  display: grid;
+  gap: 2px;
+  padding: 8px;
   border-top: 1px solid var(--rental-color-border-secondary);
 }
-.sider-tools .ant-btn { color: var(--rental-color-text-secondary); }
-.is-collapsed .sider-tools { flex-direction: column; }
+/* 三行同构：图标 + 文案（+ 尾部控件），因此行样式只写一份。 */
+.sider-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 36px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--rental-color-text-secondary);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: color .2s, background-color .2s;
+}
+.sider-link:hover {
+  color: var(--rental-color-text-heading);
+  background: var(--rental-color-fill-tertiary);
+}
+/* 主题行整行不可点（开关自己是点击目标），因此不给悬浮态与手型。 */
+.sider-link-static,
+.sider-link-static:hover { background: transparent; cursor: default; }
+.sider-link-label { flex: 1; min-width: 0; font-size: 14px; }
+/* 收起态宽度只有 64px，放不下图标加文案，只留居中的图标或小开关。 */
+.is-collapsed .sider-link { justify-content: center; padding-inline: 0; }
+.sider-link-switch { display: grid; min-height: 36px; place-items: center; }
 
 .sider-account { padding: 8px 12px 12px; }
 .account-card {
@@ -453,6 +495,8 @@ button, input, textarea, select { font: inherit; }
   background: var(--rental-color-bg-container);
 }
 .login-brand { display: flex; align-items: center; gap: 8px; color: var(--rental-color-text-heading); }
+/* 外观切换是侧栏那一行的复用；登录页头部是横向两段，不能让它撑满整行。 */
+.login-header .sider-link { width: auto; padding-inline: 0; }
 .login-brand b { font-size: 16px; font-weight: 600; }
 .login-workspace { display: grid; min-height: 0; place-items: center; padding: 32px 24px; background: var(--rental-color-bg-layout); }
 .login-panel { width: min(520px, 100%); }

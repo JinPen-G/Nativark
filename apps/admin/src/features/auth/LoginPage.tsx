@@ -51,7 +51,7 @@ export function LoginPage() {
       <div className="login-frame">
         <header className="login-header">
           <div className="login-brand"><span><ApartmentOutlined /></span><b>Rental OS</b></div>
-          <AppearanceSwitcher showLabel />
+          <AppearanceSwitcher />
         </header>
         <main className="login-workspace">
           <Card className="login-panel">
