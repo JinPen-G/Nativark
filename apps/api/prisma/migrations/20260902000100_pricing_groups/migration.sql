@@ -3,7 +3,7 @@ CREATE TABLE `rental_pricing_groups` (
   `id` VARCHAR(191) NOT NULL,
   `tenantId` VARCHAR(191) NOT NULL,
   `workspaceId` VARCHAR(191) NOT NULL,
-  `categoryCode` ENUM('CAMERA','CAMPING','VEHICLE','CONSTRUCTION') NOT NULL,
+  `categoryCode` ENUM('camera','camping','vehicle','construction') NOT NULL,
   `code` VARCHAR(191) NOT NULL,
   `name` VARCHAR(191) NOT NULL,
   `description` VARCHAR(191) NULL,
