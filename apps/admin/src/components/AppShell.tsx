@@ -2,10 +2,9 @@ import {
   BellOutlined,
   BoxPlotOutlined,
   HomeOutlined,
+  LayoutOutlined,
   LogoutOutlined,
-  MenuFoldOutlined,
   MenuOutlined,
-  MenuUnfoldOutlined,
   MoreOutlined,
   SettingOutlined
 } from "@ant-design/icons";
@@ -148,7 +147,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               type="text"
               className="sider-collapse"
               aria-label={collapsed ? "展开导航" : "收起导航"}
-              icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+              icon={<LayoutOutlined />}
               onClick={() => setCollapsed((value) => !value)}
             />
           </Tooltip>
