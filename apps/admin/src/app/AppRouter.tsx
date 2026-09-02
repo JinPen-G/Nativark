@@ -30,6 +30,8 @@ const TenantManagementPage = lazy(() => import("@/features/platform/TenantManage
 const RentalCorePage = lazy(() => import("@/features/rental-core/RentalCorePage").then((module) => ({ default: module.RentalCorePage })));
 const RentalSettingsPage = lazy(() => import("@/features/settings/RentalGovernancePage").then((module) => ({ default: module.RentalGovernancePage })));
 const CapabilityGovernancePage = lazy(() => import("@/features/rental-core/CapabilityGovernancePage").then((module) => ({ default: module.CapabilityGovernancePage })));
+const TenantOperationsAccountPage = lazy(() => import("@/features/tenant-access/TenantAccessPages").then((module) => ({ default: module.TenantOperationsAccountPage })));
+const TenantRolePermissionPage = lazy(() => import("@/features/tenant-access/TenantAccessPages").then((module) => ({ default: module.TenantRolePermissionPage })));
 
 function PageLoader() {
   return <div className="route-loader"><Spin size="large" /></div>;
@@ -91,6 +93,8 @@ function ProtectedRoutes() {
             <Route path={APP_ROUTES.services.path} element={guard(APP_ROUTES.services, <RentalCommercialPage section="services" />)} />
             <Route path={APP_ROUTES.rentalSettings.path} element={guard(APP_ROUTES.rentalSettings, <RentalSettingsPage />)} />
             <Route path={APP_ROUTES.rentalCapabilities.path} element={guard(APP_ROUTES.rentalCapabilities, <CapabilityGovernancePage />)} />
+            <Route path={APP_ROUTES.tenantAccounts.path} element={guard(APP_ROUTES.tenantAccounts, <TenantOperationsAccountPage />)} />
+            <Route path={APP_ROUTES.tenantRoles.path} element={guard(APP_ROUTES.tenantRoles, <TenantRolePermissionPage />)} />
             <Route path={APP_ROUTES.membershipReviews.path} element={guard(APP_ROUTES.membershipReviews, <MembershipReviewPage />)} />
             <Route path={APP_ROUTES.personalMembers.path} element={guard(APP_ROUTES.personalMembers, <PersonalMembershipPage />)} />
             <Route path={APP_ROUTES.corporateMembers.path} element={guard(APP_ROUTES.corporateMembers, <CorporateMembershipPage />)} />
@@ -119,7 +123,8 @@ function ProtectedRoutes() {
             {["/member-reviews"].map((path) => <Route key={path} path={path} element={<Navigate to={APP_ROUTES.membershipReviews.path} replace />} />)}
             {["/membership-plans"].map((path) => <Route key={path} path={path} element={<Navigate to={APP_ROUTES.membershipPlans.path} replace />} />)}
             {["/corporates", "/corporates/:id"].map((path) => <Route key={path} path={path} element={<Navigate to={APP_ROUTES.corporateMembers.path} replace />} />)}
-            {["/organizations", "/users", "/permissions"].map((path) => <Route key={path} path={path} element={<Navigate to={APP_ROUTES.platformUsers.path} replace />} />)}
+            <Route path="/users" element={<Navigate to={APP_ROUTES.tenantAccounts.path} replace />} />
+            {["/organizations", "/permissions"].map((path) => <Route key={path} path={path} element={<Navigate to={APP_ROUTES.tenantRoles.path} replace />} />)}
             <Route path="/system-rules" element={<Navigate to={APP_ROUTES.platformSystem.path} replace />} />
             {["/security-baseline", "/integrations", "/notifications"].map((path) => <Route key={path} path={path} element={<Navigate to={APP_ROUTES.platformOperations.path} replace />} />)}
             {["/platform-governance", "/file-assets", "/async-jobs"].map((path) => <Route key={path} path={path} element={<Navigate to={APP_ROUTES.platformTools.path} replace />} />)}
