@@ -22,9 +22,10 @@ const appearances: Array<{ value: AppearanceMode; label: string; description: st
 /**
  * 侧栏底部的外观切换行：图标 + 文案 + 开关，与「通知」「设置」两行同构。
  *
- * `collapsed` 下只留开关：64px 宽放不下图标与文案，硬塞会挤成两行。
+ * `iconOnly` 下只留开关：侧栏收起时 64px 宽放不下图标与文案，硬塞会挤成两行；
+ * 登录页把它浮在框角上，同样只需要开关本身。
  */
-export function AppearanceSwitcher({ collapsed = false }: { collapsed?: boolean }) {
+export function AppearanceSwitcher({ iconOnly = false }: { iconOnly?: boolean }) {
   const { mode, setMode } = useAppearance();
   const active = appearances.find((item) => item.value === mode) ?? appearances[0];
 
@@ -41,9 +42,9 @@ export function AppearanceSwitcher({ collapsed = false }: { collapsed?: boolean 
     };
     return (
       <Dropdown menu={menu} trigger={["click"]} placement="topLeft">
-        <Tooltip title="切换外观主题" placement={collapsed ? "right" : "top"}>
+        <Tooltip title="切换外观主题" placement={iconOnly ? "right" : "top"}>
           <Button type="text" className="sider-link" aria-label="切换外观主题" icon={active.icon}>
-            {collapsed ? null : <span className="sider-link-label">{active.label}</span>}
+            {iconOnly ? null : <span className="sider-link-label">{active.label}</span>}
           </Button>
         </Tooltip>
       </Dropdown>
@@ -59,12 +60,12 @@ export function AppearanceSwitcher({ collapsed = false }: { collapsed?: boolean 
   const isDark = mode === "dark";
   const toggle = <Switch
     checked={isDark}
-    size={collapsed ? "small" : "default"}
+    size={iconOnly ? "small" : "default"}
     aria-label="切换外观主题"
     onChange={(next) => setMode(next ? "dark" : "default")}
   />;
 
-  if (collapsed) {
+  if (iconOnly) {
     return <Tooltip title="切换外观主题" placement="right"><span className="sider-link-switch">{toggle}</span></Tooltip>;
   }
 

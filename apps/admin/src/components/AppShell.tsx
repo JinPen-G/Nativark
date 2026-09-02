@@ -169,7 +169,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </div>
 
       <div className="sider-tools">
-        <AppearanceSwitcher collapsed={collapsed && !inDrawer} />
+        <AppearanceSwitcher iconOnly={collapsed && !inDrawer} />
         {[
           { key: "notice", label: "通知", icon: <BellOutlined />, hint: "通知中心尚未接入" },
           { key: "settings", label: "设置", icon: <SettingOutlined />, hint: "偏好设置尚未接入" }

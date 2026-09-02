@@ -476,27 +476,19 @@ button, input, textarea, select { font: inherit; }
 
 .login-stage { min-height: 100vh; padding: 6px; background: var(--rental-color-fill-tertiary); }
 .login-frame {
+  position: relative;
   display: grid;
   height: calc(100vh - 12px);
   overflow: hidden;
-  grid-template-rows: auto 1fr;
   border: 1px solid var(--rental-color-border-secondary);
   border-radius: 14px;
   background: var(--rental-color-bg-layout);
   box-shadow: 0 2px 12px rgba(0, 0, 0, .1);
 }
-.login-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 56px;
-  padding: 0 24px;
-  border-bottom: 1px solid var(--rental-color-border-secondary);
-  background: var(--rental-color-bg-container);
-}
-.login-brand { display: flex; align-items: center; gap: 8px; color: var(--rental-color-text-heading); }
-/* 外观切换是侧栏那一行的复用；登录页头部是横向两段，不能让它撑满整行。 */
-.login-header .sider-link { width: auto; padding-inline: 0; }
+/* 外观开关浮在框的右上角：不再为它单独留一条横栏。 */
+.login-appearance { position: absolute; z-index: 1; top: 14px; right: 16px; }
+/* 品牌移进登录卡内部，作为标题上方的一行。 */
+.login-brand { display: flex; align-items: center; gap: 8px; margin-bottom: 20px; color: var(--rental-color-text-heading); }
 .login-brand b { font-size: 16px; font-weight: 600; }
 .login-workspace { display: grid; min-height: 0; place-items: center; padding: 32px 24px; background: var(--rental-color-bg-layout); }
 .login-panel { width: min(520px, 100%); }
@@ -539,9 +531,8 @@ button, input, textarea, select { font: inherit; }
   .app-shell,
   .login-frame { height: 100vh; border: 0; border-radius: 0; box-shadow: none; }
   .app-workspace { margin: 0; border: 0; border-radius: 0; }
-  .login-header { padding-inline: 16px !important; }
   .metric-grid { grid-template-columns: 1fr; }
-  .login-workspace { min-height: calc(100vh - 48px); padding: 16px; }
+  .login-workspace { padding: 16px; }
   .sider-drawer-trigger { top: 8px; left: 8px; }
 }
 

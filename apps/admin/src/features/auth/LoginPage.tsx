@@ -49,12 +49,11 @@ export function LoginPage() {
   return (
     <div className="login-stage">
       <div className="login-frame">
-        <header className="login-header">
-          <div className="login-brand"><span><ApartmentOutlined /></span><b>Rental OS</b></div>
-          <AppearanceSwitcher />
-        </header>
+        {/* 外观开关浮在框角：顶栏已取消，登录页也不再单独留一条只为放它的横栏。 */}
+        <div className="login-appearance"><AppearanceSwitcher iconOnly /></div>
         <main className="login-workspace">
           <Card className="login-panel">
+            <div className="login-brand"><span><ApartmentOutlined /></span><b>Rental OS</b></div>
             <div className="login-panel-heading">
               <Typography.Title level={2}>登录运营台</Typography.Title>
               <Typography.Paragraph type="secondary">使用租户账号进入对应品类的租赁工作区。</Typography.Paragraph>
