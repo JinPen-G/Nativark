@@ -5,7 +5,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Button, Card, Col, DatePicker, Drawer, Form, Input, InputNumber, Modal, Popconfirm, Row, Select, Space, Switch, Table, Tag, Typography } from "antd";
 import dayjs from "dayjs";
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
@@ -14,6 +13,7 @@ export type RentalCommercialSection = "pricing" | "discounts" | "services";
 
 const unitLabels = RENTAL_PRICING_UNIT_LABELS;
 const money = (value: number | undefined) => `¥${Number(value ?? 0).toFixed(2)}`;
+const pricingRateKey = (rate: { pricingGroupId?: string; itemGroupId: string; unit: string }) => `${rate.pricingGroupId ?? rate.itemGroupId}:${rate.unit}`;
 const serviceTypeLabels: Record<string, string> = {
   insurance: "保险",
   damage_waiver: "损坏免赔",
@@ -32,7 +32,6 @@ const customerScopeLabels: Record<string, string> = {
 
 export function RentalCommercialPage({ section }: { section: RentalCommercialSection }) {
   const { message } = App.useApp();
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [pricingEditor, setPricingEditor] = useState<RentalPricingPlanV1 | null>();
   const [adjustmentPlan, setAdjustmentPlan] = useState<RentalPricingPlanV1 | null>();
@@ -93,7 +92,13 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
   const versions = useQuery({
     queryKey: ["rental-core", "price-versions"],
     queryFn: () => rentalCoreApi.priceVersions(1, 100),
-    enabled: versionsOpen,
+    enabled: section === "pricing" || versionsOpen,
+  });
+  const currentPriceVersion = versions.data?.rows.find((row) => !dayjs(row.effectiveFrom).isAfter(dayjs()));
+  const currentPriceVersionDetail = useQuery({
+    queryKey: ["rental-core", "price-version", currentPriceVersion?.sequence],
+    queryFn: () => rentalCoreApi.priceVersion(currentPriceVersion!.sequence),
+    enabled: section === "pricing" && Boolean(currentPriceVersion),
   });
   const versionDetail = useQuery({
     queryKey: ["rental-core", "price-version", versionSequence],
@@ -216,7 +221,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
   });
 
   function editPricing() {
-    const pricedIds = new Set((pricing.data ?? []).flatMap((plan) => plan.rates.map((rate) => rate.pricingGroupId ?? rate.itemGroupId)));
+    const pricedIds = new Set((currentPriceVersionDetail.data?.rates ?? []).map((rate) => rate.pricingGroupId ?? rate.itemGroupId));
     const targets = (pricingGroups.data ?? []).filter((group) => group.status === "enabled" && !pricedIds.has(group.id));
     const rates: SaveRentalPricingPlanRequest["rates"] = targets.map((group) => ({
           pricingGroupId: group.id,
@@ -316,10 +321,12 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
   const sectionDescription = section === "pricing" ? "查看全部定价分组的当前基础价；已有价格只能通过调价计划变更。" : section === "discounts" ? "在基础价格之上配置自动优惠、客户范围、日期范围与优惠券叠加规则。" : "维护配送、保险、损坏免赔等可选服务，并对保障条款进行版本化。";
   const enabledPlans = [...(pricing.data ?? [])].filter((plan) => plan.status === "enabled").sort((left, right) => new Date(right.effectiveFrom).getTime() - new Date(left.effectiveFrom).getTime());
   const currentPricingRows = (pricingGroups.data ?? []).map((group) => {
-    const hit = enabledPlans.flatMap((plan) => plan.rates.map((rate) => ({ plan, rate }))).find(({ rate }) => (rate.pricingGroupId ?? rate.itemGroupId) === group.id);
-    return { group, plan: hit?.plan, rate: hit?.rate };
+    const rate = currentPriceVersionDetail.data?.rates.find((item) => (item.pricingGroupId ?? item.itemGroupId) === group.id);
+    const plan = enabledPlans.find((item) => item.rates.some((candidate) => (candidate.pricingGroupId ?? candidate.itemGroupId) === group.id));
+    return { group, plan, rate };
   });
   const unpricedCount = currentPricingRows.filter((row) => row.group.status === "enabled" && !row.rate).length;
+  const priceMatrixReady = !versions.isLoading && (!currentPriceVersion || currentPriceVersionDetail.isSuccess);
 
   return (
     <>
@@ -330,7 +337,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
           <Space>
             {section === "pricing" && <Button icon={<HistoryOutlined />} onClick={() => setVersionsOpen(true)}>价格版本</Button>}
             {section === "pricing" ? (
-              unpricedCount > 0 && <Button type="primary" icon={<PlusOutlined />} onClick={() => editPricing()}>初始化未定价分组（{unpricedCount}）</Button>
+              priceMatrixReady && unpricedCount > 0 && <Button type="primary" icon={<PlusOutlined />} onClick={() => editPricing()}>初始化未定价分组（{unpricedCount}）</Button>
             ) : <Button type="primary" icon={<PlusOutlined />} onClick={() => section === "discounts" ? editDiscount() : editService()}>新增{sectionTitle}</Button>}
           </Space>
         }
@@ -341,20 +348,16 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
         </span>
         <span>订单只能引用服务端报价快照，前端不能直接决定成交单价。</span>
       </div>
-      <div className="commercial-switcher">
-        <Button type={section === "pricing" ? "primary" : "text"} onClick={() => navigate("/rental/pricing")}>
-          基础定价
-        </Button>
-        <Button type={section === "discounts" ? "primary" : "text"} onClick={() => navigate("/rental/discounts")}>
-          优惠方案
-        </Button>
-        <Button type={section === "services" ? "primary" : "text"} onClick={() => navigate("/rental/services")}>
-          增值服务
-        </Button>
-      </div>
-
       {section === "pricing" && (
-        <Card
+        <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+          <Alert
+            type="info"
+            showIcon
+            title={versions.isLoading ? "正在读取当前整体价格版本" : currentPriceVersion ? `当前整体价格版本：${currentPriceVersion.version}` : "当前还没有生效的整体价格版本"}
+            description={versions.isLoading ? "" : currentPriceVersion ? `生效于 ${dayjs(currentPriceVersion.effectiveFrom).format("YYYY-MM-DD HH:mm")}，包含当前经营空间全部有效定价分组价格，共 ${currentPriceVersion.rateCount} 条；新订单保存此整体版本快照，历史订单不随调价变化。` : "请先为未定价分组初始化基础价格。"}
+            action={<Button type="link" onClick={() => setVersionsOpen(true)}>查看历史版本</Button>}
+          />
+          <Card
           className="data-panel"
           title={
             <Space>
@@ -363,7 +366,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
             </Space>
           }
         >
-          <QueryState loading={pricing.isLoading || pricingGroups.isLoading} error={pricing.error || pricingGroups.error}>
+          <QueryState loading={pricing.isLoading || pricingGroups.isLoading || versions.isLoading || currentPriceVersionDetail.isLoading} error={pricing.error || pricingGroups.error || versions.error || currentPriceVersionDetail.error}>
             <Table<{ group: RentalPricingGroup; plan?: RentalPricingPlanV1; rate?: RentalPricingPlanV1["rates"][number] }>
               rowKey={(row) => row.group.id}
               dataSource={currentPricingRows}
@@ -387,17 +390,14 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
                   render: (_, row) => row.rate ? unitLabels[row.rate.unit] ?? row.rate.unit : "-",
                 },
                 {
-                  title: "生效版本",
-                  render: (_, row) => row.plan ? <><span>v{row.plan.version}</span><br /><span className="muted">{dayjs(row.plan.effectiveFrom).format("YYYY-MM-DD HH:mm")}</span></> : "-",
-                },
-                {
                   title: "操作",
                   render: (_, row) => row.plan && row.rate ? <Button type="link" onClick={() => openAdjustment(row.plan!, row.rate!)}>新建调价计划</Button> : "请先初始化",
                 },
               ]}
             />
           </QueryState>
-        </Card>
+          </Card>
+        </Space>
       )}
       {section === "discounts" && (
         <Card
@@ -892,16 +892,16 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
       <Drawer title={`价格版本详情 · v${versionSequence ?? ""}`} size={820} open={versionSequence !== undefined} destroyOnHidden onClose={() => setVersionSequence(undefined)}>
         <Alert type="info" showIcon title={versionSequence && versionSequence > 1 ? `以下价格与 v${versionSequence - 1} 对比` : "首个价格版本"} style={{ marginBottom: 16 }} />
         <Table
-          rowKey={(row) => `${row.itemGroupId}:${row.unit}`}
+          rowKey={pricingRateKey}
           loading={versionDetail.isLoading || previousVersion.isLoading}
           dataSource={versionDetail.data?.rates ?? []}
           columns={[
-            { title: "商品", render: (_, row) => `${row.itemGroupCode} · ${row.itemGroupName}` },
+            { title: "定价分组", render: (_, row) => `${row.pricingGroupCode ?? row.itemGroupCode} · ${row.pricingGroupName ?? row.itemGroupName}` },
             { title: "计价单位", dataIndex: "unit", render: (value) => unitLabels[value as keyof typeof unitLabels] ?? value },
-            { title: "上一版基础价", render: (_, row) => money(previousVersion.data?.rates.find((item) => item.itemGroupId === row.itemGroupId && item.unit === row.unit)?.baseAmount) },
+            { title: "上一版基础价", render: (_, row) => money(previousVersion.data?.rates.find((item) => pricingRateKey(item) === pricingRateKey(row))?.baseAmount) },
             { title: "本版基础价", dataIndex: "baseAmount", render: money },
             { title: "变化", render: (_, row) => {
-              const before = previousVersion.data?.rates.find((item) => item.itemGroupId === row.itemGroupId && item.unit === row.unit)?.baseAmount;
+              const before = previousVersion.data?.rates.find((item) => pricingRateKey(item) === pricingRateKey(row))?.baseAmount;
               return before === undefined ? "新增" : before === row.baseAmount ? "未变" : `${row.baseAmount - before > 0 ? "+" : ""}${(row.baseAmount - before).toFixed(2)}`;
             } },
           ]}

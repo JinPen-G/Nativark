@@ -96,6 +96,13 @@ const themeSource = read("apps/admin/src/app/theme.tsx");
   "每件固定押金",
   "每件预授权额度"
 ].forEach((label) => requireText(commercialPage, label, "independent deposit and preauthorization rate UI"));
+[
+  "currentPriceVersionDetail.data?.rates",
+  "当前整体价格版本",
+  "包含当前经营空间全部有效定价分组价格",
+  "空间价格版本"
+].forEach((label) => requireText(commercialPage, label, "space-wide immutable price version UI"));
+forbidText(commercialPage, "commercial-switcher", "commercial pages must rely on independent sidebar routes instead of duplicate tabs");
 
 [
   "createPriceSchedule", "previewDispatchOptimization", "applyDispatchOptimization", "manualReassignFromDispatch",
