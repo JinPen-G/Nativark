@@ -45,8 +45,14 @@ export const APP_ROUTES = {
   // REPORT-01A：当前经营空间经营报表。文案固定「经营报表」——指标定义不随品类变化，
   // 只有页面标题内的标的说法用品类术语，菜单名跟着品类变会让人以为指标也变了。
   operationReport: { path: "/reports/operations", label: "经营报表", permission: "store-rental:report:view", audience: "tenant", icon: <FundOutlined />, menu: true },
-  rentalCore: { path: "/rental/core", label: "租赁工作台", permission: "store-rental:order:view", audience: "tenant", icon: <ApartmentOutlined />, menu: true },
-  orderCreate: { path: "/rental/orders/new", label: "新建订单", permission: "store-rental:order:create", audience: "tenant", icon: <FormOutlined />, menu: true },
+  // 租赁工作台（Rental Core v0.1）暂不进菜单：它是早期的合并调试台，
+  // 建单、确认预占、执行配货、取消都已经由「新建订单」和订单详情页各自承载，
+  // 且详情页还多了部分归还。路由与页面保留，需要时把 menu 打开即可。
+  rentalCore: { path: "/rental/core", label: "租赁工作台", permission: "store-rental:order:view", audience: "tenant", icon: <ApartmentOutlined /> },
+  // 新建订单不进菜单：它是「订单管理」页上的主操作（页面右上角按钮），
+  // 菜单里再放一条等于把一个动作伪装成一个板块，也让「租赁交易」多出一层噪音。
+  // 路由本身照常注册，权限仍由 permission 把关。
+  orderCreate: { path: "/rental/orders/new", label: "新建订单", permission: "store-rental:order:create", audience: "tenant", icon: <FormOutlined /> },
   orders: { path: "/rental/orders", label: "订单管理", permission: "store-rental:order:view", audience: "tenant", icon: <FileTextOutlined />, menu: true },
   orderDetail: { path: "/rental/orders/:id", label: "订单详情", permission: "store-rental:order:view", audience: "tenant", icon: <FileTextOutlined /> },
   itemGroups: { path: "/rental/item-groups", label: "商品目录", permission: "rental-core:catalog:view", legacyPermissions: ["store-rental:vehicle-group:manage"], audience: "tenant", icon: <AppstoreOutlined />, menu: true },
@@ -77,7 +83,7 @@ export const APP_ROUTES = {
 
 export const APP_NAVIGATION: AppNavigationSection[] = [
   { key: "overview", label: "概览", icon: <DashboardOutlined />, routes: [APP_ROUTES.workbench, APP_ROUTES.operationReport] },
-  { key: "transactions", label: "租赁交易", icon: <ApartmentOutlined />, routes: [APP_ROUTES.rentalCore, APP_ROUTES.orderCreate, APP_ROUTES.orders] },
+  { key: "transactions", label: "租赁交易", icon: <ApartmentOutlined />, routes: [APP_ROUTES.orders] },
   { key: "inventory", label: "商品与资产", icon: <AppstoreOutlined />, routes: [APP_ROUTES.itemGroups, APP_ROUTES.assets, APP_ROUTES.locations] },
   { key: "commercial", label: "定价与营销", icon: <FundOutlined />, routes: [APP_ROUTES.pricingGroups, APP_ROUTES.pricing, APP_ROUTES.discounts, APP_ROUTES.coupons, APP_ROUTES.services] },
   { key: "customers", label: "会员与客户", icon: <TeamOutlined />, routes: [APP_ROUTES.membershipReviews, APP_ROUTES.personalMembers, APP_ROUTES.corporateMembers, APP_ROUTES.membershipPlans] },

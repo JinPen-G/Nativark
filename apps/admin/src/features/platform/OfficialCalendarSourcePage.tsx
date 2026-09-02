@@ -76,6 +76,10 @@ export function OfficialCalendarSourcePage() {
       <PageHeader
         title="公共官方日历来源"
         description="登记中国大陆官方节假日来源与年度来源版本。租户经营空间只能引用某一版生成自己的年度草稿并自行确认发布。"
+        note={{
+          title: "官方数据是公共基础来源，导入不会自动影响任何经营空间",
+          description: "官方再次调整时请登记新的来源版本；已发布的空间日历、有效报价和订单继续指向它们各自引用的那一版，不会被静默覆盖。"
+        }}
         extra={
           <Button
             type="primary"
@@ -87,12 +91,6 @@ export function OfficialCalendarSourcePage() {
             登记来源
           </Button>
         }
-      />
-      <Alert
-        type="info"
-        showIcon
-        message="官方数据是公共基础来源，导入不会自动影响任何经营空间"
-        description="官方再次调整时请登记新的来源版本；已发布的空间日历、有效报价和订单继续指向它们各自引用的那一版，不会被静默覆盖。"
       />
       <QueryState loading={sources.isLoading} error={sources.error}>
         <Card className="data-panel">

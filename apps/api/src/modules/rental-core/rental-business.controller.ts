@@ -153,6 +153,12 @@ export class RentalBusinessController {
   /** PRICE-03：取消（草稿/待生效可取消，已生效不可撤回）。 */
   @Post("pricing-plans/:id/adjustments/:aid/cancel") cancelPriceAdjustment(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Param("aid") aid: string, @Body() body: CancelRentalPriceAdjustmentDto) { return this.business.cancelPriceAdjustment(req.user.tenantId, this.context(req.user.tenantId), id, aid, body.reason); }
 
+  /** 运营端主入口：调价以经营空间为范围，不要求用户理解内部价格计划行。 */
+  @Get("pricing-adjustments") listSpacePriceAdjustments(@Req() req: AuthenticatedRequest) { return this.business.listSpacePriceAdjustments(req.user.tenantId, this.context(req.user.tenantId)); }
+  @Post("pricing-adjustments") createSpacePriceAdjustment(@Req() req: AuthenticatedRequest, @Body() body: CreateRentalPriceAdjustmentDto) { return this.business.createSpacePriceAdjustment(req.user.tenantId, this.context(req.user.tenantId), body, req.user.displayName); }
+  @Post("pricing-adjustments/:aid/confirm") confirmSpacePriceAdjustment(@Req() req: AuthenticatedRequest, @Param("aid") aid: string) { return this.committed(req.user.tenantId, this.business.confirmSpacePriceAdjustment(req.user.tenantId, this.context(req.user.tenantId), aid, req.user.displayName)); }
+  @Post("pricing-adjustments/:aid/cancel") cancelSpacePriceAdjustment(@Req() req: AuthenticatedRequest, @Param("aid") aid: string, @Body() body: CancelRentalPriceAdjustmentDto) { return this.business.cancelSpacePriceAdjustment(req.user.tenantId, this.context(req.user.tenantId), aid, body.reason); }
+
   @Get("discount-plans") discountPlans(@Req() req: AuthenticatedRequest) { return this.business.listDiscountPlans(req.user.tenantId, this.context(req.user.tenantId)); }
   @Post("discount-plans") async createDiscountPlan(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalDiscountPlanDto) { return this.committed(req.user.tenantId, await this.business.saveDiscountPlan(req.user.tenantId, this.context(req.user.tenantId), body)); }
   @Put("discount-plans/:id") async updateDiscountPlan(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalDiscountPlanDto) { return this.committed(req.user.tenantId, await this.business.saveDiscountPlan(req.user.tenantId, this.context(req.user.tenantId), { ...body, id })); }

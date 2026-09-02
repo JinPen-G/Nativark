@@ -5,6 +5,7 @@ import type {
   SaveRentalFulfillmentOperatorRequest,
   SaveRentalItemGroupRequest,
   SaveRentalPricingGroupRequest,
+  RentalPricingGroupInitialRate,
   RentalPricingUnit
 } from "@store-rental/shared";
 import { RENTAL_PRICING_UNIT_CODES } from "@store-rental/shared";
@@ -226,6 +227,12 @@ export class SaveRentalPricingGroupDto implements SaveRentalPricingGroupRequest 
   @IsIn(RENTAL_PRICING_UNIT_CODES)
   defaultPricingUnit?: RentalPricingUnit;
 
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RentalPricingGroupInitialRateInputDto)
+  initialRates?: RentalPricingGroupInitialRateInputDto[];
+
   @IsArray()
   @IsString({ each: true })
   memberItemGroupIds!: string[];
@@ -233,4 +240,13 @@ export class SaveRentalPricingGroupDto implements SaveRentalPricingGroupRequest 
   @IsOptional()
   @IsIn(ENABLE_STATUSES)
   status?: (typeof ENABLE_STATUSES)[number];
+}
+
+class RentalPricingGroupInitialRateInputDto implements RentalPricingGroupInitialRate {
+  @IsIn(RENTAL_PRICING_UNIT_CODES)
+  unit!: RentalPricingUnit;
+
+  @IsNumber()
+  @Min(0)
+  baseAmount!: number;
 }

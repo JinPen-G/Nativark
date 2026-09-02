@@ -11,6 +11,20 @@ interface AppearanceContextValue {
 const STORAGE_KEY = "rental_admin_appearance";
 const AppearanceContext = createContext<AppearanceContextValue | null>(null);
 
+/**
+ * 侧栏底色。浅色下比内容面板的白略沉——白色留给内容区，两者靠底色差与描边区分；
+ * 深色下沿用外壳底色，与之前一致。
+ *
+ * 走 CSS 变量而不是 antd 的 `Layout.lightSiderBg`：常驻侧栏是 `Layout.Sider`，
+ * 窄屏那份是 Drawer 里的普通 div，后者拿不到 Sider 的组件 token。
+ * 一个变量同时管住两处，颜色仍然只写在这个文件里。
+ */
+const SIDER_BG: Record<AppearanceMode, string> = {
+  default: "#f7f7f7",
+  compact: "#f7f7f7",
+  dark: "var(--rental-color-bg-layout)"
+};
+
 function readInitialMode(): AppearanceMode {
   const stored = window.localStorage.getItem(STORAGE_KEY);
   return stored === "dark" || stored === "compact" || stored === "default" ? stored : "default";
@@ -22,6 +36,7 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     document.documentElement.dataset.appearance = mode;
     document.documentElement.style.colorScheme = mode === "dark" ? "dark" : "light";
+    document.documentElement.style.setProperty("--app-sider-bg", SIDER_BG[mode]);
     window.localStorage.setItem(STORAGE_KEY, mode);
   }, [mode]);
 
@@ -62,8 +77,8 @@ export function createThemeConfig(mode: AppearanceMode): ThemeConfig {
         ...(light ? {
           bodyBg: "#f5f8ff",
           footerBg: "#f5f8ff",
-          // 侧栏与外框同底：侧栏不再是白色面板，白色留给内容区，
-          // 两者靠间隙与描边区分（顶栏已取消，headerBg/headerHeight 不再使用）。
+          // 侧栏底色由 SIDER_BG 经 --app-sider-bg 统一给出（常驻侧栏与窄屏抽屉共用一处），
+          // 这里保留 transparent 只是兜住变量落地前的那一帧。顶栏已取消，headerBg/headerHeight 不再使用。
           siderBg: "transparent",
           triggerBg: "#f0f5ff",
           triggerColor: "rgba(0, 0, 0, 0.88)"
@@ -84,6 +99,9 @@ export function createThemeConfig(mode: AppearanceMode): ThemeConfig {
         headerHeight: 56,
         bodyPadding: 24
       },
+      // 工具条上的按钮偏矮，压不住 18px 的页面标题；32 → 36 只动按钮，
+      // 输入框与选择器仍按全局 controlHeight，避免整站密度跟着变。
+      Button: { controlHeight: 36 },
       Table: {
         cellPaddingBlock: 12,
         cellPaddingInline: 8,

@@ -140,6 +140,10 @@ export function WorkspaceOperationReportPage() {
             />
           </Space>
         }
+        note={{
+          title: "口径说明",
+          description: "订单量为非草稿订单数；租赁收入只含租金；优惠金额为方案优惠与券优惠合计；应收金额为调账后应收；异常费用取订单费用行中的逾期、损坏与取消。仅统计当前经营空间，不做跨空间汇总；导出与本页使用同一份数据与筛选。"
+        }}
         extra={
           <Space>
             <Button icon={<DownloadOutlined />} loading={exporting} onClick={() => void exportCsv()}>
@@ -148,13 +152,6 @@ export function WorkspaceOperationReportPage() {
             <Button icon={<ReloadOutlined />} aria-label="刷新经营报表" onClick={() => void report.refetch()} />
           </Space>
         }
-      />
-      <Alert
-        type="info"
-        showIcon
-        title="口径说明"
-        description="订单量为非草稿订单数；租赁收入只含租金；优惠金额为方案优惠与券优惠合计；应收金额为调账后应收；异常费用取订单费用行中的逾期、损坏与取消。仅统计当前经营空间，不做跨空间汇总；导出与本页使用同一份数据与筛选。"
-        style={{ marginBottom: 16 }}
       />
       <QueryState loading={report.isLoading} error={report.error}>
         {data && <ReportBody data={data} />}

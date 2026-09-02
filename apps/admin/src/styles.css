@@ -84,6 +84,8 @@ button, input, textarea, select { font: inherit; }
 
 /* 空间选择框：单行「图标 + 空间名 + 箭头」。占固定槽位，单空间/无空间也渲染。 */
 .sider-workspace { padding: 4px 12px 12px; }
+/* 侧栏里不再留硬描边：底色是 #f7f7f7，白色本身就够读成"浮起的控件"。
+   悬浮改成整块转灰，与菜单项用同一种语言。 */
 .workspace-select {
   display: flex;
   align-items: center;
@@ -91,19 +93,16 @@ button, input, textarea, select { font: inherit; }
   width: 100%;
   min-height: 40px;
   padding: 0 10px;
-  border: 1px solid var(--rental-color-border);
+  border: 0;
   border-radius: 8px;
   color: var(--rental-color-text);
   background: var(--rental-color-bg-container);
   text-align: left;
   cursor: pointer;
-  transition: border-color .2s, box-shadow .2s;
+  transition: background-color .2s;
 }
-.workspace-select:hover:not(.is-static) {
-  border-color: var(--rental-color-primary-hover);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, .06);
-}
-/* 无可切换目标时是纯展示：去掉手型，但描边与底色保留，槽位不塌。
+.workspace-select:hover:not(.is-static) { background: var(--rental-color-fill-tertiary); }
+/* 无可切换目标时是纯展示：去掉手型，但底色保留，槽位不塌。
    原生 disabled 会把文字冲淡成灰，所以显式写回文本色。 */
 .workspace-select.is-static { color: var(--rental-color-text); cursor: default; }
 .workspace-select-mark {
@@ -131,8 +130,9 @@ button, input, textarea, select { font: inherit; }
 .workspace-option { display: inline-flex; flex-direction: column; line-height: 1.25; }
 .workspace-option small { opacity: .6; font-size: 12px; }
 
+/* 侧栏底色见 app/theme.tsx 的 SIDER_BG；变量落地前的那一帧回落到外壳底色。 */
 .app-sider {
-  background: transparent !important;
+  background: var(--app-sider-bg, var(--rental-color-bg-layout)) !important;
 }
 .app-sider .ant-layout-sider-children { display: flex; flex-direction: column; height: 100%; }
 .sider-nav {
@@ -140,11 +140,17 @@ button, input, textarea, select { font: inherit; }
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
+  /* 二级全部常显后菜单必然超过一屏，滚动条要看得见——否则没人知道下面还有内容。
+     滑块取 --rental-color-border，与侧栏其它描边同一个 token，深浅两色都可见。
+     标准属性给 Firefox 和新版 Chrome，::-webkit-* 兜住旧内核（含 Electron）。 */
+  scrollbar-width: thin;
+  scrollbar-color: var(--rental-color-border) transparent;
   padding-bottom: 8px;
 }
-.sider-nav::-webkit-scrollbar { display: none; }
+.sider-nav::-webkit-scrollbar { width: 6px; }
+.sider-nav::-webkit-scrollbar-track { background: transparent; }
+.sider-nav::-webkit-scrollbar-thumb { border-radius: 999px; background: var(--rental-color-border); }
+.sider-nav::-webkit-scrollbar-thumb:hover { background: var(--rental-color-text-quaternary); }
 .sider-nav .ant-menu {
   padding-inline: 8px;
   border-inline-end: 0 !important;
@@ -163,12 +169,14 @@ button, input, textarea, select { font: inherit; }
   border-top: 1px solid var(--rental-color-border-secondary);
 }
 .sider-nav .ant-menu-item { margin-block: 2px; }
-/* 选中项做成"浮起的白卡"：用 inset 阴影画边框，避免加 border 造成 2px 位移。 */
+/* 选中项是一块灰底圆角，不描边。
+   描边这条路走不通：浅色下几乎看不见、深色下又很清楚，同一个状态在两种模式里长得不一样。
+   fill-secondary 在两种模式下都是"比底色深/浅一档"的半透明填充，自动跟着主题走。 */
 .sider-nav .ant-menu-item-selected {
   color: var(--rental-color-text-heading) !important;
   font-weight: 600;
-  background: var(--rental-color-bg-container) !important;
-  box-shadow: inset 0 0 0 1px var(--rental-color-border-secondary), 0 1px 3px rgba(0, 0, 0, .06);
+  background: var(--rental-color-fill-secondary) !important;
+  box-shadow: none;
 }
 .sider-nav .ant-menu-item-selected .ant-menu-item-icon { color: var(--rental-color-text-heading); }
 
@@ -208,23 +216,21 @@ button, input, textarea, select { font: inherit; }
 .sider-link-switch { display: grid; min-height: 36px; place-items: center; }
 
 .sider-account { padding: 8px 12px 12px; }
+/* 账号卡与空间选择框同构：白底、无描边，悬浮转灰。 */
 .account-card {
   display: flex;
   align-items: center;
   gap: 10px;
   width: 100%;
   padding: 8px 10px;
-  border: 1px solid var(--rental-color-border-secondary);
-  border-radius: 10px;
+  border: 0;
+  border-radius: 8px;
   color: inherit;
   background: var(--rental-color-bg-container);
   cursor: pointer;
-  transition: border-color .2s, box-shadow .2s;
+  transition: background-color .2s;
 }
-.account-card:hover {
-  border-color: var(--rental-color-primary-border);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, .06);
-}
+.account-card:hover { background: var(--rental-color-fill-tertiary); }
 .is-collapsed .account-card { justify-content: center; padding-inline: 6px; }
 .account-avatar { color: var(--rental-color-primary) !important; background: var(--rental-color-primary-bg) !important; font-weight: 600; }
 .account-copy { display: grid; flex: 1; min-width: 0; text-align: left; line-height: 1.35; }
@@ -254,7 +260,7 @@ button, input, textarea, select { font: inherit; }
   border: 1px solid var(--rental-color-border-secondary) !important;
   background: var(--rental-color-bg-container) !important;
 }
-.sider-drawer .sider-shell { background: var(--rental-color-bg-layout); }
+.sider-drawer .sider-shell { background: var(--app-sider-bg, var(--rental-color-bg-layout)); }
 
 /* 内容区是独立的白色面板，与侧栏之间留出间隙，形成图里的双面板观感。 */
 .app-workspace {
@@ -284,10 +290,26 @@ button, input, textarea, select { font: inherit; }
 .app-content { min-height: 0; padding: 24px; overflow: auto; background: transparent; }
 .content-canvas { width: 100%; }
 
-.page-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 34px; margin-bottom: 16px; }
-.page-toolbar-view { min-width: 0; }
-.page-toolbar-view:empty { flex: 1; }
+.page-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 36px; margin-bottom: 16px; }
+/* 标题行：标题 + 紧跟的说明入口；右侧只放导出、新增这类动作。 */
+.page-title-row { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.page-title-row .ant-btn { color: var(--rental-color-text-quaternary); }
+.page-title-row .ant-btn:hover { color: var(--rental-color-text-secondary); }
+.page-title {
+  margin: 0;
+  overflow: hidden;
+  color: var(--rental-color-text-heading);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 26px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* 筛选与视图切换自成一行：一组会换行的控件，跟标题同行会把标题挤走。 */
+.page-toolbar-view { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
 .page-toolbar-actions { flex: 0 0 auto; justify-content: flex-end; }
+/* 口径说明的浮层正文：限宽避免长句拉成一行，行高与页面正文一致。 */
+.page-note { max-width: 360px; color: var(--rental-color-text); font-size: 14px; line-height: 22px; }
 
 .data-panel,
 .workspace-panel,

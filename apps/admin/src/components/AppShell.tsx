@@ -5,13 +5,12 @@ import {
   LayoutOutlined,
   LogoutOutlined,
   MenuOutlined,
-  MoreOutlined,
-  SettingOutlined
+  MoreOutlined
 } from "@ant-design/icons";
 import { App, Avatar, Breadcrumb, Button, Drawer, Dropdown, Layout, Menu, Tooltip } from "antd";
 import type { MenuProps } from "antd";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { buildNavigationSections, canAccessRoute } from "@/app/navigation";
@@ -30,6 +29,9 @@ const { Sider, Content } = Layout;
  * 需要时改回 `true` 即可，不必重新实现。
  */
 const SHOW_BREADCRUMB = false;
+
+/** 通知还没有面向运营的数据源，入口先占位；点击如实说明，不做静默无反应的按钮。 */
+const NOTICE_HINT = "通知中心尚未接入";
 
 /**
  * 侧栏 / 抽屉的切换点。
@@ -54,6 +56,7 @@ function useMinWidth(query: string) {
 export function AppShell({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const navRef = useRef<HTMLDivElement>(null);
   const location = useLocation();
   const navigate = useNavigate();
   const { message } = App.useApp();
@@ -111,9 +114,8 @@ export function AppShell({ children }: { children: ReactNode }) {
       section: sections.find((section) => section.routes.some((entry) => entry.path === route?.path))
     };
   }, [location.pathname, routes, sections]);
-  const selectedKey = location.pathname === "/rental/orders/new"
-    ? "/rental/orders/new"
-    : location.pathname.startsWith("/rental/orders/") ? "/rental/orders" : location.pathname;
+  // 新建订单与订单详情都不在菜单里，选中态归到「订单管理」，否则进这两个页面菜单会整体失焦。
+  const selectedKey = location.pathname.startsWith("/rental/orders/") ? "/rental/orders" : location.pathname;
   const accountInitial = (user?.displayName ?? "运营用户").slice(0, 1).toUpperCase();
   const accountCaption = user?.roleNames?.join(" · ") || user?.organizationName || tenant?.tenantCode || "运营账号";
   const breadcrumbMenuItems = useMemo(() => current.section?.routes.map((entry) => ({
@@ -130,6 +132,18 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   // 路由变化即关抽屉：窄屏点完菜单还压着一层浮层，等于点了没反应。
   useEffect(() => { setDrawerOpen(false); }, [location.pathname]);
+  /**
+   * 刷新后把选中项滚进视野。
+   *
+   * 侧栏是独立滚动容器，重新挂载时 scrollTop 归零；二级全部常显后菜单远超一屏，
+   * 靠后的选中项会停在可视区外，看起来像"选中态丢了"。
+   * `block: "nearest"` 只在确实不可见时滚动，因此点击菜单这种本来就可见的场景不会跳动。
+   * 依赖里带上 `sections`：权限与品类档案是异步到的，菜单变长后位置会重排。
+   */
+  useEffect(() => {
+    navRef.current?.querySelector(".ant-menu-item-selected, .ant-menu-submenu-selected")
+      ?.scrollIntoView({ block: "nearest" });
+  }, [selectedKey, sections, drawerOpen]);
   /**
    * 侧栏内容抽成一个渲染函数：常驻侧栏与窄屏抽屉必须是同一份导航，
    * 各写一份迟早会只改其中一处。`inDrawer` 只影响收起态（抽屉里没有收起的意义）。
@@ -158,7 +172,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="sider-workspace"><WorkspaceSwitcher /></div>
       )}
 
-      <div className="sider-nav">
+      <div className="sider-nav" ref={navRef}>
         <Menu
           mode="inline"
           inlineCollapsed={collapsed && !inDrawer}
@@ -170,18 +184,13 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <div className="sider-tools">
         <AppearanceSwitcher iconOnly={collapsed && !inDrawer} />
-        {[
-          { key: "notice", label: "通知", icon: <BellOutlined />, hint: "通知中心尚未接入" },
-          { key: "settings", label: "设置", icon: <SettingOutlined />, hint: "偏好设置尚未接入" }
-        ].map((row) => (
-          <Tooltip key={row.key} title={collapsed && !inDrawer ? row.label : row.hint} placement={collapsed && !inDrawer ? "right" : "top"}>
-            {/* 占位入口：还没有数据源，因此点击如实说明「未接入」，而不是静默无反应。 */}
-            <button className="sider-link" type="button" aria-label={row.label} onClick={() => message.info(row.hint)}>
-              {row.icon}
-              {(!collapsed || inDrawer) && <span className="sider-link-label">{row.label}</span>}
-            </button>
-          </Tooltip>
-        ))}
+        <Tooltip title={collapsed && !inDrawer ? "通知" : NOTICE_HINT} placement={collapsed && !inDrawer ? "right" : "top"}>
+          {/* 占位入口：还没有数据源，因此点击如实说明「未接入」，而不是静默无反应。 */}
+          <button className="sider-link" type="button" aria-label="通知" onClick={() => message.info(NOTICE_HINT)}>
+            <BellOutlined />
+            {(!collapsed || inDrawer) && <span className="sider-link-label">通知</span>}
+          </button>
+        </Tooltip>
       </div>
 
       <div className="sider-account">

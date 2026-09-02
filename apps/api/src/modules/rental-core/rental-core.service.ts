@@ -719,7 +719,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
 
   listPricingGroups(tenantId: string) { return this.state(tenantId).pricingGroups; }
 
-  async savePricingGroup(tenantId: string, input: SaveRentalPricingGroupRequest) {
+  async savePricingGroup(tenantId: string, input: SaveRentalPricingGroupRequest, tx?: RentalConfigTx, deferCache = false) {
     const state = this.state(tenantId);
     if (!input.code?.trim() || !input.name?.trim()) throw new BadRequestException("定价分组编码和名称不能为空");
     if (!input.memberItemGroupIds?.length) throw new BadRequestException("定价分组至少选择一个产品型号");
@@ -749,10 +749,17 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       createdAt: existing?.createdAt ?? timestamp,
       updatedAt: timestamp
     };
-    await this.configStore.upsertPricingGroup?.(result);
+    await this.configStore.upsertPricingGroup?.(result, tx);
+    if (!deferCache) this.commitPricingGroup(result);
+    return result;
+  }
+
+  /** 外层事务提交后再更新写穿缓存，避免价格版本失败时缓存先看到半成品分组。 */
+  commitPricingGroup(result: RentalPricingGroup) {
+    const state = this.state(result.tenantId);
+    const existing = state.pricingGroups.find((row) => row.id === result.id);
     if (existing) state.pricingGroups.splice(state.pricingGroups.indexOf(existing), 1, result);
     else state.pricingGroups.unshift(result);
-    return result;
   }
 
   async saveItemGroup(tenantId: string, input: SaveRentalItemGroupRequest) {

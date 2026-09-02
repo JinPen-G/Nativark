@@ -176,9 +176,8 @@ export function TenantOperationsAccountPage() {
   const error = organizations.error ?? users.error ?? roles.error ?? workspaces.error ?? members.error;
 
   return <>
-    <PageHeader title="运营账号管理" description="账号属于租户；可访问空间、空间角色和数据范围按每个经营空间分别授权。" />
+    <PageHeader title="运营账号管理" description="账号属于租户；可访问空间、空间角色和数据范围按每个经营空间分别授权。" note={{ title: "权限分为两层", description: "角色决定可以执行哪些操作；数据范围决定在获准操作内可以看哪些数据。经营空间访问权单独授予，不能只靠隐藏菜单代替。" }} />
     <QueryState loading={loading} error={error}>
-      <Alert type="info" showIcon style={{ marginBottom: 16 }} title="权限分为两层" description="角色决定可以执行哪些操作；数据范围决定在获准操作内可以看哪些数据。经营空间访问权单独授予，不能只靠隐藏菜单代替。" />
       <Card>
         <div className="table-toolbar"><Typography.Text type="secondary">共 {users.data?.length ?? 0} 个运营账号</Typography.Text><Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>新增运营账号</Button></div>
         <Table<SystemUserRow> rowKey="id" dataSource={users.data ?? []} scroll={{ x: 1120 }} columns={[

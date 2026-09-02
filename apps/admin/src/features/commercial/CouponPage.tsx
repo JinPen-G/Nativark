@@ -1,7 +1,7 @@
 import { EditOutlined, PlusOutlined } from "@ant-design/icons";
 import type { RentalCouponTemplate, RentalCustomerCoupon, SaveRentalCouponTemplateRequest } from "@store-rental/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Button, Card, Col, Drawer, Form, Input, InputNumber, Modal, Row, Select, Space, Table, Tag, Typography } from "antd";
+import { App, Button, Card, Col, Drawer, Form, Input, InputNumber, Modal, Row, Select, Space, Table, Tag, Typography } from "antd";
 import dayjs from "dayjs";
 import { useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
@@ -38,8 +38,7 @@ export function CouponPage() {
 
   return (
     <>
-      <PageHeader title="优惠券" description="管理租户优惠券模板、客户领取凭证和订单核销状态。" extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>新增优惠券模板</Button>} />
-      <Alert type="info" showIcon message="优惠券与预算按订单事务流转" description="报价只计算；创建订单同时锁券和预算；订单确认转为核销预算；取消释放后按有效期恢复或过期。" style={{ marginBottom: 16 }} />
+      <PageHeader title="优惠券" description="管理租户优惠券模板、客户领取凭证和订单核销状态。" note={{ title: "优惠券与预算按订单事务流转", description: "报价只计算；创建订单同时锁券和预算；订单确认转为核销预算；取消释放后按有效期恢复或过期。" }} extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>新增优惠券模板</Button>} />
       <Card className="data-panel" styles={{ body: { paddingBottom: 0 } }}>
         <QueryState loading={templates.isLoading || groups.isLoading} error={templates.error || groups.error}>
           <Table<RentalCouponTemplate> rowKey="id" dataSource={templates.data ?? []} scroll={{ x: 1100 }} columns={[

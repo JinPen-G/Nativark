@@ -1,6 +1,6 @@
 import { BellOutlined, PlayCircleOutlined, SaveOutlined } from "@ant-design/icons";
 import type { InvokeMockAdapterRequest, SendMockNotificationRequest, SystemSecurityBaselineConfig } from "@store-rental/shared";
-import { Alert, App, Button, Card, Col, Descriptions, Drawer, Form, Input, InputNumber, Row, Select, Space, Switch, Table, Tabs, Tag, Typography } from "antd";
+import { App, Button, Card, Col, Descriptions, Drawer, Form, Input, InputNumber, Row, Select, Space, Switch, Table, Tabs, Tag, Typography } from "antd";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { api } from "@/api/rental";
@@ -39,8 +39,7 @@ export function PlatformOperationsPage() {
 
   return (
     <>
-      <PageHeader title="平台运维中心" description="查看集成能力、文件、通知与异步任务，并维护登录和敏感信息安全基线。" extra={<Button type="primary" icon={<BellOutlined />} onClick={() => setNotificationOpen(true)}>模拟通知</Button>} />
-      <Alert type="info" showIcon message="能力状态以实际提供方为准" description="mode=mock/reserved 只代表接口和留痕已预留，不代表支付、短信、电子签章或设备厂商已完成生产接入。" style={{ marginBottom: 16 }} />
+      <PageHeader title="平台运维中心" description="查看集成能力、文件、通知与异步任务，并维护登录和敏感信息安全基线。" note={{ title: "能力状态以实际提供方为准", description: "mode=mock/reserved 只代表接口和留痕已预留，不代表支付、短信、电子签章或设备厂商已完成生产接入。" }} extra={<Button type="primary" icon={<BellOutlined />} onClick={() => setNotificationOpen(true)}>模拟通知</Button>} />
       <Card className="tabbed-workspace">
         <Tabs className="standalone-tabs" items={[
           {

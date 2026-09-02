@@ -1,7 +1,7 @@
 import { PlusOutlined, SearchOutlined } from "@ant-design/icons";
 import type { RentalFulfillmentLocation, RentalFulfillmentOperator, SaveRentalFulfillmentLocationRequest, SaveRentalFulfillmentOperatorRequest } from "@store-rental/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Button, Card, Col, Drawer, Form, Input, Row, Select, Space, Table, Tag } from "antd";
+import { App, Button, Card, Col, Drawer, Form, Input, Row, Select, Space, Table, Tag } from "antd";
 import { useMemo, useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { resolveTenantNavigationLabels } from "@/app/navigation-terminology";
@@ -49,8 +49,7 @@ export function LocationPage() {
 
   return (
     <>
-      <PageHeader title={resolveTenantNavigationLabels(profile.data?.terminology).routes.locations ?? "履约地点"} description="经营主体与地点分层管理，地点类型与履约能力由经营品类约束。" extra={canManage ? <Space><Button onClick={() => openOperatorEditor()}>新增经营主体</Button><Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>新增履约地点</Button></Space> : undefined} />
-      <Alert type="info" showIcon message={`${category?.name ?? "当前品类"}履约网络`} description="车行、摄影合作商等是经营主体；门店、仓库、自提柜和项目现场是主体下的履约地点。订单保存地点与经营主体快照，避免后续档案变更影响历史单据。" style={{ marginBottom: 16 }} />
+      <PageHeader title={resolveTenantNavigationLabels(profile.data?.terminology).routes.locations ?? "履约地点"} description="经营主体与地点分层管理，地点类型与履约能力由经营品类约束。" note={{ title: `${category?.name ?? "当前品类"}履约网络`, description: "车行、摄影合作商等是经营主体；门店、仓库、自提柜和项目现场是主体下的履约地点。订单保存地点与经营主体快照，避免后续档案变更影响历史单据。" }} extra={canManage ? <Space><Button onClick={() => openOperatorEditor()}>新增经营主体</Button><Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>新增履约地点</Button></Space> : undefined} />
       <Card title={`经营主体（${operators.data?.length ?? 0}）`} className="data-panel" style={{ marginBottom: 16 }} styles={{ body: { paddingBottom: 0 } }}>
         <QueryState loading={operators.isLoading} error={operators.error}>
           <Table<RentalFulfillmentOperator> rowKey="id" dataSource={operators.data ?? []} pagination={false} columns={[

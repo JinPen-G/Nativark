@@ -7782,12 +7782,22 @@ export interface RentalPricingGroup {
   updatedAt: string;
 }
 
+export interface RentalPricingGroupInitialRate {
+  unit: RentalPricingUnit;
+  baseAmount: number;
+}
+
 export interface SaveRentalPricingGroupRequest {
   id?: string;
   code: string;
   name: string;
   description?: string;
   defaultPricingUnit?: RentalPricingUnit;
+  /**
+   * 新建分组时必须同时提交至少一条基本价。这里只接受“计价单位 + 价格”，
+   * 押金、节假日、阶梯价等高级规则不属于分组建立流程。
+   */
+  initialRates?: RentalPricingGroupInitialRate[];
   memberItemGroupIds: string[];
   status?: "enabled" | "disabled";
 }

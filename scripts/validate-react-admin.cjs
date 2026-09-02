@@ -91,11 +91,22 @@ const themeSource = read("apps/admin/src/app/theme.tsx");
   '[["none", securityRuleLabels.none]]'
 ].forEach((label) => requireText(governancePage, label, "independent deposit and preauthorization rule UI"));
 [
+  'name="initialRates"',
+  'name={[field.name, "baseAmount"]}',
+  "只需选择计价单位并填写对应价格"
+].forEach((label) => requireText(pricingGroupPage, label, "pricing group must create simple base rates"));
+[
+  "初始化未定价分组",
   'name={[field.name, "preAuthAmount"]}',
   'name={[field.name, "preAuthMultiple"]}',
   "每件固定押金",
   "每件预授权额度"
-].forEach((label) => requireText(commercialPage, label, "independent deposit and preauthorization rate UI"));
+].forEach((label) => forbidText(commercialPage, label, "base pricing page must not expose initialization or advanced pricing fields"));
+[
+  "新增统一调价计划",
+  "一次计划统一调整当前整体价格",
+  'queryKey: ["rental-core", "price-adjustments"]'
+].forEach((label) => requireText(commercialPage, label, "workspace-wide price adjustment UI"));
 [
   "currentPriceVersionDetail.data?.rates",
   "当前整体价格版本",

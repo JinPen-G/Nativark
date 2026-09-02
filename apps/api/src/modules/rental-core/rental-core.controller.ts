@@ -230,7 +230,45 @@ export class RentalCoreController {
     res.send(image.content);
   }
   @Get("pricing-groups") pricingGroups(@Req() req: AuthenticatedRequest) { return this.service.listPricingGroups(req.user.tenantId); }
-  @Post("pricing-groups") savePricingGroup(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalPricingGroupDto) { return this.committed(req.user.tenantId, this.service.savePricingGroup(req.user.tenantId, body)); }
+  @Post("pricing-groups") async savePricingGroup(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalPricingGroupDto) {
+    const tenantId = req.user.tenantId;
+    if (!body.initialRates?.length) throw new BadRequestException("新建定价分组时至少填写一条基本价");
+    const uniqueUnits = new Set(body.initialRates.map((row) => row.unit));
+    if (uniqueUnits.size !== body.initialRates.length) throw new BadRequestException("同一个计价单位只能填写一条基本价");
+
+    let group!: Awaited<ReturnType<RentalCoreService["savePricingGroup"]>>;
+    let plan!: Awaited<ReturnType<RentalBusinessService["savePricingPlan"]>>;
+    await this.prisma.$transaction(async (tx) => {
+      group = await this.service.savePricingGroup(
+        tenantId,
+        { ...body, defaultPricingUnit: body.defaultPricingUnit ?? body.initialRates![0].unit },
+        tx,
+        true
+      );
+      const context = this.context(tenantId);
+      const pricingGroups = [group, ...(context.pricingGroups ?? []).filter((row) => row.id !== group.id)];
+      plan = await this.business.savePricingPlan(tenantId, { ...context, pricingGroups }, {
+        code: `BASE-${group.code}-${group.id.slice(-8)}`,
+        name: `${group.name} 基本价`,
+        status: "enabled",
+        effectiveFrom: new Date().toISOString(),
+        changeReason: `新建定价分组“${group.name}”并设置基本价`,
+        rates: body.initialRates!.map((row) => ({
+          pricingGroupId: group.id,
+          itemGroupId: group.id,
+          unit: row.unit,
+          baseAmount: row.baseAmount,
+          weekendMultiplier: 1,
+          holidayMultiplier: 1,
+          depositAmount: 0,
+          minimumUnits: 1
+        }))
+      }, req.user.displayName, tx, true);
+    });
+    this.service.commitPricingGroup(group);
+    this.business.commitPricingPlan(tenantId, { ...this.context(tenantId), pricingGroups: [group, ...this.service.listPricingGroups(tenantId).filter((row) => row.id !== group.id)] }, plan);
+    return this.committed(tenantId, group);
+  }
   @Put("pricing-groups/:id") updatePricingGroup(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalPricingGroupDto) { return this.committed(req.user.tenantId, this.service.savePricingGroup(req.user.tenantId, { ...body, id })); }
   @Get("assets") assets(@Req() req: AuthenticatedRequest) { return this.service.listAssets(req.user.tenantId); }
   @Post("assets") saveAsset(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalAssetDto) { return this.committed(req.user.tenantId, this.service.saveAsset(req.user.tenantId, body)); }
