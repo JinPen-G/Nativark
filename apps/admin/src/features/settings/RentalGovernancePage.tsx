@@ -839,11 +839,11 @@ export function RentalGovernancePage() {
             }
           >
             {tab === "category" && (
-              <Space direction="vertical" size={16} style={{ width: "100%" }}>
+              <Space orientation="vertical" size={16} style={{ width: "100%" }}>
                 <Alert
                   type="info"
                   showIcon
-                  message={`${category.name} · 模型 ${category.version}`}
+                  title={`${category.name} · 模型 ${category.version}`}
                   description="经营品类创建后固定；租户只能在品类支持的计价、履约、库存、预授权和资质能力内配置。"
                 />
                 <Row gutter={[16, 16]}>
@@ -1013,7 +1013,7 @@ export function RentalGovernancePage() {
               </Space>
             )}
             {tab === "rules" && (
-              <Space direction="vertical" size={16} style={{ width: "100%" }}>
+              <Space orientation="vertical" size={16} style={{ width: "100%" }}>
                 <div className="table-toolbar">
                   <Space>
                     {currentRule ? (
@@ -1040,7 +1040,7 @@ export function RentalGovernancePage() {
                   <Alert
                     type="info"
                     showIcon
-                    message={`有 ${pendingRules.length} 个待生效版本`}
+                    title={`有 ${pendingRules.length} 个待生效版本`}
                     description={pendingRules
                       .map(
                         (row) =>
@@ -1210,7 +1210,7 @@ export function RentalGovernancePage() {
               </Space>
             )}
             {tab === "calendar" && (
-              <Space direction="vertical" size={16} style={{ width: "100%" }}>
+              <Space orientation="vertical" size={16} style={{ width: "100%" }}>
                 <div className="table-toolbar">
                   <Space>
                     <Select
@@ -1296,7 +1296,7 @@ export function RentalGovernancePage() {
                   <Alert
                     type="warning"
                     showIcon
-                    message={`当前引用的官方来源有新版本 v${calendar.data.latestOfficialSourceVersion}`}
+                    title={`当前引用的官方来源有新版本 v${calendar.data.latestOfficialSourceVersion}`}
                     description="平台已登记该年度更新的官方节假日数据。应用后会在草稿上生成新的一版，仍需发布才生效，且不会改动已有报价与订单。"
                     action={
                       canEditCalendar ? (
@@ -1310,7 +1310,7 @@ export function RentalGovernancePage() {
                   <Alert
                     type="info"
                     showIcon
-                    message={`平台已登记该年度可用的官方来源（${calendar.data.availableOfficialSourceCount ?? 0} 个），可选择应用`}
+                    title={`平台已登记该年度可用的官方来源（${calendar.data.availableOfficialSourceCount ?? 0} 个），可选择应用`}
                     description="本经营空间尚未引用任何官方来源版本；当前日历按每周默认模板与人工覆盖生成。选择来源时可查看各来源的公告日期与版本。"
                     action={
                       canEditCalendar ? (
@@ -1324,21 +1324,21 @@ export function RentalGovernancePage() {
                   <Alert
                     type="info"
                     showIcon
-                    message="当前没有可用的官方来源"
+                    title="当前没有可用的官方来源"
                     description="平台登记过该年度官方来源，但目前全部已停用；如需应用请联系平台管理员恢复来源。"
                   />
                 ) : !calendar.data?.sourceName ? (
                   <Alert
                     type="info"
                     showIcon
-                    message="平台尚未登记该年度公共官方来源"
+                    title="平台尚未登记该年度公共官方来源"
                     description="官方节假日来源由 SaaS 平台管理员维护；登记后这里会提示可选择应用。"
                   />
                 ) : null}
                 <Alert
                   type="info"
                   showIcon
-                  message="法定节假日与调休工作日必须来自有来源记录的年度数据"
+                  title="法定节假日与调休工作日必须来自有来源记录的年度数据"
                   description="租户可以覆盖特殊营业日、停业日和营业时段；特殊价格只在价格模块维护，日历保存规则引用。报价会记录命中的年度日历与价格版本。"
                 />
                 {/* 需求 4.5.9：默认渲染自然月七列月历，点击日期查看/编辑；全年长列表按需切换。 */}
@@ -1386,7 +1386,7 @@ export function RentalGovernancePage() {
                         title: "营业时段",
                         render: (_, row) =>
                           row.hours?.windows?.length ? (
-                            <Space direction="vertical" size={0}>
+                            <Space orientation="vertical" size={0}>
                               <Typography.Text style={{ fontSize: 12 }}>
                                 {row.hours.windows.map((w) => `${w.start}-${w.end}`).join("、")}
                               </Typography.Text>
@@ -1412,7 +1412,7 @@ export function RentalGovernancePage() {
                         // 只显示"来源=人工覆盖"而不显示原值，运营无法判断撤销后会恢复成什么。
                         render: (_, row) =>
                           row.source === "tenant_override" ? (
-                            <Space direction="vertical" size={0}>
+                            <Space orientation="vertical" size={0}>
                               <Typography.Text style={{ fontSize: 12 }}>
                                 {row.overriddenFrom
                                   ? `${row.overriddenFrom.name} · ${row.overriddenFrom.dayType} · ×${row.overriddenFrom.pricingMultiplier}`
@@ -1468,11 +1468,11 @@ export function RentalGovernancePage() {
               </Space>
             )}
             {tab === "membership" && (
-              <Space direction="vertical" size={16} style={{ width: "100%" }}>
+              <Space orientation="vertical" size={16} style={{ width: "100%" }}>
                 <Alert
                   type="info"
                   showIcon
-                  message="注册、实名审核和首单完成会自动触发奖励判断"
+                  title="注册、实名审核和首单完成会自动触发奖励判断"
                   description="下方人工入口只用于补偿与联调；自动事件使用客户事件幂等键。积分、营销余额和奖励券会进入 Rental Core 权益账户；营销余额不是支付机构资金账户。"
                 />
                 <Row gutter={[16, 16]}>
@@ -1699,7 +1699,7 @@ export function RentalGovernancePage() {
               </Space>
             )}
             {tab === "notifications" && (
-              <Space direction="vertical" size={16} style={{ width: "100%" }}>
+              <Space orientation="vertical" size={16} style={{ width: "100%" }}>
                 <div className="table-toolbar">
                   <Typography.Text type="secondary">
                     只有租户设置已启用的事件与渠道可以保存模板；发送时严格校验变量
@@ -1795,7 +1795,7 @@ export function RentalGovernancePage() {
             ? `编辑规则草稿 v${ruleEditor.version}`
             : `新建规则草稿 · 基于 v${ruleEditor?.version ?? ""}`
         }
-        width={760}
+        size={760}
         open={Boolean(ruleEditor)}
         onClose={() => setRuleEditor(undefined)}
         destroyOnHidden
@@ -2162,7 +2162,7 @@ export function RentalGovernancePage() {
           type="info"
           showIcon
           style={{ marginBottom: 12 }}
-          message="恢复只会按该版本的内容生成新草稿"
+          title="恢复只会按该版本的内容生成新草稿"
           description="被恢复的版本原样保留，已发布版本不可修改；新草稿仍需具备发布权限的人发布后才对客户生效。"
         />
         <Form
@@ -2193,7 +2193,7 @@ export function RentalGovernancePage() {
           type="warning"
           showIcon
           style={{ marginBottom: 12 }}
-          message="作废后该版本不再参与任何租期的规则匹配"
+          title="作废后该版本不再参与任何租期的规则匹配"
           description="若它是当前唯一生效版本，作废后落在该时段的报价会直接失败而不是回落到旧规则；请先发布替代版本。已锁定的报价与订单按各自快照结算，不受影响。"
         />
         <Form form={ruleVoidForm} layout="vertical" onFinish={(values) => voidRule.mutate(values)}>
@@ -2208,7 +2208,7 @@ export function RentalGovernancePage() {
       </Modal>
       <Drawer
         title={`覆盖营业日 · ${calendarDay?.date ?? ""}`}
-        width={480}
+        size={480}
         open={Boolean(calendarDay)}
         onClose={() => setCalendarDay(undefined)}
         destroyOnHidden
@@ -2237,7 +2237,7 @@ export function RentalGovernancePage() {
               style={{ marginBottom: 16 }}
               type="info"
               showIcon
-              message={
+              title={
                 calendarDay.overrideScope.kind === "range"
                   ? `属于范围覆盖：${calendarDay.overrideScope.rangeStart} ~ ${calendarDay.overrideScope.rangeEnd}`
                   : "单日覆盖"
@@ -2257,7 +2257,7 @@ export function RentalGovernancePage() {
               style={{ marginBottom: 16 }}
               extra={canManagePrice ? <Button type="link" onClick={() => navigate("/rental/pricing")}>进入基础定价</Button> : undefined}
             >
-              <Space direction="vertical" size={4}>
+              <Space orientation="vertical" size={4}>
                 {(calendar.data?.timePriceSummary ?? []).find((row) => row.date === calendarDay.date)!.entries.map((entry, index) => (
                   <Typography.Text key={`${entry.version}-${entry.unit}-${entry.timeLabel}-${index}`}>
                     {entry.planCode ?? `价格版本 ${entry.version}`} · {entry.itemGroupCodes.join("、")} · {entry.timeLabel} ×{entry.multiplier}
@@ -2291,7 +2291,7 @@ export function RentalGovernancePage() {
             style={{ marginBottom: 16 }}
             type="info"
             showIcon
-            message="日历不再直接设置价格系数"
+            title="日历不再直接设置价格系数"
             description="逐商品价格、日期类型价格和一次性分时价格都在基础定价中维护；日期范围覆盖只保存一次性规则引用。"
           />
           <Form.Item name="pricingOverrideRef" label="一次性价格引用" tooltip="填写基础定价中一次性日期时间价格规则的引用标识；留空表示不引用特殊价格。">
@@ -2334,16 +2334,16 @@ export function RentalGovernancePage() {
           公共数据由 SaaS 平台管理员在注册表里维护，这里只能挑一版应用到本空间草稿。 */}
       <Drawer
         title={`应用 ${year} 年公共官方日历来源`}
-        width={720}
+        size={720}
         open={importOpen}
         onClose={() => setImportOpen(false)}
         destroyOnHidden
       >
-        <Space direction="vertical" size={16} style={{ width: "100%" }}>
+        <Space orientation="vertical" size={16} style={{ width: "100%" }}>
           <Alert
             type="info"
             showIcon
-            message="官方数据是公共基础来源，由平台维护、按版本发布"
+            title="官方数据是公共基础来源，由平台维护、按版本发布"
             description="应用某一版只会生成或更新本经营空间的草稿；已有的人工覆盖会被保留，本版未包含的日期会回落到每周模板。确认后仍需你自己发布。"
           />
           <QueryState loading={officialSourceVersions.isLoading} error={officialSourceVersions.error}>
@@ -2399,7 +2399,7 @@ export function RentalGovernancePage() {
           <Alert
             type="info"
             showIcon
-            message="发布后不可原地修改"
+            title="发布后不可原地修改"
             description="当前已发布版本会被标记为「已被替代」并保留，历史报价仍可追溯原版本；变更原因与相对上一版本的日期差异会一并记录。"
             style={{ marginBottom: 16 }}
           />
@@ -2407,7 +2407,7 @@ export function RentalGovernancePage() {
               存在未来订单时必须提示。预览是只读推演，不会改动这些订单。 */}
           <QueryState loading={publishPreview.isLoading} error={publishPreview.error}>
             {publishPreview.data && (
-              <Space direction="vertical" size={12} style={{ width: "100%", marginBottom: 16 }}>
+              <Space orientation="vertical" size={12} style={{ width: "100%", marginBottom: 16 }}>
                 <Descriptions size="small" column={2} bordered>
                   <Descriptions.Item label="待发布版本">v{publishPreview.data.draftVersion}</Descriptions.Item>
                   <Descriptions.Item label="当前已发布">
@@ -2430,7 +2430,7 @@ export function RentalGovernancePage() {
                   <Alert
                     type="info"
                     showIcon
-                    message="该年度首次发布：差异基准是每周默认营业模板"
+                    title="该年度首次发布：差异基准是每周默认营业模板"
                     description="下面列出的是这次发布相对周模板真正带来的业务变化（人工覆盖、官方节假日、停业或限时、特殊价格）；与「空日历」比会把全年 365 天都列出来，没有筛选价值。"
                   />
                 )}
@@ -2490,9 +2490,9 @@ export function RentalGovernancePage() {
                   <Alert
                     type="warning"
                     showIcon
-                    message={`有 ${publishPreview.data.futureOrders.length} 张未来订单落在受影响日期上`}
+                    title={`有 ${publishPreview.data.futureOrders.length} 张未来订单落在受影响日期上`}
                     description={
-                      <Space direction="vertical" size={0}>
+                      <Space orientation="vertical" size={0}>
                         <Typography.Text style={{ fontSize: 12 }}>
                           发布不会改动这些订单，它们继续按各自的订单快照执行；如需调整请单独处理。
                         </Typography.Text>
@@ -2526,14 +2526,14 @@ export function RentalGovernancePage() {
         title={`${year} 年度日历历史版本`}
         open={historyOpen}
         onClose={() => setHistoryOpen(false)}
-        width={880}
+        size={880}
         destroyOnHidden
       >
-        <Space direction="vertical" size={16} style={{ width: "100%" }}>
+        <Space orientation="vertical" size={16} style={{ width: "100%" }}>
           <Alert
             type="info"
             showIcon
-            message="历史版本只读保留，不得删除或原地改回"
+            title="历史版本只读保留，不得删除或原地改回"
             description="已发布版本被新版本取代后进入「已被替代」，历史报价仍按原版本追溯；只有草稿可以作废。"
           />
           <QueryState loading={calendarVersions.isLoading} error={calendarVersions.error}>
@@ -2569,7 +2569,7 @@ export function RentalGovernancePage() {
                 {
                   title: "变更原因/发布人",
                   render: (_, row) => (
-                    <Space direction="vertical" size={0}>
+                    <Space orientation="vertical" size={0}>
                       <Typography.Text style={{ fontSize: 12 }}>{row.changeReason ?? "—"}</Typography.Text>
                       <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                         {row.publishedBy ?? ""}
@@ -2629,7 +2629,7 @@ export function RentalGovernancePage() {
             >
               <QueryState loading={calendarVersionDetail.isLoading} error={calendarVersionDetail.error}>
                 {calendarVersionDetail.data && (
-                  <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                  <Space orientation="vertical" size={12} style={{ width: "100%" }}>
                     <Descriptions size="small" column={2} bordered>
                       <Descriptions.Item label="状态">
                         {calendarStatusLabels[calendarVersionDetail.data.status] ?? calendarVersionDetail.data.status}
@@ -2729,7 +2729,7 @@ export function RentalGovernancePage() {
           <Alert
             type="warning"
             showIcon
-            message="只有草稿可以作废"
+            title="只有草稿可以作废"
             description="作废后该草稿不再进入编辑视图，但记录本身保留并写入作废原因、操作人与时间；已发布版本请发布新版本替代，已被替代版本必须保留以供历史报价追溯。"
             style={{ marginBottom: 16 }}
           />
@@ -2761,7 +2761,7 @@ export function RentalGovernancePage() {
           <Alert
             type="info"
             showIcon
-            message="恢复不会原地改回旧版本"
+            title="恢复不会原地改回旧版本"
             description="会以该版本的逐日内容生成一个新草稿；被恢复的版本与当前已发布版本都保持原样。新草稿仍需经发布前预检、填写变更原因后再发布。"
             style={{ marginBottom: 16 }}
           />
@@ -2798,7 +2798,7 @@ export function RentalGovernancePage() {
           <Alert
             type="warning"
             showIcon
-            message={
+            title={
               revertTarget?.overriddenFrom
                 ? `将恢复为：${revertTarget.overriddenFrom.name} · ${revertTarget.overriddenFrom.dayType} · 价格系数 ×${revertTarget.overriddenFrom.pricingMultiplier}`
                 : "该日期没有官方原值，将按每周模板重算"
@@ -2821,7 +2821,7 @@ export function RentalGovernancePage() {
         title={
           templateForm.getFieldValue("id") ? "编辑通知模板" : "新增通知模板"
         }
-        width={680}
+        size={680}
         open={Boolean(templateEditor)}
         onClose={() => setTemplateEditor(null)}
         destroyOnHidden

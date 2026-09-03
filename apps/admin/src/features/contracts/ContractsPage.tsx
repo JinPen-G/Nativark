@@ -57,7 +57,7 @@ export function ContractsPage() {
   return (
     <>
       <PageHeader title="合同与单据" description="集中管理租赁合同、领取单、归还单和结算单。电子签章与打印当前是后端 mock 能力。" extra={<Button type="primary" icon={<FileAddOutlined />} onClick={() => setCreateOpen(true)}>生成合同</Button>} />
-      <Alert type="warning" showIcon message="外部电子合同尚未接入" description="“模拟打印”和“模拟签署”仅验证业务留痕与状态流转，不代表真实文件已送达或具备法律效力。" style={{ marginBottom: 16 }} />
+      <Alert type="warning" showIcon title="外部电子合同尚未接入" description="“模拟打印”和“模拟签署”仅验证业务留痕与状态流转，不代表真实文件已送达或具备法律效力。" style={{ marginBottom: 16 }} />
       <Row className="page-metrics" gutter={[16, 16]}>
         {[
           ["文档总数", stats?.total ?? 0], ["待签署", stats?.pending ?? 0], ["已签署", stats?.signed ?? 0], ["已生成打印", stats?.printed ?? 0]
@@ -89,7 +89,7 @@ export function ContractsPage() {
         </QueryState>
       </Card>
 
-      <Drawer title="生成订单合同" open={createOpen} width={480} destroyOnHidden onClose={() => setCreateOpen(false)} extra={<Button type="primary" loading={createContract.isPending} onClick={() => createForm.submit()}>生成</Button>}>
+      <Drawer title="生成订单合同" open={createOpen} size={480} destroyOnHidden onClose={() => setCreateOpen(false)} extra={<Button type="primary" loading={createContract.isPending} onClick={() => createForm.submit()}>生成</Button>}>
         <Form form={createForm} layout="vertical" initialValues={{ type: "rental_contract", signMethod: "counter" }} onFinish={(values) => createContract.mutate({ orderId: values.orderId, values })}>
           <Form.Item name="orderId" label="关联订单" rules={[{ required: true }]}><Select showSearch optionFilterProp="label" options={(orders.data ?? []).map((item) => ({ value: item.id, label: `${item.orderNo} · ${item.customerName} · ${item.vehicleGroupName}` }))} /></Form.Item>
           <Form.Item name="type" label="文档类型" rules={[{ required: true }]}><Select options={Object.entries(typeLabels).map(([value, label]) => ({ value, label }))} /></Form.Item>
@@ -98,8 +98,8 @@ export function ContractsPage() {
         </Form>
       </Drawer>
 
-      <Drawer title={`模拟签署 · ${signing?.documentNo ?? ""}`} open={Boolean(signing)} width={440} destroyOnHidden onClose={() => setSigning(undefined)} extra={<Button type="primary" loading={signContract.isPending} onClick={() => signForm.submit()}>确认模拟签署</Button>}>
-        <Alert type="info" showIcon message="此操作不会调用真实签章服务" style={{ marginBottom: 20 }} />
+      <Drawer title={`模拟签署 · ${signing?.documentNo ?? ""}`} open={Boolean(signing)} size={440} destroyOnHidden onClose={() => setSigning(undefined)} extra={<Button type="primary" loading={signContract.isPending} onClick={() => signForm.submit()}>确认模拟签署</Button>}>
+        <Alert type="info" showIcon title="此操作不会调用真实签章服务" style={{ marginBottom: 20 }} />
         <Form form={signForm} layout="vertical" onFinish={(values) => signing && signContract.mutate({ record: signing, values })}>
           <Form.Item name="signerName" label="签署人" rules={[{ required: true }]}><Input /></Form.Item>
           <Form.Item name="signMethod" label="签署方式" rules={[{ required: true }]}><Select options={[{ value: "counter", label: "柜台签署" }, { value: "offline_paper", label: "线下纸质" }, { value: "app", label: "App（预留）" }]} /></Form.Item>

@@ -70,7 +70,7 @@ export function WorkbenchPage() {
           ]} />
         </Card>
         <Card className="workspace-panel" title="库存状态" extra={<Button type="link" onClick={() => navigate("/rental/assets")}>资产与库存 <ArrowRightOutlined /></Button>}>
-          <Space direction="vertical" size={0} style={{ width: "100%" }}>
+          <Space orientation="vertical" size={0} style={{ width: "100%" }}>
             {assetDistribution.map(([status, value]) => <div className="status-row" key={status}><div><Typography.Text strong>{assetStatusLabels[status as RentalAssetStatus] ?? status}</Typography.Text><Typography.Text type="secondary">独立资产</Typography.Text></div><Tag color={status === "available" ? "green" : status === "maintenance" ? "orange" : "blue"}>{value} 项</Tag></div>)}
             {(stocks.data ?? []).map((stock) => <div className="status-row" key={stock.id}><div><Typography.Text strong>{stock.itemGroupName}</Typography.Text><Typography.Text type="secondary">{stock.locationName} · 数量库存</Typography.Text></div><Tag color={stock.availableQuantity > 0 ? "green" : "orange"}>{stock.availableQuantity} / {stock.onHandQuantity}</Tag></div>)}
             {!assetDistribution.length && !(stocks.data ?? []).length && <Typography.Text type="secondary">尚未建立资产或数量库存。</Typography.Text>}

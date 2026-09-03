@@ -71,7 +71,7 @@ export function CouponPage() {
         </QueryState>
       </Card>
 
-      <Drawer title={editing ? "编辑优惠券模板" : "新增优惠券模板"} width={640} open={drawerOpen} destroyOnHidden onClose={() => setDrawerOpen(false)} extra={<Button type="primary" loading={save.isPending} onClick={() => form.submit()}>保存</Button>}>
+      <Drawer title={editing ? "编辑优惠券模板" : "新增优惠券模板"} size={640} open={drawerOpen} destroyOnHidden onClose={() => setDrawerOpen(false)} extra={<Button type="primary" loading={save.isPending} onClick={() => form.submit()}>保存</Button>}>
         <Form<SaveRentalCouponTemplateRequest> form={form} layout="vertical" onFinish={(values) => save.mutate({ ...values, id: editing?.id })}>
           <Row gutter={12}>
             <Col span={12}><Form.Item name="code" label="模板编码" rules={[{ required: true }]}><Input disabled={Boolean(editing)} /></Form.Item></Col>

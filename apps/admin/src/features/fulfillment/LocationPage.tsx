@@ -78,7 +78,7 @@ export function LocationPage() {
         </QueryState>
       </Card>
 
-      <Drawer title={editing ? "编辑履约地点" : "新增履约地点"} width={640} open={drawerOpen} destroyOnHidden onClose={() => setDrawerOpen(false)} extra={<Button type="primary" loading={save.isPending} onClick={() => form.submit()}>保存</Button>}>
+      <Drawer title={editing ? "编辑履约地点" : "新增履约地点"} size={640} open={drawerOpen} destroyOnHidden onClose={() => setDrawerOpen(false)} extra={<Button type="primary" loading={save.isPending} onClick={() => form.submit()}>保存</Button>}>
         <Form<SaveRentalFulfillmentLocationRequest> form={form} layout="vertical" onFinish={(values) => save.mutate({ ...values, id: editing?.id })}>
           <Row gutter={12}>
             <Col span={12}><Form.Item name="code" label="地点编码" rules={[{ required: true }]}><Input disabled={Boolean(editing)} /></Form.Item></Col>
@@ -97,7 +97,7 @@ export function LocationPage() {
           </Row>
         </Form>
       </Drawer>
-      <Drawer title={editingOperator ? "编辑经营主体" : "新增经营主体"} width={560} open={operatorDrawerOpen} destroyOnHidden onClose={() => setOperatorDrawerOpen(false)} extra={<Button type="primary" loading={saveOperator.isPending} onClick={() => operatorForm.submit()}>保存</Button>}>
+      <Drawer title={editingOperator ? "编辑经营主体" : "新增经营主体"} size={560} open={operatorDrawerOpen} destroyOnHidden onClose={() => setOperatorDrawerOpen(false)} extra={<Button type="primary" loading={saveOperator.isPending} onClick={() => operatorForm.submit()}>保存</Button>}>
         <Form<SaveRentalFulfillmentOperatorRequest> form={operatorForm} layout="vertical" onFinish={(values) => saveOperator.mutate({ ...values, id: editingOperator?.id })}>
           <Row gutter={12}>
             <Col span={12}><Form.Item name="code" label="主体编码" rules={[{ required: true }]}><Input disabled={Boolean(editingOperator)} /></Form.Item></Col>

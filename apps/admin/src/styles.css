@@ -291,8 +291,15 @@ button, input, textarea, select { font: inherit; }
 .content-canvas { width: 100%; }
 
 .page-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 36px; margin-bottom: 16px; }
-/* 标题行：标题 + 紧跟的说明入口；右侧只放导出、新增这类动作。 */
+/* 标题行：图标 + 标题 + 紧跟的说明入口；右侧只放导出、新增这类动作。 */
 .page-title-row { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.page-title-icon {
+  display: inline-flex;
+  flex: none;
+  margin-right: 8px;
+  color: var(--rental-color-text-secondary);
+  font-size: 17px;
+}
 .page-title-row .ant-btn { color: var(--rental-color-text-quaternary); }
 .page-title-row .ant-btn:hover { color: var(--rental-color-text-secondary); }
 .page-title {
@@ -318,8 +325,7 @@ button, input, textarea, select { font: inherit; }
   background: var(--rental-color-bg-container);
   box-shadow: none;
 }
-.workspace-panel .ant-card-head-title,
-.data-panel .ant-card-head-title,
+/* 卡片标题统一 16/600：不按 workspace-panel、data-panel 再各写一份，同一个组件只有一种字号。 */
 .ant-card .ant-card-head-title { font-size: 16px; font-weight: 600; line-height: 24px; }
 .panel-title { display: flex; align-items: center; gap: 8px; }
 .panel-count {
@@ -377,6 +383,7 @@ button, input, textarea, select { font: inherit; }
 .ant-btn-circle,
 .ant-btn.ant-btn-icon-only { border-radius: 50%; }
 
+/* 胶囊态的分段控件与页签共用同一套尺寸：3px 内边距 + 18px 字距，视觉上是同一个控件。 */
 .ant-segmented {
   padding: 3px;
   border-radius: 999px;
@@ -384,11 +391,10 @@ button, input, textarea, select { font: inherit; }
 }
 .ant-segmented .ant-segmented-item,
 .ant-segmented .ant-segmented-thumb { border-radius: 999px; }
-.ant-segmented .ant-segmented-item-label { min-width: 88px; padding-inline: 16px; }
+.ant-segmented .ant-segmented-item-label { padding-inline: 18px; }
 .ant-segmented .ant-segmented-item-selected {
   color: var(--rental-color-text);
   background: var(--rental-color-bg-container);
-  box-shadow: 0 2px 0 rgba(0, 0, 0, .02);
   font-weight: 600;
 }
 
@@ -401,20 +407,36 @@ button, input, textarea, select { font: inherit; }
   background: var(--rental-color-fill-tertiary);
 }
 .ant-tabs .ant-tabs-tab {
-  min-height: 28px;
+  position: relative;
+  z-index: 1;
+  min-height: 26px;
   margin: 0 !important;
   padding: 3px 18px;
   border-radius: 999px;
-  transition: color .2s, background-color .2s, box-shadow .2s, transform .1s ease-out;
+  transition: color .2s, transform .1s ease-out;
 }
 .ant-tabs .ant-tabs-tab:hover { color: var(--rental-color-text); }
 .ant-tabs .ant-tabs-tab:active { transform: scale(.97); }
-.ant-tabs .ant-tabs-tab-active {
+/* 选中项自己不画底色：白块交给 ink-bar，否则两处高亮会同时出现。 */
+.ant-tabs .ant-tabs-tab-active { background: transparent; box-shadow: none; }
+.ant-tabs .ant-tabs-tab-active .ant-tabs-tab-btn { color: var(--rental-color-text) !important; font-weight: 600; }
+/* ink-bar 改造成会滑动的白色滑块，和 Segmented 的 thumb 是同一个交互：
+   antd 本来就用内联 left/width 加 transition 驱动它，之前 display:none 把这段动画一起藏了，
+   于是同样的胶囊控件在分段控件上会滑、在页签上是硬切换。
+
+   三条几何属性必须 !important：antd 对 top 位的页签有更高优先级的
+   `.ant-tabs-top > .ant-tabs-nav .ant-tabs-ink-bar { height: lineWidthBold; bottom: 0 }`，
+   不覆盖的话滑块会退化成贴着底边的一条 3px 白线，在浅色轨道上几乎看不见。
+   阴影取 --rental-box-shadow-tertiary，与 antd 给 Segmented thumb 的是同一个 token。 */
+.ant-tabs .ant-tabs-ink-bar {
+  z-index: 0;
+  top: 3px !important;
+  bottom: 3px !important;
+  height: auto !important;
+  border-radius: 999px;
   background: var(--rental-color-bg-container);
   box-shadow: var(--rental-box-shadow-tertiary);
 }
-.ant-tabs .ant-tabs-tab-active .ant-tabs-tab-btn { color: var(--rental-color-text) !important; font-weight: 600; }
-.ant-tabs .ant-tabs-ink-bar { display: none; }
 
 .tabbed-workspace.ant-card {
   border: 0;
@@ -433,28 +455,14 @@ button, input, textarea, select { font: inherit; }
 .standalone-tabs > .ant-tabs-content-holder > .ant-tabs-content { min-height: 100%; }
 
 .ant-table-wrapper .ant-table-container { border-radius: var(--rental-border-radius-lg); }
-.ant-table-wrapper .ant-table-thead > tr > th { padding: 12px 8px; font-size: 14px; font-weight: 600; }
-.ant-table-wrapper .ant-table-tbody > tr > td { padding: 12px 8px; }
+/* 表格密度由 theme.tsx 的 Table token（cellPaddingBlock/Inline）统一给出，这里不重复写内边距；
+   antd 没有表头字重的 token，所以只留这一条。 */
+.ant-table-wrapper .ant-table-thead > tr > th { font-size: 14px; font-weight: 600; }
 .ant-table-wrapper .ant-table-cell { vertical-align: middle; }
-.ant-table-wrapper .ant-table-tbody .ant-btn-link {
-  min-height: 32px;
-  padding-inline: 10px;
-  border: 1px solid var(--rental-color-border);
-  border-radius: 999px;
-  color: var(--rental-color-text);
-  background: var(--rental-color-bg-container);
-  box-shadow: var(--rental-box-shadow-tertiary);
-}
-.ant-table-wrapper .ant-table-tbody .ant-btn-link:hover {
-  border-color: var(--rental-color-primary-border);
-  color: var(--rental-color-primary);
-  background: var(--rental-color-primary-bg);
-}
-.ant-table-wrapper .ant-table-tbody .ant-btn-link.ant-btn-dangerous {
-  border-color: var(--rental-color-error-border);
-  color: var(--rental-color-error);
-  background: var(--rental-color-error-bg);
-}
+/* 行内操作交给 antd 原生的按钮样式，不再自绘胶囊描边——同一个 type="link" 在表格里
+   长成描边胶囊、在别处是纯文字链接，是这套自绘规则带来的不一致。
+   这里只压一下高度：全局按钮高度是 36，直接用会把每一行撑高。 */
+.ant-table-wrapper .ant-table-tbody .ant-btn { height: 28px; }
 .page-metrics { margin-bottom: 16px; }
 .page-metrics .data-panel { height: 100%; min-height: 110px; }
 .page-metrics .data-panel .ant-card-body { display: flex; align-items: center; min-height: 108px; padding: 24px; }

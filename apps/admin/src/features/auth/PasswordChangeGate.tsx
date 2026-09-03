@@ -34,7 +34,7 @@ export function PasswordChangeGate() {
         <Typography.Paragraph type="secondary">
           临时密码只能用于首次登录。更新后，其他旧会话会立即失效。
         </Typography.Paragraph>
-        <Alert type="info" showIcon message="至少 8 位，并同时包含字母、数字和特殊字符" />
+        <Alert type="info" showIcon title="至少 8 位，并同时包含字母、数字和特殊字符" />
         <Form<PasswordForm> layout="vertical" requiredMark={false} onFinish={submit}>
           <Form.Item name="currentPassword" label="当前临时密码" rules={[{ required: true }]}>
             <Input.Password autoComplete="current-password" />

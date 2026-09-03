@@ -28,7 +28,7 @@ export function OperationsPage() {
       <QueryState loading={loading} error={error}>
         {board.data && (
           <>
-            <Alert showIcon type="warning" style={{ marginBottom: 16 }} message="车辆调度仅对启用调度能力的品类显示；摄影和露营设备默认使用资产准备、领取与归还质检任务。" />
+            <Alert showIcon type="warning" style={{ marginBottom: 16 }} title="车辆调度仅对启用调度能力的品类显示；摄影和露营设备默认使用资产准备、领取与归还质检任务。" />
             <Row className="page-metrics" gutter={[16, 16]}>
               {[
                 { label: "参与订单", value: board.data.metrics.activeOrders },

@@ -72,7 +72,7 @@ export function OfficialCalendarSourcePage() {
   });
 
   return (
-    <Space direction="vertical" size={16} style={{ width: "100%" }}>
+    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <PageHeader
         title="公共官方日历来源"
         description="登记中国大陆官方节假日来源与年度来源版本。租户经营空间只能引用某一版生成自己的年度草稿并自行确认发布。"
@@ -192,7 +192,7 @@ export function OfficialCalendarSourcePage() {
         title={sourceEditor ? `编辑来源：${sourceEditor.name}` : "登记官方来源"}
         open={sourceEditor !== undefined}
         onClose={() => setSourceEditor(undefined)}
-        width={520}
+        size={520}
         destroyOnHidden
         extra={
           <Button type="primary" loading={saveSource.isPending} onClick={() => sourceForm.submit()}>
@@ -234,7 +234,7 @@ export function OfficialCalendarSourcePage() {
           <Alert
             type="warning"
             showIcon
-            message="来源版本只追加，版本号由服务端递增"
+            title="来源版本只追加，版本号由服务端递增"
             description="官方再次调整时请再登记一版，不要修改历史版本——已引用旧版的空间日历、报价与订单必须继续指向原版本。"
             style={{ marginBottom: 16 }}
           />

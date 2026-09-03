@@ -117,7 +117,7 @@ export function PlatformToolsPage() {
       ]} />}</QueryState></> }
     ]} /></Card>
 
-    <Drawer title="平台工具操作" open={Boolean(editor)} width={600} destroyOnHidden onClose={closeEditor} extra={<Button type="primary" loading={saveDictionary.isPending || saveNumber.isPending || savePreset.isPending || createFile.isPending || createPrint.isPending || createJob.isPending || createExport.isPending} onClick={() => form.submit()}>保存</Button>}><Form form={form} layout="vertical" onFinish={(values) => {
+    <Drawer title="平台工具操作" open={Boolean(editor)} size={600} destroyOnHidden onClose={closeEditor} extra={<Button type="primary" loading={saveDictionary.isPending || saveNumber.isPending || savePreset.isPending || createFile.isPending || createPrint.isPending || createJob.isPending || createExport.isPending} onClick={() => form.submit()}>保存</Button>}><Form form={form} layout="vertical" onFinish={(values) => {
       if (editor === "dictionary") saveDictionary.mutate(values as unknown as SavePlatformDictionaryGroupRequest);
       if (editor === "number") saveNumber.mutate(values as unknown as SavePlatformNumberRuleRequest);
       if (editor === "preset") savePreset.mutate(values as unknown as SavePlatformFilterPresetRequest & { filtersText?: string });

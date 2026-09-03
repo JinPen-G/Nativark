@@ -64,7 +64,7 @@ function PricePlaceholder() {
     <Alert
       type="info"
       showIcon
-      message="一次性特殊价格由价格模块提供"
+      title="一次性特殊价格由价格模块提供"
       description="价格值由价格计划维护；日历范围覆盖只保存一次性价格规则的稳定引用，不保存商品价格或空间统一系数。"
     />
   );
@@ -339,7 +339,7 @@ export function CalendarRangeModal({
   return (
     <Drawer
       title={mode === "override" ? `新增日期范围覆盖 · ${year} 年` : `移除日期范围覆盖 · ${year} 年`}
-      width={880}
+      size={880}
       open={open}
       onClose={close}
       destroyOnHidden
@@ -457,7 +457,7 @@ export function CalendarRangeModal({
               style={{ marginBottom: 16 }}
               type="info"
               showIcon
-              message="价格说明"
+              title="价格说明"
               description="本抽屉不设置商品价格，也不会因为价格时段把整天改成假日；周期性分时价格由价格计划维护（PRICE-03）。"
             />
             <PricePlaceholder />
@@ -483,11 +483,11 @@ export function CalendarRangeModal({
       </Form>
 
       {step === "preview" && (
-        <Space direction="vertical" size={12} style={{ width: "100%", marginTop: 8 }}>
+        <Space orientation="vertical" size={12} style={{ width: "100%", marginTop: 8 }}>
           <Alert
             type={needsAck ? "warning" : "info"}
             showIcon
-            message={
+            title={
               mode === "override"
                 ? `预览：共 ${overridePreview?.totalDays ?? 0} 天，其中 ${overridePreview?.conflictCount ?? 0} 天已有人工覆盖`
                 : `移除预览：范围内 ${removePreview?.overrideCount ?? 0} 天有人工覆盖，其余保持不变`
@@ -502,7 +502,7 @@ export function CalendarRangeModal({
             <Alert
               type="warning"
               showIcon
-              message={`有 ${conflicts.length} 天已存在人工覆盖，必须明确确认后才能应用`}
+              title={`有 ${conflicts.length} 天已存在人工覆盖，必须明确确认后才能应用`}
               description={`冲突日期：${conflicts.map((row) => row.date).join("、")}。应用会替换这些日期上现有人工覆盖的原因与取值（历史审计保留在覆盖审计流水里）。`}
               action={
                 <Checkbox checked={conflictAcknowledged} onChange={(event) => setConflictAcknowledged(event.target.checked)}>

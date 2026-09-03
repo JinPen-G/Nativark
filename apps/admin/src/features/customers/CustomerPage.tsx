@@ -180,13 +180,13 @@ export function CustomerPage() {
         </Card>
       </QueryState>
 
-      <Drawer title={`驳回审核 · ${reviewing?.memberName ?? ""}`} open={Boolean(reviewing)} width={420} destroyOnHidden onClose={() => setReviewing(undefined)} extra={<Button danger type="primary" loading={processReview.isPending} onClick={() => reviewForm.submit()}>确认驳回</Button>}>
+      <Drawer title={`驳回审核 · ${reviewing?.memberName ?? ""}`} open={Boolean(reviewing)} size={420} destroyOnHidden onClose={() => setReviewing(undefined)} extra={<Button danger type="primary" loading={processReview.isPending} onClick={() => reviewForm.submit()}>确认驳回</Button>}>
         <Form form={reviewForm} layout="vertical" onFinish={({ remark }) => reviewing && processReview.mutate({ task: reviewing, action: "reject", remark })}>
           <Form.Item name="remark" label="驳回原因" rules={[{ required: true, message: "请填写驳回原因" }]}><Input.TextArea rows={5} /></Form.Item>
         </Form>
       </Drawer>
 
-      <Drawer title={planForm.getFieldValue("id") ? "编辑会员等级" : "新增会员等级"} open={planOpen} width={500} destroyOnHidden onClose={() => setPlanOpen(false)} extra={<Button type="primary" loading={savePlan.isPending} onClick={() => planForm.submit()}>保存</Button>}>
+      <Drawer title={planForm.getFieldValue("id") ? "编辑会员等级" : "新增会员等级"} open={planOpen} size={500} destroyOnHidden onClose={() => setPlanOpen(false)} extra={<Button type="primary" loading={savePlan.isPending} onClick={() => planForm.submit()}>保存</Button>}>
         <Form form={planForm} layout="vertical" onFinish={(values) => savePlan.mutate(values)}>
           <Form.Item name="id" hidden><Input /></Form.Item>
           <Row gutter={12}>
@@ -205,7 +205,7 @@ export function CustomerPage() {
         </Form>
       </Drawer>
 
-      <Drawer title={memberDetail ? `编辑客户 · ${memberDetail.name}` : "新增个人客户"} open={memberOpen} width={620} destroyOnHidden onClose={() => { setMemberOpen(false); setMemberDetail(undefined); }} extra={<Button type="primary" loading={saveMember.isPending} onClick={() => memberForm.submit()}>保存客户</Button>}>
+      <Drawer title={memberDetail ? `编辑客户 · ${memberDetail.name}` : "新增个人客户"} open={memberOpen} size={620} destroyOnHidden onClose={() => { setMemberOpen(false); setMemberDetail(undefined); }} extra={<Button type="primary" loading={saveMember.isPending} onClick={() => memberForm.submit()}>保存客户</Button>}>
         <Form<SaveMemberRequest> form={memberForm} layout="vertical" onFinish={(values) => saveMember.mutate(values)}>
           <Form.Item name="id" hidden><Input /></Form.Item>
           <Row gutter={12}><Col span={12}><Form.Item name="name" label="姓名" rules={[{ required: true }]}><Input /></Form.Item></Col><Col span={12}><Form.Item name="phone" label="手机号" rules={[{ required: true }]}><Input /></Form.Item></Col><Col span={12}><Form.Item name="email" label="邮箱"><Input /></Form.Item></Col><Col span={12}><Form.Item name="source" label="客户来源" rules={[{ required: true }]}><Input /></Form.Item></Col></Row>
@@ -217,7 +217,7 @@ export function CustomerPage() {
         </Form>
       </Drawer>
 
-      <Drawer title={corporateDetail ? `编辑企业 · ${corporateDetail.shortName}` : "新增企业客户"} open={corporateOpen} width={680} destroyOnHidden onClose={() => { setCorporateOpen(false); setCorporateDetail(undefined); }} extra={<Button type="primary" loading={saveCorporate.isPending} onClick={() => corporateForm.submit()}>保存企业</Button>}>
+      <Drawer title={corporateDetail ? `编辑企业 · ${corporateDetail.shortName}` : "新增企业客户"} open={corporateOpen} size={680} destroyOnHidden onClose={() => { setCorporateOpen(false); setCorporateDetail(undefined); }} extra={<Button type="primary" loading={saveCorporate.isPending} onClick={() => corporateForm.submit()}>保存企业</Button>}>
         <Form<SaveCorporateRequest> form={corporateForm} layout="vertical" onFinish={(values) => saveCorporate.mutate({ ...values, contacts: corporateDetail?.contacts ?? [], contracts: corporateDetail?.contracts ?? [] })}>
           <Form.Item name="id" hidden><Input /></Form.Item>
           <Row gutter={12}><Col span={12}><Form.Item name="shortName" label="企业简称" rules={[{ required: true }]}><Input /></Form.Item></Col><Col span={12}><Form.Item name="fullName" label="企业全称" rules={[{ required: true }]}><Input /></Form.Item></Col><Col span={12}><Form.Item name="contactName" label="主联系人" rules={[{ required: true }]}><Input /></Form.Item></Col><Col span={12}><Form.Item name="contactPhone" label="联系电话" rules={[{ required: true }]}><Input /></Form.Item></Col></Row>
@@ -229,7 +229,7 @@ export function CustomerPage() {
         </Form>
       </Drawer>
 
-      <Drawer title={`风险操作 · ${riskMember?.name ?? ""}`} open={Boolean(riskMember)} width={460} destroyOnHidden onClose={() => setRiskMember(undefined)} extra={<Button danger type="primary" loading={processRisk.isPending} onClick={() => riskForm.submit()}>确认执行</Button>}>
+      <Drawer title={`风险操作 · ${riskMember?.name ?? ""}`} open={Boolean(riskMember)} size={460} destroyOnHidden onClose={() => setRiskMember(undefined)} extra={<Button danger type="primary" loading={processRisk.isPending} onClick={() => riskForm.submit()}>确认执行</Button>}>
         <Form<ProcessMemberRiskRequest> form={riskForm} layout="vertical" onFinish={(values) => riskMember && processRisk.mutate({ id: riskMember.id, values })}>
           <Form.Item name="action" label="操作" rules={[{ required: true }]}><Select options={[{ value: "suspend", label: "暂停客户" }, { value: "blacklist", label: "加入黑名单" }, { value: "restore", label: "恢复客户" }]} /></Form.Item>
           <Form.Item name="reason" label="原因" rules={[{ required: true }]}><Input.TextArea rows={4} /></Form.Item><Form.Item name="tags" label="同步风险标签"><Select mode="tags" /></Form.Item>

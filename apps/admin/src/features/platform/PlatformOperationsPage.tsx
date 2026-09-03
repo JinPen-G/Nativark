@@ -146,7 +146,7 @@ export function PlatformOperationsPage() {
         ]} />
       </Card>
 
-      <Drawer title="发送模拟通知" open={notificationOpen} width={480} destroyOnHidden onClose={() => setNotificationOpen(false)} extra={<Button type="primary" loading={sendNotification.isPending} onClick={() => notificationForm.submit()}>写入发送日志</Button>}>
+      <Drawer title="发送模拟通知" open={notificationOpen} size={480} destroyOnHidden onClose={() => setNotificationOpen(false)} extra={<Button type="primary" loading={sendNotification.isPending} onClick={() => notificationForm.submit()}>写入发送日志</Button>}>
         <Typography.Paragraph type="secondary">该功能使用 mock provider，只验证模板变量、渠道选择和审计留痕。</Typography.Paragraph>
         <Form<SendMockNotificationRequest> form={notificationForm} layout="vertical" initialValues={{ businessType: "store_rental_order", targetType: "member", channels: ["APP"] }} onFinish={(values) => sendNotification.mutate({ ...values, operator })}>
           <Form.Item name="templateCode" label="通知模板"><Select allowClear options={(infra.data?.notificationTemplates ?? []).filter((item) => item.enabled).map((item) => ({ value: item.code, label: `${item.name} · ${item.code}` }))} /></Form.Item>

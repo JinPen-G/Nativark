@@ -136,7 +136,7 @@ export function AssetOperationsPage() {
         ]} />
       </Card>
 
-      <Drawer title="新建资产调拨" width={520} open={createOpen} destroyOnHidden onClose={() => setCreateOpen(false)} extra={<Button type="primary" icon={<SwapOutlined />} loading={createTask.isPending} onClick={() => form.submit()}>创建任务</Button>}>
+      <Drawer title="新建资产调拨" size={520} open={createOpen} destroyOnHidden onClose={() => setCreateOpen(false)} extra={<Button type="primary" icon={<SwapOutlined />} loading={createTask.isPending} onClick={() => form.submit()}>创建任务</Button>}>
         <Form form={form} layout="vertical" initialValues={{ targetServiceType: "STORE_STANDARD" }} onFinish={(values) => createTask.mutate({ ...values, operator })}>
           <Form.Item name="vehicleIds" label="待调拨资产" rules={[{ required: true, message: "请选择资产" }]}><Select mode="multiple" showSearch optionFilterProp="label" options={(assets.data?.rows ?? []).filter((item) => item.operationStatus === "idle").map((item) => ({ value: item.id, label: `${item.licensePlate} · ${item.vehicleGroupName} · ${item.currentStoreName}` }))} /></Form.Item>
           <Form.Item name="targetStoreName" label="目标门店" rules={[{ required: true }]}><Select showSearch optionFilterProp="label" options={Array.from(new Set((locations.data?.rows ?? []).map((item) => item.parentStoreName))).map((value) => ({ value, label: value }))} /></Form.Item>
@@ -146,7 +146,7 @@ export function AssetOperationsPage() {
         </Form>
       </Drawer>
 
-      <Drawer title={`调拨详情 · ${detail?.taskNo ?? ""}`} width={640} open={Boolean(detail)} onClose={() => setDetail(undefined)}>
+      <Drawer title={`调拨详情 · ${detail?.taskNo ?? ""}`} size={640} open={Boolean(detail)} onClose={() => setDetail(undefined)}>
         {detail && <>
           <Descriptions bordered size="small" column={2} items={[
             { key: "status", label: "状态", children: transferStatus[detail.status]?.label ?? detail.status },
@@ -159,7 +159,7 @@ export function AssetOperationsPage() {
         </>}
       </Drawer>
 
-      <Drawer title={`绑定设备 · ${bindingDevice?.cid ?? ""}`} width={460} open={Boolean(bindingDevice)} destroyOnHidden onClose={() => setBindingDevice(undefined)} extra={<Button type="primary" loading={bindDevice.isPending} onClick={() => bindingForm.submit()}>保存绑定</Button>}>
+      <Drawer title={`绑定设备 · ${bindingDevice?.cid ?? ""}`} size={460} open={Boolean(bindingDevice)} destroyOnHidden onClose={() => setBindingDevice(undefined)} extra={<Button type="primary" loading={bindDevice.isPending} onClick={() => bindingForm.submit()}>保存绑定</Button>}>
         <Form form={bindingForm} layout="vertical" onFinish={({ vehicleId }) => bindingDevice && bindDevice.mutate({ id: bindingDevice.id, vehicleId })}>
           <Form.Item name="vehicleId" label="车辆资产" rules={[{ required: true, message: "请选择车辆资产" }]}>
             <Select showSearch optionFilterProp="label" options={(assets.data?.rows ?? []).map((item) => ({ value: item.id, label: `${item.licensePlate} · ${item.vehicleGroupName} · ${item.currentStoreName}` }))} />

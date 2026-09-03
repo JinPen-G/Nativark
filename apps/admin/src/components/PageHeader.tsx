@@ -1,6 +1,8 @@
 import { InfoCircleOutlined } from "@ant-design/icons";
 import { Button, Popover, Space } from "antd";
 import { useEffect, type ReactNode } from "react";
+import { useLocation } from "react-router-dom";
+import { findRouteByPath } from "@/app/navigation";
 
 /**
  * 页面顶部一行：左边是标题（+ 页面自己的视图切换），右边是「说明」和主操作。
@@ -19,6 +21,9 @@ export function PageHeader({ title, description, view, extra, note }: {
   extra?: ReactNode;
   note?: { title: string; description: ReactNode };
 }) {
+  const location = useLocation();
+  const icon = findRouteByPath(location.pathname)?.icon;
+
   useEffect(() => {
     document.title = `${title} · Rental OS`;
   }, [title]);
@@ -27,6 +32,8 @@ export function PageHeader({ title, description, view, extra, note }: {
     <>
       <div className="page-toolbar" aria-label={`${title}页面操作`} data-description={description}>
         <div className="page-title-row">
+          {/* 图标取自路由注册表，和侧栏菜单同一个符号；页面不各自传图标，避免两处长歪。 */}
+          {icon && <span className="page-title-icon">{icon}</span>}
           {/* 面包屑已取消，页面标题就落在这里；用原生 h1 而不是 Typography.Title，
               后者会带来一整套「标题 + 副标题」的排版，规范里明确不要。 */}
           <h1 className="page-title">{title}</h1>

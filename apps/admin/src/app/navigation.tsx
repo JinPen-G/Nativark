@@ -111,6 +111,21 @@ export function buildNavigationSections(terminology?: RentalCategoryTerminology)
   });
 }
 
+/**
+ * 按路径找回路由定义。
+ *
+ * 页面标题前的图标由此取得，因此和侧栏菜单必然是同一个符号——图标只在
+ * `APP_ROUTES` 里声明一次，页面不各自再传一份，避免两处慢慢长歪。
+ * 先精确匹配，再按最长前缀兜住 `/rental/orders/:id` 这类带参数的子路由。
+ */
+export function findRouteByPath(pathname: string): AppRouteDefinition | undefined {
+  const all = Object.values(APP_ROUTES);
+  return all.find((route) => route.path === pathname)
+    ?? [...all]
+      .sort((a, b) => b.path.length - a.path.length)
+      .find((route) => pathname.startsWith(`${route.path}/`));
+}
+
 export function canAccessRoute(
   route: AppRouteDefinition,
   hasPermission: (permission?: string) => boolean,

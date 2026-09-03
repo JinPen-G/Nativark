@@ -201,7 +201,7 @@ export function TenantManagementPage() {
 
       <Drawer
         title={editor?.type === "create" ? "初始化 SaaS 租户" : editor?.type === "edit" ? "编辑租户资料" : "变更租户状态"}
-        width={560}
+        size={560}
         open={Boolean(editor)}
         destroyOnHidden
         onClose={closeEditor}
@@ -234,7 +234,7 @@ export function TenantManagementPage() {
 
       <Drawer
         title={workspaceTenant ? `${workspaceTenant.tenantName} · 经营空间` : "经营空间"}
-        width={820}
+        size={820}
         open={Boolean(workspaceTenant)}
         destroyOnHidden
         onClose={() => setWorkspaceTenant(undefined)}
@@ -259,7 +259,7 @@ export function TenantManagementPage() {
 
       <Drawer
         title={workspaceEditor?.type === "create" ? "新增经营空间" : "编辑经营空间"}
-        width={520}
+        size={520}
         open={Boolean(workspaceEditor)}
         destroyOnHidden
         onClose={closeWorkspaceEditor}
