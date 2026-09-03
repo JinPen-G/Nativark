@@ -10,10 +10,12 @@ import type {
   SaveCustomerInvoiceProfileRequest,
   SharedCustomerProfile
 } from "@store-rental/shared";
+import { formatRentalMoney } from "@store-rental/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Button, Card, Checkbox, Descriptions, Drawer, Form, Input, InputNumber, Select, Space, Table, Tabs, Tag, Timeline, Tooltip, Typography } from "antd";
 import { useState } from "react";
 import { customerApi } from "@/api/customer";
+import { useSettlementCurrency } from "@/api/rentalCore";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
@@ -104,6 +106,7 @@ interface StatusFormValues {
 export function CustomerMasterPage() {
   const { message } = App.useApp();
   const queryClient = useQueryClient();
+  const currency = useSettlementCurrency();
   const hasPermission = useAuthStore((state) => state.hasPermission);
   const canManageMember = hasPermission("store-rental:member:manage");
   const canRiskAction = hasPermission("store-rental:member:risk-action");
@@ -566,7 +569,7 @@ export function CustomerMasterPage() {
   const creditItems = (row: NonNullable<typeof credit.data>) => {
     const meta = creditStatusMeta[row.status] ?? { label: row.status, color: "default" };
     return [
-      { key: "limit", label: "授信额度", children: `¥ ${row.creditLimit.toLocaleString("zh-CN")}` },
+      { key: "limit", label: "授信额度", children: formatRentalMoney(row.creditLimit, currency) },
       { key: "term", label: "账期", children: `${row.settlementTermDays} 天` },
       { key: "cycle", label: "账单周期", children: billingCycleLabel[row.billingCycle] ?? row.billingCycle },
       { key: "status", label: "状态", children: <Tag color={meta.color}>{meta.label}</Tag> },

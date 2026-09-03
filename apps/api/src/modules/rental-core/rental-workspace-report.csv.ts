@@ -51,6 +51,8 @@ export function renderOperationReportCsv(report: RentalWorkspaceOperationReport)
   lines.push(row("经营空间报表"));
   lines.push(row("经营空间", report.workspaceId));
   lines.push(row("经营品类", report.categoryCode));
+  // 结算币种（需求 §948）：金额列一律是纯数字，没有这一行，导出件里的金额就没有单位。
+  lines.push(row("结算币种", report.currency));
   lines.push(row("生成时间", report.generatedAt));
   lines.push(row("统计开始", report.filter.from ?? "不限"));
   lines.push(row("统计结束", report.filter.to ?? "不限"));
@@ -65,6 +67,9 @@ export function renderOperationReportCsv(report: RentalWorkspaceOperationReport)
   lines.push(row("租赁收入", report.rentalRevenue));
   lines.push(row("优惠金额", report.discountTotal));
   lines.push(row("应收金额", report.receivableTotal));
+  // 价内税：税额已含在应收里，两行是同一笔钱的拆分，不要相加。
+  lines.push(row("其中税额", report.taxTotal));
+  lines.push(row("不含税应收", report.netOfTaxTotal));
   lines.push(row("异常费用", report.exceptionFeeTotal));
   lines.push(row("异常订单", report.exceptionOrderCount));
   lines.push("");

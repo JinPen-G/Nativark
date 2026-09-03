@@ -2373,6 +2373,22 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: "Settle and close a returned Rental Core order", permissions: ["store-rental:order:settle"], responseSchema: "GenericObject"
   },
   {
+    method: "get", path: "/api/rental/v1/orders/{id}/extensions", tag: "RentalCore", operationId: "listRentalOrderExtensions",
+    summary: "List order extension records", permissions: ["store-rental:order:view"], responseSchema: "GenericObject"
+  },
+  {
+    method: "post", path: "/api/rental/v1/orders/{id}/extensions/preview", tag: "RentalCore", operationId: "previewRentalOrderExtension",
+    summary: "Quote an order extension without persisting", permissions: ["store-rental:order:extend", "store-rental:order:operate"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+  },
+  {
+    method: "post", path: "/api/rental/v1/orders/{id}/extensions", tag: "RentalCore", operationId: "requestRentalOrderExtension",
+    summary: "Apply for an order extension", permissions: ["store-rental:order:extend", "store-rental:order:operate"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+  },
+  {
+    method: "post", path: "/api/rental/v1/orders/{id}/extensions/{extensionId}/pay", tag: "RentalCore", operationId: "payRentalOrderExtension",
+    summary: "Confirm extension payment and extend the rental period", permissions: ["store-rental:order:extend", "store-rental:order:operate"], responseSchema: "GenericObject"
+  },
+  {
     method: "get", path: "/api/rental/v1/inspection-templates", tag: "RentalCore", operationId: "listRentalInspectionTemplates",
     summary: "List category inspection templates", permissions: ["store-rental:order:view", "store-rental:vehicle:view"], responseSchema: "GenericObject"
   },

@@ -22,6 +22,11 @@ import {
   type RentalCalendarPublishPreviewOrder,
   type RentalCalendarVersionSummary,
   type RentalDepositRule,
+  type RentalFulfillmentMode,
+  type RentalOrder,
+  type RentalOrderExtensionPreview,
+  type RentalOrderExtensionRequest,
+  type RentalOrderLine,
   type RentalPreauthorizationRule,
   type RentalCalendarYear,
   type RentalCategoryDefinition,
@@ -108,6 +113,9 @@ import { rentalPricingStrategy } from "./rental-pricing-strategy";
 import { selectDiscountPlans } from "./rental-discount-selection";
 import { resolveQuoteServices } from "./rental-service-catalog";
 import { computeSecurityAmounts, type SecurityLineInput } from "./rental-security-deposit";
+import { roundMoney } from "./rental-money";
+import { computeEarlyReturnRefund, type EarlyReturnRefund } from "./rental-early-return";
+import { effectiveEarlyReturnRule, effectiveExtensionRule, effectiveTaxRule, inclusiveTaxAmount } from "./rental-rule-defaults";
 import {
   assertRuleEffectiveFromAvailable,
   assertRuleVersionEditable,
@@ -170,7 +178,6 @@ function businessStatusOf(day: RentalCalendarDay): RentalCalendarBusinessStatus 
 
 const stamp = () => new Date().toISOString();
 const uid = (prefix: string) => `${prefix}_${randomUUID().slice(0, 8)}`;
-const roundMoney = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 const dayMs = 24 * 60 * 60 * 1000;
 /** 新价格按定价分组寻址；迁移前快照仍用 itemGroupId，同 id 回填保证可继续复算。 */
 const pricingTargetId = (rate: Pick<RentalPricingRate, "itemGroupId" | "pricingGroupId">) => rate.pricingGroupId ?? rate.itemGroupId;
@@ -637,7 +644,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     this.assertNoOverlappingPricingPlan(state, input, rates, existing?.id);
     const result: RentalPricingPlanV1 = {
       id: existing?.id ?? uid("pricing"), tenantId, categoryCode: context.profile.categoryCode,
-      code: input.code.trim(), name: input.name.trim(), currency: "CNY", status: input.status ?? "draft",
+      // 币种跟经营空间走，不写死：同一租户下香港店与深圳店的价格计划币种不同。
+      code: input.code.trim(), name: input.name.trim(), currency: context.settings.pricing.currency, status: input.status ?? "draft",
       version: versionAfter(existing?.version), effectiveFrom: input.effectiveFrom, effectiveTo: input.effectiveTo,
       rates,
       // 同一履约方式配两档会让"取第一条"变成看装载顺序，价格解释不唯一。
@@ -2544,7 +2552,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     tenantId: string,
     context: BusinessContext,
     year: number,
-    orders: Array<{ id: string; orderNo: string; status: string; startAt: string; endAt: string }>
+    orders: Array<{ id: string; orderNo: string; status: string; startAt: string; endAt: string; effectiveEndAt?: string }>
   ): RentalCalendarPublishPreview {
     const draft = this.editableCalendar(tenantId, context, year);
     const published = this.publishedCalendar(tenantId, context, year);
@@ -2607,9 +2615,12 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const futureOrders: RentalCalendarPublishPreviewOrder[] = [];
     for (const order of orders) {
       if (closedStatuses.has(order.status)) continue;
-      if (new Date(order.endAt).getTime() < now) continue;
+      // 续租过的订单当前归还时间在 `effectiveEndAt`：读原 `endAt` 会把仍在租的订单
+      // 整个丢掉，重叠扫描也会在原结束时间就停下，续租那几天的影响看不见。
+      const orderEndAt = order.effectiveEndAt ?? order.endAt;
+      if (new Date(orderEndAt).getTime() < now) continue;
       const overlap: string[] = [];
-      for (let cursor = businessDayIndex(order.startAt, timeZone); cursor <= businessDayIndex(order.endAt, timeZone); cursor += 1) {
+      for (let cursor = businessDayIndex(order.startAt, timeZone); cursor <= businessDayIndex(orderEndAt, timeZone); cursor += 1) {
         const key = businessDateKeyFromIndex(cursor);
         if (affected.has(key)) overlap.push(key);
       }
@@ -2619,7 +2630,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
           orderNo: order.orderNo,
           status: order.status,
           startAt: order.startAt,
-          endAt: order.endAt,
+          endAt: orderEndAt,
           affectedDates: overlap
         });
       }
@@ -3498,6 +3509,137 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return fees.map((fee) => ({ ...fee }));
   }
 
+  /**
+   * 单个商品行的租金计算：单位数 → 逐单位取价 → 阶梯与封顶 → 乘商品数量。
+   *
+   * 抽成私有方法是因为续租必须对**新增时间段**跑完全相同的一段（需求 4.6.9
+   * 「对新增时间段重新报价」）。复制一份迟早让两条路径算出不同的钱——旧模块
+   * `calculateExtensionRent` 用「订单总额 × 0.78」反推日单价，就是这么来的。
+   *
+   * 只负责一行的钱：押金/预授权的求和封顶、优惠、券、服务与总额都不在这里，
+   * 本方法只返回它们需要的逐行事实。
+   */
+  private priceRentalLine(args: {
+    group: { id: string; code: string; name: string };
+    pricingGroup?: { id: string; code: string; name: string };
+    quantity: number;
+    usageQuantity?: number;
+    rate: RentalPricingRate;
+    startAt: string;
+    endAt: string;
+    timeZone: string;
+    shiftHours?: number;
+    shiftStartHours?: number[];
+    calendars: RentalCalendarYear[];
+    legacyDayTypeMultipliers: boolean;
+    planId: string;
+    planVersion: string;
+    /** 费用明细的 code 前缀与类型：报价用 `rental`，续租用 `extension`。 */
+    codePrefix: string;
+    chargeType: RentalQuoteSnapshotV1["chargeLines"][number]["type"];
+    /** 是否套用费率的最小起租量。续租增量期传 false，见下方 `units` 的说明。 */
+    applyMinimumUnits?: boolean;
+  }) {
+    const { rate, group, pricingGroup, quantity } = args;
+    const strategy = rentalPricingStrategy(rate.unit);
+    // 计价上下文：小时粒度来自**费率**（需求"按价格配置的小时粒度"），班次时长与边界
+    // 来自**已发布规则**（需求"由经营空间规则定义"）——两者取数来源不同，不能混。
+    const pricingContext = {
+      usageQuantity: args.usageQuantity,
+      timeZone: args.timeZone,
+      hourGranularityMinutes: rate.hourGranularityMinutes,
+      shiftHours: args.shiftHours,
+      shiftStartHours: args.shiftStartHours
+    };
+    const naturalUnits = strategy.billableUnits(args.startAt, args.endAt, pricingContext);
+    // 最小起租量属于价格计划的职责（技术指南 5.4），因此在这里兜底而不是在策略里。
+    // 续租的增量期**不套**这个下限：最小起租量约束的是"起租"，把它再套一次会让
+    // 3 天起租的费率下，续 1 天也按 3 天收（需求 4.6.9 只允许对新增时间段重新报价）。
+    const units = args.applyMinimumUnits === false ? naturalUnits : Math.max(rate.minimumUnits, naturalUnits);
+    const unitDates = strategy.billableUnitDates(args.startAt, args.endAt, units, pricingContext);
+    // 逐单位解析价格层并记录取价时点（需求 4.5.6 v2.9）：分时价格按取价时点命中。
+    const unitFactors = unitDates.map((unitPoint) =>
+      this.resolveUnitPrice(args.calendars, unitPoint.date, unitPoint.at, rate, args.timeZone, args.legacyDayTypeMultipliers)
+    );
+    const unitMultipliers = unitFactors.map((item) => item.value);
+    // 顺序按需求 4.4.5：阶梯单价 → 逐单位日期价格 → 单件封顶 → 乘商品数量。
+    // 金额、说明与日历快照消费**同一份** breakdown，避免快照里的单位价与金额对不上。
+    const breakdown = strategy.priceBreakdown(rate, units, unitMultipliers);
+    const amount = roundMoney(breakdown.amount * quantity);
+    // 押金与预授权按各自规则独立取数（需求 4.4.7）：这里只产出逐行事实，
+    // 求和、订单级固定/风险项与封顶交给纯函数 computeSecurityAmounts。
+    // 逐行倍数以**行租金**（已含日期价格与封顶）为基数，与该行金额一一对应、可逐行解释。
+    const securityLine: SecurityLineInput = {
+      groupName: group.name,
+      quantity,
+      lineRental: amount,
+      depositUnit: rate.depositAmount,
+      depositMultiple: rate.depositMultiple ?? 0,
+      // 预授权优先取费率的预授权字段；缺省回落到押金字段（存量费率行只配了押金）。
+      preAuthUnit: rate.preAuthAmount ?? rate.depositAmount,
+      preAuthMultiple: rate.preAuthMultiple ?? rate.depositMultiple ?? 0
+    };
+    // 逐日快照的聚合键是「日期 × 命中层 × 系数」：同一日期可能承载多个计费块
+    // （小时粒度），且不同块可能命中不同价格层（12:00 起的覆盖只命中 12:00 之后的块），
+    // 层或系数不同就拆成多行，逐单位金额之和保持不变。
+    const perDate = new Map<string, { count: number; factor: (typeof unitFactors)[number]; priceAt: string }>();
+    unitDates.slice(0, units).forEach((unitPoint, index) => {
+      const factor = unitFactors[index];
+      const key = `${unitPoint.date}|${factor.layer ?? "base"}|${factor.value}`;
+      const existing = perDate.get(key);
+      if (existing) existing.count += 1;
+      else perDate.set(key, { count: 1, factor, priceAt: unitPoint.at });
+    });
+    const calendarRows: RentalQuoteCalendarDay[] = [];
+    for (const [key, entry] of perDate) {
+      calendarRows.push({
+        date: key.split("|")[0],
+        year: entry.factor.year,
+        dayType: entry.factor.type,
+        businessStatus: entry.factor.businessStatus,
+        source: entry.factor.source,
+        calendarVersion: entry.factor.calendarVersion,
+        itemGroupId: group.id,
+        itemGroupCode: group.code,
+        unitCount: entry.count,
+        unitAmount: breakdown.unitAmount,
+        multiplier: entry.factor.value,
+        amount: roundMoney(entry.count * breakdown.unitAmount * entry.factor.value),
+        priceAt: entry.priceAt,
+        hitLayer: entry.factor.layer,
+        pricingPlanVersion: args.planVersion
+      });
+    }
+    // 说明必须能复算：单价来源、单位数、起租量是否生效、逐单位取价与数量缺一不可，
+    // 少一项客服就无法向客户解释这笔钱（需求 4.4.5 + 验收「可解释来源」）。
+    const dateBreakdown = unitDates
+      .slice(0, units)
+      .map((unitPoint, index) => {
+        const factor = unitFactors[index];
+        const at = unitPoint.at ? ` @${unitPoint.at.slice(11, 16)}` : "";
+        return `${unitPoint.date}${at} ${factor.type}×${factor.value.toFixed(2)}${factor.overridden ? "(覆盖)" : ""}`;
+      })
+      .join("、");
+    const detail = [
+      `原始 ${naturalUnits} ${rate.unit} → 计费 ${units} ${rate.unit} × ${quantity} 件`,
+      strategy.explain(rate, units, unitMultipliers),
+      units > naturalUnits ? `起租量 ${rate.minimumUnits} 生效` : undefined,
+      dateBreakdown ? `逐单位取价 ${dateBreakdown}` : undefined
+    ]
+      .filter(Boolean)
+      .join("；");
+    const chargeLine: RentalQuoteSnapshotV1["chargeLines"][number] = {
+      code: `${args.codePrefix}:${pricingGroup?.code ?? group.code}`,
+      name: `${pricingGroup?.name ?? group.name}租金`,
+      type: args.chargeType,
+      amount,
+      sourceId: args.planId,
+      sourceVersion: args.planVersion,
+      detail
+    };
+    return { amount, units, naturalUnits, breakdown, securityLine, calendarRows, chargeLine };
+  }
+
   async createQuote(tenantId: string, context: BusinessContext, input: RentalQuoteRequest) {
     const state = this.state(tenantId, context);
     // 正式经营门禁：缺品类必选能力的 production 空间不得出新报价（Review P1-4）。
@@ -3581,120 +3723,38 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
             : `${pricingGroup?.name ?? group.name} 尚未配置基础价格`
         );
       }
-      const pricingStrategy = rentalPricingStrategy(rate.unit);
-      // 计价上下文：小时粒度来自费率（需求"按价格配置的小时粒度"），
-      // 班次时长与边界来自已发布规则（需求"由经营空间规则定义"），
-      // 因此二者的取数来源不同，不能都塞进费率或都塞进规则。
-      const pricingContext = {
-        usageQuantity: line.usageQuantity,
-        timeZone: quoteTimeZone,
-        hourGranularityMinutes: rate.hourGranularityMinutes,
-        shiftHours: rule.config.pricing?.shiftHours,
-        shiftStartHours: rule.config.pricing?.shiftStartHours
-      };
-      const naturalUnits = pricingStrategy.billableUnits(input.startAt, input.endAt, pricingContext);
-      // 最小起租量属于价格计划的职责（技术指南 5.4），因此在这里兜底而不是在策略里。
-      const units = Math.max(rate.minimumUnits, naturalUnits);
-      // 逐单位日期价格（需求 4.4.5 明确禁止用整段平均倍率代替）。
-      //
-      // 自然日与夜按每个计费日期取价；小时、班次、24 小时、周、30 日月按每个
-      // 计费块开始时所在的营业日期取价。日期序列由策略给出——单位语义在策略里，
-      // 日历知识在服务层，两边各管一段。
+      // 逐行租金交给 priceRentalLine：续租要对新增时间段跑完全相同的一段，
+      // 两条路径必须共用同一个实现，否则迟早算出不同的钱。
       // 兼容开关 `pricing.holidayPricingEnabled` 只关**旧的**空间级周末/节假日倍率，
-      // 不关逐商品的 `dayTypePrices`，也不关时间窗规则（日期时间覆盖、周期性时段）。
-      // 判定与取值都在 resolveUnitPrice 内一次算完，这里不再二次筛选。
-      const legacyDayTypeMultipliers = context.settings.pricing.holidayPricingEnabled;
-      const unitDates = pricingStrategy.billableUnitDates(input.startAt, input.endAt, units, pricingContext);
-      // 逐单位解析价格层并记录**取价时点**（需求 4.5.6 v2.9）：分时价格按取价时点命中。
-      const unitFactors = unitDates.map((unitPoint) =>
-        this.resolveUnitPrice(calendars, unitPoint.date, unitPoint.at, rate, quoteTimeZone, legacyDayTypeMultipliers)
-      );
-      const unitMultipliers = unitFactors.map((item) => item.value);
-      // 停业日不在这里拦：报价可以跨过停业日，只有领取/归还**时点**受限，
-      // 那道校验在 assertFulfillmentDayOpen（需求 4.5.4）。早前此处有一个调用后
-      // 丢弃结果的循环，注释声称"停业日必须拦住"，实际什么也没拦——留着会让
-      // 后来者以为报价路径上还有一道停业校验。
-      // 顺序按需求 4.4.5：阶梯单价 → 逐单位日期价格 → 单件封顶 → 乘商品数量。
-      // 金额、说明与日历快照都消费**同一份** breakdown：早前快照里的单位价用
-      // `amountPerItem(rate, 1, [1])` 现算，等于按 1 个单位选阶梯档，租 7 天命中 80 元档时
-      // 快照仍记基础价 100，无法据快照复算。
-      const breakdown = pricingStrategy.priceBreakdown(rate, units, unitMultipliers);
-      const amount = roundMoney(breakdown.amount * line.quantity);
+      // 不关逐商品的 `dayTypePrices`，也不关时间窗规则；判定在 resolveUnitPrice 内一次算完。
+      // 停业日不在这里拦：报价可以跨过停业日，只有领取/归还**时点**受限（assertFulfillmentDayOpen）。
+      const priced = this.priceRentalLine({
+        group,
+        pricingGroup,
+        quantity: line.quantity,
+        usageQuantity: line.usageQuantity,
+        rate,
+        startAt: input.startAt,
+        endAt: input.endAt,
+        timeZone: quoteTimeZone,
+        shiftHours: rule.config.pricing?.shiftHours,
+        shiftStartHours: rule.config.pricing?.shiftStartHours,
+        calendars,
+        legacyDayTypeMultipliers: context.settings.pricing.holidayPricingEnabled,
+        planId: plan.id,
+        planVersion: plan.version,
+        codePrefix: "rental",
+        chargeType: "rental"
+      });
+      const amount = priced.amount;
       rentalAmount += amount;
       // 拷贝而非引用：当前没有任何路径会就地改这些费率对象（savePricingPlan 是重建数组），
       // 因此**变异测试证明不了**这行的必要性——它是廉价的防御，防的是将来出现就地修改。
       // 真正让历史报价可复算的是"报价自带费率快照"这件事本身，那一条有断言覆盖。
       hitRates.push(structuredClone(rate));
-      // 押金与预授权按各自规则独立取数（需求 4.4.7）。这里只收集逐行事实，
-      // 求和、订单级固定/风险项与封顶交给纯函数 computeSecurityAmounts，逐行倍数以
-      // **行租金**（amount，已含日期价格与封顶）为基数，与该行金额一一对应、可逐行解释。
-      securityLines.push({
-        groupName: group.name,
-        quantity: line.quantity,
-        lineRental: amount,
-        depositUnit: rate.depositAmount,
-        depositMultiple: rate.depositMultiple ?? 0,
-        // 预授权取数优先用费率的预授权字段；缺省回落到押金字段（存量费率行只配了押金）。
-        preAuthUnit: rate.preAuthAmount ?? rate.depositAmount,
-        preAuthMultiple: rate.preAuthMultiple ?? rate.depositMultiple ?? 0
-      });
-      // 计算说明必须能复算：单价来源（基础价/阶梯档/封顶）、单位数、起租量是否生效、
-      // 日历系数与逐日类型、数量，缺一项客服就无法向客户解释这笔钱是怎么来的（验收：可解释来源）。
-      // 需求 4.4.5：说明必须展示原始单位数、进位与最低起租、阶梯档位、
-      // 各日期或计费块价格、封顶前后金额和商品数量，使运营能据快照复算。
-      // 同一日期可能承载多个计费块（小时粒度），且不同计费块可能命中**不同价格层**
-      // （12:00 起的日期时间覆盖只命中 12:00 之后的块），因此聚合键是
-      // 「日期 × 命中层 × 系数」：层或系数不同就拆成多行，逐单位金额之和保持不变。
-      const unitAmountForLine = breakdown.unitAmount;
-      const perDate = new Map<string, { count: number; factor: (typeof unitFactors)[number]; priceAt: string }>();
-      unitDates.slice(0, units).forEach((unitPoint, index) => {
-        const factor = unitFactors[index];
-        const key = `${unitPoint.date}|${factor.layer ?? "base"}|${factor.value}`;
-        const existing = perDate.get(key);
-        if (existing) existing.count += 1;
-        else perDate.set(key, { count: 1, factor, priceAt: unitPoint.at });
-      });
-      for (const [key, entry] of perDate) {
-        const date = key.split("|")[0];
-        const multiplier = entry.factor.value;
-        const hitLayer = entry.factor.layer;
-        calendarSnapshot.push({
-          date,
-          year: entry.factor.year,
-          dayType: entry.factor.type,
-          businessStatus: entry.factor.businessStatus,
-          source: entry.factor.source,
-          calendarVersion: entry.factor.calendarVersion,
-          itemGroupId: group.id,
-          itemGroupCode: group.code,
-          unitCount: entry.count,
-          unitAmount: unitAmountForLine,
-          multiplier,
-          amount: roundMoney(entry.count * unitAmountForLine * multiplier),
-          priceAt: entry.priceAt,
-          hitLayer,
-          pricingPlanVersion: plan.version
-        });
-      }
-      const dateBreakdown = unitDates
-        .slice(0, units)
-        .map((unitPoint, index) => {
-          const factor = unitFactors[index];
-          const at = unitPoint.at ? ` @${unitPoint.at.slice(11, 16)}` : "";
-          // 说明里展示的必须是**实际采用的**系数与层，而不是再按开关折算一遍：
-          // 折算已在 resolveUnitPrice 内完成，这里二次判断只会让说明与金额对不上。
-          return `${unitPoint.date}${at} ${factor.type}×${factor.value.toFixed(2)}${factor.overridden ? "(覆盖)" : ""}`;
-        })
-        .join("、");
-      const detail = [
-        `原始 ${naturalUnits} ${rate.unit} → 计费 ${units} ${rate.unit} × ${line.quantity} 件`,
-        pricingStrategy.explain(rate, units, unitMultipliers),
-        units > naturalUnits ? `起租量 ${rate.minimumUnits} 生效` : undefined,
-        dateBreakdown ? `逐单位取价 ${dateBreakdown}` : undefined
-      ]
-        .filter(Boolean)
-        .join("；");
-      chargeLines.push({ code: `rental:${pricingGroup?.code ?? group.code}`, name: `${pricingGroup?.name ?? group.name}租金`, type: "rental", amount, sourceId: plan.id, sourceVersion: plan.version, detail });
+      securityLines.push(priced.securityLine);
+      calendarSnapshot.push(...priced.calendarRows);
+      chargeLines.push(priced.chargeLine);
     }
     rentalAmount = roundMoney(rentalAmount);
     // 押金与预授权额度独立计算（需求 4.4.7）：两笔独立的钱，可只收押金、只冻结额度，
@@ -3959,6 +4019,15 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       receivableAmount: roundMoney(
         rentalAmount - discountAmount - couponAmount + serviceAmount + fulfillmentAmount + depositAmount
       ),
+      // 价内税：从**租赁应付**反算，押金不计税（押金是代收保证金，不是收入）。
+      // 规则没配税时税率与税额都是 0，报价结果与新增字段之前完全一致。
+      taxRate: effectiveTaxRule(rule.config).rate,
+      taxAmount: inclusiveTaxAmount(
+        roundMoney(rentalAmount - discountAmount - couponAmount + serviceAmount + fulfillmentAmount),
+        effectiveTaxRule(rule.config).rate
+      ),
+      // 结算币种快照（需求 §948）：取报价时空间的币种，之后空间改币种不影响已出的报价。
+      currency: context.settings.pricing.currency,
       pricingPlanVersion: plan.version, ruleVersion: rule.version, ruleSnapshot: structuredClone(rule.config), calendarVersion: calendars.map((calendar) => `${calendar.year}:${calendar.status === "published" ? calendar.version : "draft"}`).join("|"),
       // PRICE-03：记下命中的空间级价格版本。内存数据源没有版本事实，此时留空——
       // 编一个版本号会让「按哪一版算的」这条追溯线索变成假的。
@@ -4157,7 +4226,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       depositAmount: context.category.businessModel.supportsPreauthorization ? 1000 + index * 500 : 200,
       minimumUnits: 1
     }));
-    const pricingPlans: RentalPricingPlanV1[] = [{ id: `${idPrefix}_pricing_default`, tenantId, categoryCode: context.profile.categoryCode, code: "STANDARD", name: `${context.category.name}标准价格`, currency: "CNY", status: "enabled", version: "1.0", effectiveFrom: timestamp, rates, createdAt: timestamp, updatedAt: timestamp }];
+    const pricingPlans: RentalPricingPlanV1[] = [{ id: `${idPrefix}_pricing_default`, tenantId, categoryCode: context.profile.categoryCode, code: "STANDARD", name: `${context.category.name}标准价格`, currency: context.settings.pricing.currency, status: "enabled", version: "1.0", effectiveFrom: timestamp, rates, createdAt: timestamp, updatedAt: timestamp }];
     const discountPlans: RentalDiscountPlan[] = [{ id: `${idPrefix}_discount_long`, tenantId, categoryCode: context.profile.categoryCode, code: "LONG_RENTAL", name: "长期租赁优惠", status: "enabled", discountType: "percentage", discountValue: 5, minimumSpend: 500, appliesTo: "rental", customerScope: "all", applicableItemGroupIds: [], applicablePricingGroupIds: [], applicableDayTypes: [], priority: 100, stackableWithOtherPlans: false, stackableWithCoupon: true, effectiveFrom: timestamp, version: "1.0", createdAt: timestamp, updatedAt: timestamp }];
     const services: RentalValueAddedService[] = context.category.businessModel.valueAddedServicePresets.slice(0, 4).map((name, index) => ({ id: `${idPrefix}_service_${index + 1}`, tenantId, categoryCode: context.profile.categoryCode, code: `SERVICE_${index + 1}`, name, serviceType: serviceType(name), billingUnit: name.includes("配送") || name.includes("运输") ? "per_order" : "per_day", price: 20 + index * 30, minimumQuantity: 1, maximumQuantity: 5, applicableFulfillmentModes: [], applicableLocationIds: [], customerScope: "all", selectionMode: "optional", coverageLimit: name.includes("保险") || name.includes("免赔") ? 5000 : undefined, deductible: name.includes("免赔") ? 200 : undefined, termsVersion: "1.0", terms: `${name}服务条款：以订单保存的本版本范围、限额及除外责任为准。`, applicableItemGroupIds: [], requiresCapacity: false, status: "enabled", version: "1.0", createdAt: timestamp, updatedAt: timestamp }));
     // effectiveFrom 与 publishedAt 同为初始化时刻：没有生效时点的版本不参与时点匹配，
@@ -4316,16 +4385,105 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return this.discountAmount(quote.payableAmount, rule.cancellation.lateFeeType === "percentage" ? "percentage" : "fixed_amount", rule.cancellation.lateFeeValue);
   }
 
-  calculateOverdueCharge(tenantId: string, context: BusinessContext, quote: RentalQuoteSnapshotV1, returnedAt: string) {
+  /**
+   * 逾期费（需求 4.6.10）。
+   *
+   * `scheduledEndAt` 必须传订单的**当前**约定归还时间（`effectiveEndAt`），不能读
+   * `quote.request.endAt`——续租之后报价里的结束时间还是原来那个，拿它判逾期会让刚续上
+   * 的订单立刻被判逾期。缺省仍回落到报价的结束时间，兼容未续租的既有调用。
+   *
+   * 注意 `scheduledEndAt` **只用来判逾期起点**，不能进小时单价的分母：`quote.rentalAmount`
+   * 只覆盖原租期，续租那段的租金在订单的 `adjustmentAmount` 里。用续到的时间做分母会把
+   * 单价按更长的时间摊薄——续得越久逾期费越便宜，与逾期费的意图正好相反。
+   */
+  calculateOverdueCharge(
+    tenantId: string,
+    context: BusinessContext,
+    quote: RentalQuoteSnapshotV1,
+    returnedAt: string,
+    scheduledEndAt?: string
+  ) {
     const rule = quote.ruleSnapshot;
     if (!rule) throw new ConflictException("订单缺少租赁规则快照");
-    const overdueMinutes = Math.max(0, (new Date(returnedAt).getTime() - new Date(quote.request.endAt).getTime()) / 60_000 - rule.overdue.graceMinutes);
+    const dueAt = scheduledEndAt ?? quote.request.endAt;
+    const overdueMinutes = Math.max(0, (new Date(returnedAt).getTime() - new Date(dueAt).getTime()) / 60_000 - rule.overdue.graceMinutes);
     if (overdueMinutes <= 0 || rule.overdue.feeMode === "none" || rule.overdue.feeMode === "manual_review") return 0;
-    const hourlyBase = quote.rentalAmount / Math.max(1, (new Date(quote.request.endAt).getTime() - new Date(quote.request.startAt).getTime()) / 3_600_000);
+    // 小时单价按**原报价**的时长摊：分子分母必须描述同一段租期。
+    const quotedHours = (new Date(quote.request.endAt).getTime() - new Date(quote.request.startAt).getTime()) / 3_600_000;
+    const hourlyBase = quote.rentalAmount / Math.max(1, quotedHours);
     const amount = rule.overdue.feeMode === "hourly"
       ? hourlyBase * Math.ceil(overdueMinutes / 60) * rule.overdue.feeMultiplier
       : quote.rentalAmount * rule.overdue.feeMultiplier;
     return roundMoney(Math.min(amount, rule.overdue.maximumFee ?? amount));
+  }
+
+  /**
+   * 提前归还退款（需求 4.6.8）。与逾期费同一形态：这里只读快照算钱，落账在 rental-core。
+   *
+   * 单位口径取 `rateSnapshot` 里第一个**按时间**计费的费率。`usage`（里程/工时）与
+   * `package` 不参与时间折算——少开几公里不等于少租一天，包段更是整包定价；
+   * 整单只有这两类费率时不退租金。
+   *
+   * 分子分母必须描述**同一段租期**，因此单位数按计费时的口径分两段拼：
+   *
+   * - 原租期套最小起租量下限（与 `priceRentalLine` 一致）。3 天起租的费率下租 2 天
+   *   按 3 个单位收，提前 1 天还车并没有省下任何计费单位，不该退钱。
+   * - 续租段不套下限（`applyMinimumUnits: false`），与续租时的收费一致。
+   *
+   * `extensionRentalAmount` 由调用方从订单的 `extension` 费用明细汇总传入：
+   * `quote.rentalAmount` 只覆盖原租期，续租那段的租金在订单的调整额里。
+   * 少传它会让"未使用占比"落在一个更小的基数上，续过租的单只退到一半。
+   */
+  calculateEarlyReturnRefund(
+    tenantId: string,
+    context: BusinessContext,
+    quote: RentalQuoteSnapshotV1,
+    scheduledEndAt: string,
+    returnedAt: string,
+    extensionRentalAmount = 0
+  ): EarlyReturnRefund {
+    const rule = effectiveEarlyReturnRule(quote.ruleSnapshot);
+    const timeRate = quote.rateSnapshot.find((rate) => rate.unit !== "usage" && rate.unit !== "package");
+    if (!timeRate) {
+      return { amount: 0, rentalRefund: 0, serviceRefund: 0, requiresReview: false, basis: ["整单按使用量或包段计价，不做时间折算退款"] };
+    }
+    const strategy = rentalPricingStrategy(timeRate.unit);
+    const pricingContext = {
+      timeZone: context.settings.calendar.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE,
+      hourGranularityMinutes: timeRate.hourGranularityMinutes,
+      shiftHours: quote.ruleSnapshot?.pricing?.shiftHours,
+      shiftStartHours: quote.ruleSnapshot?.pricing?.shiftStartHours
+    };
+    const quotedEndAt = quote.request.endAt;
+    const units = (from: string, to: string) =>
+      new Date(to).getTime() > new Date(from).getTime() ? strategy.billableUnits(from, to, pricingContext) : 0;
+    // 原租期：与计费一致地套最小起租量下限。
+    const quotedUnits = Math.max(timeRate.minimumUnits, units(quote.request.startAt, quotedEndAt));
+    const extendedUnits = units(quotedEndAt, scheduledEndAt);
+    const totalUnits = quotedUnits + extendedUnits;
+    // 已用单位数按同一分段算：还在原租期内就只看原租期（同样受下限约束），
+    // 已经进入续租段则原租期全部算用掉，再加续租段里用掉的部分。
+    const usedUnits =
+      new Date(returnedAt).getTime() <= new Date(quotedEndAt).getTime()
+        ? Math.min(quotedUnits, Math.max(timeRate.minimumUnits, units(quote.request.startAt, returnedAt)))
+        : quotedUnits + Math.min(extendedUnits, units(quotedEndAt, returnedAt));
+    // 优惠与券按作用对象拆：只有打在租金上的那部分参与净租金，履约费与服务费的优惠不算。
+    const rentalDiscountAmount = roundMoney(
+      quote.discountEvaluations
+        .filter((row) => row.applied && row.appliesTo === "rental")
+        .reduce((sum, row) => sum + row.discountAmount, 0)
+    );
+    const rentalCouponAmount = quote.couponEvaluation?.appliesTo === "rental" ? quote.couponEvaluation.discountAmount : 0;
+    return computeEarlyReturnRefund(rule, {
+      scheduledEndAt,
+      returnedAt,
+      totalUnits,
+      unusedUnits: Math.max(0, totalUnits - usedUnits),
+      rentalAmount: roundMoney(quote.rentalAmount + Math.max(0, extensionRentalAmount)),
+      rentalDiscountAmount,
+      rentalCouponAmount,
+      services: quote.serviceSnapshots
+    });
   }
 
   calculateDamageCharge(tenantId: string, context: BusinessContext, quote: RentalQuoteSnapshotV1, exceptions: Array<{ chargeAmount?: number }>) {
@@ -4341,6 +4499,183 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       amount = Math.min(amount, deductible) + Math.max(0, amount - coverage);
     }
     return roundMoney(Math.min(amount, rule.damage.chargeLimit ?? amount));
+  }
+
+  /**
+   * 续租 / 延期的增量报价（需求 4.6.9）。
+   *
+   * 三条硬约束直接来自需求原文：
+   * 1. **只对新增时间段报价**，原租期金额与快照一律不重算；
+   * 2. 新增部分用**申请时**命中的价格版本、日历与规则，不是下单时那一版；
+   * 3. 押金与预授权按**差额**计——按新租期算出应收总额，减去订单已收的部分，
+   *    否则续租一次就把押金重复收一遍。
+   *
+   * 计价单位从原报价的费率快照里取：那是结构事实（这条商品按小时还是按日计费），
+   * 不是价格。价格必须重新命中，单位不能变——否则同一张订单前后两段用不同单位计费，
+   * 客户看到的账无法解释。
+   */
+  async quoteOrderExtension(
+    tenantId: string,
+    context: BusinessContext,
+    args: {
+      order: Pick<RentalOrder, "id" | "startAt" | "endAt" | "effectiveEndAt" | "quoteId" | "depositAmount" | "preAuthAmount">;
+      lines: Array<Pick<RentalOrderLine, "itemGroupId" | "pricingGroupId" | "quantity">>;
+      newEndAt: string;
+      services?: RentalOrderExtensionRequest["services"];
+      /** 申请时点：决定命中哪一版价格、日历与规则。 */
+      appliedAt: string;
+      settlementMode: "immediate" | "monthly";
+      fulfillmentMode: RentalFulfillmentMode;
+      locationIds: string[];
+      customerType: "personal" | "corporate";
+    }
+  ): Promise<RentalOrderExtensionPreview & { rateSnapshot: RentalPricingRate[]; ruleSnapshot: RentalRuleConfig }> {
+    const state = this.state(tenantId, context);
+    const from = args.order.effectiveEndAt ?? args.order.endAt;
+    if (new Date(args.newEndAt).getTime() <= new Date(from).getTime()) {
+      throw new BadRequestException("新的归还时间必须晚于当前归还时间");
+    }
+    const rule = this.currentRule(tenantId, context, args.appliedAt);
+    const extensionRule = effectiveExtensionRule(rule.config);
+    if (!extensionRule.enabled) throw new ConflictException("当前经营空间的规则不允许续租");
+    // 原报价的费率快照只用来确定**计价单位**，价格一律重新命中（需求 4.6.9）。
+    const originalQuote = this.getQuote(tenantId, context, args.order.quoteId);
+    const unitOf = new Map(
+      (originalQuote.rateSnapshot ?? []).map((rate) => [pricingTargetId(rate), rate.unit] as const)
+    );
+    const targets = args.lines.map((line) => line.pricingGroupId ?? line.itemGroupId);
+    const plan = this.resolvePricingPlan(state.pricingPlans, undefined, targets, args.appliedAt);
+    const spaceVersion = await this.resolveSpaceRates(tenantId, context, args.appliedAt);
+    const timeZone = context.settings.calendar.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE;
+    const groups = new Map(context.groups.map((group) => [group.id, group]));
+    const pricingGroups = new Map((context.pricingGroups ?? []).map((group) => [group.id, group]));
+    const legacyDayTypeMultipliers = context.settings.pricing.holidayPricingEnabled;
+    const incrementalCalendars = this.calendarsForDateRange(tenantId, context, from, args.newEndAt);
+    // 押金基数要按**整个新租期**重算，因此日历要覆盖 startAt → newEndAt 全段。
+    const fullCalendars = this.calendarsForDateRange(tenantId, context, args.order.startAt, args.newEndAt);
+
+    const chargeLines: RentalQuoteSnapshotV1["chargeLines"] = [];
+    const calendarSnapshot: RentalQuoteCalendarDay[] = [];
+    const rateSnapshot: RentalPricingRate[] = [];
+    const fullSecurityLines: SecurityLineInput[] = [];
+    let rentalAmount = 0;
+    let billableUnits = 0;
+
+    for (const line of args.lines) {
+      const group = groups.get(line.itemGroupId);
+      if (!group) throw new ConflictException("订单行的产品型号已不存在，无法续租");
+      const pricingGroup = line.pricingGroupId ? pricingGroups.get(line.pricingGroupId) : undefined;
+      const target = line.pricingGroupId ?? line.itemGroupId;
+      const unit = unitOf.get(target);
+      const rate = spaceVersion.rates.find(
+        (item) => pricingTargetId(item) === target && (unit === undefined || item.unit === unit)
+      );
+      if (!rate) {
+        throw new ConflictException(
+          `${pricingGroup?.name ?? group.name} 在当前价格版本里缺少${unit ? ` ${unit} ` : ""}计价单位的价格，无法为续租定价`
+        );
+      }
+      const shared = {
+        group,
+        pricingGroup,
+        quantity: line.quantity,
+        rate,
+        timeZone,
+        shiftHours: rule.config.pricing?.shiftHours,
+        shiftStartHours: rule.config.pricing?.shiftStartHours,
+        legacyDayTypeMultipliers,
+        planId: plan.id,
+        planVersion: plan.version
+      };
+      // 增量期：这才是本次要收的租金。
+      const incremental = this.priceRentalLine({
+        ...shared,
+        startAt: from,
+        endAt: args.newEndAt,
+        calendars: incrementalCalendars,
+        codePrefix: "extension",
+        chargeType: "extension",
+        applyMinimumUnits: false
+      });
+      rentalAmount = roundMoney(rentalAmount + incremental.amount);
+      billableUnits += incremental.units;
+      chargeLines.push(incremental.chargeLine);
+      calendarSnapshot.push(...incremental.calendarRows);
+      rateSnapshot.push(structuredClone(rate));
+      // 整个新租期：只用来当押金/预授权的倍数基数，**不进** rentalAmount。
+      const full = this.priceRentalLine({
+        ...shared,
+        startAt: args.order.startAt,
+        endAt: args.newEndAt,
+        calendars: fullCalendars,
+        codePrefix: "rental",
+        chargeType: "rental"
+      });
+      fullSecurityLines.push(full.securityLine);
+    }
+
+    // 增量期的增值服务：按新增时间段单独计费，与原订单已有的服务互不影响。
+    let serviceAmount = 0;
+    if (args.services?.length) {
+      const resolved = resolveQuoteServices(state.services, {
+        selections: args.services,
+        itemGroupIds: args.lines.map((line) => line.itemGroupId),
+        fulfillmentMode: args.fulfillmentMode,
+        locationIds: args.locationIds,
+        customerType: args.customerType,
+        startAt: from,
+        endAt: args.newEndAt,
+        timeZone,
+        rentalAmount,
+        workspaceId: this.workspaceOf(tenantId)
+      });
+      serviceAmount = resolved.totalAmount;
+      for (const snapshot of resolved.snapshots) {
+        chargeLines.push({
+          code: `extension-service:${snapshot.serviceCode}`,
+          name: snapshot.serviceName,
+          type: "service",
+          amount: snapshot.amount,
+          sourceId: snapshot.serviceId,
+          sourceVersion: snapshot.serviceVersion,
+          detail: snapshot.formula
+        });
+      }
+    }
+
+    // 押金与预授权：按新租期的应收总额减去订单已收，负差额一律归零——
+    // 续租只可能让押金变多或不变，把多收的退回去是退款流程的事，不在续租里做。
+    const security = computeSecurityAmounts(
+      fullSecurityLines,
+      effectiveDepositRule(rule.config),
+      effectivePreauthorizationRule(rule.config)
+    );
+    const depositDelta = Math.max(0, roundMoney(security.deposit.amount - args.order.depositAmount));
+    const preAuthDelta = Math.max(0, roundMoney(security.preauthorization.amount - args.order.preAuthAmount));
+    const payableAmount = roundMoney(rentalAmount + serviceAmount);
+    if (payableAmount <= 0) throw new BadRequestException("续租的增量金额为 0，无需续租");
+
+    return {
+      orderId: args.order.id,
+      originalEndAt: from,
+      newEndAt: args.newEndAt,
+      billableUnits,
+      rentalAmount,
+      serviceAmount,
+      depositDelta,
+      preAuthDelta,
+      payableAmount,
+      currency: context.settings.pricing.currency,
+      settlementMode: args.settlementMode,
+      paymentRequired: args.settlementMode === "immediate",
+      chargeLines,
+      calendarSnapshot,
+      priceVersionId: "versionId" in spaceVersion ? spaceVersion.versionId : undefined,
+      priceVersion: "version" in spaceVersion ? spaceVersion.version : undefined,
+      ruleVersion: rule.version,
+      rateSnapshot,
+      ruleSnapshot: structuredClone(rule.config)
+    };
   }
 
   /**

@@ -8,6 +8,8 @@ import type {
   CreateRentalOrderRequest,
   CancelRentalOrderRequest,
   RentalAvailabilityRequest,
+  RentalMembershipSnapshot,
+  RentalOrder,
   SaveRentalAssetRequest,
   SaveRentalCouponTemplateRequest,
   SaveRentalFulfillmentLocationRequest,
@@ -32,12 +34,14 @@ import {
   PartialReturnRentalOrderDto,
   ReviewRentalInspectionExceptionDto,
   RentalAvailabilityDto,
+  RentalOrderExtensionDto,
   SaveRentalAssetDto,
   SaveRentalCouponTemplateDto,
   SaveRentalStockBalanceDto,
   SaveTenantRentalProfileDto,
   SubstituteRentalBundleComponentDto,
 } from "./rental-order-request.dto";
+import { effectiveExtensionRule } from "./rental-rule-defaults";
 import {
   SaveTenantRentalBusinessSettingsDto,
 } from "./rental-config-request.dto";
@@ -86,6 +90,20 @@ function hasPermissionCode(user: SystemUserRow, code: string) {
   if (user.isSaasAdmin) return false;
   if (user.isPlatformAdmin || user.permissions?.includes("*")) return true;
   return Boolean(user.permissions?.includes(code));
+}
+
+/**
+ * 订单上已生效的续租租金合计。
+ *
+ * 提前归还退款按"未使用单位数 / 总单位数"折算，而 `quote.rentalAmount` 只覆盖原租期——
+ * 续租那段的租金以 `type === "extension"` 的费用明细进的订单调整额。不把它加进基数，
+ * 续过租的订单只会退到应退的一部分。待补款的续租不在明细里，也不在 `effectiveEndAt` 里，
+ * 两边天然对齐。
+ */
+function extensionRentalOf(order: RentalOrder): number {
+  return (order.chargeLines ?? [])
+    .filter((line) => line.type === "extension")
+    .reduce((sum, line) => sum + Number(line.amount ?? 0), 0);
 }
 
 @Controller("rental/v1")
@@ -145,7 +163,9 @@ export class RentalCoreController {
       tenantId,
       workspaceId,
       this.service.getProfile(tenantId).categoryCode,
-      this.reportFilter({ from, to, locationId, customerId, customerType })
+      this.reportFilter({ from, to, locationId, customerId, customerType }),
+      // 币种从经营空间的业务设置取：报表仓储不读配置，避免同一事实两个来源。
+      this.service.getBusinessSettings(tenantId).pricing.currency
     );
   }
 
@@ -174,7 +194,9 @@ export class RentalCoreController {
       tenantId,
       workspaceId,
       this.service.getProfile(tenantId).categoryCode,
-      this.reportFilter({ from, to, locationId, customerId, customerType })
+      this.reportFilter({ from, to, locationId, customerId, customerType }),
+      // 币种从经营空间的业务设置取：报表仓储不读配置，避免同一事实两个来源。
+      this.service.getBusinessSettings(tenantId).pricing.currency
     );
     const stamp = report.generatedAt.replace(/[-:T]/g, "").slice(0, 14);
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
@@ -435,19 +457,147 @@ export class RentalCoreController {
     if (!cancelReplayed) await this.emitOrderEvent(req.user.tenantId, "order.cancelled", order);
     return this.committed(req.user.tenantId, order);
   }
-  @Get("inspection-templates") templates(@Req() req: AuthenticatedRequest, @Query("stage") stage?: "pickup" | "return") { return this.service.listInspectionTemplates(req.user.tenantId, stage); }
-  @Get("orders/:id/inspections") inspections(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.service.listInspections(req.user.tenantId, id); }
+  /**
+   * 续租的结算方式：个人与企业预付都要客户补款，企业月结不需要补款动作。
+   *
+   * 月结资格读**客户主档的企业授信**（`customer_corporate_credits`）：它以
+   * `CustomerProfile.id` 为键，与订单快照里的 `corporateCustomerId` 同一套 id。
+   * 不能读旧车辆域的 `Corporate` 表——那张表有自己独立的 uuid 主键，与订单上的
+   * `customerId` 没有任何关联，按它查永远查不到，月结分支会静默变成死代码。
+   *
+   * 两道前提都必须成立：
+   *
+   * 1. **企业既是签约方也是付款方**（`enterpriseContractAndPayer`）。企业员工用个人
+   *    身份付款的订单虽然也带企业信息，但钱是个人出的，仍然要补款。
+   * 2. **授信记录仍然有效**且账期不是按单结。`suspended` / `revoked` 的企业不允许
+   *    继续挂账——续租会让欠款接着涨。
+   *
+   * 查不到资格时一律回落到"要补款"——宁可多问客户一次，也不要把不该挂账的单
+   * 挂进月结。已经逾期时按规则可强制先付：逾期说明履约已经出问题，这时继续挂账
+   * 只会让欠款接着累积。
+   */
+  private async resolveExtensionSettlement(
+    tenantId: string,
+    order: { customerType: string; membershipSnapshot?: RentalMembershipSnapshot; endAt: string; effectiveEndAt?: string },
+    forceImmediateWhenOverdue: boolean
+  ): Promise<"immediate" | "monthly"> {
+    const overdue = new Date(order.effectiveEndAt ?? order.endAt).getTime() < Date.now();
+    if (overdue && forceImmediateWhenOverdue) return "immediate";
+    const corporateCustomerId = order.membershipSnapshot?.enterpriseContractAndPayer
+      ? order.membershipSnapshot.corporateCustomerId
+      : undefined;
+    if (!corporateCustomerId) return "immediate";
+    const credit = await this.prisma.customerCorporateCredit.findFirst({
+      where: { tenantId, customerId: corporateCustomerId, status: "active" },
+      select: { billingCycle: true }
+    });
+    if (!credit || credit.billingCycle === "per_order") return "immediate";
+    return "monthly";
+  }
+
+  private async priceExtension(tenantId: string, orderId: string, body: RentalOrderExtensionDto) {
+    const context = this.context(tenantId);
+    const order = await this.service.getOrder(tenantId, orderId);
+    const rule = effectiveExtensionRule(order.ruleSnapshot);
+    const settlementMode = await this.resolveExtensionSettlement(tenantId, order, rule.forceImmediateWhenOverdue);
+    return {
+      order,
+      priced: await this.business.quoteOrderExtension(tenantId, context, {
+        order,
+        lines: order.lines,
+        newEndAt: body.newEndAt,
+        services: body.services,
+        appliedAt: new Date().toISOString(),
+        settlementMode,
+        fulfillmentMode: order.fulfillmentMode,
+        locationIds: [order.fulfillmentLocationId, order.returnLocationId].filter((value): value is string => Boolean(value)),
+        customerType: order.customerType
+      })
+    };
+  }
+
+  @Get("orders/:id/extensions") extensions(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
+    return this.service.listOrderExtensions(req.user.tenantId, id);
+  }
+
+  /** 续租试算：只算钱不落库，供客户/运营确认。APP 与后台共用。 */
+  @Post("orders/:id/extensions/preview")
+  async previewExtension(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: RentalOrderExtensionDto) {
+    const { priced } = await this.priceExtension(req.user.tenantId, id, body);
+    const { rateSnapshot, ruleSnapshot, ...preview } = priced;
+    return preview;
+  }
+
+  @Post("orders/:id/extensions")
+  async applyExtension(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: RentalOrderExtensionDto) {
+    const tenantId = req.user.tenantId;
+    const key = idempotencyKeyOf(req) ?? `order.extend:${id}:${body.newEndAt}`;
+    const { priced } = await this.priceExtension(tenantId, id, body);
+    const result = await this.idempotent.execute({
+      tenantId,
+      action: "order.extend",
+      key: idempotencyKeyOf(req),
+      // 新归还时间进兜底键：同一订单先后申请两次不同的延长，是两笔业务而不是重放。
+      fallbackKey: `order.extend:${id}:${body.newEndAt}`,
+      request: { orderId: id, newEndAt: body.newEndAt, services: body.services ?? [] },
+      orderId: id,
+      run: (tx) =>
+        this.service.requestOrderExtension(
+          tenantId,
+          id,
+          priced,
+          { idempotencyKey: key, memo: body.memo, operator: req.user.displayName },
+          tx
+        ),
+      replay: async () => {
+        const rows = await this.service.listOrderExtensions(tenantId, id);
+        const existing = rows.find((row) => row.idempotencyKey === key);
+        return existing ? { order: await this.service.getOrder(tenantId, id), extension: existing } : undefined;
+      }
+    });
+    return { order: await this.committed(tenantId, result.order), extension: result.extension };
+  }
+
+  /** 续租补款到账：记录生效、延长占用与租期（需求 4.6.9「完成补款后再延长」）。 */
+  @Post("orders/:id/extensions/:extensionId/pay")
+  async payExtension(
+    @Req() req: AuthenticatedRequest,
+    @Param("id") id: string,
+    @Param("extensionId") extensionId: string
+  ) {
+    const tenantId = req.user.tenantId;
+    const result = await this.idempotent.execute({
+      tenantId,
+      action: "order.extend.pay",
+      key: idempotencyKeyOf(req),
+      fallbackKey: `order.extend.pay:${extensionId}`,
+      request: { orderId: id, extensionId },
+      orderId: id,
+      run: (tx) => this.service.payOrderExtension(tenantId, id, extensionId, tx),
+      replay: async () => {
+        const rows = await this.service.listOrderExtensions(tenantId, id);
+        const existing = rows.find((row) => row.id === extensionId && row.status === "effective");
+        return existing ? { order: await this.service.getOrder(tenantId, id), extension: existing } : undefined;
+      }
+    });
+    return { order: await this.committed(tenantId, result.order), extension: result.extension };
+  }
+
+  @Get("inspection-templates") templates(@Req() req: AuthenticatedRequest, @Query("stage") stage?: "pickup" | "return") { return this.service.listInspectionTemplates(req.user.tenantId, stage); }  @Get("orders/:id/inspections") inspections(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.service.listInspections(req.user.tenantId, id); }
   @Post("orders/:id/inspections") async createInspection(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: CreateRentalInspectionDto) {
     const tenantId = req.user.tenantId;
     const context = this.context(tenantId);
     const current = await this.service.getOrder(tenantId, id);
     const template = this.service.listInspectionTemplates(tenantId).find((row) => row.id === body.templateId);
     const returnedAt = new Date().toISOString();
-    // 逾期费可按规则直接计算；检查异常只保存建议，必须由结算人员另行审核。
+    // 逾期费与提前归还退款都按规则直接计算；检查异常只保存建议，必须由结算人员另行审核。
+    // 归还基准用订单的**当前**约定归还时间，续租过就是新时间，否则刚续上的单会被判逾期。
     const quote = this.business.getQuote(tenantId, context, current.quoteId);
+    const scheduledEndAt = current.effectiveEndAt ?? current.endAt;
     const charges = template?.stage === "return"
       ? {
-          overdue: { amount: this.business.calculateOverdueCharge(tenantId, context, quote, returnedAt), returnedAt },
+          overdue: { amount: this.business.calculateOverdueCharge(tenantId, context, quote, returnedAt, scheduledEndAt), returnedAt },
+          earlyReturn: this.business.calculateEarlyReturnRefund(tenantId, context, quote, scheduledEndAt, returnedAt, extensionRentalOf(current))
         }
       : {};
     const stage = template?.stage;
@@ -502,7 +652,12 @@ export class RentalCoreController {
       // 归还刻意不复查——停业不得让在租订单失去归还渠道（需求 4.5.4）。
       await this.business.assertPickupOpenAt(tenantId, context, current.fulfillmentLocationId, returnedAt, current.fulfillmentMode);
     }
-    const overdueCharge = stage === "return" ? this.business.calculateOverdueCharge(tenantId, context, this.business.getQuote(tenantId, context, current.quoteId), returnedAt) : 0;
+    const handoverQuote = this.business.getQuote(tenantId, context, current.quoteId);
+    const handoverDueAt = current.effectiveEndAt ?? current.endAt;
+    const overdueCharge = stage === "return" ? this.business.calculateOverdueCharge(tenantId, context, handoverQuote, returnedAt, handoverDueAt) : 0;
+    const earlyReturnRefund = stage === "return"
+      ? this.business.calculateEarlyReturnRefund(tenantId, context, handoverQuote, handoverDueAt, returnedAt, extensionRentalOf(current))
+      : undefined;
     const targetStatus = stage === "pickup" ? RentalCoreOrderStatus.Renting : RentalCoreOrderStatus.Settling;
     const { result: order, replayed } = await this.idempotent.executeWithReplayFlag({
       tenantId,
@@ -513,7 +668,7 @@ export class RentalCoreController {
       orderId: id,
       run: async (tx) => {
         if (stage === "pickup") await this.funding.assertReadyForPickup(tenantId, this.service.resolveWorkspaceId(tenantId), id, tx);
-        const completed = await this.service.completeHandoverWithoutInspection(tenantId, id, stage, overdueCharge, tx, req.user.displayName);
+        const completed = await this.service.completeHandoverWithoutInspection(tenantId, id, stage, overdueCharge, tx, req.user.displayName, earlyReturnRefund);
         if (stage === "return") {
           await this.serviceCapacities.markUsedForOrder(tenantId, id, returnedAt, tx);
         }

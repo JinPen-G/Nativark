@@ -1,4 +1,4 @@
-import { RENTAL_DISCOUNT_TARGETS, RENTAL_DISCOUNT_TYPES, RENTAL_INSURANCE_PROVIDER_STATUSES, RENTAL_PRICING_UNIT_CODES, RENTAL_SERVICE_BILLING_UNITS, RENTAL_SERVICE_SELECTION_MODES, type RentalDayType, type RentalDiscountTarget, type RentalInsuranceProviderStatus, type RentalPricingUnit, type RentalServiceMandatoryRule, type RentalServiceSelectionMode } from "@store-rental/shared";
+import { RENTAL_CURRENCY_CODES, RENTAL_DISCOUNT_TARGETS, RENTAL_DISCOUNT_TYPES, RENTAL_INSURANCE_PROVIDER_STATUSES, RENTAL_PRICING_UNIT_CODES, RENTAL_SERVICE_BILLING_UNITS, RENTAL_SERVICE_SELECTION_MODES, type RentalCurrency, type RentalDayType, type RentalDiscountTarget, type RentalInsuranceProviderStatus, type RentalPricingUnit, type RentalServiceMandatoryRule, type RentalServiceSelectionMode } from "@store-rental/shared";
 import type {
   ApplyOfficialCalendarSourceRequest,
   PublishRentalCalendarRequest,
@@ -182,9 +182,14 @@ export class BusinessSettingsPricingInputDto {
   @IsIn(RENTAL_PRICING_UNIT_CODES)
   defaultUnit!: RentalPricingUnit;
 
-  /** 目前只支持人民币。放开前先确认计价与结算链路是否真的支持多币种。 */
-  @IsIn(["CNY"])
-  currency!: "CNY";
+  /**
+   * 经营空间的结算币种（需求 §948）。
+   *
+   * 只收登记过符号与小数位的币种：`RENTAL_CURRENCY_CODES` 全是两位小数的币种，
+   * 放开成任意字符串会让「JPY」这类 0 位小数的币种进来，而全库金额列都是 Decimal(12,2)。
+   */
+  @IsIn(RENTAL_CURRENCY_CODES)
+  currency!: RentalCurrency;
 
   @IsBoolean()
   taxIncluded!: boolean;
@@ -972,6 +977,72 @@ export class RuleConfigPricingInputDto {
   shiftStartHours?: number[];
 }
 
+/** 续租 / 延期的准入规则（需求 4.6.9）。金额一律由增量期重新报价得出，此处不配单价。 */
+export class RuleConfigExtensionInputDto {
+  @IsBoolean()
+  enabled!: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  maxTimes?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  maxTotalDays?: number;
+
+  @IsBoolean()
+  forceImmediateWhenOverdue!: boolean;
+}
+
+/**
+ * 提前归还退款规则（需求 4.6.8）。
+ *
+ * 只有「提前多久」与「退几成」两个旋钮：折算口径（按未使用计费单位占比、阶梯不重算、
+ * 优惠同比例折减）固定在代码里，不给选项——留选项会让同一空间的历史订单出现两种退款
+ * 口径，事后无法向客户解释。
+ */
+export class RuleConfigEarlyReturnInputDto {
+  @IsIn(["none", "auto", "manual_review"])
+  mode!: "none" | "auto" | "manual_review";
+
+  @IsNumber()
+  @Min(0)
+  minAdvanceHours!: number;
+
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  refundPercent!: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  maxRefundAmount?: number;
+
+  @IsBoolean()
+  refundUndeliveredServices!: boolean;
+}
+
+/**
+ * 税规则。只支持价内税，因此 `inclusive` 只接受 true——写 false 会被这里直接挡掉，
+ * 而不是悄悄按价内税算出一个客户对不上的金额。
+ */
+export class RuleConfigTaxInputDto {
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  rate!: number;
+
+  @IsIn([true])
+  inclusive!: true;
+
+  @IsOptional()
+  @IsString()
+  label?: string;
+}
+
 export class RentalRuleConfigInputDto implements RentalRuleConfig {
   /** 整组可缺省：既有规则快照没有这一组，历史订单必须继续按原快照复算。 */
   @IsOptional()
@@ -1023,6 +1094,27 @@ export class RentalRuleConfigInputDto implements RentalRuleConfig {
   @ValidateNested()
   @Type(() => RuleConfigDamageInputDto)
   damage!: RuleConfigDamageInputDto;
+
+  /** 续租规则（需求 4.6.9）。整组可缺省：缺省视为允许续租、不限次数、逾期时强制先付。 */
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => RuleConfigExtensionInputDto)
+  extension?: RuleConfigExtensionInputDto;
+
+  /** 提前归还退款规则（需求 4.6.8）。整组可缺省，**缺省即不退租金**，与今天的行为一致。 */
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => RuleConfigEarlyReturnInputDto)
+  earlyReturn?: RuleConfigEarlyReturnInputDto;
+
+  /** 税规则。整组可缺省，**缺省即不计税**，历史订单的复算结果不变。 */
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => RuleConfigTaxInputDto)
+  tax?: RuleConfigTaxInputDto;
 }
 
 export class SaveRentalRuleVersionDto implements SaveRentalRuleVersionRequest {

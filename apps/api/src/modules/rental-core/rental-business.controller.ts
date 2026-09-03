@@ -267,7 +267,7 @@ export class RentalBusinessController {
       req.user.tenantId,
       this.context(req.user.tenantId),
       Number(year),
-      orders.map((order) => ({ id: order.id, orderNo: order.orderNo, status: order.status, startAt: order.startAt, endAt: order.endAt }))
+      orders.map((order) => ({ id: order.id, orderNo: order.orderNo, status: order.status, startAt: order.startAt, endAt: order.endAt, effectiveEndAt: order.effectiveEndAt }))
     );
   }
   /** 覆盖审计流水（需求 4.5.3/4.5.8）。独立只追加表，不截断；可按版本过滤。 */

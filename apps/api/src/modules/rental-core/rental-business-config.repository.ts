@@ -1,10 +1,12 @@
 import { ConflictException, Injectable } from "@nestjs/common";
 import { Prisma, type $Enums } from "@prisma/client";
+import { RENTAL_CURRENCY_CODES } from "@store-rental/shared";
 import type {
   RentalCalendarDay,
   RentalCalendarOverrideAudit,
   RentalCalendarYear,
   RentalCategoryCode,
+  RentalCurrency,
   RentalDayType,
   RentalDiscountPlan,
   RentalNotificationTemplateV1,
@@ -719,7 +721,11 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       categoryCode: lower<RentalCategoryCode>(row.categoryCode),
       code: row.code,
       name: row.name,
-      currency: row.currency as "CNY",
+      // 币种按登记表校验后再收：库里可能有历史脏值，强转会让一个不认识的币种
+      // 一路流到界面上被当成人民币显示。认不出就落回 CNY，与旧行为一致。
+      currency: RENTAL_CURRENCY_CODES.includes(row.currency as RentalCurrency)
+        ? (row.currency as RentalCurrency)
+        : "CNY",
       status: row.status as RentalPricingPlanV1["status"],
       version: row.version,
       effectiveFrom: iso(row.effectiveFrom),

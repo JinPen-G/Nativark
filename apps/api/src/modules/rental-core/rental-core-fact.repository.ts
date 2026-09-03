@@ -13,6 +13,7 @@ import {
   type RentalFulfillmentMode,
   type RentalInspectionRecord,
   type RentalOrder,
+  type RentalOrderExtension,
   type RentalOrderLine,
   type RentalQuoteChargeLine,
   type RentalReservation,
@@ -88,6 +89,17 @@ export interface RentalCoreFactStore {
   upsertStockBalance(balance: RentalStockBalance): Promise<void>;
   listInspections(tenantId: string, orderId: string): Promise<RentalInspectionRecord[]>;
   insertInspection(record: RentalInspectionRecord, tx?: RentalFactTx): Promise<void>;
+  /** 续租记录（需求 4.6.9）。只追加与改状态，不改金额——金额是申请时固化的事实。 */
+  listExtensions(tenantId: string, orderId: string, tx?: RentalFactTx): Promise<RentalOrderExtension[]>;
+  insertExtension(extension: RentalOrderExtension, tx?: RentalFactTx): Promise<void>;
+  markExtensionEffective(
+    tenantId: string,
+    extensionId: string,
+    at: string,
+    paidAt: string | undefined,
+    tx?: RentalFactTx
+  ): Promise<void>;
+  cancelExtensions(tenantId: string, extensionIds: string[], tx?: RentalFactTx): Promise<void>;
 }
 
 const ACTIVE_RESERVATION_STATES: $Enums.RentalReservationState[] = ["SOFT", "CONFIRMED", "FULFILLED"];
@@ -197,6 +209,8 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       returnLocationSnapshot: order.returnLocationSnapshot as unknown as Prisma.InputJsonValue,
       startAt: new Date(order.startAt),
       endAt: new Date(order.endAt),
+      // 续租只推进 effectiveEndAt，endAt 保持原始约定（需求 4.6.9）。
+      effectiveEndAt: order.effectiveEndAt ? new Date(order.effectiveEndAt) : null,
       quoteId: order.quoteId,
       quoteNo: order.quoteNo,
       pricingPlanVersion: order.pricingPlanVersion,
@@ -229,6 +243,9 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       payableAmount: new Prisma.Decimal(order.payableAmount),
       adjustmentAmount: new Prisma.Decimal(order.adjustmentAmount),
       finalPayableAmount: new Prisma.Decimal(order.finalPayableAmount),
+      taxRate: new Prisma.Decimal(order.taxRate ?? 0),
+      taxAmount: new Prisma.Decimal(order.taxAmount ?? 0),
+      currency: order.currency ?? "CNY",
       totalAmount: new Prisma.Decimal(order.totalAmount),
       cancellationReason: order.cancellationReason ?? null,
       cancelledAt: order.cancelledAt ? new Date(order.cancelledAt) : null,
@@ -277,8 +294,10 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
           quantity: reservation.quantity,
           releasedQuantity: reservation.releasedQuantity,
           // 预占自带期间，使可用量查询不必回连订单表。
+          // 结束端用 effectiveEndAt：续租后占用必须跟着延长，否则同一资产在延长出来的
+          // 那段时间里对可用量查询是"空闲"的，会被另一张订单同时占走。
           startAt: new Date(order.startAt),
-          endAt: new Date(order.endAt),
+          endAt: new Date(order.effectiveEndAt ?? order.endAt),
           status: upper<$Enums.RentalReservationState>(reservation.status),
           expiresAt: reservation.expiresAt ? new Date(reservation.expiresAt) : null
         };
@@ -615,6 +634,127 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     });
   }
 
+  /* ---------- 续租记录（需求 4.6.9） ---------- */
+
+  async listExtensions(tenantId: string, orderId: string, tx?: RentalFactTx): Promise<RentalOrderExtension[]> {
+    const client = tx ?? this.prisma;
+    const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
+    const rows = await client.rentalOrderExtension.findMany({
+      where: { tenantId, workspaceId, orderId },
+      orderBy: { sequence: "asc" }
+    });
+    return rows.map((row) => this.toDomainExtension(row));
+  }
+
+  async insertExtension(extension: RentalOrderExtension, tx?: RentalFactTx): Promise<void> {
+    const client = tx ?? this.prisma;
+    const workspaceId = await resolveScopeWorkspaceId(client, extension.tenantId);
+    await client.rentalOrderExtension.create({
+      data: {
+        id: extension.id,
+        tenantId: extension.tenantId,
+        workspaceId,
+        orderId: extension.orderId,
+        sequence: extension.sequence,
+        status: extension.status,
+        originalEndAt: new Date(extension.originalEndAt),
+        newEndAt: new Date(extension.newEndAt),
+        billableUnits: new Prisma.Decimal(extension.billableUnits),
+        rentalAmount: new Prisma.Decimal(extension.rentalAmount),
+        serviceAmount: new Prisma.Decimal(extension.serviceAmount),
+        depositDelta: new Prisma.Decimal(extension.depositDelta),
+        preAuthDelta: new Prisma.Decimal(extension.preAuthDelta),
+        payableAmount: new Prisma.Decimal(extension.payableAmount),
+        currency: extension.currency,
+        priceVersionId: extension.priceVersionId ?? null,
+        priceVersion: extension.priceVersion ?? null,
+        ruleVersion: extension.ruleVersion,
+        rateSnapshot: extension.rateSnapshot as unknown as Prisma.InputJsonValue,
+        ruleSnapshot: extension.ruleSnapshot as unknown as Prisma.InputJsonValue,
+        calendarSnapshot: extension.calendarSnapshot as unknown as Prisma.InputJsonValue,
+        settlementMode: extension.settlementMode,
+        idempotencyKey: extension.idempotencyKey,
+        memo: extension.memo ?? null,
+        paidAt: extension.paidAt ? new Date(extension.paidAt) : null,
+        effectiveAt: extension.effectiveAt ? new Date(extension.effectiveAt) : null,
+        createdBy: extension.createdBy,
+        createdAt: new Date(extension.createdAt)
+      }
+    });
+  }
+
+  /**
+   * 只推进状态与两个时间戳，金额一律不动——金额是申请时固化的事实，
+   * 生效时再改一次就等于事后改账。
+   */
+  async markExtensionEffective(
+    tenantId: string,
+    extensionId: string,
+    at: string,
+    paidAt: string | undefined,
+    tx?: RentalFactTx
+  ): Promise<void> {
+    const client = tx ?? this.prisma;
+    await client.rentalOrderExtension.update({
+      where: { id: extensionId },
+      data: {
+        status: "effective",
+        effectiveAt: new Date(at),
+        ...(paidAt ? { paidAt: new Date(paidAt) } : {})
+      }
+    });
+  }
+
+  /**
+   * 把一批待补款的续租作废。
+   *
+   * 存在的理由：`pending_payment` 没有任何自然终态，不作废就会永远停在"可补款"上——
+   * 客户改了主意重新申请之后，旧那条仍然挂在订单上，界面也仍然给出补款按钮。
+   * 只推状态，金额与时间戳不动：作废的是意向，不是已经固化的报价事实。
+   * 作废时刻由 `updatedAt` 记录，不再单开一列——`status` 已经说明了发生过什么。
+   */
+  async cancelExtensions(tenantId: string, extensionIds: string[], tx?: RentalFactTx): Promise<void> {
+    if (!extensionIds.length) return;
+    const client = tx ?? this.prisma;
+    await client.rentalOrderExtension.updateMany({
+      where: { id: { in: extensionIds }, tenantId, status: "pending_payment" },
+      data: { status: "cancelled" }
+    });
+  }
+
+  private toDomainExtension(row: Prisma.RentalOrderExtensionGetPayload<object>): RentalOrderExtension {
+    return {
+      id: row.id,
+      tenantId: row.tenantId,
+      workspaceId: row.workspaceId,
+      orderId: row.orderId,
+      sequence: row.sequence,
+      status: row.status as RentalOrderExtension["status"],
+      originalEndAt: iso(row.originalEndAt),
+      newEndAt: iso(row.newEndAt),
+      billableUnits: num(row.billableUnits),
+      rentalAmount: num(row.rentalAmount),
+      serviceAmount: num(row.serviceAmount),
+      depositDelta: num(row.depositDelta),
+      preAuthDelta: num(row.preAuthDelta),
+      payableAmount: num(row.payableAmount),
+      currency: row.currency,
+      priceVersionId: row.priceVersionId ?? undefined,
+      priceVersion: row.priceVersion ?? undefined,
+      ruleVersion: row.ruleVersion,
+      rateSnapshot: row.rateSnapshot as unknown as RentalOrderExtension["rateSnapshot"],
+      ruleSnapshot: row.ruleSnapshot as unknown as RentalOrderExtension["ruleSnapshot"],
+      calendarSnapshot: row.calendarSnapshot as unknown as RentalOrderExtension["calendarSnapshot"],
+      settlementMode: row.settlementMode as RentalOrderExtension["settlementMode"],
+      memo: row.memo ?? undefined,
+      paidAt: optionalIso(row.paidAt),
+      effectiveAt: optionalIso(row.effectiveAt),
+      idempotencyKey: row.idempotencyKey,
+      createdBy: row.createdBy,
+      createdAt: iso(row.createdAt)
+    };
+  }
+
   /* ---------- 行 → 领域对象 ---------- */
 
   private toDomainOrder(row: Prisma.RentalOrderGetPayload<{
@@ -683,6 +823,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       }) as unknown as RentalFulfillmentLocationSnapshot,
       startAt: iso(row.startAt),
       endAt: iso(row.endAt),
+      effectiveEndAt: optionalIso(row.effectiveEndAt),
       quoteId: row.quoteId,
       quoteNo: row.quoteNo,
       pricingPlanVersion: row.pricingPlanVersion,
@@ -715,6 +856,9 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       payableAmount: num(row.payableAmount),
       adjustmentAmount: num(row.adjustmentAmount),
       finalPayableAmount: num(row.finalPayableAmount),
+      taxRate: num(row.taxRate),
+      taxAmount: num(row.taxAmount),
+      currency: row.currency as RentalOrder["currency"],
       totalAmount: num(row.totalAmount),
       cancellationReason: row.cancellationReason ?? undefined,
       cancelledAt: optionalIso(row.cancelledAt),

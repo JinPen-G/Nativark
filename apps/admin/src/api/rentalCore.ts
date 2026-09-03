@@ -13,6 +13,7 @@ import type {
   RentalCalendarYear,
   RentalCalendarTimePriceDay,
   RentalCouponTemplate,
+  RentalCurrency,
   RentalCustomerBenefitAccount,
   RentalCustomerCoupon,
   RentalDiscountPlan,
@@ -29,6 +30,9 @@ import type {
   ReviewRentalInspectionExceptionRequest,
   RentalItemGroup,
   RentalOrder,
+  RentalOrderExtension,
+  RentalOrderExtensionPreview,
+  RentalOrderExtensionRequest,
   RentalNotificationSendLogV1,
   RentalNotificationTemplateV1,
   RentalPricingPlanV1,
@@ -92,6 +96,7 @@ import type {
   TenantRentalProfile,
   SubstituteRentalBundleComponentRequest
 } from "@store-rental/shared";
+import { useQuery } from "@tanstack/react-query";
 import { http, request, requestText } from "./http";
 
 export const rentalCoreApi = {
@@ -249,6 +254,15 @@ export const rentalCoreApi = {
   cancelOrder: (id: string, data: { reason: string; weatherException?: boolean }) => request<RentalOrder>(`/rental/v1/orders/${id}/cancel`, { method: "post", data }),
   handoverOrder: (id: string, stage: "pickup" | "return") => request<RentalOrder>(`/rental/v1/orders/${id}/handover/${stage}`, { method: "post" }),
   settleOrder: (id: string) => request<RentalOrder>(`/rental/v1/orders/${id}/settle`, { method: "post" }),
+  // 续租 / 延期（需求 4.6.9）。试算与申请分两步：金额要先给客户/运营确认，
+  // 确认后才落记录；企业月结的申请直接生效，个人还要再走一次补款。
+  orderExtensions: (id: string) => request<RentalOrderExtension[]>(`/rental/v1/orders/${id}/extensions`),
+  previewOrderExtension: (id: string, data: RentalOrderExtensionRequest) =>
+    request<RentalOrderExtensionPreview>(`/rental/v1/orders/${id}/extensions/preview`, { method: "post", data }),
+  requestOrderExtension: (id: string, data: RentalOrderExtensionRequest) =>
+    request<{ order: RentalOrder; extension: RentalOrderExtension }>(`/rental/v1/orders/${id}/extensions`, { method: "post", data }),
+  payOrderExtension: (id: string, extensionId: string) =>
+    request<{ order: RentalOrder; extension: RentalOrderExtension }>(`/rental/v1/orders/${id}/extensions/${extensionId}/pay`, { method: "post" }),
   inspectionTemplates: (stage?: "pickup" | "return") => request<RentalInspectionTemplate[]>("/rental/v1/inspection-templates", { params: { stage } }),
   inspections: (id: string) => request<RentalInspectionRecord[]>(`/rental/v1/orders/${id}/inspections`),
   createInspection: (id: string, data: CreateRentalInspectionRequest) => request<{ inspection: RentalInspectionRecord; order: RentalOrder }>(`/rental/v1/orders/${id}/inspections`, { method: "post", data }),
@@ -260,3 +274,20 @@ export const rentalCoreApi = {
   upgradeCapability: (code: string, data: UpgradeWorkspaceCapabilityRequest) => request<WorkspaceCapabilityInstance>(`/rental/v1/capabilities/${code}/upgrade`, { method: "post", data }),
   capabilityAudits: (code?: string) => request<WorkspaceCapabilityAuditEvent[]>("/rental/v1/capability-audits", { params: { code } })
 };
+
+/**
+ * 当前经营空间的结算币种（需求 §948）。
+ *
+ * 管理端所有金额展示都要经过它 + `formatRentalMoney`，因为**符号不能写死**：
+ * 此前十几处硬编码的 `¥` 会把港币空间的金额显示成人民币，而金额本身看不出错。
+ *
+ * 复用 `["rental-core", "business-settings"]` 这个已有查询键，因此在已经取过
+ * 业务设置的页面里不会多发一次请求；缺省 `CNY` 只在首帧与存量数据上出现。
+ */
+export function useSettlementCurrency(): RentalCurrency {
+  const settings = useQuery({
+    queryKey: ["rental-core", "business-settings"],
+    queryFn: rentalCoreApi.businessSettings
+  });
+  return settings.data?.pricing.currency ?? "CNY";
+}

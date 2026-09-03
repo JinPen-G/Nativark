@@ -5,7 +5,7 @@ import type {
   RentalWorkspaceOperationReport,
   RentalWorkspaceReportFilter
 } from "@store-rental/shared";
-import { RentalCoreOrderStatus } from "@store-rental/shared";
+import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol } from "@store-rental/shared";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, App, Button, Card, Col, DatePicker, Descriptions, Input, Row, Select, Space, Statistic, Table, Tag } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
@@ -48,7 +48,6 @@ const assetStatusLabels: Record<string, string> = {
   inspection: "检查中", maintenance: "维修中", disabled: "已停用"
 };
 
-const money = (value: number) => `¥${Number(value).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const percent = (value: number) => `${(Number(value) * 100).toFixed(2)}%`;
 export function WorkspaceOperationReportPage() {
   const { message } = App.useApp();
@@ -142,7 +141,7 @@ export function WorkspaceOperationReportPage() {
         }
         note={{
           title: "口径说明",
-          description: "订单量为非草稿订单数；租赁收入只含租金；优惠金额为方案优惠与券优惠合计；应收金额为调账后应收；异常费用取订单费用行中的逾期、损坏与取消。仅统计当前经营空间，不做跨空间汇总；导出与本页使用同一份数据与筛选。"
+          description: "订单量为非草稿订单数；租赁收入只含租金；优惠金额为方案优惠与券优惠合计；应收金额为调账后应收，税为价内税——「不含税应收」与「其中税额」是它的拆分，不要相加；异常费用取订单费用行中的逾期、损坏与取消。仅统计当前经营空间，不做跨空间汇总；导出与本页使用同一份数据与筛选。"
         }}
         extra={
           <Space>
@@ -160,14 +159,21 @@ export function WorkspaceOperationReportPage() {
   );
 }
 function ReportBody({ data }: { data: RentalWorkspaceOperationReport }) {
+  // 币种取报表自带的快照，而不是再去读一次业务设置：金额是按这个币种算出来的，
+  // 两处各读一次就有机会显示成不一致的单位。
+  const money = (value: number) => formatRentalMoney(Number(value), data.currency);
+  const symbol = rentalCurrencySymbol(data.currency);
   // 空空间返回全零是服务端口径；页面如实显示 0，不显示「暂无数据」——
   // 「0 单」与「没查到」是两件事，后者会让人以为报表坏了。
   const cards = [
     { label: "订单量", value: data.orderCount, precision: 0 },
-    { label: "租赁收入", value: data.rentalRevenue, prefix: "¥", precision: 2 },
-    { label: "优惠金额", value: data.discountTotal, prefix: "¥", precision: 2 },
-    { label: "应收金额", value: data.receivableTotal, prefix: "¥", precision: 2 },
-    { label: "异常费用", value: data.exceptionFeeTotal, prefix: "¥", precision: 2 },
+    { label: "租赁收入", value: data.rentalRevenue, prefix: symbol, precision: 2 },
+    { label: "优惠金额", value: data.discountTotal, prefix: symbol, precision: 2 },
+    { label: "应收金额", value: data.receivableTotal, prefix: symbol, precision: 2 },
+    // 价内税：税额已含在应收里，两个卡片是同一笔钱的拆分，不是可以相加的两项。
+    { label: "不含税应收", value: data.netOfTaxTotal, prefix: symbol, precision: 2 },
+    { label: "其中税额", value: data.taxTotal, prefix: symbol, precision: 2 },
+    { label: "异常费用", value: data.exceptionFeeTotal, prefix: symbol, precision: 2 },
     { label: "异常订单", value: data.exceptionOrderCount, precision: 0 }
   ];
   const assets = data.utilization.serializedAssets;

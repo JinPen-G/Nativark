@@ -12,6 +12,7 @@ import {
 } from "@ant-design/icons";
 import {
   RENTAL_PRICING_UNIT_LABELS,
+  formatRentalMoney,
   type CreateRentalOrderRequest,
   type RentalBookingIdentityInput,
   type RentalQuoteRequest,
@@ -52,7 +53,6 @@ type FormValues = Omit<RentalQuoteRequest, "startAt" | "endAt" | "services"> & {
 };
 type SelectedService = NonNullable<RentalQuoteRequest["services"]>[number];
 
-const money = (value: number) => `¥${Number(value).toFixed(2)}`;
 const unitLabels = RENTAL_PRICING_UNIT_LABELS;
 const fulfillmentModeLabels: Record<string, string> = {
   store_pickup_return: "门店取还",
@@ -74,6 +74,8 @@ export function RentalOrderCreatePage() {
   const bookingIdentity = Form.useWatch("bookingIdentity", form);
   const profile = useQuery({ queryKey: ["rental-core", "profile"], queryFn: rentalCoreApi.profile });
   const settings = useQuery({ queryKey: ["rental-core", "business-settings"], queryFn: rentalCoreApi.businessSettings });
+  // 报价与订单都在本空间生成，币种就是本空间的结算币种；报价回来后优先用它自己的快照。
+  const money = (value: number) => formatRentalMoney(Number(value), quote?.currency ?? settings.data?.pricing.currency);
   const pricingGroups = useQuery({ queryKey: ["rental-core", "pricing-groups"], queryFn: rentalCoreApi.pricingGroups });
   const locations = useQuery({ queryKey: ["rental-core", "locations"], queryFn: rentalCoreApi.locations });
   const pricing = useQuery({ queryKey: ["rental-core", "pricing-plans"], queryFn: rentalCoreApi.pricingPlans });

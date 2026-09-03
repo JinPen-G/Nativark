@@ -1,5 +1,5 @@
 import { DeleteOutlined, EditOutlined, PlusOutlined, SearchOutlined } from "@ant-design/icons";
-import { RENTAL_PRICING_UNIT_LABELS, type RentalPricingGroup, type SaveRentalPricingGroupRequest } from "@store-rental/shared";
+import { RENTAL_PRICING_UNIT_LABELS, formatRentalMoney, rentalCurrencySymbol, type RentalPricingGroup, type SaveRentalPricingGroupRequest } from "@store-rental/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { App, Button, Card, Drawer, Form, Input, InputNumber, Select, Space, Table, Tag, Typography } from "antd";
 import dayjs from "dayjs";
@@ -20,6 +20,7 @@ export function PricingGroupPage() {
   const models = useQuery({ queryKey: ["rental-core", "groups"], queryFn: rentalCoreApi.itemGroups });
   const pricingGroups = useQuery({ queryKey: ["rental-core", "pricing-groups"], queryFn: rentalCoreApi.pricingGroups });
   const settings = useQuery({ queryKey: ["rental-core", "business-settings"], queryFn: rentalCoreApi.businessSettings });
+  const currency = settings.data?.pricing.currency;
   const versions = useQuery({ queryKey: ["rental-core", "price-versions"], queryFn: () => rentalCoreApi.priceVersions(1, 100) });
   const currentVersion = versions.data?.rows.find((row) => !dayjs(row.effectiveFrom).isAfter(dayjs()));
   const currentVersionDetail = useQuery({
@@ -87,7 +88,7 @@ export function PricingGroupPage() {
           { title: "默认计价", render: (_, row) => row.defaultPricingUnit ? RENTAL_PRICING_UNIT_LABELS[row.defaultPricingUnit] : "跟随价格配置" },
           { title: "当前基本价", render: (_, row) => {
             const rates = (currentVersionDetail.data?.rates ?? []).filter((rate) => (rate.pricingGroupId ?? rate.itemGroupId) === row.id);
-            return rates.length ? <Space size={[4, 4]} wrap>{rates.map((rate) => <Tag color="processing" key={`${rate.itemGroupId}:${rate.unit}`}>¥{rate.baseAmount.toFixed(2)} / {RENTAL_PRICING_UNIT_LABELS[rate.unit]}</Tag>)}</Space> : <Tag color="warning">历史分组未配置</Tag>;
+            return rates.length ? <Space size={[4, 4]} wrap>{rates.map((rate) => <Tag color="processing" key={`${rate.itemGroupId}:${rate.unit}`}>{formatRentalMoney(rate.baseAmount, currency)} / {RENTAL_PRICING_UNIT_LABELS[rate.unit]}</Tag>)}</Space> : <Tag color="warning">历史分组未配置</Tag>;
           } },
           { title: "状态", dataIndex: "status", render: (value) => <Tag color={value === "enabled" ? "success" : "default"}>{value === "enabled" ? "启用" : "停用"}</Tag> },
           { title: "操作", width: 100, render: (_, row) => <Button type="link" icon={<EditOutlined />} onClick={() => edit(row)}>编辑</Button> }
@@ -120,7 +121,7 @@ export function PricingGroupPage() {
                   <Select style={{ width: 220 }} options={(settings.data?.pricing.enabledUnits ?? []).map((value) => ({ value, label: RENTAL_PRICING_UNIT_LABELS[value] ?? value }))} />
                 </Form.Item>
                 <Form.Item name={[field.name, "baseAmount"]} label="价格" rules={[{ required: true, message: "请填写价格" }]}>
-                  <InputNumber min={0} precision={2} prefix="¥" style={{ width: 220 }} />
+                  <InputNumber min={0} precision={2} prefix={rentalCurrencySymbol(currency)} style={{ width: 220 }} />
                 </Form.Item>
                 <Button danger type="text" aria-label="删除基本价" icon={<DeleteOutlined />} disabled={fields.length === 1} onClick={() => remove(field.name)} style={{ marginTop: 30 }} />
               </Space>)}

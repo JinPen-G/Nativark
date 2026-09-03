@@ -1,5 +1,6 @@
 import { PlusOutlined, SearchOutlined } from "@ant-design/icons";
 import type { RentalOrder } from "@store-rental/shared";
+import { formatRentalMoney } from "@store-rental/shared";
 import { useQuery } from "@tanstack/react-query";
 import { Button, Card, DatePicker, Input, Row, Col, Segmented, Space, Table, Tag } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
@@ -22,7 +23,9 @@ export function RentalOrdersPage() {
     const term = keyword.trim().toLowerCase();
     const matchesKeyword = !term || [order.orderNo, order.customerName, order.membershipSnapshot?.corporateCustomerName, order.payerSubjectCustomerId].filter(Boolean).some((value) => String(value).toLowerCase().includes(term));
     const matchesStatus = status === "all" || order.status === status;
-    const matchesPeriod = !period?.[0] || !period?.[1] || (dayjs(order.startAt).isBefore(period[1]!.endOf("day")) && dayjs(order.endAt).isAfter(period[0]!.startOf("day")));
+    // 区间筛选按**当前**归还时间：续租过的订单实际占用到 effectiveEndAt，
+    // 读原 endAt 会让它在覆盖续租那几天的筛选里查不出来。
+    const matchesPeriod = !period?.[0] || !period?.[1] || (dayjs(order.startAt).isBefore(period[1]!.endOf("day")) && dayjs(order.effectiveEndAt ?? order.endAt).isAfter(period[0]!.startOf("day")));
     return matchesKeyword && matchesStatus && matchesPeriod;
   }), [orders.data, keyword, period, status]);
   const statusOptions = [{ label: "全部", value: "all" }, ...[...new Set((orders.data ?? []).map((item) => item.status))].map((value) => ({ label: statusLabels[value] ?? value, value }))];
@@ -34,10 +37,15 @@ export function RentalOrdersPage() {
         { title: "订单", fixed: "left", width: 170, render: (_, row) => <Button type="link" onClick={() => navigate(`/rental/orders/${row.id}`)}>{row.orderNo}</Button> },
         { title: "使用人 / 主体", width: 210, render: (_, row) => <Space orientation="vertical" size={0}><b>{row.membershipSnapshot?.personalCustomerName ?? row.customerName}</b>{row.membershipSnapshot?.corporateCustomerName && <Tag color="blue">{row.membershipSnapshot.corporateCustomerName}{row.membershipSnapshot.enterpriseContractAndPayer ? " · 企业签约付款" : " · 企业权益"}</Tag>} {!row.membershipSnapshot && <span className="muted">旧客户记录</span>}</Space> },
         { title: profile.data?.terminology.itemLabel ?? "商品", width: 220, render: (_, row) => row.lines.map((line) => `${line.itemGroupName}×${line.quantity}`).join("、") },
-        { title: "租赁时间", width: 210, render: (_, row) => `${dayjs(row.startAt).format("MM-DD HH:mm")} → ${dayjs(row.endAt).format("MM-DD HH:mm")}` },
+        { title: "租赁时间", width: 210, render: (_, row) => {
+          // 续租不改 `endAt`（需求 4.6.9），当前归还时间在 `effectiveEndAt`。
+          // 列表必须显示后者，否则续租过的单在列表上看起来仍是原时间。
+          const end = row.effectiveEndAt ?? row.endAt;
+          return <>{`${dayjs(row.startAt).format("MM-DD HH:mm")} → ${dayjs(end).format("MM-DD HH:mm")}`}{row.effectiveEndAt && row.effectiveEndAt !== row.endAt && <><br /><span className="muted">已续租，原 {dayjs(row.endAt).format("MM-DD HH:mm")}</span></>}</>;
+        } },
         { title: "报价快照", width: 150, render: (_, row) => <><span>{row.quoteNo}</span><br /><span className="muted">价格 v{row.pricingPlanVersion} · 规则 v{row.ruleVersion}</span></> },
-        { title: "应付", width: 110, dataIndex: "payableAmount", render: (value) => `¥${Number(value).toFixed(2)}` },
-        { title: "押金 / 预授权", width: 150, render: (_, row) => `¥${Number(row.depositAmount).toFixed(2)} / ¥${Number(row.preAuthAmount).toFixed(2)}` },
+        { title: "应付", width: 110, dataIndex: "payableAmount", render: (value, row) => formatRentalMoney(Number(value), row.currency) },
+        { title: "押金 / 预授权", width: 150, render: (_, row) => `${formatRentalMoney(row.depositAmount, row.currency)} / ${formatRentalMoney(row.preAuthAmount, row.currency)}` },
         { title: "状态", fixed: "right", width: 110, dataIndex: "status", render: (value) => <Tag color={value === "completed" ? "success" : value === "cancelled" ? "default" : "processing"}>{statusLabels[value] ?? value}</Tag> }
       ]} /></QueryState>
     </Card>

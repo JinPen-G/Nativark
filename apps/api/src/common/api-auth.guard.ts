@@ -383,6 +383,14 @@ export function requiredPermissions(method: string, path: string) {
   if (path.match(/^\/rental\/v1\/orders\/[^/]+$/)) {
     return ["store-rental:order:view"];
   }
+  // 续租：读用 order:view，写用 order:extend（这个权限码平台侧早已定义，旧模块从未接上）。
+  // 试算不落库但会暴露价格，因此和申请同权限，不给只读账号看到续租报价。
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/extensions$/)) {
+    return method === "GET" ? ["store-rental:order:view"] : ["store-rental:order:extend", "store-rental:order:operate"];
+  }
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/extensions\/(preview|[^/]+\/pay)$/)) {
+    return ["store-rental:order:extend", "store-rental:order:operate"];
+  }
   if (path.startsWith("/rental/v1/inspection-templates") || path.match(/^\/rental\/v1\/orders\/[^/]+\/inspections$/)) {
     return method === "GET" ? ["store-rental:order:view"] : ["store-rental:order:operate", "store-rental:order:pickup", "store-rental:order:return"];
   }

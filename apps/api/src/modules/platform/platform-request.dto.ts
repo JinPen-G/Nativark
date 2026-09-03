@@ -1,9 +1,11 @@
 import {
+  RENTAL_CURRENCY_CODES,
   RentalCategoryCode,
   RoleScope,
   TenantStatus,
   type GeneratePlatformNumberRequest,
   type PlatformDictionaryItem,
+  type RentalCurrency,
   type SaveOrganizationRequest,
   type SavePlatformFilterPresetRequest,
   type SaveSystemRoleRequest,
@@ -115,6 +117,8 @@ export class TenantBootstrapDto implements TenantBootstrapRequest {
   @IsString() @IsNotEmpty() tenantCode!: string;
   @IsString() @IsNotEmpty() tenantName!: string;
   @IsEnum(RentalCategoryCode) categoryCode!: RentalCategoryCode;
+  // 结算币种（需求 §948）。只收登记过的两位小数币种；省略按人民币。
+  @IsOptional() @IsIn(RENTAL_CURRENCY_CODES) currency?: RentalCurrency;
   // 兼容既有 API：省略时由 PlatformService 写入默认操作人；传入则必须是非空字符串。
   @IsOptional() @IsString() @IsNotEmpty() operator?: string;
   @IsString() @IsNotEmpty() adminAccount!: string;

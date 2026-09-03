@@ -1,5 +1,5 @@
 import { EditOutlined, HistoryOutlined, PlusOutlined } from "@ant-design/icons";
-import { RENTAL_PRICING_UNIT_LABELS } from "@store-rental/shared";
+import { RENTAL_PRICING_UNIT_LABELS, formatRentalMoney, rentalCurrencySymbol } from "@store-rental/shared";
 import type { CreateRentalPriceAdjustmentRequest, RentalDiscountPlan, RentalPriceAdjustmentPreviewRow, RentalPricingGroup, RentalPricingPlanV1, RentalServiceCapacity, RentalValueAddedService, SaveRentalDiscountPlanRequest, SaveRentalServiceCapacityRequest, SaveRentalValueAddedServiceRequest } from "@store-rental/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Button, Card, Col, DatePicker, Drawer, Form, Input, InputNumber, Modal, Popconfirm, Row, Select, Space, Switch, Table, Tag, Typography } from "antd";
@@ -12,7 +12,6 @@ import { QueryState } from "@/components/QueryState";
 export type RentalCommercialSection = "pricing" | "discounts" | "services";
 
 const unitLabels = RENTAL_PRICING_UNIT_LABELS;
-const money = (value: number | undefined) => `¥${Number(value ?? 0).toFixed(2)}`;
 const pricingRateKey = (rate: { pricingGroupId?: string; itemGroupId: string; unit: string }) => `${rate.pricingGroupId ?? rate.itemGroupId}:${rate.unit}`;
 const serviceTypeLabels: Record<string, string> = {
   insurance: "保险",
@@ -66,6 +65,9 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
     queryKey: ["rental-core", "business-settings"],
     queryFn: rentalCoreApi.businessSettings,
   });
+  const currency = settings.data?.pricing.currency;
+  const money = (value: number | undefined) => formatRentalMoney(Number(value ?? 0), currency);
+  const currencySymbol = rentalCurrencySymbol(currency);
   const groups = useQuery({
     queryKey: ["rental-core", "groups"],
     queryFn: rentalCoreApi.itemGroups,
@@ -572,7 +574,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
                       <Form.Item name={[field.name, "op"]} hidden><Input /></Form.Item>
                       <Col span={10}><b>{currentPriceVersionDetail.data?.rates[field.name]?.pricingGroupName ?? currentPriceVersionDetail.data?.rates[field.name]?.itemGroupName}</b><br/><Typography.Text type="secondary">{unitLabels[currentPriceVersionDetail.data?.rates[field.name]?.unit ?? "calendar_day"]}</Typography.Text></Col>
                       <Col span={6}><Typography.Text type="secondary">当前价</Typography.Text><br/><b>{money(currentPriceVersionDetail.data?.rates[field.name]?.baseAmount)}</b></Col>
-                      <Col span={8}><Form.Item name={[field.name, "value"]} label="调后价格" rules={[{ required: true, message: "请填写调后价格" }]} style={{ marginBottom: 0 }}><InputNumber min={0} precision={2} prefix="¥" style={{ width: "100%" }} /></Form.Item></Col>
+                      <Col span={8}><Form.Item name={[field.name, "value"]} label="调后价格" rules={[{ required: true, message: "请填写调后价格" }]} style={{ marginBottom: 0 }}><InputNumber min={0} precision={2} prefix={currencySymbol} style={{ width: "100%" }} /></Form.Item></Col>
                     </Row>
                   </Card>
                 ))}
@@ -678,7 +680,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
             <Card size="small" title="2. 适用条件">
               <Row gutter={12}>
                 <Col span={12}><Form.Item name="customerScope" label="客户范围"><Select options={[{ value: "all", label: "全部客户" }, { value: "personal", label: "个人客户" }, { value: "corporate", label: "企业客户" }, { value: "member", label: "会员" }]} /></Form.Item></Col>
-                <Col span={12}><Form.Item name="minimumSpend" label="最低消费"><InputNumber min={0} precision={2} prefix="¥" style={{ width: "100%" }} /></Form.Item></Col>
+                <Col span={12}><Form.Item name="minimumSpend" label="最低消费"><InputNumber min={0} precision={2} prefix={currencySymbol} style={{ width: "100%" }} /></Form.Item></Col>
                 <Col span={24}>
                   <Form.Item name="applicablePricingGroupIds" label="适用定价分组" tooltip="留空表示适用于当前经营空间的全部定价分组。">
                     <Select mode="multiple" allowClear showSearch={{ optionFilterProp: "label" }} placeholder="全部定价分组" options={(pricingGroups.data ?? []).map((group) => ({ value: group.id, label: `${group.code} · ${group.name}` }))} />
@@ -692,9 +694,9 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
               <Row gutter={12}>
                 <Col span={8}><Form.Item name="discountType" label="优惠类型"><Select options={[{ value: "percentage", label: "百分比减免" }, { value: "fixed_amount", label: "固定减免" }, { value: "threshold_amount", label: "满额固定减免" }]} /></Form.Item></Col>
                 <Col span={8}><Form.Item name="appliesTo" label="作用费用" tooltip="押金、预授权与异常费用不可被普通优惠减免。"><Select options={[{ value: "rental", label: "租金与使用量" }, { value: "fulfillment", label: "履约费用" }, { value: "service", label: "增值服务" }]} /></Form.Item></Col>
-                <Col span={8}><Form.Item name="discountValue" label={discountType === "percentage" ? "减免比例（%）" : "减免金额"} rules={[{ required: true }]}><InputNumber min={0} max={discountType === "percentage" ? 100 : undefined} precision={2} suffix={discountType === "percentage" ? "%" : undefined} prefix={discountType === "percentage" ? undefined : "¥"} style={{ width: "100%" }} /></Form.Item></Col>
-                {discountType === "threshold_amount" ? <Col span={12}><Form.Item name="thresholdAmount" label="满减门槛" rules={[{ required: true }]}><InputNumber min={0} precision={2} prefix="¥" style={{ width: "100%" }} /></Form.Item></Col> : null}
-                {discountType === "percentage" ? <Col span={12}><Form.Item name="maximumDiscount" label="最高减免金额"><InputNumber min={0} precision={2} prefix="¥" style={{ width: "100%" }} /></Form.Item></Col> : null}
+                <Col span={8}><Form.Item name="discountValue" label={discountType === "percentage" ? "减免比例（%）" : "减免金额"} rules={[{ required: true }]}><InputNumber min={0} max={discountType === "percentage" ? 100 : undefined} precision={2} suffix={discountType === "percentage" ? "%" : undefined} prefix={discountType === "percentage" ? undefined : currencySymbol} style={{ width: "100%" }} /></Form.Item></Col>
+                {discountType === "threshold_amount" ? <Col span={12}><Form.Item name="thresholdAmount" label="满减门槛" rules={[{ required: true }]}><InputNumber min={0} precision={2} prefix={currencySymbol} style={{ width: "100%" }} /></Form.Item></Col> : null}
+                {discountType === "percentage" ? <Col span={12}><Form.Item name="maximumDiscount" label="最高减免金额"><InputNumber min={0} precision={2} prefix={currencySymbol} style={{ width: "100%" }} /></Form.Item></Col> : null}
               </Row>
             </Card>
 

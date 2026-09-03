@@ -1,10 +1,10 @@
 import { ArrowRightOutlined, ReloadOutlined } from "@ant-design/icons";
-import { RentalCoreOrderStatus, type RentalAssetStatus, type RentalOrder } from "@store-rental/shared";
+import { RentalCoreOrderStatus, formatRentalMoney, type RentalAssetStatus, type RentalOrder } from "@store-rental/shared";
 import { useQuery } from "@tanstack/react-query";
 import { Button, Card, Progress, Segmented, Space, Statistic, Table, Tag, Typography } from "antd";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { rentalCoreApi } from "@/api/rentalCore";
+import { rentalCoreApi, useSettlementCurrency } from "@/api/rentalCore";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 
@@ -19,7 +19,6 @@ const orderStatusLabels: Record<RentalCoreOrderStatus, string> = {
   [RentalCoreOrderStatus.Cancelled]: "已取消"
 };
 const assetStatusLabels: Record<RentalAssetStatus, string> = { available: "可用", reserved: "已预占", rented: "租赁中", inspection: "检查中", maintenance: "维护中", disabled: "已停用" };
-const money = (value: number) => `¥${Number(value).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 function periodStart(period: string) {
   const start = new Date();
@@ -32,6 +31,8 @@ function periodStart(period: string) {
 export function WorkbenchPage() {
   const [period, setPeriod] = useState("本月");
   const navigate = useNavigate();
+  const currency = useSettlementCurrency();
+  const money = (value: number) => formatRentalMoney(value, currency);
   const profile = useQuery({ queryKey: ["rental-core", "profile"], queryFn: rentalCoreApi.profile });
   const orders = useQuery({ queryKey: ["rental-core", "orders"], queryFn: rentalCoreApi.orders });
   const assets = useQuery({ queryKey: ["rental-core", "assets"], queryFn: rentalCoreApi.assets });

@@ -1,18 +1,20 @@
 import { CheckOutlined, CloseOutlined, EditOutlined, PlusOutlined } from "@ant-design/icons";
+import { formatRentalMoney } from "@store-rental/shared";
 import type { CorporateDetail, MemberDetail, MemberReviewTask, MembershipPlanSummary, ProcessMemberRiskRequest, SaveCorporateRequest, SaveMemberRequest, SaveMembershipPlanRequest } from "@store-rental/shared";
 import { App, Button, Card, Col, Drawer, Form, Input, InputNumber, Row, Select, Space, Statistic, Switch, Table, Tabs, Tag, Typography } from "antd";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "@/api/rental";
+import { useSettlementCurrency } from "@/api/rentalCore";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
 
-const money = (value: number | undefined) => `¥${Number(value ?? 0).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
 export function CustomerPage() {
   const { message, modal } = App.useApp();
   const queryClient = useQueryClient();
+  const currency = useSettlementCurrency();
+  const money = (value: number | undefined) => formatRentalMoney(Number(value ?? 0), currency);
   const operator = useAuthStore((state) => state.user?.displayName ?? "运营用户");
   const [reviewing, setReviewing] = useState<MemberReviewTask>();
   const [planOpen, setPlanOpen] = useState(false);

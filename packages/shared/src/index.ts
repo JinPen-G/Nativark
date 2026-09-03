@@ -644,6 +644,11 @@ export interface TenantBootstrapRequest {
   tenantCode: string;
   tenantName: string;
   categoryCode: RentalCategoryCode;
+  /**
+   * 结算币种（需求 §948）。写进首个经营空间的业务设置，新建空间继承它，之后可按空间单独改。
+   * 不填按人民币，与既有行为一致。
+   */
+  currency?: RentalCurrency;
   operator?: string;
   adminAccount: string;
   adminDisplayName: string;
@@ -4138,11 +4143,65 @@ export interface RentalCapabilityLinkedTask {
  * 这条边界是刻意的：允许能力直接写 `order.totalAmount` 就等于把金额事实源交给扩展模块，
  * 那之后任何一笔账都无法只看 Core 解释清楚。
  */
+/**
+ * 结算币种（需求 §948：「一个订单只能属于……一个结算币种」）。
+ *
+ * 用联合类型而不是 `string`：币种直接决定金额的含义，打错一个字母就是一笔钱被读成
+ * 另一种钱，而金额列本身看不出错。要支持新币种时在这里加一项并补 `RENTAL_CURRENCY_META`，
+ * 类型会强制两处一起改。
+ *
+ * 刻意只收**两位小数**的币种。日元、韩元是 0 位小数，而全库金额列都是 `Decimal(12,2)`、
+ * 取整也按分处理；把它们放进来会引入一个本次没有实现的精度维度。
+ */
+export type RentalCurrency = "CNY" | "HKD" | "MOP" | "TWD" | "SGD" | "USD" | "EUR";
+
+/** 币种的符号与中文名。符号只用于展示，不参与任何计算。 */
+export const RENTAL_CURRENCY_META: Record<RentalCurrency, { symbol: string; label: string }> = {
+  CNY: { symbol: "¥", label: "人民币" },
+  HKD: { symbol: "HK$", label: "港币" },
+  MOP: { symbol: "MOP$", label: "澳门元" },
+  TWD: { symbol: "NT$", label: "新台币" },
+  SGD: { symbol: "S$", label: "新加坡元" },
+  USD: { symbol: "$", label: "美元" },
+  EUR: { symbol: "€", label: "欧元" }
+};
+
+export const RENTAL_CURRENCY_CODES = Object.keys(RENTAL_CURRENCY_META) as RentalCurrency[];
+
+/**
+ * 金额的统一展示。
+ *
+ * 存在的理由是**币种不能靠硬编码符号表达**：管理端此前有十几处写死的 `¥`，
+ * 港币空间的金额会被显示成人民币。所有界面金额都走这里，币种取订单/报价上的快照。
+ *
+ * 未知币种（存量数据或将来新增还没登记符号的）回落成「CODE 金额」，
+ * 而不是猜一个符号——猜错比不猜更危险。
+ *
+ * 千分位固定用 `en-US` 分组而不是运行环境默认 locale：默认 locale 依赖 Node 的 ICU
+ * 数据，同一份金额在开发机与服务器上可能分组不同，那种差异只会在对账时才被发现。
+ *
+ * 负号排在符号**之前**（`-¥12.30` 而不是 `¥-12.30`）：退款与冲销行会出现负数，
+ * 符号里夹一个减号读起来像是币种的一部分。
+ */
+export function formatRentalMoney(amount: number, currency?: string): string {
+  const value = Number.isFinite(amount) ? amount : 0;
+  const sign = value < 0 ? "-" : "";
+  const fixed = Math.abs(value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const meta = currency ? RENTAL_CURRENCY_META[currency as RentalCurrency] : RENTAL_CURRENCY_META.CNY;
+  return meta ? `${sign}${meta.symbol}${fixed}` : `${currency} ${sign}${fixed}`;
+}
+
+/** 币种符号；未登记的币种回落成币种代码本身，绝不猜符号。 */
+export function rentalCurrencySymbol(currency?: string): string {
+  if (!currency) return RENTAL_CURRENCY_META.CNY.symbol;
+  return RENTAL_CURRENCY_META[currency as RentalCurrency]?.symbol ?? currency;
+}
+
 export interface RentalCapabilityFeeBasis {
   code: string;
   label: string;
   amount: number;
-  currency: "CNY";
+  currency: RentalCurrency;
   /** 计算依据的可读说明，必填：一笔说不出理由的费用不允许进入结算。 */
   basis: string;
   evidence?: Record<string, string | number | boolean>;
@@ -5425,7 +5484,13 @@ export interface TenantRentalBusinessSettings {
   pricing: {
     enabledUnits: RentalPricingUnit[];
     defaultUnit: RentalPricingUnit;
-    currency: "CNY";
+    /**
+     * 经营空间的结算币种（需求 §948）。
+     *
+     * 事实来源在这里而不是租户表：这份设置的主键就是 workspaceId，一个租户下的香港店与
+     * 深圳店天然各存一份。租户级只提供**新建空间时的默认值**，不做覆盖来源。
+     */
+    currency: RentalCurrency;
     taxIncluded: boolean;
     /**
      * **兼容开关**：是否仍启用 PRICE-03 之前的空间级 `weekendMultiplier` /
@@ -6379,7 +6444,7 @@ export interface RentalPricingPlanV1 {
   categoryCode: RentalCategoryCode;
   code: string;
   name: string;
-  currency: "CNY";
+  currency: RentalCurrency;
   status: "draft" | "enabled" | "disabled";
   version: string;
   effectiveFrom: string;
@@ -6832,6 +6897,77 @@ export interface RentalFundingBalance {
 }
 
 
+/**
+ * 续租 / 延期规则（需求 4.6.9）。
+ *
+ * 这里只放**准入**约束。金额一律由增量期重新报价得出，不在规则里配"续租单价"——
+ * 那会造出第二套价格事实，与已发布的空间价格版本对不上。
+ */
+export interface RentalExtensionRule {
+  /** 关掉后订单不再接受续租申请。缺省视为 true。 */
+  enabled: boolean;
+  /** 同一订单允许续租的次数上限。不填即不限。 */
+  maxTimes?: number;
+  /** 累计延长的天数上限（自然日）。不填即不限。 */
+  maxTotalDays?: number;
+  /**
+   * 已逾期时补办续租是否强制先付款。缺省 true。
+   *
+   * 企业月结客户平时不需要补款动作即可续租，但已经逾期说明履约已经出问题，
+   * 这时仍挂账会让欠款继续累积——旧模块也是在逾期时强制转为即时收款。
+   */
+  forceImmediateWhenOverdue: boolean;
+}
+
+/**
+ * 提前归还退款规则（需求 4.6.8）。
+ *
+ * 需求要求「允许租金退款时必须明确计费单位、长租阶梯是否重新计算、优惠如何重新分摊」，
+ * 本实现的口径固定为：**按未使用计费单位占比折算，阶梯档不重算，优惠按同一比例同步折减**。
+ * 因此规则里只需要「提前多久」和「退几成」两个旋钮，不需要再选算法——
+ * 给算法留选项会让同一个空间的历史订单出现两种退款口径，事后无法解释。
+ */
+export interface RentalEarlyReturnRule {
+  /**
+   * `none` 不退；`auto` 按规则直接退；`manual_review` 只生成待审批退款，审批通过才落账。
+   * 缺省 `none`。
+   */
+  mode: "none" | "auto" | "manual_review";
+  /**
+   * 至少提前多少小时归还才产生退款。汽车门市的惯例是 24——提前不足一天不退。
+   * 0 表示只要提前就退。
+   */
+  minAdvanceHours: number;
+  /** 剩余租金的退款比例（0-100）。 */
+  refundPercent: number;
+  /** 单笔退款上限。不填即不封顶。 */
+  maxRefundAmount?: number;
+  /**
+   * 是否连未发生的增值服务费一并退（需求 4.6.8：「未发生且可取消的服务或履约费用
+   * 可按规则退款」）。只退计划服务时段完全落在归还时刻之后的那些行。
+   */
+  refundUndeliveredServices: boolean;
+}
+
+/**
+ * 税规则（通行租赁系统的做法；需求文档目前没有税务口径，属新增能力）。
+ *
+ * 只做**价内税**：标价即含税，税额由含税额反算 `含税额 × r/(1+r)`，客户看到的应付金额
+ * 不变。这样选是因为大陆租赁零售的标价惯例就是含税价，而香港没有增值税——把税率配成 0
+ * 即可，不需要第二套报价口径。
+ *
+ * `inclusive` 目前固定 `true`，留着这个字段是为了将来做价外税（B2B 不含税报价）时
+ * 有地方表达，而不必再改一次快照结构。
+ */
+export interface RentalTaxRule {
+  /** 税率，小数形式：13% 填 0.13。0 表示不计税。 */
+  rate: number;
+  /** 价内税恒为 true。价外税尚未实现，写 false 会被服务端拒绝。 */
+  inclusive: true;
+  /** 票面税种说明，如「增值税 13%」。只做展示与开票参考，不参与计算。 */
+  label?: string;
+}
+
 export interface RentalRuleConfig {  /**
    * 计价相关的经营空间规则（需求 4.4.5：「班次时长及边界由经营空间规则定义」）。
    *
@@ -6891,6 +7027,27 @@ export interface RentalRuleConfig {  /**
     manualReviewRequired: boolean;
     chargeLimit?: number;
   };
+  /**
+   * 续租 / 延期规则（需求 4.6.9）。
+   *
+   * 整组可缺省：既有规则快照没有这一组，缺省视为「允许续租、不限次数与天数、
+   * 逾期补办续租必须先付款」，历史订单不因新增字段换一套口径。
+   */
+  extension?: RentalExtensionRule;
+  /**
+   * 提前归还退款规则（需求 4.6.8）。
+   *
+   * 整组可缺省，**缺省即不退租金**——需求原文是「第一阶段固定租期订单提前归还
+   * 默认不自动退租金」。缺省必须等于今天的行为，不能因为新增了字段就开始退钱。
+   */
+  earlyReturn?: RentalEarlyReturnRule;
+  /**
+   * 税规则。整组可缺省，**缺省即不计税**（税率 0、税额 0），历史订单的复算结果不变。
+   *
+   * 必须放在规则配置里而不是租户经营设置里：`RentalRuleConfig` 就是报价与订单的
+   * `ruleSnapshot`，只有进了快照，事后才说得清「这张单当时按几个点算的税」。
+   */
+  tax?: RentalTaxRule;
 }
 
 /**
@@ -7206,7 +7363,11 @@ export interface RentalQuoteChargeLine {
     | "deposit"
     | "cancellation"
     | "overdue"
-    | "damage";
+    | "damage"
+    /** 续租新增期间的费用（需求 4.6.9）。一次续租一条，code 带序号以便去重。 */
+    | "extension"
+    /** 提前归还退还的租金（需求 4.6.8）。金额为**负数**，直接冲减应收。 */
+    | "early_return_refund";
   amount: number;
   sourceId?: string;
   sourceVersion?: string;
@@ -7251,6 +7412,21 @@ export interface RentalQuoteSnapshotV1 {
    * 预授权额度按需求不计入其中任何一项。
    */
   receivableAmount: number;
+  /**
+   * 税率（小数形式，13% 记 0.13）与从 `payableAmount` 反算出的税额。
+   *
+   * 价内税是对已收金额的**拆分**，不是追加：`payableAmount` 与 `receivableAmount` 都不含
+   * 税额的加减，因此也**不进 `chargeLines`**——做成一条正数明细会打破上面那条
+   * 「非押金明细之和 = payableAmount」的对应关系。押金不计税（押金不是收入）。
+   * 两个字段整体可缺省：规则没配税时为 0，存量报价读出来也是 0。
+   */
+  taxRate?: number;
+  taxAmount?: number;
+  /**
+   * 结算币种快照（需求 §948）。取报价时经营空间的币种，之后空间改币种不影响已出的报价。
+   * 可缺省：存量报价读出来是 undefined，展示时回落到人民币符号。
+   */
+  currency?: RentalCurrency;
   pricingPlanVersion: string;
   /**
    * 本次报价实际命中的费率（需求 4.4「报价快照」+ 验收「相同输入可复算」）。
@@ -8054,7 +8230,18 @@ export interface RentalOrder {
   returnLocationName?: string;
   returnLocationSnapshot: RentalFulfillmentLocationSnapshot;
   startAt: string;
+  /**
+   * 原始约定归还时间，**永不因续租而改变**（需求 4.6.9：延期是订单变更，
+   * 不得直接修改原订单结束时间）。要判断「现在几点该还」用 `effectiveEndAt`。
+   */
   endAt: string;
+  /**
+   * 当前约定归还时间：最近一次**已生效**续租记录的 `newEndAt`；没有续租时等于 `endAt`。
+   *
+   * 存成字段而不是每次从续租记录聚合——占用冲突检查与逾期判定都要读它，
+   * 聚合会给这两条高频路径各加一次查询。整字段可缺省，存量订单读取时回落到 `endAt`。
+   */
+  effectiveEndAt?: string;
   quoteId: string;
   quoteNo: string;
   pricingPlanVersion: string;
@@ -8113,6 +8300,17 @@ export interface RentalOrder {
   payableAmount: number;
   adjustmentAmount: number;
   finalPayableAmount: number;
+  /**
+   * 从报价拷贝的税率，以及按 `finalPayableAmount` 反算的税额（价内税）。
+   *
+   * 税额跟着**最终应付**走而不是原应付：逾期费、损坏费、续租费、提前归还退款都会改
+   * `adjustmentAmount`，含税总额变了税额就得跟着变，否则报表里"不含税收入 + 税额"凑不回
+   * 实收。押金不含税，因此不参与反算。两个字段可缺省，规则没配税时为 0。
+   */
+  taxRate?: number;
+  taxAmount?: number;
+  /** 从报价拷贝的结算币种快照（需求 §948：一个订单只有一个结算币种）。 */
+  currency?: RentalCurrency;
   cancellationReason?: string;
   cancelledAt?: string;
   completedAt?: string;
@@ -8174,12 +8372,24 @@ export interface RentalWorkspaceOperationReport {
    * 本来就不同，只给一个总数会让人以为是数据错了。
    */
   statusBreakdown: Array<{ status: RentalCoreOrderStatus; count: number }>;
+  /**
+   * 本报表的结算币种（需求 §948）。经营空间是单币种的，因此整张报表只有一个币种，
+   * 不需要按币种分组；界面与 CSV 用它决定金额符号，而不是硬编码 `¥`。
+   */
+  currency: RentalCurrency;
   /** 租赁收入：`sum(rentalAmount)`。只含租金，不含增值服务、履约费与押金。 */
   rentalRevenue: number;
   /** 优惠金额：`sum(discountAmount + couponAmount)`。方案优惠与券优惠合计。 */
   discountTotal: number;
   /** 应收金额：`sum(finalPayableAmount)`，即调账后的应收，与账单口径一致。 */
   receivableTotal: number;
+  /**
+   * 税额合计：`sum(taxAmount)`。价内税，已经包含在 `receivableTotal` 里，不要再相加。
+   * 规则未配税的空间恒为 0。
+   */
+  taxTotal: number;
+  /** 不含税应收：`receivableTotal − taxTotal`。开票与收入确认看这个数。 */
+  netOfTaxTotal: number;
   /** 异常费用：订单费用行中 `RENTAL_EXCEPTION_CHARGE_TYPES` 的金额合计。 */
   exceptionFeeTotal: number;
   /** 异常订单数：**产生过**异常费用行的订单数（不是「取消的订单数」）。 */
@@ -8270,6 +8480,106 @@ export interface RentalQuantityStockUtilization {
  * 但「可出租时长」需要历史可用状态，库里没有，因此这里刻意不给比率——
  * 给一个分母靠猜的比率，比不给更糟。
  */
+/**
+ * 续租记录的状态（需求 4.6.9：「申请中但未成功不视为已经延期」）。
+ *
+ * 只有 `effective` 会推进订单的 `effectiveEndAt` 与占用；其余状态下原租期一律不变。
+ */
+export type RentalOrderExtensionStatus = "pending_payment" | "effective" | "cancelled" | "expired";
+
+/**
+ * 一次续租 / 延期（需求 4.6.9）。append-only，不可编辑——它是"这段时间按什么价延长的"
+ * 的唯一凭据，改它等于改历史账。
+ */
+export interface RentalOrderExtension {
+  id: string;
+  tenantId: string;
+  workspaceId: string;
+  orderId: string;
+  /** 同一订单内的续租序号，从 1 开始。费用明细的 code 用它去重。 */
+  sequence: number;
+  status: RentalOrderExtensionStatus;
+  /** 本次续租前的当前归还时间。 */
+  originalEndAt: string;
+  /** 本次续租后的归还时间。 */
+  newEndAt: string;
+  /** 增量期的计费单位数，按订单原本的计价单位计。 */
+  billableUnits: number;
+  rentalAmount: number;
+  serviceAmount: number;
+  /** 押金差额 = 按新租期算出的应收押金 − 已收押金，可为 0。 */
+  depositDelta: number;
+  /** 预授权差额，口径同上。 */
+  preAuthDelta: number;
+  /** 本次续租应付 = rentalAmount + serviceAmount。押金与预授权差额单独走资金台账。 */
+  payableAmount: number;
+  currency: string;
+  /** 申请时命中的空间级价格版本（需求 4.6.9：新增部分用申请时的价格）。 */
+  priceVersionId?: string;
+  priceVersion?: string;
+  ruleVersion: string;
+  /** 申请时的费率、规则与日历快照，供事后复算这一段。 */
+  rateSnapshot: RentalPricingRate[];
+  ruleSnapshot: RentalRuleConfig;
+  calendarSnapshot: RentalQuoteCalendarDay[];
+  /**
+   * 申请时快照的结算方式。`monthly` 表示企业月结客户，检查通过即生效、
+   * 费用记入月结账单，不需要客户补款动作；`immediate` 需要补款后才生效。
+   */
+  settlementMode: "immediate" | "monthly";
+  memo?: string;
+  paidAt?: string;
+  /** 生效时点。只有生效的记录才推进订单的 `effectiveEndAt` 与占用。 */
+  effectiveAt?: string;
+  /** 幂等键：同一订单内重复提交只落一条记录。 */
+  idempotencyKey: string;
+  createdBy: string;
+  createdAt: string;
+}
+
+/** 续租申请 / 试算的入参。APP 与后台用同一份。 */
+export interface RentalOrderExtensionRequest {
+  /** 新的归还时间。必须晚于订单当前的 `effectiveEndAt`。 */
+  newEndAt: string;
+  /** 增量期要一并追加的增值服务。不填表示只延长租期。 */
+  services?: Array<{
+    serviceId: string;
+    quantity: number;
+    scheduledStartAt?: string;
+    scheduledEndAt?: string;
+    serviceLocationId?: string;
+  }>;
+  memo?: string;
+}
+
+/**
+ * 续租试算结果：金额与依据齐全但不落库，供客户/运营确认后再提交申请。
+ *
+ * 单独定义而不是复用 `RentalOrderExtension`：试算没有 id、状态与创建人，
+ * 用 `Partial` 表达会让调用方分不清"这个字段现在没有"和"这个字段永远没有"。
+ */
+export interface RentalOrderExtensionPreview {
+  orderId: string;
+  originalEndAt: string;
+  newEndAt: string;
+  billableUnits: number;
+  rentalAmount: number;
+  serviceAmount: number;
+  depositDelta: number;
+  preAuthDelta: number;
+  payableAmount: number;
+  currency: string;
+  settlementMode: "immediate" | "monthly";
+  /** 是否需要客户补款后才生效。企业月结为 false。 */
+  paymentRequired: boolean;
+  /** 增量期的逐行计算说明，与报价的「计算说明」同源，便于客服核对。 */
+  chargeLines: RentalQuoteChargeLine[];
+  calendarSnapshot: RentalQuoteCalendarDay[];
+  priceVersionId?: string;
+  priceVersion?: string;
+  ruleVersion: string;
+}
+
 export interface RentalOrderOccupancy {
   /** 参与统计的订单数（与 `orderCount` 同一口径：非草稿 + 筛选后）。 */
   orderCount: number;

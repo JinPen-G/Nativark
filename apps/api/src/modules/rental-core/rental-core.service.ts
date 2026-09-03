@@ -29,6 +29,7 @@ import {
   type RentalBundleComponent,
   type RentalCapability,
   type RentalCategoryDefinition,
+  type RentalCurrency,
   type RentalCouponTemplate,
   type RentalFulfillmentOperator,
   type RentalFulfillmentLocation,
@@ -40,6 +41,10 @@ import {
   type RentalItemGroupImage,
   type RentalPricingGroup,
   type RentalOrder,
+  type RentalOrderExtension,
+  type RentalOrderExtensionPreview,
+  type RentalPricingRate,
+  type RentalRuleConfig,
   type RentalQuoteSnapshotV1,
   type RentalQuoteRequest,
   type CustomerOrderSubjects,
@@ -64,6 +69,8 @@ import {
 import { getRequestWorkspaceId, runWithRequestIdentity } from "../../common/request-identity";
 import { RentalStateRepository } from "./rental-state.repository";
 import { DEFAULT_BUSINESS_TIME_ZONE, isValidTimeZone, businessHoursError } from "./rental-business-day";
+import { roundMoney } from "./rental-money";
+import { effectiveExtensionRule, inclusiveTaxAmount } from "./rental-rule-defaults";
 import { RentalCoreConfigRepository, type RentalConfigStore, type RentalConfigTx } from "./rental-core-config.repository";
 import {
   RentalCoreFactRepository,
@@ -128,7 +135,15 @@ function overlaps(aStart: string, aEnd: string, bStart: string, bEnd: string) {
   return new Date(aStart).getTime() < new Date(bEnd).getTime() && new Date(aEnd).getTime() > new Date(bStart).getTime();
 }
 
-function defaultBusinessSettings(tenantId: string, definition: RentalCategoryDefinition): TenantRentalBusinessSettings {
+function defaultBusinessSettings(
+  tenantId: string,
+  definition: RentalCategoryDefinition,
+  /**
+   * 新空间的默认结算币种（需求 §948）。建租户时指定一次，此后每个新空间继承它，
+   * 空间可以单独改。缺省 CNY 与既有行为一致。
+   */
+  currency: RentalCurrency = "CNY"
+): TenantRentalBusinessSettings {
   const supportsPreauthorization = definition.businessModel.supportsPreauthorization;
   const defaults = definition.businessModel.defaults;
   return {
@@ -138,7 +153,7 @@ function defaultBusinessSettings(tenantId: string, definition: RentalCategoryDef
     pricing: {
       enabledUnits: [...definition.businessModel.pricingUnits],
       defaultUnit: definition.businessModel.defaultPricingUnit,
-      currency: "CNY",
+      currency,
       taxIncluded: true,
       holidayPricingEnabled: definition.businessModel.supportsHolidayPricing
     },
@@ -419,7 +434,13 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
    * 全部外键指向这些配置，那种租户后续下单会撞外键且报错指向订单而非真正原因。
    * 内存缓存只在事务成功提交后才写入，避免回滚后缓存里留下并不存在的租户。
    */
-  async initializeTenant(tenantId: string, categoryCode: RentalCategoryCode, tx?: RentalConfigTx) {
+  async initializeTenant(
+    tenantId: string,
+    categoryCode: RentalCategoryCode,
+    tx?: RentalConfigTx,
+    /** 建租户时选定的结算币种，写进首个经营空间的业务设置（需求 §948）。 */
+    currency: RentalCurrency = "CNY"
+  ) {
     // upsertProfile 会在同一事务里建默认经营空间（见 ensureDefaultWorkspace），
     // 但那发生在 persistConfig 内部，而 persistConfig 里的写入已经需要空间。
     // 因此这里先把空间 id 按同一确定性规则登记进查找表，让同步的 workspaceOf 可用。
@@ -429,7 +450,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       throw new ConflictException("已有租赁数据的租户不能切换经营品类");
     }
     if (!existing) {
-      const seeded = this.seedState(tenantId, categoryCode);
+      const seeded = this.seedState(tenantId, categoryCode, tenantId, currency);
       await this.persistConfig(seeded, tx);
       seeded.configPersisted = true;
       // 先落库再发布进程缓存。persist 失败时不能让同步查找表指向一个
@@ -1138,6 +1159,11 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       preAuthAmount: quote.preAuthAmount,
       payableAmount: quote.payableAmount,
       adjustmentAmount: 0, finalPayableAmount: quote.payableAmount,
+      // 税率从报价快照继承（下单不重算税率）；税额此刻等于报价的税额，
+      // 之后每次调账都会由 applyChargeTo 按新的最终应付重算。
+      taxRate: quote.taxRate ?? 0,
+      taxAmount: quote.taxAmount ?? 0,
+      currency: quote.currency,
       totalAmount: quote.payableAmount, lines: orderLines,
       reservations, allocations: [], createdBy: input.operator || userName, createdAt: timestamp, updatedAt: timestamp
     };
@@ -1345,7 +1371,9 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const targetQuantity = to.quantity * line.quantity;
     await this.factStore.lockInventoryTargets(tenantId, reservation.locationId, [{ itemGroupId: targetGroup.id, inventoryMode: targetGroup.inventoryMode }], tx);
     const snapshot = await this.loadInventorySnapshot(tenantId, tx);
-    const available = this.availableQuantity(state, snapshot, targetGroup, reservation.locationId, order.startAt, order.endAt, new Set());
+    // 占用区间到**当前**归还时间为止：续租过的订单要按延长后的时间查可用量，
+    // 否则会换进一台在续租那段时间已经被下一张订单占住的资产。
+    const available = this.availableQuantity(state, snapshot, targetGroup, reservation.locationId, order.startAt, order.effectiveEndAt ?? order.endAt, new Set());
     if (available < targetQuantity) throw new ConflictException(`${targetGroup.name} 可替代库存不足`);
     reservation.itemGroupId = targetGroup.id;
     reservation.quantity = targetQuantity;
@@ -1437,17 +1465,34 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       row.status = "released";
       if (row.assetId) assetChanges.push({ assetId: row.assetId, status: RentalAssetStatus.Available });
     });
-    if (chargeAmount > 0) order.chargeLines.push({ code: `cancellation:${order.id}`, name: "晚取消费用", type: "cancellation", amount: chargeAmount, sourceVersion: order.ruleVersion, detail: reason.trim() });
-    order.adjustmentAmount = chargeAmount;
-    order.finalPayableAmount = Math.round((order.payableAmount + chargeAmount) * 100) / 100;
-    order.totalAmount = order.finalPayableAmount;
+    // 取消费也走同一条追加路径：此前这里是 `adjustmentAmount = chargeAmount` 直接赋值，
+    // 是四个写入点里唯一不累加、也唯一没有去重保护的一处。取消对 Renting/Settling/Completed
+    // 都拒绝，所以目前不会覆盖掉已有调账，但没有理由留一个例外。
+    if (chargeAmount > 0) {
+      this.applyChargeTo(order, {
+        code: `cancellation:${order.id}`,
+        name: "晚取消费用",
+        type: "cancellation",
+        amount: chargeAmount,
+        sourceVersion: order.ruleVersion,
+        detail: reason.trim()
+      });
+    }
     order.cancellationReason = reason.trim(); order.cancelledAt = now();
     order.status = RentalCoreOrderStatus.Cancelled; order.updatedAt = now();
     await this.factStore.saveOrderAggregate(order, assetChanges, tx);
     return order;
   }
 
-  async completeHandoverWithoutInspection(tenantId: string, orderId: string, stage: "pickup" | "return", overdueCharge = 0, tx?: RentalFactTx, operator?: string) {
+  async completeHandoverWithoutInspection(
+    tenantId: string,
+    orderId: string,
+    stage: "pickup" | "return",
+    overdueCharge = 0,
+    tx?: RentalFactTx,
+    operator?: string,
+    earlyReturnRefund?: { amount: number; requiresReview: boolean; basis: string[] }
+  ) {
     const state = this.state(tenantId);
     const order = await this.lockedOrder(tenantId, orderId, tx);
     const assetChanges: AssetStatusChange[] = [];
@@ -1464,6 +1509,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       if (order.status !== RentalCoreOrderStatus.Renting) throw new ConflictException("只有租赁中的订单可以归还");
       await this.runHook(tenantId, "return_inspection", { type: "order", id: order.id }, order, tx, operator, this.orderHookInstances(tenantId, order));
       this.finishReturn(order, overdueCharge, assetChanges);
+      if (earlyReturnRefund) this.applyEarlyReturnRefundTo(order, earlyReturnRefund);
     }
     order.updatedAt = now();
     await this.factStore.saveOrderAggregate(order, assetChanges, tx);
@@ -1492,7 +1538,12 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     orderId: string,
     input: CreateRentalInspectionRequest,
     userName: string,
-    charges: { overdue?: { amount: number; returnedAt: string }; damage?: { amount: number; detail: string } } = {},
+    charges: {
+      overdue?: { amount: number; returnedAt: string };
+      damage?: { amount: number; detail: string };
+      /** 提前归还退款（需求 4.6.8）。`requiresReview` 时只记录不落账，等人工审批。 */
+      earlyReturn?: { amount: number; requiresReview: boolean; basis: string[] };
+    } = {},
     tx?: RentalFactTx
   ) {
     const state = this.state(tenantId);
@@ -1559,6 +1610,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
         for (const change of assetChanges) change.status = RentalAssetStatus.Maintenance;
       }
       if (charges.overdue && charges.overdue.amount > 0) this.applyOverdueTo(order, charges.overdue.amount, charges.overdue.returnedAt);
+      if (charges.earlyReturn) this.applyEarlyReturnRefundTo(order, charges.earlyReturn);
       // 检查员提交的是损失建议，不能直接决定客户应付；审核通过后才追加订单费用。
     }
     order.updatedAt = now();
@@ -1569,20 +1621,250 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     return { inspection: record, order };
   }
 
-  private applyOverdueTo(order: RentalOrder, amount: number, returnedAt: string) {
-    if (amount <= 0 || order.chargeLines.some((line) => line.code === `overdue:${order.id}`)) return;
-    order.chargeLines.push({ code: `overdue:${order.id}`, name: "逾期费用", type: "overdue", amount, sourceVersion: order.ruleVersion, detail: `实际归还时间 ${returnedAt}` });
-    order.adjustmentAmount = Math.round((order.adjustmentAmount + amount) * 100) / 100;
-    order.finalPayableAmount = Math.round((order.payableAmount + order.adjustmentAmount) * 100) / 100;
+  /**
+   * 往在途订单上追加一笔费用明细。
+   *
+   * 四步是既有约定：按 code 去重 → 推明细 → 累加 `adjustmentAmount` →
+   * 由 `payableAmount + adjustmentAmount` **重算** `finalPayableAmount`。
+   * `payableAmount` 是报价冻结值，永远不动；`finalPayableAmount` 永远是重算而不是累加。
+   *
+   * 去重键就是 `code` 本身，因此**每一种可能重复发生的费用都必须带判别符**——
+   * 逾期一单一次，用 orderId 够了；续租一单可以多次，必须带序号。
+   *
+   * 金额允许为负：提前归还退款走同一条路，负值让 `finalPayableAmount` 自然减少。
+   * 取整统一用 `roundMoney`（带 `Number.EPSILON`），此前这四处各写一遍裸
+   * `Math.round(v * 100) / 100`，恰好全落在最该稳的两个字段上。
+   */
+  private applyChargeTo(order: RentalOrder, line: RentalOrder["chargeLines"][number]) {
+    if (line.amount === 0 || order.chargeLines.some((row) => row.code === line.code)) return false;
+    order.chargeLines.push(line);
+    order.adjustmentAmount = roundMoney(order.adjustmentAmount + line.amount);
+    order.finalPayableAmount = roundMoney(order.payableAmount + order.adjustmentAmount);
     order.totalAmount = order.finalPayableAmount;
+    // 价内税跟着最终应付重算：逾期费、损坏费、续租费、提前归还退款都会改含税总额，
+    // 税额不跟着走的话，报表里「不含税收入 + 税额」凑不回实收。
+    order.taxAmount = inclusiveTaxAmount(order.finalPayableAmount, order.taxRate ?? 0);
+    return true;
   }
 
-  private applyDamageTo(order: RentalOrder, amount: number, detail: string) {
-    if (amount <= 0 || order.chargeLines.some((line) => line.code === `damage:${order.id}`)) return;
-    order.chargeLines.push({ code: `damage:${order.id}`, name: "损坏费用", type: "damage", amount, sourceVersion: order.ruleVersion, detail });
-    order.adjustmentAmount = Math.round((order.adjustmentAmount + amount) * 100) / 100;
-    order.finalPayableAmount = Math.round((order.payableAmount + order.adjustmentAmount) * 100) / 100;
-    order.totalAmount = order.finalPayableAmount;
+  /** 订单的续租记录，按序号升序。订单详情与幂等重放都读它。 */
+  async listOrderExtensions(tenantId: string, orderId: string, tx?: RentalFactTx) {
+    this.state(tenantId);
+    return this.factStore.listExtensions(tenantId, orderId, tx);
+  }
+
+  /**
+   * 受理续租申请（需求 4.6.9）。
+   *
+   * 金额由 `RentalBusinessService.quoteOrderExtension` 在事务外算好传进来，与逾期费、
+   * 取消费同一形态（控制器负责组合）。本方法只做闸门、落记录与推进占用。
+   *
+   * 闸门顺序：状态 → 归还时间基准未被别的续租改过 → 时间有效 → 规则准入
+   * → **后续库存占用** → 金额 > 0。库存那一步最容易漏：延长出来的那段时间可能
+   * 已经被下一张订单占住，不查就会出现两张订单同时占用同一台资产。
+   *
+   * 生效时机按结算方式分流（企业月结不需要客户补款动作）：
+   * - `monthly`：闸门全过即生效，费用进本期月结账单；
+   * - `immediate`：只落 `pending_payment` 记录，**不动**订单的占用与租期，
+   *   等 `payOrderExtension` 收到补款才生效——需求原文「完成补款后再延长占用和租期」。
+   */
+  async requestOrderExtension(
+    tenantId: string,
+    orderId: string,
+    priced: RentalOrderExtensionPreview & { rateSnapshot: RentalPricingRate[]; ruleSnapshot: RentalRuleConfig },
+    input: { idempotencyKey: string; memo?: string; operator: string },
+    tx: RentalFactTx
+  ): Promise<{ order: RentalOrder; extension: RentalOrderExtension }> {
+    this.state(tenantId);
+    const order = await this.lockedOrder(tenantId, orderId, tx);
+    if (order.status !== RentalCoreOrderStatus.Renting && order.status !== RentalCoreOrderStatus.ReadyForPickup) {
+      throw new ConflictException("只有待取车或租用中的订单可以续租");
+    }
+    const from = order.effectiveEndAt ?? order.endAt;
+    // 试算与受理之间订单可能已被另一次续租推进过，那金额基准就不成立了。
+    if (priced.originalEndAt !== from) throw new ConflictException("订单归还时间已变化，请重新试算续租费用");
+    this.validatePeriod(from, priced.newEndAt);
+    if (priced.payableAmount <= 0) throw new BadRequestException("续租的增量金额为 0，无需续租");
+    const rule = effectiveExtensionRule(priced.ruleSnapshot);
+    if (!rule.enabled) throw new ConflictException("当前经营空间的规则不允许续租");
+    const existing = await this.factStore.listExtensions(tenantId, orderId, tx);
+    const effectiveCount = existing.filter((row) => row.status === "effective").length;
+    if (rule.maxTimes !== undefined && effectiveCount >= rule.maxTimes) {
+      throw new ConflictException(`本订单的续租次数已达规则上限 ${rule.maxTimes} 次`);
+    }
+    if (rule.maxTotalDays !== undefined) {
+      // 累计延长按**原始** endAt 起算，不是上一次续租后的时间——否则多次小额续租可以绕过上限。
+      const totalDays = Math.ceil((new Date(priced.newEndAt).getTime() - new Date(order.endAt).getTime()) / 86_400_000);
+      if (totalDays > rule.maxTotalDays) {
+        throw new ConflictException(`累计延长 ${totalDays} 天，超过规则上限 ${rule.maxTotalDays} 天`);
+      }
+    }
+    // 只查**延长出来的那一段**。连原租期一起查会把本订单自己的占用算成冲突。
+    await this.assertAvailabilityWithLocks(
+      tenantId,
+      {
+        locationId: order.fulfillmentLocationId,
+        startAt: from,
+        endAt: priced.newEndAt,
+        lines: order.lines.map((line) => ({ itemGroupId: line.itemGroupId, quantity: line.quantity }))
+      },
+      tx
+    );
+
+    const sequence = existing.length + 1;
+    // 同一订单上更早的待补款申请就此作废：客户改主意重新申请后，旧那条不该继续可补款。
+    // 不作废它们，`pending_payment` 就没有任何自然终态，界面会一直给出补款按钮。
+    const superseded = existing.filter((row) => row.status === "pending_payment").map((row) => row.id);
+    if (superseded.length) await this.factStore.cancelExtensions(tenantId, superseded, tx);
+    const paymentRequired = priced.settlementMode === "immediate";
+    const at = now();
+    const extension: RentalOrderExtension = {
+      id: randomUUID(),
+      tenantId,
+      // 真正落库的 workspaceId 由仓储按当前请求作用域解析，这里的值只用于本次返回。
+      workspaceId: getRequestWorkspaceId() ?? "",
+      orderId,
+      sequence,
+      status: paymentRequired ? "pending_payment" : "effective",
+      originalEndAt: from,
+      newEndAt: priced.newEndAt,
+      billableUnits: priced.billableUnits,
+      rentalAmount: priced.rentalAmount,
+      serviceAmount: priced.serviceAmount,
+      depositDelta: priced.depositDelta,
+      preAuthDelta: priced.preAuthDelta,
+      payableAmount: priced.payableAmount,
+      currency: priced.currency,
+      priceVersionId: priced.priceVersionId,
+      priceVersion: priced.priceVersion,
+      ruleVersion: priced.ruleVersion,
+      rateSnapshot: priced.rateSnapshot,
+      ruleSnapshot: priced.ruleSnapshot,
+      calendarSnapshot: priced.calendarSnapshot,
+      settlementMode: priced.settlementMode,
+      memo: input.memo,
+      paidAt: undefined,
+      effectiveAt: paymentRequired ? undefined : at,
+      idempotencyKey: input.idempotencyKey,
+      createdBy: input.operator,
+      createdAt: at
+    };
+    await this.factStore.insertExtension(extension, tx);
+    if (!paymentRequired) this.applyExtensionTo(order, extension, at);
+    await this.factStore.saveOrderAggregate(order, [], tx);
+    return { order, extension };
+  }
+
+  /**
+   * 续租补款到账 → 记录生效 → 延长占用与租期（需求 4.6.9）。
+   *
+   * 补款前订单的占用与归还时间一律不动，因此「申请中但未成功」不会被误读成已经延期。
+   *
+   * 闸门与申请时**同样严**，不能因为"申请时已经查过"就省掉：申请与补款之间隔着一次
+   * 客户支付，这中间订单可能已经取消或结算完，延长出来的那段时间也可能被下一张订单占住。
+   * 少一道就会出现「已取消的订单被追加了一笔续租费」和「两张订单同时占用同一台资产」。
+   */
+  async payOrderExtension(
+    tenantId: string,
+    orderId: string,
+    extensionId: string,
+    tx: RentalFactTx
+  ): Promise<{ order: RentalOrder; extension: RentalOrderExtension }> {
+    this.state(tenantId);
+    const order = await this.lockedOrder(tenantId, orderId, tx);
+    const rows = await this.factStore.listExtensions(tenantId, orderId, tx);
+    const extension = rows.find((row) => row.id === extensionId);
+    if (!extension) throw new NotFoundException("续租记录不存在");
+    if (extension.status === "effective") return { order, extension };
+    if (extension.status !== "pending_payment") throw new ConflictException("该续租记录已不可补款");
+    if (order.status !== RentalCoreOrderStatus.Renting && order.status !== RentalCoreOrderStatus.ReadyForPickup) {
+      throw new ConflictException("订单当前状态不允许续租生效，请先确认订单未取消或已结算");
+    }
+    const from = order.effectiveEndAt ?? order.endAt;
+    // 期间可能有另一次续租先生效了，基准变了就不能再按原金额延长。
+    if (extension.originalEndAt !== from) throw new ConflictException("订单归还时间已变化，请重新申请续租");
+    // 延长段的占用必须**此刻**仍然可用：申请时的检查早于客户支付，不能代替这一次。
+    await this.assertAvailabilityWithLocks(
+      tenantId,
+      {
+        locationId: order.fulfillmentLocationId,
+        startAt: from,
+        endAt: extension.newEndAt,
+        lines: order.lines.map((line) => ({ itemGroupId: line.itemGroupId, quantity: line.quantity }))
+      },
+      tx
+    );
+    const at = now();
+    await this.factStore.markExtensionEffective(tenantId, extension.id, at, at, tx);
+    const applied: RentalOrderExtension = { ...extension, status: "effective", paidAt: at, effectiveAt: at };
+    this.applyExtensionTo(order, applied, at);
+    await this.factStore.saveOrderAggregate(order, [], tx);
+    return { order, extension: applied };
+  }
+
+  /**
+   * 把一次已生效的续租落到订单上：追加费用明细 + 推进当前归还时间。
+   *
+   * `endAt` 不动（需求 4.6.9），推进的是 `effectiveEndAt`；预占的结束端在仓储里跟着
+   * `effectiveEndAt` 写，因此保存聚合时占用会自动延长。
+   */
+  private applyExtensionTo(order: RentalOrder, extension: RentalOrderExtension, at: string) {
+    this.applyChargeTo(order, {
+      code: `extension:${extension.sequence}`,
+      name: `续租第 ${extension.sequence} 次`,
+      type: "extension",
+      amount: extension.payableAmount,
+      sourceId: extension.id,
+      sourceVersion: extension.ruleVersion,
+      detail: `${extension.originalEndAt} → ${extension.newEndAt}（${extension.settlementMode === "monthly" ? "计入月结账单" : "已补款"}）`
+    });
+    order.effectiveEndAt = extension.newEndAt;
+    order.updatedAt = at;
+  }
+
+  private applyOverdueTo(order: RentalOrder, amount: number, returnedAt: string) {
+    if (amount <= 0) return;
+    this.applyChargeTo(order, {
+      code: `overdue:${order.id}`,
+      name: "逾期费用",
+      type: "overdue",
+      amount,
+      sourceVersion: order.ruleVersion,
+      detail: `实际归还时间 ${returnedAt}`
+    });
+  }
+
+  /**
+   * 提前归还退款落账（需求 4.6.8）：一条**负数**费用明细，直接冲减应收。
+   *
+   * `requiresReview` 时不落账——规则选了人工审批，金额只是建议，与检查异常"只记录建议、
+   * 审核通过后才计费"是同一条纪律。需求要求保存调整前后金额，因此说明里带上落账前的最终应付。
+   */
+  private applyEarlyReturnRefundTo(
+    order: RentalOrder,
+    refund: { amount: number; requiresReview: boolean; basis: string[] }
+  ) {
+    if (refund.amount <= 0 || refund.requiresReview) return;
+    const before = order.finalPayableAmount ?? order.payableAmount;
+    this.applyChargeTo(order, {
+      code: `early_return_refund:${order.id}`,
+      name: "提前归还退租金",
+      type: "early_return_refund",
+      amount: -refund.amount,
+      sourceVersion: order.ruleVersion,
+      detail: `${refund.basis.join("；")}；落账前最终应付 ${before}`
+    });
+  }
+
+  private applyDamageTo(order: RentalOrder, amount: number, detail: string) {    if (amount <= 0) return;
+    this.applyChargeTo(order, {
+      code: `damage:${order.id}`,
+      name: "损坏费用",
+      type: "damage",
+      amount,
+      sourceVersion: order.ruleVersion,
+      detail
+    });
   }
 
   private markPickedUp(order: RentalOrder, assetChanges: AssetStatusChange[]) {
@@ -1690,13 +1972,14 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const order = await this.lockedOrder(tenantId, orderId, tx);
     if (order.status !== RentalCoreOrderStatus.Settling) throw new ConflictException("只有待结算订单可以审核异常费用");
     if (amount > 0) {
-      const code = `damage:${order.id}:${inspectionId}:${exceptionIndex}`;
-      if (!order.chargeLines.some((line) => line.code === code)) {
-        order.chargeLines.push({ code, name: "检查异常费用", type: "damage", amount, sourceVersion: order.ruleVersion, detail });
-        order.adjustmentAmount = Math.round((order.adjustmentAmount + amount) * 100) / 100;
-        order.finalPayableAmount = Math.round((order.payableAmount + order.adjustmentAmount) * 100) / 100;
-        order.totalAmount = order.finalPayableAmount;
-      }
+      this.applyChargeTo(order, {
+        code: `damage:${order.id}:${inspectionId}:${exceptionIndex}`,
+        name: "检查异常费用",
+        type: "damage",
+        amount,
+        sourceVersion: order.ruleVersion,
+        detail
+      });
     }
     order.updatedAt = now();
     await this.factStore.saveOrderAggregate(order, [], tx);
@@ -2053,7 +2336,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
    * 地点、券模板直接改挂到新空间上（实测表现为新建空间后原空间数据消失）。
    * 默认空间沿用 tenantId 前缀以保持既有 id 不变，其余空间用自己的 id。
    */
-  private seedState(tenantId: string, categoryCode: RentalCategoryCode, idPrefix: string = tenantId): TenantRentalState {
+  private seedState(tenantId: string, categoryCode: RentalCategoryCode, idPrefix: string = tenantId, currency: RentalCurrency = "CNY"): TenantRentalState {
     const isSampleTenant = tenantId === "tenant_001" || tenantId === "tenant_002";
     const definition = this.category(categoryCode); const timestamp = now(); const locationId = `${idPrefix}_location_01`;
     const initialSetup = definition.businessModel.defaults.initialSetup;
@@ -2065,7 +2348,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const templates = this.buildInspectionTemplates(tenantId, categoryCode, idPrefix);
     return {
       profile: { tenantId, categoryCode, capabilities: [...definition.defaultCapabilities] as RentalCapability[], terminology: { ...definition.terminology }, configVersion: definition.version, initializedAt: timestamp, updatedAt: timestamp },
-      businessSettings: defaultBusinessSettings(tenantId, definition),
+      businessSettings: defaultBusinessSettings(tenantId, definition, currency),
       couponTemplates: [],
       // 只有明确的演示租户才生成演示经营主体与地址。普通租户/新空间保持待配置，
       // 避免把虚构电话和地址当成真实履约事实进入报价与订单快照。

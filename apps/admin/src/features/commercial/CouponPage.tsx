@@ -1,10 +1,11 @@
 import { EditOutlined, PlusOutlined } from "@ant-design/icons";
 import type { RentalCouponTemplate, RentalCustomerCoupon, SaveRentalCouponTemplateRequest } from "@store-rental/shared";
+import { formatRentalMoney, rentalCurrencySymbol } from "@store-rental/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { App, Button, Card, Col, Drawer, Form, Input, InputNumber, Modal, Row, Select, Space, Table, Tag, Typography } from "antd";
 import dayjs from "dayjs";
 import { useState } from "react";
-import { rentalCoreApi } from "@/api/rentalCore";
+import { rentalCoreApi, useSettlementCurrency } from "@/api/rentalCore";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 
@@ -21,6 +22,8 @@ export function CouponPage() {
   const templates = useQuery({ queryKey: ["rental-core", "coupon-templates"], queryFn: rentalCoreApi.couponTemplates });
   const customerCoupons = useQuery({ queryKey: ["rental-core", "customer-coupons"], queryFn: () => rentalCoreApi.customerCoupons() });
   const groups = useQuery({ queryKey: ["rental-core", "groups"], queryFn: rentalCoreApi.itemGroups });
+  const currency = useSettlementCurrency();
+  const money = (value: number) => formatRentalMoney(Number(value), currency);
   const save = useMutation({ mutationFn: rentalCoreApi.saveCouponTemplate, onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["rental-core", "coupon-templates"] }); setDrawerOpen(false); setEditing(undefined); form.resetFields(); message.success("优惠券模板已保存"); }, onError: () => message.error("保存失败，请检查编码、优惠值、发行量和有效期") });
   const claim = useMutation({ mutationFn: (values: { templateId: string; customerId: string }) => rentalCoreApi.claimCoupon(values.templateId, values.customerId), onSuccess: async () => { setClaimOpen(false); claimForm.resetFields(); await Promise.all([queryClient.invalidateQueries({ queryKey: ["rental-core", "customer-coupons"] }), queryClient.invalidateQueries({ queryKey: ["rental-core", "coupon-templates"] })]); message.success("优惠券已发放到客户账户"); }, onError: () => message.error("发放失败：模板未启用、已领完、超过限领或不在有效期") });
   const voidCoupon = useMutation({ mutationFn: (values: { reason: string }) => rentalCoreApi.voidCustomerCoupon(voiding!.id, values.reason), onSuccess: async () => { setVoiding(undefined); voidForm.resetFields(); await queryClient.invalidateQueries({ queryKey: ["rental-core", "customer-coupons"] }); message.success("客户优惠券已作废"); }, onError: () => message.error("作废失败：请确认优惠券未被订单锁定，并填写原因") });
@@ -43,11 +46,11 @@ export function CouponPage() {
         <QueryState loading={templates.isLoading || groups.isLoading} error={templates.error || groups.error}>
           <Table<RentalCouponTemplate> rowKey="id" dataSource={templates.data ?? []} scroll={{ x: 1100 }} columns={[
             { title: "优惠券", fixed: "left", render: (_, row) => <><b>{row.name}</b><br /><span className="muted">{row.code} · v{row.version}</span></> },
-            { title: "优惠", render: (_, row) => row.discountType === "fixed_amount" ? `减 ¥${row.discountValue}` : `${row.discountValue}% 折扣${row.maximumDiscount ? `，封顶 ¥${row.maximumDiscount}` : ""}` },
-            { title: "使用门槛", dataIndex: "minimumSpend", render: (value) => value > 0 ? `满 ¥${value}` : "无门槛" },
+            { title: "优惠", render: (_, row) => row.discountType === "fixed_amount" ? `减 ${money(row.discountValue)}` : `${row.discountValue}% 折扣${row.maximumDiscount ? `，封顶 ${money(row.maximumDiscount)}` : ""}` },
+            { title: "使用门槛", dataIndex: "minimumSpend", render: (value) => value > 0 ? `满 ${money(value)}` : "无门槛" },
             { title: "发行 / 已领", render: (_, row) => `${row.totalQuota} / ${row.claimedQuantity}` },
             { title: "每客限领 / 使用", render: (_, row) => `${row.perCustomerLimit} / ${row.perCustomerUseLimit}` },
-            { title: "预算", render: (_, row) => row.totalBudget === undefined ? "不限" : `¥${row.lockedBudget + row.redeemedBudget} / ¥${row.totalBudget}` },
+            { title: "预算", render: (_, row) => row.totalBudget === undefined ? "不限" : `${money(row.lockedBudget + row.redeemedBudget)} / ${money(row.totalBudget)}` },
             { title: "适用商品", dataIndex: "applicableItemGroupIds", render: (ids) => ids.length ? `${ids.length} 个指定商品` : "全部商品" },
             { title: "有效期", render: (_, row) => `${dayjs(row.effectiveFrom).format("YYYY-MM-DD")} → ${dayjs(row.effectiveTo).format("YYYY-MM-DD")}` },
             { title: "状态", dataIndex: "status", render: (value) => <Tag color={value === "active" ? "success" : value === "draft" || value === "scheduled" ? "gold" : "default"}>{{ draft: "草稿", scheduled: "待开始", active: "进行中", paused: "已暂停", ended: "已结束", void: "已作废" }[value as RentalCouponTemplate["status"]]}</Tag> },
@@ -78,12 +81,12 @@ export function CouponPage() {
             <Col span={12}><Form.Item name="name" label="模板名称" rules={[{ required: true }]}><Input /></Form.Item></Col>
             <Col span={12}><Form.Item name="discountType" label="优惠类型" rules={[{ required: true }]}><Select options={[{ value: "fixed_amount", label: "固定减免" }, { value: "percentage", label: "百分比折扣" }]} /></Form.Item></Col>
             <Col span={12}><Form.Item name="discountValue" label="优惠值" rules={[{ required: true }]}><InputNumber min={0.01} precision={2} style={{ width: "100%" }} /></Form.Item></Col>
-            <Col span={12}><Form.Item name="minimumSpend" label="最低消费"><InputNumber min={0} precision={2} prefix="¥" style={{ width: "100%" }} /></Form.Item></Col>
-            <Col span={12}><Form.Item name="maximumDiscount" label="最高减免"><InputNumber min={0} precision={2} prefix="¥" style={{ width: "100%" }} /></Form.Item></Col>
+            <Col span={12}><Form.Item name="minimumSpend" label="最低消费"><InputNumber min={0} precision={2} prefix={rentalCurrencySymbol(currency)} style={{ width: "100%" }} /></Form.Item></Col>
+            <Col span={12}><Form.Item name="maximumDiscount" label="最高减免"><InputNumber min={0} precision={2} prefix={rentalCurrencySymbol(currency)} style={{ width: "100%" }} /></Form.Item></Col>
             <Col span={12}><Form.Item name="totalQuota" label="发行总量" rules={[{ required: true }]}><InputNumber min={0} precision={0} style={{ width: "100%" }} /></Form.Item></Col>
             <Col span={12}><Form.Item name="perCustomerLimit" label="每客限领" rules={[{ required: true }]}><InputNumber min={1} precision={0} style={{ width: "100%" }} /></Form.Item></Col>
             <Col span={12}><Form.Item name="perCustomerUseLimit" label="每客限用" rules={[{ required: true }]}><InputNumber min={1} precision={0} style={{ width: "100%" }} /></Form.Item></Col>
-            <Col span={12}><Form.Item name="totalBudget" label="优惠总预算（留空不限）"><InputNumber min={0} precision={2} prefix="¥" style={{ width: "100%" }} /></Form.Item></Col>
+            <Col span={12}><Form.Item name="totalBudget" label="优惠总预算（留空不限）"><InputNumber min={0} precision={2} prefix={rentalCurrencySymbol(currency)} style={{ width: "100%" }} /></Form.Item></Col>
             <Col span={12}><Form.Item name="appliesTo" label="作用费用" rules={[{ required: true }]}><Select options={[{ value: "rental", label: "商品租金与使用量" }, { value: "fulfillment", label: "履约费" }, { value: "service", label: "增值服务费" }]} /></Form.Item></Col>
             <Col span={12}><Form.Item name="stackableWithDiscountPlans" label="与自动优惠叠加" rules={[{ required: true }]}><Select options={[{ value: true, label: "允许" }, { value: false, label: "不允许" }]} /></Form.Item></Col>
             <Col span={12}><Form.Item name="effectiveFrom" label="生效时间" rules={[{ required: true }]}><Input placeholder="ISO 8601 / YYYY-MM-DD" /></Form.Item></Col>

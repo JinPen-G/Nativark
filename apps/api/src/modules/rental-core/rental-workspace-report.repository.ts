@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from "@nestjs/common";
 import { Prisma, RentalOrderV1Status } from "@prisma/client";
 import type {
   RentalCategoryCode,
+  RentalCurrency,
   RentalExceptionChargeType,
   RentalWorkspaceCustomerBreakdownRow,
   RentalWorkspaceLocationBreakdownRow,
@@ -129,6 +130,7 @@ export class RentalWorkspaceReportRepository {
           chargeLines: true,
           startAt: true,
           endAt: true,
+          effectiveEndAt: true,
           fulfillmentLocationId: true,
           customerId: true,
           customerName: true
@@ -139,7 +141,10 @@ export class RentalWorkspaceReportRepository {
       });
       for (const row of rows) {
         scannedOrders += 1;
-        const hours = (row.endAt.getTime() - row.startAt.getTime()) / 3_600_000;
+        // 占用时长算到**当前**归还时间：续租延长出来的那几天同样占着资产，
+        // 读原 `endAt` 会让续租过的订单在报表里显示成没占用过那段时间。
+        const occupiedUntil = row.effectiveEndAt ?? row.endAt;
+        const hours = (occupiedUntil.getTime() - row.startAt.getTime()) / 3_600_000;
         // 负时长只可能来自坏数据；计入会让平均租期变短并掩盖问题，因此按 0 计。
         if (Number.isFinite(hours) && hours > 0) occupancyHours += hours;
         // 费用行是历史快照，形状可能早于某次契约调整；逐行做防御性判定，
@@ -347,7 +352,12 @@ export class RentalWorkspaceReportRepository {
     tenantId: string,
     workspaceId: string,
     categoryCode: RentalCategoryCode,
-    filter: RentalWorkspaceReportFilter = {}
+    filter: RentalWorkspaceReportFilter = {},
+    /**
+     * 本空间的结算币种（需求 §948）。由调用方从经营空间的业务设置传入——
+     * 报表仓储不读配置，否则同一个事实会有两个来源。缺省 CNY 与存量数据一致。
+     */
+    currency: RentalCurrency = "CNY"
   ): Promise<RentalWorkspaceOperationReport> {
     const where = this.buildOrderWhere(tenantId, workspaceId, filter);
 
@@ -356,7 +366,7 @@ export class RentalWorkspaceReportRepository {
       this.prisma.rentalOrder.groupBy({ by: ["status"], where, _count: { _all: true } }),
       this.prisma.rentalOrder.aggregate({
         where,
-        _sum: { rentalAmount: true, discountAmount: true, couponAmount: true, finalPayableAmount: true }
+        _sum: { rentalAmount: true, discountAmount: true, couponAmount: true, finalPayableAmount: true, taxAmount: true }
       }),
       this.scanOrderDetails(where)
     ]);
@@ -392,6 +402,7 @@ export class RentalWorkspaceReportRepository {
         customerType: filter.customerType
       },
       orderCount,
+      currency,
       statusBreakdown: grouped
         // `READY_FOR_PICKUP` → `ready_for_pickup`：客户端枚举名转共享契约值。
         // 两套命名恰好只差大小写，因此不另维护一张映射表（会多一处需要同步的事实）。
@@ -404,6 +415,12 @@ export class RentalWorkspaceReportRepository {
       discountTotal:
         this.round2(Number(sums._sum.discountAmount ?? 0) + Number(sums._sum.couponAmount ?? 0)),
       receivableTotal: this.money(sums._sum.finalPayableAmount),
+      // 价内税：税额已经含在 receivableTotal 里，netOfTax 是拆出来的不含税口径，
+      // 两者不能再相加。规则未配税的空间两个数分别是 0 与 receivableTotal。
+      taxTotal: this.money(sums._sum.taxAmount),
+      netOfTaxTotal: this.round2(
+        Number(sums._sum.finalPayableAmount ?? 0) - Number(sums._sum.taxAmount ?? 0)
+      ),
       exceptionFeeTotal: this.round2(exceptionFeeBreakdown.reduce((total, row) => total + row.amount, 0)),
       exceptionOrderCount: exceptionOrders.size,
       exceptionFeeBreakdown,

@@ -1,6 +1,6 @@
 import { ApartmentOutlined, EditOutlined, PauseCircleOutlined, PlusOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
 import type { BusinessWorkspace, CreateBusinessWorkspaceRequest, RentalCategoryCode, TenantBootstrapRequest, TenantSummary, UpdateBusinessWorkspaceRequest, UpdateTenantStatusRequest } from "@store-rental/shared";
-import { TenantStatus } from "@store-rental/shared";
+import { RENTAL_CURRENCY_CODES, RENTAL_CURRENCY_META, TenantStatus } from "@store-rental/shared";
 import { App, Button, Card, Descriptions, Drawer, Form, Input, Modal, Segmented, Select, Space, Table, Tag, Typography } from "antd";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
@@ -106,7 +106,7 @@ export function TenantManagementPage() {
   }
 
   function openCreate() {
-    form.setFieldsValue({ tenantCode: "", tenantName: "", categoryCode: undefined, adminAccount: "admin", adminDisplayName: "租户管理员", storeName: "", storeCode: "" });
+    form.setFieldsValue({ tenantCode: "", tenantName: "", categoryCode: undefined, currency: "CNY", adminAccount: "admin", adminDisplayName: "租户管理员", storeName: "", storeCode: "" });
     setEditor({ type: "create" });
   }
 
@@ -213,6 +213,7 @@ export function TenantManagementPage() {
               <Form.Item name="tenantCode" label="租户编码" extra="创建后不可修改，用于登录和数据隔离。" rules={[{ required: true }, { pattern: /^[a-z][a-z0-9_-]{1,31}$/, message: "以小写字母开头，仅支持小写字母、数字、_ 和 -" }]}><Input /></Form.Item>
               <Form.Item name="tenantName" label="租户名称" rules={[{ required: true }]}><Input /></Form.Item>
               <Form.Item name="categoryCode" label="默认空间品类" extra="用于创建首个默认经营空间；该空间创建后品类固定。" rules={[{ required: true }]}><Select options={(categories.data ?? []).map((item) => ({ value: item.code, label: `${item.name} · ${item.description}` }))} /></Form.Item>
+              <Form.Item name="currency" label="结算币种" extra="订单、报价与配置金额的币种，跟随租户；新建经营空间时以此为默认值。" rules={[{ required: true }]}><Select options={RENTAL_CURRENCY_CODES.map((code) => ({ value: code, label: `${code} · ${RENTAL_CURRENCY_META[code].label}` }))} /></Form.Item>
               <Form.Item name="adminAccount" label="租户管理员账号" rules={[{ required: true }]}><Input /></Form.Item>
               <Form.Item name="adminDisplayName" label="租户管理员姓名" rules={[{ required: true }]}><Input /></Form.Item>
               <Form.Item name="adminPhone" label="联系电话"><Input /></Form.Item>

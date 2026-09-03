@@ -323,6 +323,7 @@ model Tenant {
   rentalRuleVersions                RentalRuleVersion[]
   rentalRuleVersionAudits           RentalRuleVersionAudit[]
   rentalFundingEvents               RentalFundingEvent[]
+  rentalOrderExtensions             RentalOrderExtension[]
   rentalBusinessCalendars           RentalBusinessCalendar[]
   rentalCalendarOverrideAudits      RentalCalendarOverrideAuditEntry[]
   rentalPriceVersions               RentalPriceVersion[]
@@ -426,6 +427,7 @@ model BusinessWorkspace {
   rentalRuleVersions                RentalRuleVersion[]
   rentalRuleVersionAudits           RentalRuleVersionAudit[]
   rentalFundingEvents               RentalFundingEvent[]
+  rentalOrderExtensions             RentalOrderExtension[]
   rentalBusinessCalendars           RentalBusinessCalendar[]
   rentalCalendarOverrideAudits      RentalCalendarOverrideAuditEntry[]
   rentalPriceVersions               RentalPriceVersion[]
@@ -3222,6 +3224,11 @@ model RentalOrder {
   returnLocationSnapshot        Json?
   startAt                       DateTime
   endAt                         DateTime
+  /// 当前约定归还时间：最近一次已生效续租的 newEndAt；没有续租时与 endAt 相同。
+  ///
+  /// 需求 4.6.9 明确「延期不得直接修改原订单结束时间」，因此 endAt 永远是原始约定，
+  /// 逾期判定与占用冲突检查一律读本列。可空：存量订单没有它，读取侧回落到 endAt。
+  effectiveEndAt                DateTime?
   /// 报价快照：订单已内联保存 quoteNo/版本/规则/费用行，因此不对 rental_quotes 建外键，
   /// 避免把订单生命周期耦合到报价行的存续（报价可过期清理，订单事实必须长存）。
   quoteId                       String
@@ -3280,6 +3287,13 @@ model RentalOrder {
   payableAmount                 Decimal                        @db.Decimal(12, 2)
   adjustmentAmount              Decimal                        @db.Decimal(12, 2)
   finalPayableAmount            Decimal                        @db.Decimal(12, 2)
+  /// 价内税税率（小数，13% 存 0.1300）与按 finalPayableAmount 反算的税额。
+  /// 价内税是对含税额的拆分，不追加金额，因此不进 chargeLines；押金不计税。
+  /// 规则未配税时为 0，存量订单迁移后同样是 0，复算结果不变。
+  taxRate                       Decimal                        @default(0) @db.Decimal(6, 4)
+  taxAmount                     Decimal                        @default(0) @db.Decimal(12, 2)
+  /// 结算币种快照（需求 §948）。事实来源是经营空间的业务设置，订单只存下单当时的那一份。
+  currency                      String                         @default("CNY") @db.VarChar(8)
   totalAmount                   Decimal                        @db.Decimal(12, 2)
   cancellationReason            String?
   cancelledAt                   DateTime?
@@ -3292,6 +3306,7 @@ model RentalOrder {
   idempotencyRecords            RentalOrderIdempotencyRecord[]
   serviceReservations           RentalServiceReservation[]
   fundingEvents                 RentalFundingEvent[]
+  extensions                    RentalOrderExtension[]
   auditLogs                     OperationLog[]
   createdAt                     DateTime                       @default(now())
   updatedAt                     DateTime                       @updatedAt
@@ -3343,6 +3358,61 @@ model RentalFundingEvent {
   @@index([tenantId, workspaceId, orderId], map: "rental_funding_events_scope_idx")
   @@index([orderId, instrument, at], map: "rental_funding_events_instrument_idx")
   @@map("rental_funding_events")
+}
+
+/// 续租 / 延期记录（需求 4.6.9）。
+///
+/// 只追加，不可编辑：它是「这段延长的时间按哪一版价格、哪一版规则算的」的唯一凭据。
+/// 原订单的 endAt 一律不动（需求原文：延期是订单变更，不得直接修改原订单结束时间），
+/// 订单当前该还的时间由 rental_orders.effectiveEndAt 表达，只有本表 status=effective 才推进它。
+/// 幂等：`(workspaceId, orderId, idempotencyKey)` 唯一，重复提交只落一条。
+model RentalOrderExtension {
+  id              String            @id @default(uuid())
+  tenantId        String
+  tenant          Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId     String
+  workspace       BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  orderId         String
+  order           RentalOrder       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  /// 同一订单内从 1 开始递增。订单费用明细的 code 用它去重（extension:1、extension:2…）。
+  sequence        Int
+  /// pending_payment | effective | cancelled | expired。只有 effective 推进 effectiveEndAt。
+  status          String            @db.VarChar(20)
+  originalEndAt   DateTime
+  newEndAt        DateTime
+  /// 增量期的计费单位数，按订单原本的计价单位计。
+  billableUnits   Decimal           @db.Decimal(12, 2)
+  rentalAmount    Decimal           @db.Decimal(12, 2)
+  serviceAmount   Decimal           @db.Decimal(12, 2)
+  /// 押金 / 预授权差额 = 按新租期应收 − 已收，可为 0。走资金台账收取，不进 payableAmount。
+  depositDelta    Decimal           @db.Decimal(12, 2)
+  preAuthDelta    Decimal           @db.Decimal(12, 2)
+  payableAmount   Decimal           @db.Decimal(12, 2)
+  currency        String            @default("CNY") @db.VarChar(8)
+  /// 申请时命中的空间级价格版本（需求 4.6.9：新增部分用申请时的价格与日历）。
+  priceVersionId  String?
+  priceVersion    String?
+  ruleVersion     String
+  /// RentalPricingRate[]：申请时命中的费率本体，供事后复算这一段。
+  rateSnapshot    Json
+  ruleSnapshot    Json
+  /// RentalQuoteCalendarDay[]：增量期逐日计价依据。
+  calendarSnapshot Json
+  /// immediate（需客户补款后生效）| monthly（企业月结，检查通过即生效）。申请时快照。
+  settlementMode  String            @db.VarChar(20)
+  idempotencyKey  String
+  memo            String?           @db.VarChar(500)
+  paidAt          DateTime?
+  effectiveAt     DateTime?
+  createdBy       String
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@unique([workspaceId, orderId, idempotencyKey], map: "rental_order_extensions_idem_key")
+  @@unique([orderId, sequence], map: "rental_order_extensions_seq_key")
+  @@index([tenantId, workspaceId, orderId], map: "rental_order_extensions_scope_idx")
+  @@index([orderId, status, newEndAt], map: "rental_order_extensions_status_idx")
+  @@map("rental_order_extensions")
 }
 
 model RentalOrderLine {
@@ -4095,6 +4165,11 @@ model RentalQuote {
   payableAmount                 Decimal            @db.Decimal(12, 2)
   /// 本次实收 = 租赁应付 + 应付押金（需求 4.4.1）。预授权额度不计入。
   receivableAmount              Decimal            @default(0) @db.Decimal(12, 2)
+  /// 价内税税率与按 payableAmount 反算的税额（押金不计税）。规则未配税时为 0。
+  taxRate                       Decimal            @default(0) @db.Decimal(6, 4)
+  taxAmount                     Decimal            @default(0) @db.Decimal(12, 2)
+  /// 结算币种快照（需求 §948）。取报价时经营空间的币种。
+  currency                      String             @default("CNY") @db.VarChar(8)
   /// 存量「押金/预授权混在 depositAmount」的记录中，无法从规则快照可靠判定归属的那些。
   /// 只由纠正迁移置位、应用写入不碰它：金额归属未确认前，该笔不得计入 receivableAmount，
   /// 需要财务人工确认后再定性。为 false 表示归属已明确（或本就是新口径记录）。

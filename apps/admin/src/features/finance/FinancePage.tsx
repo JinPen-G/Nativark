@@ -1,10 +1,12 @@
 import { CheckOutlined, CloseOutlined, EditOutlined, PlusOutlined } from "@ant-design/icons";
+import { formatRentalMoney, rentalCurrencySymbol, RENTAL_CURRENCY_CODES } from "@store-rental/shared";
 import type { FinanceDocumentRow, FinanceManualAdjustmentRow, FinancePreAuthorizationRow, SaveFinanceDocumentRequest, SaveFinanceManualAdjustmentRequest, SaveFinancePreAuthorizationRequest } from "@store-rental/shared";
 import { App, Button, Card, Col, DatePicker, Drawer, Form, Input, InputNumber, Row, Select, Space, Statistic, Table, Tabs, Tag, Typography } from "antd";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import dayjs, { type Dayjs } from "dayjs";
 import { useState } from "react";
 import { api } from "@/api/rental";
+import { useSettlementCurrency } from "@/api/rentalCore";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
@@ -12,11 +14,13 @@ import { useAuthStore } from "@/features/auth/authStore";
 type FinanceEditor = "document" | "preauth" | "adjustment" | undefined;
 type PreAuthFormValues = Omit<SaveFinancePreAuthorizationRequest, "expiresAt" | "frozenAt" | "capturedAt" | "releasedAt"> & { expiresAt?: Dayjs; frozenAt?: Dayjs; capturedAt?: Dayjs; releasedAt?: Dayjs };
 
-const money = (value: number | undefined) => `¥${Number(value ?? 0).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
 export function FinancePage() {
   const { message, modal } = App.useApp();
   const queryClient = useQueryClient();
+  const currency = useSettlementCurrency();
+  // 概览与流水没有逐笔币种，按本经营空间的结算币种展示；预授权行自带 `currency`，用它自己的。
+  const money = (value: number | undefined) => formatRentalMoney(Number(value ?? 0), currency);
+  const rowMoney = (value: number | undefined, rowCurrency?: string) => formatRentalMoney(Number(value ?? 0), rowCurrency ?? currency);
   const operator = useAuthStore((state) => state.user?.displayName ?? "财务人员");
   const hasPermission = useAuthStore((state) => state.hasPermission);
   const canManage = hasPermission("store-rental:finance:manage");
@@ -63,7 +67,7 @@ export function FinancePage() {
 
   function openPreAuth(record?: FinancePreAuthorizationRow) {
     setEditingPreAuth(record);
-    preAuthForm.setFieldsValue(record ? { ...record, expiresAt: record.expiresAt ? dayjs(record.expiresAt) : undefined, frozenAt: record.frozenAt ? dayjs(record.frozenAt) : undefined, capturedAt: record.capturedAt ? dayjs(record.capturedAt) : undefined, releasedAt: record.releasedAt ? dayjs(record.releasedAt) : undefined } : { status: "pending", channel: "offline", provider: "manual", authorizedAmount: 0, capturedAmount: 0, releasedAmount: 0, currency: "HKD", operator });
+    preAuthForm.setFieldsValue(record ? { ...record, expiresAt: record.expiresAt ? dayjs(record.expiresAt) : undefined, frozenAt: record.frozenAt ? dayjs(record.frozenAt) : undefined, capturedAt: record.capturedAt ? dayjs(record.capturedAt) : undefined, releasedAt: record.releasedAt ? dayjs(record.releasedAt) : undefined } : { status: "pending", channel: "offline", provider: "manual", authorizedAmount: 0, capturedAmount: 0, releasedAmount: 0, currency, operator });
     setEditor("preauth");
   }
 
@@ -93,7 +97,7 @@ export function FinancePage() {
               { label: "客户实收", value: overview.data.customerReceivedAmount }, { label: "冻结押金", value: overview.data.preAuthFrozenAmount },
               { label: "退款金额", value: overview.data.refundAmount }, { label: "待处理调账", value: overview.data.pendingAdjustmentAmount },
               { label: "企业月结", value: overview.data.monthlyBillingAmount }, { label: "对账异常", value: overview.data.exceptionCount, money: false }
-            ].map((item) => <Col xs={12} lg={8} xl={4} key={item.label}><Card className="data-panel"><Statistic title={item.label} prefix={item.money === false ? undefined : "¥"} value={item.value} precision={item.money === false ? 0 : 2} /></Card></Col>)}
+            ].map((item) => <Col xs={12} lg={8} xl={4} key={item.label}><Card className="data-panel"><Statistic title={item.label} prefix={item.money === false ? undefined : rentalCurrencySymbol(currency)} value={item.value} precision={item.money === false ? 0 : 2} /></Card></Col>)}
           </Row>
           <Card className="tabbed-workspace">
             <Tabs className="standalone-tabs" items={[
@@ -104,7 +108,7 @@ export function FinancePage() {
               ]} /> },
               { key: "preauth", label: "押金预授权", children: <><div className="table-toolbar"><Typography.Text type="secondary">记录冻结、扣款、释放和到期状态；真实渠道回调尚未接入时需人工核验。</Typography.Text>{canManage && <Button type="primary" icon={<PlusOutlined />} onClick={() => openPreAuth()}>新增预授权</Button>}</div><Table<FinancePreAuthorizationRow> rowKey="id" dataSource={preAuth.data ?? []} scroll={{ x: 1120 }} columns={[
                 { title: "预授权单号", dataIndex: "preAuthNo", render: (value) => <b>{value}</b> }, { title: "订单", dataIndex: "orderNo", render: (value) => value ?? "—" }, { title: "客户", dataIndex: "customerName", render: (value) => value ?? "—" },
-                { title: "授权金额", dataIndex: "authorizedAmount", align: "right", render: money }, { title: "已扣 / 已释", render: (_, record) => `${money(record.capturedAmount)} / ${money(record.releasedAmount)}` }, { title: "剩余", dataIndex: "remainingAmount", align: "right", render: money },
+                { title: "授权金额", dataIndex: "authorizedAmount", align: "right", render: (value: number, record: FinancePreAuthorizationRow) => rowMoney(value, record.currency) }, { title: "已扣 / 已释", render: (_, record) => `${rowMoney(record.capturedAmount, record.currency)} / ${rowMoney(record.releasedAmount, record.currency)}` }, { title: "剩余", dataIndex: "remainingAmount", align: "right", render: (value: number, record: FinancePreAuthorizationRow) => rowMoney(value, record.currency) },
                 { title: "状态", dataIndex: "status", render: (value) => <Tag color={value === "frozen" ? "blue" : value === "failed" || value === "expired" ? "error" : "default"}>{value}</Tag> }, { title: "到期时间", dataIndex: "expiresAt", render: (value) => value ?? "—" },
                 ...(canManage ? [{ title: "操作", fixed: "right" as const, render: (_: unknown, record: FinancePreAuthorizationRow) => <Button type="link" icon={<EditOutlined />} onClick={() => openPreAuth(record)}>编辑</Button> }] : [])
               ]} /></> },
@@ -140,7 +144,7 @@ export function FinancePage() {
       <Drawer title={editingPreAuth ? "编辑预授权" : "新增预授权"} open={editor === "preauth"} size={580} destroyOnHidden onClose={closeEditor} extra={<Button type="primary" loading={savePreAuth.isPending} onClick={() => preAuthForm.submit()}>保存</Button>}>
         <Form<PreAuthFormValues> form={preAuthForm} layout="vertical" onFinish={(values) => savePreAuth.mutate({ ...editingPreAuth, ...values, id: editingPreAuth?.id, expiresAt: values.expiresAt?.toISOString(), frozenAt: values.frozenAt?.toISOString(), capturedAt: values.capturedAt?.toISOString(), releasedAt: values.releasedAt?.toISOString(), operator })}>
           <Form.Item name="orderId" label="关联订单"><Select allowClear showSearch optionFilterProp="label" onChange={(value) => bindOrder(preAuthForm, value)} options={(orders.data ?? []).map((item) => ({ value: item.id, label: `${item.orderNo} · ${item.customerName}` }))} /></Form.Item><Form.Item name="orderNo" hidden><Input /></Form.Item>
-          <Row gutter={12}><Col span={12}><Form.Item name="status" label="状态" rules={[{ required: true }]}><Select options={["pending", "frozen", "partially_captured", "captured", "released", "expired", "failed"].map((value) => ({ value, label: value }))} /></Form.Item></Col><Col span={12}><Form.Item name="channel" label="渠道" rules={[{ required: true }]}><Select options={[{ value: "online", label: "线上" }, { value: "offline", label: "线下" }, { value: "internal", label: "内部" }]} /></Form.Item></Col><Col span={12}><Form.Item name="provider" label="提供方"><Input /></Form.Item></Col><Col span={12}><Form.Item name="currency" label="币种"><Input /></Form.Item></Col></Row>
+          <Row gutter={12}><Col span={12}><Form.Item name="status" label="状态" rules={[{ required: true }]}><Select options={["pending", "frozen", "partially_captured", "captured", "released", "expired", "failed"].map((value) => ({ value, label: value }))} /></Form.Item></Col><Col span={12}><Form.Item name="channel" label="渠道" rules={[{ required: true }]}><Select options={[{ value: "online", label: "线上" }, { value: "offline", label: "线下" }, { value: "internal", label: "内部" }]} /></Form.Item></Col><Col span={12}><Form.Item name="provider" label="提供方"><Input /></Form.Item></Col><Col span={12}><Form.Item name="currency" label="币种"><Select options={RENTAL_CURRENCY_CODES.map((code) => ({ value: code, label: code }))} /></Form.Item></Col></Row>
           <Row gutter={12}><Col span={8}><Form.Item name="authorizedAmount" label="授权金额" rules={[{ required: true }]}><InputNumber min={0} precision={2} style={{ width: "100%" }} /></Form.Item></Col><Col span={8}><Form.Item name="capturedAmount" label="已扣金额"><InputNumber min={0} precision={2} style={{ width: "100%" }} /></Form.Item></Col><Col span={8}><Form.Item name="releasedAmount" label="已释金额"><InputNumber min={0} precision={2} style={{ width: "100%" }} /></Form.Item></Col></Row>
           <Row gutter={12}><Col span={12}><Form.Item name="authCode" label="授权码"><Input /></Form.Item></Col><Col span={12}><Form.Item name="channelReferenceNo" label="渠道流水号"><Input /></Form.Item></Col><Col span={12}><Form.Item name="expiresAt" label="到期时间"><DatePicker showTime style={{ width: "100%" }} /></Form.Item></Col><Col span={12}><Form.Item name="frozenAt" label="冻结时间"><DatePicker showTime style={{ width: "100%" }} /></Form.Item></Col></Row><Form.Item name="remark" label="备注"><Input.TextArea rows={3} /></Form.Item>
         </Form>

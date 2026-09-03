@@ -16,6 +16,7 @@ import {
   type RentalFundingAmountRequest,
   type RentalFundingFailureRequest,
   type RentalFundingReleaseRequest,
+  type RentalOrderExtensionRequest,
   type RentalPricingUnit,
   type RentalQuoteRequest,
   type RentalBookingIdentityInput,
@@ -723,4 +724,26 @@ export class RentalFundingFailureDto implements RentalFundingFailureRequest {
   @IsString()
   @IsNotEmpty()
   reason!: string;
+}
+
+/**
+ * 续租 / 延期的申请与试算入参（需求 4.6.9）。后台与 APP 共用同一份。
+ *
+ * 只收「新的归还时间」这一个绝对时点，不收"延长几天"的增量——增量表达在跨日界、
+ * 跨夏令时与跨营业日模板时会有歧义，绝对时点没有。
+ */
+export class RentalOrderExtensionDto implements RentalOrderExtensionRequest {
+  @IsISO8601()
+  newEndAt!: string;
+
+  /** 增量期要一并追加的增值服务。不填表示只延长租期。 */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RentalQuoteServiceInputDto)
+  services?: RentalQuoteServiceInputDto[];
+
+  @IsOptional()
+  @IsString()
+  memo?: string;
 }

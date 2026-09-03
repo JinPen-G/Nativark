@@ -5,7 +5,7 @@ import {
   SaveOutlined,
   TeamOutlined,
 } from "@ant-design/icons";
-import { RENTAL_PRICING_UNIT_LABELS } from "@store-rental/shared";
+import { RENTAL_CURRENCY_CODES, RENTAL_CURRENCY_META, RENTAL_PRICING_UNIT_LABELS, formatRentalMoney } from "@store-rental/shared";
 import type {
   GrantRentalRewardRequest,
   RentalCalendarDay,
@@ -670,6 +670,11 @@ export function RentalGovernancePage() {
     ruleForm.setFieldsValue({
       ...config,
       ...security,
+      // 两个后加的可选块：快照里缺省时补上与服务端一致的默认值，避免表单只填一半
+      // 提交出 `{ enabled: undefined }` 这种过不了校验的半成品。
+      extension: config.extension ?? { enabled: true, forceImmediateWhenOverdue: true },
+      earlyReturn: config.earlyReturn ?? { mode: "none", minAdvanceHours: 24, refundPercent: 0, refundUndeliveredServices: false },
+      tax: config.tax ?? { rate: 0, inclusive: true },
       changeReason: source.status === "draft" ? source.changeReason : "调整租赁业务规则",
     });
     setRuleEditor(source);
@@ -849,6 +854,21 @@ export function RentalGovernancePage() {
                 <Row gutter={[16, 16]}>
                   <Col xs={24} xl={12}>
                     <Card title="计价方式">
+                      {/* 结算币种在租户开通时确定并跟随租户（需求 §948）：这里只展示。
+                          允许在这里改会让同一空间的历史配置金额换一种含义，而配置里没有币种快照。 */}
+                      <Form.Item
+                        name={["pricing", "currency"]}
+                        label="结算币种"
+                        tooltip="订单、报价与本空间所有配置金额的币种。开通租户时设定，此处不可修改。"
+                      >
+                        <Select
+                          disabled
+                          options={RENTAL_CURRENCY_CODES.map((code) => ({
+                            value: code,
+                            label: `${code} · ${RENTAL_CURRENCY_META[code].label}`,
+                          }))}
+                        />
+                      </Form.Item>
                       <Form.Item
                         name={["pricing", "enabledUnits"]}
                         label="启用计价单位"
@@ -1644,7 +1664,7 @@ export function RentalGovernancePage() {
                     columns={[
                       { title: "客户", dataIndex: "customerId" },
                       { title: "积分", dataIndex: "pointsBalance" },
-                      { title: "营销余额", dataIndex: "marketingBalance", render: (value) => `¥${Number(value).toFixed(2)}` },
+                      { title: "营销余额", dataIndex: "marketingBalance", render: (value) => formatRentalMoney(Number(value), settings.data?.pricing.currency) },
                       { title: "可用奖励券", dataIndex: "availableRewardCouponCount" },
                       { title: "更新时间", dataIndex: "updatedAt" },
                     ]}
@@ -2061,6 +2081,112 @@ export function RentalGovernancePage() {
                   label="最少剩余有效天数"
                 >
                   <InputNumber min={0} />
+                </Form.Item>
+              </Col>
+            </Row>
+          </Card>
+          <Card size="small" title="续租与提前归还" style={{ marginTop: 12 }}>
+            <Alert
+              type="info"
+              showIcon
+              title="续租金额不在这里配"
+              description="续租一律对新增时间段按申请当时的价格版本重新报价，这里只配准入。提前归还退款按未使用计费单位占比折算，长租阶梯不重算，优惠按同比例折减。"
+              style={{ marginBottom: 12 }}
+            />
+            <Row gutter={12}>
+              <Col span={8}>
+                <Form.Item name={["extension", "enabled"]} label="允许续租" valuePropName="checked">
+                  <Switch />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name={["extension", "maxTimes"]} label="最多续租次数" tooltip="留空表示不限">
+                  <InputNumber min={1} />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name={["extension", "maxTotalDays"]} label="累计延长天数上限" tooltip="留空表示不限">
+                  <InputNumber min={1} />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item
+                  name={["extension", "forceImmediateWhenOverdue"]}
+                  label="逾期续租强制先付"
+                  tooltip="企业月结客户平时不需补款即可续租；已逾期时打开这项会强制转为先收款"
+                  valuePropName="checked"
+                >
+                  <Switch />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name={["earlyReturn", "mode"]} label="提前归还退款">
+                  <Select
+                    options={[
+                      { value: "none", label: "不退租金" },
+                      { value: "auto", label: "按规则自动退" },
+                      { value: "manual_review", label: "人工审批后退" },
+                    ]}
+                  />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item
+                  name={["earlyReturn", "minAdvanceHours"]}
+                  label="最少提前小时数"
+                  tooltip="汽车门市惯例填 24：提前不足一天不退"
+                >
+                  <InputNumber min={0} />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name={["earlyReturn", "refundPercent"]} label="剩余租金退款比例(%)">
+                  <InputNumber min={0} max={100} />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name={["earlyReturn", "maxRefundAmount"]} label="单笔退款上限" tooltip="留空表示不封顶">
+                  <InputNumber min={0} />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item
+                  name={["earlyReturn", "refundUndeliveredServices"]}
+                  label="退未发生的服务费"
+                  valuePropName="checked"
+                >
+                  <Switch />
+                </Form.Item>
+              </Col>
+            </Row>
+          </Card>
+          <Card size="small" title="税（价内税）" style={{ marginTop: 12 }}>
+            <Alert
+              type="info"
+              showIcon
+              title="标价即含税，客户看到的应付金额不变"
+              description="税额由含税额反算（含税额 × 税率 ÷ (1 + 税率)），只进报表与开票，不改变报价与订单的应付金额。押金不计税。香港等无增值税的空间填 0 即可。"
+              style={{ marginBottom: 12 }}
+            />
+            <Row gutter={12}>
+              <Col span={8}>
+                <Form.Item
+                  name={["tax", "rate"]}
+                  label="税率"
+                  tooltip="小数形式：13% 填 0.13，6% 填 0.06，不计税填 0"
+                >
+                  <InputNumber min={0} max={1} step={0.01} style={{ width: "100%" }} />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name={["tax", "label"]} label="票面税种" tooltip="仅用于展示与开票参考，不参与计算">
+                  <Input placeholder="例如：增值税 13%" />
+                </Form.Item>
+              </Col>
+              {/* inclusive 恒为 true：价外税还没实现，给个只读开关比留一个能拨错的选项安全。 */}
+              <Col span={8}>
+                <Form.Item name={["tax", "inclusive"]} label="价内税" valuePropName="checked" tooltip="当前只支持价内税">
+                  <Switch disabled />
                 </Form.Item>
               </Col>
             </Row>

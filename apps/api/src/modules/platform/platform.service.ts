@@ -1282,7 +1282,7 @@ export class PlatformService {
         // 需求 4.1：品类配置必须与租户档案同事务创建，任一步失败整体回滚，
         // 不留"租户和管理员已建、品类配置没建"的半成品租户。
         async (tx, tenantId) => {
-          await this.rentalCoreService?.initializeTenant(tenantId, input.categoryCode, tx);
+          await this.rentalCoreService?.initializeTenant(tenantId, input.categoryCode, tx, input.currency);
         }
       );
       // bootstrapTenant 的配置写入刚刚随仓储事务提交；现在才可发布/持久化缓存。
@@ -1373,7 +1373,7 @@ export class PlatformService {
       detail: `初始化租户：${tenantName}`
     });
 
-    await this.rentalCoreService?.initializeTenant(tenantId, input.categoryCode);
+    await this.rentalCoreService?.initializeTenant(tenantId, input.categoryCode, undefined, input.currency);
     await this.rentalCoreService?.persist(tenantId);
     return {
       tenant,
