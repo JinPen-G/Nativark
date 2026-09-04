@@ -47,11 +47,14 @@ const themeSource = read("apps/admin/src/app/theme.tsx");
   "/platform/tenants", "/platform/users", "/platform/system", "/platform/operations", "/platform/tools"
 ].forEach((route) => requireText(navigation, `path: "${route}"`, "route registry coverage"));
 
+// `api/rental.ts` 收敛成只剩跨域的平台与会话接口：历史门市域的 67 个成员随退役页面
+// 一起删除。这里只钉住仍在用的写接口——把已删的名字继续列在这里，就是让门禁替死代码站岗。
 [
-  "savePricingPlan", "saveMarketingPlan", "saveMember", "processMemberRisk", "saveCorporate",
-  "saveFinanceDocument", "saveFinancePreAuth", "createFinanceAdjustment", "processFinanceAdjustment",
-  "bindTboxDevice", "runTboxCommand", "saveOrganization", "saveUser", "saveRole", "saveSystemRuleSection"
+  "saveOrganization", "saveUser", "saveRole", "saveSystemRuleSection"
 ].forEach((method) => requireText(api, `${method}:`, "API write coverage"));
+
+// 反向断言：历史门市端点不得再出现在这个客户端里。
+forbidText(api, "/store-rental/", "retired legacy endpoints must not return to the platform API client");
 
 [
   "categories", "profile", "businessSettings", "saveBusinessSettings", "couponTemplates", "saveCouponTemplate", "operators", "saveOperator", "locations", "saveLocation", "itemGroups", "assets", "stockBalances", "availability", "orders",
