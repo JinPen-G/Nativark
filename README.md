@@ -200,7 +200,7 @@ npm run test:rule-version-chain-mutation
 - **管理端有 9 个页面没有被路由引用**（`reports/ReportsPage`、`advanced/BusinessToolsPage`、`catalog/AssetLifecyclePage`、`contracts/ContractsPage`、`customers/CustomerMasterPage`、`customers/CustomerPage`、`finance/FinancePage`、`operations/AssetOperationsPage`、`operations/OperationsPage`），其中 `advanced`、`contracts`、`customers`、`finance`、`operations` 五个目录整体没接入。改这些文件之前先确认它到底有没有在跑。
 - **支付、预授权、通知目前是模拟的**，状态必须用 `simulated` 或同等明确语义，不得记录或展示为真实收款、冻结、发送、送达。
 - **不做跨空间汇总**。跨空间的订单、收入、库存、客户消费汇总不在当前阶段；未来做也只能基于明确的租户级查询权限。
-- **`packages/shared` 是单文件 8.7k 行**（616 个导出），且 `dist/` 提交进了仓库。拆分是件该做但没做的事；在那之前，改契约就是改这一个文件，且改完必须重新构建 shared，API 与所有测试脚本才认（管理端例外，见 §5）。
+- **`packages/shared` 是单文件 8.7k 行**（616 个导出）。拆分是件该做但没做的事；在那之前，改契约就是改这一个文件，且改完必须重新构建 shared，API 与所有测试脚本才认（管理端例外，见 §5）。
 - **区间利用率在数据上不存在**。资产与库存只有当前状态、没有状态变更历史，因此空间报表的资产口径是**读取瞬间的快照**。这条说明跟着报表出参一起下发，页面和 CSV 导出都必须显示——只写在文档里，运营照样会把快照当区间利用率用。
 
 ## 9. 文档
