@@ -1,26 +1,15 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import {
-  BillingMode,
-  CorporateStatus,
   ConfigStatus,
-  DispatchStatus,
-  MemberReviewStatus,
-  MemberStatus,
-  OrderMainStatus,
   OrganizationType as PrismaOrganizationType,
   PermissionKind,
-  PaymentStatus,
   Prisma,
   RentalCategoryCode as PrismaRentalCategoryCode,
   RoleScope as PrismaRoleScope,
-  SettlementMode,
-  StoreRentalMode,
   SystemDataScope as PrismaSystemDataScope,
   TenantStatus as PrismaTenantStatus,
   WorkspaceStatus as PrismaWorkspaceStatus,
-  VehicleOperationStatus,
-  VehicleServiceType
 } from "@prisma/client";
 import type {
   BusinessWorkspace,
@@ -79,7 +68,7 @@ export class PlatformRepository {
       include: {
         rentalProfile: { include: { category: true } },
         businessWorkspaces: { select: { categoryCode: true } },
-        _count: { select: { users: true, organizations: true, orders: true, rentalOrders: true } }
+        _count: { select: { users: true, organizations: true, rentalOrders: true } }
       },
       orderBy: { code: "asc" }
     });
@@ -93,7 +82,7 @@ export class PlatformRepository {
       include: {
         rentalProfile: { include: { category: true } },
         businessWorkspaces: { select: { categoryCode: true } },
-        _count: { select: { users: true, organizations: true, orders: true, rentalOrders: true } }
+        _count: { select: { users: true, organizations: true, rentalOrders: true } }
       }
     });
     if (!tenant) throw new NotFoundException("租户不存在");
@@ -2063,7 +2052,7 @@ export class PlatformRepository {
       category: { name: string };
     };
     businessWorkspaces: Array<{ categoryCode: string }>;
-    _count: { users: number; organizations: number; orders: number; rentalOrders: number };
+    _count: { users: number; organizations: number; rentalOrders: number };
   }): TenantSummary {
     return {
       tenantId: tenant.id,
@@ -2078,7 +2067,7 @@ export class PlatformRepository {
       workspaceCategoryCodes: [...new Set(tenant.businessWorkspaces.map((workspace) => this.toDomainCategoryCode(workspace.categoryCode)).filter(Boolean))] as TenantSummary["workspaceCategoryCodes"],
       userCount: tenant._count.users,
       organizationCount: tenant._count.organizations,
-      orderCount: tenant._count.orders + tenant._count.rentalOrders,
+      orderCount: tenant._count.rentalOrders,
       statusReason: tenant.statusReason ?? undefined,
       createdAt: tenant.createdAt.toISOString(),
       updatedAt: tenant.updatedAt.toISOString()

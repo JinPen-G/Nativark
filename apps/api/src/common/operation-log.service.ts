@@ -8,9 +8,7 @@ export interface OperationLogInput {
   tenantId?: string;
   user?: SystemUserRow;
   userId?: string;
-  /** 车辆兼容域订单（StoreRentalOrder）。 */
-  orderId?: string;
-  /** 通用租赁订单（rental_orders）。orderId 的外键指向车辆域，承载不了它。 */
+  /** 租赁订单（rental_orders）。 */
   rentalOrderId?: string;
   action: string;
   targetType: string;
@@ -53,7 +51,6 @@ export class OperationLogService {
           // 任何经营空间"——比塞一个看似精确的假归属诚实。
           workspaceId: getRequestWorkspaceId() ?? null,
           userId: input.userId ?? input.user?.id,
-          orderId: input.orderId,
           rentalOrderId: input.rentalOrderId,
           action: input.action,
           detail: this.toJsonValue({
