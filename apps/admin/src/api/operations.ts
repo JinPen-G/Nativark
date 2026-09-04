@@ -19,22 +19,12 @@ import type {
   PlatformFilterPresetQuery,
   PlatformNumberRule,
   PrintJobSummary,
-  StoreRentalFinanceReport,
-  StoreRentalOpsHealth,
-  StoreRentalOpsLogRow,
-  StoreRentalOrdersReport,
-  StoreRentalReportExportJob,
-  StoreRentalReportExportRequest,
-  StoreRentalReportQuery,
   SaveOrganizationRequest,
   SavePlatformDictionaryGroupRequest,
   SavePlatformFilterPresetRequest,
   SavePlatformNumberRuleRequest,
   SaveSystemRuleSectionRequest,
   SystemSecurityBaselineConfig,
-  StoreStationListQuery,
-  StoreStationListResult,
-  StoreStationSummary,
   TenantBootstrapPreview,
   TenantBootstrapRequest,
   TenantBootstrapResult,
@@ -297,91 +287,4 @@ export async function setOrganizationStatus(
     { status, operator }
   );
   return response.data.data;
-}
-
-export async function getStoreRentalOrdersReport(
-  params: StoreRentalReportQuery = {}
-) {
-  const response = await http.get<ApiResult<StoreRentalOrdersReport>>(
-    "/reports/orders",
-    { params }
-  );
-  return response.data.data;
-}
-
-export async function getStoreRentalFinanceReport(
-  params: StoreRentalReportQuery = {}
-) {
-  const response = await http.get<ApiResult<StoreRentalFinanceReport>>(
-    "/reports/finance",
-    { params }
-  );
-  return response.data.data;
-}
-
-export async function createStoreRentalReportExport(
-  payload: StoreRentalReportExportRequest
-) {
-  const response = await http.post<ApiResult<StoreRentalReportExportJob>>(
-    "/reports/exports",
-    payload
-  );
-  return response.data.data;
-}
-
-export async function listStoreRentalReportExports(
-  params: StoreRentalReportQuery = {}
-) {
-  const response = await http.get<ApiResult<StoreRentalReportExportJob[]>>(
-    "/reports/exports",
-    { params }
-  );
-  return response.data.data;
-}
-
-export async function downloadStoreRentalReportExport(fileName: string) {
-  const response = await http.get<Blob>(
-    `/reports/exports/${encodeURIComponent(fileName)}`,
-    { responseType: "blob" }
-  );
-  return response.data;
-}
-
-export async function getStoreRentalOpsHealth(params: StoreRentalReportQuery = {}) {
-  const response = await http.get<ApiResult<StoreRentalOpsHealth>>(
-    "/reports/ops/health",
-    { params }
-  );
-  return response.data.data;
-}
-
-export async function listStoreRentalOpsLogs(params: StoreRentalReportQuery = {}) {
-  const response = await http.get<ApiResult<StoreRentalOpsLogRow[]>>(
-    "/reports/ops/logs",
-    { params }
-  );
-  return response.data.data;
-}
-
-function normalizeStationListResult(
-  data: StoreStationListResult | StoreStationSummary[],
-  query: StoreStationListQuery = {}
-): StoreStationListResult {
-  if (!Array.isArray(data)) {
-    return data;
-  }
-  return {
-    rows: data,
-    total: data.length,
-    page: Number(query.page || 1),
-    pageSize: Number(query.pageSize || data.length || 20),
-    stats: {
-      total: data.length,
-      enabled: data.filter((row) => row.status === "enabled").length,
-      disabled: data.filter((row) => row.status === "disabled").length,
-      normal: data.filter((row) => row.serviceStatus === "normal").length,
-      paused: data.filter((row) => row.serviceStatus === "paused").length,
-      maintenance: data.filter((row) => row.serviceStatus === "maintenance").length
-    }
-  };
 }

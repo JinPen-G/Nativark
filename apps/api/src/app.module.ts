@@ -26,9 +26,6 @@ import { CustomerCorporateService } from "./modules/platform/customer-corporate.
 import { MembershipController } from "./modules/platform/membership.controller";
 import { MembershipService } from "./modules/platform/membership.service";
 import { PlatformService } from "./modules/platform/platform.service";
-import { ReportsController } from "./modules/reports/reports.controller";
-import { ReportsRepository } from "./modules/reports/reports.repository";
-import { ReportsService } from "./modules/reports/reports.service";
 import { RentalCoreController } from "./modules/rental-core/rental-core.controller";
 import { RentalCoreService } from "./modules/rental-core/rental-core.service";
 import { RentalBusinessController } from "./modules/rental-core/rental-business.controller";
@@ -68,7 +65,6 @@ import { RentalServiceCapacityService } from "./modules/rental-core/rental-servi
     AuthController,
     PlatformController,
     MembershipController,
-    ReportsController,
     RentalCoreController,
     RentalBusinessController,
     OfficialCalendarSourceController,
@@ -89,8 +85,6 @@ import { RentalServiceCapacityService } from "./modules/rental-core/rental-servi
     CustomerCorporateService,
     MembershipService,
     OperationLogService,
-    ReportsService,
-    ReportsRepository,
     RentalCoreService,
     RentalBusinessService,
     OfficialCalendarSourceService,

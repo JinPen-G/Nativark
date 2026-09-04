@@ -878,15 +878,6 @@ const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
   backlogOperation("post", "/api/membership/plans/assignments", "Membership", "assignCustomerMembershipPlan", "Grant a published personal or corporate membership plan", ["store-rental:member:plan:manage"]),
   backlogOperation("post", "/api/platform/organizations", "Platform", "createOrganization", "Create organization", ["system:org:manage"]),  backlogOperation("put", "/api/platform/organizations/{id}", "Platform", "updateOrganization", "Update organization", ["system:org:manage"]),
   backlogOperation("put", "/api/platform/organizations/{id}/status", "Platform", "setOrganizationStatus", "Set organization status", ["system:org:manage"]),
-  backlogOperation("get", "/api/reports/dashboard", "Reports", "getReportsDashboard", "Get reports dashboard", ["reports:view"]),
-  backlogOperation("get", "/api/reports/exports", "Reports", "listReportExports", "List report exports", ["reports:view"]),
-  backlogOperation("post", "/api/reports/exports", "Reports", "createReportExport", "Create report export", ["reports:export"]),
-  backlogOperation("get", "/api/reports/finance", "Reports", "getFinanceReport", "Get finance report", ["reports:view"]),
-  backlogOperation("get", "/api/reports/risk", "Reports", "getRiskReport", "Get risk report", ["reports:view"]),
-  backlogOperation("get", "/api/reports/ops/health", "Reports", "getReportsOpsHealth", "Get reports ops health", ["reports:view"]),
-  backlogOperation("get", "/api/reports/ops/logs", "Reports", "listReportsOpsLogs", "List reports ops logs", ["reports:view"]),
-  backlogOperation("get", "/api/reports/orders", "Reports", "getOrderReport", "Get order report", ["reports:view"]),
-  backlogOperation("get", "/api/reports/vehicles", "Reports", "getVehicleReport", "Get vehicle report", ["reports:view"]),
 ];
 
 export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
@@ -1338,17 +1329,6 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     operationId: "resetUserPassword",
     summary: "Reset system user password",
     permissions: ["system:user:manage"],
-    responseSchema: "GenericObject"
-  },
-  // ===== 2026-06-25 新增的契约操作 =====
-  {
-    method: "get",
-    path: "/api/reports/exports/{fileName}",
-    tag: "Reports",
-    operationId: "downloadReportExport",
-    summary: "Download report export file",
-    permissions: ["store-rental:report:view"],
-    authRequired: true,
     responseSchema: "GenericObject"
   },
   // ===== 2026-06-25 DP-01 调度任务认领新增的契约操作 =====

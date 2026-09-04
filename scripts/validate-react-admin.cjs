@@ -124,8 +124,7 @@ forbidText(commercialPage, "commercial-switcher", "commercial pages must rely on
 
 [
   "bootstrapTenant", "savePlatformDictionary", "savePlatformNumberRule", "createFileAsset", "createPrintJob",
-  "createAsyncJob", "createStoreRentalReportExport", "downloadStoreRentalReportExport",
-  "checkSecondConfirmation", "invokeMockAdapter", "setOrganizationStatus"
+  "createAsyncJob", "checkSecondConfirmation", "invokeMockAdapter", "setOrganizationStatus"
 ].forEach((method) => requireText(operations, `function ${method}`, "advanced operation coverage"));
 
 requireText(operations, "function listTenants", "tenant list API coverage");
