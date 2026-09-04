@@ -205,19 +205,7 @@ export async function saveRentalRules(payload: StoreRentalRuleConfig) {
   return response.data.data;
 }
 
-export async function listRentalRuleVersions() {
-  const response = await http.get<ApiResult<StoreRentalRuleVersionRecord[]>>(
-    "/store-rental/rules/versions"
-  );
-  return response.data.data;
-}
 
-export async function getRentalRuleVersion(version: string) {
-  const response = await http.get<ApiResult<StoreRentalRuleVersionRecord>>(
-    `/store-rental/rules/versions/${version}`
-  );
-  return response.data.data;
-}
 
 export async function listPricingPlans() {
   const response = await http.get<ApiResult<PricingPlanSummary[]>>("/store-rental/pricing/plans");
@@ -234,13 +222,6 @@ export async function savePricingPlan(id: string, payload: SavePricingPlanReques
   return response.data.data;
 }
 
-export async function createPriceSchedule(payload: CreatePriceAdjustmentScheduleRequest) {
-  const response = await http.post<ApiResult<PriceAdjustmentSchedule>>(
-    "/store-rental/pricing/schedules",
-    payload
-  );
-  return response.data.data;
-}
 
 export async function cancelPriceSchedule(id: string) {
   const response = await http.patch<ApiResult<PriceAdjustmentSchedule>>(
@@ -390,16 +371,6 @@ export async function closeStoreRentalOrderRemark(
   return response.data.data;
 }
 
-export async function createStoreRentalOrderFee(
-  id: string,
-  payload: CreateStoreRentalFeeRequest
-) {
-  const response = await http.post<ApiResult<StoreRentalFeeCenter>>(
-    `/store-rental/orders/${id}/fees`,
-    payload
-  );
-  return response.data.data;
-}
 
 export async function waiveStoreRentalOrderFee(
   id: string,
@@ -413,16 +384,6 @@ export async function waiveStoreRentalOrderFee(
   return response.data.data;
 }
 
-export async function createStoreRentalOrderTransaction(
-  id: string,
-  payload: CreateStoreRentalTransactionRequest
-) {
-  const response = await http.post<ApiResult<StoreRentalFeeCenter>>(
-    `/store-rental/orders/${id}/transactions`,
-    payload
-  );
-  return response.data.data;
-}
 
 function normalizeMemberListResult(
   data: MemberListResult | MemberSummary[],
@@ -582,17 +543,6 @@ export async function listCorporateMonthlyBills(id: string) {
   return response.data.data;
 }
 
-export async function settleCorporateMonthlyBill(
-  corporateId: string,
-  billId: string,
-  payload: SettleCorporateMonthlyBillRequest
-) {
-  const response = await http.post<ApiResult<CorporateMonthlyBillSummary>>(
-    `/store-rental/corporates/${corporateId}/monthly-bills/${billId}/settle`,
-    payload
-  );
-  return response.data.data;
-}
 
 export async function getFinanceOverview() {
   const response = await http.get<ApiResult<FinanceOverviewMetrics>>(
@@ -776,25 +726,7 @@ export async function getDispatchEvents(params: StoreRentalDispatchEventQuery & 
   return response.data.data;
 }
 
-export async function previewDispatchOptimization(
-  payload: StoreRentalDispatchOptimizeRequest
-) {
-  const response = await http.post<ApiResult<StoreRentalDispatchPlan>>(
-    "/store-rental/dispatch/optimize",
-    payload
-  );
-  return response.data.data;
-}
 
-export async function applyDispatchOptimization(
-  payload: StoreRentalDispatchApplyRequest
-) {
-  const response = await http.post<ApiResult<StoreRentalDispatchApplyResult>>(
-    "/store-rental/dispatch/apply",
-    payload
-  );
-  return response.data.data;
-}
 
 export async function hardLockDispatchOrders(
   payload: StoreRentalDispatchHardLockRequest
@@ -806,15 +738,6 @@ export async function hardLockDispatchOrders(
   return response.data.data;
 }
 
-export async function manualReassignFromDispatch(
-  payload: StoreRentalDispatchManualReassignRequest
-) {
-  const response = await http.post<ApiResult<StoreRentalOrderActionResult>>(
-    "/store-rental/dispatch/manual-reassign",
-    payload
-  );
-  return response.data.data;
-}
 
 export async function processDispatchVehicleUnavailable(
   payload: StoreRentalDispatchVehicleUnavailableRequest
@@ -1386,12 +1309,6 @@ export async function listStations() {
   return normalizeStationListResult(response.data.data).rows;
 }
 
-export async function listStationHierarchy() {
-  const response = await http.get<ApiResult<StoreStationHierarchyNode[]>>(
-    "/store-rental/stations/hierarchy"
-  );
-  return response.data.data;
-}
 
 export async function saveStation(payload: StoreStationSummary) {
   const response = payload.id
@@ -1410,16 +1327,6 @@ export async function listStationCalendar(stationId: string) {
   return response.data.data;
 }
 
-export async function saveStationCalendarDay(
-  stationId: string,
-  payload: SaveStationCalendarDayRequest
-) {
-  const response = await http.put<ApiResult<StationCalendarDay[]>>(
-    `/store-rental/stations/${stationId}/calendar`,
-    payload
-  );
-  return response.data.data;
-}
 
 export async function listStationCapacitySnapshots(stationId?: string) {
   const response = await http.get<ApiResult<StationCapacitySnapshot[]>>(
@@ -1556,17 +1463,6 @@ export async function createVehicleLocationEvent(
   return response.data.data;
 }
 
-export async function updateVehicleLocationEvent(
-  id: string,
-  recordId: string,
-  payload: UpdateVehicleLocationEventRequest
-) {
-  const response = await http.patch<ApiResult<StoreRentalVehicleDetail>>(
-    `/store-rental/vehicles/${id}/location-events/${recordId}`,
-    payload
-  );
-  return response.data.data;
-}
 
 export async function createVehicleConditionPhotoRecord(
   id: string,
@@ -1579,16 +1475,6 @@ export async function createVehicleConditionPhotoRecord(
   return response.data.data;
 }
 
-export async function createVehicleMaintenanceRecord(
-  id: string,
-  payload: CreateVehicleMaintenanceRecordRequest
-) {
-  const response = await http.post<ApiResult<StoreRentalVehicleDetail>>(
-    `/store-rental/vehicles/${id}/maintenance-records`,
-    payload
-  );
-  return response.data.data;
-}
 
 export async function listVehicleCredentials(id: string) {
   const response = await http.get<ApiResult<VehicleCredentialRecord[]>>(
@@ -1597,16 +1483,6 @@ export async function listVehicleCredentials(id: string) {
   return response.data.data;
 }
 
-export async function saveVehicleCredential(
-  id: string,
-  payload: SaveVehicleCredentialRequest
-) {
-  const response = await http.put<ApiResult<VehicleCredentialRecord[]>>(
-    `/store-rental/vehicles/${id}/credentials`,
-    payload
-  );
-  return response.data.data;
-}
 
 export async function listVehicleOnboardItems(id: string) {
   const response = await http.get<ApiResult<VehicleOnboardItemRecord[]>>(
@@ -1637,29 +1513,7 @@ export async function createVehicleAccidentRecord(
   return response.data.data;
 }
 
-export async function updateVehicleMaintenanceRecord(
-  id: string,
-  recordId: string,
-  payload: UpdateVehicleMaintenanceRecordRequest
-) {
-  const response = await http.patch<ApiResult<StoreRentalVehicleDetail>>(
-    `/store-rental/vehicles/${id}/maintenance-records/${recordId}`,
-    payload
-  );
-  return response.data.data;
-}
 
-export async function updateVehicleAccidentRecord(
-  id: string,
-  recordId: string,
-  payload: UpdateVehicleAccidentRecordRequest
-) {
-  const response = await http.patch<ApiResult<StoreRentalVehicleDetail>>(
-    `/store-rental/vehicles/${id}/accident-records/${recordId}`,
-    payload
-  );
-  return response.data.data;
-}
 
 export async function saveVehicle(payload: VehicleInstanceSummary) {
   const response = payload.id

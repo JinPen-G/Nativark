@@ -31,7 +31,6 @@ const locationPage = read("apps/admin/src/features/fulfillment/LocationPage.tsx"
 const platformPage = read("apps/admin/src/features/platform/PlatformPage.tsx");
 const tenantManagementPage = read("apps/admin/src/features/platform/TenantManagementPage.tsx");
 const platformOperationsPage = read("apps/admin/src/features/platform/PlatformOperationsPage.tsx");
-const assetLifecyclePage = read("apps/admin/src/features/catalog/AssetLifecyclePage.tsx");
 const rentalCorePage = read("apps/admin/src/features/rental-core/RentalCorePage.tsx");
 const rentalOrderDetailPage = read("apps/admin/src/features/rental-core/RentalOrderDetailPage.tsx");
 const catalogPage = read("apps/admin/src/features/catalog/CatalogPage.tsx");
@@ -119,14 +118,9 @@ const themeSource = read("apps/admin/src/app/theme.tsx");
 forbidText(commercialPage, "commercial-switcher", "commercial pages must rely on independent sidebar routes instead of duplicate tabs");
 
 [
-  "createPriceSchedule", "previewDispatchOptimization", "applyDispatchOptimization", "manualReassignFromDispatch",
-  "createStoreRentalOrderFee", "createStoreRentalOrderTransaction", "settleCorporateMonthlyBill",
-  "createVehicleMaintenanceRecord", "saveVehicleCredential", "saveStationCalendarDay",
   "bootstrapTenant", "savePlatformDictionary", "savePlatformNumberRule", "createFileAsset", "createPrintJob",
   "createAsyncJob", "createStoreRentalReportExport", "downloadStoreRentalReportExport",
-  "checkSecondConfirmation", "getRentalRuleVersion", "invokeMockAdapter", "listRentalRuleVersions",
-  "listStationHierarchy", "setOrganizationStatus", "updateVehicleAccidentRecord",
-  "updateVehicleLocationEvent", "updateVehicleMaintenanceRecord"
+  "checkSecondConfirmation", "invokeMockAdapter", "setOrganizationStatus"
 ].forEach((method) => requireText(operations, `function ${method}`, "advanced operation coverage"));
 
 requireText(operations, "function listTenants", "tenant list API coverage");
@@ -157,10 +151,7 @@ if (sessionCacheClearCount < 4) {
   [tenantManagementPage, "updateTenantStatus", "tenant lifecycle UI"],
   [platformPage, "setOrganizationStatus", "organization status UI"],
   [platformOperationsPage, "checkSecondConfirmation", "second confirmation UI"],
-  [platformOperationsPage, "invokeMockAdapter", "mock adapter UI"],
-  [assetLifecyclePage, "updateVehicleLocationEvent", "location event edit UI"],
-  [assetLifecyclePage, "updateVehicleMaintenanceRecord", "maintenance record edit UI"],
-  [assetLifecyclePage, "updateVehicleAccidentRecord", "accident record edit UI"]
+  [platformOperationsPage, "invokeMockAdapter", "mock adapter UI"]
 ].forEach(([source, expected, label]) => requireText(source, expected, label));
 
 [
@@ -174,8 +165,24 @@ requireText(shell, "Boolean(user?.isSaasAdmin)", "navigation filters by authenti
 for (const legacyLabel of ["车辆合同与单据", "车辆财务结算", "车辆履约调度", "车辆调拨与 TBox", "车辆生命周期", "车辆运营控制台", "车辆兼容报表"]) {
   forbidText(navigation, legacyLabel, "legacy store-rental route must not be registered");
 }
-for (const legacyPage of ["ContractsPage", "FinancePage", "OperationsPage", "AssetOperationsPage", "AssetLifecyclePage", "BusinessToolsPage", "ReportsPage"]) {
-  forbidText(router, `const ${legacyPage} = lazy`, "legacy store-rental page must not be routed");
+// 历史门市页面已**删除**，不是"留着但不路由"。
+//
+// 之前这里只断言它们没有出现在 router 里，于是七个页面连同它们独占的 16 个 API 客户端
+// 函数一直留在仓库里，还被门禁要求"必须存在"——门禁在强制一批死代码。
+// 改成断言文件不存在：退役的判据是删掉，任何人重新加回来都会在这里失败。
+for (const retiredPage of [
+  "features/contracts/ContractsPage.tsx",
+  "features/finance/FinancePage.tsx",
+  "features/operations/OperationsPage.tsx",
+  "features/operations/AssetOperationsPage.tsx",
+  "features/catalog/AssetLifecyclePage.tsx",
+  "features/advanced/BusinessToolsPage.tsx",
+  "features/reports/ReportsPage.tsx",
+  "features/customers/CustomerPage.tsx"
+]) {
+  if (fs.existsSync(path.join(reactRoot, retiredPage))) {
+    failures.push(`legacy store-rental page must stay deleted: ${retiredPage}`);
+  }
 }
 
 // UI-NAV-01：外壳改为消费 `buildNavigationSections(terminology)`——它在 navigation.tsx 内
