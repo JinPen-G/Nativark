@@ -51,10 +51,10 @@ capability 由经营空间按需启用，注册表本身在启动期做一致性
 ```text
 apps/api           NestJS 10 + Prisma 5，统一前缀 /api
 apps/admin         React 19 + Ant Design 6 + Vite 8 管理端
-packages/shared    前后端唯一契约来源（单文件 index.ts，约 8.7k 行、616 个导出）
-apps/api/prisma    schema.prisma：146 model / 33 enum，86 个迁移
+packages/shared    前后端唯一契约来源，按依赖方向拆成 core / platform / infrastructure / common
+apps/api/prisma    schema.prisma：89 model / 12 enum，87 个迁移
 scripts            契约、DTO、鉴权、管理端的静态门禁 + scripts/ops 运维演练
-tests              46 个 .cjs 专项，纯计算与真库 E2E 分开
+tests              44 个 .cjs 专项，纯计算与真库 E2E 分开
 docs               正式需求、技术指南、数据库与界面规范
 ```
 
@@ -66,9 +66,9 @@ docs               正式需求、技术指南、数据库与界面规范
 | `platform` | 租户、经营空间、组织角色账号、权限树、系统规则、安全基线、审计、字典与编号规则、共享客户主档与合并 | `/api/platform`、`/api/membership` | 约 9.3k 行 |
 | `auth` | 登录、会话上下文、刷新登出、改密、切换空间 | `/api/auth` | 约 0.6k 行 |
 | `integrations` | 适配器日志、模拟调用、数据交换任务、TBox 车联网设备 | `/api/integrations` | 约 1.9k 行 |
-| `store-rental` | **历史门市租赁参考面**。只作实现参考，新业务一律不进 | `/api/store-rental` | 约 25.7k 行 |
-| `reports` | 旧看板与车辆报表，已被 `/api/rental/v1/reports/operations` 取代 | `/api/reports` | 约 2.0k 行 |
 | `database` / `health` / `files` / `jobs` / `notifications` / `openapi` | Prisma 服务、存活探测与桩 | 各自前缀 | 合计 < 0.2k 行 |
+
+历史门市租赁面（`/api/store-rental/*`，25.7k 行）与门市时代的 `reports` 模块（2.0k 行）**已于 2026-09-04 整体下线**，连同 57 张只服务于它们的表。仓库里不再有这一层，`git log` 可查退役过程。
 
 `rental-core` 内部按职责分层，值得记住的几个：`rental-business.service.ts`（报价与全部金额计算，最大的一个文件）、`rental-core.service.ts`（订单聚合与状态机）、`*-fact.repository.ts` / `*-config.repository.ts`（事实与配置分开落库）、`workspace-capability.service.ts` + `capability-hook.runtime.ts`（能力启用与钩子运行时）、以及一批**纯函数计算模块**：`rental-pricing-strategy.ts`、`rental-security-deposit.ts`、`rental-discount-selection.ts`、`rental-early-return.ts`、`rental-rule-defaults.ts`、`rental-money.ts`。
 
@@ -196,11 +196,12 @@ npm run test:rule-version-chain-mutation
 
 写在这里而不是藏着，因为它们会直接影响你怎么读代码：
 
-- **`/api/store-rental/*` 是历史参考面**，约 25.7k 行仍在仓库里且仍然注册着，但不承诺兼容、迁移、投影或对账。新业务事实一律只进 Rental Core。`reports` 模块与它耦合（车辆报表、写死 HKD 的营收指标），已被 `/api/rental/v1/reports/operations` 取代。
-- **管理端有 9 个页面没有被路由引用**（`reports/ReportsPage`、`advanced/BusinessToolsPage`、`catalog/AssetLifecyclePage`、`contracts/ContractsPage`、`customers/CustomerMasterPage`、`customers/CustomerPage`、`finance/FinancePage`、`operations/AssetOperationsPage`、`operations/OperationsPage`），其中 `advanced`、`contracts`、`customers`、`finance`、`operations` 五个目录整体没接入。改这些文件之前先确认它到底有没有在跑。
+- **门市域已整体退役**（2026-09-04）：`/api/store-rental/*` 的 119 个路由、`store-rental` 与 `reports` 两个模块、管理端 8 个退役页面、两个 API 客户端里 182 个遗留函数、以及 57 张只服务于它们的表全部删除。门禁里加了反向断言：两个 API 客户端都不得再出现 `/store-rental/`，退役页面文件不得重新出现。注意 `store-rental:*` **权限码命名空间保留**——它是全系统（含 Rental Core）在用的权限前缀，与那批 URL 是两件事。
 - **支付、预授权、通知目前是模拟的**，状态必须用 `simulated` 或同等明确语义，不得记录或展示为真实收款、冻结、发送、送达。
 - **不做跨空间汇总**。跨空间的订单、收入、库存、客户消费汇总不在当前阶段；未来做也只能基于明确的租户级查询权限。
-- **`packages/shared` 是单文件 8.7k 行**（616 个导出）。拆分是件该做但没做的事；在那之前，改契约就是改这一个文件，且改完必须重新构建 shared，API 与所有测试脚本才认（管理端例外，见 §5）。
+- **`tests/mysql-e2e.test.cjs` 里仍有门市段落**（7 处、约 49 行引用）。它需要专用库才能跑、不在默认门禁里，因此这次没有动——盲改这个 10k 行的唯一真库 E2E 只会造出一份看起来有覆盖的假象。修它需要一次带专用库的专门会话。
+- **`requiredCapability` 目前只映射两个已删除的前缀**（`/store-rental/dispatch`、`/store-rental/tbox-devices`）。守卫层的能力门禁机制本身是活的、且被 `extension-consistency` 的变异测试钉着（未启用必拒、缺服务 fail-closed），所以刻意保留；但它需要重新指向一个**现行**的应受能力约束的路由，这是个产品决定。
+- **`rental_pricing_groups.categoryCode` 存在库与 schema 漂移**，且库里有一条本地不存在的迁移 `20260828006000_capability_config_audit_snapshots`。两者可能同源，尚未查清。
 - **区间利用率在数据上不存在**。资产与库存只有当前状态、没有状态变更历史，因此空间报表的资产口径是**读取瞬间的快照**。这条说明跟着报表出参一起下发，页面和 CSV 导出都必须显示——只写在文档里，运营照样会把快照当区间利用率用。
 
 ## 9. 文档

@@ -25,23 +25,6 @@ function requiredCapability(path: string): RentalCapability | undefined {
   return undefined;
 }
 
-function requiresVehicleCategory(path: string) {
-  return [
-    "/reports",
-    "/store-rental/availability",
-    "/store-rental/contracts",
-    "/store-rental/dispatch",
-    "/store-rental/finance",
-    "/store-rental/orders",
-    "/store-rental/pricing",
-    "/store-rental/stations",
-    "/store-rental/tbox-devices",
-    "/store-rental/value-added-services",
-    "/store-rental/vehicle-groups",
-    "/store-rental/vehicles",
-    "/store-rental/workflow"
-  ].some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
-}
 
 /**
  * 未匹配任何规则时要求的"权限"。它**不存在于权限目录**，因此任何角色都不可能持有，
@@ -426,164 +409,6 @@ export function requiredPermissions(method: string, path: string) {
       : ["store-rental:order:operate", "store-rental:vehicle:manage"];
   }
 
-  if (path.startsWith("/store-rental/data-dictionary")) {
-    return ["store-rental:order:view", "store-rental:vehicle:view", "store-rental:member:view"];
-  }
-
-  if (path.startsWith("/store-rental/rules")) {
-    return ["store-rental:rules:manage"];
-  }
-  if (path.startsWith("/store-rental/pricing")) {
-    return ["store-rental:price:manage"];
-  }
-  if (path.startsWith("/store-rental/availability")) {
-    return ["store-rental:order:operate", "store-rental:vehicle:view"];
-  }
-  if (path === "/store-rental/orders") {
-    return method === "GET"
-      ? ["store-rental:order:view"]
-      : ["store-rental:order:operate", "store-rental:order:create"];
-  }
-  if (path.startsWith("/store-rental/contracts")) {
-    return method === "GET"
-      ? ["store-rental:order:view"]
-      : ["store-rental:order:operate"];
-  }
-  const orderActionMatch = path.match(/^\/store-rental\/orders\/[^/]+\/actions\/([^/]+)$/);
-  if (orderActionMatch) {
-    const action = orderActionMatch[1];
-    const actionPermissions: Record<string, string[]> = {
-      "payment-success": ["store-rental:order:operate", "store-rental:order:pickup"],
-      "start-pickup": ["store-rental:order:operate", "store-rental:order:pickup"],
-      "pickup-inspection": ["store-rental:order:operate", "store-rental:order:pickup"],
-      "return-inspection": ["store-rental:order:operate", "store-rental:order:return"],
-      "extend-rental": ["store-rental:order:operate", "store-rental:order:extend"],
-      "redirect-order": ["store-rental:order:operate", "store-rental:dispatch:manage"],
-      "change-return-store": ["store-rental:order:operate", "store-rental:dispatch:manage"],
-      "change-return-station": ["store-rental:order:operate", "store-rental:dispatch:manage"],
-      "confirm-settlement": ["store-rental:order:settle"],
-      "register-accident": [
-        "store-rental:order:operate",
-        "store-rental:vehicle:status-action"
-      ],
-      "mark-no-show": ["store-rental:order:operate", "store-rental:order:cancel"],
-      cancel: ["store-rental:order:operate", "store-rental:order:cancel"],
-      "reject-order": ["store-rental:order:operate", "store-rental:order:close"],
-      "close-order": ["store-rental:order:operate", "store-rental:order:close"]
-    };
-    return actionPermissions[action] ?? ["store-rental:order:operate"];
-  }
-  if (
-    path.match(/^\/store-rental\/orders\/[^/]+\/fees/) ||
-    path.match(/^\/store-rental\/orders\/[^/]+\/transactions/)
-  ) {
-    return method === "GET"
-      ? ["store-rental:order:view"]
-      : ["store-rental:order:settle", "store-rental:order:fee-manage"];
-  }
-  if (path.startsWith("/store-rental/orders/")) {
-    return method === "GET"
-      ? ["store-rental:order:view"]
-      : ["store-rental:order:operate", "store-rental:order:settle"];
-  }
-  if (path.startsWith("/store-rental/workflow")) {
-    return ["store-rental:order:view", "store-rental:order:operate"];
-  }
-  if (path.startsWith("/store-rental/dispatch")) {
-    return method === "GET"
-      ? ["store-rental:dispatch:manage", "store-rental:order:view"]
-      : ["store-rental:dispatch:manage"];
-  }
-  if (path.startsWith("/store-rental/stations")) {
-    return method === "GET"
-      ? ["store-rental:station:view"]
-      : ["store-rental:station:manage"];
-  }
-  if (path.startsWith("/store-rental/vehicle-groups")) {
-    return ["store-rental:vehicle-group:manage"];
-  }
-  if (
-    path.match(
-      /^\/store-rental\/vehicles\/[^/]+\/(status|location-events|maintenance-records|accident-records)/
-    )
-  ) {
-    return [
-      "store-rental:vehicle:manage",
-      "store-rental:vehicle:status-action"
-    ];
-  }
-  if (path.startsWith("/store-rental/vehicles")) {
-    return method === "GET"
-      ? ["store-rental:vehicle:view"]
-      : ["store-rental:vehicle:manage"];
-  }
-  if (path.match(/^\/store-rental\/members\/[^/]+\/risk-actions$/)) {
-    return ["store-rental:member:manage", "store-rental:member:risk-action"];
-  }
-  if (path.startsWith("/store-rental/members")) {
-    return method === "GET"
-      ? ["store-rental:member:view"]
-      : ["store-rental:member:manage"];
-  }
-  if (path.startsWith("/store-rental/member-reviews")) {
-    return method === "GET"
-      ? ["store-rental:member:view"]
-      : ["store-rental:member:manage"];
-  }
-  if (path.startsWith("/store-rental/membership-plans")) {
-    return ["store-rental:member:manage"];
-  }
-  if (path.match(/^\/store-rental\/corporates\/[^/]+\/monthly-bills\/[^/]+\/settle$/)) {
-    return [
-      "store-rental:corporate:manage",
-      "store-rental:corporate:monthly-settle",
-      "store-rental:order:fee-manage"
-    ];
-  }
-  if (path.startsWith("/store-rental/finance/manual-adjustments")) {
-    return method === "GET"
-      ? ["store-rental:finance:view", "store-rental:order:fee-manage"]
-      : ["store-rental:finance:adjust", "store-rental:order:fee-manage"];
-  }
-  if (path.startsWith("/store-rental/finance/documents")) {
-    return method === "GET"
-      ? ["store-rental:finance:view", "store-rental:finance:invoice"]
-      : ["store-rental:finance:invoice", "store-rental:finance:manage"];
-  }
-  if (path.startsWith("/store-rental/finance/reconciliation")) {
-    return ["store-rental:finance:reconcile", "store-rental:finance:view"];
-  }
-  if (path.startsWith("/store-rental/finance")) {
-    return method === "GET"
-      ? ["store-rental:finance:view"]
-      : ["store-rental:finance:manage"];
-  }
-  if (path.startsWith("/store-rental/corporates")) {
-    return method === "GET"
-      ? ["store-rental:corporate:view"]
-      : ["store-rental:corporate:manage"];
-  }
-  if (path.startsWith("/store-rental/value-added-services")) {
-    return ["store-rental:service:manage"];
-  }
-  // 以下五组此前全部落在兜底 `return []` 上，等于完全无鉴权。
-  // `/store-rental/marketing/plans` 的增改尤其严重：任何能登录的账号都能改本租户营销方案。
-  if (path.startsWith("/store-rental/marketing")) {
-    // 与 `/rental/v1/coupon-templates` 同一口径：营销配置由营销权限管，价格管理员为超集。
-    return ["store-rental:marketing:manage", "store-rental:price:manage"];
-  }
-  if (path.startsWith("/store-rental/tbox-devices")) {
-    // 车控设备绑定与下发指令会实际操作车辆，写侧要求车辆管理权限；读侧允许查看权限。
-    // 另有 requiredCapability 的 "iot" 能力门槛，两者是并列条件而非替代关系。
-    return method === "GET"
-      ? ["store-rental:vehicle:view", "store-rental:vehicle:manage"]
-      : ["store-rental:vehicle:manage"];
-  }
-  if (path.startsWith("/store-rental/integrations") || path.startsWith("/store-rental/client-endpoints")) {
-    // 外部接入占位与预留端点清单属系统集成信息，与 `/integrations` 分支同一权限。
-    return ["system:integration:manage", "system:params:manage"];
-  }
-
   return [UNMATCHED_ROUTE_PERMISSION];
 }
 
@@ -682,20 +507,11 @@ export class ApiAuthGuard implements CanActivate {
     if (!hasAnyPermission(user, permissions)) {
       throw new ForbiddenException("当前账号无权访问该功能");
     }
-    if (!user.isSaasAdmin && (path === "/store-rental" || path.startsWith("/store-rental/"))) {
-      // 旧车辆域的持久化表尚未完成 workspaceId 迁移。非默认空间不能继续
-      // 读取同一租户级数据，否则仅靠 wid 入 token 并不能形成真实隔离。
-      await this.authService.assertLegacyVehicleDomainWorkspace(user.tenantId, workspaceId);
-    }
     const capability = requiredCapability(path);
-    const vehicleCategoryRequired = requiresVehicleCategory(path);
-    if ((capability || vehicleCategoryRequired) && !user.isSaasAdmin) {
+    if (capability && !user.isSaasAdmin) {
       // SPACE-03：品类与能力按**当前经营空间**判定，不能用租户级档案——
       // 同租户多个空间品类不同时，那会让 camping 空间按 camera 的能力集放行。
       const scope = await this.authService.getCategoryContext(user.tenantId, workspaceId);
-      if (vehicleCategoryRequired && scope.categoryCode !== RentalCategoryCode.Vehicle) {
-        throw new ForbiddenException("该接口属于历史门市租赁参考模块，当前经营空间不可用");
-      }
       if (capability) {
         // CORE-EXT-02C：能力门禁只认**实例**。
         //
