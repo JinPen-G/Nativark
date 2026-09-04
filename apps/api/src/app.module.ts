@@ -29,9 +29,6 @@ import { PlatformService } from "./modules/platform/platform.service";
 import { ReportsController } from "./modules/reports/reports.controller";
 import { ReportsRepository } from "./modules/reports/reports.repository";
 import { ReportsService } from "./modules/reports/reports.service";
-import { StoreRentalController } from "./modules/store-rental/store-rental.controller";
-import { StoreRentalRepository } from "./modules/store-rental/store-rental.repository";
-import { StoreRentalService } from "./modules/store-rental/store-rental.service";
 import { RentalCoreController } from "./modules/rental-core/rental-core.controller";
 import { RentalCoreService } from "./modules/rental-core/rental-core.service";
 import { RentalBusinessController } from "./modules/rental-core/rental-business.controller";
@@ -72,7 +69,6 @@ import { RentalServiceCapacityService } from "./modules/rental-core/rental-servi
     PlatformController,
     MembershipController,
     ReportsController,
-    StoreRentalController,
     RentalCoreController,
     RentalBusinessController,
     OfficialCalendarSourceController,
@@ -95,8 +91,6 @@ import { RentalServiceCapacityService } from "./modules/rental-core/rental-servi
     OperationLogService,
     ReportsService,
     ReportsRepository,
-    StoreRentalService,
-    StoreRentalRepository,
     RentalCoreService,
     RentalBusinessService,
     OfficialCalendarSourceService,
