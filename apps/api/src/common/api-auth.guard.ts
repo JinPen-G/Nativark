@@ -562,7 +562,6 @@ export class ApiAuthGuard implements CanActivate {
       !workspaceId &&
       !workspaceExemptPath &&
       (path.startsWith("/rental/") ||
-        path.startsWith("/store-rental/") ||
         // SPACE-04：这两条按当前空间读写业务关系，缺空间同样必须 fail-closed。
         // 不加进来的话，服务层的 requireRequestWorkspaceId() 会抛成 500，
         // 而正确语义是「请先选择经营空间」的 403。

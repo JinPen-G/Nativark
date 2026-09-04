@@ -70,13 +70,9 @@ export class OperationAuditInterceptor implements NestInterceptor {
     if (path === "/auth/login" || path === "/health") {
       return true;
     }
-    // 通用租赁域必须纳入审计：此前只放行 /platform 与 /store-rental，
+    // 通用租赁域必须纳入审计：此前只放行 /platform 与门市域，
     // 导致 /rental/v1 的下单、确认、配货、取消和检查全部没有审计记录，
     // RC-04「关键动作可回溯」在通用域上并不成立。
-    return (
-      !path.startsWith("/platform") &&
-      !path.startsWith("/store-rental") &&
-      !path.startsWith("/rental/")
-    );
+    return !path.startsWith("/platform") && !path.startsWith("/rental/");
   }
 }
