@@ -53,8 +53,10 @@ const themeSource = read("apps/admin/src/app/theme.tsx");
   "saveOrganization", "saveUser", "saveRole", "saveSystemRuleSection"
 ].forEach((method) => requireText(api, `${method}:`, "API write coverage"));
 
-// 反向断言：历史门市端点不得再出现在这个客户端里。
+// 反向断言：历史门市端点不得再出现在任何管理端 API 客户端里。
+// 这是整条退役工作的落锁点——只要有人把 `/store-rental/` 写回客户端，这里就失败。
 forbidText(api, "/store-rental/", "retired legacy endpoints must not return to the platform API client");
+forbidText(operations, "/store-rental/", "retired legacy endpoints must not return to the operations API client");
 
 [
   "categories", "profile", "businessSettings", "saveBusinessSettings", "couponTemplates", "saveCouponTemplate", "operators", "saveOperator", "locations", "saveLocation", "itemGroups", "assets", "stockBalances", "availability", "orders",
