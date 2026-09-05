@@ -239,6 +239,8 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       agentId: order.agentId ?? null,
       subjectSnapshot: (order.subjectSnapshot ?? null) as unknown as Prisma.InputJsonValue,
       chargeLines: order.chargeLines as unknown as Prisma.InputJsonValue,
+      // 待人工裁定的费用审核单。空数组也写 null，避免历史订单与「审完清空」两种状态混淆。
+      feeReviews: (order.feeReviews?.length ? order.feeReviews : null) as unknown as Prisma.InputJsonValue,
       rentalAmount: new Prisma.Decimal(order.rentalAmount),
       discountAmount: new Prisma.Decimal(order.discountAmount),
       couponAmount: new Prisma.Decimal(order.couponAmount),
@@ -877,6 +879,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       // Review P1-10：NULL 快照明确解释为 legacy empty，不回退到当前已启用能力。
       capabilityPolicy: row.capabilitySnapshot ? "snapshot" : "legacy_empty",
       chargeLines: (row.chargeLines ?? []) as unknown as RentalQuoteChargeLine[],
+      feeReviews: (row.feeReviews ?? undefined) as unknown as RentalOrder["feeReviews"],
       rentalAmount: num(row.rentalAmount),
       discountAmount: num(row.discountAmount),
       couponAmount: num(row.couponAmount),

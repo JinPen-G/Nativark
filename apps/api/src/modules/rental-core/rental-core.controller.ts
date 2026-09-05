@@ -38,6 +38,7 @@ import {
   RentalAvailabilityDto,
   RentalOrderExtensionDto,
   ReviewRentalExtensionRefundDto,
+  ReviewRentalOrderFeeReviewDto,
   SaveRentalAssetDto,
   SaveRentalCouponTemplateDto,
   SaveRentalStockBalanceDto,
@@ -653,6 +654,26 @@ export class RentalCoreController {
       }
     });
     return { order: await this.committed(tenantId, result.order), extension: result.extension };
+  }
+
+  /**
+   * 裁定费用审核单（需求 4.6.10 人工催收 / 4.6.8 人工审核退款）。
+   *
+   * 与续租差额退款审核同一形态：批准才落账，未裁定则 `settleOrder` 拒绝关单。
+   */
+  @Post("orders/:id/fee-reviews/:reviewId/review")
+  async reviewOrderFeeReview(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Param("reviewId") reviewId: string, @Body() body: ReviewRentalOrderFeeReviewDto) {
+    const tenantId = req.user.tenantId;
+    const order = await this.idempotent.execute({
+      tenantId, action: "order.fee-review", key: idempotencyKeyOf(req),
+      fallbackKey: `order.fee-review:${reviewId}`, request: { orderId: id, reviewId, ...body }, orderId: id,
+      run: (tx) => this.service.reviewOrderFeeReview(tenantId, id, reviewId, body, req.user.displayName, tx),
+      replay: async () => {
+        const latest = await this.service.getOrder(tenantId, id);
+        return (latest.feeReviews ?? []).some((row) => row.id === reviewId && row.status === body.decision) ? latest : undefined;
+      }
+    });
+    return this.committed(tenantId, order);
   }
 
   @Post("orders/:id/extensions/:extensionId/refund-review")

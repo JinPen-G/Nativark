@@ -12,6 +12,7 @@ import {
   type PartialReturnRentalOrderRequest,
   type ReviewRentalInspectionExceptionRequest,
   type ReviewRentalExtensionRefundRequest,
+  type ReviewRentalOrderFeeReviewRequest,
   type RentalAvailabilityRequest,
   type RentalCapability,
   type RentalFulfillmentMode,
@@ -777,6 +778,18 @@ export class ReviewRentalExtensionRefundDto implements ReviewRentalExtensionRefu
   @IsString()
   @IsNotEmpty()
   reason!: string;
+}
+
+export class ReviewRentalOrderFeeReviewDto implements ReviewRentalOrderFeeReviewRequest {
+  @IsIn(["approved", "rejected"])
+  decision!: "approved" | "rejected";
+
+  @IsString()
+  @IsNotEmpty()
+  reason!: string;
+
+  // 认定金额。省略即按规则建议额；服务端拒绝超过建议额的值——多收要另立异常费用。
+  @IsOptional() @IsNumber() @Min(0) amount?: number;
 }
 
 export class RentalOrderExtensionDto implements RentalOrderExtensionRequest {

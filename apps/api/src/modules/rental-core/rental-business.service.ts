@@ -4667,7 +4667,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     if (!rule) throw new ConflictException("订单缺少租赁规则快照");
     const dueAt = scheduledEndAt ?? quote.request.endAt;
     const overdueMinutes = Math.max(0, (new Date(returnedAt).getTime() - new Date(dueAt).getTime()) / 60_000 - rule.overdue.graceMinutes);
-    if (overdueMinutes <= 0 || rule.overdue.feeMode === "none" || rule.overdue.feeMode === "manual_review") return 0;
+    // manual_review 不在这里短路：金额照样算出来当审核依据，是否落账由调用方按规则
+    // 模式决定（生成待审核的费用审核单）。早前这里直接返回 0，等于把逾期费静默免除。
+    if (overdueMinutes <= 0 || rule.overdue.feeMode === "none") return 0;
     /** 该行仍在租的占比。已交回的部分不再占用资源，也就不该继续产生逾期费。 */
     const shareOf = (line: { pricingGroupId?: string; itemGroupId?: string; quantity: number }) => {
       if (!outstandingQuantities) return 1;

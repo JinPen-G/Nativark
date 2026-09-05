@@ -1366,6 +1366,10 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: "Confirm extension payment and extend the rental period", permissions: ["store-rental:order:extend", "store-rental:order:operate"], responseSchema: "GenericObject"
   },
   {
+    method: "post", path: "/api/rental/v1/orders/{id}/fee-reviews/{reviewId}/review", tag: "RentalCore", operationId: "reviewRentalOrderFeeReview",
+    summary: "Decide a pending fee review (manual overdue collection or early-return refund)", permissions: ["store-rental:order:settle"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+  },
+  {
     method: "post", path: "/api/rental/v1/orders/{id}/extensions/{extensionId}/refund-review", tag: "RentalCore", operationId: "reviewRentalExtensionRefund",
     summary: "Review an extension price reduction without issuing a cash refund", permissions: ["store-rental:order:settle"], requestSchema: "GenericObject", responseSchema: "GenericObject"
   },

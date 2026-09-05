@@ -1849,6 +1849,9 @@ model RentalOrder {
   agentId                       String?
   subjectSnapshot               Json?
   chargeLines                   Json
+  /// 待人工裁定的费用审核单（逾期人工催收、提前归还人工审核退款）。
+  /// 只要还有 pending 的就不许结清——否则「人工审核」这个规则选项等于静默免除。
+  feeReviews                    Json?
   rentalAmount                  Decimal                        @db.Decimal(12, 2)
   discountAmount                Decimal                        @db.Decimal(12, 2)
   couponAmount                  Decimal                        @db.Decimal(12, 2)

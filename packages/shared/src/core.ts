@@ -4438,6 +4438,33 @@ export interface RentalReservation {
   createdAt: string;
 }
 
+/**
+ * 费用审核单（需求 4.6.10 的人工催收、4.6.8 的人工审核退款）。
+ *
+ * 规则选了「人工审核」时，金额照样按快照算出来，但**不得直接落账**——落多少由催收
+ * 或减免的结论决定。此前这两条路径一个直接返回 0、一个直接跳过，结果是逾期费被静默
+ * 免除、退款被静默丢弃，运营侧连一条待办都看不到，订单还能照常结清。
+ *
+ * 因此这张单必须同时具备三件事：建议金额与依据（能解释）、审核结果与认定金额
+ * （能追溯），以及**阻止结清**的能力（未处理不许关单）。
+ */
+export interface RentalOrderFeeReview {
+  id: string;
+  /** 目前只有逾期费与提前归还退款两类需要人工裁定。 */
+  type: "overdue" | "early_return_refund";
+  /** 规则算出的建议金额，**正数**。退款类落账时取负。 */
+  suggestedAmount: number;
+  /** 逐条依据：应归还/实际归还时间、规则模式与金额构成。客服据此向客户解释。 */
+  basis: string[];
+  status: "pending" | "approved" | "rejected";
+  /** 审核认定的金额。批准时缺省取 `suggestedAmount`，可核减但不得超过它。 */
+  decidedAmount?: number;
+  reason?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  createdAt: string;
+}
+
 export interface RentalAllocation {
   id: string;
   orderId: string;
@@ -4594,6 +4621,13 @@ export interface RentalOrder {
    */
   capabilityPolicy?: "snapshot" | "legacy_empty";
   chargeLines: RentalQuoteChargeLine[];
+  /**
+   * 待人工裁定的费用审核单（见 `RentalOrderFeeReview`）。
+   *
+   * 只要还有 `pending` 的，订单就不许结清——这是「人工审核」这个规则选项唯一能
+   * 兑现的方式：否则它等于一句静默免除。
+   */
+  feeReviews?: RentalOrderFeeReview[];
   rentalAmount: number;
   discountAmount: number;
   couponAmount: number;
@@ -4881,6 +4915,19 @@ export interface RentalOrderExtension {
 export interface ReviewRentalExtensionRefundRequest {
   decision: "approved" | "rejected";
   reason: string;
+}
+
+/** 裁定一张费用审核单（逾期人工催收 / 提前归还人工审核退款）。 */
+export interface ReviewRentalOrderFeeReviewRequest {
+  decision: "approved" | "rejected";
+  reason: string;
+  /**
+   * 认定金额。省略即按规则建议额。
+   *
+   * 服务端拒绝超过建议额的值：那已经不是"审核"而是另立一笔费用，
+   * 要走异常费用流程并留下自己的依据。
+   */
+  amount?: number;
 }
 
 /** 续租申请 / 试算的入参。APP 与后台用同一份。 */

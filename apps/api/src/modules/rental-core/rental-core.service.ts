@@ -41,6 +41,7 @@ import {
   type RentalItemGroupImage,
   type RentalPricingGroup,
   type RentalOrder,
+  type RentalOrderFeeReview,
   type RentalOrderExtension,
   type RentalOrderExtensionPreview,
   type RentalPricingRate,
@@ -1934,8 +1935,41 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     return { order, extension: { ...extension, pricingSnapshot: next } };
   }
 
+  /**
+   * 往订单挂一张待人工裁定的费用审核单（需求 4.6.10 / 4.6.8）。
+   *
+   * 同一类型只保留一张待审单：重复归还提交不该堆出多条待办，后一次的金额与依据覆盖前一次。
+   * 已审完（approved/rejected）的保留为历史，不被覆盖。
+   */
+  private raiseFeeReview(
+    order: RentalOrder,
+    type: RentalOrderFeeReview["type"],
+    suggestedAmount: number,
+    basis: string[]
+  ) {
+    if (suggestedAmount <= 0) return;
+    const at = now();
+    const kept = (order.feeReviews ?? []).filter((row) => !(row.type === type && row.status === "pending"));
+    order.feeReviews = [
+      ...kept,
+      { id: randomUUID(), type, suggestedAmount: roundMoney(suggestedAmount), basis, status: "pending", createdAt: at }
+    ];
+  }
+
+  /**
+   * 逾期费落账（需求 4.6.10）。
+   *
+   * 规则选 `manual_review` 时**不落账**，改挂一张待审核单：落多少由催收或减免的结论决定。
+   * 早前这条路径由计算侧直接返回 0，等于把逾期费静默免除，运营侧连一条待办都看不到。
+   */
   private applyOverdueTo(order: RentalOrder, amount: number, returnedAt: string) {
     if (amount <= 0) return;
+    const mode = order.ruleSnapshot?.overdue?.feeMode;
+    const basis = [`实际归还时间 ${returnedAt}`, `按规则 ${mode ?? "unknown"} 算出建议逾期费 ${roundMoney(amount)}`];
+    if (mode === "manual_review") {
+      this.raiseFeeReview(order, "overdue", amount, basis);
+      return;
+    }
     this.applyChargeTo(order, {
       code: `overdue:${order.id}`,
       name: "逾期费用",
@@ -1956,7 +1990,12 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     order: RentalOrder,
     refund: { amount: number; requiresReview: boolean; basis: string[] }
   ) {
-    if (refund.amount <= 0 || refund.requiresReview) return;
+    if (refund.amount <= 0) return;
+    // 需要人工审核时挂待审单而不是直接丢弃：早前这里 return，退款连一条记录都不留。
+    if (refund.requiresReview) {
+      this.raiseFeeReview(order, "early_return_refund", refund.amount, refund.basis);
+      return;
+    }
     const before = order.finalPayableAmount ?? order.payableAmount;
     this.applyChargeTo(order, {
       code: `early_return_refund:${order.id}`,
@@ -1966,6 +2005,52 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       sourceVersion: order.ruleVersion,
       detail: `${refund.basis.join("；")}；落账前最终应付 ${before}`
     });
+  }
+
+  /**
+   * 裁定一张费用审核单（需求 4.6.10 人工催收 / 4.6.8 人工审核退款）。
+   *
+   * 批准才落账，且认定金额不得超过规则算出的建议额——超出就不是"审核"而是另立一笔费用，
+   * 那要走异常费用流程并留下自己的依据。驳回只记录结论，不产生任何金额。
+   */
+  async reviewOrderFeeReview(
+    tenantId: string,
+    orderId: string,
+    reviewId: string,
+    input: { decision: "approved" | "rejected"; reason: string; amount?: number },
+    operator: string,
+    tx: RentalFactTx
+  ) {
+    const order = await this.lockedOrder(tenantId, orderId, tx);
+    if (order.status === RentalCoreOrderStatus.Completed || order.status === RentalCoreOrderStatus.Cancelled) {
+      throw new ConflictException("已关闭或已取消的订单不能再裁定费用审核");
+    }
+    if (!input.reason.trim()) throw new BadRequestException("请填写审核原因");
+    const review = (order.feeReviews ?? []).find((row) => row.id === reviewId);
+    if (!review || review.status !== "pending") throw new ConflictException("该费用审核单不存在或已处理");
+    const decidedAmount = input.amount === undefined ? review.suggestedAmount : roundMoney(input.amount);
+    if (decidedAmount < 0) throw new BadRequestException("认定金额不能为负");
+    if (decidedAmount > review.suggestedAmount) {
+      throw new BadRequestException(`认定金额不能超过规则建议的 ${review.suggestedAmount}；需要多收请另立异常费用`);
+    }
+    const at = now();
+    if (input.decision === "approved" && decidedAmount > 0) {
+      const isRefund = review.type === "early_return_refund";
+      this.applyChargeTo(order, {
+        code: `${review.type}:${order.id}`,
+        name: isRefund ? "提前归还退租金（已审核）" : "逾期费用（已审核）",
+        type: review.type,
+        amount: isRefund ? -decidedAmount : decidedAmount,
+        sourceVersion: order.ruleVersion,
+        detail: `${review.basis.join("；")}；审核认定 ${decidedAmount}（建议 ${review.suggestedAmount}）：${input.reason.trim()}`
+      });
+    }
+    order.feeReviews = (order.feeReviews ?? []).map((row) => row.id === reviewId
+      ? { ...row, status: input.decision, decidedAmount, reason: input.reason.trim(), reviewedBy: operator, reviewedAt: at }
+      : row);
+    order.updatedAt = at;
+    await this.factStore.saveOrderAggregate(order, [], tx);
+    return order;
   }
 
   private applyDamageTo(order: RentalOrder, amount: number, detail: string) {    if (amount <= 0) return;
@@ -2115,6 +2200,11 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const extensions = await this.factStore.listExtensions(tenantId, orderId, tx);
     if (extensions.some((row) => row.status === "effective" && row.pricingSnapshot?.refundReview?.status === "pending")) {
       throw new ConflictException("还有续租差额退款待审核，请先处理后关闭订单");
+    }
+    // 人工审核的逾期费与提前归还退款同理：未裁定就关单等于静默免除，
+    // 这也是「人工审核」这个规则选项唯一能兑现的地方。
+    if ((order.feeReviews ?? []).some((row) => row.status === "pending")) {
+      throw new ConflictException("还有费用审核单待处理，请先裁定后关闭订单");
     }
     await this.runHook(
       tenantId,
