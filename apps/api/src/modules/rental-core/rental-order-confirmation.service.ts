@@ -25,6 +25,7 @@ import { RentalCoreService } from "./rental-core.service";
 import { CustomerCorporateService } from "../platform/customer-corporate.service";
 import { CustomerOperationsService } from "../platform/customer-operations.service";
 import { RentalServiceCapacityService } from "./rental-service-capacity.service";
+import { stampOccurrences } from "./rental-service-occurrence";
 import { MembershipService } from "../platform/membership.service";
 
 function canonicalize(value: unknown): unknown {
@@ -273,6 +274,15 @@ export class RentalOrderConfirmationService {
             ? this.core.capabilityInstancesFromSnapshot(tenantId, order.capabilitySnapshot)
             : []
         });
+        // MKT-02C：下单时约定的服务也标成发生项（origin=order），并挂上与下面 reserveForOrder
+        // 同源的容量依据。没有它，归还结算只能按 serviceId 配对，续租再买同一服务就会串。
+        if (order.serviceSnapshots?.length) {
+          order.serviceSnapshots = stampOccurrences(order.serviceSnapshots, {
+            origin: "order",
+            ownerId: order.id,
+            requestKey: key
+          });
+        }
         await this.coreFacts.saveOrderAggregate(order, [], tx);
 
         // 服务容量与订单聚合、库存预占、报价消费、券锁定同一事务。

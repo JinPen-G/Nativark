@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type {
   RentalOrder,
   RentalQuoteServiceSnapshot,
@@ -8,6 +8,7 @@ import type {
   SaveRentalServiceCapacityRequest
 } from "@store-rental/shared";
 import { PrismaService } from "../database/prisma.service";
+import { serviceReservationKey } from "./rental-service-occurrence";
 import { resolveScopeWorkspaceId } from "./workspace-scope";
 
 type Tx = Prisma.TransactionClient;
@@ -239,12 +240,20 @@ export class RentalServiceCapacityService {
   ): Promise<{ usedServiceIds: string[]; releasedServiceIds: string[] }> {
     const returnedAtMs = Date.parse(returnedAt);
     if (!Number.isFinite(returnedAtMs)) throw new BadRequestException("归还时间无效");
-    const snapshotByServiceId = new Map((order.serviceSnapshots ?? []).map((snapshot) => [snapshot.serviceId, snapshot]));
+    // MKT-02C：按**容量依据**配对，而不是按 serviceId。同一服务可能有原订单一次、续租
+    // 又一次两条预留，各自时段不同；按 serviceId 建索引只会留下一条，另一条会被拿别人的
+    // 时段判「是否已开始」——已经做过的服务被当成没做，容量就被错误放回可用池。
+    const occurrences = order.serviceSnapshots ?? [];
+    const byReservationKey = new Map(
+      occurrences.filter((row) => row.reservationKey).map((row) => [row.reservationKey as string, row])
+    );
+    // 存量订单的快照没有容量依据，只能回落到 serviceId；这类订单本来也只有一次发生。
+    const legacyByServiceId = new Map(occurrences.filter((row) => !row.reservationKey).map((row) => [row.serviceId, row]));
     const rows = await this.lockOrderReservations(tenantId, order.id, tx);
     const usedServiceIds: string[] = [];
     const releasedServiceIds: string[] = [];
     for (const row of rows.filter((item) => item.status === "confirmed")) {
-      const snapshot = snapshotByServiceId.get(row.serviceId);
+      const snapshot = byReservationKey.get(row.idempotencyKey) ?? legacyByServiceId.get(row.serviceId);
       // 存量订单缺少服务快照时无法证明服务未开始：保守保留为已使用，避免错放容量。
       const started = !snapshot || Date.parse(snapshot.scheduledStartAt) <= returnedAtMs;
       if (started) {
@@ -324,11 +333,12 @@ export class RentalServiceCapacityService {
     return tx.rentalServiceReservation.findMany({ where: { tenantId, workspaceId, orderId } });
   }
 
+  /**
+   * 委托给共用纯函数：订单聚合要用同一个键把服务发生项和它自己那条预留配对，
+   * 两处各写一遍哈希就会分叉。见 rental-service-occurrence.ts。
+   */
   private reservationKey(requestKey: string, snapshot: RentalQuoteServiceSnapshot) {
-    const digest = createHash("sha256")
-      .update([requestKey, snapshot.serviceId, snapshot.serviceLocationId, snapshot.scheduledStartAt, snapshot.scheduledEndAt].join("|"))
-      .digest("hex");
-    return `service-capacity:${digest}`;
+    return serviceReservationKey(requestKey, snapshot);
   }
 
   private toCapacity(row: {

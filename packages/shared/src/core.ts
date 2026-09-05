@@ -2962,6 +2962,32 @@ export interface RentalQuoteServiceSnapshot {
   couponAllocatedAmount?: number;
 }
 
+/**
+ * 订单上的一次服务发生（MKT-02C）。
+ *
+ * 为什么不能按 serviceId 合并：同一个服务可以在原订单买一次、再由第 1 次续租买一次，
+ * 两次的服务版本、条款版本、时段、单价与净额都可能不同，各自还对应**独立的**容量预留。
+ * 早期实现把它们按 serviceId 合并成一条并取时段并集，结果是后一次覆盖前一次的版本与
+ * 金额，账上有服务费但找不到对应的那次履约承诺。
+ *
+ * 因此发生项一律追加、不覆盖。`occurrenceId` 是稳定标识，`reservationKey` 就是容量依据
+ * ——它与 `rental_service_reservations.idempotencyKey` 同源，凭它可以把一次发生项和它
+ * 自己那条容量预留精确配对，而不是靠 serviceId 猜。
+ *
+ * 字段全部可选：存量订单的服务快照没有这些信息，读取侧按缺省回落到旧口径。
+ */
+export interface RentalOrderServiceOccurrence extends RentalQuoteServiceSnapshot {
+  /** 稳定标识。原订单服务用 `order:<serviceId>:<序号>`，续租新增用 `extension:<续租id>:<serviceId>:<序号>`。 */
+  occurrenceId?: string;
+  /** 来源：下单时约定的服务，还是某一次续租新增/延长出来的。 */
+  origin?: "order" | "extension";
+  /** 来源续租的 id 与序号（origin 为 extension 时给出），用于界面上显示"第几次续租新增"。 */
+  extensionId?: string;
+  extensionSequence?: number;
+  /** 容量依据：对应容量预留的幂等键。不需要容量的服务没有这一项。 */
+  reservationKey?: string;
+}
+
 export interface RentalServiceCapacity {
   id: string;
   tenantId: string;
@@ -4597,8 +4623,13 @@ export interface RentalOrder {
   capabilityDecisions?: RentalCapabilityDecisionSnapshot[];
   /** Review P1-6：带风险继续的完整例外快照（不可变），配货与后续履约据此还原裁决。 */
   capabilityExceptions?: RentalCapabilityExceptionSnapshot[];
-  /** MKT-02A：从报价直接继承的服务、价格、资格、时段与条款正文快照。 */
-  serviceSnapshots?: RentalQuoteServiceSnapshot[];
+  /**
+   * MKT-02A：从报价直接继承的服务、价格、资格、时段与条款正文快照。
+   *
+   * MKT-02C 起每一项都是一次**独立的服务发生**：同一服务被续租再买一次会追加一条，
+   * 不再按 serviceId 合并。见 `RentalOrderServiceOccurrence`。
+   */
+  serviceSnapshots?: RentalOrderServiceOccurrence[];
   /**
    * CUSTOMER-01C：订单四类主体（需求 4.8.4）。
    *

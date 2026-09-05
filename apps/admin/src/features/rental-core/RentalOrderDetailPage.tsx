@@ -1,5 +1,5 @@
 import { ArrowLeftOutlined, CheckCircleOutlined, DollarOutlined, MinusCircleOutlined, PlusOutlined, RetweetOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
-import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol, type CreateRentalInspectionRequest, type RentalAllocation, type RentalFundingAction, type RentalFundingInstrument, type RentalInspectionTemplate, type RentalOrderExtension, type RentalOrderExtensionPreview, type RentalOrderFeeReview, type RentalReservation } from "@store-rental/shared";
+import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol, type CreateRentalInspectionRequest, type RentalAllocation, type RentalFundingAction, type RentalFundingInstrument, type RentalInspectionTemplate, type RentalOrderExtension, type RentalOrderExtensionPreview, type RentalOrderFeeReview, type RentalOrderServiceOccurrence, type RentalReservation } from "@store-rental/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Button, Card, DatePicker, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Table, Tag } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
@@ -11,6 +11,7 @@ import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
 import { OrderAllocationPanel } from "./OrderAllocationPanel";
 import { FEE_REVIEW_STATUS_COLORS, FEE_REVIEW_TYPE_LABELS, feeReviewStatusText, hasPendingFeeReview } from "./orderFeeReview";
+import { serviceOccurrenceNetAmount, serviceOccurrenceOriginText } from "./orderServiceOccurrence";
 
 type FundingOperation = {
   instrument: RentalFundingInstrument;
@@ -262,6 +263,32 @@ export function RentalOrderDetailPage() {
         { title: "状态", dataIndex: "status", render: (value) => <Tag>{value}</Tag> },
         { title: "操作", render: (_, row) => detail.status === RentalCoreOrderStatus.Reserved && canSubstituteReservation(row) ? <Button type="link" icon={<RetweetOutlined />} onClick={() => setSubstitution({ orderLineId: row.orderLineId, fromItemGroupId: row.itemGroupId })}>替换组成</Button> : "-" }
       ]} />}</Card>
+      {Boolean(detail.serviceSnapshots?.length) && <Card title="增值服务与履约承诺" extra={<Tag color="blue">按发生次数分别记录</Tag>}>
+        <Alert
+          type="info"
+          showIcon
+          title="这里只展示已承诺的服务与计划时段；实际开始与完成另行记录，不能用计划时间当作已履约。"
+          style={{ marginBottom: 16 }}
+        />
+        <Table<RentalOrderServiceOccurrence>
+          rowKey={(row) => row.occurrenceId ?? `${row.serviceId}:${row.scheduledStartAt}`}
+          size="small"
+          pagination={false}
+          dataSource={detail.serviceSnapshots}
+          columns={[
+            { title: "来源", width: 150, render: (_, row) => serviceOccurrenceOriginText(row) },
+            { title: "服务", render: (_, row) => <Space orientation="vertical" size={0}><span>{row.serviceName}</span><span style={{ color: "#999" }}>{row.serviceCode} · 服务版本 {row.serviceVersion} · 条款 {row.termsVersion}</span></Space> },
+            { title: "计划时段", render: (_, row) => `${new Date(row.scheduledStartAt).toLocaleString()} ～ ${new Date(row.scheduledEndAt).toLocaleString()}` },
+            { title: "数量 × 单位数 × 单价", align: "right", render: (_, row) => `${row.quantity} × ${row.billingUnits} × ${money(row.unitPrice)}` },
+            { title: "原价", align: "right", render: (_, row) => money(row.amount) },
+            { title: "减免", align: "right", render: (_, row) => money(Number(row.discountAllocatedAmount ?? 0) + Number(row.couponAllocatedAmount ?? 0)) },
+            { title: "净额", align: "right", render: (_, row) => money(serviceOccurrenceNetAmount(row)) },
+            { title: "容量", width: 130, render: (_, row) => row.requiresCapacity
+              ? <Tag color={row.reservationKey ? "green" : "orange"}>{row.reservationKey ? `已占 ${row.capacityQuantity}` : "无容量依据"}</Tag>
+              : <Tag color="default">不需要容量</Tag> }
+          ]}
+        />
+      </Card>}
       <Card title="费用与版本快照"><Table rowKey="code" pagination={false} dataSource={detail.chargeLines} columns={[{ title: "费用项", dataIndex: "name" }, { title: "类型", dataIndex: "type" }, { title: "来源版本", dataIndex: "sourceVersion", render: (value) => value ?? "-" }, { title: "说明", dataIndex: "detail", render: (value) => value ?? "-" }, { title: "金额", dataIndex: "amount", render: (value) => money(Number(value)) }]} /></Card>
       {Boolean(detail.membershipBenefitEvaluations?.length) && <Card title="会员权益应用快照" extra={<Tag color="blue">按下单时会员方案固化</Tag>}>
         <Table rowKey={(row) => `${row.planVersionId}:${row.type}:${row.appliesTo}`} pagination={false} size="small" dataSource={detail.membershipBenefitEvaluations} columns={[

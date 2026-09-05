@@ -77,14 +77,17 @@ try {
   console.log(redact(migration.stdout + migration.stderr, [admin.password, source.password]));
   if (migration.status !== 0) throw Error("克隆库迁移失败");
 
-  const test = spawnSync(process.execPath, [path.join(root, "tests/rental-order-close-concurrency.test.cjs")], {
-    env,
-    cwd: root,
-    encoding: "utf8"
-  });
-  console.log(redact(test.stdout + test.stderr, [admin.password, source.password]));
-  if (test.status !== 0) throw Error("订单事务一致性真库专项失败");
-  console.log("PASS order-close concurrency on dedicated clone");
+  // 一次克隆跑完这一批真库专项：备份与恢复是最贵的一步，没必要每个专项各来一遍。
+  const suites = [
+    "tests/rental-order-close-concurrency.test.cjs",
+    "tests/rental-service-capacity-contention.test.cjs"
+  ];
+  for (const suite of suites) {
+    const test = spawnSync(process.execPath, [path.join(root, suite)], { env, cwd: root, encoding: "utf8" });
+    console.log(redact(test.stdout + test.stderr, [admin.password, source.password]));
+    if (test.status !== 0) throw Error(`真库专项失败：${suite}`);
+  }
+  console.log("PASS order-close concurrency and service capacity contention on dedicated clone");
 } catch (e) {
   console.error(redact(e.message, [admin.password, source.password]));
   process.exitCode = 1;

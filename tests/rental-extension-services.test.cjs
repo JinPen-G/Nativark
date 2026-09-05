@@ -191,15 +191,49 @@ const applyExtensionToOrder = async (order, extension) => {
 }
 
 {
+  // MKT-02C：同一服务被续租再买一次是**两次独立发生**。早先按 serviceId 合并成一条并取
+  // 时段并集，挡住了容量错放，但后一次的版本/单价/净额会覆盖前一次，账上有服务费却找不到
+  // 对应那次履约承诺。现在追加两条，配对靠各自的容量依据。
+  const first = { ...snapshotOf("svc_same", startAt, endAt), serviceVersion: "1.0", amount: 200 };
+  const second = { ...snapshotOf("svc_same", endAt, extendedTo), serviceVersion: "2.0", amount: 350, unitPrice: 175 };
+  const order = await applyExtensionToOrder(orderWithServices([first]), extensionWith("ext_2", 2, [second]));
+  assert.equal(order.serviceSnapshots.length, 2, "同一服务两次发生必须各留一条，不能被按 serviceId 覆盖");
+  const [original, added] = order.serviceSnapshots;
+  assert.equal(original.serviceVersion, "1.0", "原订单那次的服务版本不能被续租那次改写");
+  assert.equal(original.amount, 200, "原订单那次的金额不能被覆盖");
+  assert.equal(original.scheduledStartAt, startAt, "原订单那次保留自己的时段，不再取并集");
+  assert.equal(original.scheduledEndAt, endAt);
+  assert.equal(added.serviceVersion, "2.0", "续租那次按自己的适用版本记");
+  assert.equal(added.amount, 350);
+  assert.equal(added.scheduledStartAt, endAt, "续租那次保留自己的时段");
+  assert.equal(added.extensionSequence, 2, "续租那次要能追溯到第几次续租");
+  assert.equal(added.origin, "extension");
+  assert.notEqual(original.reservationKey, added.reservationKey, "两次发生的容量依据必须不同，否则仍会配对到同一条预留");
+  ok("同一服务的两次发生各自独立：版本、金额、时段与容量依据都不互相覆盖");
+}
+
+{
+  // 网络重试/幂等回放会带着同一批快照再进来一次，不能变成第二次履约承诺。
+  const order = orderWithServices([]);
+  const extension = extensionWith("ext_retry", 4, [snapshotOf("svc_retry", endAt)]);
+  await applyExtensionToOrder(order, extension);
+  await applyExtensionToOrder(order, extension);
+  assert.equal(order.serviceSnapshots.length, 1, "同一次续租重复生效只能留一条发生项");
+  assert.equal(order.serviceSnapshots[0].occurrenceId, "extension:ext_retry:svc_retry:0", "发生项标识必须稳定，重放才能去重");
+  ok("同一次续租的重复生效按发生项标识去重，不会重复记一次履约承诺");
+}
+
+{
+  // 同一次续租里同一个服务的两个不同时段，也必须是两条——只按 serviceId 去重会吞掉一条。
   const order = await applyExtensionToOrder(
-    orderWithServices([snapshotOf("svc_same", startAt, endAt)]),
-    extensionWith("ext_2", 2, [snapshotOf("svc_same", endAt, extendedTo)])
+    orderWithServices([]),
+    extensionWith("ext_two_slots", 5, [snapshotOf("svc_slot", endAt, extendedTo), snapshotOf("svc_slot", startAt, endAt)])
   );
-  assert.equal(order.serviceSnapshots.length, 1, "同一服务续租两次不能在订单上留两份快照");
-  assert.equal(order.serviceSnapshots[0].scheduledStartAt, startAt,
-    "留下的那份时段必须跨到两段之外（起点取早）：否则原订单那条预留会被拿续租的时段判成未开始，容量被错误释放");
-  assert.equal(order.serviceSnapshots[0].scheduledEndAt, extendedTo, "终点取晚");
-  ok("同一服务多次续租只留一份快照，且时段取两段的并集——按 serviceId 建索引的归还结算才不会错放容量");
+  assert.equal(order.serviceSnapshots.length, 2, "一次续租里同一服务的两个时段是两次发生");
+  assert.deepEqual(order.serviceSnapshots.map((row) => row.occurrenceId),
+    ["extension:ext_two_slots:svc_slot:0", "extension:ext_two_slots:svc_slot:1"],
+    "同一次续租内的多条按序号区分");
+  ok("一次续租内同一服务的多个时段各自成条，序号区分而不是互相覆盖");
 }
 
 {

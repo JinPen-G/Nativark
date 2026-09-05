@@ -87,6 +87,7 @@ import {
   type StockQuarantineChange
 } from "./rental-core-fact.repository";
 import { assertRentalCategoryExtensions } from "./rental-extension-registry";
+import { appendOccurrences, extensionRequestKey, stampOccurrences } from "./rental-service-occurrence";
 import { buildRentalCategorySamples } from "./rental-category-samples";
 
 /**
@@ -135,9 +136,6 @@ const categories: RentalCategoryDefinition[] = RENTAL_CATEGORY_DEFINITIONS;
 assertRentalCategoryExtensions(categories);
 
 function now() { return new Date().toISOString(); }
-/** 两个时点里靠前/靠后的那个。合并同一服务的多段时段时用来取并集。 */
-function minIso(left: string, right: string) { return Date.parse(left) <= Date.parse(right) ? left : right; }
-function maxIso(left: string, right: string) { return Date.parse(left) >= Date.parse(right) ? left : right; }
 function id(prefix: string) { return `${prefix}_${randomUUID().slice(0, 8)}`; }
 function overlaps(aStart: string, aEnd: string, bStart: string, bEnd: string) {
   return new Date(aStart).getTime() < new Date(bEnd).getTime() && new Date(aEnd).getTime() > new Date(bStart).getTime();
@@ -1968,27 +1966,23 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       detail: `${extension.originalEndAt} → ${extension.newEndAt}（${extension.settlementMode === "monthly" ? "计入月结账单" : "已补款"}）`
     });
     order.effectiveEndAt = extension.newEndAt;
-    // 本次续租新增的服务并进订单快照。归还结算判断"服务是否已开始"、以及损坏免赔认定
-    // 都只读订单上的这一份，不合并的话续租买的服务在这两处等于不存在。
+    // 本次续租新增的服务作为**独立发生项**追加到订单上（MKT-02C）。
+    //
+    // 早先这里按 serviceId 合并、并把时段取并集。合并挡住了「容量被错放」那个坑，但代价是
+    // 后一次的服务版本、条款版本、单价与净额覆盖前一次，账上有服务费却找不到对应的那次
+    // 履约承诺。现在改成追加：配对不再靠 serviceId，而靠发生项自带的容量依据
+    // （reservationKey，与预留行的幂等键同源），因此两条同服务的发生项各自判定、互不干扰。
     if (extension.serviceSnapshots?.length) {
-      const merged = new Map((order.serviceSnapshots ?? []).map((row) => [row.serviceId, row]));
-      for (const snapshot of extension.serviceSnapshots) {
-        const previous = merged.get(snapshot.serviceId);
-        // 同一服务被续租再买一次时只能留一份：`settleReturnForOrder` 按 serviceId 建索引，
-        // 留两份也只有一份会被查到。但不能直接用新那份——原订单那条预留（例如第 1-3 天）
-        // 会被拿续租的时段（第 6-7 天）去判"是否已开始"，归还早于第 6 天就判成未开始，
-        // 容量被错误释放。保留的这份时段因此要跨到两段之外：起点取早、终点取晚。
-        // 方向上偏保守：宁可把未开始的算成已开始（与该函数缺快照时的兜底同向），
-        // 也不能把已经做过的服务当成没做、把容量放回可用池。
-        merged.set(snapshot.serviceId, previous
-          ? {
-              ...snapshot,
-              scheduledStartAt: minIso(previous.scheduledStartAt, snapshot.scheduledStartAt),
-              scheduledEndAt: maxIso(previous.scheduledEndAt, snapshot.scheduledEndAt)
-            }
-          : snapshot);
-      }
-      order.serviceSnapshots = [...merged.values()];
+      order.serviceSnapshots = appendOccurrences(
+        order.serviceSnapshots,
+        stampOccurrences(extension.serviceSnapshots, {
+          origin: "extension",
+          ownerId: extension.id,
+          requestKey: extensionRequestKey(extension.id),
+          extensionId: extension.id,
+          extensionSequence: extension.sequence
+        })
+      );
     }
     order.updatedAt = at;
   }
