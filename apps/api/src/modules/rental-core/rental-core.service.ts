@@ -73,6 +73,7 @@ import { RentalStateRepository } from "./rental-state.repository";
 import { DEFAULT_BUSINESS_TIME_ZONE, isValidTimeZone, businessHoursError } from "./rental-business-day";
 import { roundMoney } from "./rental-money";
 import { bufferedRentalPeriod, peakReservedQuantity } from "./rental-occupancy";
+import { extensionPaymentRequired } from "./rental-extension-lifecycle";
 import { effectiveExtensionRule, inclusiveTaxAmount } from "./rental-rule-defaults";
 import { RentalCoreConfigRepository, type RentalConfigStore, type RentalConfigTx } from "./rental-core-config.repository";
 import {
@@ -1515,6 +1516,21 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (order.allocations.every((allocation) => allocation.status === "returned" || allocation.status === "released")) throw new ConflictException("部分归还不应释放最后一批，请使用整单归还");
   }
 
+  /**
+   * 订单进入终态或已归还时，作废遗留的待补款续租申请。
+   *
+   * 不作废会留下一笔永远不可能生效的申请：`payOrderExtension` 会因订单状态拒绝，
+   * 而资金侧仍把它的应付计入待收，于是页面上出现一个点了必然失败的补款按钮。
+   *
+   * 用 `cancelled` 而不是 `expired`：这不是超时，是被订单状态终结。`expired` 留给
+   * 将来的待支付超时机制。`cancelExtensions` 只更新 `pending_payment` 行，重复调用幂等。
+   */
+  private async voidPendingExtensions(tenantId: string, orderId: string, tx?: RentalFactTx) {
+    const rows = await this.factStore.listExtensions(tenantId, orderId, tx);
+    const pending = rows.filter((row) => row.status === "pending_payment").map((row) => row.id);
+    if (pending.length) await this.factStore.cancelExtensions(tenantId, pending, tx);
+  }
+
   async cancelOrder(tenantId: string, orderId: string, reason: string, chargeAmount = 0, tx?: RentalFactTx, operator?: string) {
     this.state(tenantId);
     const order = await this.lockedOrder(tenantId, orderId, tx);
@@ -1555,6 +1571,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     }
     order.cancellationReason = reason.trim(); order.cancelledAt = now();
     order.status = RentalCoreOrderStatus.Cancelled; order.updatedAt = now();
+    // 订单取消后遗留的待补款续租不该继续可补款，也不该继续计入待收。
+    await this.voidPendingExtensions(tenantId, orderId, tx);
     await this.factStore.saveOrderAggregate(order, assetChanges, tx);
     return order;
   }
@@ -1585,6 +1603,9 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       if (order.status !== RentalCoreOrderStatus.Renting) throw new ConflictException("只有租赁中的订单可以归还");
       await this.runHook(tenantId, "return_inspection", { type: "order", id: order.id }, order, tx, operator, this.orderHookInstances(tenantId, order));
       this.finishReturn(order, overdueCharge, assetChanges);
+      // 整单归还后订单进入待结算，`payOrderExtension` 会因状态拒绝生效——
+      // 遗留的待补款续租就此作废，不再显示补款入口也不再计入待收。
+      await this.voidPendingExtensions(tenantId, orderId, tx);
       if (earlyReturnRefund) this.applyEarlyReturnRefundTo(order, earlyReturnRefund);
     }
     order.updatedAt = now();
@@ -1690,6 +1711,9 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
         await this.applyPartialReturnItems(tenantId, state, order, partialReturnItems, tx, assetChanges);
       } else {
         this.finishReturn(order, 0, assetChanges);
+      // 整单归还后订单进入待结算，`payOrderExtension` 会因状态拒绝生效——
+      // 遗留的待补款续租就此作废，不再显示补款入口也不再计入待收。
+      await this.voidPendingExtensions(tenantId, orderId, tx);
       }
       if (input.exceptions?.length) {
         // 有异常的序列化资产先进入维护，不能在工单处理前重新出租。
@@ -1794,7 +1818,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     // 不作废它们，`pending_payment` 就没有任何自然终态，界面会一直给出补款按钮。
     const superseded = existing.filter((row) => row.status === "pending_payment").map((row) => row.id);
     if (superseded.length) await this.factStore.cancelExtensions(tenantId, superseded, tx);
-    const paymentRequired = priced.settlementMode === "immediate" && priced.payableAmount > 0;
+    // 与试算侧同一判据：押金/预授权差额同样要求先补款，否则押金会随续租直接生效而漏收。
+    const paymentRequired = extensionPaymentRequired(priced);
     const at = now();
     const extension: RentalOrderExtension = {
       id: randomUUID(),
@@ -2218,6 +2243,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     order.status = RentalCoreOrderStatus.Completed;
     order.completedAt = now();
     order.updatedAt = order.completedAt;
+    // 关单前作废遗留的待补款续租：留着就是一个点了必然失败的补款按钮。
+    await this.voidPendingExtensions(tenantId, orderId, tx);
     await this.factStore.saveOrderAggregate(order, [], tx);
     return order;
   }

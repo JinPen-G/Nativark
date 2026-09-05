@@ -9,6 +9,7 @@ import type {
 } from "@store-rental/shared";
 import { PrismaService } from "../database/prisma.service";
 import { assertActionApplies, deriveFundingLedgers, nextBalanceAfter, rentalPaymentBalance } from "./rental-funding-events";
+import { pendingExtensionCountsAsDue } from "./rental-extension-lifecycle";
 
 type FundingOrder = { depositAmount: number; preAuthAmount: number; payable: number; status: string; ruleSnapshot: { payment?: { timing?: string } } };
 
@@ -217,7 +218,14 @@ export class RentalFundingService {
       const events = await this.loadEvents(tx, tenantId, workspaceId, orderId);
       const ledgers = deriveFundingLedgers(events);
       const payment = rentalPaymentBalance(order.payable, events);
-      const pending = await tx.rentalOrderExtension.findMany({ where: { tenantId, workspaceId, orderId, status: "pending_payment" } });
+      // 订单已终结时，遗留的待补款续租不再计入待收：订单都关了还为它收款，
+      // 等于给一笔永远不可能生效的续租继续收钱（payOrderExtension 会因订单状态拒绝生效）。
+      // 这类遗留申请由订单终态统一作废，见 rental-core.service 的 voidPendingExtensions。
+      // 大小写不敏感比较：Prisma 客户端返回的是枚举成员名（大写），库里存的是 @map 小写值。
+      const stillCollectable = pendingExtensionCountsAsDue(order.status);
+      const pending = !stillCollectable
+        ? []
+        : await tx.rentalOrderExtension.findMany({ where: { tenantId, workspaceId, orderId, status: "pending_payment" } });
       const due = payment.balance + pending.reduce((sum, row) => sum + Number(row.payableAmount), 0);
       let effectiveAmount: number;
       if (input.action === "initiate") {

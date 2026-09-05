@@ -120,6 +120,7 @@ import { resolveQuoteServices } from "./rental-service-catalog";
 import { computeSecurityAmounts, type SecurityLineInput } from "./rental-security-deposit";
 import { roundMoney } from "./rental-money";
 import { computeEarlyReturnRefund, type EarlyReturnRefund } from "./rental-early-return";
+import { extensionPaymentRequired } from "./rental-extension-lifecycle";
 import { effectiveEarlyReturnRule, effectiveExtensionRule, effectiveTaxRule, inclusiveTaxAmount } from "./rental-rule-defaults";
 import {
   assertRuleEffectiveFromAvailable,
@@ -5052,7 +5053,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       payableAmount,
       currency: context.settings.pricing.currency,
       settlementMode: args.settlementMode,
-      paymentRequired: args.settlementMode === "immediate" && payableAmount > 0,
+      // 押金/预授权差额也必须先收：只看租金差额会让「租金不变、押金要补 100」的续租
+      // 直接生效，押金从此收不回来。三者任一为正就要走补款确认这一步。
+      paymentRequired: extensionPaymentRequired({ settlementMode: args.settlementMode, payableAmount, depositDelta, preAuthDelta }),
       chargeLines,
       calendarSnapshot,
       priceVersionId: "versionId" in spaceVersion ? spaceVersion.versionId : undefined,
@@ -5322,7 +5325,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       payableAmount,
       currency: originalQuote.currency ?? context.settings.pricing.currency,
       settlementMode: args.settlementMode,
-      paymentRequired: args.settlementMode === "immediate" && payableAmount > 0,
+      // 押金/预授权差额也必须先收：只看租金差额会让「租金不变、押金要补 100」的续租
+      // 直接生效，押金从此收不回来。三者任一为正就要走补款确认这一步。
+      paymentRequired: extensionPaymentRequired({ settlementMode: args.settlementMode, payableAmount, depositDelta, preAuthDelta }),
       chargeLines: deltaLines,
       calendarSnapshot,
       priceVersionId: originalQuote.priceVersionId,
