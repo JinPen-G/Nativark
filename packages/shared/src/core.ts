@@ -1567,6 +1567,16 @@ export interface RentalMembershipBenefitEvaluation {
   configuredValue: number;
   appliesTo: "rental" | "service" | "deposit" | "preauthorization" | "quote_validity" | "priority";
   appliedAmount: number;
+  /**
+   * 本次减免所依据的费用基数（优惠方案与券之后的净额）。
+   *
+   * 续租按全租期重算时必须知道它：只有拿「原基数」与「新基数」对比，才能判断这条
+   * 会员权益该不该跟着放大。缺了它就只能冻结原减免额，新增租期拿不到会员折扣。
+   * 历史快照没有此字段，续租时退回冻结口径。
+   */
+  base?: number;
+  /** 权益配置的封顶值。重算时封顶不因基数变大而放宽，因此必须一起固化。 */
+  configuredMaximum?: number;
   skippedReason?: string;
   allocations?: Record<string, number>;
   detail: string;

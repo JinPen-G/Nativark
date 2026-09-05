@@ -3722,7 +3722,14 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   }
 
   /** 会员金额权益统一按当期剩余基数计算并封顶；priority 这类非金额权益不在此函数消费。 */
-  private membershipBenefitAmount(benefit: CustomerMembershipBenefit, base: number) {
+  /**
+   * 会员权益减免额。入参放宽成只取三个计算字段，因此续租按快照重算时可以直接复用
+   * 同一个实现——续租另写一套简化公式正是优惠口径分叉的来源。
+   */
+  private membershipBenefitAmount(
+    benefit: Pick<CustomerMembershipBenefit, "calculation" | "value" | "maximum">,
+    base: number
+  ) {
     if (!Number.isFinite(benefit.value) || benefit.value <= 0 || base <= 0) return 0;
     const raw = benefit.calculation === "percentage" ? base * Math.min(100, benefit.value) / 100 : benefit.value;
     return roundMoney(Math.min(base, benefit.maximum === undefined ? raw : Math.min(raw, benefit.maximum)));
@@ -4118,6 +4125,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
           configuredValue: candidate.entry.benefit.value,
           appliesTo,
           appliedAmount: selected ? candidate.amount : 0,
+          // 基数与封顶一起固化：续租按全租期重算时要靠它们判断这条权益该不该放大。
+          base: candidate.base,
+          configuredMaximum: candidate.entry.benefit.maximum,
           allocations,
           skippedReason: selected ? undefined : candidate.hasUnsupportedConditions
             ? "权益配置包含尚未支持的条件，未自动放行"
@@ -5076,6 +5086,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const rateSnapshot: RentalPricingRate[] = [];
     const fullSecurityLines: SecurityLineInput[] = [];
     let fullRentalAmount = 0;
+    // 全租期的**逐行**租金。限定商品的优惠方案、券适用范围与会员权益基数都按行判定，
+    // 只给总额会让这三者退化：方案失效、券扩大到整单、会员减免整体消失。
+    const fullRentalLineAmounts: Record<string, number> = {};
     let totalBillableUnits = 0;
     let originalBillableUnits = 0;
 
@@ -5117,6 +5130,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         chargeType: "rental"
       });
       fullRentalAmount = roundMoney(fullRentalAmount + full.amount);
+      fullRentalLineAmounts[target] = roundMoney((fullRentalLineAmounts[target] ?? 0) + full.amount);
       totalBillableUnits += full.units;
       originalBillableUnits += Math.max(rate.minimumUnits, rentalPricingStrategy(rate.unit).billableUnits(args.order.startAt, args.order.endAt, {
         timeZone, usageQuantity: originalLine?.usageQuantity, hourGranularityMinutes: rate.hourGranularityMinutes,
@@ -5178,22 +5192,75 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       minimumSpendBase: fullRentalAmount, customerType: args.customerType, hasCustomer: Boolean(originalQuote.request.customerId),
       itemGroupIds: args.lines.map((row) => row.itemGroupId),
       pricingGroupIds: args.lines.map((row) => row.pricingGroupId).filter((value): value is string => Boolean(value)),
+      // 逐行金额必须传：限定商品的方案要靠它判定命中哪几行、减免多少。
+      // 漏传会让「只对 A 五折」的活动在续租重算时整体失效——原报价减了、重算没减，
+      // 差额就变成向客户虚收一笔活动优惠额。
+      rentalLines: args.lines.map((row) => {
+        const id = row.pricingGroupId ?? row.itemGroupId;
+        return { id, itemGroupId: row.itemGroupId, pricingGroupId: row.pricingGroupId, amount: fullRentalLineAmounts[id] ?? 0 };
+      }),
       dayTypes: new Set(calendarSnapshot.map((row) => row.dayType)), rentalStartAt: args.order.startAt, workspaceId: this.workspaceOf(tenantId)
     });
-    const fullDiscountAmount = roundMoney(Object.values(discounts.discountByTarget).reduce((sum, value) => sum + value, 0));
+    const planDiscountAmount = roundMoney(Object.values(discounts.discountByTarget).reduce((sum, value) => sum + value, 0));
     const oldCoupon = originalQuote.couponEvaluation;
     let fullCouponAmount = 0;
     let couponEvaluation: RentalQuoteSnapshotV1["couponEvaluation"];
     if (oldCoupon) {
-      const gross = { rental: fullRentalAmount, service: fullServiceAmount, fulfillment: originalQuote.fulfillmentAmount }[oldCoupon.appliesTo];
-      const base = Math.max(0, roundMoney(gross - discounts.discountByTarget[oldCoupon.appliesTo]));
+      // 券的适用范围必须按原报价冻结。快照里没存 applicableItemGroupIds，但存了
+      // `rentalAllocations`——券在各行的分摊，有分摊的行就是当初适用的行。
+      // 拿整单当基数会让「只对 A 五折」的券在续租时扩大到 A+B：减免变大、
+      // 重算应付变小，于是凭空产生一笔待退款。
+      const scopedIds = oldCoupon.appliesTo === "rental" && oldCoupon.rentalAllocations
+        ? Object.keys(oldCoupon.rentalAllocations)
+        : undefined;
+      const sumOf = (ids: string[], source: Record<string, number>) =>
+        roundMoney(ids.reduce((sum, id) => sum + (source[id] ?? 0), 0));
+      const gross = oldCoupon.appliesTo === "rental"
+        ? (scopedIds ? sumOf(scopedIds, fullRentalLineAmounts) : fullRentalAmount)
+        : oldCoupon.appliesTo === "fulfillment" ? originalQuote.fulfillmentAmount : fullServiceAmount;
+      // 自动方案的减免同样按范围取：口径与原报价的 `automaticDiscount` 一致。
+      const automaticDiscount = oldCoupon.appliesTo === "rental" && scopedIds
+        ? sumOf(scopedIds, discounts.rentalLineDiscounts)
+        : discounts.discountByTarget[oldCoupon.appliesTo];
+      const base = Math.max(0, roundMoney(gross - automaticDiscount));
       const stackable = !discounts.applied.length || (oldCoupon.stackableWithDiscountPlans && discounts.applied.every((plan) => plan.stackableWithCoupon));
       if (gross >= oldCoupon.minimumSpend && stackable) {
         fullCouponAmount = this.discountAmount(base, oldCoupon.discountType, oldCoupon.discountValue, oldCoupon.maximumDiscount);
       }
       couponEvaluation = { ...oldCoupon, baseBeforeDiscount: gross, runningBase: base, discountAmount: fullCouponAmount,
-        formula: `原券 ${oldCoupon.templateVersion}：基数 ${base}，减免 ${fullCouponAmount}（不重复核销）` };
+        formula: `原券 ${oldCoupon.templateVersion}：基数 ${base}${scopedIds ? `（限 ${scopedIds.length} 个适用商品）` : ""}，减免 ${fullCouponAmount}（不重复核销）` };
     }
+    // 会员权益：只复算原报价里**已生效**的那几条，不引入后续新权益——与优惠方案同一口径。
+    //
+    // 漏掉这一步是 Codex review #2 的第一个反例：日租 240、会员九折、原应付 216，
+    // 延长后仍在同一天内，全租期租金还是 240，而重算不减会员的 24 → 差额 24，
+    // 等于把整个会员折扣向客户虚收一遍。
+    //
+    // 基数口径与原报价一致：方案优惠与券之后的净额。原快照存了 `base` 就精确重算，
+    // 历史快照没有则冻结原减免额——保守方向，宁可少减也不虚收。
+    const appliedMembership = (originalQuote.membershipBenefitEvaluations ?? []).filter(
+      (row) => row.appliedAmount > 0 && (row.appliesTo === "rental" || row.appliesTo === "service")
+    );
+    let fullMembershipAmount = 0;
+    for (const benefit of appliedMembership) {
+      // 显式窄化：`appliesTo` 的联合比优惠基数的键更宽（还含押金/预授权等），
+      // 上面的 filter 不是类型守卫，直接索引会被判 any。
+      const target: "rental" | "service" = benefit.appliesTo === "rental" ? "rental" : "service";
+      const grossTarget = target === "rental" ? fullRentalAmount : fullServiceAmount;
+      const couponOnTarget = couponEvaluation?.appliesTo === target ? fullCouponAmount : 0;
+      const newBase = Math.max(0, roundMoney(grossTarget - (discounts.discountByTarget[target] ?? 0) - couponOnTarget));
+      fullMembershipAmount = roundMoney(fullMembershipAmount + (
+        benefit.base === undefined
+          ? benefit.appliedAmount
+          : this.membershipBenefitAmount(
+              { calculation: benefit.calculation, value: benefit.configuredValue, maximum: benefit.configuredMaximum },
+              newBase
+            )
+      ));
+    }
+    // 与原报价的 `discountAmount` 组成保持一致（方案 + 会员），否则
+    // previousPayableAmount 与 recalculatedPayableAmount 不是同一口径，差额必然错。
+    const fullDiscountAmount = roundMoney(planDiscountAmount + fullMembershipAmount);
     const previousPayableAmount = roundMoney(originalQuote.payableAmount + previous.reduce((sum, row) => sum + row.payableAmount -
       (row.pricingSnapshot?.refundReview?.status === "approved" ? row.pricingSnapshot.refundReview.amount : 0), 0));
     const recalculatedPayableAmount = roundMoney(fullRentalAmount + fullServiceAmount + originalQuote.fulfillmentAmount - fullDiscountAmount - fullCouponAmount);

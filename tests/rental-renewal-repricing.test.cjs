@@ -169,5 +169,79 @@ const at = hours => new Date(Date.parse(start) + hours * 3600000).toISOString();
   assert.equal(saved.finalPayableAmount, 300);
   await assert.rejects(() => core.reviewExtensionRefund(tenant, order.id, pendingRefund.extension.id, { decision: 'approved', reason: '重复' }, 'finance', {}), /没有待审核退款/);
   pass('负差额只在审核通过后核减一次，不等于已向客户打款');
+
+  /* ==== Codex review #2：续租必须继承原报价的完整优惠链 ====
+     三个反例共同前提：延长后仍落在原来已购买的那一天内，全租期租金不变，
+     因此补款必须为 0。修复前分别虚收 24 / 虚收 120 / 虚退 120。 */
+
+  // 反例 1：日租 240、会员九折，原应付 216。
+  // 修复前重算不含会员减免 → recalculated 240 vs previous 216 → 虚收 24。
+  {
+    const member = fixture();
+    member.discountAmount = 24; member.payableAmount = 216;
+    member.membershipBenefitEvaluations = [{
+      source: 'personal', planId: 'plan_m', planVersionId: 'plan_m_v1', planName: '九折会员',
+      type: 'rental_discount', calculation: 'percentage', configuredValue: 10,
+      appliesTo: 'rental', appliedAmount: 24, base: 240, detail: '九折会员：percentage 10，基数 240'
+    }];
+    const priced = await price(member, 3);
+    assert.equal(priced.pricingSnapshot.recalculatedRentalAmount, 240, '全租期租金不变');
+    assert.equal(priced.payableAmount, 0, '会员折扣必须被继承，否则会虚收整个折扣额');
+    pass('反例1 会员九折：延长仍在已买当天，补款 0（修复前虚收 24）');
+  }
+
+  // 反例 2、3 需要两行商品才能表达"只对 A 生效"。
+  const groupB = ctx.groups.find(x => x.id !== group.id && x.status === 'enabled');
+  assert.ok(groupB, '需要第二个启用的商品组来构造限定商品场景');
+  function twoLines() {
+    const quote = fixture();
+    const lineA = quote.request.lines[0];
+    const rateA = quote.rateSnapshot[0];
+    quote.request.lines = [lineA, { ...lineA, itemGroupId: groupB.id, pricingGroupId: undefined }];
+    quote.rateSnapshot = [rateA, { ...rateA, itemGroupId: groupB.id, itemGroupCode: groupB.code, pricingGroupId: undefined, pricingGroupCode: undefined }];
+    quote.rentalAmount = 480;
+    quote.chargeLines = quote.request.lines.map((_, index) => ({ code: `rental:${index}`, type: 'rental', name: '租金', amount: 240 }));
+    return { quote, targetA: lineA.pricingGroupId ?? lineA.itemGroupId };
+  }
+
+  // 反例 2：A、B 各 240，活动只给 A 五折，原应付 360。
+  // 修复前不传逐行金额 → 限定商品的方案在重算里失效 → 虚收 120。
+  {
+    const { quote, targetA } = twoLines();
+    quote.discountAmount = 120; quote.payableAmount = 360;
+    quote.discountEvaluations = [{
+      planId: 'plan_a', planVersion: 'v1', planCode: 'ONLY_A', planName: '限定A五折',
+      appliesTo: 'rental', applied: true, discountAmount: 120, rentalAllocations: { [targetA]: 120 },
+      planSnapshot: {
+        id: 'plan_a', tenantId: tenant, code: 'ONLY_A', name: '限定A五折', version: 'v1', status: 'enabled',
+        appliesTo: 'rental', discountType: 'percentage', discountValue: 50,
+        applicableItemGroupIds: [quote.request.lines[0].itemGroupId], applicablePricingGroupIds: [], applicableDayTypes: [],
+        stackableWithCoupon: true, stackableWithOtherPlans: true, minimumSpend: 0, customerScope: 'all',
+        effectiveFrom: '2000-01-01T00:00:00.000Z', effectiveTo: '2100-01-01T00:00:00.000Z'
+      }
+    }];
+    const priced = await price(quote, 3);
+    assert.equal(priced.pricingSnapshot.recalculatedRentalAmount, 480);
+    assert.equal(priced.payableAmount, 0, '限定商品的活动必须仍只作用于 A 并保持原减免');
+    pass('反例2 限定商品活动：延长仍在已买当天，补款 0（修复前虚收 120）');
+  }
+
+  // 反例 3：券只给 A 五折，原应付 360。
+  // 修复前券基数取整单 480 → 减免变大 → 重算应付变小 → 凭空产生 120 待退款。
+  {
+    const { quote, targetA } = twoLines();
+    quote.couponAmount = 120; quote.payableAmount = 360;
+    quote.couponEvaluation = {
+      couponId: 'c1', templateId: 't1', templateCode: 'ONLY_A', templateName: '限定A五折券', templateVersion: 'v1',
+      appliesTo: 'rental', discountType: 'percentage', discountValue: 50, minimumSpend: 0,
+      stackableWithDiscountPlans: true, baseBeforeDiscount: 240, runningBase: 240, discountAmount: 120,
+      formula: '240 × 50%', rentalAllocations: { [targetA]: 120 }
+    };
+    const priced = await price(quote, 3);
+    assert.equal(priced.pricingSnapshot.recalculatedCouponAmount, 120, '券减免额不应因整单基数而放大');
+    assert.equal(priced.payableAmount, 0, '券必须按原适用范围取基数，不能扩大到整单');
+    pass('反例3 限定商品券：延长仍在已买当天，补款 0（修复前虚退 120）');
+  }
+
   console.log(`续租修正专项 ${count} 组通过（计算与应用服务测试；不冒充数据库并发验收）`);
 })().catch(error => { console.error(error); process.exitCode = 1; });
