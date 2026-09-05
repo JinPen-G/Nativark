@@ -696,6 +696,40 @@ export class RentalCoreController {
     return { order: await this.committed(tenantId, result.order), extension: result.extension };
   }
 
+  /**
+   * 归还计费的基准在**锁内**重取后再算。
+   *
+   * 逾期费与提前归还退款都以订单"当前约定归还时间"为准，而这些值此前取自事务外读到的
+   * 订单快照：`current.effectiveEndAt`、最后一笔已生效续租的报价快照、以及仍未交回的数量。
+   * 订单行的锁要到 `createInspection` 内部才加上，于是快照与锁之间存在一段时间窗——
+   * 期间一笔续租生效（`payOrderExtension` 同样先锁订单行，两者可被同一把锁串行化），
+   * 归还就会按旧租期判逾期，把刚续上的单多收一笔；`extensionPricing` 漏掉新续租时，
+   * 提前归还退款还会按错的租金基数算。先锁再算，这个窗口就不存在了。
+   *
+   * `quote` 是报价冻结快照、`context` 是配置内存态，两者都不是竞态输入，
+   * 因此仍从内存取；重取的只有订单派生的那几个值。
+   */
+  private async returnCharges(
+    tenantId: string,
+    context: BusinessContext,
+    orderId: string,
+    returnedAt: string,
+    tx: Prisma.TransactionClient
+  ) {
+    const locked = await this.service.lockOrderForReturnCharges(tenantId, orderId, tx);
+    const quote = this.business.getQuote(tenantId, context, locked.quoteId);
+    const dueAt = locked.effectiveEndAt ?? locked.endAt;
+    const extensionPricing = (await this.service.listOrderExtensions(tenantId, orderId, tx))
+      .filter((row) => row.status === "effective").at(-1)?.pricingSnapshot;
+    return {
+      overdue: {
+        amount: this.business.calculateOverdueCharge(tenantId, context, quote, returnedAt, dueAt, outstandingQuantitiesOf(locked)),
+        returnedAt
+      },
+      earlyReturn: this.business.calculateEarlyReturnRefund(tenantId, context, quote, dueAt, returnedAt, extensionRentalOf(locked), extensionPricing)
+    };
+  }
+
   @Get("inspection-templates") templates(@Req() req: AuthenticatedRequest, @Query("stage") stage?: "pickup" | "return") { return this.service.listInspectionTemplates(req.user.tenantId, stage); }  @Get("orders/:id/inspections") inspections(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.service.listInspections(req.user.tenantId, id); }
   @Post("orders/:id/inspections") async createInspection(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: CreateRentalInspectionDto) {
     const tenantId = req.user.tenantId;
@@ -713,21 +747,14 @@ export class RentalCoreController {
         "分批归还检查必须提供 Idempotency-Key 请求头或 returnBatchNo，用于区分多次真实归还与同一次的网络重试"
       );
     }
-    // 逾期费与提前归还退款都按规则直接计算；检查异常只保存建议，必须由结算人员另行审核。
-    // 归还基准用订单的**当前**约定归还时间，续租过就是新时间，否则刚续上的单会被判逾期。
-    const quote = this.business.getQuote(tenantId, context, current.quoteId);
-    const scheduledEndAt = current.effectiveEndAt ?? current.endAt;
-    const extensionPricing = stage === "return" && !partialReturn
-      ? (await this.service.listOrderExtensions(tenantId, id)).filter((row) => row.status === "effective").at(-1)?.pricingSnapshot : undefined;
-    const charges = stage === "return" && !partialReturn
-      ? {
-          overdue: { amount: this.business.calculateOverdueCharge(tenantId, context, quote, returnedAt, scheduledEndAt, outstandingQuantitiesOf(current)), returnedAt },
-          earlyReturn: this.business.calculateEarlyReturnRefund(tenantId, context, quote, scheduledEndAt, returnedAt, extensionRentalOf(current), extensionPricing)
-        }
-      : {};
+    // 逾期费与提前归还退款都在事务内锁单之后重算（见 returnCharges）。这里只留下
+    // 与订单当前事实无关的判定。
     if (stage === "pickup") await this.business.assertPickupOpenAt(tenantId, context, current.fulfillmentLocationId, returnedAt, current.fulfillmentMode);
     // 归还只进入待结算；资金账处理完后再独立关闭订单。
     const targetStatus = stage === "pickup" || partialReturn ? RentalCoreOrderStatus.Renting : RentalCoreOrderStatus.Settling;
+    // 逾期通知要按真实逾期费判断是否发。它在 run 里才算出来，而只有 run 真的执行过
+    // （未被幂等回放）时下面才会读它——回放路径不重复发通知。
+    let overdueAmount = 0;
     const { result, replayed } = await this.idempotent.executeWithReplayFlag({
       tenantId,
       action: "order.inspection",
@@ -742,7 +769,11 @@ export class RentalCoreController {
       orderId: id,
       run: async (tx) => {
         if (stage === "pickup") await this.funding.assertReadyForPickup(tenantId, this.service.resolveWorkspaceId(tenantId), id, tx);
-        const created = await this.service.createInspection(tenantId, id, body, req.user.displayName, charges, tx);
+        const charges = stage === "return" && !partialReturn
+          ? await this.returnCharges(tenantId, context, id, returnedAt, tx)
+          : undefined;
+        overdueAmount = charges?.overdue.amount ?? 0;
+        const created = await this.service.createInspection(tenantId, id, body, req.user.displayName, charges ?? {}, tx);
         if (stage === "return" && !partialReturn) await this.serviceCapacities.settleReturnForOrder(tenantId, created.order, returnedAt, tx);
         return created;
       },
@@ -758,7 +789,7 @@ export class RentalCoreController {
       if (!partialReturn) await this.emitOrderEvent(tenantId, result.inspection.stage === "pickup" ? "pickup.completed" : "return.completed", result.order);
       // 归还确实逾期（费用 > 0）才发逾期通知——这是真实业务事实，不是凭空造事件。
       // 与 return.completed 各自独立幂等，因此同一次归还两条通知都只发一次。
-      if (stage === "return" && !partialReturn && charges.overdue && charges.overdue.amount > 0) {
+      if (stage === "return" && !partialReturn && overdueAmount > 0) {
         await this.emitOrderEvent(tenantId, "order.overdue", result.order);
       }
     }
@@ -776,15 +807,10 @@ export class RentalCoreController {
       // 归还刻意不复查——停业不得让在租订单失去归还渠道（需求 4.5.4）。
       await this.business.assertPickupOpenAt(tenantId, context, current.fulfillmentLocationId, returnedAt, current.fulfillmentMode);
     }
-    const handoverQuote = this.business.getQuote(tenantId, context, current.quoteId);
-    const handoverDueAt = current.effectiveEndAt ?? current.endAt;
-    const extensionPricing = stage === "return"
-      ? (await this.service.listOrderExtensions(tenantId, id)).filter((row) => row.status === "effective").at(-1)?.pricingSnapshot : undefined;
-    const overdueCharge = stage === "return" ? this.business.calculateOverdueCharge(tenantId, context, handoverQuote, returnedAt, handoverDueAt, outstandingQuantitiesOf(current)) : 0;
-    const earlyReturnRefund = stage === "return"
-      ? this.business.calculateEarlyReturnRefund(tenantId, context, handoverQuote, handoverDueAt, returnedAt, extensionRentalOf(current), extensionPricing)
-      : undefined;
+    // 归还计费同样在事务内锁单后重算（见 returnCharges）；这里只保留领取侧的营业校验。
     const targetStatus = stage === "pickup" ? RentalCoreOrderStatus.Renting : RentalCoreOrderStatus.Settling;
+    // 与归还检查同理：逾期费在 run 内才算出，只有 run 真的执行过时下面才会读它。
+    let overdueAmount = 0;
     const { result: order, replayed } = await this.idempotent.executeWithReplayFlag({
       tenantId,
       action: "order.handover",
@@ -794,7 +820,9 @@ export class RentalCoreController {
       orderId: id,
       run: async (tx) => {
         if (stage === "pickup") await this.funding.assertReadyForPickup(tenantId, this.service.resolveWorkspaceId(tenantId), id, tx);
-        const completed = await this.service.completeHandoverWithoutInspection(tenantId, id, stage, overdueCharge, tx, req.user.displayName, earlyReturnRefund);
+        const charges = stage === "return" ? await this.returnCharges(tenantId, context, id, returnedAt, tx) : undefined;
+        overdueAmount = charges?.overdue.amount ?? 0;
+        const completed = await this.service.completeHandoverWithoutInspection(tenantId, id, stage, overdueAmount, tx, req.user.displayName, charges?.earlyReturn);
         if (stage === "return") await this.serviceCapacities.settleReturnForOrder(tenantId, completed, returnedAt, tx);
         return completed;
       },
@@ -807,7 +835,7 @@ export class RentalCoreController {
     if (!replayed) {
       await this.emitOrderEvent(tenantId, stage === "pickup" ? "pickup.completed" : "return.completed", order);
       // 无检查直接交接的归还路径同样按真实逾期费判断是否发逾期通知。
-      if (stage === "return" && overdueCharge > 0) {
+      if (stage === "return" && overdueAmount > 0) {
         await this.emitOrderEvent(tenantId, "order.overdue", order);
       }
     }
