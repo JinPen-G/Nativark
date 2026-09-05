@@ -82,6 +82,13 @@ enum RentalOrderV1Status {
   READY_FOR_PICKUP  @map("ready_for_pickup")
   RENTING           @map("renting")
   RETURN_INSPECTION @map("return_inspection")
+  /// 归还后、结清前的待结算态。
+  ///
+  /// 共享契约里一直有 `RentalCoreOrderStatus.Settling`，这里却缺了对应成员：
+  /// `finishReturn` 把订单推进到 settling，事实仓储再 `toUpperCase()` 交给 Prisma，
+  /// 成员不存在于是写库直接失败——内存实现不校验枚举，所以专项测试全绿、真库归还挂。
+  /// 位置放在归还检查之后、完成之前，与业务流程和共享契约的顺序一致。
+  SETTLING          @map("settling")
   COMPLETED         @map("completed")
   CANCELLED         @map("cancelled")
 }
