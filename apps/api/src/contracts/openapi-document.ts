@@ -1367,11 +1367,11 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/fee-reviews/{reviewId}/review", tag: "RentalCore", operationId: "reviewRentalOrderFeeReview",
-    summary: "Decide a pending fee review (manual overdue collection or early-return refund)", permissions: ["store-rental:order:settle"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+    summary: "Decide a pending fee review (manual overdue collection or early-return refund)", permissions: ["store-rental:order:fee-review"], requestSchema: "GenericObject", responseSchema: "GenericObject"
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/extensions/{extensionId}/refund-review", tag: "RentalCore", operationId: "reviewRentalExtensionRefund",
-    summary: "Review an extension price reduction without issuing a cash refund", permissions: ["store-rental:order:settle"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+    summary: "Review an extension price reduction without issuing a cash refund", permissions: ["store-rental:order:fee-review"], requestSchema: "GenericObject", responseSchema: "GenericObject"
   },
   {
     method: "get", path: "/api/rental/v1/inspection-templates", tag: "RentalCore", operationId: "listRentalInspectionTemplates",
@@ -1387,7 +1387,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/inspections/{inspectionId}/exceptions/{exceptionIndex}/review", tag: "RentalCore", operationId: "reviewRentalOrderInspectionException",
-    summary: "Approve or reject a suggested inspection exception charge", permissions: ["store-rental:order:settle"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+    summary: "Approve or reject a suggested inspection exception charge", permissions: ["store-rental:order:fee-review"], requestSchema: "GenericObject", responseSchema: "GenericObject"
   },
   {
     method: "get", path: "/api/rental/v1/capabilities", tag: "RentalCore", operationId: "listWorkspaceCapabilities",

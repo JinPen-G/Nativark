@@ -213,6 +213,9 @@ export class PlatformService {
         { code: "store-rental:order:operate", name: "订单操作", description: "新建订单、取车验车、还车验车" },
         { code: "store-rental:order:reassign", name: "资源解锁与改配", description: "解锁、释放及更换订单锁定资源，必须填写原因" },
         { code: "store-rental:order:settle", name: "订单结算", description: "确认费用、补缴、退款或月结入账" },
+        // ORDER-CLOSE-02：裁定「该收/该退多少」与实际动钱拆成两个权限。此前四类审核
+        // 都认 order:settle，而资金事件也认它，一个权限同时授予定金额和收退款。
+        { code: "store-rental:order:fee-review", name: "费用裁定", description: "裁定逾期人工核价、提前归还退款、续租负差额与检查异常的金额；不含实际收退款" },
         { code: "store-rental:order:create", name: "按钮-新建订单", description: "显示并执行新建门市订单入口" },
         { code: "store-rental:order:pickup", name: "按钮-取车交付", description: "执行开始取车和确认发车" },
         { code: "store-rental:order:return", name: "按钮-还车验车", description: "执行还车验车和提交结算" },
@@ -301,6 +304,9 @@ export class PlatformService {
         "store-rental:order:view",
         "store-rental:order:operate",
         "store-rental:order:settle",
+        // 迁移说明：该角色此前凭 order:settle 就能裁定四类费用审核，拆权后必须显式补上
+        // 才不会失能。只补这一个已有结算权的预设角色，不给其他角色授新权。
+        "store-rental:order:fee-review",
         "store-rental:station:view",
         "store-rental:vehicle:view",
         "rental-core:catalog:view",

@@ -1509,6 +1509,9 @@ export class PlatformRepository {
       "store-rental:order:view",
       "store-rental:order:operate",
       "store-rental:order:settle",
+      // 与 STORE_OPERATOR 预设同一条迁移：原本凭 order:settle 就能裁定的四类费用审核，
+      // 拆权后要显式补上 fee-review，否则门店营运账号开出来就无法处理待审费用。
+      "store-rental:order:fee-review",
       "store-rental:station:view",
       "store-rental:vehicle:view",
       "rental-core:catalog:view",

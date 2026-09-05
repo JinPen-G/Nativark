@@ -30,6 +30,7 @@ import type {
   RentalInspectionRecord,
   RentalInspectionTemplate,
   ReviewRentalInspectionExceptionRequest,
+  ReviewRentalOrderFeeReviewRequest,
   RentalItemGroup,
   RentalOrder,
   RentalOrderExtension,
@@ -270,6 +271,14 @@ export const rentalCoreApi = {
     request<{ order: RentalOrder; extension: RentalOrderExtension }>(`/rental/v1/orders/${id}/extensions/${extensionId}/pay`, { method: "post" }),
   reviewExtensionRefund: (id: string, extensionId: string, data: { decision: "approved" | "rejected"; reason: string }) =>
     request<{ order: RentalOrder; extension: RentalOrderExtension }>(`/rental/v1/orders/${id}/extensions/${extensionId}/refund-review`, { method: "post", data }),
+  /**
+   * ORDER-CLOSE-02：裁定订单上的待审费用（规则判为人工核价的逾期费 / 提前归还退款）。
+   *
+   * 与续租负差额、检查异常各自保持独立接口：三者的来源、状态机与「能不能改金额」
+   * 的规则都不同，合成一个统一审批入口会把三套证据糊成一套。
+   */
+  reviewOrderFeeReview: (id: string, reviewId: string, data: ReviewRentalOrderFeeReviewRequest) =>
+    request<RentalOrder>(`/rental/v1/orders/${id}/fee-reviews/${reviewId}/review`, { method: "post", data }),
   inspectionTemplates: (stage?: "pickup" | "return") => request<RentalInspectionTemplate[]>("/rental/v1/inspection-templates", { params: { stage } }),
   inspections: (id: string) => request<RentalInspectionRecord[]>(`/rental/v1/orders/${id}/inspections`),
   createInspection: (id: string, data: CreateRentalInspectionRequest, token?: string) => request<{ inspection: RentalInspectionRecord; order: RentalOrder }>(`/rental/v1/orders/${id}/inspections`, { method: "post", data, headers: token ? { "X-Operation-Token": token } : undefined }),

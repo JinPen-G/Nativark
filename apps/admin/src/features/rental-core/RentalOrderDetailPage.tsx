@@ -1,5 +1,5 @@
 import { ArrowLeftOutlined, CheckCircleOutlined, DollarOutlined, MinusCircleOutlined, PlusOutlined, RetweetOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
-import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol, type CreateRentalInspectionRequest, type RentalAllocation, type RentalFundingAction, type RentalFundingInstrument, type RentalInspectionTemplate, type RentalOrderExtension, type RentalOrderExtensionPreview, type RentalReservation } from "@store-rental/shared";
+import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol, type CreateRentalInspectionRequest, type RentalAllocation, type RentalFundingAction, type RentalFundingInstrument, type RentalInspectionTemplate, type RentalOrderExtension, type RentalOrderExtensionPreview, type RentalOrderFeeReview, type RentalReservation } from "@store-rental/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Button, Card, DatePicker, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Table, Tag } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
@@ -10,6 +10,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
 import { OrderAllocationPanel } from "./OrderAllocationPanel";
+import { FEE_REVIEW_STATUS_COLORS, FEE_REVIEW_TYPE_LABELS, feeReviewStatusText, hasPendingFeeReview } from "./orderFeeReview";
 
 type FundingOperation = {
   instrument: RentalFundingInstrument;
@@ -48,6 +49,9 @@ export function RentalOrderDetailPage() {
   const hasPermission = useAuthStore((state) => state.hasPermission);
   const canViewFunding = hasPermission("store-rental:order:view") || hasPermission("store-rental:order:settle");
   const canSettleFunding = hasPermission("store-rental:order:settle");
+  // ORDER-CLOSE-02：裁定「该收/该退多少」与实际动钱是两个权限。只有裁定权的人看得到
+  // 审核按钮但看不到收退款按钮；只有资金权的人反之。两者都不给的账号只能查看。
+  const canReviewFees = hasPermission("store-rental:order:fee-review");
   const canOperate = hasPermission("store-rental:order:operate");
   const canPickup = canOperate || hasPermission("store-rental:order:pickup");
   const canReturn = canOperate || hasPermission("store-rental:order:return");
@@ -63,6 +67,8 @@ export function RentalOrderDetailPage() {
   const [partialReturnOpen, setPartialReturnOpen] = useState(false);
   const [fundingOperation, setFundingOperation] = useState<FundingOperation>();
   const [exceptionReview, setExceptionReview] = useState<{ inspectionId: string; exceptionIndex: number; description: string; suggested?: number }>();
+  const [feeReview, setFeeReview] = useState<RentalOrderFeeReview>();
+  const [feeReviewForm] = Form.useForm<{ decision: "approved" | "rejected"; amount?: number; reason: string }>();
   const [inspectionForm] = Form.useForm<Record<string, unknown> & { exceptionCode?: string; exceptionDescription?: string; exceptionChargeAmount?: number }>();
   const [cancelForm] = Form.useForm<{ reason: string }>();
   const [substitutionForm] = Form.useForm<{ toItemGroupId: string }>();
@@ -123,6 +129,31 @@ export function RentalOrderDetailPage() {
     onError: () => message.error("操作失败，请检查当前余额、动作顺序和订单范围")
   });
   const refreshExtensions = async () => { await Promise.all([refresh(), queryClient.invalidateQueries({ queryKey: ["rental-core", "order", id, "extensions"] })]); };
+  /**
+   * 费用裁定。落账口径由服务端决定，这里只提交结论：
+   * 认定额不得超过建议额（超出属于另立一笔异常费用，走检查异常流程），原因必填。
+   * 成功后同时刷新订单与资金余额——裁定会改应收，但**不会**产生实际收退款。
+   */
+  const decideFeeReview = useMutation({
+    mutationFn: (values: { decision: "approved" | "rejected"; amount?: number; reason: string }) =>
+      rentalCoreApi.reviewOrderFeeReview(id, feeReview!.id, {
+        decision: values.decision,
+        reason: values.reason,
+        amount: values.decision === "approved" && values.amount !== undefined ? Number(values.amount) : undefined
+      }),
+    onSuccess: async () => {
+      setFeeReview(undefined);
+      feeReviewForm.resetFields();
+      await Promise.all([refresh(), queryClient.invalidateQueries({ queryKey: ["rental-core", "order", id, "funding"] })]);
+      message.success("裁定已记录；应收已按结论调整，实际收退款仍需在资金区单独办理");
+    },
+    onError: async (error: Error) => {
+      // 冲突多半是已被他人裁定或被新续租替代：刷新到最新状态再让用户重新判断，
+      // 不保留一个已经失效的表单。
+      await refresh();
+      message.error(error.message || "裁定失败：该事项可能已被处理或已被新的续租替代，请查看最新状态");
+    }
+  });
   const previewExtension = useMutation({
     mutationFn: (values: { newEndAt: Dayjs }) => rentalCoreApi.previewOrderExtension(id, { newEndAt: values.newEndAt.toISOString() }),
     onSuccess: (data) => setExtensionPreview(data),
@@ -159,6 +190,9 @@ export function RentalOrderDetailPage() {
     onError: () => message.error("审核失败，请检查订单状态或该异常是否已处理")
   });
   const detail = order.data;
+  const feeReviews = detail?.feeReviews ?? [];
+  const pendingFeeReviews = feeReviews.filter((row) => row.status === "pending");
+  const orderHasPendingFee = hasPendingFeeReview(detail ?? {});
   // 金额一律按**订单自己的**结算币种展示（需求 §948）：币种是下单时的快照，
   // 不能改读当前经营空间的设置——空间后来改了币种，历史单的金额含义不会跟着改。
   const money = (value: number | undefined) => formatRentalMoney(Number(value ?? 0), detail?.currency);
@@ -185,7 +219,7 @@ export function RentalOrderDetailPage() {
         {canPickup && detail.status === RentalCoreOrderStatus.ReadyForPickup && ((detail.ruleSnapshot?.fulfillment.pickupInspectionRequired ?? true) ? <Button type="primary" icon={<SafetyCertificateOutlined />} onClick={() => beginInspection("pickup")}>{profile.data?.terminology.pickupLabel}检查</Button> : <Button type="primary" onClick={() => handover.mutate("pickup")}>直接完成{profile.data?.terminology.pickupLabel}</Button>)}
         {canReturn && detail.status === RentalCoreOrderStatus.Renting && ((detail.ruleSnapshot?.fulfillment.returnInspectionRequired ?? true) ? <Button type="primary" icon={<CheckCircleOutlined />} onClick={() => beginInspection("return")}>{profile.data?.terminology.returnLabel}检查</Button> : <Button type="primary" onClick={() => handover.mutate("return")}>直接完成{profile.data?.terminology.returnLabel}</Button>)}
         {canReturn && detail.status === RentalCoreOrderStatus.Renting && (detail.allocations.filter((allocation) => allocation.status === "picked_up").length > 1 || detail.allocations.some((allocation) => allocation.status === "picked_up" && allocation.quantity > 1)) && <Button onClick={() => { partialReturnForm.setFieldsValue({ items: [{ allocationId: "", quantity: 1 }] }); setPartialReturnOpen(true); }}>{detail.ruleSnapshot?.fulfillment.returnInspectionRequired ? "部分归还检查" : "部分归还"}</Button>}
-        {detail.status === RentalCoreOrderStatus.Settling && canSettleFunding && <Button type="primary" loading={settle.isPending} onClick={() => settle.mutate()}>结算并关闭订单</Button>}
+        {detail.status === RentalCoreOrderStatus.Settling && canSettleFunding && <Button type="primary" loading={settle.isPending} disabled={orderHasPendingFee} title={orderHasPendingFee ? "仍有待裁定的费用事项，服务端会拒绝关单；请先在「待审费用与裁定历史」里裁定" : undefined} onClick={() => settle.mutate()}>结算并关闭订单</Button>}
         {canExtend && [RentalCoreOrderStatus.ReadyForPickup, RentalCoreOrderStatus.Renting].includes(detail.status) && <Button icon={<RetweetOutlined />} onClick={() => { extensionForm.resetFields(); setExtensionPreview(undefined); extensionForm.setFieldsValue({ newEndAt: dayjs(detail.effectiveEndAt ?? detail.endAt).add(1, "day") }); setExtensionOpen(true); }}>续租 / 延期</Button>}
         {canCancel && [RentalCoreOrderStatus.Draft, RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.ReadyForPickup].includes(detail.status) && <Button danger onClick={() => setCancelOpen(true)}>取消并按规则计费</Button>}
       </Space>
@@ -252,9 +286,36 @@ export function RentalOrderDetailPage() {
         { title: "建议费用", dataIndex: "suggestedChargeAmount", render: (value) => value === undefined ? "-" : money(Number(value)) },
         { title: "审核", dataIndex: "reviewStatus", render: (value) => <Tag color={value === "approved" ? "green" : value === "rejected" ? "default" : "orange"}>{value === "approved" ? "已通过" : value === "rejected" ? "已驳回" : "待审核"}</Tag> },
         { title: "最终费用", dataIndex: "approvedChargeAmount", render: (value) => value === undefined ? "-" : money(Number(value)) },
-        { title: "操作", render: (_, row) => canSettleFunding && row.reviewStatus === "pending" ? <Button type="link" onClick={() => { setExceptionReview({ inspectionId: row.inspectionId, exceptionIndex: row.exceptionIndex, description: row.description, suggested: row.suggestedChargeAmount }); exceptionReviewForm.setFieldsValue({ decision: "approved", approvedChargeAmount: row.suggestedChargeAmount }); }}>审核</Button> : "-" }
+        { title: "操作", render: (_, row) => canReviewFees && row.reviewStatus === "pending" ? <Button type="link" onClick={() => { setExceptionReview({ inspectionId: row.inspectionId, exceptionIndex: row.exceptionIndex, description: row.description, suggested: row.suggestedChargeAmount }); exceptionReviewForm.setFieldsValue({ decision: "approved", approvedChargeAmount: row.suggestedChargeAmount }); }}>审核</Button> : "-" }
         ]} />
       </Space></Card>
+      <Card title="待审费用与裁定历史" extra={<Tag color={pendingFeeReviews.length ? "orange" : "default"}>{pendingFeeReviews.length ? `${pendingFeeReviews.length} 项待裁定` : "无待办"}</Tag>}>
+        <Alert
+          type="info"
+          showIcon
+          title="裁定只决定应收金额；批准退款表示应收已核减、等待实际退款，实际收退款仍要在下方资金区按资金权限单独办理。"
+          style={{ marginBottom: 16 }}
+        />
+        {feeReviews.length ? <Table<RentalOrderFeeReview> rowKey="id" size="small" pagination={false} dataSource={feeReviews} columns={[
+          { title: "类型", dataIndex: "type", render: (value) => FEE_REVIEW_TYPE_LABELS[value as RentalOrderFeeReview["type"]] ?? String(value) },
+          { title: "来源", render: () => "订单费用审核" },
+          { title: "建议金额", dataIndex: "suggestedAmount", render: (value) => money(Number(value)) },
+          { title: "依据", dataIndex: "basis", render: (value) => <Space orientation="vertical" size={0}>{((value as string[]) ?? []).map((row) => <span key={row}>{row}</span>)}</Space> },
+          { title: "状态", render: (_, row) => <Tag color={FEE_REVIEW_STATUS_COLORS[row.status]}>{feeReviewStatusText(row)}</Tag> },
+          { title: "裁定额", dataIndex: "decidedAmount", render: (value, row) => row.status === "pending" ? "-" : money(Number(value ?? 0)) },
+          { title: "原因", dataIndex: "reason", render: (value) => value ?? "-" },
+          { title: "操作者", dataIndex: "reviewedBy", render: (value) => value ?? "-" },
+          { title: "时间", render: (_, row) => new Date(row.reviewedAt ?? row.createdAt).toLocaleString() },
+          {
+            title: "操作",
+            render: (_, row) => row.status !== "pending"
+              ? "-"
+              : canReviewFees
+                ? <Button type="link" onClick={() => { setFeeReview(row); feeReviewForm.setFieldsValue({ decision: "approved", amount: row.suggestedAmount, reason: undefined }); }}>裁定</Button>
+                : <span style={{ color: "#999" }}>无费用裁定权限</span>
+          }
+        ]} /> : <span style={{ color: "#999" }}>当前订单没有需要人工裁定的费用事项。</span>}
+      </Card>
       {canViewFunding && <Card title={<Space><DollarOutlined />收付款、押金与预授权 <Tag color="orange">模拟资金</Tag></Space>}>
         {funding.data?.rental && <Space direction="vertical" style={{ marginBottom: 16 }}>
           <span>最终应收 {money(funding.data.rental.payable)} · 已收 {money(funding.data.rental.collected)} · 已退 {money(funding.data.rental.refunded)} · 保证金抵扣 {money(funding.data.rental.securityCaptured)}</span>
@@ -375,6 +436,59 @@ export function RentalOrderDetailPage() {
         <Form.Item name="decision" label="审核结论" rules={[{ required: true }]}><Select options={[{ value: "approved", label: "通过并计费" }, { value: "rejected", label: "驳回，不计费" }]} /></Form.Item>
         <Form.Item noStyle shouldUpdate={(before, after) => before.decision !== after.decision}>{({ getFieldValue }) => getFieldValue("decision") === "approved" ? <Form.Item name="approvedChargeAmount" label="最终费用" rules={[{ required: true }]}><InputNumber min={0} precision={2} prefix={symbol} style={{ width: "100%" }} /></Form.Item> : null}</Form.Item>
         <Form.Item name="reason" label="审核理由" rules={[{ required: true }]}><Input.TextArea rows={3} /></Form.Item>
+      </Form>
+    </Modal>
+    <Modal
+      title={feeReview ? `裁定${FEE_REVIEW_TYPE_LABELS[feeReview.type]}` : "费用裁定"}
+      open={Boolean(feeReview)}
+      onCancel={() => { setFeeReview(undefined); feeReviewForm.resetFields(); }}
+      onOk={() => feeReviewForm.submit()}
+      confirmLoading={decideFeeReview.isPending}
+      okButtonProps={{ disabled: decideFeeReview.isPending }}
+      destroyOnHidden
+    >
+      <Alert
+        type="info"
+        showIcon
+        title={`规则建议金额 ${money(feeReview?.suggestedAmount)}`}
+        description={<Space orientation="vertical" size={0}>
+          {(feeReview?.basis ?? []).map((row) => <span key={row}>{row}</span>)}
+          <span>
+            {feeReview?.type === "early_return_refund"
+              ? "批准后只核减应收并生成待退款；实际退款要到资金区由具备资金权限的人员办理。"
+              : "批准后按认定额计入应收；实际收款要到资金区单独登记。"}
+          </span>
+        </Space>}
+        style={{ marginBottom: 16 }}
+      />
+      <Form form={feeReviewForm} layout="vertical" onFinish={(values) => decideFeeReview.mutate(values)}>
+        <Form.Item name="decision" label="裁定结论" rules={[{ required: true }]}>
+          <Select options={[
+            { value: "approved", label: feeReview?.type === "early_return_refund" ? "批准退款（核减应收）" : "批准计费" },
+            { value: "rejected", label: feeReview?.type === "early_return_refund" ? "驳回，不退款" : "驳回，不计费" }
+          ]} />
+        </Form.Item>
+        <Form.Item noStyle shouldUpdate={(before, after) => before.decision !== after.decision}>
+          {({ getFieldValue }) => getFieldValue("decision") === "approved"
+            ? <Form.Item
+                name="amount"
+                label="认定金额"
+                extra="不填按建议金额。认定额不得超过建议额——超出部分属于另立一笔异常费用，须走检查异常流程并留下自己的依据。"
+                rules={[
+                  { required: true, message: "请填写认定金额" },
+                  {
+                    validator: (_rule, value) =>
+                      value === undefined || Number(value) <= Number(feeReview?.suggestedAmount ?? 0)
+                        ? Promise.resolve()
+                        : Promise.reject(new Error(`认定额不能超过建议额 ${money(feeReview?.suggestedAmount)}`))
+                  }
+                ]}
+              ><InputNumber min={0} precision={2} prefix={symbol} style={{ width: "100%" }} /></Form.Item>
+            : null}
+        </Form.Item>
+        <Form.Item name="reason" label="裁定原因" rules={[{ required: true, message: "请填写裁定原因，客服要据此向客户解释" }]}>
+          <Input.TextArea rows={3} />
+        </Form.Item>
       </Form>
     </Modal>
   </>;

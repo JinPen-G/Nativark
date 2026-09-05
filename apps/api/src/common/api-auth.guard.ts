@@ -366,12 +366,12 @@ export function requiredPermissions(method: string, path: string) {
   if (path.match(/^\/rental\/v1\/orders\/[^/]+$/)) {
     return ["store-rental:order:view"];
   }
-  // 续租：读用 order:view，写用 order:extend（这个权限码平台侧早已定义，旧模块从未接上）。
-  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/extensions\/[^/]+\/refund-review$/)) return ["store-rental:order:settle"];
-  // 费用审核（人工催收逾期费 / 人工审核提前归还退款）是结算动作，与上面两条审核同权限。
-  // 不加这一条会落到 /rental/v1 的通用写规则（order:operate），等于任何能办业务的人
-  // 都可以裁定金额——validate-route-permissions 只检查「能解析出权限」，不检查权限是否恰当。
-  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/fee-reviews\/[^/]+\/review$/)) return ["store-rental:order:settle"];
+  // 三条费用裁定入口统一收到 order:fee-review：裁定「该收/该退多少」与实际动钱是两件事。
+  // 此前它们都认 order:settle，而资金事件也认 order:settle，等于一个权限同时授予
+  // 「决定金额」与「收退款」。拆开后只有裁定权的人能定金额但动不了资金台账，
+  // 只有资金权的人能收退款但改不了裁定结论。资金事件那条规则保持 order:settle 不变。
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/extensions\/[^/]+\/refund-review$/)) return ["store-rental:order:fee-review"];
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/fee-reviews\/[^/]+\/review$/)) return ["store-rental:order:fee-review"];
   // 试算不落库但会暴露价格，因此和申请同权限，不给只读账号看到续租报价。
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/extensions$/)) {
     return method === "GET" ? ["store-rental:order:view"] : ["store-rental:order:extend", "store-rental:order:operate"];
@@ -382,7 +382,8 @@ export function requiredPermissions(method: string, path: string) {
   if (path.startsWith("/rental/v1/inspection-templates") || path.match(/^\/rental\/v1\/orders\/[^/]+\/inspections$/)) {
     return method === "GET" ? ["store-rental:order:view"] : ["store-rental:order:operate", "store-rental:order:pickup", "store-rental:order:return"];
   }
-  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/inspections\/[^/]+\/exceptions\/[^/]+\/review$/)) return ["store-rental:order:settle"];
+  // 检查异常的建议损失额同样是费用裁定，与上面两条同权限。
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/inspections\/[^/]+\/exceptions\/[^/]+\/review$/)) return ["store-rental:order:fee-review"];
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/cancel$/)) return ["store-rental:order:cancel", "store-rental:order:operate"];
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/operation-lock$/)) return ["store-rental:order:operate", "store-rental:order:pickup", "store-rental:order:return"];
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/handover\/pickup$/)) return ["store-rental:order:operate", "store-rental:order:pickup"];
