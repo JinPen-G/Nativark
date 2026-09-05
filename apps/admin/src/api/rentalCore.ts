@@ -1,5 +1,7 @@
 import type {
   CreateRentalInspectionRequest,
+  ManageRentalAllocationRequest,
+  RentalAllocationCandidates,
   ApiResult,
   CreateRentalOrderRequest,
   PartialReturnRentalOrderRequest,
@@ -249,10 +251,13 @@ export const rentalCoreApi = {
   createOrder: (data: CreateRentalOrderRequest) => request<RentalOrder>("/rental/v1/orders", { method: "post", data }),
   confirmOrder: (id: string) => request<RentalOrder>(`/rental/v1/orders/${id}/confirm`, { method: "post" }),
   allocateOrder: (id: string) => request<RentalOrder>(`/rental/v1/orders/${id}/allocate`, { method: "post" }),
+  allocationCandidates: (id: string) => request<RentalAllocationCandidates>(`/rental/v1/orders/${id}/allocation-candidates`),
+  manageAllocations: (id: string, data: ManageRentalAllocationRequest) => request<RentalOrder>(`/rental/v1/orders/${id}/assignments`, { method: "post", data }),
+  operationLock: (id: string, action: "acquire" | "release", token?: string) => request<{ token?: string; expiresAt?: string }>(`/rental/v1/orders/${id}/operation-lock`, { method: "post", data: { action, token } }),
   substituteBundleComponent: (id: string, data: SubstituteRentalBundleComponentRequest) => request<RentalOrder>(`/rental/v1/orders/${id}/substitute-bundle-component`, { method: "post", data }),
-  partialReturnOrder: (id: string, data: PartialReturnRentalOrderRequest) => request<RentalOrder>(`/rental/v1/orders/${id}/partial-return`, { method: "post", data }),
+  partialReturnOrder: (id: string, data: PartialReturnRentalOrderRequest, token?: string) => request<RentalOrder>(`/rental/v1/orders/${id}/partial-return`, { method: "post", data, headers: token ? { "X-Operation-Token": token } : undefined }),
   cancelOrder: (id: string, data: { reason: string; weatherException?: boolean }) => request<RentalOrder>(`/rental/v1/orders/${id}/cancel`, { method: "post", data }),
-  handoverOrder: (id: string, stage: "pickup" | "return") => request<RentalOrder>(`/rental/v1/orders/${id}/handover/${stage}`, { method: "post" }),
+  handoverOrder: (id: string, stage: "pickup" | "return", token?: string) => request<RentalOrder>(`/rental/v1/orders/${id}/handover/${stage}`, { method: "post", headers: token ? { "X-Operation-Token": token } : undefined }),
   settleOrder: (id: string) => request<RentalOrder>(`/rental/v1/orders/${id}/settle`, { method: "post" }),
   // 续租 / 延期（需求 4.6.9）。试算与申请分两步：金额要先给客户/运营确认，
   // 确认后才落记录；企业月结的申请直接生效，个人还要再走一次补款。
@@ -263,9 +268,11 @@ export const rentalCoreApi = {
     request<{ order: RentalOrder; extension: RentalOrderExtension }>(`/rental/v1/orders/${id}/extensions`, { method: "post", data }),
   payOrderExtension: (id: string, extensionId: string) =>
     request<{ order: RentalOrder; extension: RentalOrderExtension }>(`/rental/v1/orders/${id}/extensions/${extensionId}/pay`, { method: "post" }),
+  reviewExtensionRefund: (id: string, extensionId: string, data: { decision: "approved" | "rejected"; reason: string }) =>
+    request<{ order: RentalOrder; extension: RentalOrderExtension }>(`/rental/v1/orders/${id}/extensions/${extensionId}/refund-review`, { method: "post", data }),
   inspectionTemplates: (stage?: "pickup" | "return") => request<RentalInspectionTemplate[]>("/rental/v1/inspection-templates", { params: { stage } }),
   inspections: (id: string) => request<RentalInspectionRecord[]>(`/rental/v1/orders/${id}/inspections`),
-  createInspection: (id: string, data: CreateRentalInspectionRequest) => request<{ inspection: RentalInspectionRecord; order: RentalOrder }>(`/rental/v1/orders/${id}/inspections`, { method: "post", data }),
+  createInspection: (id: string, data: CreateRentalInspectionRequest, token?: string) => request<{ inspection: RentalInspectionRecord; order: RentalOrder }>(`/rental/v1/orders/${id}/inspections`, { method: "post", data, headers: token ? { "X-Operation-Token": token } : undefined }),
   reviewInspectionException: (id: string, inspectionId: string, exceptionIndex: number, data: ReviewRentalInspectionExceptionRequest) => request<{ order: RentalOrder }>(`/rental/v1/orders/${id}/inspections/${inspectionId}/exceptions/${exceptionIndex}/review`, { method: "post", data }),
   // CORE-EXT-02C：经营空间能力治理。读写都不带 workspaceId——空间取自会话，
   // 客户端无法指定要治理哪个空间的能力，因此也伪造不了能力范围。

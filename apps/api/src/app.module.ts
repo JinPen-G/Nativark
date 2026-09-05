@@ -28,6 +28,7 @@ import { MembershipService } from "./modules/platform/membership.service";
 import { PlatformService } from "./modules/platform/platform.service";
 import { RentalCoreController } from "./modules/rental-core/rental-core.controller";
 import { RentalCoreService } from "./modules/rental-core/rental-core.service";
+import { RentalAllocationService } from "./modules/rental-core/rental-allocation.service";
 import { RentalBusinessController } from "./modules/rental-core/rental-business.controller";
 import { OfficialCalendarSourceController } from "./modules/rental-core/official-calendar-source.controller";
 import { OfficialCalendarSourceService } from "./modules/rental-core/official-calendar-source.service";
@@ -86,6 +87,7 @@ import { RentalServiceCapacityService } from "./modules/rental-core/rental-servi
     MembershipService,
     OperationLogService,
     RentalCoreService,
+    RentalAllocationService,
     RentalBusinessService,
     OfficialCalendarSourceService,
     RentalStateRepository,

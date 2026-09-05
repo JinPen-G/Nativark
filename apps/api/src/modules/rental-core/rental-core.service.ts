@@ -66,10 +66,12 @@ import {
   type RentalCapabilityEquipmentLine,
   type RentalCapabilityExceptionSnapshot
 } from "@store-rental/shared";
-import { getRequestWorkspaceId, runWithRequestIdentity } from "../../common/request-identity";
+import { getRequestWorkspaceId, getRequestIdentity, runWithRequestIdentity } from "../../common/request-identity";
+import { ACTIVE_ASSIGNMENTS, allocationComplete } from "./rental-allocation-policy";
 import { RentalStateRepository } from "./rental-state.repository";
 import { DEFAULT_BUSINESS_TIME_ZONE, isValidTimeZone, businessHoursError } from "./rental-business-day";
 import { roundMoney } from "./rental-money";
+import { bufferedRentalPeriod, peakReservedQuantity } from "./rental-occupancy";
 import { effectiveExtensionRule, inclusiveTaxAmount } from "./rental-rule-defaults";
 import { RentalCoreConfigRepository, type RentalConfigStore, type RentalConfigTx } from "./rental-core-config.repository";
 import {
@@ -991,7 +993,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
    * RC-03：在订单事务内锁定实际依赖的基础库存并重新计算可用量。
    * 事务外的 availability 只负责快速反馈，最终是否可下单以这里的锁后重算为准。
    */
-  async assertAvailabilityWithLocks(tenantId: string, input: RentalAvailabilityRequest, tx: RentalFactTx) {
+  async assertAvailabilityWithLocks(tenantId: string, input: RentalAvailabilityRequest, tx: RentalFactTx, rule?: RentalRuleConfig) {
     const state = this.state(tenantId);
     this.validatePeriod(input.startAt, input.endAt);
     this.activeLocation(state, input.locationId);
@@ -1009,19 +1011,67 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     }
 
     await this.factStore.lockInventoryTargets(tenantId, input.locationId, [...targets.values()], tx);
-    const checked = this.computeAvailability(state, await this.loadInventorySnapshot(tenantId, tx), input);
+    const checked = this.computeAvailability(state, await this.loadInventorySnapshot(tenantId, tx), {
+      ...input, ...bufferedRentalPeriod(input.startAt, input.endAt, rule)
+    });
     if (!checked.available) throw new ConflictException("库存已被其他订单占用，请重新选择租期或数量");
     return checked;
   }
 
+  /** 续租预检与事务内复检共用：排除本单，按真实预占组成与已分配资产检查含缓冲区间。 */
+  async assertOrderExtensionAvailable(tenantId: string, order: RentalOrder, newEndAt: string, tx?: RentalFactTx) {
+    const state = this.state(tenantId);
+    if (![RentalCoreOrderStatus.ReadyForPickup, RentalCoreOrderStatus.Renting].includes(order.status)) {
+      throw new ConflictException("只有待领取或租用中的订单可以续租");
+    }
+    this.validatePeriod(order.effectiveEndAt ?? order.endAt, newEndAt);
+    if (order.reservations.some(row => row.releasedQuantity > 0)) throw new ConflictException("已有部分归还，不能按整单自动续租，请人工处理剩余商品");
+    const period = bufferedRentalPeriod(order.startAt, newEndAt, order.ruleSnapshot);
+    const demands = new Map<string, { itemGroupId: string; locationId: string; quantity: number }>();
+    for (const reservation of order.reservations) {
+      const remaining = reservation.quantity - reservation.releasedQuantity;
+      if (remaining <= 0 || reservation.status === RentalReservationStatus.Released) continue;
+      const key = `${reservation.locationId}:${reservation.itemGroupId}`;
+      const row = demands.get(key) ?? { itemGroupId: reservation.itemGroupId, locationId: reservation.locationId, quantity: 0 };
+      row.quantity += remaining;
+      demands.set(key, row);
+    }
+    if (!demands.size) throw new ConflictException("订单没有可延长的有效库存占用");
+    const ordered = [...demands.values()].sort((a, b) => `${a.locationId}:${a.itemGroupId}`.localeCompare(`${b.locationId}:${b.itemGroupId}`));
+    if (tx) {
+      for (const demand of ordered) {
+        await this.factStore.lockInventoryTargets(tenantId, demand.locationId, [{
+          itemGroupId: demand.itemGroupId, inventoryMode: this.group(state, demand.itemGroupId).inventoryMode
+        }], tx);
+      }
+    }
+    const snapshot = await this.loadInventorySnapshot(tenantId, tx);
+    snapshot.reservations = snapshot.reservations.filter((row) => row.orderId !== order.id);
+    const assigned = new Set(order.allocations.filter((row) => ACTIVE_ASSIGNMENTS.includes(row.status)).map((row) => row.assetId).filter(Boolean));
+    if (snapshot.reservations.some((row) => row.quantity > 0 && overlaps(row.startAt, row.endAt, period.startAt, period.endAt) && row.assetIds?.some((assetId) => assigned.has(assetId)))) {
+      throw new ConflictException("本单已分配的资产与后续订单（含准备/周转缓冲）时间冲突，不能续租");
+    }
+    for (const demand of ordered) {
+      this.activeLocation(state, demand.locationId);
+      const available = this.availableQuantity(state, snapshot, this.group(state, demand.itemGroupId), demand.locationId, period.startAt, period.endAt, new Set());
+      if (available < demand.quantity) throw new ConflictException("续租与后续租赁（含准备/周转缓冲）库存冲突，请调整归还时间");
+    }
+  }
+
   async listOrders(tenantId: string) {
     this.state(tenantId);
-    return this.factStore.listOrders(tenantId);
+    return (await this.factStore.listOrders(tenantId)).map((order) => this.publicOrder(order));
   }
 
   async getOrder(tenantId: string, orderId: string) {
     this.state(tenantId);
-    return this.requireOrder(tenantId, orderId);
+    return this.publicOrder(await this.requireOrder(tenantId, orderId));
+  }
+
+  private publicOrder(order: RentalOrder) {
+    const result = structuredClone(order);
+    if (result.assignment?.operationLock) result.assignment.operationLock.token = "";
+    return result;
   }
 
   /**
@@ -1112,7 +1162,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       for (const target of reservationTargets) reservations.push({
         id: id("reservation"), orderId, orderLineId: line.id, itemGroupId: target.itemGroupId,
         locationId: location.id, quantity: target.quantity, releasedQuantity: 0, status: RentalReservationStatus.Soft,
-        expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(), createdAt: timestamp
+        expiresAt: new Date(Date.now() + quote.ruleSnapshot.payment.unpaidHoldMinutes * 60_000).toISOString(), createdAt: timestamp
       });
     }
     // 订单号序号取自库中该租户的订单数，迁库后不能再用内存数组长度。
@@ -1122,6 +1172,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       categoryCode: state.profile.categoryCode, status: RentalCoreOrderStatus.Draft,
       customerType: input.customerType, customerId: input.customerId, customerName: input.customerName.trim(), contactPhone: input.contactPhone?.trim(),
       membershipSnapshot: quote.membershipSnapshot ? structuredClone(quote.membershipSnapshot) : undefined,
+      membershipBenefitEvaluations: quote.membershipBenefitEvaluations?.length ? structuredClone(quote.membershipBenefitEvaluations) : undefined,
       fulfillmentMode: input.fulfillmentMode,
       fulfillmentLocationId: location.id, fulfillmentLocationName: location.name,
       fulfillmentLocationSnapshot: this.locationSnapshot(state, location),
@@ -1249,6 +1300,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const state = await this.factContext(tenantId);
     const order = await this.lockedOrder(tenantId, orderId, tx);
     if (order.status !== RentalCoreOrderStatus.Reserved) throw new ConflictException("只有已确认预占的订单可以配货");
+    if (order.assignment) throw new ConflictException("请通过预分配和锁定入口管理该订单");
     this.assertOutboundLocationActive(state, order);
     // Hook **不**在这里执行（Review P1-8）。
     //
@@ -1354,6 +1406,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const state = await this.factContext(tenantId);
     const order = await this.lockedOrder(tenantId, orderId, tx);
     if (order.status !== RentalCoreOrderStatus.Reserved) throw new ConflictException("只有已确认且尚未配货的订单可以替换套装组成");
+    if (order.allocations.some((a) => ACTIVE_ASSIGNMENTS.includes(a.status))) throw new ConflictException("请先释放分配，再替换套装组成");
     const line = order.lines.find((row) => row.id === input.orderLineId);
     if (!line || line.inventoryMode !== RentalInventoryMode.Bundle) throw new BadRequestException("目标订单行不是套装");
     const bundle = this.group(state, line.itemGroupId);
@@ -1392,6 +1445,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const state = await this.factContext(tenantId);
     const order = await this.lockedOrder(tenantId, orderId, tx);
     if (order.status !== RentalCoreOrderStatus.Renting) throw new ConflictException("只有租赁中的订单可以办理部分归还");
+    if (order.ruleSnapshot.fulfillment.returnInspectionRequired) throw new ConflictException("当前规则要求归还检查；部分归还须走逐批检查流程，不能直接释放资产");
     if (!input.items?.length) throw new BadRequestException("至少选择一个归还分配项");
     if (new Set(input.items.map((item) => item.allocationId)).size !== input.items.length) throw new BadRequestException("归还分配项不能重复");
     await this.runHook(
@@ -1403,11 +1457,35 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       undefined,
       this.orderHookInstances(tenantId, order)
     );
+    const assetChanges: AssetStatusChange[] = [];
+    await this.applyPartialReturnItems(tenantId, state, order, input.items, tx, assetChanges);
+    order.updatedAt = now();
+    await this.factStore.saveOrderAggregate(order, assetChanges, tx);
+    return order;
+  }
+
+  /**
+   * 只改变本批已领取分配项及对应预占。直接部分归还和“部分归还检查”共用它，
+   * 防止两条路径对库存释放、最后一批判断出现不同口径。
+   */
+  private async applyPartialReturnItems(
+    tenantId: string,
+    state: TenantRentalState,
+    order: RentalOrder,
+    items: PartialReturnRentalOrderRequest["items"],
+    tx: RentalFactTx | undefined,
+    assetChanges: AssetStatusChange[]
+  ) {
+    if (!items?.length) throw new BadRequestException("至少选择一个归还分配项");
+    if (new Set(items.map((item) => item.allocationId)).size !== items.length) throw new BadRequestException("归还分配项不能重复");
+    const requestedByAllocationId = new Map(items.map((item) => [item.allocationId, item.quantity]));
+    const pickedUp = order.allocations.filter((allocation) => allocation.status === "picked_up");
+    if (pickedUp.length && pickedUp.every((allocation) => (requestedByAllocationId.get(allocation.id) ?? 0) >= allocation.quantity)) {
+      throw new ConflictException("最后一批必须通过整单归还或归还检查完成，以计算逾期和异常费用");
+    }
     const assets = await this.factStore.listAssets(tenantId, tx);
     const assetById = new Map(assets.map((asset) => [asset.id, asset]));
-    const assetChanges: AssetStatusChange[] = [];
-
-    for (const item of input.items) {
+    for (const item of items) {
       if (!Number.isInteger(item.quantity) || item.quantity <= 0) throw new BadRequestException("归还数量必须是正整数");
       const allocation = order.allocations.find((row) => row.id === item.allocationId);
       if (!allocation || allocation.status !== "picked_up") throw new ConflictException("所选分配项已归还或不可归还");
@@ -1419,13 +1497,12 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       const reservation = order.reservations.find((row) => row.orderLineId === allocation.orderLineId && row.itemGroupId === actualItemGroupId);
       if (!reservation || reservation.status !== RentalReservationStatus.Fulfilled) throw new ConflictException("归还项没有对应的履约预占");
       if (reservation.releasedQuantity + item.quantity > reservation.quantity) throw new ConflictException("累计归还数量超过原预占数量");
-
       if (item.quantity === allocation.quantity) {
         allocation.status = "returned";
       } else {
         allocation.quantity -= item.quantity;
         order.allocations.push({
-          id: id("allocation"), orderId, orderLineId: allocation.orderLineId, itemGroupId: actualItemGroupId,
+          id: id("allocation"), orderId: order.id, orderLineId: allocation.orderLineId, itemGroupId: actualItemGroupId,
           quantity: item.quantity, status: "returned"
         });
       }
@@ -1434,13 +1511,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       if (reservation.releasedQuantity === reservation.quantity) reservation.status = RentalReservationStatus.Released;
       if (allocation.assetId) assetChanges.push({ assetId: allocation.assetId, status: RentalAssetStatus.Available });
     }
-
-    if (order.allocations.every((allocation) => allocation.status === "returned" || allocation.status === "released")) {
-      throw new ConflictException("最后一批必须通过整单归还或归还检查完成，以计算逾期和异常费用");
-    }
-    order.updatedAt = now();
-    await this.factStore.saveOrderAggregate(order, assetChanges, tx);
-    return order;
+    if (order.allocations.every((allocation) => allocation.status === "returned" || allocation.status === "released")) throw new ConflictException("部分归还不应释放最后一批，请使用整单归还");
   }
 
   async cancelOrder(tenantId: string, orderId: string, reason: string, chargeAmount = 0, tx?: RentalFactTx, operator?: string) {
@@ -1462,9 +1533,12 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const assetChanges: AssetStatusChange[] = [];
     order.reservations.forEach((row) => { row.status = RentalReservationStatus.Cancelled; });
     order.allocations.forEach((row) => {
-      row.status = "released";
-      if (row.assetId) assetChanges.push({ assetId: row.assetId, status: RentalAssetStatus.Available });
+      // 新排期不改变资产即时状态；取消未来订单不得释放前单正在使用的资产。
+      if (row.assetId && row.status === "allocated") assetChanges.push({ assetId: row.assetId, status: RentalAssetStatus.Available });
+      if (ACTIVE_ASSIGNMENTS.includes(row.status)) row.status = "released";
     });
+    // 撤销未履行订单的原应收；原报价保持不变，取消结算通过追加核减留下完整依据。
+    this.applyChargeTo(order, { code: `cancellation_reversal:${order.id}`, name: "取消未履行费用核减", type: "early_return_refund", amount: -(order.finalPayableAmount ?? order.payableAmount), sourceVersion: order.ruleVersion, detail: reason.trim() });
     // 取消费也走同一条追加路径：此前这里是 `adjustmentAmount = chargeAmount` 直接赋值，
     // 是四个写入点里唯一不累加、也唯一没有去重保护的一处。取消对 Renting/Settling/Completed
     // 都拒绝，所以目前不会覆盖掉已有调账，但没有理由留一个例外。
@@ -1499,6 +1573,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (stage === "pickup") {
       if (order.ruleSnapshot.fulfillment.pickupInspectionRequired) throw new ConflictException("当前规则要求完成领取检查");
       if (order.status !== RentalCoreOrderStatus.ReadyForPickup) throw new ConflictException("订单尚未完成配货");
+      await this.assertAllocatedPickupReady(tenantId, order, tx);
       this.assertOutboundLocationActive(state, order);
       // 领取/交付与归还检查是两个不同的触发点，因此按 stage 分发。
       // 这不是品类分支：stage 是履约阶段，与经营品类无关。
@@ -1554,14 +1629,19 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (missing.length) throw new BadRequestException(`缺少必填检查项：${missing.map((field) => field.label).join("、")}`);
     if (template.stage === "pickup" && order.status !== RentalCoreOrderStatus.ReadyForPickup) throw new ConflictException("订单尚未完成配货，不能办理取件检查");
     if (template.stage === "return" && order.status !== RentalCoreOrderStatus.Renting) throw new ConflictException("只有租赁中的订单可以办理归还检查");
-    if (template.stage === "pickup") this.assertOutboundLocationActive(state, order);
+    if (input.returnItems?.length && template.stage !== "return") throw new BadRequestException("只有归还检查可以指定部分归还项");
+    const partialReturnItems = template.stage === "return" && input.returnItems?.length ? input.returnItems : undefined;
+    if (template.stage === "pickup") {
+      this.assertOutboundLocationActive(state, order);
+      await this.assertAllocatedPickupReady(tenantId, order, tx);
+    }
     // 检查项校验通过后、写检查记录前判定。传入检查结果与异常项：能力要能据此
     // 给出提示或费用依据（例如按异常项主张损坏费依据），但不得自己改写订单金额。
     await this.runHook(
       tenantId,
       template.stage === "pickup" ? "pickup_delivery" : "return_inspection",
       { type: "order", id: order.id },
-      { order, stage: template.stage, results: input.results, exceptions: input.exceptions ?? [], charges },
+      { order, stage: template.stage, results: input.results, exceptions: input.exceptions ?? [], charges, partialReturn: partialReturnItems },
       tx,
       input.operator || userName,
       this.orderHookInstances(tenantId, order)
@@ -1591,6 +1671,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       baselineInspectionId: pickupBaseline?.id,
       comparisons,
       usageReadings,
+      returnedItems: partialReturnItems,
       exceptions: (input.exceptions ?? []).map((exception) => ({
         code: exception.code,
         description: exception.description,
@@ -1604,13 +1685,18 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (template.stage === "pickup") {
       this.markPickedUp(order, assetChanges);
     } else {
-      this.finishReturn(order, 0, assetChanges);
+      if (partialReturnItems) {
+        await this.applyPartialReturnItems(tenantId, state, order, partialReturnItems, tx, assetChanges);
+      } else {
+        this.finishReturn(order, 0, assetChanges);
+      }
       if (input.exceptions?.length) {
         // 有异常的序列化资产先进入维护，不能在工单处理前重新出租。
         for (const change of assetChanges) change.status = RentalAssetStatus.Maintenance;
       }
-      if (charges.overdue && charges.overdue.amount > 0) this.applyOverdueTo(order, charges.overdue.amount, charges.overdue.returnedAt);
-      if (charges.earlyReturn) this.applyEarlyReturnRefundTo(order, charges.earlyReturn);
+      // 逐批归还不结清整个租期：逾期、提前归还和服务消耗都在最后一批的整单归还时计算。
+      if (!partialReturnItems && charges.overdue && charges.overdue.amount > 0) this.applyOverdueTo(order, charges.overdue.amount, charges.overdue.returnedAt);
+      if (!partialReturnItems && charges.earlyReturn) this.applyEarlyReturnRefundTo(order, charges.earlyReturn);
       // 检查员提交的是损失建议，不能直接决定客户应付；审核通过后才追加订单费用。
     }
     order.updatedAt = now();
@@ -1684,10 +1770,11 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     // 试算与受理之间订单可能已被另一次续租推进过，那金额基准就不成立了。
     if (priced.originalEndAt !== from) throw new ConflictException("订单归还时间已变化，请重新试算续租费用");
     this.validatePeriod(from, priced.newEndAt);
-    if (priced.payableAmount <= 0) throw new BadRequestException("续租的增量金额为 0，无需续租");
+    if (priced.payableAmount < 0) throw new BadRequestException("补款金额不能为负，负差额必须走退款审核");
     const rule = effectiveExtensionRule(priced.ruleSnapshot);
     if (!rule.enabled) throw new ConflictException("当前经营空间的规则不允许续租");
     const existing = await this.factStore.listExtensions(tenantId, orderId, tx);
+    this.assertExtensionPriceBase(order, existing, priced.pricingSnapshot);
     const effectiveCount = existing.filter((row) => row.status === "effective").length;
     if (rule.maxTimes !== undefined && effectiveCount >= rule.maxTimes) {
       throw new ConflictException(`本订单的续租次数已达规则上限 ${rule.maxTimes} 次`);
@@ -1699,24 +1786,14 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
         throw new ConflictException(`累计延长 ${totalDays} 天，超过规则上限 ${rule.maxTotalDays} 天`);
       }
     }
-    // 只查**延长出来的那一段**。连原租期一起查会把本订单自己的占用算成冲突。
-    await this.assertAvailabilityWithLocks(
-      tenantId,
-      {
-        locationId: order.fulfillmentLocationId,
-        startAt: from,
-        endAt: priced.newEndAt,
-        lines: order.lines.map((line) => ({ itemGroupId: line.itemGroupId, quantity: line.quantity }))
-      },
-      tx
-    );
+    await this.assertOrderExtensionAvailable(tenantId, order, priced.newEndAt, tx);
 
     const sequence = existing.length + 1;
     // 同一订单上更早的待补款申请就此作废：客户改主意重新申请后，旧那条不该继续可补款。
     // 不作废它们，`pending_payment` 就没有任何自然终态，界面会一直给出补款按钮。
     const superseded = existing.filter((row) => row.status === "pending_payment").map((row) => row.id);
     if (superseded.length) await this.factStore.cancelExtensions(tenantId, superseded, tx);
-    const paymentRequired = priced.settlementMode === "immediate";
+    const paymentRequired = priced.settlementMode === "immediate" && priced.payableAmount > 0;
     const at = now();
     const extension: RentalOrderExtension = {
       id: randomUUID(),
@@ -1741,6 +1818,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       rateSnapshot: priced.rateSnapshot,
       ruleSnapshot: priced.ruleSnapshot,
       calendarSnapshot: priced.calendarSnapshot,
+      pricingSnapshot: priced.pricingSnapshot,
       settlementMode: priced.settlementMode,
       memo: input.memo,
       paidAt: undefined,
@@ -1750,7 +1828,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       createdAt: at
     };
     await this.factStore.insertExtension(extension, tx);
-    if (!paymentRequired) this.applyExtensionTo(order, extension, at);
+    if (!paymentRequired) await this.applyExtensionTo(order, extension, at, existing, tx);
     await this.factStore.saveOrderAggregate(order, [], tx);
     return { order, extension };
   }
@@ -1783,21 +1861,13 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const from = order.effectiveEndAt ?? order.endAt;
     // 期间可能有另一次续租先生效了，基准变了就不能再按原金额延长。
     if (extension.originalEndAt !== from) throw new ConflictException("订单归还时间已变化，请重新申请续租");
-    // 延长段的占用必须**此刻**仍然可用：申请时的检查早于客户支付，不能代替这一次。
-    await this.assertAvailabilityWithLocks(
-      tenantId,
-      {
-        locationId: order.fulfillmentLocationId,
-        startAt: from,
-        endAt: extension.newEndAt,
-        lines: order.lines.map((line) => ({ itemGroupId: line.itemGroupId, quantity: line.quantity }))
-      },
-      tx
-    );
+    if (effectiveExtensionRule(order.ruleSnapshot).pricingMode === "original_total" && Date.parse(now()) > Date.parse(from)) throw new ConflictException("补款时已超过原约定归还时间，请先人工处理逾时，不能直接生效原价全租期续租");
+    this.assertExtensionPriceBase(order, rows, extension.pricingSnapshot);
+    await this.assertOrderExtensionAvailable(tenantId, order, extension.newEndAt, tx);
     const at = now();
     await this.factStore.markExtensionEffective(tenantId, extension.id, at, at, tx);
     const applied: RentalOrderExtension = { ...extension, status: "effective", paidAt: at, effectiveAt: at };
-    this.applyExtensionTo(order, applied, at);
+    await this.applyExtensionTo(order, applied, at, rows, tx);
     await this.factStore.saveOrderAggregate(order, [], tx);
     return { order, extension: applied };
   }
@@ -1808,8 +1878,22 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
    * `endAt` 不动（需求 4.6.9），推进的是 `effectiveEndAt`；预占的结束端在仓储里跟着
    * `effectiveEndAt` 写，因此保存聚合时占用会自动延长。
    */
-  private applyExtensionTo(order: RentalOrder, extension: RentalOrderExtension, at: string) {
-    this.applyChargeTo(order, {
+  private async applyExtensionTo(order: RentalOrder, extension: RentalOrderExtension, at: string, previous: RentalOrderExtension[], tx: RentalFactTx) {
+    for (const row of previous) {
+      if (row.status === "effective" && row.pricingSnapshot?.refundReview?.status === "pending") {
+        await this.factStore.updateExtensionPricingSnapshot(order.tenantId, order.id, row.id, {
+          ...row.pricingSnapshot, refundReview: { ...row.pricingSnapshot.refundReview, status: "superseded", reason: `已由第 ${extension.sequence} 次续租重算替代` }
+        }, tx);
+      }
+    }
+    if (extension.pricingSnapshot) {
+      // 负差额只生成待审退款，不提前核减应收；零/正差额分项落账，保留租金、服务、优惠边界。
+      if (extension.pricingSnapshot.differenceAmount >= 0) {
+        for (const line of extension.pricingSnapshot.chargeLines) this.applyChargeTo(order, {
+          ...line, code: `extension:${extension.sequence}:${line.code}`, sourceId: extension.id, sourceVersion: extension.priceVersion
+        });
+      }
+    } else this.applyChargeTo(order, {
       code: `extension:${extension.sequence}`,
       name: `续租第 ${extension.sequence} 次`,
       type: "extension",
@@ -1820,6 +1904,34 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     });
     order.effectiveEndAt = extension.newEndAt;
     order.updatedAt = at;
+  }
+
+  private assertExtensionPriceBase(order: RentalOrder, rows: RentalOrderExtension[], snapshot: RentalOrderExtension["pricingSnapshot"]) {
+    if (!snapshot) return; // 旧版待补款记录仍按已经确认的原快照生效。
+    const expected = roundMoney(order.payableAmount + rows.filter((row) => row.status === "effective").reduce((sum, row) => sum + row.payableAmount -
+      (row.pricingSnapshot?.refundReview?.status === "approved" ? row.pricingSnapshot.refundReview.amount : 0), 0));
+    if (expected !== snapshot.previousPayableAmount) throw new ConflictException("已计金额或退款审核状态已变化，请重新试算续租差额");
+  }
+
+  async reviewExtensionRefund(tenantId: string, orderId: string, extensionId: string, input: { decision: "approved" | "rejected"; reason: string }, operator: string, tx: RentalFactTx) {
+    const order = await this.lockedOrder(tenantId, orderId, tx);
+    if (order.status === RentalCoreOrderStatus.Completed || order.status === RentalCoreOrderStatus.Cancelled) throw new ConflictException("已关闭或取消的订单不能审核续租退款");
+    if (!input.reason.trim()) throw new BadRequestException("请填写退款审核原因");
+    const rows = await this.factStore.listExtensions(tenantId, orderId, tx);
+    const extension = rows.find((row) => row.id === extensionId);
+    const snapshot = extension?.pricingSnapshot;
+    const review = snapshot?.refundReview;
+    if (!extension || extension.status !== "effective" || !snapshot || review?.status !== "pending") throw new ConflictException("该续租没有待审核退款，或已被后续续租替代");
+    const at = now();
+    if (input.decision === "approved") this.applyChargeTo(order, {
+      code: `extension:${extension.sequence}:refund`, name: "续租重算差额核减（实际退款另办）", type: "early_return_refund",
+      amount: -review.amount, sourceId: extension.id, sourceVersion: extension.priceVersion, detail: input.reason.trim()
+    });
+    const next = { ...snapshot, refundReview: { ...review, status: input.decision, reason: input.reason.trim(), reviewedBy: operator, reviewedAt: at } };
+    await this.factStore.updateExtensionPricingSnapshot(tenantId, orderId, extensionId, next, tx);
+    order.updatedAt = at;
+    await this.factStore.saveOrderAggregate(order, [], tx);
+    return { order, extension: { ...extension, pricingSnapshot: next } };
   }
 
   private applyOverdueTo(order: RentalOrder, amount: number, returnedAt: string) {
@@ -1868,19 +1980,23 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   }
 
   private markPickedUp(order: RentalOrder, assetChanges: AssetStatusChange[]) {
+    if (order.assignment) order.assignment.operationLock = undefined;
     order.status = RentalCoreOrderStatus.Renting;
     order.reservations.forEach((row) => { row.status = RentalReservationStatus.Fulfilled; });
     order.allocations.forEach((row) => {
+      if (!["locked", "allocated"].includes(row.status)) return;
       row.status = "picked_up";
       if (row.assetId) assetChanges.push({ assetId: row.assetId, status: RentalAssetStatus.Rented });
     });
   }
 
   private finishReturn(order: RentalOrder, overdueCharge: number, assetChanges: AssetStatusChange[]) {
+    if (order.assignment) order.assignment.operationLock = undefined;
     // 归还只代表实物已回库。资金余额和异常费用仍须独立结算，不能直接冒充订单已关闭。
     order.status = RentalCoreOrderStatus.Settling;
     order.reservations.forEach((row) => { row.status = RentalReservationStatus.Released; row.releasedQuantity = row.quantity; });
     order.allocations.forEach((row) => {
+      if (row.status !== "picked_up") return;
       row.status = "returned";
       if (row.assetId) assetChanges.push({ assetId: row.assetId, status: RentalAssetStatus.Available });
     });
@@ -1971,24 +2087,35 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   ) {
     const order = await this.lockedOrder(tenantId, orderId, tx);
     if (order.status !== RentalCoreOrderStatus.Settling) throw new ConflictException("只有待结算订单可以审核异常费用");
-    if (amount > 0) {
+    const waiver = order.serviceSnapshots?.find((service) => service.serviceType === "damage_waiver");
+    const coveredAmount = waiver && amount > 0
+      ? Math.min(amount, waiver.deductible ?? 0) + Math.max(0, amount - (waiver.coverageLimit ?? 0))
+      : amount;
+    const existingDamage = order.chargeLines.filter((line) => line.type === "damage").reduce((sum, line) => sum + line.amount, 0);
+    const limit = order.ruleSnapshot.damage.chargeLimit;
+    if (limit !== undefined && existingDamage + coveredAmount > limit) throw new ConflictException(`异常费用超过订单规则上限 ${limit}`);
+    if (coveredAmount > 0) {
       this.applyChargeTo(order, {
         code: `damage:${order.id}:${inspectionId}:${exceptionIndex}`,
         name: "检查异常费用",
         type: "damage",
-        amount,
+        amount: coveredAmount,
         sourceVersion: order.ruleVersion,
         detail
       });
     }
     order.updatedAt = now();
     await this.factStore.saveOrderAggregate(order, [], tx);
-    return order;
+    return { order, approvedChargeAmount: coveredAmount };
   }
 
   async settleOrder(tenantId: string, orderId: string, tx: RentalFactTx, operator?: string) {
     const order = await this.lockedOrder(tenantId, orderId, tx);
     if (order.status !== RentalCoreOrderStatus.Settling) throw new ConflictException("只有已归还待结算的订单可以关闭");
+    const extensions = await this.factStore.listExtensions(tenantId, orderId, tx);
+    if (extensions.some((row) => row.status === "effective" && row.pricingSnapshot?.refundReview?.status === "pending")) {
+      throw new ConflictException("还有续租差额退款待审核，请先处理后关闭订单");
+    }
     await this.runHook(
       tenantId,
       "settlement",
@@ -2160,7 +2287,43 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     await this.factStore.lockOrder(tenantId, orderId, tx);
     const order = await this.factStore.findOrder(tenantId, orderId, tx);
     if (!order) throw new NotFoundException("租赁订单不存在");
+    const lock = order.assignment?.operationLock;
+    const identity = getRequestIdentity();
+    if (lock && (lock.ownerId !== identity?.userId || lock.token !== identity?.operationToken || Date.parse(lock.expiresAt) <= Date.now())) {
+      throw new ConflictException(`订单由 ${lock.ownerName} 办理中，或办理凭证已过期，请重新接手`);
+    }
     return order;
+  }
+
+  async validateAllocationEquipment(tenantId: string, order: RentalOrder, allocations: RentalAllocation[], tx: RentalFactTx, operator?: string) {
+    this.assertOutboundLocationActive(this.state(tenantId), order);
+    const assets = await this.factStore.listAssets(tenantId, tx);
+    const groups = this.capabilityEquipmentGroups(tenantId);
+    const picked = allocations.filter((a) => a.assetId).map((a) => assets.find((s) => s.id === a.assetId)).filter((a): a is RentalAsset => Boolean(a));
+    const equipment = [...buildCapabilityEquipmentFromAssets(groups, picked), ...buildCapabilityEquipment(groups, allocations.filter((a) => !a.assetId).map((a) => ({ itemGroupId: a.itemGroupId!, quantity: a.quantity })))];
+    await this.runHook(tenantId, "allocation_dispatch", { type: "order", id: order.id }, { ...order, equipment, capabilityExceptions: (order.capabilityExceptions ?? []).map((a) => ({ capability: a.capability, code: a.riskCode, reason: a.reason })) }, tx, operator, this.orderHookInstances(tenantId, order));
+  }
+
+  private async assertAllocatedPickupReady(tenantId: string, order: RentalOrder, tx?: RentalFactTx) {
+    if (!allocationComplete(order, true)) throw new ConflictException("必须锁定全部必要资源才能领取");
+    const active = order.allocations.filter((a) => ["locked", "allocated"].includes(a.status));
+    if (tx) for (const r of [...order.reservations].sort((a, b) => `${a.itemGroupId}:${a.locationId}`.localeCompare(`${b.itemGroupId}:${b.locationId}`))) await this.factStore.lockAssetsForAllocation(tenantId, r.itemGroupId, r.locationId, tx);
+    const assets = await this.factStore.listAssets(tenantId, tx);
+    const stock = await this.factStore.listStockBalances(tenantId, tx);
+    const reservations = await this.factStore.activeReservations(tenantId, tx);
+    const period = bufferedRentalPeriod(order.startAt, order.effectiveEndAt ?? order.endAt, order.ruleSnapshot);
+    for (const a of active.filter((a) => !a.assetId)) {
+      const balance = stock.find((s) => s.itemGroupId === a.itemGroupId && s.locationId === order.fulfillmentLocationId);
+      const needed = active.filter((x) => !x.assetId && x.itemGroupId === a.itemGroupId).reduce((sum, x) => sum + x.quantity, 0);
+      const other = reservations.filter((r) => r.orderId !== order.id && r.itemGroupId === a.itemGroupId && r.locationId === order.fulfillmentLocationId);
+      if (!balance || balance.onHandQuantity - balance.maintenanceQuantity - peakReservedQuantity(other, period.startAt, period.endAt) < needed) throw new ConflictException("数量库存不足或存在维护占用，不能交付");
+    }
+    for (const a of active) {
+      if (!a.assetId) continue;
+      const asset = assets.find((s) => s.id === a.assetId);
+      if (!asset || ![RentalAssetStatus.Available, RentalAssetStatus.Reserved].includes(asset.status) || asset.locationId !== order.fulfillmentLocationId) throw new ConflictException("锁定资产尚未回库、正在维护或不在领取地点，请先改配或处理整备");
+    }
+    if (tx) await this.validateAllocationEquipment(tenantId, order, active, tx);
   }
   private validatePeriod(startAt: string, endAt: string) { const start = new Date(startAt).getTime(); const end = new Date(endAt).getTime(); if (!Number.isFinite(start) || !Number.isFinite(end) || start >= end) throw new BadRequestException("租赁起止时间无效"); }
   private validateAttributes(
@@ -2243,9 +2406,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   }
 
   private reservedQuantity(reservations: ActiveReservationRow[], itemGroupId: string, locationId: string, startAt?: string, endAt?: string) {
-    return reservations
-      .filter((row) => row.itemGroupId === itemGroupId && row.locationId === locationId && (!startAt || !endAt || overlaps(row.startAt, row.endAt, startAt, endAt)))
-      .reduce((sum, row) => sum + row.quantity, 0);
+    const rows = reservations.filter((row) => row.itemGroupId === itemGroupId && row.locationId === locationId);
+    return startAt && endAt ? peakReservedQuantity(rows, startAt, endAt) : rows.reduce((sum, row) => sum + row.quantity, 0);
   }
 
   private computeAvailability(state: TenantRentalState, snapshot: InventorySnapshot, input: RentalAvailabilityRequest): RentalAvailabilityResult {

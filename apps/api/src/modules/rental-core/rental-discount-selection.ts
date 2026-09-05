@@ -35,6 +35,8 @@ export interface RentalDiscountContext {
   hasCustomer: boolean;
   itemGroupIds: string[];
   pricingGroupIds?: string[];
+  /** 每行真实租金，用于限定商品优惠及逐行分摊。id 为定价组/商品的稳定标识。 */
+  rentalLines?: Array<{ id: string; itemGroupId: string; pricingGroupId?: string; amount: number }>;
   /** 报价租期覆盖的日期类型集合，与逐单位取价同一日界口径。 */
   dayTypes: Set<string>;
   /** 租期开始时点，用于有效期判定——不是报价创建时刻。 */
@@ -45,6 +47,29 @@ export interface RentalDiscountContext {
 }
 
 const money = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
+
+export function allocateDiscount(amount: number, bases: Record<string, number>): Record<string, number> {
+  const entries = Object.entries(bases).filter(([, value]) => value > 0).sort(([a], [b]) => a.localeCompare(b));
+  const total = entries.reduce((sum, [, value]) => sum + Math.round(value * 100), 0);
+  let remaining = Math.min(Math.round(amount * 100), total);
+  let remainingBase = total;
+  return Object.fromEntries(entries.map(([id, value]) => {
+    const cents = Math.round(value * 100);
+    const allocated = remainingBase ? Math.min(cents, Math.round(remaining * cents / remainingBase)) : 0;
+    remaining -= allocated; remainingBase -= cents;
+    return [id, allocated / 100];
+  }));
+}
+
+function matchingRentalLines(plan: RentalDiscountPlan, ctx: RentalDiscountContext) {
+  const lines = ctx.rentalLines ?? (ctx.itemGroupIds.length === 1 ? [{ id: ctx.pricingGroupIds?.[0] ?? ctx.itemGroupIds[0], itemGroupId: ctx.itemGroupIds[0], pricingGroupId: ctx.pricingGroupIds?.[0], amount: ctx.bases.rental }] : []);
+  return lines.filter(line => (plan.applicablePricingGroupIds?.length ? Boolean(line.pricingGroupId && plan.applicablePricingGroupIds.includes(line.pricingGroupId)) : !plan.applicableItemGroupIds.length || plan.applicableItemGroupIds.includes(line.itemGroupId)));
+}
+
+function eligibleBase(plan: RentalDiscountPlan, ctx: RentalDiscountContext) {
+  if (plan.appliesTo !== "rental" || (!ctx.rentalLines && !plan.applicablePricingGroupIds?.length && !plan.applicableItemGroupIds.length)) return ctx.bases[plan.appliesTo];
+  return money(matchingRentalLines(plan, ctx).reduce((sum, line) => sum + line.amount, 0));
+}
 
 /** 该方案在给定基数上的减免额。上限依次是「最大优惠金额」与「基数本身」（不得优惠成负数）。 */
 function amountFor(plan: RentalDiscountPlan, base: number) {
@@ -149,11 +174,11 @@ function evaluateEligibility(plan: RentalDiscountPlan, ctx: RentalDiscountContex
 export function selectDiscountPlans(
   plans: RentalDiscountPlan[],
   ctx: RentalDiscountContext
-): { applied: RentalDiscountPlan[]; evaluations: RentalQuoteDiscountEvaluation[]; discountByTarget: RentalDiscountBases } {
+): { applied: RentalDiscountPlan[]; evaluations: RentalQuoteDiscountEvaluation[]; discountByTarget: RentalDiscountBases; rentalLineDiscounts: Record<string, number> } {
   const scoped = ctx.requestedPlanId ? plans.filter((plan) => plan.id === ctx.requestedPlanId) : plans;
   const judged = scoped.map((plan) => {
     const { eligibility, skipReason, eligible } = evaluateEligibility(plan, ctx);
-    const gross = ctx.bases[plan.appliesTo];
+    const gross = eligibleBase(plan, ctx);
     const candidateAmount = eligible ? amountFor(plan, gross) : 0;
     return { plan, eligibility, skipReason, eligible, gross, candidateAmount };
   });
@@ -191,21 +216,30 @@ export function selectDiscountPlans(
     .sort((left, right) => comparePlans(left.plan, right.plan));
   const calculate = (rows: typeof orderedWinners) => {
     const running: RentalDiscountBases = { ...ctx.bases };
+    const rentalRemaining = Object.fromEntries((ctx.rentalLines ?? []).map(line => [line.id, line.amount]));
+    const rentalLineDiscounts: Record<string, number> = {};
     const discountByTarget: RentalDiscountBases = { rental: 0, fulfillment: 0, service: 0 };
-    const actual = new Map<string, { amount: number; base: number }>();
+    const actual = new Map<string, { amount: number; base: number; rentalAllocations?: Record<string, number> }>();
     const applied: RentalDiscountPlan[] = [];
     for (const row of rows) {
       const target: RentalDiscountTarget = row.plan.appliesTo;
-      const base = running[target];
+      const eligibleLines = target === "rental" ? matchingRentalLines(row.plan, ctx) : [];
+      const lineBases = Object.fromEntries(eligibleLines.map(line => [line.id, rentalRemaining[line.id] ?? line.amount]));
+      const base = target === "rental" && ctx.rentalLines ? money(Object.values(lineBases).reduce((sum, value) => sum + value, 0)) : Math.min(running[target], row.gross);
       const amount = amountFor(row.plan, base);
-      actual.set(row.plan.id, { amount, base });
+      const rentalAllocations = target === "rental" && ctx.rentalLines ? allocateDiscount(amount, lineBases) : undefined;
+      actual.set(row.plan.id, { amount, base, rentalAllocations });
+      for (const [id, discount] of Object.entries(rentalAllocations ?? {})) {
+        rentalRemaining[id] = money(rentalRemaining[id] - discount);
+        rentalLineDiscounts[id] = money((rentalLineDiscounts[id] ?? 0) + discount);
+      }
       if (amount <= 0) continue;
       running[target] = money(base - amount);
       discountByTarget[target] = money(discountByTarget[target] + amount);
       applied.push(row.plan);
     }
     const total = money(discountByTarget.rental + discountByTarget.fulfillment + discountByTarget.service);
-    return { rows, applied, actual, discountByTarget, total };
+    return { rows, applied, actual, discountByTarget, rentalLineDiscounts, total };
   };
   const stackable = orderedWinners.filter((row) => row.plan.stackableWithOtherPlans);
   const options = [
@@ -252,6 +286,7 @@ export function selectDiscountPlans(
         }
       }
       return {
+        planSnapshot: structuredClone(row.plan),
         planId: row.plan.id,
         planCode: row.plan.code,
         planName: row.plan.name,
@@ -272,10 +307,11 @@ export function selectDiscountPlans(
         formula: formulaFor(row.plan, base, amount),
         candidateAmount: row.candidateAmount,
         discountAmount: amount,
+        rentalAllocations: hit?.rentalAllocations,
         maximumDiscount: row.plan.maximumDiscount,
         capped: row.plan.maximumDiscount !== undefined && amount >= row.plan.maximumDiscount
       };
     });
 
-  return { applied, evaluations, discountByTarget };
+  return { applied, evaluations, discountByTarget, rentalLineDiscounts: selected.rentalLineDiscounts };
 }

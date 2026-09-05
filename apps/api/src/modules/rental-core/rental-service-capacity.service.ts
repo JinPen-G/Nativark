@@ -225,6 +225,50 @@ export class RentalServiceCapacityService {
     });
   }
 
+  /**
+   * 归还时按服务自己的计划开始时点结算容量：已经开始的服务成为已使用历史；
+   * 尚未开始的服务释放容量，不能因为订单最终归还就被伪造为“已履约”。
+   *
+   * 服务价款是否可退由订单冻结的早退规则决定；容量释放只是资源事实，二者不能混为一谈。
+   */
+  async settleReturnForOrder(
+    tenantId: string,
+    order: Pick<RentalOrder, "id" | "serviceSnapshots">,
+    returnedAt: string,
+    tx: Tx
+  ): Promise<{ usedServiceIds: string[]; releasedServiceIds: string[] }> {
+    const returnedAtMs = Date.parse(returnedAt);
+    if (!Number.isFinite(returnedAtMs)) throw new BadRequestException("归还时间无效");
+    const snapshotByServiceId = new Map((order.serviceSnapshots ?? []).map((snapshot) => [snapshot.serviceId, snapshot]));
+    const rows = await this.lockOrderReservations(tenantId, order.id, tx);
+    const usedServiceIds: string[] = [];
+    const releasedServiceIds: string[] = [];
+    for (const row of rows.filter((item) => item.status === "confirmed")) {
+      const snapshot = snapshotByServiceId.get(row.serviceId);
+      // 存量订单缺少服务快照时无法证明服务未开始：保守保留为已使用，避免错放容量。
+      const started = !snapshot || Date.parse(snapshot.scheduledStartAt) <= returnedAtMs;
+      if (started) {
+        await tx.rentalServiceReservation.updateMany({
+          where: { id: row.id, tenantId, status: "confirmed" },
+          data: { status: "used", usedAt: new Date(returnedAt), expiresAt: null }
+        });
+        usedServiceIds.push(row.serviceId);
+        continue;
+      }
+      const moved = await tx.rentalServiceCapacity.updateMany({
+        where: { id: row.capacityId, tenantId, usedQuantity: { gte: row.quantity } },
+        data: { usedQuantity: { decrement: row.quantity } }
+      });
+      if (moved.count !== 1) throw new ConflictException("未开始服务的容量账不平，拒绝归还结算");
+      await tx.rentalServiceReservation.updateMany({
+        where: { id: row.id, tenantId, status: "confirmed" },
+        data: { status: "released", releasedAt: new Date(returnedAt), releaseReason: "not_started_at_return", expiresAt: null }
+      });
+      releasedServiceIds.push(row.serviceId);
+    }
+    return { usedServiceIds, releasedServiceIds };
+  }
+
   async releaseExpired(tenantId: string, tx?: Tx): Promise<number> {
     if (!tx) {
       return this.prisma.$transaction((inner) => this.releaseExpired(tenantId, inner), {

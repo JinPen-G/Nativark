@@ -49,10 +49,23 @@ const ctx = (over = {}) => ({
   dayTypes: over.dayTypes ?? new Set(["workday"]),
   rentalStartAt: over.rentalStartAt ?? "2026-06-01T02:00:00.000Z",
   workspaceId: over.workspaceId ?? "ws1",
-  requestedPlanId: over.requestedPlanId
+  requestedPlanId: over.requestedPlanId,
+  rentalLines: over.rentalLines
 });
 
 const byCode = (evaluations, code) => evaluations.find((row) => row.planCode === code);
+
+// ============ 0. 限定商品优惠只作用于命中行 ============
+{
+  const scoped = plan({ id: "only-a", code: "ONLY_A", discountValue: 10, applicableItemGroupIds: ["a"] });
+  const result = selectDiscountPlans([scoped], ctx({
+    bases: { rental: 1000, fulfillment: 0, service: 0 }, itemGroupIds: ["a", "b"],
+    rentalLines: [{ id: "a", itemGroupId: "a", amount: 100 }, { id: "b", itemGroupId: "b", amount: 900 }]
+  }));
+  assert.equal(result.discountByTarget.rental, 10, "只针对 A 的 10% 不得减免 B 的 900 元");
+  assert.deepEqual(result.rentalLineDiscounts, { a: 10 }, "优惠必须只保存到实际命中行");
+  ok("限定商品优惠只按适用订单行计算并保存分摊");
+}
 
 // ============ 1. 互斥组内按实际减免最大择一，而不是按优先级或加载顺序 ============
 {

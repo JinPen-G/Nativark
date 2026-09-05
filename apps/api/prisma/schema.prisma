@@ -1773,6 +1773,7 @@ model RentalOrder {
   /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
   workspace                     BusinessWorkspace              @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   orderNo                       String
+  assignment                    Json?
   categoryCode                  RentalCategoryCode
   status                        RentalOrderV1Status            @default(RESERVED)
   customerType                  String
@@ -1781,6 +1782,8 @@ model RentalOrder {
   contactPhone                  String?
   /// 新会员体系：预约身份、企业员工关系、主体和权益的不可变快照。
   membershipSnapshot            Json?
+  /// 会员方案本次实际生效、跳过与金额分摊的不可变结果。只存会员关系不足以解释订单减免。
+  membershipBenefitEvaluations  Json?
   fulfillmentMode               String
   fulfillmentLocationId         String
   fulfillmentLocation           RentalFulfillmentLocation      @relation(fields: [fulfillmentLocationId], references: [id])
@@ -1935,6 +1938,8 @@ model RentalFundingEvent {
 /// 订单当前该还的时间由 rental_orders.effectiveEndAt 表达，只有本表 status=effective 才推进它。
 /// 幂等：`(workspaceId, orderId, idempotencyKey)` 唯一，重复提交只落一条。
 model RentalOrderExtension {
+  /// 原价格/优惠全租期重算结果、差额明细与退款审核。
+  pricingSnapshot Json?
   id              String            @id @default(uuid())
   tenantId        String
   tenant          Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -2056,6 +2061,7 @@ model RentalAllocation {
   assetNo     String?
   quantity    Int              @default(1)
   status      String           @default("allocated")
+  metadata    Json?
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
 
@@ -2706,6 +2712,8 @@ model RentalNotificationTemplate {
 // 需求要求的不可变时点快照保留 JSON（需求 4.7）。
 
 model RentalQuote {
+  /// 原价续租所需的报价时区、倍率开关与计价日历。
+  pricingContext Json?
   id                            String             @id @default(uuid())
   tenantId                      String
   tenant                        Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -2719,6 +2727,8 @@ model RentalQuote {
   request                       Json
   /// 新会员体系：由服务端解析的预约身份、企业关系和权益快照。
   membershipSnapshot            Json?
+  /// 会员方案本次实际生效、跳过与金额分摊的不可变结果；确认下单时同步拷进订单。
+  membershipBenefitEvaluations  Json?
   /// RentalQuoteChargeLine[]：费用行明细，是报价可解释性的依据。
   chargeLines                   Json
   rentalAmount                  Decimal            @db.Decimal(12, 2)

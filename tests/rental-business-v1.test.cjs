@@ -500,6 +500,35 @@ assert.equal(
 assert.ok(mktQuote.discountAmount > 0 && mktQuote.payableAmount < mktQuote.rentalAmount, "优惠必须真的减少应付");
 ok2("MKT-01A：报价保存逐方案评估与落选原因，优惠不触碰押金与预授权");
 
+// 会员权益必须取预约身份实际使用的方案。企业员工预约不叠加个人方案，且本次的
+// 减免与来源要固化在报价中，不能等后续方案改版后再回读当前配置。
+const membershipProbeInput = {
+  customerType: "personal", customerId: "member_001", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id,
+  startAt: mktStartAt, endAt: mktEndAt, lines: [{ itemGroupId: mktGroup.id, quantity: 1, pricingUnit: "calendar_day" }]
+};
+const noMembershipBenefitQuote = await business.createQuote(tenantId, context(), membershipProbeInput);
+business.memberships = {
+  resolveBookingIdentity: async () => ({
+    bookingIdentity: "enterprise_employee", personalCustomerId: "member_001", personalCustomerName: "个人会员",
+    corporateCustomerId: "corp_001", corporateCustomerName: "企业会员", corporateMembershipId: "employment_001",
+    enterpriseContractAndPayer: false, benefitSource: "corporate", qualifications: [], resolvedAt: new Date().toISOString(),
+    personalPlan: { id: "assignment_personal", customerId: "member_001", planId: "plan_personal", planVersionId: "version_personal", source: "manual", status: "active", effectiveFrom: startAt, snapshot: { planName: "个人方案", targetType: "personal", benefits: [{ type: "rental_discount", calculation: "amount", value: 50 }] }, createdAt: startAt },
+    corporatePlan: { id: "assignment_corporate", customerId: "corp_001", planId: "plan_corporate", planVersionId: "version_corporate", source: "corporate_contract", status: "active", effectiveFrom: startAt, snapshot: { planName: "企业方案", targetType: "corporate", benefits: [{ type: "rental_discount", calculation: "amount", value: 25 }] }, createdAt: startAt }
+  })
+};
+const membershipBenefitQuote = await business.createQuote(tenantId, context(), {
+  ...membershipProbeInput,
+  bookingIdentity: { bookingIdentity: "enterprise_employee", corporateCustomerId: "corp_001" }
+});
+const membershipRentalBenefit = membershipBenefitQuote.membershipBenefitEvaluations.find((row) => row.type === "rental_discount" && row.appliedAmount > 0);
+assert.equal(membershipRentalBenefit?.source, "corporate", "企业员工预约只能使用企业方案，不得与个人方案叠加");
+assert.equal(membershipRentalBenefit?.appliedAmount, 25, "企业方案固定租金权益必须按本次剩余租金实际减免");
+assert.equal(membershipBenefitQuote.discountAmount, noMembershipBenefitQuote.discountAmount + 25, "会员权益必须真正减少报价应付");
+assert.ok(membershipBenefitQuote.chargeLines.some((line) => line.code === "membership:rental_discount:corporate" && line.amount === -25), "会员减免必须有独立可解释费用行");
+ok2("会员权益：企业员工仅用企业方案，金额、来源与费用行均随报价固化");
+// 这个专项只注入一次性会员解析 stub；后续历史报价测试没有客户主档，不能误走新会员门禁。
+business.memberships = undefined;
+
 const crossYearQuote = await business.createQuote(tenantId, context(), {
   customerType: "personal",
   fulfillmentMode: "store_pickup_return",

@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { ConflictException, Injectable } from "@nestjs/common";
 import { Prisma, type $Enums } from "@prisma/client";
 import type {
   RentalCategoryCode,
@@ -49,6 +49,7 @@ export interface RentalBusinessFactStore {
   consumeQuoteIfAvailable(tenantId: string, quoteId: string, orderId: string, consumedAt: string, tx: RentalBusinessFactTx): Promise<boolean>;
   lockCouponIfAvailable(tenantId: string, couponId: string, customerId: string | undefined, orderId: string, lockedAt: string, validAt: string, discountAmount: number, tx: RentalBusinessFactTx): Promise<boolean>;
   redeemCouponForOrder(tenantId: string, orderId: string, redeemedAt: string, tx: RentalBusinessFactTx): Promise<"none" | "redeemed" | "already_redeemed" | "invalid">;
+  repriceOrderCoupon(tenantId: string, orderId: string, amount: number, tx: RentalBusinessFactTx): Promise<void>;
   releaseCouponForOrder(tenantId: string, orderId: string, releasedAt: string, tx: RentalBusinessFactTx): Promise<void>;
   expireClaimedCoupons(tenantId: string, expiredAt: string): Promise<number>;
   voidClaimedCoupon(tenantId: string, couponId: string, reason: string, voidedAt: string, tx: RentalBusinessFactTx): Promise<boolean>;
@@ -271,6 +272,28 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
     return "redeemed";
   }
 
+  /** 调整原订单的用券金额，不重复核销次数；与续租生效/退款核减共用事务。 */
+  async repriceOrderCoupon(tenantId: string, orderId: string, amount: number, tx: RentalBusinessFactTx): Promise<void> {
+    const workspaceId = await resolveScopeWorkspaceId(tx, tenantId);
+    await tx.$queryRaw(Prisma.sql`SELECT id FROM rental_customer_coupons
+      WHERE tenantId = ${tenantId} AND workspaceId = ${workspaceId}
+        AND (lockedOrderId = ${orderId} OR redeemedOrderId = ${orderId}) FOR UPDATE`);
+    const coupon = await tx.rentalCustomerCoupon.findFirst({ where: {
+      tenantId, workspaceId, OR: [{ lockedOrderId: orderId }, { redeemedOrderId: orderId }]
+    } });
+    if (!coupon || !["locked", "redeemed"].includes(coupon.status)) throw new ConflictException("原订单优惠券账目缺失，不能自动续租核价");
+    const delta = new Prisma.Decimal(amount).minus(coupon.lockedDiscountAmount ?? 0);
+    if (delta.isZero()) return;
+    const column = coupon.status === "locked" ? Prisma.raw("lockedBudget") : Prisma.raw("redeemedBudget");
+    const updated = await tx.$executeRaw(Prisma.sql`UPDATE rental_coupon_templates
+      SET ${column} = ${column} + ${delta}
+      WHERE id = ${coupon.templateId} AND tenantId = ${tenantId} AND workspaceId = ${workspaceId}
+        AND ${column} + ${delta} >= 0
+        AND (${delta} <= 0 OR totalBudget IS NULL OR totalBudget - lockedBudget - redeemedBudget >= ${delta})`);
+    if (updated !== 1) throw new ConflictException("原优惠券预算不足或账目异常，请先处理后重新续租；未改变原租期");
+    await tx.rentalCustomerCoupon.updateMany({ where: { id: coupon.id, tenantId, workspaceId, status: coupon.status }, data: { lockedDiscountAmount: amount } });
+  }
+
   async releaseCouponForOrder(tenantId: string, orderId: string, releasedAt: string, tx: RentalBusinessFactTx): Promise<void> {
     const workspaceId = await resolveScopeWorkspaceId(tx, tenantId);
     const timestamp = date(releasedAt);
@@ -365,6 +388,7 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       categoryCode: upper<$Enums.RentalCategoryCode>(quote.categoryCode),
       request: quote.request as unknown as Prisma.InputJsonValue,
       membershipSnapshot: (quote.membershipSnapshot ?? null) as unknown as Prisma.InputJsonValue,
+      membershipBenefitEvaluations: (quote.membershipBenefitEvaluations ?? null) as unknown as Prisma.InputJsonValue,
       chargeLines: quote.chargeLines as unknown as Prisma.InputJsonValue,
       rentalAmount: new Prisma.Decimal(quote.rentalAmount),
       discountAmount: new Prisma.Decimal(quote.discountAmount),
@@ -373,6 +397,7 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       fulfillmentAmount: new Prisma.Decimal(quote.fulfillmentAmount),
       rateSnapshot: quote.rateSnapshot as unknown as Prisma.InputJsonValue,
       calendarSnapshot: quote.calendarSnapshot as unknown as Prisma.InputJsonValue,
+      pricingContext: quote.pricingContext ? quote.pricingContext as unknown as Prisma.InputJsonValue : Prisma.DbNull,
       calendarWarnings: quote.calendarWarnings as unknown as Prisma.InputJsonValue,
       preAuthAmount: new Prisma.Decimal(quote.preAuthAmount),
       receivableAmount: new Prisma.Decimal(quote.receivableAmount),
@@ -605,6 +630,7 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       categoryCode: lower<RentalCategoryCode>(row.categoryCode),
       request: row.request as unknown as RentalQuoteRequest,
       membershipSnapshot: (row.membershipSnapshot ?? undefined) as unknown as RentalQuoteSnapshotV1["membershipSnapshot"],
+      membershipBenefitEvaluations: (row.membershipBenefitEvaluations ?? undefined) as unknown as RentalQuoteSnapshotV1["membershipBenefitEvaluations"],
       chargeLines: (row.chargeLines ?? []) as unknown as RentalQuoteChargeLine[],
       rentalAmount: num(row.rentalAmount),
       discountAmount: num(row.discountAmount),
@@ -613,6 +639,7 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       fulfillmentAmount: num(row.fulfillmentAmount),
       rateSnapshot: (row.rateSnapshot ?? []) as unknown as RentalQuoteSnapshotV1["rateSnapshot"],
       calendarSnapshot: (row.calendarSnapshot ?? []) as unknown as RentalQuoteSnapshotV1["calendarSnapshot"],
+      pricingContext: row.pricingContext ? row.pricingContext as unknown as RentalQuoteSnapshotV1["pricingContext"] : undefined,
       calendarWarnings: (row.calendarWarnings ?? []) as unknown as RentalQuoteSnapshotV1["calendarWarnings"],
       preAuthAmount: num(row.preAuthAmount),
       receivableAmount: num(row.receivableAmount),

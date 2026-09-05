@@ -45,6 +45,7 @@ function quoteSnapshotFingerprint(quote: RentalQuoteSnapshotV1) {
     categoryCode: quote.categoryCode,
     request: quote.request,
     membershipSnapshot: quote.membershipSnapshot,
+    membershipBenefitEvaluations: quote.membershipBenefitEvaluations,
     chargeLines: quote.chargeLines,
     rentalAmount: quote.rentalAmount,
     discountAmount: quote.discountAmount,
@@ -137,6 +138,7 @@ export class RentalOrderConfirmationService {
     idempotencyKey?: string
   ) {
     // 未显式传键时退回 quoteId：报价一次性使用，天然是这次下单的唯一标识。
+    if (this.memberships && !input.bookingIdentity) input = { ...input, bookingIdentity: { bookingIdentity: "personal" } };
     const key = idempotencyKey?.trim() || `quote:${input.quoteId}`;
     const fingerprint = orderRequestFingerprint(input);
 
@@ -214,7 +216,7 @@ export class RentalOrderConfirmationService {
       quote.request.customerId,
       committedAt
     );
-    const order = await this.core.prepareOrder(tenantId, orderInput, userName, quote, resolvedSubjects);
+    const order = await this.core.prepareOrder(tenantId, orderInput, userName, membershipAtCommit ? { ...quote, membershipSnapshot: membershipAtCommit } : quote, resolvedSubjects);
 
     try {
       await this.prisma.$transaction(async (tx) => {
@@ -236,7 +238,7 @@ export class RentalOrderConfirmationService {
           startAt: input.startAt,
           endAt: input.endAt,
           lines: input.lines.map((line) => ({ itemGroupId: line.itemGroupId, quantity: line.quantity }))
-        }, tx);
+        }, tx, quote.ruleSnapshot);
 
         // 故意先写订单聚合，再校验并消费报价、锁券；后续任一步失败都必须证明
         // 前面的订单、订单行和库存预占会随同一事务整体回滚。
@@ -411,6 +413,7 @@ export class RentalOrderConfirmationService {
     ) {
       throw new ConflictException("会员预约身份或企业员工关系已变化，请重新报价");
     }
-    return snapshot;
+    // 价格权益保持报价快照，资格读取当前事实，不能使用已被撤销的旧审核结果。
+    return { ...snapshot, qualifications: current.qualifications };
   }
 }

@@ -1556,6 +1556,22 @@ export interface CustomerMembershipBenefit {
   conditions?: Record<string, unknown>;
 }
 
+/** 报价实际消费的会员权益快照；方案后续调整不得改写这次取价与减免依据。 */
+export interface RentalMembershipBenefitEvaluation {
+  source: "personal" | "corporate";
+  planId: string;
+  planVersionId: string;
+  planName: string;
+  type: CustomerMembershipBenefitType;
+  calculation: CustomerMembershipBenefit["calculation"];
+  configuredValue: number;
+  appliesTo: "rental" | "service" | "deposit" | "preauthorization" | "quote_validity" | "priority";
+  appliedAmount: number;
+  skippedReason?: string;
+  allocations?: Record<string, number>;
+  detail: string;
+}
+
 export interface CustomerMembershipPlanVersion {
   id: string;
   planId: string;
@@ -1671,6 +1687,8 @@ export interface TenantRentalProfile {
 
 export interface TenantRentalBusinessSettings {
   tenantId: string;
+  /** 经营空间资源排期；缺省不启用自动任务。 */
+  allocation?: { autoPreassign: boolean; preassignDays: number; autoLock: boolean; lockMinutes: number; protectManual: boolean };
   categoryCode: RentalCategoryCode;
   configVersion: string;
   pricing: {
@@ -2742,6 +2760,8 @@ export type RentalDiscountSkipReason = (typeof RENTAL_DISCOUNT_SKIP_REASONS)[num
  * 比大小，而落选方案的实际减免是 0。只存后者就无法解释「它输给谁、差多少」。
  */
 export interface RentalQuoteDiscountEvaluation {
+  /** 原优惠规则本体；续租重算不回读已修改的营销方案。旧快照可缺省。 */
+  planSnapshot?: RentalDiscountPlan;
   planId: string;
   planCode: string;
   planName: string;
@@ -2770,6 +2790,8 @@ export interface RentalQuoteDiscountEvaluation {
   candidateAmount: number;
   /** 实际减免；未应用时为 0。 */
   discountAmount: number;
+  /** 租金优惠按订单行分摊；部分取消、退款与报表不得再靠整单金额猜测。 */
+  rentalAllocations?: Record<string, number>;
   maximumDiscount?: number;
   /** 是否被最大优惠金额截断。 */
   capped: boolean;
@@ -2925,6 +2947,9 @@ export interface RentalQuoteServiceSnapshot {
   scheduledEndAt: string;
   serviceLocationId: string;
   capacityQuantity: number;
+  /** 服务费用已被优惠或券抵扣的金额；退款只能退客户实际支付的净额。 */
+  discountAllocatedAmount?: number;
+  couponAllocatedAmount?: number;
 }
 
 export interface RentalServiceCapacity {
@@ -3025,7 +3050,7 @@ export interface RentalSecurityReduction {
  * 发起、追加、抵扣、退款、释放、失败都是一条**独立、只追加**的资金事件，
  * 不得通过修改原报价明细表达。未接真实支付供应商前 provider 恒为明确标记的 mock。
  */
-export type RentalFundingInstrument = "deposit" | "preauthorization";
+export type RentalFundingInstrument = "deposit" | "preauthorization" | "rental";
 
 /**
  * 资金动作。押金：initiate（收取）、capture（抵扣）、refund（退款）、fail（失败）；
@@ -3083,6 +3108,8 @@ export interface RentalFundingFailureRequest {
 
 export interface RentalFundingBalance {
   orderId: string;
+  /** 模拟收付款账；保证金只有实际抵扣后才计入已付，退款减少净收款。 */
+  rental: { payable: number; collected: number; refunded: number; securityCaptured: number; balance: number; pendingExtensionAmount: number };
   deposit: { collected: number; captured: number; refunded: number; balance: number };
   preauthorization: { frozen: number; captured: number; released: number; balance: number };
   events: RentalFundingEvent[];
@@ -3096,6 +3123,8 @@ export interface RentalFundingBalance {
  * 那会造出第二套价格事实，与已发布的空间价格版本对不上。
  */
 export interface RentalExtensionRule {
+  /** 缺省保留新增时段单独计费；随订单规则快照固定。 */
+  pricingMode?: "incremental" | "original_total";
   /** 关掉后订单不再接受续租申请。缺省视为 true。 */
   enabled: boolean;
   /** 同一订单允许续租的次数上限。不填即不限。 */
@@ -3174,6 +3203,10 @@ export interface RentalRuleConfig {  /**
      * 给了边界就按「跨过几个班次窗口」计数；不给则按班次时长整除。
      */
     shiftStartHours?: number[];
+    /** 小时计价按连续24小时分段；缺省关闭。 */
+    hourToDayEnabled?: boolean;
+    /** 余段严格超过该小时数转日价；达到日价也封顶。开启时必填，0 < 值 <= 24。 */
+    hourToDayThresholdHours?: number;
   };
   payment: {
     timing: "order" | "confirmation" | "pickup" | "offline_terms";
@@ -3197,12 +3230,20 @@ export interface RentalRuleConfig {  /**
     returnInspectionRequired: boolean;
     evidenceRequired: boolean;
     allowDifferentReturnLocation: boolean;
+    /** 领取前准备缓冲（分钟），只占库存不计租金。缺省 0。 */
+    pickupBufferMinutes?: number;
+    /** 归还后检查、清洁等周转缓冲（分钟），只占库存不计租金。缺省 0。 */
+    returnBufferMinutes?: number;
   };
   overdue: {
     graceMinutes: number;
-    feeMode: "none" | "hourly" | "next_period" | "multiplier" | "manual_review";
+    feeMode: "none" | "hourly" | "next_period" | "multiplier" | "manual_review" | "hourly_to_daily";
     feeMultiplier: number;
     maximumFee?: number;
+    /** hourly_to_daily：每个逾时小时按原版本对应日价的百分比计费。 */
+    hourlyRatePercent?: number;
+    /** hourly_to_daily：扣除一次宽限后，每24小时余段超过此阈值转一天。 */
+    dailyAfterHours?: number;
   };
   cancellation: {
     freeBeforeHours: number;
@@ -3371,6 +3412,10 @@ export interface RentalQuoteCouponEvaluation {
   runningBase: number;
   formula: string;
   discountAmount: number;
+  /** 租金券按实际适用订单行分摊，后续取消、部分归还和退款不再按整单猜测。 */
+  rentalAllocations?: Record<string, number>;
+  /** 服务券按实际服务快照分摊，提前归还退款只能退客户实付净额。 */
+  serviceAllocations?: Record<string, number>;
 }
 
 export interface RentalRewardLedgerEntry {
@@ -3567,6 +3612,8 @@ export interface RentalQuoteChargeLine {
 }
 
 export interface RentalQuoteSnapshotV1 {
+  /** 报价时的计价日历及空间计价口径，供原价续租复算。 */
+  pricingContext?: RentalRepricingContext;
   id: string;
   tenantId: string;
   quoteNo: string;
@@ -3574,8 +3621,12 @@ export interface RentalQuoteSnapshotV1 {
   request: RentalQuoteRequest;
   /** 新会员预约身份、主体与权益版本的服务端快照。 */
   membershipSnapshot?: RentalMembershipSnapshot;
+  /** 会员方案中本次真正生效的权益与金额；只存会员关系不足以解释实际减免。 */
+  membershipBenefitEvaluations?: RentalMembershipBenefitEvaluation[];
   chargeLines: RentalQuoteChargeLine[];
   rentalAmount: number;
+  /** 定价组／商品行的租金快照，订单变更与退款按此分摊。 */
+  rentalLineAmounts?: Record<string, number>;
   discountAmount: number;
   couponAmount: number;
   serviceAmount: number;
@@ -4386,7 +4437,43 @@ export interface RentalAllocation {
   assetId?: string;
   assetNo?: string;
   quantity: number;
-  status: "allocated" | "picked_up" | "returned" | "released";
+  /** allocated 为历史已配货记录，按已锁定处理。 */
+  status: "pre_assigned" | "locked" | "allocated" | "picked_up" | "returned" | "released";
+  metadata?: { reservationId?: string; source: "manual" | "automatic"; protected: boolean; assignedAt: string; lockedAt?: string; itemGroupName?: string; locationId?: string };
+}
+
+export interface RentalAssignmentState {
+  revision: number;
+  issue?: string;
+  history: Array<{ id: string; at: string; actor: string; action: string; reason?: string; before: RentalAllocation[]; after: RentalAllocation[] }>;
+  operationLock?: { ownerId: string; ownerName: string; token: string; expiresAt: string };
+}
+
+export interface ManageRentalAllocationRequest {
+  action: "preassign" | "lock" | "unlock" | "release" | "reassign";
+  expectedRevision: number;
+  selections?: Array<{ reservationId: string; itemGroupId?: string; assetIds?: string[]; quantity?: number }>;
+  allocationIds?: string[];
+  reason?: string;
+}
+
+export interface RentalOperationLockRequest {
+  action: "acquire" | "release";
+  token?: string;
+}
+
+export interface RentalAllocationCandidates {
+  revision: number;
+  reservations: Array<{ reservationId: string; orderLineId: string; itemGroupId: string; itemGroupName: string; locationId: string; inventoryMode: RentalInventoryMode; quantity: number; assignedQuantity: number; lockedQuantity: number; models: Array<{ itemGroupId: string; name: string; enabled: boolean }>; candidates: Array<{ assetId: string; assetNo: string; itemGroupId: string; available: boolean; reason?: string; imageUrl?: string }> }>;
+}
+
+/** 分配是独立维度，不用订单主状态或资产当前状态代替未来排期。 */
+export function rentalAllocationProgress(order: Pick<RentalOrder, "reservations" | "allocations">) {
+  const active = order.allocations.filter((a) => ["pre_assigned", "locked", "allocated", "picked_up"].includes(a.status));
+  const required = order.reservations.filter((r) => !["released", "expired", "cancelled"].includes(r.status)).reduce((sum, r) => sum + Math.max(0, r.quantity - r.releasedQuantity), 0);
+  const assigned = active.reduce((sum, a) => sum + a.quantity, 0);
+  const locked = active.filter((a) => a.status !== "pre_assigned").reduce((sum, a) => sum + a.quantity, 0);
+  return { required, assigned, locked, label: !assigned ? "待分配" : assigned < required ? "部分分配" : locked < required ? "待锁定" : "已锁定" };
 }
 
 export interface SubstituteRentalBundleComponentRequest {
@@ -4414,6 +4501,8 @@ export interface RentalOrder {
   contactPhone?: string;
   /** 报价生成时解析的会员预约身份、企业关系与权益快照。 */
   membershipSnapshot?: RentalMembershipSnapshot;
+  /** 会员方案实际消费的权益、跳过原因与金额分摊；与报价同源，不能回读当前方案重算。 */
+  membershipBenefitEvaluations?: RentalMembershipBenefitEvaluation[];
   fulfillmentMode: RentalFulfillmentMode;
   fulfillmentLocationId: string;
   fulfillmentLocationName: string;
@@ -4510,6 +4599,7 @@ export interface RentalOrder {
   lines: RentalOrderLine[];
   reservations: RentalReservation[];
   allocations: RentalAllocation[];
+  assignment?: RentalAssignmentState;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
@@ -4683,6 +4773,39 @@ export type RentalOrderExtensionStatus = "pending_payment" | "effective" | "canc
  * 一次续租 / 延期（需求 4.6.9）。append-only，不可编辑——它是"这段时间按什么价延长的"
  * 的唯一凭据，改它等于改历史账。
  */
+export interface RentalRepricingContext {
+  /** 小时转日租/逾时所需的同版本24小时日价，不能事后读取现价。 */
+  dayRates?: RentalPricingRate[];
+  timeZone: string;
+  legacyDayTypeMultipliers: boolean;
+  calendars: RentalCalendarYear[];
+}
+
+export interface RentalExtensionPricingSnapshot {
+  method: "original_version_difference";
+  /** 全租期租金与本次新增服务的计算明细；差额落账另见 chargeLines。 */
+  fullChargeLines: RentalQuoteChargeLine[];
+  context: RentalRepricingContext;
+  previousPayableAmount: number;
+  recalculatedPayableAmount: number;
+  recalculatedRentalAmount: number;
+  recalculatedServiceAmount: number;
+  recalculatedDiscountAmount: number;
+  recalculatedCouponAmount: number;
+  totalBillableUnits: number;
+  differenceAmount: number;
+  discountEvaluations: RentalQuoteDiscountEvaluation[];
+  couponEvaluation?: RentalQuoteCouponEvaluation;
+  chargeLines: RentalQuoteChargeLine[];
+  refundReview?: {
+    amount: number;
+    status: "pending" | "approved" | "rejected" | "superseded";
+    reason?: string;
+    reviewedBy?: string;
+    reviewedAt?: string;
+  };
+}
+
 export interface RentalOrderExtension {
   id: string;
   tenantId: string;
@@ -4695,7 +4818,7 @@ export interface RentalOrderExtension {
   originalEndAt: string;
   /** 本次续租后的归还时间。 */
   newEndAt: string;
-  /** 增量期的计费单位数，按订单原本的计价单位计。 */
+  /** 全租期重算后的计费单位增量，可为 0。 */
   billableUnits: number;
   rentalAmount: number;
   serviceAmount: number;
@@ -4703,10 +4826,10 @@ export interface RentalOrderExtension {
   depositDelta: number;
   /** 预授权差额，口径同上。 */
   preAuthDelta: number;
-  /** 本次续租应付 = rentalAmount + serviceAmount。押金与预授权差额单独走资金台账。 */
+  /** 本次需补的正应付差额（已重算原优惠）；负差额另走退款审核。 */
   payableAmount: number;
   currency: string;
-  /** 申请时命中的空间级价格版本（需求 4.6.9：新增部分用申请时的价格）。 */
+  /** 原订单空间级价格版本，不随申请时现价改变。 */
   priceVersionId?: string;
   priceVersion?: string;
   ruleVersion: string;
@@ -4714,6 +4837,7 @@ export interface RentalOrderExtension {
   rateSnapshot: RentalPricingRate[];
   ruleSnapshot: RentalRuleConfig;
   calendarSnapshot: RentalQuoteCalendarDay[];
+  pricingSnapshot?: RentalExtensionPricingSnapshot;
   /**
    * 申请时快照的结算方式。`monthly` 表示企业月结客户，检查通过即生效、
    * 费用记入月结账单，不需要客户补款动作；`immediate` 需要补款后才生效。
@@ -4727,6 +4851,11 @@ export interface RentalOrderExtension {
   idempotencyKey: string;
   createdBy: string;
   createdAt: string;
+}
+
+export interface ReviewRentalExtensionRefundRequest {
+  decision: "approved" | "rejected";
+  reason: string;
 }
 
 /** 续租申请 / 试算的入参。APP 与后台用同一份。 */
@@ -4751,6 +4880,7 @@ export interface RentalOrderExtensionRequest {
  * 用 `Partial` 表达会让调用方分不清"这个字段现在没有"和"这个字段永远没有"。
  */
 export interface RentalOrderExtensionPreview {
+  pricingSnapshot?: RentalExtensionPricingSnapshot;
   orderId: string;
   originalEndAt: string;
   newEndAt: string;
@@ -4762,7 +4892,7 @@ export interface RentalOrderExtensionPreview {
   payableAmount: number;
   currency: string;
   settlementMode: "immediate" | "monthly";
-  /** 是否需要客户补款后才生效。企业月结为 false。 */
+  /** 正差额且非企业月结才需补款；零差额与待审退款不阻止续租。 */
   paymentRequired: boolean;
   /** 增量期的逐行计算说明，与报价的「计算说明」同源，便于客服核对。 */
   chargeLines: RentalQuoteChargeLine[];
@@ -4831,6 +4961,12 @@ export interface RentalInspectionTemplate {
 export interface CreateRentalInspectionRequest {
   templateId: string;
   results: Record<string, unknown>;
+  /**
+   * 归还阶段可指定本次实际归还的分配项。存在时是“逐批归还检查”：只释放本批
+   * 已领取的资产/数量，订单仍保持租赁中；最后一批必须使用整单归还，以统一计算
+   * 逾期、提前归还和最终服务结算。
+   */
+  returnItems?: Array<{ allocationId: string; quantity: number }>;
   /** 检查员只能提交建议损失额；最终计费必须由结算权限人员独立审核。 */
   exceptions?: Array<{ code: string; description: string; chargeAmount?: number; evidenceAttachments?: string[] }>;
   attachments?: string[];
@@ -4851,6 +4987,8 @@ export interface RentalInspectionRecord {
   comparisons?: Array<{ fieldCode: string; baseline?: unknown; current?: unknown; changed: boolean }>;
   /** 通用使用量读数（快门、里程、工时等由字段编码识别），保留原始值与差值。 */
   usageReadings?: Array<{ fieldCode: string; baseline?: number; current: number; delta?: number }>;
+  /** 本记录覆盖的部分归还分配项；整单检查为空。 */
+  returnedItems?: Array<{ allocationId: string; quantity: number }>;
   exceptions: Array<{
     code: string;
     description: string;

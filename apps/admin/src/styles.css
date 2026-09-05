@@ -7,6 +7,16 @@
 
 * { box-sizing: border-box; }
 html, body, #root { min-height: 100%; height: 100%; margin: 0; }
+/* 切换主题的那一瞬间关掉所有过渡。
+   我们和 antd 都在不少组件上写了 background-color / color 的 0.2~0.3s 过渡，
+   变量一换，有过渡的元素慢慢变色、没过渡的立刻变色，同一屏就会深浅混着出现。
+   这里只是让颜色直接跳到新值，不改任何配色，也不遮挡界面。 */
+html[data-theme-switching] *,
+html[data-theme-switching] *::before,
+html[data-theme-switching] *::after {
+  transition: none !important;
+  animation: none !important;
+}
 body { overflow: hidden; background: var(--rental-color-bg-layout); }
 button, input, textarea, select { font: inherit; }
 

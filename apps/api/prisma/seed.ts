@@ -155,6 +155,7 @@ const permissions = [
   ["store-rental:rules:publish", "业务规则发布", "门市租赁", PermissionKind.ACTION],
   ["store-rental:order:view", "订单查看", "门市租赁", PermissionKind.ACTION],
   ["store-rental:order:operate", "订单操作", "门市租赁", PermissionKind.ACTION],
+  ["store-rental:order:reassign", "资源解锁与改配", "门市租赁", PermissionKind.ACTION],
   ["store-rental:order:settle", "订单结算", "门市租赁", PermissionKind.ACTION],
   ["store-rental:order:create", "按钮-新建订单", "门市租赁", PermissionKind.BUTTON],
   ["store-rental:order:pickup", "按钮-取车交付", "门市租赁", PermissionKind.BUTTON],

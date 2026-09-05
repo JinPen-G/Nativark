@@ -4,11 +4,14 @@ import {
   RentalAssetStatus,
   RentalCategoryCode,
   type CancelRentalOrderRequest,
+  type ManageRentalAllocationRequest,
+  type RentalOperationLockRequest,
   type CreateRentalInspectionRequest,
   type CreateRentalOrderRequest,
   type GrantRentalRewardRequest,
   type PartialReturnRentalOrderRequest,
   type ReviewRentalInspectionExceptionRequest,
+  type ReviewRentalExtensionRefundRequest,
   type RentalAvailabilityRequest,
   type RentalCapability,
   type RentalFulfillmentMode,
@@ -41,8 +44,28 @@ import {
   IsOptional,
   IsString,
   Min,
+  Max,
+  IsInt,
   ValidateNested
 } from "class-validator";
+
+export class RentalAllocationSelectionInputDto {
+  @IsOptional() @IsString() @IsNotEmpty() itemGroupId?: string;
+  @IsString() @IsNotEmpty() reservationId!: string;
+  @IsOptional() @IsArray() @IsString({ each: true }) assetIds?: string[];
+  @IsOptional() @IsInt() @Min(1) @Max(10000) quantity?: number;
+}
+export class ManageRentalAllocationDto implements ManageRentalAllocationRequest {
+  @IsIn(["preassign", "lock", "unlock", "release", "reassign"]) action!: "preassign" | "lock" | "unlock" | "release" | "reassign";
+  @IsInt() @Min(0) expectedRevision!: number;
+  @IsOptional() @IsArray() @ArrayNotEmpty() @ValidateNested({ each: true }) @Type(() => RentalAllocationSelectionInputDto) selections?: RentalAllocationSelectionInputDto[];
+  @IsOptional() @IsArray() @ArrayNotEmpty() @IsString({ each: true }) allocationIds?: string[];
+  @IsOptional() @IsString() reason?: string;
+}
+export class RentalOperationLockDto implements RentalOperationLockRequest {
+  @IsIn(["acquire", "release"]) action!: "acquire" | "release";
+  @IsOptional() @IsString() token?: string;
+}
 
 /**
  * Rental Core 订单、报价、资产与业务动作的请求 DTO。第二批。
@@ -403,6 +426,13 @@ export class CreateRentalInspectionDto implements CreateRentalInspectionRequest 
 
   @IsOptional()
   @IsArray()
+  @ArrayNotEmpty()
+  @ValidateNested({ each: true })
+  @Type(() => PartialReturnAllocationInputDto)
+  returnItems?: PartialReturnAllocationInputDto[];
+
+  @IsOptional()
+  @IsArray()
   @ValidateNested({ each: true })
   @Type(() => RentalInspectionExceptionInputDto)
   exceptions?: RentalInspectionExceptionInputDto[];
@@ -658,7 +688,7 @@ export class SendRentalNotificationDto implements SendRentalNotificationRequest 
 
 /* ---------- RULE-01B：模拟资金事件（押金/预授权） ---------- */
 
-const FUNDING_INSTRUMENTS = ["deposit", "preauthorization"] as const;
+const FUNDING_INSTRUMENTS = ["deposit", "preauthorization", "rental"] as const;
 
 /** 发起押金收取 / 预授权冻结。发起后同订单同 instrument 不能再发起，追加请用 append。 */
 export class InitiateRentalFundingDto implements InitiateRentalFundingRequest {
@@ -732,6 +762,15 @@ export class RentalFundingFailureDto implements RentalFundingFailureRequest {
  * 只收「新的归还时间」这一个绝对时点，不收"延长几天"的增量——增量表达在跨日界、
  * 跨夏令时与跨营业日模板时会有歧义，绝对时点没有。
  */
+export class ReviewRentalExtensionRefundDto implements ReviewRentalExtensionRefundRequest {
+  @IsIn(["approved", "rejected"])
+  decision!: "approved" | "rejected";
+
+  @IsString()
+  @IsNotEmpty()
+  reason!: string;
+}
+
 export class RentalOrderExtensionDto implements RentalOrderExtensionRequest {
   @IsISO8601()
   newEndAt!: string;

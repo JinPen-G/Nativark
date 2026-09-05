@@ -8,7 +8,8 @@ require("ts-node").register({
 const {
   deriveFundingLedgers,
   nextBalanceAfter,
-  assertActionApplies
+  assertActionApplies,
+  rentalPaymentBalance
 } = require("../apps/api/src/modules/rental-core/rental-funding-events");
 
 /**
@@ -95,6 +96,24 @@ const rejects = (fn, pattern, label) =>
   rejects(() => nextBalanceAfter("deposit", "capture", -5, dep), /必须为正/u, "金额不能为负");
   assert.equal(nextBalanceAfter("deposit", "fail", 0, dep), 300, "失败不动余额");
   ok("非失败动作金额必须为正；失败事件金额不校验且不改变余额");
+}
+
+// ============ 7. 租金应收、退款与保证金抵扣是独立结算事实 ============
+{
+  const events = [
+    ev("rental", "append", 800),
+    ev("rental", "refund", 50),
+    ev("deposit", "initiate", 300),
+    ev("deposit", "capture", 200)
+  ];
+  const payment = rentalPaymentBalance(1000, events);
+  assert.equal(payment.collected, 800);
+  assert.equal(payment.refunded, 50);
+  assert.equal(payment.securityCaptured, 200);
+  assert.equal(payment.balance, 50, "应收 1000 - 已收 800 + 已退 50 - 已抵扣 200 = 待收 50");
+  assert.doesNotThrow(() => assertActionApplies("rental", "append"));
+  rejects(() => assertActionApplies("rental", "capture"), /租金与费用不支持 capture/u, "租金不能伪装成保证金抵扣");
+  ok("租金收付款与保证金独立结算，退款不会被当作已结清");
 }
 
 console.log("\nAll funding-events assertions passed.");

@@ -1318,6 +1318,18 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: "Allocate Rental Core inventory", permissions: ["store-rental:order:operate", "store-rental:vehicle:manage"], responseSchema: "GenericObject"
   },
   {
+    method: "get", path: "/api/rental/v1/orders/{id}/allocation-candidates", tag: "RentalCore", operationId: "rentalAllocationCandidates",
+    summary: "Get scoped assets available for the complete buffered period", permissions: ["store-rental:order:operate"], responseSchema: "GenericObject"
+  },
+  {
+    method: "post", path: "/api/rental/v1/orders/{id}/assignments", tag: "RentalCore", operationId: "manageRentalAllocations",
+    summary: "Preassign or lock resources; unlock, release and reassign additionally require order:reassign", permissions: ["store-rental:order:operate"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+  },
+  {
+    method: "post", path: "/api/rental/v1/orders/{id}/operation-lock", tag: "RentalCore", operationId: "rentalOrderOperationLock",
+    summary: "Acquire or release a fenced handover operation lock", permissions: ["store-rental:order:operate", "store-rental:order:pickup", "store-rental:order:return"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+  },
+  {
     method: "post", path: "/api/rental/v1/orders/{id}/substitute-bundle-component", tag: "RentalCore", operationId: "substituteRentalBundleComponent",
     summary: "Substitute a reserved bundle component within its configured group", permissions: ["store-rental:order:operate"], requestSchema: "GenericObject", responseSchema: "GenericObject"
   },
@@ -1352,6 +1364,10 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   {
     method: "post", path: "/api/rental/v1/orders/{id}/extensions/{extensionId}/pay", tag: "RentalCore", operationId: "payRentalOrderExtension",
     summary: "Confirm extension payment and extend the rental period", permissions: ["store-rental:order:extend", "store-rental:order:operate"], responseSchema: "GenericObject"
+  },
+  {
+    method: "post", path: "/api/rental/v1/orders/{id}/extensions/{extensionId}/refund-review", tag: "RentalCore", operationId: "reviewRentalExtensionRefund",
+    summary: "Review an extension price reduction without issuing a cash refund", permissions: ["store-rental:order:settle"], requestSchema: "GenericObject", responseSchema: "GenericObject"
   },
   {
     method: "get", path: "/api/rental/v1/inspection-templates", tag: "RentalCore", operationId: "listRentalInspectionTemplates",

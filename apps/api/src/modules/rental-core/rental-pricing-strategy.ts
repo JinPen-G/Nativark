@@ -427,6 +427,28 @@ export function rentalPricingStrategy(unit: RentalPricingUnit): RentalPricingStr
   return strategy;
 }
 
+/** 已购买计费单位所代表的时长；不得用预约的实际小时数摊薄/放大逾期小时价。 */
+export function billedRentalHours(
+  rate: RentalPricingRate,
+  units: number,
+  startAt: string,
+  endAt: string,
+  ctx: RentalPricingContext
+): number {
+  if (rate.unit === "usage" || rate.unit === "package") {
+    throw new BadRequestException("使用量或整包计价没有固定时间周期，请配置租金倍率或人工处理逾期费");
+  }
+  if (rate.unit === "shift" && ctx.shiftStartHours?.length) {
+    const starts = shiftWindowStartsForUnits(startAt, endAt, units + 1, ctx);
+    return starts.slice(0, units).reduce((sum, at, index) => sum + (starts[index + 1] - at) / 3_600_000, 0);
+  }
+  const hours: Record<Exclude<RentalPricingUnit, "usage" | "package">, number> = {
+    hour: blockHours("hour", 1, ctx), shift: blockHours("shift", 8, ctx),
+    day_24h: 24, calendar_day: 24, night: 24, week: 168, month: 720
+  };
+  return units * hours[rate.unit];
+}
+
 export function assertRentalPricingStrategiesComplete() {
   for (const unit of RENTAL_PRICING_UNIT_CODES) {
     if (!strategies[unit] || strategies[unit].unit !== unit) {

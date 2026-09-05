@@ -211,6 +211,7 @@ export class PlatformService {
         { code: "store-rental:rules:publish", name: "业务规则发布", description: "发布或安排规则版本生效、作废已发布或待生效版本" },
         { code: "store-rental:order:view", name: "订单查看", description: "查看门市订单列表和详情" },
         { code: "store-rental:order:operate", name: "订单操作", description: "新建订单、取车验车、还车验车" },
+        { code: "store-rental:order:reassign", name: "资源解锁与改配", description: "解锁、释放及更换订单锁定资源，必须填写原因" },
         { code: "store-rental:order:settle", name: "订单结算", description: "确认费用、补缴、退款或月结入账" },
         { code: "store-rental:order:create", name: "按钮-新建订单", description: "显示并执行新建门市订单入口" },
         { code: "store-rental:order:pickup", name: "按钮-取车交付", description: "执行开始取车和确认发车" },

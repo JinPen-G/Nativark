@@ -161,7 +161,7 @@ function ruleSecurityGroups(config: RentalRuleVersion["config"]): {
 }
 
 export function RentalGovernancePage() {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   // 需求 4.5.8 的角色矩阵要在界面上成立：日历编辑人员不该看到「发布」，发布人员不该
@@ -351,7 +351,7 @@ export function RentalGovernancePage() {
     [categories.data, profile.data?.categoryCode],
   );
   useEffect(() => {
-    if (settings.data) settingsForm.setFieldsValue(settings.data);
+    if (settings.data) settingsForm.setFieldsValue({ ...settings.data, allocation: settings.data.allocation ?? { autoPreassign: false, preassignDays: 7, autoLock: false, lockMinutes: 120, protectManual: true } });
   }, [settings.data, settingsForm]);
 
   const saveSettings = useMutation({
@@ -672,7 +672,7 @@ export function RentalGovernancePage() {
       ...security,
       // 两个后加的可选块：快照里缺省时补上与服务端一致的默认值，避免表单只填一半
       // 提交出 `{ enabled: undefined }` 这种过不了校验的半成品。
-      extension: config.extension ?? { enabled: true, forceImmediateWhenOverdue: true },
+      extension: { pricingMode: "incremental", ...(config.extension ?? { enabled: true, forceImmediateWhenOverdue: true }) },
       earlyReturn: config.earlyReturn ?? { mode: "none", minAdvanceHours: 24, refundPercent: 0, refundUndeliveredServices: false },
       tax: config.tax ?? { rate: 0, inclusive: true },
       changeReason: source.status === "draft" ? source.changeReason : "调整租赁业务规则",
@@ -908,6 +908,12 @@ export function RentalGovernancePage() {
                   </Col>
                   <Col xs={24} xl={12}>
                     <Card title="租赁与履约方式">
+                      <Form.Item name={["allocation", "autoPreassign"]} label="自动预分配资源" valuePropName="checked"><Switch /></Form.Item>
+                      <Form.Item name={["allocation", "preassignDays"]} label="提前预分配（天）"><InputNumber min={0} max={365} precision={0} /></Form.Item>
+                      <Form.Item name={["allocation", "autoLock"]} label="到时自动锁定分配" valuePropName="checked"><Switch /></Form.Item>
+                      <Form.Item name={["allocation", "lockMinutes"]} label="领取前锁定（分钟）"><InputNumber min={0} max={43200} precision={0} /></Form.Item>
+                      <Form.Item name={["allocation", "protectManual"]} label="保护人工分配结果" valuePropName="checked"><Switch /></Form.Item>
+                      <Alert type="info" title="自动任务每分钟检查一次；不自动换掉锁定资源，不跨地点调拨，失败转待人工处理。" style={{ marginBottom: 16 }} />
                       <Form.Item
                         name={["fulfillment", "enabledModes"]}
                         label="启用方式"
@@ -1696,7 +1702,7 @@ export function RentalGovernancePage() {
                               danger
                               type="link"
                               onClick={() =>
-                                Modal.confirm({
+                                modal.confirm({
                                   title: "撤销奖励",
                                   content: "撤销会保留原流水与撤销时间。",
                                   onOk: () =>
@@ -1967,6 +1973,13 @@ export function RentalGovernancePage() {
               </Col>
             </Row>
           </Card>
+          <Card size="small" title="时租转日租" style={{ marginTop: 12 }}>
+            <Row gutter={12}>
+              <Col span={8}><Form.Item name={["pricing", "hourToDayEnabled"]} label="启用时租转日租" valuePropName="checked"><Switch /></Form.Item></Col>
+              <Col span={8}><Form.Item name={["pricing", "hourToDayThresholdHours"]} label="超过多少小时转日租" tooltip="大于0且不超过24小时。未超过阈值但小时金额达到日价，也按日价封顶。"><InputNumber min={0.01} max={24} /></Form.Item></Col>
+            </Row>
+            <Typography.Text type="secondary">按连续24小时分段，不按午夜切日。使用同一定价分组、同一价格版本的24小时日价；未配置日价不能使用。发布后随新订单规则固定，不改变已有订单。</Typography.Text>
+          </Card>
           <Card size="small" title="超时、取消与损坏" style={{ marginTop: 12 }}>
             <Row gutter={12}>
               <Col span={8}>
@@ -1981,12 +1994,13 @@ export function RentalGovernancePage() {
                 <Form.Item name={["overdue", "feeMode"]} label="逾期收费">
                   <Select
                     options={[
-                      "none",
-                      "hourly",
-                      "next_period",
-                      "multiplier",
-                      "manual_review",
-                    ].map((value) => ({ value, label: value }))}
+                      { value: "none", label: "不收逾期费" },
+                      { value: "hourly", label: "按已购单位折算小时价" },
+                      { value: "next_period", label: "按逾期占用的计价周期数" },
+                      { value: "multiplier", label: "原租金固定倍率" },
+                      { value: "manual_review", label: "人工处理" },
+                      { value: "hourly_to_daily", label: "宽限后按小时比例，超过阈值转日费" },
+                    ]}
                   />
                 </Form.Item>
               </Col>
@@ -2000,6 +2014,12 @@ export function RentalGovernancePage() {
                   <InputNumber min={0} />
                 </Form.Item>
               </Col>
+              <Form.Item noStyle shouldUpdate={(previous, current) => previous.overdue?.feeMode !== current.overdue?.feeMode}>
+                {({ getFieldValue }) => getFieldValue(["overdue", "feeMode"]) === "hourly_to_daily" ? <>
+                  <Col span={12}><Form.Item name={["overdue", "hourlyRatePercent"]} label="逾时每小时＝原日价的百分比" rules={[{ required: true, message: "请填写每小时比例" }]} tooltip="例如10表示每小时收原版本对应日价的10%；不重复享受营销优惠。"><InputNumber min={0.01} max={100} suffix="%" /></Form.Item></Col>
+                  <Col span={12}><Form.Item name={["overdue", "dailyAfterHours"]} label="逾时超过多少小时转一天" rules={[{ required: true, message: "请填写逾时转日阈值" }]} tooltip="先扣除一次宽限；每连续24小时内，余段超过该阈值或小时费达到日费，改收一天，不叠加小时费。"><InputNumber min={0.01} max={24} /></Form.Item></Col>
+                </> : null}
+              </Form.Item>
               <Col span={8}>
                 <Form.Item
                   name={["cancellation", "freeBeforeHours"]}
@@ -2086,14 +2106,19 @@ export function RentalGovernancePage() {
             </Row>
           </Card>
           <Card size="small" title="续租与提前归还" style={{ marginTop: 12 }}>
+            <Row gutter={16}>
+              <Col span={12}><Form.Item name={["fulfillment", "pickupBufferMinutes"]} label="领取前准备缓冲（分钟）" tooltip="只占用库存，不计租金；留空按 0。随规则版本固化到订单。"><InputNumber min={0} max={43200} precision={0} /></Form.Item></Col>
+              <Col span={12}><Form.Item name={["fulfillment", "returnBufferMinutes"]} label="归还后周转缓冲（分钟）" tooltip="用于检查、清洁、运输等周转；续租与后续订单必须连同双方缓冲一起检查。"><InputNumber min={0} max={43200} precision={0} /></Form.Item></Col>
+            </Row>
             <Alert
               type="info"
               showIcon
-              title="续租金额不在这里配"
-              description="续租一律对新增时间段按申请当时的价格版本重新报价，这里只配准入。提前归还退款按未使用计费单位占比折算，长租阶梯不重算，优惠按同比例折减。"
+              title="选择本空间的续租计费方式"
+              description="单独计费保留原租期金额，新增时段按申请时价格计算；完整重算沿用原价格与原优惠，再扣此前已计金额。两种方式都检查后续占用及缓冲。发布后新订单固定所选方式，改设置不影响旧订单。"
               style={{ marginBottom: 12 }}
             />
             <Row gutter={12}>
+              <Col span={24}><Form.Item name={["extension", "pricingMode"]} label="续租计费方式" rules={[{ required: true }]}><Select options={[{ value: "incremental", label: "新增时段单独计费（原方式）" }, { value: "original_total", label: "按原价格重算完整租期，只补差价" }]} /></Form.Item></Col>
               <Col span={8}>
                 <Form.Item name={["extension", "enabled"]} label="允许续租" valuePropName="checked">
                   <Switch />
@@ -2113,7 +2138,7 @@ export function RentalGovernancePage() {
                 <Form.Item
                   name={["extension", "forceImmediateWhenOverdue"]}
                   label="逾期续租强制先付"
-                  tooltip="企业月结客户平时不需补款即可续租；已逾期时打开这项会强制转为先收款"
+                  tooltip="沿用新增时段计费时，企业月结订单逾期后可强制先付。原价全租期补差暂不自动处理逾期订单，须先人工核价。"
                   valuePropName="checked"
                 >
                   <Switch />

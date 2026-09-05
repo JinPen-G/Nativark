@@ -314,7 +314,19 @@ export class BusinessSettingsNotificationsInputDto {
   editableChannels!: (typeof NOTIFICATION_CHANNELS)[number][];
 }
 
+export class BusinessSettingsAllocationInputDto {
+  @IsBoolean() autoPreassign!: boolean;
+  @IsInt() @Min(0) @Max(365) preassignDays!: number;
+  @IsBoolean() autoLock!: boolean;
+  @IsInt() @Min(0) @Max(43200) lockMinutes!: number;
+  @IsBoolean() protectManual!: boolean;
+}
+
 export class SaveTenantRentalBusinessSettingsDto implements SaveTenantRentalBusinessSettingsRequest {
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => BusinessSettingsAllocationInputDto)
+  allocation?: BusinessSettingsAllocationInputDto;
   @IsObject()
   @ValidateNested()
   @Type(() => BusinessSettingsPricingInputDto)
@@ -889,6 +901,18 @@ export class RuleConfigPreauthorizationInputDto {
 }
 
 export class RuleConfigFulfillmentInputDto {
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(43200)
+  pickupBufferMinutes?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(43200)
+  returnBufferMinutes?: number;
+
   @IsBoolean()
   pickupInspectionRequired!: boolean;
 
@@ -903,12 +927,23 @@ export class RuleConfigFulfillmentInputDto {
 }
 
 export class RuleConfigOverdueInputDto {
+  @IsOptional()
+  @IsNumber()
+  @Min(0.01)
+  @Max(100)
+  hourlyRatePercent?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0.01)
+  @Max(24)
+  dailyAfterHours?: number;
   @IsInt()
   @Min(0)
   graceMinutes!: number;
 
-  @IsIn(OVERDUE_FEE_MODES)
-  feeMode!: (typeof OVERDUE_FEE_MODES)[number];
+  @IsIn([...OVERDUE_FEE_MODES, "hourly_to_daily"])
+  feeMode!: (typeof OVERDUE_FEE_MODES)[number] | "hourly_to_daily";
 
   @IsNumber()
   @Min(0)
@@ -963,6 +998,15 @@ export class RuleConfigDamageInputDto {
 /** 计价相关的经营空间规则（需求 4.4.5：班次时长及边界由经营空间规则定义）。 */
 export class RuleConfigPricingInputDto {
   @IsOptional()
+  @IsBoolean()
+  hourToDayEnabled?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0.01)
+  @Max(24)
+  hourToDayThresholdHours?: number;
+  @IsOptional()
   @IsNumber()
   @Min(0.5)
   @Max(24)
@@ -979,6 +1023,9 @@ export class RuleConfigPricingInputDto {
 
 /** 续租 / 延期的准入规则（需求 4.6.9）。金额一律由增量期重新报价得出，此处不配单价。 */
 export class RuleConfigExtensionInputDto {
+  @IsOptional()
+  @IsIn(["incremental", "original_total"])
+  pricingMode?: "incremental" | "original_total";
   @IsBoolean()
   enabled!: boolean;
 

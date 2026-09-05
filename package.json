@@ -7,6 +7,8 @@
     "packages/*"
   ],
   "scripts": {
+    "test:order-allocation": "npm run build -w @store-rental/shared && node tests/rental-allocation.test.cjs",
+    "test:order-allocation-db": "npm run build -w @store-rental/shared && node tests/helpers/run-assignment-db.cjs",
     "dev": "npm run build -w @store-rental/shared && concurrently -n api,admin -c blue,green \"npm run dev -w @store-rental/api\" \"npm run dev -w @store-rental/admin\"",
     "dev:api": "npm run build -w @store-rental/shared && npm run dev -w @store-rental/api",
     "dev:admin": "npm run build -w @store-rental/shared && npm run dev -w @store-rental/admin",
@@ -69,7 +71,9 @@
     "test:rule-version-chain-mutation": "node tests/helpers/rule-version-chain-mutation.cjs",
     "test:rule-permission-split": "npm run build -w @store-rental/shared && node tests/rental-rule-permission-split.test.cjs",
     "test:early-return": "npm run build -w @store-rental/shared && node tests/rental-early-return.test.cjs",
-    "test:order-extension": "npm run build -w @store-rental/shared && node tests/rental-extension.test.cjs",
+    "test:funding-gates": "npm run build -w @store-rental/shared && node tests/rental-funding-gates.test.cjs",
+    "test:order-settlement": "npm run build -w @store-rental/shared && node tests/rental-order-settlement.test.cjs",
+    "test:order-extension": "npm run build -w @store-rental/shared && node tests/rental-extension.test.cjs && node tests/rental-renewal-repricing.test.cjs",
     "test:tax": "npm run build -w @store-rental/shared && node tests/rental-tax.test.cjs",
     "test:currency": "npm run build -w @store-rental/shared && node tests/rental-currency.test.cjs"
   },

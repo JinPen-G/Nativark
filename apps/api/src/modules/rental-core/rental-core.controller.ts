@@ -29,12 +29,15 @@ import {
 } from "./rental-core-request.dto";
 import {
   CancelRentalOrderDto,
+  ManageRentalAllocationDto,
+  RentalOperationLockDto,
   CreateRentalInspectionDto,
   CreateRentalOrderDto,
   PartialReturnRentalOrderDto,
   ReviewRentalInspectionExceptionDto,
   RentalAvailabilityDto,
   RentalOrderExtensionDto,
+  ReviewRentalExtensionRefundDto,
   SaveRentalAssetDto,
   SaveRentalCouponTemplateDto,
   SaveRentalStockBalanceDto,
@@ -47,6 +50,7 @@ import {
 } from "./rental-config-request.dto";
 import { renderOperationReportCsv } from "./rental-workspace-report.csv";
 import { RentalCoreService } from "./rental-core.service";
+import { RentalAllocationService } from "./rental-allocation.service";
 import { RentalBusinessService, type BusinessContext } from "./rental-business.service";
 import { RentalOrderConfirmationService } from "./rental-order-confirmation.service";
 import { RentalIdempotentActionService } from "./rental-idempotent-action.service";
@@ -110,6 +114,7 @@ function extensionRentalOf(order: RentalOrder): number {
 export class RentalCoreController {
   constructor(
     private readonly service: RentalCoreService,
+    private readonly allocation: RentalAllocationService,
     private readonly business: RentalBusinessService,
     private readonly orderConfirmation: RentalOrderConfirmationService,
     private readonly idempotent: RentalIdempotentActionService,
@@ -343,6 +348,7 @@ export class RentalCoreController {
       request: { orderId: id },
       orderId: id,
       run: async (tx) => {
+        await this.funding.assertReadyForConfirmation(tenantId, this.service.resolveWorkspaceId(tenantId), id, tx);
         const confirmed = await this.service.confirmOrder(tenantId, id, tx, req.user.displayName);
         await this.serviceCapacities.confirmForOrder(tenantId, id, new Date().toISOString(), tx);
         await this.business.redeemCouponInTransaction(tenantId, id, tx);
@@ -370,13 +376,34 @@ export class RentalCoreController {
       fallbackKey: `order.allocate:${id}`,
       request: { orderId: id },
       orderId: id,
-      run: (tx) => this.service.allocateOrder(tenantId, id, tx, req.user.displayName),
+      run: async (tx) => {
+        const current = await this.service.getOrder(tenantId, id);
+        const assigned = await this.allocation.manage(tenantId, id, { action: "preassign", expectedRevision: current.assignment?.revision ?? 0 }, tx, req.user.displayName);
+        return this.allocation.manage(tenantId, id, { action: "lock", expectedRevision: assigned.assignment!.revision }, tx, req.user.displayName);
+      },
       replay: async () => {
         const current = await this.service.getOrder(tenantId, id);
         return current.status === RentalCoreOrderStatus.ReadyForPickup ? current : undefined;
       }
     });
     return this.committed(tenantId, order);
+  }
+  @Get("orders/:id/allocation-candidates") async allocationCandidates(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
+    return this.allocation.candidates(req.user.tenantId, id);
+  }
+  @Post("orders/:id/assignments") async manageAllocations(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: ManageRentalAllocationDto) {
+    if (["unlock", "release", "reassign"].includes(body.action) && !hasPermissionCode(req.user, "store-rental:order:reassign")) throw new ForbiddenException("解锁、释放及改配需要独立的资源改配权限");
+    const tenantId = req.user.tenantId;
+    return this.idempotent.execute({ tenantId, action: "order.assignment", key: idempotencyKeyOf(req), fallbackKey: `assignment:${id}:${body.expectedRevision}`, orderId: id, request: { id, ...body },
+      run: (tx) => this.allocation.manage(tenantId, id, body, tx, req.user.displayName),
+      replay: async () => this.service.getOrder(tenantId, id) });
+  }
+  @Post("orders/:id/operation-lock") async operationLock(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: RentalOperationLockDto) {
+    const allowed: RentalCoreOrderStatus[] = [];
+    const operate = hasPermissionCode(req.user, "store-rental:order:operate");
+    if (operate || hasPermissionCode(req.user, "store-rental:order:pickup")) allowed.push(RentalCoreOrderStatus.ReadyForPickup);
+    if (operate || hasPermissionCode(req.user, "store-rental:order:return")) allowed.push(RentalCoreOrderStatus.Renting);
+    return this.allocation.operationLock(req.user.tenantId, id, body.action, req.user.id, req.user.displayName, body.token, allowed);
   }
   @Post("orders/:id/substitute-bundle-component") async substituteBundleComponent(
     @Req() req: AuthenticatedRequest,
@@ -498,12 +525,15 @@ export class RentalCoreController {
   private async priceExtension(tenantId: string, orderId: string, body: RentalOrderExtensionDto) {
     const context = this.context(tenantId);
     const order = await this.service.getOrder(tenantId, orderId);
+    await this.service.assertOrderExtensionAvailable(tenantId, order, body.newEndAt);
+    const previousExtensions = await this.service.listOrderExtensions(tenantId, orderId);
     const rule = effectiveExtensionRule(order.ruleSnapshot);
     const settlementMode = await this.resolveExtensionSettlement(tenantId, order, rule.forceImmediateWhenOverdue);
     return {
       order,
       priced: await this.business.quoteOrderExtension(tenantId, context, {
         order,
+        previousExtensions,
         lines: order.lines,
         newEndAt: body.newEndAt,
         services: body.services,
@@ -532,7 +562,6 @@ export class RentalCoreController {
   async applyExtension(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: RentalOrderExtensionDto) {
     const tenantId = req.user.tenantId;
     const key = idempotencyKeyOf(req) ?? `order.extend:${id}:${body.newEndAt}`;
-    const { priced } = await this.priceExtension(tenantId, id, body);
     const result = await this.idempotent.execute({
       tenantId,
       action: "order.extend",
@@ -541,14 +570,18 @@ export class RentalCoreController {
       fallbackKey: `order.extend:${id}:${body.newEndAt}`,
       request: { orderId: id, newEndAt: body.newEndAt, services: body.services ?? [] },
       orderId: id,
-      run: (tx) =>
-        this.service.requestOrderExtension(
+      run: async (tx) => {
+        const { priced } = await this.priceExtension(tenantId, id, body);
+        const result = await this.service.requestOrderExtension(
           tenantId,
           id,
           priced,
           { idempotencyKey: key, memo: body.memo, operator: req.user.displayName },
           tx
-        ),
+        );
+        await this.business.synchronizeExtensionCoupon(tenantId, result.extension, tx);
+        return result;
+      },
       replay: async () => {
         const rows = await this.service.listOrderExtensions(tenantId, id);
         const existing = rows.find((row) => row.idempotencyKey === key);
@@ -573,11 +606,36 @@ export class RentalCoreController {
       fallbackKey: `order.extend.pay:${extensionId}`,
       request: { orderId: id, extensionId },
       orderId: id,
-      run: (tx) => this.service.payOrderExtension(tenantId, id, extensionId, tx),
+      run: async (tx) => {
+        await this.funding.assertExtensionPaid(tenantId, this.service.resolveWorkspaceId(tenantId), id, extensionId, tx);
+        const result = await this.service.payOrderExtension(tenantId, id, extensionId, tx);
+        await this.business.synchronizeExtensionCoupon(tenantId, result.extension, tx);
+        return result;
+      },
       replay: async () => {
         const rows = await this.service.listOrderExtensions(tenantId, id);
         const existing = rows.find((row) => row.id === extensionId && row.status === "effective");
         return existing ? { order: await this.service.getOrder(tenantId, id), extension: existing } : undefined;
+      }
+    });
+    return { order: await this.committed(tenantId, result.order), extension: result.extension };
+  }
+
+  @Post("orders/:id/extensions/:extensionId/refund-review")
+  async reviewExtensionRefund(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Param("extensionId") extensionId: string, @Body() body: ReviewRentalExtensionRefundDto) {
+    const tenantId = req.user.tenantId;
+    const result = await this.idempotent.execute({
+      tenantId, action: "order.extend.refund-review", key: idempotencyKeyOf(req),
+      fallbackKey: `order.extend.refund-review:${extensionId}`, request: { orderId: id, extensionId, ...body }, orderId: id,
+      run: async (tx) => {
+        const result = await this.service.reviewExtensionRefund(tenantId, id, extensionId, body, req.user.displayName, tx);
+        await this.business.synchronizeExtensionCoupon(tenantId, result.extension, tx);
+        return result;
+      },
+      replay: async () => {
+        const rows = await this.service.listOrderExtensions(tenantId, id);
+        const extension = rows.find((row) => row.id === extensionId && row.pricingSnapshot?.refundReview?.status === body.decision);
+        return extension ? { order: await this.service.getOrder(tenantId, id), extension } : undefined;
       }
     });
     return { order: await this.committed(tenantId, result.order), extension: result.extension };
@@ -590,19 +648,26 @@ export class RentalCoreController {
     const current = await this.service.getOrder(tenantId, id);
     const template = this.service.listInspectionTemplates(tenantId).find((row) => row.id === body.templateId);
     const returnedAt = new Date().toISOString();
+    const stage = template?.stage;
+    const partialReturn = stage === "return" && Boolean(body.returnItems?.length);
+    const partialReturnHash = partialReturn
+      ? createHash("sha256").update(JSON.stringify([...(body.returnItems ?? [])].sort((left, right) => left.allocationId.localeCompare(right.allocationId)))).digest("hex").slice(0, 16)
+      : undefined;
     // 逾期费与提前归还退款都按规则直接计算；检查异常只保存建议，必须由结算人员另行审核。
     // 归还基准用订单的**当前**约定归还时间，续租过就是新时间，否则刚续上的单会被判逾期。
     const quote = this.business.getQuote(tenantId, context, current.quoteId);
     const scheduledEndAt = current.effectiveEndAt ?? current.endAt;
-    const charges = template?.stage === "return"
+    const extensionPricing = stage === "return" && !partialReturn
+      ? (await this.service.listOrderExtensions(tenantId, id)).filter((row) => row.status === "effective").at(-1)?.pricingSnapshot : undefined;
+    const charges = stage === "return" && !partialReturn
       ? {
           overdue: { amount: this.business.calculateOverdueCharge(tenantId, context, quote, returnedAt, scheduledEndAt), returnedAt },
-          earlyReturn: this.business.calculateEarlyReturnRefund(tenantId, context, quote, scheduledEndAt, returnedAt, extensionRentalOf(current))
+          earlyReturn: this.business.calculateEarlyReturnRefund(tenantId, context, quote, scheduledEndAt, returnedAt, extensionRentalOf(current), extensionPricing)
         }
       : {};
-    const stage = template?.stage;
+    if (stage === "pickup") await this.business.assertPickupOpenAt(tenantId, context, current.fulfillmentLocationId, returnedAt, current.fulfillmentMode);
     // 归还只进入待结算；资金账处理完后再独立关闭订单。
-    const targetStatus = stage === "pickup" ? RentalCoreOrderStatus.Renting : RentalCoreOrderStatus.Settling;
+    const targetStatus = stage === "pickup" || partialReturn ? RentalCoreOrderStatus.Renting : RentalCoreOrderStatus.Settling;
     const { result, replayed } = await this.idempotent.executeWithReplayFlag({
       tenantId,
       action: "order.inspection",
@@ -610,16 +675,14 @@ export class RentalCoreController {
       // 键按订单 + 阶段：同一阶段的检查只应生效一次，换阶段是另一个动作。
       // 不纳入订单当前状态（理由见执行器注释），也不纳入 returnedAt——
       // 那是服务端每次取的当前时间，纳入后每次重试都算出新键，幂等直接失效。
-      fallbackKey: `order.inspection:${id}:${stage ?? "unknown"}`,
+      fallbackKey: `order.inspection:${id}:${stage ?? "unknown"}:${partialReturnHash ?? "whole"}`,
       // returnedAt 同样不能进指纹，否则重试必然被判为"同键不同内容"而 409。
-      request: { orderId: id, templateId: body.templateId, results: body.results, exceptions: body.exceptions ?? [] },
+      request: { orderId: id, templateId: body.templateId, results: body.results, returnItems: body.returnItems ?? [], exceptions: body.exceptions ?? [] },
       orderId: id,
       run: async (tx) => {
         if (stage === "pickup") await this.funding.assertReadyForPickup(tenantId, this.service.resolveWorkspaceId(tenantId), id, tx);
         const created = await this.service.createInspection(tenantId, id, body, req.user.displayName, charges, tx);
-        if (stage === "return") {
-          await this.serviceCapacities.markUsedForOrder(tenantId, id, returnedAt, tx);
-        }
+        if (stage === "return" && !partialReturn) await this.serviceCapacities.settleReturnForOrder(tenantId, created.order, returnedAt, tx);
         return created;
       },
       replay: async () => {
@@ -629,12 +692,12 @@ export class RentalCoreController {
         return recorded ? { inspection: recorded, order: latest } : undefined;
       }
     });
-    if (stage === "return") await this.business.refreshFromDatabase();
+    if (stage === "return" && !partialReturn) await this.business.refreshFromDatabase();
     if (!replayed) {
-      await this.emitOrderEvent(tenantId, result.inspection.stage === "pickup" ? "pickup.completed" : "return.completed", result.order);
+      if (!partialReturn) await this.emitOrderEvent(tenantId, result.inspection.stage === "pickup" ? "pickup.completed" : "return.completed", result.order);
       // 归还确实逾期（费用 > 0）才发逾期通知——这是真实业务事实，不是凭空造事件。
       // 与 return.completed 各自独立幂等，因此同一次归还两条通知都只发一次。
-      if (stage === "return" && charges.overdue && charges.overdue.amount > 0) {
+      if (stage === "return" && !partialReturn && charges.overdue && charges.overdue.amount > 0) {
         await this.emitOrderEvent(tenantId, "order.overdue", result.order);
       }
     }
@@ -654,9 +717,11 @@ export class RentalCoreController {
     }
     const handoverQuote = this.business.getQuote(tenantId, context, current.quoteId);
     const handoverDueAt = current.effectiveEndAt ?? current.endAt;
+    const extensionPricing = stage === "return"
+      ? (await this.service.listOrderExtensions(tenantId, id)).filter((row) => row.status === "effective").at(-1)?.pricingSnapshot : undefined;
     const overdueCharge = stage === "return" ? this.business.calculateOverdueCharge(tenantId, context, handoverQuote, returnedAt, handoverDueAt) : 0;
     const earlyReturnRefund = stage === "return"
-      ? this.business.calculateEarlyReturnRefund(tenantId, context, handoverQuote, handoverDueAt, returnedAt, extensionRentalOf(current))
+      ? this.business.calculateEarlyReturnRefund(tenantId, context, handoverQuote, handoverDueAt, returnedAt, extensionRentalOf(current), extensionPricing)
       : undefined;
     const targetStatus = stage === "pickup" ? RentalCoreOrderStatus.Renting : RentalCoreOrderStatus.Settling;
     const { result: order, replayed } = await this.idempotent.executeWithReplayFlag({
@@ -669,9 +734,7 @@ export class RentalCoreController {
       run: async (tx) => {
         if (stage === "pickup") await this.funding.assertReadyForPickup(tenantId, this.service.resolveWorkspaceId(tenantId), id, tx);
         const completed = await this.service.completeHandoverWithoutInspection(tenantId, id, stage, overdueCharge, tx, req.user.displayName, earlyReturnRefund);
-        if (stage === "return") {
-          await this.serviceCapacities.markUsedForOrder(tenantId, id, returnedAt, tx);
-        }
+        if (stage === "return") await this.serviceCapacities.settleReturnForOrder(tenantId, completed, returnedAt, tx);
         return completed;
       },
       replay: async () => {
@@ -751,25 +814,24 @@ export class RentalCoreController {
         if (!exception) throw new BadRequestException("检查异常不存在");
         if (exception.reviewStatus !== "pending") throw new ConflictException("该检查异常已经审核，不能重复改写");
         const approvedAmount = body.decision === "approved" ? Number(body.approvedChargeAmount) : 0;
-        const order = await this.service.approveInspectionException(
+        const approved = await this.service.approveInspectionException(
           tenantId, id, inspectionId, exceptionIndex, approvedAmount,
           `${String(exception.description)}；审核：${body.reason}`, tx
         );
         Object.assign(exception, {
           reviewStatus: body.decision,
-          approvedChargeAmount: approvedAmount,
+          approvedChargeAmount: approved.approvedChargeAmount,
           reviewReason: body.reason,
           reviewedBy: req.user.displayName,
           reviewedAt: new Date().toISOString()
         });
         await tx.rentalInspectionRecord.update({ where: { id: inspectionId }, data: { exceptions: exceptions as Prisma.InputJsonValue } });
-        return { order, inspectionId, exceptionIndex, exception };
+        return { order: approved.order, inspectionId, exceptionIndex, exception };
       },
       replay: async () => {
         const row = await this.prisma.rentalInspectionRecord.findFirst({ where: { id: inspectionId, tenantId, workspaceId, orderId: id } });
         const exception = (row?.exceptions as unknown as Array<Record<string, unknown>> | undefined)?.[exceptionIndex];
-        const expectedAmount = body.decision === "approved" ? Number(body.approvedChargeAmount) : 0;
-        if (!exception || exception.reviewStatus !== body.decision || Number(exception.approvedChargeAmount) !== expectedAmount) return undefined;
+        if (!exception || exception.reviewStatus !== body.decision) return undefined;
         return { order: await this.service.getOrder(tenantId, id), inspectionId, exceptionIndex, exception };
       }
     });

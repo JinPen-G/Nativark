@@ -38,12 +38,14 @@ export interface FundingLedgers {
 
 /** 哪些动作对哪个 instrument 合法。押金不能 release（实收的钱只能退款），预授权不能 refund。 */
 const ALLOWED: Record<RentalFundingInstrument, ReadonlySet<RentalFundingAction>> = {
+  rental: new Set<RentalFundingAction>(["initiate", "append", "refund", "fail"]),
   deposit: new Set<RentalFundingAction>(["initiate", "append", "capture", "refund", "fail"]),
   preauthorization: new Set<RentalFundingAction>(["initiate", "append", "capture", "release", "fail"])
 };
 
 export function assertActionApplies(instrument: RentalFundingInstrument, action: RentalFundingAction): void {
   if (!ALLOWED[instrument].has(action)) {
+    if (instrument === "rental") throw new BadRequestException(`租金与费用不支持 ${action} 动作（只能登记收款、退款或失败）`);
     throw new BadRequestException(
       instrument === "deposit"
         ? `押金不支持 ${action} 动作（实收资金只能收取、抵扣、退款或标记失败，不能释放）`
@@ -58,6 +60,7 @@ export function deriveFundingLedgers(events: readonly RentalFundingEvent[]): Fun
   const preauth: PreauthLedger = { frozen: 0, captured: 0, released: 0, balance: 0 };
   for (const event of events) {
     if (event.action === "fail") continue; // 失败不改变余额
+    if (event.instrument === "rental") continue;
     if (event.instrument === "deposit") {
       if (event.action === "initiate" || event.action === "append") deposit.collected += event.amount;
       else if (event.action === "capture") deposit.captured += event.amount;
@@ -130,4 +133,12 @@ export function nextBalanceAfter(
     default:
       throw new BadRequestException(`未知资金动作 ${action as string}`);
   }
+}
+
+/** 应付与实收严格分离；负余额表示尚欠客户退款，不得当成已结清。 */
+export function rentalPaymentBalance(payable: number, events: readonly RentalFundingEvent[]) {
+  const collected = money(events.filter(e => e.instrument === "rental" && ["initiate", "append"].includes(e.action)).reduce((sum, e) => sum + e.amount, 0));
+  const refunded = money(events.filter(e => e.instrument === "rental" && e.action === "refund").reduce((sum, e) => sum + e.amount, 0));
+  const securityCaptured = money(events.filter(e => e.instrument !== "rental" && e.action === "capture").reduce((sum, e) => sum + e.amount, 0));
+  return { payable, collected, refunded, securityCaptured, balance: money(payable - collected + refunded - securityCaptured) };
 }

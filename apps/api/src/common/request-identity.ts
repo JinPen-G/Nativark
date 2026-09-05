@@ -4,6 +4,8 @@ import { ForbiddenException } from "@nestjs/common";
 export interface RequestIdentity {
   tenantId: string;
   userId: string;
+  /** 办理凭证只用于与订单服务端保存的随机令牌比较，不授予权限。 */
+  operationToken?: string;
   isSaasAdmin: boolean;
   /**
    * SPACE-02：当前经营空间。只由认证守卫从**会话**写入，

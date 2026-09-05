@@ -22,9 +22,12 @@ import {
 } from "@store-rental/shared";
 import { PrismaService } from "../database/prisma.service";
 import { resolveScopeWorkspaceId } from "./workspace-scope";
+import { bufferedRentalPeriod } from "./rental-occupancy";
 
 /** 参与可用量计算的预占。表上直接带 startAt/endAt，因此不必回连订单。 */
 export interface ActiveReservationRow {
+  orderId?: string;
+  assetIds?: string[];
   itemGroupId: string;
   locationId: string;
   quantity: number;
@@ -100,10 +103,11 @@ export interface RentalCoreFactStore {
     tx?: RentalFactTx
   ): Promise<void>;
   cancelExtensions(tenantId: string, extensionIds: string[], tx?: RentalFactTx): Promise<void>;
+  updateExtensionPricingSnapshot(tenantId: string, orderId: string, extensionId: string, snapshot: NonNullable<RentalOrderExtension["pricingSnapshot"]>, tx: RentalFactTx): Promise<void>;
 }
 
 const ACTIVE_RESERVATION_STATES: $Enums.RentalReservationState[] = ["SOFT", "CONFIRMED", "FULFILLED"];
-const IN_USE_ALLOCATION_STATES = ["allocated", "picked_up"];
+const IN_USE_ALLOCATION_STATES = ["pre_assigned", "locked", "allocated", "picked_up"];
 
 function iso(value: Date): string {
   return value.toISOString();
@@ -193,6 +197,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     const orderData = {
       tenantId: order.tenantId,
       orderNo: order.orderNo,
+      assignment: order.assignment ? order.assignment as unknown as Prisma.InputJsonValue : Prisma.JsonNull,
       categoryCode: upper<$Enums.RentalCategoryCode>(order.categoryCode),
       status: upper<$Enums.RentalOrderV1Status>(order.status),
       customerType: order.customerType,
@@ -200,6 +205,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       customerName: order.customerName,
       contactPhone: order.contactPhone ?? null,
       membershipSnapshot: (order.membershipSnapshot ?? null) as unknown as Prisma.InputJsonValue,
+      membershipBenefitEvaluations: (order.membershipBenefitEvaluations ?? null) as unknown as Prisma.InputJsonValue,
       fulfillmentMode: order.fulfillmentMode,
       fulfillmentLocationId: order.fulfillmentLocationId,
       fulfillmentLocationName: order.fulfillmentLocationName,
@@ -321,7 +327,8 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
             assetId: allocation.assetId ?? null,
             assetNo: allocation.assetNo ?? null,
             quantity: allocation.quantity,
-            status: allocation.status
+            status: allocation.status,
+            metadata: (allocation.metadata ?? Prisma.JsonNull) as Prisma.InputJsonValue
           }
         });
       }
@@ -387,14 +394,24 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
         status: { in: ACTIVE_RESERVATION_STATES },
         OR: [{ expiresAt: null }, { expiresAt: { gte: now } }]
       },
-      select: { itemGroupId: true, locationId: true, quantity: true, releasedQuantity: true, startAt: true, endAt: true }
+      select: {
+        orderId: true, orderLineId: true, itemGroupId: true, locationId: true,
+        quantity: true, releasedQuantity: true, startAt: true, endAt: true, status: true,
+        order: { select: {
+          ruleSnapshot: true,
+          allocations: { where: { status: { in: IN_USE_ALLOCATION_STATES } }, select: { orderLineId: true, itemGroupId: true, assetId: true } }
+        } }
+      }
     });
     return rows.map((row) => ({
+      orderId: row.orderId,
+      assetIds: row.order.allocations
+        .filter((allocation) => allocation.orderLineId === row.orderLineId && (!allocation.itemGroupId || allocation.itemGroupId === row.itemGroupId))
+        .map((allocation) => allocation.assetId).filter((assetId): assetId is string => Boolean(assetId)),
       itemGroupId: row.itemGroupId,
       locationId: row.locationId,
       quantity: Math.max(0, row.quantity - row.releasedQuantity),
-      startAt: iso(row.startAt),
-      endAt: iso(row.endAt)
+      ...bufferedRentalPeriod(iso(row.startAt), row.status === "FULFILLED" && row.endAt <= now ? "9999-12-30T00:00:00.000Z" : iso(row.endAt), row.order.ruleSnapshot as unknown as RentalRuleConfig)
     }));
   }
 
@@ -583,7 +600,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     return rows.map((row) => {
       const results = structuredClone((row.results ?? {}) as Record<string, unknown>);
       const meta = results.__r1InspectionMeta as
-        | Pick<RentalInspectionRecord, "baselineInspectionId" | "comparisons" | "usageReadings">
+        | Pick<RentalInspectionRecord, "baselineInspectionId" | "comparisons" | "usageReadings" | "returnedItems">
         | undefined;
       delete results.__r1InspectionMeta;
       return {
@@ -598,6 +615,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
         baselineInspectionId: meta?.baselineInspectionId,
         comparisons: meta?.comparisons,
         usageReadings: meta?.usageReadings,
+        returnedItems: meta?.returnedItems,
         exceptions: (row.exceptions ?? []) as RentalInspectionRecord["exceptions"],
         attachments: (row.attachments ?? []) as string[],
         operator: row.operator,
@@ -623,7 +641,8 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
           __r1InspectionMeta: {
             baselineInspectionId: record.baselineInspectionId,
             comparisons: record.comparisons ?? [],
-            usageReadings: record.usageReadings ?? []
+            usageReadings: record.usageReadings ?? [],
+            returnedItems: record.returnedItems ?? []
           }
         } as Prisma.InputJsonValue,
         exceptions: record.exceptions as unknown as Prisma.InputJsonValue,
@@ -672,6 +691,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
         rateSnapshot: extension.rateSnapshot as unknown as Prisma.InputJsonValue,
         ruleSnapshot: extension.ruleSnapshot as unknown as Prisma.InputJsonValue,
         calendarSnapshot: extension.calendarSnapshot as unknown as Prisma.InputJsonValue,
+        pricingSnapshot: extension.pricingSnapshot ? extension.pricingSnapshot as unknown as Prisma.InputJsonValue : Prisma.DbNull,
         settlementMode: extension.settlementMode,
         idempotencyKey: extension.idempotencyKey,
         memo: extension.memo ?? null,
@@ -745,6 +765,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       rateSnapshot: row.rateSnapshot as unknown as RentalOrderExtension["rateSnapshot"],
       ruleSnapshot: row.ruleSnapshot as unknown as RentalOrderExtension["ruleSnapshot"],
       calendarSnapshot: row.calendarSnapshot as unknown as RentalOrderExtension["calendarSnapshot"],
+      pricingSnapshot: row.pricingSnapshot ? row.pricingSnapshot as unknown as RentalOrderExtension["pricingSnapshot"] : undefined,
       settlementMode: row.settlementMode as RentalOrderExtension["settlementMode"],
       memo: row.memo ?? undefined,
       paidAt: optionalIso(row.paidAt),
@@ -753,6 +774,13 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       createdBy: row.createdBy,
       createdAt: iso(row.createdAt)
     };
+  }
+
+  async updateExtensionPricingSnapshot(tenantId: string, orderId: string, extensionId: string, snapshot: NonNullable<RentalOrderExtension["pricingSnapshot"]>, tx: RentalFactTx) {
+    const workspaceId = await resolveScopeWorkspaceId(tx, tenantId);
+    await tx.rentalOrderExtension.updateMany({ where: { id: extensionId, orderId, tenantId, workspaceId }, data: {
+      pricingSnapshot: snapshot as unknown as Prisma.InputJsonValue
+    } });
   }
 
   /* ---------- 行 → 领域对象 ---------- */
@@ -795,12 +823,14 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       assetId: allocation.assetId ?? undefined,
       assetNo: allocation.assetNo ?? undefined,
       quantity: allocation.quantity,
-      status: allocation.status as RentalAllocation["status"]
+      status: allocation.status as RentalAllocation["status"],
+      metadata: allocation.metadata ? allocation.metadata as unknown as RentalAllocation["metadata"] : undefined
     }));
     return {
       id: row.id,
       tenantId: row.tenantId,
       orderNo: row.orderNo,
+      assignment: row.assignment ? row.assignment as unknown as RentalOrder["assignment"] : undefined,
       categoryCode: lower<RentalCategoryCode>(row.categoryCode),
       status: lower<RentalCoreOrderStatus>(row.status),
       customerType: row.customerType as RentalOrder["customerType"],
@@ -808,6 +838,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       customerName: row.customerName,
       contactPhone: row.contactPhone ?? undefined,
       membershipSnapshot: (row.membershipSnapshot ?? undefined) as RentalOrder["membershipSnapshot"],
+      membershipBenefitEvaluations: (row.membershipBenefitEvaluations ?? undefined) as RentalOrder["membershipBenefitEvaluations"],
       fulfillmentMode: row.fulfillmentMode as RentalFulfillmentMode,
       fulfillmentLocationId: row.fulfillmentLocationId,
       fulfillmentLocationName: row.fulfillmentLocationName,

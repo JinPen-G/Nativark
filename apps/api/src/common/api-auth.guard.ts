@@ -367,6 +367,7 @@ export function requiredPermissions(method: string, path: string) {
     return ["store-rental:order:view"];
   }
   // 续租：读用 order:view，写用 order:extend（这个权限码平台侧早已定义，旧模块从未接上）。
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/extensions\/[^/]+\/refund-review$/)) return ["store-rental:order:settle"];
   // 试算不落库但会暴露价格，因此和申请同权限，不给只读账号看到续租报价。
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/extensions$/)) {
     return method === "GET" ? ["store-rental:order:view"] : ["store-rental:order:extend", "store-rental:order:operate"];
@@ -379,6 +380,10 @@ export function requiredPermissions(method: string, path: string) {
   }
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/inspections\/[^/]+\/exceptions\/[^/]+\/review$/)) return ["store-rental:order:settle"];
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/cancel$/)) return ["store-rental:order:cancel", "store-rental:order:operate"];
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/operation-lock$/)) return ["store-rental:order:operate", "store-rental:order:pickup", "store-rental:order:return"];
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/handover\/pickup$/)) return ["store-rental:order:operate", "store-rental:order:pickup"];
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/(handover\/return|partial-return)$/)) return ["store-rental:order:operate", "store-rental:order:return"];
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/(assignments|allocation-candidates)$/)) return ["store-rental:order:operate"];
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/(confirm|allocate|substitute-bundle-component|partial-return|handover\/[^/]+)$/)) return ["store-rental:order:operate"];
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/settle$/)) return ["store-rental:order:settle"];
   // RULE-01B：押金/预授权模拟资金事件。读用 order:view 或 order:settle；
@@ -578,6 +583,7 @@ export class ApiAuthGuard implements CanActivate {
     enterRequestIdentity({
       tenantId: user.tenantId,
       userId: user.id,
+      operationToken: typeof request.headers["x-operation-token"] === "string" ? request.headers["x-operation-token"] : undefined,
       isSaasAdmin: Boolean(user.isSaasAdmin),
       // 只从会话写入，绝不读取请求体或查询参数里的 workspaceId。
       workspaceId

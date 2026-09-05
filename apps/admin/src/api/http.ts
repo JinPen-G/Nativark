@@ -111,12 +111,13 @@ http.interceptors.response.use(
   }
 );
 
-export async function request<T>(path: string, options: { method?: "get" | "post" | "put" | "patch" | "delete"; data?: unknown; params?: unknown } = {}) {
+export async function request<T>(path: string, options: { method?: "get" | "post" | "put" | "patch" | "delete"; data?: unknown; params?: unknown; headers?: Record<string, string> } = {}) {
   const response = await http.request<ApiResult<T>>({
     url: path,
     method: options.method ?? "get",
     data: options.data,
-    params: options.params
+    params: options.params,
+    headers: options.headers
   });
   return response.data.data;
 }

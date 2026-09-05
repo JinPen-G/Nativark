@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { theme, type ThemeConfig } from "antd";
 
 export type AppearanceMode = "default" | "dark" | "compact";
@@ -30,17 +30,45 @@ function readInitialMode(): AppearanceMode {
   return stored === "dark" || stored === "compact" || stored === "default" ? stored : "default";
 }
 
+/**
+ * 切换主题时短暂关掉全局过渡（见 styles.css 的 `[data-theme-switching]`）。
+ *
+ * 「延迟变色」不是 antd 换样式慢，而是过渡动画：我们和 antd 都在按钮、菜单项、
+ * 表格行、卡片上写了 `background-color` / `color` 的 0.2~0.3s 过渡。变量一换，
+ * 有过渡的元素慢慢染色、没过渡的立刻到位，同一屏就会深浅混着出现。
+ * 关掉过渡后颜色直接跳到新值，切换是原来那种即时切换，不遮挡也不闪。
+ *
+ * 120ms 覆盖住变量落地的那几帧就够；这段时间内 hover 之类的过渡也会失效，无感。
+ */
+const THEME_SWITCH_MS = 120;
+
 export function AppearanceProvider({ children }: { children: ReactNode }) {
   const [mode, setModeState] = useState<AppearanceMode>(readInitialMode);
+  const revealTimer = useRef<number>(0);
 
-  useEffect(() => {
+  const setMode = useCallback((next: AppearanceMode) => {
+    const root = document.documentElement;
+    root.dataset.themeSwitching = "";
+    window.clearTimeout(revealTimer.current);
+    revealTimer.current = window.setTimeout(() => { delete root.dataset.themeSwitching; }, THEME_SWITCH_MS);
+    setModeState(next);
+  }, []);
+
+  /**
+   * 这三个 DOM 写入必须在绘制前完成，因此用 useLayoutEffect。
+   *
+   * 放在 useEffect 里是"渲染完 → 绘制 → 再改属性"，侧栏底色与 colorScheme 会比
+   * antd 的变量晚一帧生效，切换主题时看得出分层变色。localStorage 那行不影响画面，
+   * 顺带留在一起，省一个 effect。
+   */
+  useLayoutEffect(() => {
     document.documentElement.dataset.appearance = mode;
     document.documentElement.style.colorScheme = mode === "dark" ? "dark" : "light";
     document.documentElement.style.setProperty("--app-sider-bg", SIDER_BG[mode]);
     window.localStorage.setItem(STORAGE_KEY, mode);
   }, [mode]);
 
-  const value = useMemo(() => ({ mode, setMode: setModeState }), [mode]);
+  const value = useMemo(() => ({ mode, setMode }), [mode, setMode]);
   return <AppearanceContext.Provider value={value}>{children}</AppearanceContext.Provider>;
 }
 
@@ -60,7 +88,14 @@ export function createThemeConfig(mode: AppearanceMode): ThemeConfig {
 
   return {
     algorithm,
-    cssVar: { key: `rental-os-${mode}`, prefix: "rental" },
+    /**
+     * cssVar 的 key 必须**固定**，不能按模式取名。
+     *
+     * 组件样式的选择器是被这个 key 限定的：key 一变，antd 不是改几百个变量的值，
+     * 而是要为新 key 重新生成全部组件样式并换 class，于是切主题时能看到侧栏、卡片、
+     * 表格分批变色。key 固定后只有变量块被重写，组件样式复用，一次提交内完成。
+     */
+    cssVar: { key: "rental-os", prefix: "rental" },
     token: {
       colorPrimary: "#1677ff",
       colorInfo: "#1677ff",
