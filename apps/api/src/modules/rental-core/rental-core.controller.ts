@@ -1,7 +1,7 @@
 import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, Param, Post, Put, Query, Req, Res, UploadedFile, UseInterceptors } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import { Prisma } from "@prisma/client";
-import { RentalCoreOrderStatus } from "@store-rental/shared";
+import { RentalCoreOrderStatus, type RentalOrderExtension } from "@store-rental/shared";
 import { createHash } from "node:crypto";
 import type {
   CreateRentalInspectionRequest,
@@ -593,6 +593,35 @@ export class RentalCoreController {
     return preview;
   }
 
+  /**
+   * 续租新增服务的容量占用。续租**生效**时才占，不在申请时软预留。
+   *
+   * 需求 4.6.9 是「完成补款后再延长占用和租期」，待补款申请刻意不动订单占用；服务容量
+   * 同口径。软预留还有一个坑：`releaseExpired` 到期只把行改成 expired 而**保留幂等键**，
+   * 于是补款晚于 15 分钟时再调 `reserveForOrder` 会命中既有行直接跳过，容量被静默丢掉。
+   * 生效时一次性预留 + 确认，就没有过期窗口。
+   *
+   * 不能直接对整单调 `reserveForOrder`：它会按新 requestKey 给 `order.serviceSnapshots`
+   * 里**全部**服务再建一遍预留，等于把订单原有服务重复占用。只传本次新增的快照。
+   * 紧接着的 `confirmForOrder` 只动 `reserved` 状态的行——续租只发生在租赁中/待领取的
+   * 订单上，原有服务此时已是 confirmed/used，因此确认的正好只有刚建的这几条。
+   */
+  private async occupyExtensionServices(
+    tenantId: string,
+    orderId: string,
+    extension: RentalOrderExtension,
+    tx: Prisma.TransactionClient
+  ) {
+    if (!extension.serviceSnapshots?.length) return;
+    await this.serviceCapacities.reserveForOrder(
+      tenantId,
+      { id: orderId, serviceSnapshots: extension.serviceSnapshots, reservations: [] },
+      `extension:${extension.id}`,
+      tx
+    );
+    await this.serviceCapacities.confirmForOrder(tenantId, orderId, extension.effectiveAt ?? new Date().toISOString(), tx);
+  }
+
   @Post("orders/:id/extensions")
   async applyExtension(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: RentalOrderExtensionDto) {
     const tenantId = req.user.tenantId;
@@ -615,6 +644,9 @@ export class RentalCoreController {
           tx
         );
         await this.business.synchronizeExtensionCoupon(tenantId, result.extension, tx);
+        // 企业月结无需补款、申请即生效，因此这里就要占住新增服务的容量。
+        // 待补款的申请不占：占用与租期都等补款到账（需求 4.6.9）。
+        if (result.extension.status === "effective") await this.occupyExtensionServices(tenantId, id, result.extension, tx);
         return result;
       },
       replay: async () => {
@@ -645,6 +677,8 @@ export class RentalCoreController {
         await this.funding.assertExtensionPaid(tenantId, this.service.resolveWorkspaceId(tenantId), id, extensionId, tx);
         const result = await this.service.payOrderExtension(tenantId, id, extensionId, tx);
         await this.business.synchronizeExtensionCoupon(tenantId, result.extension, tx);
+        // 补款到账、续租生效：这一刻才占住新增服务的容量，与延长租期同一个事务。
+        await this.occupyExtensionServices(tenantId, id, result.extension, tx);
         return result;
       },
       replay: async () => {

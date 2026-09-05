@@ -49,6 +49,7 @@ import {
   type RentalPricingPlanV1,
   type RentalPricingRate,
   type RentalQuoteCalendarDay,
+  type RentalQuoteServiceSnapshot,
   type RentalQuoteRequest,
   type RentalQuoteSnapshotV1,
   type RentalCapabilityDecisionSnapshot,
@@ -5002,6 +5003,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
 
     // 增量期的增值服务：按新增时间段单独计费，与原订单已有的服务互不影响。
     let serviceAmount = 0;
+    let serviceSnapshots: RentalQuoteServiceSnapshot[] | undefined;
     if (args.services?.length) {
       const resolved = resolveQuoteServices(state.services, {
         selections: args.services,
@@ -5015,7 +5017,11 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         rentalAmount,
         workspaceId: this.workspaceOf(tenantId)
       });
+      // 与下单报价同一道闸门：续租此前从不校验容量，于是可以给容量已满的服务加单，
+      // 到履约那天没人能做。快照也必须带出去，否则生效时无从占用容量。
+      await this.serviceCapacities?.assertAvailableForQuote(tenantId, resolved.snapshots);
       serviceAmount = resolved.totalAmount;
+      serviceSnapshots = resolved.snapshots;
       for (const snapshot of resolved.snapshots) {
         chargeLines.push({
           code: `extension-service:${snapshot.serviceCode}`,
@@ -5058,6 +5064,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       paymentRequired: extensionPaymentRequired({ settlementMode: args.settlementMode, payableAmount, depositDelta, preAuthDelta }),
       chargeLines,
       calendarSnapshot,
+      serviceSnapshots,
       priceVersionId: "versionId" in spaceVersion ? spaceVersion.versionId : undefined,
       priceVersion: "version" in spaceVersion ? spaceVersion.version : undefined,
       ruleVersion: rule.version,
@@ -5176,6 +5183,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
 
     // 增量期的增值服务：按新增时间段单独计费，与原订单已有的服务互不影响。
     let serviceAmount = 0;
+    let serviceSnapshots: RentalQuoteServiceSnapshot[] | undefined;
     if (args.services?.length) {
       const resolved = resolveQuoteServices(state.services, {
         selections: args.services,
@@ -5189,7 +5197,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         rentalAmount: fullRentalAmount,
         workspaceId: this.workspaceOf(tenantId)
       });
+      // 与下单报价同一道闸门；快照带出去供生效时占用容量。理由同增量式续租那一处。
+      await this.serviceCapacities?.assertAvailableForQuote(tenantId, resolved.snapshots);
       serviceAmount = resolved.totalAmount;
+      serviceSnapshots = resolved.snapshots;
       for (const snapshot of resolved.snapshots) {
         chargeLines.push({
           code: `extension-service:${snapshot.serviceCode}`,
@@ -5330,6 +5341,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       paymentRequired: extensionPaymentRequired({ settlementMode: args.settlementMode, payableAmount, depositDelta, preAuthDelta }),
       chargeLines: deltaLines,
       calendarSnapshot,
+      serviceSnapshots,
       priceVersionId: originalQuote.priceVersionId,
       priceVersion: originalQuote.priceVersion ?? originalQuote.pricingPlanVersion,
       pricingSnapshot: {

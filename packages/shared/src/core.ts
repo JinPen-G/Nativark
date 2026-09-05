@@ -4898,6 +4898,14 @@ export interface RentalOrderExtension {
   calendarSnapshot: RentalQuoteCalendarDay[];
   pricingSnapshot?: RentalExtensionPricingSnapshot;
   /**
+   * 本次续租新增的增值服务快照，申请时固化。
+   *
+   * 必须落库而不是只留在预览里：申请与生效之间可能隔着客户补款，生效时要靠它
+   * 确认服务容量、并把这些服务合并进订单的 `serviceSnapshots`（归还结算判断服务
+   * 是否已开始、以及损坏免赔认定都读订单上的那一份）。
+   */
+  serviceSnapshots?: RentalQuoteServiceSnapshot[];
+  /**
    * 申请时快照的结算方式。`monthly` 表示企业月结客户，检查通过即生效、
    * 费用记入月结账单，不需要客户补款动作；`immediate` 需要补款后才生效。
    */
@@ -4969,6 +4977,14 @@ export interface RentalOrderExtensionPreview {
   /** 增量期的逐行计算说明，与报价的「计算说明」同源，便于客服核对。 */
   chargeLines: RentalQuoteChargeLine[];
   calendarSnapshot: RentalQuoteCalendarDay[];
+  /**
+   * 本次续租新增的增值服务快照。
+   *
+   * 此前续租只把服务费算进 `serviceAmount` 与费用明细，解析出来的快照直接丢弃，
+   * 于是这些服务既不占服务容量、也不进订单的 `serviceSnapshots`：容量可被超卖，
+   * 归还结算看不到它们，续租加的损坏免赔也静默不生效。
+   */
+  serviceSnapshots?: RentalQuoteServiceSnapshot[];
   priceVersionId?: string;
   priceVersion?: string;
   ruleVersion: string;

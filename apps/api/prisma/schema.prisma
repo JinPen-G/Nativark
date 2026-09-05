@@ -1981,6 +1981,8 @@ model RentalOrderExtension {
   ruleSnapshot    Json
   /// RentalQuoteCalendarDay[]：增量期逐日计价依据。
   calendarSnapshot Json
+  /// RentalQuoteServiceSnapshot[]：本次续租新增的增值服务。生效时据此确认容量并合并进订单快照。
+  serviceSnapshots Json?
   /// immediate（需客户补款后生效）| monthly（企业月结，检查通过即生效）。申请时快照。
   settlementMode  String            @db.VarChar(20)
   idempotencyKey  String
