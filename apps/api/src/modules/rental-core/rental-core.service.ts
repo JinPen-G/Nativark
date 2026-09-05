@@ -83,7 +83,8 @@ import {
   type InventoryLockTarget,
   type RentalFactTx,
   type RentalCoreFactStore,
-  type RentalUniqueAttributeClaim
+  type RentalUniqueAttributeClaim,
+  type StockQuarantineChange
 } from "./rental-core-fact.repository";
 import { assertRentalCategoryExtensions } from "./rental-extension-registry";
 import { buildRentalCategorySamples } from "./rental-category-samples";
@@ -969,18 +970,21 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (group.inventoryMode !== RentalInventoryMode.Quantity) throw new BadRequestException("只有数量型库存可以维护库存余额");
     const location = this.activeLocation(state, input.locationId, "storage");
     if (!Number.isInteger(input.onHandQuantity) || input.onHandQuantity < 0) throw new BadRequestException("在手数量必须是非负整数");
-    const maintenance = input.maintenanceQuantity ?? 0;
-    if (!Number.isInteger(maintenance) || maintenance < 0 || maintenance > input.onHandQuantity) throw new BadRequestException("维护数量无效");
-    const stocks = await this.factStore.listStockBalances(tenantId);
-    const existing = stocks.find((row) => row.itemGroupId === group.id && row.locationId === location.id);
-    const result: RentalStockBalance = {
-      id: existing?.id ?? id("stock"), tenantId, itemGroupId: group.id, itemGroupCode: group.code,
-      itemGroupName: group.name, locationId: location.id, locationName: location.name,
-      onHandQuantity: input.onHandQuantity, reservedQuantity: existing?.reservedQuantity ?? 0,
-      maintenanceQuantity: maintenance, availableQuantity: Math.max(0, input.onHandQuantity - maintenance), updatedAt: now()
-    };
-    await this.factStore.upsertStockBalance(result);
-    return (await this.listStockBalances(tenantId)).find((row) => row.id === result.id)!;
+    if (input.maintenanceQuantity !== undefined && (!Number.isInteger(input.maintenanceQuantity) || input.maintenanceQuantity < 0)) {
+      throw new BadRequestException("维护数量无效");
+    }
+    // 不在这里 `?? 0`：维修量这一列还记着异常归还的隔离量，省略即清零会让一次
+    // 只报在手数量的例行盘点顺手把隔离中的坏货放回可用池。合并与上界校验都在
+    // `applyStockCount` 的行锁内完成——读-改-写必须原子，否则并发隔离会被覆盖。
+    const saved = await this.factStore.applyStockCount({
+      id: id("stock"),
+      tenantId,
+      itemGroupId: group.id,
+      locationId: location.id,
+      onHandQuantity: input.onHandQuantity,
+      maintenanceQuantity: input.maintenanceQuantity
+    });
+    return (await this.listStockBalances(tenantId)).find((row) => row.id === saved.id)!;
   }
 
   async availability(tenantId: string, input: RentalAvailabilityRequest): Promise<RentalAvailabilityResult> {
@@ -1704,6 +1708,10 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       attachments: input.attachments ?? [], operator: input.operator || userName, createdAt: now()
     };
     const assetChanges: AssetStatusChange[] = [];
+    const stockQuarantines: StockQuarantineChange[] = [];
+    // 归还前的已释放量快照：隔离数量必须是"本批刚释放的量"，不是累计量。
+    // 分批归还会多次进入这里，用累计量会把前几批已经放回可用池的数量再隔离一遍。
+    const releasedBeforeReturn = new Map(order.reservations.map((row) => [row.id, row.releasedQuantity]));
     if (template.stage === "pickup") {
       this.markPickedUp(order, assetChanges);
     } else {
@@ -1718,6 +1726,9 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       if (input.exceptions?.length) {
         // 有异常的序列化资产先进入维护，不能在工单处理前重新出租。
         for (const change of assetChanges) change.status = RentalAssetStatus.Maintenance;
+        // 数量库存此前完全没有对应处理：预占一释放，数量就回到可用池，下一单就能把
+        // 坏的租出去。序列化资产靠上面这行进维护，数量库存必须靠维修量隔离。
+        stockQuarantines.push(...this.quarantinedReturnQuantities(state, order, releasedBeforeReturn));
       }
       // 逐批归还不结清整个租期：逾期、提前归还和服务消耗都在最后一批的整单归还时计算。
       if (!partialReturnItems && charges.overdue && charges.overdue.amount > 0) this.applyOverdueTo(order, charges.overdue.amount, charges.overdue.returnedAt);
@@ -1728,7 +1739,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     // 检查记录与订单状态推进必须同事务：分两次写时中途失败会留下
     // "检查已记录、订单未推进"的中间态。
     await this.factStore.insertInspection(record, tx);
-    await this.factStore.saveOrderAggregate(order, assetChanges, tx);
+    await this.factStore.saveOrderAggregate(order, assetChanges, tx, stockQuarantines);
     return { inspection: record, order };
   }
 
@@ -2111,6 +2122,44 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       if (row.assetId) assetChanges.push({ assetId: row.assetId, status: RentalAssetStatus.Available });
     });
     if (overdueCharge > 0) this.applyOverdueTo(order, overdueCharge, now());
+  }
+
+  /**
+   * 带异常归还时，本批归还的**数量库存**要进维修隔离，而不是回到可用池。
+   *
+   * 为什么是一刀切：检查异常（`CreateRentalInspectionRequest.exceptions`）只有
+   * code/description/建议金额，不带商品或分配项标识，因此无法知道坏的是哪一件。
+   * 序列化资产早就是同样的一刀切——有异常就把本批全部资产置维护——数量库存却什么
+   * 都不做。宁可多隔离等人工核减，也不能把可能损坏的货直接算进下一单的可用量。
+   *
+   * 隔离量取"本批刚释放的量"（`releasedQuantity` 前后差值），不是预占总量：分批归还
+   * 会多次走到这里，用总量会把前几批早已放回可用池的数量再隔离一遍。
+   *
+   * 地点取预占自己的 `locationId`：释放预占是把可用量还给这个地点（`activeReservations`
+   * 不再计它的占用），隔离必须冲在同一个地点上。记到归还网点会变成可用量在 A 涨、
+   * 维修量在 B 涨，净额等于没隔离——数量库存的实物调拨本来也不在这条路径上建模。
+   *
+   * 出口是人工：`setStockBalance` 可以把维修量降回去（修好或核销后）。
+   */
+  private quarantinedReturnQuantities(
+    state: TenantRentalState,
+    order: RentalOrder,
+    releasedBefore: Map<string, number>
+  ): StockQuarantineChange[] {
+    const byTarget = new Map<string, StockQuarantineChange>();
+    for (const reservation of order.reservations) {
+      const quantity = reservation.releasedQuantity - (releasedBefore.get(reservation.id) ?? 0);
+      if (quantity <= 0) continue;
+      // 序列化资产已经通过 assetChanges 置维护；再按数量隔离一次就是同一件货扣两遍。
+      // 用不抛异常的查找：归还路径不该因为配置里少一个分组就整单失败。
+      const group = state.itemGroups.find((row) => row.id === reservation.itemGroupId);
+      if (group?.inventoryMode === RentalInventoryMode.Serialized) continue;
+      const key = `${reservation.itemGroupId}:${reservation.locationId}`;
+      const existing = byTarget.get(key);
+      if (existing) existing.quantity += quantity;
+      else byTarget.set(key, { itemGroupId: reservation.itemGroupId, locationId: reservation.locationId, quantity });
+    }
+    return [...byTarget.values()];
   }
 
   /**

@@ -82,6 +82,16 @@ function createAbsorbingFactStore() {
     upsertAsset: record("asset"),
     listStockBalances: () => Promise.resolve([]),
     upsertStockBalance: record("stockBalance"),
+    // 盘点写入在真实实现里是「锁行 → 读现值 → 合并维修量」。锁语义与并发合并同样
+    // 只能在真 MySQL 里验证，这里回显入参：吸收式 store 读永远是空库，省略维修量按 0。
+    applyStockCount: (input) => {
+      writes.push({ kind: "stockBalance", id: input?.id });
+      return Promise.resolve({
+        id: input?.id,
+        onHandQuantity: input?.onHandQuantity ?? 0,
+        maintenanceQuantity: input?.maintenanceQuantity ?? 0
+      });
+    },
     listInspections: () => Promise.resolve([]),
     insertInspection: record("inspection")
   };

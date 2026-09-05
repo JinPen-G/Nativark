@@ -41,6 +41,35 @@ export interface AssetStatusChange {
   status: RentalAssetStatus;
 }
 
+/**
+ * 数量库存的隔离变更，同样随订单聚合一起提交。
+ *
+ * 数量库存没有"单件状态"可以像序列化资产那样转成 maintenance：它只有
+ * 在库/已占用/维修三个数量。异常归还时若只释放预占，那批货会直接回到可用池，
+ * 下一单就能把坏的租出去。因此必须把数量记进 `maintenanceQuantity` 隔离。
+ */
+export interface StockQuarantineChange {
+  itemGroupId: string;
+  locationId: string;
+  /** 转入维修隔离的数量，正数。 */
+  quantity: number;
+}
+
+/**
+ * 盘点写入的入参。`maintenanceQuantity` 省略表示"本次不动维修量"，不是 0。
+ *
+ * `id` 只在余额行还不存在时用得上；已存在时沿用库里的 id，避免同一个
+ * (商品, 网点) 因为调用方每次生成新 id 而 upsert 出第二行。
+ */
+export interface StockCountInput {
+  id: string;
+  tenantId: string;
+  itemGroupId: string;
+  locationId: string;
+  onHandQuantity: number;
+  maintenanceQuantity?: number;
+}
+
 export type RentalFactTx = Prisma.TransactionClient;
 
 export interface InventoryLockTarget {
@@ -68,7 +97,7 @@ export interface RentalCoreFactStore {
    */
   lockOrder(tenantId: string, orderId: string, tx: RentalFactTx): Promise<void>;
   countOrders(tenantId: string): Promise<number>;
-  saveOrderAggregate(order: RentalOrder, assetChanges?: AssetStatusChange[], tx?: RentalFactTx): Promise<void>;
+  saveOrderAggregate(order: RentalOrder, assetChanges?: AssetStatusChange[], tx?: RentalFactTx, stockQuarantines?: StockQuarantineChange[]): Promise<void>;
   lockInventoryTargets(tenantId: string, locationId: string, targets: InventoryLockTarget[], tx: RentalFactTx): Promise<void>;
   activeReservations(tenantId: string, tx?: RentalFactTx): Promise<ActiveReservationRow[]>;
   /**
@@ -90,6 +119,11 @@ export interface RentalCoreFactStore {
   upsertAsset(asset: RentalAsset, uniqueAttributes?: RentalUniqueAttributeClaim[]): Promise<void>;
   listStockBalances(tenantId: string, tx?: RentalFactTx): Promise<RentalStockBalance[]>;
   upsertStockBalance(balance: RentalStockBalance): Promise<void>;
+  /**
+   * 盘点写入。与 `upsertStockBalance`（只用于建样例数据）分开，因为它必须锁行：
+   * `maintenanceQuantity` 现在有第二个写者，见 `saveOrderAggregate` 的异常隔离。
+   */
+  applyStockCount(input: StockCountInput): Promise<{ id: string; onHandQuantity: number; maintenanceQuantity: number }>;
   listInspections(tenantId: string, orderId: string): Promise<RentalInspectionRecord[]>;
   insertInspection(record: RentalInspectionRecord, tx?: RentalFactTx): Promise<void>;
   /** 续租记录（需求 4.6.9）。只追加与改状态，不改金额——金额是申请时固化的事实。 */
@@ -193,7 +227,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
    * 写回订单聚合。行与预占按 id upsert，分配整表替换（配货会重算整组分配），
    * 资产状态变更一并进入同一事务。
    */
-  async saveOrderAggregate(order: RentalOrder, assetChanges: AssetStatusChange[] = [], tx?: RentalFactTx): Promise<void> {
+  async saveOrderAggregate(order: RentalOrder, assetChanges: AssetStatusChange[] = [], tx?: RentalFactTx, stockQuarantines: StockQuarantineChange[] = []): Promise<void> {
     const orderData = {
       tenantId: order.tenantId,
       orderNo: order.orderNo,
@@ -340,6 +374,28 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
           where: { id: change.assetId, tenantId: order.tenantId },
           data: { status: upper<$Enums.RentalAssetState>(change.status) }
         });
+      }
+
+      // 数量库存的异常隔离：加进维修量，使它不再回到可用池。
+      // 与资产状态变更同一事务——分两次写会留下「订单已归还、坏货已可租」的中间态。
+      for (const quarantine of stockQuarantines) {
+        if (quarantine.quantity <= 0) continue;
+        const isolated = await client.rentalStockBalance.updateMany({
+          where: {
+            tenantId: order.tenantId,
+            workspaceId,
+            itemGroupId: quarantine.itemGroupId,
+            locationId: quarantine.locationId
+          },
+          data: { maintenanceQuantity: { increment: quarantine.quantity } }
+        });
+        // 匹配不到余额行时 updateMany 只会返回 count: 0 而不报错，隔离就被静默丢弃了。
+        // 维修量是这条路径上唯一阻止坏货回到可用池的手段，宁可让整单归还失败。
+        if (isolated.count === 0) {
+          throw new ConflictException(
+            `商品 ${quarantine.itemGroupId} 在网点 ${quarantine.locationId} 没有库存台账，无法隔离异常归还的数量`
+          );
+        }
       }
     };
 
@@ -568,6 +624,53 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     }));
   }
 
+  /**
+   * 盘点写入：锁行 → 读现值 → 合并 → 落库，全程同一事务。
+   *
+   * 为什么必须锁：`maintenanceQuantity` 从"只有盘点一个写者"变成了两个——异常归还的
+   * 隔离增量也写它（见 `saveOrderAggregate`）。无锁的读-改-写会把并发的隔离整行覆盖掉，
+   * 等于把刚隔离的坏货又放回可用池，正是隔离要防的事。
+   *
+   * `maintenanceQuantity` 省略时**保留库里现值**：盘点表单常常只报在手数量，
+   * 默认清零会让一次例行盘点顺手解除隔离。要下调维修量必须显式给值。
+   */
+  async applyStockCount(input: StockCountInput): Promise<{ id: string; onHandQuantity: number; maintenanceQuantity: number }> {
+    return this.prisma.$transaction(async (tx) => {
+      const workspaceId = await resolveScopeWorkspaceId(tx, input.tenantId);
+      await this.lockInventoryTargets(
+        input.tenantId,
+        input.locationId,
+        [{ itemGroupId: input.itemGroupId, inventoryMode: RentalInventoryMode.Quantity }],
+        tx
+      );
+      const existing = await tx.rentalStockBalance.findFirst({
+        where: { tenantId: input.tenantId, workspaceId, itemGroupId: input.itemGroupId, locationId: input.locationId },
+        select: { id: true, maintenanceQuantity: true }
+      });
+      const maintenanceQuantity = input.maintenanceQuantity ?? existing?.maintenanceQuantity ?? 0;
+      // 在手数量兜不住维修量时明确拒绝，而不是把维修量截断——截断会静默释放隔离。
+      if (maintenanceQuantity > input.onHandQuantity) {
+        throw new ConflictException(
+          `维修隔离数量 ${maintenanceQuantity} 超过在手数量 ${input.onHandQuantity}，请先处理隔离中的商品再下调库存`
+        );
+      }
+      const id = existing?.id ?? input.id;
+      const data = {
+        tenantId: input.tenantId,
+        itemGroupId: input.itemGroupId,
+        locationId: input.locationId,
+        onHandQuantity: input.onHandQuantity,
+        maintenanceQuantity
+      };
+      await tx.rentalStockBalance.upsert({
+        where: { id },
+        create: { workspaceId, id, ...data },
+        update: data
+      });
+      return { id, onHandQuantity: input.onHandQuantity, maintenanceQuantity };
+    });
+  }
+
   async findStockBalance(tenantId: string, itemGroupId: string, locationId: string) {
     return this.prisma.rentalStockBalance.findFirst({
       where: { tenantId, workspaceId: await resolveScopeWorkspaceId(this.prisma, tenantId), itemGroupId, locationId },
@@ -587,12 +690,10 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     await this.prisma.rentalStockBalance.upsert({
       where: { id: balance.id },
       create: { workspaceId, id: balance.id, ...data },
-      update: data
-    });
+      update: data    });
   }
 
   /* ---------- 检查记录 ---------- */
-
   async listInspections(tenantId: string, orderId: string): Promise<RentalInspectionRecord[]> {
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
     const rows = await this.prisma.rentalInspectionRecord.findMany({
