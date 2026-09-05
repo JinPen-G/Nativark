@@ -43,6 +43,7 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  MaxLength,
   Min,
   Max,
   IsInt,
@@ -268,6 +269,10 @@ export class PartialReturnRentalOrderDto implements PartialReturnRentalOrderRequ
   @ValidateNested({ each: true })
   @Type(() => PartialReturnAllocationInputDto)
   items!: PartialReturnAllocationInputDto[];
+
+  // 归还批次标识（见共享契约的说明）。长度上限与幂等键列宽一致，
+  // 否则超长值会在写幂等记录时撞 MySQL 1406 变成 500，而不是这里明确的 400。
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(128) batchNo?: string;
 }
 
 /**
@@ -430,6 +435,9 @@ export class CreateRentalInspectionDto implements CreateRentalInspectionRequest 
   @ValidateNested({ each: true })
   @Type(() => PartialReturnAllocationInputDto)
   returnItems?: PartialReturnAllocationInputDto[];
+
+  // 分批归还的批次标识（见共享契约）。只在 returnItems 非空时需要。
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(128) returnBatchNo?: string;
 
   @IsOptional()
   @IsArray()

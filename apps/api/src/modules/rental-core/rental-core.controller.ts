@@ -438,13 +438,26 @@ export class RentalCoreController {
     @Body() body: PartialReturnRentalOrderDto
   ) {
     const tenantId = req.user.tenantId;
-    const fallbackHash = createHash("sha256").update(JSON.stringify([...body.items].sort((left, right) => left.allocationId.localeCompare(right.allocationId)))).digest("hex").slice(0, 32);
+    const idempotencyKey = idempotencyKeyOf(req);
+    // 部分归还是**天然可重复**的动作：数量库存租 3 件，先还 1 件、再还 1 件是两次
+    // 真实归还，而两次请求体完全相同。此前兜底键是「订单 + 分配项内容哈希」，
+    // 于是第二次被判成第一次的重试直接丢弃——客户还了两件，系统只记一件。
+    //
+    // 也不能改用「当前已归还进度」做兜底键：那会让第一次请求的网络重试因为进度
+    // 已变而被当成新归还，重复扣减库存。可重复动作的幂等只能由调用方标识，
+    // 因此这里 fail-closed：两个标识都没有就拒绝，宁可让调用方补一个，
+    // 也不能静默丢掉一次真实归还。
+    if (!idempotencyKey && !body.batchNo) {
+      throw new BadRequestException(
+        "部分归还必须提供 Idempotency-Key 请求头或 batchNo，用于区分多次真实归还与同一次的网络重试"
+      );
+    }
     const order = await this.idempotent.execute({
       tenantId,
       action: "order.partial-return",
-      key: idempotencyKeyOf(req),
-      fallbackKey: `order.partial-return:${id}:${fallbackHash}`,
-      request: { orderId: id, items: body.items },
+      key: idempotencyKey,
+      fallbackKey: `order.partial-return:${id}:${body.batchNo}`,
+      request: { orderId: id, items: body.items, batchNo: body.batchNo },
       orderId: id,
       run: (tx) => this.service.partialReturnOrder(tenantId, id, body, tx),
       replay: async () => {
@@ -650,9 +663,14 @@ export class RentalCoreController {
     const returnedAt = new Date().toISOString();
     const stage = template?.stage;
     const partialReturn = stage === "return" && Boolean(body.returnItems?.length);
-    const partialReturnHash = partialReturn
-      ? createHash("sha256").update(JSON.stringify([...(body.returnItems ?? [])].sort((left, right) => left.allocationId.localeCompare(right.allocationId)))).digest("hex").slice(0, 16)
-      : undefined;
+    // 带 returnItems 的归还检查是分批归还的**第二个入口**，与 partial-return 同一个坑：
+    // 分配项内容哈希分不清"第二次归还相同数量"和"第一次的网络重试"。同样 fail-closed。
+    const inspectionKey = idempotencyKeyOf(req);
+    if (partialReturn && !inspectionKey && !body.returnBatchNo) {
+      throw new BadRequestException(
+        "分批归还检查必须提供 Idempotency-Key 请求头或 returnBatchNo，用于区分多次真实归还与同一次的网络重试"
+      );
+    }
     // 逾期费与提前归还退款都按规则直接计算；检查异常只保存建议，必须由结算人员另行审核。
     // 归还基准用订单的**当前**约定归还时间，续租过就是新时间，否则刚续上的单会被判逾期。
     const quote = this.business.getQuote(tenantId, context, current.quoteId);
@@ -671,13 +689,14 @@ export class RentalCoreController {
     const { result, replayed } = await this.idempotent.executeWithReplayFlag({
       tenantId,
       action: "order.inspection",
-      key: idempotencyKeyOf(req),
+      key: inspectionKey,
       // 键按订单 + 阶段：同一阶段的检查只应生效一次，换阶段是另一个动作。
       // 不纳入订单当前状态（理由见执行器注释），也不纳入 returnedAt——
       // 那是服务端每次取的当前时间，纳入后每次重试都算出新键，幂等直接失效。
-      fallbackKey: `order.inspection:${id}:${stage ?? "unknown"}:${partialReturnHash ?? "whole"}`,
+      // 分批归还按调用方给的批次号区分，整单归还固定用 "whole"。
+      fallbackKey: `order.inspection:${id}:${stage ?? "unknown"}:${body.returnBatchNo ?? "whole"}`,
       // returnedAt 同样不能进指纹，否则重试必然被判为"同键不同内容"而 409。
-      request: { orderId: id, templateId: body.templateId, results: body.results, returnItems: body.returnItems ?? [], exceptions: body.exceptions ?? [] },
+      request: { orderId: id, templateId: body.templateId, results: body.results, returnItems: body.returnItems ?? [], returnBatchNo: body.returnBatchNo, exceptions: body.exceptions ?? [] },
       orderId: id,
       run: async (tx) => {
         if (stage === "pickup") await this.funding.assertReadyForPickup(tenantId, this.service.resolveWorkspaceId(tenantId), id, tx);

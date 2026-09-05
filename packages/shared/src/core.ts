@@ -4487,6 +4487,21 @@ export interface PartialReturnRentalOrderRequest {
     allocationId: string;
     quantity: number;
   }>;
+  /**
+   * 本次归还批次的标识，由调用方生成，网络重试时必须复用同一个值。
+   *
+   * 为什么必须由调用方给：部分归还是**天然可重复**的业务动作——数量库存租 3 件，
+   * 先还 1 件、再还 1 件是两次真实归还，而两次请求的分配项与数量完全相同。
+   * 幂等兜底键此前是「订单 + 分配项内容哈希」，于是第二次被当成第一次的重试
+   * 直接丢弃：客户还了两件，系统只记一件。
+   *
+   * 也不能改用「当前已归还进度」做兜底键：那样第一次请求的网络重试会因为进度
+   * 已经变化而被当成新归还，重复扣减库存。可重复动作的幂等只能由调用方标识。
+   *
+   * 缺省时服务端要求必须带 `Idempotency-Key` 请求头；两者都没有则拒绝——
+   * 宁可让调用方补一个标识，也不能静默丢掉一次真实归还。
+   */
+  batchNo?: string;
 }
 
 export interface RentalOrder {
@@ -4967,6 +4982,14 @@ export interface CreateRentalInspectionRequest {
    * 逾期、提前归还和最终服务结算。
    */
   returnItems?: Array<{ allocationId: string; quantity: number }>;
+  /**
+   * 分批归还的批次标识，语义与 `PartialReturnRentalOrderRequest.batchNo` 完全一致。
+   *
+   * 带 `returnItems` 的归还检查是分批归还的第二个入口，此前和 `partial-return`
+   * 一样用分配项内容哈希做幂等兜底键，因此同样会把「第二次归还相同数量」
+   * 判成第一次的重试。只在 `returnItems` 非空时需要。
+   */
+  returnBatchNo?: string;
   /** 检查员只能提交建议损失额；最终计费必须由结算权限人员独立审核。 */
   exceptions?: Array<{ code: string; description: string; chargeAmount?: number; evidenceAttachments?: string[] }>;
   attachments?: string[];
