@@ -557,11 +557,15 @@ export class RentalCoreController {
     return "monthly";
   }
 
-  private async priceExtension(tenantId: string, orderId: string, body: RentalOrderExtensionDto) {
+  private async priceExtension(tenantId: string, orderId: string, body: RentalOrderExtensionDto, tx?: Prisma.TransactionClient) {
     const context = this.context(tenantId);
-    const order = await this.service.getOrder(tenantId, orderId);
-    await this.service.assertOrderExtensionAvailable(tenantId, order, body.newEndAt);
-    const previousExtensions = await this.service.listOrderExtensions(tenantId, orderId);
+    // 申请路径传 tx：必须在事务内锁住订单行之后再加载订单、有效续租与可用量，
+    // 否则定价和可用量判定用的是锁之前的事实。试算路径不传，只作展示。
+    const order = tx
+      ? await this.service.lockOrderForUpdate(tenantId, orderId, tx)
+      : await this.service.getOrder(tenantId, orderId);
+    await this.service.assertOrderExtensionAvailable(tenantId, order, body.newEndAt, tx);
+    const previousExtensions = await this.service.listOrderExtensions(tenantId, orderId, tx);
     const rule = effectiveExtensionRule(order.ruleSnapshot);
     const settlementMode = await this.resolveExtensionSettlement(tenantId, order, rule.forceImmediateWhenOverdue);
     return {
@@ -635,7 +639,7 @@ export class RentalCoreController {
       request: { orderId: id, newEndAt: body.newEndAt, services: body.services ?? [] },
       orderId: id,
       run: async (tx) => {
-        const { priced } = await this.priceExtension(tenantId, id, body);
+        const { priced } = await this.priceExtension(tenantId, id, body, tx);
         const result = await this.service.requestOrderExtension(
           tenantId,
           id,
@@ -750,7 +754,7 @@ export class RentalCoreController {
     returnedAt: string,
     tx: Prisma.TransactionClient
   ) {
-    const locked = await this.service.lockOrderForReturnCharges(tenantId, orderId, tx);
+    const locked = await this.service.lockOrderForUpdate(tenantId, orderId, tx);
     const quote = this.business.getQuote(tenantId, context, locked.quoteId);
     const dueAt = locked.effectiveEndAt ?? locked.endAt;
     const extensionPricing = (await this.service.listOrderExtensions(tenantId, orderId, tx))
@@ -887,6 +891,11 @@ export class RentalCoreController {
       request: { orderId: id },
       orderId: id,
       run: async (tx) => {
+        // 先锁订单行，再查待审异常与资金余额。此前顺序是反的：异常查询和
+        // assertReadyToClose 之间没有共同的锁，一笔并发的费用裁定或收退款可以插在
+        // 中间，结算就按旧事实判定——欠款订单被关掉、刚生成的待审事项被跳过。
+        // 锁与费用裁定（reviewOrderFeeReview）、资金事件（lockedOrderScope）同一行。
+        await this.service.lockOrderForUpdate(tenantId, id, tx);
         const inspectionRows = await tx.rentalInspectionRecord.findMany({
           where: { tenantId, workspaceId: this.service.resolveWorkspaceId(tenantId), orderId: id },
           select: { exceptions: true }

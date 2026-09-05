@@ -1078,18 +1078,23 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   }
 
   /**
-   * 锁住订单行后返回它的当前事实，供归还计费在事务内重算。
+   * 锁住订单行后返回它的当前事实。同一业务动作的后续判定与写入都必须基于它，
+   * 而不是锁之前读到的快照——页面预览只供展示。
    *
-   * 归还的逾期费与提前归还退款此前全部在控制器**事务外**按快照算好再传进来，而订单行
-   * 的锁要到 `createInspection` 内部的 `lockedOrder` 才加上。这段时间窗里一笔续租生效，
-   * 归还就会按旧的约定归还时间判逾期——刚续上的单被多收一笔，退款也按错的租金基数算。
+   * 归还计费是第一个落点：逾期费与提前归还退款此前全部在控制器**事务外**按快照算好
+   * 再传进来，而订单行的锁要到 `createInspection` 内部的 `lockedOrder` 才加上。这段
+   * 时间窗里一笔续租生效，归还就会按旧的约定归还时间判逾期——刚续上的单被多收一笔，
+   * 退款也按错的租金基数算。
+   *
+   * 结算是第二个落点：待审异常与资金余额此前在拿到订单锁之前就查完了，等于用旧事实
+   * 决定能不能关单。改成先锁再查，结算与费用裁定、收退款被同一把行锁串行化。
    *
    * 之所以"先锁再算"就够：改写 `effectiveEndAt` 的只有 `applyExtensionTo`，而它只有两个
    * 调用点——`requestOrderExtension`（月结等无需补款时直接生效）与 `payOrderExtension`，
-   * 两者都先 `lockedOrder`，因此和归还被同一把行锁串行化；而且两者都要求订单处于
-   * 租赁中/待领取，归还一旦推进到待结算，续租就再也无法生效。
+   * 两者都先 `lockedOrder`；资金事件走 `lockedOrderScope`、费用裁定走 `reviewOrderFeeReview`
+   * 的 `lockedOrder`，全部锁同一行订单，因此彼此串行。
    */
-  async lockOrderForReturnCharges(tenantId: string, orderId: string, tx: RentalFactTx) {
+  async lockOrderForUpdate(tenantId: string, orderId: string, tx: RentalFactTx) {
     this.state(tenantId);
     return this.publicOrder(await this.lockedOrder(tenantId, orderId, tx));
   }

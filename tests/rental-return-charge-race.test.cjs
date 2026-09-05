@@ -52,7 +52,7 @@ function controller({ locked = LOCKED, extensions = [] } = {}) {
     resolveWorkspaceId: () => "ws_1",
     listInspections: async () => [],
     listOrderExtensions: async (_tenantId, orderId) => { seen.lockedFor.push(`extensions:${orderId}`); return extensions; },
-    lockOrderForReturnCharges: async (_tenantId, orderId) => { seen.lockedFor.push(`lock:${orderId}`); return locked(); },
+    lockOrderForUpdate: async (_tenantId, orderId) => { seen.lockedFor.push(`lock:${orderId}`); return locked(); },
     createInspection: async (_tenantId, _orderId, _body, _user, charges) => {
       seen.charges = charges;
       return { inspection: { stage: "return" }, order: locked() };
