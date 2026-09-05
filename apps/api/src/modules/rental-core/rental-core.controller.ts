@@ -110,6 +110,27 @@ function extensionRentalOf(order: RentalOrder): number {
     .reduce((sum, line) => sum + Number(line.amount ?? 0), 0);
 }
 
+/**
+ * 每个计价目标仍未交回的数量。
+ *
+ * 逾期费必须按**实际仍在占用**的部分收：两件各日租 240、一件按时还、另一件逾时一小时，
+ * 按原报价的全部数量算会收 20，而实际只有一件在逾期，应收 10。
+ *
+ * 已 `returned` / `released` 的分配项排除在外。本批要交回的仍计入——它确实逾期了，
+ * 费用是先算后落账，此时订单上还没应用本批归还。
+ */
+function outstandingQuantitiesOf(order: RentalOrder): Record<string, number> {
+  const result: Record<string, number> = {};
+  for (const allocation of order.allocations ?? []) {
+    if (allocation.status === "returned" || allocation.status === "released") continue;
+    const line = order.lines?.find((row) => row.id === allocation.orderLineId);
+    const target = line?.pricingGroupId ?? line?.itemGroupId ?? allocation.itemGroupId;
+    if (!target) continue;
+    result[target] = (result[target] ?? 0) + allocation.quantity;
+  }
+  return result;
+}
+
 @Controller("rental/v1")
 export class RentalCoreController {
   constructor(
@@ -679,7 +700,7 @@ export class RentalCoreController {
       ? (await this.service.listOrderExtensions(tenantId, id)).filter((row) => row.status === "effective").at(-1)?.pricingSnapshot : undefined;
     const charges = stage === "return" && !partialReturn
       ? {
-          overdue: { amount: this.business.calculateOverdueCharge(tenantId, context, quote, returnedAt, scheduledEndAt), returnedAt },
+          overdue: { amount: this.business.calculateOverdueCharge(tenantId, context, quote, returnedAt, scheduledEndAt, outstandingQuantitiesOf(current)), returnedAt },
           earlyReturn: this.business.calculateEarlyReturnRefund(tenantId, context, quote, scheduledEndAt, returnedAt, extensionRentalOf(current), extensionPricing)
         }
       : {};
@@ -738,7 +759,7 @@ export class RentalCoreController {
     const handoverDueAt = current.effectiveEndAt ?? current.endAt;
     const extensionPricing = stage === "return"
       ? (await this.service.listOrderExtensions(tenantId, id)).filter((row) => row.status === "effective").at(-1)?.pricingSnapshot : undefined;
-    const overdueCharge = stage === "return" ? this.business.calculateOverdueCharge(tenantId, context, handoverQuote, returnedAt, handoverDueAt) : 0;
+    const overdueCharge = stage === "return" ? this.business.calculateOverdueCharge(tenantId, context, handoverQuote, returnedAt, handoverDueAt, outstandingQuantitiesOf(current)) : 0;
     const earlyReturnRefund = stage === "return"
       ? this.business.calculateEarlyReturnRefund(tenantId, context, handoverQuote, handoverDueAt, returnedAt, extensionRentalOf(current), extensionPricing)
       : undefined;

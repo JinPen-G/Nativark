@@ -200,8 +200,10 @@ const at = hours => new Date(Date.parse(start) + hours * 3600000).toISOString();
     quote.request.lines = [lineA, { ...lineA, itemGroupId: groupB.id, pricingGroupId: undefined }];
     quote.rateSnapshot = [rateA, { ...rateA, itemGroupId: groupB.id, itemGroupCode: groupB.code, pricingGroupId: undefined, pricingGroupCode: undefined }];
     quote.rentalAmount = 480;
-    quote.chargeLines = quote.request.lines.map((_, index) => ({ code: `rental:${index}`, type: 'rental', name: '租金', amount: 240 }));
-    return { quote, targetA: lineA.pricingGroupId ?? lineA.itemGroupId };
+    quote.chargeLines = quote.rateSnapshot.map(rate => ({ code: `rental:${rate.pricingGroupCode ?? rate.itemGroupCode}`, type: 'rental', name: '租金', amount: 240 }));
+    const targetA = lineA.pricingGroupId ?? lineA.itemGroupId;
+    quote.rentalLineAmounts = { [targetA]: 240, [groupB.id]: 240 };
+    return { quote, targetA, targetB: groupB.id };
   }
 
   // 反例 2：A、B 各 240，活动只给 A 五折，原应付 360。
@@ -241,6 +243,24 @@ const at = hours => new Date(Date.parse(start) + hours * 3600000).toISOString();
     assert.equal(priced.pricingSnapshot.recalculatedCouponAmount, 120, '券减免额不应因整单基数而放大');
     assert.equal(priced.payableAmount, 0, '券必须按原适用范围取基数，不能扩大到整单');
     pass('反例3 限定商品券：延长仍在已买当天，补款 0（修复前虚退 120）');
+  }
+
+  /* ==== Codex review #3：分批归还后逾期费只按仍在占用的部分收 ====
+     两件各日租 240（每小时 10），一件按时归还、另一件逾时一小时。
+     按原报价的全部数量算会收 20；实际只有一件在逾期，应收 10。 */
+  {
+    const { quote, targetA, targetB } = twoLines();
+    const dueAt = quote.request.endAt;
+    const lateBy1h = new Date(Date.parse(dueAt) + 90 * 60_000).toISOString(); // 30 分钟宽限 + 逾时 1 小时
+    const whole = business.calculateOverdueCharge(tenant, ctx, quote, lateBy1h, dueAt);
+    assert.equal(whole, 20, '不传仍在租数量时按整单两件计（这就是修复前的行为）');
+    const onlyA = business.calculateOverdueCharge(tenant, ctx, quote, lateBy1h, dueAt, { [targetA]: 1, [targetB]: 0 });
+    assert.equal(onlyA, 10, '一件已交回后，逾期费只按仍在租的那一件收');
+    const bothOut = business.calculateOverdueCharge(tenant, ctx, quote, lateBy1h, dueAt, { [targetA]: 1, [targetB]: 1 });
+    assert.equal(bothOut, 20, '两件都还没交回时与整单口径一致');
+    const allReturned = business.calculateOverdueCharge(tenant, ctx, quote, lateBy1h, dueAt, { [targetA]: 0, [targetB]: 0 });
+    assert.equal(allReturned, 0, '全部已交回则不产生逾期费');
+    pass('反例4 分批归还：逾期费按仍在占用的数量收（修复前按全部数量收 20）');
   }
 
   console.log(`续租修正专项 ${count} 组通过（计算与应用服务测试；不冒充数据库并发验收）`);

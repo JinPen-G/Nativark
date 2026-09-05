@@ -4650,20 +4650,45 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
    * 注意 `scheduledEndAt` **只用来判逾期起点**，不能进小时单价的分母：`quote.rentalAmount`
    * 只覆盖原租期，续租那段的租金在订单的 `adjustmentAmount` 里。用续到的时间做分母会把
    * 单价按更长的时间摊薄——续得越久逾期费越便宜，与逾期费的意图正好相反。
+   *
+   * `outstandingQuantities` 是**每个计价目标仍未交回的数量**，由调用方从订单分配项算出。
+   * 分批归还后必须传：两件各日租 240、一件按时还、另一件逾时一小时，按原报价的全部数量
+   * 算会收 20，而实际只有一件在逾期，应收 10。缺省（整单归还）按原数量，行为不变。
    */
   calculateOverdueCharge(
     tenantId: string,
     context: BusinessContext,
     quote: RentalQuoteSnapshotV1,
     returnedAt: string,
-    scheduledEndAt?: string
+    scheduledEndAt?: string,
+    outstandingQuantities?: Record<string, number>
   ) {
     const rule = quote.ruleSnapshot;
     if (!rule) throw new ConflictException("订单缺少租赁规则快照");
     const dueAt = scheduledEndAt ?? quote.request.endAt;
     const overdueMinutes = Math.max(0, (new Date(returnedAt).getTime() - new Date(dueAt).getTime()) / 60_000 - rule.overdue.graceMinutes);
     if (overdueMinutes <= 0 || rule.overdue.feeMode === "none" || rule.overdue.feeMode === "manual_review") return 0;
-    let amount = quote.rentalAmount * rule.overdue.feeMultiplier;
+    /** 该行仍在租的占比。已交回的部分不再占用资源，也就不该继续产生逾期费。 */
+    const shareOf = (line: { pricingGroupId?: string; itemGroupId?: string; quantity: number }) => {
+      if (!outstandingQuantities) return 1;
+      const target = line.pricingGroupId ?? line.itemGroupId;
+      const stillOut = target ? outstandingQuantities[target] ?? 0 : 0;
+      return Math.min(1, Math.max(0, stillOut / Math.max(1, line.quantity)));
+    };
+    /** 该行的原租金。优先用逐行快照，否则按费率反查租金明细——与下方 hourly 分支同一口径。 */
+    const lineRentalOf = (line: { pricingGroupId?: string; itemGroupId?: string }) => {
+      const target = line.pricingGroupId ?? line.itemGroupId;
+      const fromSnapshot = target ? quote.rentalLineAmounts?.[target] : undefined;
+      if (fromSnapshot !== undefined) return fromSnapshot;
+      const rate = quote.rateSnapshot.find((row) => pricingTargetId(row) === target);
+      const code = rate ? `rental:${rate.pricingGroupCode ?? rate.itemGroupCode}` : undefined;
+      return (code ? quote.chargeLines.find((row) => row.code === code)?.amount : undefined) ?? 0;
+    };
+    /** 仍在租部分的租金合计，`multiplier` 模式的基数。 */
+    const outstandingRental = outstandingQuantities
+      ? roundMoney(quote.request.lines.reduce((sum, line) => sum + lineRentalOf(line) * shareOf(line), 0))
+      : quote.rentalAmount;
+    let amount = outstandingRental * rule.overdue.feeMultiplier;
     if (rule.overdue.feeMode === "hourly_to_daily") {
       const percent = rule.overdue.hourlyRatePercent;
       const threshold = rule.overdue.dailyAfterHours;
@@ -4681,7 +4706,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
           const point = new Date(Date.parse(dueAt) + rule.overdue.graceMinutes * 60_000 + offset * 3_600_000).toISOString();
           const factor = this.resolveUnitPrice(contextSnapshot?.calendars ?? [], businessDateKey(point, timeZone), point, dayRate, timeZone, contextSnapshot?.legacyDayTypeMultipliers ?? false);
           const daily = dayRate.baseAmount * factor.value;
-          total += daily * (remainder >= 24 || remainder > threshold ? 1 : Math.min(1, Math.ceil(remainder) * percent / 100)) * line.quantity;
+          total += daily * (remainder >= 24 || remainder > threshold ? 1 : Math.min(1, Math.ceil(remainder) * percent / 100)) * line.quantity * shareOf(line);
         }
       }
       amount = total * rule.overdue.feeMultiplier;
@@ -4707,9 +4732,11 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
           hours = this.convertedHourCoverage(context, quote, rate, quote.request.endAt);
         }
         if (units <= 0 || hours <= 0) throw new ConflictException("原订单没有有效的已计费时间单位，无法计算逾期费");
+        // 行金额按仍在租占比折算：已交回那部分不再产生逾期费。
+        const chargeAmount = charge.amount * shareOf(line);
         basis += rule.overdue.feeMode === "hourly"
-          ? charge.amount / hours * Math.ceil(overdueMinutes / 60)
-          : charge.amount / units * Math.max(1, strategy.billableUnits(chargeStart, returnedAt, pricingContext));
+          ? chargeAmount / hours * Math.ceil(overdueMinutes / 60)
+          : chargeAmount / units * Math.max(1, strategy.billableUnits(chargeStart, returnedAt, pricingContext));
       }
       amount = basis * rule.overdue.feeMultiplier;
     }
