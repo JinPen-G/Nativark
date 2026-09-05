@@ -248,7 +248,11 @@ export class RentalServiceCapacityService {
       occurrences.filter((row) => row.reservationKey).map((row) => [row.reservationKey as string, row])
     );
     // 存量订单的快照没有容量依据，只能回落到 serviceId；这类订单本来也只有一次发生。
-    const legacyByServiceId = new Map(occurrences.filter((row) => !row.reservationKey).map((row) => [row.serviceId, row]));
+    // 只收需要容量的：不需要容量的新发生项同样没有 reservationKey，把它收进来会让
+    // 它抢走同 serviceId 那条存量快照的位置。
+    const legacyByServiceId = new Map(
+      occurrences.filter((row) => !row.reservationKey && row.requiresCapacity).map((row) => [row.serviceId, row])
+    );
     const rows = await this.lockOrderReservations(tenantId, order.id, tx);
     const usedServiceIds: string[] = [];
     const releasedServiceIds: string[] = [];

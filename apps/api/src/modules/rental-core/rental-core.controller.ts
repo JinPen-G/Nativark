@@ -59,6 +59,7 @@ import { RentalWorkspaceReportRepository } from "./rental-workspace-report.repos
 import { resolveScopeWorkspaceId } from "./workspace-scope";
 import { PrismaService } from "../database/prisma.service";
 import { RentalServiceCapacityService } from "./rental-service-capacity.service";
+import { extensionRequestKey } from "./rental-service-occurrence";
 import { RentalFundingService } from "./rental-funding.service";
 
 /** 读取标准 Idempotency-Key 请求头。大小写不敏感，超长键直接拒绝。 */
@@ -620,7 +621,7 @@ export class RentalCoreController {
     await this.serviceCapacities.reserveForOrder(
       tenantId,
       { id: orderId, serviceSnapshots: extension.serviceSnapshots, reservations: [] },
-      `extension:${extension.id}`,
+      extensionRequestKey(extension.id),
       tx
     );
     await this.serviceCapacities.confirmForOrder(tenantId, orderId, extension.effectiveAt ?? new Date().toISOString(), tx);

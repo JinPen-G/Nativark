@@ -26,7 +26,8 @@ export function serviceOccurrenceOriginText(row: Pick<RentalOrderServiceOccurren
  */
 export function serviceOccurrenceNetAmount(row: Pick<RentalOrderServiceOccurrence, "amount" | "discountAllocatedAmount" | "couponAllocatedAmount">) {
   const net = Number(row.amount) - Number(row.discountAllocatedAmount ?? 0) - Number(row.couponAllocatedAmount ?? 0);
-  return Math.round((net + Number.EPSILON) * 100) / 100;
+  // 与服务端 roundMoney 同式，并且不允许算成负数：减免之和大于原价时净额是 0，不是负退款。
+  return Math.max(0, Math.round((net + Number.EPSILON) * 100) / 100);
 }
 
 /** 同一服务在这张订单上发生了几次。界面据此提示「这不是重复记录」。 */

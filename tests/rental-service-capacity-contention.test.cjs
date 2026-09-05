@@ -98,12 +98,14 @@ void (async () => {
 
       /* ---------- 两单争抢最后一份容量 ---------- */
 
+      let capacityWinner;
       {
         const first = await makeOrder();
         const second = await makeOrder();
         const snapshot = snapshotFor(serviceId, location.id);
-        const attempt = (order, delayMs) => prisma.$transaction(async (tx) => {
-          if (delayMs) await sleep(delayMs);
+        // 不加人为延迟：两边同时开事务真抢。早先在事务内 reserveForOrder 之前 sleep(60)，
+        // 快的一方早就提交完了，两方实际串行，容量的乐观并发条件一次都没被触发。
+        const attempt = (order) => prisma.$transaction(async (tx) => {
           await capacities.reserveForOrder(
             base.tenantId,
             { id: order.id, serviceSnapshots: [snapshot], reservations: [] },
@@ -113,17 +115,18 @@ void (async () => {
           return order.id;
         }).then((value) => ({ ok: true, value }), (error) => ({ ok: false, error: error.message }));
 
-        const [a, b] = await Promise.all([attempt(first, 0), attempt(second, 60)]);
+        const [a, b] = await Promise.all([attempt(first), attempt(second)]);
         const winners = [a, b].filter((row) => row.ok);
         assert.equal(winners.length, 1, `最后一份容量只能被一个订单占走，实际 ${winners.length} 个成功`);
+        capacityWinner = winners[0].value;
         const loser = [a, b].find((row) => !row.ok);
         assert.match(loser.error, /容量/u, "失败的一方必须明确报容量原因");
         const capacity = await prisma.rentalServiceCapacity.findUniqueOrThrow({ where: { id: capacityId } });
         assert.equal(capacity.reservedQuantity, 1, "容量账必须只加一次");
         const rows = await prisma.rentalServiceReservation.findMany({ where: { capacityId } });
         assert.equal(rows.length, 1, "只能留下一条预留流水");
-        assert.equal(rows[0].orderId, winners[0].value, "留下的那条必须属于成功的那张订单");
-        ok("两单争抢最后一份容量只有一个成功，容量账与预留流水都只加一次");
+        assert.equal(rows[0].orderId, capacityWinner, "留下的那条必须属于成功的那张订单");
+        ok("两单真并发抢最后一份容量只有一个成功，容量账与预留流水都只加一次");
       }
 
       /* ---------- 容量失败时有效结束时间与费用一起回滚 ---------- */
@@ -163,15 +166,29 @@ void (async () => {
       /* ---------- 重复释放不污染别次预留 ---------- */
 
       {
-        const holder = createdOrders[0];
+        // 先把容量放宽到 2 并给**另一张订单**也占一份：只有存在别次预留，才能证明
+        // 释放一单不会顺手把别人的放掉。早先只有一条预留，这一组其实什么都没证明。
+        await prisma.rentalServiceCapacity.update({ where: { id: capacityId }, data: { totalCapacity: 3 } });
+        const bystander = await makeOrder();
+        await prisma.$transaction((tx) => capacities.reserveForOrder(
+          base.tenantId,
+          { id: bystander.id, serviceSnapshots: [snapshotFor(serviceId, location.id)], reservations: [] },
+          extensionRequestKey(`ext-bystander-${bystander.id}`),
+          tx
+        ));
         const before = await prisma.rentalServiceCapacity.findUniqueOrThrow({ where: { id: capacityId } });
-        await prisma.$transaction((tx) => capacities.releaseForOrder(base.tenantId, holder, "test_release", new Date().toISOString(), tx));
+        assert.equal(before.reservedQuantity, 2, "此时应有两条占用：抢赢那单与旁观那单");
+
+        await prisma.$transaction((tx) => capacities.releaseForOrder(base.tenantId, capacityWinner, "test_release", new Date().toISOString(), tx));
         const afterFirst = await prisma.rentalServiceCapacity.findUniqueOrThrow({ where: { id: capacityId } });
-        await prisma.$transaction((tx) => capacities.releaseForOrder(base.tenantId, holder, "test_release_again", new Date().toISOString(), tx));
+        await prisma.$transaction((tx) => capacities.releaseForOrder(base.tenantId, capacityWinner, "test_release_again", new Date().toISOString(), tx));
         const afterSecond = await prisma.rentalServiceCapacity.findUniqueOrThrow({ where: { id: capacityId } });
-        assert.equal(afterFirst.reservedQuantity, before.reservedQuantity - 1, "第一次释放要把占用还回去");
-        assert.equal(afterSecond.reservedQuantity, afterFirst.reservedQuantity, "重复释放不能把容量账减成负的");
-        ok("重复释放同一订单的容量是幂等的，不会把别次占用一起放掉");
+        assert.equal(afterFirst.reservedQuantity, 1, "释放抢赢那单只还回一份，旁观那单的占用必须留着");
+        assert.equal(afterSecond.reservedQuantity, 1, "重复释放是幂等的，不能把容量账继续往下减");
+        const bystanderRow = await prisma.rentalServiceReservation.findFirstOrThrow({ where: { capacityId, orderId: bystander.id } });
+        assert.equal(bystanderRow.status, "reserved", "别次预留的状态不能被这次释放改掉");
+        assert.equal(bystanderRow.releasedAt, null, "别次预留不能被标记成已释放");
+        ok("释放一单的容量只还回它自己那份：重复释放幂等，别次预留的额度与状态都不受影响");
       }
 
       console.log(`\n服务容量争抢与回滚真库专项：${passed} 项全部通过`);

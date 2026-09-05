@@ -5022,6 +5022,13 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       await this.serviceCapacities?.assertAvailableForQuote(tenantId, resolved.snapshots);
       serviceAmount = resolved.totalAmount;
       serviceSnapshots = resolved.snapshots;
+      // 增量式续租按新增时段单独计费，不复算原订单的优惠链，因此这段服务费确实没有减免。
+      // 显式写 0 而不是留 undefined：净额口径要能一眼看出「确实没有减免」，
+      // 而不是「不知道有没有」。
+      for (const snapshot of serviceSnapshots) {
+        snapshot.discountAllocatedAmount = 0;
+        snapshot.couponAllocatedAmount = 0;
+      }
       for (const snapshot of resolved.snapshots) {
         chargeLines.push({
           code: `extension-service:${snapshot.serviceCode}`,
@@ -5272,6 +5279,28 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       }
       couponEvaluation = { ...oldCoupon, baseBeforeDiscount: gross, runningBase: base, discountAmount: fullCouponAmount,
         formula: `原券 ${oldCoupon.templateVersion}：基数 ${base}${scopedIds ? `（限 ${scopedIds.length} 个适用商品）` : ""}，减免 ${fullCouponAmount}（不重复核销）` };
+    }
+    // MKT-02C §4.3-2：发生项必须带「原价 / 减免 / 净额」，退款只能退客户实际支付的净额。
+    //
+    // 原价全租期重算算出的 `discountByTarget.service` 与 `fullCouponAmount` 是**整单**服务维度
+    // 的减免；本次续租该分摊到的只是增量：全额减去已经归属给原报价与前几次续租的部分，
+    // 再按本次新增服务的金额比例分配。口径与 `differenceAmount`「全额减已计」完全一致。
+    //
+    // 不回填的后果是发生项的净额恒等于原价：原订单有服务八折时，界面与退款依据都会按
+    // 原价算，多退的正是那笔折扣。
+    if (serviceSnapshots?.length) {
+      const alreadyAllocated = [...(originalQuote.serviceSnapshots ?? []), ...previous.flatMap((row) => row.serviceSnapshots ?? [])];
+      const discountBefore = roundMoney(alreadyAllocated.reduce((sum, row) => sum + Number(row.discountAllocatedAmount ?? 0), 0));
+      const couponBefore = roundMoney(alreadyAllocated.reduce((sum, row) => sum + Number(row.couponAllocatedAmount ?? 0), 0));
+      const discountDelta = Math.max(0, roundMoney((discounts.discountByTarget.service ?? 0) - discountBefore));
+      const couponDelta = couponEvaluation?.appliesTo === "service" ? Math.max(0, roundMoney(fullCouponAmount - couponBefore)) : 0;
+      const bases = Object.fromEntries(serviceSnapshots.map((row) => [row.serviceId, row.amount]));
+      const discountAllocations = discountDelta > 0 ? allocateDiscount(discountDelta, bases) : {};
+      const couponAllocations = couponDelta > 0 ? allocateDiscount(couponDelta, bases) : {};
+      for (const snapshot of serviceSnapshots) {
+        snapshot.discountAllocatedAmount = discountAllocations[snapshot.serviceId] ?? 0;
+        snapshot.couponAllocatedAmount = couponAllocations[snapshot.serviceId] ?? 0;
+      }
     }
     // 会员权益：只复算原报价里**已生效**的那几条，不引入后续新权益——与优惠方案同一口径。
     //

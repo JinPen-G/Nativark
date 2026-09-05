@@ -125,7 +125,11 @@ void (async () => {
   assert.ok(preview.serviceSnapshots?.length, "解析出的服务快照必须带出报价——修复前直接丢弃");
   assert.equal(preview.serviceSnapshots[0].serviceId, service.id);
   assert.ok(preview.serviceAmount > 0, "服务费仍要照收，闸门不改变金额口径");
-  ok("续租报价校验服务容量并带出服务快照——修复前两件都没做");
+  // MKT-02C：发生项必须带「原价 / 减免 / 净额」。留 undefined 会让净额恒等于原价，
+  // 按此退款就把平台自己出的优惠也退给客户。本单没有服务维度优惠，因此应是明确的 0。
+  assert.equal(preview.serviceSnapshots[0].discountAllocatedAmount, 0, "减免必须是明确的 0，而不是 undefined");
+  assert.equal(preview.serviceSnapshots[0].couponAllocatedAmount, 0, "券抵扣同理");
+  ok("续租报价校验服务容量并带出服务快照与明确的减免口径——修复前三件都没做");
 }
 
 /* ---------- 容量不足必须拦住续租，而不是照样收钱 ---------- */

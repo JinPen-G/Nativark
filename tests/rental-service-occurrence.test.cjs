@@ -42,6 +42,8 @@ const snapshot = (overrides = {}) => ({
   ...overrides
 });
 
+void (async () => {
+
 /* ---------- 容量依据：同一输入同一键，时段/地点变了就是另一条占用 ---------- */
 
 {
@@ -128,4 +130,76 @@ const snapshot = (overrides = {}) => ({
   ok("净额按原价减优惠减券算，同一服务的发生次数可数");
 }
 
+/* ---------- 归还结算按容量依据配对：同一服务两次发生各自判定 ---------- */
+
+const { RentalServiceCapacityService } = require("../apps/api/src/modules/rental-core/rental-service-capacity.service");
+
+/**
+ * 这一组是整个改动的核心机制：取消「按 serviceId 合并 + 时段并集」的前提，就是
+ * `settleReturnForOrder` 能靠容量依据把每条预留配到自己那条发生项。配不上会**静默**
+ * 走「保守当已开始」分支——未开始服务的容量永久不释放，而所有别的专项都照样绿。
+ */
+function fakeCapacityTx(reservations) {
+  const updates = { reservation: [], capacity: [] };
+  return {
+    updates,
+    businessWorkspace: { findFirst: async () => ({ id: "ws_1" }) },
+    $queryRaw: async () => reservations.map((row) => ({ id: row.id })),
+    rentalServiceReservation: {
+      findMany: async () => reservations,
+      updateMany: async (args) => { updates.reservation.push(args); return { count: 1 }; }
+    },
+    rentalServiceCapacity: {
+      updateMany: async (args) => { updates.capacity.push(args); return { count: 1 }; }
+    }
+  };
+}
+
+{
+  const capacities = new RentalServiceCapacityService({});
+  const early = snapshot({ scheduledStartAt: "2040-03-01T00:00:00.000Z", scheduledEndAt: "2040-03-03T00:00:00.000Z" });
+  const late = snapshot({ scheduledStartAt: "2040-03-06T00:00:00.000Z", scheduledEndAt: "2040-03-07T00:00:00.000Z" });
+  const occurrences = [
+    ...stampOccurrences([early], { origin: "order", ownerId: "order_1", requestKey: "order-key" }),
+    ...stampOccurrences([late], { origin: "extension", ownerId: "ext_1", requestKey: extensionRequestKey("ext_1"), extensionId: "ext_1", extensionSequence: 1 })
+  ];
+  const reservations = [
+    { id: "res_early", capacityId: "cap_1", serviceId: "svc_1", quantity: 1, status: "confirmed", idempotencyKey: occurrences[0].reservationKey },
+    { id: "res_late", capacityId: "cap_1", serviceId: "svc_1", quantity: 1, status: "confirmed", idempotencyKey: occurrences[1].reservationKey }
+  ];
+  const tx = fakeCapacityTx(reservations);
+  // 归还发生在 D4：早的那次已开始（应记 used），晚的那次还没开始（应释放容量）。
+  const result = await capacities.settleReturnForOrder(
+    "tenant_1",
+    { id: "order_1", serviceSnapshots: occurrences },
+    "2040-03-04T00:00:00.000Z",
+    tx
+  );
+  assert.deepEqual(result.usedServiceIds, ["svc_1"], "已开始的那次必须记为已使用");
+  assert.deepEqual(result.releasedServiceIds, ["svc_1"], "未开始的那次必须释放容量");
+  const usedRow = tx.updates.reservation.find((row) => row.data.status === "used");
+  const releasedRow = tx.updates.reservation.find((row) => row.data.status === "released");
+  assert.equal(usedRow.where.id, "res_early", "记为已使用的必须是早时段那条预留");
+  assert.equal(releasedRow.where.id, "res_late", "释放的必须是晚时段那条预留");
+  assert.equal(tx.updates.capacity.length, 1, "只有未开始的那次退还容量");
+  assert.deepEqual(tx.updates.capacity[0].data, { usedQuantity: { decrement: 1 } });
+  ok("同一服务两次发生按容量依据各自配对：早的记已使用、晚的释放容量——配错会静默把容量永久扣住");
+}
+
+{
+  // 存量订单：快照没有容量依据，预留行的键也是旧格式，必须回落 serviceId 且行为不变。
+  const legacy = { ...snapshot({ scheduledStartAt: "2040-03-01T00:00:00.000Z", scheduledEndAt: "2040-03-03T00:00:00.000Z" }) };
+  const tx = fakeCapacityTx([
+    { id: "res_legacy", capacityId: "cap_1", serviceId: "svc_1", quantity: 1, status: "confirmed", idempotencyKey: "service-capacity:legacy" }
+  ]);
+  const result = await new RentalServiceCapacityService({}).settleReturnForOrder(
+    "tenant_1", { id: "order_1", serviceSnapshots: [legacy] }, "2040-03-04T00:00:00.000Z", tx
+  );
+  assert.deepEqual(result.usedServiceIds, ["svc_1"], "存量订单按 serviceId 回落后行为与改动前一致");
+  assert.equal(result.releasedServiceIds.length, 0);
+  ok("存量快照没有容量依据时回落 serviceId，判定结果与改动前一致");
+}
+
 console.log(`\n服务发生项与容量依据专项：${passed} 项全部通过`);
+
+})();

@@ -82,6 +82,41 @@ if (routes.length === 0) {
 
 const unmatched = [];
 const zeroPermission = [];
+const undeclared = new Map();
+
+/**
+ * seed.ts 的 `permissions` 目录是 Permission 表的唯一写入源，而所有授权路径都按表里
+ * 已有的行过滤（platform.repository 的 findMany + filter、replaceRolePermissions 的
+ * `code in (...)`）。守卫要求一个表里不存在的权限码时，角色预设与管理端勾选都会被静默
+ * 丢弃，结果是该路由对除平台管理员以外的所有人 403——而本脚本原来只检查「能不能解析出
+ * 权限」，这类错误一次都抓不到。ORDER-CLOSE-02 的费用裁定权就是这么漏的。
+ */
+function declaredPermissionCodes() {
+  const source = fs.readFileSync(path.join(repoRoot, "apps", "api", "prisma", "seed.ts"), "utf8");
+  const start = source.indexOf("const permissions = [");
+  if (start < 0) throw new Error("未能在 apps/api/prisma/seed.ts 里定位 permissions 目录");
+  const end = source.indexOf("\n];", start);
+  if (end < 0) throw new Error("permissions 目录没有结束标记，无法解析");
+  return new Set([...source.slice(start, end).matchAll(/\["([^"]+)"/gu)].map((match) => match[1]));
+}
+const declared = declaredPermissionCodes();
+
+/**
+ * 已知的存量缺口：这些权限码被守卫要求，但 seed.ts 的目录里没有，因此对应路由目前
+ * 对非平台管理员一律 403。全部落在会员/企业域（membership.controller），不属于本轮
+ * 订单闭环的改动范围，也不该由订单侧顺手决定它们该授予哪些角色。
+ *
+ * 白名单只为「不让存量缺口挡住新检查」而存在，**不是**认可这些缺口：新增权限码一律
+ * 必须进 seed.ts 目录，否则本脚本失败。修掉一个就从这里删一行。
+ */
+const KNOWN_UNDECLARED = new Set([
+  "store-rental:member:account-manage",
+  "store-rental:member:review",
+  "store-rental:member:qualification-review",
+  "store-rental:member:plan:manage",
+  "store-rental:member:plan:publish",
+  "store-rental:corporate:employee-manage"
+]);
 
 for (const route of routes) {
   const permissions = requiredPermissions(route.method, route.path);
@@ -93,9 +128,14 @@ for (const route of routes) {
   if (permissions.length === 0 && !isPublic(route.path)) {
     zeroPermission.push(route);
   }
+  for (const code of permissions) {
+    if (declared.has(code) || KNOWN_UNDECLARED.has(code)) continue;
+    if (!undeclared.has(code)) undeclared.set(code, []);
+    undeclared.get(code).push(route);
+  }
 }
 
-if (unmatched.length || zeroPermission.length) {
+if (unmatched.length || zeroPermission.length || undeclared.size) {
   if (unmatched.length) {
     console.error(`以下 ${unmatched.length} 个路由没有命中任何鉴权规则（运行时会 403，但应显式声明权限）：`);
     for (const route of unmatched) console.error(`  ${route.method.padEnd(6)} ${route.path}   ← ${route.source}`);
@@ -103,6 +143,13 @@ if (unmatched.length || zeroPermission.length) {
   if (zeroPermission.length) {
     console.error(`以下 ${zeroPermission.length} 个路由被判定为"无需任何权限"且不在公共白名单中，属放行漏洞：`);
     for (const route of zeroPermission) console.error(`  ${route.method.padEnd(6)} ${route.path}   ← ${route.source}`);
+  }
+  if (undeclared.size) {
+    console.error(`以下 ${undeclared.size} 个权限码被守卫要求，但不在 apps/api/prisma/seed.ts 的 permissions 目录里：`);
+    for (const [code, affected] of undeclared) {
+      console.error(`  ${code}   ← ${affected.length} 个路由，例如 ${affected[0].method} ${affected[0].path}`);
+    }
+    console.error("Permission 表里没有这一行时，角色预设与管理端勾选都会被静默丢弃，该路由对非平台管理员一律 403。");
   }
   console.error("请在 apps/api/src/common/api-auth.guard.ts 的 requiredPermissions 中补齐，或将确属公共的路由加入 PUBLIC_ROUTES。");
   process.exit(1);

@@ -13,12 +13,17 @@ require("ts-node").register({
 
 const { PrismaService } = require("../apps/api/src/modules/database/prisma.service");
 const { RentalCoreFactRepository } = require("../apps/api/src/modules/rental-core/rental-core-fact.repository");
+const { RentalCoreConfigRepository } = require("../apps/api/src/modules/rental-core/rental-core-config.repository");
+const { RentalCoreService } = require("../apps/api/src/modules/rental-core/rental-core.service");
 const { RentalIdempotencyRepository } = require("../apps/api/src/modules/rental-core/rental-idempotency.repository");
 const { RentalIdempotentActionService } = require("../apps/api/src/modules/rental-core/rental-idempotent-action.service");
 const { runWithRequestIdentity } = require("../apps/api/src/common/request-identity");
 
 const prisma = new PrismaService();
 const facts = new RentalCoreFactRepository(prisma);
+// 真实的领域服务：组二要断言「锁内读到的待审事项**真的**拦住关单」，
+// 自己再实现一遍闸门只能证明测试自己会拒。
+const core = new RentalCoreService(new RentalCoreConfigRepository(prisma), facts);
 const idempotent = new RentalIdempotentActionService(prisma, new RentalIdempotencyRepository(prisma));
 
 let passed = 0;
@@ -107,17 +112,20 @@ void (async () => {
         const order = await createRentingOrder(domainBase, target);
         created.push(order.id);
         let seenByReturn;
-        // T1 锁住订单行、把有效归还时间推到续租后的时间，提交前故意停留。
+        let lockWaitMs;
+        // T1 锁住订单行、把有效归还时间推到续租后的时间，提交前故意停留 300ms。
         const extend = prisma.$transaction(async (tx) => {
           await facts.lockOrder(base.tenantId, order.id, tx);
           await sleep(300);
           await tx.rentalOrder.update({ where: { id: order.id }, data: { effectiveEndAt: new Date(EXTENDED_END) } });
         });
-        // T2 稍后开始，必须在锁上等待，拿到的只能是续租之后的事实。
+        // T2 晚 80ms 开始，必须在锁上等待，拿到的只能是续租之后的事实。
         const settleBasis = (async () => {
           await sleep(80);
           return prisma.$transaction(async (tx) => {
+            const startedAt = process.hrtime.bigint();
             await facts.lockOrder(base.tenantId, order.id, tx);
+            lockWaitMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
             const locked = await facts.findOrder(base.tenantId, order.id, tx);
             seenByReturn = locked.effectiveEndAt;
           });
@@ -125,7 +133,12 @@ void (async () => {
         await Promise.all([extend, settleBasis]);
         assert.equal(new Date(seenByReturn).toISOString(), EXTENDED_END,
           "锁内读到的必须是续租后的有效归还时间；读到计划时间说明归还会按旧租期判逾期");
-        ok("续租与归还竞争：归还侧在订单行锁上等待，拿到的是续租后的有效归还时间");
+        // 只断言"读到了新值"不够：机器卡顿时 T2 可能压根没等过锁，断言会变成恒真。
+        // T1 持锁 300ms、T2 晚 80ms 起跑，因此真被挡住时等待应在 200ms 量级；
+        // 没有行锁的话这一句是个数毫秒的查询。阈值取 150ms，留足抖动余量。
+        assert.ok(lockWaitMs > 150,
+          `T2 必须真的在订单行锁上等待过，实际只等了 ${lockWaitMs.toFixed(1)}ms——说明没有被锁串行化`);
+        ok("续租与归还竞争：归还侧确实被订单行锁挡住并等到续租提交，读到的是新的有效归还时间");
       }
 
       /* ---------- 组二：费用裁定与结算竞争 ---------- */
@@ -162,7 +175,17 @@ void (async () => {
         assert.equal(unlockedRead, null, "锁之前读到的还是旧事实：待审事项尚未提交，这正是修复前结算依赖的读");
         assert.equal(Array.isArray(lockedRead) && lockedRead.length, 1, "锁之后必须看到刚生成的待审费用事项");
         assert.equal(lockedRead[0].status, "pending", "待审状态必须可见，否则欠款订单会被直接关掉");
-        ok("费用裁定与结算竞争：锁前读不到待审事项、锁后读得到——顺序反了就会漏判");
+        // 关键补强：证明服务端的关单闸门读的就是这一列、并且真的会拒。
+        // 只对比"锁前读不到、锁后读得到"不足以说明结算会被拦住——那两个读都是本专项自己发的。
+        // settleOrder 要求订单处于待结算，因此先推进状态再验闸门。
+        await prisma.rentalOrder.update({ where: { id: order.id }, data: { status: "SETTLING" } });
+        await assert.rejects(
+          () => prisma.$transaction((tx) => core.settleOrder(base.tenantId, order.id, tx, "结算员")),
+          /费用审核单待处理/u,
+          "锁内读到的待审事项必须真的拦住 settleOrder"
+        );
+        assert.equal(await statusOf(order.id), "SETTLING", "被拦住时订单不能被推进到已完成");
+        ok("费用裁定与结算竞争：锁前读不到、锁后读得到，且锁内读到的待审事项真的拦住了 settleOrder");
       }
 
       /* ---------- 组三：同批重试只归还一次，不同批各归还一次 ---------- */
@@ -186,7 +209,9 @@ void (async () => {
             });
             return { released: batchNo };
           },
-          replay: async (response) => response ?? { replayed: true }
+          // 与生产同语义：只有目标状态已达成才回放，否则返回 undefined 交回状态机。
+          // 早先写成 `response ?? {...}` 永不返回 undefined，正好绕开了这条语义。
+          replay: async (response) => (response && response.released === batchNo ? response : undefined)
         });
         await releaseOne("batch-1");
         await releaseOne("batch-1");

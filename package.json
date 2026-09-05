@@ -77,6 +77,7 @@
     "test:service-occurrence": "npm run build -w @store-rental/shared && node tests/rental-service-occurrence.test.cjs",
     "test:order-transaction-order": "npm run build -w @store-rental/shared && node tests/rental-order-transaction-order.test.cjs",
     "test:order-close-db": "npm run build -w @store-rental/shared && node tests/helpers/run-order-close-db.cjs",
+    "test:rental-db-suites": "npm run test:order-allocation-db && npm run test:order-close-db",
     "test:extension-funding": "npm run build -w @store-rental/shared && node tests/rental-extension-funding.test.cjs",
     "test:fee-review": "npm run build -w @store-rental/shared && node tests/rental-fee-review.test.cjs",
     "test:fee-review-permission": "npm run build -w @store-rental/shared && node tests/rental-fee-review-permission.test.cjs",

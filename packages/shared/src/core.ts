@@ -2977,7 +2977,7 @@ export interface RentalQuoteServiceSnapshot {
  * 字段全部可选：存量订单的服务快照没有这些信息，读取侧按缺省回落到旧口径。
  */
 export interface RentalOrderServiceOccurrence extends RentalQuoteServiceSnapshot {
-  /** 稳定标识。原订单服务用 `order:<serviceId>:<序号>`，续租新增用 `extension:<续租id>:<serviceId>:<序号>`。 */
+  /** 稳定标识。形如 `order:<订单id>:<serviceId>:<序号>` 或 `extension:<续租id>:<serviceId>:<序号>`。 */
   occurrenceId?: string;
   /** 来源：下单时约定的服务，还是某一次续租新增/延长出来的。 */
   origin?: "order" | "extension";

@@ -157,6 +157,11 @@ const permissions = [
   ["store-rental:order:operate", "订单操作", "门市租赁", PermissionKind.ACTION],
   ["store-rental:order:reassign", "资源解锁与改配", "门市租赁", PermissionKind.ACTION],
   ["store-rental:order:settle", "订单结算", "门市租赁", PermissionKind.ACTION],
+  // ORDER-CLOSE-02：费用裁定与实际收退款分权。这一行必须在**这里**——授权路径全部按
+  // Permission 表里已有的行过滤（platform.repository 的 findMany + filter、
+  // replaceRolePermissions 的 code in (...)），表里没有这一行时，角色预设与管理端勾选
+  // 都会被静默丢弃，三条裁定路由对除平台管理员以外的所有人 403。
+  ["store-rental:order:fee-review", "费用裁定", "门市租赁", PermissionKind.ACTION],
   ["store-rental:order:create", "按钮-新建订单", "门市租赁", PermissionKind.BUTTON],
   ["store-rental:order:pickup", "按钮-取车交付", "门市租赁", PermissionKind.BUTTON],
   ["store-rental:order:return", "按钮-还车验车", "门市租赁", PermissionKind.BUTTON],
@@ -238,6 +243,9 @@ const roleTemplates = [
       "store-rental:order:view",
       "store-rental:order:operate",
       "store-rental:order:settle",
+      // 与 platform.service / platform.repository 的同一条迁移：该角色原本凭 order:settle
+      // 就能裁定四类费用审核，拆权后必须显式补上，否则门店营运账号裁定一律 403。
+      "store-rental:order:fee-review",
       "store-rental:station:view",
       "store-rental:vehicle:view",
       "rental-core:catalog:view",

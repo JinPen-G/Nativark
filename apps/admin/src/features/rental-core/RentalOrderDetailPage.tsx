@@ -194,6 +194,15 @@ export function RentalOrderDetailPage() {
   const feeReviews = detail?.feeReviews ?? [];
   const pendingFeeReviews = feeReviews.filter((row) => row.status === "pending");
   const orderHasPendingFee = hasPendingFeeReview(detail ?? {});
+  // 服务端关单有三道闸门（rental-core.service 的 feeReviews 与续租退款审核、控制器的检查异常）。
+  // 界面把三道都列出来，否则按钮可点却必然 409，运营只能靠猜。
+  const settleBlockers = [
+    orderHasPendingFee ? "有待裁定的费用事项" : undefined,
+    (extensions.data ?? []).some((row) => row.status === "effective" && row.pricingSnapshot?.refundReview?.status === "pending")
+      ? "有待审核的续租退款差额" : undefined,
+    (inspections.data ?? []).some((row) => row.exceptions.some((exception) => exception.reviewStatus === "pending"))
+      ? "有待审核的检查异常" : undefined
+  ].filter((row): row is string => Boolean(row));
   // 金额一律按**订单自己的**结算币种展示（需求 §948）：币种是下单时的快照，
   // 不能改读当前经营空间的设置——空间后来改了币种，历史单的金额含义不会跟着改。
   const money = (value: number | undefined) => formatRentalMoney(Number(value ?? 0), detail?.currency);
@@ -220,7 +229,7 @@ export function RentalOrderDetailPage() {
         {canPickup && detail.status === RentalCoreOrderStatus.ReadyForPickup && ((detail.ruleSnapshot?.fulfillment.pickupInspectionRequired ?? true) ? <Button type="primary" icon={<SafetyCertificateOutlined />} onClick={() => beginInspection("pickup")}>{profile.data?.terminology.pickupLabel}检查</Button> : <Button type="primary" onClick={() => handover.mutate("pickup")}>直接完成{profile.data?.terminology.pickupLabel}</Button>)}
         {canReturn && detail.status === RentalCoreOrderStatus.Renting && ((detail.ruleSnapshot?.fulfillment.returnInspectionRequired ?? true) ? <Button type="primary" icon={<CheckCircleOutlined />} onClick={() => beginInspection("return")}>{profile.data?.terminology.returnLabel}检查</Button> : <Button type="primary" onClick={() => handover.mutate("return")}>直接完成{profile.data?.terminology.returnLabel}</Button>)}
         {canReturn && detail.status === RentalCoreOrderStatus.Renting && (detail.allocations.filter((allocation) => allocation.status === "picked_up").length > 1 || detail.allocations.some((allocation) => allocation.status === "picked_up" && allocation.quantity > 1)) && <Button onClick={() => { partialReturnForm.setFieldsValue({ items: [{ allocationId: "", quantity: 1 }] }); setPartialReturnOpen(true); }}>{detail.ruleSnapshot?.fulfillment.returnInspectionRequired ? "部分归还检查" : "部分归还"}</Button>}
-        {detail.status === RentalCoreOrderStatus.Settling && canSettleFunding && <Button type="primary" loading={settle.isPending} disabled={orderHasPendingFee} title={orderHasPendingFee ? "仍有待裁定的费用事项，服务端会拒绝关单；请先在「待审费用与裁定历史」里裁定" : undefined} onClick={() => settle.mutate()}>结算并关闭订单</Button>}
+        {detail.status === RentalCoreOrderStatus.Settling && canSettleFunding && <Button type="primary" loading={settle.isPending} disabled={settleBlockers.length > 0} title={settleBlockers.length ? `服务端会拒绝关单：${settleBlockers.join("、")}` : undefined} onClick={() => settle.mutate()}>结算并关闭订单</Button>}
         {canExtend && [RentalCoreOrderStatus.ReadyForPickup, RentalCoreOrderStatus.Renting].includes(detail.status) && <Button icon={<RetweetOutlined />} onClick={() => { extensionForm.resetFields(); setExtensionPreview(undefined); extensionForm.setFieldsValue({ newEndAt: dayjs(detail.effectiveEndAt ?? detail.endAt).add(1, "day") }); setExtensionOpen(true); }}>续租 / 延期</Button>}
         {canCancel && [RentalCoreOrderStatus.Draft, RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.ReadyForPickup].includes(detail.status) && <Button danger onClick={() => setCancelOpen(true)}>取消并按规则计费</Button>}
       </Space>
@@ -390,7 +399,7 @@ export function RentalOrderDetailPage() {
           { title: "结算方式", render: (_, row) => <Tag color={row.settlementMode === "monthly" ? "blue" : "gold"}>{row.settlementMode === "monthly" ? "企业月结" : "客户补款"}</Tag> },
           { title: "状态", render: (_, row) => <Tag color={row.status === "effective" ? "success" : row.status === "pending_payment" ? "gold" : "default"}>{{ pending_payment: "待补款", effective: "已生效", cancelled: "已取消", expired: "已过期" }[row.status]}</Tag> },
           { title: "价格版本", render: (_, row) => row.priceVersion ?? "—" },
-          { title: "操作", align: "right", render: (_, row) => row.status === "pending_payment" ? <Button type="link" loading={payExtension.isPending} onClick={() => payExtension.mutate(row.id)}>确认补款</Button> : row.pricingSnapshot?.refundReview?.status === "pending" && canSettleFunding ? <Button type="link" onClick={() => { setExtensionRefundReview(row); extensionRefundForm.setFieldsValue({ decision: "approved", reason: "" }); }}>审核退款差额</Button> : "—" }
+          { title: "操作", align: "right", render: (_, row) => row.status === "pending_payment" ? <Button type="link" loading={payExtension.isPending} onClick={() => payExtension.mutate(row.id)}>确认补款</Button> : row.pricingSnapshot?.refundReview?.status === "pending" && canReviewFees ? <Button type="link" onClick={() => { setExtensionRefundReview(row); extensionRefundForm.setFieldsValue({ decision: "approved", reason: "" }); }}>审核退款差额</Button> : "—" }
         ]} />
       </Card>}
     </Space>}</QueryState>

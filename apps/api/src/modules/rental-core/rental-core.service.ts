@@ -2290,7 +2290,19 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   ) {
     const order = await this.lockedOrder(tenantId, orderId, tx);
     if (order.status !== RentalCoreOrderStatus.Settling) throw new ConflictException("只有待结算订单可以审核异常费用");
-    const waiver = order.serviceSnapshots?.find((service) => service.serviceType === "damage_waiver");
+    // 损坏免赔按**覆盖损坏发生时点**的那次发生项认定（MKT-02C）。
+    //
+    // 同一免赔服务现在可能有多次发生（原订单买一次、续租又买一次），各自时段与额度不同。
+    // 直接 `find` 取数组第一条等于永远按原订单那次算：原免赔已过期、客户续租时又买了一次，
+    // 仍会拿过期那份的额度扣客户。按时点筛选后仍有多条时取覆盖额度最大的那条——保障口径
+    // 上对客户有利的那一条，避免因为记录顺序不同而给出不同结论。
+    const damagedAt = now();
+    const damagedAtMs = Date.parse(damagedAt);
+    const waiver = (order.serviceSnapshots ?? [])
+      .filter((service) => service.serviceType === "damage_waiver")
+      .filter((service) => !service.scheduledStartAt || !service.scheduledEndAt
+        || (Date.parse(service.scheduledStartAt) <= damagedAtMs && damagedAtMs <= Date.parse(service.scheduledEndAt)))
+      .sort((left, right) => (right.coverageLimit ?? 0) - (left.coverageLimit ?? 0))[0];
     const coveredAmount = waiver && amount > 0
       ? Math.min(amount, waiver.deductible ?? 0) + Math.max(0, amount - (waiver.coverageLimit ?? 0))
       : amount;
