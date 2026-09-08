@@ -953,6 +953,17 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     return result;
   }
 
+  async restoreStockDisposition(tenantId: string, dispositionId: string, operator: string) {
+    this.state(tenantId);
+    return this.factStore.restoreStockDisposition(tenantId, dispositionId, operator);
+  }
+
+  async listStockDispositions(tenantId: string, orderId?: string) {
+    this.state(tenantId);
+    if (orderId) await this.requireOrder(tenantId, orderId);
+    return this.factStore.listStockDispositions(tenantId, orderId);
+  }
+
   async listStockBalances(tenantId: string) {
     await this.factContext(tenantId);
     const [stocks, reservations] = await Promise.all([
@@ -1762,6 +1773,9 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     // 检查记录与订单状态推进必须同事务：分两次写时中途失败会留下
     // "检查已记录、订单未推进"的中间态。
     await this.factStore.insertInspection(record, tx);
+    if (template.stage === "return") {
+      await this.recordReturnDispositions(tenantId, order, record.id, input.returnBatchNo ?? record.id, releasedBeforeReturn, input.exceptions?.length ? "blocked" : undefined, tx);
+    }
     await this.factStore.saveOrderAggregate(order, assetChanges, tx, stockQuarantines);
     return { inspection: record, order };
   }
@@ -2185,6 +2199,30 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
    *
    * 出口是人工：`setStockBalance` 可以把维修量降回去（修好或核销后）。
    */
+  private async recordReturnDispositions(
+    tenantId: string,
+    order: RentalOrder,
+    inspectionId: string,
+    returnBatchKey: string,
+    releasedBefore: Map<string, number>,
+    blockedReason: string | undefined,
+    tx: RentalFactTx | undefined
+  ) {
+    const receivedAt = now();
+    const bufferUntil = new Date(Date.parse(receivedAt) + Math.max(0, order.ruleSnapshot.fulfillment.returnBufferMinutes ?? 0) * 60_000).toISOString();
+    for (const reservation of order.reservations) {
+      const quantity = Math.max(0, reservation.releasedQuantity - (releasedBefore.get(reservation.id) ?? 0));
+      if (quantity <= 0) continue;
+      const dedupeKey = `${returnBatchKey}:${reservation.itemGroupId}:${reservation.locationId}:${reservation.id}`;
+      await this.factStore.upsertStockDisposition({
+        id: id("disposition"), tenantId, workspaceId: getRequestWorkspaceId() ?? "", orderId: order.id, inspectionId,
+        returnBatchKey, dedupeKey, itemGroupId: reservation.itemGroupId, locationId: reservation.locationId,
+        quantity, receivedAt, bufferUntil, status: blockedReason ? "blocked" : "buffered",
+        blockReason: blockedReason, restoredQuantity: 0, createdAt: receivedAt, updatedAt: receivedAt
+      }, tx);
+    }
+  }
+
   private quarantinedReturnQuantities(
     state: TenantRentalState,
     order: RentalOrder,

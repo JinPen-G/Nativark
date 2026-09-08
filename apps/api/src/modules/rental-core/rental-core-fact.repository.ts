@@ -1,4 +1,4 @@
-import { ConflictException, Injectable } from "@nestjs/common";
+import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { createHash } from "node:crypto";
 import { Prisma, type $Enums } from "@prisma/client";
 import {
@@ -70,6 +70,29 @@ export interface StockCountInput {
   maintenanceQuantity?: number;
 }
 
+export interface RentalStockDisposition {
+  id: string;
+  tenantId: string;
+  workspaceId: string;
+  orderId: string;
+  inspectionId?: string;
+  returnBatchKey: string;
+  dedupeKey: string;
+  itemGroupId: string;
+  locationId: string;
+  assetId?: string;
+  quantity: number;
+  receivedAt: string;
+  bufferUntil: string;
+  status: string;
+  blockReason?: string;
+  restoredQuantity: number;
+  restoredAt?: string;
+  restoredBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type RentalFactTx = Prisma.TransactionClient;
 
 export interface InventoryLockTarget {
@@ -124,6 +147,9 @@ export interface RentalCoreFactStore {
    * `maintenanceQuantity` 现在有第二个写者，见 `saveOrderAggregate` 的异常隔离。
    */
   applyStockCount(input: StockCountInput): Promise<{ id: string; onHandQuantity: number; maintenanceQuantity: number }>;
+  listStockDispositions(tenantId: string, orderId?: string, tx?: RentalFactTx): Promise<RentalStockDisposition[]>;
+  upsertStockDisposition(disposition: RentalStockDisposition, tx?: RentalFactTx): Promise<void>;
+  restoreStockDisposition(tenantId: string, dispositionId: string, operator: string, tx?: RentalFactTx): Promise<RentalStockDisposition>;
   listInspections(tenantId: string, orderId: string): Promise<RentalInspectionRecord[]>;
   insertInspection(record: RentalInspectionRecord, tx?: RentalFactTx): Promise<void>;
   /** 续租记录（需求 4.6.9）。只追加与改状态，不改金额——金额是申请时固化的事实。 */
@@ -691,6 +717,41 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       where: { id: balance.id },
       create: { workspaceId, id: balance.id, ...data },
       update: data    });
+  }
+
+  async listStockDispositions(tenantId: string, orderId?: string, tx?: RentalFactTx): Promise<RentalStockDisposition[]> {
+    const client = tx ?? this.prisma;
+    const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
+    const rows = await client.rentalStockDisposition.findMany({
+      where: { tenantId, workspaceId, ...(orderId ? { orderId } : {}) }, orderBy: { createdAt: "asc" }
+    });
+    return rows.map((row) => ({ ...row, inspectionId: row.inspectionId ?? undefined, assetId: row.assetId ?? undefined, blockReason: row.blockReason ?? undefined, restoredBy: row.restoredBy ?? undefined, receivedAt: row.receivedAt.toISOString(), bufferUntil: row.bufferUntil.toISOString(), restoredAt: row.restoredAt?.toISOString(), createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() }));
+  }
+
+  async upsertStockDisposition(disposition: RentalStockDisposition, tx?: RentalFactTx): Promise<void> {
+    const client = tx ?? this.prisma;
+    const workspaceId = await resolveScopeWorkspaceId(client, disposition.tenantId);
+    await client.rentalStockDisposition.upsert({
+      where: { id: disposition.id },
+      create: { ...disposition, workspaceId, receivedAt: new Date(disposition.receivedAt), bufferUntil: new Date(disposition.bufferUntil), restoredAt: disposition.restoredAt ? new Date(disposition.restoredAt) : null, createdAt: new Date(disposition.createdAt), updatedAt: new Date(disposition.updatedAt) },
+      update: { orderId: disposition.orderId, inspectionId: disposition.inspectionId ?? null, returnBatchKey: disposition.returnBatchKey, dedupeKey: disposition.dedupeKey, itemGroupId: disposition.itemGroupId, locationId: disposition.locationId, assetId: disposition.assetId ?? null, quantity: disposition.quantity, receivedAt: new Date(disposition.receivedAt), bufferUntil: new Date(disposition.bufferUntil), status: disposition.status, blockReason: disposition.blockReason ?? null, restoredQuantity: disposition.restoredQuantity, restoredAt: disposition.restoredAt ? new Date(disposition.restoredAt) : null, restoredBy: disposition.restoredBy ?? null }
+    });
+  }
+
+  async restoreStockDisposition(tenantId: string, dispositionId: string, operator: string, tx?: RentalFactTx): Promise<RentalStockDisposition> {
+    const client = tx ?? this.prisma;
+    const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
+    const row = await client.rentalStockDisposition.findFirst({ where: { id: dispositionId, tenantId, workspaceId }, select: { id: true, quantity: true, restoredQuantity: true, status: true, bufferUntil: true, tenantId: true, workspaceId: true, orderId: true, inspectionId: true, returnBatchKey: true, dedupeKey: true, itemGroupId: true, locationId: true, assetId: true, receivedAt: true, blockReason: true, restoredAt: true, restoredBy: true, createdAt: true, updatedAt: true } });
+    if (!row) throw new NotFoundException("库存处置不存在或不属于当前经营空间");
+    if (row.status === "blocked") throw new ConflictException("该处置仍有异常阻断，须先完成关联工单验收");
+    if (new Date() < row.bufferUntil) throw new ConflictException("归还后周转缓冲尚未结束，暂不能恢复可租");
+    if (row.restoredQuantity >= row.quantity) throw new ConflictException("该处置已经恢复，不能重复恢复");
+    const restoredAt = new Date();
+    const updated = await client.rentalStockDisposition.update({ where: { id: row.id }, data: { status: "restored", restoredQuantity: row.quantity, restoredAt, restoredBy: operator } });
+    if (row.assetId) {
+      await client.rentalAsset.updateMany({ where: { id: row.assetId, tenantId, workspaceId }, data: { status: "AVAILABLE" } });
+    }
+    return { ...updated, inspectionId: updated.inspectionId ?? undefined, assetId: updated.assetId ?? undefined, blockReason: updated.blockReason ?? undefined, restoredBy: updated.restoredBy ?? undefined, receivedAt: updated.receivedAt.toISOString(), bufferUntil: updated.bufferUntil.toISOString(), restoredAt: updated.restoredAt?.toISOString(), createdAt: updated.createdAt.toISOString(), updatedAt: updated.updatedAt.toISOString() };
   }
 
   /* ---------- 检查记录 ---------- */

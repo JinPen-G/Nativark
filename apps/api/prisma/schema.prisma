@@ -129,6 +129,7 @@ model Tenant {
   rentalPricingGroups               RentalPricingGroup[]
   rentalAssets                      RentalAsset[]
   rentalStockBalances               RentalStockBalance[]
+  rentalStockDispositions           RentalStockDisposition[]
   rentalOrders                      RentalOrder[]
   rentalReservations                RentalReservation[]
   rentalInspectionTemplates         RentalInspectionTemplate[]
@@ -241,6 +242,7 @@ model BusinessWorkspace {
   rentalPricingGroups               RentalPricingGroup[]
   rentalAssets                      RentalAsset[]
   rentalStockBalances               RentalStockBalance[]
+  rentalStockDispositions           RentalStockDisposition[]
   rentalOrders                      RentalOrder[]
   rentalReservations                RentalReservation[]
   rentalInspectionTemplates         RentalInspectionTemplate[]
@@ -1771,6 +1773,39 @@ model RentalStockBalance {
   @@map("rental_stock_balances")
 }
 
+/// STOCK-CLOSE-01：每批实际归还后的库存处置事实。
+model RentalStockDisposition {
+  id               String   @id @default(uuid())
+  tenantId         String
+  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId      String
+  workspace        BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  orderId          String
+  order            RentalOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  inspectionId     String?
+  inspection       RentalInspectionRecord? @relation(fields: [inspectionId], references: [id], onDelete: SetNull)
+  returnBatchKey   String   @db.VarChar(191)
+  dedupeKey        String   @db.VarChar(191)
+  itemGroupId      String   @db.VarChar(191)
+  locationId       String   @db.VarChar(191)
+  assetId          String?  @db.VarChar(191)
+  quantity         Int
+  receivedAt       DateTime
+  bufferUntil      DateTime
+  status           String   @db.VarChar(20)
+  blockReason      String?  @db.VarChar(500)
+  restoredQuantity Int      @default(0)
+  restoredAt       DateTime?
+  restoredBy       String?  @db.VarChar(191)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([workspaceId, dedupeKey], map: "rental_stock_disp_batch_resource_key")
+  @@index([tenantId, workspaceId, itemGroupId, locationId, status])
+  @@index([orderId, inspectionId])
+  @@map("rental_stock_dispositions")
+}
+
 model RentalOrder {
   id                            String                         @id @default(uuid())
   tenantId                      String
@@ -1884,6 +1919,7 @@ model RentalOrder {
   reservations                  RentalReservation[]
   allocations                   RentalAllocation[]
   inspections                   RentalInspectionRecord[]
+  stockDispositions             RentalStockDisposition[]
   idempotencyRecords            RentalOrderIdempotencyRecord[]
   serviceReservations           RentalServiceReservation[]
   fundingEvents                 RentalFundingEvent[]
@@ -2121,6 +2157,7 @@ model RentalInspectionRecord {
   stage           String
   templateId      String
   template        RentalInspectionTemplate @relation(fields: [templateId], references: [id])
+  stockDispositions RentalStockDisposition[]
   templateCode    String
   templateVersion String
   results         Json
