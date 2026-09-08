@@ -157,10 +157,13 @@ const permissions = [
   ["store-rental:order:operate", "订单操作", "门市租赁", PermissionKind.ACTION],
   ["store-rental:order:reassign", "资源解锁与改配", "门市租赁", PermissionKind.ACTION],
   ["store-rental:order:settle", "订单结算", "门市租赁", PermissionKind.ACTION],
-  // ORDER-CLOSE-02：费用裁定与实际收退款分权。这一行必须在**这里**——授权路径全部按
-  // Permission 表里已有的行过滤（platform.repository 的 findMany + filter、
-  // replaceRolePermissions 的 code in (...)），表里没有这一行时，角色预设与管理端勾选
-  // 都会被静默丢弃，三条裁定路由对除平台管理员以外的所有人 403。
+  ["store-rental:member:account-manage", "会员账号与密码管理", "会员管理", PermissionKind.ACTION],
+  ["store-rental:member:review", "会员注册审核", "会员管理", PermissionKind.ACTION],
+  ["store-rental:member:qualification-review", "会员证件审核", "会员管理", PermissionKind.ACTION],
+  ["store-rental:member:plan:manage", "会员方案编辑", "会员管理", PermissionKind.ACTION],
+  ["store-rental:member:plan:publish", "会员方案发布", "会员管理", PermissionKind.ACTION],
+  ["store-rental:corporate:employee-manage", "企业员工管理", "企业会员", PermissionKind.ACTION],
+  // ORDER-CLOSE-02：费用裁定与实际收退款分权。
   ["store-rental:order:fee-review", "费用裁定", "门市租赁", PermissionKind.ACTION],
   ["store-rental:order:create", "按钮-新建订单", "门市租赁", PermissionKind.BUTTON],
   ["store-rental:order:pickup", "按钮-取车交付", "门市租赁", PermissionKind.BUTTON],

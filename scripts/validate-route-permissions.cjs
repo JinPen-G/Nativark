@@ -101,23 +101,6 @@ function declaredPermissionCodes() {
 }
 const declared = declaredPermissionCodes();
 
-/**
- * 已知的存量缺口：这些权限码被守卫要求，但 seed.ts 的目录里没有，因此对应路由目前
- * 对非平台管理员一律 403。全部落在会员/企业域（membership.controller），不属于本轮
- * 订单闭环的改动范围，也不该由订单侧顺手决定它们该授予哪些角色。
- *
- * 白名单只为「不让存量缺口挡住新检查」而存在，**不是**认可这些缺口：新增权限码一律
- * 必须进 seed.ts 目录，否则本脚本失败。修掉一个就从这里删一行。
- */
-const KNOWN_UNDECLARED = new Set([
-  "store-rental:member:account-manage",
-  "store-rental:member:review",
-  "store-rental:member:qualification-review",
-  "store-rental:member:plan:manage",
-  "store-rental:member:plan:publish",
-  "store-rental:corporate:employee-manage"
-]);
-
 for (const route of routes) {
   const permissions = requiredPermissions(route.method, route.path);
   if (permissions.includes(UNMATCHED_ROUTE_PERMISSION)) {
@@ -129,7 +112,7 @@ for (const route of routes) {
     zeroPermission.push(route);
   }
   for (const code of permissions) {
-    if (declared.has(code) || KNOWN_UNDECLARED.has(code)) continue;
+    if (declared.has(code)) continue;
     if (!undeclared.has(code)) undeclared.set(code, []);
     undeclared.get(code).push(route);
   }
