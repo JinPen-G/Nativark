@@ -716,7 +716,8 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     await this.prisma.rentalStockBalance.upsert({
       where: { id: balance.id },
       create: { workspaceId, id: balance.id, ...data },
-      update: data    });
+      update: data
+    });
   }
 
   async listStockDispositions(tenantId: string, orderId?: string, tx?: RentalFactTx): Promise<RentalStockDisposition[]> {

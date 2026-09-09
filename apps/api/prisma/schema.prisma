@@ -130,6 +130,7 @@ model Tenant {
   rentalAssets                      RentalAsset[]
   rentalStockBalances               RentalStockBalance[]
   rentalStockDispositions           RentalStockDisposition[]
+  rentalWorkOrders                  RentalWorkOrder[]
   rentalOrders                      RentalOrder[]
   rentalReservations                RentalReservation[]
   rentalInspectionTemplates         RentalInspectionTemplate[]
@@ -243,6 +244,7 @@ model BusinessWorkspace {
   rentalAssets                      RentalAsset[]
   rentalStockBalances               RentalStockBalance[]
   rentalStockDispositions           RentalStockDisposition[]
+  rentalWorkOrders                  RentalWorkOrder[]
   rentalOrders                      RentalOrder[]
   rentalReservations                RentalReservation[]
   rentalInspectionTemplates         RentalInspectionTemplate[]
@@ -1797,6 +1799,7 @@ model RentalStockDisposition {
   restoredQuantity Int      @default(0)
   restoredAt       DateTime?
   restoredBy       String?  @db.VarChar(191)
+  workOrders       RentalWorkOrder[]
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -1804,6 +1807,46 @@ model RentalStockDisposition {
   @@index([tenantId, workspaceId, itemGroupId, locationId, status])
   @@index([orderId, inspectionId])
   @@map("rental_stock_dispositions")
+}
+
+/// SHARED-WORK-01A：清洁、整备、校准和维修共用的最小养护工单事实。
+model RentalWorkOrder {
+  id             String   @id @default(uuid())
+  tenantId       String
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId    String
+  workspace      BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  workNo         String
+  type           String   @db.VarChar(24)
+  status         String   @db.VarChar(24)
+  dispositionId  String?
+  disposition    RentalStockDisposition? @relation(fields: [dispositionId], references: [id], onDelete: SetNull)
+  orderId        String?
+  order          RentalOrder? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  inspectionId   String?
+  itemGroupId    String
+  locationId     String
+  assetId        String?
+  quantity       Int
+  assigneeId     String?
+  assigneeName   String?
+  reason         String
+  result         String?
+  attachments    Json
+  startedAt      DateTime?
+  submittedAt    DateTime?
+  reviewedAt     DateTime?
+  reviewedBy     String?
+  reviewReason   String?
+  createdBy      String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([workspaceId, workNo], map: "rental_work_orders_ws_no_key")
+  @@unique([workspaceId, dispositionId, type], map: "rental_work_orders_disp_type_key")
+  @@index([tenantId, workspaceId, status, type])
+  @@index([orderId, inspectionId])
+  @@map("rental_work_orders")
 }
 
 model RentalOrder {
@@ -1920,6 +1963,7 @@ model RentalOrder {
   allocations                   RentalAllocation[]
   inspections                   RentalInspectionRecord[]
   stockDispositions             RentalStockDisposition[]
+  workOrders                     RentalWorkOrder[]
   idempotencyRecords            RentalOrderIdempotencyRecord[]
   serviceReservations           RentalServiceReservation[]
   fundingEvents                 RentalFundingEvent[]
