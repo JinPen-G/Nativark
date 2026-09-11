@@ -22,8 +22,8 @@ const env = Object.fromEntries(
 );
 const databaseUrl = process.env.DATABASE_URL || env.DATABASE_URL;
 const dbName = new URL(databaseUrl).pathname.slice(1);
-if (!/claude/.test(dbName)) {
-  console.error(`拒绝执行：订单选择器专项只能跑在专用库上，当前指向 ${dbName}`);
+if (!/(claude|zcode)/.test(dbName)) {
+  console.error(`拒绝执行：订单选择器专项只能跑在并行专用库上（claude/zcode），当前指向 ${dbName}`);
   process.exit(1);
 }
 process.env.DATABASE_URL = databaseUrl;

@@ -23,8 +23,8 @@ const env = Object.fromEntries(
 // 允许通过进程环境把专项切到隔离库；没有显式环境变量时才使用项目 .env。
 const databaseUrl = process.env.DATABASE_URL || env.DATABASE_URL;
 const dbName = new URL(databaseUrl).pathname.slice(1);
-if (!/claude/.test(dbName)) {
-  console.error(`拒绝执行：会员空间专项只能跑在专用库上，当前指向 ${dbName}`);
+if (!/(claude|zcode)/.test(dbName)) {
+  console.error(`拒绝执行：会员空间专项只能跑在并行专用库上（claude/zcode），当前指向 ${dbName}`);
   process.exit(1);
 }
 process.env.DATABASE_URL = databaseUrl;
