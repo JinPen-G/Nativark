@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 import { CapabilityHookRuntime } from "./capability-hook.runtime";
+import { MembershipService } from "../platform/membership.service";
 import type { CapabilityHookSubjectType } from "./capability-hook.repository";
 import { WorkspaceCapabilityService } from "./workspace-capability.service";
 import {
@@ -100,6 +101,7 @@ import {
 import { assertRentalCategoryExtensions } from "./rental-extension-registry";
 import { appendOccurrences, extensionRequestKey, stampOccurrences } from "./rental-service-occurrence";
 import { buildRentalCategorySamples } from "./rental-category-samples";
+import { evaluateRentalQualification } from "./rental-qualification";
 
 /**
  * 内存态只保留**配置**（库为事实源、这里是写穿缓存）。
@@ -249,7 +251,10 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     // 两三个参数直接构造本服务；生产装配里 Nest 必然注入。
     // mysql-e2e 会断言 Hook 确实执行，因此「装配里漏掉它」会让 E2E 变红，
     // 不会变成一个静默不跑 Hook 的部署。
-    @Optional() private readonly hooks?: CapabilityHookRuntime
+    @Optional() private readonly hooks?: CapabilityHookRuntime,
+    // SHARED-QUAL-01：领取与续租必须重新解析当前会员事实。可选仅为保留
+    // 直接构造 RentalCoreService 的内存单测；生产 AppModule 必须注入。
+    @Optional() private readonly memberships?: MembershipService
   ) {}
 
   /**
@@ -1247,15 +1252,12 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     // 能力随后暂停或升级都不得反向废掉这份报价，更不能卡住由它形成的在途订单。
     if (quote.ruleSnapshot.qualification.required) {
       if (quote.membershipSnapshot) {
-        const qualification = quote.membershipSnapshot.qualifications.find((item) =>
-          quote.ruleSnapshot.qualification.documentTypes.includes(item.qualificationType)
-          && item.status === "approved"
+        const evaluation = evaluateRentalQualification(
+          quote.membershipSnapshot.qualifications,
+          quote.ruleSnapshot.qualification,
+          { validThroughAt: input.endAt, minimumValidityFromAt: input.startAt }
         );
-        if (!qualification) throw new ConflictException(`当前品类要求先通过资质审核：${quote.ruleSnapshot.qualification.documentTypes.join("、")}`);
-        if (qualification.expiresAt) {
-          const validDays = (new Date(qualification.expiresAt).getTime() - new Date(input.startAt).getTime()) / 86_400_000;
-          if (validDays < quote.ruleSnapshot.qualification.minimumValidityDays) throw new ConflictException("资质有效期不满足租赁规则");
-        }
+        if (!evaluation.ok) throw new ConflictException(`当前品类要求先通过资质审核：${evaluation.message}`);
       } else {
         // 仅保留给迁移前旧调用方；新会员订单不接受前端声明资质已通过。
         if (!input.qualificationApproved) throw new ConflictException(`当前品类要求先通过资质审核：${quote.ruleSnapshot.qualification.documentTypes.join("、")}`);
@@ -1757,6 +1759,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (stage === "pickup") {
       if (order.ruleSnapshot.fulfillment.pickupInspectionRequired) throw new ConflictException("当前规则要求完成领取检查");
       if (order.status !== RentalCoreOrderStatus.ReadyForPickup) throw new ConflictException("订单尚未完成配货");
+      await this.assertOrderQualification(tenantId, order, "pickup", order.effectiveEndAt ?? order.endAt);
       await this.assertAllocatedPickupReady(tenantId, order, tx);
       this.assertOutboundLocationActive(state, order);
       // 领取/交付与归还检查是两个不同的触发点，因此按 stage 分发。
@@ -1836,6 +1839,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (input.returnItems?.length && template.stage !== "return") throw new BadRequestException("只有归还检查可以指定部分归还项");
     const partialReturnItems = template.stage === "return" && input.returnItems?.length ? input.returnItems : undefined;
     if (template.stage === "pickup") {
+      await this.assertOrderQualification(tenantId, order, "pickup", order.effectiveEndAt ?? order.endAt);
       this.assertOutboundLocationActive(state, order);
       await this.assertAllocatedPickupReady(tenantId, order, tx);
     }
@@ -2004,6 +2008,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (priced.payableAmount < 0) throw new BadRequestException("补款金额不能为负，负差额必须走退款审核");
     const rule = effectiveExtensionRule(priced.ruleSnapshot);
     if (!rule.enabled) throw new ConflictException("当前经营空间的规则不允许续租");
+    await this.assertOrderQualification(tenantId, order, "extension", priced.newEndAt);
     const existing = await this.factStore.listExtensions(tenantId, orderId, tx);
     this.assertExtensionPriceBase(order, existing, priced.pricingSnapshot);
     const effectiveCount = existing.filter((row) => row.status === "effective").length;
@@ -2097,6 +2102,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     // 期间可能有另一次续租先生效了，基准变了就不能再按原金额延长。
     if (extension.originalEndAt !== from) throw new ConflictException("订单归还时间已变化，请重新申请续租");
     if (effectiveExtensionRule(order.ruleSnapshot).pricingMode === "original_total" && Date.parse(now()) > Date.parse(from)) throw new ConflictException("补款时已超过原约定归还时间，请先人工处理逾时，不能直接生效原价全租期续租");
+    await this.assertOrderQualification(tenantId, order, "extension", extension.newEndAt);
     this.assertExtensionPriceBase(order, rows, extension.pricingSnapshot);
     await this.assertOrderExtensionAvailable(tenantId, order, extension.newEndAt, tx);
     const at = now();
@@ -2763,6 +2769,26 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       throw new ConflictException(`订单由 ${lock.ownerName} 办理中，或办理凭证已过期，请重新接手`);
     }
     return order;
+  }
+
+  /** 资格闸门只看订单的规则快照，会员/员工关系由 MembershipService 按当前空间重读。 */
+  private async assertOrderQualification(
+    tenantId: string,
+    order: RentalOrder,
+    action: "pickup" | "extension",
+    validThroughAt: string
+  ) {
+    const rule = order.ruleSnapshot.qualification;
+    if (!rule.required) return;
+    if (!this.memberships) throw new ConflictException("当前服务未装配会员资格校验，不能继续办理该订单");
+    await this.memberships.assertBookingQualificationForAction(
+      tenantId,
+      this.resolveWorkspaceId(tenantId),
+      order.membershipSnapshot,
+      rule,
+      action,
+      { validThroughAt, minimumValidityFromAt: order.startAt }
+    );
   }
 
   async validateAllocationEquipment(tenantId: string, order: RentalOrder, allocations: RentalAllocation[], tx: RentalFactTx, operator?: string) {

@@ -24,9 +24,11 @@ import type {
   SavePersonalMembershipRequest,
   SubmitCustomerQualificationRequest,
   RentalBookingIdentityInput,
-  RentalMembershipSnapshot
+  RentalMembershipSnapshot,
+  RentalRuleConfig
 } from "@store-rental/shared";
 import { PrismaService } from "../database/prisma.service";
+import { evaluateRentalQualification, type RentalQualificationAction, type RentalQualificationCheckWindow } from "../rental-core/rental-qualification";
 
 const mask = (value?: string) => {
   const trimmed = value?.trim();
@@ -637,6 +639,39 @@ export class MembershipService {
       qualifications,
       resolvedAt: now.toISOString()
     };
+  }
+
+  /**
+   * SHARED-QUAL-01：履约动作前重新解析会员事实，再按订单规则快照复核资格。
+   *
+   * 订单里的 membershipSnapshot 只解释下单时选了谁，不能当成当前授权；
+   * 因此企业员工关系、空间会员状态和证件状态都必须从当前主档重读。
+   */
+  async assertBookingQualificationForAction(
+    tenantId: string,
+    workspaceId: string,
+    snapshot: RentalMembershipSnapshot | undefined,
+    rule: RentalRuleConfig["qualification"],
+    action: RentalQualificationAction,
+    window: RentalQualificationCheckWindow
+  ) {
+    if (!rule.required) return { ok: true as const };
+    if (!snapshot) {
+      throw new ConflictException(`${this.qualificationActionLabel(action)}不能继续：订单缺少会员资格快照，请先人工核验`);
+    }
+
+    const current = await this.resolveBookingIdentity(tenantId, workspaceId, snapshot.personalCustomerId, {
+      bookingIdentity: snapshot.bookingIdentity,
+      corporateCustomerId: snapshot.corporateCustomerId,
+      enterpriseContractAndPayer: snapshot.enterpriseContractAndPayer
+    });
+    const result = evaluateRentalQualification(current.qualifications, rule, window);
+    if (!result.ok) throw new ConflictException(`${this.qualificationActionLabel(action)}资格校验未通过：${result.message}`);
+    return { ok: true as const, qualificationType: result.qualificationType };
+  }
+
+  private qualificationActionLabel(action: RentalQualificationAction) {
+    return action === "submit" ? "订单提交" : action === "pickup" ? "领取" : "续租";
   }
 
   async listBookingOptions(tenantId: string, workspaceId: string, personalCustomerId: string): Promise<CustomerMembershipBookingOption[]> {
