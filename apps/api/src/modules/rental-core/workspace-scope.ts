@@ -1,4 +1,4 @@
-import { ForbiddenException } from "@nestjs/common";
+import { ConflictException, ForbiddenException } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
 import { getRequestWorkspaceId } from "../../common/request-identity";
 
@@ -16,6 +16,21 @@ type AnyClient = {
 };
 
 export type WorkspaceScopeTx = Prisma.TransactionClient;
+
+/**
+ * 配置写入的第二道边界：`upsert` 的唯一键通常只有全局 id，
+ * 不能因为 id 命中就把另一租户/空间的记录更新成当前请求的数据。
+ */
+export function assertScopedWrite(
+  existing: { tenantId: string; workspaceId: string } | null,
+  tenantId: string,
+  workspaceId: string,
+  label: string
+) {
+  if (existing && (existing.tenantId !== tenantId || existing.workspaceId !== workspaceId)) {
+    throw new ConflictException(`${label}已属于其他租户或经营空间，拒绝覆盖`);
+  }
+}
 
 /**
  * SPACE-03：读写经营事实时使用的经营空间。

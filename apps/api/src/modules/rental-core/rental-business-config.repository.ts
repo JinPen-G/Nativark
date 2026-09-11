@@ -19,7 +19,7 @@ import type {
 } from "@store-rental/shared";
 import { PrismaService } from "../database/prisma.service";
 import type { RentalConfigTx } from "./rental-core-config.repository";
-import { resolveScopeWorkspaceId } from "./workspace-scope";
+import { assertScopedWrite, resolveScopeWorkspaceId } from "./workspace-scope";
 
 const canonicalJson = (value: unknown) => JSON.stringify(value, (_key, item: unknown) => {
   if (!item || typeof item !== "object" || Array.isArray(item)) return item;
@@ -198,6 +198,8 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
     };
     const client = tx ?? this.prisma;
     const workspaceId = await resolveScopeWorkspaceId(client, plan.tenantId);
+    const existing = await client.rentalPricingPlan.findUnique({ where: { id: plan.id }, select: { tenantId: true, workspaceId: true } });
+    assertScopedWrite(existing, plan.tenantId, workspaceId, "基础定价计划");
     await client.rentalPricingPlan.upsert({
       where: { id: plan.id },
       create: { workspaceId, id: plan.id, ...data, createdAt: new Date(plan.createdAt) },
@@ -231,6 +233,8 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       version: plan.version
     };
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, plan.tenantId);
+    const existing = await this.prisma.rentalDiscountPlan.findUnique({ where: { id: plan.id }, select: { tenantId: true, workspaceId: true } });
+    assertScopedWrite(existing, plan.tenantId, workspaceId, "优惠方案");
     await this.prisma.rentalDiscountPlan.upsert({
       where: { id: plan.id },
       create: { workspaceId, id: plan.id, ...data, createdAt: new Date(plan.createdAt) },
@@ -268,6 +272,8 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, service.tenantId);
     const snapshot = JSON.parse(JSON.stringify({ ...service, workspaceId })) as Prisma.InputJsonValue;
     await this.prisma.$transaction(async (tx) => {
+      const existing = await tx.rentalValueAddedService.findUnique({ where: { id: service.id }, select: { tenantId: true, workspaceId: true } });
+      assertScopedWrite(existing, service.tenantId, workspaceId, "增值服务");
       await tx.rentalValueAddedService.upsert({
         where: { id: service.id },
         create: { workspaceId, id: service.id, ...data, createdAt: new Date(service.createdAt) },
@@ -547,6 +553,8 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
     const data = this.ruleVersionData(version);
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, version.tenantId);
     try {
+      const existing = await this.prisma.rentalRuleVersion.findUnique({ where: { id: version.id }, select: { tenantId: true, workspaceId: true } });
+      assertScopedWrite(existing, version.tenantId, workspaceId, "规则版本");
       await this.prisma.rentalRuleVersion.upsert({
         where: { id: version.id },
         create: { workspaceId, id: version.id, ...data, createdAt: new Date(version.createdAt) },
@@ -600,6 +608,9 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
           }
         }
         for (const row of [version, ...alsoWrite]) {
+          if (row.tenantId !== version.tenantId) throw new ConflictException("规则版本不能跨租户写入");
+          const existing = await tx.rentalRuleVersion.findUnique({ where: { id: row.id }, select: { tenantId: true, workspaceId: true } });
+          assertScopedWrite(existing, version.tenantId, workspaceId, "规则版本");
           const data = this.ruleVersionData(row);
           await tx.rentalRuleVersion.upsert({
             where: { id: row.id },
@@ -672,6 +683,8 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
   async upsertNotificationTemplate(template: RentalNotificationTemplateV1): Promise<void> {
     const data = this.notificationTemplateData(template);
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, template.tenantId);
+    const existing = await this.prisma.rentalNotificationTemplate.findUnique({ where: { id: template.id }, select: { tenantId: true, workspaceId: true } });
+    assertScopedWrite(existing, template.tenantId, workspaceId, "通知模板");
     await this.prisma.rentalNotificationTemplate.upsert({
       where: { id: template.id },
       create: { workspaceId, id: template.id, ...data },
