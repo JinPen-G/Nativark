@@ -95,6 +95,8 @@ export interface RentalUniqueAttributeClaim {
  */
 export interface RentalCoreFactStore {
   listOrders(tenantId: string): Promise<RentalOrder[]>;
+  /** 找出当前空间中仍处于待确认、且至少一条软预占已过期的订单候选。 */
+  listExpiredDraftOrderIds(tenantId: string, expiredBefore: string, take?: number): Promise<string[]>;
   findOrder(tenantId: string, orderId: string, tx?: RentalFactTx): Promise<RentalOrder | undefined>;
   /**
    * 对订单行加排他锁，供状态推进动作在读取聚合前调用。
@@ -265,6 +267,24 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       orderBy: { createdAt: "desc" }
     });
     return rows.map((row) => this.toDomainOrder(row));
+  }
+
+  async listExpiredDraftOrderIds(tenantId: string, expiredBefore: string, take = 50): Promise<string[]> {
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
+    const rows = await this.prisma.rentalOrder.findMany({
+      where: {
+        tenantId,
+        workspaceId,
+        status: "DRAFT",
+        reservations: {
+          some: { status: "SOFT", expiresAt: { lt: new Date(expiredBefore) } }
+        }
+      },
+      select: { id: true },
+      orderBy: { createdAt: "asc" },
+      take: Math.min(Math.max(1, take), 200)
+    });
+    return rows.map((row) => row.id);
   }
 
   async findOrder(tenantId: string, orderId: string, tx?: RentalFactTx): Promise<RentalOrder | undefined> {

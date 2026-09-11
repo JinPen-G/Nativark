@@ -272,6 +272,8 @@ export const rentalCoreApi = {
   releaseFunding: (id: string, data: RentalFundingReleaseRequest) => request<RentalFundingEvent>(`/rental/v1/orders/${id}/funding-events/release`, { method: "post", data }),
   failFunding: (id: string, data: RentalFundingFailureRequest) => request<RentalFundingEvent>(`/rental/v1/orders/${id}/funding-events/fail`, { method: "post", data }),
   createOrder: (data: CreateRentalOrderRequest) => request<RentalOrder>("/rental/v1/orders", { method: "post", data }),
+  expirePendingOrder: (id: string) => request<RentalOrder>(`/rental/v1/orders/${id}/expire-pending`, { method: "post" }),
+  expirePendingOrders: (limit = 50) => request<{ scanned: number; expired: number; skipped: number; results: Array<{ orderId: string; status: "expired" | "skipped"; reason?: string }> }>(`/rental/v1/orders/expire-pending?limit=${limit}`, { method: "post" }),
   confirmOrder: (id: string) => request<RentalOrder>(`/rental/v1/orders/${id}/confirm`, { method: "post" }),
   allocateOrder: (id: string) => request<RentalOrder>(`/rental/v1/orders/${id}/allocate`, { method: "post" }),
   allocationCandidates: (id: string) => request<RentalAllocationCandidates>(`/rental/v1/orders/${id}/allocation-candidates`),

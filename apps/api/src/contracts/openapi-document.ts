@@ -1352,8 +1352,16 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: "Create multi-line Rental Core order", permissions: ["store-rental:order:operate", "store-rental:vehicle:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
   },
   {
+    method: "post", path: "/api/rental/v1/orders/expire-pending", tag: "RentalCore", operationId: "expirePendingRentalCoreOrders",
+    summary: "Expire pending-payment soft reservations in the current workspace", permissions: ["store-rental:order:operate"], responseSchema: "GenericObject"
+  },
+  {
     method: "get", path: "/api/rental/v1/orders/{id}", tag: "RentalCore", operationId: "getRentalCoreOrder",
     summary: "Get Rental Core order", permissions: ["store-rental:order:view", "store-rental:vehicle:view"], responseSchema: "GenericObject"
+  },
+  {
+    method: "post", path: "/api/rental/v1/orders/{id}/expire-pending", tag: "RentalCore", operationId: "expirePendingRentalCoreOrder",
+    summary: "Expire one pending-payment soft reservation when all holds have elapsed", permissions: ["store-rental:order:operate"], responseSchema: "GenericObject"
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/confirm", tag: "RentalCore", operationId: "confirmRentalCoreOrder",

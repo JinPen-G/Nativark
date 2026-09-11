@@ -63,7 +63,7 @@ const SERVICE_EXECUTION_STATUS_COLORS: Record<NonNullable<RentalOrderServiceOccu
 export function RentalOrderDetailPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const queryClient = useQueryClient();
   const hasPermission = useAuthStore((state) => state.hasPermission);
   const canViewFunding = hasPermission("store-rental:order:view") || hasPermission("store-rental:order:settle");
@@ -121,6 +121,7 @@ export function RentalOrderDetailPage() {
   };
   const action = useMutation({ mutationFn: (type: "confirm" | "allocate") => type === "confirm" ? rentalCoreApi.confirmOrder(id) : rentalCoreApi.allocateOrder(id), onSuccess: async () => { await refresh(); message.success("订单状态已更新"); }, onError: () => message.error("操作失败，请检查状态、库存或优惠券") });
   const cancel = useMutation({ mutationFn: (values: { reason: string }) => rentalCoreApi.cancelOrder(id, values), onSuccess: async () => { setCancelOpen(false); cancelForm.resetFields(); await refresh(); message.success("订单已取消，费用和优惠券状态已更新"); }, onError: () => message.error("取消失败，请检查规则与订单状态") });
+  const expirePending = useMutation({ mutationFn: () => rentalCoreApi.expirePendingOrder(id), onSuccess: async () => { await refresh(); message.success("待支付占用已超时取消，库存、服务容量和优惠已释放"); }, onError: (error: Error) => message.error(error.message || "处理失败：订单可能尚未全部到期或已被其他操作改变") });
   const handover = useMutation({ mutationFn: async (stage: "pickup" | "return") => { const token = operationToken ?? (await rentalCoreApi.operationLock(id, "acquire")).token; setOperationToken(token); return rentalCoreApi.handoverOrder(id, stage, token); }, onSuccess: async () => { setOperationToken(undefined); await refresh(); message.success("交接已完成"); }, onError: () => message.error("当前规则要求检查，或订单状态不允许直接交接") });
   const settle = useMutation({ mutationFn: () => rentalCoreApi.settleOrder(id), onSuccess: async () => { await refresh(); await queryClient.invalidateQueries({ queryKey: ["rental-core", "order", id, "funding"] }); message.success("订单已结算并关闭"); }, onError: () => message.error("结算失败，请先处理全部押金和预授权余额") });
   const substitute = useMutation({ mutationFn: (values: { toItemGroupId: string }) => rentalCoreApi.substituteBundleComponent(id, { ...substitution!, toItemGroupId: values.toItemGroupId }), onSuccess: async () => { setSubstitution(undefined); substitutionForm.resetFields(); await refresh(); message.success("套装组成已替换并重新预占"); }, onError: () => message.error("替换失败，请检查替代组、订单状态和候选库存") });
@@ -267,6 +268,7 @@ export function RentalOrderDetailPage() {
     <PageHeader title={detail?.orderNo ?? "订单详情"} description="订单保存价格、优惠、规则、日历、服务条款和履约检查快照。" extra={<Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/rental/orders")}>返回列表</Button>} />
     <QueryState loading={order.isLoading} error={order.error}>{detail && <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <Space wrap>
+        {canOperate && detail.status === RentalCoreOrderStatus.Draft && detail.reservations.some((row) => row.status === "soft" && row.expiresAt && Date.parse(row.expiresAt) < Date.now()) && <Button danger loading={expirePending.isPending} onClick={() => modal.confirm({ title: "处理待支付超时？", content: "系统会取消该订单，并释放库存预占、服务容量和优惠券占用。", okText: "确认处理", cancelText: "暂不处理", okButtonProps: { danger: true }, onOk: () => expirePending.mutateAsync() })}>处理待支付超时</Button>}
         {canOperate && detail.status === RentalCoreOrderStatus.Draft && <Button type="primary" onClick={() => action.mutate("confirm")}>确认订单并核销优惠券</Button>}
         {((canPickup && detail.status === RentalCoreOrderStatus.ReadyForPickup) || (canReturn && detail.status === RentalCoreOrderStatus.Renting)) && <Button loading={operationLock.isPending} onClick={() => operationLock.mutate(operationToken ? "release" : "acquire")}>{operationToken ? "结束办理" : "开始 / 接手办理"}</Button>}
         {canPickup && detail.status === RentalCoreOrderStatus.ReadyForPickup && ((detail.ruleSnapshot?.fulfillment.pickupInspectionRequired ?? true) ? <Button type="primary" icon={<SafetyCertificateOutlined />} onClick={() => beginInspection("pickup")}>{profile.data?.terminology.pickupLabel}检查</Button> : <Button type="primary" onClick={() => handover.mutate("pickup")}>直接完成{profile.data?.terminology.pickupLabel}</Button>)}
@@ -413,7 +415,7 @@ export function RentalOrderDetailPage() {
         ]} /> : <span style={{ color: "#999" }}>当前订单没有需要人工裁定的费用事项。</span>}
       </Card>
       {canViewFunding && <Card title={<Space><DollarOutlined />收付款、押金与预授权 <Tag color="orange">模拟资金</Tag></Space>}>
-        {funding.data?.rental && <Space direction="vertical" style={{ marginBottom: 16 }}>
+        {funding.data?.rental && <Space orientation="vertical" style={{ marginBottom: 16 }}>
           <span>最终应收 {money(funding.data.rental.payable)} · 已收 {money(funding.data.rental.collected)} · 已退 {money(funding.data.rental.refunded)} · 保证金抵扣 {money(funding.data.rental.securityCaptured)}</span>
           <span>{funding.data.rental.balance < 0 ? "待退" : "待收"} {money(Math.abs(funding.data.rental.balance))} · 续租待补 {money(funding.data.rental.pendingExtensionAmount)}</span>
           {canSettleFunding && <Space>

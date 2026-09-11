@@ -152,6 +152,7 @@ const categories: RentalCategoryDefinition[] = RENTAL_CATEGORY_DEFINITIONS;
 assertRentalCategoryExtensions(categories);
 
 function now() { return new Date().toISOString(); }
+export const RENTAL_PENDING_PAYMENT_TIMEOUT_REASON = "待支付超时自动取消";
 function id(prefix: string) { return `${prefix}_${randomUUID().slice(0, 8)}`; }
 
 function workOrderTypeForReason(reason: string): RentalWorkOrderType {
@@ -1198,6 +1199,47 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   async listOrders(tenantId: string) {
     this.state(tenantId);
     return (await this.factStore.listOrders(tenantId)).map((order) => this.publicOrder(order));
+  }
+
+  /**
+   * RULE-CLOSE-01：返回当前经营空间中待支付软预占已到期的订单候选。
+   *
+   * 候选查询只负责缩小范围；真正的到期判定必须在订单行锁内再次完成，
+   * 因为候选查询与实际取消之间可能已经发生确认、人工取消或续租等状态变化。
+   */
+  async listExpiredPendingOrderIds(tenantId: string, expiredBefore = now(), take = 50) {
+    this.state(tenantId);
+    return this.factStore.listExpiredDraftOrderIds(tenantId, expiredBefore, take);
+  }
+
+  /**
+   * RULE-CLOSE-01：幂等终结一张待支付超时订单。
+   *
+   * 待确认订单的软预占到期后才允许走这条路径；已确认订单即使尚未登记租金收款，
+   * 也不能被误当成待支付超时单。优惠券、服务容量和其它释放动作由控制器在同一
+   * 事务中紧接着调用，确保订单终态不会先于这些占用事实提交。
+   */
+  async expirePendingOrder(
+    tenantId: string,
+    orderId: string,
+    tx?: RentalFactTx,
+    operator = "system",
+    expiredBefore = now()
+  ) {
+    this.state(tenantId);
+    const order = await this.lockedOrder(tenantId, orderId, tx);
+    if (order.status !== RentalCoreOrderStatus.Draft) {
+      throw new ConflictException("只有待确认订单才能按待支付超时处理");
+    }
+    const softReservations = order.reservations.filter((row) => row.status === RentalReservationStatus.Soft);
+    const cutoff = Date.parse(expiredBefore);
+    if (!softReservations.length || !Number.isFinite(cutoff) || softReservations.some((row) => {
+      const expiresAt = row.expiresAt ? Date.parse(row.expiresAt) : Number.NaN;
+      return !Number.isFinite(expiresAt) || expiresAt >= cutoff;
+    })) {
+      throw new ConflictException("订单的待支付占用尚未全部到期");
+    }
+    return this.cancelOrder(tenantId, orderId, RENTAL_PENDING_PAYMENT_TIMEOUT_REASON, 0, tx, operator);
   }
 
   async getOrder(tenantId: string, orderId: string) {

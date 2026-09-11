@@ -57,7 +57,7 @@ import {
   SaveTenantRentalBusinessSettingsDto,
 } from "./rental-config-request.dto";
 import { renderOperationReportCsv } from "./rental-workspace-report.csv";
-import { RentalCoreService } from "./rental-core.service";
+import { RENTAL_PENDING_PAYMENT_TIMEOUT_REASON, RentalCoreService } from "./rental-core.service";
 import { RentalAllocationService } from "./rental-allocation.service";
 import { RentalBusinessService, type BusinessContext } from "./rental-business.service";
 import { RentalOrderConfirmationService } from "./rental-order-confirmation.service";
@@ -166,6 +166,10 @@ export class RentalCoreController {
     const resolved = await result;
     await Promise.all([this.service.persist(tenantId), this.business.persist(tenantId)]);
     return resolved;
+  }
+  private async releaseCancelledOrderResources(tenantId: string, orderId: string, tx: Prisma.TransactionClient, reason: string) {
+    await this.business.releaseCouponInTransaction(tenantId, orderId, tx);
+    await this.serviceCapacities.releaseForOrder(tenantId, orderId, reason, new Date().toISOString(), tx);
   }
   private async emitOrderEvent(tenantId: string, eventCode: string, order: { id: string; orderNo: string; customerName: string; contactPhone?: string; customerId?: string }) {
     // 业务对象随事件传入，服务端据此生成空间级幂等键——同一订单同一事件重放不再二次发信。
@@ -393,6 +397,89 @@ export class RentalCoreController {
     if (!replayed) await this.emitOrderEvent(req.user.tenantId, "order.created", order);
     return this.committed(req.user.tenantId, order);
   }
+
+  /**
+   * RULE-CLOSE-01：批量处理已过期的待支付软预占。
+   *
+   * 这是给定时任务、运维脚本和运营端手动补偿调用的窄入口；候选查询与逐单锁内
+   * 复查分开，已经被确认或人工取消的订单只会返回 skipped，不会阻断整批处理。
+   */
+  @Post("orders/expire-pending")
+  async expirePendingOrders(@Req() req: AuthenticatedRequest, @Query("limit") limit?: string) {
+    const parsedLimit = limit === undefined ? 50 : Number(limit);
+    if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 200) {
+      throw new BadRequestException("处理数量必须是 1 至 200 的整数");
+    }
+    const tenantId = req.user.tenantId;
+    const candidates = await this.service.listExpiredPendingOrderIds(tenantId, new Date().toISOString(), parsedLimit);
+    const processed: Array<{ orderId: string; status: "expired" | "skipped"; reason?: string; replayed?: boolean }> = [];
+    for (const orderId of candidates) {
+      try {
+        const { replayed } = await this.idempotent.executeWithReplayFlag({
+          tenantId,
+          action: "order.expire_pending",
+          key: undefined,
+          fallbackKey: `order.expire_pending:${orderId}`,
+          request: { orderId, reason: RENTAL_PENDING_PAYMENT_TIMEOUT_REASON },
+          orderId,
+          run: async (tx) => {
+            const expired = await this.service.expirePendingOrder(tenantId, orderId, tx, req.user.displayName);
+            await this.releaseCancelledOrderResources(tenantId, orderId, tx, "order_payment_timeout");
+            return expired;
+          },
+          replay: async () => {
+            const latest = await this.service.getOrder(tenantId, orderId);
+            return latest.status === RentalCoreOrderStatus.Cancelled && latest.cancellationReason === RENTAL_PENDING_PAYMENT_TIMEOUT_REASON
+              ? latest
+              : undefined;
+          }
+        });
+        processed.push({ orderId, status: "expired", replayed });
+      } catch (error) {
+        if (!(error instanceof ConflictException)) throw error;
+        processed.push({ orderId, status: "skipped", reason: error.message });
+      }
+    }
+    await this.business.refreshFromDatabase();
+    await this.business.refreshCouponTemplateCache(tenantId, this.context(tenantId));
+    await this.service.persist(tenantId);
+    return {
+      scanned: candidates.length,
+      expired: processed.filter((row) => row.status === "expired").length,
+      skipped: processed.filter((row) => row.status === "skipped").length,
+      results: processed
+    };
+  }
+
+  /** 订单详情页的单笔操作入口；规则仍在订单行锁内复查，不能绕过批处理语义。 */
+  @Post("orders/:id/expire-pending")
+  async expirePendingOrder(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
+    const tenantId = req.user.tenantId;
+    const { result: order, replayed } = await this.idempotent.executeWithReplayFlag({
+      tenantId,
+      action: "order.expire_pending",
+      key: idempotencyKeyOf(req),
+      fallbackKey: `order.expire_pending:${id}`,
+      request: { orderId: id, reason: RENTAL_PENDING_PAYMENT_TIMEOUT_REASON },
+      orderId: id,
+      run: async (tx) => {
+        const expired = await this.service.expirePendingOrder(tenantId, id, tx, req.user.displayName);
+        await this.releaseCancelledOrderResources(tenantId, id, tx, "order_payment_timeout");
+        return expired;
+      },
+      replay: async () => {
+        const latest = await this.service.getOrder(tenantId, id);
+        return latest.status === RentalCoreOrderStatus.Cancelled && latest.cancellationReason === RENTAL_PENDING_PAYMENT_TIMEOUT_REASON
+          ? latest
+          : undefined;
+      }
+    });
+    if (!replayed) await this.emitOrderEvent(tenantId, "order.cancelled", order);
+    await this.business.refreshFromDatabase();
+    await this.business.refreshCouponTemplateCache(tenantId, this.context(tenantId));
+    return this.committed(tenantId, order);
+  }
+
   @Post("orders/:id/confirm") async confirm(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
     const tenantId = req.user.tenantId;
     const { result: order, replayed } = await this.idempotent.executeWithReplayFlag({
@@ -542,8 +629,7 @@ export class RentalCoreController {
       orderId: id,
       run: async (tx) => {
         const cancelled = await this.service.cancelOrder(req.user.tenantId, id, body.reason, charge, tx, req.user.displayName);
-        await this.business.releaseCouponInTransaction(req.user.tenantId, id, tx);
-        await this.serviceCapacities.releaseForOrder(req.user.tenantId, id, "order_cancelled", new Date().toISOString(), tx);
+        await this.releaseCancelledOrderResources(req.user.tenantId, id, tx, "order_cancelled");
         return cancelled;
       },
       replay: async () => {
