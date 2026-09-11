@@ -498,7 +498,7 @@ export function RentalOrderDetailPage() {
         ]} />
       </Card>}
     </Space>}</QueryState>
-    <Modal title={inspectionReturnItems?.length ? "部分归还检查" : inspection?.name} open={Boolean(inspection)} onCancel={() => { setInspection(undefined); setInspectionReturnItems(undefined); }} onOk={() => inspectionForm.submit()} confirmLoading={inspect.isPending} destroyOnHidden>{inspection && <Form form={inspectionForm} layout="vertical" onFinish={(values) => inspect.mutate(values)}>{inspectionReturnItems?.length ? <Alert type="info" showIcon title={`本次检查并归还 ${inspectionReturnItems.length} 个分配项`} description="只会释放本批实物；剩余项目继续在租。最后一批请使用整单归还，以统一结算逾期和提前归还。" style={{ marginBottom: 16 }} /> : null}{inspection.fields.map((field) => <Form.Item key={field.code} name={field.code} label={field.label} rules={[{ required: field.required }]}>{field.type === "number" ? <InputNumber suffix={field.unit} style={{ width: "100%" }} /> : field.type === "boolean" ? <SelectBoolean /> : <Input />}</Form.Item>)}{inspection.stage === "return" && <Card size="small" title="异常与损坏建议（可选）"><Alert type="info" showIcon title="检查员只记录事实和建议损失额，不会直接向客户计费。" style={{ marginBottom: 12 }} /><Form.Item name="exceptionCode" label="异常编码"><Input placeholder="damage / missing_item / cleaning" /></Form.Item><Form.Item name="exceptionDescription" label="异常说明"><Input.TextArea rows={2} /></Form.Item><Form.Item name="exceptionChargeAmount" label="建议损失金额"><InputNumber min={0} precision={2} prefix={symbol} style={{ width: "100%" }} /></Form.Item></Card>}</Form>}</Modal>
+    <Modal title={inspectionReturnItems?.length ? "部分归还检查" : inspection?.name} open={Boolean(inspection)} onCancel={() => { setInspection(undefined); setInspectionReturnItems(undefined); }} onOk={() => inspectionForm.submit()} confirmLoading={inspect.isPending} destroyOnHidden>{inspection && <Form form={inspectionForm} layout="vertical" onFinish={(values) => inspect.mutate(values)}>{inspectionReturnItems?.length ? <Alert type="info" showIcon title={`本次检查并归还 ${inspectionReturnItems.length} 个分配项`} description="只会释放本批实物；剩余项目继续在租。最后一批请使用整单归还，以统一结算逾期和提前归还。" style={{ marginBottom: 16 }} /> : null}{inspection.fields.map((field) => <Form.Item key={field.code} name={field.code} label={field.label} rules={inspectionFieldRules(field)}>{field.type === "number" ? <InputNumber suffix={field.unit} style={{ width: "100%" }} /> : field.type === "boolean" ? <Select options={[{ value: true, label: "是 / 正常" }, { value: false, label: "否 / 异常" }]} /> : <Input />}</Form.Item>)}{inspection.stage === "return" && <Card size="small" title="异常与损坏建议（可选）"><Alert type="info" showIcon title="检查员只记录事实和建议损失额，不会直接向客户计费。" style={{ marginBottom: 12 }} /><Form.Item name="exceptionCode" label="异常编码"><Input placeholder="damage / missing_item / cleaning" /></Form.Item><Form.Item name="exceptionDescription" label="异常说明"><Input.TextArea rows={2} /></Form.Item><Form.Item name="exceptionChargeAmount" label="建议损失金额"><InputNumber min={0} precision={2} prefix={symbol} style={{ width: "100%" }} /></Form.Item></Card>}</Form>}</Modal>
     <Modal title="续租 / 延期" open={extensionOpen} onCancel={() => { setExtensionOpen(false); setExtensionPreview(undefined); }} destroyOnHidden width={640}
       footer={[
         <Button key="cancel" onClick={() => { setExtensionOpen(false); setExtensionPreview(undefined); }}>取消</Button>,
@@ -662,6 +662,10 @@ export function RentalOrderDetailPage() {
   </>;
 }
 
-function SelectBoolean() {
-  return <Select options={[{ value: true, label: "是 / 正常" }, { value: false, label: "否 / 异常" }]} />;
+function inspectionFieldRules(field: RentalInspectionTemplate["fields"][number]) {
+  if (!field.required) return undefined;
+  if (field.type === "boolean") {
+    return [{ validator: (_rule: unknown, value: unknown) => typeof value === "boolean" ? Promise.resolve() : Promise.reject(new Error(`请输入${field.label}`)) }];
+  }
+  return [{ required: true, message: `请输入${field.label}` }];
 }

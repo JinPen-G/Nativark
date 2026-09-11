@@ -351,6 +351,13 @@ async function bootstrapTenant(platformToken, tenantCode, categoryCode) {
 }
 
 async function prepareMockFunding(order, token, keyPrefix) {
+  const payable = Number(order.payable ?? order.finalPayableAmount ?? order.payableAmount ?? 0);
+  if (payable > 0) {
+    const rental = await request("POST", `/api/rental/v1/orders/${order.id}/funding-events/initiate`, {
+      instrument: "rental", idempotencyKey: `${keyPrefix}:rental`, reason: "E2E 领取前模拟收取租金与费用"
+    }, token);
+    assert.equal(rental.status, 201, `模拟租金收取失败: ${JSON.stringify(rental.body).slice(0, 200)}`);
+  }
   if (Number(order.depositAmount) > 0) {
     const deposit = await request("POST", `/api/rental/v1/orders/${order.id}/funding-events/initiate`, {
       instrument: "deposit", idempotencyKey: `${keyPrefix}:deposit`, reason: "E2E 领取前模拟收取押金"
@@ -368,6 +375,13 @@ async function prepareMockFunding(order, token, keyPrefix) {
 async function closeMockFundedOrder(orderId, token, keyPrefix) {
   const balance = await request("GET", `/api/rental/v1/orders/${orderId}/funding-events`, null, token);
   assert.equal(balance.status, 200, "结算前读取模拟资金余额失败");
+  if (Number(balance.body.data.rental.balance) > 0) {
+    const rental = await request("POST", `/api/rental/v1/orders/${orderId}/funding-events/append`, {
+      instrument: "rental", amount: balance.body.data.rental.balance,
+      idempotencyKey: `${keyPrefix}:rental-balance`, reason: "E2E 结算前补收异常费用"
+    }, token);
+    assert.equal(rental.status, 201, "结算前补收租金与异常费用失败");
+  }
   if (Number(balance.body.data.deposit.balance) > 0) {
     const refunded = await request("POST", `/api/rental/v1/orders/${orderId}/funding-events/refund`, {
       instrument: "deposit", amount: balance.body.data.deposit.balance,
@@ -656,7 +670,7 @@ async function main() {
   ok("旧库存量押金/预授权混口径经纠正迁移重新分类：预授权搬到额度、固定押金保留、无法判定金额独立隔离");
   await maybeStopAfter("baseline");
 
-  console.log("== 6. 仓储层 fail-closed（无租户身份必须拒绝） ==");
+  console.log("== 6. Rental Core 空间作用域 fail-closed（旧门市仓储已删除） ==");
   require("ts-node").register({
     transpileOnly: true,
     compilerOptions: {
@@ -667,11 +681,14 @@ async function main() {
       target: "ES2022"
     }
   });
-  const { StoreRentalRepository } = require("../apps/api/src/modules/store-rental/store-rental.repository");
-  const { PrismaService } = require("../apps/api/src/modules/database/prisma.service");
-  const repository = new StoreRentalRepository(new PrismaService());
-  await assert.rejects(repository.listStations(), /缺少已验证的租户身份/u, "仓储层无身份时必须拒绝");
-  ok("StoreRentalRepository 无请求身份时 fail-closed");
+  const { resolveScopeWorkspaceId } = require("../apps/api/src/modules/rental-core/workspace-scope");
+  const { runWithRequestIdentity } = require("../apps/api/src/common/request-identity");
+  const scopeClient = { businessWorkspace: { findFirst: async () => null } };
+  await runWithRequestIdentity(
+    { tenantId: "tenant_001", userId: "e2e-scope", workspaceId: "workspace-from-other-tenant", isSaasAdmin: false },
+    () => assert.rejects(resolveScopeWorkspaceId(scopeClient, "tenant_001"), /当前经营空间不属于目标租户/u, "空间作用域不匹配必须拒绝")
+  );
+  ok("旧门市仓储不再被 E2E 依赖，当前 Rental Core 作用域不匹配时 fail-closed");
 
   console.log("== 7. 启动 API（MySQL 模式） ==");
   const apiLogs = startApi();
@@ -679,7 +696,7 @@ async function main() {
   ok(`API 已启动: ${API_BASE}`);
 
   console.log("== 8. 认证、品类与未授权拒绝 ==");
-  const unauthorized = await request("GET", "/api/store-rental/orders");
+  const unauthorized = await request("GET", "/api/rental/v1/orders");
   assert.equal(unauthorized.status, 401, "无 token 访问业务接口必须 401");
   ok("无 token 请求返回 401");
   const demo = await login("demo", "admin", DEMO_PASSWORD);
@@ -722,9 +739,26 @@ async function main() {
   assert.equal(demoBackToDefault.status, 201, "四品类样本验证后切回 demo 默认空间失败");
   demo.accessToken = demoBackToDefault.body.data.accessToken;
   ok("demo 四品类空间可切换，且摄影/露营/车辆/工程均有独立测试商品与资产或库存");
-  const cameraLegacy = await request("GET", "/api/store-rental/orders", null, demo.accessToken);
-  assert.equal(cameraLegacy.status, 403, "camera 租户访问车辆兼容域必须 403");
-  ok("品类守卫拒绝 camera 租户访问车辆域");
+  const removedLegacyRoute = await request("GET", "/api/store-rental/orders", null, demo.accessToken);
+  assert.equal(removedLegacyRoute.status, 404, "旧门市订单路由不应重新出现");
+  ok("旧门市订单路由已移除，摄影空间只走 Rental Core");
+  const r1CustomerResponse = await request(
+    "POST",
+    "/api/platform/customers",
+    { customerType: "personal", name: "E2E R1 会员", phone: "13800000002" },
+    demo.accessToken
+  );
+  assert.equal(r1CustomerResponse.status, 201, `R1 摄影会员创建失败: ${JSON.stringify(r1CustomerResponse.body).slice(0, 300)}`);
+  const r1CustomerId = r1CustomerResponse.body.data.id;
+  const r1SecondCustomerResponse = await request(
+    "POST",
+    "/api/platform/customers",
+    { customerType: "personal", name: "E2E R1 第二会员", phone: "13800000004" },
+    demo.accessToken
+  );
+  assert.equal(r1SecondCustomerResponse.status, 201, `R1 第二会员创建失败: ${JSON.stringify(r1SecondCustomerResponse.body).slice(0, 300)}`);
+  const r1SecondCustomerId = r1SecondCustomerResponse.body.data.id;
+  ok("R1 订单验收使用已登记的个人会员主档");
 
   console.log("== 9. Rental Core 报价→下单→履约全链路（摄影：序列化+套装） ==");
   const groups = (await request("GET", "/api/rental/v1/item-groups", null, demo.accessToken)).body.data;
@@ -735,10 +769,24 @@ async function main() {
   const startAt = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
   const endAt = new Date(Date.now() + 72 * 3600 * 1000).toISOString();
   const lines = [...serialized.slice(0, 2).map((group) => ({ itemGroupId: group.id, quantity: 1 })), { itemGroupId: cameraKit.id, quantity: 1 }];
+  const r1Pricing = await request(
+    "POST",
+    "/api/rental/v1/pricing-plans",
+    {
+      effectiveFrom: new Date(Date.now() - 86400000).toISOString(),
+      code: "E2E-R1-PRICE",
+      name: "R1 摄影验收基础定价",
+      changeReason: "R1 隔离库真实业务验收",
+      status: "enabled",
+      rates: lines.map((line) => ({ itemGroupId: line.itemGroupId, unit: "day_24h", baseAmount: 100, weekendMultiplier: 1, holidayMultiplier: 1, depositAmount: 200, minimumUnits: 1 }))
+    },
+    demo.accessToken
+  );
+  assert.equal(r1Pricing.status, 201, `R1 价格版本创建失败: ${JSON.stringify(r1Pricing.body).slice(0, 300)}`);
   const quote = await request(
     "POST",
     "/api/rental/v1/quotes",
-    { customerType: "personal", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt, endAt, lines },
+    { customerType: "personal", customerId: r1CustomerId, fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt, endAt, lines },
     demo.accessToken
   );
   assert.equal(quote.status, 201, `报价失败: ${JSON.stringify(quote.body).slice(0, 200)}`);
@@ -746,19 +794,25 @@ async function main() {
   const order = await request(
     "POST",
     "/api/rental/v1/orders",
-    { quoteId: quote.body.data.id, customerType: "personal", customerName: "E2E隔离客户", contactPhone: "13800000002", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt, endAt, lines },
+    { quoteId: quote.body.data.id, customerType: "personal", customerId: r1CustomerId, customerName: "E2E隔离客户", contactPhone: "13800000002", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt, endAt, lines },
     demo.accessToken
   );
   assert.equal(order.status, 201, `下单失败: ${JSON.stringify(order.body).slice(0, 200)}`);
   const orderId = order.body.data.id;
   assert.equal(order.body.data.status, "draft");
   const assetStatus = async () => (await request("GET", "/api/rental/v1/assets", null, demo.accessToken)).body.data;
-  assert.equal((await request("POST", `/api/rental/v1/orders/${orderId}/confirm`, {}, demo.accessToken)).body.data.status, "reserved");
-  const allocated = (await request("POST", `/api/rental/v1/orders/${orderId}/allocate`, {}, demo.accessToken)).body.data;
+  await prepareMockFunding(order.body.data, demo.accessToken, `e2e:${orderId}`);
+  const confirmed = await request("POST", `/api/rental/v1/orders/${orderId}/confirm`, {}, demo.accessToken);
+  assert.equal(confirmed.status, 201, `订单确认失败: ${JSON.stringify(confirmed.body).slice(0, 300)}`);
+  assert.equal(confirmed.body.data.status, "reserved");
+  const allocationResponse = await request("POST", `/api/rental/v1/orders/${orderId}/allocate`, {}, demo.accessToken);
+  assert.equal(allocationResponse.status, 201, `订单配货失败: ${JSON.stringify(allocationResponse.body).slice(0, 300)}`);
+  const allocated = allocationResponse.body.data;
   assert.equal(allocated.status, "ready_for_pickup");
   assert.ok(allocated.allocations.length >= 3, "序列化+套装组件应完成分配");
   const trackedAssetId = allocated.allocations[0].assetId;
-  assert.equal((await assetStatus()).find((row) => row.id === trackedAssetId).status, "reserved", "分配后资产应为 reserved");
+  assert.equal(allocated.allocations[0].status, "locked", "自动配货后分配记录应为 locked");
+  assert.equal((await assetStatus()).find((row) => row.id === trackedAssetId).status, "available", "资产在领取前仍应保持 available，资源锁定记录在订单分配上");
   await prepareMockFunding(order.body.data, demo.accessToken, `e2e:${orderId}`);
   const pickupTemplate = (await request("GET", "/api/rental/v1/inspection-templates?stage=pickup", null, demo.accessToken)).body.data[0];
   const pickedUp = (await request("POST", `/api/rental/v1/orders/${orderId}/inspections`, { templateId: pickupTemplate.id, results: { appearance_ok: true, function_ok: true, shutter_count: 9000 } }, demo.accessToken)).body.data;
@@ -826,18 +880,19 @@ async function main() {
   const cat03Lines = [{ itemGroupId: cat03Bundle.id, quantity: 2 }];
   const cat03Quote = await request(
     "POST", "/api/rental/v1/quotes",
-    { customerType: "personal", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: cat03Start, endAt: cat03End, lines: cat03Lines, pricingPlanId: cat03Pricing.body.data.id },
+    { customerType: "personal", customerId: r1CustomerId, fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: cat03Start, endAt: cat03End, lines: cat03Lines, pricingPlanId: cat03Pricing.body.data.id },
     demo.accessToken
   );
   assert.equal(cat03Quote.status, 201, "CAT-03 报价失败");
   const cat03Order = await request(
     "POST", "/api/rental/v1/orders",
-    { quoteId: cat03Quote.body.data.id, customerType: "personal", customerName: "CAT-03 客户", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: cat03Start, endAt: cat03End, lines: cat03Lines },
+    { quoteId: cat03Quote.body.data.id, customerType: "personal", customerId: r1CustomerId, customerName: "CAT-03 客户", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: cat03Start, endAt: cat03End, lines: cat03Lines },
     demo.accessToken
   );
   assert.equal(cat03Order.status, 201, "CAT-03 下单失败");
   const cat03OrderId = cat03Order.body.data.id;
   const cat03OrderLineId = cat03Order.body.data.lines[0].id;
+  await prepareMockFunding(cat03Order.body.data, demo.accessToken, `e2e:${cat03OrderId}`);
   const cat03Confirmed = await request("POST", `/api/rental/v1/orders/${cat03OrderId}/confirm`, {}, demo.accessToken);
   assert.equal(cat03Confirmed.status, 201, "CAT-03 确认订单失败");
   assert.ok(cat03Confirmed.body.data.reservations.some((row) => row.itemGroupId === defaultBattery.id && row.quantity === 2), "套装应先预占替代组默认组成");
@@ -871,26 +926,32 @@ async function main() {
   assert.equal(cat03Pickup.status, 201, "CAT-03 领取检查失败");
   const alternateAllocation = cat03Pickup.body.data.order.allocations.find((allocation) => allocation.itemGroupId === alternateBattery.id && allocation.status === "picked_up");
   const cableAllocation = cat03Pickup.body.data.order.allocations.find((allocation) => allocation.itemGroupId === cable.id && allocation.status === "picked_up");
+  const cat03ReturnTemplate = (await request("GET", "/api/rental/v1/inspection-templates?stage=return", null, demo.accessToken)).body.data[0];
   const partialReturned = await request(
-    "POST", `/api/rental/v1/orders/${cat03OrderId}/partial-return`,
-    { items: [{ allocationId: alternateAllocation.id, quantity: 1 }] },
+    "POST", `/api/rental/v1/orders/${cat03OrderId}/inspections`,
+    {
+      templateId: cat03ReturnTemplate.id,
+      returnBatchNo: "cat03-partial-1",
+      returnItems: [{ allocationId: alternateAllocation.id, quantity: 1 }],
+      results: { appearance_ok: true, function_ok: true, shutter_count: 110 }
+    },
     demo.accessToken
   );
   assert.equal(partialReturned.status, 201, `CAT-03 部分归还失败: ${JSON.stringify(partialReturned.body).slice(0, 200)}`);
-  assert.equal(partialReturned.body.data.status, "renting", "部分归还后订单必须保持租赁中");
-  assert.equal(partialReturned.body.data.allocations.find((allocation) => allocation.id === alternateAllocation.id).quantity, 1, "数量分配应拆出剩余未归还数量");
-  assert.ok(partialReturned.body.data.allocations.some((allocation) => allocation.itemGroupId === alternateBattery.id && allocation.status === "returned" && allocation.quantity === 1), "应生成已归还的拆分分配记录");
-  assert.equal(partialReturned.body.data.reservations.find((row) => row.itemGroupId === alternateBattery.id).releasedQuantity, 1, "预占应记录已释放数量");
-  const remainingAlternateAllocation = partialReturned.body.data.allocations.find((allocation) => allocation.id === alternateAllocation.id);
+  assert.equal(partialReturned.body.data.order.status, "renting", "部分归还后订单必须保持租赁中");
+  assert.equal(partialReturned.body.data.order.allocations.find((allocation) => allocation.id === alternateAllocation.id).quantity, 1, "数量分配应拆出剩余未归还数量");
+  assert.ok(partialReturned.body.data.order.allocations.some((allocation) => allocation.itemGroupId === alternateBattery.id && allocation.status === "returned" && allocation.quantity === 1), "应生成已归还的拆分分配记录");
+  assert.equal(partialReturned.body.data.order.reservations.find((row) => row.itemGroupId === alternateBattery.id).releasedQuantity, 1, "预占应记录已释放数量");
+  const remainingAlternateAllocation = partialReturned.body.data.order.allocations.find((allocation) => allocation.id === alternateAllocation.id);
   const finalBatchBypass = await request(
     "POST", `/api/rental/v1/orders/${cat03OrderId}/partial-return`,
-    { items: [{ allocationId: remainingAlternateAllocation.id, quantity: 1 }, { allocationId: cableAllocation.id, quantity: 2 }] },
+    { batchNo: "cat03-partial-final-bypass", items: [{ allocationId: remainingAlternateAllocation.id, quantity: 1 }, { allocationId: cableAllocation.id, quantity: 2 }] },
     demo.accessToken
   );
   assert.equal(finalBatchBypass.status, 409, "最后一批不得绕过归还检查和费用结算");
   const cat03Returned = await request(
     "POST", `/api/rental/v1/orders/${cat03OrderId}/inspections`,
-    { templateId: returnTemplate.id, results: { appearance_ok: true, function_ok: true, shutter_count: 120 } },
+    { templateId: cat03ReturnTemplate.id, results: { appearance_ok: true, function_ok: true, shutter_count: 120 } },
     demo.accessToken
   );
   assert.equal(cat03Returned.status, 201, "CAT-03 最终归还检查失败");
@@ -923,7 +984,7 @@ async function main() {
   const cat04Start = new Date(Date.now() + 340 * 86400000).toISOString();
   const cat04End = new Date(Date.now() + 342 * 86400000).toISOString();
   const cat04Lines = [{ itemGroupId: serialized[0].id, quantity: 1 }];
-  const cat04QuotePayload = { customerType: "personal", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: cat04Start, endAt: cat04End, lines: cat04Lines };
+  const cat04QuotePayload = { customerType: "personal", customerId: r1CustomerId, fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: cat04Start, endAt: cat04End, lines: cat04Lines };
 
   assert.equal((await request("PUT", `/api/rental/v1/locations/${location.id}`, locationPayload({ capabilities: location.capabilities.filter((value) => value !== "return") }), demo.accessToken)).status, 200);
   assert.equal((await request("POST", "/api/rental/v1/quotes", cat04QuotePayload, demo.accessToken)).status, 409, "缺少归还能力的地点不得报价");
@@ -936,7 +997,7 @@ async function main() {
   const cat04Quote = await request("POST", "/api/rental/v1/quotes", cat04QuotePayload, demo.accessToken);
   assert.equal(cat04Quote.status, 201, `CAT-04 有效地点报价失败: ${JSON.stringify(cat04Quote.body).slice(0, 200)}`);
   const cat04Order = await request("POST", "/api/rental/v1/orders", {
-    quoteId: cat04Quote.body.data.id, customerType: "personal", customerName: "CAT-04 快照客户",
+    quoteId: cat04Quote.body.data.id, customerType: "personal", customerId: r1CustomerId, customerName: "CAT-04 快照客户",
     fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id,
     startAt: cat04Start, endAt: cat04End, lines: cat04Lines
   }, demo.accessToken);
@@ -953,6 +1014,7 @@ async function main() {
 
   assert.equal((await request("PUT", `/api/rental/v1/fulfillment-operators/${locationOperator.id}`, operatorPayload(), demo.accessToken)).status, 200);
   assert.equal((await request("PUT", `/api/rental/v1/locations/${location.id}`, locationPayload(), demo.accessToken)).status, 200);
+  await prepareMockFunding(cat04Order.body.data, demo.accessToken, `e2e:${cat04Order.body.data.id}`);
   assert.equal((await request("POST", `/api/rental/v1/orders/${cat04Order.body.data.id}/confirm`, {}, demo.accessToken)).status, 201);
   assert.equal((await request("PUT", `/api/rental/v1/locations/${location.id}`, locationPayload({ status: "disabled" }), demo.accessToken)).status, 200);
   assert.equal((await request("POST", "/api/rental/v1/quotes", cat04QuotePayload, demo.accessToken)).status, 409, "停用地点不得新报价");
@@ -967,10 +1029,35 @@ async function main() {
   const kit = campingGroups.find((group) => group.code === "CAMP-KIT");
   const campingLocation = (await request("GET", "/api/rental/v1/locations", null, demo2.accessToken)).body.data[0];
   assert.ok(tent && kit, `露营样本缺少数量/套装商品: ${campingGroups.map((g) => g.code).join(",")}`);
+  const campingCustomerResponse = await request(
+    "POST",
+    "/api/platform/customers",
+    { customerType: "personal", name: "E2E 露营会员", phone: "13800000005" },
+    demo2.accessToken
+  );
+  assert.equal(campingCustomerResponse.status, 201, `露营会员创建失败: ${JSON.stringify(campingCustomerResponse.body).slice(0, 300)}`);
+  const campingCustomerId = campingCustomerResponse.body.data.id;
+  const campingPricing = await request(
+    "POST",
+    "/api/rental/v1/pricing-plans",
+    {
+      effectiveFrom: new Date(Date.now() - 86400000).toISOString(),
+      code: "E2E-R1-CAMP-PRICE",
+      name: "R1 露营验收基础定价",
+      changeReason: "R1 隔离库真实业务验收",
+      status: "enabled",
+      rates: [tent, kit].map((group) => ({ itemGroupId: group.id, unit: "calendar_day", baseAmount: 80, weekendMultiplier: 1, holidayMultiplier: 1, depositAmount: 100, minimumUnits: 1 }))
+    },
+    demo2.accessToken
+  );
+  assert.equal(campingPricing.status, 201, `露营价格版本创建失败: ${JSON.stringify(campingPricing.body).slice(0, 300)}`);
   const campingStockBefore = (await request("GET", "/api/rental/v1/stock-balances", null, demo2.accessToken)).body.data;
   const tentStockBefore = campingStockBefore.find((row) => row.itemGroupId === tent.id);
-  const campingStart = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
-  const campingEnd = new Date(Date.now() + 72 * 3600 * 1000).toISOString();
+  // 露营租户的规则版本随本轮 API 启动生效，因此用近未来起租；配货后等到起租再
+  // 办理领取和归还，既有规则覆盖，也不会留下尚未开始租期的合法预占。
+  const campingStartAt = Date.now() + 3000;
+  const campingStart = new Date(campingStartAt).toISOString();
+  const campingEnd = new Date(campingStartAt + 22 * 3600 * 1000).toISOString();
   const campingLines = [
     { itemGroupId: tent.id, quantity: 2 },
     { itemGroupId: kit.id, quantity: 1 }
@@ -978,7 +1065,7 @@ async function main() {
   const campingQuote = await request(
     "POST",
     "/api/rental/v1/quotes",
-    { customerType: "personal", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: campingLocation.id, startAt: campingStart, endAt: campingEnd, lines: campingLines },
+    { customerType: "personal", customerId: campingCustomerId, fulfillmentMode: "store_pickup_return", fulfillmentLocationId: campingLocation.id, startAt: campingStart, endAt: campingEnd, lines: campingLines },
     demo2.accessToken
   );
   assert.equal(campingQuote.status, 201, `露营报价失败: ${JSON.stringify(campingQuote.body).slice(0, 200)}`);
@@ -989,17 +1076,19 @@ async function main() {
   const campingOrder = await request(
     "POST",
     "/api/rental/v1/orders",
-    { quoteId: campingQuote.body.data.id, customerType: "personal", customerName: "E2E露营客户", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: campingLocation.id, startAt: campingStart, endAt: campingEnd, lines: campingLines },
+    { quoteId: campingQuote.body.data.id, customerType: "personal", customerId: campingCustomerId, customerName: "E2E露营客户", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: campingLocation.id, startAt: campingStart, endAt: campingEnd, lines: campingLines },
     demo2.accessToken
   );
   assert.equal(campingOrder.status, 201, `露营下单失败: ${JSON.stringify(campingOrder.body).slice(0, 200)}`);
   const campingOrderId = campingOrder.body.data.id;
+  await prepareMockFunding(campingOrder.body.data, demo2.accessToken, `e2e:${campingOrderId}`);
   await request("POST", `/api/rental/v1/orders/${campingOrderId}/confirm`, {}, demo2.accessToken);
   const campingAllocated = (await request("POST", `/api/rental/v1/orders/${campingOrderId}/allocate`, {}, demo2.accessToken)).body.data;
   assert.ok(
     campingAllocated.allocations.length >= 2 && campingAllocated.allocations.every((row) => !row.assetId),
     "数量库存分配不应绑定具体资产"
   );
+  while (Date.now() < campingStartAt) await new Promise((resolve) => setTimeout(resolve, 250));
   const campingStockReserved = (await request("GET", "/api/rental/v1/stock-balances", null, demo2.accessToken)).body.data.find((row) => row.itemGroupId === tent.id);
   assert.equal(
     tentStockBefore.availableQuantity - campingStockReserved.availableQuantity,
@@ -1028,11 +1117,62 @@ async function main() {
   const campingSettled = await closeMockFundedOrder(campingOrderId, demo2.accessToken, `e2e:${campingOrderId}`);
   assert.equal(campingSettled.body.data.status, "completed", "露营订单资金归零后必须关闭");
   const campingStockAfter = (await request("GET", "/api/rental/v1/stock-balances", null, demo2.accessToken)).body.data.find((row) => row.itemGroupId === tent.id);
-  assert.equal(campingStockAfter.availableQuantity, tentStockBefore.availableQuantity, "完成后数量库存应完整释放");
+  assert.equal(campingStockAfter.availableQuantity, tentStockBefore.availableQuantity - 3, "有缺件/污损异常时，异常数量必须留在维修隔离而不是回到可用池");
+  assert.equal(campingStockAfter.maintenanceQuantity, (tentStockBefore.maintenanceQuantity ?? 0) + 3, "有缺件/污损异常时，数量库存必须增加对应维修隔离量");
+  const campingDispositions = (await request("GET", `/api/rental/v1/stock-dispositions?orderId=${campingOrderId}`, null, demo2.accessToken)).body.data;
+  const campingBlockedDispositions = campingDispositions.filter((row) => row.status === "blocked");
+  assert.ok(campingBlockedDispositions.length > 0, "异常归还必须生成待处置的库存隔离记录");
+  assert.equal(
+    campingBlockedDispositions.filter((row) => row.itemGroupId === tent.id).reduce((sum, row) => sum + row.quantity, 0),
+    3,
+    "直租帐篷与套装帐篷必须各自生成处置记录，合计隔离 3 顶"
+  );
+  // 一个异常归还可能产生多条处置记录（例如同一型号既有直租行又是套装组成）。
+  // 每条处置都必须完成自己的工单并恢复，不能只处理第一条就把剩余坏货重新放回可用池。
+  for (const campingDisposition of campingBlockedDispositions) {
+    const campingWorkOrder = await request(
+      "POST",
+      "/api/rental/v1/work-orders",
+      { dispositionId: campingDisposition.id, type: "repair", reason: "处理露营订单归还的缺件与污损" },
+      demo2.accessToken
+    );
+    assert.equal(campingWorkOrder.status, 201, `创建养护工单失败: ${JSON.stringify(campingWorkOrder.body).slice(0, 300)}`);
+    const campingWorkOrderId = campingWorkOrder.body.data.id;
+    const campingWorkOrderStarted = await request("POST", `/api/rental/v1/work-orders/${campingWorkOrderId}/start`, {}, demo2.accessToken);
+    assert.equal(campingWorkOrderStarted.status, 201, `启动养护工单失败: ${JSON.stringify(campingWorkOrderStarted.body).slice(0, 300)}`);
+    const campingWorkOrderSubmitted = await request(
+      "POST",
+      `/api/rental/v1/work-orders/${campingWorkOrderId}/submit`,
+      { result: "已补齐缺件并完成清洁复检", attachments: [] },
+      demo2.accessToken
+    );
+    assert.equal(campingWorkOrderSubmitted.status, 201, `提交养护工单失败: ${JSON.stringify(campingWorkOrderSubmitted.body).slice(0, 300)}`);
+    const campingWorkOrderReviewed = await request(
+      "POST",
+      `/api/rental/v1/work-orders/${campingWorkOrderId}/review`,
+      { decision: "approved", reason: "复检通过，可以恢复可用" },
+      demo2.accessToken
+    );
+    assert.equal(campingWorkOrderReviewed.status, 201, `审核养护工单失败: ${JSON.stringify(campingWorkOrderReviewed.body).slice(0, 300)}`);
+    assert.equal(campingWorkOrderReviewed.body.data.status, "completed", "养护工单审核通过后必须完成");
+    const campingWorkOrderHistory = (await request("GET", `/api/rental/v1/work-orders/${campingWorkOrderId}/history`, null, demo2.accessToken)).body.data;
+    assert.ok(campingWorkOrderHistory.length >= 3, "养护工单必须保留开始、提交、审核的历史");
+    const campingRestoredDisposition = await request(
+      "POST",
+      `/api/rental/v1/stock-dispositions/${campingDisposition.id}/restore`,
+      {},
+      demo2.accessToken
+    );
+    assert.equal(campingRestoredDisposition.status, 201, `恢复库存隔离失败: ${JSON.stringify(campingRestoredDisposition.body).slice(0, 300)}`);
+    assert.equal(campingRestoredDisposition.body.data.status, "restored", "养护验收通过后库存处置必须标记为已恢复");
+  }
+  const campingStockRestored = (await request("GET", "/api/rental/v1/stock-balances", null, demo2.accessToken)).body.data.find((row) => row.itemGroupId === tent.id);
+  assert.equal(campingStockRestored.availableQuantity, tentStockBefore.availableQuantity, "养护恢复后数量库存必须回到可用池");
+  assert.equal(campingStockRestored.maintenanceQuantity, tentStockBefore.maintenanceQuantity ?? 0, "养护恢复后维修隔离量必须扣回");
   const demo2Orders = (await request("GET", "/api/rental/v1/orders", null, demo2.accessToken)).body.data;
   assert.equal(demo2Orders.length, 1, "demo2 应只看到自己的露营订单");
   assert.ok(!demo2Orders.some((row) => row.id === orderId), "demo2 不得看到 demo 订单");
-  ok("露营数量+套装闭环：合并占用 3、缺件污损 55 元、库存完整释放");
+  ok("露营数量+套装闭环：合并占用 3、缺件污损 55 元、异常隔离后经养护工单恢复");
 
   console.log("== 11. 订单状态机边界与取消闭环 ==");
   const confirmCompleted = await request("POST", `/api/rental/v1/orders/${orderId}/confirm`, {}, demo.accessToken);
@@ -1047,10 +1187,11 @@ async function main() {
   const availabilityFor = async () =>
     (await request("POST", "/api/rental/v1/availability", { locationId: location.id, startAt: cancelStart, endAt: cancelEnd, lines: cancelLines }, demo.accessToken)).body.data.lines[0].availableQuantity;
   const availableBefore = await availabilityFor();
-  const cancelQuote = (await request("POST", "/api/rental/v1/quotes", { customerType: "personal", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: cancelStart, endAt: cancelEnd, lines: cancelLines }, demo.accessToken)).body.data;
-  const cancelOrder = await request("POST", "/api/rental/v1/orders", { quoteId: cancelQuote.id, customerType: "personal", customerName: "E2E取消客户", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: cancelStart, endAt: cancelEnd, lines: cancelLines }, demo.accessToken);
+  const cancelQuote = (await request("POST", "/api/rental/v1/quotes", { customerType: "personal", customerId: r1CustomerId, fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: cancelStart, endAt: cancelEnd, lines: cancelLines }, demo.accessToken)).body.data;
+  const cancelOrder = await request("POST", "/api/rental/v1/orders", { quoteId: cancelQuote.id, customerType: "personal", customerId: r1CustomerId, customerName: "E2E取消客户", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: cancelStart, endAt: cancelEnd, lines: cancelLines }, demo.accessToken);
   assert.equal(cancelOrder.status, 201, `取消用例下单失败: ${JSON.stringify(cancelOrder.body).slice(0, 200)}`);
   const cancelOrderId = cancelOrder.body.data.id;
+  await prepareMockFunding(cancelOrder.body.data, demo.accessToken, `e2e:${cancelOrderId}`);
   await request("POST", `/api/rental/v1/orders/${cancelOrderId}/confirm`, {}, demo.accessToken);
   assert.equal(await availabilityFor(), availableBefore - 1, "确认后可用库存应减少 1");
   const cancelled = (await request("POST", `/api/rental/v1/orders/${cancelOrderId}/cancel`, { reason: "E2E 验证收费窗口内取消" }, demo.accessToken)).body.data;
@@ -1061,7 +1202,7 @@ async function main() {
     Math.abs(cancellationLine.amount - cancelled.payableAmount * 0.2) < 0.02,
     `取消费应约为应付金额 20%: ${cancellationLine.amount} vs ${cancelled.payableAmount}`
   );
-  assert.equal(cancelled.finalPayableAmount, Math.round((cancelled.payableAmount + cancellationLine.amount) * 100) / 100, "取消费应进入最终应付");
+  assert.equal(cancelled.finalPayableAmount, cancellationLine.amount, "取消原租金核减后，最终应付应只保留取消费");
   assert.equal(await availabilityFor(), availableBefore, "取消后库存应完整释放");
   const cancelAgain = await request("POST", `/api/rental/v1/orders/${cancelOrderId}/cancel`, { reason: "重复取消" }, demo.accessToken);
   assert.equal(cancelAgain.status, 409, "已取消订单不能再次取消");
@@ -1071,26 +1212,26 @@ async function main() {
   const couponTemplate = await request(
     "POST",
     "/api/rental/v1/coupon-templates",
-    { code: "E2E-COUPON-50", name: "E2E 满 300 减 50", discountType: "fixed_amount", discountValue: 50, minimumSpend: 300, totalQuota: 1, perCustomerLimit: 1, effectiveFrom: new Date(Date.now() - 86400000).toISOString(), effectiveTo: new Date(Date.now() + 30 * 86400000).toISOString(), status: "active" },
+    { code: "E2E-COUPON-50", name: "E2E 满 200 减 50", discountType: "fixed_amount", discountValue: 50, minimumSpend: 200, totalQuota: 1, perCustomerLimit: 1, effectiveFrom: new Date(Date.now() - 86400000).toISOString(), effectiveTo: new Date(Date.now() + 30 * 86400000).toISOString(), status: "active" },
     demo.accessToken
   );
   assert.equal(couponTemplate.status, 201, `券模板创建失败: ${JSON.stringify(couponTemplate.body).slice(0, 200)}`);
   const couponId = couponTemplate.body.data.id;
-  const claim = await request("POST", "/api/rental/v1/customer-coupons/claim", { templateId: couponId, customerId: "e2e_coupon_customer" }, demo.accessToken);
+  const claim = await request("POST", "/api/rental/v1/customer-coupons/claim", { templateId: couponId, customerId: r1CustomerId }, demo.accessToken);
   assert.equal(claim.status, 201, `领取失败: ${JSON.stringify(claim.body).slice(0, 200)}`);
   const claimedCouponId = claim.body.data.id;
-  const claimAgain = await request("POST", "/api/rental/v1/customer-coupons/claim", { templateId: couponId, customerId: "e2e_coupon_customer" }, demo.accessToken);
+  const claimAgain = await request("POST", "/api/rental/v1/customer-coupons/claim", { templateId: couponId, customerId: r1CustomerId }, demo.accessToken);
   assert.equal(claimAgain.status, 409, "同一客户不得超过每客限领");
-  const claimSoldOut = await request("POST", "/api/rental/v1/customer-coupons/claim", { templateId: couponId, customerId: "e2e_coupon_customer_2" }, demo.accessToken);
+  const claimSoldOut = await request("POST", "/api/rental/v1/customer-coupons/claim", { templateId: couponId, customerId: r1SecondCustomerId }, demo.accessToken);
   assert.equal(claimSoldOut.status, 409, "发行量用尽后不得再领取");
   const couponQuoteStart = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
   const couponQuoteEnd = new Date(Date.now() + 72 * 3600 * 1000).toISOString();
-  const couponLines = [{ itemGroupId: serialized[0].id, quantity: 2 }];
+  const couponLines = [{ itemGroupId: serialized[0].id, quantity: 1 }];
   const couponQuote = (
     await request(
       "POST",
       "/api/rental/v1/quotes",
-      { customerType: "personal", customerId: "e2e_coupon_customer", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: couponQuoteStart, endAt: couponQuoteEnd, lines: couponLines, customerCouponId: claimedCouponId },
+      { customerType: "personal", customerId: r1CustomerId, fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: couponQuoteStart, endAt: couponQuoteEnd, lines: couponLines, customerCouponId: claimedCouponId },
       demo.accessToken
     )
   ).body.data;
@@ -1106,36 +1247,37 @@ async function main() {
   const couponOrder = await request(
     "POST",
     "/api/rental/v1/orders",
-    { quoteId: couponQuote.id, customerType: "personal", customerId: "e2e_coupon_customer", customerName: "E2E券客户", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: couponQuoteStart, endAt: couponQuoteEnd, lines: couponLines },
+    { quoteId: couponQuote.id, customerType: "personal", customerId: r1CustomerId, customerName: "E2E券客户", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: couponQuoteStart, endAt: couponQuoteEnd, lines: couponLines },
     demo.accessToken
   );
   assert.equal(couponOrder.status, 201, `券订单创建失败: ${JSON.stringify(couponOrder.body).slice(0, 200)}`);
   const couponOrderId = couponOrder.body.data.id;
-  const couponAfterOrder = (await request("GET", "/api/rental/v1/customer-coupons?customerId=e2e_coupon_customer", null, demo.accessToken)).body.data.find((row) => row.id === claimedCouponId);
+  await prepareMockFunding(couponOrder.body.data, demo.accessToken, `e2e:${couponOrderId}`);
+  const couponAfterOrder = (await request("GET", `/api/rental/v1/customer-coupons?customerId=${r1CustomerId}`, null, demo.accessToken)).body.data.find((row) => row.id === claimedCouponId);
   assert.equal(couponAfterOrder.status, "locked", "下单后优惠券应锁定");
   assert.equal(couponAfterOrder.lockedOrderId, couponOrderId);
   const reuseQuoteRes = await request(
     "POST",
     "/api/rental/v1/quotes",
-    { customerType: "personal", customerId: "e2e_coupon_customer", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: couponQuoteStart, endAt: couponQuoteEnd, lines: couponLines, customerCouponId: claimedCouponId },
+    { customerType: "personal", customerId: r1CustomerId, fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: couponQuoteStart, endAt: couponQuoteEnd, lines: couponLines, customerCouponId: claimedCouponId },
     demo.accessToken
   );
   assert.equal(reuseQuoteRes.status, 409, "已锁定的优惠券不得再次进入报价");
   await request("POST", `/api/rental/v1/orders/${couponOrderId}/confirm`, {}, demo.accessToken);
-  const couponAfterConfirm = (await request("GET", "/api/rental/v1/customer-coupons?customerId=e2e_coupon_customer", null, demo.accessToken)).body.data.find((row) => row.id === claimedCouponId);
+  const couponAfterConfirm = (await request("GET", `/api/rental/v1/customer-coupons?customerId=${r1CustomerId}`, null, demo.accessToken)).body.data.find((row) => row.id === claimedCouponId);
   assert.equal(couponAfterConfirm.status, "redeemed", "确认订单后优惠券应核销");
   const releasedCouponOrder = (await request("POST", `/api/rental/v1/orders/${couponOrderId}/cancel`, { reason: "E2E 验证券释放" }, demo.accessToken)).body.data;
   assert.equal(releasedCouponOrder.status, "cancelled");
-  const couponAfterCancel = (await request("GET", "/api/rental/v1/customer-coupons?customerId=e2e_coupon_customer", null, demo.accessToken)).body.data.find((row) => row.id === claimedCouponId);
+  const couponAfterCancel = (await request("GET", `/api/rental/v1/customer-coupons?customerId=${r1CustomerId}`, null, demo.accessToken)).body.data.find((row) => row.id === claimedCouponId);
   assert.equal(couponAfterCancel.status, "claimed", "取消订单后优惠券应释放回可再用");
   const template2 = await request(
     "POST",
     "/api/rental/v1/coupon-templates",
-    { code: "E2E-COUPON-30", name: "E2E 满 300 减 30", discountType: "fixed_amount", discountValue: 30, minimumSpend: 300, totalQuota: 5, perCustomerLimit: 1, effectiveFrom: new Date(Date.now() - 86400000).toISOString(), effectiveTo: new Date(Date.now() + 30 * 86400000).toISOString(), status: "active" },
+    { code: "E2E-COUPON-30", name: "E2E 满 200 减 30", discountType: "fixed_amount", discountValue: 30, minimumSpend: 200, totalQuota: 5, perCustomerLimit: 1, effectiveFrom: new Date(Date.now() - 86400000).toISOString(), effectiveTo: new Date(Date.now() + 30 * 86400000).toISOString(), status: "active" },
     demo.accessToken
   );
   assert.equal(template2.status, 201);
-  const claim2 = await request("POST", "/api/rental/v1/customer-coupons/claim", { templateId: template2.body.data.id, customerId: "e2e_coupon_customer" }, demo.accessToken);
+  const claim2 = await request("POST", "/api/rental/v1/customer-coupons/claim", { templateId: template2.body.data.id, customerId: r1CustomerId }, demo.accessToken);
   assert.equal(claim2.status, 201);
 
   console.log("== 12.1 RC-02 订单确认事务：成功全落库，报价或锁券失败则整体回滚 ==");
@@ -1149,7 +1291,7 @@ async function main() {
   const atomicClaim = await request(
     "POST",
     "/api/rental/v1/customer-coupons/claim",
-    { templateId: atomicTemplate.body.data.id, customerId: "rc02_success_customer" },
+    { templateId: atomicTemplate.body.data.id, customerId: r1CustomerId },
     demo.accessToken
   );
   assert.equal(atomicClaim.status, 201, `RC-02 领券失败: ${JSON.stringify(atomicClaim.body)}`);
@@ -1160,14 +1302,14 @@ async function main() {
     await request(
       "POST",
       "/api/rental/v1/quotes",
-      { customerType: "personal", customerId: "rc02_success_customer", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: atomicStart, endAt: atomicEnd, lines: atomicLines, customerCouponId: atomicClaim.body.data.id },
+      { customerType: "personal", customerId: r1CustomerId, fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: atomicStart, endAt: atomicEnd, lines: atomicLines, customerCouponId: atomicClaim.body.data.id },
       demo.accessToken
     )
   ).body.data;
   const atomicOrderResponse = await request(
     "POST",
     "/api/rental/v1/orders",
-    { quoteId: atomicQuote.id, customerType: "personal", customerId: "rc02_success_customer", customerName: "RC-02成功客户", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: atomicStart, endAt: atomicEnd, lines: atomicLines },
+    { quoteId: atomicQuote.id, customerType: "personal", customerId: r1CustomerId, customerName: "RC-02成功客户", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: atomicStart, endAt: atomicEnd, lines: atomicLines },
     demo.accessToken
   );
   assert.equal(atomicOrderResponse.status, 201, `RC-02 正常订单创建失败: ${JSON.stringify(atomicOrderResponse.body)}`);
@@ -1178,6 +1320,7 @@ async function main() {
   assert.equal(readScalar(`SELECT \`consumedOrderId\` FROM \`rental_quotes\` WHERE \`id\`='${atomicQuote.id}';`), atomicOrderId, "报价必须关联消费订单");
   assert.equal(readScalar(`SELECT \`status\` FROM \`rental_customer_coupons\` WHERE \`id\`='${atomicClaim.body.data.id}';`), "locked", "优惠券必须锁定");
   assert.equal(readScalar(`SELECT \`lockedOrderId\` FROM \`rental_customer_coupons\` WHERE \`id\`='${atomicClaim.body.data.id}';`), atomicOrderId, "优惠券必须关联订单");
+  await prepareMockFunding(atomicOrderResponse.body.data, demo.accessToken, `e2e:${atomicOrderId}`);
   ok("RC-02 正常路径：订单、订单行、库存预占、报价消费和优惠券锁定同时提交");
 
   // 确认前券状态若被后台任务/人工修复改走，核销会更新 0 行。订单必须随核销失败
@@ -1204,7 +1347,7 @@ async function main() {
   const couponFailureQuoteResponse = await request(
     "POST",
     "/api/rental/v1/quotes",
-    { customerType: "personal", customerId: "e2e_coupon_customer", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: couponFailureStart, endAt: couponFailureEnd, lines: atomicLines, customerCouponId: claim2.body.data.id },
+    { customerType: "personal", customerId: r1CustomerId, fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: couponFailureStart, endAt: couponFailureEnd, lines: atomicLines, customerCouponId: claim2.body.data.id },
     demo.accessToken
   );
   assert.equal(couponFailureQuoteResponse.status, 201, `RC-02 锁券失败用报价创建失败: ${JSON.stringify(couponFailureQuoteResponse.body)}`);
@@ -1214,7 +1357,7 @@ async function main() {
   const couponFailure = await request(
     "POST",
     "/api/rental/v1/orders",
-    { quoteId: couponFailureQuote.id, customerType: "personal", customerId: "e2e_coupon_customer", customerName: "RC-02锁券失败客户", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: couponFailureStart, endAt: couponFailureEnd, lines: atomicLines },
+    { quoteId: couponFailureQuote.id, customerType: "personal", customerId: r1CustomerId, customerName: "RC-02锁券失败客户", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: couponFailureStart, endAt: couponFailureEnd, lines: atomicLines },
     demo.accessToken
   );
   assert.equal(couponFailure.status, 409, `数据库券状态变化后必须拒绝下单: ${JSON.stringify(couponFailure.body)}`);
@@ -1229,7 +1372,7 @@ async function main() {
   const quoteFailureQuoteResponse = await request(
     "POST",
     "/api/rental/v1/quotes",
-    { customerType: "personal", customerId: "rc02_quote_failure", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: quoteFailureStart, endAt: quoteFailureEnd, lines: atomicLines },
+    { customerType: "personal", customerId: r1CustomerId, fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: quoteFailureStart, endAt: quoteFailureEnd, lines: atomicLines },
     demo.accessToken
   );
   assert.equal(quoteFailureQuoteResponse.status, 201, `RC-02 失效用报价创建失败: ${JSON.stringify(quoteFailureQuoteResponse.body)}`);
@@ -1239,7 +1382,7 @@ async function main() {
   const quoteFailure = await request(
     "POST",
     "/api/rental/v1/orders",
-    { quoteId: quoteFailureQuote.id, customerType: "personal", customerId: "rc02_quote_failure", customerName: "RC-02报价失败客户", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: quoteFailureStart, endAt: quoteFailureEnd, lines: atomicLines },
+    { quoteId: quoteFailureQuote.id, customerType: "personal", customerId: r1CustomerId, customerName: "RC-02报价失败客户", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: quoteFailureStart, endAt: quoteFailureEnd, lines: atomicLines },
     demo.accessToken
   );
   assert.equal(quoteFailure.status, 409, `数据库报价过期后必须拒绝下单: ${JSON.stringify(quoteFailure.body)}`);
@@ -1255,15 +1398,14 @@ async function main() {
   demo.accessToken = demoAfterRc02Restart.accessToken;
   demo2.accessToken = demo2AfterRc02Restart.accessToken;
   const restoredAtomicOrder = (await request("GET", `/api/rental/v1/orders/${atomicOrderId}`, null, demoAfterRc02Restart.accessToken)).body.data;
-  const restoredAtomicCoupon = (await request("GET", "/api/rental/v1/customer-coupons?customerId=rc02_success_customer", null, demoAfterRc02Restart.accessToken)).body.data.find((row) => row.id === atomicClaim.body.data.id);
+  const restoredAtomicCoupon = (await request("GET", `/api/rental/v1/customer-coupons?customerId=${r1CustomerId}`, null, demoAfterRc02Restart.accessToken)).body.data.find((row) => row.id === atomicClaim.body.data.id);
   assert.equal(restoredAtomicOrder.quoteId, atomicQuote.id, "重启后必须从库恢复事务成功订单");
   assert.equal(restoredAtomicCoupon.status, "locked", "重启后必须从库恢复优惠券锁定状态");
   assert.equal(restoredAtomicCoupon.lockedOrderId, atomicOrderId, "重启后优惠券仍须关联原订单");
   ok("RC-02 重启一致性：成功事务完整恢复，失败事务无半成品复活");
 
   console.log("== 12.2 RC-03 序列化、数量和套装库存并发防超卖 ==");
-  const runInventoryRace = async ({ label, token, locationId, itemGroupId, startAt, endAt, reservationQuantity }) => {
-    const lines = [{ itemGroupId, quantity: reservationQuantity.requested }];
+  const runInventoryRace = async ({ label, token, customerId, locationId, itemGroupId, startAt, endAt, reservationQuantity }) => {
     const availability = async () => {
       const response = await request(
         "POST",
@@ -1275,9 +1417,14 @@ async function main() {
       return response.body.data.lines[0].availableQuantity;
     };
     const availableBefore = await availability();
-    assert.equal(availableBefore, reservationQuantity.requested, `${label} 构造前提：请求量应恰好等于全部可用量`);
+    assert.ok(availableBefore >= 1, `${label} 构造前提：至少需要一份可用库存`);
+    // 不假设固定夹具永远有 3 份库存：前面的验收链可能已经占用过同一品类。
+    // 并发场景仍然请求当前全部可用量，保持“两个请求争抢最后容量”的语义。
+    const requestQuantity = availableBefore;
+    const lines = [{ itemGroupId, quantity: requestQuantity }];
+    const persistedQuantity = requestQuantity * reservationQuantity.persistedPerRequested;
 
-    const quotePayload = { customerType: "personal", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: locationId, startAt, endAt, lines };
+    const quotePayload = { customerType: "personal", customerId, fulfillmentMode: "store_pickup_return", fulfillmentLocationId: locationId, startAt, endAt, lines };
     const firstQuoteResponse = await request("POST", "/api/rental/v1/quotes", quotePayload, token);
     const secondQuoteResponse = await request("POST", "/api/rental/v1/quotes", quotePayload, token);
     assert.equal(firstQuoteResponse.status, 201, `${label} 第一份报价失败: ${JSON.stringify(firstQuoteResponse.body)}`);
@@ -1287,6 +1434,7 @@ async function main() {
     const orderPayload = (quoteId, suffix) => ({
       quoteId,
       customerType: "personal",
+      customerId,
       customerName: `${label}并发客户${suffix}`,
       fulfillmentMode: "store_pickup_return",
       fulfillmentLocationId: locationId,
@@ -1314,7 +1462,7 @@ async function main() {
     );
     assert.equal(
       readCount(`SELECT COALESCE(SUM(\`quantity\`),0) FROM \`rental_reservations\` WHERE \`orderId\`='${winningOrderId}' AND \`status\`='SOFT';`),
-      reservationQuantity.persisted,
+      persistedQuantity,
       `${label} 只能保留成功订单的预占`
     );
     assert.equal(
@@ -1340,11 +1488,12 @@ async function main() {
   await runInventoryRace({
     label: "序列化库存",
     token: demo.accessToken,
+    customerId: r1CustomerId,
     locationId: location.id,
     itemGroupId: serialized[0].id,
     startAt: serializedRaceStart,
     endAt: serializedRaceEnd,
-    reservationQuantity: { requested: 3, persisted: 3 }
+    reservationQuantity: { persistedPerRequested: 1 }
   });
 
   const quantityRaceStart = new Date(Date.now() + 210 * 86400000).toISOString();
@@ -1352,11 +1501,12 @@ async function main() {
   await runInventoryRace({
     label: "数量库存",
     token: demo2.accessToken,
+    customerId: campingCustomerId,
     locationId: campingLocation.id,
     itemGroupId: tent.id,
     startAt: quantityRaceStart,
     endAt: quantityRaceEnd,
-    reservationQuantity: { requested: tentStockBefore.availableQuantity, persisted: tentStockBefore.availableQuantity }
+    reservationQuantity: { persistedPerRequested: 1 }
   });
 
   const bundleRaceStart = new Date(Date.now() + 220 * 86400000).toISOString();
@@ -1364,29 +1514,111 @@ async function main() {
   await runInventoryRace({
     label: "套装库存",
     token: demo.accessToken,
+    customerId: r1CustomerId,
     locationId: location.id,
     itemGroupId: cameraKit.id,
     startAt: bundleRaceStart,
     endAt: bundleRaceEnd,
-    reservationQuantity: { requested: 3, persisted: 6 }
+    reservationQuantity: { persistedPerRequested: 2 }
   });
 
   const exclusivePlan = await request(
     "POST",
     "/api/rental/v1/discount-plans",
-    { code: "E2E-EXCLUSIVE", name: "E2E 不可叠加券的优惠", changeReason: "E2E 互斥验证", discountType: "percentage", discountValue: 10, minimumSpend: 0, customerScope: "all", applicableItemGroupIds: [], applicableDayTypes: [], priority: 1, stackableWithCoupon: false, effectiveFrom: new Date(Date.now() - 86400000).toISOString(), status: "enabled" },
+    { code: "E2E-EXCLUSIVE", name: "E2E 不可叠加券的优惠", changeReason: "E2E 互斥验证", discountType: "percentage", discountValue: 10, minimumSpend: 0, customerScope: "all", applicableItemGroupIds: [], applicableDayTypes: [], priority: 1, appliesTo: "rental", stackableWithOtherPlans: false, stackableWithCoupon: false, effectiveFrom: new Date(Date.now() - 86400000).toISOString(), status: "enabled" },
     demo.accessToken
   );
   assert.equal(exclusivePlan.status, 201, `互斥方案创建失败: ${JSON.stringify(exclusivePlan.body).slice(0, 200)}`);
   const conflictingQuote = await request(
     "POST",
     "/api/rental/v1/quotes",
-    { customerType: "personal", customerId: "e2e_coupon_customer", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: couponQuoteStart, endAt: couponQuoteEnd, lines: couponLines, customerCouponId: claim2.body.data.id },
+    { customerType: "personal", customerId: r1CustomerId, fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: couponQuoteStart, endAt: couponQuoteEnd, lines: couponLines, customerCouponId: claim2.body.data.id },
     demo.accessToken
   );
   assert.equal(conflictingQuote.status, 409, "互斥优惠方案下不得同时使用优惠券");
   assert.match(JSON.stringify(conflictingQuote.body), /叠加/u, "拒绝原因应指向叠加互斥");
   ok("优惠券闭环：限领/领完/抵扣/锁定/复用拒绝/核销/取消释放/互斥拦截");
+
+  console.log("== R1-NO-SHOW. 领取爽约真实 API 链（旧门市兼容段之前） ==");
+  // 当前产品已删除旧 /store-rental 运行域；把 R1 的爽约验收放在兼容性历史段之前，
+  // 这样可独立跑本条真实链，不会被历史测试阻断。后续稳定后再清理那批旧段。
+  // 规则按报价起租时点匹配，不能用“过去两小时”硬造订单（当前规则可能是在本轮
+  // 测试中刚发布，过去时点没有规则覆盖）。先发布一版领取宽限为 0 的爽约规则，
+  // 再用一个很近的未来起租时间，等它自然越过起租点后推进真实爽约链。
+  const currentNoShowRuleResponse = await request("GET", "/api/rental/v1/rule-versions/current", null, demo.accessToken);
+  assert.equal(currentNoShowRuleResponse.status, 200, `读取爽约规则失败: ${JSON.stringify(currentNoShowRuleResponse.body).slice(0, 300)}`);
+  const currentNoShowRule = currentNoShowRuleResponse.body.data;
+  const noShowRuleDraft = await request(
+    "POST",
+    "/api/rental/v1/rule-versions",
+    {
+      changeReason: "R1 爽约真实链验收",
+      config: {
+        ...currentNoShowRule.config,
+        cancellation: {
+          ...currentNoShowRule.config.cancellation,
+          noShow: {
+            ...currentNoShowRule.config.cancellation.noShow,
+            enabled: true,
+            pickupGraceMinutes: 0,
+            finalizationMinutes: 1,
+            feeType: "percentage",
+            feeValue: 100
+          }
+        }
+      }
+    },
+    demo.accessToken
+  );
+  assert.equal(noShowRuleDraft.status, 201, `保存爽约规则草稿失败: ${JSON.stringify(noShowRuleDraft.body).slice(0, 300)}`);
+  const noShowRulePublished = await request(
+    "POST",
+    `/api/rental/v1/rule-versions/${noShowRuleDraft.body.data.version}/publish`,
+    { reason: "R1 爽约真实链验收" },
+    demo.accessToken
+  );
+  assert.equal(noShowRulePublished.status, 201, `发布爽约规则失败: ${JSON.stringify(noShowRulePublished.body).slice(0, 300)}`);
+  const noShowStartAt = Date.now() + 3000;
+  const noShowStart = new Date(noShowStartAt).toISOString();
+  const noShowEnd = new Date(noShowStartAt + 24 * 60 * 60 * 1000).toISOString();
+  const noShowLines = [{ itemGroupId: serialized[1]?.id ?? serialized[0].id, quantity: 1 }];
+  const noShowQuote = await request(
+    "POST",
+    "/api/rental/v1/quotes",
+    { customerType: "personal", customerId: r1CustomerId, fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: noShowStart, endAt: noShowEnd, lines: noShowLines },
+    demo.accessToken
+  );
+  assert.equal(noShowQuote.status, 201, `爽约订单报价失败: ${JSON.stringify(noShowQuote.body).slice(0, 300)}`);
+  const noShowOrderResponse = await request(
+    "POST",
+    "/api/rental/v1/orders",
+    { quoteId: noShowQuote.body.data.id, customerType: "personal", customerId: r1CustomerId, customerName: "E2E 爽约客户", contactPhone: "13800000003", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: noShowStart, endAt: noShowEnd, lines: noShowLines },
+    demo.accessToken
+  );
+  assert.equal(noShowOrderResponse.status, 201, `爽约订单创建失败: ${JSON.stringify(noShowOrderResponse.body).slice(0, 300)}`);
+  const noShowOrderId = noShowOrderResponse.body.data.id;
+  await prepareMockFunding(noShowOrderResponse.body.data, demo.accessToken, `e2e:${noShowOrderId}`);
+  const noShowConfirmed = await request("POST", `/api/rental/v1/orders/${noShowOrderId}/confirm`, {}, demo.accessToken);
+  assert.equal(noShowConfirmed.status, 201, `爽约订单确认失败: ${JSON.stringify(noShowConfirmed.body).slice(0, 300)}`);
+  const noShowAllocated = await request("POST", `/api/rental/v1/orders/${noShowOrderId}/allocate`, {}, demo.accessToken);
+  assert.equal(noShowAllocated.status, 201, `爽约订单锁分配失败: ${JSON.stringify(noShowAllocated.body).slice(0, 300)}`);
+  const noShowAssetId = noShowAllocated.body.data.allocations.find((row) => row.assetId)?.assetId;
+  assert.ok(noShowAssetId, "爽约订单必须先有真实序列化资产分配，才能验证释放");
+  while (Date.now() < noShowStartAt) await new Promise((resolve) => setTimeout(resolve, 250));
+  const noShowOverdue = await request("POST", `/api/rental/v1/orders/${noShowOrderId}/mark-pickup-overdue`, {}, demo.accessToken);
+  assert.equal(noShowOverdue.status, 201, `领取超时推进失败: ${JSON.stringify(noShowOverdue.body).slice(0, 300)}`);
+  assert.equal(noShowOverdue.body.data.status, "pickup_overdue", "领取超时只应进入待确认爽约");
+  assert.ok(noShowOverdue.body.data.noShowNoticeAt, "领取超时应记录模拟通知时间");
+  const noShowFinal = await request("POST", `/api/rental/v1/orders/${noShowOrderId}/confirm-no-show`, { reason: "客户未按约领取" }, demo.accessToken);
+  assert.equal(noShowFinal.status, 201, `确认爽约失败: ${JSON.stringify(noShowFinal.body).slice(0, 300)}`);
+  assert.equal(noShowFinal.body.data.status, "no_show", "确认爽约后必须进入终态 no_show");
+  assert.ok(noShowFinal.body.data.chargeLines.some((row) => row.code === `cancellation_reversal:${noShowOrderId}`), "爽约必须保留未履行租金核减事实");
+  const noShowAsset = (await request("GET", "/api/rental/v1/assets", null, demo.accessToken)).body.data.find((row) => row.id === noShowAssetId);
+  assert.equal(noShowAsset.status, "available", "确认爽约必须释放已分配但未领取的序列化资产");
+  assert.ok(noShowFinal.body.data.reservations.every((row) => row.status === "cancelled"), "确认爽约必须取消全部资源预占");
+  ok("领取爽约真实链路：起租超时进入待确认、记录通知、确认后进入 no_show，保留核减并释放预占与资产");
+
+  await maybeStopAfter("r1-no-show");
 
   console.log("== 13. 车辆租户初始化、写入租户戳与车辆域隔离 ==");
   const platform = await login("platform", "admin", PLATFORM_PASSWORD);
