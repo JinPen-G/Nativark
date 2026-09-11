@@ -64,6 +64,7 @@ import type {
   RentalValueAddedService,
   RentalWorkspaceOperationReport,
   RentalWorkspaceReportFilter,
+  RentalWorkbenchTodos,
   RentalServiceCapacity,
   SaveWorkspaceCapabilityRequest,
   UpgradeWorkspaceCapabilityRequest,
@@ -123,6 +124,7 @@ export const rentalCoreApi = {
    */
   operationReport: (params?: RentalWorkspaceReportFilter) =>
     request<RentalWorkspaceOperationReport>("/rental/v1/reports/operations", { params }),
+  workbenchTodos: () => request<RentalWorkbenchTodos>("/rental/v1/workbench/todos"),
   /**
    * REPORT-01B：导出当前经营空间报表（CSV）。
    *

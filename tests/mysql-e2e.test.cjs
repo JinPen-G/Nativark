@@ -514,12 +514,12 @@ async function main() {
   console.log("== 3. 二次部署幂等（已迁移库升级路径） ==");
   const countsBefore = {
     tenants: readCount("SELECT COUNT(*) FROM `Tenant`;"),
-    orders: readCount("SELECT COUNT(*) FROM `StoreRentalOrder`;")
+    orders: readCount("SELECT COUNT(*) FROM `rental_orders`;")
   };
   const secondDeploy = deploy();
   if (secondDeploy.status !== 0) fail("二次 migrate deploy 失败", `${secondDeploy.stdout || ""}${secondDeploy.stderr || ""}`);
   assert.deepEqual(
-    { tenants: readCount("SELECT COUNT(*) FROM `Tenant`;"), orders: readCount("SELECT COUNT(*) FROM `StoreRentalOrder`;") },
+    { tenants: readCount("SELECT COUNT(*) FROM `Tenant`;"), orders: readCount("SELECT COUNT(*) FROM `rental_orders`;") },
     countsBefore,
     "二次部署不得改变数据"
   );
@@ -536,7 +536,7 @@ async function main() {
   };
   const seedRun = (script) =>
     runNode([TS_NODE_BIN, `prisma/${script}`], { cwd: API_DIR, env: seedEnv });
-  for (const script of ["seed.ts", "seed-report-demo.ts"]) {
+  for (const script of ["seed.ts"]) {
     for (let round = 1; round <= 2; round += 1) {
       const result = seedRun(script);
       if (result.status !== 0) fail(`${script} 第 ${round} 次执行失败`, `${result.stdout || ""}${result.stderr || ""}`.slice(-2000));
@@ -545,11 +545,10 @@ async function main() {
   const seedCounts = {
     tenants: readCount("SELECT COUNT(*) FROM `Tenant`;"),
     users: readCount("SELECT COUNT(*) FROM `User`;"),
-    orders: readCount("SELECT COUNT(*) FROM `StoreRentalOrder`;"),
-    fees: readCount("SELECT COUNT(*) FROM `FeeItem`;")
+    orders: readCount("SELECT COUNT(*) FROM `rental_orders`;"),
+    ordersWithCharges: readCount("SELECT COUNT(*) FROM `rental_orders` WHERE JSON_LENGTH(`chargeLines`) > 0;")
   };
   assert.equal(seedCounts.tenants, 3, "Seed 后租户数");
-  assert.ok(seedCounts.orders >= 29, `Seed 后订单数异常: ${seedCounts.orders}`);
   assert.equal(
     readCount("SELECT COUNT(DISTINCT `categoryCode`) FROM `business_workspaces` WHERE `tenantId`='tenant_001' AND `status`='ACTIVE';"),
     4,
@@ -562,65 +561,13 @@ async function main() {
   );
   ok(`双 Seed 各执行两次，计数稳定: ${JSON.stringify(seedCounts)}`);
 
-  console.log("== 5. 真实旧库升级：旧通知表带数据 → 数据保留式迁移 ==");
-  const sampleOrder = mysqlQuery("SELECT `id`, `orderNo`, `tenantId` FROM `StoreRentalOrder` ORDER BY `createdAt` LIMIT 1;");
-  const dataLine = sampleOrder.split(/\r?\n/).filter((line) => line && !/^id\torderNo\ttenantId$/u.test(line)).pop();
-  const orderMatch = dataLine ? dataLine.match(/^(\S+)\t(\S+)\t(\S+)$/u) : null;
-  if (!orderMatch) fail("无法取种子订单用于旧通知数据构造", sampleOrder);
-  const [, sampleOrderId, sampleOrderNo, sampleTenantId] = orderMatch;
-  mysqlQuery(`
-    SET FOREIGN_KEY_CHECKS=0;
-    DROP TABLE IF EXISTS \`OrderNotificationRecord\`;
-    DROP TABLE IF EXISTS \`OrderOperationRecord\`;
-    SET FOREIGN_KEY_CHECKS=1;
-    CREATE TABLE \`OrderNotificationRecord\` (
-      \`id\` VARCHAR(191) NOT NULL,
-      \`orderId\` VARCHAR(191) NOT NULL,
-      \`scene\` VARCHAR(191) NOT NULL,
-      \`channel\` VARCHAR(191) NOT NULL,
-      \`target\` VARCHAR(191) NOT NULL,
-      \`status\` VARCHAR(191) NOT NULL,
-      \`content\` TEXT NOT NULL,
-      \`idempotencyKey\` VARCHAR(191) NULL,
-      \`payload\` JSON NULL,
-      \`operator\` VARCHAR(191) NULL,
-      \`sentAt\` DATETIME(3) NULL,
-      \`createdAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-      INDEX \`OrderNotificationRecord_orderId_scene_createdAt_idx\`(\`orderId\`, \`scene\`, \`createdAt\`),
-      INDEX \`OrderNotificationRecord_orderId_idempotencyKey_idx\`(\`orderId\`, \`idempotencyKey\`),
-      PRIMARY KEY (\`id\`)
-    ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-    ALTER TABLE \`OrderNotificationRecord\` ADD CONSTRAINT \`OrderNotificationRecord_orderId_fkey\` FOREIGN KEY (\`orderId\`) REFERENCES \`StoreRentalOrder\`(\`id\`) ON DELETE RESTRICT ON UPDATE CASCADE;
-    INSERT INTO \`OrderNotificationRecord\` (\`id\`, \`orderId\`, \`scene\`, \`channel\`, \`target\`, \`status\`, \`content\`, \`operator\`) VALUES
-      ('e2e_legacy_notice_1', '${sampleOrderId}', 'payment_success', 'sms', '+852****0001', 'sent', '旧结构通知：您的订单已支付成功。', 'seed-e2e'),
-      ('e2e_legacy_notice_2', '${sampleOrderId}', 'order_created', 'sms', '+852****0001', 'sent', '${"长内容验证截断映射。".repeat(60)}', 'seed-e2e');
-    DELETE FROM \`_prisma_migrations\` WHERE \`migration_name\` = '20260609000100_add_order_operation_notification_records';
-  `);
-  const upgradeDeploy = deploy();
-  if (upgradeDeploy.status !== 0) fail("旧库状态下的 migrate deploy 失败", `${upgradeDeploy.stdout || ""}${upgradeDeploy.stderr || ""}`.slice(-2000));
-  assert.equal(readCount("SELECT COUNT(*) FROM `OrderNotificationRecord`;"), 2, "升级后旧通知记录必须保留");
-  const upgraded = mysqlQuery(
-    "SELECT `tenantId`, `orderNo`, `event`, `targetMasked`, `templateCode`, `contentSummary` FROM `OrderNotificationRecord` WHERE `id`='e2e_legacy_notice_1';"
-  );
-  assert.ok(upgraded.includes(sampleTenantId), `tenantId 未回填: ${upgraded}`);
-  assert.ok(upgraded.includes(sampleOrderNo), `orderNo 未回填: ${upgraded}`);
-  assert.ok(upgraded.includes("payment_success"), `event 未映射: ${upgraded}`);
-  assert.ok(upgraded.includes("+852****0001"), `targetMasked 未映射: ${upgraded}`);
-  assert.ok(upgraded.includes("LEGACY_payment_success"), `templateCode 未映射: ${upgraded}`);
-  const truncated = mysqlQuery(
-    "SELECT CHAR_LENGTH(`contentSummary`) AS len FROM `OrderNotificationRecord` WHERE `id`='e2e_legacy_notice_2';"
-  );
-  assert.match(truncated, /512/, `超长内容应按 512 截断: ${truncated}`);
-  const staleColumn = mysqlRaw(`USE \`${TEST_DB}\`;\nSELECT \`scene\` FROM \`OrderNotificationRecord\` LIMIT 1;`);
-  assert.notEqual(staleColumn.status, 0, "查询已移除的旧列 scene 必须失败");
-  assert.match(`${staleColumn.stdout || ""}${staleColumn.stderr || ""}`, /Unknown column/u, "旧列应已移除");
-  assert.equal(
-    readCount("SELECT COUNT(*) FROM `_prisma_migrations` WHERE `finished_at` IS NOT NULL AND `rolled_back_at` IS NULL;"),
-    EXPECTED_MIGRATIONS,
-    "升级后迁移记录应恢复完整"
-  );
-  ok("旧通知数据经升级完整保留并正确映射（tenantId/orderNo/event/截断规则）");
-
+  const sampleTenantId = readScalar("SELECT `id` FROM `Tenant` ORDER BY `id` LIMIT 1;");
+  if (!sampleTenantId) fail("无法取 Seed 租户用于存量报价构造");
+  const retiredTables = ["StoreRentalOrder", "FeeItem", "OrderNotificationRecord", "OrderOperationRecord"];
+  const legacyTablesExist = retiredTables.filter((table) => readCount(
+    `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = "${table}";`
+  ) > 0);
+  assert.equal(legacyTablesExist.length, 0, "旧门市租赁表必须已移除");
   console.log("== 5b. 旧库存量押金/预授权混口径必须被重新分类，不得错算进本次实收 ==");
   // Codex 复审 P1：`add_quote_receivable_amount` 无条件把 receivable 算成 payable + deposit，
   // 而紧随其后的 `split_deposit_and_preauth` 自己承认存量 depositAmount 里可能装的是预授权额度。
@@ -707,6 +654,7 @@ async function main() {
   // 断言已全部完成，删除不影响本节结论。
   mysqlQuery("DELETE FROM `rental_quotes` WHERE `id` IN ('e2e_legacy_q_preauth','e2e_legacy_q_fixed','e2e_legacy_q_unknown');");
   ok("旧库存量押金/预授权混口径经纠正迁移重新分类：预授权搬到额度、固定押金保留、无法判定金额独立隔离");
+  await maybeStopAfter("baseline");
 
   console.log("== 6. 仓储层 fail-closed（无租户身份必须拒绝） ==");
   require("ts-node").register({

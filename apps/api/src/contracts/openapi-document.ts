@@ -1348,6 +1348,10 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: "List Rental Core orders", permissions: ["store-rental:order:view", "store-rental:vehicle:view"], responseSchema: "GenericObject"
   },
   {
+    method: "get", path: "/api/rental/v1/workbench/todos", tag: "RentalCore", operationId: "listRentalWorkbenchTodos",
+    summary: "List actionable workbench todos for the current workspace", permissions: ["store-rental:report:view", "store-rental:order:view"], responseSchema: "GenericObject"
+  },
+  {
     method: "post", path: "/api/rental/v1/orders", tag: "RentalCore", operationId: "createRentalCoreOrder",
     summary: "Create multi-line Rental Core order", permissions: ["store-rental:order:operate", "store-rental:vehicle:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
   },

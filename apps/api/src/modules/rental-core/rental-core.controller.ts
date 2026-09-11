@@ -68,6 +68,7 @@ import { PrismaService } from "../database/prisma.service";
 import { RentalServiceCapacityService } from "./rental-service-capacity.service";
 import { extensionRequestKey } from "./rental-service-occurrence";
 import { RentalFundingService } from "./rental-funding.service";
+import { buildRentalWorkbenchTodos } from "./rental-workbench-todos";
 
 /** 读取标准 Idempotency-Key 请求头。大小写不敏感，超长键直接拒绝。 */
 /**
@@ -366,6 +367,34 @@ export class RentalCoreController {
     return this.committed(req.user.tenantId, this.service.cancelWorkOrder(req.user.tenantId, id, body, req.user.displayName));
   }
   @Post("availability") availability(@Req() req: AuthenticatedRequest, @Body() body: RentalAvailabilityDto) { return this.service.availability(req.user.tenantId, body); }
+  /**
+   * R1 工作台统一待办：服务端只聚合当前会话租户/空间内真正可操作的事项。
+   * 退款余额来自资金事件流，不能由前端仅凭订单应付金额推算。
+   */
+  @Get("workbench/todos")
+  async workbenchTodos(@Req() req: AuthenticatedRequest) {
+    const tenantId = req.user.tenantId;
+    const workspaceId = this.service.resolveWorkspaceId(tenantId);
+    const orders = await this.service.listOrders(tenantId);
+    const workOrders = await this.service.listWorkOrders(tenantId);
+    const extensionsByOrderId: Record<string, RentalOrderExtension[]> = {};
+    const fundingByOrderId: Record<string, Awaited<ReturnType<RentalFundingService["listEvents"]>>> = {};
+
+    await Promise.all(orders.map(async (order) => {
+      const extensions = await this.service.listOrderExtensions(tenantId, order.id);
+      extensionsByOrderId[order.id] = extensions;
+      const mayHaveRefund =
+        [RentalCoreOrderStatus.Settling, RentalCoreOrderStatus.Completed].includes(order.status) ||
+        (order.chargeLines ?? []).some((line) => line.type === "early_return_refund" && Number(line.amount) < 0) ||
+        (order.serviceSnapshots ?? []).some((row) => row.refundStatus === "approved_pending_refund") ||
+        extensions.some((row) => row.status === "effective" && row.pricingSnapshot?.refundReview?.status === "approved");
+      if (mayHaveRefund) {
+        fundingByOrderId[order.id] = await this.funding.listEvents(tenantId, workspaceId, order.id);
+      }
+    }));
+
+    return buildRentalWorkbenchTodos(orders, workOrders, fundingByOrderId, extensionsByOrderId);
+  }
   @Get("orders") orders(@Req() req: AuthenticatedRequest) { return this.service.listOrders(req.user.tenantId); }
   @Get("orders/:id") order(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.service.getOrder(req.user.tenantId, id); }
   @Post("orders") async createOrder(@Req() req: AuthenticatedRequest, @Body() body: CreateRentalOrderDto) {

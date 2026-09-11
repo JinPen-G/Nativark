@@ -1806,7 +1806,9 @@ model RentalStockDisposition {
   updatedAt        DateTime @updatedAt
 
   @@unique([workspaceId, dedupeKey], map: "rental_stock_disp_batch_resource_key")
-  @@index([tenantId, workspaceId, itemGroupId, locationId, status])
+  // MySQL utf8mb4 下四个 191 字符列已接近 3072 字节上限，不能再把 status 拼进同一索引。
+  @@index([tenantId, workspaceId, itemGroupId, locationId], map: "rental_stock_dispositions_scope_idx")
+  @@index([tenantId, workspaceId, status], map: "rental_stock_dispositions_scope_status_idx")
   @@index([orderId, inspectionId])
   @@map("rental_stock_dispositions")
 }

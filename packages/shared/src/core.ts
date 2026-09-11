@@ -4662,6 +4662,42 @@ export interface RentalOrderFeeReview {
   createdAt: string;
 }
 
+/**
+ * R1 运营工作台的统一待办。
+ *
+ * 这里聚合的是“当前确实有下一步操作”的事实，不把通知模拟发送成功、
+ * 已处理的历史记录或仅供查看的状态混进来。链接只指向现有订单/工单详情，
+ * 不在待办层复制一套业务动作。
+ */
+export type RentalWorkbenchTodoType =
+  | "pending_payment"
+  | "no_show_notice"
+  | "no_show_confirmation"
+  | "return_overdue"
+  | "fee_review"
+  | "refund"
+  | "work_order";
+
+export interface RentalWorkbenchTodo {
+  id: string;
+  type: RentalWorkbenchTodoType;
+  priority: "high" | "normal";
+  title: string;
+  description: string;
+  href: string;
+  orderId?: string;
+  orderNo?: string;
+  workOrderId?: string;
+  amount?: number;
+  createdAt: string;
+}
+
+export interface RentalWorkbenchTodos {
+  generatedAt: string;
+  counts: Record<RentalWorkbenchTodoType, number>;
+  items: RentalWorkbenchTodo[];
+}
+
 export interface RentalAllocation {
   id: string;
   orderId: string;

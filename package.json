@@ -98,7 +98,8 @@
     "test:order-settlement": "npm run build -w @store-rental/shared && node tests/rental-order-settlement.test.cjs",
     "test:order-extension": "npm run build -w @store-rental/shared && node tests/rental-extension.test.cjs && node tests/rental-renewal-repricing.test.cjs",
     "test:tax": "npm run build -w @store-rental/shared && node tests/rental-tax.test.cjs",
-    "test:currency": "npm run build -w @store-rental/shared && node tests/rental-currency.test.cjs"
+    "test:currency": "npm run build -w @store-rental/shared && node tests/rental-currency.test.cjs",
+    "test:workbench-todos": "npm run build -w @store-rental/shared && node tests/rental-workbench-todos.test.cjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",
