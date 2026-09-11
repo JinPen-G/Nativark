@@ -88,13 +88,16 @@ const quarantineOf = (reservations, releasedBefore) =>
 function fakeTx(stockUpdateCount) {
   const stockUpdates = [];
   const noop = async () => ({});
+  const findNone = async () => null;
   return {
     stockUpdates,
     businessWorkspace: { findFirst: async () => ({ id: "ws_1" }) },
-    rentalOrder: { upsert: noop },
-    rentalOrderLine: { upsert: noop },
-    rentalReservation: { upsert: noop },
-    rentalAllocation: { deleteMany: async () => ({ count: 0 }), create: noop },
+    // 仓储在写回前会先核对既有事实的租户/空间/订单归属；
+    // 这个夹具只验证隔离增量，因此模拟“所有事实都是本次新写入”。
+    rentalOrder: { findUnique: findNone, create: noop, update: noop },
+    rentalOrderLine: { findUnique: findNone, create: noop, update: noop },
+    rentalReservation: { findUnique: findNone, create: noop, update: noop },
+    rentalAllocation: { deleteMany: async () => ({ count: 0 }), findUnique: findNone, create: noop },
     rentalAsset: { updateMany: async () => ({ count: 1 }) },
     rentalStockBalance: {
       updateMany: async (args) => { stockUpdates.push(args); return { count: stockUpdateCount }; }
@@ -128,6 +131,9 @@ function fakeStockPrisma(existing) {
     $queryRaw: async () => [],
     rentalStockBalance: {
       findFirst: async () => existing,
+      findUnique: async () => existing ? { tenantId: "tenant_1", workspaceId: "ws_1" } : null,
+      update: async (args) => { upserts.push({ where: args.where, update: args.data }); return {}; },
+      create: async (args) => { upserts.push({ where: { id: args.data.id }, update: args.data }); return {}; },
       upsert: async (args) => { upserts.push(args); return {}; }
     }
   };
