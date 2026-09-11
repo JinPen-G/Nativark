@@ -1,7 +1,7 @@
 import { ArrowLeftOutlined, CheckCircleOutlined, DollarOutlined, MinusCircleOutlined, PlusOutlined, RetweetOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
-import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol, type CreateRentalInspectionRequest, type RentalAllocation, type RentalFundingAction, type RentalFundingInstrument, type RentalInspectionTemplate, type RentalOrderExtension, type RentalOrderExtensionPreview, type RentalOrderFeeReview, type RentalOrderServiceOccurrence, type RentalReservation, type RentalServiceExecutionAction, type UpdateRentalServiceOccurrenceRequest } from "@store-rental/shared";
+import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol, type CreateRentalInspectionRequest, type RentalAllocation, type RentalFundingAction, type RentalFundingInstrument, type RentalInspectionTemplate, type RentalOrderExtension, type RentalOrderExtensionPreview, type RentalOrderFeeReview, type RentalOrderServiceOccurrence, type RentalReservation, type RentalServiceExecutionAction, type UpdateRentalServiceOccurrenceRequest, type RentalWorkOrder, type RentalStockDisposition } from "@store-rental/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Button, Card, DatePicker, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Table, Tag } from "antd";
+import { Alert, App, Button, Card, DatePicker, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -70,6 +70,7 @@ export function RentalOrderDetailPage() {
   const canSettleFunding = hasPermission("store-rental:order:settle");
   // ORDER-CLOSE-02：裁定「该收/该退多少」与实际动钱是两个权限。只有裁定权的人看得到
   // 审核按钮但看不到收退款按钮；只有资金权的人反之。两者都不给的账号只能查看。
+  const WORK_ORDER_STATUS_LABELS: Record<string, { label: string; color: string }> = { pending: { label: "待处理", color: "default" }, in_progress: { label: "处理中", color: "processing" }, pending_review: { label: "待验收", color: "warning" }, completed: { label: "已完成", color: "success" }, rejected: { label: "验收驳回", color: "error" }, cancelled: { label: "已取消", color: "default" } };
   const canReviewFees = hasPermission("store-rental:order:fee-review");
   const canOperate = hasPermission("store-rental:order:operate");
   const canPickup = canOperate || hasPermission("store-rental:order:pickup");
@@ -275,6 +276,18 @@ export function RentalOrderDetailPage() {
     onError: (error: Error) => message.error(error.message || "服务履约记录失败，请刷新后重试")
   });
   const detail = order.data;
+  // SHARED-WORK-01A：订单详情与养护工单联动——按订单过滤本空间的养护工单与归还处置。
+  const relatedWorkOrders = useQuery({
+    queryKey: ["rental-core", "work-orders", id],
+    queryFn: () => rentalCoreApi.workOrders(),
+    enabled: Boolean(id),
+    select: (rows) => rows.filter((row) => row.orderId === id)
+  });
+  const relatedDispositions = useQuery({
+    queryKey: ["rental-core", "stock-dispositions", id],
+    queryFn: () => rentalCoreApi.stockDispositions(id),
+    enabled: Boolean(id)
+  });
   const feeReviews = detail?.feeReviews ?? [];
   const pendingFeeReviews = feeReviews.filter((row) => row.status === "pending");
   const orderHasPendingFee = hasPendingFeeReview(detail ?? {});
@@ -470,6 +483,34 @@ export function RentalOrderDetailPage() {
           }
         ]} /> : <span style={{ color: "#999" }}>当前订单没有需要人工裁定的费用事项。</span>}
       </Card>
+      {relatedWorkOrders.data?.length || relatedDispositions.data?.length ? (
+        <Card title="归还处置与养护工单" size="small">
+          {relatedWorkOrders.data?.length ? (
+            <Table<RentalWorkOrder> rowKey="id" size="small" pagination={false} dataSource={relatedWorkOrders.data} columns={[
+              { title: "工单号", dataIndex: "workNo", width: 190 },
+              { title: "类型", dataIndex: "type", width: 110 },
+              { title: "状态", dataIndex: "status", width: 110, render: (value) => { const status = WORK_ORDER_STATUS_LABELS[value] ?? { label: value, color: "default" }; return <Tag color={status.color}>{status.label}</Tag>; } },
+              { title: "处理人", render: (_, row) => row.assigneeName || row.assigneeId || "未派工" },
+              { title: "原因", dataIndex: "reason", ellipsis: true }
+            ]} />
+          ) : (
+            <Typography.Text type="secondary">本订单暂无关联养护工单。</Typography.Text>
+          )}
+          {relatedDispositions.data?.length ? (
+            <>
+              <Typography.Paragraph type="secondary" style={{ marginTop: 12, marginBottom: 4 }}>归还处置（周转/隔离）：</Typography.Paragraph>
+              <Table<RentalStockDisposition> rowKey="id" size="small" pagination={false} dataSource={relatedDispositions.data} columns={[
+                { title: "归还批次", dataIndex: "returnBatchKey", ellipsis: true },
+                { title: "数量", dataIndex: "quantity", width: 70 },
+                { title: "状态", dataIndex: "status", width: 110, render: (value) => ({ buffered: <Tag color="orange">周转缓冲</Tag>, blocked: <Tag color="red">异常隔离</Tag>, restored: <Tag color="success">已恢复</Tag> }[value as string] ?? String(value)) },
+                { title: "阻断原因", dataIndex: "blockReason", render: (value) => value ?? "-" },
+                { title: "预计恢复", dataIndex: "bufferUntil", width: 170, render: (value) => new Date(value).toLocaleString() }
+              ]} />
+            </>
+          ) : null}
+          <Button type="link" style={{ marginTop: 8, padding: 0 }} onClick={() => navigate("/rental/work-orders")}>前往养护工单管理</Button>
+        </Card>
+      ) : null}
       {canViewFunding && <Card title={<Space><DollarOutlined />收付款、押金与预授权 <Tag color="orange">模拟资金</Tag></Space>}>
         {funding.data?.rental && <Space orientation="vertical" style={{ marginBottom: 16 }}>
           <span>最终应收 {money(funding.data.rental.payable)} · 已收 {money(funding.data.rental.collected)} · 已退 {money(funding.data.rental.refunded)} · 保证金抵扣 {money(funding.data.rental.securityCaptured)}</span>

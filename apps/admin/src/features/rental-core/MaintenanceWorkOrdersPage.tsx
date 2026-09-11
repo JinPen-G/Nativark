@@ -1,3 +1,4 @@
+import { useNavigate } from "react-router-dom";
 import { PlusOutlined, ReloadOutlined } from "@ant-design/icons";
 import type {
   CreateRentalWorkOrderRequest,
@@ -59,6 +60,7 @@ export function MaintenanceWorkOrdersPage() {
   const [submitForm] = Form.useForm<SubmitFormValues>();
   const [reviewForm] = Form.useForm<ReviewRentalWorkOrderRequest>();
   const [cancelForm] = Form.useForm<CancelRentalWorkOrderRequest>();
+  const navigate = useNavigate();
   const [statusFilter, setStatusFilter] = useState<string>();
   const [typeFilter, setTypeFilter] = useState<RentalWorkOrderType>();
   const [assigneeFilter, setAssigneeFilter] = useState<string>();
@@ -152,6 +154,19 @@ export function MaintenanceWorkOrdersPage() {
         </Space>
         <Table<RentalWorkOrder> rowKey="id" dataSource={filteredWorkOrders} pagination={{ pageSize: 8 }} scroll={{ x: 1280 }} locale={{ emptyText: <Empty description="暂无匹配的养护工单" /> }} columns={[
           { title: "工单号", dataIndex: "workNo", width: 190 },
+          {
+            title: "来源订单",
+            dataIndex: "orderId",
+            width: 150,
+            render: (value: string | undefined) =>
+              value ? (
+                <Button type="link" size="small" style={{ padding: 0 }} onClick={() => navigate(`/rental/orders/${value}`)}>
+                  {value.slice(0, 14)}…
+                </Button>
+              ) : (
+                "-"
+              ),
+          },
           { title: "类型", dataIndex: "type", width: 110, render: (value: RentalWorkOrderType) => WORK_ORDER_TYPE_LABELS[value] ?? value },
           { title: "状态", dataIndex: "status", width: 110, render: (value) => { const status = WORK_ORDER_STATUS_LABELS[value] ?? { label: value, color: "default" }; return <Tag color={status.color}>{status.label}</Tag>; } },
           { title: "原因", dataIndex: "reason", width: 260 },
