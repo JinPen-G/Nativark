@@ -4723,16 +4723,41 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       const hours = overdueMinutes / 60;
       const contextSnapshot = quote.pricingContext;
       const timeZone = contextSnapshot?.timeZone ?? context.settings.calendar.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE;
+      const groups = new Map(context.groups.map((group) => [group.id, group]));
+      const pricingGroups = new Map((context.pricingGroups ?? []).map((group) => [group.id, group]));
       let total = 0;
       for (const line of quote.request.lines) {
         const target = line.pricingGroupId ?? line.itemGroupId;
         const dayRate = [...(contextSnapshot?.dayRates ?? []), ...quote.rateSnapshot].find(row => pricingTargetId(row) === target && row.unit === "day_24h");
         if (!dayRate) throw new ConflictException("原订单缺少对应日价快照，不能用现价计算逾时费");
+        const group = line.itemGroupId ? groups.get(line.itemGroupId) : undefined;
+        if (!group) throw new ConflictException("原订单产品快照无法匹配，不能计算逾时费");
+        const pricingGroup = line.pricingGroupId ? pricingGroups.get(line.pricingGroupId) : undefined;
         for (let offset = 0; offset < hours; offset += 24) {
           const remainder = Math.min(24, hours - offset);
           const point = new Date(Date.parse(dueAt) + rule.overdue.graceMinutes * 60_000 + offset * 3_600_000).toISOString();
-          const factor = this.resolveUnitPrice(contextSnapshot?.calendars ?? [], businessDateKey(point, timeZone), point, dayRate, timeZone, contextSnapshot?.legacyDayTypeMultipliers ?? false);
-          const daily = dayRate.baseAmount * factor.value;
+          // 逾时转日租必须复用正常日价的完整取价链：阶梯、封顶、日期类型价、周期/日期时间覆盖
+          // 都应与报价和续租一致。此前这里只取 baseAmount 再乘日历倍率，会把配置好的日价阶梯
+          // 变成另一套费率，导致同一订单正常报价与逾时费不一致。
+          const fullDayEnd = new Date(Date.parse(point) + dayMs).toISOString();
+          const daily = this.priceRentalLine({
+            group,
+            pricingGroup,
+            quantity: 1,
+            rate: dayRate,
+            startAt: point,
+            endAt: fullDayEnd,
+            timeZone,
+            shiftHours: quote.ruleSnapshot.pricing?.shiftHours,
+            shiftStartHours: quote.ruleSnapshot.pricing?.shiftStartHours,
+            calendars: contextSnapshot?.calendars ?? [],
+            legacyDayTypeMultipliers: contextSnapshot?.legacyDayTypeMultipliers ?? false,
+            planId: quote.priceVersionId ?? quote.id,
+            planVersion: quote.priceVersion ?? quote.pricingPlanVersion,
+            codePrefix: "rental",
+            chargeType: "rental",
+            applyMinimumUnits: false
+          }).amount;
           total += daily * (remainder >= 24 || remainder > threshold ? 1 : Math.min(1, Math.ceil(remainder) * percent / 100)) * line.quantity * shareOf(line);
         }
       }
