@@ -168,10 +168,13 @@ function fakeCapacityTx(reservations) {
     { id: "res_late", capacityId: "cap_1", serviceId: "svc_1", quantity: 1, status: "confirmed", idempotencyKey: occurrences[1].reservationKey }
   ];
   const tx = fakeCapacityTx(reservations);
+  // 本组验证旧订单的 reservationKey 配对兼容；新订单必须先记录实际履约状态，
+  // 对应的“未记录就不能归还”门禁由 MKT-02D 专项覆盖。
+  const legacyOccurrences = occurrences.map(({ executionStatus, ...row }) => row);
   // 归还发生在 D4：早的那次已开始（应记 used），晚的那次还没开始（应释放容量）。
   const result = await capacities.settleReturnForOrder(
     "tenant_1",
-    { id: "order_1", serviceSnapshots: occurrences },
+    { id: "order_1", serviceSnapshots: legacyOccurrences },
     "2040-03-04T00:00:00.000Z",
     tx
   );

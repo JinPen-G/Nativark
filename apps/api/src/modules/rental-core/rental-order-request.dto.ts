@@ -13,6 +13,7 @@ import {
   type ReviewRentalInspectionExceptionRequest,
   type ReviewRentalExtensionRefundRequest,
   type ReviewRentalOrderFeeReviewRequest,
+  type UpdateRentalServiceOccurrenceRequest,
   type RentalAvailabilityRequest,
   type RentalCapability,
   type RentalFulfillmentMode,
@@ -102,6 +103,7 @@ const REWARD_TRIGGERS = ["registration", "identity_verified", "first_order_compl
 const DISCOUNT_TYPES = ["fixed_amount", "percentage"] as const;
 const COUPON_TARGETS = ["rental", "fulfillment", "service"] as const;
 const TEMPLATE_STATUSES = ["draft", "scheduled", "active", "paused", "ended", "void"] as const;
+const SERVICE_EXECUTION_ACTIONS = ["start", "complete", "cancel", "fail", "no_show"] as const;
 
 /* ---------- 嵌套值对象 ---------- */
 
@@ -806,4 +808,44 @@ export class RentalOrderExtensionDto implements RentalOrderExtensionRequest {
   @IsOptional()
   @IsString()
   memo?: string;
+}
+
+/** MKT-02D：记录一次增值服务的实际履约结果；计划时间不能替代实际动作。 */
+export class UpdateRentalServiceOccurrenceDto implements UpdateRentalServiceOccurrenceRequest {
+  @IsIn(SERVICE_EXECUTION_ACTIONS)
+  action!: UpdateRentalServiceOccurrenceRequest["action"];
+
+  @IsOptional()
+  @IsISO8601()
+  actualAt?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  result?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  reason?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(500, { each: true })
+  evidenceAttachments?: string[];
+
+  @IsOptional()
+  @IsBoolean()
+  customerConfirmed?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  refundAmount?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  compensationAmount?: number;
 }

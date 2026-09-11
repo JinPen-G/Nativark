@@ -9,7 +9,8 @@ import type { RentalOrderFeeReview } from "@store-rental/shared";
  */
 export const FEE_REVIEW_TYPE_LABELS: Record<RentalOrderFeeReview["type"], string> = {
   overdue: "逾期费（规则要求人工核价）",
-  early_return_refund: "提前归还退款（规则要求人工审核）"
+  early_return_refund: "提前归还退款（规则要求人工审核）",
+  service_refund: "增值服务退款（规则要求人工审核）"
 };
 
 export const FEE_REVIEW_STATUS_COLORS: Record<RentalOrderFeeReview["status"], string> = {
@@ -27,7 +28,9 @@ export const FEE_REVIEW_STATUS_COLORS: Record<RentalOrderFeeReview["status"], st
 export function feeReviewStatusText(row: Pick<RentalOrderFeeReview, "status" | "type">) {
   if (row.status === "pending") return "待裁定";
   if (row.status === "rejected") return "已驳回（不计费/不退款）";
-  return row.type === "early_return_refund" ? "已批准：应收已核减，待实际退款" : "已批准：已计入应收";
+  return row.type === "early_return_refund" || row.type === "service_refund"
+    ? "已批准：应收已核减，待实际退款"
+    : "已批准：已计入应收";
 }
 
 /** 订单上是否还有需要人工裁定的费用事项。列表标记与筛选共用它，避免两处判据分叉。 */

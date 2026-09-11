@@ -45,6 +45,7 @@ import {
   RentalOrderExtensionDto,
   ReviewRentalExtensionRefundDto,
   ReviewRentalOrderFeeReviewDto,
+  UpdateRentalServiceOccurrenceDto,
   SaveRentalAssetDto,
   SaveRentalCouponTemplateDto,
   SaveRentalStockBalanceDto,
@@ -952,6 +953,35 @@ export class RentalCoreController {
     });
     await this.business.refreshFromDatabase();
     return this.committed(tenantId, order);
+  }
+
+  @Post("orders/:id/services/:occurrenceId/execution")
+  async updateServiceOccurrence(
+    @Req() req: AuthenticatedRequest,
+    @Param("id") id: string,
+    @Param("occurrenceId") occurrenceId: string,
+    @Body() body: UpdateRentalServiceOccurrenceDto
+  ) {
+    const tenantId = req.user.tenantId;
+    const result = await this.idempotent.execute({
+      tenantId,
+      action: "order.service-execution",
+      key: idempotencyKeyOf(req),
+      fallbackKey: `order.service-execution:${id}:${occurrenceId}:${body.action}`,
+      request: { orderId: id, occurrenceId, ...body },
+      orderId: id,
+      run: (tx) => this.service.updateServiceOccurrence(tenantId, id, occurrenceId, body, req.user.displayName, tx),
+      replay: async (response) => {
+        const current = await this.service.getOrder(tenantId, id);
+        const occurrence = current.serviceSnapshots?.find((row) => row.occurrenceId === occurrenceId);
+        if (!occurrence) return undefined;
+        const terminal = body.action === "start"
+          ? occurrence.executionStatus === "in_progress"
+          : ["completed", "cancelled", "failed", "no_show"].includes(occurrence.executionStatus ?? "");
+        return terminal ? { order: current, occurrence } : undefined;
+      }
+    });
+    return this.committed(tenantId, result);
   }
 
   @Post("orders/:id/inspections/:inspectionId/exceptions/:exceptionIndex/review")

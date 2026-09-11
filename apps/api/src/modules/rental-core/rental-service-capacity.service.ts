@@ -234,6 +234,70 @@ export class RentalServiceCapacityService {
   }
 
   /**
+   * MKT-02D：只把一条服务发生项对应的容量预留转为已使用。
+   *
+   * 不能复用 `markUsedForOrder`：同一订单可能有多次同服务发生，整单转换会把尚未执行
+   * 的那一次也伪造成已履约。状态与容量计数仍由同一事务更新。
+   */
+  async markUsedForOccurrence(
+    tenantId: string,
+    orderId: string,
+    reservationKey: string | undefined,
+    usedAt: string,
+    tx: Tx
+  ): Promise<void> {
+    if (!reservationKey) return;
+    const workspaceId = await resolveScopeWorkspaceId(tx, tenantId);
+    const rows = await this.lockOrderReservations(tenantId, orderId, tx);
+    const row = rows.find((item) => item.idempotencyKey === reservationKey);
+    if (!row) throw new ConflictException("服务发生项没有找到对应的容量预留");
+    if (row.status === "used") return;
+    if (row.status !== "confirmed") throw new ConflictException("服务容量预留当前状态不能转为已使用");
+    const updated = await tx.rentalServiceReservation.updateMany({
+      where: { id: row.id, tenantId, workspaceId, status: "confirmed" },
+      data: { status: "used", usedAt: new Date(usedAt), expiresAt: null }
+    });
+    if (updated.count !== 1) throw new ConflictException("服务容量预留状态已变化，请刷新后重试");
+  }
+
+  /** MKT-02D：取消/未到场/未开始失败时只释放这一条发生项的容量。 */
+  async releaseForOccurrence(
+    tenantId: string,
+    orderId: string,
+    reservationKey: string | undefined,
+    reason: string,
+    releasedAt: string,
+    tx: Tx
+  ): Promise<void> {
+    if (!reservationKey) return;
+    const workspaceId = await resolveScopeWorkspaceId(tx, tenantId);
+    const rows = await this.lockOrderReservations(tenantId, orderId, tx);
+    const row = rows.find((item) => item.idempotencyKey === reservationKey);
+    if (!row || row.status === "released" || row.status === "expired") return;
+    const data = row.status === "reserved"
+      ? { reservedQuantity: { decrement: row.quantity } }
+      : row.status === "confirmed"
+        ? { usedQuantity: { decrement: row.quantity } }
+        : undefined;
+    const guard = row.status === "reserved"
+      ? { reservedQuantity: { gte: row.quantity } }
+      : row.status === "confirmed"
+        ? { usedQuantity: { gte: row.quantity } }
+        : undefined;
+    if (!data || !guard) throw new ConflictException("服务容量预留当前状态不能释放");
+    const moved = await tx.rentalServiceCapacity.updateMany({
+      where: { id: row.capacityId, tenantId, workspaceId, ...guard },
+      data
+    });
+    if (moved.count !== 1) throw new ConflictException("服务容量账不平，拒绝释放发生项");
+    const updated = await tx.rentalServiceReservation.updateMany({
+      where: { id: row.id, tenantId, workspaceId, status: row.status },
+      data: { status: "released", releasedAt: new Date(releasedAt), releaseReason: reason, expiresAt: null }
+    });
+    if (updated.count !== 1) throw new ConflictException("服务容量预留状态已变化，请刷新后重试");
+  }
+
+  /**
    * 归还时按服务自己的计划开始时点结算容量：已经开始的服务成为已使用历史；
    * 尚未开始的服务释放容量，不能因为订单最终归还就被伪造为“已履约”。
    *
@@ -251,6 +315,16 @@ export class RentalServiceCapacityService {
     // 又一次两条预留，各自时段不同；按 serviceId 建索引只会留下一条，另一条会被拿别人的
     // 时段判「是否已开始」——已经做过的服务被当成没做，容量就被错误放回可用池。
     const occurrences = order.serviceSnapshots ?? [];
+    // MKT-02D：只要订单已经进入整单归还，所有新格式服务发生项都必须先有明确终态。
+    // 不能因为服务不需要容量，或服务计划时间尚未到，就让归还动作绕过履约记录。
+    // 存量订单没有 executionStatus，继续走下面的兼容分支，不改变历史口径。
+    const pendingExecution = occurrences.filter((row) => {
+      if (!("executionStatus" in row) || !row.executionStatus) return false;
+      return !["completed", "cancelled", "failed", "no_show"].includes(row.executionStatus);
+    });
+    if (pendingExecution.length) {
+      throw new ConflictException(`还有 ${pendingExecution.length} 项增值服务未记录实际结果，请先完成、取消或记录失败`);
+    }
     const byReservationKey = new Map(
       occurrences.filter((row) => row.reservationKey).map((row) => [row.reservationKey as string, row])
     );
@@ -266,8 +340,19 @@ export class RentalServiceCapacityService {
     const releasedServiceIds: string[] = [];
     for (const row of rows.filter((item) => item.status === "confirmed")) {
       const snapshot = byReservationKey.get(row.idempotencyKey) ?? legacyByServiceId.get(row.serviceId);
-      // 存量订单缺少服务快照时无法证明服务未开始：保守保留为已使用，避免错放容量。
-      const started = !snapshot || Date.parse(snapshot.scheduledStartAt) <= returnedAtMs;
+      const executionStatus = snapshot && "executionStatus" in snapshot ? snapshot.executionStatus : undefined;
+      // MKT-02D：新订单的显式履约状态优先。计划时点不能证明服务已经完成；在归还前
+      // 已明确开始但尚未结束的服务必须先由运营记录完成/失败，不能靠归还动作代办。
+      if (executionStatus === "in_progress") {
+        throw new ConflictException(`服务「${snapshot?.serviceName ?? row.serviceId}」仍在执行，请先记录完成或失败`);
+      }
+      if (executionStatus === "not_started" && Date.parse(snapshot?.scheduledStartAt ?? "") <= returnedAtMs) {
+        throw new ConflictException(`服务「${snapshot?.serviceName ?? row.serviceId}」尚未记录实际结果，不能按计划时间自动结算`);
+      }
+      // 存量订单缺少服务快照/履约状态时保守沿用旧口径；新订单不会走这个分支。
+      const started = executionStatus
+        ? executionStatus === "completed" || executionStatus === "failed"
+        : !snapshot || Date.parse(snapshot.scheduledStartAt) <= returnedAtMs;
       if (started) {
         await tx.rentalServiceReservation.updateMany({
           where: { id: row.id, tenantId, workspaceId, status: "confirmed" },

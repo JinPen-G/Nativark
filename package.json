@@ -82,6 +82,7 @@
     "test:return-charge-race": "npm run build -w @store-rental/shared && node tests/rental-return-charge-race.test.cjs",
     "test:extension-services": "npm run build -w @store-rental/shared && node tests/rental-extension-services.test.cjs",
     "test:service-occurrence": "npm run build -w @store-rental/shared && node tests/rental-service-occurrence.test.cjs",
+    "test:service-execution": "npm run build -w @store-rental/shared && node tests/rental-service-execution.test.cjs",
     "test:order-transaction-order": "npm run build -w @store-rental/shared && node tests/rental-order-transaction-order.test.cjs",
     "test:order-close-db": "npm run build -w @store-rental/shared && node tests/helpers/run-order-close-db.cjs",
     "test:stock-disposition": "npm run build -w @store-rental/shared && node tests/rental-stock-disposition.test.cjs",

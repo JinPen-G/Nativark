@@ -377,6 +377,10 @@ export function requiredPermissions(method: string, path: string) {
   if (path.match(/^\/rental\/v1\/orders\/[^/]+$/)) {
     return ["store-rental:order:view"];
   }
+  // MKT-02D：服务实际履约是订单操作，不等同于维护服务目录/容量配置。
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/services\/[^/]+\/execution$/)) {
+    return ["store-rental:order:operate"];
+  }
   // 三条费用裁定入口统一收到 order:fee-review：裁定「该收/该退多少」与实际动钱是两件事。
   // 此前它们都认 order:settle，而资金事件也认 order:settle，等于一个权限同时授予
   // 「决定金额」与「收退款」。拆开后只有裁定权的人能定金额但动不了资金台账，

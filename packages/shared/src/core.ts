@@ -2963,6 +2963,47 @@ export interface RentalQuoteServiceSnapshot {
 }
 
 /**
+ * 增值服务的实际履约状态（MKT-02D）。
+ *
+ * 计划时间只能说明服务承诺，不能自动证明已经开始或完成；新订单的服务发生项
+ * 必须由运营人员明确记录实际动作。终态不会被后续动作覆盖。
+ */
+export const RENTAL_SERVICE_EXECUTION_STATUSES = [
+  "not_started",
+  "in_progress",
+  "completed",
+  "cancelled",
+  "failed",
+  "no_show"
+] as const;
+export type RentalServiceExecutionStatus = (typeof RENTAL_SERVICE_EXECUTION_STATUSES)[number];
+
+export const RENTAL_SERVICE_EXECUTION_ACTIONS = ["start", "complete", "cancel", "fail", "no_show"] as const;
+export type RentalServiceExecutionAction = (typeof RENTAL_SERVICE_EXECUTION_ACTIONS)[number];
+
+export const RENTAL_SERVICE_REFUND_STATUSES = [
+  "none",
+  "pending_review",
+  "approved_pending_refund",
+  "rejected"
+] as const;
+export type RentalServiceRefundStatus = (typeof RENTAL_SERVICE_REFUND_STATUSES)[number];
+
+/** APP 与管理端共用的服务实际履约动作入参。 */
+export interface UpdateRentalServiceOccurrenceRequest {
+  action: RentalServiceExecutionAction;
+  actualAt?: string;
+  result?: string;
+  reason?: string;
+  evidenceAttachments?: string[];
+  /** 完成时必须明确记录客户是否确认，不能从“点击完成”推断。 */
+  customerConfirmed?: boolean;
+  /** 失败/取消的建议退款额，缺省为该次服务客户实际支付的净额。 */
+  refundAmount?: number;
+  compensationAmount?: number;
+}
+
+/**
  * 订单上的一次服务发生（MKT-02C）。
  *
  * 为什么不能按 serviceId 合并：同一个服务可以在原订单买一次、再由第 1 次续租买一次，
@@ -2986,6 +3027,20 @@ export interface RentalOrderServiceOccurrence extends RentalQuoteServiceSnapshot
   extensionSequence?: number;
   /** 容量依据：对应容量预留的幂等键。不需要容量的服务没有这一项。 */
   reservationKey?: string;
+  /** 实际履约状态；存量订单缺省时按 not_started 读取，但不会自动补写历史。 */
+  executionStatus?: RentalServiceExecutionStatus;
+  actualStartAt?: string;
+  actualEndAt?: string;
+  executionResult?: string;
+  failureReason?: string;
+  evidenceAttachments?: string[];
+  customerConfirmedAt?: string;
+  executedBy?: string;
+  /** 服务取消/失败产生的净额退款审核状态；批准不等于已实际退款。 */
+  refundStatus?: RentalServiceRefundStatus;
+  refundAmount?: number;
+  refundReviewId?: string;
+  compensationAmount?: number;
 }
 
 export interface RentalServiceCapacity {
@@ -4574,8 +4629,10 @@ export interface RentalReservation {
  */
 export interface RentalOrderFeeReview {
   id: string;
-  /** 目前只有逾期费与提前归还退款两类需要人工裁定。 */
-  type: "overdue" | "early_return_refund";
+  /** 逾期、提前归还退款，以及增值服务未履约退款。 */
+  type: "overdue" | "early_return_refund" | "service_refund";
+  /** 服务退款审核对应的服务发生项；其他类型为空。 */
+  sourceId?: string;
   /** 规则算出的建议金额，**正数**。退款类落账时取负。 */
   suggestedAmount: number;
   /** 逐条依据：应归还/实际归还时间、规则模式与金额构成。客服据此向客户解释。 */

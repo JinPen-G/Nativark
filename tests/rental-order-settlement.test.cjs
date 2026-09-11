@@ -93,14 +93,15 @@ void (async () => {
     service.lockOrderReservations = async () => rows;
     const writes = [];
     const tx = {
+      businessWorkspace: { findFirst: async () => ({ id: "ws_1" }) },
       rentalServiceReservation: { updateMany: async (input) => { writes.push({ kind: "reservation", input }); return { count: 1 }; } },
       rentalServiceCapacity: { updateMany: async (input) => { writes.push({ kind: "capacity", input }); return { count: 1 }; } }
     };
     const outcome = await service.settleReturnForOrder("tenant", {
       id: "order_service",
       serviceSnapshots: [
-        { serviceId: "service_due", scheduledStartAt: "2026-09-01T09:00:00.000Z" },
-        { serviceId: "service_future", scheduledStartAt: "2026-09-03T09:00:00.000Z" }
+        { serviceId: "service_due", requiresCapacity: true, scheduledStartAt: "2026-09-01T09:00:00.000Z" },
+        { serviceId: "service_future", requiresCapacity: true, scheduledStartAt: "2026-09-03T09:00:00.000Z" }
       ]
     }, "2026-09-02T09:00:00.000Z", tx);
     assert.deepEqual(outcome, { usedServiceIds: ["service_due"], releasedServiceIds: ["service_future"] });

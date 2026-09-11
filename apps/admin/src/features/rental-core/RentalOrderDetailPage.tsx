@@ -1,5 +1,5 @@
 import { ArrowLeftOutlined, CheckCircleOutlined, DollarOutlined, MinusCircleOutlined, PlusOutlined, RetweetOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
-import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol, type CreateRentalInspectionRequest, type RentalAllocation, type RentalFundingAction, type RentalFundingInstrument, type RentalInspectionTemplate, type RentalOrderExtension, type RentalOrderExtensionPreview, type RentalOrderFeeReview, type RentalOrderServiceOccurrence, type RentalReservation } from "@store-rental/shared";
+import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol, type CreateRentalInspectionRequest, type RentalAllocation, type RentalFundingAction, type RentalFundingInstrument, type RentalInspectionTemplate, type RentalOrderExtension, type RentalOrderExtensionPreview, type RentalOrderFeeReview, type RentalOrderServiceOccurrence, type RentalReservation, type RentalServiceExecutionAction, type UpdateRentalServiceOccurrenceRequest } from "@store-rental/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Button, Card, DatePicker, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Table, Tag } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
@@ -42,6 +42,24 @@ const MEMBERSHIP_BENEFIT_LABELS: Record<string, string> = {
   quote_validity_extension: "报价有效期"
 };
 
+const SERVICE_EXECUTION_STATUS_LABELS: Record<NonNullable<RentalOrderServiceOccurrence["executionStatus"]>, string> = {
+  not_started: "未开始",
+  in_progress: "执行中",
+  completed: "已完成",
+  cancelled: "已取消",
+  failed: "执行失败",
+  no_show: "未到场"
+};
+
+const SERVICE_EXECUTION_STATUS_COLORS: Record<NonNullable<RentalOrderServiceOccurrence["executionStatus"]>, string> = {
+  not_started: "default",
+  in_progress: "processing",
+  completed: "success",
+  cancelled: "default",
+  failed: "error",
+  no_show: "warning"
+};
+
 export function RentalOrderDetailPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
@@ -78,10 +96,12 @@ export function RentalOrderDetailPage() {
   const [exceptionReviewForm] = Form.useForm<{ decision: "approved" | "rejected"; approvedChargeAmount?: number; reason: string }>();
   const [extensionOpen, setExtensionOpen] = useState(false);
   const [extensionRefundReview, setExtensionRefundReview] = useState<RentalOrderExtension>();
+  const [serviceExecution, setServiceExecution] = useState<{ occurrence: RentalOrderServiceOccurrence; action: RentalServiceExecutionAction }>();
   const [extensionRefundForm] = Form.useForm<{ decision: "approved" | "rejected"; reason: string }>();
   // 试算结果单独存：金额要先摆给运营/客户确认，确认后才提交申请。
   const [extensionPreview, setExtensionPreview] = useState<RentalOrderExtensionPreview>();
   const [extensionForm] = Form.useForm<{ newEndAt: Dayjs; memo?: string }>();
+  const [serviceExecutionForm] = Form.useForm<{ result?: string; reason?: string; customerConfirmed?: boolean; refundAmount?: number; compensationAmount?: number; evidenceAttachments?: string }>();
   const order = useQuery({ queryKey: ["rental-core", "order", id], queryFn: () => rentalCoreApi.order(id), enabled: Boolean(id) });
   const profile = useQuery({ queryKey: ["rental-core", "profile"], queryFn: rentalCoreApi.profile });
   const templates = useQuery({ queryKey: ["rental-core", "templates"], queryFn: () => rentalCoreApi.inspectionTemplates() });
@@ -190,6 +210,29 @@ export function RentalOrderDetailPage() {
     },
     onError: () => message.error("审核失败，请检查订单状态或该异常是否已处理")
   });
+  const executeService = useMutation({
+    mutationFn: (values: { result?: string; reason?: string; customerConfirmed?: boolean; refundAmount?: number; compensationAmount?: number; evidenceAttachments?: string }) => {
+      const selected = serviceExecution!;
+      const data: UpdateRentalServiceOccurrenceRequest = {
+        action: selected.action,
+        actualAt: new Date().toISOString(),
+        result: values.result,
+        reason: values.reason,
+        customerConfirmed: values.customerConfirmed,
+        refundAmount: values.refundAmount === undefined ? undefined : Number(values.refundAmount),
+        compensationAmount: values.compensationAmount === undefined ? undefined : Number(values.compensationAmount),
+        evidenceAttachments: values.evidenceAttachments?.split(/[\n,]/u).map((item) => item.trim()).filter(Boolean)
+      };
+      return rentalCoreApi.updateServiceOccurrence(id, selected.occurrence.occurrenceId!, data);
+    },
+    onSuccess: async () => {
+      setServiceExecution(undefined);
+      serviceExecutionForm.resetFields();
+      await Promise.all([refresh(), queryClient.invalidateQueries({ queryKey: ["rental-core", "order", id, "funding"] })]);
+      message.success("服务履约记录已保存；如产生退款，已进入费用审核")
+    },
+    onError: (error: Error) => message.error(error.message || "服务履约记录失败，请刷新后重试")
+  });
   const detail = order.data;
   const feeReviews = detail?.feeReviews ?? [];
   const pendingFeeReviews = feeReviews.filter((row) => row.status === "pending");
@@ -292,9 +335,26 @@ export function RentalOrderDetailPage() {
             { title: "原价", align: "right", render: (_, row) => money(row.amount) },
             { title: "减免", align: "right", render: (_, row) => money(Number(row.discountAllocatedAmount ?? 0) + Number(row.couponAllocatedAmount ?? 0)) },
             { title: "净额", align: "right", render: (_, row) => money(serviceOccurrenceNetAmount(row)) },
+            { title: "实际履约", width: 150, render: (_, row) => {
+              const status = row.executionStatus ?? "not_started";
+              return <Space orientation="vertical" size={0}><Tag color={SERVICE_EXECUTION_STATUS_COLORS[status]}>{SERVICE_EXECUTION_STATUS_LABELS[status]}</Tag><span style={{ color: "#999" }}>{row.actualStartAt ? `开始 ${new Date(row.actualStartAt).toLocaleString()}` : "未记录实际开始"}</span>{row.actualEndAt && <span style={{ color: "#999" }}>结束 {new Date(row.actualEndAt).toLocaleString()}</span>}</Space>;
+            }},
+            { title: "退款", width: 150, render: (_, row) => row.refundStatus && row.refundStatus !== "none"
+              ? <Tag color={row.refundStatus === "pending_review" ? "orange" : row.refundStatus === "approved_pending_refund" ? "gold" : "default"}>{row.refundStatus === "pending_review" ? `待审核 ${money(row.refundAmount)}` : row.refundStatus === "approved_pending_refund" ? `已核减，待退款 ${money(row.refundAmount)}` : "已驳回"}</Tag>
+              : "-" },
             { title: "容量", width: 130, render: (_, row) => row.requiresCapacity
               ? <Tag color={row.reservationKey ? "green" : "orange"}>{row.reservationKey ? `已占 ${row.capacityQuantity}` : "无容量依据"}</Tag>
-              : <Tag color="default">不需要容量</Tag> }
+              : <Tag color="default">不需要容量</Tag> },
+            { title: "操作", width: 260, render: (_, row) => {
+              if (!canOperate || !row.occurrenceId) return <span style={{ color: "#999" }}>无操作权限/历史记录</span>;
+              const status = row.executionStatus ?? "not_started";
+              const actions: Array<{ action: RentalServiceExecutionAction; label: string; danger?: boolean }> = status === "not_started"
+                ? [{ action: "start", label: "开始" }, { action: "complete", label: "直接完成" }, { action: "cancel", label: "取消" }, { action: "no_show", label: "未到场", danger: true }]
+                : status === "in_progress"
+                  ? [{ action: "complete", label: "完成" }, { action: "fail", label: "记录失败", danger: true }]
+                  : [];
+              return <Space wrap>{actions.map((item) => <Button key={item.action} type={item.action === "complete" ? "primary" : "link"} danger={item.danger} size="small" onClick={() => { serviceExecutionForm.resetFields(); setServiceExecution({ occurrence: row, action: item.action }); }}>{item.label}</Button>)}</Space>;
+            } }
           ]}
         />
       </Card>}
@@ -475,6 +535,35 @@ export function RentalOrderDetailPage() {
       </Form>
     </Modal>
     <Modal
+      title={serviceExecution ? `${serviceExecution.action === "start" ? "开始" : serviceExecution.action === "complete" ? "完成" : serviceExecution.action === "cancel" ? "取消" : serviceExecution.action === "no_show" ? "登记未到场" : "记录失败"}服务：${serviceExecution.occurrence.serviceName}` : "服务履约"}
+      open={Boolean(serviceExecution)}
+      onCancel={() => { setServiceExecution(undefined); serviceExecutionForm.resetFields(); }}
+      onOk={() => serviceExecutionForm.submit()}
+      confirmLoading={executeService.isPending}
+      destroyOnHidden
+    >
+      <Alert
+        type={serviceExecution?.action === "complete" ? "info" : "warning"}
+        showIcon
+        title="实际时间由本次操作记录，计划时段不能自动证明服务已经履约。"
+        description={serviceExecution?.action === "complete" ? "完成服务必须填写执行结果，并明确记录客户是否确认。" : "取消、失败或未到场会按服务净额生成待审核退款；批准后仍需到资金区办理实际退款。"}
+        style={{ marginBottom: 16 }}
+      />
+      <Form form={serviceExecutionForm} layout="vertical" onFinish={(values) => executeService.mutate(values)}>
+        {serviceExecution?.action === "start" && <span style={{ color: "#666" }}>点击确认后记录当前时间为实际开始时间。</span>}
+        {serviceExecution?.action === "complete" && <>
+          <Form.Item name="result" label="执行结果" rules={[{ required: true, whitespace: true, message: "请填写执行结果" }]}><Input.TextArea rows={3} placeholder="例如：服务已完成，客户现场确认" /></Form.Item>
+          <Form.Item name="customerConfirmed" label="客户确认" rules={[{ required: true, message: "请选择客户是否确认" }]}><Select options={[{ value: true, label: "客户已确认" }, { value: false, label: "客户未确认" }]} /></Form.Item>
+        </>}
+        {serviceExecution && ["cancel", "fail", "no_show"].includes(serviceExecution.action) && <>
+          <Form.Item name="reason" label="处理原因" rules={[{ required: true, whitespace: true, message: "请填写处理原因" }]}><Input.TextArea rows={3} /></Form.Item>
+          <Form.Item name="refundAmount" label="建议退款净额" extra={`留空按服务客户实际净支付 ${money(serviceOccurrenceNetAmount(serviceExecution.occurrence))} 全额退款；实际退款仍需审核。`}><InputNumber min={0} max={serviceOccurrenceNetAmount(serviceExecution.occurrence)} precision={2} prefix={symbol} style={{ width: "100%" }} /></Form.Item>
+          <Form.Item name="compensationAmount" label="补偿金额（记录用）"><InputNumber min={0} precision={2} prefix={symbol} style={{ width: "100%" }} /></Form.Item>
+        </>}
+        {serviceExecution?.action !== "start" && <Form.Item name="evidenceAttachments" label="证据引用（可选）" extra="每行或用逗号填写一条照片、签名或附件引用，不在本任务接入文件存储。"><Input.TextArea rows={2} /></Form.Item>}
+      </Form>
+    </Modal>
+    <Modal
       title={feeReview ? `裁定${FEE_REVIEW_TYPE_LABELS[feeReview.type]}` : "费用裁定"}
       open={Boolean(feeReview)}
       onCancel={() => { setFeeReview(undefined); feeReviewForm.resetFields(); }}
@@ -490,7 +579,7 @@ export function RentalOrderDetailPage() {
         description={<Space orientation="vertical" size={0}>
           {(feeReview?.basis ?? []).map((row) => <span key={row}>{row}</span>)}
           <span>
-            {feeReview?.type === "early_return_refund"
+            {feeReview?.type === "early_return_refund" || feeReview?.type === "service_refund"
               ? "批准后只核减应收并生成待退款；实际退款要到资金区由具备资金权限的人员办理。"
               : "批准后按认定额计入应收；实际收款要到资金区单独登记。"}
           </span>
@@ -500,8 +589,8 @@ export function RentalOrderDetailPage() {
       <Form form={feeReviewForm} layout="vertical" onFinish={(values) => decideFeeReview.mutate(values)}>
         <Form.Item name="decision" label="裁定结论" rules={[{ required: true }]}>
           <Select options={[
-            { value: "approved", label: feeReview?.type === "early_return_refund" ? "批准退款（核减应收）" : "批准计费" },
-            { value: "rejected", label: feeReview?.type === "early_return_refund" ? "驳回，不退款" : "驳回，不计费" }
+            { value: "approved", label: feeReview?.type === "early_return_refund" || feeReview?.type === "service_refund" ? "批准退款（核减应收）" : "批准计费" },
+            { value: "rejected", label: feeReview?.type === "early_return_refund" || feeReview?.type === "service_refund" ? "驳回，不退款" : "驳回，不计费" }
           ]} />
         </Form.Item>
         <Form.Item noStyle shouldUpdate={(before, after) => before.decision !== after.decision}>

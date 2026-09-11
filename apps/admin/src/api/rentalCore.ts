@@ -33,6 +33,7 @@ import type {
   ReviewRentalOrderFeeReviewRequest,
   RentalItemGroup,
   RentalOrder,
+  RentalOrderServiceOccurrence,
   RentalOrderExtension,
   RentalOrderExtensionPreview,
   RentalOrderExtensionRequest,
@@ -94,6 +95,7 @@ import type {
   SaveRentalRuleVersionRequest,
   SaveRentalValueAddedServiceRequest,
   SaveRentalServiceCapacityRequest,
+  UpdateRentalServiceOccurrenceRequest,
   SendRentalNotificationRequest,
   SaveRentalAssetRequest,
   SaveRentalCouponTemplateRequest,
@@ -299,6 +301,8 @@ export const rentalCoreApi = {
    */
   reviewOrderFeeReview: (id: string, reviewId: string, data: ReviewRentalOrderFeeReviewRequest) =>
     request<RentalOrder>(`/rental/v1/orders/${id}/fee-reviews/${reviewId}/review`, { method: "post", data }),
+  updateServiceOccurrence: (id: string, occurrenceId: string, data: UpdateRentalServiceOccurrenceRequest) =>
+    request<{ order: RentalOrder; occurrence: RentalOrderServiceOccurrence }>(`/rental/v1/orders/${id}/services/${encodeURIComponent(occurrenceId)}/execution`, { method: "post", data }),
   inspectionTemplates: (stage?: "pickup" | "return") => request<RentalInspectionTemplate[]>("/rental/v1/inspection-templates", { params: { stage } }),
   inspections: (id: string) => request<RentalInspectionRecord[]>(`/rental/v1/orders/${id}/inspections`),
   createInspection: (id: string, data: CreateRentalInspectionRequest, token?: string) => request<{ inspection: RentalInspectionRecord; order: RentalOrder }>(`/rental/v1/orders/${id}/inspections`, { method: "post", data, headers: token ? { "X-Operation-Token": token } : undefined }),

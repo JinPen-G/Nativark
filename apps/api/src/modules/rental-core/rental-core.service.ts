@@ -42,6 +42,7 @@ import {
   type RentalItemGroupImage,
   type RentalPricingGroup,
   type RentalOrder,
+  type RentalOrderServiceOccurrence,
   type RentalOrderFeeReview,
   type RentalOrderExtension,
   type RentalOrderExtensionPreview,
@@ -77,7 +78,8 @@ import {
   type TenantRentalProfile,
   type WorkspaceCapabilityInstance,
   type RentalCapabilityEquipmentLine,
-  type RentalCapabilityExceptionSnapshot
+  type RentalCapabilityExceptionSnapshot,
+  type UpdateRentalServiceOccurrenceRequest
 } from "@store-rental/shared";
 import { getRequestWorkspaceId, getRequestIdentity, runWithRequestIdentity } from "../../common/request-identity";
 import { ACTIVE_ASSIGNMENTS, allocationComplete } from "./rental-allocation-policy";
@@ -102,6 +104,7 @@ import { assertRentalCategoryExtensions } from "./rental-extension-registry";
 import { appendOccurrences, extensionRequestKey, stampOccurrences } from "./rental-service-occurrence";
 import { buildRentalCategorySamples } from "./rental-category-samples";
 import { evaluateRentalQualification } from "./rental-qualification";
+import { RentalServiceCapacityService } from "./rental-service-capacity.service";
 
 /**
  * 内存态只保留**配置**（库为事实源、这里是写穿缓存）。
@@ -254,7 +257,9 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     @Optional() private readonly hooks?: CapabilityHookRuntime,
     // SHARED-QUAL-01：领取与续租必须重新解析当前会员事实。可选仅为保留
     // 直接构造 RentalCoreService 的内存单测；生产 AppModule 必须注入。
-    @Optional() private readonly memberships?: MembershipService
+    @Optional() private readonly memberships?: MembershipService,
+    // MKT-02D：服务实际履约与容量转换必须在订单聚合的同一事务内完成。
+    @Optional() private readonly serviceCapacities?: RentalServiceCapacityService
   ) {}
 
   /**
@@ -1198,6 +1203,113 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   async getOrder(tenantId: string, orderId: string) {
     this.state(tenantId);
     return this.publicOrder(await this.requireOrder(tenantId, orderId));
+  }
+
+  /**
+   * MKT-02D：记录一次增值服务的实际履约。
+   *
+   * 这条链故意不根据计划开始/结束时间自动推进状态。开始、完成、取消、失败和未到场
+   * 都是运营动作；容量流水、退款审核单与订单服务发生项必须在同一事务内落下。
+   */
+  async updateServiceOccurrence(
+    tenantId: string,
+    orderId: string,
+    occurrenceId: string,
+    input: UpdateRentalServiceOccurrenceRequest,
+    operator: string,
+    tx: RentalFactTx
+  ) {
+    const order = await this.lockedOrder(tenantId, orderId, tx);
+    if (order.status === RentalCoreOrderStatus.Completed || order.status === RentalCoreOrderStatus.Cancelled) {
+      throw new ConflictException("已完成或已取消的订单不能再记录服务履约");
+    }
+    const occurrences = [...(order.serviceSnapshots ?? [])];
+    const index = occurrences.findIndex((row) => row.occurrenceId === occurrenceId);
+    if (index < 0) throw new NotFoundException("服务发生项不存在");
+    const previous = occurrences[index] as RentalOrderServiceOccurrence;
+    const currentStatus = previous.executionStatus ?? "not_started";
+    const at = input.actualAt ?? now();
+    const atMs = Date.parse(at);
+    if (!Number.isFinite(atMs)) throw new BadRequestException("实际履约时间无效");
+    if (atMs > Date.now() + 60_000) throw new BadRequestException("实际履约时间不能晚于当前时间");
+    if (input.evidenceAttachments?.some((value) => !value.trim())) throw new BadRequestException("证据引用不能为空");
+
+    const activeStatuses = [RentalCoreOrderStatus.ReadyForPickup, RentalCoreOrderStatus.Renting, RentalCoreOrderStatus.Settling];
+    if (!activeStatuses.includes(order.status)) throw new ConflictException("订单当前状态不允许记录服务履约");
+    if (input.action === "start" && ![RentalCoreOrderStatus.ReadyForPickup, RentalCoreOrderStatus.Renting].includes(order.status)) {
+      throw new ConflictException("订单已进入归还结算，不能再开始新的服务");
+    }
+
+    const netAmount = roundMoney(Math.max(0, previous.amount - (previous.discountAllocatedAmount ?? 0) - (previous.couponAllocatedAmount ?? 0)));
+    let next: RentalOrderServiceOccurrence = { ...previous };
+    let releaseCapacity = false;
+    let useCapacity = false;
+
+    if (input.action === "start") {
+      if (currentStatus !== "not_started") throw new ConflictException("该服务已经开始或已结束，不能重复开始");
+      next = { ...next, executionStatus: "in_progress", actualStartAt: at, executedBy: operator };
+    } else if (input.action === "complete") {
+      if (currentStatus !== "not_started" && currentStatus !== "in_progress") throw new ConflictException("该服务当前状态不能完成");
+      if (!input.result?.trim()) throw new BadRequestException("完成服务必须填写执行结果");
+      if (input.customerConfirmed === undefined) throw new BadRequestException("完成服务必须记录客户是否确认");
+      const actualStartAt = previous.actualStartAt ?? at;
+      if (Date.parse(actualStartAt) > atMs) throw new BadRequestException("完成时间不能早于开始时间");
+      next = {
+        ...next,
+        executionStatus: "completed",
+        actualStartAt,
+        actualEndAt: at,
+        executionResult: input.result.trim(),
+        evidenceAttachments: input.evidenceAttachments ?? previous.evidenceAttachments,
+        customerConfirmedAt: input.customerConfirmed ? at : undefined,
+        executedBy: operator,
+        refundStatus: "none"
+      };
+      useCapacity = true;
+    } else {
+      if (input.action === "cancel" && currentStatus !== "not_started") throw new ConflictException("已经开始的服务不能直接取消，请记录失败结果");
+      if (input.action === "no_show" && currentStatus !== "not_started") throw new ConflictException("已开始的服务不能记为未到场");
+      if (currentStatus !== "not_started" && currentStatus !== "in_progress") throw new ConflictException("该服务已经结束，不能重复处理");
+      if (!input.reason?.trim()) throw new BadRequestException("取消、失败或未到场必须填写原因");
+      const refundAmount = roundMoney(Math.min(netAmount, Math.max(0, input.refundAmount ?? netAmount)));
+      const terminalStatus = input.action === "cancel" ? "cancelled" : input.action === "no_show" ? "no_show" : "failed";
+      next = {
+        ...next,
+        executionStatus: terminalStatus,
+        actualEndAt: at,
+        failureReason: input.reason.trim(),
+        evidenceAttachments: input.evidenceAttachments ?? previous.evidenceAttachments,
+        executedBy: operator,
+        refundAmount,
+        compensationAmount: input.compensationAmount === undefined ? previous.compensationAmount : roundMoney(input.compensationAmount),
+        refundStatus: refundAmount > 0 ? "pending_review" : "none"
+      };
+      releaseCapacity = currentStatus === "not_started";
+      useCapacity = currentStatus === "in_progress";
+      if (refundAmount > 0) {
+        const review = this.raiseFeeReview(order, "service_refund", refundAmount, [
+          `服务：${previous.serviceName}`,
+          `发生项：${occurrenceId}`,
+          `履约结果：${terminalStatus}`,
+          `客户实际净支付：${netAmount}`,
+          `退款建议：${refundAmount}`,
+          input.reason.trim()
+        ], occurrenceId);
+        if (!review) throw new ConflictException("服务退款审核单创建失败");
+        next.refundReviewId = review.id;
+      }
+    }
+
+    if ((useCapacity || releaseCapacity) && previous.requiresCapacity && previous.reservationKey) {
+      if (!this.serviceCapacities) throw new ConflictException("服务容量履约组件未就绪，拒绝只写订单状态");
+      if (useCapacity) await this.serviceCapacities.markUsedForOccurrence(tenantId, orderId, previous.reservationKey, at, tx);
+      if (releaseCapacity) await this.serviceCapacities.releaseForOccurrence(tenantId, orderId, previous.reservationKey, input.reason ?? input.action, at, tx);
+    }
+    occurrences[index] = next;
+    order.serviceSnapshots = occurrences;
+    order.updatedAt = at;
+    await this.factStore.saveOrderAggregate(order, [], tx);
+    return { order: this.publicOrder(order), occurrence: next };
   }
 
   /**
@@ -2196,22 +2308,25 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   /**
    * 往订单挂一张待人工裁定的费用审核单（需求 4.6.10 / 4.6.8）。
    *
-   * 同一类型只保留一张待审单：重复归还提交不该堆出多条待办，后一次的金额与依据覆盖前一次。
-   * 已审完（approved/rejected）的保留为历史，不被覆盖。
+   * 同一来源只保留一张待审单：重复归还或重复服务动作不该堆出多条待办，后一次的金额与依据覆盖前一次；
+   * 服务退款按发生项 sourceId 分开，避免同一订单的多次服务互相覆盖。已审完（approved/rejected）的保留为历史。
    */
   private raiseFeeReview(
     order: RentalOrder,
     type: RentalOrderFeeReview["type"],
     suggestedAmount: number,
-    basis: string[]
+    basis: string[],
+    sourceId?: string
   ) {
-    if (suggestedAmount <= 0) return;
+    if (suggestedAmount <= 0) return undefined;
     const at = now();
-    const kept = (order.feeReviews ?? []).filter((row) => !(row.type === type && row.status === "pending"));
+    const kept = (order.feeReviews ?? []).filter((row) => !(row.type === type && row.sourceId === sourceId && row.status === "pending"));
+    const review: RentalOrderFeeReview = { id: randomUUID(), type, sourceId, suggestedAmount: roundMoney(suggestedAmount), basis, status: "pending", createdAt: at };
     order.feeReviews = [
       ...kept,
-      { id: randomUUID(), type, suggestedAmount: roundMoney(suggestedAmount), basis, status: "pending", createdAt: at }
+      review
     ];
+    return review;
   }
 
   /**
@@ -2293,11 +2408,11 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     }
     const at = now();
     if (input.decision === "approved" && decidedAmount > 0) {
-      const isRefund = review.type === "early_return_refund";
+      const isRefund = review.type === "early_return_refund" || review.type === "service_refund";
       this.applyChargeTo(order, {
-        code: `${review.type}:${order.id}`,
-        name: isRefund ? "提前归还退租金（已审核）" : "逾期费用（已审核）",
-        type: review.type,
+        code: `${review.type}:${order.id}:${review.sourceId ?? "order"}`,
+        name: review.type === "service_refund" ? "增值服务退款（已审核）" : isRefund ? "提前归还退租金（已审核）" : "逾期费用（已审核）",
+        type: review.type === "service_refund" ? "early_return_refund" : review.type,
         amount: isRefund ? -decidedAmount : decidedAmount,
         sourceVersion: order.ruleVersion,
         detail: `${review.basis.join("；")}；审核认定 ${decidedAmount}（建议 ${review.suggestedAmount}）：${input.reason.trim()}`
@@ -2306,6 +2421,16 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     order.feeReviews = (order.feeReviews ?? []).map((row) => row.id === reviewId
       ? { ...row, status: input.decision, decidedAmount, reason: input.reason.trim(), reviewedBy: operator, reviewedAt: at }
       : row);
+    if (review.type === "service_refund" && review.sourceId) {
+      order.serviceSnapshots = (order.serviceSnapshots ?? []).map((row) => row.occurrenceId === review.sourceId
+        ? {
+            ...row,
+            refundStatus: input.decision === "approved" ? "approved_pending_refund" : "rejected",
+            refundAmount: input.decision === "approved" ? decidedAmount : 0,
+            refundReviewId: review.id
+          }
+        : row);
+    }
     order.updatedAt = at;
     await this.factStore.saveOrderAggregate(order, [], tx);
     return order;
