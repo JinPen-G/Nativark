@@ -52,6 +52,7 @@ export function MaintenanceWorkOrdersPage() {
   const queryClient = useQueryClient();
   const canManage = useAuthStore((state) => state.hasPermission("rental-core:maintenance:manage"));
   const canReview = useAuthStore((state) => state.hasPermission("rental-core:maintenance:review"));
+  const canViewOrders = useAuthStore((state) => state.hasPermission("store-rental:order:view"));
   const canRestore = useAuthStore((state) => state.hasPermission("rental-core:maintenance:review") || state.hasPermission("rental-core:asset:manage") || state.hasPermission("store-rental:vehicle:manage"));
   const [dialog, setDialog] = useState<DialogKind>();
   const [activeWorkOrder, setActiveWorkOrder] = useState<RentalWorkOrder>();
@@ -159,10 +160,12 @@ export function MaintenanceWorkOrdersPage() {
             dataIndex: "orderId",
             width: 150,
             render: (value: string | undefined) =>
-              value ? (
+              value && canViewOrders ? (
                 <Button type="link" size="small" style={{ padding: 0 }} onClick={() => navigate(`/rental/orders/${value}`)}>
                   {value.slice(0, 14)}…
                 </Button>
+              ) : value ? (
+                <Typography.Text type="secondary">{value.slice(0, 14)}…</Typography.Text>
               ) : (
                 "-"
               ),

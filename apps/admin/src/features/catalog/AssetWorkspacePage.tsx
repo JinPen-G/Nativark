@@ -86,7 +86,7 @@ export function AssetWorkspacePage() {
       {visibleTabs.length > 1 && <Tabs className="standalone-tabs" activeKey={activeTab} onChange={(key) => setActiveTab(key as "assets" | "stock")} items={visibleTabs} />}
       <Card className="data-panel" styles={{ body: { paddingBottom: 0 } }}>
         <Space wrap style={{ marginBottom: 16 }}><Input allowClear prefix={<SearchOutlined />} placeholder={`${profile.data?.terminology.identifierLabel ?? "资产编号"}、车牌/VIN、型号或${profile.data?.terminology.fulfillmentLabel ?? "履约地点"}`} value={keyword} onChange={(event) => setKeyword(event.target.value)} style={{ width: 360 }} /></Space>
-        <QueryState loading={assets.isLoading || stocks.isLoading || groups.isLoading || locations.isLoading || profile.isLoading || categories.isLoading} error={assets.error || stocks.error || groups.error || locations.error || profile.error || categories.error}>
+        <QueryState loading={assets.isLoading || stocks.isLoading || groups.isLoading || locations.isLoading || dispositions.isLoading || profile.isLoading || categories.isLoading} error={assets.error || stocks.error || groups.error || locations.error || dispositions.error || profile.error || categories.error}>
           {activeTab === "assets" ? <Table<RentalAsset> rowKey="id" dataSource={assetRows} scroll={{ x: 960 }} columns={[
             { title: `${profile.data?.terminology.itemGroupLabel ?? "产品型号"}照片`, width: 110, fixed: "left", render: (_, row) => {
               const group = (groups.data ?? []).find((item) => item.id === row.itemGroupId);

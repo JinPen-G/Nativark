@@ -71,6 +71,8 @@ export function RentalOrderDetailPage() {
   // ORDER-CLOSE-02：裁定「该收/该退多少」与实际动钱是两个权限。只有裁定权的人看得到
   // 审核按钮但看不到收退款按钮；只有资金权的人反之。两者都不给的账号只能查看。
   const WORK_ORDER_STATUS_LABELS: Record<string, { label: string; color: string }> = { pending: { label: "待处理", color: "default" }, in_progress: { label: "处理中", color: "processing" }, pending_review: { label: "待验收", color: "warning" }, completed: { label: "已完成", color: "success" }, rejected: { label: "验收驳回", color: "error" }, cancelled: { label: "已取消", color: "default" } };
+  const canViewWorkOrders = hasPermission("rental-core:maintenance:view");
+  const canViewDispositions = canViewWorkOrders || hasPermission("rental-core:asset:view") || hasPermission("rental-core:asset:manage") || hasPermission("store-rental:vehicle:view");
   const canReviewFees = hasPermission("store-rental:order:fee-review");
   const canOperate = hasPermission("store-rental:order:operate");
   const canPickup = canOperate || hasPermission("store-rental:order:pickup");
@@ -204,13 +206,15 @@ export function RentalOrderDetailPage() {
         reason: values.reason,
         amount: values.decision === "approved" && values.amount !== undefined ? Number(values.amount) : undefined
       }),
-    onSuccess: async () => {
-      // ORDER-CLOSE-02：批准只代表核定金额，不等于实际收退款——后者仍受资金权限与资金事件控制。
-      message.success("费用已裁定：批准仅代表核定应收/应退金额，实际收退款仍受资金权限与资金事件流程控制");
+    onSuccess: async (_data, values) => {
       setFeeReview(undefined);
       feeReviewForm.resetFields();
       await Promise.all([refresh(), queryClient.invalidateQueries({ queryKey: ["rental-core", "order", id, "funding"] })]);
-      message.success("裁定已记录；应收已按结论调整，实际收退款仍需在资金区单独办理");
+      // ORDER-CLOSE-02：批准只代表核定金额，不等于实际收退款；驳回也必须明确显示为驳回，
+      // 不能复用“批准”文案让操作员误以为已经产生资金事件。
+      message.success(values.decision === "approved"
+        ? "费用已批准：应收/应退已按核定金额调整，实际收退款仍需在资金区单独办理"
+        : "费用已驳回：该费用不按本次事项计入，实际收退款仍需按资金事件办理");
     },
     onError: async (error: Error) => {
       // 冲突多半是已被他人裁定或被新续租替代：刷新到最新状态再让用户重新判断，
@@ -282,13 +286,13 @@ export function RentalOrderDetailPage() {
   const relatedWorkOrders = useQuery({
     queryKey: ["rental-core", "work-orders", id],
     queryFn: () => rentalCoreApi.workOrders(),
-    enabled: Boolean(id),
+    enabled: Boolean(id) && canViewWorkOrders,
     select: (rows) => rows.filter((row) => row.orderId === id)
   });
   const relatedDispositions = useQuery({
     queryKey: ["rental-core", "stock-dispositions", id],
     queryFn: () => rentalCoreApi.stockDispositions(id),
-    enabled: Boolean(id)
+    enabled: Boolean(id) && canViewDispositions
   });
   const feeReviews = detail?.feeReviews ?? [];
   const pendingFeeReviews = feeReviews.filter((row) => row.status === "pending");
