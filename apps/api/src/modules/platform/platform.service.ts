@@ -193,6 +193,9 @@ export class PlatformService {
         { code: "rental-core:catalog:manage", name: "通用商品目录管理" },
         { code: "rental-core:asset:view", name: "通用资产库存查看" },
         { code: "rental-core:asset:manage", name: "通用资产库存管理" },
+        { code: "rental-core:maintenance:view", name: "养护工单查看", description: "查看归还处置和养护工单" },
+        { code: "rental-core:maintenance:manage", name: "养护工单处理", description: "创建、派工、开始和提交养护工单" },
+        { code: "rental-core:maintenance:review", name: "养护工单验收", description: "审核养护结果并恢复库存可用状态" },
         { code: "rental-core:capability:view", name: "经营空间能力查看" },
         { code: "rental-core:capability:manage", name: "经营空间能力治理" },
         // CAM-01A：确认能力给出的风险提示（如需转接环的器材组合）才能带风险下单。

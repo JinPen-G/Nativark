@@ -11,6 +11,7 @@ const WorkbenchPage = lazy(() => import("@/features/workbench/WorkbenchPage").th
 const WorkspaceOperationReportPage = lazy(() => import("@/features/reports/WorkspaceOperationReportPage").then((module) => ({ default: module.WorkspaceOperationReportPage })));
 const CatalogPage = lazy(() => import("@/features/catalog/CatalogPage").then((module) => ({ default: module.CatalogPage })));
 const AssetWorkspacePage = lazy(() => import("@/features/catalog/AssetWorkspacePage").then((module) => ({ default: module.AssetWorkspacePage })));
+const MaintenanceWorkOrdersPage = lazy(() => import("@/features/rental-core/MaintenanceWorkOrdersPage").then((module) => ({ default: module.MaintenanceWorkOrdersPage })));
 const LocationPage = lazy(() => import("@/features/fulfillment/LocationPage").then((module) => ({ default: module.LocationPage })));
 const OrdersPage = lazy(() => import("@/features/rental-core/RentalOrdersPage").then((module) => ({ default: module.RentalOrdersPage })));
 const OrderCreatePage = lazy(() => import("@/features/rental-core/RentalOrderCreatePage").then((module) => ({ default: module.RentalOrderCreatePage })));
@@ -85,6 +86,7 @@ function ProtectedRoutes() {
             <Route path={APP_ROUTES.orderDetail.path} element={guard(APP_ROUTES.orderDetail, <OrderDetailPage />)} />
             <Route path={APP_ROUTES.itemGroups.path} element={guard(APP_ROUTES.itemGroups, <CatalogPage />)} />
             <Route path={APP_ROUTES.assets.path} element={guard(APP_ROUTES.assets, <AssetWorkspacePage />)} />
+            <Route path={APP_ROUTES.workOrders.path} element={guard(APP_ROUTES.workOrders, <MaintenanceWorkOrdersPage />)} />
             <Route path={APP_ROUTES.locations.path} element={guard(APP_ROUTES.locations, <LocationPage />)} />
             <Route path={APP_ROUTES.pricingGroups.path} element={guard(APP_ROUTES.pricingGroups, <PricingGroupPage />)} />
             <Route path={APP_ROUTES.pricing.path} element={guard(APP_ROUTES.pricing, <RentalCommercialPage section="pricing" />)} />

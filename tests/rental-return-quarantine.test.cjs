@@ -28,11 +28,11 @@ const ITEM_GROUPS = [
 
 const TEMPLATE = { id: "tpl_return", code: "return", version: "1", stage: "return", enabled: true, fields: [] };
 
-const orderFixture = () => ({
+const orderFixture = (returnBufferMinutes = 0) => ({
   id: "order_1",
   tenantId: "tenant_1",
   status: RentalCoreOrderStatus.Renting,
-  ruleSnapshot: { fulfillment: {} },
+  ruleSnapshot: { fulfillment: { returnBufferMinutes } },
   reservations: [
     { id: "res_q", orderLineId: "line_q", itemGroupId: "group_q", locationId: "loc_1", quantity: 2, releasedQuantity: 0, status: RentalReservationStatus.Fulfilled },
     { id: "res_s", orderLineId: "line_s", itemGroupId: "group_s", locationId: "loc_1", quantity: 1, releasedQuantity: 0, status: RentalReservationStatus.Fulfilled }
@@ -57,6 +57,7 @@ function serviceWith(order) {
     listAssets: async () => [],
     listExtensions: async () => [],
     cancelExtensions: async () => {},
+    upsertStockDisposition: async () => {},
     insertInspection: async () => {},
     saveOrderAggregate: async (_order, assetChanges, _tx, stockQuarantines) => {
       captured.assetChanges = assetChanges;
@@ -164,6 +165,18 @@ void (async () => {
   await instance.createInspection("tenant_1", "order_1", returnInspection(), "检查员");
   assert.deepEqual(captured.stockQuarantines, [], "没有异常就没有隔离依据，数量必须正常回可用池");
   ok("无异常归还不隔离任何数量");
+}
+
+/* ---------- 正常归还的周转缓冲也必须暂时阻止再次出租 ---------- */
+
+{
+  const { instance, captured } = serviceWith(orderFixture(30));
+  await instance.createInspection("tenant_1", "order_1", returnInspection(), "检查员");
+  assert.deepEqual(captured.stockQuarantines, [{ itemGroupId: "group_q", locationId: "loc_1", quantity: 2 }],
+    "正常归还的周转缓冲期间，数量库存也必须暂时从可用池隔离");
+  assert.deepEqual(captured.assetChanges, [{ assetId: "asset_1", status: RentalAssetStatus.Maintenance }],
+    "正常归还的周转缓冲期间，序列化资产必须暂时保持维护状态");
+  ok("周转缓冲期间数量与序列化库存都不可再次出租");
 }
 
 /* ---------- 分批归还只隔离本批增量 ---------- */

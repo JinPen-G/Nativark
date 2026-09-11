@@ -6,9 +6,14 @@ import type {
   SaveRentalItemGroupRequest,
   SaveRentalPricingGroupRequest,
   RentalPricingGroupInitialRate,
-  RentalPricingUnit
+  RentalPricingUnit,
+  AssignRentalWorkOrderRequest,
+  CancelRentalWorkOrderRequest,
+  CreateRentalWorkOrderRequest,
+  ReviewRentalWorkOrderRequest,
+  SubmitRentalWorkOrderRequest
 } from "@store-rental/shared";
-import { RENTAL_PRICING_UNIT_CODES } from "@store-rental/shared";
+import { RENTAL_PRICING_UNIT_CODES, RENTAL_WORK_ORDER_TYPES } from "@store-rental/shared";
 import { Type } from "class-transformer";
 import {
   IsArray,
@@ -20,6 +25,7 @@ import {
   IsString,
   Min,
   IsNumber,
+  MaxLength,
   ValidateNested
 } from "class-validator";
 
@@ -249,4 +255,57 @@ class RentalPricingGroupInitialRateInputDto implements RentalPricingGroupInitial
   @IsNumber()
   @Min(0)
   baseAmount!: number;
+}
+
+export class CreateRentalWorkOrderDto implements CreateRentalWorkOrderRequest {
+  @IsString()
+  @IsNotEmpty()
+  dispositionId!: string;
+
+  @IsIn(RENTAL_WORK_ORDER_TYPES)
+  type!: CreateRentalWorkOrderRequest["type"];
+
+  @IsOptional()
+  @IsString()
+  assigneeId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
+}
+
+export class AssignRentalWorkOrderDto implements AssignRentalWorkOrderRequest {
+  @IsOptional()
+  @IsString()
+  assigneeId?: string;
+}
+
+export class SubmitRentalWorkOrderDto implements SubmitRentalWorkOrderRequest {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(2000)
+  result!: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  attachments?: string[];
+}
+
+export class ReviewRentalWorkOrderDto implements ReviewRentalWorkOrderRequest {
+  @IsIn(["approved", "rejected"])
+  decision!: ReviewRentalWorkOrderRequest["decision"];
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(500)
+  reason!: string;
+}
+
+export class CancelRentalWorkOrderDto implements CancelRentalWorkOrderRequest {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(500)
+  reason!: string;
 }

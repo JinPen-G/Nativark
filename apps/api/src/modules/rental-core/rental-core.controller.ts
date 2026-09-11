@@ -16,6 +16,7 @@ import type {
   SaveRentalFulfillmentOperatorRequest,
   SaveRentalItemGroupRequest,
   SaveRentalStockBalanceRequest,
+  RentalWorkOrderStatus,
   SaveTenantRentalBusinessSettingsRequest,
   SaveTenantRentalProfileRequest,
   RentalWorkspaceReportFilter,
@@ -26,6 +27,11 @@ import {
   SaveRentalFulfillmentOperatorDto,
   SaveRentalItemGroupDto,
   SaveRentalPricingGroupDto,
+  AssignRentalWorkOrderDto,
+  CancelRentalWorkOrderDto,
+  CreateRentalWorkOrderDto,
+  ReviewRentalWorkOrderDto,
+  SubmitRentalWorkOrderDto,
 } from "./rental-core-request.dto";
 import {
   CancelRentalOrderDto,
@@ -327,6 +333,33 @@ export class RentalCoreController {
   @Get("stock-dispositions") dispositions(@Req() req: AuthenticatedRequest, @Query("orderId") orderId?: string) { return this.service.listStockDispositions(req.user.tenantId, orderId); }
   @Post("stock-dispositions/:dispositionId/restore") restoreDisposition(@Req() req: AuthenticatedRequest, @Param("dispositionId") dispositionId: string) { return this.committed(req.user.tenantId, this.service.restoreStockDisposition(req.user.tenantId, dispositionId, req.user.displayName)); }
   @Put("stock-balances") saveStock(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalStockBalanceDto) { return this.committed(req.user.tenantId, this.service.saveStockBalance(req.user.tenantId, body)); }
+  @Get("work-orders") workOrders(@Req() req: AuthenticatedRequest, @Query("status") status?: string) {
+    return this.service.listWorkOrders(req.user.tenantId, status as RentalWorkOrderStatus | undefined);
+  }
+  @Get("work-order-assignees") workOrderAssignees(@Req() req: AuthenticatedRequest) {
+    return this.service.listWorkOrderAssignees(req.user.tenantId);
+  }
+  @Get("work-orders/:id/history") workOrderHistory(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
+    return this.service.listWorkOrderHistory(req.user.tenantId, id);
+  }
+  @Post("work-orders") createWorkOrder(@Req() req: AuthenticatedRequest, @Body() body: CreateRentalWorkOrderDto) {
+    return this.committed(req.user.tenantId, this.service.createWorkOrder(req.user.tenantId, body, req.user.displayName));
+  }
+  @Put("work-orders/:id/assign") assignWorkOrder(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: AssignRentalWorkOrderDto) {
+    return this.committed(req.user.tenantId, this.service.assignWorkOrder(req.user.tenantId, id, body));
+  }
+  @Post("work-orders/:id/start") startWorkOrder(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
+    return this.committed(req.user.tenantId, this.service.startWorkOrder(req.user.tenantId, id, req.user.displayName));
+  }
+  @Post("work-orders/:id/submit") submitWorkOrder(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SubmitRentalWorkOrderDto) {
+    return this.committed(req.user.tenantId, this.service.submitWorkOrder(req.user.tenantId, id, body, req.user.displayName));
+  }
+  @Post("work-orders/:id/review") reviewWorkOrder(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: ReviewRentalWorkOrderDto) {
+    return this.committed(req.user.tenantId, this.service.reviewWorkOrder(req.user.tenantId, id, body, req.user.displayName));
+  }
+  @Post("work-orders/:id/cancel") cancelWorkOrder(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: CancelRentalWorkOrderDto) {
+    return this.committed(req.user.tenantId, this.service.cancelWorkOrder(req.user.tenantId, id, body, req.user.displayName));
+  }
   @Post("availability") availability(@Req() req: AuthenticatedRequest, @Body() body: RentalAvailabilityDto) { return this.service.availability(req.user.tenantId, body); }
   @Get("orders") orders(@Req() req: AuthenticatedRequest) { return this.service.listOrders(req.user.tenantId); }
   @Get("orders/:id") order(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.service.getOrder(req.user.tenantId, id); }

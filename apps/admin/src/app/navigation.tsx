@@ -13,7 +13,8 @@ import {
   SettingOutlined,
   ShopOutlined,
   TagsOutlined,
-  TeamOutlined
+  TeamOutlined,
+  ToolOutlined
 } from "@ant-design/icons";
 import { RentalCategoryCode, type RentalCapability, type RentalCategoryTerminology } from "@store-rental/shared";
 import type { ReactNode } from "react";
@@ -58,6 +59,7 @@ export const APP_ROUTES = {
   itemGroups: { path: "/rental/item-groups", label: "商品目录", permission: "rental-core:catalog:view", legacyPermissions: ["store-rental:vehicle-group:manage"], audience: "tenant", icon: <AppstoreOutlined />, menu: true },
   pricingGroups: { path: "/rental/pricing-groups", label: "定价分组", permission: "store-rental:price:manage", audience: "tenant", icon: <TagsOutlined />, menu: true },
   assets: { path: "/rental/assets", label: "资产与库存", permission: "rental-core:asset:view", legacyPermissions: ["store-rental:vehicle:view"], audience: "tenant", icon: <BoxPlotOutlined />, menu: true },
+  workOrders: { path: "/rental/work-orders", label: "养护工单", permission: "rental-core:maintenance:view", audience: "tenant", icon: <ToolOutlined />, menu: true },
   locations: { path: "/rental/locations", label: "履约地点", permission: "store-rental:station:view", audience: "tenant", icon: <ShopOutlined />, menu: true },
   pricing: { path: "/rental/pricing", label: "基础定价", permission: "store-rental:price:manage", audience: "tenant", icon: <FundOutlined />, menu: true },
   discounts: { path: "/rental/discounts", label: "优惠方案", permission: "store-rental:price:manage", audience: "tenant", icon: <TagsOutlined />, menu: true },
@@ -84,7 +86,7 @@ export const APP_ROUTES = {
 export const APP_NAVIGATION: AppNavigationSection[] = [
   { key: "overview", label: "概览", icon: <DashboardOutlined />, routes: [APP_ROUTES.workbench, APP_ROUTES.operationReport] },
   { key: "transactions", label: "租赁交易", icon: <ApartmentOutlined />, routes: [APP_ROUTES.orders] },
-  { key: "inventory", label: "商品与资产", icon: <AppstoreOutlined />, routes: [APP_ROUTES.itemGroups, APP_ROUTES.assets, APP_ROUTES.locations] },
+  { key: "inventory", label: "商品与资产", icon: <AppstoreOutlined />, routes: [APP_ROUTES.itemGroups, APP_ROUTES.assets, APP_ROUTES.workOrders, APP_ROUTES.locations] },
   { key: "commercial", label: "定价与营销", icon: <FundOutlined />, routes: [APP_ROUTES.pricingGroups, APP_ROUTES.pricing, APP_ROUTES.discounts, APP_ROUTES.coupons, APP_ROUTES.services] },
   { key: "customers", label: "会员与客户", icon: <TeamOutlined />, routes: [APP_ROUTES.membershipReviews, APP_ROUTES.personalMembers, APP_ROUTES.corporateMembers, APP_ROUTES.membershipPlans] },
   { key: "tenant-settings", label: "经营设置", icon: <SettingOutlined />, routes: [APP_ROUTES.rentalSettings, APP_ROUTES.rentalCapabilities, APP_ROUTES.tenantAccounts, APP_ROUTES.tenantRoles] },

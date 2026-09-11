@@ -1830,14 +1830,14 @@ model RentalWorkOrder {
   quantity       Int
   assigneeId     String?
   assigneeName   String?
-  reason         String
-  result         String?
+  reason         String   @db.Text
+  result         String?  @db.Text
   attachments    Json
   startedAt      DateTime?
   submittedAt    DateTime?
   reviewedAt     DateTime?
   reviewedBy     String?
-  reviewReason   String?
+  reviewReason   String?  @db.Text
   createdBy      String
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt

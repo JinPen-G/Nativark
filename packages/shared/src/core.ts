@@ -4320,6 +4320,104 @@ export interface SaveRentalStockBalanceRequest {
   operator?: string;
 }
 
+/** STOCK-CLOSE-01 / SHARED-WORK-01A：归还后库存处置与养护工单的统一事实契约。 */
+export const RENTAL_WORK_ORDER_TYPES = ["cleaning", "restock", "calibration", "repair"] as const;
+export type RentalWorkOrderType = (typeof RENTAL_WORK_ORDER_TYPES)[number];
+export const RENTAL_WORK_ORDER_STATUSES = ["pending", "in_progress", "pending_review", "completed", "rejected", "cancelled"] as const;
+export type RentalWorkOrderStatus = (typeof RENTAL_WORK_ORDER_STATUSES)[number];
+
+export interface RentalStockDisposition {
+  id: string;
+  tenantId: string;
+  workspaceId: string;
+  orderId: string;
+  inspectionId?: string;
+  returnBatchKey: string;
+  dedupeKey: string;
+  itemGroupId: string;
+  locationId: string;
+  assetId?: string;
+  quantity: number;
+  receivedAt: string;
+  bufferUntil: string;
+  status: "buffered" | "blocked" | "restored";
+  blockReason?: string;
+  restoredQuantity: number;
+  restoredAt?: string;
+  restoredBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RentalWorkOrder {
+  id: string;
+  tenantId: string;
+  workspaceId: string;
+  workNo: string;
+  type: RentalWorkOrderType;
+  status: RentalWorkOrderStatus;
+  dispositionId?: string;
+  orderId?: string;
+  inspectionId?: string;
+  itemGroupId: string;
+  locationId: string;
+  assetId?: string;
+  quantity: number;
+  assigneeId?: string;
+  assigneeName?: string;
+  reason: string;
+  result?: string;
+  attachments: string[];
+  startedAt?: string;
+  submittedAt?: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
+  reviewReason?: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RentalWorkOrderAssignee {
+  id: string;
+  account: string;
+  displayName: string;
+}
+
+export interface RentalWorkOrderHistoryEntry {
+  id: string;
+  action: string;
+  operator: string;
+  detail: string;
+  createdAt: string;
+}
+
+export interface CreateRentalWorkOrderRequest {
+  dispositionId: string;
+  type: RentalWorkOrderType;
+  assigneeId?: string;
+  reason?: string;
+}
+
+export interface AssignRentalWorkOrderRequest {
+  /** 只能选择当前经营空间启用的运营账号；省略表示清除派工。 */
+  assigneeId?: string;
+}
+
+export interface SubmitRentalWorkOrderRequest {
+  result: string;
+  attachments?: string[];
+}
+
+export interface ReviewRentalWorkOrderRequest {
+  decision: "approved" | "rejected";
+  reason: string;
+}
+
+export interface CancelRentalWorkOrderRequest {
+  reason: string;
+}
+
 export interface RentalAvailabilityRequest {
   locationId: string;
   startAt: string;

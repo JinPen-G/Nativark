@@ -51,6 +51,17 @@ import {
   type CustomerOrderSubjects,
   type RentalReservation,
   type RentalStockBalance,
+  type RentalStockDisposition,
+  type RentalWorkOrder,
+  type RentalWorkOrderAssignee,
+  type RentalWorkOrderHistoryEntry,
+  type CreateRentalWorkOrderRequest,
+  type AssignRentalWorkOrderRequest,
+  type CancelRentalWorkOrderRequest,
+  type SubmitRentalWorkOrderRequest,
+  type ReviewRentalWorkOrderRequest,
+  type RentalWorkOrderType,
+  type RentalWorkOrderStatus,
   type SaveRentalAssetRequest,
   type SaveRentalCouponTemplateRequest,
   type SaveRentalFulfillmentLocationRequest,
@@ -137,6 +148,13 @@ assertRentalCategoryExtensions(categories);
 
 function now() { return new Date().toISOString(); }
 function id(prefix: string) { return `${prefix}_${randomUUID().slice(0, 8)}`; }
+
+function workOrderTypeForReason(reason: string): RentalWorkOrderType {
+  if (/清洁|清洗|clean/iu.test(reason)) return "cleaning";
+  if (/缺件|补货|耗材|restock/iu.test(reason)) return "restock";
+  if (/校准|标定|calibr/iu.test(reason)) return "calibration";
+  return "repair";
+}
 function overlaps(aStart: string, aEnd: string, bStart: string, bEnd: string) {
   return new Date(aStart).getTime() < new Date(bEnd).getTime() && new Date(aEnd).getTime() > new Date(bStart).getTime();
 }
@@ -964,6 +982,97 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     return this.factStore.listStockDispositions(tenantId, orderId);
   }
 
+  async listWorkOrders(tenantId: string, status?: RentalWorkOrderStatus) {
+    this.state(tenantId);
+    if (status && !["pending", "in_progress", "pending_review", "completed", "rejected", "cancelled"].includes(status)) {
+      throw new BadRequestException("养护工单状态无效");
+    }
+    return this.factStore.listWorkOrders(tenantId, status);
+  }
+
+  async listWorkOrderAssignees(tenantId: string): Promise<RentalWorkOrderAssignee[]> {
+    this.state(tenantId);
+    return this.factStore.listWorkOrderAssignees(tenantId);
+  }
+
+  async listWorkOrderHistory(tenantId: string, workOrderId: string): Promise<RentalWorkOrderHistoryEntry[]> {
+    this.state(tenantId);
+    const row = (await this.factStore.listWorkOrders(tenantId)).find((item) => item.id === workOrderId);
+    if (!row) throw new NotFoundException("养护工单不存在或不属于当前经营空间");
+    return this.factStore.listWorkOrderHistory(tenantId, workOrderId);
+  }
+
+  private async resolveWorkOrderAssignee(tenantId: string, assigneeId?: string) {
+    if (!assigneeId) return undefined;
+    const assignee = (await this.factStore.listWorkOrderAssignees(tenantId)).find((item) => item.id === assigneeId);
+    if (!assignee) throw new BadRequestException("处理人不存在、未加入当前经营空间或已停用");
+    return assignee;
+  }
+
+  async createWorkOrder(tenantId: string, input: CreateRentalWorkOrderRequest, operator: string) {
+    this.state(tenantId);
+    const dispositions = await this.factStore.listStockDispositions(tenantId);
+    const disposition = dispositions.find((row) => row.id === input.dispositionId);
+    if (!disposition) throw new NotFoundException("库存处置不存在或不属于当前经营空间");
+    if (disposition.status === "restored") throw new ConflictException("已恢复可用的库存处置不能再建养护工单");
+    const reason = input.reason?.trim() || disposition.blockReason || "归还后需要养护处理";
+    const assignee = await this.resolveWorkOrderAssignee(tenantId, input.assigneeId);
+    const timestamp = now();
+    const workOrder: RentalWorkOrder = {
+      id: id("work"),
+      tenantId,
+      workspaceId: this.resolveWorkspaceId(tenantId),
+      workNo: `WO${timestamp.replace(/\D/g, "").slice(0, 14)}${randomUUID().slice(0, 4).toUpperCase()}`,
+      type: input.type,
+      status: "pending",
+      dispositionId: disposition.id,
+      orderId: disposition.orderId,
+      inspectionId: disposition.inspectionId,
+      itemGroupId: disposition.itemGroupId,
+      locationId: disposition.locationId,
+      assetId: disposition.assetId,
+      quantity: disposition.quantity,
+      assigneeId: assignee?.id,
+      assigneeName: assignee?.displayName,
+      reason,
+      attachments: [],
+      createdBy: operator,
+      createdAt: timestamp,
+      updatedAt: timestamp
+    };
+    return this.factStore.upsertWorkOrder(workOrder);
+  }
+
+  async assignWorkOrder(tenantId: string, workOrderId: string, input: AssignRentalWorkOrderRequest) {
+    this.state(tenantId);
+    const current = await this.factStore.listWorkOrders(tenantId);
+    const row = current.find((item) => item.id === workOrderId);
+    if (!row) throw new NotFoundException("养护工单不存在或不属于当前经营空间");
+    if (!["pending", "in_progress"].includes(row.status)) throw new ConflictException("当前工单状态不能派工");
+    const assignee = await this.resolveWorkOrderAssignee(tenantId, input.assigneeId);
+    return this.factStore.assignWorkOrder(tenantId, workOrderId, assignee?.id, assignee?.displayName);
+  }
+
+  async startWorkOrder(tenantId: string, workOrderId: string, operator: string) {
+    this.state(tenantId);
+    return this.factStore.transitionWorkOrder(tenantId, workOrderId, "start", operator);
+  }
+
+  async submitWorkOrder(tenantId: string, workOrderId: string, input: SubmitRentalWorkOrderRequest, operator: string) {
+    this.state(tenantId);
+    return this.factStore.transitionWorkOrder(tenantId, workOrderId, "submit", operator, input);
+  }
+
+  async reviewWorkOrder(tenantId: string, workOrderId: string, input: ReviewRentalWorkOrderRequest, operator: string) {
+    this.state(tenantId);
+    return this.factStore.transitionWorkOrder(tenantId, workOrderId, "review", operator, input);
+  }
+
+  async cancelWorkOrder(tenantId: string, workOrderId: string, input: CancelRentalWorkOrderRequest, operator: string) {
+    this.state(tenantId);
+    return this.factStore.transitionWorkOrder(tenantId, workOrderId, "cancel", operator, input);
+  }
+
   async listStockBalances(tenantId: string) {
     await this.factContext(tenantId);
     const [stocks, reservations] = await Promise.all([
@@ -1488,6 +1597,10 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (order.ruleSnapshot.fulfillment.returnInspectionRequired) throw new ConflictException("当前规则要求归还检查；部分归还须走逐批检查流程，不能直接释放资产");
     if (!input.items?.length) throw new BadRequestException("至少选择一个归还分配项");
     if (new Set(input.items.map((item) => item.allocationId)).size !== input.items.length) throw new BadRequestException("归还分配项不能重复");
+    const returnedAllocationIdsBefore = new Set(
+      (order.allocations ?? []).filter((allocation) => allocation.status === "returned" || allocation.status === "released").map((allocation) => allocation.id)
+    );
+    const releasedBeforeReturn = new Map(order.reservations.map((row) => [row.id, row.releasedQuantity]));
     await this.runHook(
       tenantId,
       "return_inspection",
@@ -1499,8 +1612,21 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     );
     const assetChanges: AssetStatusChange[] = [];
     await this.applyPartialReturnItems(tenantId, state, order, input.items, tx, assetChanges);
+    await this.recordReturnDispositions(
+      tenantId,
+      order,
+      undefined,
+      input.batchNo ?? `partial-${id("return")}`,
+      releasedBeforeReturn,
+      undefined,
+      tx,
+      undefined,
+      returnedAllocationIdsBefore,
+      assetChanges
+    );
+    const stockQuarantines = this.quarantinedReturnQuantities(state, order, releasedBeforeReturn);
     order.updatedAt = now();
-    await this.factStore.saveOrderAggregate(order, assetChanges, tx);
+    await this.factStore.saveOrderAggregate(order, assetChanges, tx, this.hasReturnHold(order) ? stockQuarantines : []);
     return order;
   }
 
@@ -1627,6 +1753,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const state = this.state(tenantId);
     const order = await this.lockedOrder(tenantId, orderId, tx);
     const assetChanges: AssetStatusChange[] = [];
+    let returnStockQuarantines: StockQuarantineChange[] = [];
     if (stage === "pickup") {
       if (order.ruleSnapshot.fulfillment.pickupInspectionRequired) throw new ConflictException("当前规则要求完成领取检查");
       if (order.status !== RentalCoreOrderStatus.ReadyForPickup) throw new ConflictException("订单尚未完成配货");
@@ -1640,14 +1767,31 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       if (order.ruleSnapshot.fulfillment.returnInspectionRequired) throw new ConflictException("当前规则要求完成归还检查");
       if (order.status !== RentalCoreOrderStatus.Renting) throw new ConflictException("只有租赁中的订单可以归还");
       await this.runHook(tenantId, "return_inspection", { type: "order", id: order.id }, order, tx, operator, this.orderHookInstances(tenantId, order));
+      const returnedAllocationIdsBefore = new Set(
+        (order.allocations ?? []).filter((allocation) => allocation.status === "returned" || allocation.status === "released").map((allocation) => allocation.id)
+      );
+      const releasedBeforeReturn = new Map(order.reservations.map((row) => [row.id, row.releasedQuantity]));
       this.finishReturn(order, overdueCharge, assetChanges);
       // 整单归还后订单进入待结算，`payOrderExtension` 会因状态拒绝生效——
       // 遗留的待补款续租就此作废，不再显示补款入口也不再计入待收。
       await this.voidPendingExtensions(tenantId, orderId, tx);
       if (earlyReturnRefund) this.applyEarlyReturnRefundTo(order, earlyReturnRefund);
+      await this.recordReturnDispositions(
+        tenantId,
+        order,
+        undefined,
+        `handover-${id("return")}`,
+        releasedBeforeReturn,
+        undefined,
+        tx,
+        operator,
+        returnedAllocationIdsBefore,
+        assetChanges
+      );
+      if (this.hasReturnHold(order)) returnStockQuarantines = this.quarantinedReturnQuantities(state, order, releasedBeforeReturn);
     }
     order.updatedAt = now();
-    await this.factStore.saveOrderAggregate(order, assetChanges, tx);
+    await this.factStore.saveOrderAggregate(order, assetChanges, tx, returnStockQuarantines);
     return order;
   }
 
@@ -1746,6 +1890,9 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     // 归还前的已释放量快照：隔离数量必须是"本批刚释放的量"，不是累计量。
     // 分批归还会多次进入这里，用累计量会把前几批已经放回可用池的数量再隔离一遍。
     const releasedBeforeReturn = new Map(order.reservations.map((row) => [row.id, row.releasedQuantity]));
+    const returnedAllocationIdsBefore = new Set(
+      (order.allocations ?? []).filter((allocation) => allocation.status === "returned" || allocation.status === "released").map((allocation) => allocation.id)
+    );
     if (template.stage === "pickup") {
       this.markPickedUp(order, assetChanges);
     } else {
@@ -1757,7 +1904,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       // 遗留的待补款续租就此作废，不再显示补款入口也不再计入待收。
       await this.voidPendingExtensions(tenantId, orderId, tx);
       }
-      if (input.exceptions?.length) {
+      if (input.exceptions?.length || this.hasReturnHold(order)) {
         // 有异常的序列化资产先进入维护，不能在工单处理前重新出租。
         for (const change of assetChanges) change.status = RentalAssetStatus.Maintenance;
         // 数量库存此前完全没有对应处理：预占一释放，数量就回到可用池，下一单就能把
@@ -1774,7 +1921,18 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     // "检查已记录、订单未推进"的中间态。
     await this.factStore.insertInspection(record, tx);
     if (template.stage === "return") {
-      await this.recordReturnDispositions(tenantId, order, record.id, input.returnBatchNo ?? record.id, releasedBeforeReturn, input.exceptions?.length ? "blocked" : undefined, tx);
+      await this.recordReturnDispositions(
+        tenantId,
+        order,
+        record.id,
+        input.returnBatchNo ?? record.id,
+        releasedBeforeReturn,
+        input.exceptions?.length ? "blocked" : undefined,
+        tx,
+        input.operator || userName,
+        returnedAllocationIdsBefore,
+        assetChanges
+      );
     }
     await this.factStore.saveOrderAggregate(order, assetChanges, tx, stockQuarantines);
     return { inspection: record, order };
@@ -2202,25 +2360,77 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   private async recordReturnDispositions(
     tenantId: string,
     order: RentalOrder,
-    inspectionId: string,
+    inspectionId: string | undefined,
     returnBatchKey: string,
     releasedBefore: Map<string, number>,
     blockedReason: string | undefined,
-    tx: RentalFactTx | undefined
+    tx: RentalFactTx | undefined,
+    operator = "系统",
+    returnedAllocationIdsBefore = new Set<string>(),
+    assetChanges: AssetStatusChange[] = []
   ) {
     const receivedAt = now();
     const bufferUntil = new Date(Date.parse(receivedAt) + Math.max(0, order.ruleSnapshot.fulfillment.returnBufferMinutes ?? 0) * 60_000).toISOString();
+    const returnedAllocations = (order.allocations ?? []).filter((allocation) =>
+      !returnedAllocationIdsBefore.has(allocation.id) && (allocation.status === "returned" || allocation.status === "released")
+    );
+    const workspaceId = getRequestWorkspaceId() ?? "";
     for (const reservation of order.reservations) {
       const quantity = Math.max(0, reservation.releasedQuantity - (releasedBefore.get(reservation.id) ?? 0));
       if (quantity <= 0) continue;
-      const dedupeKey = `${returnBatchKey}:${reservation.itemGroupId}:${reservation.locationId}:${reservation.id}`;
-      await this.factStore.upsertStockDisposition({
-        id: id("disposition"), tenantId, workspaceId: getRequestWorkspaceId() ?? "", orderId: order.id, inspectionId,
-        returnBatchKey, dedupeKey, itemGroupId: reservation.itemGroupId, locationId: reservation.locationId,
-        quantity, receivedAt, bufferUntil, status: blockedReason ? "blocked" : "buffered",
-        blockReason: blockedReason, restoredQuantity: 0, createdAt: receivedAt, updatedAt: receivedAt
-      }, tx);
+      const matching = returnedAllocations
+        .filter((allocation) => {
+          if (allocation.metadata?.reservationId) return allocation.metadata.reservationId === reservation.id;
+          return allocation.orderLineId === reservation.orderLineId
+            && allocation.itemGroupId === reservation.itemGroupId
+            && (!allocation.metadata?.locationId || allocation.metadata.locationId === reservation.locationId);
+        })
+        .map((allocation) => ({ allocation, remaining: allocation.quantity }));
+      const dispositionParts: Array<{ quantity: number; assetId?: string }> = [];
+      let remaining = quantity;
+      for (const match of matching) {
+        if (remaining <= 0) break;
+        const part = Math.min(remaining, match.remaining);
+        if (part <= 0) continue;
+        dispositionParts.push({ quantity: part, assetId: match.allocation.assetId });
+        remaining -= part;
+      }
+      if (remaining > 0) dispositionParts.push({ quantity: remaining });
+      for (const [partIndex, part] of dispositionParts.entries()) {
+        const allocationKey = matching[partIndex]?.allocation.id ?? "fallback";
+        const dedupeKey = `${returnBatchKey}:${reservation.id}:${allocationKey}`;
+        const disposition: RentalStockDisposition = {
+          id: id("disposition"), tenantId, workspaceId, orderId: order.id, inspectionId,
+          returnBatchKey, dedupeKey, itemGroupId: reservation.itemGroupId, locationId: reservation.locationId,
+          assetId: part.assetId, quantity: part.quantity, receivedAt, bufferUntil, status: blockedReason ? "blocked" : "buffered",
+          blockReason: blockedReason, restoredQuantity: 0, createdAt: receivedAt, updatedAt: receivedAt
+        };
+        const persisted = await this.factStore.upsertStockDisposition(disposition, tx);
+        // 处置事实本身不能阻止序列化资产被候选分配选中；在同一订单事务里先
+        // 把它置为维护，待受控恢复入口把对应处置恢复后再改回可用。
+        // 异常归还即使没有缓冲时间也必须保持维护，正常归还只在周转缓冲有效时保持维护。
+        if (part.assetId && (blockedReason || this.hasReturnHold(order))) {
+          const change = assetChanges.find((item) => item.assetId === part.assetId);
+          if (change) change.status = RentalAssetStatus.Maintenance;
+          else assetChanges.push({ assetId: part.assetId, status: RentalAssetStatus.Maintenance });
+        }
+        if (blockedReason && this.factStore.upsertWorkOrder) {
+          const persistedDisposition = persisted ?? disposition;
+          const workTimestamp = now();
+          await this.factStore.upsertWorkOrder({
+            id: id("work"), tenantId, workspaceId, workNo: `WO${workTimestamp.replace(/\D/g, "").slice(0, 14)}${randomUUID().slice(0, 4).toUpperCase()}`,
+            type: workOrderTypeForReason(blockedReason), status: "pending", dispositionId: persistedDisposition.id,
+            orderId: order.id, inspectionId, itemGroupId: reservation.itemGroupId, locationId: reservation.locationId,
+            assetId: part.assetId, quantity: part.quantity, reason: blockedReason, attachments: [],
+            createdBy: operator, createdAt: workTimestamp, updatedAt: workTimestamp
+          }, tx);
+        }
+      }
     }
+  }
+
+  private hasReturnHold(order: RentalOrder) {
+    return Math.max(0, order.ruleSnapshot.fulfillment.returnBufferMinutes ?? 0) > 0;
   }
 
   private quarantinedReturnQuantities(

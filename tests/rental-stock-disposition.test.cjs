@@ -14,6 +14,18 @@ void (async () => {
   await RentalCoreService.prototype.recordReturnDispositions.call(service, "tenant_1", order(), "inspection_1", "batch_1", new Map([["res_1", 0]]), "damage", {}); assert.equal(facts.rows.length, 1); assert.equal(facts.rows[0].status, "blocked"); ok("同批重试幂等，异常归还进入阻断而不重复隔离");
   const repo = Object.create(RentalCoreFactRepository.prototype); repo.prisma = {};
   const original = { ...facts.rows[0], status: "buffered", restoredQuantity: 0, bufferUntil: "2020-01-01T00:00:00.000Z" };
-  const tx = { businessWorkspace: { findFirst: async () => ({ id: "ws_1" }) }, rentalStockDisposition: { findFirst: async () => ({ ...original, bufferUntil: new Date(original.bufferUntil), receivedAt: new Date(now), createdAt: new Date(now), updatedAt: new Date(now), restoredAt: null, inspectionId: "inspection_1", assetId: null, blockReason: null, restoredBy: null }), update: async ({ data }) => ({ ...original, ...data, bufferUntil: new Date(original.bufferUntil), receivedAt: new Date(now), createdAt: new Date(now), updatedAt: new Date(now), restoredAt: new Date(), inspectionId: "inspection_1", assetId: null, blockReason: null, restoredBy: data.restoredBy }) } };
-  const restored = await RentalCoreFactRepository.prototype.restoreStockDisposition.call(repo, "tenant_1", "disp_1", "运营", tx); assert.equal(restored.status, "restored"); assert.equal(restored.restoredQuantity, 2); ok("周转缓冲结束后才能通过受控入口恢复处置数量"); console.log(`\n库存处置专项：${passed} 项全部通过`);
+  const restoredRow = () => ({ ...original, status: "restored", restoredQuantity: 2, bufferUntil: new Date(original.bufferUntil), receivedAt: new Date(now), createdAt: new Date(now), updatedAt: new Date(now), restoredAt: new Date(), inspectionId: "inspection_1", assetId: null, blockReason: null, restoredBy: "运营" });
+  let restored = false;
+  const tx = {
+    businessWorkspace: { findFirst: async () => ({ id: "ws_1" }) },
+    rentalStockDisposition: {
+      findFirst: async () => restored ? restoredRow() : ({ ...original, bufferUntil: new Date(original.bufferUntil), receivedAt: new Date(now), createdAt: new Date(now), updatedAt: new Date(now), restoredAt: null, inspectionId: "inspection_1", assetId: null, blockReason: null, restoredBy: null }),
+      updateMany: async () => { restored = true; return { count: 1 }; },
+      count: async () => 0
+    },
+    rentalWorkOrder: { count: async () => 0 },
+    rentalStockBalance: { updateMany: async () => ({ count: 1 }) },
+    rentalAsset: { updateMany: async () => ({ count: 1 }) }
+  };
+  const restoredResult = await RentalCoreFactRepository.prototype.restoreStockDisposition.call(repo, "tenant_1", "disp_1", "运营", tx); assert.equal(restoredResult.status, "restored"); assert.equal(restoredResult.restoredQuantity, 2); ok("周转缓冲结束后才能通过受控入口恢复处置数量"); console.log(`\n库存处置专项：${passed} 项全部通过`);
 })().catch((error) => { console.error(error); process.exitCode = 1; });
