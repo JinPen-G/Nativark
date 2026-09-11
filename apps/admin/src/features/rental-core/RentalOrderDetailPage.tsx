@@ -514,7 +514,7 @@ export function RentalOrderDetailPage() {
               ]} />
             </>
           ) : null}
-          <Button type="link" style={{ marginTop: 8, padding: 0 }} onClick={() => navigate("/rental/work-orders")}>前往养护工单管理</Button>
+          {canViewWorkOrders && <Button type="link" style={{ marginTop: 8, padding: 0 }} onClick={() => navigate("/rental/work-orders")}>前往养护工单管理</Button>}
         </Card>
       ) : null}
       {canViewFunding && <Card title={<Space><DollarOutlined />收付款、押金与预授权 <Tag color="orange">模拟资金</Tag></Space>}>
