@@ -38,6 +38,8 @@ export function AssetWorkspacePage() {
   const stocks = useQuery({ queryKey: ["rental-core", "stocks"], queryFn: rentalCoreApi.stockBalances });
   const groups = useQuery({ queryKey: ["rental-core", "groups"], queryFn: rentalCoreApi.itemGroups });
   const locations = useQuery({ queryKey: ["rental-core", "locations"], queryFn: rentalCoreApi.locations });
+  // SHARED-WORK-01A：库存页显示不可用原因与预计恢复时间（来自归还处置事实，不由前端拼造）。
+  const dispositions = useQuery({ queryKey: ["rental-core", "stock-dispositions"], queryFn: () => rentalCoreApi.stockDispositions() });
   const profile = useQuery({ queryKey: ["rental-core", "profile"], queryFn: rentalCoreApi.profile });
   const categories = useQuery({ queryKey: ["rental-core", "categories"], queryFn: rentalCoreApi.categories });
   const category = categories.data?.find((item) => item.code === profile.data?.categoryCode);
@@ -84,7 +86,7 @@ export function AssetWorkspacePage() {
       {visibleTabs.length > 1 && <Tabs className="standalone-tabs" activeKey={activeTab} onChange={(key) => setActiveTab(key as "assets" | "stock")} items={visibleTabs} />}
       <Card className="data-panel" styles={{ body: { paddingBottom: 0 } }}>
         <Space wrap style={{ marginBottom: 16 }}><Input allowClear prefix={<SearchOutlined />} placeholder={`${profile.data?.terminology.identifierLabel ?? "资产编号"}、车牌/VIN、型号或${profile.data?.terminology.fulfillmentLabel ?? "履约地点"}`} value={keyword} onChange={(event) => setKeyword(event.target.value)} style={{ width: 360 }} /></Space>
-        <QueryState loading={assets.isLoading || stocks.isLoading || groups.isLoading || locations.isLoading || profile.isLoading || categories.isLoading} error={assets.error || stocks.error || groups.error || locations.error || profile.error || categories.error}>
+        <QueryState loading={assets.isLoading || stocks.isLoading || groups.isLoading || locations.isLoading || dispositions.isLoading || profile.isLoading || categories.isLoading} error={assets.error || stocks.error || groups.error || locations.error || dispositions.error || profile.error || categories.error}>
           {activeTab === "assets" ? <Table<RentalAsset> rowKey="id" dataSource={assetRows} scroll={{ x: 960 }} columns={[
             { title: `${profile.data?.terminology.itemGroupLabel ?? "产品型号"}照片`, width: 110, fixed: "left", render: (_, row) => {
               const group = (groups.data ?? []).find((item) => item.id === row.itemGroupId);
@@ -105,6 +107,24 @@ export function AssetWorkspacePage() {
             { title: "已预占", dataIndex: "reservedQuantity", align: "right" },
             { title: "维护/清洁", dataIndex: "maintenanceQuantity", align: "right" },
             { title: "可用", dataIndex: "availableQuantity", align: "right", render: (value) => <b>{value}</b> },
+            {
+              title: "不可用原因 / 预计恢复",
+              render: (_, row) => {
+                const blocked = (dispositions.data ?? []).filter(
+                  (item) => item.itemGroupId === row.itemGroupId && item.locationId === row.locationId && item.status !== "restored"
+                );
+                if (!blocked.length) return "-";
+                return blocked.map((item) => (
+                  <div key={item.id} style={{ fontSize: 12 }}>
+                    <Tag color={item.status === "blocked" ? "red" : "orange"} style={{ marginInlineEnd: 4 }}>
+                      {item.status === "blocked" ? "异常隔离" : "周转缓冲"}
+                    </Tag>
+                    {item.blockReason || "养护处理中"}
+                    {item.status === "buffered" && item.bufferUntil ? " · 预计 " + new Date(item.bufferUntil).toLocaleString() : ""}
+                  </div>
+                ));
+              }
+            },
             { title: "操作", render: (_, row) => canManage ? <Button type="link" onClick={() => openStockEditor(row)}>调整库存</Button> : "-" }
           ]} />}
         </QueryState>

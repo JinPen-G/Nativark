@@ -19,7 +19,7 @@ if (fs.existsSync(envFile)) {
 const databaseUrl = process.env.DATABASE_URL || fileEnv.DATABASE_URL;
 assert.ok(databaseUrl, "必须提供专用 DATABASE_URL");
 const databaseName = new URL(databaseUrl).pathname.slice(1);
-assert.match(databaseName, /^store_rental_claude(?:_dedicated_access_\d+)?$/u, "权限真库专项只能运行在专用库");
+assert.match(databaseName, /^store_rental_(?:claude(?:_dedicated_access_\d+)?|zcode)$/u, "权限真库专项只能运行在并行专用库（claude/zcode）");
 process.env.DATABASE_URL = databaseUrl;
 
 require("ts-node").register({
