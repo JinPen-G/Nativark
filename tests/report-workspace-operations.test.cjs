@@ -22,12 +22,15 @@ const env = Object.fromEntries(
     .filter((l) => l.includes("=") && !l.trim().startsWith("#"))
     .map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1).replace(/^"|"$/g, "")])
 );
-const dbName = new URL(env.DATABASE_URL).pathname.slice(1);
+// 允许专用验收通过进程环境切换目标库；没有显式环境变量时才回落项目 .env。
+// 这样不会为了跑一次专项去改共享开发库配置文件。
+const databaseUrl = process.env.DATABASE_URL || env.DATABASE_URL;
+const dbName = new URL(databaseUrl).pathname.slice(1);
 if (!/claude/.test(dbName)) {
   console.error(`拒绝执行：REPORT 专项只能跑在专用库上，当前指向 ${dbName}`);
   process.exit(1);
 }
-process.env.DATABASE_URL = env.DATABASE_URL;
+process.env.DATABASE_URL = databaseUrl;
 
 const { PrismaClient, Prisma } = require(path.join(ROOT, "node_modules", "@prisma", "client"));
 const {
