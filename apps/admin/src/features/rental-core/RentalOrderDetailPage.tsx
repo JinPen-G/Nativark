@@ -82,6 +82,7 @@ export function RentalOrderDetailPage() {
   const [inspection, setInspection] = useState<RentalInspectionTemplate>();
   const [inspectionReturnItems, setInspectionReturnItems] = useState<Array<{ allocationId: string; quantity: number }>>();
   const [cancelOpen, setCancelOpen] = useState(false);
+  const [noShowOpen, setNoShowOpen] = useState(false);
   const [substitution, setSubstitution] = useState<{ orderLineId: string; fromItemGroupId: string }>();
   const [partialReturnOpen, setPartialReturnOpen] = useState(false);
   const [fundingOperation, setFundingOperation] = useState<FundingOperation>();
@@ -90,6 +91,7 @@ export function RentalOrderDetailPage() {
   const [feeReviewForm] = Form.useForm<{ decision: "approved" | "rejected"; amount?: number; reason: string }>();
   const [inspectionForm] = Form.useForm<Record<string, unknown> & { exceptionCode?: string; exceptionDescription?: string; exceptionChargeAmount?: number }>();
   const [cancelForm] = Form.useForm<{ reason: string }>();
+  const [noShowForm] = Form.useForm<{ reason: string }>();
   const [substitutionForm] = Form.useForm<{ toItemGroupId: string }>();
   const [partialReturnForm] = Form.useForm<{ items: Array<{ allocationId: string; quantity: number }> }>();
   const [fundingForm] = Form.useForm<{ amount?: number; reason: string; failureCode?: string }>();
@@ -122,6 +124,21 @@ export function RentalOrderDetailPage() {
   const action = useMutation({ mutationFn: (type: "confirm" | "allocate") => type === "confirm" ? rentalCoreApi.confirmOrder(id) : rentalCoreApi.allocateOrder(id), onSuccess: async () => { await refresh(); message.success("订单状态已更新"); }, onError: () => message.error("操作失败，请检查状态、库存或优惠券") });
   const cancel = useMutation({ mutationFn: (values: { reason: string }) => rentalCoreApi.cancelOrder(id, values), onSuccess: async () => { setCancelOpen(false); cancelForm.resetFields(); await refresh(); message.success("订单已取消，费用和优惠券状态已更新"); }, onError: () => message.error("取消失败，请检查规则与订单状态") });
   const expirePending = useMutation({ mutationFn: () => rentalCoreApi.expirePendingOrder(id), onSuccess: async () => { await refresh(); message.success("待支付占用已超时取消，库存、服务容量和优惠已释放"); }, onError: (error: Error) => message.error(error.message || "处理失败：订单可能尚未全部到期或已被其他操作改变") });
+  const markPickupOverdue = useMutation({
+    mutationFn: () => rentalCoreApi.markPickupOverdue(id),
+    onSuccess: async () => { await refresh(); message.success("订单已进入待确认爽约"); },
+    onError: (error: Error) => message.error(error.message || "进入待确认爽约失败")
+  });
+  const sendNoShowNotice = useMutation({
+    mutationFn: () => rentalCoreApi.sendNoShowNotice(id),
+    onSuccess: async () => { await refresh(); message.success("客户通知记录已保存"); },
+    onError: (error: Error) => message.error(error.message || "通知记录失败，请先配置待确认爽约通知模板")
+  });
+  const confirmNoShow = useMutation({
+    mutationFn: (values: { reason: string }) => rentalCoreApi.confirmNoShow(id, values),
+    onSuccess: async () => { setNoShowOpen(false); noShowForm.resetFields(); await refresh(); message.success("订单已确认爽约，资源和优惠占用已释放"); },
+    onError: (error: Error) => message.error(error.message || "确认爽约失败")
+  });
   const handover = useMutation({ mutationFn: async (stage: "pickup" | "return") => { const token = operationToken ?? (await rentalCoreApi.operationLock(id, "acquire")).token; setOperationToken(token); return rentalCoreApi.handoverOrder(id, stage, token); }, onSuccess: async () => { setOperationToken(undefined); await refresh(); message.success("交接已完成"); }, onError: () => message.error("当前规则要求检查，或订单状态不允许直接交接") });
   const settle = useMutation({ mutationFn: () => rentalCoreApi.settleOrder(id), onSuccess: async () => { await refresh(); await queryClient.invalidateQueries({ queryKey: ["rental-core", "order", id, "funding"] }); message.success("订单已结算并关闭"); }, onError: () => message.error("结算失败，请先处理全部押金和预授权余额") });
   const substitute = useMutation({ mutationFn: (values: { toItemGroupId: string }) => rentalCoreApi.substituteBundleComponent(id, { ...substitution!, toItemGroupId: values.toItemGroupId }), onSuccess: async () => { setSubstitution(undefined); substitutionForm.resetFields(); await refresh(); message.success("套装组成已替换并重新预占"); }, onError: () => message.error("替换失败，请检查替代组、订单状态和候选库存") });
@@ -253,6 +270,19 @@ export function RentalOrderDetailPage() {
   const symbol = rentalCurrencySymbol(detail?.currency);
   // 当前该还的时间：续租过就是新时间。约定归还（endAt）不因续租改写（需求 4.6.9）。
   const detailEndAt = detail?.effectiveEndAt ?? detail?.endAt ?? new Date().toISOString();
+  const noShowRule = detail?.ruleSnapshot?.cancellation?.noShow;
+  const pickupOverdueReady = Boolean(
+    detail
+      && [RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.ReadyForPickup].includes(detail.status)
+      && noShowRule?.enabled === true
+      && Date.parse(detail.startAt) + (noShowRule?.pickupGraceMinutes ?? 0) * 60_000 <= Date.now()
+  );
+  const noShowNoticeReady = Boolean(
+    detail?.status === RentalCoreOrderStatus.PickupOverdue
+      && detail.pickupOverdueAt
+      && detail.noShowNoticeAt
+  );
+  const noShowFinalReady = noShowNoticeReady && Date.parse(detail!.pickupOverdueAt!) + (noShowRule?.finalizationMinutes ?? 60) * 60_000 <= Date.now();
   const substitutionLine = detail?.lines.find((line) => line.id === substitution?.orderLineId);
   const substitutionBundle = groups.data?.find((group) => group.id === substitutionLine?.itemGroupId);
   const substitutionSource = substitutionBundle?.bundleComponents.find((component) => component.itemGroupId === substitution?.fromItemGroupId);
@@ -270,6 +300,9 @@ export function RentalOrderDetailPage() {
       <Space wrap>
         {canOperate && detail.status === RentalCoreOrderStatus.Draft && detail.reservations.some((row) => row.status === "soft" && row.expiresAt && Date.parse(row.expiresAt) < Date.now()) && <Button danger loading={expirePending.isPending} onClick={() => modal.confirm({ title: "处理待支付超时？", content: "系统会取消该订单，并释放库存预占、服务容量和优惠券占用。", okText: "确认处理", cancelText: "暂不处理", okButtonProps: { danger: true }, onOk: () => expirePending.mutateAsync() })}>处理待支付超时</Button>}
         {canOperate && detail.status === RentalCoreOrderStatus.Draft && <Button type="primary" onClick={() => action.mutate("confirm")}>确认订单并核销优惠券</Button>}
+        {canOperate && pickupOverdueReady && <Button danger loading={markPickupOverdue.isPending} onClick={() => modal.confirm({ title: "进入待确认爽约？", content: "订单将标记为领取超时，但不会立即释放资源或收取爽约费用；请先通知客户，达到最终时限后再确认爽约。", okText: "确认进入", cancelText: "暂不处理", okButtonProps: { danger: true }, onOk: () => markPickupOverdue.mutateAsync() })}>领取超时</Button>}
+        {canOperate && detail.status === RentalCoreOrderStatus.PickupOverdue && !detail.noShowNoticeAt && <Button loading={sendNoShowNotice.isPending} onClick={() => sendNoShowNotice.mutate()}>通知客户</Button>}
+        {canOperate && noShowNoticeReady && <Button danger loading={confirmNoShow.isPending} onClick={() => { noShowForm.resetFields(); setNoShowOpen(true); }}>{noShowFinalReady ? "确认爽约" : "提前确认爽约"}</Button>}
         {((canPickup && detail.status === RentalCoreOrderStatus.ReadyForPickup) || (canReturn && detail.status === RentalCoreOrderStatus.Renting)) && <Button loading={operationLock.isPending} onClick={() => operationLock.mutate(operationToken ? "release" : "acquire")}>{operationToken ? "结束办理" : "开始 / 接手办理"}</Button>}
         {canPickup && detail.status === RentalCoreOrderStatus.ReadyForPickup && ((detail.ruleSnapshot?.fulfillment.pickupInspectionRequired ?? true) ? <Button type="primary" icon={<SafetyCertificateOutlined />} onClick={() => beginInspection("pickup")}>{profile.data?.terminology.pickupLabel}检查</Button> : <Button type="primary" onClick={() => handover.mutate("pickup")}>直接完成{profile.data?.terminology.pickupLabel}</Button>)}
         {canReturn && detail.status === RentalCoreOrderStatus.Renting && ((detail.ruleSnapshot?.fulfillment.returnInspectionRequired ?? true) ? <Button type="primary" icon={<CheckCircleOutlined />} onClick={() => beginInspection("return")}>{profile.data?.terminology.returnLabel}检查</Button> : <Button type="primary" onClick={() => handover.mutate("return")}>直接完成{profile.data?.terminology.returnLabel}</Button>)}
@@ -280,7 +313,7 @@ export function RentalOrderDetailPage() {
       </Space>
       <OrderAllocationPanel key={detail.id} order={detail} />
       <Card><Descriptions column={{ xs: 1, md: 2, xl: 4 }} items={[
-        { key: "status", label: "状态", children: <Tag>{{ draft: "待确认", reserved: "已确认", ready_for_pickup: "待领取", renting: "租赁中", return_inspection: "归还检查", settling: "待结算", completed: "已完成", cancelled: "已取消" }[detail.status]}</Tag> },
+        { key: "status", label: "状态", children: <Tag>{{ draft: "待确认", reserved: "已确认", pickup_overdue: "待确认爽约", ready_for_pickup: "待领取", renting: "租赁中", return_inspection: "归还检查", settling: "待结算", completed: "已完成", cancelled: "已取消", no_show: "已爽约" }[detail.status]}</Tag> },
         { key: "customer", label: "客户", children: detail.customerName },
         { key: "mode", label: "租赁方式", children: detail.fulfillmentMode },
         {
@@ -518,6 +551,14 @@ export function RentalOrderDetailPage() {
       </Form>
     </Modal>
     <Modal title="取消租赁订单" open={cancelOpen} onCancel={() => setCancelOpen(false)} onOk={() => cancelForm.submit()} confirmLoading={cancel.isPending} destroyOnHidden><Form form={cancelForm} layout="vertical" onFinish={(values) => cancel.mutate(values)}><Alert type="info" showIcon title="系统会撤销未履行租金，再按当前冻结规则计入取消费。" description="天气等特殊豁免必须走审批，不可由本页面直接免除。" style={{ marginBottom: 16 }} /><Form.Item name="reason" label="取消原因" rules={[{ required: true }]}><Input.TextArea rows={3} /></Form.Item></Form></Modal>
+    <Modal title="确认客户爽约" open={noShowOpen} onCancel={() => { setNoShowOpen(false); noShowForm.resetFields(); }} onOk={() => noShowForm.submit()} confirmLoading={confirmNoShow.isPending} destroyOnHidden>
+      <Alert type="warning" showIcon title={noShowFinalReady ? "最终时限已到。确认后会释放库存、服务容量和优惠券占用；已支付金额按规则进入待退款/资金处理。" : "这是有权限人员的提前确认。请确认已通知客户并填写事实原因；确认后会释放库存、服务容量和优惠券占用。"} style={{ marginBottom: 16 }} />
+      <Form form={noShowForm} layout="vertical" onFinish={(values) => confirmNoShow.mutate(values)}>
+        <Form.Item name="reason" label="爽约原因" rules={[{ required: true, whitespace: true, message: "请输入爽约原因" }]}>
+          <Input.TextArea rows={3} maxLength={500} />
+        </Form.Item>
+      </Form>
+    </Modal>
     <Modal title="替换套装组成" open={Boolean(substitution)} onCancel={() => setSubstitution(undefined)} onOk={() => substitutionForm.submit()} confirmLoading={substitute.isPending} destroyOnHidden><Form form={substitutionForm} layout="vertical" onFinish={(values) => substitute.mutate(values)}><Form.Item label="当前组成"><Input disabled value={groups.data?.find((group) => group.id === substitution?.fromItemGroupId)?.name} /></Form.Item><Form.Item name="toItemGroupId" label="替代商品" rules={[{ required: true }]}><Select options={substitutionOptions} placeholder="选择同一替代组的候选商品" /></Form.Item></Form></Modal>
     <Modal title={detail?.ruleSnapshot?.fulfillment.returnInspectionRequired ? "部分归还检查" : "部分归还"} open={partialReturnOpen} onCancel={() => setPartialReturnOpen(false)} onOk={() => partialReturnForm.submit()} confirmLoading={partialReturn.isPending} destroyOnHidden><Form form={partialReturnForm} layout="vertical" onFinish={async (values) => { if (detail?.ruleSnapshot?.fulfillment.returnInspectionRequired) { if (await beginInspection("return", values.items)) setPartialReturnOpen(false); return; } partialReturn.mutate(values); }}><Alert type="info" showIcon title={detail?.ruleSnapshot?.fulfillment.returnInspectionRequired ? "选择本批归还项后，下一步填写归还检查。" : "本批实物会直接释放；最后一批仍须使用整单归还。"} style={{ marginBottom: 16 }} /><Form.List name="items">{(fields, { add, remove }) => <Space orientation="vertical" style={{ width: "100%" }}>{fields.map((field) => <Space key={field.key} align="start"><Form.Item {...field} name={[field.name, "allocationId"]} rules={[{ required: true }]}><Select style={{ width: 320 }} placeholder="选择待归还资产或数量项" options={detail?.allocations.filter((allocation) => allocation.status === "picked_up").map((allocation) => ({ value: allocation.id, label: allocation.assetNo ?? `${groups.data?.find((group) => group.id === allocation.itemGroupId)?.name ?? "数量库存"} · 剩余 ${allocation.quantity}` }))} /></Form.Item><Form.Item {...field} name={[field.name, "quantity"]} rules={[{ required: true }]}><InputNumber min={1} precision={0} style={{ width: 100 }} /></Form.Item><Button type="text" danger icon={<MinusCircleOutlined />} onClick={() => remove(field.name)} /></Space>)}<Button type="dashed" icon={<PlusOutlined />} onClick={() => add({ quantity: 1 })}>增加归还项</Button></Space>}</Form.List></Form></Modal>
     <Modal title={fundingOperation ? `${FUNDING_ACTION_LABELS[fundingOperation.action]}${FUNDING_INSTRUMENT_LABELS[fundingOperation.instrument]}（模拟）` : "模拟资金操作"} open={Boolean(fundingOperation)} onCancel={() => { setFundingOperation(undefined); fundingForm.resetFields(); }} onOk={() => fundingForm.submit()} confirmLoading={fundingAction.isPending} destroyOnHidden>

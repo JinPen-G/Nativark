@@ -216,7 +216,7 @@ function defaultBusinessSettings(
       referralTrigger: "first_order_completed"
     },
     notifications: {
-      enabledEvents: ["member.registered", "order.created", "order.confirmed", "order.cancelled", "pickup.completed", "return.completed", "pickup.reminder", "return.reminder", "order.overdue"],
+      enabledEvents: ["member.registered", "order.created", "order.confirmed", "order.cancelled", "order.pickup_overdue", "order.no_show", "pickup.completed", "return.completed", "pickup.reminder", "return.reminder", "order.overdue"],
       editableChannels: ["sms", "app_push", "wechat"]
     },
     updatedAt: now(),
@@ -622,7 +622,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     };
     validateRewardCoupon(input.membership.signupRewardEnabled, input.membership.signupRewardType, input.membership.signupRewardAmount, input.membership.signupRewardCouponTemplateId);
     validateRewardCoupon(input.membership.referralRewardEnabled, input.membership.referralRewardType, Math.max(input.membership.referrerRewardAmount, input.membership.inviteeRewardAmount), input.membership.referralRewardCouponTemplateId);
-    const supportedNotificationEvents = new Set(["member.registered", "referral.rewarded", "order.created", "order.confirmed", "order.cancelled", "pickup.completed", "return.completed", "pickup.reminder", "return.reminder", "order.overdue", "qualification.reviewed", "refund.completed", "asset.exception"]);
+    const supportedNotificationEvents = new Set(["member.registered", "referral.rewarded", "order.created", "order.confirmed", "order.cancelled", "order.pickup_overdue", "order.no_show", "pickup.completed", "return.completed", "pickup.reminder", "return.reminder", "order.overdue", "qualification.reviewed", "refund.completed", "asset.exception"]);
     if (!input.notifications.editableChannels.length || input.notifications.enabledEvents.some((event) => !supportedNotificationEvents.has(event))) throw new BadRequestException("通知渠道不能为空，且只能启用已注册的系统事件");
     const nextSettings = {
       ...input,
@@ -1242,6 +1242,99 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     return this.cancelOrder(tenantId, orderId, RENTAL_PENDING_PAYMENT_TIMEOUT_REASON, 0, tx, operator);
   }
 
+  /** RULE-CLOSE-01：列出已超过领取宽限、仍未领取的订单。 */
+  async listPickupOverdueOrderIds(tenantId: string, at = now(), take = 50) {
+    this.state(tenantId);
+    const cutoff = Date.parse(at);
+    if (!Number.isFinite(cutoff)) throw new BadRequestException("检查时间无效");
+    const rows = await this.factStore.listOrders(tenantId);
+    return rows
+      .filter((order) => [RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.ReadyForPickup].includes(order.status))
+      .filter((order) => order.ruleSnapshot.cancellation.noShow?.enabled === true)
+      .filter((order) => {
+        const grace = order.ruleSnapshot.cancellation.noShow?.pickupGraceMinutes ?? 0;
+        return Date.parse(order.startAt) + grace * 60_000 <= cutoff;
+      })
+      .sort((a, b) => Date.parse(a.startAt) - Date.parse(b.startAt))
+      .slice(0, Math.min(Math.max(1, take), 200))
+      .map((order) => order.id);
+  }
+
+  /** 已通知且达到最终确认时限的待确认爽约候选。 */
+  async listNoShowCandidateIds(tenantId: string, at = now(), take = 50) {
+    this.state(tenantId);
+    const cutoff = Date.parse(at);
+    if (!Number.isFinite(cutoff)) throw new BadRequestException("检查时间无效");
+    const rows = await this.factStore.listOrders(tenantId);
+    return rows
+      .filter((order) => order.status === RentalCoreOrderStatus.PickupOverdue && order.pickupOverdueAt && order.noShowNoticeAt)
+      .filter((order) => order.ruleSnapshot.cancellation.noShow?.enabled === true)
+      .filter((order) => Date.parse(order.pickupOverdueAt!) + (order.ruleSnapshot.cancellation.noShow?.finalizationMinutes ?? 60) * 60_000 <= cutoff)
+      .sort((a, b) => Date.parse(a.pickupOverdueAt!) - Date.parse(b.pickupOverdueAt!))
+      .slice(0, Math.min(Math.max(1, take), 200))
+      .map((order) => order.id);
+  }
+
+  async markPickupOverdueOrder(tenantId: string, orderId: string, tx?: RentalFactTx, operator = "system", at = now()) {
+    this.state(tenantId);
+    const order = await this.lockedOrder(tenantId, orderId, tx);
+    if (![RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.ReadyForPickup].includes(order.status)) {
+      throw new ConflictException("只有已确认或待领取订单可以进入待确认爽约");
+    }
+    const rule = order.ruleSnapshot.cancellation.noShow;
+    if (rule?.enabled !== true) throw new ConflictException("当前订单规则未启用爽约处理");
+    const atMs = Date.parse(at);
+    const deadline = Date.parse(order.startAt) + (rule?.pickupGraceMinutes ?? 0) * 60_000;
+    if (!Number.isFinite(atMs) || atMs < deadline) throw new ConflictException("尚未超过领取宽限时间");
+    order.status = RentalCoreOrderStatus.PickupOverdue;
+    order.pickupOverdueAt = at;
+    order.updatedAt = at;
+    await this.factStore.saveOrderAggregate(order, [], tx);
+    void operator;
+    return order;
+  }
+
+  /** 只有现有模拟通知适配器真正产生日志后，才把通知时间写入订单。 */
+  async recordNoShowNotice(tenantId: string, orderId: string, noticeAt = now(), tx?: RentalFactTx) {
+    this.state(tenantId);
+    const order = await this.lockedOrder(tenantId, orderId, tx);
+    if (order.status !== RentalCoreOrderStatus.PickupOverdue) throw new ConflictException("订单不在待确认爽约状态");
+    if (!order.noShowNoticeAt) {
+      if (!Number.isFinite(Date.parse(noticeAt))) throw new BadRequestException("通知时间无效");
+      order.noShowNoticeAt = noticeAt;
+      order.updatedAt = noticeAt;
+      await this.factStore.saveOrderAggregate(order, [], tx);
+    }
+    return order;
+  }
+
+  async confirmNoShowOrder(tenantId: string, orderId: string, reason: string, tx?: RentalFactTx, operator = "system", at = now(), allowEarly = false) {
+    this.state(tenantId);
+    const current = await this.lockedOrder(tenantId, orderId, tx);
+    if (current.status !== RentalCoreOrderStatus.PickupOverdue) throw new ConflictException("只有待确认爽约订单才能确认爽约");
+    const rule = current.ruleSnapshot.cancellation.noShow;
+    if (rule?.enabled !== true) throw new ConflictException("当前订单规则未启用爽约处理");
+    if (!current.pickupOverdueAt || !current.noShowNoticeAt) throw new ConflictException("必须先记录客户通知，才能确认爽约");
+    const atMs = Date.parse(at);
+    const finalAt = Date.parse(current.pickupOverdueAt) + (rule?.finalizationMinutes ?? 60) * 60_000;
+    if (!Number.isFinite(atMs)) throw new BadRequestException("确认时间无效");
+    if (!allowEarly && atMs < finalAt) throw new ConflictException("尚未到达爽约最终确认时限");
+    if (!reason?.trim()) throw new BadRequestException("爽约原因不能为空");
+    const base = Math.max(0, current.finalPayableAmount ?? current.payableAmount);
+    const fee = rule?.feeType === "fixed_amount"
+      ? Math.min(base, Math.max(0, rule.feeValue))
+      : rule?.feeType === "percentage"
+        ? Math.min(base, Math.max(0, roundMoney(base * Math.max(0, rule.feeValue) / 100)))
+        : 0;
+    const order = await this.cancelOrder(tenantId, orderId, `客户爽约：${reason.trim()}`, fee, tx, operator);
+    order.status = RentalCoreOrderStatus.NoShow;
+    order.noShowAt = at;
+    order.noShowReason = reason.trim();
+    order.updatedAt = at;
+    await this.factStore.saveOrderAggregate(order, [], tx);
+    return order;
+  }
+
   async getOrder(tenantId: string, orderId: string) {
     this.state(tenantId);
     return this.publicOrder(await this.requireOrder(tenantId, orderId));
@@ -1854,7 +1947,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   async cancelOrder(tenantId: string, orderId: string, reason: string, chargeAmount = 0, tx?: RentalFactTx, operator?: string) {
     this.state(tenantId);
     const order = await this.lockedOrder(tenantId, orderId, tx);
-    if ([RentalCoreOrderStatus.Renting, RentalCoreOrderStatus.Settling, RentalCoreOrderStatus.Completed, RentalCoreOrderStatus.Cancelled].includes(order.status)) throw new ConflictException("当前订单状态不能取消");
+    if ([RentalCoreOrderStatus.Renting, RentalCoreOrderStatus.Settling, RentalCoreOrderStatus.Completed, RentalCoreOrderStatus.Cancelled, RentalCoreOrderStatus.NoShow].includes(order.status)) throw new ConflictException("当前订单状态不能取消");
     if (!reason?.trim()) throw new BadRequestException("取消原因不能为空");
     // 结算 Hook：取消费用是一笔真实结算。能力可以给出费用**依据**或提示，
     // 但金额如何计入由下面的 Core 逻辑决定——能力拿到的是冻结快照，改不了 order。

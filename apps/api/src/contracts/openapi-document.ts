@@ -1356,12 +1356,28 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: "Expire pending-payment soft reservations in the current workspace", permissions: ["store-rental:order:operate"], responseSchema: "GenericObject"
   },
   {
+    method: "post", path: "/api/rental/v1/orders/reconcile-pickup-overdue", tag: "RentalCore", operationId: "reconcilePickupOverdueRentalCoreOrders",
+    summary: "Advance overdue pickup orders and finalize eligible no-shows", permissions: ["store-rental:order:operate"], responseSchema: "GenericObject"
+  },
+  {
     method: "get", path: "/api/rental/v1/orders/{id}", tag: "RentalCore", operationId: "getRentalCoreOrder",
     summary: "Get Rental Core order", permissions: ["store-rental:order:view", "store-rental:vehicle:view"], responseSchema: "GenericObject"
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/expire-pending", tag: "RentalCore", operationId: "expirePendingRentalCoreOrder",
     summary: "Expire one pending-payment soft reservation when all holds have elapsed", permissions: ["store-rental:order:operate"], responseSchema: "GenericObject"
+  },
+  {
+    method: "post", path: "/api/rental/v1/orders/{id}/mark-pickup-overdue", tag: "RentalCore", operationId: "markPickupOverdueRentalCoreOrder",
+    summary: "Move an order past pickup grace into pending no-show", permissions: ["store-rental:order:operate"], responseSchema: "GenericObject"
+  },
+  {
+    method: "post", path: "/api/rental/v1/orders/{id}/no-show-notice", tag: "RentalCore", operationId: "sendNoShowNoticeRentalCoreOrder",
+    summary: "Record a simulated customer notice for a pending no-show", permissions: ["store-rental:order:operate"], responseSchema: "GenericObject"
+  },
+  {
+    method: "post", path: "/api/rental/v1/orders/{id}/confirm-no-show", tag: "RentalCore", operationId: "confirmNoShowRentalCoreOrder",
+    summary: "Finalize an eligible no-show and release its resources", permissions: ["store-rental:order:operate"], requestSchema: "GenericObject", responseSchema: "GenericObject"
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/confirm", tag: "RentalCore", operationId: "confirmRentalCoreOrder",

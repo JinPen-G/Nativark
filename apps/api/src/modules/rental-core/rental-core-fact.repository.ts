@@ -412,6 +412,10 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       totalAmount: new Prisma.Decimal(order.totalAmount),
       cancellationReason: order.cancellationReason ?? null,
       cancelledAt: order.cancelledAt ? new Date(order.cancelledAt) : null,
+      pickupOverdueAt: order.pickupOverdueAt ? new Date(order.pickupOverdueAt) : null,
+      noShowNoticeAt: order.noShowNoticeAt ? new Date(order.noShowNoticeAt) : null,
+      noShowAt: order.noShowAt ? new Date(order.noShowAt) : null,
+      noShowReason: order.noShowReason ?? null,
       completedAt: order.completedAt ? new Date(order.completedAt) : null,
       createdBy: order.createdBy
     };
@@ -1456,6 +1460,10 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       totalAmount: num(row.totalAmount),
       cancellationReason: row.cancellationReason ?? undefined,
       cancelledAt: optionalIso(row.cancelledAt),
+      pickupOverdueAt: optionalIso(row.pickupOverdueAt),
+      noShowNoticeAt: optionalIso(row.noShowNoticeAt),
+      noShowAt: optionalIso(row.noShowAt),
+      noShowReason: row.noShowReason ?? undefined,
       completedAt: optionalIso(row.completedAt),
       lines,
       reservations,

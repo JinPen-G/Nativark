@@ -11,12 +11,14 @@ import { QueryState } from "@/components/QueryState";
 const orderStatusLabels: Record<RentalCoreOrderStatus, string> = {
   [RentalCoreOrderStatus.Draft]: "草稿",
   [RentalCoreOrderStatus.Reserved]: "已预订",
+  [RentalCoreOrderStatus.PickupOverdue]: "待确认爽约",
   [RentalCoreOrderStatus.ReadyForPickup]: "待领取",
   [RentalCoreOrderStatus.Renting]: "租赁中",
   [RentalCoreOrderStatus.ReturnInspection]: "待归还检查",
   [RentalCoreOrderStatus.Settling]: "待结算",
   [RentalCoreOrderStatus.Completed]: "已关闭",
-  [RentalCoreOrderStatus.Cancelled]: "已取消"
+  [RentalCoreOrderStatus.Cancelled]: "已取消",
+  [RentalCoreOrderStatus.NoShow]: "已爽约"
 };
 const assetStatusLabels: Record<RentalAssetStatus, string> = { available: "可用", reserved: "已预占", rented: "租赁中", inspection: "检查中", maintenance: "维护中", disabled: "已停用" };
 
@@ -40,7 +42,7 @@ export function WorkbenchPage() {
   const loading = profile.isLoading || orders.isLoading || assets.isLoading || stocks.isLoading;
   const error = profile.error || orders.error || assets.error || stocks.error;
   const filteredOrders = useMemo(() => (orders.data ?? []).filter((order) => new Date(order.createdAt).getTime() >= periodStart(period)), [orders.data, period]);
-  const activeOrders = filteredOrders.filter((order) => [RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.ReadyForPickup, RentalCoreOrderStatus.Renting, RentalCoreOrderStatus.ReturnInspection, RentalCoreOrderStatus.Settling].includes(order.status));
+  const activeOrders = filteredOrders.filter((order) => [RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.PickupOverdue, RentalCoreOrderStatus.ReadyForPickup, RentalCoreOrderStatus.Renting, RentalCoreOrderStatus.ReturnInspection, RentalCoreOrderStatus.Settling].includes(order.status));
   const completedOrders = filteredOrders.filter((order) => order.status === RentalCoreOrderStatus.Completed);
   const periodRevenue = completedOrders.reduce((total, order) => total + order.finalPayableAmount, 0);
   const availableUnits = (assets.data ?? []).filter((asset) => asset.status === "available").length + (stocks.data ?? []).reduce((total, stock) => total + stock.availableQuantity, 0);

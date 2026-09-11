@@ -375,7 +375,7 @@ export function requiredPermissions(method: string, path: string) {
     return method === "GET" ? ["store-rental:order:view"] : ["store-rental:order:operate", "store-rental:order:create"];
   }
   // RULE-CLOSE-01：待支付超时只能由订单操作权限触发，不能因为静态路径被通用订单详情规则放行。
-  if (path === "/rental/v1/orders/expire-pending" || path.match(/^\/rental\/v1\/orders\/[^/]+\/expire-pending$/u)) {
+  if (path === "/rental/v1/orders/expire-pending" || path === "/rental/v1/orders/reconcile-pickup-overdue" || path.match(/^\/rental\/v1\/orders\/[^/]+\/(?:expire-pending|mark-pickup-overdue|no-show-notice|confirm-no-show)$/u)) {
     return ["store-rental:order:operate"];
   }
   if (path.match(/^\/rental\/v1\/orders\/[^/]+$/)) {

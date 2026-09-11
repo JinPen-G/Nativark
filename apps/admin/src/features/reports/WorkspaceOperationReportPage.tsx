@@ -29,12 +29,14 @@ import { QueryState } from "@/components/QueryState";
  */
 const statusLabels: Record<string, string> = {
   [RentalCoreOrderStatus.Reserved]: "已预订",
+  [RentalCoreOrderStatus.PickupOverdue]: "待确认爽约",
   [RentalCoreOrderStatus.ReadyForPickup]: "待取",
   [RentalCoreOrderStatus.Renting]: "在租",
   [RentalCoreOrderStatus.ReturnInspection]: "归还检查",
   [RentalCoreOrderStatus.Settling]: "待结算",
   [RentalCoreOrderStatus.Completed]: "已关闭",
-  [RentalCoreOrderStatus.Cancelled]: "已取消"
+  [RentalCoreOrderStatus.Cancelled]: "已取消",
+  [RentalCoreOrderStatus.NoShow]: "已爽约"
 };
 
 const exceptionLabels: Record<string, string> = {

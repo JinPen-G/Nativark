@@ -79,6 +79,7 @@ enum RentalAssetState {
 enum RentalOrderV1Status {
   DRAFT             @map("draft")
   RESERVED          @map("reserved")
+  PICKUP_OVERDUE    @map("pickup_overdue")
   READY_FOR_PICKUP  @map("ready_for_pickup")
   RENTING           @map("renting")
   RETURN_INSPECTION @map("return_inspection")
@@ -91,6 +92,7 @@ enum RentalOrderV1Status {
   SETTLING          @map("settling")
   COMPLETED         @map("completed")
   CANCELLED         @map("cancelled")
+  NO_SHOW           @map("no_show")
 }
 
 enum RentalReservationState {
@@ -1956,6 +1958,10 @@ model RentalOrder {
   totalAmount                   Decimal                        @db.Decimal(12, 2)
   cancellationReason            String?
   cancelledAt                   DateTime?
+  pickupOverdueAt               DateTime?
+  noShowNoticeAt                DateTime?
+  noShowAt                      DateTime?
+  noShowReason                  String?
   completedAt                   DateTime?
   createdBy                     String
   lines                         RentalOrderLine[]

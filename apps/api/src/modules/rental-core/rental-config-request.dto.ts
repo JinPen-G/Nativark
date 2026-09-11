@@ -970,6 +970,32 @@ export class RuleConfigCancellationInputDto {
 
   @IsBoolean()
   weatherExceptionEnabled!: boolean;
+
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => RuleConfigNoShowInputDto)
+  noShow?: RuleConfigNoShowInputDto;
+}
+
+export class RuleConfigNoShowInputDto {
+  @IsBoolean()
+  enabled!: boolean;
+
+  @IsInt()
+  @Min(0)
+  pickupGraceMinutes!: number;
+
+  @IsInt()
+  @Min(1)
+  finalizationMinutes!: number;
+
+  @IsIn(CANCELLATION_FEE_TYPES)
+  feeType!: (typeof CANCELLATION_FEE_TYPES)[number];
+
+  @IsNumber()
+  @Min(0)
+  feeValue!: number;
 }
 
 export class RuleConfigQualificationInputDto {

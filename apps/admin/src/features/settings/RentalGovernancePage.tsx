@@ -675,6 +675,10 @@ export function RentalGovernancePage() {
       extension: { pricingMode: "incremental", ...(config.extension ?? { enabled: true, forceImmediateWhenOverdue: true }) },
       earlyReturn: config.earlyReturn ?? { mode: "none", minAdvanceHours: 24, refundPercent: 0, refundUndeliveredServices: false },
       tax: config.tax ?? { rate: 0, inclusive: true },
+      cancellation: {
+        ...(config.cancellation ?? {}),
+        noShow: config.cancellation?.noShow ?? { enabled: true, pickupGraceMinutes: 30, finalizationMinutes: 60, feeType: "percentage", feeValue: 100 }
+      },
       changeReason: source.status === "draft" ? source.changeReason : "调整租赁业务规则",
     });
     setRuleEditor(source);
@@ -2055,6 +2059,52 @@ export function RentalGovernancePage() {
                   valuePropName="checked"
                 >
                   <Switch />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item
+                  name={["cancellation", "noShow", "enabled"]}
+                  label="启用爽约处理"
+                  valuePropName="checked"
+                  tooltip="领取超过宽限后先进入待确认爽约；通知客户并达到最终时限后，才能确认爽约并释放占用。"
+                >
+                  <Switch />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item
+                  name={["cancellation", "noShow", "pickupGraceMinutes"]}
+                  label="领取宽限（分钟）"
+                  rules={[{ required: true, message: "请填写领取宽限" }]}
+                >
+                  <InputNumber min={0} precision={0} style={{ width: "100%" }} />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item
+                  name={["cancellation", "noShow", "finalizationMinutes"]}
+                  label="通知后最终确认（分钟）"
+                  rules={[{ required: true, message: "请填写最终确认时限" }]}
+                >
+                  <InputNumber min={1} precision={0} style={{ width: "100%" }} />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item
+                  name={["cancellation", "noShow", "feeType"]}
+                  label="爽约费用类型"
+                >
+                  <Select options={[{ value: "none", label: "不收取" }, { value: "fixed_amount", label: "固定金额" }, { value: "percentage", label: "应付金额百分比" }]} />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item
+                  name={["cancellation", "noShow", "feeValue"]}
+                  label="爽约费用值"
+                  tooltip="固定金额按结算币种填写；百分比填写 0-100。"
+                  rules={[{ required: true, message: "请填写爽约费用值" }]}
+                >
+                  <InputNumber min={0} style={{ width: "100%" }} />
                 </Form.Item>
               </Col>
               <Col span={8}>

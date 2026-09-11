@@ -43,12 +43,14 @@ export enum RentalReservationStatus {
 export enum RentalCoreOrderStatus {
   Draft = "draft",
   Reserved = "reserved",
+  PickupOverdue = "pickup_overdue",
   ReadyForPickup = "ready_for_pickup",
   Renting = "renting",
   ReturnInspection = "return_inspection",
   Settling = "settling",
   Completed = "completed",
-  Cancelled = "cancelled"
+  Cancelled = "cancelled",
+  NoShow = "no_show"
 }
 
 export const RENTAL_CAPABILITY_CODES = [
@@ -3280,6 +3282,18 @@ export interface RentalTaxRule {
   label?: string;
 }
 
+export interface RentalNoShowRule {
+  /** 开启后，领取时间超过宽限才进入待确认爽约；关闭时不自动推进爽约状态。 */
+  enabled: boolean;
+  /** 从订单 startAt 起算的领取宽限，独立于未支付保留和归还逾时宽限。 */
+  pickupGraceMinutes: number;
+  /** 进入待确认爽约后，必须等待的最终确认时限。 */
+  finalizationMinutes: number;
+  /** 爽约最终结算的费用依据。 */
+  feeType: "none" | "fixed_amount" | "percentage";
+  feeValue: number;
+}
+
 export interface RentalRuleConfig {  /**
    * 计价相关的经营空间规则（需求 4.4.5：「班次时长及边界由经营空间规则定义」）。
    *
@@ -3341,6 +3355,8 @@ export interface RentalRuleConfig {  /**
     lateFeeType: "none" | "fixed_amount" | "percentage";
     lateFeeValue: number;
     weatherExceptionEnabled: boolean;
+    /** 爽约独立于客户主动取消；缺省表示历史订单没有这组规则。 */
+    noShow?: RentalNoShowRule;
   };
   qualification: {
     required: boolean;
@@ -4839,6 +4855,12 @@ export interface RentalOrder {
   currency?: RentalCurrency;
   cancellationReason?: string;
   cancelledAt?: string;
+  /** 订单已超过领取宽限，但尚未完成最终爽约确认。 */
+  pickupOverdueAt?: string;
+  /** 已记录客户通知的模拟发送时间；没有通知记录不得自动判定爽约。 */
+  noShowNoticeAt?: string;
+  noShowAt?: string;
+  noShowReason?: string;
   completedAt?: string;
   totalAmount: number;
   lines: RentalOrderLine[];

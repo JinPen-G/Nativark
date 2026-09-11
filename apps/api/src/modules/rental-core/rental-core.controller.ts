@@ -480,6 +480,185 @@ export class RentalCoreController {
     return this.committed(tenantId, order);
   }
 
+  /** 领取宽限结束后只进入待确认爽约，不释放资源，也不直接进入终态。 */
+  @Post("orders/reconcile-pickup-overdue")
+  async reconcilePickupOverdue(@Req() req: AuthenticatedRequest, @Query("limit") limit?: string) {
+    const parsedLimit = limit === undefined ? 50 : Number(limit);
+    if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 200) {
+      throw new BadRequestException("处理数量必须是 1 至 200 的整数");
+    }
+    const tenantId = req.user.tenantId;
+    const overdueCandidates = await this.service.listPickupOverdueOrderIds(tenantId, new Date().toISOString(), parsedLimit);
+    const noShowCandidates = await this.service.listNoShowCandidateIds(tenantId, new Date().toISOString(), parsedLimit);
+    const results: Array<{ orderId: string; status: "pickup_overdue" | "no_show" | "skipped"; notice: "recorded" | "pending" | "not_required"; reason?: string }> = [];
+    for (const orderId of overdueCandidates) {
+      try {
+        const { result: order, replayed } = await this.idempotent.executeWithReplayFlag({
+          tenantId,
+          action: "order.mark_pickup_overdue",
+          key: undefined,
+          fallbackKey: `order.mark_pickup_overdue:${orderId}`,
+          request: { orderId },
+          orderId,
+          run: (tx) => this.service.markPickupOverdueOrder(tenantId, orderId, tx, req.user.displayName),
+          replay: async () => {
+            const latest = await this.service.getOrder(tenantId, orderId);
+            return latest.status === RentalCoreOrderStatus.PickupOverdue ? latest : undefined;
+          }
+        });
+        let notice: "recorded" | "pending" | "not_required" = order.noShowNoticeAt ? "recorded" : "pending";
+        if (!replayed && !order.noShowNoticeAt) {
+          const logs = await this.emitOrderEvent(tenantId, "order.pickup_overdue", order);
+          if (logs.length) {
+            await this.idempotent.execute({
+              tenantId,
+              action: "order.no_show_notice",
+              key: undefined,
+              fallbackKey: `order.no_show_notice:${orderId}`,
+              request: { orderId },
+              orderId,
+              run: (tx) => this.service.recordNoShowNotice(tenantId, orderId, new Date().toISOString(), tx),
+              replay: async () => {
+                const latest = await this.service.getOrder(tenantId, orderId);
+                return latest.noShowNoticeAt ? latest : undefined;
+              }
+            });
+            notice = "recorded";
+          }
+        }
+        results.push({ orderId, status: "pickup_overdue", notice });
+      } catch (error) {
+        if (!(error instanceof ConflictException)) throw error;
+        results.push({ orderId, status: "skipped", notice: "not_required", reason: error.message });
+      }
+    }
+    for (const orderId of noShowCandidates) {
+      try {
+        const { result: order, replayed } = await this.idempotent.executeWithReplayFlag({
+          tenantId,
+          action: "order.confirm_no_show",
+          key: undefined,
+          fallbackKey: `order.confirm_no_show:${orderId}`,
+          request: { orderId, reason: "领取超时且最终时限已到" },
+          orderId,
+          run: async (tx) => {
+            const confirmed = await this.service.confirmNoShowOrder(tenantId, orderId, "领取超时且最终时限已到", tx, req.user.displayName);
+            await this.releaseCancelledOrderResources(tenantId, orderId, tx, "order_no_show");
+            return confirmed;
+          },
+          replay: async () => {
+            const latest = await this.service.getOrder(tenantId, orderId);
+            return latest.status === RentalCoreOrderStatus.NoShow ? latest : undefined;
+          }
+        });
+        if (!replayed) await this.emitOrderEvent(tenantId, "order.no_show", order);
+        results.push({ orderId, status: "no_show", notice: "recorded" });
+      } catch (error) {
+        if (!(error instanceof ConflictException)) throw error;
+        results.push({ orderId, status: "skipped", notice: "not_required", reason: error.message });
+      }
+    }
+    await this.business.refreshFromDatabase();
+    await this.business.refreshCouponTemplateCache(tenantId, this.context(tenantId));
+    await this.service.persist(tenantId);
+    return {
+      scanned: overdueCandidates.length + noShowCandidates.length,
+      pickupOverdue: results.filter((row) => row.status === "pickup_overdue").length,
+      noShow: results.filter((row) => row.status === "no_show").length,
+      skipped: results.filter((row) => row.status === "skipped").length,
+      noticePending: results.filter((row) => row.notice === "pending").length,
+      results
+    };
+  }
+
+  @Post("orders/:id/mark-pickup-overdue")
+  async markPickupOverdue(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
+    const tenantId = req.user.tenantId;
+    const { result: order, replayed } = await this.idempotent.executeWithReplayFlag({
+      tenantId,
+      action: "order.mark_pickup_overdue",
+      key: idempotencyKeyOf(req),
+      fallbackKey: `order.mark_pickup_overdue:${id}`,
+      request: { orderId: id },
+      orderId: id,
+      run: (tx) => this.service.markPickupOverdueOrder(tenantId, id, tx, req.user.displayName),
+      replay: async () => {
+        const latest = await this.service.getOrder(tenantId, id);
+        return latest.status === RentalCoreOrderStatus.PickupOverdue ? latest : undefined;
+      }
+    });
+    let committedOrder = order;
+    if (!replayed && !order.noShowNoticeAt) {
+      const logs = await this.emitOrderEvent(tenantId, "order.pickup_overdue", order);
+      if (logs.length) {
+        const noticed = await this.idempotent.execute({
+          tenantId,
+          action: "order.no_show_notice",
+          key: undefined,
+          fallbackKey: `order.no_show_notice:${id}`,
+          request: { orderId: id },
+          orderId: id,
+          run: (tx) => this.service.recordNoShowNotice(tenantId, id, new Date().toISOString(), tx),
+          replay: async () => {
+            const latest = await this.service.getOrder(tenantId, id);
+            return latest.noShowNoticeAt ? latest : undefined;
+          }
+        });
+        committedOrder = noticed;
+      }
+    }
+    return this.committed(tenantId, committedOrder);
+  }
+
+  @Post("orders/:id/no-show-notice")
+  async sendNoShowNotice(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
+    const tenantId = req.user.tenantId;
+    const current = await this.service.getOrder(tenantId, id);
+    if (current.status !== RentalCoreOrderStatus.PickupOverdue) throw new ConflictException("订单不在待确认爽约状态");
+    const logs = await this.emitOrderEvent(tenantId, "order.pickup_overdue", current);
+    if (!logs.length && !current.noShowNoticeAt) throw new ConflictException("当前空间没有启用待确认爽约通知模板");
+    const { result: order } = await this.idempotent.executeWithReplayFlag({
+      tenantId,
+      action: "order.no_show_notice",
+      key: idempotencyKeyOf(req),
+      fallbackKey: `order.no_show_notice:${id}`,
+      request: { orderId: id },
+      orderId: id,
+      run: (tx) => this.service.recordNoShowNotice(tenantId, id, new Date().toISOString(), tx),
+      replay: async () => {
+        const latest = await this.service.getOrder(tenantId, id);
+        return latest.noShowNoticeAt ? latest : undefined;
+      }
+    });
+    return this.committed(tenantId, order);
+  }
+
+  @Post("orders/:id/confirm-no-show")
+  async confirmNoShow(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: CancelRentalOrderDto) {
+    const tenantId = req.user.tenantId;
+    const { result: order, replayed } = await this.idempotent.executeWithReplayFlag({
+      tenantId,
+      action: "order.confirm_no_show",
+      key: idempotencyKeyOf(req),
+      fallbackKey: `order.confirm_no_show:${id}`,
+      request: { orderId: id, reason: body.reason },
+      orderId: id,
+      run: async (tx) => {
+        const confirmed = await this.service.confirmNoShowOrder(tenantId, id, body.reason, tx, req.user.displayName, new Date().toISOString(), true);
+        await this.releaseCancelledOrderResources(tenantId, id, tx, "order_no_show");
+        return confirmed;
+      },
+      replay: async () => {
+        const latest = await this.service.getOrder(tenantId, id);
+        return latest.status === RentalCoreOrderStatus.NoShow ? latest : undefined;
+      }
+    });
+    if (!replayed) await this.emitOrderEvent(tenantId, "order.no_show", order);
+    await this.business.refreshFromDatabase();
+    await this.business.refreshCouponTemplateCache(tenantId, this.context(tenantId));
+    return this.committed(tenantId, order);
+  }
+
   @Post("orders/:id/confirm") async confirm(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
     const tenantId = req.user.tenantId;
     const { result: order, replayed } = await this.idempotent.executeWithReplayFlag({

@@ -12,7 +12,7 @@ import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
 import { hasPendingFeeReview } from "./orderFeeReview";
 
-const statusLabels: Record<string, string> = { draft: "软预占", reserved: "已确认", ready_for_pickup: "待交付", renting: "租赁中", return_inspection: "归还检查", settling: "待结算", completed: "已关闭", cancelled: "已取消" };
+const statusLabels: Record<string, string> = { draft: "软预占", reserved: "已确认", pickup_overdue: "待确认爽约", ready_for_pickup: "待交付", renting: "租赁中", return_inspection: "归还检查", settling: "待结算", completed: "已关闭", cancelled: "已取消", no_show: "已爽约" };
 
 export function RentalOrdersPage() {
   const navigate = useNavigate();

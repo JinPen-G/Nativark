@@ -342,7 +342,10 @@ function defaultRuleConfig(category: RentalCategoryDefinition, settings: TenantR
       allowDifferentReturnLocation: settings.fulfillment.allowDifferentReturnLocation
     },
     overdue: { ...settings.overdue },
-    cancellation: { ...defaults.cancellation },
+    cancellation: {
+      ...defaults.cancellation,
+      noShow: { enabled: true, pickupGraceMinutes: 30, finalizationMinutes: 60, feeType: "percentage", feeValue: 100 }
+    },
     qualification: {
       required: category.businessModel.supportsQualificationReview,
       documentTypes: [...defaults.qualificationDocumentTypes],
@@ -4630,6 +4633,11 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     if (config.qualification.required && !context.category.businessModel.supportsQualificationReview) throw new BadRequestException("当前品类不支持资质审核");
     if (config.fulfillment.allowDifferentReturnLocation && !context.settings.fulfillment.allowDifferentReturnLocation) throw new BadRequestException("租户履约设置未启用异地归还");
     if (config.payment.unpaidHoldMinutes < 1 || config.overdue.graceMinutes < 0 || config.overdue.feeMultiplier < 0 || config.cancellation.freeBeforeHours < 0) throw new BadRequestException("规则中的时长或费用参数无效");
+    const noShow = config.cancellation.noShow;
+    if (noShow && (noShow.pickupGraceMinutes < 0 || noShow.finalizationMinutes < 1 || noShow.feeValue < 0 || !Number.isFinite(noShow.pickupGraceMinutes) || !Number.isFinite(noShow.finalizationMinutes) || !Number.isFinite(noShow.feeValue))) {
+      throw new BadRequestException("爽约规则的领取宽限、最终确认时限和费用值无效");
+    }
+    if (noShow?.feeType === "percentage" && noShow.feeValue > 100) throw new BadRequestException("爽约费率不能超过100%");
   }
 
   private customerCoupon(state: RentalBusinessState, id: string) {

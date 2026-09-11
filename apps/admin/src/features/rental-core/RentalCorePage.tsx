@@ -11,8 +11,9 @@ import { QueryState } from "@/components/QueryState";
 type OrderForm = Omit<CreateRentalOrderRequest, "quoteId" | "startAt" | "endAt" | "lines"> & { period: [Dayjs, Dayjs]; lines: Array<{ itemGroupId: string; quantity: number; note?: string }> };
 const orderStatus: Record<string, { label: string; color: string }> = {
   draft: { label: "软预占", color: "default" }, reserved: { label: "已确认", color: "processing" },
+  pickup_overdue: { label: "待确认爽约", color: "warning" },
   ready_for_pickup: { label: "待取件", color: "cyan" }, renting: { label: "租赁中", color: "blue" },
-  return_inspection: { label: "归还检查", color: "orange" }, settling: { label: "待结算", color: "gold" }, completed: { label: "已关闭", color: "success" }, cancelled: { label: "已取消", color: "default" }
+  return_inspection: { label: "归还检查", color: "orange" }, settling: { label: "待结算", color: "gold" }, completed: { label: "已关闭", color: "success" }, cancelled: { label: "已取消", color: "default" }, no_show: { label: "已爽约", color: "error" }
 };
 const modeLabel: Record<string, string> = { serialized: "序列化资产", quantity: "数量库存", bundle: "套装" };
 
