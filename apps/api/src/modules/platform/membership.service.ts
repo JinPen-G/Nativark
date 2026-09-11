@@ -334,11 +334,11 @@ export class MembershipService {
 
   async listPersonalMembers(tenantId: string, workspaceId: string): Promise<PersonalMembershipMember[]> {
     const rows = await this.prisma.customerProfile.findMany({
-      where: { tenantId, customerType: "personal", workspaceLinks: { some: { workspaceId } } },
+      where: { tenantId, customerType: "personal", workspaceLinks: { some: { tenantId, workspaceId } } },
       include: {
-        workspaceLinks: { where: { workspaceId }, take: 1 },
+        workspaceLinks: { where: { tenantId, workspaceId }, take: 1 },
         account: { select: { status: true, loginPhoneMasked: true, suspendedAt: true, closedAt: true } },
-        qualificationRefs: { orderBy: { qualificationType: "asc" } }
+        qualificationRefs: { where: { tenantId }, orderBy: { qualificationType: "asc" } }
       },
       orderBy: { createdAt: "desc" }
     });
@@ -398,10 +398,10 @@ export class MembershipService {
 
   async listCorporateMembers(tenantId: string, workspaceId: string): Promise<CorporateMembershipMember[]> {
     const rows = await this.prisma.customerProfile.findMany({
-      where: { tenantId, customerType: "corporate", workspaceLinks: { some: { workspaceId } } },
+      where: { tenantId, customerType: "corporate", workspaceLinks: { some: { tenantId, workspaceId } } },
       include: {
-        workspaceLinks: { where: { workspaceId }, take: 1 },
-        corporateMembershipsAsCompany: { where: { workspaceId, status: "active" }, select: { role: true } }
+        workspaceLinks: { where: { tenantId, workspaceId }, take: 1 },
+        corporateMembershipsAsCompany: { where: { tenantId, workspaceId, status: "active" }, select: { role: true } }
       },
       orderBy: { createdAt: "desc" }
     });

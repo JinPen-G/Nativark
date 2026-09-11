@@ -39,7 +39,7 @@ export class SharedCustomerRepository {
   async listByTenant(tenantId: string, workspaceId: string): Promise<SharedCustomerProfile[]> {
     const rows = await this.prisma.customerProfile.findMany({
       where: { tenantId },
-      include: { workspaceLinks: { where: { workspaceId } } },
+      include: { workspaceLinks: { where: { tenantId, workspaceId } } },
       orderBy: { createdAt: "desc" }
     });
     return rows.map((row) => this.toDomain(row));
@@ -54,7 +54,7 @@ export class SharedCustomerRepository {
     const row = await this.db(tx).customerProfile.findFirst({
       where: { id: customerId, tenantId },
       include: {
-        workspaceLinks: workspaceId ? { where: { workspaceId } } : false,
+        workspaceLinks: workspaceId ? { where: { tenantId, workspaceId } } : false,
         // CUSTOMER-01E：详情才带联系人与经办人；列表不带，避免 N+1 且列表并不展示它们。
         contacts: { where: { status: "active" }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
         authorizedAgents: { orderBy: { validFrom: "desc" } },
@@ -70,7 +70,7 @@ export class SharedCustomerRepository {
   async findByPhone(tenantId: string, phone: string, workspaceId?: string): Promise<SharedCustomerProfile | undefined> {
     const row = await this.prisma.customerProfile.findFirst({
       where: { tenantId, phone: phone.trim() },
-      include: { workspaceLinks: workspaceId ? { where: { workspaceId } } : false }
+      include: { workspaceLinks: workspaceId ? { where: { tenantId, workspaceId } } : false }
     });
     return row ? this.toDomain(row) : undefined;
   }
