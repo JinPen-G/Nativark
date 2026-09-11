@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "test:workspace-scope": "node tests/rental-workspace-scope.test.cjs",
+    "test:membership-workspace": "node tests/membership-workspace-scope.test.cjs",
     "test:order-allocation": "npm run build -w @store-rental/shared && node tests/rental-allocation.test.cjs",
     "test:order-allocation-db": "npm run build -w @store-rental/shared && node tests/helpers/run-assignment-db.cjs",
     "dev": "npm run build -w @store-rental/shared && concurrently -n api,admin -c blue,green \"npm run dev -w @store-rental/api\" \"npm run dev -w @store-rental/admin\"",

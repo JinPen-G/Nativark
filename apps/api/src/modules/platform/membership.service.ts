@@ -368,7 +368,8 @@ export class MembershipService {
     return { customerId: row.id, name: row.name, phoneMasked: row.phoneMasked, email: row.email ?? undefined, identityNoMasked: row.identityNoMasked ?? undefined };
   }
 
-  async setTemporaryPassword(tenantId: string, customerId: string, temporaryPassword: string, operator?: string) {
+  async setTemporaryPassword(tenantId: string, workspaceId: string, customerId: string, temporaryPassword: string, operator?: string) {
+    await this.requireWorkspaceLink(tenantId, workspaceId, customerId);
     const customer = await this.requireCustomer(tenantId, customerId, "personal");
     const account = await this.prisma.customerAccount.upsert({
       where: { tenantId_customerId: { tenantId, customerId } },
@@ -435,6 +436,7 @@ export class MembershipService {
 
   async listCorporateEmployees(tenantId: string, workspaceId: string, corporateCustomerId: string): Promise<CustomerCorporateMembership[]> {
     await this.requireCustomer(tenantId, corporateCustomerId, "corporate");
+    await this.requireWorkspaceLink(tenantId, workspaceId, corporateCustomerId);
     const rows = await this.prisma.customerCorporateMembership.findMany({
       where: { tenantId, workspaceId, corporateCustomerId },
       include: { personalCustomer: { select: { name: true } } }, orderBy: [{ role: "asc" }, { createdAt: "desc" }]

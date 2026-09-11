@@ -68,8 +68,8 @@ export class MembershipController {
     @Body() body: SetCustomerMembershipTemporaryPasswordDto,
     @Req() req: RequestWithUser
   ) {
-    const { tenantId } = this.scope();
-    return this.memberships.setTemporaryPassword(tenantId, customerId, body.temporaryPassword, req.user?.displayName);
+    const { tenantId, workspaceId } = this.scope();
+    return this.memberships.setTemporaryPassword(tenantId, workspaceId, customerId, body.temporaryPassword, req.user?.displayName);
   }
 
   @Post("personal/:customerId/qualifications")
