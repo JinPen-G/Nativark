@@ -1,11 +1,17 @@
 import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import { theme, type ThemeConfig } from "antd";
 
 export type AppearanceMode = "default" | "dark" | "compact";
 
+/** 切换时的揭示圆心：传触发控件，圆从它中心扩散；缺省取视口中心。 */
+interface AppearanceOrigin {
+  element?: HTMLElement | null;
+}
+
 interface AppearanceContextValue {
   mode: AppearanceMode;
-  setMode: (mode: AppearanceMode) => void;
+  setMode: (mode: AppearanceMode, origin?: AppearanceOrigin) => void;
 }
 
 const STORAGE_KEY = "rental_admin_appearance";
@@ -42,16 +48,108 @@ function readInitialMode(): AppearanceMode {
  */
 const THEME_SWITCH_MS = 120;
 
+/**
+ * 圆形揭示（BoardUI 同款）。
+ *
+ * 用 View Transitions 把新旧两帧各拍一张快照，再给新帧挂一张**软边圆形遮罩**，
+ * 让它从触发控件的位置扩散到覆盖全屏，而不是整屏一起变色。
+ *
+ * 遮罩是一张内联 SVG：白色实心圆 r=42 叠 2px 高斯模糊，模糊是为了让圆边不出现硬描边。
+ * 圆在 100×100 的 viewBox 里，所以遮罩尺寸放大到 2.5R 时，实际圆半径约 1.05R——
+ * 比"到最远角"的 R 多 5%，保证扩散结束时四角都已覆盖，不会留白边。
+ */
+const THEME_REVEAL_MS = 820;
+const THEME_REVEAL_EASING = "cubic-bezier(0.16, 1, 0.3, 1)";
+const THEME_REVEAL_STYLE_ID = "rental-theme-reveal";
+const THEME_REVEAL_MASK = `url("data:image/svg+xml,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><filter id="blur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="2" /></filter></defs><circle cx="50" cy="50" r="42" fill="white" filter="url(#blur)" /></svg>'
+)}")`;
+
 export function AppearanceProvider({ children }: { children: ReactNode }) {
   const [mode, setModeState] = useState<AppearanceMode>(readInitialMode);
   const revealTimer = useRef<number>(0);
+  const revealing = useRef(false);
 
-  const setMode = useCallback((next: AppearanceMode) => {
+  const setMode = useCallback((next: AppearanceMode, origin?: AppearanceOrigin) => {
     const root = document.documentElement;
+
+    /**
+     * 无 View Transitions 或用户要求减少动效时，退回原来的即时切换。
+     *
+     * 因此这条路径的行为与本文件原有的实现完全一致：只在变量落地那几帧关过渡。
+     */
+    if (!document.startViewTransition || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      root.dataset.themeSwitching = "";
+      window.clearTimeout(revealTimer.current);
+      revealTimer.current = window.setTimeout(() => { delete root.dataset.themeSwitching; }, THEME_SWITCH_MS);
+      setModeState(next);
+      return;
+    }
+
+    // 一次只放一个揭示：动画期间重复点击直接丢弃，否则两张快照会互相打架。
+    if (revealing.current) return;
+    revealing.current = true;
+
+    // 圆心取触发控件中点并夹进视口；半径取圆心到视口最远角的距离。
+    const rect = origin?.element?.getBoundingClientRect();
+    const centerX = rect ? rect.left + rect.width / 2 : window.innerWidth / 2;
+    const centerY = rect ? rect.top + rect.height / 2 : window.innerHeight / 2;
+    const x = Math.min(Math.max(centerX, 0), window.innerWidth);
+    const y = Math.min(Math.max(centerY, 0), window.innerHeight);
+    const size = 2.5 * Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y));
+    const offsetX = x - size / 2;
+    const offsetY = y - size / 2;
+
+    /**
+     * 揭示期间同样关掉全局过渡：否则变量落地那几帧里，有过渡的元素还在慢慢染色，
+     * 会被拍进"新帧"快照，跟圆形遮罩叠成两层动画。
+     */
     root.dataset.themeSwitching = "";
     window.clearTimeout(revealTimer.current);
-    revealTimer.current = window.setTimeout(() => { delete root.dataset.themeSwitching; }, THEME_SWITCH_MS);
-    setModeState(next);
+
+    const revealStyle = document.createElement("style");
+    revealStyle.id = THEME_REVEAL_STYLE_ID;
+    revealStyle.textContent = `
+      ::view-transition-new(root) {
+        -webkit-mask-image: ${THEME_REVEAL_MASK};
+        mask-image: ${THEME_REVEAL_MASK};
+        -webkit-mask-repeat: no-repeat;
+        mask-repeat: no-repeat;
+        animation: rental-theme-reveal ${THEME_REVEAL_MS}ms ${THEME_REVEAL_EASING} both;
+      }
+      @keyframes rental-theme-reveal {
+        from {
+          -webkit-mask-position: ${x}px ${y}px;
+          mask-position: ${x}px ${y}px;
+          -webkit-mask-size: 0px 0px;
+          mask-size: 0px 0px;
+        }
+        to {
+          -webkit-mask-position: ${offsetX}px ${offsetY}px;
+          mask-position: ${offsetX}px ${offsetY}px;
+          -webkit-mask-size: ${size}px ${size}px;
+          mask-size: ${size}px ${size}px;
+        }
+      }
+    `;
+    document.head.appendChild(revealStyle);
+
+    /**
+     * 必须用 flushSync：React 默认把这次 setState 排进下一批，等内容提交时
+     * 快照早已拍完，新帧还是旧主题，揭示出来等于没换。flushSync 让 DOM 在
+     * 回调内同步落地，View Transitions 才能拍到真正的"新"帧。
+     */
+    const transition = document.startViewTransition(() => {
+      flushSync(() => setModeState(next));
+    });
+
+    const finish = () => {
+      revealStyle.remove();
+      delete root.dataset.themeSwitching;
+      revealing.current = false;
+    };
+    // finished 在过渡被跳过时会 reject，因此两个分支都要收尾，不能只挂 then。
+    void transition.finished.then(finish, finish);
   }, []);
 
   /**

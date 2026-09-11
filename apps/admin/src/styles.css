@@ -17,6 +17,13 @@ html[data-theme-switching] *::after {
   transition: none !important;
   animation: none !important;
 }
+/* 主题揭示：View Transitions 默认会给新旧两帧各做一次交叉淡入，而我们要的是
+   「新帧被一张圆形遮罩揭开」。所以只关掉旧帧的默认动画——它留在下层原地不动，
+   新帧叠在上层，由切换时注入的 mask 动画负责揭开。
+   注意 `*` 命中的是元素、不会命中 ::view-transition-* 这些伪元素，
+   因此上面的过渡开关不会误伤揭示动画本身。 */
+::view-transition-old(root) { animation: none; z-index: 1; mix-blend-mode: normal; }
+::view-transition-new(root) { z-index: 2; mix-blend-mode: normal; }
 body { overflow: hidden; background: var(--rental-color-bg-layout); }
 button, input, textarea, select { font: inherit; }
 
@@ -179,16 +186,19 @@ button, input, textarea, select { font: inherit; }
   border-top: 1px solid var(--rental-color-border-secondary);
 }
 .sider-nav .ant-menu-item { margin-block: 2px; }
-/* 选中项是一块灰底圆角，不描边。
-   描边这条路走不通：浅色下几乎看不见、深色下又很清楚，同一个状态在两种模式里长得不一样。
-   fill-secondary 在两种模式下都是"比底色深/浅一档"的半透明填充，自动跟着主题走。 */
+/* 选中项是一块蓝底圆角，白字白图标。取色思路与 BoardUI 侧栏选中态一致（它用 accent 的蓝），
+   但这里走本仓的主题色 --rental-color-primary：浅色下是 #1677ff、暗色下由 darkAlgorithm
+   派生成 #1668dc，同一族蓝且自动跟着主题分叉，不写死任何外来色值。
+   BoardUI 那里其实是上下渐变，这里压成纯色：门禁把装饰性渐变列为禁用项，写进本文件
+   会直接失败，而这么小的圆角块上渐变与纯色几乎看不出差别。
+   尺寸、圆角、间距全部保持本仓原样（标签文字继承菜单项的颜色，antd 未单独设色）。 */
 .sider-nav .ant-menu-item-selected {
-  color: var(--rental-color-text-heading) !important;
+  color: var(--rental-color-white) !important;
   font-weight: 600;
-  background: var(--rental-color-fill-secondary) !important;
+  background: var(--rental-color-primary) !important;
   box-shadow: none;
 }
-.sider-nav .ant-menu-item-selected .ant-menu-item-icon { color: var(--rental-color-text-heading); }
+.sider-nav .ant-menu-item-selected .ant-menu-item-icon { color: var(--rental-color-white); }
 
 /* 底部工具区：主题 / 通知 / 设置各占一行，与上方菜单用分隔线断开。 */
 .sider-tools {
@@ -406,6 +416,75 @@ button, input, textarea, select { font: inherit; }
   color: var(--rental-color-text);
   background: var(--rental-color-bg-container);
   font-weight: 600;
+}
+/* 外观切换：药丸容器 + 两枚图标按钮，选中项是一块平移过去的高亮滑块。
+   结构与留白比例照搬 BoardUI 的分段切换，尺寸收敛到本仓的 36px 行高。
+   滑块位置由 html[data-appearance] 驱动，浅色靠左、暗色靠右；行程 = 28 + 4 间隙。
+   轨道取 fill-secondary：浅色下 #e8e8e8（BoardUI 原版是 #ebebeb，基本一致），
+   暗色下 #1f1f1f，在纯黑侧栏上能看出轨道。 */
+.appearance-toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 999px;
+  background: var(--rental-color-fill-secondary);
+}
+/* 滑块要比轨道更亮才像"抬起来"。antd 的 fill 色阶是"浅色越叠越深、深色越叠越亮"，
+   所以不存在一个变量在两种主题下都满足，只能按主题各给一个值：
+   浅色用容器白（#fff），暗色用一层更亮的叠加（约 #2b2b2b）。 */
+.appearance-toggle-thumb {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--rental-color-bg-container);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .12);
+  transition: transform .2s ease, background-color .2s;
+}
+html[data-appearance="dark"] .appearance-toggle-thumb {
+  transform: translateX(32px);
+  background: var(--rental-color-fill-tertiary);
+}
+.appearance-toggle-option {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  color: var(--rental-color-text-secondary);
+  background: transparent;
+  cursor: pointer;
+  transition: color .15s ease;
+}
+.appearance-toggle-option:hover { color: var(--rental-color-text-heading); }
+.appearance-toggle-option[aria-pressed="true"] { color: var(--rental-color-text); }
+
+/* 收起态侧栏与登录页角上的单枚外观按钮：那两处放不下药丸，退化成圆形图标按钮。
+   图标显示的是「点下去会变成什么样」，与分段控件的语义一致。 */
+.appearance-toggle-compact {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  color: var(--rental-color-text-secondary);
+  background: var(--rental-color-fill-tertiary);
+  cursor: pointer;
+  transition: color .2s, background-color .2s;
+}
+.appearance-toggle-compact:hover {
+  color: var(--rental-color-text-heading);
+  background: var(--rental-color-fill-secondary);
 }
 
 .ant-tabs .ant-tabs-nav { margin-bottom: 16px; }
