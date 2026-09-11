@@ -81,6 +81,7 @@ export function RentalOrderDetailPage() {
   const setOperationToken = (token?: string) => { if (token) sessionStorage.setItem(`rental-operation:${id}`, token); else sessionStorage.removeItem(`rental-operation:${id}`); setOperationSession({ id, token }); };
   const [inspection, setInspection] = useState<RentalInspectionTemplate>();
   const [inspectionReturnItems, setInspectionReturnItems] = useState<Array<{ allocationId: string; quantity: number }>>();
+  const [inspectionClosing, setInspectionClosing] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [noShowOpen, setNoShowOpen] = useState(false);
   const [substitution, setSubstitution] = useState<{ orderLineId: string; fromItemGroupId: string }>();
@@ -113,12 +114,34 @@ export function RentalOrderDetailPage() {
   const extensions = useQuery({ queryKey: ["rental-core", "order", id, "extensions"], queryFn: () => rentalCoreApi.orderExtensions(id), enabled: Boolean(id) });
   const refresh = async () => { await Promise.all([queryClient.invalidateQueries({ queryKey: ["rental-core", "order", id] }), queryClient.invalidateQueries({ queryKey: ["rental-core", "orders"] })]); };
   const operationLock = useMutation({ mutationFn: (type: "acquire" | "release") => rentalCoreApi.operationLock(id, type, operationToken), onSuccess: async (result) => { setOperationToken(result.token); await refresh(); }, onError: (e: Error) => message.error(e.message) });
+  const closeInspection = async () => {
+    if (inspectionClosing || inspect.isPending) return;
+    setInspectionClosing(true);
+    try {
+      if (operationToken) {
+        await rentalCoreApi.operationLock(id, "release", operationToken);
+        setOperationToken(undefined);
+        await refresh();
+      } else {
+        setOperationToken(undefined);
+      }
+      inspectionForm.resetFields();
+      setInspection(undefined);
+      setInspectionReturnItems(undefined);
+    } catch (error) {
+      // 释放失败时保留 token 和表单，避免界面关闭后订单仍被本账号锁住，
+      // 也避免误导操作员以为已经结束办理。
+      message.error((error as Error).message || "结束办理失败，请重试");
+    } finally {
+      setInspectionClosing(false);
+    }
+  };
   const beginInspection = async (stage: "pickup" | "return", returnItems?: Array<{ allocationId: string; quantity: number }>) => {
     const template = templates.data?.find((item) => item.stage === stage && item.enabled);
     if (!template) { message.error("未配置有效的交接检查模板，请先在经营设置中配置"); return false; }
     try {
       const result = await rentalCoreApi.operationLock(id, "acquire", operationToken);
-      setOperationToken(result.token); await refresh(); setInspectionReturnItems(returnItems); setInspection(template); return true;
+      setOperationToken(result.token); await refresh(); inspectionForm.resetFields(); setInspectionReturnItems(returnItems); setInspection(template); return true;
     } catch { message.error("其他人员正在办理，或订单状态已变化，请刷新后重试"); return false; }
   };
   const action = useMutation({ mutationFn: (type: "confirm" | "allocate") => type === "confirm" ? rentalCoreApi.confirmOrder(id) : rentalCoreApi.allocateOrder(id), onSuccess: async () => { await refresh(); message.success("订单状态已更新"); }, onError: () => message.error("操作失败，请检查状态、库存或优惠券") });
@@ -498,7 +521,7 @@ export function RentalOrderDetailPage() {
         ]} />
       </Card>}
     </Space>}</QueryState>
-    <Modal title={inspectionReturnItems?.length ? "部分归还检查" : inspection?.name} open={Boolean(inspection)} onCancel={() => { setInspection(undefined); setInspectionReturnItems(undefined); }} onOk={() => inspectionForm.submit()} confirmLoading={inspect.isPending} destroyOnHidden>{inspection && <Form form={inspectionForm} layout="vertical" onFinish={(values) => inspect.mutate(values)}>{inspectionReturnItems?.length ? <Alert type="info" showIcon title={`本次检查并归还 ${inspectionReturnItems.length} 个分配项`} description="只会释放本批实物；剩余项目继续在租。最后一批请使用整单归还，以统一结算逾期和提前归还。" style={{ marginBottom: 16 }} /> : null}{inspection.fields.map((field) => <Form.Item key={field.code} name={field.code} label={field.label} rules={inspectionFieldRules(field)}>{field.type === "number" ? <InputNumber suffix={field.unit} style={{ width: "100%" }} /> : field.type === "boolean" ? <Select options={[{ value: true, label: "是 / 正常" }, { value: false, label: "否 / 异常" }]} /> : <Input />}</Form.Item>)}{inspection.stage === "return" && <Card size="small" title="异常与损坏建议（可选）"><Alert type="info" showIcon title="检查员只记录事实和建议损失额，不会直接向客户计费。" style={{ marginBottom: 12 }} /><Form.Item name="exceptionCode" label="异常编码"><Input placeholder="damage / missing_item / cleaning" /></Form.Item><Form.Item name="exceptionDescription" label="异常说明"><Input.TextArea rows={2} /></Form.Item><Form.Item name="exceptionChargeAmount" label="建议损失金额"><InputNumber min={0} precision={2} prefix={symbol} style={{ width: "100%" }} /></Form.Item></Card>}</Form>}</Modal>
+    <Modal title={inspectionReturnItems?.length ? "部分归还检查" : inspection?.name} open={Boolean(inspection)} onCancel={closeInspection} onOk={() => inspectionForm.submit()} confirmLoading={inspect.isPending || inspectionClosing} cancelButtonProps={{ loading: inspectionClosing, disabled: inspectionClosing || inspect.isPending }} okButtonProps={{ disabled: inspectionClosing }} closable={!inspectionClosing && !inspect.isPending} destroyOnHidden>{inspection && <Form form={inspectionForm} layout="vertical" onFinish={(values) => inspect.mutate(values)}>{inspectionReturnItems?.length ? <Alert type="info" showIcon title={`本次检查并归还 ${inspectionReturnItems.length} 个分配项`} description="只会释放本批实物；剩余项目继续在租。最后一批请使用整单归还，以统一结算逾期和提前归还。" style={{ marginBottom: 16 }} /> : null}{inspection.fields.map((field) => <Form.Item key={field.code} name={field.code} label={field.label} rules={inspectionFieldRules(field)}>{field.type === "number" ? <InputNumber suffix={field.unit} style={{ width: "100%" }} /> : field.type === "boolean" ? <Select options={[{ value: true, label: "是 / 正常" }, { value: false, label: "否 / 异常" }]} /> : <Input />}</Form.Item>)}{inspection.stage === "return" && <Card size="small" title="异常与损坏建议（可选）"><Alert type="info" showIcon title="检查员只记录事实和建议损失额，不会直接向客户计费。" style={{ marginBottom: 12 }} /><Form.Item name="exceptionCode" label="异常编码"><Input placeholder="damage / missing_item / cleaning" /></Form.Item><Form.Item name="exceptionDescription" label="异常说明"><Input.TextArea rows={2} /></Form.Item><Form.Item name="exceptionChargeAmount" label="建议损失金额"><InputNumber min={0} precision={2} prefix={symbol} style={{ width: "100%" }} /></Form.Item></Card>}</Form>}</Modal>
     <Modal title="续租 / 延期" open={extensionOpen} onCancel={() => { setExtensionOpen(false); setExtensionPreview(undefined); }} destroyOnHidden width={640}
       footer={[
         <Button key="cancel" onClick={() => { setExtensionOpen(false); setExtensionPreview(undefined); }}>取消</Button>,

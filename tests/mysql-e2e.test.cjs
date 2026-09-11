@@ -1537,11 +1537,18 @@ async function main() {
   );
   assert.equal(conflictingQuote.status, 409, "互斥优惠方案下不得同时使用优惠券");
   assert.match(JSON.stringify(conflictingQuote.body), /叠加/u, "拒绝原因应指向叠加互斥");
+  const disableExclusivePlan = await request(
+    "PUT",
+    `/api/rental/v1/discount-plans/${exclusivePlan.body.data.id}`,
+    { ...exclusivePlan.body.data, status: "disabled", changeReason: "E2E 爽约资源释放前清理互斥方案" },
+    demo.accessToken
+  );
+  assert.equal(disableExclusivePlan.status, 200, `清理互斥优惠方案失败: ${disableExclusivePlan.status}`);
   ok("优惠券闭环：限领/领完/抵扣/锁定/复用拒绝/核销/取消释放/互斥拦截");
 
-  console.log("== R1-NO-SHOW. 领取爽约真实 API 链（旧门市兼容段之前） ==");
-  // 当前产品已删除旧 /store-rental 运行域；把 R1 的爽约验收放在兼容性历史段之前，
-  // 这样可独立跑本条真实链，不会被历史测试阻断。后续稳定后再清理那批旧段。
+  console.log("== R1-NO-SHOW. 领取爽约真实 API 链：资产、服务容量与优惠券原子释放 ==");
+  // 当前产品统一使用 Rental Core。除序列化资产外，本条同时挂一项容量服务和一张券，
+  // 验证 confirm-no-show 的同一事务会把三类未履约资源一起释放，而不是只改订单状态。
   // 规则按报价起租时点匹配，不能用“过去两小时”硬造订单（当前规则可能是在本轮
   // 测试中刚发布，过去时点没有规则覆盖）。先发布一版领取宽限为 0 的爽约规则，
   // 再用一个很近的未来起租时间，等它自然越过起租点后推进真实爽约链。
@@ -1582,10 +1589,80 @@ async function main() {
   const noShowStart = new Date(noShowStartAt).toISOString();
   const noShowEnd = new Date(noShowStartAt + 24 * 60 * 60 * 1000).toISOString();
   const noShowLines = [{ itemGroupId: serialized[1]?.id ?? serialized[0].id, quantity: 1 }];
+  const noShowService = await request(
+    "POST",
+    "/api/rental/v1/value-added-services",
+    {
+      code: `E2E-NOSHOW-SERVICE-${Date.now().toString(36)}`,
+      name: "E2E 爽约容量服务",
+      serviceType: "operator",
+      billingUnit: "per_day",
+      price: 10,
+      minimumQuantity: 1,
+      maximumQuantity: 1,
+      termsVersion: "1.0",
+      terms: "E2E 爽约容量服务条款",
+      applicableItemGroupIds: [],
+      applicableFulfillmentModes: ["store_pickup_return"],
+      applicableLocationIds: [location.id],
+      customerScope: "all",
+      selectionMode: "optional",
+      requiresCapacity: true,
+      status: "enabled"
+    },
+    demo.accessToken
+  );
+  assert.equal(noShowService.status, 201, `爽约容量服务创建失败: ${JSON.stringify(noShowService.body).slice(0, 300)}`);
+  const noShowCapacity = await request(
+    "POST",
+    "/api/rental/v1/service-capacities",
+    {
+      serviceId: noShowService.body.data.id,
+      locationId: location.id,
+      windowStart: new Date(noShowStartAt - 1000).toISOString(),
+      windowEnd: new Date(noShowStartAt + 24 * 60 * 60 * 1000 + 1000).toISOString(),
+      totalCapacity: 1,
+      status: "enabled"
+    },
+    demo.accessToken
+  );
+  assert.equal(noShowCapacity.status, 201, `爽约容量窗口创建失败: ${JSON.stringify(noShowCapacity.body).slice(0, 300)}`);
+  const noShowCouponTemplate = await request(
+    "POST",
+    "/api/rental/v1/coupon-templates",
+    {
+      code: `E2E-NOSHOW-COUPON-${Date.now().toString(36)}`,
+      name: "E2E 爽约释放券",
+      discountType: "fixed_amount",
+      discountValue: 10,
+      minimumSpend: 0,
+      totalQuota: 1,
+      perCustomerLimit: 1,
+      effectiveFrom: new Date(Date.now() - 86400000).toISOString(),
+      effectiveTo: new Date(Date.now() + 30 * 86400000).toISOString(),
+      status: "active"
+    },
+    demo.accessToken
+  );
+  assert.equal(noShowCouponTemplate.status, 201, `爽约优惠券模板创建失败: ${JSON.stringify(noShowCouponTemplate.body).slice(0, 300)}`);
+  const noShowClaim = await request(
+    "POST",
+    "/api/rental/v1/customer-coupons/claim",
+    { templateId: noShowCouponTemplate.body.data.id, customerId: r1CustomerId },
+    demo.accessToken
+  );
+  assert.equal(noShowClaim.status, 201, `爽约优惠券领取失败: ${JSON.stringify(noShowClaim.body).slice(0, 300)}`);
+  const noShowServices = [{
+    serviceId: noShowService.body.data.id,
+    quantity: 1,
+    scheduledStartAt: noShowStart,
+    scheduledEndAt: noShowEnd,
+    serviceLocationId: location.id
+  }];
   const noShowQuote = await request(
     "POST",
     "/api/rental/v1/quotes",
-    { customerType: "personal", customerId: r1CustomerId, fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: noShowStart, endAt: noShowEnd, lines: noShowLines },
+    { customerType: "personal", customerId: r1CustomerId, fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id, startAt: noShowStart, endAt: noShowEnd, lines: noShowLines, customerCouponId: noShowClaim.body.data.id, services: noShowServices },
     demo.accessToken
   );
   assert.equal(noShowQuote.status, 201, `爽约订单报价失败: ${JSON.stringify(noShowQuote.body).slice(0, 300)}`);
@@ -1597,9 +1674,22 @@ async function main() {
   );
   assert.equal(noShowOrderResponse.status, 201, `爽约订单创建失败: ${JSON.stringify(noShowOrderResponse.body).slice(0, 300)}`);
   const noShowOrderId = noShowOrderResponse.body.data.id;
+  assert.equal(
+    readScalar(`SELECT \`reservedQuantity\` FROM \`rental_service_capacities\` WHERE \`id\`='${noShowCapacity.body.data.id}';`),
+    "1",
+    "爽约订单创建后应预留服务容量"
+  );
+  const noShowCouponLocked = (await request("GET", `/api/rental/v1/customer-coupons?customerId=${r1CustomerId}`, null, demo.accessToken)).body.data.find((row) => row.id === noShowClaim.body.data.id);
+  assert.equal(noShowCouponLocked.status, "locked", "爽约订单创建后优惠券应锁定");
+  assert.equal(noShowCouponLocked.lockedOrderId, noShowOrderId, "锁定优惠券应关联爽约订单");
   await prepareMockFunding(noShowOrderResponse.body.data, demo.accessToken, `e2e:${noShowOrderId}`);
   const noShowConfirmed = await request("POST", `/api/rental/v1/orders/${noShowOrderId}/confirm`, {}, demo.accessToken);
   assert.equal(noShowConfirmed.status, 201, `爽约订单确认失败: ${JSON.stringify(noShowConfirmed.body).slice(0, 300)}`);
+  assert.equal(
+    readScalar(`SELECT \`usedQuantity\` FROM \`rental_service_capacities\` WHERE \`id\`='${noShowCapacity.body.data.id}';`),
+    "1",
+    "订单确认后服务容量应从预留转为已确认占用"
+  );
   const noShowAllocated = await request("POST", `/api/rental/v1/orders/${noShowOrderId}/allocate`, {}, demo.accessToken);
   assert.equal(noShowAllocated.status, 201, `爽约订单锁分配失败: ${JSON.stringify(noShowAllocated.body).slice(0, 300)}`);
   const noShowAssetId = noShowAllocated.body.data.allocations.find((row) => row.assetId)?.assetId;
@@ -1616,28 +1706,44 @@ async function main() {
   const noShowAsset = (await request("GET", "/api/rental/v1/assets", null, demo.accessToken)).body.data.find((row) => row.id === noShowAssetId);
   assert.equal(noShowAsset.status, "available", "确认爽约必须释放已分配但未领取的序列化资产");
   assert.ok(noShowFinal.body.data.reservations.every((row) => row.status === "cancelled"), "确认爽约必须取消全部资源预占");
-  ok("领取爽约真实链路：起租超时进入待确认、记录通知、确认后进入 no_show，保留核减并释放预占与资产");
+  assert.equal(
+    readScalar(`SELECT \`reservedQuantity\` FROM \`rental_service_capacities\` WHERE \`id\`='${noShowCapacity.body.data.id}';`),
+    "0",
+    "确认爽约必须释放服务容量预留"
+  );
+  assert.equal(
+    readScalar(`SELECT \`usedQuantity\` FROM \`rental_service_capacities\` WHERE \`id\`='${noShowCapacity.body.data.id}';`),
+    "0",
+    "确认爽约必须释放服务已确认占用"
+  );
+  assert.equal(
+    readScalar(`SELECT \`status\` FROM \`rental_service_reservations\` WHERE \`orderId\`='${noShowOrderId}' AND \`serviceId\`='${noShowService.body.data.id}';`),
+    "released",
+    "确认爽约必须把服务容量流水标记为 released"
+  );
+  const noShowCouponReleased = (await request("GET", `/api/rental/v1/customer-coupons?customerId=${r1CustomerId}`, null, demo.accessToken)).body.data.find((row) => row.id === noShowClaim.body.data.id);
+  assert.equal(noShowCouponReleased.status, "claimed", "确认爽约必须释放优惠券回可用状态");
+  assert.equal(noShowCouponReleased.lockedOrderId, undefined, "释放后的优惠券不得继续关联爽约订单");
+  ok("领取爽约真实链路：起租超时进入待确认、记录通知、确认后进入 no_show，保留核减并原子释放资产、服务容量与优惠券");
 
   await maybeStopAfter("r1-no-show");
 
-  console.log("== 13. 车辆租户初始化、写入租户戳与车辆域隔离 ==");
+  console.log("== 13. 车辆租户初始化、经营空间与跨租户隔离 ==");
   const platform = await login("platform", "admin", PLATFORM_PASSWORD);
   const vehicleA = await bootstrapTenant(platform.accessToken, "e2e_vehicle_a", "vehicle");
   const tenantAId = vehicleA.tenant.tenantId;
-  const stationCreate = await request(
-    "POST",
-    "/api/store-rental/stations",
-    { id: "e2e_station_a", storeCode: "E2E_A", stationCode: "E2E_A", parentStoreName: "E2E门市A", name: "E2E据点A", stationType: "counter", serviceCapabilities: ["store_rental"], parkingTotal: 5, parkingAvailable: 2, status: "enabled", serviceStatus: "normal", address: "E2E地址", storeRentalEnabled: true },
-    vehicleA.accessToken
-  );
-  assert.equal(stationCreate.status, 201, `车辆租户建站点失败: ${JSON.stringify(stationCreate.body).slice(0, 200)}`);
-  const stampRows = mysqlQuery("SELECT `tenantId` FROM `StoreStation` WHERE `id`='e2e_station_a';");
-  assert.ok(stampRows.includes(tenantAId), `写入必须带本租户戳: ${stampRows}`);
-  const vehicleAOrders = await request("GET", "/api/store-rental/orders", null, vehicleA.accessToken);
-  const vehicleAList = Array.isArray(vehicleAOrders.body.data) ? vehicleAOrders.body.data : vehicleAOrders.body.data.items ?? [];
-  assert.equal(vehicleAList.length, 0, "新车辆租户不得看到 tenant_001 的种子订单");
-  const dashboard = await request("GET", "/api/reports/dashboard", null, vehicleA.accessToken);
-  assert.equal(dashboard.status, 200);
+  const vehicleAProfile = await request("GET", "/api/rental/v1/tenant-profile", null, vehicleA.accessToken);
+  assert.equal(vehicleAProfile.status, 200, `车辆租户应能读取当前经营空间档案: ${vehicleAProfile.status}`);
+  assert.equal(vehicleAProfile.body.data.categoryCode, "vehicle", "默认经营空间应保持 vehicle 品类");
+  const vehicleALocations = await request("GET", "/api/rental/v1/locations", null, vehicleA.accessToken);
+  assert.equal(vehicleALocations.status, 200, `车辆租户应能读取通用履约地点: ${vehicleALocations.status}`);
+  assert.ok(vehicleALocations.body.data.length >= 1, "新车辆租户应有默认履约地点");
+  const vehicleAOrders = await request("GET", "/api/rental/v1/orders", null, vehicleA.accessToken);
+  assert.equal(vehicleAOrders.status, 200, `新车辆租户读取通用订单列表失败: ${vehicleAOrders.status}`);
+  assert.equal(vehicleAOrders.body.data.length, 0, "新车辆租户不得看到 tenant_001 的种子订单");
+  const vehicleAReport = await request("GET", "/api/rental/v1/reports/operations", null, vehicleA.accessToken);
+  assert.equal(vehicleAReport.status, 200, `新车辆租户应能读取空经营报表: ${vehicleAReport.status}`);
+  assert.equal(vehicleAReport.body.data.orderCount, 0, "新车辆租户空报表订单量应为 0");
   const saasWorkspaceList = await request("GET", `/api/platform/tenants/${tenantAId}/workspaces`, null, platform.accessToken);
   assert.equal(saasWorkspaceList.status, 200, "SaaS 管理员应能列出目标租户经营空间");
   assert.equal(saasWorkspaceList.body.data.length, 1, "新租户初始应只有默认经营空间");
@@ -1672,39 +1778,13 @@ async function main() {
   assert.deepEqual([...tenantSummaryAfterSpace.workspaceCategoryCodes].sort(), ["camera", "vehicle"], "租户摘要应汇总空间品类");
   ok("SaaS 管理员可按目标租户查看、新增和编辑经营空间；租户管理员不能越权，租户摘要按多空间汇总");
   const vehicleB = await bootstrapTenant(platform.accessToken, "e2e_vehicle_b", "vehicle");
-  const vehicleBStations = (await request("GET", "/api/store-rental/stations", null, vehicleB.accessToken)).body.data;
-  assert.equal(Array.isArray(vehicleBStations) ? vehicleBStations.length : 0, 0, "车辆租户 B 不得看到 A 的站点");
-  // 行销方案的租户隔离。这块此前完全没有测试覆盖，而它与站点、会员不同：
-  // 会员/会员方案/会员审核都按 `tenant<X> = new Map` 做了按租户克隆，
-  // 行销方案却直接读写共享的 `this.marketingPlans`，且该类型没有 tenantId。
-  // 后果是 A 改一条方案，B 立刻看到被改后的内容。
-  const mktA = (await request("GET", "/api/store-rental/marketing/plans", null, vehicleA.accessToken)).body.data;
-  assert.ok(Array.isArray(mktA) && mktA.length, "前置条件：车辆租户应能看到行销方案样本");
-  // 列表返回的是 Summary，不含 versionHistory；而 saveMarketingPlan 会读
-  // existing.versionHistory[0]，所以必须取详情再回传，否则 500（我第一版就踩了这个）。
-  const mktTarget = (await request(
-    "GET",
-    `/api/store-rental/marketing/plans/${mktA[0].id}`,
-    null,
-    vehicleA.accessToken
-  )).body.data;
-  const mktRenamed = `E2E-A-改名-${Date.now().toString(36)}`;
-  const mktUpdate = await request(
-    "PUT",
-    `/api/store-rental/marketing/plans/${mktTarget.id}`,
-    { ...mktTarget, displayName: mktRenamed },
-    vehicleA.accessToken
-  );
-  assert.equal(mktUpdate.status, 200, `租户 A 改行销方案应成功: ${JSON.stringify(mktUpdate.body).slice(0, 200)}`);
-  const mktB = (await request("GET", "/api/store-rental/marketing/plans", null, vehicleB.accessToken)).body.data;
-  const mktLeaked = (Array.isArray(mktB) ? mktB : []).find((row) => row.displayName === mktRenamed);
-  assert.equal(
-    mktLeaked,
-    undefined,
-    `租户 B 不得看到 A 修改后的行销方案（看到即说明 marketingPlans 是跨租户共享的同一批对象）：` +
-      `${JSON.stringify(mktLeaked ?? null).slice(0, 200)}`
-  );
-  ok("车辆域读写隔离验证通过（租户戳正确、站点与行销方案均互不可见）");
+  const vehicleBLocations = await request("GET", "/api/rental/v1/locations", null, vehicleB.accessToken);
+  assert.equal(vehicleBLocations.status, 200, `车辆租户 B 读取通用履约地点失败: ${vehicleBLocations.status}`);
+  assert.ok(vehicleBLocations.body.data.every((row) => row.tenantId === vehicleB.tenant.tenantId), "车辆租户 B 不得看到 A 的履约地点");
+  const vehicleBGroups = await request("GET", "/api/rental/v1/item-groups", null, vehicleB.accessToken);
+  assert.equal(vehicleBGroups.status, 200, `车辆租户 B 读取商品目录失败: ${vehicleBGroups.status}`);
+  assert.equal(vehicleBGroups.body.data.length, 0, "车辆租户 B 不得看到 A 的商品型号");
+  ok("车辆租户使用统一 Rental Core：商品、资产、地点、订单和报表均按租户隔离");
 
   console.log("== 14. 车辆品类 Rental Core 深度用例：资质拦截、序列化资产与逾期费 ==");
   const vehicleLocation = (await request("GET", "/api/rental/v1/locations", null, vehicleA.accessToken)).body.data[0];
@@ -5290,7 +5370,7 @@ async function main() {
   for (let i = 0; i < rounds; i += 1) {
     concurrent.push(request("GET", "/api/rental/v1/item-groups", null, demo.accessToken).then((res) => ({ tenant: "demo", res })));
     concurrent.push(request("GET", "/api/rental/v1/item-groups", null, demo2.accessToken).then((res) => ({ tenant: "demo2", res })));
-    concurrent.push(request("GET", "/api/store-rental/orders", null, vehicleA.accessToken).then((res) => ({ tenant: "vehicleA", res })));
+    concurrent.push(request("GET", "/api/rental/v1/item-groups", null, vehicleA.accessToken).then((res) => ({ tenant: "vehicleA", res })));
   }
   const settled = await Promise.all(concurrent);
   for (const item of settled) {
@@ -5299,8 +5379,7 @@ async function main() {
     } else if (item.tenant === "demo2") {
       assert.ok(item.res.body.data.every((group) => group.code.startsWith("CAMP-")), "并发中 demo2 数据串线");
     } else {
-      const list = Array.isArray(item.res.body.data) ? item.res.body.data : item.res.body.data.items ?? [];
-      assert.equal(list.length, 0, "并发中车辆租户数据串线");
+      assert.ok(item.res.body.data.every((group) => group.code.startsWith("E2E-TRUCK")), "并发中车辆租户数据串线");
     }
   }
   ok(`${settled.length} 个并发请求全部命中本租户数据`);
@@ -7473,62 +7552,6 @@ async function main() {
       `第二空间 ${isoOrdersSecond.length} 张/${isoAssetsSecond.length} 件且无一条来自默认空间，切回后原样可见；业务配置与业务设置亦隔离（定价方案不互见、业务设置各一份），且两空间各有状态快照、重启后各自恢复不串台`
   );
 
-  console.log("== 56. SPACE-03 品类与能力按经营空间判定 ==");
-  // 守卫原先用**租户级**品类档案做 capability 与车辆域校验。同租户多个空间且
-  // 品类不同时那是错的：一个 camping 空间会被按 camera/vehicle 的能力集放行。
-  //
-  // 构造：车辆租户（租户级品类=vehicle）新建一个 camera 空间并切进去，
-  // 此时 /store-rental/* 必须被拒——若仍按租户判定，它会被放行。
-  const catPlatform = await login("platform", "admin", PLATFORM_PASSWORD);
-  const catVehicle = await bootstrapTenant(catPlatform.accessToken, "e2e_scope_vehicle", "vehicle");
-  const catVehicleOk = await request("GET", "/api/store-rental/vehicles", null, catVehicle.accessToken);
-  assert.equal(
-    catVehicleOk.status,
-    200,
-    `前置条件：车辆租户在其默认（vehicle）空间应能访问车辆域，实际 ${catVehicleOk.status}`
-  );
-  const catCameraWs = await request(
-    "POST",
-    "/api/platform/workspaces",
-    { code: "camera-side", name: "摄影副空间", categoryCode: "camera" },
-    catVehicle.accessToken
-  );
-  assert.equal(catCameraWs.status, 201, `车辆租户创建 camera 空间失败: ${JSON.stringify(catCameraWs.body).slice(0, 200)}`);
-  const catMember = await request(
-    "PUT",
-    `/api/platform/workspaces/${catCameraWs.body.data.id}/members`,
-    { userId: catVehicle.user.id },
-    catVehicle.accessToken
-  );
-  assert.equal(catMember.status, 200, "加入 camera 空间成员失败");
-  const catSwitched = await request(
-    "POST",
-    "/api/auth/switch-workspace",
-    { workspaceId: catCameraWs.body.data.id },
-    catVehicle.accessToken
-  );
-  assert.equal(catSwitched.status, 201, "切换到 camera 空间失败");
-  const catDenied = await request("GET", "/api/store-rental/vehicles", null, catSwitched.body.data.accessToken);
-  assert.equal(
-    catDenied.status,
-    403,
-    `车辆租户切到 camera 空间后必须被车辆域拒绝（品类须按空间判定），实际 ${catDenied.status}: ${JSON.stringify(catDenied.body).slice(0, 200)}`
-  );
-  // 切回默认（vehicle）空间必须恢复可访问，证明拒绝来自空间品类而非账号权限。
-  const catBack = await request(
-    "POST",
-    "/api/auth/switch-workspace",
-    { workspaceId: catVehicle.currentWorkspaceId },
-    catSwitched.body.data.accessToken
-  );
-  assert.equal(catBack.status, 201, "切回 vehicle 空间失败");
-  assert.equal(
-    (await request("GET", "/api/store-rental/vehicles", null, catBack.body.data.accessToken)).status,
-    200,
-    "切回 vehicle 空间后必须恢复可访问（证明拒绝来自空间品类，不是账号权限）"
-  );
-  ok("品类与能力按经营空间判定：车辆租户在 camera 空间被车辆域拒绝 403，切回 vehicle 空间即恢复 200");
-
   console.log("== 57. SPACE-04 共享客户主档按租户复用、业务关系按空间隔离 ==");
   // SPACE-04 的核心验收，两个方向都必须成立，缺一个就是做错了：
   //   共享方向：同一客户在第二个空间**不必重复注册**（主档按租户唯一）
@@ -8165,13 +8188,9 @@ async function main() {
   ok("客服/财务历史只读权限：view-history 账号能读版本列表/详情/覆盖审计（200），但导入、发布、发布预检一律 403，实现了「查看历史但不得修改」而不过度授予编辑或发布权");
 
   console.log("== 61d. 未列入鉴权规则的路由必须默认拒绝（Codex P0 fail-open） ==");
-  // `requiredPermissions` 的兜底曾是 `return []`，而 hasAnyPermission 对空数组直接放行，
-  // 于是每个没被显式分支覆盖的路由都是**完全无鉴权**的接口。营销方案的增改正落在兜底里：
-  // 任何能登录的账号（哪怕只有 order:view）都能改本租户营销方案。兜底已改为默认拒绝。
-  //
-  // 必须用**车辆租户的默认空间**做这一节：`/store-rental/*` 是旧车辆兼容接口，
-  // 非默认车辆空间访问会先被空间闸门 403。若拿日历空间的账号来测，两条 403 都来自
-  // 空间闸门而不是权限判定——那正是"因错误的理由通过"。
+  // 当前产品的优惠配置统一走 Rental Core；旧 /store-rental/marketing/* 已删除。
+  // order:view 可以读取可用于下单的优惠目录，但不能修改配置；真正的越权断言放在
+  // POST /discount-plans 上，避免把“订单创建需要读优惠”误判成配置泄露。
   // vehicleA 的令牌建于第 17 节重启之前，而重启会换 AUTH_TOKEN_SECRET，故须重登。
   const mktAdmin = await login("e2e_vehicle_a", "admin", vehicleA.password);
   const mktLowRole = await request("POST", "/api/platform/roles", {
@@ -8195,33 +8214,43 @@ async function main() {
     "低权限账号改密应成功（否则后面的 403 来自改密闸门）"
   );
   const mktLow = await login("e2e_vehicle_a", mktLowAccount, mktLowPwd);
-  // 前置条件：该账号确实进入了默认车辆空间，因此 403 不可能来自空间闸门。
-  const mktLowOrders = await request("GET", "/api/store-rental/orders", null, mktLow.accessToken);
-  assert.equal(mktLowOrders.status, 200, `前置条件：低权限账号应能进入旧车辆域读订单（证明空间闸门已通过）: ${mktLowOrders.status} ${JSON.stringify(mktLowOrders.body).slice(0, 200)}`);
-  const marketingBody = {
-    name: `E2E 越权方案 ${Date.now().toString(36)}`, displayName: "E2E 越权方案", status: "enabled",
-    customerScope: "all", supportedModes: ["daily"], priority: 1,
-    effectiveFrom: new Date(Date.now() - 86400000).toISOString(), effectiveTo: new Date(Date.now() + 86400000).toISOString(),
-    storeCodes: [], vehicleGroupCodes: [], manualVerification: false,
-    weekdayRate: 1, holidayRate: 1, fixedDeductionAmount: 0, description: "E2E", rules: []
+  const mktLowOrders = await request("GET", "/api/rental/v1/orders", null, mktLow.accessToken);
+  assert.equal(mktLowOrders.status, 200, `低权限账号应能读取订单（证明空间成员关系与 order:view 生效）: ${mktLowOrders.status} ${JSON.stringify(mktLowOrders.body).slice(0, 200)}`);
+  const discountBody = {
+    code: `E2E-DISCOUNT-LOW-${Date.now().toString(36)}`,
+    name: "E2E 越权方案",
+    status: "enabled",
+    discountType: "percentage",
+    discountValue: 10,
+    minimumSpend: 0,
+    customerScope: "all",
+    applicableItemGroupIds: [],
+    applicableDayTypes: [],
+    priority: 1,
+    appliesTo: "rental",
+    stackableWithOtherPlans: false,
+    stackableWithCoupon: false,
+    effectiveFrom: new Date(Date.now() - 86400000).toISOString(),
+    changeReason: "E2E 权限验证"
   };
-  const viewerMarketingWrite = await request("POST", "/api/store-rental/marketing/plans", marketingBody, mktLow.accessToken);
+  const viewerDiscountWrite = await request("POST", "/api/rental/v1/discount-plans", discountBody, mktLow.accessToken);
   assert.equal(
-    viewerMarketingWrite.status,
+    viewerDiscountWrite.status,
     403,
-    `只有 order:view 的账号不得写营销方案（曾因兜底 return [] 而完全无鉴权）: ${viewerMarketingWrite.status} ${JSON.stringify(viewerMarketingWrite.body).slice(0, 200)}`
+    `只有 order:view 的账号不得写优惠方案（曾因兜底 return [] 而完全无鉴权）: ${viewerDiscountWrite.status} ${JSON.stringify(viewerDiscountWrite.body).slice(0, 200)}`
   );
-  const viewerMarketingRead = await request("GET", "/api/store-rental/marketing/plans", null, mktLow.accessToken);
-  assert.equal(viewerMarketingRead.status, 403, `只有 order:view 的账号也不得读营销方案配置: ${viewerMarketingRead.status}`);
-  // 正向控制：同一空间内持有营销权限的账号必须能读——否则上面两条 403 可能只是接口坏了。
-  const adminMarketingRead = await request("GET", "/api/store-rental/marketing/plans", null, mktAdmin.accessToken);
-  assert.equal(adminMarketingRead.status, 200, `持有营销权限的账号必须能读营销方案（证明 403 来自鉴权而非坏接口）: ${adminMarketingRead.status} ${JSON.stringify(adminMarketingRead.body).slice(0, 200)}`);
+  const viewerDiscountRead = await request("GET", "/api/rental/v1/discount-plans", null, mktLow.accessToken);
+  assert.equal(viewerDiscountRead.status, 200, `订单查看账号应能读取下单可用优惠目录: ${viewerDiscountRead.status}`);
+  // 正向控制：同一空间内持有管理权限的账号也必须能读，否则上面的 403/200
+  // 可能只是接口坏了，而不是权限差异。
+  const adminDiscountRead = await request("GET", "/api/rental/v1/discount-plans", null, mktAdmin.accessToken);
+  assert.equal(adminDiscountRead.status, 200, `持有优惠管理权限的账号必须能读优惠方案: ${adminDiscountRead.status} ${JSON.stringify(adminDiscountRead.body).slice(0, 200)}`);
   // 兜底默认拒绝不得误伤自助会话端点与租户级 UI 偏好：它们在显式公共白名单里。
   const viewerSessionContext = await request("GET", "/api/auth/session-context", null, mktLow.accessToken);
   assert.equal(viewerSessionContext.status, 200, `会话自助端点不得被默认拒绝误伤: ${viewerSessionContext.status}`);
   const viewerPresets = await request("GET", "/api/platform/filter-presets?scopeKey=store-rental.orders", null, mktLow.accessToken);
   assert.equal(viewerPresets.status, 200, `筛选预设（租户级 UI 偏好）不得被默认拒绝误伤: ${viewerPresets.status}`);
-  ok("未列入鉴权规则的路由默认拒绝：默认车辆空间内只读账号写/读营销方案均 403（此前完全无鉴权），同空间持权限账号 200 为正向控制，自助会话与筛选预设不被误伤");
+  ok("优惠配置权限：order:view 可读下单目录但不可写，管理账号可读，且会话与筛选预设不被默认拒绝误伤");
   console.log("== 62. 无空间成员关系的账号不得访问经营域 ==");
   // 另一处 fail-open：空间检查曾附加 `accessContext.hasWorkspaces` 条件，
   // 于是「一个空间都没有的账号」跳过检查，随后仓储层的 resolveScopeWorkspaceId
@@ -9304,134 +9333,6 @@ async function main() {
     "重启后订单终态仍必须从库中读回"
   );
   ok("Hook 审计表：重复部署无差异、与 schema.prisma 一致、重启后能力与订单状态均从库读回");
-
-  console.log("== 67. CORE-EXT-02C API 门禁按已启用实例判定（暂停即刻收回放行） ==");
-  // 本节证的是 02C 的核心口径：`API 可执行 = capability 已启用 AND 用户具备权限 AND 空间匹配`。
-  //
-  // 改造前判据是品类定义的 `defaultCapabilities` 数组——vehicle 品类声明了 dispatch，
-  // 于是任何 vehicle 空间的 `/store-rental/dispatch/*` 都直接放行，且暂停与停用
-  // 完全无法表达（数组里永远有它）。用**同一个账号、同一个空间、同一个接口**，
-  // 只改能力状态来观察放行与拒绝，才能证明判据真的换成了实例。
-  const gatePlatform = await login("platform", "admin", PLATFORM_PASSWORD);
-  const gateTenant = await bootstrapTenant(gatePlatform.accessToken, "e2e_gate_vehicle", "vehicle");
-  const dispatchBoard = (token) => request("GET", "/api/store-rental/dispatch/board", null, token);
-
-  // 1) 未启用：必须 403。租户是 vehicle 品类、账号是租户管理员（权限齐备），
-  //    因此这次拒绝只可能来自能力门禁。
-  const gateBefore = await dispatchBoard(gateTenant.accessToken);
-  assert.equal(
-    gateBefore.status,
-    403,
-    `dispatch 未启用时必须拒绝（品类声明不等于已启用），实际 ${gateBefore.status}: ${JSON.stringify(gateBefore.body).slice(0, 200)}`
-  );
-  assert.match(JSON.stringify(gateBefore.body), /未启用该业务能力/u, "拒绝原因应指向能力未启用");
-  // 正向控制：同账号访问不受能力门禁保护的车辆域接口必须 200，
-  // 否则上面的 403 可能只是权限或品类不符，与能力无关。
-  assert.equal(
-    (await request("GET", "/api/store-rental/vehicles", null, gateTenant.accessToken)).status,
-    200,
-    "同账号访问无能力门禁的车辆域接口必须成功（否则 403 无区分力）"
-  );
-
-  // 2) 启用依赖后再启用 dispatch。dispatch 依赖 serialized_inventory，
-  //    顺序错会被 409 拦住——这同时复验了 02A 的依赖校验在真库上成立。
-  const gateDepMissing = await request(
-    "PUT",
-    "/api/rental/v1/capabilities",
-    { code: "dispatch", status: "enabled", reason: "先启调度（应被依赖拦住）" },
-    gateTenant.accessToken
-  );
-  assert.equal(gateDepMissing.status, 409, `缺依赖时启用 dispatch 应 409，实际 ${gateDepMissing.status}`);
-  for (const code of ["serialized_inventory", "dispatch"]) {
-    const enabled = await request(
-      "PUT",
-      "/api/rental/v1/capabilities",
-      { code, status: "enabled", reason: "第 67 节验证门禁" },
-      gateTenant.accessToken
-    );
-    assert.equal(enabled.status, 200, `启用 ${code} 失败: ${enabled.status} ${JSON.stringify(enabled.body).slice(0, 200)}`);
-  }
-  const gateAfterEnable = await dispatchBoard(gateTenant.accessToken);
-  assert.equal(
-    gateAfterEnable.status,
-    200,
-    `启用 dispatch 后必须放行，实际 ${gateAfterEnable.status}: ${JSON.stringify(gateAfterEnable.body).slice(0, 200)}`
-  );
-
-  // 3) 暂停：同一接口必须立刻回到 403。这是旧模型完全表达不了的状态。
-  const gatePauseRevision = Number(
-    readScalar(
-      `SELECT \`revision\` FROM \`workspace_capability_instances\` WHERE \`workspaceId\`='${gateTenant.currentWorkspaceId}' AND \`code\`='dispatch';`
-    )
-  );
-  const gatePaused = await request(
-    "PUT",
-    "/api/rental/v1/capabilities",
-    { code: "dispatch", status: "paused", reason: "调度暂停演练", expectedRevision: gatePauseRevision },
-    gateTenant.accessToken
-  );
-  assert.equal(gatePaused.status, 200, `暂停 dispatch 失败: ${gatePaused.status}`);
-  const gateAfterPause = await dispatchBoard(gateTenant.accessToken);
-  assert.equal(
-    gateAfterPause.status,
-    403,
-    `暂停后必须立刻收回放行，实际 ${gateAfterPause.status}（仍 200 说明判据还在读品类声明）`
-  );
-
-  // 4) 重新启用后恢复：证明 403 来自状态而非一次性副作用。
-  const gateResumeRevision = Number(
-    readScalar(
-      `SELECT \`revision\` FROM \`workspace_capability_instances\` WHERE \`workspaceId\`='${gateTenant.currentWorkspaceId}' AND \`code\`='dispatch';`
-    )
-  );
-  assert.equal(
-    (await request(
-      "PUT",
-      "/api/rental/v1/capabilities",
-      { code: "dispatch", status: "enabled", reason: "演练结束恢复", expectedRevision: gateResumeRevision },
-      gateTenant.accessToken
-    )).status,
-    200,
-    "恢复启用失败"
-  );
-  assert.equal((await dispatchBoard(gateTenant.accessToken)).status, 200, "恢复启用后必须重新放行");
-  ok("API 门禁按实例判定：未启用 403 → 启用 200 → 暂停 403 → 恢复 200，且缺依赖启用被 409 拦下");
-
-  console.log("== 67b. CORE-EXT-02C 会话上下文：入口可见性与生产就绪分开表示 ==");
-  // 菜单入口取自会话上下文的 `tenant.capabilities`。它必须是**已启用集**，
-  // 否则前端会长出「只有 code、没有模块」的入口，点进去才 403（或反之）。
-  const gateSession = await request("GET", "/api/auth/session-context", null, gateTenant.accessToken);
-  assert.equal(gateSession.status, 200, `读会话上下文失败: ${gateSession.status}`);
-  const gateCaps = gateSession.body.data.tenant.capabilities ?? [];
-  assert.ok(gateCaps.includes("dispatch"), `已启用的 dispatch 必须出现在会话能力集里，实际 ${gateCaps.join("、")}`);
-  assert.ok(gateCaps.includes("serialized_inventory"), "已启用的 serialized_inventory 必须出现在会话能力集里");
-  // vehicle 品类声明了 qualification / usage_reading 等，但它们没有实例 → 不得出现。
-  // 这一条是整节的关键：它区分「品类声明」与「已启用」两种口径。
-  assert.ok(
-    !gateCaps.includes("qualification"),
-    `品类声明但未启用的能力不得出现在会话能力集里（否则菜单会长出点进去 403 的入口）：${gateCaps.join("、")}`
-  );
-  // 「可访问」与「已达生产经营条件」必须分开：能进空间不等于品类能力齐备。
-  assert.equal(
-    gateSession.body.data.capabilityProductionReady,
-    false,
-    "必选能力未齐备时不得报告生产就绪"
-  );
-  assert.ok(
-    Array.isArray(gateSession.body.data.missingRequiredCapabilities) &&
-      gateSession.body.data.missingRequiredCapabilities.length > 0,
-    `未就绪时必须列出缺失的必选能力，实际 ${JSON.stringify(gateSession.body.data.missingRequiredCapabilities)}`
-  );
-  // 暂停一个必选能力后，缺失列表必须把它算进来——证明该字段是实时判定而非静态文案。
-  const gateReqCode = gateSession.body.data.missingRequiredCapabilities[0];
-  assert.ok(
-    !gateCaps.includes(gateReqCode),
-    `缺失列表里的能力不应同时出现在已启用集里：${gateReqCode}`
-  );
-  ok(
-    `会话上下文：已启用能力如实带出（含 dispatch），品类声明但未启用的 qualification 不带出；` +
-      `生产就绪为 false 且缺失必选能力可枚举（${gateSession.body.data.missingRequiredCapabilities.join("、")}）`
-  );
 
   console.log("== 68. CORE-EXT-02D 能力快照固化：报价/订单保存版本，暂停不破坏历史、新报价用新状态 ==");
   // 本节证的是：报价与订单在生成时固化「当时已启用能力的版本快照」，此后暂停/停用能力
