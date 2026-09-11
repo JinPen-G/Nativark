@@ -5,7 +5,8 @@ import type {
   RentalWorkbenchTodo,
   RentalWorkbenchTodos,
   RentalWorkOrder,
-  RentalWorkbenchTodoType
+  RentalWorkbenchTodoType,
+  SystemUserRow
 } from "@store-rental/shared";
 
 const TODO_TYPES: RentalWorkbenchTodoType[] = [
@@ -17,6 +18,15 @@ const TODO_TYPES: RentalWorkbenchTodoType[] = [
   "refund",
   "work_order"
 ];
+
+/**
+ * 工作台路由本身也允许报表角色查看，但养护工单不是报表数据的默认组成部分。
+ * 把这个判断抽成纯函数，控制器和专项测试共用，避免以后新增工作台待办时把
+ * maintenance:view 门禁漏掉。
+ */
+export function canIncludeWorkbenchWorkOrders(user: Pick<SystemUserRow, "isPlatformAdmin" | "permissions">): boolean {
+  return Boolean(user.isPlatformAdmin || user.permissions?.includes("*") || user.permissions?.includes("rental-core:maintenance:view"));
+}
 
 function iso(value: string | undefined, fallback: string) {
   return value && Number.isFinite(Date.parse(value)) ? value : fallback;

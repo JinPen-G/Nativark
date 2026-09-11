@@ -5,7 +5,7 @@ require("ts-node").register({
   compilerOptions: { module: "commonjs", moduleResolution: "node" }
 });
 
-const { buildRentalWorkbenchTodos } = require("../apps/api/src/modules/rental-core/rental-workbench-todos");
+const { buildRentalWorkbenchTodos, canIncludeWorkbenchWorkOrders } = require("../apps/api/src/modules/rental-core/rental-workbench-todos");
 
 const at = "2026-09-11T12:00:00.000Z";
 const base = (overrides = {}) => ({
@@ -55,4 +55,8 @@ assert.equal(todos.items.find((row) => row.type === "refund").amount, 25);
 const withoutFunding = buildRentalWorkbenchTodos([base({ id: "refund_without_funding", status: "settling", serviceSnapshots: [{ refundStatus: "approved_pending_refund" }] })], [], {}, {}, at);
 assert.equal(withoutFunding.items.some((row) => row.type === "refund"), false, "没有负租金余额时不能凭审核状态虚构退款待办");
 
-console.log(`\n工作台统一待办专项：${todos.items.length + 1} 项全部通过`);
+assert.equal(canIncludeWorkbenchWorkOrders({ isPlatformAdmin: false, permissions: ["store-rental:report:view"] }), false, "只有报表权限时不能读取养护工单待办");
+assert.equal(canIncludeWorkbenchWorkOrders({ isPlatformAdmin: false, permissions: ["rental-core:maintenance:view"] }), true, "维护查看权限可以读取养护工单待办");
+assert.equal(canIncludeWorkbenchWorkOrders({ isPlatformAdmin: true, permissions: [] }), true, "平台管理员沿用全局可见能力");
+
+console.log(`\n工作台统一待办专项：${todos.items.length + 4} 项全部通过`);
