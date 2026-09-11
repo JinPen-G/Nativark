@@ -28,6 +28,7 @@ import {
 import { PrismaService } from "../database/prisma.service";
 import { resolveScopeWorkspaceId } from "./workspace-scope";
 import { bufferedRentalPeriod } from "./rental-occupancy";
+import { getRequestWorkspaceId } from "../../common/request-identity";
 
 /** 参与可用量计算的预占。表上直接带 startAt/endAt，因此不必回连订单。 */
 export interface ActiveReservationRow {
@@ -281,14 +282,41 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
    * 拿到订单锁即可串行同一订单的状态推进，不同订单仍并行。
    */
   async lockOrder(tenantId: string, orderId: string, tx: RentalFactTx): Promise<void> {
-    const workspaceId = await resolveScopeWorkspaceId(tx, tenantId);
-    await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-      SELECT \`id\` FROM \`rental_orders\`
-      WHERE \`tenantId\` = ${tenantId}
-        AND \`workspaceId\` = ${workspaceId}
-        AND \`id\` = ${orderId}
-      FOR UPDATE
-    `);
+    /**
+     * 必须让这条 FOR UPDATE 成为事务内的第一条读。
+     *
+     * MySQL 默认是 REPEATABLE READ；如果先调用 resolveScopeWorkspaceId，
+     * 它的普通 SELECT 会建立旧快照。之后即使 FOR UPDATE 等到了续租事务并
+     * 拿到最新行锁，findOrder 的普通查询仍可能读到快照中的旧 effectiveEndAt，
+     * 归还就会按旧租期计算逾时费。这里直接把会话空间放进锁查询条件，并从
+     * 锁定结果取得空间；没有会话的 seed/恢复路径则先锁订单，再确认它属于
+     * 目标租户的默认空间，不提前做任何普通查询。
+     */
+    const sessionWorkspaceId = getRequestWorkspaceId();
+    const rows = sessionWorkspaceId
+      ? await tx.$queryRaw<Array<{ id: string; workspaceId: string }>>(Prisma.sql`
+          SELECT \`id\`, \`workspaceId\` FROM \`rental_orders\`
+          WHERE \`tenantId\` = ${tenantId}
+            AND \`workspaceId\` = ${sessionWorkspaceId}
+            AND \`id\` = ${orderId}
+          FOR UPDATE
+        `)
+      : await tx.$queryRaw<Array<{ id: string; workspaceId: string }>>(Prisma.sql`
+          SELECT \`id\`, \`workspaceId\` FROM \`rental_orders\`
+          WHERE \`tenantId\` = ${tenantId}
+            AND \`id\` = ${orderId}
+          FOR UPDATE
+        `);
+
+    if (!sessionWorkspaceId && rows[0]) {
+      const defaultWorkspace = await tx.businessWorkspace.findFirst({
+        where: { id: rows[0].workspaceId, tenantId, defaultMarker: "default" },
+        select: { id: true }
+      });
+      if (!defaultWorkspace) {
+        throw new ConflictException("订单不属于租户默认经营空间，拒绝在无会话路径锁定");
+      }
+    }
   }
 
   async countOrders(tenantId: string): Promise<number> {
