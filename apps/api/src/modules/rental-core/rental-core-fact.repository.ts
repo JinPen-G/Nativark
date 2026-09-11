@@ -281,9 +281,12 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
    * 拿到订单锁即可串行同一订单的状态推进，不同订单仍并行。
    */
   async lockOrder(tenantId: string, orderId: string, tx: RentalFactTx): Promise<void> {
+    const workspaceId = await resolveScopeWorkspaceId(tx, tenantId);
     await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
       SELECT \`id\` FROM \`rental_orders\`
-      WHERE \`tenantId\` = ${tenantId} AND \`id\` = ${orderId}
+      WHERE \`tenantId\` = ${tenantId}
+        AND \`workspaceId\` = ${workspaceId}
+        AND \`id\` = ${orderId}
       FOR UPDATE
     `);
   }
@@ -367,11 +370,20 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
 
     const write = async (client: RentalFactTx) => {
       const workspaceId = await resolveScopeWorkspaceId(client, order.tenantId);
-      await client.rentalOrder.upsert({
+      const existingOrder = await client.rentalOrder.findUnique({
         where: { id: order.id },
-        create: { workspaceId, id: order.id, ...orderData, createdAt: new Date(order.createdAt) },
-        update: orderData
+        select: { tenantId: true, workspaceId: true }
       });
+      if (existingOrder && (existingOrder.tenantId !== order.tenantId || existingOrder.workspaceId !== workspaceId)) {
+        throw new ConflictException("订单事实已属于其他租户或经营空间，拒绝覆盖");
+      }
+      if (existingOrder) {
+        await client.rentalOrder.update({ where: { id: order.id }, data: orderData });
+      } else {
+        await client.rentalOrder.create({
+          data: { workspaceId, id: order.id, ...orderData, createdAt: new Date(order.createdAt) }
+        });
+      }
 
       for (const line of order.lines) {
         const lineData = {
@@ -389,11 +401,15 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
           amount: new Prisma.Decimal(line.amount),
           note: line.note ?? null
         };
-        await client.rentalOrderLine.upsert({
-          where: { id: line.id },
-          create: { id: line.id, ...lineData },
-          update: lineData
-        });
+        const existingLine = await client.rentalOrderLine.findUnique({ where: { id: line.id }, select: { orderId: true } });
+        if (existingLine && existingLine.orderId !== order.id) {
+          throw new ConflictException("订单明细已属于其他订单，拒绝覆盖");
+        }
+        if (existingLine) {
+          await client.rentalOrderLine.update({ where: { id: line.id }, data: lineData });
+        } else {
+          await client.rentalOrderLine.create({ data: { id: line.id, ...lineData } });
+        }
       }
 
       for (const reservation of order.reservations) {
@@ -413,17 +429,33 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
           status: upper<$Enums.RentalReservationState>(reservation.status),
           expiresAt: reservation.expiresAt ? new Date(reservation.expiresAt) : null
         };
-        const workspaceId = await resolveScopeWorkspaceId(client, order.tenantId);
-        await client.rentalReservation.upsert({
+        const existingReservation = await client.rentalReservation.findUnique({
           where: { id: reservation.id },
-          create: { workspaceId, id: reservation.id, ...reservationData, createdAt: new Date(reservation.createdAt) },
-          update: reservationData
+          select: { tenantId: true, workspaceId: true, orderId: true }
         });
+        if (existingReservation && (
+          existingReservation.tenantId !== order.tenantId ||
+          existingReservation.workspaceId !== workspaceId ||
+          existingReservation.orderId !== order.id
+        )) {
+          throw new ConflictException("订单预占已属于其他租户、经营空间或订单，拒绝覆盖");
+        }
+        if (existingReservation) {
+          await client.rentalReservation.update({ where: { id: reservation.id }, data: reservationData });
+        } else {
+          await client.rentalReservation.create({
+            data: { workspaceId, id: reservation.id, ...reservationData, createdAt: new Date(reservation.createdAt) }
+          });
+        }
       }
 
       // 配货会重算整组分配，整表替换比逐条对齐更不容易留下孤立行。
       await client.rentalAllocation.deleteMany({ where: { orderId: order.id } });
       for (const allocation of order.allocations) {
+        const existingAllocation = await client.rentalAllocation.findUnique({ where: { id: allocation.id }, select: { orderId: true } });
+        if (existingAllocation && existingAllocation.orderId !== order.id) {
+          throw new ConflictException("订单分配已属于其他订单，拒绝覆盖");
+        }
         await client.rentalAllocation.create({
           data: {
             id: allocation.id,
@@ -441,7 +473,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
 
       for (const change of assetChanges) {
         await client.rentalAsset.updateMany({
-          where: { id: change.assetId, tenantId: order.tenantId },
+          where: { id: change.assetId, tenantId: order.tenantId, workspaceId },
           data: { status: upper<$Enums.RentalAssetState>(change.status) }
         });
       }
@@ -484,6 +516,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
    * 可确保同一资源的并发下单串行重算，而不同地点仍可并行。
    */
   async lockInventoryTargets(tenantId: string, locationId: string, targets: InventoryLockTarget[], tx: RentalFactTx): Promise<void> {
+    const workspaceId = await resolveScopeWorkspaceId(tx, tenantId);
     const ordered = [...targets].sort((left, right) =>
       `${left.itemGroupId}:${left.inventoryMode}`.localeCompare(`${right.itemGroupId}:${right.inventoryMode}`)
     );
@@ -492,6 +525,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
         await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
           SELECT \`id\` FROM \`rental_assets\`
           WHERE \`tenantId\` = ${tenantId}
+            AND \`workspaceId\` = ${workspaceId}
             AND \`itemGroupId\` = ${target.itemGroupId}
             AND \`locationId\` = ${locationId}
           ORDER BY \`id\` FOR UPDATE
@@ -500,6 +534,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
         await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
           SELECT \`id\` FROM \`rental_stock_balances\`
           WHERE \`tenantId\` = ${tenantId}
+            AND \`workspaceId\` = ${workspaceId}
             AND \`itemGroupId\` = ${target.itemGroupId}
             AND \`locationId\` = ${locationId}
           ORDER BY \`id\` FOR UPDATE
@@ -557,9 +592,11 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     locationId: string,
     tx: RentalFactTx
   ): Promise<void> {
+    const workspaceId = await resolveScopeWorkspaceId(tx, tenantId);
     await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
       SELECT \`id\` FROM \`rental_assets\`
       WHERE \`tenantId\` = ${tenantId}
+        AND \`workspaceId\` = ${workspaceId}
         AND \`itemGroupId\` = ${itemGroupId}
         AND \`locationId\` = ${locationId}
       ORDER BY \`id\` FOR UPDATE
@@ -650,11 +687,20 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
             throw error;
           }
         }
-        await tx.rentalAsset.upsert({
+        const existing = await tx.rentalAsset.findUnique({
           where: { id: asset.id },
-          create: { workspaceId, id: asset.id, ...data, createdAt: new Date(asset.createdAt) },
-          update: data
+          select: { tenantId: true, workspaceId: true }
         });
+        if (existing && (existing.tenantId !== asset.tenantId || existing.workspaceId !== workspaceId)) {
+          throw new ConflictException("资产事实已属于其他租户或经营空间，拒绝覆盖");
+        }
+        if (existing) {
+          await tx.rentalAsset.update({ where: { id: asset.id }, data });
+        } else {
+          await tx.rentalAsset.create({
+            data: { workspaceId, id: asset.id, ...data, createdAt: new Date(asset.createdAt) }
+          });
+        }
       });
     } catch (error) {
       // MySQL 在多个请求同时争抢同一唯一键时可能以死锁/写冲突结束事务，
@@ -732,11 +778,18 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
         onHandQuantity: input.onHandQuantity,
         maintenanceQuantity
       };
-      await tx.rentalStockBalance.upsert({
+      const existingById = await tx.rentalStockBalance.findUnique({
         where: { id },
-        create: { workspaceId, id, ...data },
-        update: data
+        select: { tenantId: true, workspaceId: true }
       });
+      if (existingById && (existingById.tenantId !== input.tenantId || existingById.workspaceId !== workspaceId)) {
+        throw new ConflictException("库存台账已属于其他租户或经营空间，拒绝覆盖");
+      }
+      if (existingById) {
+        await tx.rentalStockBalance.update({ where: { id }, data });
+      } else {
+        await tx.rentalStockBalance.create({ data: { workspaceId, id, ...data } });
+      }
       return { id, onHandQuantity: input.onHandQuantity, maintenanceQuantity };
     });
   }
@@ -757,11 +810,18 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       maintenanceQuantity: balance.maintenanceQuantity
     };
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, balance.tenantId);
-    await this.prisma.rentalStockBalance.upsert({
+    const existing = await this.prisma.rentalStockBalance.findUnique({
       where: { id: balance.id },
-      create: { workspaceId, id: balance.id, ...data },
-      update: data
+      select: { tenantId: true, workspaceId: true }
     });
+    if (existing && (existing.tenantId !== balance.tenantId || existing.workspaceId !== workspaceId)) {
+      throw new ConflictException("库存台账已属于其他租户或经营空间，拒绝覆盖");
+    }
+    if (existing) {
+      await this.prisma.rentalStockBalance.update({ where: { id: balance.id }, data });
+    } else {
+      await this.prisma.rentalStockBalance.create({ data: { workspaceId, id: balance.id, ...data } });
+    }
   }
 
   async listStockDispositions(tenantId: string, orderId?: string, tx?: RentalFactTx): Promise<RentalStockDisposition[]> {
@@ -953,11 +1013,14 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
     const row = await client.rentalWorkOrder.findFirst({ where: { id: workOrderId, tenantId, workspaceId } });
     if (!row) throw new NotFoundException("养护工单不存在或不属于当前经营空间");
-    const updated = await client.rentalWorkOrder.update({
-      where: { id: row.id },
+    const updated = await client.rentalWorkOrder.updateMany({
+      where: { id: row.id, tenantId, workspaceId },
       data: { assigneeId: assigneeId ?? null, assigneeName: assigneeName?.trim() || null }
     });
-    return toWorkOrder(updated);
+    if (updated.count !== 1) throw new ConflictException("养护工单已被其他人修改，请刷新后重试");
+    const refreshed = await client.rentalWorkOrder.findFirst({ where: { id: row.id, tenantId, workspaceId } });
+    if (!refreshed) throw new NotFoundException("养护工单更新后无法读取");
+    return toWorkOrder(refreshed);
   }
 
   async transitionWorkOrder(
@@ -1162,14 +1225,16 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     tx?: RentalFactTx
   ): Promise<void> {
     const client = tx ?? this.prisma;
-    await client.rentalOrderExtension.update({
-      where: { id: extensionId },
+    const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
+    const updated = await client.rentalOrderExtension.updateMany({
+      where: { id: extensionId, tenantId, workspaceId },
       data: {
         status: "effective",
         effectiveAt: new Date(at),
         ...(paidAt ? { paidAt: new Date(paidAt) } : {})
       }
     });
+    if (updated.count !== 1) throw new NotFoundException("续租记录不存在或不属于当前经营空间");
   }
 
   /**
@@ -1183,8 +1248,9 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
   async cancelExtensions(tenantId: string, extensionIds: string[], tx?: RentalFactTx): Promise<void> {
     if (!extensionIds.length) return;
     const client = tx ?? this.prisma;
+    const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
     await client.rentalOrderExtension.updateMany({
-      where: { id: { in: extensionIds }, tenantId, status: "pending_payment" },
+      where: { id: { in: extensionIds }, tenantId, workspaceId, status: "pending_payment" },
       data: { status: "cancelled" }
     });
   }

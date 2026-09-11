@@ -46,14 +46,18 @@ export class RentalServiceCapacityService {
     }
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
     return this.prisma.$transaction(async (tx) => {
-      const [service, location, existing] = await Promise.all([
+      const [service, location, existingById] = await Promise.all([
         tx.rentalValueAddedService.findFirst({ where: { id: input.serviceId, tenantId, workspaceId } }),
         tx.rentalFulfillmentLocation.findFirst({ where: { id: input.locationId, tenantId, workspaceId } }),
-        input.id ? tx.rentalServiceCapacity.findFirst({ where: { id: input.id, tenantId, workspaceId } }) : undefined
+        input.id ? tx.rentalServiceCapacity.findUnique({ where: { id: input.id } }) : undefined
       ]);
+      const existing = existingById && existingById.tenantId === tenantId && existingById.workspaceId === workspaceId
+        ? existingById
+        : undefined;
       if (!service) throw new NotFoundException("增值服务不存在");
       if (!service.requiresCapacity) throw new ConflictException("该服务未声明需要容量，不能维护容量窗口");
       if (!location) throw new NotFoundException("服务地点不存在");
+      if (existingById && !existing) throw new ConflictException("服务容量窗口已属于其他租户或经营空间，拒绝覆盖");
       if (input.id && !existing) throw new NotFoundException("服务容量窗口不存在");
       if (existing && input.totalCapacity < existing.reservedQuantity + existing.usedQuantity) {
         throw new ConflictException("总容量不能小于已预留与已确认数量之和");
@@ -141,7 +145,7 @@ export class RentalServiceCapacityService {
     const expiresAt = order.reservations.map((row) => row.expiresAt).filter(Boolean).sort()[0];
     for (const snapshot of required) {
       const idempotencyKey = this.reservationKey(requestKey, snapshot);
-      const existing = await tx.rentalServiceReservation.findFirst({ where: { tenantId, idempotencyKey } });
+      const existing = await tx.rentalServiceReservation.findFirst({ where: { tenantId, workspaceId, idempotencyKey } });
       if (existing) {
         if (existing.orderId !== order.id || existing.serviceId !== snapshot.serviceId || existing.quantity !== snapshot.capacityQuantity) {
           throw new ConflictException("服务容量幂等键已被不同订单内容使用");
@@ -181,15 +185,16 @@ export class RentalServiceCapacityService {
 
   /** 订单确认：软预留转已确认，占用量继续计入 available 公式并停止超时。 */
   async confirmForOrder(tenantId: string, orderId: string, confirmedAt: string, tx: Tx): Promise<void> {
+    const workspaceId = await resolveScopeWorkspaceId(tx, tenantId);
     const rows = await this.lockOrderReservations(tenantId, orderId, tx);
     for (const row of rows.filter((item) => item.status === "reserved")) {
       const moved = await tx.rentalServiceCapacity.updateMany({
-        where: { id: row.capacityId, tenantId, reservedQuantity: { gte: row.quantity } },
+        where: { id: row.capacityId, tenantId, workspaceId, reservedQuantity: { gte: row.quantity } },
         data: { reservedQuantity: { decrement: row.quantity }, usedQuantity: { increment: row.quantity } }
       });
       if (moved.count !== 1) throw new ConflictException("服务容量账不平，拒绝确认订单");
       await tx.rentalServiceReservation.updateMany({
-        where: { id: row.id, tenantId, status: "reserved" },
+        where: { id: row.id, tenantId, workspaceId, status: "reserved" },
         data: { status: "confirmed", confirmedAt: new Date(confirmedAt), expiresAt: null }
       });
     }
@@ -197,6 +202,7 @@ export class RentalServiceCapacityService {
 
   /** 取消释放未使用容量；已完成服务是历史事实，不在取消路径反向冲销。 */
   async releaseForOrder(tenantId: string, orderId: string, reason: string, releasedAt: string, tx: Tx): Promise<void> {
+    const workspaceId = await resolveScopeWorkspaceId(tx, tenantId);
     const rows = await this.lockOrderReservations(tenantId, orderId, tx);
     for (const row of rows.filter((item) => item.status === "reserved" || item.status === "confirmed")) {
       const data = row.status === "reserved"
@@ -206,12 +212,12 @@ export class RentalServiceCapacityService {
         ? { reservedQuantity: { gte: row.quantity } }
         : { usedQuantity: { gte: row.quantity } };
       const moved = await tx.rentalServiceCapacity.updateMany({
-        where: { id: row.capacityId, tenantId, ...guard },
+        where: { id: row.capacityId, tenantId, workspaceId, ...guard },
         data
       });
       if (moved.count !== 1) throw new ConflictException("服务容量账不平，拒绝释放");
       await tx.rentalServiceReservation.updateMany({
-        where: { id: row.id, tenantId, status: row.status },
+        where: { id: row.id, tenantId, workspaceId, status: row.status },
         data: { status: "released", releasedAt: new Date(releasedAt), releaseReason: reason, expiresAt: null }
       });
     }
@@ -220,8 +226,9 @@ export class RentalServiceCapacityService {
   /** 整单履约完成后把已确认流水标记已使用；计数不再移动，避免重复增减。 */
   async markUsedForOrder(tenantId: string, orderId: string, usedAt: string, tx: Tx): Promise<void> {
     await this.lockOrderReservations(tenantId, orderId, tx);
+    const workspaceId = await resolveScopeWorkspaceId(tx, tenantId);
     await tx.rentalServiceReservation.updateMany({
-      where: { tenantId, orderId, status: "confirmed" },
+      where: { tenantId, workspaceId, orderId, status: "confirmed" },
       data: { status: "used", usedAt: new Date(usedAt), expiresAt: null }
     });
   }
@@ -254,6 +261,7 @@ export class RentalServiceCapacityService {
       occurrences.filter((row) => !row.reservationKey && row.requiresCapacity).map((row) => [row.serviceId, row])
     );
     const rows = await this.lockOrderReservations(tenantId, order.id, tx);
+    const workspaceId = await resolveScopeWorkspaceId(tx, tenantId);
     const usedServiceIds: string[] = [];
     const releasedServiceIds: string[] = [];
     for (const row of rows.filter((item) => item.status === "confirmed")) {
@@ -262,19 +270,19 @@ export class RentalServiceCapacityService {
       const started = !snapshot || Date.parse(snapshot.scheduledStartAt) <= returnedAtMs;
       if (started) {
         await tx.rentalServiceReservation.updateMany({
-          where: { id: row.id, tenantId, status: "confirmed" },
+          where: { id: row.id, tenantId, workspaceId, status: "confirmed" },
           data: { status: "used", usedAt: new Date(returnedAt), expiresAt: null }
         });
         usedServiceIds.push(row.serviceId);
         continue;
       }
       const moved = await tx.rentalServiceCapacity.updateMany({
-        where: { id: row.capacityId, tenantId, usedQuantity: { gte: row.quantity } },
+        where: { id: row.capacityId, tenantId, workspaceId, usedQuantity: { gte: row.quantity } },
         data: { usedQuantity: { decrement: row.quantity } }
       });
       if (moved.count !== 1) throw new ConflictException("未开始服务的容量账不平，拒绝归还结算");
       await tx.rentalServiceReservation.updateMany({
-        where: { id: row.id, tenantId, status: "confirmed" },
+        where: { id: row.id, tenantId, workspaceId, status: "confirmed" },
         data: { status: "released", releasedAt: new Date(returnedAt), releaseReason: "not_started_at_return", expiresAt: null }
       });
       releasedServiceIds.push(row.serviceId);
@@ -297,7 +305,9 @@ export class RentalServiceCapacityService {
       FOR UPDATE
     `);
     if (!ids.length) return 0;
-    const rows = await tx.rentalServiceReservation.findMany({ where: { id: { in: ids.map((row) => row.id) } } });
+    const rows = await tx.rentalServiceReservation.findMany({
+      where: { id: { in: ids.map((row) => row.id) }, tenantId, workspaceId }
+    });
     for (const row of rows) {
       const moved = await tx.rentalServiceCapacity.updateMany({
         where: { id: row.capacityId, tenantId, workspaceId, reservedQuantity: { gte: row.quantity } },
@@ -305,7 +315,7 @@ export class RentalServiceCapacityService {
       });
       if (moved.count !== 1) throw new ConflictException("过期服务容量账不平，拒绝自动释放");
       await tx.rentalServiceReservation.updateMany({
-        where: { id: row.id, tenantId, status: "reserved" },
+        where: { id: row.id, tenantId, workspaceId, status: "reserved" },
         data: { status: "expired", releasedAt: now, releaseReason: "reservation_timeout", expiresAt: null }
       });
     }

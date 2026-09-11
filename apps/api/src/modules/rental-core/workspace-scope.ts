@@ -5,7 +5,11 @@ import { getRequestWorkspaceId } from "../../common/request-identity";
 type AnyClient = {
   businessWorkspace: {
     findFirst: (args: {
-      where: { tenantId: string; defaultMarker: string };
+      where: {
+        tenantId?: string;
+        defaultMarker?: string;
+        id?: string;
+      };
       select: { id: true };
     }) => Promise<{ id: string } | null>;
   };
@@ -37,7 +41,19 @@ export async function resolveScopeWorkspaceId(
   tenantId: string
 ): Promise<string> {
   const fromSession = getRequestWorkspaceId();
-  if (fromSession) return fromSession;
+  if (fromSession) {
+    // 会话空间来自认证上下文，但调用方仍可能带着另一个 tenantId 进入
+    // 内部服务。不能只信任 workspaceId 本身，否则一个跨租户的内部调用
+    // 会把当前空间当成目标租户的空间继续写入。
+    const current = await client.businessWorkspace.findFirst({
+      where: { id: fromSession, tenantId },
+      select: { id: true }
+    });
+    if (!current) {
+      throw new ForbiddenException("当前经营空间不属于目标租户，拒绝访问");
+    }
+    return current.id;
+  }
   const fallback = await client.businessWorkspace.findFirst({
     where: { tenantId, defaultMarker: "default" },
     select: { id: true }

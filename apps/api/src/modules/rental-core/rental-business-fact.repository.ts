@@ -152,8 +152,9 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
     tx: RentalBusinessFactTx
   ): Promise<boolean> {
     const timestamp = date(consumedAt);
+    const workspaceId = await resolveScopeWorkspaceId(tx, tenantId);
     const result = await tx.rentalQuote.updateMany({
-      where: { id: quoteId, tenantId, consumedAt: null, expiresAt: { gte: timestamp } },
+      where: { id: quoteId, tenantId, workspaceId, consumedAt: null, expiresAt: { gte: timestamp } },
       data: { consumedAt: timestamp, consumedOrderId: orderId }
     });
     return result.count === 1;
@@ -427,11 +428,20 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       consumedOrderId: quote.consumedOrderId ?? null
     };
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, quote.tenantId);
-    await this.prisma.rentalQuote.upsert({
+    const existing = await this.prisma.rentalQuote.findUnique({
       where: { id: quote.id },
-      create: { workspaceId, id: quote.id, ...data, createdAt: date(quote.createdAt) },
-      update: data
+      select: { tenantId: true, workspaceId: true }
     });
+    if (existing && (existing.tenantId !== quote.tenantId || existing.workspaceId !== workspaceId)) {
+      throw new ConflictException("报价事实已属于其他租户或经营空间，拒绝覆盖");
+    }
+    if (existing) {
+      await this.prisma.rentalQuote.update({ where: { id: quote.id }, data });
+    } else {
+      await this.prisma.rentalQuote.create({
+        data: { workspaceId, id: quote.id, ...data, createdAt: date(quote.createdAt) }
+      });
+    }
   }
 
   async upsertCustomerCoupon(coupon: RentalCustomerCoupon, tx?: RentalBusinessFactTx): Promise<void> {
@@ -466,11 +476,19 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       voidReason: coupon.voidReason ?? null
     };
     const workspaceId = await resolveScopeWorkspaceId(tx ?? this.prisma, coupon.tenantId);
-    await (tx ?? this.prisma).rentalCustomerCoupon.upsert({
+    const client = tx ?? this.prisma;
+    const existing = await client.rentalCustomerCoupon.findUnique({
       where: { id: coupon.id },
-      create: { workspaceId, id: coupon.id, ...data },
-      update: data
+      select: { tenantId: true, workspaceId: true }
     });
+    if (existing && (existing.tenantId !== coupon.tenantId || existing.workspaceId !== workspaceId)) {
+      throw new ConflictException("优惠券事实已属于其他租户或经营空间，拒绝覆盖");
+    }
+    if (existing) {
+      await client.rentalCustomerCoupon.update({ where: { id: coupon.id }, data });
+    } else {
+      await client.rentalCustomerCoupon.create({ data: { workspaceId, id: coupon.id, ...data } });
+    }
   }
 
   async findRewardsByIdempotencyKey(
@@ -508,11 +526,20 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
     };
     const client = tx ?? this.prisma;
     const workspaceId = await resolveScopeWorkspaceId(client, entry.tenantId);
-    await client.rentalRewardLedgerEntry.upsert({
+    const existing = await client.rentalRewardLedgerEntry.findUnique({
       where: { id: entry.id },
-      create: { workspaceId, id: entry.id, ...data, createdAt: date(entry.createdAt) },
-      update: data
+      select: { tenantId: true, workspaceId: true }
     });
+    if (existing && (existing.tenantId !== entry.tenantId || existing.workspaceId !== workspaceId)) {
+      throw new ConflictException("奖励流水已属于其他租户或经营空间，拒绝覆盖");
+    }
+    if (existing) {
+      await client.rentalRewardLedgerEntry.update({ where: { id: entry.id }, data });
+    } else {
+      await client.rentalRewardLedgerEntry.create({
+        data: { workspaceId, id: entry.id, ...data, createdAt: date(entry.createdAt) }
+      });
+    }
   }
 
   async upsertBenefitAccount(account: RentalCustomerBenefitAccount, tx?: RentalBusinessFactTx): Promise<void> {
