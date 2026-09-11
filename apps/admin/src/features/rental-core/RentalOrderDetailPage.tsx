@@ -205,6 +205,8 @@ export function RentalOrderDetailPage() {
         amount: values.decision === "approved" && values.amount !== undefined ? Number(values.amount) : undefined
       }),
     onSuccess: async () => {
+      // ORDER-CLOSE-02：批准只代表核定金额，不等于实际收退款——后者仍受资金权限与资金事件控制。
+      message.success("费用已裁定：批准仅代表核定应收/应退金额，实际收退款仍受资金权限与资金事件流程控制");
       setFeeReview(undefined);
       feeReviewForm.resetFields();
       await Promise.all([refresh(), queryClient.invalidateQueries({ queryKey: ["rental-core", "order", id, "funding"] })]);
