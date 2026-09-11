@@ -77,6 +77,16 @@ export class MembershipService {
     return link;
   }
 
+  /**
+   * 供订单/营销等共享业务在写入空间级事实前复用同一条会员范围校验。
+   * 客户主档属于租户，但优惠券、奖励和预约权益属于经营空间，不能只凭
+   * tenantId + customerId 就把事实写入当前空间。
+   */
+  async assertCustomerInWorkspace(tenantId: string, workspaceId: string, customerId: string) {
+    await this.requireCustomer(tenantId, customerId);
+    return this.requireWorkspaceLink(tenantId, workspaceId, customerId);
+  }
+
   async getRegistrationSettings(tenantId: string, workspaceId: string): Promise<CustomerMembershipRegistrationSettings> {
     await this.requireWorkspace(tenantId, workspaceId);
     const row = await this.prisma.customerMembershipRegistrationSettings.findFirst({ where: { tenantId, workspaceId } });

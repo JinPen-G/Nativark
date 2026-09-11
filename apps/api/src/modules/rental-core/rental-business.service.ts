@@ -2951,6 +2951,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     customerId: string,
     tx?: RentalBusinessFactTx
   ): Promise<{ coupon: RentalCustomerCoupon; template: RentalCouponTemplate }> {
+    await this.assertCustomerInCurrentWorkspace(tenantId, customerId);
     if (!tx && this.prisma && (process.env.PLATFORM_DATA_SOURCE ?? "mysql").toLowerCase() === "mysql") {
       const result = await this.prisma.$transaction((transaction) =>
         this.claimCoupon(tenantId, context, templateId, customerId, transaction)
@@ -3112,6 +3113,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     /** MySQL 事务使用隔离副本；提交成功后再用数据库事实刷新共享缓存。 */
     workingState?: RentalBusinessState
   ): Promise<RentalRewardLedgerEntry[]> {
+    await this.assertCustomerInCurrentWorkspace(tenantId, input.customerId);
+    if (input.relatedCustomerId) await this.assertCustomerInCurrentWorkspace(tenantId, input.relatedCustomerId);
     if (!tx && this.prisma && (process.env.PLATFORM_DATA_SOURCE ?? "mysql").toLowerCase() === "mysql") {
       const state = this.state(tenantId, context);
       // 不能把事务中的余额、奖励券和配额直接写进进程共享缓存：在 commit 前
@@ -3259,6 +3262,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const state = this.state(tenantId, context);
     if (!referrerCustomerId) return undefined;
     if (inviteeCustomerId === referrerCustomerId) throw new BadRequestException("客户不能邀请自己");
+    await this.assertCustomerInCurrentWorkspace(tenantId, inviteeCustomerId);
+    await this.assertCustomerInCurrentWorkspace(tenantId, referrerCustomerId);
     const current = state.referrals.find((row) => row.inviteeCustomerId === inviteeCustomerId);
     if (current && current.referrerCustomerId !== referrerCustomerId) throw new ConflictException("邀请关系建立后不能更换邀请人");
     if (current) return current;
@@ -4438,6 +4443,16 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const fallback = this.defaultWorkspaceByTenant.get(tenantId);
     if (!fallback) throw new ConflictException("当前 SaaS 租户尚未建立经营空间");
     return fallback;
+  }
+
+  /**
+   * 客户主档是租户共享的，但营销事实按经营空间保存。
+   * 真实应用始终注入 MembershipService；保留无数据库内存测试的兼容分支，
+   * 避免把只验证价格公式的夹具误当成会员范围来源。
+   */
+  private async assertCustomerInCurrentWorkspace(tenantId: string, customerId: string) {
+    if (!this.memberships) return;
+    await this.memberships.assertCustomerInWorkspace(tenantId, this.workspaceOf(tenantId), customerId);
   }
 
   /** 配置 id 前缀：默认空间沿用 tenantId 保持既有 id，其余空间用自己的 id。 */
