@@ -11,3 +11,4 @@ export * from "./common";
 export * from "./core";
 export * from "./platform";
 export * from "./infrastructure";
+export * from "./client";
