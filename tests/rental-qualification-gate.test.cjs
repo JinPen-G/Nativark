@@ -142,6 +142,20 @@ void (async () => {
     );
     console.log("  ✓ 暂停中的个人会员和倒置有效期不能建立企业员工关系");
 
+    const qualificationSubmission = await memberships.submitQualification(tenantId, workspaceId, personalId, {
+      qualificationType: "driver_license", issuedAt: "2026-01-01T00:00:00.000Z", expiresAt: "2099-01-01T00:00:00.000Z"
+    }, "admin", "资格测试管理员");
+    await assert.rejects(
+      () => memberships.review(tenantId, workspaceId, qualificationSubmission.review.id, { status: "rejected" }, "资格审核员", { registration: false, qualification: true }),
+      /拒绝、补件或取消审核必须填写原因/u
+    );
+    const rejectedQualification = await memberships.review(
+      tenantId, workspaceId, qualificationSubmission.review.id, { status: "rejected", reason: "证件照片无法辨识" }, "资格审核员", { registration: false, qualification: true }
+    );
+    assert.equal(rejectedQualification.status, "rejected");
+    assert.equal(rejectedQualification.reason, "证件照片无法辨识");
+    console.log("  ✓ 非通过审核必须记录原因，并回写证件审核状态");
+
     await prisma.customerQualificationRef.updateMany({ where: { tenantId, customerId: personalId }, data: { status: "revoked" } });
     await assert.rejects(
       () => memberships.assertBookingQualificationForAction(tenantId, workspaceId, personalSnapshot, rule, "pickup", actionWindow(1, 3)),

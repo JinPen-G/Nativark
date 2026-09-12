@@ -238,6 +238,7 @@ export class MembershipService {
     operator?: string,
     permissions: { registration: boolean; qualification: boolean } = { registration: false, qualification: false }
   ) {
+    const reason = input.reason?.trim();
     const now = new Date();
     const result = await this.prisma.$transaction(async (tx) => {
       const review = await tx.customerMembershipReview.findFirst({ where: { tenantId, workspaceId, id: reviewId } });
@@ -247,9 +248,12 @@ export class MembershipService {
       if (review.status !== "pending" && review.status !== "supplement_required") {
         throw new ConflictException("审核任务已处理，不能重复审核");
       }
+      if (input.status !== "approved" && !reason) {
+        throw new BadRequestException("拒绝、补件或取消审核必须填写原因");
+      }
       const updated = await tx.customerMembershipReview.update({
         where: { id: review.id },
-        data: { status: input.status, reason: input.reason?.trim() || null, reviewedBy: operator, reviewedAt: now }
+        data: { status: input.status, reason: reason || null, reviewedBy: operator, reviewedAt: now }
       });
       if (review.reviewType === "registration" && input.status === "approved") {
         await tx.customerWorkspaceLink.updateMany({

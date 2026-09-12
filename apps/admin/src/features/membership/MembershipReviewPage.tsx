@@ -44,7 +44,7 @@ export function MembershipReviewPage() {
     <Modal title={selected ? `${typeText[selected.reviewType]}审核` : "审核"} open={Boolean(selected)} onCancel={() => setSelected(undefined)} onOk={() => form.submit()} confirmLoading={decide.isPending} destroyOnHidden>
       <Form form={form} layout="vertical" onFinish={(values) => decide.mutate(values)}>
         <Form.Item label="审核结论" name="status" rules={[{ required: true }]}><Radio.Group options={[{ value: "approved", label: "通过" }, { value: "supplement_required", label: "补充资料" }, { value: "rejected", label: "拒绝" }, { value: "cancelled", label: "取消" }]} /></Form.Item>
-        <Form.Item label="说明" name="reason"><Input.TextArea maxLength={500} rows={3} placeholder="补件、拒绝或取消时请说明原因" /></Form.Item>
+        <Form.Item label="说明" name="reason" dependencies={["status"]} rules={[({ getFieldValue }) => ({ required: getFieldValue("status") !== "approved", message: "补件、拒绝或取消审核必须填写原因" })]}><Input.TextArea maxLength={500} rows={3} placeholder="补件、拒绝或取消时请说明原因" /></Form.Item>
       </Form>
     </Modal>
   </QueryState>;
