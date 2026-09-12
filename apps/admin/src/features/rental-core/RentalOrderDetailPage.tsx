@@ -103,11 +103,13 @@ export function RentalOrderDetailPage() {
   const [extensionOpen, setExtensionOpen] = useState(false);
   const [extensionRefundReview, setExtensionRefundReview] = useState<RentalOrderExtension>();
   const [serviceExecution, setServiceExecution] = useState<{ occurrence: RentalOrderServiceOccurrence; action: RentalServiceExecutionAction }>();
+  const [serviceRefund, setServiceRefund] = useState<RentalOrderServiceOccurrence>();
   const [extensionRefundForm] = Form.useForm<{ decision: "approved" | "rejected"; reason: string }>();
   // 试算结果单独存：金额要先摆给运营/客户确认，确认后才提交申请。
   const [extensionPreview, setExtensionPreview] = useState<RentalOrderExtensionPreview>();
   const [extensionForm] = Form.useForm<{ newEndAt: Dayjs; memo?: string }>();
   const [serviceExecutionForm] = Form.useForm<{ result?: string; reason?: string; customerConfirmed?: boolean; refundAmount?: number; compensationAmount?: number; evidenceAttachments?: string }>();
+  const [serviceRefundForm] = Form.useForm<{ reason: string }>();
   const order = useQuery({ queryKey: ["rental-core", "order", id], queryFn: () => rentalCoreApi.order(id), enabled: Boolean(id) });
   const profile = useQuery({ queryKey: ["rental-core", "profile"], queryFn: rentalCoreApi.profile });
   const templates = useQuery({ queryKey: ["rental-core", "templates"], queryFn: () => rentalCoreApi.inspectionTemplates() });
@@ -285,6 +287,24 @@ export function RentalOrderDetailPage() {
     },
     onError: (error: Error) => message.error(error.message || "服务履约记录失败，请刷新后重试")
   });
+  const refundService = useMutation({
+    mutationFn: (values: { reason: string }) => {
+      const occurrence = serviceRefund;
+      if (!occurrence?.occurrenceId || occurrence.refundAmount === undefined) throw new Error("服务退款事实不完整");
+      return rentalCoreApi.refundServiceOccurrence(id, occurrence.occurrenceId, {
+        amount: Number(occurrence.refundAmount),
+        idempotencyKey: crypto.randomUUID(),
+        reason: values.reason
+      });
+    },
+    onSuccess: async () => {
+      setServiceRefund(undefined);
+      serviceRefundForm.resetFields();
+      await Promise.all([refresh(), queryClient.invalidateQueries({ queryKey: ["rental-core", "order", id, "funding"] })]);
+      message.success("服务退款已登记，服务发生项已闭环");
+    },
+    onError: (error: Error) => message.error(error.message || "服务退款失败，请检查已批准金额和资金余额")
+  });
   const detail = order.data;
   // SHARED-WORK-01A：订单详情与养护工单联动——按订单过滤本空间的养护工单与归还处置。
   const relatedWorkOrders = useQuery({
@@ -441,20 +461,24 @@ export function RentalOrderDetailPage() {
               return <Space orientation="vertical" size={0}><Tag color={SERVICE_EXECUTION_STATUS_COLORS[status]}>{SERVICE_EXECUTION_STATUS_LABELS[status]}</Tag><span style={{ color: "#999" }}>{row.actualStartAt ? `开始 ${new Date(row.actualStartAt).toLocaleString()}` : "未记录实际开始"}</span>{row.actualEndAt && <span style={{ color: "#999" }}>结束 {new Date(row.actualEndAt).toLocaleString()}</span>}</Space>;
             }},
             { title: "退款", width: 150, render: (_, row) => row.refundStatus && row.refundStatus !== "none"
-              ? <Tag color={row.refundStatus === "pending_review" ? "orange" : row.refundStatus === "approved_pending_refund" ? "gold" : "default"}>{row.refundStatus === "pending_review" ? `待审核 ${money(row.refundAmount)}` : row.refundStatus === "approved_pending_refund" ? `已核减，待退款 ${money(row.refundAmount)}` : "已驳回"}</Tag>
+              ? <Tag color={row.refundStatus === "pending_review" ? "orange" : row.refundStatus === "approved_pending_refund" ? "gold" : row.refundStatus === "refunded" ? "green" : "default"}>{row.refundStatus === "pending_review" ? `待审核 ${money(row.refundAmount)}` : row.refundStatus === "approved_pending_refund" ? `已核减，待退款 ${money(row.refundAmount)}` : row.refundStatus === "refunded" ? `已退款 ${money(row.refundAmount)}` : "已驳回"}</Tag>
               : "-" },
             { title: "容量", width: 130, render: (_, row) => row.requiresCapacity
               ? <Tag color={row.reservationKey ? "green" : "orange"}>{row.reservationKey ? `已占 ${row.capacityQuantity}` : "无容量依据"}</Tag>
               : <Tag color="default">不需要容量</Tag> },
             { title: "操作", width: 260, render: (_, row) => {
-              if (!canOperate || !row.occurrenceId) return <span style={{ color: "#999" }}>无操作权限/历史记录</span>;
+              if (!row.occurrenceId) return <span style={{ color: "#999" }}>历史记录，无操作</span>;
               const status = row.executionStatus ?? "not_started";
               const actions: Array<{ action: RentalServiceExecutionAction; label: string; danger?: boolean }> = status === "not_started"
                 ? [{ action: "start", label: "开始" }, { action: "complete", label: "直接完成" }, { action: "cancel", label: "取消" }, { action: "no_show", label: "未到场", danger: true }]
                 : status === "in_progress"
                   ? [{ action: "complete", label: "完成" }, { action: "fail", label: "记录失败", danger: true }]
                   : [];
-              return <Space wrap>{actions.map((item) => <Button key={item.action} type={item.action === "complete" ? "primary" : "link"} danger={item.danger} size="small" onClick={() => { serviceExecutionForm.resetFields(); setServiceExecution({ occurrence: row, action: item.action }); }}>{item.label}</Button>)}</Space>;
+              return <Space wrap>
+                {canOperate && actions.map((item) => <Button key={item.action} type={item.action === "complete" ? "primary" : "link"} danger={item.danger} size="small" onClick={() => { serviceExecutionForm.resetFields(); setServiceExecution({ occurrence: row, action: item.action }); }}>{item.label}</Button>)}
+                {canSettleFunding && row.refundStatus === "approved_pending_refund" && <Button key="refund" type="primary" size="small" onClick={() => { serviceRefundForm.resetFields(); setServiceRefund(row); }}>办理退款</Button>}
+                {!canOperate && !(canSettleFunding && row.refundStatus === "approved_pending_refund") && <span style={{ color: "#999" }}>无操作权限</span>}
+              </Space>;
             } }
           ]}
         />
@@ -699,6 +723,28 @@ export function RentalOrderDetailPage() {
           <Form.Item name="compensationAmount" label="补偿金额（记录用）"><InputNumber min={0} precision={2} prefix={symbol} style={{ width: "100%" }} /></Form.Item>
         </>}
         {serviceExecution?.action !== "start" && <Form.Item name="evidenceAttachments" label="证据引用（可选）" extra="每行或用逗号填写一条照片、签名或附件引用，不在本任务接入文件存储。"><Input.TextArea rows={2} /></Form.Item>}
+     </Form>
+    </Modal>
+    <Modal
+      title={serviceRefund ? `办理服务退款：${serviceRefund.serviceName}` : "办理服务退款"}
+      open={Boolean(serviceRefund)}
+      onCancel={() => { setServiceRefund(undefined); serviceRefundForm.resetFields(); }}
+      onOk={() => serviceRefundForm.submit()}
+      confirmLoading={refundService.isPending}
+      destroyOnHidden
+    >
+      <Alert
+        type="warning"
+        showIcon
+        title={`本次将登记模拟退款 ${money(serviceRefund?.refundAmount)}`}
+        description="金额必须与已批准的服务退款一致；资金事件与服务发生项状态会在同一事务内提交。"
+        style={{ marginBottom: 16 }}
+      />
+      <Form form={serviceRefundForm} layout="vertical" onFinish={(values) => refundService.mutate(values)}>
+        <Form.Item label="已批准金额"><InputNumber disabled value={serviceRefund?.refundAmount} precision={2} prefix={symbol} style={{ width: "100%" }} /></Form.Item>
+        <Form.Item name="reason" label="退款办理原因" rules={[{ required: true, whitespace: true, message: "请填写退款办理原因" }]}>
+          <Input.TextArea rows={3} placeholder="例如：服务退款审核已通过，现办理模拟退款" />
+        </Form.Item>
       </Form>
     </Modal>
     <Modal

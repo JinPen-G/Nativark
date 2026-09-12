@@ -80,6 +80,7 @@
     "test:return-batch": "npm run build -w @store-rental/shared && node tests/rental-return-batch.test.cjs",
     "test:return-quarantine": "npm run build -w @store-rental/shared && node tests/rental-return-quarantine.test.cjs",
     "test:return-charge-race": "npm run build -w @store-rental/shared && node tests/rental-return-charge-race.test.cjs",
+    "test:cancel-lock-order": "npm run build -w @store-rental/shared && node tests/rental-cancel-lock-order.test.cjs",
     "test:extension-services": "npm run build -w @store-rental/shared && node tests/rental-extension-services.test.cjs",
     "test:service-occurrence": "npm run build -w @store-rental/shared && node tests/rental-service-occurrence.test.cjs",
     "test:service-execution": "npm run build -w @store-rental/shared && node tests/rental-service-execution.test.cjs",

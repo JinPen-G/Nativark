@@ -2987,7 +2987,8 @@ export const RENTAL_SERVICE_REFUND_STATUSES = [
   "none",
   "pending_review",
   "approved_pending_refund",
-  "rejected"
+  "rejected",
+  "refunded"
 ] as const;
 export type RentalServiceRefundStatus = (typeof RENTAL_SERVICE_REFUND_STATUSES)[number];
 
@@ -3042,6 +3043,9 @@ export interface RentalOrderServiceOccurrence extends RentalQuoteServiceSnapshot
   refundStatus?: RentalServiceRefundStatus;
   refundAmount?: number;
   refundReviewId?: string;
+  /** 实际退款资金事件落账后的闭环事实；批准与实际退款必须分开记录。 */
+  refundedAt?: string;
+  refundedBy?: string;
   compensationAmount?: number;
 }
 
@@ -3182,6 +3186,13 @@ export interface InitiateRentalFundingRequest {
 
 export interface RentalFundingAmountRequest {
   instrument: RentalFundingInstrument;
+  amount: number;
+  idempotencyKey: string;
+  reason: string;
+}
+
+/** MKT-02D：将已批准的增值服务退款写入模拟资金流水并闭合该服务发生项。 */
+export interface RefundRentalServiceRequest {
   amount: number;
   idempotencyKey: string;
   reason: string;
@@ -4648,7 +4659,7 @@ export interface RentalOrderFeeReview {
   id: string;
   /** 逾期、提前归还退款，以及增值服务未履约退款。 */
   type: "overdue" | "early_return_refund" | "service_refund";
-  /** 服务退款审核对应的服务发生项；其他类型为空。 */
+  /** 服务退款审核对应的服务发生项；逾时审核时可记录归还批次，其他类型为空。 */
   sourceId?: string;
   /** 规则算出的建议金额，**正数**。退款类落账时取负。 */
   suggestedAmount: number;

@@ -21,6 +21,7 @@ import {
   type RentalFundingAmountRequest,
   type RentalFundingFailureRequest,
   type RentalFundingReleaseRequest,
+  type RefundRentalServiceRequest,
   type RentalOrderExtensionRequest,
   type RentalPricingUnit,
   type RentalQuoteRequest,
@@ -764,6 +765,23 @@ export class RentalFundingFailureDto implements RentalFundingFailureRequest {
 
   @IsString()
   @IsNotEmpty()
+  reason!: string;
+}
+
+/** MKT-02D：服务退款必须引用已批准的服务退款金额，并单独写入资金事件。 */
+export class RefundRentalServiceDto implements RefundRentalServiceRequest {
+  @IsNumber()
+  @Min(0.01)
+  amount!: number;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(191)
+  idempotencyKey!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(1000)
   reason!: string;
 }
 

@@ -385,6 +385,10 @@ export function requiredPermissions(method: string, path: string) {
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/services\/[^/]+\/execution$/)) {
     return ["store-rental:order:operate"];
   }
+  // 服务退款是已批准退款的实际资金动作，只认结算权限，不让普通履约操作员动资金。
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/services\/[^/]+\/refund$/)) {
+    return ["store-rental:order:settle"];
+  }
   // 三条费用裁定入口统一收到 order:fee-review：裁定「该收/该退多少」与实际动钱是两件事。
   // 此前它们都认 order:settle，而资金事件也认 order:settle，等于一个权限同时授予
   // 「决定金额」与「收退款」。拆开后只有裁定权的人能定金额但动不了资金台账，

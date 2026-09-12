@@ -121,6 +121,22 @@ void (async () => {
     assert.equal(reviewed.serviceSnapshots[0].refundStatus, "approved_pending_refund");
     assert.equal(reviewed.chargeLines[0].amount, -90);
     ok("服务退款审核批准只核减应收，状态明确为待实际退款");
+
+    await assert.rejects(
+      () => service.refundServiceOccurrence("tenant_1", order.id, occurrence.occurrenceId, 80, "结算员", {}),
+      /必须等于已批准金额/u,
+      "实际退款金额不能绕过审核结论"
+    );
+    const refunded = await service.refundServiceOccurrence("tenant_1", order.id, occurrence.occurrenceId, 90, "结算员", {});
+    assert.equal(refunded.occurrence.refundStatus, "refunded");
+    assert.ok(refunded.occurrence.refundedAt);
+    assert.equal(refunded.occurrence.refundedBy, "结算员");
+    await assert.rejects(
+      () => service.refundServiceOccurrence("tenant_1", order.id, occurrence.occurrenceId, 90, "结算员", {}),
+      /尚未批准，或已经办理过/u,
+      "同一服务不能重复办理实际退款"
+    );
+    ok("实际退款金额必须匹配已批准金额，成功后记录退款人和时间并拒绝重复办理");
   }
 
   {

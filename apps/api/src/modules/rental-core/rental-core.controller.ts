@@ -45,6 +45,7 @@ import {
   RentalOrderExtensionDto,
   ReviewRentalExtensionRefundDto,
   ReviewRentalOrderFeeReviewDto,
+  RefundRentalServiceDto,
   UpdateRentalServiceOccurrenceDto,
   SaveRentalAssetDto,
   SaveRentalCouponTemplateDto,
@@ -137,6 +138,29 @@ function outstandingQuantitiesOf(order: RentalOrder): Record<string, number> {
     const target = line?.pricingGroupId ?? line?.itemGroupId ?? allocation.itemGroupId;
     if (!target) continue;
     result[target] = (result[target] ?? 0) + allocation.quantity;
+  }
+  return result;
+}
+
+/**
+ * 本批实际归还的数量。
+ *
+ * 归还计费在应用归还前计算，因此这里按锁内订单把请求的分配项映射回
+ * 计价目标。逾时费只应落在本批刚归还的数量上，不能把仍在租的部分一起
+ * 计费，也不能等最后一批才把前面各批重新算一遍。
+ */
+function returnedQuantitiesOf(
+  order: RentalOrder,
+  items: Array<{ allocationId: string; quantity: number }>
+): Record<string, number> {
+  const result: Record<string, number> = {};
+  for (const item of items) {
+    const allocation = order.allocations?.find((row) => row.id === item.allocationId);
+    if (!allocation || allocation.status === "returned" || allocation.status === "released") continue;
+    const line = order.lines?.find((row) => row.id === allocation.orderLineId);
+    const target = line?.pricingGroupId ?? line?.itemGroupId ?? allocation.itemGroupId;
+    if (!target) continue;
+    result[target] = (result[target] ?? 0) + Math.max(0, Number(item.quantity) || 0);
   }
   return result;
 }
@@ -819,7 +843,20 @@ export class RentalCoreController {
       fallbackKey: `order.partial-return:${id}:${body.batchNo}`,
       request: { orderId: id, items: body.items, batchNo: body.batchNo },
       orderId: id,
-      run: (tx) => this.service.partialReturnOrder(tenantId, id, body, tx),
+      run: async (tx) => {
+        const returnedAt = new Date().toISOString();
+        const charges = await this.returnCharges(
+          tenantId,
+          this.context(tenantId),
+          id,
+          returnedAt,
+          tx,
+          body.items,
+          body.batchNo ?? idempotencyKey ?? "partial-return",
+          false
+        );
+        return this.service.partialReturnOrder(tenantId, id, body, tx, charges);
+      },
       replay: async () => {
         const current = await this.service.getOrder(tenantId, id);
         return current.status === RentalCoreOrderStatus.Renting ? current : undefined;
@@ -829,9 +866,6 @@ export class RentalCoreController {
   }
   @Post("orders/:id/cancel") async cancel(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: CancelRentalOrderDto) {
     const context = this.context(req.user.tenantId);
-    const current = await this.service.getOrder(req.user.tenantId, id);
-    const quote = this.business.getQuote(req.user.tenantId, context, current.quoteId);
-    const charge = this.business.calculateCancellationCharge(req.user.tenantId, context, quote, undefined, Boolean(body.weatherException));
     const { result: order, replayed: cancelReplayed } = await this.idempotent.executeWithReplayFlag({
       tenantId: req.user.tenantId,
       action: "order.cancel",
@@ -842,7 +876,20 @@ export class RentalCoreController {
       request: { orderId: id, reason: body.reason, weatherException: Boolean(body.weatherException) },
       orderId: id,
       run: async (tx) => {
-        const cancelled = await this.service.cancelOrder(req.user.tenantId, id, body.reason, charge, tx, req.user.displayName);
+        const cancelled = await this.service.cancelOrder(
+          req.user.tenantId,
+          id,
+          body.reason,
+          (lockedOrder) => this.business.calculateCancellationCharge(
+            req.user.tenantId,
+            context,
+            this.business.getQuote(req.user.tenantId, context, lockedOrder.quoteId),
+            undefined,
+            Boolean(body.weatherException)
+          ),
+          tx,
+          req.user.displayName
+        );
         await this.releaseCancelledOrderResources(req.user.tenantId, id, tx, "order_cancelled");
         return cancelled;
       },
@@ -1089,19 +1136,28 @@ export class RentalCoreController {
     context: BusinessContext,
     orderId: string,
     returnedAt: string,
-    tx: Prisma.TransactionClient
+    tx: Prisma.TransactionClient,
+    partialReturnItems?: Array<{ allocationId: string; quantity: number }>,
+    batchId?: string,
+    includeEarlyReturn = true
   ) {
     const locked = await this.service.lockOrderForUpdate(tenantId, orderId, tx);
     const quote = this.business.getQuote(tenantId, context, locked.quoteId);
     const dueAt = locked.effectiveEndAt ?? locked.endAt;
     const extensionPricing = (await this.service.listOrderExtensions(tenantId, orderId, tx))
       .filter((row) => row.status === "effective").at(-1)?.pricingSnapshot;
+    const quantityScope = partialReturnItems
+      ? returnedQuantitiesOf(locked, partialReturnItems)
+      : outstandingQuantitiesOf(locked);
     return {
       overdue: {
-        amount: this.business.calculateOverdueCharge(tenantId, context, quote, returnedAt, dueAt, outstandingQuantitiesOf(locked)),
-        returnedAt
+        amount: this.business.calculateOverdueCharge(tenantId, context, quote, returnedAt, dueAt, quantityScope),
+        returnedAt,
+        batchId
       },
-      earlyReturn: this.business.calculateEarlyReturnRefund(tenantId, context, quote, dueAt, returnedAt, extensionRentalOf(locked), extensionPricing)
+      earlyReturn: includeEarlyReturn
+        ? this.business.calculateEarlyReturnRefund(tenantId, context, quote, dueAt, returnedAt, extensionRentalOf(locked), extensionPricing)
+        : undefined
     };
   }
 
@@ -1144,8 +1200,17 @@ export class RentalCoreController {
       orderId: id,
       run: async (tx) => {
         if (stage === "pickup") await this.funding.assertReadyForPickup(tenantId, this.service.resolveWorkspaceId(tenantId), id, tx);
-        const charges = stage === "return" && !partialReturn
-          ? await this.returnCharges(tenantId, context, id, returnedAt, tx)
+        const charges = stage === "return"
+          ? await this.returnCharges(
+              tenantId,
+              context,
+              id,
+              returnedAt,
+              tx,
+              partialReturn ? body.returnItems : undefined,
+              partialReturn ? (body.returnBatchNo ?? inspectionKey ?? "inspection-return") : undefined,
+              !partialReturn
+            )
           : undefined;
         overdueAmount = charges?.overdue.amount ?? 0;
         const created = await this.service.createInspection(tenantId, id, body, req.user.displayName, charges ?? {}, tx);
@@ -1164,7 +1229,7 @@ export class RentalCoreController {
       if (!partialReturn) await this.emitOrderEvent(tenantId, result.inspection.stage === "pickup" ? "pickup.completed" : "return.completed", result.order);
       // 归还确实逾期（费用 > 0）才发逾期通知——这是真实业务事实，不是凭空造事件。
       // 与 return.completed 各自独立幂等，因此同一次归还两条通知都只发一次。
-      if (stage === "return" && !partialReturn && overdueAmount > 0) {
+      if (stage === "return" && overdueAmount > 0) {
         await this.emitOrderEvent(tenantId, "order.overdue", result.order);
       }
     }
@@ -1279,6 +1344,45 @@ export class RentalCoreController {
           ? occurrence.executionStatus === "in_progress"
           : ["completed", "cancelled", "failed", "no_show"].includes(occurrence.executionStatus ?? "");
         return terminal ? { order: current, occurrence } : undefined;
+      }
+    });
+    return this.committed(tenantId, result);
+  }
+
+  @Post("orders/:id/services/:occurrenceId/refund")
+  async refundServiceOccurrence(
+    @Req() req: AuthenticatedRequest,
+    @Param("id") id: string,
+    @Param("occurrenceId") occurrenceId: string,
+    @Body() body: RefundRentalServiceDto
+  ) {
+    const tenantId = req.user.tenantId;
+    const result = await this.idempotent.execute({
+      tenantId,
+      action: "order.service-refund",
+      key: body.idempotencyKey,
+      fallbackKey: `order.service-refund:${id}:${occurrenceId}`,
+      request: { orderId: id, occurrenceId, ...body },
+      orderId: id,
+      run: async (tx) => {
+        // 资金事件和服务快照必须同成同败，避免“钱已退但服务仍显示待退款”或反过来。
+        // 资金事件使用服务域命名空间，避免调用方偶然复用一个通用退款幂等键，
+        // 把另一笔退款事件误当成当前服务退款的资金事实。
+        const fundingIdempotencyKey = `service-refund:${createHash("sha256").update(`${id}:${occurrenceId}:${body.idempotencyKey}`).digest("hex")}`;
+        await this.funding.recordEvent(
+          tenantId,
+          this.service.resolveWorkspaceId(tenantId),
+          id,
+          { instrument: "rental", action: "refund", amount: body.amount, idempotencyKey: fundingIdempotencyKey, reason: body.reason },
+          req.user.displayName,
+          tx
+        );
+        return this.service.refundServiceOccurrence(tenantId, id, occurrenceId, body.amount, req.user.displayName, tx);
+      },
+      replay: async () => {
+        const current = await this.service.getOrder(tenantId, id);
+        const occurrence = current.serviceSnapshots?.find((row) => row.occurrenceId === occurrenceId);
+        return occurrence?.refundStatus === "refunded" ? { order: current, occurrence } : undefined;
       }
     });
     return this.committed(tenantId, result);

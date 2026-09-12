@@ -1842,7 +1842,10 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     tenantId: string,
     orderId: string,
     input: PartialReturnRentalOrderRequest,
-    tx: RentalFactTx
+    tx: RentalFactTx,
+    charges: {
+      overdue?: { amount: number; returnedAt: string; batchId?: string };
+    } = {}
   ) {
     const state = await this.factContext(tenantId);
     const order = await this.lockedOrder(tenantId, orderId, tx);
@@ -1877,6 +1880,9 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       returnedAllocationIdsBefore,
       assetChanges
     );
+    if (charges.overdue && charges.overdue.amount > 0) {
+      this.applyOverdueTo(order, charges.overdue.amount, charges.overdue.returnedAt, charges.overdue.batchId);
+    }
     const stockQuarantines = this.quarantinedReturnQuantities(state, order, releasedBeforeReturn);
     order.updatedAt = now();
     await this.factStore.saveOrderAggregate(order, assetChanges, tx, this.hasReturnHold(order) ? stockQuarantines : []);
@@ -1948,18 +1954,29 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (pending.length) await this.factStore.cancelExtensions(tenantId, pending, tx);
   }
 
-  async cancelOrder(tenantId: string, orderId: string, reason: string, chargeAmount = 0, tx?: RentalFactTx, operator?: string) {
+  async cancelOrder(
+    tenantId: string,
+    orderId: string,
+    reason: string,
+    chargeAmount: number | ((order: RentalOrder) => number | Promise<number>) = 0,
+    tx?: RentalFactTx,
+    operator?: string
+  ) {
     this.state(tenantId);
     const order = await this.lockedOrder(tenantId, orderId, tx);
     if ([RentalCoreOrderStatus.Renting, RentalCoreOrderStatus.Settling, RentalCoreOrderStatus.Completed, RentalCoreOrderStatus.Cancelled, RentalCoreOrderStatus.NoShow].includes(order.status)) throw new ConflictException("当前订单状态不能取消");
     if (!reason?.trim()) throw new BadRequestException("取消原因不能为空");
+    // 取消费必须基于同一事务里刚锁住的订单事实计算。保留 number 入参是为了兼容
+    // 直接调用服务的旧测试/内存路径；生产控制器传 resolver，让价格快照和当前时间
+    // 的读取发生在订单行锁之后。
+    const resolvedChargeAmount = typeof chargeAmount === "function" ? await chargeAmount(order) : chargeAmount;
     // 结算 Hook：取消费用是一笔真实结算。能力可以给出费用**依据**或提示，
     // 但金额如何计入由下面的 Core 逻辑决定——能力拿到的是冻结快照，改不了 order。
     await this.runHook(
       tenantId,
       "settlement",
       { type: "order", id: order.id },
-      { order, settlement: { kind: "cancellation", chargeAmount, reason: reason.trim() } },
+      { order, settlement: { kind: "cancellation", chargeAmount: resolvedChargeAmount, reason: reason.trim() } },
       tx,
       operator,
       this.orderHookInstances(tenantId, order)
@@ -1976,12 +1993,12 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     // 取消费也走同一条追加路径：此前这里是 `adjustmentAmount = chargeAmount` 直接赋值，
     // 是四个写入点里唯一不累加、也唯一没有去重保护的一处。取消对 Renting/Settling/Completed
     // 都拒绝，所以目前不会覆盖掉已有调账，但没有理由留一个例外。
-    if (chargeAmount > 0) {
+    if (resolvedChargeAmount > 0) {
       this.applyChargeTo(order, {
         code: `cancellation:${order.id}`,
         name: "晚取消费用",
         type: "cancellation",
-        amount: chargeAmount,
+        amount: resolvedChargeAmount,
         sourceVersion: order.ruleVersion,
         detail: reason.trim()
       });
@@ -2072,7 +2089,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     input: CreateRentalInspectionRequest,
     userName: string,
     charges: {
-      overdue?: { amount: number; returnedAt: string };
+      overdue?: { amount: number; returnedAt: string; batchId?: string };
       damage?: { amount: number; detail: string };
       /** 提前归还退款（需求 4.6.8）。`requiresReview` 时只记录不落账，等人工审批。 */
       earlyReturn?: { amount: number; requiresReview: boolean; basis: string[] };
@@ -2166,8 +2183,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
         // 坏的租出去。序列化资产靠上面这行进维护，数量库存必须靠维修量隔离。
         stockQuarantines.push(...this.quarantinedReturnQuantities(state, order, releasedBeforeReturn));
       }
-      // 逐批归还不结清整个租期：逾期、提前归还和服务消耗都在最后一批的整单归还时计算。
-      if (!partialReturnItems && charges.overdue && charges.overdue.amount > 0) this.applyOverdueTo(order, charges.overdue.amount, charges.overdue.returnedAt);
+      // 逾时按本批实际归还数量落账；提前归还退款仍只在整单归还时按规则处理。
+      if (charges.overdue && charges.overdue.amount > 0) this.applyOverdueTo(order, charges.overdue.amount, charges.overdue.returnedAt, charges.overdue.batchId);
       if (!partialReturnItems && charges.earlyReturn) this.applyEarlyReturnRefundTo(order, charges.earlyReturn);
       // 检查员提交的是损失建议，不能直接决定客户应付；审核通过后才追加订单费用。
     }
@@ -2474,21 +2491,26 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
    * 规则选 `manual_review` 时**不落账**，改挂一张待审核单：落多少由催收或减免的结论决定。
    * 早前这条路径由计算侧直接返回 0，等于把逾期费静默免除，运营侧连一条待办都看不到。
    */
-  private applyOverdueTo(order: RentalOrder, amount: number, returnedAt: string) {
+  private applyOverdueTo(order: RentalOrder, amount: number, returnedAt: string, batchId?: string) {
     if (amount <= 0) return;
     const mode = order.ruleSnapshot?.overdue?.feeMode;
-    const basis = [`实际归还时间 ${returnedAt}`, `按规则 ${mode ?? "unknown"} 算出建议逾期费 ${roundMoney(amount)}`];
+    const sourceId = batchId ? `return:${batchId}` : undefined;
+    const basis = [
+      ...(batchId ? [`归还批次 ${batchId}`] : []),
+      `实际归还时间 ${returnedAt}`,
+      `按规则 ${mode ?? "unknown"} 算出建议逾期费 ${roundMoney(amount)}`
+    ];
     if (mode === "manual_review") {
-      this.raiseFeeReview(order, "overdue", amount, basis);
+      this.raiseFeeReview(order, "overdue", amount, basis, sourceId);
       return;
     }
     this.applyChargeTo(order, {
-      code: `overdue:${order.id}`,
+      code: batchId ? `overdue:${order.id}:return:${batchId}` : `overdue:${order.id}`,
       name: "逾期费用",
       type: "overdue",
       amount,
       sourceVersion: order.ruleVersion,
-      detail: `实际归还时间 ${returnedAt}`
+      detail: `${batchId ? `归还批次 ${batchId}；` : ""}实际归还时间 ${returnedAt}`
     });
   }
 
@@ -2573,6 +2595,47 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     order.updatedAt = at;
     await this.factStore.saveOrderAggregate(order, [], tx);
     return order;
+  }
+
+  /**
+   * MKT-02D：办理已批准的服务退款。
+   *
+   * 审核只核减订单应收，不能冒充退款到账；本方法由控制器与 rental funding
+   * event 放在同一事务中调用，只有资金事件成功后才把发生项推进到 refunded。
+   */
+  async refundServiceOccurrence(
+    tenantId: string,
+    orderId: string,
+    occurrenceId: string,
+    amount: number,
+    operator: string,
+    tx: RentalFactTx
+  ) {
+    const order = await this.lockedOrder(tenantId, orderId, tx);
+    const occurrences = [...(order.serviceSnapshots ?? [])];
+    const index = occurrences.findIndex((row) => row.occurrenceId === occurrenceId);
+    if (index < 0) throw new NotFoundException("服务发生项不存在");
+    const occurrence = occurrences[index] as RentalOrderServiceOccurrence;
+    if (occurrence.refundStatus !== "approved_pending_refund") {
+      throw new ConflictException("该服务退款尚未批准，或已经办理过实际退款");
+    }
+    const approvedAmount = roundMoney(Number(occurrence.refundAmount ?? 0));
+    const requestedAmount = roundMoney(Number(amount));
+    if (approvedAmount <= 0) throw new ConflictException("该服务没有可办理的退款金额");
+    if (requestedAmount !== approvedAmount) {
+      throw new ConflictException(`实际退款必须等于已批准金额 ${approvedAmount.toFixed(2)}`);
+    }
+    const review = (order.feeReviews ?? []).find((row) => row.id === occurrence.refundReviewId);
+    if (!review || review.type !== "service_refund" || review.status !== "approved" || roundMoney(Number(review.decidedAmount ?? 0)) !== approvedAmount) {
+      throw new ConflictException("服务退款审核事实不完整，不能办理实际退款");
+    }
+    const at = now();
+    const next = { ...occurrence, refundStatus: "refunded" as const, refundedAt: at, refundedBy: operator };
+    occurrences[index] = next;
+    order.serviceSnapshots = occurrences;
+    order.updatedAt = at;
+    await this.factStore.saveOrderAggregate(order, [], tx);
+    return { order: this.publicOrder(order), occurrence: next };
   }
 
   private applyDamageTo(order: RentalOrder, amount: number, detail: string) {    if (amount <= 0) return;

@@ -4681,9 +4681,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
    * 只覆盖原租期，续租那段的租金在订单的 `adjustmentAmount` 里。用续到的时间做分母会把
    * 单价按更长的时间摊薄——续得越久逾期费越便宜，与逾期费的意图正好相反。
    *
-   * `outstandingQuantities` 是**每个计价目标仍未交回的数量**，由调用方从订单分配项算出。
-   * 分批归还后必须传：两件各日租 240、一件按时还、另一件逾时一小时，按原报价的全部数量
-   * 算会收 20，而实际只有一件在逾期，应收 10。缺省（整单归还）按原数量，行为不变。
+   * `quantityScope` 是**本次要计逾时的每个计价目标数量**，由调用方从订单分配项算出：
+   * 整单归还传仍未交回的数量；分批归还传本批刚归还的数量。两件各日租 240、一件按时还、
+   * 另一件逾时一小时，按原报价的全部数量算会收 20，而实际只有一件在逾期，应收 10。
+   * 缺省（兼容旧调用）按原报价全部数量，行为不变。
    */
   calculateOverdueCharge(
     tenantId: string,
@@ -4691,7 +4692,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     quote: RentalQuoteSnapshotV1,
     returnedAt: string,
     scheduledEndAt?: string,
-    outstandingQuantities?: Record<string, number>
+    quantityScope?: Record<string, number>
   ) {
     const rule = quote.ruleSnapshot;
     if (!rule) throw new ConflictException("订单缺少租赁规则快照");
@@ -4700,12 +4701,12 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     // manual_review 不在这里短路：金额照样算出来当审核依据，是否落账由调用方按规则
     // 模式决定（生成待审核的费用审核单）。早前这里直接返回 0，等于把逾期费静默免除。
     if (overdueMinutes <= 0 || rule.overdue.feeMode === "none") return 0;
-    /** 该行仍在租的占比。已交回的部分不再占用资源，也就不该继续产生逾期费。 */
+    /** 该行进入本次逾时计费范围的占比；范围外的数量不重复计费。 */
     const shareOf = (line: { pricingGroupId?: string; itemGroupId?: string; quantity: number }) => {
-      if (!outstandingQuantities) return 1;
+      if (!quantityScope) return 1;
       const target = line.pricingGroupId ?? line.itemGroupId;
-      const stillOut = target ? outstandingQuantities[target] ?? 0 : 0;
-      return Math.min(1, Math.max(0, stillOut / Math.max(1, line.quantity)));
+      const inScope = target ? quantityScope[target] ?? 0 : 0;
+      return Math.min(1, Math.max(0, inScope / Math.max(1, line.quantity)));
     };
     /** 该行的原租金。优先用逐行快照，否则按费率反查租金明细——与下方 hourly 分支同一口径。 */
     const lineRentalOf = (line: { pricingGroupId?: string; itemGroupId?: string }) => {
@@ -4716,8 +4717,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       const code = rate ? `rental:${rate.pricingGroupCode ?? rate.itemGroupCode}` : undefined;
       return (code ? quote.chargeLines.find((row) => row.code === code)?.amount : undefined) ?? 0;
     };
-    /** 仍在租部分的租金合计，`multiplier` 模式的基数。 */
-    const outstandingRental = outstandingQuantities
+    /** 本次计费范围内的租金合计，`multiplier` 模式的基数。 */
+    const outstandingRental = quantityScope
       ? roundMoney(quote.request.lines.reduce((sum, line) => sum + lineRentalOf(line) * shareOf(line), 0))
       : quote.rentalAmount;
     let amount = outstandingRental * rule.overdue.feeMultiplier;
@@ -4789,7 +4790,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
           hours = this.convertedHourCoverage(context, quote, rate, quote.request.endAt);
         }
         if (units <= 0 || hours <= 0) throw new ConflictException("原订单没有有效的已计费时间单位，无法计算逾期费");
-        // 行金额按仍在租占比折算：已交回那部分不再产生逾期费。
+        // 行金额按本次计费范围占比折算：不在本批范围的数量不重复产生逾期费。
         const chargeAmount = charge.amount * shareOf(line);
         basis += rule.overdue.feeMode === "hourly"
           ? chargeAmount / hours * Math.ceil(overdueMinutes / 60)

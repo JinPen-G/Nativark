@@ -97,6 +97,18 @@ void (async () => {
   ok("同类型只保留一张待审单，重复归还提交不堆待办");
 }
 
+/* ---------- 不同归还批次各自保留待审单 ---------- */
+
+{
+  const { instance } = service();
+  const row = order();
+  instance.applyOverdueTo(row, 120, "2026-09-05T10:00:00.000Z", "batch-1");
+  instance.applyOverdueTo(row, 80, "2026-09-05T12:00:00.000Z", "batch-2");
+  assert.equal(row.feeReviews.length, 2, "不同归还批次不能互相覆盖待审单");
+  assert.deepEqual(row.feeReviews.map((review) => review.sourceId), ["return:batch-1", "return:batch-2"]);
+  ok("分批归还的人工逾时审核按批次隔离，重复同批仍可覆盖同一待审单");
+}
+
 /* ---------- 裁定：批准落账、驳回不落账、认定额不得超过建议额 ---------- */
 
 {

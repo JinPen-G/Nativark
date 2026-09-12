@@ -32,8 +32,8 @@ const orderAt = (effectiveEndAt, allocations) => ({
 /** 事务外快照仍是旧租期与旧未归还数量；锁内订单已经被并发动作改过。 */
 const STALE = () => orderAt(STALE_END, [{ orderLineId: "line_1", itemGroupId: "group_q", quantity: 2, status: "picked_up" }]);
 const LOCKED = () => orderAt(EXTENDED_END, [
-  { orderLineId: "line_1", itemGroupId: "group_q", quantity: 1, status: "picked_up" },
-  { orderLineId: "line_1", itemGroupId: "group_q", quantity: 1, status: "returned" }
+  { id: "alloc_1", orderLineId: "line_1", itemGroupId: "group_q", quantity: 1, status: "picked_up" },
+  { id: "alloc_2", orderLineId: "line_1", itemGroupId: "group_q", quantity: 1, status: "returned" }
 ]);
 
 const TEMPLATE = { id: "tpl_return", stage: "return" };
@@ -120,17 +120,18 @@ void (async () => {
   ok("续租报价快照在锁内重查，且查询发生在锁之后");
 }
 
-/* ---------- 分批归还与领取阶段都不算整单归还费用 ---------- */
+/* ---------- 分批归还按本批数量计算逾时，领取阶段不算归还费用 ---------- */
 
 {
   const { instance, seen } = controller();
   await instance.createInspection(req(), "order_1", {
     templateId: TEMPLATE.id, results: {}, returnItems: [{ allocationId: "alloc_1", quantity: 1 }], returnBatchNo: "batch-1"
   });
-  assert.equal(seen.overdue.length, 0, "逐批归还不结清整个租期，不该在这里算逾期");
-  assert.deepEqual(seen.charges, {}, "分批归还不传整单费用");
-  assert.equal(seen.lockedFor.length, 0, "既然不计费，就没有必要为计费再锁一次");
-  ok("分批归还不触发整单计费，也不做多余的锁");
+  assert.equal(seen.overdue.length, 1, "逐批归还必须按本批实际归还数量计算逾期");
+  assert.deepEqual(seen.overdue[0].outstanding, { group_q: 1 }, "逾时计费范围必须只包含本批归还数量");
+  assert.equal(seen.charges.overdue.amount, 0, "按新租期算出来不逾期，就不能落一笔逾期费");
+  assert.ok(seen.lockedFor.indexOf("lock:order_1") >= 0, "逐批归还计费必须使用锁内订单事实");
+  ok("分批归还按本批数量锁内计算逾时，不把费用拖到最后一批");
 }
 
 /* ---------- 无检查直接交接的归还走同一条重算路径 ---------- */

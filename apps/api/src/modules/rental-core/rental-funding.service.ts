@@ -204,13 +204,14 @@ export class RentalFundingService {
       reason: string;
       failureCode?: string;
     },
-    operator?: string
+    operator?: string,
+    tx?: Prisma.TransactionClient
   ): Promise<RentalFundingEvent> {
     const reason = input.reason?.trim();
     if (!reason) throw new ConflictException("资金事件原因不能为空");
     const key = input.idempotencyKey?.trim();
     if (!key) throw new ConflictException("资金事件必须带幂等键");
-    return this.prisma.$transaction(async (tx) => {
+    const run = async (tx: Prisma.TransactionClient) => {
       // 资金余额是事件流推导值。必须先锁住订单行，把同一订单的不同幂等键动作也串行化；
       // 否则两笔并发抵扣都可能读到同一个旧余额并同时成功。
       const order = await this.lockedOrderScope(tx, tenantId, workspaceId, orderId);
@@ -303,6 +304,9 @@ export class RentalFundingService {
         }
       });
       return this.toEvent(created);
-    });
+    };
+    // 服务退款等复合动作需要把资金事件与订单服务快照放进同一事务；
+    // 原有单一资金接口不传 tx 时仍保持自己的事务边界。
+    return tx ? run(tx) : this.prisma.$transaction(run);
   }
 }

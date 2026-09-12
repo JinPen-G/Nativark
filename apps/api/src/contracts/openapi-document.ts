@@ -1473,6 +1473,10 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: "Record a value-added service execution outcome and settle its capacity/refund review", permissions: ["store-rental:order:operate"], requestSchema: "GenericObject", responseSchema: "GenericObject"
   },
   {
+    method: "post", path: "/api/rental/v1/orders/{id}/services/{occurrenceId}/refund", tag: "RentalCore", operationId: "refundRentalServiceOccurrence",
+    summary: "Record the approved value-added service refund and close its refund state", permissions: ["store-rental:order:settle"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+  },
+  {
     method: "get", path: "/api/rental/v1/orders/{id}/extensions", tag: "RentalCore", operationId: "listRentalOrderExtensions",
     summary: "List order extension records", permissions: ["store-rental:order:view"], responseSchema: "GenericObject"
   },
