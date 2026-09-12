@@ -68,8 +68,8 @@ export const RENTAL_CAPABILITY_CODES = [
   // CAM-01A：首个真实产品能力——摄影器材兼容性。仅摄影品类适用（applicableCategories 收口），
   // 只做兼容性判定，不代替 CAM-01 的附件清点、使用量、检查与养护。
   "camera_compatibility",
-  // 各品类首期经营闭环的独立 capability。先登记、后实现：没有 implementationVersion
-  // 时会明确显示「已声明但未实现」，并阻止该品类空间进入 production。
+  // 各品类首期经营闭环的独立 capability。尚未接入真实模块的能力不声明
+  // implementationVersion；已接入的能力必须由对应任务补齐版本化实现。
   "camera_kit_handover",
   "camping_kit_integrity",
   "camping_cleaning_turnaround",
@@ -566,7 +566,7 @@ export const RENTAL_CAPABILITY_MODULES: RentalCapabilityModuleDefinition[] = [
     code: "camera_kit_handover", label: "摄影套装交接与附件清点", kind: "category_required",
     extensionPoints: ["order_validation", "fulfillment"],
     applicableCategories: [RentalCategoryCode.Camera], dependsOn: ["bundle_inventory"], conflictsWith: [],
-    configSchema: []
+    configSchema: [], implementationVersion: "cam-kit-1.0"
   },
   {
     code: "camping_kit_integrity", label: "露营套装完整性", kind: "category_required",
@@ -4037,6 +4037,9 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
         inspectionFields: [
           { code: "appearance_ok", label: "外观完好", type: "boolean", required: true },
           { code: "function_ok", label: "功能正常", type: "boolean", required: true },
+          // CAM-01B：套装清点是可选字段而不是全摄影订单的硬必填项；Hook 只在
+          // 本单确实包含 bundle 且操作员明确填了“不齐”时阻断，兼容旧模板与非套装订单。
+          { code: "kit_complete", label: "套装附件齐全", type: "boolean", required: false },
           { code: "shutter_count", label: "快门次数", type: "number", required: true, unit: "次", usageMetric: true }
         ],
         sampleBaseAmount: 180,

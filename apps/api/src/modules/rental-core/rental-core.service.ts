@@ -2071,7 +2071,10 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   }
 
   listInspectionTemplates(tenantId: string, stage?: "pickup" | "return") {
-    return this.state(tenantId).inspectionTemplates.filter((row) => !stage || row.stage === stage);
+    const state = this.state(tenantId);
+    return state.inspectionTemplates
+      .filter((row) => !stage || row.stage === stage)
+      .map((row) => this.inspectionTemplateForRead(state.profile.categoryCode, row));
   }
 
   async listInspections(tenantId: string, orderId: string) {
@@ -2102,7 +2105,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   ) {
     const state = this.state(tenantId);
     const order = await this.lockedOrder(tenantId, orderId, tx);
-    const template = state.inspectionTemplates.find((row) => row.id === input.templateId && row.enabled);
+    const storedTemplate = state.inspectionTemplates.find((row) => row.id === input.templateId && row.enabled);
+    const template = storedTemplate ? this.inspectionTemplateForRead(state.profile.categoryCode, storedTemplate) : undefined;
     if (!template) throw new NotFoundException("检查模板不存在或已停用");
     const missing = template.fields.filter((field) => field.required && (input.results[field.code] === undefined || input.results[field.code] === ""));
     if (missing.length) throw new BadRequestException(`缺少必填检查项：${missing.map((field) => field.label).join("、")}`);
@@ -3480,5 +3484,21 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       stage, version: "1.0", enabled: true,
       fields: definition.businessModel.defaults.inspectionFields.map((field) => ({ ...field }))
     }));
+  }
+
+  /**
+   * 旧空间的检查模板已经持久化，不能靠重新 seed 才看到新增的品类字段。
+   * 读路径补齐 CAM-01B 的可选清点项；不回写旧模板，避免启动时偷偷改运营配置，
+   * 但 createInspection 与页面读取共用同一份输出口径。
+   */
+  private inspectionTemplateForRead(categoryCode: RentalCategoryCode, template: RentalInspectionTemplate): RentalInspectionTemplate {
+    if (categoryCode !== "camera" || template.fields.some((field) => field.code === "kit_complete")) return template;
+    return {
+      ...template,
+      fields: [
+        ...template.fields.map((field) => ({ ...field })),
+        { code: "kit_complete", label: "套装附件齐全", type: "boolean", required: false }
+      ]
+    };
   }
 }

@@ -1,5 +1,9 @@
 import { Injectable, Logger, type OnApplicationBootstrap } from "@nestjs/common";
 import { buildCameraCompatibilityHookModule } from "./capabilities/camera-compatibility";
+import {
+  buildCameraKitHandoverHookModule,
+  CAMERA_KIT_HANDOVER_LEGACY_VERSION
+} from "./capabilities/camera-kit-handover";
 import { CapabilityHookRuntime } from "./capability-hook.runtime";
 
 /**
@@ -26,6 +30,10 @@ export class CapabilityHookRegistrar implements OnApplicationBootstrap {
     // **同时保留** cam-1.0 的登记，直到没有在途订单再引用它。登记表按
     // (code, implementationVersion) 索引，删掉旧版会让引用它的在途订单 fail-closed。
     this.runtime.register(buildCameraCompatibilityHookModule());
+    // CAM-01B：摄影套装附件清点。旧空间/在途订单可能仍固化为 unimplemented，
+    // 兼容版本必须与当前版本一起登记，不能让历史订单因新模块上线而被拒绝履约。
+    this.runtime.register(buildCameraKitHandoverHookModule());
+    this.runtime.register(buildCameraKitHandoverHookModule(CAMERA_KIT_HANDOVER_LEGACY_VERSION));
     // 发布自检：注册表当前声明的实现版本必须真的有实现。
     // 捕捉「升了注册表版本号却忘了发实现」——那会让该能力对新业务全面 fail-closed。
     this.runtime.assertCurrentVersionsRegistered();
