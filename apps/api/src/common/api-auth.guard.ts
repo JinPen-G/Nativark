@@ -232,7 +232,7 @@ export function requiredPermissions(method: string, path: string) {
         ? ["store-rental:corporate:view", "store-rental:corporate:manage", "store-rental:corporate:employee-manage"]
         : ["store-rental:corporate:manage"];
     }
-    if (/^\/membership\/plans\/[^/]+\/versions\/[^/]+\/publish$/u.test(path)) {
+    if (/^\/membership\/plans\/[^/]+\/versions\/[^/]+\/(publish|disable|restore)$/u.test(path)) {
       return ["store-rental:member:plan:publish"];
     }
     if (path === "/membership/plans/assignments") {

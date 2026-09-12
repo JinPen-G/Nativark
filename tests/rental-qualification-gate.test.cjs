@@ -175,7 +175,18 @@ void (async () => {
     await prisma.customerMembershipPlanVersion.update({ where: { id: planVersionId }, data: { benefits: [{ type: "rental_discount", calculation: "amount", value: 100 }] } });
     const afterPlanUpdate = await memberships.resolveBenefits(tenantId, workspaceId, personalId);
     assert.equal(afterPlanUpdate.personal?.snapshot.benefits[0].value, 50, "方案版本变更不得改写已授予会员的权益快照");
-    console.log("  ✓ 会员方案授予强制记录原因与有效期，历史权益按授予时快照保持不变");
+    const disabledPlan = await memberships.disablePlanVersion(tenantId, workspaceId, planId, planVersionId, "方案下线测试", "资格测试管理员");
+    assert.equal(disabledPlan.currentVersion?.status, "disabled");
+    const afterDisable = await memberships.resolveBenefits(tenantId, workspaceId, personalId);
+    assert.equal(afterDisable.personal?.snapshot.benefits[0].value, 50, "停用方案版本不得改写已授予会员的权益快照");
+    await assert.rejects(
+      () => memberships.assignPlan(tenantId, workspaceId, { customerId: personalId, planVersionId, source: "manual", reason: "停用版本不应再授予" }, "资格测试管理员"),
+      /可授予的已发布会员方案版本不存在/u
+    );
+    const restoredPlan = await memberships.restorePlanVersion(tenantId, workspaceId, planId, planVersionId, "恢复历史版本测试", "资格测试管理员");
+    assert.equal(restoredPlan.currentVersion?.status, "draft");
+    assert.equal(restoredPlan.currentVersion?.restoredFromVersionId, planVersionId);
+    console.log("  ✓ 会员方案授予强制记录原因与有效期，停用不影响历史快照，恢复生成新草稿");
 
     const qualificationSubmission = await memberships.submitQualification(tenantId, workspaceId, personalId, {
       qualificationType: "driver_license", issuedAt: "2026-01-01T00:00:00.000Z", expiresAt: "2099-01-01T00:00:00.000Z"

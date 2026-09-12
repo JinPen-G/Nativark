@@ -3,6 +3,7 @@ import type { SystemUserRow } from "@store-rental/shared";
 import { requireRequestTenantId, requireRequestWorkspaceId } from "../../common/request-identity";
 import {
   AssignCustomerMembershipPlanDto,
+  CustomerMembershipPlanVersionActionDto,
   RegisterPersonalMembershipDto,
   ReviewCustomerMembershipDto,
   SaveCustomerCorporateMembershipDto,
@@ -154,6 +155,18 @@ export class MembershipController {
   publishPlan(@Param("planId") planId: string, @Param("versionId") versionId: string, @Req() req: RequestWithUser) {
     const { tenantId, workspaceId } = this.scope();
     return this.memberships.publishPlan(tenantId, workspaceId, planId, versionId, req.user?.displayName);
+  }
+
+  @Post("plans/:planId/versions/:versionId/disable")
+  disablePlan(@Param("planId") planId: string, @Param("versionId") versionId: string, @Body() body: CustomerMembershipPlanVersionActionDto, @Req() req: RequestWithUser) {
+    const { tenantId, workspaceId } = this.scope();
+    return this.memberships.disablePlanVersion(tenantId, workspaceId, planId, versionId, body.reason, req.user?.displayName);
+  }
+
+  @Post("plans/:planId/versions/:versionId/restore")
+  restorePlan(@Param("planId") planId: string, @Param("versionId") versionId: string, @Body() body: CustomerMembershipPlanVersionActionDto, @Req() req: RequestWithUser) {
+    const { tenantId, workspaceId } = this.scope();
+    return this.memberships.restorePlanVersion(tenantId, workspaceId, planId, versionId, body.reason, req.user?.displayName);
   }
 
   @Post("plans/assignments")

@@ -49,6 +49,10 @@ export const membershipApi = {
   savePlan: (data: SaveCustomerMembershipPlanRequest) => request<CustomerMembershipPlan>("/membership/plans", { method: "put", data }),
   publishPlan: (planId: string, versionId: string) =>
     request<CustomerMembershipPlan>(`/membership/plans/${planId}/versions/${versionId}/publish`, { method: "post" }),
+  disablePlan: (planId: string, versionId: string, reason: string) =>
+    request<CustomerMembershipPlan>(`/membership/plans/${planId}/versions/${versionId}/disable`, { method: "post", data: { reason } }),
+  restorePlan: (planId: string, versionId: string, reason: string) =>
+    request<CustomerMembershipPlan>(`/membership/plans/${planId}/versions/${versionId}/restore`, { method: "post", data: { reason } }),
   assignPlan: (data: AssignCustomerMembershipPlanRequest) =>
     request<unknown>("/membership/plans/assignments", { method: "post", data }),
   bookingOptions: (customerId: string) =>

@@ -1059,6 +1059,11 @@ model CustomerMembershipPlanVersion {
   createdBy     String?
   publishedBy   String?
   publishedAt   DateTime?
+  disabledBy    String?
+  disabledAt    DateTime?
+  disableReason String?                            @db.Text
+  restoredFromVersionId String?
+  restoreReason String?                            @db.Text
   createdAt     DateTime                           @default(now())
   updatedAt     DateTime                           @updatedAt
   assignments   CustomerMembershipPlanAssignment[]

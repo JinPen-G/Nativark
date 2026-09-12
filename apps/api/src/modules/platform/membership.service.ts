@@ -562,6 +562,46 @@ export class MembershipService {
     return (await this.listPlans(tenantId, workspaceId)).find((item) => item.id === planId)!;
   }
 
+  async disablePlanVersion(tenantId: string, workspaceId: string, planId: string, versionId: string, reason: string, operator?: string) {
+    const trimmedReason = reason.trim();
+    if (!trimmedReason) throw new BadRequestException("停用会员方案必须填写原因");
+    await this.prisma.$transaction(async (tx) => {
+      const version = await tx.customerMembershipPlanVersion.findFirst({ where: { tenantId, workspaceId, planId, id: versionId } });
+      if (!version) throw new NotFoundException("会员方案版本不存在");
+      if (version.status !== "published") throw new ConflictException("只有已发布方案版本可以停用");
+      await tx.customerMembershipPlanVersion.update({
+        where: { id: version.id },
+        data: { status: "disabled", disabledBy: operator, disabledAt: new Date(), disableReason: trimmedReason }
+      });
+      const remainingPublished = await tx.customerMembershipPlanVersion.count({
+        where: { tenantId, workspaceId, planId, status: "published", id: { not: version.id } }
+      });
+      await tx.customerMembershipPlan.update({ where: { id: planId }, data: { status: remainingPublished ? "active" : "disabled" } });
+    });
+    return (await this.listPlans(tenantId, workspaceId)).find((item) => item.id === planId)!;
+  }
+
+  async restorePlanVersion(tenantId: string, workspaceId: string, planId: string, versionId: string, reason: string, operator?: string) {
+    const trimmedReason = reason.trim();
+    if (!trimmedReason) throw new BadRequestException("恢复会员方案必须填写原因");
+    await this.prisma.$transaction(async (tx) => {
+      const source = await tx.customerMembershipPlanVersion.findFirst({ where: { tenantId, workspaceId, planId, id: versionId } });
+      if (!source) throw new NotFoundException("会员方案版本不存在");
+      if (!["published", "disabled"].includes(source.status)) throw new ConflictException("只能从已发布或已停用版本恢复");
+      const latest = await tx.customerMembershipPlanVersion.findFirst({ where: { tenantId, workspaceId, planId }, orderBy: { version: "desc" } });
+      if (latest?.status === "draft") throw new ConflictException("该方案已有草稿，请先发布或作废后再恢复");
+      await tx.customerMembershipPlanVersion.create({
+        data: {
+          tenantId, workspaceId, planId, version: (latest?.version ?? 0) + 1, status: "draft", levelRank: source.levelRank,
+          isDefault: source.isDefault, isRecommended: source.isRecommended, appVisible: source.appVisible,
+          effectiveFrom: source.effectiveFrom, effectiveTo: source.effectiveTo, eligibility: source.eligibility as Prisma.InputJsonValue, benefits: source.benefits as Prisma.InputJsonValue,
+          createdBy: operator, restoredFromVersionId: source.id, restoreReason: trimmedReason
+        }
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    return (await this.listPlans(tenantId, workspaceId)).find((item) => item.id === planId)!;
+  }
+
   async assignPlan(tenantId: string, workspaceId: string, input: AssignCustomerMembershipPlanRequest, operator?: string): Promise<CustomerMembershipPlanAssignment> {
     await this.requireCustomer(tenantId, input.customerId);
     await this.requireWorkspaceLink(tenantId, workspaceId, input.customerId);
@@ -776,7 +816,7 @@ export class MembershipService {
 
   private toPlan(row: {
     id: string; workspaceId: string; code: string; name: string; targetType: string; status: string; createdAt: Date; updatedAt: Date;
-    versions: Array<{ id: string; planId: string; version: number; status: string; levelRank: number; isDefault: boolean; isRecommended: boolean; appVisible: boolean; effectiveFrom: Date | null; effectiveTo: Date | null; eligibility: Prisma.JsonValue; benefits: Prisma.JsonValue; createdAt: Date; updatedAt: Date; publishedAt: Date | null }>;
+    versions: Array<{ id: string; planId: string; version: number; status: string; levelRank: number; isDefault: boolean; isRecommended: boolean; appVisible: boolean; effectiveFrom: Date | null; effectiveTo: Date | null; eligibility: Prisma.JsonValue; benefits: Prisma.JsonValue; createdAt: Date; updatedAt: Date; publishedAt: Date | null; disabledBy: string | null; disabledAt: Date | null; disableReason: string | null; restoredFromVersionId: string | null; restoreReason: string | null }>;
   }): CustomerMembershipPlan {
     const versions = row.versions.map((version) => this.toPlanVersion(version));
     return {
@@ -789,12 +829,14 @@ export class MembershipService {
     };
   }
 
-  private toPlanVersion(row: { id: string; planId: string; version: number; status: string; levelRank: number; isDefault: boolean; isRecommended: boolean; appVisible: boolean; effectiveFrom: Date | null; effectiveTo: Date | null; eligibility: Prisma.JsonValue; benefits: Prisma.JsonValue; createdAt: Date; updatedAt: Date; publishedAt: Date | null }): CustomerMembershipPlanVersion {
+  private toPlanVersion(row: { id: string; planId: string; version: number; status: string; levelRank: number; isDefault: boolean; isRecommended: boolean; appVisible: boolean; effectiveFrom: Date | null; effectiveTo: Date | null; eligibility: Prisma.JsonValue; benefits: Prisma.JsonValue; createdAt: Date; updatedAt: Date; publishedAt: Date | null; disabledBy: string | null; disabledAt: Date | null; disableReason: string | null; restoredFromVersionId: string | null; restoreReason: string | null }): CustomerMembershipPlanVersion {
     return {
       id: row.id, planId: row.planId, version: row.version, status: row.status as CustomerMembershipPlanVersion["status"], levelRank: row.levelRank,
       isDefault: row.isDefault, isRecommended: row.isRecommended, appVisible: row.appVisible, effectiveFrom: row.effectiveFrom?.toISOString(), effectiveTo: row.effectiveTo?.toISOString(),
       eligibility: (row.eligibility ?? {}) as Record<string, unknown>, benefits: (row.benefits ?? []) as unknown as CustomerMembershipPlanVersion["benefits"],
-      createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString(), publishedAt: row.publishedAt?.toISOString()
+      createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString(), publishedAt: row.publishedAt?.toISOString(),
+      disabledBy: row.disabledBy ?? undefined, disabledAt: row.disabledAt?.toISOString(), disableReason: row.disableReason ?? undefined,
+      restoredFromVersionId: row.restoredFromVersionId ?? undefined, restoreReason: row.restoreReason ?? undefined
     };
   }
 

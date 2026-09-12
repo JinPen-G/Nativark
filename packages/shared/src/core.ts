@@ -1600,6 +1600,11 @@ export interface CustomerMembershipPlanVersion {
   createdAt: string;
   updatedAt: string;
   publishedAt?: string;
+  disabledBy?: string;
+  disabledAt?: string;
+  disableReason?: string;
+  restoredFromVersionId?: string;
+  restoreReason?: string;
 }
 
 export interface CustomerMembershipPlan {
@@ -1685,6 +1690,10 @@ export interface AssignCustomerMembershipPlanRequest {
   effectiveFrom?: string;
   effectiveTo?: string;
   reason?: string;
+}
+
+export interface CustomerMembershipPlanVersionActionRequest {
+  reason: string;
 }
 
 export interface TenantRentalProfile {
