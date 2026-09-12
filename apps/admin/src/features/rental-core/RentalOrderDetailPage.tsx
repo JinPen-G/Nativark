@@ -3,7 +3,7 @@ import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol, type Cr
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Button, Card, DatePicker, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { PageHeader } from "@/components/PageHeader";
@@ -116,6 +116,10 @@ export function RentalOrderDetailPage() {
   const inspections = useQuery({ queryKey: ["rental-core", "order", id, "inspections"], queryFn: () => rentalCoreApi.inspections(id), enabled: Boolean(id) });
   const extensions = useQuery({ queryKey: ["rental-core", "order", id, "extensions"], queryFn: () => rentalCoreApi.orderExtensions(id), enabled: Boolean(id) });
   const refresh = async () => { await Promise.all([queryClient.invalidateQueries({ queryKey: ["rental-core", "order", id] }), queryClient.invalidateQueries({ queryKey: ["rental-core", "orders"] })]); };
+  useEffect(() => {
+    // Modal 挂载后再清空表单，避免在 Form 尚未连接时 resetFields 产生运行时告警。
+    if (inspection) inspectionForm.resetFields();
+  }, [inspection, inspectionForm]);
   const operationLock = useMutation({ mutationFn: (type: "acquire" | "release") => rentalCoreApi.operationLock(id, type, operationToken), onSuccess: async (result) => { setOperationToken(result.token); await refresh(); }, onError: (e: Error) => message.error(e.message) });
   const closeInspection = async () => {
     if (inspectionClosing || inspect.isPending) return;
@@ -144,7 +148,7 @@ export function RentalOrderDetailPage() {
     if (!template) { message.error("未配置有效的交接检查模板，请先在经营设置中配置"); return false; }
     try {
       const result = await rentalCoreApi.operationLock(id, "acquire", operationToken);
-      setOperationToken(result.token); await refresh(); inspectionForm.resetFields(); setInspectionReturnItems(returnItems); setInspection(template); return true;
+      setOperationToken(result.token); await refresh(); setInspectionReturnItems(returnItems); setInspection(template); return true;
     } catch { message.error("其他人员正在办理，或订单状态已变化，请刷新后重试"); return false; }
   };
   const action = useMutation({ mutationFn: (type: "confirm" | "allocate") => type === "confirm" ? rentalCoreApi.confirmOrder(id) : rentalCoreApi.allocateOrder(id), onSuccess: async () => { await refresh(); message.success("订单状态已更新"); }, onError: () => message.error("操作失败，请检查状态、库存或优惠券") });
@@ -172,7 +176,7 @@ export function RentalOrderDetailPage() {
   // "又还了一批"和"同一批的网络重试"。在 mutationFn 里生成，与资金操作同一范式——
   // React Query 默认不重试 mutation，浏览器层的网络重试不会重跑这段 JS。
   const partialReturn = useMutation({ mutationFn: (input: { items: Array<{ allocationId: string; quantity: number }> }) => rentalCoreApi.partialReturnOrder(id, { ...input, batchNo: crypto.randomUUID() }, operationToken), onSuccess: async () => { setPartialReturnOpen(false); partialReturnForm.resetFields(); await refresh(); message.success("部分归还已完成，剩余项目继续在租"); }, onError: () => message.error("部分归还失败；最后一批请使用归还检查或整单归还") });
-  const inspect = useMutation({ mutationFn: (values: Record<string, unknown> & { exceptionCode?: string; exceptionDescription?: string; exceptionChargeAmount?: number }) => { const { exceptionCode, exceptionDescription, exceptionChargeAmount, ...results } = values; const exceptions: CreateRentalInspectionRequest["exceptions"] = exceptionDescription ? [{ code: exceptionCode || "damage", description: exceptionDescription, chargeAmount: Number(exceptionChargeAmount) || undefined }] : []; return rentalCoreApi.createInspection(id, { templateId: inspection!.id, results, returnItems: inspectionReturnItems, returnBatchNo: inspectionReturnItems?.length ? crypto.randomUUID() : undefined, exceptions }, operationToken); }, onSuccess: async () => { const wasPartialReturn = Boolean(inspectionReturnItems?.length); setInspection(undefined); setInspectionReturnItems(undefined); setOperationToken(undefined); inspectionForm.resetFields(); await Promise.all([refresh(), queryClient.invalidateQueries({ queryKey: ["rental-core", "order", id, "inspections"] })]); message.success(wasPartialReturn ? "本批归还检查已保存，剩余项目继续在租" : "检查记录已保存；异常建议须由结算人员审核后才计费"); }, onError: () => message.error("检查提交失败") });
+  const inspect = useMutation({ mutationFn: (values: Record<string, unknown> & { exceptionCode?: string; exceptionDescription?: string; exceptionChargeAmount?: number }) => { const { exceptionCode, exceptionDescription, exceptionChargeAmount, ...results } = values; const exceptions: CreateRentalInspectionRequest["exceptions"] = exceptionDescription ? [{ code: exceptionCode || "damage", description: exceptionDescription, chargeAmount: Number(exceptionChargeAmount) || undefined }] : []; return rentalCoreApi.createInspection(id, { templateId: inspection!.id, results, returnItems: inspectionReturnItems, returnBatchNo: inspectionReturnItems?.length ? crypto.randomUUID() : undefined, exceptions }, operationToken); }, onSuccess: async () => { const wasPartialReturn = Boolean(inspectionReturnItems?.length); setInspection(undefined); setInspectionReturnItems(undefined); setOperationToken(undefined); inspectionForm.resetFields(); await Promise.all([refresh(), queryClient.invalidateQueries({ queryKey: ["rental-core", "order", id, "inspections"] }), queryClient.invalidateQueries({ queryKey: ["rental-core", "work-orders", id] }), queryClient.invalidateQueries({ queryKey: ["rental-core", "stock-dispositions", id] })]); message.success(wasPartialReturn ? "本批归还检查已保存，剩余项目继续在租" : "检查记录已保存；异常建议须由结算人员审核后才计费"); }, onError: () => message.error("检查提交失败") });
   const fundingAction = useMutation({
     mutationFn: async (values: { amount?: number; reason: string; failureCode?: string }) => {
       const operation = fundingOperation!;
