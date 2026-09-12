@@ -63,12 +63,12 @@ export function TenantReadinessBody({ data, onRefresh }: { data: TenantReadiness
   const blockingItems = data.items.filter((item) => !item.done && !item.optional);
   const optionalMissing = data.items.filter((item) => !item.done && item.optional && !item.unavailable);
   return (
-    <Space direction="vertical" size={16} style={{ width: "100%" }}>
+    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <Alert
         type={data.ready ? "success" : "warning"}
         showIcon
         icon={data.ready ? <CheckCircleFilled /> : <WarningFilled />}
-        message={
+        title={
           data.ready
             ? `开业配置已完成，可以进行报价与订单${optionalMissing.length ? `（${optionalMissing.map((item) => item.title).join("、")}可暂缓）` : ""}`
             : `开业配置${statusMeta.label}：还有 ${blockingItems.length} 项必做配置未完成`
