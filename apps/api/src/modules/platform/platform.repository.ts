@@ -822,6 +822,7 @@ export class PlatformRepository {
 
     for (const permission of permissions) {
       const module = this.permissionModuleOf(permission.code, permission.module);
+      const display = this.permissionDisplayOf(permission);
       if (!modules.has(module.code)) {
         modules.set(module.code, {
           code: module.code,
@@ -831,8 +832,8 @@ export class PlatformRepository {
       }
       modules.get(module.code)?.children.push({
         code: permission.code,
-        name: permission.name,
-        description: permission.description ?? undefined
+        name: display.name,
+        description: display.description
       });
     }
 
@@ -2271,12 +2272,34 @@ export class PlatformRepository {
     );
   }
 
+  private permissionDisplayOf(permission: { code: string; name: string; description: string | null }) {
+    const overrides: Record<string, { name: string; description?: string }> = {
+      "store-rental:order:view": { name: "订单查看", description: "查看租赁订单列表和详情" },
+      "store-rental:order:operate": { name: "订单操作", description: "新建租赁订单、领取检查和归还检查" },
+      "store-rental:order:create": { name: "按钮-新建订单", description: "显示并执行新建租赁订单入口" },
+      "store-rental:order:pickup": { name: "按钮-领取交付", description: "执行领取交付和确认开始履约" },
+      "store-rental:order:return": { name: "按钮-归还验收", description: "执行归还验收和提交结算" },
+      "store-rental:order:extend": { name: "按钮-延长租期", description: "执行延长租期和逾期补办续租" },
+      "store-rental:station:view": { name: "履约地点查看" },
+      "store-rental:station:manage": { name: "履约地点管理" },
+      "store-rental:vehicle-group:manage": { name: "品类型号与分组管理" },
+      "store-rental:vehicle:view": { name: "品类资产查看" },
+      "store-rental:vehicle:manage": { name: "品类资产管理" },
+      "store-rental:vehicle:status-action": { name: "按钮-品类资产状态动作", description: "启停、维保、异常和状态处置" }
+    };
+    const override = overrides[permission.code];
+    return {
+      name: override?.name ?? permission.name,
+      description: override?.description ?? permission.description ?? undefined
+    };
+  }
+
   private permissionModuleOf(code: string, moduleName: string) {
     if (code.startsWith("system:")) {
       return { code: "system", name: "系统设置" };
     }
     if (code.startsWith("store-rental:")) {
-      return { code: "store-rental", name: "门市租赁" };
+      return { code: "store-rental", name: "租赁业务" };
     }
     return { code: moduleName, name: moduleName };
   }

@@ -8,6 +8,9 @@ const navigation = read("apps/admin/src/app/navigation.tsx");
 const router = read("apps/admin/src/app/AppRouter.tsx");
 const api = read("apps/admin/src/api/rental.ts");
 const page = read("apps/admin/src/features/tenant-access/TenantAccessPages.tsx");
+const permissionService = read("apps/api/src/modules/platform/platform.service.ts");
+const permissionRepository = read("apps/api/src/modules/platform/platform.repository.ts");
+const permissionMigration = read("apps/api/prisma/migrations/20260913000400_tenant_neutral_permission_labels/migration.sql");
 
 assert.match(navigation, /tenantAccounts: \{ path: "\/tenant\/accounts"[\s\S]*audience: "tenant"/u);
 assert.match(navigation, /tenantRoles: \{ path: "\/tenant\/roles"[\s\S]*audience: "tenant"/u);
@@ -23,5 +26,9 @@ assert.match(page, /isActive: row\.enabled/u, "关闭空间访问必须真正写
 assert.match(page, /api\.saveUserWithWorkspaceAccess\(payload\)/u, "账号资料与空间授权必须走单事务入口");
 assert.doesNotMatch(page, /Promise\.all\(accessRows[\s\S]*api\.saveWorkspaceMember/u, "页面不能在账号保存后并行写入空间授权");
 assert.doesNotMatch(page, /audience: "saas"/u);
+assert.match(permissionService, /code: "store-rental",\s*name: "租赁业务"/u, "内存权限目录必须使用租户中立的业务模块名");
+assert.match(permissionRepository, /return \{ code: "store-rental", name: "租赁业务" \}/u, "数据库权限目录必须使用租户中立的业务模块名");
+assert.doesNotMatch(permissionService, /code: "store-rental",\s*name: "门市租赁"/u, "权限目录不得回退到旧门市模块名");
+assert.match(permissionMigration, /SET `module` = '租赁业务'/u, "已有数据库的权限模块名必须通过迁移收口");
 
 console.log("Tenant access admin contract passed: tenant routes, RBAC, workspace membership, operation/data split.");

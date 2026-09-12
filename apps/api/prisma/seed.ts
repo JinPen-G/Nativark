@@ -241,7 +241,7 @@ const roleTemplates = [
     id: "role_store_operator",
     code: "STORE_OPERATOR",
     name: "门店营运",
-    description: "门店前台和门店值班人员处理订单、取还车和基础车辆查看。",
+    description: "经营空间营运人员处理订单、领取/归还和基础品类资产查看。",
     scope: RoleScope.STORE,
     fixedAllPermissions: false,
     enabledBusinessScopes: ["STORE_STANDARD", "STORE_24H"],
@@ -277,7 +277,7 @@ const roleTemplates = [
     id: "role_pricing_manager",
     code: "PRICING_MANAGER",
     name: "价格规则管理员",
-    description: "维护门市租赁价格、规则和增值服务配置。",
+    description: "维护租赁价格、规则和增值服务配置。",
     scope: RoleScope.OPERATOR,
     fixedAllPermissions: false,
     enabledBusinessScopes: ["STORE_STANDARD", "SYSTEM_GLOBAL"],
@@ -412,11 +412,24 @@ async function upsertOrganizations() {
 }
 
 async function upsertPermissions() {
+  const permissionNameOverrides: Record<string, string> = {
+    "store-rental:order:pickup": "按钮-领取交付",
+    "store-rental:order:return": "按钮-归还验收",
+    "store-rental:order:extend": "按钮-延长租期",
+    "store-rental:station:view": "履约地点查看",
+    "store-rental:station:manage": "履约地点管理",
+    "store-rental:vehicle-group:manage": "品类型号与分组管理",
+    "store-rental:vehicle:view": "品类资产查看",
+    "store-rental:vehicle:manage": "品类资产管理",
+    "store-rental:vehicle:status-action": "按钮-品类资产状态动作"
+  };
   for (const [code, name, module, kind] of permissions) {
+    const normalizedName = permissionNameOverrides[code] ?? name;
+    const normalizedModule = module === "门市租赁" ? "租赁业务" : module;
     await prisma.permission.upsert({
       where: { code },
-      update: { name, module, kind },
-      create: { code, name, module, kind }
+      update: { name: normalizedName, module: normalizedModule, kind },
+      create: { code, name: normalizedName, module: normalizedModule, kind }
     });
   }
 }
