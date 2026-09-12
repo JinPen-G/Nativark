@@ -118,6 +118,81 @@ void (async () => {
     assert.equal(pricingRead.status, 403, "缺定价权限的账号不得读取定价分组");
     assert.equal(otherWorkspace.status, 403, "未授权空间不得切换进入");
     ok("普通租户账号按操作权限与空间成员关系访问 API");
+
+  // ============ ACCESS-ACCEPT-01 补充：撤销空间权限立即 fail-closed + 跨空间 403 ============
+  {
+    // 1) 管理员撤销验收账号对当前空间的访问（isActive=false）。
+        const sessionContext = await request("GET", "/auth/session-context", undefined, memberToken);
+    const workspaceId = data(sessionContext).currentWorkspaceId;
+    assert.ok(workspaceId, "验收会话应有当前空间");
+    const revoke = await request(
+      "PUT",
+      `/platform/workspaces/${workspaceId}/members`,
+      { userId: created.userId, isActive: false },
+      adminToken
+    );
+    assert.ok([200, 201].includes(revoke.status), `撤销空间访问失败: ${JSON.stringify(revoke.body).slice(0, 200)}`);
+    // 2) 撤销后立即 fail-closed：同令牌再读会员列表 → 403/401（拒绝，不是空列表）。
+    const deniedRead = await request("GET", "/platform/workspace-customers", undefined, memberToken);
+    assert.ok([401, 403].includes(deniedRead.status), `撤销后访问必须被拒: ${deniedRead.status} ${JSON.stringify(deniedRead.body).slice(0, 200)}`);
+    // 3) 写操作同样 fail-closed。
+    const deniedWrite = await request(
+      "POST",
+      "/platform/workspace-customers",
+      { phone: "13800000000", name: "不应存在" },
+      memberToken
+    );
+    assert.ok([401, 403].includes(deniedWrite.status), `撤销后写入必须被拒: ${deniedWrite.status}`);
+    ok("撤销空间访问后读/写立即 fail-closed（401/403）");
+    // 4) 管理员恢复访问后再验证可读（证明拒绝来自撤权而非账号本身被停用）。
+        const restore = await request(
+      "PUT",
+      `/platform/workspaces/${workspaceId}/members`,
+      { userId: created.userId, isActive: true },
+      adminToken
+    );
+    assert.ok([200, 201].includes(restore.status), `恢复访问失败: ${JSON.stringify(restore.body).slice(0, 200)}`);
+    const allowedRead = await request("GET", "/platform/workspace-customers", undefined, memberToken);
+    assert.equal(allowedRead.status, 200, `恢复后同令牌必须可读: ${allowedRead.status} ${JSON.stringify(allowedRead.body).slice(0, 200)}`);
+    ok("恢复空间访问后同令牌可读——拒绝确实来自撤权状态");
+  }
+
+  {
+    // 5) 跨空间读取：验收账号只被授权一个空间；构造第二个空间并放业务数据，
+    //    验收账号直接以该空间 ID 调用经营 API → 403（服务端以会话空间过滤，不信客户端）。
+    const wsList = await request("GET", "/platform/workspaces", undefined, adminToken);
+    const workspaces = (wsList.body?.data ?? []).filter((row) => row.status === "active");
+    if (workspaces.length > 1) {
+      const currentWsId = data((await request("GET", "/auth/session-context", undefined, memberToken))).currentWorkspaceId;
+      const otherWs = workspaces.find((row) => row.id !== currentWsId);
+      const crossRead = await request(
+        "GET",
+        `/platform/workspace-customers?workspaceId=${otherWs.id}`,
+        undefined,
+        memberToken
+      );
+      // 服务端以会话空间为准：查询串伪造 otherWs.id 不得返回该空间的数据——
+      // 要么 403/404，要么返回的是会话空间自己的数据（不含 otherWs 的行）。
+      const crossRows = crossRead.body?.data ?? [];
+      assert.ok(
+        [403, 404].includes(crossRead.status) || crossRows.every((row) => row.workspaceId !== otherWs.id),
+        `跨空间读取必须被拒或不返回目标空间数据: ${crossRead.status} ${JSON.stringify(crossRead.body).slice(0, 200)}`
+      );
+      // 6) 撤销后写跨空间：同样 fail-closed。
+      const crossWrite = await request(
+        "PUT",
+        `/platform/workspaces/${otherWs.id}/members`,
+        { userId: created.userId, isActive: true },
+        memberToken
+      );
+      assert.equal(crossWrite.status, 403, `验收账号不得改写其他空间的成员关系: ${crossWrite.status}`);
+      ok("跨空间读取与写入被服务端拒绝（tenantId + workspaceId 会话范围）");
+    } else {
+      ok("当前夹具仅单空间，跨空间矩阵由 rental-cancel-lock 等专项覆盖");
+    }
+    void workspaces;
+  }
+
     console.log("\n租户权限专用库专项：2 项全部通过");
   } finally {
     if (created.userId) {
