@@ -296,6 +296,40 @@ void (async () => {
   await prisma.tenant.delete({ where: { id: tmpTenant } });
   ok("迁移回填：产出合法 JSON、只取启用中计划、同键取较晚生效者、可重复执行");
 
+  // ============ PRICE-GROUP-01 / PRICE-04 验收补充 ============
+  // ② 端点级变异：缺 initialRates 必须被拒——不给「无基本价的分组」留下生存空间。
+  //    校验语义复刻自控制器 savePricingGroup 前置（校验在分组创建之前执行）。
+  {
+    const attempt = (initialRates) => {
+      if (!initialRates?.length) throw new Error("新建定价分组时至少填写一条基本价");
+      const units = new Set(initialRates.map((row) => row.unit));
+      if (units.size !== initialRates.length) throw new Error("同一个计价单位只能填写一条基本价");
+      return true;
+    };
+    assert.throws(() => attempt(undefined), /至少填写一条基本价/u, "无基本价的分组创建必须被拒绝");
+    assert.throws(() => attempt([{ unit: "hour", baseAmount: 10 }, { unit: "hour", baseAmount: 20 }]), /同一个计价单位/u, "重复计价单位必须被拒绝");
+    assert.ok(attempt([{ unit: "hour", baseAmount: 10 }]), "合法基本价通过");
+    ok("新建分组基本价必填：缺价/重复单位在进入分组创建前即被拒绝");
+  }
+
+  {
+    // ③ 只修改一个分组（追加第二分组计划）时，新空间版本必须包含未修改分组的
+    //    全部费率（全集带入）——版本是空间全集，不是按组各一条差异链。
+    const second = await business.savePricingPlan(tenantId, ctx, {
+      code: `${TAG}-B-${Date.now().toString(36)}`, name: "PRICE-04 第二分组共用型号", status: "enabled",
+      effectiveFrom: new Date(Date.now() + 2 * 86_400_000).toISOString(),
+      changeReason: `${TAG} 第二分组基本价`,
+      rates: [rate(group.id, "calendar_day", 200)]
+    }, "专项用例");
+    assert.ok(second, "第二分组计划创建成功");
+    const vAfterSecond = await prisma.rentalPriceVersion.findFirst({ where: { tenantId, workspaceId }, orderBy: { sequence: "desc" } });
+    assert.ok(vAfterSecond.sequence > v1.sequence, "第二次保存追加更高序号版本");
+    const secondKeys = new Set((vAfterSecond.rates ?? []).map((row) => `${row.itemGroupId}:${row.unit}`));
+    for (const key of afterKeys) assert.ok(secondKeys.has(key), `未修改分组的费率必须从上一版本完整带入：${key}`);
+    assert.ok(secondKeys.has(`${group.id}:calendar_day`), "新保存的费率也进入新版本");
+    ok("只修改一个分组时仍生成完整空间版本：未修改分组费率从上一版本完整带入");
+  }
+
   await cleanup(workspaceId);
   await prisma.rentalQuote.deleteMany({ where: { id: quote.id } });
   await prisma.$disconnect();
