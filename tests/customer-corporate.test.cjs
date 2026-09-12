@@ -21,12 +21,13 @@ const env = Object.fromEntries(
     .filter((l) => l.includes("=") && !l.trim().startsWith("#"))
     .map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1).replace(/^"|"$/g, "")])
 );
-const dbName = new URL(env.DATABASE_URL).pathname.slice(1);
+const databaseUrl = process.env.DATABASE_URL || env.DATABASE_URL;
+const dbName = new URL(databaseUrl).pathname.slice(1);
 if (!/claude/.test(dbName)) {
   console.error(`拒绝执行：CUSTOMER 专项测试只能跑在专用库上，当前指向 ${dbName}`);
   process.exit(1);
 }
-process.env.DATABASE_URL = env.DATABASE_URL;
+process.env.DATABASE_URL = databaseUrl;
 
 const { PrismaClient } = require(path.join(ROOT, "node_modules", "@prisma", "client"));
 const { SharedCustomerRepository } = require(path.join(ROOT, "apps/api/src/modules/platform/shared-customer.repository"));

@@ -25,13 +25,14 @@ const env = Object.fromEntries(
 
 // 安全闸：本套件只允许跑在专用库上。指到共享开发库会被直接拒绝——
 // 它会创建并删除租户，跑错库等于破坏别人的数据。
-const dbName = new URL(env.DATABASE_URL).pathname.slice(1);
+const databaseUrl = process.env.DATABASE_URL || env.DATABASE_URL;
+const dbName = new URL(databaseUrl).pathname.slice(1);
 if (!/claude/.test(dbName)) {
   console.error(`拒绝执行：CUSTOMER 专项测试只能跑在专用库上，当前 DATABASE_URL 指向 ${dbName}`);
   process.exit(1);
 }
 
-process.env.DATABASE_URL = env.DATABASE_URL;
+process.env.DATABASE_URL = databaseUrl;
 const { PrismaClient, Prisma } = require(path.join(ROOT, "node_modules", "@prisma", "client"));
 
 const suffix = Date.now().toString(36);

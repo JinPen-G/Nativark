@@ -23,12 +23,13 @@ const env = Object.fromEntries(
     .filter((l) => l.includes("=") && !l.trim().startsWith("#"))
     .map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1).replace(/^"|"$/g, "")])
 );
-const dbName = new URL(env.DATABASE_URL).pathname.slice(1);
+const databaseUrl = process.env.DATABASE_URL || env.DATABASE_URL;
+const dbName = new URL(databaseUrl).pathname.slice(1);
 if (!/claude/.test(dbName)) {
   console.error(`拒绝执行：CUSTOMER 专项测试只能跑在专用库上，当前指向 ${dbName}`);
   process.exit(1);
 }
-process.env.DATABASE_URL = env.DATABASE_URL;
+process.env.DATABASE_URL = databaseUrl;
 
 const { PrismaClient } = require(path.join(ROOT, "node_modules", "@prisma", "client"));
 const { SharedCustomerRepository } = require(path.join(ROOT, "apps/api/src/modules/platform/shared-customer.repository"));
@@ -285,49 +286,48 @@ void (async () => {
   const read = (relative) => fs.readFileSync(path.join(ROOT, relative), "utf8");
   const nav = read("apps/admin/src/app/navigation.tsx");
   const router = read("apps/admin/src/app/AppRouter.tsx");
+  const reviewPage = read("apps/admin/src/features/membership/MembershipReviewPage.tsx");
+  const personalPage = read("apps/admin/src/features/membership/PersonalMembershipPage.tsx");
+  const corporatePage = read("apps/admin/src/features/membership/CorporateMembershipPage.tsx");
+  const planPage = read("apps/admin/src/features/membership/MembershipPlanPage.tsx");
+  // 兼容性回归断言仍覆盖后端主档的合并/企业资料/注销闸门；该组件已不再被路由或菜单引用。
   const page = read("apps/admin/src/features/customers/CustomerMasterPage.tsx");
   const api = read("apps/admin/src/api/customer.ts");
 
-  assert.match(nav, /customerMaster:\s*\{[^}]*path:\s*"\/customers\/master"/u, "主档页必须注册路由");
-  assert.match(nav, /customerMaster:\s*\{[^}]*permission:\s*"store-rental:member:view"/u, "主档页入口必须要求会员查看权限");
-  assert.match(nav, /routes:\s*\[APP_ROUTES\.customerMaster/u, "主档页必须出现在客户管理菜单里");
-  assert.match(router, /APP_ROUTES\.customerMaster\.path[^\n]*CustomerMasterPage/u, "路由必须指向主档页组件");
+  assert.ok(nav.includes('membershipReviews: { path: "/membership/reviews"'), "会员审核必须注册新路由");
+  assert.ok(nav.includes('personalMembers: { path: "/membership/personal"'), "个人会员必须注册新路由");
+  assert.ok(nav.includes('corporateMembers: { path: "/membership/corporate"'), "企业会员必须注册新路由");
+  assert.ok(nav.includes('membershipPlans: { path: "/membership/plans"'), "会员方案必须注册新路由");
+  assert.ok(nav.includes("routes: [APP_ROUTES.membershipReviews, APP_ROUTES.personalMembers, APP_ROUTES.corporateMembers, APP_ROUTES.membershipPlans]"), "四个会员页面必须进入同一会员菜单");
+  assert.match(router, /APP_ROUTES\.membershipReviews\.path[\s\S]{0,120}MembershipReviewPage/u, "审核路由必须指向独立审核页");
+  assert.match(router, /APP_ROUTES\.personalMembers\.path[\s\S]{0,120}PersonalMembershipPage/u, "个人会员路由必须指向个人会员页");
+  assert.match(router, /APP_ROUTES\.corporateMembers\.path[\s\S]{0,120}CorporateMembershipPage/u, "企业会员路由必须指向企业会员页");
+  assert.match(router, /APP_ROUTES\.membershipPlans\.path[\s\S]{0,120}MembershipPlanPage/u, "会员方案路由必须指向方案页");
+  assert.equal(nav.includes("customerMaster"), false, "旧客户主档不得重新进入新会员菜单");
 
-  for (const [permission, label] of [
-    ["store-rental:member:manage", "会员管理"],
-    ["store-rental:member:risk-action", "风险处理"],
-    ["store-rental:customer:merge", "客户合并"],
-    ["store-rental:customer:close", "客户注销"],
-    ["store-rental:customer:reveal-sensitive", "敏感资料解密"]
+  for (const [source, permissions, label] of [
+    [reviewPage, ["store-rental:member:review", "store-rental:member:qualification-review"], "独立审核"],
+    [personalPage, ["store-rental:member:manage", "store-rental:member:account-manage", "store-rental:member:risk-action", "store-rental:customer:close"], "个人会员管理"],
+    [corporatePage, ["store-rental:corporate:manage", "store-rental:corporate:employee-manage"], "企业会员与员工"],
+    [planPage, ["store-rental:member:plan:manage", "store-rental:member:plan:publish"], "会员方案"]
   ]) {
-    assert.ok(page.includes(permission), `页面必须按「${label}」权限分别门禁，缺少 ${permission}`);
+    for (const permission of permissions) assert.ok(source.includes(permission), `${label}必须按 ${permission} 分别门禁`);
   }
-  for (const label of ["待激活", "风险受限", "已退出", "已注销"]) {
-    assert.ok(page.includes(label), `六态文案缺少「${label}」——两态凑不出「为什么不能下单」`);
+  for (const label of ["待审核", "风险受限", "已退出", "已注销"]) {
+    assert.ok(personalPage.includes(label) || reviewPage.includes(label) || corporatePage.includes(label), `会员状态文案缺少「${label}」`);
   }
-  assert.ok(page.includes("contacts") && page.includes("authorizedAgents"), "详情必须展示联系人与经办人");
-  assert.ok(page.includes("Timeline"), "必须以时间线展示状态历史");
-  assert.ok(
-    /canReveal\s*&&/u.test(page) || /canReveal\s*\?/u.test(page),
-    "敏感访问审计必须由解密权限门禁"
-  );
-  ok("页面契约：入口已注册，四类权限分别门禁，六态与联系人/经办人/时间线齐备");
+  assert.ok(reviewPage.includes("membershipApi.review") && reviewPage.includes("supplement_required"), "注册和证件审核必须支持补件、拒绝等独立结论");
+  assert.ok(personalPage.includes("registrationMode") && personalPage.includes("directApprove"), "个人会员页必须支持自动通过/手动审核策略和后台直接通过");
+  assert.ok(personalPage.includes("ensureAccount") && personalPage.includes("changeAccountStatus") && personalPage.includes("changeMembershipStatus"), "个人会员页必须分别管理账号状态和当前空间会员状态");
+  assert.ok(personalPage.includes("manualConfirmations") && personalPage.includes("blockers"), "会员注销前置检查必须展示阻断项和人工核对项");
+  assert.ok(corporatePage.includes("corporateEmployees") && corporatePage.includes('role: "admin"'), "企业详情必须支持个人会员成为企业管理员或员工");
+  assert.ok(planPage.includes("publishPlan") && planPage.includes("restorePlan"), "会员方案页必须保留版本发布与历史恢复入口");
+  ok("页面契约：新会员四页面入口、权限、审核、账号/空间状态、企业员工和方案版本闭环齐备");
 
-  // ============ 11. 合并与注销在界面上是「有闸的动作」，不是一键 ============
-  assert.ok(page.includes("preservedReferences"), "合并预览必须展示将保留的历史引用——它解释了「为什么不搬数据」");
-  assert.ok(page.includes("overlappingWorkspaceIds"), "合并预览必须展示两边都有会员关系的空间，供人工决定保留哪份等级");
-  // 这几条刻意断言到**结构**而不是「源码里出现过这个词」：变量声明在、但请求里没带，
-  // 等于取舍结论没回传服务端，事后照样解释不了「保留了谁的值」。
-  assert.match(page, /customerApi\.merge\(\{[\s\S]{0,400}fieldResolutions/u, "合并请求必须回传人工取舍结论");
-  assert.match(page, /mergeBlockReason[\s\S]{0,400}unresolvedFields\.length/u, "未取舍的冲突字段必须计入提交闸门");
-  assert.match(page, /disabled=\{Boolean\(mergeBlockReason\)\}/u, "闸门必须真的禁用「确认合并」按钮");
-  assert.match(
-    page,
-    /changeAccountStatus\([\s\S]{0,300}acknowledgedManualChecks/u,
-    "注销必须把人工核对确认回传服务端，否则服务端会按「未确认」拒绝"
-  );
-  assert.ok(page.includes("manualConfirmations"), "注销前必须把系统无法自动核对的项列给操作人");
-  assert.ok(page.includes("blockers"), "注销与合并的阻断项必须展示，而不是提交后才报错");
+  // ============ 11. 旧客户主档不再承担新会员页面职责 ============
+  // 合并/注销服务仍由上面的 API 专项覆盖，但新管理端不得再把旧主档页面挂回菜单。
+  assert.equal(nav.includes("customerMaster"), false, "旧客户主档不得挂回新会员菜单");
+  assert.match(router, /\/customers\/master[\s\S]{0,180}APP_ROUTES\.personalMembers\.path/u, "旧主档地址只能兼容重定向到个人会员页");
   // 空间一律由服务端按会话解析：页面若能传 workspaceId，就能改到自己无权进入的空间。
   // 去掉注释再比对——注释里说明这条口径是好事，不该被当成违规。
   const apiCode = api.replace(/\/\*[\s\S]*?\*\//gu, "").replace(/^\s*\/\/.*$/gmu, "");
