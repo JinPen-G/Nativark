@@ -60,6 +60,17 @@ const SERVICE_EXECUTION_STATUS_COLORS: Record<NonNullable<RentalOrderServiceOccu
   no_show: "warning"
 };
 
+const SERVICE_EXECUTION_ORDER_STATUSES = [
+  RentalCoreOrderStatus.ReadyForPickup,
+  RentalCoreOrderStatus.Renting,
+  RentalCoreOrderStatus.Settling
+];
+
+const SERVICE_START_ORDER_STATUSES = [
+  RentalCoreOrderStatus.ReadyForPickup,
+  RentalCoreOrderStatus.Renting
+];
+
 export function RentalOrderDetailPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
@@ -469,14 +480,33 @@ export function RentalOrderDetailPage() {
             { title: "操作", width: 260, render: (_, row) => {
               if (!row.occurrenceId) return <span style={{ color: "#999" }}>历史记录，无操作</span>;
               const status = row.executionStatus ?? "not_started";
-              const actions: Array<{ action: RentalServiceExecutionAction; label: string; danger?: boolean }> = status === "not_started"
-                ? [{ action: "start", label: "开始" }, { action: "complete", label: "直接完成" }, { action: "cancel", label: "取消" }, { action: "no_show", label: "未到场", danger: true }]
-                : status === "in_progress"
+              const canRecordForOrder = SERVICE_EXECUTION_ORDER_STATUSES.includes(detail.status);
+              const canStartForOrder = SERVICE_START_ORDER_STATUSES.includes(detail.status);
+              const actions: Array<{ action: RentalServiceExecutionAction; label: string; danger?: boolean }> = canRecordForOrder && status === "not_started"
+                ? [
+                    ...(canStartForOrder ? [{ action: "start" as const, label: "开始" }] : []),
+                    { action: "complete", label: "直接完成" },
+                    { action: "cancel", label: "取消" },
+                    { action: "no_show", label: "未到场", danger: true }
+                  ]
+                : canRecordForOrder && status === "in_progress"
                   ? [{ action: "complete", label: "完成" }, { action: "fail", label: "记录失败", danger: true }]
                   : [];
+              const terminalHint = !canRecordForOrder
+                ? "订单当前状态不允许履约"
+                : status === "completed"
+                  ? "服务已完成"
+                  : status === "cancelled"
+                    ? "服务已取消"
+                    : status === "failed"
+                      ? "服务已记录失败"
+                      : status === "no_show"
+                        ? "已记录未到场"
+                        : "暂无可用操作";
               return <Space wrap>
                 {canOperate && actions.map((item) => <Button key={item.action} type={item.action === "complete" ? "primary" : "link"} danger={item.danger} size="small" onClick={() => { serviceExecutionForm.resetFields(); setServiceExecution({ occurrence: row, action: item.action }); }}>{item.label}</Button>)}
                 {canSettleFunding && row.refundStatus === "approved_pending_refund" && <Button key="refund" type="primary" size="small" onClick={() => { serviceRefundForm.resetFields(); setServiceRefund(row); }}>办理退款</Button>}
+                {canOperate && !actions.length && !(canSettleFunding && row.refundStatus === "approved_pending_refund") && <span style={{ color: "#999" }}>{terminalHint}</span>}
                 {!canOperate && !(canSettleFunding && row.refundStatus === "approved_pending_refund") && <span style={{ color: "#999" }}>无操作权限</span>}
               </Space>;
             } }
