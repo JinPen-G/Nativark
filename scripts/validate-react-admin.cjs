@@ -95,10 +95,11 @@ forbidText(operations, "/store-rental/", "retired legacy endpoints must not retu
 [catalogPage, assetWorkspacePage].forEach((source, index) => {
   const label = index === 0 ? "catalog attribute control wiring" : "asset attribute control wiring";
   requireText(source, "value?: unknown", label);
+  requireText(source, "checked?: boolean", `${label}: boolean prop`);
   requireText(source, "onChange?: (...args: never[]) => void", label);
   requireText(source, "value={value as string}", `${label}: string/date input`);
   requireText(source, "value={value as number}", `${label}: number input`);
-  requireText(source, "checked={Boolean(value)}", `${label}: boolean switch`);
+  requireText(source, "checked={checked ?? Boolean(value)}", `${label}: boolean switch`);
 });
 [
   'name={["deposit", "mode"]}',

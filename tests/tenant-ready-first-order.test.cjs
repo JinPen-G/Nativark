@@ -498,6 +498,26 @@ async function main() {
   assert.ok(!afterNetwork.quoteBlockers.some((row) => row.includes("履约地点")), "履约地点配置后必须移出报价闸门");
   ok("履约网络（主体+取还地点）配置后 readiness 转绿并移出报价闸门");
 
+  const disabledOperator = await request("PUT", `/api/rental/v1/fulfillment-operators/${operator.body.data.id}`, {
+    code: operator.body.data.code,
+    name: operator.body.data.name,
+    type: operator.body.data.type,
+    status: "disabled"
+  }, blank.accessToken);
+  assert.equal(disabledOperator.status, 200, `停用经营主体失败: ${JSON.stringify(disabledOperator.body).slice(0, 300)}`);
+  const afterDisabledOperator = await readiness(blank.accessToken);
+  assert.equal(itemOf(afterDisabledOperator, "fulfillment_network").done, false, "经营主体停用后履约网络必须回到未完成");
+  assert.ok(afterDisabledOperator.quoteBlockers.some((row) => row.includes("履约地点")), "经营主体停用后必须重新进入报价闸门");
+  const restoredOperator = await request("PUT", `/api/rental/v1/fulfillment-operators/${operator.body.data.id}`, {
+    code: operator.body.data.code,
+    name: operator.body.data.name,
+    type: operator.body.data.type,
+    status: "enabled"
+  }, blank.accessToken);
+  assert.equal(restoredOperator.status, 200, `恢复经营主体失败: ${JSON.stringify(restoredOperator.body).slice(0, 300)}`);
+  assert.equal(itemOf(await readiness(blank.accessToken), "fulfillment_network").done, true, "恢复经营主体后履约网络应恢复");
+  ok("经营主体停用会立即撤销履约网络可用性，恢复后 readiness 重新转绿");
+
   // 开业必做项还有年度日历：空白租户按每周默认模板生成草稿后直接发布。
   const year = new Date().getFullYear();
   const publishRes = await request("POST", `/api/rental/v1/calendars/${year}/publish`, {

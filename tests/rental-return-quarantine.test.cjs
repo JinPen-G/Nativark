@@ -48,7 +48,11 @@ const orderFixture = (returnBufferMinutes = 0) => ({
 function serviceWith(order) {
   const captured = {};
   const instance = Object.create(RentalCoreService.prototype);
-  instance.state = () => ({ inspectionTemplates: [TEMPLATE], itemGroups: ITEM_GROUPS });
+  instance.state = () => ({
+    profile: { categoryCode: "camera" },
+    inspectionTemplates: [TEMPLATE],
+    itemGroups: ITEM_GROUPS
+  });
   instance.lockedOrder = async () => order;
   instance.runHook = async () => {};
   instance.orderHookInstances = () => undefined;

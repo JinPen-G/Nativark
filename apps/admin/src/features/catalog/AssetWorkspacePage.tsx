@@ -19,11 +19,13 @@ const statusMap: Record<string, { label: string; color: string }> = {
 function AttributeInput({
   field,
   value,
+  checked,
   onChange,
   id
 }: {
   field: RentalAttributeDefinition;
   value?: unknown;
+  checked?: boolean;
   onChange?: (...args: never[]) => void;
   id?: string;
 }) {
@@ -34,7 +36,7 @@ function AttributeInput({
     return <Select id={id} options={field.options?.map((option) => ({ value: option, label: option }))} value={value as string} onChange={onChange as (value: string) => void} />;
   }
   if (field.type === "boolean") {
-    return <Switch id={id} checked={Boolean(value)} onChange={onChange as (checked: boolean) => void} />;
+    return <Switch id={id} checked={checked ?? Boolean(value)} onChange={onChange as (checked: boolean) => void} />;
   }
   return <Input id={id} type={field.type === "date" ? "date" : undefined} value={value as string} onChange={onChange as (event: unknown) => void} />;
 }

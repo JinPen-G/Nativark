@@ -23,11 +23,13 @@ const inventoryLabels: Record<string, string> = { serialized: "序列化资产",
 function AttributeInput({
   field,
   value,
+  checked,
   onChange,
   id
 }: {
   field: RentalAttributeDefinition;
   value?: unknown;
+  checked?: boolean;
   onChange?: (...args: never[]) => void;
   id?: string;
 }) {
@@ -39,7 +41,7 @@ function AttributeInput({
   }
   if (field.type === "boolean") {
     // Form.Item 对该类字段使用 valuePropName="checked"，注入的是 checked 而非 value。
-    return <Switch id={id} checked={Boolean(value)} onChange={onChange as (checked: boolean) => void} />;
+    return <Switch id={id} checked={checked ?? Boolean(value)} onChange={onChange as (checked: boolean) => void} />;
   }
   return <Input id={id} type={field.type === "date" ? "date" : undefined} value={value as string} onChange={onChange as (event: unknown) => void} />;
 }

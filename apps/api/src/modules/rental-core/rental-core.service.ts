@@ -2036,12 +2036,28 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       this.assertOutboundLocationActive(state, order);
       // 领取/交付与归还检查是两个不同的触发点，因此按 stage 分发。
       // 这不是品类分支：stage 是履约阶段，与经营品类无关。
-      await this.runHook(tenantId, "pickup_delivery", { type: "order", id: order.id }, order, tx, operator, this.orderHookInstances(tenantId, order));
+      await this.runHook(
+        tenantId,
+        "pickup_delivery",
+        { type: "order", id: order.id },
+        { order, inspectionSkipped: true },
+        tx,
+        operator,
+        this.orderHookInstances(tenantId, order)
+      );
       this.markPickedUp(order, assetChanges);
     } else {
       if (order.ruleSnapshot.fulfillment.returnInspectionRequired) throw new ConflictException("当前规则要求完成归还检查");
       if (order.status !== RentalCoreOrderStatus.Renting) throw new ConflictException("只有租赁中的订单可以归还");
-      await this.runHook(tenantId, "return_inspection", { type: "order", id: order.id }, order, tx, operator, this.orderHookInstances(tenantId, order));
+      await this.runHook(
+        tenantId,
+        "return_inspection",
+        { type: "order", id: order.id },
+        { order, inspectionSkipped: true },
+        tx,
+        operator,
+        this.orderHookInstances(tenantId, order)
+      );
       const returnedAllocationIdsBefore = new Set(
         (order.allocations ?? []).filter((allocation) => allocation.status === "returned" || allocation.status === "released").map((allocation) => allocation.id)
       );
@@ -2074,7 +2090,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const state = this.state(tenantId);
     return state.inspectionTemplates
       .filter((row) => !stage || row.stage === stage)
-      .map((row) => this.inspectionTemplateForRead(state.profile.categoryCode, row));
+      .map((row) => this.inspectionTemplateForRead(state.profile?.categoryCode, row));
   }
 
   async listInspections(tenantId: string, orderId: string) {
@@ -2106,7 +2122,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const state = this.state(tenantId);
     const order = await this.lockedOrder(tenantId, orderId, tx);
     const storedTemplate = state.inspectionTemplates.find((row) => row.id === input.templateId && row.enabled);
-    const template = storedTemplate ? this.inspectionTemplateForRead(state.profile.categoryCode, storedTemplate) : undefined;
+    const template = storedTemplate ? this.inspectionTemplateForRead(state.profile?.categoryCode, storedTemplate) : undefined;
     if (!template) throw new NotFoundException("检查模板不存在或已停用");
     const missing = template.fields.filter((field) => field.required && (input.results[field.code] === undefined || input.results[field.code] === ""));
     if (missing.length) throw new BadRequestException(`缺少必填检查项：${missing.map((field) => field.label).join("、")}`);
@@ -3491,7 +3507,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
    * 读路径补齐 CAM-01B 的可选清点项；不回写旧模板，避免启动时偷偷改运营配置，
    * 但 createInspection 与页面读取共用同一份输出口径。
    */
-  private inspectionTemplateForRead(categoryCode: RentalCategoryCode, template: RentalInspectionTemplate): RentalInspectionTemplate {
+  private inspectionTemplateForRead(categoryCode: RentalCategoryCode | undefined, template: RentalInspectionTemplate): RentalInspectionTemplate {
     if (categoryCode !== "camera" || template.fields.some((field) => field.code === "kit_complete")) return template;
     return {
       ...template,

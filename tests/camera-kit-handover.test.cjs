@@ -37,6 +37,11 @@ const current = buildCameraKitHandoverHookModule();
 assert.equal(current.hooks.pickup_delivery(context("pickup_delivery", { bundle: false, kitComplete: false })).decision, "allow", "非套装订单不应被套装清点阻断");
 assert.equal(current.hooks.pickup_delivery(context("pickup_delivery")).decision, "allow", "旧模板未提供清点结果时保持兼容");
 assert.equal(current.hooks.pickup_delivery(context("pickup_delivery", { kitComplete: true })).decision, "allow");
+const skipped = context("pickup_delivery");
+skipped.subject.inspectionSkipped = true;
+const skippedDecision = current.hooks.pickup_delivery(skipped);
+assert.equal(skippedDecision.decision, "block", "当前摄影套装实现不得通过免检查交付绕过附件清点");
+assert.equal(skippedDecision.blockReasons[0].code, "camera_kit_inspection_required");
 
 const pickupIncomplete = current.hooks.pickup_delivery(context("pickup_delivery", { kitComplete: false }));
 assert.equal(pickupIncomplete.decision, "block");
@@ -60,5 +65,8 @@ assert.equal(invalid.blockReasons[0].code, "camera_kit_check_invalid");
 const legacy = buildCameraKitHandoverHookModule(CAMERA_KIT_HANDOVER_LEGACY_VERSION);
 assert.equal(legacy.implementationVersion, CAMERA_KIT_HANDOVER_LEGACY_VERSION);
 assert.equal(legacy.hooks.pickup_delivery(context("pickup_delivery", { kitComplete: false })).decision, "block", "旧快照也必须保留相同的清点语义");
+const legacySkipped = context("pickup_delivery");
+legacySkipped.subject.inspectionSkipped = true;
+assert.equal(legacy.hooks.pickup_delivery(legacySkipped).decision, "allow", "旧订单快照仍保留免检查兼容性");
 
 console.log("CAM-01B 摄影套装交接与附件清点专项通过：注册表、旧快照兼容、取件阻断、归还异常与非套装放行均已覆盖");

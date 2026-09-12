@@ -50,6 +50,10 @@ export function PricingGroupPage() {
   const routeLabel = resolveTenantNavigationLabels(profile.data?.terminology).routes.pricingGroups ?? "定价分组";
 
   function edit(record?: RentalPricingGroup) {
+    if (!settings.data) {
+      message.error(settings.isError ? "基础经营设置读取失败，请刷新后重试" : "基础经营设置仍在加载，请稍后重试");
+      return;
+    }
     setEditing(record);
     form.setFieldsValue(record ? {
       id: record.id,
@@ -77,11 +81,11 @@ export function PricingGroupPage() {
         title: "定价分组不是产品型号",
         description: "例如“舒适轿车组”可包含宝马 3 系、奔驰 C 级。一个型号可进入多个分组，但资产与库存只维护一份，报价后由系统选择实际承接型号。"
       }}
-      extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => edit()}>新增定价分组</Button>}
+      extra={<Button type="primary" icon={<PlusOutlined />} disabled={settings.isLoading || settings.isError} onClick={() => edit()}>新增定价分组</Button>}
     />
     <Card className="data-panel">
       <Input allowClear prefix={<SearchOutlined />} value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索分组或成员型号" style={{ width: 320, marginBottom: 16 }} />
-      <QueryState loading={pricingGroups.isLoading || models.isLoading} error={pricingGroups.error || models.error}>
+      <QueryState loading={pricingGroups.isLoading || models.isLoading || settings.isLoading} error={pricingGroups.error || models.error || settings.error}>
         <Table<RentalPricingGroup> rowKey="id" dataSource={rows} columns={[
           { title: "定价分组", render: (_, row) => <><b>{row.name}</b><br /><span className="muted">{row.code} · v{row.version}</span></> },
           { title: `包含的${profile.data?.terminology.itemGroupLabel ?? "产品型号"}`, render: (_, row) => <Space size={[4, 4]} wrap>{row.members.length ? row.members.map((member) => <Tag color="blue" key={member.id}>{member.name} · {member.code}</Tag>) : <Tag>未配置</Tag>}</Space> },
@@ -123,8 +127,8 @@ export function PricingGroupPage() {
                 <Form.Item name={[field.name, "baseAmount"]} label="价格" rules={[{ required: true, message: "请填写价格" }]}>
                   <InputNumber min={0} precision={2} prefix={rentalCurrencySymbol(currency)} style={{ width: 220 }} />
                 </Form.Item>
-                {settings.data?.payment.preauthorizationRequired && <Form.Item name={[field.name, "preAuthAmount"]} label="预授权额度" tooltip="当前品类默认规则要求预授权；不填按 0 处理，报价会被预授权闸门拦截" rules={[{ required: true, message: "预授权品类必须填写预授权额度" }]}>
-                  <InputNumber min={0} precision={2} prefix={rentalCurrencySymbol(currency)} style={{ width: 220 }} />
+                {settings.data?.payment.preauthorizationRequired && <Form.Item name={[field.name, "preAuthAmount"]} label="预授权额度" tooltip="当前品类默认规则要求预授权，额度必须大于 0，否则报价会被预授权闸门拦截" rules={[{ required: true, message: "预授权品类必须填写预授权额度" }, { validator: async (_, value) => { if (Number(value) > 0) return; throw new Error("预授权额度必须大于 0"); } }]}>
+                  <InputNumber min={0.01} precision={2} prefix={rentalCurrencySymbol(currency)} style={{ width: 220 }} />
                 </Form.Item>}
                 <Button danger type="text" aria-label="删除基本价" icon={<DeleteOutlined />} disabled={fields.length === 1} onClick={() => remove(field.name)} style={{ marginTop: 30 }} />
               </Space>)}

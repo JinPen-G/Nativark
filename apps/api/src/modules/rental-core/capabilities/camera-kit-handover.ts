@@ -19,6 +19,8 @@ interface CameraKitHandoverSubject {
   order?: { lines?: KitLine[] };
   results?: Record<string, unknown>;
   exceptions?: Array<{ code?: string; description?: string }>;
+  /** 没有办理检查而直接交付/归还时由 Core 标记，避免绕过摄影套装能力。 */
+  inspectionSkipped?: boolean;
 }
 
 const MISSING_KIT_EXCEPTION_CODES = new Set([
@@ -96,8 +98,21 @@ function evaluateKitHandover(
 export function buildCameraKitHandoverHookModule(
   implementationVersion = CAMERA_KIT_HANDOVER_RULESET_VERSION
 ): RentalCapabilityHookModule {
-  const evaluate = (point: "pickup_delivery" | "return_inspection", subject: CameraKitHandoverSubject) =>
-    evaluateKitHandover(point, subject);
+  const evaluate = (point: "pickup_delivery" | "return_inspection", subject: CameraKitHandoverSubject) => {
+    // 旧订单的 `unimplemented` 快照保留原有免检查兼容性；当前实现下，
+    // 摄影套装不能通过“关闭检查后直接交付/归还”绕过必选能力。
+    if (implementationVersion !== CAMERA_KIT_HANDOVER_LEGACY_VERSION && subject.inspectionSkipped && hasBundle(subject)) {
+      return {
+        decision: "block" as const,
+        blockReasons: [{
+          code: "camera_kit_inspection_required",
+          message: "摄影套装必须完成附件清点后才能交付或归还",
+          evidence: { bundles: kitLines(subject), point }
+        }]
+      };
+    }
+    return evaluateKitHandover(point, subject);
+  };
   return {
     code: "camera_kit_handover",
     implementationVersion,

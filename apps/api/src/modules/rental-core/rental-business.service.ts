@@ -643,17 +643,38 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const operationsAccounts = this.prisma
       ? await this.prisma.workspaceMember.count({ where: { tenantId, workspaceId, isActive: true, user: { isActive: true } } })
       : 0;
-    const roles = this.prisma
-      ? await this.prisma.role.count({ where: { tenantId, isActive: true } })
-      : 0;
+    const activeMembers = this.prisma
+      ? await this.prisma.workspaceMember.findMany({
+          where: { tenantId, workspaceId, isActive: true, user: { isActive: true } },
+          select: {
+            roleId: true,
+            role: { select: { isActive: true } },
+            user: {
+              select: {
+                role: { select: { isActive: true } },
+                roleAssignments: { select: { role: { select: { isActive: true } } } }
+              }
+            }
+          }
+        })
+      : [];
+    // roleId 非空时覆盖租户级角色；为空时才沿用用户默认角色或角色分配。
+    // 不能只统计租户内的角色，否则其他空间的角色会把当前空间误判为可开业。
+    const roles = activeMembers.some((member) =>
+      member.roleId
+        ? member.role?.isActive === true
+        : member.user.role?.isActive === true || member.user.roleAssignments.some((assignment) => assignment.role.isActive)
+    ) ? 1 : 0;
     // 报价对履约地点的硬闸门（requireLocation）：取货/配送与归还时点都会校验
-    // 「启用 + 具备对应能力」，因此开业判定的最小履约网络 = 至少一个同时支持
-    // 取货与归还的启用地点。经营主体由地点归属间接保证（地点必须挂在启用主体下）。
+    //「地点启用 + 所属经营主体启用 + 具备对应能力」，开业判定必须使用同一口径。
     const serviceableLocations = (context.locations ?? []).filter(
-      (location) =>
-        location.status === "enabled" &&
-        location.capabilities.includes("pickup") &&
-        location.capabilities.includes("return")
+      (location) => {
+        const operator = location.operatorId ? context.operators.find((row) => row.id === location.operatorId) : undefined;
+        return location.status === "enabled" &&
+          operator?.status === "enabled" &&
+          location.capabilities.includes("pickup") &&
+          location.capabilities.includes("return");
+      }
     );
 
     const items: Array<{

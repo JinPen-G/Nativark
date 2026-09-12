@@ -602,6 +602,23 @@ await core.saveLocation(readyTenant, {
 const configuredReadiness = await readReady();
 assert.ok(configuredReadiness.items.find((item) => item.key === "fulfillment_network").done, "配置取还地点后履约项应完成");
 assert.ok(!configuredReadiness.quoteBlockers.some((row) => row.includes("履约地点")), "履约地点配置后必须移出报价闸门");
+await core.saveOperator(readyTenant, {
+  id: readyOperator.id,
+  code: readyOperator.code,
+  name: readyOperator.name,
+  type: readyOperator.type,
+  status: "disabled"
+});
+const disabledOperatorReadiness = await readReady();
+assert.equal(disabledOperatorReadiness.items.find((item) => item.key === "fulfillment_network").done, false, "运营主体停用后履约网络必须回到未完成");
+assert.ok(disabledOperatorReadiness.quoteBlockers.some((row) => row.includes("履约地点")), "运营主体停用后必须重新进入报价闸门");
+await core.saveOperator(readyTenant, {
+  id: readyOperator.id,
+  code: readyOperator.code,
+  name: readyOperator.name,
+  type: readyOperator.type,
+  status: "enabled"
+});
 await core.saveLocation(readyTenant, {
   code: "DEPOT", name: "中转仓", type: "warehouse", operatorId: readyOperator.id,
   capabilities: ["storage"]
