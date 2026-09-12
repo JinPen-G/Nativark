@@ -6,6 +6,7 @@ require("ts-node").register({
 });
 
 const { RentalCoreService } = require("../apps/api/src/modules/rental-core/rental-core.service");
+const { RentalCoreController } = require("../apps/api/src/modules/rental-core/rental-core.controller");
 
 let passed = 0;
 const ok = (message) => { passed += 1; console.log(`  PASS  ${message}`); };
@@ -105,6 +106,26 @@ void (async () => {
     /未启用爽约处理/u
   );
   ok("没有爽约规则快照的存量订单不会被升级后的新逻辑追溯改写");
+
+  // NOTICE-01：模板存在但模拟发送失败时，后台不能误报成“没有启用模板”。
+  const controller = Object.create(RentalCoreController.prototype);
+  const failedNoticeOrder = orderWith({ id: "order_no_show_notice_failed", status: "pickup_overdue", customerId: "customer-1", contactPhone: "13800000000" });
+  controller.service = { getOrder: async () => failedNoticeOrder };
+  controller.context = () => ({ notificationContext: true });
+  controller.business = {
+    emitNotificationEvent: async () => [],
+    listNotificationLogs: () => [{
+      eventCode: "order.pickup_overdue",
+      businessObjectType: "order",
+      businessObjectId: failedNoticeOrder.id,
+      status: "simulation_failed"
+    }]
+  };
+  await assert.rejects(
+    () => controller.sendNoShowNotice({ user: { tenantId: "tenant_1" } }, failedNoticeOrder.id),
+    /通知发送失败，客户通知尚未记录/u
+  );
+  ok("通知模板发送失败时返回真实失败原因，不误报为未启用模板");
 
   console.log(`\nRULE-CLOSE-01 领取超时与爽约专项：${passed} 项全部通过`);
 })().catch((error) => { console.error(error); process.exitCode = 1; });

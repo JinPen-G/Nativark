@@ -685,8 +685,28 @@ export class RentalCoreController {
     const tenantId = req.user.tenantId;
     const current = await this.service.getOrder(tenantId, id);
     if (current.status !== RentalCoreOrderStatus.PickupOverdue) throw new ConflictException("订单不在待确认爽约状态");
-    const logs = await this.emitOrderEvent(tenantId, "order.pickup_overdue", current);
-    if (!logs.length && !current.noShowNoticeAt) throw new ConflictException("当前空间没有启用待确认爽约通知模板");
+    const context = this.context(tenantId);
+    const logs = await this.business.emitNotificationEvent(
+      tenantId,
+      context,
+      "order.pickup_overdue",
+      current.contactPhone ?? current.customerId,
+      { customerName: current.customerName, orderNo: current.orderNo },
+      { type: "order", id: current.id }
+    );
+    if (!logs.length && !current.noShowNoticeAt) {
+      const failed = this.business.listNotificationLogs(tenantId, context).some(
+        (log) => log.eventCode === "order.pickup_overdue" &&
+          log.businessObjectType === "order" &&
+          log.businessObjectId === current.id &&
+          (log.status === "simulation_failed" || log.status === "failed")
+      );
+      throw new ConflictException(
+        failed
+          ? "通知发送失败，客户通知尚未记录；请处理工作台待办后重试"
+          : "当前空间没有启用待确认爽约通知模板"
+      );
+    }
     const { result: order } = await this.idempotent.executeWithReplayFlag({
       tenantId,
       action: "order.no_show_notice",
