@@ -118,7 +118,7 @@ import { applyPriceAdjustment, assertNoDatetimeOverrideOverlap, assertNoPeriodic
 import { billedRentalHours, rentalPricingStrategy } from "./rental-pricing-strategy";
 import { allocateDiscount, selectDiscountPlans } from "./rental-discount-selection";
 import { resolveQuoteServices } from "./rental-service-catalog";
-import { computeSecurityAmounts, type SecurityLineInput } from "./rental-security-deposit";
+import { computeSecurityAmounts, type SecurityLineInput, validateSecurityRules } from "./rental-security-deposit";
 import { roundMoney } from "./rental-money";
 import { computeEarlyReturnRefund, type EarlyReturnRefund } from "./rental-early-return";
 import { extensionPaymentRequired } from "./rental-extension-lifecycle";
@@ -4627,6 +4627,11 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       throw new BadRequestException("逾时小时转日费必须填写每小时日价比例（0至100%）和转日阈值（0至24小时），均不能为0");
     }
     const preauthorizationEnabled = effectivePreauthorizationRule(config).mode !== "none";
+    const securityRuleErrors = validateSecurityRules(
+      effectiveDepositRule(config),
+      effectivePreauthorizationRule(config)
+    );
+    if (securityRuleErrors.length) throw new BadRequestException(securityRuleErrors.join("；"));
     if ((config.payment.preauthorizationRequired || preauthorizationEnabled) && !context.category.businessModel.supportsPreauthorization) {
       throw new BadRequestException("当前品类不支持预授权");
     }

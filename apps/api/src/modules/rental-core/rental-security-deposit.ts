@@ -5,6 +5,9 @@ import type {
   RentalSecurityReduction
 } from "@store-rental/shared";
 
+const DEPOSIT_MODES = new Set<RentalDepositRule["mode"]>(["none", "fixed", "price_multiple", "order_fixed"]);
+const PREAUTH_MODES = new Set<RentalPreauthorizationRule["mode"]>(["none", "fixed", "price_multiple", "order_fixed", "risk_surcharge"]);
+
 /**
  * RULE-01B：押金与预授权的独立计算（需求 4.4.7）。
  *
@@ -48,6 +51,66 @@ export interface SecurityComputation {
 export interface SecurityComputationResult {
   deposit: SecurityComputation;
   preauthorization: SecurityComputation;
+}
+
+/**
+ * RULE-01B：校验押金/预授权规则的跨字段约束。
+ *
+ * DTO 只能校验字段自身的类型和范围，无法阻止运营把「每单固定」漏填金额，
+ * 或把不会被当前模式消费的字段一起保存。后者尤其危险：配置表面保存成功，
+ * 报价时却静默忽略，运营看到的规则和客户实际承担的资金义务不一致。
+ *
+ * 返回错误文本而不是直接抛异常，便于配置服务统一使用 BadRequestException，
+ * 也便于纯函数测试覆盖所有模式组合。
+ */
+export function validateSecurityRules(
+  depositRule?: RentalDepositRule,
+  preauthRule?: RentalPreauthorizationRule
+): string[] {
+  const errors: string[] = [];
+  validateNumericField(depositRule?.maxAmount, "押金上限", errors);
+  validateNumericField(depositRule?.fixedAmount, "押金每单固定金额", errors);
+  validateNumericField(preauthRule?.maxAmount, "预授权上限", errors);
+  validateNumericField(preauthRule?.fixedAmount, "预授权每单固定金额", errors);
+  validateNumericField(preauthRule?.riskSurchargeAmount, "预授权风险附加额", errors);
+
+  if (depositRule) {
+    if (!DEPOSIT_MODES.has(depositRule.mode)) {
+      errors.push(`押金 mode 无效：${String(depositRule.mode)}`);
+    }
+    if (depositRule.mode === "order_fixed" && depositRule.fixedAmount === undefined) {
+      errors.push("押金选择每单固定时必须填写 fixedAmount");
+    }
+    if (depositRule.mode !== "order_fixed" && depositRule.fixedAmount !== undefined) {
+      errors.push("押金 fixedAmount 仅能用于 order_fixed 模式");
+    }
+  }
+
+  if (preauthRule) {
+    if (!PREAUTH_MODES.has(preauthRule.mode)) {
+      errors.push(`预授权 mode 无效：${String(preauthRule.mode)}`);
+    }
+    if (preauthRule.mode === "order_fixed" && preauthRule.fixedAmount === undefined) {
+      errors.push("预授权选择每单固定时必须填写 fixedAmount");
+    }
+    if (preauthRule.mode !== "order_fixed" && preauthRule.fixedAmount !== undefined) {
+      errors.push("预授权 fixedAmount 仅能用于 order_fixed 模式");
+    }
+    if (preauthRule.mode === "risk_surcharge" && preauthRule.riskSurchargeAmount === undefined) {
+      errors.push("预授权选择风险附加时必须填写 riskSurchargeAmount");
+    }
+    if (preauthRule.mode !== "risk_surcharge" && preauthRule.riskSurchargeAmount !== undefined) {
+      errors.push("预授权 riskSurchargeAmount 仅能用于 risk_surcharge 模式");
+    }
+  }
+
+  return errors;
+}
+
+function validateNumericField(value: number | undefined, label: string, errors: string[]) {
+  if (value !== undefined && (!Number.isFinite(value) || value < 0)) {
+    errors.push(`${label}必须是大于等于 0 的有限数字`);
+  }
 }
 
 /**

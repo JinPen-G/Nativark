@@ -7,7 +7,8 @@ require("ts-node").register({
 
 const {
   computeSecurityAmounts,
-  applySecurityReduction
+  applySecurityReduction,
+  validateSecurityRules
 } = require("../apps/api/src/modules/rental-core/rental-security-deposit");
 
 /**
@@ -125,6 +126,40 @@ const rejects = (fn, pattern, label) =>
     "减免不能为负"
   );
   ok("减免只能调低到服务端算出的目标额，不能升高或为负");
+}
+
+// ============ 9. 规则跨字段校验：不能保存会被静默忽略的参数 ============
+{
+  assert.deepEqual(
+    validateSecurityRules(
+      { mode: "order_fixed", fixedAmount: 500 },
+      { mode: "risk_surcharge", riskSurchargeAmount: 250 }
+    ),
+    [],
+    "每单固定与风险附加的必需参数齐全"
+  );
+  assert.deepEqual(
+    validateSecurityRules({ mode: "fixed" }, { mode: "order_fixed" }),
+    ["预授权选择每单固定时必须填写 fixedAmount"],
+    "每单固定缺金额必须拒绝"
+  );
+  assert.ok(
+    validateSecurityRules({ mode: "price_multiple", fixedAmount: 100 }).some((message) => message.includes("仅能用于 order_fixed")),
+    "押金不适用字段不能被静默忽略"
+  );
+  assert.ok(
+    validateSecurityRules({ mode: "none" }, { mode: "fixed", riskSurchargeAmount: 20 }).some((message) => message.includes("仅能用于 risk_surcharge")),
+    "预授权不适用风险附加额不能被静默忽略"
+  );
+  assert.ok(
+    validateSecurityRules({ mode: "fixed", maxAmount: Number.NaN }).some((message) => message.includes("押金上限")),
+    "有限数字校验不能被 NaN 绕过"
+  );
+  assert.ok(
+    validateSecurityRules({ mode: "legacy_unknown" }).some((message) => message.includes("mode 无效")),
+    "未知模式不能落入默认的逐件计算分支"
+  );
+  ok("押金/预授权规则校验模式与参数的跨字段约束，避免配置保存后静默失效");
 }
 
 console.log("\nAll security-deposit assertions passed.");
