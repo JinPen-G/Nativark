@@ -1,4 +1,6 @@
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 
 require("ts-node").register({
   transpileOnly: true,
@@ -58,5 +60,14 @@ assert.equal(withoutFunding.items.some((row) => row.type === "refund"), false, "
 assert.equal(canIncludeWorkbenchWorkOrders({ isPlatformAdmin: false, permissions: ["store-rental:report:view"] }), false, "只有报表权限时不能读取养护工单待办");
 assert.equal(canIncludeWorkbenchWorkOrders({ isPlatformAdmin: false, permissions: ["rental-core:maintenance:view"] }), true, "维护查看权限可以读取养护工单待办");
 assert.equal(canIncludeWorkbenchWorkOrders({ isPlatformAdmin: true, permissions: [] }), true, "平台管理员沿用全局可见能力");
+
+// 维护人员必须有工作台的路由/API入口，否则上面的维护待办聚合只能从单元测试里存在，
+// 实际账号永远进不去。这里同时钉住前端路由、后端守卫和 OpenAPI 权限契约，避免只改一层。
+const navigationSource = fs.readFileSync(path.join(__dirname, "../apps/admin/src/app/navigation.tsx"), "utf8");
+const guardSource = fs.readFileSync(path.join(__dirname, "../apps/api/src/common/api-auth.guard.ts"), "utf8");
+const openapiSource = fs.readFileSync(path.join(__dirname, "../apps/api/src/contracts/openapi-document.ts"), "utf8");
+assert.ok(navigationSource.includes('legacyPermissions: ["store-rental:order:view", "rental-core:maintenance:view"]'), "工作台前端路由必须允许维护查看权限");
+assert.ok(guardSource.includes('path === "/rental/v1/workbench/todos") return ["store-rental:report:view", "store-rental:order:view", "rental-core:maintenance:view"]'), "工作台 API 必须允许维护查看权限");
+assert.ok(openapiSource.includes('permissions: ["store-rental:report:view", "store-rental:order:view", "rental-core:maintenance:view"]'), "OpenAPI 工作台权限必须与守卫一致");
 
 console.log(`\n工作台统一待办专项：${todos.items.length + 4} 项全部通过`);

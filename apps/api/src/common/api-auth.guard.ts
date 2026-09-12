@@ -417,8 +417,9 @@ export function requiredPermissions(method: string, path: string) {
       ? ["store-rental:order:view", "store-rental:order:settle"]
       : ["store-rental:order:settle"];
   }
-  // R1 工作台待办只读当前会话空间；报表角色可看工作台，订单查看角色也可在有路由出口时读取。
-  if (path === "/rental/v1/workbench/todos") return ["store-rental:report:view", "store-rental:order:view"];
+  // R1 工作台待办只读当前会话空间；报表、订单查看和维护人员都需要能进入，
+  // 控制器再按维护查看权限决定是否聚合工单摘要，不能让维护人员只能绕到工单页。
+  if (path === "/rental/v1/workbench/todos") return ["store-rental:report:view", "store-rental:order:view", "rental-core:maintenance:view"];
   if (
     path === "/rental/v1/capabilities" ||
     path.startsWith("/rental/v1/capabilities/") ||

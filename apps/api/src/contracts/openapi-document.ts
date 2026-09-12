@@ -1394,7 +1394,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   },
   {
     method: "get", path: "/api/rental/v1/workbench/todos", tag: "RentalCore", operationId: "listRentalWorkbenchTodos",
-    summary: "List actionable workbench todos for the current workspace", permissions: ["store-rental:report:view", "store-rental:order:view"], responseSchema: "GenericObject"
+    summary: "List actionable workbench todos for the current workspace", permissions: ["store-rental:report:view", "store-rental:order:view", "rental-core:maintenance:view"], responseSchema: "GenericObject"
   },
   {
     method: "post", path: "/api/rental/v1/orders", tag: "RentalCore", operationId: "createRentalCoreOrder",

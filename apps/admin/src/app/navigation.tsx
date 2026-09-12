@@ -42,7 +42,9 @@ export interface AppNavigationSection {
 }
 
 export const APP_ROUTES = {
-  workbench: { path: "/workbench", label: "运营概览", permission: "store-rental:report:view", audience: "tenant", icon: <DashboardOutlined />, menu: true },
+  // 工作台既承载经营指标，也承载订单/维护待办。维护人员没有报表或订单数据权限时，
+  // 仍应能进入页面查看自己的工单待办；页面内部会继续按数据权限隐藏订单和金额指标。
+  workbench: { path: "/workbench", label: "运营概览", permission: "store-rental:report:view", legacyPermissions: ["store-rental:order:view", "rental-core:maintenance:view"], audience: "tenant", icon: <DashboardOutlined />, menu: true },
   // REPORT-01A：当前经营空间经营报表。文案固定「经营报表」——指标定义不随品类变化，
   // 只有页面标题内的标的说法用品类术语，菜单名跟着品类变会让人以为指标也变了。
   operationReport: { path: "/reports/operations", label: "经营报表", permission: "store-rental:report:view", audience: "tenant", icon: <FundOutlined />, menu: true },
