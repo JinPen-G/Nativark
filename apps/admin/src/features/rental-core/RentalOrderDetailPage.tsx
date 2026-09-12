@@ -1,5 +1,5 @@
 import { ArrowLeftOutlined, CheckCircleOutlined, DollarOutlined, MinusCircleOutlined, PlusOutlined, RetweetOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
-import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol, type CreateRentalInspectionRequest, type RentalAllocation, type RentalFundingAction, type RentalFundingInstrument, type RentalInspectionTemplate, type RentalOrderExtension, type RentalOrderExtensionPreview, type RentalOrderFeeReview, type RentalOrderServiceOccurrence, type RentalReservation, type RentalServiceExecutionAction, type UpdateRentalServiceOccurrenceRequest, type RentalWorkOrder, type RentalStockDisposition } from "@store-rental/shared";
+import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol, type CorrectRentalInspectionUsageRequest, type CreateRentalInspectionRequest, type RentalAllocation, type RentalFundingAction, type RentalFundingInstrument, type RentalInspectionTemplate, type RentalOrderExtension, type RentalOrderExtensionPreview, type RentalOrderFeeReview, type RentalOrderServiceOccurrence, type RentalReservation, type RentalServiceExecutionAction, type UpdateRentalServiceOccurrenceRequest, type RentalWorkOrder, type RentalStockDisposition } from "@store-rental/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Button, Card, DatePicker, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
@@ -109,6 +109,7 @@ export function RentalOrderDetailPage() {
   const [partialReturnOpen, setPartialReturnOpen] = useState(false);
   const [fundingOperation, setFundingOperation] = useState<FundingOperation>();
   const [exceptionReview, setExceptionReview] = useState<{ inspectionId: string; exceptionIndex: number; description: string; suggested?: number }>();
+  const [usageCorrection, setUsageCorrection] = useState<{ inspectionId: string; fieldCode: string; stage: "pickup" | "return"; current: number; baseline?: number }>();
   const [feeReview, setFeeReview] = useState<RentalOrderFeeReview>();
   const [feeReviewForm] = Form.useForm<{ decision: "approved" | "rejected"; amount?: number; reason: string }>();
   const [inspectionForm] = Form.useForm<Record<string, unknown> & { exceptionCode?: string; exceptionDescription?: string; exceptionChargeAmount?: number }>();
@@ -118,6 +119,7 @@ export function RentalOrderDetailPage() {
   const [partialReturnForm] = Form.useForm<{ items: Array<{ allocationId: string; quantity: number }> }>();
   const [fundingForm] = Form.useForm<{ amount?: number; reason: string; failureCode?: string }>();
   const [exceptionReviewForm] = Form.useForm<{ decision: "approved" | "rejected"; approvedChargeAmount?: number; reason: string }>();
+  const [usageCorrectionForm] = Form.useForm<{ correctedCurrent: number; reason: string; evidenceAttachments?: string }>();
   const [extensionOpen, setExtensionOpen] = useState(false);
   const [extensionRefundReview, setExtensionRefundReview] = useState<RentalOrderExtension>();
   const [serviceExecution, setServiceExecution] = useState<{ occurrence: RentalOrderServiceOccurrence; action: RentalServiceExecutionAction }>();
@@ -286,6 +288,25 @@ export function RentalOrderDetailPage() {
       message.success("检查异常已审核");
     },
     onError: () => message.error("审核失败，请检查订单状态或该异常是否已处理")
+  });
+  const correctUsage = useMutation({
+    mutationFn: (values: { correctedCurrent: number; reason: string; evidenceAttachments?: string }) => {
+      if (!usageCorrection) throw new Error("未选择要修正的使用量读数");
+      const data: CorrectRentalInspectionUsageRequest = {
+        fieldCode: usageCorrection.fieldCode,
+        correctedCurrent: Number(values.correctedCurrent),
+        reason: values.reason,
+        evidenceAttachments: values.evidenceAttachments?.split(/[\n,]/u).map((item) => item.trim()).filter(Boolean)
+      };
+      return rentalCoreApi.correctInspectionUsage(id, usageCorrection.inspectionId, data);
+    },
+    onSuccess: async () => {
+      setUsageCorrection(undefined);
+      usageCorrectionForm.resetFields();
+      await queryClient.invalidateQueries({ queryKey: ["rental-core", "order", id, "inspections"] });
+      message.success("使用量已修正，原始读数和修正记录均已保留");
+    },
+    onError: (error: Error) => message.error(error.message || "使用量修正失败，请刷新后重试")
   });
   const executeService = useMutation({
     mutationFn: (values: { executedQuantity?: number; result?: string; reason?: string; customerConfirmed?: boolean; refundAmount?: number; compensationAmount?: number; evidenceAttachments?: string }) => {
@@ -539,12 +560,21 @@ export function RentalOrderDetailPage() {
         ]} />
       </Card>}
       <Card title="检查、使用量与异常审核"><Space orientation="vertical" style={{ width: "100%" }} size={16}>
-        <Table rowKey={(row) => `${row.inspectionId}:${row.fieldCode}`} size="small" pagination={false} dataSource={(inspections.data ?? []).flatMap((record) => (record.usageReadings ?? []).map((reading) => ({ ...reading, inspectionId: record.id, stage: record.stage })))} columns={[
+        <Table rowKey={(row) => `${row.inspectionId}:${row.fieldCode}`} size="small" pagination={false} dataSource={(inspections.data ?? []).flatMap((record) => (record.usageReadings ?? []).map((reading) => ({ ...reading, inspectionId: record.id, stage: record.stage, corrections: (record.usageCorrections ?? []).filter((correction) => correction.fieldCode === reading.fieldCode) })))} columns={[
           { title: "阶段", dataIndex: "stage", render: (value) => value === "pickup" ? "领取基线" : "归还读数" },
           { title: "读数字段", dataIndex: "fieldCode" },
           { title: "领取基线", dataIndex: "baseline", render: (value) => value ?? "-" },
-          { title: "归还原始值", dataIndex: "current" },
-          { title: "使用量", dataIndex: "delta", render: (value) => value ?? "-" }
+          { title: "当前有效读数", dataIndex: "current" },
+          { title: "使用量", dataIndex: "delta", render: (value) => value ?? "-" },
+          { title: "修正记录", render: (_, row) => {
+            const latest = row.corrections?.at(-1);
+            return latest ? <Typography.Text type="secondary">原 {latest.from} → {latest.to} · {latest.operator}<br />{latest.reason}</Typography.Text> : "-";
+          } },
+          { title: "操作", render: (_, row) => canOperate ? <Button type="link" size="small" onClick={() => {
+            usageCorrectionForm.resetFields();
+            usageCorrectionForm.setFieldsValue({ correctedCurrent: row.current });
+            setUsageCorrection({ inspectionId: row.inspectionId, fieldCode: row.fieldCode, stage: row.stage, current: row.current, baseline: row.baseline });
+          }}>修正读数</Button> : "-" }
         ]} />
         <Table rowKey="id" size="small" pagination={false} dataSource={inspections.data ?? []} columns={[
           { title: "检查记录", render: (_, row) => row.stage === "pickup" ? "领取检查" : "归还检查" },
@@ -745,6 +775,33 @@ export function RentalOrderDetailPage() {
         <Form.Item name="decision" label="审核结论" rules={[{ required: true }]}><Select options={[{ value: "approved", label: "通过并计费" }, { value: "rejected", label: "驳回，不计费" }]} /></Form.Item>
         <Form.Item noStyle shouldUpdate={(before, after) => before.decision !== after.decision}>{({ getFieldValue }) => getFieldValue("decision") === "approved" ? <Form.Item name="approvedChargeAmount" label="最终费用" rules={[{ required: true }]}><InputNumber min={0} precision={2} prefix={symbol} style={{ width: "100%" }} /></Form.Item> : null}</Form.Item>
         <Form.Item name="reason" label="审核理由" rules={[{ required: true }]}><Input.TextArea rows={3} /></Form.Item>
+      </Form>
+    </Modal>
+    <Modal
+      title={usageCorrection ? `修正${usageCorrection.stage === "pickup" ? "领取" : "归还"}使用量：${usageCorrection.fieldCode}` : "修正使用量"}
+      open={Boolean(usageCorrection)}
+      onCancel={() => { setUsageCorrection(undefined); usageCorrectionForm.resetFields(); }}
+      onOk={() => usageCorrectionForm.submit()}
+      confirmLoading={correctUsage.isPending}
+      destroyOnHidden
+    >
+      <Alert
+        type="warning"
+        showIcon
+        title={`当前有效读数：${usageCorrection?.current ?? "-"}`}
+        description="原始检查结果不会被覆盖；修正只保存为追加记录，不会直接重算订单金额。"
+        style={{ marginBottom: 16 }}
+      />
+      <Form form={usageCorrectionForm} layout="vertical" onFinish={(values) => correctUsage.mutate(values)}>
+        <Form.Item name="correctedCurrent" label="修正后读数" rules={[{ required: true, message: "请输入修正后的读数" }]}>
+          <InputNumber min={0} precision={2} style={{ width: "100%" }} />
+        </Form.Item>
+        <Form.Item name="reason" label="修正原因" rules={[{ required: true, whitespace: true, message: "请输入修正原因" }]}>
+          <Input.TextArea rows={3} maxLength={1000} />
+        </Form.Item>
+        <Form.Item name="evidenceAttachments" label="证据引用" extra="每行或用逗号填写一条照片、签名或附件引用。">
+          <Input.TextArea rows={2} />
+        </Form.Item>
       </Form>
     </Modal>
     <Modal

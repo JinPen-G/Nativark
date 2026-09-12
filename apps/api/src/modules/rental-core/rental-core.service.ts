@@ -21,6 +21,7 @@ import {
   RentalInventoryMode,
   RentalReservationStatus,
   type CreateRentalInspectionRequest,
+  type CorrectRentalInspectionUsageRequest,
   type CreateRentalOrderRequest,
   type PartialReturnRentalOrderRequest,
   type RentalAllocation,
@@ -2130,6 +2131,21 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     return this.factStore.listInspections(tenantId, orderId);
   }
 
+  async correctInspectionUsage(
+    tenantId: string,
+    orderId: string,
+    inspectionId: string,
+    input: CorrectRentalInspectionUsageRequest,
+    operator: string,
+    tx?: RentalFactTx
+  ) {
+    const order = await this.lockedOrder(tenantId, orderId, tx);
+    if ([RentalCoreOrderStatus.Completed, RentalCoreOrderStatus.Cancelled].includes(order.status)) {
+      throw new ConflictException("已完成或已取消的订单不能修正使用量读数");
+    }
+    return this.factStore.correctInspectionUsage(tenantId, orderId, inspectionId, input, operator, tx);
+  }
+
   /**
    * 办理检查并推进履约状态。
    *
@@ -2202,7 +2218,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const usageReadings = usageFields.flatMap((field) => {
       const current = Number(input.results[field.code]);
       if (!Number.isFinite(current)) return [];
-      const baselineValue = Number(pickupBaseline?.results[field.code]);
+      const baselineReading = pickupBaseline?.usageReadings?.find((reading) => reading.fieldCode === field.code);
+      const baselineValue = Number(baselineReading?.current ?? pickupBaseline?.results[field.code]);
       const baseline = Number.isFinite(baselineValue) ? baselineValue : undefined;
       return [{ fieldCode: field.code, baseline, current, delta: baseline === undefined ? undefined : current - baseline }];
     });

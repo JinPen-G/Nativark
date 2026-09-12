@@ -1,6 +1,7 @@
 import type {
   TenantReadinessStatus,
   CreateRentalInspectionRequest,
+  CorrectRentalInspectionUsageRequest,
   ManageRentalAllocationRequest,
   RentalAllocationCandidates,
   ApiResult,
@@ -320,6 +321,7 @@ export const rentalCoreApi = {
   inspectionTemplates: (stage?: "pickup" | "return") => request<RentalInspectionTemplate[]>("/rental/v1/inspection-templates", { params: { stage } }),
   inspections: (id: string) => request<RentalInspectionRecord[]>(`/rental/v1/orders/${id}/inspections`),
   createInspection: (id: string, data: CreateRentalInspectionRequest, token?: string) => request<{ inspection: RentalInspectionRecord; order: RentalOrder }>(`/rental/v1/orders/${id}/inspections`, { method: "post", data, headers: token ? { "X-Operation-Token": token } : undefined }),
+  correctInspectionUsage: (id: string, inspectionId: string, data: CorrectRentalInspectionUsageRequest) => request<{ inspection: RentalInspectionRecord }>(`/rental/v1/orders/${id}/inspections/${inspectionId}/usage-correction`, { method: "post", data }),
   reviewInspectionException: (id: string, inspectionId: string, exceptionIndex: number, data: ReviewRentalInspectionExceptionRequest) => request<{ order: RentalOrder }>(`/rental/v1/orders/${id}/inspections/${inspectionId}/exceptions/${exceptionIndex}/review`, { method: "post", data }),
   // CORE-EXT-02C：经营空间能力治理。读写都不带 workspaceId——空间取自会话，
   // 客户端无法指定要治理哪个空间的能力，因此也伪造不了能力范围。

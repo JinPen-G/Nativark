@@ -14,6 +14,7 @@ import {
   type ReviewRentalExtensionRefundRequest,
   type ReviewRentalOrderFeeReviewRequest,
   type UpdateRentalServiceOccurrenceRequest,
+  type CorrectRentalInspectionUsageRequest,
   type RentalAvailabilityRequest,
   type RentalCapability,
   type RentalFulfillmentMode,
@@ -464,6 +465,28 @@ export class CreateRentalInspectionDto implements CreateRentalInspectionRequest 
   @IsOptional()
   @IsString()
   operator?: string;
+}
+
+export class CorrectRentalInspectionUsageDto implements CorrectRentalInspectionUsageRequest {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(128)
+  fieldCode!: string;
+
+  @IsNumber()
+  @Min(0)
+  correctedCurrent!: number;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(1000)
+  reason!: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(500, { each: true })
+  evidenceAttachments?: string[];
 }
 
 export class RentalQuoteDto implements RentalQuoteRequest {

@@ -1,5 +1,5 @@
-import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
-import { createHash } from "node:crypto";
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { createHash, randomUUID } from "node:crypto";
 import { Prisma, type $Enums } from "@prisma/client";
 import {
   RentalAssetStatus,
@@ -12,6 +12,7 @@ import {
   type RentalFulfillmentLocationSnapshot,
   type RentalFulfillmentMode,
   type RentalInspectionRecord,
+  type CorrectRentalInspectionUsageRequest,
   type RentalOrder,
   type RentalOrderExtension,
   type RentalOrderLine,
@@ -143,6 +144,14 @@ export interface RentalCoreFactStore {
   transitionWorkOrder(tenantId: string, workOrderId: string, action: "start" | "submit" | "review" | "cancel", operator: string, input?: { result?: string; attachments?: string[]; decision?: "approved" | "rejected"; reason?: string }, tx?: RentalFactTx): Promise<RentalWorkOrder>;
   listInspections(tenantId: string, orderId: string): Promise<RentalInspectionRecord[]>;
   insertInspection(record: RentalInspectionRecord, tx?: RentalFactTx): Promise<void>;
+  correctInspectionUsage(
+    tenantId: string,
+    orderId: string,
+    inspectionId: string,
+    input: CorrectRentalInspectionUsageRequest,
+    operator: string,
+    tx?: RentalFactTx
+  ): Promise<RentalInspectionRecord>;
   /** 续租记录（需求 4.6.9）。只追加与改状态，不改金额——金额是申请时固化的事实。 */
   listExtensions(tenantId: string, orderId: string, tx?: RentalFactTx): Promise<RentalOrderExtension[]>;
   insertExtension(extension: RentalOrderExtension, tx?: RentalFactTx): Promise<void>;
@@ -1152,37 +1161,40 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
   }
 
   /* ---------- 检查记录 ---------- */
+  private toInspectionRecord(row: any): RentalInspectionRecord {
+    const results = structuredClone((row.results ?? {}) as Record<string, unknown>);
+    const meta = results.__r1InspectionMeta as
+      | Pick<RentalInspectionRecord, "baselineInspectionId" | "comparisons" | "usageReadings" | "usageCorrections" | "returnedItems">
+      | undefined;
+    delete results.__r1InspectionMeta;
+    return {
+      id: row.id,
+      tenantId: row.tenantId,
+      orderId: row.orderId,
+      stage: row.stage as "pickup" | "return",
+      templateId: row.templateId,
+      templateCode: row.templateCode,
+      templateVersion: row.templateVersion,
+      results,
+      baselineInspectionId: meta?.baselineInspectionId,
+      comparisons: meta?.comparisons,
+      usageReadings: meta?.usageReadings,
+      usageCorrections: meta?.usageCorrections,
+      returnedItems: meta?.returnedItems,
+      exceptions: (row.exceptions ?? []) as RentalInspectionRecord["exceptions"],
+      attachments: (row.attachments ?? []) as string[],
+      operator: row.operator,
+      createdAt: iso(row.createdAt)
+    };
+  }
+
   async listInspections(tenantId: string, orderId: string): Promise<RentalInspectionRecord[]> {
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
     const rows = await this.prisma.rentalInspectionRecord.findMany({
       where: { tenantId, workspaceId, orderId },
       orderBy: { createdAt: "desc" }
     });
-    return rows.map((row) => {
-      const results = structuredClone((row.results ?? {}) as Record<string, unknown>);
-      const meta = results.__r1InspectionMeta as
-        | Pick<RentalInspectionRecord, "baselineInspectionId" | "comparisons" | "usageReadings" | "returnedItems">
-        | undefined;
-      delete results.__r1InspectionMeta;
-      return {
-        id: row.id,
-        tenantId: row.tenantId,
-        orderId: row.orderId,
-        stage: row.stage as "pickup" | "return",
-        templateId: row.templateId,
-        templateCode: row.templateCode,
-        templateVersion: row.templateVersion,
-        results,
-        baselineInspectionId: meta?.baselineInspectionId,
-        comparisons: meta?.comparisons,
-        usageReadings: meta?.usageReadings,
-        returnedItems: meta?.returnedItems,
-        exceptions: (row.exceptions ?? []) as RentalInspectionRecord["exceptions"],
-        attachments: (row.attachments ?? []) as string[],
-        operator: row.operator,
-        createdAt: iso(row.createdAt)
-      };
-    });
+    return rows.map((row) => this.toInspectionRecord(row));
   }
 
   async insertInspection(record: RentalInspectionRecord, tx?: RentalFactTx): Promise<void> {
@@ -1203,6 +1215,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
             baselineInspectionId: record.baselineInspectionId,
             comparisons: record.comparisons ?? [],
             usageReadings: record.usageReadings ?? [],
+            usageCorrections: record.usageCorrections ?? [],
             returnedItems: record.returnedItems ?? []
           }
         } as Prisma.InputJsonValue,
@@ -1212,6 +1225,60 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
         createdAt: new Date(record.createdAt)
       }
     });
+  }
+
+  async correctInspectionUsage(
+    tenantId: string,
+    orderId: string,
+    inspectionId: string,
+    input: CorrectRentalInspectionUsageRequest,
+    operator: string,
+    tx?: RentalFactTx
+  ): Promise<RentalInspectionRecord> {
+    const client = tx ?? this.prisma;
+    const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
+    const row = await client.rentalInspectionRecord.findFirst({ where: { id: inspectionId, tenantId, workspaceId, orderId } });
+    if (!row) throw new NotFoundException("检查记录不存在或不属于当前订单");
+    const results = structuredClone((row.results ?? {}) as Record<string, unknown>);
+    const meta = (results.__r1InspectionMeta ?? {}) as {
+      baselineInspectionId?: string;
+      comparisons?: RentalInspectionRecord["comparisons"];
+      usageReadings?: RentalInspectionRecord["usageReadings"];
+      usageCorrections?: RentalInspectionRecord["usageCorrections"];
+      returnedItems?: RentalInspectionRecord["returnedItems"];
+    };
+    const usageReadings = [...(meta.usageReadings ?? [])];
+    const index = usageReadings.findIndex((reading) => reading.fieldCode === input.fieldCode);
+    if (index < 0) throw new NotFoundException("检查记录中没有这个使用量读数");
+    if (!Number.isFinite(input.correctedCurrent) || input.correctedCurrent < 0) throw new BadRequestException("修正后的读数必须是非负数字");
+    if (!input.reason.trim()) throw new BadRequestException("使用量修正必须填写原因");
+    const previous = usageReadings[index];
+    if (previous.current === input.correctedCurrent) throw new ConflictException("修正后的读数与当前有效读数相同");
+    usageReadings[index] = {
+      ...previous,
+      current: input.correctedCurrent,
+      delta: previous.baseline === undefined ? undefined : input.correctedCurrent - previous.baseline
+    };
+    const correction = {
+      id: randomUUID(),
+      fieldCode: input.fieldCode,
+      from: previous.current,
+      to: input.correctedCurrent,
+      reason: input.reason.trim(),
+      evidenceAttachments: input.evidenceAttachments ?? [],
+      operator,
+      correctedAt: new Date().toISOString()
+    };
+    results.__r1InspectionMeta = {
+      ...meta,
+      usageReadings,
+      usageCorrections: [...(meta.usageCorrections ?? []), correction]
+    };
+    const updated = await client.rentalInspectionRecord.update({
+      where: { id: inspectionId },
+      data: { results: results as Prisma.InputJsonValue }
+    });
+    return this.toInspectionRecord(updated);
   }
 
   /* ---------- 续租记录（需求 4.6.9） ---------- */

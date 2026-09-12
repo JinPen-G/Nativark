@@ -38,6 +38,7 @@ import {
   ManageRentalAllocationDto,
   RentalOperationLockDto,
   CreateRentalInspectionDto,
+  CorrectRentalInspectionUsageDto,
   CreateRentalOrderDto,
   PartialReturnRentalOrderDto,
   ReviewRentalInspectionExceptionDto,
@@ -1250,6 +1251,34 @@ export class RentalCoreController {
     }
     return this.committed(tenantId, result);
   }
+
+  @Post("orders/:id/inspections/:inspectionId/usage-correction")
+  async correctInspectionUsage(
+    @Req() req: AuthenticatedRequest,
+    @Param("id") id: string,
+    @Param("inspectionId") inspectionId: string,
+    @Body() body: CorrectRentalInspectionUsageDto
+  ) {
+    const tenantId = req.user.tenantId;
+    const result = await this.idempotent.execute({
+      tenantId,
+      action: "order.inspection-usage-correction",
+      key: idempotencyKeyOf(req),
+      fallbackKey: `inspection-usage-correction:${inspectionId}:${body.fieldCode}:${body.correctedCurrent}`,
+      request: { orderId: id, inspectionId, ...body },
+      orderId: id,
+      run: async (tx) => ({ inspection: await this.service.correctInspectionUsage(tenantId, id, inspectionId, body, req.user.displayName, tx) }),
+      replay: async () => {
+        const inspection = (await this.service.listInspections(tenantId, id)).find((row) => row.id === inspectionId);
+        const correction = inspection?.usageCorrections?.find((row) =>
+          row.fieldCode === body.fieldCode && row.to === body.correctedCurrent && row.reason === body.reason.trim()
+        );
+        return correction && inspection ? { inspection } : undefined;
+      }
+    });
+    return this.committed(tenantId, result);
+  }
+
   @Post("orders/:id/handover/:stage") async handover(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Param("stage") stage: string) {
     if (stage !== "pickup" && stage !== "return") throw new BadRequestException("交接阶段无效");
     const tenantId = req.user.tenantId;

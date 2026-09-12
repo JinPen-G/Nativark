@@ -5396,6 +5396,17 @@ export interface RentalInspectionRecord {
   comparisons?: Array<{ fieldCode: string; baseline?: unknown; current?: unknown; changed: boolean }>;
   /** 通用使用量读数（快门、里程、工时等由字段编码识别），保留原始值与差值。 */
   usageReadings?: Array<{ fieldCode: string; baseline?: number; current: number; delta?: number }>;
+  /** 使用量异常修正只追加记录，不覆盖原始检查结果；当前有效读数由最后一次修正得到。 */
+  usageCorrections?: Array<{
+    id: string;
+    fieldCode: string;
+    from: number;
+    to: number;
+    reason: string;
+    evidenceAttachments: string[];
+    operator: string;
+    correctedAt: string;
+  }>;
   /** 本记录覆盖的部分归还分配项；整单检查为空。 */
   returnedItems?: Array<{ allocationId: string; quantity: number }>;
   exceptions: Array<{
@@ -5415,6 +5426,13 @@ export interface RentalInspectionRecord {
   attachments: string[];
   operator: string;
   createdAt: string;
+}
+
+export interface CorrectRentalInspectionUsageRequest {
+  fieldCode: string;
+  correctedCurrent: number;
+  reason: string;
+  evidenceAttachments?: string[];
 }
 
 export interface ReviewRentalInspectionExceptionRequest {
