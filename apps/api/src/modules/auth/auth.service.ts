@@ -308,7 +308,7 @@ export class AuthService {
   async resolveAccessContext(
     authorization?: string,
     options: { allowInvalidWorkspace?: boolean } = {}
-  ): Promise<{ user: SystemUserRow; workspaceId?: string; hasWorkspaces: boolean } | undefined> {
+  ): Promise<{ user: SystemUserRow; workspaceId?: string; hasWorkspaces: boolean; workspaceValid: boolean } | undefined> {
     const token = authorization?.replace(/^Bearer\s+/i, "").trim();
     if (!token) return undefined;
     const payload = this.verifyAccessToken(token);
@@ -327,7 +327,13 @@ export class AuthService {
     const hasWorkspaces = workspaceId
       ? true
       : (await this.platformService.listUserWorkspaces(payload.sub)).length > 0;
-    return { user, workspaceId, hasWorkspaces };
+    // TENANT-READY/ACCESS-ACCEPT：会话指向的空间必须有有效成员关系才算「空间已验证」。
+    // 撤销/停用后 fallback 到租户级身份时，workspaceId 不能再当有效范围使用——
+    // 否则被撤销的账号拿着旧会话仍能读旧空间的经营数据。
+    const workspaceValid = Boolean(workspaceId) && Boolean(
+      await this.platformService.findWorkspaceScopedUser(payload.sub, workspaceId)
+    );
+    return { user, workspaceId, hasWorkspaces, workspaceValid };
   }
 
   /** SPACE-02：切换当前经营空间。校验成员资格与空间状态后重新签发访问令牌。 */

@@ -509,6 +509,23 @@ export class ApiAuthGuard implements CanActivate {
     const user = accessContext?.user;
     const workspaceId = accessContext?.workspaceId;
 
+    // ACCESS-ACCEPT-01：撤销空间访问后，经营数据接口必须立即 fail-closed。
+    // allowInvalidWorkspace 允许被撤销者进入切换入口与账号自助，但不能让他们
+    // 拿旧会话的 workspaceId 继续读旧空间的客户/会员/经营事实。
+    // workspaceValid=false 表示会话指向的空间成员关系已失效（撤销/停用）。
+    if (
+      workspaceId &&
+      accessContext.workspaceValid === false &&
+      !path.startsWith("/auth/") &&
+      (path.startsWith("/platform/workspace-customers") ||
+        path.startsWith("/platform/customers") ||
+        path.startsWith("/rental/v1") ||
+        path.startsWith("/store-rental/") ||
+        path.startsWith("/reports"))
+    ) {
+      throw new ForbiddenException("当前经营空间的访问权已被撤销，请重新登录或联系管理员");
+    }
+
     if (!user) {
       throw new UnauthorizedException("请先登录");
     }
