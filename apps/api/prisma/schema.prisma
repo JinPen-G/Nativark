@@ -916,7 +916,7 @@ model CustomerQualificationRef {
   /// not_submitted / pending / approved / rejected / expired / revoked（需求 4.8.5 六态）
   status            String          @default("not_submitted")
   /// 最近一次提交来源：admin / app；不代表审核通过。
-  source            String          @default("manual")
+  source            String          @default("manual") @db.VarChar(32)
   currentRevisionId String?         @unique
   currentRevision   CustomerQualificationRevision? @relation("CurrentQualificationRevision", fields: [currentRevisionId], references: [id], onDelete: SetNull)
   evidenceRef       String?
@@ -995,15 +995,15 @@ model CustomerQualificationRevision {
   referenceNoMasked String?
   issuedAt           DateTime?
   expiresAt          DateTime?
-  evidenceRef        String?
+  evidenceRef        String?               @db.VarChar(512)
   /// admin / app
-  source             String
+  source             String                @db.VarChar(32)
   submittedBy        String?
   submittedAt        DateTime              @default(now())
   /// 当前这份证件快照的事实状态。
-  qualificationStatus String               @default("pending")
+  qualificationStatus String               @default("pending") @db.VarChar(32)
   /// 对应审核任务状态。
-  reviewStatus       String                @default("pending")
+  reviewStatus       String                @default("pending") @db.VarChar(32)
   reviewReason       String?               @db.Text
   reviewedBy         String?
   reviewedAt         DateTime?
