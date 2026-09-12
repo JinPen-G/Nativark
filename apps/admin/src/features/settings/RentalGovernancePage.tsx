@@ -352,8 +352,21 @@ export function RentalGovernancePage() {
     [categories.data, profile.data?.categoryCode],
   );
   useEffect(() => {
-    if (settings.data) settingsForm.setFieldsValue({ ...settings.data, allocation: settings.data.allocation ?? { autoPreassign: false, preassignDays: 7, autoLock: false, lockMinutes: 120, protectManual: true } });
-  }, [settings.data, settingsForm]);
+    // 设置表单挂载在品类档案与设置数据都准备好之后；避免设置请求先返回时
+    // 提前调用未连接的 Form 实例，触发 Ant Design 告警并丢掉首次回填。
+    if (settings.data && category) {
+      settingsForm.setFieldsValue({
+        ...settings.data,
+        allocation: settings.data.allocation ?? {
+          autoPreassign: false,
+          preassignDays: 7,
+          autoLock: false,
+          lockMinutes: 120,
+          protectManual: true,
+        },
+      });
+    }
+  }, [category, settings.data, settingsForm]);
 
   const saveSettings = useMutation({
     mutationFn: (values: TenantRentalBusinessSettings) => {
