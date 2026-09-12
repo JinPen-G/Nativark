@@ -28,6 +28,19 @@ export function canIncludeWorkbenchWorkOrders(user: Pick<SystemUserRow, "isPlatf
   return Boolean(user.isPlatformAdmin || user.permissions?.includes("*") || user.permissions?.includes("rental-core:maintenance:view"));
 }
 
+/**
+ * 订单待办包含订单号、费用建议和客户履约事实，不能因为能打开工作台就一并读取。
+ * 报表角色沿用工作台既有只读口径；仅有维护权限的账号只能看到工单待办。
+ */
+export function canIncludeWorkbenchOrderTodos(user: Pick<SystemUserRow, "isPlatformAdmin" | "permissions">): boolean {
+  return Boolean(
+    user.isPlatformAdmin
+      || user.permissions?.includes("*")
+      || user.permissions?.includes("store-rental:report:view")
+      || user.permissions?.includes("store-rental:order:view")
+  );
+}
+
 function iso(value: string | undefined, fallback: string) {
   return value && Number.isFinite(Date.parse(value)) ? value : fallback;
 }

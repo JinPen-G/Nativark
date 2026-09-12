@@ -7,7 +7,7 @@ require("ts-node").register({
   compilerOptions: { module: "commonjs", moduleResolution: "node" }
 });
 
-const { buildRentalWorkbenchTodos, canIncludeWorkbenchWorkOrders } = require("../apps/api/src/modules/rental-core/rental-workbench-todos");
+const { buildRentalWorkbenchTodos, canIncludeWorkbenchOrderTodos, canIncludeWorkbenchWorkOrders } = require("../apps/api/src/modules/rental-core/rental-workbench-todos");
 
 const at = "2026-09-11T12:00:00.000Z";
 const base = (overrides = {}) => ({
@@ -60,6 +60,9 @@ assert.equal(withoutFunding.items.some((row) => row.type === "refund"), false, "
 assert.equal(canIncludeWorkbenchWorkOrders({ isPlatformAdmin: false, permissions: ["store-rental:report:view"] }), false, "只有报表权限时不能读取养护工单待办");
 assert.equal(canIncludeWorkbenchWorkOrders({ isPlatformAdmin: false, permissions: ["rental-core:maintenance:view"] }), true, "维护查看权限可以读取养护工单待办");
 assert.equal(canIncludeWorkbenchWorkOrders({ isPlatformAdmin: true, permissions: [] }), true, "平台管理员沿用全局可见能力");
+assert.equal(canIncludeWorkbenchOrderTodos({ isPlatformAdmin: false, permissions: ["rental-core:maintenance:view"] }), false, "仅维护查看权限不能读取订单待办");
+assert.equal(canIncludeWorkbenchOrderTodos({ isPlatformAdmin: false, permissions: ["store-rental:report:view"] }), true, "报表角色保留既有工作台订单待办口径");
+assert.equal(canIncludeWorkbenchOrderTodos({ isPlatformAdmin: false, permissions: ["store-rental:order:view"] }), true, "订单查看角色可以读取订单待办");
 
 // 维护人员必须有工作台的路由/API入口，否则上面的维护待办聚合只能从单元测试里存在，
 // 实际账号永远进不去。这里同时钉住前端路由、后端守卫和 OpenAPI 权限契约，避免只改一层。

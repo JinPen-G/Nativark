@@ -68,7 +68,7 @@ import { PrismaService } from "../database/prisma.service";
 import { RentalServiceCapacityService } from "./rental-service-capacity.service";
 import { extensionRequestKey } from "./rental-service-occurrence";
 import { RentalFundingService } from "./rental-funding.service";
-import { buildRentalWorkbenchTodos, canIncludeWorkbenchWorkOrders } from "./rental-workbench-todos";
+import { buildRentalWorkbenchTodos, canIncludeWorkbenchOrderTodos, canIncludeWorkbenchWorkOrders } from "./rental-workbench-todos";
 
 /** 读取标准 Idempotency-Key 请求头。大小写不敏感，超长键直接拒绝。 */
 /**
@@ -375,7 +375,9 @@ export class RentalCoreController {
   async workbenchTodos(@Req() req: AuthenticatedRequest) {
     const tenantId = req.user.tenantId;
     const workspaceId = this.service.resolveWorkspaceId(tenantId);
-    const orders = await this.service.listOrders(tenantId);
+    const orders = canIncludeWorkbenchOrderTodos(req.user)
+      ? await this.service.listOrders(tenantId)
+      : [];
     // 工作台允许 report:view 进入，但养护工单属于独立的维护数据权限；没有
     // maintenance:view 时只聚合订单/资金待办，不能借工作台旁路读到工单摘要。
     const workOrders = canIncludeWorkbenchWorkOrders(req.user)
