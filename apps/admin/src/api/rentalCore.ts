@@ -1,4 +1,5 @@
 import type {
+  TenantReadinessStatus,
   CreateRentalInspectionRequest,
   ManageRentalAllocationRequest,
   RentalAllocationCandidates,
@@ -134,6 +135,8 @@ export const rentalCoreApi = {
   exportOperationReport: (params?: RentalWorkspaceReportFilter) =>
     requestText("/rental/v1/reports/operations/export", params),
   profile: () => request<TenantRentalProfile>("/rental/v1/tenant-profile"),
+  /** TENANT-READY-01：当前空间开业配置状态（服务端权威判定）。 */
+  tenantReadiness: () => request<TenantReadinessStatus>("/rental/v1/tenant-readiness"),
   saveProfile: (data: SaveTenantRentalProfileRequest) => request<TenantRentalProfile>("/rental/v1/tenant-profile", { method: "put", data }),
   businessSettings: () => request<TenantRentalBusinessSettings>("/rental/v1/business-settings"),
   saveBusinessSettings: (data: SaveTenantRentalBusinessSettingsRequest) => request<TenantRentalBusinessSettings>("/rental/v1/business-settings", { method: "put", data }),

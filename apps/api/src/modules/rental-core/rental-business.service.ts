@@ -594,6 +594,138 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
 
   listPricingPlans(tenantId: string, context: BusinessContext) { return this.state(tenantId, context).pricingPlans; }
 
+  /**
+   * TENANT-READY-01：空白/半配置租户的开业配置状态（服务端权威判定）。
+   *
+   * 全部事实来自当前租户 + 当前经营空间的聚合与查询，不回落 demo 或共享默认数据；
+   * 缺项给出「缺什么、下一步去哪个页面」。报价/下单侧的硬拦截由既有闸门承担：
+   * 无已发布规则、无已发布日历、无覆盖租期开始时点的空间价格版本都会 409。
+   */
+  async tenantReadiness(tenantId: string, context: BusinessContext) {
+    const state = this.state(tenantId, context);
+    const workspaceId = this.workspaceOf(tenantId);
+    const rule = this.currentRule(tenantId, context);
+    const calendars = this.calendarsForDateRange(tenantId, context, `${new Date().getFullYear()}-01-01T00:00:00.000Z`, `${new Date().getFullYear() + 1}-12-31T23:59:59.000Z`);
+    const publishedCalendarYears = new Set(
+      calendars.filter((calendar) => calendar.status === "published").map((calendar) => calendar.year)
+    );
+    const enabledGroups = (context.pricingGroups ?? []).filter((row) => row.status === "enabled");
+    let membershipPlanCount = 0;
+    if (this.memberships) {
+      try {
+        membershipPlanCount = (await this.memberships.listPlans(tenantId, workspaceId)).length;
+      } catch {
+        membershipPlanCount = 0;
+      }
+    }
+    const operationsAccounts = this.prisma
+      ? await this.prisma.workspaceMember.count({ where: { tenantId, workspaceId, isActive: true } })
+      : 0;
+    const roles = this.prisma
+      ? await this.prisma.role.count({ where: { tenantId, isActive: true } })
+      : 0;
+
+    const items: Array<{
+      key: string;
+      title: string;
+      done: boolean;
+      missing: string;
+      nextHref: string;
+      summary?: string;
+    }> = [
+      {
+        key: "workspace_profile",
+        title: "经营空间与品类档案",
+        done: Boolean(context.profile?.categoryCode),
+        missing: "经营空间未绑定经营品类",
+        nextHref: "/workbench",
+        summary: context.profile?.categoryCode ? `品类：${context.category?.name ?? context.profile.categoryCode}` : undefined
+      },
+      {
+        key: "accounts_roles",
+        title: "运营账号、角色与空间访问",
+        done: operationsAccounts > 0 && roles > 0,
+        missing: operationsAccounts === 0 ? "还没有启用的运营账号加入本空间" : roles === 0 ? "还没有启用角色" : "",
+        nextHref: "/tenant/accounts",
+        summary: operationsAccounts > 0 ? `本空间启用账号 ${operationsAccounts} 个` : undefined
+      },
+      {
+        key: "business_rule",
+        title: "营业规则（已发布）",
+        done: Boolean(rule && rule.status === "published"),
+        missing: "还没有已发布的租赁规则版本，报价会被拒绝",
+        nextHref: "/rental/settings",
+        summary: rule?.status === "published" ? `生效版本 ${rule.version}` : undefined
+      },
+      {
+        key: "business_calendar",
+        title: "营业日历（当年或次年已发布）",
+        done: publishedCalendarYears.size > 0,
+        missing: "还没有已发布的年度日历；报价将只按每周默认模板计算日期类型",
+        nextHref: "/rental/settings",
+        summary: publishedCalendarYears.size ? `已发布年度：${[...publishedCalendarYears].sort().join("、")}` : undefined
+      },
+      {
+        key: "item_groups",
+        title: "商品 / 产品型号",
+        done: context.groups.some((row) => row.status === "enabled"),
+        missing: "还没有启用的产品型号，无法建立定价分组",
+        nextHref: "/rental/item-groups",
+        summary: `启用型号 ${context.groups.filter((row) => row.status === "enabled").length} 个`
+      },
+      {
+        key: "pricing_groups_rates",
+        title: "定价分组与初始基本价",
+        done: enabledGroups.length > 0,
+        missing: "还没有启用的定价分组（分组建立时必须填写各计价单位基本价）",
+        nextHref: "/rental/pricing-groups",
+        summary: enabledGroups.length ? `启用分组 ${enabledGroups.length} 个` : undefined
+      },
+      {
+        key: "price_version",
+        title: "空间整体价格版本",
+        done: false,
+        missing: "",
+        nextHref: "/rental/pricing"
+      },
+      {
+        key: "membership_base",
+        title: "会员方案基础配置",
+        done: membershipPlanCount > 0,
+        missing: "还没有会员方案（如暂不经营会员可暂缓）",
+        nextHref: "/membership/plans",
+        summary: membershipPlanCount > 0 ? `会员方案 ${membershipPlanCount} 个` : undefined
+      }
+    ];
+    // 价格版本需要查库：无 MySQL 事实时（内存模式）也如实标未完成，不伪造。
+    if (this.prisma) {
+      const versionRow = await this.findSpaceVersionAt(tenantId, workspaceId, new Date(), undefined);
+      const versionItem = items.find((item) => item.key === "price_version")!;
+      versionItem.done = Boolean(versionRow);
+      versionItem.missing = versionRow ? "" : "还没有空间整体价格版本；由定价分组基本价或调价计划生成";
+      versionItem.summary = versionRow ? `当前版本 v${versionRow.sequence}（${versionRow.effectiveFrom.toISOString().slice(0, 10)} 起）` : undefined;
+    }
+
+    const missingKeys = items.filter((item) => !item.done).map((item) => item.key);
+    const status = items.every((item) => item.done) ? "completed" : items.some((item) => item.done) ? "configuring" : "not_started";
+    return {
+      tenantId,
+      workspaceId,
+      status,
+      ready: missingKeys.length === 0,
+      missingKeys,
+      items,
+      /** 报价/下单的硬闸门说明：即便本页显示部分完成，服务端仍有独立拦截。 */
+      quoteBlockers: [
+        ...(rule?.status === "published" ? [] : ["未发布租赁规则"]),
+        ...(!publishedCalendarYears.size ? [] : []),
+        ...(missingKeys.includes("price_version") ? ["无空间整体价格版本"] : []),
+        ...(missingKeys.includes("item_groups") ? ["无启用产品型号"] : []),
+        ...(missingKeys.includes("pricing_groups_rates") ? ["无启用定价分组"] : [])
+      ]
+    };
+  }
+
   async savePricingPlan(
     tenantId: string,
     context: BusinessContext,
