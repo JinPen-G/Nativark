@@ -11,7 +11,7 @@ import type {
 } from "@store-rental/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Button, Card, Descriptions, Empty, Form, Input, Modal, Select, Space, Table, Tag, Typography } from "antd";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
@@ -107,14 +107,20 @@ export function MaintenanceWorkOrdersPage() {
   function openDialog(kind: DialogKind, workOrder?: RentalWorkOrder) {
     setActiveWorkOrder(workOrder);
     setDialog(kind);
-    if (kind === "create") {
-      createForm.setFieldsValue({ type: "repair", dispositionId: workOrderDispositions[0]?.id });
-    }
-    if (kind === "assign") assignForm.setFieldsValue({ assigneeId: workOrder?.assigneeId });
   }
 
   const workOrderDispositions = (dispositions.data ?? []).filter((row) => row.status !== "restored");
   const availableForRestore = (row: RentalStockDisposition) => row.status === "buffered" && Date.parse(row.bufferUntil) <= Date.now();
+  useEffect(() => {
+    if (dialog === "create") {
+      createForm.setFieldsValue({ type: "repair", dispositionId: workOrderDispositions[0]?.id });
+    }
+  }, [createForm, dialog, workOrderDispositions[0]?.id]);
+  useEffect(() => {
+    if (dialog === "assign") {
+      assignForm.setFieldsValue({ assigneeId: activeWorkOrder?.assigneeId });
+    }
+  }, [activeWorkOrder?.assigneeId, assignForm, dialog]);
   const filteredWorkOrders = (workOrders.data ?? []).filter((row) => {
     if (statusFilter && row.status !== statusFilter) return false;
     if (typeFilter && row.type !== typeFilter) return false;
@@ -133,7 +139,7 @@ export function MaintenanceWorkOrdersPage() {
       extra={<Space><Button icon={<ReloadOutlined />} onClick={() => refresh()}>刷新</Button>{canManage && <Button type="primary" icon={<PlusOutlined />} onClick={() => openDialog("create")}>新建工单</Button>}</Space>}
     />
     <QueryState loading={loading} error={error}>
-      <Alert type="info" showIcon message="库存恢复规则" description="周转缓冲结束后可直接恢复；异常隔离必须先完成养护工单并通过验收。恢复动作在服务端按租户、经营空间和剩余数量原子执行，重复点击不会重复加回库存。" style={{ marginBottom: 16 }} />
+      <Alert type="info" showIcon title="库存恢复规则" description="周转缓冲结束后可直接恢复；异常隔离必须先完成养护工单并通过验收。恢复动作在服务端按租户、经营空间和剩余数量原子执行，重复点击不会重复加回库存。" style={{ marginBottom: 16 }} />
       <Card title={`归还处置（${dispositions.data?.length ?? 0}）`} style={{ marginBottom: 16 }}>
         <Table<RentalStockDisposition> rowKey="id" dataSource={dispositions.data ?? []} pagination={{ pageSize: 8 }} scroll={{ x: 1050 }} locale={{ emptyText: <Empty description="暂无归还处置记录" /> }} columns={[
           { title: "状态", width: 110, render: (_, row) => { const status = DISPOSITION_STATUS_LABELS[row.status] ?? { label: row.status, color: "default" }; return <Tag color={status.color}>{status.label}</Tag>; } },
@@ -217,7 +223,7 @@ export function MaintenanceWorkOrdersPage() {
     </Modal>
     <Modal title={`取消工单：${activeWorkOrder?.workNo ?? ""}`} open={dialog === "cancel"} confirmLoading={run.isPending} onCancel={() => setDialog(undefined)} onOk={() => cancelForm.submit()} destroyOnHidden>
       <Form form={cancelForm} layout="vertical" onFinish={(data) => activeWorkOrder && run.mutate({ kind: "cancel", id: activeWorkOrder.id, data })}>
-        <Alert type="warning" showIcon message="取消不会恢复库存" description="取消只结束当前工单；关联资源会继续保持异常隔离，后续必须重新建立并通过养护验收。" style={{ marginBottom: 16 }} />
+        <Alert type="warning" showIcon title="取消不会恢复库存" description="取消只结束当前工单；关联资源会继续保持异常隔离，后续必须重新建立并通过养护验收。" style={{ marginBottom: 16 }} />
         <Form.Item name="reason" label="取消原因" rules={[{ required: true, message: "请填写取消原因" }]}><Input.TextArea rows={3} /></Form.Item>
       </Form>
     </Modal>
