@@ -49,10 +49,16 @@ const core = new RentalCoreFactRepository(prisma);
       assert.deepEqual((await core.listExtensions(tenantId, row.id)).find(e => e.id === extensionId).pricingSnapshot, snapshot);
       console.log('PASS 退款审核快照随事务回滚');
       await runWithRequestIdentity({ tenantId, workspaceId: 'wrong-space' }, async () => {
-        assert.equal(await business.findQuote(tenantId, order.quoteId), undefined);
-        assert.equal((await core.listExtensions(tenantId, row.id)).length, 0);
+        await assert.rejects(
+          () => business.findQuote(tenantId, order.quoteId),
+          /当前经营空间不属于目标租户/
+        );
+        await assert.rejects(
+          () => core.listExtensions(tenantId, row.id),
+          /当前经营空间不属于目标租户/
+        );
       });
-      console.log('PASS 快照不能跨空间读取');
+      console.log('PASS 快照跨空间读取 fail-closed');
       const effectiveFrom = new Date(Date.now() - 86400000), effectiveTo = new Date(Date.now() + 86400000);
       const template = await prisma.rentalCouponTemplate.create({ data: {
         tenantId, workspaceId, code: tag, name: '续租预算并发', discountType: 'fixed_amount', discountValue: 40,
@@ -84,7 +90,7 @@ const core = new RentalCoreFactRepository(prisma);
       assert.equal(Number((await prisma.rentalCouponTemplate.findUniqueOrThrow({ where: { id: templateId } })).redeemedBudget), 60);
       assert.equal(Number((await prisma.rentalCustomerCoupon.findUniqueOrThrow({ where: { id: winner.id } })).lockedDiscountAmount), 40);
       await runWithRequestIdentity({ tenantId, workspaceId: 'wrong-space' }, () => assert.rejects(
-        () => prisma.$transaction(tx => business.repriceOrderCoupon(tenantId, winner.redeemedOrderId, 10, tx)), /账目缺失/));
+        () => prisma.$transaction(tx => business.repriceOrderCoupon(tenantId, winner.redeemedOrderId, 10, tx)), /当前经营空间不属于目标租户/));
       await prisma.$transaction(tx => business.releaseCouponForOrder(tenantId, winner.redeemedOrderId, new Date().toISOString(), tx));
       assert.equal(Number((await prisma.rentalCouponTemplate.findUniqueOrThrow({ where: { id: templateId } })).redeemedBudget), 20);
       console.log('PASS 预算事务回滚、空间隔离、取消按调整后金额释放');
