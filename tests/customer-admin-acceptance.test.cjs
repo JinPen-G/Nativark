@@ -290,8 +290,6 @@ void (async () => {
   const personalPage = read("apps/admin/src/features/membership/PersonalMembershipPage.tsx");
   const corporatePage = read("apps/admin/src/features/membership/CorporateMembershipPage.tsx");
   const planPage = read("apps/admin/src/features/membership/MembershipPlanPage.tsx");
-  // 兼容性回归断言仍覆盖后端主档的合并/企业资料/注销闸门；该组件已不再被路由或菜单引用。
-  const page = read("apps/admin/src/features/customers/CustomerMasterPage.tsx");
   const api = read("apps/admin/src/api/customer.ts");
 
   assert.ok(nav.includes('membershipReviews: { path: "/membership/reviews"'), "会员审核必须注册新路由");
@@ -390,86 +388,57 @@ void (async () => {
   );
   ok("账号查询：库层显式 select，明文登录标识不进进程内存");
 
-  // ============ 13. 页面契约：企业资料与账号入口 ============
-  // 与第 9、10 段同一理由：服务端守住不等于界面守住。这里断言到**结构**，
-  // 因为「源码里出现过这个词」不能证明请求真的受门禁、按钮真的被禁用。
+  // ============ 13. 页面契约：新企业会员与账号入口 ============
+  // 新会员页面不再依赖已退役的 CustomerMasterPage；企业主档、管理员/员工关系
+  // 与企业方案授予都在独立企业会员页完成，且员工选择器只能选择当前空间的个人会员。
   assert.match(
-    page,
-    /const canCorporateManage = hasPermission\("store-rental:corporate:manage"\)/u,
+    corporatePage,
+    /const canManage = hasPermission\("store-rental:corporate:manage"\)/u,
     "企业资料编辑必须按「企业客户管理」权限门禁"
   );
   assert.match(
-    page,
-    /canCorporateView\s*=\s*hasPermission\("store-rental:corporate:view"\)\s*\|\|\s*canCorporateManage/u,
-    "manage 必须视为 view 的超集，否则只有 manage 的账号看不到自己有权改的数据"
+    corporatePage,
+    /const canEmployeeManage = hasPermission\("store-rental:corporate:employee-manage"\)/u,
+    "企业管理员与员工关系必须按独立权限门禁"
   );
-  // 两个 enabled 条件都要在：个人客户没有这三类资料，无权限时更不该发注定 403 的请求。
-  assert.match(
-    page,
-    /corporateEnabled\s*=\s*Boolean\(selected\)\s*&&\s*isCorporate\s*&&\s*canCorporateView/u,
-    "企业资料查询必须同时受「是企业客户」与「有企业查看权限」两个条件门禁"
-  );
-  for (const query of ["customer-invoice-profiles", "customer-contracts", "customer-credit"]) {
-    assert.match(
-      page,
-      new RegExp(`queryKey: \\["${query}"[\\s\\S]{0,200}?enabled: corporateEnabled`, "u"),
-      `${query} 查询必须挂在 corporateEnabled 上，不能无条件发起`
-    );
+  for (const method of ["corporate", "saveCorporate", "corporateEmployees", "saveCorporateEmployee", "assignPlan", "revokePlanAssignment"]) {
+    assert.ok(corporatePage.includes(`membershipApi.${method}`), `企业会员页缺少 ${method} 闭环`);
   }
-  // 只有 GET 等于只读：编辑闭环必须真的调用 PUT。
-  for (const [method, label] of [
-    ["saveInvoiceProfile", "开票资料"],
-    ["saveContract", "企业合同"],
-    ["saveCredit", "授信与账期"]
-  ]) {
-    assert.ok(api.includes(method), `customerApi 缺少 ${label} 的保存方法 ${method}`);
-    assert.ok(page.includes(`customerApi.${method}`), `页面未调用 ${method}，${label} 只能看不能改`);
-  }
-  assert.match(api, /saveCredit[\s\S]{0,200}method: "put"/u, "授信保存必须是 PUT，不能只有 GET");
+  assert.match(corporatePage, /membershipApi\.personal[\s\S]{0,500}drawer === "employees"/u, "企业员工选择器只能在员工抽屉读取个人会员");
+  assert.match(corporatePage, /filter\(\(item\) => item\.membershipStatus === "active"\)/u, "企业员工只能从当前有效个人会员中选择");
+  assert.ok(corporatePage.includes('name="corporateName"') && corporatePage.includes('name="corporateTaxNo"'), "企业详情必须维护企业基础资料");
   assert.match(
-    page,
-    /name="clearBankAccount"[\s\S]{0,180}清除已保存的银行账号/u,
-    "编辑开票资料必须把「保留脱敏值」与「显式清除」分成两个动作"
-  );
-  assert.match(
-    page,
-    /name="reason"[\s\S]{0,220}调整授信与账期必须填写变更原因/u,
-    "授信调整原因必须在管理端必填，不能只写提示文案"
-  );
-  assert.match(
-    page,
+    personalPage,
     /changeMembershipStatus[\s\S]{0,300}acknowledgedManualChecks: values\.acknowledgedManualChecks/u,
     "注销空间会员关系也必须回传人工核对确认"
   );
   assert.ok(api.includes("workspaceClosability"), "空间会员注销必须有按当前空间检查的预览接口");
-  ok("页面契约：企业资料受 view/manage 分别门禁，无权限不发请求，三类资料都有保存闭环");
+  ok("页面契约：企业资料、个人员工关系、企业方案和会员状态均在新页面闭环");
 
   // ============ 14. 无账号客户：状态入口先禁用，开通后才可管理 ============
   assert.match(
-    page,
-    /accountActionBlockReason[\s\S]{0,400}尚未开通登录账号/u,
-    "未开通账号时必须给出禁用理由，而不是让人提交后收 404"
+    personalPage,
+    /!row\.account\.provisioned[\s\S]{0,180}row\.account\.status === "closed"/u,
+    "未开通账号时必须禁用账号状态入口，而不是让人提交后收 404"
   );
   assert.match(
-    page,
-    /disabled=\{Boolean\(accountActionBlockReason\)\}/u,
-    "禁用理由必须真的禁用「账号状态 / 注销」按钮"
-  );
-  // 断言必须落到「真的产出了禁用理由」上：只断言 `status === "closed"` 这个条件存在，
-  // 把理由文案换成 undefined 也照样通过——那时按钮又变回可点，闸门等于没有。
-  assert.match(
-    page,
-    /account\?\.status === "closed"[\s\S]{0,200}\?\s*[\s\S]{0,120}"[^"]*注销不可逆[^"]*"/u,
-    "已注销是不可逆终态：条件命中时必须真的产出禁用理由，而不只是判断一下"
+    personalPage,
+    /!row\.account\.provisioned[\s\S]{0,80}onClick=\{\(\) => openStatus\(row, "account"\)\}/u,
+    "未开通账号时账号状态按钮必须真的不可用"
   );
   assert.match(
-    page,
-    /accountLoaded && !accountProvisioned[\s\S]{0,400}customerApi\.ensureAccount|ensureAccount\.mutate\(\)/u,
+    personalPage,
+    /注销为不可逆终态，不删除主档和历史业务事实/u,
+    "已注销必须明确是不可逆终态，不能提供虚假恢复入口"
+  );
+  assert.match(
+    personalPage,
+    /!row\.account\.provisioned[\s\S]{0,240}ensureAccount\.mutate\(row\.customerId\)/u,
     "未开通时必须给「开通登录账号」入口并调用 ensureAccount"
   );
   assert.match(
-    page,
-    /ensureAccount = useMutation\([\s\S]{0,400}refreshAll\(\)/u,
+    personalPage,
+    /ensureAccount = useMutation\([\s\S]{0,400}await refresh\(\)/u,
     "开通成功后必须刷新详情与状态历史，否则界面仍显示「未开通」"
   );
   ok("账号入口：未开通先禁用状态变更、给开通入口，开通后刷新详情与历史");
