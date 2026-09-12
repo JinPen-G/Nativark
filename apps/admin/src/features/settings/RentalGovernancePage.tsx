@@ -844,6 +844,8 @@ export function RentalGovernancePage() {
             : []),
         ]}
       />
+      {!(settings.data && category) && <Form form={settingsForm} style={{ display: "none" }} />}
+      {tab !== "membership" && <Form form={rewardForm} style={{ display: "none" }} />}
       <QueryState
         loading={settings.isLoading || profile.isLoading}
         error={settings.error || profile.error}
@@ -1845,6 +1847,7 @@ export function RentalGovernancePage() {
         size={760}
         open={Boolean(ruleEditor)}
         onClose={() => setRuleEditor(undefined)}
+        forceRender
         destroyOnHidden
         extra={
           <Button
@@ -2318,6 +2321,7 @@ export function RentalGovernancePage() {
           setRulePublishEffectiveFrom(undefined);
         }}
         okText="确认发布"
+        forceRender
         destroyOnHidden
         width={640}
       >
@@ -2389,6 +2393,7 @@ export function RentalGovernancePage() {
         confirmLoading={restoreRule.isPending}
         onCancel={() => setRuleRestoreTarget(undefined)}
         okText="生成新草稿"
+        forceRender
         destroyOnHidden
       >
         <Alert
@@ -2420,6 +2425,7 @@ export function RentalGovernancePage() {
         onCancel={() => setRuleVoidTarget(undefined)}
         okText="确认作废"
         okButtonProps={{ danger: true }}
+        forceRender
         destroyOnHidden
       >
         <Alert
@@ -2444,6 +2450,7 @@ export function RentalGovernancePage() {
         size={480}
         open={Boolean(calendarDay)}
         onClose={() => setCalendarDay(undefined)}
+        forceRender
         destroyOnHidden
         extra={
           <Button
@@ -2622,6 +2629,7 @@ export function RentalGovernancePage() {
         confirmLoading={publishCalendar.isPending}
         okText="发布"
         width={760}
+        forceRender
         destroyOnHidden
       >
         <Form
@@ -2950,6 +2958,7 @@ export function RentalGovernancePage() {
         confirmLoading={voidVersion.isPending}
         okText="确认作废"
         okButtonProps={{ danger: true }}
+        forceRender
         destroyOnHidden
       >
         <Form
@@ -2982,6 +2991,7 @@ export function RentalGovernancePage() {
         onOk={() => restoreForm.submit()}
         confirmLoading={restoreVersion.isPending}
         okText="生成新草稿"
+        forceRender
         destroyOnHidden
       >
         <Form
@@ -3015,6 +3025,7 @@ export function RentalGovernancePage() {
         confirmLoading={removeDayOverride.isPending}
         okText="移除覆盖"
         okButtonProps={{ danger: true }}
+        forceRender
         destroyOnHidden
       >
         <Form
@@ -3051,12 +3062,11 @@ export function RentalGovernancePage() {
         </Form>
       </Modal>
       <Drawer
-        title={
-          templateForm.getFieldValue("id") ? "编辑通知模板" : "新增通知模板"
-        }
+        title={templateEditor?.id ? "编辑通知模板" : "新增通知模板"}
         size={680}
         open={Boolean(templateEditor)}
         onClose={() => setTemplateEditor(null)}
+        forceRender
         destroyOnHidden
         extra={
           <Button
@@ -3132,6 +3142,7 @@ export function RentalGovernancePage() {
         onCancel={() => setSendTemplate(undefined)}
         onOk={() => sendForm.submit()}
         confirmLoading={sendNotification.isPending}
+        forceRender
         destroyOnHidden
       >
         <Form
