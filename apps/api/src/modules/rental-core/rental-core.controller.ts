@@ -282,6 +282,8 @@ export class RentalCoreController {
     };
   }
   @Get("tenant-profile") profile(@Req() req: AuthenticatedRequest) { return this.service.getProfile(req.user.tenantId); }
+  /** TENANT-READY-01：当前空间开业配置状态（服务端权威判定，含缺项与下一步入口）。 */
+  @Get("tenant-readiness") tenantReadiness(@Req() req: AuthenticatedRequest) { return this.business.tenantReadiness(req.user.tenantId, this.context(req.user.tenantId)); }
   @Put("tenant-profile") saveProfile(@Req() req: AuthenticatedRequest, @Body() body: SaveTenantRentalProfileDto) { return this.committed(req.user.tenantId, this.service.saveProfile(req.user.tenantId, body)); }
   @Get("business-settings") businessSettings(@Req() req: AuthenticatedRequest) { return this.service.getBusinessSettings(req.user.tenantId); }
   @Put("business-settings") saveBusinessSettings(@Req() req: AuthenticatedRequest, @Body() body: SaveTenantRentalBusinessSettingsDto) { return this.committed(req.user.tenantId, this.service.saveBusinessSettings(req.user.tenantId, body, req.user.displayName)); }

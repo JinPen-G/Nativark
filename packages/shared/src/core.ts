@@ -3660,6 +3660,31 @@ export interface RentalQuoteRequest {
   }>;
 }
 
+/**
+ * TENANT-READY-01：空白/半配置租户的开业配置状态（服务端权威判定）。
+ * 全部事实按当前租户 + 经营空间聚合；不回落 demo 或共享默认数据。
+ */
+export interface TenantReadinessItem {
+  key: string;
+  title: string;
+  done: boolean;
+  /** 未完成时缺什么、下一步去哪。 */
+  missing: string;
+  nextHref: string;
+  summary?: string;
+}
+
+export interface TenantReadinessStatus {
+  tenantId: string;
+  workspaceId: string;
+  status: "not_started" | "configuring" | "completed";
+  ready: boolean;
+  missingKeys: string[];
+  items: TenantReadinessItem[];
+  /** 报价/下单的硬闸门摘要：即便部分完成，服务端仍有独立拦截。 */
+  quoteBlockers: string[];
+}
+
 /** 报价命中的单个「营业日期 × 商品组」计价依据（需求 4.5.6）。 */
 export interface RentalQuoteCalendarDay {
   /** 营业时区下的日期键，与营业日历同一口径。 */

@@ -1247,6 +1247,10 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: "Get tenant rental profile", permissions: ["store-rental:order:view", "store-rental:vehicle:view"], responseSchema: "GenericObject"
   },
   {
+    method: "get", path: "/api/rental/v1/tenant-readiness", tag: "RentalBusiness", operationId: "getTenantReadiness",
+    summary: "Tenant onboarding readiness status for the current workspace", permissions: ["store-rental:order:view"], responseSchema: "GenericObject"
+  },
+  {
     method: "put", path: "/api/rental/v1/tenant-profile", tag: "RentalCore", operationId: "saveRentalTenantProfile",
     summary: "Save tenant rental profile", permissions: ["store-rental:order:operate", "store-rental:vehicle:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
   },
