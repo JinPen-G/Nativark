@@ -173,6 +173,30 @@ void (async () => {
   ok("无异常归还不隔离任何数量");
 }
 
+/* ---------- 分批归还成功后必须释放操作锁 ---------- */
+
+{
+  const order = orderFixture();
+  order.assignment = {
+    revision: 4,
+    operationLock: {
+      ownerId: "operator_1",
+      ownerName: "运营",
+      token: "lock-token",
+      expiresAt: "2099-01-01T00:00:00.000Z"
+    }
+  };
+  const { instance } = serviceWith(order);
+  await instance.createInspection("tenant_1", "order_1", {
+    ...returnInspection(),
+    returnItems: [{ allocationId: "alloc_q", quantity: 1 }],
+    returnBatchNo: "batch-1"
+  }, "检查员");
+  assert.equal(order.assignment.operationLock, undefined,
+    "分批归还检查成功后必须清掉订单操作锁，否则下一批归还会被旧凭证阻断");
+  ok("分批归还检查成功后释放操作锁，下一批可重新办理");
+}
+
 /* ---------- 正常归还的周转缓冲也必须暂时阻止再次出租 ---------- */
 
 {

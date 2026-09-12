@@ -1937,6 +1937,10 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       if (allocation.assetId) assetChanges.push({ assetId: allocation.assetId, status: RentalAssetStatus.Available });
     }
     if (order.allocations.every((allocation) => allocation.status === "returned" || allocation.status === "released")) throw new ConflictException("部分归还不应释放最后一批，请使用整单归还");
+    // 分批归还是一个完整的办理动作。成功提交后必须释放本次操作锁，
+    // 否则管理端已经清掉本地凭证，订单聚合却仍保留旧锁，下一批归还会被
+    // 自己的旧 token 卡成 409；直接部分归还和“部分归还检查”共用这里。
+    if (order.assignment) order.assignment.operationLock = undefined;
   }
 
   /**
