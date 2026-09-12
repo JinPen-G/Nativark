@@ -306,7 +306,7 @@ export function RentalOrderDetailPage() {
     (inspections.data ?? []).some((row) => row.exceptions.some((exception) => exception.reviewStatus === "pending"))
       ? "有待审核的检查异常" : undefined,
     // MKT-02D：未收口的增值服务（未开始/执行中）也是关单阻断——服务端 settleOrder 有同款闸门。
-    (detail?.serviceSnapshots ?? []).some((row) => ["not_started", "in_progress"].includes(row.executionStatus ?? "not_started"))
+    (detail?.serviceSnapshots ?? []).some((row) => Boolean(row.occurrenceId) && ["not_started", "in_progress"].includes(row.executionStatus ?? "not_started"))
       ? "有未收口的增值服务（需先完成、取消或记录失败）" : undefined
   ].filter((row): row is string => Boolean(row));
   // 金额一律按**订单自己的**结算币种展示（需求 §948）：币种是下单时的快照，

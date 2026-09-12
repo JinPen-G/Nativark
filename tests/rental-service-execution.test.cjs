@@ -197,5 +197,34 @@ void (async () => {
     ok("未到场按净额退款进待办并释放容量；重复回调被状态机拒绝");
   }
 
+  {
+    // 兼容存量订单：没有 occurrenceId 的旧服务快照不属于新履约状态机，不能被缺省的
+    // not_started 永久卡在结算入口；新链路发生项仍由上面的闸门严格控制。
+    const calls = { saved: 0, voided: 0, extensions: [], used: [], released: [] };
+    const legacyOrder = { ...orderWith({ ...snapshot(), occurrenceId: undefined, executionStatus: undefined }), status: "settling" };
+    const service = serviceFor(legacyOrder, calls);
+    service.factStore.listExtensions = async () => calls.extensions;
+    service.factStore.voidPendingExtensions = async () => { calls.voided += 1; };
+    const settled = await service.settleOrder("tenant_1", legacyOrder.id, {});
+    assert.equal(settled.status, "completed", "旧服务快照不能因缺少履约字段而阻断结算");
+    ok("存量订单的旧服务快照不误触发新履约关单闸门");
+  }
+
+  {
+    const calls = { saved: 0, used: [], released: [] };
+    const occurrence = stampOccurrences([snapshot()], { origin: "order", ownerId: "order_service_1", requestKey: "order-key-time" })[0];
+    const actualStartAt = new Date(Date.now() - 500).toISOString();
+    const earlierActualAt = new Date(Date.now() - 1_000).toISOString();
+    const order = orderWith({ ...occurrence, executionStatus: "in_progress", actualStartAt });
+    const service = serviceFor(order, calls);
+    await assert.rejects(
+      () => service.updateServiceOccurrence("tenant_1", order.id, occurrence.occurrenceId, { action: "fail", actualAt: earlierActualAt, reason: "服务失败" }, "操作员", {}),
+      /结束时间不能早于开始时间/u,
+      "执行中服务的失败时间不能早于开始时间"
+    );
+    assert.equal(calls.saved, 0, "无效的失败时间不得保存订单聚合");
+    ok("执行中服务的失败动作校验实际结束时间不早于开始时间");
+  }
+
   console.log(`\nMKT-02D 服务实际履约专项：${passed} 项全部通过`);
 })().catch((error) => { console.error(error); process.exitCode = 1; });

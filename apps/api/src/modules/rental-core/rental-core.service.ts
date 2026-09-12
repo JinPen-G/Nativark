@@ -1405,6 +1405,10 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       if (input.action === "cancel" && currentStatus !== "not_started") throw new ConflictException("已经开始的服务不能直接取消，请记录失败结果");
       if (input.action === "no_show" && currentStatus !== "not_started") throw new ConflictException("已开始的服务不能记为未到场");
       if (currentStatus !== "not_started" && currentStatus !== "in_progress") throw new ConflictException("该服务已经结束，不能重复处理");
+      if (currentStatus === "in_progress" && previous.actualStartAt) {
+        const actualStartMs = Date.parse(previous.actualStartAt);
+        if (Number.isFinite(actualStartMs) && actualStartMs > atMs) throw new BadRequestException("结束时间不能早于开始时间");
+      }
       if (!input.reason?.trim()) throw new BadRequestException("取消、失败或未到场必须填写原因");
       const refundAmount = roundMoney(Math.min(netAmount, Math.max(0, input.refundAmount ?? netAmount)));
       const terminalStatus = input.action === "cancel" ? "cancelled" : input.action === "no_show" ? "no_show" : "failed";
@@ -2853,8 +2857,11 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     // MKT-02D：未收口的增值服务（未开始/执行中）不能静默关单——
     // 容量与净额退款必须先通过 开始/完成/取消/失败/未到场 落定，
     // 否则会出现「订单已完结、服务还挂着」的孤儿履约。
+    // 存量订单的服务快照没有 occurrenceId，也没有实际履约字段；它们不能被新状态机操作，
+    // 不能把缺省值当成“未开始”从而永久阻断历史订单结算。只有已被新链路标记为发生项的
+    // 服务，才由 MKT-02D 的状态机负责收口。
     const openOccurrences = (order.serviceSnapshots ?? []).filter((row) =>
-      ["not_started", "in_progress"].includes(row.executionStatus ?? "not_started")
+      Boolean(row.occurrenceId) && ["not_started", "in_progress"].includes(row.executionStatus ?? "not_started")
     );
     if (openOccurrences.length) {
       throw new ConflictException(
