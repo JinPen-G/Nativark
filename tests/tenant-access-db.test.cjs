@@ -193,7 +193,7 @@ void (async () => {
     void workspaces;
   }
 
-    console.log("\n租户权限专用库专项：2 项全部通过");
+    console.log("\n租户权限专用库专项：6 项全部通过");
   } finally {
     if (created.userId) {
       await prisma.operationLog.deleteMany({ where: { userId: created.userId } });
