@@ -15,11 +15,28 @@ const statusMap: Record<string, { label: string; color: string }> = {
   inspection: { label: "检查中", color: "orange" }, maintenance: { label: "维护中", color: "warning" }, disabled: { label: "停用", color: "default" }
 };
 
-function AttributeInput({ field }: { field: RentalAttributeDefinition }) {
-  if (field.type === "number") return <InputNumber min={0} suffix={field.unit} style={{ width: "100%" }} />;
-  if (field.type === "select") return <Select options={field.options?.map((value) => ({ value, label: value }))} />;
-  if (field.type === "boolean") return <Switch />;
-  return <Input type={field.type === "date" ? "date" : undefined} />;
+/** 与商品目录页同一问题与同一修法：受控属性必须透传，否则必填属性永远校验不过。 */
+function AttributeInput({
+  field,
+  value,
+  onChange,
+  id
+}: {
+  field: RentalAttributeDefinition;
+  value?: unknown;
+  onChange?: (...args: never[]) => void;
+  id?: string;
+}) {
+  if (field.type === "number") {
+    return <InputNumber id={id} min={0} suffix={field.unit} style={{ width: "100%" }} value={value as number} onChange={onChange as (value: number | null) => void} />;
+  }
+  if (field.type === "select") {
+    return <Select id={id} options={field.options?.map((option) => ({ value: option, label: option }))} value={value as string} onChange={onChange as (value: string) => void} />;
+  }
+  if (field.type === "boolean") {
+    return <Switch id={id} checked={Boolean(value)} onChange={onChange as (checked: boolean) => void} />;
+  }
+  return <Input id={id} type={field.type === "date" ? "date" : undefined} value={value as string} onChange={onChange as (event: unknown) => void} />;
 }
 
 export function AssetWorkspacePage() {

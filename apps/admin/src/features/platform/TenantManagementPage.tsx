@@ -60,7 +60,14 @@ export function TenantManagementPage() {
     ]);
   };
   const createTenant = useMutation({
-    mutationFn: (values: TenantBootstrapRequest) => bootstrapTenant({ ...values, operator }),
+    // 空字符串的可选字段按未填写处理：服务端 @IsNotEmpty 会拒绝 ""，而
+    // 「不预建首个门店」的空白租户正是本页必须支持的合法开业路径。
+    mutationFn: (values: TenantBootstrapRequest) => bootstrapTenant({
+      ...values,
+      storeName: values.storeName?.trim() || undefined,
+      storeCode: values.storeCode?.trim() || undefined,
+      operator
+    }),
     onSuccess: async (result) => {
       await refresh();
       closeEditor();

@@ -13,11 +13,35 @@ import { ItemGroupPhoto } from "./ItemGroupPhoto";
 
 const inventoryLabels: Record<string, string> = { serialized: "序列化资产", quantity: "数量库存", bundle: "套装" };
 
-function AttributeInput({ field }: { field: RentalAttributeDefinition }) {
-  if (field.type === "number") return <InputNumber min={0} suffix={field.unit} style={{ width: "100%" }} />;
-  if (field.type === "select") return <Select options={field.options?.map((value) => ({ value, label: value }))} />;
-  if (field.type === "boolean") return <Switch />;
-  return <Input type={field.type === "date" ? "date" : undefined} />;
+/**
+ * 品类动态属性的受控控件。
+ *
+ * 必须把 Form.Item 注入的受控属性透传给内部控件：`(field) => <Input />` 会让控件退化成
+ * 非受控，输入只改 DOM、不进表单值——而四个品类的 item_group 必填属性（厂商/品牌/型号等）
+ * 都在这里，表现为「框里明明有值，保存却报请输入厂商」且不发出任何请求，新增型号被彻底卡死。
+ */
+function AttributeInput({
+  field,
+  value,
+  onChange,
+  id
+}: {
+  field: RentalAttributeDefinition;
+  value?: unknown;
+  onChange?: (...args: never[]) => void;
+  id?: string;
+}) {
+  if (field.type === "number") {
+    return <InputNumber id={id} min={0} suffix={field.unit} style={{ width: "100%" }} value={value as number} onChange={onChange as (value: number | null) => void} />;
+  }
+  if (field.type === "select") {
+    return <Select id={id} options={field.options?.map((option) => ({ value: option, label: option }))} value={value as string} onChange={onChange as (value: string) => void} />;
+  }
+  if (field.type === "boolean") {
+    // Form.Item 对该类字段使用 valuePropName="checked"，注入的是 checked 而非 value。
+    return <Switch id={id} checked={Boolean(value)} onChange={onChange as (checked: boolean) => void} />;
+  }
+  return <Input id={id} type={field.type === "date" ? "date" : undefined} value={value as string} onChange={onChange as (event: unknown) => void} />;
 }
 
 export function CatalogPage() {

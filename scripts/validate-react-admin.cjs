@@ -34,6 +34,7 @@ const platformOperationsPage = read("apps/admin/src/features/platform/PlatformOp
 const rentalCorePage = read("apps/admin/src/features/rental-core/RentalCorePage.tsx");
 const rentalOrderDetailPage = read("apps/admin/src/features/rental-core/RentalOrderDetailPage.tsx");
 const catalogPage = read("apps/admin/src/features/catalog/CatalogPage.tsx");
+const assetWorkspacePage = read("apps/admin/src/features/catalog/AssetWorkspacePage.tsx");
 const rentalCoreApi = read("apps/admin/src/api/rentalCore.ts");
 const capabilityPage = read("apps/admin/src/features/rental-core/CapabilityGovernancePage.tsx");
 const appRoot = read("apps/admin/src/app/App.tsx");
@@ -87,6 +88,18 @@ forbidText(operations, "/store-rental/", "retired legacy endpoints must not retu
 [
   "substitutionGroup", "默认组成", "替代候选"
 ].forEach((label) => requireText(catalogPage, label, "bundle component UI coverage"));
+// 品类动态属性控件必须把 Form.Item 注入的受控属性透传给内部控件。不透传时控件退化为非受控：
+// 输入只改 DOM、不进表单值，而四个品类的 item_group / asset 必填属性（厂商、品牌、型号、
+// 序列号等）全部走这个组件，表现为「框里明明有值，保存仍报请输入厂商」且不发出任何请求——
+// 新增型号与登记资产在管理端被彻底卡死（浏览器实测复现）。
+[catalogPage, assetWorkspacePage].forEach((source, index) => {
+  const label = index === 0 ? "catalog attribute control wiring" : "asset attribute control wiring";
+  requireText(source, "value?: unknown", label);
+  requireText(source, "onChange?: (...args: never[]) => void", label);
+  requireText(source, "value={value as string}", `${label}: string/date input`);
+  requireText(source, "value={value as number}", `${label}: number input`);
+  requireText(source, "checked={Boolean(value)}", `${label}: boolean switch`);
+});
 [
   'name={["deposit", "mode"]}',
   'name={["deposit", "maxAmount"]}',
