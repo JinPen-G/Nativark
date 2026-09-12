@@ -4356,6 +4356,9 @@ export interface RentalPricingGroup {
 export interface RentalPricingGroupInitialRate {
   unit: RentalPricingUnit;
   baseAmount: number;
+  /** 预授权品类的可选预授权额度：默认规则要求预授权而额度为 0 时报价会 fail-closed。
+   *  已启用计划禁止普通编辑、调价计划又只作用于基础价，这里是开业期唯一的配置入口。 */
+  preAuthAmount?: number;
 }
 
 export interface SaveRentalPricingGroupRequest {

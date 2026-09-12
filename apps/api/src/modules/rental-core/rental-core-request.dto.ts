@@ -255,6 +255,11 @@ class RentalPricingGroupInitialRateInputDto implements RentalPricingGroupInitial
   @IsNumber()
   @Min(0)
   baseAmount!: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  preAuthAmount?: number;
 }
 
 export class CreateRentalWorkOrderDto implements CreateRentalWorkOrderRequest {

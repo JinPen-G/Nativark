@@ -123,10 +123,13 @@ export function PricingGroupPage() {
                 <Form.Item name={[field.name, "baseAmount"]} label="价格" rules={[{ required: true, message: "请填写价格" }]}>
                   <InputNumber min={0} precision={2} prefix={rentalCurrencySymbol(currency)} style={{ width: 220 }} />
                 </Form.Item>
+                {settings.data?.payment.preauthorizationRequired && <Form.Item name={[field.name, "preAuthAmount"]} label="预授权额度" tooltip="当前品类默认规则要求预授权；不填按 0 处理，报价会被预授权闸门拦截" rules={[{ required: true, message: "预授权品类必须填写预授权额度" }]}>
+                  <InputNumber min={0} precision={2} prefix={rentalCurrencySymbol(currency)} style={{ width: 220 }} />
+                </Form.Item>}
                 <Button danger type="text" aria-label="删除基本价" icon={<DeleteOutlined />} disabled={fields.length === 1} onClick={() => remove(field.name)} style={{ marginTop: 30 }} />
               </Space>)}
               <Form.ErrorList errors={errors} />
-              <Button icon={<PlusOutlined />} disabled={fields.length >= (settings.data?.pricing.enabledUnits.length ?? 0)} onClick={() => add({ unit: undefined, baseAmount: 0 })}>增加计价单位</Button>
+              <Button icon={<PlusOutlined />} disabled={fields.length >= (settings.data?.pricing.enabledUnits.length ?? 0)} onClick={() => add({ unit: undefined, baseAmount: 0, preAuthAmount: settings.data?.payment.preauthorizationRequired ? 0 : undefined })}>增加计价单位</Button>
             </Space>}
           </Form.List>
         </Card>}
