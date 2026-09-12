@@ -559,6 +559,61 @@ assert.equal(business.listPricingPlans("tenant_001", {
   couponTemplates: core.listCouponTemplates("tenant_001")
 })[0].categoryCode, "camera");
 
+// TENANT-READY-01：空白租户开业判定——履约网络是必做项，会员方案是可暂缓项。
+// 用非演示租户（R1 决策：普通租户不自带经营主体/地点）验证 readiness 的口径。
+const readyTenant = "tenant_ready_r1";
+await core.initializeTenant(readyTenant, "camping");
+assert.equal(core.listLocations(readyTenant).length, 0, "普通新租户不得自带演示履约地点");
+assert.equal(core.listOperators(readyTenant).length, 0, "普通新租户不得自带演示经营主体");
+// readiness 按会话空间取工作区：与 API 一致，用 ALS 注入 bootstrap 建立的默认空间（ws_<tenantId>）。
+const { runWithRequestIdentity } = require("../apps/api/src/common/request-identity");
+const readyWorkspaceId = `ws_${readyTenant}`;
+const readReady = () => runWithRequestIdentity(
+  { tenantId: readyTenant, userId: "test-ready", workspaceId: readyWorkspaceId, isSaasAdmin: false },
+  () => business.tenantReadiness(readyTenant, readyContext())
+);
+const readyContext = () => ({
+  profile: core.getProfile(readyTenant),
+  category: core.listCategories().find((item) => item.code === core.getProfile(readyTenant).categoryCode),
+  settings: core.getBusinessSettings(readyTenant),
+  groups: core.listItemGroups(readyTenant),
+  couponTemplates: core.listCouponTemplates(readyTenant),
+  locations: core.listLocations(readyTenant),
+  operators: core.listOperators(readyTenant),
+  pricingGroups: core.listPricingGroups(readyTenant)
+});
+const blankReadiness = await readReady();
+const fulfillmentItem = blankReadiness.items.find((item) => item.key === "fulfillment_network");
+assert.ok(fulfillmentItem && !fulfillmentItem.done, "空白租户的履约地点项必须未完成");
+assert.ok(blankReadiness.quoteBlockers.some((row) => row.includes("履约地点")), "缺履约地点必须进入报价闸门说明");
+const membershipItem = blankReadiness.items.find((item) => item.key === "membership_base");
+assert.equal(membershipItem.optional, true, "会员方案必须标注为可暂缓");
+assert.ok(!blankReadiness.quoteBlockers.some((row) => row.includes("会员")), "会员缺失不得伪装成报价闸门");
+assert.ok(blankReadiness.missingKeys.includes("membership_base"), "missingKeys 仍须如实列出可暂缓缺项");
+assert.ok(blankReadiness.items.find((item) => item.key === "business_rule").done, "新空间的品类初始化规则应已发布且生效");
+assert.ok(blankReadiness.items.find((item) => item.key === "business_calendar").done === false, "空白租户日历项应未完成（但不是报价闸门）");
+ok2("TENANT-READY-01：空白租户 readiness 如实标注履约网络缺失并进报价闸门，会员可暂缓不进闸门");
+
+const readyOperator = await core.saveOperator(readyTenant, { code: "SELF", name: "自营露营站", type: "self_operated" });
+await core.saveLocation(readyTenant, {
+  code: "MAIN", name: "营地仓", type: "warehouse", operatorId: readyOperator.id,
+  capabilities: ["pickup", "return", "storage"]
+});
+const configuredReadiness = await readReady();
+assert.ok(configuredReadiness.items.find((item) => item.key === "fulfillment_network").done, "配置取还地点后履约项应完成");
+assert.ok(!configuredReadiness.quoteBlockers.some((row) => row.includes("履约地点")), "履约地点配置后必须移出报价闸门");
+await core.saveLocation(readyTenant, {
+  code: "DEPOT", name: "中转仓", type: "warehouse", operatorId: readyOperator.id,
+  capabilities: ["storage"]
+});
+const depotReadiness = await readReady();
+assert.equal(
+  depotReadiness.items.find((item) => item.key === "fulfillment_network").summary,
+  "可用履约地点 1 个",
+  "仅 storage 能力的地点不得计入取还履约网络"
+);
+ok2("TENANT-READY-01：取还地点配置后履约项转绿并移出报价闸门，storage-only 地点不计入");
+
 console.log("Rental business v1 test passed: generic pricing, official calendar publication, rule snapshots, discounts, coupon lifecycle, quote/order snapshots, rewards and notifications verified.");
 })().catch((error) => {
   console.error(error);

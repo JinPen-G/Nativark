@@ -646,6 +646,15 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const roles = this.prisma
       ? await this.prisma.role.count({ where: { tenantId, isActive: true } })
       : 0;
+    // 报价对履约地点的硬闸门（requireLocation）：取货/配送与归还时点都会校验
+    // 「启用 + 具备对应能力」，因此开业判定的最小履约网络 = 至少一个同时支持
+    // 取货与归还的启用地点。经营主体由地点归属间接保证（地点必须挂在启用主体下）。
+    const serviceableLocations = (context.locations ?? []).filter(
+      (location) =>
+        location.status === "enabled" &&
+        location.capabilities.includes("pickup") &&
+        location.capabilities.includes("return")
+    );
 
     const items: Array<{
       key: string;
@@ -655,6 +664,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       nextHref: string;
       summary?: string;
       unavailable?: boolean;
+      optional?: boolean;
     }> = [
       {
         key: "workspace_profile",
@@ -671,6 +681,14 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         missing: operationsAccounts === 0 ? "还没有启用的运营账号加入本空间" : roles === 0 ? "还没有启用角色" : "",
         nextHref: "/tenant/accounts",
         summary: operationsAccounts > 0 ? `本空间启用账号 ${operationsAccounts} 个` : undefined
+      },
+      {
+        key: "fulfillment_network",
+        title: "履约地点（支持取还）",
+        done: serviceableLocations.length > 0,
+        missing: "还没有支持取货和归还的启用履约地点；报价与订单确认必须指定可用履约地点",
+        nextHref: "/rental/locations",
+        summary: serviceableLocations.length ? `可用履约地点 ${serviceableLocations.length} 个` : undefined
       },
       {
         key: "business_rule",
@@ -722,7 +740,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         missing: membershipUnavailable ? "会员方案暂时无法读取，请稍后重试" : "还没有会员方案（如暂不经营会员可暂缓）",
         nextHref: "/membership/plans",
         summary: membershipUnavailable ? undefined : membershipPlanCount > 0 ? `会员方案 ${membershipPlanCount} 个` : undefined,
-        unavailable: membershipUnavailable
+        unavailable: membershipUnavailable,
+        // 文案本身就承诺“可暂缓”，就必须说到做到：会员缺失不阻塞 ready，
+        // 也不进 quoteBlockers——否则页面把可选项渲染成了服务端并不存在的闸门。
+        optional: true
       }
     ];
     // 价格版本需要查库：无 MySQL 事实时（内存模式）也如实标未完成，不伪造。
@@ -735,18 +756,22 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     }
 
     const missingKeys = items.filter((item) => !item.done).map((item) => item.key);
+    // ready 只看必做项：可暂缓项（如会员方案）缺失不改变「可以开业」的判定，
+    // 但 completed 仍要求全部项完成，页面可据此区分「能营业」与「全绿」。
+    const ready = items.filter((item) => !item.done && !item.optional).length === 0;
     const status = items.every((item) => item.done) ? "completed" : items.some((item) => item.done) ? "configuring" : "not_started";
     return {
       tenantId,
       workspaceId,
       status,
-      ready: missingKeys.length === 0,
+      ready,
       missingKeys,
       items,
       /** 报价/下单的硬闸门说明：即便本页显示部分完成，服务端仍有独立拦截。 */
       quoteBlockers: [
         ...(rule && !ruleConflict ? [] : [ruleConflict ? "规则版本同时生效冲突" : "未发布租赁规则"]),
-        ...(!publishedCalendarYears.size ? [] : []),
+        // 日历缺省不是硬闸门：报价按每周默认模板推导日期类型（见 business_calendar 项说明）。
+        ...(missingKeys.includes("fulfillment_network") ? ["无可用履约地点（取/还）"] : []),
         ...(missingKeys.includes("price_version") ? ["无空间整体价格版本"] : []),
         ...(missingKeys.includes("item_groups") ? ["无启用产品型号"] : []),
         ...(missingKeys.includes("pricing_groups_rates") ? ["无启用定价分组"] : [])

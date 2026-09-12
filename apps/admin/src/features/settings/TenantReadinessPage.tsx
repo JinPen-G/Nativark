@@ -58,17 +58,27 @@ export function TenantReadinessPage() {
 export function TenantReadinessBody({ data, onRefresh }: { data: TenantReadinessStatus; onRefresh: () => void }) {
   const navigate = useNavigate();
   const statusMeta = STATUS_META[data.status];
+  // 「未完成」与「会被服务端拦截」必须分开数：可暂缓项（optional）缺失不阻止开业，
+  // 真正拦报价的是 quoteBlockers。把可选项混进拦截文案会制造服务端不存在的闸门。
+  const blockingItems = data.items.filter((item) => !item.done && !item.optional);
+  const optionalMissing = data.items.filter((item) => !item.done && item.optional && !item.unavailable);
   return (
     <Space direction="vertical" size={16} style={{ width: "100%" }}>
       <Alert
         type={data.ready ? "success" : "warning"}
         showIcon
         icon={data.ready ? <CheckCircleFilled /> : <WarningFilled />}
-        message={data.ready ? "开业配置已完成，可以进行报价与订单" : `开业配置${statusMeta.label}：还有 ${data.items.filter((item) => !item.done).length} 项未完成`}
+        message={
+          data.ready
+            ? `开业配置已完成，可以进行报价与订单${optionalMissing.length ? `（${optionalMissing.map((item) => item.title).join("、")}可暂缓）` : ""}`
+            : `开业配置${statusMeta.label}：还有 ${blockingItems.length} 项必做配置未完成`
+        }
         description={
           data.ready
             ? undefined
-            : `报价与订单确认会被服务端拦截，直到缺项补齐。当前缺失：${data.items.filter((item) => !item.done).map((item) => item.title).join("、")}。`
+            : data.quoteBlockers.length
+              ? `在缺项补齐前，服务端会拦截报价与订单确认：${data.quoteBlockers.join("、")}。`
+              : `当前缺失：${blockingItems.map((item) => item.title).join("、")}。`
         }
       />
       {data.items.map((item) => (
@@ -80,6 +90,7 @@ export function TenantReadinessBody({ data, onRefresh }: { data: TenantReadiness
               <Tag color={item.unavailable ? "default" : item.done ? "success" : "warning"}>
                 {item.unavailable ? "待重试" : item.done ? "已完成" : "未完成"}
               </Tag>
+              {!item.done && item.optional && !item.unavailable ? <Tag>可暂缓</Tag> : null}
             </Space>
             <Button type="link" onClick={() => item.unavailable ? onRefresh() : navigate(item.nextHref)}>
               {item.unavailable ? "重试" : item.done ? "查看" : "去配置"}
