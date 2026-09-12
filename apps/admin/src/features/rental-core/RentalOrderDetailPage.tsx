@@ -301,15 +301,6 @@ export function RentalOrderDetailPage() {
   const feeReviews = detail?.feeReviews ?? [];
   const pendingFeeReviews = feeReviews.filter((row) => row.status === "pending");
   const orderHasPendingFee = hasPendingFeeReview(detail ?? {});
-  // 服务端关单有三道闸门（rental-core.service 的 feeReviews 与续租退款审核、控制器的检查异常）。
-  // 界面把三道都列出来，否则按钮可点却必然 409，运营只能靠猜。
-  const settleBlockers = [
-    orderHasPendingFee ? "有待裁定的费用事项" : undefined,
-    (extensions.data ?? []).some((row) => row.status === "effective" && row.pricingSnapshot?.refundReview?.status === "pending")
-      ? "有待审核的续租退款差额" : undefined,
-    (inspections.data ?? []).some((row) => row.exceptions.some((exception) => exception.reviewStatus === "pending"))
-      ? "有待审核的检查异常" : undefined
-  ].filter((row): row is string => Boolean(row));
   // 金额一律按**订单自己的**结算币种展示（需求 §948）：币种是下单时的快照，
   // 不能改读当前经营空间的设置——空间后来改了币种，历史单的金额含义不会跟着改。
   const money = (value: number | undefined) => formatRentalMoney(Number(value ?? 0), detail?.currency);
@@ -320,6 +311,25 @@ export function RentalOrderDetailPage() {
   const pendingPreauthorizationAmount = funding.data?.preauthorization.pendingExtensionAmount ?? 0;
   const depositRequirement = funding.data?.deposit.requiredAmount ?? Number(detail?.depositAmount ?? 0) + pendingDepositAmount;
   const preauthorizationRequirement = funding.data?.preauthorization.requiredAmount ?? Number(detail?.preAuthAmount ?? 0) + pendingPreauthorizationAmount;
+  // 服务端关单会同时检查费用审核、续租退款审核、检查异常和三本资金账。
+  // 页面必须展示同一组阻断原因，否则按钮可点却必然 409，运营只能靠猜。
+  const settleBlockers = [
+    !funding.data ? (funding.isLoading ? "正在读取资金余额" : "资金余额读取失败") : undefined,
+    extensions.isLoading || inspections.isLoading ? "正在读取结算审核状态" : undefined,
+    orderHasPendingFee ? "有待裁定的费用事项" : undefined,
+    (extensions.data ?? []).some((row) => row.status === "effective" && row.pricingSnapshot?.refundReview?.status === "pending")
+      ? "有待审核的续租退款差额" : undefined,
+    (inspections.data ?? []).some((row) => row.exceptions.some((exception) => exception.reviewStatus === "pending"))
+      ? "有待审核的检查异常" : undefined,
+    funding.data && funding.data.rental.balance > 0.005 ? "租金及费用尚未收齐" : undefined,
+    funding.data && funding.data.rental.balance < -0.005 ? "仍有租金退款待办理" : undefined,
+    funding.data && depositRequirement > 0 && funding.data.deposit.collected + 0.005 < depositRequirement
+      ? "押金尚未足额收取" : undefined,
+    funding.data && preauthorizationRequirement > 0 && funding.data.preauthorization.frozen + 0.005 < preauthorizationRequirement
+      ? "预授权尚未足额冻结" : undefined,
+    funding.data && funding.data.deposit.balance > 0.005 ? "仍有押金余额未处理" : undefined,
+    funding.data && funding.data.preauthorization.balance > 0.005 ? "仍有预授权余额未处理" : undefined
+  ].filter((row): row is string => Boolean(row));
   // 当前该还的时间：续租过就是新时间。约定归还（endAt）不因续租改写（需求 4.6.9）。
   const detailEndAt = detail?.effectiveEndAt ?? detail?.endAt ?? new Date().toISOString();
   const noShowRule = detail?.ruleSnapshot?.cancellation?.noShow;
