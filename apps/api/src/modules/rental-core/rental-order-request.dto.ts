@@ -11,6 +11,7 @@ import {
   type GrantRentalRewardRequest,
   type PartialReturnRentalOrderRequest,
   type ReviewRentalInspectionExceptionRequest,
+  type RecordRentalInspectionExceptionCustomerResponseRequest,
   type ReviewRentalExtensionRefundRequest,
   type ReviewRentalOrderFeeReviewRequest,
   type UpdateRentalServiceOccurrenceRequest,
@@ -795,6 +796,16 @@ export class RentalFundingFailureDto implements RentalFundingFailureRequest {
 
   @IsString()
   @IsNotEmpty()
+  reason!: string;
+}
+
+export class RecordRentalInspectionExceptionCustomerResponseDto implements RecordRentalInspectionExceptionCustomerResponseRequest {
+  @IsIn(["confirmed", "disputed"])
+  decision!: "confirmed" | "disputed";
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(1000)
   reason!: string;
 }
 

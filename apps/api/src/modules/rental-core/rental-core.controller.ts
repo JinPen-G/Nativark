@@ -42,6 +42,7 @@ import {
   CreateRentalOrderDto,
   PartialReturnRentalOrderDto,
   ReviewRentalInspectionExceptionDto,
+  RecordRentalInspectionExceptionCustomerResponseDto,
   RentalAvailabilityDto,
   RentalOrderExtensionDto,
   ReviewRentalExtensionRefundDto,
@@ -71,6 +72,7 @@ import { RentalServiceCapacityService } from "./rental-service-capacity.service"
 import { extensionRequestKey } from "./rental-service-occurrence";
 import { RentalFundingService } from "./rental-funding.service";
 import { buildRentalWorkbenchTodos, canIncludeWorkbenchOrderTodos, canIncludeWorkbenchWorkOrders } from "./rental-workbench-todos";
+import { validateInspectionCustomerResponse } from "./rental-inspection-customer-response";
 
 /** 读取标准 Idempotency-Key 请求头。大小写不敏感，超长键直接拒绝。 */
 /**
@@ -1350,6 +1352,13 @@ export class RentalCoreController {
           (row.exceptions as unknown as Array<{ reviewStatus?: string }>).some((exception) => exception.reviewStatus === "pending")
         );
         if (hasPendingException) throw new ConflictException("仍有检查异常待审核，不能关闭订单");
+        const hasUnconfirmedException = inspectionRows.some((row) =>
+          (row.exceptions as unknown as Array<{ reviewStatus?: string; approvedChargeAmount?: number; customerResponseStatus?: string }>).some((exception) =>
+            exception.reviewStatus === "approved" && Number(exception.approvedChargeAmount ?? 0) > 0
+              && (exception.customerResponseStatus === "pending" || exception.customerResponseStatus === "disputed")
+          )
+        );
+        if (hasUnconfirmedException) throw new ConflictException("还有检查异常费用待客户确认或申诉处理，不能关闭订单");
         await this.funding.assertReadyToClose(tenantId, this.service.resolveWorkspaceId(tenantId), id, tx);
         const settled = await this.service.settleOrder(tenantId, id, tx, req.user.displayName);
         await this.business.completeCustomerOrderEventInTransaction(tenantId, context, settled.customerId, tx);
@@ -1467,6 +1476,8 @@ export class RentalCoreController {
         Object.assign(exception, {
           reviewStatus: body.decision,
           approvedChargeAmount: approved.approvedChargeAmount,
+          customerResponseStatus: body.decision === "approved" && approved.approvedChargeAmount > 0 ? "pending" : "not_required",
+          customerResponseHistory: [],
           reviewReason: body.reason,
           reviewedBy: req.user.displayName,
           reviewedAt: new Date().toISOString()
@@ -1478,6 +1489,64 @@ export class RentalCoreController {
         const row = await this.prisma.rentalInspectionRecord.findFirst({ where: { id: inspectionId, tenantId, workspaceId, orderId: id } });
         const exception = (row?.exceptions as unknown as Array<Record<string, unknown>> | undefined)?.[exceptionIndex];
         if (!exception || exception.reviewStatus !== body.decision) return undefined;
+        return { order: await this.service.getOrder(tenantId, id), inspectionId, exceptionIndex, exception };
+      }
+    });
+    return this.committed(tenantId, result);
+  }
+
+  @Post("orders/:id/inspections/:inspectionId/exceptions/:exceptionIndex/customer-response")
+  async recordInspectionExceptionCustomerResponse(
+    @Req() req: AuthenticatedRequest,
+    @Param("id") id: string,
+    @Param("inspectionId") inspectionId: string,
+    @Param("exceptionIndex") exceptionIndexText: string,
+    @Body() body: RecordRentalInspectionExceptionCustomerResponseDto
+  ) {
+    const tenantId = req.user.tenantId;
+    const workspaceId = this.service.resolveWorkspaceId(tenantId);
+    const exceptionIndex = Number(exceptionIndexText);
+    if (!Number.isInteger(exceptionIndex) || exceptionIndex < 0) throw new BadRequestException("异常序号无效");
+    const result = await this.idempotent.execute({
+      tenantId,
+      action: "order.inspection-exception.customer-response",
+      key: idempotencyKeyOf(req),
+      fallbackKey: `inspection-exception.customer-response:${inspectionId}:${exceptionIndex}`,
+      request: { orderId: id, inspectionId, exceptionIndex, ...body },
+      orderId: id,
+      run: async (tx) => {
+        const order = await this.service.lockOrderForUpdate(tenantId, id, tx);
+        const row = await tx.rentalInspectionRecord.findFirst({ where: { id: inspectionId, tenantId, workspaceId, orderId: id } });
+        if (!row) throw new BadRequestException("检查记录不存在");
+        const exceptions = structuredClone(row.exceptions as unknown as Array<Record<string, unknown>>);
+        const exception = exceptions[exceptionIndex];
+        if (!exception) throw new BadRequestException("检查异常不存在");
+        const error = validateInspectionCustomerResponse({
+          reviewStatus: exception.reviewStatus as "pending" | "approved" | "rejected",
+          approvedChargeAmount: Number(exception.approvedChargeAmount ?? 0),
+          currentStatus: exception.customerResponseStatus as "not_required" | "pending" | "confirmed" | "disputed" | undefined,
+          decision: body.decision
+        });
+        if (error) throw new ConflictException(error);
+        const respondedAt = new Date().toISOString();
+        const history = Array.isArray(exception.customerResponseHistory)
+          ? exception.customerResponseHistory as Array<Record<string, unknown>>
+          : [];
+        history.push({ decision: body.decision, reason: body.reason, operator: req.user.displayName, respondedAt });
+        Object.assign(exception, {
+          customerResponseStatus: body.decision,
+          customerResponseReason: body.reason,
+          customerRespondedBy: req.user.displayName,
+          customerRespondedAt: respondedAt,
+          customerResponseHistory: history
+        });
+        await tx.rentalInspectionRecord.update({ where: { id: inspectionId }, data: { exceptions: exceptions as Prisma.InputJsonValue } });
+        return { order, inspectionId, exceptionIndex, exception };
+      },
+      replay: async () => {
+        const row = await this.prisma.rentalInspectionRecord.findFirst({ where: { id: inspectionId, tenantId, workspaceId, orderId: id } });
+        const exception = (row?.exceptions as unknown as Array<Record<string, unknown>> | undefined)?.[exceptionIndex];
+        if (!exception || exception.customerResponseStatus !== body.decision) return undefined;
         return { order: await this.service.getOrder(tenantId, id), inspectionId, exceptionIndex, exception };
       }
     });

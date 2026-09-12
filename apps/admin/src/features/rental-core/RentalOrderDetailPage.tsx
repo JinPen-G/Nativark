@@ -1,5 +1,5 @@
 import { ArrowLeftOutlined, CheckCircleOutlined, DollarOutlined, MinusCircleOutlined, PlusOutlined, RetweetOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
-import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol, type CorrectRentalInspectionUsageRequest, type CreateRentalInspectionRequest, type RentalAllocation, type RentalFundingAction, type RentalFundingInstrument, type RentalInspectionTemplate, type RentalOrderExtension, type RentalOrderExtensionPreview, type RentalOrderFeeReview, type RentalOrderServiceOccurrence, type RentalReservation, type RentalServiceExecutionAction, type UpdateRentalServiceOccurrenceRequest, type RentalWorkOrder, type RentalStockDisposition } from "@store-rental/shared";
+import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol, type CorrectRentalInspectionUsageRequest, type CreateRentalInspectionRequest, type RecordRentalInspectionExceptionCustomerResponseRequest, type RentalAllocation, type RentalFundingAction, type RentalFundingInstrument, type RentalInspectionTemplate, type RentalOrderExtension, type RentalOrderExtensionPreview, type RentalOrderFeeReview, type RentalOrderServiceOccurrence, type RentalReservation, type RentalServiceExecutionAction, type UpdateRentalServiceOccurrenceRequest, type RentalWorkOrder, type RentalStockDisposition } from "@store-rental/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Button, Card, DatePicker, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
@@ -109,6 +109,7 @@ export function RentalOrderDetailPage() {
   const [partialReturnOpen, setPartialReturnOpen] = useState(false);
   const [fundingOperation, setFundingOperation] = useState<FundingOperation>();
   const [exceptionReview, setExceptionReview] = useState<{ inspectionId: string; exceptionIndex: number; description: string; suggested?: number }>();
+  const [exceptionCustomerResponse, setExceptionCustomerResponse] = useState<{ inspectionId: string; exceptionIndex: number; description: string; status?: string }>();
   const [usageCorrection, setUsageCorrection] = useState<{ inspectionId: string; fieldCode: string; stage: "pickup" | "return"; current: number; baseline?: number }>();
   const [feeReview, setFeeReview] = useState<RentalOrderFeeReview>();
   const [feeReviewForm] = Form.useForm<{ decision: "approved" | "rejected"; amount?: number; reason: string }>();
@@ -119,6 +120,7 @@ export function RentalOrderDetailPage() {
   const [partialReturnForm] = Form.useForm<{ items: Array<{ allocationId: string; quantity: number }> }>();
   const [fundingForm] = Form.useForm<{ amount?: number; reason: string; failureCode?: string }>();
   const [exceptionReviewForm] = Form.useForm<{ decision: "approved" | "rejected"; approvedChargeAmount?: number; reason: string }>();
+  const [exceptionCustomerResponseForm] = Form.useForm<RecordRentalInspectionExceptionCustomerResponseRequest>();
   const [usageCorrectionForm] = Form.useForm<{ correctedCurrent: number; reason: string; evidenceAttachments?: string }>();
   const [extensionOpen, setExtensionOpen] = useState(false);
   const [extensionRefundReview, setExtensionRefundReview] = useState<RentalOrderExtension>();
@@ -288,6 +290,16 @@ export function RentalOrderDetailPage() {
       message.success("检查异常已审核");
     },
     onError: () => message.error("审核失败，请检查订单状态或该异常是否已处理")
+  });
+  const recordExceptionCustomerResponse = useMutation({
+    mutationFn: (values: RecordRentalInspectionExceptionCustomerResponseRequest) => rentalCoreApi.recordInspectionExceptionCustomerResponse(id, exceptionCustomerResponse!.inspectionId, exceptionCustomerResponse!.exceptionIndex, values),
+    onSuccess: async () => {
+      setExceptionCustomerResponse(undefined);
+      exceptionCustomerResponseForm.resetFields();
+      await Promise.all([refresh(), queryClient.invalidateQueries({ queryKey: ["rental-core", "order", id, "inspections"] })]);
+      message.success("客户确认/申诉记录已保存");
+    },
+    onError: (error: Error) => message.error(error.message || "客户确认/申诉记录失败，请刷新后重试")
   });
   const correctUsage = useMutation({
     mutationFn: (values: { correctedCurrent: number; reason: string; evidenceAttachments?: string }) => {
@@ -588,7 +600,12 @@ export function RentalOrderDetailPage() {
           { title: "建议费用", dataIndex: "suggestedChargeAmount", render: (value) => value === undefined ? "-" : money(Number(value)) },
           { title: "审核", dataIndex: "reviewStatus", render: (value) => <Tag color={value === "approved" ? "green" : value === "rejected" ? "default" : "orange"}>{value === "approved" ? "已通过" : value === "rejected" ? "已驳回" : "待审核"}</Tag> },
           { title: "最终费用", dataIndex: "approvedChargeAmount", render: (value) => value === undefined ? "-" : money(Number(value)) },
-          { title: "操作", render: (_, row) => canReviewFees && row.reviewStatus === "pending" ? <Button type="link" onClick={() => { setExceptionReview({ inspectionId: row.inspectionId, exceptionIndex: row.exceptionIndex, description: row.description, suggested: row.suggestedChargeAmount }); exceptionReviewForm.setFieldsValue({ decision: "approved", approvedChargeAmount: row.suggestedChargeAmount }); }}>审核</Button> : "-" }
+          { title: "客户响应", render: (_, row) => row.customerResponseStatus === "pending" ? <Tag color="orange">待确认/申诉</Tag> : row.customerResponseStatus === "confirmed" ? <Tag color="green">已确认</Tag> : row.customerResponseStatus === "disputed" ? <Tag color="red">已申诉</Tag> : row.customerResponseStatus === "not_required" ? <Tag>无需确认</Tag> : "-" },
+          { title: "操作", render: (_, row) => <Space>
+            {canReviewFees && row.reviewStatus === "pending" && <Button type="link" onClick={() => { setExceptionReview({ inspectionId: row.inspectionId, exceptionIndex: row.exceptionIndex, description: row.description, suggested: row.suggestedChargeAmount }); exceptionReviewForm.setFieldsValue({ decision: "approved", approvedChargeAmount: row.suggestedChargeAmount }); }}>审核</Button>}
+            {canReviewFees && row.reviewStatus === "approved" && Number(row.approvedChargeAmount ?? 0) > 0 && ["pending", "disputed"].includes(row.customerResponseStatus ?? "") && <Button type="link" onClick={() => { setExceptionCustomerResponse({ inspectionId: row.inspectionId, exceptionIndex: row.exceptionIndex, description: row.description, status: row.customerResponseStatus }); exceptionCustomerResponseForm.setFieldsValue({ decision: "confirmed" }); }}>记录客户响应</Button>}
+            {!((canReviewFees && row.reviewStatus === "pending") || (canReviewFees && row.reviewStatus === "approved" && Number(row.approvedChargeAmount ?? 0) > 0 && ["pending", "disputed"].includes(row.customerResponseStatus ?? ""))) && "-"}
+          </Space> }
         ]} />
       </Space></Card>
       <Card title="待审费用与裁定历史" extra={<Tag color={pendingFeeReviews.length ? "orange" : "default"}>{pendingFeeReviews.length ? `${pendingFeeReviews.length} 项待裁定` : "无待办"}</Tag>}>
@@ -775,6 +792,23 @@ export function RentalOrderDetailPage() {
         <Form.Item name="decision" label="审核结论" rules={[{ required: true }]}><Select options={[{ value: "approved", label: "通过并计费" }, { value: "rejected", label: "驳回，不计费" }]} /></Form.Item>
         <Form.Item noStyle shouldUpdate={(before, after) => before.decision !== after.decision}>{({ getFieldValue }) => getFieldValue("decision") === "approved" ? <Form.Item name="approvedChargeAmount" label="最终费用" rules={[{ required: true }]}><InputNumber min={0} precision={2} prefix={symbol} style={{ width: "100%" }} /></Form.Item> : null}</Form.Item>
         <Form.Item name="reason" label="审核理由" rules={[{ required: true }]}><Input.TextArea rows={3} /></Form.Item>
+      </Form>
+    </Modal>
+    <Modal title="记录客户确认 / 申诉" open={Boolean(exceptionCustomerResponse)} onCancel={() => { setExceptionCustomerResponse(undefined); exceptionCustomerResponseForm.resetFields(); }} onOk={() => exceptionCustomerResponseForm.submit()} confirmLoading={recordExceptionCustomerResponse.isPending} destroyOnHidden>
+      <Alert
+        type={exceptionCustomerResponse?.status === "disputed" ? "warning" : "info"}
+        showIcon
+        title={exceptionCustomerResponse?.description}
+        description={exceptionCustomerResponse?.status === "disputed" ? "当前已有客户申诉；只有再次明确记录客户确认后，订单才可以继续结算。" : "审核通过的异常费用必须有客户确认或申诉记录；申诉会继续阻断结算，不会被当作已处理。"}
+        style={{ marginBottom: 16 }}
+      />
+      <Form form={exceptionCustomerResponseForm} layout="vertical" onFinish={(values) => recordExceptionCustomerResponse.mutate(values)}>
+        <Form.Item name="decision" label="客户响应" rules={[{ required: true }]}>
+          <Select options={[{ value: "confirmed", label: "客户已确认费用" }, { value: "disputed", label: "客户提出申诉" }]} />
+        </Form.Item>
+        <Form.Item name="reason" label="响应记录" rules={[{ required: true, whitespace: true, message: "请记录客户确认或申诉的事实" }]}>
+          <Input.TextArea rows={4} maxLength={1000} placeholder="记录确认方式、客户意见或申诉内容" />
+        </Form.Item>
       </Form>
     </Modal>
     <Modal

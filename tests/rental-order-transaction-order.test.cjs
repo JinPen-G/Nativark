@@ -104,6 +104,22 @@ void (async () => {
   ok("待审检查异常在锁内被拦住，且拦住时订单状态未被推进");
 }
 
+/* ---------- 已裁定正数异常必须先完成客户响应 ---------- */
+
+{
+  const { instance, trace } = settleController({ exceptions: [[{ reviewStatus: "approved", approvedChargeAmount: 80, customerResponseStatus: "pending" }]] });
+  await assert.rejects(() => instance.settle(req(), orderId), /待客户确认或申诉处理/u, "已批准异常费用未完成客户响应时必须拒绝关单");
+  assert.equal(trace.includes("settle"), false, "客户响应未完成时不能已经改过订单状态");
+  ok("已裁定的正数异常在客户确认/申诉处理前仍阻断结算");
+}
+
+{
+  const { instance, trace } = settleController({ exceptions: [[{ reviewStatus: "approved", approvedChargeAmount: 80, customerResponseStatus: "disputed" }]] });
+  await assert.rejects(() => instance.settle(req(), orderId), /待客户确认或申诉处理/u, "客户已申诉时必须继续拒绝关单");
+  assert.equal(trace.includes("settle"), false);
+  ok("客户申诉不会被当作已处理，仍保留结算阻断");
+}
+
 /* ---------- 续租申请在事务内加载；试算不加锁 ---------- */
 
 {

@@ -5422,6 +5422,17 @@ export interface RentalInspectionRecord {
     reviewReason?: string;
     reviewedBy?: string;
     reviewedAt?: string;
+    /** 正数异常费用审核后，必须记录客户确认或申诉，才能进入结算。存量记录缺省表示旧链路。 */
+    customerResponseStatus?: "not_required" | "pending" | "confirmed" | "disputed";
+    customerResponseReason?: string;
+    customerRespondedBy?: string;
+    customerRespondedAt?: string;
+    customerResponseHistory?: Array<{
+      decision: "confirmed" | "disputed";
+      reason: string;
+      operator: string;
+      respondedAt: string;
+    }>;
   }>;
   attachments: string[];
   operator: string;
@@ -5438,5 +5449,10 @@ export interface CorrectRentalInspectionUsageRequest {
 export interface ReviewRentalInspectionExceptionRequest {
   decision: "approved" | "rejected";
   approvedChargeAmount?: number;
+  reason: string;
+}
+
+export interface RecordRentalInspectionExceptionCustomerResponseRequest {
+  decision: "confirmed" | "disputed";
   reason: string;
 }

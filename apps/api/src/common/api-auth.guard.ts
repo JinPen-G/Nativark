@@ -413,6 +413,7 @@ export function requiredPermissions(method: string, path: string) {
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/inspections\/[^/]+\/usage-correction$/)) return ["store-rental:order:operate"];
   // 检查异常的建议损失额同样是费用裁定，与上面两条同权限。
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/inspections\/[^/]+\/exceptions\/[^/]+\/review$/)) return ["store-rental:order:fee-review"];
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/inspections\/[^/]+\/exceptions\/[^/]+\/customer-response$/)) return ["store-rental:order:fee-review"];
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/cancel$/)) return ["store-rental:order:cancel", "store-rental:order:operate"];
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/operation-lock$/)) return ["store-rental:order:operate", "store-rental:order:pickup", "store-rental:order:return"];
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/handover\/pickup$/)) return ["store-rental:order:operate", "store-rental:order:pickup"];

@@ -47,7 +47,8 @@ const allows = (userPerms, required) => required.some((code) => userPerms.includ
 const FEE_ROUTES = {
   "订单费用审核": ["POST", "/rental/v1/orders/order_1/fee-reviews/review_1/review"],
   "续租负差额退款审核": ["POST", "/rental/v1/orders/order_1/extensions/ext_1/refund-review"],
-  "检查异常费用审核": ["POST", "/rental/v1/orders/order_1/inspections/ins_1/exceptions/0/review"]
+  "检查异常费用审核": ["POST", "/rental/v1/orders/order_1/inspections/ins_1/exceptions/0/review"],
+  "检查异常客户响应": ["POST", "/rental/v1/orders/order_1/inspections/ins_1/exceptions/0/customer-response"]
 };
 const FUNDING_WRITE = ["POST", "/rental/v1/orders/order_1/funding-events"];
 
