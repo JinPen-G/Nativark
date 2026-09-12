@@ -151,5 +151,80 @@ void (async () => {
     ok("归还不会按计划时间自动完成执行中的服务");
   }
 
+  {
+    // MKT-02D：未收口服务（执行中）不能静默关单——变异（删掉 settleOrder 的闸门）必须报红。
+    const calls = { saved: 0, voided: 0, extensions: [], used: [], released: [] };
+    const occurrence = stampOccurrences([snapshot()], { origin: "order", ownerId: "order_service_1", requestKey: "order-key-4" })[0];
+    const settlingOrder = { ...orderWith({ ...occurrence, executionStatus: "in_progress", actualStartAt: at() }), status: "settling" };
+    const service = serviceFor(settlingOrder, calls);
+    service.factStore.listExtensions = async () => calls.extensions;
+    service.factStore.voidPendingExtensions = async () => { calls.voided += 1; };
+    await assert.rejects(
+      () => service.settleOrder("tenant_1", settlingOrder.id, {}),
+      /未收口/u,
+      "执行中的服务必须阻断关单"
+    );
+    assert.equal(calls.saved, 0, "被阻断的关单不得保存订单聚合");
+    // 对照：完成同一服务后关单走通——证明阻断来自服务状态而非测试桩。
+    await service.updateServiceOccurrence("tenant_1", settlingOrder.id, occurrence.occurrenceId, {
+      action: "complete", actualAt: at(), result: "已清洁并交付", customerConfirmed: true
+    }, "操作员", {});
+    const settled = await service.settleOrder("tenant_1", settlingOrder.id, {});
+    assert.equal(settled.status, "completed", "完成服务后关单走通");
+    ok("未收口服务阻断关单且不保存聚合；完成后关单走通");
+  }
+
+  {
+    // MKT-02D：未到场与取消的净额退款进待办；重复回调不重复退款建议。
+    const calls = { saved: 0, used: [], released: [] };
+    const occurrence = stampOccurrences([snapshot()], { origin: "order", ownerId: "order_service_1", requestKey: "order-key-5" })[0];
+    const order = orderWith({ ...stamped });
+    const service = serviceFor(order, calls);
+    const noShow = await service.updateServiceOccurrence("tenant_1", order.id, occurrence.occurrenceId, {
+      action: "no_show", actualAt: at(), reason: "客户未到场"
+    }, "操作员", {});
+    assert.equal(noShow.occurrence.executionStatus, "no_show");
+    assert.equal(noShow.occurrence.refundAmount, 90, "未到场退款建议按净额（120-20-10=90）");
+    assert.equal(noShow.occurrence.refundStatus, "pending_review");
+    assert.equal(calls.released.length, 1, "未到场释放对应容量");
+    // 同一发生项重复 no_show：状态已是终态，必须拒绝——不会重复产生退款建议。
+    await assert.rejects(
+      () => service.updateServiceOccurrence("tenant_1", order.id, occurrence.occurrenceId, { action: "no_show", actualAt: at(), reason: "重复" }, "操作员", {}),
+      /不能/u,
+      "重复回调必须被状态机拒绝"
+    );
+    assert.equal((order.feeReviews ?? []).length, 1, "不重复堆退款待办");
+    ok("未到场按净额退款进待办并释放容量；重复回调被状态机拒绝");
+  }
+
+  {
+    // 兼容存量订单：没有 occurrenceId 的旧服务快照不属于新履约状态机，不能被缺省的
+    // not_started 永久卡在结算入口；新链路发生项仍由上面的闸门严格控制。
+    const calls = { saved: 0, voided: 0, extensions: [], used: [], released: [] };
+    const legacyOrder = { ...orderWith({ ...snapshot(), occurrenceId: undefined, executionStatus: undefined }), status: "settling" };
+    const service = serviceFor(legacyOrder, calls);
+    service.factStore.listExtensions = async () => calls.extensions;
+    service.factStore.voidPendingExtensions = async () => { calls.voided += 1; };
+    const settled = await service.settleOrder("tenant_1", legacyOrder.id, {});
+    assert.equal(settled.status, "completed", "旧服务快照不能因缺少履约字段而阻断结算");
+    ok("存量订单的旧服务快照不误触发新履约关单闸门");
+  }
+
+  {
+    const calls = { saved: 0, used: [], released: [] };
+    const occurrence = stampOccurrences([snapshot()], { origin: "order", ownerId: "order_service_1", requestKey: "order-key-time" })[0];
+    const actualStartAt = new Date(Date.now() - 500).toISOString();
+    const earlierActualAt = new Date(Date.now() - 1_000).toISOString();
+    const order = orderWith({ ...occurrence, executionStatus: "in_progress", actualStartAt });
+    const service = serviceFor(order, calls);
+    await assert.rejects(
+      () => service.updateServiceOccurrence("tenant_1", order.id, occurrence.occurrenceId, { action: "fail", actualAt: earlierActualAt, reason: "服务失败" }, "操作员", {}),
+      /结束时间不能早于开始时间/u,
+      "执行中服务的失败时间不能早于开始时间"
+    );
+    assert.equal(calls.saved, 0, "无效的失败时间不得保存订单聚合");
+    ok("执行中服务的失败动作校验实际结束时间不早于开始时间");
+  }
+
   console.log(`\nMKT-02D 服务实际履约专项：${passed} 项全部通过`);
 })().catch((error) => { console.error(error); process.exitCode = 1; });

@@ -321,6 +321,10 @@ export function RentalOrderDetailPage() {
       ? "有待审核的续租退款差额" : undefined,
     (inspections.data ?? []).some((row) => row.exceptions.some((exception) => exception.reviewStatus === "pending"))
       ? "有待审核的检查异常" : undefined,
+    // MKT-02D：只有带 occurrenceId 的新履约发生项进入状态机；旧订单服务快照
+    // 没有实际履约字段，不能因缺省值而永久阻断历史订单结算。
+    (detail?.serviceSnapshots ?? []).some((row) => Boolean(row.occurrenceId) && ["not_started", "in_progress"].includes(row.executionStatus ?? "not_started"))
+      ? "有未收口的增值服务（需先完成、取消或记录失败）" : undefined,
     funding.data && funding.data.rental.balance > 0.005 ? "租金及费用尚未收齐" : undefined,
     funding.data && funding.data.rental.balance < -0.005 ? "仍有租金退款待办理" : undefined,
     funding.data && depositRequirement > 0 && funding.data.deposit.collected + 0.005 < depositRequirement
