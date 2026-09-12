@@ -23,6 +23,7 @@ const ROOT = path.resolve(__dirname, "..");
 const navSource = fs.readFileSync(path.join(ROOT, "apps/admin/src/app/navigation.tsx"), "utf8");
 const pageSource = fs.readFileSync(path.join(ROOT, "apps/admin/src/features/tenant-access/TenantAccessPages.tsx"), "utf8");
 const memberRepoSource = fs.readFileSync(path.join(ROOT, "apps/api/src/modules/platform/platform.repository.ts"), "utf8");
+const authServiceSource = fs.readFileSync(path.join(ROOT, "apps/api/src/modules/auth/auth.service.ts"), "utf8");
 
 let passed = 0;
 const ok = (message) => {
@@ -108,6 +109,19 @@ const scopedUserBody = memberRepoSource.slice(
 assert.match(scopedUserBody, /isActive: true/u, "成员关系必须要求 isActive");
 assert.match(scopedUserBody, /workspace: \{ status: PrismaWorkspaceStatus.ACTIVE \}|status: PrismaWorkspaceStatus.ACTIVE/u, "空间必须要求 ACTIVE 状态");
 ok("撤销防护：被撤销成员或停用空间在身份解析层即返回空，fail-closed 不可写入");
+
+// 权限身份和 workspaceValid 必须来自同一次成员关系读取。若分别查询，授权在
+// 两次查询之间变化时，可能组合出「租户级身份 + 有效空间」并绕过空间角色权限。
+const resolveContextStart = authServiceSource.indexOf("async resolveAccessContext(");
+const resolveContextEnd = authServiceSource.indexOf("/** SPACE-02：切换当前经营空间", resolveContextStart);
+const resolveContextBody = authServiceSource.slice(resolveContextStart, resolveContextEnd);
+assert.equal(
+  (resolveContextBody.match(/findWorkspaceScopedUser\(/gu) ?? []).length,
+  1,
+  "resolveAccessContext 必须只读取一次空间成员关系"
+);
+assert.match(resolveContextBody, /const workspaceValid = Boolean\(workspaceId\) && Boolean\(workspaceUser\)/u);
+ok("撤权并发边界：空间权限身份与有效性复用同一次成员关系读取");
 
 /* ---------- 变异 3 补充：菜单构建消费 canAccessRoute（防两套判断分叉） ---------- */
 

@@ -316,7 +316,11 @@ export class AuthService {
     const session = await this.platformService.getAuthSession(payload.sid);
     if (!session || session.userId !== payload.sub) return undefined;
     const workspaceId = session.currentWorkspaceId ?? undefined;
-    const user = await this.platformService.findWorkspaceScopedUser(payload.sub, workspaceId)
+    // 同一个请求只读取一次空间成员关系，并同时用于权限身份与有效性判断。
+    // 若分两次查询，授权恰好在两次查询之间恢复时，可能出现「租户级身份 +
+    // workspaceValid=true」的瞬时组合，使该请求绕过空间角色权限。
+    const workspaceUser = await this.platformService.findWorkspaceScopedUser(payload.sub, workspaceId);
+    const user = workspaceUser
       ?? (options.allowInvalidWorkspace ? await this.platformService.findUserById(payload.sub) : undefined);
     if (!user || user.tenantId !== payload.tid) return undefined;
     // hasWorkspaces 用于区分两种"没有当前空间"：
@@ -330,9 +334,7 @@ export class AuthService {
     // TENANT-READY/ACCESS-ACCEPT：会话指向的空间必须有有效成员关系才算「空间已验证」。
     // 撤销/停用后 fallback 到租户级身份时，workspaceId 不能再当有效范围使用——
     // 否则被撤销的账号拿着旧会话仍能读旧空间的经营数据。
-    const workspaceValid = Boolean(workspaceId) && Boolean(
-      await this.platformService.findWorkspaceScopedUser(payload.sub, workspaceId)
-    );
+    const workspaceValid = Boolean(workspaceId) && Boolean(workspaceUser);
     return { user, workspaceId, hasWorkspaces, workspaceValid };
   }
 

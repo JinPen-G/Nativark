@@ -513,6 +513,9 @@ export class ApiAuthGuard implements CanActivate {
     // allowInvalidWorkspace 允许被撤销者进入切换入口与账号自助，但不能让他们
     // 拿旧会话的 workspaceId 继续读旧空间的客户/会员/经营事实。
     // workspaceValid=false 表示会话指向的空间成员关系已失效（撤销/停用）。
+    // /rental、/store-rental、/reports 本身不允许租户级 fallback，通常会先以
+    // 401 拒绝；这里保留这些前缀，是为了即使将来调整 fallback，也仍显式守住
+    // 经营数据边界。/platform 下的客户与会员接口则在这里明确返回 403。
     if (
       workspaceId &&
       accessContext.workspaceValid === false &&
