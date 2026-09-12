@@ -604,14 +604,34 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   async tenantReadiness(tenantId: string, context: BusinessContext) {
     const state = this.state(tenantId, context);
     const workspaceId = this.workspaceOf(tenantId);
-    const rule = this.currentRule(tenantId, context);
+    // 这里是“配置状态”查询，不能复用报价用的 currentRule：后者在没有规则或
+    // 版本冲突时会抛 409，而空白租户正需要靠本页看到“缺少规则”并继续配置。
+    // 只在本方法内做非抛错的当前版本判定，报价仍继续使用 fail-closed 的 currentRule。
+    const nowAt = Date.now();
+    const effectiveRules = state.ruleVersions
+      .filter((row) => isIssuedRuleVersion(row.status) && row.effectiveFrom)
+      .filter((row) => new Date(row.effectiveFrom!).getTime() <= nowAt)
+      .sort((left, right) => new Date(right.effectiveFrom!).getTime() - new Date(left.effectiveFrom!).getTime());
+    const latestRuleAt = effectiveRules[0] ? new Date(effectiveRules[0].effectiveFrom!).getTime() : undefined;
+    const rulesAtCurrentTime = latestRuleAt === undefined
+      ? []
+      : effectiveRules.filter((row) => new Date(row.effectiveFrom!).getTime() === latestRuleAt);
+    const rule = rulesAtCurrentTime.length === 1 ? rulesAtCurrentTime[0] : undefined;
+    const ruleConflict = rulesAtCurrentTime.length > 1;
     const calendars = this.calendarsForDateRange(tenantId, context, `${new Date().getFullYear()}-01-01T00:00:00.000Z`, `${new Date().getFullYear() + 1}-12-31T23:59:59.000Z`);
     const publishedCalendarYears = new Set(
       calendars.filter((calendar) => calendar.status === "published").map((calendar) => calendar.year)
     );
     const enabledGroups = (context.pricingGroups ?? []).filter((row) => row.status === "enabled");
+    const pricedGroupIds = new Set(
+      state.pricingPlans
+        .filter((plan) => plan.status === "enabled")
+        .flatMap((plan) => plan.rates.map((rate) => pricingTargetId(rate)))
+    );
+    const unpricedGroups = enabledGroups.filter((group) => !pricedGroupIds.has(group.id));
+    const pricedGroupCount = enabledGroups.length - unpricedGroups.length;
     let membershipPlanCount = 0;
-    let membershipUnavailable = false;
+    let membershipUnavailable = !this.memberships;
     if (this.memberships) {
       try {
         membershipPlanCount = (await this.memberships.listPlans(tenantId, workspaceId)).length;
@@ -621,7 +641,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       }
     }
     const operationsAccounts = this.prisma
-      ? await this.prisma.workspaceMember.count({ where: { tenantId, workspaceId, isActive: true } })
+      ? await this.prisma.workspaceMember.count({ where: { tenantId, workspaceId, isActive: true, user: { isActive: true } } })
       : 0;
     const roles = this.prisma
       ? await this.prisma.role.count({ where: { tenantId, isActive: true } })
@@ -634,6 +654,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       missing: string;
       nextHref: string;
       summary?: string;
+      unavailable?: boolean;
     }> = [
       {
         key: "workspace_profile",
@@ -654,10 +675,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       {
         key: "business_rule",
         title: "营业规则（已发布）",
-        done: Boolean(rule && rule.status === "published"),
-        missing: "还没有已发布的租赁规则版本，报价会被拒绝",
+        done: Boolean(rule) && !ruleConflict,
+        missing: ruleConflict ? "有多个规则版本在同一时点生效，暂时无法唯一确定" : "还没有已发布的租赁规则版本，报价会被拒绝",
         nextHref: "/rental/settings",
-        summary: rule?.status === "published" ? `生效版本 ${rule.version}` : undefined
+        summary: rule && !ruleConflict ? `生效版本 ${rule.version}` : undefined
       },
       {
         key: "business_calendar",
@@ -678,10 +699,14 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       {
         key: "pricing_groups_rates",
         title: "定价分组与初始基本价",
-        done: enabledGroups.length > 0,
-        missing: "还没有启用的定价分组（分组建立时必须填写各计价单位基本价）",
+        done: enabledGroups.length > 0 && unpricedGroups.length === 0,
+        missing: enabledGroups.length === 0
+          ? "还没有启用的定价分组（分组建立时必须填写各计价单位基本价）"
+          : unpricedGroups.length
+            ? `以下定价分组还没有基本价：${unpricedGroups.map((group) => group.name).join("、")}`
+            : "",
         nextHref: "/rental/pricing-groups",
-        summary: enabledGroups.length ? `启用分组 ${enabledGroups.length} 个` : undefined
+        summary: enabledGroups.length ? `启用分组 ${enabledGroups.length} 个，已配置基本价 ${pricedGroupCount} 个` : undefined
       },
       {
         key: "price_version",
@@ -693,10 +718,11 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       {
         key: "membership_base",
         title: "会员方案基础配置",
-        done: membershipPlanCount > 0,
-        missing: "还没有会员方案（如暂不经营会员可暂缓）",
+        done: !membershipUnavailable && membershipPlanCount > 0,
+        missing: membershipUnavailable ? "会员方案暂时无法读取，请稍后重试" : "还没有会员方案（如暂不经营会员可暂缓）",
         nextHref: "/membership/plans",
-        summary: membershipPlanCount > 0 ? `会员方案 ${membershipPlanCount} 个` : undefined
+        summary: membershipUnavailable ? undefined : membershipPlanCount > 0 ? `会员方案 ${membershipPlanCount} 个` : undefined,
+        unavailable: membershipUnavailable
       }
     ];
     // 价格版本需要查库：无 MySQL 事实时（内存模式）也如实标未完成，不伪造。
@@ -719,7 +745,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       items,
       /** 报价/下单的硬闸门说明：即便本页显示部分完成，服务端仍有独立拦截。 */
       quoteBlockers: [
-        ...(rule?.status === "published" ? [] : ["未发布租赁规则"]),
+        ...(rule && !ruleConflict ? [] : [ruleConflict ? "规则版本同时生效冲突" : "未发布租赁规则"]),
         ...(!publishedCalendarYears.size ? [] : []),
         ...(missingKeys.includes("price_version") ? ["无空间整体价格版本"] : []),
         ...(missingKeys.includes("item_groups") ? ["无启用产品型号"] : []),

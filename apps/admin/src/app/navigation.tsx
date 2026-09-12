@@ -75,7 +75,7 @@ export const APP_ROUTES = {
   personalMembers: { path: "/membership/personal", label: "个人会员", permission: "store-rental:member:view", audience: "tenant", icon: <IdcardOutlined />, menu: true },
   corporateMembers: { path: "/membership/corporate", label: "企业会员", permission: "store-rental:corporate:view", legacyPermissions: ["store-rental:corporate:manage", "store-rental:corporate:employee-manage"], audience: "tenant", icon: <TeamOutlined />, menu: true },
   membershipPlans: { path: "/membership/plans", label: "会员方案", permission: "store-rental:member:view", legacyPermissions: ["store-rental:member:plan:manage", "store-rental:member:plan:publish"], audience: "tenant", icon: <TagsOutlined />, menu: true },
-  tenantReadiness: { path: "/tenant/readiness", label: "开业配置", permission: "store-rental:order:view", audience: "tenant", icon: <DashboardOutlined />, menu: true },
+  tenantReadiness: { path: "/tenant/readiness", label: "开业配置", permission: "store-rental:order:view", legacyPermissions: ["store-rental:price:manage", "system:user:manage", "system:role:manage"], audience: "tenant", icon: <DashboardOutlined />, menu: true },
   tenantAccounts: { path: "/tenant/accounts", label: "运营账号", permission: "system:user:manage", audience: "tenant", icon: <TeamOutlined />, menu: true },
   tenantRoles: { path: "/tenant/roles", label: "角色权限", permission: "system:role:manage", audience: "tenant", icon: <SafetyCertificateOutlined />, menu: true },
   platformTenants: { path: "/platform/tenants", label: "SaaS 租户", permission: "system:tenant:manage", audience: "saas", icon: <ShopOutlined />, menu: true },
@@ -92,7 +92,7 @@ export const APP_NAVIGATION: AppNavigationSection[] = [
   { key: "inventory", label: "商品与资产", icon: <AppstoreOutlined />, routes: [APP_ROUTES.itemGroups, APP_ROUTES.assets, APP_ROUTES.workOrders, APP_ROUTES.locations] },
   { key: "commercial", label: "定价与营销", icon: <FundOutlined />, routes: [APP_ROUTES.pricingGroups, APP_ROUTES.pricing, APP_ROUTES.discounts, APP_ROUTES.coupons, APP_ROUTES.services] },
   { key: "customers", label: "会员与客户", icon: <TeamOutlined />, routes: [APP_ROUTES.membershipReviews, APP_ROUTES.personalMembers, APP_ROUTES.corporateMembers, APP_ROUTES.membershipPlans] },
-  { key: "tenant-settings", label: "经营设置", icon: <SettingOutlined />, routes: [APP_ROUTES.rentalSettings, APP_ROUTES.rentalCapabilities, APP_ROUTES.tenantAccounts, APP_ROUTES.tenantRoles] },
+  { key: "tenant-settings", label: "经营设置", icon: <SettingOutlined />, routes: [APP_ROUTES.tenantReadiness, APP_ROUTES.rentalSettings, APP_ROUTES.rentalCapabilities, APP_ROUTES.tenantAccounts, APP_ROUTES.tenantRoles] },
   { key: "platform-management", label: "平台管理", icon: <SettingOutlined />, routes: [APP_ROUTES.platformTenants, APP_ROUTES.platformOfficialCalendars, APP_ROUTES.platformUsers, APP_ROUTES.platformSystem, APP_ROUTES.platformOperations, APP_ROUTES.platformTools] }
 ];
 

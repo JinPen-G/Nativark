@@ -1248,7 +1248,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   },
   {
     method: "get", path: "/api/rental/v1/tenant-readiness", tag: "RentalBusiness", operationId: "getTenantReadiness",
-    summary: "Tenant onboarding readiness status for the current workspace", permissions: ["store-rental:order:view"], responseSchema: "GenericObject"
+    summary: "Tenant onboarding readiness status for the current workspace", permissions: ["store-rental:order:view", "store-rental:price:manage", "system:user:manage", "system:role:manage"], responseSchema: "GenericObject"
   },
   {
     method: "put", path: "/api/rental/v1/tenant-profile", tag: "RentalCore", operationId: "saveRentalTenantProfile",

@@ -3668,6 +3668,8 @@ export interface TenantReadinessItem {
   key: string;
   title: string;
   done: boolean;
+  /** 事实源暂时不可读时置 true；这不是“未配置”，页面应提示重试而不是误导配置。 */
+  unavailable?: boolean;
   /** 未完成时缺什么、下一步去哪。 */
   missing: string;
   nextHref: string;

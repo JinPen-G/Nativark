@@ -77,10 +77,12 @@ export function TenantReadinessBody({ data, onRefresh }: { data: TenantReadiness
             <Space>
               {item.done ? <CheckCircleFilled style={{ color: "#52c41a" }} /> : <WarningFilled style={{ color: "#faad14" }} />}
               <Typography.Text strong>{item.title}</Typography.Text>
-              <Tag color={item.done ? "success" : "warning"}>{item.done ? "已完成" : "未完成"}</Tag>
+              <Tag color={item.unavailable ? "default" : item.done ? "success" : "warning"}>
+                {item.unavailable ? "待重试" : item.done ? "已完成" : "未完成"}
+              </Tag>
             </Space>
-            <Button type="link" onClick={() => navigate(item.nextHref)}>
-              {item.done ? "查看" : "去配置"}
+            <Button type="link" onClick={() => item.unavailable ? onRefresh() : navigate(item.nextHref)}>
+              {item.unavailable ? "重试" : item.done ? "查看" : "去配置"}
               <RightOutlined />
             </Button>
           </Space>

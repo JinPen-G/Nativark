@@ -261,6 +261,11 @@ export function requiredPermissions(method: string, path: string) {
   if (path === "/rental/v1/business-settings") {
     return method === "GET" ? ["store-rental:rules:manage", "store-rental:price:manage", "store-rental:order:view", "store-rental:order:create"] : ["store-rental:rules:manage", "store-rental:price:manage"];
   }
+  if (path === "/rental/v1/tenant-readiness") {
+    // 开业配置是多个配置域的只读汇总，不能只绑定订单查看；否则只有账号/角色
+    // 管理权限的租户管理员反而看不到自己要补齐的配置清单。
+    return ["store-rental:order:view", "store-rental:price:manage", "system:user:manage", "system:role:manage"];
+  }
   if (path.startsWith("/rental/v1/official-calendar-sources")) {
     // 空间侧只读引用公共来源版本，用于挑选要应用哪一版（需求 4.5.2）。
     // 只给日历相关角色：它不含业务数据，但也没有理由开放给全部经营角色。
