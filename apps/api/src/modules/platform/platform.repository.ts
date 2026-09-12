@@ -33,7 +33,9 @@ import type {
   SavePlatformDictionaryGroupRequest,
   SavePlatformNumberRuleRequest,
   SaveSystemRoleRequest,
+  SaveSystemUserAccessRequest,
   SaveSystemUserRequest,
+  SaveWorkspaceAccessRequest,
   SystemDataScope,
   SystemRoleRow,
   SystemRulesConfig,
@@ -1002,21 +1004,43 @@ export class PlatformRepository {
   }
 
   async saveUser(input: SaveSystemUserRequest, tenantId: string): Promise<SystemUserRow> {
+    const saved = await this.prisma.$transaction((tx) => this.saveUserInTransaction(tx, input, tenantId));
+    const user = await this.findUserWithRoles(saved.userId);
+    return { ...this.toUserRow(user), temporaryPassword: saved.temporaryPassword };
+  }
+
+  async saveUserWithWorkspaceAccess(
+    input: SaveSystemUserAccessRequest,
+    tenantId: string
+  ): Promise<SystemUserRow> {
+    const { workspaceAccesses, ...userInput } = input;
+    const saved = await this.prisma.$transaction(async (tx) => {
+      const user = await this.saveUserInTransaction(tx, userInput, tenantId);
+      await this.saveWorkspaceAccessesInTransaction(tx, tenantId, user.userId, workspaceAccesses);
+      return user;
+    });
+    const user = await this.findUserWithRoles(saved.userId);
+    return { ...this.toUserRow(user), temporaryPassword: saved.temporaryPassword };
+  }
+
+  private async saveUserInTransaction(
+    tx: Prisma.TransactionClient,
+    input: SaveSystemUserRequest,
+    tenantId: string
+  ): Promise<{ userId: string; temporaryPassword?: string }> {
     const account = input.account.trim();
     const displayName = input.displayName.trim();
 
     if (!account || !displayName) {
       throw new BadRequestException("账号和姓名不能为空");
     }
-    const tenant = await this.prisma.tenant.findUnique({
-      where: { id: tenantId }
-    });
+    const tenant = await tx.tenant.findUnique({ where: { id: tenantId } });
     if (!tenant) {
       throw new BadRequestException("租户不存在");
     }
-    const duplicated = await this.prisma.user.findFirst({
+    const duplicated = await tx.user.findFirst({
       where: {
-        id: { not: input.id },
+        id: input.id ? { not: input.id } : undefined,
         tenantId,
         account
       }
@@ -1025,7 +1049,7 @@ export class PlatformRepository {
       throw new BadRequestException("该租户下账号已存在");
     }
 
-    const platformRole = await this.prisma.role.findFirst({
+    const platformRole = await tx.role.findFirst({
       where: { tenantId, code: "TENANT_ADMIN" }
     });
     const roleIds = input.isPlatformAdmin
@@ -1038,7 +1062,7 @@ export class PlatformRepository {
       throw new BadRequestException("普通用户至少选择一个角色");
     }
 
-    const validRoles = await this.prisma.role.findMany({
+    const validRoles = await tx.role.findMany({
       where: { id: { in: roleIds }, tenantId, isActive: true },
       select: { id: true }
     });
@@ -1046,18 +1070,19 @@ export class PlatformRepository {
       throw new BadRequestException("角色不存在、已停用或不属于当前租户");
     }
     if (input.organizationId) {
-      const organization = await this.prisma.organizationUnit.findFirst({
+      const organization = await tx.organizationUnit.findFirst({
         where: { id: input.organizationId, tenantId }
       });
       if (!organization) throw new BadRequestException("组织不属于当前租户");
     }
     const existingUser = input.id
-      ? await this.prisma.user.findFirst({ where: { id: input.id, tenantId } })
+      ? await tx.user.findFirst({ where: { id: input.id, tenantId } })
       : undefined;
     if (input.id && !existingUser) throw new NotFoundException("账号不存在");
     const temporaryPassword = existingUser ? undefined : generateTemporaryPassword();
-    const user = await this.prisma.user.upsert({
-      where: { id: input.id ?? `user_${randomUUID()}` },
+    const userId = input.id ?? `user_${randomUUID()}`;
+    const user = await tx.user.upsert({
+      where: { id: userId },
       update: {
         tenantId,
         account,
@@ -1070,14 +1095,16 @@ export class PlatformRepository {
         isActive: input.isActive
       },
       create: {
-        id: input.id ?? `user_${randomUUID()}`,
+        id: userId,
         tenantId,
         account,
         displayName,
         phone: input.phone,
         organizationId: input.organizationId,
         roleId: roleIds[0],
-        passwordHash: hashPassword(temporaryPassword!),
+        // upsert 的 create 分支对象会先在 JavaScript 中求值；编辑已有账号时
+        // temporaryPassword 为空，不能无条件 hash undefined。
+        passwordHash: existingUser?.passwordHash ?? hashPassword(temporaryPassword!),
         mustChangePassword: true,
         isSaasAdmin: false,
         isPlatformAdmin: Boolean(input.isPlatformAdmin),
@@ -1085,16 +1112,68 @@ export class PlatformRepository {
       }
     });
 
-    await this.prisma.userRole.deleteMany({ where: { userId: user.id } });
+    await tx.userRole.deleteMany({ where: { userId: user.id } });
     if (roleIds.length > 0) {
-      await this.prisma.userRole.createMany({
+      await tx.userRole.createMany({
         data: roleIds.map((roleId) => ({ userId: user.id, roleId })),
         skipDuplicates: true
       });
     }
 
-    const saved = await this.findUserWithRoles(user.id);
-    return { ...this.toUserRow(saved), temporaryPassword };
+    return { userId: user.id, temporaryPassword };
+  }
+
+  private async saveWorkspaceAccessesInTransaction(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    userId: string,
+    accesses: SaveWorkspaceAccessRequest[]
+  ) {
+    const rows = Array.isArray(accesses) ? accesses : [];
+    const workspaceIds = rows.map((row) => row.workspaceId);
+    if (new Set(workspaceIds).size !== workspaceIds.length) {
+      throw new BadRequestException("同一经营空间不能重复授权");
+    }
+    if (rows.length === 0) return;
+
+    const [user, workspaces] = await Promise.all([
+      tx.user.findFirst({ where: { id: userId, tenantId }, select: { id: true } }),
+      tx.businessWorkspace.findMany({
+        where: { tenantId, id: { in: workspaceIds } },
+        select: { id: true, status: true }
+      })
+    ]);
+    if (!user) throw new BadRequestException("账号不存在或不属于当前租户");
+    if (workspaces.length !== workspaceIds.length) {
+      throw new BadRequestException("经营空间不存在或不属于当前租户");
+    }
+    if (workspaces.some((workspace) => workspace.status !== PrismaWorkspaceStatus.ACTIVE)) {
+      throw new BadRequestException("冻结或停用的经营空间不能变更成员");
+    }
+
+    const roleIds = [...new Set(rows.map((row) => row.roleId).filter((roleId): roleId is string => Boolean(roleId)))];
+    if (roleIds.length > 0) {
+      const roles = await tx.role.findMany({
+        where: { id: { in: roleIds }, tenantId, isActive: true },
+        select: { id: true }
+      });
+      if (roles.length !== roleIds.length) {
+        throw new BadRequestException("空间角色不存在、已停用或不属于当前租户");
+      }
+    }
+
+    for (const row of rows) {
+      const data = {
+        roleId: row.roleId ?? null,
+        dataScope: row.dataScope ? this.toPrismaDataScope(row.dataScope) : null,
+        isActive: row.isActive
+      };
+      await tx.workspaceMember.upsert({
+        where: { workspaceId_userId: { workspaceId: row.workspaceId, userId } },
+        create: { tenantId, workspaceId: row.workspaceId, userId, ...data },
+        update: data
+      });
+    }
   }
 
   async setUserStatus(id: string, isActive: boolean, tenantId: string) {

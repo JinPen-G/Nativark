@@ -378,6 +378,30 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     },
     ["tenantId", "account", "displayName", "roleIds", "isActive"]
   ),
+  SaveWorkspaceAccessRequest: objectOf(
+    {
+      workspaceId: stringSchema,
+      roleId: stringSchema,
+      dataScope: stringSchema,
+      isActive: booleanSchema
+    },
+    ["workspaceId", "isActive"]
+  ),
+  SaveSystemUserAccessRequest: objectOf(
+    {
+      id: stringSchema,
+      tenantId: stringSchema,
+      account: stringSchema,
+      displayName: stringSchema,
+      phone: stringSchema,
+      organizationId: stringSchema,
+      roleIds: arrayOf(stringSchema),
+      isPlatformAdmin: booleanSchema,
+      isActive: booleanSchema,
+      workspaceAccesses: arrayOf("SaveWorkspaceAccessRequest")
+    },
+    ["account", "displayName", "roleIds", "isActive", "workspaceAccesses"]
+  ),
   SystemRulesConfig: objectSchema,
   SaveSystemRuleSectionRequest: objectOf(
     {
@@ -1162,6 +1186,27 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     permissions: ["system:user:manage"],
     requestSchema: "SaveSystemUserRequest",
     responseSchema: "SystemUserRow"
+  },
+  {
+    method: "post",
+    path: "/api/platform/users/access",
+    tag: "Platform",
+    operationId: "createUserWithWorkspaceAccess",
+    summary: "Create system user with workspace access atomically",
+    permissions: ["system:user:manage"],
+    requestSchema: "SaveSystemUserAccessRequest",
+    responseSchema: "SystemUserRow"
+  },
+  {
+    method: "put",
+    path: "/api/platform/users/{id}/access",
+    tag: "Platform",
+    operationId: "updateUserWithWorkspaceAccess",
+    summary: "Update system user and workspace access atomically",
+    permissions: ["system:user:manage"],
+    requestSchema: "SaveSystemUserAccessRequest",
+    responseSchema: "SystemUserRow",
+    parameters: [{ name: "id", in: "path", required: true, schema: stringSchema }]
   },
   {
     method: "put",

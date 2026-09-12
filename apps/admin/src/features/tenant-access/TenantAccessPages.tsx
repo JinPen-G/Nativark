@@ -3,6 +3,7 @@ import type {
   BusinessWorkspace,
   PermissionModule,
   SaveSystemRoleRequest,
+  SaveSystemUserAccessRequest,
   SaveSystemUserRequest,
   SystemDataScope,
   SystemRoleRow,
@@ -104,15 +105,19 @@ export function TenantOperationsAccountPage() {
 
   const save = useMutation({
     mutationFn: async (values: SaveSystemUserRequest) => {
-      const user = await api.saveUser({ ...values, id: editing?.id });
-      const existingByWorkspace = new Map(memberRows.filter((member) => member.userId === user.id).map((member) => [member.workspaceId, member]));
-      await Promise.all(accessRows.filter((row) => workspaceMap.get(row.workspaceId)?.status === "active" && (row.enabled || existingByWorkspace.has(row.workspaceId))).map((row) => api.saveWorkspaceMember(row.workspaceId, {
-        userId: user.id,
-        roleId: row.roleId,
-        dataScope: row.dataScope,
-        isActive: row.enabled
-      })));
-      return user;
+      const payload: SaveSystemUserAccessRequest = {
+        ...values,
+        id: editing?.id,
+        workspaceAccesses: accessRows
+          .filter((row) => workspaceMap.get(row.workspaceId)?.status === "active" && (row.enabled || row.existed))
+          .map((row) => ({
+            workspaceId: row.workspaceId,
+            roleId: row.roleId,
+            dataScope: row.dataScope,
+            isActive: row.enabled
+          }))
+      };
+      return api.saveUserWithWorkspaceAccess(payload);
     },
     onSuccess: async (user) => {
       await refresh();

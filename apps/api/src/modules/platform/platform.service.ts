@@ -35,6 +35,7 @@ import {
   SavePlatformNumberRuleRequest,
   SaveSystemRuleSectionRequest,
   SaveSystemRoleRequest,
+  SaveSystemUserAccessRequest,
   SaveSystemUserRequest,
   SystemAiConnectionTestResult,
   SystemRoleRow,
@@ -2374,6 +2375,25 @@ export class PlatformService {
     }
 
     return { ...this.toUserRow(index >= 0 ? this.users[index] : payload), temporaryPassword };
+  }
+
+  /**
+   * ACCESS-01C：账号资料、租户角色和经营空间授权必须共用一个事务。
+   *
+   * 运营账号页面原先先保存账号，再并行保存各空间成员关系；其中一个空间
+   * 失败时会留下半套授权。该入口只允许在真实空间数据源上执行，避免内存
+   * 演示模式伪造空间权限事实。
+   */
+  saveUserWithWorkspaceAccess(
+    input: SaveSystemUserAccessRequest,
+    currentUser?: SystemUserRow
+  ) {
+    const targetTenantId = this.resolveTargetTenantId(input.tenantId, currentUser);
+    this.requireWorkspaceDataSource();
+    return this.platformRepository.saveUserWithWorkspaceAccess(
+      { ...input, tenantId: targetTenantId, isSaasAdmin: false },
+      targetTenantId
+    );
   }
 
   async findUserForLogin(tenantCode: string, account: string, password: string) {

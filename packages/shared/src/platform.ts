@@ -375,6 +375,24 @@ export interface SaveSystemUserRequest {
   isActive: boolean;
 }
 
+/**
+ * ACCESS-01C：账号资料、租户角色和经营空间成员关系的一次性提交。
+ *
+ * 空间授权不是账号保存后的附属请求：如果一项空间授权失败，账号和其他
+ * 空间授权也不能留下半套结果。因此管理端编辑账号时必须把这组关系作为
+ * 同一个事务边界提交。
+ */
+export interface SaveWorkspaceAccessRequest {
+  workspaceId: string;
+  roleId?: string;
+  dataScope?: SystemDataScope;
+  isActive: boolean;
+}
+
+export interface SaveSystemUserAccessRequest extends SaveSystemUserRequest {
+  workspaceAccesses: SaveWorkspaceAccessRequest[];
+}
+
 export interface SystemRuleGiftConfig {
   enabled: boolean;
   trigger: string;

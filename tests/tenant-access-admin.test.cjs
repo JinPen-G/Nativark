@@ -15,10 +15,13 @@ assert.match(router, /TenantOperationsAccountPage/u);
 assert.match(router, /TenantRolePermissionPage/u);
 assert.match(api, /workspaceMembers: \(workspaceId: string\)/u);
 assert.match(api, /saveWorkspaceMember: \(workspaceId: string/u);
+assert.match(api, /saveUserWithWorkspaceAccess: \(payload: SaveSystemUserAccessRequest\)/u);
 assert.match(page, /空间角色（操作权限）/u);
 assert.match(page, /数据范围/u);
 assert.match(page, /currentUserId/u, "必须保护当前登录账号，避免自停用或撤销当前空间");
 assert.match(page, /isActive: row\.enabled/u, "关闭空间访问必须真正写回成员状态");
+assert.match(page, /api\.saveUserWithWorkspaceAccess\(payload\)/u, "账号资料与空间授权必须走单事务入口");
+assert.doesNotMatch(page, /Promise\.all\(accessRows[\s\S]*api\.saveWorkspaceMember/u, "页面不能在账号保存后并行写入空间授权");
 assert.doesNotMatch(page, /audience: "saas"/u);
 
 console.log("Tenant access admin contract passed: tenant routes, RBAC, workspace membership, operation/data split.");

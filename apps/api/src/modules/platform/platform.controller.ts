@@ -29,6 +29,7 @@ import {
   SaveRolePermissionsInputDto,
   SaveSecurityBaselineInputDto,
   SaveSystemRoleDto,
+  SaveSystemUserAccessDto,
   SaveSystemRuleSectionBodyInputDto,
   SaveSystemUserDto,
   SecondConfirmationInputDto,
@@ -521,6 +522,20 @@ export class PlatformController {
   @Put("users/:id")
   updateUser(@Param("id") id: string, @Body() body: SaveSystemUserDto, @Req() req: RequestWithUser) {
     return this.platformService.saveUser({ ...body, id }, req.user);
+  }
+
+  @Post("users/access")
+  createUserWithWorkspaceAccess(@Body() body: SaveSystemUserAccessDto, @Req() req: RequestWithUser) {
+    return this.platformService.saveUserWithWorkspaceAccess(body, req.user);
+  }
+
+  @Put("users/:id/access")
+  updateUserWithWorkspaceAccess(
+    @Param("id") id: string,
+    @Body() body: SaveSystemUserAccessDto,
+    @Req() req: RequestWithUser
+  ) {
+    return this.platformService.saveUserWithWorkspaceAccess({ ...body, id }, req.user);
   }
 
   @Put("users/:id/status")

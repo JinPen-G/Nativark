@@ -11,7 +11,9 @@ import {
   type SaveSystemRoleRequest,
   type SystemRulesConfig,
   type SystemSecurityBaselineConfig,
+  type SaveSystemUserAccessRequest,
   type SaveSystemUserRequest,
+  type SaveWorkspaceAccessRequest,
   type TenantBootstrapRequest,
   type UpdateTenantRequest,
   type UpdateTenantStatusRequest
@@ -158,6 +160,30 @@ export class SaveSystemUserDto implements SaveSystemUserRequest {
   @IsOptional() @IsBoolean() isPlatformAdmin?: boolean;
   @IsOptional() @IsBoolean() isSaasAdmin?: boolean;
   @IsBoolean() isActive!: boolean;
+}
+
+export class SaveWorkspaceAccessDto implements SaveWorkspaceAccessRequest {
+  @IsString() @IsNotEmpty() workspaceId!: string;
+  @IsOptional() @IsString() @IsNotEmpty() roleId?: string;
+  @IsOptional() @IsIn(DATA_SCOPES) dataScope?: SaveWorkspaceAccessRequest["dataScope"];
+  @IsBoolean() isActive!: boolean;
+}
+
+export class SaveSystemUserAccessDto implements SaveSystemUserAccessRequest {
+  @IsOptional() @IsString() @IsNotEmpty() id?: string;
+  @IsOptional() @IsString() @IsNotEmpty() tenantId?: string;
+  @IsString() @IsNotEmpty() account!: string;
+  @IsString() @IsNotEmpty() displayName!: string;
+  @IsOptional() @IsString() @IsNotEmpty() phone?: string;
+  @IsOptional() @IsString() @IsNotEmpty() organizationId?: string;
+  @IsArray() @IsString({ each: true }) roleIds!: string[];
+  @IsOptional() @IsBoolean() isPlatformAdmin?: boolean;
+  @IsOptional() @IsBoolean() isSaasAdmin?: boolean;
+  @IsBoolean() isActive!: boolean;
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => SaveWorkspaceAccessDto)
+  workspaceAccesses!: SaveWorkspaceAccessRequest[];
 }
 
 export class SetUserStatusInputDto {

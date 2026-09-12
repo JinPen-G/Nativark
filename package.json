@@ -89,6 +89,7 @@
     "test:work-order": "npm run build -w @store-rental/shared && node tests/rental-work-order.test.cjs",
     "test:work-order-db": "npm run build -w @store-rental/shared && node tests/rental-work-order-db.test.cjs",
     "test:tenant-access-db": "npm run build -w @store-rental/shared && node tests/tenant-access-db.test.cjs",
+    "test:tenant-access-atomic": "npm run build -w @store-rental/shared && node tests/tenant-access-atomic.test.cjs",
     "test:rental-db-suites": "npm run test:order-allocation-db && npm run test:order-close-db",
     "test:extension-funding": "npm run build -w @store-rental/shared && node tests/rental-extension-funding.test.cjs",
     "test:fee-review": "npm run build -w @store-rental/shared && node tests/rental-fee-review.test.cjs",
