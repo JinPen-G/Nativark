@@ -850,6 +850,11 @@ export class UpdateRentalServiceOccurrenceDto implements UpdateRentalServiceOccu
   result?: string;
 
   @IsOptional()
+  @IsInt()
+  @Min(1)
+  executedQuantity?: number;
+
+  @IsOptional()
   @IsString()
   @MaxLength(1000)
   reason?: string;

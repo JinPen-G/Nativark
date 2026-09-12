@@ -1376,6 +1376,13 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     }
 
     const netAmount = roundMoney(Math.max(0, previous.amount - (previous.discountAllocatedAmount ?? 0) - (previous.couponAllocatedAmount ?? 0)));
+    const totalQuantity = Number.isInteger(previous.quantity) && previous.quantity > 0 ? previous.quantity : 1;
+    const previousExecutedQuantity = Number(previous.executedQuantity);
+    const alreadyExecutedQuantity = Number.isInteger(previousExecutedQuantity) && previousExecutedQuantity >= 0
+      ? previousExecutedQuantity
+      : 0;
+    if (alreadyExecutedQuantity > totalQuantity) throw new ConflictException("服务已执行数量超过约定数量，拒绝继续处理");
+    const executionSegments = Array.isArray(previous.executionSegments) ? [...previous.executionSegments] : [];
     let next: RentalOrderServiceOccurrence = { ...previous };
     let releaseCapacity = false;
     let useCapacity = false;
@@ -1389,20 +1396,40 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       if (input.customerConfirmed === undefined) throw new BadRequestException("完成服务必须记录客户是否确认");
       const actualStartAt = previous.actualStartAt ?? at;
       if (Date.parse(actualStartAt) > atMs) throw new BadRequestException("完成时间不能早于开始时间");
-      next = {
-        ...next,
-        executionStatus: "completed",
-        actualStartAt,
+      const remainingQuantity = totalQuantity - alreadyExecutedQuantity;
+      const executedThisTime = input.executedQuantity ?? remainingQuantity;
+      if (!Number.isInteger(executedThisTime) || executedThisTime < 1 || executedThisTime > remainingQuantity) {
+        throw new BadRequestException(`本次执行数量必须在 1 到 ${remainingQuantity} 之间`);
+      }
+      const nextExecutedQuantity = alreadyExecutedQuantity + executedThisTime;
+      const completed = nextExecutedQuantity === totalQuantity;
+      executionSegments.push({
+        quantity: executedThisTime,
+        actualStartAt: previous.actualStartAt ?? at,
         actualEndAt: at,
-        executionResult: input.result.trim(),
+        result: input.result.trim(),
         evidenceAttachments: input.evidenceAttachments ?? previous.evidenceAttachments,
         customerConfirmedAt: input.customerConfirmed ? at : undefined,
+        executedBy: operator
+      });
+      next = {
+        ...next,
+        executionStatus: completed ? "completed" : "in_progress",
+        actualStartAt,
+        actualEndAt: completed ? at : undefined,
+        executionResult: input.result.trim(),
+        evidenceAttachments: input.evidenceAttachments ?? previous.evidenceAttachments,
+        customerConfirmedAt: completed && input.customerConfirmed ? at : previous.customerConfirmedAt,
         executedBy: operator,
-        refundStatus: "none"
+        executedQuantity: nextExecutedQuantity,
+        executionSegments,
+        refundStatus: completed ? "none" : previous.refundStatus
       };
-      useCapacity = true;
+      useCapacity = completed;
     } else {
-      if (input.action === "cancel" && currentStatus !== "not_started") throw new ConflictException("已经开始的服务不能直接取消，请记录失败结果");
+      if (input.action === "cancel" && currentStatus !== "not_started" && !(currentStatus === "in_progress" && alreadyExecutedQuantity > 0)) {
+        throw new ConflictException("已经开始的服务不能直接取消，请记录失败结果");
+      }
       if (input.action === "no_show" && currentStatus !== "not_started") throw new ConflictException("已开始的服务不能记为未到场");
       if (currentStatus !== "not_started" && currentStatus !== "in_progress") throw new ConflictException("该服务已经结束，不能重复处理");
       if (currentStatus === "in_progress" && previous.actualStartAt) {
@@ -1410,7 +1437,9 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
         if (Number.isFinite(actualStartMs) && actualStartMs > atMs) throw new BadRequestException("结束时间不能早于开始时间");
       }
       if (!input.reason?.trim()) throw new BadRequestException("取消、失败或未到场必须填写原因");
-      const refundAmount = roundMoney(Math.min(netAmount, Math.max(0, input.refundAmount ?? netAmount)));
+      const remainingQuantity = totalQuantity - alreadyExecutedQuantity;
+      const remainingNetAmount = roundMoney(netAmount * remainingQuantity / totalQuantity);
+      const refundAmount = roundMoney(Math.min(remainingNetAmount, Math.max(0, input.refundAmount ?? remainingNetAmount)));
       const terminalStatus = input.action === "cancel" ? "cancelled" : input.action === "no_show" ? "no_show" : "failed";
       next = {
         ...next,
@@ -1431,6 +1460,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
           `发生项：${occurrenceId}`,
           `履约结果：${terminalStatus}`,
           `客户实际净支付：${netAmount}`,
+          `已执行数量：${alreadyExecutedQuantity}/${totalQuantity}`,
+          `未执行净额：${remainingNetAmount}`,
           `退款建议：${refundAmount}`,
           input.reason.trim()
         ], occurrenceId);

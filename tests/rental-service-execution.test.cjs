@@ -141,6 +141,57 @@ void (async () => {
 
   {
     const calls = { saved: 0, used: [], released: [] };
+    const occurrence = stampOccurrences([snapshot({ quantity: 3, amount: 300, unitPrice: 100, discountAllocatedAmount: 0, couponAllocatedAmount: 0, formula: "100 × 3 × 1", capacityQuantity: 3 })], { origin: "order", ownerId: "order_service_1", requestKey: "order-key-partial" })[0];
+    const order = orderWith(occurrence);
+    const service = serviceFor(order, calls);
+    await service.updateServiceOccurrence("tenant_1", order.id, occurrence.occurrenceId, { action: "start", actualAt: at() }, "操作员", {});
+    const partial = await service.updateServiceOccurrence("tenant_1", order.id, occurrence.occurrenceId, {
+      action: "complete", actualAt: at(), executedQuantity: 1, result: "先完成 1 份", customerConfirmed: true
+    }, "操作员", {});
+    assert.equal(partial.occurrence.executionStatus, "in_progress", "部分完成后服务仍应保留待处理状态");
+    assert.equal(partial.occurrence.executedQuantity, 1);
+    assert.equal(partial.occurrence.executionSegments.length, 1);
+    assert.equal(calls.used.length, 0, "部分完成不能把整项容量误标成已完成");
+    await assert.rejects(
+      () => service.updateServiceOccurrence("tenant_1", order.id, occurrence.occurrenceId, {
+        action: "complete", actualAt: at(), executedQuantity: 3, result: "越过剩余数量", customerConfirmed: true
+      }, "操作员", {}),
+      /本次执行数量必须在 1 到 2 之间/u,
+      "本次执行数量不能超过剩余数量"
+    );
+    const completed = await service.updateServiceOccurrence("tenant_1", order.id, occurrence.occurrenceId, {
+      action: "complete", actualAt: at(), executedQuantity: 2, result: "剩余 2 份完成", customerConfirmed: true
+    }, "操作员", {});
+    assert.equal(completed.occurrence.executionStatus, "completed");
+    assert.equal(completed.occurrence.executedQuantity, 3);
+    assert.equal(completed.occurrence.executionSegments.length, 2);
+    assert.equal(calls.used.length, 1, "全部执行后才转换当前服务容量");
+    ok("数量服务支持分次完成，保留每段事实并只在全部完成后收口");
+  }
+
+  {
+    const calls = { saved: 0, used: [], released: [] };
+    const occurrence = stampOccurrences([snapshot({ quantity: 3, amount: 300, unitPrice: 100, discountAllocatedAmount: 0, couponAllocatedAmount: 0, formula: "100 × 3 × 1", capacityQuantity: 3 })], { origin: "order", ownerId: "order_service_1", requestKey: "order-key-partial-fail" })[0];
+    const order = orderWith(occurrence);
+    const service = serviceFor(order, calls);
+    await service.updateServiceOccurrence("tenant_1", order.id, occurrence.occurrenceId, { action: "start", actualAt: at() }, "操作员", {});
+    await service.updateServiceOccurrence("tenant_1", order.id, occurrence.occurrenceId, {
+      action: "complete", actualAt: at(), executedQuantity: 1, result: "完成 1 份", customerConfirmed: true
+    }, "操作员", {});
+    const failed = await service.updateServiceOccurrence("tenant_1", order.id, occurrence.occurrenceId, {
+      action: "fail", actualAt: at(), reason: "剩余资源无法继续提供"
+    }, "操作员", {});
+    assert.equal(failed.occurrence.executionStatus, "failed");
+    assert.equal(failed.occurrence.executedQuantity, 1);
+    assert.equal(failed.occurrence.refundAmount, 200, "失败退款只能覆盖未执行的 2 份");
+    assert.equal(failed.occurrence.refundStatus, "pending_review");
+    assert.equal(order.feeReviews[0].decidedAmount, undefined);
+    assert.ok(order.feeReviews[0].basis.includes("未执行净额：200"), "退款审核依据必须说明未执行净额");
+    ok("部分执行后失败只为未执行数量生成退款审核，不冲销已执行事实");
+  }
+
+  {
+    const calls = { saved: 0, used: [], released: [] };
     const occurrence = stampOccurrences([snapshot()], { origin: "order", ownerId: "order_service_1", requestKey: "order-key-3" })[0];
     const service = serviceFor(orderWith(occurrence), calls);
     await assert.rejects(

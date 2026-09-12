@@ -49,6 +49,8 @@ export function stampOccurrences(
     extensionSequence: source.extensionSequence,
     // MKT-02D：实际履约必须由运营动作明确推进，不能由计划时间或归还时间自动完成。
     executionStatus: "not_started",
+    executedQuantity: 0,
+    executionSegments: [],
     // 不需要容量的服务没有预留行，也就没有容量依据可挂。
     reservationKey: snapshot.requiresCapacity ? serviceReservationKey(source.requestKey, snapshot) : undefined
   }));

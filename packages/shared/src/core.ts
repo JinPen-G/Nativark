@@ -2997,6 +2997,8 @@ export interface UpdateRentalServiceOccurrenceRequest {
   action: RentalServiceExecutionAction;
   actualAt?: string;
   result?: string;
+  /** 完成动作本次实际执行的服务数量；缺省表示完成全部剩余数量。 */
+  executedQuantity?: number;
   reason?: string;
   evidenceAttachments?: string[];
   /** 完成时必须明确记录客户是否确认，不能从“点击完成”推断。 */
@@ -3035,6 +3037,18 @@ export interface RentalOrderServiceOccurrence extends RentalQuoteServiceSnapshot
   actualStartAt?: string;
   actualEndAt?: string;
   executionResult?: string;
+  /** 已实际执行的数量；存量订单缺省时按 0 读取。 */
+  executedQuantity?: number;
+  /** 每次部分执行的事实，不用覆盖前一次结果。 */
+  executionSegments?: Array<{
+    quantity: number;
+    actualStartAt?: string;
+    actualEndAt: string;
+    result: string;
+    evidenceAttachments?: string[];
+    customerConfirmedAt?: string;
+    executedBy?: string;
+  }>;
   failureReason?: string;
   evidenceAttachments?: string[];
   customerConfirmedAt?: string;

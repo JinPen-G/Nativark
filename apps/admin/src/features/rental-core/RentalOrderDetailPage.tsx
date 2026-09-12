@@ -71,6 +71,13 @@ const SERVICE_START_ORDER_STATUSES = [
   RentalCoreOrderStatus.Renting
 ];
 
+const serviceOccurrenceTotalQuantity = (row: RentalOrderServiceOccurrence) => Number.isInteger(row.quantity) && row.quantity > 0 ? row.quantity : 1;
+const serviceOccurrenceExecutedQuantity = (row: RentalOrderServiceOccurrence) => Math.min(
+  serviceOccurrenceTotalQuantity(row),
+  Number.isInteger(row.executedQuantity) && row.executedQuantity !== undefined && row.executedQuantity >= 0 ? row.executedQuantity : 0
+);
+const serviceOccurrenceRemainingQuantity = (row: RentalOrderServiceOccurrence) => Math.max(0, serviceOccurrenceTotalQuantity(row) - serviceOccurrenceExecutedQuantity(row));
+
 export function RentalOrderDetailPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
@@ -119,7 +126,7 @@ export function RentalOrderDetailPage() {
   // 试算结果单独存：金额要先摆给运营/客户确认，确认后才提交申请。
   const [extensionPreview, setExtensionPreview] = useState<RentalOrderExtensionPreview>();
   const [extensionForm] = Form.useForm<{ newEndAt: Dayjs; memo?: string }>();
-  const [serviceExecutionForm] = Form.useForm<{ result?: string; reason?: string; customerConfirmed?: boolean; refundAmount?: number; compensationAmount?: number; evidenceAttachments?: string }>();
+  const [serviceExecutionForm] = Form.useForm<{ executedQuantity?: number; result?: string; reason?: string; customerConfirmed?: boolean; refundAmount?: number; compensationAmount?: number; evidenceAttachments?: string }>();
   const [serviceRefundForm] = Form.useForm<{ reason: string }>();
   const order = useQuery({ queryKey: ["rental-core", "order", id], queryFn: () => rentalCoreApi.order(id), enabled: Boolean(id) });
   const profile = useQuery({ queryKey: ["rental-core", "profile"], queryFn: rentalCoreApi.profile });
@@ -281,11 +288,12 @@ export function RentalOrderDetailPage() {
     onError: () => message.error("审核失败，请检查订单状态或该异常是否已处理")
   });
   const executeService = useMutation({
-    mutationFn: (values: { result?: string; reason?: string; customerConfirmed?: boolean; refundAmount?: number; compensationAmount?: number; evidenceAttachments?: string }) => {
+    mutationFn: (values: { executedQuantity?: number; result?: string; reason?: string; customerConfirmed?: boolean; refundAmount?: number; compensationAmount?: number; evidenceAttachments?: string }) => {
       const selected = serviceExecution!;
       const data: UpdateRentalServiceOccurrenceRequest = {
         action: selected.action,
         actualAt: new Date().toISOString(),
+        executedQuantity: values.executedQuantity === undefined ? undefined : Number(values.executedQuantity),
         result: values.result,
         reason: values.reason,
         customerConfirmed: values.customerConfirmed,
@@ -472,9 +480,11 @@ export function RentalOrderDetailPage() {
             { title: "原价", align: "right", render: (_, row) => money(row.amount) },
             { title: "减免", align: "right", render: (_, row) => money(Number(row.discountAllocatedAmount ?? 0) + Number(row.couponAllocatedAmount ?? 0)) },
             { title: "净额", align: "right", render: (_, row) => money(serviceOccurrenceNetAmount(row)) },
-            { title: "实际履约", width: 150, render: (_, row) => {
+            { title: "实际履约", width: 180, render: (_, row) => {
               const status = row.executionStatus ?? "not_started";
-              return <Space orientation="vertical" size={0}><Tag color={SERVICE_EXECUTION_STATUS_COLORS[status]}>{SERVICE_EXECUTION_STATUS_LABELS[status]}</Tag><span style={{ color: "#999" }}>{row.actualStartAt ? `开始 ${new Date(row.actualStartAt).toLocaleString()}` : "未记录实际开始"}</span>{row.actualEndAt && <span style={{ color: "#999" }}>结束 {new Date(row.actualEndAt).toLocaleString()}</span>}</Space>;
+              const total = serviceOccurrenceTotalQuantity(row);
+              const executed = serviceOccurrenceExecutedQuantity(row);
+              return <Space orientation="vertical" size={0}><Tag color={SERVICE_EXECUTION_STATUS_COLORS[status]}>{SERVICE_EXECUTION_STATUS_LABELS[status]}</Tag>{total > 1 && <span style={{ color: "#666" }}>已执行 {executed} / {total}</span>}<span style={{ color: "#999" }}>{row.actualStartAt ? `开始 ${new Date(row.actualStartAt).toLocaleString()}` : "未记录实际开始"}</span>{row.actualEndAt && <span style={{ color: "#999" }}>结束 {new Date(row.actualEndAt).toLocaleString()}</span>}</Space>;
             }},
             { title: "退款", width: 150, render: (_, row) => row.refundStatus && row.refundStatus !== "none"
               ? <Tag color={row.refundStatus === "pending_review" ? "orange" : row.refundStatus === "approved_pending_refund" ? "gold" : row.refundStatus === "refunded" ? "green" : "default"}>{row.refundStatus === "pending_review" ? `待审核 ${money(row.refundAmount)}` : row.refundStatus === "approved_pending_refund" ? `已核减，待退款 ${money(row.refundAmount)}` : row.refundStatus === "refunded" ? `已退款 ${money(row.refundAmount)}` : "已驳回"}</Tag>
@@ -749,18 +759,19 @@ export function RentalOrderDetailPage() {
         type={serviceExecution?.action === "complete" ? "info" : "warning"}
         showIcon
         title="实际时间由本次操作记录，计划时段不能自动证明服务已经履约。"
-        description={serviceExecution?.action === "complete" ? "完成服务必须填写执行结果，并明确记录客户是否确认。" : "取消、失败或未到场会按服务净额生成待审核退款；批准后仍需到资金区办理实际退款。"}
+          description={serviceExecution?.action === "complete" ? "完成服务必须填写执行结果，并明确记录客户是否确认；数量服务可以分次记录，未执行部分仍会保持待处理。" : `取消、失败或未到场会按未执行部分的净额生成待审核退款；批准后仍需到资金区办理实际退款。`}
         style={{ marginBottom: 16 }}
       />
       <Form form={serviceExecutionForm} layout="vertical" onFinish={(values) => executeService.mutate(values)}>
         {serviceExecution?.action === "start" && <span style={{ color: "#666" }}>点击确认后记录当前时间为实际开始时间。</span>}
         {serviceExecution?.action === "complete" && <>
+          {serviceOccurrenceTotalQuantity(serviceExecution.occurrence) > 1 && <Form.Item name="executedQuantity" label="本次实际执行数量" initialValue={serviceOccurrenceRemainingQuantity(serviceExecution.occurrence)} rules={[{ required: true, message: "请输入本次实际执行数量" }]} extra={`剩余可执行 ${serviceOccurrenceRemainingQuantity(serviceExecution.occurrence)} 份；全部执行后才会结束该服务。`}><InputNumber min={1} max={serviceOccurrenceRemainingQuantity(serviceExecution.occurrence)} precision={0} style={{ width: "100%" }} /></Form.Item>}
           <Form.Item name="result" label="执行结果" rules={[{ required: true, whitespace: true, message: "请填写执行结果" }]}><Input.TextArea rows={3} placeholder="例如：服务已完成，客户现场确认" /></Form.Item>
           <Form.Item name="customerConfirmed" label="客户确认" rules={[{ required: true, message: "请选择客户是否确认" }]}><Select options={[{ value: true, label: "客户已确认" }, { value: false, label: "客户未确认" }]} /></Form.Item>
         </>}
         {serviceExecution && ["cancel", "fail", "no_show"].includes(serviceExecution.action) && <>
           <Form.Item name="reason" label="处理原因" rules={[{ required: true, whitespace: true, message: "请填写处理原因" }]}><Input.TextArea rows={3} /></Form.Item>
-          <Form.Item name="refundAmount" label="建议退款净额" extra={`留空按服务客户实际净支付 ${money(serviceOccurrenceNetAmount(serviceExecution.occurrence))} 全额退款；实际退款仍需审核。`}><InputNumber min={0} max={serviceOccurrenceNetAmount(serviceExecution.occurrence)} precision={2} prefix={symbol} style={{ width: "100%" }} /></Form.Item>
+          <Form.Item name="refundAmount" label="建议退款净额" extra={`留空按未执行部分的客户实际净支付 ${money(serviceOccurrenceNetAmount(serviceExecution.occurrence) * serviceOccurrenceRemainingQuantity(serviceExecution.occurrence) / serviceOccurrenceTotalQuantity(serviceExecution.occurrence))} 退款；实际退款仍需审核。`}><InputNumber min={0} max={serviceOccurrenceNetAmount(serviceExecution.occurrence) * serviceOccurrenceRemainingQuantity(serviceExecution.occurrence) / serviceOccurrenceTotalQuantity(serviceExecution.occurrence)} precision={2} prefix={symbol} style={{ width: "100%" }} /></Form.Item>
           <Form.Item name="compensationAmount" label="补偿金额（记录用）"><InputNumber min={0} precision={2} prefix={symbol} style={{ width: "100%" }} /></Form.Item>
         </>}
         {serviceExecution?.action !== "start" && <Form.Item name="evidenceAttachments" label="证据引用（可选）" extra="每行或用逗号填写一条照片、签名或附件引用，不在本任务接入文件存储。"><Input.TextArea rows={2} /></Form.Item>}
