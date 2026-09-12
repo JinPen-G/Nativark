@@ -84,6 +84,12 @@ export class MembershipController {
     return this.memberships.submitQualification(tenantId, workspaceId, customerId, body, "admin", req.user?.displayName);
   }
 
+  @Get("personal/:customerId/qualification-history")
+  qualificationHistory(@Param("customerId") customerId: string, @Query("qualificationType") qualificationType?: string) {
+    const { tenantId, workspaceId } = this.scope();
+    return this.memberships.listQualificationRevisions(tenantId, workspaceId, customerId, qualificationType);
+  }
+
   @Get("reviews")
   reviews(@Query("status") status?: string, @Query("type") type?: string) {
     const { tenantId, workspaceId } = this.scope();

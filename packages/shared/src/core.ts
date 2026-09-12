@@ -1427,6 +1427,7 @@ export interface CustomerMembershipReview {
   reason?: string;
   reviewedBy?: string;
   reviewedAt?: string;
+  qualificationSnapshot?: CustomerQualificationRevision;
   createdAt: string;
   updatedAt: string;
 }
@@ -1466,10 +1467,45 @@ export interface CustomerQualificationRef {
   issuedAt?: string;
   expiresAt?: string;
   status: CustomerQualificationStatus;
+  /** 最近一次提交来源；不是审核结论。 */
+  source?: "admin" | "app" | string;
   evidenceRef?: string;
   verifiedAt?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface CustomerQualificationApplicableScope {
+  workspaceId: string;
+  categoryCode: RentalCategoryCode;
+  capabilityCode?: string;
+  requiredForBooking: boolean;
+}
+
+/** 每次证件提交对应一份不可变快照，供审核详情和重审历史回看。 */
+export interface CustomerQualificationRevision {
+  id: string;
+  tenantId?: string;
+  workspaceId: string;
+  customerId: string;
+  qualificationType: string;
+  categoryCode: RentalCategoryCode;
+  capabilityCode?: string;
+  applicableScope: CustomerQualificationApplicableScope;
+  referenceNoMasked?: string;
+  issuedAt?: string;
+  expiresAt?: string;
+  evidenceRef?: string;
+  source: "admin" | "app" | string;
+  submittedBy?: string;
+  submittedAt: string;
+  qualificationStatus: CustomerQualificationStatus;
+  reviewStatus: CustomerMembershipReviewStatus;
+  reviewReason?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  reviewId?: string;
+  createdAt: string;
 }
 
 /** 当前空间个人会员管理列表。账号、空间关系与证件状态同时展示，但不包含任何明文凭据。 */

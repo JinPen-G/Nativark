@@ -1,4 +1,4 @@
-import type { CustomerAccountStatus, CustomerMembershipPlanAssignment, CustomerMembershipQualificationType, CustomerMembershipStatus, PersonalMembershipMember } from "@store-rental/shared";
+import type { CustomerAccountStatus, CustomerMembershipPlanAssignment, CustomerMembershipQualificationType, CustomerMembershipStatus, CustomerQualificationRevision, PersonalMembershipMember, SubmitCustomerQualificationRequest } from "@store-rental/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Button, Card, Checkbox, Drawer, Form, Input, Modal, Radio, Select, Space, Table, Tag, Tooltip } from "antd";
 import { useState } from "react";
@@ -10,6 +10,8 @@ import { useAuthStore } from "@/features/auth/authStore";
 
 const membershipLabel: Record<string, string> = { pending_activation: "待审核", active: "正常", suspended: "已暂停", risk_restricted: "风险受限", exited: "已退出", closed: "已注销" };
 const qualificationStatus: Record<string, { text: string; color: string }> = { pending: { text: "待审核", color: "processing" }, approved: { text: "已通过", color: "success" }, rejected: { text: "已拒绝", color: "error" }, expired: { text: "已过期", color: "warning" }, revoked: { text: "已撤销", color: "default" }, not_submitted: { text: "未提交", color: "default" } };
+const reviewStatusLabel: Record<string, string> = { pending: "待审核", approved: "已通过", rejected: "已拒绝", supplement_required: "待补件", cancelled: "已取消" };
+const statusMetaColor = (status: string) => ({ pending: "processing", approved: "success", rejected: "error", supplement_required: "warning", cancelled: "default" }[status] ?? "default");
 
 type PersonalForm = { name: string; phone?: string; email?: string; identityNo?: string; temporaryPassword?: string; directApprove?: boolean };
 type StatusForm = {
@@ -23,18 +25,19 @@ export function PersonalMembershipPage() {
   const canManage = hasPermission("store-rental:member:manage"); const canManageAccount = hasPermission("store-rental:member:account-manage"); const canDirectApprove = hasPermission("store-rental:member:review"); const canRiskAction = hasPermission("store-rental:member:risk-action"); const canClose = hasPermission("store-rental:customer:close");
   const [selected, setSelected] = useState<PersonalMembershipMember>(); const [drawer, setDrawer] = useState<"create" | "edit" | "password" | "qualification" | "types" | "grant">(); const [revokeTarget, setRevokeTarget] = useState<CustomerMembershipPlanAssignment>();
   const [statusTarget, setStatusTarget] = useState<PersonalMembershipMember>(); const [statusScope, setStatusScope] = useState<"account" | "workspace">();
-  const [form] = Form.useForm<PersonalForm>(); const [qualificationForm] = Form.useForm<{ qualificationType: string; referenceNo?: string; evidenceRef?: string }>(); const [typeForm] = Form.useForm<CustomerMembershipQualificationType>(); const [grantForm] = Form.useForm<{ planVersionId: string; effectiveFrom?: string; effectiveTo?: string; reason?: string }>(); const [revokeForm] = Form.useForm<{ reason: string }>(); const [statusForm] = Form.useForm<StatusForm>();
+  const [form] = Form.useForm<PersonalForm>(); const [qualificationForm] = Form.useForm<SubmitCustomerQualificationRequest>(); const [typeForm] = Form.useForm<CustomerMembershipQualificationType>(); const [grantForm] = Form.useForm<{ planVersionId: string; effectiveFrom?: string; effectiveTo?: string; reason?: string }>(); const [revokeForm] = Form.useForm<{ reason: string }>(); const [statusForm] = Form.useForm<StatusForm>();
   const statusValue = Form.useWatch("status", statusForm); const acknowledgedManualChecks = Form.useWatch("acknowledgedManualChecks", statusForm);
   const members = useQuery({ queryKey: ["membership-personal"], queryFn: membershipApi.personal });
   const types = useQuery({ queryKey: ["membership-qualification-types"], queryFn: membershipApi.qualificationTypes });
   const settings = useQuery({ queryKey: ["membership-registration-settings"], queryFn: membershipApi.registrationSettings });
   const plans = useQuery({ queryKey: ["membership-plans"], queryFn: membershipApi.plans });
   const assignments = useQuery({ queryKey: ["membership-plan-assignments", selected?.customerId], queryFn: () => membershipApi.planAssignments(selected!.customerId), enabled: Boolean(selected) && drawer === "grant" });
+  const qualificationHistory = useQuery({ queryKey: ["membership-qualification-history", selected?.customerId], queryFn: () => membershipApi.qualificationHistory(selected!.customerId), enabled: Boolean(selected) && drawer === "qualification" });
   const refresh = async () => queryClient.invalidateQueries({ predicate: (query) => String(query.queryKey[0] ?? "").startsWith("membership-") });
   const create = useMutation({ mutationFn: (values: PersonalForm) => membershipApi.registerPersonal({ ...values, phone: values.phone!, channel: "admin", directApprove: values.directApprove ? true : undefined }), onSuccess: async () => { await refresh(); setDrawer(undefined); form.resetFields(); message.success("个人会员已创建"); } });
   const edit = useMutation({ mutationFn: (values: PersonalForm) => membershipApi.savePersonal(selected!.customerId, values), onSuccess: async () => { await refresh(); setDrawer(undefined); message.success("会员资料已更新"); } });
   const password = useMutation({ mutationFn: (values: PersonalForm) => membershipApi.setTemporaryPassword(selected!.customerId, { temporaryPassword: values.temporaryPassword! }), onSuccess: () => { setDrawer(undefined); form.resetFields(); message.success("已设置临时密码，会员首次登录后必须修改"); } });
-  const submitQualification = useMutation({ mutationFn: (values: { qualificationType: string; referenceNo?: string; evidenceRef?: string }) => membershipApi.submitQualification(selected!.customerId, values), onSuccess: async () => { await refresh(); setDrawer(undefined); qualificationForm.resetFields(); message.success("证件已提交，等待独立审核"); } });
+  const submitQualification = useMutation({ mutationFn: (values: SubmitCustomerQualificationRequest) => membershipApi.submitQualification(selected!.customerId, values), onSuccess: async () => { await refresh(); setDrawer(undefined); qualificationForm.resetFields(); message.success("证件已提交，等待独立审核"); } });
   const saveType = useMutation({ mutationFn: (values: CustomerMembershipQualificationType) => membershipApi.saveQualificationType(values), onSuccess: async () => { await refresh(); typeForm.resetFields(); message.success("证件类型已保存"); } });
   const saveMode = useMutation({ mutationFn: (registrationMode: "automatic" | "manual") => membershipApi.saveRegistrationSettings({ registrationMode }), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["membership-registration-settings"] }); message.success("注册审核方式已保存"); } });
   const grant = useMutation({ mutationFn: (values: { planVersionId: string; effectiveFrom?: string; effectiveTo?: string; reason?: string }) => membershipApi.assignPlan({ customerId: selected!.customerId, planVersionId: values.planVersionId, source: "manual", effectiveFrom: values.effectiveFrom, effectiveTo: values.effectiveTo, reason: values.reason }), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["membership-plan-assignments", selected?.customerId] }); setDrawer(undefined); grantForm.resetFields(); message.success("会员方案已授予；后续报价会以权益快照为准"); } });
@@ -89,7 +92,29 @@ export function PersonalMembershipPage() {
         {drawer === "password" && <Form.Item label="新临时密码" name="temporaryPassword" rules={[{ required: true, min: 8 }]}><Input.Password /></Form.Item>}
         <Button type="primary" htmlType="submit" loading={create.isPending || edit.isPending || password.isPending}>保存</Button>
       </Form>}
-      {drawer === "qualification" && <Form form={qualificationForm} layout="vertical" onFinish={(values) => submitQualification.mutate(values)}><Form.Item label="证件类型" name="qualificationType" rules={[{ required: true }]}><Select options={(types.data ?? []).filter((item) => item.status === "enabled").map((item) => ({ value: item.code, label: item.name }))} /></Form.Item><Form.Item label="证件编号" name="referenceNo"><Input /></Form.Item><Form.Item label="附件引用" name="evidenceRef"><Input placeholder="文件服务接入后填文件引用" /></Form.Item><Button type="primary" htmlType="submit" loading={submitQualification.isPending}>提交审核</Button></Form>}
+      {drawer === "qualification" && <>
+        <Form form={qualificationForm} layout="vertical" onFinish={(values) => submitQualification.mutate(values)}>
+          <Form.Item label="证件类型" name="qualificationType" rules={[{ required: true }]}><Select options={(types.data ?? []).filter((item) => item.status === "enabled").map((item) => ({ value: item.code, label: item.name }))} /></Form.Item>
+          <Form.Item label="证件编号" name="referenceNo"><Input /></Form.Item>
+          <Form.Item label="签发时间" name="issuedAt"><Input placeholder="YYYY-MM-DD" /></Form.Item>
+          <Form.Item label="失效时间" name="expiresAt"><Input placeholder="YYYY-MM-DD" /></Form.Item>
+          <Form.Item label="附件引用" name="evidenceRef" extra="仅填写文件服务返回的不可变引用，不填写本地路径或 URL"><Input /></Form.Item>
+          <Button type="primary" htmlType="submit" loading={submitQualification.isPending}>提交审核</Button>
+        </Form>
+        <Card size="small" title="提交与审核历史" style={{ marginTop: 20 }}>
+          <Table<CustomerQualificationRevision> rowKey="id" size="small" loading={qualificationHistory.isLoading} dataSource={qualificationHistory.data ?? []} pagination={{ pageSize: 5 }} scroll={{ x: 1080 }} columns={[
+            { title: "证件", dataIndex: "qualificationType" },
+            { title: "编号", dataIndex: "referenceNoMasked", render: (value) => value ?? "—" },
+            { title: "证件状态", render: (_, row) => <Tag color={qualificationStatus[row.qualificationStatus]?.color}>{qualificationStatus[row.qualificationStatus]?.text ?? row.qualificationStatus}</Tag> },
+            { title: "审核", render: (_, row) => <Tag color={statusMetaColor(row.reviewStatus)}>{reviewStatusLabel[row.reviewStatus] ?? row.reviewStatus}</Tag> },
+            { title: "来源", render: (_, row) => row.source === "app" ? "APP" : "后台" },
+            { title: "提交时间", render: (_, row) => new Date(row.submittedAt).toLocaleString() },
+            { title: "审核人", dataIndex: "reviewedBy", render: (value) => value ?? "—" },
+            { title: "审核意见", dataIndex: "reviewReason", render: (value) => value ?? "—" },
+            { title: "附件引用", dataIndex: "evidenceRef", render: (value) => value ?? "—" }
+          ]} />
+        </Card>
+      </>}
       {drawer === "grant" && <><Form form={grantForm} layout="vertical" onFinish={(values) => grant.mutate(values)}><Form.Item label="已发布个人方案" name="planVersionId" rules={[{ required: true }]}><Select options={(plans.data ?? []).flatMap((plan) => plan.targetType === "personal" ? (plan.versions ?? []).filter((version) => version.status === "published").map((version) => ({ value: version.id, label: `${plan.name} · v${version.version}` })) : [])} /></Form.Item><Form.Item label="生效时间" name="effectiveFrom" extra="留空为提交时生效"><Input placeholder="YYYY-MM-DD HH:mm" /></Form.Item><Form.Item label="失效时间" name="effectiveTo" extra="留空为长期有效"><Input placeholder="YYYY-MM-DD HH:mm" /></Form.Item><Form.Item label="授予原因" name="reason" rules={[{ required: true }]}><Input.TextArea rows={2} /></Form.Item><Button type="primary" htmlType="submit" loading={grant.isPending}>确认授予</Button></Form><Card size="small" title="当前方案授予记录" style={{ marginTop: 20 }}><Table<CustomerMembershipPlanAssignment> rowKey="id" size="small" loading={assignments.isLoading} dataSource={assignments.data ?? []} pagination={false} columns={[{ title: "方案", render: (_, row) => row.snapshot.planName }, { title: "有效期", render: (_, row) => `${row.effectiveFrom.slice(0, 16).replace("T", " ")} ~ ${row.effectiveTo?.slice(0, 16).replace("T", " ") ?? "长期"}` }, { title: "状态", render: (_, row) => <Tag color={row.status === "active" ? "success" : row.status === "expired" ? "warning" : "default"}>{row.status === "active" ? "有效" : row.status === "expired" ? "已过期" : "已撤销"}</Tag> }, { title: "操作", render: (_, row) => row.status === "active" && <Button type="link" disabled={!canManage} onClick={() => { setRevokeTarget(row); revokeForm.resetFields(); }}>撤销</Button> }]} /></Card></>}
       {drawer === "types" && <><Form form={typeForm} layout="vertical" onFinish={(values) => saveType.mutate(values)}><Form.Item label="编码" name="code" rules={[{ required: true }]}><Input /></Form.Item><Form.Item label="名称" name="name" rules={[{ required: true }]}><Input placeholder="例如：驾驶证、操作资格证" /></Form.Item><Form.Item name="requiredForBooking" valuePropName="checked"><Checkbox>下单必需</Checkbox></Form.Item><Button type="primary" htmlType="submit" loading={saveType.isPending}>新增证件类型</Button></Form><Table size="small" rowKey="id" style={{ marginTop: 20 }} dataSource={types.data ?? []} pagination={false} columns={[{ title: "名称", dataIndex: "name" }, { title: "编码", dataIndex: "code" }, { title: "下单要求", render: (_, row) => row.requiredForBooking ? "必需" : "可选" }, { title: "状态", dataIndex: "status" }]} /></>}
     </Drawer>

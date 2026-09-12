@@ -174,6 +174,7 @@ model Tenant {
   customerStatusHistory             CustomerStatusHistoryEntry[]
   customerRiskRecords               CustomerRiskRecord[]
   customerQualificationRefs         CustomerQualificationRef[]
+  customerQualificationRevisions    CustomerQualificationRevision[]
   customerMergeMappings             CustomerMergeMapping[]
   customerSensitiveAccess           CustomerSensitiveAccessAudit[]
   customerInvoiceProfiles           CustomerCorporateInvoiceProfile[]
@@ -231,6 +232,7 @@ model BusinessWorkspace {
   customerWorkspaceLinks            CustomerWorkspaceLink[]
   membershipRegistrationSettings    CustomerMembershipRegistrationSettings?
   membershipReviews                 CustomerMembershipReview[]
+  customerQualificationRevisions    CustomerQualificationRevision[]
   membershipQualificationTypes      CustomerMembershipQualificationType[]
   corporateMemberships              CustomerCorporateMembership[]
   customerMembershipPlans           CustomerMembershipPlan[]
@@ -541,6 +543,7 @@ model CustomerProfile {
   statusHistory                  CustomerStatusHistoryEntry[]
   riskRecords                    CustomerRiskRecord[]
   qualificationRefs              CustomerQualificationRef[]
+  qualificationRevisions         CustomerQualificationRevision[]
   mergeAsSource                  CustomerMergeMapping[]             @relation("CustomerMergeSource")
   mergeAsTarget                  CustomerMergeMapping[]             @relation("CustomerMergeTarget")
   sensitiveAccess                CustomerSensitiveAccessAudit[]
@@ -912,6 +915,10 @@ model CustomerQualificationRef {
   verifiedAt        DateTime?
   /// not_submitted / pending / approved / rejected / expired / revoked（需求 4.8.5 六态）
   status            String          @default("not_submitted")
+  /// 最近一次提交来源：admin / app；不代表审核通过。
+  source            String          @default("manual")
+  currentRevisionId String?         @unique
+  currentRevision   CustomerQualificationRevision? @relation("CurrentQualificationRevision", fields: [currentRevisionId], references: [id], onDelete: SetNull)
   evidenceRef       String?
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
@@ -957,6 +964,7 @@ model CustomerMembershipReview {
   reason            String?           @db.Text
   reviewedBy        String?
   reviewedAt        DateTime?
+  qualificationRevision CustomerQualificationRevision?
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
 
@@ -964,6 +972,49 @@ model CustomerMembershipReview {
   @@index([tenantId, workspaceId, status, reviewType], map: "customer_membership_reviews_scope_status_type_idx")
   @@index([tenantId, customerId, createdAt], map: "customer_membership_reviews_customer_created_idx")
   @@map("customer_membership_reviews")
+}
+
+/// MEMBER-01C：个人证件提交与重审的不可变版本历史。
+///
+/// CustomerQualificationRef 只保留当前有效事实；每次提交都在这里追加一份快照，
+/// 审核结果只更新对应快照的审核字段，不覆盖历史。evidenceRef 仅是文件服务返回的
+/// 不可变引用，不是本表保存的文件路径或可直接访问的 URL。
+model CustomerQualificationRevision {
+  id                 String                @id @default(uuid())
+  tenantId           String
+  tenant             Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId        String
+  workspace          BusinessWorkspace     @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  customerId         String
+  customer           CustomerProfile       @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
+  qualificationType  String
+  categoryCode       String
+  capabilityCode     String?
+  /// 提交时的空间/品类/能力范围快照，后续修改证件类型配置不改写历史。
+  applicableScope    Json
+  referenceNoMasked String?
+  issuedAt           DateTime?
+  expiresAt          DateTime?
+  evidenceRef        String?
+  /// admin / app
+  source             String
+  submittedBy        String?
+  submittedAt        DateTime              @default(now())
+  /// 当前这份证件快照的事实状态。
+  qualificationStatus String               @default("pending")
+  /// 对应审核任务状态。
+  reviewStatus       String                @default("pending")
+  reviewReason       String?               @db.Text
+  reviewedBy         String?
+  reviewedAt         DateTime?
+  reviewId           String?               @unique
+  review             CustomerMembershipReview? @relation(fields: [reviewId], references: [id], onDelete: SetNull)
+  currentQualification CustomerQualificationRef? @relation("CurrentQualificationRevision")
+  createdAt          DateTime              @default(now())
+
+  @@index([tenantId, workspaceId, customerId, qualificationType, submittedAt], map: "customer_qualification_revisions_scope_customer_type_idx")
+  @@index([tenantId, customerId, createdAt], map: "customer_qualification_revisions_customer_created_idx")
+  @@map("customer_qualification_revisions")
 }
 
 /// MEMBER-01C：经营空间的可维护证件类型注册表。品类或 capability 可以扩展它，会员主流程不写死车辆字段。

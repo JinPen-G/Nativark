@@ -13,6 +13,7 @@ import type {
   CustomerMembershipReview,
   CustomerMembershipBookingOption,
   CustomerQualificationRef,
+  CustomerQualificationRevision,
   CustomerQualificationStatus,
   PersonalMembershipMember,
   RegisterPersonalMembershipRequest,
@@ -42,6 +43,16 @@ const dateOrUndefined = (value?: string) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) throw new BadRequestException("日期格式无效");
   return date;
+};
+
+const evidenceRefOrUndefined = (value?: string) => {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  // 这里只接受文件服务返回的不可变引用，不把本地路径或可直接访问的 URL 当作证据。
+  if (/[\\/]/u.test(trimmed) || /^(?:https?|file):/iu.test(trimmed)) {
+    throw new BadRequestException("附件引用必须使用文件服务返回的不可变引用");
+  }
+  return trimmed;
 };
 
 /**
@@ -229,10 +240,10 @@ export class MembershipService {
   async listReviews(tenantId: string, workspaceId: string, status?: string, type?: string): Promise<CustomerMembershipReview[]> {
     const rows = await this.prisma.customerMembershipReview.findMany({
       where: { tenantId, workspaceId, ...(status ? { status } : {}), ...(type ? { reviewType: type } : {}) },
-      include: { customer: { select: { name: true } } },
+      include: { customer: { select: { name: true } }, qualificationRevision: true },
       orderBy: [{ status: "asc" }, { createdAt: "desc" }]
     });
-    return rows.map((row) => this.toReview(row, row.customer.name));
+    return rows.map((row) => this.toReview(row, row.customer.name, row.qualificationRevision ?? undefined));
   }
 
   async review(
@@ -272,14 +283,48 @@ export class MembershipService {
           : input.status === "rejected"
             ? "rejected"
             : "pending";
-        await tx.customerQualificationRef.updateMany({
-          where: { tenantId, customerId: review.customerId, qualificationType: review.qualificationType },
-          data: { status: qualificationStatus, verifiedAt: input.status === "approved" ? now : null }
-        });
+        const revision = await tx.customerQualificationRevision.findFirst({ where: { tenantId, workspaceId, reviewId: review.id } });
+        if (revision) {
+          await tx.customerQualificationRevision.update({
+            where: { id: revision.id },
+            data: {
+              qualificationStatus,
+              reviewStatus: input.status,
+              reviewReason: reason || null,
+              reviewedBy: operator,
+              reviewedAt: now
+            }
+          });
+          // 旧审核不能覆盖后来提交的当前证件；只有仍指向本次快照时才回写当前事实。
+          await tx.customerQualificationRef.updateMany({
+            where: { tenantId, customerId: review.customerId, qualificationType: review.qualificationType, currentRevisionId: revision.id },
+            data: { status: qualificationStatus, verifiedAt: input.status === "approved" ? now : null }
+          });
+        } else {
+          // 兼容历史上没有版本快照的审核任务。
+          await tx.customerQualificationRef.updateMany({
+            where: { tenantId, customerId: review.customerId, qualificationType: review.qualificationType },
+            data: { status: qualificationStatus, verifiedAt: input.status === "approved" ? now : null }
+          });
+        }
       }
       return updated;
     });
-    return this.toReview(result);
+    const reviewed = await this.prisma.customerMembershipReview.findFirst({
+      where: { tenantId, workspaceId, id: result.id },
+      include: { customer: { select: { name: true } }, qualificationRevision: true }
+    });
+    return this.toReview(reviewed ?? result, reviewed?.customer.name, reviewed?.qualificationRevision ?? undefined);
+  }
+
+  async listQualificationRevisions(tenantId: string, workspaceId: string, customerId: string, qualificationType?: string) {
+    await this.requireCustomer(tenantId, customerId, "personal");
+    await this.requireWorkspaceLink(tenantId, workspaceId, customerId);
+    const rows = await this.prisma.customerQualificationRevision.findMany({
+      where: { tenantId, workspaceId, customerId, ...(qualificationType ? { qualificationType } : {}) },
+      orderBy: [{ submittedAt: "desc" }, { createdAt: "desc" }]
+    });
+    return rows.map((row) => this.toQualificationRevision(row));
   }
 
   async listQualificationTypes(tenantId: string, workspaceId: string): Promise<CustomerMembershipQualificationType[]> {
@@ -326,29 +371,44 @@ export class MembershipService {
     if (issuedAt && expiresAt && expiresAt < issuedAt) {
       throw new BadRequestException("证件有效期不能早于签发日期");
     }
+    const evidenceRef = evidenceRefOrUndefined(input.evidenceRef);
     const now = new Date();
     const result = await this.prisma.$transaction(async (tx) => {
+      const review = await tx.customerMembershipReview.create({
+        data: {
+          tenantId, workspaceId, customerId, reviewType: "qualification", qualificationType: input.qualificationType,
+          status: "pending", channel, payload: { evidenceRef, submittedBy: operator } as Prisma.InputJsonValue
+        }
+      });
+      const revision = await tx.customerQualificationRevision.create({
+        data: {
+          tenantId, workspaceId, customerId, qualificationType: input.qualificationType,
+          categoryCode: type.categoryCode, capabilityCode: type.capabilityCode,
+          applicableScope: {
+            workspaceId, categoryCode: type.categoryCode,
+            ...(type.capabilityCode ? { capabilityCode: type.capabilityCode } : {}),
+            requiredForBooking: type.requiredForBooking
+          } as Prisma.InputJsonValue,
+          referenceNoMasked: mask(input.referenceNo), issuedAt, expiresAt, evidenceRef,
+          source: channel, submittedBy: operator, submittedAt: now,
+          qualificationStatus: "pending", reviewStatus: "pending", reviewId: review.id
+        }
+      });
       const qualification = await tx.customerQualificationRef.upsert({
         where: { tenantId_customerId_qualificationType: { tenantId, customerId, qualificationType: input.qualificationType } },
         create: {
           tenantId, customerId, qualificationType: input.qualificationType,
           referenceNoMasked: mask(input.referenceNo), issuedAt,
-          expiresAt, evidenceRef: input.evidenceRef?.trim() || null, status: "pending"
+          expiresAt, evidenceRef: evidenceRef || null, source: channel, currentRevisionId: revision.id, status: "pending"
         },
         update: {
           referenceNoMasked: mask(input.referenceNo), issuedAt,
-          expiresAt, evidenceRef: input.evidenceRef?.trim() || null, status: "pending", verifiedAt: null
+          expiresAt, evidenceRef: evidenceRef || null, source: channel, currentRevisionId: revision.id, status: "pending", verifiedAt: null
         }
       });
-      const review = await tx.customerMembershipReview.create({
-        data: {
-          tenantId, workspaceId, customerId, reviewType: "qualification", qualificationType: input.qualificationType,
-          status: "pending", channel, payload: { evidenceRef: input.evidenceRef?.trim() || undefined, submittedBy: operator } as Prisma.InputJsonValue
-        }
-      });
-      return { qualification, review, now };
+      return { qualification, review, revision, now };
     });
-    return { qualification: this.toQualification(result.qualification), review: this.toReview(result.review) };
+    return { qualification: this.toQualification(result.qualification), review: this.toReview(result.review, undefined, result.revision) };
   }
 
   async listPersonalMembers(tenantId: string, workspaceId: string): Promise<PersonalMembershipMember[]> {
@@ -809,26 +869,55 @@ export class MembershipService {
     };
   }
 
-  private toReview(row: PrismaMembershipReview, customerName?: string): CustomerMembershipReview {
+  private toReview(row: PrismaMembershipReview, customerName?: string, qualificationRevision?: Prisma.CustomerQualificationRevisionGetPayload<{}>): CustomerMembershipReview {
     return {
       id: row.id, tenantId: row.tenantId, workspaceId: row.workspaceId, customerId: row.customerId, customerName,
       reviewType: row.reviewType as CustomerMembershipReview["reviewType"], qualificationType: row.qualificationType ?? undefined,
       status: row.status as CustomerMembershipReview["status"], channel: row.channel, reason: row.reason ?? undefined,
-      reviewedBy: row.reviewedBy ?? undefined, reviewedAt: row.reviewedAt?.toISOString(), createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString()
+      reviewedBy: row.reviewedBy ?? undefined, reviewedAt: row.reviewedAt?.toISOString(),
+      qualificationSnapshot: qualificationRevision ? this.toQualificationRevision(qualificationRevision) : undefined,
+      createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString()
     };
   }
 
   private toQualification(row: {
     id: string; customerId: string; qualificationType: string; referenceNoMasked: string | null; issuedAt: Date | null;
-    expiresAt: Date | null; status: string; evidenceRef: string | null; verifiedAt: Date | null; createdAt: Date; updatedAt: Date;
+    expiresAt: Date | null; status: string; source: string; evidenceRef: string | null; verifiedAt: Date | null; createdAt: Date; updatedAt: Date;
   }): CustomerQualificationRef {
     const status: CustomerQualificationStatus = row.status === "approved" && row.expiresAt && row.expiresAt.getTime() <= Date.now()
       ? "expired"
       : row.status as CustomerQualificationStatus;
     return {
       id: row.id, customerId: row.customerId, qualificationType: row.qualificationType, referenceNoMasked: row.referenceNoMasked ?? undefined,
-      issuedAt: row.issuedAt?.toISOString(), expiresAt: row.expiresAt?.toISOString(), status,
+      issuedAt: row.issuedAt?.toISOString(), expiresAt: row.expiresAt?.toISOString(), status, source: row.source,
       evidenceRef: row.evidenceRef ?? undefined, verifiedAt: row.verifiedAt?.toISOString(), createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString()
+    };
+  }
+
+  private toQualificationRevision(row: {
+    id: string; tenantId: string; workspaceId: string; customerId: string; qualificationType: string; categoryCode: string;
+    capabilityCode: string | null; applicableScope: Prisma.JsonValue; referenceNoMasked: string | null; issuedAt: Date | null;
+    expiresAt: Date | null; evidenceRef: string | null; source: string; submittedBy: string | null; submittedAt: Date;
+    qualificationStatus: string; reviewStatus: string; reviewReason: string | null; reviewedBy: string | null;
+    reviewedAt: Date | null; reviewId: string | null; createdAt: Date;
+  }): CustomerQualificationRevision {
+    const scope = (row.applicableScope ?? {}) as { workspaceId?: string; categoryCode?: string; capabilityCode?: string; requiredForBooking?: boolean };
+    return {
+      id: row.id, tenantId: row.tenantId, workspaceId: row.workspaceId, customerId: row.customerId,
+      qualificationType: row.qualificationType, categoryCode: row.categoryCode as CustomerQualificationRevision["categoryCode"],
+      capabilityCode: row.capabilityCode ?? undefined,
+      applicableScope: {
+        workspaceId: scope.workspaceId ?? row.workspaceId,
+        categoryCode: (scope.categoryCode ?? row.categoryCode) as CustomerQualificationRevision["categoryCode"],
+        capabilityCode: scope.capabilityCode ?? row.capabilityCode ?? undefined,
+        requiredForBooking: Boolean(scope.requiredForBooking)
+      },
+      referenceNoMasked: row.referenceNoMasked ?? undefined, issuedAt: row.issuedAt?.toISOString(), expiresAt: row.expiresAt?.toISOString(),
+      evidenceRef: row.evidenceRef ?? undefined, source: row.source, submittedBy: row.submittedBy ?? undefined,
+      submittedAt: row.submittedAt.toISOString(), qualificationStatus: row.qualificationStatus as CustomerQualificationRevision["qualificationStatus"],
+      reviewStatus: row.reviewStatus as CustomerQualificationRevision["reviewStatus"], reviewReason: row.reviewReason ?? undefined,
+      reviewedBy: row.reviewedBy ?? undefined, reviewedAt: row.reviewedAt?.toISOString(), reviewId: row.reviewId ?? undefined,
+      createdAt: row.createdAt.toISOString()
     };
   }
 

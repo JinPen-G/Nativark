@@ -7,6 +7,7 @@ import type {
   CustomerMembershipQualificationType,
   CustomerMembershipRegistrationSettings,
   CustomerMembershipReview,
+  CustomerQualificationRevision,
   PersonalMembershipMember,
   RegisterPersonalMembershipRequest,
   ReviewCustomerMembershipRequest,
@@ -34,6 +35,8 @@ export const membershipApi = {
     request<unknown>(`/membership/personal/${customerId}/temporary-password`, { method: "put", data }),
   submitQualification: (customerId: string, data: SubmitCustomerQualificationRequest) =>
     request<unknown>(`/membership/personal/${customerId}/qualifications`, { method: "post", data }),
+  qualificationHistory: (customerId: string, qualificationType?: string) =>
+    request<CustomerQualificationRevision[]>(`/membership/personal/${customerId}/qualification-history`, { params: qualificationType ? { qualificationType } : undefined }),
   reviews: (params?: { status?: string; type?: string }) => request<CustomerMembershipReview[]>("/membership/reviews", { params }),
   review: (reviewId: string, data: ReviewCustomerMembershipRequest) =>
     request<CustomerMembershipReview>(`/membership/reviews/${reviewId}/decision`, { method: "post", data }),

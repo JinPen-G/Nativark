@@ -203,19 +203,44 @@ void (async () => {
     console.log("  ✓ 会员方案授予强制记录原因与有效期，停用不影响历史快照，恢复生成新草稿");
     console.log("  ✓ 会员方案授予记录可回看，撤销必须记录原因且保留审计状态");
 
-    const qualificationSubmission = await memberships.submitQualification(tenantId, workspaceId, personalId, {
-      qualificationType: "driver_license", issuedAt: "2026-01-01T00:00:00.000Z", expiresAt: "2099-01-01T00:00:00.000Z"
+    const firstQualificationSubmission = await memberships.submitQualification(tenantId, workspaceId, personalId, {
+      qualificationType: "driver_license", issuedAt: "2026-01-01T00:00:00.000Z", expiresAt: "2099-01-01T00:00:00.000Z", evidenceRef: "evidence-first"
     }, "admin", "资格测试管理员");
+    assert.equal(firstQualificationSubmission.review.qualificationSnapshot?.evidenceRef, "evidence-first");
+    const firstHistory = await memberships.listQualificationRevisions(tenantId, workspaceId, personalId, "driver_license");
+    assert.equal(firstHistory.length, 1, "首次提交必须留下不可变资质快照");
+    assert.equal(firstHistory[0].applicableScope.workspaceId, workspaceId);
+    assert.equal(firstHistory[0].source, "admin");
     await assert.rejects(
-      () => memberships.review(tenantId, workspaceId, qualificationSubmission.review.id, { status: "rejected" }, "资格审核员", { registration: false, qualification: true }),
+      () => memberships.submitQualification(tenantId, workspaceId, personalId, { qualificationType: "driver_license", evidenceRef: "C:\\private\\license.jpg" }, "admin", "资格测试管理员"),
+      /附件引用必须使用文件服务返回的不可变引用/u
+    );
+    const secondQualificationSubmission = await memberships.submitQualification(tenantId, workspaceId, personalId, {
+      qualificationType: "driver_license", issuedAt: "2026-02-01T00:00:00.000Z", expiresAt: "2098-01-01T00:00:00.000Z", evidenceRef: "evidence-second"
+    }, "app", "APP");
+    const approvedOldQualification = await memberships.review(
+      tenantId, workspaceId, firstQualificationSubmission.review.id, { status: "approved" }, "资格审核员", { registration: false, qualification: true }
+    );
+    assert.equal(approvedOldQualification.status, "approved");
+    const currentAfterOldReview = await prisma.customerQualificationRef.findFirst({ where: { tenantId, customerId: personalId, qualificationType: "driver_license" } });
+    assert.equal(currentAfterOldReview.currentRevisionId, secondQualificationSubmission.review.qualificationSnapshot.id, "旧审核不得把当前证件指针切回旧版本");
+    assert.equal(currentAfterOldReview.status, "pending", "新证件仍待审核时，旧证件通过不能提前放行当前资格");
+    const historyAfterResubmit = await memberships.listQualificationRevisions(tenantId, workspaceId, personalId, "driver_license");
+    assert.equal(historyAfterResubmit.length, 2, "重新提交不得覆盖上一份资质历史");
+    assert.equal(historyAfterResubmit.find((row) => row.id === firstQualificationSubmission.review.qualificationSnapshot.id)?.reviewStatus, "approved");
+    assert.equal(historyAfterResubmit.find((row) => row.id === secondQualificationSubmission.review.qualificationSnapshot.id)?.reviewStatus, "pending");
+    await assert.rejects(
+      () => memberships.review(tenantId, workspaceId, secondQualificationSubmission.review.id, { status: "rejected" }, "资格审核员", { registration: false, qualification: true }),
       /拒绝、补件或取消审核必须填写原因/u
     );
     const rejectedQualification = await memberships.review(
-      tenantId, workspaceId, qualificationSubmission.review.id, { status: "rejected", reason: "证件照片无法辨识" }, "资格审核员", { registration: false, qualification: true }
+      tenantId, workspaceId, secondQualificationSubmission.review.id, { status: "rejected", reason: "证件照片无法辨识" }, "资格审核员", { registration: false, qualification: true }
     );
     assert.equal(rejectedQualification.status, "rejected");
     assert.equal(rejectedQualification.reason, "证件照片无法辨识");
-    console.log("  ✓ 非通过审核必须记录原因，并回写证件审核状态");
+    assert.equal(rejectedQualification.qualificationSnapshot?.reviewReason, "证件照片无法辨识");
+    assert.equal((await prisma.customerQualificationRef.findFirst({ where: { tenantId, customerId: personalId, qualificationType: "driver_license" } })).status, "rejected");
+    console.log("  ✓ 非通过审核必须记录原因，历史快照可回看，旧审核不会覆盖新提交");
 
     await prisma.customerQualificationRef.updateMany({ where: { tenantId, customerId: personalId }, data: { status: "revoked" } });
     await assert.rejects(
