@@ -95,6 +95,7 @@
     "test:fee-review-permission": "npm run build -w @store-rental/shared && node tests/rental-fee-review-permission.test.cjs",
     "test:early-return": "npm run build -w @store-rental/shared && node tests/rental-early-return.test.cjs",
     "test:funding-gates": "npm run build -w @store-rental/shared && node tests/rental-funding-gates.test.cjs",
+    "test:funding-events": "node tests/rental-funding-events.test.cjs",
     "test:security-deposit": "npm run build -w @store-rental/shared && node tests/rental-security-deposit.test.cjs",
     "test:security-rule-form": "npm run build -w @store-rental/shared && node tests/rental-security-rule-form.test.cjs",
     "test:order-settlement": "npm run build -w @store-rental/shared && node tests/rental-order-settlement.test.cjs",

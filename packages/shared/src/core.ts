@@ -3203,8 +3203,9 @@ export interface RentalFundingBalance {
   orderId: string;
   /** 模拟收付款账；保证金只有实际抵扣后才计入已付，退款减少净收款。 */
   rental: { payable: number; collected: number; refunded: number; securityCaptured: number; balance: number; pendingExtensionAmount: number };
-  deposit: { collected: number; captured: number; refunded: number; balance: number };
-  preauthorization: { frozen: number; captured: number; released: number; balance: number };
+  /** pendingExtensionAmount 是尚未生效续租申请带来的新增资金要求。 */
+  deposit: { collected: number; captured: number; refunded: number; balance: number; requiredAmount: number; pendingExtensionAmount: number };
+  preauthorization: { frozen: number; captured: number; released: number; balance: number; requiredAmount: number; pendingExtensionAmount: number };
   events: RentalFundingEvent[];
 }
 

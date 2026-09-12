@@ -75,6 +75,56 @@ void (async () => {
     }
   });
 
+  // 续租申请尚未生效时，押金/预授权增量也必须进入首次发起目标；
+  // 这是基础订单金额为 0 时仍能补收/补冻的关键回归用例。
+  const pendingExtensionId = `${tag}-extension`;
+  await prisma.rentalOrderExtension.create({
+    data: {
+      id: pendingExtensionId,
+      tenantId,
+      workspaceId: workspace.id,
+      orderId,
+      sequence: 1,
+      status: "pending_payment",
+      originalEndAt: new Date("2049-01-02T00:00:00.000Z"),
+      newEndAt: new Date("2049-01-03T00:00:00.000Z"),
+      billableUnits: 1,
+      rentalAmount: 100,
+      serviceAmount: 0,
+      depositDelta: 100,
+      preAuthDelta: 200,
+      payableAmount: 100,
+      currency: "CNY",
+      ruleVersion: "test",
+      rateSnapshot: [],
+      ruleSnapshot: {},
+      calendarSnapshot: [],
+      settlementMode: "immediate",
+      idempotencyKey: `${tag}:extension`,
+      createdBy: "rule-01b-test"
+    }
+  });
+  await prisma.rentalOrder.update({ where: { id: orderId }, data: { depositAmount: 0, preAuthAmount: 0 } });
+  const pendingSummary = await funding.listEvents(tenantId, workspace.id, orderId);
+  assert.equal(pendingSummary.deposit.requiredAmount, 100, "资金摘要总押金目标要包含待生效续租增量");
+  assert.equal(pendingSummary.preauthorization.requiredAmount, 200, "资金摘要总预授权目标要包含待生效续租增量");
+  assert.equal(pendingSummary.deposit.pendingExtensionAmount, 100, "资金摘要要展示待补押金增量");
+  assert.equal(pendingSummary.preauthorization.pendingExtensionAmount, 200, "资金摘要要展示待补预授权增量");
+  assert.equal(pendingSummary.rental.pendingExtensionAmount, 100, "资金摘要要展示待补租金");
+
+  const pendingDeposit = await funding.recordEvent(tenantId, workspace.id, orderId, {
+    instrument: "deposit", action: "initiate", idempotencyKey: `${tag}:pending-deposit`, reason: "基础押金为 0 时收取续租押金增量"
+  }, "专项");
+  assert.equal(pendingDeposit.amount, 100, "基础押金为 0 时也必须能发起待生效续租押金增量");
+  const pendingPreauth = await funding.recordEvent(tenantId, workspace.id, orderId, {
+    instrument: "preauthorization", action: "initiate", idempotencyKey: `${tag}:pending-preauth`, reason: "基础预授权为 0 时冻结续租预授权增量"
+  }, "专项");
+  assert.equal(pendingPreauth.amount, 200, "基础预授权为 0 时也必须能发起待生效续租预授权增量");
+  await prisma.rentalFundingEvent.deleteMany({ where: { orderId } });
+  await prisma.rentalOrderExtension.delete({ where: { id: pendingExtensionId } });
+  await prisma.rentalOrder.update({ where: { id: orderId }, data: { depositAmount: 500, preAuthAmount: 800 } });
+  console.log("  PASS  待补款续租的押金/预授权增量可在基础目标为 0 或未收取时正常发起");
+
   await assert.rejects(
     prisma.$transaction((tx) => funding.assertReadyForPickup(tenantId, workspace.id, orderId, tx)),
     /足额收取押金/,
@@ -100,7 +150,14 @@ void (async () => {
   await funding.recordEvent(tenantId, workspace.id, orderId, {
     instrument: "preauthorization", action: "initiate", idempotencyKey: `${tag}:preauth`, reason: "按订单快照冻结"
   }, "专项");
+  const rental = await funding.recordEvent(tenantId, workspace.id, orderId, {
+    instrument: "rental", action: "initiate", idempotencyKey: `${tag}:rental`, reason: "按订单应收登记租金"
+  }, "专项");
+  assert.equal(rental.amount, 1500, "领取前租金必须按订单最终应收登记");
   await prisma.$transaction((tx) => funding.assertReadyForPickup(tenantId, workspace.id, orderId, tx));
+  // 模拟归还检查后新增一笔尚未收取的异常费用：预授权抵扣只能覆盖真实未收应收，
+  // 不能在没有费用的订单上凭空转扣。
+  await prisma.rentalOrder.update({ where: { id: orderId }, data: { finalPayableAmount: 2000, totalAmount: 2000, adjustmentAmount: 500 } });
   await assert.rejects(
     prisma.$transaction((tx) => funding.assertReadyToClose(tenantId, workspace.id, orderId, tx)),
     /押金余额/,

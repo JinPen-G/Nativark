@@ -9,7 +9,8 @@ const {
   deriveFundingLedgers,
   nextBalanceAfter,
   assertActionApplies,
-  rentalPaymentBalance
+  rentalPaymentBalance,
+  aggregatePendingExtensionFunding
 } = require("../apps/api/src/modules/rental-core/rental-funding-events");
 
 /**
@@ -114,6 +115,17 @@ const rejects = (fn, pattern, label) =>
   assert.doesNotThrow(() => assertActionApplies("rental", "append"));
   rejects(() => assertActionApplies("rental", "capture"), /租金与费用不支持 capture/u, "租金不能伪装成保证金抵扣");
   ok("租金收付款与保证金独立结算，退款不会被当作已结清");
+}
+
+// ============ 8. 待补款续租的三类资金要求分别汇总 ============
+{
+  const pending = aggregatePendingExtensionFunding([
+    { payableAmount: 120, depositDelta: 80, preAuthDelta: 0 },
+    { payableAmount: 30, depositDelta: 0, preAuthDelta: 200 }
+  ]);
+  assert.deepEqual(pending, { payableAmount: 150, depositAmount: 80, preauthorizationAmount: 200 });
+  assert.deepEqual(aggregatePendingExtensionFunding([]), { payableAmount: 0, depositAmount: 0, preauthorizationAmount: 0 });
+  ok("待补款续租分别汇总租金、押金和预授权增量，空集合为零");
 }
 
 console.log("\nAll funding-events assertions passed.");

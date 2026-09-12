@@ -36,6 +36,35 @@ export interface FundingLedgers {
   preauthorization: PreauthLedger;
 }
 
+export interface PendingExtensionFundingRow {
+  payableAmount: number;
+  depositDelta: number;
+  preAuthDelta: number;
+}
+
+export interface PendingExtensionFunding {
+  payableAmount: number;
+  depositAmount: number;
+  preauthorizationAmount: number;
+}
+
+/**
+ * 汇总尚未生效的续租资金要求。
+ *
+ * 即时续租在补款前不会推进订单的有效租期，但押金/预授权增量已经是本次
+ * 申请要求收取或冻结的资金事实。统一从这里汇总，避免“租金能补、保证金
+ * 却被当成 0”这种半完成状态。
+ */
+export function aggregatePendingExtensionFunding(
+  rows: readonly PendingExtensionFundingRow[]
+): PendingExtensionFunding {
+  return {
+    payableAmount: money(rows.reduce((sum, row) => sum + Number(row.payableAmount), 0)),
+    depositAmount: money(rows.reduce((sum, row) => sum + Number(row.depositDelta), 0)),
+    preauthorizationAmount: money(rows.reduce((sum, row) => sum + Number(row.preAuthDelta), 0))
+  };
+}
+
 /** 哪些动作对哪个 instrument 合法。押金不能 release（实收的钱只能退款），预授权不能 refund。 */
 const ALLOWED: Record<RentalFundingInstrument, ReadonlySet<RentalFundingAction>> = {
   rental: new Set<RentalFundingAction>(["initiate", "append", "refund", "fail"]),

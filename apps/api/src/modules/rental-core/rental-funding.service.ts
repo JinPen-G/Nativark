@@ -8,7 +8,7 @@ import type {
   RentalFundingInstrument
 } from "@store-rental/shared";
 import { PrismaService } from "../database/prisma.service";
-import { assertActionApplies, deriveFundingLedgers, nextBalanceAfter, rentalPaymentBalance } from "./rental-funding-events";
+import { aggregatePendingExtensionFunding, assertActionApplies, deriveFundingLedgers, nextBalanceAfter, rentalPaymentBalance } from "./rental-funding-events";
 import { pendingExtensionCountsAsDue } from "./rental-extension-lifecycle";
 
 type FundingOrder = { depositAmount: number; preAuthAmount: number; payable: number; status: string; ruleSnapshot: { payment?: { timing?: string } } };
@@ -80,23 +80,39 @@ export class RentalFundingService {
   async listEvents(tenantId: string, workspaceId: string, orderId: string): Promise<RentalFundingBalance> {
     await this.loadOrderScope(tenantId, workspaceId, orderId);
     const order = await this.prisma.rentalOrder.findFirstOrThrow({ where: { id: orderId, tenantId, workspaceId } });
-    const extensions = await this.prisma.rentalOrderExtension.findMany({ where: { tenantId, workspaceId, orderId, status: "pending_payment" } });
+    const extensions = await this.prisma.rentalOrderExtension.findMany({
+      where: { tenantId, workspaceId, orderId, status: { in: ["pending_payment", "effective"] } }
+    });
+    const effective = aggregatePendingExtensionFunding(extensions.filter((row) => row.status === "effective").map((row) => ({
+      payableAmount: Number(row.payableAmount),
+      depositDelta: Number(row.depositDelta),
+      preAuthDelta: Number(row.preAuthDelta)
+    })));
+    const pending = aggregatePendingExtensionFunding((pendingExtensionCountsAsDue(order.status) ? extensions.filter((row) => row.status === "pending_payment") : []).map((row) => ({
+      payableAmount: Number(row.payableAmount),
+      depositDelta: Number(row.depositDelta),
+      preAuthDelta: Number(row.preAuthDelta)
+    })));
     const events = await this.loadEvents(this.prisma, tenantId, workspaceId, orderId);
     const ledgers = deriveFundingLedgers(events);
     return {
       orderId,
-      rental: { ...rentalPaymentBalance(Number(order.finalPayableAmount), events), pendingExtensionAmount: extensions.reduce((sum, row) => sum + Number(row.payableAmount), 0) },
+      rental: { ...rentalPaymentBalance(Number(order.finalPayableAmount), events), pendingExtensionAmount: pending.payableAmount },
       deposit: {
         collected: ledgers.deposit.collected,
         captured: ledgers.deposit.captured,
         refunded: ledgers.deposit.refunded,
-        balance: ledgers.deposit.balance
+        balance: ledgers.deposit.balance,
+        requiredAmount: Number(order.depositAmount) + effective.depositAmount + pending.depositAmount,
+        pendingExtensionAmount: pending.depositAmount
       },
       preauthorization: {
         frozen: ledgers.preauthorization.frozen,
         captured: ledgers.preauthorization.captured,
         released: ledgers.preauthorization.released,
-        balance: ledgers.preauthorization.balance
+        balance: ledgers.preauthorization.balance,
+        requiredAmount: Number(order.preAuthAmount) + effective.preauthorizationAmount + pending.preauthorizationAmount,
+        pendingExtensionAmount: pending.preauthorizationAmount
       },
       events
     };
@@ -117,7 +133,12 @@ export class RentalFundingService {
     const order = rows[0];
     if (!order) throw new NotFoundException("订单不存在或不属于当前经营空间");
     const extensions = await tx.rentalOrderExtension.findMany({ where: { tenantId, workspaceId, orderId, status: "effective" } });
-    return { depositAmount: Number(order.depositAmount) + extensions.reduce((s, e) => s + Number(e.depositDelta), 0), preAuthAmount: Number(order.preAuthAmount) + extensions.reduce((s, e) => s + Number(e.preAuthDelta), 0), payable: Number(order.finalPayableAmount), status: order.status.toLowerCase(), ruleSnapshot: order.ruleSnapshot };
+    const effective = aggregatePendingExtensionFunding(extensions.map((row) => ({
+      payableAmount: Number(row.payableAmount),
+      depositDelta: Number(row.depositDelta),
+      preAuthDelta: Number(row.preAuthDelta)
+    })));
+    return { depositAmount: Number(order.depositAmount) + effective.depositAmount, preAuthAmount: Number(order.preAuthAmount) + effective.preauthorizationAmount, payable: Number(order.finalPayableAmount), status: order.status.toLowerCase(), ruleSnapshot: order.ruleSnapshot };
   }
 
   /** 领取前必须已经按订单快照足额收取押金、冻结预授权。 */
@@ -226,11 +247,18 @@ export class RentalFundingService {
       const pending = !stillCollectable
         ? []
         : await tx.rentalOrderExtension.findMany({ where: { tenantId, workspaceId, orderId, status: "pending_payment" } });
-      const due = payment.balance + pending.reduce((sum, row) => sum + Number(row.payableAmount), 0);
+      const pendingFunding = aggregatePendingExtensionFunding(pending.map((row) => ({
+        payableAmount: Number(row.payableAmount),
+        depositDelta: Number(row.depositDelta),
+        preAuthDelta: Number(row.preAuthDelta)
+      })));
+      const due = payment.balance + pendingFunding.payableAmount;
       let effectiveAmount: number;
       if (input.action === "initiate") {
         // 首次应收/应冻结额是订单快照事实，客户端不得自行填写金额。
-        effectiveAmount = input.instrument === "rental" ? due : Number(input.instrument === "deposit" ? order.depositAmount : order.preAuthAmount);
+        effectiveAmount = input.instrument === "rental"
+          ? due
+          : Number(input.instrument === "deposit" ? order.depositAmount + pendingFunding.depositAmount : order.preAuthAmount + pendingFunding.preauthorizationAmount);
         if (effectiveAmount <= 0) {
           throw new ConflictException(
             input.instrument === "rental"

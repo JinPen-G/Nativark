@@ -310,6 +310,12 @@ export function RentalOrderDetailPage() {
   // 不能改读当前经营空间的设置——空间后来改了币种，历史单的金额含义不会跟着改。
   const money = (value: number | undefined) => formatRentalMoney(Number(value ?? 0), detail?.currency);
   const symbol = rentalCurrencySymbol(detail?.currency);
+  // 续租不会改写原订单金额列，资金摘要返回包含已生效/待补续租的完整目标。
+  // 这里优先消费服务端目标，旧响应缺字段时才回退到基础目标，避免页面自算漏掉已生效增量。
+  const pendingDepositAmount = funding.data?.deposit.pendingExtensionAmount ?? 0;
+  const pendingPreauthorizationAmount = funding.data?.preauthorization.pendingExtensionAmount ?? 0;
+  const depositRequirement = funding.data?.deposit.requiredAmount ?? Number(detail?.depositAmount ?? 0) + pendingDepositAmount;
+  const preauthorizationRequirement = funding.data?.preauthorization.requiredAmount ?? Number(detail?.preAuthAmount ?? 0) + pendingPreauthorizationAmount;
   // 当前该还的时间：续租过就是新时间。约定归还（endAt）不因续租改写（需求 4.6.9）。
   const detailEndAt = detail?.effectiveEndAt ?? detail?.endAt ?? new Date().toISOString();
   const noShowRule = detail?.ruleSnapshot?.cancellation?.noShow;
@@ -528,19 +534,20 @@ export function RentalOrderDetailPage() {
         </Space>}
         <Alert type="warning" showIcon title="当前未接入真实支付机构；以下操作只记录可追溯的模拟资金事件，不代表真实收款、冻结或退款。" style={{ marginBottom: 16 }} />
         <Descriptions column={{ xs: 1, md: 2 }} items={[
-          { key: "deposit", label: `应收押金 ${money(detail.depositAmount)}`, children: funding.data ? `已收 ${money(funding.data.deposit.collected)} / 已抵扣 ${money(funding.data.deposit.captured)} / 已退 ${money(funding.data.deposit.refunded)} / 余额 ${money(funding.data.deposit.balance)}` : "加载中" },
-          { key: "preauth", label: `应冻结预授权 ${money(detail.preAuthAmount)}`, children: funding.data ? `已冻结 ${money(funding.data.preauthorization.frozen)} / 已转扣 ${money(funding.data.preauthorization.captured)} / 已释放 ${money(funding.data.preauthorization.released)} / 余额 ${money(funding.data.preauthorization.balance)}` : "加载中" }
+          { key: "deposit", label: `应收押金 ${money(depositRequirement)}`, children: funding.data ? `已收 ${money(funding.data.deposit.collected)} / 已抵扣 ${money(funding.data.deposit.captured)} / 已退 ${money(funding.data.deposit.refunded)} / 余额 ${money(funding.data.deposit.balance)}${pendingDepositAmount > 0 ? ` / 续租待补 ${money(pendingDepositAmount)}` : ""}` : "加载中" },
+          { key: "preauth", label: `应冻结预授权 ${money(preauthorizationRequirement)}`, children: funding.data ? `已冻结 ${money(funding.data.preauthorization.frozen)} / 已转扣 ${money(funding.data.preauthorization.captured)} / 已释放 ${money(funding.data.preauthorization.released)} / 余额 ${money(funding.data.preauthorization.balance)}${pendingPreauthorizationAmount > 0 ? ` / 续租待补 ${money(pendingPreauthorizationAmount)}` : ""}` : "加载中" }
         ]} />
         {canSettleFunding && <Space wrap style={{ margin: "12px 0" }}>
-          {detail.depositAmount > 0 && !funding.data?.deposit.collected && <Button onClick={() => setFundingOperation({ instrument: "deposit", action: "initiate" })}>模拟收取押金</Button>}
+          {depositRequirement > 0 && !funding.data?.deposit.collected && <Button onClick={() => setFundingOperation({ instrument: "deposit", action: "initiate" })}>模拟收取押金</Button>}
           {(funding.data?.deposit.collected ?? 0) > 0 && <Button onClick={() => setFundingOperation({ instrument: "deposit", action: "append" })}>追加押金</Button>}
           {(funding.data?.deposit.balance ?? 0) > 0 && <Button onClick={() => setFundingOperation({ instrument: "deposit", action: "capture" })}>押金抵扣</Button>}
           {(funding.data?.deposit.balance ?? 0) > 0 && <Button onClick={() => setFundingOperation({ instrument: "deposit", action: "refund" })}>押金退款</Button>}
-          {detail.preAuthAmount > 0 && !funding.data?.preauthorization.frozen && <Button onClick={() => setFundingOperation({ instrument: "preauthorization", action: "initiate" })}>模拟冻结预授权</Button>}
+          {preauthorizationRequirement > 0 && !funding.data?.preauthorization.frozen && <Button onClick={() => setFundingOperation({ instrument: "preauthorization", action: "initiate" })}>模拟冻结预授权</Button>}
           {(funding.data?.preauthorization.frozen ?? 0) > 0 && <Button onClick={() => setFundingOperation({ instrument: "preauthorization", action: "append" })}>追加预授权</Button>}
           {(funding.data?.preauthorization.balance ?? 0) > 0 && <Button onClick={() => setFundingOperation({ instrument: "preauthorization", action: "capture" })}>预授权转扣</Button>}
           {(funding.data?.preauthorization.balance ?? 0) > 0 && <Button onClick={() => setFundingOperation({ instrument: "preauthorization", action: "release" })}>释放全部预授权</Button>}
-          <Button danger onClick={() => setFundingOperation({ instrument: detail.preAuthAmount > 0 ? "preauthorization" : "deposit", action: "fail" })}>记录资金失败</Button>
+          {depositRequirement > 0 && <Button danger onClick={() => setFundingOperation({ instrument: "deposit", action: "fail" })}>记录押金收取失败</Button>}
+          {preauthorizationRequirement > 0 && <Button danger onClick={() => setFundingOperation({ instrument: "preauthorization", action: "fail" })}>记录预授权冻结失败</Button>}
         </Space>}
         <Table rowKey="id" size="small" pagination={false} loading={funding.isLoading} dataSource={funding.data?.events ?? []} columns={[
           { title: "时间", dataIndex: "at", render: (value) => new Date(String(value)).toLocaleString() },
