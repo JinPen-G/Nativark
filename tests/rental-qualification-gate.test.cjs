@@ -37,6 +37,8 @@ const workspaceId = `ws_qual_${suffix}`;
 const otherWorkspaceId = `ws_qual_other_${suffix}`;
 const personalId = `personal_qual_${suffix}`;
 const corporateId = `corporate_qual_${suffix}`;
+const planId = `plan_qual_${suffix}`;
+const planVersionId = `plan_version_qual_${suffix}`;
 
 const prisma = new PrismaClient();
 const memberships = new MembershipService(prisma);
@@ -76,6 +78,15 @@ async function seed() {
       { id: personalId, tenantId, customerType: "personal", name: "资格测试个人", phone: `138${suffix.slice(-8)}`, phoneMasked: "138****0000", qualifications: {} },
       { id: corporateId, tenantId, customerType: "corporate", name: "资格测试企业", phone: `139${suffix.slice(-8)}`, phoneMasked: "139****0000", qualifications: {}, corporateName: "资格测试企业有限公司" }
     ]
+  });
+  await prisma.customerMembershipPlan.create({
+    data: { id: planId, tenantId, workspaceId, code: `QUAL-PLAN-${suffix}`, name: "资格测试会员方案", targetType: "personal", status: "active" }
+  });
+  await prisma.customerMembershipPlanVersion.create({
+    data: {
+      id: planVersionId, tenantId, workspaceId, planId, version: 1, status: "published", levelRank: 1,
+      eligibility: {}, benefits: [{ type: "rental_discount", calculation: "amount", value: 50 }], publishedAt: new Date()
+    }
   });
   await prisma.customerWorkspaceLink.createMany({
     data: [
@@ -141,6 +152,30 @@ void (async () => {
       /员工关系失效时间不能早于生效时间/u
     );
     console.log("  ✓ 暂停中的个人会员和倒置有效期不能建立企业员工关系");
+
+    await assert.rejects(
+      () => memberships.assignPlan(tenantId, workspaceId, { customerId: personalId, planVersionId }, "资格测试管理员"),
+      /人工授予或合同授予会员方案必须填写原因/u
+    );
+    await assert.rejects(
+      () => memberships.assignPlan(tenantId, workspaceId, { customerId: personalId, planVersionId, reason: "测试授予", effectiveFrom: "not-a-date" }, "资格测试管理员"),
+      /日期格式无效/u
+    );
+    await assert.rejects(
+      () => memberships.assignPlan(tenantId, workspaceId, { customerId: personalId, planVersionId, reason: "测试授予", effectiveFrom: "2026-09-14T00:00:00.000Z", effectiveTo: "2026-09-13T00:00:00.000Z" }, "资格测试管理员"),
+      /会员方案失效时间不能早于生效时间/u
+    );
+    const assignment = await memberships.assignPlan(tenantId, workspaceId, {
+      customerId: personalId, planVersionId, source: "manual", reason: "首批会员测试授予",
+      effectiveFrom: new Date(Date.now() - 60_000).toISOString(), effectiveTo: new Date(Date.now() + 86_400_000).toISOString()
+    }, "资格测试管理员");
+    assert.equal(assignment.snapshot.benefits[0].value, 50);
+    const beforePlanUpdate = await memberships.resolveBenefits(tenantId, workspaceId, personalId);
+    assert.equal(beforePlanUpdate.personal?.snapshot.benefits[0].value, 50);
+    await prisma.customerMembershipPlanVersion.update({ where: { id: planVersionId }, data: { benefits: [{ type: "rental_discount", calculation: "amount", value: 100 }] } });
+    const afterPlanUpdate = await memberships.resolveBenefits(tenantId, workspaceId, personalId);
+    assert.equal(afterPlanUpdate.personal?.snapshot.benefits[0].value, 50, "方案版本变更不得改写已授予会员的权益快照");
+    console.log("  ✓ 会员方案授予强制记录原因与有效期，历史权益按授予时快照保持不变");
 
     const qualificationSubmission = await memberships.submitQualification(tenantId, workspaceId, personalId, {
       qualificationType: "driver_license", issuedAt: "2026-01-01T00:00:00.000Z", expiresAt: "2099-01-01T00:00:00.000Z"

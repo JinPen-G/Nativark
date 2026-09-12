@@ -37,7 +37,12 @@ const mask = (value?: string) => {
   return `${trimmed.slice(0, 3)}****${trimmed.slice(-4)}`;
 };
 
-const dateOrUndefined = (value?: string) => (value ? new Date(value) : undefined);
+const dateOrUndefined = (value?: string) => {
+  if (!value) return undefined;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) throw new BadRequestException("日期格式无效");
+  return date;
+};
 
 /**
  * MEMBER-01 的新体系服务。
@@ -560,6 +565,13 @@ export class MembershipService {
   async assignPlan(tenantId: string, workspaceId: string, input: AssignCustomerMembershipPlanRequest, operator?: string): Promise<CustomerMembershipPlanAssignment> {
     await this.requireCustomer(tenantId, input.customerId);
     await this.requireWorkspaceLink(tenantId, workspaceId, input.customerId);
+    const source = input.source ?? "manual";
+    const effectiveFrom = dateOrUndefined(input.effectiveFrom) ?? new Date();
+    const effectiveTo = dateOrUndefined(input.effectiveTo);
+    if (effectiveTo && effectiveTo < effectiveFrom) throw new BadRequestException("会员方案失效时间不能早于生效时间");
+    if ((source === "manual" || source === "corporate_contract") && !input.reason?.trim()) {
+      throw new BadRequestException("人工授予或合同授予会员方案必须填写原因");
+    }
     const version = await this.prisma.customerMembershipPlanVersion.findFirst({
       where: { tenantId, workspaceId, id: input.planVersionId, status: "published" }, include: { plan: true }
     });
@@ -569,7 +581,7 @@ export class MembershipService {
     const row = await this.prisma.customerMembershipPlanAssignment.create({
       data: {
         tenantId, workspaceId, customerId: input.customerId, planId: version.planId, planVersionId: version.id,
-        source: input.source ?? "manual", effectiveFrom: dateOrUndefined(input.effectiveFrom) ?? new Date(), effectiveTo: dateOrUndefined(input.effectiveTo),
+        source, effectiveFrom, effectiveTo,
         reason: input.reason?.trim() || null, grantedBy: operator,
         snapshot: { planName: version.plan.name, targetType: version.plan.targetType, benefits: version.benefits } as Prisma.InputJsonValue
       }
