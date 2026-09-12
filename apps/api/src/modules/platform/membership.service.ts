@@ -407,11 +407,15 @@ export class MembershipService {
   }
 
   async listCorporateMembers(tenantId: string, workspaceId: string): Promise<CorporateMembershipMember[]> {
+    const now = new Date();
     const rows = await this.prisma.customerProfile.findMany({
       where: { tenantId, customerType: "corporate", workspaceLinks: { some: { tenantId, workspaceId } } },
       include: {
         workspaceLinks: { where: { tenantId, workspaceId }, take: 1 },
-        corporateMembershipsAsCompany: { where: { tenantId, workspaceId, status: "active" }, select: { role: true } }
+        corporateMembershipsAsCompany: {
+          where: { tenantId, workspaceId, status: "active", effectiveFrom: { lte: now }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }] },
+          select: { role: true }
+        }
       },
       orderBy: { createdAt: "desc" }
     });
@@ -468,20 +472,27 @@ export class MembershipService {
     await this.requireCustomer(tenantId, corporateCustomerId, "corporate");
     await this.requireWorkspaceLink(tenantId, workspaceId, corporateCustomerId);
     await this.requireCustomer(tenantId, input.personalCustomerId, "personal");
-    await this.requireWorkspaceLink(tenantId, workspaceId, input.personalCustomerId);
+    const personalLink = await this.requireWorkspaceLink(tenantId, workspaceId, input.personalCustomerId);
+    if (personalLink.status !== "active") throw new ConflictException("只有当前空间的有效个人会员才能加入企业");
     if (corporateCustomerId === input.personalCustomerId) throw new BadRequestException("企业不能将自身作为员工");
+    const effectiveFrom = dateOrUndefined(input.effectiveFrom) ?? new Date();
+    const effectiveTo = dateOrUndefined(input.effectiveTo);
+    if ([effectiveFrom, effectiveTo].some((value) => value && Number.isNaN(value.getTime()))) {
+      throw new BadRequestException("员工关系有效期格式无效");
+    }
+    if (effectiveTo && effectiveTo < effectiveFrom) throw new BadRequestException("员工关系失效时间不能早于生效时间");
     const row = await this.prisma.customerCorporateMembership.upsert({
       where: { workspaceId_corporateCustomerId_personalCustomerId: { workspaceId, corporateCustomerId, personalCustomerId: input.personalCustomerId } },
       create: {
         tenantId, workspaceId, corporateCustomerId, personalCustomerId: input.personalCustomerId,
         role: input.role, department: input.department?.trim() || null, employeeNo: input.employeeNo?.trim() || null,
-        status: input.status ?? "active", effectiveFrom: dateOrUndefined(input.effectiveFrom) ?? new Date(),
-        effectiveTo: dateOrUndefined(input.effectiveTo), reason: input.reason?.trim() || null, createdBy: operator
+        status: input.status ?? "active", effectiveFrom,
+        effectiveTo, reason: input.reason?.trim() || null, createdBy: operator
       },
       update: {
         role: input.role, department: input.department?.trim() || null, employeeNo: input.employeeNo?.trim() || null,
-        status: input.status ?? "active", effectiveFrom: dateOrUndefined(input.effectiveFrom) ?? new Date(),
-        effectiveTo: dateOrUndefined(input.effectiveTo), reason: input.reason?.trim() || null
+        status: input.status ?? "active", effectiveFrom,
+        effectiveTo, reason: input.reason?.trim() || null
       },
       include: { personalCustomer: { select: { name: true } } }
     });

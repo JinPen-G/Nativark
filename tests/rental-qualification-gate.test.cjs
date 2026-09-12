@@ -109,6 +109,13 @@ void (async () => {
 
     const listed = await memberships.listPersonalMembers(tenantId, workspaceId);
     assert.equal(listed.find((row) => row.customerId === personalId)?.qualifications[0]?.status, "approved");
+    const corporateListed = await memberships.listCorporateMembers(tenantId, workspaceId);
+    assert.equal(corporateListed.find((row) => row.customerId === corporateId)?.employeeCount, 1, "当前有效员工关系应计入企业员工数");
+    await prisma.customerCorporateMembership.updateMany({ where: { tenantId, workspaceId, corporateCustomerId: corporateId, personalCustomerId: personalId }, data: { effectiveTo: new Date(Date.now() - 60_000) } });
+    const expiredCorporate = await memberships.listCorporateMembers(tenantId, workspaceId);
+    assert.equal(expiredCorporate.find((row) => row.customerId === corporateId)?.employeeCount, 0, "已过期员工关系不得继续计入企业员工数");
+    await prisma.customerCorporateMembership.updateMany({ where: { tenantId, workspaceId, corporateCustomerId: corporateId, personalCustomerId: personalId }, data: { effectiveTo: null } });
+    console.log("  ✓ 企业员工数量只统计当前有效关系");
     await prisma.customerQualificationRef.updateMany({ where: { tenantId, customerId: personalId }, data: { expiresAt: new Date(Date.now() - 60_000) } });
     const expiredRead = await memberships.resolveBookingIdentity(tenantId, workspaceId, personalId);
     assert.equal(expiredRead.qualifications[0]?.status, "expired", "已过期的已审核证件读回时必须显示为已过期");
@@ -122,6 +129,18 @@ void (async () => {
       /有效期不能早于签发日期/u
     );
     console.log("  ✓ 证件提交拒绝早于签发日期的有效期");
+
+    await prisma.customerWorkspaceLink.update({ where: { workspaceId_customerId: { workspaceId, customerId: personalId } }, data: { status: "suspended" } });
+    await assert.rejects(
+      () => memberships.saveCorporateEmployee(tenantId, workspaceId, corporateId, { personalCustomerId: personalId, role: "employee" }),
+      /只有当前空间的有效个人会员才能加入企业/u
+    );
+    await prisma.customerWorkspaceLink.update({ where: { workspaceId_customerId: { workspaceId, customerId: personalId } }, data: { status: "active" } });
+    await assert.rejects(
+      () => memberships.saveCorporateEmployee(tenantId, workspaceId, corporateId, { personalCustomerId: personalId, role: "employee", effectiveFrom: "2026-09-13T00:00:00.000Z", effectiveTo: "2026-09-12T00:00:00.000Z" }),
+      /员工关系失效时间不能早于生效时间/u
+    );
+    console.log("  ✓ 暂停中的个人会员和倒置有效期不能建立企业员工关系");
 
     await prisma.customerQualificationRef.updateMany({ where: { tenantId, customerId: personalId }, data: { status: "revoked" } });
     await assert.rejects(
