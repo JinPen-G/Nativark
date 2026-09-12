@@ -2,6 +2,7 @@ import type {
   RentalOrder,
   RentalOrderExtension,
   RentalFundingBalance,
+  RentalNotificationSendLogV1,
   RentalWorkbenchTodo,
   RentalWorkbenchTodos,
   RentalWorkOrder,
@@ -16,7 +17,8 @@ const TODO_TYPES: RentalWorkbenchTodoType[] = [
   "return_overdue",
   "fee_review",
   "refund",
-  "work_order"
+  "work_order",
+  "notification_failure"
 ];
 
 /**
@@ -65,6 +67,7 @@ export function buildRentalWorkbenchTodos(
   workOrders: RentalWorkOrder[],
   fundingByOrderId: Record<string, RentalFundingBalance | undefined> = {},
   extensionsByOrderId: Record<string, RentalOrderExtension[] | undefined> = {},
+  notificationLogs: RentalNotificationSendLogV1[] = [],
   at = new Date().toISOString()
 ): RentalWorkbenchTodos {
   const now = Date.parse(at);
@@ -166,6 +169,25 @@ export function buildRentalWorkbenchTodos(
       workOrderId: workOrder.id,
       createdAt: workOrder.createdAt,
       priority: workOrder.status === "pending_review" ? "high" : "normal"
+    });
+  }
+
+  // NOTICE-01：只有带订单业务对象的失败通知才进入工作台，确保待办有明确处理出口。
+  // 模拟成功、已处理历史记录和没有业务对象的手工发送不伪造成业务待办。
+  for (const log of notificationLogs.filter(
+    (row) => ["failed", "simulation_failed"].includes(row.status) && row.businessObjectType === "order" && row.businessObjectId
+  )) {
+    const order = orders.find((row) => row.id === log.businessObjectId);
+    add(items, {
+      id: `notification_failure:${log.id}`,
+      type: "notification_failure",
+      title: "业务通知发送失败",
+      description: `${log.eventCode} 未成功记录发送结果${log.errorMessage ? `：${log.errorMessage}` : "，请检查通知模板与渠道配置"}。`,
+      href: order ? `/rental/orders/${order.id}` : "/rental/orders",
+      orderId: order?.id ?? log.businessObjectId,
+      orderNo: order?.orderNo,
+      createdAt: log.createdAt,
+      priority: "high"
     });
   }
 

@@ -551,6 +551,26 @@ assert.equal(sendLog.provider, "simulation");
 assert.equal(sendLog.templateVersion, template.version);
 await assert.rejects(async () => business.sendNotification(tenantId, context(), { templateId: template.id, recipient: "member_001", variables: {} }), /缺少通知变量/);
 
+// NOTICE-01：业务事件通知失败不能被 emitNotificationEvent 静默吞掉，
+// 必须写入 simulation_failed 事实，后续由工作台按订单生成待办。
+const originalSchema = template.variableSchema;
+template.variableSchema = { ...originalSchema, failureReason: { label: "失败原因", required: true } };
+const failedLogs = await business.emitNotificationEvent(
+  tenantId,
+  context(),
+  "order.created",
+  "member_001",
+  { customerName: "露营测试会员", orderNo: "RC-NOTIFY-FAIL-001" },
+  { type: "order", id: "order_notify_failure" }
+);
+assert.equal(failedLogs.length, 0, "失败通知不能被调用方当成已发送成功");
+const failedLog = business.listNotificationLogs(tenantId, context()).find((row) => row.businessObjectId === "order_notify_failure");
+assert.ok(failedLog, "通知失败必须保留一条失败发送事实");
+assert.equal(failedLog.status, "simulation_failed");
+assert.equal(failedLog.businessObjectType, "order");
+assert.match(failedLog.errorMessage, /缺少通知变量/);
+template.variableSchema = originalSchema;
+
 assert.equal(business.listPricingPlans("tenant_001", {
   profile: core.getProfile("tenant_001"),
   category: core.listCategories().find((item) => item.code === core.getProfile("tenant_001").categoryCode),

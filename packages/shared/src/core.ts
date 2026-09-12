@@ -4790,7 +4790,9 @@ export type RentalWorkbenchTodoType =
   | "return_overdue"
   | "fee_review"
   | "refund"
-  | "work_order";
+  | "work_order"
+  /** NOTICE-01：业务事件通知未成功写入模拟发送记录，需要运营处理。 */
+  | "notification_failure";
 
 export interface RentalWorkbenchTodo {
   id: string;

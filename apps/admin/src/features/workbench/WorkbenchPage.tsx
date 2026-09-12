@@ -29,7 +29,8 @@ const todoTypeLabels: Record<RentalWorkbenchTodoType, string> = {
   return_overdue: "逾时未归还",
   fee_review: "待裁定费用",
   refund: "待办理退款",
-  work_order: "养护工单"
+  work_order: "养护工单",
+  notification_failure: "通知失败"
 };
 const todoTypeColors: Record<RentalWorkbenchTodoType, string> = {
   pending_payment: "gold",
@@ -38,7 +39,8 @@ const todoTypeColors: Record<RentalWorkbenchTodoType, string> = {
   return_overdue: "orange",
   fee_review: "volcano",
   refund: "purple",
-  work_order: "blue"
+  work_order: "blue",
+  notification_failure: "red"
 };
 
 function periodStart(period: string) {

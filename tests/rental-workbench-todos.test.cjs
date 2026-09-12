@@ -41,9 +41,28 @@ const todos = buildRentalWorkbenchTodos([
   id: "work_1", workNo: "W-001", status: "pending_review", type: "repair", reason: "归还异常", createdAt: "2026-09-11T10:30:00.000Z"
 }], {
   refund_1: { rental: { balance: -25 } }
-}, {}, at);
+}, {}, [{
+  id: "notify_failed_1",
+  tenantId: "tenant_1",
+  templateId: "template_1",
+  templateVersion: "1.1",
+  eventCode: "order.confirmed",
+  channel: "sms",
+  recipient: "138****8888",
+  renderedTitle: "订单通知",
+  renderedBody: "发送失败",
+  variables: {},
+  status: "simulation_failed",
+  provider: "simulation",
+  errorMessage: "缺少通知变量",
+  attempts: 1,
+  businessObjectType: "order",
+  businessObjectId: "fee_1",
+  idempotencyKey: "order.confirmed:order:fee_1:sms",
+  createdAt: "2026-09-11T11:30:00.000Z"
+}], at);
 
-assert.equal(todos.items.length, 7);
+assert.equal(todos.items.length, 8);
 assert.equal(todos.counts.pending_payment, 1);
 assert.equal(todos.counts.no_show_notice, 1);
 assert.equal(todos.counts.no_show_confirmation, 1);
@@ -51,10 +70,12 @@ assert.equal(todos.counts.return_overdue, 1);
 assert.equal(todos.counts.fee_review, 1);
 assert.equal(todos.counts.refund, 1);
 assert.equal(todos.counts.work_order, 1);
+assert.equal(todos.counts.notification_failure, 1);
+assert.equal(todos.items.find((row) => row.type === "notification_failure").href, "/rental/orders/fee_1");
 assert.equal(todos.items[0].type, "no_show_confirmation", "高优先级待确认爽约应先展示");
 assert.equal(todos.items.find((row) => row.type === "refund").amount, 25);
 
-const withoutFunding = buildRentalWorkbenchTodos([base({ id: "refund_without_funding", status: "settling", serviceSnapshots: [{ refundStatus: "approved_pending_refund" }] })], [], {}, {}, at);
+const withoutFunding = buildRentalWorkbenchTodos([base({ id: "refund_without_funding", status: "settling", serviceSnapshots: [{ refundStatus: "approved_pending_refund" }] })], [], {}, {}, [], at);
 assert.equal(withoutFunding.items.some((row) => row.type === "refund"), false, "没有负租金余额时不能凭审核状态虚构退款待办");
 
 assert.equal(canIncludeWorkbenchWorkOrders({ isPlatformAdmin: false, permissions: ["store-rental:report:view"] }), false, "只有报表权限时不能读取养护工单待办");

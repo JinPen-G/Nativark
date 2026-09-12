@@ -3726,16 +3726,15 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     if (!recipient || !context.settings.notifications.enabledEvents.includes(eventCode)) return [];
     const templates = this.state(tenantId, context).notificationTemplates.filter((item) => item.eventCode === eventCode && item.status === "enabled");
     const logs: RentalNotificationSendLogV1[] = [];
+    const render = (source: string, scoped: Record<string, unknown>) => source.replace(/\{\{(\w+)\}\}/g, (_match, key: string) => String(scoped[key] ?? ""));
     for (const template of templates) {
+      // 只传模板注册过的变量：事件发射方持有一个变量词表，各模板按需登记子集；
+      // 把整个词表塞给模板会撞上「未知变量」拦截，而那是给人工发送用的护栏。
+      const scoped = Object.fromEntries(Object.entries(variables).filter(([key]) => key in template.variableSchema));
+      const idempotencyKey = businessObject
+        ? `${eventCode}:${businessObject.type}:${businessObject.id}:${template.channel}`
+        : undefined;
       try {
-        // 只传模板注册过的变量：事件发射方持有一个变量词表，各模板按需登记子集；
-        // 把整个词表塞给模板会撞上「未知变量」拦截，而那是给人工发送用的护栏。
-        const scoped = Object.fromEntries(
-          Object.entries(variables).filter(([key]) => key in template.variableSchema)
-        );
-        const idempotencyKey = businessObject
-          ? `${eventCode}:${businessObject.type}:${businessObject.id}:${template.channel}`
-          : undefined;
         const log = await this.sendNotification(
           tenantId, context,
           { templateId: template.id, recipient, variables: scoped },
@@ -3743,8 +3742,37 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
           { businessObjectType: businessObject?.type, businessObjectId: businessObject?.id, idempotencyKey }
         );
         if (log) logs.push(log);
-      } catch {
-        // 模板停用、渠道不可用等单点失败不冒泡到订单动作。
+      } catch (error) {
+        // 失败不能伪装成已送达，也不能静默丢掉。保留一条失败事实，
+        // 让工作台按订单业务对象生成待办；主订单动作仍不因单个通知模板失败回滚。
+        const failure: RentalNotificationSendLogV1 = {
+          id: uid("notification"),
+          tenantId,
+          templateId: template.id,
+          templateVersion: template.version,
+          eventCode: template.eventCode,
+          channel: template.channel,
+          recipient: maskRecipient(recipient),
+          renderedTitle: render(template.title, scoped),
+          renderedBody: render(template.body, scoped),
+          variables: structuredClone(scoped),
+          status: "simulation_failed",
+          provider: "simulation",
+          attempts: 1,
+          errorMessage: (error instanceof Error ? error.message : String(error)).slice(0, 191),
+          businessObjectType: businessObject?.type,
+          businessObjectId: businessObject?.id,
+          idempotencyKey,
+          createdAt: stamp()
+        };
+        try {
+          const outcome = await this.factStore.insertNotificationLog(failure);
+          if (outcome !== "duplicate") {
+            this.state(tenantId, context).notificationLogs.unshift(failure);
+          }
+        } catch {
+          // 失败记录本身不可写时仍不能让订单动作失败；基础设施错误由运维日志处理。
+        }
       }
     }
     return logs;

@@ -431,7 +431,10 @@ export class RentalCoreController {
       }
     }));
 
-    return buildRentalWorkbenchTodos(orders, workOrders, fundingByOrderId, extensionsByOrderId);
+    const notificationLogs = canIncludeWorkbenchOrderTodos(req.user)
+      ? this.business.listNotificationLogs(tenantId, this.context(tenantId))
+      : [];
+    return buildRentalWorkbenchTodos(orders, workOrders, fundingByOrderId, extensionsByOrderId, notificationLogs);
   }
   @Get("orders") orders(@Req() req: AuthenticatedRequest) { return this.service.listOrders(req.user.tenantId); }
   @Get("orders/:id") order(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.service.getOrder(req.user.tenantId, id); }
