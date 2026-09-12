@@ -86,6 +86,9 @@ async function seed() {
   await prisma.customerCorporateMembership.create({
     data: { tenantId, workspaceId, corporateCustomerId: corporateId, personalCustomerId: personalId, role: "employee", status: "active" }
   });
+  await prisma.customerMembershipQualificationType.create({
+    data: { tenantId, workspaceId, code: "driver_license", name: "驾驶证", categoryCode: "CAMERA", requiredForBooking: true, status: "enabled" }
+  });
   await prisma.customerQualificationRef.create({
     data: { tenantId, customerId: personalId, qualificationType: "driver_license", status: "approved", verifiedAt: new Date(), expiresAt: new Date(Date.now() + 10 * 86_400_000) }
   });
@@ -103,6 +106,22 @@ void (async () => {
     );
     assert.equal(allowed.ok, true);
     console.log("  ✓ 领取按当前空间重新读取已审核资格，并允许有效证件通过");
+
+    const listed = await memberships.listPersonalMembers(tenantId, workspaceId);
+    assert.equal(listed.find((row) => row.customerId === personalId)?.qualifications[0]?.status, "approved");
+    await prisma.customerQualificationRef.updateMany({ where: { tenantId, customerId: personalId }, data: { expiresAt: new Date(Date.now() - 60_000) } });
+    const expiredRead = await memberships.resolveBookingIdentity(tenantId, workspaceId, personalId);
+    assert.equal(expiredRead.qualifications[0]?.status, "expired", "已过期的已审核证件读回时必须显示为已过期");
+    await prisma.customerQualificationRef.updateMany({ where: { tenantId, customerId: personalId }, data: { expiresAt: new Date(Date.now() + 10 * 86_400_000) } });
+    console.log("  ✓ 已审核但过期的证件在会员与订单身份读取时显示为已过期");
+
+    await assert.rejects(
+      () => memberships.submitQualification(tenantId, workspaceId, personalId, {
+        qualificationType: "driver_license", issuedAt: "2026-09-13T00:00:00.000Z", expiresAt: "2026-09-12T00:00:00.000Z"
+      }, "admin", "资格测试管理员"),
+      /有效期不能早于签发日期/u
+    );
+    console.log("  ✓ 证件提交拒绝早于签发日期的有效期");
 
     await prisma.customerQualificationRef.updateMany({ where: { tenantId, customerId: personalId }, data: { status: "revoked" } });
     await assert.rejects(

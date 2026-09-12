@@ -309,18 +309,26 @@ export class MembershipService {
       where: { tenantId, workspaceId, code: input.qualificationType, status: "enabled" }
     });
     if (!type) throw new BadRequestException("当前经营空间未启用该证件类型");
+    const issuedAt = dateOrUndefined(input.issuedAt);
+    const expiresAt = dateOrUndefined(input.expiresAt);
+    if ([issuedAt, expiresAt].some((value) => value && Number.isNaN(value.getTime()))) {
+      throw new BadRequestException("证件日期格式无效");
+    }
+    if (issuedAt && expiresAt && expiresAt < issuedAt) {
+      throw new BadRequestException("证件有效期不能早于签发日期");
+    }
     const now = new Date();
     const result = await this.prisma.$transaction(async (tx) => {
       const qualification = await tx.customerQualificationRef.upsert({
         where: { tenantId_customerId_qualificationType: { tenantId, customerId, qualificationType: input.qualificationType } },
         create: {
           tenantId, customerId, qualificationType: input.qualificationType,
-          referenceNoMasked: mask(input.referenceNo), issuedAt: dateOrUndefined(input.issuedAt),
-          expiresAt: dateOrUndefined(input.expiresAt), evidenceRef: input.evidenceRef?.trim() || null, status: "pending"
+          referenceNoMasked: mask(input.referenceNo), issuedAt,
+          expiresAt, evidenceRef: input.evidenceRef?.trim() || null, status: "pending"
         },
         update: {
-          referenceNoMasked: mask(input.referenceNo), issuedAt: dateOrUndefined(input.issuedAt),
-          expiresAt: dateOrUndefined(input.expiresAt), evidenceRef: input.evidenceRef?.trim() || null, status: "pending", verifiedAt: null
+          referenceNoMasked: mask(input.referenceNo), issuedAt,
+          expiresAt, evidenceRef: input.evidenceRef?.trim() || null, status: "pending", verifiedAt: null
         }
       });
       const review = await tx.customerMembershipReview.create({
@@ -717,9 +725,12 @@ export class MembershipService {
     id: string; customerId: string; qualificationType: string; referenceNoMasked: string | null; issuedAt: Date | null;
     expiresAt: Date | null; status: string; evidenceRef: string | null; verifiedAt: Date | null; createdAt: Date; updatedAt: Date;
   }): CustomerQualificationRef {
+    const status: CustomerQualificationStatus = row.status === "approved" && row.expiresAt && row.expiresAt.getTime() <= Date.now()
+      ? "expired"
+      : row.status as CustomerQualificationStatus;
     return {
       id: row.id, customerId: row.customerId, qualificationType: row.qualificationType, referenceNoMasked: row.referenceNoMasked ?? undefined,
-      issuedAt: row.issuedAt?.toISOString(), expiresAt: row.expiresAt?.toISOString(), status: row.status as CustomerQualificationStatus,
+      issuedAt: row.issuedAt?.toISOString(), expiresAt: row.expiresAt?.toISOString(), status,
       evidenceRef: row.evidenceRef ?? undefined, verifiedAt: row.verifiedAt?.toISOString(), createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString()
     };
   }
