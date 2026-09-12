@@ -452,6 +452,7 @@ export class CreateRentalInspectionDto implements CreateRentalInspectionRequest 
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
+  @MaxLength(500, { each: true })
   attachments?: string[];
 
   @IsOptional()

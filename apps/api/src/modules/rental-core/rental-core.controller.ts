@@ -1201,7 +1201,17 @@ export class RentalCoreController {
       // 分批归还按调用方给的批次号区分，整单归还固定用 "whole"。
       fallbackKey: `order.inspection:${id}:${stage ?? "unknown"}:${body.returnBatchNo ?? "whole"}`,
       // returnedAt 同样不能进指纹，否则重试必然被判为"同键不同内容"而 409。
-      request: { orderId: id, templateId: body.templateId, results: body.results, returnItems: body.returnItems ?? [], returnBatchNo: body.returnBatchNo, exceptions: body.exceptions ?? [] },
+      request: {
+        orderId: id,
+        templateId: body.templateId,
+        results: body.results,
+        returnItems: body.returnItems ?? [],
+        returnBatchNo: body.returnBatchNo,
+        exceptions: body.exceptions ?? [],
+        // 检查照片/证据引用属于请求事实的一部分；必须进入幂等指纹，
+        // 否则同一批次先空提交、后补证据会被错误当作同一次请求回放。
+        attachments: body.attachments ?? []
+      },
       orderId: id,
       run: async (tx) => {
         if (stage === "pickup") await this.funding.assertReadyForPickup(tenantId, this.service.resolveWorkspaceId(tenantId), id, tx);
