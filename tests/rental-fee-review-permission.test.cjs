@@ -118,4 +118,31 @@ ok("三条费用裁定入口都要求 order:fee-review——修复前它们都�
   ok("逾期人工核价与提前归还退款在界面上仍是两类来源，没有被合并成统一审批");
 }
 
+
+/* ---------- ORDER-CLOSE-02-UI：订单详情 UI 层的变异锁定 ---------- */
+
+{
+  // 用真实源码做静态断言：审核按钮必须以 order:fee-review 为门禁；
+  // 成功/失败文案不得把「已裁定」写成「已退款/已收款」。
+  const nodeFs = require("node:fs");
+  const nodePath = require("node:path");
+  const detailSource = nodeFs.readFileSync(
+    nodePath.join(__dirname, "../apps/admin/src/features/rental-core/RentalOrderDetailPage.tsx"),
+    "utf8"
+  );
+  assert.match(detailSource, /hasPermission\("store-rental:order:fee-review"\)/u, "订单详情必须消费 order:fee-review 作为审核门禁");
+  assert.match(detailSource, /canReviewFees/u, "待审费用的裁定按钮必须受 canReviewFees 控制");
+  assert.match(detailSource, /仅核减应收/u, "扩展退款审核文案必须说明只核减应收");
+  assert.match(detailSource, /不代表实际退款到账/u, "扩展退款审核必须说明不代表实际退款");
+  assert.equal(/已退款到账|已实际退款/u.test(detailSource), false, "不得出现「已退款到账」类措辞");
+  assert.match(detailSource, /被后续续租替代/u, "审核冲突提示必须点名「被后续续租替代」");
+  const listSource = nodeFs.readFileSync(
+    nodePath.join(__dirname, "../apps/admin/src/features/rental-core/RentalOrdersPage.tsx"),
+    "utf8"
+  );
+  assert.match(listSource, /待裁定费用/u, "订单列表必须渲染待裁定标识");
+  assert.match(listSource, /只看有待审费用的订单/u, "订单列表必须提供待审筛选");
+  ok("订单详情 UI：审核按钮以 fee-review 权限为门禁；文案区分裁定与实际动钱；列表/工作台待审可发现");
+}
+
 console.log(`\n费用裁定权限与措辞专项：${passed} 项全部通过`);

@@ -304,7 +304,10 @@ export function RentalOrderDetailPage() {
     (extensions.data ?? []).some((row) => row.status === "effective" && row.pricingSnapshot?.refundReview?.status === "pending")
       ? "有待审核的续租退款差额" : undefined,
     (inspections.data ?? []).some((row) => row.exceptions.some((exception) => exception.reviewStatus === "pending"))
-      ? "有待审核的检查异常" : undefined
+      ? "有待审核的检查异常" : undefined,
+    // MKT-02D：未收口的增值服务（未开始/执行中）也是关单阻断——服务端 settleOrder 有同款闸门。
+    (detail?.serviceSnapshots ?? []).some((row) => ["not_started", "in_progress"].includes(row.executionStatus ?? "not_started"))
+      ? "有未收口的增值服务（需先完成、取消或记录失败）" : undefined
   ].filter((row): row is string => Boolean(row));
   // 金额一律按**订单自己的**结算币种展示（需求 §948）：币种是下单时的快照，
   // 不能改读当前经营空间的设置——空间后来改了币种，历史单的金额含义不会跟着改。

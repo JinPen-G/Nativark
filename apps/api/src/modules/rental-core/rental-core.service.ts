@@ -2850,6 +2850,17 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if ((order.feeReviews ?? []).some((row) => row.status === "pending")) {
       throw new ConflictException("还有费用审核单待处理，请先裁定后关闭订单");
     }
+    // MKT-02D：未收口的增值服务（未开始/执行中）不能静默关单——
+    // 容量与净额退款必须先通过 开始/完成/取消/失败/未到场 落定，
+    // 否则会出现「订单已完结、服务还挂着」的孤儿履约。
+    const openOccurrences = (order.serviceSnapshots ?? []).filter((row) =>
+      ["not_started", "in_progress"].includes(row.executionStatus ?? "not_started")
+    );
+    if (openOccurrences.length) {
+      throw new ConflictException(
+        `还有 ${openOccurrences.length} 项增值服务未收口（未开始或执行中），请先完成、取消或记录失败后再关闭订单`
+      );
+    }
     await this.runHook(
       tenantId,
       "settlement",
