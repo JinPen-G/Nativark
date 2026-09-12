@@ -186,7 +186,22 @@ void (async () => {
     const restoredPlan = await memberships.restorePlanVersion(tenantId, workspaceId, planId, planVersionId, "恢复历史版本测试", "资格测试管理员");
     assert.equal(restoredPlan.currentVersion?.status, "draft");
     assert.equal(restoredPlan.currentVersion?.restoredFromVersionId, planVersionId);
+    const publishedRestored = await memberships.publishPlan(tenantId, workspaceId, planId, restoredPlan.currentVersion.id, "资格测试管理员");
+    const secondAssignment = await memberships.assignPlan(tenantId, workspaceId, {
+      customerId: personalId, planVersionId: publishedRestored.currentVersion.id, source: "manual", reason: "重新授予测试"
+    }, "资格测试管理员");
+    const assignmentHistory = await memberships.listPlanAssignments(tenantId, workspaceId, personalId);
+    assert.ok(assignmentHistory.some((row) => row.id === secondAssignment.id), "会员方案授予记录应可回看");
+    await assert.rejects(
+      () => memberships.revokePlanAssignment(tenantId, workspaceId, secondAssignment.id, " ", "资格测试管理员"),
+      /撤销会员方案必须填写原因/u
+    );
+    const revokedAssignment = await memberships.revokePlanAssignment(tenantId, workspaceId, secondAssignment.id, "测试撤销", "资格测试管理员");
+    assert.equal(revokedAssignment.status, "revoked");
+    assert.equal(revokedAssignment.revokeReason, "测试撤销");
+    assert.equal((await memberships.listPlanAssignments(tenantId, workspaceId, personalId)).find((row) => row.id === secondAssignment.id)?.status, "revoked");
     console.log("  ✓ 会员方案授予强制记录原因与有效期，停用不影响历史快照，恢复生成新草稿");
+    console.log("  ✓ 会员方案授予记录可回看，撤销必须记录原因且保留审计状态");
 
     const qualificationSubmission = await memberships.submitQualification(tenantId, workspaceId, personalId, {
       qualificationType: "driver_license", issuedAt: "2026-01-01T00:00:00.000Z", expiresAt: "2099-01-01T00:00:00.000Z"

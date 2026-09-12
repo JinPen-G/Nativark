@@ -5,6 +5,7 @@ import {
   CUSTOMER_QUALIFICATION_STATUSES,
   type AssignCustomerMembershipPlanRequest,
   type CustomerMembershipPlanVersionActionRequest,
+  type CustomerMembershipPlanAssignmentActionRequest,
   type RegisterPersonalMembershipRequest,
   type SaveCorporateMembershipRequest,
   type SavePersonalMembershipRequest,
@@ -184,6 +185,11 @@ export class AssignCustomerMembershipPlanDto implements AssignCustomerMembership
 }
 
 export class CustomerMembershipPlanVersionActionDto implements CustomerMembershipPlanVersionActionRequest {
+  @IsString() @IsNotEmpty() @MaxLength(500)
+  reason!: string;
+}
+
+export class CustomerMembershipPlanAssignmentActionDto implements CustomerMembershipPlanAssignmentActionRequest {
   @IsString() @IsNotEmpty() @MaxLength(500)
   reason!: string;
 }

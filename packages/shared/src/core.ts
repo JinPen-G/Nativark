@@ -1645,6 +1645,9 @@ export interface CustomerMembershipPlanAssignment {
   effectiveFrom: string;
   effectiveTo?: string;
   reason?: string;
+  revokedBy?: string;
+  revokedAt?: string;
+  revokeReason?: string;
   snapshot: { planName: string; targetType: CustomerMembershipPlanTargetType; benefits: CustomerMembershipBenefit[] };
   createdAt: string;
 }
@@ -1693,6 +1696,10 @@ export interface AssignCustomerMembershipPlanRequest {
 }
 
 export interface CustomerMembershipPlanVersionActionRequest {
+  reason: string;
+}
+
+export interface CustomerMembershipPlanAssignmentActionRequest {
   reason: string;
 }
 

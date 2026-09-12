@@ -3,6 +3,7 @@ import type { SystemUserRow } from "@store-rental/shared";
 import { requireRequestTenantId, requireRequestWorkspaceId } from "../../common/request-identity";
 import {
   AssignCustomerMembershipPlanDto,
+  CustomerMembershipPlanAssignmentActionDto,
   CustomerMembershipPlanVersionActionDto,
   RegisterPersonalMembershipDto,
   ReviewCustomerMembershipDto,
@@ -173,6 +174,18 @@ export class MembershipController {
   assignPlan(@Body() body: AssignCustomerMembershipPlanDto, @Req() req: RequestWithUser) {
     const { tenantId, workspaceId } = this.scope();
     return this.memberships.assignPlan(tenantId, workspaceId, body, req.user?.displayName);
+  }
+
+  @Get("plans/assignments/:customerId")
+  planAssignments(@Param("customerId") customerId: string) {
+    const { tenantId, workspaceId } = this.scope();
+    return this.memberships.listPlanAssignments(tenantId, workspaceId, customerId);
+  }
+
+  @Post("plans/assignments/:assignmentId/revoke")
+  revokePlanAssignment(@Param("assignmentId") assignmentId: string, @Body() body: CustomerMembershipPlanAssignmentActionDto, @Req() req: RequestWithUser) {
+    const { tenantId, workspaceId } = this.scope();
+    return this.memberships.revokePlanAssignment(tenantId, workspaceId, assignmentId, body.reason, req.user?.displayName);
   }
 
   /** 后续报价/订单接口调用同一判定，企业权益必须显式指定企业且员工关系有效。 */

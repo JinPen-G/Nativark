@@ -1094,6 +1094,9 @@ model CustomerMembershipPlanAssignment {
   effectiveTo   DateTime?
   reason        String?                       @db.Text
   grantedBy     String?
+  revokedBy     String?
+  revokedAt     DateTime?
+  revokeReason  String?                       @db.Text
   snapshot      Json
   createdAt     DateTime                      @default(now())
   updatedAt     DateTime                      @updatedAt

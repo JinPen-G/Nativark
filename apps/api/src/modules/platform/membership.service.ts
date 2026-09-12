@@ -629,6 +629,36 @@ export class MembershipService {
     return this.toAssignment(row);
   }
 
+  async listPlanAssignments(tenantId: string, workspaceId: string, customerId: string): Promise<CustomerMembershipPlanAssignment[]> {
+    await this.requireCustomer(tenantId, customerId);
+    await this.requireWorkspaceLink(tenantId, workspaceId, customerId);
+    const rows = await this.prisma.customerMembershipPlanAssignment.findMany({
+      where: { tenantId, workspaceId, customerId }, orderBy: { createdAt: "desc" }
+    });
+    const now = Date.now();
+    return rows.map((row) => {
+      const assignment = this.toAssignment(row);
+      if (assignment.status === "active" && assignment.effectiveTo && new Date(assignment.effectiveTo).getTime() <= now) assignment.status = "expired";
+      return assignment;
+    });
+  }
+
+  async revokePlanAssignment(tenantId: string, workspaceId: string, assignmentId: string, reason: string, operator?: string) {
+    const trimmedReason = reason.trim();
+    if (!trimmedReason) throw new BadRequestException("撤销会员方案必须填写原因");
+    const assignment = await this.prisma.customerMembershipPlanAssignment.findFirst({ where: { tenantId, workspaceId, id: assignmentId } });
+    if (!assignment) throw new NotFoundException("会员方案授予记录不存在");
+    if (assignment.status !== "active") throw new ConflictException("只有当前有效的会员方案授予可以撤销");
+    const updated = await this.prisma.customerMembershipPlanAssignment.updateMany({
+      where: { tenantId, workspaceId, id: assignment.id, status: "active" },
+      data: { status: "revoked", revokedBy: operator, revokedAt: new Date(), revokeReason: trimmedReason }
+    });
+    if (updated.count !== 1) throw new ConflictException("会员方案授予已被其他操作撤销，请刷新后重试");
+    const row = await this.prisma.customerMembershipPlanAssignment.findFirst({ where: { tenantId, workspaceId, id: assignment.id } });
+    if (!row) throw new NotFoundException("会员方案授予记录不存在");
+    return this.toAssignment(row);
+  }
+
   /** 企业优惠资格判定的单一读模型，供后续报价/订单安全接入，不从旧企业表取权益。 */
   async resolveBenefits(tenantId: string, workspaceId: string, personalCustomerId: string, corporateCustomerId?: string) {
     await this.requireCustomer(tenantId, personalCustomerId, "personal");
@@ -840,11 +870,12 @@ export class MembershipService {
     };
   }
 
-  private toAssignment(row: { id: string; customerId: string; planId: string; planVersionId: string; source: string; status: string; effectiveFrom: Date; effectiveTo: Date | null; reason: string | null; snapshot: Prisma.JsonValue; createdAt: Date }): CustomerMembershipPlanAssignment {
+  private toAssignment(row: { id: string; customerId: string; planId: string; planVersionId: string; source: string; status: string; effectiveFrom: Date; effectiveTo: Date | null; reason: string | null; revokedBy: string | null; revokedAt: Date | null; revokeReason: string | null; snapshot: Prisma.JsonValue; createdAt: Date }): CustomerMembershipPlanAssignment {
     return {
       id: row.id, customerId: row.customerId, planId: row.planId, planVersionId: row.planVersionId,
       source: row.source as CustomerMembershipPlanAssignment["source"], status: row.status as CustomerMembershipPlanAssignment["status"],
       effectiveFrom: row.effectiveFrom.toISOString(), effectiveTo: row.effectiveTo?.toISOString(), reason: row.reason ?? undefined,
+      revokedBy: row.revokedBy ?? undefined, revokedAt: row.revokedAt?.toISOString(), revokeReason: row.revokeReason ?? undefined,
       snapshot: row.snapshot as unknown as CustomerMembershipPlanAssignment["snapshot"], createdAt: row.createdAt.toISOString()
     };
   }

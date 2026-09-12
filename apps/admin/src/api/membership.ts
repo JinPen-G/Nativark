@@ -55,6 +55,10 @@ export const membershipApi = {
     request<CustomerMembershipPlan>(`/membership/plans/${planId}/versions/${versionId}/restore`, { method: "post", data: { reason } }),
   assignPlan: (data: AssignCustomerMembershipPlanRequest) =>
     request<unknown>("/membership/plans/assignments", { method: "post", data }),
+  planAssignments: (customerId: string) =>
+    request<import("@store-rental/shared").CustomerMembershipPlanAssignment[]>(`/membership/plans/assignments/${customerId}`),
+  revokePlanAssignment: (assignmentId: string, reason: string) =>
+    request<unknown>(`/membership/plans/assignments/${assignmentId}/revoke`, { method: "post", data: { reason } }),
   bookingOptions: (customerId: string) =>
     request<CustomerMembershipBookingOption[]>(`/membership/personal/${customerId}/booking-options`)
 };
