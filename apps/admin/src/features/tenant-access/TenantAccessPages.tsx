@@ -58,6 +58,10 @@ interface WorkspaceAccessRow {
   existed: boolean;
 }
 
+type TenantOperationsAccountForm = Omit<SaveSystemUserRequest, "roleIds"> & {
+  roleId?: string;
+};
+
 function useTenantAccessData() {
   const organizations = useQuery({ queryKey: ["tenant-access", "organizations"], queryFn: api.organizations });
   const users = useQuery({ queryKey: ["tenant-access", "users"], queryFn: api.users });
@@ -86,12 +90,15 @@ export function TenantOperationsAccountPage() {
   const queryClient = useQueryClient();
   const currentUserId = useAuthStore((state) => state.user?.id);
   const { organizations, users, roles, workspaces, members } = useTenantAccessData();
-  const [form] = Form.useForm<SaveSystemUserRequest>();
+  const [form] = Form.useForm<TenantOperationsAccountForm>();
   const [editing, setEditing] = useState<SystemUserRow>();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [accessRows, setAccessRows] = useState<WorkspaceAccessRow[]>([]);
 
   const activeRoles = (roles.data ?? []).filter((role) => role.isActive);
+  const defaultRoleId = activeRoles.find((role) => role.scope === RoleScope.Store && !role.fixedAllPermissions)?.id
+    ?? activeRoles.find((role) => !role.fixedAllPermissions)?.id
+    ?? activeRoles[0]?.id;
   const roleMap = useMemo(() => new Map((roles.data ?? []).map((role) => [role.id, role])), [roles.data]);
   const workspaceMap = useMemo(() => new Map((workspaces.data ?? []).map((workspace) => [workspace.id, workspace])), [workspaces.data]);
   const memberRows = useMemo(() => (members.data ?? []).flatMap((group) => group.members), [members.data]);
@@ -153,7 +160,7 @@ export function TenantOperationsAccountPage() {
       return {
         workspaceId: workspace.id,
         enabled: member?.isActive ?? false,
-        roleId: member?.roleId ?? user?.roleIds[0] ?? activeRoles[0]?.id,
+        roleId: member?.roleId ?? user?.roleIds[0] ?? defaultRoleId,
         dataScope: member?.dataScope ?? roleMap.get(member?.roleId ?? user?.roleIds[0] ?? "")?.dataScope ?? "store",
         existed: Boolean(member)
       } satisfies WorkspaceAccessRow;
@@ -166,10 +173,10 @@ export function TenantOperationsAccountPage() {
       displayName: user.displayName,
       phone: user.phone,
       organizationId: user.organizationId,
-      roleIds: user.roleIds.slice(0, 1),
+      roleId: user.roleIds[0],
       isPlatformAdmin: user.isPlatformAdmin,
       isActive: user.isActive
-    } : { account: "", displayName: "", roleIds: activeRoles[0] ? [activeRoles[0].id] : [], isPlatformAdmin: false, isActive: true });
+    } : { account: "", displayName: "", roleId: defaultRoleId, isPlatformAdmin: false, isActive: true });
     setDrawerOpen(true);
   }
 
@@ -201,14 +208,17 @@ export function TenantOperationsAccountPage() {
     </QueryState>
 
     <Drawer title={editing ? "编辑运营账号" : "新增运营账号"} open={drawerOpen} size="large" destroyOnHidden onClose={() => setDrawerOpen(false)} extra={<Button type="primary" loading={save.isPending} onClick={() => form.submit()}>保存账号与空间权限</Button>}>
-      <Form<SaveSystemUserRequest> form={form} layout="vertical" onFinish={(values) => save.mutate(values)}>
+      <Form<TenantOperationsAccountForm> form={form} layout="vertical" onFinish={(values) => {
+        const { roleId, ...rest } = values;
+        save.mutate({ ...rest, roleIds: roleId ? [roleId] : [] });
+      }}>
         <Typography.Title level={5}>账号资料</Typography.Title>
         <Row gutter={16}>
           <Col span={12}><Form.Item name="displayName" label="姓名" rules={[{ required: true, message: "请输入姓名" }]}><Input /></Form.Item></Col>
           <Col span={12}><Form.Item name="account" label="登录账号" rules={[{ required: true, message: "请输入登录账号" }]}><Input disabled={Boolean(editing)} /></Form.Item></Col>
           <Col span={12}><Form.Item name="phone" label="手机号"><Input /></Form.Item></Col>
           <Col span={12}><Form.Item name="organizationId" label="归属组织"><Select allowClear options={(organizations.data ?? []).filter((item) => item.status === "enabled").map((item) => ({ value: item.id, label: item.name }))} /></Form.Item></Col>
-          <Col span={12}><Form.Item name="roleIds" label="租户基础角色" rules={[{ required: true, message: "请选择基础角色" }]}><Select mode="multiple" maxCount={1} options={activeRoles.map((role) => ({ value: role.id, label: role.name }))} /></Form.Item></Col>
+          <Col span={12}><Form.Item name="roleId" label="租户基础角色" rules={[{ required: true, message: "请选择基础角色" }]}><Select options={activeRoles.map((role) => ({ value: role.id, label: role.name }))} /></Form.Item></Col>
           <Col span={6}><Form.Item name="isActive" label="账号启用" valuePropName="checked"><Switch /></Form.Item></Col>
           <Col span={6}><Form.Item name="isPlatformAdmin" label="租户管理员" valuePropName="checked"><Switch disabled={editing?.id === currentUserId} /></Form.Item></Col>
         </Row>
