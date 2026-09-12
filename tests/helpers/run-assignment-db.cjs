@@ -10,14 +10,17 @@ const {
 const { redact } = require("../../scripts/ops/dedicated-env.cjs");
 const root = path.resolve(__dirname, "../..");
 const raw = new URL(runtime.loadDatabaseUrl());
+const sourceDatabase = raw.pathname.slice(1);
+const dedicatedSource = sourceDatabase === "store_rental_claude" && process.env.RENTAL_ALLOW_DEDICATED_SOURCE === "1";
 if (
   !["localhost", "127.0.0.1"].includes(raw.hostname) ||
-  raw.pathname !== "/store_rental" ||
+  !["store_rental", "store_rental_claude"].includes(sourceDatabase) ||
+  (sourceDatabase === "store_rental_claude" && !dedicatedSource) ||
   (raw.port && raw.port !== "3306")
 )
-  throw Error("只允许本机明确的 store_rental 开发源库");
+  throw Error("只允许本机明确的 store_rental 开发源库，或显式授权的专用源库");
 const source = runtime.assertContainerEndpoint({
-  database: "store_rental",
+  database: sourceDatabase,
   host: raw.hostname,
   port: 3306,
   user: decodeURIComponent(raw.username),

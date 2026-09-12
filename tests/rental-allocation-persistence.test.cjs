@@ -242,11 +242,11 @@ let context,
         async () => {
           await assert.rejects(
             () => service.candidates(seed.tenantId, winner.id),
-            /不存在/,
+            /当前经营空间不属于目标租户|不存在/,
           );
-          assert.equal(
-            await facts.findOrder(seed.tenantId, winner.id),
-            undefined,
+          await assert.rejects(
+            () => facts.findOrder(seed.tenantId, winner.id),
+            /当前经营空间不属于目标租户|不存在/,
           );
         },
       );
