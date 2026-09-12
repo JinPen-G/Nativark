@@ -13,12 +13,13 @@ const env = Object.fromEntries(
     .filter((line) => line.includes("=") && !line.trim().startsWith("#"))
     .map((line) => [line.slice(0, line.indexOf("=")), line.slice(line.indexOf("=") + 1).replace(/^"|"$/g, "")])
 );
-const dbName = new URL(env.DATABASE_URL).pathname.slice(1);
+const databaseUrl = process.env.DATABASE_URL || env.DATABASE_URL;
+const dbName = new URL(databaseUrl).pathname.slice(1);
 if (!/zcode/.test(dbName)) {
   console.error(`拒绝执行：优惠券预算专项只能使用 ZCode 专用库，当前指向 ${dbName}`);
   process.exit(1);
 }
-process.env.DATABASE_URL = env.DATABASE_URL;
+process.env.DATABASE_URL = databaseUrl;
 
 const { PrismaService } = require(path.join(ROOT, "apps/api/src/modules/database/prisma.service"));
 const { RentalBusinessFactRepository } = require(path.join(ROOT, "apps/api/src/modules/rental-core/rental-business-fact.repository"));
