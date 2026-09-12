@@ -83,6 +83,11 @@ async function cleanup(workspaceId) {
   await prisma.rentalPriceAdjustmentPlan.deleteMany({ where: { workspaceId, code: { startsWith: "P03-" } } });
   await prisma.rentalPriceVersion.deleteMany({ where: { workspaceId, changeReason: { startsWith: "P03-" } } });
   await prisma.rentalPricingPlan.deleteMany({ where: { workspaceId, code: { startsWith: "P03-" } } });
+  // 第 ④ 组创建的定价分组（成员行级联）：按编码前缀清，不触碰既有分组。
+  await prisma.rentalPricingGroup.deleteMany({ where: { workspaceId, code: { startsWith: "P03-" } } });
+  // 第 ⑤ 组在另一空间留下的计划与版本（按 changeReason 前缀清）。
+  await prisma.rentalPriceVersion.deleteMany({ where: { tenantId, changeReason: { startsWith: "P03-" }, NOT: { workspaceId } } });
+  await prisma.rentalPricingPlan.deleteMany({ where: { tenantId, code: { startsWith: "P03-" }, NOT: { workspaceId } } });
   // 第 5 组的回填夹具租户。用例中途失败时它会留下来，且它的计划会被下一轮回填算进去，
   // 因此每轮开头都按前缀清一次（级联带走空间、计划与版本）。
   await prisma.tenant.deleteMany({ where: { id: { startsWith: "t_p03_" } } });
@@ -328,6 +333,71 @@ void (async () => {
     for (const key of afterKeys) assert.ok(secondKeys.has(key), `未修改分组的费率必须从上一版本完整带入：${key}`);
     assert.ok(secondKeys.has(`${group.id}:calendar_day`), "新保存的费率也进入新版本");
     ok("只修改一个分组时仍生成完整空间版本：未修改分组费率从上一版本完整带入");
+  }
+
+  {
+    // ④ PRICE-GROUP-01：同一型号可同时属于多个定价分组——分组是商业包装，
+    //    成员是引用不是复制，库存不因此翻倍。「同组内重复」的禁止方向已在
+    //    rental-core-v01 覆盖，这里在真库路径证明「允许」的方向同样成立。
+    const holdersBefore = core.listPricingGroups(tenantId).filter((row) => row.memberItemGroupIds.includes(group.id)).length;
+    const g2 = await core.savePricingGroup(tenantId, {
+      code: `${TAG}-G2`, name: "PRICE-03 第二分组（共用型号）", defaultPricingUnit: "hour",
+      memberItemGroupIds: [group.id], status: "enabled"
+    });
+    assert.ok(g2, "第二分组创建成功");
+    const holders = core.listPricingGroups(tenantId).filter(
+      (row) => row.status === "enabled" && row.memberItemGroupIds.includes(group.id)
+    );
+    assert.equal(holders.length, holdersBefore + 1, "同一型号必须可加入多个定价分组");
+    assert.ok(holders.some((row) => row.id === g2.id), "新分组必须出现在该型号的分组归属里");
+    ok("PRICE-GROUP-01：同一型号加入多个定价分组放行，成员是引用不是复制");
+  }
+
+  {
+    // ⑤ PRICE-04：价格版本按经营空间隔离——两个空间各自成版本链，读路径互不可见。
+    //    savePricingPlan/listSpacePriceVersions 的空间都取自会话（ALS），任何一方
+    //    回退到「默认空间」都会在这里暴露成串版本。
+    const { runWithRequestIdentity } = require("../apps/api/src/common/request-identity");
+    const otherWorkspace = await prisma.businessWorkspace.findFirst({ where: { tenantId, isDefault: false, status: "ACTIVE" } });
+    assert.ok(otherWorkspace, "夹具需要 demo 租户的第二个经营空间");
+    // 先清上一轮失败可能残留的隔离夹具（按 changeReason 前缀，不动别的事实）。
+    await prisma.rentalPriceVersion.deleteMany({ where: { tenantId, workspaceId: otherWorkspace.id, changeReason: { startsWith: "P03-" } } });
+    await prisma.rentalPricingPlan.deleteMany({ where: { tenantId, workspaceId: otherWorkspace.id, code: { startsWith: "P03-" } } });
+    const otherSummary = await runWithRequestIdentity(
+      { tenantId, userId: "p03-iso", workspaceId: otherWorkspace.id, isSaasAdmin: false },
+      async () => {
+        const otherCtx = context();
+        const otherGroup = otherCtx.groups.find((item) => item.status === "enabled") ?? otherCtx.groups[0];
+        assert.ok(otherGroup, "另一空间夹具需要至少一个商品组");
+        const otherUnit = otherCtx.settings.pricing.defaultUnit;
+        await business.savePricingPlan(tenantId, otherCtx, {
+          code: `${TAG}-ISO`, name: "PRICE-04 跨空间隔离", status: "enabled",
+          effectiveFrom: new Date(Date.now() + 86_400_000).toISOString(),
+          changeReason: `${TAG} 跨空间隔离`,
+          rates: [rate(otherGroup.id, otherUnit, 77)]
+        }, "隔离用例");
+        return business.listSpacePriceVersions(tenantId, otherCtx);
+      }
+    );
+    assert.ok(otherSummary.rows.length >= 1, "另一空间必须有自己的版本链");
+    assert.ok(
+      otherSummary.rows.every((row) => row.workspaceId === otherWorkspace.id),
+      "另一空间的版本列表不得出现默认空间版本"
+    );
+    assert.ok(
+      otherSummary.rows.some((row) => row.changeReason === `${TAG} 跨空间隔离`),
+      "另一空间必须能看到本空间刚创建的隔离版本"
+    );
+    const defaultSummary = await business.listSpacePriceVersions(tenantId, ctx);
+    assert.ok(
+      defaultSummary.rows.every((row) => row.workspaceId === workspaceId),
+      "默认空间的版本列表不得出现其他空间版本"
+    );
+    assert.ok(
+      !defaultSummary.rows.some((row) => row.changeReason === `${TAG} 跨空间隔离`),
+      "默认空间不得看到另一空间的隔离版本"
+    );
+    ok("PRICE-04：价格版本按经营空间隔离——两空间各自成链，读路径互不可见");
   }
 
   await cleanup(workspaceId);
