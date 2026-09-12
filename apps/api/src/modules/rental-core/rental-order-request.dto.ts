@@ -208,6 +208,12 @@ export class RentalInspectionExceptionInputDto {
   description!: string;
 
   @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(128)
+  allocationId?: string;
+
+  @IsOptional()
   @IsNumber()
   @Min(0)
   chargeAmount?: number;

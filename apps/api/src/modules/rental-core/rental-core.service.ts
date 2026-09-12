@@ -2130,6 +2130,16 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (template.stage === "return" && order.status !== RentalCoreOrderStatus.Renting) throw new ConflictException("只有租赁中的订单可以办理归还检查");
     if (input.returnItems?.length && template.stage !== "return") throw new BadRequestException("只有归还检查可以指定部分归还项");
     const partialReturnItems = template.stage === "return" && input.returnItems?.length ? input.returnItems : undefined;
+    const returnableAllocationIds = new Set(
+      partialReturnItems?.map((item) => item.allocationId)
+        ?? order.allocations.filter((allocation) => allocation.status === "picked_up").map((allocation) => allocation.id)
+    );
+    const invalidExceptionAllocation = (input.exceptions ?? []).find(
+      (exception) => exception.allocationId && !returnableAllocationIds.has(exception.allocationId)
+    );
+    if (invalidExceptionAllocation?.allocationId) {
+      throw new ConflictException("异常关联的分配项不属于本次归还批次");
+    }
     if (template.stage === "pickup") {
       await this.assertOrderQualification(tenantId, order, "pickup", order.effectiveEndAt ?? order.endAt);
       this.assertOutboundLocationActive(state, order);
@@ -2175,6 +2185,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       exceptions: (input.exceptions ?? []).map((exception) => ({
         code: exception.code,
         description: exception.description,
+        allocationId: exception.allocationId,
         suggestedChargeAmount: exception.chargeAmount,
         evidenceAttachments: exception.evidenceAttachments ?? input.attachments ?? [],
         reviewStatus: "pending" as const

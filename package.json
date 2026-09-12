@@ -82,6 +82,7 @@
     "test:rule-permission-split": "npm run build -w @store-rental/shared && node tests/rental-rule-permission-split.test.cjs",
     "test:return-batch": "npm run build -w @store-rental/shared && node tests/rental-return-batch.test.cjs",
     "test:return-quarantine": "npm run build -w @store-rental/shared && node tests/rental-return-quarantine.test.cjs",
+    "test:inspection-resource": "node tests/rental-inspection-resource.test.cjs",
     "test:return-charge-race": "npm run build -w @store-rental/shared && node tests/rental-return-charge-race.test.cjs",
     "test:cancel-lock-order": "npm run build -w @store-rental/shared && node tests/rental-cancel-lock-order.test.cjs",
     "test:extension-services": "npm run build -w @store-rental/shared && node tests/rental-extension-services.test.cjs",

@@ -5356,7 +5356,14 @@ export interface CreateRentalInspectionRequest {
    */
   returnBatchNo?: string;
   /** 检查员只能提交建议损失额；最终计费必须由结算权限人员独立审核。 */
-  exceptions?: Array<{ code: string; description: string; chargeAmount?: number; evidenceAttachments?: string[] }>;
+  exceptions?: Array<{
+    code: string;
+    description: string;
+    /** 可选的本次归还分配项；缺省表示异常影响本批全部归还资源。 */
+    allocationId?: string;
+    chargeAmount?: number;
+    evidenceAttachments?: string[];
+  }>;
   attachments?: string[];
   operator?: string;
 }
@@ -5380,6 +5387,8 @@ export interface RentalInspectionRecord {
   exceptions: Array<{
     code: string;
     description: string;
+    /** 异常具体关联的归还分配项；缺省表示本批全部资源。 */
+    allocationId?: string;
     /** 检查员提交的建议额，不直接进入订单应付。 */
     suggestedChargeAmount?: number;
     evidenceAttachments?: string[];

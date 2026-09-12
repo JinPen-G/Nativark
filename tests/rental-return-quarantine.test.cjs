@@ -62,7 +62,7 @@ function serviceWith(order) {
     listExtensions: async () => [],
     cancelExtensions: async () => {},
     upsertStockDisposition: async () => {},
-    insertInspection: async () => {},
+    insertInspection: async (record) => { captured.inspection = record; },
     saveOrderAggregate: async (_order, assetChanges, _tx, stockQuarantines) => {
       captured.assetChanges = assetChanges;
       captured.stockQuarantines = stockQuarantines;
@@ -154,6 +154,25 @@ void (async () => {
   assert.deepEqual(captured.stockQuarantines, [{ itemGroupId: "group_q", locationId: "loc_1", quantity: 2 }],
     "本批归还的数量库存必须按 itemGroup + 地点进维修隔离");
   ok("带异常整单归还时数量库存进维修隔离——修复前这里是 undefined，数量直接回可用池");
+}
+
+/* ---------- 多行订单异常必须能定位到本次归还的具体分配项 ---------- */
+
+{
+  const { instance, captured } = serviceWith(orderFixture());
+  await instance.createInspection("tenant_1", "order_1", returnInspection([{ code: "scratch", description: "镜头划伤", allocationId: "alloc_s" }]), "检查员");
+  assert.equal(captured.inspection.exceptions[0].allocationId, "alloc_s", "异常记录必须保留具体分配项标识");
+  ok("多行归还异常保留具体分配项，费用审核和养护链可以继续追溯资源");
+}
+
+{
+  const { instance } = serviceWith(orderFixture());
+  await assert.rejects(
+    () => instance.createInspection("tenant_1", "order_1", returnInspection([{ code: "scratch", description: "越界资源", allocationId: "alloc_other" }]), "检查员"),
+    /异常关联的分配项不属于本次归还批次/u,
+    "异常不能关联订单外或未在本次归还的分配项"
+  );
+  ok("异常关联分配项必须属于本订单当前归还批次");
 }
 
 /* ---------- 序列化资产仍然置维护，且不重复按数量隔离 ---------- */
