@@ -1,3 +1,4 @@
+import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, Button, Card, Space, Spin, Tag, Typography } from "antd";
 import { CheckCircleFilled, RightOutlined, WarningFilled } from "@ant-design/icons";
@@ -55,6 +56,7 @@ export function TenantReadinessPage() {
 }
 
 export function TenantReadinessBody({ data, onRefresh }: { data: TenantReadinessStatus; onRefresh: () => void }) {
+  const navigate = useNavigate();
   const statusMeta = STATUS_META[data.status];
   return (
     <Space direction="vertical" size={16} style={{ width: "100%" }}>
@@ -77,7 +79,7 @@ export function TenantReadinessBody({ data, onRefresh }: { data: TenantReadiness
               <Typography.Text strong>{item.title}</Typography.Text>
               <Tag color={item.done ? "success" : "warning"}>{item.done ? "已完成" : "未完成"}</Tag>
             </Space>
-            <Button type="link" onClick={() => { window.location.hash = item.nextHref; }}>
+            <Button type="link" onClick={() => navigate(item.nextHref)}>
               {item.done ? "查看" : "去配置"}
               <RightOutlined />
             </Button>

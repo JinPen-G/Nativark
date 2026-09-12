@@ -611,11 +611,13 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     );
     const enabledGroups = (context.pricingGroups ?? []).filter((row) => row.status === "enabled");
     let membershipPlanCount = 0;
+    let membershipUnavailable = false;
     if (this.memberships) {
       try {
         membershipPlanCount = (await this.memberships.listPlans(tenantId, workspaceId)).length;
       } catch {
-        membershipPlanCount = 0;
+        // 会员域读取异常时如实标注不可判定，而不是把「查不到」伪装成「没配置」。
+        membershipUnavailable = true;
       }
     }
     const operationsAccounts = this.prisma
@@ -685,7 +687,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         key: "price_version",
         title: "空间整体价格版本",
         done: false,
-        missing: "",
+        missing: "还没有空间整体价格版本（由定价分组基本价或调价计划生成）",
         nextHref: "/rental/pricing"
       },
       {
