@@ -51,6 +51,7 @@ import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
 import { CalendarMonthGrid } from "@/features/settings/CalendarMonthGrid";
 import { CalendarRangeModal } from "@/features/settings/CalendarRangeModal";
+import { normalizeSecurityRules } from "@/features/settings/securityRuleForm";
 
 type TabKey =
   | "category"
@@ -384,12 +385,14 @@ export function RentalGovernancePage() {
       values: RentalRuleVersion["config"] & { changeReason: string },
     ) => {
       const { changeReason, ...config } = values;
-      const deposit = config.deposit ?? { mode: "none" as const };
+      const security = normalizeSecurityRules(
+        config,
+        category?.businessModel.supportsPreauthorization !== false,
+      );
+      const deposit = security.deposit;
       // 不支持预授权的品类只能保存 none。即使历史快照或缓存表单残留了旧值，
       // 也要给用户一条可恢复路径，不能让禁用控件与后端能力校验形成死锁。
-      const preauthorization = category?.businessModel.supportsPreauthorization === false
-        ? { mode: "none" as const }
-        : config.preauthorization ?? { mode: "none" as const };
+      const preauthorization = security.preauthorization;
       return rentalCoreApi.saveRuleVersion({
         config: {
           ...config,
@@ -667,6 +670,7 @@ export function RentalGovernancePage() {
     if (category?.businessModel.supportsPreauthorization === false) {
       security.preauthorization = { mode: "none" };
     }
+    ruleForm.resetFields();
     ruleForm.setFieldsValue({
       ...config,
       ...security,
@@ -1901,7 +1905,12 @@ export function RentalGovernancePage() {
               <Form.Item name={["payment", "preauthorizationRequired"]} valuePropName="checked" hidden><Switch /></Form.Item>
               <Col span={8}>
                 <Form.Item name={["deposit", "mode"]} label="押金规则" rules={[{ required: true }]}>
-                  <Select options={Object.entries(securityRuleLabels).map(([value, label]) => ({ value, label }))} />
+                  <Select
+                    options={Object.entries(securityRuleLabels).map(([value, label]) => ({ value, label }))}
+                    onChange={(mode) => {
+                      if (mode !== "order_fixed") ruleForm.resetFields([["deposit", "fixedAmount"]]);
+                    }}
+                  />
                 </Form.Item>
               </Col>
               <Col span={8}>
@@ -1910,8 +1919,10 @@ export function RentalGovernancePage() {
                 </Form.Item>
               </Col>
               <Col span={8}>
-                <Form.Item name={["deposit", "fixedAmount"]} label="每单固定押金" tooltip="仅在押金规则选择“每单固定金额”时使用。">
-                  <InputNumber min={0} style={{ width: "100%" }} />
+                <Form.Item noStyle shouldUpdate={(previous, current) => previous.deposit?.mode !== current.deposit?.mode}>
+                  {({ getFieldValue }) => getFieldValue(["deposit", "mode"]) === "order_fixed" ? <Form.Item name={["deposit", "fixedAmount"]} label="每单固定押金" tooltip="仅在押金规则选择“每单固定金额”时使用。">
+                    <InputNumber min={0} style={{ width: "100%" }} />
+                  </Form.Item> : null}
                 </Form.Item>
               </Col>
               <Col span={8}>
@@ -1921,6 +1932,10 @@ export function RentalGovernancePage() {
                       ? Object.entries(preauthorizationRuleLabels)
                       : [["none", securityRuleLabels.none]]
                     ).map(([value, label]) => ({ value, label }))}
+                    onChange={(mode) => {
+                      if (mode !== "order_fixed") ruleForm.resetFields([["preauthorization", "fixedAmount"]]);
+                      if (mode !== "risk_surcharge") ruleForm.resetFields([["preauthorization", "riskSurchargeAmount"]]);
+                    }}
                   />
                 </Form.Item>
               </Col>
@@ -1930,13 +1945,17 @@ export function RentalGovernancePage() {
                 </Form.Item>
               </Col>
               <Col span={8}>
-                <Form.Item name={["preauthorization", "fixedAmount"]} label="订单固定预授权" tooltip="仅在预授权规则选择“每单固定金额”时使用。">
-                  <InputNumber min={0} disabled={!category?.businessModel.supportsPreauthorization} style={{ width: "100%" }} />
+                <Form.Item noStyle shouldUpdate={(previous, current) => previous.preauthorization?.mode !== current.preauthorization?.mode}>
+                  {({ getFieldValue }) => getFieldValue(["preauthorization", "mode"]) === "order_fixed" ? <Form.Item name={["preauthorization", "fixedAmount"]} label="订单固定预授权" tooltip="仅在预授权规则选择“每单固定金额”时使用。">
+                    <InputNumber min={0} disabled={!category?.businessModel.supportsPreauthorization} style={{ width: "100%" }} />
+                  </Form.Item> : null}
                 </Form.Item>
               </Col>
               <Col span={8}>
-                <Form.Item name={["preauthorization", "riskSurchargeAmount"]} label="风险附加额度" tooltip="仅在预授权规则选择“租金倍数 + 风险附加”时使用。">
-                  <InputNumber min={0} disabled={!category?.businessModel.supportsPreauthorization} style={{ width: "100%" }} />
+                <Form.Item noStyle shouldUpdate={(previous, current) => previous.preauthorization?.mode !== current.preauthorization?.mode}>
+                  {({ getFieldValue }) => getFieldValue(["preauthorization", "mode"]) === "risk_surcharge" ? <Form.Item name={["preauthorization", "riskSurchargeAmount"]} label="风险附加额度" tooltip="仅在预授权规则选择“租金倍数 + 风险附加”时使用。">
+                    <InputNumber min={0} disabled={!category?.businessModel.supportsPreauthorization} style={{ width: "100%" }} />
+                  </Form.Item> : null}
                 </Form.Item>
               </Col>
               <Col span={8}>
