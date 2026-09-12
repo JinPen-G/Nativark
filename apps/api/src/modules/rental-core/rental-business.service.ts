@@ -474,6 +474,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         state.calendars = config.calendars;
         state.ruleVersions = config.ruleVersions;
         state.notificationTemplates = config.notificationTemplates;
+        // 启动从数据库装载的配置已经是事实源，不能在首个报价时再次按 seedState
+        // 全量写回；尤其服务/规则版本禁止 v1 原地覆盖。只有没有任何持久化配置的
+        // 懒初始化空间，才由 createQuote 触发首次补落。
+        state.configPersisted = true;
       }
       const fact = factsByWorkspace.get(workspaceId);
       if (fact) {
@@ -584,12 +588,76 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   }
 
   private async persistBusinessConfig(state: RentalBusinessState) {
-    for (const plan of state.pricingPlans) await this.configStore.upsertPricingPlan(plan);
+    const mysql = this.prisma && (process.env.PLATFORM_DATA_SOURCE ?? "mysql").toLowerCase() === "mysql";
+    if (mysql && state.pricingPlans.length) {
+      // 懒加载演示/新空间的价格计划是在 PRICE-03 迁移之后才第一次落库，
+      // 因而不会被迁移回填。计划行和首个空间整体版本必须在同一事务内出现，
+      // 否则应用重启后报价会看到计划、却因没有版本而拒绝。
+      await this.prisma!.$transaction(async (tx) => {
+        for (const plan of state.pricingPlans) await this.configStore.upsertPricingPlan(plan, tx);
+        await this.ensureInitialSpacePriceVersion(state, tx);
+      });
+    } else {
+      for (const plan of state.pricingPlans) await this.configStore.upsertPricingPlan(plan);
+    }
     for (const plan of state.discountPlans) await this.configStore.upsertDiscountPlan(plan);
     for (const service of state.services) await this.configStore.upsertService(service);
     for (const calendar of state.calendars) await this.configStore.upsertCalendar(calendar);
     for (const version of state.ruleVersions) await this.configStore.upsertRuleVersion(version);
     for (const template of state.notificationTemplates) await this.configStore.upsertNotificationTemplate(template);
+  }
+
+  /**
+   * 为首次落库的启用价格计划建立 v1 空间整体版本。
+   *
+   * PRICE-03 的迁移只能回填迁移时已经存在的计划；懒初始化的新空间是在迁移之后
+   * 才写入计划行，因此必须在同一事务中补建首版。首版只包含其最早生效时刻实际
+   * 有效的计划，避免把未来才生效的计划提前写入当前价格事实。
+   */
+  private async ensureInitialSpacePriceVersion(state: RentalBusinessState, tx: Prisma.TransactionClient) {
+    const plans = state.pricingPlans.filter((plan) => plan.status === "enabled");
+    if (!plans.length) return;
+    const tenantId = plans[0].tenantId;
+    const workspaceId = this.workspaceOf(tenantId);
+    const existing = await tx.rentalPriceVersion.findFirst({
+      where: { tenantId, workspaceId, sequence: 1 },
+      select: { id: true }
+    });
+    if (existing) return;
+
+    const effectiveTimes = plans
+      .map((plan) => new Date(plan.effectiveFrom).getTime())
+      .filter((value) => Number.isFinite(value));
+    if (!effectiveTimes.length) return;
+    const earliest = Math.min(...effectiveTimes);
+    const activeAtEarliest = plans.filter((plan) => {
+      const from = new Date(plan.effectiveFrom).getTime();
+      const to = plan.effectiveTo ? new Date(plan.effectiveTo).getTime() : undefined;
+      return Number.isFinite(from) && from <= earliest && (to === undefined || to > earliest);
+    });
+    const ordered = [...activeAtEarliest].sort((left, right) => {
+      const byEffective = new Date(left.effectiveFrom).getTime() - new Date(right.effectiveFrom).getTime();
+      return byEffective !== 0 ? byEffective : right.code.localeCompare(left.code);
+    });
+    const rates = new Map<string, RentalPricingRate>();
+    for (const plan of ordered) {
+      for (const rate of plan.rates) rates.set(`${pricingTargetId(rate)}:${rate.unit}`, rate);
+    }
+    if (!rates.size) return;
+
+    await tx.rentalPriceVersion.createMany({
+      skipDuplicates: true,
+      data: {
+        id: randomUUID(),
+        tenantId,
+        workspaceId,
+        sequence: 1,
+        effectiveFrom: new Date(earliest),
+        rates: [...rates.values()] as unknown as Prisma.InputJsonValue,
+        changeReason: "PRICE-03 新空间初始价格版本",
+        createdBy: "system"
+      }
+    });
   }
 
   listPricingPlans(tenantId: string, context: BusinessContext) { return this.state(tenantId, context).pricingPlans; }
@@ -3954,6 +4022,13 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   async createQuote(tenantId: string, context: BusinessContext, input: RentalQuoteRequest) {
     if (this.memberships && !input.bookingIdentity) input = { ...input, bookingIdentity: { bookingIdentity: "personal" } };
     const state = this.state(tenantId, context);
+    // 新空间的默认价格是懒加载配置：首个报价不能先因为版本表为空而失败，
+    // 再等一个无关的保存动作来触发持久化。MySQL 路径在报价前补落计划与首版，
+    // 仍由 resolveSpaceRates 对所有后续报价执行不可变版本校验。
+    if (this.prisma && (process.env.PLATFORM_DATA_SOURCE ?? "mysql").toLowerCase() === "mysql" && !state.configPersisted) {
+      await this.persistBusinessConfig(state);
+      state.configPersisted = true;
+    }
     // 正式经营门禁：缺品类必选能力的 production 空间不得出新报价（Review P1-4）。
     if (this.capabilities) await this.capabilities.assertWorkspaceOperable(tenantId, this.workspaceOf(tenantId));
     if (new Date(input.startAt).getTime() >= new Date(input.endAt).getTime()) throw new BadRequestException("租赁结束时间必须晚于开始时间");
