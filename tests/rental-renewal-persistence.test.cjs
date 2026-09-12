@@ -16,8 +16,17 @@ const business = new RentalBusinessFactRepository(prisma);
 const core = new RentalCoreFactRepository(prisma);
 (async () => {
   await prisma.$connect();
-  const row = await prisma.rentalOrder.findFirst();
-  assert.ok(row, '克隆备份需包含至少一个订单供快照验证');
+  const candidates = await prisma.rentalOrder.findMany({
+    orderBy: { createdAt: 'asc' }
+  });
+  let row;
+  for (const candidate of candidates) {
+    if (await prisma.rentalQuote.findUnique({ where: { id: candidate.quoteId } })) {
+      row = candidate;
+      break;
+    }
+  }
+  assert.ok(row, '克隆备份需包含订单及其报价快照供续租持久化验证');
   const { tenantId, workspaceId } = row;
   await runWithRequestIdentity({ tenantId, workspaceId, userId: 'renewal-test', isSaasAdmin: false }, async () => {
     try {
