@@ -18,6 +18,7 @@ import { TenantIntegrationRuntimeService } from "./modules/integrations/tenant-i
 import { FileStorageRuntimeService } from "./modules/integrations/file-storage.runtime.service";
 import { PaymentRuntimeService } from "./modules/integrations/payment.runtime.service";
 import { PaymentWebhookController } from "./modules/integrations/payment-webhook.controller";
+import { PaymentOperationsController } from "./modules/integrations/payment-operations.controller";
 import { SecretBox } from "./common/secret-box";
 import { JobsController } from "./modules/jobs/jobs.controller";
 import { NotificationsController } from "./modules/notifications/notifications.controller";
@@ -84,6 +85,7 @@ import { ClientAuthService } from "./modules/client/client-auth.service";
     TenantIntegrationController,
     FilesController,
     PaymentWebhookController,
+    PaymentOperationsController,
     NotificationsController,
     JobsController,
     ClientApiController

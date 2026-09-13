@@ -47,8 +47,19 @@ interface PaymentIntentRow {
   merchantOrderNo: string;
   status: string;
   checkoutUrl: string | null;
+  externalTransactionId: string | null;
   expiresAt: Date;
   paidAt: Date | null;
+}
+
+type PaymentRefundRow = Prisma.RentalPaymentRefundGetPayload<object>;
+
+interface ProviderRefundResult {
+  status: "succeeded" | "accepted" | "failed";
+  externalRefundId?: string;
+  externalStatus?: string;
+  responseJson?: JsonRecord;
+  confirmedTotal?: number;
 }
 
 const money = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
@@ -247,6 +258,196 @@ export class PaymentRuntimeService {
     }
   }
 
+  async listPaymentIntents(tenantId: string, workspaceId: string, orderId: string) {
+    const rows = await this.prisma.rentalPaymentIntent.findMany({
+      where: { tenantId, workspaceId, orderId },
+      orderBy: { createdAt: "asc" }
+    });
+    return rows.map((row) => this.toResponse(row));
+  }
+
+  async listPaymentRefunds(tenantId: string, workspaceId: string, orderId: string, intentId: string) {
+    await this.requirePaymentIntent(tenantId, workspaceId, orderId, intentId);
+    const rows = await this.prisma.rentalPaymentRefund.findMany({
+      where: { tenantId, workspaceId, orderId, paymentIntentId: intentId },
+      orderBy: { createdAt: "asc" }
+    });
+    return rows.map((row) => this.toRefundResponse(row));
+  }
+
+  /**
+   * 创建真实退款申请。退款单先落库并以幂等键占住额度，再调用第三方；
+   * 网络未知结果不会直接标记失败，必须复用同一退款单查询，避免重复退款。
+   */
+  async createPaymentRefund(
+    tenantId: string,
+    workspaceId: string,
+    orderId: string,
+    intentId: string,
+    input: { amount: number; reason: string; idempotencyKey: string },
+    operator?: string
+  ) {
+    const reason = input.reason?.trim();
+    const idempotencyKey = input.idempotencyKey?.trim();
+    const amount = money(Number(input.amount));
+    if (!reason) throw new BadRequestException("退款原因不能为空");
+    if (!idempotencyKey || idempotencyKey.length > 191) throw new BadRequestException("退款必须带有效幂等键");
+    if (!Number.isFinite(amount) || amount <= 0) throw new BadRequestException("退款金额必须为正数");
+
+    // 先按完整作用域确认支付单，再查幂等记录。否则攻击者只要拿到另一个租户的
+    // intentId，就可能在幂等回放分支读到别的租户退款单摘要。
+    const intent = await this.requirePaymentIntent(tenantId, workspaceId, orderId, intentId);
+    const existing = await this.prisma.rentalPaymentRefund.findFirst({
+      where: { tenantId, workspaceId, orderId, paymentIntentId: intentId, idempotencyHash: sha256(idempotencyKey) }
+    });
+    if (existing) {
+      if (existing.idempotencyKey !== idempotencyKey) throw new ConflictException("退款幂等键摘要冲突，请更换幂等键");
+      if (money(Number(existing.amount)) !== amount || existing.reason !== reason) {
+        throw new ConflictException("相同退款幂等键已用于不同金额或原因");
+      }
+      return this.toRefundResponse(existing);
+    }
+
+    if (intent.status !== "paid" || !intent.externalTransactionId) throw new ConflictException("只有已入账且有第三方交易号的支付单才能退款");
+    const config = await this.integrations.runtimeConfig("payment", tenantId, intent.method as "alipay" | "wechat_pay");
+    if (!config) throw new ServiceUnavailableException("原支付平台未启用，无法发起退款");
+
+    const prepared = await this.prisma.$transaction(async (tx) => {
+      // 退款额度属于订单级事实，而不是支付单级事实；同一订单有多个支付单时，
+      // 必须锁订单行，避免两笔退款并发各自读到同一笔待退余额。
+      await tx.$queryRaw(Prisma.sql`
+        SELECT id
+          FROM rental_orders
+         WHERE id = ${orderId} AND tenantId = ${tenantId} AND workspaceId = ${workspaceId}
+         FOR UPDATE
+      `);
+      await tx.$queryRaw(Prisma.sql`
+        SELECT id
+          FROM rental_payment_intents
+         WHERE id = ${intentId} AND tenantId = ${tenantId} AND workspaceId = ${workspaceId} AND orderId = ${orderId}
+         FOR UPDATE
+      `);
+      const locked = await tx.rentalPaymentIntent.findFirst({
+        where: { id: intentId, tenantId, workspaceId, orderId }
+      });
+      if (!locked) throw new NotFoundException("支付单不存在");
+      if (locked.status !== "paid" || !locked.externalTransactionId) throw new ConflictException("支付单尚未完成真实入账");
+
+      // 外层幂等查询与本事务之间存在竞态；唯一键只负责兜底，不能把并发重试变成 500。
+      const duplicate = await tx.rentalPaymentRefund.findFirst({
+        where: { tenantId, workspaceId, orderId, paymentIntentId: intentId, idempotencyHash: sha256(idempotencyKey) }
+      });
+      if (duplicate) {
+        if (money(Number(duplicate.amount)) !== amount || duplicate.reason !== reason) {
+          throw new ConflictException("相同退款幂等键已用于不同金额或原因");
+        }
+        return { replay: true as const, refund: duplicate, intent: locked, confirmedTotal: 0 };
+      }
+
+      const funding = await this.funding.listEvents(tenantId, workspaceId, orderId, tx);
+      const pendingRefunds = await tx.rentalPaymentRefund.findMany({
+        where: { tenantId, workspaceId, orderId, status: { in: ["pending", "accepted", "funding_pending"] } },
+        select: { amount: true, status: true, paymentIntentId: true }
+      });
+      const alreadyRequested = money(pendingRefunds.reduce((sum, row) => sum + Number(row.amount), 0));
+      const remainingApproved = money(Math.max(0, -funding.rental.balance) - alreadyRequested);
+      const intentAlreadyRequested = money(pendingRefunds
+        .filter((row) => row.paymentIntentId === intentId)
+        .reduce((sum, row) => sum + Number(row.amount), 0));
+      const remainingIntent = money(Math.max(0, Number(locked.amount) - intentAlreadyRequested));
+      const maxRefundable = money(Math.max(0, Math.min(remainingApproved, remainingIntent)));
+      if (amount > maxRefundable + 0.005) {
+        throw new ConflictException(`退款金额超过当前可退余额，最多可退 ¥${maxRefundable.toFixed(2)}`);
+      }
+
+      const merchantRefundNo = `RR${Date.now().toString(36).toUpperCase()}${randomUUID().replace(/-/gu, "").slice(0, 14).toUpperCase()}`;
+      const refund = await tx.rentalPaymentRefund.create({
+        data: {
+          tenantId,
+          workspaceId,
+          orderId,
+          paymentIntentId: intentId,
+          provider: locked.provider,
+          method: locked.method,
+          amount: new Prisma.Decimal(amount),
+          currency: locked.currency,
+          merchantRefundNo,
+          idempotencyKey,
+          idempotencyHash: sha256(idempotencyKey),
+          status: "pending",
+          reason,
+          requestedBy: operator ?? null
+        }
+      });
+      return {
+        replay: false as const,
+        refund,
+        intent: locked,
+        confirmedTotal: money((await tx.rentalPaymentRefund.findMany({
+          where: { tenantId, workspaceId, orderId, paymentIntentId: intentId, status: { in: ["succeeded", "funding_pending"] } },
+          select: { amount: true }
+        })).reduce((sum, row) => sum + Number(row.amount), 0))
+      };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+    if (prepared.replay) return this.toRefundResponse(prepared.refund);
+
+    let result: { status: string; response: unknown; failureReason?: string };
+    try {
+      const outcome = await this.submitProviderRefund(config, prepared.intent, prepared.refund, prepared.confirmedTotal);
+      result = await this.applyProviderRefundOutcome(tenantId, workspaceId, orderId, prepared.refund.id, outcome, operator);
+    } catch (error) {
+      result = await this.markRefundProviderCallPending(
+        tenantId,
+        workspaceId,
+        orderId,
+        prepared.refund.id,
+        error instanceof Error ? error.message : "第三方退款结果未知"
+      );
+    }
+    await this.log(tenantId, config, "create_payment_refund", result.status === "failed" ? "failed" : "success", {
+      orderId,
+      intentId,
+      refundId: prepared.refund.id,
+      merchantRefundNo: prepared.refund.merchantRefundNo,
+      amount
+    }, result.response as JsonRecord, result.status === "failed" ? result.failureReason : undefined);
+    return result.response;
+  }
+
+  async refreshPaymentRefund(tenantId: string, workspaceId: string, orderId: string, intentId: string, refundId: string) {
+    const refund = await this.prisma.rentalPaymentRefund.findFirst({
+      where: { id: refundId, tenantId, workspaceId, orderId, paymentIntentId: intentId }
+    });
+    if (!refund) throw new NotFoundException("退款单不存在");
+    if (refund.status === "succeeded" && refund.fundedAt) return this.toRefundResponse(refund);
+    if (refund.status === "failed" || refund.status === "closed") return this.toRefundResponse(refund);
+    const intent = await this.requirePaymentIntent(tenantId, workspaceId, orderId, intentId);
+    const config = await this.integrations.runtimeConfig("payment", tenantId, intent.method as "alipay" | "wechat_pay");
+    if (!config) throw new ServiceUnavailableException("原支付平台未启用，无法查询退款");
+    const confirmedTotal = await this.confirmedRefundTotal(tenantId, workspaceId, intentId, refund.id);
+    let result: { status: string; response: unknown; failureReason?: string };
+    try {
+      const outcome = await this.queryProviderRefund(config, intent, refund, confirmedTotal);
+      result = await this.applyProviderRefundOutcome(tenantId, workspaceId, orderId, refund.id, outcome);
+    } catch (error) {
+      result = await this.markRefundProviderCallPending(
+        tenantId,
+        workspaceId,
+        orderId,
+        refund.id,
+        error instanceof Error ? error.message : "第三方退款查询结果未知"
+      );
+    }
+    await this.log(tenantId, config, "query_payment_refund", result.status === "failed" ? "failed" : "success", {
+      orderId,
+      intentId,
+      refundId: refund.id,
+      merchantRefundNo: refund.merchantRefundNo
+    }, result.response as JsonRecord, result.status === "failed" ? result.failureReason : undefined);
+    return result.response;
+  }
+
   async getPaymentIntent(tenantId: string, workspaceId: string, orderId: string, intentId: string) {
     const row = await this.prisma.rentalPaymentIntent.findFirst({ where: { id: intentId, tenantId, workspaceId, orderId } });
     if (!row) throw new NotFoundException("支付单不存在");
@@ -418,6 +619,285 @@ export class PaymentRuntimeService {
     if (!verified) throw new UnauthorizedException("微信支付回调验签失败");
     if (!identityMatched) throw new UnauthorizedException("微信支付回调商户身份不匹配");
     throw new NotFoundException("微信支付回调对应的支付单不存在");
+  }
+
+  private async requirePaymentIntent(tenantId: string, workspaceId: string, orderId: string, intentId: string) {
+    const row = await this.prisma.rentalPaymentIntent.findFirst({ where: { id: intentId, tenantId, workspaceId, orderId } });
+    if (!row) throw new NotFoundException("支付单不存在");
+    return row;
+  }
+
+  private async confirmedRefundTotal(tenantId: string, workspaceId: string, intentId: string, excludeRefundId?: string) {
+    const rows = await this.prisma.rentalPaymentRefund.findMany({
+      where: {
+        tenantId,
+        workspaceId,
+        paymentIntentId: intentId,
+        ...(excludeRefundId ? { id: { not: excludeRefundId } } : {}),
+        status: { in: ["succeeded", "funding_pending"] }
+      },
+      select: { amount: true }
+    });
+    return money(rows.reduce((sum, row) => sum + Number(row.amount), 0));
+  }
+
+  private async submitProviderRefund(
+    config: TenantIntegrationRuntimeConfig,
+    intent: PaymentIntentRow,
+    refund: PaymentRefundRow,
+    confirmedTotal: number
+  ): Promise<ProviderRefundResult> {
+    return intent.method === "alipay"
+      ? this.createAlipayRefund(config, intent, refund, confirmedTotal)
+      : this.createWechatRefund(config, intent, refund);
+  }
+
+  private async queryProviderRefund(
+    config: TenantIntegrationRuntimeConfig,
+    intent: PaymentIntentRow,
+    refund: PaymentRefundRow,
+    confirmedTotal: number
+  ): Promise<ProviderRefundResult> {
+    return intent.method === "alipay"
+      ? this.queryAlipayRefund(config, intent, refund, confirmedTotal)
+      : this.queryWechatRefund(config, refund);
+  }
+
+  private async createAlipayRefund(
+    config: TenantIntegrationRuntimeConfig,
+    intent: PaymentIntentRow,
+    refund: PaymentRefundRow,
+    confirmedTotal: number
+  ): Promise<ProviderRefundResult> {
+    const params: Record<string, string> = {
+      app_id: requiredText(config.settings.appId, "应用 ID"),
+      method: "alipay.trade.refund",
+      format: "JSON",
+      charset: "utf-8",
+      sign_type: "RSA2",
+      timestamp: alipayTimestamp(),
+      version: "1.0",
+      biz_content: JSON.stringify({
+        out_trade_no: intent.merchantOrderNo,
+        trade_no: intent.externalTransactionId,
+        refund_amount: Number(refund.amount).toFixed(2),
+        out_request_no: refund.merchantRefundNo,
+        refund_reason: refund.reason
+      })
+    };
+    const response = await fetchJson(requiredText(config.settings.gatewayUrl, "网关地址"), {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded;charset=utf-8" },
+      body: new URLSearchParams({ ...params, sign: signRsa(valueOf(config.credentials.appPrivateKey), stableFormContent(params)) }).toString()
+    });
+    const result = (response.alipay_trade_refund_response ?? {}) as JsonRecord;
+    if (valueOf(result.code) !== "10000") throw new Error(valueOf(result.sub_msg || result.msg || "支付宝退款申请失败"));
+    const refundFee = Number(valueOf(result.refund_fee));
+    const expectedTotal = money(confirmedTotal + Number(refund.amount));
+    const succeeded = valueOf(result.fund_change) === "Y" && Number.isFinite(refundFee) && refundFee + 0.005 >= expectedTotal;
+    return {
+      status: succeeded ? "succeeded" : "accepted",
+      externalRefundId: valueOf(result.trade_no || intent.externalTransactionId),
+      externalStatus: valueOf(result.fund_change || "ACCEPTED"),
+      confirmedTotal: Number.isFinite(refundFee) ? refundFee : undefined,
+      responseJson: { code: valueOf(result.code), fundChange: valueOf(result.fund_change), refundFee: Number.isFinite(refundFee) ? refundFee : undefined }
+    };
+  }
+
+  private async queryAlipayRefund(
+    config: TenantIntegrationRuntimeConfig,
+    intent: PaymentIntentRow,
+    refund: PaymentRefundRow,
+    confirmedTotal: number
+  ): Promise<ProviderRefundResult> {
+    const params: Record<string, string> = {
+      app_id: requiredText(config.settings.appId, "应用 ID"),
+      method: "alipay.trade.fastpay.refund.query",
+      format: "JSON",
+      charset: "utf-8",
+      sign_type: "RSA2",
+      timestamp: alipayTimestamp(),
+      version: "1.0",
+      biz_content: JSON.stringify({ out_trade_no: intent.merchantOrderNo, trade_no: intent.externalTransactionId, out_request_no: refund.merchantRefundNo })
+    };
+    const response = await fetchJson(requiredText(config.settings.gatewayUrl, "网关地址"), {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded;charset=utf-8" },
+      body: new URLSearchParams({ ...params, sign: signRsa(valueOf(config.credentials.appPrivateKey), stableFormContent(params)) }).toString()
+    });
+    const result = (response.alipay_trade_fastpay_refund_query_response ?? {}) as JsonRecord;
+    if (valueOf(result.code) !== "10000") throw new Error(valueOf(result.sub_msg || result.msg || "支付宝退款查询失败"));
+    const refundFee = Number(valueOf(result.refund_amount || result.refund_fee));
+    const succeeded = valueOf(result.refund_status) === "REFUND_SUCCESS"
+      && Number.isFinite(refundFee)
+      && refundFee + 0.005 >= money(confirmedTotal + Number(refund.amount));
+    return {
+      status: succeeded ? "succeeded" : "accepted",
+      externalRefundId: valueOf(result.trade_no || intent.externalTransactionId),
+      externalStatus: valueOf(result.refund_status || "PROCESSING"),
+      confirmedTotal: Number.isFinite(refundFee) ? refundFee : undefined,
+      responseJson: { code: valueOf(result.code), refundStatus: valueOf(result.refund_status || "PROCESSING"), refundFee: Number.isFinite(refundFee) ? refundFee : undefined }
+    };
+  }
+
+  private async createWechatRefund(
+    config: TenantIntegrationRuntimeConfig,
+    intent: PaymentIntentRow,
+    refund: PaymentRefundRow
+  ): Promise<ProviderRefundResult> {
+    const requestBody: JsonRecord = {
+      ...(intent.externalTransactionId ? { transaction_id: intent.externalTransactionId } : { out_trade_no: intent.merchantOrderNo }),
+      out_refund_no: refund.merchantRefundNo,
+      reason: refund.reason,
+      amount: {
+        refund: Math.round(Number(refund.amount) * 100),
+        total: Math.round(Number(intent.amount) * 100),
+        currency: intent.currency
+      }
+    };
+    const response = await this.wechatRequest(config, "POST", "/v3/refund/domestic/refunds", JSON.stringify(requestBody));
+    const state = valueOf(response.status || "PROCESSING").toUpperCase();
+    const refundedAmount = Number(((response.amount as JsonRecord | undefined)?.refund ?? Number.NaN)) / 100;
+    const amountMatches = state !== "SUCCESS" || (Number.isFinite(refundedAmount) && refundedAmount + 0.005 >= Number(refund.amount));
+    return {
+      status: state === "SUCCESS" && amountMatches ? "succeeded" : ["CLOSED"].includes(state) ? "failed" : "accepted",
+      externalRefundId: valueOf(response.refund_id),
+      externalStatus: state === "SUCCESS" && !amountMatches ? "SUCCESS_AMOUNT_MISMATCH" : state,
+      responseJson: {
+        refundId: valueOf(response.refund_id),
+        status: state,
+        outRefundNo: valueOf(response.out_refund_no || refund.merchantRefundNo),
+        refundedAmount: Number.isFinite(refundedAmount) ? refundedAmount : undefined
+      }
+    };
+  }
+
+  private async queryWechatRefund(config: TenantIntegrationRuntimeConfig, refund: PaymentRefundRow): Promise<ProviderRefundResult> {
+    const response = await this.wechatRequest(config, "GET", `/v3/refund/domestic/refunds/${encodeURIComponent(refund.merchantRefundNo)}`, "");
+    const state = valueOf(response.status || "PROCESSING").toUpperCase();
+    const refundedAmount = Number(((response.amount as JsonRecord | undefined)?.refund ?? Number.NaN)) / 100;
+    const amountMatches = state !== "SUCCESS" || (Number.isFinite(refundedAmount) && refundedAmount + 0.005 >= Number(refund.amount));
+    return {
+      status: state === "SUCCESS" && amountMatches ? "succeeded" : state === "CLOSED" ? "failed" : "accepted",
+      externalRefundId: valueOf(response.refund_id),
+      externalStatus: state === "SUCCESS" && !amountMatches ? "SUCCESS_AMOUNT_MISMATCH" : state,
+      responseJson: {
+        refundId: valueOf(response.refund_id),
+        status: state,
+        outRefundNo: valueOf(response.out_refund_no || refund.merchantRefundNo),
+        refundedAmount: Number.isFinite(refundedAmount) ? refundedAmount : undefined
+      }
+    };
+  }
+
+  private async applyProviderRefundOutcome(
+    tenantId: string,
+    workspaceId: string,
+    orderId: string,
+    refundId: string,
+    outcome: ProviderRefundResult,
+    operator?: string
+  ) {
+    if (outcome.status === "succeeded") {
+      try {
+        const updated = await this.prisma.$transaction(async (tx) => {
+          const row = await tx.rentalPaymentRefund.findFirst({ where: { id: refundId, tenantId, workspaceId, orderId } });
+          if (!row) throw new NotFoundException("退款单不存在");
+          if (row.fundedAt) return row;
+          await tx.rentalPaymentRefund.update({
+            where: { id: row.id },
+            data: {
+              status: "succeeded",
+              externalRefundId: outcome.externalRefundId ?? row.externalRefundId,
+              externalStatus: outcome.externalStatus ?? "SUCCESS",
+              responseJson: outcome.responseJson as Prisma.InputJsonValue,
+              succeededAt: row.succeededAt ?? new Date(),
+              failureReason: null
+            }
+          });
+          await this.funding.recordEvent(tenantId, workspaceId, orderId, {
+            instrument: "rental",
+            action: "refund",
+            amount: Number(row.amount),
+            idempotencyKey: `payment-refund:${row.id}`,
+            reason: `真实支付退款：${row.reason}`,
+            provider: row.provider as "alipay" | "wechat_pay"
+          }, operator ?? "provider", tx);
+          return tx.rentalPaymentRefund.update({ where: { id: row.id }, data: { fundedAt: new Date(), failureReason: null } });
+        });
+        return { status: updated.status, response: this.toRefundResponse(updated) };
+      } catch (error) {
+        const failureReason = error instanceof Error ? error.message : "第三方退款成功，但内部资金入账待恢复";
+        await this.prisma.rentalPaymentRefund.updateMany({
+          where: { id: refundId, tenantId, workspaceId, orderId },
+          data: {
+            status: "funding_pending",
+            externalRefundId: outcome.externalRefundId,
+            externalStatus: outcome.externalStatus ?? "SUCCESS",
+            responseJson: outcome.responseJson as Prisma.InputJsonValue,
+            succeededAt: new Date(),
+            failureReason: failureReason.slice(0, 500)
+          }
+        });
+        const scoped = await this.prisma.rentalPaymentRefund.findFirst({ where: { id: refundId, tenantId, workspaceId, orderId } });
+        if (!scoped) throw new NotFoundException("退款单不存在");
+        return { status: scoped.status, response: this.toRefundResponse(scoped), failureReason };
+      }
+    }
+
+    const current = await this.prisma.rentalPaymentRefund.findFirst({ where: { id: refundId, tenantId, workspaceId, orderId } });
+    if (!current) throw new NotFoundException("退款单不存在");
+    // 第三方一旦已确认成功，内部资金事件即使暂时失败，也不能被一次暂时性查询
+    // 结果降级成 accepted/failed；否则会丢失“已发生外部退款”的事实并允许重复退款。
+    if (current.fundedAt || current.status === "succeeded" || current.status === "funding_pending") {
+      return { status: current.status, response: this.toRefundResponse(current) };
+    }
+    const updated = await this.prisma.rentalPaymentRefund.update({
+      where: { id: current.id },
+      data: {
+        status: outcome.status === "accepted" ? "accepted" : "failed",
+        externalRefundId: outcome.externalRefundId,
+        externalStatus: outcome.externalStatus,
+        responseJson: outcome.responseJson as Prisma.InputJsonValue,
+        acceptedAt: outcome.status === "accepted" ? new Date() : undefined,
+        failureReason: outcome.status === "failed" ? "第三方明确拒绝退款" : null
+      }
+    });
+    return { status: updated.status, response: this.toRefundResponse(updated), failureReason: updated.failureReason ?? undefined };
+  }
+
+  private async markRefundProviderCallPending(tenantId: string, workspaceId: string, orderId: string, refundId: string, errorMessage: string) {
+    const definitive = /HTTP (400|401|403|404|409)/u.test(errorMessage);
+    await this.prisma.rentalPaymentRefund.updateMany({
+      where: { id: refundId, tenantId, workspaceId, orderId, status: { in: ["pending", "accepted"] } },
+      data: { status: definitive ? "failed" : "pending", failureReason: errorMessage.slice(0, 500) }
+    });
+    const updated = await this.prisma.rentalPaymentRefund.findFirst({ where: { id: refundId, tenantId, workspaceId, orderId } });
+    if (!updated) throw new NotFoundException("退款单不存在");
+    return { status: updated.status, response: this.toRefundResponse(updated), failureReason: errorMessage };
+  }
+
+  private toRefundResponse(row: PaymentRefundRow) {
+    return {
+      refundId: row.id,
+      paymentIntentId: row.paymentIntentId,
+      orderId: row.orderId,
+      provider: row.provider,
+      method: row.method,
+      amount: Number(row.amount),
+      currency: row.currency,
+      merchantRefundNo: row.merchantRefundNo,
+      status: row.status,
+      externalRefundId: row.externalRefundId ?? undefined,
+      externalStatus: row.externalStatus ?? undefined,
+      reason: row.reason,
+      failureReason: row.failureReason ?? undefined,
+      acceptedAt: row.acceptedAt?.toISOString(),
+      succeededAt: row.succeededAt?.toISOString(),
+      fundedAt: row.fundedAt?.toISOString(),
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString()
+    };
   }
 
   private async createAlipayIntent(config: TenantIntegrationRuntimeConfig, intent: PaymentIntentRow, orderNo: string) {

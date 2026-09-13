@@ -259,6 +259,33 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     },
     ["capability", "provider", "ok", "mode", "message", "checkedAt", "missingFields"]
   ),
+  CreatePaymentRefundRequest: objectOf(
+    { amount: numberSchema, reason: stringSchema, idempotencyKey: stringSchema },
+    ["amount", "reason", "idempotencyKey"]
+  ),
+  PaymentRefundResponse: objectOf(
+    {
+      refundId: stringSchema,
+      paymentIntentId: stringSchema,
+      orderId: stringSchema,
+      provider: stringSchema,
+      method: stringSchema,
+      amount: numberSchema,
+      currency: stringSchema,
+      merchantRefundNo: stringSchema,
+      status: stringSchema,
+      externalRefundId: stringSchema,
+      externalStatus: stringSchema,
+      reason: stringSchema,
+      failureReason: stringSchema,
+      acceptedAt: { type: "string", format: "date-time" },
+      succeededAt: { type: "string", format: "date-time" },
+      fundedAt: { type: "string", format: "date-time" },
+      createdAt: { type: "string", format: "date-time" },
+      updatedAt: { type: "string", format: "date-time" }
+    },
+    ["refundId", "paymentIntentId", "orderId", "provider", "method", "amount", "currency", "merchantRefundNo", "status", "reason", "createdAt", "updatedAt"]
+  ),
   CreateFileUploadSessionRequest: objectOf(
     {
       businessModule: stringSchema,
@@ -2231,6 +2258,10 @@ function rentalBusinessOperations(): ContractOperation[] { return [
   backlogOperation("post", "/api/rental/v1/orders/{orderId}/funding-events/refund", "RentalBusiness", "refundRentalOrderFundingV1", "Refund a deposit (mock)", ["rental-os:order:settle"]),
   backlogOperation("post", "/api/rental/v1/orders/{orderId}/funding-events/release", "RentalBusiness", "releaseRentalOrderFundingV1", "Release a pre-auth freeze (mock)", ["rental-os:order:settle"]),
   backlogOperation("post", "/api/rental/v1/orders/{orderId}/funding-events/fail", "RentalBusiness", "failRentalOrderFundingV1", "Record a failed deposit/pre-auth funding action (mock)", ["rental-os:order:settle"]),
+  backlogOperation("get", "/api/rental/v1/orders/{orderId}/payment-intents", "Payments", "listRentalPaymentIntents", "List real payment intents for an order", ["rental-os:finance:view", "rental-os:finance:reconcile"]),
+  backlogOperation("get", "/api/rental/v1/orders/{orderId}/payment-intents/{intentId}/refunds", "Payments", "listRentalPaymentRefunds", "List provider refund records for a payment intent", ["rental-os:finance:view", "rental-os:finance:reconcile"]),
+  backlogOperation("post", "/api/rental/v1/orders/{orderId}/payment-intents/{intentId}/refunds", "Payments", "createRentalPaymentRefund", "Create a real provider refund after an approved order credit", ["rental-os:finance:reconcile"], true, "CreatePaymentRefundRequest", "PaymentRefundResponse"),
+  backlogOperation("post", "/api/rental/v1/orders/{orderId}/payment-intents/{intentId}/refunds/{refundId}/refresh", "Payments", "refreshRentalPaymentRefund", "Query and recover a provider refund", ["rental-os:finance:reconcile"], true, undefined, "PaymentRefundResponse"),
   backlogOperation("get", "/api/rental/v1/customer-coupons", "RentalBusiness", "listRentalCustomerCoupons", "List customer coupons", ["rental-os:marketing:manage"]),
   backlogOperation("post", "/api/rental/v1/customer-coupons/{id}/void", "RentalBusiness", "voidRentalCustomerCoupon", "Void an available customer coupon with a reason", ["rental-os:marketing:manage"]),
   backlogOperation("post", "/api/rental/v1/customer-coupons/claim", "RentalBusiness", "claimRentalCustomerCoupon", "Claim customer coupon", ["rental-os:marketing:manage"]),

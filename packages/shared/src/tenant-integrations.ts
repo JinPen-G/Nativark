@@ -69,6 +69,13 @@ export interface SaveTenantIntegrationRequest {
   credentials?: Record<string, string>;
 }
 
+/** EXT-01D：真实支付退款申请。只允许引用订单资金事实形成的待退余额。 */
+export interface CreatePaymentRefundRequest {
+  amount: number;
+  reason: string;
+  idempotencyKey: string;
+}
+
 export interface TenantIntegrationRouteParams {
   capability: TenantIntegrationCapability;
   provider: TenantIntegrationProvider;

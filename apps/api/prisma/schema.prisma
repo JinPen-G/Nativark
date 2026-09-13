@@ -159,6 +159,7 @@ model Tenant {
   rentalRuleVersionAudits           RentalRuleVersionAudit[]
   rentalFundingEvents               RentalFundingEvent[]
   rentalPaymentIntents              RentalPaymentIntent[]
+  rentalPaymentRefunds              RentalPaymentRefund[]
   paymentWebhookEvents              PaymentWebhookEvent[]
   rentalOrderExtensions             RentalOrderExtension[]
   rentalBusinessCalendars           RentalBusinessCalendar[]
@@ -273,6 +274,7 @@ model BusinessWorkspace {
   rentalRuleVersionAudits           RentalRuleVersionAudit[]
   rentalFundingEvents               RentalFundingEvent[]
   rentalPaymentIntents              RentalPaymentIntent[]
+  rentalPaymentRefunds              RentalPaymentRefund[]
   rentalOrderExtensions             RentalOrderExtension[]
   rentalBusinessCalendars           RentalBusinessCalendar[]
   rentalCalendarOverrideAudits      RentalCalendarOverrideAuditEntry[]
@@ -2150,6 +2152,7 @@ model RentalOrder {
   serviceReservations           RentalServiceReservation[]
   fundingEvents                 RentalFundingEvent[]
   paymentIntents                RentalPaymentIntent[]
+  paymentRefunds                RentalPaymentRefund[]
   extensions                    RentalOrderExtension[]
   auditLogs                     OperationLog[]
   createdAt                     DateTime                       @default(now())
@@ -2231,11 +2234,52 @@ model RentalPaymentIntent {
   failureReason         String?           @db.VarChar(500)
   createdAt             DateTime          @default(now())
   updatedAt             DateTime          @updatedAt
+  refunds               RentalPaymentRefund[]
 
   @@unique([tenantId, workspaceId, orderId, instrument, idempotencyHash], map: "rental_payment_intents_scope_idem_key")
   @@index([tenantId, provider, status], map: "rental_payment_intents_provider_status_idx")
   @@index([tenantId, workspaceId, orderId, status], map: "rental_payment_intents_order_status_idx")
   @@map("rental_payment_intents")
+}
+
+/// EXT-01D：真实支付退款单。退款申请、第三方受理、实际退款和内部租金资金事件
+/// 分开记录；只有确认第三方退款成功后，才允许写入 rental_funding_events 的 refund。
+/// 同一支付单支持多次部分退款，但每个幂等键只产生一张退款单。
+model RentalPaymentRefund {
+  id                    String            @id @default(uuid())
+  tenantId              String
+  tenant                Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId           String
+  workspace             BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  orderId               String
+  order                 RentalOrder       @relation(fields: [tenantId, workspaceId, orderId], references: [tenantId, workspaceId, id], onDelete: Cascade)
+  paymentIntentId       String
+  paymentIntent         RentalPaymentIntent @relation(fields: [paymentIntentId], references: [id], onDelete: Cascade)
+  provider              String            @db.VarChar(40)
+  method                String            @db.VarChar(24)
+  amount                Decimal           @db.Decimal(12, 2)
+  currency              String            @db.VarChar(8)
+  merchantRefundNo      String            @unique(map: "rental_payment_refunds_merchant_no_key")
+  idempotencyKey        String            @db.VarChar(191)
+  idempotencyHash       String            @db.Char(64)
+  /// pending | accepted | succeeded | funding_pending | failed | closed
+  status                String            @default("pending") @db.VarChar(32)
+  externalRefundId      String?           @db.VarChar(191)
+  externalStatus        String?           @db.VarChar(40)
+  responseJson          Json?
+  reason                String            @db.VarChar(500)
+  requestedBy           String?
+  failureReason         String?           @db.VarChar(500)
+  acceptedAt            DateTime?
+  succeededAt           DateTime?
+  fundedAt              DateTime?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  @@unique([paymentIntentId, idempotencyHash], map: "rental_payment_refunds_intent_idem_key")
+  @@index([tenantId, workspaceId, orderId, status], map: "rental_payment_refunds_order_status_idx")
+  @@index([tenantId, provider, status, updatedAt], map: "rental_payment_refunds_provider_status_idx")
+  @@map("rental_payment_refunds")
 }
 
 /// EXT-01D：已验签的第三方支付通知。先以提供方事件幂等，再推进租金资金事实。
