@@ -529,7 +529,7 @@ export interface ClientNotificationView {
   channel: "sms" | "app_push" | "wechat" | "email";
   title: string;
   body: string;
-  status: "queued" | "sent" | "failed" | "delivery_uncertain" | "simulated" | "simulation_failed";
+  status: "queued" | "sent" | "delivery_pending" | "delivered" | "delivery_failed" | "failed" | "delivery_uncertain" | "simulated" | "simulation_failed";
   orderId?: string;
   createdAt: string;
   sentAt?: string;

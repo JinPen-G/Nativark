@@ -175,7 +175,7 @@ export function buildRentalWorkbenchTodos(
   // NOTICE-01：只有带订单业务对象的失败通知才进入工作台，确保待办有明确处理出口。
   // 模拟成功、已处理历史记录和没有业务对象的手工发送不伪造成业务待办。
   for (const log of notificationLogs.filter(
-    (row) => ["failed", "delivery_uncertain", "simulation_failed"].includes(row.status) && row.businessObjectType === "order" && row.businessObjectId
+    (row) => ["failed", "delivery_failed", "delivery_uncertain", "simulation_failed"].includes(row.status) && row.businessObjectType === "order" && row.businessObjectId
   )) {
     const order = orders.find((row) => row.id === log.businessObjectId);
     add(items, {

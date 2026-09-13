@@ -355,6 +355,9 @@ export class RentalBusinessController {
     const parsedLimit = limit ? Number(limit) : 20;
     return this.committed(req.user.tenantId, this.business.retryDueNotifications(req.user.tenantId, this.context(req.user.tenantId), Number.isFinite(parsedLimit) ? parsedLimit : 20));
   }
+  @Post("notification-logs/:id/query-delivery") async queryNotificationDelivery(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
+    return this.committed(req.user.tenantId, this.business.queryNotificationDelivery(req.user.tenantId, this.context(req.user.tenantId), id));
+  }
   @Post("notification-logs/:id/retry") async retryNotification(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
     return this.committed(req.user.tenantId, this.business.retryNotification(req.user.tenantId, this.context(req.user.tenantId), id));
   }

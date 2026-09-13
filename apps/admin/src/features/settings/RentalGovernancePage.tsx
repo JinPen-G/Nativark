@@ -671,9 +671,17 @@ export function RentalGovernancePage() {
     mutationFn: (id: string) => rentalCoreApi.retryNotification(id),
     onSuccess: async (result) => {
       await queryClient.invalidateQueries({ queryKey: ["rental-core", "notification-logs"] });
-      message.success(result.status === "sent" ? "短信已发送" : "短信仍未送达，已记录下一次重试时间");
+      message.success(result.status === "sent" ? "短信已被服务商受理" : result.status === "delivery_failed" ? "服务商确认投递失败，可重新发送" : result.status === "delivered" ? "短信已送达" : "短信仍未完成投递，已保留当前状态");
     },
     onError: () => message.error("短信重试失败，请检查短信平台配置和模板编码"),
+  });
+  const queryNotificationDelivery = useMutation({
+    mutationFn: (id: string) => rentalCoreApi.queryNotificationDelivery(id),
+    onSuccess: async (result) => {
+      await queryClient.invalidateQueries({ queryKey: ["rental-core", "notification-logs"] });
+      message.success(result.status === "delivered" ? "短信已送达" : result.status === "delivery_failed" ? "服务商返回短信投递失败" : result.status === "delivery_pending" ? "服务商暂未返回最终回执" : "短信回执状态已更新");
+    },
+    onError: () => message.error("查询短信回执失败，请稍后重试"),
   });
   const retryDueNotifications = useMutation({
     mutationFn: () => rentalCoreApi.retryDueNotifications(),
@@ -1843,19 +1851,28 @@ export function RentalGovernancePage() {
                         title: "状态",
                         dataIndex: "status",
                         render: (value) => (
-                          <Tag color={value === "sent" ? "success" : value === "simulated" ? "processing" : value === "queued" || value === "delivery_uncertain" ? "warning" : "error"}>
-                            {value}
+                          <Tag color={value === "delivered" ? "success" : value === "sent" || value === "delivery_pending" ? "processing" : value === "simulated" ? "default" : value === "queued" || value === "delivery_uncertain" ? "warning" : "error"}>
+                            {{ sent: "服务商已受理", delivered: "已送达", delivery_pending: "等待回执", delivery_failed: "投递失败", delivery_uncertain: "结果未知", queued: "待发送", failed: "发送失败", simulated: "模拟", simulation_failed: "模拟失败" }[value as string] ?? value}
                           </Tag>
                         ),
                       },
                       { title: "时间", dataIndex: "createdAt" },
                       {
                         title: "操作",
-                        render: (_, row) => row.channel === "sms" && ["queued", "failed"].includes(row.status) ? (
-                          <Button type="link" loading={retryNotification.isPending} onClick={() => retryNotification.mutate(row.id)}>
-                            重试
-                          </Button>
-                        ) : "—",
+                        render: (_, row) => row.channel !== "sms" ? "—" : (
+                          <Space>
+                            {["sent", "delivery_pending", "delivery_uncertain"].includes(row.status) && (
+                              <Button type="link" loading={queryNotificationDelivery.isPending} onClick={() => queryNotificationDelivery.mutate(row.id)}>
+                                查询回执
+                              </Button>
+                            )}
+                            {["queued", "failed", "delivery_failed"].includes(row.status) && (
+                              <Button type="link" loading={retryNotification.isPending} onClick={() => retryNotification.mutate(row.id)}>
+                                重试
+                              </Button>
+                            )}
+                          </Space>
+                        ),
                       },
                     ]}
                   />

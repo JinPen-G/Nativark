@@ -3868,11 +3868,57 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     }
   }
 
+  /** 查询真实短信的服务商回执；查询未知时保留不确定态，绝不自动补发。 */
+  async queryNotificationDelivery(tenantId: string, context: BusinessContext, id: string): Promise<RentalNotificationSendLogV1> {
+    const current = await this.factStore.findNotificationDelivery(tenantId, id);
+    if (!current) throw new NotFoundException("通知发送记录不存在");
+    if (current.log.channel !== "sms") throw new BadRequestException("只有短信通知支持查询投递回执");
+    if (["simulated", "simulation_failed"].includes(current.log.status)) throw new BadRequestException("模拟通知没有服务商回执");
+    if (["delivered", "delivery_failed"].includes(current.log.status)) return current.log;
+    if (!current.log.providerMessageId) throw new ConflictException("短信没有可查询的服务商回执号");
+    if (!current.recipientEncrypted || !this.secretBox) throw new ServiceUnavailableException("通知收件人密文不可用，无法查询回执");
+    if (!this.notificationRuntime) throw new ServiceUnavailableException("短信平台运行组件未就绪");
+    const decrypted = this.secretBox.decrypt(current.recipientEncrypted);
+    let queried: Awaited<ReturnType<TenantIntegrationRuntimeService["queryNotificationDelivery"]>>;
+    try {
+      queried = await this.notificationRuntime.queryNotificationDelivery(
+        tenantId,
+        decrypted.recipient,
+        current.log.providerMessageId,
+        current.log.sentAt
+      );
+    } catch (error) {
+      if (!(error instanceof NotificationDeliveryUnknownError)) throw error;
+      const message = (error instanceof Error ? error.message : "短信回执查询结果未知").slice(0, 191);
+      const updated = await this.factStore.updateNotificationDelivery(tenantId, id, {
+        status: "delivery_uncertain",
+        errorMessage: message,
+        nextAttemptAt: null
+      });
+      const result = updated ?? { ...current.log, status: "delivery_uncertain" as const, errorMessage: message, nextAttemptAt: undefined };
+      this.applyNotificationLogToCache(tenantId, context, result);
+      return result;
+    }
+    const status = queried.status === "delivered"
+      ? "delivered"
+      : queried.status === "failed"
+        ? "delivery_failed"
+        : "delivery_pending";
+    const updated = await this.factStore.updateNotificationDelivery(tenantId, id, {
+      status,
+      errorMessage: queried.status === "failed" ? (queried.detail ?? queried.providerStatus).slice(0, 191) : null,
+      nextAttemptAt: null
+    });
+    if (!updated) throw new ConflictException("短信投递记录已被其他操作更新，请刷新后重试");
+    this.applyNotificationLogToCache(tenantId, context, updated);
+    return updated;
+  }
+
   async retryNotification(tenantId: string, context: BusinessContext, id: string, rateReserved = false) {
     const current = await this.factStore.findNotificationDelivery(tenantId, id);
     if (!current) throw new NotFoundException("通知发送记录不存在");
     if (current.log.channel !== "sms") throw new BadRequestException("只有真实短信通知支持重试");
-    if (current.log.status === "sent") return current.log;
+    if (["sent", "delivery_pending", "delivered"].includes(current.log.status)) return current.log;
     if (current.log.status === "delivery_uncertain") throw new ConflictException("短信投递结果未知，请先查询服务商记录，不能直接重试");
     if (current.log.attempts >= current.maxAttempts) throw new ConflictException("该通知已达到最大重试次数");
     return this.deliverNotification(tenantId, context, id, undefined, true, rateReserved);

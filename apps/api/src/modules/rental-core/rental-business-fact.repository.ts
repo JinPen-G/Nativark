@@ -805,11 +805,11 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
   async claimNotificationDelivery(tenantId: string, id: string, at: string, leaseUntil: string, force: boolean): Promise<boolean> {
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
     const current = await this.prisma.rentalNotificationLog.findFirst({ where: { id, tenantId, workspaceId } });
-    if (!current || current.channel !== "sms" || !["queued", "failed"].includes(current.status)) return false;
+    if (!current || current.channel !== "sms" || !["queued", "failed", "delivery_failed"].includes(current.status)) return false;
     if (current.attempts >= current.maxAttempts) return false;
     if (!force && current.nextAttemptAt && current.nextAttemptAt.getTime() > new Date(at).getTime()) return false;
     const result = await this.prisma.rentalNotificationLog.updateMany({
-      where: { id, tenantId, workspaceId, status: { in: ["queued", "failed"] }, attempts: current.attempts },
+      where: { id, tenantId, workspaceId, status: { in: ["queued", "failed", "delivery_failed"] }, attempts: current.attempts },
       data: { attempts: { increment: 1 }, lastAttemptAt: date(at), nextAttemptAt: date(leaseUntil) }
     });
     return result.count === 1;

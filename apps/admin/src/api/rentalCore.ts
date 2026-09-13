@@ -239,6 +239,7 @@ export const rentalCoreApi = {
   saveNotificationTemplate: (data: SaveRentalNotificationTemplateRequest) => request<RentalNotificationTemplateV1>(data.id ? `/rental/v1/notification-templates/${data.id}` : "/rental/v1/notification-templates", { method: data.id ? "put" : "post", data }),
   notificationLogs: () => request<RentalNotificationSendLogV1[]>("/rental/v1/notification-logs"),
   retryNotification: (id: string) => request<RentalNotificationSendLogV1>(`/rental/v1/notification-logs/${id}/retry`, { method: "post" }),
+  queryNotificationDelivery: (id: string) => request<RentalNotificationSendLogV1>(`/rental/v1/notification-logs/${id}/query-delivery`, { method: "post" }),
   retryDueNotifications: (limit = 20) => request<{ attempted: number; sent: number; failed: number; ids: string[] }>(`/rental/v1/notification-logs/retry-due?limit=${limit}`, { method: "post" }),
   sendNotification: (data: SendRentalNotificationRequest) => request<RentalNotificationSendLogV1>("/rental/v1/notifications/send", { method: "post", data }),
   createQuote: (data: RentalQuoteRequest) => request<RentalQuoteSnapshotV1>("/rental/v1/quotes", { method: "post", data }),

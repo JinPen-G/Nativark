@@ -13,6 +13,14 @@ export interface VerificationSmsResult {
 
 export interface NotificationSmsResult extends VerificationSmsResult {}
 
+export type NotificationDeliveryQueryStatus = "pending" | "delivered" | "failed";
+
+export interface NotificationDeliveryQueryResult {
+  status: NotificationDeliveryQueryStatus;
+  providerStatus: string;
+  detail?: string;
+}
+
 /**
  * 请求已经离开本服务，但没有拿到服务商的确定响应。
  * 这种情况不能当作“发送失败”自动重试，否则服务商可能已经受理而造成重复短信。
@@ -49,6 +57,17 @@ function hmacSha256(key: string | Buffer, value: string, encoding: "hex" | "buff
 
 function hmacSha1Base64(key: string, value: string) {
   return createHmac("sha1", key).update(value).digest("base64");
+}
+
+function aliyunSendDate(value: Date) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(value);
+  const part = (type: string) => parts.find((item) => item.type === type)?.value ?? "";
+  return `${part("year")}${part("month")}${part("day")}`;
 }
 
 async function fetchWithTimeout(url: string, init: RequestInit, productionHosts: readonly string[], timeoutMs = 8_000) {
@@ -233,6 +252,179 @@ export class TenantIntegrationRuntimeService {
     }
   }
 
+  /**
+   * 查询服务商的最终投递回执。发送接口的成功只代表服务商受理，不能直接当作客户已收到。
+   * 查询失败不会被当成“发送失败”；网络结果未知时由上层保留 delivery_uncertain，避免重复发送。
+   */
+  async queryNotificationDelivery(
+    tenantId: string,
+    phone: string,
+    providerMessageId: string,
+    sentAt?: string
+  ): Promise<NotificationDeliveryQueryResult> {
+    const config = await this.integrations.runtimeConfig("sms", tenantId);
+    if (!config) throw new ServiceUnavailableException("短信平台尚未配置或未启用");
+    const messageId = providerMessageId.trim();
+    if (!messageId) throw new ServiceUnavailableException("短信服务商回执号为空，无法查询");
+    const sentAtDate = sentAt ? new Date(sentAt) : new Date();
+    if (!Number.isFinite(sentAtDate.getTime())) throw new ServiceUnavailableException("短信发送时间无效，无法查询回执");
+    const maxAgeMs = config.provider === "aliyun_sms" ? 30 * 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000;
+    const ageMs = Date.now() - sentAtDate.getTime();
+    if (ageMs < -5 * 60 * 1000 || ageMs > maxAgeMs) {
+      throw new NotificationDeliveryUnknownError(
+        config.provider === "aliyun_sms"
+          ? "阿里云短信回执查询仅支持近期发送记录，请保留服务商回执或配置回调"
+          : "腾讯云短信回执查询仅支持近期发送记录，请保留服务商回执或配置回调"
+      );
+    }
+    const messageHash = sha256(messageId).slice(0, 16);
+    try {
+      const result = config.provider === "aliyun_sms"
+        ? await this.queryAliyunDelivery(config, phone, messageId, sentAtDate)
+        : config.provider === "tencent_sms"
+          ? await this.queryTencentDelivery(config, phone, messageId, sentAtDate)
+          : (() => { throw new ServiceUnavailableException("未实现的短信平台适配器"); })();
+      await this.tryLog(tenantId, config, "query_notification_sms_delivery", "success", {
+        phone: maskPhone(phone),
+        providerMessageHash: messageHash
+      }, { providerStatus: result.providerStatus, status: result.status });
+      return result;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "短信回执查询失败";
+      await this.tryLog(tenantId, config, "query_notification_sms_delivery", "failed", {
+        phone: maskPhone(phone),
+        providerMessageHash: messageHash
+      }, undefined, message);
+      throw error instanceof NotificationDeliveryUnknownError || error instanceof ServiceUnavailableException
+        ? error
+        : new ServiceUnavailableException(`短信回执查询失败：${message.slice(0, 180)}`);
+    }
+  }
+
+  private async queryAliyunDelivery(
+    config: TenantIntegrationRuntimeConfig,
+    phone: string,
+    providerMessageId: string,
+    sentAt: Date
+  ): Promise<NotificationDeliveryQueryResult> {
+    const accessKeyId = text(config.credentials.accessKeyId, "AccessKey ID");
+    const accessKeySecret = text(config.credentials.accessKeySecret, "AccessKey Secret");
+    const params: Record<string, string> = {
+      AccessKeyId: accessKeyId,
+      Action: "QuerySendDetails",
+      BizId: providerMessageId,
+      CurrentPage: "1",
+      Format: "JSON",
+      PageSize: "50",
+      PhoneNumber: phone,
+      RegionId: text(config.settings.region, "地域"),
+      SendDate: aliyunSendDate(sentAt),
+      SignatureMethod: "HMAC-SHA1",
+      SignatureNonce: randomUUID(),
+      SignatureVersion: "1.0",
+      Timestamp: new Date().toISOString().replace(/\.\d{3}Z$/u, "Z"),
+      Version: "2017-05-25",
+      Signature: ""
+    };
+    const canonical = Object.keys(params)
+      .filter((key) => key !== "Signature")
+      .sort()
+      .map((key) => `${rfc3986(key)}=${rfc3986(params[key])}`)
+      .join("&");
+    params.Signature = hmacSha1Base64(`${accessKeySecret}&`, `GET&%2F&${rfc3986(canonical)}`);
+    const query = Object.keys(params).sort().map((key) => `${rfc3986(key)}=${rfc3986(params[key])}`).join("&");
+    let response: Response;
+    let body: JsonRecord;
+    try {
+      response = await fetchWithTimeout(`https://dysmsapi.aliyuncs.com/?${query}`, { method: "GET" }, ["dysmsapi.aliyuncs.com"]);
+      body = await this.readJson(response);
+    } catch (error) {
+      throw error instanceof NotificationDeliveryUnknownError ? error : new NotificationDeliveryUnknownError();
+    }
+    if (!response.ok || body.Code !== "OK") throw new ServiceUnavailableException("阿里云短信回执查询失败");
+    const detailContainer = body.SmsSendDetailDTOs as JsonRecord | undefined;
+    const details = Array.isArray(detailContainer?.SmsSendDetailDTO) ? detailContainer.SmsSendDetailDTO as JsonRecord[] : [];
+    const detail = details[0];
+    if (!detail) return { status: "pending", providerStatus: "PENDING" };
+    const sendStatus = Number(detail.SendStatus);
+    const errorCode = String(detail.ErrCode ?? "").trim().toUpperCase();
+    if (sendStatus === 3 || errorCode === "DELIVERED") {
+      return { status: "delivered", providerStatus: errorCode || "DELIVERED", detail: String(detail.ReceiveDate ?? "") || undefined };
+    }
+    if (sendStatus === 2) {
+      return { status: "failed", providerStatus: errorCode || "FAILED", detail: String(detail.ErrCode ?? "") || undefined };
+    }
+    return { status: "pending", providerStatus: errorCode || "PENDING" };
+  }
+
+  private async queryTencentDelivery(
+    config: TenantIntegrationRuntimeConfig,
+    phone: string,
+    providerMessageId: string,
+    sentAt: Date
+  ): Promise<NotificationDeliveryQueryResult> {
+    const secretId = text(config.credentials.secretId, "SecretId");
+    const secretKey = text(config.credentials.secretKey, "SecretKey");
+    const host = "sms.tencentcloudapi.com";
+    const service = "sms";
+    const action = "PullSmsSendStatusByPhoneNumber";
+    const version = "2019-07-11";
+    const timestamp = Math.floor(Date.now() / 1000);
+    const start = Math.max(Math.floor(sentAt.getTime() / 1000) - 60, timestamp - 7 * 24 * 60 * 60);
+    const phoneNumber = phone.startsWith("+") ? phone : phone.startsWith("86") ? `+${phone}` : `+86${phone}`;
+    const payload = JSON.stringify({
+      EndDateTime: timestamp + 60,
+      Limit: 100,
+      Offset: 0,
+      PhoneNumber: phoneNumber,
+      SendDateTime: start,
+      SmsSdkAppid: text(config.settings.smsSdkAppId, "SmsSdkAppid")
+    });
+    const contentType = "application/json; charset=utf-8";
+    const canonicalHeaders = `content-type:${contentType}\nhost:${host}\n`;
+    const signedHeaders = "content-type;host";
+    const canonicalRequest = `POST\n/\n\n${canonicalHeaders}\n${signedHeaders}\n${sha256(payload)}`;
+    const date = new Date(timestamp * 1000).toISOString().slice(0, 10).replace(/-/g, "");
+    const credentialScope = `${date}/${service}/tc3_request`;
+    const stringToSign = `TC3-HMAC-SHA256\n${timestamp}\n${credentialScope}\n${sha256(canonicalRequest)}`;
+    const secretDate = hmacSha256(`TC3${secretKey}`, date, "buffer") as Buffer;
+    const secretService = hmacSha256(secretDate, service, "buffer") as Buffer;
+    const secretSigning = hmacSha256(secretService, "tc3_request", "buffer") as Buffer;
+    const signature = hmacSha256(secretSigning, stringToSign);
+    const authorization = `TC3-HMAC-SHA256 Credential=${secretId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+    let response: Response;
+    let body: JsonRecord;
+    try {
+      response = await fetchWithTimeout(`https://${host}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": contentType,
+          Host: host,
+          "X-TC-Action": action,
+          "X-TC-Version": version,
+          "X-TC-Region": text(config.settings.region, "地域"),
+          "X-TC-Timestamp": String(timestamp),
+          "X-TC-RequestClient": "rental-os",
+          Authorization: authorization
+        },
+        body: payload
+      }, [host]);
+      body = await this.readJson(response);
+    } catch (error) {
+      throw error instanceof NotificationDeliveryUnknownError ? error : new NotificationDeliveryUnknownError();
+    }
+    const responseBody = (body.Response ?? {}) as JsonRecord;
+    const error = responseBody.Error as JsonRecord | undefined;
+    if (!response.ok || error) throw new ServiceUnavailableException("腾讯云短信回执查询失败");
+    const statuses = Array.isArray(responseBody.PullSmsSendStatusSet) ? responseBody.PullSmsSendStatusSet as JsonRecord[] : [];
+    const detail = statuses.find((item) => String(item.SerialNo ?? "") === providerMessageId);
+    if (!detail) return { status: "pending", providerStatus: "PENDING" };
+    const reportStatus = String(detail.ReportStatus ?? "").trim().toUpperCase();
+    if (reportStatus === "SUCCESS") return { status: "delivered", providerStatus: reportStatus, detail: String(detail.Description ?? "") || undefined };
+    if (reportStatus === "FAIL") return { status: "failed", providerStatus: reportStatus, detail: String(detail.Description ?? "") || undefined };
+    return { status: "pending", providerStatus: reportStatus || "PENDING" };
+  }
+
   private async sendAliyun(config: TenantIntegrationRuntimeConfig, phone: string, code: string, idempotencyKey: string) {
     return this.sendAliyunTemplate(config, phone, text(config.settings.verificationTemplateCode, "验证码模板编码"), { code }, idempotencyKey);
   }
@@ -280,7 +472,9 @@ export class TenantIntegrationRuntimeService {
       throw new NotificationDeliveryUnknownError();
     }
     if (!response.ok || body.Code !== "OK") throw new Error(String(body.Message ?? `HTTP ${response.status}`));
-    return String(body.RequestId ?? idempotencyKey);
+    const bizId = String(body.BizId ?? "").trim();
+    if (!bizId) throw new NotificationDeliveryUnknownError("阿里云已返回成功，但没有返回可查询的短信回执号");
+    return bizId;
   }
 
   private async sendTencent(config: TenantIntegrationRuntimeConfig, phone: string, code: string, idempotencyKey: string) {
@@ -346,7 +540,10 @@ export class TenantIntegrationRuntimeService {
     const responseBody = (body.Response ?? {}) as JsonRecord;
     const error = responseBody.Error as JsonRecord | undefined;
     if (!response.ok || error) throw new Error(String(error?.Message ?? `HTTP ${response.status}`));
-    return String(responseBody.RequestId ?? idempotencyKey);
+    const sendStatuses = Array.isArray(responseBody.SendStatusSet) ? responseBody.SendStatusSet as JsonRecord[] : [];
+    const serialNo = String(sendStatuses[0]?.SerialNo ?? "").trim();
+    if (!serialNo) throw new NotificationDeliveryUnknownError("腾讯云已返回成功，但没有返回可查询的短信流水号");
+    return serialNo;
   }
 
   private async readJson(response: Response): Promise<JsonRecord> {

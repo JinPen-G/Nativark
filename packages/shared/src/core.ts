@@ -3669,7 +3669,8 @@ export interface RentalNotificationSendLogV1 {
   renderedBody: string;
   variables: Record<string, unknown>;
   /** 未接真实 Provider 时只能使用 simulated / simulation_failed，不得冒充真实发送或送达。 */
-  status: "queued" | "sent" | "failed" | "delivery_uncertain" | "simulated" | "simulation_failed";
+  /** sent=服务商已受理，delivery_pending=已查询但尚无最终回执，delivered/ delivery_failed=服务商最终回执。 */
+  status: "queued" | "sent" | "delivery_pending" | "delivered" | "delivery_failed" | "failed" | "delivery_uncertain" | "simulated" | "simulation_failed";
   provider: string;
   providerMessageId?: string;
   errorMessage?: string;
