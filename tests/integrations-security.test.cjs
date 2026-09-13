@@ -31,6 +31,7 @@ assert.match(paymentSource, /微信支付回调格式无效/);
 assert.match(fileSource, /content-length/);
 assert.match(fileSource, /actualType === expectedType/);
 assert.match(fileSource, /redirect: "error"/);
+assert.match(fileSource, /this\.presign\(config, "HEAD", storageKey/);
 assert.match(fileSource, /safeObjectPrefix/);
 assert.match(fileSource, /safeBucket/);
 assert.match(smsSource, /redirect: "error"/);

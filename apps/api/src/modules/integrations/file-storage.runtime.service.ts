@@ -241,13 +241,13 @@ export class FileStorageRuntimeService {
     return { base: pathStyle ? `${base.protocol}//${base.host}/${encodeURIComponent(bucket)}` : `${base.protocol}//${bucket}.${base.host}`, bucket, region: safeRegion(text(settings.region, "Region")) };
   }
 
-  private presign(config: TenantIntegrationRuntimeConfig, method: "GET" | "PUT", storageKey: string, mimeType: string, expiresAt: Date) {
+  private presign(config: TenantIntegrationRuntimeConfig, method: "GET" | "PUT" | "HEAD", storageKey: string, mimeType: string, expiresAt: Date) {
     if (config.provider === "aliyun_oss") return this.presignOss(config, method, storageKey, mimeType, expiresAt);
     if (config.provider === "tencent_cos") return this.presignCos(config, method, storageKey, mimeType, expiresAt);
     return this.presignS3(config, method, storageKey, mimeType, expiresAt);
   }
 
-  private presignOss(config: TenantIntegrationRuntimeConfig, method: "GET" | "PUT", storageKey: string, mimeType: string, expiresAt: Date) {
+  private presignOss(config: TenantIntegrationRuntimeConfig, method: "GET" | "PUT" | "HEAD", storageKey: string, mimeType: string, expiresAt: Date) {
     const { base, bucket } = this.endpoint(config);
     const expires = Math.floor(expiresAt.getTime() / 1000);
     const contentType = method === "PUT" ? mimeType : "";
@@ -259,7 +259,7 @@ export class FileStorageRuntimeService {
     return { url, headers };
   }
 
-  private presignCos(config: TenantIntegrationRuntimeConfig, method: "GET" | "PUT", storageKey: string, mimeType: string, expiresAt: Date) {
+  private presignCos(config: TenantIntegrationRuntimeConfig, method: "GET" | "PUT" | "HEAD", storageKey: string, mimeType: string, expiresAt: Date) {
     const { base } = this.endpoint(config);
     const start = Math.floor(Date.now() / 1000);
     const end = Math.floor(expiresAt.getTime() / 1000);
@@ -283,7 +283,7 @@ export class FileStorageRuntimeService {
     return { url: `${base}${uri}?${query.toString()}`, headers };
   }
 
-  private presignS3(config: TenantIntegrationRuntimeConfig, method: "GET" | "PUT", storageKey: string, mimeType: string, expiresAt: Date) {
+  private presignS3(config: TenantIntegrationRuntimeConfig, method: "GET" | "PUT" | "HEAD", storageKey: string, mimeType: string, expiresAt: Date) {
     const { base, bucket, region } = this.endpoint(config);
     const endpoint = new URL(base);
     const host = endpoint.host;
@@ -314,7 +314,7 @@ export class FileStorageRuntimeService {
   }
 
   private async objectExists(config: TenantIntegrationRuntimeConfig, storageKey: string, mimeType: string, sizeBytes: number, expiresAt: Date) {
-    const signed = this.presign(config, "GET", storageKey, mimeType, expiresAt);
+    const signed = this.presign(config, "HEAD", storageKey, mimeType, expiresAt);
     const response = await fetchWithTimeout(signed.url, { method: "HEAD", headers: signed.headers });
     if (!response.ok) return false;
     const contentLength = Number(response.headers.get("content-length"));
