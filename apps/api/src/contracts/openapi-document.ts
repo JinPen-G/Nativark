@@ -259,6 +259,45 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     },
     ["capability", "provider", "ok", "mode", "message", "checkedAt", "missingFields"]
   ),
+  CreateFileUploadSessionRequest: objectOf(
+    {
+      businessModule: stringSchema,
+      businessType: stringSchema,
+      businessId: stringSchema,
+      fileName: stringSchema,
+      mimeType: stringSchema,
+      sizeBytes: numberSchema,
+      uploadScene: stringSchema,
+      idempotencyKey: stringSchema,
+      metadata: objectSchema
+    },
+    ["businessModule", "businessType", "fileName", "mimeType", "sizeBytes", "uploadScene", "idempotencyKey"]
+  ),
+  CompleteFileUploadRequest: objectOf({ checksum: stringSchema }),
+  FileUploadSessionSummary: objectOf(
+    {
+      sessionId: stringSchema,
+      fileAssetId: stringSchema,
+      provider: stringSchema,
+      mode: stringSchema,
+      status: stringSchema,
+      storageKey: stringSchema,
+      uploadUrl: stringSchema,
+      uploadHeaders: objectSchema,
+      expiresAt: { type: "string", format: "date-time" }
+    },
+    ["sessionId", "fileAssetId", "provider", "mode", "status", "storageKey", "expiresAt"]
+  ),
+  FileDownloadUrlSummary: objectOf(
+    {
+      fileAssetId: stringSchema,
+      provider: stringSchema,
+      mode: stringSchema,
+      downloadUrl: stringSchema,
+      expiresAt: { type: "string", format: "date-time" }
+    },
+    ["fileAssetId", "provider", "mode", "downloadUrl"]
+  ),
   SessionContextResponse: objectOf(
     {
       tenant: ref("TenantContext"),
@@ -1124,7 +1163,9 @@ function backlogOperation(
   operationId: string,
   summary: string,
   permissions: string[] = [],
-  authRequired = true
+  authRequired = true,
+  requestSchema?: string,
+  responseSchema?: string
 ): ContractOperation {
   return {
     method,
@@ -1134,8 +1175,8 @@ function backlogOperation(
     summary,
     permissions,
     authRequired,
-    requestSchema: method === "get" || method === "delete" ? undefined : "GenericObject",
-    responseSchema: "GenericObject"
+    requestSchema: requestSchema ?? (method === "get" || method === "delete" ? undefined : "GenericObject"),
+    responseSchema: responseSchema ?? "GenericObject"
   };
 }
 
@@ -1196,6 +1237,9 @@ const TENANT_INTEGRATION_OPERATIONS: ContractOperation[] = [
 const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
   backlogOperation("get", "/api/files", "Files", "listFileAssets", "List file assets", ["system:files:manage"]),
   backlogOperation("post", "/api/files", "Files", "createFileAsset", "Create file asset", ["system:files:manage"]),
+  backlogOperation("post", "/api/files/upload-sessions", "Files", "createFileUploadSession", "Create a tenant-scoped presigned upload session", ["system:integration:manage"], true, "CreateFileUploadSessionRequest", "FileUploadSessionSummary"),
+  backlogOperation("post", "/api/files/upload-sessions/{id}/complete", "Files", "completeFileUpload", "Confirm a presigned upload and activate its file metadata", ["system:integration:manage"], true, "CompleteFileUploadRequest", "GenericObject"),
+  backlogOperation("get", "/api/files/{id}/download-url", "Files", "getFileDownloadUrl", "Create a short-lived tenant-scoped download URL", ["system:integration:manage"], true, undefined, "FileDownloadUrlSummary"),
   backlogOperation("get", "/api/integrations/adapter-logs", "Integrations", "listAdapterLogs", "List adapter logs", ["system:integrations:manage"]),
   backlogOperation("post", "/api/integrations/adapters/mock-call", "Integrations", "invokeMockAdapter", "Invoke mock adapter", ["system:integrations:manage"]),
   backlogOperation("get", "/api/integrations/data-exchange/templates", "Integrations", "listDataExchangeTemplates", "List data exchange templates", ["system:integrations:manage"]),

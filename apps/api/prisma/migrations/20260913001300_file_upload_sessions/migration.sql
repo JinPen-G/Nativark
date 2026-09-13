@@ -1,0 +1,20 @@
+CREATE TABLE `file_upload_sessions` (
+  `id` VARCHAR(191) NOT NULL,
+  `tenantId` VARCHAR(191) NOT NULL,
+  `fileAssetId` VARCHAR(191) NOT NULL,
+  `provider` VARCHAR(40) NOT NULL,
+  `storageKey` VARCHAR(500) NOT NULL,
+  `status` VARCHAR(24) NOT NULL DEFAULT 'pending_upload',
+  `idempotencyKey` VARCHAR(191) NULL,
+  `expiresAt` DATETIME(3) NOT NULL,
+  `completedAt` DATETIME(3) NULL,
+  `failureReason` VARCHAR(500) NULL,
+  `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updatedAt` DATETIME(3) NOT NULL,
+  UNIQUE INDEX `file_upload_sessions_fileAssetId_key` (`fileAssetId`),
+  UNIQUE INDEX `file_upload_sessions_scope_idem_key` (`tenantId`, `idempotencyKey`),
+  INDEX `file_upload_sessions_scope_status_idx` (`tenantId`, `status`, `expiresAt`),
+  PRIMARY KEY (`id`),
+  CONSTRAINT `file_upload_sessions_tenantId_fkey` FOREIGN KEY (`tenantId`) REFERENCES `Tenant` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `file_upload_sessions_fileAssetId_fkey` FOREIGN KEY (`fileAssetId`) REFERENCES `FileAsset` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

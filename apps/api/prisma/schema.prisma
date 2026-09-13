@@ -118,6 +118,7 @@ model Tenant {
   filterPresets                     FilterPreset[]
   systemParameterSets               SystemParameterSet[]
   files                             FileAsset[]
+  fileUploadSessions                FileUploadSession[]
   notificationTemplates             NotificationTemplate[]
   notificationLogs                  NotificationSendLog[]
   adapterLogs                       ExternalAdapterLog[]
@@ -1366,11 +1367,35 @@ model FileAsset {
   status          String   @default("active")
   uploadedBy      String?
   metadata        Json?
+  uploadSession   FileUploadSession?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   @@index([tenantId, businessType, businessId])
   @@index([tenantId, uploadScene, createdAt])
+}
+
+/// EXT-01C：短时对象存储上传会话。FileAsset 先进入 pending_upload，
+/// 只有服务端完成对象存在性确认后才变为 active。
+model FileUploadSession {
+  id            String    @id @default(uuid())
+  tenantId      String
+  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  fileAssetId   String    @unique
+  fileAsset     FileAsset @relation(fields: [fileAssetId], references: [id], onDelete: Cascade)
+  provider      String    @db.VarChar(40)
+  storageKey    String    @db.VarChar(500)
+  status        String    @default("pending_upload") @db.VarChar(24)
+  idempotencyKey String?
+  expiresAt     DateTime
+  completedAt   DateTime?
+  failureReason String?   @db.VarChar(500)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([tenantId, idempotencyKey], map: "file_upload_sessions_scope_idem_key")
+  @@index([tenantId, status, expiresAt], map: "file_upload_sessions_scope_status_idx")
+  @@map("file_upload_sessions")
 }
 
 model NotificationTemplate {

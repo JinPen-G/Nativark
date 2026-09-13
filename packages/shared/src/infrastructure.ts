@@ -70,6 +70,42 @@ export interface CreateFileAssetRequest {
   metadata?: Record<string, unknown>;
 }
 
+export interface CreateFileUploadSessionRequest {
+  businessModule: string;
+  businessType: string;
+  businessId?: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  uploadScene: string;
+  idempotencyKey: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface FileUploadSessionSummary {
+  sessionId: string;
+  fileAssetId: string;
+  provider: string;
+  mode: "provider" | "simulation";
+  status: "pending_upload" | "completed" | "failed" | string;
+  storageKey: string;
+  uploadUrl?: string;
+  uploadHeaders?: Record<string, string>;
+  expiresAt: string;
+}
+
+export interface CompleteFileUploadRequest {
+  checksum?: string;
+}
+
+export interface FileDownloadUrlSummary {
+  fileAssetId: string;
+  provider: string;
+  mode: "provider" | "simulation";
+  downloadUrl: string;
+  expiresAt?: string;
+}
+
 export interface NotificationTemplateSummary {
   id: string;
   code: string;
