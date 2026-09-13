@@ -12,6 +12,7 @@ import {
   type TenantIntegrationTestResult
 } from "@rental-os/shared";
 import { OperationLogService } from "../../common/operation-log.service";
+import { UnsafeOutboundUrlError, validateProviderOutboundUrls } from "../../common/outbound-url";
 import { requireRequestTenantId } from "../../common/request-identity";
 import { SecretBox } from "../../common/secret-box";
 import { PrismaService } from "../database/prisma.service";
@@ -107,6 +108,12 @@ export class TenantIntegrationService {
       .filter((field) => field.required && !String((field.secret ? credentials[field.key] : settings[field.key]) ?? "").trim())
       .map((field) => field.key);
     if (missing.length > 0) throw new ServiceUnavailableException(`默认${capability}平台配置不完整：${missing.join("、")}`);
+    try {
+      await validateProviderOutboundUrls(capability, row.provider, settings);
+    } catch (error) {
+      const message = error instanceof UnsafeOutboundUrlError ? error.message : "第三方平台地址无法安全使用";
+      throw new ServiceUnavailableException(message);
+    }
     return {
       id: row.id,
       capability,
@@ -126,23 +133,28 @@ export class TenantIntegrationService {
       where: { capability: "payment", provider, enabled: true },
       orderBy: { updatedAt: "desc" }
     });
-    return rows.flatMap((row) => {
+    const result: Array<TenantIntegrationRuntimeConfig & { tenantId: string }> = [];
+    for (const row of rows) {
       const definition = this.definition("payment", provider);
       const credentials = this.configuredSecrets(row);
       const settings = (row.settings ?? {}) as Record<string, unknown>;
       const missing = definition.fields
         .filter((field) => field.required && !String((field.secret ? credentials[field.key] : settings[field.key]) ?? "").trim())
         .map((field) => field.key);
-      if (missing.length > 0) return [];
-      return [{
+      if (missing.length > 0) continue;
+      // 回调路径只需要商户标识和验签材料，不会向 gateway/notifyUrl 发起请求。
+      // 不在公开回调上为所有租户逐个做 DNS 解析，避免被伪造回调放大为
+      // 大量外部 DNS 查询；真正发起支付请求的 runtimeConfig 仍会做完整出站校验。
+      result.push({
         tenantId: row.tenantId,
         id: row.id,
         capability: "payment" as const,
         provider,
         settings,
         credentials
-      }];
-    });
+      });
+    }
+    return result;
   }
 
   async save(
@@ -185,6 +197,12 @@ export class TenantIntegrationService {
       })
       .map((field) => field.key);
     if (input.enabled && missing.length > 0) throw new BadRequestException(`启用前请补齐：${missing.join("、")}`);
+    try {
+      await validateProviderOutboundUrls(capability, provider, mergedSettings);
+    } catch (error) {
+      const message = error instanceof UnsafeOutboundUrlError ? error.message : "第三方平台地址无法安全使用";
+      throw new BadRequestException(message);
+    }
 
     const secretFieldNames = definition.fields.filter((field) => field.secret && mergedSecrets[field.key]).map((field) => field.key);
     const row = await this.prisma.$transaction(async (tx) => {

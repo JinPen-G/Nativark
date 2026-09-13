@@ -30,6 +30,7 @@ import { TenantIntegrationRuntimeService } from "../integrations/tenant-integrat
 const ACCESS_TTL_SECONDS = 60 * 60;
 const REFRESH_TTL_SECONDS = 60 * 60 * 24 * 30;
 const CHALLENGE_TTL_SECONDS = 10 * 60;
+const CHALLENGE_COOLDOWN_SECONDS = 60;
 const MAX_CHALLENGE_ATTEMPTS = 5;
 const BLOCKED_WORKSPACE_MEMBERSHIP_STATUSES = new Set(["exited", "closed"]);
 
@@ -222,30 +223,76 @@ export class ClientAuthService {
     if (!identifier) throw new BadRequestException("手机号或邮箱不能为空");
     if (input.method === "sms" && !/^\+?[0-9]{6,20}$/u.test(identifier)) throw new BadRequestException("手机号格式无效");
     if (input.method === "email" && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/u.test(identifier)) throw new BadRequestException("邮箱格式无效");
+    const requestKey = input.idempotencyKey?.trim();
+    if (!requestKey || requestKey.length > 191) throw new BadRequestException("验证码请求必须带有效幂等键");
     const identifierHash = hashOpaqueToken(`${tenant.id}:${workspace.id}:${input.method}:${identifier}`);
     const now = new Date();
-    const existing = input.idempotencyKey
-      ? await this.prisma.clientRegistrationChallenge.findFirst({ where: { tenantId: tenant.id, workspaceId: workspace.id, requestKey: input.idempotencyKey.trim() } })
-      : undefined;
-    if (existing && existing.expiresAt > now && existing.status === "pending_verification") {
-      return {
-        apiVersion: CLIENT_API_VERSION,
-        challengeId: existing.id,
-        status: existing.status as ClientRegistrationChallengeResponse["status"],
-        method: existing.method as ClientRegistrationChallengeResponse["method"],
-        maskedDestination: existing.maskedDestination,
-        expiresAt: existing.expiresAt.toISOString(),
-        retryAfterSeconds: Math.max(0, Math.ceil((existing.expiresAt.getTime() - now.getTime()) / 1000)),
-        deliveryMode: existing.deliveryMode as ClientRegistrationChallengeResponse["deliveryMode"],
-        ...(existing.deliveryMode === "development" ? { developmentCode: undefined } : {})
-      };
-    }
-    const id = existing?.id ?? randomBytes(16).toString("hex");
-    const code = String(randomInt(100000, 1000000));
-    const expiresAt = new Date(now.getTime() + CHALLENGE_TTL_SECONDS * 1000);
-    const row = existing
-      ? await this.prisma.clientRegistrationChallenge.update({ where: { id }, data: { method: input.method, identifierHash, maskedDestination: input.method === "sms" ? maskPhone(identifier) : maskEmail(identifier), codeHash: hashOpaqueToken(`${id}:${code}`), status: "pending_verification", deliveryMode: "development", attempts: 0, expiresAt, verifiedAt: null, verificationTokenHash: null, consumedAt: null, registrationId: null, registeredCustomerId: null, registrationResult: null } })
-      : await this.prisma.clientRegistrationChallenge.create({ data: { id, tenantId: tenant.id, workspaceId: workspace.id, method: input.method, identifierHash, maskedDestination: input.method === "sms" ? maskPhone(identifier) : maskEmail(identifier), codeHash: hashOpaqueToken(`${id}:${code}`), requestKey: input.idempotencyKey.trim(), status: "pending_verification", deliveryMode: "development", expiresAt } });
+    // 幂等键只能防止客户端重试，不能阻止攻击者每次换一个 key 轰炸同一手机号/邮箱。
+    // 服务端按租户、空间、验证目标和方式做短冷却；不返回开发验证码，避免通过换 key
+    // 把开发环境的验证码接口变成可无限调用的短信成本放大器。以空间行加锁，
+    // 让多实例部署下的两个并发请求也不能同时绕过这条冷却规则。
+    const reservation = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw(Prisma.sql`
+        SELECT id FROM business_workspaces
+         WHERE tenantId = ${tenant.id} AND id = ${workspace.id}
+         FOR UPDATE
+      `);
+      const existing = await tx.clientRegistrationChallenge.findFirst({
+        where: { tenantId: tenant.id, workspaceId: workspace.id, requestKey }
+      });
+      if (existing && existing.expiresAt > now && existing.status === "pending_verification") {
+        return {
+          kind: "response" as const,
+          response: {
+            apiVersion: CLIENT_API_VERSION,
+            challengeId: existing.id,
+            status: existing.status as ClientRegistrationChallengeResponse["status"],
+            method: existing.method as ClientRegistrationChallengeResponse["method"],
+            maskedDestination: existing.maskedDestination,
+            expiresAt: existing.expiresAt.toISOString(),
+            retryAfterSeconds: Math.max(0, Math.ceil((existing.expiresAt.getTime() - now.getTime()) / 1000)),
+            deliveryMode: existing.deliveryMode as ClientRegistrationChallengeResponse["deliveryMode"]
+          }
+        };
+      }
+      const recent = await tx.clientRegistrationChallenge.findFirst({
+        where: {
+          tenantId: tenant.id,
+          workspaceId: workspace.id,
+          identifierHash,
+          method: input.method,
+          status: { in: ["pending_verification", "delivery_failed"] },
+          createdAt: { gt: new Date(now.getTime() - CHALLENGE_COOLDOWN_SECONDS * 1000) }
+        },
+        orderBy: { createdAt: "desc" }
+      });
+      if (recent) {
+        const retryAfterSeconds = Math.max(1, Math.ceil((recent.createdAt.getTime() + CHALLENGE_COOLDOWN_SECONDS * 1000 - now.getTime()) / 1000));
+        return {
+          kind: "response" as const,
+          response: {
+            apiVersion: CLIENT_API_VERSION,
+            challengeId: recent.id,
+            status: recent.status as ClientRegistrationChallengeResponse["status"],
+            method: recent.method as ClientRegistrationChallengeResponse["method"],
+            maskedDestination: recent.maskedDestination,
+            expiresAt: recent.expiresAt.toISOString(),
+            retryAfterSeconds,
+            deliveryMode: recent.deliveryMode as ClientRegistrationChallengeResponse["deliveryMode"]
+          }
+        };
+      }
+      const id = existing?.id ?? randomBytes(16).toString("hex");
+      const code = String(randomInt(100000, 1000000));
+      const expiresAt = new Date(now.getTime() + CHALLENGE_TTL_SECONDS * 1000);
+      const row = existing
+        ? await tx.clientRegistrationChallenge.update({ where: { id }, data: { method: input.method, identifierHash, maskedDestination: input.method === "sms" ? maskPhone(identifier) : maskEmail(identifier), codeHash: hashOpaqueToken(`${id}:${code}`), status: "pending_verification", deliveryMode: "development", attempts: 0, expiresAt, verifiedAt: null, verificationTokenHash: null, consumedAt: null, registrationId: null, registeredCustomerId: null, registrationResult: null } })
+        : await tx.clientRegistrationChallenge.create({ data: { id, tenantId: tenant.id, workspaceId: workspace.id, method: input.method, identifierHash, maskedDestination: input.method === "sms" ? maskPhone(identifier) : maskEmail(identifier), codeHash: hashOpaqueToken(`${id}:${code}`), requestKey, status: "pending_verification", deliveryMode: "development", expiresAt } });
+      return { kind: "send" as const, row, code };
+    });
+
+    if (reservation.kind === "response") return reservation.response;
+    const { row, code } = reservation;
 
     let deliveryMode: ClientRegistrationChallengeResponse["deliveryMode"] = "development";
     try {

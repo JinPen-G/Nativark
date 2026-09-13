@@ -1,4 +1,4 @@
-import { IsInt, IsObject, IsOptional, IsString, Max, Min } from "class-validator";
+import { IsInt, IsObject, IsOptional, IsString, Max, MaxLength, Min } from "class-validator";
 import type { CompleteFileUploadRequest, CreateFileUploadSessionRequest } from "@rental-os/shared";
 
 export class CreateFileUploadSessionDto implements CreateFileUploadSessionRequest {
@@ -14,5 +14,5 @@ export class CreateFileUploadSessionDto implements CreateFileUploadSessionReques
 }
 
 export class CompleteFileUploadDto implements CompleteFileUploadRequest {
-  @IsOptional() @IsString() checksum?: string;
+  @IsOptional() @IsString() @MaxLength(191) checksum?: string;
 }

@@ -132,6 +132,9 @@ export function requiredPermissions(method: string, path: string) {
   if (path.startsWith("/platform/data-permission-preview")) {
     return ["system:user:manage", "system:role:manage"];
   }
+  if (path.startsWith("/platform/integrations")) {
+    return ["system:integration:manage"];
+  }
   if (
     path.startsWith("/integrations") ||
     path.startsWith("/files") ||

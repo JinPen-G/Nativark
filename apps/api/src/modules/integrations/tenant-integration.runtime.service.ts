@@ -1,6 +1,7 @@
 import { Injectable, ServiceUnavailableException } from "@nestjs/common";
 import { createHash, createHmac, randomUUID } from "node:crypto";
 import type { TenantIntegrationProvider } from "@rental-os/shared";
+import { assertOutboundUrl } from "../../common/outbound-url";
 import { PrismaService } from "../database/prisma.service";
 import { TenantIntegrationService, type TenantIntegrationRuntimeConfig } from "./tenant-integration.service";
 
@@ -37,11 +38,12 @@ function hmacSha1Base64(key: string, value: string) {
   return createHmac("sha1", key).update(value).digest("base64");
 }
 
-async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = 8_000) {
+async function fetchWithTimeout(url: string, init: RequestInit, productionHosts: readonly string[], timeoutMs = 8_000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    const safeUrl = await assertOutboundUrl(url, "短信平台请求地址", { allowQuery: true, productionHosts });
+    return await fetch(safeUrl, { ...init, redirect: "error", signal: controller.signal });
   } finally {
     clearTimeout(timer);
   }
@@ -112,7 +114,7 @@ export class TenantIntegrationRuntimeService {
     const stringToSign = `GET&%2F&${rfc3986(canonical)}`;
     params.Signature = hmacSha1Base64(`${accessKeySecret}&`, stringToSign);
     const query = Object.keys(params).sort().map((key) => `${rfc3986(key)}=${rfc3986(params[key])}`).join("&");
-    const response = await fetchWithTimeout(`https://dysmsapi.aliyuncs.com/?${query}`, { method: "GET", headers: { "x-acs-signature-nonce": idempotencyKey } });
+    const response = await fetchWithTimeout(`https://dysmsapi.aliyuncs.com/?${query}`, { method: "GET", headers: { "x-acs-signature-nonce": idempotencyKey } }, ["dysmsapi.aliyuncs.com"]);
     const body = await this.readJson(response);
     if (!response.ok || body.Code !== "OK") throw new Error(String(body.Message ?? `HTTP ${response.status}`));
     return String(body.RequestId ?? idempotencyKey);
@@ -159,7 +161,7 @@ export class TenantIntegrationRuntimeService {
         "X-Rental-Idempotency-Key": idempotencyKey
       },
       body: payload
-    });
+    }, [host]);
     const body = await this.readJson(response);
     const responseBody = (body.Response ?? {}) as JsonRecord;
     const error = responseBody.Error as JsonRecord | undefined;

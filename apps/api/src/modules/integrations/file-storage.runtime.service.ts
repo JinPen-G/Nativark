@@ -7,6 +7,7 @@ import type {
   FileDownloadUrlSummary,
   FileUploadSessionSummary
 } from "@rental-os/shared";
+import { assertOutboundUrl } from "../../common/outbound-url";
 import { PrismaService } from "../database/prisma.service";
 import { TenantIntegrationService, type TenantIntegrationRuntimeConfig } from "./tenant-integration.service";
 
@@ -28,6 +29,30 @@ const hmac = (key: string | Buffer, value: string) => createHmac("sha256", key).
 const hmacBuffer = (key: string | Buffer, value: string) => createHmac("sha256", key).update(value).digest();
 const hmacSha1 = (key: string | Buffer, value: string) => createHmac("sha1", key).update(value).digest("hex");
 
+function safeBucket(value: unknown) {
+  const bucket = String(value ?? "").trim();
+  if (!/^[a-z0-9](?:[a-z0-9.-]{0,61}[a-z0-9])?$/iu.test(bucket) || bucket.includes("..")) {
+    throw new ServiceUnavailableException("对象存储 Bucket 格式不安全");
+  }
+  return bucket;
+}
+
+function safeRegion(value: unknown) {
+  const region = String(value ?? "").trim();
+  if (!/^[a-z0-9][a-z0-9-]{0,63}$/iu.test(region)) throw new ServiceUnavailableException("对象存储地域格式不安全");
+  return region;
+}
+
+function safeObjectPrefix(value: unknown) {
+  const prefix = String(value ?? "").trim().replace(/^\/+|\/+$/gu, "");
+  if (!prefix) return "";
+  const segments = prefix.split("/");
+  if (prefix.length > 180 || segments.some((segment) => !segment || segment === "." || segment === ".." || /[\\\u0000-\u001f\u007f]/u.test(segment))) {
+    throw new ServiceUnavailableException("对象存储对象前缀格式不安全");
+  }
+  return segments.join("/");
+}
+
 function hmacSha1Base64(key: string, value: string) {
   return createHmac("sha1", key).update(value).digest("base64");
 }
@@ -40,7 +65,10 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = 8_00
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    // 供应商地址来自租户配置；禁止跟随跳转，避免一个看似安全的公网地址
+    // 把服务端请求转发到内网或云元数据地址。
+    const safeUrl = await assertOutboundUrl(url, "对象存储请求地址", { allowQuery: true });
+    return await fetch(safeUrl, { ...init, redirect: "error", signal: controller.signal });
   } finally {
     clearTimeout(timer);
   }
@@ -57,11 +85,15 @@ export class FileStorageRuntimeService {
     tenantId: string,
     input: CreateFileUploadSessionRequest
   ): Promise<FileUploadSessionSummary> {
-    this.validateInput(input);
+    const mimeType = this.validateInput(input);
     const existing = await this.prisma.fileUploadSession.findFirst({
       where: { tenantId, idempotencyKey: input.idempotencyKey }
     });
-    if (existing) return this.sessionSummary(existing, await this.prisma.fileAsset.findUniqueOrThrow({ where: { id: existing.fileAssetId } }));
+    if (existing) {
+      const existingAsset = await this.prisma.fileAsset.findUniqueOrThrow({ where: { id: existing.fileAssetId } });
+      const existingMode = (existingAsset.metadata as JsonRecord | null)?.uploadMode === "provider" ? "provider" : "simulation";
+      return this.sessionSummary(existing, existingAsset, existingMode);
+    }
 
     const assetId = `file_${randomUUID().replace(/-/g, "")}`;
     const sessionId = randomUUID();
@@ -84,7 +116,7 @@ export class FileStorageRuntimeService {
           businessId: input.businessId?.trim() || null,
           fileName: input.fileName.trim().slice(0, 180),
           fileExt: input.fileName.includes(".") ? input.fileName.split(".").pop()?.slice(0, 20) : null,
-          mimeType: input.mimeType.trim(),
+          mimeType,
           sizeBytes: input.sizeBytes,
           storageProvider: provider,
           storageKey,
@@ -110,7 +142,7 @@ export class FileStorageRuntimeService {
     });
 
     if (!configured) return this.sessionSummary(created.session, created.asset, mode);
-    const signed = this.presign(configured, "PUT", storageKey, input.mimeType, expiresAt);
+    const signed = this.presign(configured, "PUT", storageKey, mimeType, expiresAt);
     return {
       ...this.sessionSummary(created.session, created.asset, mode),
       uploadUrl: signed.url,
@@ -132,13 +164,19 @@ export class FileStorageRuntimeService {
     if (session.provider !== "local_mock") {
       const config = await this.integrations.runtimeConfig("file", tenantId, session.provider as never);
       if (!config) throw new ServiceUnavailableException("文件平台已停用，无法确认上传结果");
-      const exists = await this.objectExists(config, session.storageKey, asset.mimeType, session.expiresAt);
+      const exists = await this.objectExists(config, session.storageKey, asset.mimeType, asset.sizeBytes, session.expiresAt);
       if (!exists) throw new ConflictException("对象存储中尚未找到上传文件");
     }
-    const metadata = { ...((asset.metadata ?? {}) as JsonRecord), completedAt: new Date().toISOString(), checksum: input.checksum };
+    // checksum 是客户端声明，不在服务端读取对象并核算前视为可信事实；只保留在元数据
+    // 供排障，不能写入 FileAsset.checksum 作为完整性证明。
+    const metadata = {
+      ...((asset.metadata ?? {}) as JsonRecord),
+      completedAt: new Date().toISOString(),
+      ...(input.checksum?.trim() ? { clientChecksum: input.checksum.trim() } : {})
+    };
     const updated = await this.prisma.$transaction(async (tx) => {
       await tx.fileUploadSession.update({ where: { id: session.id }, data: { status: "completed", completedAt: new Date(), failureReason: null } });
-      return tx.fileAsset.update({ where: { id: asset.id }, data: { status: "active", checksum: input.checksum?.trim() || asset.checksum, metadata: metadata as Prisma.InputJsonValue } });
+      return tx.fileAsset.update({ where: { id: asset.id }, data: { status: "active", metadata: metadata as Prisma.InputJsonValue } });
     });
     return updated;
   }
@@ -159,12 +197,18 @@ export class FileStorageRuntimeService {
   private validateInput(input: CreateFileUploadSessionRequest) {
     if (!input.businessModule?.trim() || !input.businessType?.trim() || !input.uploadScene?.trim()) throw new ConflictException("文件业务归属和上传场景不能为空");
     if (!input.fileName?.trim() || !input.mimeType?.trim()) throw new ConflictException("文件名和类型不能为空");
+    const mimeType = input.mimeType.trim().toLowerCase();
+    if (!/^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/u.test(mimeType) || mimeType.length > 127) throw new ConflictException("文件类型格式无效");
+    if (["text/html", "application/xhtml+xml", "image/svg+xml", "text/javascript", "application/javascript"].includes(mimeType)) {
+      throw new ConflictException("不允许上传可直接执行或内嵌脚本的文件类型");
+    }
     if (!Number.isInteger(input.sizeBytes) || input.sizeBytes <= 0 || input.sizeBytes > MAX_FILE_BYTES) throw new ConflictException("文件大小必须在 1B 到 20MB 之间");
     if (!input.idempotencyKey?.trim() || input.idempotencyKey.length > 191) throw new ConflictException("上传必须带有效幂等键");
+    return mimeType;
   }
 
   private storageKey(config: TenantIntegrationRuntimeConfig | undefined, tenantId: string, assetId: string, fileName: string) {
-    const prefix = String(config?.settings.objectPrefix ?? "tenant-files").trim().replace(/^\/+|\/+$/gu, "");
+    const prefix = safeObjectPrefix(config?.settings.objectPrefix ?? "tenant-files");
     const safeName = fileName.trim().replace(/[^a-zA-Z0-9._-]/gu, "_").slice(0, 180) || "file";
     return `${prefix ? `${prefix}/` : ""}${tenantId}/${assetId}/${safeName}`;
   }
@@ -182,25 +226,25 @@ export class FileStorageRuntimeService {
 
   private endpoint(config: TenantIntegrationRuntimeConfig) {
     const settings = config.settings;
-    const bucket = text(settings.bucket, "Bucket");
+    const bucket = safeBucket(text(settings.bucket, "Bucket"));
     if (config.provider === "aliyun_oss") {
       const base = new URL(text(settings.endpoint, "Endpoint"));
       const host = base.hostname.startsWith(`${bucket}.`) ? base.hostname : `${bucket}.${base.hostname}`;
-      return { base: `${base.protocol}//${host}`, bucket, region: String(settings.region ?? "") };
+      return { base: `${base.protocol}//${host}`, bucket, region: safeRegion(settings.region) };
     }
     if (config.provider === "tencent_cos") {
-      const region = text(settings.region, "地域");
+      const region = safeRegion(text(settings.region, "地域"));
       return { base: `https://${bucket}.cos.${region}.myqcloud.com`, bucket, region };
     }
     const base = new URL(text(settings.endpoint, "Endpoint"));
     const pathStyle = String(settings.forcePathStyle ?? "false").toLowerCase() === "true" || settings.forcePathStyle === true;
-    return { base: pathStyle ? `${base.protocol}//${base.host}/${encodeURIComponent(bucket)}` : `${base.protocol}//${bucket}.${base.host}`, bucket, region: text(settings.region, "Region") };
+    return { base: pathStyle ? `${base.protocol}//${base.host}/${encodeURIComponent(bucket)}` : `${base.protocol}//${bucket}.${base.host}`, bucket, region: safeRegion(text(settings.region, "Region")) };
   }
 
   private presign(config: TenantIntegrationRuntimeConfig, method: "GET" | "PUT", storageKey: string, mimeType: string, expiresAt: Date) {
     if (config.provider === "aliyun_oss") return this.presignOss(config, method, storageKey, mimeType, expiresAt);
-    if (config.provider === "tencent_cos") return this.presignCos(config, method, storageKey, expiresAt);
-    return this.presignS3(config, method, storageKey, expiresAt);
+    if (config.provider === "tencent_cos") return this.presignCos(config, method, storageKey, mimeType, expiresAt);
+    return this.presignS3(config, method, storageKey, mimeType, expiresAt);
   }
 
   private presignOss(config: TenantIntegrationRuntimeConfig, method: "GET" | "PUT", storageKey: string, mimeType: string, expiresAt: Date) {
@@ -211,10 +255,11 @@ export class FileStorageRuntimeService {
     const stringToSign = `${method}\n\n${contentType}\n${expires}\n${resource}`;
     const signature = hmacSha1Base64(text(config.credentials.accessKeySecret, "AccessKey Secret"), stringToSign);
     const url = `${base}/${encodePath(storageKey)}?OSSAccessKeyId=${encodeURIComponent(text(config.credentials.accessKeyId, "AccessKey ID"))}&Expires=${expires}&Signature=${encodeURIComponent(signature)}`;
-    return { url, headers: method === "PUT" ? { "Content-Type": mimeType } : {} };
+    const headers: Record<string, string> = method === "PUT" ? { "Content-Type": mimeType } : {};
+    return { url, headers };
   }
 
-  private presignCos(config: TenantIntegrationRuntimeConfig, method: "GET" | "PUT", storageKey: string, expiresAt: Date) {
+  private presignCos(config: TenantIntegrationRuntimeConfig, method: "GET" | "PUT", storageKey: string, mimeType: string, expiresAt: Date) {
     const { base } = this.endpoint(config);
     const start = Math.floor(Date.now() / 1000);
     const end = Math.floor(expiresAt.getTime() / 1000);
@@ -234,10 +279,11 @@ export class FileStorageRuntimeService {
       "q-url-param-list": "",
       "q-signature": signature
     });
-    return { url: `${base}${uri}?${query.toString()}`, headers: {} };
+    const headers: Record<string, string> = method === "PUT" ? { "Content-Type": mimeType } : {};
+    return { url: `${base}${uri}?${query.toString()}`, headers };
   }
 
-  private presignS3(config: TenantIntegrationRuntimeConfig, method: "GET" | "PUT", storageKey: string, expiresAt: Date) {
+  private presignS3(config: TenantIntegrationRuntimeConfig, method: "GET" | "PUT", storageKey: string, mimeType: string, expiresAt: Date) {
     const { base, bucket, region } = this.endpoint(config);
     const endpoint = new URL(base);
     const host = endpoint.host;
@@ -249,23 +295,32 @@ export class FileStorageRuntimeService {
     const scope = `${date}/${region}/${service}/aws4_request`;
     const accessKey = text(config.credentials.accessKeyId, "Access Key ID");
     const secretKey = text(config.credentials.secretAccessKey, "Secret Access Key");
+    const contentType = method === "PUT" ? mimeType : "";
+    const signedHeaders = method === "PUT" ? "content-type;host" : "host";
+    const canonicalHeaders = method === "PUT" ? `content-type:${contentType}\nhost:${host}\n` : `host:${host}\n`;
     const query = new URLSearchParams({
       "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
       "X-Amz-Credential": `${accessKey}/${scope}`,
       "X-Amz-Date": amzDate,
       "X-Amz-Expires": String(Math.max(1, Math.floor((expiresAt.getTime() - now.getTime()) / 1000))),
-      "X-Amz-SignedHeaders": "host"
+      "X-Amz-SignedHeaders": signedHeaders
     });
     const canonicalQuery = [...query.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`).join("&");
-    const canonicalRequest = `${method}\n${path}\n${canonicalQuery}\nhost:${host}\n\nhost\nUNSIGNED-PAYLOAD`;
+    const canonicalRequest = `${method}\n${path}\n${canonicalQuery}\n${canonicalHeaders}\n${signedHeaders}\nUNSIGNED-PAYLOAD`;
     const signingKey = hmacBuffer(hmacBuffer(hmacBuffer(hmacBuffer(`AWS4${secretKey}`, date), region), service), "aws4_request");
     query.set("X-Amz-Signature", hmac(signingKey, `${"AWS4-HMAC-SHA256"}\n${amzDate}\n${scope}\n${sha256(canonicalRequest)}`));
-    return { url: `${endpoint.protocol}//${host}${path}?${query.toString()}`, headers: {} };
+    const headers: Record<string, string> = method === "PUT" ? { "Content-Type": contentType } : {};
+    return { url: `${endpoint.protocol}//${host}${path}?${query.toString()}`, headers };
   }
 
-  private async objectExists(config: TenantIntegrationRuntimeConfig, storageKey: string, mimeType: string, expiresAt: Date) {
+  private async objectExists(config: TenantIntegrationRuntimeConfig, storageKey: string, mimeType: string, sizeBytes: number, expiresAt: Date) {
     const signed = this.presign(config, "GET", storageKey, mimeType, expiresAt);
     const response = await fetchWithTimeout(signed.url, { method: "HEAD", headers: signed.headers });
-    return response.ok;
+    if (!response.ok) return false;
+    const contentLength = Number(response.headers.get("content-length"));
+    if (!Number.isSafeInteger(contentLength) || contentLength !== sizeBytes) return false;
+    const expectedType = mimeType.split(";", 1)[0].trim().toLowerCase();
+    const actualType = String(response.headers.get("content-type") ?? "").split(";", 1)[0].trim().toLowerCase();
+    return Boolean(actualType) && actualType === expectedType;
   }
 }

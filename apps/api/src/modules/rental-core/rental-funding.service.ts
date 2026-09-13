@@ -28,11 +28,12 @@ export class RentalFundingService {
   constructor(private readonly prisma: PrismaService) {}
 
   private async loadOrderScope(
+    db: Prisma.TransactionClient | PrismaService,
     tenantId: string,
     workspaceId: string,
     orderId: string
   ): Promise<{ workspaceId: string; depositAmount: number; preAuthAmount: number }> {
-    const order = await this.prisma.rentalOrder.findFirst({
+    const order = await db.rentalOrder.findFirst({
       where: { id: orderId, tenantId, workspaceId },
       select: { workspaceId: true, depositAmount: true, preAuthAmount: true }
     });
@@ -77,10 +78,11 @@ export class RentalFundingService {
     return rows.map((row) => this.toEvent(row));
   }
 
-  async listEvents(tenantId: string, workspaceId: string, orderId: string): Promise<RentalFundingBalance> {
-    await this.loadOrderScope(tenantId, workspaceId, orderId);
-    const order = await this.prisma.rentalOrder.findFirstOrThrow({ where: { id: orderId, tenantId, workspaceId } });
-    const extensions = await this.prisma.rentalOrderExtension.findMany({
+  async listEvents(tenantId: string, workspaceId: string, orderId: string, tx?: Prisma.TransactionClient): Promise<RentalFundingBalance> {
+    const db = tx ?? this.prisma;
+    await this.loadOrderScope(db, tenantId, workspaceId, orderId);
+    const order = await db.rentalOrder.findFirstOrThrow({ where: { id: orderId, tenantId, workspaceId } });
+    const extensions = await db.rentalOrderExtension.findMany({
       where: { tenantId, workspaceId, orderId, status: { in: ["pending_payment", "effective"] } }
     });
     const effective = aggregatePendingExtensionFunding(extensions.filter((row) => row.status === "effective").map((row) => ({
@@ -93,7 +95,7 @@ export class RentalFundingService {
       depositDelta: Number(row.depositDelta),
       preAuthDelta: Number(row.preAuthDelta)
     })));
-    const events = await this.loadEvents(this.prisma, tenantId, workspaceId, orderId);
+    const events = await this.loadEvents(db, tenantId, workspaceId, orderId);
     const ledgers = deriveFundingLedgers(events);
     return {
       orderId,

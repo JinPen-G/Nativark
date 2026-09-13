@@ -57,6 +57,8 @@ export class IntegrationsService {
       createdAt: "2026-06-08T08:30:00.000Z"
     }
   ];
+  /** 内存 mock 也必须按当前租户隔离，不能把演示数组当成共享数据源。 */
+  private readonly filesByTenant = new Map<string, FileAssetSummary[]>();
 
   private readonly notificationTemplates = defaultNotificationTemplates();
   private readonly dataExchangeTemplates = defaultDataExchangeTemplates();
@@ -226,7 +228,7 @@ export class IntegrationsService {
       return this.integrationsRepository.listFiles(this.defaultTenantId, query);
     }
     const limit = Math.min(Math.max(Number(query.limit ?? 80), 1), 200);
-    return this.files
+    return this.memoryFilesForTenant(this.defaultTenantId)
       .filter((file) => {
         if (query.businessModule && file.businessModule !== query.businessModule) {
           return false;
@@ -672,6 +674,7 @@ export class IntegrationsService {
   }
 
   private createMemoryFile(input: CreateFileAssetRequest) {
+    const tenantId = this.defaultTenantId;
     const fileId = `file_${shortId()}`;
     const fileExt = input.fileName.includes(".")
       ? input.fileName.split(".").pop()
@@ -686,15 +689,31 @@ export class IntegrationsService {
       mimeType: input.mimeType,
       sizeBytes: Math.max(0, Math.round(input.sizeBytes ?? 0)),
       storageProvider: "local_mock",
-      storageKey: `mock/${this.defaultTenantId}/${fileId}/${input.fileName}`,
+      storageKey: `mock/${tenantId}/${fileId}/${input.fileName}`,
       publicUrl: `/api/files/${fileId}/download`,
       uploadScene: input.uploadScene,
       status: "active",
       uploadedBy: input.uploadedBy,
       createdAt: new Date().toISOString()
     };
-    this.files.unshift(row);
+    this.memoryFilesForTenant(tenantId).unshift(row);
     return row;
+  }
+
+  private memoryFilesForTenant(tenantId: string) {
+    const existing = this.filesByTenant.get(tenantId);
+    if (existing) return existing;
+    const seeded = this.files.map((file) => {
+      const id = `${file.id}_${tenantId}`;
+      return {
+        ...file,
+        id,
+        storageKey: file.storageKey.replace(/^mock\/[^/]+/u, `mock/${tenantId}`),
+        publicUrl: `/api/files/${id}/download`
+      };
+    });
+    this.filesByTenant.set(tenantId, seeded);
+    return seeded;
   }
 
   private createMemoryNotificationLog(input: SendMockNotificationRequest) {
