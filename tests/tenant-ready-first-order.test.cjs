@@ -364,6 +364,10 @@ async function main() {
   const apiLogs = startApi();
   if (!(await waitHealth())) fail("API 启动超时", apiLogs.join("").slice(-2000));
   ok(`API 已启动: ${API_BASE}`);
+  if (process.env.TENANT_READY_PAUSE_BEFORE_BOOTSTRAP === "1") {
+    console.log("浏览器验收暂停：API 已就绪，按回车继续并执行专项清理");
+    await new Promise((resolve) => process.stdin.once("data", resolve));
+  }
 
   console.log("== 4. 空白租户 bootstrap 与初始开业状态 ==");
   const platform = await loginOk("platform", "admin", PLATFORM_PASSWORD, "平台管理员登录失败");
