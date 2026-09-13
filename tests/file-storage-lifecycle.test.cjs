@@ -143,7 +143,21 @@ void (async () => {
     uploadScene: "client-qualification",
     idempotencyKey: "upload-client-qualification-1",
     metadata: { qualificationType: "driver_license" }
-  });
+  }, { businessType: "customer", businessId: "customer-file-test", uploadScene: "client-qualification" });
+  await assert.rejects(
+    () => runtime.createUploadSession(tenantId, {
+      businessModule: "membership",
+      businessType: "customer",
+      businessId: "other-customer",
+      fileName: "license.jpg",
+      mimeType: "image/jpeg",
+      sizeBytes: 2048,
+      uploadScene: "client-qualification",
+      idempotencyKey: "upload-client-qualification-1",
+      metadata: { qualificationType: "driver_license" }
+    }, { businessType: "customer", businessId: "other-customer", uploadScene: "client-qualification" }),
+    /幂等键已被其他业务对象使用/u
+  );
   await assert.rejects(
     () => runtime.completeUpload(tenantId, qualificationSession.sessionId, {}, { businessType: "customer", businessId: "other-customer", uploadScene: "client-qualification" }),
     /上传会话不存在或不属于当前业务对象/u

@@ -587,7 +587,7 @@ export class ClientApiService {
       uploadScene: "client-qualification",
       idempotencyKey: input.idempotencyKey,
       metadata: { qualificationType: input.qualificationType }
-    });
+    }, { businessType: "customer", businessId: context.customerId, uploadScene: "client-qualification" });
   }
 
   async completeQualificationUpload(context: ClientRequestContext, sessionId: string, input: ClientQualificationUploadCompleteRequest) {

@@ -112,15 +112,20 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
 
   async createUploadSession(
     tenantId: string,
-    input: CreateFileUploadSessionRequest
+    input: CreateFileUploadSessionRequest,
+    owner?: FileBusinessOwner
   ): Promise<FileUploadSessionSummary> {
     const mimeType = this.validateInput(input);
     const idempotencyKey = input.idempotencyKey.trim();
+    if (owner && !this.matchesOwner({ businessType: input.businessType, businessId: input.businessId, uploadScene: input.uploadScene }, owner)) {
+      throw new BadRequestException("上传业务对象与当前业务归属不一致");
+    }
     const existing = await this.prisma.fileUploadSession.findFirst({
       where: { tenantId, idempotencyKey }
     });
     if (existing) {
       const existingAsset = await this.prisma.fileAsset.findUniqueOrThrow({ where: { id: existing.fileAssetId } });
+      if (owner && !this.matchesOwner(existingAsset, owner)) throw new ConflictException("幂等键已被其他业务对象使用，请更换幂等键");
       const existingMode = (existingAsset.metadata as JsonRecord | null)?.uploadMode === "provider" ? "provider" : "simulation";
       return this.sessionSummary(existing, existingAsset, existingMode);
     }
@@ -183,6 +188,7 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
         });
         if (concurrent) {
           const concurrentAsset = await this.prisma.fileAsset.findUniqueOrThrow({ where: { id: concurrent.fileAssetId } });
+          if (owner && !this.matchesOwner(concurrentAsset, owner)) throw new ConflictException("幂等键已被其他业务对象使用，请更换幂等键");
           const concurrentMode = (concurrentAsset.metadata as JsonRecord | null)?.uploadMode === "provider" ? "provider" : "simulation";
           return this.sessionSummary(concurrent, concurrentAsset, concurrentMode);
         }
