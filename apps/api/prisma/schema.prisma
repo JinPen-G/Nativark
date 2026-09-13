@@ -2219,7 +2219,7 @@ model RentalPaymentIntent {
   method                String            @db.VarChar(24)
   amount                Decimal           @db.Decimal(12, 2)
   currency              String            @default("CNY") @db.VarChar(8)
-  merchantOrderNo       String            @unique
+  merchantOrderNo       String            @unique(map: "rental_payment_intents_merchant_order_no_key")
   idempotencyKey        String            @db.VarChar(191)
   idempotencyHash       String            @db.Char(64)
   status                String            @default("pending") @db.VarChar(32)
