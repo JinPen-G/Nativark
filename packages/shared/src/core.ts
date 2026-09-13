@@ -3040,7 +3040,9 @@ export const RENTAL_SERVICE_REFUND_STATUSES = [
   "pending_review",
   "approved_pending_refund",
   "rejected",
-  "refunded"
+  "refunded",
+  /** 取货前订单变更已经把客户净额纳入订单退款差额，不再创建服务退款审核单。 */
+  "included_in_order_change"
 ] as const;
 export type RentalServiceRefundStatus = (typeof RENTAL_SERVICE_REFUND_STATUSES)[number];
 
@@ -5435,14 +5437,16 @@ export interface RentalOrderExtensionPreview {
   ruleVersion: string;
 }
 
-/** ORDER-CHANGE-01A/01B：取货前部分取消的试算结果；数量库存可按数量拆分。 */
+/** ORDER-CHANGE-01A/01B/01C：取货前部分取消的试算结果；数量库存可按数量拆分，未开始服务可单独取消。 */
 export interface RentalOrderChangePreview {
   orderId: string;
-  type: "partial_line_cancel";
+  type: "partial_line_cancel" | "service_cancel";
   /** 试算基于的订单更新时间；提交时必须原样带回，防止旧预览覆盖新变更。 */
   expectedUpdatedAt: string;
   cancelledLineIds: string[];
   cancelledItems: Array<{ lineId: string; itemGroupName: string; quantity: number }>;
+  /** ORDER-CHANGE-01C：已取消的未开始服务发生项；金额按订单快照中的客户净支付计算。 */
+  cancelledServices: Array<{ occurrenceId: string; serviceName: string; quantity: number; refundAmount: number }>;
   remainingLineIds: string[];
   beforePayableAmount: number;
   recalculatedPayableAmount: number;
@@ -5456,15 +5460,18 @@ export interface RentalOrderChangePreview {
   /** 沿用原订单价格、规则、优惠与券快照的重算依据。 */
   pricingSnapshot?: RentalExtensionPricingSnapshot;
   resourceRelease: Array<{ lineId: string; itemGroupName: string; quantity: number }>;
+  serviceResourceRelease: Array<{ occurrenceId: string; serviceName: string; quantity: number }>;
   warnings: string[];
 }
 
-/** 订单变更请求。只接受服务端按订单快照重算的取消项，不接受客户端传金额。 */
+/** 订单变更请求。只接受服务端按订单/服务快照重算的取消项，不接受客户端传金额。 */
 export interface ApplyRentalOrderChangeRequest {
-  type: "partial_line_cancel";
+  type: "partial_line_cancel" | "service_cancel";
   /** 兼容 01A 的整行请求；01B 优先使用 items 表达数量库存的部分数量取消。 */
   lineIds?: string[];
   items?: Array<{ lineId: string; quantity: number }>;
+  /** ORDER-CHANGE-01C：只能选择取货前、尚未开始的服务发生项。 */
+  serviceOccurrenceIds?: string[];
   reason: string;
   customerConfirmed: boolean;
   expectedUpdatedAt: string;
@@ -5477,7 +5484,7 @@ export interface RentalOrderChange {
   workspaceId: string;
   orderId: string;
   sequence: number;
-  type: "partial_line_cancel";
+  type: "partial_line_cancel" | "service_cancel";
   status: "applied" | "rejected";
   request: ApplyRentalOrderChangeRequest;
   beforeSnapshot: Record<string, unknown>;
@@ -5497,10 +5504,11 @@ export interface RentalOrderChange {
 
 /** 订单变更试算入参。 */
 export interface PreviewRentalOrderChangeRequest {
-  type: "partial_line_cancel";
+  type: "partial_line_cancel" | "service_cancel";
   /** 兼容 01A 的整行请求；01B 优先使用 items 表达数量库存的部分数量取消。 */
   lineIds?: string[];
   items?: Array<{ lineId: string; quantity: number }>;
+  serviceOccurrenceIds?: string[];
 }
 
 export interface RentalOrderOccupancy {

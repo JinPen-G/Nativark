@@ -447,6 +447,7 @@ export class RentalCoreController {
     const differenceAmount = priced.pricingSnapshot?.differenceAmount ?? priced.payableAmount;
     return {
       order,
+      scope: "line" as const,
       selected,
       remaining,
       priced,
@@ -467,6 +468,7 @@ export class RentalCoreController {
         currency: priced.currency,
         pricingSnapshot: priced.pricingSnapshot,
         resourceRelease: cancellationItems.map((item) => ({ lineId: item.lineId, itemGroupName: item.itemGroupName, quantity: item.quantity })),
+        serviceResourceRelease: [],
         warnings: [
           ...(differenceAmount < 0 ? ["租金差额只记入订单退款待办，实际退款仍需通过支付退款流程完成"] : []),
           ...(priced.depositDelta < 0 ? ["押金减少将按当前已收余额记录退款事件"] : []),
@@ -477,10 +479,95 @@ export class RentalCoreController {
     };
   }
 
+  /**
+   * ORDER-CHANGE-01C：只取消取货前尚未开始的增值服务。
+   *
+   * 服务不重新读取当前目录或优惠模板，退款依据来自订单服务发生项快照；容量释放与
+   * 订单变更写入在同一事务内完成。商品行取消与服务取消在本轮保持互斥，避免一个预览
+   * 同时混合两套资格/金额语义。
+   */
+  private async priceServiceCancellation(tenantId: string, orderId: string, body: PreviewRentalOrderChangeDto, tx?: Prisma.TransactionClient) {
+    const order = tx
+      ? await this.service.lockOrderForUpdate(tenantId, orderId, tx)
+      : await this.service.getOrder(tenantId, orderId);
+    if (![RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.ReadyForPickup].includes(order.status)) {
+      throw new ConflictException("只有取货前的待确认或待领取订单可以取消增值服务");
+    }
+    const changes = await this.service.listOrderChanges(tenantId, orderId, tx);
+    if (changes.some((row) => row.status === "applied")) {
+      throw new ConflictException("本轮一个订单只允许一次部分变更，后续变更请使用专用变更流程");
+    }
+    if (body.lineIds?.length || body.items?.length) throw new BadRequestException("服务取消不能同时提交商品取消项");
+    const serviceOccurrenceIds = [...new Set((body.serviceOccurrenceIds ?? []).map((value) => value.trim()).filter(Boolean))];
+    if (!serviceOccurrenceIds.length || serviceOccurrenceIds.length !== (body.serviceOccurrenceIds ?? []).length) {
+      throw new BadRequestException("请选择至少一项且不重复的增值服务");
+    }
+    const occurrences = order.serviceSnapshots ?? [];
+    const selectedServices = serviceOccurrenceIds.map((occurrenceId) => {
+      const occurrence = occurrences.find((row) => row.occurrenceId === occurrenceId);
+      if (!occurrence) throw new ConflictException("存在不存在或不属于当前订单的服务发生项");
+      const status = occurrence.executionStatus ?? "not_started";
+      if (status !== "not_started") throw new ConflictException(`服务「${occurrence.serviceName}」已经开始或结束，不能从取货前变更取消`);
+      if (occurrence.requiredByRule) throw new ConflictException(`服务「${occurrence.serviceName}」属于业务规则要求，不能直接取消`);
+      if (occurrence.refundStatus && occurrence.refundStatus !== "none") throw new ConflictException(`服务「${occurrence.serviceName}」已有退款处理记录`);
+      return occurrence;
+    });
+    const netAmountOf = (row: typeof selectedServices[number]) => {
+      const gross = Math.max(0, Number(row.amount ?? 0) || 0);
+      const discount = Math.max(0, Number(row.discountAllocatedAmount ?? 0) || 0);
+      const coupon = Math.max(0, Number(row.couponAllocatedAmount ?? 0) || 0);
+      return Math.max(0, gross - discount - coupon);
+    };
+    const priced = await this.business.quoteOrderServiceCancellation(tenantId, this.context(tenantId), {
+      order,
+      serviceOccurrenceIds
+    });
+    const differenceAmount = priced.payableAmount;
+    const activeLineIds = order.lines
+      .filter((line) => (line.cancelledQuantity ?? 0) < line.quantity)
+      .map((line) => line.id);
+    return {
+      order,
+      scope: "service" as const,
+      selectedServices,
+      serviceOccurrenceIds,
+      priced,
+      preview: {
+        orderId: order.id,
+        type: "service_cancel" as const,
+        expectedUpdatedAt: order.updatedAt,
+        cancelledLineIds: [],
+        cancelledItems: [],
+        cancelledServices: selectedServices.map((row) => ({
+          occurrenceId: row.occurrenceId!,
+          serviceName: row.serviceName,
+          quantity: row.quantity,
+          refundAmount: Math.round(netAmountOf(row) * 100) / 100
+        })),
+        remainingLineIds: activeLineIds,
+        beforePayableAmount: order.finalPayableAmount,
+        recalculatedPayableAmount: order.finalPayableAmount + differenceAmount,
+        differenceAmount,
+        additionalAmount: 0,
+        refundAmount: Math.max(0, -differenceAmount),
+        depositDelta: 0,
+        preAuthDelta: 0,
+        currency: priced.currency,
+        pricingSnapshot: undefined,
+        resourceRelease: [],
+        serviceResourceRelease: selectedServices.map((row) => ({ occurrenceId: row.occurrenceId!, serviceName: row.serviceName, quantity: row.capacityQuantity })),
+        warnings: differenceAmount < 0
+          ? ["服务退款按订单快照中的客户净支付计算，差额只记入退款待办，实际退款仍需通过支付退款流程完成"]
+          : ["本次服务没有客户净支付，不产生退款，但会释放服务容量"]
+      },
+      cancellationItems: []
+    };
+  }
+
   private async releaseLineCancellationSecurity(
     tenantId: string,
     orderId: string,
-    priced: Awaited<ReturnType<RentalBusinessService["quoteOrderLineCancellation"]>>,
+    priced: { depositDelta: number; preAuthDelta: number },
     idempotencyKey: string,
     operator: string,
     tx: Prisma.TransactionClient
@@ -1150,7 +1237,9 @@ export class RentalCoreController {
   /** 取货前部分取消试算：不落库、不释放资源、不改变优惠券预算。数量库存可按数量拆分，序列化资产只能整行。 */
   @Post("orders/:id/changes/partial-cancel/preview")
   async previewPartialLineCancellation(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: PreviewRentalOrderChangeDto) {
-    const result = await this.priceLineCancellation(req.user.tenantId, id, body);
+    const result = body.type === "service_cancel"
+      ? await this.priceServiceCancellation(req.user.tenantId, id, body)
+      : await this.priceLineCancellation(req.user.tenantId, id, body);
     return result.preview;
   }
 
@@ -1163,7 +1252,8 @@ export class RentalCoreController {
     const tenantId = req.user.tenantId;
     const lineIds = body.lineIds?.map((value) => value.trim()).filter(Boolean).sort();
     const items = body.items?.map((item) => ({ lineId: item.lineId.trim(), quantity: item.quantity })).sort((a, b) => a.lineId.localeCompare(b.lineId));
-    const requestFingerprint = items?.length ? JSON.stringify({ items }) : JSON.stringify({ lineIds: lineIds ?? [] });
+    const serviceOccurrenceIds = body.serviceOccurrenceIds?.map((value) => value.trim()).filter(Boolean).sort();
+    const requestFingerprint = JSON.stringify({ type: body.type, lineIds: lineIds ?? [], items: items ?? [], serviceOccurrenceIds: serviceOccurrenceIds ?? [] });
     const explicitKey = idempotencyKeyOf(req);
     const fallbackKey = `order.change.partial-cancel:${id}:${createHash("sha256").update(requestFingerprint).digest("hex")}`;
     const result = await this.idempotent.execute({
@@ -1174,11 +1264,13 @@ export class RentalCoreController {
       request: { orderId: id, ...body, lineIds, items },
       orderId: id,
       run: async (tx) => {
-        const priced = await this.priceLineCancellation(tenantId, id, { type: body.type, lineIds, items }, tx);
+        const priced = body.type === "service_cancel"
+          ? await this.priceServiceCancellation(tenantId, id, { type: body.type, lineIds, items, serviceOccurrenceIds }, tx)
+          : await this.priceLineCancellation(tenantId, id, { type: body.type, lineIds, items }, tx);
         if (body.expectedUpdatedAt !== priced.order.updatedAt) throw new ConflictException("订单已发生变化，请重新试算后再提交");
         if (!body.customerConfirmed) throw new ConflictException("必须先取得客户确认才能应用订单变更");
         await this.releaseLineCancellationSecurity(tenantId, id, priced.priced, explicitKey ?? fallbackKey, req.user.displayName, tx);
-        if (priced.priced.pricingSnapshot?.couponEvaluation) {
+        if (priced.scope === "line" && priced.priced.pricingSnapshot?.couponEvaluation) {
           await this.business.repriceCouponForOrder(
             tenantId,
             id,
@@ -1192,8 +1284,10 @@ export class RentalCoreController {
           priced.priced,
           {
             ...body,
-            lineIds: priced.cancellationItems.map((item) => item.lineId),
-            items: priced.cancellationItems.map((item) => ({ lineId: item.lineId, quantity: item.quantity }))
+            type: priced.scope === "service" ? "service_cancel" : "partial_line_cancel",
+            lineIds: priced.scope === "line" ? priced.cancellationItems.map((item) => item.lineId) : undefined,
+            items: priced.scope === "line" ? priced.cancellationItems.map((item) => ({ lineId: item.lineId, quantity: item.quantity })) : undefined,
+            serviceOccurrenceIds: priced.scope === "service" ? priced.serviceOccurrenceIds : undefined
           },
           explicitKey ?? fallbackKey,
           req.user.displayName,

@@ -6024,6 +6024,54 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   }
 
   /**
+   * ORDER-CHANGE-01C：取货前取消尚未开始的增值服务。
+   *
+   * 这里刻意不重新读取当前服务配置，也不重新跑一套优惠规则：订单上的服务发生项已经
+   * 固化了服务版本、条款、原价与优惠分摊，取消时必须按这份快照退客户实际支付的净额。
+   * 这样服务后续改价、停用或优惠模板变化，都不会把历史订单的退款金额改掉。
+   */
+  async quoteOrderServiceCancellation(
+    tenantId: string,
+    context: BusinessContext,
+    args: {
+      order: Pick<RentalOrder, "id" | "quoteId" | "endAt" | "payableAmount" | "finalPayableAmount" | "rentalAmount" | "serviceAmount" | "currency" | "priceVersionId" | "priceVersion" | "ruleVersion" | "calendarSnapshot" | "serviceSnapshots">;
+      serviceOccurrenceIds: string[];
+    }
+  ): Promise<RentalOrderExtensionPreview & { rateSnapshot: RentalPricingRate[]; ruleSnapshot: RentalRuleConfig }> {
+    const quote = this.getQuote(tenantId, context, args.order.quoteId);
+    const selected = (args.order.serviceSnapshots ?? []).filter((row) => row.occurrenceId && args.serviceOccurrenceIds.includes(row.occurrenceId));
+    if (selected.length !== args.serviceOccurrenceIds.length) throw new ConflictException("存在不存在或不属于当前订单的服务发生项");
+    const refundAmount = roundMoney(selected.reduce((sum, row) => {
+      const gross = Math.max(0, Number(row.amount) || 0);
+      const discount = Math.max(0, Number(row.discountAllocatedAmount ?? 0) || 0);
+      const coupon = Math.max(0, Number(row.couponAllocatedAmount ?? 0) || 0);
+      return sum + Math.max(0, gross - discount - coupon);
+    }, 0));
+    const differenceAmount = roundMoney(-refundAmount);
+    return {
+      orderId: args.order.id,
+      originalEndAt: args.order.endAt,
+      newEndAt: args.order.endAt,
+      billableUnits: 0,
+      rentalAmount: 0,
+      serviceAmount: 0,
+      depositDelta: 0,
+      preAuthDelta: 0,
+      payableAmount: differenceAmount,
+      currency: args.order.currency ?? context.settings.pricing.currency,
+      settlementMode: "immediate",
+      paymentRequired: false,
+      chargeLines: [],
+      calendarSnapshot: structuredClone(args.order.calendarSnapshot ?? quote.calendarSnapshot ?? []),
+      priceVersionId: args.order.priceVersionId ?? quote.priceVersionId,
+      priceVersion: args.order.priceVersion ?? quote.priceVersion,
+      ruleVersion: args.order.ruleVersion ?? quote.ruleVersion,
+      rateSnapshot: structuredClone(quote.rateSnapshot ?? []),
+      ruleSnapshot: structuredClone(quote.ruleSnapshot)
+    };
+  }
+
+  /**
    * 按营业时区的年份装载日历。
    *
    * 用 `getUTCFullYear()` 会在跨年边界装错：北京时间 2027-01-01 01:00 对应 UTC

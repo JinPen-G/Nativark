@@ -142,7 +142,7 @@ export function buildRentalWorkbenchTodos(
     const extensions = extensionsByOrderId[order.id] ?? [];
     const approvedExtensionRefund = extensions.find((row) => row.status === "effective" && row.pricingSnapshot?.refundReview?.status === "approved");
     const approvedServiceRefund = (order.serviceSnapshots ?? []).some((row) => row.refundStatus === "approved_pending_refund");
-    const hasRefundCharge = (order.chargeLines ?? []).some((row) => row.type === "early_return_refund" && Number(row.amount) < 0);
+    const hasRefundCharge = (order.chargeLines ?? []).some((row) => ["early_return_refund", "order_change"].includes(row.type) && Number(row.amount) < 0);
     const rentalBalance = fundingByOrderId[order.id]?.rental.balance ?? 0;
     if (rentalBalance < -0.005 && (approvedExtensionRefund || approvedServiceRefund || hasRefundCharge || order.status === "settling" || order.status === "completed")) {
       add(items, {

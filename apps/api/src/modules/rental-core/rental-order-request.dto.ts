@@ -940,19 +940,23 @@ export class RentalOrderChangeItemInputDto {
 }
 
 export class PreviewRentalOrderChangeDto implements PreviewRentalOrderChangeRequest {
-  @IsIn(["partial_line_cancel"])
-  type!: "partial_line_cancel";
+  @IsIn(["partial_line_cancel", "service_cancel"])
+  type!: "partial_line_cancel" | "service_cancel";
 
   @IsOptional() @IsArray() @ArrayNotEmpty() @IsString({ each: true }) @MaxLength(191, { each: true }) lineIds?: string[];
   @IsOptional() @IsArray() @ArrayNotEmpty() @ValidateNested({ each: true }) @Type(() => RentalOrderChangeItemInputDto) items?: RentalOrderChangeItemInputDto[];
+  /** ORDER-CHANGE-01C：服务发生项只能按 occurrenceId 选择，服务端按订单快照计算净额。 */
+  @IsOptional() @IsArray() @ArrayNotEmpty() @IsString({ each: true }) @MaxLength(191, { each: true }) serviceOccurrenceIds?: string[];
 }
 
 export class ApplyRentalOrderChangeDto implements ApplyRentalOrderChangeRequest {
-  @IsIn(["partial_line_cancel"])
-  type!: "partial_line_cancel";
+  @IsIn(["partial_line_cancel", "service_cancel"])
+  type!: "partial_line_cancel" | "service_cancel";
 
   @IsOptional() @IsArray() @ArrayNotEmpty() @IsString({ each: true }) @MaxLength(191, { each: true }) lineIds?: string[];
   @IsOptional() @IsArray() @ArrayNotEmpty() @ValidateNested({ each: true }) @Type(() => RentalOrderChangeItemInputDto) items?: RentalOrderChangeItemInputDto[];
+  /** ORDER-CHANGE-01C：取货前取消尚未开始的增值服务。 */
+  @IsOptional() @IsArray() @ArrayNotEmpty() @IsString({ each: true }) @MaxLength(191, { each: true }) serviceOccurrenceIds?: string[];
 
   @IsString()
   @IsNotEmpty()

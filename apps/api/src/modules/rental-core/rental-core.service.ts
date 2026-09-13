@@ -2400,7 +2400,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     tenantId: string,
     orderId: string,
     priced: RentalOrderExtensionPreview & { rateSnapshot: RentalPricingRate[]; ruleSnapshot: RentalRuleConfig },
-    input: { type: "partial_line_cancel"; lineIds?: string[]; items: Array<{ lineId: string; quantity: number }>; reason: string; customerConfirmed: boolean; expectedUpdatedAt: string },
+    input: { type: "partial_line_cancel" | "service_cancel"; lineIds?: string[]; items?: Array<{ lineId: string; quantity: number }>; serviceOccurrenceIds?: string[]; reason: string; customerConfirmed: boolean; expectedUpdatedAt: string },
     idempotencyKey: string,
     operator: string,
     tx: RentalFactTx
@@ -2418,21 +2418,30 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (priced.orderId !== order.id || Date.parse(priced.newEndAt) !== Date.parse(order.endAt)) {
       throw new ConflictException("订单变更试算基准已失效，请重新试算");
     }
-    if (order.effectiveEndAt && Date.parse(order.effectiveEndAt) !== Date.parse(order.endAt)) {
+    if (input.type === "partial_line_cancel" && order.effectiveEndAt && Date.parse(order.effectiveEndAt) !== Date.parse(order.endAt)) {
       throw new ConflictException("已有生效续租的订单不能在本轮部分取消，请人工处理");
     }
-    if (order.serviceSnapshots?.length) {
+    if (input.type === "partial_line_cancel" && order.serviceSnapshots?.length) {
       throw new ConflictException("已包含增值服务的订单暂不能自动部分取消，请人工处理服务释放与退款");
     }
-    if (order.adjustmentAmount !== 0) {
+    if (input.type === "partial_line_cancel" && order.adjustmentAmount !== 0) {
       throw new ConflictException("订单已有其他费用调整，请先完成现有调整后再部分取消");
     }
     const previousChanges = await this.factStore.listOrderChanges(tenantId, orderId, tx);
     if (previousChanges.some((row) => row.status === "applied")) {
       throw new ConflictException("本轮一个订单只允许一次整行部分取消，后续拆分变更请使用专用变更流程");
     }
+    if (input.type === "service_cancel") {
+      return this.applyServiceCancellation(tenantId, order, priced, {
+        type: "service_cancel",
+        serviceOccurrenceIds: input.serviceOccurrenceIds,
+        reason: input.reason,
+        customerConfirmed: input.customerConfirmed,
+        expectedUpdatedAt: input.expectedUpdatedAt
+      }, previousChanges, idempotencyKey, operator, tx);
+    }
     const activeLines = order.lines.filter((line) => (line.cancelledQuantity ?? 0) < line.quantity);
-    const cancellationItems = input.items.map((item) => ({ lineId: item.lineId.trim(), quantity: Number(item.quantity) }));
+    const cancellationItems = (input.items ?? []).map((item) => ({ lineId: item.lineId.trim(), quantity: Number(item.quantity) }));
     if (!cancellationItems.length || cancellationItems.some((item) => !item.lineId || !Number.isInteger(item.quantity) || item.quantity <= 0)) {
       throw new BadRequestException("请选择有效的订单行和取消数量");
     }
@@ -2579,6 +2588,104 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       requestedAt: at, appliedAt: at, createdAt: at
     };
     await this.factStore.saveOrderAggregate(order, assetChanges, tx);
+    await this.factStore.insertOrderChange(change, tx);
+    return { order, change };
+  }
+
+  /** ORDER-CHANGE-01C：在同一订单事务中取消服务发生项并释放它自己的容量预留。 */
+  private async applyServiceCancellation(
+    tenantId: string,
+    order: RentalOrder,
+    priced: RentalOrderExtensionPreview & { rateSnapshot: RentalPricingRate[]; ruleSnapshot: RentalRuleConfig },
+    input: { type: "service_cancel"; serviceOccurrenceIds?: string[]; reason: string; customerConfirmed: boolean; expectedUpdatedAt: string },
+    previousChanges: RentalOrderChange[],
+    idempotencyKey: string,
+    operator: string,
+    tx: RentalFactTx
+  ): Promise<{ order: RentalOrder; change: RentalOrderChange }> {
+    const ids = [...new Set((input.serviceOccurrenceIds ?? []).map((value) => value.trim()).filter(Boolean))];
+    if (!ids.length || ids.length !== (input.serviceOccurrenceIds ?? []).length) throw new BadRequestException("请选择至少一项且不重复的增值服务");
+    const occurrences = [...(order.serviceSnapshots ?? [])];
+    const selected = ids.map((occurrenceId) => {
+      const row = occurrences.find((item) => item.occurrenceId === occurrenceId);
+      if (!row) throw new ConflictException("存在不存在或不属于当前订单的服务发生项");
+      if ((row.executionStatus ?? "not_started") !== "not_started") throw new ConflictException(`服务「${row.serviceName}」已经开始或结束，不能取消`);
+      if (row.requiredByRule) throw new ConflictException(`服务「${row.serviceName}」属于业务规则要求，不能直接取消`);
+      if (row.refundStatus && row.refundStatus !== "none") throw new ConflictException(`服务「${row.serviceName}」已有退款处理记录`);
+      if (row.requiresCapacity && !row.reservationKey) throw new ConflictException(`服务「${row.serviceName}」缺少容量预留依据，拒绝安全取消`);
+      return row;
+    });
+    const reservationKeys = selected.map((row) => row.reservationKey).filter((value): value is string => Boolean(value));
+    if (new Set(reservationKeys).size !== reservationKeys.length) throw new ConflictException("多个服务发生项共用了同一容量预留，拒绝重复释放");
+    const expectedRefund = roundMoney(selected.reduce((sum, row) => sum + Math.max(
+      0,
+      Number(row.amount ?? 0) - Number(row.discountAllocatedAmount ?? 0) - Number(row.couponAllocatedAmount ?? 0)
+    ), 0));
+    const differenceAmount = roundMoney(priced.pricingSnapshot?.differenceAmount ?? priced.payableAmount);
+    if (differenceAmount !== roundMoney(-expectedRefund)) throw new ConflictException("服务退款试算与订单快照不一致，请重新试算");
+    if (differenceAmount > 0.005 || priced.depositDelta > 0.005 || priced.preAuthDelta > 0.005) {
+      throw new ConflictException("服务取消不能产生补款或新增押金/预授权");
+    }
+    const at = now();
+    const beforeServices = selected.map((row) => structuredClone(row));
+    for (const row of selected) {
+      const index = occurrences.findIndex((item) => item.occurrenceId === row.occurrenceId);
+      const refundAmount = roundMoney(Math.max(0, Number(row.amount ?? 0) - Number(row.discountAllocatedAmount ?? 0) - Number(row.couponAllocatedAmount ?? 0)));
+      occurrences[index] = {
+        ...row,
+        executionStatus: "cancelled",
+        actualEndAt: at,
+        failureReason: input.reason.trim(),
+        executedBy: operator,
+        refundAmount,
+        refundStatus: refundAmount > 0 ? "included_in_order_change" : "none"
+      };
+      if (row.requiresCapacity && row.reservationKey) {
+        if (!this.serviceCapacities) throw new ConflictException("服务容量履约组件未就绪，拒绝只写服务取消状态");
+        await this.serviceCapacities.releaseForOccurrence(tenantId, order.id, row.reservationKey, "order_change_service_cancel", at, tx);
+      }
+    }
+    order.serviceSnapshots = occurrences;
+    this.applyChargeTo(order, {
+      code: `order-change:${previousChanges.length + 1}`,
+      name: "订单增值服务取消差额",
+      type: "order_change",
+      amount: differenceAmount,
+      sourceVersion: priced.priceVersion ?? priced.ruleVersion,
+      detail: input.reason.trim()
+    });
+    order.updatedAt = at;
+    const afterServices = occurrences.filter((row) => ids.includes(row.occurrenceId ?? "")).map((row) => structuredClone(row));
+    const beforeSnapshot: Record<string, unknown> = {
+      updatedAt: input.expectedUpdatedAt,
+      status: order.status,
+      finalPayableAmount: roundMoney(order.finalPayableAmount - differenceAmount),
+      adjustmentAmount: roundMoney(order.adjustmentAmount - differenceAmount),
+      serviceSnapshots: beforeServices
+    };
+    const afterSnapshot: Record<string, unknown> = {
+      updatedAt: order.updatedAt,
+      status: order.status,
+      finalPayableAmount: order.finalPayableAmount,
+      adjustmentAmount: order.adjustmentAmount,
+      serviceSnapshots: afterServices
+    };
+    const change: RentalOrderChange = {
+      id: randomUUID(), tenantId, workspaceId: this.resolveWorkspaceId(tenantId), orderId: order.id,
+      sequence: previousChanges.length + 1, type: "service_cancel", status: "applied",
+      request: { ...input, serviceOccurrenceIds: ids }, beforeSnapshot, afterSnapshot,
+      diff: {
+        scope: "services",
+        serviceOccurrenceIds: ids,
+        services: selected.map((row) => ({ occurrenceId: row.occurrenceId, serviceName: row.serviceName, quantity: row.quantity, refundAmount: roundMoney(Math.max(0, Number(row.amount ?? 0) - Number(row.discountAllocatedAmount ?? 0) - Number(row.couponAllocatedAmount ?? 0))) })),
+        differenceAmount, refundAmount: Math.max(0, -differenceAmount), additionalAmount: 0,
+        releasedServiceOccurrenceIds: selected.filter((row) => row.requiresCapacity).map((row) => row.occurrenceId)
+      },
+      refundAmount: roundMoney(Math.max(0, -differenceAmount)), additionalAmount: 0,
+      depositDelta: 0, preAuthDelta: 0, idempotencyKey, requestedBy: operator, appliedBy: operator,
+      requestedAt: at, appliedAt: at, createdAt: at
+    };
+    await this.factStore.saveOrderAggregate(order, [], tx);
     await this.factStore.insertOrderChange(change, tx);
     return { order, change };
   }

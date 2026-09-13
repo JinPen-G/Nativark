@@ -12,7 +12,15 @@ const tenant = 'tenant_002';
 
 (async () => {
   const facts = stores.createAbsorbingFactStore();
-  const core = new RentalCoreService(stores.createAbsorbingConfigStore(), facts);
+  const releasedServiceReservations = [];
+  const core = new RentalCoreService(
+    stores.createAbsorbingConfigStore(),
+    facts,
+    undefined,
+    undefined,
+    undefined,
+    { releaseForOccurrence: async (...args) => releasedServiceReservations.push(args) }
+  );
   const business = new RentalBusinessService(
     stores.createAbsorbingBusinessConfigStore(),
     stores.createAbsorbingBusinessFactStore(),
@@ -172,6 +180,47 @@ const tenant = 'tenant_002';
   assert.ok(savedChange.refundAmount > 0);
   pass('应用部分取消只追加变更记录，并释放对应预占而不改原始金额');
 
+  cancellationOrder.serviceSnapshots = [{
+    serviceId: 'service-change-test', serviceCode: 'CLEANING', serviceName: '清洁服务', serviceType: 'other',
+    serviceVersion: '1.0', workspaceId: 'workspace_test', billingUnit: 'per_order', selectionMode: 'optional',
+    requiredByRule: false, unitPrice: 100, quantity: 1, billingUnits: 1, amount: 100,
+    formula: '100 × 1 × 1', termsVersion: '1.0', terms: '清洁服务条款', eligibility: [],
+    insuredDisplayable: false, requiresCapacity: true, scheduledStartAt: start, scheduledEndAt: end,
+    serviceLocationId: location.id, capacityQuantity: 1, discountAllocatedAmount: 10, couponAllocatedAmount: 5,
+    occurrenceId: 'service-occurrence-change-test', origin: 'order', executionStatus: 'not_started',
+    executedQuantity: 0, executionSegments: [], refundStatus: 'none', reservationKey: 'service-reservation-change-test'
+  }];
+  const servicePriced = await business.quoteOrderServiceCancellation(tenant, ctx, {
+    order: cancellationOrder,
+    serviceOccurrenceIds: ['service-occurrence-change-test']
+  });
+  assert.equal(servicePriced.payableAmount, -85, '服务取消应按订单快照扣除优惠后的客户净支付');
+  const serviceApplied = await core.applyPartialLineCancellation(
+    tenant,
+    cancellationOrder.id,
+    servicePriced,
+    {
+      type: 'service_cancel',
+      serviceOccurrenceIds: ['service-occurrence-change-test'],
+      reason: '客户取消未开始的清洁服务',
+      customerConfirmed: true,
+      expectedUpdatedAt: cancellationOrder.updatedAt
+    },
+    'service-change-test-key',
+    '测试操作员',
+    {}
+  );
+  assert.equal(serviceApplied.change.type, 'service_cancel');
+  assert.equal(savedOrder.serviceSnapshots[0].executionStatus, 'cancelled');
+  assert.equal(savedOrder.serviceSnapshots[0].refundStatus, 'included_in_order_change');
+  assert.equal(savedOrder.serviceSnapshots[0].refundAmount, 85);
+  assert.equal(serviceApplied.change.refundAmount, 85);
+  assert.equal(serviceApplied.change.diff.services[0].refundAmount, 85);
+  assert.equal(releasedServiceReservations.length, 1, '取消服务必须释放对应的容量预留');
+  assert.equal(releasedServiceReservations[0][2], 'service-reservation-change-test');
+  pass('取消未开始增值服务按客户净支付退款，并追加服务变更快照');
+
+  facts.findOrder = async () => clone({ ...cancellationOrder, serviceSnapshots: [] });
   await assert.rejects(
     () => core.applyPartialLineCancellation(tenant, cancellationOrder.id, priced, {
       type: 'partial_line_cancel',

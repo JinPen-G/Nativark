@@ -306,8 +306,9 @@ export function RentalOrderDetailPage() {
     mutationFn: (values: ApplyRentalOrderChangeRequest) => {
       if (!partialCancelPreview) throw new Error("请先试算部分取消费用");
       return rentalCoreApi.applyPartialLineCancellation(id, {
-        type: "partial_line_cancel",
+        type: values.serviceOccurrenceIds?.length ? "service_cancel" : "partial_line_cancel",
         items: values.items,
+        serviceOccurrenceIds: values.serviceOccurrenceIds,
         reason: values.reason,
         customerConfirmed: values.customerConfirmed,
         expectedUpdatedAt: partialCancelPreview.expectedUpdatedAt
@@ -317,7 +318,7 @@ export function RentalOrderDetailPage() {
       setPartialCancelOpen(false);
       setPartialCancelPreview(undefined);
       partialCancelForm.resetFields();
-      await refreshChanges();
+      await Promise.all([refresh(), refreshChanges()]);
       message.success("订单部分取消已生效，资源与差额记录已更新");
     },
     onError: (error: Error) => message.error(error.message || "部分取消失败，请刷新订单后重试")
@@ -394,6 +395,9 @@ export function RentalOrderDetailPage() {
     onError: (error: Error) => message.error(error.message || "服务退款失败，请检查已批准金额和资金余额")
   });
   const detail = order.data;
+  const cancelableServiceCount = (detail?.serviceSnapshots ?? []).filter((row) =>
+    Boolean(row.occurrenceId) && (row.executionStatus ?? "not_started") === "not_started" && !row.requiredByRule
+  ).length;
   // SHARED-WORK-01A：订单详情与养护工单联动——按订单过滤本空间的养护工单与归还处置。
   const relatedWorkOrders = useQuery({
     queryKey: ["rental-core", "work-orders", id],
@@ -483,7 +487,7 @@ export function RentalOrderDetailPage() {
         {canReturn && detail.status === RentalCoreOrderStatus.Renting && (detail.allocations.filter((allocation) => allocation.status === "picked_up").length > 1 || detail.allocations.some((allocation) => allocation.status === "picked_up" && allocation.quantity > 1)) && <Button onClick={() => setPartialReturnOpen(true)}>{detail.ruleSnapshot?.fulfillment?.returnInspectionRequired ? "部分归还检查" : "部分归还"}</Button>}
         {detail.status === RentalCoreOrderStatus.Settling && canSettleFunding && <Button type="primary" loading={settle.isPending} disabled={settleBlockers.length > 0} title={settleBlockers.length ? `服务端会拒绝关单：${settleBlockers.join("、")}` : undefined} onClick={() => settle.mutate()}>结算并关闭订单</Button>}
         {canExtend && [RentalCoreOrderStatus.ReadyForPickup, RentalCoreOrderStatus.Renting].includes(detail.status) && <Button icon={<RetweetOutlined />} onClick={() => { extensionForm.resetFields(); setExtensionPreview(undefined); extensionForm.setFieldsValue({ newEndAt: dayjs(detail.effectiveEndAt ?? detail.endAt).add(1, "day") }); setExtensionOpen(true); }}>续租 / 延期</Button>}
-        {canOperate && [RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.ReadyForPickup].includes(detail.status) && (detail.lines.filter((line) => (line.cancelledQuantity ?? 0) < line.quantity).length > 1 || detail.lines.some((line) => line.inventoryMode === "quantity" && line.quantity - (line.cancelledQuantity ?? 0) > 1)) && <Button onClick={() => { partialCancelForm.resetFields(); setPartialCancelPreview(undefined); setPartialCancelOpen(true); }}>部分取消商品</Button>}
+        {canOperate && [RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.ReadyForPickup].includes(detail.status) && (detail.lines.filter((line) => (line.cancelledQuantity ?? 0) < line.quantity).length > 1 || detail.lines.some((line) => line.inventoryMode === "quantity" && line.quantity - (line.cancelledQuantity ?? 0) > 1) || cancelableServiceCount > 0) && <Button onClick={() => { partialCancelForm.resetFields(); setPartialCancelPreview(undefined); setPartialCancelOpen(true); }}>部分取消商品 / 服务</Button>}
         {canCancel && [RentalCoreOrderStatus.Draft, RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.ReadyForPickup].includes(detail.status) && <Button danger onClick={() => setCancelOpen(true)}>取消并按规则计费</Button>}
       </Space>
       <OrderAllocationPanel key={detail.id} order={detail} />
@@ -570,7 +574,7 @@ export function RentalOrderDetailPage() {
               return <Space orientation="vertical" size={0}><Tag color={SERVICE_EXECUTION_STATUS_COLORS[status]}>{SERVICE_EXECUTION_STATUS_LABELS[status]}</Tag>{total > 1 && <span style={{ color: "#666" }}>已执行 {executed} / {total}</span>}<span style={{ color: "#999" }}>{row.actualStartAt ? `开始 ${new Date(row.actualStartAt).toLocaleString()}` : "未记录实际开始"}</span>{row.actualEndAt && <span style={{ color: "#999" }}>结束 {new Date(row.actualEndAt).toLocaleString()}</span>}</Space>;
             }},
             { title: "退款", width: 150, render: (_, row) => row.refundStatus && row.refundStatus !== "none"
-              ? <Tag color={row.refundStatus === "pending_review" ? "orange" : row.refundStatus === "approved_pending_refund" ? "gold" : row.refundStatus === "refunded" ? "green" : "default"}>{row.refundStatus === "pending_review" ? `待审核 ${money(row.refundAmount)}` : row.refundStatus === "approved_pending_refund" ? `已核减，待退款 ${money(row.refundAmount)}` : row.refundStatus === "refunded" ? `已退款 ${money(row.refundAmount)}` : "已驳回"}</Tag>
+              ? <Tag color={row.refundStatus === "pending_review" ? "orange" : row.refundStatus === "approved_pending_refund" ? "gold" : row.refundStatus === "refunded" ? "green" : row.refundStatus === "included_in_order_change" ? "blue" : "default"}>{row.refundStatus === "pending_review" ? `待审核 ${money(row.refundAmount)}` : row.refundStatus === "approved_pending_refund" ? `已核减，待退款 ${money(row.refundAmount)}` : row.refundStatus === "refunded" ? `已退款 ${money(row.refundAmount)}` : row.refundStatus === "included_in_order_change" ? `已纳入订单变更 ${money(row.refundAmount)}` : "已驳回"}</Tag>
               : "-" },
             { title: "容量", width: 130, render: (_, row) => row.requiresCapacity
               ? <Tag color={row.reservationKey ? "green" : "orange"}>{row.reservationKey ? `已占 ${row.capacityQuantity}` : "无容量依据"}</Tag>
@@ -811,20 +815,28 @@ export function RentalOrderDetailPage() {
       </Form>
     </Modal>
     <Modal
-      title="部分取消商品"
+      title="部分取消商品 / 服务"
       open={partialCancelOpen}
       onCancel={() => { setPartialCancelOpen(false); setPartialCancelPreview(undefined); partialCancelForm.resetFields(); }}
       destroyOnHidden
       width={680}
       footer={[
         <Button key="cancel" onClick={() => { setPartialCancelOpen(false); setPartialCancelPreview(undefined); partialCancelForm.resetFields(); }}>取消</Button>,
-        <Button key="preview" loading={previewPartialCancel.isPending} onClick={() => partialCancelForm.validateFields(["items"]).then((values) => previewPartialCancel.mutate({ type: "partial_line_cancel", items: values.items }))}>试算差额</Button>,
+        <Button key="preview" loading={previewPartialCancel.isPending} onClick={() => partialCancelForm.validateFields(["items", "serviceOccurrenceIds"]).then((values) => {
+          const items = values.items?.filter((item: { lineId?: string; quantity?: number }) => item?.lineId && item.quantity);
+          const serviceOccurrenceIds = values.serviceOccurrenceIds?.filter(Boolean);
+          if (Boolean(items?.length) === Boolean(serviceOccurrenceIds?.length)) {
+            message.error("请选择商品取消项或未开始的增值服务，且两者只能选一种");
+            return;
+          }
+          previewPartialCancel.mutate({ type: serviceOccurrenceIds?.length ? "service_cancel" : "partial_line_cancel", items, serviceOccurrenceIds });
+        })}>试算差额</Button>,
         <Button key="apply" type="primary" disabled={!partialCancelPreview} loading={applyPartialCancel.isPending} onClick={() => partialCancelForm.submit()}>确认并应用</Button>
       ]}
     >
       <Form form={partialCancelForm} layout="vertical" onFinish={(values) => applyPartialCancel.mutate(values)} initialValues={{ customerConfirmed: false }}>
-        <Alert type="info" showIcon title="仅支持取货前部分取消" description="数量库存可以按数量取消；序列化资产只能整行取消。原订单与原报价不会被覆盖；系统会按原价格、日历和优惠快照重算剩余商品，资源释放与变更历史在同一事务内完成。含增值服务、已续租或已有其他费用调整的订单请人工处理。" style={{ marginBottom: 16 }} />
-        <Form.List name="items" rules={[{ validator: async (_, value) => value?.length ? Promise.resolve() : Promise.reject(new Error("至少增加一项取消商品")) }]}>
+        <Alert type="info" showIcon title="仅支持取货前部分取消" description="数量库存可以按数量取消；序列化资产只能整行取消。未开始的可选增值服务可以单独取消，退款按订单快照中的客户净支付计算并释放服务容量。原订单与原报价不会被覆盖；商品与服务取消不能在同一次变更中混合。" style={{ marginBottom: 16 }} />
+        <Form.List name="items">
           {(fields, { add, remove }) => <Space orientation="vertical" style={{ width: "100%" }}>
             {fields.map((field) => <Space key={field.key} align="start" style={{ width: "100%" }}>
               <Form.Item name={[field.name, "lineId"]} rules={[{ required: true, message: "请选择商品" }]} style={{ flex: 1 }}>
@@ -838,6 +850,18 @@ export function RentalOrderDetailPage() {
             <Button type="dashed" icon={<PlusOutlined />} onClick={() => { add({ quantity: 1 }); setPartialCancelPreview(undefined); }}>增加取消项</Button>
           </Space>}
         </Form.List>
+        <Form.Item name="serviceOccurrenceIds" label="取消未开始的增值服务" extra="业务规则要求的服务、已开始或已结束的服务不能从此处取消。">
+          <Select
+            mode="multiple"
+            allowClear
+            placeholder="可选；与商品取消二选一"
+            onChange={() => setPartialCancelPreview(undefined)}
+            options={(detail?.serviceSnapshots ?? []).filter((row) => Boolean(row.occurrenceId) && (row.executionStatus ?? "not_started") === "not_started" && !row.requiredByRule).map((row) => ({
+              value: row.occurrenceId,
+              label: `${row.serviceName} · ${row.quantity} 份 · 可退 ${money(serviceOccurrenceNetAmount(row))}`
+            }))}
+          />
+        </Form.Item>
         <Form.Item name="reason" label="变更原因" rules={[{ required: true, whitespace: true, message: "请填写变更原因" }]}><Input.TextArea rows={3} maxLength={500} placeholder="例如：客户减少租赁设备" /></Form.Item>
         <Form.Item name="customerConfirmed" valuePropName="checked" rules={[{ validator: (_, value) => value ? Promise.resolve() : Promise.reject(new Error("必须取得客户确认")) }]}><Checkbox>我已取得客户对本次商品取消及金额变化的确认</Checkbox></Form.Item>
         {partialCancelPreview && <Card size="small" title="试算结果">
@@ -847,7 +871,8 @@ export function RentalOrderDetailPage() {
             { key: "difference", label: "差额", children: <b>{money(partialCancelPreview.differenceAmount)}</b> },
             { key: "deposit", label: "押金差额", children: money(partialCancelPreview.depositDelta) },
             { key: "preauth", label: "预授权差额", children: money(partialCancelPreview.preAuthDelta) },
-            { key: "release", label: "释放资源", span: 2, children: partialCancelPreview.resourceRelease.map((row) => `${row.itemGroupName} × ${row.quantity}`).join("、") }
+            { key: "release", label: "释放商品资源", span: 2, children: partialCancelPreview.resourceRelease.length ? partialCancelPreview.resourceRelease.map((row) => `${row.itemGroupName} × ${row.quantity}`).join("、") : "—" },
+            { key: "serviceRelease", label: "释放服务容量", span: 2, children: partialCancelPreview.serviceResourceRelease.length ? partialCancelPreview.serviceResourceRelease.map((row) => `${row.serviceName} × ${row.quantity}`).join("、") : "—" }
           ]} />
           {partialCancelPreview.warnings.map((warning) => <Alert key={warning} type="warning" showIcon title={warning} style={{ marginTop: 12 }} />)}
         </Card>}
