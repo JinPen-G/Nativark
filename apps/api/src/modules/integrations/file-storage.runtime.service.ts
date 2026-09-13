@@ -110,6 +110,21 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     this.cleanupTimer = undefined;
   }
 
+  /**
+   * 用随机不存在的对象做 HEAD 探针：验证签名、Bucket 和网络可达性，
+   * 只接受 404 作为“权限已到达但对象不存在”，绝不上传、删除或覆盖租户文件。
+   */
+  async testConnection(config: TenantIntegrationRuntimeConfig): Promise<string> {
+    const configuredPrefix = config.settings.objectPrefix ?? "tenant-files";
+    const prefix = safeObjectPrefix(configuredPrefix);
+    const storageKey = `${prefix ? `${prefix}/` : ""}_rental_os_connectivity/${config.id}/${randomUUID()}.probe`;
+    const signed = this.presign(config, "HEAD", storageKey, "application/octet-stream", new Date(Date.now() + 5 * 60 * 1000));
+    const response = await fetchWithTimeout(signed.url, { method: "HEAD", headers: signed.headers });
+    if (response.status === 404) return "已验证对象存储连接（随机探针对象不存在，未上传文件）。";
+    if (!response.ok) throw new Error(`对象存储返回 HTTP ${response.status}`);
+    return "已验证对象存储连接（未写入文件）。";
+  }
+
   async createUploadSession(
     tenantId: string,
     input: CreateFileUploadSessionRequest,

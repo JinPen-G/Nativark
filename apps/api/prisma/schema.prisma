@@ -1491,6 +1491,7 @@ model TenantIntegrationConfig {
   credentialsEncrypted String?   @db.Text
   secretFields         Json
   lastTestStatus       String    @default("not_tested") @db.VarChar(20)
+  lastTestMode         String    @default("none") @db.VarChar(20)
   lastTestAt           DateTime?
   lastTestError        String?   @db.VarChar(500)
   updatedBy            String?

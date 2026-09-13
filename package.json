@@ -12,6 +12,7 @@
     "test:membership-selector-scope": "node tests/membership-selector-workspace.test.cjs",
     "test:client-membership-contract": "npm run build -w @rental-os/shared && node tests/client-membership-contract.test.cjs",
     "test:integrations-security": "npm run build -w @rental-os/shared && npm run build -w @rental-os/api && node tests/integrations-security.test.cjs",
+    "test:integration-connectivity": "npm run build -w @rental-os/shared && npm run build -w @rental-os/api && node tests/tenant-integration-connectivity.test.cjs",
     "test:sms-notification": "node tests/tenant-sms-notification.test.cjs",
     "test:sms-rate-limit": "npm run build -w @rental-os/shared && npm run build -w @rental-os/api && node tests/sms-rate-limit.test.cjs",
     "test:tenant-integration-default": "npm run build -w @rental-os/shared && node tests/tenant-integration-default.test.cjs",

@@ -16,6 +16,7 @@ export type TenantIntegrationProvider =
   | "s3_compatible";
 
 export type TenantIntegrationTestStatus = "not_tested" | "passed" | "failed";
+export type TenantIntegrationTestMode = "none" | "configuration" | "live";
 
 export interface TenantIntegrationProviderField {
   key: string;
@@ -50,6 +51,7 @@ export interface TenantIntegrationConfigSummary {
   settings: Record<string, unknown>;
   secrets: TenantIntegrationSecretState;
   lastTestStatus: TenantIntegrationTestStatus;
+  lastTestMode: TenantIntegrationTestMode;
   lastTestAt?: string;
   lastTestError?: string;
   createdAt: string;
@@ -85,7 +87,7 @@ export interface TenantIntegrationTestResult {
   capability: TenantIntegrationCapability;
   provider: TenantIntegrationProvider;
   ok: boolean;
-  mode: "configuration" | "live";
+  mode: Exclude<TenantIntegrationTestMode, "none">;
   message: string;
   checkedAt: string;
   missingFields: string[];

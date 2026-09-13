@@ -13,6 +13,7 @@ import { IntegrationsController } from "./modules/integrations/integrations.cont
 import { IntegrationsRepository } from "./modules/integrations/integrations.repository";
 import { IntegrationsService } from "./modules/integrations/integrations.service";
 import { TenantIntegrationController } from "./modules/integrations/tenant-integration.controller";
+import { TenantIntegrationConnectivityService } from "./modules/integrations/tenant-integration.connectivity.service";
 import { TenantIntegrationService } from "./modules/integrations/tenant-integration.service";
 import { TenantIntegrationRuntimeService } from "./modules/integrations/tenant-integration.runtime.service";
 import { FileStorageRuntimeService } from "./modules/integrations/file-storage.runtime.service";
@@ -129,6 +130,7 @@ import { ClientAuthService } from "./modules/client/client-auth.service";
     IntegrationsService,
     IntegrationsRepository,
     TenantIntegrationService,
+    TenantIntegrationConnectivityService,
     TenantIntegrationRuntimeService,
     FileStorageRuntimeService,
     PaymentRuntimeService,

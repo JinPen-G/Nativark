@@ -69,6 +69,84 @@ export class TenantIntegrationRuntimeService {
     private readonly integrations: TenantIntegrationService
   ) {}
 
+  /**
+   * 只做平台连通性验证，不发送任何短信。
+   * 阿里云调用模板列表查询，腾讯云调用模板列表查询；两者都不会产生计费投递。
+   */
+  async testConnection(config: TenantIntegrationRuntimeConfig): Promise<string> {
+    if (config.provider === "aliyun_sms") {
+      const accessKeyId = text(config.credentials.accessKeyId, "AccessKey ID");
+      const accessKeySecret = text(config.credentials.accessKeySecret, "AccessKey Secret");
+      const params: Record<string, string> = {
+        AccessKeyId: accessKeyId,
+        Action: "QuerySmsTemplateList",
+        Format: "JSON",
+        PageIndex: "1",
+        PageSize: "1",
+        RegionId: text(config.settings.region, "地域"),
+        SignatureMethod: "HMAC-SHA1",
+        SignatureNonce: randomUUID(),
+        SignatureVersion: "1.0",
+        Timestamp: new Date().toISOString().replace(/\.\d{3}Z$/u, "Z"),
+        Version: "2017-05-25",
+        Signature: ""
+      };
+      const canonical = Object.keys(params)
+        .filter((key) => key !== "Signature")
+        .sort()
+        .map((key) => `${rfc3986(key)}=${rfc3986(params[key])}`)
+        .join("&");
+      params.Signature = hmacSha1Base64(`${accessKeySecret}&`, `GET&%2F&${rfc3986(canonical)}`);
+      const query = Object.keys(params).sort().map((key) => `${rfc3986(key)}=${rfc3986(params[key])}`).join("&");
+      const response = await fetchWithTimeout(`https://dysmsapi.aliyuncs.com/?${query}`, { method: "GET" }, ["dysmsapi.aliyuncs.com"]);
+      const body = await this.readJson(response);
+      if (!response.ok || body.Code !== "OK") throw new Error("阿里云短信模板查询失败");
+      return "已验证阿里云短信连接（仅查询模板，未发送短信）。";
+    }
+
+    if (config.provider === "tencent_sms") {
+      const secretId = text(config.credentials.secretId, "SecretId");
+      const secretKey = text(config.credentials.secretKey, "SecretKey");
+      const host = "sms.tencentcloudapi.com";
+      const service = "sms";
+      const action = "DescribeSmsTemplateList";
+      const version = "2021-01-11";
+      const timestamp = Math.floor(Date.now() / 1000);
+      const payload = JSON.stringify({ International: 0, Limit: 1, Offset: 0 });
+      const contentType = "application/json; charset=utf-8";
+      const canonicalHeaders = `content-type:${contentType}\nhost:${host}\n`;
+      const signedHeaders = "content-type;host";
+      const canonicalRequest = `POST\n/\n\n${canonicalHeaders}\n${signedHeaders}\n${sha256(payload)}`;
+      const date = new Date(timestamp * 1000).toISOString().slice(0, 10).replace(/-/g, "");
+      const credentialScope = `${date}/${service}/tc3_request`;
+      const stringToSign = `TC3-HMAC-SHA256\n${timestamp}\n${credentialScope}\n${sha256(canonicalRequest)}`;
+      const secretDate = hmacSha256(`TC3${secretKey}`, date, "buffer") as Buffer;
+      const secretService = hmacSha256(secretDate, service, "buffer") as Buffer;
+      const secretSigning = hmacSha256(secretService, "tc3_request", "buffer") as Buffer;
+      const signature = hmacSha256(secretSigning, stringToSign);
+      const authorization = `TC3-HMAC-SHA256 Credential=${secretId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+      const response = await fetchWithTimeout(`https://${host}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": contentType,
+          Host: host,
+          "X-TC-Action": action,
+          "X-TC-Version": version,
+          "X-TC-Region": text(config.settings.region, "地域"),
+          "X-TC-Timestamp": String(timestamp),
+          "X-TC-RequestClient": "rental-os",
+          Authorization: authorization
+        },
+        body: payload
+      }, [host]);
+      const body = await this.readJson(response);
+      const responseBody = (body.Response ?? {}) as JsonRecord;
+      if (!response.ok || responseBody.Error) throw new Error("腾讯云短信模板查询失败");
+      return "已验证腾讯云短信连接（仅查询模板，未发送短信）。";
+    }
+    throw new ServiceUnavailableException("未实现的短信平台适配器");
+  }
+
   async sendVerificationSms(
     tenantId: string,
     phone: string,

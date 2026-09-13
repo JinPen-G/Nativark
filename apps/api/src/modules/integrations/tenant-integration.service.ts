@@ -9,7 +9,7 @@ import {
   type TenantIntegrationCatalogResponse,
   type TenantIntegrationConfigSummary,
   type TenantIntegrationProvider,
-  type TenantIntegrationTestResult
+  type TenantIntegrationTestStatus
 } from "@rental-os/shared";
 import { OperationLogService } from "../../common/operation-log.service";
 import { UnsafeOutboundUrlError, validateProviderOutboundUrls } from "../../common/outbound-url";
@@ -25,6 +25,13 @@ export interface TenantIntegrationRuntimeConfig {
   provider: TenantIntegrationProvider;
   settings: Record<string, unknown>;
   credentials: Record<string, string>;
+}
+
+export interface TenantIntegrationTestConfig extends TenantIntegrationRuntimeConfig {
+  tenantId: string;
+  missingFields: string[];
+  configurationError?: string;
+  lastTestAt?: Date;
 }
 
 @Injectable()
@@ -72,6 +79,7 @@ export class TenantIntegrationService {
         fields: secretFields
       },
       lastTestStatus: row.lastTestStatus as TenantIntegrationConfigSummary["lastTestStatus"],
+      lastTestMode: row.lastTestMode as TenantIntegrationConfigSummary["lastTestMode"],
       lastTestAt: row.lastTestAt?.toISOString(),
       lastTestError: row.lastTestError ?? undefined,
       createdAt: row.createdAt.toISOString(),
@@ -218,6 +226,7 @@ export class TenantIntegrationService {
           credentialsEncrypted: secretFieldNames.length ? this.secretBox.encrypt(mergedSecrets) : null,
           secretFields: secretFieldNames as Prisma.InputJsonValue,
           lastTestStatus: "not_tested",
+          lastTestMode: "none",
           updatedBy: user?.displayName ?? user?.account
         },
         update: {
@@ -227,6 +236,7 @@ export class TenantIntegrationService {
           credentialsEncrypted: secretFieldNames.length ? this.secretBox.encrypt(mergedSecrets) : null,
           secretFields: secretFieldNames as Prisma.InputJsonValue,
           lastTestStatus: "not_tested",
+          lastTestMode: "none",
           lastTestAt: null,
           lastTestError: null,
           updatedBy: user?.displayName ?? user?.account
@@ -269,7 +279,16 @@ export class TenantIntegrationService {
     return this.summary(row);
   }
 
-  async test(capability: TenantIntegrationCapability, provider: TenantIntegrationProvider, user?: SystemUserRow): Promise<TenantIntegrationTestResult> {
+  /**
+   * 读取测试所需的配置，但不把密钥返回给 controller。
+   * 配置完整性和真实连通性由 connectivity service 分开处理，避免把
+   * “字段填了”误报成“第三方平台可用”。
+   */
+  async testConfig(
+    capability: TenantIntegrationCapability,
+    provider: TenantIntegrationProvider,
+    user?: SystemUserRow
+  ): Promise<TenantIntegrationTestConfig> {
     const tenantId = user?.tenantId ?? requireRequestTenantId();
     const definition = this.definition(capability, provider);
     const row = await this.prisma.tenantIntegrationConfig.findUnique({
@@ -281,20 +300,69 @@ export class TenantIntegrationService {
     const missingFields = definition.fields
       .filter((field) => field.required && !String((field.secret ? secrets[field.key] : settings[field.key]) ?? "").trim())
       .map((field) => field.key);
-    const ok = missingFields.length === 0;
-    const checkedAt = new Date();
-    await this.prisma.tenantIntegrationConfig.update({
-      where: { id: row.id },
-      data: { lastTestStatus: ok ? "passed" : "failed", lastTestAt: checkedAt, lastTestError: ok ? null : `缺少：${missingFields.join("、")}` }
-    });
+    let configurationError: string | undefined;
+    try {
+      await validateProviderOutboundUrls(capability, provider, settings);
+    } catch (error) {
+      configurationError = error instanceof UnsafeOutboundUrlError ? error.message : "第三方平台地址无法安全使用";
+    }
     return {
+      id: row.id,
+      tenantId,
       capability,
       provider,
-      ok,
-      mode: "configuration",
-      message: ok ? "配置字段完整；尚未发起真实外部调用。" : "配置不完整，请补齐必填字段。",
-      checkedAt: checkedAt.toISOString(),
-      missingFields
+      settings,
+      credentials: secrets,
+      missingFields,
+      configurationError,
+      lastTestAt: row.lastTestAt ?? undefined
     };
+  }
+
+  async recordTestResult(input: {
+    tenantId: string;
+    configId: string;
+    status: TenantIntegrationTestStatus;
+    mode: "configuration" | "live";
+    checkedAt: Date;
+    error?: string;
+    startedAt?: Date;
+  }) {
+    const result = await this.prisma.tenantIntegrationConfig.updateMany({
+      where: {
+        id: input.configId,
+        tenantId: input.tenantId,
+        ...(input.startedAt ? { lastTestAt: input.startedAt } : {})
+      },
+      data: {
+        lastTestStatus: input.status,
+        lastTestMode: input.mode,
+        lastTestAt: input.checkedAt,
+        lastTestError: input.error ?? null
+      }
+    });
+    return result.count === 1;
+  }
+
+  /**
+   * 原子占用一次外部测试窗口，避免两个并发点击同时打到第三方平台。
+   * lastTestAt 在发起调用前写入；调用完成后再由 recordTestResult 写最终状态。
+   */
+  async claimLiveTest(input: { tenantId: string; configId: string; startedAt: Date; cooldownMs: number }) {
+    const cutoff = new Date(input.startedAt.getTime() - input.cooldownMs);
+    const result = await this.prisma.tenantIntegrationConfig.updateMany({
+      where: {
+        id: input.configId,
+        tenantId: input.tenantId,
+        OR: [{ lastTestAt: null }, { lastTestAt: { lt: cutoff } }]
+      },
+      data: {
+        lastTestStatus: "not_tested",
+        lastTestMode: "live",
+        lastTestAt: input.startedAt,
+        lastTestError: null
+      }
+    });
+    return result.count === 1;
   }
 }

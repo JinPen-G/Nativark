@@ -27,8 +27,11 @@ function ProviderCard({ definition, config }: { definition: TenantIntegrationPro
   });
   const test = useMutation({
     mutationFn: () => tenantIntegrationsApi.test(definition.capability, definition.provider),
-    onSuccess: (result) => result.ok ? message.success(result.message) : message.warning(result.message),
-    onError: (error: any) => message.error(error?.response?.data?.message ?? "配置检查失败")
+    onSuccess: async (result) => {
+      await queryClient.invalidateQueries({ queryKey: ["tenant-integrations"] });
+      result.ok ? message.success(result.message) : message.warning(result.message);
+    },
+    onError: (error: any) => message.error(error?.response?.data?.message ?? "连接测试失败")
   });
 
   useEffect(() => {
@@ -39,7 +42,15 @@ function ProviderCard({ definition, config }: { definition: TenantIntegrationPro
     <Card
       size="small"
       title={<Space><CloudServerOutlined /><span>{definition.name}</span>{config?.enabled ? <Tag color="success">已启用</Tag> : <Tag>未启用</Tag>}{config?.isDefault ? <Tag color="blue">默认</Tag> : null}</Space>}
-      extra={config?.lastTestStatus === "passed" ? <Tag icon={<CheckCircleOutlined />} color="success">配置完整</Tag> : config?.lastTestStatus === "failed" ? <Tag color="error">配置不完整</Tag> : null}
+      extra={config?.lastTestStatus === "passed" && config.lastTestMode === "live"
+        ? <Tag icon={<CheckCircleOutlined />} color="success">已验证</Tag>
+        : config?.lastTestStatus === "passed"
+          ? <Tag color="processing">配置完整（未联网）</Tag>
+          : config?.lastTestStatus === "failed" && config.lastTestMode === "live"
+            ? <Tag color="error">连接失败</Tag>
+            : config?.lastTestStatus === "failed"
+              ? <Tag color="error">配置不完整</Tag>
+              : null}
     >
       <Typography.Paragraph type="secondary">{definition.description}</Typography.Paragraph>
       <Form form={form} layout="vertical" onFinish={(values) => save.mutate(values)}>
@@ -58,8 +69,8 @@ function ProviderCard({ definition, config }: { definition: TenantIntegrationPro
         </Row>
         <Space>
           <Button type="primary" htmlType="submit" icon={<SaveOutlined />} loading={save.isPending}>保存配置</Button>
-          <Button icon={<ExperimentOutlined />} onClick={() => test.mutate()} loading={test.isPending}>检查配置</Button>
-          {config?.lastTestAt ? <Typography.Text type="secondary">上次检查：{config.lastTestAt}</Typography.Text> : null}
+          <Button icon={<ExperimentOutlined />} onClick={() => test.mutate()} loading={test.isPending}>测试连接</Button>
+          {config?.lastTestAt ? <Typography.Text type="secondary">上次测试：{config.lastTestAt}</Typography.Text> : null}
         </Space>
       </Form>
     </Card>
@@ -75,7 +86,7 @@ export function TenantIntegrationsPage() {
     <PageHeader
       title="第三方服务"
       description="为当前租户选择并配置短信、支付和文件存储平台。配置按租户共享给各经营空间，业务模块只使用统一适配器。"
-      note={{ title: "密钥只在服务端加密保存", description: "页面不会回显 AccessKey、私钥、API 密钥等敏感值；停用平台不会删除配置，重新启用时可继续使用。当前“检查配置”只检查必填项，真实网络连通和回调验签将在适配器接入后启用。" }}
+      note={{ title: "密钥只在服务端加密保存", description: "页面不会回显 AccessKey、私钥、API 密钥等敏感值；停用平台不会删除配置，重新启用时可继续使用。“测试连接”只发起无副作用探针：支付查询随机交易号、短信查询模板、文件存储 HEAD 随机不存在对象，不会扣款、发短信或写入文件。" }}
       view={<Space orientation="vertical" size={20} style={{ width: "100%" }}>
         <Alert showIcon type="info" icon={<SettingOutlined />} title="一个能力可以配置多个平台" description="支付可以同时启用支付宝和微信支付；短信、文件存储也可以分别配置多个平台，并指定默认平台。保存某个平台时不会覆盖其他平台。" />
         {(["payment", "sms", "file"] as TenantIntegrationCapability[]).map((capability) => {

@@ -151,6 +151,23 @@ export class PaymentRuntimeService {
     private readonly funding: RentalFundingService
   ) {}
 
+  /**
+   * 只查询一个随机不存在的交易号验证商户签名与网关连通性。
+   * 此方法不会创建支付单、扣款、关单或触发退款。
+   */
+  async testConnection(config: TenantIntegrationRuntimeConfig): Promise<string> {
+    const merchantOrderNo = `ROTEST${randomUUID().replace(/-/gu, "").slice(0, 20)}`;
+    if (config.provider === "alipay") {
+      await this.queryAlipayIntent(config, merchantOrderNo);
+      return "已验证支付宝连接（仅查询随机交易号，未创建或扣款）。";
+    }
+    if (config.provider === "wechat_pay") {
+      await this.queryWechatIntent(config, merchantOrderNo);
+      return "已验证微信支付连接（仅查询随机交易号，未创建或扣款）。";
+    }
+    throw new ServiceUnavailableException("未实现的支付平台适配器");
+  }
+
   async createPaymentIntent(
     tenantId: string,
     workspaceId: string,
