@@ -87,7 +87,18 @@ export interface RentalBusinessFactStore {
   upsertBenefitAccount(account: RentalCustomerBenefitAccount, tx?: RentalBusinessFactTx): Promise<void>;
   incrementBenefitAccount(tenantId: string, customerId: string, delta: { points: number; marketing: number; rewardCoupons: number }, tx: RentalBusinessFactTx): Promise<void>;
   upsertReferral(tenantId: string, referral: RentalReferralRecord): Promise<void>;
-  insertNotificationLog(log: RentalNotificationSendLogV1, tx?: RentalBusinessFactTx, recipientEncrypted?: string): Promise<"inserted" | "duplicate">;
+  insertNotificationLog(
+    log: RentalNotificationSendLogV1,
+    tx?: RentalBusinessFactTx,
+    recipientEncrypted?: string,
+    recipientFingerprint?: string
+  ): Promise<"inserted" | "duplicate">;
+  reserveSmsRate(
+    tenantId: string,
+    recipientFingerprint: string,
+    at: string,
+    tx?: RentalBusinessFactTx
+  ): Promise<{ allowed: boolean; retryAt: string }>;
   findNotificationDelivery(tenantId: string, id: string): Promise<RentalNotificationDeliveryRecord | undefined>;
   listDueNotificationDeliveries(tenantId: string, at: string, limit: number): Promise<RentalNotificationDeliveryRecord[]>;
   claimNotificationDelivery(tenantId: string, id: string, at: string, leaseUntil: string, force: boolean): Promise<boolean>;
@@ -624,7 +635,12 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
   }
 
   /** 发送记录是追加式流水，用 create 而非 upsert：同一条记录不应被改写。 */
-  async insertNotificationLog(log: RentalNotificationSendLogV1, tx?: RentalBusinessFactTx, recipientEncrypted?: string): Promise<"inserted" | "duplicate"> {
+  async insertNotificationLog(
+    log: RentalNotificationSendLogV1,
+    tx?: RentalBusinessFactTx,
+    recipientEncrypted?: string,
+    recipientFingerprint?: string
+  ): Promise<"inserted" | "duplicate"> {
     const workspaceId = await resolveScopeWorkspaceId(tx ?? this.prisma, log.tenantId);
     try {
       await (tx ?? this.prisma).rentalNotificationLog.create({
@@ -638,6 +654,7 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
           channel: log.channel,
           recipient: log.recipient,
           recipientEncrypted: recipientEncrypted ?? null,
+          recipientFingerprint: recipientFingerprint ?? null,
           renderedTitle: log.renderedTitle,
           renderedBody: log.renderedBody,
           variables: log.variables as Prisma.InputJsonValue,
@@ -670,6 +687,58 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       }
       throw error;
     }
+  }
+
+  /**
+   * EXT-02：短信安全频率闸门。
+   *
+   * 用固定时间桶和条件递增，而不是先 count 再 insert，避免并发请求一起看到
+   * 旧数量后同时放行。手机号只以 SecretBox 生成的 HMAC 指纹进入这里；租户总量
+   * 和单收件人两道上限都在同一个事务里预留，租户上限失败时回滚收件人预留。
+   */
+  async reserveSmsRate(
+    tenantId: string,
+    recipientFingerprint: string,
+    at: string,
+    tx?: RentalBusinessFactTx
+  ): Promise<{ allowed: boolean; retryAt: string }> {
+    const nowMs = new Date(at).getTime();
+    if (!Number.isFinite(nowMs)) throw new Error("短信频率限制时间无效");
+    const recipientBucketStart = new Date(Math.floor(nowMs / (10 * 60 * 1000)) * 10 * 60 * 1000);
+    const workspaceBucketStart = new Date(Math.floor(nowMs / (60 * 1000)) * 60 * 1000);
+    const recipientLimit = 3;
+    const workspaceLimit = 120;
+    const run = async (client: Prisma.TransactionClient | PrismaService) => {
+      const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
+      const reserve = async (scopeKey: string, bucketStart: Date, limit: number) => {
+        try {
+          await client.rentalNotificationRateBucket.create({
+            data: { tenantId, workspaceId, scopeKey, bucketStart }
+          });
+        } catch (error) {
+          if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002")) throw error;
+        }
+        const result = await client.rentalNotificationRateBucket.updateMany({
+          where: { tenantId, workspaceId, scopeKey, bucketStart, count: { lt: limit } },
+          data: { count: { increment: 1 } }
+        });
+        return result.count === 1;
+      };
+
+      const recipientScope = `recipient:${recipientFingerprint}`;
+      if (!await reserve(recipientScope, recipientBucketStart, recipientLimit)) {
+        return { allowed: false, retryAt: new Date(recipientBucketStart.getTime() + 10 * 60 * 1000).toISOString() };
+      }
+      if (!await reserve("workspace", workspaceBucketStart, workspaceLimit)) {
+        await client.rentalNotificationRateBucket.updateMany({
+          where: { tenantId, workspaceId, scopeKey: recipientScope, bucketStart: recipientBucketStart, count: { gt: 0 } },
+          data: { count: { decrement: 1 } }
+        });
+        return { allowed: false, retryAt: new Date(workspaceBucketStart.getTime() + 60 * 1000).toISOString() };
+      }
+      return { allowed: true, retryAt: at };
+    };
+    return tx ? run(tx) : this.prisma.$transaction((client) => run(client));
   }
 
   private notificationDelivery(row: Prisma.RentalNotificationLogGetPayload<object>): RentalNotificationDeliveryRecord {

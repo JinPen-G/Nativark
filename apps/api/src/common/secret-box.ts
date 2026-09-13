@@ -1,6 +1,6 @@
 import { ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from "node:crypto";
 
 /** 服务端保存租户第三方凭据的 AES-256-GCM 小封装。 */
 export class SecretBox {
@@ -36,5 +36,13 @@ export class SecretBox {
     const parsed = JSON.parse(plaintext) as unknown;
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("第三方凭据内容无效");
     return Object.fromEntries(Object.entries(parsed as Record<string, unknown>).filter(([, item]) => typeof item === "string")) as Record<string, string>;
+  }
+
+  /**
+   * 生成服务端内部使用的稳定指纹。它与 AES-GCM 密文分开：同一个手机号不能
+   * 通过数据库里的值反推出明文，但重试和频率限制仍能识别同一收件人。
+   */
+  fingerprint(value: string) {
+    return createHmac("sha256", this.key()).update(value.trim(), "utf8").digest("hex");
   }
 }

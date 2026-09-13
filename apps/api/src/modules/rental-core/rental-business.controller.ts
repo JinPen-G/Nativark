@@ -378,7 +378,7 @@ export class RentalBusinessController {
     if (!replayed && result) this.business.applyNotificationLogToCache(tenantId, context, result);
     // 幂等事务提交后才允许真正调用第三方短信；这样数据库回滚不会产生外部副作用。
     const delivered = !replayed && result?.status === "queued"
-      ? await this.business.retryNotification(tenantId, context, result.id)
+      ? await this.business.retryNotification(tenantId, context, result.id, true)
       : result;
     return this.committed(tenantId, delivered);
   }

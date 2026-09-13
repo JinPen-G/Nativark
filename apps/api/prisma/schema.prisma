@@ -149,6 +149,7 @@ model Tenant {
   rentalReferrals                   RentalReferral[]
   rentalNotificationTemplates       RentalNotificationTemplate[]
   rentalNotificationLogs            RentalNotificationLog[]
+  rentalNotificationRateBuckets     RentalNotificationRateBucket[]
   rentalPricingPlans                RentalPricingPlan[]
   rentalDiscountPlans               RentalDiscountPlan[]
   rentalValueAddedServices          RentalValueAddedService[]
@@ -287,6 +288,7 @@ model BusinessWorkspace {
   rentalBenefitAccounts             RentalBenefitAccount[]
   rentalReferrals                   RentalReferral[]
   rentalNotificationLogs            RentalNotificationLog[]
+  rentalNotificationRateBuckets     RentalNotificationRateBucket[]
   rentalOrderIdempotencyRecords     RentalOrderIdempotencyRecord[]
   workspaceCapabilityInstances      WorkspaceCapabilityInstance[]
   workspaceCapabilityAudits         WorkspaceCapabilityAuditEntry[]
@@ -3319,6 +3321,8 @@ model RentalNotificationLog {
   recipient          String
   /// 真实短信重试所需的收件人密文；AES-GCM 加密，绝不返回给管理端。
   recipientEncrypted String?                    @db.Text
+  /// EXT-02：用于服务端频率限制的不可逆 HMAC 指纹，不返回给管理端。
+  recipientFingerprint String?                  @db.Char(64)
   renderedTitle      String
   renderedBody       String                     @db.Text
   variables          Json
@@ -3347,7 +3351,27 @@ model RentalNotificationLog {
   @@index([tenantId, status, createdAt], map: "rental_notification_logs_tenant_status_created_idx")
   @@index([templateId])
   @@index([tenantId, workspaceId, status, nextAttemptAt], map: "rental_notification_logs_ws_retry_idx")
+  @@index([tenantId, workspaceId, channel, recipientFingerprint, createdAt], map: "rental_notification_logs_sms_rate_idx")
   @@map("rental_notification_logs")
+}
+
+/// EXT-02：短信发送频率桶。只保存不可逆收件人指纹，不保存手机号明文。
+/// 固定时间桶由服务端原子递增，避免单个租户或手机号在重试/事件重放时打爆供应商。
+model RentalNotificationRateBucket {
+  id            String           @id @default(uuid())
+  tenantId      String
+  tenant        Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId   String
+  workspace     BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  scopeKey      String           @db.VarChar(128)
+  bucketStart   DateTime
+  count         Int              @default(0)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  @@unique([tenantId, workspaceId, scopeKey, bucketStart], map: "rental_notification_rate_bucket_key")
+  @@index([tenantId, workspaceId, bucketStart], map: "rental_notification_rate_bucket_scope_idx")
+  @@map("rental_notification_rate_buckets")
 }
 
 /// RC-04：通用租赁订单动作的业务幂等记录。

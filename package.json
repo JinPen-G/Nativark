@@ -13,6 +13,7 @@
     "test:client-membership-contract": "npm run build -w @rental-os/shared && node tests/client-membership-contract.test.cjs",
     "test:integrations-security": "npm run build -w @rental-os/shared && npm run build -w @rental-os/api && node tests/integrations-security.test.cjs",
     "test:sms-notification": "node tests/tenant-sms-notification.test.cjs",
+    "test:sms-rate-limit": "npm run build -w @rental-os/shared && npm run build -w @rental-os/api && node tests/sms-rate-limit.test.cjs",
     "test:file-storage": "npm run build -w @rental-os/shared && node tests/file-storage-lifecycle.test.cjs",
     "test:payment-reconciliation": "npm run build -w @rental-os/shared && npm run build -w @rental-os/api && node tests/payment-reconciliation.test.cjs",
     "test:qualification-gate": "npm run build -w @rental-os/shared && node tests/rental-qualification-gate.test.cjs",
