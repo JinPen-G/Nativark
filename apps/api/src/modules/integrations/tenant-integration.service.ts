@@ -96,7 +96,7 @@ export class TenantIntegrationService {
     provider?: TenantIntegrationProvider
   ): Promise<TenantIntegrationRuntimeConfig | undefined> {
     const row = await this.prisma.tenantIntegrationConfig.findFirst({
-      where: { tenantId, capability, enabled: true, ...(provider ? { provider } : {}) },
+      where: { tenantId, capability, enabled: true, ...(provider ? { provider } : { isDefault: true }) },
       orderBy: [{ isDefault: "desc" }, { updatedAt: "desc" }]
     });
     if (!row) return undefined;

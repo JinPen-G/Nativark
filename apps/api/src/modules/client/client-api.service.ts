@@ -224,7 +224,7 @@ export class ClientApiService {
       select: { registrationMode: true }
     });
     const integrationCatalog = await this.tenantIntegrations.catalog(context.tenantId);
-    const smsConfigured = integrationCatalog.configs.some((item) => item.capability === "sms" && item.enabled);
+    const smsConfigured = integrationCatalog.configs.some((item) => item.capability === "sms" && item.enabled && item.isDefault);
     const payment = this.buildPaymentCapabilities(integrationCatalog.configs);
     return {
       apiVersion: CLIENT_API_VERSION,
