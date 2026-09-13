@@ -10,6 +10,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
 import { OrderAllocationPanel } from "./OrderAllocationPanel";
+import { OrderDocumentsPanel } from "./OrderDocumentsPanel";
 import { FEE_REVIEW_STATUS_COLORS, FEE_REVIEW_TYPE_LABELS, feeReviewStatusText, hasPendingFeeReview } from "./orderFeeReview";
 import { serviceOccurrenceNetAmount, serviceOccurrenceOriginText } from "./orderServiceOccurrence";
 
@@ -482,6 +483,14 @@ export function RentalOrderDetailPage() {
             : "不计税"
         }
       ]} /></Card>
+      <OrderDocumentsPanel
+        order={detail}
+        inspections={inspections.data ?? []}
+        templates={templates.data ?? []}
+        funding={funding.data}
+        terminology={profile.data?.terminology}
+        money={money}
+      />
       <Card title="商品明细"><Table rowKey="id" pagination={false} dataSource={detail.lines} columns={[{ title: "商品", dataIndex: "itemGroupName" }, { title: "数量", dataIndex: "quantity" }, { title: "租金", dataIndex: "amount", render: (value) => money(Number(value)) }]} /></Card>
       <Card title="库存拆分与归还">{detail.allocations.length ? <Table<RentalAllocation> rowKey="id" pagination={false} dataSource={detail.allocations} columns={[
         { title: "实际商品", render: (_, row) => groups.data?.find((group) => group.id === row.itemGroupId)?.name ?? row.assetNo ?? "历史分配" },
