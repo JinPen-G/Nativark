@@ -19,7 +19,7 @@ import {
   type RentalReservation,
   type RentalRuleConfig,
   type TenantRentalBusinessSettings,
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 import {
   RentalCoreFactRepository,

@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Post } from "@nestjs/common";
-import type { CreateAsyncJobRequest, CreatePrintJobRequest } from "@store-rental/shared";
+import type { CreateAsyncJobRequest, CreatePrintJobRequest } from "@rental-os/shared";
 import { IntegrationsService } from "../integrations/integrations.service";
 
 @Controller("jobs")

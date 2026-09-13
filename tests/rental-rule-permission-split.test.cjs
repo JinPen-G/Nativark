@@ -16,9 +16,9 @@ const { requiredPermissions } = require("../apps/api/src/common/api-auth.guard")
  */
 
 const ok = (message) => console.log(`  PASS  ${message}`);
-const MANAGE = "store-rental:rules:manage";
-const PUBLISH = "store-rental:rules:publish";
-const PRICE = "store-rental:price:manage";
+const MANAGE = "rental-os:rules:manage";
+const PUBLISH = "rental-os:rules:publish";
+const PRICE = "rental-os:price:manage";
 
 // 判定一律用归一化后的小写路径（无 /api 前缀），与守卫 canActivate 传入的一致。
 const req = (method, path) => requiredPermissions(method, path);

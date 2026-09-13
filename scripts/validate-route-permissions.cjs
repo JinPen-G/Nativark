@@ -3,7 +3,7 @@
  *
  * 为什么需要它：`requiredPermissions` 的兜底早前是 `return []`，而 `hasAnyPermission`
  * 对空数组直接放行——于是每一个没被显式分支覆盖的路由都是**完全无鉴权**的接口。
- * 这不是理论风险，`/store-rental/marketing/plans` 的增改就长期落在兜底里。
+ * 这不是理论风险，`/rental-os/marketing/plans` 的增改就长期落在兜底里。
  * 兜底已改为默认拒绝（`UNMATCHED_ROUTE_PERMISSION`），但「默认拒绝」只把漏网路由
  * 从静默放行变成运行时 403——真正要防的是**新增路由时忘记补权限**，
  * 那种错误只有在有人访问该路由时才会暴露。因此这里在验收阶段就逐路由核对：

@@ -1,5 +1,5 @@
 param(
-  [string]$DatabaseUrl = "mysql://store_rental:store_rental@localhost:3306/rental_os"
+  [string]$DatabaseUrl = "mysql://rental_os:rental_os@localhost:3306/rental_os"
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,7 +19,7 @@ Write-Host "Local MySQL and Redis are starting."
 Write-Host "Use this DATABASE_URL for the current shell:"
 Write-Host "`$env:DATABASE_URL=`"$DatabaseUrl`""
 Write-Host "`$env:PLATFORM_DATA_SOURCE=`"mysql`""
-Write-Host "`$env:STORE_RENTAL_DATA_SOURCE=`"mysql`""
+Write-Host "`$env:RENTAL_OS_DATA_SOURCE=`"mysql`""
 Write-Host ""
 Write-Host "Then run:"
 Write-Host "npm run db:generate"

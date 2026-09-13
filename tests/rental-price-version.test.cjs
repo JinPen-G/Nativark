@@ -32,7 +32,7 @@ if (!/zcode/.test(dbName)) {
 }
 process.env.DATABASE_URL = databaseUrl;
 process.env.PLATFORM_DATA_SOURCE = "mysql";
-process.env.STORE_RENTAL_DATA_SOURCE = "mysql";
+process.env.RENTAL_OS_DATA_SOURCE = "mysql";
 
 const { PrismaService } = require(path.join(ROOT, "apps/api/src/modules/database/prisma.service"));
 const { RentalCoreConfigRepository } = require(path.join(ROOT, "apps/api/src/modules/rental-core/rental-core-config.repository"));

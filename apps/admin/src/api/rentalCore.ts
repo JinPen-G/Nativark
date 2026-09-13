@@ -114,7 +114,7 @@ import type {
   TenantRentalBusinessSettings,
   TenantRentalProfile,
   SubstituteRentalBundleComponentRequest
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { useQuery } from "@tanstack/react-query";
 import { http, request, requestText } from "./http";
 

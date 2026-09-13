@@ -81,7 +81,7 @@ import {
   type RentalCapabilityEquipmentLine,
   type RentalCapabilityExceptionSnapshot,
   type UpdateRentalServiceOccurrenceRequest
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { getRequestWorkspaceId, getRequestIdentity, runWithRequestIdentity } from "../../common/request-identity";
 import { ACTIVE_ASSIGNMENTS, allocationComplete } from "./rental-allocation-policy";
 import { RentalStateRepository } from "./rental-state.repository";

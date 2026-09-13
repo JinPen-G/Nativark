@@ -2,7 +2,7 @@ import {
   RentalAssetStatus,
   type RentalAllocation,
   type RentalOrder,
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { bufferedRentalPeriod } from "./rental-occupancy";
 
 export const ACTIVE_ASSIGNMENTS = [

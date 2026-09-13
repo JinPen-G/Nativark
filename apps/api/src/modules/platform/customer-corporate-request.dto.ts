@@ -15,7 +15,7 @@ import type {
   SaveCustomerContractRequest,
   SaveCustomerCreditRequest,
   SaveCustomerInvoiceProfileRequest
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 
 /**
  * CUSTOMER-01C 的请求 DTO。

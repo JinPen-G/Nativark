@@ -24,15 +24,15 @@ const rejects = (fn, pattern, label) => {
   }, label);
 };
 
-const SOURCE = "store_rental_claude";
+const SOURCE = "rental_os_claude";
 const STAMP = new Date("2026-08-30T01:02:03.000Z");
 
 void (() => {
   // ============ 1. 克隆库命名：种类 + 时间戳，且必须是新库 ============
   const upgrade = env.buildCloneDatabaseName(SOURCE, "upgrade", STAMP);
   const rollback = env.buildCloneDatabaseName(SOURCE, "rollback", STAMP);
-  assert.equal(upgrade, "store_rental_claude_upgrade_20260830010203");
-  assert.equal(rollback, "store_rental_claude_rollback_20260830010203");
+  assert.equal(upgrade, "rental_os_claude_upgrade_20260830010203");
+  assert.equal(rollback, "rental_os_claude_rollback_20260830010203");
   assert.notEqual(upgrade, rollback, "升级库与回滚库必须是两个不同的库——回滚不是把升级库改回去");
   assert.notEqual(upgrade, SOURCE, "克隆库不得与源库同名");
   for (const name of [upgrade, rollback]) {
@@ -44,8 +44,8 @@ void (() => {
   rejects(() => env.buildCloneDatabaseName("store_rental_prod_claude", "upgrade"), /生产\/共享环境标记/u, "源库带生产标记");
   // `legacy` 用于把历史备份恢复成一个**落后于当前 schema** 的专用源库，
   // 否则 migrate deploy 只会新增 0 条，升级路径其实没被演练到。
-  const legacy = env.buildCloneDatabaseName("store_rental_claude", "legacy", STAMP);
-  assert.equal(legacy, "store_rental_claude_legacy_20260830010203");
+  const legacy = env.buildCloneDatabaseName("rental_os_claude", "legacy", STAMP);
+  assert.equal(legacy, "rental_os_claude_legacy_20260830010203");
   assert.ok(env.isOwnedCloneDatabase(legacy), "legacy 源库也必须可被识别为本工具创建");
   ok("克隆库命名：种类（含 legacy）与时间戳齐备、升级与回滚分库、共享/生产源库被拒");
 
@@ -53,7 +53,7 @@ void (() => {
   // 实测踩过：`..._legacy_<14位>` 再套 `_rollback_<14位>` 共 65 字符，
   // 旧实现直接砍末位，得到 `..._2026083007582` 这种看起来像坏数据的名字，
   // 且两个仅末位不同的基底会撞成同名。
-  const longBase = "store_rental_claude_legacy_20260830075826";
+  const longBase = "rental_os_claude_legacy_20260830075826abc";
   assert.equal(longBase.length, 41, "夹具前提：基底 41 字符");
   const longRollback = env.buildCloneDatabaseName(longBase, "rollback", STAMP);
   assert.ok(longRollback.length <= 64, `生成名不得超过 64，实际 ${longRollback.length}`);
@@ -65,18 +65,18 @@ void (() => {
   );
   assert.match(longRollback, /_[0-9a-f]{4}_rollback_/u, "截断时必须补基底摘要，保持可追溯");
   // 仅末位不同的两个基底不能撞成同名。
-  const sibling = env.buildCloneDatabaseName("store_rental_claude_legacy_20260830075827", "rollback", STAMP);
+  const sibling = env.buildCloneDatabaseName("rental_os_claude_legacy_20260830075827abc", "rollback", STAMP);
   assert.notEqual(longRollback, sibling, "仅末位不同的基底必须得到不同的克隆库名");
   assert.ok(env.isOwnedCloneDatabase(longRollback), "截断后的名字仍须被识别为本工具创建");
   ok("超长名：截断基底并补摘要，时间戳完整、不同基底不撞名");
 
-  assert.equal(env.quoteSqlString("store_rental"), "'store_rental'");
+  assert.equal(env.quoteSqlString("rental_os_claude"), "'rental_os_claude'");
   assert.equal(env.quoteSqlString("svc' OR 1=1 --"), "'svc'' OR 1=1 --'", "账号名必须安全编码后再进入 GRANT/REVOKE");
   rejects(() => env.quoteSqlString("bad\nuser"), /控制字符/u, "账号名控制字符");
   ok("SQL 字符串：账号名不能改变 GRANT/REVOKE 语句结构");
 
   const specialUrl = env.buildDatabaseUrl(
-    "mysql://old:old@127.0.0.1:3306/store_rental_claude",
+    "mysql://old:old@127.0.0.1:3306/rental_os_claude",
     { user: "svc.user", password: "p@ss:/?#%", database: upgrade }
   );
   const parsedSpecialUrl = new URL(specialUrl);
@@ -88,10 +88,10 @@ void (() => {
   // ============ 2. 只有本工具形态的克隆库才允许被自动删除 ============
   for (const name of [
     SOURCE,                                        // 源库
-    "store_rental",                                // 共享库
-    "store_rental_claude_upgrade",                 // 缺时间戳
-    "store_rental_claude_upgrade_2026",            // 时间戳位数不足
-    "store_rental_prod_upgrade_20260830010203",    // 生产标记
+    "rental_os",                                   // 共享库
+    "rental_os_claude_upgrade",                    // 缺时间戳
+    "rental_os_claude_upgrade_2026",               // 时间戳位数不足
+    "rental_os_prod_upgrade_20260830010203",       // 生产标记
     "app_upgrade_20260830010203"                   // 无专用标记
   ]) {
     assert.equal(env.isOwnedCloneDatabase(name), false, `${name} 不应被判为可自动删除`);

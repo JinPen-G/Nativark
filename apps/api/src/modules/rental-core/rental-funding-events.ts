@@ -3,7 +3,7 @@ import type {
   RentalFundingAction,
   RentalFundingEvent,
   RentalFundingInstrument
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 
 /**
  * RULE-01B：模拟资金事件的余额推导与动作合法性（需求 4.4.7 line 527、4.6.3）。

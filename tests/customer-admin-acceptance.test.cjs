@@ -58,7 +58,7 @@ let ops = new CustomerOperationsService(prisma, customers, operations, merge);
 const ok = (m) => console.log(`  ✓ ${m}`);
 
 /** 只读账号：能看客户，但看不到明文，也看不到访问审计。 */
-const viewer = { id: "u_view", displayName: "只读运营", permissions: ["store-rental:member:view"], isSaasAdmin: false, isPlatformAdmin: false };
+const viewer = { id: "u_view", displayName: "只读运营", permissions: ["rental-os:member:view"], isSaasAdmin: false, isPlatformAdmin: false };
 /** 具备解密权限的账号。SaaS 管理员刻意不在此列——跨租户身份不该看租户客户明文。 */
 const revealer = { id: "u_reveal", displayName: "客服主管", permissions: [CUSTOMER_REVEAL_PERMISSION], isSaasAdmin: false, isPlatformAdmin: false };
 
@@ -249,9 +249,9 @@ void (async () => {
     id: `u_${permissions.join("_")}`, tenantId: tenantA, displayName: "权限测试", permissions,
     isSaasAdmin: false, isPlatformAdmin: false
   });
-  const memberActor = actor(["store-rental:member:manage"]);
-  const closeActor = actor(["store-rental:customer:close"]);
-  const riskActor = actor(["store-rental:member:risk-action"]);
+  const memberActor = actor(["rental-os:member:manage"]);
+  const closeActor = actor(["rental-os:customer:close"]);
+  const riskActor = actor(["rental-os:member:risk-action"]);
   await rejects(
     Promise.resolve().then(() => platform.changeCustomerAccountStatus(person.id, { status: "closed", reason: "越权注销" }, memberActor)),
     /customer:close/u,
@@ -304,10 +304,10 @@ void (async () => {
   assert.equal(nav.includes("customerMaster"), false, "旧客户主档不得重新进入新会员菜单");
 
   for (const [source, permissions, label] of [
-    [reviewPage, ["store-rental:member:review", "store-rental:member:qualification-review"], "独立审核"],
-    [personalPage, ["store-rental:member:manage", "store-rental:member:account-manage", "store-rental:member:risk-action", "store-rental:customer:close"], "个人会员管理"],
-    [corporatePage, ["store-rental:corporate:manage", "store-rental:corporate:employee-manage"], "企业会员与员工"],
-    [planPage, ["store-rental:member:plan:manage", "store-rental:member:plan:publish"], "会员方案"]
+    [reviewPage, ["rental-os:member:review", "rental-os:member:qualification-review"], "独立审核"],
+    [personalPage, ["rental-os:member:manage", "rental-os:member:account-manage", "rental-os:member:risk-action", "rental-os:customer:close"], "个人会员管理"],
+    [corporatePage, ["rental-os:corporate:manage", "rental-os:corporate:employee-manage"], "企业会员与员工"],
+    [planPage, ["rental-os:member:plan:manage", "rental-os:member:plan:publish"], "会员方案"]
   ]) {
     for (const permission of permissions) assert.ok(source.includes(permission), `${label}必须按 ${permission} 分别门禁`);
   }
@@ -393,12 +393,12 @@ void (async () => {
   // 与企业方案授予都在独立企业会员页完成，且员工选择器只能选择当前空间的个人会员。
   assert.match(
     corporatePage,
-    /const canManage = hasPermission\("store-rental:corporate:manage"\)/u,
+    /const canManage = hasPermission\("rental-os:corporate:manage"\)/u,
     "企业资料编辑必须按「企业客户管理」权限门禁"
   );
   assert.match(
     corporatePage,
-    /const canEmployeeManage = hasPermission\("store-rental:corporate:employee-manage"\)/u,
+    /const canEmployeeManage = hasPermission\("rental-os:corporate:employee-manage"\)/u,
     "企业管理员与员工关系必须按独立权限门禁"
   );
   for (const method of ["corporate", "saveCorporate", "corporateEmployees", "saveCorporateEmployee", "assignPlan", "revokePlanAssignment"]) {

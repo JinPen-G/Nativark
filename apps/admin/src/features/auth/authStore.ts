@@ -1,4 +1,4 @@
-import type { AuthUser, BusinessWorkspace, RentalCapability, TenantContext } from "@store-rental/shared";
+import type { AuthUser, BusinessWorkspace, RentalCapability, TenantContext } from "@rental-os/shared";
 import { create } from "zustand";
 import { api } from "@/api/rental";
 import { clearSessionQueryCache } from "@/app/queryClient";

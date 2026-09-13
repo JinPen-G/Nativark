@@ -1,5 +1,5 @@
-import type { CreateBusinessWorkspaceRequest, LinkCustomerToWorkspaceRequest, SaveSharedCustomerRequest, SaveWorkspaceMemberRequest, UpdateBusinessWorkspaceRequest } from "@store-rental/shared";
-import { BUSINESS_WORKSPACE_RUN_MODES } from "@store-rental/shared";
+import type { CreateBusinessWorkspaceRequest, LinkCustomerToWorkspaceRequest, SaveSharedCustomerRequest, SaveWorkspaceMemberRequest, UpdateBusinessWorkspaceRequest } from "@rental-os/shared";
+import { BUSINESS_WORKSPACE_RUN_MODES } from "@rental-os/shared";
 import { IsBoolean, IsEmail, IsIn, IsNotEmpty, IsObject, IsOptional, IsString } from "class-validator";
 
 const CATEGORIES = ["vehicle", "camera", "camping", "construction"] as const;

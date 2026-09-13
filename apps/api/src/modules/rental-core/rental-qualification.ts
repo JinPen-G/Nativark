@@ -1,4 +1,4 @@
-import type { CustomerQualificationRef, RentalRuleConfig } from "@store-rental/shared";
+import type { CustomerQualificationRef, RentalRuleConfig } from "@rental-os/shared";
 
 export type RentalQualificationAction = "submit" | "pickup" | "extension";
 

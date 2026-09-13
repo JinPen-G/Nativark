@@ -1228,7 +1228,7 @@ model OperationLog {
   user          User?              @relation(fields: [userId], references: [id])
   /// 租赁订单引用。RC-04 的审计事件走这一列。
   ///
-  /// 这里曾经还有一个 `orderId`，外键指向门市域的 StoreRentalOrder；那一层随门市
+  /// 这里曾经还有一个 `orderId`，外键指向早期单品类订单实体；那一层随历史单品类
   /// 模块整体下线后已经删除，审计只剩这一个订单口径。
   /// 不新建审计表：本表已有 tenantId/userId/action/detail 与平台审计查询，
   /// 再建一张只会造出第二个审计事实源。
@@ -3126,9 +3126,9 @@ model RentalNotificationLog {
 
 /// RC-04：通用租赁订单动作的业务幂等记录。
 ///
-/// 为什么不复用 `OrderIdempotencyRecord`：那张表的 orderId 外键指向车辆兼容域的
-/// `StoreRentalOrder`，承载不了 Rental Core 订单；改成双引用会造出双事实源表结构，
-/// 与 RC-05「停止双事实源扩张」相悖。旧表留给车辆域，等 RC-05 收口。
+/// 为什么不复用 `OrderIdempotencyRecord`：那张表的 orderId 外键指向历史单品类订单实体，
+/// 承载不了 Rental Core 订单；改成双引用会造出双事实源表结构，与 RC-05「停止双事实源扩张」相悖。
+/// 旧表留给历史数据，等 RC-05 收口。
 model RentalOrderIdempotencyRecord {
   id             String            @id @default(uuid())
   tenantId       String

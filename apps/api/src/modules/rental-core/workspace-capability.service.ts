@@ -16,7 +16,7 @@ import {
   type WorkspaceCapabilityOverview,
   type WorkspaceCapabilityView,
   type RentalWorkspaceCapabilitySnapshotEntry
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { WorkspaceCapabilityRepository } from "./workspace-capability.repository";
 
 /** 初始化必须在调用方的事务里执行，因此显式收窄为事务客户端。 */

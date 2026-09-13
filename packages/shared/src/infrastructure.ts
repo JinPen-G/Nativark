@@ -1,9 +1,9 @@
 /**
  * 基础设施域契约：文件、打印、异步任务、通知、外部适配器与 T-Box 设备。
  *
- * 这些声明原先夹在门市（store-rental）域的契约文件里。门市域整体下线后，它们是
+ * 这些声明原先夹在单品类租赁域的契约文件里。该域整体下线后，它们是
  * 唯一还有消费方的部分——integrations / files / jobs / notifications 四个模块，
- * 与门市业务无关。因此单独成文件，原来的 legacy.ts 随之删除。
+ * 与具体品类业务无关。因此单独成文件，原来的 legacy.ts 随之删除。
  */
 
 export type InfraAdapterCapability =
@@ -166,7 +166,7 @@ export type DataExchangeOperation = "export" | "import_validate" | "template_dow
 
 export interface DataExchangeTemplateSummary {
   templateCode: string;
-  targetModule: "store-rental" | string;
+  targetModule: "rental-os" | string;
   targetObject: "stations" | "vehicles" | "members" | "corporates" | "orders" | string;
   name: string;
   operation: DataExchangeOperation;
@@ -179,7 +179,7 @@ export interface DataExchangeTemplateSummary {
 
 export interface CreateDataExchangeJobRequest {
   operation: DataExchangeOperation;
-  targetModule: "store-rental" | string;
+  targetModule: "rental-os" | string;
   targetObject: DataExchangeTemplateSummary["targetObject"];
   templateCode?: string;
   sourceFileAssetId?: string;
@@ -271,4 +271,3 @@ export interface InfraDashboardResult {
   printJobs: PrintJobSummary[];
   tboxDevices: TBoxDeviceSummary[];
 }
-

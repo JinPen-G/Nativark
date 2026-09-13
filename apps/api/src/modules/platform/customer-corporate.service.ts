@@ -10,7 +10,7 @@ import type {
   SaveCustomerContractRequest,
   SaveCustomerCreditRequest,
   SaveCustomerInvoiceProfileRequest
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 import { SharedCustomerRepository } from "./shared-customer.repository";
 

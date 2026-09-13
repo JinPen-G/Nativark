@@ -6,7 +6,7 @@ import {
   type RentalFulfillmentLocation,
   type RentalItemGroup,
   type RentalStockBalance
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 
 interface RentalCategorySampleInput {
   tenantId: string;

@@ -12,8 +12,8 @@ import type {
   CreateRentalWorkOrderRequest,
   ReviewRentalWorkOrderRequest,
   SubmitRentalWorkOrderRequest
-} from "@store-rental/shared";
-import { RENTAL_PRICING_UNIT_CODES, RENTAL_WORK_ORDER_TYPES } from "@store-rental/shared";
+} from "@rental-os/shared";
+import { RENTAL_PRICING_UNIT_CODES, RENTAL_WORK_ORDER_TYPES } from "@rental-os/shared";
 import { Type } from "class-transformer";
 import {
   IsArray,

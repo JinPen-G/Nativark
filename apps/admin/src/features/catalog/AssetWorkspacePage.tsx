@@ -1,5 +1,5 @@
 import { PlusOutlined, SearchOutlined } from "@ant-design/icons";
-import { RentalAssetStatus, RentalInventoryMode, type RentalAsset, type RentalAttributeDefinition, type RentalStockBalance, type SaveRentalAssetRequest, type SaveRentalStockBalanceRequest } from "@store-rental/shared";
+import { RentalAssetStatus, RentalInventoryMode, type RentalAsset, type RentalAttributeDefinition, type RentalStockBalance, type SaveRentalAssetRequest, type SaveRentalStockBalanceRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Button, Card, Col, Drawer, Form, Input, InputNumber, Row, Select, Space, Switch, Table, Tabs, Tag } from "antd";
 import { useEffect, useMemo, useState } from "react";
@@ -44,7 +44,7 @@ function AttributeInput({
 export function AssetWorkspacePage() {
   const { message } = App.useApp();
   const queryClient = useQueryClient();
-  const canManage = useAuthStore((state) => state.hasPermission("rental-core:asset:manage") || state.hasPermission("store-rental:vehicle:manage"));
+  const canManage = useAuthStore((state) => state.hasPermission("rental-core:asset:manage") || state.hasPermission("rental-os:vehicle:manage"));
   const [activeTab, setActiveTab] = useState<"assets" | "stock">("assets");
   const [keyword, setKeyword] = useState("");
   const [editing, setEditing] = useState<RentalAsset>();

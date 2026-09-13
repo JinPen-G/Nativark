@@ -8,7 +8,7 @@ import type {
   RentalWorkOrder,
   RentalWorkbenchTodoType,
   SystemUserRow
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 
 const TODO_TYPES: RentalWorkbenchTodoType[] = [
   "pending_payment",
@@ -38,8 +38,8 @@ export function canIncludeWorkbenchOrderTodos(user: Pick<SystemUserRow, "isPlatf
   return Boolean(
     user.isPlatformAdmin
       || user.permissions?.includes("*")
-      || user.permissions?.includes("store-rental:report:view")
-      || user.permissions?.includes("store-rental:order:view")
+      || user.permissions?.includes("rental-os:report:view")
+      || user.permissions?.includes("rental-os:order:view")
   );
 }
 

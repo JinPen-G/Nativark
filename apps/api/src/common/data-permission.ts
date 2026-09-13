@@ -1,4 +1,4 @@
-import type { SystemDataScope, SystemUserRow } from "@store-rental/shared";
+import type { SystemDataScope, SystemUserRow } from "@rental-os/shared";
 
 export interface DataPermissionSummary {
   tenantId?: string;
@@ -36,7 +36,7 @@ export function describeDataPermission(
   const descriptions: Record<SystemDataScope, string> = {
     all: "当前租户全部数据",
     organization: "当前组织及其业务范围数据",
-    store: "当前门市/站点数据",
+    store: "当前经营空间/履约点数据",
     own: "本人创建或分配的数据"
   };
 

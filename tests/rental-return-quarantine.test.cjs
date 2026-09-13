@@ -15,7 +15,7 @@ require("ts-node").register({
 // 与序列化资产的一刀切同口径：异常不带商品标识，宁可多隔离等人工核减。
 const { RentalCoreService } = require("../apps/api/src/modules/rental-core/rental-core.service");
 const { RentalCoreFactRepository } = require("../apps/api/src/modules/rental-core/rental-core-fact.repository");
-const { RentalCoreOrderStatus, RentalInventoryMode, RentalReservationStatus, RentalAssetStatus } = require("@store-rental/shared");
+const { RentalCoreOrderStatus, RentalInventoryMode, RentalReservationStatus, RentalAssetStatus } = require("@rental-os/shared");
 
 let passed = 0;
 const ok = (message) => { passed += 1; console.log(`  PASS  ${message}`); };

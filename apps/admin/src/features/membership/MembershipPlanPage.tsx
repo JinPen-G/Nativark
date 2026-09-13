@@ -1,4 +1,4 @@
-import type { CustomerMembershipBenefit, CustomerMembershipPlan, SaveCustomerMembershipPlanRequest } from "@store-rental/shared";
+import type { CustomerMembershipBenefit, CustomerMembershipPlan, SaveCustomerMembershipPlanRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { App, Button, Card, Checkbox, Drawer, Form, Input, InputNumber, Select, Space, Table, Tag } from "antd";
 import { useState } from "react";
@@ -11,7 +11,7 @@ const benefitOptions = [{ value: "rental_discount", label: "租金优惠" }, { v
 type PlanForm = SaveCustomerMembershipPlanRequest & { benefits: CustomerMembershipBenefit[] };
 type VersionAction = { kind: "disable" | "restore"; planId: string; versionId: string; version: number; planName: string };
 export function MembershipPlanPage() {
-  const { message } = App.useApp(); const queryClient = useQueryClient(); const hasPermission = useAuthStore((state) => state.hasPermission); const canManage = hasPermission("store-rental:member:plan:manage"); const canPublish = hasPermission("store-rental:member:plan:publish");
+  const { message } = App.useApp(); const queryClient = useQueryClient(); const hasPermission = useAuthStore((state) => state.hasPermission); const canManage = hasPermission("rental-os:member:plan:manage"); const canPublish = hasPermission("rental-os:member:plan:publish");
   const [selected, setSelected] = useState<CustomerMembershipPlan>(); const [editorOpen, setEditorOpen] = useState(false); const [historyPlan, setHistoryPlan] = useState<CustomerMembershipPlan>(); const [versionAction, setVersionAction] = useState<VersionAction>(); const [form] = Form.useForm<PlanForm>(); const [actionForm] = Form.useForm<{ reason: string }>();
   const plans = useQuery({ queryKey: ["membership-plans"], queryFn: membershipApi.plans });
   const save = useMutation({ mutationFn: (values: PlanForm) => membershipApi.savePlan({ ...values, id: selected?.id }), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["membership-plans"] }); setSelected(undefined); setEditorOpen(false); form.resetFields(); message.success("会员方案草稿已保存"); } });

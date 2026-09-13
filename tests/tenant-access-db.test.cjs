@@ -19,7 +19,7 @@ if (fs.existsSync(envFile)) {
 const databaseUrl = process.env.DATABASE_URL || fileEnv.DATABASE_URL;
 assert.ok(databaseUrl, "必须提供专用 DATABASE_URL");
 const databaseName = new URL(databaseUrl).pathname.slice(1);
-assert.match(databaseName, /^store_rental_(?:claude(?:_dedicated_access_\d+)?|zcode)$/u, "权限真库专项只能运行在并行专用库（claude/zcode）");
+assert.match(databaseName, /^rental_os_(?:claude(?:_dedicated_access_\d+)?|zcode)$/u, "权限真库专项只能运行在并行专用库（claude/zcode）");
 process.env.DATABASE_URL = databaseUrl;
 
 require("ts-node").register({
@@ -62,7 +62,7 @@ void (async () => {
       description: "专项测试结束后清理",
       scope: "operator",
       enabledBusinessScopes: [],
-      permissions: ["store-rental:member:view"],
+      permissions: ["rental-os:member:view"],
       buttonPermissions: [],
       dataScope: "all",
       isActive: true
@@ -73,12 +73,12 @@ void (async () => {
     const updatedRole = await request("PUT", `/platform/roles/${created.roleId}`, {
       ...rolePayload,
       id: created.roleId,
-      permissions: ["store-rental:member:view", "store-rental:member:review"]
+      permissions: ["rental-os:member:view", "rental-os:member:review"]
     }, adminToken);
     assert.ok([200, 201].includes(updatedRole.status), `角色保存失败: ${JSON.stringify(updatedRole.body)}`);
     const roles = await request("GET", "/platform/roles", undefined, adminToken);
     const savedRole = data(roles).find((row) => row.id === created.roleId);
-    assert.ok(savedRole?.permissions.includes("store-rental:member:review"), "角色保存后必须能读回权限");
+    assert.ok(savedRole?.permissions.includes("rental-os:member:review"), "角色保存后必须能读回权限");
     ok("租户角色保存后按权限树读回操作权限");
 
     const createdUser = await request("POST", "/platform/users", {

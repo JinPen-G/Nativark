@@ -1,5 +1,5 @@
 {
-  "name": "@store-rental/admin",
+  "name": "@rental-os/admin",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@ant-design/icons": "6.3.2",
-    "@store-rental/shared": "0.1.0",
+    "@rental-os/shared": "0.1.0",
     "@tanstack/react-query": "5.101.4",
     "antd": "6.6.0",
     "axios": "1.19.0",

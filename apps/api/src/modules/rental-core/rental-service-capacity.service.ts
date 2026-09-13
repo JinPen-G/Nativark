@@ -6,7 +6,7 @@ import type {
   RentalQuoteServiceSnapshot,
   RentalServiceCapacity,
   SaveRentalServiceCapacityRequest
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 import { serviceReservationKey } from "./rental-service-occurrence";
 import { resolveScopeWorkspaceId } from "./workspace-scope";

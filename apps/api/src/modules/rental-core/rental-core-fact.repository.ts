@@ -25,7 +25,7 @@ import {
   type RentalWorkOrderAssignee,
   type RentalWorkOrderHistoryEntry,
   type RentalWorkOrderStatus
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 import { resolveScopeWorkspaceId } from "./workspace-scope";
 import { bufferedRentalPeriod } from "./rental-occupancy";

@@ -1,4 +1,4 @@
-import type { RentalRuleConfig } from "@store-rental/shared";
+import type { RentalRuleConfig } from "@rental-os/shared";
 
 /** 库存占用包含交付前准备与归还后周转；缓冲不计租金。历史快照缺省为 0。 */
 export function bufferedRentalPeriod(startAt: string, endAt: string, rule?: RentalRuleConfig) {

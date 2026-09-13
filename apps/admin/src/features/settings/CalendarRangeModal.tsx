@@ -25,7 +25,7 @@ import {
   RentalCalendarRangeOverridePreview,
   RentalCalendarRangeRemovePreview,
   RentalDayType,
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { rentalCoreApi } from "@/api/rentalCore";
 
 type RangeRow = RentalCalendarRangeOverridePreview["days"][number] | RentalCalendarRangeRemovePreview["days"][number];

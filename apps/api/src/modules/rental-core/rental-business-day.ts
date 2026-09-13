@@ -16,7 +16,7 @@
  * 同一租户在不同城市的经营空间可以各自正确切分日界。
  */
 
-import type { RentalBusinessHours, RentalTimeWindow } from "@store-rental/shared";
+import type { RentalBusinessHours, RentalTimeWindow } from "@rental-os/shared";
 
 const MS_PER_DAY = 86_400_000;
 

@@ -10,7 +10,7 @@ const {
   CAMERA_KIT_HANDOVER_RULESET_VERSION,
   CAMERA_KIT_HANDOVER_LEGACY_VERSION
 } = require("../apps/api/src/modules/rental-core/capabilities/camera-kit-handover");
-const { RENTAL_CAPABILITY_MODULES, RENTAL_CATEGORY_DEFINITIONS } = require("@store-rental/shared");
+const { RENTAL_CAPABILITY_MODULES, RENTAL_CATEGORY_DEFINITIONS } = require("@rental-os/shared");
 
 const definition = RENTAL_CAPABILITY_MODULES.find((row) => row.code === "camera_kit_handover");
 assert.ok(definition, "摄影套装交接能力必须登记");

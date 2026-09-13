@@ -8,7 +8,7 @@ require("ts-node").register({
 // ORDER-CLOSE-02 §4.2-4/5：把「裁定该收/该退多少」和「实际收退款」拆成两个权限，
 // 并且「批准退款」不得在界面上显示成「已经退款」。
 //
-// 此前四类审核入口全部认 store-rental:order:settle，而资金事件也认它，
+// 此前四类审核入口全部认 rental-os:order:settle，而资金事件也认它，
 // 等于一个权限同时授予定金额与动钱——任何能结算的人都能改裁定，反之亦然。
 const { requiredPermissions } = require("../apps/api/src/common/api-auth.guard");
 
@@ -35,9 +35,9 @@ const { feeReviewStatusText, hasPendingFeeReview, FEE_REVIEW_TYPE_LABELS } =
 let passed = 0;
 const ok = (message) => { passed += 1; console.log(`  PASS  ${message}`); };
 
-const FEE_REVIEW = "store-rental:order:fee-review";
-const SETTLE = "store-rental:order:settle";
-const VIEW = "store-rental:order:view";
+const FEE_REVIEW = "rental-os:order:fee-review";
+const SETTLE = "rental-os:order:settle";
+const VIEW = "rental-os:order:view";
 
 const req = (method, path) => requiredPermissions(method, path);
 /** 守卫放行语义：账号权限与要求集合有交集即通过（hasAnyPermission 用 some）。 */
@@ -131,7 +131,7 @@ ok("三条费用裁定入口都要求 order:fee-review——修复前它们都�
     nodePath.join(__dirname, "../apps/admin/src/features/rental-core/RentalOrderDetailPage.tsx"),
     "utf8"
   );
-  assert.match(detailSource, /hasPermission\("store-rental:order:fee-review"\)/u, "订单详情必须消费 order:fee-review 作为审核门禁");
+  assert.match(detailSource, /hasPermission\("rental-os:order:fee-review"\)/u, "订单详情必须消费 order:fee-review 作为审核门禁");
   assert.match(detailSource, /canReviewFees/u, "待审费用的裁定按钮必须受 canReviewFees 控制");
   assert.match(detailSource, /仅核减应收/u, "扩展退款审核文案必须说明只核减应收");
   assert.match(detailSource, /不代表实际退款到账/u, "扩展退款审核必须说明不代表实际退款");

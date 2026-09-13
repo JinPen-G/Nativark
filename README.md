@@ -68,7 +68,7 @@ docs               正式需求、技术指南、数据库与界面规范
 | `integrations` | 适配器日志、模拟调用、数据交换任务、TBox 车联网设备 | `/api/integrations` | 约 1.9k 行 |
 | `database` / `health` / `files` / `jobs` / `notifications` / `openapi` | Prisma 服务、存活探测与桩 | 各自前缀 | 合计 < 0.2k 行 |
 
-历史门市租赁面（`/api/store-rental/*`，25.7k 行）与门市时代的 `reports` 模块（2.0k 行）**已于 2026-09-04 整体下线**，连同 57 张只服务于它们的表。仓库里不再有这一层，`git log` 可查退役过程。
+早期单品类租赁面（25.7k 行）与对应的 `reports` 模块（2.0k 行）**已于 2026-09-04 整体下线**，连同 57 张只服务于它们的表。仓库里不再有这一层，`git log` 可查退役过程。
 
 `rental-core` 内部按职责分层，值得记住的几个：`rental-business.service.ts`（报价与全部金额计算，最大的一个文件）、`rental-core.service.ts`（订单聚合与状态机）、`*-fact.repository.ts` / `*-config.repository.ts`（事实与配置分开落库）、`workspace-capability.service.ts` + `capability-hook.runtime.ts`（能力启用与钩子运行时）、以及一批**纯函数计算模块**：`rental-pricing-strategy.ts`、`rental-security-deposit.ts`、`rental-discount-selection.ts`、`rental-early-return.ts`、`rental-rule-defaults.ts`、`rental-money.ts`。
 
@@ -106,7 +106,7 @@ docs               正式需求、技术指南、数据库与界面规范
 
 ### 4.4 品类差异只能是配置
 
-通用页面与计算模块里**不允许** `if (categoryCode === ...)` 这类分支。汽车门市「提前一天以上还车才退租金」和摄影器材「提前就退」的差别，由经营空间规则里的 `minAdvanceHours` 表达，不是两段代码。
+通用页面与计算模块里**不允许** `if (categoryCode === ...)` 这类分支。汽车租赁「提前一天以上还车才退租金」和摄影器材「提前就退」的差别，由经营空间规则里的 `minAdvanceHours` 表达，不是两段代码。
 
 当前状态：计费与计算模块里没有品类分支，`categoryCode` 只出现在状态按空间归档与一致性校验上。新增品类时，只需在品类定义里补术语与导航显示配置，通用导航即可接入。
 
@@ -139,7 +139,7 @@ npm run dev
 - API：`http://localhost:3000/api`（`API_PORT` 可改）
 - 管理端：`http://localhost:5175`（`REACT_ADMIN_PORT` 可改），`/api` 由 Vite 代理到 API
 
-`npm run dev` 会先构建 `packages/shared` 再并行起 API 与管理端。两端读 shared 的方式不同，值得知道：**API 依赖编译产物 `dist/`**，管理端的 Vite 把 `@store-rental/shared` 直接 alias 到 `src/index.ts`。所以改完契约，管理端热更新立刻看得到，API 却要重新构建 shared 才认——只在管理端验证过就以为改通了，是这里最容易踩的坑。测试脚本也读 `dist/`，因此每个 `test:*` 都先构建 shared。
+`npm run dev` 会先构建 `packages/shared` 再并行起 API 与管理端。两端读 shared 的方式不同，值得知道：**API 依赖编译产物 `dist/`**，管理端的 Vite 把 `@rental-os/shared` 直接 alias 到 `src/index.ts`。所以改完契约，管理端热更新立刻看得到，API 却要重新构建 shared 才认——只在管理端验证过就以为改通了，是这里最容易踩的坑。测试脚本也读 `dist/`，因此每个 `test:*` 都先构建 shared。
 
 Windows 上跑 `prisma generate` 前必须先停掉 API 开发服务器，否则 `query_engine-windows.dll.node` 被占用导致 EPERM。
 
@@ -196,12 +196,12 @@ npm run test:rule-version-chain-mutation
 
 写在这里而不是藏着，因为它们会直接影响你怎么读代码：
 
-- **门市域已整体退役**（2026-09-04）：`/api/store-rental/*` 的 119 个路由、`store-rental` 与 `reports` 两个模块、管理端 8 个退役页面、两个 API 客户端里 182 个遗留函数、以及 57 张只服务于它们的表全部删除。门禁里加了反向断言：两个 API 客户端都不得再出现 `/store-rental/`，退役页面文件不得重新出现。注意 `store-rental:*` **权限码命名空间保留**——它是全系统（含 Rental Core）在用的权限前缀，与那批 URL 是两件事。
+- **早期单品类租赁域已整体退役**（2026-09-04）：旧 API 路由、业务模块、管理端 8 个退役页面、两个 API 客户端里 182 个遗留函数，以及 57 张只服务于它们的表全部删除。当前权限码统一使用 `rental-os:*` 命名空间，业务代码不再依赖旧域命名。
 - **支付、预授权、通知目前是模拟的**，状态必须用 `simulated` 或同等明确语义，不得记录或展示为真实收款、冻结、发送、送达。
 - **不做跨空间汇总**。跨空间的订单、收入、库存、客户消费汇总不在当前阶段；未来做也只能基于明确的租户级查询权限。
-- **`tests/mysql-e2e.test.cjs` 里仍有门市段落**（7 处、约 49 行引用）。它需要专用库才能跑、不在默认门禁里，因此这次没有动——盲改这个 10k 行的唯一真库 E2E 只会造出一份看起来有覆盖的假象。修它需要一次带专用库的专门会话。
-- **`requiredCapability` 目前只映射两个已删除的前缀**（`/store-rental/dispatch`、`/store-rental/tbox-devices`）。守卫层的能力门禁机制本身是活的、且被 `extension-consistency` 的变异测试钉着（未启用必拒、缺服务 fail-closed），所以刻意保留；但它需要重新指向一个**现行**的应受能力约束的路由，这是个产品决定。
-- **`rental_pricing_groups.categoryCode` 存在库与 schema 漂移**，且库里有一条本地不存在的迁移 `20260828006000_capability_config_audit_snapshots`。两者可能同源，尚未查清。
+- **`tests/mysql-e2e.test.cjs` 里仍有历史专用段落**（7 处、约 49 行引用）。它需要专用库才能跑、不在默认门禁里，因此这次没有动——盲改这个 10k 行的唯一真库 E2E 只会造出一份看起来有覆盖的假象。修它需要一次带专用库的专门会话。
+- **`requiredCapability` 目前只映射两个已删除的历史调度/T-Box 前缀**。守卫层的能力门禁机制本身是活的、且被 `extension-consistency` 的变异测试钉着（未启用必拒、缺服务 fail-closed），所以刻意保留；但它需要重新指向一个**现行**的应受能力约束的路由，这是个产品决定。
+- **当前 `rental_os` 数据库已完成迁移状态收口**：新命名迁移已执行，旧分支留下的失败迁移记录已清理；运行时使用 `rental_os` 数据库和账号，原库仅保留为受保护回退数据。
 - **区间利用率在数据上不存在**。资产与库存只有当前状态、没有状态变更历史，因此空间报表的资产口径是**读取瞬间的快照**。这条说明跟着报表出参一起下发，页面和 CSV 导出都必须显示——只写在文档里，运营照样会把快照当区间利用率用。
 
 ## 9. 文档

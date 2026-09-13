@@ -1,4 +1,4 @@
-import { RENTAL_CURRENCY_CODES, RENTAL_DISCOUNT_TARGETS, RENTAL_DISCOUNT_TYPES, RENTAL_INSURANCE_PROVIDER_STATUSES, RENTAL_PRICING_UNIT_CODES, RENTAL_SERVICE_BILLING_UNITS, RENTAL_SERVICE_SELECTION_MODES, type RentalCurrency, type RentalDayType, type RentalDiscountTarget, type RentalInsuranceProviderStatus, type RentalPricingUnit, type RentalServiceMandatoryRule, type RentalServiceSelectionMode } from "@store-rental/shared";
+import { RENTAL_CURRENCY_CODES, RENTAL_DISCOUNT_TARGETS, RENTAL_DISCOUNT_TYPES, RENTAL_INSURANCE_PROVIDER_STATUSES, RENTAL_PRICING_UNIT_CODES, RENTAL_SERVICE_BILLING_UNITS, RENTAL_SERVICE_SELECTION_MODES, type RentalCurrency, type RentalDayType, type RentalDiscountTarget, type RentalInsuranceProviderStatus, type RentalPricingUnit, type RentalServiceMandatoryRule, type RentalServiceSelectionMode } from "@rental-os/shared";
 import type {
   ApplyOfficialCalendarSourceRequest,
   PublishRentalCalendarRequest,
@@ -29,7 +29,7 @@ import type {
   RestoreRentalPriceVersionRequest,
   RentalPeriodicPriceWindow,
   RentalDatetimePriceOverride
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { Type } from "class-transformer";
 import {
   ArrayNotEmpty,

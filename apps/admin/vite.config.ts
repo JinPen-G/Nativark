@@ -10,7 +10,7 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: {
         "@": fileURLToPath(new URL("./src", import.meta.url)),
-        "@store-rental/shared": fileURLToPath(
+        "@rental-os/shared": fileURLToPath(
           new URL("../../packages/shared/src/index.ts", import.meta.url)
         )
       }

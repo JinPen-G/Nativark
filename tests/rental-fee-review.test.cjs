@@ -10,7 +10,7 @@ require("ts-node").register({
 // 修复前：逾期的 manual_review 由计算侧直接返回 0，提前归还的 requiresReview 在落账
 // 侧被直接 return——两条都是静默免除，运营侧连一条待办都没有，订单还能照常结清。
 const { RentalCoreService } = require("../apps/api/src/modules/rental-core/rental-core.service");
-const { RentalCoreOrderStatus } = require("@store-rental/shared");
+const { RentalCoreOrderStatus } = require("@rental-os/shared");
 
 let passed = 0;
 const ok = (message) => { passed += 1; console.log(`  PASS  ${message}`); };

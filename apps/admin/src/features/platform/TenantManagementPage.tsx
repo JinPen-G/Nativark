@@ -1,6 +1,6 @@
 import { ApartmentOutlined, EditOutlined, PauseCircleOutlined, PlusOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
-import type { BusinessWorkspace, CreateBusinessWorkspaceRequest, RentalCategoryCode, TenantBootstrapRequest, TenantSummary, UpdateBusinessWorkspaceRequest, UpdateTenantStatusRequest } from "@store-rental/shared";
-import { RENTAL_CURRENCY_CODES, RENTAL_CURRENCY_META, TenantStatus } from "@store-rental/shared";
+import type { BusinessWorkspace, CreateBusinessWorkspaceRequest, RentalCategoryCode, TenantBootstrapRequest, TenantSummary, UpdateBusinessWorkspaceRequest, UpdateTenantStatusRequest } from "@rental-os/shared";
+import { RENTAL_CURRENCY_CODES, RENTAL_CURRENCY_META, TenantStatus } from "@rental-os/shared";
 import { App, Button, Card, Descriptions, Drawer, Form, Input, Modal, Segmented, Select, Space, Table, Tag, Typography } from "antd";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
@@ -224,7 +224,7 @@ export function TenantManagementPage() {
               <Form.Item name="adminAccount" label="租户管理员账号" rules={[{ required: true }]}><Input /></Form.Item>
               <Form.Item name="adminDisplayName" label="租户管理员姓名" rules={[{ required: true }]}><Input /></Form.Item>
               <Form.Item name="adminPhone" label="联系电话"><Input /></Form.Item>
-              <Form.Item name="storeName" label="首个门店/履约点"><Input /></Form.Item>
+              <Form.Item name="storeName" label="首个履约地点"><Input /></Form.Item>
               <Form.Item name="storeCode" label="门店编码"><Input /></Form.Item>
               <Typography.Paragraph type="secondary">初始化将原子创建租户档案、首个默认经营空间、根组织、租户管理员、默认角色、字典和编号规则。后续可继续新增其他品类空间。模板项：{preview.data?.templates?.length ?? 0} 类。</Typography.Paragraph>
             </>

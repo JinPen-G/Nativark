@@ -21,7 +21,7 @@ import {
   type ManageRentalAllocationRequest,
   type RentalAllocation,
   type RentalOrder,
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useAuthStore } from "@/features/auth/authStore";
 import { QueryState } from "@/components/QueryState";
@@ -48,8 +48,8 @@ export function OrderAllocationPanel({ order }: { order: RentalOrder }) {
   const { message } = App.useApp();
   const qc = useQueryClient();
   const has = useAuthStore((s) => s.hasPermission);
-  const canOperate = has("store-rental:order:operate");
-  const canReassign = has("store-rental:order:reassign");
+  const canOperate = has("rental-os:order:operate");
+  const canReassign = has("rental-os:order:reassign");
   const editable = ["reserved", "ready_for_pickup"].includes(order.status);
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState("");

@@ -2,7 +2,7 @@ import {
   type RentalDiscountPlan,
   type RentalDiscountTarget,
   type RentalQuoteDiscountEvaluation
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 
 /**
  * MKT-01A：自动优惠方案的资格判定、互斥取舍与逐项计算（需求 4.4.10）。

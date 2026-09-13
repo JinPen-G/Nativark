@@ -18,7 +18,7 @@ import type {
   RentalCapability,
   ResetLocalDemoPasswordResult,
   SystemUserRow
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { hashOpaqueToken } from "../../common/password";
 import { PlatformService } from "../platform/platform.service";

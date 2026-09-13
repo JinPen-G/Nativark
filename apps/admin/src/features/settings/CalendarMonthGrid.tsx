@@ -1,7 +1,7 @@
 import { Button, Card, Space, Tag, Tooltip, Typography } from "antd";
 import { LeftOutlined, RightOutlined } from "@ant-design/icons";
 import type { CSSProperties } from "react";
-import type { RentalCalendarDay, RentalCalendarTimePriceDay } from "@store-rental/shared";
+import type { RentalCalendarDay, RentalCalendarTimePriceDay } from "@rental-os/shared";
 
 /**
  * PRICE-02A（需求 4.5.9）：按自然月展示的七列月历。

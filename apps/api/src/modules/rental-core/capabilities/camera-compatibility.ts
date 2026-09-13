@@ -5,7 +5,7 @@ import {
   type RentalCapabilityHookResult,
   type RentalCompatibilityEntityRef,
   type RentalCompatibilityRelation
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 
 /**
  * CAM-01A：摄影器材兼容性规则集（首个真实运行模块）。

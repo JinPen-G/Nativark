@@ -6,7 +6,7 @@ import type {
   RentalFundingBalance,
   RentalFundingEvent,
   RentalFundingInstrument
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 import { aggregatePendingExtensionFunding, assertActionApplies, deriveFundingLedgers, nextBalanceAfter, rentalPaymentBalance } from "./rental-funding-events";
 import { pendingExtensionCountsAsDue } from "./rental-extension-lifecycle";

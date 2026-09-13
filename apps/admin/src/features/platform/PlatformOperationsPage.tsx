@@ -1,5 +1,5 @@
 import { BellOutlined, PlayCircleOutlined, SaveOutlined } from "@ant-design/icons";
-import type { InvokeMockAdapterRequest, SendMockNotificationRequest, SystemSecurityBaselineConfig } from "@store-rental/shared";
+import type { InvokeMockAdapterRequest, SendMockNotificationRequest, SystemSecurityBaselineConfig } from "@rental-os/shared";
 import { App, Button, Card, Col, Descriptions, Drawer, Form, Input, InputNumber, Row, Select, Space, Switch, Table, Tabs, Tag, Typography } from "antd";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
@@ -148,7 +148,7 @@ export function PlatformOperationsPage() {
 
       <Drawer title="发送模拟通知" open={notificationOpen} size={480} destroyOnHidden onClose={() => setNotificationOpen(false)} extra={<Button type="primary" loading={sendNotification.isPending} onClick={() => notificationForm.submit()}>写入发送日志</Button>}>
         <Typography.Paragraph type="secondary">该功能使用 mock provider，只验证模板变量、渠道选择和审计留痕。</Typography.Paragraph>
-        <Form<SendMockNotificationRequest> form={notificationForm} layout="vertical" initialValues={{ businessType: "store_rental_order", targetType: "member", channels: ["APP"] }} onFinish={(values) => sendNotification.mutate({ ...values, operator })}>
+        <Form<SendMockNotificationRequest> form={notificationForm} layout="vertical" initialValues={{ businessType: "rental_order", targetType: "member", channels: ["APP"] }} onFinish={(values) => sendNotification.mutate({ ...values, operator })}>
           <Form.Item name="templateCode" label="通知模板"><Select allowClear options={(infra.data?.notificationTemplates ?? []).filter((item) => item.enabled).map((item) => ({ value: item.code, label: `${item.name} · ${item.code}` }))} /></Form.Item>
           <Form.Item name="businessType" label="业务类型" rules={[{ required: true }]}><Input /></Form.Item>
           <Form.Item name="businessId" label="业务 ID"><Input /></Form.Item>

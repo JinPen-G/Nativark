@@ -3,7 +3,7 @@ require('ts-node').register({ transpileOnly: false, compilerOptions: { module: '
 const { RentalCoreService } = require('../apps/api/src/modules/rental-core/rental-core.service');
 const { RentalBusinessService } = require('../apps/api/src/modules/rental-core/rental-business.service');
 const { bufferedRentalPeriod, peakReservedQuantity } = require('../apps/api/src/modules/rental-core/rental-occupancy');
-const { RentalCoreOrderStatus, RentalInventoryMode, RentalReservationStatus } = require('@store-rental/shared');
+const { RentalCoreOrderStatus, RentalInventoryMode, RentalReservationStatus } = require('@rental-os/shared');
 const stores = require('./helpers/absorbing-config-store.cjs');
 let count = 0;
 const pass = label => { count++; console.log('PASS', label); };

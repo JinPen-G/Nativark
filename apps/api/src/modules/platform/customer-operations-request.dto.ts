@@ -6,7 +6,7 @@ import {
   type ChangeCustomerMembershipStatusRequest,
   type CustomerAccountStatus,
   type CustomerMembershipStatus
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 
 /**
  * CUSTOMER-01B 的请求 DTO。

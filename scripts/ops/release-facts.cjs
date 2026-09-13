@@ -25,7 +25,7 @@ const RELEASE_ENV_VARS = [
   { name: "DATABASE_URL", required: true, purpose: "数据库连接串（值不入清单）" },
   { name: "AUTH_TOKEN_SECRET", required: true, purpose: "令牌签名密钥（值不入清单）" },
   { name: "PLATFORM_DATA_SOURCE", required: false, purpose: "平台模块数据源选择" },
-  { name: "STORE_RENTAL_DATA_SOURCE", required: false, purpose: "门市租赁模块数据源选择" },
+  { name: "RENTAL_OS_DATA_SOURCE", required: false, purpose: "租赁业务模块数据源选择" },
   { name: "INFRA_DATA_SOURCE", required: false, purpose: "基础设施模块数据源选择" },
   { name: "API_PORT", required: false, purpose: "API 监听端口，默认 3000" },
   { name: "DATABASE_CONNECT_ON_START", required: false, purpose: "启动时是否立即连库" }
@@ -129,7 +129,7 @@ function inspectBuildProvenance(provenance, head, builds) {
  * 清单落盘前的最后一道闸：不允许任何口令、令牌或连接串明文进入。
  *
  * 判定刻意**不用**「整份 JSON 里搜子串」。本地夹具的库口令恰好是库名前缀
- * （`store_rental` / `store_rental_claude`），子串匹配会把一个本就不是秘密的库名
+ * （`rental_os` / `rental_os_claude`），子串匹配会把一个本就不是秘密的库名
  * 判成泄露——而一个总在误报的检查很快就会被人关掉，那比没有检查更糟。
  *
  * 因此按**值的位置与形态**判定，三条并行：

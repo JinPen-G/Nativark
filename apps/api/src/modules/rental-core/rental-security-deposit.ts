@@ -3,7 +3,7 @@ import type {
   RentalDepositRule,
   RentalPreauthorizationRule,
   RentalSecurityReduction
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 
 const DEPOSIT_MODES = new Set<RentalDepositRule["mode"]>(["none", "fixed", "price_multiple", "order_fixed"]);
 const PREAUTH_MODES = new Set<RentalPreauthorizationRule["mode"]>(["none", "fixed", "price_multiple", "order_fixed", "risk_surcharge"]);

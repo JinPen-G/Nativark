@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
-import type { SystemUserRow } from "@store-rental/shared";
+import type { SystemUserRow } from "@rental-os/shared";
 import { PrismaService } from "../modules/database/prisma.service";
 import { getRequestWorkspaceId } from "./request-identity";
 
@@ -139,7 +139,7 @@ export class OperationLogService {
         targetId: parts[resourceIndex + 1]
       };
     }
-    if (parts[0] === "store-rental") {
+    if (parts[0] === "rental-os") {
       const typeMap: Record<string, string> = {
         orders: "order",
         vehicles: "vehicle",
@@ -151,7 +151,7 @@ export class OperationLogService {
         rules: "rental-rule"
       };
       return {
-        targetType: typeMap[parts[1] ?? ""] ?? parts[1] ?? "store-rental",
+        targetType: typeMap[parts[1] ?? ""] ?? parts[1] ?? "rental-os",
         targetId: parts[2]
       };
     }

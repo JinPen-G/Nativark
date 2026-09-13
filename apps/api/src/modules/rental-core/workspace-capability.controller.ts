@@ -1,5 +1,5 @@
 import { BadRequestException, Body, Controller, Get, Param, Post, Put, Query, Req } from "@nestjs/common";
-import { RENTAL_CAPABILITY_CODES, type RentalCapability, type SystemUserRow } from "@store-rental/shared";
+import { RENTAL_CAPABILITY_CODES, type RentalCapability, type SystemUserRow } from "@rental-os/shared";
 import {
   SaveWorkspaceCapabilityDto,
   UpgradeWorkspaceCapabilityDto

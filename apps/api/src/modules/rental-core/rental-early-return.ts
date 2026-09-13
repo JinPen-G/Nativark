@@ -1,11 +1,11 @@
-import type { RentalEarlyReturnRule, RentalQuoteServiceSnapshot } from "@store-rental/shared";
+import type { RentalEarlyReturnRule, RentalQuoteServiceSnapshot } from "@rental-os/shared";
 import { roundMoney } from "./rental-money";
 
 /**
  * 提前归还退款的计算（需求 4.6.8）。
  *
  * 抽成纯函数的理由与优惠取舍、押金计算相同：「凭什么退这么多」必须逐条回放。
- * 四个品类共用同一套算法，因此这里不出现任何品类编码分支——车辆门市"提前不足一天不退"
+ * 四个品类共用同一套算法，因此这里不出现任何品类编码分支——车辆租赁"提前不足一天不退"
  * 与摄影器材"提前就退"的差别，全部由经营空间规则里的 `minAdvanceHours` 表达。
  *
  * 需求要求「允许租金退款时必须明确计费单位、长租阶梯是否重新计算、优惠如何重新分摊」。

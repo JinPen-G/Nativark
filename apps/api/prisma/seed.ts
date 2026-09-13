@@ -13,7 +13,7 @@ import {
 import {
   RENTAL_CATEGORY_DEFINITIONS,
   RentalCategoryCode as SharedRentalCategoryCode
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { hashPassword } from "../src/common/password";
 
 const prisma = new PrismaClient();
@@ -68,9 +68,9 @@ const tenants: TenantSeed[] = [
     name: "演示香港租户",
     organizations: [
       { id: "org_operator_hk", type: OrganizationType.OPERATOR, code: "OP-HK", name: "香港营运中心" },
-      { id: "org_store_mongkok", parentId: "org_operator_hk", type: OrganizationType.STORE, code: "STORE-MK", name: "旺角门市" },
-      { id: "org_store_central", parentId: "org_operator_hk", type: OrganizationType.STORE, code: "STORE-CENTRAL", name: "中环门市" },
-      { id: "org_store_airport", parentId: "org_operator_hk", type: OrganizationType.STORE, code: "STORE-AIRPORT", name: "机场门市" }
+      { id: "org_store_mongkok", parentId: "org_operator_hk", type: OrganizationType.STORE, code: "STORE-MK", name: "旺角服务点" },
+      { id: "org_store_central", parentId: "org_operator_hk", type: OrganizationType.STORE, code: "STORE-CENTRAL", name: "中环服务点" },
+      { id: "org_store_airport", parentId: "org_operator_hk", type: OrganizationType.STORE, code: "STORE-AIRPORT", name: "机场服务点" }
     ],
     users: [
       {
@@ -111,7 +111,7 @@ const tenants: TenantSeed[] = [
     name: "演示深圳租户",
     organizations: [
       { id: "org_operator_sz", type: OrganizationType.OPERATOR, code: "OP-SZ", name: "深圳营运中心" },
-      { id: "org_store_nanshan", parentId: "org_operator_sz", type: OrganizationType.STORE, code: "STORE-NS", name: "南山门市" }
+      { id: "org_store_nanshan", parentId: "org_operator_sz", type: OrganizationType.STORE, code: "STORE-NS", name: "南山服务点" }
     ],
     users: [
       {
@@ -152,63 +152,63 @@ const permissions = [
   ["rental-core:capability:manage", "经营空间能力治理", "Rental Core", PermissionKind.ACTION],
   // CAM-01A：确认能力风险提示后才能带风险下单。与 :manage 分开授权（见 platform.service 注释）。
   ["rental-core:capability:override", "能力风险例外确认", "Rental Core", PermissionKind.ACTION],
-  ["store-rental:rules:manage", "业务规则配置", "门市租赁", PermissionKind.ACTION],
+  ["rental-os:rules:manage", "业务规则配置", "租赁业务", PermissionKind.ACTION],
   // RULE-01A：需求 4.6.14 明确「权限分为规则编辑、规则发布……」。发布会改变对外生效的
   // 条款，与编辑草稿是两个责任；共用一个码等于任何能改草稿的人都能直接对客户生效。
-  ["store-rental:rules:publish", "业务规则发布", "门市租赁", PermissionKind.ACTION],
-  ["store-rental:order:view", "订单查看", "门市租赁", PermissionKind.ACTION],
-  ["store-rental:order:operate", "订单操作", "门市租赁", PermissionKind.ACTION],
-  ["store-rental:order:reassign", "资源解锁与改配", "门市租赁", PermissionKind.ACTION],
-  ["store-rental:order:settle", "订单结算", "门市租赁", PermissionKind.ACTION],
-  ["store-rental:member:account-manage", "会员账号与密码管理", "会员管理", PermissionKind.ACTION],
-  ["store-rental:member:review", "会员注册审核", "会员管理", PermissionKind.ACTION],
-  ["store-rental:member:qualification-review", "会员证件审核", "会员管理", PermissionKind.ACTION],
-  ["store-rental:member:plan:manage", "会员方案编辑", "会员管理", PermissionKind.ACTION],
-  ["store-rental:member:plan:publish", "会员方案发布", "会员管理", PermissionKind.ACTION],
-  ["store-rental:corporate:employee-manage", "企业员工管理", "企业会员", PermissionKind.ACTION],
+  ["rental-os:rules:publish", "业务规则发布", "租赁业务", PermissionKind.ACTION],
+  ["rental-os:order:view", "订单查看", "租赁业务", PermissionKind.ACTION],
+  ["rental-os:order:operate", "订单操作", "租赁业务", PermissionKind.ACTION],
+  ["rental-os:order:reassign", "资源解锁与改配", "租赁业务", PermissionKind.ACTION],
+  ["rental-os:order:settle", "订单结算", "租赁业务", PermissionKind.ACTION],
+  ["rental-os:member:account-manage", "会员账号与密码管理", "会员管理", PermissionKind.ACTION],
+  ["rental-os:member:review", "会员注册审核", "会员管理", PermissionKind.ACTION],
+  ["rental-os:member:qualification-review", "会员证件审核", "会员管理", PermissionKind.ACTION],
+  ["rental-os:member:plan:manage", "会员方案编辑", "会员管理", PermissionKind.ACTION],
+  ["rental-os:member:plan:publish", "会员方案发布", "会员管理", PermissionKind.ACTION],
+  ["rental-os:corporate:employee-manage", "企业员工管理", "企业会员", PermissionKind.ACTION],
   // ORDER-CLOSE-02：费用裁定与实际收退款分权。
-  ["store-rental:order:fee-review", "费用裁定", "门市租赁", PermissionKind.ACTION],
-  ["store-rental:order:create", "按钮-新建订单", "门市租赁", PermissionKind.BUTTON],
-  ["store-rental:order:pickup", "按钮-取车交付", "门市租赁", PermissionKind.BUTTON],
-  ["store-rental:order:return", "按钮-还车验车", "门市租赁", PermissionKind.BUTTON],
-  ["store-rental:order:extend", "按钮-延长用车", "门市租赁", PermissionKind.BUTTON],
-  ["store-rental:order:cancel", "按钮-取消/爽约", "门市租赁", PermissionKind.BUTTON],
-  ["store-rental:order:close", "按钮-关闭/拒绝履约", "门市租赁", PermissionKind.BUTTON],
-  ["store-rental:order:fee-manage", "按钮-费用处理", "门市租赁", PermissionKind.BUTTON],
-  ["store-rental:dispatch:manage", "调度管理", "门市租赁", PermissionKind.ACTION],
-  ["store-rental:price:manage", "价格规则", "门市租赁", PermissionKind.ACTION],
-  ["store-rental:calendar:edit", "营业日历编辑（草稿）", "门市租赁", PermissionKind.ACTION],
-  ["store-rental:calendar:publish", "营业日历发布", "门市租赁", PermissionKind.ACTION],
+  ["rental-os:order:fee-review", "费用裁定", "租赁业务", PermissionKind.ACTION],
+  ["rental-os:order:create", "按钮-新建订单", "租赁业务", PermissionKind.BUTTON],
+  ["rental-os:order:pickup", "按钮-取车交付", "租赁业务", PermissionKind.BUTTON],
+  ["rental-os:order:return", "按钮-还车验车", "租赁业务", PermissionKind.BUTTON],
+  ["rental-os:order:extend", "按钮-延长用车", "租赁业务", PermissionKind.BUTTON],
+  ["rental-os:order:cancel", "按钮-取消/爽约", "租赁业务", PermissionKind.BUTTON],
+  ["rental-os:order:close", "按钮-关闭/拒绝履约", "租赁业务", PermissionKind.BUTTON],
+  ["rental-os:order:fee-manage", "按钮-费用处理", "租赁业务", PermissionKind.BUTTON],
+  ["rental-os:dispatch:manage", "调度管理", "租赁业务", PermissionKind.ACTION],
+  ["rental-os:price:manage", "价格规则", "租赁业务", PermissionKind.ACTION],
+  ["rental-os:calendar:edit", "营业日历编辑（草稿）", "租赁业务", PermissionKind.ACTION],
+  ["rental-os:calendar:publish", "营业日历发布", "租赁业务", PermissionKind.ACTION],
   // 需求 4.5.8：客服或财务「查看历史版本及报价命中的日历依据，不得修改」。
   // 没有这个独立权限时，给客服开放历史就只能顺带授予编辑、发布或规则管理权，权限过大。
-  ["store-rental:calendar:view-history", "营业日历历史只读", "门市租赁", PermissionKind.ACTION],
-  ["store-rental:marketing:manage", "行销方案管理", "门市租赁", PermissionKind.ACTION],
-  ["store-rental:station:view", "站点查看", "门市租赁", PermissionKind.ACTION],
-  ["store-rental:station:manage", "站点管理", "门市租赁", PermissionKind.ACTION],
-  ["store-rental:vehicle-group:manage", "车型组管理", "门市租赁", PermissionKind.ACTION],
-  ["store-rental:vehicle:view", "车辆查看", "门市租赁", PermissionKind.ACTION],
-  ["store-rental:vehicle:manage", "车辆管理", "门市租赁", PermissionKind.ACTION],
-  ["store-rental:vehicle:status-action", "按钮-车辆状态动作", "门市租赁", PermissionKind.BUTTON],
-  ["store-rental:member:view", "会员查看", "门市租赁", PermissionKind.ACTION],
-  ["store-rental:member:manage", "会员管理", "门市租赁", PermissionKind.ACTION],
-  ["store-rental:member:risk-action", "按钮-会员风控动作", "门市租赁", PermissionKind.BUTTON],
+  ["rental-os:calendar:view-history", "营业日历历史只读", "租赁业务", PermissionKind.ACTION],
+  ["rental-os:marketing:manage", "行销方案管理", "租赁业务", PermissionKind.ACTION],
+  ["rental-os:station:view", "站点查看", "租赁业务", PermissionKind.ACTION],
+  ["rental-os:station:manage", "站点管理", "租赁业务", PermissionKind.ACTION],
+  ["rental-os:vehicle-group:manage", "车型组管理", "租赁业务", PermissionKind.ACTION],
+  ["rental-os:vehicle:view", "车辆查看", "租赁业务", PermissionKind.ACTION],
+  ["rental-os:vehicle:manage", "车辆管理", "租赁业务", PermissionKind.ACTION],
+  ["rental-os:vehicle:status-action", "按钮-车辆状态动作", "租赁业务", PermissionKind.BUTTON],
+  ["rental-os:member:view", "会员查看", "租赁业务", PermissionKind.ACTION],
+  ["rental-os:member:manage", "会员管理", "租赁业务", PermissionKind.ACTION],
+  ["rental-os:member:risk-action", "按钮-会员风控动作", "租赁业务", PermissionKind.BUTTON],
   // CUSTOMER-01B：敏感资料解密查看单独授权（需求 4.8.5 / 4.8.14）。
   // 与「会员查看」分开：日常查客户只该看到脱敏值，看明文是另一件需要单独追责的事。
-  ["store-rental:customer:reveal-sensitive", "客户敏感资料解密", "门市租赁", PermissionKind.ACTION],
+  ["rental-os:customer:reveal-sensitive", "客户敏感资料解密", "租赁业务", PermissionKind.ACTION],
   // CUSTOMER-01D：需求 4.8.14 要求客户合并与注销**分别授权**。
   // 两者都不可逆，且影响面不同：合并改变身份归属，注销终止业务资格。
-  ["store-rental:customer:merge", "客户合并", "门市租赁", PermissionKind.ACTION],
-  ["store-rental:customer:close", "客户注销", "门市租赁", PermissionKind.ACTION],
-  ["store-rental:corporate:view", "企业客户查看", "门市租赁", PermissionKind.ACTION],
-  ["store-rental:corporate:manage", "企业客户管理", "门市租赁", PermissionKind.ACTION],
-  ["store-rental:corporate:monthly-settle", "按钮-企业月结回款", "门市租赁", PermissionKind.BUTTON],
-  ["store-rental:finance:view", "财务查看", "门市租赁", PermissionKind.ACTION],
-  ["store-rental:finance:manage", "财务管理", "门市租赁", PermissionKind.ACTION],
-  ["store-rental:finance:adjust", "按钮-手工调账", "门市租赁", PermissionKind.BUTTON],
-  ["store-rental:finance:invoice", "按钮-发票/收据", "门市租赁", PermissionKind.BUTTON],
-  ["store-rental:finance:reconcile", "财务对账", "门市租赁", PermissionKind.ACTION],
-  ["store-rental:service:manage", "增值服务管理", "门市租赁", PermissionKind.ACTION],
-  ["store-rental:report:view", "报表查看", "门市租赁", PermissionKind.ACTION],
+  ["rental-os:customer:merge", "客户合并", "租赁业务", PermissionKind.ACTION],
+  ["rental-os:customer:close", "客户注销", "租赁业务", PermissionKind.ACTION],
+  ["rental-os:corporate:view", "企业客户查看", "租赁业务", PermissionKind.ACTION],
+  ["rental-os:corporate:manage", "企业客户管理", "租赁业务", PermissionKind.ACTION],
+  ["rental-os:corporate:monthly-settle", "按钮-企业月结回款", "租赁业务", PermissionKind.BUTTON],
+  ["rental-os:finance:view", "财务查看", "租赁业务", PermissionKind.ACTION],
+  ["rental-os:finance:manage", "财务管理", "租赁业务", PermissionKind.ACTION],
+  ["rental-os:finance:adjust", "按钮-手工调账", "租赁业务", PermissionKind.BUTTON],
+  ["rental-os:finance:invoice", "按钮-发票/收据", "租赁业务", PermissionKind.BUTTON],
+  ["rental-os:finance:reconcile", "财务对账", "租赁业务", PermissionKind.ACTION],
+  ["rental-os:service:manage", "增值服务管理", "租赁业务", PermissionKind.ACTION],
+  ["rental-os:report:view", "报表查看", "租赁业务", PermissionKind.ACTION],
   ["system:user:manage", "系统用户", "系统设置", PermissionKind.ACTION],
   ["system:role:manage", "角色权限", "系统设置", PermissionKind.ACTION],
   ["system:params:manage", "系统通用参数", "系统设置", PermissionKind.ACTION],
@@ -246,30 +246,30 @@ const roleTemplates = [
     fixedAllPermissions: false,
     enabledBusinessScopes: ["STORE_STANDARD", "STORE_24H"],
     permissions: [
-      "store-rental:order:view",
-      "store-rental:order:operate",
-      "store-rental:order:settle",
+      "rental-os:order:view",
+      "rental-os:order:operate",
+      "rental-os:order:settle",
       // 与 platform.service / platform.repository 的同一条迁移：该角色原本凭 order:settle
       // 就能裁定四类费用审核，拆权后必须显式补上，否则门店营运账号裁定一律 403。
-      "store-rental:order:fee-review",
-      "store-rental:station:view",
-      "store-rental:vehicle:view",
+      "rental-os:order:fee-review",
+      "rental-os:station:view",
+      "rental-os:vehicle:view",
       "rental-core:catalog:view",
       "rental-core:asset:view",
-      "store-rental:member:view",
-      "store-rental:corporate:view",
-      "store-rental:finance:view",
+      "rental-os:member:view",
+      "rental-os:corporate:view",
+      "rental-os:finance:view",
       // 门店营运兼客服口径：可查营业日历历史与报价命中的日历依据，但不得编辑或发布。
-      "store-rental:calendar:view-history"
+      "rental-os:calendar:view-history"
     ],
     buttonPermissions: [
-      "store-rental:order:create",
-      "store-rental:order:pickup",
-      "store-rental:order:return",
-      "store-rental:order:extend",
-      "store-rental:order:cancel",
-      "store-rental:order:fee-manage",
-      "store-rental:vehicle:status-action"
+      "rental-os:order:create",
+      "rental-os:order:pickup",
+      "rental-os:order:return",
+      "rental-os:order:extend",
+      "rental-os:order:cancel",
+      "rental-os:order:fee-manage",
+      "rental-os:vehicle:status-action"
     ],
     dataScope: SystemDataScope.STORE
   },
@@ -282,19 +282,19 @@ const roleTemplates = [
     fixedAllPermissions: false,
     enabledBusinessScopes: ["STORE_STANDARD", "SYSTEM_GLOBAL"],
     permissions: [
-      "store-rental:rules:manage",
-      "store-rental:rules:publish",
-      "store-rental:price:manage",
-      "store-rental:calendar:edit",
-      "store-rental:calendar:publish",
-      "store-rental:marketing:manage",
-      "store-rental:service:manage",
+      "rental-os:rules:manage",
+      "rental-os:rules:publish",
+      "rental-os:price:manage",
+      "rental-os:calendar:edit",
+      "rental-os:calendar:publish",
+      "rental-os:marketing:manage",
+      "rental-os:service:manage",
       "system:params:manage",
       "system:integration:manage",
-      "store-rental:order:view",
-      "store-rental:finance:view",
-      "store-rental:finance:reconcile",
-      "store-rental:report:view"
+      "rental-os:order:view",
+      "rental-os:finance:view",
+      "rental-os:finance:reconcile",
+      "rental-os:report:view"
     ],
     buttonPermissions: ["system:button:export"],
     dataScope: SystemDataScope.ORGANIZATION
@@ -413,19 +413,19 @@ async function upsertOrganizations() {
 
 async function upsertPermissions() {
   const permissionNameOverrides: Record<string, string> = {
-    "store-rental:order:pickup": "按钮-领取交付",
-    "store-rental:order:return": "按钮-归还验收",
-    "store-rental:order:extend": "按钮-延长租期",
-    "store-rental:station:view": "履约地点查看",
-    "store-rental:station:manage": "履约地点管理",
-    "store-rental:vehicle-group:manage": "品类型号与分组管理",
-    "store-rental:vehicle:view": "品类资产查看",
-    "store-rental:vehicle:manage": "品类资产管理",
-    "store-rental:vehicle:status-action": "按钮-品类资产状态动作"
+    "rental-os:order:pickup": "按钮-领取交付",
+    "rental-os:order:return": "按钮-归还验收",
+    "rental-os:order:extend": "按钮-延长租期",
+    "rental-os:station:view": "履约地点查看",
+    "rental-os:station:manage": "履约地点管理",
+    "rental-os:vehicle-group:manage": "品类型号与分组管理",
+    "rental-os:vehicle:view": "品类资产查看",
+    "rental-os:vehicle:manage": "品类资产管理",
+    "rental-os:vehicle:status-action": "按钮-品类资产状态动作"
   };
   for (const [code, name, module, kind] of permissions) {
     const normalizedName = permissionNameOverrides[code] ?? name;
-    const normalizedModule = module === "门市租赁" ? "租赁业务" : module;
+    const normalizedModule = module === "租赁业务" ? "租赁业务" : module;
     await prisma.permission.upsert({
       where: { code },
       update: { name: normalizedName, module: normalizedModule, kind },
@@ -650,9 +650,9 @@ async function upsertSystemParameters() {
           groups: [
             {
               code: "order_main_status",
-              name: "门市订单主状态",
-              module: "门市租赁",
-              description: "按门市租车订单状态 PRD 维护主状态展示文案。",
+              name: "租赁订单主状态",
+              module: "租赁业务",
+              description: "按租赁订单状态规则维护主状态展示文案。",
               updatedAt: "2026-06-08T00:00:00+08:00",
               updatedBy: "seed",
               items: [
@@ -680,7 +680,7 @@ async function upsertSystemParameters() {
             {
               code: "vehicle_operation_status",
               name: "车辆营运状态",
-              module: "门市租赁",
+              module: "租赁业务",
               description: "车辆档案库和调度看板共用的实例状态字典。",
               updatedAt: "2026-06-08T00:00:00+08:00",
               updatedBy: "seed",
@@ -706,9 +706,9 @@ async function upsertSystemParameters() {
           groups: [
             {
               code: "order_main_status",
-              name: "门市订单主状态",
-              module: "门市租赁",
-              description: "按门市租车订单状态 PRD 维护主状态展示文案。",
+              name: "租赁订单主状态",
+              module: "租赁业务",
+              description: "按租赁订单状态规则维护主状态展示文案。",
               updatedAt: "2026-06-08T00:00:00+08:00",
               updatedBy: "seed",
               items: [
@@ -736,7 +736,7 @@ async function upsertSystemParameters() {
             {
               code: "vehicle_operation_status",
               name: "车辆营运状态",
-              module: "门市租赁",
+              module: "租赁业务",
               description: "车辆档案库和调度看板共用的实例状态字典。",
               updatedAt: "2026-06-08T00:00:00+08:00",
               updatedBy: "seed",
@@ -767,7 +767,7 @@ async function upsertSystemParameters() {
         status: ConfigStatus.EFFECTIVE,
         content: {
           rules: [
-            { code: "STORE_ORDER", name: "门市订单号", module: "订单中心", prefix: "SO", datePattern: "yyyyMMdd", sequenceLength: 6, currentSequence: 0, resetCycle: "daily", enabled: true, sample: "SO-20260505-000001", updatedAt: "2026-05-05T10:00:00+08:00", updatedBy: "seed" },
+            { code: "STORE_ORDER", name: "租赁订单号", module: "订单中心", prefix: "SO", datePattern: "yyyyMMdd", sequenceLength: 6, currentSequence: 0, resetCycle: "daily", enabled: true, sample: "SO-20260505-000001", updatedAt: "2026-05-05T10:00:00+08:00", updatedBy: "seed" },
             { code: "CONTRACT", name: "合同编号", module: "合同单据", prefix: "CT", datePattern: "yyyyMM", sequenceLength: 5, currentSequence: 0, resetCycle: "monthly", enabled: true, sample: "CT-202605-00001", updatedAt: "2026-05-05T10:00:00+08:00", updatedBy: "seed" },
             { code: "ACCIDENT_REPORT", name: "事故报案号", module: "事故出险", prefix: "AC", datePattern: "yyyyMMdd", sequenceLength: 4, currentSequence: 0, resetCycle: "daily", enabled: true, sample: "AC-20260505-0001", updatedAt: "2026-05-05T10:00:00+08:00", updatedBy: "seed" },
             { code: "CUSTOMER", name: "客户编号", module: "客户运营", prefix: "CU", datePattern: "yyyyMM", sequenceLength: 5, currentSequence: 0, resetCycle: "monthly", enabled: true, sample: "CU-202605-00001", updatedAt: "2026-05-05T10:00:00+08:00", updatedBy: "seed" },
@@ -783,7 +783,7 @@ async function upsertSystemParameters() {
         status: ConfigStatus.EFFECTIVE,
         content: {
           rules: [
-            { code: "STORE_ORDER", name: "门市订单号", module: "订单中心", prefix: "SO", datePattern: "yyyyMMdd", sequenceLength: 6, currentSequence: 0, resetCycle: "daily", enabled: true, sample: "SO-20260505-000001", updatedAt: "2026-05-05T10:00:00+08:00", updatedBy: "seed" },
+            { code: "STORE_ORDER", name: "租赁订单号", module: "订单中心", prefix: "SO", datePattern: "yyyyMMdd", sequenceLength: 6, currentSequence: 0, resetCycle: "daily", enabled: true, sample: "SO-20260505-000001", updatedAt: "2026-05-05T10:00:00+08:00", updatedBy: "seed" },
             { code: "CONTRACT", name: "合同编号", module: "合同单据", prefix: "CT", datePattern: "yyyyMM", sequenceLength: 5, currentSequence: 0, resetCycle: "monthly", enabled: true, sample: "CT-202605-00001", updatedAt: "2026-05-05T10:00:00+08:00", updatedBy: "seed" },
             { code: "ACCIDENT_REPORT", name: "事故报案号", module: "事故出险", prefix: "AC", datePattern: "yyyyMMdd", sequenceLength: 4, currentSequence: 0, resetCycle: "daily", enabled: true, sample: "AC-20260505-0001", updatedAt: "2026-05-05T10:00:00+08:00", updatedBy: "seed" },
             { code: "CUSTOMER", name: "客户编号", module: "客户运营", prefix: "CU", datePattern: "yyyyMM", sequenceLength: 5, currentSequence: 0, resetCycle: "monthly", enabled: true, sample: "CU-202605-00001", updatedAt: "2026-05-05T10:00:00+08:00", updatedBy: "seed" },

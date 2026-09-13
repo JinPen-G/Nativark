@@ -2,7 +2,7 @@ import {
   RentalInventoryMode,
   type RentalCapabilityHookModule,
   type RentalCapabilityHookResult
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 
 /** CAM-01B：摄影套装交接与附件清点规则版本。 */
 export const CAMERA_KIT_HANDOVER_RULESET_VERSION = "cam-kit-1.0";

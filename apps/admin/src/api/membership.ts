@@ -19,7 +19,7 @@ import type {
   SetCustomerMembershipTemporaryPasswordRequest,
   SubmitCustomerQualificationRequest,
   UpdateCustomerMembershipRegistrationSettingsRequest
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { request } from "./http";
 
 /** 新会员体系唯一的管理端 API。所有请求的经营空间均由会话确定。 */
@@ -59,7 +59,7 @@ export const membershipApi = {
   assignPlan: (data: AssignCustomerMembershipPlanRequest) =>
     request<unknown>("/membership/plans/assignments", { method: "post", data }),
   planAssignments: (customerId: string) =>
-    request<import("@store-rental/shared").CustomerMembershipPlanAssignment[]>(`/membership/plans/assignments/${customerId}`),
+    request<import("@rental-os/shared").CustomerMembershipPlanAssignment[]>(`/membership/plans/assignments/${customerId}`),
   revokePlanAssignment: (assignmentId: string, reason: string) =>
     request<unknown>(`/membership/plans/assignments/${assignmentId}/revoke`, { method: "post", data: { reason } }),
   bookingOptions: (customerId: string) =>

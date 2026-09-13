@@ -4,7 +4,7 @@ import {
   type RentalPriceAdjustmentChange,
   type RentalPriceAdjustmentPreviewRow,
   type RentalPricingRate
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { BadRequestException, ConflictException } from "@nestjs/common";
 import { DEFAULT_BUSINESS_TIME_ZONE, businessDateKey, businessTimeOfDay } from "./rental-business-day";
 

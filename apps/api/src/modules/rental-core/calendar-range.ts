@@ -6,7 +6,7 @@ import {
   type RentalCalendarDaySnapshot,
   type RentalCalendarOverrideScope,
   type RentalCalendarRangeFields
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { isCalendarDateKey, businessDateKey, DEFAULT_BUSINESS_TIME_ZONE } from "./rental-business-day";
 
 const DAY_MS = 86_400_000;

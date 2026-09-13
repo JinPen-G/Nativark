@@ -23,7 +23,7 @@ import type {
   SystemRoleRow,
   SystemRulesConfig,
   SystemUserRow
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { request } from "./http";
 
 export const api = {

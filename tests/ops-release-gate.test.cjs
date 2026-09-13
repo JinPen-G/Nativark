@@ -18,7 +18,7 @@ const buf = (text) => Buffer.from(text, "utf8");
 
 void (() => {
   // ============ 1. 环境变量只校验存在性，且只回名字 ============
-  const complete = { DATABASE_URL: "mysql://u:p@h:3306/store_rental_claude", AUTH_TOKEN_SECRET: "x".repeat(40) };
+  const complete = { DATABASE_URL: "mysql://u:p@h:3306/rental_os_claude", AUTH_TOKEN_SECRET: "x".repeat(40) };
   const result = facts.inspectEnvNames(complete);
   assert.deepEqual(result.missing, [], "必需变量齐备时不应报缺失");
   assert.ok(result.present.includes("DATABASE_URL"), "已配置的变量名应出现在 present");
@@ -80,11 +80,11 @@ void (() => {
   ok("工作区状态：未跟踪文件也算脏，只回文件名不回内容");
 
   // ============ 4. 敏感值拦截 ============
-  const password = "store_rental";
+  const password = "rental_os";
   // 关键回归：库名恰好以口令为前缀。这**不是**泄露，必须放行——
   // 一个总在误报的检查很快会被关掉，那比没有检查更糟。
   assert.equal(
-    facts.assertNoSecrets({ database: { database: "store_rental_claude" } }, [password]),
+    facts.assertNoSecrets({ database: { database: "rental_os_claude" } }, [password]),
     true,
     "库名包含口令子串不构成泄露，不得误报"
   );
@@ -96,7 +96,7 @@ void (() => {
   };
   rejects({ note: password }, [password], /整体等于一个已知秘密/u, "字符串值整体等于口令");
   rejects({ url: "mysql://svc:s3cr3t@db:3306/x_claude" }, [], /连接串明文/u, "连接串明文");
-  rejects({ db: { url: "mysql://svc:store_rental@db:3306/x_claude" } }, [password], /连接串明文|含已知秘密/u, "连接串里含口令");
+  rejects({ db: { url: "mysql://svc:rental_os@db:3306/x_claude" } }, [password], /连接串明文|含已知秘密/u, "连接串里含口令");
   rejects({ auth: { secret: "abc123" } }, [], /敏感字段/u, "sensitive 键名未掩码");
   rejects({ items: [{ token: "abc" }] }, [], /敏感字段/u, "数组内的敏感键名也要拦");
   assert.equal(facts.assertNoSecrets({ auth: { secret: "***" } }, []), true, "已掩码的敏感字段应放行");

@@ -6,7 +6,7 @@ import {
   type RentalCapabilityLifecycleStatus,
   type SaveWorkspaceCapabilityRequest,
   type UpgradeWorkspaceCapabilityRequest
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { IsIn, IsInt, IsNotEmpty, IsObject, IsOptional, IsString, MaxLength, Min } from "class-validator";
 
 /**

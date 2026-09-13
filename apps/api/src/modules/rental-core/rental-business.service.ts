@@ -89,7 +89,7 @@ import {
   type SendRentalNotificationRequest,
   type TenantRentalBusinessSettings,
   type TenantRentalProfile
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { getRequestWorkspaceId } from "../../common/request-identity";
 import { RentalStateRepository } from "./rental-state.repository";
 import {

@@ -1,6 +1,6 @@
 import { ConflictException, Injectable } from "@nestjs/common";
 import { Prisma, type $Enums } from "@prisma/client";
-import { RENTAL_CURRENCY_CODES } from "@store-rental/shared";
+import { RENTAL_CURRENCY_CODES } from "@rental-os/shared";
 import type {
   RentalCalendarDay,
   RentalCalendarOverrideAudit,
@@ -16,7 +16,7 @@ import type {
   RentalRuleVersion,
   RentalRuleVersionAudit,
   RentalValueAddedService
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 import type { RentalConfigTx } from "./rental-core-config.repository";
 import { assertScopedWrite, resolveScopeWorkspaceId } from "./workspace-scope";

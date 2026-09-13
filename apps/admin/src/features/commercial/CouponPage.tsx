@@ -1,6 +1,6 @@
 import { EditOutlined, PlusOutlined } from "@ant-design/icons";
-import type { RentalCouponTemplate, RentalCustomerCoupon, SaveRentalCouponTemplateRequest } from "@store-rental/shared";
-import { formatRentalMoney, rentalCurrencySymbol } from "@store-rental/shared";
+import type { RentalCouponTemplate, RentalCustomerCoupon, SaveRentalCouponTemplateRequest } from "@rental-os/shared";
+import { formatRentalMoney, rentalCurrencySymbol } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { App, Button, Card, Col, Drawer, Form, Input, InputNumber, Modal, Row, Select, Space, Table, Tag, Typography } from "antd";
 import dayjs from "dayjs";

@@ -1,4 +1,4 @@
-import type { ChangePasswordRequest, RefreshSessionRequest, ResetLocalDemoPasswordRequest, SwitchWorkspaceRequest } from "@store-rental/shared";
+import type { ChangePasswordRequest, RefreshSessionRequest, ResetLocalDemoPasswordRequest, SwitchWorkspaceRequest } from "@rental-os/shared";
 import { IsNotEmpty, IsString, MinLength } from "class-validator";
 
 export class RefreshSessionDto implements RefreshSessionRequest {

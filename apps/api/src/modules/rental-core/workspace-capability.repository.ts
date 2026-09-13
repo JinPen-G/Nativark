@@ -7,7 +7,7 @@ import type {
   RentalCategoryCode,
   WorkspaceCapabilityAuditEvent,
   WorkspaceCapabilityInstance
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 import { resolveScopeWorkspaceId } from "./workspace-scope";
 

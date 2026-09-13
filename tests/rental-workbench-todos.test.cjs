@@ -78,20 +78,20 @@ assert.equal(todos.items.find((row) => row.type === "refund").amount, 25);
 const withoutFunding = buildRentalWorkbenchTodos([base({ id: "refund_without_funding", status: "settling", serviceSnapshots: [{ refundStatus: "approved_pending_refund" }] })], [], {}, {}, [], at);
 assert.equal(withoutFunding.items.some((row) => row.type === "refund"), false, "没有负租金余额时不能凭审核状态虚构退款待办");
 
-assert.equal(canIncludeWorkbenchWorkOrders({ isPlatformAdmin: false, permissions: ["store-rental:report:view"] }), false, "只有报表权限时不能读取养护工单待办");
+assert.equal(canIncludeWorkbenchWorkOrders({ isPlatformAdmin: false, permissions: ["rental-os:report:view"] }), false, "只有报表权限时不能读取养护工单待办");
 assert.equal(canIncludeWorkbenchWorkOrders({ isPlatformAdmin: false, permissions: ["rental-core:maintenance:view"] }), true, "维护查看权限可以读取养护工单待办");
 assert.equal(canIncludeWorkbenchWorkOrders({ isPlatformAdmin: true, permissions: [] }), true, "平台管理员沿用全局可见能力");
 assert.equal(canIncludeWorkbenchOrderTodos({ isPlatformAdmin: false, permissions: ["rental-core:maintenance:view"] }), false, "仅维护查看权限不能读取订单待办");
-assert.equal(canIncludeWorkbenchOrderTodos({ isPlatformAdmin: false, permissions: ["store-rental:report:view"] }), true, "报表角色保留既有工作台订单待办口径");
-assert.equal(canIncludeWorkbenchOrderTodos({ isPlatformAdmin: false, permissions: ["store-rental:order:view"] }), true, "订单查看角色可以读取订单待办");
+assert.equal(canIncludeWorkbenchOrderTodos({ isPlatformAdmin: false, permissions: ["rental-os:report:view"] }), true, "报表角色保留既有工作台订单待办口径");
+assert.equal(canIncludeWorkbenchOrderTodos({ isPlatformAdmin: false, permissions: ["rental-os:order:view"] }), true, "订单查看角色可以读取订单待办");
 
 // 维护人员必须有工作台的路由/API入口，否则上面的维护待办聚合只能从单元测试里存在，
 // 实际账号永远进不去。这里同时钉住前端路由、后端守卫和 OpenAPI 权限契约，避免只改一层。
 const navigationSource = fs.readFileSync(path.join(__dirname, "../apps/admin/src/app/navigation.tsx"), "utf8");
 const guardSource = fs.readFileSync(path.join(__dirname, "../apps/api/src/common/api-auth.guard.ts"), "utf8");
 const openapiSource = fs.readFileSync(path.join(__dirname, "../apps/api/src/contracts/openapi-document.ts"), "utf8");
-assert.ok(navigationSource.includes('legacyPermissions: ["store-rental:order:view", "rental-core:maintenance:view"]'), "工作台前端路由必须允许维护查看权限");
-assert.ok(guardSource.includes('path === "/rental/v1/workbench/todos") return ["store-rental:report:view", "store-rental:order:view", "rental-core:maintenance:view"]'), "工作台 API 必须允许维护查看权限");
-assert.ok(openapiSource.includes('permissions: ["store-rental:report:view", "store-rental:order:view", "rental-core:maintenance:view"]'), "OpenAPI 工作台权限必须与守卫一致");
+assert.ok(navigationSource.includes('legacyPermissions: ["rental-os:order:view", "rental-core:maintenance:view"]'), "工作台前端路由必须允许维护查看权限");
+assert.ok(guardSource.includes('path === "/rental/v1/workbench/todos") return ["rental-os:report:view", "rental-os:order:view", "rental-core:maintenance:view"]'), "工作台 API 必须允许维护查看权限");
+assert.ok(openapiSource.includes('permissions: ["rental-os:report:view", "rental-os:order:view", "rental-core:maintenance:view"]'), "OpenAPI 工作台权限必须与守卫一致");
 
 console.log(`\n工作台统一待办专项：${todos.items.length + 4} 项全部通过`);

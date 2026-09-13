@@ -24,7 +24,7 @@ import type {
   RentalValueAddedService,
   TenantRentalBusinessSettings,
   TenantRentalProfile
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 
 /**

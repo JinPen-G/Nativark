@@ -5,7 +5,7 @@ import type {
   RentalCapabilityLifecycleStatus,
   SaveWorkspaceCapabilityRequest,
   WorkspaceCapabilityView
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Button, Card, Drawer, Form, Input, InputNumber, Select, Space, Switch, Table, Tag, Tooltip, Typography } from "antd";
 import { useState } from "react";

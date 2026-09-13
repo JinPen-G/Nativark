@@ -7,7 +7,7 @@ require("ts-node").register({
 
 const { RentalCoreService } = require("../apps/api/src/modules/rental-core/rental-core.service");
 const { RentalServiceCapacityService } = require("../apps/api/src/modules/rental-core/rental-service-capacity.service");
-const { RentalCoreOrderStatus } = require("@store-rental/shared");
+const { RentalCoreOrderStatus } = require("@rental-os/shared");
 
 let passed = 0;
 const ok = (message) => { passed += 1; console.log(`  PASS  ${message}`); };

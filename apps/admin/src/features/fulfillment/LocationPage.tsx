@@ -1,5 +1,5 @@
 import { PlusOutlined, SearchOutlined } from "@ant-design/icons";
-import type { RentalFulfillmentLocation, RentalFulfillmentOperator, SaveRentalFulfillmentLocationRequest, SaveRentalFulfillmentOperatorRequest } from "@store-rental/shared";
+import type { RentalFulfillmentLocation, RentalFulfillmentOperator, SaveRentalFulfillmentLocationRequest, SaveRentalFulfillmentOperatorRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { App, Button, Card, Col, Drawer, Form, Input, Row, Select, Space, Table, Tag } from "antd";
 import { useMemo, useState } from "react";
@@ -15,7 +15,7 @@ const capabilityLabels: Record<string, string> = { pickup: "领取", return: "�
 export function LocationPage() {
   const { message } = App.useApp();
   const queryClient = useQueryClient();
-  const canManage = useAuthStore((state) => state.hasPermission("store-rental:station:manage"));
+  const canManage = useAuthStore((state) => state.hasPermission("rental-os:station:manage"));
   const [keyword, setKeyword] = useState("");
   const [editing, setEditing] = useState<RentalFulfillmentLocation>();
   const [editingOperator, setEditingOperator] = useState<RentalFulfillmentOperator>();

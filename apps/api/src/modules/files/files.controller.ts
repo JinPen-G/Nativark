@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Post, Query } from "@nestjs/common";
-import type { CreateFileAssetRequest, FileAssetQuery } from "@store-rental/shared";
+import type { CreateFileAssetRequest, FileAssetQuery } from "@rental-os/shared";
 import { IntegrationsService } from "../integrations/integrations.service";
 
 @Controller("files")

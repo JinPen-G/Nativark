@@ -1,4 +1,4 @@
-import type { CustomerAccountStatus, CustomerMembershipPlanAssignment, CustomerMembershipQualificationType, CustomerMembershipStatus, CustomerQualificationRevision, PersonalMembershipMember, SubmitCustomerQualificationRequest } from "@store-rental/shared";
+import type { CustomerAccountStatus, CustomerMembershipPlanAssignment, CustomerMembershipQualificationType, CustomerMembershipStatus, CustomerQualificationRevision, PersonalMembershipMember, SubmitCustomerQualificationRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Button, Card, Checkbox, Drawer, Form, Input, Modal, Radio, Select, Space, Table, Tag, Tooltip } from "antd";
 import { useState } from "react";
@@ -22,7 +22,7 @@ type StatusForm = {
 };
 export function PersonalMembershipPage() {
   const { message } = App.useApp(); const queryClient = useQueryClient(); const hasPermission = useAuthStore((state) => state.hasPermission);
-  const canManage = hasPermission("store-rental:member:manage"); const canManageAccount = hasPermission("store-rental:member:account-manage"); const canDirectApprove = hasPermission("store-rental:member:review"); const canRiskAction = hasPermission("store-rental:member:risk-action"); const canClose = hasPermission("store-rental:customer:close");
+  const canManage = hasPermission("rental-os:member:manage"); const canManageAccount = hasPermission("rental-os:member:account-manage"); const canDirectApprove = hasPermission("rental-os:member:review"); const canRiskAction = hasPermission("rental-os:member:risk-action"); const canClose = hasPermission("rental-os:customer:close");
   const [selected, setSelected] = useState<PersonalMembershipMember>(); const [drawer, setDrawer] = useState<"create" | "edit" | "password" | "qualification" | "types" | "grant">(); const [revokeTarget, setRevokeTarget] = useState<CustomerMembershipPlanAssignment>();
   const [statusTarget, setStatusTarget] = useState<PersonalMembershipMember>(); const [statusScope, setStatusScope] = useState<"account" | "workspace">();
   const [form] = Form.useForm<PersonalForm>(); const [qualificationForm] = Form.useForm<SubmitCustomerQualificationRequest>(); const [typeForm] = Form.useForm<CustomerMembershipQualificationType>(); const [grantForm] = Form.useForm<{ planVersionId: string; effectiveFrom?: string; effectiveTo?: string; reason?: string }>(); const [revokeForm] = Form.useForm<{ reason: string }>(); const [statusForm] = Form.useForm<StatusForm>();

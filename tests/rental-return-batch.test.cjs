@@ -14,7 +14,7 @@ require("ts-node").register({
 // 这里测的是**兜底键的区分能力**与缺标识时的 fail-closed，不测库存扣减本身
 // （那部分由 rental-order-settlement 专项覆盖）。
 const { RentalCoreController } = require("../apps/api/src/modules/rental-core/rental-core.controller");
-const { RentalCoreOrderStatus } = require("@store-rental/shared");
+const { RentalCoreOrderStatus } = require("@rental-os/shared");
 
 let passed = 0;
 const ok = (message) => { passed += 1; console.log(`  PASS  ${message}`); };

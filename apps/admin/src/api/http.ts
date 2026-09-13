@@ -1,5 +1,5 @@
 import axios from "axios";
-import type { ApiResult, LoginResponse } from "@store-rental/shared";
+import type { ApiResult, LoginResponse } from "@rental-os/shared";
 import type { InternalAxiosRequestConfig } from "axios";
 import { clearSessionQueryCache, currentSessionSignal } from "@/app/queryClient";
 

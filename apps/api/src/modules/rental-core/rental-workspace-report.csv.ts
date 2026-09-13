@@ -1,5 +1,5 @@
-import type { RentalWorkspaceOperationReport } from "@store-rental/shared";
-import { RENTAL_EXCEPTION_CHARGE_TYPES } from "@store-rental/shared";
+import type { RentalWorkspaceOperationReport } from "@rental-os/shared";
+import { RENTAL_EXCEPTION_CHARGE_TYPES } from "@rental-os/shared";
 
 /**
  * REPORT-01B：把经营报表渲染成 CSV。

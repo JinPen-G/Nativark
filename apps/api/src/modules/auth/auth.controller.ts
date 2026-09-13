@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Headers, Post } from "@nestjs/common";
-import type { ChangePasswordRequest, RefreshSessionRequest, SwitchWorkspaceRequest } from "@store-rental/shared";
+import type { ChangePasswordRequest, RefreshSessionRequest, SwitchWorkspaceRequest } from "@rental-os/shared";
 import { IsNotEmpty, IsString } from "class-validator";
 import { AuthService } from "./auth.service";
 import { ChangePasswordDto, RefreshSessionDto, ResetLocalDemoPasswordDto, SwitchWorkspaceDto } from "./auth-request.dto";

@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Post, Put, Query, Req } from "@nestjs/common";
-import type { SystemUserRow } from "@store-rental/shared";
+import type { SystemUserRow } from "@rental-os/shared";
 import { requireRequestTenantId, requireRequestWorkspaceId } from "../../common/request-identity";
 import {
   AssignCustomerMembershipPlanDto,
@@ -53,8 +53,8 @@ export class MembershipController {
   @Post("personal")
   registerPersonal(@Body() body: RegisterPersonalMembershipDto, @Req() req: RequestWithUser) {
     const { tenantId, workspaceId } = this.scope();
-    const canDirectApprove = Boolean(req.user?.isPlatformAdmin || req.user?.permissions.includes("*") || req.user?.permissions.includes("store-rental:member:review"));
-    const canManageAccount = Boolean(req.user?.isPlatformAdmin || req.user?.permissions.includes("*") || req.user?.permissions.includes("store-rental:member:account-manage"));
+    const canDirectApprove = Boolean(req.user?.isPlatformAdmin || req.user?.permissions.includes("*") || req.user?.permissions.includes("rental-os:member:review"));
+    const canManageAccount = Boolean(req.user?.isPlatformAdmin || req.user?.permissions.includes("*") || req.user?.permissions.includes("rental-os:member:account-manage"));
     return this.memberships.registerPersonal(tenantId, workspaceId, body, req.user?.displayName, canDirectApprove, canManageAccount);
   }
 
@@ -101,8 +101,8 @@ export class MembershipController {
     const { tenantId, workspaceId } = this.scope();
     const all = Boolean(req.user?.isPlatformAdmin || req.user?.permissions.includes("*"));
     return this.memberships.review(tenantId, workspaceId, reviewId, body, req.user?.displayName, {
-      registration: all || Boolean(req.user?.permissions.includes("store-rental:member:review")),
-      qualification: all || Boolean(req.user?.permissions.includes("store-rental:member:qualification-review"))
+      registration: all || Boolean(req.user?.permissions.includes("rental-os:member:review")),
+      qualification: all || Boolean(req.user?.permissions.includes("rental-os:member:qualification-review"))
     });
   }
 

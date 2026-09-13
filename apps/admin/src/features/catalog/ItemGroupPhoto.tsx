@@ -1,4 +1,4 @@
-import type { RentalItemGroupImage } from "@store-rental/shared";
+import type { RentalItemGroupImage } from "@rental-os/shared";
 import { useQuery } from "@tanstack/react-query";
 import { Image } from "antd";
 import { useEffect, useState } from "react";

@@ -5,7 +5,7 @@ import type {
   CustomerMembershipStatus,
   CustomerMergePreview,
   MergeCustomersRequest
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { $Enums, Prisma } from "@prisma/client";
 import { PrismaService } from "../database/prisma.service";
 import { CustomerOperationsRepository } from "./customer-operations.repository";

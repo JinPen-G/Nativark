@@ -37,7 +37,7 @@ function loadPureTsModule(relative) {
   return shim.exports;
 }
 
-const { RENTAL_CATEGORY_DEFINITIONS } = require("@store-rental/shared");
+const { RENTAL_CATEGORY_DEFINITIONS } = require("@rental-os/shared");
 const { resolveTenantNavigationLabels, applyTenantNavigationLabels } = loadPureTsModule("apps/admin/src/app/navigation-terminology.ts");
 
 const ok = (m) => console.log(`  ✓ ${m}`);
@@ -110,11 +110,11 @@ void (() => {
   const registry = [
     { key: "inventory", label: "商品与资产", routes: [
       { path: PATHS.itemGroups, label: "商品目录", permission: "rental-core:catalog:view" },
-      { path: PATHS.pricingGroups, label: "定价分组", permission: "store-rental:price:manage" },
+      { path: PATHS.pricingGroups, label: "定价分组", permission: "rental-os:price:manage" },
       { path: PATHS.assets, label: "资产与库存", permission: "rental-core:asset:view" },
-      { path: PATHS.locations, label: "履约地点", permission: "store-rental:station:view" }
+      { path: PATHS.locations, label: "履约地点", permission: "rental-os:station:view" }
     ] },
-    { key: "transactions", label: "租赁交易", routes: [{ path: "/rental/orders", label: "订单管理", permission: "store-rental:order:view" }] },
+    { key: "transactions", label: "租赁交易", routes: [{ path: "/rental/orders", label: "订单管理", permission: "rental-os:order:view" }] },
     { key: "platform-management", label: "平台管理", routes: [{ path: "/platform/tenants", label: "SaaS 租户", permission: "system:tenant:manage" }] }
   ];
   const applied = applyTenantNavigationLabels(registry, byCode("vehicle").terminology, PATHS);
@@ -181,9 +181,9 @@ void (() => {
   // ============ 7. 只改文案，不改路由与鉴权契约 ============
   for (const [routePath, permission] of [
     ["/rental/item-groups", "rental-core:catalog:view"],
-    ["/rental/pricing-groups", "store-rental:price:manage"],
+    ["/rental/pricing-groups", "rental-os:price:manage"],
     ["/rental/assets", "rental-core:asset:view"],
-    ["/rental/locations", "store-rental:station:view"]
+    ["/rental/locations", "rental-os:station:view"]
   ]) {
     assert.ok(nav.includes(`path: "${routePath}"`), `路由路径 ${routePath} 不得变更`);
     assert.ok(nav.includes(`permission: "${permission}"`), `权限码 ${permission} 不得变更`);

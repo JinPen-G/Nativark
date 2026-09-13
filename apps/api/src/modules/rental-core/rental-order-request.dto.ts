@@ -34,7 +34,7 @@ import {
   type SaveTenantRentalProfileRequest,
   type SendRentalNotificationRequest,
   type SubstituteRentalBundleComponentRequest
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { Type } from "class-transformer";
 import {
   ArrayNotEmpty,

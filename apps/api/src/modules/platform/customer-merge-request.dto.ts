@@ -1,5 +1,5 @@
 import { IsNotEmpty, IsObject, IsOptional, IsString, MaxLength } from "class-validator";
-import type { MergeCustomersRequest } from "@store-rental/shared";
+import type { MergeCustomersRequest } from "@rental-os/shared";
 
 /**
  * CUSTOMER-01D：人工合并请求。

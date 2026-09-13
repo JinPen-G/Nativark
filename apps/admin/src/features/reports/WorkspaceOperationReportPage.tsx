@@ -4,8 +4,8 @@ import type {
   RentalWorkspaceLocationBreakdownRow,
   RentalWorkspaceOperationReport,
   RentalWorkspaceReportFilter
-} from "@store-rental/shared";
-import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol } from "@store-rental/shared";
+} from "@rental-os/shared";
+import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol } from "@rental-os/shared";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, App, Button, Card, Col, DatePicker, Descriptions, Input, Row, Select, Space, Statistic, Table, Tag } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
@@ -21,7 +21,7 @@ import { QueryState } from "@/components/QueryState";
  *   1. **指标定义不随品类变化**。页面标题用当前品类术语（器材/装备/车辆/设备），
  *      但「租赁收入」「应收金额」的算法四个品类完全一致，因此指标卡的标签
  *      是固定文案，不做术语替换——否则同一个数字在两个空间会被读成两种含义。
- *   2. **不展示任何车辆/门市专用字段**。车牌、门店、计费模式在非车辆品类里
+ *   2. **不展示任何车辆/履约地点专用字段**。车牌、门店、计费模式在非车辆品类里
  *      根本不存在；报表只显示 Rental Core 规范化事实。
  *   3. **库存与资产是当前快照，不是区间利用率**。库里没有资产状态历史，
  *      因此区间利用率在数据上不存在；页面必须把这一点显著标出来，

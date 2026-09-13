@@ -6,7 +6,7 @@ require("ts-node").register({
 });
 
 const { CapabilityHookRuntime } = require("../apps/api/src/modules/rental-core/capability-hook.runtime");
-const { RENTAL_CAPABILITY_HOOK_POINTS } = require("@store-rental/shared");
+const { RENTAL_CAPABILITY_HOOK_POINTS } = require("@rental-os/shared");
 
 /**
  * CORE-EXT-02B：Hook 运行时的判定口径。

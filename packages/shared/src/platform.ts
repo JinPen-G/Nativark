@@ -33,8 +33,8 @@ export enum RoleScope {
   Station = "station"
 }
 
-export enum StoreRentalMode {
-  Store = "store_rental",
+export enum RentalMode {
+  Rental = "rental_os",
   SelfService24h = "self_service_24h"
 }
 
@@ -61,7 +61,7 @@ export enum OrderMainStatus {
  * 车辆兼容域订单主状态的合法转移表。
  *
  * 这是该状态机唯一的成文规格：生产代码把转移规则分散在
- * `store-rental.service.ts` 的各个 action 处理器里，没有集中定义。
+ * `rental-os.service.ts` 的各个 action 处理器里，没有集中定义。
  * 本表由已隔离的 `tests/e2e-order-flow.test.cjs` 提炼而来，键集与
  * `OrderMainStatus` 完全一致，可供 ORDER-01 在服务端集中校验非法转移时引用。
  *
@@ -627,13 +627,13 @@ export interface GeneratePlatformNumberResult {
 }
 
 export type PlatformFilterPresetScope =
-  | "store-rental.orders"
-  | "store-rental.vehicles"
-  | "store-rental.members"
-  | "store-rental.corporates"
-  | "store-rental.stations"
-  | "store-rental.vehicle-transfer"
-  | "store-rental.contracts";
+  | "rental-os.orders"
+  | "rental-os.vehicles"
+  | "rental-os.members"
+  | "rental-os.corporates"
+  | "rental-os.stations"
+  | "rental-os.vehicle-transfer"
+  | "rental-os.contracts";
 
 export interface PlatformFilterPreset {
   id: string;

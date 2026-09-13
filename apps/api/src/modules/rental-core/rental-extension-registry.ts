@@ -3,7 +3,7 @@ import {
   type RentalCapability,
   type RentalCapabilityDefinition,
   type RentalCategoryDefinition
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { assertRentalPricingStrategiesComplete, rentalPricingStrategy } from "./rental-pricing-strategy";
 
 /**

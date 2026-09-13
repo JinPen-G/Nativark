@@ -10,7 +10,7 @@ const {
   buildCameraCompatibilityHookModule,
   CAMERA_COMPATIBILITY_RULESET_VERSION
 } = require("../apps/api/src/modules/rental-core/capabilities/camera-compatibility");
-const { RENTAL_CAPABILITY_MODULES, RENTAL_CATEGORY_DEFINITIONS } = require("@store-rental/shared");
+const { RENTAL_CAPABILITY_MODULES, RENTAL_CATEGORY_DEFINITIONS } = require("@rental-os/shared");
 
 /**
  * CAM-01A：摄影器材兼容性规则集与 Hook 判定。

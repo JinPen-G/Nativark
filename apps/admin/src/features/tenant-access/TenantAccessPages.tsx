@@ -9,8 +9,8 @@ import type {
   SystemRoleRow,
   SystemUserRow,
   WorkspaceMember
-} from "@store-rental/shared";
-import { RoleScope } from "@store-rental/shared";
+} from "@rental-os/shared";
+import { RoleScope } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,

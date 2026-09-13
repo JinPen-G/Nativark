@@ -1,5 +1,5 @@
 import { ArrowLeftOutlined, CheckCircleOutlined, DollarOutlined, MinusCircleOutlined, PlusOutlined, RetweetOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
-import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol, type CorrectRentalInspectionUsageRequest, type CreateRentalInspectionRequest, type RecordRentalInspectionExceptionCustomerResponseRequest, type RentalAllocation, type RentalFundingAction, type RentalFundingInstrument, type RentalInspectionTemplate, type RentalOrderExtension, type RentalOrderExtensionPreview, type RentalOrderFeeReview, type RentalOrderServiceOccurrence, type RentalReservation, type RentalServiceExecutionAction, type UpdateRentalServiceOccurrenceRequest, type RentalWorkOrder, type RentalStockDisposition } from "@store-rental/shared";
+import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol, type CorrectRentalInspectionUsageRequest, type CreateRentalInspectionRequest, type RecordRentalInspectionExceptionCustomerResponseRequest, type RentalAllocation, type RentalFundingAction, type RentalFundingInstrument, type RentalInspectionTemplate, type RentalOrderExtension, type RentalOrderExtensionPreview, type RentalOrderFeeReview, type RentalOrderServiceOccurrence, type RentalReservation, type RentalServiceExecutionAction, type UpdateRentalServiceOccurrenceRequest, type RentalWorkOrder, type RentalStockDisposition } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Button, Card, DatePicker, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
@@ -84,19 +84,19 @@ export function RentalOrderDetailPage() {
   const { message, modal } = App.useApp();
   const queryClient = useQueryClient();
   const hasPermission = useAuthStore((state) => state.hasPermission);
-  const canViewFunding = hasPermission("store-rental:order:view") || hasPermission("store-rental:order:settle");
-  const canSettleFunding = hasPermission("store-rental:order:settle");
+  const canViewFunding = hasPermission("rental-os:order:view") || hasPermission("rental-os:order:settle");
+  const canSettleFunding = hasPermission("rental-os:order:settle");
   // ORDER-CLOSE-02：裁定「该收/该退多少」与实际动钱是两个权限。只有裁定权的人看得到
   // 审核按钮但看不到收退款按钮；只有资金权的人反之。两者都不给的账号只能查看。
   const WORK_ORDER_STATUS_LABELS: Record<string, { label: string; color: string }> = { pending: { label: "待处理", color: "default" }, in_progress: { label: "处理中", color: "processing" }, pending_review: { label: "待验收", color: "warning" }, completed: { label: "已完成", color: "success" }, rejected: { label: "验收驳回", color: "error" }, cancelled: { label: "已取消", color: "default" } };
   const canViewWorkOrders = hasPermission("rental-core:maintenance:view");
-  const canViewDispositions = canViewWorkOrders || hasPermission("rental-core:asset:view") || hasPermission("rental-core:asset:manage") || hasPermission("store-rental:vehicle:view");
-  const canReviewFees = hasPermission("store-rental:order:fee-review");
-  const canOperate = hasPermission("store-rental:order:operate");
-  const canPickup = canOperate || hasPermission("store-rental:order:pickup");
-  const canReturn = canOperate || hasPermission("store-rental:order:return");
-  const canExtend = canOperate || hasPermission("store-rental:order:extend");
-  const canCancel = canOperate || hasPermission("store-rental:order:cancel");
+  const canViewDispositions = canViewWorkOrders || hasPermission("rental-core:asset:view") || hasPermission("rental-core:asset:manage") || hasPermission("rental-os:vehicle:view");
+  const canReviewFees = hasPermission("rental-os:order:fee-review");
+  const canOperate = hasPermission("rental-os:order:operate");
+  const canPickup = canOperate || hasPermission("rental-os:order:pickup");
+  const canReturn = canOperate || hasPermission("rental-os:order:return");
+  const canExtend = canOperate || hasPermission("rental-os:order:extend");
+  const canCancel = canOperate || hasPermission("rental-os:order:cancel");
   const [operationSession, setOperationSession] = useState<{ id: string; token?: string }>();
   const operationToken = operationSession?.id === id ? operationSession.token : sessionStorage.getItem(`rental-operation:${id}`) ?? undefined;
   const setOperationToken = (token?: string) => { if (token) sessionStorage.setItem(`rental-operation:${id}`, token); else sessionStorage.removeItem(`rental-operation:${id}`); setOperationSession({ id, token }); };

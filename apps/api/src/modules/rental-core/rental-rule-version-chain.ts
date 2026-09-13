@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException } from "@nestjs/common";
-import type { RentalRuleVersionStatus } from "@store-rental/shared";
+import type { RentalRuleVersionStatus } from "@rental-os/shared";
 
 /**
  * RULE-01A：规则版本链的时点匹配、展示状态与冲突判定（需求 4.6.1、4.6.14）。

@@ -27,7 +27,7 @@ import type {
   RentalBookingIdentityInput,
   RentalMembershipSnapshot,
   RentalRuleConfig
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 import { evaluateRentalQualification, type RentalQualificationAction, type RentalQualificationCheckWindow } from "../rental-core/rental-qualification";
 
@@ -59,7 +59,7 @@ const evidenceRefOrUndefined = (value?: string) => {
  * MEMBER-01 的新体系服务。
  *
  * 这个服务只操作 CustomerProfile / CustomerAccount / CustomerWorkspaceLink 及其新扩展表；
- * 不读取、不写入旧 Member 或 MembershipPlan。旧表尚保留是为了让已有门市订单能安全退役，
+ * 不读取、不写入旧 Member 或 MembershipPlan。旧表尚保留是为了让历史订单能安全退役，
  * 而不是允许新旧体系双写。
  */
 @Injectable()

@@ -10,7 +10,7 @@ require("ts-node").register({
 const {
   RENTAL_CATEGORY_DEFINITIONS,
   RENTAL_CAPABILITY_MODULES
-} = require("@store-rental/shared");
+} = require("@rental-os/shared");
 const {
   assertRentalCategoryExtensions,
   assertRentalCapabilityRegistry
@@ -204,19 +204,19 @@ const makeGuard = (isEnabled) => new ApiAuthGuard(vehicleAuthStub, { async isEna
 
 // 未启用 dispatch：能力分支必须拒绝。
 await assert.rejects(
-  makeGuard(false).canActivate(guardContext("GET", "/api/store-rental/dispatch/board")),
+  makeGuard(false).canActivate(guardContext("GET", "/api/rental-os/dispatch/board")),
   /未启用该业务能力/u,
   "capability 未启用时 Guard 必须拒绝（这条捕获任何绕过 isEnabled 的改动）"
 );
 // 启用 dispatch：放行。
 assert.equal(
-  await makeGuard(true).canActivate(guardContext("GET", "/api/store-rental/dispatch/board")),
+  await makeGuard(true).canActivate(guardContext("GET", "/api/rental-os/dispatch/board")),
   true,
   "capability 已启用时 Guard 必须放行"
 );
 // 缺少能力服务（装配被改坏）：fail-closed 拒绝，而不是放行。
 await assert.rejects(
-  new ApiAuthGuard(vehicleAuthStub).canActivate(guardContext("GET", "/api/store-rental/dispatch/board")),
+  new ApiAuthGuard(vehicleAuthStub).canActivate(guardContext("GET", "/api/rental-os/dispatch/board")),
   /能力门禁未就绪/u,
   "缺少能力服务时必须 fail-closed 拒绝，绝不放行"
 );

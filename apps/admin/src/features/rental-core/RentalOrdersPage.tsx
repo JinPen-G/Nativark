@@ -1,6 +1,6 @@
 import { PlusOutlined, SearchOutlined } from "@ant-design/icons";
-import type { RentalOrder } from "@store-rental/shared";
-import { formatRentalMoney, rentalAllocationProgress } from "@store-rental/shared";
+import type { RentalOrder } from "@rental-os/shared";
+import { formatRentalMoney, rentalAllocationProgress } from "@rental-os/shared";
 import { useQuery } from "@tanstack/react-query";
 import { Button, Card, Checkbox, DatePicker, Input, Row, Col, Segmented, Space, Table, Tag } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
@@ -16,8 +16,8 @@ const statusLabels: Record<string, string> = { draft: "软预占", reserved: "�
 
 export function RentalOrdersPage() {
   const navigate = useNavigate();
-  const canOperate = useAuthStore((s) => s.hasPermission("store-rental:order:operate"));
-  const canCreate = useAuthStore((s) => s.hasPermission("store-rental:order:create"));
+  const canOperate = useAuthStore((s) => s.hasPermission("rental-os:order:operate"));
+  const canCreate = useAuthStore((s) => s.hasPermission("rental-os:order:create"));
   const [assignmentFilter, setAssignmentFilter] = useState("全部分配");
   const [keyword, setKeyword] = useState("");
   const [status, setStatus] = useState<string>("all");

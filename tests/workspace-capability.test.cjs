@@ -8,7 +8,7 @@ require("ts-node").register({
 const { WorkspaceCapabilityService } = require("../apps/api/src/modules/rental-core/workspace-capability.service");
 const { WorkspaceCapabilityRepository } = require("../apps/api/src/modules/rental-core/workspace-capability.repository");
 const { assertRentalCapabilityRegistry } = require("../apps/api/src/modules/rental-core/rental-extension-registry");
-const { RENTAL_CAPABILITY_MODULES, RENTAL_CATEGORY_DEFINITIONS } = require("@store-rental/shared");
+const { RENTAL_CAPABILITY_MODULES, RENTAL_CATEGORY_DEFINITIONS } = require("@rental-os/shared");
 const { ConflictException } = require("@nestjs/common");
 
 /**

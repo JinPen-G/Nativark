@@ -64,7 +64,7 @@ function requiredCredential(name) {
 }
 
 const TEST_DB = process.env.TENANT_READY_DATABASE_NAME || "rental_os_zcode_firstorder";
-const MYSQL_CONTAINER = process.env.E2E_MYSQL_CONTAINER || "store-rental-mysql";
+const MYSQL_CONTAINER = process.env.E2E_MYSQL_CONTAINER || "rental-os-mysql";
 const MYSQL_ROOT_PASSWORD = requiredCredential("MYSQL_ROOT_PASSWORD");
 const PLATFORM_PASSWORD = requiredCredential("E2E_PLATFORM_PASSWORD");
 const SEED_DEMO_PASSWORD = requiredCredential("E2E_DEMO_PASSWORD");
@@ -76,7 +76,7 @@ const API_BASE = `http://localhost:${API_PORT}`;
 
 assert.match(TEST_DB, /^[a-z][a-z0-9_]{2,62}$/u, "专用库名只允许小写字母、数字和下划线");
 assert.ok(TEST_DB.includes("zcode"), "专用库名必须包含 zcode，防止误操作其他工作树的数据库");
-assert.ok(!["store_rental", "rental_os"].includes(TEST_DB), "禁止将专项指向共享开发库");
+assert.ok(!["rental_os", "rental_os"].includes(TEST_DB), "禁止将专项指向共享开发库");
 assert.match(MYSQL_CONTAINER, /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/u, "容器名格式非法");
 assert.ok(Number.isInteger(API_PORT) && API_PORT >= 1024 && API_PORT <= 65535, "TENANT_READY_API_PORT 必须是 1024-65535 的整数");
 
@@ -208,7 +208,7 @@ function startApi() {
       ...process.env,
       DATABASE_URL: TEST_DATABASE_URL,
       PLATFORM_DATA_SOURCE: "mysql",
-      STORE_RENTAL_DATA_SOURCE: "mysql",
+      RENTAL_OS_DATA_SOURCE: "mysql",
       INFRA_DATA_SOURCE: "mysql",
       AUTH_TOKEN_SECRET: randomBytes(32).toString("hex"),
       API_PORT: String(API_PORT),
@@ -337,7 +337,7 @@ async function createMockFunding(order, token, keyPrefix) {
 
 async function main() {
   if (fs.existsSync(path.join(API_DIR, "dist", "main.js")) === false) {
-    fail("apps/api/dist/main.js 不存在：请先执行 npm run build -w @store-rental/api 再运行本专项");
+    fail("apps/api/dist/main.js 不存在：请先执行 npm run build -w @rental-os/api 再运行本专项");
   }
   if (await probePort()) fail(`端口 ${API_PORT} 已被占用，拒绝启动专项 API`);
 
@@ -345,7 +345,7 @@ async function main() {
   mysqlRootExec(
     `DROP DATABASE IF EXISTS \`${TEST_DB}\`;\n` +
       `CREATE DATABASE \`${TEST_DB}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\n` +
-      `GRANT ALL PRIVILEGES ON \`${TEST_DB}\`.* TO 'store_rental'@'%';`
+      `GRANT ALL PRIVILEGES ON \`${TEST_DB}\`.* TO 'rental_os'@'%';`
   );
   ok(`专用库 ${TEST_DB} 已重建`);
 

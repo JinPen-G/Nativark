@@ -1,5 +1,5 @@
 import { ApartmentOutlined, CheckCircleOutlined, InfoCircleOutlined, PlusOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
-import { RentalCoreOrderStatus, RentalInventoryMode, formatRentalMoney, type CreateRentalOrderRequest, type RentalInspectionTemplate, type RentalOrder } from "@store-rental/shared";
+import { RentalCoreOrderStatus, RentalInventoryMode, formatRentalMoney, type CreateRentalOrderRequest, type RentalInspectionTemplate, type RentalOrder } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Button, Card, Col, DatePicker, Descriptions, Drawer, Empty, Form, Input, InputNumber, Modal, Row, Select, Space, Statistic, Table, Tabs, Tag, Typography } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
@@ -66,7 +66,7 @@ export function RentalCorePage() {
   return (
     <>
       <PageHeader title="Rental Core v0.1" description="租户品类、三种库存模式、多行订单、服务端报价、预占配货和动态检查。" extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => { orderForm.setFieldsValue({ customerType: "personal", fulfillmentMode: settings.data?.fulfillment.enabledModes[0] ?? "store_pickup_return", fulfillmentLocationId: locations.data?.[0]?.id, period: [dayjs().add(1, "day").hour(9), dayjs().add(2, "day").hour(18)], lines: [{ itemGroupId: groups.data?.[0]?.id ?? "", quantity: 1 }] }); setOrderOpen(true); }}>新建 Core 订单</Button>} />
-      <div className="context-note"><InfoCircleOutlined /><span>摄影、露营、车辆和工程设备统一使用 Rental Core；车辆专属能力通过 capability 扩展，不读取旧门市租赁数据。demo 为摄影样本、demo2 为露营样本。</span></div>
+      <div className="context-note"><InfoCircleOutlined /><span>摄影、露营、车辆和工程设备统一使用 Rental Core；车辆专属能力通过 capability 扩展，不读取旧租赁业务数据。demo 为摄影样本、demo2 为露营样本。</span></div>
       <QueryState loading={profile.isLoading || groups.isLoading} error={profile.error || groups.error}>
         <div className="metric-grid">
           <Card className="metric-card"><Statistic title="当前经营品类" value={currentCategory?.name ?? profile.data?.categoryCode ?? "-"} prefix={<ApartmentOutlined />} /><div className="metric-foot"><span>单空间单品类</span><span className="metric-trend">已配置</span></div></Card>

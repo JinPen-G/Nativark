@@ -48,7 +48,7 @@ function loadCanAccessRoute(mutate) {
 }
 
 const saasRoute = { path: "/platform/tenants", audience: "saas", permission: "system:tenant:manage" };
-const tenantRoute = { path: "/rental/orders", audience: "tenant", permission: "store-rental:order:view" };
+const tenantRoute = { path: "/rental/orders", audience: "tenant", permission: "rental-os:order:view" };
 // 关键账号：持有 SaaS 路由所需权限码的**租户**账号——audience 检查正是防这个面：
 // 权限再大，跨了运行面（tenant → saas）就必须被拦。
 const saasPermissionHolder = (permission) => permission === "system:tenant:manage";
@@ -58,7 +58,7 @@ const saasPermissionHolder = (permission) => permission === "system:tenant:manag
 const canAccessRouteOriginal = loadCanAccessRoute(null);
 assert.equal(canAccessRouteOriginal(saasRoute, saasPermissionHolder, () => true, undefined, false), false, "原版门禁必须拦截持有 SaaS 权限码的租户账号访问 SaaS 路由");
 // 正向对照：持租户权限码的账号访问租户路由必须放行——证明拦截来自运行面而非权限缺失。
-assert.equal(canAccessRouteOriginal(tenantRoute, (permission) => permission === "store-rental:order:view", () => true, undefined, false), true, "持租户权限码的账号访问租户路由必须放行");
+assert.equal(canAccessRouteOriginal(tenantRoute, (permission) => permission === "rental-os:order:view", () => true, undefined, false), true, "持租户权限码的账号访问租户路由必须放行");
 
 const canAccessRouteMutated = loadCanAccessRoute((fn) =>
   fn.replace('if ((route.audience === "saas") !== isSaasAdmin) return false;', "")
@@ -77,10 +77,10 @@ assert.ok(
 // 入口按权限显示的门禁在两层：路由层 canAccessRoute（变异 3 已锁定）与业务页消费层。
 // 会员审核/账号管理/企业员工三个入口必须消费各自的操作权限码（任务书点名）。
 const membershipPage = fs.readFileSync(path.join(ROOT, "apps/admin/src/features/membership/PersonalMembershipPage.tsx"), "utf8");
-assert.match(membershipPage, /hasPermission\("store-rental:member:review"\)/, "会员审核入口必须消费 member:review 操作权限");
-assert.match(membershipPage, /hasPermission\("store-rental:member:account-manage"\)/, "账号管理入口必须消费 member:account-manage 操作权限");
+assert.match(membershipPage, /hasPermission\("rental-os:member:review"\)/, "会员审核入口必须消费 member:review 操作权限");
+assert.match(membershipPage, /hasPermission\("rental-os:member:account-manage"\)/, "账号管理入口必须消费 member:account-manage 操作权限");
 const corporatePage = fs.readFileSync(path.join(ROOT, "apps/admin/src/features/membership/CorporateMembershipPage.tsx"), "utf8");
-assert.match(corporatePage, /hasPermission\("store-rental:corporate:employee-manage"\)/, "企业员工入口必须消费 corporate:employee-manage 操作权限");
+assert.match(corporatePage, /hasPermission\("rental-os:corporate:employee-manage"\)/, "企业员工入口必须消费 corporate:employee-manage 操作权限");
 ok("权限区分：操作可见性只来自 permission 判断，dataScope 不被当作操作门禁");
 
 /* ---------- 变异 1：漏 tenant/workspace ---------- */

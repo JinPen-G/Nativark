@@ -4,7 +4,7 @@ import type {
   RentalQuoteServiceSnapshot,
   RentalServiceMandatoryRule,
   RentalValueAddedService
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { businessDayIndex } from "./rental-business-day";
 
 /**

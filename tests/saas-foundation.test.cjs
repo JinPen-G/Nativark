@@ -18,7 +18,7 @@ const { hashPassword, verifyPassword } = require("../apps/api/src/common/passwor
 const { AuthService } = require("../apps/api/src/modules/auth/auth.service");
 const { PlatformService } = require("../apps/api/src/modules/platform/platform.service");
 const { RentalCoreService } = require("../apps/api/src/modules/rental-core/rental-core.service");
-const { RoleScope, TenantStatus } = require("@store-rental/shared");
+const { RoleScope, TenantStatus } = require("@rental-os/shared");
 const { createAbsorbingConfigStore, createAbsorbingFactStore } = require("./helpers/absorbing-config-store.cjs");
 
 const config = {
@@ -130,7 +130,7 @@ function requestContext(method, url, accessToken) {
   const otherTenantPreset = await platform.saveFilterPreset(
     {
       tenantId: "tenant_002",
-      scopeKey: "store-rental.orders",
+      scopeKey: "rental-os.orders",
       name: "深圳租户预设",
       filters: { status: "active" }
     },
@@ -245,7 +245,7 @@ function requestContext(method, url, accessToken) {
   assert.equal(getRequestTenantId(), undefined);
 
   const priceOnlyGuard = new ApiAuthGuard({
-    async resolveAccessToken() { return { ...demo.user, isPlatformAdmin: false, permissions: ["store-rental:price:manage"] }; },
+    async resolveAccessToken() { return { ...demo.user, isPlatformAdmin: false, permissions: ["rental-os:price:manage"] }; },
     // SPACE-02：守卫改为经 resolveAccessContext 取「账号 + 当前经营空间」。
     //
     // 本用例验证的是**权限判定**（有定价权不等于有下单权），因此必须给一个
@@ -256,7 +256,7 @@ function requestContext(method, url, accessToken) {
     // （它照样 rejects，只是原因换成了缺空间）。
     async resolveAccessContext() {
       return {
-        user: { ...demo.user, isPlatformAdmin: false, permissions: ["store-rental:price:manage"] },
+        user: { ...demo.user, isPlatformAdmin: false, permissions: ["rental-os:price:manage"] },
         workspaceId: "ws_saas_foundation_price_only",
         hasWorkspaces: true
       };

@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Post } from "@nestjs/common";
-import type { SendMockNotificationRequest } from "@store-rental/shared";
+import type { SendMockNotificationRequest } from "@rental-os/shared";
 import { IntegrationsService } from "../integrations/integrations.service";
 
 @Controller("notifications")

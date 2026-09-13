@@ -68,7 +68,7 @@ function requiredCredential(name) {
 }
 
 const TEST_DB = process.env.E2E_DATABASE_NAME || "rental_os_e2e";
-const MYSQL_CONTAINER = process.env.E2E_MYSQL_CONTAINER || "store-rental-mysql";
+const MYSQL_CONTAINER = process.env.E2E_MYSQL_CONTAINER || "rental-os-mysql";
 const MYSQL_ROOT_PASSWORD = requiredCredential("MYSQL_ROOT_PASSWORD");
 const DEMO_PASSWORD = requiredCredential("E2E_DEMO_PASSWORD");
 const PLATFORM_PASSWORD = requiredCredential("E2E_PLATFORM_PASSWORD");
@@ -80,7 +80,7 @@ const API_BASE = `http://localhost:${API_PORT}`;
 
 assert.match(TEST_DB, /^[a-z][a-z0-9_]{2,62}$/u, "测试库名只允许小写字母、数字和下划线");
 assert.ok(TEST_DB.includes("e2e"), "测试库名必须包含 e2e，防止误操作非专用数据库");
-assert.ok(!["store_rental", "rental_os"].includes(TEST_DB), "禁止将 E2E 指向开发库");
+assert.ok(!["rental_os", "rental_os"].includes(TEST_DB), "禁止将 E2E 指向开发库");
 assert.match(MYSQL_CONTAINER, /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/u, "容器名格式非法");
 assert.ok(Number.isInteger(API_PORT) && API_PORT >= 1024 && API_PORT <= 65535, "E2E_API_PORT 必须是 1024-65535 的整数");
 
@@ -264,7 +264,7 @@ function startApi() {
       ...process.env,
       DATABASE_URL: TEST_DATABASE_URL,
       PLATFORM_DATA_SOURCE: "mysql",
-      STORE_RENTAL_DATA_SOURCE: "mysql",
+      RENTAL_OS_DATA_SOURCE: "mysql",
       INFRA_DATA_SOURCE: "mysql",
       AUTH_TOKEN_SECRET: randomBytes(32).toString("hex"),
       API_PORT: String(API_PORT),
@@ -485,7 +485,7 @@ async function main() {
   mysqlRootExec(
     `DROP DATABASE IF EXISTS \`${TEST_DB}\`;\n` +
       `CREATE DATABASE \`${TEST_DB}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\n` +
-      `GRANT ALL PRIVILEGES ON \`${TEST_DB}\`.* TO 'store_rental'@'%';`
+      `GRANT ALL PRIVILEGES ON \`${TEST_DB}\`.* TO 'rental_os'@'%';`
   );
   ok(`测试库 ${TEST_DB} 已重建`);
 
@@ -739,7 +739,7 @@ async function main() {
   assert.equal(demoBackToDefault.status, 201, "四品类样本验证后切回 demo 默认空间失败");
   demo.accessToken = demoBackToDefault.body.data.accessToken;
   ok("demo 四品类空间可切换，且摄影/露营/车辆/工程均有独立测试商品与资产或库存");
-  const removedLegacyRoute = await request("GET", "/api/store-rental/orders", null, demo.accessToken);
+  const removedLegacyRoute = await request("GET", "/api/rental-os/orders", null, demo.accessToken);
   assert.equal(removedLegacyRoute.status, 404, "旧门市订单路由不应重新出现");
   ok("旧门市订单路由已移除，摄影空间只走 Rental Core");
   const r1CustomerResponse = await request(
@@ -4800,7 +4800,7 @@ async function main() {
   // 权限：只有 order:view 的账号对范围端点一律 403（服务端独立校验，不靠前端隐藏按钮）。
   const rangeRole = await request("POST", "/api/platform/roles", {
     code: `E2E-RANGE-VIEW-${Date.now().toString(36)}`, name: "E2E 范围只读", scope: "store", dataScope: "all",
-    enabledBusinessScopes: ["rental"], permissions: ["store-rental:order:view"], isActive: true
+    enabledBusinessScopes: ["rental"], permissions: ["rental-os:order:view"], isActive: true
   }, construction.accessToken);
   assert.equal(rangeRole.status, 201, `建只读角色失败: ${JSON.stringify(rangeRole.body).slice(0, 200)}`);
   const rangeAccount = `e2e_range_view_${Date.now().toString(36)}`;
@@ -6396,7 +6396,7 @@ async function main() {
 
   console.log("== 41. RC-04 通用租赁域审计事件 ==");
   // 审计写入有 try/catch 兜底（不阻断业务），因此 E2E 全绿并不能证明审计落库。
-  // 必须直查库：此前拦截器只放行 /platform 与 /store-rental，
+  // 必须直查库：此前拦截器只放行 /platform 与 /rental-os，
   // /rental/v1 的全部变更动作没有任何审计记录。
   const rentalAudits = readCount(
     "SELECT COUNT(*) FROM `OperationLog` WHERE `action` LIKE 'http.post.rental.%';"
@@ -7892,9 +7892,9 @@ async function main() {
       // 于是第 61 节的 403 来自"无权访问该功能"而不是空间检查——因错误的理由通过。
       // 实测过：写错时把 hasWorkspaces 豁免加回去，第 61 节依然全绿。
       permissions: [
-        "store-rental:order:view",
-        "store-rental:vehicle:view",
-        "store-rental:vehicle-group:manage"
+        "rental-os:order:view",
+        "rental-os:vehicle:view",
+        "rental-os:vehicle-group:manage"
       ],
       isActive: true
     },
@@ -7986,7 +7986,7 @@ async function main() {
       dataScope: "all",
       enabledBusinessScopes: ["rental"],
       // 只给编辑权限，不给发布、不给 price:manage：这正是「编辑人不能发布」要能表达的角色。
-      permissions: ["store-rental:calendar:edit", "store-rental:order:view"],
+      permissions: ["rental-os:calendar:edit", "rental-os:order:view"],
       isActive: true
     },
     calAdmin.accessToken
@@ -8061,7 +8061,7 @@ async function main() {
   // #2：发布与编辑相互独立——只有 calendar:publish 的账号不得编辑（导入应 403）。
   const calPublisherRole = await request("POST", "/api/platform/roles", {
     code: `E2E-CAL-PUB-${Date.now().toString(36)}`, name: "E2E 日历发布人员", scope: "store", dataScope: "all",
-    enabledBusinessScopes: ["rental"], permissions: ["store-rental:calendar:publish", "store-rental:order:view"], isActive: true
+    enabledBusinessScopes: ["rental"], permissions: ["rental-os:calendar:publish", "rental-os:order:view"], isActive: true
   }, calAdmin.accessToken);
   assert.equal(calPublisherRole.status, 201, `建发布角色失败: ${JSON.stringify(calPublisherRole.body).slice(0, 200)}`);
   const calPublisherAccount = `e2e_cal_pub_${Date.now().toString(36)}`;
@@ -8097,7 +8097,7 @@ async function main() {
   assert.equal(draftEdit.status, 200, `造未发布草稿调整失败: ${draftEdit.status} ${JSON.stringify(draftEdit.body).slice(0, 200)}`);
   const calViewerRole = await request("POST", "/api/platform/roles", {
     code: `E2E-CAL-VIEW-${Date.now().toString(36)}`, name: "E2E 只读运营", scope: "store", dataScope: "all",
-    enabledBusinessScopes: ["rental"], permissions: ["store-rental:order:view"], isActive: true
+    enabledBusinessScopes: ["rental"], permissions: ["rental-os:order:view"], isActive: true
   }, calAdmin.accessToken);
   assert.equal(calViewerRole.status, 201, `建只读角色失败: ${JSON.stringify(calViewerRole.body).slice(0, 200)}`);
   const calViewerAccount = `e2e_cal_view_${Date.now().toString(36)}`;
@@ -8123,7 +8123,7 @@ async function main() {
   // Codex 自审 P0/P1：鉴权路径判定必须与 Express 的路由匹配语义一致（大小写不敏感、容忍尾斜杠），
   // 否则大小写/尾斜杠变体会落到 requiredPermissions 的 `return []` 被当成无需权限而放行。
   // (a) 提权面：只读运营用大写 /PLATFORM 建角色必须被拒（这条曾可 201 完成任意提权）。
-  const bypassRole = await request("POST", "/api/PLATFORM/roles", { code: `E2E-BYPASS-${Date.now().toString(36)}`, name: "越权", scope: "store", dataScope: "own", enabledBusinessScopes: ["rental"], permissions: ["store-rental:price:manage"], isActive: true }, calViewToken);
+  const bypassRole = await request("POST", "/api/PLATFORM/roles", { code: `E2E-BYPASS-${Date.now().toString(36)}`, name: "越权", scope: "store", dataScope: "own", enabledBusinessScopes: ["rental"], permissions: ["rental-os:price:manage"], isActive: true }, calViewToken);
   assert.equal(bypassRole.status, 403, `大写路径不得绕过平台鉴权（提权面）: ${bypassRole.status} ${JSON.stringify(bypassRole.body).slice(0, 160)}`);
   // (b) 大写前缀的经营接口同样不得整体放行。
   const bypassPrefix = await request("POST", "/API/rental/v1/calendars/2035/publish", { changeReason: "x" }, calViewToken);
@@ -8140,7 +8140,7 @@ async function main() {
 
   console.log("== 61c-2. PRICE-02 客服/财务历史只读权限（Codex #5） ==");
   // 需求 4.5.8：客服或财务「查看历史版本及报价命中的日历依据，不得修改」。
-  // 独立权限 store-rental:calendar:view-history：能读历史/差异/审计，但不能编辑、发布、看发布预检。
+  // 独立权限 rental-os:calendar:view-history：能读历史/差异/审计，但不能编辑、发布、看发布预检。
   //
   // Codex 复审 #3：三个日历权限必须出现在 /permission-tree 目录里，否则角色管理页面
   // 根本列不出这些选项，管理员无法给自定义角色分配（页面选项完全来自该目录）。
@@ -8149,12 +8149,12 @@ async function main() {
   const permCodes = new Set(
     (permTree.body.data ?? []).flatMap((mod) => (mod.children ?? []).map((child) => child.code))
   );
-  for (const code of ["store-rental:calendar:edit", "store-rental:calendar:publish", "store-rental:calendar:view-history"]) {
+  for (const code of ["rental-os:calendar:edit", "rental-os:calendar:publish", "rental-os:calendar:view-history"]) {
     assert.ok(permCodes.has(code), `权限目录必须包含 ${code}，否则角色管理页面无法分配`);
   }
   const historyRole = await request("POST", "/api/platform/roles", {
     code: `E2E-CAL-HIST-${Date.now().toString(36)}`, name: "E2E 客服历史只读", scope: "store", dataScope: "all",
-    enabledBusinessScopes: ["rental"], permissions: ["store-rental:calendar:view-history", "store-rental:order:view"], isActive: true
+    enabledBusinessScopes: ["rental"], permissions: ["rental-os:calendar:view-history", "rental-os:order:view"], isActive: true
   }, calAdmin.accessToken);
   assert.equal(historyRole.status, 201, `建历史只读角色失败: ${JSON.stringify(historyRole.body).slice(0, 200)}`);
   const historyAccount = `e2e_cal_hist_${Date.now().toString(36)}`;
@@ -8188,14 +8188,14 @@ async function main() {
   ok("客服/财务历史只读权限：view-history 账号能读版本列表/详情/覆盖审计（200），但导入、发布、发布预检一律 403，实现了「查看历史但不得修改」而不过度授予编辑或发布权");
 
   console.log("== 61d. 未列入鉴权规则的路由必须默认拒绝（Codex P0 fail-open） ==");
-  // 当前产品的优惠配置统一走 Rental Core；旧 /store-rental/marketing/* 已删除。
+  // 当前产品的优惠配置统一走 Rental Core；旧 /rental-os/marketing/* 已删除。
   // order:view 可以读取可用于下单的优惠目录，但不能修改配置；真正的越权断言放在
   // POST /discount-plans 上，避免把“订单创建需要读优惠”误判成配置泄露。
   // vehicleA 的令牌建于第 17 节重启之前，而重启会换 AUTH_TOKEN_SECRET，故须重登。
   const mktAdmin = await login("e2e_vehicle_a", "admin", vehicleA.password);
   const mktLowRole = await request("POST", "/api/platform/roles", {
     code: `E2E-MKT-LOW-${Date.now().toString(36)}`, name: "E2E 营销越权验证角色", scope: "store", dataScope: "all",
-    enabledBusinessScopes: ["rental"], permissions: ["store-rental:order:view"], isActive: true
+    enabledBusinessScopes: ["rental"], permissions: ["rental-os:order:view"], isActive: true
   }, mktAdmin.accessToken);
   assert.equal(mktLowRole.status, 201, `建低权限角色失败: ${JSON.stringify(mktLowRole.body).slice(0, 200)}`);
   const mktLowAccount = `e2e_mkt_low_${Date.now().toString(36)}`;
@@ -8248,7 +8248,7 @@ async function main() {
   // 兜底默认拒绝不得误伤自助会话端点与租户级 UI 偏好：它们在显式公共白名单里。
   const viewerSessionContext = await request("GET", "/api/auth/session-context", null, mktLow.accessToken);
   assert.equal(viewerSessionContext.status, 200, `会话自助端点不得被默认拒绝误伤: ${viewerSessionContext.status}`);
-  const viewerPresets = await request("GET", "/api/platform/filter-presets?scopeKey=store-rental.orders", null, mktLow.accessToken);
+  const viewerPresets = await request("GET", "/api/platform/filter-presets?scopeKey=rental-os.orders", null, mktLow.accessToken);
   assert.equal(viewerPresets.status, 200, `筛选预设（租户级 UI 偏好）不得被默认拒绝误伤: ${viewerPresets.status}`);
   ok("优惠配置权限：order:view 可读下单目录但不可写，管理账号可读，且会话与筛选预设不被默认拒绝误伤");
   console.log("== 62. 无空间成员关系的账号不得访问经营域 ==");
@@ -8680,7 +8680,7 @@ async function main() {
   // 65b. 能力治理必须是独立权限：能操作订单 ≠ 能启停整个空间的业务能力。
   const capOpRole = await request("POST", "/api/platform/roles", {
     code: `E2E-CAP-OP-${Date.now().toString(36)}`, name: "E2E 订单操作员", scope: "store", dataScope: "all",
-    enabledBusinessScopes: ["rental"], permissions: ["store-rental:order:view", "store-rental:order:operate"], isActive: true
+    enabledBusinessScopes: ["rental"], permissions: ["rental-os:order:view", "rental-os:order:operate"], isActive: true
   }, capTenant.accessToken);
   assert.equal(capOpRole.status, 201, `建订单操作角色失败: ${JSON.stringify(capOpRole.body).slice(0, 200)}`);
   const capOpAccount = `e2e_cap_op_${Date.now().toString(36)}`;
@@ -9647,7 +9647,7 @@ async function main() {
       dataScope: "all",
       enabledBusinessScopes: ["rental"],
       // 刻意**不给** rental-core:capability:override：本步要证「无该权限带确认下单必须 403」。
-      permissions: ["store-rental:order:view", "store-rental:order:operate", "store-rental:order:create", "rental-core:catalog:view", "rental-core:asset:view"],
+      permissions: ["rental-os:order:view", "rental-os:order:operate", "rental-os:order:create", "rental-core:catalog:view", "rental-core:asset:view"],
       isActive: true
     },
     camToken

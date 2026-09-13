@@ -16,7 +16,7 @@ import {
   TeamOutlined,
   ToolOutlined
 } from "@ant-design/icons";
-import { RentalCategoryCode, type RentalCapability, type RentalCategoryTerminology } from "@store-rental/shared";
+import { RentalCategoryCode, type RentalCapability, type RentalCategoryTerminology } from "@rental-os/shared";
 import type { ReactNode } from "react";
 import { applyTenantNavigationLabels } from "./navigation-terminology";
 
@@ -44,38 +44,38 @@ export interface AppNavigationSection {
 export const APP_ROUTES = {
   // 工作台既承载经营指标，也承载订单/维护待办。维护人员没有报表或订单数据权限时，
   // 仍应能进入页面查看自己的工单待办；页面内部会继续按数据权限隐藏订单和金额指标。
-  workbench: { path: "/workbench", label: "运营概览", permission: "store-rental:report:view", legacyPermissions: ["store-rental:order:view", "rental-core:maintenance:view"], audience: "tenant", icon: <DashboardOutlined />, menu: true },
+  workbench: { path: "/workbench", label: "运营概览", permission: "rental-os:report:view", legacyPermissions: ["rental-os:order:view", "rental-core:maintenance:view"], audience: "tenant", icon: <DashboardOutlined />, menu: true },
   // REPORT-01A：当前经营空间经营报表。文案固定「经营报表」——指标定义不随品类变化，
   // 只有页面标题内的标的说法用品类术语，菜单名跟着品类变会让人以为指标也变了。
-  operationReport: { path: "/reports/operations", label: "经营报表", permission: "store-rental:report:view", audience: "tenant", icon: <FundOutlined />, menu: true },
+  operationReport: { path: "/reports/operations", label: "经营报表", permission: "rental-os:report:view", audience: "tenant", icon: <FundOutlined />, menu: true },
   // 租赁工作台（Rental Core v0.1）暂不进菜单：它是早期的合并调试台，
   // 建单、确认预占、执行配货、取消都已经由「新建订单」和订单详情页各自承载，
   // 且详情页还多了部分归还。路由与页面保留，需要时把 menu 打开即可。
-  rentalCore: { path: "/rental/core", label: "租赁工作台", permission: "store-rental:order:view", audience: "tenant", icon: <ApartmentOutlined /> },
+  rentalCore: { path: "/rental/core", label: "租赁工作台", permission: "rental-os:order:view", audience: "tenant", icon: <ApartmentOutlined /> },
   // 新建订单不进菜单：它是「订单管理」页上的主操作（页面右上角按钮），
   // 菜单里再放一条等于把一个动作伪装成一个板块，也让「租赁交易」多出一层噪音。
   // 路由本身照常注册，权限仍由 permission 把关。
-  orderCreate: { path: "/rental/orders/new", label: "新建订单", permission: "store-rental:order:create", audience: "tenant", icon: <FormOutlined /> },
-  orders: { path: "/rental/orders", label: "订单管理", permission: "store-rental:order:view", audience: "tenant", icon: <FileTextOutlined />, menu: true },
-  orderDetail: { path: "/rental/orders/:id", label: "订单详情", permission: "store-rental:order:view", audience: "tenant", icon: <FileTextOutlined /> },
-  itemGroups: { path: "/rental/item-groups", label: "商品目录", permission: "rental-core:catalog:view", legacyPermissions: ["store-rental:vehicle-group:manage"], audience: "tenant", icon: <AppstoreOutlined />, menu: true },
-  pricingGroups: { path: "/rental/pricing-groups", label: "定价分组", permission: "store-rental:price:manage", audience: "tenant", icon: <TagsOutlined />, menu: true },
-  assets: { path: "/rental/assets", label: "资产与库存", permission: "rental-core:asset:view", legacyPermissions: ["store-rental:vehicle:view"], audience: "tenant", icon: <BoxPlotOutlined />, menu: true },
+  orderCreate: { path: "/rental/orders/new", label: "新建订单", permission: "rental-os:order:create", audience: "tenant", icon: <FormOutlined /> },
+  orders: { path: "/rental/orders", label: "订单管理", permission: "rental-os:order:view", audience: "tenant", icon: <FileTextOutlined />, menu: true },
+  orderDetail: { path: "/rental/orders/:id", label: "订单详情", permission: "rental-os:order:view", audience: "tenant", icon: <FileTextOutlined /> },
+  itemGroups: { path: "/rental/item-groups", label: "商品目录", permission: "rental-core:catalog:view", legacyPermissions: ["rental-os:vehicle-group:manage"], audience: "tenant", icon: <AppstoreOutlined />, menu: true },
+  pricingGroups: { path: "/rental/pricing-groups", label: "定价分组", permission: "rental-os:price:manage", audience: "tenant", icon: <TagsOutlined />, menu: true },
+  assets: { path: "/rental/assets", label: "资产与库存", permission: "rental-core:asset:view", legacyPermissions: ["rental-os:vehicle:view"], audience: "tenant", icon: <BoxPlotOutlined />, menu: true },
   workOrders: { path: "/rental/work-orders", label: "养护工单", permission: "rental-core:maintenance:view", audience: "tenant", icon: <ToolOutlined />, menu: true },
-  locations: { path: "/rental/locations", label: "履约地点", permission: "store-rental:station:view", audience: "tenant", icon: <ShopOutlined />, menu: true },
-  pricing: { path: "/rental/pricing", label: "基础定价", permission: "store-rental:price:manage", audience: "tenant", icon: <FundOutlined />, menu: true },
-  discounts: { path: "/rental/discounts", label: "优惠方案", permission: "store-rental:price:manage", audience: "tenant", icon: <TagsOutlined />, menu: true },
-  coupons: { path: "/rental/coupons", label: "优惠券", permission: "store-rental:price:manage", audience: "tenant", icon: <TagsOutlined />, menu: true },
-  services: { path: "/rental/services", label: "增值服务", permission: "store-rental:price:manage", audience: "tenant", icon: <SafetyCertificateOutlined />, menu: true },
-  rentalSettings: { path: "/rental/settings", label: "品类与业务规则", permission: "store-rental:price:manage", legacyPermissions: ["store-rental:calendar:edit", "store-rental:calendar:publish", "store-rental:calendar:view-history", "store-rental:rules:manage"], audience: "tenant", icon: <SettingOutlined />, menu: true },
+  locations: { path: "/rental/locations", label: "履约地点", permission: "rental-os:station:view", audience: "tenant", icon: <ShopOutlined />, menu: true },
+  pricing: { path: "/rental/pricing", label: "基础定价", permission: "rental-os:price:manage", audience: "tenant", icon: <FundOutlined />, menu: true },
+  discounts: { path: "/rental/discounts", label: "优惠方案", permission: "rental-os:price:manage", audience: "tenant", icon: <TagsOutlined />, menu: true },
+  coupons: { path: "/rental/coupons", label: "优惠券", permission: "rental-os:price:manage", audience: "tenant", icon: <TagsOutlined />, menu: true },
+  services: { path: "/rental/services", label: "增值服务", permission: "rental-os:price:manage", audience: "tenant", icon: <SafetyCertificateOutlined />, menu: true },
+  rentalSettings: { path: "/rental/settings", label: "品类与业务规则", permission: "rental-os:price:manage", legacyPermissions: ["rental-os:calendar:edit", "rental-os:calendar:publish", "rental-os:calendar:view-history", "rental-os:rules:manage"], audience: "tenant", icon: <SettingOutlined />, menu: true },
   // CORE-EXT-02C：能力治理入口。刻意**不**给 capability 门禁——它是治理能力本身的页面，
   // 若也要求某个能力已启用，全新空间就会陷入「没有入口去启用第一个能力」的死锁。
   rentalCapabilities: { path: "/rental/capabilities", label: "经营空间能力", permission: "rental-core:capability:view", legacyPermissions: ["rental-core:capability:manage"], audience: "tenant", icon: <ControlOutlined />, menu: true },
-  membershipReviews: { path: "/membership/reviews", label: "会员审核", permission: "store-rental:member:view", legacyPermissions: ["store-rental:member:review", "store-rental:member:qualification-review"], audience: "tenant", icon: <SafetyCertificateOutlined />, menu: true },
-  personalMembers: { path: "/membership/personal", label: "个人会员", permission: "store-rental:member:view", audience: "tenant", icon: <IdcardOutlined />, menu: true },
-  corporateMembers: { path: "/membership/corporate", label: "企业会员", permission: "store-rental:corporate:view", legacyPermissions: ["store-rental:corporate:manage", "store-rental:corporate:employee-manage"], audience: "tenant", icon: <TeamOutlined />, menu: true },
-  membershipPlans: { path: "/membership/plans", label: "会员方案", permission: "store-rental:member:view", legacyPermissions: ["store-rental:member:plan:manage", "store-rental:member:plan:publish"], audience: "tenant", icon: <TagsOutlined />, menu: true },
-  tenantReadiness: { path: "/tenant/readiness", label: "开业配置", permission: "store-rental:order:view", legacyPermissions: ["store-rental:price:manage", "system:user:manage", "system:role:manage"], audience: "tenant", icon: <DashboardOutlined />, menu: true },
+  membershipReviews: { path: "/membership/reviews", label: "会员审核", permission: "rental-os:member:view", legacyPermissions: ["rental-os:member:review", "rental-os:member:qualification-review"], audience: "tenant", icon: <SafetyCertificateOutlined />, menu: true },
+  personalMembers: { path: "/membership/personal", label: "个人会员", permission: "rental-os:member:view", audience: "tenant", icon: <IdcardOutlined />, menu: true },
+  corporateMembers: { path: "/membership/corporate", label: "企业会员", permission: "rental-os:corporate:view", legacyPermissions: ["rental-os:corporate:manage", "rental-os:corporate:employee-manage"], audience: "tenant", icon: <TeamOutlined />, menu: true },
+  membershipPlans: { path: "/membership/plans", label: "会员方案", permission: "rental-os:member:view", legacyPermissions: ["rental-os:member:plan:manage", "rental-os:member:plan:publish"], audience: "tenant", icon: <TagsOutlined />, menu: true },
+  tenantReadiness: { path: "/tenant/readiness", label: "开业配置", permission: "rental-os:order:view", legacyPermissions: ["rental-os:price:manage", "system:user:manage", "system:role:manage"], audience: "tenant", icon: <DashboardOutlined />, menu: true },
   tenantAccounts: { path: "/tenant/accounts", label: "运营账号", permission: "system:user:manage", audience: "tenant", icon: <TeamOutlined />, menu: true },
   tenantRoles: { path: "/tenant/roles", label: "角色权限", permission: "system:role:manage", audience: "tenant", icon: <SafetyCertificateOutlined />, menu: true },
   platformTenants: { path: "/platform/tenants", label: "SaaS 租户", permission: "system:tenant:manage", audience: "saas", icon: <ShopOutlined />, menu: true },

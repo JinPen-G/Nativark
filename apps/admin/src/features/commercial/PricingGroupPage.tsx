@@ -1,5 +1,5 @@
 import { DeleteOutlined, EditOutlined, PlusOutlined, SearchOutlined } from "@ant-design/icons";
-import { RENTAL_PRICING_UNIT_LABELS, formatRentalMoney, rentalCurrencySymbol, type RentalPricingGroup, type SaveRentalPricingGroupRequest } from "@store-rental/shared";
+import { RENTAL_PRICING_UNIT_LABELS, formatRentalMoney, rentalCurrencySymbol, type RentalPricingGroup, type SaveRentalPricingGroupRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { App, Button, Card, Drawer, Form, Input, InputNumber, Select, Space, Table, Tag, Typography } from "antd";
 import dayjs from "dayjs";

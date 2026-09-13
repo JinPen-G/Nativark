@@ -55,9 +55,9 @@ const closability = new CustomerMergeService(prisma, customers, operations);
 const service = new CustomerOperationsService(prisma, customers, operations, closability);
 
 /** 只有 member:view 的普通运营：不得看到明文。 */
-const viewer = { id: "u_view", tenantId: tenantA, displayName: "运营小王", permissions: ["store-rental:member:view"], isPlatformAdmin: false, isSaasAdmin: false };
+const viewer = { id: "u_view", tenantId: tenantA, displayName: "运营小王", permissions: ["rental-os:member:view"], isPlatformAdmin: false, isSaasAdmin: false };
 /** 具备解密权限的风控：可以看到明文，且其查看要留痕。 */
-const revealer = { id: "u_reveal", tenantId: tenantA, displayName: "风控老李", permissions: ["store-rental:member:view", CUSTOMER_REVEAL_PERMISSION], isPlatformAdmin: false, isSaasAdmin: false };
+const revealer = { id: "u_reveal", tenantId: tenantA, displayName: "风控老李", permissions: ["rental-os:member:view", CUSTOMER_REVEAL_PERMISSION], isPlatformAdmin: false, isSaasAdmin: false };
 
 const ok = (m) => console.log(`  ✓ ${m}`);
 

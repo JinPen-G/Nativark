@@ -25,7 +25,7 @@ assert.match(service, /baselineReading = pickupBaseline\?\.usageReadings\?\.find
 assert.match(service, /correctInspectionUsage\(tenantId, orderId, inspectionId, input, operator, tx\)/u, "服务层必须校验订单后委托修正");
 assert.match(controller, /orders\/:id\/inspections\/:inspectionId\/usage-correction/u, "必须提供订单检查读数修正接口");
 assert.match(controller, /action: "order\.inspection-usage-correction"/u, "使用量修正必须走幂等动作");
-assert.match(guard, /usage-correction.*store-rental:order:operate/u, "使用量修正必须受订单操作权限保护");
+assert.match(guard, /usage-correction.*rental-os:order:operate/u, "使用量修正必须受订单操作权限保护");
 assert.match(openapi, /correctRentalInspectionUsage/u, "使用量修正必须登记 OpenAPI 路由");
 assert.match(api, /correctInspectionUsage:/u, "管理端必须接入使用量修正 API");
 assert.match(page, /修正读数/u, "订单详情必须提供修正入口");
@@ -35,7 +35,7 @@ assert.match(page, /usageCorrections \?\? \[\]/u, "页面必须回显修正历�
 // 证伪校验：删除追加历史、归还基准、权限或页面入口任一关键接线后，本专项必须报红。
 assert.doesNotMatch(repository.replace(/usageCorrections: \[\.\.\.\(meta\.usageCorrections \?\? \[\]\), correction\]/u, ""), /usageCorrections: \[\.\.\.\(meta\.usageCorrections/u);
 assert.doesNotMatch(service.replace(/baselineReading = pickupBaseline\?\.usageReadings\?\.find[^;]+;/u, ""), /baselineReading = pickupBaseline\?\.usageReadings/u);
-assert.doesNotMatch(guard.replace('  if (path.match(/^\\/rental\\/v1\\/orders\\/[^/]+\\/inspections\\/[^/]+\\/usage-correction$/)) return ["store-rental:order:operate"];\n', ""), /usage-correction.*store-rental:order:operate/u);
+assert.doesNotMatch(guard.replace('  if (path.match(/^\\/rental\\/v1\\/orders\\/[^/]+\\/inspections\\/[^/]+\\/usage-correction$/)) return ["rental-os:order:operate"];\n', ""), /usage-correction.*rental-os:order:operate/u);
 assert.doesNotMatch(page.replace(/修正读数/u, ""), /修正读数/u);
 
 console.log("ORDER-02A usage correction test passed: append-only correction history, effective baseline, idempotent API and permissioned admin entry are wired.");

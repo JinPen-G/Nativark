@@ -6,7 +6,7 @@ import {
   Optional,
   UnauthorizedException
 } from "@nestjs/common";
-import { RentalCategoryCode, type RentalCapability, type SystemUserRow } from "@store-rental/shared";
+import { RentalCategoryCode, type RentalCapability, type SystemUserRow } from "@rental-os/shared";
 import { AuthService } from "../modules/auth/auth.service";
 import { WorkspaceCapabilityService } from "../modules/rental-core/workspace-capability.service";
 import { enterRequestIdentity } from "./request-identity";
@@ -20,8 +20,8 @@ interface RequestLike {
 }
 
 function requiredCapability(path: string): RentalCapability | undefined {
-  if (path.startsWith("/store-rental/dispatch") || path.startsWith("/store-rental/vehicles/transfer-tasks")) return "dispatch";
-  if (path.startsWith("/store-rental/tbox-devices")) return "iot";
+  if (path.startsWith("/rental-os/dispatch") || path.startsWith("/rental-os/vehicles/transfer-tasks")) return "dispatch";
+  if (path.startsWith("/rental-os/tbox-devices")) return "iot";
   return undefined;
 }
 
@@ -32,7 +32,7 @@ function requiredCapability(path: string): RentalCapability | undefined {
  *
  * 早前这里是 `return []`，而 `hasAnyPermission` 对空数组直接放行——于是每一个
  * 没被上面任何分支覆盖的路由都是**完全无鉴权**的写接口。这不是理论风险：
- * `/store-rental/marketing/plans` 的增改就落在这里，任何能登录的账号都能改本租户营销方案。
+ * `/rental-os/marketing/plans` 的增改就落在这里，任何能登录的账号都能改本租户营销方案。
  * 而且这个坑会随每次新增路由复发，靠人记得补分支是不可靠的，
  * 因此改为默认拒绝 + `scripts/validate-route-permissions.cjs` 在标准验收命令里逐路由核对。
  */
@@ -126,19 +126,19 @@ export function requiredPermissions(method: string, path: string) {
     // SPACE-04：共享客户主档按会员权限判定，与旧车辆域会员页面一致。
     // 读写分开：查看不应要求管理权限，否则运营查客户就得给写权限。
     if (/\/closability$/u.test(path)) {
-      return ["store-rental:customer:close"];
+      return ["rental-os:customer:close"];
     }
     if (/\/status$/u.test(path)) {
       // 目标状态在请求体中；具体动作由 PlatformService 按权限二次校验。
       return [
-        "store-rental:member:manage",
-        "store-rental:member:risk-action",
-        "store-rental:customer:close"
+        "rental-os:member:manage",
+        "rental-os:member:risk-action",
+        "rental-os:customer:close"
       ];
     }
     return method === "GET"
-      ? ["store-rental:member:view", "store-rental:member:manage"]
-      : ["store-rental:member:manage"];
+      ? ["rental-os:member:view", "rental-os:member:manage"]
+      : ["rental-os:member:manage"];
   }  // SPACE-01/02：经营空间主档与成员关系属于租户管理能力。
   //
   // 必须显式列出：本函数末尾兜底 `return []`，而 hasAnyPermission 对空数组
@@ -161,120 +161,120 @@ export function requiredPermissions(method: string, path: string) {
     // 因此它需要**解密权限**，不能只凭「会员查看」。必须放在下面的通用分支之前，
     // 否则会被 `/platform/customers` 前缀吃掉，退化成只要会员查看权限即可读取。
     if (/\/sensitive-access$/u.test(path)) {
-      return ["store-rental:customer:reveal-sensitive"];
+      return ["rental-os:customer:reveal-sensitive"];
     }
     // CUSTOMER-01C：企业开票、合同、授信账期属**企业客户**权限，与个人会员权限分开。
     // 同样必须放在通用分支之前，否则「会员管理」就能改企业授信与账期。
     if (/\/(invoice-profiles|contracts|credit)$/u.test(path)) {
       return method === "GET"
-        ? ["store-rental:corporate:view", "store-rental:corporate:manage"]
-        : ["store-rental:corporate:manage"];
+        ? ["rental-os:corporate:view", "rental-os:corporate:manage"]
+        : ["rental-os:corporate:manage"];
     }
     // CUSTOMER-01D：需求 4.8.14 要求合并与注销**分别授权**。两者都不可逆，
     // 且影响面不同（合并改身份归属、注销终止业务资格），因此不能共用「会员管理」
     // 一个权限——否则任何能改会员等级的人都能合并或注销客户。同样置于通用分支之前。
     if (path === "/platform/customers/merge") {
-      return ["store-rental:customer:merge"];
+      return ["rental-os:customer:merge"];
     }
     // 预览与候选是只读的，但它们暴露「哪些主档可能是同一人」，属合并决策信息，
     // 因此同样按合并权限判定，而不是按「会员查看」放行。
     if (/\/(merge-preview|duplicates)$/u.test(path)) {
-      return ["store-rental:customer:merge"];
+      return ["rental-os:customer:merge"];
     }
     if (/\/closability$/u.test(path)) {
-      return ["store-rental:customer:close"];
+      return ["rental-os:customer:close"];
     }
     // 账号注销走 account-status，其请求体里 status=closed 才是注销；Guard 按路径判权限、
     // 看不到请求体，因此这条路由「会员管理」或「客户注销」之一即可进入，
     // 真正的动作级权限与注销前置检查在服务层完成。
     if (/\/account-status$/u.test(path)) {
-      return ["store-rental:member:manage", "store-rental:customer:close"];
+      return ["rental-os:member:manage", "rental-os:customer:close"];
     }
     return method === "GET"
-      ? ["store-rental:member:view", "store-rental:member:manage"]
-      : ["store-rental:member:manage"];
+      ? ["rental-os:member:view", "rental-os:member:manage"]
+      : ["rental-os:member:manage"];
   }
   if (path.startsWith("/platform/tenants")) {
     return ["system:tenant:manage"];
   }
   if (path.startsWith("/reports")) {
-    return ["store-rental:report:view"];
+    return ["rental-os:report:view"];
   }
   if (path.startsWith("/membership")) {
     if (path === "/membership/registration-settings") {
       return method === "GET"
-        ? ["store-rental:member:view", "store-rental:member:manage"]
-        : ["store-rental:member:manage"];
+        ? ["rental-os:member:view", "rental-os:member:manage"]
+        : ["rental-os:member:manage"];
     }
     if (path.startsWith("/membership/reviews")) {
       return method === "GET"
-        ? ["store-rental:member:view", "store-rental:member:review", "store-rental:member:qualification-review"]
-        : ["store-rental:member:review", "store-rental:member:qualification-review"];
+        ? ["rental-os:member:view", "rental-os:member:review", "rental-os:member:qualification-review"]
+        : ["rental-os:member:review", "rental-os:member:qualification-review"];
     }
     if (path.startsWith("/membership/qualification-types")) {
-      return method === "GET" ? ["store-rental:member:view", "store-rental:member:manage"] : ["store-rental:member:manage"];
+      return method === "GET" ? ["rental-os:member:view", "rental-os:member:manage"] : ["rental-os:member:manage"];
     }
     if (/^\/membership\/personal\/[^/]+\/temporary-password$/u.test(path)) {
-      return ["store-rental:member:account-manage"];
+      return ["rental-os:member:account-manage"];
     }
     if (path.startsWith("/membership/personal")) {
       return method === "GET"
-        ? ["store-rental:member:view", "store-rental:member:manage"]
-        : ["store-rental:member:manage"];
+        ? ["rental-os:member:view", "rental-os:member:manage"]
+        : ["rental-os:member:manage"];
     }
     if (/^\/membership\/corporate\/[^/]+\/employees$/u.test(path)) {
       return method === "GET"
-        ? ["store-rental:corporate:view", "store-rental:corporate:manage", "store-rental:corporate:employee-manage"]
-        : ["store-rental:corporate:employee-manage"];
+        ? ["rental-os:corporate:view", "rental-os:corporate:manage", "rental-os:corporate:employee-manage"]
+        : ["rental-os:corporate:employee-manage"];
     }
     if (path.startsWith("/membership/corporate")) {
       return method === "GET"
-        ? ["store-rental:corporate:view", "store-rental:corporate:manage", "store-rental:corporate:employee-manage"]
-        : ["store-rental:corporate:manage"];
+        ? ["rental-os:corporate:view", "rental-os:corporate:manage", "rental-os:corporate:employee-manage"]
+        : ["rental-os:corporate:manage"];
     }
     if (/^\/membership\/plans\/[^/]+\/versions\/[^/]+\/(publish|disable|restore)$/u.test(path)) {
-      return ["store-rental:member:plan:publish"];
+      return ["rental-os:member:plan:publish"];
     }
     if (path === "/membership/plans/assignments") {
-      return ["store-rental:member:plan:manage"];
+      return ["rental-os:member:plan:manage"];
     }
     if (path.startsWith("/membership/plans")) {
       return method === "GET"
-        ? ["store-rental:member:view", "store-rental:member:plan:manage", "store-rental:member:plan:publish"]
-        : ["store-rental:member:plan:manage"];
+        ? ["rental-os:member:view", "rental-os:member:plan:manage", "rental-os:member:plan:publish"]
+        : ["rental-os:member:plan:manage"];
     }
-    return ["store-rental:member:view"];
+    return ["rental-os:member:view"];
   }
 
   if (path === "/rental/v1/categories") {
-    return ["system:tenant:manage", "store-rental:order:view", "store-rental:vehicle:view"];
+    return ["system:tenant:manage", "rental-os:order:view", "rental-os:vehicle:view"];
   }
   // REPORT-01A：当前经营空间的经营报表。与旧 `/reports` 同一权限口径
   // （报表查看），但数据只来自 Rental Core 规范化事实且严格按会话空间隔离。
   // 必须放在通用 `/rental/v1` 分支之前，否则会落到经营写权限上。
   if (path.startsWith("/rental/v1/reports")) {
-    return ["store-rental:report:view"];
+    return ["rental-os:report:view"];
   }
   if (path === "/rental/v1/tenant-profile") {
-    return method === "GET" ? ["store-rental:order:view", "store-rental:vehicle:view"] : ["store-rental:rules:manage", "store-rental:price:manage"];
+    return method === "GET" ? ["rental-os:order:view", "rental-os:vehicle:view"] : ["rental-os:rules:manage", "rental-os:price:manage"];
   }
   if (path === "/rental/v1/business-settings") {
-    return method === "GET" ? ["store-rental:rules:manage", "store-rental:price:manage", "store-rental:order:view", "store-rental:order:create"] : ["store-rental:rules:manage", "store-rental:price:manage"];
+    return method === "GET" ? ["rental-os:rules:manage", "rental-os:price:manage", "rental-os:order:view", "rental-os:order:create"] : ["rental-os:rules:manage", "rental-os:price:manage"];
   }
   if (path === "/rental/v1/tenant-readiness") {
     // 开业配置是多个配置域的只读汇总，不能只绑定订单查看；否则只有账号/角色
     // 管理权限的租户管理员反而看不到自己要补齐的配置清单。
-    return ["store-rental:order:view", "store-rental:price:manage", "system:user:manage", "system:role:manage"];
+    return ["rental-os:order:view", "rental-os:price:manage", "system:user:manage", "system:role:manage"];
   }
   if (path.startsWith("/rental/v1/official-calendar-sources")) {
     // 空间侧只读引用公共来源版本，用于挑选要应用哪一版（需求 4.5.2）。
     // 只给日历相关角色：它不含业务数据，但也没有理由开放给全部经营角色。
     return [
-      "store-rental:calendar:view-history",
-      "store-rental:calendar:edit",
-      "store-rental:calendar:publish",
-      "store-rental:price:manage",
-      "store-rental:rules:manage"
+      "rental-os:calendar:view-history",
+      "rental-os:calendar:edit",
+      "rental-os:calendar:publish",
+      "rental-os:price:manage",
+      "rental-os:rules:manage"
     ];
   }
   if (path.startsWith("/rental/v1/calendars")) {
@@ -285,7 +285,7 @@ export function requiredPermissions(method: string, path: string) {
       // 发布前影响预览属**发布决策**动作，只给能编辑或发布的人；客服/财务的历史只读
       // 权限不覆盖它——预览的内容是「即将发布的草稿会改什么」，不是历史追溯。
       if (/\/publish-preview$/.test(path)) {
-        return ["store-rental:calendar:edit", "store-rental:calendar:publish", "store-rental:price:manage", "store-rental:rules:manage"];
+        return ["rental-os:calendar:edit", "rental-os:calendar:publish", "rental-os:price:manage", "rental-os:rules:manage"];
       }
       // 历史版本/差异/覆盖审计属**追溯视图**：需求 4.5.8 要求客服或财务「查看历史版本
       // 及报价命中的日历依据，不得修改」，因此额外接受独立的历史只读权限。
@@ -293,68 +293,68 @@ export function requiredPermissions(method: string, path: string) {
       // 「普通运营只见已发布」相悖；要开放就必须显式配 view-history。
       if (/\/versions(\/|$)/.test(path) || /\/override-audits$/.test(path)) {
         return [
-          "store-rental:calendar:view-history",
-          "store-rental:calendar:edit",
-          "store-rental:calendar:publish",
-          "store-rental:price:manage",
-          "store-rental:rules:manage"
+          "rental-os:calendar:view-history",
+          "rental-os:calendar:edit",
+          "rental-os:calendar:publish",
+          "rental-os:price:manage",
+          "rental-os:rules:manage"
         ];
       }
       return [
-        "store-rental:calendar:view-history",
-        "store-rental:calendar:edit",
-        "store-rental:calendar:publish",
-        "store-rental:price:manage",
-        "store-rental:rules:manage",
-        "store-rental:order:view"
+        "rental-os:calendar:view-history",
+        "rental-os:calendar:edit",
+        "rental-os:calendar:publish",
+        "rental-os:price:manage",
+        "rental-os:rules:manage",
+        "rental-os:order:view"
       ];
     }
     // 发布与编辑相互独立：发布端点只认发布权限，编辑端点只认编辑权限，
     // 因此「只有发布权限」的账号在编辑端点会被拒、「只有编辑权限」的账号在发布端点会被拒。
     // price:manage 作为既有超集对两类都放行，避免存量部署失去日历能力。
     if (/\/publish$/.test(path)) {
-      return ["store-rental:calendar:publish", "store-rental:price:manage"];
+      return ["rental-os:calendar:publish", "rental-os:price:manage"];
     }
     // 其余写操作（导入官方来源、保存日期、移除覆盖、作废草稿）属编辑，只认编辑权限。
-    return ["store-rental:calendar:edit", "store-rental:price:manage"];
+    return ["rental-os:calendar:edit", "rental-os:price:manage"];
   }
   // RULE-01A：规则读取（列表、详情、发布预览、历史）manage 或 publish 任一即可；
   // 发布级动作（publish / void）只认 rules:publish，编辑级动作（存草稿、恢复为新草稿）
   // 只认 rules:manage。必须放在下面的合并分支之前，否则会被前缀吃掉退化成共用一个码。
   if (path.startsWith("/rental/v1/rule-versions")) {
     if (method === "GET") {
-      return ["store-rental:rules:manage", "store-rental:rules:publish", "store-rental:price:manage"];
+      return ["rental-os:rules:manage", "rental-os:rules:publish", "rental-os:price:manage"];
     }
     if (/\/(publish|void)$/u.test(path)) {
-      return ["store-rental:rules:publish"];
+      return ["rental-os:rules:publish"];
     }
-    return ["store-rental:rules:manage"];
+    return ["rental-os:rules:manage"];
   }
   if (path.startsWith("/rental/v1/rewards") || path.startsWith("/rental/v1/benefit-accounts") || path.startsWith("/rental/v1/notification-templates") || path.startsWith("/rental/v1/notification-logs") || path === "/rental/v1/notifications/send") {
-    return ["store-rental:rules:manage", "store-rental:price:manage"];
+    return ["rental-os:rules:manage", "rental-os:price:manage"];
   }
   if (path === "/rental/v1/coupon-templates" || path.startsWith("/rental/v1/coupon-templates/")) {
-    return ["store-rental:marketing:manage", "store-rental:price:manage"];
+    return ["rental-os:marketing:manage", "rental-os:price:manage"];
   }
   if (path.startsWith("/rental/v1/discount-plans") || path.startsWith("/rental/v1/customer-coupons")) {
-    return method === "GET" ? ["store-rental:marketing:manage", "store-rental:price:manage", "store-rental:order:view"] : ["store-rental:marketing:manage", "store-rental:price:manage", "store-rental:order:operate"];
+    return method === "GET" ? ["rental-os:marketing:manage", "rental-os:price:manage", "rental-os:order:view"] : ["rental-os:marketing:manage", "rental-os:price:manage", "rental-os:order:operate"];
   }
   if (path.startsWith("/rental/v1/pricing-versions")) {
     return method === "GET"
-      ? ["store-rental:price:manage", "store-rental:order:view", "store-rental:order:create"]
-      : ["store-rental:price:manage"];
+      ? ["rental-os:price:manage", "rental-os:order:view", "rental-os:order:create"]
+      : ["rental-os:price:manage"];
   }
   if (path.startsWith("/rental/v1/pricing-plans")) {
-    return method === "GET" ? ["store-rental:price:manage", "store-rental:order:view", "store-rental:order:create"] : ["store-rental:price:manage"];
+    return method === "GET" ? ["rental-os:price:manage", "rental-os:order:view", "rental-os:order:create"] : ["rental-os:price:manage"];
   }
   if (path.startsWith("/rental/v1/value-added-services") || path.startsWith("/rental/v1/service-capacities")) {
-    return ["store-rental:service:manage"];
+    return ["rental-os:service:manage"];
   }
   if (path === "/rental/v1/locations" || path.startsWith("/rental/v1/locations/") || path.startsWith("/rental/v1/fulfillment-operators")) {
-    return method === "GET" ? ["store-rental:station:view"] : ["store-rental:station:manage"];
+    return method === "GET" ? ["rental-os:station:view"] : ["rental-os:station:manage"];
   }
   if (path === "/rental/v1/item-groups" || path.startsWith("/rental/v1/item-groups/")) {
-    return method === "GET" ? ["rental-core:catalog:view", "rental-core:catalog:manage", "store-rental:vehicle-group:manage", "store-rental:vehicle:view", "store-rental:order:view", "store-rental:order:create"] : ["rental-core:catalog:manage", "store-rental:vehicle-group:manage"];
+    return method === "GET" ? ["rental-core:catalog:view", "rental-core:catalog:manage", "rental-os:vehicle-group:manage", "rental-os:vehicle:view", "rental-os:order:view", "rental-os:order:create"] : ["rental-core:catalog:manage", "rental-os:vehicle-group:manage"];
   }
   if (path === "/rental/v1/work-order-assignees") return ["rental-core:maintenance:view"];
   if (path === "/rental/v1/work-orders" || path.startsWith("/rental/v1/work-orders/")) {
@@ -364,73 +364,73 @@ export function requiredPermissions(method: string, path: string) {
   }
   if (path === "/rental/v1/stock-dispositions" || path.startsWith("/rental/v1/stock-dispositions/")) {
     return method === "GET"
-      ? ["rental-core:maintenance:view", "rental-core:asset:view", "rental-core:asset:manage", "store-rental:vehicle:view"]
-      : ["rental-core:maintenance:review", "rental-core:asset:manage", "store-rental:vehicle:manage"];
+      ? ["rental-core:maintenance:view", "rental-core:asset:view", "rental-core:asset:manage", "rental-os:vehicle:view"]
+      : ["rental-core:maintenance:review", "rental-core:asset:manage", "rental-os:vehicle:manage"];
   }
   if (path === "/rental/v1/assets" || path.startsWith("/rental/v1/assets/") || path === "/rental/v1/stock-balances" || path === "/rental/v1/stock-dispositions") {
-    return method === "GET" ? ["rental-core:asset:view", "rental-core:asset:manage", "store-rental:vehicle:view"] : ["rental-core:asset:manage", "store-rental:vehicle:manage"];
+    return method === "GET" ? ["rental-core:asset:view", "rental-core:asset:manage", "rental-os:vehicle:view"] : ["rental-core:asset:manage", "rental-os:vehicle:manage"];
   }
   if (path === "/rental/v1/availability") {
-    return ["store-rental:order:operate", "store-rental:order:create", "store-rental:vehicle:view"];
+    return ["rental-os:order:operate", "rental-os:order:create", "rental-os:vehicle:view"];
   }
   if (path.startsWith("/rental/v1/quotes")) {
-    return method === "GET" ? ["store-rental:order:view"] : ["store-rental:order:operate", "store-rental:order:create"];
+    return method === "GET" ? ["rental-os:order:view"] : ["rental-os:order:operate", "rental-os:order:create"];
   }
   if (path === "/rental/v1/orders") {
-    return method === "GET" ? ["store-rental:order:view"] : ["store-rental:order:operate", "store-rental:order:create"];
+    return method === "GET" ? ["rental-os:order:view"] : ["rental-os:order:operate", "rental-os:order:create"];
   }
   // RULE-CLOSE-01：待支付超时只能由订单操作权限触发，不能因为静态路径被通用订单详情规则放行。
   if (path === "/rental/v1/orders/expire-pending" || path === "/rental/v1/orders/reconcile-pickup-overdue" || path.match(/^\/rental\/v1\/orders\/[^/]+\/(?:expire-pending|mark-pickup-overdue|no-show-notice|confirm-no-show)$/u)) {
-    return ["store-rental:order:operate"];
+    return ["rental-os:order:operate"];
   }
   if (path.match(/^\/rental\/v1\/orders\/[^/]+$/)) {
-    return ["store-rental:order:view"];
+    return ["rental-os:order:view"];
   }
   // MKT-02D：服务实际履约是订单操作，不等同于维护服务目录/容量配置。
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/services\/[^/]+\/execution$/)) {
-    return ["store-rental:order:operate"];
+    return ["rental-os:order:operate"];
   }
   // 服务退款是已批准退款的实际资金动作，只认结算权限，不让普通履约操作员动资金。
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/services\/[^/]+\/refund$/)) {
-    return ["store-rental:order:settle"];
+    return ["rental-os:order:settle"];
   }
   // 三条费用裁定入口统一收到 order:fee-review：裁定「该收/该退多少」与实际动钱是两件事。
   // 此前它们都认 order:settle，而资金事件也认 order:settle，等于一个权限同时授予
   // 「决定金额」与「收退款」。拆开后只有裁定权的人能定金额但动不了资金台账，
   // 只有资金权的人能收退款但改不了裁定结论。资金事件那条规则保持 order:settle 不变。
-  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/extensions\/[^/]+\/refund-review$/)) return ["store-rental:order:fee-review"];
-  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/fee-reviews\/[^/]+\/review$/)) return ["store-rental:order:fee-review"];
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/extensions\/[^/]+\/refund-review$/)) return ["rental-os:order:fee-review"];
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/fee-reviews\/[^/]+\/review$/)) return ["rental-os:order:fee-review"];
   // 试算不落库但会暴露价格，因此和申请同权限，不给只读账号看到续租报价。
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/extensions$/)) {
-    return method === "GET" ? ["store-rental:order:view"] : ["store-rental:order:extend", "store-rental:order:operate"];
+    return method === "GET" ? ["rental-os:order:view"] : ["rental-os:order:extend", "rental-os:order:operate"];
   }
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/extensions\/(preview|[^/]+\/pay)$/)) {
-    return ["store-rental:order:extend", "store-rental:order:operate"];
+    return ["rental-os:order:extend", "rental-os:order:operate"];
   }
   if (path.startsWith("/rental/v1/inspection-templates") || path.match(/^\/rental\/v1\/orders\/[^/]+\/inspections$/)) {
-    return method === "GET" ? ["store-rental:order:view"] : ["store-rental:order:operate", "store-rental:order:pickup", "store-rental:order:return"];
+    return method === "GET" ? ["rental-os:order:view"] : ["rental-os:order:operate", "rental-os:order:pickup", "rental-os:order:return"];
   }
-  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/inspections\/[^/]+\/usage-correction$/)) return ["store-rental:order:operate"];
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/inspections\/[^/]+\/usage-correction$/)) return ["rental-os:order:operate"];
   // 检查异常的建议损失额同样是费用裁定，与上面两条同权限。
-  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/inspections\/[^/]+\/exceptions\/[^/]+\/review$/)) return ["store-rental:order:fee-review"];
-  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/inspections\/[^/]+\/exceptions\/[^/]+\/customer-response$/)) return ["store-rental:order:fee-review"];
-  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/cancel$/)) return ["store-rental:order:cancel", "store-rental:order:operate"];
-  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/operation-lock$/)) return ["store-rental:order:operate", "store-rental:order:pickup", "store-rental:order:return"];
-  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/handover\/pickup$/)) return ["store-rental:order:operate", "store-rental:order:pickup"];
-  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/(handover\/return|partial-return)$/)) return ["store-rental:order:operate", "store-rental:order:return"];
-  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/(assignments|allocation-candidates)$/)) return ["store-rental:order:operate"];
-  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/(confirm|allocate|substitute-bundle-component|partial-return|handover\/[^/]+)$/)) return ["store-rental:order:operate"];
-  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/settle$/)) return ["store-rental:order:settle"];
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/inspections\/[^/]+\/exceptions\/[^/]+\/review$/)) return ["rental-os:order:fee-review"];
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/inspections\/[^/]+\/exceptions\/[^/]+\/customer-response$/)) return ["rental-os:order:fee-review"];
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/cancel$/)) return ["rental-os:order:cancel", "rental-os:order:operate"];
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/operation-lock$/)) return ["rental-os:order:operate", "rental-os:order:pickup", "rental-os:order:return"];
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/handover\/pickup$/)) return ["rental-os:order:operate", "rental-os:order:pickup"];
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/(handover\/return|partial-return)$/)) return ["rental-os:order:operate", "rental-os:order:return"];
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/(assignments|allocation-candidates)$/)) return ["rental-os:order:operate"];
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/(confirm|allocate|substitute-bundle-component|partial-return|handover\/[^/]+)$/)) return ["rental-os:order:operate"];
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/settle$/)) return ["rental-os:order:settle"];
   // RULE-01B：押金/预授权模拟资金事件。读用 order:view 或 order:settle；
   // 发起/追加/抵扣/退款/释放/失败是资金动作，只认 order:settle（订单结算权限）。
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/funding-events(\/[^/]+)?$/)) {
     return method === "GET"
-      ? ["store-rental:order:view", "store-rental:order:settle"]
-      : ["store-rental:order:settle"];
+      ? ["rental-os:order:view", "rental-os:order:settle"]
+      : ["rental-os:order:settle"];
   }
   // R1 工作台待办只读当前会话空间；报表、订单查看和维护人员都需要能进入，
   // 控制器再按维护查看权限决定是否聚合工单摘要，不能让维护人员只能绕到工单页。
-  if (path === "/rental/v1/workbench/todos") return ["store-rental:report:view", "store-rental:order:view", "rental-core:maintenance:view"];
+  if (path === "/rental/v1/workbench/todos") return ["rental-os:report:view", "rental-os:order:view", "rental-core:maintenance:view"];
   if (
     path === "/rental/v1/capabilities" ||
     path.startsWith("/rental/v1/capabilities/") ||
@@ -448,8 +448,8 @@ export function requiredPermissions(method: string, path: string) {
   }
   if (path.startsWith("/rental/v1")) {
     return method === "GET"
-      ? ["store-rental:order:view", "store-rental:vehicle:view"]
-      : ["store-rental:order:operate", "store-rental:vehicle:manage"];
+      ? ["rental-os:order:view", "rental-os:vehicle:view"]
+      : ["rental-os:order:operate", "rental-os:vehicle:manage"];
   }
 
   return [UNMATCHED_ROUTE_PERMISSION];
@@ -515,7 +515,7 @@ export class ApiAuthGuard implements CanActivate {
     // allowInvalidWorkspace 允许被撤销者进入切换入口与账号自助，但不能让他们
     // 拿旧会话的 workspaceId 继续读旧空间的客户/会员/经营事实。
     // workspaceValid=false 表示会话指向的空间成员关系已失效（撤销/停用）。
-    // /rental、/store-rental、/reports 本身不允许租户级 fallback，通常会先以
+    // /rental、/rental-os、/reports 本身不允许租户级 fallback，通常会先以
     // 401 拒绝；这里保留这些前缀，是为了即使将来调整 fallback，也仍显式守住
     // 经营数据边界。/platform 下的客户与会员接口则在这里明确返回 403。
     if (
@@ -525,7 +525,7 @@ export class ApiAuthGuard implements CanActivate {
       (path.startsWith("/platform/workspace-customers") ||
         path.startsWith("/platform/customers") ||
         path.startsWith("/rental/v1") ||
-        path.startsWith("/store-rental/") ||
+        path.startsWith("/rental-os/") ||
         path.startsWith("/reports"))
     ) {
       throw new ForbiddenException("当前经营空间的访问权已被撤销，请重新登录或联系管理员");
@@ -603,7 +603,7 @@ export class ApiAuthGuard implements CanActivate {
 
     // SPACE-02 fail-closed：经营域接口必须有已验证的当前经营空间。
     //
-    // 只拦经营域（/rental/v1 与 /store-rental），不拦 /auth 与 /platform：
+    // 只拦经营域（/rental/v1 与 /rental-os），不拦 /auth 与 /platform：
     // 登录、切换空间、以及租户管理员维护空间本身，都发生在"还没有空间"的时刻。
     //
     // 这里刻意不回退到默认空间：默认空间只是升级兼容层，回退会让一个本该被拒绝的

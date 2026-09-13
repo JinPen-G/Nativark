@@ -1,5 +1,5 @@
 import { DeleteOutlined, MinusCircleOutlined, PlusOutlined, SearchOutlined, UploadOutlined } from "@ant-design/icons";
-import { RentalInventoryMode, type RentalAttributeDefinition, type RentalItemGroup, type SaveRentalItemGroupRequest } from "@store-rental/shared";
+import { RentalInventoryMode, type RentalAttributeDefinition, type RentalItemGroup, type SaveRentalItemGroupRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Button, Card, Col, Drawer, Empty, Form, Input, InputNumber, Row, Select, Space, Switch, Table, Tag, Typography, Upload } from "antd";
 import type { UploadFile } from "antd";
@@ -49,7 +49,7 @@ function AttributeInput({
 export function CatalogPage() {
   const { message } = App.useApp();
   const queryClient = useQueryClient();
-  const canManage = useAuthStore((state) => state.hasPermission("rental-core:catalog:manage") || state.hasPermission("store-rental:vehicle-group:manage"));
+  const canManage = useAuthStore((state) => state.hasPermission("rental-core:catalog:manage") || state.hasPermission("rental-os:vehicle-group:manage"));
   const [keyword, setKeyword] = useState("");
   const [editing, setEditing] = useState<RentalItemGroup>();
   const [drawerOpen, setDrawerOpen] = useState(false);

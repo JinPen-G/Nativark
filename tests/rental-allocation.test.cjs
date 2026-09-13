@@ -12,7 +12,7 @@ const {
   allocationConflict,
   allocationComplete,
 } = require("../apps/api/src/modules/rental-core/rental-allocation-policy");
-const { rentalAllocationProgress } = require("@store-rental/shared");
+const { rentalAllocationProgress } = require("@rental-os/shared");
 const order = {
   id: "o",
   startAt: "2030-01-01T10:00:00Z",

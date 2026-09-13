@@ -46,8 +46,8 @@ import type {
   TenantSummary,
   UpdateTenantRequest,
   UpdateTenantStatusRequest
-} from "@store-rental/shared";
-import { RoleScope, TenantStatus } from "@store-rental/shared";
+} from "@rental-os/shared";
+import { RoleScope, TenantStatus } from "@rental-os/shared";
 import { generateTemporaryPassword, hashPassword, verifyPassword } from "../../common/password";
 import {
   buildOrganizationWhere,
@@ -665,7 +665,7 @@ export class PlatformRepository {
   }
 
   /**
-   * 旧 `/store-rental/*` 车辆域的表仍只有 tenantId，尚未完成空间级迁移。
+   * 旧 `/rental-os/*` 车辆域的表仍只有 tenantId，尚未完成空间级迁移。
    * 在迁移完成前只允许默认车辆空间使用这组兼容接口，禁止非默认空间把
    * 同一套租户级车辆数据伪装成自己的空间数据。
    */
@@ -1586,22 +1586,22 @@ export class PlatformRepository {
     }
     const temporaryPassword = generateTemporaryPassword();
     const storePermissionCodes = new Set([
-      "store-rental:order:view",
-      "store-rental:order:operate",
-      "store-rental:order:settle",
+      "rental-os:order:view",
+      "rental-os:order:operate",
+      "rental-os:order:settle",
       // 与 STORE_OPERATOR 预设同一条迁移：原本凭 order:settle 就能裁定的四类费用审核，
       // 拆权后要显式补上 fee-review，否则门店营运账号开出来就无法处理待审费用。
-      "store-rental:order:fee-review",
-      "store-rental:station:view",
-      "store-rental:vehicle:view",
+      "rental-os:order:fee-review",
+      "rental-os:station:view",
+      "rental-os:vehicle:view",
       "rental-core:catalog:view",
       "rental-core:asset:view",
-      "store-rental:member:view",
-      "store-rental:corporate:view",
-      "store-rental:order:create",
-      "store-rental:order:pickup",
-      "store-rental:order:return",
-      "store-rental:order:fee-manage"
+      "rental-os:member:view",
+      "rental-os:corporate:view",
+      "rental-os:order:create",
+      "rental-os:order:pickup",
+      "rental-os:order:return",
+      "rental-os:order:fee-manage"
     ]);
     const created = await this.prisma.$transaction(async (tx) => {
       if (await tx.tenant.findUnique({ where: { code: tenantCode } })) {
@@ -1636,7 +1636,7 @@ export class PlatformRepository {
           parentId: operatorOrg.id,
           type: PrismaOrganizationType.STORE,
           code: input.storeCode?.trim() || `STORE-${tenantCode.toUpperCase()}`,
-          name: input.storeName?.trim() || `${tenant.name}门店`
+          name: input.storeName?.trim() || `${tenant.name}履约空间`
         }
       });
       const permissions = await tx.permission.findMany();
@@ -1664,10 +1664,10 @@ export class PlatformRepository {
           fixedAllPermissions: false,
           enabledBusinessScopes: ["RENTAL_CORE"],
           buttonPermissions: [
-            "store-rental:order:create",
-            "store-rental:order:pickup",
-            "store-rental:order:return",
-            "store-rental:order:fee-manage"
+            "rental-os:order:create",
+            "rental-os:order:pickup",
+            "rental-os:order:return",
+            "rental-os:order:fee-manage"
           ],
           dataScope: PrismaSystemDataScope.STORE,
           isActive: true
@@ -1786,14 +1786,14 @@ export class PlatformRepository {
       executionId: `tenant_bootstrap_${randomUUID()}`,
       items: [
         {
-          code: "store-station",
-          name: "默认门市与站点",
+          code: "fulfillment-location",
+          name: "默认履约地点",
           count: 1,
           reusableForGenericRental: false,
-          remark: "当前绑定门市租车；通用租赁应改为服务点/仓库模板。"
+          remark: "当前模板保留了车辆专用示例；通用租赁应改为服务点/仓库模板。"
         },
         {
-          code: "asset-vehicle",
+          code: "asset-catalog",
           name: "车辆资产与车型组",
           count: 2,
           reusableForGenericRental: false,
@@ -1808,13 +1808,13 @@ export class PlatformRepository {
         },
         {
           code: "demo-order",
-          name: "演示门市租赁订单",
+          name: "演示租赁订单",
           count: 1,
           reusableForGenericRental: false,
           remark: "用于本地验证订单闭环；通用租赁需替换资产快照字段。"
         }
       ],
-      message: "已执行默认角色、参数、字典、编号和门市租赁基础模板。"
+      message: "已执行默认角色、参数、字典、编号和租赁业务基础模板。"
     };
   }
 
@@ -2255,18 +2255,18 @@ export class PlatformRepository {
     return (
       permission.includes(":button:") ||
       [
-        "store-rental:order:create",
-        "store-rental:order:pickup",
-        "store-rental:order:return",
-        "store-rental:order:extend",
-        "store-rental:order:cancel",
-        "store-rental:order:close",
-        "store-rental:order:fee-manage",
-        "store-rental:vehicle:status-action",
-        "store-rental:member:risk-action",
-        "store-rental:corporate:monthly-settle",
-        "store-rental:finance:adjust",
-        "store-rental:finance:invoice",
+        "rental-os:order:create",
+        "rental-os:order:pickup",
+        "rental-os:order:return",
+        "rental-os:order:extend",
+        "rental-os:order:cancel",
+        "rental-os:order:close",
+        "rental-os:order:fee-manage",
+        "rental-os:vehicle:status-action",
+        "rental-os:member:risk-action",
+        "rental-os:corporate:monthly-settle",
+        "rental-os:finance:adjust",
+        "rental-os:finance:invoice",
         "system:button:export"
       ].includes(permission)
     );
@@ -2274,18 +2274,18 @@ export class PlatformRepository {
 
   private permissionDisplayOf(permission: { code: string; name: string; description: string | null }) {
     const overrides: Record<string, { name: string; description?: string }> = {
-      "store-rental:order:view": { name: "订单查看", description: "查看租赁订单列表和详情" },
-      "store-rental:order:operate": { name: "订单操作", description: "新建租赁订单、领取检查和归还检查" },
-      "store-rental:order:create": { name: "按钮-新建订单", description: "显示并执行新建租赁订单入口" },
-      "store-rental:order:pickup": { name: "按钮-领取交付", description: "执行领取交付和确认开始履约" },
-      "store-rental:order:return": { name: "按钮-归还验收", description: "执行归还验收和提交结算" },
-      "store-rental:order:extend": { name: "按钮-延长租期", description: "执行延长租期和逾期补办续租" },
-      "store-rental:station:view": { name: "履约地点查看" },
-      "store-rental:station:manage": { name: "履约地点管理" },
-      "store-rental:vehicle-group:manage": { name: "品类型号与分组管理" },
-      "store-rental:vehicle:view": { name: "品类资产查看" },
-      "store-rental:vehicle:manage": { name: "品类资产管理" },
-      "store-rental:vehicle:status-action": { name: "按钮-品类资产状态动作", description: "启停、维保、异常和状态处置" }
+      "rental-os:order:view": { name: "订单查看", description: "查看租赁订单列表和详情" },
+      "rental-os:order:operate": { name: "订单操作", description: "新建租赁订单、领取检查和归还检查" },
+      "rental-os:order:create": { name: "按钮-新建订单", description: "显示并执行新建租赁订单入口" },
+      "rental-os:order:pickup": { name: "按钮-领取交付", description: "执行领取交付和确认开始履约" },
+      "rental-os:order:return": { name: "按钮-归还验收", description: "执行归还验收和提交结算" },
+      "rental-os:order:extend": { name: "按钮-延长租期", description: "执行延长租期和逾期补办续租" },
+      "rental-os:station:view": { name: "履约地点查看" },
+      "rental-os:station:manage": { name: "履约地点管理" },
+      "rental-os:vehicle-group:manage": { name: "品类型号与分组管理" },
+      "rental-os:vehicle:view": { name: "品类资产查看" },
+      "rental-os:vehicle:manage": { name: "品类资产管理" },
+      "rental-os:vehicle:status-action": { name: "按钮-品类资产状态动作", description: "启停、维保、异常和状态处置" }
     };
     const override = overrides[permission.code];
     return {
@@ -2298,8 +2298,8 @@ export class PlatformRepository {
     if (code.startsWith("system:")) {
       return { code: "system", name: "系统设置" };
     }
-    if (code.startsWith("store-rental:")) {
-      return { code: "store-rental", name: "租赁业务" };
+    if (code.startsWith("rental-os:")) {
+      return { code: "rental-os", name: "租赁业务" };
     }
     return { code: moduleName, name: moduleName };
   }

@@ -1,5 +1,5 @@
 import { DeleteOutlined, EditOutlined, KeyOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
-import type { OrganizationSummary, SaveOrganizationRequest, SaveSystemRoleRequest, SaveSystemUserRequest, SystemRoleRow, SystemRulesConfig, SystemUserRow } from "@store-rental/shared";
+import type { OrganizationSummary, SaveOrganizationRequest, SaveSystemRoleRequest, SaveSystemUserRequest, SystemRoleRow, SystemRulesConfig, SystemUserRow } from "@rental-os/shared";
 import { Alert, App, Button, Card, Col, Drawer, Form, Input, InputNumber, Modal, Row, Select, Space, Switch, Table, Tabs, Tag, Typography } from "antd";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";

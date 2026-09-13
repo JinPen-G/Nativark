@@ -9,7 +9,7 @@ require("ts-node").register({
 // 旧路径在 controller 里先 getOrder / 算费，再进入 cancelOrder 的锁；
 // 这会让并发续租或其他订单变更与取消费计算之间出现事实窗口。
 const { RentalCoreService } = require("../apps/api/src/modules/rental-core/rental-core.service");
-const { RentalCoreOrderStatus } = require("@store-rental/shared");
+const { RentalCoreOrderStatus } = require("@rental-os/shared");
 
 const events = [];
 const order = {

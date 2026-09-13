@@ -13,7 +13,7 @@ import {
   type RentalCapabilityEquipmentLine,
   type RentalCategoryCode,
   type WorkspaceCapabilityInstance
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { CapabilityHookRepository, type CapabilityHookSubjectType } from "./capability-hook.repository";
 import { WorkspaceCapabilityService } from "./workspace-capability.service";
 

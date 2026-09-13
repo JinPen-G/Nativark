@@ -14,7 +14,7 @@ import type {
   SaveTBoxDeviceRequest,
   SendMockNotificationRequest,
   TBoxDeviceSummary
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { requireRequestTenantId } from "../../common/request-identity";
 import { PrismaService } from "../database/prisma.service";
 

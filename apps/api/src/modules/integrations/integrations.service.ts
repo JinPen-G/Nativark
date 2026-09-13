@@ -23,7 +23,7 @@ import type {
   SaveTBoxDeviceRequest,
   SendMockNotificationRequest,
   TBoxDeviceSummary
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { requireRequestTenantId } from "../../common/request-identity";
 import { IntegrationsRepository } from "./integrations.repository";
 
@@ -41,7 +41,7 @@ export class IntegrationsService {
   private readonly files: FileAssetSummary[] = [
     {
       id: "file_demo_contract_001",
-      businessModule: "store-rental",
+      businessModule: "rental-os",
       businessType: "order_contract",
       businessId: "order_10001",
       fileName: "SR202605060001-租赁合约.pdf",
@@ -65,7 +65,7 @@ export class IntegrationsService {
     {
       id: "notify_demo_001",
       templateCode: "order_confirmed",
-      businessType: "store_rental_order",
+      businessType: "rental_order",
       businessId: "order_10001",
       targetType: "member",
       targetName: "陈小明",
@@ -111,7 +111,7 @@ export class IntegrationsService {
     {
       id: "job_demo_pending_payment_timeout",
       jobType: "pending_payment_timeout",
-      businessType: "store_rental_order",
+      businessType: "rental_order",
       businessId: "order_10002",
       status: "queued",
       attempt: 0,
@@ -131,8 +131,8 @@ export class IntegrationsService {
       id: "print_demo_001",
       documentNo: "DOC-20260608-0001",
       documentType: "rental_contract",
-      templateCode: "store-rental-contract-v1",
-      businessType: "store_rental_order",
+      templateCode: "rental-os-contract-v1",
+      businessType: "rental_order",
       businessId: "order_10001",
       status: "mock_generated",
       fileAssetId: "file_demo_contract_001",
@@ -557,7 +557,7 @@ export class IntegrationsService {
       (await this.listPrintJobs()).length + 1
     ).padStart(4, "0")}`;
     const file = await this.createFile({
-      businessModule: "store-rental",
+      businessModule: "rental-os",
       businessType: input.businessType,
       businessId: input.businessId,
       fileName: `${documentNo}-${input.documentType}.pdf`,
@@ -876,7 +876,7 @@ export class IntegrationsService {
 
     if (operation === "export" || operation === "template_download") {
       const file = await this.createFile({
-        businessModule: "store-rental",
+        businessModule: "rental-os",
         businessType:
           operation === "template_download" ? "data_exchange_template" : "data_exchange_export",
         businessId: job.id,
@@ -905,7 +905,7 @@ export class IntegrationsService {
     }
 
     const reportFile = await this.createFile({
-      businessModule: "store-rental",
+      businessModule: "rental-os",
       businessType: "data_exchange_import_report",
       businessId: job.id,
       fileName: `${targetObject}-导入校验报告-${formatDateNo(new Date())}.xlsx`,
@@ -941,7 +941,7 @@ export class IntegrationsService {
   private useMysqlDataSource() {
     const value =
       this.configService.get<string>("INFRA_DATA_SOURCE") ??
-      this.configService.get<string>("STORE_RENTAL_DATA_SOURCE") ??
+      this.configService.get<string>("RENTAL_OS_DATA_SOURCE") ??
       "mysql";
     return value.toLowerCase() === "mysql";
   }
@@ -989,44 +989,44 @@ function defaultNotificationTemplates(): NotificationTemplateSummary[] {
 function defaultDataExchangeTemplates(): DataExchangeTemplateSummary[] {
   return [
     {
-      templateCode: "store-stations-import-v1",
-      targetModule: "store-rental",
+      templateCode: "fulfillment-locations-import-v1",
+      targetModule: "rental-os",
       targetObject: "stations",
       name: "服务站点导入模板",
       operation: "template_download",
       format: "xlsx",
-      fields: ["所属门市", "据点名称", "服务类型", "车位容量", "营业状态"],
+      fields: ["所属履约地点", "地点名称", "服务类型", "车位容量", "营业状态"],
       mockFileName: "服务站点导入模板.xlsx",
       enabled: true,
       nextIntegrationPoint: "接 Excel 模板渲染、字段校验、站点能力校验和导入错误报告。"
     },
     {
-      templateCode: "store-stations-export-v1",
-      targetModule: "store-rental",
+      templateCode: "fulfillment-locations-export-v1",
+      targetModule: "rental-os",
       targetObject: "stations",
       name: "服务站点导出",
       operation: "export",
       format: "xlsx",
-      fields: ["据点编码", "据点名称", "所属门市", "服务能力", "车位", "状态"],
+      fields: ["地点编码", "地点名称", "所属履约地点", "服务能力", "车位", "状态"],
       mockFileName: "服务站点导出.xlsx",
       enabled: true,
       nextIntegrationPoint: "接站点 repository 查询、筛选条件快照、导出下载权限和操作审计。"
     },
     {
       templateCode: "vehicles-export-v1",
-      targetModule: "store-rental",
+      targetModule: "rental-os",
       targetObject: "vehicles",
       name: "车辆档案导出",
       operation: "export",
       format: "xlsx",
-      fields: ["车牌", "VIN", "车型组", "当前门市", "营运状态", "服务类型"],
+      fields: ["车牌", "VIN", "车型组", "当前履约地点", "营运状态", "服务类型"],
       mockFileName: "车辆档案导出.xlsx",
       enabled: true,
       nextIntegrationPoint: "接车辆 repository 查询、证照附件引用和批量导入校验。"
     },
     {
       templateCode: "members-export-v1",
-      targetModule: "store-rental",
+      targetModule: "rental-os",
       targetObject: "members",
       name: "个人会员导出",
       operation: "export",
@@ -1038,7 +1038,7 @@ function defaultDataExchangeTemplates(): DataExchangeTemplateSummary[] {
     },
     {
       templateCode: "corporates-export-v1",
-      targetModule: "store-rental",
+      targetModule: "rental-os",
       targetObject: "corporates",
       name: "企业客户导出",
       operation: "export",
@@ -1050,19 +1050,19 @@ function defaultDataExchangeTemplates(): DataExchangeTemplateSummary[] {
     },
     {
       templateCode: "orders-export-v1",
-      targetModule: "store-rental",
+      targetModule: "rental-os",
       targetObject: "orders",
-      name: "门市订单导出",
+      name: "租赁订单导出",
       operation: "export",
       format: "xlsx",
-      fields: ["订单号", "客户", "取车门市", "还车门市", "主状态", "支付状态", "应收金额"],
-      mockFileName: "门市订单导出.xlsx",
+      fields: ["订单号", "客户", "取件履约地点", "归还履约地点", "主状态", "支付状态", "应收金额"],
+      mockFileName: "租赁订单导出.xlsx",
       enabled: true,
       nextIntegrationPoint: "接订单 repository 查询、订单快照、费用汇总和导出任务进度。"
     },
     {
       templateCode: "members-import-validate-v1",
-      targetModule: "store-rental",
+      targetModule: "rental-os",
       targetObject: "members",
       name: "个人会员导入校验",
       operation: "import_validate",

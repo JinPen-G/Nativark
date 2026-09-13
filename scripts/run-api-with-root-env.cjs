@@ -35,7 +35,7 @@ if (!npmExecPath) {
 }
 const result = spawnSync(
   process.execPath,
-  [npmExecPath, "run", apiScript, "-w", "@store-rental/api", ...(extraArgs.length ? ["--", ...extraArgs] : [])],
+  [npmExecPath, "run", apiScript, "-w", "@rental-os/api", ...(extraArgs.length ? ["--", ...extraArgs] : [])],
   {
     cwd: rootDir,
     env: { ...loadedEnv, ...process.env },

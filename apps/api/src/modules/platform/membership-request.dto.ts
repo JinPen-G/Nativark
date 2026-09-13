@@ -16,7 +16,7 @@ import {
   type SetCustomerMembershipTemporaryPasswordRequest,
   type SubmitCustomerQualificationRequest,
   type UpdateCustomerMembershipRegistrationSettingsRequest
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import {
   IsArray,
   IsBoolean,

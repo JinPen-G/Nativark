@@ -5,7 +5,7 @@ export class HealthController {
   @Get()
   health() {
     return {
-      service: "store-rental-api",
+      service: "rental-os-api",
       status: "ok",
       time: new Date().toISOString()
     };

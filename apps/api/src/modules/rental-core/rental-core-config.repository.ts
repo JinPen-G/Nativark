@@ -13,7 +13,7 @@ import type {
   RentalLocationType,
   TenantRentalBusinessSettings,
   TenantRentalProfile
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 import { getRequestWorkspaceId } from "../../common/request-identity";
 import { assertScopedWrite, resolveScopeWorkspaceId } from "./workspace-scope";

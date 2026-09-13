@@ -1,4 +1,4 @@
-import type { RentalOrderFeeReview } from "@store-rental/shared";
+import type { RentalOrderFeeReview } from "@rental-os/shared";
 
 /**
  * 费用审核在管理端的展示口径。

@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import type {
   CreateRentalOrderRequest,
   RentalQuoteSnapshotV1
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 import { CapabilityHookRuntime } from "./capability-hook.runtime";
 import {

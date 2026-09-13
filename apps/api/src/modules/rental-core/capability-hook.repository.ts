@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import type {
   RentalCapabilityHookOutcome,
   RentalCapabilityHookPoint
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 
 /** Hook 判定对象的种类。用于按订单或报价追溯当时的判定。 */

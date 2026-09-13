@@ -1,5 +1,5 @@
 import { ArrowRightOutlined, ReloadOutlined } from "@ant-design/icons";
-import { RentalCoreOrderStatus, formatRentalMoney, type RentalAssetStatus, type RentalOrder, type RentalWorkbenchTodo, type RentalWorkbenchTodoType } from "@store-rental/shared";
+import { RentalCoreOrderStatus, formatRentalMoney, type RentalAssetStatus, type RentalOrder, type RentalWorkbenchTodo, type RentalWorkbenchTodoType } from "@rental-os/shared";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, Button, Card, Progress, Segmented, Space, Statistic, Table, Tag, Typography } from "antd";
 import { useMemo, useState } from "react";
@@ -55,8 +55,8 @@ export function WorkbenchPage() {
   const [period, setPeriod] = useState("本月");
   const navigate = useNavigate();
   const hasPermission = useAuthStore((state) => state.hasPermission);
-  const canViewOrders = hasPermission("store-rental:order:view");
-  const canViewAssets = hasPermission("rental-core:asset:view") || hasPermission("store-rental:vehicle:view");
+  const canViewOrders = hasPermission("rental-os:order:view");
+  const canViewAssets = hasPermission("rental-core:asset:view") || hasPermission("rental-os:vehicle:view");
   const canViewWorkOrders = hasPermission("rental-core:maintenance:view");
   const currency = useSettlementCurrency();
   const money = (value: number) => formatRentalMoney(value, currency);

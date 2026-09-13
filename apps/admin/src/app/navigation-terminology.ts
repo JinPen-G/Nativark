@@ -1,4 +1,4 @@
-import type { RentalCategoryTerminology } from "@store-rental/shared";
+import type { RentalCategoryTerminology } from "@rental-os/shared";
 
 /**
  * UI-NAV-01：把当前经营空间的品类术语解析成导航文案。

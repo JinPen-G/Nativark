@@ -1,4 +1,4 @@
-import type { CorporateMembershipMember, CustomerCorporateMembership, CustomerMembershipPlanAssignment, SaveCorporateMembershipRequest } from "@store-rental/shared";
+import type { CorporateMembershipMember, CustomerCorporateMembership, CustomerMembershipPlanAssignment, SaveCorporateMembershipRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { App, Button, Card, Drawer, Form, Input, Select, Space, Table, Tag } from "antd";
 import { useState } from "react";
@@ -10,7 +10,7 @@ import { useAuthStore } from "@/features/auth/authStore";
 const relationMeta: Record<string, { text: string; color: string }> = { active: { text: "有效", color: "success" }, suspended: { text: "暂停", color: "warning" }, exited: { text: "已退出", color: "default" } };
 export function CorporateMembershipPage() {
   const { message } = App.useApp(); const queryClient = useQueryClient(); const hasPermission = useAuthStore((state) => state.hasPermission);
-  const canManage = hasPermission("store-rental:corporate:manage"); const canEmployeeManage = hasPermission("store-rental:corporate:employee-manage");
+  const canManage = hasPermission("rental-os:corporate:manage"); const canEmployeeManage = hasPermission("rental-os:corporate:employee-manage");
   const [selected, setSelected] = useState<CorporateMembershipMember>(); const [drawer, setDrawer] = useState<"corporate" | "employees" | "grant">(); const [editTarget, setEditTarget] = useState<CorporateMembershipMember>(); const [revokeTarget, setRevokeTarget] = useState<CustomerMembershipPlanAssignment>();
   const [corporateForm] = Form.useForm<SaveCorporateMembershipRequest>(); const [employeeForm] = Form.useForm<{ personalCustomerId: string; role: "admin" | "employee"; department?: string; employeeNo?: string; status?: "active" | "suspended" | "exited"; effectiveFrom?: string; effectiveTo?: string; reason?: string }>(); const [grantForm] = Form.useForm<{ planVersionId: string; source: "manual" | "corporate_contract"; effectiveFrom?: string; effectiveTo?: string; reason?: string }>(); const [revokeForm] = Form.useForm<{ reason: string }>();
   const corporates = useQuery({ queryKey: ["membership-corporate"], queryFn: membershipApi.corporate });

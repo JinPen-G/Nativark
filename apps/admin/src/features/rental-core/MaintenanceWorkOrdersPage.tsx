@@ -8,7 +8,7 @@ import type {
   RentalWorkOrderType,
   ReviewRentalWorkOrderRequest,
   SubmitRentalWorkOrderRequest
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Button, Card, Descriptions, Empty, Form, Input, Modal, Select, Space, Table, Tag, Typography } from "antd";
 import { useEffect, useState } from "react";
@@ -52,8 +52,8 @@ export function MaintenanceWorkOrdersPage() {
   const queryClient = useQueryClient();
   const canManage = useAuthStore((state) => state.hasPermission("rental-core:maintenance:manage"));
   const canReview = useAuthStore((state) => state.hasPermission("rental-core:maintenance:review"));
-  const canViewOrders = useAuthStore((state) => state.hasPermission("store-rental:order:view"));
-  const canRestore = useAuthStore((state) => state.hasPermission("rental-core:maintenance:review") || state.hasPermission("rental-core:asset:manage") || state.hasPermission("store-rental:vehicle:manage"));
+  const canViewOrders = useAuthStore((state) => state.hasPermission("rental-os:order:view"));
+  const canRestore = useAuthStore((state) => state.hasPermission("rental-core:maintenance:review") || state.hasPermission("rental-core:asset:manage") || state.hasPermission("rental-os:vehicle:manage"));
   const [dialog, setDialog] = useState<DialogKind>();
   const [activeWorkOrder, setActiveWorkOrder] = useState<RentalWorkOrder>();
   const [createForm] = Form.useForm<CreateRentalWorkOrderRequest>();

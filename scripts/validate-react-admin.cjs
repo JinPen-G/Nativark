@@ -55,9 +55,9 @@ const themeSource = read("apps/admin/src/app/theme.tsx");
 ].forEach((method) => requireText(api, `${method}:`, "API write coverage"));
 
 // 反向断言：历史门市端点不得再出现在任何管理端 API 客户端里。
-// 这是整条退役工作的落锁点——只要有人把 `/store-rental/` 写回客户端，这里就失败。
-forbidText(api, "/store-rental/", "retired legacy endpoints must not return to the platform API client");
-forbidText(operations, "/store-rental/", "retired legacy endpoints must not return to the operations API client");
+// 这是整条退役工作的落锁点——只要有人把 `/rental-os/` 写回客户端，这里就失败。
+forbidText(api, "/rental-os/", "retired legacy endpoints must not return to the platform API client");
+forbidText(operations, "/rental-os/", "retired legacy endpoints must not return to the operations API client");
 
 [
   "categories", "profile", "businessSettings", "saveBusinessSettings", "couponTemplates", "saveCouponTemplate", "operators", "saveOperator", "locations", "saveLocation", "itemGroups", "assets", "stockBalances", "availability", "orders",
@@ -144,7 +144,7 @@ forbidText(commercialPage, "commercial-switcher", "commercial pages must rely on
 requireText(operations, "function listTenants", "tenant list API coverage");
 requireText(operations, "function updateTenantStatus", "tenant lifecycle API coverage");
 requireText(operations, 'import { http } from "./http";', "shared authenticated HTTP client");
-if (operations.includes("axios.create") || operations.includes("store_rental_access_token")) {
+if (operations.includes("axios.create") || operations.includes("rental_os_access_token")) {
   failures.push("authentication contract: operations API recreated the HTTP client or uses retired auth storage keys");
 }
 if (!httpSource.includes('window.localStorage.getItem("rental_access_token")')) {
@@ -181,7 +181,7 @@ requireText(navigation, 'audience: "tenant" | "saas"', "SaaS and tenant route au
 requireText(navigation, '(route.audience === "saas") !== isSaasAdmin', "SaaS and tenant route audience guard");
 requireText(shell, "Boolean(user?.isSaasAdmin)", "navigation filters by authenticated audience");
 for (const legacyLabel of ["车辆合同与单据", "车辆财务结算", "车辆履约调度", "车辆调拨与 TBox", "车辆生命周期", "车辆运营控制台", "车辆兼容报表"]) {
-  forbidText(navigation, legacyLabel, "legacy store-rental route must not be registered");
+  forbidText(navigation, legacyLabel, "legacy rental-os route must not be registered");
 }
 // 历史门市页面已**删除**，不是"留着但不路由"。
 //
@@ -199,7 +199,7 @@ for (const retiredPage of [
   "features/customers/CustomerPage.tsx"
 ]) {
   if (fs.existsSync(path.join(reactRoot, retiredPage))) {
-    failures.push(`legacy store-rental page must stay deleted: ${retiredPage}`);
+    failures.push(`legacy rental-os page must stay deleted: ${retiredPage}`);
   }
 }
 
@@ -290,7 +290,7 @@ const packageFiles = [read("package.json"), read("package-lock.json"), read("app
 if (packageFiles.some((source) => /"(?:vue|vue-router|pinia|element-plus|vue-tsc|@vitejs\/plugin-vue)"/.test(source))) {
   failures.push("package manifests or lockfile still contain removed frontend dependencies");
 }
-if (packageFiles.some((source) => source.includes("@store-rental/admin-next") || source.includes('"apps/admin-next"'))) {
+if (packageFiles.some((source) => source.includes("@rental-os/admin-next") || source.includes('"apps/admin-next"'))) {
   failures.push("package metadata still contains the temporary React workspace");
 }
 if (fs.existsSync(path.join(root, "apps", "admin-next"))) failures.push("temporary apps/admin-next directory still exists");

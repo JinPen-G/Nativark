@@ -31,7 +31,7 @@ void (() => {
   rejects(() => ops.parseDatabaseUrl("not-a-url"), /不是合法的连接串/u, "非法连接串");
   rejects(() => ops.parseDatabaseUrl("postgresql://u:p@localhost:5432/db"), /仅支持 mysql/u, "非 mysql 驱动");
   rejects(() => ops.parseDatabaseUrl("mysql://u:p@localhost:3306/"), /未指定数据库名/u, "缺库名");
-  rejects(() => ops.parseDatabaseUrl("mysql://localhost:3306/store_rental_claude"), /未指定数据库账号/u, "缺账号");
+  rejects(() => ops.parseDatabaseUrl("mysql://localhost:3306/rental_os_claude"), /未指定数据库账号/u, "缺账号");
   ok("连接信息缺失、驱动错误、缺库名或缺账号一律明确失败");
 
   // ============ 2. 共享库与系统库必须被拒 ============
@@ -46,14 +46,14 @@ void (() => {
   }
   ok("共享开发库、生产命名与系统库全部被拒（大小写无关）");
 
-  for (const database of ["store_rental_prod_claude", "store_rental_staging_e2e", "store_rental_live_sandbox"]) {
+  for (const database of ["rental_os_prod_claude", "rental_os_staging_e2e", "rental_os_live_sandbox"]) {
     rejects(
       () => ops.resolveDedicatedTarget(`mysql://u:p@localhost:3306/${database}`),
       /生产\/共享环境标记/u,
       `混入专用标记的生产库 ${database}`
     );
   }
-  for (const database of ["store_rental_claudedev", "store_rental_e2etest", "store-rental-claude", "store_rental_claude%60evil"]) {
+  for (const database of ["rental_os_claudedev", "rental_os_e2etest", "rental-os-claude", "rental_os_claude%60evil"]) {
     rejects(
       () => ops.resolveDedicatedTarget(`mysql://u:p@localhost:3306/${database}`),
       /缺少专用库标记|不是安全的数据库名/u,
@@ -63,8 +63,8 @@ void (() => {
   ok("生产标记不能用专用词绕过，库名与专用标记均按安全边界校验");
 
   // ============ 3. 没有专用标记的库默认拒绝，而不是默认放行 ============
-  // 黑名单永远漏项；`store_rental_backup` 这类名字不在黑名单里，但同样不该被当作演练目标。
-  for (const database of ["store_rental_backup", "rentaldb", "app_main", "temp1"]) {
+  // 黑名单永远漏项；`rental_os_backup` 这类名字不在黑名单里，但同样不该被当作演练目标。
+  for (const database of ["rental_os_backup", "rentaldb", "app_main", "temp1"]) {
     rejects(
       () => ops.resolveDedicatedTarget(`mysql://u:p@localhost:3306/${database}`),
       /缺少专用库标记/u,
@@ -74,19 +74,19 @@ void (() => {
   ok("缺少专用标记的库默认拒绝（fail-closed，不靠黑名单兜底）");
 
   // ============ 4. 专用库放行，并如实解析连接信息 ============
-  const target = ops.resolveDedicatedTarget("mysql://svc:s3cr3t@db.internal:3307/store_rental_claude");
-  assert.equal(target.database, "store_rental_claude");
+  const target = ops.resolveDedicatedTarget("mysql://svc:s3cr3t@db.internal:3307/rental_os_claude");
+  assert.equal(target.database, "rental_os_claude");
   assert.equal(target.host, "db.internal");
   assert.equal(target.port, 3307);
   assert.equal(target.user, "svc");
   assert.equal(target.password, "s3cr3t");
   for (const marker of ops.DEDICATED_MARKERS) {
-    assert.equal(ops.rejectionReason(`store_rental_${marker}`), undefined, `带 ${marker} 标记的库应放行`);
+    assert.equal(ops.rejectionReason(`rental_os_${marker}`), undefined, `带 ${marker} 标记的库应放行`);
   }
   ok("带专用标记的库放行，主机、端口、账号与库名如实解析");
   assert.equal(
-    runtime.assertContainerEndpoint(ops.resolveDedicatedTarget("mysql://svc:p@localhost:3306/store_rental_claude")).database,
-    "store_rental_claude"
+    runtime.assertContainerEndpoint(ops.resolveDedicatedTarget("mysql://svc:p@localhost:3306/rental_os_claude")).database,
+    "rental_os_claude"
   );
   rejects(
     () => runtime.assertContainerEndpoint(target),
@@ -96,13 +96,13 @@ void (() => {
   ok("运行时不会把远程连接串静默改连本地 MySQL 容器");
 
   // ============ 5. 演练库必须是新库，且与源库不同名 ============
-  const drill = ops.buildDrillDatabaseName("store_rental_claude", new Date("2026-08-30T01:02:03.000Z"));
-  assert.equal(drill, "store_rental_claude_drill_20260830010203", "演练库名应带时间戳后缀");
-  assert.notEqual(drill, "store_rental_claude", "演练库不得与源库同名——往源库恢复是覆盖数据，不是验证备份");
+  const drill = ops.buildDrillDatabaseName("rental_os_claude", new Date("2026-08-30T01:02:03.000Z"));
+  assert.equal(drill, "rental_os_claude_drill_20260830010203", "演练库名应带时间戳后缀");
+  assert.notEqual(drill, "rental_os_claude", "演练库不得与源库同名——往源库恢复是覆盖数据，不是验证备份");
   assert.ok(ops.isDrillDatabase(drill), "生成的演练库必须能被识别为本次演练库");
   assert.ok(drill.length <= 64, "库名不得超过 MySQL 上限");
   rejects(
-    () => ops.buildDrillDatabaseName(`store_rental_claude_${"x".repeat(60)}`),
+    () => ops.buildDrillDatabaseName(`rental_os_claude_${"x".repeat(60)}`),
     /不超过 64 字符/u,
     "MySQL 本身不可能存在的超长源库名"
   );
@@ -111,7 +111,7 @@ void (() => {
   ok("演练库为带时间戳的新库、可识别、不超长，且不能为共享库生成");
 
   // ============ 6. 只认本次演练库形态，其余一律不可删 ============
-  for (const name of ["store_rental", "store_rental_claude", "store_rental_claude_drill", "store_rental_claude_drill_2026", "drill"]) {
+  for (const name of ["store_rental", "rental_os_claude", "rental_os_claude_drill", "rental_os_claude_drill_2026", "drill"]) {
     assert.equal(ops.isDrillDatabase(name), false, `${name} 不应被识别为可删除的演练库`);
   }
   ok("清理判定只认 *_drill_<14位时间戳>，源库与近似名字都不可删");
@@ -119,8 +119,8 @@ void (() => {
   // ============ 7. 口令不得进日志 ============
   assert.equal(ops.redact("connecting s3cr3t", ["s3cr3t"]), "connecting ***", "显式口令必须被掩码");
   assert.equal(
-    ops.redact("mysql://svc:s3cr3t@db.internal:3307/store_rental_claude"),
-    "mysql://svc:***@db.internal:3307/store_rental_claude",
+    ops.redact("mysql://svc:s3cr3t@db.internal:3307/rental_os_claude"),
+    "mysql://svc:***@db.internal:3307/rental_os_claude",
     "连接串口令段必须被掩码，即使未显式传入口令"
   );
   assert.equal(ops.redact("", ["s3cr3t"]), "", "空文本不应报错");

@@ -303,7 +303,7 @@ void withCleanup(async () => {
     path.join(ROOT, "apps/api/src/modules/rental-core/rental-workspace-report.repository.ts"),
     "utf8"
   );
-  for (const legacy of ["storeRental", "store_rental_orders", "vehicle", "plateNo", "billingMode"]) {
+  for (const legacy of ["storeRental", "rental_orders", "vehicle", "plateNo", "billingMode"]) {
     assert.equal(
       new RegExp(legacy, "iu").test(repoSource.replace(/\/\*[\s\S]*?\*\//gu, "").replace(/^\s*\/\/.*$/gmu, "")),
       false,

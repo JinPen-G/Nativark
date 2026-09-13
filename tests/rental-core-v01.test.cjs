@@ -15,7 +15,7 @@ const {
   RENTAL_PRICING_UNIT_CODES,
   RentalCoreOrderStatus,
   RentalInventoryMode
-} = require("@store-rental/shared");
+} = require("@rental-os/shared");
 const { assertRentalCategoryExtensions } = require("../apps/api/src/modules/rental-core/rental-extension-registry");
 const { RENTAL_PRICING_STRATEGIES, rentalPricingStrategy } = require("../apps/api/src/modules/rental-core/rental-pricing-strategy");
 const { createAbsorbingConfigStore, createAbsorbingFactStore, createAbsorbingBusinessConfigStore, createAbsorbingBusinessFactStore } = require("./helpers/absorbing-config-store.cjs");

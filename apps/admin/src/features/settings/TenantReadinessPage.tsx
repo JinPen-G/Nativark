@@ -2,7 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, Button, Card, Space, Spin, Tag, Typography } from "antd";
 import { CheckCircleFilled, RightOutlined, WarningFilled } from "@ant-design/icons";
-import type { TenantReadinessStatus } from "@store-rental/shared";
+import type { TenantReadinessStatus } from "@rental-os/shared";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { PageHeader } from "@/components/PageHeader";
 import { useAuthStore } from "@/features/auth/authStore";

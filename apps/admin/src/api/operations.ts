@@ -33,7 +33,7 @@ import type {
   UpdateBusinessWorkspaceRequest,
   UpdateTenantRequest,
   UpdateTenantStatusRequest
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 
 export async function saveSystemRuleSection(
   payload: SaveSystemRuleSectionRequest

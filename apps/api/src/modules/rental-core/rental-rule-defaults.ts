@@ -1,4 +1,4 @@
-import type { RentalEarlyReturnRule, RentalExtensionRule, RentalRuleConfig, RentalTaxRule } from "@store-rental/shared";
+import type { RentalEarlyReturnRule, RentalExtensionRule, RentalRuleConfig, RentalTaxRule } from "@rental-os/shared";
 import { roundMoney } from "./rental-money";
 
 /**

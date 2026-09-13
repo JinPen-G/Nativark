@@ -4,7 +4,7 @@ import type {
   RentalCustomerCoupon,
   RentalNotificationSendLogV1,
   SystemUserRow
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { RentalBusinessService, type BusinessContext } from "./rental-business.service";
 import {
   GrantRentalRewardDto,
@@ -108,10 +108,10 @@ export class RentalBusinessController {
     const permissions = user.permissions ?? [];
     if (permissions.includes("*") || user.isPlatformAdmin) return true;
     return [
-      "store-rental:calendar:edit",
-      "store-rental:calendar:publish",
-      "store-rental:price:manage",
-      "store-rental:rules:manage"
+      "rental-os:calendar:edit",
+      "rental-os:calendar:publish",
+      "rental-os:price:manage",
+      "rental-os:rules:manage"
     ].some((code) => permissions.includes(code));
   }
 

@@ -3,7 +3,7 @@ import {
   RENTAL_PRICING_UNIT_CODES,
   type RentalPricingRate,
   type RentalPricingUnit
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { DEFAULT_BUSINESS_TIME_ZONE, businessDateKey, businessDateKeyFromIndex, businessDayIndex, businessInstantAt } from "./rental-business-day";
 
 /**

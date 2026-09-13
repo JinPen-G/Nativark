@@ -3,7 +3,7 @@ import type {
   PlatformAuditLogQuery,
   PlatformFilterPresetQuery,
   SystemUserRow,
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { PlatformService } from "./platform.service";
 import { CustomerOperationsService } from "./customer-operations.service";
 import {

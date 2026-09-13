@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { RentalOrderServiceOccurrence, RentalQuoteServiceSnapshot } from "@store-rental/shared";
+import type { RentalOrderServiceOccurrence, RentalQuoteServiceSnapshot } from "@rental-os/shared";
 
 /**
  * 服务容量预留的幂等键（MKT-02C）。

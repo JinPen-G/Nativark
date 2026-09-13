@@ -1,4 +1,4 @@
-import type { RentalOrderServiceOccurrence } from "@store-rental/shared";
+import type { RentalOrderServiceOccurrence } from "@rental-os/shared";
 
 /**
  * 订单服务发生项的展示口径（MKT-02C）。

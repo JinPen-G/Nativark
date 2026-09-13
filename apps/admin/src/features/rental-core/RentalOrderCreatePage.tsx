@@ -17,7 +17,7 @@ import {
   type RentalBookingIdentityInput,
   type RentalQuoteRequest,
   type RentalQuoteSnapshotV1,
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   Alert,

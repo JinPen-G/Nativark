@@ -49,7 +49,7 @@ import {
   TenantSummary,
   UpdateTenantRequest,
   UpdateTenantStatusRequest
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import {
   buildOrganizationWhere,
   buildSystemUserWhere,
@@ -123,7 +123,7 @@ export class PlatformService {
       tenantCode: "demo",
       tenantName: "演示香港租户",
       tenantStatus: TenantStatus.Active,
-      enabledBusinessLines: ["rental_core", "store_rental"],
+      enabledBusinessLines: ["rental_core", "rental_os"],
       categoryCode: RentalCategoryCode.Camera,
       categoryName: "摄影设备",
       capabilities: [...RENTAL_CATEGORY_DEFINITIONS.find((category) => category.code === RentalCategoryCode.Camera)!.defaultCapabilities]
@@ -163,7 +163,7 @@ export class PlatformService {
       parentId: "org_operator_hk",
       type: RoleScope.Store,
       code: "STORE-MK",
-      name: "旺角门市",
+      name: "旺角服务点",
       status: "enabled"
     },
     {
@@ -172,7 +172,7 @@ export class PlatformService {
       parentId: "org_operator_hk",
       type: RoleScope.Store,
       code: "STORE-CENTRAL",
-      name: "中环门市",
+      name: "中环服务点",
       status: "enabled"
     },
     {
@@ -206,63 +206,63 @@ export class PlatformService {
       ]
     },
     {
-      code: "store-rental",
+      code: "rental-os",
       name: "租赁业务",
       children: [
-        { code: "store-rental:rules:manage", name: "业务规则配置" },
+        { code: "rental-os:rules:manage", name: "业务规则配置" },
         // RULE-01A：发布与编辑分权（需求 4.6.14）。发布改变对外生效条款，
         // 与「改草稿」是两个责任；共用一个码会让任何能编辑的人直接对客户生效。
-        { code: "store-rental:rules:publish", name: "业务规则发布", description: "发布或安排规则版本生效、作废已发布或待生效版本" },
-        { code: "store-rental:order:view", name: "订单查看", description: "查看租赁订单列表和详情" },
-        { code: "store-rental:order:operate", name: "订单操作", description: "新建租赁订单、领取检查和归还检查" },
-        { code: "store-rental:order:reassign", name: "资源解锁与改配", description: "解锁、释放及更换订单锁定资源，必须填写原因" },
-        { code: "store-rental:order:settle", name: "订单结算", description: "确认费用、补缴、退款或月结入账" },
+        { code: "rental-os:rules:publish", name: "业务规则发布", description: "发布或安排规则版本生效、作废已发布或待生效版本" },
+        { code: "rental-os:order:view", name: "订单查看", description: "查看租赁订单列表和详情" },
+        { code: "rental-os:order:operate", name: "订单操作", description: "新建租赁订单、领取检查和归还检查" },
+        { code: "rental-os:order:reassign", name: "资源解锁与改配", description: "解锁、释放及更换订单锁定资源，必须填写原因" },
+        { code: "rental-os:order:settle", name: "订单结算", description: "确认费用、补缴、退款或月结入账" },
         // ORDER-CLOSE-02：裁定「该收/该退多少」与实际动钱拆成两个权限。此前四类审核
         // 都认 order:settle，而资金事件也认它，一个权限同时授予定金额和收退款。
-        { code: "store-rental:order:fee-review", name: "费用裁定", description: "裁定逾期人工核价、提前归还退款、续租负差额与检查异常的金额；不含实际收退款" },
-        { code: "store-rental:order:create", name: "按钮-新建订单", description: "显示并执行新建租赁订单入口" },
-        { code: "store-rental:order:pickup", name: "按钮-领取交付", description: "执行领取交付和确认开始履约" },
-        { code: "store-rental:order:return", name: "按钮-归还验收", description: "执行归还验收和提交结算" },
-        { code: "store-rental:order:extend", name: "按钮-延长租期", description: "执行延长租期和逾期补办续租" },
-        { code: "store-rental:order:cancel", name: "按钮-取消/爽约", description: "执行取消订单和标记爽约" },
-        { code: "store-rental:order:close", name: "按钮-关闭/拒绝履约", description: "执行关闭订单和拒绝履约" },
-        { code: "store-rental:order:fee-manage", name: "按钮-费用处理", description: "登记订单费用、收款、退款和减免" },
-        { code: "store-rental:dispatch:manage", name: "调度管理" },
-        { code: "store-rental:price:manage", name: "价格规则" },
-        { code: "store-rental:calendar:edit", name: "营业日历编辑（草稿）", description: "新建和修改营业日历草稿，不含发布" },
-        { code: "store-rental:calendar:publish", name: "营业日历发布", description: "发布年度营业日历版本" },
-        { code: "store-rental:calendar:view-history", name: "营业日历历史只读", description: "查看历史版本、发布差异、覆盖审计与报价命中的日历依据，不得修改" },
-        { code: "store-rental:marketing:manage", name: "行销方案管理" },
-        { code: "store-rental:station:view", name: "履约地点查看" },
-        { code: "store-rental:station:manage", name: "履约地点管理" },
-        { code: "store-rental:vehicle-group:manage", name: "品类型号与分组管理" },
-        { code: "store-rental:vehicle:view", name: "品类资产查看" },
-        { code: "store-rental:vehicle:manage", name: "品类资产管理" },
-        { code: "store-rental:vehicle:status-action", name: "按钮-品类资产状态动作", description: "启停、维保、异常和状态处置" },
-        { code: "store-rental:member:view", name: "会员查看" },
-        { code: "store-rental:member:manage", name: "会员管理" },
-        { code: "store-rental:member:review", name: "会员注册审核", description: "处理个人会员注册审核，不含证件审核" },
-        { code: "store-rental:member:qualification-review", name: "会员证件审核", description: "处理身份证件和品类资质审核" },
-        { code: "store-rental:member:account-manage", name: "会员账号与密码管理", description: "开通账号、设置临时密码和管理账号状态" },
-        { code: "store-rental:member:plan:manage", name: "会员方案编辑", description: "编辑个人和企业会员方案草稿、授予方案" },
-        { code: "store-rental:member:plan:publish", name: "会员方案发布", description: "发布会员方案版本" },
-        { code: "store-rental:member:risk-action", name: "按钮-会员风控动作", description: "暂停、拉黑和恢复会员" },
+        { code: "rental-os:order:fee-review", name: "费用裁定", description: "裁定逾期人工核价、提前归还退款、续租负差额与检查异常的金额；不含实际收退款" },
+        { code: "rental-os:order:create", name: "按钮-新建订单", description: "显示并执行新建租赁订单入口" },
+        { code: "rental-os:order:pickup", name: "按钮-领取交付", description: "执行领取交付和确认开始履约" },
+        { code: "rental-os:order:return", name: "按钮-归还验收", description: "执行归还验收和提交结算" },
+        { code: "rental-os:order:extend", name: "按钮-延长租期", description: "执行延长租期和逾期补办续租" },
+        { code: "rental-os:order:cancel", name: "按钮-取消/爽约", description: "执行取消订单和标记爽约" },
+        { code: "rental-os:order:close", name: "按钮-关闭/拒绝履约", description: "执行关闭订单和拒绝履约" },
+        { code: "rental-os:order:fee-manage", name: "按钮-费用处理", description: "登记订单费用、收款、退款和减免" },
+        { code: "rental-os:dispatch:manage", name: "调度管理" },
+        { code: "rental-os:price:manage", name: "价格规则" },
+        { code: "rental-os:calendar:edit", name: "营业日历编辑（草稿）", description: "新建和修改营业日历草稿，不含发布" },
+        { code: "rental-os:calendar:publish", name: "营业日历发布", description: "发布年度营业日历版本" },
+        { code: "rental-os:calendar:view-history", name: "营业日历历史只读", description: "查看历史版本、发布差异、覆盖审计与报价命中的日历依据，不得修改" },
+        { code: "rental-os:marketing:manage", name: "行销方案管理" },
+        { code: "rental-os:station:view", name: "履约地点查看" },
+        { code: "rental-os:station:manage", name: "履约地点管理" },
+        { code: "rental-os:vehicle-group:manage", name: "品类型号与分组管理" },
+        { code: "rental-os:vehicle:view", name: "品类资产查看" },
+        { code: "rental-os:vehicle:manage", name: "品类资产管理" },
+        { code: "rental-os:vehicle:status-action", name: "按钮-品类资产状态动作", description: "启停、维保、异常和状态处置" },
+        { code: "rental-os:member:view", name: "会员查看" },
+        { code: "rental-os:member:manage", name: "会员管理" },
+        { code: "rental-os:member:review", name: "会员注册审核", description: "处理个人会员注册审核，不含证件审核" },
+        { code: "rental-os:member:qualification-review", name: "会员证件审核", description: "处理身份证件和品类资质审核" },
+        { code: "rental-os:member:account-manage", name: "会员账号与密码管理", description: "开通账号、设置临时密码和管理账号状态" },
+        { code: "rental-os:member:plan:manage", name: "会员方案编辑", description: "编辑个人和企业会员方案草稿、授予方案" },
+        { code: "rental-os:member:plan:publish", name: "会员方案发布", description: "发布会员方案版本" },
+        { code: "rental-os:member:risk-action", name: "按钮-会员风控动作", description: "暂停、拉黑和恢复会员" },
         // CUSTOMER-01B：敏感资料解密查看单独授权。必须出现在权限目录里——
         // 角色管理页的可选项完全来自这棵树，漏了它就没人能被授予该权限。
-        { code: "store-rental:customer:reveal-sensitive", name: "客户敏感资料解密", description: "查看客户证件号等明文，并可查阅敏感访问审计" },
-        { code: "store-rental:customer:merge", name: "客户合并", description: "人工合并重复客户主档，不可逆" },
-        { code: "store-rental:customer:close", name: "客户注销", description: "注销客户账号或空间会员关系，不可逆" },
-        { code: "store-rental:corporate:view", name: "企业客户查看" },
-        { code: "store-rental:corporate:manage", name: "企业客户管理" },
-        { code: "store-rental:corporate:employee-manage", name: "企业员工管理", description: "维护企业管理员和员工关系" },
-        { code: "store-rental:corporate:monthly-settle", name: "按钮-企业月结回款", description: "登记企业账单回款" },
-        { code: "store-rental:finance:view", name: "财务查看", description: "查看资金流水、发票收据、调账和对账" },
-        { code: "store-rental:finance:manage", name: "财务管理", description: "维护财务单据和处理资金状态" },
-        { code: "store-rental:finance:adjust", name: "按钮-手工调账", description: "提交、审核和入账手工调账" },
-        { code: "store-rental:finance:invoice", name: "按钮-发票/收据", description: "开具、发送和作废发票收据" },
-        { code: "store-rental:finance:reconcile", name: "财务对账", description: "查看和处理资金、月结、调账异常" },
-        { code: "store-rental:service:manage", name: "增值服务管理" },
-        { code: "store-rental:report:view", name: "报表查看" }
+        { code: "rental-os:customer:reveal-sensitive", name: "客户敏感资料解密", description: "查看客户证件号等明文，并可查阅敏感访问审计" },
+        { code: "rental-os:customer:merge", name: "客户合并", description: "人工合并重复客户主档，不可逆" },
+        { code: "rental-os:customer:close", name: "客户注销", description: "注销客户账号或空间会员关系，不可逆" },
+        { code: "rental-os:corporate:view", name: "企业客户查看" },
+        { code: "rental-os:corporate:manage", name: "企业客户管理" },
+        { code: "rental-os:corporate:employee-manage", name: "企业员工管理", description: "维护企业管理员和员工关系" },
+        { code: "rental-os:corporate:monthly-settle", name: "按钮-企业月结回款", description: "登记企业账单回款" },
+        { code: "rental-os:finance:view", name: "财务查看", description: "查看资金流水、发票收据、调账和对账" },
+        { code: "rental-os:finance:manage", name: "财务管理", description: "维护财务单据和处理资金状态" },
+        { code: "rental-os:finance:adjust", name: "按钮-手工调账", description: "提交、审核和入账手工调账" },
+        { code: "rental-os:finance:invoice", name: "按钮-发票/收据", description: "开具、发送和作废发票收据" },
+        { code: "rental-os:finance:reconcile", name: "财务对账", description: "查看和处理资金、月结、调账异常" },
+        { code: "rental-os:service:manage", name: "增值服务管理" },
+        { code: "rental-os:report:view", name: "报表查看" }
       ]
     },
     {
@@ -305,28 +305,28 @@ export class PlatformService {
       enabledBusinessScopes: ["STORE_STANDARD", "STORE_24H"],
       isActive: true,
       permissions: [
-        "store-rental:order:view",
-        "store-rental:order:operate",
-        "store-rental:order:settle",
+        "rental-os:order:view",
+        "rental-os:order:operate",
+        "rental-os:order:settle",
         // 迁移说明：该角色此前凭 order:settle 就能裁定四类费用审核，拆权后必须显式补上
         // 才不会失能。只补这一个已有结算权的预设角色，不给其他角色授新权。
-        "store-rental:order:fee-review",
-        "store-rental:station:view",
-        "store-rental:vehicle:view",
+        "rental-os:order:fee-review",
+        "rental-os:station:view",
+        "rental-os:vehicle:view",
         "rental-core:catalog:view",
         "rental-core:asset:view",
-        "store-rental:member:view",
-        "store-rental:corporate:view",
-        "store-rental:finance:view"
+        "rental-os:member:view",
+        "rental-os:corporate:view",
+        "rental-os:finance:view"
       ],
       buttonPermissions: [
-        "store-rental:order:create",
-        "store-rental:order:pickup",
-        "store-rental:order:return",
-        "store-rental:order:extend",
-        "store-rental:order:cancel",
-        "store-rental:order:fee-manage",
-        "store-rental:vehicle:status-action"
+        "rental-os:order:create",
+        "rental-os:order:pickup",
+        "rental-os:order:return",
+        "rental-os:order:extend",
+        "rental-os:order:cancel",
+        "rental-os:order:fee-manage",
+        "rental-os:vehicle:status-action"
       ],
       dataScope: "store"
     },
@@ -341,17 +341,17 @@ export class PlatformService {
       enabledBusinessScopes: ["STORE_STANDARD", "SYSTEM_GLOBAL"],
       isActive: true,
       permissions: [
-        "store-rental:rules:manage",
-        "store-rental:rules:publish",
-        "store-rental:price:manage",
-        "store-rental:marketing:manage",
-        "store-rental:service:manage",
+        "rental-os:rules:manage",
+        "rental-os:rules:publish",
+        "rental-os:price:manage",
+        "rental-os:marketing:manage",
+        "rental-os:service:manage",
         "system:params:manage",
         "system:integration:manage",
-        "store-rental:order:view",
-        "store-rental:finance:view",
-        "store-rental:finance:reconcile",
-        "store-rental:report:view"
+        "rental-os:order:view",
+        "rental-os:finance:view",
+        "rental-os:finance:reconcile",
+        "rental-os:report:view"
       ],
       buttonPermissions: ["system:button:export"],
       dataScope: "organization"
@@ -381,17 +381,17 @@ export class PlatformService {
       enabledBusinessScopes: ["STORE_STANDARD", "STORE_24H"],
       isActive: true,
       permissions: [
-        "store-rental:order:view",
-        "store-rental:order:operate",
-        "store-rental:station:view",
-        "store-rental:vehicle:view",
+        "rental-os:order:view",
+        "rental-os:order:operate",
+        "rental-os:station:view",
+        "rental-os:vehicle:view",
         "rental-core:catalog:view",
         "rental-core:asset:view"
       ],
       buttonPermissions: [
-        "store-rental:order:create",
-        "store-rental:order:pickup",
-        "store-rental:order:return"
+        "rental-os:order:create",
+        "rental-os:order:pickup",
+        "rental-os:order:return"
       ],
       dataScope: "store"
     }
@@ -555,7 +555,7 @@ export class PlatformService {
       apiKeyMasked: "sk-****8F3A",
       promptSourceText: "租户专属版",
       promptConfigVersion: "prompt-config-20260519.01",
-      promptVersion: "store-rental-dispatch-agent-v1",
+      promptVersion: "rental-os-dispatch-agent-v1",
       promptHash: "sha256:8c21...f09a",
       lastTestStatus: "成功",
       lastTestTime: "2026-05-05 10:30",
@@ -580,12 +580,12 @@ export class PlatformService {
           operator: "王店长",
           model: "gpt-xxx",
           promptSourceText: "租户专属版",
-          promptVersion: "store-rental-dispatch-agent-v1",
+          promptVersion: "rental-os-dispatch-agent-v1",
           promptHash: "sha256:8c21...f09a",
           filteredCount: 5,
           status: "成功",
           promptText:
-            "你是 Store Rental Platform 门市租赁 AI 调度分析 Agent。\n你的职责是帮助调度员分析车辆排程风险，并在系统合法候选车辆范围内生成推荐。",
+            "你是 Rental OS 平台租赁业务 AI 调度分析 Agent。\n你的职责是帮助调度员分析车辆排程风险，并在系统合法候选车辆范围内生成推荐。",
           requestPayload: JSON.stringify(
             {
               analysisContext: {
@@ -618,12 +618,12 @@ export class PlatformService {
           operator: "陈调度",
           model: "gpt-xxx",
           promptSourceText: "默认版",
-          promptVersion: "store-rental-dispatch-agent-v1",
+          promptVersion: "rental-os-dispatch-agent-v1",
           promptHash: "sha256:7f18...a921",
           filteredCount: 5,
           status: "成功",
           promptText:
-            "你是 Store Rental Platform 门市租赁 AI 调度分析 Agent。\n必须遵守系统硬约束，不得直接修改订单、车辆或排程。",
+            "你是 Rental OS 平台租赁业务 AI 调度分析 Agent。\n必须遵守系统硬约束，不得直接修改订单、车辆或排程。",
           requestPayload: JSON.stringify(
             {
               analysisContext: {
@@ -672,7 +672,7 @@ export class PlatformService {
       operator: "系统初始化",
       targetType: "system-rules",
       targetId: "system-rules",
-      detail: "写入门市租赁系统通用参数默认值。",
+      detail: "写入租赁业务系统通用参数默认值。",
       createdAt: "2026-05-05T10:30:00+08:00"
     }
   ];
@@ -683,8 +683,8 @@ export class PlatformService {
     {
       code: "order_main_status",
       name: "订单主状态",
-      module: "门市租赁",
-      description: "门市租赁订单列表、详情和审计中心统一展示主状态。",
+      module: "租赁业务",
+      description: "租赁业务订单列表、详情和审计中心统一展示主状态。",
       items: [
         { code: "reserved", label: "已预订", value: "reserved", sortNo: 10, enabled: true },
         { code: "renting", label: "租赁中", value: "renting", sortNo: 20, enabled: true },
@@ -725,7 +725,7 @@ export class PlatformService {
   ];
 
   private numberRules: PlatformNumberRule[] = [
-    this.buildNumberRule("STORE_ORDER", "门市订单号", "订单中心", "SO", "yyyyMMdd", 6),
+    this.buildNumberRule("STORE_ORDER", "租赁订单号", "订单中心", "SO", "yyyyMMdd", 6),
     this.buildNumberRule("CONTRACT", "合同编号", "合同单据", "CT", "yyyyMM", 5),
     this.buildNumberRule("ACCIDENT_REPORT", "事故报案号", "事故出险", "AC", "yyyyMMdd", 4),
     this.buildNumberRule("CUSTOMER", "客户编号", "客户运营", "CU", "yyyyMM", 5),
@@ -1252,9 +1252,9 @@ export class PlatformService {
           code: "STORE_OPERATOR",
           name: "门店营运",
           permissions: [
-            "store-rental:order:view",
-            "store-rental:order:operate",
-            "store-rental:vehicle:view"
+            "rental-os:order:view",
+            "rental-os:order:operate",
+            "rental-os:vehicle:view"
           ]
         }
       ],
@@ -1337,7 +1337,7 @@ export class PlatformService {
         parentId: orgId,
         type: RoleScope.Store,
         code: input.storeCode?.trim() || `STORE-${tenantCode.toUpperCase()}`,
-        name: input.storeName?.trim() || `${tenantName}门市`,
+        name: input.storeName?.trim() || `${tenantName}履约空间`,
         status: "enabled"
       }
     );
@@ -1614,7 +1614,7 @@ export class PlatformService {
     this.requireWorkspaceDataSource();
     this.assertCustomerActionPermission(
       currentUser,
-      input.status === "closed" ? "store-rental:customer:close" : "store-rental:member:manage",
+      input.status === "closed" ? "rental-os:customer:close" : "rental-os:member:manage",
       input.status === "closed" ? "注销客户账号" : "变更客户账号状态"
     );
     const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
@@ -1636,10 +1636,10 @@ export class PlatformService {
     this.assertCustomerActionPermission(
       currentUser,
       input.status === "closed"
-        ? "store-rental:customer:close"
+        ? "rental-os:customer:close"
         : input.status === "risk_restricted"
-          ? "store-rental:member:risk-action"
-          : "store-rental:member:manage",
+          ? "rental-os:member:risk-action"
+          : "rental-os:member:manage",
       input.status === "closed"
         ? "注销空间会员关系"
         : input.status === "risk_restricted"
@@ -2592,14 +2592,14 @@ export class PlatformService {
   private getTenantBootstrapTemplates() {
     return [
       {
-        code: "store-station",
-        name: "默认门市与站点",
+        code: "fulfillment-location",
+        name: "默认履约地点",
         count: 1,
         reusableForGenericRental: false,
-        remark: "当前绑定门市租车；通用租赁应改为服务点/仓库模板。"
+        remark: "当前模板保留了车辆专用示例；通用租赁应改为服务点/仓库模板。"
       },
       {
-        code: "asset-vehicle",
+        code: "asset-catalog",
         name: "车辆资产与车型组",
         count: 2,
         reusableForGenericRental: false,
@@ -2614,7 +2614,7 @@ export class PlatformService {
       },
       {
         code: "demo-order",
-        name: "演示门市租赁订单",
+        name: "演示租赁订单",
         count: 1,
         reusableForGenericRental: false,
         remark: "用于本地验证订单闭环；通用租赁需替换资产快照字段。"
@@ -2626,7 +2626,7 @@ export class PlatformService {
     return {
       executionId: `tenant_bootstrap_${randomUUID()}`,
       items: this.getTenantBootstrapTemplates(),
-      message: "已执行默认角色、参数、字典、编号和门市租赁基础模板。"
+      message: "已执行默认角色、参数、字典、编号和租赁业务基础模板。"
     };
   }
 
@@ -2668,12 +2668,12 @@ export class PlatformService {
 
   private normalizeFilterPresetScope(scopeKey: string): PlatformFilterPresetScope {
     const allowedScopes: PlatformFilterPresetScope[] = [
-      "store-rental.orders",
-      "store-rental.vehicles",
-      "store-rental.members",
-      "store-rental.corporates",
-      "store-rental.stations",
-      "store-rental.vehicle-transfer"
+      "rental-os.orders",
+      "rental-os.vehicles",
+      "rental-os.members",
+      "rental-os.corporates",
+      "rental-os.stations",
+      "rental-os.vehicle-transfer"
     ];
     if (!allowedScopes.includes(scopeKey as PlatformFilterPresetScope)) {
       throw new BadRequestException("筛选预设范围不支持");
@@ -2854,18 +2854,18 @@ export class PlatformService {
     return (
       permission.includes(":button:") ||
       [
-        "store-rental:order:create",
-        "store-rental:order:pickup",
-        "store-rental:order:return",
-        "store-rental:order:extend",
-        "store-rental:order:cancel",
-        "store-rental:order:close",
-        "store-rental:order:fee-manage",
-        "store-rental:vehicle:status-action",
-        "store-rental:member:risk-action",
-        "store-rental:corporate:monthly-settle",
-        "store-rental:finance:adjust",
-        "store-rental:finance:invoice",
+        "rental-os:order:create",
+        "rental-os:order:pickup",
+        "rental-os:order:return",
+        "rental-os:order:extend",
+        "rental-os:order:cancel",
+        "rental-os:order:close",
+        "rental-os:order:fee-manage",
+        "rental-os:vehicle:status-action",
+        "rental-os:member:risk-action",
+        "rental-os:corporate:monthly-settle",
+        "rental-os:finance:adjust",
+        "rental-os:finance:invoice",
         "system:button:export"
       ].includes(permission)
     );
@@ -2917,9 +2917,9 @@ export class PlatformService {
         actions: [
           "system.user.reset-password",
           "system.role.delete",
-          "store-rental.order.close",
-          "store-rental.fee.waive",
-          "store-rental.vehicle.disable"
+          "rental-os.order.close",
+          "rental-os.fee.waive",
+          "rental-os.vehicle.disable"
         ]
       }
     };

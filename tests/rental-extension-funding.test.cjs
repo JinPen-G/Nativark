@@ -12,7 +12,7 @@ require("ts-node").register({
 //   (b) 订单已终结却仍为遗留待付款续租计入待收，页面给出一个必然失败的补款按钮；
 //   (c) 归还/取消/完成时未处理未生效申请，pending_payment 没有自然终态。
 const { RentalCoreService } = require("../apps/api/src/modules/rental-core/rental-core.service");
-const { RentalCoreOrderStatus } = require("@store-rental/shared");
+const { RentalCoreOrderStatus } = require("@rental-os/shared");
 const {
   extensionPaymentRequired,
   pendingExtensionCountsAsDue

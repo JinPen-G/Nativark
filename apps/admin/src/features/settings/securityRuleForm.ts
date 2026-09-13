@@ -2,7 +2,7 @@ import type {
   RentalDepositRule,
   RentalPreauthorizationRule,
   RentalRuleVersion,
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 
 export interface NormalizedSecurityRules {
   deposit: RentalDepositRule;

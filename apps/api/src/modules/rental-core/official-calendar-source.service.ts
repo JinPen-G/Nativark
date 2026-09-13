@@ -5,7 +5,7 @@ import type {
   OfficialCalendarSourceVersionSummary,
   RegisterOfficialCalendarSourceVersionRequest,
   SaveOfficialCalendarSourceRequest
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 import { isCalendarDateKey } from "./rental-business-day";
 

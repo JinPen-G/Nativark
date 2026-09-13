@@ -12,7 +12,7 @@ import type {
   RentalQuoteSnapshotV1,
   RentalRewardLedgerEntry,
   RentalRuleConfig
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 import { resolveScopeWorkspaceId } from "./workspace-scope";
 

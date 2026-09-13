@@ -16,7 +16,7 @@ import type {
   SaveCustomerCreditRequest,
   SaveCustomerInvoiceProfileRequest,
   SharedCustomerProfile
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { request } from "./http";
 
 /**

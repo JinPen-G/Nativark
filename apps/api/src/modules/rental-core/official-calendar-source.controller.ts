@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Post, Put, Query, Req } from "@nestjs/common";
-import type { SystemUserRow } from "@store-rental/shared";
+import type { SystemUserRow } from "@rental-os/shared";
 import {
   RegisterOfficialCalendarSourceVersionDto,
   SaveOfficialCalendarSourceDto

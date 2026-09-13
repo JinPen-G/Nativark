@@ -5,7 +5,7 @@ import {
   SaveOutlined,
   TeamOutlined,
 } from "@ant-design/icons";
-import { RENTAL_CURRENCY_CODES, RENTAL_CURRENCY_META, RENTAL_PRICING_UNIT_LABELS, formatRentalMoney } from "@store-rental/shared";
+import { RENTAL_CURRENCY_CODES, RENTAL_CURRENCY_META, RENTAL_PRICING_UNIT_LABELS, formatRentalMoney } from "@rental-os/shared";
 import type {
   GrantRentalRewardRequest,
   RentalCalendarDay,
@@ -18,7 +18,7 @@ import type {
   SaveRentalNotificationTemplateRequest,
   SendRentalNotificationRequest,
   TenantRentalBusinessSettings,
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
@@ -169,21 +169,21 @@ export function RentalGovernancePage() {
   // 看到「导入/覆盖/移除覆盖」，而且不该发出注定 403 的请求（页面会满屏报错，
   // 专门配置的日历角色拿不到一个能用的工作界面）。
   const hasPermission = useAuthStore((state) => state.hasPermission);
-  const canManagePrice = hasPermission("store-rental:price:manage");
+  const canManagePrice = hasPermission("rental-os:price:manage");
   // 需求 4.6.14：「权限分为规则编辑、规则发布……」。编辑草稿与对客户生效是两个责任，
   // 因此按钮分别判权；读取（列表、详情、预览、审计）两者任一即可，与后端 guard 同口径。
-  const canEditRules = hasPermission("store-rental:rules:manage");
-  const canPublishRules = hasPermission("store-rental:rules:publish");
+  const canEditRules = hasPermission("rental-os:rules:manage");
+  const canPublishRules = hasPermission("rental-os:rules:publish");
   const canSeeRules = canEditRules || canPublishRules || canManagePrice;
-  const canEditCalendar = canManagePrice || hasPermission("store-rental:calendar:edit");
-  const canPublishCalendar = canManagePrice || hasPermission("store-rental:calendar:publish");
+  const canEditCalendar = canManagePrice || hasPermission("rental-os:calendar:edit");
+  const canPublishCalendar = canManagePrice || hasPermission("rental-os:calendar:publish");
   // 需求 4.5.8：客服或财务「查看历史版本及报价命中的日历依据，不得修改」——独立的
   // 历史只读权限，不必顺带授予编辑/发布/规则管理。与后端 guard 同一口径。
   const canViewCalendarHistory =
     canEditCalendar ||
     canPublishCalendar ||
     canEditRules ||
-    hasPermission("store-rental:calendar:view-history");
+    hasPermission("rental-os:calendar:view-history");
   const canSeeCalendar = canViewCalendarHistory;
   const canSeeSettings = canManagePrice || canEditRules;
   const permittedTabs = useMemo<TabKey[]>(
@@ -2244,7 +2244,7 @@ export function RentalGovernancePage() {
                 <Form.Item
                   name={["earlyReturn", "minAdvanceHours"]}
                   label="最少提前小时数"
-                  tooltip="汽车门市惯例填 24：提前不足一天不退"
+                  tooltip="汽车租赁惯例填 24：提前不足一天不退"
                 >
                   <InputNumber min={0} />
                 </Form.Item>

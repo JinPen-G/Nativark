@@ -14,7 +14,7 @@ const { spawnSync } = require("node:child_process");
 const { redact, resolveDedicatedTarget, OpsTargetError } = require("./dedicated-env.cjs");
 
 const ROOT = path.resolve(__dirname, "..", "..");
-const CONTAINER = process.env.OPS_MYSQL_CONTAINER || "store-rental-mysql";
+const CONTAINER = process.env.OPS_MYSQL_CONTAINER || "rental-os-mysql";
 
 /** 从 env 文件读取键值。仅用于本地开发；CI 应直接给进程环境变量。 */
 function readEnvFile(relative = ".env") {

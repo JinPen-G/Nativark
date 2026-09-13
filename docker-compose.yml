@@ -1,14 +1,14 @@
 services:
   mysql:
     image: mysql:8.4
-    container_name: store-rental-mysql
+    container_name: rental-os-mysql
     restart: unless-stopped
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     environment:
-      MYSQL_ROOT_PASSWORD: store_rental_root
+      MYSQL_ROOT_PASSWORD: rental_os_root
       MYSQL_DATABASE: rental_os
-      MYSQL_USER: store_rental
-      MYSQL_PASSWORD: store_rental
+      MYSQL_USER: rental_os
+      MYSQL_PASSWORD: rental_os
     ports:
       - "3306:3306"
     volumes:
@@ -16,7 +16,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: store-rental-redis
+    container_name: rental-os-redis
     restart: unless-stopped
     ports:
       - "6379:6379"

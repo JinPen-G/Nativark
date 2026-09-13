@@ -3,7 +3,7 @@ import type {
   RentalAsset,
   RentalCapabilityEquipmentLine,
   RentalInventoryMode
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 
 /** 富化只需要商品组的这几项，因此收窄接口而不是依赖完整的 RentalItemGroup。 */
 export interface CapabilityEquipmentGroup {

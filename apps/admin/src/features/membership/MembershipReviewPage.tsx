@@ -1,4 +1,4 @@
-import type { CustomerMembershipReview, CustomerMembershipReviewStatus } from "@store-rental/shared";
+import type { CustomerMembershipReview, CustomerMembershipReviewStatus } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { App, Button, Card, Drawer, Form, Input, Modal, Radio, Select, Space, Table, Tag } from "antd";
 import { useState } from "react";
@@ -17,8 +17,8 @@ export function MembershipReviewPage() {
   const { message } = App.useApp();
   const queryClient = useQueryClient();
   const hasPermission = useAuthStore((state) => state.hasPermission);
-  const canRegistrationReview = hasPermission("store-rental:member:review");
-  const canQualificationReview = hasPermission("store-rental:member:qualification-review");
+  const canRegistrationReview = hasPermission("rental-os:member:review");
+  const canQualificationReview = hasPermission("rental-os:member:qualification-review");
   const [filter, setFilter] = useState<{ status?: string; type?: string }>({ status: "pending" });
   const [selected, setSelected] = useState<CustomerMembershipReview>();
   const [detailTarget, setDetailTarget] = useState<CustomerMembershipReview>();

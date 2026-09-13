@@ -9,8 +9,8 @@ import type {
   RentalWorkspaceOperationReport,
   RentalWorkspaceReportFilter,
   RentalWorkspaceUtilization
-} from "@store-rental/shared";
-import { RENTAL_EXCEPTION_CHARGE_TYPES, RentalAssetStatus, RentalCoreOrderStatus } from "@store-rental/shared";
+} from "@rental-os/shared";
+import { RENTAL_EXCEPTION_CHARGE_TYPES, RentalAssetStatus, RentalCoreOrderStatus } from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 
 /** 一次分页读取的订单数。内存上限与总订单量解耦，不随经营空间变大而变大。 */

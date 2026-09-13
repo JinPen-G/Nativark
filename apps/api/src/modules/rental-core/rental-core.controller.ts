@@ -1,7 +1,7 @@
 import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, Param, Post, Put, Query, Req, Res, UploadedFile, UseInterceptors } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import { Prisma } from "@prisma/client";
-import { RentalCoreOrderStatus, type RentalOrderExtension } from "@store-rental/shared";
+import { RentalCoreOrderStatus, type RentalOrderExtension } from "@rental-os/shared";
 import { createHash } from "node:crypto";
 import type {
   CreateRentalInspectionRequest,
@@ -21,7 +21,7 @@ import type {
   SaveTenantRentalProfileRequest,
   RentalWorkspaceReportFilter,
   SystemUserRow
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import {
   SaveRentalFulfillmentLocationDto,
   SaveRentalFulfillmentOperatorDto,
@@ -807,7 +807,7 @@ export class RentalCoreController {
     return this.allocation.candidates(req.user.tenantId, id);
   }
   @Post("orders/:id/assignments") async manageAllocations(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: ManageRentalAllocationDto) {
-    if (["unlock", "release", "reassign"].includes(body.action) && !hasPermissionCode(req.user, "store-rental:order:reassign")) throw new ForbiddenException("解锁、释放及改配需要独立的资源改配权限");
+    if (["unlock", "release", "reassign"].includes(body.action) && !hasPermissionCode(req.user, "rental-os:order:reassign")) throw new ForbiddenException("解锁、释放及改配需要独立的资源改配权限");
     const tenantId = req.user.tenantId;
     return this.idempotent.execute({ tenantId, action: "order.assignment", key: idempotencyKeyOf(req), fallbackKey: `assignment:${id}:${body.expectedRevision}`, orderId: id, request: { id, ...body },
       run: (tx) => this.allocation.manage(tenantId, id, body, tx, req.user.displayName),
@@ -815,9 +815,9 @@ export class RentalCoreController {
   }
   @Post("orders/:id/operation-lock") async operationLock(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: RentalOperationLockDto) {
     const allowed: RentalCoreOrderStatus[] = [];
-    const operate = hasPermissionCode(req.user, "store-rental:order:operate");
-    if (operate || hasPermissionCode(req.user, "store-rental:order:pickup")) allowed.push(RentalCoreOrderStatus.ReadyForPickup);
-    if (operate || hasPermissionCode(req.user, "store-rental:order:return")) allowed.push(RentalCoreOrderStatus.Renting);
+    const operate = hasPermissionCode(req.user, "rental-os:order:operate");
+    if (operate || hasPermissionCode(req.user, "rental-os:order:pickup")) allowed.push(RentalCoreOrderStatus.ReadyForPickup);
+    if (operate || hasPermissionCode(req.user, "rental-os:order:return")) allowed.push(RentalCoreOrderStatus.Renting);
     return this.allocation.operationLock(req.user.tenantId, id, body.action, req.user.id, req.user.displayName, body.token, allowed);
   }
   @Post("orders/:id/substitute-bundle-component") async substituteBundleComponent(

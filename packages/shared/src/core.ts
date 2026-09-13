@@ -531,7 +531,7 @@ export const RENTAL_CAPABILITY_MODULES: RentalCapabilityModuleDefinition[] = [
     extensionPoints: ["menu", "api", "fulfillment"],
     applicableCategories: [RentalCategoryCode.Vehicle, RentalCategoryCode.Construction], dependsOn: ["serialized_inventory"], conflictsWith: [],
     configSchema: [],
-    // `legacy-1.0` 而不是缺省：`/store-rental/dispatch/*` 在历史车辆域里确有十余个
+    // `legacy-1.0` 而不是缺省：`/rental-os/dispatch/*` 在历史车辆域里确有十余个
     // 已实现端点（看板、任务领取与处理、优化、硬锁、人工改派…）。CORE-EXT-02A 起初把它
     // 记成「已声明但无可执行模块」，那与现有业务事实不符——而 CORE-EXT-02C 把 API 门禁
     // 改为只认实例后，「无模块因而永不可启用」会让所有车辆空间**永久失去**调度功能，
@@ -559,7 +559,7 @@ export const RENTAL_CAPABILITY_MODULES: RentalCapabilityModuleDefinition[] = [
     extensionPoints: ["menu", "api", "integration"],
     applicableCategories: [RentalCategoryCode.Vehicle, RentalCategoryCode.Construction], dependsOn: [], conflictsWith: [],
     configSchema: [{ key: "provider", label: "遥测服务商", type: "string", required: true }],
-    // 同 dispatch：`/store-rental/tbox-devices` 在历史车辆域里已实现。
+    // 同 dispatch：`/rental-os/tbox-devices` 在历史车辆域里已实现。
     implementationVersion: "legacy-1.0"
   },
   {
@@ -3326,7 +3326,7 @@ export interface RentalEarlyReturnRule {
    */
   mode: "none" | "auto" | "manual_review";
   /**
-   * 至少提前多少小时归还才产生退款。汽车门市的惯例是 24——提前不足一天不退。
+   * 至少提前多少小时归还才产生退款。汽车租赁的惯例是 24——提前不足一天不退。
    * 0 表示只要提前就退。
    */
   minAdvanceHours: number;
@@ -5039,8 +5039,8 @@ export type RentalExceptionChargeType = (typeof RENTAL_EXCEPTION_CHARGE_TYPES)[n
  *
  * 三条口径，写在类型上而不是只写在实现里：
  *
- * 1. **只取 Rental Core 规范化事实**（`rental_orders`）。不读车辆、门市或旧
- *    Store Rental 的任何专用字段——那些字段在非车辆品类里根本不存在，
+ * 1. **只取 Rental Core 规范化事实**（`rental_orders`）。不读车辆、履约地点或旧
+ *    车辆品类的任何专用字段——那些字段在非车辆品类里根本不存在，
  *    用它们做指标等于让报表只对一个品类成立。
  * 2. **指标定义不随品类变化**。四个品类走同一套公式；页面标题可以用品类术语
  *    （器材/装备/车辆/设备），但「租赁收入」是什么永远是同一个算法。

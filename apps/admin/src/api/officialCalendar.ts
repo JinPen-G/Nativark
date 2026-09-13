@@ -4,7 +4,7 @@ import type {
   OfficialCalendarSourceVersionSummary,
   RegisterOfficialCalendarSourceVersionRequest,
   SaveOfficialCalendarSourceRequest
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { request } from "./http";
 
 /**

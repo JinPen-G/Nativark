@@ -9,15 +9,15 @@ import type {
   CustomerTransactability,
   SharedCustomerProfile,
   SystemUserRow
-} from "@store-rental/shared";
-import { CUSTOMER_ACCOUNT_STATUSES, CUSTOMER_MEMBERSHIP_STATUSES } from "@store-rental/shared";
+} from "@rental-os/shared";
+import { CUSTOMER_ACCOUNT_STATUSES, CUSTOMER_MEMBERSHIP_STATUSES } from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 import { CustomerOperationsRepository, type CustomerTx } from "./customer-operations.repository";
 import { SharedCustomerRepository } from "./shared-customer.repository";
 import { CustomerMergeService } from "./customer-merge.service";
 
 /** 敏感字段的解密查看权限。与「查看客户」分开授权（需求 4.8.5）。 */
-export const CUSTOMER_REVEAL_PERMISSION = "store-rental:customer:reveal-sensitive";
+export const CUSTOMER_REVEAL_PERMISSION = "rental-os:customer:reveal-sensitive";
 
 const stamp = () => new Date().toISOString();
 

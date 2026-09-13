@@ -6,7 +6,7 @@ import type {
   CustomerWorkspaceLink,
   SaveSharedCustomerRequest,
   SharedCustomerProfile
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 
 export type SharedCustomerTx = Prisma.TransactionClient;

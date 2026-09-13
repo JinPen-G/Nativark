@@ -17,7 +17,7 @@ import {
   type TenantBootstrapRequest,
   type UpdateTenantRequest,
   type UpdateTenantStatusRequest
-} from "@store-rental/shared";
+} from "@rental-os/shared";
 import { Type } from "class-transformer";
 import { IsArray, IsBoolean, IsEnum, IsIn, IsInt, IsNotEmpty, IsObject, IsOptional, IsString, Min, ValidateNested } from "class-validator";
 

@@ -10,9 +10,9 @@ const { digestFiles } = require("./release-facts.cjs");
 const ARTIFACT_DIR = process.env.OPS_ARTIFACT_DIR || path.join(ROOT, "artifacts", "release");
 const BUILD_PROVENANCE_FILE = path.join(ARTIFACT_DIR, "build-provenance.json");
 const BUILD_TARGETS = [
-  { name: "@store-rental/api", dir: path.join(ROOT, "apps", "api", "dist") },
-  { name: "@store-rental/admin", dir: path.join(ROOT, "apps", "admin", "dist") },
-  { name: "@store-rental/shared", dir: path.join(ROOT, "packages", "shared", "dist") }
+  { name: "@rental-os/api", dir: path.join(ROOT, "apps", "api", "dist") },
+  { name: "@rental-os/admin", dir: path.join(ROOT, "apps", "admin", "dist") },
+  { name: "@rental-os/shared", dir: path.join(ROOT, "packages", "shared", "dist") }
 ];
 
 function collectFiles(dir) {
