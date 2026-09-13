@@ -933,27 +933,26 @@ export class RentalOrderExtensionDto implements RentalOrderExtensionRequest {
   memo?: string;
 }
 
-/** ORDER-CHANGE-01A：只允许选择整条订单行，金额一律由服务端按原快照重算。 */
+/** ORDER-CHANGE-01A/01B：金额一律由服务端按原快照重算。 */
+export class RentalOrderChangeItemInputDto {
+  @IsString() @IsNotEmpty() @MaxLength(191) lineId!: string;
+  @IsInt() @Min(1) @Max(10000) quantity!: number;
+}
+
 export class PreviewRentalOrderChangeDto implements PreviewRentalOrderChangeRequest {
   @IsIn(["partial_line_cancel"])
   type!: "partial_line_cancel";
 
-  @IsArray()
-  @ArrayNotEmpty()
-  @IsString({ each: true })
-  @MaxLength(191, { each: true })
-  lineIds!: string[];
+  @IsOptional() @IsArray() @ArrayNotEmpty() @IsString({ each: true }) @MaxLength(191, { each: true }) lineIds?: string[];
+  @IsOptional() @IsArray() @ArrayNotEmpty() @ValidateNested({ each: true }) @Type(() => RentalOrderChangeItemInputDto) items?: RentalOrderChangeItemInputDto[];
 }
 
 export class ApplyRentalOrderChangeDto implements ApplyRentalOrderChangeRequest {
   @IsIn(["partial_line_cancel"])
   type!: "partial_line_cancel";
 
-  @IsArray()
-  @ArrayNotEmpty()
-  @IsString({ each: true })
-  @MaxLength(191, { each: true })
-  lineIds!: string[];
+  @IsOptional() @IsArray() @ArrayNotEmpty() @IsString({ each: true }) @MaxLength(191, { each: true }) lineIds?: string[];
+  @IsOptional() @IsArray() @ArrayNotEmpty() @ValidateNested({ each: true }) @Type(() => RentalOrderChangeItemInputDto) items?: RentalOrderChangeItemInputDto[];
 
   @IsString()
   @IsNotEmpty()

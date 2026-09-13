@@ -1,5 +1,5 @@
 import { ArrowLeftOutlined, CheckCircleOutlined, DollarOutlined, MinusCircleOutlined, PlusOutlined, RetweetOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
-import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol, type CorrectRentalInspectionUsageRequest, type CreateRentalInspectionRequest, type RecordRentalInspectionExceptionCustomerResponseRequest, type RentalAllocation, type RentalFundingAction, type RentalFundingInstrument, type RentalInspectionTemplate, type RentalOrderExtension, type RentalOrderExtensionPreview, type RentalOrderFeeReview, type RentalOrderServiceOccurrence, type RentalReservation, type RentalServiceExecutionAction, type UpdateRentalServiceOccurrenceRequest, type RentalWorkOrder, type RentalStockDisposition } from "@rental-os/shared";
+import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol, type ApplyRentalOrderChangeRequest, type CorrectRentalInspectionUsageRequest, type CreateRentalInspectionRequest, type PreviewRentalOrderChangeRequest, type RecordRentalInspectionExceptionCustomerResponseRequest, type RentalAllocation, type RentalFundingAction, type RentalFundingInstrument, type RentalInspectionTemplate, type RentalOrderExtension, type RentalOrderExtensionPreview, type RentalOrderFeeReview, type RentalOrderServiceOccurrence, type RentalReservation, type RentalServiceExecutionAction, type UpdateRentalServiceOccurrenceRequest, type RentalWorkOrder, type RentalStockDisposition } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Button, Card, Checkbox, DatePicker, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
@@ -130,7 +130,7 @@ export function RentalOrderDetailPage() {
   const [serviceExecution, setServiceExecution] = useState<{ occurrence: RentalOrderServiceOccurrence; action: RentalServiceExecutionAction }>();
   const [serviceRefund, setServiceRefund] = useState<RentalOrderServiceOccurrence>();
   const [extensionRefundForm] = Form.useForm<{ decision: "approved" | "rejected"; reason: string }>();
-  const [partialCancelForm] = Form.useForm<{ lineIds: string[]; reason: string; customerConfirmed: boolean }>();
+  const [partialCancelForm] = Form.useForm<ApplyRentalOrderChangeRequest>();
   // 试算结果单独存：金额要先摆给运营/客户确认，确认后才提交申请。
   const [extensionPreview, setExtensionPreview] = useState<RentalOrderExtensionPreview>();
   const [extensionForm] = Form.useForm<{ newEndAt: Dayjs; memo?: string }>();
@@ -298,16 +298,16 @@ export function RentalOrderDetailPage() {
     onError: () => message.error("审核失败，请检查订单状态或该异常是否已处理")
   });
   const previewPartialCancel = useMutation({
-    mutationFn: (values: { lineIds: string[] }) => rentalCoreApi.previewPartialLineCancellation(id, values.lineIds),
+    mutationFn: (values: PreviewRentalOrderChangeRequest) => rentalCoreApi.previewPartialLineCancellation(id, values),
     onSuccess: (data) => setPartialCancelPreview(data),
     onError: (error: Error) => message.error(error.message || "部分取消试算失败，请检查订单状态、服务和已生效续租")
   });
   const applyPartialCancel = useMutation({
-    mutationFn: (values: { lineIds: string[]; reason: string; customerConfirmed: boolean }) => {
+    mutationFn: (values: ApplyRentalOrderChangeRequest) => {
       if (!partialCancelPreview) throw new Error("请先试算部分取消费用");
       return rentalCoreApi.applyPartialLineCancellation(id, {
         type: "partial_line_cancel",
-        lineIds: values.lineIds,
+        items: values.items,
         reason: values.reason,
         customerConfirmed: values.customerConfirmed,
         expectedUpdatedAt: partialCancelPreview.expectedUpdatedAt
@@ -483,7 +483,7 @@ export function RentalOrderDetailPage() {
         {canReturn && detail.status === RentalCoreOrderStatus.Renting && (detail.allocations.filter((allocation) => allocation.status === "picked_up").length > 1 || detail.allocations.some((allocation) => allocation.status === "picked_up" && allocation.quantity > 1)) && <Button onClick={() => setPartialReturnOpen(true)}>{detail.ruleSnapshot?.fulfillment?.returnInspectionRequired ? "部分归还检查" : "部分归还"}</Button>}
         {detail.status === RentalCoreOrderStatus.Settling && canSettleFunding && <Button type="primary" loading={settle.isPending} disabled={settleBlockers.length > 0} title={settleBlockers.length ? `服务端会拒绝关单：${settleBlockers.join("、")}` : undefined} onClick={() => settle.mutate()}>结算并关闭订单</Button>}
         {canExtend && [RentalCoreOrderStatus.ReadyForPickup, RentalCoreOrderStatus.Renting].includes(detail.status) && <Button icon={<RetweetOutlined />} onClick={() => { extensionForm.resetFields(); setExtensionPreview(undefined); extensionForm.setFieldsValue({ newEndAt: dayjs(detail.effectiveEndAt ?? detail.endAt).add(1, "day") }); setExtensionOpen(true); }}>续租 / 延期</Button>}
-        {canOperate && [RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.ReadyForPickup].includes(detail.status) && detail.lines.filter((line) => (line.cancelledQuantity ?? 0) < line.quantity).length > 1 && <Button onClick={() => { partialCancelForm.resetFields(); setPartialCancelPreview(undefined); setPartialCancelOpen(true); }}>部分取消商品</Button>}
+        {canOperate && [RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.ReadyForPickup].includes(detail.status) && (detail.lines.filter((line) => (line.cancelledQuantity ?? 0) < line.quantity).length > 1 || detail.lines.some((line) => line.inventoryMode === "quantity" && line.quantity - (line.cancelledQuantity ?? 0) > 1)) && <Button onClick={() => { partialCancelForm.resetFields(); setPartialCancelPreview(undefined); setPartialCancelOpen(true); }}>部分取消商品</Button>}
         {canCancel && [RentalCoreOrderStatus.Draft, RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.ReadyForPickup].includes(detail.status) && <Button danger onClick={() => setCancelOpen(true)}>取消并按规则计费</Button>}
       </Space>
       <OrderAllocationPanel key={detail.id} order={detail} />
@@ -818,15 +818,26 @@ export function RentalOrderDetailPage() {
       width={680}
       footer={[
         <Button key="cancel" onClick={() => { setPartialCancelOpen(false); setPartialCancelPreview(undefined); partialCancelForm.resetFields(); }}>取消</Button>,
-        <Button key="preview" loading={previewPartialCancel.isPending} onClick={() => partialCancelForm.validateFields(["lineIds"]).then((values) => previewPartialCancel.mutate({ lineIds: values.lineIds }))}>试算差额</Button>,
+        <Button key="preview" loading={previewPartialCancel.isPending} onClick={() => partialCancelForm.validateFields(["items"]).then((values) => previewPartialCancel.mutate({ type: "partial_line_cancel", items: values.items }))}>试算差额</Button>,
         <Button key="apply" type="primary" disabled={!partialCancelPreview} loading={applyPartialCancel.isPending} onClick={() => partialCancelForm.submit()}>确认并应用</Button>
       ]}
     >
       <Form form={partialCancelForm} layout="vertical" onFinish={(values) => applyPartialCancel.mutate(values)} initialValues={{ customerConfirmed: false }}>
-        <Alert type="info" showIcon title="仅支持取货前整条商品行取消" description="原订单与原报价不会被覆盖；系统会按原价格、日历和优惠快照重算剩余商品，资源释放与变更历史在同一事务内完成。含增值服务、已续租或已有其他费用调整的订单请人工处理。" style={{ marginBottom: 16 }} />
-        <Form.Item name="lineIds" label="要取消的商品" rules={[{ required: true, message: "至少选择一条商品行" }]}>
-          <Select mode="multiple" placeholder="选择要整行取消的商品" onChange={() => setPartialCancelPreview(undefined)} options={(detail?.lines ?? []).filter((line) => (line.cancelledQuantity ?? 0) < line.quantity).map((line) => ({ value: line.id, label: `${line.itemGroupName} · ${line.quantity} 件${line.pricingGroupName ? ` · ${line.pricingGroupName}` : ""}` }))} />
-        </Form.Item>
+        <Alert type="info" showIcon title="仅支持取货前部分取消" description="数量库存可以按数量取消；序列化资产只能整行取消。原订单与原报价不会被覆盖；系统会按原价格、日历和优惠快照重算剩余商品，资源释放与变更历史在同一事务内完成。含增值服务、已续租或已有其他费用调整的订单请人工处理。" style={{ marginBottom: 16 }} />
+        <Form.List name="items" rules={[{ validator: async (_, value) => value?.length ? Promise.resolve() : Promise.reject(new Error("至少增加一项取消商品")) }]}>
+          {(fields, { add, remove }) => <Space orientation="vertical" style={{ width: "100%" }}>
+            {fields.map((field) => <Space key={field.key} align="start" style={{ width: "100%" }}>
+              <Form.Item name={[field.name, "lineId"]} rules={[{ required: true, message: "请选择商品" }]} style={{ flex: 1 }}>
+                <Select style={{ width: 360 }} placeholder="选择要取消的商品" onChange={() => setPartialCancelPreview(undefined)} options={(detail?.lines ?? []).filter((line) => (line.cancelledQuantity ?? 0) < line.quantity).map((line) => ({ value: line.id, label: `${line.itemGroupName} · 可取消 ${line.quantity - (line.cancelledQuantity ?? 0)} 件${line.inventoryMode === "quantity" ? "（数量库存）" : "（序列化资产，仅整行）"}` }))} />
+              </Form.Item>
+              <Form.Item name={[field.name, "quantity"]} rules={[{ required: true, message: "请输入数量" }]}>
+                <InputNumber min={1} precision={0} style={{ width: 110 }} placeholder="数量" onChange={() => setPartialCancelPreview(undefined)} />
+              </Form.Item>
+              <Button type="text" danger icon={<MinusCircleOutlined />} onClick={() => { remove(field.name); setPartialCancelPreview(undefined); }} />
+            </Space>)}
+            <Button type="dashed" icon={<PlusOutlined />} onClick={() => { add({ quantity: 1 }); setPartialCancelPreview(undefined); }}>增加取消项</Button>
+          </Space>}
+        </Form.List>
         <Form.Item name="reason" label="变更原因" rules={[{ required: true, whitespace: true, message: "请填写变更原因" }]}><Input.TextArea rows={3} maxLength={500} placeholder="例如：客户减少租赁设备" /></Form.Item>
         <Form.Item name="customerConfirmed" valuePropName="checked" rules={[{ validator: (_, value) => value ? Promise.resolve() : Promise.reject(new Error("必须取得客户确认")) }]}><Checkbox>我已取得客户对本次商品取消及金额变化的确认</Checkbox></Form.Item>
         {partialCancelPreview && <Card size="small" title="试算结果">

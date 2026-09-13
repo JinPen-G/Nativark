@@ -2388,19 +2388,19 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   }
 
   /**
-   * ORDER-CHANGE-01A：应用一次取货前整行部分取消。
+   * ORDER-CHANGE-01A/01B：应用一次取货前部分取消。
    *
    * 这条内核只负责把已在控制器完成的重算结果与订单资源放进同一事务：
    * - 原始行的 quantity / unitPrice / amount 不改，只写 cancelledQuantity；
    * - 预占、分配、资产状态、订单差额和变更历史一起提交；
    * - 正差额或新增保证金本轮拒绝，避免“订单已变更但还没收钱”；
-   * - 同一订单首期只允许一笔部分取消，后续按数量拆分/换货任务承接。
+   * - 同一订单首期只允许一笔部分取消；01B 仅扩展数量库存的数量拆分，序列化资产仍整行处理。
    */
   async applyPartialLineCancellation(
     tenantId: string,
     orderId: string,
     priced: RentalOrderExtensionPreview & { rateSnapshot: RentalPricingRate[]; ruleSnapshot: RentalRuleConfig },
-    input: { type: "partial_line_cancel"; lineIds: string[]; reason: string; customerConfirmed: boolean; expectedUpdatedAt: string },
+    input: { type: "partial_line_cancel"; lineIds?: string[]; items: Array<{ lineId: string; quantity: number }>; reason: string; customerConfirmed: boolean; expectedUpdatedAt: string },
     idempotencyKey: string,
     operator: string,
     tx: RentalFactTx
@@ -2431,12 +2431,28 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (previousChanges.some((row) => row.status === "applied")) {
       throw new ConflictException("本轮一个订单只允许一次整行部分取消，后续拆分变更请使用专用变更流程");
     }
-    const lineIds = [...new Set(input.lineIds.map((value) => value.trim()).filter(Boolean))];
-    if (!lineIds.length || lineIds.length !== input.lineIds.length) throw new BadRequestException("请选择有效的订单行");
     const activeLines = order.lines.filter((line) => (line.cancelledQuantity ?? 0) < line.quantity);
-    const selected = activeLines.filter((line) => lineIds.includes(line.id));
-    if (selected.length !== lineIds.length) throw new ConflictException("存在无效、已取消或不属于当前订单的订单行");
-    if (selected.length >= activeLines.length) throw new ConflictException("整单取消请使用订单取消操作，部分取消必须保留至少一条有效订单行");
+    const cancellationItems = input.items.map((item) => ({ lineId: item.lineId.trim(), quantity: Number(item.quantity) }));
+    if (!cancellationItems.length || cancellationItems.some((item) => !item.lineId || !Number.isInteger(item.quantity) || item.quantity <= 0)) {
+      throw new BadRequestException("请选择有效的订单行和取消数量");
+    }
+    if (new Set(cancellationItems.map((item) => item.lineId)).size !== cancellationItems.length) throw new BadRequestException("同一订单行只能出现一次");
+    const selected = activeLines.filter((line) => cancellationItems.some((item) => item.lineId === line.id));
+    if (selected.length !== cancellationItems.length) throw new ConflictException("存在无效、已取消或不属于当前订单的订单行");
+    for (const item of cancellationItems) {
+      const line = selected.find((row) => row.id === item.lineId)!;
+      const activeQuantity = line.quantity - (line.cancelledQuantity ?? 0);
+      if (item.quantity > activeQuantity) throw new ConflictException(`${line.itemGroupName}最多可取消 ${activeQuantity} 件`);
+      if (line.inventoryMode !== "quantity" && item.quantity !== activeQuantity) throw new ConflictException(`${line.itemGroupName}是序列化资产，本轮只能整行取消`);
+      const availableReservation = order.reservations
+        .filter((row) => row.orderLineId === line.id && !["released", "expired", "cancelled"].includes(row.status))
+        .reduce((sum, row) => sum + row.quantity - row.releasedQuantity, 0);
+      if (availableReservation < item.quantity) throw new ConflictException(`${line.itemGroupName}的可释放预占数量不足`);
+    }
+    const activeTotal = activeLines.reduce((sum, line) => sum + line.quantity - (line.cancelledQuantity ?? 0), 0);
+    const cancelledTotal = cancellationItems.reduce((sum, item) => sum + item.quantity, 0);
+    if (cancelledTotal >= activeTotal) throw new ConflictException("整单取消请使用订单取消操作，部分取消必须保留至少一件有效商品");
+    const lineIds = cancellationItems.map((item) => item.lineId);
     if (order.reservations.some((row) => lineIds.includes(row.orderLineId) && row.releasedQuantity > 0)) {
       throw new ConflictException("已有部分归还或释放记录的订单行不能自动部分取消");
     }
@@ -2463,28 +2479,49 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
 
     const selectedAllocations = order.allocations.filter((row) => lineIds.includes(row.orderLineId));
     const allocationBefore = structuredClone(selectedAllocations);
-    const releasableAssetIds = new Set(
-      selectedAllocations
-        .filter((row) => row.assetId && ["locked", "allocated"].includes(row.status))
-        .map((row) => row.assetId as string)
-    );
+    const requestedByLine = new Map(cancellationItems.map((item) => [item.lineId, item.quantity]));
+    const reservationRemaining = new Map(requestedByLine);
+    for (const reservation of order.reservations) {
+      if (!lineIds.includes(reservation.orderLineId) || ["released", "expired", "cancelled"].includes(reservation.status)) continue;
+      const remaining = reservationRemaining.get(reservation.orderLineId) ?? 0;
+      if (remaining <= 0) continue;
+      const release = Math.min(remaining, reservation.quantity - reservation.releasedQuantity);
+      reservation.releasedQuantity += release;
+      reservationRemaining.set(reservation.orderLineId, remaining - release);
+      if (reservation.releasedQuantity >= reservation.quantity) reservation.status = RentalReservationStatus.Released;
+    }
+    if ([...reservationRemaining.values()].some((quantity) => quantity > 0)) throw new ConflictException("订单预占数量不足，不能安全释放");
+    const allocationRemaining = new Map(requestedByLine);
+    for (const allocation of order.allocations) {
+      const remaining = allocationRemaining.get(allocation.orderLineId) ?? 0;
+      if (remaining <= 0 || !["pre_assigned", "locked", "allocated"].includes(allocation.status)) continue;
+      const release = Math.min(remaining, allocation.quantity);
+      if (release === allocation.quantity) allocation.status = "released";
+      else {
+        if (allocation.assetId) throw new ConflictException("序列化资产不能拆分分配数量，请按整行取消");
+        allocation.quantity -= release;
+      }
+      allocationRemaining.set(allocation.orderLineId, remaining - release);
+    }
+    for (const item of cancellationItems) {
+      const hasActiveAllocation = order.allocations.some((row) => row.orderLineId === item.lineId && ["pre_assigned", "locked", "allocated"].includes(row.status));
+      if (hasActiveAllocation && (allocationRemaining.get(item.lineId) ?? 0) > 0) throw new ConflictException("已分配资源数量不足，请重新配货后再部分取消");
+    }
+    for (const line of order.lines) {
+      const quantity = requestedByLine.get(line.id);
+      if (quantity !== undefined) line.cancelledQuantity = (line.cancelledQuantity ?? 0) + quantity;
+    }
     const assets = await this.factStore.listAssets(tenantId, tx);
     const otherAllocatedAssetIds = await this.factStore.allocatedAssetIds(tenantId, tx, order.id);
+    const releasableAssetIds = new Set(
+      allocationBefore
+        .filter((row) => row.assetId && ["pre_assigned", "locked", "allocated"].includes(row.status))
+        .filter((row) => order.allocations.find((after) => after.id === row.id)?.status === "released")
+        .map((row) => row.assetId as string)
+    );
     const assetChanges: AssetStatusChange[] = assets
       .filter((asset) => releasableAssetIds.has(asset.id) && asset.status === RentalAssetStatus.Reserved && !otherAllocatedAssetIds.has(asset.id))
       .map((asset) => ({ assetId: asset.id, status: RentalAssetStatus.Available, reason: `订单 ${order.orderNo} 部分取消释放资源`, operator }));
-
-    for (const line of order.lines) {
-      if (lineIds.includes(line.id)) line.cancelledQuantity = line.quantity;
-    }
-    for (const reservation of order.reservations) {
-      if (!lineIds.includes(reservation.orderLineId) || ["released", "expired", "cancelled"].includes(reservation.status)) continue;
-      reservation.releasedQuantity = reservation.quantity;
-      reservation.status = RentalReservationStatus.Released;
-    }
-    for (const allocation of order.allocations) {
-      if (lineIds.includes(allocation.orderLineId) && ["pre_assigned", "locked", "allocated"].includes(allocation.status)) allocation.status = "released";
-    }
     if (order.status === RentalCoreOrderStatus.ReadyForPickup && !allocationComplete(order, true)) {
       order.status = RentalCoreOrderStatus.Reserved;
     }
@@ -2528,9 +2565,11 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const change: RentalOrderChange = {
       id: randomUUID(), tenantId, workspaceId: this.resolveWorkspaceId(tenantId), orderId: order.id,
       sequence: previousChanges.length + 1, type: "partial_line_cancel", status: "applied",
-      request: { ...input, lineIds }, beforeSnapshot, afterSnapshot,
+      request: { ...input, lineIds, items: cancellationItems.map((item) => ({ lineId: item.lineId, quantity: item.quantity })) }, beforeSnapshot, afterSnapshot,
       diff: {
-        lineIds, differenceAmount, refundAmount: Math.max(0, -differenceAmount), additionalAmount: Math.max(0, differenceAmount),
+        lineIds,
+        items: cancellationItems.map((item) => ({ lineId: item.lineId, quantity: item.quantity })),
+        differenceAmount, refundAmount: Math.max(0, -differenceAmount), additionalAmount: Math.max(0, differenceAmount),
         depositDelta, preAuthDelta, pricingSnapshot: priced.pricingSnapshot ?? null,
         releasedAssetIds: assetChanges.map((row) => row.assetId)
       },

@@ -41,6 +41,7 @@ import type {
   ApplyRentalOrderChangeRequest,
   RentalOrderChange,
   RentalOrderChangePreview,
+  PreviewRentalOrderChangeRequest,
   RentalOrderServiceOccurrence,
   RentalOrderExtension,
   RentalOrderExtensionPreview,
@@ -315,8 +316,8 @@ export const rentalCoreApi = {
   // 确认后才落记录；企业月结的申请直接生效，个人还要再走一次补款。
   orderExtensions: (id: string) => request<RentalOrderExtension[]>(`/rental/v1/orders/${id}/extensions`),
   orderChanges: (id: string) => request<RentalOrderChange[]>(`/rental/v1/orders/${id}/changes`),
-  previewPartialLineCancellation: (id: string, lineIds: string[]) =>
-    request<RentalOrderChangePreview>(`/rental/v1/orders/${id}/changes/partial-cancel/preview`, { method: "post", data: { type: "partial_line_cancel", lineIds } }),
+  previewPartialLineCancellation: (id: string, data: PreviewRentalOrderChangeRequest) =>
+    request<RentalOrderChangePreview>(`/rental/v1/orders/${id}/changes/partial-cancel/preview`, { method: "post", data }),
   applyPartialLineCancellation: (id: string, data: ApplyRentalOrderChangeRequest) =>
     request<{ order: RentalOrder; change: RentalOrderChange }>(`/rental/v1/orders/${id}/changes/partial-cancel`, { method: "post", data }),
   previewOrderExtension: (id: string, data: RentalOrderExtensionRequest) =>

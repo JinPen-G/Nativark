@@ -5435,13 +5435,14 @@ export interface RentalOrderExtensionPreview {
   ruleVersion: string;
 }
 
-/** ORDER-CHANGE-01A：取货前按整条订单行取消的试算结果。 */
+/** ORDER-CHANGE-01A/01B：取货前部分取消的试算结果；数量库存可按数量拆分。 */
 export interface RentalOrderChangePreview {
   orderId: string;
   type: "partial_line_cancel";
   /** 试算基于的订单更新时间；提交时必须原样带回，防止旧预览覆盖新变更。 */
   expectedUpdatedAt: string;
   cancelledLineIds: string[];
+  cancelledItems: Array<{ lineId: string; itemGroupName: string; quantity: number }>;
   remainingLineIds: string[];
   beforePayableAmount: number;
   recalculatedPayableAmount: number;
@@ -5458,10 +5459,12 @@ export interface RentalOrderChangePreview {
   warnings: string[];
 }
 
-/** 订单变更请求。只允许服务端认定为完整订单行取消，不接受客户端传金额。 */
+/** 订单变更请求。只接受服务端按订单快照重算的取消项，不接受客户端传金额。 */
 export interface ApplyRentalOrderChangeRequest {
   type: "partial_line_cancel";
-  lineIds: string[];
+  /** 兼容 01A 的整行请求；01B 优先使用 items 表达数量库存的部分数量取消。 */
+  lineIds?: string[];
+  items?: Array<{ lineId: string; quantity: number }>;
   reason: string;
   customerConfirmed: boolean;
   expectedUpdatedAt: string;
@@ -5495,7 +5498,9 @@ export interface RentalOrderChange {
 /** 订单变更试算入参。 */
 export interface PreviewRentalOrderChangeRequest {
   type: "partial_line_cancel";
-  lineIds: string[];
+  /** 兼容 01A 的整行请求；01B 优先使用 items 表达数量库存的部分数量取消。 */
+  lineIds?: string[];
+  items?: Array<{ lineId: string; quantity: number }>;
 }
 
 export interface RentalOrderOccupancy {

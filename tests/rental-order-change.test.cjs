@@ -44,7 +44,7 @@ const tenant = 'tenant_002';
     fulfillmentLocationId: location.id,
     startAt: start,
     endAt: end,
-    lines: groups.slice(0, 2).map(group => ({ itemGroupId: group.id, quantity: 1 }))
+    lines: groups.slice(0, 2).map((group, index) => ({ itemGroupId: group.id, quantity: index === 0 ? 2 : 1 }))
   });
   business.getQuote = () => quote;
 
@@ -59,7 +59,7 @@ const tenant = 'tenant_002';
     itemGroupCode: groups[index].code,
     itemGroupName: groups[index].name,
     inventoryMode: 'quantity',
-    quantity: 1,
+    quantity: request.quantity,
     cancelledQuantity: 0,
     unitPrice: quote.rateSnapshot[index].baseAmount,
     amount: quote.rentalLineAmounts?.[request.pricingGroupId ?? request.itemGroupId] ?? quote.rateSnapshot[index].baseAmount,
@@ -97,7 +97,7 @@ const tenant = 'tenant_002';
       orderLineId: line.id,
       itemGroupId: line.itemGroupId,
       locationId: location.id,
-      quantity: 1,
+      quantity: line.quantity,
       releasedQuantity: 0,
       status: RentalReservationStatus.Confirmed,
       startAt: start,
@@ -111,7 +111,7 @@ const tenant = 'tenant_002';
       itemGroupId: line.itemGroupId,
       assetId: undefined,
       assetNo: undefined,
-      quantity: 1,
+      quantity: line.quantity,
       status: 'locked',
       metadata: { reservationId: `change-reservation-${index + 1}` }
     })),
@@ -123,7 +123,7 @@ const tenant = 'tenant_002';
 
   const priced = await business.quoteOrderLineCancellation(tenant, ctx, {
     order: cancellationOrder,
-    lines: [orderLines[1]],
+    lines: [{ ...orderLines[0], quantity: 1 }, orderLines[1]],
     appliedAt: new Date().toISOString(),
     fulfillmentMode: cancellationOrder.fulfillmentMode,
     locationIds: [location.id],
@@ -151,7 +151,7 @@ const tenant = 'tenant_002';
     priced,
     {
       type: 'partial_line_cancel',
-      lineIds: [orderLines[0].id],
+      items: [{ lineId: orderLines[0].id, quantity: 1 }],
       reason: '客户减少一项商品',
       customerConfirmed: true,
       expectedUpdatedAt: cancellationOrder.updatedAt
@@ -162,17 +162,23 @@ const tenant = 'tenant_002';
   );
   assert.equal(applied.change.status, 'applied');
   assert.equal(savedOrder.lines[0].cancelledQuantity, 1);
-  assert.equal(savedOrder.reservations[0].status, RentalReservationStatus.Released);
-  assert.equal(savedOrder.allocations[0].status, 'released');
+  assert.equal(savedOrder.reservations[0].status, RentalReservationStatus.Confirmed);
+  assert.equal(savedOrder.reservations[0].releasedQuantity, 1);
+  assert.equal(savedOrder.allocations[0].status, 'locked');
+  assert.equal(savedOrder.allocations[0].quantity, 1);
   assert.equal(savedAssets.length, 0, '数量库存不应伪造资产状态变更');
-  assert.equal(savedChange.diff.lineIds[0], orderLines[0].id);
+  assert.equal(savedChange.diff.items[0].lineId, orderLines[0].id);
+  assert.equal(savedChange.diff.items[0].quantity, 1);
   assert.ok(savedChange.refundAmount > 0);
   pass('应用部分取消只追加变更记录，并释放对应预占而不改原始金额');
 
   await assert.rejects(
     () => core.applyPartialLineCancellation(tenant, cancellationOrder.id, priced, {
       type: 'partial_line_cancel',
-      lineIds: [orderLines[0].id, orderLines[1].id],
+      items: [
+        { lineId: orderLines[0].id, quantity: orderLines[0].quantity },
+        { lineId: orderLines[1].id, quantity: orderLines[1].quantity }
+      ],
       reason: '不能整单取消',
       customerConfirmed: true,
       expectedUpdatedAt: cancellationOrder.updatedAt
