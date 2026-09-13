@@ -52,6 +52,7 @@ import {
   SaveRentalAssetDto,
   SaveRentalCouponTemplateDto,
   SaveRentalStockBalanceDto,
+  ApplyRentalStockOperationDto,
   SaveTenantRentalProfileDto,
   SubstituteRentalBundleComponentDto,
 } from "./rental-order-request.dto";
@@ -368,6 +369,14 @@ export class RentalCoreController {
   @Post("assets") saveAsset(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalAssetDto) { return this.committed(req.user.tenantId, this.service.saveAsset(req.user.tenantId, body)); }
   @Put("assets/:id") updateAsset(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalAssetDto) { return this.committed(req.user.tenantId, this.service.saveAsset(req.user.tenantId, { ...body, id })); }
   @Get("stock-balances") stocks(@Req() req: AuthenticatedRequest) { return this.service.listStockBalances(req.user.tenantId); }
+  @Get("stock-ledger") stockLedger(@Req() req: AuthenticatedRequest, @Query("itemGroupId") itemGroupId?: string, @Query("locationId") locationId?: string, @Query("limit") limit?: string) {
+    const parsedLimit = limit === undefined ? undefined : Number.parseInt(limit, 10);
+    if (limit !== undefined && (parsedLimit === undefined || !Number.isInteger(parsedLimit) || parsedLimit < 1)) throw new BadRequestException("流水条数必须是正整数");
+    return this.service.listStockLedger(req.user.tenantId, { itemGroupId, locationId, limit: parsedLimit });
+  }
+  @Post("stock-operations") stockOperation(@Req() req: AuthenticatedRequest, @Body() body: ApplyRentalStockOperationDto) {
+    return this.committed(req.user.tenantId, this.service.applyStockOperation(req.user.tenantId, body, req.user.displayName));
+  }
   @Get("stock-dispositions") dispositions(@Req() req: AuthenticatedRequest, @Query("orderId") orderId?: string) { return this.service.listStockDispositions(req.user.tenantId, orderId); }
   @Post("stock-dispositions/:dispositionId/restore") restoreDisposition(@Req() req: AuthenticatedRequest, @Param("dispositionId") dispositionId: string) { return this.committed(req.user.tenantId, this.service.restoreStockDisposition(req.user.tenantId, dispositionId, req.user.displayName)); }
   @Put("stock-balances") saveStock(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalStockBalanceDto) { return this.committed(req.user.tenantId, this.service.saveStockBalance(req.user.tenantId, body)); }

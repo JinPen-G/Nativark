@@ -4513,6 +4513,54 @@ export interface SaveRentalStockBalanceRequest {
   operator?: string;
 }
 
+/** STOCK-OPS-01：数量库存的可审计日常作业。余额是当前快照，流水才是调整来源。 */
+export const RENTAL_STOCK_OPERATION_TYPES = ["receive", "count_adjustment", "transfer", "scrap", "retire"] as const;
+export type RentalStockOperationType = (typeof RENTAL_STOCK_OPERATION_TYPES)[number];
+
+export interface RentalStockLedgerEntry {
+  id: string;
+  tenantId: string;
+  workspaceId: string;
+  operationId: string;
+  entryKind: "single" | "out" | "in";
+  operationType: RentalStockOperationType;
+  itemGroupId: string;
+  itemGroupCode: string;
+  itemGroupName: string;
+  locationId: string;
+  locationName: string;
+  quantityDelta: number;
+  onHandBefore: number;
+  onHandAfter: number;
+  reservedQuantity: number;
+  maintenanceQuantity: number;
+  reason: string;
+  idempotencyKey: string;
+  operator: string;
+  createdAt: string;
+}
+
+export interface RentalStockOperationRequest {
+  type: RentalStockOperationType;
+  itemGroupId: string;
+  locationId?: string;
+  fromLocationId?: string;
+  toLocationId?: string;
+  quantity?: number;
+  actualOnHandQuantity?: number;
+  reason: string;
+  idempotencyKey: string;
+  operator?: string;
+}
+
+export interface RentalStockOperationResult {
+  operationId: string;
+  operationType: RentalStockOperationType;
+  idempotent: boolean;
+  entries: RentalStockLedgerEntry[];
+  balances: RentalStockBalance[];
+}
+
 /** STOCK-CLOSE-01 / SHARED-WORK-01A：归还后库存处置与养护工单的统一事实契约。 */
 export const RENTAL_WORK_ORDER_TYPES = ["cleaning", "restock", "calibration", "repair"] as const;
 export type RentalWorkOrderType = (typeof RENTAL_WORK_ORDER_TYPES)[number];

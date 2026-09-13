@@ -406,6 +406,12 @@ export function requiredPermissions(method: string, path: string) {
       ? ["rental-core:maintenance:view", "rental-core:asset:view", "rental-core:asset:manage", "rental-os:vehicle:view"]
       : ["rental-core:maintenance:review", "rental-core:asset:manage", "rental-os:vehicle:manage"];
   }
+  if (path === "/rental/v1/stock-ledger") {
+    return method === "GET" ? ["rental-core:asset:view", "rental-core:asset:manage", "rental-os:vehicle:view"] : ["rental-core:asset:manage", "rental-os:vehicle:manage"];
+  }
+  if (path === "/rental/v1/stock-operations") {
+    return ["rental-core:asset:manage", "rental-os:vehicle:manage"];
+  }
   if (path === "/rental/v1/assets" || path.startsWith("/rental/v1/assets/") || path === "/rental/v1/stock-balances" || path === "/rental/v1/stock-dispositions") {
     return method === "GET" ? ["rental-core:asset:view", "rental-core:asset:manage", "rental-os:vehicle:view"] : ["rental-core:asset:manage", "rental-os:vehicle:manage"];
   }

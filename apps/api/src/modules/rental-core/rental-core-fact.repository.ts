@@ -20,6 +20,9 @@ import {
   type RentalReservation,
   type RentalRuleConfig,
   type RentalStockBalance,
+  type RentalStockLedgerEntry,
+  type RentalStockOperationRequest,
+  type RentalStockOperationType,
   type RentalStockDisposition,
   type RentalWorkOrder,
   type RentalWorkOrderAssignee,
@@ -75,6 +78,18 @@ export interface StockCountInput {
   locationId: string;
   onHandQuantity: number;
   maintenanceQuantity?: number;
+}
+
+export interface StockOperationInput extends RentalStockOperationRequest {
+  tenantId: string;
+  operator: string;
+}
+
+export interface AppliedStockOperation {
+  operationId: string;
+  operationType: RentalStockOperationType;
+  idempotent: boolean;
+  entries: RentalStockLedgerEntry[];
 }
 
 export type RentalFactTx = Prisma.TransactionClient;
@@ -133,6 +148,8 @@ export interface RentalCoreFactStore {
    * `maintenanceQuantity` 现在有第二个写者，见 `saveOrderAggregate` 的异常隔离。
    */
   applyStockCount(input: StockCountInput): Promise<{ id: string; onHandQuantity: number; maintenanceQuantity: number }>;
+  listStockLedger(tenantId: string, filters?: { itemGroupId?: string; locationId?: string; limit?: number }, tx?: RentalFactTx): Promise<RentalStockLedgerEntry[]>;
+  applyStockOperation(input: StockOperationInput): Promise<AppliedStockOperation>;
   listStockDispositions(tenantId: string, orderId?: string, tx?: RentalFactTx): Promise<RentalStockDisposition[]>;
   upsertStockDisposition(disposition: RentalStockDisposition, tx?: RentalFactTx): Promise<RentalStockDisposition>;
   restoreStockDisposition(tenantId: string, dispositionId: string, operator: string, tx?: RentalFactTx): Promise<RentalStockDisposition>;
@@ -211,6 +228,31 @@ function toStockDisposition(row: any): RentalStockDisposition {
     restoredBy: row.restoredBy ?? undefined,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString()
+  };
+}
+
+function toStockLedgerEntry(row: any): RentalStockLedgerEntry {
+  return {
+    id: row.id,
+    tenantId: row.tenantId,
+    workspaceId: row.workspaceId,
+    operationId: row.operationId,
+    entryKind: row.entryKind,
+    operationType: row.operationType,
+    itemGroupId: row.itemGroupId,
+    itemGroupCode: row.itemGroup?.code ?? "",
+    itemGroupName: row.itemGroup?.name ?? "",
+    locationId: row.locationId,
+    locationName: row.location?.name ?? "",
+    quantityDelta: row.quantityDelta,
+    onHandBefore: row.onHandBefore,
+    onHandAfter: row.onHandAfter,
+    reservedQuantity: row.reservedQuantity,
+    maintenanceQuantity: row.maintenanceQuantity,
+    reason: row.reason,
+    idempotencyKey: row.idempotencyKey,
+    operator: row.operator,
+    createdAt: row.createdAt.toISOString()
   };
 }
 
@@ -852,6 +894,161 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
         await tx.rentalStockBalance.create({ data: { workspaceId, id, ...data } });
       }
       return { id, onHandQuantity: input.onHandQuantity, maintenanceQuantity };
+    });
+  }
+
+  async listStockLedger(
+    tenantId: string,
+    filters: { itemGroupId?: string; locationId?: string; limit?: number } = {},
+    tx?: RentalFactTx
+  ): Promise<RentalStockLedgerEntry[]> {
+    const client = tx ?? this.prisma;
+    const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
+    const take = Math.min(Math.max(Math.trunc(filters.limit ?? 100), 1), 200);
+    const rows = await client.rentalStockLedgerEntry.findMany({
+      where: {
+        tenantId,
+        workspaceId,
+        ...(filters.itemGroupId ? { itemGroupId: filters.itemGroupId } : {}),
+        ...(filters.locationId ? { locationId: filters.locationId } : {})
+      },
+      include: { itemGroup: { select: { code: true, name: true } }, location: { select: { name: true } } },
+      orderBy: { createdAt: "desc" },
+      take
+    });
+    return rows.map(toStockLedgerEntry);
+  }
+
+  /**
+   * 通过单事务写入数量库存作业和追加流水。
+   *
+   * 先确保目标余额行存在，再按地点排序锁行；所有减少库存的动作都必须留下
+   * `reserved + maintenance`，因此盘点/报损/退出不能把正在租赁或隔离中的数量
+   * 直接抹掉。相同幂等键只回放第一次结果，业务参数变化则明确冲突。
+   */
+  async applyStockOperation(input: StockOperationInput): Promise<AppliedStockOperation> {
+    const requestFingerprint = createHash("sha256").update(JSON.stringify({
+      type: input.type,
+      itemGroupId: input.itemGroupId,
+      locationId: input.locationId ?? null,
+      fromLocationId: input.fromLocationId ?? null,
+      toLocationId: input.toLocationId ?? null,
+      quantity: input.quantity ?? null,
+      actualOnHandQuantity: input.actualOnHandQuantity ?? null,
+      reason: input.reason
+    })).digest("hex");
+
+    return this.prisma.$transaction(async (tx) => {
+      const workspaceId = await resolveScopeWorkspaceId(tx, input.tenantId);
+      const existing = await tx.rentalStockLedgerEntry.findMany({
+        where: { tenantId: input.tenantId, workspaceId, idempotencyKey: input.idempotencyKey },
+        include: { itemGroup: { select: { code: true, name: true } }, location: { select: { name: true } } },
+        orderBy: { createdAt: "asc" }
+      });
+      if (existing.length) {
+        if (existing.some((row) => row.requestFingerprint !== requestFingerprint)) {
+          throw new ConflictException("同一幂等键已用于另一笔库存作业，请更换幂等键");
+        }
+        return {
+          operationId: existing[0].operationId,
+          operationType: existing[0].operationType as RentalStockOperationType,
+          idempotent: true,
+          entries: existing.map(toStockLedgerEntry)
+        };
+      }
+
+      const isTransfer = input.type === "transfer";
+      const targetLocationIds = isTransfer
+        ? [input.fromLocationId, input.toLocationId]
+        : [input.locationId];
+      const locationIds = [...new Set(targetLocationIds.filter((value): value is string => Boolean(value)))].sort();
+      if (isTransfer && (locationIds.length !== 2 || input.fromLocationId === input.toLocationId)) {
+        throw new BadRequestException("调拨必须选择两个不同的履约地点");
+      }
+      if (!isTransfer && locationIds.length !== 1) {
+        throw new BadRequestException("该库存作业必须选择履约地点");
+      }
+
+      for (const locationId of locationIds) {
+        await tx.rentalStockBalance.upsert({
+          where: { workspaceId_itemGroupId_locationId: { workspaceId, itemGroupId: input.itemGroupId, locationId } },
+          create: {
+            id: randomUUID(), tenantId: input.tenantId, workspaceId, itemGroupId: input.itemGroupId, locationId,
+            onHandQuantity: 0, reservedQuantity: 0, maintenanceQuantity: 0
+          },
+          update: {}
+        });
+      }
+
+      const lockedRows = await tx.$queryRaw<Array<{
+        id: string;
+        locationId: string;
+        onHandQuantity: number;
+        maintenanceQuantity: number;
+      }>>(Prisma.sql`
+        SELECT \`id\`, \`locationId\`, \`onHandQuantity\`, \`maintenanceQuantity\`
+        FROM \`rental_stock_balances\`
+        WHERE \`tenantId\` = ${input.tenantId}
+          AND \`workspaceId\` = ${workspaceId}
+          AND \`itemGroupId\` = ${input.itemGroupId}
+          AND \`locationId\` IN (${Prisma.join(locationIds)})
+        ORDER BY \`locationId\` FOR UPDATE
+      `);
+      if (lockedRows.length !== locationIds.length) throw new ConflictException("库存余额行未能完整锁定，请刷新后重试");
+
+      const reservations = await this.activeReservations(input.tenantId, tx);
+      const reservedByLocation = new Map<string, number>();
+      for (const reservation of reservations) {
+        if (reservation.itemGroupId !== input.itemGroupId || !locationIds.includes(reservation.locationId)) continue;
+        reservedByLocation.set(reservation.locationId, (reservedByLocation.get(reservation.locationId) ?? 0) + reservation.quantity);
+      }
+      const rowsByLocation = new Map(lockedRows.map((row) => [row.locationId, row]));
+      const operationId = randomUUID();
+      const entries: RentalStockLedgerEntry[] = [];
+      const deltas = new Map<string, { delta: number; entryKind: "single" | "out" | "in" }>();
+      const quantity = input.quantity ?? 0;
+
+      if (input.type === "count_adjustment") {
+        const actualOnHandQuantity = input.actualOnHandQuantity;
+        if (typeof actualOnHandQuantity !== "number" || !Number.isInteger(actualOnHandQuantity) || actualOnHandQuantity < 0) throw new BadRequestException("盘点实数必须是非负整数");
+        const row = rowsByLocation.get(input.locationId!);
+        if (!row) throw new ConflictException("盘点库存余额不存在");
+        deltas.set(input.locationId!, { delta: actualOnHandQuantity - row.onHandQuantity, entryKind: "single" });
+      } else {
+        if (!Number.isInteger(quantity) || quantity <= 0) throw new BadRequestException("库存作业数量必须是正整数");
+        if (input.type === "transfer") {
+          deltas.set(input.fromLocationId!, { delta: -quantity, entryKind: "out" });
+          deltas.set(input.toLocationId!, { delta: quantity, entryKind: "in" });
+        } else {
+          deltas.set(input.locationId!, { delta: input.type === "receive" ? quantity : -quantity, entryKind: "single" });
+        }
+      }
+
+      for (const [locationId, change] of deltas) {
+        const row = rowsByLocation.get(locationId)!;
+        const reservedQuantity = reservedByLocation.get(locationId) ?? 0;
+        const nextOnHand = row.onHandQuantity + change.delta;
+        if (nextOnHand < reservedQuantity + row.maintenanceQuantity) {
+          throw new ConflictException(`${locationId === input.fromLocationId ? "调出" : "调整"}数量会低于已预占或维护隔离数量，当前可操作在手数量为 ${Math.max(0, row.onHandQuantity - reservedQuantity - row.maintenanceQuantity)}`);
+        }
+        const updated = await tx.rentalStockBalance.updateMany({
+          where: { id: row.id, tenantId: input.tenantId, workspaceId, onHandQuantity: row.onHandQuantity },
+          data: { onHandQuantity: nextOnHand }
+        });
+        if (updated.count !== 1) throw new ConflictException("库存余额已被其他操作修改，请刷新后重试");
+        const ledgerRow = await tx.rentalStockLedgerEntry.create({
+          data: {
+            id: randomUUID(), tenantId: input.tenantId, workspaceId, operationId,
+            entryKind: change.entryKind, operationType: input.type, itemGroupId: input.itemGroupId, locationId,
+            quantityDelta: change.delta, onHandBefore: row.onHandQuantity, onHandAfter: nextOnHand,
+            reservedQuantity, maintenanceQuantity: row.maintenanceQuantity, reason: input.reason.trim(),
+            idempotencyKey: input.idempotencyKey, requestFingerprint, operator: input.operator
+          },
+          include: { itemGroup: { select: { code: true, name: true } }, location: { select: { name: true } } }
+        });
+        entries.push(toStockLedgerEntry(ledgerRow));
+      }
+      return { operationId, operationType: input.type, idempotent: false, entries };
     });
   }
 

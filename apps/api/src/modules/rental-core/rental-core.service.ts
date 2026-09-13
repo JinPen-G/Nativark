@@ -54,6 +54,9 @@ import {
   type CustomerOrderSubjects,
   type RentalReservation,
   type RentalStockBalance,
+  type RentalStockLedgerEntry,
+  type RentalStockOperationRequest,
+  type RentalStockOperationResult,
   type RentalStockDisposition,
   type RentalWorkOrder,
   type RentalWorkOrderAssignee,
@@ -1097,6 +1100,32 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     });
   }
 
+  async listStockLedger(tenantId: string, filters: { itemGroupId?: string; locationId?: string; limit?: number } = {}) {
+    await this.factContext(tenantId);
+    return this.factStore.listStockLedger(tenantId, filters);
+  }
+
+  async applyStockOperation(tenantId: string, input: RentalStockOperationRequest, operator: string): Promise<RentalStockOperationResult> {
+    const state = await this.factContext(tenantId);
+    const group = this.group(state, input.itemGroupId);
+    if (group.inventoryMode !== RentalInventoryMode.Quantity) throw new BadRequestException("库存日常作业目前只适用于数量型库存");
+    if (!input.reason?.trim()) throw new BadRequestException("库存作业必须填写原因或来源说明");
+
+    if (input.type === "transfer") {
+      if (!input.fromLocationId || !input.toLocationId || input.fromLocationId === input.toLocationId) throw new BadRequestException("调拨必须选择两个不同的履约地点");
+      this.activeLocation(state, input.fromLocationId, "storage");
+      this.activeLocation(state, input.toLocationId, "storage");
+    } else {
+      if (!input.locationId) throw new BadRequestException("库存作业必须选择履约地点");
+      this.activeLocation(state, input.locationId, "storage");
+    }
+
+    const result = await this.factStore.applyStockOperation({ ...input, tenantId, operator: operator || input.operator || "系统" });
+    const locationIds = new Set(result.entries.map((entry) => entry.locationId));
+    const balances = (await this.listStockBalances(tenantId)).filter((row) => row.itemGroupId === input.itemGroupId && locationIds.has(row.locationId));
+    return { ...result, balances };
+  }
+
   async saveStockBalance(tenantId: string, input: SaveRentalStockBalanceRequest) {
     const state = await this.factContext(tenantId);
     const group = this.group(state, input.itemGroupId);
@@ -1105,6 +1134,10 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (!Number.isInteger(input.onHandQuantity) || input.onHandQuantity < 0) throw new BadRequestException("在手数量必须是非负整数");
     if (input.maintenanceQuantity !== undefined && (!Number.isInteger(input.maintenanceQuantity) || input.maintenanceQuantity < 0)) {
       throw new BadRequestException("维护数量无效");
+    }
+    const existing = (await this.listStockBalances(tenantId)).find((row) => row.itemGroupId === group.id && row.locationId === location.id);
+    if (existing && (input.onHandQuantity !== existing.onHandQuantity || (input.maintenanceQuantity !== undefined && input.maintenanceQuantity !== existing.maintenanceQuantity))) {
+      throw new ConflictException("已有库存不能直接覆盖余额，请使用入库、盘点、调拨、报损或退出作业并填写来源");
     }
     // 不在这里 `?? 0`：维修量这一列还记着异常归还的隔离量，省略即清零会让一次
     // 只报在手数量的例行盘点顺手把隔离中的坏货放回可用池。合并与上界校验都在

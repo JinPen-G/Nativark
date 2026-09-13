@@ -1,6 +1,7 @@
 import {
   RENTAL_CAPABILITY_CODES,
   RENTAL_PRICING_UNIT_CODES,
+  RENTAL_STOCK_OPERATION_TYPES,
   RentalAssetStatus,
   RentalCategoryCode,
   type CancelRentalOrderRequest,
@@ -31,6 +32,7 @@ import {
   type SaveRentalAssetRequest,
   type SaveRentalCouponTemplateRequest,
   type SaveRentalStockBalanceRequest,
+  type RentalStockOperationRequest,
   type SaveTenantRentalProfileRequest,
   type SendRentalNotificationRequest,
   type SubstituteRentalBundleComponentRequest
@@ -599,6 +601,54 @@ export class SaveRentalStockBalanceDto implements SaveRentalStockBalanceRequest 
   @IsNumber()
   @Min(0)
   maintenanceQuantity?: number;
+
+  @IsOptional()
+  @IsString()
+  operator?: string;
+}
+
+export class ApplyRentalStockOperationDto implements RentalStockOperationRequest {
+  @IsIn(RENTAL_STOCK_OPERATION_TYPES)
+  type!: RentalStockOperationRequest["type"];
+
+  @IsString()
+  @IsNotEmpty()
+  itemGroupId!: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  locationId?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  fromLocationId?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  toLocationId?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  quantity?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  actualOnHandQuantity?: number;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(500)
+  reason!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(191)
+  idempotencyKey!: string;
 
   @IsOptional()
   @IsString()

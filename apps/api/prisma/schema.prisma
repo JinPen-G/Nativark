@@ -134,6 +134,7 @@ model Tenant {
   rentalAssets                      RentalAsset[]
   rentalStockBalances               RentalStockBalance[]
   rentalStockDispositions           RentalStockDisposition[]
+  rentalStockLedgerEntries          RentalStockLedgerEntry[]
   rentalWorkOrders                  RentalWorkOrder[]
   rentalOrders                      RentalOrder[]
   rentalReservations                RentalReservation[]
@@ -258,6 +259,7 @@ model BusinessWorkspace {
   rentalAssets                      RentalAsset[]
   rentalStockBalances               RentalStockBalance[]
   rentalStockDispositions           RentalStockDisposition[]
+  rentalStockLedgerEntries          RentalStockLedgerEntry[]
   rentalWorkOrders                  RentalWorkOrder[]
   rentalOrders                      RentalOrder[]
   rentalReservations                RentalReservation[]
@@ -1783,6 +1785,7 @@ model RentalFulfillmentLocation {
   status            String                     @default("enabled")
   assets            RentalAsset[]
   stockBalances     RentalStockBalance[]
+  stockLedgerEntries RentalStockLedgerEntry[]
   orders            RentalOrder[]
   reservations      RentalReservation[]
   serviceCapacities RentalServiceCapacity[]
@@ -1815,6 +1818,7 @@ model RentalItemGroup {
   status                  String                     @default("enabled")
   assets                  RentalAsset[]
   stockBalances           RentalStockBalance[]
+  stockLedgerEntries      RentalStockLedgerEntry[]
   orderLines              RentalOrderLine[]
   reservations            RentalReservation[]
   allocations             RentalAllocation[]
@@ -1957,6 +1961,37 @@ model RentalStockBalance {
   @@unique([workspaceId, itemGroupId, locationId], map: "rental_stock_ws_group_location_key")
   @@index([tenantId, locationId])
   @@map("rental_stock_balances")
+}
+
+/// STOCK-OPS-01：数量库存的追加式日常作业流水。余额是当前快照，本表记录每次入库、盘点、调拨、报损和退出的来源与前后值。
+model RentalStockLedgerEntry {
+  id                  String                     @id @default(uuid())
+  tenantId            String
+  tenant              Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId         String
+  workspace           BusinessWorkspace          @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  operationId         String                     @db.VarChar(191)
+  entryKind           String                     @db.VarChar(8)
+  operationType       String                     @db.VarChar(24)
+  itemGroupId         String
+  itemGroup           RentalItemGroup            @relation(fields: [itemGroupId], references: [id], onDelete: Restrict)
+  locationId          String
+  location            RentalFulfillmentLocation  @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  quantityDelta       Int
+  onHandBefore        Int
+  onHandAfter         Int
+  reservedQuantity    Int
+  maintenanceQuantity Int
+  reason              String                     @db.VarChar(500)
+  idempotencyKey      String                     @db.VarChar(191)
+  requestFingerprint  String                     @db.Char(64)
+  operator            String                     @db.VarChar(191)
+  createdAt           DateTime                   @default(now())
+
+  @@unique([workspaceId, idempotencyKey, entryKind], map: "rental_stock_ledger_idem_entry_key")
+  @@index([tenantId, workspaceId, itemGroupId, locationId, createdAt], map: "rental_stock_ledger_scope_created_idx")
+  @@index([workspaceId, operationId], map: "rental_stock_ledger_operation_idx")
+  @@map("rental_stock_ledger_entries")
 }
 
 /// STOCK-CLOSE-01：每批实际归还后的库存处置事实。
