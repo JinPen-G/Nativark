@@ -27,6 +27,13 @@ import type {
 import { requireRequestTenantId } from "../../common/request-identity";
 import { IntegrationsRepository } from "./integrations.repository";
 
+function safeFileAssetSummary(file: FileAssetSummary): FileAssetSummary {
+  const safe = { ...file };
+  delete safe.storageKey;
+  delete safe.publicUrl;
+  return safe;
+}
+
 @Injectable()
 export class IntegrationsService {
   private get defaultTenantId() {
@@ -247,7 +254,8 @@ export class IntegrationsService {
         }
         return true;
       })
-      .slice(0, limit);
+      .slice(0, limit)
+      .map(safeFileAssetSummary);
   }
 
   async createFile(input: CreateFileAssetRequest) {
@@ -278,11 +286,11 @@ export class IntegrationsService {
       responseJson: {
         externalCallSkipped: true,
         fileId: created.id,
-        storageKey: created.storageKey
+        reference: "protected-file-reference"
       }
     });
 
-    return created;
+    return safeFileAssetSummary(created);
   }
 
   async listNotificationTemplates() {
@@ -708,7 +716,7 @@ export class IntegrationsService {
       return {
         ...file,
         id,
-        storageKey: file.storageKey.replace(/^mock\/[^/]+/u, `mock/${tenantId}`),
+        storageKey: (file.storageKey ?? `mock/${tenantId}/${id}`).replace(/^mock\/[^/]+/u, `mock/${tenantId}`),
         publicUrl: `/api/files/${id}/download`
       };
     });
@@ -914,7 +922,7 @@ export class IntegrationsService {
       return {
         externalCallSkipped: true,
         fileAssetId: file.id,
-        downloadUrl: file.publicUrl,
+        downloadUrl: file.publicUrl ?? `/api/files/${file.id}/download-url`,
         rowCount: operation === "export" ? 12 : 0,
         message:
           operation === "template_download"

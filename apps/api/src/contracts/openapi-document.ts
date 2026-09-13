@@ -298,7 +298,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       idempotencyKey: stringSchema,
       metadata: objectSchema
     },
-    ["businessModule", "businessType", "fileName", "mimeType", "sizeBytes", "uploadScene", "idempotencyKey"]
+    ["businessModule", "businessType", "businessId", "fileName", "mimeType", "sizeBytes", "uploadScene", "idempotencyKey"]
   ),
   CompleteFileUploadRequest: objectOf({ checksum: stringSchema }),
   FileUploadSessionSummary: objectOf(
@@ -308,12 +308,11 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       provider: stringSchema,
       mode: stringSchema,
       status: stringSchema,
-      storageKey: stringSchema,
       uploadUrl: stringSchema,
       uploadHeaders: objectSchema,
       expiresAt: { type: "string", format: "date-time" }
     },
-    ["sessionId", "fileAssetId", "provider", "mode", "status", "storageKey", "expiresAt"]
+    ["sessionId", "fileAssetId", "provider", "mode", "status", "expiresAt"]
   ),
   FileDownloadUrlSummary: objectOf(
     {
@@ -324,6 +323,16 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       expiresAt: { type: "string", format: "date-time" }
     },
     ["fileAssetId", "provider", "mode", "downloadUrl"]
+  ),
+  FileUploadCleanupSummary: objectOf(
+    {
+      scanned: numberSchema,
+      invalidated: numberSchema,
+      deletedObjects: numberSchema,
+      cleanupPending: numberSchema,
+      sessionIds: { type: "array", items: stringSchema }
+    },
+    ["scanned", "invalidated", "deletedObjects", "cleanupPending", "sessionIds"]
   ),
   SessionContextResponse: objectOf(
     {
@@ -1291,6 +1300,7 @@ const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
   backlogOperation("post", "/api/files", "Files", "createFileAsset", "Create file asset", ["system:files:manage"]),
   backlogOperation("post", "/api/files/upload-sessions", "Files", "createFileUploadSession", "Create a tenant-scoped presigned upload session", ["system:integration:manage"], true, "CreateFileUploadSessionRequest", "FileUploadSessionSummary"),
   backlogOperation("post", "/api/files/upload-sessions/{id}/complete", "Files", "completeFileUpload", "Confirm a presigned upload and activate its file metadata", ["system:integration:manage"], true, "CompleteFileUploadRequest", "GenericObject"),
+  backlogOperation("post", "/api/files/upload-sessions/cleanup-expired", "Files", "cleanupExpiredFileUploads", "Invalidate expired upload sessions and clean their provider objects", ["system:integration:manage"], true, undefined, "FileUploadCleanupSummary"),
   backlogOperation("get", "/api/files/{id}/download-url", "Files", "getFileDownloadUrl", "Create a short-lived tenant-scoped download URL", ["system:integration:manage"], true, undefined, "FileDownloadUrlSummary"),
   backlogOperation("get", "/api/integrations/adapter-logs", "Integrations", "listAdapterLogs", "List adapter logs", ["system:integrations:manage"]),
   backlogOperation("post", "/api/integrations/adapters/mock-call", "Integrations", "invokeMockAdapter", "Invoke mock adapter", ["system:integrations:manage"]),

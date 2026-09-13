@@ -41,7 +41,8 @@ export interface FileAssetSummary {
   mimeType: string;
   sizeBytes: number;
   storageProvider: string;
-  storageKey: string;
+  /** 服务端内部对象键；对外接口不返回，保留为可选字段兼容内部 mock 数据。 */
+  storageKey?: string;
   publicUrl?: string;
   uploadScene: string;
   status: "active" | "deleted" | string;
@@ -73,7 +74,8 @@ export interface CreateFileAssetRequest {
 export interface CreateFileUploadSessionRequest {
   businessModule: string;
   businessType: string;
-  businessId?: string;
+  /** 上传必须绑定已存在的租户业务对象，禁止只凭调用方字符串制造孤儿文件。 */
+  businessId: string;
   fileName: string;
   mimeType: string;
   sizeBytes: number;
@@ -88,10 +90,17 @@ export interface FileUploadSessionSummary {
   provider: string;
   mode: "provider" | "simulation";
   status: "pending_upload" | "completed" | "failed" | string;
-  storageKey: string;
   uploadUrl?: string;
   uploadHeaders?: Record<string, string>;
   expiresAt: string;
+}
+
+export interface FileUploadCleanupSummary {
+  scanned: number;
+  invalidated: number;
+  deletedObjects: number;
+  cleanupPending: number;
+  sessionIds: string[];
 }
 
 export interface CompleteFileUploadRequest {

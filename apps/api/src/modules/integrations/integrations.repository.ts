@@ -416,8 +416,6 @@ function toFileAssetSummary(
     mimeType: row.mimeType,
     sizeBytes: row.sizeBytes,
     storageProvider: row.storageProvider,
-    storageKey: row.storageKey,
-    publicUrl: row.publicUrl ?? undefined,
     uploadScene: row.uploadScene,
     status: row.status,
     uploadedBy: row.uploadedBy ?? undefined,

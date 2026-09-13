@@ -4,7 +4,7 @@ import type { CompleteFileUploadRequest, CreateFileUploadSessionRequest } from "
 export class CreateFileUploadSessionDto implements CreateFileUploadSessionRequest {
   @IsString() businessModule!: string;
   @IsString() businessType!: string;
-  @IsOptional() @IsString() businessId?: string;
+  @IsString() businessId!: string;
   @IsString() fileName!: string;
   @IsString() mimeType!: string;
   @IsInt() @Min(1) @Max(20 * 1024 * 1024) sizeBytes!: number;

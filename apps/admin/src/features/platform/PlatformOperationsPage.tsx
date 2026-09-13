@@ -62,7 +62,7 @@ export function PlatformOperationsPage() {
               { title: "业务模块", dataIndex: "businessModule" },
               { title: "业务类型", dataIndex: "businessType" },
               { title: "场景", dataIndex: "uploadScene" },
-              { title: "存储", render: (_, record) => `${record.storageProvider} / ${record.storageKey}` },
+              { title: "存储", render: (_, record) => `${record.storageProvider} / 受保护对象引用` },
               { title: "上传时间", dataIndex: "createdAt" },
               { title: "状态", dataIndex: "status", render: (value) => <Tag>{value}</Tag> }
             ]} /></QueryState>

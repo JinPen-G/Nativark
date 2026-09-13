@@ -1,0 +1,147 @@
+const assert = require("node:assert/strict");
+const path = require("node:path");
+
+process.env.NODE_ENV = "test";
+require("ts-node").register({
+  transpileOnly: true,
+  compilerOptions: { module: "commonjs", moduleResolution: "node", experimentalDecorators: true, emitDecoratorMetadata: true }
+});
+
+const { FileStorageRuntimeService } = require(path.join(
+  __dirname,
+  "../apps/api/src/modules/integrations/file-storage.runtime.service"
+));
+
+const tenantId = "tenant-file-test";
+const orderId = "order-file-test";
+const assets = new Map();
+const sessions = new Map();
+let assetSequence = 0;
+
+function assetRow(id, status = "pending_upload") {
+  return {
+    id,
+    tenantId,
+    businessModule: "rental-core",
+    businessType: "rental_order",
+    businessId: orderId,
+    fileName: "contract.pdf",
+    fileExt: "pdf",
+    mimeType: "application/pdf",
+    sizeBytes: 1024,
+    storageProvider: "local_mock",
+    storageKey: `tenant-files/${tenantId}/${id}/contract.pdf`,
+    publicUrl: null,
+    uploadScene: "order-contract",
+    status,
+    uploadedBy: null,
+    metadata: { uploadMode: "simulation" },
+    createdAt: new Date(),
+    updatedAt: new Date()
+  };
+}
+
+const prisma = {
+  rentalOrder: { findFirst: async ({ where }) => where.tenantId === tenantId && where.id === orderId ? { id: orderId } : null },
+  fileAsset: {
+    create: async ({ data }) => {
+      const row = { ...assetRow(data.id), ...data, createdAt: new Date(), updatedAt: new Date() };
+      assets.set(row.id, row);
+      return row;
+    },
+    findUniqueOrThrow: async ({ where }) => assets.get(where.id),
+    findFirst: async ({ where }) => {
+      const row = assets.get(where.id);
+      return row && row.tenantId === where.tenantId && (!where.status || row.status === where.status) ? row : null;
+    },
+    update: async ({ where, data }) => {
+      const row = assets.get(where.id);
+      Object.assign(row, data, { updatedAt: new Date() });
+      return row;
+    },
+    updateMany: async ({ where, data }) => {
+      const row = assets.get(where.id);
+      if (!row || row.tenantId !== where.tenantId || (where.status && row.status !== where.status)) return { count: 0 };
+      Object.assign(row, data, { updatedAt: new Date() });
+      return { count: 1 };
+    }
+  },
+  fileUploadSession: {
+    findFirst: async ({ where }) => [...sessions.values()].find((row) => row.tenantId === where.tenantId && (where.id ? row.id === where.id : row.idempotencyKey === where.idempotencyKey)) ?? null,
+    findMany: async ({ where }) => [...sessions.values()].filter((row) => row.tenantId === where.tenantId && row.expiresAt <= where.expiresAt.lte && (row.status === "pending_upload" || (row.status === "failed" && row.cleanupError))).slice(0, 100),
+    create: async ({ data }) => {
+      const row = { ...data, createdAt: new Date(), updatedAt: new Date(), cleanupAttempts: 0, cleanupError: null, lastCleanupAt: null };
+      sessions.set(row.id, row);
+      return row;
+    },
+    update: async ({ where, data }) => {
+      const row = sessions.get(where.id);
+      Object.assign(row, data, { updatedAt: new Date() });
+      return row;
+    },
+    updateMany: async ({ where, data }) => {
+      const row = sessions.get(where.id);
+      const allowed = row && row.tenantId === where.tenantId && (row.status === "pending_upload" || (row.status === "failed" && row.cleanupError));
+      if (!allowed) return { count: 0 };
+      Object.assign(row, data, { updatedAt: new Date(), cleanupAttempts: (row.cleanupAttempts ?? 0) + (data.cleanupAttempts?.increment ?? 0) });
+      return { count: 1 };
+    }
+  },
+  $transaction: async (work) => Array.isArray(work) ? Promise.all(work) : work({ fileAsset: prisma.fileAsset, fileUploadSession: prisma.fileUploadSession })
+};
+
+const integrations = { runtimeConfig: async () => undefined };
+const runtime = new FileStorageRuntimeService(prisma, integrations);
+
+void (async () => {
+  const input = {
+    businessModule: "rental-core",
+    businessType: "rental_order",
+    businessId: orderId,
+    fileName: "contract.pdf",
+    mimeType: "application/pdf",
+    sizeBytes: 1024,
+    uploadScene: "order-contract",
+    idempotencyKey: "upload-order-file-1"
+  };
+  const first = await runtime.createUploadSession(tenantId, input);
+  assert.equal(first.fileAssetId.startsWith("file_"), true);
+  assert.equal("storageKey" in first, false, "上传会话不得向调用方返回对象存储路径");
+
+  const replay = await runtime.createUploadSession(tenantId, input);
+  assert.equal(replay.sessionId, first.sessionId, "同一租户幂等重放必须复用原上传会话");
+
+  await assert.rejects(
+    () => runtime.createUploadSession(tenantId, { ...input, businessId: "order-from-other-tenant", idempotencyKey: "upload-order-file-2" }),
+    /业务对象不存在或不属于当前租户/
+  );
+
+  const completed = await runtime.completeUpload(tenantId, first.sessionId, {});
+  assert.equal(completed.status, "active");
+  assert.equal("storageKey" in completed, false, "完成响应不得向调用方返回对象存储路径");
+
+  const expiredAssetId = "file_expired";
+  const expiredSessionId = "session_expired";
+  assets.set(expiredAssetId, assetRow(expiredAssetId));
+  sessions.set(expiredSessionId, {
+    id: expiredSessionId,
+    tenantId,
+    fileAssetId: expiredAssetId,
+    provider: "local_mock",
+    storageKey: `tenant-files/${tenantId}/${expiredAssetId}/contract.pdf`,
+    status: "pending_upload",
+    idempotencyKey: "upload-expired",
+    expiresAt: new Date(Date.now() - 1000),
+    cleanupError: null,
+    cleanupAttempts: 0
+  });
+  const cleanup = await runtime.cleanupExpiredUploadSessions(tenantId);
+  assert.equal(cleanup.invalidated, 1);
+  assert.equal(cleanup.deletedObjects, 1);
+  assert.equal(sessions.get(expiredSessionId).status, "failed");
+  assert.equal(assets.get(expiredAssetId).status, "failed");
+  console.log("file storage lifecycle tests passed");
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

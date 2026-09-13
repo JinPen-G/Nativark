@@ -1,15 +1,18 @@
-import { ConflictException, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable, NotFoundException, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { createHash, createHmac, randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import type {
   CompleteFileUploadRequest,
   CreateFileUploadSessionRequest,
+  FileAssetSummary,
+  FileUploadCleanupSummary,
   FileDownloadUrlSummary,
   FileUploadSessionSummary
 } from "@rental-os/shared";
 import { assertOutboundUrl } from "../../common/outbound-url";
 import { PrismaService } from "../database/prisma.service";
 import { TenantIntegrationService, type TenantIntegrationRuntimeConfig } from "./tenant-integration.service";
+import { OperationLogService } from "../../common/operation-log.service";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -78,7 +81,8 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = 8_00
 export class FileStorageRuntimeService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly integrations: TenantIntegrationService
+    private readonly integrations: TenantIntegrationService,
+    @Optional() private readonly operationLog?: OperationLogService
   ) {}
 
   async createUploadSession(
@@ -86,14 +90,16 @@ export class FileStorageRuntimeService {
     input: CreateFileUploadSessionRequest
   ): Promise<FileUploadSessionSummary> {
     const mimeType = this.validateInput(input);
+    const idempotencyKey = input.idempotencyKey.trim();
     const existing = await this.prisma.fileUploadSession.findFirst({
-      where: { tenantId, idempotencyKey: input.idempotencyKey }
+      where: { tenantId, idempotencyKey }
     });
     if (existing) {
       const existingAsset = await this.prisma.fileAsset.findUniqueOrThrow({ where: { id: existing.fileAssetId } });
       const existingMode = (existingAsset.metadata as JsonRecord | null)?.uploadMode === "provider" ? "provider" : "simulation";
       return this.sessionSummary(existing, existingAsset, existingMode);
     }
+    await this.assertBusinessReference(tenantId, input.businessType, input.businessId);
 
     const assetId = `file_${randomUUID().replace(/-/g, "")}`;
     const sessionId = randomUUID();
@@ -106,40 +112,58 @@ export class FileStorageRuntimeService {
       throw new ServiceUnavailableException("文件存储尚未配置，请先启用一个文件平台");
     }
 
-    const created = await this.prisma.$transaction(async (tx) => {
-      const asset = await tx.fileAsset.create({
-        data: {
-          id: assetId,
-          tenantId,
-          businessModule: input.businessModule.trim(),
-          businessType: input.businessType.trim(),
-          businessId: input.businessId?.trim() || null,
-          fileName: input.fileName.trim().slice(0, 180),
-          fileExt: input.fileName.includes(".") ? input.fileName.split(".").pop()?.slice(0, 20) : null,
-          mimeType,
-          sizeBytes: input.sizeBytes,
-          storageProvider: provider,
-          storageKey,
-          publicUrl: null,
-          uploadScene: input.uploadScene.trim(),
-          status: "pending_upload",
-          metadata: { ...(input.metadata ?? {}), uploadMode: mode } as Prisma.InputJsonValue
-        }
+    let created: {
+      asset: Prisma.FileAssetGetPayload<object>;
+      session: Prisma.FileUploadSessionGetPayload<object>;
+    };
+    try {
+      created = await this.prisma.$transaction(async (tx) => {
+        const asset = await tx.fileAsset.create({
+          data: {
+            id: assetId,
+            tenantId,
+            businessModule: input.businessModule.trim(),
+            businessType: input.businessType.trim(),
+            businessId: input.businessId.trim(),
+            fileName: input.fileName.trim().slice(0, 180),
+            fileExt: input.fileName.includes(".") ? input.fileName.split(".").pop()?.slice(0, 20) : null,
+            mimeType,
+            sizeBytes: input.sizeBytes,
+            storageProvider: provider,
+            storageKey,
+            publicUrl: null,
+            uploadScene: input.uploadScene.trim(),
+            status: "pending_upload",
+            metadata: { ...(input.metadata ?? {}), uploadMode: mode } as Prisma.InputJsonValue
+          }
+        });
+        const session = await tx.fileUploadSession.create({
+          data: {
+            id: sessionId,
+            tenantId,
+            fileAssetId: asset.id,
+            provider,
+            storageKey,
+            status: "pending_upload",
+            idempotencyKey,
+            expiresAt
+          }
+        });
+        return { asset, session };
       });
-      const session = await tx.fileUploadSession.create({
-        data: {
-          id: sessionId,
-          tenantId,
-          fileAssetId: asset.id,
-          provider,
-          storageKey,
-          status: "pending_upload",
-          idempotencyKey: input.idempotencyKey.trim(),
-          expiresAt
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        const concurrent = await this.prisma.fileUploadSession.findFirst({
+          where: { tenantId, idempotencyKey }
+        });
+        if (concurrent) {
+          const concurrentAsset = await this.prisma.fileAsset.findUniqueOrThrow({ where: { id: concurrent.fileAssetId } });
+          const concurrentMode = (concurrentAsset.metadata as JsonRecord | null)?.uploadMode === "provider" ? "provider" : "simulation";
+          return this.sessionSummary(concurrent, concurrentAsset, concurrentMode);
         }
-      });
-      return { asset, session };
-    });
+      }
+      throw error;
+    }
 
     if (!configured) return this.sessionSummary(created.session, created.asset, mode);
     const signed = this.presign(configured, "PUT", storageKey, mimeType, expiresAt);
@@ -155,7 +179,7 @@ export class FileStorageRuntimeService {
     if (!session) throw new NotFoundException("上传会话不存在");
     const asset = await this.prisma.fileAsset.findFirst({ where: { id: session.fileAssetId, tenantId } });
     if (!asset) throw new NotFoundException("文件元数据不存在");
-    if (session.status === "completed") return asset;
+    if (session.status === "completed") return this.assetSummary(asset);
     if (session.status !== "pending_upload") throw new ConflictException("上传会话已失效");
     if (session.expiresAt.getTime() <= Date.now()) {
       await this.failSession(tenantId, session.id, "上传会话已过期");
@@ -178,25 +202,197 @@ export class FileStorageRuntimeService {
       await tx.fileUploadSession.update({ where: { id: session.id }, data: { status: "completed", completedAt: new Date(), failureReason: null } });
       return tx.fileAsset.update({ where: { id: asset.id }, data: { status: "active", metadata: metadata as Prisma.InputJsonValue } });
     });
-    return updated;
+    return this.assetSummary(updated);
+  }
+
+  /**
+   * 过期上传会话的可重复清理。先把会话抢占为 cleanup_in_progress，再删除对象，
+   * 最后把元数据置为 failed；对象删除失败会保留 cleanupError，下一次运维执行可重试。
+   */
+  async cleanupExpiredUploadSessions(tenantId: string, limit = 50): Promise<FileUploadCleanupSummary> {
+    const now = new Date();
+    const staleCleanupBefore = new Date(now.getTime() - 10 * 60 * 1000);
+    const rows = await this.prisma.fileUploadSession.findMany({
+      where: {
+        tenantId,
+        expiresAt: { lte: now },
+        OR: [
+          { status: "pending_upload" },
+          { status: "failed", cleanupError: { not: null } },
+          { status: "cleanup_in_progress", lastCleanupAt: { lte: staleCleanupBefore } }
+        ]
+      },
+      orderBy: { expiresAt: "asc" },
+      take: Math.max(1, Math.min(limit, 100))
+    });
+    let invalidated = 0;
+    let deletedObjects = 0;
+    let cleanupPending = 0;
+    const sessionIds: string[] = [];
+    for (const row of rows) {
+      const claimed = await this.prisma.fileUploadSession.updateMany({
+        where: {
+          id: row.id,
+          tenantId,
+          OR: [
+            { status: "pending_upload" },
+            { status: "failed", cleanupError: { not: null } },
+            { status: "cleanup_in_progress", lastCleanupAt: { lte: staleCleanupBefore } }
+          ]
+        },
+        data: { status: "cleanup_in_progress", cleanupAttempts: { increment: 1 }, lastCleanupAt: now }
+      });
+      if (claimed.count !== 1) continue;
+      sessionIds.push(row.id);
+      let cleanupError: string | undefined;
+      let deleted = row.provider === "local_mock";
+      try {
+        if (!deleted) {
+          const config = await this.integrations.runtimeConfig("file", tenantId, row.provider as never);
+          if (!config) throw new ServiceUnavailableException("文件平台已停用，无法清理过期对象");
+          deleted = await this.deleteObject(config, row.storageKey, now);
+          if (!deleted) throw new ServiceUnavailableException("对象存储未确认删除过期对象");
+        }
+      } catch (error) {
+        cleanupError = (error instanceof Error ? error.message : String(error)).slice(0, 500);
+      }
+      await this.prisma.$transaction([
+        this.prisma.fileUploadSession.update({
+          where: { id: row.id },
+          data: {
+            status: "failed",
+            failureReason: "上传会话已过期",
+            cleanupError: cleanupError ?? null
+          }
+        }),
+        this.prisma.fileAsset.updateMany({
+          where: { id: row.fileAssetId, tenantId, status: "pending_upload" },
+          data: { status: "failed" }
+        })
+      ]);
+      invalidated += 1;
+      if (deleted) deletedObjects += 1;
+      else cleanupPending += 1;
+    }
+    await this.operationLog?.record({
+      tenantId,
+      action: "file.upload.cleanup-expired",
+      targetType: "file-upload-session",
+      detail: "清理过期文件上传会话",
+      metadata: { scanned: rows.length, invalidated, deletedObjects, cleanupPending }
+    });
+    return { scanned: rows.length, invalidated, deletedObjects, cleanupPending, sessionIds };
   }
 
   async downloadUrl(tenantId: string, fileAssetId: string): Promise<FileDownloadUrlSummary> {
     const asset = await this.prisma.fileAsset.findFirst({ where: { id: fileAssetId, tenantId, status: "active" } });
     if (!asset) throw new NotFoundException("文件不存在或尚未完成上传");
     if (asset.storageProvider === "local_mock") {
-      return { fileAssetId, provider: asset.storageProvider, mode: "simulation", downloadUrl: asset.publicUrl ?? `/api/files/${fileAssetId}/download` };
+      const result = { fileAssetId, provider: asset.storageProvider, mode: "simulation" as const, downloadUrl: `/api/files/${fileAssetId}/download-url` };
+      await this.operationLog?.record({ tenantId, action: "file.download-url.issue", targetType: "file", targetId: fileAssetId, detail: "生成受保护文件访问引用", metadata: { mode: result.mode } });
+      return result;
     }
     const config = await this.integrations.runtimeConfig("file", tenantId, asset.storageProvider as never);
     if (!config) throw new ServiceUnavailableException("文件平台已停用，无法生成下载地址");
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
     const signed = this.presign(config, "GET", asset.storageKey, asset.mimeType, expiresAt);
-    return { fileAssetId, provider: asset.storageProvider, mode: "provider", downloadUrl: signed.url, expiresAt: expiresAt.toISOString() };
+    const result = { fileAssetId, provider: asset.storageProvider, mode: "provider" as const, downloadUrl: signed.url, expiresAt: expiresAt.toISOString() };
+    await this.operationLog?.record({ tenantId, action: "file.download-url.issue", targetType: "file", targetId: fileAssetId, detail: "生成短时文件访问签名", metadata: { mode: result.mode, expiresAt: result.expiresAt } });
+    return result;
+  }
+
+  private async assertBusinessReference(tenantId: string, businessType: string, businessId: string) {
+    const id = businessId.trim();
+    const type = businessType.trim().toLowerCase();
+    let exists: boolean;
+    switch (type) {
+      case "rental_order":
+      case "order":
+        exists = Boolean(await this.prisma.rentalOrder.findFirst({ where: { id, tenantId }, select: { id: true } }));
+        break;
+      case "rental_quote":
+      case "quote":
+        exists = Boolean(await this.prisma.rentalQuote.findFirst({ where: { id, tenantId }, select: { id: true } }));
+        break;
+      case "rental_item_group":
+      case "item_group":
+        exists = Boolean(await this.prisma.rentalItemGroup.findFirst({ where: { id, tenantId }, select: { id: true } }));
+        break;
+      case "rental_asset":
+      case "asset":
+        exists = Boolean(await this.prisma.rentalAsset.findFirst({ where: { id, tenantId }, select: { id: true } }));
+        break;
+      case "rental_work_order":
+      case "work_order":
+        exists = Boolean(await this.prisma.rentalWorkOrder.findFirst({ where: { id, tenantId }, select: { id: true } }));
+        break;
+      case "customer":
+      case "customer_profile":
+        exists = Boolean(await this.prisma.customerProfile.findFirst({ where: { id, tenantId }, select: { id: true } }));
+        break;
+      case "customer_contract":
+      case "corporate_contract":
+        exists = Boolean(await this.prisma.customerCorporateContract.findFirst({ where: { id, tenantId }, select: { id: true } }));
+        break;
+      case "customer_invoice_profile":
+      case "invoice_profile":
+        exists = Boolean(await this.prisma.customerCorporateInvoiceProfile.findFirst({ where: { id, tenantId }, select: { id: true } }));
+        break;
+      case "customer_credit":
+      case "credit":
+        exists = Boolean(await this.prisma.customerCorporateCredit.findFirst({ where: { id, tenantId }, select: { id: true } }));
+        break;
+      case "membership_review":
+        exists = Boolean(await this.prisma.customerMembershipReview.findFirst({ where: { id, tenantId }, select: { id: true } }));
+        break;
+      case "async_job":
+        exists = Boolean(await this.prisma.asyncJob.findFirst({ where: { id, tenantId }, select: { id: true } }));
+        break;
+      case "document_print_job":
+        exists = Boolean(await this.prisma.documentPrintJob.findFirst({ where: { id, tenantId }, select: { id: true } }));
+        break;
+      default:
+        throw new BadRequestException(`文件业务类型未登记引用校验规则：${businessType}`);
+    }
+    if (!exists) throw new NotFoundException("文件关联的业务对象不存在或不属于当前租户");
+  }
+
+  private assetSummary(asset: {
+    id: string;
+    businessModule: string;
+    businessType: string;
+    businessId: string | null;
+    fileName: string;
+    fileExt: string | null;
+    mimeType: string;
+    sizeBytes: number;
+    storageProvider: string;
+    uploadScene: string;
+    status: string;
+    uploadedBy: string | null;
+    createdAt: Date;
+  }): FileAssetSummary {
+    return {
+      id: asset.id,
+      businessModule: asset.businessModule,
+      businessType: asset.businessType,
+      businessId: asset.businessId ?? undefined,
+      fileName: asset.fileName,
+      fileExt: asset.fileExt ?? undefined,
+      mimeType: asset.mimeType,
+      sizeBytes: asset.sizeBytes,
+      storageProvider: asset.storageProvider,
+      uploadScene: asset.uploadScene,
+      status: asset.status,
+      uploadedBy: asset.uploadedBy ?? undefined,
+      createdAt: asset.createdAt.toISOString()
+    };
   }
 
   private validateInput(input: CreateFileUploadSessionRequest) {
-    if (!input.businessModule?.trim() || !input.businessType?.trim() || !input.uploadScene?.trim()) throw new ConflictException("文件业务归属和上传场景不能为空");
-    if (!input.fileName?.trim() || !input.mimeType?.trim()) throw new ConflictException("文件名和类型不能为空");
+    if (!input.businessModule?.trim() || !input.businessType?.trim() || !input.businessId?.trim() || !input.uploadScene?.trim()) throw new ConflictException("文件业务归属、业务对象和上传场景不能为空");
+    if (input.businessModule.trim().length > 64 || input.businessType.trim().length > 64 || input.businessId.trim().length > 191 || input.uploadScene.trim().length > 64) throw new ConflictException("文件业务归属字段过长");
+    if (!input.fileName?.trim() || input.fileName.trim().length > 180 || !input.mimeType?.trim()) throw new ConflictException("文件名和类型不能为空且不能超过 180 个字符");
     const mimeType = input.mimeType.trim().toLowerCase();
     if (!/^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/u.test(mimeType) || mimeType.length > 127) throw new ConflictException("文件类型格式无效");
     if (["text/html", "application/xhtml+xml", "image/svg+xml", "text/javascript", "application/javascript"].includes(mimeType)) {
@@ -213,15 +409,22 @@ export class FileStorageRuntimeService {
     return `${prefix ? `${prefix}/` : ""}${tenantId}/${assetId}/${safeName}`;
   }
 
-  private sessionSummary(session: { id: string; fileAssetId: string; provider: string; status: string; storageKey: string; expiresAt: Date }, asset: { id: string }, mode: "provider" | "simulation" = "simulation"): FileUploadSessionSummary {
-    return { sessionId: session.id, fileAssetId: asset.id, provider: session.provider, mode, status: session.status, storageKey: session.storageKey, expiresAt: session.expiresAt.toISOString() };
+  private sessionSummary(session: { id: string; fileAssetId: string; provider: string; status: string; expiresAt: Date }, asset: { id: string }, mode: "provider" | "simulation" = "simulation"): FileUploadSessionSummary {
+    return { sessionId: session.id, fileAssetId: asset.id, provider: session.provider, mode, status: session.status, expiresAt: session.expiresAt.toISOString() };
   }
 
   private async failSession(tenantId: string, sessionId: string, reason: string) {
     await this.prisma.$transaction([
-      this.prisma.fileUploadSession.updateMany({ where: { id: sessionId, tenantId, status: "pending_upload" }, data: { status: "failed", failureReason: reason } }),
+      this.prisma.fileUploadSession.updateMany({ where: { id: sessionId, tenantId, status: "pending_upload" }, data: { status: "failed", failureReason: reason, cleanupError: "待执行过期对象清理" } }),
       this.prisma.fileAsset.updateMany({ where: { tenantId, uploadSession: { is: { id: sessionId } }, status: "pending_upload" }, data: { status: "failed" } })
     ]);
+  }
+
+  private async deleteObject(config: TenantIntegrationRuntimeConfig, storageKey: string, at: Date) {
+    const expiresAt = new Date(at.getTime() + 5 * 60 * 1000);
+    const signed = this.presign(config, "DELETE", storageKey, "application/octet-stream", expiresAt);
+    const response = await fetchWithTimeout(signed.url, { method: "DELETE", headers: signed.headers });
+    return response.status === 404 || response.ok;
   }
 
   private endpoint(config: TenantIntegrationRuntimeConfig) {
@@ -241,13 +444,13 @@ export class FileStorageRuntimeService {
     return { base: pathStyle ? `${base.protocol}//${base.host}/${encodeURIComponent(bucket)}` : `${base.protocol}//${bucket}.${base.host}`, bucket, region: safeRegion(text(settings.region, "Region")) };
   }
 
-  private presign(config: TenantIntegrationRuntimeConfig, method: "GET" | "PUT" | "HEAD", storageKey: string, mimeType: string, expiresAt: Date) {
+  private presign(config: TenantIntegrationRuntimeConfig, method: "GET" | "PUT" | "HEAD" | "DELETE", storageKey: string, mimeType: string, expiresAt: Date) {
     if (config.provider === "aliyun_oss") return this.presignOss(config, method, storageKey, mimeType, expiresAt);
     if (config.provider === "tencent_cos") return this.presignCos(config, method, storageKey, mimeType, expiresAt);
     return this.presignS3(config, method, storageKey, mimeType, expiresAt);
   }
 
-  private presignOss(config: TenantIntegrationRuntimeConfig, method: "GET" | "PUT" | "HEAD", storageKey: string, mimeType: string, expiresAt: Date) {
+  private presignOss(config: TenantIntegrationRuntimeConfig, method: "GET" | "PUT" | "HEAD" | "DELETE", storageKey: string, mimeType: string, expiresAt: Date) {
     const { base, bucket } = this.endpoint(config);
     const expires = Math.floor(expiresAt.getTime() / 1000);
     const contentType = method === "PUT" ? mimeType : "";
@@ -259,7 +462,7 @@ export class FileStorageRuntimeService {
     return { url, headers };
   }
 
-  private presignCos(config: TenantIntegrationRuntimeConfig, method: "GET" | "PUT" | "HEAD", storageKey: string, mimeType: string, expiresAt: Date) {
+  private presignCos(config: TenantIntegrationRuntimeConfig, method: "GET" | "PUT" | "HEAD" | "DELETE", storageKey: string, mimeType: string, expiresAt: Date) {
     const { base } = this.endpoint(config);
     const start = Math.floor(Date.now() / 1000);
     const end = Math.floor(expiresAt.getTime() / 1000);
@@ -283,7 +486,7 @@ export class FileStorageRuntimeService {
     return { url: `${base}${uri}?${query.toString()}`, headers };
   }
 
-  private presignS3(config: TenantIntegrationRuntimeConfig, method: "GET" | "PUT" | "HEAD", storageKey: string, mimeType: string, expiresAt: Date) {
+  private presignS3(config: TenantIntegrationRuntimeConfig, method: "GET" | "PUT" | "HEAD" | "DELETE", storageKey: string, mimeType: string, expiresAt: Date) {
     const { base, bucket, region } = this.endpoint(config);
     const endpoint = new URL(base);
     const host = endpoint.host;

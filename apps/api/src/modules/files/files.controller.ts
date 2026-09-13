@@ -34,6 +34,12 @@ export class FilesController {
     return this.storage.completeUpload(req.user.tenantId, id, body);
   }
 
+  @Post("upload-sessions/cleanup-expired")
+  cleanupExpiredUploads(@Req() req: AuthenticatedRequest, @Query("limit") limit?: string) {
+    const parsed = Number(limit ?? 50);
+    return this.storage.cleanupExpiredUploadSessions(req.user.tenantId, Number.isFinite(parsed) ? parsed : 50);
+  }
+
   @Get(":id/download-url")
   downloadUrl(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
     return this.storage.downloadUrl(req.user.tenantId, id);
