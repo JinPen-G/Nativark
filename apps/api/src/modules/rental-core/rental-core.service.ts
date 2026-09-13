@@ -1454,7 +1454,15 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
         refundStatus: refundAmount > 0 ? "pending_review" : "none"
       };
       releaseCapacity = currentStatus === "not_started";
-      useCapacity = currentStatus === "in_progress";
+      useCapacity = currentStatus === "in_progress" && alreadyExecutedQuantity === totalQuantity;
+      if (currentStatus === "in_progress" && alreadyExecutedQuantity > 0 && alreadyExecutedQuantity < totalQuantity
+        && previous.requiresCapacity && previous.reservationKey) {
+        if (!this.serviceCapacities) throw new ConflictException("服务容量履约组件未就绪，拒绝只写订单状态");
+        await this.serviceCapacities.markPartiallyUsedForOccurrence(
+          tenantId, orderId, previous.reservationKey, alreadyExecutedQuantity, input.reason.trim(), at, tx
+        );
+      }
+      if (currentStatus === "in_progress" && alreadyExecutedQuantity === 0) useCapacity = true;
       if (refundAmount > 0) {
         const review = this.raiseFeeReview(order, "service_refund", refundAmount, [
           `服务：${previous.serviceName}`,
@@ -2950,7 +2958,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     exceptionIndex: number,
     amount: number,
     detail: string,
-    tx: RentalFactTx
+    tx: RentalFactTx,
+    inspectionAt = now()
   ) {
     const order = await this.lockedOrder(tenantId, orderId, tx);
     if (order.status !== RentalCoreOrderStatus.Settling) throw new ConflictException("只有待结算订单可以审核异常费用");
@@ -2960,8 +2969,9 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     // 直接 `find` 取数组第一条等于永远按原订单那次算：原免赔已过期、客户续租时又买了一次，
     // 仍会拿过期那份的额度扣客户。按时点筛选后仍有多条时取覆盖额度最大的那条——保障口径
     // 上对客户有利的那一条，避免因为记录顺序不同而给出不同结论。
-    const damagedAt = now();
-    const damagedAtMs = Date.parse(damagedAt);
+    // 保障归属以异常被检查记录的时点为准，不能用运营人员晚几天审核的时刻。
+    const damagedAtMs = Date.parse(inspectionAt);
+    if (!Number.isFinite(damagedAtMs)) throw new BadRequestException("检查时间无效，不能判定免赔保障");
     const waiver = (order.serviceSnapshots ?? [])
       .filter((service) => service.serviceType === "damage_waiver")
       .filter((service) => !service.scheduledStartAt || !service.scheduledEndAt

@@ -80,6 +80,20 @@ void (async () => {
       /超过订单规则上限/u
     );
     assert.equal(order.chargeLines.length, 0, "超上限审核不得留下任何费用行");
+    order = baseOrder();
+    order.serviceSnapshots[0].scheduledStartAt = "2026-09-10T00:00:00.000Z";
+    order.serviceSnapshots[0].scheduledEndAt = "2026-09-11T00:00:00.000Z";
+    const lateReview = await service.approveInspectionException(
+      "tenant", order.id, "inspection_3", 0, 250, "保障期内发现、期后审核", {}, "2026-09-10T12:00:00.000Z"
+    );
+    assert.equal(lateReview.approvedChargeAmount, 100, "延迟审核不能让保障期内的异常失去免赔");
+    order = baseOrder();
+    order.serviceSnapshots[0].scheduledStartAt = "2026-09-10T00:00:00.000Z";
+    order.serviceSnapshots[0].scheduledEndAt = "2026-09-11T00:00:00.000Z";
+    const outside = await service.approveInspectionException(
+      "tenant", order.id, "inspection_4", 0, 250, "保障期外发现", {}, "2026-09-12T12:00:00.000Z"
+    );
+    assert.equal(outside.approvedChargeAmount, 250, "保障期外的异常不能因审核时刻改变而命中免赔");
     ok("检查异常计费同时受免赔服务和订单损坏上限约束");
   }
 

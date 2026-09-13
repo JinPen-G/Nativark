@@ -1494,7 +1494,7 @@ export class RentalCoreController {
         const approvedAmount = body.decision === "approved" ? Number(body.approvedChargeAmount) : 0;
         const approved = await this.service.approveInspectionException(
           tenantId, id, inspectionId, exceptionIndex, approvedAmount,
-          `${String(exception.description)}；审核：${body.reason}`, tx
+          `${String(exception.description)}；审核：${body.reason}`, tx, row.createdAt.toISOString()
         );
         Object.assign(exception, {
           reviewStatus: body.decision,

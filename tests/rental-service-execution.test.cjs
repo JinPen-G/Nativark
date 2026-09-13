@@ -67,7 +67,8 @@ function serviceFor(order, calls) {
   service.factStore = { saveOrderAggregate: async () => { calls.saved += 1; } };
   service.serviceCapacities = {
     markUsedForOccurrence: async (...args) => calls.used.push(args),
-    releaseForOccurrence: async (...args) => calls.released.push(args)
+    releaseForOccurrence: async (...args) => calls.released.push(args),
+    markPartiallyUsedForOccurrence: async (...args) => (calls.partialUsed ??= []).push(args)
   };
   return service;
 }
@@ -185,9 +186,36 @@ void (async () => {
     assert.equal(failed.occurrence.executedQuantity, 1);
     assert.equal(failed.occurrence.refundAmount, 200, "失败退款只能覆盖未执行的 2 份");
     assert.equal(failed.occurrence.refundStatus, "pending_review");
+    assert.equal(calls.partialUsed.length, 1, "部分失败必须拆分已用与未用容量");
+    assert.equal(calls.partialUsed[0][3], 1, "只保留实际执行的 1 份容量");
+    assert.equal(calls.used.length, 0, "不能把原来 3 份全部标为已使用");
     assert.equal(order.feeReviews[0].decidedAmount, undefined);
     assert.ok(order.feeReviews[0].basis.includes("未执行净额：200"), "退款审核依据必须说明未执行净额");
     ok("部分执行后失败只为未执行数量生成退款审核，不冲销已执行事实");
+  }
+
+  {
+    const capacity = new RentalServiceCapacityService({});
+    capacity.lockOrderReservations = async () => [{
+      id: "res_partial", tenantId: "tenant_1", workspaceId: "ws_1", orderId: "order_service_1",
+      serviceId: "svc_cleaning", capacityId: "cap_1", quantity: 3, status: "confirmed",
+      idempotencyKey: "key_partial", reservedAt: new Date(), confirmedAt: new Date()
+    }];
+    const changes = [];
+    const tx = {
+      businessWorkspace: { findFirst: async () => ({ id: "ws_1" }) },
+      rentalServiceCapacity: { updateMany: async (input) => { changes.push(["capacity", input]); return { count: 1 }; } },
+      rentalServiceReservation: {
+        updateMany: async (input) => { changes.push(["used", input]); return { count: 1 }; },
+        create: async (input) => { changes.push(["released", input]); return input.data; }
+      }
+    };
+    await capacity.markPartiallyUsedForOccurrence("tenant_1", "order_service_1", "key_partial", 1, "剩余服务失败", at(), tx);
+    assert.equal(changes[0][1].data.usedQuantity.decrement, 2, "未执行的两份要回到可用容量");
+    assert.equal(changes[1][1].data.quantity, 1, "已用流水只保留一份");
+    assert.equal(changes[2][1].data.quantity, 2, "另存未执行的两份释放流水");
+    assert.equal(changes[2][1].data.status, "released");
+    ok("部分服务容量按实际执行与未执行份数拆账，保留两条流水");
   }
 
   {

@@ -260,6 +260,45 @@ export class RentalServiceCapacityService {
     if (updated.count !== 1) throw new ConflictException("服务容量预留状态已变化，请刷新后重试");
   }
 
+  /** 部分履约后终止：已执行份数留作 used，未执行份数释放，并保留两条可追溯流水。 */
+  async markPartiallyUsedForOccurrence(
+    tenantId: string,
+    orderId: string,
+    reservationKey: string | undefined,
+    executedQuantity: number,
+    reason: string,
+    at: string,
+    tx: Tx
+  ): Promise<void> {
+    if (!reservationKey) return;
+    const workspaceId = await resolveScopeWorkspaceId(tx, tenantId);
+    const rows = await this.lockOrderReservations(tenantId, orderId, tx);
+    const row = rows.find((item) => item.idempotencyKey === reservationKey);
+    if (!row || row.status !== "confirmed") throw new ConflictException("服务容量预留当前状态不能部分结算");
+    if (!Number.isInteger(executedQuantity) || executedQuantity < 1 || executedQuantity >= row.quantity) {
+      throw new BadRequestException("已执行份数必须小于预留份数且大于零");
+    }
+    const releasedQuantity = row.quantity - executedQuantity;
+    const moved = await tx.rentalServiceCapacity.updateMany({
+      where: { id: row.capacityId, tenantId, workspaceId, usedQuantity: { gte: releasedQuantity } },
+      data: { usedQuantity: { decrement: releasedQuantity } }
+    });
+    if (moved.count !== 1) throw new ConflictException("服务容量账不平，拒绝部分结算");
+    const updated = await tx.rentalServiceReservation.updateMany({
+      where: { id: row.id, tenantId, workspaceId, status: "confirmed", quantity: row.quantity },
+      data: { quantity: executedQuantity, status: "used", usedAt: new Date(at), expiresAt: null }
+    });
+    if (updated.count !== 1) throw new ConflictException("服务容量预留状态已变化，请刷新后重试");
+    await tx.rentalServiceReservation.create({
+      data: {
+        id: randomUUID(), tenantId, workspaceId, capacityId: row.capacityId, serviceId: row.serviceId,
+        orderId, quantity: releasedQuantity, status: "released", idempotencyKey: `partial-release:${row.id}`,
+        reservedAt: row.reservedAt, confirmedAt: row.confirmedAt, releasedAt: new Date(at),
+        releaseReason: reason
+      }
+    });
+  }
+
   /** MKT-02D：取消/未到场/未开始失败时只释放这一条发生项的容量。 */
   async releaseForOccurrence(
     tenantId: string,
