@@ -524,7 +524,9 @@ export class PaymentRuntimeService {
       closed: results.filter((row) => row.kind === "payment_intent" && row.status === "closed").length,
       refunded: results.filter((row) => row.kind === "refund" && row.status === "succeeded").length,
       pending: results.filter((row) => ["pending", "accepted", "funding_pending"].includes(row.status)).length,
-      failed: results.filter((row) => row.status === "failed" || row.status === "reconcile_error").length,
+      // funding_failed 表示第三方已确认支付、但内部资金事件未完成，
+      // 不能被当成普通 pending：它需要运营恢复资金入账，必须在失败待恢复数中显式暴露。
+      failed: results.filter((row) => ["failed", "funding_failed", "reconcile_error"].includes(row.status)).length,
       results
     };
   }
