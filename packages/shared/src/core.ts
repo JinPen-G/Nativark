@@ -4490,6 +4490,24 @@ export interface SaveRentalAssetRequest {
   operator?: string;
 }
 
+/** STOCK-OPS-01：序列化资产状态只追加历史，不用当前状态快照冒充过去事实。 */
+export type RentalAssetStatusHistorySource = "onboarding" | "manual" | "order" | "disposition";
+
+export interface RentalAssetStatusHistory {
+  id: string;
+  tenantId: string;
+  workspaceId: string;
+  assetId: string;
+  assetNo: string;
+  fromStatus?: RentalAssetStatus;
+  toStatus: RentalAssetStatus;
+  source: RentalAssetStatusHistorySource;
+  sourceId?: string;
+  reason: string;
+  operator: string;
+  createdAt: string;
+}
+
 export interface RentalStockBalance {
   id: string;
   tenantId: string;

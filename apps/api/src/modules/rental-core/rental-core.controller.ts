@@ -366,6 +366,7 @@ export class RentalCoreController {
   }
   @Put("pricing-groups/:id") updatePricingGroup(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalPricingGroupDto) { return this.committed(req.user.tenantId, this.service.savePricingGroup(req.user.tenantId, { ...body, id })); }
   @Get("assets") assets(@Req() req: AuthenticatedRequest) { return this.service.listAssets(req.user.tenantId); }
+  @Get("assets/:id/status-history") assetStatusHistory(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.service.listAssetStatusHistory(req.user.tenantId, id); }
   @Post("assets") saveAsset(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalAssetDto) { return this.committed(req.user.tenantId, this.service.saveAsset(req.user.tenantId, body)); }
   @Put("assets/:id") updateAsset(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalAssetDto) { return this.committed(req.user.tenantId, this.service.saveAsset(req.user.tenantId, { ...body, id })); }
   @Get("stock-balances") stocks(@Req() req: AuthenticatedRequest) { return this.service.listStockBalances(req.user.tenantId); }

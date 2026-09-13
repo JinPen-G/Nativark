@@ -1987,6 +1987,10 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: "List serialized rental assets", permissions: ["rental-core:asset:view"], responseSchema: "GenericObject"
   },
   {
+    method: "get", path: "/api/rental/v1/assets/{id}/status-history", tag: "RentalCore", operationId: "listRentalAssetStatusHistory",
+    summary: "List serialized asset status history", permissions: ["rental-core:asset:view"], responseSchema: "GenericObject"
+  },
+  {
     method: "post", path: "/api/rental/v1/assets", tag: "RentalCore", operationId: "createRentalAsset",
     summary: "Create serialized rental asset", permissions: ["rental-core:asset:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
   },

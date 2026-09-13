@@ -103,6 +103,7 @@
     "test:order-close-db": "npm run build -w @rental-os/shared && node tests/helpers/run-order-close-db.cjs",
     "test:stock-disposition": "npm run build -w @rental-os/shared && node tests/rental-stock-disposition.test.cjs",
     "test:stock-operations": "npm run build -w @rental-os/shared && node tests/rental-stock-operations.test.cjs",
+    "test:asset-status-history": "npm run build -w @rental-os/shared && node tests/rental-asset-status-history.test.cjs",
     "test:work-order": "npm run build -w @rental-os/shared && node tests/rental-work-order.test.cjs",
     "test:work-order-db": "npm run build -w @rental-os/shared && node tests/rental-work-order-db.test.cjs",
     "test:tenant-access-db": "npm run build -w @rental-os/shared && node tests/tenant-access-db.test.cjs",

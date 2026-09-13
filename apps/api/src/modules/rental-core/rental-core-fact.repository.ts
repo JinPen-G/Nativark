@@ -8,6 +8,8 @@ import {
   RentalReservationStatus,
   type RentalAllocation,
   type RentalAsset,
+  type RentalAssetStatusHistory,
+  type RentalAssetStatusHistorySource,
   type RentalCategoryCode,
   type RentalFulfillmentLocationSnapshot,
   type RentalFulfillmentMode,
@@ -49,6 +51,21 @@ export interface ActiveReservationRow {
 export interface AssetStatusChange {
   assetId: string;
   status: RentalAssetStatus;
+  reason?: string;
+  operator?: string;
+}
+
+interface AssetStatusHistoryInput {
+  tenantId: string;
+  workspaceId: string;
+  assetId: string;
+  assetNo: string;
+  fromStatus?: string | null;
+  toStatus: RentalAssetStatus;
+  source: RentalAssetStatusHistorySource;
+  sourceId?: string;
+  reason: string;
+  operator?: string;
 }
 
 /**
@@ -105,6 +122,11 @@ export interface RentalUniqueAttributeClaim {
   normalizedValue: string;
 }
 
+export interface AssetStatusHistoryMetadata {
+  reason?: string;
+  operator?: string;
+}
+
 /**
  * 服务层只依赖这个接口。与配置仓储同理：不连库的单元测试注入吸收式 stub，
  * 而租户隔离、外键、过期预占过滤这类持久化语义只在 MySQL E2E 里验证。
@@ -140,7 +162,8 @@ export interface RentalCoreFactStore {
    */
   allocatedAssetIds(tenantId: string, tx?: RentalFactTx): Promise<Set<string>>;
   listAssets(tenantId: string, tx?: RentalFactTx): Promise<RentalAsset[]>;
-  upsertAsset(asset: RentalAsset, uniqueAttributes?: RentalUniqueAttributeClaim[]): Promise<void>;
+  listAssetStatusHistory(tenantId: string, assetId: string, tx?: RentalFactTx): Promise<RentalAssetStatusHistory[]>;
+  upsertAsset(asset: RentalAsset, uniqueAttributes?: RentalUniqueAttributeClaim[], statusChange?: AssetStatusHistoryMetadata): Promise<void>;
   listStockBalances(tenantId: string, tx?: RentalFactTx): Promise<RentalStockBalance[]>;
   upsertStockBalance(balance: RentalStockBalance): Promise<void>;
   /**
@@ -204,6 +227,44 @@ function lower<T extends string>(value: string): T {
 
 function upper<T extends string>(value: string): T {
   return value.toUpperCase() as T;
+}
+
+async function appendAssetStatusHistory(client: RentalFactTx, input: AssetStatusHistoryInput) {
+  const fromStatus = input.fromStatus ? upper<$Enums.RentalAssetState>(input.fromStatus) : null;
+  const toStatus = upper<$Enums.RentalAssetState>(input.toStatus);
+  if (fromStatus === toStatus) return;
+  await client.rentalAssetStatusHistory.create({
+    data: {
+      id: randomUUID(),
+      tenantId: input.tenantId,
+      workspaceId: input.workspaceId,
+      assetId: input.assetId,
+      assetNo: input.assetNo,
+      fromStatus,
+      toStatus,
+      source: input.source,
+      sourceId: input.sourceId ?? null,
+      reason: input.reason.trim().slice(0, 500),
+      operator: (input.operator ?? "系统").trim().slice(0, 191) || "系统"
+    }
+  });
+}
+
+function toAssetStatusHistory(row: any): RentalAssetStatusHistory {
+  return {
+    id: row.id,
+    tenantId: row.tenantId,
+    workspaceId: row.workspaceId,
+    assetId: row.assetId,
+    assetNo: row.assetNo,
+    fromStatus: row.fromStatus ? lower<RentalAssetStatus>(row.fromStatus) : undefined,
+    toStatus: lower<RentalAssetStatus>(row.toStatus),
+    source: row.source as RentalAssetStatusHistorySource,
+    sourceId: row.sourceId ?? undefined,
+    reason: row.reason,
+    operator: row.operator,
+    createdAt: row.createdAt.toISOString()
+  };
 }
 
 function toStockDisposition(row: any): RentalStockDisposition {
@@ -574,11 +635,36 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
         });
       }
 
+      const changedAssetIds = [...new Set(assetChanges.map((change) => change.assetId))];
+      const assetStatusBefore = changedAssetIds.length
+        ? await client.rentalAsset.findMany({
+          where: { id: { in: changedAssetIds }, tenantId: order.tenantId, workspaceId },
+          select: { id: true, assetNo: true, status: true }
+        })
+        : [];
+      const currentAssetStatus = new Map(assetStatusBefore.map((asset) => [asset.id, asset]));
       for (const change of assetChanges) {
-        await client.rentalAsset.updateMany({
+        const targetStatus = upper<$Enums.RentalAssetState>(change.status);
+        const before = currentAssetStatus.get(change.assetId);
+        const updated = await client.rentalAsset.updateMany({
           where: { id: change.assetId, tenantId: order.tenantId, workspaceId },
-          data: { status: upper<$Enums.RentalAssetState>(change.status) }
+          data: { status: targetStatus }
         });
+        if (updated.count === 1 && before && before.status !== targetStatus) {
+          await appendAssetStatusHistory(client, {
+            tenantId: order.tenantId,
+            workspaceId,
+            assetId: change.assetId,
+            assetNo: before.assetNo,
+            fromStatus: before.status,
+            toStatus: change.status,
+            source: "order",
+            sourceId: order.id,
+            reason: change.reason ?? `订单 ${order.orderNo} 状态推进`,
+            operator: change.operator ?? order.createdBy
+          });
+        }
+        if (updated.count === 1 && before) currentAssetStatus.set(change.assetId, { ...before, status: targetStatus });
       }
 
       // 数量库存的异常隔离：加进维修量，使它不再回到可用池。
@@ -748,12 +834,29 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     }));
   }
 
+  async listAssetStatusHistory(tenantId: string, assetId: string, tx?: RentalFactTx): Promise<RentalAssetStatusHistory[]> {
+    const client = tx ?? this.prisma;
+    const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
+    const asset = await client.rentalAsset.findFirst({ where: { id: assetId, tenantId, workspaceId }, select: { id: true } });
+    if (!asset) throw new NotFoundException("资产不存在或不属于当前经营空间");
+    const rows = await client.rentalAssetStatusHistory.findMany({
+      where: { tenantId, workspaceId, assetId },
+      orderBy: { createdAt: "desc" },
+      take: 200
+    });
+    return rows.map(toAssetStatusHistory);
+  }
+
   async findAssetByNo(tenantId: string, assetNo: string): Promise<{ id: string } | null> {
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
     return this.prisma.rentalAsset.findFirst({ where: { tenantId, workspaceId, assetNo }, select: { id: true } });
   }
 
-  async upsertAsset(asset: RentalAsset, uniqueAttributes: RentalUniqueAttributeClaim[] = []): Promise<void> {
+  async upsertAsset(
+    asset: RentalAsset,
+    uniqueAttributes: RentalUniqueAttributeClaim[] = [],
+    statusChange?: AssetStatusHistoryMetadata
+  ): Promise<void> {
     const data = {
       tenantId: asset.tenantId,
       itemGroupId: asset.itemGroupId,
@@ -792,7 +895,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
         }
         const existing = await tx.rentalAsset.findUnique({
           where: { id: asset.id },
-          select: { tenantId: true, workspaceId: true }
+          select: { tenantId: true, workspaceId: true, status: true, assetNo: true }
         });
         if (existing && (existing.tenantId !== asset.tenantId || existing.workspaceId !== workspaceId)) {
           throw new ConflictException("资产事实已属于其他租户或经营空间，拒绝覆盖");
@@ -804,6 +907,17 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
             data: { workspaceId, id: asset.id, ...data, createdAt: new Date(asset.createdAt) }
           });
         }
+        await appendAssetStatusHistory(tx, {
+          tenantId: asset.tenantId,
+          workspaceId,
+          assetId: asset.id,
+          assetNo: asset.assetNo,
+          fromStatus: existing?.status,
+          toStatus: asset.status,
+          source: existing ? "manual" : "onboarding",
+          reason: statusChange?.reason ?? (existing ? "资产资料维护" : "资产登记"),
+          operator: statusChange?.operator
+        });
       });
     } catch (error) {
       // MySQL 在多个请求同时争抢同一唯一键时可能以死锁/写冲突结束事务，
@@ -1176,7 +1290,24 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       const remainingBlocks = await client.rentalStockDisposition.count({
         where: { tenantId, workspaceId, assetId: row.assetId, id: { not: row.id }, status: { in: ["buffered", "blocked"] }, restoredQuantity: { lt: row.quantity } }
       });
-      if (remainingBlocks === 0) await client.rentalAsset.updateMany({ where: { id: row.assetId, tenantId, workspaceId }, data: { status: "AVAILABLE" } });
+      if (remainingBlocks === 0) {
+        const assetBefore = await client.rentalAsset.findFirst({ where: { id: row.assetId, tenantId, workspaceId }, select: { assetNo: true, status: true } });
+        const updatedAsset = await client.rentalAsset.updateMany({ where: { id: row.assetId, tenantId, workspaceId }, data: { status: "AVAILABLE" } });
+        if (updatedAsset.count === 1 && assetBefore && assetBefore.status !== "AVAILABLE") {
+          await appendAssetStatusHistory(client, {
+            tenantId,
+            workspaceId,
+            assetId: row.assetId,
+            assetNo: assetBefore.assetNo,
+            fromStatus: assetBefore.status,
+            toStatus: RentalAssetStatus.Available,
+            source: "disposition",
+            sourceId: row.id,
+            reason: "归还处置与养护工单已完成，恢复可用",
+            operator
+          });
+        }
+      }
     }
     const refreshed = await client.rentalStockDisposition.findFirst({ where: { id: row.id, tenantId, workspaceId } });
     if (!refreshed) throw new NotFoundException("库存处置恢复后无法读取");

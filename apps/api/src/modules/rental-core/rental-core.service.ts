@@ -943,6 +943,11 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     return this.factStore.listAssets(tenantId);
   }
 
+  async listAssetStatusHistory(tenantId: string, assetId: string) {
+    await this.factContext(tenantId);
+    return this.factStore.listAssetStatusHistory(tenantId, assetId);
+  }
+
   async saveAsset(tenantId: string, input: SaveRentalAssetRequest) {
     const state = await this.factContext(tenantId);
     const group = this.group(state, input.itemGroupId);
@@ -981,7 +986,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     await this.runHook(tenantId, "item_onboarding", { type: "asset", id: result.id }, result);
     await this.factStore.upsertAsset(
       result,
-      this.uniqueAttributeClaims(definition.businessModel.assetFields, "asset", assetAttributes, attributeAliases)
+      this.uniqueAttributeClaims(definition.businessModel.assetFields, "asset", assetAttributes, attributeAliases),
+      { reason: input.id ? "资产资料维护" : "资产登记", operator: input.operator }
     );
     return result;
   }

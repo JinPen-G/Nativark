@@ -1,5 +1,5 @@
 import { PlusOutlined, SearchOutlined } from "@ant-design/icons";
-import { RentalAssetStatus, RentalInventoryMode, type RentalAsset, type RentalAttributeDefinition, type RentalStockBalance, type SaveRentalAssetRequest } from "@rental-os/shared";
+import { RentalAssetStatus, RentalInventoryMode, type RentalAsset, type RentalAssetStatusHistory, type RentalAttributeDefinition, type RentalStockBalance, type SaveRentalAssetRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Button, Card, Col, Drawer, Form, Input, InputNumber, Row, Select, Space, Switch, Table, Tabs, Tag } from "antd";
 import { useEffect, useMemo, useState } from "react";
@@ -15,6 +15,7 @@ const statusMap: Record<string, { label: string; color: string }> = {
   available: { label: "可用", color: "success" }, reserved: { label: "已预占", color: "processing" }, rented: { label: "租赁中", color: "blue" },
   inspection: { label: "检查中", color: "orange" }, maintenance: { label: "维护中", color: "warning" }, disabled: { label: "停用", color: "default" }
 };
+const historySourceMap: Record<string, string> = { onboarding: "资产登记", manual: "资料维护", order: "订单流程", disposition: "归还处置" };
 
 /** 与商品目录页同一问题与同一修法：受控属性必须透传，否则必填属性永远校验不过。 */
 function AttributeInput({
@@ -46,13 +47,16 @@ export function AssetWorkspacePage() {
   const { message } = App.useApp();
   const queryClient = useQueryClient();
   const canManage = useAuthStore((state) => state.hasPermission("rental-core:asset:manage") || state.hasPermission("rental-os:vehicle:manage"));
+  const canView = useAuthStore((state) => state.hasPermission("rental-core:asset:view") || state.hasPermission("rental-core:asset:manage") || state.hasPermission("rental-os:vehicle:view") || state.hasPermission("rental-os:vehicle:manage"));
   const [activeTab, setActiveTab] = useState<"assets" | "stock">("assets");
   const [keyword, setKeyword] = useState("");
   const [editing, setEditing] = useState<RentalAsset>();
   const [assetDrawerOpen, setAssetDrawerOpen] = useState(false);
+  const [statusHistoryAsset, setStatusHistoryAsset] = useState<RentalAsset>();
   const [assetForm] = Form.useForm<SaveRentalAssetRequest>();
   const selectedItemGroupId = Form.useWatch("itemGroupId", assetForm);
   const assets = useQuery({ queryKey: ["rental-core", "assets"], queryFn: rentalCoreApi.assets });
+  const statusHistory = useQuery({ queryKey: ["rental-core", "asset-status-history", statusHistoryAsset?.id], queryFn: () => rentalCoreApi.assetStatusHistory(statusHistoryAsset!.id), enabled: Boolean(statusHistoryAsset) });
   const stocks = useQuery({ queryKey: ["rental-core", "stocks"], queryFn: rentalCoreApi.stockBalances });
   const groups = useQuery({ queryKey: ["rental-core", "groups"], queryFn: rentalCoreApi.itemGroups });
   const locations = useQuery({ queryKey: ["rental-core", "locations"], queryFn: rentalCoreApi.locations });
@@ -110,7 +114,7 @@ export function AssetWorkspacePage() {
             ...summaryAssetFields.map((field) => ({ title: field.label, render: (_: unknown, row: RentalAsset) => String(row.attributes[field.code] ?? "-") })),
             { title: profile.data?.terminology.fulfillmentLabel ?? "履约地点", dataIndex: "locationName" },
             { title: "状态", dataIndex: "status", render: (value) => <Tag color={statusMap[value]?.color}>{statusMap[value]?.label ?? value}</Tag> },
-            { title: "操作", fixed: "right", render: (_, row) => canManage ? <Button type="link" onClick={() => openAssetEditor(row)}>编辑</Button> : "-" }
+            { title: "操作", fixed: "right", render: (_, row) => canView ? <Space size={0}>{canManage && <Button type="link" onClick={() => openAssetEditor(row)}>编辑</Button>}<Button type="link" onClick={() => setStatusHistoryAsset(row)}>状态历史</Button></Space> : "-" }
           ]} /> : <Table<RentalStockBalance> rowKey="id" dataSource={stockRows} columns={[
             { title: "商品", render: (_, row) => <><b>{row.itemGroupName}</b><br /><span className="muted">{row.itemGroupCode}</span></> },
             { title: profile.data?.terminology.fulfillmentLabel ?? "履约地点", dataIndex: "locationName" },
@@ -157,6 +161,22 @@ export function AssetWorkspacePage() {
           </Card>
           {assetFields.length > 0 && <Card size="small" title={`${profile.data?.terminology.assetLabel ?? "资产"}识别信息`}><Row gutter={12}>{assetFields.map((field) => <Col span={12} key={field.code}><Form.Item name={["attributes", field.code]} label={field.label} extra={field.unique ? "当前经营空间内不可重复" : undefined} rules={[{ required: field.required }]} valuePropName={field.type === "boolean" ? "checked" : "value"}><AttributeInput field={field} /></Form.Item></Col>)}</Row></Card>}
         </Form>
+      </Drawer>
+      <Drawer title={`${statusHistoryAsset?.assetNo ?? "资产"}状态历史`} size={720} open={Boolean(statusHistoryAsset)} onClose={() => setStatusHistoryAsset(undefined)}>
+        {statusHistory.isError ? <Alert type="error" showIcon title="状态历史读取失败" description="请稍后重试；本次未将失败误显示为没有记录。" /> : <Table<RentalAssetStatusHistory>
+          rowKey="id"
+          loading={statusHistory.isLoading}
+          dataSource={statusHistory.data ?? []}
+          pagination={{ pageSize: 10 }}
+          locale={{ emptyText: "暂无状态变化记录" }}
+          columns={[
+            { title: "时间", dataIndex: "createdAt", render: (value: string) => new Date(value).toLocaleString() },
+            { title: "状态变化", render: (_: unknown, row) => `${row.fromStatus ? statusMap[row.fromStatus]?.label ?? row.fromStatus : "初始"} → ${statusMap[row.toStatus]?.label ?? row.toStatus}` },
+            { title: "来源", dataIndex: "source", render: (value: string) => historySourceMap[value] ?? value },
+            { title: "原因", dataIndex: "reason", ellipsis: true },
+            { title: "操作人", dataIndex: "operator" }
+          ]}
+        />}
       </Drawer>
     </>
   );

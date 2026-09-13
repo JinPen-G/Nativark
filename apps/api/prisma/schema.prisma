@@ -132,6 +132,7 @@ model Tenant {
   rentalItemGroups                  RentalItemGroup[]
   rentalPricingGroups               RentalPricingGroup[]
   rentalAssets                      RentalAsset[]
+  rentalAssetStatusHistories        RentalAssetStatusHistory[]
   rentalStockBalances               RentalStockBalance[]
   rentalStockDispositions           RentalStockDisposition[]
   rentalStockLedgerEntries          RentalStockLedgerEntry[]
@@ -257,6 +258,7 @@ model BusinessWorkspace {
   rentalItemGroups                  RentalItemGroup[]
   rentalPricingGroups               RentalPricingGroup[]
   rentalAssets                      RentalAsset[]
+  rentalAssetStatusHistories        RentalAssetStatusHistory[]
   rentalStockBalances               RentalStockBalance[]
   rentalStockDispositions           RentalStockDisposition[]
   rentalStockLedgerEntries          RentalStockLedgerEntry[]
@@ -400,30 +402,30 @@ model OrganizationUnit {
 }
 
 model User {
-  id                 String             @id @default(uuid())
+  id                 String            @id @default(uuid())
   tenantId           String
-  tenant             Tenant             @relation(fields: [tenantId], references: [id])
+  tenant             Tenant            @relation(fields: [tenantId], references: [id])
   organizationId     String?
-  organization       OrganizationUnit?  @relation(fields: [organizationId], references: [id])
+  organization       OrganizationUnit? @relation(fields: [organizationId], references: [id])
   roleId             String?
-  role               Role?              @relation(fields: [roleId], references: [id])
+  role               Role?             @relation(fields: [roleId], references: [id])
   account            String
   displayName        String
   phone              String?
   passwordHash       String
-  isSaasAdmin        Boolean            @default(false)
-  isPlatformAdmin    Boolean            @default(false)
-  isActive           Boolean            @default(true)
-  mustChangePassword Boolean            @default(true)
-  tokenVersion       Int                @default(1)
+  isSaasAdmin        Boolean           @default(false)
+  isPlatformAdmin    Boolean           @default(false)
+  isActive           Boolean           @default(true)
+  mustChangePassword Boolean           @default(true)
+  tokenVersion       Int               @default(1)
   passwordChangedAt  DateTime?
   lastLoginAt        DateTime?
   roleAssignments    UserRole[]
   workspaceMembers   WorkspaceMember[]
   authSessions       AuthSession[]
   logs               OperationLog[]
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
 
   @@unique([tenantId, account])
   /// 供成员关系的复合外键引用：成员必须指向**同租户**的账号，
@@ -566,7 +568,7 @@ model CustomerProfile {
   contracts                      CustomerCorporateContract[]
   credit                         CustomerCorporateCredit?
   membershipReviews              CustomerMembershipReview[]
-  clientAuthSessions              ClientAuthSession[]
+  clientAuthSessions             ClientAuthSession[]
   corporateMembershipsAsCompany  CustomerCorporateMembership[]      @relation("CorporateMembershipCompany")
   corporateMembershipsAsPersonal CustomerCorporateMembership[]      @relation("CorporateMembershipPersonal")
   membershipPlanAssignments      CustomerMembershipPlanAssignment[]
@@ -676,7 +678,7 @@ model ClientRegistrationChallenge {
   verificationTokenHash String?           @db.Char(64)
   consumedAt            DateTime?
   registrationId        String?
-  registeredCustomerId   String?
+  registeredCustomerId  String?
   registrationResult    String?           @db.VarChar(32)
   createdAt             DateTime          @default(now())
   updatedAt             DateTime          @updatedAt
@@ -969,11 +971,11 @@ model CustomerRiskRecord {
 /// **不**保存「是否适用于某空间」的结论——那由 SHARED-QUAL-01 按目标空间品类判断，
 /// 本任务不得越界实现审核流程。需求明确：一个空间通过不得自动绕过另一个空间的适用性校验。
 model CustomerQualificationRef {
-  id                String          @id @default(uuid())
+  id                String                         @id @default(uuid())
   tenantId          String
-  tenant            Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant            Tenant                         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   customerId        String
-  customer          CustomerProfile @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
+  customer          CustomerProfile                @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
   /// 证件/资质类型（driver_license、operator_certificate…）。取值域由 SHARED-QUAL-01 收口。
   qualificationType String
   /// 证件号码只存脱敏值。原件与影像不入本表（需求 4.8.5 要求限制访问与脱敏展示）。
@@ -983,14 +985,14 @@ model CustomerQualificationRef {
   /// 租户级实名/资质核验结果。是否**适用**由目标空间判断，不在此表。
   verifiedAt        DateTime?
   /// not_submitted / pending / approved / rejected / expired / revoked（需求 4.8.5 六态）
-  status            String          @default("not_submitted")
+  status            String                         @default("not_submitted")
   /// 最近一次提交来源：admin / app；不代表审核通过。
-  source            String          @default("manual") @db.VarChar(32)
-  currentRevisionId String?         @unique
+  source            String                         @default("manual") @db.VarChar(32)
+  currentRevisionId String?                        @unique
   currentRevision   CustomerQualificationRevision? @relation("CurrentQualificationRevision", fields: [currentRevisionId], references: [id], onDelete: SetNull)
   evidenceRef       String?
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
+  createdAt         DateTime                       @default(now())
+  updatedAt         DateTime                       @updatedAt
 
   @@unique([tenantId, customerId, qualificationType], map: "customer_qualification_refs_unique_type_key")
   @@index([tenantId, status], map: "customer_qualification_refs_tenant_status_idx")
@@ -1015,27 +1017,27 @@ model CustomerMembershipRegistrationSettings {
 
 /// MEMBER-01B/01C：注册审核与证件审核均为只追加的独立任务。
 model CustomerMembershipReview {
-  id                String            @id @default(uuid())
-  tenantId          String
-  tenant            Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  workspaceId       String
-  workspace         BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
-  customerId        String
-  customer          CustomerProfile   @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
+  id                    String                         @id @default(uuid())
+  tenantId              String
+  tenant                Tenant                         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId           String
+  workspace             BusinessWorkspace              @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  customerId            String
+  customer              CustomerProfile                @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
   /// registration / qualification
-  reviewType        String
-  qualificationType String?
+  reviewType            String
+  qualificationType     String?
   /// pending / approved / rejected / supplement_required / cancelled
-  status            String            @default("pending")
-  channel           String
-  requestKey        String?
-  payload           Json?
-  reason            String?           @db.Text
-  reviewedBy        String?
-  reviewedAt        DateTime?
+  status                String                         @default("pending")
+  channel               String
+  requestKey            String?
+  payload               Json?
+  reason                String?                        @db.Text
+  reviewedBy            String?
+  reviewedAt            DateTime?
   qualificationRevision CustomerQualificationRevision?
-  createdAt         DateTime          @default(now())
-  updatedAt         DateTime          @updatedAt
+  createdAt             DateTime                       @default(now())
+  updatedAt             DateTime                       @updatedAt
 
   @@unique([tenantId, workspaceId, requestKey], map: "customer_membership_reviews_scope_request_key")
   @@index([tenantId, workspaceId, status, reviewType], map: "customer_membership_reviews_scope_status_type_idx")
@@ -1049,37 +1051,37 @@ model CustomerMembershipReview {
 /// 审核结果只更新对应快照的审核字段，不覆盖历史。evidenceRef 仅是文件服务返回的
 /// 不可变引用，不是本表保存的文件路径或可直接访问的 URL。
 model CustomerQualificationRevision {
-  id                 String                @id @default(uuid())
-  tenantId           String
-  tenant             Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  workspaceId        String
-  workspace          BusinessWorkspace     @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
-  customerId         String
-  customer           CustomerProfile       @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
-  qualificationType  String
-  categoryCode       String
-  capabilityCode     String?
+  id                   String                    @id @default(uuid())
+  tenantId             String
+  tenant               Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId          String
+  workspace            BusinessWorkspace         @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  customerId           String
+  customer             CustomerProfile           @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
+  qualificationType    String
+  categoryCode         String
+  capabilityCode       String?
   /// 提交时的空间/品类/能力范围快照，后续修改证件类型配置不改写历史。
-  applicableScope    Json
-  referenceNoMasked String?
-  issuedAt           DateTime?
-  expiresAt          DateTime?
-  evidenceRef        String?               @db.VarChar(512)
+  applicableScope      Json
+  referenceNoMasked    String?
+  issuedAt             DateTime?
+  expiresAt            DateTime?
+  evidenceRef          String?                   @db.VarChar(512)
   /// admin / app
-  source             String                @db.VarChar(32)
-  submittedBy        String?
-  submittedAt        DateTime              @default(now())
+  source               String                    @db.VarChar(32)
+  submittedBy          String?
+  submittedAt          DateTime                  @default(now())
   /// 当前这份证件快照的事实状态。
-  qualificationStatus String               @default("pending") @db.VarChar(32)
+  qualificationStatus  String                    @default("pending") @db.VarChar(32)
   /// 对应审核任务状态。
-  reviewStatus       String                @default("pending") @db.VarChar(32)
-  reviewReason       String?               @db.Text
-  reviewedBy         String?
-  reviewedAt         DateTime?
-  reviewId           String?               @unique
-  review             CustomerMembershipReview? @relation(fields: [reviewId], references: [id], onDelete: SetNull)
+  reviewStatus         String                    @default("pending") @db.VarChar(32)
+  reviewReason         String?                   @db.Text
+  reviewedBy           String?
+  reviewedAt           DateTime?
+  reviewId             String?                   @unique
+  review               CustomerMembershipReview? @relation(fields: [reviewId], references: [id], onDelete: SetNull)
   currentQualification CustomerQualificationRef? @relation("CurrentQualificationRevision")
-  createdAt          DateTime              @default(now())
+  createdAt            DateTime                  @default(now())
 
   @@index([tenantId, workspaceId, customerId, qualificationType, submittedAt], map: "customer_qualification_revisions_scope_customer_type_idx")
   @@index([tenantId, customerId, createdAt], map: "customer_qualification_revisions_customer_created_idx")
@@ -1159,34 +1161,34 @@ model CustomerMembershipPlan {
 }
 
 model CustomerMembershipPlanVersion {
-  id            String                             @id @default(uuid())
-  tenantId      String
-  tenant        Tenant                             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  workspaceId   String
-  workspace     BusinessWorkspace                  @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
-  planId        String
-  plan          CustomerMembershipPlan             @relation(fields: [tenantId, planId], references: [tenantId, id], onDelete: Cascade)
-  version       Int
-  status        String                             @default("draft")
-  levelRank     Int                                @default(1)
-  isDefault     Boolean                            @default(false)
-  isRecommended Boolean                            @default(false)
-  appVisible    Boolean                            @default(false)
-  effectiveFrom DateTime?
-  effectiveTo   DateTime?
-  eligibility   Json
-  benefits      Json
-  createdBy     String?
-  publishedBy   String?
-  publishedAt   DateTime?
-  disabledBy    String?
-  disabledAt    DateTime?
-  disableReason String?                            @db.Text
+  id                    String                             @id @default(uuid())
+  tenantId              String
+  tenant                Tenant                             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId           String
+  workspace             BusinessWorkspace                  @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  planId                String
+  plan                  CustomerMembershipPlan             @relation(fields: [tenantId, planId], references: [tenantId, id], onDelete: Cascade)
+  version               Int
+  status                String                             @default("draft")
+  levelRank             Int                                @default(1)
+  isDefault             Boolean                            @default(false)
+  isRecommended         Boolean                            @default(false)
+  appVisible            Boolean                            @default(false)
+  effectiveFrom         DateTime?
+  effectiveTo           DateTime?
+  eligibility           Json
+  benefits              Json
+  createdBy             String?
+  publishedBy           String?
+  publishedAt           DateTime?
+  disabledBy            String?
+  disabledAt            DateTime?
+  disableReason         String?                            @db.Text
   restoredFromVersionId String?
-  restoreReason String?                            @db.Text
-  createdAt     DateTime                           @default(now())
-  updatedAt     DateTime                           @updatedAt
-  assignments   CustomerMembershipPlanAssignment[]
+  restoreReason         String?                            @db.Text
+  createdAt             DateTime                           @default(now())
+  updatedAt             DateTime                           @updatedAt
+  assignments           CustomerMembershipPlanAssignment[]
 
   @@unique([planId, version], map: "customer_membership_plan_versions_plan_version_key")
   @@unique([tenantId, id], map: "customer_membership_plan_versions_tenant_id_key")
@@ -1358,27 +1360,27 @@ model FilterPreset {
 }
 
 model FileAsset {
-  id              String   @id @default(uuid())
+  id              String             @id @default(uuid())
   tenantId        String
-  tenant          Tenant   @relation(fields: [tenantId], references: [id])
+  tenant          Tenant             @relation(fields: [tenantId], references: [id])
   businessModule  String
   businessType    String
   businessId      String?
   fileName        String
   fileExt         String?
   mimeType        String
-  sizeBytes       Int      @default(0)
-  storageProvider String   @default("local_mock")
+  sizeBytes       Int                @default(0)
+  storageProvider String             @default("local_mock")
   storageKey      String
   publicUrl       String?
   checksum        String?
   uploadScene     String
-  status          String   @default("active")
+  status          String             @default("active")
   uploadedBy      String?
   metadata        Json?
   uploadSession   FileUploadSession?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
 
   @@index([tenantId, businessType, businessId])
   @@index([tenantId, uploadScene, createdAt])
@@ -1387,24 +1389,24 @@ model FileAsset {
 /// EXT-01C：短时对象存储上传会话。FileAsset 先进入 pending_upload，
 /// 只有服务端完成对象存在性确认后才变为 active。
 model FileUploadSession {
-  id            String    @id @default(uuid())
-  tenantId      String
-  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  fileAssetId   String    @unique
-  fileAsset     FileAsset @relation(fields: [fileAssetId], references: [id], onDelete: Cascade)
-  provider      String    @db.VarChar(40)
-  storageKey    String    @db.VarChar(500)
-  status        String    @default("pending_upload") @db.VarChar(24)
-  idempotencyKey String?
-  expiresAt     DateTime
-  completedAt   DateTime?
-  failureReason String?   @db.VarChar(500)
+  id              String    @id @default(uuid())
+  tenantId        String
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  fileAssetId     String    @unique
+  fileAsset       FileAsset @relation(fields: [fileAssetId], references: [id], onDelete: Cascade)
+  provider        String    @db.VarChar(40)
+  storageKey      String    @db.VarChar(500)
+  status          String    @default("pending_upload") @db.VarChar(24)
+  idempotencyKey  String?
+  expiresAt       DateTime
+  completedAt     DateTime?
+  failureReason   String?   @db.VarChar(500)
   /// 过期对象清理状态。cleanup_in_progress 防止并发清理重复处理同一会话。
   cleanupAttempts Int       @default(0)
   lastCleanupAt   DateTime?
   cleanupError    String?   @db.VarChar(500)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   @@unique([tenantId, idempotencyKey], map: "file_upload_sessions_scope_idem_key")
   @@index([tenantId, status, expiresAt], map: "file_upload_sessions_scope_status_idx")
@@ -1478,22 +1480,22 @@ model ExternalAdapterLog {
 /// API 永远只返回 secret 字段是否已配置。配置按租户共享给该租户的经营空间，
 /// 业务运行时再按 capability + 默认提供方选择，避免每个品类重复接入一套账号。
 model TenantIntegrationConfig {
-  id                    String   @id @default(uuid())
-  tenantId              String
-  tenant                Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  capability            String   @db.VarChar(20)
-  provider              String   @db.VarChar(40)
-  enabled               Boolean  @default(false)
-  isDefault             Boolean  @default(false)
-  settings              Json
-  credentialsEncrypted  String?  @db.Text
-  secretFields          Json
-  lastTestStatus        String   @default("not_tested") @db.VarChar(20)
-  lastTestAt            DateTime?
-  lastTestError         String?  @db.VarChar(500)
-  updatedBy             String?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  id                   String    @id @default(uuid())
+  tenantId             String
+  tenant               Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  capability           String    @db.VarChar(20)
+  provider             String    @db.VarChar(40)
+  enabled              Boolean   @default(false)
+  isDefault            Boolean   @default(false)
+  settings             Json
+  credentialsEncrypted String?   @db.Text
+  secretFields         Json
+  lastTestStatus       String    @default("not_tested") @db.VarChar(20)
+  lastTestAt           DateTime?
+  lastTestError        String?   @db.VarChar(500)
+  updatedBy            String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
   @@unique([tenantId, capability, provider], map: "tenant_integration_configs_scope_provider_key")
   @@index([tenantId, capability, enabled], map: "tenant_integration_configs_scope_capability_idx")
@@ -1762,35 +1764,35 @@ model RentalCouponTemplate {
 }
 
 model RentalFulfillmentLocation {
-  id                String                     @id @default(uuid())
-  tenantId          String
-  tenant            Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  id                 String                     @id @default(uuid())
+  tenantId           String
+  tenant             Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   /// SPACE-03：经营空间归属。与 tenantId 并存（需求 3：经营事实同时包含两者）。
-  workspaceId       String
+  workspaceId        String
   /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
-  workspace         BusinessWorkspace          @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
-  code              String
-  name              String
-  type              String
-  operatorId        String?
-  operator          RentalFulfillmentOperator? @relation(fields: [operatorId], references: [id])
-  operatorType      String?
-  operatorName      String?
-  parentLocationId  String?
-  capabilities      Json
-  address           String?
-  contactName       String?
-  contactPhone      String?
-  businessHours     String?
-  status            String                     @default("enabled")
-  assets            RentalAsset[]
-  stockBalances     RentalStockBalance[]
+  workspace          BusinessWorkspace          @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  code               String
+  name               String
+  type               String
+  operatorId         String?
+  operator           RentalFulfillmentOperator? @relation(fields: [operatorId], references: [id])
+  operatorType       String?
+  operatorName       String?
+  parentLocationId   String?
+  capabilities       Json
+  address            String?
+  contactName        String?
+  contactPhone       String?
+  businessHours      String?
+  status             String                     @default("enabled")
+  assets             RentalAsset[]
+  stockBalances      RentalStockBalance[]
   stockLedgerEntries RentalStockLedgerEntry[]
-  orders            RentalOrder[]
-  reservations      RentalReservation[]
-  serviceCapacities RentalServiceCapacity[]
-  createdAt         DateTime                   @default(now())
-  updatedAt         DateTime                   @updatedAt
+  orders             RentalOrder[]
+  reservations       RentalReservation[]
+  serviceCapacities  RentalServiceCapacity[]
+  createdAt          DateTime                   @default(now())
+  updatedAt          DateTime                   @updatedAt
 
   @@unique([workspaceId, code], map: "rental_locations_ws_code_key")
   @@unique([tenantId, workspaceId, id], map: "rental_locations_scope_id_key")
@@ -1891,29 +1893,53 @@ model RentalBundleComponent {
 }
 
 model RentalAsset {
-  id          String                    @id @default(uuid())
-  tenantId    String
-  tenant      Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  id            String                     @id @default(uuid())
+  tenantId      String
+  tenant        Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   /// SPACE-03：经营空间归属。与 tenantId 并存（需求 3：经营事实同时包含两者）。
-  workspaceId String
+  workspaceId   String
   /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
-  workspace   BusinessWorkspace         @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
-  itemGroupId String
-  itemGroup   RentalItemGroup           @relation(fields: [itemGroupId], references: [id])
-  assetNo     String
-  serialNo    String?
-  locationId  String
-  location    RentalFulfillmentLocation @relation(fields: [locationId], references: [id])
-  status      RentalAssetState          @default(AVAILABLE)
-  attributes  Json
-  allocations RentalAllocation[]
-  createdAt   DateTime                  @default(now())
-  updatedAt   DateTime                  @updatedAt
+  workspace     BusinessWorkspace          @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  itemGroupId   String
+  itemGroup     RentalItemGroup            @relation(fields: [itemGroupId], references: [id])
+  assetNo       String
+  serialNo      String?
+  locationId    String
+  location      RentalFulfillmentLocation  @relation(fields: [locationId], references: [id])
+  status        RentalAssetState           @default(AVAILABLE)
+  attributes    Json
+  allocations   RentalAllocation[]
+  statusHistory RentalAssetStatusHistory[]
+  createdAt     DateTime                   @default(now())
+  updatedAt     DateTime                   @updatedAt
 
   @@unique([workspaceId, assetNo], map: "rental_assets_ws_asset_no_key")
   @@unique([workspaceId, serialNo], map: "rental_assets_ws_serial_no_key")
   @@index([tenantId, itemGroupId, locationId, status])
   @@map("rental_assets")
+}
+
+/// STOCK-OPS-01：序列化资产状态变更追加账。订单、归还处置和资料维护共用这一张历史表。
+model RentalAssetStatusHistory {
+  id          String            @id @default(uuid())
+  tenantId    String
+  tenant      Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId String
+  workspace   BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  assetId     String
+  asset       RentalAsset       @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  assetNo     String            @db.VarChar(191)
+  fromStatus  RentalAssetState?
+  toStatus    RentalAssetState
+  source      String            @db.VarChar(24)
+  sourceId    String?           @db.VarChar(191)
+  reason      String            @db.VarChar(500)
+  operator    String            @db.VarChar(191)
+  createdAt   DateTime          @default(now())
+
+  @@index([tenantId, workspaceId, assetId, createdAt], map: "rental_asset_status_history_scope_idx")
+  @@index([workspaceId, source, sourceId], map: "rental_asset_status_history_source_idx")
+  @@map("rental_asset_status_history")
 }
 
 /// CAT-02：动态字段唯一值声明。
@@ -1965,28 +1991,28 @@ model RentalStockBalance {
 
 /// STOCK-OPS-01：数量库存的追加式日常作业流水。余额是当前快照，本表记录每次入库、盘点、调拨、报损和退出的来源与前后值。
 model RentalStockLedgerEntry {
-  id                  String                     @id @default(uuid())
+  id                  String                    @id @default(uuid())
   tenantId            String
-  tenant              Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant              Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   workspaceId         String
-  workspace           BusinessWorkspace          @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
-  operationId         String                     @db.VarChar(191)
-  entryKind           String                     @db.VarChar(8)
-  operationType       String                     @db.VarChar(24)
+  workspace           BusinessWorkspace         @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  operationId         String                    @db.VarChar(191)
+  entryKind           String                    @db.VarChar(8)
+  operationType       String                    @db.VarChar(24)
   itemGroupId         String
-  itemGroup           RentalItemGroup            @relation(fields: [itemGroupId], references: [id], onDelete: Restrict)
+  itemGroup           RentalItemGroup           @relation(fields: [itemGroupId], references: [id], onDelete: Restrict)
   locationId          String
-  location            RentalFulfillmentLocation  @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  location            RentalFulfillmentLocation @relation(fields: [locationId], references: [id], onDelete: Restrict)
   quantityDelta       Int
   onHandBefore        Int
   onHandAfter         Int
   reservedQuantity    Int
   maintenanceQuantity Int
-  reason              String                     @db.VarChar(500)
-  idempotencyKey      String                     @db.VarChar(191)
-  requestFingerprint  String                     @db.Char(64)
-  operator            String                     @db.VarChar(191)
-  createdAt           DateTime                   @default(now())
+  reason              String                    @db.VarChar(500)
+  idempotencyKey      String                    @db.VarChar(191)
+  requestFingerprint  String                    @db.Char(64)
+  operator            String                    @db.VarChar(191)
+  createdAt           DateTime                  @default(now())
 
   @@unique([workspaceId, idempotencyKey, entryKind], map: "rental_stock_ledger_idem_entry_key")
   @@index([tenantId, workspaceId, itemGroupId, locationId, createdAt], map: "rental_stock_ledger_scope_created_idx")
@@ -1996,31 +2022,31 @@ model RentalStockLedgerEntry {
 
 /// STOCK-CLOSE-01：每批实际归还后的库存处置事实。
 model RentalStockDisposition {
-  id               String   @id @default(uuid())
+  id               String                  @id @default(uuid())
   tenantId         String
-  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant           Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   workspaceId      String
-  workspace        BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  workspace        BusinessWorkspace       @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   orderId          String
-  order            RentalOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order            RentalOrder             @relation(fields: [orderId], references: [id], onDelete: Cascade)
   inspectionId     String?
   inspection       RentalInspectionRecord? @relation(fields: [inspectionId], references: [id], onDelete: SetNull)
-  returnBatchKey   String   @db.VarChar(191)
-  dedupeKey        String   @db.VarChar(191)
-  itemGroupId      String   @db.VarChar(191)
-  locationId       String   @db.VarChar(191)
-  assetId          String?  @db.VarChar(191)
+  returnBatchKey   String                  @db.VarChar(191)
+  dedupeKey        String                  @db.VarChar(191)
+  itemGroupId      String                  @db.VarChar(191)
+  locationId       String                  @db.VarChar(191)
+  assetId          String?                 @db.VarChar(191)
   quantity         Int
   receivedAt       DateTime
   bufferUntil      DateTime
-  status           String   @db.VarChar(20)
-  blockReason      String?  @db.VarChar(500)
-  restoredQuantity Int      @default(0)
+  status           String                  @db.VarChar(20)
+  blockReason      String?                 @db.VarChar(500)
+  restoredQuantity Int                     @default(0)
   restoredAt       DateTime?
-  restoredBy       String?  @db.VarChar(191)
+  restoredBy       String?                 @db.VarChar(191)
   workOrders       RentalWorkOrder[]
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
 
   @@unique([workspaceId, dedupeKey], map: "rental_stock_disp_batch_resource_key")
   // MySQL utf8mb4 下四个 191 字符列已接近 3072 字节上限，不能再把 status 拼进同一索引。
@@ -2032,36 +2058,36 @@ model RentalStockDisposition {
 
 /// SHARED-WORK-01A：清洁、整备、校准和维修共用的最小养护工单事实。
 model RentalWorkOrder {
-  id             String   @id @default(uuid())
-  tenantId       String
-  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  workspaceId    String
-  workspace      BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
-  workNo         String
-  type           String   @db.VarChar(24)
-  status         String   @db.VarChar(24)
-  dispositionId  String?
-  disposition    RentalStockDisposition? @relation(fields: [dispositionId], references: [id], onDelete: SetNull)
-  orderId        String?
-  order          RentalOrder? @relation(fields: [orderId], references: [id], onDelete: SetNull)
-  inspectionId   String?
-  itemGroupId    String
-  locationId     String
-  assetId        String?
-  quantity       Int
-  assigneeId     String?
-  assigneeName   String?
-  reason         String   @db.Text
-  result         String?  @db.Text
-  attachments    Json
-  startedAt      DateTime?
-  submittedAt    DateTime?
-  reviewedAt     DateTime?
-  reviewedBy     String?
-  reviewReason   String?  @db.Text
-  createdBy      String
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id            String                  @id @default(uuid())
+  tenantId      String
+  tenant        Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId   String
+  workspace     BusinessWorkspace       @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  workNo        String
+  type          String                  @db.VarChar(24)
+  status        String                  @db.VarChar(24)
+  dispositionId String?
+  disposition   RentalStockDisposition? @relation(fields: [dispositionId], references: [id], onDelete: SetNull)
+  orderId       String?
+  order         RentalOrder?            @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  inspectionId  String?
+  itemGroupId   String
+  locationId    String
+  assetId       String?
+  quantity      Int
+  assigneeId    String?
+  assigneeName  String?
+  reason        String                  @db.Text
+  result        String?                 @db.Text
+  attachments   Json
+  startedAt     DateTime?
+  submittedAt   DateTime?
+  reviewedAt    DateTime?
+  reviewedBy    String?
+  reviewReason  String?                 @db.Text
+  createdBy     String
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
 
   @@unique([workspaceId, workNo], map: "rental_work_orders_ws_no_key")
   @@unique([workspaceId, dispositionId, type], map: "rental_work_orders_disp_type_key")
@@ -2188,7 +2214,7 @@ model RentalOrder {
   allocations                   RentalAllocation[]
   inspections                   RentalInspectionRecord[]
   stockDispositions             RentalStockDisposition[]
-  workOrders                     RentalWorkOrder[]
+  workOrders                    RentalWorkOrder[]
   idempotencyRecords            RentalOrderIdempotencyRecord[]
   serviceReservations           RentalServiceReservation[]
   fundingEvents                 RentalFundingEvent[]
@@ -2251,30 +2277,30 @@ model RentalFundingEvent {
 /// EXT-01D：租户真实支付意图。第一阶段只承接普通租赁款，押金与预授权
 /// 继续走独立的资金事件链，不能把支付成功误当成预授权已冻结。
 model RentalPaymentIntent {
-  id                    String            @id @default(uuid())
+  id                    String                @id @default(uuid())
   tenantId              String
-  tenant                Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant                Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   workspaceId           String
-  workspace             BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  workspace             BusinessWorkspace     @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   orderId               String
-  order                 RentalOrder       @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  instrument            String            @db.VarChar(24)
-  provider              String            @db.VarChar(40)
-  method                String            @db.VarChar(24)
-  amount                Decimal           @db.Decimal(12, 2)
-  currency              String            @default("CNY") @db.VarChar(8)
-  merchantOrderNo       String            @unique(map: "rental_payment_intents_merchant_order_no_key")
-  idempotencyKey        String            @db.VarChar(191)
-  idempotencyHash       String            @db.Char(64)
-  status                String            @default("pending") @db.VarChar(32)
-  checkoutUrl           String?           @db.Text
-  externalTransactionId String?           @db.VarChar(191)
+  order                 RentalOrder           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  instrument            String                @db.VarChar(24)
+  provider              String                @db.VarChar(40)
+  method                String                @db.VarChar(24)
+  amount                Decimal               @db.Decimal(12, 2)
+  currency              String                @default("CNY") @db.VarChar(8)
+  merchantOrderNo       String                @unique(map: "rental_payment_intents_merchant_order_no_key")
+  idempotencyKey        String                @db.VarChar(191)
+  idempotencyHash       String                @db.Char(64)
+  status                String                @default("pending") @db.VarChar(32)
+  checkoutUrl           String?               @db.Text
+  externalTransactionId String?               @db.VarChar(191)
   responseJson          Json?
   expiresAt             DateTime
-  paidAt               DateTime?
-  failureReason         String?           @db.VarChar(500)
-  createdAt             DateTime          @default(now())
-  updatedAt             DateTime          @updatedAt
+  paidAt                DateTime?
+  failureReason         String?               @db.VarChar(500)
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
   refunds               RentalPaymentRefund[]
 
   @@unique([tenantId, workspaceId, orderId, instrument, idempotencyHash], map: "rental_payment_intents_scope_idem_key")
@@ -2287,35 +2313,35 @@ model RentalPaymentIntent {
 /// 分开记录；只有确认第三方退款成功后，才允许写入 rental_funding_events 的 refund。
 /// 同一支付单支持多次部分退款，但每个幂等键只产生一张退款单。
 model RentalPaymentRefund {
-  id                    String            @id @default(uuid())
-  tenantId              String
-  tenant                Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  workspaceId           String
-  workspace             BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
-  orderId               String
-  order                 RentalOrder       @relation(fields: [tenantId, workspaceId, orderId], references: [tenantId, workspaceId, id], onDelete: Cascade)
-  paymentIntentId       String
-  paymentIntent         RentalPaymentIntent @relation(fields: [paymentIntentId], references: [id], onDelete: Cascade)
-  provider              String            @db.VarChar(40)
-  method                String            @db.VarChar(24)
-  amount                Decimal           @db.Decimal(12, 2)
-  currency              String            @db.VarChar(8)
-  merchantRefundNo      String            @unique(map: "rental_payment_refunds_merchant_no_key")
-  idempotencyKey        String            @db.VarChar(191)
-  idempotencyHash       String            @db.Char(64)
+  id               String              @id @default(uuid())
+  tenantId         String
+  tenant           Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId      String
+  workspace        BusinessWorkspace   @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  orderId          String
+  order            RentalOrder         @relation(fields: [tenantId, workspaceId, orderId], references: [tenantId, workspaceId, id], onDelete: Cascade)
+  paymentIntentId  String
+  paymentIntent    RentalPaymentIntent @relation(fields: [paymentIntentId], references: [id], onDelete: Cascade)
+  provider         String              @db.VarChar(40)
+  method           String              @db.VarChar(24)
+  amount           Decimal             @db.Decimal(12, 2)
+  currency         String              @db.VarChar(8)
+  merchantRefundNo String              @unique(map: "rental_payment_refunds_merchant_no_key")
+  idempotencyKey   String              @db.VarChar(191)
+  idempotencyHash  String              @db.Char(64)
   /// pending | accepted | succeeded | funding_pending | failed | closed
-  status                String            @default("pending") @db.VarChar(32)
-  externalRefundId      String?           @db.VarChar(191)
-  externalStatus        String?           @db.VarChar(40)
-  responseJson          Json?
-  reason                String            @db.VarChar(500)
-  requestedBy           String?
-  failureReason         String?           @db.VarChar(500)
-  acceptedAt            DateTime?
-  succeededAt           DateTime?
-  fundedAt              DateTime?
-  createdAt             DateTime          @default(now())
-  updatedAt             DateTime          @updatedAt
+  status           String              @default("pending") @db.VarChar(32)
+  externalRefundId String?             @db.VarChar(191)
+  externalStatus   String?             @db.VarChar(40)
+  responseJson     Json?
+  reason           String              @db.VarChar(500)
+  requestedBy      String?
+  failureReason    String?             @db.VarChar(500)
+  acceptedAt       DateTime?
+  succeededAt      DateTime?
+  fundedAt         DateTime?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
 
   @@unique([paymentIntentId, idempotencyHash], map: "rental_payment_refunds_intent_idem_key")
   @@index([tenantId, workspaceId, orderId, status], map: "rental_payment_refunds_order_status_idx")
@@ -2350,49 +2376,49 @@ model PaymentWebhookEvent {
 /// 幂等：`(workspaceId, orderId, idempotencyKey)` 唯一，重复提交只落一条。
 model RentalOrderExtension {
   /// 原价格/优惠全租期重算结果、差额明细与退款审核。
-  pricingSnapshot Json?
-  id              String            @id @default(uuid())
-  tenantId        String
-  tenant          Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  workspaceId     String
-  workspace       BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
-  orderId         String
-  order           RentalOrder       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  pricingSnapshot  Json?
+  id               String            @id @default(uuid())
+  tenantId         String
+  tenant           Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId      String
+  workspace        BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  orderId          String
+  order            RentalOrder       @relation(fields: [orderId], references: [id], onDelete: Cascade)
   /// 同一订单内从 1 开始递增。订单费用明细的 code 用它去重（extension:1、extension:2…）。
-  sequence        Int
+  sequence         Int
   /// pending_payment | effective | cancelled | expired。只有 effective 推进 effectiveEndAt。
-  status          String            @db.VarChar(20)
-  originalEndAt   DateTime
-  newEndAt        DateTime
+  status           String            @db.VarChar(20)
+  originalEndAt    DateTime
+  newEndAt         DateTime
   /// 增量期的计费单位数，按订单原本的计价单位计。
-  billableUnits   Decimal           @db.Decimal(12, 2)
-  rentalAmount    Decimal           @db.Decimal(12, 2)
-  serviceAmount   Decimal           @db.Decimal(12, 2)
+  billableUnits    Decimal           @db.Decimal(12, 2)
+  rentalAmount     Decimal           @db.Decimal(12, 2)
+  serviceAmount    Decimal           @db.Decimal(12, 2)
   /// 押金 / 预授权差额 = 按新租期应收 − 已收，可为 0。走资金台账收取，不进 payableAmount。
-  depositDelta    Decimal           @db.Decimal(12, 2)
-  preAuthDelta    Decimal           @db.Decimal(12, 2)
-  payableAmount   Decimal           @db.Decimal(12, 2)
-  currency        String            @default("CNY") @db.VarChar(8)
+  depositDelta     Decimal           @db.Decimal(12, 2)
+  preAuthDelta     Decimal           @db.Decimal(12, 2)
+  payableAmount    Decimal           @db.Decimal(12, 2)
+  currency         String            @default("CNY") @db.VarChar(8)
   /// 申请时命中的空间级价格版本（需求 4.6.9：新增部分用申请时的价格与日历）。
-  priceVersionId  String?
-  priceVersion    String?
-  ruleVersion     String
+  priceVersionId   String?
+  priceVersion     String?
+  ruleVersion      String
   /// RentalPricingRate[]：申请时命中的费率本体，供事后复算这一段。
-  rateSnapshot    Json
-  ruleSnapshot    Json
+  rateSnapshot     Json
+  ruleSnapshot     Json
   /// RentalQuoteCalendarDay[]：增量期逐日计价依据。
   calendarSnapshot Json
   /// RentalQuoteServiceSnapshot[]：本次续租新增的增值服务。生效时据此确认容量并合并进订单快照。
   serviceSnapshots Json?
   /// immediate（需客户补款后生效）| monthly（企业月结，检查通过即生效）。申请时快照。
-  settlementMode  String            @db.VarChar(20)
-  idempotencyKey  String
-  memo            String?           @db.VarChar(500)
-  paidAt          DateTime?
-  effectiveAt     DateTime?
-  createdBy       String
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
+  settlementMode   String            @db.VarChar(20)
+  idempotencyKey   String
+  memo             String?           @db.VarChar(500)
+  paidAt           DateTime?
+  effectiveAt      DateTime?
+  createdBy        String
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
 
   @@unique([workspaceId, orderId, idempotencyKey], map: "rental_order_extensions_idem_key")
   @@unique([orderId, sequence], map: "rental_order_extensions_seq_key")
@@ -2510,26 +2536,26 @@ model RentalInspectionTemplate {
 }
 
 model RentalInspectionRecord {
-  id              String                   @id @default(uuid())
-  tenantId        String
-  tenant          Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  id                String                   @id @default(uuid())
+  tenantId          String
+  tenant            Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   /// SPACE-03：经营空间归属。与 tenantId 并存（需求 3：经营事实同时包含两者）。
-  workspaceId     String
+  workspaceId       String
   /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
-  workspace       BusinessWorkspace        @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
-  orderId         String
-  order           RentalOrder              @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  stage           String
-  templateId      String
-  template        RentalInspectionTemplate @relation(fields: [templateId], references: [id])
+  workspace         BusinessWorkspace        @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  orderId           String
+  order             RentalOrder              @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  stage             String
+  templateId        String
+  template          RentalInspectionTemplate @relation(fields: [templateId], references: [id])
   stockDispositions RentalStockDisposition[]
-  templateCode    String
-  templateVersion String
-  results         Json
-  exceptions      Json
-  attachments     Json
-  operator        String
-  createdAt       DateTime                 @default(now())
+  templateCode      String
+  templateVersion   String
+  results           Json
+  exceptions        Json
+  attachments       Json
+  operator          String
+  createdAt         DateTime                 @default(now())
 
   @@index([tenantId, orderId, stage])
   @@map("rental_inspection_records")
@@ -3097,26 +3123,26 @@ model RentalCalendarOverrideAuditEntry {
 }
 
 model RentalNotificationTemplate {
-  id             String                  @id @default(uuid())
-  tenantId       String
-  tenant         Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  id                   String                  @id @default(uuid())
+  tenantId             String
+  tenant               Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   /// SPACE-03：经营空间归属。与 tenantId 并存（需求 3：经营事实同时包含两者）。
-  workspaceId    String
+  workspaceId          String
   /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
-  workspace      BusinessWorkspace       @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
-  eventCode      String
-  channel        String
-  name           String
-  title          String
-  body           String                  @db.Text
+  workspace            BusinessWorkspace       @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  eventCode            String
+  channel              String
+  name                 String
+  title                String
+  body                 String                  @db.Text
   /// 短信服务商模板编码。模板正文仍由本系统保存，编码只用于实际投递。
   providerTemplateCode String?
-  variableSchema Json
-  status         String                  @default("enabled")
-  version        String
-  logs           RentalNotificationLog[]
-  createdAt      DateTime                @default(now())
-  updatedAt      DateTime                @updatedAt
+  variableSchema       Json
+  status               String                  @default("enabled")
+  version              String
+  logs                 RentalNotificationLog[]
+  createdAt            DateTime                @default(now())
+  updatedAt            DateTime                @updatedAt
 
   @@unique([workspaceId, eventCode, channel, version], map: "rental_notification_templates_tenant_event_channel_ver_key")
   @@index([tenantId, status, eventCode], map: "rental_notification_templates_tenant_status_event_idx")
@@ -3129,7 +3155,7 @@ model RentalNotificationTemplate {
 
 model RentalQuote {
   /// 原价续租所需的报价时区、倍率开关与计价日历。
-  pricingContext Json?
+  pricingContext                Json?
   id                            String             @id @default(uuid())
   tenantId                      String
   tenant                        Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -3340,46 +3366,46 @@ model RentalReferral {
 }
 
 model RentalNotificationLog {
-  id                 String                     @id @default(uuid())
-  tenantId           String
-  tenant             Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  id                   String                     @id @default(uuid())
+  tenantId             String
+  tenant               Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   /// SPACE-03：经营空间归属。与 tenantId 并存（需求 3：经营事实同时包含两者）。
-  workspaceId        String
+  workspaceId          String
   /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
-  workspace          BusinessWorkspace          @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
-  templateId         String
-  template           RentalNotificationTemplate @relation(fields: [templateId], references: [id])
-  templateVersion    String
-  eventCode          String
-  channel            String
+  workspace            BusinessWorkspace          @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  templateId           String
+  template             RentalNotificationTemplate @relation(fields: [templateId], references: [id])
+  templateVersion      String
+  eventCode            String
+  channel              String
   /// 发送目标按需求 4.9 脱敏后留存。
-  recipient          String
+  recipient            String
   /// 真实短信重试所需的收件人密文；AES-GCM 加密，绝不返回给管理端。
-  recipientEncrypted String?                    @db.Text
+  recipientEncrypted   String?                    @db.Text
   /// EXT-02：用于服务端频率限制的不可逆 HMAC 指纹，不返回给管理端。
-  recipientFingerprint String?                  @db.Char(64)
-  renderedTitle      String
-  renderedBody       String                     @db.Text
-  variables          Json
-  status             String                     @default("queued")
-  provider           String
-  providerMessageId  String?
-  errorMessage       String?
-  attempts           Int                        @default(0)
+  recipientFingerprint String?                    @db.Char(64)
+  renderedTitle        String
+  renderedBody         String                     @db.Text
+  variables            Json
+  status               String                     @default("queued")
+  provider             String
+  providerMessageId    String?
+  errorMessage         String?
+  attempts             Int                        @default(0)
   /// 真实短信投递的下一次重试时间；NULL 表示当前不可重试或已完成。
-  nextAttemptAt      DateTime?
-  lastAttemptAt      DateTime?
-  maxAttempts        Int                        @default(3)
+  nextAttemptAt        DateTime?
+  lastAttemptAt        DateTime?
+  maxAttempts          Int                        @default(3)
   /// NOTICE-01A：触发本条通知的业务对象（如 order / <订单id>）。
   /// 手工发送没有业务对象，因此可空。
-  businessObjectType String?
-  businessObjectId   String?
+  businessObjectType   String?
+  businessObjectId     String?
   /// NOTICE-01A：空间级幂等键，形如 `<eventCode>:<businessObjectId>`。
   /// 由业务事件驱动的通知带键，手工发送不带（NULL）。MySQL 唯一索引对 NULL
   /// 互不冲突，因此手工发送不受去重约束，而同一业务事件重放不会二次落库。
-  idempotencyKey     String?
-  sentAt             DateTime?
-  createdAt          DateTime                   @default(now())
+  idempotencyKey       String?
+  sentAt               DateTime?
+  createdAt            DateTime                   @default(now())
 
   @@unique([workspaceId, idempotencyKey], map: "rental_notification_logs_ws_idempotency_key")
   @@index([tenantId, eventCode, createdAt], map: "rental_notification_logs_tenant_event_created_idx")
@@ -3393,16 +3419,16 @@ model RentalNotificationLog {
 /// EXT-02：短信发送频率桶。只保存不可逆收件人指纹，不保存手机号明文。
 /// 固定时间桶由服务端原子递增，避免单个租户或手机号在重试/事件重放时打爆供应商。
 model RentalNotificationRateBucket {
-  id            String           @id @default(uuid())
-  tenantId      String
-  tenant        Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  workspaceId   String
-  workspace     BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
-  scopeKey      String           @db.VarChar(128)
-  bucketStart   DateTime
-  count         Int              @default(0)
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
+  id          String            @id @default(uuid())
+  tenantId    String
+  tenant      Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId String
+  workspace   BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  scopeKey    String            @db.VarChar(128)
+  bucketStart DateTime
+  count       Int               @default(0)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
 
   @@unique([tenantId, workspaceId, scopeKey, bucketStart], map: "rental_notification_rate_bucket_key")
   @@index([tenantId, workspaceId, bucketStart], map: "rental_notification_rate_bucket_scope_idx")
