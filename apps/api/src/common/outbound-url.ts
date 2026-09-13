@@ -125,6 +125,7 @@ export async function validateProviderOutboundUrls(capability: string, provider:
     } else if (provider === "wechat_pay") {
       if (String(settings.gatewayUrl ?? "").trim()) targets.push({ key: "gatewayUrl", label: "微信支付网关地址", value: settings.gatewayUrl, productionHosts: ["api.mch.weixin.qq.com"] });
       targets.push({ key: "notifyUrl", label: "微信支付通知地址", value: settings.notifyUrl, allowQuery: true });
+      if (String(settings.refundNotifyUrl ?? "").trim()) targets.push({ key: "refundNotifyUrl", label: "微信退款通知地址", value: settings.refundNotifyUrl, allowQuery: true });
     }
   } else if (capability === "file" && (provider === "aliyun_oss" || provider === "s3_compatible")) {
     targets.push({ key: "endpoint", label: "对象存储 Endpoint", value: settings.endpoint });

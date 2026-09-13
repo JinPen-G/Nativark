@@ -59,7 +59,9 @@ export const PUBLIC_ROUTES = new Set([
   "/auth/switch-workspace",
   "/auth/session-context",
   "/payments/webhooks/alipay",
-  "/payments/webhooks/wechat_pay"
+  "/payments/webhooks/wechat_pay",
+  "/payments/webhooks/alipay/refund",
+  "/payments/webhooks/wechat_pay/refund"
 ]);
 
 /**

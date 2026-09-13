@@ -69,6 +69,10 @@ function valueOf(value: unknown) {
   return Array.isArray(value) ? String(value[0] ?? "") : String(value ?? "");
 }
 
+function certificateSerial(value: unknown) {
+  return valueOf(value).trim().toUpperCase();
+}
+
 function requiredText(value: unknown, name: string) {
   const result = valueOf(value).trim();
   if (!result) throw new ServiceUnavailableException(`支付平台缺少配置：${name}`);
@@ -628,11 +632,11 @@ export class PaymentRuntimeService {
     const timestampHeader = valueOf(headers["wechatpay-timestamp"] || headers["Wechatpay-Timestamp"]);
     const nonceHeader = valueOf(headers["wechatpay-nonce"] || headers["Wechatpay-Nonce"]);
     const signature = valueOf(headers["wechatpay-signature"] || headers["Wechatpay-Signature"]);
-    const serial = valueOf(headers["wechatpay-serial"] || headers["Wechatpay-Serial"]);
+    const serial = certificateSerial(headers["wechatpay-serial"] || headers["Wechatpay-Serial"]);
     const rawBody = input.rawBody ?? Buffer.from(JSON.stringify(input.body ?? {}));
     const candidates = (await this.integrations.runtimeConfigsForCallback("wechat_pay"))
-      .filter((item) => valueOf(item.credentials.merchantSerialNo) === serial);
-    if (candidates.length === 0) throw new UnauthorizedException("微信支付回调商户证书不存在");
+      .filter((item) => certificateSerial(item.settings.platformCertificateSerial) === serial);
+    if (candidates.length === 0) throw new UnauthorizedException("微信支付回调平台证书序列号未配置或不匹配");
     const signedAt = Number(timestampHeader);
     if (!Number.isFinite(signedAt) || Math.abs(Date.now() / 1000 - signedAt) > 300) throw new UnauthorizedException("微信支付回调已过期");
     const message = `${timestampHeader}\n${nonceHeader}\n${rawBody.toString("utf8")}\n`;
@@ -690,6 +694,168 @@ export class PaymentRuntimeService {
     if (!verified) throw new UnauthorizedException("微信支付回调验签失败");
     if (!identityMatched) throw new UnauthorizedException("微信支付回调商户身份不匹配");
     throw new NotFoundException("微信支付回调对应的支付单不存在");
+  }
+
+  /**
+   * 微信退款结果通知：先验平台签名和商户号，再解密并按商户退款单号绑定租户退款单。
+   * 只有 REFUND.SUCCESS 且当前退款单金额足够覆盖本地退款单金额才会写租金资金事件；
+   * 受理、关闭、异常和金额不一致都不能伪装成成功。
+   */
+  async handleWechatRefundCallback(input: PaymentCallbackInput) {
+    const headers = input.headers ?? {};
+    const timestampHeader = valueOf(headers["wechatpay-timestamp"] || headers["Wechatpay-Timestamp"]);
+    const nonceHeader = valueOf(headers["wechatpay-nonce"] || headers["Wechatpay-Nonce"]);
+    const signature = valueOf(headers["wechatpay-signature"] || headers["Wechatpay-Signature"]);
+    const serial = certificateSerial(headers["wechatpay-serial"] || headers["Wechatpay-Serial"]);
+    const rawBody = input.rawBody ?? Buffer.from(JSON.stringify(input.body ?? {}));
+    const candidates = (await this.integrations.runtimeConfigsForCallback("wechat_pay"))
+      .filter((item) => certificateSerial(item.settings.platformCertificateSerial) === serial);
+    if (candidates.length === 0) throw new UnauthorizedException("微信退款回调平台证书序列号未配置或不匹配");
+    const signedAt = Number(timestampHeader);
+    if (!Number.isFinite(signedAt) || Math.abs(Date.now() / 1000 - signedAt) > 300) throw new UnauthorizedException("微信退款回调已过期");
+    const message = `${timestampHeader}\n${nonceHeader}\n${rawBody.toString("utf8")}\n`;
+    let envelope: JsonRecord;
+    try {
+      const parsed = JSON.parse(rawBody.toString("utf8")) as unknown;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not-object");
+      envelope = parsed as JsonRecord;
+    } catch {
+      throw new BadRequestException("微信退款回调格式无效");
+    }
+    const eventId = valueOf(envelope.id);
+    const eventType = valueOf(envelope.event_type).toUpperCase();
+    if (!eventId || !eventType) throw new BadRequestException("微信退款回调缺少事件编号或事件类型");
+    const resource = (envelope.resource ?? {}) as JsonRecord;
+    let verified = false;
+    let identityMatched = false;
+    for (const config of candidates) {
+      let signatureVerified = false;
+      try {
+        signatureVerified = Boolean(timestampHeader && nonceHeader && signature && verifyRsa(valueOf(config.credentials.wechatPlatformCertificate), message, signature));
+      } catch {
+        signatureVerified = false;
+      }
+      if (!signatureVerified) continue;
+      verified = true;
+      let decrypted: JsonRecord;
+      try {
+        decrypted = this.decryptWechatResource(config, resource);
+      } catch {
+        continue;
+      }
+      if (valueOf(decrypted.mchid) !== requiredText(config.settings.mchid, "商户号")) continue;
+      identityMatched = true;
+      const merchantRefundNo = valueOf(decrypted.out_refund_no);
+      const refund = await this.prisma.rentalPaymentRefund.findFirst({
+        where: { tenantId: config.tenantId, provider: "wechat_pay", merchantRefundNo }
+      });
+      if (!refund) continue;
+      const refundStatus = valueOf(decrypted.refund_status).toUpperCase();
+      const amount = Number(((decrypted.amount as JsonRecord | undefined)?.refund ?? Number.NaN)) / 100;
+      const payloadHash = sha256(rawBody);
+      if (eventType === "REFUND.SUCCESS" && refundStatus === "SUCCESS") {
+        if (!Number.isFinite(amount)) throw new ConflictException("微信退款回调缺少退款金额，保留待核对");
+        if (amount + 0.005 < Number(refund.amount)) {
+          throw new ConflictException("微信退款回调当前退款金额不足，保留待核对");
+        }
+        await this.applyRefundWebhookOutcome({
+          tenantId: refund.tenantId,
+          workspaceId: refund.workspaceId,
+          orderId: refund.orderId,
+          refund,
+          provider: "wechat_pay",
+          eventId,
+          payloadHash,
+          outcome: {
+            status: "succeeded",
+            externalRefundId: valueOf(decrypted.refund_id),
+            externalStatus: refundStatus,
+            responseJson: { eventType, refundStatus, refundId: valueOf(decrypted.refund_id), outRefundNo: merchantRefundNo, refundedAmount: amount }
+          }
+        });
+      } else if (eventType === "REFUND.CLOSED" || refundStatus === "CLOSED") {
+        await this.applyRefundWebhookOutcome({
+          tenantId: refund.tenantId,
+          workspaceId: refund.workspaceId,
+          orderId: refund.orderId,
+          refund,
+          provider: "wechat_pay",
+          eventId,
+          payloadHash,
+          outcome: { status: "failed", externalRefundId: valueOf(decrypted.refund_id), externalStatus: refundStatus || eventType, responseJson: { eventType, refundStatus, outRefundNo: merchantRefundNo } }
+        });
+      } else {
+        // REFUND.ABNORMAL 或未知事件只保留在查询/人工处理中，不能推进成功资金事件。
+        await this.applyRefundWebhookOutcome({
+          tenantId: refund.tenantId,
+          workspaceId: refund.workspaceId,
+          orderId: refund.orderId,
+          refund,
+          provider: "wechat_pay",
+          eventId,
+          payloadHash,
+          outcome: { status: "accepted", externalRefundId: valueOf(decrypted.refund_id), externalStatus: refundStatus || eventType, responseJson: { eventType, refundStatus, outRefundNo: merchantRefundNo } }
+        });
+      }
+      return { code: "SUCCESS", message: "成功" };
+    }
+    if (!verified) throw new UnauthorizedException("微信退款回调验签失败");
+    if (!identityMatched) throw new UnauthorizedException("微信退款回调商户身份不匹配或退款单不存在");
+    throw new NotFoundException("微信退款回调对应的退款单不存在");
+  }
+
+  /**
+   * 支付宝退款没有统一等价于微信 REFUND.SUCCESS 的通用推送链，仍以退款查询为主。
+   * 兼容明确带退款成功状态和累计退款金额的签名通知；字段不完整时直接拒绝入账，
+   * 让主动查单/对账恢复，不把“收到通知”当成“资金已退”。
+   */
+  async handleAlipayRefundCallback(body: unknown) {
+    const values = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
+    const appId = valueOf(values.app_id);
+    const candidates = (await this.integrations.runtimeConfigsForCallback("alipay"))
+      .filter((item) => valueOf(item.settings.appId) === appId);
+    if (candidates.length === 0) throw new UnauthorizedException("支付宝退款回调商户不存在");
+    const signature = valueOf(values.sign);
+    const signedContent = stableFormContent(values, ["sign", "sign_type"]);
+    let verified = false;
+    for (const config of candidates) {
+      try {
+        if (!signature || !verifyRsa(valueOf(config.credentials.alipayPublicKey), signedContent, signature)) continue;
+      } catch {
+        continue;
+      }
+      verified = true;
+      const merchantRefundNo = valueOf(values.out_request_no || values.out_refund_no);
+      const refund = await this.prisma.rentalPaymentRefund.findFirst({ where: { tenantId: config.tenantId, provider: "alipay", merchantRefundNo } });
+      if (!refund) continue;
+      const status = valueOf(values.refund_status || values.refund_result).toUpperCase();
+      const refundFee = Number(valueOf(values.refund_fee || values.refund_amount));
+      if (status !== "REFUND_SUCCESS" && valueOf(values.fund_change).toUpperCase() !== "Y") {
+        throw new ConflictException("支付宝退款通知未明确确认成功，已保留待查询");
+      }
+      if (!Number.isFinite(refundFee)) throw new ConflictException("支付宝退款通知缺少累计退款金额，已保留待查询");
+      const confirmedTotal = await this.confirmedRefundTotal(refund.tenantId, refund.workspaceId, refund.paymentIntentId, refund.id);
+      if (refundFee + 0.005 < money(confirmedTotal + Number(refund.amount))) throw new ConflictException("支付宝退款通知金额不足，已保留待查询");
+      await this.applyRefundWebhookOutcome({
+        tenantId: refund.tenantId,
+        workspaceId: refund.workspaceId,
+        orderId: refund.orderId,
+        refund,
+        provider: "alipay",
+        eventId: valueOf(values.notify_id) || `${valueOf(values.trade_no)}:${merchantRefundNo}:${refundFee}`,
+        payloadHash: sha256(JSON.stringify(values)),
+        outcome: {
+          status: "succeeded",
+          externalRefundId: valueOf(values.trade_no),
+          externalStatus: status || "REFUND_SUCCESS",
+          confirmedTotal: refundFee,
+          responseJson: { status: status || "REFUND_SUCCESS", outRefundNo: merchantRefundNo, refundFee }
+        }
+      });
+      return "success";
+    }
+    if (!verified) throw new UnauthorizedException("支付宝退款回调验签失败");
+    throw new NotFoundException("支付宝退款回调对应的退款单不存在");
   }
 
   private async requirePaymentIntent(tenantId: string, workspaceId: string, orderId: string, intentId: string) {
@@ -824,7 +990,8 @@ export class PaymentRuntimeService {
         refund: Math.round(Number(refund.amount) * 100),
         total: Math.round(Number(intent.amount) * 100),
         currency: intent.currency
-      }
+      },
+      ...(String(config.settings.refundNotifyUrl ?? "").trim() ? { notify_url: String(config.settings.refundNotifyUrl).trim() } : {})
     };
     const response = await this.wechatRequest(config, "POST", "/v3/refund/domestic/refunds", JSON.stringify(requestBody));
     const state = valueOf(response.status || "PROCESSING").toUpperCase();
@@ -935,6 +1102,45 @@ export class PaymentRuntimeService {
       }
     });
     return { status: updated.status, response: this.toRefundResponse(updated), failureReason: updated.failureReason ?? undefined };
+  }
+
+  private async applyRefundWebhookOutcome(input: {
+    tenantId: string;
+    workspaceId: string;
+    orderId: string;
+    refund: PaymentRefundRow;
+    provider: "alipay" | "wechat_pay";
+    eventId: string;
+    payloadHash: string;
+    outcome: ProviderRefundResult;
+  }) {
+    const eventProvider = `${input.provider}_refund`;
+    const existing = await this.prisma.paymentWebhookEvent.findUnique({ where: { provider_eventId: { provider: eventProvider, eventId: input.eventId } } });
+    if (existing) {
+      if (existing.tenantId !== input.tenantId || existing.payloadHash !== input.payloadHash || (existing.paymentIntentId && existing.paymentIntentId !== input.refund.paymentIntentId)) {
+        throw new ConflictException("退款回调事件已绑定到其他租户或退款单");
+      }
+      if (existing.status === "processed" || existing.status === "processing") return;
+      const claimed = await this.prisma.paymentWebhookEvent.updateMany({ where: { id: existing.id, status: "failed" }, data: { status: "processing", errorMessage: null } });
+      if (claimed.count !== 1) return;
+    } else {
+      try {
+        await this.prisma.paymentWebhookEvent.create({
+          data: { tenantId: input.tenantId, provider: eventProvider, eventId: input.eventId, paymentIntentId: input.refund.paymentIntentId, payloadHash: input.payloadHash, status: "processing" }
+        });
+      } catch (error) {
+        if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002")) throw error;
+        // 另一并发回调已经抢到事件；它负责处理，当前请求返回成功避免第三方重复投递。
+        return;
+      }
+    }
+    try {
+      await this.applyProviderRefundOutcome(input.tenantId, input.workspaceId, input.orderId, input.refund.id, input.outcome, "provider-webhook");
+      await this.prisma.paymentWebhookEvent.updateMany({ where: { provider: eventProvider, eventId: input.eventId, status: "processing" }, data: { status: "processed", processedAt: new Date(), paymentIntentId: input.refund.paymentIntentId, errorMessage: null } });
+    } catch (error) {
+      await this.prisma.paymentWebhookEvent.updateMany({ where: { provider: eventProvider, eventId: input.eventId, status: "processing" }, data: { status: "failed", errorMessage: (error instanceof Error ? error.message : String(error)).slice(0, 500) } });
+      throw error;
+    }
   }
 
   private async markRefundProviderCallPending(tenantId: string, workspaceId: string, orderId: string, refundId: string, errorMessage: string) {
