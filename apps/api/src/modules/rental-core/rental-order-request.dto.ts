@@ -26,6 +26,8 @@ import {
   type RentalFundingReleaseRequest,
   type RefundRentalServiceRequest,
   type RentalOrderExtensionRequest,
+  type ApplyRentalOrderChangeRequest,
+  type PreviewRentalOrderChangeRequest,
   type RentalPricingUnit,
   type RentalQuoteRequest,
   type RentalBookingIdentityInput,
@@ -929,6 +931,40 @@ export class RentalOrderExtensionDto implements RentalOrderExtensionRequest {
   @IsOptional()
   @IsString()
   memo?: string;
+}
+
+/** ORDER-CHANGE-01A：只允许选择整条订单行，金额一律由服务端按原快照重算。 */
+export class PreviewRentalOrderChangeDto implements PreviewRentalOrderChangeRequest {
+  @IsIn(["partial_line_cancel"])
+  type!: "partial_line_cancel";
+
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsString({ each: true })
+  @MaxLength(191, { each: true })
+  lineIds!: string[];
+}
+
+export class ApplyRentalOrderChangeDto implements ApplyRentalOrderChangeRequest {
+  @IsIn(["partial_line_cancel"])
+  type!: "partial_line_cancel";
+
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsString({ each: true })
+  @MaxLength(191, { each: true })
+  lineIds!: string[];
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(500)
+  reason!: string;
+
+  @IsBoolean()
+  customerConfirmed!: boolean;
+
+  @IsISO8601()
+  expectedUpdatedAt!: string;
 }
 
 /** MKT-02D：记录一次增值服务的实际履约结果；计划时间不能替代实际动作。 */

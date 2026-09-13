@@ -3374,6 +3374,11 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     await this.factStore.repriceOrderCoupon(tenantId, extension.orderId, snapshot.recalculatedCouponAmount, tx);
   }
 
+  /** ORDER-CHANGE-01A：变更后的整单重算需要同步已锁定优惠券的占用额度。 */
+  async repriceCouponForOrder(tenantId: string, orderId: string, amount: number, tx: RentalBusinessFactTx) {
+    await this.factStore.repriceOrderCoupon(tenantId, orderId, amount, tx);
+  }
+
   async releaseCoupon(tenantId: string, context: BusinessContext, orderId: string) {
     const coupon = this.state(tenantId, context).customerCoupons.find((item) => item.lockedOrderId === orderId || item.redeemedOrderId === orderId);
     if (!coupon) return undefined;
@@ -5679,7 +5684,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     tenantId: string,
     context: BusinessContext,
     args: {
-      order: Pick<RentalOrder, "id" | "startAt" | "endAt" | "effectiveEndAt" | "quoteId" | "depositAmount" | "preAuthAmount">;
+      order: Pick<RentalOrder, "id" | "startAt" | "endAt" | "effectiveEndAt" | "quoteId" | "depositAmount" | "preAuthAmount" | "serviceSnapshots">;
       previousExtensions?: RentalOrderExtension[];
       lines: Array<Pick<RentalOrderLine, "itemGroupId" | "pricingGroupId" | "quantity">>;
       newEndAt: string;
@@ -5690,22 +5695,28 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       fulfillmentMode: RentalFulfillmentMode;
       locationIds: string[];
       customerType: "personal" | "corporate";
+      /** ORDER-CHANGE-01A：取消整行时复用原订单价格快照，但不走续租准入。 */
+      mode?: "line_cancellation";
     }
   ): Promise<RentalOrderExtensionPreview & { rateSnapshot: RentalPricingRate[]; ruleSnapshot: RentalRuleConfig }> {
     const state = this.state(tenantId, context);
     const from = args.order.effectiveEndAt ?? args.order.endAt;
-    if (new Date(args.newEndAt).getTime() <= new Date(from).getTime()) {
+    const lineCancellation = args.mode === "line_cancellation";
+    if (!lineCancellation && new Date(args.newEndAt).getTime() <= new Date(from).getTime()) {
       throw new BadRequestException("新的归还时间必须晚于当前归还时间");
     }
     const originalQuote = this.getQuote(tenantId, context, args.order.quoteId);
     const rule = { config: originalQuote.ruleSnapshot, version: originalQuote.ruleVersion };
-    if (!effectiveExtensionRule(rule.config).enabled) throw new ConflictException("原订单规则不允许续租");
-    if ((effectiveExtensionRule(rule.config).pricingMode ?? "incremental") === "incremental") {
+    if (!lineCancellation && !effectiveExtensionRule(rule.config).enabled) throw new ConflictException("原订单规则不允许续租");
+    if (!lineCancellation && (effectiveExtensionRule(rule.config).pricingMode ?? "incremental") === "incremental") {
       return this.quoteIncrementalExtension(tenantId, context, args);
     }
-    if (Date.parse(args.appliedAt) > Date.parse(from)) throw new ConflictException("订单已逾时，请先人工核价处理；不能通过原价全租期重算清除逾时费用");
+    if (!lineCancellation && Date.parse(args.appliedAt) > Date.parse(from)) throw new ConflictException("订单已逾时，请先人工核价处理；不能通过原价全租期重算清除逾时费用");
     const previous = (args.previousExtensions ?? []).filter((row) => row.status === "effective").sort((a, b) => a.sequence - b.sequence);
-    if (from !== args.order.endAt && !previous.length) throw new ConflictException("缺少已生效续租记录，不能确定已计金额");
+    if (!lineCancellation && from !== args.order.endAt && !previous.length) throw new ConflictException("缺少已生效续租记录，不能确定已计金额");
+    if (lineCancellation && (args.order.serviceSnapshots?.length || originalQuote.serviceSnapshots?.length || originalQuote.serviceAmount > 0)) {
+      throw new ConflictException("本轮部分取消暂不支持已包含增值服务的订单，请先人工处理服务释放与退款");
+    }
     const savedContext = previous.at(-1)?.pricingSnapshot?.context ?? originalQuote.pricingContext;
     const timeZone = savedContext?.timeZone ?? context.settings.calendar.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE;
     const groups = new Map(context.groups.map((group) => [group.id, group]));
@@ -5822,8 +5833,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       effectiveDepositRule(rule.config),
       effectivePreauthorizationRule(rule.config)
     );
-    const depositDelta = Math.max(0, roundMoney(security.deposit.amount - args.order.depositAmount - previous.reduce((sum, row) => sum + row.depositDelta, 0)));
-    const preAuthDelta = Math.max(0, roundMoney(security.preauthorization.amount - args.order.preAuthAmount - previous.reduce((sum, row) => sum + row.preAuthDelta, 0)));
+    const depositDeltaRaw = roundMoney(security.deposit.amount - args.order.depositAmount - previous.reduce((sum, row) => sum + row.depositDelta, 0));
+    const preAuthDeltaRaw = roundMoney(security.preauthorization.amount - args.order.preAuthAmount - previous.reduce((sum, row) => sum + row.preAuthDelta, 0));
+    const depositDelta = lineCancellation ? depositDeltaRaw : Math.max(0, depositDeltaRaw);
+    const preAuthDelta = lineCancellation ? preAuthDeltaRaw : Math.max(0, preAuthDeltaRaw);
     const fullServiceAmount = roundMoney(originalQuote.serviceAmount + previous.reduce((sum, row) => sum + row.serviceAmount, 0) + serviceAmount);
     // 只复算原订单已采用的优惠，不引入后续新活动，不再次锁券/核销。
     const originalPlans = (originalQuote.discountEvaluations ?? []).filter((row) => row.applied).map((row) => {
@@ -5979,6 +5992,35 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       rateSnapshot,
       ruleSnapshot: structuredClone(rule.config)
     };
+  }
+
+  /**
+   * ORDER-CHANGE-01A：取货前整行部分取消的试算。
+   *
+   * 取消不读取当前价格、不引入新优惠，直接复用原报价的价格/日历/规则/优惠快照，
+   * 只把剩余订单行作为新的全租期输入。这样负差额是真实的「原已计金额 - 剩余订单金额」，
+   * 而不是把取消当成一笔新的报价。
+   */
+  async quoteOrderLineCancellation(
+    tenantId: string,
+    context: BusinessContext,
+    args: {
+      order: Pick<RentalOrder, "id" | "startAt" | "endAt" | "effectiveEndAt" | "quoteId" | "depositAmount" | "preAuthAmount" | "serviceSnapshots">;
+      lines: Array<Pick<RentalOrderLine, "itemGroupId" | "pricingGroupId" | "quantity">>;
+      appliedAt: string;
+      fulfillmentMode: RentalFulfillmentMode;
+      locationIds: string[];
+      customerType: "personal" | "corporate";
+    }
+  ) {
+    return this.quoteOrderExtension(tenantId, context, {
+      ...args,
+      previousExtensions: [],
+      newEndAt: args.order.endAt,
+      services: undefined,
+      settlementMode: "immediate",
+      mode: "line_cancellation"
+    });
   }
 
   /**

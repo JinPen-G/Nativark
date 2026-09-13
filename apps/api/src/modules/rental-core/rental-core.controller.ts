@@ -45,6 +45,8 @@ import {
   RecordRentalInspectionExceptionCustomerResponseDto,
   RentalAvailabilityDto,
   RentalOrderExtensionDto,
+  PreviewRentalOrderChangeDto,
+  ApplyRentalOrderChangeDto,
   ReviewRentalExtensionRefundDto,
   ReviewRentalOrderFeeReviewDto,
   RefundRentalServiceDto,
@@ -374,6 +376,100 @@ export class RentalCoreController {
     const parsedLimit = limit === undefined ? undefined : Number.parseInt(limit, 10);
     if (limit !== undefined && (parsedLimit === undefined || !Number.isInteger(parsedLimit) || parsedLimit < 1)) throw new BadRequestException("流水条数必须是正整数");
     return this.service.listStockLedger(req.user.tenantId, { itemGroupId, locationId, batchNo, sourceDocumentNo, limit: parsedLimit });
+  }
+
+  private async priceLineCancellation(tenantId: string, orderId: string, body: PreviewRentalOrderChangeDto, tx?: Prisma.TransactionClient) {
+    const order = tx
+      ? await this.service.lockOrderForUpdate(tenantId, orderId, tx)
+      : await this.service.getOrder(tenantId, orderId);
+    if (![RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.ReadyForPickup].includes(order.status)) {
+      throw new ConflictException("只有取货前的待确认或待领取订单可以部分取消");
+    }
+    if (order.effectiveEndAt && Date.parse(order.effectiveEndAt) !== Date.parse(order.endAt)) {
+      throw new ConflictException("已有生效续租的订单不能在本轮部分取消，请人工处理");
+    }
+    if (order.serviceSnapshots?.length || order.adjustmentAmount !== 0) {
+      throw new ConflictException("已有服务或费用调整的订单暂不能自动部分取消，请人工处理");
+    }
+    const changes = await this.service.listOrderChanges(tenantId, orderId, tx);
+    if (changes.some((row) => row.status === "applied")) {
+      throw new ConflictException("本轮一个订单只允许一次整行部分取消，后续拆分变更请使用专用变更流程");
+    }
+    const lineIds = [...new Set(body.lineIds.map((value) => value.trim()).filter(Boolean))];
+    if (!lineIds.length || lineIds.length !== body.lineIds.length) throw new BadRequestException("请选择有效的订单行");
+    const activeLines = order.lines.filter((line) => (line.cancelledQuantity ?? 0) < line.quantity);
+    const selected = activeLines.filter((line) => lineIds.includes(line.id));
+    if (selected.length !== lineIds.length) throw new ConflictException("存在无效、已取消或不属于当前订单的订单行");
+    if (selected.length >= activeLines.length) throw new ConflictException("整单取消请使用订单取消操作，部分取消必须保留至少一条有效订单行");
+    if (order.reservations.some((row) => lineIds.includes(row.orderLineId) && row.releasedQuantity > 0)) {
+      throw new ConflictException("已有部分归还或释放记录的订单行不能自动部分取消");
+    }
+    const remaining = activeLines.filter((line) => !lineIds.includes(line.id));
+    const priced = await this.business.quoteOrderLineCancellation(tenantId, this.context(tenantId), {
+      order,
+      lines: remaining.map((line) => ({ itemGroupId: line.itemGroupId, pricingGroupId: line.pricingGroupId, quantity: line.quantity })),
+      appliedAt: new Date().toISOString(),
+      fulfillmentMode: order.fulfillmentMode,
+      locationIds: [order.fulfillmentLocationId, order.returnLocationId].filter((value): value is string => Boolean(value)),
+      customerType: order.customerType
+    });
+    const differenceAmount = priced.pricingSnapshot?.differenceAmount ?? priced.payableAmount;
+    return {
+      order,
+      selected,
+      remaining,
+      priced,
+      preview: {
+        orderId: order.id,
+        type: "partial_line_cancel" as const,
+        expectedUpdatedAt: order.updatedAt,
+        cancelledLineIds: selected.map((line) => line.id),
+        remainingLineIds: remaining.map((line) => line.id),
+        beforePayableAmount: order.finalPayableAmount,
+        recalculatedPayableAmount: priced.pricingSnapshot?.recalculatedPayableAmount ?? order.finalPayableAmount + differenceAmount,
+        differenceAmount,
+        additionalAmount: Math.max(0, differenceAmount),
+        refundAmount: Math.max(0, -differenceAmount),
+        depositDelta: priced.depositDelta,
+        preAuthDelta: priced.preAuthDelta,
+        currency: priced.currency,
+        pricingSnapshot: priced.pricingSnapshot,
+        resourceRelease: selected.map((line) => ({ lineId: line.id, itemGroupName: line.itemGroupName, quantity: line.quantity })),
+        warnings: [
+          ...(differenceAmount < 0 ? ["租金差额只记入订单退款待办，实际退款仍需通过支付退款流程完成"] : []),
+          ...(priced.depositDelta < 0 ? ["押金减少将按当前已收余额记录退款事件"] : []),
+          ...(priced.preAuthDelta < 0 ? ["预授权减少将按当前冻结余额记录释放事件"] : [])
+        ]
+      }
+    };
+  }
+
+  private async releaseLineCancellationSecurity(
+    tenantId: string,
+    orderId: string,
+    priced: Awaited<ReturnType<RentalBusinessService["quoteOrderLineCancellation"]>>,
+    idempotencyKey: string,
+    operator: string,
+    tx: Prisma.TransactionClient
+  ) {
+    const workspaceId = this.service.resolveWorkspaceId(tenantId);
+    const funding = await this.funding.listEvents(tenantId, workspaceId, orderId, tx);
+    const depositRefund = Math.max(0, -priced.depositDelta);
+    const preAuthRelease = Math.max(0, -priced.preAuthDelta);
+    if (depositRefund > funding.deposit.balance + 0.005) throw new ConflictException("当前已收押金不足以自动退款，请人工处理");
+    if (preAuthRelease > funding.preauthorization.balance + 0.005) throw new ConflictException("当前预授权冻结余额不足以自动释放，请人工处理");
+    if (depositRefund > 0) {
+      await this.funding.recordEvent(tenantId, workspaceId, orderId, {
+        instrument: "deposit", action: "refund", amount: depositRefund,
+        idempotencyKey: `order-change:${idempotencyKey}:deposit`, reason: "订单部分取消退还押金"
+      }, operator, tx);
+    }
+    if (preAuthRelease > 0) {
+      await this.funding.recordEvent(tenantId, workspaceId, orderId, {
+        instrument: "preauthorization", action: "release", amount: preAuthRelease,
+        idempotencyKey: `order-change:${idempotencyKey}:preauthorization`, reason: "订单部分取消释放预授权"
+      }, operator, tx);
+    }
   }
   @Post("stock-operations") stockOperation(@Req() req: AuthenticatedRequest, @Body() body: ApplyRentalStockOperationDto) {
     return this.committed(req.user.tenantId, this.service.applyStockOperation(req.user.tenantId, body, req.user.displayName));
@@ -1012,6 +1108,67 @@ export class RentalCoreController {
 
   @Get("orders/:id/extensions") extensions(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
     return this.service.listOrderExtensions(req.user.tenantId, id);
+  }
+
+  @Get("orders/:id/changes") changes(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
+    return this.service.listOrderChanges(req.user.tenantId, id);
+  }
+
+  /** 取货前整行部分取消试算：不落库、不释放资源、不改变优惠券预算。 */
+  @Post("orders/:id/changes/partial-cancel/preview")
+  async previewPartialLineCancellation(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: PreviewRentalOrderChangeDto) {
+    const result = await this.priceLineCancellation(req.user.tenantId, id, body);
+    return result.preview;
+  }
+
+  /**
+   * 应用部分取消：客户确认、重新报价、优惠券预算、资金释放、资源释放与变更记录
+   * 必须在同一个幂等事务内完成。租金负差额只形成待退款账，不伪造第三方退款成功。
+   */
+  @Post("orders/:id/changes/partial-cancel")
+  async applyPartialLineCancellation(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: ApplyRentalOrderChangeDto) {
+    const tenantId = req.user.tenantId;
+    const lineIds = [...new Set(body.lineIds.map((value) => value.trim()).filter(Boolean))].sort();
+    const explicitKey = idempotencyKeyOf(req);
+    const fallbackKey = `order.change.partial-cancel:${id}:${createHash("sha256").update(lineIds.join(",")).digest("hex")}`;
+    const result = await this.idempotent.execute({
+      tenantId,
+      action: "order.change.partial-cancel",
+      key: explicitKey,
+      fallbackKey,
+      request: { orderId: id, ...body, lineIds },
+      orderId: id,
+      run: async (tx) => {
+        const priced = await this.priceLineCancellation(tenantId, id, { type: body.type, lineIds }, tx);
+        if (body.expectedUpdatedAt !== priced.order.updatedAt) throw new ConflictException("订单已发生变化，请重新试算后再提交");
+        if (!body.customerConfirmed) throw new ConflictException("必须先取得客户确认才能应用订单变更");
+        await this.releaseLineCancellationSecurity(tenantId, id, priced.priced, explicitKey ?? fallbackKey, req.user.displayName, tx);
+        if (priced.priced.pricingSnapshot?.couponEvaluation) {
+          await this.business.repriceCouponForOrder(
+            tenantId,
+            id,
+            priced.priced.pricingSnapshot.recalculatedCouponAmount,
+            tx
+          );
+        }
+        return this.service.applyPartialLineCancellation(
+          tenantId,
+          id,
+          priced.priced,
+          { ...body, lineIds },
+          explicitKey ?? fallbackKey,
+          req.user.displayName,
+          tx
+        );
+      },
+      replay: async (response) => {
+        const rows = await this.service.listOrderChanges(tenantId, id);
+        const existing = rows.find((row) => row.idempotencyKey === (explicitKey ?? fallbackKey));
+        return existing ? { order: await this.service.getOrder(tenantId, id), change: existing } : undefined;
+      }
+    });
+    await this.business.refreshFromDatabase();
+    return { order: await this.committed(tenantId, result.order), change: result.change };
   }
 
   /** 续租试算：只算钱不落库，供客户/运营确认。APP 与后台共用。 */

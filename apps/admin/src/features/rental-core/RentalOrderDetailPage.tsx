@@ -1,7 +1,7 @@
 import { ArrowLeftOutlined, CheckCircleOutlined, DollarOutlined, MinusCircleOutlined, PlusOutlined, RetweetOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
 import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol, type CorrectRentalInspectionUsageRequest, type CreateRentalInspectionRequest, type RecordRentalInspectionExceptionCustomerResponseRequest, type RentalAllocation, type RentalFundingAction, type RentalFundingInstrument, type RentalInspectionTemplate, type RentalOrderExtension, type RentalOrderExtensionPreview, type RentalOrderFeeReview, type RentalOrderServiceOccurrence, type RentalReservation, type RentalServiceExecutionAction, type UpdateRentalServiceOccurrenceRequest, type RentalWorkOrder, type RentalStockDisposition } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Button, Card, DatePicker, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from "antd";
+import { Alert, App, Button, Card, Checkbox, DatePicker, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -125,9 +125,12 @@ export function RentalOrderDetailPage() {
   const [usageCorrectionForm] = Form.useForm<{ correctedCurrent: number; reason: string; evidenceAttachments?: string }>();
   const [extensionOpen, setExtensionOpen] = useState(false);
   const [extensionRefundReview, setExtensionRefundReview] = useState<RentalOrderExtension>();
+  const [partialCancelOpen, setPartialCancelOpen] = useState(false);
+  const [partialCancelPreview, setPartialCancelPreview] = useState<Awaited<ReturnType<typeof rentalCoreApi.previewPartialLineCancellation>>>();
   const [serviceExecution, setServiceExecution] = useState<{ occurrence: RentalOrderServiceOccurrence; action: RentalServiceExecutionAction }>();
   const [serviceRefund, setServiceRefund] = useState<RentalOrderServiceOccurrence>();
   const [extensionRefundForm] = Form.useForm<{ decision: "approved" | "rejected"; reason: string }>();
+  const [partialCancelForm] = Form.useForm<{ lineIds: string[]; reason: string; customerConfirmed: boolean }>();
   // 试算结果单独存：金额要先摆给运营/客户确认，确认后才提交申请。
   const [extensionPreview, setExtensionPreview] = useState<RentalOrderExtensionPreview>();
   const [extensionForm] = Form.useForm<{ newEndAt: Dayjs; memo?: string }>();
@@ -140,6 +143,7 @@ export function RentalOrderDetailPage() {
   const funding = useQuery({ queryKey: ["rental-core", "order", id, "funding"], queryFn: () => rentalCoreApi.fundingEvents(id), enabled: Boolean(id) && canViewFunding });
   const inspections = useQuery({ queryKey: ["rental-core", "order", id, "inspections"], queryFn: () => rentalCoreApi.inspections(id), enabled: Boolean(id) });
   const extensions = useQuery({ queryKey: ["rental-core", "order", id, "extensions"], queryFn: () => rentalCoreApi.orderExtensions(id), enabled: Boolean(id) });
+  const changes = useQuery({ queryKey: ["rental-core", "order", id, "changes"], queryFn: () => rentalCoreApi.orderChanges(id), enabled: Boolean(id) });
   const refresh = async () => { await Promise.all([queryClient.invalidateQueries({ queryKey: ["rental-core", "order", id] }), queryClient.invalidateQueries({ queryKey: ["rental-core", "orders"] })]); };
   useEffect(() => {
     // Modal 挂载后再清空表单，避免在 Form 尚未连接时 resetFields 产生运行时告警。
@@ -228,6 +232,7 @@ export function RentalOrderDetailPage() {
     onError: () => message.error("操作失败，请检查当前余额、动作顺序和订单范围")
   });
   const refreshExtensions = async () => { await Promise.all([refresh(), queryClient.invalidateQueries({ queryKey: ["rental-core", "order", id, "extensions"] })]); };
+  const refreshChanges = async () => { await Promise.all([refresh(), queryClient.invalidateQueries({ queryKey: ["rental-core", "order", id, "changes"] }), queryClient.invalidateQueries({ queryKey: ["rental-core", "order", id, "funding"] })]); };
   /**
    * 费用裁定。落账口径由服务端决定，这里只提交结论：
    * 认定额不得超过建议额（超出属于另立一笔异常费用，走检查异常流程），原因必填。
@@ -291,6 +296,31 @@ export function RentalOrderDetailPage() {
       message.success("检查异常已审核");
     },
     onError: () => message.error("审核失败，请检查订单状态或该异常是否已处理")
+  });
+  const previewPartialCancel = useMutation({
+    mutationFn: (values: { lineIds: string[] }) => rentalCoreApi.previewPartialLineCancellation(id, values.lineIds),
+    onSuccess: (data) => setPartialCancelPreview(data),
+    onError: (error: Error) => message.error(error.message || "部分取消试算失败，请检查订单状态、服务和已生效续租")
+  });
+  const applyPartialCancel = useMutation({
+    mutationFn: (values: { lineIds: string[]; reason: string; customerConfirmed: boolean }) => {
+      if (!partialCancelPreview) throw new Error("请先试算部分取消费用");
+      return rentalCoreApi.applyPartialLineCancellation(id, {
+        type: "partial_line_cancel",
+        lineIds: values.lineIds,
+        reason: values.reason,
+        customerConfirmed: values.customerConfirmed,
+        expectedUpdatedAt: partialCancelPreview.expectedUpdatedAt
+      });
+    },
+    onSuccess: async () => {
+      setPartialCancelOpen(false);
+      setPartialCancelPreview(undefined);
+      partialCancelForm.resetFields();
+      await refreshChanges();
+      message.success("订单部分取消已生效，资源与差额记录已更新");
+    },
+    onError: (error: Error) => message.error(error.message || "部分取消失败，请刷新订单后重试")
   });
   const recordExceptionCustomerResponse = useMutation({
     mutationFn: (values: RecordRentalInspectionExceptionCustomerResponseRequest) => rentalCoreApi.recordInspectionExceptionCustomerResponse(id, exceptionCustomerResponse!.inspectionId, exceptionCustomerResponse!.exceptionIndex, values),
@@ -453,6 +483,7 @@ export function RentalOrderDetailPage() {
         {canReturn && detail.status === RentalCoreOrderStatus.Renting && (detail.allocations.filter((allocation) => allocation.status === "picked_up").length > 1 || detail.allocations.some((allocation) => allocation.status === "picked_up" && allocation.quantity > 1)) && <Button onClick={() => setPartialReturnOpen(true)}>{detail.ruleSnapshot?.fulfillment?.returnInspectionRequired ? "部分归还检查" : "部分归还"}</Button>}
         {detail.status === RentalCoreOrderStatus.Settling && canSettleFunding && <Button type="primary" loading={settle.isPending} disabled={settleBlockers.length > 0} title={settleBlockers.length ? `服务端会拒绝关单：${settleBlockers.join("、")}` : undefined} onClick={() => settle.mutate()}>结算并关闭订单</Button>}
         {canExtend && [RentalCoreOrderStatus.ReadyForPickup, RentalCoreOrderStatus.Renting].includes(detail.status) && <Button icon={<RetweetOutlined />} onClick={() => { extensionForm.resetFields(); setExtensionPreview(undefined); extensionForm.setFieldsValue({ newEndAt: dayjs(detail.effectiveEndAt ?? detail.endAt).add(1, "day") }); setExtensionOpen(true); }}>续租 / 延期</Button>}
+        {canOperate && [RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.ReadyForPickup].includes(detail.status) && detail.lines.filter((line) => (line.cancelledQuantity ?? 0) < line.quantity).length > 1 && <Button onClick={() => { partialCancelForm.resetFields(); setPartialCancelPreview(undefined); setPartialCancelOpen(true); }}>部分取消商品</Button>}
         {canCancel && [RentalCoreOrderStatus.Draft, RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.ReadyForPickup].includes(detail.status) && <Button danger onClick={() => setCancelOpen(true)}>取消并按规则计费</Button>}
       </Space>
       <OrderAllocationPanel key={detail.id} order={detail} />
@@ -491,7 +522,17 @@ export function RentalOrderDetailPage() {
         terminology={profile.data?.terminology}
         money={money}
       />
-      <Card title="商品明细"><Table rowKey="id" pagination={false} dataSource={detail.lines} columns={[{ title: "商品", dataIndex: "itemGroupName" }, { title: "数量", dataIndex: "quantity" }, { title: "租金", dataIndex: "amount", render: (value) => money(Number(value)) }]} /></Card>
+      <Card title="商品明细"><Table rowKey="id" pagination={false} dataSource={detail.lines} columns={[{ title: "商品", dataIndex: "itemGroupName" }, { title: "数量", dataIndex: "quantity", render: (value, row) => <>{value}{row.cancelledQuantity ? <Tag color="default" style={{ marginLeft: 8 }}>已取消 {row.cancelledQuantity}</Tag> : null}</> }, { title: "租金", dataIndex: "amount", render: (value) => money(Number(value)) }]} /></Card>
+      {Boolean(changes.data?.length) && <Card title="订单变更记录" extra={<Tag color="blue">原订单与原报价快照保留</Tag>}>
+        <Table rowKey="id" size="small" pagination={false} dataSource={changes.data ?? []} columns={[
+          { title: "时间", dataIndex: "appliedAt", render: (value) => value ? dayjs(value).format("YYYY-MM-DD HH:mm") : "—" },
+          { title: "变更", render: () => "取货前整行部分取消" },
+          { title: "取消商品", render: (_, row) => ((row.request.lineIds ?? []).map((lineId) => detail.lines.find((line) => line.id === lineId)?.itemGroupName ?? lineId).join("、")) },
+          { title: "退款差额", align: "right", render: (_, row) => money(row.refundAmount) },
+          { title: "补款差额", align: "right", render: (_, row) => money(row.additionalAmount) },
+          { title: "原因", render: (_, row) => row.request.reason }
+        ]} />
+      </Card>}
       <Card title="库存拆分与归还">{detail.allocations.length ? <Table<RentalAllocation> rowKey="id" pagination={false} dataSource={detail.allocations} columns={[
         { title: "实际商品", render: (_, row) => groups.data?.find((group) => group.id === row.itemGroupId)?.name ?? row.assetNo ?? "历史分配" },
         { title: "资产 / 数量", render: (_, row) => row.assetNo ?? `${row.quantity} 件` },
@@ -766,6 +807,38 @@ export function RentalOrderDetailPage() {
             { title: "金额", align: "right", render: (_, row) => money(row.amount) },
             { title: "计算说明", dataIndex: "detail", render: (value) => <span className="muted">{value ?? "—"}</span> }
           ]} />
+        </Card>}
+      </Form>
+    </Modal>
+    <Modal
+      title="部分取消商品"
+      open={partialCancelOpen}
+      onCancel={() => { setPartialCancelOpen(false); setPartialCancelPreview(undefined); partialCancelForm.resetFields(); }}
+      destroyOnHidden
+      width={680}
+      footer={[
+        <Button key="cancel" onClick={() => { setPartialCancelOpen(false); setPartialCancelPreview(undefined); partialCancelForm.resetFields(); }}>取消</Button>,
+        <Button key="preview" loading={previewPartialCancel.isPending} onClick={() => partialCancelForm.validateFields(["lineIds"]).then((values) => previewPartialCancel.mutate({ lineIds: values.lineIds }))}>试算差额</Button>,
+        <Button key="apply" type="primary" disabled={!partialCancelPreview} loading={applyPartialCancel.isPending} onClick={() => partialCancelForm.submit()}>确认并应用</Button>
+      ]}
+    >
+      <Form form={partialCancelForm} layout="vertical" onFinish={(values) => applyPartialCancel.mutate(values)} initialValues={{ customerConfirmed: false }}>
+        <Alert type="info" showIcon title="仅支持取货前整条商品行取消" description="原订单与原报价不会被覆盖；系统会按原价格、日历和优惠快照重算剩余商品，资源释放与变更历史在同一事务内完成。含增值服务、已续租或已有其他费用调整的订单请人工处理。" style={{ marginBottom: 16 }} />
+        <Form.Item name="lineIds" label="要取消的商品" rules={[{ required: true, message: "至少选择一条商品行" }]}>
+          <Select mode="multiple" placeholder="选择要整行取消的商品" onChange={() => setPartialCancelPreview(undefined)} options={(detail?.lines ?? []).filter((line) => (line.cancelledQuantity ?? 0) < line.quantity).map((line) => ({ value: line.id, label: `${line.itemGroupName} · ${line.quantity} 件${line.pricingGroupName ? ` · ${line.pricingGroupName}` : ""}` }))} />
+        </Form.Item>
+        <Form.Item name="reason" label="变更原因" rules={[{ required: true, whitespace: true, message: "请填写变更原因" }]}><Input.TextArea rows={3} maxLength={500} placeholder="例如：客户减少租赁设备" /></Form.Item>
+        <Form.Item name="customerConfirmed" valuePropName="checked" rules={[{ validator: (_, value) => value ? Promise.resolve() : Promise.reject(new Error("必须取得客户确认")) }]}><Checkbox>我已取得客户对本次商品取消及金额变化的确认</Checkbox></Form.Item>
+        {partialCancelPreview && <Card size="small" title="试算结果">
+          <Descriptions column={2} size="small" items={[
+            { key: "before", label: "原最终应收", children: money(partialCancelPreview.beforePayableAmount) },
+            { key: "after", label: "重算后应收", children: money(partialCancelPreview.recalculatedPayableAmount) },
+            { key: "difference", label: "差额", children: <b>{money(partialCancelPreview.differenceAmount)}</b> },
+            { key: "deposit", label: "押金差额", children: money(partialCancelPreview.depositDelta) },
+            { key: "preauth", label: "预授权差额", children: money(partialCancelPreview.preAuthDelta) },
+            { key: "release", label: "释放资源", span: 2, children: partialCancelPreview.resourceRelease.map((row) => `${row.itemGroupName} × ${row.quantity}`).join("、") }
+          ]} />
+          {partialCancelPreview.warnings.map((warning) => <Alert key={warning} type="warning" showIcon title={warning} style={{ marginTop: 12 }} />)}
         </Card>}
       </Form>
     </Modal>

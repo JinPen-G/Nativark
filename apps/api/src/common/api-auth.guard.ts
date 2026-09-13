@@ -431,6 +431,15 @@ export function requiredPermissions(method: string, path: string) {
   if (path.match(/^\/rental\/v1\/orders\/[^/]+$/)) {
     return ["rental-os:order:view"];
   }
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/changes$/)) {
+    return method === "GET" ? ["rental-os:order:view"] : ["rental-os:order:operate"];
+  }
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/changes\/partial-cancel\/preview$/)) {
+    return ["rental-os:order:operate"];
+  }
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/changes\/partial-cancel$/)) {
+    return ["rental-os:order:operate"];
+  }
   // MKT-02D：服务实际履约是订单操作，不等同于维护服务目录/容量配置。
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/services\/[^/]+\/execution$/)) {
     return ["rental-os:order:operate"];

@@ -121,6 +121,7 @@
     "test:security-rule-form": "npm run build -w @rental-os/shared && node tests/rental-security-rule-form.test.cjs",
     "test:order-settlement": "npm run build -w @rental-os/shared && node tests/rental-order-settlement.test.cjs",
     "test:order-extension": "npm run build -w @rental-os/shared && node tests/rental-extension.test.cjs && node tests/rental-renewal-repricing.test.cjs",
+    "test:order-change": "npm run build -w @rental-os/shared && node tests/rental-order-change.test.cjs",
     "test:renewal-persistence": "npm run build -w @rental-os/shared && node tests/helpers/run-renewal-persistence-db.cjs",
     "test:tax": "npm run build -w @rental-os/shared && node tests/rental-tax.test.cjs",
     "test:currency": "npm run build -w @rental-os/shared && node tests/rental-currency.test.cjs",

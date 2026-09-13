@@ -3828,7 +3828,9 @@ export interface RentalQuoteChargeLine {
     /** 续租新增期间的费用（需求 4.6.9）。一次续租一条，code 带序号以便去重。 */
     | "extension"
     /** 提前归还退还的租金（需求 4.6.8）。金额为**负数**，直接冲减应收。 */
-    | "early_return_refund";
+    /** 订单变更产生的差额；原订单金额不改，只追加一条变更费用事实。 */
+    | "early_return_refund"
+    | "order_change";
   amount: number;
   sourceId?: string;
   sourceVersion?: string;
@@ -4810,6 +4812,8 @@ export interface RentalOrderLine {
   itemGroupName: string;
   inventoryMode: RentalInventoryMode;
   quantity: number;
+  /** 订单变更已取消的数量。原始数量、价格与金额保留不改，活动数量 = quantity - cancelledQuantity。 */
+  cancelledQuantity?: number;
   unitPrice: number;
   amount: number;
   note?: string;
@@ -5429,6 +5433,69 @@ export interface RentalOrderExtensionPreview {
   priceVersionId?: string;
   priceVersion?: string;
   ruleVersion: string;
+}
+
+/** ORDER-CHANGE-01A：取货前按整条订单行取消的试算结果。 */
+export interface RentalOrderChangePreview {
+  orderId: string;
+  type: "partial_line_cancel";
+  /** 试算基于的订单更新时间；提交时必须原样带回，防止旧预览覆盖新变更。 */
+  expectedUpdatedAt: string;
+  cancelledLineIds: string[];
+  remainingLineIds: string[];
+  beforePayableAmount: number;
+  recalculatedPayableAmount: number;
+  /** 新账面应收 - 原账面应收；负数表示应核减，正数表示需要补款。 */
+  differenceAmount: number;
+  additionalAmount: number;
+  refundAmount: number;
+  depositDelta: number;
+  preAuthDelta: number;
+  currency: string;
+  /** 沿用原订单价格、规则、优惠与券快照的重算依据。 */
+  pricingSnapshot?: RentalExtensionPricingSnapshot;
+  resourceRelease: Array<{ lineId: string; itemGroupName: string; quantity: number }>;
+  warnings: string[];
+}
+
+/** 订单变更请求。只允许服务端认定为完整订单行取消，不接受客户端传金额。 */
+export interface ApplyRentalOrderChangeRequest {
+  type: "partial_line_cancel";
+  lineIds: string[];
+  reason: string;
+  customerConfirmed: boolean;
+  expectedUpdatedAt: string;
+}
+
+/** 订单变更只追加记录。原订单与原订单行仍保留，所有差异和金额从这里回放。 */
+export interface RentalOrderChange {
+  id: string;
+  tenantId: string;
+  workspaceId: string;
+  orderId: string;
+  sequence: number;
+  type: "partial_line_cancel";
+  status: "applied" | "rejected";
+  request: ApplyRentalOrderChangeRequest;
+  beforeSnapshot: Record<string, unknown>;
+  afterSnapshot: Record<string, unknown>;
+  diff: Record<string, unknown>;
+  refundAmount: number;
+  additionalAmount: number;
+  depositDelta: number;
+  preAuthDelta: number;
+  idempotencyKey: string;
+  requestedBy: string;
+  appliedBy?: string;
+  requestedAt: string;
+  appliedAt?: string;
+  createdAt: string;
+}
+
+/** 订单变更试算入参。 */
+export interface PreviewRentalOrderChangeRequest {
+  type: "partial_line_cancel";
+  lineIds: string[];
 }
 
 export interface RentalOrderOccupancy {

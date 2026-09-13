@@ -16,6 +16,7 @@ import {
   type RentalInspectionRecord,
   type CorrectRentalInspectionUsageRequest,
   type RentalOrder,
+  type RentalOrderChange,
   type RentalOrderExtension,
   type RentalOrderLine,
   type RentalQuoteChargeLine,
@@ -160,7 +161,7 @@ export interface RentalCoreFactStore {
    * 必须支持 tx：配货在事务内挑资产，若这里走独立连接的 autocommit 读，
    * 就看不到并发事务已提交但本连接快照之外的分配。
    */
-  allocatedAssetIds(tenantId: string, tx?: RentalFactTx): Promise<Set<string>>;
+  allocatedAssetIds(tenantId: string, tx?: RentalFactTx, excludeOrderId?: string): Promise<Set<string>>;
   listAssets(tenantId: string, tx?: RentalFactTx): Promise<RentalAsset[]>;
   listAssetStatusHistory(tenantId: string, assetId: string, tx?: RentalFactTx): Promise<RentalAssetStatusHistory[]>;
   upsertAsset(asset: RentalAsset, uniqueAttributes?: RentalUniqueAttributeClaim[], statusChange?: AssetStatusHistoryMetadata): Promise<void>;
@@ -194,7 +195,9 @@ export interface RentalCoreFactStore {
   ): Promise<RentalInspectionRecord>;
   /** 续租记录（需求 4.6.9）。只追加与改状态，不改金额——金额是申请时固化的事实。 */
   listExtensions(tenantId: string, orderId: string, tx?: RentalFactTx): Promise<RentalOrderExtension[]>;
+  listOrderChanges(tenantId: string, orderId: string, tx?: RentalFactTx): Promise<RentalOrderChange[]>;
   insertExtension(extension: RentalOrderExtension, tx?: RentalFactTx): Promise<void>;
+  insertOrderChange(change: RentalOrderChange, tx?: RentalFactTx): Promise<void>;
   markExtensionEffective(
     tenantId: string,
     extensionId: string,
@@ -563,6 +566,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
           itemGroupName: line.itemGroupName,
           inventoryMode: upper<$Enums.RentalInventoryMode>(line.inventoryMode),
           quantity: line.quantity,
+          cancelledQuantity: line.cancelledQuantity ?? 0,
           unitPrice: new Prisma.Decimal(line.unitPrice),
           amount: new Prisma.Decimal(line.amount),
           note: line.note ?? null
@@ -794,7 +798,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     `);
   }
 
-  async allocatedAssetIds(tenantId: string, tx?: RentalFactTx): Promise<Set<string>> {
+  async allocatedAssetIds(tenantId: string, tx?: RentalFactTx, excludeOrderId?: string): Promise<Set<string>> {
     const client = tx ?? this.prisma;
     // 分配表没有 workspaceId（它是订单子表），通过父订单的空间条件过滤。
     const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
@@ -802,7 +806,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       where: {
         status: { in: IN_USE_ALLOCATION_STATES },
         assetId: { not: null },
-        order: { tenantId, workspaceId }
+        order: { tenantId, workspaceId, ...(excludeOrderId ? { id: { not: excludeOrderId } } : {}) }
       },
       select: { assetId: true }
     });
@@ -1669,6 +1673,51 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     });
   }
 
+  /* ---------- 订单变更（ORDER-CHANGE-01A） ---------- */
+
+  async listOrderChanges(tenantId: string, orderId: string, tx?: RentalFactTx): Promise<RentalOrderChange[]> {
+    const client = tx ?? this.prisma;
+    const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
+    const rows = await client.rentalOrderChange.findMany({
+      where: { tenantId, workspaceId, orderId },
+      orderBy: { sequence: "asc" }
+    });
+    return rows.map((row) => this.toDomainOrderChange(row));
+  }
+
+  async insertOrderChange(change: RentalOrderChange, tx?: RentalFactTx): Promise<void> {
+    const client = tx ?? this.prisma;
+    const workspaceId = await resolveScopeWorkspaceId(client, change.tenantId);
+    if (change.workspaceId !== workspaceId) {
+      throw new ConflictException("订单变更不属于当前经营空间，拒绝写入");
+    }
+    await client.rentalOrderChange.create({
+      data: {
+        id: change.id,
+        tenantId: change.tenantId,
+        workspaceId,
+        orderId: change.orderId,
+        sequence: change.sequence,
+        type: change.type,
+        status: change.status,
+        request: change.request as unknown as Prisma.InputJsonValue,
+        beforeSnapshot: change.beforeSnapshot as unknown as Prisma.InputJsonValue,
+        afterSnapshot: change.afterSnapshot as unknown as Prisma.InputJsonValue,
+        diff: change.diff as unknown as Prisma.InputJsonValue,
+        refundAmount: new Prisma.Decimal(change.refundAmount),
+        additionalAmount: new Prisma.Decimal(change.additionalAmount),
+        depositDelta: new Prisma.Decimal(change.depositDelta),
+        preAuthDelta: new Prisma.Decimal(change.preAuthDelta),
+        idempotencyKey: change.idempotencyKey,
+        requestedBy: change.requestedBy,
+        appliedBy: change.appliedBy ?? null,
+        requestedAt: new Date(change.requestedAt),
+        appliedAt: change.appliedAt ? new Date(change.appliedAt) : null,
+        createdAt: new Date(change.createdAt)
+      }
+    });
+  }
+
   /**
    * 只推进状态与两个时间戳，金额一律不动——金额是申请时固化的事实，
    * 生效时再改一次就等于事后改账。
@@ -1769,6 +1818,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       itemGroupName: line.itemGroupName,
       inventoryMode: lower<RentalInventoryMode>(line.inventoryMode),
       quantity: line.quantity,
+      cancelledQuantity: line.cancelledQuantity || undefined,
       unitPrice: num(line.unitPrice),
       amount: num(line.amount),
       note: line.note ?? undefined
@@ -1875,6 +1925,32 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       createdBy: row.createdBy,
       createdAt: iso(row.createdAt),
       updatedAt: iso(row.updatedAt)
+    };
+  }
+
+  private toDomainOrderChange(row: Prisma.RentalOrderChangeGetPayload<object>): RentalOrderChange {
+    return {
+      id: row.id,
+      tenantId: row.tenantId,
+      workspaceId: row.workspaceId,
+      orderId: row.orderId,
+      sequence: row.sequence,
+      type: row.type as RentalOrderChange["type"],
+      status: row.status as RentalOrderChange["status"],
+      request: row.request as unknown as RentalOrderChange["request"],
+      beforeSnapshot: row.beforeSnapshot as unknown as Record<string, unknown>,
+      afterSnapshot: row.afterSnapshot as unknown as Record<string, unknown>,
+      diff: row.diff as unknown as Record<string, unknown>,
+      refundAmount: Number(row.refundAmount),
+      additionalAmount: Number(row.additionalAmount),
+      depositDelta: Number(row.depositDelta),
+      preAuthDelta: Number(row.preAuthDelta),
+      idempotencyKey: row.idempotencyKey,
+      requestedBy: row.requestedBy,
+      appliedBy: row.appliedBy ?? undefined,
+      requestedAt: row.requestedAt.toISOString(),
+      appliedAt: row.appliedAt?.toISOString(),
+      createdAt: row.createdAt.toISOString()
     };
   }
 }

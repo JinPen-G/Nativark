@@ -38,6 +38,9 @@ import type {
   ReviewRentalOrderFeeReviewRequest,
   RentalItemGroup,
   RentalOrder,
+  ApplyRentalOrderChangeRequest,
+  RentalOrderChange,
+  RentalOrderChangePreview,
   RentalOrderServiceOccurrence,
   RentalOrderExtension,
   RentalOrderExtensionPreview,
@@ -311,6 +314,11 @@ export const rentalCoreApi = {
   // 续租 / 延期（需求 4.6.9）。试算与申请分两步：金额要先给客户/运营确认，
   // 确认后才落记录；企业月结的申请直接生效，个人还要再走一次补款。
   orderExtensions: (id: string) => request<RentalOrderExtension[]>(`/rental/v1/orders/${id}/extensions`),
+  orderChanges: (id: string) => request<RentalOrderChange[]>(`/rental/v1/orders/${id}/changes`),
+  previewPartialLineCancellation: (id: string, lineIds: string[]) =>
+    request<RentalOrderChangePreview>(`/rental/v1/orders/${id}/changes/partial-cancel/preview`, { method: "post", data: { type: "partial_line_cancel", lineIds } }),
+  applyPartialLineCancellation: (id: string, data: ApplyRentalOrderChangeRequest) =>
+    request<{ order: RentalOrder; change: RentalOrderChange }>(`/rental/v1/orders/${id}/changes/partial-cancel`, { method: "post", data }),
   previewOrderExtension: (id: string, data: RentalOrderExtensionRequest) =>
     request<RentalOrderExtensionPreview>(`/rental/v1/orders/${id}/extensions/preview`, { method: "post", data }),
   requestOrderExtension: (id: string, data: RentalOrderExtensionRequest) =>

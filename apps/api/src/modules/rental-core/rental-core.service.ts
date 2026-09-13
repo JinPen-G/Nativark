@@ -43,6 +43,7 @@ import {
   type RentalItemGroupImage,
   type RentalPricingGroup,
   type RentalOrder,
+  type RentalOrderChange,
   type RentalOrderServiceOccurrence,
   type RentalOrderFeeReview,
   type RentalOrderExtension,
@@ -2378,6 +2379,169 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   async listOrderExtensions(tenantId: string, orderId: string, tx?: RentalFactTx) {
     this.state(tenantId);
     return this.factStore.listExtensions(tenantId, orderId, tx);
+  }
+
+  /** 订单变更历史只读；原订单与原报价快照不从这里重写。 */
+  async listOrderChanges(tenantId: string, orderId: string, tx?: RentalFactTx) {
+    this.state(tenantId);
+    return this.factStore.listOrderChanges(tenantId, orderId, tx);
+  }
+
+  /**
+   * ORDER-CHANGE-01A：应用一次取货前整行部分取消。
+   *
+   * 这条内核只负责把已在控制器完成的重算结果与订单资源放进同一事务：
+   * - 原始行的 quantity / unitPrice / amount 不改，只写 cancelledQuantity；
+   * - 预占、分配、资产状态、订单差额和变更历史一起提交；
+   * - 正差额或新增保证金本轮拒绝，避免“订单已变更但还没收钱”；
+   * - 同一订单首期只允许一笔部分取消，后续按数量拆分/换货任务承接。
+   */
+  async applyPartialLineCancellation(
+    tenantId: string,
+    orderId: string,
+    priced: RentalOrderExtensionPreview & { rateSnapshot: RentalPricingRate[]; ruleSnapshot: RentalRuleConfig },
+    input: { type: "partial_line_cancel"; lineIds: string[]; reason: string; customerConfirmed: boolean; expectedUpdatedAt: string },
+    idempotencyKey: string,
+    operator: string,
+    tx: RentalFactTx
+  ): Promise<{ order: RentalOrder; change: RentalOrderChange }> {
+    this.state(tenantId);
+    if (!input.customerConfirmed) throw new ConflictException("必须先取得客户确认才能应用订单变更");
+    if (!input.reason?.trim()) throw new BadRequestException("订单变更原因不能为空");
+    const order = await this.lockedOrder(tenantId, orderId, tx);
+    if (![RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.ReadyForPickup].includes(order.status)) {
+      throw new ConflictException("只有取货前的待确认或待领取订单可以部分取消");
+    }
+    if (order.updatedAt !== input.expectedUpdatedAt) {
+      throw new ConflictException("订单已发生变化，请重新试算后再提交");
+    }
+    if (priced.orderId !== order.id || Date.parse(priced.newEndAt) !== Date.parse(order.endAt)) {
+      throw new ConflictException("订单变更试算基准已失效，请重新试算");
+    }
+    if (order.effectiveEndAt && Date.parse(order.effectiveEndAt) !== Date.parse(order.endAt)) {
+      throw new ConflictException("已有生效续租的订单不能在本轮部分取消，请人工处理");
+    }
+    if (order.serviceSnapshots?.length) {
+      throw new ConflictException("已包含增值服务的订单暂不能自动部分取消，请人工处理服务释放与退款");
+    }
+    if (order.adjustmentAmount !== 0) {
+      throw new ConflictException("订单已有其他费用调整，请先完成现有调整后再部分取消");
+    }
+    const previousChanges = await this.factStore.listOrderChanges(tenantId, orderId, tx);
+    if (previousChanges.some((row) => row.status === "applied")) {
+      throw new ConflictException("本轮一个订单只允许一次整行部分取消，后续拆分变更请使用专用变更流程");
+    }
+    const lineIds = [...new Set(input.lineIds.map((value) => value.trim()).filter(Boolean))];
+    if (!lineIds.length || lineIds.length !== input.lineIds.length) throw new BadRequestException("请选择有效的订单行");
+    const activeLines = order.lines.filter((line) => (line.cancelledQuantity ?? 0) < line.quantity);
+    const selected = activeLines.filter((line) => lineIds.includes(line.id));
+    if (selected.length !== lineIds.length) throw new ConflictException("存在无效、已取消或不属于当前订单的订单行");
+    if (selected.length >= activeLines.length) throw new ConflictException("整单取消请使用订单取消操作，部分取消必须保留至少一条有效订单行");
+    if (order.reservations.some((row) => lineIds.includes(row.orderLineId) && row.releasedQuantity > 0)) {
+      throw new ConflictException("已有部分归还或释放记录的订单行不能自动部分取消");
+    }
+
+    const differenceAmount = roundMoney(priced.pricingSnapshot?.differenceAmount ?? priced.payableAmount);
+    const depositDelta = roundMoney(priced.depositDelta);
+    const preAuthDelta = roundMoney(priced.preAuthDelta);
+    if (differenceAmount > 0.005 || depositDelta > 0.005 || preAuthDelta > 0.005) {
+      throw new ConflictException("本次取消会产生补款或新增保证金，暂不能自动应用，请人工核价");
+    }
+
+    const beforeSnapshot: Record<string, unknown> = {
+      updatedAt: order.updatedAt,
+      status: order.status,
+      payableAmount: order.payableAmount,
+      finalPayableAmount: order.finalPayableAmount,
+      adjustmentAmount: order.adjustmentAmount,
+      depositAmount: order.depositAmount,
+      preAuthAmount: order.preAuthAmount,
+      lines: order.lines.map((line) => ({ id: line.id, quantity: line.quantity, cancelledQuantity: line.cancelledQuantity ?? 0, amount: line.amount })),
+      reservations: order.reservations.filter((row) => lineIds.includes(row.orderLineId)).map((row) => ({ id: row.id, quantity: row.quantity, releasedQuantity: row.releasedQuantity, status: row.status })),
+      allocations: order.allocations.filter((row) => lineIds.includes(row.orderLineId)).map((row) => ({ id: row.id, quantity: row.quantity, status: row.status, assetId: row.assetId }))
+    };
+
+    const selectedAllocations = order.allocations.filter((row) => lineIds.includes(row.orderLineId));
+    const allocationBefore = structuredClone(selectedAllocations);
+    const releasableAssetIds = new Set(
+      selectedAllocations
+        .filter((row) => row.assetId && ["locked", "allocated"].includes(row.status))
+        .map((row) => row.assetId as string)
+    );
+    const assets = await this.factStore.listAssets(tenantId, tx);
+    const otherAllocatedAssetIds = await this.factStore.allocatedAssetIds(tenantId, tx, order.id);
+    const assetChanges: AssetStatusChange[] = assets
+      .filter((asset) => releasableAssetIds.has(asset.id) && asset.status === RentalAssetStatus.Reserved && !otherAllocatedAssetIds.has(asset.id))
+      .map((asset) => ({ assetId: asset.id, status: RentalAssetStatus.Available, reason: `订单 ${order.orderNo} 部分取消释放资源`, operator }));
+
+    for (const line of order.lines) {
+      if (lineIds.includes(line.id)) line.cancelledQuantity = line.quantity;
+    }
+    for (const reservation of order.reservations) {
+      if (!lineIds.includes(reservation.orderLineId) || ["released", "expired", "cancelled"].includes(reservation.status)) continue;
+      reservation.releasedQuantity = reservation.quantity;
+      reservation.status = RentalReservationStatus.Released;
+    }
+    for (const allocation of order.allocations) {
+      if (lineIds.includes(allocation.orderLineId) && ["pre_assigned", "locked", "allocated"].includes(allocation.status)) allocation.status = "released";
+    }
+    if (order.status === RentalCoreOrderStatus.ReadyForPickup && !allocationComplete(order, true)) {
+      order.status = RentalCoreOrderStatus.Reserved;
+    }
+    const at = now();
+    const previousAssignment = order.assignment;
+    const history = previousAssignment?.history ?? [];
+    order.assignment = {
+      revision: (previousAssignment?.revision ?? 0) + 1,
+      issue: previousAssignment?.issue,
+      operationLock: previousAssignment?.operationLock,
+      history: [...history, {
+        id: randomUUID(), at, actor: operator, action: "order_change_partial_cancel", reason: input.reason.trim(),
+        before: allocationBefore,
+        after: structuredClone(order.allocations.filter((row) => lineIds.includes(row.orderLineId)))
+      }]
+    };
+    this.applyChargeTo(order, {
+      code: `order-change:${previousChanges.length + 1}`,
+      name: "订单部分取消差额",
+      type: "order_change",
+      amount: differenceAmount,
+      sourceVersion: priced.priceVersion ?? priced.ruleVersion,
+      detail: input.reason.trim()
+    });
+    order.depositAmount = roundMoney(order.depositAmount + depositDelta);
+    order.preAuthAmount = roundMoney(order.preAuthAmount + preAuthDelta);
+    order.updatedAt = at;
+
+    const afterSnapshot: Record<string, unknown> = {
+      updatedAt: order.updatedAt,
+      status: order.status,
+      payableAmount: order.payableAmount,
+      finalPayableAmount: order.finalPayableAmount,
+      adjustmentAmount: order.adjustmentAmount,
+      depositAmount: order.depositAmount,
+      preAuthAmount: order.preAuthAmount,
+      lines: order.lines.map((line) => ({ id: line.id, quantity: line.quantity, cancelledQuantity: line.cancelledQuantity ?? 0, amount: line.amount })),
+      reservations: order.reservations.filter((row) => lineIds.includes(row.orderLineId)).map((row) => ({ id: row.id, quantity: row.quantity, releasedQuantity: row.releasedQuantity, status: row.status })),
+      allocations: order.allocations.filter((row) => lineIds.includes(row.orderLineId)).map((row) => ({ id: row.id, quantity: row.quantity, status: row.status, assetId: row.assetId }))
+    };
+    const change: RentalOrderChange = {
+      id: randomUUID(), tenantId, workspaceId: this.resolveWorkspaceId(tenantId), orderId: order.id,
+      sequence: previousChanges.length + 1, type: "partial_line_cancel", status: "applied",
+      request: { ...input, lineIds }, beforeSnapshot, afterSnapshot,
+      diff: {
+        lineIds, differenceAmount, refundAmount: Math.max(0, -differenceAmount), additionalAmount: Math.max(0, differenceAmount),
+        depositDelta, preAuthDelta, pricingSnapshot: priced.pricingSnapshot ?? null,
+        releasedAssetIds: assetChanges.map((row) => row.assetId)
+      },
+      refundAmount: roundMoney(Math.max(0, -differenceAmount)),
+      additionalAmount: roundMoney(Math.max(0, differenceAmount)),
+      depositDelta, preAuthDelta, idempotencyKey, requestedBy: operator, appliedBy: operator,
+      requestedAt: at, appliedAt: at, createdAt: at
+    };
+    await this.factStore.saveOrderAggregate(order, assetChanges, tx);
+    await this.factStore.insertOrderChange(change, tx);
+    return { order, change };
   }
 
   /**
