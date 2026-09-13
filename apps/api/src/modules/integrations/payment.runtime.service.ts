@@ -49,6 +49,7 @@ interface PaymentIntentRow {
   status: string;
   checkoutUrl: string | null;
   externalTransactionId: string | null;
+  failureReason: string | null;
   expiresAt: Date;
   paidAt: Date | null;
 }
@@ -122,21 +123,57 @@ function stableFormContent(values: Record<string, unknown>, exclude: string[] = 
     .join("&");
 }
 
+/**
+ * 请求已经离开本系统，但没有得到可确认的支付平台结果。
+ * 这类错误绝不能把支付单置为 failed：平台可能已经受理，后续只能靠查询或回调确认。
+ */
+export class PaymentProviderUnknownError extends ServiceUnavailableException {
+  readonly providerResultUnknown = true;
+
+  constructor(message = "支付平台未返回可确认结果，请查询支付状态后再重试") {
+    super(message);
+    this.name = "PaymentProviderUnknownError";
+  }
+}
+
+class PaymentProviderHttpError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+    this.name = "PaymentProviderHttpError";
+  }
+}
+
+function isProviderCallUnknown(error: unknown) {
+  if (error instanceof PaymentProviderUnknownError) return true;
+  if (!(error instanceof PaymentProviderHttpError)) return false;
+  return [408, 425, 429].includes(error.status) || error.status >= 500;
+}
+
 async function fetchJson(url: string, init: RequestInit, timeoutMs = 10_000): Promise<JsonRecord> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     // 租户可配置网关，但支付请求不应被跟随跳转到另一个主机。
     const safeUrl = await assertOutboundUrl(url, "支付平台请求地址", { allowQuery: true });
-    const response = await fetch(safeUrl, { ...init, redirect: "error", signal: controller.signal });
-    const raw = await response.text();
+    let response: Response;
+    try {
+      response = await fetch(safeUrl, { ...init, redirect: "error", signal: controller.signal });
+    } catch {
+      throw new PaymentProviderUnknownError();
+    }
+    let raw: string;
+    try {
+      raw = await response.text();
+    } catch {
+      throw new PaymentProviderUnknownError();
+    }
     let body: JsonRecord;
     try {
       body = JSON.parse(raw) as JsonRecord;
     } catch {
       body = { raw: raw.slice(0, 500) };
     }
-    if (!response.ok) throw new Error(`HTTP ${response.status}: ${valueOf(body.message || body.msg || body.raw)}`);
+    if (!response.ok) throw new PaymentProviderHttpError(response.status, `HTTP ${response.status}: ${valueOf(body.message || body.msg || body.raw)}`);
     return body;
   } finally {
     clearTimeout(timer);
@@ -274,8 +311,11 @@ export class PaymentRuntimeService {
       return this.toResponse(updated);
     } catch (error) {
       const message = error instanceof Error ? error.message : "支付平台调用失败";
-      await this.prisma.rentalPaymentIntent.update({ where: { id: intent.id }, data: { status: "failed", failureReason: message.slice(0, 500) } });
-      await this.log(tenantId, config, "create_payment_intent", "failed", { orderId, intentId: intent.id, merchantOrderNo: intent.merchantOrderNo, amount }, undefined, message);
+      const unknown = isProviderCallUnknown(error);
+      const failureReason = unknown ? "支付请求结果未知，请查询支付状态后再重试" : message.slice(0, 500);
+      await this.prisma.rentalPaymentIntent.update({ where: { id: intent.id }, data: { status: unknown ? "pending" : "failed", failureReason } });
+      await this.log(tenantId, config, "create_payment_intent", unknown ? "pending" : "failed", { orderId, intentId: intent.id, merchantOrderNo: intent.merchantOrderNo, amount }, undefined, failureReason);
+      if (unknown && !(error instanceof PaymentProviderUnknownError)) throw new PaymentProviderUnknownError();
       throw error instanceof ServiceUnavailableException || error instanceof BadRequestException ? error : new ServiceUnavailableException(`支付平台调用失败：${message.slice(0, 180)}`);
     }
   }
@@ -1218,7 +1258,7 @@ export class PaymentRuntimeService {
     const result = (response.alipay_trade_precreate_response ?? {}) as JsonRecord;
     if (valueOf(result.code) !== "10000") throw new Error(valueOf(result.sub_msg || result.msg || "支付宝下单失败"));
     const checkoutUrl = valueOf(result.qr_code);
-    if (!checkoutUrl) throw new Error("支付宝未返回二维码地址");
+    if (!checkoutUrl) throw new PaymentProviderUnknownError("支付宝未返回可用二维码地址，请查询支付状态后再重试");
     return { checkoutUrl, responseCode: valueOf(result.code), responseJson: { code: valueOf(result.code), qrCode: checkoutUrl } };
   }
 
@@ -1306,7 +1346,7 @@ export class PaymentRuntimeService {
     });
     const response = await this.wechatRequest(config, "POST", path, requestBody);
     const checkoutUrl = valueOf(response.code_url);
-    if (!checkoutUrl) throw new Error("微信支付未返回二维码地址");
+    if (!checkoutUrl) throw new PaymentProviderUnknownError("微信支付未返回可用二维码地址，请查询支付状态后再重试");
     return { checkoutUrl, responseCode: "SUCCESS", responseJson: { codeUrl: checkoutUrl } };
   }
 
@@ -1406,7 +1446,13 @@ export class PaymentRuntimeService {
       checkoutUrl: row.checkoutUrl ?? undefined,
       expiresAt: row.expiresAt.toISOString(),
       paidAt: row.paidAt?.toISOString(),
-      message: row.status === "failed" ? "支付平台下单失败，请重新发起" : row.status === "funding_failed" ? "支付已验签但入账失败，请联系运营处理" : undefined
+      message: row.status === "failed"
+        ? "支付平台下单失败，请重新发起"
+        : row.status === "funding_failed"
+          ? "支付已验签但入账失败，请联系运营处理"
+          : row.status === "pending" && row.failureReason
+            ? "支付请求结果未知，请先查询支付状态"
+            : undefined
     };
   }
 

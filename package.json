@@ -18,6 +18,7 @@
     "test:tenant-integration-default": "npm run build -w @rental-os/shared && node tests/tenant-integration-default.test.cjs",
     "test:file-storage": "npm run build -w @rental-os/shared && node tests/file-storage-lifecycle.test.cjs",
     "test:payment-reconciliation": "npm run build -w @rental-os/shared && npm run build -w @rental-os/api && node tests/payment-reconciliation.test.cjs",
+    "test:payment-provider-unknown": "npm run build -w @rental-os/shared && npm run build -w @rental-os/api && node tests/payment-provider-unknown.test.cjs",
     "test:payment-refund-webhook": "npm run build -w @rental-os/shared && npm run build -w @rental-os/api && node tests/payment-refund-webhook.test.cjs",
     "test:qualification-gate": "npm run build -w @rental-os/shared && node tests/rental-qualification-gate.test.cjs",
     "test:rental-selector-scope": "node tests/rental-selector-workspace.test.cjs",
