@@ -69,6 +69,41 @@ async function request(pathname, method = "GET", token, body) {
   return data;
 }
 
+async function uploadItemGroupImage(token, itemGroupId, imagePath) {
+  const buffer = fs.readFileSync(imagePath);
+  const form = new FormData();
+  form.append("file", new Blob([buffer], { type: "image/png" }), path.basename(imagePath));
+  const response = await fetch(`${API_BASE}/rental/v1/item-groups/${encodeURIComponent(itemGroupId)}/images`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}` },
+    body: form
+  });
+  let payload;
+  try { payload = await response.json(); } catch { payload = {}; }
+  if (!response.ok) {
+    const message = typeof payload?.message === "string"
+      ? payload.message
+      : Array.isArray(payload?.message) ? payload.message.join("；") : `HTTP ${response.status}`;
+    throw new Error(`POST item-group image 失败：${message}`);
+  }
+  return payload?.data ?? payload;
+}
+
+async function ensureItemGroupImages(token, workspaceCode, groups) {
+  const imageByWorkspace = {
+    default: path.join(ROOT, "apps", "website", "public", "images", "hero-camera.png"),
+    camping: path.join(ROOT, "apps", "website", "public", "images", "camping.png"),
+    vehicle: path.join(ROOT, "apps", "website", "public", "images", "vehicle.png"),
+    construction: path.join(ROOT, "apps", "website", "public", "images", "construction.png")
+  };
+  const imagePath = imageByWorkspace[workspaceCode];
+  if (!imagePath || !fs.existsSync(imagePath)) throw new Error(`${workspaceCode} 缺少演示图片资源`);
+  for (const group of groups) {
+    if (Array.isArray(group.images) && group.images.length > 0) continue;
+    await uploadItemGroupImage(token, group.id, imagePath);
+  }
+}
+
 function latestVersion(plan) {
   return [...(plan?.versions || [])].sort((a, b) => Number(b.version) - Number(a.version))[0];
 }
@@ -305,6 +340,8 @@ async function main() {
 
       const locations = await request("/rental/v1/locations", "GET", token);
       const groups = await request("/rental/v1/pricing-groups", "GET", token);
+      const itemGroups = await request("/rental/v1/item-groups", "GET", token);
+      await ensureItemGroupImages(token, workspace.code, itemGroups);
       const pricingPlans = await request("/rental/v1/pricing-plans", "GET", token);
       const discountPlans = await request("/rental/v1/discount-plans", "GET", token);
       const services = await request("/rental/v1/value-added-services", "GET", token);
@@ -367,7 +404,17 @@ async function main() {
           operator: "demo-seed"
         });
       }
-      summaries.push({ code: workspace.code, groups: groups.length, plans: pricingPlans.length, discounts: discountPlans.length, services: services.length, customerCoupon: Boolean(customerCoupon), orderStatus: order?.status || "existing" });
+      summaries.push({
+        code: workspace.code,
+        itemGroups: itemGroups.length,
+        itemGroupsWithImages: itemGroups.filter((item) => Array.isArray(item.images) && item.images.length > 0).length,
+        pricingGroups: groups.length,
+        plans: pricingPlans.length,
+        discounts: discountPlans.length,
+        services: services.length,
+        customerCoupon: Boolean(customerCoupon),
+        orderStatus: order?.status || "existing"
+      });
     }
 
     const counts = {};
