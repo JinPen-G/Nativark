@@ -3696,14 +3696,15 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const realSms = template.channel === "sms" && Boolean(this.notificationRuntime);
     if (realSms && !this.secretBox) throw new ServiceUnavailableException("短信通知安全组件未就绪");
     const recipientFingerprint = realSms ? this.secretBox!.fingerprint(canonicalSmsRecipient(input.recipient)) : undefined;
+    const rateAt = realSms ? stamp() : undefined;
     if (realSms) {
-      const rate = await this.factStore.reserveSmsRate(tenantId, recipientFingerprint!, stamp(), tx);
+      const rate = await this.factStore.reserveSmsRate(tenantId, recipientFingerprint!, rateAt!, tx);
       if (!rate.allowed) {
         throw new HttpException(`短信发送频率已达到安全上限，请于 ${rate.retryAt} 后重试`, HttpStatus.TOO_MANY_REQUESTS);
       }
     }
     const render = (source: string) => source.replace(/\{\{(\w+)\}\}/g, (_match, key: string) => String(input.variables[key] ?? ""));
-    const timestamp = stamp();
+    const timestamp = rateAt ?? stamp();
     const log: RentalNotificationSendLogV1 = {
       id: uid("notification"), tenantId, templateId: template.id, templateVersion: template.version,
       eventCode: template.eventCode, channel: template.channel,
@@ -3721,9 +3722,18 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       createdAt: timestamp
     };
     const recipientEncrypted = realSms ? this.secretBox!.encrypt({ recipient: input.recipient.trim() }) : undefined;
-    const outcome = await this.factStore.insertNotificationLog(log, tx, recipientEncrypted, recipientFingerprint);
+    let outcome: "inserted" | "duplicate";
+    try {
+      outcome = await this.factStore.insertNotificationLog(log, tx, recipientEncrypted, recipientFingerprint);
+    } catch (error) {
+      if (realSms) await this.factStore.releaseSmsRate(tenantId, recipientFingerprint!, rateAt!, tx);
+      throw error;
+    }
     // 唯一键撞了 → 说明这条业务事件已发过；不是错误，静默跳过不重复通知。
-    if (outcome === "duplicate") return undefined;
+    if (outcome === "duplicate") {
+      if (realSms) await this.factStore.releaseSmsRate(tenantId, recipientFingerprint!, rateAt!, tx);
+      return undefined;
+    }
     // 事务路径下不动缓存：回滚后内存里会留下库中不存在的幽灵通知记录。
     if (tx) return log;
     state.notificationLogs.unshift(log);

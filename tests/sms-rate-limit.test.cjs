@@ -46,6 +46,9 @@ async function main() {
   assert.equal(otherRecipient.allowed, true, "不同收件人不应共用手机号频率桶");
   const otherTenant = await repo.reserveSmsRate("tenant-2", "fingerprint-1", at);
   assert.equal(otherTenant.allowed, true, "不同租户不应共用频率桶");
+  await repo.releaseSmsRate("tenant-1", "fingerprint-1", at);
+  const released = await repo.reserveSmsRate("tenant-1", "fingerprint-1", at);
+  assert.equal(released.allowed, true, "幂等重复或落库失败释放预留后，不应错误消耗频率额度");
   console.log("sms rate limit tests passed");
 }
 

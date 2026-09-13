@@ -99,6 +99,12 @@ export interface RentalBusinessFactStore {
     at: string,
     tx?: RentalBusinessFactTx
   ): Promise<{ allowed: boolean; retryAt: string }>;
+  releaseSmsRate(
+    tenantId: string,
+    recipientFingerprint: string,
+    at: string,
+    tx?: RentalBusinessFactTx
+  ): Promise<void>;
   findNotificationDelivery(tenantId: string, id: string): Promise<RentalNotificationDeliveryRecord | undefined>;
   listDueNotificationDeliveries(tenantId: string, at: string, limit: number): Promise<RentalNotificationDeliveryRecord[]>;
   claimNotificationDelivery(tenantId: string, id: string, at: string, leaseUntil: string, force: boolean): Promise<boolean>;
@@ -739,6 +745,31 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       return { allowed: true, retryAt: at };
     };
     return tx ? run(tx) : this.prisma.$transaction((client) => run(client));
+  }
+
+  async releaseSmsRate(
+    tenantId: string,
+    recipientFingerprint: string,
+    at: string,
+    tx?: RentalBusinessFactTx
+  ): Promise<void> {
+    const nowMs = new Date(at).getTime();
+    if (!Number.isFinite(nowMs)) throw new Error("短信频率限制时间无效");
+    const recipientBucketStart = new Date(Math.floor(nowMs / (10 * 60 * 1000)) * 10 * 60 * 1000);
+    const workspaceBucketStart = new Date(Math.floor(nowMs / (60 * 1000)) * 60 * 1000);
+    const run = async (client: Prisma.TransactionClient | PrismaService) => {
+      const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
+      await client.rentalNotificationRateBucket.updateMany({
+        where: { tenantId, workspaceId, scopeKey: `recipient:${recipientFingerprint}`, bucketStart: recipientBucketStart, count: { gt: 0 } },
+        data: { count: { decrement: 1 } }
+      });
+      await client.rentalNotificationRateBucket.updateMany({
+        where: { tenantId, workspaceId, scopeKey: "workspace", bucketStart: workspaceBucketStart, count: { gt: 0 } },
+        data: { count: { decrement: 1 } }
+      });
+    };
+    if (tx) await run(tx);
+    else await this.prisma.$transaction((client) => run(client));
   }
 
   private notificationDelivery(row: Prisma.RentalNotificationLogGetPayload<object>): RentalNotificationDeliveryRecord {
