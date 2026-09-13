@@ -20,6 +20,8 @@ export interface FileBusinessOwner {
   businessType: string;
   businessId: string;
   uploadScene?: string;
+  /** 客户端或空间内业务调用时必须带当前空间；租户级资料可省略。 */
+  workspaceId?: string;
 }
 
 const UPLOAD_TTL_SECONDS = 15 * 60;
@@ -147,7 +149,7 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
       const existingMode = (existingAsset.metadata as JsonRecord | null)?.uploadMode === "provider" ? "provider" : "simulation";
       return this.sessionSummary(existing, existingAsset, existingMode);
     }
-    await this.assertBusinessReference(tenantId, input.businessType, input.businessId);
+    await this.assertBusinessReference(tenantId, input.businessType, input.businessId, owner?.workspaceId);
 
     const assetId = `file_${randomUUID().replace(/-/g, "")}`;
     const sessionId = randomUUID();
@@ -349,6 +351,7 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     if (!session) throw new NotFoundException("上传会话不存在");
     const asset = await this.prisma.fileAsset.findFirst({ where: { id: session.fileAssetId, tenantId } });
     if (!asset || (owner && !this.matchesOwner(asset, owner))) throw new NotFoundException("上传会话不存在或不属于当前业务对象");
+    if (owner?.workspaceId) await this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? "", owner.workspaceId);
     if (session.status === "completed") return this.assetSummary(asset);
     if (session.status !== "pending_upload") throw new ConflictException("上传会话已失效");
     if (session.expiresAt.getTime() <= Date.now()) {
@@ -386,6 +389,7 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     const asset = await this.prisma.fileAsset.findFirst({ where: { id: fileAssetId, tenantId, status: "active" } });
     if (asset && owner && !this.matchesOwner(asset, owner)) throw new NotFoundException("文件不存在或不属于当前业务对象");
     if (!asset) throw new NotFoundException("文件不存在或尚未完成上传");
+    if (owner?.workspaceId) await this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? "", owner.workspaceId);
     if (asset.storageProvider === "local_mock") {
       const result = { fileAssetId, provider: asset.storageProvider, mode: "simulation" as const, downloadUrl: `/api/files/${fileAssetId}/download-url` };
       await this.operationLog?.record({ tenantId, action: "file.download-url.issue", targetType: "file", targetId: fileAssetId, detail: "生成受保护文件访问引用", metadata: { mode: result.mode } });
@@ -418,34 +422,36 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
       && asset.uploadScene === input.uploadScene.trim();
   }
 
-  private async assertBusinessReference(tenantId: string, businessType: string, businessId: string) {
+  private async assertBusinessReference(tenantId: string, businessType: string, businessId: string, workspaceId?: string) {
     const id = businessId.trim();
     const type = businessType.trim().toLowerCase();
     let exists: boolean;
     switch (type) {
       case "rental_order":
       case "order":
-        exists = Boolean(await this.prisma.rentalOrder.findFirst({ where: { id, tenantId }, select: { id: true } }));
+        exists = Boolean(await this.prisma.rentalOrder.findFirst({ where: { id, tenantId, ...(workspaceId ? { workspaceId } : {}) }, select: { id: true } }));
         break;
       case "rental_quote":
       case "quote":
-        exists = Boolean(await this.prisma.rentalQuote.findFirst({ where: { id, tenantId }, select: { id: true } }));
+        exists = Boolean(await this.prisma.rentalQuote.findFirst({ where: { id, tenantId, ...(workspaceId ? { workspaceId } : {}) }, select: { id: true } }));
         break;
       case "rental_item_group":
       case "item_group":
-        exists = Boolean(await this.prisma.rentalItemGroup.findFirst({ where: { id, tenantId }, select: { id: true } }));
+        exists = Boolean(await this.prisma.rentalItemGroup.findFirst({ where: { id, tenantId, ...(workspaceId ? { workspaceId } : {}) }, select: { id: true } }));
         break;
       case "rental_asset":
       case "asset":
-        exists = Boolean(await this.prisma.rentalAsset.findFirst({ where: { id, tenantId }, select: { id: true } }));
+        exists = Boolean(await this.prisma.rentalAsset.findFirst({ where: { id, tenantId, ...(workspaceId ? { workspaceId } : {}) }, select: { id: true } }));
         break;
       case "rental_work_order":
       case "work_order":
-        exists = Boolean(await this.prisma.rentalWorkOrder.findFirst({ where: { id, tenantId }, select: { id: true } }));
+        exists = Boolean(await this.prisma.rentalWorkOrder.findFirst({ where: { id, tenantId, ...(workspaceId ? { workspaceId } : {}) }, select: { id: true } }));
         break;
       case "customer":
       case "customer_profile":
-        exists = Boolean(await this.prisma.customerProfile.findFirst({ where: { id, tenantId }, select: { id: true } }));
+        exists = workspaceId
+          ? Boolean(await this.prisma.customerWorkspaceLink.findFirst({ where: { tenantId, workspaceId, customerId: id, status: "active" }, select: { id: true } }))
+          : Boolean(await this.prisma.customerProfile.findFirst({ where: { id, tenantId }, select: { id: true } }));
         break;
       case "customer_contract":
       case "corporate_contract":
@@ -460,7 +466,7 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
         exists = Boolean(await this.prisma.customerCorporateCredit.findFirst({ where: { id, tenantId }, select: { id: true } }));
         break;
       case "membership_review":
-        exists = Boolean(await this.prisma.customerMembershipReview.findFirst({ where: { id, tenantId }, select: { id: true } }));
+        exists = Boolean(await this.prisma.customerMembershipReview.findFirst({ where: { id, tenantId, ...(workspaceId ? { workspaceId } : {}) }, select: { id: true } }));
         break;
       case "async_job":
         exists = Boolean(await this.prisma.asyncJob.findFirst({ where: { id, tenantId }, select: { id: true } }));

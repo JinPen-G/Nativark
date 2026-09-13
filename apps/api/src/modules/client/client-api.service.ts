@@ -587,17 +587,17 @@ export class ClientApiService {
       uploadScene: "client-qualification",
       idempotencyKey: input.idempotencyKey,
       metadata: { qualificationType: input.qualificationType }
-    }, { businessType: "customer", businessId: context.customerId, uploadScene: "client-qualification" });
+    }, { businessType: "customer", businessId: context.customerId, uploadScene: "client-qualification", workspaceId: context.workspaceId });
   }
 
   async completeQualificationUpload(context: ClientRequestContext, sessionId: string, input: ClientQualificationUploadCompleteRequest) {
     this.requireActiveMembership(context);
-    return this.files.completeUpload(context.tenantId, sessionId, input, { businessType: "customer", businessId: context.customerId, uploadScene: "client-qualification" });
+    return this.files.completeUpload(context.tenantId, sessionId, input, { businessType: "customer", businessId: context.customerId, uploadScene: "client-qualification", workspaceId: context.workspaceId });
   }
 
   async qualificationFileUrl(context: ClientRequestContext, fileAssetId: string): Promise<ClientQualificationFileUrlResponse> {
     this.requireActiveMembership(context);
-    return this.files.downloadUrl(context.tenantId, fileAssetId, { businessType: "customer", businessId: context.customerId, uploadScene: "client-qualification" });
+    return this.files.downloadUrl(context.tenantId, fileAssetId, { businessType: "customer", businessId: context.customerId, uploadScene: "client-qualification", workspaceId: context.workspaceId });
   }
 
   async availability(context: ClientRequestContext, input: { locationId: string; startAt: string; endAt: string; lines: Array<{ itemGroupId: string; quantity: number }> }) {

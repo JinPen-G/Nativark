@@ -46,6 +46,7 @@ function assetRow(id, status = "pending_upload", assetTenantId = tenantId, asset
 const prisma = {
   rentalOrder: { findFirst: async ({ where }) => where.tenantId === tenantId && where.id === orderId ? { id: orderId } : null },
   customerProfile: { findFirst: async ({ where }) => where.tenantId === tenantId && where.id === "customer-file-test" ? { id: where.id } : null },
+  customerWorkspaceLink: { findFirst: async ({ where }) => where.tenantId === tenantId && where.workspaceId === "workspace-file-test" && where.customerId === "customer-file-test" && where.status === "active" ? { id: "link-file-test" } : null },
   fileAsset: {
     create: async ({ data }) => {
       const row = { ...assetRow(data.id), ...data, createdAt: new Date(), updatedAt: new Date() };
@@ -158,7 +159,7 @@ void (async () => {
     uploadScene: "client-qualification",
     idempotencyKey: "upload-client-qualification-1",
     metadata: { qualificationType: "driver_license" }
-  }, { businessType: "customer", businessId: "customer-file-test", uploadScene: "client-qualification" });
+  }, { businessType: "customer", businessId: "customer-file-test", uploadScene: "client-qualification", workspaceId: "workspace-file-test" });
   await assert.rejects(
     () => runtime.createUploadSession(tenantId, {
       businessModule: "membership",
@@ -170,14 +171,34 @@ void (async () => {
       uploadScene: "client-qualification",
       idempotencyKey: "upload-client-qualification-1",
       metadata: { qualificationType: "driver_license" }
-    }, { businessType: "customer", businessId: "other-customer", uploadScene: "client-qualification" }),
+    }, { businessType: "customer", businessId: "other-customer", uploadScene: "client-qualification", workspaceId: "workspace-file-test" }),
     /幂等键已被其他业务对象使用/u
   );
   await assert.rejects(
-    () => runtime.completeUpload(tenantId, qualificationSession.sessionId, {}, { businessType: "customer", businessId: "other-customer", uploadScene: "client-qualification" }),
+    () => runtime.createUploadSession(tenantId, {
+      businessModule: "membership",
+      businessType: "customer",
+      businessId: "customer-file-test",
+      fileName: "license-other-space.jpg",
+      mimeType: "image/jpeg",
+      sizeBytes: 2048,
+      uploadScene: "client-qualification",
+      idempotencyKey: "upload-client-other-workspace-1",
+      metadata: { qualificationType: "driver_license" }
+    }, { businessType: "customer", businessId: "customer-file-test", uploadScene: "client-qualification", workspaceId: "workspace-other" }),
+    /业务对象不存在或不属于当前租户/u
+  );
+  await assert.rejects(
+    () => runtime.completeUpload(tenantId, qualificationSession.sessionId, {}, { businessType: "customer", businessId: "other-customer", uploadScene: "client-qualification", workspaceId: "workspace-file-test" }),
     /上传会话不存在或不属于当前业务对象/u
   );
-  await runtime.completeUpload(tenantId, qualificationSession.sessionId, {}, { businessType: "customer", businessId: "customer-file-test", uploadScene: "client-qualification" });
+  await runtime.completeUpload(tenantId, qualificationSession.sessionId, {}, { businessType: "customer", businessId: "customer-file-test", uploadScene: "client-qualification", workspaceId: "workspace-file-test" });
+  const qualificationUrl = await runtime.downloadUrl(tenantId, qualificationSession.fileAssetId, { businessType: "customer", businessId: "customer-file-test", uploadScene: "client-qualification", workspaceId: "workspace-file-test" });
+  assert.equal(qualificationUrl.fileAssetId, qualificationSession.fileAssetId);
+  await assert.rejects(
+    () => runtime.downloadUrl(tenantId, qualificationSession.fileAssetId, { businessType: "customer", businessId: "customer-file-test", uploadScene: "client-qualification", workspaceId: "workspace-other" }),
+    /文件不存在或不属于当前业务对象|业务对象不存在或不属于当前租户/u
+  );
   console.log("client file owner binding tests passed");
 
   const raceSession = await runtime.createUploadSession(tenantId, {
