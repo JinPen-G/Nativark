@@ -99,6 +99,7 @@ export function StockOperationsPanel({
           { title: terminology?.fulfillmentLabel ?? "履约地点", dataIndex: "locationName" },
           { title: "变化", dataIndex: "quantityDelta", align: "right", render: (value: number) => <b>{deltaLabel(value)}</b> },
           { title: "前 → 后", render: (_: unknown, row) => `${row.onHandBefore} → ${row.onHandAfter}` },
+          { title: "批次/单据", render: (_: unknown, row) => <>{row.batchNo && <div>批次：{row.batchNo}</div>}{row.sourceDocumentNo && <Typography.Text type="secondary">单据：{row.sourceDocumentNo}</Typography.Text>}{!row.batchNo && !row.sourceDocumentNo && <Typography.Text type="secondary">未填写</Typography.Text>}</> },
           { title: "原因/来源", dataIndex: "reason", ellipsis: true },
           { title: "操作人", dataIndex: "operator" }
         ]}
@@ -131,6 +132,10 @@ export function StockOperationsPanel({
           <Select options={storageLocations.map((location) => ({ value: location.id, label: location.name }))} />
         </Form.Item>}
         {operationType === "count_adjustment" ? <Form.Item label="盘点实数" name="actualOnHandQuantity" rules={[{ required: true }]}><InputNumber min={0} precision={0} style={{ width: "100%" }} /></Form.Item> : <Form.Item label="数量" name="quantity" rules={[{ required: true }]}><InputNumber min={1} precision={0} style={{ width: "100%" }} /></Form.Item>}
+        <Row gutter={12}>
+          <Col span={12}><Form.Item label="批次号" name="batchNo" rules={[{ max: 100 }]}><Input placeholder="可填外部批次或本次作业批次" /></Form.Item></Col>
+          <Col span={12}><Form.Item label="来源/审批单号" name="sourceDocumentNo" rules={[{ max: 100 }]}><Input placeholder="可填入库单、盘点单或审批单号" /></Form.Item></Col>
+        </Row>
         <Form.Item label="原因或来源说明" name="reason" rules={[{ required: true, whitespace: true, max: 500 }]}><Input.TextArea rows={4} placeholder="例如：采购入库单、月末盘点差异、报损审批单号或退出原因" /></Form.Item>
         <Form.Item name="idempotencyKey" hidden><Input /></Form.Item>
         <Typography.Text type="secondary">当前作业会使用一次性幂等键；网络异常后在本窗口重试，不会重复增加或扣减库存。</Typography.Text>

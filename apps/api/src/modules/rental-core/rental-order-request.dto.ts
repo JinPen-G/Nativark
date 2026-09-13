@@ -645,6 +645,18 @@ export class ApplyRentalStockOperationDto implements RentalStockOperationRequest
   @MaxLength(500)
   reason!: string;
 
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  batchNo?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  sourceDocumentNo?: string;
+
   @IsString()
   @IsNotEmpty()
   @MaxLength(191)

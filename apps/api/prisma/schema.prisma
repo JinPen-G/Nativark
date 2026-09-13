@@ -2010,6 +2010,8 @@ model RentalStockLedgerEntry {
   reservedQuantity    Int
   maintenanceQuantity Int
   reason              String                    @db.VarChar(500)
+  batchNo             String?                   @db.VarChar(100)
+  sourceDocumentNo    String?                   @db.VarChar(100)
   idempotencyKey      String                    @db.VarChar(191)
   requestFingerprint  String                    @db.Char(64)
   operator            String                    @db.VarChar(191)
@@ -2017,6 +2019,8 @@ model RentalStockLedgerEntry {
 
   @@unique([workspaceId, idempotencyKey, entryKind], map: "rental_stock_ledger_idem_entry_key")
   @@index([tenantId, workspaceId, itemGroupId, locationId, createdAt], map: "rental_stock_ledger_scope_created_idx")
+  @@index([tenantId, workspaceId, batchNo, createdAt], map: "rental_stock_ledger_batch_idx")
+  @@index([tenantId, workspaceId, sourceDocumentNo, createdAt], map: "rental_stock_ledger_document_idx")
   @@index([workspaceId, operationId], map: "rental_stock_ledger_operation_idx")
   @@map("rental_stock_ledger_entries")
 }

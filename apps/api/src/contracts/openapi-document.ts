@@ -2020,7 +2020,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   {
     method: "get", path: "/api/rental/v1/stock-ledger", tag: "RentalCore", operationId: "listRentalStockLedger",
     summary: "List quantity stock operation ledger", permissions: ["rental-core:asset:view"], responseSchema: "GenericObject",
-    parameters: [queryParam("itemGroupId"), queryParam("locationId"), queryParam("limit")]
+    parameters: [queryParam("itemGroupId"), queryParam("locationId"), queryParam("batchNo"), queryParam("sourceDocumentNo"), queryParam("limit")]
   },
   {
     method: "post", path: "/api/rental/v1/stock-operations", tag: "RentalCore", operationId: "applyRentalStockOperation",

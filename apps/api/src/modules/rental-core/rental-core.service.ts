@@ -1106,7 +1106,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     });
   }
 
-  async listStockLedger(tenantId: string, filters: { itemGroupId?: string; locationId?: string; limit?: number } = {}) {
+  async listStockLedger(tenantId: string, filters: { itemGroupId?: string; locationId?: string; batchNo?: string; sourceDocumentNo?: string; limit?: number } = {}) {
     await this.factContext(tenantId);
     return this.factStore.listStockLedger(tenantId, filters);
   }
@@ -1116,6 +1116,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const group = this.group(state, input.itemGroupId);
     if (group.inventoryMode !== RentalInventoryMode.Quantity) throw new BadRequestException("库存日常作业目前只适用于数量型库存");
     if (!input.reason?.trim()) throw new BadRequestException("库存作业必须填写原因或来源说明");
+    if (input.batchNo !== undefined && (!input.batchNo.trim() || input.batchNo.trim().length > 100)) throw new BadRequestException("批次号不能为空且不能超过100个字符");
+    if (input.sourceDocumentNo !== undefined && (!input.sourceDocumentNo.trim() || input.sourceDocumentNo.trim().length > 100)) throw new BadRequestException("来源单据号不能为空且不能超过100个字符");
 
     if (input.type === "transfer") {
       if (!input.fromLocationId || !input.toLocationId || input.fromLocationId === input.toLocationId) throw new BadRequestException("调拨必须选择两个不同的履约地点");
@@ -1126,7 +1128,13 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       this.activeLocation(state, input.locationId, "storage");
     }
 
-    const result = await this.factStore.applyStockOperation({ ...input, tenantId, operator: operator || input.operator || "系统" });
+    const result = await this.factStore.applyStockOperation({
+      ...input,
+      batchNo: input.batchNo?.trim() || undefined,
+      sourceDocumentNo: input.sourceDocumentNo?.trim() || undefined,
+      tenantId,
+      operator: operator || input.operator || "系统"
+    });
     const locationIds = new Set(result.entries.map((entry) => entry.locationId));
     const balances = (await this.listStockBalances(tenantId)).filter((row) => row.itemGroupId === input.itemGroupId && locationIds.has(row.locationId));
     return { ...result, balances };

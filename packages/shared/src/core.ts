@@ -4553,6 +4553,10 @@ export interface RentalStockLedgerEntry {
   reservedQuantity: number;
   maintenanceQuantity: number;
   reason: string;
+  /** 外部批次或本次库存作业批次，不能替代幂等键。 */
+  batchNo?: string;
+  /** 外部入库单、盘点单、调拨单或审批单号。 */
+  sourceDocumentNo?: string;
   idempotencyKey: string;
   operator: string;
   createdAt: string;
@@ -4567,6 +4571,8 @@ export interface RentalStockOperationRequest {
   quantity?: number;
   actualOnHandQuantity?: number;
   reason: string;
+  batchNo?: string;
+  sourceDocumentNo?: string;
   idempotencyKey: string;
   operator?: string;
 }

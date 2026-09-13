@@ -52,18 +52,20 @@ let passed = 0;
 const ok = (message) => { passed += 1; console.log(`  PASS ${message}`); };
 
 (async () => {
-  const received = await facts.applyStockOperation({ ...base, type: "receive", locationId: "loc_a", quantity: 5, idempotencyKey: "receive-1" });
+  const received = await facts.applyStockOperation({ ...base, type: "receive", locationId: "loc_a", quantity: 5, batchNo: "B-2026-01", sourceDocumentNo: "IN-001", idempotencyKey: "receive-1" });
   assert.equal(received.entries[0].quantityDelta, 5);
+  assert.equal(received.entries[0].batchNo, "B-2026-01");
+  assert.equal(received.entries[0].sourceDocumentNo, "IN-001");
   assert.equal(state.balances.get("loc_a").onHandQuantity, 15);
   ok("入库在同一作业中增加余额并追加前后值流水");
 
-  const replay = await facts.applyStockOperation({ ...base, type: "receive", locationId: "loc_a", quantity: 5, idempotencyKey: "receive-1" });
+  const replay = await facts.applyStockOperation({ ...base, type: "receive", locationId: "loc_a", quantity: 5, batchNo: "B-2026-01", sourceDocumentNo: "IN-001", idempotencyKey: "receive-1" });
   assert.equal(replay.idempotent, true);
   assert.equal(state.balances.get("loc_a").onHandQuantity, 15);
   ok("相同幂等键重试不重复增加库存");
 
   await assert.rejects(
-    () => facts.applyStockOperation({ ...base, type: "receive", locationId: "loc_a", quantity: 6, idempotencyKey: "receive-1" }),
+    () => facts.applyStockOperation({ ...base, type: "receive", locationId: "loc_a", quantity: 5, batchNo: "B-2026-01", sourceDocumentNo: "IN-002", idempotencyKey: "receive-1" }),
     (error) => error instanceof ConflictException && /另一笔库存作业/u.test(error.message)
   );
   ok("同一幂等键参数变化会拒绝而不是回放错误结果");

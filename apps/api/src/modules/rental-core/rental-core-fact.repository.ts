@@ -311,6 +311,8 @@ function toStockLedgerEntry(row: any): RentalStockLedgerEntry {
     reservedQuantity: row.reservedQuantity,
     maintenanceQuantity: row.maintenanceQuantity,
     reason: row.reason,
+    batchNo: row.batchNo ?? undefined,
+    sourceDocumentNo: row.sourceDocumentNo ?? undefined,
     idempotencyKey: row.idempotencyKey,
     operator: row.operator,
     createdAt: row.createdAt.toISOString()
@@ -1013,7 +1015,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
 
   async listStockLedger(
     tenantId: string,
-    filters: { itemGroupId?: string; locationId?: string; limit?: number } = {},
+    filters: { itemGroupId?: string; locationId?: string; batchNo?: string; sourceDocumentNo?: string; limit?: number } = {},
     tx?: RentalFactTx
   ): Promise<RentalStockLedgerEntry[]> {
     const client = tx ?? this.prisma;
@@ -1024,7 +1026,9 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
         tenantId,
         workspaceId,
         ...(filters.itemGroupId ? { itemGroupId: filters.itemGroupId } : {}),
-        ...(filters.locationId ? { locationId: filters.locationId } : {})
+        ...(filters.locationId ? { locationId: filters.locationId } : {}),
+        ...(filters.batchNo ? { batchNo: filters.batchNo } : {}),
+        ...(filters.sourceDocumentNo ? { sourceDocumentNo: filters.sourceDocumentNo } : {})
       },
       include: { itemGroup: { select: { code: true, name: true } }, location: { select: { name: true } } },
       orderBy: { createdAt: "desc" },
@@ -1041,6 +1045,8 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
    * 直接抹掉。相同幂等键只回放第一次结果，业务参数变化则明确冲突。
    */
   async applyStockOperation(input: StockOperationInput): Promise<AppliedStockOperation> {
+    const batchNo = input.batchNo?.trim() || undefined;
+    const sourceDocumentNo = input.sourceDocumentNo?.trim() || undefined;
     const requestFingerprint = createHash("sha256").update(JSON.stringify({
       type: input.type,
       itemGroupId: input.itemGroupId,
@@ -1049,7 +1055,9 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       toLocationId: input.toLocationId ?? null,
       quantity: input.quantity ?? null,
       actualOnHandQuantity: input.actualOnHandQuantity ?? null,
-      reason: input.reason
+      reason: input.reason,
+      batchNo: batchNo ?? null,
+      sourceDocumentNo: sourceDocumentNo ?? null
     })).digest("hex");
 
     return this.prisma.$transaction(async (tx) => {
@@ -1156,6 +1164,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
             entryKind: change.entryKind, operationType: input.type, itemGroupId: input.itemGroupId, locationId,
             quantityDelta: change.delta, onHandBefore: row.onHandQuantity, onHandAfter: nextOnHand,
             reservedQuantity, maintenanceQuantity: row.maintenanceQuantity, reason: input.reason.trim(),
+            batchNo, sourceDocumentNo,
             idempotencyKey: input.idempotencyKey, requestFingerprint, operator: input.operator
           },
           include: { itemGroup: { select: { code: true, name: true } }, location: { select: { name: true } } }
