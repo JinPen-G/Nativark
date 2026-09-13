@@ -170,6 +170,7 @@ export function RentalGovernancePage() {
   // 专门配置的日历角色拿不到一个能用的工作界面）。
   const hasPermission = useAuthStore((state) => state.hasPermission);
   const canManagePrice = hasPermission("rental-os:price:manage");
+  const canManageParams = hasPermission("system:params:manage");
   // 需求 4.6.14：「权限分为规则编辑、规则发布……」。编辑草稿与对客户生效是两个责任，
   // 因此按钮分别判权；读取（列表、详情、预览、审计）两者任一即可，与后端 guard 同口径。
   const canEditRules = hasPermission("rental-os:rules:manage");
@@ -194,9 +195,9 @@ export function RentalGovernancePage() {
         canSeeCalendar ? ("calendar" as const) : undefined,
         canSeeSettings ? ("membership" as const) : undefined,
         // 通知模板走 rules:manage，单有发布权限不覆盖它。
-        canEditRules || canManagePrice ? ("notifications" as const) : undefined
+        canEditRules || canManagePrice || canManageParams ? ("notifications" as const) : undefined
       ].filter((key): key is TabKey => Boolean(key)),
-    [canSeeSettings, canSeeRules, canEditRules, canManagePrice, canSeeCalendar]
+    [canSeeSettings, canSeeRules, canEditRules, canManagePrice, canManageParams, canSeeCalendar]
   );
   const [tab, setTab] = useState<TabKey>(permittedTabs[0] ?? "calendar");
   useEffect(() => {
@@ -339,12 +340,12 @@ export function RentalGovernancePage() {
   const templates = useQuery({
     queryKey: ["rental-core", "notification-templates"],
     queryFn: rentalCoreApi.notificationTemplates,
-    enabled: canEditRules || canManagePrice,
+    enabled: canEditRules || canManagePrice || canManageParams,
   });
   const logs = useQuery({
     queryKey: ["rental-core", "notification-logs"],
     queryFn: rentalCoreApi.notificationLogs,
-    enabled: canEditRules || canManagePrice,
+    enabled: canEditRules || canManagePrice || canManageParams,
   });
   const category = useMemo(
     () =>
@@ -662,9 +663,25 @@ export function RentalGovernancePage() {
       await queryClient.invalidateQueries({
         queryKey: ["rental-core", "notification-logs"],
       });
-      message.success("通知已通过 Mock 适配器发送并记录回执");
+      message.success("通知已处理并记录投递结果");
     },
     onError: () => message.error("发送失败，请检查必填变量和接收人"),
+  });
+  const retryNotification = useMutation({
+    mutationFn: (id: string) => rentalCoreApi.retryNotification(id),
+    onSuccess: async (result) => {
+      await queryClient.invalidateQueries({ queryKey: ["rental-core", "notification-logs"] });
+      message.success(result.status === "sent" ? "短信已发送" : "短信仍未送达，已记录下一次重试时间");
+    },
+    onError: () => message.error("短信重试失败，请检查短信平台配置和模板编码"),
+  });
+  const retryDueNotifications = useMutation({
+    mutationFn: () => rentalCoreApi.retryDueNotifications(),
+    onSuccess: async (result) => {
+      await queryClient.invalidateQueries({ queryKey: ["rental-core", "notification-logs"] });
+      message.success(`已处理 ${result.attempted} 条到期短信，成功 ${result.sent} 条`);
+    },
+    onError: () => message.error("批量重试失败，请稍后再试"),
   });
 
   /**
@@ -1757,6 +1774,9 @@ export function RentalGovernancePage() {
                   <Button type="primary" onClick={() => openTemplate()}>
                     新增模板
                   </Button>
+                  <Button loading={retryDueNotifications.isPending} onClick={() => retryDueNotifications.mutate()}>
+                    重试到期短信
+                  </Button>
                 </div>
                 <Card title="通知模板">
                   <Table<RentalNotificationTemplateV1>
@@ -1806,7 +1826,7 @@ export function RentalGovernancePage() {
                     ]}
                   />
                 </Card>
-                <Card title="通知记录（未接真实供应商时仅模拟）">
+                <Card title="通知记录">
                   <Table
                     rowKey="id"
                     dataSource={logs.data ?? []}
@@ -1823,12 +1843,20 @@ export function RentalGovernancePage() {
                         title: "状态",
                         dataIndex: "status",
                         render: (value) => (
-                          <Tag color={value === "sent" ? "success" : value === "simulated" ? "processing" : "error"}>
+                          <Tag color={value === "sent" ? "success" : value === "simulated" ? "processing" : value === "queued" || value === "delivery_uncertain" ? "warning" : "error"}>
                             {value}
                           </Tag>
                         ),
                       },
                       { title: "时间", dataIndex: "createdAt" },
+                      {
+                        title: "操作",
+                        render: (_, row) => row.channel === "sms" && ["queued", "failed"].includes(row.status) ? (
+                          <Button type="link" loading={retryNotification.isPending} onClick={() => retryNotification.mutate(row.id)}>
+                            重试
+                          </Button>
+                        ) : "—",
+                      },
                     ]}
                   />
                 </Card>
@@ -3122,6 +3150,13 @@ export function RentalGovernancePage() {
           </Form.Item>
           <Form.Item name="body" label="正文">
             <Input.TextArea rows={5} />
+          </Form.Item>
+          <Form.Item
+            name="providerTemplateCode"
+            label="短信服务商模板编码"
+            tooltip="仅短信渠道使用；填写阿里云模板编码或腾讯云模板 ID。其他渠道留空。"
+          >
+            <Input placeholder="例如 SMS_123456789" />
           </Form.Item>
           <Form.Item name="variableSchemaText" label="变量 schema（JSON）">
             <Input.TextArea rows={8} />

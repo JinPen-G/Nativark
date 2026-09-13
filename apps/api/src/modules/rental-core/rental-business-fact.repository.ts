@@ -18,6 +18,23 @@ import { resolveScopeWorkspaceId } from "./workspace-scope";
 
 export type RentalBusinessFactTx = Prisma.TransactionClient;
 
+export interface RentalNotificationDeliveryRecord {
+  log: RentalNotificationSendLogV1;
+  /** 仅服务端重试使用的收件人密文，不进入 RentalNotificationSendLogV1。 */
+  recipientEncrypted?: string;
+  maxAttempts: number;
+}
+
+export interface RentalNotificationDeliveryPatch {
+  status?: RentalNotificationSendLogV1["status"];
+  provider?: string;
+  providerMessageId?: string | null;
+  errorMessage?: string | null;
+  sentAt?: string | null;
+  nextAttemptAt?: string | null;
+  lastAttemptAt?: string | null;
+}
+
 export interface RentalReferralRecord {
   inviteeCustomerId: string;
   referrerCustomerId: string;
@@ -70,7 +87,11 @@ export interface RentalBusinessFactStore {
   upsertBenefitAccount(account: RentalCustomerBenefitAccount, tx?: RentalBusinessFactTx): Promise<void>;
   incrementBenefitAccount(tenantId: string, customerId: string, delta: { points: number; marketing: number; rewardCoupons: number }, tx: RentalBusinessFactTx): Promise<void>;
   upsertReferral(tenantId: string, referral: RentalReferralRecord): Promise<void>;
-  insertNotificationLog(log: RentalNotificationSendLogV1, tx?: RentalBusinessFactTx): Promise<"inserted" | "duplicate">;
+  insertNotificationLog(log: RentalNotificationSendLogV1, tx?: RentalBusinessFactTx, recipientEncrypted?: string): Promise<"inserted" | "duplicate">;
+  findNotificationDelivery(tenantId: string, id: string): Promise<RentalNotificationDeliveryRecord | undefined>;
+  listDueNotificationDeliveries(tenantId: string, at: string, limit: number): Promise<RentalNotificationDeliveryRecord[]>;
+  claimNotificationDelivery(tenantId: string, id: string, at: string, leaseUntil: string, force: boolean): Promise<boolean>;
+  updateNotificationDelivery(tenantId: string, id: string, patch: RentalNotificationDeliveryPatch): Promise<RentalNotificationSendLogV1 | undefined>;
 }
 
 function iso(value: Date): string {
@@ -97,7 +118,7 @@ function date(value: string): Date {
   return new Date(value);
 }
 
-function optionalDate(value: string | undefined): Date | null {
+function optionalDate(value: string | null | undefined): Date | null {
   return value ? new Date(value) : null;
 }
 
@@ -603,7 +624,7 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
   }
 
   /** 发送记录是追加式流水，用 create 而非 upsert：同一条记录不应被改写。 */
-  async insertNotificationLog(log: RentalNotificationSendLogV1, tx?: RentalBusinessFactTx): Promise<"inserted" | "duplicate"> {
+  async insertNotificationLog(log: RentalNotificationSendLogV1, tx?: RentalBusinessFactTx, recipientEncrypted?: string): Promise<"inserted" | "duplicate"> {
     const workspaceId = await resolveScopeWorkspaceId(tx ?? this.prisma, log.tenantId);
     try {
       await (tx ?? this.prisma).rentalNotificationLog.create({
@@ -616,6 +637,7 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
           eventCode: log.eventCode,
           channel: log.channel,
           recipient: log.recipient,
+          recipientEncrypted: recipientEncrypted ?? null,
           renderedTitle: log.renderedTitle,
           renderedBody: log.renderedBody,
           variables: log.variables as Prisma.InputJsonValue,
@@ -624,6 +646,9 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
           providerMessageId: log.providerMessageId ?? null,
           errorMessage: log.errorMessage ?? null,
           attempts: log.attempts,
+          nextAttemptAt: optionalDate(log.nextAttemptAt),
+          lastAttemptAt: optionalDate(log.lastAttemptAt),
+          maxAttempts: log.maxAttempts ?? 3,
           businessObjectType: log.businessObjectType ?? null,
           businessObjectId: log.businessObjectId ?? null,
           idempotencyKey: log.idempotencyKey ?? null,
@@ -645,6 +670,68 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       }
       throw error;
     }
+  }
+
+  private notificationDelivery(row: Prisma.RentalNotificationLogGetPayload<object>): RentalNotificationDeliveryRecord {
+    return {
+      log: this.toNotificationLog(row),
+      recipientEncrypted: row.recipientEncrypted ?? undefined,
+      maxAttempts: row.maxAttempts
+    };
+  }
+
+  async findNotificationDelivery(tenantId: string, id: string): Promise<RentalNotificationDeliveryRecord | undefined> {
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
+    const row = await this.prisma.rentalNotificationLog.findFirst({ where: { id, tenantId, workspaceId } });
+    return row ? this.notificationDelivery(row) : undefined;
+  }
+
+  async listDueNotificationDeliveries(tenantId: string, at: string, limit: number): Promise<RentalNotificationDeliveryRecord[]> {
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
+    const rows = await this.prisma.rentalNotificationLog.findMany({
+      where: {
+        tenantId,
+        workspaceId,
+        channel: "sms",
+        status: { in: ["queued", "failed"] },
+        nextAttemptAt: { lte: date(at) }
+      },
+      orderBy: [{ nextAttemptAt: "asc" }, { createdAt: "asc" }],
+      take: Math.max(1, Math.min(limit, 100))
+    });
+    return rows.filter((row) => row.attempts < row.maxAttempts).map((row) => this.notificationDelivery(row));
+  }
+
+  async claimNotificationDelivery(tenantId: string, id: string, at: string, leaseUntil: string, force: boolean): Promise<boolean> {
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
+    const current = await this.prisma.rentalNotificationLog.findFirst({ where: { id, tenantId, workspaceId } });
+    if (!current || current.channel !== "sms" || !["queued", "failed"].includes(current.status)) return false;
+    if (current.attempts >= current.maxAttempts) return false;
+    if (!force && current.nextAttemptAt && current.nextAttemptAt.getTime() > new Date(at).getTime()) return false;
+    const result = await this.prisma.rentalNotificationLog.updateMany({
+      where: { id, tenantId, workspaceId, status: { in: ["queued", "failed"] }, attempts: current.attempts },
+      data: { attempts: { increment: 1 }, lastAttemptAt: date(at), nextAttemptAt: date(leaseUntil) }
+    });
+    return result.count === 1;
+  }
+
+  async updateNotificationDelivery(tenantId: string, id: string, patch: RentalNotificationDeliveryPatch): Promise<RentalNotificationSendLogV1 | undefined> {
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
+    const result = await this.prisma.rentalNotificationLog.updateMany({
+      where: { id, tenantId, workspaceId },
+      data: {
+        ...(patch.status !== undefined ? { status: patch.status } : {}),
+        ...(patch.provider !== undefined ? { provider: patch.provider } : {}),
+        ...(patch.providerMessageId !== undefined ? { providerMessageId: patch.providerMessageId } : {}),
+        ...(patch.errorMessage !== undefined ? { errorMessage: patch.errorMessage } : {}),
+        ...(patch.sentAt !== undefined ? { sentAt: optionalDate(patch.sentAt) } : {}),
+        ...(patch.nextAttemptAt !== undefined ? { nextAttemptAt: optionalDate(patch.nextAttemptAt) } : {}),
+        ...(patch.lastAttemptAt !== undefined ? { lastAttemptAt: optionalDate(patch.lastAttemptAt) } : {})
+      }
+    });
+    if (result.count !== 1) return undefined;
+    const row = await this.prisma.rentalNotificationLog.findFirst({ where: { id, tenantId, workspaceId } });
+    return row ? this.toNotificationLog(row) : undefined;
   }
 
   /* ---------- 行 → 领域对象 ---------- */
@@ -776,6 +863,9 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       providerMessageId: row.providerMessageId ?? undefined,
       errorMessage: row.errorMessage ?? undefined,
       attempts: row.attempts,
+      nextAttemptAt: optionalIso(row.nextAttemptAt),
+      lastAttemptAt: optionalIso(row.lastAttemptAt),
+      maxAttempts: row.maxAttempts,
       businessObjectType: row.businessObjectType ?? undefined,
       businessObjectId: row.businessObjectId ?? undefined,
       idempotencyKey: row.idempotencyKey ?? undefined,

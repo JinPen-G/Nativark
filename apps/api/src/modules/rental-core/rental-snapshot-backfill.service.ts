@@ -973,6 +973,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               name: template.name,
               title: template.title,
               body: template.body,
+              providerTemplateCode: template.providerTemplateCode ?? null,
               variableSchema: json(template.variableSchema ?? {}),
               status: template.status ?? "enabled",
               version: template.version ?? "1.0"
@@ -1265,6 +1266,9 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               providerMessageId: log.providerMessageId ?? null,
               errorMessage: log.errorMessage ?? null,
               attempts: log.attempts ?? 0,
+              nextAttemptAt: optionalDate(log.nextAttemptAt),
+              lastAttemptAt: optionalDate(log.lastAttemptAt),
+              maxAttempts: log.maxAttempts ?? 3,
               sentAt: optionalDate(log.sentAt),
               createdAt: optionalDate(log.createdAt) ?? new Date()
             }

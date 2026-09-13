@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, OnApplicationBootstrap, OnModuleInit, Optional } from "@nestjs/common";
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, OnApplicationBootstrap, OnModuleInit, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { CapabilityBlockedException, CapabilityHookRuntime } from "./capability-hook.runtime";
@@ -91,6 +91,7 @@ import {
   type TenantRentalProfile
 } from "@rental-os/shared";
 import { getRequestWorkspaceId } from "../../common/request-identity";
+import { SecretBox } from "../../common/secret-box";
 import { RentalStateRepository } from "./rental-state.repository";
 import {
   RentalBusinessConfigRepository,
@@ -122,6 +123,7 @@ import { computeSecurityAmounts, type SecurityLineInput, validateSecurityRules }
 import { roundMoney } from "./rental-money";
 import { computeEarlyReturnRefund, type EarlyReturnRefund } from "./rental-early-return";
 import { extensionPaymentRequired } from "./rental-extension-lifecycle";
+import { NotificationDeliveryUnknownError, TenantIntegrationRuntimeService } from "../integrations/tenant-integration.runtime.service";
 import { effectiveEarlyReturnRule, effectiveExtensionRule, effectiveTaxRule, inclusiveTaxAmount } from "./rental-rule-defaults";
 import {
   assertRuleEffectiveFromAvailable,
@@ -219,6 +221,11 @@ function maskRecipient(recipient: string): string {
   }
   // push token、openid 等：只露前两位。
   return value.length <= 2 ? "***" : `${value.slice(0, 2)}***`;
+}
+
+function isSmsRecipient(value: string): boolean {
+  const normalized = String(value ?? "").trim();
+  return /^\+?[0-9][0-9\- ]{5,24}$/u.test(normalized);
 }
 
 
@@ -393,7 +400,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     @Optional() private readonly hookAudits?: CapabilityHookRepository,
     @Optional() private readonly serviceCapacities?: RentalServiceCapacityService,
     /** 新会员订单的预约身份、企业关系与权益只能在会员域解析。 */
-    @Optional() private readonly memberships?: MembershipService
+    @Optional() private readonly memberships?: MembershipService,
+    /** EXT-02A：真实业务短信投递；单测未装配时保留原有模拟通知语义。 */
+    @Optional() private readonly notificationRuntime?: TenantIntegrationRuntimeService,
+    @Optional() private readonly secretBox?: SecretBox
   ) {}
 
   /**
@@ -3606,6 +3616,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const state = this.state(tenantId, context);
     if (!context.settings.notifications.enabledEvents.includes(input.eventCode)) throw new BadRequestException("通知事件未在租户经营设置中启用");
     if (!context.settings.notifications.editableChannels.includes(input.channel)) throw new BadRequestException("通知渠道未在租户经营设置中启用");
+    if (input.providerTemplateCode && !/^[A-Za-z0-9_.-]{1,191}$/u.test(input.providerTemplateCode.trim())) {
+      throw new BadRequestException("短信服务商模板编码格式无效");
+    }
     const existing = input.id ? state.notificationTemplates.find((item) => item.id === input.id) : undefined;
     if (input.id && !existing) throw new NotFoundException("通知模板不存在");
     const activePeer = state.notificationTemplates.find(
@@ -3644,13 +3657,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   listNotificationLogs(tenantId: string, context: BusinessContext) { return this.state(tenantId, context).notificationLogs; }
 
   /**
-   * 发送通知。传入 `tx` 时数据库写入走该事务，且**不碰内存缓存**——
-   * 缓存由调用方在提交成功后用 `applyNotificationLogToCache` 落地。
-   *
-   * 注意边界：事务只能回滚**数据库记录**。当前 provider 是 mock adapter，
-   * 没有真正的外部投递，所以"回滚"是完整的；接入真实 provider 后，事务
-   * 撤不回已发出的短信，那时必须改用 provider 幂等键或 transactional outbox。
-   * 本任务不虚构外部 provider，因此不在此实现 outbox。
+   * 写入通知 outbox。真实短信先落 queued，再在事务提交后投递；这样数据库事务
+   * 回滚不会留下已经调用第三方的孤儿短信。收件人明文只在当前调用栈中存在，
+   * 数据库保存 AES-GCM 密文，日志和接口只返回脱敏值。
    */
   async sendNotification(
     tenantId: string,
@@ -3677,6 +3686,11 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       return undefined;
     }
 
+    if (template.channel === "sms" && !isSmsRecipient(input.recipient)) {
+      throw new BadRequestException("短信通知必须使用有效的手机号，不能把客户编号当作收件人");
+    }
+    const realSms = template.channel === "sms" && Boolean(this.notificationRuntime);
+    if (realSms && !this.secretBox) throw new ServiceUnavailableException("短信通知安全组件未就绪");
     const render = (source: string) => source.replace(/\{\{(\w+)\}\}/g, (_match, key: string) => String(input.variables[key] ?? ""));
     const timestamp = stamp();
     const log: RentalNotificationSendLogV1 = {
@@ -3685,24 +3699,160 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       // 目标一律脱敏后留存；明文不进发送记录。
       recipient: maskRecipient(input.recipient),
       renderedTitle: render(template.title), renderedBody: render(template.body), variables: structuredClone(input.variables),
-      status: "simulated", provider: "simulation", attempts: 1,
+      status: realSms ? "queued" : "simulated",
+      provider: realSms ? "sms_pending" : "simulation",
+      attempts: realSms ? 0 : 1,
+      nextAttemptAt: realSms ? timestamp : undefined,
+      maxAttempts: realSms ? 3 : undefined,
       businessObjectType: options.businessObjectType,
       businessObjectId: options.businessObjectId,
       idempotencyKey: options.idempotencyKey,
       createdAt: timestamp
     };
-    const outcome = await this.factStore.insertNotificationLog(log, tx);
+    const recipientEncrypted = realSms ? this.secretBox!.encrypt({ recipient: input.recipient.trim() }) : undefined;
+    const outcome = await this.factStore.insertNotificationLog(log, tx, recipientEncrypted);
     // 唯一键撞了 → 说明这条业务事件已发过；不是错误，静默跳过不重复通知。
     if (outcome === "duplicate") return undefined;
     // 事务路径下不动缓存：回滚后内存里会留下库中不存在的幽灵通知记录。
-    if (!tx) state.notificationLogs.unshift(log);
-    return log;
+    if (tx) return log;
+    state.notificationLogs.unshift(log);
+    return realSms ? this.deliverNotification(tenantId, context, log.id, input.recipient.trim(), false) : log;
   }
 
   /** 事务提交成功后把发送记录落进内存缓存。提交前调用会产生幽灵通知记录。 */
   applyNotificationLogToCache(tenantId: string, context: BusinessContext, log: RentalNotificationSendLogV1) {
     const state = this.state(tenantId, context);
-    if (!state.notificationLogs.some((item) => item.id === log.id)) state.notificationLogs.unshift(log);
+    const index = state.notificationLogs.findIndex((item) => item.id === log.id);
+    if (index < 0) state.notificationLogs.unshift(log);
+    else state.notificationLogs[index] = log;
+  }
+
+  private async deliverNotification(
+    tenantId: string,
+    context: BusinessContext,
+    id: string,
+    recipient: string | undefined,
+    force: boolean
+  ): Promise<RentalNotificationSendLogV1> {
+    const current = await this.factStore.findNotificationDelivery(tenantId, id);
+    if (!current) throw new NotFoundException("通知发送记录不存在");
+    const template = this.state(tenantId, context).notificationTemplates.find((item) => item.id === current.log.templateId);
+    if (!template || template.channel !== "sms") return current.log;
+    let phone = recipient;
+    if (!phone) {
+      if (!current.recipientEncrypted || !this.secretBox) throw new ServiceUnavailableException("通知收件人密文不可用，无法重试");
+      const decrypted = this.secretBox.decrypt(current.recipientEncrypted);
+      phone = decrypted.recipient;
+    }
+    if (!isSmsRecipient(phone)) throw new BadRequestException("通知收件人不是有效手机号");
+    if (!template.providerTemplateCode?.trim()) {
+      const message = "短信模板未配置服务商模板编码";
+      const updated = await this.factStore.updateNotificationDelivery(tenantId, id, {
+        status: "failed", errorMessage: message, nextAttemptAt: null
+      });
+      const result = updated ?? current.log;
+      this.applyNotificationLogToCache(tenantId, context, result);
+      return result;
+    }
+    if (!this.notificationRuntime) return current.log;
+    const now = new Date();
+    const leaseUntil = new Date(now.getTime() + 10 * 60 * 1000);
+    const claimed = await this.factStore.claimNotificationDelivery(tenantId, id, now.toISOString(), leaseUntil.toISOString(), force);
+    if (!claimed) {
+      const latest = await this.factStore.findNotificationDelivery(tenantId, id);
+      return latest?.log ?? current.log;
+    }
+    let sent: Awaited<ReturnType<TenantIntegrationRuntimeService["sendNotificationSms"]>> | undefined;
+    let providerAccepted = false;
+    try {
+      sent = await this.notificationRuntime.sendNotificationSms(
+        tenantId,
+        phone,
+        template.providerTemplateCode,
+        current.log.variables,
+        Object.keys(template.variableSchema),
+        `notification:${id}`
+      );
+      if (!sent.configured || !sent.provider) throw new ServiceUnavailableException("短信平台尚未配置或未启用");
+      providerAccepted = true;
+      const updated = await this.factStore.updateNotificationDelivery(tenantId, id, {
+        status: "sent",
+        provider: sent.provider,
+        providerMessageId: sent.externalRequestId ?? null,
+        errorMessage: null,
+        sentAt: now.toISOString(),
+        nextAttemptAt: null
+      });
+      if (!updated) throw new Error("短信服务商已受理，但投递记录不存在");
+      const result = updated;
+      this.applyNotificationLogToCache(tenantId, context, result);
+      return result;
+    } catch (error) {
+      const attempts = current.log.attempts + 1;
+      const deliveryUncertain = providerAccepted || error instanceof NotificationDeliveryUnknownError;
+      const retryable = attempts < current.maxAttempts;
+      if (deliveryUncertain) {
+        const message = providerAccepted
+          ? "短信服务商已受理，但本地投递状态未能可靠落库；请人工查询服务商记录，系统不会自动重试"
+          : "短信请求结果未知，可能已被服务商受理；请人工查询服务商记录，系统不会自动重试";
+        let updated: RentalNotificationSendLogV1 | undefined;
+        try {
+          updated = await this.factStore.updateNotificationDelivery(tenantId, id, {
+            status: "delivery_uncertain",
+            provider: sent?.provider ?? undefined,
+            providerMessageId: sent?.externalRequestId ?? null,
+            errorMessage: message,
+            nextAttemptAt: null
+          });
+        } catch {
+          // 结果本身已经不确定，不能因为写状态再次失败而安排自动重试。
+        }
+        const result = updated ?? {
+          ...current.log,
+          status: "delivery_uncertain" as const,
+          provider: sent?.provider ?? current.log.provider,
+          providerMessageId: sent?.externalRequestId ?? current.log.providerMessageId,
+          errorMessage: message,
+          attempts
+        };
+        this.applyNotificationLogToCache(tenantId, context, result);
+        return result;
+      }
+      const retryAt = retryable
+        ? new Date(now.getTime() + Math.min(15 * 60 * 1000, 30 * 1000 * (2 ** Math.max(0, attempts - 1)))).toISOString()
+        : null;
+      const message = (error instanceof Error ? error.message : String(error)).slice(0, 191);
+      const updated = await this.factStore.updateNotificationDelivery(tenantId, id, {
+        status: "failed",
+        errorMessage: message,
+        nextAttemptAt: retryAt
+      });
+      const result = updated ?? { ...current.log, status: "failed" as const, errorMessage: message, attempts, nextAttemptAt: retryAt ?? undefined };
+      this.applyNotificationLogToCache(tenantId, context, result);
+      return result;
+    }
+  }
+
+  async retryNotification(tenantId: string, context: BusinessContext, id: string) {
+    const current = await this.factStore.findNotificationDelivery(tenantId, id);
+    if (!current) throw new NotFoundException("通知发送记录不存在");
+    if (current.log.channel !== "sms") throw new BadRequestException("只有真实短信通知支持重试");
+    if (current.log.status === "sent") return current.log;
+    if (current.log.status === "delivery_uncertain") throw new ConflictException("短信投递结果未知，请先查询服务商记录，不能直接重试");
+    if (current.log.attempts >= current.maxAttempts) throw new ConflictException("该通知已达到最大重试次数");
+    return this.deliverNotification(tenantId, context, id, undefined, true);
+  }
+
+  async retryDueNotifications(tenantId: string, context: BusinessContext, limit = 20) {
+    const due = await this.factStore.listDueNotificationDeliveries(tenantId, new Date().toISOString(), limit);
+    const results: RentalNotificationSendLogV1[] = [];
+    for (const row of due) results.push(await this.deliverNotification(tenantId, context, row.log.id, undefined, false));
+    return {
+      attempted: results.length,
+      sent: results.filter((row) => row.status === "sent").length,
+      failed: results.filter((row) => row.status === "failed").length,
+      ids: results.map((row) => row.id)
+    };
   }
 
   /**
@@ -3741,7 +3891,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
           undefined,
           { businessObjectType: businessObject?.type, businessObjectId: businessObject?.id, idempotencyKey }
         );
-        if (log) logs.push(log);
+        if (log && ["sent", "simulated"].includes(log.status)) logs.push(log);
       } catch (error) {
         // 失败不能伪装成已送达，也不能静默丢掉。保留一条失败事实，
         // 让工作台按订单业务对象生成待办；主订单动作仍不因单个通知模板失败回滚。
@@ -3756,8 +3906,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
           renderedTitle: render(template.title, scoped),
           renderedBody: render(template.body, scoped),
           variables: structuredClone(scoped),
-          status: "simulation_failed",
-          provider: "simulation",
+          status: this.notificationRuntime && template.channel === "sms" ? "failed" : "simulation_failed",
+          provider: this.notificationRuntime && template.channel === "sms" ? "sms" : "simulation",
           attempts: 1,
           errorMessage: (error instanceof Error ? error.message : String(error)).slice(0, 191),
           businessObjectType: businessObject?.type,

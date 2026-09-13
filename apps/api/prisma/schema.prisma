@@ -3068,6 +3068,8 @@ model RentalNotificationTemplate {
   name           String
   title          String
   body           String                  @db.Text
+  /// 短信服务商模板编码。模板正文仍由本系统保存，编码只用于实际投递。
+  providerTemplateCode String?
   variableSchema Json
   status         String                  @default("enabled")
   version        String
@@ -3311,6 +3313,8 @@ model RentalNotificationLog {
   channel            String
   /// 发送目标按需求 4.9 脱敏后留存。
   recipient          String
+  /// 真实短信重试所需的收件人密文；AES-GCM 加密，绝不返回给管理端。
+  recipientEncrypted String?                    @db.Text
   renderedTitle      String
   renderedBody       String                     @db.Text
   variables          Json
@@ -3319,6 +3323,10 @@ model RentalNotificationLog {
   providerMessageId  String?
   errorMessage       String?
   attempts           Int                        @default(0)
+  /// 真实短信投递的下一次重试时间；NULL 表示当前不可重试或已完成。
+  nextAttemptAt      DateTime?
+  lastAttemptAt      DateTime?
+  maxAttempts        Int                        @default(3)
   /// NOTICE-01A：触发本条通知的业务对象（如 order / <订单id>）。
   /// 手工发送没有业务对象，因此可空。
   businessObjectType String?
@@ -3334,6 +3342,7 @@ model RentalNotificationLog {
   @@index([tenantId, eventCode, createdAt], map: "rental_notification_logs_tenant_event_created_idx")
   @@index([tenantId, status, createdAt], map: "rental_notification_logs_tenant_status_created_idx")
   @@index([templateId])
+  @@index([tenantId, workspaceId, status, nextAttemptAt], map: "rental_notification_logs_ws_retry_idx")
   @@map("rental_notification_logs")
 }
 

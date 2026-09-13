@@ -699,7 +699,7 @@ export class RentalCoreController {
         (log) => log.eventCode === "order.pickup_overdue" &&
           log.businessObjectType === "order" &&
           log.businessObjectId === current.id &&
-          (log.status === "simulation_failed" || log.status === "failed")
+          (log.status === "simulation_failed" || log.status === "failed" || log.status === "delivery_uncertain")
       );
       throw new ConflictException(
         failed

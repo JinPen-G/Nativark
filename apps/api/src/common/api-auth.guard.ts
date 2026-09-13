@@ -367,7 +367,7 @@ export function requiredPermissions(method: string, path: string) {
     return ["rental-os:rules:manage"];
   }
   if (path.startsWith("/rental/v1/rewards") || path.startsWith("/rental/v1/benefit-accounts") || path.startsWith("/rental/v1/notification-templates") || path.startsWith("/rental/v1/notification-logs") || path === "/rental/v1/notifications/send") {
-    return ["rental-os:rules:manage", "rental-os:price:manage"];
+    return ["system:params:manage", "rental-os:rules:manage", "rental-os:price:manage"];
   }
   if (path === "/rental/v1/coupon-templates" || path.startsWith("/rental/v1/coupon-templates/")) {
     return ["rental-os:marketing:manage", "rental-os:price:manage"];

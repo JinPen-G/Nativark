@@ -3644,6 +3644,8 @@ export interface RentalNotificationTemplateV1 {
   name: string;
   title: string;
   body: string;
+  /** 短信渠道在对应服务商侧的模板编码；仅由服务端用于投递，不渲染到日志。 */
+  providerTemplateCode?: string;
   variableSchema: Record<string, { label: string; required: boolean }>;
   status: "enabled" | "disabled";
   version: string;
@@ -3667,11 +3669,17 @@ export interface RentalNotificationSendLogV1 {
   renderedBody: string;
   variables: Record<string, unknown>;
   /** 未接真实 Provider 时只能使用 simulated / simulation_failed，不得冒充真实发送或送达。 */
-  status: "queued" | "sent" | "failed" | "simulated" | "simulation_failed";
+  status: "queued" | "sent" | "failed" | "delivery_uncertain" | "simulated" | "simulation_failed";
   provider: string;
   providerMessageId?: string;
   errorMessage?: string;
   attempts: number;
+  /** 下一次允许自动重试的时间；只对真实短信投递记录有值。 */
+  nextAttemptAt?: string;
+  /** 最近一次实际调用短信服务商的时间。 */
+  lastAttemptAt?: string;
+  /** 发送上限快照，避免后续配置变化改变历史日志的重试边界。 */
+  maxAttempts?: number;
   /**
    * NOTICE-01A：触发本条通知的业务对象。业务事件驱动的通知带上它（如 order / 订单id），
    * 手工发送没有业务对象。

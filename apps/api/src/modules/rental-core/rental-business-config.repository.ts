@@ -674,6 +674,7 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       name: template.name,
       title: template.title,
       body: template.body,
+      providerTemplateCode: template.providerTemplateCode ?? null,
       variableSchema: template.variableSchema as unknown as Prisma.InputJsonValue,
       status: template.status,
       version: template.version
@@ -877,6 +878,7 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       name: row.name,
       title: row.title,
       body: row.body,
+      providerTemplateCode: row.providerTemplateCode ?? undefined,
       variableSchema: (row.variableSchema ?? {}) as RentalNotificationTemplateV1["variableSchema"],
       status: row.status as RentalNotificationTemplateV1["status"],
       version: row.version,

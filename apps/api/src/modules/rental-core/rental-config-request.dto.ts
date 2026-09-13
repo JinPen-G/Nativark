@@ -1641,6 +1641,13 @@ export class SaveRentalNotificationTemplateDto implements SaveRentalNotification
   @IsNotEmpty()
   body!: string;
 
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(191)
+  @Matches(/^[A-Za-z0-9_.-]+$/u)
+  providerTemplateCode?: string;
+
   /**
    * 变量 schema 的键是模板自定义的变量名，无法静态声明，故只校验是对象。
    * 值的形状（`{ label, required }`）在服务层渲染时校验。

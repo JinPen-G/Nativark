@@ -17,6 +17,9 @@ assert.doesNotThrow(() => outbound.parseOutboundUrl("https://openapi.alipay.com/
 const paymentSource = fs.readFileSync(path.join(repo, "apps", "api", "src", "modules", "integrations", "payment.runtime.service.ts"), "utf8");
 const fileSource = fs.readFileSync(path.join(repo, "apps", "api", "src", "modules", "integrations", "file-storage.runtime.service.ts"), "utf8");
 const smsSource = fs.readFileSync(path.join(repo, "apps", "api", "src", "modules", "integrations", "tenant-integration.runtime.service.ts"), "utf8");
+const notificationSource = fs.readFileSync(path.join(repo, "apps", "api", "src", "modules", "rental-core", "rental-business.service.ts"), "utf8");
+const notificationFactSource = fs.readFileSync(path.join(repo, "apps", "api", "src", "modules", "rental-core", "rental-business-fact.repository.ts"), "utf8");
+const notificationSchema = fs.readFileSync(path.join(repo, "apps", "api", "prisma", "schema.prisma"), "utf8");
 const authSource = fs.readFileSync(path.join(repo, "apps", "api", "src", "modules", "client", "client-auth.service.ts"), "utf8");
 const guardSource = fs.readFileSync(path.join(repo, "apps", "api", "src", "common", "api-auth.guard.ts"), "utf8");
 
@@ -42,10 +45,22 @@ assert.match(fileSource, /safeObjectPrefix/);
 assert.match(fileSource, /safeBucket/);
 assert.match(smsSource, /redirect: "error"/);
 assert.match(smsSource, /assertOutboundUrl/);
+assert.match(smsSource, /sendNotificationSms/);
+assert.match(smsSource, /variableKeys: names/);
+assert.match(notificationSource, /recipientEncrypted/);
+assert.match(notificationSource, /先落 queued/);
+assert.match(notificationSource, /claimNotificationDelivery/);
+assert.match(notificationSource, /notification:\$\{id\}/);
+assert.match(notificationSource, /只有真实短信通知支持重试/);
+assert.match(notificationFactSource, /attempts: \{ increment: 1 \}/);
+assert.match(notificationFactSource, /attempts: current\.attempts/);
+assert.match(notificationSchema, /recipientEncrypted\s+String\?\s+@db\.Text/);
+assert.match(notificationSchema, /rental_notification_logs_ws_retry_idx/);
 assert.match(authSource, /CHALLENGE_COOLDOWN_SECONDS/);
 assert.match(authSource, /identifierHash/);
 assert.match(authSource, /SELECT id FROM business_workspaces/);
 assert.match(authSource, /FOR UPDATE/);
 assert.match(guardSource, /path\.startsWith\("\/platform\/integrations"\)/);
+assert.match(guardSource, /system:params:manage.*rental-os:rules:manage.*rental-os:price:manage/s);
 
 console.log("integration security probes passed: SSRF, callback binding, payment race, upload verification, SMS cooldown and route permission");

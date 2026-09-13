@@ -351,6 +351,13 @@ export class RentalBusinessController {
   @Post("notification-templates") async createNotificationTemplate(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalNotificationTemplateDto) { return this.committed(req.user.tenantId, await this.business.saveNotificationTemplate(req.user.tenantId, this.context(req.user.tenantId), body)); }
   @Put("notification-templates/:id") async updateNotificationTemplate(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalNotificationTemplateDto) { return this.committed(req.user.tenantId, await this.business.saveNotificationTemplate(req.user.tenantId, this.context(req.user.tenantId), { ...body, id })); }
   @Get("notification-logs") notificationLogs(@Req() req: AuthenticatedRequest) { return this.business.listNotificationLogs(req.user.tenantId, this.context(req.user.tenantId)); }
+  @Post("notification-logs/retry-due") async retryDueNotifications(@Req() req: AuthenticatedRequest, @Query("limit") limit?: string) {
+    const parsedLimit = limit ? Number(limit) : 20;
+    return this.committed(req.user.tenantId, this.business.retryDueNotifications(req.user.tenantId, this.context(req.user.tenantId), Number.isFinite(parsedLimit) ? parsedLimit : 20));
+  }
+  @Post("notification-logs/:id/retry") async retryNotification(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
+    return this.committed(req.user.tenantId, this.business.retryNotification(req.user.tenantId, this.context(req.user.tenantId), id));
+  }
   @Post("notifications/send") async sendNotification(@Req() req: AuthenticatedRequest, @Body() body: SendRentalNotificationDto) {
     const tenantId = req.user.tenantId;
     const key = explicitIdempotencyKey(req);
@@ -369,7 +376,11 @@ export class RentalBusinessController {
     });
     // 人工发送不带幂等键，正常必得一条日志；`result` 为空只可能是并发回放，跳过入缓存即可。
     if (!replayed && result) this.business.applyNotificationLogToCache(tenantId, context, result);
-    return this.committed(tenantId, result);
+    // 幂等事务提交后才允许真正调用第三方短信；这样数据库回滚不会产生外部副作用。
+    const delivered = !replayed && result?.status === "queued"
+      ? await this.business.retryNotification(tenantId, context, result.id)
+      : result;
+    return this.committed(tenantId, delivered);
   }
 
   @Post("quotes") async quote(@Req() req: AuthenticatedRequest, @Body() body: RentalQuoteDto) {
