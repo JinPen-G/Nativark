@@ -141,6 +141,7 @@ export function requiredPermissions(method: string, path: string) {
       ? ["rental-os:finance:view", "rental-os:finance:reconcile"]
       : ["rental-os:finance:reconcile"];
   }
+  if (path === "/rental/v1/payment-reconciliation") return ["rental-os:finance:reconcile"];
   if (
     path.startsWith("/integrations") ||
     path.startsWith("/files") ||

@@ -115,6 +115,25 @@ export interface FileDownloadUrlSummary {
   expiresAt?: string;
 }
 
+/** EXT-01D：运营端按当前经营空间执行的支付/退款主动对账结果。 */
+export interface PaymentReconciliationSummary {
+  scanned: number;
+  processed: number;
+  paid: number;
+  closed: number;
+  refunded: number;
+  pending: number;
+  failed: number;
+  results: Array<{
+    kind: "payment_intent" | "refund";
+    id: string;
+    orderId: string;
+    previousStatus: string;
+    status: string;
+    error?: string;
+  }>;
+}
+
 export interface NotificationTemplateSummary {
   id: string;
   code: string;

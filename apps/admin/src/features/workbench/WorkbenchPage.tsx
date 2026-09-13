@@ -1,7 +1,7 @@
 import { ArrowRightOutlined, ReloadOutlined } from "@ant-design/icons";
 import { RentalCoreOrderStatus, formatRentalMoney, type RentalAssetStatus, type RentalOrder, type RentalWorkbenchTodo, type RentalWorkbenchTodoType } from "@rental-os/shared";
-import { useQuery } from "@tanstack/react-query";
-import { Alert, Button, Card, Progress, Segmented, Space, Statistic, Table, Tag, Typography } from "antd";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { Alert, App, Button, Card, Progress, Segmented, Space, Statistic, Table, Tag, Typography } from "antd";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { rentalCoreApi, useSettlementCurrency } from "@/api/rentalCore";
@@ -54,10 +54,12 @@ function periodStart(period: string) {
 export function WorkbenchPage() {
   const [period, setPeriod] = useState("本月");
   const navigate = useNavigate();
+  const { message } = App.useApp();
   const hasPermission = useAuthStore((state) => state.hasPermission);
   const canViewOrders = hasPermission("rental-os:order:view");
   const canViewAssets = hasPermission("rental-core:asset:view") || hasPermission("rental-os:vehicle:view");
   const canViewWorkOrders = hasPermission("rental-core:maintenance:view");
+  const canReconcilePayments = hasPermission("rental-os:finance:reconcile");
   const currency = useSettlementCurrency();
   const money = (value: number) => formatRentalMoney(value, currency);
   const profile = useQuery({ queryKey: ["rental-core", "profile"], queryFn: rentalCoreApi.profile, enabled: canViewOrders || canViewAssets });
@@ -65,6 +67,17 @@ export function WorkbenchPage() {
   const assets = useQuery({ queryKey: ["rental-core", "assets"], queryFn: rentalCoreApi.assets, enabled: canViewAssets });
   const stocks = useQuery({ queryKey: ["rental-core", "stock-balances"], queryFn: rentalCoreApi.stockBalances, enabled: canViewAssets });
   const todos = useQuery({ queryKey: ["rental-core", "workbench-todos"], queryFn: rentalCoreApi.workbenchTodos });
+  const reconcilePayments = useMutation({
+    mutationFn: () => rentalCoreApi.reconcilePayments(),
+    onSuccess: (result) => {
+      if (result.failed > 0 || result.pending > 0) {
+        message.warning(`已核对 ${result.processed} 笔，${result.pending} 笔仍待核对，${result.failed} 笔需要人工处理`);
+      } else {
+        message.success(`支付对账完成，共处理 ${result.processed} 笔`);
+      }
+    },
+    onError: (error: Error) => message.error(error.message || "支付对账失败")
+  });
   const loading = profile.isLoading || orders.isLoading || assets.isLoading || stocks.isLoading || todos.isLoading;
   const error = profile.error || orders.error || assets.error || stocks.error || todos.error;
   const filteredOrders = useMemo(() => (orders.data ?? []).filter((order) => new Date(order.createdAt).getTime() >= periodStart(period)), [orders.data, period]);
@@ -90,7 +103,7 @@ export function WorkbenchPage() {
   }
 
   return <>
-    <PageHeader title="运营概览" description={`${profile.data?.terminology.itemLabel ?? "租赁标的"}、订单与库存均来自当前 SaaS 租户的 Rental Core 数据。`} view={<Segmented value={period} onChange={(value) => setPeriod(String(value))} options={["今日", "本周", "本月"]} />} extra={<Button shape="circle" aria-label="刷新经营概览" icon={<ReloadOutlined />} onClick={refresh} />} />
+    <PageHeader title="运营概览" description={`${profile.data?.terminology.itemLabel ?? "租赁标的"}、订单与库存均来自当前 SaaS 租户的 Rental Core 数据。`} view={<Segmented value={period} onChange={(value) => setPeriod(String(value))} options={["今日", "本周", "本月"]} />} extra={<Space><Button shape="circle" aria-label="刷新经营概览" icon={<ReloadOutlined />} onClick={refresh} />{canReconcilePayments && <Button loading={reconcilePayments.isPending} onClick={() => reconcilePayments.mutate()}>核对支付与退款</Button>}</Space>} />
     <QueryState loading={loading} error={error}>
       {(canViewOrders || canViewAssets) ? <div className="metric-grid">
         {canViewOrders && <>

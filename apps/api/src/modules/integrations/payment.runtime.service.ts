@@ -10,7 +10,8 @@ import { Prisma } from "@prisma/client";
 import {
   CLIENT_API_VERSION,
   type ClientPaymentIntentRequest,
-  type ClientPaymentIntentResponse
+  type ClientPaymentIntentResponse,
+  type PaymentReconciliationSummary
 } from "@rental-os/shared";
 import {
   createHash,
@@ -452,6 +453,76 @@ export class PaymentRuntimeService {
     const row = await this.prisma.rentalPaymentIntent.findFirst({ where: { id: intentId, tenantId, workspaceId, orderId } });
     if (!row) throw new NotFoundException("支付单不存在");
     return this.toResponse(row);
+  }
+
+  /**
+   * 对账只处理仍可能改变外部状态的记录，且每一笔独立隔离失败。
+   *
+   * 这里故意复用单笔 refresh，而不是在批量入口复制支付入账/退款入账逻辑：
+   * 回调、客户主动查询和运营批量对账必须共享同一套金额校验、幂等和资金事件门禁。
+   * “查询失败”只写入本次结果，不把未知状态改成失败，也不影响后续记录。
+   */
+  async reconcileCurrentWorkspace(
+    tenantId: string,
+    workspaceId: string,
+    limit = 50
+  ): Promise<PaymentReconciliationSummary> {
+    const take = Math.max(1, Math.min(Number.isFinite(limit) ? Math.floor(limit) : 50, 100));
+    const [intents, refunds] = await Promise.all([
+      this.prisma.rentalPaymentIntent.findMany({
+        where: { tenantId, workspaceId, status: { in: ["pending", "verified_pending_funding", "funding_failed"] } },
+        orderBy: { updatedAt: "asc" },
+        take
+      }),
+      this.prisma.rentalPaymentRefund.findMany({
+        where: { tenantId, workspaceId, status: { in: ["pending", "accepted", "funding_pending"] } },
+        orderBy: { updatedAt: "asc" },
+        take
+      })
+    ]);
+    const candidates = [
+      ...intents.map((row) => ({ kind: "payment_intent" as const, id: row.id, orderId: row.orderId, previousStatus: row.status, updatedAt: row.updatedAt.getTime() })),
+      ...refunds.map((row) => ({ kind: "refund" as const, id: row.id, orderId: row.orderId, previousStatus: row.status, intentId: row.paymentIntentId, updatedAt: row.updatedAt.getTime() }))
+    ].sort((left, right) => left.updatedAt - right.updatedAt || left.id.localeCompare(right.id)).slice(0, take);
+    const results: PaymentReconciliationSummary["results"] = [];
+
+    for (const candidate of candidates) {
+      try {
+        const current = candidate.kind === "payment_intent"
+          ? await this.refreshPaymentIntent(tenantId, workspaceId, candidate.orderId, candidate.id)
+          : await this.refreshPaymentRefund(tenantId, workspaceId, candidate.orderId, candidate.intentId, candidate.id);
+        const status = typeof current === "object" && current !== null && "status" in current
+          ? String((current as { status: unknown }).status)
+          : "unknown";
+        results.push({
+          kind: candidate.kind,
+          id: candidate.id,
+          orderId: candidate.orderId,
+          previousStatus: candidate.previousStatus,
+          status
+        });
+      } catch (error) {
+        results.push({
+          kind: candidate.kind,
+          id: candidate.id,
+          orderId: candidate.orderId,
+          previousStatus: candidate.previousStatus,
+          status: "reconcile_error",
+          error: (error instanceof Error ? error.message : String(error)).slice(0, 240)
+        });
+      }
+    }
+
+    return {
+      scanned: candidates.length,
+      processed: results.length,
+      paid: results.filter((row) => row.kind === "payment_intent" && row.status === "paid").length,
+      closed: results.filter((row) => row.kind === "payment_intent" && row.status === "closed").length,
+      refunded: results.filter((row) => row.kind === "refund" && row.status === "succeeded").length,
+      pending: results.filter((row) => ["pending", "accepted", "funding_pending"].includes(row.status)).length,
+      failed: results.filter((row) => row.status === "failed" || row.status === "reconcile_error").length,
+      results
+    };
   }
 
   /**

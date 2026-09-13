@@ -19,6 +19,7 @@ import { FileStorageRuntimeService } from "./modules/integrations/file-storage.r
 import { PaymentRuntimeService } from "./modules/integrations/payment.runtime.service";
 import { PaymentWebhookController } from "./modules/integrations/payment-webhook.controller";
 import { PaymentOperationsController } from "./modules/integrations/payment-operations.controller";
+import { PaymentReconciliationController } from "./modules/integrations/payment-reconciliation.controller";
 import { SecretBox } from "./common/secret-box";
 import { JobsController } from "./modules/jobs/jobs.controller";
 import { NotificationsController } from "./modules/notifications/notifications.controller";
@@ -86,6 +87,7 @@ import { ClientAuthService } from "./modules/client/client-auth.service";
     FilesController,
     PaymentWebhookController,
     PaymentOperationsController,
+    PaymentReconciliationController,
     NotificationsController,
     JobsController,
     ClientApiController

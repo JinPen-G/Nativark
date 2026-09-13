@@ -69,6 +69,7 @@ import type {
   RentalWorkspaceOperationReport,
   RentalWorkspaceReportFilter,
   RentalWorkbenchTodos,
+  PaymentReconciliationSummary,
   RentalServiceCapacity,
   SaveWorkspaceCapabilityRequest,
   UpgradeWorkspaceCapabilityRequest,
@@ -129,6 +130,7 @@ export const rentalCoreApi = {
   operationReport: (params?: RentalWorkspaceReportFilter) =>
     request<RentalWorkspaceOperationReport>("/rental/v1/reports/operations", { params }),
   workbenchTodos: () => request<RentalWorkbenchTodos>("/rental/v1/workbench/todos"),
+  reconcilePayments: (limit = 50) => request<PaymentReconciliationSummary>(`/rental/v1/payment-reconciliation?limit=${limit}`, { method: "post" }),
   /**
    * REPORT-01B：导出当前经营空间报表（CSV）。
    *

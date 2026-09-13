@@ -286,6 +286,26 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     },
     ["refundId", "paymentIntentId", "orderId", "provider", "method", "amount", "currency", "merchantRefundNo", "status", "reason", "createdAt", "updatedAt"]
   ),
+  PaymentReconciliationSummary: objectOf(
+    {
+      scanned: numberSchema,
+      processed: numberSchema,
+      paid: numberSchema,
+      closed: numberSchema,
+      refunded: numberSchema,
+      pending: numberSchema,
+      failed: numberSchema,
+      results: arrayOf(objectOf({
+        kind: stringSchema,
+        id: stringSchema,
+        orderId: stringSchema,
+        previousStatus: stringSchema,
+        status: stringSchema,
+        error: stringSchema
+      }, ["kind", "id", "orderId", "previousStatus", "status"]))
+    },
+    ["scanned", "processed", "paid", "closed", "refunded", "pending", "failed", "results"]
+  ),
   CreateFileUploadSessionRequest: objectOf(
     {
       businessModule: stringSchema,
@@ -1226,7 +1246,8 @@ function backlogOperation(
   permissions: string[] = [],
   authRequired = true,
   requestSchema?: string,
-  responseSchema?: string
+  responseSchema?: string,
+  parameters?: ParameterObject[]
 ): ContractOperation {
   return {
     method,
@@ -1237,7 +1258,8 @@ function backlogOperation(
     permissions,
     authRequired,
     requestSchema: requestSchema ?? (method === "get" || method === "delete" ? undefined : "GenericObject"),
-    responseSchema: responseSchema ?? "GenericObject"
+    responseSchema: responseSchema ?? "GenericObject",
+    parameters
   };
 }
 
@@ -2272,6 +2294,7 @@ function rentalBusinessOperations(): ContractOperation[] { return [
   backlogOperation("get", "/api/rental/v1/orders/{orderId}/payment-intents/{intentId}/refunds", "Payments", "listRentalPaymentRefunds", "List provider refund records for a payment intent", ["rental-os:finance:view", "rental-os:finance:reconcile"]),
   backlogOperation("post", "/api/rental/v1/orders/{orderId}/payment-intents/{intentId}/refunds", "Payments", "createRentalPaymentRefund", "Create a real provider refund after an approved order credit", ["rental-os:finance:reconcile"], true, "CreatePaymentRefundRequest", "PaymentRefundResponse"),
   backlogOperation("post", "/api/rental/v1/orders/{orderId}/payment-intents/{intentId}/refunds/{refundId}/refresh", "Payments", "refreshRentalPaymentRefund", "Query and recover a provider refund", ["rental-os:finance:reconcile"], true, undefined, "PaymentRefundResponse"),
+  backlogOperation("post", "/api/rental/v1/payment-reconciliation", "Payments", "reconcileRentalPayments", "Reconcile unresolved payment intents and refunds in the current workspace", ["rental-os:finance:reconcile"], true, undefined, "PaymentReconciliationSummary", [queryParam("limit", numberSchema)]),
   backlogOperation("get", "/api/rental/v1/customer-coupons", "RentalBusiness", "listRentalCustomerCoupons", "List customer coupons", ["rental-os:marketing:manage"]),
   backlogOperation("post", "/api/rental/v1/customer-coupons/{id}/void", "RentalBusiness", "voidRentalCustomerCoupon", "Void an available customer coupon with a reason", ["rental-os:marketing:manage"]),
   backlogOperation("post", "/api/rental/v1/customer-coupons/claim", "RentalBusiness", "claimRentalCustomerCoupon", "Claim customer coupon", ["rental-os:marketing:manage"]),
