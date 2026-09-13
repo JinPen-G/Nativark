@@ -7,6 +7,7 @@
  */
 
 import type {
+  CustomerMembershipBenefit,
   RentalBookingIdentityInput,
   RentalFulfillmentMode,
   RentalPricingUnit
@@ -174,6 +175,160 @@ export interface ClientMembershipStatusResponse {
   workspaces: ClientWorkspaceSummary[];
   reviews: ClientMembershipReviewStatus[];
   qualifications: ClientMembershipQualificationStatus[];
+}
+
+/**
+ * 客户端自己的资料视图。手机号、证件号和企业统一社会信用代码只返回脱敏值；
+ * 客户端不能通过这个接口修改手机号、证件或企业主体事实。
+ */
+export interface ClientProfileView {
+  apiVersion: typeof CLIENT_API_VERSION;
+  customerId: string;
+  customerType: "personal" | "corporate";
+  name: string;
+  phoneMasked: string;
+  email?: string;
+  identityVerified: boolean;
+  identityNoMasked?: string;
+  accountStatus: "active" | "suspended" | "closed";
+  workspace: ClientWorkspaceSummary;
+  corporate?: {
+    legalName: string;
+    unifiedSocialCreditCodeMasked: string;
+    registeredAddress?: string;
+    industry?: string;
+    scale?: string;
+    status: string;
+  };
+  contacts: ClientContactView[];
+}
+
+export interface ClientProfileUpdateRequest {
+  name?: string;
+  email?: string | null;
+}
+
+export type ClientContactKind = "emergency" | "corporate" | "other";
+
+export interface ClientContactRequest {
+  id?: string;
+  kind: ClientContactKind;
+  name: string;
+  phone: string;
+  email?: string;
+  relation?: string;
+  isPrimary?: boolean;
+}
+
+export interface ClientContactView {
+  id: string;
+  kind: ClientContactKind;
+  name: string;
+  phoneMasked: string;
+  email?: string;
+  relation?: string;
+  isPrimary: boolean;
+  status: "active" | "inactive" | string;
+}
+
+export interface ClientContactsResponse {
+  apiVersion: typeof CLIENT_API_VERSION;
+  items: ClientContactView[];
+}
+
+export interface ClientMembershipPlanView {
+  planId: string;
+  code: string;
+  name: string;
+  targetType: "personal" | "corporate";
+  versionId: string;
+  version: number;
+  levelRank: number;
+  isDefault: boolean;
+  isRecommended: boolean;
+  benefits: CustomerMembershipBenefit[];
+  effectiveFrom?: string;
+  effectiveTo?: string;
+}
+
+export interface ClientMembershipPlansResponse {
+  apiVersion: typeof CLIENT_API_VERSION;
+  plans: ClientMembershipPlanView[];
+}
+
+export interface ClientMembershipAssignmentView {
+  id: string;
+  planId: string;
+  planVersionId: string;
+  planName: string;
+  targetType: "personal" | "corporate";
+  source: "manual" | "system" | "corporate_contract" | string;
+  status: "active" | "expired" | "revoked" | string;
+  effectiveFrom: string;
+  effectiveTo?: string;
+  benefits: CustomerMembershipBenefit[];
+  reason?: string;
+  createdAt: string;
+}
+
+export interface ClientMembershipAssignmentsResponse {
+  apiVersion: typeof CLIENT_API_VERSION;
+  items: ClientMembershipAssignmentView[];
+}
+
+export interface ClientMembershipBenefitsResponse {
+  apiVersion: typeof CLIENT_API_VERSION;
+  personal?: ClientMembershipAssignmentView;
+  corporate?: ClientMembershipAssignmentView;
+}
+
+export interface ClientCorporateIdentityView {
+  corporateCustomerId: string;
+  corporateName: string;
+  legalName?: string;
+  unifiedSocialCreditCodeMasked?: string;
+  registeredAddress?: string;
+  role: "admin" | "employee" | string;
+  department?: string;
+  employeeNo?: string;
+  membershipId: string;
+  effectiveTo?: string;
+}
+
+export interface ClientCorporateIdentityListResponse {
+  apiVersion: typeof CLIENT_API_VERSION;
+  items: ClientCorporateIdentityView[];
+}
+
+export interface ClientPaymentCapabilitiesResponse {
+  apiVersion: typeof CLIENT_API_VERSION;
+  mode: "simulation_only" | "provider_pending";
+  realPaymentEnabled: false;
+  methods: Array<"simulation">;
+  instruments: Array<"rental" | "deposit" | "preauthorization">;
+}
+
+export interface ClientConfigResponse {
+  apiVersion: typeof CLIENT_API_VERSION;
+  tenantCode: string;
+  workspace: ClientWorkspaceSummary;
+  categoryCode: string;
+  timeZone: string;
+  registration: {
+    mode: "manual" | "automatic";
+    verificationMethods: ClientVerificationMethod[];
+    providerMode: "development" | "provider_pending";
+  };
+  features: {
+    profile: boolean;
+    contacts: boolean;
+    membershipPlans: boolean;
+    qualifications: boolean;
+    coupons: boolean;
+    orderExtensions: boolean;
+    notifications: boolean;
+  };
+  payment: ClientPaymentCapabilitiesResponse;
 }
 
 export interface ClientBookingOption {

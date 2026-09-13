@@ -1,10 +1,13 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   Param,
+  Patch,
   Post,
+  Put,
   Query,
   Req,
   Res,
@@ -16,12 +19,14 @@ import {
   ClientAvailabilityRequestDto,
   ClientCancelOrderRequestDto,
   ClientChangePasswordRequestDto,
+  ClientContactRequestDto,
   ClientCreateOrderRequestDto,
   ClientCreateQuoteRequestDto,
   ClientMembershipLoginRequestDto,
   ClientOrderExtensionRequestDto,
   ClientPaymentSimulationRequestDto,
   ClientPersonalMembershipRegistrationRequestDto,
+  ClientProfileUpdateRequestDto,
   ClientRefreshRequestDto,
   ClientRegistrationChallengeRequestDto,
   ClientSubmitQualificationRequestDto,
@@ -101,6 +106,41 @@ export class ClientApiController {
     return this.auth.changePassword(currentClient(req), body.currentPassword, body.newPassword);
   }
 
+  @Get("config")
+  config(@Req() req: ClientRequest) {
+    return this.api.config(currentClient(req));
+  }
+
+  @Get("payment/capabilities")
+  paymentCapabilities() {
+    return this.api.paymentCapabilities();
+  }
+
+  @Get("profile")
+  profile(@Req() req: ClientRequest) {
+    return this.api.profile(currentClient(req));
+  }
+
+  @Patch("profile")
+  updateProfile(@Req() req: ClientRequest, @Body() body: ClientProfileUpdateRequestDto) {
+    return this.api.updateProfile(currentClient(req), body);
+  }
+
+  @Get("profile/contacts")
+  contacts(@Req() req: ClientRequest) {
+    return this.api.contacts(currentClient(req));
+  }
+
+  @Put("profile/contacts")
+  saveContact(@Req() req: ClientRequest, @Body() body: ClientContactRequestDto) {
+    return this.api.saveContact(currentClient(req), body);
+  }
+
+  @Delete("profile/contacts/:contactId")
+  deleteContact(@Req() req: ClientRequest, @Param("contactId") contactId: string) {
+    return this.api.deleteContact(currentClient(req), contactId);
+  }
+
   @Get("membership/status")
   membershipStatus(@Req() req: ClientRequest) {
     return this.api.membershipStatus(currentClient(req));
@@ -114,6 +154,26 @@ export class ClientApiController {
   @Get("membership/booking-options")
   bookingOptions(@Req() req: ClientRequest) {
     return this.api.bookingOptions(currentClient(req));
+  }
+
+  @Get("membership/plans")
+  membershipPlans(@Req() req: ClientRequest) {
+    return this.api.membershipPlans(currentClient(req));
+  }
+
+  @Get("membership/assignments")
+  membershipAssignments(@Req() req: ClientRequest) {
+    return this.api.membershipAssignments(currentClient(req));
+  }
+
+  @Get("membership/benefits")
+  membershipBenefits(@Req() req: ClientRequest, @Query("corporateCustomerId") corporateCustomerId?: string) {
+    return this.api.membershipBenefits(currentClient(req), corporateCustomerId);
+  }
+
+  @Get("membership/corporates")
+  corporateIdentities(@Req() req: ClientRequest) {
+    return this.api.corporateIdentities(currentClient(req));
   }
 
   @Get("membership/qualification-types")

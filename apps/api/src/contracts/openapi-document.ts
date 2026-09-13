@@ -788,6 +788,151 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     },
     ["apiVersion", "customerId", "customerType", "displayName", "phoneMasked", "accountStatus", "workspace", "workspaces", "reviews", "qualifications"]
   ),
+  ClientProfileUpdateRequest: objectOf(
+    {
+      name: stringSchema,
+      email: stringSchema
+    },
+    []
+  ),
+  ClientContactRequest: objectOf(
+    {
+      id: stringSchema,
+      kind: { type: "string", enum: ["emergency", "corporate", "other"] },
+      name: stringSchema,
+      phone: stringSchema,
+      email: stringSchema,
+      relation: stringSchema,
+      isPrimary: booleanSchema
+    },
+    ["kind", "name", "phone"]
+  ),
+  ClientContact: objectOf(
+    {
+      id: stringSchema,
+      kind: { type: "string", enum: ["emergency", "corporate", "other"] },
+      name: stringSchema,
+      phoneMasked: stringSchema,
+      email: stringSchema,
+      relation: stringSchema,
+      isPrimary: booleanSchema,
+      status: stringSchema
+    },
+    ["id", "kind", "name", "phoneMasked", "isPrimary", "status"]
+  ),
+  ClientContacts: objectOf(
+    { apiVersion: stringSchema, items: arrayOf(ref("ClientContact")) },
+    ["apiVersion", "items"]
+  ),
+  ClientProfile: objectOf(
+    {
+      apiVersion: stringSchema,
+      customerId: stringSchema,
+      customerType: stringSchema,
+      name: stringSchema,
+      phoneMasked: stringSchema,
+      email: stringSchema,
+      identityVerified: booleanSchema,
+      identityNoMasked: stringSchema,
+      accountStatus: stringSchema,
+      workspace: ref("ClientWorkspaceSummary"),
+      corporate: objectSchema,
+      contacts: arrayOf(ref("ClientContact"))
+    },
+    ["apiVersion", "customerId", "customerType", "name", "phoneMasked", "identityVerified", "accountStatus", "workspace", "contacts"]
+  ),
+  ClientMembershipPlan: objectOf(
+    {
+      planId: stringSchema,
+      code: stringSchema,
+      name: stringSchema,
+      targetType: stringSchema,
+      versionId: stringSchema,
+      version: numberSchema,
+      levelRank: numberSchema,
+      isDefault: booleanSchema,
+      isRecommended: booleanSchema,
+      benefits: arrayOf(objectSchema),
+      effectiveFrom: { type: "string", format: "date-time" },
+      effectiveTo: { type: "string", format: "date-time" }
+    },
+    ["planId", "code", "name", "targetType", "versionId", "version", "levelRank", "isDefault", "isRecommended", "benefits"]
+  ),
+  ClientMembershipPlans: objectOf(
+    { apiVersion: stringSchema, plans: arrayOf(ref("ClientMembershipPlan")) },
+    ["apiVersion", "plans"]
+  ),
+  ClientMembershipAssignment: objectOf(
+    {
+      id: stringSchema,
+      planId: stringSchema,
+      planVersionId: stringSchema,
+      planName: stringSchema,
+      targetType: stringSchema,
+      source: stringSchema,
+      status: stringSchema,
+      effectiveFrom: { type: "string", format: "date-time" },
+      effectiveTo: { type: "string", format: "date-time" },
+      benefits: arrayOf(objectSchema),
+      reason: stringSchema,
+      createdAt: { type: "string", format: "date-time" }
+    },
+    ["id", "planId", "planVersionId", "planName", "targetType", "source", "status", "effectiveFrom", "benefits", "createdAt"]
+  ),
+  ClientMembershipAssignments: objectOf(
+    { apiVersion: stringSchema, items: arrayOf(ref("ClientMembershipAssignment")) },
+    ["apiVersion", "items"]
+  ),
+  ClientMembershipBenefits: objectOf(
+    {
+      apiVersion: stringSchema,
+      personal: ref("ClientMembershipAssignment"),
+      corporate: ref("ClientMembershipAssignment")
+    },
+    ["apiVersion"]
+  ),
+  ClientCorporateIdentity: objectOf(
+    {
+      corporateCustomerId: stringSchema,
+      corporateName: stringSchema,
+      legalName: stringSchema,
+      unifiedSocialCreditCodeMasked: stringSchema,
+      registeredAddress: stringSchema,
+      role: stringSchema,
+      department: stringSchema,
+      employeeNo: stringSchema,
+      membershipId: stringSchema,
+      effectiveTo: { type: "string", format: "date-time" }
+    },
+    ["corporateCustomerId", "corporateName", "role", "membershipId"]
+  ),
+  ClientCorporateIdentities: objectOf(
+    { apiVersion: stringSchema, items: arrayOf(ref("ClientCorporateIdentity")) },
+    ["apiVersion", "items"]
+  ),
+  ClientPaymentCapabilities: objectOf(
+    {
+      apiVersion: stringSchema,
+      mode: stringSchema,
+      realPaymentEnabled: { type: "boolean" },
+      methods: arrayOf(stringSchema),
+      instruments: arrayOf(stringSchema)
+    },
+    ["apiVersion", "mode", "realPaymentEnabled", "methods", "instruments"]
+  ),
+  ClientConfig: objectOf(
+    {
+      apiVersion: stringSchema,
+      tenantCode: stringSchema,
+      workspace: ref("ClientWorkspaceSummary"),
+      categoryCode: stringSchema,
+      timeZone: stringSchema,
+      registration: objectOf({ mode: stringSchema, verificationMethods: arrayOf(stringSchema), providerMode: stringSchema }, ["mode", "verificationMethods", "providerMode"]),
+      features: objectOf({ profile: booleanSchema, contacts: booleanSchema, membershipPlans: booleanSchema, qualifications: booleanSchema, coupons: booleanSchema, orderExtensions: booleanSchema, notifications: booleanSchema }, ["profile", "contacts", "membershipPlans", "qualifications", "coupons", "orderExtensions", "notifications"]),
+      payment: ref("ClientPaymentCapabilities")
+    },
+    ["apiVersion", "tenantCode", "workspace", "categoryCode", "timeZone", "registration", "features", "payment"]
+  ),
   ClientBookingOption: objectOf(
     {
       bookingIdentity: stringSchema,
@@ -1992,9 +2137,20 @@ function rentalBusinessOperations(): ContractOperation[] { return [
   clientOperation("post", "/api/client/v1/auth/switch-workspace", "switchClientWorkspace", "Switch the current customer client session to an authorized workspace", { requestSchema: "ClientSwitchWorkspaceRequest", responseSchema: "ClientMembershipSessionResponse" }),
   clientOperation("get", "/api/client/v1/auth/me", "getClientMe", "Get the current customer client profile", { responseSchema: "ClientMembershipStatus" }),
   clientOperation("post", "/api/client/v1/auth/change-password", "changeClientPassword", "Change the current customer client password", { requestSchema: "ClientChangePasswordRequest", responseSchema: "ClientActionResult" }),
+  clientOperation("get", "/api/client/v1/config", "getClientConfig", "Get client-safe workspace configuration and feature availability", { responseSchema: "ClientConfig" }),
+  clientOperation("get", "/api/client/v1/payment/capabilities", "getClientPaymentCapabilities", "Get client payment capability status without exposing a provider", { responseSchema: "ClientPaymentCapabilities" }),
+  clientOperation("get", "/api/client/v1/profile", "getClientProfile", "Get the current customer profile and masked contact data", { responseSchema: "ClientProfile" }),
+  clientOperation("patch", "/api/client/v1/profile", "updateClientProfile", "Update the editable part of the current customer profile", { requestSchema: "ClientProfileUpdateRequest", responseSchema: "ClientProfile" }),
+  clientOperation("get", "/api/client/v1/profile/contacts", "listClientContacts", "List the current customer contacts", { responseSchema: "ClientContacts" }),
+  clientOperation("put", "/api/client/v1/profile/contacts", "saveClientContact", "Create or update a current customer contact", { requestSchema: "ClientContactRequest", responseSchema: "ClientContact" }),
+  clientOperation("delete", "/api/client/v1/profile/contacts/{contactId}", "deleteClientContact", "Deactivate a current customer contact", { responseSchema: "ClientActionResult" }),
   clientOperation("get", "/api/client/v1/membership/status", "getClientMembershipStatus", "Get current customer membership and review status", { responseSchema: "ClientMembershipStatus" }),
   clientOperation("get", "/api/client/v1/notifications", "listClientNotifications", "List notifications for the current customer orders", { responseSchema: "ClientNotificationList", parameters: [queryParam("page", numberSchema), queryParam("pageSize", numberSchema)] }),
   clientOperation("get", "/api/client/v1/membership/booking-options", "listClientBookingOptions", "List personal and enterprise booking identities", { responseSchema: arrayOf(ref("ClientBookingOption")) }),
+  clientOperation("get", "/api/client/v1/membership/plans", "listClientMembershipPlans", "List published APP-visible membership plans for the current workspace", { responseSchema: "ClientMembershipPlans" }),
+  clientOperation("get", "/api/client/v1/membership/assignments", "listClientMembershipAssignments", "List the current customer's membership plan assignments", { responseSchema: "ClientMembershipAssignments" }),
+  clientOperation("get", "/api/client/v1/membership/benefits", "getClientMembershipBenefits", "Resolve personal and optionally selected enterprise benefits", { responseSchema: "ClientMembershipBenefits", parameters: [queryParam("corporateCustomerId", stringSchema)] }),
+  clientOperation("get", "/api/client/v1/membership/corporates", "listClientCorporateIdentities", "List active enterprise identities available to the current personal member", { responseSchema: "ClientCorporateIdentities" }),
   clientOperation("get", "/api/client/v1/membership/qualification-types", "listClientQualificationTypes", "List qualification types for the current workspace", { responseSchema: arrayOf(objectSchema) }),
   clientOperation("get", "/api/client/v1/membership/qualifications", "listClientQualifications", "List current customer qualification submissions", { responseSchema: arrayOf(objectSchema) }),
   clientOperation("post", "/api/client/v1/membership/qualifications", "submitClientQualification", "Submit a customer qualification for review", { requestSchema: "ClientQualificationRequest", responseSchema: objectSchema }),

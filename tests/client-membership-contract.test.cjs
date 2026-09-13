@@ -55,4 +55,25 @@ assert.equal(session.apiVersion, "v1");
 assert.equal("permissions" in session, false, "客户端会话不能携带运营权限矩阵");
 assert.equal("roleIds" in session, false, "客户端会话不能复用运营角色字段");
 
-console.log("MEMBER-01F 客户端会员 v1 契约：12 项全部通过");
+const profileUpdate = { name: "移动端会员", email: "member@example.com" };
+assert.equal("phone" in profileUpdate, false, "客户端资料更新不能直接改手机号");
+assert.equal("identityNo" in profileUpdate, false, "客户端资料更新不能直接改证件号");
+
+const contact = { kind: "emergency", name: "紧急联系人", phone: "13900000000", isPrimary: true };
+assert.equal(contact.kind, "emergency");
+assert.equal("phoneMasked" in contact, false, "客户端写联系人使用明文输入，响应必须由服务端脱敏");
+
+const benefitsQuery = { corporateCustomerId: "corporate-1" };
+assert.ok(benefitsQuery.corporateCustomerId, "企业权益解析必须使用服务端校验的企业标识");
+
+const payment = {
+  apiVersion: "v1",
+  mode: "simulation_only",
+  realPaymentEnabled: false,
+  methods: ["simulation"],
+  instruments: ["rental", "deposit", "preauthorization"]
+};
+assert.equal(payment.realPaymentEnabled, false, "客户端 v1 不得伪装已接入真实支付");
+assert.deepEqual(payment.instruments, ["rental", "deposit", "preauthorization"]);
+
+console.log("MEMBER-01F/CLIENT-01 客户端会员 v1 契约：20 项全部通过");

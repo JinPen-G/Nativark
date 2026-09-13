@@ -24,9 +24,11 @@ import {
   type ClientAvailabilityRequest,
   type ClientCancelOrderRequest,
   type ClientChangePasswordRequest,
+  type ClientContactRequest,
   type ClientCreateOrderRequest,
   type ClientCreateQuoteRequest,
   type ClientMembershipLoginRequest,
+  type ClientProfileUpdateRequest,
   type ClientOrderExtensionRequest,
   type ClientPaymentSimulationRequest,
   type ClientPersonalMembershipRegistrationRequest,
@@ -150,6 +152,37 @@ export class ClientChangePasswordRequestDto implements ClientChangePasswordReque
 
   @IsString() @IsNotEmpty() @MinLength(8) @MaxLength(128)
   newPassword!: string;
+}
+
+export class ClientProfileUpdateRequestDto implements ClientProfileUpdateRequest {
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(120)
+  name?: string;
+
+  @IsOptional() @IsEmail() @MaxLength(191)
+  email?: string | null;
+}
+
+export class ClientContactRequestDto implements ClientContactRequest {
+  @IsOptional() @IsString() @MaxLength(191)
+  id?: string;
+
+  @IsIn(["emergency", "corporate", "other"])
+  kind!: ClientContactRequest["kind"];
+
+  @IsString() @IsNotEmpty() @MaxLength(120)
+  name!: string;
+
+  @IsString() @IsNotEmpty() @MaxLength(32)
+  phone!: string;
+
+  @IsOptional() @IsEmail() @MaxLength(191)
+  email?: string;
+
+  @IsOptional() @IsString() @MaxLength(120)
+  relation?: string;
+
+  @IsOptional() @IsBoolean()
+  isPrimary?: boolean;
 }
 
 export class ClientBookingIdentityInputDto {

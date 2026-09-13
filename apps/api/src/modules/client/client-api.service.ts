@@ -1,16 +1,28 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
-import type {
-  ClientCreateOrderRequest,
-  ClientCreateQuoteRequest,
-  ClientFulfillmentView,
-  ClientNotificationListResponse,
-  ClientOrderExtensionRequest,
-  ClientOrderView,
-  ClientPaymentSimulationRequest,
-  ClientWorkspaceSummary,
-  CreateRentalOrderRequest,
-  RentalOrder,
-  RentalQuoteRequest
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from "@nestjs/common";
+import {
+  CLIENT_API_VERSION,
+  type ClientConfigResponse,
+  type ClientContactRequest,
+  type ClientContactView,
+  type ClientCreateOrderRequest,
+  type ClientCorporateIdentityListResponse,
+  type ClientCreateQuoteRequest,
+  type ClientFulfillmentView,
+  type ClientMembershipAssignmentView,
+  type ClientMembershipBenefitsResponse,
+  type ClientMembershipPlansResponse,
+  type ClientNotificationListResponse,
+  type ClientOrderExtensionRequest,
+  type ClientOrderView,
+  type ClientPaymentSimulationRequest,
+  type ClientPaymentCapabilitiesResponse,
+  type ClientProfileUpdateRequest,
+  type ClientProfileView,
+  type ClientWorkspaceSummary,
+  type CreateRentalOrderRequest,
+  type CustomerMembershipPlanAssignment,
+  type RentalOrder,
+  type RentalQuoteRequest
 } from "@rental-os/shared";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../database/prisma.service";
@@ -131,7 +143,7 @@ export class ClientApiService {
         isDefault: workspace?.isDefault
       } satisfies ClientWorkspaceSummary,
       categoryCode: business.profile.categoryCode,
-      timeZone: business.settings.calendar.timeZone,
+      timeZone: business.settings.calendar.timeZone ?? "Asia/Shanghai",
       items: business.groups.filter((item) => item.status === "enabled").map((item) => ({ id: item.id, code: item.code, name: item.name, description: item.description, inventoryMode: item.inventoryMode, images: item.images?.map((image) => ({ url: `/api/client/v1/catalog/items/${encodeURIComponent(item.id)}/images/${encodeURIComponent(image.id)}`, alt: image.fileName })), attributes: item.attributes })),
       pricingGroups: (business.pricingGroups ?? []).filter((group) => group.status === "enabled").map((group) => ({ id: group.id, code: group.code, name: group.name, memberItemGroupIds: group.memberItemGroupIds, enabled: group.status === "enabled" })),
       services: this.business.listServices(context.tenantId, business).filter((service) => service.status === "enabled").map((service) => ({ id: service.id, code: service.code, name: service.name, description: service.terms, pricingUnit: service.billingUnit, enabled: true })),
@@ -145,6 +157,338 @@ export class ClientApiService {
     const item = business.groups.find((group) => group.id === itemGroupId && group.status === "enabled");
     if (!item) throw new NotFoundException("商品不存在");
     return this.core.readItemGroupImage(context.tenantId, itemGroupId, imageId);
+  }
+
+  private async currentWorkspace(context: ClientRequestContext) {
+    const directory = await this.auth.listPublicWorkspaces(context.tenantCode);
+    const workspace = directory.workspaces.find((row) => row.code === context.workspaceCode);
+    if (!workspace) throw new NotFoundException("当前经营空间不存在或未启用");
+    return workspace;
+  }
+
+  private maskPhone(value: string) {
+    const phone = value.trim();
+    return phone.length <= 4 ? "****" : `${phone.slice(0, 3)}****${phone.slice(-4)}`;
+  }
+
+  private normalizePhone(value: string) {
+    const phone = value.trim().replace(/[\s-]/gu, "");
+    if (!/^\+?[0-9]{6,20}$/u.test(phone)) throw new BadRequestException("联系人手机号格式无效");
+    return phone;
+  }
+
+  private async profileRow(context: ClientRequestContext) {
+    const row = await this.prisma.customerProfile.findFirst({
+      where: { tenantId: context.tenantId, id: context.customerId },
+      select: {
+        id: true,
+        customerType: true,
+        name: true,
+        phoneMasked: true,
+        email: true,
+        identityVerified: true,
+        identityNoMasked: true,
+        account: { select: { status: true } },
+        corporateProfile: {
+          select: {
+            legalName: true,
+            unifiedSocialCreditCodeMasked: true,
+            registeredAddress: true,
+            industry: true,
+            scale: true,
+            status: true
+          }
+        },
+        contacts: {
+          where: { status: "active" },
+          orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
+          select: { id: true, kind: true, name: true, phoneMasked: true, email: true, relation: true, isPrimary: true, status: true }
+        }
+      }
+    });
+    if (!row || !row.account) throw new UnauthorizedException("客户账号不存在");
+    return row;
+  }
+
+  async config(context: ClientRequestContext): Promise<ClientConfigResponse> {
+    const business = this.context(context.tenantId);
+    const workspace = await this.currentWorkspace(context);
+    const registration = await this.prisma.customerMembershipRegistrationSettings.findFirst({
+      where: { tenantId: context.tenantId, workspaceId: context.workspaceId },
+      select: { registrationMode: true }
+    });
+    const payment = this.buildPaymentCapabilities();
+    return {
+      apiVersion: CLIENT_API_VERSION,
+      tenantCode: context.tenantCode,
+      workspace: {
+        workspaceCode: workspace.code,
+        workspaceName: workspace.name,
+        categoryCode: String(workspace.categoryCode),
+        membershipStatus: context.membershipStatus,
+        isDefault: workspace.isDefault
+      },
+      categoryCode: business.profile.categoryCode,
+      timeZone: business.settings.calendar.timeZone ?? "Asia/Shanghai",
+      registration: {
+        mode: registration?.registrationMode === "automatic" ? "automatic" : "manual",
+        verificationMethods: ["sms", "email"],
+        providerMode: process.env.NODE_ENV === "production" ? "provider_pending" : "development"
+      },
+      features: {
+        profile: true,
+        contacts: true,
+        membershipPlans: true,
+        qualifications: true,
+        coupons: true,
+        orderExtensions: true,
+        notifications: true
+      },
+      payment
+    };
+  }
+
+  private buildPaymentCapabilities(): ClientPaymentCapabilitiesResponse {
+    const development = process.env.NODE_ENV !== "production";
+    return {
+      apiVersion: CLIENT_API_VERSION,
+      mode: development ? "simulation_only" : "provider_pending",
+      realPaymentEnabled: false,
+      methods: development ? ["simulation"] : [],
+      instruments: ["rental", "deposit", "preauthorization"]
+    };
+  }
+
+  async paymentCapabilities(): Promise<ClientPaymentCapabilitiesResponse> {
+    return this.buildPaymentCapabilities();
+  }
+
+  async profile(context: ClientRequestContext): Promise<ClientProfileView> {
+    const [row, workspace] = await Promise.all([this.profileRow(context), this.currentWorkspace(context)]);
+    return {
+      apiVersion: CLIENT_API_VERSION,
+      customerId: row.id,
+      customerType: row.customerType as ClientProfileView["customerType"],
+      name: row.name,
+      phoneMasked: row.phoneMasked,
+      email: row.email ?? undefined,
+      identityVerified: row.identityVerified,
+      identityNoMasked: row.identityNoMasked ?? undefined,
+      accountStatus: row.account!.status as ClientProfileView["accountStatus"],
+      workspace: {
+        workspaceCode: workspace.code,
+        workspaceName: workspace.name,
+        categoryCode: String(workspace.categoryCode),
+        membershipStatus: context.membershipStatus,
+        isDefault: workspace.isDefault
+      },
+      corporate: row.corporateProfile
+        ? {
+            legalName: row.corporateProfile.legalName,
+            unifiedSocialCreditCodeMasked: row.corporateProfile.unifiedSocialCreditCodeMasked,
+            registeredAddress: row.corporateProfile.registeredAddress ?? undefined,
+            industry: row.corporateProfile.industry ?? undefined,
+            scale: row.corporateProfile.scale ?? undefined,
+            status: row.corporateProfile.status
+          }
+        : undefined,
+      contacts: row.contacts.map((contact): ClientContactView => ({
+        id: contact.id,
+        kind: contact.kind as ClientContactView["kind"],
+        name: contact.name,
+        phoneMasked: contact.phoneMasked,
+        email: contact.email ?? undefined,
+        relation: contact.relation ?? undefined,
+        isPrimary: contact.isPrimary,
+        status: contact.status
+      }))
+    };
+  }
+
+  async updateProfile(context: ClientRequestContext, input: ClientProfileUpdateRequest) {
+    const data: Prisma.CustomerProfileUpdateManyMutationInput = {};
+    if (input.name !== undefined) {
+      const name = input.name.trim();
+      if (!name) throw new BadRequestException("姓名不能为空");
+      data.name = name;
+    }
+    if (input.email !== undefined) data.email = input.email?.trim() || null;
+    if (Object.keys(data).length > 0) {
+      const updated = await this.prisma.customerProfile.updateMany({ where: { tenantId: context.tenantId, id: context.customerId }, data });
+      if (updated.count !== 1) throw new NotFoundException("客户资料不存在");
+    }
+    return this.profile(context);
+  }
+
+  async contacts(context: ClientRequestContext) {
+    const row = await this.profileRow(context);
+    return {
+      apiVersion: CLIENT_API_VERSION,
+      items: row.contacts.map((contact): ClientContactView => ({
+        id: contact.id,
+        kind: contact.kind as ClientContactView["kind"],
+        name: contact.name,
+        phoneMasked: contact.phoneMasked,
+        email: contact.email ?? undefined,
+        relation: contact.relation ?? undefined,
+        isPrimary: contact.isPrimary,
+        status: contact.status
+      }))
+    };
+  }
+
+  async saveContact(context: ClientRequestContext, input: ClientContactRequest) {
+    if (input.kind === "corporate" && context.customerType !== "corporate") {
+      throw new ForbiddenException("个人会员不能维护企业联系人");
+    }
+    const phone = this.normalizePhone(input.phone);
+    const name = input.name.trim();
+    if (!name) throw new BadRequestException("联系人姓名不能为空");
+    const saved = await this.prisma.$transaction(async (tx) => {
+      let existing = input.id
+        ? await tx.customerContact.findFirst({ where: { tenantId: context.tenantId, customerId: context.customerId, id: input.id, status: "active" } })
+        : undefined;
+      if (input.id && !existing) throw new NotFoundException("联系人不存在");
+      if (input.isPrimary) {
+        await tx.customerContact.updateMany({ where: { tenantId: context.tenantId, customerId: context.customerId, kind: input.kind, status: "active", isPrimary: true, ...(input.id ? { id: { not: input.id } } : {}) }, data: { isPrimary: false } });
+      }
+      if (existing) {
+        existing = await tx.customerContact.update({
+          where: { id: existing.id },
+          data: { kind: input.kind, name, phone, phoneMasked: this.maskPhone(phone), email: input.email?.trim() || null, relation: input.relation?.trim() || null, isPrimary: input.isPrimary ?? existing.isPrimary }
+        });
+      } else {
+        existing = await tx.customerContact.create({
+          data: { tenantId: context.tenantId, customerId: context.customerId, kind: input.kind, name, phone, phoneMasked: this.maskPhone(phone), email: input.email?.trim() || null, relation: input.relation?.trim() || null, isPrimary: input.isPrimary ?? false, status: "active" }
+        });
+      }
+      return existing;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    return {
+      id: saved.id,
+      kind: saved.kind as ClientContactView["kind"],
+      name: saved.name,
+      phoneMasked: saved.phoneMasked,
+      email: saved.email ?? undefined,
+      relation: saved.relation ?? undefined,
+      isPrimary: saved.isPrimary,
+      status: saved.status
+    } satisfies ClientContactView;
+  }
+
+  async deleteContact(context: ClientRequestContext, contactId: string) {
+    const result = await this.prisma.customerContact.updateMany({ where: { tenantId: context.tenantId, customerId: context.customerId, id: contactId, status: "active" }, data: { status: "inactive", isPrimary: false } });
+    if (result.count !== 1) throw new NotFoundException("联系人不存在");
+    return { success: true };
+  }
+
+  private membershipAssignmentView(assignment: CustomerMembershipPlanAssignment): ClientMembershipAssignmentView {
+    return {
+      id: assignment.id,
+      planId: assignment.planId,
+      planVersionId: assignment.planVersionId,
+      planName: assignment.snapshot.planName,
+      targetType: assignment.snapshot.targetType,
+      source: assignment.source,
+      status: assignment.status,
+      effectiveFrom: assignment.effectiveFrom,
+      effectiveTo: assignment.effectiveTo,
+      benefits: assignment.snapshot.benefits,
+      reason: assignment.reason,
+      createdAt: assignment.createdAt
+    };
+  }
+
+  async membershipPlans(context: ClientRequestContext): Promise<ClientMembershipPlansResponse> {
+    const now = new Date();
+    const rows = await this.prisma.customerMembershipPlan.findMany({
+      where: { tenantId: context.tenantId, workspaceId: context.workspaceId, status: "active" },
+      include: {
+        versions: {
+          where: {
+            status: "published",
+            appVisible: true,
+            AND: [
+              { OR: [{ effectiveFrom: null }, { effectiveFrom: { lte: now } }] },
+              { OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }] }
+            ]
+          },
+          orderBy: { version: "desc" },
+          take: 1
+        }
+      },
+      orderBy: [{ targetType: "asc" }, { code: "asc" }]
+    });
+    return {
+      apiVersion: CLIENT_API_VERSION,
+      plans: rows.flatMap((plan) => plan.versions.map((version) => ({
+        planId: plan.id,
+        code: plan.code,
+        name: plan.name,
+        targetType: plan.targetType as "personal" | "corporate",
+        versionId: version.id,
+        version: version.version,
+        levelRank: version.levelRank,
+        isDefault: version.isDefault,
+        isRecommended: version.isRecommended,
+        benefits: (Array.isArray(version.benefits) ? version.benefits : []) as unknown as ClientMembershipPlansResponse["plans"][number]["benefits"],
+        effectiveFrom: version.effectiveFrom?.toISOString(),
+        effectiveTo: version.effectiveTo?.toISOString()
+      })))
+    };
+  }
+
+  async membershipAssignments(context: ClientRequestContext) {
+    const assignments = await this.memberships.listPlanAssignments(context.tenantId, context.workspaceId, context.customerId);
+    return { apiVersion: CLIENT_API_VERSION, items: assignments.map((assignment) => this.membershipAssignmentView(assignment)) };
+  }
+
+  async membershipBenefits(context: ClientRequestContext, corporateCustomerId?: string): Promise<ClientMembershipBenefitsResponse> {
+    const benefits = await this.memberships.resolveBenefits(context.tenantId, context.workspaceId, context.customerId, corporateCustomerId?.trim() || undefined);
+    return {
+      apiVersion: CLIENT_API_VERSION,
+      personal: benefits.personal ? this.membershipAssignmentView(benefits.personal) : undefined,
+      corporate: benefits.corporate ? this.membershipAssignmentView(benefits.corporate) : undefined
+    };
+  }
+
+  async corporateIdentities(context: ClientRequestContext): Promise<ClientCorporateIdentityListResponse> {
+    const now = new Date();
+    const rows = await this.prisma.customerCorporateMembership.findMany({
+      where: {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        personalCustomerId: context.customerId,
+        status: "active",
+        effectiveFrom: { lte: now },
+        OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }],
+        corporateCustomer: { customerType: "corporate", status: "active" }
+      },
+      include: {
+        corporateCustomer: {
+          select: {
+            name: true,
+            corporateProfile: { select: { legalName: true, unifiedSocialCreditCodeMasked: true, registeredAddress: true } }
+          }
+        }
+      },
+      orderBy: { createdAt: "desc" }
+    });
+    return {
+      apiVersion: CLIENT_API_VERSION,
+      items: rows.map((row) => ({
+        corporateCustomerId: row.corporateCustomerId,
+        corporateName: row.corporateCustomer.name,
+        legalName: row.corporateCustomer.corporateProfile?.legalName,
+        unifiedSocialCreditCodeMasked: row.corporateCustomer.corporateProfile?.unifiedSocialCreditCodeMasked,
+        registeredAddress: row.corporateCustomer.corporateProfile?.registeredAddress ?? undefined,
+        role: row.role,
+        department: row.department ?? undefined,
+        employeeNo: row.employeeNo ?? undefined,
+        membershipId: row.id,
+        effectiveTo: row.effectiveTo?.toISOString()
+      }))
+    };
   }
 
   async membershipStatus(context: ClientRequestContext) {
