@@ -14,6 +14,7 @@
     "test:integrations-security": "npm run build -w @rental-os/shared && npm run build -w @rental-os/api && node tests/integrations-security.test.cjs",
     "test:sms-notification": "node tests/tenant-sms-notification.test.cjs",
     "test:sms-rate-limit": "npm run build -w @rental-os/shared && npm run build -w @rental-os/api && node tests/sms-rate-limit.test.cjs",
+    "test:tenant-integration-default": "npm run build -w @rental-os/shared && node tests/tenant-integration-default.test.cjs",
     "test:file-storage": "npm run build -w @rental-os/shared && node tests/file-storage-lifecycle.test.cjs",
     "test:payment-reconciliation": "npm run build -w @rental-os/shared && npm run build -w @rental-os/api && node tests/payment-reconciliation.test.cjs",
     "test:payment-refund-webhook": "npm run build -w @rental-os/shared && npm run build -w @rental-os/api && node tests/payment-refund-webhook.test.cjs",

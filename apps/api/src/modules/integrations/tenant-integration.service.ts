@@ -237,6 +237,23 @@ export class TenantIntegrationService {
           where: { tenantId, capability, id: { not: saved.id } },
           data: { isDefault: false }
         });
+      } else if (existing?.isDefault) {
+        // 不能留下“有启用平台但没有默认平台”的半配置状态：运行时只会读取
+        // 默认平台，管理员若只是取消勾选，业务就会把已启用的平台误判成未配置。
+        // 如果没有其他启用平台，允许停用最后一个默认平台；否则必须先明确把
+        // 另一平台设为默认，避免一次保存隐式切换支付/短信/文件出口。
+        const otherDefault = await tx.tenantIntegrationConfig.findFirst({
+          where: { tenantId, capability, enabled: true, isDefault: true, id: { not: saved.id } },
+          select: { id: true }
+        });
+        if (!otherDefault) {
+          if (saved.enabled) throw new BadRequestException("当前默认平台不能取消默认，请先将其他已启用平台设为默认");
+          const otherEnabled = await tx.tenantIntegrationConfig.findFirst({
+            where: { tenantId, capability, enabled: true, id: { not: saved.id } },
+            select: { id: true }
+          });
+          if (otherEnabled) throw new BadRequestException("当前默认平台不能取消默认，请先将其他已启用平台设为默认");
+        }
       }
       return saved;
     });
