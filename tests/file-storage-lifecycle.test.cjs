@@ -13,18 +13,19 @@ const { FileStorageRuntimeService } = require(path.join(
 ));
 
 const tenantId = "tenant-file-test";
+const secondTenantId = "tenant-file-test-2";
 const orderId = "order-file-test";
 const assets = new Map();
 const sessions = new Map();
 let assetSequence = 0;
 
-function assetRow(id, status = "pending_upload") {
+function assetRow(id, status = "pending_upload", assetTenantId = tenantId, assetOrderId = orderId) {
   return {
     id,
-    tenantId,
+    tenantId: assetTenantId,
     businessModule: "rental-core",
     businessType: "rental_order",
-    businessId: orderId,
+    businessId: assetOrderId,
     fileName: "contract.pdf",
     fileExt: "pdf",
     mimeType: "application/pdf",
@@ -68,7 +69,12 @@ const prisma = {
   },
   fileUploadSession: {
     findFirst: async ({ where }) => [...sessions.values()].find((row) => row.tenantId === where.tenantId && (where.id ? row.id === where.id : row.idempotencyKey === where.idempotencyKey)) ?? null,
-    findMany: async ({ where }) => [...sessions.values()].filter((row) => row.tenantId === where.tenantId && row.expiresAt <= where.expiresAt.lte && (row.status === "pending_upload" || (row.status === "failed" && row.cleanupError))).slice(0, 100),
+    findMany: async ({ where, select }) => {
+      if (!where && select?.tenantId) {
+        return [...new Set([...sessions.values()].map((row) => row.tenantId))].sort().map((id) => ({ tenantId: id }));
+      }
+      return [...sessions.values()].filter((row) => row.tenantId === where.tenantId && row.expiresAt <= where.expiresAt.lte && (row.status === "pending_upload" || (row.status === "failed" && row.cleanupError))).slice(0, 100);
+    },
     create: async ({ data }) => {
       const row = { ...data, createdAt: new Date(), updatedAt: new Date(), cleanupAttempts: 0, cleanupError: null, lastCleanupAt: null };
       sessions.set(row.id, row);
@@ -140,6 +146,26 @@ void (async () => {
   assert.equal(cleanup.deletedObjects, 1);
   assert.equal(sessions.get(expiredSessionId).status, "failed");
   assert.equal(assets.get(expiredAssetId).status, "failed");
+
+  const secondExpiredAssetId = "file_expired_second_tenant";
+  const secondExpiredSessionId = "session_expired_second_tenant";
+  assets.set(secondExpiredAssetId, assetRow(secondExpiredAssetId, "pending_upload", secondTenantId, "order-file-test-2"));
+  sessions.set(secondExpiredSessionId, {
+    id: secondExpiredSessionId,
+    tenantId: secondTenantId,
+    fileAssetId: secondExpiredAssetId,
+    provider: "local_mock",
+    storageKey: `tenant-files/${secondTenantId}/${secondExpiredAssetId}/contract.pdf`,
+    status: "pending_upload",
+    idempotencyKey: "upload-expired-second-tenant",
+    expiresAt: new Date(Date.now() - 1000),
+    cleanupError: null,
+    cleanupAttempts: 0
+  });
+  const scheduled = await runtime.cleanupExpiredUploadSessionsForAllTenants();
+  assert.equal(scheduled.deletedObjects, 1, "跨租户调度应处理其他租户的过期对象");
+  assert.equal(sessions.get(secondExpiredSessionId).status, "failed");
+  assert.equal(assets.get(secondExpiredAssetId).status, "failed");
   console.log("file storage lifecycle tests passed");
 })().catch((error) => {
   console.error(error);

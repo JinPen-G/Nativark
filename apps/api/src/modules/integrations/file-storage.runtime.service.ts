@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException, Optional, ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable, NotFoundException, OnApplicationBootstrap, OnApplicationShutdown, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { createHash, createHmac, randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import type {
@@ -78,12 +78,31 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = 8_00
 }
 
 @Injectable()
-export class FileStorageRuntimeService {
+export class FileStorageRuntimeService implements OnApplicationBootstrap, OnApplicationShutdown {
+  private cleanupTimer?: ReturnType<typeof setInterval>;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly integrations: TenantIntegrationService,
     @Optional() private readonly operationLog?: OperationLogService
   ) {}
+
+  onApplicationBootstrap() {
+    // 多实例部署也可以各自运行：每个会话先用条件更新抢占，重复扫描不会重复删对象。
+    // 测试进程不启动定时器；FILE_UPLOAD_CLEANUP_INTERVAL_MS 只允许调慢，避免误配成忙循环。
+    if (process.env.NODE_ENV === "test" || process.env.FILE_UPLOAD_CLEANUP_DISABLED === "true") return;
+    const configured = Number(process.env.FILE_UPLOAD_CLEANUP_INTERVAL_MS ?? 5 * 60 * 1000);
+    const intervalMs = Number.isFinite(configured) ? Math.max(configured, 60 * 1000) : 5 * 60 * 1000;
+    this.cleanupTimer = setInterval(() => {
+      void this.cleanupExpiredUploadSessionsForAllTenants().catch(() => undefined);
+    }, intervalMs);
+    this.cleanupTimer.unref?.();
+  }
+
+  onApplicationShutdown() {
+    if (this.cleanupTimer) clearInterval(this.cleanupTimer);
+    this.cleanupTimer = undefined;
+  }
 
   async createUploadSession(
     tenantId: string,
@@ -282,6 +301,40 @@ export class FileStorageRuntimeService {
       metadata: { scanned: rows.length, invalidated, deletedObjects, cleanupPending }
     });
     return { scanned: rows.length, invalidated, deletedObjects, cleanupPending, sessionIds };
+  }
+
+  /**
+   * 常驻进程的跨租户清理入口。它不接受请求传入的租户范围，租户集合只从
+   * 上传会话表读取；每个租户仍由 cleanupExpiredUploadSessions 再次带 tenantId
+   * 查询和抢占，不能因为某个租户的 provider 配置异常而影响其他租户。
+   */
+  async cleanupExpiredUploadSessionsForAllTenants(limitPerTenant = 50): Promise<FileUploadCleanupSummary> {
+    const tenants = await this.prisma.fileUploadSession.findMany({
+      select: { tenantId: true },
+      distinct: ["tenantId"],
+      orderBy: { tenantId: "asc" },
+      take: 1000
+    });
+    const summary: FileUploadCleanupSummary = {
+      scanned: 0,
+      invalidated: 0,
+      deletedObjects: 0,
+      cleanupPending: 0,
+      sessionIds: []
+    };
+    for (const tenant of tenants) {
+      try {
+        const current = await this.cleanupExpiredUploadSessions(tenant.tenantId, limitPerTenant);
+        summary.scanned += current.scanned;
+        summary.invalidated += current.invalidated;
+        summary.deletedObjects += current.deletedObjects;
+        summary.cleanupPending += current.cleanupPending;
+        summary.sessionIds.push(...current.sessionIds);
+      } catch {
+        // 单租户配置/网络异常只保留该租户会话待下一轮处理，不能停掉全局清理循环。
+      }
+    }
+    return summary;
   }
 
   async downloadUrl(tenantId: string, fileAssetId: string): Promise<FileDownloadUrlSummary> {
