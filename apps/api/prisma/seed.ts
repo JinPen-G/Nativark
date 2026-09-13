@@ -812,7 +812,7 @@ async function main() {
 main()
   .then(async () => {
     await prisma.$disconnect();
-    console.log("Store rental seed completed.");
+    console.log("Rental OS seed completed.");
   })
   .catch(async (error) => {
     console.error(error);

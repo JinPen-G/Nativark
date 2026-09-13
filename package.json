@@ -27,6 +27,7 @@
     "db:validate": "node scripts/run-api-with-root-env.cjs prisma:validate",
     "db:migrate": "node scripts/run-api-with-root-env.cjs prisma:migrate",
     "db:seed": "node scripts/run-api-with-root-env.cjs prisma:seed",
+    "db:seed:demo": "node scripts/seed-demo-tenant.cjs",
     "ops:mysql:setup": "powershell -ExecutionPolicy Bypass -File scripts/setup-local-mysql.ps1",
     "ops:preflight": "node scripts/ops/preflight.cjs",
     "ops:migration-status": "node scripts/ops/migration-status.cjs",
