@@ -35,7 +35,7 @@ void (() => {
   ok("连接信息缺失、驱动错误、缺库名或缺账号一律明确失败");
 
   // ============ 2. 共享库与系统库必须被拒 ============
-  for (const database of ["store_rental", "STORE_RENTAL", "store_rental_prod", "store_rental_production", "mysql", "information_schema"]) {
+  for (const database of ["store_rental", "STORE_RENTAL", "rental_os", "RENTAL_OS", "rental_os_prod", "rental_os_production", "mysql", "information_schema"]) {
     const reason = ops.rejectionReason(database);
     assert.ok(reason, `共享/系统库 ${database} 必须被拒绝`);
     rejects(

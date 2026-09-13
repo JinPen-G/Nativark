@@ -63,7 +63,7 @@ function requiredCredential(name) {
   return value;
 }
 
-const TEST_DB = process.env.TENANT_READY_DATABASE_NAME || "store_rental_zcode_firstorder";
+const TEST_DB = process.env.TENANT_READY_DATABASE_NAME || "rental_os_zcode_firstorder";
 const MYSQL_CONTAINER = process.env.E2E_MYSQL_CONTAINER || "store-rental-mysql";
 const MYSQL_ROOT_PASSWORD = requiredCredential("MYSQL_ROOT_PASSWORD");
 const PLATFORM_PASSWORD = requiredCredential("E2E_PLATFORM_PASSWORD");
@@ -76,7 +76,7 @@ const API_BASE = `http://localhost:${API_PORT}`;
 
 assert.match(TEST_DB, /^[a-z][a-z0-9_]{2,62}$/u, "专用库名只允许小写字母、数字和下划线");
 assert.ok(TEST_DB.includes("zcode"), "专用库名必须包含 zcode，防止误操作其他工作树的数据库");
-assert.ok(TEST_DB !== "store_rental", "禁止将专项指向共享开发库");
+assert.ok(!["store_rental", "rental_os"].includes(TEST_DB), "禁止将专项指向共享开发库");
 assert.match(MYSQL_CONTAINER, /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/u, "容器名格式非法");
 assert.ok(Number.isInteger(API_PORT) && API_PORT >= 1024 && API_PORT <= 65535, "TENANT_READY_API_PORT 必须是 1024-65535 的整数");
 

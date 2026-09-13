@@ -6,7 +6,7 @@ services:
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     environment:
       MYSQL_ROOT_PASSWORD: store_rental_root
-      MYSQL_DATABASE: store_rental
+      MYSQL_DATABASE: rental_os
       MYSQL_USER: store_rental
       MYSQL_PASSWORD: store_rental
     ports:

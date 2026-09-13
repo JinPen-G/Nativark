@@ -1,4 +1,4 @@
-// ORDER-CLOSE-01 最小真库：只读本机 store_rental 开发库，备份后恢复到本次专用克隆库，
+// ORDER-CLOSE-01 最小真库：只读本机 rental_os 开发库，备份后恢复到本次专用克隆库，
 // 跑完只删除本次创建的克隆库。与 run-assignment-db.cjs 同一套保护，克隆库名前缀不同，
 // 因此两个专项可以各自独立运行、互不删除对方的库。
 const fs = require("node:fs");
@@ -13,21 +13,21 @@ const root = path.resolve(__dirname, "../..");
 const raw = new URL(runtime.loadDatabaseUrl());
 if (
   !["localhost", "127.0.0.1"].includes(raw.hostname) ||
-  raw.pathname !== "/store_rental" ||
+  raw.pathname !== "/rental_os" ||
   (raw.port && raw.port !== "3306")
 ) {
-  throw Error("只允许本机明确的 store_rental 开发源库");
+  throw Error("只允许本机明确的 rental_os 开发源库");
 }
 const source = runtime.assertContainerEndpoint({
-  database: "store_rental",
+  database: "rental_os",
   host: raw.hostname,
   port: 3306,
   user: decodeURIComponent(raw.username),
   password: decodeURIComponent(raw.password)
 });
 const admin = runtime.requireAdminTarget(source);
-const cloneName = `store_rental_dedicated_orderclose_${Date.now()}`;
-if (!/^store_rental_dedicated_orderclose_\d+$/.test(cloneName)) throw Error("克隆库名不合法");
+const cloneName = `rental_os_dedicated_orderclose_${Date.now()}`;
+if (!/^rental_os_dedicated_orderclose_\d+$/.test(cloneName)) throw Error("克隆库名不合法");
 const clone = { ...admin, database: cloneName };
 let created = false;
 try {
@@ -40,7 +40,7 @@ try {
   if (dump.status !== 0) throw Error(redact(String(dump.stderr), [admin.password, source.password]));
   const bytes = Buffer.from(dump.stdout);
   if (!bytes.toString("utf8").includes("Dump completed")) throw Error("备份不完整");
-  const backup = path.join(root, "backups", `store_rental-pre-orderclose-${Date.now()}.sql`);
+  const backup = path.join(root, "backups", `rental_os-pre-orderclose-${Date.now()}.sql`);
   fs.mkdirSync(path.dirname(backup), { recursive: true });
   fs.writeFileSync(backup, bytes);
   fs.writeFileSync(backup + ".sha256", createHash("sha256").update(bytes).digest("hex"));

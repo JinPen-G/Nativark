@@ -68,8 +68,8 @@ void (() => {
   }
 
   // 顺带把「为什么共享库会被拒」显示出来，便于运维确认守卫确实生效。
-  const sharedReason = rejectionReason("store_rental");
-  log(`  · 守卫自检：共享库 store_rental 会被拒绝（${sharedReason}）`);
+  const sharedReason = rejectionReason("rental_os");
+  log(`  · 守卫自检：共享库 rental_os 会被拒绝（${sharedReason}）`);
 
   const failed = results.filter((ok) => !ok).length;
   if (failed) {

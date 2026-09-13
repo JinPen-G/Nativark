@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const { randomUUID } = require("node:crypto");
 const url = new URL(process.env.DATABASE_URL || "mysql://invalid/invalid");
-assert.match(url.pathname.slice(1), /^store_rental_dedicated_assignment_\d+$/);
+assert.match(url.pathname.slice(1), /^rental_os_dedicated_assignment_\d+$/);
 require("ts-node").register({
   transpileOnly: true,
   compilerOptions: {

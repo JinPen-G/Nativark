@@ -14,11 +14,11 @@ const sourceDatabase = raw.pathname.slice(1);
 const dedicatedSource = sourceDatabase === "store_rental_claude" && process.env.RENTAL_ALLOW_DEDICATED_SOURCE === "1";
 if (
   !["localhost", "127.0.0.1"].includes(raw.hostname) ||
-  !["store_rental", "store_rental_claude"].includes(sourceDatabase) ||
+  !["rental_os", "store_rental_claude"].includes(sourceDatabase) ||
   (sourceDatabase === "store_rental_claude" && !dedicatedSource) ||
   (raw.port && raw.port !== "3306")
 )
-  throw Error("只允许本机明确的 store_rental 开发源库，或显式授权的专用源库");
+  throw Error("只允许本机明确的 rental_os 开发源库，或显式授权的专用源库");
 const source = runtime.assertContainerEndpoint({
   database: sourceDatabase,
   host: raw.hostname,
@@ -27,8 +27,8 @@ const source = runtime.assertContainerEndpoint({
   password: decodeURIComponent(raw.password),
 });
 const admin = runtime.requireAdminTarget(source);
-const cloneName = `store_rental_dedicated_assignment_${Date.now()}`;
-if (!/^store_rental_dedicated_assignment_\d+$/.test(cloneName))
+const cloneName = `rental_os_dedicated_assignment_${Date.now()}`;
+if (!/^rental_os_dedicated_assignment_\d+$/.test(cloneName))
   throw Error("克隆库名不合法");
 const clone = { ...admin, database: cloneName };
 let created = false;
@@ -53,7 +53,7 @@ try {
   const backup = path.join(
     root,
     "backups",
-    `store_rental-pre-assignment-${Date.now()}.sql`,
+    `rental_os-pre-assignment-${Date.now()}.sql`,
   );
   fs.mkdirSync(path.dirname(backup), { recursive: true });
   fs.writeFileSync(backup, bytes);

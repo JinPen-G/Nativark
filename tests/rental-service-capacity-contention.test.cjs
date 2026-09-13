@@ -4,7 +4,7 @@ const { randomUUID } = require("node:crypto");
 // MKT-02C §4.3 最小验收：两单争抢最后一份容量只能一个成功；容量失败不改变有效结束时间与费用。
 // 只允许在本次创建的专用克隆库上运行，由 tests/helpers/run-order-close-db.cjs 调用。
 const url = new URL(process.env.DATABASE_URL || "mysql://invalid/invalid");
-assert.match(url.pathname.slice(1), /^store_rental_dedicated_orderclose_\d+$/u, "只允许在本次专用克隆库上运行");
+assert.match(url.pathname.slice(1), /^rental_os_dedicated_orderclose_\d+$/u, "只允许在本次专用克隆库上运行");
 
 require("ts-node").register({
   transpileOnly: true,

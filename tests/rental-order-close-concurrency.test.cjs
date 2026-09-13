@@ -4,7 +4,7 @@ const { randomUUID } = require("node:crypto");
 // ORDER-CLOSE-01 §4.1 最小真库：只允许在本次创建的专用克隆库上运行。
 // 由 tests/helpers/run-order-close-db.cjs 备份→克隆→迁移→注入 DATABASE_URL 后调用。
 const url = new URL(process.env.DATABASE_URL || "mysql://invalid/invalid");
-assert.match(url.pathname.slice(1), /^store_rental_dedicated_orderclose_\d+$/u, "只允许在本次专用克隆库上运行");
+assert.match(url.pathname.slice(1), /^rental_os_dedicated_orderclose_\d+$/u, "只允许在本次专用克隆库上运行");
 
 require("ts-node").register({
   transpileOnly: true,

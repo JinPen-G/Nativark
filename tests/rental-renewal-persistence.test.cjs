@@ -1,7 +1,7 @@
 // 只对专门克隆的续租验收库执行，绝不读取 .env 回落到开发库。
 const assert = require('node:assert/strict');
 const target = new URL(process.env.DATABASE_URL || 'mysql://invalid/invalid');
-assert.match(target.pathname.slice(1), /^store_rental_dedicated_renewal_\d+$/);
+assert.match(target.pathname.slice(1), /^rental_os_dedicated_renewal_\d+$/);
 require('ts-node').register({ transpileOnly: true, compilerOptions: { module: 'commonjs', moduleResolution: 'node', experimentalDecorators: true, emitDecoratorMetadata: true } });
 const { PrismaService } = require('../apps/api/src/modules/database/prisma.service');
 const { RentalBusinessFactRepository } = require('../apps/api/src/modules/rental-core/rental-business-fact.repository');
