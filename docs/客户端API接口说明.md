@@ -112,6 +112,8 @@ Idempotency-Key: <unique-key-for-mutating-action>
 | POST | `/orders/{id}/funding/simulate` | 仅开发环境记录模拟收款、押金、预授权、退款或释放事件，供内部经营演练。生产环境拒绝调用。 |
 | POST | `/orders/{id}/payment-intents` | 按当前租户启用的支付宝或微信支付创建租金/费用支付意图；返回二维码/收银入口、金额和支付单状态。押金与预授权仍走独立资金能力。请求必须带幂等键。 |
 | GET | `/orders/{id}/payment-intents/{intentId}` | 查询当前客户自己的支付单状态；最终是否入账以服务端验签回调写入的资金事件为准。 |
+| POST | `/orders/{id}/payment-intents/{intentId}/refresh` | 在回调延迟或丢失时向提供方查询支付状态；只有查询到成功且金额一致才入账，不能由客户端直接确认收款。 |
+| POST | `/orders/{id}/payment-intents/{intentId}/close` | 关闭尚未支付的支付宝/微信支付单；已入账支付不能关闭。 |
 
 ## 8. 状态码与通用规则
 

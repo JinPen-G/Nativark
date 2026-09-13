@@ -222,6 +222,51 @@ export class PaymentRuntimeService {
     return this.toResponse(row);
   }
 
+  /**
+   * 查询补偿不是收款依据的替代品，而是回调丢失时的主动恢复入口。
+   * 只有提供方查询结果明确为成功，才会复用同一套金额校验和资金事件入账。
+   */
+  async refreshPaymentIntent(tenantId: string, workspaceId: string, orderId: string, intentId: string) {
+    const intent = await this.prisma.rentalPaymentIntent.findFirst({ where: { id: intentId, tenantId, workspaceId, orderId } });
+    if (!intent) throw new NotFoundException("支付单不存在");
+    if (["paid", "closed"].includes(intent.status)) return this.toResponse(intent);
+    const config = await this.integrations.runtimeConfig("payment", tenantId, intent.method as "alipay" | "wechat_pay");
+    if (!config) throw new ServiceUnavailableException("支付平台已停用，无法查询支付状态");
+    const result = intent.method === "alipay"
+      ? await this.queryAlipayIntent(config, intent.merchantOrderNo)
+      : await this.queryWechatIntent(config, intent.merchantOrderNo);
+    if (result.paid) {
+      this.assertPaidAmount(result.amount, Number(intent.amount));
+      await this.settleVerifiedPayment({
+        tenantId,
+        provider: intent.provider as "alipay" | "wechat_pay",
+        eventId: `query:${intent.merchantOrderNo}:${result.externalTransactionId || "paid"}`,
+        externalTransactionId: result.externalTransactionId,
+        intentId: intent.id,
+        amount: result.amount,
+        payloadHash: sha256(JSON.stringify({ source: "query", merchantOrderNo: intent.merchantOrderNo, state: result.state }))
+      });
+    } else if (result.closed) {
+      await this.prisma.rentalPaymentIntent.update({ where: { id: intent.id }, data: { status: "closed", failureReason: "第三方支付单已关闭" } });
+    }
+    await this.log(tenantId, config, "query_payment_intent", "success", { intentId, merchantOrderNo: intent.merchantOrderNo }, { state: result.state });
+    return this.getPaymentIntent(tenantId, workspaceId, orderId, intentId);
+  }
+
+  async closePaymentIntent(tenantId: string, workspaceId: string, orderId: string, intentId: string) {
+    const intent = await this.prisma.rentalPaymentIntent.findFirst({ where: { id: intentId, tenantId, workspaceId, orderId } });
+    if (!intent) throw new NotFoundException("支付单不存在");
+    if (intent.status === "paid") throw new ConflictException("支付已入账，不能关闭支付单");
+    if (intent.status === "closed") return this.toResponse(intent);
+    const config = await this.integrations.runtimeConfig("payment", tenantId, intent.method as "alipay" | "wechat_pay");
+    if (!config) throw new ServiceUnavailableException("支付平台已停用，无法关闭支付单");
+    if (intent.method === "alipay") await this.closeAlipayIntent(config, intent.merchantOrderNo);
+    else await this.closeWechatIntent(config, intent.merchantOrderNo);
+    const updated = await this.prisma.rentalPaymentIntent.update({ where: { id: intent.id }, data: { status: "closed", failureReason: "客户主动关闭支付" } });
+    await this.log(tenantId, config, "close_payment_intent", "success", { intentId, merchantOrderNo: intent.merchantOrderNo });
+    return this.toResponse(updated);
+  }
+
   async handleAlipayCallback(body: unknown) {
     const values = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
     const appId = valueOf(values.app_id);
@@ -319,8 +364,79 @@ export class PaymentRuntimeService {
     return { checkoutUrl, responseCode: valueOf(result.code), responseJson: { code: valueOf(result.code), qrCode: checkoutUrl } };
   }
 
+  private async queryAlipayIntent(config: TenantIntegrationRuntimeConfig, merchantOrderNo: string) {
+    const params: Record<string, string> = {
+      app_id: requiredText(config.settings.appId, "应用 ID"),
+      method: "alipay.trade.query",
+      format: "JSON",
+      charset: "utf-8",
+      sign_type: "RSA2",
+      timestamp: alipayTimestamp(),
+      version: "1.0",
+      biz_content: JSON.stringify({ out_trade_no: merchantOrderNo })
+    };
+    const response = await fetchJson(requiredText(config.settings.gatewayUrl, "网关地址"), {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded;charset=utf-8" },
+      body: new URLSearchParams({ ...params, sign: signRsa(valueOf(config.credentials.appPrivateKey), stableFormContent(params)) }).toString()
+    });
+    const result = (response.alipay_trade_query_response ?? {}) as JsonRecord;
+    if (valueOf(result.code) === "40004") return { state: "NOTPAY", paid: false, closed: false, amount: 0, externalTransactionId: "" };
+    if (valueOf(result.code) !== "10000") throw new Error(valueOf(result.sub_msg || result.msg || "支付宝查询失败"));
+    const state = valueOf(result.trade_status);
+    return {
+      state,
+      paid: ["TRADE_SUCCESS", "TRADE_FINISHED"].includes(state),
+      closed: state === "TRADE_CLOSED",
+      amount: Number(valueOf(result.total_amount || result.receipt_amount)),
+      externalTransactionId: valueOf(result.trade_no)
+    };
+  }
+
+  private async closeAlipayIntent(config: TenantIntegrationRuntimeConfig, merchantOrderNo: string) {
+    const params: Record<string, string> = {
+      app_id: requiredText(config.settings.appId, "应用 ID"),
+      method: "alipay.trade.close",
+      format: "JSON",
+      charset: "utf-8",
+      sign_type: "RSA2",
+      timestamp: alipayTimestamp(),
+      version: "1.0",
+      biz_content: JSON.stringify({ out_trade_no: merchantOrderNo })
+    };
+    const response = await fetchJson(requiredText(config.settings.gatewayUrl, "网关地址"), {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded;charset=utf-8" },
+      body: new URLSearchParams({ ...params, sign: signRsa(valueOf(config.credentials.appPrivateKey), stableFormContent(params)) }).toString()
+    });
+    const result = (response.alipay_trade_close_response ?? {}) as JsonRecord;
+    if (valueOf(result.code) !== "10000" && valueOf(result.code) !== "40004") throw new Error(valueOf(result.sub_msg || result.msg || "支付宝关闭支付单失败"));
+  }
+
+  private async queryWechatIntent(config: TenantIntegrationRuntimeConfig, merchantOrderNo: string) {
+    const path = `/v3/pay/transactions/out-trade-no/${encodeURIComponent(merchantOrderNo)}?mchid=${encodeURIComponent(requiredText(config.settings.mchid, "商户号"))}`;
+    try {
+      const response = await this.wechatRequest(config, "GET", path, "");
+      const state = valueOf(response.trade_state);
+      return {
+        state,
+        paid: state === "SUCCESS",
+        closed: ["CLOSED", "REVOKED", "PAYERROR"].includes(state),
+        amount: Number(((response.amount as JsonRecord | undefined)?.total ?? 0)) / 100,
+        externalTransactionId: valueOf(response.transaction_id)
+      };
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("HTTP 404")) return { state: "NOTPAY", paid: false, closed: false, amount: 0, externalTransactionId: "" };
+      throw error;
+    }
+  }
+
+  private async closeWechatIntent(config: TenantIntegrationRuntimeConfig, merchantOrderNo: string) {
+    const path = `/v3/pay/transactions/out-trade-no/${encodeURIComponent(merchantOrderNo)}/close`;
+    await this.wechatRequest(config, "POST", path, JSON.stringify({ mchid: requiredText(config.settings.mchid, "商户号") }));
+  }
+
   private async createWechatIntent(config: TenantIntegrationRuntimeConfig, intent: PaymentIntentRow, orderNo: string) {
-    const base = valueOf(config.settings.gatewayUrl || "https://api.mch.weixin.qq.com").replace(/\/$/u, "");
     const path = "/v3/pay/transactions/native";
     const requestBody = JSON.stringify({
       appid: requiredText(config.settings.appId, "应用 ID"),
@@ -330,18 +446,23 @@ export class PaymentRuntimeService {
       notify_url: requiredText(config.settings.notifyUrl, "支付通知地址"),
       amount: { total: Math.round(Number(intent.amount) * 100), currency: "CNY" }
     });
-    const requestTimestamp = timestamp();
-    const requestNonce = nonce();
-    const signature = signRsa(valueOf(config.credentials.merchantPrivateKey), `POST\n${path}\n${requestTimestamp}\n${requestNonce}\n${requestBody}\n`);
-    const authorization = `WECHATPAY2-SHA256-RSA2048 mchid="${requiredText(config.settings.mchid, "商户号")}",nonce_str="${requestNonce}",timestamp="${requestTimestamp}",serial_no="${requiredText(config.credentials.merchantSerialNo, "商户证书序列号")}",signature="${signature}"`;
-    const response = await fetchJson(`${base}${path}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: authorization },
-      body: requestBody
-    });
+    const response = await this.wechatRequest(config, "POST", path, requestBody);
     const checkoutUrl = valueOf(response.code_url);
     if (!checkoutUrl) throw new Error("微信支付未返回二维码地址");
     return { checkoutUrl, responseCode: "SUCCESS", responseJson: { codeUrl: checkoutUrl } };
+  }
+
+  private async wechatRequest(config: TenantIntegrationRuntimeConfig, method: "GET" | "POST", path: string, body: string) {
+    const base = valueOf(config.settings.gatewayUrl || "https://api.mch.weixin.qq.com").replace(/\/$/u, "");
+    const requestTimestamp = timestamp();
+    const requestNonce = nonce();
+    const signature = signRsa(valueOf(config.credentials.merchantPrivateKey), `${method}\n${path}\n${requestTimestamp}\n${requestNonce}\n${body}\n`);
+    const authorization = `WECHATPAY2-SHA256-RSA2048 mchid="${requiredText(config.settings.mchid, "商户号")}",nonce_str="${requestNonce}",timestamp="${requestTimestamp}",serial_no="${requiredText(config.credentials.merchantSerialNo, "商户证书序列号")}",signature="${signature}"`;
+    return fetchJson(`${base}${path}`, {
+      method,
+      headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: authorization },
+      body: method === "GET" ? undefined : body
+    });
   }
 
   private decryptWechatResource(config: TenantIntegrationRuntimeConfig, resource: JsonRecord) {

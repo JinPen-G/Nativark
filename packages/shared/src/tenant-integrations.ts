@@ -136,6 +136,7 @@ export const TENANT_INTEGRATION_PROVIDERS: TenantIntegrationProviderDefinition[]
     fields: [
       { key: "mchid", label: "商户号", secret: false, required: true, inputType: "text" },
       { key: "appId", label: "应用 ID", secret: false, required: true, inputType: "text" },
+      { key: "gatewayUrl", label: "网关地址", secret: false, required: false, inputType: "url", placeholder: "https://api.mch.weixin.qq.com", description: "开发或沙箱联调时可填写兼容网关；生产默认使用微信支付官方网关。" },
       { key: "notifyUrl", label: "支付通知地址", secret: false, required: true, inputType: "url" },
       { key: "merchantPrivateKey", label: "商户私钥", secret: true, required: true, inputType: "password" },
       { key: "merchantSerialNo", label: "商户证书序列号", secret: true, required: true, inputType: "text" },

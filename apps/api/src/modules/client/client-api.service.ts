@@ -788,4 +788,15 @@ export class ClientApiService {
     await this.assertClientOrder(context, orderId);
     return this.payments.getPaymentIntent(context.tenantId, context.workspaceId, orderId, intentId);
   }
+
+  async refreshPaymentIntent(context: ClientRequestContext, orderId: string, intentId: string): Promise<ClientPaymentIntentResponse> {
+    await this.assertClientOrder(context, orderId);
+    return this.payments.refreshPaymentIntent(context.tenantId, context.workspaceId, orderId, intentId);
+  }
+
+  async closePaymentIntent(context: ClientRequestContext, orderId: string, intentId: string): Promise<ClientPaymentIntentResponse> {
+    this.requireActiveMembership(context);
+    await this.assertClientOrder(context, orderId);
+    return this.payments.closePaymentIntent(context.tenantId, context.workspaceId, orderId, intentId);
+  }
 }

@@ -302,4 +302,14 @@ export class ClientApiController {
   paymentIntent(@Req() req: ClientRequest, @Param("id") id: string, @Param("intentId") intentId: string) {
     return this.api.getPaymentIntent(currentClient(req), id, intentId);
   }
+
+  @Post("orders/:id/payment-intents/:intentId/refresh")
+  refreshPaymentIntent(@Req() req: ClientRequest, @Param("id") id: string, @Param("intentId") intentId: string) {
+    return this.api.refreshPaymentIntent(currentClient(req), id, intentId);
+  }
+
+  @Post("orders/:id/payment-intents/:intentId/close")
+  closePaymentIntent(@Req() req: ClientRequest, @Param("id") id: string, @Param("intentId") intentId: string) {
+    return this.api.closePaymentIntent(currentClient(req), id, intentId);
+  }
 }
