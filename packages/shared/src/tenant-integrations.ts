@@ -91,7 +91,7 @@ export const TENANT_INTEGRATION_PROVIDERS: TenantIntegrationProviderDefinition[]
     name: "阿里云短信",
     description: "验证码和业务通知短信。需要阿里云 AccessKey、签名和模板编码。",
     fields: [
-      { key: "region", label: "地域", secret: false, required: false, inputType: "text", placeholder: "cn-hangzhou" },
+      { key: "region", label: "地域", secret: false, required: true, inputType: "text", placeholder: "cn-hangzhou" },
       { key: "signName", label: "短信签名", secret: false, required: true, inputType: "text" },
       { key: "verificationTemplateCode", label: "验证码模板编码", secret: false, required: true, inputType: "text", description: "短信服务商的验证码模板编码；不是密钥，可安全回显。" },
       { key: "accessKeyId", label: "AccessKey ID", secret: true, required: true, inputType: "text" },
