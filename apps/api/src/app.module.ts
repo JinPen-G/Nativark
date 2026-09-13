@@ -51,6 +51,9 @@ import { CapabilityHookRuntime } from "./modules/rental-core/capability-hook.run
 import { CapabilityHookRepository } from "./modules/rental-core/capability-hook.repository";
 import { CapabilityHookRegistrar } from "./modules/rental-core/capability-hook.registrar";
 import { RentalServiceCapacityService } from "./modules/rental-core/rental-service-capacity.service";
+import { ClientApiController } from "./modules/client/client-api.controller";
+import { ClientApiService } from "./modules/client/client-api.service";
+import { ClientAuthService } from "./modules/client/client-auth.service";
 
 @Module({
   imports: [
@@ -73,7 +76,8 @@ import { RentalServiceCapacityService } from "./modules/rental-core/rental-servi
     IntegrationsController,
     FilesController,
     NotificationsController,
-    JobsController
+    JobsController,
+    ClientApiController
   ],
   providers: [
     AuthService,
@@ -107,6 +111,8 @@ import { RentalServiceCapacityService } from "./modules/rental-core/rental-servi
     CapabilityHookRuntime,
     CapabilityHookRegistrar,
     CapabilityHookRepository,
+    ClientApiService,
+    ClientAuthService,
     IntegrationsService,
     IntegrationsRepository,
     {

@@ -8,6 +8,7 @@ import {
 } from "@nestjs/common";
 import { RentalCategoryCode, type RentalCapability, type SystemUserRow } from "@rental-os/shared";
 import { AuthService } from "../modules/auth/auth.service";
+import { ClientAuthService } from "../modules/client/client-auth.service";
 import { WorkspaceCapabilityService } from "../modules/rental-core/workspace-capability.service";
 import { enterRequestIdentity } from "./request-identity";
 import { matchableRequestPath } from "./request-path";
@@ -17,6 +18,7 @@ interface RequestLike {
   url: string;
   headers: Record<string, string | string[] | undefined>;
   user?: SystemUserRow;
+  client?: import("../modules/client/client-auth.service").ClientRequestContext;
 }
 
 function requiredCapability(path: string): RentalCapability | undefined {
@@ -67,11 +69,34 @@ export const PUBLIC_ROUTES = new Set([
  */
 export const PUBLIC_ROUTE_PREFIXES = ["/platform/filter-presets"];
 
+/** 客户端认证域：不走运营角色权限树，但仍由 ApiAuthGuard 校验客户令牌。 */
+export const CLIENT_ROUTE_PREFIXES = ["/client/v1"];
+
+export function isClientRoute(path: string) {
+  return CLIENT_ROUTE_PREFIXES.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
+}
+
+const CLIENT_PUBLIC_ROUTES = new Set([
+  "/client/v1/auth/login",
+  "/client/v1/auth/refresh",
+  "/client/v1/auth/logout",
+  "/client/v1/auth/register",
+  "/client/v1/auth/registration/challenges"
+]);
+
+export function isClientPublicRoute(method: string, path: string) {
+  if (CLIENT_PUBLIC_ROUTES.has(path)) return true;
+  if (method === "GET" && /^\/client\/v1\/tenants\/[^/]+\/workspaces$/u.test(path)) return true;
+  if (method === "POST" && /^\/client\/v1\/auth\/registration\/challenges\/[^/]+\/verify$/u.test(path)) return true;
+  return false;
+}
+
 function isPublicRoute(path: string) {
   return PUBLIC_ROUTES.has(path) || PUBLIC_ROUTE_PREFIXES.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
 }
 
 export function requiredPermissions(method: string, path: string) {
+  if (isClientRoute(path)) return [];
   if (isPublicRoute(path) || method === "OPTIONS") {
     return [];
   }
@@ -479,7 +504,8 @@ export class ApiAuthGuard implements CanActivate {
     private readonly authService: AuthService,
     // CORE-EXT-02C：能力门禁的判定依据。可选是为了让既有单测继续用一个假 AuthService
     // 直接构造守卫；缺失时能力门禁**拒绝**而不是放行（见 canActivate 内注释）。
-    @Optional() private readonly capabilities?: WorkspaceCapabilityService
+    @Optional() private readonly capabilities?: WorkspaceCapabilityService,
+    @Optional() private readonly clientAuth?: ClientAuthService
   ) {}
 
   async canActivate(context: ExecutionContext) {
@@ -498,6 +524,24 @@ export class ApiAuthGuard implements CanActivate {
       path === "/auth/refresh" ||
       request.method === "OPTIONS"
     ) {
+      return true;
+    }
+
+    if (isClientRoute(path)) {
+      if (isClientPublicRoute(request.method, path)) return true;
+      const authorization = request.headers.authorization;
+      const raw = Array.isArray(authorization) ? authorization[0] : authorization;
+      const token = typeof raw === "string" && raw.startsWith("Bearer ") ? raw.slice(7).trim() : undefined;
+      if (!token) throw new UnauthorizedException("请先登录客户端账号");
+      if (!this.clientAuth) throw new UnauthorizedException("客户端认证服务未就绪");
+      const client = await this.clientAuth.authenticate(token);
+      request.client = client;
+      enterRequestIdentity({
+        tenantId: client.tenantId,
+        userId: client.customerId,
+        isSaasAdmin: false,
+        workspaceId: client.workspaceId
+      });
       return true;
     }
 

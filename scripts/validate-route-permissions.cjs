@@ -25,6 +25,7 @@ const {
   requiredPermissions,
   PUBLIC_ROUTES,
   PUBLIC_ROUTE_PREFIXES,
+  isClientRoute,
   UNMATCHED_ROUTE_PERMISSION
 } = require("../apps/api/src/common/api-auth.guard");
 
@@ -102,6 +103,10 @@ function declaredPermissionCodes() {
 const declared = declaredPermissionCodes();
 
 for (const route of routes) {
+  // 客户端 API 使用独立的 ClientAuthService/token 认证域，不属于运营 RBAC 权限树。
+  // 这里跳过的是静态“运营权限码”检查，不代表路由匿名放行；运行时 Guard 仍会
+  // 对除登录/注册等公开端点外的客户端路由校验客户令牌。
+  if (isClientRoute(route.path)) continue;
   const permissions = requiredPermissions(route.method, route.path);
   if (permissions.includes(UNMATCHED_ROUTE_PERMISSION)) {
     unmatched.push(route);

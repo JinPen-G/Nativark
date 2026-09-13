@@ -187,6 +187,8 @@ model Tenant {
   customerMembershipPlans           CustomerMembershipPlan[]
   customerMembershipPlanVersions    CustomerMembershipPlanVersion[]
   customerMembershipPlanAssignments CustomerMembershipPlanAssignment[]
+  clientRegistrationChallenges      ClientRegistrationChallenge[]
+  clientAuthSessions                ClientAuthSession[]
   rentalCoreStateSnapshot           RentalCoreStateSnapshot[]
   rentalBusinessStateSnapshot       RentalBusinessStateSnapshot[]
   businessWorkspaces                BusinessWorkspace[]
@@ -238,6 +240,8 @@ model BusinessWorkspace {
   customerMembershipPlans           CustomerMembershipPlan[]
   customerMembershipPlanVersions    CustomerMembershipPlanVersion[]
   customerMembershipPlanAssignments CustomerMembershipPlanAssignment[]
+  clientRegistrationChallenges      ClientRegistrationChallenge[]
+  clientAuthSessions                ClientAuthSession[]
   coreStateSnapshot                 RentalCoreStateSnapshot?
   businessStateSnapshot             RentalBusinessStateSnapshot?
   // SPACE-03：经营事实的反向关系。字段仅供 Prisma 关系解析，不用于查询。
@@ -551,6 +555,7 @@ model CustomerProfile {
   contracts                      CustomerCorporateContract[]
   credit                         CustomerCorporateCredit?
   membershipReviews              CustomerMembershipReview[]
+  clientAuthSessions              ClientAuthSession[]
   corporateMembershipsAsCompany  CustomerCorporateMembership[]      @relation("CorporateMembershipCompany")
   corporateMembershipsAsPersonal CustomerCorporateMembership[]      @relation("CorporateMembershipPersonal")
   membershipPlanAssignments      CustomerMembershipPlanAssignment[]
@@ -637,6 +642,58 @@ model CustomerAccount {
   @@unique([tenantId, loginPhone], map: "customer_accounts_tenant_login_key")
   @@index([tenantId, status], map: "customer_accounts_tenant_status_idx")
   @@map("customer_accounts")
+}
+
+/// CLIENT-01：客户端注册验证码挑战。原验证码只保存哈希；开发环境可返回一次性验证码，
+/// 生产环境由短信/邮件 provider 接管。
+model ClientRegistrationChallenge {
+  id                    String            @id @default(uuid())
+  tenantId              String
+  tenant                Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId           String
+  workspace             BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  method                String            @db.VarChar(16)
+  identifierHash        String            @db.Char(64)
+  maskedDestination     String            @db.VarChar(64)
+  codeHash              String            @db.Char(64)
+  status                String            @default("pending_verification") @db.VarChar(32)
+  requestKey            String?
+  attempts              Int               @default(0)
+  expiresAt             DateTime
+  verifiedAt            DateTime?
+  verificationTokenHash String?           @db.Char(64)
+  consumedAt            DateTime?
+  registrationId        String?
+  registeredCustomerId   String?
+  registrationResult    String?           @db.VarChar(32)
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  @@unique([tenantId, workspaceId, requestKey], map: "client_registration_challenges_scope_request_key")
+  @@index([tenantId, workspaceId, identifierHash, createdAt], map: "client_registration_challenges_lookup_idx")
+  @@index([expiresAt, status], map: "client_registration_challenges_expiry_idx")
+  @@map("client_registration_challenges")
+}
+
+/// CLIENT-01：客户端账号会话。与后台 AuthSession 分开，客户端 token 不能互换。
+model ClientAuthSession {
+  id               String            @id @default(uuid())
+  tenantId         String
+  tenant           Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId       String
+  customer         CustomerProfile   @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
+  workspaceId      String
+  workspace        BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  refreshTokenHash String            @unique @db.Char(64)
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  lastUsedAt       DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@index([tenantId, customerId, revokedAt], map: "client_auth_sessions_customer_idx")
+  @@index([tenantId, workspaceId, revokedAt], map: "client_auth_sessions_workspace_idx")
+  @@map("client_auth_sessions")
 }
 
 /// CUSTOMER-01A：企业客户资料（需求 4.8.4）。

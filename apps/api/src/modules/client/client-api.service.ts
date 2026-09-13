@@ -1,0 +1,412 @@
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import type {
+  ClientCreateOrderRequest,
+  ClientCreateQuoteRequest,
+  ClientFulfillmentView,
+  ClientNotificationListResponse,
+  ClientOrderExtensionRequest,
+  ClientOrderView,
+  ClientPaymentSimulationRequest,
+  ClientWorkspaceSummary,
+  CreateRentalOrderRequest,
+  RentalOrder,
+  RentalQuoteRequest
+} from "@rental-os/shared";
+import { Prisma } from "@prisma/client";
+import { PrismaService } from "../database/prisma.service";
+import { MembershipService } from "../platform/membership.service";
+import { RentalCoreService } from "../rental-core/rental-core.service";
+import { RentalBusinessService, type BusinessContext } from "../rental-core/rental-business.service";
+import { RentalOrderConfirmationService } from "../rental-core/rental-order-confirmation.service";
+import { RentalIdempotentActionService } from "../rental-core/rental-idempotent-action.service";
+import { RentalFundingService } from "../rental-core/rental-funding.service";
+import { RentalServiceCapacityService } from "../rental-core/rental-service-capacity.service";
+import { ClientAuthService, type ClientRequestContext } from "./client-auth.service";
+
+interface ClientOrderRequestContext {
+  headers?: Record<string, unknown>;
+}
+
+function idempotencyKeyOf(req?: ClientOrderRequestContext) {
+  const raw = req?.headers?.["idempotency-key"] ?? req?.headers?.["Idempotency-Key"];
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  if (value.trim().length > 191) throw new BadRequestException("Idempotency-Key 最多 191 个字符");
+  return value.trim();
+}
+
+@Injectable()
+export class ClientApiService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auth: ClientAuthService,
+    private readonly memberships: MembershipService,
+    private readonly core: RentalCoreService,
+    private readonly business: RentalBusinessService,
+    private readonly orders: RentalOrderConfirmationService,
+    private readonly idempotent: RentalIdempotentActionService,
+    private readonly fundingService: RentalFundingService,
+    private readonly serviceCapacities: RentalServiceCapacityService
+  ) {}
+
+  private context(tenantId: string): BusinessContext {
+    const profile = this.core.getProfile(tenantId);
+    const category = this.core.listCategories().find((item) => item.code === profile.categoryCode);
+    if (!category) throw new ConflictException("当前经营空间的品类定义不存在");
+    return {
+      profile,
+      category,
+      settings: this.core.getBusinessSettings(tenantId),
+      groups: this.core.listItemGroups(tenantId),
+      pricingGroups: this.core.listPricingGroups(tenantId),
+      couponTemplates: this.core.listCouponTemplates(tenantId),
+      locations: this.core.listLocations(tenantId),
+      operators: this.core.listOperators(tenantId)
+    };
+  }
+
+  private requireActiveMembership(context: ClientRequestContext) {
+    if (context.membershipStatus !== "active") throw new ForbiddenException("当前经营空间会员关系尚未生效，暂不能进行租赁业务");
+  }
+
+  private async assertClientOrder(context: ClientRequestContext, orderId: string) {
+    const order = await this.core.getOrder(context.tenantId, orderId);
+    const belongs = order.customerId === context.customerId || order.membershipSnapshot?.personalCustomerId === context.customerId;
+    if (!belongs) throw new NotFoundException("订单不存在");
+    return order;
+  }
+
+  private orderView(order: RentalOrder): ClientOrderView {
+    return {
+      id: order.id,
+      orderNo: order.orderNo,
+      status: String(order.status),
+      customerName: order.customerName,
+      fulfillmentMode: order.fulfillmentMode,
+      fulfillmentLocationName: order.fulfillmentLocationName,
+      returnLocationName: order.returnLocationName,
+      startAt: order.startAt,
+      endAt: order.endAt,
+      effectiveEndAt: order.effectiveEndAt,
+      rentalAmount: order.rentalAmount,
+      discountAmount: order.discountAmount,
+      couponAmount: order.couponAmount,
+      serviceAmount: order.serviceAmount,
+      fulfillmentAmount: order.fulfillmentAmount,
+      depositAmount: order.depositAmount,
+      preAuthAmount: order.preAuthAmount,
+      payableAmount: order.payableAmount,
+      adjustmentAmount: order.adjustmentAmount,
+      finalPayableAmount: order.finalPayableAmount,
+      currency: order.currency,
+      lines: order.lines.map((line) => ({
+        id: line.id,
+        itemGroupId: line.itemGroupId,
+        itemGroupName: line.itemGroupName,
+        pricingGroupId: line.pricingGroupId,
+        pricingGroupName: line.pricingGroupName,
+        quantity: line.quantity,
+        unitPrice: line.unitPrice,
+        amount: line.amount
+      })),
+      chargeLines: order.chargeLines.map((line) => ({ type: line.type, name: line.name, amount: line.amount, quantity: undefined, unitPrice: undefined })),
+      allocations: order.allocations?.map((row) => ({ id: row.id, orderLineId: row.orderLineId, quantity: row.quantity, status: row.status, assetNo: row.assetNo })),
+      createdAt: order.createdAt,
+      updatedAt: order.updatedAt
+    };
+  }
+
+  async catalog(context: ClientRequestContext) {
+    const business = this.context(context.tenantId);
+    const workspaces = await this.auth.listPublicWorkspaces(context.tenantCode);
+    const workspace = workspaces.workspaces.find((row) => row.code === context.workspaceCode);
+    return {
+      apiVersion: "v1",
+      tenantCode: context.tenantCode,
+      workspace: {
+        workspaceCode: context.workspaceCode,
+        workspaceName: context.workspaceName,
+        categoryCode: context.categoryCode,
+        membershipStatus: context.membershipStatus,
+        isDefault: workspace?.isDefault
+      } satisfies ClientWorkspaceSummary,
+      categoryCode: business.profile.categoryCode,
+      timeZone: business.settings.calendar.timeZone,
+      items: business.groups.filter((item) => item.status === "enabled").map((item) => ({ id: item.id, code: item.code, name: item.name, description: item.description, inventoryMode: item.inventoryMode, images: item.images?.map((image) => ({ url: `/api/client/v1/catalog/items/${encodeURIComponent(item.id)}/images/${encodeURIComponent(image.id)}`, alt: image.fileName })), attributes: item.attributes })),
+      pricingGroups: (business.pricingGroups ?? []).filter((group) => group.status === "enabled").map((group) => ({ id: group.id, code: group.code, name: group.name, memberItemGroupIds: group.memberItemGroupIds, enabled: group.status === "enabled" })),
+      services: this.business.listServices(context.tenantId, business).filter((service) => service.status === "enabled").map((service) => ({ id: service.id, code: service.code, name: service.name, description: service.terms, pricingUnit: service.billingUnit, enabled: true })),
+      locations: business.locations.filter((location) => location.status === "enabled").map((location) => ({ id: location.id, code: location.code, name: location.name, status: location.status })),
+      discountPlans: this.business.listDiscountPlans(context.tenantId, business).filter((plan) => plan.status === "enabled").map((plan) => ({ id: plan.id, code: plan.code, name: plan.name, status: plan.status }))
+    };
+  }
+
+  async readCatalogItemImage(context: ClientRequestContext, itemGroupId: string, imageId: string) {
+    const business = this.context(context.tenantId);
+    const item = business.groups.find((group) => group.id === itemGroupId && group.status === "enabled");
+    if (!item) throw new NotFoundException("商品不存在");
+    return this.core.readItemGroupImage(context.tenantId, itemGroupId, imageId);
+  }
+
+  async membershipStatus(context: ClientRequestContext) {
+    return this.auth.sessionStatus(context);
+  }
+
+  async notifications(context: ClientRequestContext, query: { page?: number; pageSize?: number }): Promise<ClientNotificationListResponse> {
+    const page = Math.max(1, Math.floor(query.page ?? 1));
+    const pageSize = Math.min(50, Math.max(1, Math.floor(query.pageSize ?? 20)));
+    const customerOrders = (await this.core.listOrders(context.tenantId)).filter(
+      (order) => order.customerId === context.customerId || order.membershipSnapshot?.personalCustomerId === context.customerId
+    );
+    const orderIds = new Set(customerOrders.map((order) => order.id));
+    const logs = this.business
+      .listNotificationLogs(context.tenantId, this.context(context.tenantId))
+      .filter((log) => log.businessObjectType === "order" && Boolean(log.businessObjectId) && orderIds.has(log.businessObjectId!))
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+    const start = (page - 1) * pageSize;
+    return {
+      items: logs.slice(start, start + pageSize).map((log) => ({
+        id: log.id,
+        eventCode: log.eventCode,
+        channel: log.channel,
+        title: log.renderedTitle,
+        body: log.renderedBody,
+        status: log.status,
+        orderId: log.businessObjectId,
+        createdAt: log.createdAt,
+        sentAt: log.sentAt
+      })),
+      page,
+      pageSize,
+      total: logs.length
+    };
+  }
+
+  async bookingOptions(context: ClientRequestContext) {
+    const rows = await this.memberships.listBookingOptions(context.tenantId, context.workspaceId, context.customerId);
+    return [{ bookingIdentity: "personal", label: "个人身份", eligible: context.membershipStatus === "active" }, ...rows.map((row) => ({ bookingIdentity: "enterprise_employee", corporateCustomerId: row.corporateCustomerId, corporateName: row.corporateCustomerName, membershipId: row.corporateMembershipId, label: row.corporateCustomerName, eligible: true }))];
+  }
+
+  async qualificationTypes(context: ClientRequestContext) {
+    return this.memberships.listQualificationTypes(context.tenantId, context.workspaceId);
+  }
+
+  async qualifications(context: ClientRequestContext) {
+    return this.memberships.listQualificationRevisions(context.tenantId, context.workspaceId, context.customerId);
+  }
+
+  async submitQualification(context: ClientRequestContext, input: Parameters<MembershipService["submitQualification"]>[3]) {
+    this.requireActiveMembership(context);
+    return this.memberships.submitQualification(context.tenantId, context.workspaceId, context.customerId, input, "app", `client:${context.customerId}`);
+  }
+
+  async availability(context: ClientRequestContext, input: { locationId: string; startAt: string; endAt: string; lines: Array<{ itemGroupId: string; quantity: number }> }) {
+    this.requireActiveMembership(context);
+    return this.core.availability(context.tenantId, input);
+  }
+
+  async createQuote(context: ClientRequestContext, input: ClientCreateQuoteRequest) {
+    this.requireActiveMembership(context);
+    const request: RentalQuoteRequest = {
+      ...input,
+      customerType: "personal",
+      customerId: context.customerId,
+      bookingIdentity: input.bookingIdentity ?? { bookingIdentity: "personal" }
+    };
+    return this.business.createQuote(context.tenantId, this.context(context.tenantId), request);
+  }
+
+  async getQuote(context: ClientRequestContext, quoteId: string) {
+    const quote = this.business.getQuote(context.tenantId, this.context(context.tenantId), quoteId);
+    if (quote.request.customerId !== context.customerId) throw new NotFoundException("报价不存在");
+    return quote;
+  }
+
+  async coupons(context: ClientRequestContext) {
+    return this.business.listCurrentCustomerCoupons(context.tenantId, this.context(context.tenantId), context.customerId);
+  }
+
+  async claimCoupon(context: ClientRequestContext, templateId: string) {
+    this.requireActiveMembership(context);
+    return this.business.claimCoupon(context.tenantId, this.context(context.tenantId), templateId, context.customerId);
+  }
+
+  async createOrder(context: ClientRequestContext, input: ClientCreateOrderRequest, requestContext?: ClientOrderRequestContext) {
+    this.requireActiveMembership(context);
+    const business = this.context(context.tenantId);
+    const quote = this.business.getQuote(context.tenantId, business, input.quoteId);
+    if (quote.request.customerId !== context.customerId) throw new NotFoundException("报价不存在");
+    const lines = quote.request.lines.map((line) => {
+      if (!line.itemGroupId) throw new ConflictException("报价缺少承接商品型号，不能下单");
+      return { itemGroupId: line.itemGroupId, pricingGroupId: line.pricingGroupId, quantity: line.quantity, note: line.note };
+    });
+    const orderInput: CreateRentalOrderRequest = {
+      quoteId: input.quoteId,
+      customerType: "personal",
+      customerId: context.customerId,
+      customerName: context.displayName,
+      contactPhone: input.contactPhone ?? context.phone,
+      bookingIdentity: quote.request.bookingIdentity ?? { bookingIdentity: "personal" },
+      fulfillmentMode: quote.request.fulfillmentMode,
+      fulfillmentLocationId: quote.request.fulfillmentLocationId,
+      returnLocationId: quote.request.returnLocationId,
+      startAt: quote.request.startAt,
+      endAt: quote.request.endAt,
+      lines
+    };
+    const created = await this.orders.createOrder(context.tenantId, orderInput, `client:${context.customerId}`, business, idempotencyKeyOf(requestContext));
+    await Promise.all([this.core.persist(context.tenantId), this.business.persist(context.tenantId)]);
+    return { order: this.orderView(created.order), replayed: created.replayed };
+  }
+
+  async listOrders(context: ClientRequestContext, query: { page?: number; pageSize?: number; status?: string }) {
+    const page = Math.max(1, Math.floor(query.page ?? 1));
+    const pageSize = Math.min(50, Math.max(1, Math.floor(query.pageSize ?? 20)));
+    const all = (await this.core.listOrders(context.tenantId)).filter((order) => order.customerId === context.customerId || order.membershipSnapshot?.personalCustomerId === context.customerId).filter((order) => !query.status || String(order.status).toLowerCase() === query.status.toLowerCase());
+    const start = (page - 1) * pageSize;
+    return { items: all.slice(start, start + pageSize).map((order) => this.orderView(order)), page, pageSize, total: all.length };
+  }
+
+  async getOrder(context: ClientRequestContext, orderId: string) {
+    return this.orderView(await this.assertClientOrder(context, orderId));
+  }
+
+  async fulfillment(context: ClientRequestContext, orderId: string): Promise<ClientFulfillmentView> {
+    const order = await this.assertClientOrder(context, orderId);
+    return {
+      orderId: order.id,
+      orderNo: order.orderNo,
+      status: String(order.status),
+      fulfillmentMode: order.fulfillmentMode,
+      fulfillmentLocationName: order.fulfillmentLocationName,
+      returnLocationName: order.returnLocationName,
+      startAt: order.startAt,
+      endAt: order.endAt,
+      effectiveEndAt: order.effectiveEndAt,
+      allocations: order.allocations?.map((row) => ({ id: row.id, orderLineId: row.orderLineId, quantity: row.quantity, status: row.status, assetNo: row.assetNo })) ?? []
+    };
+  }
+
+  async cancelOrder(context: ClientRequestContext, orderId: string, input: { reason: string }, requestContext?: ClientOrderRequestContext) {
+    this.requireActiveMembership(context);
+    const key = idempotencyKeyOf(requestContext) ?? `client:order.cancel:${orderId}`;
+    const business = this.context(context.tenantId);
+    const outcome = await this.idempotent.executeWithReplayFlag({
+      tenantId: context.tenantId,
+      action: "order.cancel",
+      key,
+      fallbackKey: `client:order.cancel:${orderId}`,
+      request: { orderId, reason: input.reason },
+      orderId,
+      run: async (tx) => {
+        await this.assertClientOrder(context, orderId);
+        const order = await this.core.cancelOrder(context.tenantId, orderId, input.reason, (locked) => this.business.calculateCancellationCharge(context.tenantId, business, this.business.getQuote(context.tenantId, business, locked.quoteId)), tx, `client:${context.customerId}`);
+        await this.business.releaseCouponInTransaction(context.tenantId, orderId, tx);
+        await this.serviceCapacities.releaseForOrder(context.tenantId, orderId, "client_order_cancelled", new Date().toISOString(), tx);
+        return order;
+      },
+      replay: async () => {
+        const latest = await this.core.getOrder(context.tenantId, orderId);
+        return String(latest.status).toLowerCase() === "cancelled" ? latest : undefined;
+      }
+    });
+    await Promise.all([this.core.persist(context.tenantId), this.business.persist(context.tenantId)]);
+    return { order: this.orderView(outcome.result), replayed: outcome.replayed };
+  }
+
+  private async extensionSettlement(context: ClientRequestContext, order: RentalOrder) {
+    const overdue = new Date(order.effectiveEndAt ?? order.endAt).getTime() < Date.now();
+    if (overdue) return "immediate" as const;
+    const corporateId = order.membershipSnapshot?.enterpriseContractAndPayer ? order.membershipSnapshot.corporateCustomerId : undefined;
+    if (!corporateId) return "immediate" as const;
+    const credit = await this.prisma.customerCorporateCredit.findFirst({ where: { tenantId: context.tenantId, customerId: corporateId, status: "active" }, select: { billingCycle: true } });
+    return credit && credit.billingCycle !== "per_order" ? "monthly" as const : "immediate" as const;
+  }
+
+  private async priceExtension(context: ClientRequestContext, orderId: string, input: ClientOrderExtensionRequest) {
+    const order = await this.assertClientOrder(context, orderId);
+    await this.core.assertOrderExtensionAvailable(context.tenantId, order, input.newEndAt);
+    const priced = await this.business.quoteOrderExtension(context.tenantId, this.context(context.tenantId), { order, previousExtensions: await this.core.listOrderExtensions(context.tenantId, orderId), lines: order.lines, newEndAt: input.newEndAt, services: input.services, appliedAt: new Date().toISOString(), settlementMode: await this.extensionSettlement(context, order), fulfillmentMode: order.fulfillmentMode, locationIds: [order.fulfillmentLocationId, order.returnLocationId].filter((id): id is string => Boolean(id)), customerType: order.customerType });
+    const { rateSnapshot: _rateSnapshot, ruleSnapshot: _ruleSnapshot, ...preview } = priced;
+    return { order, priced, preview };
+  }
+
+  async previewExtension(context: ClientRequestContext, orderId: string, input: ClientOrderExtensionRequest) {
+    this.requireActiveMembership(context);
+    return (await this.priceExtension(context, orderId, input)).preview;
+  }
+
+  private async occupyExtensionServices(context: ClientRequestContext, orderId: string, extension: { id: string; serviceSnapshots?: unknown[] }, tx: Prisma.TransactionClient) {
+    if (!extension.serviceSnapshots?.length) return;
+    await this.serviceCapacities.reserveForOrder(context.tenantId, { id: orderId, serviceSnapshots: extension.serviceSnapshots, reservations: [] } as never, `client-extension:${extension.id}`, tx);
+    await this.serviceCapacities.confirmForOrder(context.tenantId, orderId, new Date().toISOString(), tx);
+  }
+
+  async applyExtension(context: ClientRequestContext, orderId: string, input: ClientOrderExtensionRequest, requestContext?: ClientOrderRequestContext) {
+    this.requireActiveMembership(context);
+    const key = idempotencyKeyOf(requestContext) ?? `client:order.extend:${orderId}:${input.newEndAt}`;
+    const outcome = await this.idempotent.executeWithReplayFlag({
+      tenantId: context.tenantId,
+      action: "order.extend",
+      key: idempotencyKeyOf(requestContext),
+      fallbackKey: `client:order.extend:${orderId}:${input.newEndAt}`,
+      request: { orderId, newEndAt: input.newEndAt, services: input.services ?? [] },
+      orderId,
+      run: async (tx) => {
+        const { priced } = await this.priceExtension(context, orderId, input);
+        const result = await this.core.requestOrderExtension(context.tenantId, orderId, priced, { idempotencyKey: key, memo: input.memo, operator: `client:${context.customerId}` }, tx);
+        await this.business.synchronizeExtensionCoupon(context.tenantId, result.extension, tx);
+        if (result.extension.status === "effective") await this.occupyExtensionServices(context, orderId, result.extension, tx);
+        return result;
+      },
+      replay: async () => {
+        const existing = (await this.core.listOrderExtensions(context.tenantId, orderId)).find((row) => row.idempotencyKey === key);
+        return existing ? { order: await this.core.getOrder(context.tenantId, orderId), extension: existing } : undefined;
+      }
+    });
+    return { order: this.orderView(outcome.result.order), extension: outcome.result.extension, replayed: outcome.replayed };
+  }
+
+  async listExtensions(context: ClientRequestContext, orderId: string) {
+    await this.assertClientOrder(context, orderId);
+    return this.core.listOrderExtensions(context.tenantId, orderId);
+  }
+
+  async payExtension(context: ClientRequestContext, orderId: string, extensionId: string, requestContext?: ClientOrderRequestContext) {
+    this.requireActiveMembership(context);
+    const key = idempotencyKeyOf(requestContext) ?? `client:order.extend.pay:${extensionId}`;
+    const outcome = await this.idempotent.executeWithReplayFlag({
+      tenantId: context.tenantId,
+      action: "order.extend.pay",
+      key: idempotencyKeyOf(requestContext),
+      fallbackKey: `client:order.extend.pay:${extensionId}`,
+      request: { orderId, extensionId },
+      orderId,
+      run: async (tx) => {
+        await this.assertClientOrder(context, orderId);
+        await this.fundingService.assertExtensionPaid(context.tenantId, context.workspaceId, orderId, extensionId, tx);
+        const result = await this.core.payOrderExtension(context.tenantId, orderId, extensionId, tx);
+        await this.business.synchronizeExtensionCoupon(context.tenantId, result.extension, tx);
+        await this.occupyExtensionServices(context, orderId, result.extension, tx);
+        return result;
+      },
+      replay: async () => {
+        const extension = (await this.core.listOrderExtensions(context.tenantId, orderId)).find((row) => row.id === extensionId && row.status === "effective");
+        return extension ? { order: await this.core.getOrder(context.tenantId, orderId), extension } : undefined;
+      }
+    });
+    return { order: this.orderView(outcome.result.order), extension: outcome.result.extension, replayed: outcome.replayed };
+  }
+
+  async funding(context: ClientRequestContext, orderId: string) {
+    await this.assertClientOrder(context, orderId);
+    return this.fundingService.listEvents(context.tenantId, context.workspaceId, orderId);
+  }
+
+  async simulateFunding(context: ClientRequestContext, orderId: string, input: ClientPaymentSimulationRequest, requestContext?: ClientOrderRequestContext) {
+    if (process.env.NODE_ENV === "production") throw new ForbiddenException("生产环境未接入真实支付 provider，不能使用模拟资金接口");
+    await this.assertClientOrder(context, orderId);
+    const key = idempotencyKeyOf(requestContext);
+    if (!key) throw new BadRequestException("资金操作必须提供 Idempotency-Key");
+    return this.fundingService.recordEvent(context.tenantId, context.workspaceId, orderId, { ...input, idempotencyKey: key }, `client:${context.customerId}`);
+  }
+}

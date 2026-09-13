@@ -6,6 +6,9 @@ interface SchemaObject {
   format?: string;
   description?: string;
   enum?: string[];
+  minLength?: number;
+  maxLength?: number;
+  minimum?: number;
   items?: SchemaObject;
   properties?: Record<string, SchemaObject>;
   required?: string[];
@@ -32,6 +35,7 @@ export interface ContractOperation {
   requestSchema?: string | SchemaObject;
   responseSchema?: string | SchemaObject;
   parameters?: ParameterObject[];
+  rawResponseContentType?: string;
 }
 
 const stringSchema: SchemaObject = { type: "string" };
@@ -107,6 +111,10 @@ function pathParameters(path: string, parameters: ParameterObject[] = []) {
 function operation(config: ContractOperation) {
   const parameters = pathParameters(config.path, config.parameters);
   const securityRequired = config.authRequired || config.permissions.length > 0;
+  const responseContentType = config.rawResponseContentType ?? "application/json";
+  const responseSchema = config.rawResponseContentType || config.path === "/api/openapi.json"
+    ? toSchema(config.responseSchema)
+    : apiResult(config.responseSchema);
   const item: Record<string, unknown> = {
     tags: [config.tag],
     operationId: config.operationId,
@@ -119,12 +127,7 @@ function operation(config: ContractOperation) {
       "200": {
         description: "Success",
         content: {
-          "application/json": {
-            schema:
-              config.path === "/api/openapi.json"
-                ? toSchema(config.responseSchema)
-                : apiResult(config.responseSchema)
-          }
+          [responseContentType]: { schema: responseSchema }
         }
       }
     }
@@ -642,6 +645,311 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   UserStatusRequest: objectOf({
     isActive: booleanSchema
   }),
+  ClientWorkspaceSummary: objectOf(
+    {
+      workspaceCode: stringSchema,
+      workspaceName: stringSchema,
+      categoryCode: stringSchema,
+      membershipStatus: stringSchema,
+      isDefault: booleanSchema
+    },
+    ["workspaceCode", "workspaceName", "categoryCode", "membershipStatus"]
+  ),
+  ClientWorkspaceDirectory: objectOf(
+    {
+      apiVersion: stringSchema,
+      tenantCode: stringSchema,
+      tenantName: stringSchema,
+      workspaces: arrayOf(ref("ClientWorkspaceSummary"))
+    },
+    ["apiVersion", "tenantCode", "tenantName", "workspaces"]
+  ),
+  ClientRegistrationChallengeRequest: objectOf(
+    {
+      tenantCode: stringSchema,
+      workspaceCode: stringSchema,
+      method: { type: "string", enum: ["sms", "email"] },
+      identifier: stringSchema,
+      idempotencyKey: stringSchema
+    },
+    ["tenantCode", "workspaceCode", "method", "identifier", "idempotencyKey"]
+  ),
+  ClientRegistrationChallengeResponse: objectOf(
+    {
+      apiVersion: stringSchema,
+      challengeId: stringSchema,
+      status: stringSchema,
+      method: stringSchema,
+      maskedDestination: stringSchema,
+      expiresAt: { type: "string", format: "date-time" },
+      retryAfterSeconds: numberSchema,
+      developmentCode: stringSchema,
+      deliveryMode: stringSchema
+    },
+    ["apiVersion", "challengeId", "status", "method", "maskedDestination", "expiresAt"]
+  ),
+  VerifyClientRegistrationChallengeRequest: objectOf(
+    { code: { type: "string", minLength: 6, maxLength: 6 } },
+    ["code"]
+  ),
+  VerifyClientRegistrationChallengeResponse: objectOf(
+    {
+      apiVersion: stringSchema,
+      verificationToken: stringSchema,
+      expiresAt: { type: "string", format: "date-time" }
+    },
+    ["apiVersion", "verificationToken", "expiresAt"]
+  ),
+  ClientPersonalMembershipRegistrationRequest: objectOf(
+    {
+      tenantCode: stringSchema,
+      workspaceCode: stringSchema,
+      name: stringSchema,
+      phone: stringSchema,
+      email: stringSchema,
+      identityNo: stringSchema,
+      password: { type: "string", format: "password" },
+      verificationToken: stringSchema,
+      consent: objectOf(
+        {
+          userAgreementVersion: stringSchema,
+          privacyPolicyVersion: stringSchema,
+          agreedAt: { type: "string", format: "date-time" }
+        },
+        ["userAgreementVersion", "privacyPolicyVersion", "agreedAt"]
+      ),
+      idempotencyKey: stringSchema
+    },
+    ["tenantCode", "workspaceCode", "name", "phone", "password", "verificationToken", "consent", "idempotencyKey"]
+  ),
+  ClientPersonalMembershipRegistrationResponse: objectOf(
+    {
+      apiVersion: stringSchema,
+      result: stringSchema,
+      registrationId: stringSchema,
+      customerId: stringSchema,
+      reviewStatus: stringSchema,
+      membershipStatus: stringSchema
+    },
+    ["apiVersion", "result", "registrationId", "reviewStatus", "membershipStatus"]
+  ),
+  ClientMembershipLoginRequest: objectOf(
+    {
+      tenantCode: stringSchema,
+      loginIdentifier: stringSchema,
+      password: { type: "string", format: "password" },
+      workspaceCode: stringSchema,
+      clientId: stringSchema
+    },
+    ["tenantCode", "loginIdentifier", "password"]
+  ),
+  ClientMembershipSessionResponse: objectOf(
+    {
+      apiVersion: stringSchema,
+      accessToken: stringSchema,
+      refreshToken: stringSchema,
+      expiresIn: numberSchema,
+      customer: objectOf(
+        {
+          customerId: stringSchema,
+          customerType: stringSchema,
+          displayName: stringSchema,
+          loginIdentifierMasked: stringSchema
+        },
+        ["customerId", "customerType", "displayName", "loginIdentifierMasked"]
+      ),
+      workspaces: arrayOf(ref("ClientWorkspaceSummary"))
+    },
+    ["apiVersion", "accessToken", "refreshToken", "expiresIn", "customer", "workspaces"]
+  ),
+  ClientRefreshRequest: objectOf({ refreshToken: stringSchema }, ["refreshToken"]),
+  ClientSwitchWorkspaceRequest: objectOf({ workspaceCode: stringSchema }, ["workspaceCode"]),
+  ClientChangePasswordRequest: objectOf(
+    {
+      currentPassword: { type: "string", format: "password" },
+      newPassword: { type: "string", format: "password" }
+    },
+    ["currentPassword", "newPassword"]
+  ),
+  ClientActionResult: objectOf({ success: booleanSchema }),
+  ClientMembershipStatus: objectOf(
+    {
+      apiVersion: stringSchema,
+      customerId: stringSchema,
+      customerType: stringSchema,
+      displayName: stringSchema,
+      phoneMasked: stringSchema,
+      email: stringSchema,
+      accountStatus: stringSchema,
+      workspace: ref("ClientWorkspaceSummary"),
+      workspaces: arrayOf(ref("ClientWorkspaceSummary")),
+      reviews: arrayOf(objectSchema),
+      qualifications: arrayOf(objectSchema)
+    },
+    ["apiVersion", "customerId", "customerType", "displayName", "phoneMasked", "accountStatus", "workspace", "workspaces", "reviews", "qualifications"]
+  ),
+  ClientBookingOption: objectOf(
+    {
+      bookingIdentity: stringSchema,
+      corporateCustomerId: stringSchema,
+      corporateName: stringSchema,
+      membershipId: stringSchema,
+      label: stringSchema,
+      eligible: booleanSchema,
+      reason: stringSchema
+    },
+    ["bookingIdentity", "label", "eligible"]
+  ),
+  ClientQualificationRequest: objectOf(
+    {
+      qualificationType: stringSchema,
+      referenceNo: stringSchema,
+      issuedAt: { type: "string", format: "date-time" },
+      expiresAt: { type: "string", format: "date-time" },
+      evidenceRef: stringSchema
+    },
+    ["qualificationType"]
+  ),
+  ClientCatalog: objectOf(
+    {
+      apiVersion: stringSchema,
+      tenantCode: stringSchema,
+      workspace: ref("ClientWorkspaceSummary"),
+      categoryCode: stringSchema,
+      timeZone: stringSchema,
+      items: arrayOf(objectSchema),
+      pricingGroups: arrayOf(objectSchema),
+      services: arrayOf(objectSchema),
+      locations: arrayOf(objectSchema),
+      discountPlans: arrayOf(objectSchema)
+    },
+    ["apiVersion", "tenantCode", "workspace", "categoryCode", "timeZone", "items", "pricingGroups", "services", "locations", "discountPlans"]
+  ),
+  ClientAvailabilityRequest: objectOf(
+    {
+      locationId: stringSchema,
+      startAt: { type: "string", format: "date-time" },
+      endAt: { type: "string", format: "date-time" },
+      lines: arrayOf(objectOf({ itemGroupId: stringSchema, quantity: numberSchema }, ["itemGroupId", "quantity"]))
+    },
+    ["locationId", "startAt", "endAt", "lines"]
+  ),
+  ClientQuoteRequest: objectOf(
+    {
+      bookingIdentity: objectSchema,
+      fulfillmentMode: stringSchema,
+      fulfillmentLocationId: stringSchema,
+      returnLocationId: stringSchema,
+      startAt: { type: "string", format: "date-time" },
+      endAt: { type: "string", format: "date-time" },
+      pricingPlanId: stringSchema,
+      discountPlanId: stringSchema,
+      customerCouponId: stringSchema,
+      lines: arrayOf(objectSchema),
+      services: arrayOf(objectSchema)
+    },
+    ["fulfillmentMode", "fulfillmentLocationId", "startAt", "endAt", "lines"]
+  ),
+  ClientQuote: objectOf(
+    {
+      id: stringSchema,
+      quoteNo: stringSchema,
+      request: ref("ClientQuoteRequest"),
+      rentalAmount: numberSchema,
+      discountAmount: numberSchema,
+      couponAmount: numberSchema,
+      serviceAmount: numberSchema,
+      finalPayableAmount: numberSchema,
+      expiresAt: { type: "string", format: "date-time" }
+    },
+    ["id", "request"]
+  ),
+  ClientCreateOrderRequest: objectOf(
+    {
+      quoteId: stringSchema,
+      contactPhone: stringSchema
+    },
+    ["quoteId"]
+  ),
+  ClientOrder: objectOf(
+    {
+      id: stringSchema,
+      orderNo: stringSchema,
+      status: stringSchema,
+      customerName: stringSchema,
+      fulfillmentMode: stringSchema,
+      fulfillmentLocationName: stringSchema,
+      returnLocationName: stringSchema,
+      startAt: { type: "string", format: "date-time" },
+      endAt: { type: "string", format: "date-time" },
+      effectiveEndAt: { type: "string", format: "date-time" },
+      rentalAmount: numberSchema,
+      discountAmount: numberSchema,
+      couponAmount: numberSchema,
+      serviceAmount: numberSchema,
+      fulfillmentAmount: numberSchema,
+      depositAmount: numberSchema,
+      preAuthAmount: numberSchema,
+      payableAmount: numberSchema,
+      adjustmentAmount: numberSchema,
+      finalPayableAmount: numberSchema,
+      currency: stringSchema,
+      lines: arrayOf(objectSchema),
+      chargeLines: arrayOf(objectSchema),
+      allocations: arrayOf(objectSchema),
+      createdAt: { type: "string", format: "date-time" },
+      updatedAt: { type: "string", format: "date-time" }
+    },
+    ["id", "orderNo", "status", "customerName", "fulfillmentMode", "fulfillmentLocationName", "startAt", "endAt", "rentalAmount", "discountAmount", "couponAmount", "serviceAmount", "fulfillmentAmount", "depositAmount", "preAuthAmount", "payableAmount", "adjustmentAmount", "finalPayableAmount", "lines", "chargeLines", "createdAt", "updatedAt"]
+  ),
+  ClientOrderMutation: objectOf({ order: ref("ClientOrder"), replayed: booleanSchema }, ["order", "replayed"]),
+  ClientOrderList: objectOf({ items: arrayOf(ref("ClientOrder")), page: numberSchema, pageSize: numberSchema, total: numberSchema }, ["items", "page", "pageSize", "total"]),
+  ClientFulfillment: objectOf(
+    {
+      orderId: stringSchema,
+      orderNo: stringSchema,
+      status: stringSchema,
+      fulfillmentMode: stringSchema,
+      fulfillmentLocationName: stringSchema,
+      returnLocationName: stringSchema,
+      startAt: { type: "string", format: "date-time" },
+      endAt: { type: "string", format: "date-time" },
+      effectiveEndAt: { type: "string", format: "date-time" },
+      allocations: arrayOf(objectSchema)
+    },
+    ["orderId", "orderNo", "status", "fulfillmentMode", "fulfillmentLocationName", "startAt", "endAt", "allocations"]
+  ),
+  ClientNotificationList: objectOf(
+    {
+      items: arrayOf(objectSchema),
+      page: numberSchema,
+      pageSize: numberSchema,
+      total: numberSchema
+    },
+    ["items", "page", "pageSize", "total"]
+  ),
+  ClientOrderExtensionRequest: objectOf(
+    {
+      newEndAt: { type: "string", format: "date-time" },
+      services: arrayOf(objectSchema),
+      memo: stringSchema
+    },
+    ["newEndAt"]
+  ),
+  ClientExtensionList: arrayOf(objectSchema),
+  ClientExtensionPreview: objectSchema,
+  ClientCancelOrderRequest: objectOf({ reason: stringSchema }, ["reason"]),
+  ClientFunding: arrayOf(objectSchema),
+  ClientPaymentSimulationRequest: objectOf(
+    {
+      instrument: { type: "string", enum: ["rental", "deposit", "preauthorization"] },
+      action: { type: "string", enum: ["initiate", "append", "capture", "refund", "release", "fail"] },
+      amount: numberSchema,
+      reason: stringSchema,
+      failureCode: stringSchema
+    },
+    ["instrument", "action", "reason"]
+  ),
 };
 
 function backlogOperation(
@@ -663,6 +971,29 @@ function backlogOperation(
     authRequired,
     requestSchema: method === "get" || method === "delete" ? undefined : "GenericObject",
     responseSchema: "GenericObject"
+  };
+}
+
+/** CLIENT-01 的字段级契约，不让移动端把 GenericObject 当成正式协议。 */
+function clientOperation(
+  method: HttpMethod,
+  path: string,
+  operationId: string,
+  summary: string,
+  options: { requestSchema?: string; responseSchema?: string | SchemaObject; authRequired?: boolean; parameters?: ParameterObject[]; rawResponseContentType?: string } = {}
+): ContractOperation {
+  return {
+    method,
+    path,
+    tag: "Client",
+    operationId,
+    summary,
+    permissions: [],
+    authRequired: options.authRequired ?? true,
+    requestSchema: options.requestSchema,
+    responseSchema: options.responseSchema ?? "GenericObject",
+    parameters: options.parameters,
+    rawResponseContentType: options.rawResponseContentType
   };
 }
 
@@ -1647,7 +1978,44 @@ function rentalBusinessOperations(): ContractOperation[] { return [
   backlogOperation("get", "/api/rental/v1/notification-logs", "RentalBusiness", "listRentalNotificationLogs", "List notification send logs", ["system:params:manage"]),
   backlogOperation("post", "/api/rental/v1/notifications/send", "RentalBusiness", "sendRentalNotification", "Render and send tenant notification", ["system:params:manage"]),
   backlogOperation("post", "/api/rental/v1/quotes", "RentalBusiness", "createRentalQuote", "Create server-side rental quote", ["rental-os:order:operate"]),
-  backlogOperation("get", "/api/rental/v1/quotes/{id}", "RentalBusiness", "getRentalQuote", "Get rental quote snapshot", ["rental-os:order:view"])
+  backlogOperation("get", "/api/rental/v1/quotes/{id}", "RentalBusiness", "getRentalQuote", "Get rental quote snapshot", ["rental-os:order:view"]),
+
+  // CLIENT-01：移动端/小程序独立 API。客户端路径不使用运营 RBAC 权限码，
+  // 但受独立客户 bearer token 保护；这里使用字段级 schema 供小程序/App 生成客户端。
+  clientOperation("get", "/api/client/v1/tenants/{tenantCode}/workspaces", "listClientWorkspaces", "List active workspaces for client registration", { responseSchema: "ClientWorkspaceDirectory", authRequired: false }),
+  clientOperation("post", "/api/client/v1/auth/registration/challenges", "createClientRegistrationChallenge", "Create a client registration verification challenge", { requestSchema: "ClientRegistrationChallengeRequest", responseSchema: "ClientRegistrationChallengeResponse", authRequired: false }),
+  clientOperation("post", "/api/client/v1/auth/registration/challenges/{challengeId}/verify", "verifyClientRegistrationChallenge", "Verify a client registration challenge", { requestSchema: "VerifyClientRegistrationChallengeRequest", responseSchema: "VerifyClientRegistrationChallengeResponse", authRequired: false }),
+  clientOperation("post", "/api/client/v1/auth/register", "registerClientPersonalMembership", "Register a personal client membership", { requestSchema: "ClientPersonalMembershipRegistrationRequest", responseSchema: "ClientPersonalMembershipRegistrationResponse", authRequired: false }),
+  clientOperation("post", "/api/client/v1/auth/login", "clientLogin", "Login a customer client account", { requestSchema: "ClientMembershipLoginRequest", responseSchema: "ClientMembershipSessionResponse", authRequired: false }),
+  clientOperation("post", "/api/client/v1/auth/refresh", "refreshClientSession", "Refresh a customer client session", { requestSchema: "ClientRefreshRequest", responseSchema: "ClientMembershipSessionResponse", authRequired: false }),
+  clientOperation("post", "/api/client/v1/auth/logout", "logoutClientSession", "Revoke a customer client session", { requestSchema: "ClientRefreshRequest", responseSchema: "ClientActionResult", authRequired: false }),
+  clientOperation("post", "/api/client/v1/auth/switch-workspace", "switchClientWorkspace", "Switch the current customer client session to an authorized workspace", { requestSchema: "ClientSwitchWorkspaceRequest", responseSchema: "ClientMembershipSessionResponse" }),
+  clientOperation("get", "/api/client/v1/auth/me", "getClientMe", "Get the current customer client profile", { responseSchema: "ClientMembershipStatus" }),
+  clientOperation("post", "/api/client/v1/auth/change-password", "changeClientPassword", "Change the current customer client password", { requestSchema: "ClientChangePasswordRequest", responseSchema: "ClientActionResult" }),
+  clientOperation("get", "/api/client/v1/membership/status", "getClientMembershipStatus", "Get current customer membership and review status", { responseSchema: "ClientMembershipStatus" }),
+  clientOperation("get", "/api/client/v1/notifications", "listClientNotifications", "List notifications for the current customer orders", { responseSchema: "ClientNotificationList", parameters: [queryParam("page", numberSchema), queryParam("pageSize", numberSchema)] }),
+  clientOperation("get", "/api/client/v1/membership/booking-options", "listClientBookingOptions", "List personal and enterprise booking identities", { responseSchema: arrayOf(ref("ClientBookingOption")) }),
+  clientOperation("get", "/api/client/v1/membership/qualification-types", "listClientQualificationTypes", "List qualification types for the current workspace", { responseSchema: arrayOf(objectSchema) }),
+  clientOperation("get", "/api/client/v1/membership/qualifications", "listClientQualifications", "List current customer qualification submissions", { responseSchema: arrayOf(objectSchema) }),
+  clientOperation("post", "/api/client/v1/membership/qualifications", "submitClientQualification", "Submit a customer qualification for review", { requestSchema: "ClientQualificationRequest", responseSchema: objectSchema }),
+  clientOperation("get", "/api/client/v1/catalog", "getClientCatalog", "Get the current workspace client catalog", { responseSchema: "ClientCatalog" }),
+  clientOperation("get", "/api/client/v1/catalog/items/{itemGroupId}/images/{imageId}", "getClientCatalogItemImage", "Get a client-authenticated catalog item image", { responseSchema: { type: "string", format: "binary" }, rawResponseContentType: "image/*" }),
+  clientOperation("post", "/api/client/v1/availability", "getClientAvailability", "Check rental availability for the client", { requestSchema: "ClientAvailabilityRequest", responseSchema: objectSchema }),
+  clientOperation("post", "/api/client/v1/quotes", "createClientQuote", "Create a server-side client rental quote", { requestSchema: "ClientQuoteRequest", responseSchema: "ClientQuote" }),
+  clientOperation("get", "/api/client/v1/quotes/{id}", "getClientQuote", "Get a client rental quote", { responseSchema: "ClientQuote" }),
+  clientOperation("get", "/api/client/v1/coupons", "listClientCoupons", "List current customer coupons", { responseSchema: arrayOf(objectSchema) }),
+  clientOperation("post", "/api/client/v1/coupons/{templateId}/claim", "claimClientCoupon", "Claim an available customer coupon", { responseSchema: objectSchema }),
+  clientOperation("post", "/api/client/v1/orders", "createClientOrder", "Create a rental order from a client quote", { requestSchema: "ClientCreateOrderRequest", responseSchema: "ClientOrderMutation" }),
+  clientOperation("get", "/api/client/v1/orders", "listClientOrders", "List the current customer orders", { responseSchema: "ClientOrderList", parameters: [queryParam("page", numberSchema), queryParam("pageSize", numberSchema), queryParam("status")] }),
+  clientOperation("get", "/api/client/v1/orders/{id}", "getClientOrder", "Get a customer order", { responseSchema: "ClientOrder" }),
+  clientOperation("get", "/api/client/v1/orders/{id}/fulfillment", "getClientOrderFulfillment", "Get customer-visible fulfillment and allocation progress", { responseSchema: "ClientFulfillment" }),
+  clientOperation("post", "/api/client/v1/orders/{id}/cancel", "cancelClientOrder", "Cancel a customer order", { requestSchema: "ClientCancelOrderRequest", responseSchema: "ClientOrderMutation" }),
+  clientOperation("get", "/api/client/v1/orders/{id}/extensions", "listClientOrderExtensions", "List customer order extensions", { responseSchema: "ClientExtensionList" }),
+  clientOperation("post", "/api/client/v1/orders/{id}/extensions/preview", "previewClientOrderExtension", "Preview a customer order extension", { requestSchema: "ClientOrderExtensionRequest", responseSchema: "ClientExtensionPreview" }),
+  clientOperation("post", "/api/client/v1/orders/{id}/extensions", "applyClientOrderExtension", "Apply a customer order extension", { requestSchema: "ClientOrderExtensionRequest", responseSchema: "ClientOrderMutation" }),
+  clientOperation("post", "/api/client/v1/orders/{id}/extensions/{extensionId}/pay", "payClientOrderExtension", "Complete a customer order extension after payment", { responseSchema: "ClientOrderMutation" }),
+  clientOperation("get", "/api/client/v1/orders/{id}/funding", "getClientOrderFunding", "Get customer order funding status", { responseSchema: "ClientFunding" }),
+  clientOperation("post", "/api/client/v1/orders/{id}/funding/simulate", "simulateClientOrderFunding", "Record a development-only simulated customer funding event", { requestSchema: "ClientPaymentSimulationRequest", responseSchema: objectSchema })
 ]; }
 
 export const OPENAPI_DOCUMENT = {
