@@ -18,6 +18,7 @@ const orderId = "order-file-test";
 const assets = new Map();
 const sessions = new Map();
 let assetSequence = 0;
+let forceCompletionRace = false;
 
 function assetRow(id, status = "pending_upload", assetTenantId = tenantId, assetOrderId = orderId) {
   return {
@@ -88,13 +89,23 @@ const prisma = {
     },
     updateMany: async ({ where, data }) => {
       const row = sessions.get(where.id);
-      const allowed = row && row.tenantId === where.tenantId && (row.status === "pending_upload" || (row.status === "failed" && row.cleanupError));
+      const allowed = row
+        && row.tenantId === where.tenantId
+        && (!where.status || row.status === where.status)
+        && (where.status || row.status === "pending_upload" || (row.status === "failed" && row.cleanupError));
       if (!allowed) return { count: 0 };
       Object.assign(row, data, { updatedAt: new Date(), cleanupAttempts: (row.cleanupAttempts ?? 0) + (data.cleanupAttempts?.increment ?? 0) });
       return { count: 1 };
     }
   },
-  $transaction: async (work) => Array.isArray(work) ? Promise.all(work) : work({ fileAsset: prisma.fileAsset, fileUploadSession: prisma.fileUploadSession })
+  $transaction: async (work) => {
+    if (!Array.isArray(work) && forceCompletionRace) {
+      forceCompletionRace = false;
+      const pending = [...sessions.values()].find((row) => row.status === "pending_upload");
+      if (pending) pending.status = "cleanup_in_progress";
+    }
+    return Array.isArray(work) ? Promise.all(work) : work({ fileAsset: prisma.fileAsset, fileUploadSession: prisma.fileUploadSession });
+  }
 };
 
 const integrations = { runtimeConfig: async () => undefined };
@@ -117,6 +128,10 @@ void (async () => {
 
   const replay = await runtime.createUploadSession(tenantId, input);
   assert.equal(replay.sessionId, first.sessionId, "同一租户幂等重放必须复用原上传会话");
+  await assert.rejects(
+    () => runtime.createUploadSession(tenantId, { ...input, fileName: "another-contract.pdf" }),
+    /幂等键已用于不同文件上传请求/u
+  );
 
   await assert.rejects(
     () => runtime.createUploadSession(tenantId, { ...input, businessId: "order-from-other-tenant", idempotencyKey: "upload-order-file-2" }),
@@ -164,6 +179,17 @@ void (async () => {
   );
   await runtime.completeUpload(tenantId, qualificationSession.sessionId, {}, { businessType: "customer", businessId: "customer-file-test", uploadScene: "client-qualification" });
   console.log("client file owner binding tests passed");
+
+  const raceSession = await runtime.createUploadSession(tenantId, {
+    ...input,
+    idempotencyKey: "upload-cleanup-race"
+  });
+  forceCompletionRace = true;
+  await assert.rejects(
+    () => runtime.completeUpload(tenantId, raceSession.sessionId, {}),
+    /上传会话已失效，请重新上传/u
+  );
+  console.log("cleanup/complete race guard passed");
 
   const expiredAssetId = "file_expired";
   const expiredSessionId = "session_expired";

@@ -126,6 +126,9 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     if (existing) {
       const existingAsset = await this.prisma.fileAsset.findUniqueOrThrow({ where: { id: existing.fileAssetId } });
       if (owner && !this.matchesOwner(existingAsset, owner)) throw new ConflictException("幂等键已被其他业务对象使用，请更换幂等键");
+      if (!this.matchesUploadRequest(existingAsset, input, mimeType)) {
+        throw new ConflictException("幂等键已用于不同文件上传请求，请更换幂等键");
+      }
       const existingMode = (existingAsset.metadata as JsonRecord | null)?.uploadMode === "provider" ? "provider" : "simulation";
       return this.sessionSummary(existing, existingAsset, existingMode);
     }
@@ -189,6 +192,9 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
         if (concurrent) {
           const concurrentAsset = await this.prisma.fileAsset.findUniqueOrThrow({ where: { id: concurrent.fileAssetId } });
           if (owner && !this.matchesOwner(concurrentAsset, owner)) throw new ConflictException("幂等键已被其他业务对象使用，请更换幂等键");
+          if (!this.matchesUploadRequest(concurrentAsset, input, mimeType)) {
+            throw new ConflictException("幂等键已用于不同文件上传请求，请更换幂等键");
+          }
           const concurrentMode = (concurrentAsset.metadata as JsonRecord | null)?.uploadMode === "provider" ? "provider" : "simulation";
           return this.sessionSummary(concurrent, concurrentAsset, concurrentMode);
         }
@@ -346,8 +352,17 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
       ...(input.checksum?.trim() ? { clientChecksum: input.checksum.trim() } : {})
     };
     const updated = await this.prisma.$transaction(async (tx) => {
-      await tx.fileUploadSession.update({ where: { id: session.id }, data: { status: "completed", completedAt: new Date(), failureReason: null } });
-      return tx.fileAsset.update({ where: { id: asset.id }, data: { status: "active", metadata: metadata as Prisma.InputJsonValue } });
+      const sessionClaim = await tx.fileUploadSession.updateMany({
+        where: { id: session.id, tenantId, status: "pending_upload" },
+        data: { status: "completed", completedAt: new Date(), failureReason: null }
+      });
+      if (sessionClaim.count !== 1) throw new ConflictException("上传会话已失效，请重新上传");
+      const assetClaim = await tx.fileAsset.updateMany({
+        where: { id: asset.id, tenantId, status: "pending_upload" },
+        data: { status: "active", metadata: metadata as Prisma.InputJsonValue }
+      });
+      if (assetClaim.count !== 1) throw new ConflictException("上传文件已失效，请重新上传");
+      return tx.fileAsset.findUniqueOrThrow({ where: { id: asset.id } });
     });
     return this.assetSummary(updated);
   }
@@ -372,6 +387,20 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
 
   private matchesOwner(asset: { businessType: string; businessId: string | null; uploadScene: string }, owner: FileBusinessOwner) {
     return asset.businessType === owner.businessType && asset.businessId === owner.businessId && (!owner.uploadScene || asset.uploadScene === owner.uploadScene);
+  }
+
+  private matchesUploadRequest(
+    asset: { businessModule: string; businessType: string; businessId: string | null; fileName: string; mimeType: string; sizeBytes: number; uploadScene: string },
+    input: CreateFileUploadSessionRequest,
+    mimeType: string
+  ) {
+    return asset.businessModule === input.businessModule.trim()
+      && asset.businessType === input.businessType.trim()
+      && asset.businessId === input.businessId.trim()
+      && asset.fileName === input.fileName.trim()
+      && asset.mimeType === mimeType
+      && asset.sizeBytes === input.sizeBytes
+      && asset.uploadScene === input.uploadScene.trim();
   }
 
   private async assertBusinessReference(tenantId: string, businessType: string, businessId: string) {
