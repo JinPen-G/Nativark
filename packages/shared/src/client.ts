@@ -309,6 +309,28 @@ export interface ClientPaymentCapabilitiesResponse {
   instruments: Array<"rental" | "deposit" | "preauthorization">;
 }
 
+export interface ClientPaymentIntentRequest {
+  /** 第一阶段真实支付只承接租金/费用；押金和预授权仍由独立资金能力处理。 */
+  instrument: "rental" | "deposit" | "preauthorization";
+  method: "alipay" | "wechat_pay";
+  idempotencyKey: string;
+}
+
+export interface ClientPaymentIntentResponse {
+  apiVersion: typeof CLIENT_API_VERSION;
+  intentId: string;
+  provider: "alipay" | "wechat_pay";
+  method: "alipay" | "wechat_pay";
+  instrument: "rental" | "deposit" | "preauthorization";
+  amount: number;
+  currency: string;
+  status: "pending" | "paid" | "failed" | "funding_failed" | "closed";
+  checkoutUrl?: string;
+  expiresAt: string;
+  paidAt?: string;
+  message?: string;
+}
+
 export interface ClientConfigResponse {
   apiVersion: typeof CLIENT_API_VERSION;
   tenantCode: string;

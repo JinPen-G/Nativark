@@ -31,6 +31,7 @@ import {
   type ClientProfileUpdateRequest,
   type ClientOrderExtensionRequest,
   type ClientPaymentSimulationRequest,
+  type ClientPaymentIntentRequest,
   type ClientPersonalMembershipRegistrationRequest,
   type ClientRefreshRequest,
   type ClientRegistrationChallengeRequest,
@@ -346,4 +347,15 @@ export class ClientPaymentSimulationRequestDto implements ClientPaymentSimulatio
 
   @IsOptional() @IsString() @MaxLength(128)
   failureCode?: string;
+}
+
+export class ClientPaymentIntentRequestDto implements ClientPaymentIntentRequest {
+  @IsIn(["rental", "deposit", "preauthorization"])
+  instrument!: ClientPaymentIntentRequest["instrument"];
+
+  @IsIn(["alipay", "wechat_pay"])
+  method!: ClientPaymentIntentRequest["method"];
+
+  @IsString() @IsNotEmpty() @MaxLength(191)
+  idempotencyKey!: string;
 }

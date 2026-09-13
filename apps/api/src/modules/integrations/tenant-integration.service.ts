@@ -116,6 +116,35 @@ export class TenantIntegrationService {
     };
   }
 
+  /**
+   * 第三方回调没有租户路径，不能信任请求体里的 tenantId。
+   * 回调适配器只能从已启用的对应提供方配置中匹配商户标识/证书，
+   * 这里返回完整配置但绝不经过 controller。
+   */
+  async runtimeConfigsForCallback(provider: TenantIntegrationProvider): Promise<Array<TenantIntegrationRuntimeConfig & { tenantId: string }>> {
+    const rows = await this.prisma.tenantIntegrationConfig.findMany({
+      where: { capability: "payment", provider, enabled: true },
+      orderBy: { updatedAt: "desc" }
+    });
+    return rows.flatMap((row) => {
+      const definition = this.definition("payment", provider);
+      const credentials = this.configuredSecrets(row);
+      const settings = (row.settings ?? {}) as Record<string, unknown>;
+      const missing = definition.fields
+        .filter((field) => field.required && !String((field.secret ? credentials[field.key] : settings[field.key]) ?? "").trim())
+        .map((field) => field.key);
+      if (missing.length > 0) return [];
+      return [{
+        tenantId: row.tenantId,
+        id: row.id,
+        capability: "payment" as const,
+        provider,
+        settings,
+        credentials
+      }];
+    });
+  }
+
   async save(
     capability: TenantIntegrationCapability,
     provider: TenantIntegrationProvider,

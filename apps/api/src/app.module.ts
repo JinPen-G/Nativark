@@ -16,6 +16,8 @@ import { TenantIntegrationController } from "./modules/integrations/tenant-integ
 import { TenantIntegrationService } from "./modules/integrations/tenant-integration.service";
 import { TenantIntegrationRuntimeService } from "./modules/integrations/tenant-integration.runtime.service";
 import { FileStorageRuntimeService } from "./modules/integrations/file-storage.runtime.service";
+import { PaymentRuntimeService } from "./modules/integrations/payment.runtime.service";
+import { PaymentWebhookController } from "./modules/integrations/payment-webhook.controller";
 import { SecretBox } from "./common/secret-box";
 import { JobsController } from "./modules/jobs/jobs.controller";
 import { NotificationsController } from "./modules/notifications/notifications.controller";
@@ -81,6 +83,7 @@ import { ClientAuthService } from "./modules/client/client-auth.service";
     IntegrationsController,
     TenantIntegrationController,
     FilesController,
+    PaymentWebhookController,
     NotificationsController,
     JobsController,
     ClientApiController
@@ -124,6 +127,7 @@ import { ClientAuthService } from "./modules/client/client-auth.service";
     TenantIntegrationService,
     TenantIntegrationRuntimeService,
     FileStorageRuntimeService,
+    PaymentRuntimeService,
     SecretBox,
     {
       provide: APP_INTERCEPTOR,

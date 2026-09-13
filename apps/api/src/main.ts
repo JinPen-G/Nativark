@@ -5,7 +5,8 @@ import { AppModule } from "./app.module";
 import { requestIdentityMiddleware } from "./common/request-identity";
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // 微信支付 v3 验签必须使用原始请求体；Express 解析后的 JSON 可能改变空白与字段顺序。
+  const app = await NestFactory.create(AppModule, { rawBody: true });
 
   app.use(requestIdentityMiddleware);
   app.setGlobalPrefix("api");

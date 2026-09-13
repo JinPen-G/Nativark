@@ -15,6 +15,8 @@ import {
   type ClientOrderExtensionRequest,
   type ClientOrderView,
   type ClientPaymentSimulationRequest,
+  type ClientPaymentIntentRequest,
+  type ClientPaymentIntentResponse,
   type ClientPaymentCapabilitiesResponse,
   type ClientProfileUpdateRequest,
   type ClientProfileView,
@@ -34,6 +36,7 @@ import { RentalIdempotentActionService } from "../rental-core/rental-idempotent-
 import { RentalFundingService } from "../rental-core/rental-funding.service";
 import { RentalServiceCapacityService } from "../rental-core/rental-service-capacity.service";
 import { TenantIntegrationService } from "../integrations/tenant-integration.service";
+import { PaymentRuntimeService } from "../integrations/payment.runtime.service";
 import { ClientAuthService, type ClientRequestContext } from "./client-auth.service";
 
 interface ClientOrderRequestContext {
@@ -60,7 +63,8 @@ export class ClientApiService {
     private readonly idempotent: RentalIdempotentActionService,
     private readonly fundingService: RentalFundingService,
     private readonly serviceCapacities: RentalServiceCapacityService,
-    private readonly tenantIntegrations: TenantIntegrationService
+    private readonly tenantIntegrations: TenantIntegrationService,
+    private readonly payments: PaymentRuntimeService
   ) {}
 
   private context(tenantId: string): BusinessContext {
@@ -264,7 +268,9 @@ export class ClientApiService {
         mode: "provider",
         realPaymentEnabled: true,
         methods: [...new Set(providerMethods)],
-        instruments: ["rental", "deposit", "preauthorization"]
+        // 首批支付宝/微信适配器只做普通租金收款；押金/预授权必须继续走独立资金能力，
+        // 不能因为“已配置支付平台”就在客户端宣称三类资金都能真实处理。
+        instruments: ["rental"]
       };
     }
     return {
@@ -276,8 +282,9 @@ export class ClientApiService {
     };
   }
 
-  async paymentCapabilities(): Promise<ClientPaymentCapabilitiesResponse> {
-    return this.buildPaymentCapabilities();
+  async paymentCapabilities(context: ClientRequestContext): Promise<ClientPaymentCapabilitiesResponse> {
+    const catalog = await this.tenantIntegrations.catalog(context.tenantId);
+    return this.buildPaymentCapabilities(catalog.configs);
   }
 
   async profile(context: ClientRequestContext): Promise<ClientProfileView> {
@@ -769,5 +776,16 @@ export class ClientApiService {
     const key = idempotencyKeyOf(requestContext);
     if (!key) throw new BadRequestException("资金操作必须提供 Idempotency-Key");
     return this.fundingService.recordEvent(context.tenantId, context.workspaceId, orderId, { ...input, idempotencyKey: key }, `client:${context.customerId}`);
+  }
+
+  async createPaymentIntent(context: ClientRequestContext, orderId: string, input: ClientPaymentIntentRequest) {
+    this.requireActiveMembership(context);
+    await this.assertClientOrder(context, orderId);
+    return this.payments.createPaymentIntent(context.tenantId, context.workspaceId, orderId, input);
+  }
+
+  async getPaymentIntent(context: ClientRequestContext, orderId: string, intentId: string): Promise<ClientPaymentIntentResponse> {
+    await this.assertClientOrder(context, orderId);
+    return this.payments.getPaymentIntent(context.tenantId, context.workspaceId, orderId, intentId);
   }
 }

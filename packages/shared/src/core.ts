@@ -3231,8 +3231,8 @@ export interface RentalFundingEvent {
   amount: number;
   /** 该 instrument 在本事件后的余额（押金实收余额 / 预授权冻结余额）。由服务端结算。 */
   balanceAfter: number;
-  /** 只使用明确标记的 mock（需求 4.6.3），不接真实支付 Provider。 */
-  provider: "mock";
+  /** mock 或已验签的真实支付提供方；普通收款不能冒充预授权。 */
+  provider: "mock" | "alipay" | "wechat_pay";
   /** 幂等键：同一 (order, instrument, action, idempotencyKey) 重复提交只落一条。 */
   idempotencyKey: string;
   reason: string;

@@ -24,6 +24,7 @@ import {
   ClientCreateQuoteRequestDto,
   ClientMembershipLoginRequestDto,
   ClientOrderExtensionRequestDto,
+  ClientPaymentIntentRequestDto,
   ClientPaymentSimulationRequestDto,
   ClientPersonalMembershipRegistrationRequestDto,
   ClientProfileUpdateRequestDto,
@@ -112,8 +113,8 @@ export class ClientApiController {
   }
 
   @Get("payment/capabilities")
-  paymentCapabilities() {
-    return this.api.paymentCapabilities();
+  paymentCapabilities(@Req() req: ClientRequest) {
+    return this.api.paymentCapabilities(currentClient(req));
   }
 
   @Get("profile")
@@ -289,5 +290,16 @@ export class ClientApiController {
   @HttpCode(201)
   simulateFunding(@Req() req: ClientRequest, @Param("id") id: string, @Body() body: ClientPaymentSimulationRequestDto) {
     return this.api.simulateFunding(currentClient(req), id, body, req);
+  }
+
+  @Post("orders/:id/payment-intents")
+  @HttpCode(201)
+  createPaymentIntent(@Req() req: ClientRequest, @Param("id") id: string, @Body() body: ClientPaymentIntentRequestDto) {
+    return this.api.createPaymentIntent(currentClient(req), id, body);
+  }
+
+  @Get("orders/:id/payment-intents/:intentId")
+  paymentIntent(@Req() req: ClientRequest, @Param("id") id: string, @Param("intentId") intentId: string) {
+    return this.api.getPaymentIntent(currentClient(req), id, intentId);
   }
 }

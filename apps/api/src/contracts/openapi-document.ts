@@ -1154,6 +1154,31 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     },
     ["instrument", "action", "reason"]
   ),
+  ClientPaymentIntentRequest: objectOf(
+    {
+      instrument: { type: "string", enum: ["rental", "deposit", "preauthorization"] },
+      method: { type: "string", enum: ["alipay", "wechat_pay"] },
+      idempotencyKey: stringSchema
+    },
+    ["instrument", "method", "idempotencyKey"]
+  ),
+  ClientPaymentIntentResponse: objectOf(
+    {
+      apiVersion: stringSchema,
+      intentId: stringSchema,
+      provider: stringSchema,
+      method: stringSchema,
+      instrument: stringSchema,
+      amount: numberSchema,
+      currency: stringSchema,
+      status: stringSchema,
+      checkoutUrl: stringSchema,
+      expiresAt: { type: "string", format: "date-time" },
+      paidAt: { type: "string", format: "date-time" },
+      message: stringSchema
+    },
+    ["apiVersion", "intentId", "provider", "method", "instrument", "amount", "currency", "status", "expiresAt"]
+  ),
 };
 
 function backlogOperation(
@@ -2218,6 +2243,8 @@ function rentalBusinessOperations(): ContractOperation[] { return [
   backlogOperation("put", "/api/rental/v1/notification-templates/{id}", "RentalBusiness", "updateRentalNotificationTemplate", "Update tenant notification template", ["system:params:manage"]),
   backlogOperation("get", "/api/rental/v1/notification-logs", "RentalBusiness", "listRentalNotificationLogs", "List notification send logs", ["system:params:manage"]),
   backlogOperation("post", "/api/rental/v1/notifications/send", "RentalBusiness", "sendRentalNotification", "Render and send tenant notification", ["system:params:manage"]),
+  backlogOperation("post", "/api/payments/webhooks/alipay", "Integrations", "receiveAlipayPaymentWebhook", "Receive and verify an Alipay payment notification", [], false, "GenericObject", "GenericObject"),
+  backlogOperation("post", "/api/payments/webhooks/wechat_pay", "Integrations", "receiveWechatPaymentWebhook", "Receive and verify a WeChat Pay API v3 notification", [], false, "GenericObject", "GenericObject"),
   backlogOperation("post", "/api/rental/v1/quotes", "RentalBusiness", "createRentalQuote", "Create server-side rental quote", ["rental-os:order:operate"]),
   backlogOperation("get", "/api/rental/v1/quotes/{id}", "RentalBusiness", "getRentalQuote", "Get rental quote snapshot", ["rental-os:order:view"]),
 
@@ -2267,7 +2294,9 @@ function rentalBusinessOperations(): ContractOperation[] { return [
   clientOperation("post", "/api/client/v1/orders/{id}/extensions", "applyClientOrderExtension", "Apply a customer order extension", { requestSchema: "ClientOrderExtensionRequest", responseSchema: "ClientOrderMutation" }),
   clientOperation("post", "/api/client/v1/orders/{id}/extensions/{extensionId}/pay", "payClientOrderExtension", "Complete a customer order extension after payment", { responseSchema: "ClientOrderMutation" }),
   clientOperation("get", "/api/client/v1/orders/{id}/funding", "getClientOrderFunding", "Get customer order funding status", { responseSchema: "ClientFunding" }),
-  clientOperation("post", "/api/client/v1/orders/{id}/funding/simulate", "simulateClientOrderFunding", "Record a development-only simulated customer funding event", { requestSchema: "ClientPaymentSimulationRequest", responseSchema: objectSchema })
+  clientOperation("post", "/api/client/v1/orders/{id}/funding/simulate", "simulateClientOrderFunding", "Record a development-only simulated customer funding event", { requestSchema: "ClientPaymentSimulationRequest", responseSchema: objectSchema }),
+  clientOperation("post", "/api/client/v1/orders/{id}/payment-intents", "createClientPaymentIntent", "Create a real Alipay or WeChat Pay rental payment intent", { requestSchema: "ClientPaymentIntentRequest", responseSchema: "ClientPaymentIntentResponse" }),
+  clientOperation("get", "/api/client/v1/orders/{id}/payment-intents/{intentId}", "getClientPaymentIntent", "Get the status of a client payment intent", { responseSchema: "ClientPaymentIntentResponse" })
 ]; }
 
 export const OPENAPI_DOCUMENT = {

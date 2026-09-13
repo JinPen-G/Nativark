@@ -54,7 +54,7 @@ export class RentalFundingService {
       action: row.action as RentalFundingAction,
       amount: Number(row.amount),
       balanceAfter: Number(row.balanceAfter),
-      provider: "mock",
+      provider: row.provider as RentalFundingEvent["provider"],
       idempotencyKey: row.idempotencyKey,
       reason: row.reason,
       operator: row.operator ?? undefined,
@@ -203,6 +203,7 @@ export class RentalFundingService {
       idempotencyKey: string;
       reason: string;
       failureCode?: string;
+      provider?: RentalFundingEvent["provider"];
     },
     operator?: string,
     tx?: Prisma.TransactionClient
@@ -268,6 +269,9 @@ export class RentalFundingService {
                 ? "该订单没有应收押金"
                 : "该订单没有应冻结的预授权额度"
           );
+        if (input.instrument === "rental" && input.amount !== undefined && Math.abs(Number(input.amount) - effectiveAmount) > 0.005) {
+          throw new ConflictException("支付回调金额与当前订单待收金额不一致，请重新发起支付");
+        }
         }
       } else if (input.action === "release" && input.amount === undefined) {
         effectiveAmount = ledgers.preauthorization.balance;
@@ -295,7 +299,7 @@ export class RentalFundingService {
           action: input.action,
           amount: new Prisma.Decimal(effectiveAmount),
           balanceAfter: new Prisma.Decimal(balanceAfter),
-          provider: "mock",
+          provider: input.provider ?? "mock",
           idempotencyKey: key,
           reason,
           operator: operator ?? null,

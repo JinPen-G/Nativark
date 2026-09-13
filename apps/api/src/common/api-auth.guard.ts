@@ -57,7 +57,9 @@ export const PUBLIC_ROUTES = new Set([
   "/auth/me",
   "/auth/change-password",
   "/auth/switch-workspace",
-  "/auth/session-context"
+  "/auth/session-context",
+  "/payments/webhooks/alipay",
+  "/payments/webhooks/wechat_pay"
 ]);
 
 /**
