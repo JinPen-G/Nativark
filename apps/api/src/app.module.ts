@@ -12,6 +12,10 @@ import { HealthController } from "./modules/health/health.controller";
 import { IntegrationsController } from "./modules/integrations/integrations.controller";
 import { IntegrationsRepository } from "./modules/integrations/integrations.repository";
 import { IntegrationsService } from "./modules/integrations/integrations.service";
+import { TenantIntegrationController } from "./modules/integrations/tenant-integration.controller";
+import { TenantIntegrationService } from "./modules/integrations/tenant-integration.service";
+import { TenantIntegrationRuntimeService } from "./modules/integrations/tenant-integration.runtime.service";
+import { SecretBox } from "./common/secret-box";
 import { JobsController } from "./modules/jobs/jobs.controller";
 import { NotificationsController } from "./modules/notifications/notifications.controller";
 import { OpenApiController } from "./modules/openapi/openapi.controller";
@@ -74,6 +78,7 @@ import { ClientAuthService } from "./modules/client/client-auth.service";
     OfficialCalendarSourceController,
     WorkspaceCapabilityController,
     IntegrationsController,
+    TenantIntegrationController,
     FilesController,
     NotificationsController,
     JobsController,
@@ -115,6 +120,9 @@ import { ClientAuthService } from "./modules/client/client-auth.service";
     ClientAuthService,
     IntegrationsService,
     IntegrationsRepository,
+    TenantIntegrationService,
+    TenantIntegrationRuntimeService,
+    SecretBox,
     {
       provide: APP_INTERCEPTOR,
       useClass: RequestIdInterceptor

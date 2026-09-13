@@ -25,6 +25,7 @@ import {
 import { createHmac, randomBytes, randomInt } from "node:crypto";
 import { PrismaService } from "../database/prisma.service";
 import { hashOpaqueToken, hashPassword, verifyPassword } from "../../common/password";
+import { TenantIntegrationRuntimeService } from "../integrations/tenant-integration.runtime.service";
 
 const ACCESS_TTL_SECONDS = 60 * 60;
 const REFRESH_TTL_SECONDS = 60 * 60 * 24 * 30;
@@ -83,7 +84,10 @@ function asIso(value: Date | null | undefined) {
 
 @Injectable()
 export class ClientAuthService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly integrations: TenantIntegrationRuntimeService
+  ) {}
 
   private secret() {
     const secret = process.env.AUTH_TOKEN_SECRET?.trim();
@@ -218,9 +222,6 @@ export class ClientAuthService {
     if (!identifier) throw new BadRequestException("手机号或邮箱不能为空");
     if (input.method === "sms" && !/^\+?[0-9]{6,20}$/u.test(identifier)) throw new BadRequestException("手机号格式无效");
     if (input.method === "email" && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/u.test(identifier)) throw new BadRequestException("邮箱格式无效");
-    if (process.env.NODE_ENV === "production") {
-      throw new ServiceUnavailableException("验证码服务尚未配置，请先接入短信或邮件 provider");
-    }
     const identifierHash = hashOpaqueToken(`${tenant.id}:${workspace.id}:${input.method}:${identifier}`);
     const now = new Date();
     const existing = input.idempotencyKey
@@ -235,16 +236,42 @@ export class ClientAuthService {
         maskedDestination: existing.maskedDestination,
         expiresAt: existing.expiresAt.toISOString(),
         retryAfterSeconds: Math.max(0, Math.ceil((existing.expiresAt.getTime() - now.getTime()) / 1000)),
-        deliveryMode: "development"
+        deliveryMode: existing.deliveryMode as ClientRegistrationChallengeResponse["deliveryMode"],
+        ...(existing.deliveryMode === "development" ? { developmentCode: undefined } : {})
       };
     }
     const id = existing?.id ?? randomBytes(16).toString("hex");
     const code = String(randomInt(100000, 1000000));
     const expiresAt = new Date(now.getTime() + CHALLENGE_TTL_SECONDS * 1000);
     const row = existing
-      ? await this.prisma.clientRegistrationChallenge.update({ where: { id }, data: { method: input.method, identifierHash, maskedDestination: input.method === "sms" ? maskPhone(identifier) : maskEmail(identifier), codeHash: hashOpaqueToken(`${id}:${code}`), status: "pending_verification", attempts: 0, expiresAt, verifiedAt: null, verificationTokenHash: null, consumedAt: null, registrationId: null, registeredCustomerId: null, registrationResult: null } })
-      : await this.prisma.clientRegistrationChallenge.create({ data: { id, tenantId: tenant.id, workspaceId: workspace.id, method: input.method, identifierHash, maskedDestination: input.method === "sms" ? maskPhone(identifier) : maskEmail(identifier), codeHash: hashOpaqueToken(`${id}:${code}`), requestKey: input.idempotencyKey.trim(), status: "pending_verification", expiresAt } });
-    return { apiVersion: CLIENT_API_VERSION, challengeId: row.id, status: "pending_verification", method: input.method, maskedDestination: row.maskedDestination, expiresAt: row.expiresAt.toISOString(), retryAfterSeconds: 60, developmentCode: code, deliveryMode: "development" };
+      ? await this.prisma.clientRegistrationChallenge.update({ where: { id }, data: { method: input.method, identifierHash, maskedDestination: input.method === "sms" ? maskPhone(identifier) : maskEmail(identifier), codeHash: hashOpaqueToken(`${id}:${code}`), status: "pending_verification", deliveryMode: "development", attempts: 0, expiresAt, verifiedAt: null, verificationTokenHash: null, consumedAt: null, registrationId: null, registeredCustomerId: null, registrationResult: null } })
+      : await this.prisma.clientRegistrationChallenge.create({ data: { id, tenantId: tenant.id, workspaceId: workspace.id, method: input.method, identifierHash, maskedDestination: input.method === "sms" ? maskPhone(identifier) : maskEmail(identifier), codeHash: hashOpaqueToken(`${id}:${code}`), requestKey: input.idempotencyKey.trim(), status: "pending_verification", deliveryMode: "development", expiresAt } });
+
+    let deliveryMode: ClientRegistrationChallengeResponse["deliveryMode"] = "development";
+    try {
+      if (input.method === "sms") {
+        const delivery = await this.integrations.sendVerificationSms(tenant.id, identifier, code, `client-registration:${row.id}`);
+        if (delivery.configured) deliveryMode = "provider";
+        else if (process.env.NODE_ENV === "production") throw new ServiceUnavailableException("短信验证码服务尚未配置，请先启用一个短信平台");
+      } else if (process.env.NODE_ENV === "production") {
+        throw new ServiceUnavailableException("邮箱验证码服务尚未配置，请先接入邮件 provider");
+      }
+      await this.prisma.clientRegistrationChallenge.update({ where: { id: row.id }, data: { deliveryMode } });
+    } catch (error) {
+      await this.prisma.clientRegistrationChallenge.updateMany({ where: { id: row.id, status: "pending_verification" }, data: { status: "delivery_failed" } });
+      throw error;
+    }
+    return {
+      apiVersion: CLIENT_API_VERSION,
+      challengeId: row.id,
+      status: "pending_verification",
+      method: input.method,
+      maskedDestination: row.maskedDestination,
+      expiresAt: row.expiresAt.toISOString(),
+      retryAfterSeconds: 60,
+      ...(deliveryMode === "development" ? { developmentCode: code } : {}),
+      deliveryMode
+    };
   }
 
   async verifyChallenge(input: VerifyClientRegistrationChallengeRequest): Promise<VerifyClientRegistrationChallengeResponse> {

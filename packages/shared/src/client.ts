@@ -23,7 +23,8 @@ export const CLIENT_REGISTRATION_CHALLENGE_STATUSES = [
   "pending_verification",
   "verified",
   "expired",
-  "consumed"
+  "consumed",
+  "delivery_failed"
 ] as const;
 export type ClientRegistrationChallengeStatus =
   (typeof CLIENT_REGISTRATION_CHALLENGE_STATUSES)[number];
@@ -54,7 +55,7 @@ export interface ClientRegistrationChallengeResponse {
   retryAfterSeconds?: number;
   /** 仅本地开发返回，生产环境永不返回验证码。 */
   developmentCode?: string;
-  deliveryMode?: "development" | "provider_pending";
+  deliveryMode?: "development" | "provider" | "provider_pending";
 }
 
 /** 验证码交换为一次性短期证明，不把原始验证码带进注册请求或日志。 */
@@ -302,9 +303,9 @@ export interface ClientCorporateIdentityListResponse {
 
 export interface ClientPaymentCapabilitiesResponse {
   apiVersion: typeof CLIENT_API_VERSION;
-  mode: "simulation_only" | "provider_pending";
-  realPaymentEnabled: false;
-  methods: Array<"simulation">;
+  mode: "simulation_only" | "provider_pending" | "provider";
+  realPaymentEnabled: boolean;
+  methods: Array<"simulation" | "alipay" | "wechat_pay">;
   instruments: Array<"rental" | "deposit" | "preauthorization">;
 }
 
@@ -317,7 +318,7 @@ export interface ClientConfigResponse {
   registration: {
     mode: "manual" | "automatic";
     verificationMethods: ClientVerificationMethod[];
-    providerMode: "development" | "provider_pending";
+    providerMode: "development" | "provider_pending" | "provider";
   };
   features: {
     profile: boolean;

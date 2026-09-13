@@ -12,3 +12,4 @@ export * from "./core";
 export * from "./platform";
 export * from "./infrastructure";
 export * from "./client";
+export * from "./tenant-integrations";

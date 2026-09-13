@@ -121,6 +121,7 @@ model Tenant {
   notificationTemplates             NotificationTemplate[]
   notificationLogs                  NotificationSendLog[]
   adapterLogs                       ExternalAdapterLog[]
+  integrationConfigs                TenantIntegrationConfig[]
   asyncJobs                         AsyncJob[]
   printJobs                         DocumentPrintJob[]
   integrationTboxDevices            TBoxDevice[]
@@ -657,6 +658,7 @@ model ClientRegistrationChallenge {
   maskedDestination     String            @db.VarChar(64)
   codeHash              String            @db.Char(64)
   status                String            @default("pending_verification") @db.VarChar(32)
+  deliveryMode          String            @default("development") @db.VarChar(24)
   requestKey            String?
   attempts              Int               @default(0)
   expiresAt             DateTime
@@ -1430,6 +1432,34 @@ model ExternalAdapterLog {
   @@index([tenantId, provider, capability, createdAt])
   @@index([tenantId, businessType, businessId])
   @@index([tenantId, status, createdAt])
+}
+
+/// 租户自己的第三方服务配置。
+///
+/// settings 只保存非秘密配置；credentialsEncrypted 保存加密后的 JSON，
+/// API 永远只返回 secret 字段是否已配置。配置按租户共享给该租户的经营空间，
+/// 业务运行时再按 capability + 默认提供方选择，避免每个品类重复接入一套账号。
+model TenantIntegrationConfig {
+  id                    String   @id @default(uuid())
+  tenantId              String
+  tenant                Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  capability            String   @db.VarChar(20)
+  provider              String   @db.VarChar(40)
+  enabled               Boolean  @default(false)
+  isDefault             Boolean  @default(false)
+  settings              Json
+  credentialsEncrypted  String?  @db.Text
+  secretFields          Json
+  lastTestStatus        String   @default("not_tested") @db.VarChar(20)
+  lastTestAt            DateTime?
+  lastTestError         String?  @db.VarChar(500)
+  updatedBy             String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@unique([tenantId, capability, provider], map: "tenant_integration_configs_scope_provider_key")
+  @@index([tenantId, capability, enabled], map: "tenant_integration_configs_scope_capability_idx")
+  @@map("tenant_integration_configs")
 }
 
 model AsyncJob {

@@ -34,6 +34,7 @@ const RentalSettingsPage = lazy(() => import("@/features/settings/RentalGovernan
 const CapabilityGovernancePage = lazy(() => import("@/features/rental-core/CapabilityGovernancePage").then((module) => ({ default: module.CapabilityGovernancePage })));
 const TenantOperationsAccountPage = lazy(() => import("@/features/tenant-access/TenantAccessPages").then((module) => ({ default: module.TenantOperationsAccountPage })));
 const TenantRolePermissionPage = lazy(() => import("@/features/tenant-access/TenantAccessPages").then((module) => ({ default: module.TenantRolePermissionPage })));
+const TenantIntegrationsPage = lazy(() => import("@/features/settings/TenantIntegrationsPage").then((module) => ({ default: module.TenantIntegrationsPage })));
 
 function PageLoader() {
   return <div className="route-loader"><Spin size="large" /></div>;
@@ -99,6 +100,7 @@ function ProtectedRoutes() {
             <Route path={APP_ROUTES.rentalCapabilities.path} element={guard(APP_ROUTES.rentalCapabilities, <CapabilityGovernancePage />)} />
             <Route path={APP_ROUTES.tenantAccounts.path} element={guard(APP_ROUTES.tenantAccounts, <TenantOperationsAccountPage />)} />
             <Route path={APP_ROUTES.tenantRoles.path} element={guard(APP_ROUTES.tenantRoles, <TenantRolePermissionPage />)} />
+            <Route path={APP_ROUTES.tenantIntegrations.path} element={guard(APP_ROUTES.tenantIntegrations, <TenantIntegrationsPage />)} />
             <Route path={APP_ROUTES.membershipReviews.path} element={guard(APP_ROUTES.membershipReviews, <MembershipReviewPage />)} />
             <Route path={APP_ROUTES.personalMembers.path} element={guard(APP_ROUTES.personalMembers, <PersonalMembershipPage />)} />
             <Route path={APP_ROUTES.corporateMembers.path} element={guard(APP_ROUTES.corporateMembers, <CorporateMembershipPage />)} />

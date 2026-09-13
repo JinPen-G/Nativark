@@ -239,6 +239,26 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     },
     ["id", "tenantId", "account", "displayName", "roleNames", "scope"]
   ),
+  TenantIntegrationCatalogResponse: objectOf(
+    { providers: arrayOf(objectSchema), configs: arrayOf(objectSchema) },
+    ["providers", "configs"]
+  ),
+  SaveTenantIntegrationRequest: objectOf(
+    { enabled: booleanSchema, isDefault: booleanSchema, settings: objectSchema, credentials: objectSchema },
+    ["enabled", "isDefault", "settings"]
+  ),
+  TenantIntegrationTestResult: objectOf(
+    {
+      capability: stringSchema,
+      provider: stringSchema,
+      ok: booleanSchema,
+      mode: stringSchema,
+      message: stringSchema,
+      checkedAt: { type: "string", format: "date-time" },
+      missingFields: arrayOf(stringSchema)
+    },
+    ["capability", "provider", "ok", "mode", "message", "checkedAt", "missingFields"]
+  ),
   SessionContextResponse: objectOf(
     {
       tenant: ref("TenantContext"),
@@ -1142,6 +1162,37 @@ function clientOperation(
   };
 }
 
+const TENANT_INTEGRATION_OPERATIONS: ContractOperation[] = [
+  {
+    method: "get",
+    path: "/api/platform/integrations",
+    tag: "Platform",
+    operationId: "listTenantIntegrationConfigs",
+    summary: "List tenant SMS, payment and file provider configurations",
+    permissions: ["system:integration:manage"],
+    responseSchema: "TenantIntegrationCatalogResponse"
+  },
+  {
+    method: "put",
+    path: "/api/platform/integrations/{capability}/{provider}",
+    tag: "Platform",
+    operationId: "saveTenantIntegrationConfig",
+    summary: "Save one tenant provider configuration",
+    permissions: ["system:integration:manage"],
+    requestSchema: "SaveTenantIntegrationRequest",
+    responseSchema: "GenericObject"
+  },
+  {
+    method: "post",
+    path: "/api/platform/integrations/{capability}/{provider}/test",
+    tag: "Platform",
+    operationId: "testTenantIntegrationConfig",
+    summary: "Validate one tenant provider configuration",
+    permissions: ["system:integration:manage"],
+    responseSchema: "TenantIntegrationTestResult"
+  }
+];
+
 const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
   backlogOperation("get", "/api/files", "Files", "listFileAssets", "List file assets", ["system:files:manage"]),
   backlogOperation("post", "/api/files", "Files", "createFileAsset", "Create file asset", ["system:files:manage"]),
@@ -2037,6 +2088,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     permissions: ["rental-core:capability:view", "rental-core:capability:manage"], responseSchema: "GenericObject"
   },
   ...rentalBusinessOperations(),
+  ...TENANT_INTEGRATION_OPERATIONS,
   ...INTEGRATION_BACKLOG_OPERATIONS
 ];
 

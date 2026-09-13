@@ -435,6 +435,9 @@ export function requiredPermissions(method: string, path: string) {
   if (path.startsWith("/rental/v1/inspection-templates") || path.match(/^\/rental\/v1\/orders\/[^/]+\/inspections$/)) {
     return method === "GET" ? ["rental-os:order:view"] : ["rental-os:order:operate", "rental-os:order:pickup", "rental-os:order:return"];
   }
+  if (path.startsWith("/platform/integrations")) {
+    return ["system:integration:manage"];
+  }
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/inspections\/[^/]+\/usage-correction$/)) return ["rental-os:order:operate"];
   // 检查异常的建议损失额同样是费用裁定，与上面两条同权限。
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/inspections\/[^/]+\/exceptions\/[^/]+\/review$/)) return ["rental-os:order:fee-review"];

@@ -33,6 +33,7 @@ import { RentalOrderConfirmationService } from "../rental-core/rental-order-conf
 import { RentalIdempotentActionService } from "../rental-core/rental-idempotent-action.service";
 import { RentalFundingService } from "../rental-core/rental-funding.service";
 import { RentalServiceCapacityService } from "../rental-core/rental-service-capacity.service";
+import { TenantIntegrationService } from "../integrations/tenant-integration.service";
 import { ClientAuthService, type ClientRequestContext } from "./client-auth.service";
 
 interface ClientOrderRequestContext {
@@ -58,7 +59,8 @@ export class ClientApiService {
     private readonly orders: RentalOrderConfirmationService,
     private readonly idempotent: RentalIdempotentActionService,
     private readonly fundingService: RentalFundingService,
-    private readonly serviceCapacities: RentalServiceCapacityService
+    private readonly serviceCapacities: RentalServiceCapacityService,
+    private readonly tenantIntegrations: TenantIntegrationService
   ) {}
 
   private context(tenantId: string): BusinessContext {
@@ -217,7 +219,9 @@ export class ClientApiService {
       where: { tenantId: context.tenantId, workspaceId: context.workspaceId },
       select: { registrationMode: true }
     });
-    const payment = this.buildPaymentCapabilities();
+    const integrationCatalog = await this.tenantIntegrations.catalog(context.tenantId);
+    const smsConfigured = integrationCatalog.configs.some((item) => item.capability === "sms" && item.enabled);
+    const payment = this.buildPaymentCapabilities(integrationCatalog.configs);
     return {
       apiVersion: CLIENT_API_VERSION,
       tenantCode: context.tenantCode,
@@ -233,7 +237,7 @@ export class ClientApiService {
       registration: {
         mode: registration?.registrationMode === "automatic" ? "automatic" : "manual",
         verificationMethods: ["sms", "email"],
-        providerMode: process.env.NODE_ENV === "production" ? "provider_pending" : "development"
+        providerMode: smsConfigured ? "provider" : process.env.NODE_ENV === "production" ? "provider_pending" : "development"
       },
       features: {
         profile: true,
@@ -248,8 +252,21 @@ export class ClientApiService {
     };
   }
 
-  private buildPaymentCapabilities(): ClientPaymentCapabilitiesResponse {
+  private buildPaymentCapabilities(configs: Array<{ capability: string; provider: string; enabled: boolean }> = []): ClientPaymentCapabilitiesResponse {
     const development = process.env.NODE_ENV !== "production";
+    const providerMethods = configs
+      .filter((item) => item.capability === "payment" && item.enabled)
+      .map((item) => item.provider)
+      .filter((item): item is "alipay" | "wechat_pay" => item === "alipay" || item === "wechat_pay");
+    if (providerMethods.length > 0) {
+      return {
+        apiVersion: CLIENT_API_VERSION,
+        mode: "provider",
+        realPaymentEnabled: true,
+        methods: [...new Set(providerMethods)],
+        instruments: ["rental", "deposit", "preauthorization"]
+      };
+    }
     return {
       apiVersion: CLIENT_API_VERSION,
       mode: development ? "simulation_only" : "provider_pending",
