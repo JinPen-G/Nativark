@@ -18,6 +18,10 @@ import {
   type ClientPaymentIntentRequest,
   type ClientPaymentIntentResponse,
   type ClientPaymentCapabilitiesResponse,
+  type ClientQualificationUploadSessionRequest,
+  type ClientQualificationUploadCompleteRequest,
+  type ClientQualificationUploadSessionResponse,
+  type ClientQualificationFileUrlResponse,
   type ClientProfileUpdateRequest,
   type ClientProfileView,
   type ClientWorkspaceSummary,
@@ -37,6 +41,7 @@ import { RentalFundingService } from "../rental-core/rental-funding.service";
 import { RentalServiceCapacityService } from "../rental-core/rental-service-capacity.service";
 import { TenantIntegrationService } from "../integrations/tenant-integration.service";
 import { PaymentRuntimeService } from "../integrations/payment.runtime.service";
+import { FileStorageRuntimeService } from "../integrations/file-storage.runtime.service";
 import { ClientAuthService, type ClientRequestContext } from "./client-auth.service";
 
 interface ClientOrderRequestContext {
@@ -64,7 +69,8 @@ export class ClientApiService {
     private readonly fundingService: RentalFundingService,
     private readonly serviceCapacities: RentalServiceCapacityService,
     private readonly tenantIntegrations: TenantIntegrationService,
-    private readonly payments: PaymentRuntimeService
+    private readonly payments: PaymentRuntimeService,
+    private readonly files: FileStorageRuntimeService
   ) {}
 
   private context(tenantId: string): BusinessContext {
@@ -565,6 +571,33 @@ export class ClientApiService {
   async submitQualification(context: ClientRequestContext, input: Parameters<MembershipService["submitQualification"]>[3]) {
     this.requireActiveMembership(context);
     return this.memberships.submitQualification(context.tenantId, context.workspaceId, context.customerId, input, "app", `client:${context.customerId}`);
+  }
+
+  async createQualificationUploadSession(context: ClientRequestContext, input: ClientQualificationUploadSessionRequest): Promise<ClientQualificationUploadSessionResponse> {
+    this.requireActiveMembership(context);
+    const types = await this.memberships.listQualificationTypes(context.tenantId, context.workspaceId);
+    if (!types.some((type) => type.code === input.qualificationType && type.status === "enabled")) throw new BadRequestException("当前经营空间未启用该证件类型");
+    return this.files.createUploadSession(context.tenantId, {
+      businessModule: "membership",
+      businessType: "customer",
+      businessId: context.customerId,
+      fileName: input.fileName,
+      mimeType: input.mimeType,
+      sizeBytes: input.sizeBytes,
+      uploadScene: "client-qualification",
+      idempotencyKey: input.idempotencyKey,
+      metadata: { qualificationType: input.qualificationType }
+    });
+  }
+
+  async completeQualificationUpload(context: ClientRequestContext, sessionId: string, input: ClientQualificationUploadCompleteRequest) {
+    this.requireActiveMembership(context);
+    return this.files.completeUpload(context.tenantId, sessionId, input, { businessType: "customer", businessId: context.customerId, uploadScene: "client-qualification" });
+  }
+
+  async qualificationFileUrl(context: ClientRequestContext, fileAssetId: string): Promise<ClientQualificationFileUrlResponse> {
+    this.requireActiveMembership(context);
+    return this.files.downloadUrl(context.tenantId, fileAssetId, { businessType: "customer", businessId: context.customerId, uploadScene: "client-qualification" });
   }
 
   async availability(context: ClientRequestContext, input: { locationId: string; startAt: string; endAt: string; lines: Array<{ itemGroupId: string; quantity: number }> }) {

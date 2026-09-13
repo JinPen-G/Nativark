@@ -12,6 +12,7 @@ import type {
   RentalFulfillmentMode,
   RentalPricingUnit
 } from "./core";
+import type { CompleteFileUploadRequest, FileDownloadUrlSummary, FileUploadSessionSummary } from "./infrastructure";
 
 export const CLIENT_API_VERSION = "v1" as const;
 export const CLIENT_REGISTRATION_CHANNEL = "app" as const;
@@ -231,6 +232,19 @@ export interface ClientContactView {
   isPrimary: boolean;
   status: "active" | "inactive" | string;
 }
+
+/** 客户端资质影像上传只接受业务字段，租户、客户和上传场景由服务端绑定。 */
+export interface ClientQualificationUploadSessionRequest {
+  qualificationType: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  idempotencyKey: string;
+}
+
+export type ClientQualificationUploadSessionResponse = FileUploadSessionSummary;
+export type ClientQualificationUploadCompleteRequest = CompleteFileUploadRequest;
+export type ClientQualificationFileUrlResponse = FileDownloadUrlSummary;
 
 export interface ClientContactsResponse {
   apiVersion: typeof CLIENT_API_VERSION;

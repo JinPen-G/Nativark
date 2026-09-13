@@ -22,6 +22,8 @@ import {
   ClientContactRequestDto,
   ClientCreateOrderRequestDto,
   ClientCreateQuoteRequestDto,
+  ClientQualificationUploadCompleteRequestDto,
+  ClientQualificationUploadSessionRequestDto,
   ClientMembershipLoginRequestDto,
   ClientOrderExtensionRequestDto,
   ClientPaymentIntentRequestDto,
@@ -191,6 +193,22 @@ export class ClientApiController {
   @HttpCode(201)
   submitQualification(@Req() req: ClientRequest, @Body() body: ClientSubmitQualificationRequestDto) {
     return this.api.submitQualification(currentClient(req), body);
+  }
+
+  @Post("membership/qualifications/files")
+  @HttpCode(201)
+  qualificationFileUpload(@Req() req: ClientRequest, @Body() body: ClientQualificationUploadSessionRequestDto) {
+    return this.api.createQualificationUploadSession(currentClient(req), body);
+  }
+
+  @Post("membership/qualifications/files/:sessionId/complete")
+  completeQualificationFileUpload(@Req() req: ClientRequest, @Param("sessionId") sessionId: string, @Body() body: ClientQualificationUploadCompleteRequestDto) {
+    return this.api.completeQualificationUpload(currentClient(req), sessionId, body);
+  }
+
+  @Get("membership/qualifications/files/:fileAssetId/download-url")
+  qualificationFileUrl(@Req() req: ClientRequest, @Param("fileAssetId") fileAssetId: string) {
+    return this.api.qualificationFileUrl(currentClient(req), fileAssetId);
   }
 
   @Get("catalog")

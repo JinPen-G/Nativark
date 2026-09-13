@@ -215,8 +215,50 @@ void (async () => {
       () => memberships.submitQualification(tenantId, workspaceId, personalId, { qualificationType: "driver_license", evidenceRef: "C:\\private\\license.jpg" }, "admin", "资格测试管理员"),
       /附件引用必须使用文件服务返回的不可变引用/u
     );
+    const clientEvidenceId = `file_qual_${suffix}`;
+    await prisma.fileAsset.create({
+      data: {
+        id: clientEvidenceId,
+        tenantId,
+        businessModule: "membership",
+        businessType: "customer",
+        businessId: personalId,
+        fileName: "driver-license.jpg",
+        fileExt: "jpg",
+        mimeType: "image/jpeg",
+        sizeBytes: 2048,
+        storageProvider: "local_mock",
+        storageKey: `tenant-files/${tenantId}/${clientEvidenceId}/driver-license.jpg`,
+        uploadScene: "client-qualification",
+        status: "active",
+        metadata: { qualificationType: "driver_license" }
+      }
+    });
+    const otherCustomerEvidenceId = `file_qual_other_${suffix}`;
+    await prisma.fileAsset.create({
+      data: {
+        id: otherCustomerEvidenceId,
+        tenantId,
+        businessModule: "membership",
+        businessType: "customer",
+        businessId: corporateId,
+        fileName: "other-license.jpg",
+        fileExt: "jpg",
+        mimeType: "image/jpeg",
+        sizeBytes: 2048,
+        storageProvider: "local_mock",
+        storageKey: `tenant-files/${tenantId}/${otherCustomerEvidenceId}/other-license.jpg`,
+        uploadScene: "client-qualification",
+        status: "active",
+        metadata: { qualificationType: "driver_license" }
+      }
+    });
+    await assert.rejects(
+      () => memberships.submitQualification(tenantId, workspaceId, personalId, { qualificationType: "driver_license", evidenceRef: otherCustomerEvidenceId }, "app", "APP"),
+      /资质附件不存在、尚未完成上传或不属于当前会员/u
+    );
     const secondQualificationSubmission = await memberships.submitQualification(tenantId, workspaceId, personalId, {
-      qualificationType: "driver_license", issuedAt: "2026-02-01T00:00:00.000Z", expiresAt: "2098-01-01T00:00:00.000Z", evidenceRef: "evidence-second"
+      qualificationType: "driver_license", issuedAt: "2026-02-01T00:00:00.000Z", expiresAt: "2098-01-01T00:00:00.000Z", evidenceRef: clientEvidenceId
     }, "app", "APP");
     const approvedOldQualification = await memberships.review(
       tenantId, workspaceId, firstQualificationSubmission.review.id, { status: "approved" }, "资格审核员", { registration: false, qualification: true }

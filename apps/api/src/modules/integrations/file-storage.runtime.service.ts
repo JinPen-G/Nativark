@@ -16,6 +16,12 @@ import { OperationLogService } from "../../common/operation-log.service";
 
 type JsonRecord = Record<string, unknown>;
 
+export interface FileBusinessOwner {
+  businessType: string;
+  businessId: string;
+  uploadScene?: string;
+}
+
 const UPLOAD_TTL_SECONDS = 15 * 60;
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
 
@@ -193,37 +199,6 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     };
   }
 
-  async completeUpload(tenantId: string, sessionId: string, input: CompleteFileUploadRequest) {
-    const session = await this.prisma.fileUploadSession.findFirst({ where: { id: sessionId, tenantId } });
-    if (!session) throw new NotFoundException("上传会话不存在");
-    const asset = await this.prisma.fileAsset.findFirst({ where: { id: session.fileAssetId, tenantId } });
-    if (!asset) throw new NotFoundException("文件元数据不存在");
-    if (session.status === "completed") return this.assetSummary(asset);
-    if (session.status !== "pending_upload") throw new ConflictException("上传会话已失效");
-    if (session.expiresAt.getTime() <= Date.now()) {
-      await this.failSession(tenantId, session.id, "上传会话已过期");
-      throw new ConflictException("上传会话已过期，请重新上传");
-    }
-    if (session.provider !== "local_mock") {
-      const config = await this.integrations.runtimeConfig("file", tenantId, session.provider as never);
-      if (!config) throw new ServiceUnavailableException("文件平台已停用，无法确认上传结果");
-      const exists = await this.objectExists(config, session.storageKey, asset.mimeType, asset.sizeBytes, session.expiresAt);
-      if (!exists) throw new ConflictException("对象存储中尚未找到上传文件");
-    }
-    // checksum 是客户端声明，不在服务端读取对象并核算前视为可信事实；只保留在元数据
-    // 供排障，不能写入 FileAsset.checksum 作为完整性证明。
-    const metadata = {
-      ...((asset.metadata ?? {}) as JsonRecord),
-      completedAt: new Date().toISOString(),
-      ...(input.checksum?.trim() ? { clientChecksum: input.checksum.trim() } : {})
-    };
-    const updated = await this.prisma.$transaction(async (tx) => {
-      await tx.fileUploadSession.update({ where: { id: session.id }, data: { status: "completed", completedAt: new Date(), failureReason: null } });
-      return tx.fileAsset.update({ where: { id: asset.id }, data: { status: "active", metadata: metadata as Prisma.InputJsonValue } });
-    });
-    return this.assetSummary(updated);
-  }
-
   /**
    * 过期上传会话的可重复清理。先把会话抢占为 cleanup_in_progress，再删除对象，
    * 最后把元数据置为 failed；对象删除失败会保留 cleanupError，下一次运维执行可重试。
@@ -337,8 +312,43 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     return summary;
   }
 
-  async downloadUrl(tenantId: string, fileAssetId: string): Promise<FileDownloadUrlSummary> {
+  async completeUpload(
+    tenantId: string,
+    sessionId: string,
+    input: CompleteFileUploadRequest,
+    owner?: FileBusinessOwner
+  ) {
+    const session = await this.prisma.fileUploadSession.findFirst({ where: { id: sessionId, tenantId } });
+    if (!session) throw new NotFoundException("上传会话不存在");
+    const asset = await this.prisma.fileAsset.findFirst({ where: { id: session.fileAssetId, tenantId } });
+    if (!asset || (owner && !this.matchesOwner(asset, owner))) throw new NotFoundException("上传会话不存在或不属于当前业务对象");
+    if (session.status === "completed") return this.assetSummary(asset);
+    if (session.status !== "pending_upload") throw new ConflictException("上传会话已失效");
+    if (session.expiresAt.getTime() <= Date.now()) {
+      await this.failSession(tenantId, session.id, "上传会话已过期");
+      throw new ConflictException("上传会话已过期，请重新上传");
+    }
+    if (session.provider !== "local_mock") {
+      const config = await this.integrations.runtimeConfig("file", tenantId, session.provider as never);
+      if (!config) throw new ServiceUnavailableException("文件平台已停用，无法确认上传结果");
+      const exists = await this.objectExists(config, session.storageKey, asset.mimeType, asset.sizeBytes, session.expiresAt);
+      if (!exists) throw new ConflictException("对象存储中尚未找到上传文件");
+    }
+    const metadata = {
+      ...((asset.metadata ?? {}) as JsonRecord),
+      completedAt: new Date().toISOString(),
+      ...(input.checksum?.trim() ? { clientChecksum: input.checksum.trim() } : {})
+    };
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.fileUploadSession.update({ where: { id: session.id }, data: { status: "completed", completedAt: new Date(), failureReason: null } });
+      return tx.fileAsset.update({ where: { id: asset.id }, data: { status: "active", metadata: metadata as Prisma.InputJsonValue } });
+    });
+    return this.assetSummary(updated);
+  }
+
+  async downloadUrl(tenantId: string, fileAssetId: string, owner?: FileBusinessOwner): Promise<FileDownloadUrlSummary> {
     const asset = await this.prisma.fileAsset.findFirst({ where: { id: fileAssetId, tenantId, status: "active" } });
+    if (asset && owner && !this.matchesOwner(asset, owner)) throw new NotFoundException("文件不存在或不属于当前业务对象");
     if (!asset) throw new NotFoundException("文件不存在或尚未完成上传");
     if (asset.storageProvider === "local_mock") {
       const result = { fileAssetId, provider: asset.storageProvider, mode: "simulation" as const, downloadUrl: `/api/files/${fileAssetId}/download-url` };
@@ -352,6 +362,10 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     const result = { fileAssetId, provider: asset.storageProvider, mode: "provider" as const, downloadUrl: signed.url, expiresAt: expiresAt.toISOString() };
     await this.operationLog?.record({ tenantId, action: "file.download-url.issue", targetType: "file", targetId: fileAssetId, detail: "生成短时文件访问签名", metadata: { mode: result.mode, expiresAt: result.expiresAt } });
     return result;
+  }
+
+  private matchesOwner(asset: { businessType: string; businessId: string | null; uploadScene: string }, owner: FileBusinessOwner) {
+    return asset.businessType === owner.businessType && asset.businessId === owner.businessId && (!owner.uploadScene || asset.uploadScene === owner.uploadScene);
   }
 
   private async assertBusinessReference(tenantId: string, businessType: string, businessId: string) {

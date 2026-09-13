@@ -44,6 +44,7 @@ function assetRow(id, status = "pending_upload", assetTenantId = tenantId, asset
 
 const prisma = {
   rentalOrder: { findFirst: async ({ where }) => where.tenantId === tenantId && where.id === orderId ? { id: orderId } : null },
+  customerProfile: { findFirst: async ({ where }) => where.tenantId === tenantId && where.id === "customer-file-test" ? { id: where.id } : null },
   fileAsset: {
     create: async ({ data }) => {
       const row = { ...assetRow(data.id), ...data, createdAt: new Date(), updatedAt: new Date() };
@@ -53,7 +54,7 @@ const prisma = {
     findUniqueOrThrow: async ({ where }) => assets.get(where.id),
     findFirst: async ({ where }) => {
       const row = assets.get(where.id);
-      return row && row.tenantId === where.tenantId && (!where.status || row.status === where.status) ? row : null;
+      return row && row.tenantId === where.tenantId && (!where.status || row.status === where.status) && (!where.businessType || row.businessType === where.businessType) && (!where.businessId || row.businessId === where.businessId) && (!where.uploadScene || row.uploadScene === where.uploadScene) ? row : null;
     },
     update: async ({ where, data }) => {
       const row = assets.get(where.id);
@@ -125,6 +126,30 @@ void (async () => {
   const completed = await runtime.completeUpload(tenantId, first.sessionId, {});
   assert.equal(completed.status, "active");
   assert.equal("storageKey" in completed, false, "完成响应不得向调用方返回对象存储路径");
+  const ownedUrl = await runtime.downloadUrl(tenantId, first.fileAssetId, { businessType: "rental_order", businessId: orderId, uploadScene: "order-contract" });
+  assert.equal(ownedUrl.fileAssetId, first.fileAssetId);
+  await assert.rejects(
+    () => runtime.downloadUrl(tenantId, first.fileAssetId, { businessType: "customer", businessId: "other-customer", uploadScene: "client-qualification" }),
+    /文件不存在或不属于当前业务对象/u
+  );
+
+  const qualificationSession = await runtime.createUploadSession(tenantId, {
+    businessModule: "membership",
+    businessType: "customer",
+    businessId: "customer-file-test",
+    fileName: "license.jpg",
+    mimeType: "image/jpeg",
+    sizeBytes: 2048,
+    uploadScene: "client-qualification",
+    idempotencyKey: "upload-client-qualification-1",
+    metadata: { qualificationType: "driver_license" }
+  });
+  await assert.rejects(
+    () => runtime.completeUpload(tenantId, qualificationSession.sessionId, {}, { businessType: "customer", businessId: "other-customer", uploadScene: "client-qualification" }),
+    /上传会话不存在或不属于当前业务对象/u
+  );
+  await runtime.completeUpload(tenantId, qualificationSession.sessionId, {}, { businessType: "customer", businessId: "customer-file-test", uploadScene: "client-qualification" });
+  console.log("client file owner binding tests passed");
 
   const expiredAssetId = "file_expired";
   const expiredSessionId = "session_expired";

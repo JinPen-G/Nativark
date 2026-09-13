@@ -11,6 +11,7 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
   Min,
   MinLength,
@@ -38,7 +39,9 @@ import {
   type ClientSwitchWorkspaceRequest,
   type ClientWorkspaceTarget,
   type VerifyClientRegistrationChallengeRequest,
-  type SubmitCustomerQualificationRequest
+  type SubmitCustomerQualificationRequest,
+  type ClientQualificationUploadSessionRequest,
+  type ClientQualificationUploadCompleteRequest
 } from "@rental-os/shared";
 
 const FULFILLMENT_MODES = ["store_pickup_return", "partner_pickup_return", "warehouse_pickup_return", "locker_pickup_return", "delivery", "onsite_delivery"] as const;
@@ -330,6 +333,28 @@ export class ClientSubmitQualificationRequestDto implements SubmitCustomerQualif
 
   @IsOptional() @IsString() @MaxLength(512)
   evidenceRef?: string;
+}
+
+export class ClientQualificationUploadSessionRequestDto implements ClientQualificationUploadSessionRequest {
+  @IsString() @IsNotEmpty() @MaxLength(128)
+  qualificationType!: string;
+
+  @IsString() @IsNotEmpty() @MaxLength(180)
+  fileName!: string;
+
+  @IsString() @IsNotEmpty() @MaxLength(127)
+  mimeType!: string;
+
+  @IsInt() @Min(1) @Max(20 * 1024 * 1024)
+  sizeBytes!: number;
+
+  @IsString() @IsNotEmpty() @MaxLength(191)
+  idempotencyKey!: string;
+}
+
+export class ClientQualificationUploadCompleteRequestDto implements ClientQualificationUploadCompleteRequest {
+  @IsOptional() @IsString() @MaxLength(191)
+  checksum?: string;
 }
 
 export class ClientPaymentSimulationRequestDto implements ClientPaymentSimulationRequest {

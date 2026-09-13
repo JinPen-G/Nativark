@@ -372,6 +372,24 @@ export class MembershipService {
       throw new BadRequestException("证件有效期不能早于签发日期");
     }
     const evidenceRef = evidenceRefOrUndefined(input.evidenceRef);
+    if (channel === "app" && evidenceRef) {
+      const evidence = await this.prisma.fileAsset.findFirst({
+        where: {
+          id: evidenceRef,
+          tenantId,
+          businessType: "customer",
+          businessId: customerId,
+          uploadScene: "client-qualification",
+          status: "active"
+        },
+        select: { id: true, metadata: true }
+      });
+      if (!evidence) throw new BadRequestException("资质附件不存在、尚未完成上传或不属于当前会员");
+      const metadata = evidence.metadata && typeof evidence.metadata === "object" && !Array.isArray(evidence.metadata)
+        ? evidence.metadata as Record<string, unknown>
+        : {};
+      if (metadata.qualificationType !== input.qualificationType) throw new BadRequestException("资质附件与证件类型不匹配");
+    }
     const now = new Date();
     const result = await this.prisma.$transaction(async (tx) => {
       const review = await tx.customerMembershipReview.create({
