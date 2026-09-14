@@ -95,6 +95,9 @@ assert.match(paymentSource, /requireLiveTest: false/u);
 assert.match(paymentSource, /runtimeConfig\("payment", tenantId, input\.method, \{ requireDefault: true \}\)/u);
 assert.match(paymentSource, /assertEnabledInTransaction\(tx, tenantId, "payment", config\.provider, \{ requireDefault: true \}\)/u);
 assert.match(smsSource, /requireLiveTest: false/u);
+assert.match(smsSource, /hasEnabledProvider/u);
+assert.match(notificationSource, /生产环境尚未配置默认短信平台/u);
+assert.match(notificationSource, /smsProviderConfigured/u);
 assert.match(integrationsServiceSource, /生产环境禁止创建模拟文件资产/u);
 
 (async () => {

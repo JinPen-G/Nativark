@@ -44,7 +44,24 @@ void (async () => {
   const businessConfig = new RentalBusinessConfigRepository(prisma);
   const businessFact = new RentalBusinessFactRepository(prisma);
   const core = new RentalCoreService(coreConfig, coreFact);
-  const business = new RentalBusinessService(businessConfig, businessFact, coreConfig, undefined, prisma);
+  let runtimeCalls = 0;
+  const notificationRuntime = {
+    hasEnabledProvider: async () => false,
+    sendNotificationSms: async () => { runtimeCalls += 1; throw new Error("无短信平台时不应调用真实发送"); }
+  };
+  const business = new RentalBusinessService(
+    businessConfig,
+    businessFact,
+    coreConfig,
+    undefined,
+    prisma,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    notificationRuntime
+  );
   await core.onApplicationBootstrap();
   await business.onApplicationBootstrap();
   const profile = core.getProfile(tenantId);
@@ -90,6 +107,7 @@ void (async () => {
   assert.equal(manual.provider, "simulation");
   assert.equal(manual.providerMessageId, undefined, "模拟发送不得伪造外部回执号");
   assert.equal(manual.sentAt, undefined, "模拟记录不得伪造真实发送时间");
+  assert.equal(runtimeCalls, 0, "无短信平台的开发通知不得调用真实发送组件");
 
   await assert.rejects(
     business.sendNotification(tenantId, context, {

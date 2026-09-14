@@ -3699,7 +3699,15 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     if (template.channel === "sms" && !isSmsRecipient(input.recipient)) {
       throw new BadRequestException("短信通知必须使用有效的手机号，不能把客户编号当作收件人");
     }
-    const realSms = template.channel === "sms" && Boolean(this.notificationRuntime);
+    const smsRuntime = template.channel === "sms" && this.notificationRuntime ? this.notificationRuntime : undefined;
+    const smsProviderConfigured = smsRuntime ? await smsRuntime.hasEnabledProvider(tenantId) : false;
+    if (template.channel === "sms" && !smsProviderConfigured && process.env.NODE_ENV === "production") {
+      throw new ServiceUnavailableException("生产环境尚未配置默认短信平台，不能把通知当作成功发送");
+    }
+    // 开发环境只有在租户没有默认短信平台时才允许明确记为模拟；一旦租户
+    // 已启用平台，即使尚未 live 验证，也必须进入真实链并由运行门禁拒绝，
+    // 不能悄悄降级成模拟而掩盖配置问题。
+    const realSms = Boolean(smsRuntime && smsProviderConfigured);
     if (realSms && !this.secretBox) throw new ServiceUnavailableException("短信通知安全组件未就绪");
     const recipientFingerprint = realSms ? this.secretBox!.fingerprint(canonicalSmsRecipient(input.recipient)) : undefined;
     const rateAt = realSms ? stamp() : undefined;

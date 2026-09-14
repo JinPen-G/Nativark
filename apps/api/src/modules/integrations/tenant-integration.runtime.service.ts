@@ -89,6 +89,18 @@ export class TenantIntegrationRuntimeService {
   ) {}
 
   /**
+   * 只判断当前租户是否有短信默认出口，不读取密钥，也不把“已启用”当成
+   * 已通过 live 测试。调用方用它区分开发环境的明确模拟和生产环境的拒绝。
+   */
+  async hasEnabledProvider(tenantId: string) {
+    const row = await this.prisma.tenantIntegrationConfig.findFirst({
+      where: { tenantId, capability: "sms", enabled: true, isDefault: true },
+      select: { id: true }
+    });
+    return Boolean(row);
+  }
+
+  /**
    * 只做平台连通性验证，不发送任何短信。
    * 阿里云调用模板列表查询，腾讯云调用模板列表查询；两者都不会产生计费投递。
    */
