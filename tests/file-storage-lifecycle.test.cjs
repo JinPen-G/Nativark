@@ -189,6 +189,20 @@ void (async () => {
     /业务对象不存在或不属于当前租户/u
   );
   await assert.rejects(
+    () => runtime.createUploadSession(tenantId, {
+      businessModule: "membership",
+      businessType: "customer",
+      businessId: "customer-file-test",
+      fileName: "license.jpg",
+      mimeType: "image/jpeg",
+      sizeBytes: 2048,
+      uploadScene: "client-qualification",
+      idempotencyKey: "upload-client-qualification-1",
+      metadata: { qualificationType: "driver_license" }
+    }, { businessType: "customer", businessId: "customer-file-test", uploadScene: "client-qualification", workspaceId: "workspace-other" }),
+    /业务对象不存在或不属于当前租户/u
+  );
+  await assert.rejects(
     () => runtime.completeUpload(tenantId, qualificationSession.sessionId, {}, { businessType: "customer", businessId: "other-customer", uploadScene: "client-qualification", workspaceId: "workspace-file-test" }),
     /上传会话不存在或不属于当前业务对象/u
   );

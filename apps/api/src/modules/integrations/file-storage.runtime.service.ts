@@ -152,10 +152,14 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     });
     if (existing) {
       const existingAsset = await this.prisma.fileAsset.findUniqueOrThrow({ where: { id: existing.fileAssetId } });
+      if (existingAsset.tenantId !== tenantId) throw new NotFoundException("上传会话不存在或不属于当前租户");
       if (owner && !this.matchesOwner(existingAsset, owner)) throw new ConflictException("幂等键已被其他业务对象使用，请更换幂等键");
       if (!this.matchesUploadRequest(existingAsset, input, mimeType)) {
         throw new ConflictException("幂等键已用于不同文件上传请求，请更换幂等键");
       }
+      // 幂等重放也必须重新验证经营空间归属。不能因为首次创建时通过过校验，
+      // 就让同一租户的另一个空间凭同一个幂等键拿到客户/订单文件会话。
+      await this.assertBusinessReference(tenantId, existingAsset.businessType, existingAsset.businessId ?? "", owner?.workspaceId);
       const existingMode = (existingAsset.metadata as JsonRecord | null)?.uploadMode === "provider" ? "provider" : "simulation";
       return this.sessionSummary(existing, existingAsset, existingMode);
     }
@@ -218,10 +222,12 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
         });
         if (concurrent) {
           const concurrentAsset = await this.prisma.fileAsset.findUniqueOrThrow({ where: { id: concurrent.fileAssetId } });
+          if (concurrentAsset.tenantId !== tenantId) throw new NotFoundException("上传会话不存在或不属于当前租户");
           if (owner && !this.matchesOwner(concurrentAsset, owner)) throw new ConflictException("幂等键已被其他业务对象使用，请更换幂等键");
           if (!this.matchesUploadRequest(concurrentAsset, input, mimeType)) {
             throw new ConflictException("幂等键已用于不同文件上传请求，请更换幂等键");
           }
+          await this.assertBusinessReference(tenantId, concurrentAsset.businessType, concurrentAsset.businessId ?? "", owner?.workspaceId);
           const concurrentMode = (concurrentAsset.metadata as JsonRecord | null)?.uploadMode === "provider" ? "provider" : "simulation";
           return this.sessionSummary(concurrent, concurrentAsset, concurrentMode);
         }
