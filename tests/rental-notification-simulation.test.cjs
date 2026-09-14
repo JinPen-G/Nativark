@@ -8,6 +8,7 @@ require("ts-node").register({
 });
 
 const ROOT = path.resolve(__dirname, "..");
+const { rejectionReason } = require(path.join(ROOT, "scripts/ops/dedicated-env.cjs"));
 const env = Object.fromEntries(
   fs.readFileSync(path.join(ROOT, ".env"), "utf8").split(/\r?\n/)
     .filter((line) => line.includes("=") && !line.trim().startsWith("#"))
@@ -15,8 +16,9 @@ const env = Object.fromEntries(
 );
 const databaseUrl = process.env.DATABASE_URL || env.DATABASE_URL;
 const dbName = new URL(databaseUrl).pathname.slice(1);
-if (!/claude/.test(dbName)) {
-  console.error(`拒绝执行：通知专项只能使用带 claude 标记的专用库，当前 ${dbName}`);
+const databaseGuardReason = rejectionReason(dbName);
+if (databaseGuardReason) {
+  console.error(`拒绝执行：通知专项只能使用通过专用库守卫的隔离库，当前 ${dbName}（${databaseGuardReason}）`);
   process.exit(1);
 }
 process.env.DATABASE_URL = databaseUrl;

@@ -53,6 +53,7 @@ void (() => {
       `混入专用标记的生产库 ${database}`
     );
   }
+  assert.equal(ops.rejectionReason("rental_os_zcode"), undefined, "zcode 工作树专用库应通过统一守卫");
   for (const database of ["rental_os_claudedev", "rental_os_e2etest", "rental-os-claude", "rental_os_claude%60evil"]) {
     rejects(
       () => ops.resolveDedicatedTarget(`mysql://u:p@localhost:3306/${database}`),

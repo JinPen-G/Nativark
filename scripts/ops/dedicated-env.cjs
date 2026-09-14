@@ -34,7 +34,7 @@ const PROTECTED_DATABASES = new Set([
  * 用「必须命中标记」而不是「不在黑名单即可」：黑名单永远漏项，
  * 而新建一个叫 `store_rental_backup` 的库并把它当演练目标是很容易发生的事。
  */
-const DEDICATED_MARKERS = ["claude", "e2e", "drill", "dedicated", "sandbox"];
+const DEDICATED_MARKERS = ["claude", "zcode", "e2e", "drill", "dedicated", "sandbox"];
 const FORBIDDEN_ENV_MARKERS = new Set(["prod", "production", "staging", "live", "primary"]);
 
 class OpsTargetError extends Error {
