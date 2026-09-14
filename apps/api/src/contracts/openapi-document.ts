@@ -306,6 +306,75 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     },
     ["scanned", "processed", "paid", "closed", "refunded", "pending", "failed", "results"]
   ),
+  ImportPaymentStatementRequest: objectOf(
+    { provider: stringSchema },
+    ["provider"]
+  ),
+  ReviewPaymentStatementLineRequest: objectOf(
+    { decision: stringSchema, reason: stringSchema },
+    ["decision", "reason"]
+  ),
+  PaymentStatementBatchSummary: objectOf(
+    {
+      id: stringSchema,
+      workspaceId: stringSchema,
+      provider: stringSchema,
+      fileName: stringSchema,
+      fileSha256: stringSchema,
+      status: stringSchema,
+      totalRows: numberSchema,
+      matchedRows: numberSchema,
+      differenceRows: numberSchema,
+      acknowledgedRows: numberSchema,
+      importedBy: stringSchema,
+      importedAt: { type: "string", format: "date-time" }
+    },
+    ["id", "workspaceId", "provider", "fileName", "fileSha256", "status", "totalRows", "matchedRows", "differenceRows", "acknowledgedRows", "importedAt"]
+  ),
+  PaymentStatementLineSummary: objectOf(
+    {
+      id: stringSchema,
+      batchId: stringSchema,
+      rowNumber: numberSchema,
+      kind: stringSchema,
+      merchantOrderNo: stringSchema,
+      merchantRefundNo: stringSchema,
+      externalId: stringSchema,
+      statementStatus: stringSchema,
+      normalizedStatus: stringSchema,
+      amount: numberSchema,
+      currency: stringSchema,
+      occurredAt: { type: "string", format: "date-time" },
+      localRecordId: stringSchema,
+      localStatus: stringSchema,
+      differenceCodes: arrayOf(stringSchema),
+      differenceDetail: stringSchema,
+      reviewStatus: stringSchema,
+      reviewReason: stringSchema,
+      reviewedBy: stringSchema,
+      reviewedAt: { type: "string", format: "date-time" }
+    },
+    ["id", "batchId", "rowNumber", "kind", "merchantOrderNo", "statementStatus", "normalizedStatus", "amount", "currency", "differenceCodes", "reviewStatus"]
+  ),
+  PaymentStatementBatchDetail: objectOf(
+    {
+      id: stringSchema,
+      workspaceId: stringSchema,
+      provider: stringSchema,
+      fileName: stringSchema,
+      fileSha256: stringSchema,
+      status: stringSchema,
+      totalRows: numberSchema,
+      matchedRows: numberSchema,
+      differenceRows: numberSchema,
+      acknowledgedRows: numberSchema,
+      importedBy: stringSchema,
+      importedAt: { type: "string", format: "date-time" },
+      lines: arrayOf("PaymentStatementLineSummary")
+    },
+    ["id", "workspaceId", "provider", "fileName", "fileSha256", "status", "totalRows", "matchedRows", "differenceRows", "acknowledgedRows", "importedAt", "lines"]
+  ),
+  PaymentStatementBatchList: arrayOf("PaymentStatementBatchSummary"),
   CreateFileUploadSessionRequest: objectOf(
     {
       businessModule: stringSchema,
@@ -2331,6 +2400,10 @@ function rentalBusinessOperations(): ContractOperation[] { return [
   backlogOperation("post", "/api/rental/v1/orders/{orderId}/payment-intents/{intentId}/refunds", "Payments", "createRentalPaymentRefund", "Create a real provider refund after an approved order credit", ["rental-os:finance:reconcile"], true, "CreatePaymentRefundRequest", "PaymentRefundResponse"),
   backlogOperation("post", "/api/rental/v1/orders/{orderId}/payment-intents/{intentId}/refunds/{refundId}/refresh", "Payments", "refreshRentalPaymentRefund", "Query and recover a provider refund", ["rental-os:finance:reconcile"], true, undefined, "PaymentRefundResponse"),
   backlogOperation("post", "/api/rental/v1/payment-reconciliation", "Payments", "reconcileRentalPayments", "Reconcile unresolved payment intents and refunds in the current workspace", ["rental-os:finance:reconcile"], true, undefined, "PaymentReconciliationSummary", [queryParam("limit", numberSchema)]),
+  backlogOperation("post", "/api/rental/v1/payment-reconciliation/statements", "Payments", "importRentalPaymentStatement", "Import a tenant-scoped payment provider statement without mutating payment facts", ["rental-os:finance:reconcile"], true, "ImportPaymentStatementRequest", "PaymentStatementBatchDetail"),
+  backlogOperation("get", "/api/rental/v1/payment-reconciliation/statements", "Payments", "listRentalPaymentStatements", "List imported payment provider statements for the current workspace", ["rental-os:finance:reconcile"], true, undefined, "PaymentStatementBatchList", [queryParam("limit", numberSchema)]),
+  backlogOperation("get", "/api/rental/v1/payment-reconciliation/statements/{batchId}", "Payments", "getRentalPaymentStatement", "Get one imported payment provider statement and its differences", ["rental-os:finance:reconcile"], true, undefined, "PaymentStatementBatchDetail"),
+  backlogOperation("post", "/api/rental/v1/payment-reconciliation/statements/{batchId}/lines/{lineId}/review", "Payments", "reviewRentalPaymentStatementLine", "Acknowledge or query one payment statement difference without changing funding facts", ["rental-os:finance:reconcile"], true, "ReviewPaymentStatementLineRequest", "PaymentStatementBatchDetail"),
   backlogOperation("get", "/api/rental/v1/customer-coupons", "RentalBusiness", "listRentalCustomerCoupons", "List customer coupons", ["rental-os:marketing:manage"]),
   backlogOperation("post", "/api/rental/v1/customer-coupons/{id}/void", "RentalBusiness", "voidRentalCustomerCoupon", "Void an available customer coupon with a reason", ["rental-os:marketing:manage"]),
   backlogOperation("post", "/api/rental/v1/customer-coupons/claim", "RentalBusiness", "claimRentalCustomerCoupon", "Claim customer coupon", ["rental-os:marketing:manage"]),

@@ -164,6 +164,7 @@ model Tenant {
   rentalPaymentIntents              RentalPaymentIntent[]
   rentalPaymentRefunds              RentalPaymentRefund[]
   paymentWebhookEvents              PaymentWebhookEvent[]
+  paymentReconciliationBatches      PaymentReconciliationBatch[]
   rentalOrderExtensions             RentalOrderExtension[]
   rentalOrderChanges                RentalOrderChange[]
   rentalBusinessCalendars           RentalBusinessCalendar[]
@@ -281,6 +282,7 @@ model BusinessWorkspace {
   rentalFundingEvents               RentalFundingEvent[]
   rentalPaymentIntents              RentalPaymentIntent[]
   rentalPaymentRefunds              RentalPaymentRefund[]
+  paymentReconciliationBatches      PaymentReconciliationBatch[]
   rentalOrderExtensions             RentalOrderExtension[]
   rentalOrderChanges                RentalOrderChange[]
   rentalBusinessCalendars           RentalBusinessCalendar[]
@@ -2374,6 +2376,65 @@ model PaymentWebhookEvent {
   @@unique([provider, eventId], map: "payment_webhook_events_provider_event_key")
   @@index([tenantId, provider, createdAt], map: "payment_webhook_events_scope_created_idx")
   @@map("payment_webhook_events")
+}
+
+/// EXT-01D：支付平台对账文件导入批次。文件只作为外部账单证据保存摘要，
+/// 不直接改写支付意图、退款单或资金事件；差异必须由财务人工确认。
+model PaymentReconciliationBatch {
+  id               String                       @id @default(uuid())
+  tenantId         String
+  tenant           Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId      String
+  workspace        BusinessWorkspace            @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  provider         String                       @db.VarChar(40)
+  fileName         String                       @db.VarChar(180)
+  fileSha256       String                       @db.Char(64)
+  status           String                       @db.VarChar(24)
+  totalRows        Int
+  matchedRows      Int                          @default(0)
+  differenceRows   Int                          @default(0)
+  acknowledgedRows Int                          @default(0)
+  importedBy       String?
+  importedAt       DateTime                     @default(now())
+  createdAt        DateTime                     @default(now())
+  updatedAt        DateTime                     @updatedAt
+  lines            PaymentReconciliationLine[]
+
+  @@unique([tenantId, workspaceId, provider, fileSha256], map: "payment_reconciliation_batch_file_key")
+  @@index([tenantId, workspaceId, status, importedAt], map: "payment_reconciliation_batch_scope_idx")
+  @@map("payment_reconciliation_batches")
+}
+
+/// 对账文件中的标准化单行。localRecordId 只引用当前空间内的支付意图或退款单，
+/// differenceCodes 是可解释的差异事实；reviewStatus 不会改变任何资金事实。
+model PaymentReconciliationLine {
+  id                String                    @id @default(uuid())
+  batchId           String
+  batch             PaymentReconciliationBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  rowNumber         Int
+  kind              String                    @db.VarChar(16)
+  merchantOrderNo   String                    @db.VarChar(191)
+  merchantRefundNo  String?                   @db.VarChar(191)
+  externalId        String?                   @db.VarChar(191)
+  statementStatus   String                    @db.VarChar(80)
+  normalizedStatus  String                    @db.VarChar(24)
+  amount            Decimal                   @db.Decimal(12, 2)
+  currency          String                    @db.VarChar(8)
+  occurredAt        DateTime?
+  localRecordId     String?                   @db.VarChar(191)
+  localStatus       String?                   @db.VarChar(32)
+  differenceCodes   Json
+  differenceDetail  String?                   @db.VarChar(1000)
+  reviewStatus      String                    @default("not_required") @db.VarChar(24)
+  reviewReason      String?                   @db.VarChar(500)
+  reviewedBy        String?
+  reviewedAt        DateTime?
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
+
+  @@unique([batchId, rowNumber], map: "payment_reconciliation_line_row_key")
+  @@index([batchId, reviewStatus], map: "payment_reconciliation_line_review_idx")
+  @@map("payment_reconciliation_lines")
 }
 
 /// 续租 / 延期记录（需求 4.6.9）。

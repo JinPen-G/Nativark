@@ -134,6 +134,57 @@ export interface PaymentReconciliationSummary {
   }>;
 }
 
+/** EXT-01D：生产支付对账文件导入结果。导入只生成证据与差异，不改资金事实。 */
+export type PaymentStatementKind = "payment" | "refund";
+export type PaymentStatementReviewStatus = "not_required" | "open" | "query_pending" | "acknowledged";
+
+export interface PaymentStatementBatchSummary {
+  id: string;
+  workspaceId: string;
+  provider: "alipay" | "wechat_pay" | string;
+  fileName: string;
+  fileSha256: string;
+  status: "matched" | "needs_review" | "reviewed" | string;
+  totalRows: number;
+  matchedRows: number;
+  differenceRows: number;
+  acknowledgedRows: number;
+  importedBy?: string;
+  importedAt: string;
+}
+
+export interface PaymentStatementLineSummary {
+  id: string;
+  batchId: string;
+  rowNumber: number;
+  kind: PaymentStatementKind;
+  merchantOrderNo: string;
+  merchantRefundNo?: string;
+  externalId?: string;
+  statementStatus: string;
+  normalizedStatus: string;
+  amount: number;
+  currency: string;
+  occurredAt?: string;
+  localRecordId?: string;
+  localStatus?: string;
+  differenceCodes: string[];
+  differenceDetail?: string;
+  reviewStatus: PaymentStatementReviewStatus;
+  reviewReason?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+}
+
+export interface PaymentStatementBatchDetail extends PaymentStatementBatchSummary {
+  lines: PaymentStatementLineSummary[];
+}
+
+export interface ReviewPaymentStatementLineRequest {
+  decision: "acknowledge" | "query_provider";
+  reason: string;
+}
+
 export interface NotificationTemplateSummary {
   id: string;
   code: string;

@@ -21,6 +21,7 @@ import { PaymentRuntimeService } from "./modules/integrations/payment.runtime.se
 import { PaymentWebhookController } from "./modules/integrations/payment-webhook.controller";
 import { PaymentOperationsController } from "./modules/integrations/payment-operations.controller";
 import { PaymentReconciliationController } from "./modules/integrations/payment-reconciliation.controller";
+import { PaymentReconciliationFileService } from "./modules/integrations/payment-reconciliation-file.service";
 import { SecretBox } from "./common/secret-box";
 import { JobsController } from "./modules/jobs/jobs.controller";
 import { NotificationsController } from "./modules/notifications/notifications.controller";
@@ -134,6 +135,7 @@ import { ClientAuthService } from "./modules/client/client-auth.service";
     TenantIntegrationRuntimeService,
     FileStorageRuntimeService,
     PaymentRuntimeService,
+    PaymentReconciliationFileService,
     SecretBox,
     {
       provide: APP_INTERCEPTOR,
