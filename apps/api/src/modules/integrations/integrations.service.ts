@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from "@nestjs/common";
+import { BadRequestException, Injectable, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "node:crypto";
 import type {
@@ -259,6 +259,13 @@ export class IntegrationsService {
   }
 
   async createFile(input: CreateFileAssetRequest) {
+    // 该接口只登记开发/演示用的模拟文件元数据，不是实际的对象存储上传。
+    // 生产环境禁止它生成 local_mock active 资产，避免未配置真实文件平台时
+    // 把“已生成元数据”误读成“文件已上传并可用”。真实业务必须走
+    // FileStorageRuntimeService 的上传会话、live 门禁和完成确认链。
+    if (process.env.NODE_ENV === "production") {
+      throw new ServiceUnavailableException("生产环境禁止创建模拟文件资产，请使用真实文件存储上传链");
+    }
     validateRequired(input.businessModule, "业务模块不能为空");
     validateRequired(input.businessType, "业务对象类型不能为空");
     validateRequired(input.fileName, "文件名不能为空");

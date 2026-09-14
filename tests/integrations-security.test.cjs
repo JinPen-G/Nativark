@@ -24,6 +24,7 @@ const authSource = fs.readFileSync(path.join(repo, "apps", "api", "src", "module
 const guardSource = fs.readFileSync(path.join(repo, "apps", "api", "src", "common", "api-auth.guard.ts"), "utf8");
 const openapiSource = fs.readFileSync(path.join(repo, "apps", "api", "src", "contracts", "openapi-document.ts"), "utf8");
 const integrationSource = fs.readFileSync(path.join(repo, "apps", "api", "src", "modules", "integrations", "tenant-integration.service.ts"), "utf8");
+const integrationsServiceSource = fs.readFileSync(path.join(repo, "apps", "api", "src", "modules", "integrations", "integrations.service.ts"), "utf8");
 
 assert.match(paymentSource, /decrypted\.mchid/);
 assert.match(paymentSource, /decrypted\.appid/);
@@ -90,6 +91,7 @@ assert.match(integrationSource, /requireLiveTest !== false/u);
 assert.match(fileSource, /requireLiveTest: false/u);
 assert.match(paymentSource, /requireLiveTest: false/u);
 assert.match(smsSource, /requireLiveTest: false/u);
+assert.match(integrationsServiceSource, /生产环境禁止创建模拟文件资产/u);
 
 (async () => {
   const { TenantIntegrationService } = require(path.join(repo, "apps", "api", "dist", "modules", "integrations", "tenant-integration.service.js"));
@@ -135,6 +137,21 @@ assert.match(smsSource, /requireLiveTest: false/u);
     ),
     /尚未通过真实连接测试/u,
     "进行中事实落库前必须在配置行锁内再次确认 live 门禁"
+  );
+  const { IntegrationsService } = require(path.join(repo, "apps", "api", "dist", "modules", "integrations", "integrations.service.js"));
+  const mockIntegrationService = new IntegrationsService({ get: () => "mysql" }, {});
+  await assert.rejects(
+    mockIntegrationService.createFile({
+      businessModule: "test",
+      businessType: "test",
+      businessId: "test",
+      fileName: "fake.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 1,
+      uploadScene: "test"
+    }),
+    /生产环境禁止创建模拟文件资产/u,
+    "生产环境不得通过旧元数据接口生成 local_mock 文件资产"
   );
   console.log("integration security probes passed: SSRF, callback binding, payment race, upload verification, SMS cooldown, runtime gate and route permission");
 })().catch((error) => {
