@@ -4,6 +4,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 import { CapabilityHookRuntime } from "./capability-hook.runtime";
 import { MembershipService } from "../platform/membership.service";
+import { FileStorageRuntimeService, type FileBusinessOwner } from "../integrations/file-storage.runtime.service";
 import type { CapabilityHookSubjectType } from "./capability-hook.repository";
 import { WorkspaceCapabilityService } from "./workspace-capability.service";
 import {
@@ -134,7 +135,7 @@ interface TenantRentalState {
   configPersisted?: boolean;
 }
 
-type StoredItemGroupImage = Omit<RentalItemGroupImage, "url">;
+type StoredItemGroupImage = Omit<RentalItemGroupImage, "url"> & { fileAssetId?: string };
 
 interface UploadedItemGroupImage {
   originalname: string;
@@ -266,7 +267,10 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     // 直接构造 RentalCoreService 的内存单测；生产 AppModule 必须注入。
     @Optional() private readonly memberships?: MembershipService,
     // MKT-02D：服务实际履约与容量转换必须在订单聚合的同一事务内完成。
-    @Optional() private readonly serviceCapacities?: RentalServiceCapacityService
+    @Optional() private readonly serviceCapacities?: RentalServiceCapacityService,
+    // EXT-03/CAT-IMAGE-01：已配置租户对象存储时，型号图片通过统一文件生命周期服务
+    // 上传、读取和删除；未注入仅保留内存/开发环境的本地图片兼容路径。
+    @Optional() private readonly fileStorage?: FileStorageRuntimeService
   ) {}
 
   /**
@@ -905,14 +909,44 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       sizeBytes: file.buffer.length,
       isCover: current.length === 0
     };
-    const absolutePath = this.itemGroupImagePath(group, nextImage);
-    await mkdir(dirname(absolutePath), { recursive: true });
-    await writeFile(absolutePath, file.buffer);
+    const workspaceId = getRequestWorkspaceId() ?? undefined;
+    const useConfiguredProvider = this.fileStorage ? await this.fileStorage.hasEnabledProvider(tenantId) : false;
+    let absolutePath: string | undefined;
+    if (useConfiguredProvider) {
+      const owner: FileBusinessOwner = { businessType: "item_group", businessId: group.id, uploadScene: "item-group-image", workspaceId };
+      const asset = await this.fileStorage!.uploadBuffer(tenantId, {
+        businessModule: "rental-core",
+        businessType: "item_group",
+        businessId: group.id,
+        fileName: nextImage.fileName,
+        mimeType: nextImage.mimeType,
+        sizeBytes: nextImage.sizeBytes,
+        uploadScene: "item-group-image",
+        idempotencyKey: `item-group-image:${group.id}:${imageId}`,
+        metadata: { imageId, workspaceId }
+      }, file.buffer, owner);
+      nextImage.fileAssetId = asset.id;
+    } else {
+      if (process.env.NODE_ENV === "production" && this.fileStorage) {
+        throw new ConflictException("生产环境必须先配置文件存储平台，不能使用本地图片存储");
+      }
+      absolutePath = this.itemGroupImagePath(group, nextImage);
+      await mkdir(dirname(absolutePath), { recursive: true });
+      await writeFile(absolutePath, file.buffer);
+    }
     const next: StoredItemGroupImage[] = [...current, nextImage];
     try {
       await this.persistItemGroupImages(group, next);
     } catch (error) {
-      await rm(absolutePath, { force: true });
+      if (absolutePath) await rm(absolutePath, { force: true });
+      if (nextImage.fileAssetId && this.fileStorage) {
+        await this.fileStorage.deleteFileAsset(tenantId, nextImage.fileAssetId, {
+          businessType: "item_group",
+          businessId: group.id,
+          uploadScene: "item-group-image",
+          workspaceId
+        }).catch(() => undefined);
+      }
       throw error;
     }
     return this.publicItemGroup(group);
@@ -925,7 +959,16 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (!target) throw new NotFoundException("产品型号图片不存在");
     const remaining = current.filter((image) => image.id !== imageId).map((image, index) => ({ ...image, isCover: index === 0 }));
     await this.persistItemGroupImages(group, remaining);
-    await rm(this.itemGroupImagePath(group, target), { force: true });
+    if (target.fileAssetId && this.fileStorage) {
+      await this.fileStorage.deleteFileAsset(tenantId, target.fileAssetId, {
+        businessType: "item_group",
+        businessId: group.id,
+        uploadScene: "item-group-image",
+        workspaceId: getRequestWorkspaceId() ?? undefined
+      });
+    } else {
+      await rm(this.itemGroupImagePath(group, target), { force: true });
+    }
     return this.publicItemGroup(group);
   }
 
@@ -933,6 +976,15 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const group = this.group(this.state(tenantId), itemGroupId);
     const image = this.storedItemGroupImages(group).find((item) => item.id === imageId);
     if (!image) throw new NotFoundException("产品型号图片不存在");
+    if (image.fileAssetId && this.fileStorage) {
+      const download = await this.fileStorage.downloadUrl(tenantId, image.fileAssetId, {
+        businessType: "item_group",
+        businessId: group.id,
+        uploadScene: "item-group-image",
+        workspaceId: getRequestWorkspaceId() ?? undefined
+      });
+      return { redirectUrl: download.downloadUrl, mimeType: image.mimeType, fileName: image.fileName };
+    }
     try {
       return { content: await readFile(this.itemGroupImagePath(group, image)), mimeType: image.mimeType, fileName: image.fileName };
     } catch {
@@ -3852,10 +3904,13 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   }
 
   private publicItemGroupImages(group: RentalItemGroup, images = this.storedItemGroupImages(group)): RentalItemGroupImage[] {
-    return images.map((image) => ({
-      ...image,
+    return images.map((image) => {
+      const { fileAssetId: _fileAssetId, ...publicImage } = image;
+      return {
+      ...publicImage,
       url: `/api/rental/v1/item-groups/${encodeURIComponent(group.id)}/images/${encodeURIComponent(image.id)}`
-    }));
+      };
+    });
   }
 
   private publicItemGroup(group: RentalItemGroup): RentalItemGroup {

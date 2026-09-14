@@ -100,7 +100,7 @@ function idempotencyKeyOf(req: { headers?: Record<string, unknown> }): string | 
 
 interface AuthenticatedRequest { user: SystemUserRow; headers?: Record<string, unknown>; }
 interface UploadedImageFile { originalname: string; mimetype: string; size: number; buffer: Buffer; }
-interface BinaryResponse { setHeader(name: string, value: string): void; send(body: Buffer): void; }
+interface BinaryResponse { setHeader(name: string, value: string): void; send(body: Buffer): void; redirect(status: number, url: string): void; }
 
 /**
  * CAM-01A：控制器内的权限判定，口径与 Guard 的 hasAnyPermission 一致。
@@ -319,6 +319,10 @@ export class RentalCoreController {
   @Get("item-groups/:id/images/:imageId")
   async itemGroupImage(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Param("imageId") imageId: string, @Res() res: BinaryResponse) {
     const image = await this.service.readItemGroupImage(req.user.tenantId, id, imageId);
+    if ("redirectUrl" in image) {
+      res.redirect(302, image.redirectUrl!);
+      return;
+    }
     res.setHeader("Content-Type", image.mimeType);
     res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(image.fileName)}`);
     res.setHeader("Cache-Control", "private, max-age=300");

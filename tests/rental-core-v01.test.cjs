@@ -285,6 +285,66 @@ try {
   else process.env.RENTAL_UPLOAD_DIR = previousUploadRoot;
   rmSync(uploadRoot, { recursive: true, force: true });
 }
+
+// CAT-IMAGE-01：租户配置对象存储后，型号图片不能继续落本地；
+// 读取必须走受保护的短时地址，删除必须带同一业务归属。
+const providerCalls = { upload: 0, download: 0, remove: 0 };
+const providerStorage = {
+  hasEnabledProvider: async () => true,
+  uploadBuffer: async (tenantId, input, content, owner) => {
+    providerCalls.upload += 1;
+    assert.equal(tenantId, "tenant_provider_image");
+    assert.equal(input.businessType, "item_group");
+    assert.equal(input.uploadScene, "item-group-image");
+    assert.equal(input.sizeBytes, content.length);
+    assert.equal(owner.businessId, input.businessId);
+    return { id: "file_provider_item_image_1" };
+  },
+  downloadUrl: async (tenantId, fileAssetId, owner) => {
+    providerCalls.download += 1;
+    assert.equal(tenantId, "tenant_provider_image");
+    assert.equal(fileAssetId, "file_provider_item_image_1");
+    assert.equal(owner.businessType, "item_group");
+    return { downloadUrl: "https://cdn.example.test/item-image.png" };
+  },
+  deleteFileAsset: async (tenantId, fileAssetId, owner) => {
+    providerCalls.remove += 1;
+    assert.equal(tenantId, "tenant_provider_image");
+    assert.equal(fileAssetId, "file_provider_item_image_1");
+    assert.equal(owner.uploadScene, "item-group-image");
+    return { fileAssetId, status: "deleted" };
+  }
+};
+const providerService = new RentalCoreService(
+  createAbsorbingConfigStore([{ id: "ws_provider_image", tenantId: "tenant_provider_image", categoryCode: "camera", isDefault: true }]),
+  createAbsorbingFactStore(),
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  providerStorage
+);
+await providerService.onApplicationBootstrap();
+const providerGroup = await providerService.saveItemGroup("tenant_provider_image", {
+  code: "PROVIDER-IMAGE-001",
+  name: "对象存储型号",
+  inventoryMode: "serialized",
+  attributes: { brand: "测试品牌", model: "P-1" },
+  status: "enabled"
+});
+const providerImage = await providerService.addItemGroupImage("tenant_provider_image", providerGroup.id, {
+  originalname: "provider.png",
+  mimetype: "image/png",
+  size: onePixelPng.length,
+  buffer: onePixelPng
+});
+assert.equal(providerCalls.upload, 1);
+assert.equal(providerImage.images[0].fileAssetId, undefined, "对象存储资产 ID 不得泄漏到型号接口");
+const providerRead = await providerService.readItemGroupImage("tenant_provider_image", providerGroup.id, providerImage.images[0].id);
+assert.equal(providerRead.redirectUrl, "https://cdn.example.test/item-image.png");
+assert.equal(providerCalls.download, 1);
+await providerService.removeItemGroupImage("tenant_provider_image", providerGroup.id, providerImage.images[0].id);
+assert.equal(providerCalls.remove, 1);
 const constructionPricingGroup = await service.savePricingGroup(newTenant, {
   code: "EXC-COMPACT",
   name: "小型挖掘机组",

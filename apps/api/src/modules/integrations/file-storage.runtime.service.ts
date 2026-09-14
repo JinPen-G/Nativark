@@ -103,6 +103,7 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     const intervalMs = Number.isFinite(configured) ? Math.max(configured, 60 * 1000) : 5 * 60 * 1000;
     this.cleanupTimer = setInterval(() => {
       void this.cleanupExpiredUploadSessionsForAllTenants().catch(() => undefined);
+      void this.cleanupPendingFileAssetDeletesForAllTenants().catch(() => undefined);
     }, intervalMs);
     this.cleanupTimer.unref?.();
   }
@@ -110,6 +111,15 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
   onApplicationShutdown() {
     if (this.cleanupTimer) clearInterval(this.cleanupTimer);
     this.cleanupTimer = undefined;
+  }
+
+  /** 只返回是否存在已启用的文件平台，不返回配置内容或凭据。 */
+  async hasEnabledProvider(tenantId: string) {
+    const row = await this.prisma.tenantIntegrationConfig.findFirst({
+      where: { tenantId, capability: "file", enabled: true },
+      select: { id: true }
+    });
+    return Boolean(row);
   }
 
   /**
@@ -229,6 +239,80 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
   }
 
   /**
+   * 服务端已有完整文件内容时使用的上传入口（例如型号图片）。
+   * 仍然复用上传会话、幂等键、对象存在性校验和完成状态机，不允许业务模块
+   * 自己拿租户密钥直连对象存储。该入口只接受已配置的真实 provider；没有配置
+   * 时由调用方决定是否保留开发环境的本地模拟路径。
+   */
+  async uploadBuffer(
+    tenantId: string,
+    input: CreateFileUploadSessionRequest,
+    content: Buffer,
+    owner?: FileBusinessOwner
+  ) {
+    if (!Buffer.isBuffer(content) || content.length !== input.sizeBytes) {
+      throw new ConflictException("上传文件内容与声明大小不一致");
+    }
+    const session = await this.createUploadSession(tenantId, input, owner);
+    if (session.status === "completed") return this.completeUpload(tenantId, session.sessionId, {}, owner);
+    if (session.mode !== "provider" || !session.uploadUrl) {
+      await this.failSession(tenantId, session.sessionId, "文件平台未返回可用上传地址");
+      throw new ServiceUnavailableException("文件平台未返回可用上传地址");
+    }
+
+    let response: Response;
+    try {
+      response = await fetchWithTimeout(session.uploadUrl, {
+        method: "PUT",
+        headers: session.uploadHeaders ?? { "Content-Type": input.mimeType },
+        body: new Uint8Array(content)
+      });
+    } catch {
+      await this.failSession(tenantId, session.sessionId, "上传到对象存储失败");
+      throw new ServiceUnavailableException("上传到对象存储失败，请稍后重试");
+    }
+    if (!response.ok) {
+      await this.failSession(tenantId, session.sessionId, `对象存储返回 HTTP ${response.status}`);
+      throw new ServiceUnavailableException("上传到对象存储失败，请稍后重试");
+    }
+    return this.completeUpload(tenantId, session.sessionId, {}, owner);
+  }
+
+  /**
+   * 删除业务文件时使用。先在 provider 侧确认删除，再把 FileAsset 标为 deleted；
+   * provider 暂不可用时标记 delete_pending，避免把一个实际上仍存在的对象伪装成
+   * 已删除。后台清理循环会继续重试 pending 状态。
+   */
+  async deleteFileAsset(tenantId: string, fileAssetId: string, owner?: FileBusinessOwner) {
+    const asset = await this.prisma.fileAsset.findFirst({ where: { id: fileAssetId, tenantId } });
+    if (!asset || (owner && !this.matchesOwner(asset, owner)) || !["active", "delete_pending", "deleted"].includes(asset.status)) {
+      throw new NotFoundException("文件不存在或不属于当前业务对象");
+    }
+    if (owner?.workspaceId) await this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? "", owner.workspaceId);
+    if (asset.status === "deleted") return { fileAssetId, status: "deleted" as const };
+
+    if (asset.storageProvider !== "local_mock") {
+      try {
+        const config = await this.integrations.runtimeConfig("file", tenantId, asset.storageProvider as never);
+        if (!config || !(await this.deleteObject(config, asset.storageKey, new Date()))) throw new ServiceUnavailableException("对象存储未确认删除文件");
+      } catch {
+        await this.prisma.fileAsset.updateMany({
+          where: { id: fileAssetId, tenantId, status: { in: ["active", "delete_pending"] } },
+          data: { status: "delete_pending" }
+        });
+        await this.operationLog?.record({ tenantId, action: "file.delete.pending", targetType: "file", targetId: fileAssetId, detail: "对象存储删除待重试", metadata: { provider: asset.storageProvider } });
+        throw new ServiceUnavailableException("对象存储暂不可用，文件删除已进入重试队列");
+      }
+    }
+    await this.prisma.fileAsset.updateMany({
+      where: { id: fileAssetId, tenantId, status: { in: ["active", "delete_pending"] } },
+      data: { status: "deleted" }
+    });
+    await this.operationLog?.record({ tenantId, action: "file.delete", targetType: "file", targetId: fileAssetId, detail: "删除业务文件", metadata: { provider: asset.storageProvider } });
+    return { fileAssetId, status: "deleted" as const };
+  }
+
+  /**
    * 过期上传会话的可重复清理。先把会话抢占为 cleanup_in_progress，再删除对象，
    * 最后把元数据置为 failed；对象删除失败会保留 cleanupError，下一次运维执行可重试。
    */
@@ -339,6 +423,63 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
       }
     }
     return summary;
+  }
+
+  /** 删除业务记录已经从页面移除、但 provider 暂时不可达的文件。 */
+  async cleanupPendingFileAssetDeletes(tenantId: string, limit = 50) {
+    const rows = await this.prisma.fileAsset.findMany({
+      where: { tenantId, status: { in: ["delete_pending", "delete_in_progress"] } },
+      orderBy: { updatedAt: "asc" },
+      take: Math.max(1, Math.min(limit, 100))
+    });
+    let deleted = 0;
+    let pending = 0;
+    for (const row of rows) {
+      const claimed = await this.prisma.fileAsset.updateMany({
+        where: { id: row.id, tenantId, status: { in: ["delete_pending", "delete_in_progress"] } },
+        data: { status: "delete_in_progress" }
+      });
+      if (claimed.count !== 1) continue;
+      try {
+        if (row.storageProvider !== "local_mock") {
+          const config = await this.integrations.runtimeConfig("file", tenantId, row.storageProvider as never);
+          if (!config || !(await this.deleteObject(config, row.storageKey, new Date()))) throw new ServiceUnavailableException("对象存储未确认删除文件");
+        }
+        await this.prisma.fileAsset.updateMany({ where: { id: row.id, tenantId, status: "delete_in_progress" }, data: { status: "deleted" } });
+        deleted += 1;
+      } catch {
+        await this.prisma.fileAsset.updateMany({ where: { id: row.id, tenantId, status: "delete_in_progress" }, data: { status: "delete_pending" } });
+        pending += 1;
+      }
+    }
+    if (deleted || pending) {
+      await this.operationLog?.record({ tenantId, action: "file.delete.cleanup", targetType: "file", detail: "重试待删除业务文件", metadata: { scanned: rows.length, deleted, pending } });
+    }
+    return { scanned: rows.length, deleted, pending };
+  }
+
+  async cleanupPendingFileAssetDeletesForAllTenants(limitPerTenant = 50) {
+    const tenants = await this.prisma.fileAsset.findMany({
+      where: { status: { in: ["delete_pending", "delete_in_progress"] } },
+      select: { tenantId: true },
+      distinct: ["tenantId"],
+      orderBy: { tenantId: "asc" },
+      take: 1000
+    });
+    let scanned = 0;
+    let deleted = 0;
+    let pending = 0;
+    for (const tenant of tenants) {
+      try {
+        const result = await this.cleanupPendingFileAssetDeletes(tenant.tenantId, limitPerTenant);
+        scanned += result.scanned;
+        deleted += result.deleted;
+        pending += result.pending;
+      } catch {
+        // 一个租户的 provider 配置异常不能阻断其他租户的文件清理。
+      }
+    }
+    return { scanned, deleted, pending };
   }
 
   async completeUpload(

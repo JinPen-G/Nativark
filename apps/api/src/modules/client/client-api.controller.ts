@@ -46,6 +46,7 @@ interface ClientRequest {
 interface ClientBinaryResponse {
   setHeader(name: string, value: string): void;
   send(body: Buffer): void;
+  redirect(status: number, url: string): void;
 }
 
 function currentClient(req: ClientRequest): ClientSessionContext {
@@ -219,6 +220,10 @@ export class ClientApiController {
   @Get("catalog/items/:itemGroupId/images/:imageId")
   async catalogImage(@Req() req: ClientRequest, @Param("itemGroupId") itemGroupId: string, @Param("imageId") imageId: string, @Res() res: ClientBinaryResponse) {
     const image = await this.api.readCatalogItemImage(currentClient(req), itemGroupId, imageId);
+    if ("redirectUrl" in image) {
+      res.redirect(302, image.redirectUrl!);
+      return;
+    }
     res.setHeader("Content-Type", image.mimeType);
     res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(image.fileName)}`);
     res.setHeader("Cache-Control", "private, max-age=300");
