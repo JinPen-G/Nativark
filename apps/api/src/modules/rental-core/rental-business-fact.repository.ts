@@ -1,4 +1,4 @@
-import { ConflictException, Injectable } from "@nestjs/common";
+import { ConflictException, ForbiddenException, Injectable } from "@nestjs/common";
 import { Prisma, type $Enums } from "@prisma/client";
 import type {
   RentalCategoryCode,
@@ -95,12 +95,14 @@ export interface RentalBusinessFactStore {
   ): Promise<"inserted" | "duplicate">;
   reserveSmsRate(
     tenantId: string,
+    workspaceId: string,
     recipientFingerprint: string,
     at: string,
     tx?: RentalBusinessFactTx
   ): Promise<{ allowed: boolean; retryAt: string }>;
   releaseSmsRate(
     tenantId: string,
+    workspaceId: string,
     recipientFingerprint: string,
     at: string,
     tx?: RentalBusinessFactTx
@@ -704,6 +706,7 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
    */
   async reserveSmsRate(
     tenantId: string,
+    workspaceId: string,
     recipientFingerprint: string,
     at: string,
     tx?: RentalBusinessFactTx
@@ -715,17 +718,22 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
     const recipientLimit = 3;
     const workspaceLimit = 120;
     const run = async (client: Prisma.TransactionClient | PrismaService) => {
-      const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
+      const scopedWorkspace = await client.businessWorkspace.findFirst({
+        where: { tenantId, id: workspaceId.trim() },
+        select: { id: true }
+      });
+      if (!scopedWorkspace) throw new ForbiddenException("短信限流空间不属于当前租户，拒绝访问");
+      const scopedWorkspaceId = scopedWorkspace.id;
       const reserve = async (scopeKey: string, bucketStart: Date, limit: number) => {
         try {
           await client.rentalNotificationRateBucket.create({
-            data: { tenantId, workspaceId, scopeKey, bucketStart }
+            data: { tenantId, workspaceId: scopedWorkspaceId, scopeKey, bucketStart }
           });
         } catch (error) {
           if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002")) throw error;
         }
         const result = await client.rentalNotificationRateBucket.updateMany({
-          where: { tenantId, workspaceId, scopeKey, bucketStart, count: { lt: limit } },
+          where: { tenantId, workspaceId: scopedWorkspaceId, scopeKey, bucketStart, count: { lt: limit } },
           data: { count: { increment: 1 } }
         });
         return result.count === 1;
@@ -737,7 +745,7 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       }
       if (!await reserve("workspace", workspaceBucketStart, workspaceLimit)) {
         await client.rentalNotificationRateBucket.updateMany({
-          where: { tenantId, workspaceId, scopeKey: recipientScope, bucketStart: recipientBucketStart, count: { gt: 0 } },
+          where: { tenantId, workspaceId: scopedWorkspaceId, scopeKey: recipientScope, bucketStart: recipientBucketStart, count: { gt: 0 } },
           data: { count: { decrement: 1 } }
         });
         return { allowed: false, retryAt: new Date(workspaceBucketStart.getTime() + 60 * 1000).toISOString() };
@@ -749,6 +757,7 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
 
   async releaseSmsRate(
     tenantId: string,
+    workspaceId: string,
     recipientFingerprint: string,
     at: string,
     tx?: RentalBusinessFactTx
@@ -758,13 +767,18 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
     const recipientBucketStart = new Date(Math.floor(nowMs / (10 * 60 * 1000)) * 10 * 60 * 1000);
     const workspaceBucketStart = new Date(Math.floor(nowMs / (60 * 1000)) * 60 * 1000);
     const run = async (client: Prisma.TransactionClient | PrismaService) => {
-      const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
+      const scopedWorkspace = await client.businessWorkspace.findFirst({
+        where: { tenantId, id: workspaceId.trim() },
+        select: { id: true }
+      });
+      if (!scopedWorkspace) throw new ForbiddenException("短信限流空间不属于当前租户，拒绝访问");
+      const scopedWorkspaceId = scopedWorkspace.id;
       await client.rentalNotificationRateBucket.updateMany({
-        where: { tenantId, workspaceId, scopeKey: `recipient:${recipientFingerprint}`, bucketStart: recipientBucketStart, count: { gt: 0 } },
+        where: { tenantId, workspaceId: scopedWorkspaceId, scopeKey: `recipient:${recipientFingerprint}`, bucketStart: recipientBucketStart, count: { gt: 0 } },
         data: { count: { decrement: 1 } }
       });
       await client.rentalNotificationRateBucket.updateMany({
-        where: { tenantId, workspaceId, scopeKey: "workspace", bucketStart: workspaceBucketStart, count: { gt: 0 } },
+        where: { tenantId, workspaceId: scopedWorkspaceId, scopeKey: "workspace", bucketStart: workspaceBucketStart, count: { gt: 0 } },
         data: { count: { decrement: 1 } }
       });
     };

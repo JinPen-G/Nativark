@@ -3703,8 +3703,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     if (realSms && !this.secretBox) throw new ServiceUnavailableException("短信通知安全组件未就绪");
     const recipientFingerprint = realSms ? this.secretBox!.fingerprint(canonicalSmsRecipient(input.recipient)) : undefined;
     const rateAt = realSms ? stamp() : undefined;
+    const workspaceId = this.workspaceOf(tenantId);
     if (realSms) {
-      const rate = await this.factStore.reserveSmsRate(tenantId, recipientFingerprint!, rateAt!, tx);
+      const rate = await this.factStore.reserveSmsRate(tenantId, workspaceId, recipientFingerprint!, rateAt!, tx);
       if (!rate.allowed) {
         throw new HttpException(`短信发送频率已达到安全上限，请于 ${rate.retryAt} 后重试`, HttpStatus.TOO_MANY_REQUESTS);
       }
@@ -3732,12 +3733,12 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     try {
       outcome = await this.factStore.insertNotificationLog(log, tx, recipientEncrypted, recipientFingerprint);
     } catch (error) {
-      if (realSms) await this.factStore.releaseSmsRate(tenantId, recipientFingerprint!, rateAt!, tx);
+      if (realSms) await this.factStore.releaseSmsRate(tenantId, workspaceId, recipientFingerprint!, rateAt!, tx);
       throw error;
     }
     // 唯一键撞了 → 说明这条业务事件已发过；不是错误，静默跳过不重复通知。
     if (outcome === "duplicate") {
-      if (realSms) await this.factStore.releaseSmsRate(tenantId, recipientFingerprint!, rateAt!, tx);
+      if (realSms) await this.factStore.releaseSmsRate(tenantId, workspaceId, recipientFingerprint!, rateAt!, tx);
       return undefined;
     }
     // 事务路径下不动缓存：回滚后内存里会留下库中不存在的幽灵通知记录。
@@ -3791,7 +3792,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       return latest?.log ?? current.log;
     }
     if (!rateReserved) {
-      const rate = await this.factStore.reserveSmsRate(tenantId, this.secretBox!.fingerprint(canonicalSmsRecipient(phone)), now.toISOString());
+      const rate = await this.factStore.reserveSmsRate(tenantId, this.workspaceOf(tenantId), this.secretBox!.fingerprint(canonicalSmsRecipient(phone)), now.toISOString());
       if (!rate.allowed) {
         const updated = await this.factStore.updateNotificationDelivery(tenantId, id, {
           status: "failed",

@@ -5,7 +5,11 @@ const { RentalBusinessFactRepository } = require("../apps/api/dist/modules/renta
 const buckets = new Map();
 const prisma = {
   businessWorkspace: {
-    findFirst: async () => ({ id: "workspace-1" })
+    findFirst: async ({ where }) => where.tenantId === "tenant-1" && ["workspace-1", "workspace-2"].includes(where.id)
+      ? { id: where.id }
+      : where.tenantId === "tenant-2" && where.id === "workspace-3"
+        ? { id: where.id }
+        : null
   },
   rentalNotificationRateBucket: {
     create: async ({ data }) => {
@@ -37,17 +41,19 @@ async function main() {
   const repo = new RentalBusinessFactRepository(prisma);
   const at = "2026-09-14T10:05:00.000Z";
   for (let i = 0; i < 3; i++) {
-    const result = await repo.reserveSmsRate("tenant-1", "fingerprint-1", at);
+    const result = await repo.reserveSmsRate("tenant-1", "workspace-1", "fingerprint-1", at);
     assert.equal(result.allowed, true);
   }
-  const blocked = await repo.reserveSmsRate("tenant-1", "fingerprint-1", at);
+  const blocked = await repo.reserveSmsRate("tenant-1", "workspace-1", "fingerprint-1", at);
   assert.equal(blocked.allowed, false, "同一手机号十分钟内超过 3 条必须阻断");
-  const otherRecipient = await repo.reserveSmsRate("tenant-1", "fingerprint-2", at);
+  const otherRecipient = await repo.reserveSmsRate("tenant-1", "workspace-1", "fingerprint-2", at);
   assert.equal(otherRecipient.allowed, true, "不同收件人不应共用手机号频率桶");
-  const otherTenant = await repo.reserveSmsRate("tenant-2", "fingerprint-1", at);
+  const otherTenant = await repo.reserveSmsRate("tenant-2", "workspace-3", "fingerprint-1", at);
   assert.equal(otherTenant.allowed, true, "不同租户不应共用频率桶");
-  await repo.releaseSmsRate("tenant-1", "fingerprint-1", at);
-  const released = await repo.reserveSmsRate("tenant-1", "fingerprint-1", at);
+  const otherWorkspace = await repo.reserveSmsRate("tenant-1", "workspace-2", "fingerprint-1", at);
+  assert.equal(otherWorkspace.allowed, true, "同租户不同经营空间不应共用频率桶");
+  await repo.releaseSmsRate("tenant-1", "workspace-1", "fingerprint-1", at);
+  const released = await repo.reserveSmsRate("tenant-1", "workspace-1", "fingerprint-1", at);
   assert.equal(released.allowed, true, "幂等重复或落库失败释放预留后，不应错误消耗频率额度");
   console.log("sms rate limit tests passed");
 }
