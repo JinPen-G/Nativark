@@ -43,6 +43,7 @@ import { TenantIntegrationService } from "../integrations/tenant-integration.ser
 import { PaymentRuntimeService } from "../integrations/payment.runtime.service";
 import { FileStorageRuntimeService } from "../integrations/file-storage.runtime.service";
 import { ClientAuthService, type ClientRequestContext } from "./client-auth.service";
+import { RentalDocumentService } from "../rental-core/rental-document.service";
 
 interface ClientOrderRequestContext {
   headers?: Record<string, unknown>;
@@ -70,7 +71,8 @@ export class ClientApiService {
     private readonly serviceCapacities: RentalServiceCapacityService,
     private readonly tenantIntegrations: TenantIntegrationService,
     private readonly payments: PaymentRuntimeService,
-    private readonly files: FileStorageRuntimeService
+    private readonly files: FileStorageRuntimeService,
+    private readonly documents: RentalDocumentService
   ) {}
 
   private context(tenantId: string): BusinessContext {
@@ -687,6 +689,21 @@ export class ClientApiService {
       effectiveEndAt: order.effectiveEndAt,
       allocations: order.allocations?.map((row) => ({ id: row.id, orderLineId: row.orderLineId, quantity: row.quantity, status: row.status, assetNo: row.assetNo })) ?? []
     };
+  }
+
+  /**
+   * APP-01：客户端订单凭证必须先通过会员自己的订单归属校验，
+   * 再复用后台同一份服务端快照渲染器。客户端不传 workspaceId，
+   * 当前空间由客户端会话和请求上下文决定；结算凭证只展示该会员订单的
+   * 资金汇总，不把后台财务权限或内部费用裁定字段带给客户端。
+   */
+  async orderDocument(context: ClientRequestContext, orderId: string, documentType: string) {
+    await this.assertClientOrder(context, orderId);
+    const business = this.context(context.tenantId);
+    return this.documents.render(context.tenantId, orderId, documentType, {
+      includeFinancial: documentType === "settlement",
+      terminology: business.profile.terminology
+    });
   }
 
   async cancelOrder(context: ClientRequestContext, orderId: string, input: { reason: string }, requestContext?: ClientOrderRequestContext) {

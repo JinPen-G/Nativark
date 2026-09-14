@@ -278,6 +278,11 @@ export class ClientApiController {
     return this.api.fulfillment(currentClient(req), id);
   }
 
+  @Get("orders/:id/documents/:type")
+  orderDocument(@Req() req: ClientRequest, @Param("id") id: string, @Param("type") type: string) {
+    return this.api.orderDocument(currentClient(req), id, type);
+  }
+
   @Post("orders/:id/cancel")
   cancelOrder(@Req() req: ClientRequest, @Param("id") id: string, @Body() body: ClientCancelOrderRequestDto) {
     return this.api.cancelOrder(currentClient(req), id, body, req);
