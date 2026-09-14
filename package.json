@@ -133,6 +133,7 @@
     "test:tax": "npm run build -w @rental-os/shared && node tests/rental-tax.test.cjs",
     "test:currency": "npm run build -w @rental-os/shared && node tests/rental-currency.test.cjs",
     "test:workbench-todos": "npm run build -w @rental-os/shared && node tests/rental-workbench-todos.test.cjs",
+    "test:rental-document-renderer": "npm run build -w @rental-os/shared && npm run build -w @rental-os/api && node tests/rental-document-renderer.test.cjs",
     "test:access-page-mutations": "node tests/access-page-mutations.test.cjs"
   },
   "devDependencies": {

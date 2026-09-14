@@ -439,6 +439,11 @@ export function requiredPermissions(method: string, path: string) {
   if (path === "/rental/v1/orders") {
     return method === "GET" ? ["rental-os:order:view"] : ["rental-os:order:operate", "rental-os:order:create"];
   }
+  // DOC-PRINT-01：订单客户凭证只读订单历史快照；结算里的资金汇总由控制器
+  // 再按 finance:view/reconcile 做字段级裁剪，不能因为下载凭证自动获得资金明细。
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/documents\/(quote|delivery|return|settlement)$/u)) {
+    return ["rental-os:order:view"];
+  }
   // RULE-CLOSE-01：待支付超时只能由订单操作权限触发，不能因为静态路径被通用订单详情规则放行。
   if (path === "/rental/v1/orders/expire-pending" || path === "/rental/v1/orders/reconcile-pickup-overdue" || path.match(/^\/rental\/v1\/orders\/[^/]+\/(?:expire-pending|mark-pickup-overdue|no-show-notice|confirm-no-show)$/u)) {
     return ["rental-os:order:operate"];

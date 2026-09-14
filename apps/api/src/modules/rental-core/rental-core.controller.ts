@@ -75,6 +75,7 @@ import { PrismaService } from "../database/prisma.service";
 import { RentalServiceCapacityService } from "./rental-service-capacity.service";
 import { extensionRequestKey } from "./rental-service-occurrence";
 import { RentalFundingService } from "./rental-funding.service";
+import { RentalDocumentService } from "./rental-document.service";
 import { buildRentalWorkbenchTodos, canIncludeWorkbenchOrderTodos, canIncludeWorkbenchWorkOrders } from "./rental-workbench-todos";
 import { validateInspectionCustomerResponse } from "./rental-inspection-customer-response";
 import { serviceCancellationAmounts, type ServiceCancellationSelection } from "./rental-service-cancellation";
@@ -184,7 +185,8 @@ export class RentalCoreController {
     private readonly workspaceReports: RentalWorkspaceReportRepository,
     private readonly prisma: PrismaService,
     private readonly serviceCapacities: RentalServiceCapacityService,
-    private readonly funding: RentalFundingService
+    private readonly funding: RentalFundingService,
+    private readonly documents: RentalDocumentService
   ) {}
 
   private context(tenantId: string): BusinessContext {
@@ -687,6 +689,16 @@ export class RentalCoreController {
     return buildRentalWorkbenchTodos(orders, workOrders, fundingByOrderId, extensionsByOrderId, notificationLogs);
   }
   @Get("orders") orders(@Req() req: AuthenticatedRequest) { return this.service.listOrders(req.user.tenantId); }
+  /**
+   * DOC-PRINT-01：订单详情页与 APP 统一读取同一份服务端客户凭证快照。
+   * 资金聚合只有财务查看/对账权限时才加入；没有该权限仍可得到脱敏结算凭证，
+   * 但不会因为查看订单而旁路读取押金、预授权或收退款明细。
+   */
+  @Get("orders/:id/documents/:type")
+  async orderDocument(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Param("type") type: string) {
+    const includeFinancial = hasPermissionCode(req.user, "rental-os:finance:view") || hasPermissionCode(req.user, "rental-os:finance:reconcile");
+    return this.documents.render(req.user.tenantId, id, type, { includeFinancial });
+  }
   @Get("orders/:id") order(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.service.getOrder(req.user.tenantId, id); }
   @Post("orders") async createOrder(@Req() req: AuthenticatedRequest, @Body() body: CreateRentalOrderDto) {
     const context = this.context(req.user.tenantId);

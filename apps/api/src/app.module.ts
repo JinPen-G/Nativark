@@ -54,6 +54,7 @@ import { RentalBusinessFactRepository } from "./modules/rental-core/rental-busin
 import { RentalIdempotencyRepository } from "./modules/rental-core/rental-idempotency.repository";
 import { RentalIdempotentActionService } from "./modules/rental-core/rental-idempotent-action.service";
 import { RentalFundingService } from "./modules/rental-core/rental-funding.service";
+import { RentalDocumentService } from "./modules/rental-core/rental-document.service";
 import { RentalOrderConfirmationService } from "./modules/rental-core/rental-order-confirmation.service";
 import { WorkspaceCapabilityController } from "./modules/rental-core/workspace-capability.controller";
 import { WorkspaceCapabilityRepository } from "./modules/rental-core/workspace-capability.repository";
@@ -120,6 +121,7 @@ import { ClientApiRateLimitService } from "./modules/client/client-api-rate-limi
     RentalIdempotencyRepository,
     RentalIdempotentActionService,
     RentalFundingService,
+    RentalDocumentService,
     RentalOrderConfirmationService,
     RentalServiceCapacityService,
     WorkspaceCapabilityRepository,
