@@ -76,6 +76,7 @@ import { extensionRequestKey } from "./rental-service-occurrence";
 import { RentalFundingService } from "./rental-funding.service";
 import { buildRentalWorkbenchTodos, canIncludeWorkbenchOrderTodos, canIncludeWorkbenchWorkOrders } from "./rental-workbench-todos";
 import { validateInspectionCustomerResponse } from "./rental-inspection-customer-response";
+import { serviceCancellationAmounts, type ServiceCancellationSelection } from "./rental-service-cancellation";
 
 /** 读取标准 Idempotency-Key 请求头。大小写不敏感，超长键直接拒绝。 */
 /**
@@ -499,28 +500,32 @@ export class RentalCoreController {
     }
     if (body.lineIds?.length || body.items?.length) throw new BadRequestException("服务取消不能同时提交商品取消项");
     const serviceOccurrenceIds = [...new Set((body.serviceOccurrenceIds ?? []).map((value) => value.trim()).filter(Boolean))];
-    if (!serviceOccurrenceIds.length || serviceOccurrenceIds.length !== (body.serviceOccurrenceIds ?? []).length) {
-      throw new BadRequestException("请选择至少一项且不重复的增值服务");
+    const serviceItems = (body.serviceItems ?? []).map((item) => ({ occurrenceId: item.occurrenceId.trim(), quantity: Number(item.quantity) }));
+    if (serviceOccurrenceIds.length && serviceItems.length) throw new BadRequestException("整项取消与按数量取消只能选择一种");
+    if (!serviceOccurrenceIds.length && !serviceItems.length) throw new BadRequestException("请选择至少一项且不重复的增值服务");
+    const selections: ServiceCancellationSelection[] = serviceItems.length
+      ? serviceItems
+      : serviceOccurrenceIds.map((occurrenceId) => ({ occurrenceId, quantity: 0 }));
+    if (new Set(selections.map((item) => item.occurrenceId)).size !== selections.length || selections.some((item) => !item.occurrenceId || !Number.isInteger(item.quantity) || item.quantity < 0)) {
+      throw new BadRequestException("请选择有效且不重复的增值服务取消项");
     }
     const occurrences = order.serviceSnapshots ?? [];
-    const selectedServices = serviceOccurrenceIds.map((occurrenceId) => {
-      const occurrence = occurrences.find((row) => row.occurrenceId === occurrenceId);
+    const selectedServices = selections.map((selection) => {
+      const occurrence = occurrences.find((row) => row.occurrenceId === selection.occurrenceId);
       if (!occurrence) throw new ConflictException("存在不存在或不属于当前订单的服务发生项");
       const status = occurrence.executionStatus ?? "not_started";
       if (status !== "not_started") throw new ConflictException(`服务「${occurrence.serviceName}」已经开始或结束，不能从取货前变更取消`);
       if (occurrence.requiredByRule) throw new ConflictException(`服务「${occurrence.serviceName}」属于业务规则要求，不能直接取消`);
       if (occurrence.refundStatus && occurrence.refundStatus !== "none") throw new ConflictException(`服务「${occurrence.serviceName}」已有退款处理记录`);
-      return occurrence;
+      const quantity = selection.quantity || occurrence.quantity;
+      if (!Number.isInteger(quantity) || quantity < 1 || quantity > occurrence.quantity) throw new ConflictException(`服务「${occurrence.serviceName}」最多可取消 ${occurrence.quantity} 份`);
+      if (occurrence.requiresCapacity && occurrence.capacityQuantity !== occurrence.quantity) throw new ConflictException(`服务「${occurrence.serviceName}」的容量快照不支持安全拆分，请人工处理`);
+      return { occurrence, selection: { occurrenceId: selection.occurrenceId, quantity } };
     });
-    const netAmountOf = (row: typeof selectedServices[number]) => {
-      const gross = Math.max(0, Number(row.amount ?? 0) || 0);
-      const discount = Math.max(0, Number(row.discountAllocatedAmount ?? 0) || 0);
-      const coupon = Math.max(0, Number(row.couponAllocatedAmount ?? 0) || 0);
-      return Math.max(0, gross - discount - coupon);
-    };
+    const normalizedServiceItems = selectedServices.map((row) => row.selection);
     const priced = await this.business.quoteOrderServiceCancellation(tenantId, this.context(tenantId), {
       order,
-      serviceOccurrenceIds
+      serviceItems: normalizedServiceItems
     });
     const differenceAmount = priced.payableAmount;
     const activeLineIds = order.lines
@@ -530,7 +535,8 @@ export class RentalCoreController {
       order,
       scope: "service" as const,
       selectedServices,
-      serviceOccurrenceIds,
+      serviceOccurrenceIds: serviceOccurrenceIds.length ? serviceOccurrenceIds : undefined,
+      serviceItems: serviceItems.length ? normalizedServiceItems : undefined,
       priced,
       preview: {
         orderId: order.id,
@@ -538,11 +544,11 @@ export class RentalCoreController {
         expectedUpdatedAt: order.updatedAt,
         cancelledLineIds: [],
         cancelledItems: [],
-        cancelledServices: selectedServices.map((row) => ({
-          occurrenceId: row.occurrenceId!,
-          serviceName: row.serviceName,
-          quantity: row.quantity,
-          refundAmount: Math.round(netAmountOf(row) * 100) / 100
+        cancelledServices: selectedServices.map(({ occurrence, selection }) => ({
+          occurrenceId: occurrence.occurrenceId!,
+          serviceName: occurrence.serviceName,
+          quantity: selection.quantity,
+          refundAmount: serviceCancellationAmounts(occurrence, selection.quantity).refundAmount
         })),
         remainingLineIds: activeLineIds,
         beforePayableAmount: order.finalPayableAmount,
@@ -555,7 +561,7 @@ export class RentalCoreController {
         currency: priced.currency,
         pricingSnapshot: undefined,
         resourceRelease: [],
-        serviceResourceRelease: selectedServices.map((row) => ({ occurrenceId: row.occurrenceId!, serviceName: row.serviceName, quantity: row.capacityQuantity })),
+        serviceResourceRelease: selectedServices.map(({ occurrence, selection }) => ({ occurrenceId: occurrence.occurrenceId!, serviceName: occurrence.serviceName, quantity: occurrence.requiresCapacity ? selection.quantity : 0 })),
         warnings: differenceAmount < 0
           ? ["服务退款按订单快照中的客户净支付计算，差额只记入退款待办，实际退款仍需通过支付退款流程完成"]
           : ["本次服务没有客户净支付，不产生退款，但会释放服务容量"]
@@ -1253,7 +1259,8 @@ export class RentalCoreController {
     const lineIds = body.lineIds?.map((value) => value.trim()).filter(Boolean).sort();
     const items = body.items?.map((item) => ({ lineId: item.lineId.trim(), quantity: item.quantity })).sort((a, b) => a.lineId.localeCompare(b.lineId));
     const serviceOccurrenceIds = body.serviceOccurrenceIds?.map((value) => value.trim()).filter(Boolean).sort();
-    const requestFingerprint = JSON.stringify({ type: body.type, lineIds: lineIds ?? [], items: items ?? [], serviceOccurrenceIds: serviceOccurrenceIds ?? [] });
+    const serviceItems = body.serviceItems?.map((item) => ({ occurrenceId: item.occurrenceId.trim(), quantity: item.quantity })).sort((a, b) => a.occurrenceId.localeCompare(b.occurrenceId));
+    const requestFingerprint = JSON.stringify({ type: body.type, lineIds: lineIds ?? [], items: items ?? [], serviceOccurrenceIds: serviceOccurrenceIds ?? [], serviceItems: serviceItems ?? [] });
     const explicitKey = idempotencyKeyOf(req);
     const fallbackKey = `order.change.partial-cancel:${id}:${createHash("sha256").update(requestFingerprint).digest("hex")}`;
     const result = await this.idempotent.execute({
@@ -1261,11 +1268,11 @@ export class RentalCoreController {
       action: "order.change.partial-cancel",
       key: explicitKey,
       fallbackKey,
-      request: { orderId: id, ...body, lineIds, items },
+      request: { orderId: id, ...body, lineIds, items, serviceItems },
       orderId: id,
       run: async (tx) => {
         const priced = body.type === "service_cancel"
-          ? await this.priceServiceCancellation(tenantId, id, { type: body.type, lineIds, items, serviceOccurrenceIds }, tx)
+          ? await this.priceServiceCancellation(tenantId, id, { type: body.type, lineIds, items, serviceOccurrenceIds, serviceItems }, tx)
           : await this.priceLineCancellation(tenantId, id, { type: body.type, lineIds, items }, tx);
         if (body.expectedUpdatedAt !== priced.order.updatedAt) throw new ConflictException("订单已发生变化，请重新试算后再提交");
         if (!body.customerConfirmed) throw new ConflictException("必须先取得客户确认才能应用订单变更");
@@ -1287,7 +1294,8 @@ export class RentalCoreController {
             type: priced.scope === "service" ? "service_cancel" : "partial_line_cancel",
             lineIds: priced.scope === "line" ? priced.cancellationItems.map((item) => item.lineId) : undefined,
             items: priced.scope === "line" ? priced.cancellationItems.map((item) => ({ lineId: item.lineId, quantity: item.quantity })) : undefined,
-            serviceOccurrenceIds: priced.scope === "service" ? priced.serviceOccurrenceIds : undefined
+            serviceOccurrenceIds: priced.scope === "service" ? priced.serviceOccurrenceIds : undefined,
+            serviceItems: priced.scope === "service" ? priced.serviceItems : undefined
           },
           explicitKey ?? fallbackKey,
           req.user.displayName,

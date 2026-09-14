@@ -107,6 +107,7 @@ import {
 } from "./rental-core-fact.repository";
 import { assertRentalCategoryExtensions } from "./rental-extension-registry";
 import { appendOccurrences, extensionRequestKey, stampOccurrences } from "./rental-service-occurrence";
+import { serviceCancellationAmounts, type ServiceCancellationSelection } from "./rental-service-cancellation";
 import { buildRentalCategorySamples } from "./rental-category-samples";
 import { evaluateRentalQualification } from "./rental-qualification";
 import { RentalServiceCapacityService } from "./rental-service-capacity.service";
@@ -2400,7 +2401,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     tenantId: string,
     orderId: string,
     priced: RentalOrderExtensionPreview & { rateSnapshot: RentalPricingRate[]; ruleSnapshot: RentalRuleConfig },
-    input: { type: "partial_line_cancel" | "service_cancel"; lineIds?: string[]; items?: Array<{ lineId: string; quantity: number }>; serviceOccurrenceIds?: string[]; reason: string; customerConfirmed: boolean; expectedUpdatedAt: string },
+    input: { type: "partial_line_cancel" | "service_cancel"; lineIds?: string[]; items?: Array<{ lineId: string; quantity: number }>; serviceOccurrenceIds?: string[]; serviceItems?: ServiceCancellationSelection[]; reason: string; customerConfirmed: boolean; expectedUpdatedAt: string },
     idempotencyKey: string,
     operator: string,
     tx: RentalFactTx
@@ -2435,6 +2436,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       return this.applyServiceCancellation(tenantId, order, priced, {
         type: "service_cancel",
         serviceOccurrenceIds: input.serviceOccurrenceIds,
+        serviceItems: input.serviceItems,
         reason: input.reason,
         customerConfirmed: input.customerConfirmed,
         expectedUpdatedAt: input.expectedUpdatedAt
@@ -2592,57 +2594,80 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     return { order, change };
   }
 
-  /** ORDER-CHANGE-01C：在同一订单事务中取消服务发生项并释放它自己的容量预留。 */
+  /** ORDER-CHANGE-01C/01D：在同一订单事务中取消服务发生项并释放它自己的容量预留。 */
   private async applyServiceCancellation(
     tenantId: string,
     order: RentalOrder,
     priced: RentalOrderExtensionPreview & { rateSnapshot: RentalPricingRate[]; ruleSnapshot: RentalRuleConfig },
-    input: { type: "service_cancel"; serviceOccurrenceIds?: string[]; reason: string; customerConfirmed: boolean; expectedUpdatedAt: string },
+    input: { type: "service_cancel"; serviceOccurrenceIds?: string[]; serviceItems?: ServiceCancellationSelection[]; reason: string; customerConfirmed: boolean; expectedUpdatedAt: string },
     previousChanges: RentalOrderChange[],
     idempotencyKey: string,
     operator: string,
     tx: RentalFactTx
   ): Promise<{ order: RentalOrder; change: RentalOrderChange }> {
     const ids = [...new Set((input.serviceOccurrenceIds ?? []).map((value) => value.trim()).filter(Boolean))];
-    if (!ids.length || ids.length !== (input.serviceOccurrenceIds ?? []).length) throw new BadRequestException("请选择至少一项且不重复的增值服务");
+    const requested = input.serviceItems?.length
+      ? input.serviceItems.map((item) => ({ occurrenceId: item.occurrenceId.trim(), quantity: Number(item.quantity) }))
+      : ids.map((occurrenceId) => ({ occurrenceId, quantity: 0 }));
+    if (!requested.length || new Set(requested.map((item) => item.occurrenceId)).size !== requested.length) throw new BadRequestException("请选择至少一项且不重复的增值服务");
     const occurrences = [...(order.serviceSnapshots ?? [])];
-    const selected = ids.map((occurrenceId) => {
-      const row = occurrences.find((item) => item.occurrenceId === occurrenceId);
+    const selected = requested.map((selection) => {
+      const row = occurrences.find((item) => item.occurrenceId === selection.occurrenceId);
       if (!row) throw new ConflictException("存在不存在或不属于当前订单的服务发生项");
       if ((row.executionStatus ?? "not_started") !== "not_started") throw new ConflictException(`服务「${row.serviceName}」已经开始或结束，不能取消`);
       if (row.requiredByRule) throw new ConflictException(`服务「${row.serviceName}」属于业务规则要求，不能直接取消`);
       if (row.refundStatus && row.refundStatus !== "none") throw new ConflictException(`服务「${row.serviceName}」已有退款处理记录`);
       if (row.requiresCapacity && !row.reservationKey) throw new ConflictException(`服务「${row.serviceName}」缺少容量预留依据，拒绝安全取消`);
-      return row;
+      const quantity = selection.quantity || row.quantity;
+      if (!Number.isInteger(quantity) || quantity < 1 || quantity > row.quantity) throw new ConflictException(`服务「${row.serviceName}」最多可取消 ${row.quantity} 份`);
+      if (row.requiresCapacity && row.capacityQuantity !== row.quantity) throw new ConflictException(`服务「${row.serviceName}」的容量快照不支持安全拆分，请人工处理`);
+      return { row, quantity };
     });
-    const reservationKeys = selected.map((row) => row.reservationKey).filter((value): value is string => Boolean(value));
+    const reservationKeys = selected.map(({ row }) => row.reservationKey).filter((value): value is string => Boolean(value));
     if (new Set(reservationKeys).size !== reservationKeys.length) throw new ConflictException("多个服务发生项共用了同一容量预留，拒绝重复释放");
-    const expectedRefund = roundMoney(selected.reduce((sum, row) => sum + Math.max(
-      0,
-      Number(row.amount ?? 0) - Number(row.discountAllocatedAmount ?? 0) - Number(row.couponAllocatedAmount ?? 0)
-    ), 0));
+    const expectedRefund = roundMoney(selected.reduce((sum, selection) => sum + serviceCancellationAmounts(selection.row, selection.quantity).refundAmount, 0));
     const differenceAmount = roundMoney(priced.pricingSnapshot?.differenceAmount ?? priced.payableAmount);
     if (differenceAmount !== roundMoney(-expectedRefund)) throw new ConflictException("服务退款试算与订单快照不一致，请重新试算");
     if (differenceAmount > 0.005 || priced.depositDelta > 0.005 || priced.preAuthDelta > 0.005) {
       throw new ConflictException("服务取消不能产生补款或新增押金/预授权");
     }
     const at = now();
-    const beforeServices = selected.map((row) => structuredClone(row));
-    for (const row of selected) {
+    const beforeServices = selected.map(({ row }) => structuredClone(row));
+    const beforeFinalPayableAmount = order.finalPayableAmount;
+    const beforeAdjustmentAmount = order.adjustmentAmount;
+    for (const selection of selected) {
+      const { row, quantity } = selection;
       const index = occurrences.findIndex((item) => item.occurrenceId === row.occurrenceId);
-      const refundAmount = roundMoney(Math.max(0, Number(row.amount ?? 0) - Number(row.discountAllocatedAmount ?? 0) - Number(row.couponAllocatedAmount ?? 0)));
-      occurrences[index] = {
-        ...row,
-        executionStatus: "cancelled",
-        actualEndAt: at,
-        failureReason: input.reason.trim(),
-        executedBy: operator,
-        refundAmount,
-        refundStatus: refundAmount > 0 ? "included_in_order_change" : "none"
-      };
+      const amounts = serviceCancellationAmounts(row, quantity);
+      const fullCancellation = quantity === row.quantity;
+      const remainingQuantity = row.quantity - quantity;
+      occurrences[index] = fullCancellation
+        ? {
+            ...row,
+            executionStatus: "cancelled",
+            actualEndAt: at,
+            failureReason: input.reason.trim(),
+            executedBy: operator,
+            refundAmount: amounts.refundAmount,
+            refundStatus: amounts.refundAmount > 0 ? "included_in_order_change" : "none"
+          }
+        : {
+            ...row,
+            quantity: remainingQuantity,
+            amount: amounts.remainingGross,
+            discountAllocatedAmount: amounts.remainingDiscount,
+            couponAllocatedAmount: amounts.remainingCoupon,
+            capacityQuantity: row.requiresCapacity ? row.capacityQuantity - quantity : row.capacityQuantity,
+            cancelledQuantity: (row.cancelledQuantity ?? 0) + quantity,
+            formula: `${row.unitPrice} × ${remainingQuantity} × ${row.billingUnits}`
+          };
       if (row.requiresCapacity && row.reservationKey) {
         if (!this.serviceCapacities) throw new ConflictException("服务容量履约组件未就绪，拒绝只写服务取消状态");
-        await this.serviceCapacities.releaseForOccurrence(tenantId, order.id, row.reservationKey, "order_change_service_cancel", at, tx);
+        if (fullCancellation) {
+          await this.serviceCapacities.releaseForOccurrence(tenantId, order.id, row.reservationKey, "order_change_service_cancel", at, tx);
+        } else {
+          await this.serviceCapacities.releaseQuantityForOccurrence(tenantId, order.id, row.reservationKey, quantity, "order_change_service_partial_cancel", at, tx);
+        }
       }
     }
     order.serviceSnapshots = occurrences;
@@ -2655,12 +2680,13 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       detail: input.reason.trim()
     });
     order.updatedAt = at;
-    const afterServices = occurrences.filter((row) => ids.includes(row.occurrenceId ?? "")).map((row) => structuredClone(row));
+    const selectedIds = selected.map(({ row }) => row.occurrenceId).filter((value): value is string => Boolean(value));
+    const afterServices = occurrences.filter((row) => selectedIds.includes(row.occurrenceId ?? "")).map((row) => structuredClone(row));
     const beforeSnapshot: Record<string, unknown> = {
       updatedAt: input.expectedUpdatedAt,
       status: order.status,
-      finalPayableAmount: roundMoney(order.finalPayableAmount - differenceAmount),
-      adjustmentAmount: roundMoney(order.adjustmentAmount - differenceAmount),
+      finalPayableAmount: beforeFinalPayableAmount,
+      adjustmentAmount: beforeAdjustmentAmount,
       serviceSnapshots: beforeServices
     };
     const afterSnapshot: Record<string, unknown> = {
@@ -2673,13 +2699,13 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const change: RentalOrderChange = {
       id: randomUUID(), tenantId, workspaceId: this.resolveWorkspaceId(tenantId), orderId: order.id,
       sequence: previousChanges.length + 1, type: "service_cancel", status: "applied",
-      request: { ...input, serviceOccurrenceIds: ids }, beforeSnapshot, afterSnapshot,
+      request: { ...input, serviceOccurrenceIds: ids.length ? ids : undefined, serviceItems: selected.map(({ row, quantity }) => ({ occurrenceId: row.occurrenceId!, quantity })) }, beforeSnapshot, afterSnapshot,
       diff: {
         scope: "services",
-        serviceOccurrenceIds: ids,
-        services: selected.map((row) => ({ occurrenceId: row.occurrenceId, serviceName: row.serviceName, quantity: row.quantity, refundAmount: roundMoney(Math.max(0, Number(row.amount ?? 0) - Number(row.discountAllocatedAmount ?? 0) - Number(row.couponAllocatedAmount ?? 0))) })),
+        serviceOccurrenceIds: selectedIds,
+        services: selected.map(({ row, quantity }) => ({ occurrenceId: row.occurrenceId, serviceName: row.serviceName, quantity, refundAmount: serviceCancellationAmounts(row, quantity).refundAmount, remainingQuantity: row.quantity - quantity })),
         differenceAmount, refundAmount: Math.max(0, -differenceAmount), additionalAmount: 0,
-        releasedServiceOccurrenceIds: selected.filter((row) => row.requiresCapacity).map((row) => row.occurrenceId)
+        releasedServiceOccurrenceIds: selected.filter(({ row }) => row.requiresCapacity).map(({ row }) => row.occurrenceId)
       },
       refundAmount: roundMoney(Math.max(0, -differenceAmount)), additionalAmount: 0,
       depositDelta: 0, preAuthDelta: 0, idempotencyKey, requestedBy: operator, appliedBy: operator,

@@ -105,6 +105,7 @@ import {
 import { RentalCoreConfigRepository, type RentalConfigStore, type RentalConfigTx } from "./rental-core-config.repository";
 import { PrismaService } from "../database/prisma.service";
 import { RentalServiceCapacityService } from "./rental-service-capacity.service";
+import { serviceCancellationAmounts, type ServiceCancellationSelection } from "./rental-service-cancellation";
 import { MembershipService } from "../platform/membership.service";
 import { DEFAULT_BUSINESS_TIME_ZONE, businessDateKey, businessTimeOfDay, businessDateKeyFromIndex, businessDayIndex, businessInstantAt, businessYearFromDateKey, isCalendarDateKey, businessHoursError } from "./rental-business-day";
 import {
@@ -6035,17 +6036,25 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     context: BusinessContext,
     args: {
       order: Pick<RentalOrder, "id" | "quoteId" | "endAt" | "payableAmount" | "finalPayableAmount" | "rentalAmount" | "serviceAmount" | "currency" | "priceVersionId" | "priceVersion" | "ruleVersion" | "calendarSnapshot" | "serviceSnapshots">;
-      serviceOccurrenceIds: string[];
+      serviceOccurrenceIds?: string[];
+      serviceItems?: ServiceCancellationSelection[];
     }
   ): Promise<RentalOrderExtensionPreview & { rateSnapshot: RentalPricingRate[]; ruleSnapshot: RentalRuleConfig }> {
     const quote = this.getQuote(tenantId, context, args.order.quoteId);
-    const selected = (args.order.serviceSnapshots ?? []).filter((row) => row.occurrenceId && args.serviceOccurrenceIds.includes(row.occurrenceId));
-    if (selected.length !== args.serviceOccurrenceIds.length) throw new ConflictException("存在不存在或不属于当前订单的服务发生项");
-    const refundAmount = roundMoney(selected.reduce((sum, row) => {
-      const gross = Math.max(0, Number(row.amount) || 0);
-      const discount = Math.max(0, Number(row.discountAllocatedAmount ?? 0) || 0);
-      const coupon = Math.max(0, Number(row.couponAllocatedAmount ?? 0) || 0);
-      return sum + Math.max(0, gross - discount - coupon);
+    const snapshots = args.order.serviceSnapshots ?? [];
+    const selections = args.serviceItems?.length
+      ? args.serviceItems
+      : (args.serviceOccurrenceIds ?? []).map((occurrenceId) => {
+        const row = snapshots.find((item) => item.occurrenceId === occurrenceId);
+        return { occurrenceId, quantity: row?.quantity ?? 0 };
+      });
+    if (!selections.length || new Set(selections.map((item) => item.occurrenceId)).size !== selections.length) {
+      throw new ConflictException("请选择至少一项且不重复的增值服务");
+    }
+    const refundAmount = roundMoney(selections.reduce((sum, selection) => {
+      const row = snapshots.find((item) => item.occurrenceId === selection.occurrenceId);
+      if (!row) throw new ConflictException("存在不存在或不属于当前订单的服务发生项");
+      return sum + serviceCancellationAmounts(row, selection.quantity).refundAmount;
     }, 0));
     const differenceAmount = roundMoney(-refundAmount);
     return {
@@ -6067,7 +6076,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       priceVersion: args.order.priceVersion ?? quote.priceVersion,
       ruleVersion: args.order.ruleVersion ?? quote.ruleVersion,
       rateSnapshot: structuredClone(quote.rateSnapshot ?? []),
-      ruleSnapshot: structuredClone(quote.ruleSnapshot)
+      ruleSnapshot: structuredClone(quote.ruleSnapshot),
+      // 控制器/订单内核会再次用同一组选择与快照校验，不能把金额作为客户端事实。
+      serviceSnapshots: undefined
     };
   }
 

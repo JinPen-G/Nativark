@@ -13,13 +13,17 @@ const tenant = 'tenant_002';
 (async () => {
   const facts = stores.createAbsorbingFactStore();
   const releasedServiceReservations = [];
+  const partiallyReleasedServiceReservations = [];
   const core = new RentalCoreService(
     stores.createAbsorbingConfigStore(),
     facts,
     undefined,
     undefined,
     undefined,
-    { releaseForOccurrence: async (...args) => releasedServiceReservations.push(args) }
+    {
+      releaseForOccurrence: async (...args) => releasedServiceReservations.push(args),
+      releaseQuantityForOccurrence: async (...args) => partiallyReleasedServiceReservations.push(args)
+    }
   );
   const business = new RentalBusinessService(
     stores.createAbsorbingBusinessConfigStore(),
@@ -189,7 +193,48 @@ const tenant = 'tenant_002';
     serviceLocationId: location.id, capacityQuantity: 1, discountAllocatedAmount: 10, couponAllocatedAmount: 5,
     occurrenceId: 'service-occurrence-change-test', origin: 'order', executionStatus: 'not_started',
     executedQuantity: 0, executionSegments: [], refundStatus: 'none', reservationKey: 'service-reservation-change-test'
+  }, {
+    serviceId: 'service-quantity-change-test', serviceCode: 'STAFF', serviceName: '现场服务', serviceType: 'other',
+    serviceVersion: '1.0', workspaceId: 'workspace_test', billingUnit: 'per_person', selectionMode: 'optional',
+    requiredByRule: false, unitPrice: 100, quantity: 3, billingUnits: 1, amount: 300,
+    formula: '100 × 3 × 1', termsVersion: '1.0', terms: '现场服务条款', eligibility: [],
+    insuredDisplayable: false, requiresCapacity: true, scheduledStartAt: start, scheduledEndAt: end,
+    serviceLocationId: location.id, capacityQuantity: 3, discountAllocatedAmount: 30, couponAllocatedAmount: 15,
+    occurrenceId: 'service-occurrence-quantity-change-test', origin: 'order', executionStatus: 'not_started',
+    executedQuantity: 0, executionSegments: [], refundStatus: 'none', reservationKey: 'service-reservation-quantity-change-test'
   }];
+  const partialServicePriced = await business.quoteOrderServiceCancellation(tenant, ctx, {
+    order: cancellationOrder,
+    serviceItems: [{ occurrenceId: 'service-occurrence-quantity-change-test', quantity: 1 }]
+  });
+  assert.equal(partialServicePriced.payableAmount, -85, '数量型服务部分取消应按订单快照按比例计算客户净支付');
+  const partialServiceApplied = await core.applyPartialLineCancellation(
+    tenant,
+    cancellationOrder.id,
+    partialServicePriced,
+    {
+      type: 'service_cancel',
+      serviceItems: [{ occurrenceId: 'service-occurrence-quantity-change-test', quantity: 1 }],
+      reason: '客户减少一份现场服务',
+      customerConfirmed: true,
+      expectedUpdatedAt: cancellationOrder.updatedAt
+    },
+    'service-quantity-change-test-key',
+    '测试操作员',
+    {}
+  );
+  const partiallyCancelled = savedOrder.serviceSnapshots.find(row => row.occurrenceId === 'service-occurrence-quantity-change-test');
+  assert.equal(partialServiceApplied.change.type, 'service_cancel');
+  assert.equal(partiallyCancelled.quantity, 2);
+  assert.equal(partiallyCancelled.cancelledQuantity, 1);
+  assert.equal(partiallyCancelled.amount, 200);
+  assert.equal(partiallyCancelled.capacityQuantity, 2);
+  assert.equal(partialServiceApplied.change.refundAmount, 85);
+  assert.equal(partiallyReleasedServiceReservations.length, 1, '部分取消服务必须只释放本次数量');
+  assert.equal(partiallyReleasedServiceReservations[0][2], 'service-reservation-quantity-change-test');
+  assert.equal(partiallyReleasedServiceReservations[0][3], 1);
+  pass('数量型增值服务可按数量取消，并同步缩减快照与容量预留');
+
   const servicePriced = await business.quoteOrderServiceCancellation(tenant, ctx, {
     order: cancellationOrder,
     serviceOccurrenceIds: ['service-occurrence-change-test']
@@ -211,9 +256,10 @@ const tenant = 'tenant_002';
     {}
   );
   assert.equal(serviceApplied.change.type, 'service_cancel');
-  assert.equal(savedOrder.serviceSnapshots[0].executionStatus, 'cancelled');
-  assert.equal(savedOrder.serviceSnapshots[0].refundStatus, 'included_in_order_change');
-  assert.equal(savedOrder.serviceSnapshots[0].refundAmount, 85);
+  const fullyCancelled = savedOrder.serviceSnapshots.find(row => row.occurrenceId === 'service-occurrence-change-test');
+  assert.equal(fullyCancelled.executionStatus, 'cancelled');
+  assert.equal(fullyCancelled.refundStatus, 'included_in_order_change');
+  assert.equal(fullyCancelled.refundAmount, 85);
   assert.equal(serviceApplied.change.refundAmount, 85);
   assert.equal(serviceApplied.change.diff.services[0].refundAmount, 85);
   assert.equal(releasedServiceReservations.length, 1, '取消服务必须释放对应的容量预留');

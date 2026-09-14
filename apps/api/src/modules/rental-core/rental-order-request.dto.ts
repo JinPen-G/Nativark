@@ -939,14 +939,22 @@ export class RentalOrderChangeItemInputDto {
   @IsInt() @Min(1) @Max(10000) quantity!: number;
 }
 
+/** ORDER-CHANGE-01D：数量型增值服务的部分取消项。 */
+export class RentalOrderChangeServiceItemInputDto {
+  @IsString() @IsNotEmpty() @MaxLength(191) occurrenceId!: string;
+  @IsInt() @Min(1) @Max(10000) quantity!: number;
+}
+
 export class PreviewRentalOrderChangeDto implements PreviewRentalOrderChangeRequest {
   @IsIn(["partial_line_cancel", "service_cancel"])
   type!: "partial_line_cancel" | "service_cancel";
 
   @IsOptional() @IsArray() @ArrayNotEmpty() @IsString({ each: true }) @MaxLength(191, { each: true }) lineIds?: string[];
   @IsOptional() @IsArray() @ArrayNotEmpty() @ValidateNested({ each: true }) @Type(() => RentalOrderChangeItemInputDto) items?: RentalOrderChangeItemInputDto[];
-  /** ORDER-CHANGE-01C：服务发生项只能按 occurrenceId 选择，服务端按订单快照计算净额。 */
+  /** ORDER-CHANGE-01C：整项取消；服务端按订单快照计算净额。 */
   @IsOptional() @IsArray() @ArrayNotEmpty() @IsString({ each: true }) @MaxLength(191, { each: true }) serviceOccurrenceIds?: string[];
+  /** ORDER-CHANGE-01D：数量型服务部分取消；与 serviceOccurrenceIds 二选一。 */
+  @IsOptional() @IsArray() @ArrayNotEmpty() @ValidateNested({ each: true }) @Type(() => RentalOrderChangeServiceItemInputDto) serviceItems?: RentalOrderChangeServiceItemInputDto[];
 }
 
 export class ApplyRentalOrderChangeDto implements ApplyRentalOrderChangeRequest {
@@ -955,8 +963,10 @@ export class ApplyRentalOrderChangeDto implements ApplyRentalOrderChangeRequest 
 
   @IsOptional() @IsArray() @ArrayNotEmpty() @IsString({ each: true }) @MaxLength(191, { each: true }) lineIds?: string[];
   @IsOptional() @IsArray() @ArrayNotEmpty() @ValidateNested({ each: true }) @Type(() => RentalOrderChangeItemInputDto) items?: RentalOrderChangeItemInputDto[];
-  /** ORDER-CHANGE-01C：取货前取消尚未开始的增值服务。 */
+  /** ORDER-CHANGE-01C：取货前整项取消尚未开始的增值服务。 */
   @IsOptional() @IsArray() @ArrayNotEmpty() @IsString({ each: true }) @MaxLength(191, { each: true }) serviceOccurrenceIds?: string[];
+  /** ORDER-CHANGE-01D：取货前按数量取消尚未开始的数量型增值服务。 */
+  @IsOptional() @IsArray() @ArrayNotEmpty() @ValidateNested({ each: true }) @Type(() => RentalOrderChangeServiceItemInputDto) serviceItems?: RentalOrderChangeServiceItemInputDto[];
 
   @IsString()
   @IsNotEmpty()

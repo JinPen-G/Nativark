@@ -306,9 +306,10 @@ export function RentalOrderDetailPage() {
     mutationFn: (values: ApplyRentalOrderChangeRequest) => {
       if (!partialCancelPreview) throw new Error("请先试算部分取消费用");
       return rentalCoreApi.applyPartialLineCancellation(id, {
-        type: values.serviceOccurrenceIds?.length ? "service_cancel" : "partial_line_cancel",
+        type: values.serviceOccurrenceIds?.length || values.serviceItems?.length ? "service_cancel" : "partial_line_cancel",
         items: values.items,
         serviceOccurrenceIds: values.serviceOccurrenceIds,
+        serviceItems: values.serviceItems,
         reason: values.reason,
         customerConfirmed: values.customerConfirmed,
         expectedUpdatedAt: partialCancelPreview.expectedUpdatedAt
@@ -822,14 +823,20 @@ export function RentalOrderDetailPage() {
       width={680}
       footer={[
         <Button key="cancel" onClick={() => { setPartialCancelOpen(false); setPartialCancelPreview(undefined); partialCancelForm.resetFields(); }}>取消</Button>,
-        <Button key="preview" loading={previewPartialCancel.isPending} onClick={() => partialCancelForm.validateFields(["items", "serviceOccurrenceIds"]).then((values) => {
+        <Button key="preview" loading={previewPartialCancel.isPending} onClick={() => partialCancelForm.validateFields(["items", "serviceOccurrenceIds", "serviceItems"]).then((values) => {
           const items = values.items?.filter((item: { lineId?: string; quantity?: number }) => item?.lineId && item.quantity);
           const serviceOccurrenceIds = values.serviceOccurrenceIds?.filter(Boolean);
-          if (Boolean(items?.length) === Boolean(serviceOccurrenceIds?.length)) {
+          const serviceItems = values.serviceItems?.filter((item: { occurrenceId?: string; quantity?: number }) => item?.occurrenceId && item.quantity);
+          const hasServices = Boolean(serviceOccurrenceIds?.length) || Boolean(serviceItems?.length);
+          if (Boolean(items?.length) === hasServices) {
             message.error("请选择商品取消项或未开始的增值服务，且两者只能选一种");
             return;
           }
-          previewPartialCancel.mutate({ type: serviceOccurrenceIds?.length ? "service_cancel" : "partial_line_cancel", items, serviceOccurrenceIds });
+          if (serviceOccurrenceIds?.length && serviceItems?.length) {
+            message.error("整项取消与按数量取消只能选择一种服务方式");
+            return;
+          }
+          previewPartialCancel.mutate({ type: hasServices ? "service_cancel" : "partial_line_cancel", items, serviceOccurrenceIds, serviceItems });
         })}>试算差额</Button>,
         <Button key="apply" type="primary" disabled={!partialCancelPreview} loading={applyPartialCancel.isPending} onClick={() => partialCancelForm.submit()}>确认并应用</Button>
       ]}
@@ -850,7 +857,7 @@ export function RentalOrderDetailPage() {
             <Button type="dashed" icon={<PlusOutlined />} onClick={() => { add({ quantity: 1 }); setPartialCancelPreview(undefined); }}>增加取消项</Button>
           </Space>}
         </Form.List>
-        <Form.Item name="serviceOccurrenceIds" label="取消未开始的增值服务" extra="业务规则要求的服务、已开始或已结束的服务不能从此处取消。">
+        <Form.Item name="serviceOccurrenceIds" label="整项取消未开始的增值服务" extra="业务规则要求的服务、已开始或已结束的服务不能从此处取消；如需只取消部分数量，请使用下方数量取消。">
           <Select
             mode="multiple"
             allowClear
@@ -862,6 +869,20 @@ export function RentalOrderDetailPage() {
             }))}
           />
         </Form.Item>
+        <Form.List name="serviceItems">
+          {(fields, { add, remove }) => <Space orientation="vertical" style={{ width: "100%" }}>
+            {fields.map((field) => <Space key={field.key} align="start" style={{ width: "100%" }}>
+              <Form.Item name={[field.name, "occurrenceId"]} rules={[{ required: true, message: "请选择服务" }]}>
+                <Select style={{ width: 360 }} placeholder="选择按数量取消的服务" onChange={() => setPartialCancelPreview(undefined)} options={(detail?.serviceSnapshots ?? []).filter((row) => Boolean(row.occurrenceId) && (row.executionStatus ?? "not_started") === "not_started" && !row.requiredByRule).map((row) => ({ value: row.occurrenceId, label: `${row.serviceName} · 可取消 ${row.quantity} 份` }))} />
+              </Form.Item>
+              <Form.Item name={[field.name, "quantity"]} rules={[{ required: true, message: "请输入数量" }]}>
+                <InputNumber min={1} precision={0} style={{ width: 110 }} placeholder="数量" onChange={() => setPartialCancelPreview(undefined)} />
+              </Form.Item>
+              <Button type="text" danger icon={<MinusCircleOutlined />} onClick={() => { remove(field.name); setPartialCancelPreview(undefined); }} />
+            </Space>)}
+            <Button type="dashed" icon={<PlusOutlined />} onClick={() => { add({ quantity: 1 }); setPartialCancelPreview(undefined); }}>增加服务取消数量项</Button>
+          </Space>}
+        </Form.List>
         <Form.Item name="reason" label="变更原因" rules={[{ required: true, whitespace: true, message: "请填写变更原因" }]}><Input.TextArea rows={3} maxLength={500} placeholder="例如：客户减少租赁设备" /></Form.Item>
         <Form.Item name="customerConfirmed" valuePropName="checked" rules={[{ validator: (_, value) => value ? Promise.resolve() : Promise.reject(new Error("必须取得客户确认")) }]}><Checkbox>我已取得客户对本次商品取消及金额变化的确认</Checkbox></Form.Item>
         {partialCancelPreview && <Card size="small" title="试算结果">

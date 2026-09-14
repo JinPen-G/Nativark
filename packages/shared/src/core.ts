@@ -3093,6 +3093,8 @@ export interface RentalOrderServiceOccurrence extends RentalQuoteServiceSnapshot
   executionResult?: string;
   /** 已实际执行的数量；存量订单缺省时按 0 读取。 */
   executedQuantity?: number;
+  /** ORDER-CHANGE-01D：取货前已取消的服务数量；quantity 表示当前仍有效的服务数量。 */
+  cancelledQuantity?: number;
   /** 每次部分执行的事实，不用覆盖前一次结果。 */
   executionSegments?: Array<{
     quantity: number;
@@ -5472,6 +5474,8 @@ export interface ApplyRentalOrderChangeRequest {
   items?: Array<{ lineId: string; quantity: number }>;
   /** ORDER-CHANGE-01C：只能选择取货前、尚未开始的服务发生项。 */
   serviceOccurrenceIds?: string[];
+  /** ORDER-CHANGE-01D：数量型服务可按发生项拆分取消；与 serviceOccurrenceIds 二选一。 */
+  serviceItems?: Array<{ occurrenceId: string; quantity: number }>;
   reason: string;
   customerConfirmed: boolean;
   expectedUpdatedAt: string;
@@ -5509,6 +5513,8 @@ export interface PreviewRentalOrderChangeRequest {
   lineIds?: string[];
   items?: Array<{ lineId: string; quantity: number }>;
   serviceOccurrenceIds?: string[];
+  /** ORDER-CHANGE-01D：数量型服务可按发生项拆分取消；与 serviceOccurrenceIds 二选一。 */
+  serviceItems?: Array<{ occurrenceId: string; quantity: number }>;
 }
 
 export interface RentalOrderOccupancy {

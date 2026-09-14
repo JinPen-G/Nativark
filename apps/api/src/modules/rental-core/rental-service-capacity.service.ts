@@ -337,6 +337,57 @@ export class RentalServiceCapacityService {
   }
 
   /**
+   * ORDER-CHANGE-01D：取货前只释放一项服务发生的部分数量。
+   * 原预留行缩减为剩余数量，另写一条 released 流水保留本次释放事实；
+   * reserved/confirmed 分别回冲对应容量桶，不能把部分释放当成整项释放。
+   */
+  async releaseQuantityForOccurrence(
+    tenantId: string,
+    orderId: string,
+    reservationKey: string | undefined,
+    quantity: number,
+    reason: string,
+    releasedAt: string,
+    tx: Tx
+  ): Promise<void> {
+    if (!reservationKey) return;
+    if (!Number.isInteger(quantity) || quantity < 1) throw new BadRequestException("服务容量释放数量必须是正整数");
+    const workspaceId = await resolveScopeWorkspaceId(tx, tenantId);
+    const rows = await this.lockOrderReservations(tenantId, orderId, tx);
+    const row = rows.find((item) => item.idempotencyKey === reservationKey);
+    if (!row || row.status === "released" || row.status === "expired") throw new ConflictException("服务容量预留当前状态不能部分释放");
+    if (quantity >= row.quantity) throw new ConflictException("部分释放数量必须小于当前容量预留数量");
+    const data = row.status === "reserved"
+      ? { reservedQuantity: { decrement: quantity } }
+      : row.status === "confirmed"
+        ? { usedQuantity: { decrement: quantity } }
+        : undefined;
+    const guard = row.status === "reserved"
+      ? { reservedQuantity: { gte: quantity } }
+      : row.status === "confirmed"
+        ? { usedQuantity: { gte: quantity } }
+        : undefined;
+    if (!data || !guard) throw new ConflictException("服务容量预留当前状态不能部分释放");
+    const moved = await tx.rentalServiceCapacity.updateMany({
+      where: { id: row.capacityId, tenantId, workspaceId, ...guard },
+      data
+    });
+    if (moved.count !== 1) throw new ConflictException("服务容量账不平，拒绝部分释放");
+    const updated = await tx.rentalServiceReservation.updateMany({
+      where: { id: row.id, tenantId, workspaceId, status: row.status, quantity: row.quantity },
+      data: { quantity: row.quantity - quantity }
+    });
+    if (updated.count !== 1) throw new ConflictException("服务容量预留状态已变化，请刷新后重试");
+    await tx.rentalServiceReservation.create({
+      data: {
+        id: randomUUID(), tenantId, workspaceId, capacityId: row.capacityId, serviceId: row.serviceId,
+        orderId, quantity, status: "released", idempotencyKey: `partial-release:${row.id}:${randomUUID()}`,
+        reservedAt: row.reservedAt, confirmedAt: row.confirmedAt, releasedAt: new Date(releasedAt), releaseReason: reason
+      }
+    });
+  }
+
+  /**
    * 归还时按服务自己的计划开始时点结算容量：已经开始的服务成为已使用历史；
    * 尚未开始的服务释放容量，不能因为订单最终归还就被伪造为“已履约”。
    *
