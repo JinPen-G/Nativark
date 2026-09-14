@@ -22,6 +22,7 @@ const notificationFactSource = fs.readFileSync(path.join(repo, "apps", "api", "s
 const notificationSchema = fs.readFileSync(path.join(repo, "apps", "api", "prisma", "schema.prisma"), "utf8");
 const authSource = fs.readFileSync(path.join(repo, "apps", "api", "src", "modules", "client", "client-auth.service.ts"), "utf8");
 const guardSource = fs.readFileSync(path.join(repo, "apps", "api", "src", "common", "api-auth.guard.ts"), "utf8");
+const openapiSource = fs.readFileSync(path.join(repo, "apps", "api", "src", "contracts", "openapi-document.ts"), "utf8");
 
 assert.match(paymentSource, /decrypted\.mchid/);
 assert.match(paymentSource, /decrypted\.appid/);
@@ -73,6 +74,9 @@ assert.match(authSource, /identifierHash/);
 assert.match(authSource, /SELECT id FROM business_workspaces/);
 assert.match(authSource, /FOR UPDATE/);
 assert.match(guardSource, /path\.startsWith\("\/platform\/integrations"\)/);
-assert.match(guardSource, /system:params:manage.*rental-os:rules:manage.*rental-os:price:manage/s);
+assert.match(guardSource, /path\.startsWith\("\/rental\/v1\/notification-templates"\)[\s\S]{0,260}return \["system:integration:manage"\]/u);
+assert.doesNotMatch(guardSource, /path\.startsWith\("\/rental\/v1\/notification-templates"\)[\s\S]{0,260}system:params:manage/u);
+assert.match(openapiSource, /notification-templates[\s\S]{0,220}system:integration:manage/u);
+assert.doesNotMatch(openapiSource, /notification-templates[\s\S]{0,220}system:params:manage/u);
 
 console.log("integration security probes passed: SSRF, callback binding, payment race, upload verification, SMS cooldown and route permission");

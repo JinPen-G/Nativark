@@ -372,7 +372,13 @@ export function requiredPermissions(method: string, path: string) {
     }
     return ["rental-os:rules:manage"];
   }
-  if (path.startsWith("/rental/v1/rewards") || path.startsWith("/rental/v1/benefit-accounts") || path.startsWith("/rental/v1/notification-templates") || path.startsWith("/rental/v1/notification-logs") || path === "/rental/v1/notifications/send") {
+  if (path.startsWith("/rental/v1/notification-templates") || path.startsWith("/rental/v1/notification-logs") || path === "/rental/v1/notifications/send") {
+    // EXT-02：通知模板、真实短信投递、回执查询和重试属于外部接入操作，
+    // 不能被价格/规则人员的权限顺带放行；自动业务事件发送仍由服务端事务链调用，
+    // 不经过这条人工管理 API。
+    return ["system:integration:manage"];
+  }
+  if (path.startsWith("/rental/v1/rewards") || path.startsWith("/rental/v1/benefit-accounts")) {
     return ["system:params:manage", "rental-os:rules:manage", "rental-os:price:manage"];
   }
   if (path === "/rental/v1/coupon-templates" || path.startsWith("/rental/v1/coupon-templates/")) {
