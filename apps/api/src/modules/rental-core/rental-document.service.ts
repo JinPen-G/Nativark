@@ -1,5 +1,7 @@
-import { BadRequestException, Injectable } from "@nestjs/common";
+import { BadRequestException, Injectable, Optional } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import type { RentalCategoryTerminology, RentalDocumentRenderResult, RentalDocumentType } from "@rental-os/shared";
+import { PrismaService } from "../database/prisma.service";
 import { RentalFundingService } from "./rental-funding.service";
 import { RentalCoreService } from "./rental-core.service";
 import { renderRentalDocument } from "./rental-document-renderer";
@@ -10,7 +12,8 @@ const DOCUMENT_TYPES = new Set<RentalDocumentType>(["quote", "delivery", "return
 export class RentalDocumentService {
   constructor(
     private readonly core: RentalCoreService,
-    private readonly funding: RentalFundingService
+    private readonly funding: RentalFundingService,
+    @Optional() private readonly prisma?: PrismaService
   ) {}
 
   /**
@@ -38,7 +41,7 @@ export class RentalDocumentService {
     const funding = type === "settlement" && options.includeFinancial
       ? await this.funding.listEvents(tenantId, this.core.resolveWorkspaceId(tenantId), orderId)
       : undefined;
-    return renderRentalDocument({
+    const rendered = renderRentalDocument({
       documentType: type,
       order,
       inspections,
@@ -48,5 +51,77 @@ export class RentalDocumentService {
       timeZone: this.core.getBusinessSettings(tenantId).calendar.timeZone,
       snapshotAt: new Date().toISOString()
     });
+
+    // 没有 Prisma 的纯内存单元场景仍允许复用渲染器；真实 API 有数据库时，
+    // 凭证必须先归档再返回，避免后续订单变更把历史凭证静默改写。
+    if (!this.prisma) return rendered;
+
+    const workspaceId = this.core.resolveWorkspaceId(tenantId);
+    const where = {
+      tenantId,
+      workspaceId,
+      orderId,
+      documentType: type,
+      contentHash: rendered.contentHash
+    };
+    const existing = await this.prisma.rentalOrderDocumentSnapshot.findUnique({
+      where: { tenantId_workspaceId_orderId_documentType_contentHash: where }
+    });
+    if (existing) return this.fromPersisted(existing);
+
+    try {
+      const created = await this.prisma.rentalOrderDocumentSnapshot.create({
+        data: {
+          tenantId,
+          workspaceId,
+          orderId,
+          documentType: rendered.documentType,
+          templateCode: rendered.templateCode,
+          documentNo: rendered.documentNo,
+          sourceOrderUpdatedAt: new Date(rendered.sourceOrderUpdatedAt),
+          snapshotAt: new Date(rendered.snapshotAt),
+          contentHash: rendered.contentHash,
+          snapshot: rendered.snapshot as Prisma.InputJsonValue,
+          html: rendered.html
+        }
+      });
+      return this.fromPersisted(created);
+    } catch (error) {
+      // 两个请求可能同时首次打开同一份凭证；唯一键只允许一个写入，
+      // 另一个重新读同一版本，不能向调用方暴露 500 或生成两个历史版本。
+      if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") throw error;
+      const concurrent = await this.prisma.rentalOrderDocumentSnapshot.findUnique({
+        where: { tenantId_workspaceId_orderId_documentType_contentHash: where }
+      });
+      if (!concurrent) throw error;
+      return this.fromPersisted(concurrent);
+    }
+  }
+
+  private fromPersisted(row: {
+    id: string;
+    documentType: string;
+    templateCode: string;
+    documentNo: string;
+    sourceOrderUpdatedAt: Date;
+    snapshotAt: Date;
+    snapshot: unknown;
+    html: string;
+    contentHash: string;
+  }): RentalDocumentRenderResult {
+    return {
+      snapshotId: row.id,
+      documentType: row.documentType as RentalDocumentType,
+      templateCode: row.templateCode as `${RentalDocumentType}-v1`,
+      title: typeof row.snapshot === "object" && row.snapshot && "title" in row.snapshot
+        ? String((row.snapshot as { title?: unknown }).title ?? row.documentType)
+        : row.documentType,
+      documentNo: row.documentNo,
+      sourceOrderUpdatedAt: row.sourceOrderUpdatedAt.toISOString(),
+      snapshotAt: row.snapshotAt.toISOString(),
+      snapshot: row.snapshot as Record<string, unknown>,
+      html: row.html,
+      contentHash: row.contentHash
+    };
   }
 }

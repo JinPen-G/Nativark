@@ -335,6 +335,8 @@ export interface PrintJobSummary {
 export type RentalDocumentType = "quote" | "delivery" | "return" | "settlement";
 
 export interface RentalDocumentRenderResult {
+  /** 已落库的不可变凭证快照 ID；无数据库的纯内存调用可为空。 */
+  snapshotId?: string;
   documentType: RentalDocumentType;
   templateCode: `${RentalDocumentType}-v1`;
   title: string;

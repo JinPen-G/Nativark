@@ -168,6 +168,7 @@ model Tenant {
   paymentReconciliationBatches      PaymentReconciliationBatch[]
   rentalOrderExtensions             RentalOrderExtension[]
   rentalOrderChanges                RentalOrderChange[]
+  rentalOrderDocumentSnapshots      RentalOrderDocumentSnapshot[]
   rentalBusinessCalendars           RentalBusinessCalendar[]
   rentalCalendarOverrideAudits      RentalCalendarOverrideAuditEntry[]
   rentalPriceVersions               RentalPriceVersion[]
@@ -286,6 +287,7 @@ model BusinessWorkspace {
   paymentReconciliationBatches      PaymentReconciliationBatch[]
   rentalOrderExtensions             RentalOrderExtension[]
   rentalOrderChanges                RentalOrderChange[]
+  rentalOrderDocumentSnapshots      RentalOrderDocumentSnapshot[]
   rentalBusinessCalendars           RentalBusinessCalendar[]
   rentalCalendarOverrideAudits      RentalCalendarOverrideAuditEntry[]
   rentalPriceVersions               RentalPriceVersion[]
@@ -2250,6 +2252,7 @@ model RentalOrder {
   paymentRefunds                RentalPaymentRefund[]
   extensions                    RentalOrderExtension[]
   changes                       RentalOrderChange[]
+  documentSnapshots             RentalOrderDocumentSnapshot[]
   auditLogs                     OperationLog[]
   createdAt                     DateTime                       @default(now())
   updatedAt                     DateTime                       @updatedAt
@@ -2265,6 +2268,35 @@ model RentalOrder {
   @@index([tenantId, payerSubjectCustomerId], map: "rental_orders_payer_subject_idx")
   @@index([tenantId, userSubjectCustomerId], map: "rental_orders_user_subject_idx")
   @@map("rental_orders")
+}
+
+/// DOC-PRINT-01：订单客户凭证的不可变服务端快照。
+///
+/// 同一订单、空间、凭证类型和内容哈希只归档一次；订单后续发生续租、归还、
+/// 部分取消或结算变化时，会产生新的哈希和新的历史版本，旧版本不被覆盖。
+/// snapshot/html 只保存已脱敏的客户可读内容，不保存规则、成本、完整资金流水
+/// 或内部权限事实。正式 PDF/FileAsset 归档仍由后续切片承接。
+model RentalOrderDocumentSnapshot {
+  id                   String        @id @default(uuid())
+  tenantId             String
+  tenant               Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId          String
+  workspace             BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  orderId              String
+  order                RentalOrder   @relation(fields: [tenantId, workspaceId, orderId], references: [tenantId, workspaceId, id], onDelete: Cascade)
+  documentType         String        @db.VarChar(32)
+  templateCode         String        @db.VarChar(64)
+  documentNo           String        @db.VarChar(191)
+  sourceOrderUpdatedAt DateTime
+  snapshotAt           DateTime
+  contentHash          String        @db.Char(64)
+  snapshot             Json
+  html                 String        @db.LongText
+  createdAt            DateTime      @default(now())
+
+  @@unique([tenantId, workspaceId, orderId, documentType, contentHash], map: "rental_order_document_snapshots_content_key")
+  @@index([tenantId, workspaceId, orderId, documentType, createdAt], map: "rental_order_document_snapshots_history_idx")
+  @@map("rental_order_document_snapshots")
 }
 
 /// RULE-01B：押金与预授权的模拟资金事件（需求 4.4.7 line 527、4.6.3）。
