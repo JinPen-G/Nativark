@@ -85,11 +85,15 @@ assert.doesNotMatch(openapiSource, /notification-templates[\s\S]{0,220}system:pa
 assert.match(openapiSource, /backlogOperation\("get", "\/api\/files"[\s\S]{0,150}system:integration:manage/u);
 assert.doesNotMatch(openapiSource, /backlogOperation\("(?:get|post)", "\/api\/files"[\s\S]{0,150}system:files:manage/u);
 assert.match(integrationSource, /requireLiveTest\?: boolean/u);
+assert.match(integrationSource, /requireDefault\?: boolean/u);
+assert.match(integrationSource, /options\.requireDefault \? Prisma\.sql`AND isDefault = 1`/u);
 assert.match(integrationSource, /row\.lastTestStatus !== "passed"/u);
 assert.match(integrationSource, /row\.lastTestMode !== "live"/u);
 assert.match(integrationSource, /requireLiveTest !== false/u);
 assert.match(fileSource, /requireLiveTest: false/u);
 assert.match(paymentSource, /requireLiveTest: false/u);
+assert.match(paymentSource, /runtimeConfig\("payment", tenantId, input\.method, \{ requireDefault: true \}\)/u);
+assert.match(paymentSource, /assertEnabledInTransaction\(tx, tenantId, "payment", config\.provider, \{ requireDefault: true \}\)/u);
 assert.match(smsSource, /requireLiveTest: false/u);
 assert.match(integrationsServiceSource, /生产环境禁止创建模拟文件资产/u);
 
@@ -128,6 +132,34 @@ assert.match(integrationsServiceSource, /生产环境禁止创建模拟文件资
   row.lastTestMode = "live";
   const verifiedConfig = await service.runtimeConfig("sms", "tenant_1");
   assert.equal(verifiedConfig?.provider, "aliyun_sms", "通过 live 测试后新短信发送链可使用配置");
+  const paymentRow = {
+    ...row,
+    id: "cfg_payment_1",
+    capability: "payment",
+    provider: "alipay",
+    isDefault: false,
+    settings: {
+      appId: "app_1",
+      gatewayUrl: "https://openapi.alipay.com/gateway.do",
+      notifyUrl: "https://example.com/payment-notify"
+    },
+    secretFields: ["appPrivateKey", "alipayPublicKey"]
+  };
+  let paymentWhere;
+  const paymentService = new TenantIntegrationService(
+    { tenantIntegrationConfig: { findFirst: async ({ where }) => { paymentWhere = where; return where.isDefault && !paymentRow.isDefault ? null : paymentRow; } } },
+    { decrypt: () => ({ appPrivateKey: "private-key", alipayPublicKey: "public-key" }) },
+    { record: async () => undefined }
+  );
+  const previousNodeEnv = process.env.NODE_ENV;
+  process.env.NODE_ENV = "development";
+  const nonDefaultPayment = await paymentService.runtimeConfig("payment", "tenant_1", "alipay", { requireDefault: true });
+  assert.equal(nonDefaultPayment, undefined, "新建支付不能选择已启用但非默认的支付平台");
+  assert.equal(paymentWhere.isDefault, true, "新建支付的配置查询必须限定当前默认平台");
+  paymentRow.isDefault = true;
+  const defaultPayment = await paymentService.runtimeConfig("payment", "tenant_1", "alipay", { requireDefault: true });
+  assert.equal(defaultPayment?.provider, "alipay", "当前默认且已 live 验证的支付平台才可创建新支付");
+  process.env.NODE_ENV = previousNodeEnv;
   await assert.rejects(
     service.assertEnabledInTransaction(
       { $queryRaw: async () => [{ id: "cfg_sms_1", enabled: true, lastTestStatus: "failed", lastTestMode: "live" }] },

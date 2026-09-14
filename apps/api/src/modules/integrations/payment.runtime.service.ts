@@ -228,7 +228,9 @@ export class PaymentRuntimeService {
       return this.toResponse(existing);
     }
 
-    const config = await this.integrations.runtimeConfig("payment", tenantId, input.method);
+    // 新建支付必须遵循租户当前明确选择的默认平台；查单、退款和关闭则
+    // 继续按原支付单保存的平台恢复，不能因默认平台切换而丢失历史事实。
+    const config = await this.integrations.runtimeConfig("payment", tenantId, input.method, { requireDefault: true });
     if (!config) throw new ServiceUnavailableException(`尚未启用${input.method === "alipay" ? "支付宝" : "微信支付"}`);
     let prepared: { intent: Prisma.RentalPaymentIntentGetPayload<object>; orderNo: string; amount: number; replayed: boolean };
     try {
@@ -246,7 +248,7 @@ export class PaymentRuntimeService {
 
         // runtimeConfig 在事务外读取；这里锁同一份配置并重新确认仍启用，
         // 与停用配置的检查形成互斥，避免停用提交后仍落下一笔 pending 支付单。
-        await this.integrations.assertEnabledInTransaction(tx, tenantId, "payment", config.provider);
+        await this.integrations.assertEnabledInTransaction(tx, tenantId, "payment", config.provider, { requireDefault: true });
 
         const existingInside = await tx.rentalPaymentIntent.findUnique({
           where: { tenantId_workspaceId_orderId_instrument_idempotencyHash: { tenantId, workspaceId, orderId, instrument: input.instrument, idempotencyHash: sha256(idempotencyKey) } }

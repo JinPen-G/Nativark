@@ -33,6 +33,8 @@ export interface TenantIntegrationRuntimeOptions {
    * 既有事实的查单、回执、上传完成和清理可显式关闭此要求，避免恢复链被测试状态阻断。
    */
   requireLiveTest?: boolean;
+  /** 新建外部业务事实时要求该平台仍是租户当前明确选择的默认出口。 */
+  requireDefault?: boolean;
 }
 
 export interface TenantIntegrationTestConfig extends TenantIntegrationRuntimeConfig {
@@ -114,7 +116,12 @@ export class TenantIntegrationService {
     options: TenantIntegrationRuntimeOptions = {}
   ): Promise<TenantIntegrationRuntimeConfig | undefined> {
     const row = await this.prisma.tenantIntegrationConfig.findFirst({
-      where: { tenantId, capability, enabled: true, ...(provider ? { provider } : { isDefault: true }) },
+      where: {
+        tenantId,
+        capability,
+        enabled: true,
+        ...(provider ? { provider, ...(options.requireDefault ? { isDefault: true } : {}) } : { isDefault: true })
+      },
       orderBy: [{ isDefault: "desc" }, { updatedAt: "desc" }]
     });
     if (!row) return undefined;
@@ -158,18 +165,22 @@ export class TenantIntegrationService {
     provider: TenantIntegrationProvider,
     options: TenantIntegrationRuntimeOptions = {}
   ): Promise<void> {
-    const rows = await tx.$queryRaw<Array<{ id: string; enabled: boolean | number | string; lastTestStatus: string; lastTestMode: string }>>(Prisma.sql`
-      SELECT id, enabled, lastTestStatus, lastTestMode
+    const rows = await tx.$queryRaw<Array<{ id: string; enabled: boolean | number | string; isDefault: boolean | number | string; lastTestStatus: string; lastTestMode: string }>>(Prisma.sql`
+      SELECT id, enabled, isDefault, lastTestStatus, lastTestMode
         FROM tenant_integration_configs
        WHERE tenantId = ${tenantId}
          AND capability = ${capability}
          AND provider = ${provider}
+         ${options.requireDefault ? Prisma.sql`AND isDefault = 1` : Prisma.empty}
        FOR UPDATE
     `);
     const row = rows[0];
     const enabled = row?.enabled === true || row?.enabled === 1 || row?.enabled === "1";
     if (!row || !enabled) {
       throw new ServiceUnavailableException("该第三方平台已停用或配置不存在，请稍后重试");
+    }
+    if (options.requireDefault && !(row.isDefault === true || row.isDefault === 1 || row.isDefault === "1")) {
+      throw new ServiceUnavailableException("该第三方平台已不再是当前默认平台，请刷新后重试");
     }
     if (options.requireLiveTest !== false && (row.lastTestStatus !== "passed" || row.lastTestMode !== "live")) {
       throw new ServiceUnavailableException("该第三方平台尚未通过真实连接测试，请先完成连接测试");
