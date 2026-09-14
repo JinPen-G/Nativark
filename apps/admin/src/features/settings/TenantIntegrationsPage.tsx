@@ -61,8 +61,18 @@ function ProviderCard({ definition, config }: { definition: TenantIntegrationPro
         <Row gutter={[12, 0]}>
           {definition.fields.map((field) => (
             <Col xs={24} md={12} key={field.key}>
-              <Form.Item name={[field.secret ? "credentials" : "settings", field.key]} label={field.label} rules={[{ required: field.required && !field.secret, message: `请输入${field.label}` }]} extra={field.secret && config?.secrets.fields.includes(field.key) ? "已配置；留空保持原密钥不变" : field.description}>
-                {field.secret ? <Input.Password placeholder={config?.secrets.fields.includes(field.key) ? "已配置（留空不修改）" : field.placeholder} /> : <Input type={field.inputType === "url" ? "url" : "text"} placeholder={field.placeholder} />}
+              <Form.Item
+                name={[field.secret ? "credentials" : "settings", field.key]}
+                label={field.label}
+                valuePropName={field.inputType === "boolean" ? "checked" : undefined}
+                rules={[{ required: field.required && !field.secret, message: `请输入${field.label}` }]}
+                extra={field.secret && config?.secrets.fields.includes(field.key) ? "已配置；留空保持原密钥不变" : field.description}
+              >
+                {field.secret
+                  ? <Input.Password placeholder={config?.secrets.fields.includes(field.key) ? "已配置（留空不修改）" : field.placeholder} />
+                  : field.inputType === "boolean"
+                    ? <Switch />
+                    : <Input type={field.inputType === "url" ? "url" : field.inputType === "number" ? "number" : "text"} placeholder={field.placeholder} />}
               </Form.Item>
             </Col>
           ))}
@@ -91,7 +101,29 @@ export function TenantIntegrationsPage() {
         <Alert showIcon type="info" icon={<SettingOutlined />} title="一个能力可以配置多个平台" description="支付可以同时启用支付宝和微信支付；短信、文件存储也可以分别配置多个平台，并指定默认平台。保存某个平台时不会覆盖其他平台。" />
         {(["payment", "sms", "file"] as TenantIntegrationCapability[]).map((capability) => {
           const providers = catalog.data.providers.filter((item) => item.capability === capability);
-          return <Card key={capability} title={`${CAPABILITY_LABELS[capability]}平台`} size="small"><Row gutter={[20, 20]}>{providers.map((definition) => <Col xs={24} xl={12} key={definition.provider}><ProviderCard definition={definition} config={configByProvider.get(`${definition.capability}:${definition.provider}`)} /></Col>)}</Row>{providers.length === 0 ? <Empty description="暂无可用平台" /> : null}</Card>;
+          const configs = catalog.data.configs.filter((item) => item.capability === capability);
+          const enabledWithoutDefault = configs.filter((item) => item.enabled && !item.isDefault);
+          return (
+            <Card key={capability} title={`${CAPABILITY_LABELS[capability]}平台`} size="small">
+              {enabledWithoutDefault.length > 0 ? (
+                <Alert
+                  showIcon
+                  type="warning"
+                  style={{ marginBottom: 16 }}
+                  title={`${enabledWithoutDefault.map((item) => catalog.data.providers.find((provider) => provider.provider === item.provider)?.name ?? item.provider).join("、")}已启用但未设为默认`}
+                  description="业务运行只会使用默认平台，请为该能力指定一个默认平台。"
+                />
+              ) : null}
+              <Row gutter={[20, 20]}>
+                {providers.map((definition) => (
+                  <Col xs={24} xl={12} key={definition.provider}>
+                    <ProviderCard definition={definition} config={configByProvider.get(`${definition.capability}:${definition.provider}`)} />
+                  </Col>
+                ))}
+              </Row>
+              {providers.length === 0 ? <Empty description="暂无可用平台" /> : null}
+            </Card>
+          );
         })}
       </Space>}
     />

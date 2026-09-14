@@ -23,7 +23,7 @@ export interface TenantIntegrationProviderField {
   label: string;
   secret: boolean;
   required: boolean;
-  inputType: "text" | "password" | "number" | "url";
+  inputType: "text" | "password" | "number" | "url" | "boolean";
   placeholder?: string;
   description?: string;
 }
@@ -195,7 +195,7 @@ export const TENANT_INTEGRATION_PROVIDERS: TenantIntegrationProviderDefinition[]
       { key: "region", label: "Region", secret: false, required: true, inputType: "text", placeholder: "us-east-1" },
       { key: "bucket", label: "Bucket", secret: false, required: true, inputType: "text" },
       { key: "objectPrefix", label: "对象前缀", secret: false, required: false, inputType: "text", placeholder: "tenant-files/" },
-      { key: "forcePathStyle", label: "使用 Path Style", secret: false, required: false, inputType: "text" },
+      { key: "forcePathStyle", label: "使用 Path Style", secret: false, required: false, inputType: "boolean", description: "部分兼容 S3 的私有对象存储需要使用路径式地址；云厂商默认不需要。" },
       { key: "accessKeyId", label: "Access Key ID", secret: true, required: true, inputType: "text" },
       { key: "secretAccessKey", label: "Secret Access Key", secret: true, required: true, inputType: "password" }
     ],

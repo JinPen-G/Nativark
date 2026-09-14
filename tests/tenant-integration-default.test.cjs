@@ -73,6 +73,17 @@ const alipay = {
 };
 
 (async () => {
+  await assert.rejects(
+    () => service.save("sms", "aliyun_sms", {
+      enabled: true,
+      isDefault: false,
+      settings: { region: "cn-hangzhou", signName: "测试", verificationTemplateCode: "SMS_TEST" },
+      credentials: { accessKeyId: "access-key", accessKeySecret: "secret" }
+    }, user),
+    /首个启用的平台必须设为该能力默认平台/u
+  );
+  assert.equal((await service.catalog(tenantId)).configs.some((row) => row.capability === "sms"), false, "首个平台未设默认时不得留下半配置记录");
+
   await service.save("payment", "alipay", alipay, user);
   await service.save("payment", "wechat_pay", { enabled: false, isDefault: false, settings: {}, credentials: {} }, user);
 

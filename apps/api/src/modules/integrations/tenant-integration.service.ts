@@ -264,6 +264,15 @@ export class TenantIntegrationService {
           });
           if (otherEnabled) throw new BadRequestException("当前默认平台不能取消默认，请先将其他已启用平台设为默认");
         }
+      } else if (saved.enabled) {
+        // 运行时只从默认平台取配置。首个平台若允许“启用但不设默认”，
+        // 管理页会显示已启用，但支付/短信/文件链路实际拿不到出口。
+        // 在同一事务内阻止这种半配置状态；已有默认平台时，非默认平台可以继续启用。
+        const defaultConfig = await tx.tenantIntegrationConfig.findFirst({
+          where: { tenantId, capability, enabled: true, isDefault: true },
+          select: { id: true }
+        });
+        if (!defaultConfig) throw new BadRequestException("首个启用的平台必须设为该能力默认平台");
       }
       return saved;
     });
