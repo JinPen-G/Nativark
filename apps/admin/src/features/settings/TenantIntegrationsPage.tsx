@@ -16,6 +16,7 @@ const CAPABILITY_LABELS: Record<TenantIntegrationCapability, string> = { sms: "�
 function ProviderCard({ definition, config }: { definition: TenantIntegrationProviderDefinition; config?: TenantIntegrationConfigSummary }) {
   const [form] = Form.useForm<SaveTenantIntegrationRequest>();
   const enabled = Form.useWatch("enabled", form);
+  const liveVerified = config?.lastTestStatus === "passed" && config.lastTestMode === "live";
   const { message } = App.useApp();
   const queryClient = useQueryClient();
   const save = useMutation({
@@ -54,6 +55,15 @@ function ProviderCard({ definition, config }: { definition: TenantIntegrationPro
               : null}
     >
       <Typography.Paragraph type="secondary">{definition.description}</Typography.Paragraph>
+      {config?.enabled && !liveVerified ? (
+        <Alert
+          showIcon
+          type={config.lastTestStatus === "failed" ? "error" : "warning"}
+          style={{ marginBottom: 16 }}
+          title={config.lastTestStatus === "failed" ? "连接测试未通过，业务暂不可用" : "尚未通过真实连接测试，业务暂不可用"}
+          description="配置可以先保存，但支付下单、短信发送和文件上传等新业务调用会被服务端拒绝。请先补齐配置并点击“测试连接”，测试通过后才会进入真实运行链。"
+        />
+      ) : null}
       <Form form={form} layout="vertical" onFinish={(values) => save.mutate(values)}>
         <Space size="large" style={{ marginBottom: 12 }}>
           <Form.Item name="enabled" label="启用此平台" valuePropName="checked" noStyle>
