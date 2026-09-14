@@ -151,6 +151,11 @@ void (async () => {
   process.env.NODE_ENV = "production";
   try {
     await assert.rejects(
+      () => runtime.createUploadSession(tenantId, input),
+      /生产环境禁止重放模拟文件上传/u,
+      "生产环境不得通过幂等重放返回 local_mock 上传会话"
+    );
+    await assert.rejects(
       () => runtime.downloadUrl(tenantId, first.fileAssetId, { businessType: "rental_order", businessId: orderId, uploadScene: "order-contract" }),
       /生产环境禁止访问未归档的模拟文件/u,
       "生产环境不得为 local_mock 文件生成下载引用"

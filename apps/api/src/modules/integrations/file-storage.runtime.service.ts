@@ -160,6 +160,9 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
       // 幂等重放也必须重新验证经营空间归属。不能因为首次创建时通过过校验，
       // 就让同一租户的另一个空间凭同一个幂等键拿到客户/订单文件会话。
       await this.assertBusinessReference(tenantId, existingAsset.businessType, existingAsset.businessId ?? "", owner?.workspaceId);
+      if (existing.provider === "local_mock" && process.env.NODE_ENV === "production") {
+        throw new ServiceUnavailableException("生产环境禁止重放模拟文件上传，请先配置并验证文件存储平台");
+      }
       const existingMode = (existingAsset.metadata as JsonRecord | null)?.uploadMode === "provider" ? "provider" : "simulation";
       return this.sessionSummary(existing, existingAsset, existingMode);
     }

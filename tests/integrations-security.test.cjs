@@ -202,6 +202,7 @@ assert.match(integrationsServiceSource, /生产环境禁止调用支付、短信
   );
   assert.match(fileSource, /生产环境禁止完成模拟文件上传/u, "生产环境不得完成 local_mock 上传会话");
   assert.match(fileSource, /生产环境禁止访问未归档的模拟文件/u, "生产环境不得暴露 local_mock 文件下载引用");
+  assert.match(fileSource, /生产环境禁止重放模拟文件上传/u, "生产环境不得通过幂等重放返回 local_mock 上传会话");
   console.log("integration security probes passed: SSRF, callback binding, payment race, upload verification, SMS cooldown, runtime gate and route permission");
 })().catch((error) => {
   console.error(error);
