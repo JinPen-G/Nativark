@@ -1394,18 +1394,45 @@ export class PaymentRuntimeService {
         if (duplicate && (duplicate.tenantId !== input.tenantId || duplicate.payloadHash !== input.payloadHash || (duplicate.paymentIntentId && duplicate.paymentIntentId !== input.intentId))) {
           throw new ConflictException("支付回调事件已绑定到其他支付单");
         }
-        if (duplicate?.status === "processed") return;
         const intent = await tx.rentalPaymentIntent.findFirst({ where: { id: input.intentId, tenantId: input.tenantId } });
         if (!intent) throw new NotFoundException("支付单不存在");
         if (intent.provider !== input.provider || intent.method !== input.provider) throw new ConflictException("支付单提供方与回调不匹配");
+        if (intent.externalTransactionId && intent.externalTransactionId !== input.externalTransactionId) {
+          throw new ConflictException("支付单已绑定其他第三方交易编号，不能接受新的成功交易");
+        }
+        if (duplicate?.status === "processed") {
+          if (intent.status !== "paid") throw new ConflictException("支付回调已处理但支付单尚未完成入账，请进入待核对处理");
+          if (!intent.externalTransactionId) {
+            await tx.rentalPaymentIntent.update({ where: { id: intent.id }, data: { externalTransactionId: input.externalTransactionId } });
+          }
+          return;
+        }
+        // 处理中事件由先取得事件的请求负责完成；当前请求不能再次写入资金事件。
+        // 查询恢复会使用新的事件键重新尝试，避免一个卡住的事件阻塞支付单恢复。
+        if (duplicate?.status === "processing") return;
         if (intent.status === "paid") {
           if (duplicate) await tx.paymentWebhookEvent.update({ where: { id: duplicate.id }, data: { status: "processed", processedAt: new Date(), paymentIntentId: intent.id } });
           else await tx.paymentWebhookEvent.create({ data: { tenantId: input.tenantId, provider: input.provider, eventId: input.eventId, paymentIntentId: intent.id, payloadHash: input.payloadHash, status: "processed", processedAt: new Date() } });
+          if (!intent.externalTransactionId) await tx.rentalPaymentIntent.update({ where: { id: intent.id }, data: { externalTransactionId: input.externalTransactionId } });
           return;
         }
-        const webhook = duplicate ?? await tx.paymentWebhookEvent.create({
-          data: { tenantId: input.tenantId, provider: input.provider, eventId: input.eventId, paymentIntentId: intent.id, payloadHash: input.payloadHash, status: "processing" }
-        });
+        let webhook = duplicate;
+        if (!webhook) {
+          try {
+            webhook = await tx.paymentWebhookEvent.create({
+              data: { tenantId: input.tenantId, provider: input.provider, eventId: input.eventId, paymentIntentId: intent.id, payloadHash: input.payloadHash, status: "processing" }
+            });
+          } catch (error) {
+            if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002")) throw error;
+            const concurrent = await tx.paymentWebhookEvent.findUnique({ where: { provider_eventId: { provider: input.provider, eventId: input.eventId } } });
+            if (!concurrent) throw error;
+            if (concurrent.tenantId !== input.tenantId || concurrent.payloadHash !== input.payloadHash || (concurrent.paymentIntentId && concurrent.paymentIntentId !== input.intentId)) {
+              throw new ConflictException("支付回调事件已绑定到其他支付单");
+            }
+            if (concurrent.status === "processed" || concurrent.status === "processing") return;
+            webhook = concurrent;
+          }
+        }
         await this.funding.recordEvent(input.tenantId, intent.workspaceId, intent.orderId, {
           instrument: "rental",
           action: "initiate",
