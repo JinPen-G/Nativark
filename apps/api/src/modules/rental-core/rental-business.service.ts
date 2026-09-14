@@ -3892,7 +3892,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         tenantId,
         decrypted.recipient,
         current.log.providerMessageId,
-        current.log.sentAt
+        current.log.sentAt,
+        current.log.provider === "aliyun_sms" || current.log.provider === "tencent_sms" ? current.log.provider : undefined
       );
     } catch (error) {
       if (!(error instanceof NotificationDeliveryUnknownError)) throw error;

@@ -1100,6 +1100,9 @@ export class PaymentRuntimeService {
         const updated = await this.prisma.$transaction(async (tx) => {
           const row = await tx.rentalPaymentRefund.findFirst({ where: { id: refundId, tenantId, workspaceId, orderId } });
           if (!row) throw new NotFoundException("退款单不存在");
+          if (row.externalRefundId && outcome.externalRefundId && row.externalRefundId !== outcome.externalRefundId) {
+            throw new ConflictException("退款单已绑定其他第三方退款编号，不能接受新的退款结果");
+          }
           if (row.fundedAt) return row;
           await tx.rentalPaymentRefund.update({
             where: { id: row.id },
@@ -1124,6 +1127,7 @@ export class PaymentRuntimeService {
         });
         return { status: updated.status, response: this.toRefundResponse(updated) };
       } catch (error) {
+        if (error instanceof ConflictException || error instanceof NotFoundException) throw error;
         const failureReason = error instanceof Error ? error.message : "第三方退款成功，但内部资金入账待恢复";
         await this.prisma.rentalPaymentRefund.updateMany({
           where: { id: refundId, tenantId, workspaceId, orderId },
@@ -1144,6 +1148,9 @@ export class PaymentRuntimeService {
 
     const current = await this.prisma.rentalPaymentRefund.findFirst({ where: { id: refundId, tenantId, workspaceId, orderId } });
     if (!current) throw new NotFoundException("退款单不存在");
+    if (current.externalRefundId && outcome.externalRefundId && current.externalRefundId !== outcome.externalRefundId) {
+      throw new ConflictException("退款单已绑定其他第三方退款编号，不能接受新的退款结果");
+    }
     // 第三方一旦已确认成功，内部资金事件即使暂时失败，也不能被一次暂时性查询
     // 结果降级成 accepted/failed；否则会丢失“已发生外部退款”的事实并允许重复退款。
     if (current.fundedAt || current.status === "succeeded" || current.status === "funding_pending") {
@@ -1189,8 +1196,16 @@ export class PaymentRuntimeService {
         });
       } catch (error) {
         if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002")) throw error;
-        // 另一并发回调已经抢到事件；它负责处理，当前请求返回成功避免第三方重复投递。
-        return;
+        // 另一并发回调可能已经抢到事件。重新读取并复核事件归属；如果它已经
+        // 失败则由当前请求接管重试，只有 processing/processed 才直接返回。
+        const concurrent = await this.prisma.paymentWebhookEvent.findUnique({ where: { provider_eventId: { provider: eventProvider, eventId: input.eventId } } });
+        if (!concurrent) throw error;
+        if (concurrent.tenantId !== input.tenantId || concurrent.payloadHash !== input.payloadHash || (concurrent.paymentIntentId && concurrent.paymentIntentId !== input.refund.paymentIntentId)) {
+          throw new ConflictException("退款回调事件已绑定到其他租户或退款单");
+        }
+        if (concurrent.status === "processed" || concurrent.status === "processing") return;
+        const claimed = await this.prisma.paymentWebhookEvent.updateMany({ where: { id: concurrent.id, status: "failed" }, data: { status: "processing", errorMessage: null } });
+        if (claimed.count !== 1) return;
       }
     }
     try {

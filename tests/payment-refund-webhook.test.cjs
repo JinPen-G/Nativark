@@ -56,6 +56,24 @@ async function main() {
   await service.applyRefundWebhookOutcome(input);
   assert.equal(applyCount, 2, "失败事件允许后续通过查单/重试恢复");
 
+  const refundIntegrity = new PaymentRuntimeService({
+    $transaction: async (callback) => callback({
+      rentalPaymentRefund: {
+        findFirst: async () => ({
+          id: "refund-1", tenantId: "tenant-1", workspaceId: "workspace-1", orderId: "order-1",
+          paymentIntentId: "intent-1", amount: 10, externalRefundId: "refund-existing", fundedAt: null,
+          reason: "测试退款", provider: "wechat_pay", status: "accepted"
+        }),
+        update: async () => { throw new Error("不应写入冲突退款结果"); }
+      }
+    })
+  }, {}, {});
+  await assert.rejects(
+    () => refundIntegrity.applyProviderRefundOutcome("tenant-1", "workspace-1", "order-1", "refund-1", { status: "succeeded", externalRefundId: "refund-other" }),
+    /已绑定其他第三方退款编号/u,
+    "退款单不能被不同第三方退款号覆盖"
+  );
+
   const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
   const apiV3Key = Buffer.from("01234567890123456789012345678901", "utf8");
   const decryptedRefund = {

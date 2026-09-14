@@ -260,9 +260,10 @@ export class TenantIntegrationRuntimeService {
     tenantId: string,
     phone: string,
     providerMessageId: string,
-    sentAt?: string
+    sentAt?: string,
+    provider?: TenantIntegrationProvider
   ): Promise<NotificationDeliveryQueryResult> {
-    const config = await this.integrations.runtimeConfig("sms", tenantId);
+    const config = await this.integrations.runtimeConfig("sms", tenantId, provider);
     if (!config) throw new ServiceUnavailableException("短信平台尚未配置或未启用");
     const messageId = providerMessageId.trim();
     if (!messageId) throw new ServiceUnavailableException("短信服务商回执号为空，无法查询");

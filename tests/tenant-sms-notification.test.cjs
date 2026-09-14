@@ -31,7 +31,7 @@ const configs = new Map([
 
 const integrations = {
   active: "aliyun_sms",
-  runtimeConfig: async () => configs.get(integrations.active)
+  runtimeConfig: async (_capability, _tenantId, provider) => configs.get(provider ?? integrations.active)
 };
 const prisma = {
   externalAdapterLog: {
@@ -86,10 +86,10 @@ void (async () => {
       : JSON.stringify({ Response: { PullSmsSendStatusSet: [{ SerialNo: "tencent-serial", ReportStatus: "SUCCESS", Description: "DELIVRD" }] } })
   });
   integrations.active = "aliyun_sms";
-  const aliyunReceipt = await runtime.queryNotificationDelivery("tenant-test", "13800001111", "aliyun-biz-id", new Date().toISOString());
-  assert.deepEqual(aliyunReceipt, { status: "delivered", providerStatus: "DELIVERED", detail: undefined });
   integrations.active = "tencent_sms";
-  const tencentReceipt = await runtime.queryNotificationDelivery("tenant-test", "+8613800002222", "tencent-serial", new Date().toISOString());
+  const aliyunReceipt = await runtime.queryNotificationDelivery("tenant-test", "13800001111", "aliyun-biz-id", new Date().toISOString(), "aliyun_sms");
+  assert.deepEqual(aliyunReceipt, { status: "delivered", providerStatus: "DELIVERED", detail: undefined });
+  const tencentReceipt = await runtime.queryNotificationDelivery("tenant-test", "+8613800002222", "tencent-serial", new Date().toISOString(), "tencent_sms");
   assert.deepEqual(tencentReceipt, { status: "delivered", providerStatus: "SUCCESS", detail: "DELIVRD" });
 
   global.fetch = async (url) => ({
@@ -99,14 +99,13 @@ void (async () => {
       ? JSON.stringify({ Code: "OK", SmsSendDetailDTOs: { SmsSendDetailDTO: [{ SendStatus: 1 }] } })
       : JSON.stringify({ Response: { PullSmsSendStatusSet: [{ SerialNo: "tencent-serial", ReportStatus: "FAIL", Description: "UNDELIVERED" }] } })
   });
-  integrations.active = "aliyun_sms";
-  assert.deepEqual(
-    await runtime.queryNotificationDelivery("tenant-test", "13800001111", "aliyun-biz-id", new Date().toISOString()),
-    { status: "pending", providerStatus: "PENDING" }
-  );
   integrations.active = "tencent_sms";
   assert.deepEqual(
-    await runtime.queryNotificationDelivery("tenant-test", "+8613800002222", "tencent-serial", new Date().toISOString()),
+    await runtime.queryNotificationDelivery("tenant-test", "13800001111", "aliyun-biz-id", new Date().toISOString(), "aliyun_sms"),
+    { status: "pending", providerStatus: "PENDING" }
+  );
+  assert.deepEqual(
+    await runtime.queryNotificationDelivery("tenant-test", "+8613800002222", "tencent-serial", new Date().toISOString(), "tencent_sms"),
     { status: "failed", providerStatus: "FAIL", detail: "UNDELIVERED" }
   );
 
