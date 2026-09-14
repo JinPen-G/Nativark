@@ -9,6 +9,7 @@ import {
 import { RentalCategoryCode, type RentalCapability, type SystemUserRow } from "@rental-os/shared";
 import { AuthService } from "../modules/auth/auth.service";
 import { ClientAuthService } from "../modules/client/client-auth.service";
+import { ClientApiRateLimitService } from "../modules/client/client-api-rate-limit.service";
 import { WorkspaceCapabilityService } from "../modules/rental-core/workspace-capability.service";
 import { enterRequestIdentity } from "./request-identity";
 import { matchableRequestPath } from "./request-path";
@@ -17,6 +18,7 @@ interface RequestLike {
   method: string;
   url: string;
   headers: Record<string, string | string[] | undefined>;
+  ip?: string;
   user?: SystemUserRow;
   client?: import("../modules/client/client-auth.service").ClientRequestContext;
 }
@@ -551,7 +553,8 @@ export class ApiAuthGuard implements CanActivate {
     // CORE-EXT-02C：能力门禁的判定依据。可选是为了让既有单测继续用一个假 AuthService
     // 直接构造守卫；缺失时能力门禁**拒绝**而不是放行（见 canActivate 内注释）。
     @Optional() private readonly capabilities?: WorkspaceCapabilityService,
-    @Optional() private readonly clientAuth?: ClientAuthService
+    @Optional() private readonly clientAuth?: ClientAuthService,
+    @Optional() private readonly clientRateLimit?: ClientApiRateLimitService
   ) {}
 
   async canActivate(context: ExecutionContext) {
@@ -574,6 +577,8 @@ export class ApiAuthGuard implements CanActivate {
     }
 
     if (isClientRoute(path)) {
+      if (!this.clientRateLimit) throw new UnauthorizedException("客户端安全策略未就绪");
+      await this.clientRateLimit.assertAllowed({ method: request.method, path, ip: request.ip });
       if (isClientPublicRoute(request.method, path)) return true;
       const authorization = request.headers.authorization;
       const raw = Array.isArray(authorization) ? authorization[0] : authorization;
@@ -581,6 +586,14 @@ export class ApiAuthGuard implements CanActivate {
       if (!token) throw new UnauthorizedException("请先登录客户端账号");
       if (!this.clientAuth) throw new UnauthorizedException("客户端认证服务未就绪");
       const client = await this.clientAuth.authenticate(token);
+      await this.clientRateLimit.assertAllowed({
+        method: request.method,
+        path,
+        ip: request.ip,
+        tenantId: client.tenantId,
+        workspaceId: client.workspaceId,
+        sessionId: client.sessionId
+      });
       request.client = client;
       enterRequestIdentity({
         tenantId: client.tenantId,

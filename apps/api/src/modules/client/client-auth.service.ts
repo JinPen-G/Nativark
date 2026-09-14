@@ -22,7 +22,7 @@ import {
   type VerifyClientRegistrationChallengeRequest,
   type VerifyClientRegistrationChallengeResponse
 } from "@rental-os/shared";
-import { createHmac, randomBytes, randomInt } from "node:crypto";
+import { createHmac, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { PrismaService } from "../database/prisma.service";
 import { hashOpaqueToken, hashPassword, verifyPassword } from "../../common/password";
 import { TenantIntegrationRuntimeService } from "../integrations/tenant-integration.runtime.service";
@@ -108,14 +108,29 @@ export class ClientAuthService {
     const [header, body, signature] = token.split(".");
     if (!header || !body || !signature) throw new UnauthorizedException("客户端令牌无效");
     const expected = createHmac("sha256", `${this.secret()}:client`).update(`${header}.${body}`).digest("base64url");
-    if (signature !== expected) throw new UnauthorizedException("客户端令牌无效");
+    const expectedBytes = Buffer.from(expected);
+    const actualBytes = Buffer.from(signature);
+    if (expectedBytes.length !== actualBytes.length || !timingSafeEqual(expectedBytes, actualBytes)) throw new UnauthorizedException("客户端令牌无效");
+    let headerPayload: { alg?: string; typ?: string };
     let payload: ClientTokenPayload;
     try {
+      headerPayload = JSON.parse(Buffer.from(header, "base64url").toString("utf8")) as { alg?: string; typ?: string };
       payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as ClientTokenPayload;
     } catch {
       throw new UnauthorizedException("客户端令牌无效");
     }
-    if (payload.typ !== "client" || !payload.sub || !payload.tid || !payload.sid || !payload.wid || payload.exp <= Math.floor(Date.now() / 1000)) {
+    if (
+      headerPayload.alg !== "HS256" ||
+      headerPayload.typ !== "JWT" ||
+      payload.typ !== "client" ||
+      typeof payload.sub !== "string" ||
+      typeof payload.tid !== "string" ||
+      typeof payload.sid !== "string" ||
+      typeof payload.wid !== "string" ||
+      !Number.isInteger(payload.iat) ||
+      !Number.isInteger(payload.exp) ||
+      payload.exp <= Math.floor(Date.now() / 1000)
+    ) {
       throw new UnauthorizedException("客户端令牌已过期或无效");
     }
     return payload;

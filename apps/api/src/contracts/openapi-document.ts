@@ -36,6 +36,7 @@ export interface ContractOperation {
   responseSchema?: string | SchemaObject;
   parameters?: ParameterObject[];
   rawResponseContentType?: string;
+  rateLimited?: boolean;
 }
 
 const stringSchema: SchemaObject = { type: "string" };
@@ -141,6 +142,13 @@ function operation(config: ContractOperation) {
           schema: toSchema(config.requestSchema)
         }
       }
+    };
+  }
+
+  if (config.rateLimited) {
+    (item.responses as Record<string, unknown>)["429"] = {
+      description: "Client request rate limit exceeded",
+      content: { "application/json": { schema: objectSchema } }
     };
   }
 
@@ -1349,7 +1357,7 @@ function clientOperation(
   path: string,
   operationId: string,
   summary: string,
-  options: { requestSchema?: string; responseSchema?: string | SchemaObject; authRequired?: boolean; parameters?: ParameterObject[]; rawResponseContentType?: string } = {}
+  options: { requestSchema?: string; responseSchema?: string | SchemaObject; authRequired?: boolean; parameters?: ParameterObject[]; rawResponseContentType?: string; rateLimited?: boolean } = {}
 ): ContractOperation {
   return {
     method,
@@ -1362,7 +1370,8 @@ function clientOperation(
     requestSchema: options.requestSchema,
     responseSchema: options.responseSchema ?? "GenericObject",
     parameters: options.parameters,
-    rawResponseContentType: options.rawResponseContentType
+    rawResponseContentType: options.rawResponseContentType,
+    rateLimited: options.rateLimited ?? true
   };
 }
 

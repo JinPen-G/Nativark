@@ -714,6 +714,24 @@ model ClientAuthSession {
   @@map("client_auth_sessions")
 }
 
+/// CLIENT-01：客户端 API 的跨实例固定时间窗限流桶。
+///
+/// 只保存服务端生成的 scopeKey，不保存 IP、手机号、客户令牌或其他可逆识别信息。
+/// 公开认证接口按来源地址限流，登录后的接口按客户端会话限流；计数通过数据库
+/// 的唯一键和原子递增实现，多 API 实例不会各自维护一份可绕过的内存计数。
+model ClientApiRateBucket {
+  id          String   @id @default(uuid())
+  scopeKey    String   @db.Char(64)
+  bucketStart DateTime
+  count       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([scopeKey, bucketStart], map: "client_api_rate_bucket_key")
+  @@index([bucketStart], map: "client_api_rate_bucket_expiry_idx")
+  @@map("client_api_rate_buckets")
+}
+
 /// CUSTOMER-01A：企业客户资料（需求 4.8.4）。
 ///
 /// 与主档 1:1，只在 `customerType = corporate` 时存在。个人与企业共用统一客户框架，

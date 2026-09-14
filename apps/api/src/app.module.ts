@@ -65,6 +65,7 @@ import { RentalServiceCapacityService } from "./modules/rental-core/rental-servi
 import { ClientApiController } from "./modules/client/client-api.controller";
 import { ClientApiService } from "./modules/client/client-api.service";
 import { ClientAuthService } from "./modules/client/client-auth.service";
+import { ClientApiRateLimitService } from "./modules/client/client-api-rate-limit.service";
 
 @Module({
   imports: [
@@ -128,6 +129,7 @@ import { ClientAuthService } from "./modules/client/client-auth.service";
     CapabilityHookRepository,
     ClientApiService,
     ClientAuthService,
+    ClientApiRateLimitService,
     IntegrationsService,
     IntegrationsRepository,
     TenantIntegrationService,
