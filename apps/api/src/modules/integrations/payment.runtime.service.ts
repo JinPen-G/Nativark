@@ -225,6 +225,7 @@ export class PaymentRuntimeService {
     });
     if (existing) {
       if (existing.idempotencyKey !== idempotencyKey) throw new ConflictException("支付幂等键摘要冲突，请更换幂等键");
+      if (existing.method !== input.method) throw new ConflictException("支付幂等键已用于其他支付方式，请更换幂等键");
       return this.toResponse(existing);
     }
 
@@ -255,6 +256,7 @@ export class PaymentRuntimeService {
         });
         if (existingInside) {
           if (existingInside.idempotencyKey !== idempotencyKey) throw new ConflictException("支付幂等键摘要冲突，请更换幂等键");
+          if (existingInside.method !== input.method) throw new ConflictException("支付幂等键已用于其他支付方式，请更换幂等键");
           return { intent: existingInside, orderNo: order.orderNo, amount: Number(existingInside.amount), replayed: true };
         }
 

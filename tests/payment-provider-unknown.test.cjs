@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const { PaymentRuntimeService, PaymentProviderUnknownError } = require("../apps/api/dist/modules/integrations/payment.runtime.service.js");
 
-function makeHarness(providerError) {
+function makeHarness(providerError, existingMethod = null) {
   const updates = [];
   const intent = {
     id: "intent-provider-unknown",
@@ -14,6 +14,7 @@ function makeHarness(providerError) {
     amount: 12.34,
     currency: "CNY",
     merchantOrderNo: "RO-UNKNOWN-1",
+    idempotencyKey: "payment-unknown-1",
     status: "pending",
     checkoutUrl: null,
     externalTransactionId: null,
@@ -23,7 +24,7 @@ function makeHarness(providerError) {
   };
   const prisma = {
     rentalPaymentIntent: {
-      findUnique: async () => null,
+      findUnique: async () => existingMethod ? { ...intent, method: existingMethod } : null,
       update: async ({ data }) => {
         updates.push(data);
         Object.assign(intent, data);
@@ -71,6 +72,17 @@ async function main() {
     /支付平台调用失败/u
   );
   assert.equal(rejected.updates.at(-1).status, "failed", "明确拒绝可以记成失败");
+
+  const mismatchedReplay = makeHarness(null, "wechat_pay");
+  await assert.rejects(
+    () => mismatchedReplay.service.createPaymentIntent("tenant-1", "workspace-1", "order-1", {
+      instrument: "rental",
+      method: "alipay",
+      idempotencyKey: "payment-unknown-1"
+    }),
+    (error) => error?.response?.message === "支付幂等键已用于其他支付方式，请更换幂等键",
+    "幂等重放不能把支付宝请求静默回放成微信支付单"
+  );
 
   console.log("payment provider unknown-result tests passed");
 }
