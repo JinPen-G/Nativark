@@ -149,11 +149,15 @@ export function requiredPermissions(method: string, path: string) {
   ) return ["rental-os:finance:reconcile"];
   if (
     path.startsWith("/integrations") ||
-    path.startsWith("/files") ||
     path.startsWith("/notifications") ||
     path.startsWith("/jobs")
   ) {
-    return ["system:integration:manage", "system:params:manage"];
+    return ["system:integration:manage"];
+  }
+  // 文件列表、上传会话、完成确认和短时下载都可能触达客户/订单附件，
+  // 不能因为拥有系统参数权限就获得文件数据操作能力。
+  if (path.startsWith("/files")) {
+    return ["system:integration:manage"];
   }
   if (path === "/platform/roles") {
     return ["system:user:manage", "system:role:manage"];

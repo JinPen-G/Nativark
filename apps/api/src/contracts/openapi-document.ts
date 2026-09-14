@@ -1398,8 +1398,8 @@ const TENANT_INTEGRATION_OPERATIONS: ContractOperation[] = [
 ];
 
 const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
-  backlogOperation("get", "/api/files", "Files", "listFileAssets", "List file assets", ["system:files:manage"]),
-  backlogOperation("post", "/api/files", "Files", "createFileAsset", "Create file asset", ["system:files:manage"]),
+  backlogOperation("get", "/api/files", "Files", "listFileAssets", "List file assets", ["system:integration:manage"]),
+  backlogOperation("post", "/api/files", "Files", "createFileAsset", "Create file asset", ["system:integration:manage"]),
   backlogOperation("post", "/api/files/upload-sessions", "Files", "createFileUploadSession", "Create a tenant-scoped presigned upload session", ["system:integration:manage"], true, "CreateFileUploadSessionRequest", "FileUploadSessionSummary"),
   backlogOperation("post", "/api/files/upload-sessions/{id}/complete", "Files", "completeFileUpload", "Confirm a presigned upload and activate its file metadata", ["system:integration:manage"], true, "CompleteFileUploadRequest", "GenericObject"),
   backlogOperation("post", "/api/files/upload-sessions/cleanup-expired", "Files", "cleanupExpiredFileUploads", "Invalidate expired upload sessions and clean their provider objects", ["system:integration:manage"], true, undefined, "FileUploadCleanupSummary"),

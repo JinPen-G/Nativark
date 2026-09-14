@@ -76,7 +76,11 @@ assert.match(authSource, /FOR UPDATE/);
 assert.match(guardSource, /path\.startsWith\("\/platform\/integrations"\)/);
 assert.match(guardSource, /path\.startsWith\("\/rental\/v1\/notification-templates"\)[\s\S]{0,260}return \["system:integration:manage"\]/u);
 assert.doesNotMatch(guardSource, /path\.startsWith\("\/rental\/v1\/notification-templates"\)[\s\S]{0,260}system:params:manage/u);
+assert.match(guardSource, /path\.startsWith\("\/files"\)[\s\S]{0,220}return \["system:integration:manage"\]/u);
+assert.doesNotMatch(guardSource, /path\.startsWith\("\/files"\)[\s\S]{0,220}system:params:manage/u);
 assert.match(openapiSource, /notification-templates[\s\S]{0,220}system:integration:manage/u);
 assert.doesNotMatch(openapiSource, /notification-templates[\s\S]{0,220}system:params:manage/u);
+assert.match(openapiSource, /backlogOperation\("get", "\/api\/files"[\s\S]{0,150}system:integration:manage/u);
+assert.doesNotMatch(openapiSource, /backlogOperation\("(?:get|post)", "\/api\/files"[\s\S]{0,150}system:files:manage/u);
 
 console.log("integration security probes passed: SSRF, callback binding, payment race, upload verification, SMS cooldown and route permission");
