@@ -144,6 +144,20 @@ async function main() {
   assert.equal(appliedWebhookOutcome.outcome.status, "succeeded", "微信成功通知应推进退款事实");
   assert.equal(appliedWebhookOutcome.outcome.confirmedTotal, undefined, "回调不应把单笔退款金额误当支付单累计退款金额");
 
+  await assert.rejects(
+    () => callbackService.handleWechatRefundCallback({
+      body: JSON.parse(envelope),
+      headers: {
+        "Wechatpay-Timestamp": timestamp,
+        "Wechatpay-Nonce": callbackNonce,
+        "Wechatpay-Signature": signature,
+        "Wechatpay-Serial": "platform-1"
+      }
+    }),
+    /缺少原始请求体/u,
+    "微信退款回调不能用重新序列化后的 JSON 代替原始请求体验签"
+  );
+
   console.log("payment refund webhook tests passed");
 }
 

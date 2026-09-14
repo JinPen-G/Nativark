@@ -692,7 +692,10 @@ export class PaymentRuntimeService {
     const nonceHeader = valueOf(headers["wechatpay-nonce"] || headers["Wechatpay-Nonce"]);
     const signature = valueOf(headers["wechatpay-signature"] || headers["Wechatpay-Signature"]);
     const serial = certificateSerial(headers["wechatpay-serial"] || headers["Wechatpay-Serial"]);
-    const rawBody = input.rawBody ?? Buffer.from(JSON.stringify(input.body ?? {}));
+    if (!Buffer.isBuffer(input.rawBody)) {
+      throw new UnauthorizedException("微信支付回调缺少原始请求体");
+    }
+    const rawBody = input.rawBody;
     const candidates = (await this.integrations.runtimeConfigsForCallback("wechat_pay"))
       .filter((item) => certificateSerial(item.settings.platformCertificateSerial) === serial);
     if (candidates.length === 0) throw new UnauthorizedException("微信支付回调平台证书序列号未配置或不匹配");
@@ -766,7 +769,10 @@ export class PaymentRuntimeService {
     const nonceHeader = valueOf(headers["wechatpay-nonce"] || headers["Wechatpay-Nonce"]);
     const signature = valueOf(headers["wechatpay-signature"] || headers["Wechatpay-Signature"]);
     const serial = certificateSerial(headers["wechatpay-serial"] || headers["Wechatpay-Serial"]);
-    const rawBody = input.rawBody ?? Buffer.from(JSON.stringify(input.body ?? {}));
+    if (!Buffer.isBuffer(input.rawBody)) {
+      throw new UnauthorizedException("微信退款回调缺少原始请求体");
+    }
+    const rawBody = input.rawBody;
     const candidates = (await this.integrations.runtimeConfigsForCallback("wechat_pay"))
       .filter((item) => certificateSerial(item.settings.platformCertificateSerial) === serial);
     if (candidates.length === 0) throw new UnauthorizedException("微信退款回调平台证书序列号未配置或不匹配");
