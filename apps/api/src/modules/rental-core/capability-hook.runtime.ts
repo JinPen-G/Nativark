@@ -259,7 +259,7 @@ export class CapabilityHookRuntime {
       }
 
       // 2) 该能力有没有 Hook 实现。完全没有登记过任何版本 = 这个能力不参与 Hook
-      //    （三种库存、取还等由 Core 主流程实现的能力就是这一类），静默跳过是正确的。
+      //    （四种库存、取还等由 Core 主流程实现的能力就是这一类），静默跳过是正确的。
       const versions = this.versionsByCode.get(instance.code);
       if (!versions?.size) continue;
 

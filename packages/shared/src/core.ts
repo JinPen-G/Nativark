@@ -19,6 +19,8 @@ export enum RentalCategoryCode {
 export enum RentalInventoryMode {
   Serialized = "serialized",
   Quantity = "quantity",
+  /** 一次性使用的库存；领取时消耗，不进入归还、周转或维修隔离。 */
+  Consumable = "consumable",
   Bundle = "bundle"
 }
 
@@ -501,7 +503,7 @@ export interface RentalCapabilityHookOutcome {
  * Rental Core 只识别 capability code，不在订单主流程里判断具体品类。
  */
 export const RENTAL_CAPABILITY_MODULES: RentalCapabilityModuleDefinition[] = [
-  // 三种库存与取还是 Rental Core 自身实现的能力，因此带 `core-1.0` 实现版本：
+  // 四种库存与取还是 Rental Core 自身实现的能力，因此带 `core-1.0` 实现版本：
   // 它们确实有可执行模块（库存与履约主流程），不属于"只有 code"。
   { code: "serialized_inventory", label: "序列化库存", kind: "category_required", extensionPoints: ["order_validation", "fulfillment"], applicableCategories: "all", dependsOn: [], conflictsWith: [], configSchema: [], implementationVersion: "core-1.0" },
   { code: "quantity_inventory", label: "数量库存", kind: "category_required", extensionPoints: ["order_validation", "fulfillment"], applicableCategories: "all", dependsOn: [], conflictsWith: [], configSchema: [], implementationVersion: "core-1.0" },
@@ -4136,7 +4138,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     code: RentalCategoryCode.Camping,
     name: "露营设备",
     description: "帐篷、桌椅、炊具和露营套装租赁",
-    supportedInventoryModes: [RentalInventoryMode.Serialized, RentalInventoryMode.Quantity, RentalInventoryMode.Bundle],
+    supportedInventoryModes: [RentalInventoryMode.Serialized, RentalInventoryMode.Quantity, RentalInventoryMode.Consumable, RentalInventoryMode.Bundle],
     defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery", "camping_kit_integrity", "camping_cleaning_turnaround"],
     requiredCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "camping_kit_integrity", "camping_cleaning_turnaround"],
     terminology: { itemLabel: "装备", itemGroupLabel: "装备型号", assetLabel: "装备资产", fulfillmentLabel: "装备仓", pickupLabel: "领用", returnLabel: "归还", identifierLabel: "装备编号", navigationLabels: { inventoryGroup: "户外装备", itemGroups: "装备型号", pricingGroups: "装备定价分组", assets: "装备资产与库存", locations: "装备仓库" } },
@@ -4538,8 +4540,8 @@ export interface SaveRentalStockBalanceRequest {
   operator?: string;
 }
 
-/** STOCK-OPS-01：数量库存的可审计日常作业。余额是当前快照，流水才是调整来源。 */
-export const RENTAL_STOCK_OPERATION_TYPES = ["receive", "count_adjustment", "transfer", "scrap", "retire"] as const;
+/** STOCK-OPS-01：数量与一次性耗材库存的可审计日常作业。余额是当前快照，流水才是调整来源。 */
+export const RENTAL_STOCK_OPERATION_TYPES = ["receive", "count_adjustment", "transfer", "consume", "scrap", "retire"] as const;
 export type RentalStockOperationType = (typeof RENTAL_STOCK_OPERATION_TYPES)[number];
 
 export interface RentalStockLedgerEntry {
@@ -4913,7 +4915,7 @@ export interface RentalAllocation {
   assetNo?: string;
   quantity: number;
   /** allocated 为历史已配货记录，按已锁定处理。 */
-  status: "pre_assigned" | "locked" | "allocated" | "picked_up" | "returned" | "released";
+  status: "pre_assigned" | "locked" | "allocated" | "picked_up" | "consumed" | "returned" | "released";
   metadata?: { reservationId?: string; source: "manual" | "automatic"; protected: boolean; assignedAt: string; lockedAt?: string; itemGroupName?: string; locationId?: string };
 }
 

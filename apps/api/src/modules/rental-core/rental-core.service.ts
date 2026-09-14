@@ -1174,7 +1174,10 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   async applyStockOperation(tenantId: string, input: RentalStockOperationRequest, operator: string): Promise<RentalStockOperationResult> {
     const state = await this.factContext(tenantId);
     const group = this.group(state, input.itemGroupId);
-    if (group.inventoryMode !== RentalInventoryMode.Quantity) throw new BadRequestException("库存日常作业目前只适用于数量型库存");
+    if (![RentalInventoryMode.Quantity, RentalInventoryMode.Consumable].includes(group.inventoryMode)) throw new BadRequestException("库存日常作业目前只适用于数量型或一次性耗材库存");
+    if (input.type === "consume" && group.inventoryMode !== RentalInventoryMode.Consumable) {
+      throw new BadRequestException("消耗作业只适用于一次性耗材库存");
+    }
     if (!input.reason?.trim()) throw new BadRequestException("库存作业必须填写原因或来源说明");
     if (input.batchNo !== undefined && (!input.batchNo.trim() || input.batchNo.trim().length > 100)) throw new BadRequestException("批次号不能为空且不能超过100个字符");
     if (input.sourceDocumentNo !== undefined && (!input.sourceDocumentNo.trim() || input.sourceDocumentNo.trim().length > 100)) throw new BadRequestException("来源单据号不能为空且不能超过100个字符");
@@ -1203,7 +1206,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   async saveStockBalance(tenantId: string, input: SaveRentalStockBalanceRequest) {
     const state = await this.factContext(tenantId);
     const group = this.group(state, input.itemGroupId);
-    if (group.inventoryMode !== RentalInventoryMode.Quantity) throw new BadRequestException("只有数量型库存可以维护库存余额");
+    if (![RentalInventoryMode.Quantity, RentalInventoryMode.Consumable].includes(group.inventoryMode)) throw new BadRequestException("只有数量型或一次性耗材库存可以维护库存余额");
     const location = this.activeLocation(state, input.locationId, "storage");
     if (!Number.isInteger(input.onHandQuantity) || input.onHandQuantity < 0) throw new BadRequestException("在手数量必须是非负整数");
     if (input.maintenanceQuantity !== undefined && (!Number.isInteger(input.maintenanceQuantity) || input.maintenanceQuantity < 0)) {
@@ -1271,7 +1274,12 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       throw new ConflictException("只有待领取或租用中的订单可以续租");
     }
     this.validatePeriod(order.effectiveEndAt ?? order.endAt, newEndAt);
-    if (order.reservations.some(row => row.releasedQuantity > 0)) throw new ConflictException("已有部分归还，不能按整单自动续租，请人工处理剩余商品");
+    if (order.reservations.some(row => {
+      const group = this.group(state, row.itemGroupId);
+      // 一次性耗材在领取时就已完成消费并释放预占，不存在“部分归还后继续占用”
+      // 的事实；混合订单仍要对其它可归还商品执行原有边界。
+      return group.inventoryMode !== RentalInventoryMode.Consumable && row.releasedQuantity > 0;
+    })) throw new ConflictException("已有部分归还，不能按整单自动续租，请人工处理剩余商品");
     const period = bufferedRentalPeriod(order.startAt, newEndAt, order.ruleSnapshot);
     const demands = new Map<string, { itemGroupId: string; locationId: string; quantity: number }>();
     for (const reservation of order.reservations) {
@@ -2065,6 +2073,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       const actualItemGroupId = allocation.itemGroupId ?? (allocation.assetId ? assetById.get(allocation.assetId)?.itemGroupId : undefined);
       if (!actualItemGroupId) throw new ConflictException("历史套装分配缺少组成商品标识，请使用整单归还");
       const group = this.group(state, actualItemGroupId);
+      if (group.inventoryMode === RentalInventoryMode.Consumable) throw new BadRequestException("一次性耗材已在领取时消耗，不进入归还流程");
       if (group.inventoryMode === RentalInventoryMode.Serialized && item.quantity !== 1) throw new BadRequestException("序列化资产必须按单件归还");
       const reservation = order.reservations.find((row) => row.orderLineId === allocation.orderLineId && row.itemGroupId === actualItemGroupId);
       if (!reservation || reservation.status !== RentalReservationStatus.Fulfilled) throw new ConflictException("归还项没有对应的履约预占");
@@ -2192,7 +2201,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
         operator,
         this.orderHookInstances(tenantId, order)
       );
-      this.markPickedUp(order, assetChanges);
+      await this.markPickedUp(tenantId, order, assetChanges, tx, operator);
     } else {
       if (order.ruleSnapshot.fulfillment.returnInspectionRequired) throw new ConflictException("当前规则要求完成归还检查");
       if (order.status !== RentalCoreOrderStatus.Renting) throw new ConflictException("只有租赁中的订单可以归还");
@@ -2364,7 +2373,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       (order.allocations ?? []).filter((allocation) => allocation.status === "returned" || allocation.status === "released").map((allocation) => allocation.id)
     );
     if (template.stage === "pickup") {
-      this.markPickedUp(order, assetChanges);
+      await this.markPickedUp(tenantId, order, assetChanges, tx, input.operator || userName);
     } else {
       if (partialReturnItems) {
         await this.applyPartialReturnItems(tenantId, state, order, partialReturnItems, tx, assetChanges);
@@ -2459,7 +2468,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
    * - 原始行的 quantity / unitPrice / amount 不改，只写 cancelledQuantity；
    * - 预占、分配、资产状态、订单差额和变更历史一起提交；
    * - 正差额或新增保证金本轮拒绝，避免“订单已变更但还没收钱”；
-   * - 同一订单首期只允许一笔部分取消；01B 仅扩展数量库存的数量拆分，序列化资产仍整行处理。
+   * - 同一订单首期只允许一笔部分取消；本轮仅扩展数量库存和一次性耗材的数量拆分，序列化资产仍整行处理。
    */
   async applyPartialLineCancellation(
     tenantId: string,
@@ -2518,7 +2527,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       const line = selected.find((row) => row.id === item.lineId)!;
       const activeQuantity = line.quantity - (line.cancelledQuantity ?? 0);
       if (item.quantity > activeQuantity) throw new ConflictException(`${line.itemGroupName}最多可取消 ${activeQuantity} 件`);
-      if (line.inventoryMode !== "quantity" && item.quantity !== activeQuantity) throw new ConflictException(`${line.itemGroupName}是序列化资产，本轮只能整行取消`);
+      if (!["quantity", "consumable"].includes(line.inventoryMode) && item.quantity !== activeQuantity) throw new ConflictException(`${line.itemGroupName}是序列化资产，本轮只能整行取消`);
       const availableReservation = order.reservations
         .filter((row) => row.orderLineId === line.id && !["released", "expired", "cancelled"].includes(row.status))
         .reduce((sum, row) => sum + row.quantity - row.releasedQuantity, 0);
@@ -3187,14 +3196,50 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     });
   }
 
-  private markPickedUp(order: RentalOrder, assetChanges: AssetStatusChange[]) {
+  private async markPickedUp(
+    tenantId: string,
+    order: RentalOrder,
+    assetChanges: AssetStatusChange[],
+    tx: RentalFactTx | undefined,
+    operator = "系统"
+  ) {
     if (order.assignment) order.assignment.operationLock = undefined;
+    const state = this.state(tenantId);
+    const consumptions = new Map<string, { itemGroupId: string; locationId: string; quantity: number }>();
+    for (const allocation of order.allocations) {
+      if (!["locked", "allocated"].includes(allocation.status) || allocation.assetId) continue;
+      const group = state.itemGroups.find((row) => row.id === allocation.itemGroupId);
+      if (group?.inventoryMode !== RentalInventoryMode.Consumable) continue;
+      const locationId = allocation.metadata?.locationId
+        ?? order.reservations.find((row) => row.orderLineId === allocation.orderLineId && row.itemGroupId === allocation.itemGroupId)?.locationId
+        ?? order.fulfillmentLocationId;
+      const key = `${allocation.itemGroupId}:${locationId}`;
+      const current = consumptions.get(key);
+      if (current) current.quantity += allocation.quantity;
+      else consumptions.set(key, { itemGroupId: allocation.itemGroupId!, locationId, quantity: allocation.quantity });
+    }
+    if (consumptions.size) {
+      if (!tx || !this.factStore.consumeStockForOrder) throw new ConflictException("耗材库存组件未就绪，拒绝完成领取");
+      await this.factStore.consumeStockForOrder(tenantId, order.id, [...consumptions.values()], operator, tx);
+    }
     order.status = RentalCoreOrderStatus.Renting;
-    order.reservations.forEach((row) => { row.status = RentalReservationStatus.Fulfilled; });
+    order.reservations.forEach((row) => {
+      const group = state.itemGroups.find((item) => item.id === row.itemGroupId);
+      if (group?.inventoryMode === RentalInventoryMode.Consumable) {
+        row.releasedQuantity = row.quantity;
+        row.status = RentalReservationStatus.Released;
+      } else {
+        row.status = RentalReservationStatus.Fulfilled;
+      }
+    });
     order.allocations.forEach((row) => {
       if (!["locked", "allocated"].includes(row.status)) return;
-      row.status = "picked_up";
-      if (row.assetId) assetChanges.push({ assetId: row.assetId, status: RentalAssetStatus.Rented });
+      const group = state.itemGroups.find((item) => item.id === row.itemGroupId);
+      if (group?.inventoryMode === RentalInventoryMode.Consumable) row.status = "consumed";
+      else {
+        row.status = "picked_up";
+        if (row.assetId) assetChanges.push({ assetId: row.assetId, status: RentalAssetStatus.Rented });
+      }
     });
   }
 
@@ -3316,7 +3361,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       // 序列化资产已经通过 assetChanges 置维护；再按数量隔离一次就是同一件货扣两遍。
       // 用不抛异常的查找：归还路径不该因为配置里少一个分组就整单失败。
       const group = state.itemGroups.find((row) => row.id === reservation.itemGroupId);
-      if (group?.inventoryMode === RentalInventoryMode.Serialized) continue;
+      if ([RentalInventoryMode.Serialized, RentalInventoryMode.Consumable].includes(group?.inventoryMode as RentalInventoryMode)) continue;
       const key = `${reservation.itemGroupId}:${reservation.locationId}`;
       const existing = byTarget.get(key);
       if (existing) existing.quantity += quantity;
@@ -3745,6 +3790,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
 
   private async assertAllocatedPickupReady(tenantId: string, order: RentalOrder, tx?: RentalFactTx) {
     if (!allocationComplete(order, true)) throw new ConflictException("必须锁定全部必要资源才能领取");
+    const state = this.state(tenantId);
     const active = order.allocations.filter((a) => ["locked", "allocated"].includes(a.status));
     if (tx) for (const r of [...order.reservations].sort((a, b) => `${a.itemGroupId}:${a.locationId}`.localeCompare(`${b.itemGroupId}:${b.locationId}`))) await this.factStore.lockAssetsForAllocation(tenantId, r.itemGroupId, r.locationId, tx);
     const assets = await this.factStore.listAssets(tenantId, tx);
@@ -3755,7 +3801,11 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       const balance = stock.find((s) => s.itemGroupId === a.itemGroupId && s.locationId === order.fulfillmentLocationId);
       const needed = active.filter((x) => !x.assetId && x.itemGroupId === a.itemGroupId).reduce((sum, x) => sum + x.quantity, 0);
       const other = reservations.filter((r) => r.orderId !== order.id && r.itemGroupId === a.itemGroupId && r.locationId === order.fulfillmentLocationId);
-      if (!balance || balance.onHandQuantity - balance.maintenanceQuantity - peakReservedQuantity(other, period.startAt, period.endAt) < needed) throw new ConflictException("数量库存不足或存在维护占用，不能交付");
+      const group = state.itemGroups.find((row) => row.id === a.itemGroupId);
+      const reserved = group?.inventoryMode === RentalInventoryMode.Consumable
+        ? other.reduce((sum, row) => sum + row.quantity, 0)
+        : peakReservedQuantity(other, period.startAt, period.endAt);
+      if (!balance || balance.onHandQuantity - balance.maintenanceQuantity - reserved < needed) throw new ConflictException("数量库存不足或存在维护占用，不能交付");
     }
     for (const a of active) {
       if (!a.assetId) continue;
@@ -3891,9 +3941,11 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       const total = snapshot.assets.filter((row) => row.itemGroupId === group.id && row.locationId === locationId && ![RentalAssetStatus.Maintenance, RentalAssetStatus.Disabled].includes(row.status)).length;
       return Math.max(0, total - this.reservedQuantity(snapshot.reservations, group.id, locationId, startAt, endAt));
     }
-    if (group.inventoryMode === RentalInventoryMode.Quantity) {
+    if (group.inventoryMode === RentalInventoryMode.Quantity || group.inventoryMode === RentalInventoryMode.Consumable) {
       const stock = snapshot.stocks.find((row) => row.itemGroupId === group.id && row.locationId === locationId);
-      const reserved = this.reservedQuantity(snapshot.reservations, group.id, locationId, startAt, endAt);
+      const reserved = group.inventoryMode === RentalInventoryMode.Consumable
+        ? this.reservedQuantity(snapshot.reservations, group.id, locationId)
+        : this.reservedQuantity(snapshot.reservations, group.id, locationId, startAt, endAt);
       return Math.max(0, (stock?.onHandQuantity ?? 0) - (stock?.maintenanceQuantity ?? 0) - reserved);
     }
     const next = new Set(visited); next.add(group.id);

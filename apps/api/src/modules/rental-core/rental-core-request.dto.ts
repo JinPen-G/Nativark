@@ -52,7 +52,7 @@ const SETTLEMENT_MODES = ["self", "monthly", "per_order"] as const;
 const ENABLE_STATUSES = ["enabled", "disabled"] as const;
 const LOCATION_CAPABILITIES = ["pickup", "return", "storage", "delivery"] as const;
 const LOCATION_TYPES = ["store", "warehouse", "pickup_point", "delivery_point", "parking", "project_site"] as const;
-const INVENTORY_MODES = ["serialized", "quantity", "bundle"] as const;
+const INVENTORY_MODES = ["serialized", "quantity", "consumable", "bundle"] as const;
 
 export class SaveRentalFulfillmentOperatorDto implements SaveRentalFulfillmentOperatorRequest {
   /** 存在即为更新。路径参数版本的处理器会用 `{ ...body, id }` 覆盖它。 */

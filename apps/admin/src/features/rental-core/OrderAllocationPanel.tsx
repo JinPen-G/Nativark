@@ -32,6 +32,7 @@ const labels: Record<string, string> = {
   locked: "已锁定",
   allocated: "已锁定",
   picked_up: "已交付",
+  consumed: "已消耗",
   returned: "已归还",
   released: "已释放",
   preassign: "预分配",
@@ -80,7 +81,7 @@ export function OrderAllocationPanel({ order }: { order: RentalOrder }) {
     enabled: editable && canOperate && open,
   });
   const progress = rentalAllocationProgress(order);
-  const active = order.allocations.filter((a) => a.status !== "released");
+  const active = order.allocations.filter((a) => !["released", "returned", "consumed"].includes(a.status));
   const mutation = useMutation({
     mutationFn: (
       input: Omit<ManageRentalAllocationRequest, "expectedRevision">,
@@ -382,7 +383,7 @@ export function OrderAllocationPanel({ order }: { order: RentalOrder }) {
                       <div className="muted">
                         变更前：
                         {h.before
-                          .filter((a) => a.status !== "released")
+                          .filter((a) => !["released", "returned", "consumed"].includes(a.status))
                           .map(
                             (a) =>
                               `${a.assetNo ?? a.metadata?.itemGroupName ?? "数量库存"} × ${a.quantity}（${labels[a.status]}）`,
@@ -394,7 +395,7 @@ export function OrderAllocationPanel({ order }: { order: RentalOrder }) {
                       <div className="muted">
                         变更后：
                         {h.after
-                          .filter((a) => a.status !== "released")
+                          .filter((a) => !["released", "returned", "consumed"].includes(a.status))
                           .map(
                             (a) =>
                               `${a.assetNo ?? a.metadata?.itemGroupName ?? "数量库存"} × ${a.quantity}（${labels[a.status]}）`,

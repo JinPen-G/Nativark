@@ -64,6 +64,7 @@ enum RentalCategoryCode {
 enum RentalInventoryMode {
   SERIALIZED @map("serialized")
   QUANTITY   @map("quantity")
+  CONSUMABLE @map("consumable")
   BUNDLE     @map("bundle")
 }
 

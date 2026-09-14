@@ -506,7 +506,7 @@ export function RentalOrderDetailPage() {
         {canReturn && detail.status === RentalCoreOrderStatus.Renting && (detail.allocations.filter((allocation) => allocation.status === "picked_up").length > 1 || detail.allocations.some((allocation) => allocation.status === "picked_up" && allocation.quantity > 1)) && <Button onClick={() => setPartialReturnOpen(true)}>{detail.ruleSnapshot?.fulfillment?.returnInspectionRequired ? "部分归还检查" : "部分归还"}</Button>}
         {detail.status === RentalCoreOrderStatus.Settling && canSettleFunding && <Button type="primary" loading={settle.isPending} disabled={settleBlockers.length > 0} title={settleBlockers.length ? `服务端会拒绝关单：${settleBlockers.join("、")}` : undefined} onClick={() => settle.mutate()}>结算并关闭订单</Button>}
         {canExtend && [RentalCoreOrderStatus.ReadyForPickup, RentalCoreOrderStatus.Renting].includes(detail.status) && <Button icon={<RetweetOutlined />} onClick={() => { extensionForm.resetFields(); setExtensionPreview(undefined); extensionForm.setFieldsValue({ newEndAt: dayjs(detail.effectiveEndAt ?? detail.endAt).add(1, "day") }); setExtensionOpen(true); }}>续租 / 延期</Button>}
-        {canOperate && [RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.ReadyForPickup].includes(detail.status) && (detail.lines.filter((line) => (line.cancelledQuantity ?? 0) < line.quantity).length > 1 || detail.lines.some((line) => line.inventoryMode === "quantity" && line.quantity - (line.cancelledQuantity ?? 0) > 1) || cancelableServiceCount > 0) && <Button onClick={() => { partialCancelForm.resetFields(); setPartialCancelPreview(undefined); setPartialCancelOpen(true); }}>部分取消商品 / 服务</Button>}
+        {canOperate && [RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.ReadyForPickup].includes(detail.status) && (detail.lines.filter((line) => (line.cancelledQuantity ?? 0) < line.quantity).length > 1 || detail.lines.some((line) => ["quantity", "consumable"].includes(line.inventoryMode) && line.quantity - (line.cancelledQuantity ?? 0) > 1) || cancelableServiceCount > 0) && <Button onClick={() => { partialCancelForm.resetFields(); setPartialCancelPreview(undefined); setPartialCancelOpen(true); }}>部分取消商品 / 服务</Button>}
         {canCancel && [RentalCoreOrderStatus.Draft, RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.ReadyForPickup].includes(detail.status) && <Button danger onClick={() => setCancelOpen(true)}>取消并按规则计费</Button>}
       </Space>
       <OrderAllocationPanel key={detail.id} order={detail} />
@@ -865,12 +865,12 @@ export function RentalOrderDetailPage() {
       ]}
     >
       <Form form={partialCancelForm} layout="vertical" onFinish={(values) => applyPartialCancel.mutate(values)} initialValues={{ customerConfirmed: false }}>
-        <Alert type="info" showIcon title="仅支持取货前部分取消" description="数量库存可以按数量取消；序列化资产只能整行取消。未开始的可选增值服务可以单独取消，退款按订单快照中的客户净支付计算并释放服务容量。原订单与原报价不会被覆盖；商品与服务取消不能在同一次变更中混合。" style={{ marginBottom: 16 }} />
+        <Alert type="info" showIcon title="仅支持取货前部分取消" description="数量库存和一次性耗材可以按数量取消；序列化资产只能整行取消。未开始的可选增值服务可以单独取消，退款按订单快照中的客户净支付计算并释放服务容量。原订单与原报价不会被覆盖；商品与服务取消不能在同一次变更中混合。" style={{ marginBottom: 16 }} />
         <Form.List name="items">
           {(fields, { add, remove }) => <Space orientation="vertical" style={{ width: "100%" }}>
             {fields.map((field) => <Space key={field.key} align="start" style={{ width: "100%" }}>
               <Form.Item name={[field.name, "lineId"]} rules={[{ required: true, message: "请选择商品" }]} style={{ flex: 1 }}>
-                <Select style={{ width: 360 }} placeholder="选择要取消的商品" onChange={() => setPartialCancelPreview(undefined)} options={(detail?.lines ?? []).filter((line) => (line.cancelledQuantity ?? 0) < line.quantity).map((line) => ({ value: line.id, label: `${line.itemGroupName} · 可取消 ${line.quantity - (line.cancelledQuantity ?? 0)} 件${line.inventoryMode === "quantity" ? "（数量库存）" : "（序列化资产，仅整行）"}` }))} />
+                <Select style={{ width: 360 }} placeholder="选择要取消的商品" onChange={() => setPartialCancelPreview(undefined)} options={(detail?.lines ?? []).filter((line) => (line.cancelledQuantity ?? 0) < line.quantity).map((line) => ({ value: line.id, label: `${line.itemGroupName} · 可取消 ${line.quantity - (line.cancelledQuantity ?? 0)} 件${["quantity", "consumable"].includes(line.inventoryMode) ? (line.inventoryMode === "consumable" ? "（一次性耗材）" : "（数量库存）") : "（序列化资产，仅整行）"}` }))} />
               </Form.Item>
               <Form.Item name={[field.name, "quantity"]} rules={[{ required: true, message: "请输入数量" }]}>
                 <InputNumber min={1} precision={0} style={{ width: 110 }} placeholder="数量" onChange={() => setPartialCancelPreview(undefined)} />

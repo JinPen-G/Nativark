@@ -222,5 +222,37 @@ void (async () => {
   assert.equal(flooredRefund.rentalRefund, 0);
   ok("最小起租量吃掉整段租期时不退租金：客户被收的计费单位一个都没省下");
 
+  /* ---------- 一次性耗材：续租不重复计费，且不要求耗材重新命中现价 ---------- */
+
+  const originalInventoryMode = group.inventoryMode;
+  group.inventoryMode = "consumable";
+  const consumableLine = {
+    itemGroupId: group.id,
+    pricingGroupId: undefined,
+    quantity: 1,
+    inventoryMode: "consumable",
+    amount: quote.rentalAmount
+  };
+  const consumableOriginalTotal = await business.quoteOrderExtension(tenantId, ctx, {
+    ...baseArgs,
+    lines: [consumableLine],
+    newEndAt: extendedTo
+  });
+  assert.equal(consumableOriginalTotal.rentalAmount, 0);
+  assert.equal(consumableOriginalTotal.billableUnits, 0);
+  assert.equal(consumableOriginalTotal.pricingSnapshot.recalculatedRentalAmount, quote.rentalAmount);
+  ok("原价全租期续租不会再次收取已领取的一次性耗材");
+
+  quote.ruleSnapshot.extension.pricingMode = "incremental";
+  const consumableIncremental = await business.quoteOrderExtension(tenantId, ctx, {
+    ...baseArgs,
+    lines: [consumableLine],
+    newEndAt: extendedTo
+  });
+  assert.equal(consumableIncremental.rentalAmount, 0);
+  assert.equal(consumableIncremental.billableUnits, 0);
+  ok("增量续租不会因耗材价格版本变化而重新计价");
+  group.inventoryMode = originalInventoryMode;
+
   console.log(`\n续租/延期专项：${passed} 项全部通过`);
 })();

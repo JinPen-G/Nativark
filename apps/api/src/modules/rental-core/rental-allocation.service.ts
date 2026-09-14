@@ -466,7 +466,7 @@ export class RentalAllocationService
       );
       for (const r of finalOptions.reservations.filter(
         (r) =>
-          r.inventoryMode === RentalInventoryMode.Quantity ||
+          [RentalInventoryMode.Quantity, RentalInventoryMode.Consumable].includes(r.inventoryMode) ||
           movedModels.has(r.itemGroupId),
       )) {
         const balance = stock.find(
@@ -485,8 +485,9 @@ export class RentalAllocationService
               s.itemGroupId === r.itemGroupId && s.locationId === r.locationId,
           )
           .reduce((sum, s) => sum + s.quantity, 0);
+        const stockBased = [RentalInventoryMode.Quantity, RentalInventoryMode.Consumable].includes(r.inventoryMode);
         const capacity =
-          r.inventoryMode === RentalInventoryMode.Quantity
+          stockBased
             ? (balance?.onHandQuantity ?? 0) -
               (balance?.maintenanceQuantity ?? 0)
             : assets.filter(
@@ -499,11 +500,10 @@ export class RentalAllocationService
                     RentalAssetStatus.Rented,
                   ].includes(a.status),
               ).length;
-        if (
-          capacity -
-            peakReservedQuantity(others, period.startAt, period.endAt) <
-          needed
-        )
+        const reserved = r.inventoryMode === RentalInventoryMode.Consumable
+          ? others.reduce((sum, row) => sum + row.quantity, 0)
+          : peakReservedQuantity(others, period.startAt, period.endAt);
+        if (capacity - reserved < needed)
           throw new ConflictException(
             `${r.itemGroupName} 可交付数量不足，请先处理库存`,
           );
@@ -746,7 +746,7 @@ export class RentalAllocationService
         );
         for (const r of options.reservations.filter(
           (r) =>
-            r.inventoryMode === RentalInventoryMode.Quantity &&
+            [RentalInventoryMode.Quantity, RentalInventoryMode.Consumable].includes(r.inventoryMode) &&
             r.assignedQuantity > 0,
         )) {
           const balance = stock.find(
@@ -766,10 +766,13 @@ export class RentalAllocationService
                 s.locationId === r.locationId,
             )
             .reduce((n, s) => n + s.quantity, 0);
+          const reserved = r.inventoryMode === RentalInventoryMode.Consumable
+            ? others.reduce((sum, row) => sum + row.quantity, 0)
+            : peakReservedQuantity(others, period.startAt, period.endAt);
           if (
             (balance?.onHandQuantity ?? 0) -
               (balance?.maintenanceQuantity ?? 0) -
-              peakReservedQuantity(others, period.startAt, period.endAt) <
+              reserved <
             required
           )
             issues.push(`${r.itemGroupName}：可交付数量不足`);

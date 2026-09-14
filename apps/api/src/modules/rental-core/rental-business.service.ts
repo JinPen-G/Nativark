@@ -7,6 +7,7 @@ import { WorkspaceCapabilityService } from "./workspace-capability.service";
 import { buildCapabilityEquipment } from "./capability-equipment";
 import {
   RentalCategoryCode,
+  RentalInventoryMode,
   type GrantRentalRewardRequest,
   type ImportRentalCalendarRequest,
   type RentalCalendarBusinessStatus,
@@ -5514,7 +5515,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     args: {
       order: Pick<RentalOrder, "id" | "startAt" | "endAt" | "effectiveEndAt" | "quoteId" | "depositAmount" | "preAuthAmount">;
       previousExtensions?: RentalOrderExtension[];
-      lines: Array<Pick<RentalOrderLine, "itemGroupId" | "pricingGroupId" | "quantity">>;
+      lines: Array<Pick<RentalOrderLine, "itemGroupId" | "pricingGroupId" | "quantity"> & Partial<Pick<RentalOrderLine, "inventoryMode" | "amount">>>;
       newEndAt: string;
       services?: RentalOrderExtensionRequest["services"];
       /** 申请时点：决定命中哪一版价格、日历与规则。 */
@@ -5538,9 +5539,17 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const unitOf = new Map(
       (originalQuote.rateSnapshot ?? []).map((rate) => [pricingTargetId(rate), rate.unit] as const)
     );
-    const targets = args.lines.map((line) => line.pricingGroupId ?? line.itemGroupId);
-    const plan = this.resolvePricingPlan(state.pricingPlans, undefined, targets, args.appliedAt);
-    const spaceVersion = await this.resolveSpaceRates(tenantId, context, args.appliedAt);
+    const targets = args.lines
+      .filter((line) => line.inventoryMode !== RentalInventoryMode.Consumable)
+      .map((line) => line.pricingGroupId ?? line.itemGroupId);
+    const plan = targets.length
+      ? this.resolvePricingPlan(state.pricingPlans, undefined, targets, args.appliedAt)
+      : undefined;
+    // 订单只有一次性耗材时，不应因为当前空间没有新的价格版本而阻断续租；
+    // 耗材已经按原订单一次性计价，只有仍在租用的商品才需要命中现行版本。
+    const spaceVersion = targets.length
+      ? await this.resolveSpaceRates(tenantId, context, args.appliedAt)
+      : { rates: [] as RentalPricingRate[] };
     const timeZone = context.settings.calendar.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE;
     const groups = new Map(context.groups.map((group) => [group.id, group]));
     const pricingGroups = new Map((context.pricingGroups ?? []).map((group) => [group.id, group]));
@@ -5562,6 +5571,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       const pricingGroup = line.pricingGroupId ? pricingGroups.get(line.pricingGroupId) : undefined;
       const target = line.pricingGroupId ?? line.itemGroupId;
       const unit = unitOf.get(target);
+      // 一次性耗材在领取时已经完成一次性消费，续租只延长其它可归还商品的占用，
+      // 不应再为耗材按新增时段重复计费或重新查当前价格。
+      if (line.inventoryMode === RentalInventoryMode.Consumable) continue;
       const rate = spaceVersion.rates.find(
         (item) => pricingTargetId(item) === target && (unit === undefined || item.unit === unit)
       );
@@ -5581,8 +5593,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         shiftHours: rule.config.pricing?.shiftHours,
         shiftStartHours: rule.config.pricing?.shiftStartHours,
         legacyDayTypeMultipliers,
-        planId: plan.id,
-        planVersion: plan.version
+        planId: plan!.id,
+        planVersion: plan!.version
       };
       // 增量期：这才是本次要收的租金。
       const incremental = this.priceRentalLine({
@@ -5662,6 +5674,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const depositDelta = Math.max(0, roundMoney(security.deposit.amount - args.order.depositAmount - (args.previousExtensions ?? []).filter(row => row.status === "effective").reduce((sum, row) => sum + row.depositDelta, 0)));
     const preAuthDelta = Math.max(0, roundMoney(security.preauthorization.amount - args.order.preAuthAmount - (args.previousExtensions ?? []).filter(row => row.status === "effective").reduce((sum, row) => sum + row.preAuthDelta, 0)));
     const payableAmount = roundMoney(rentalAmount + serviceAmount);
+    const versionedSpaceVersion = spaceVersion as { versionId?: string; version?: string };
 
 
     return {
@@ -5682,8 +5695,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       chargeLines,
       calendarSnapshot,
       serviceSnapshots,
-      priceVersionId: "versionId" in spaceVersion ? spaceVersion.versionId : undefined,
-      priceVersion: "version" in spaceVersion ? spaceVersion.version : undefined,
+      priceVersionId: versionedSpaceVersion.versionId,
+      priceVersion: versionedSpaceVersion.version,
       ruleVersion: rule.version,
       rateSnapshot,
       ruleSnapshot: structuredClone({ ...rule.config, extension: extensionRule })
@@ -5697,7 +5710,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     args: {
       order: Pick<RentalOrder, "id" | "startAt" | "endAt" | "effectiveEndAt" | "quoteId" | "depositAmount" | "preAuthAmount" | "serviceSnapshots">;
       previousExtensions?: RentalOrderExtension[];
-      lines: Array<Pick<RentalOrderLine, "itemGroupId" | "pricingGroupId" | "quantity">>;
+      lines: Array<Pick<RentalOrderLine, "itemGroupId" | "pricingGroupId" | "quantity"> & Partial<Pick<RentalOrderLine, "inventoryMode" | "amount">>>;
       newEndAt: string;
       services?: RentalOrderExtensionRequest["services"];
       /** 申请时点：决定命中哪一版价格、日历与规则。 */
@@ -5765,6 +5778,35 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         throw new ConflictException(
           `${pricingGroup?.name ?? group.name} 缺少原订单费率快照，不能改用现价续租`
         );
+      }
+      if (line.inventoryMode === RentalInventoryMode.Consumable) {
+        const preservedAmount = line.amount;
+        if (preservedAmount === undefined || !Number.isFinite(preservedAmount) || preservedAmount < 0) {
+          throw new ConflictException(`${group.name} 缺少原订单耗材金额快照，不能安全续租`);
+        }
+        const securityLine: SecurityLineInput = {
+          groupName: group.name,
+          quantity: line.quantity,
+          lineRental: preservedAmount,
+          depositUnit: rate.depositAmount,
+          depositMultiple: rate.depositMultiple ?? 0,
+          preAuthUnit: rate.preAuthAmount ?? rate.depositAmount,
+          preAuthMultiple: rate.preAuthMultiple ?? rate.depositMultiple ?? 0
+        };
+        fullRentalAmount = roundMoney(fullRentalAmount + preservedAmount);
+        fullRentalLineAmounts[target] = roundMoney((fullRentalLineAmounts[target] ?? 0) + preservedAmount);
+        chargeLines.push({
+          code: `rental:${target}:consumable`,
+          name: `${group.name}（一次性耗材原订单金额）`,
+          type: "rental",
+          amount: preservedAmount,
+          sourceId: originalQuote.priceVersionId ?? originalQuote.id,
+          sourceVersion: originalQuote.priceVersion ?? originalQuote.pricingPlanVersion,
+          detail: `一次性耗材仅在领取时消耗，续租不重复计费；原订单金额 ${preservedAmount}`
+        });
+        rateSnapshot.push(structuredClone(rate));
+        fullSecurityLines.push(securityLine);
+        continue;
       }
       const shared = {
         group,
@@ -6017,7 +6059,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     context: BusinessContext,
     args: {
       order: Pick<RentalOrder, "id" | "startAt" | "endAt" | "effectiveEndAt" | "quoteId" | "depositAmount" | "preAuthAmount" | "serviceSnapshots">;
-      lines: Array<Pick<RentalOrderLine, "itemGroupId" | "pricingGroupId" | "quantity">>;
+      lines: Array<Pick<RentalOrderLine, "itemGroupId" | "pricingGroupId" | "quantity"> & Partial<Pick<RentalOrderLine, "inventoryMode" | "amount">>>;
       appliedAt: string;
       fulfillmentMode: RentalFulfillmentMode;
       locationIds: string[];

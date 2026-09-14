@@ -11,7 +11,7 @@ import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
 import { ItemGroupPhoto } from "./ItemGroupPhoto";
 
-const inventoryLabels: Record<string, string> = { serialized: "序列化资产", quantity: "数量库存", bundle: "套装" };
+const inventoryLabels: Record<string, string> = { serialized: "序列化资产", quantity: "数量库存", consumable: "一次性耗材", bundle: "套装" };
 
 /**
  * 品类动态属性的受控控件。

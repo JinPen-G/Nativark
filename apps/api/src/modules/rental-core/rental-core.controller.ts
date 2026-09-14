@@ -420,8 +420,8 @@ export class RentalCoreController {
       if (!line) throw new ConflictException("存在无效、已取消或不属于当前订单的订单行");
       const activeQuantity = line.quantity - (line.cancelledQuantity ?? 0);
       if (item.quantity > activeQuantity) throw new ConflictException(`${line.itemGroupName}最多可取消 ${activeQuantity} 件`);
-      // 序列化资产是一条实物承诺，01B 只扩展数量库存的拆分取消；整行取消仍复用 01A。
-      if (line.inventoryMode !== "quantity" && item.quantity !== activeQuantity) {
+      // 序列化资产是一条实物承诺；本轮只允许数量库存和一次性耗材按数量拆分，整行取消仍复用 01A。
+      if (!["quantity", "consumable"].includes(line.inventoryMode) && item.quantity !== activeQuantity) {
         throw new ConflictException(`${line.itemGroupName}是序列化资产，本轮只能整行取消`);
       }
       const availableReservation = order.reservations
@@ -444,7 +444,20 @@ export class RentalCoreController {
       .filter((line) => line.quantity > 0);
     const priced = await this.business.quoteOrderLineCancellation(tenantId, this.context(tenantId), {
       order,
-      lines: remaining.map((line) => ({ itemGroupId: line.itemGroupId, pricingGroupId: line.pricingGroupId, quantity: line.quantity })),
+      lines: remaining.map((line) => {
+        const original = activeLines.find((row) => row.id === line.id)!;
+        return {
+          itemGroupId: line.itemGroupId,
+          pricingGroupId: line.pricingGroupId,
+          quantity: line.quantity,
+          inventoryMode: line.inventoryMode,
+          // 一次性耗材没有第二次计价；部分取消时按未取消数量保留原行金额，
+          // 其它库存模式仍由续租/取消定价逻辑按原费率重算。
+          amount: original.quantity > 0
+            ? Math.round((original.amount * line.quantity / original.quantity + Number.EPSILON) * 100) / 100
+            : 0
+        };
+      }),
       appliedAt: new Date().toISOString(),
       fulfillmentMode: order.fulfillmentMode,
       locationIds: [order.fulfillmentLocationId, order.returnLocationId].filter((value): value is string => Boolean(value)),

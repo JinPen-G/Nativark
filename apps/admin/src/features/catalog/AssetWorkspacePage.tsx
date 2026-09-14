@@ -72,10 +72,10 @@ export function AssetWorkspacePage() {
     .map((code) => assetFields.find((field) => field.code === code))
     .filter((field): field is RentalAttributeDefinition => Boolean(field));
   const supportsAssets = category?.supportedInventoryModes.includes(RentalInventoryMode.Serialized) ?? true;
-  const supportsStock = category?.supportedInventoryModes.includes(RentalInventoryMode.Quantity) ?? true;
+  const supportsStock = category?.supportedInventoryModes.some((mode) => [RentalInventoryMode.Quantity, RentalInventoryMode.Consumable].includes(mode)) ?? true;
   const visibleTabs = [
     supportsAssets ? { key: "assets", label: `序列化资产（${assets.data?.length ?? 0}）` } : undefined,
-    supportsStock ? { key: "stock", label: `数量库存（${stocks.data?.length ?? 0}）` } : undefined
+    supportsStock ? { key: "stock", label: `数量/耗材库存（${stocks.data?.length ?? 0}）` } : undefined
   ].filter((item): item is { key: string; label: string } => Boolean(item));
   const saveAsset = useMutation({ mutationFn: rentalCoreApi.saveAsset, onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["rental-core", "assets"] }); setAssetDrawerOpen(false); setEditing(undefined); assetForm.resetFields(); message.success("资产已保存"); }, onError: () => message.error("资产保存失败，请检查编号、商品和履约地点") });
   const assetRows = useMemo(() => (assets.data ?? []).filter((asset) => !keyword || `${asset.assetNo}${asset.serialNo}${asset.itemGroupName}${asset.locationName}${Object.values(asset.attributes).join("")}`.toLowerCase().includes(keyword.toLowerCase())), [assets.data, keyword]);

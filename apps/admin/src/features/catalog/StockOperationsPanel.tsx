@@ -16,6 +16,7 @@ const OPERATION_OPTIONS: Array<{ value: RentalStockOperationType; label: string;
   { value: "receive", label: "入库", description: "增加某个履约地点的在手数量。" },
   { value: "count_adjustment", label: "盘点差异", description: "按实际盘点数调整在手数量，已预占和维修隔离数量不能被抹掉。" },
   { value: "transfer", label: "地点调拨", description: "在两个支持仓储的履约地点之间转移数量。" },
+  { value: "consume", label: "耗材领用", description: "登记一次性耗材的人工领用；订单领取会自动记录同类消耗。" },
   { value: "scrap", label: "报损", description: "将无法继续经营的数量从在手账中报损。" },
   { value: "retire", label: "退出", description: "将不再经营的数量从在手账中退出。" }
 ];
@@ -46,7 +47,7 @@ export function StockOperationsPanel({
   const [operationKey, setOperationKey] = useState(() => crypto.randomUUID());
   const [form] = Form.useForm<RentalStockOperationRequest>();
   const ledger = useQuery({ queryKey: ["rental-core", "stock-ledger"], queryFn: () => rentalCoreApi.stockLedger({ limit: 100 }) });
-  const quantityGroups = groups.filter((group) => group.inventoryMode === "quantity" && group.status === "enabled");
+  const quantityGroups = groups.filter((group) => ["quantity", "consumable"].includes(group.inventoryMode) && group.status === "enabled");
   const storageLocations = locations.filter((location) => location.status === "enabled" && location.capabilities.includes("storage"));
   const apply = useMutation({
     mutationFn: rentalCoreApi.applyStockOperation,
@@ -76,7 +77,7 @@ export function StockOperationsPanel({
   const itemLabel = terminology?.itemGroupLabel ?? "商品";
   return <>
     <Card
-      title="数量库存日常作业"
+      title="数量与耗材库存日常作业"
       extra={<Space><Typography.Text type="secondary">余额变化必须有来源流水</Typography.Text>{canManage && <Button type="primary" icon={<PlusOutlined />} onClick={openEditor}>新增库存作业</Button>}</Space>}
       style={{ marginTop: 16 }}
     >
@@ -106,7 +107,7 @@ export function StockOperationsPanel({
       />
     </Card>
     <Drawer
-      title="新增数量库存作业"
+      title="新增数量/耗材库存作业"
       size={560}
       open={open}
       destroyOnHidden
@@ -123,7 +124,7 @@ export function StockOperationsPanel({
         </Form.Item>
         <Typography.Paragraph type="secondary">{currentDescription}</Typography.Paragraph>
         <Form.Item label={itemLabel} name="itemGroupId" rules={[{ required: true }]}>
-          <Select showSearch={{ optionFilterProp: "label" }} options={quantityGroups.map((group) => ({ value: group.id, label: `${group.code} · ${group.name}` }))} />
+          <Select showSearch={{ optionFilterProp: "label" }} options={quantityGroups.map((group) => ({ value: group.id, label: `${group.code} · ${group.name}${group.inventoryMode === "consumable" ? "（一次性耗材）" : ""}` }))} />
         </Form.Item>
         {operationType === "transfer" ? <Row gutter={12}>
           <Col span={12}><Form.Item label="调出地点" name="fromLocationId" rules={[{ required: true }]}><Select options={storageLocations.map((location) => ({ value: location.id, label: location.name }))} /></Form.Item></Col>

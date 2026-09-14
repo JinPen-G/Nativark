@@ -110,6 +110,13 @@ export interface AppliedStockOperation {
   entries: RentalStockLedgerEntry[];
 }
 
+/** 领取时一次性消耗的库存。必须与订单写入放在同一事务中。 */
+export interface ConsumableStockConsumption {
+  itemGroupId: string;
+  locationId: string;
+  quantity: number;
+}
+
 export type RentalFactTx = Prisma.TransactionClient;
 
 export interface InventoryLockTarget {
@@ -174,6 +181,8 @@ export interface RentalCoreFactStore {
   applyStockCount(input: StockCountInput): Promise<{ id: string; onHandQuantity: number; maintenanceQuantity: number }>;
   listStockLedger(tenantId: string, filters?: { itemGroupId?: string; locationId?: string; limit?: number }, tx?: RentalFactTx): Promise<RentalStockLedgerEntry[]>;
   applyStockOperation(input: StockOperationInput): Promise<AppliedStockOperation>;
+  /** 锁余额、扣在手、追加 consume 流水；调用方随后在同一事务内保存订单领取事实。 */
+  consumeStockForOrder(tenantId: string, orderId: string, lines: ConsumableStockConsumption[], operator: string, tx: RentalFactTx): Promise<void>;
   listStockDispositions(tenantId: string, orderId?: string, tx?: RentalFactTx): Promise<RentalStockDisposition[]>;
   upsertStockDisposition(disposition: RentalStockDisposition, tx?: RentalFactTx): Promise<RentalStockDisposition>;
   restoreStockDisposition(tenantId: string, dispositionId: string, operator: string, tx?: RentalFactTx): Promise<RentalStockDisposition>;
@@ -725,7 +734,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
             AND \`locationId\` = ${locationId}
           ORDER BY \`id\` FOR UPDATE
         `);
-      } else if (target.inventoryMode === RentalInventoryMode.Quantity) {
+      } else if ([RentalInventoryMode.Quantity, RentalInventoryMode.Consumable].includes(target.inventoryMode)) {
         await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
           SELECT \`id\` FROM \`rental_stock_balances\`
           WHERE \`tenantId\` = ${tenantId}
@@ -1042,7 +1051,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
   }
 
   /**
-   * 通过单事务写入数量库存作业和追加流水。
+   * 通过单事务写入数量与一次性耗材库存作业和追加流水。
    *
    * 先确保目标余额行存在，再按地点排序锁行；所有减少库存的动作都必须留下
    * `reserved + maintenance`，因此盘点/报损/退出不能把正在租赁或隔离中的数量
@@ -1146,7 +1155,10 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
           deltas.set(input.fromLocationId!, { delta: -quantity, entryKind: "out" });
           deltas.set(input.toLocationId!, { delta: quantity, entryKind: "in" });
         } else {
-          deltas.set(input.locationId!, { delta: input.type === "receive" ? quantity : -quantity, entryKind: "single" });
+          deltas.set(input.locationId!, {
+            delta: input.type === "receive" ? quantity : -quantity,
+            entryKind: input.type === "consume" ? "out" : "single"
+          });
         }
       }
 
@@ -1177,6 +1189,129 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       }
       return { operationId, operationType: input.type, idempotent: false, entries };
     });
+  }
+
+  /**
+   * 领取时消耗一次性库存。
+   *
+   * 耗材不能沿用“归还后释放预占”的数量库存语义：领取成功即减少在手，
+   * 后续归还不能把它重新放回可用池。这里排除当前订单的预占后再检查其它
+   * 订单，避免把本单已经锁住的数量重复算进库存不足判断；订单聚合与本方法
+   * 必须共用同一事务，保证不能出现“订单已领取但库存未扣”或反过来的半事实。
+   */
+  async consumeStockForOrder(
+    tenantId: string,
+    orderId: string,
+    lines: ConsumableStockConsumption[],
+    operator: string,
+    tx: RentalFactTx
+  ): Promise<void> {
+    if (!lines.length) return;
+    const workspaceId = await resolveScopeWorkspaceId(tx, tenantId);
+    const grouped = new Map<string, ConsumableStockConsumption>();
+    for (const line of lines) {
+      if (!Number.isInteger(line.quantity) || line.quantity <= 0) {
+        throw new BadRequestException("耗材领取数量必须是正整数");
+      }
+      const key = `${line.itemGroupId}:${line.locationId}`;
+      const current = grouped.get(key);
+      if (current) current.quantity += line.quantity;
+      else grouped.set(key, { ...line });
+    }
+
+    for (const line of [...grouped.values()].sort((a, b) => `${a.locationId}:${a.itemGroupId}`.localeCompare(`${b.locationId}:${b.itemGroupId}`))) {
+      const group = await tx.rentalItemGroup.findFirst({
+        where: { id: line.itemGroupId, tenantId, workspaceId },
+        select: { inventoryMode: true }
+      });
+      if (!group) throw new NotFoundException("耗材商品不存在或不属于当前经营空间");
+      if (group.inventoryMode !== "CONSUMABLE") throw new ConflictException("只有一次性耗材可以在领取时消耗库存");
+
+      const idempotencyKey = `consume:${orderId}:${line.itemGroupId}:${line.locationId}`;
+      const operationId = `consume:${orderId}`;
+      const requestFingerprint = createHash("sha256").update(JSON.stringify({
+        operationId,
+        itemGroupId: line.itemGroupId,
+        locationId: line.locationId,
+        quantity: line.quantity
+      })).digest("hex");
+      const existing = await tx.rentalStockLedgerEntry.findFirst({
+        where: { tenantId, workspaceId, idempotencyKey, entryKind: "out" },
+        select: { id: true, requestFingerprint: true }
+      });
+      if (existing) {
+        if (existing.requestFingerprint !== requestFingerprint) {
+          throw new ConflictException("同一耗材领取幂等键已用于另一笔消耗，请刷新后重试");
+        }
+        continue;
+      }
+
+      const rows = await tx.$queryRaw<Array<{
+        id: string;
+        onHandQuantity: number;
+        maintenanceQuantity: number;
+      }>>(Prisma.sql`
+        SELECT \`id\`, \`onHandQuantity\`, \`maintenanceQuantity\`
+        FROM \`rental_stock_balances\`
+        WHERE \`tenantId\` = ${tenantId}
+          AND \`workspaceId\` = ${workspaceId}
+          AND \`itemGroupId\` = ${line.itemGroupId}
+          AND \`locationId\` = ${line.locationId}
+        FOR UPDATE
+      `);
+      const balance = rows[0];
+      if (!balance) throw new ConflictException("耗材没有库存台账，不能领取");
+
+      const now = new Date();
+      const otherReservations = await tx.rentalReservation.findMany({
+        where: {
+          tenantId,
+          workspaceId,
+          orderId: { not: orderId },
+          itemGroupId: line.itemGroupId,
+          locationId: line.locationId,
+          status: { in: ACTIVE_RESERVATION_STATES },
+          OR: [{ expiresAt: null }, { expiresAt: { gte: now } }]
+        },
+        select: { quantity: true, releasedQuantity: true }
+      });
+      const reservedByOthers = otherReservations.reduce(
+        (sum, reservation) => sum + Math.max(0, reservation.quantity - reservation.releasedQuantity),
+        0
+      );
+      const available = balance.onHandQuantity - balance.maintenanceQuantity - reservedByOthers;
+      if (available < line.quantity) {
+        throw new ConflictException(`耗材库存不足，当前可领取 ${Math.max(0, available)}，需要 ${line.quantity}`);
+      }
+
+      const updated = await tx.rentalStockBalance.updateMany({
+        where: { id: balance.id, tenantId, workspaceId, onHandQuantity: balance.onHandQuantity },
+        data: { onHandQuantity: { decrement: line.quantity } }
+      });
+      if (updated.count !== 1) throw new ConflictException("耗材库存已被其他操作修改，请刷新后重试");
+
+      await tx.rentalStockLedgerEntry.create({
+        data: {
+          id: randomUUID(),
+          tenantId,
+          workspaceId,
+          operationId,
+          entryKind: "out",
+          operationType: "consume",
+          itemGroupId: line.itemGroupId,
+          locationId: line.locationId,
+          quantityDelta: -line.quantity,
+          onHandBefore: balance.onHandQuantity,
+          onHandAfter: balance.onHandQuantity - line.quantity,
+          reservedQuantity: reservedByOthers,
+          maintenanceQuantity: balance.maintenanceQuantity,
+          reason: `订单 ${orderId} 领取消耗`,
+          idempotencyKey,
+          requestFingerprint,
+          operator: operator || "系统"
+        }
+      });
+    }
   }
 
   async findStockBalance(tenantId: string, itemGroupId: string, locationId: string) {
