@@ -78,6 +78,9 @@ import type {
   RentalWorkspaceReportFilter,
   RentalWorkbenchTodos,
   PaymentReconciliationSummary,
+  PaymentStatementBatchDetail,
+  PaymentStatementBatchSummary,
+  ReviewPaymentStatementLineRequest,
   RentalServiceCapacity,
   SaveWorkspaceCapabilityRequest,
   UpgradeWorkspaceCapabilityRequest,
@@ -139,6 +142,16 @@ export const rentalCoreApi = {
     request<RentalWorkspaceOperationReport>("/rental/v1/reports/operations", { params }),
   workbenchTodos: () => request<RentalWorkbenchTodos>("/rental/v1/workbench/todos"),
   reconcilePayments: (limit = 50) => request<PaymentReconciliationSummary>(`/rental/v1/payment-reconciliation?limit=${limit}`, { method: "post" }),
+  paymentStatementBatches: (limit = 50) => request<PaymentStatementBatchSummary[]>(`/rental/v1/payment-reconciliation/statements?limit=${limit}`),
+  paymentStatementBatch: (batchId: string) => request<PaymentStatementBatchDetail>(`/rental/v1/payment-reconciliation/statements/${batchId}`),
+  importPaymentStatement: (provider: string, file: File) => {
+    const data = new FormData();
+    data.append("provider", provider);
+    data.append("file", file);
+    return request<PaymentStatementBatchDetail>("/rental/v1/payment-reconciliation/statements", { method: "post", data });
+  },
+  reviewPaymentStatementLine: (batchId: string, lineId: string, data: ReviewPaymentStatementLineRequest) =>
+    request<PaymentStatementBatchDetail>(`/rental/v1/payment-reconciliation/statements/${batchId}/lines/${lineId}/review`, { method: "post", data }),
   /**
    * REPORT-01B：导出当前经营空间报表（CSV）。
    *
