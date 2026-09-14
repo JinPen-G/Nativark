@@ -109,7 +109,10 @@ const prisma = {
   }
 };
 
-const integrations = { runtimeConfig: async () => undefined };
+const integrations = {
+  runtimeConfig: async () => undefined,
+  assertEnabledInTransaction: async () => undefined
+};
 const runtime = new FileStorageRuntimeService(prisma, integrations);
 
 void (async () => {

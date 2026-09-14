@@ -182,6 +182,11 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     };
     try {
       created = await this.prisma.$transaction(async (tx) => {
+        if (configured) {
+          // runtimeConfig 在事务外读取；锁住配置行后再创建 pending 上传会话，
+          // 与停用配置的检查形成互斥，避免产生无法继续上传或清理的孤儿会话。
+          await this.integrations.assertEnabledInTransaction(tx, tenantId, "file", configured.provider);
+        }
         const asset = await tx.fileAsset.create({
           data: {
             id: assetId,

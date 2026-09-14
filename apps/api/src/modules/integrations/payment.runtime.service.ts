@@ -244,6 +244,10 @@ export class PaymentRuntimeService {
         const order = rows[0];
         if (!order) throw new NotFoundException("订单不存在或不属于当前经营空间");
 
+        // runtimeConfig 在事务外读取；这里锁同一份配置并重新确认仍启用，
+        // 与停用配置的检查形成互斥，避免停用提交后仍落下一笔 pending 支付单。
+        await this.integrations.assertEnabledInTransaction(tx, tenantId, "payment", config.provider);
+
         const existingInside = await tx.rentalPaymentIntent.findUnique({
           where: { tenantId_workspaceId_orderId_instrument_idempotencyHash: { tenantId, workspaceId, orderId, instrument: input.instrument, idempotencyHash: sha256(idempotencyKey) } }
         });

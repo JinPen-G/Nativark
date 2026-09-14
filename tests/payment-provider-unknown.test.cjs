@@ -34,6 +34,7 @@ function makeHarness(providerError) {
     $transaction: async () => ({ intent, orderNo: "ORDER-1", amount: 12.34, replayed: false })
   };
   const integrations = {
+    assertEnabledInTransaction: async () => undefined,
     runtimeConfig: async () => ({
       id: "integration-1",
       capability: "payment",

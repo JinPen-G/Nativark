@@ -132,6 +132,35 @@ export class TenantIntegrationService {
   }
 
   /**
+   * 在创建支付单、上传会话等“进行中事实”前锁住配置行，并重新确认平台仍启用。
+   *
+   * 运行时配置通常会先在事务外读取，停用配置则在自己的事务里检查进行中事实。
+   * 如果两边没有共同的锁点，就会出现“停用检查通过后又插入进行中事实”的竞态。
+   * 所有会改变外部平台生命周期的创建事务都必须调用本方法；不存在或已停用时
+   * 直接失败，不能使用事务外读到的旧配置继续写入。
+   */
+  async assertEnabledInTransaction(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    capability: TenantIntegrationCapability,
+    provider: TenantIntegrationProvider
+  ): Promise<void> {
+    const rows = await tx.$queryRaw<Array<{ id: string; enabled: boolean | number | string }>>(Prisma.sql`
+      SELECT id, enabled
+        FROM tenant_integration_configs
+       WHERE tenantId = ${tenantId}
+         AND capability = ${capability}
+         AND provider = ${provider}
+       FOR UPDATE
+    `);
+    const row = rows[0];
+    const enabled = row?.enabled === true || row?.enabled === 1 || row?.enabled === "1";
+    if (!row || !enabled) {
+      throw new ServiceUnavailableException("该第三方平台已停用或配置不存在，请稍后重试");
+    }
+  }
+
+  /**
    * 第三方回调没有租户路径，不能信任请求体里的 tenantId。
    * 回调适配器只能从已启用的对应提供方配置中匹配商户标识/证书，
    * 这里返回完整配置但绝不经过 controller。
@@ -214,8 +243,19 @@ export class TenantIntegrationService {
 
     const secretFieldNames = definition.fields.filter((field) => field.secret && mergedSecrets[field.key]).map((field) => field.key);
     const row = await this.prisma.$transaction(async (tx) => {
-      if (existing?.enabled && !input.enabled) {
-        await this.assertCanDisableProvider(tx, tenantId, capability, provider);
+      if (existing) {
+        // 与运行时创建事务使用同一行锁，避免检查完进行中事实后又被并发创建。
+        await tx.$queryRaw(Prisma.sql`
+          SELECT id
+            FROM tenant_integration_configs
+           WHERE tenantId = ${tenantId}
+             AND capability = ${capability}
+             AND provider = ${provider}
+           FOR UPDATE
+        `);
+        if (existing.enabled && !input.enabled) {
+          await this.assertCanDisableProvider(tx, tenantId, capability, provider);
+        }
       }
       const saved = await tx.tenantIntegrationConfig.upsert({
         where: { tenantId_capability_provider: { tenantId, capability, provider } },
@@ -317,16 +357,29 @@ export class TenantIntegrationService {
       return;
     }
     if (capability === "sms") {
-      const pending = await tx.rentalNotificationLog.findFirst({
-        where: {
-          tenantId,
-          channel: "sms",
-          provider,
-          status: { in: ["queued", "sent", "delivery_pending", "delivery_uncertain"] }
-        },
-        select: { id: true }
-      });
-      if (pending) throw new ConflictException("该短信平台仍有未完成或待核对的通知，请先处理完再停用");
+      const [pendingBound, pendingUnbound] = await Promise.all([
+        tx.rentalNotificationLog.findFirst({
+          where: {
+            tenantId,
+            channel: "sms",
+            provider,
+            status: { in: ["queued", "sent", "delivery_pending", "delivery_uncertain"] }
+          },
+          select: { id: true }
+        }),
+        // 新通知在真正选择服务商前会短暂使用 sms_pending。停用任一短信平台
+        // 时必须保护这类队列，避免它在停用检查后才读到旧的默认平台配置。
+        tx.rentalNotificationLog.findFirst({
+          where: {
+            tenantId,
+            channel: "sms",
+            provider: "sms_pending",
+            status: { in: ["queued", "failed"] }
+          },
+          select: { id: true }
+        })
+      ]);
+      if (pendingBound || pendingUnbound) throw new ConflictException("该短信平台仍有未完成或待核对的通知，请先处理完再停用");
       return;
     }
     const [asset, session] = await Promise.all([

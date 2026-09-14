@@ -22,6 +22,11 @@ const matches = (row, where) => Object.entries(where).every(([key, value]) => {
 });
 const clone = (row) => row ? { ...row, settings: { ...row.settings }, secretFields: [...row.secretFields] } : null;
 const fakeClient = {
+  $queryRaw: async (query) => {
+    const [queryTenantId, capability, provider] = query.values ?? [];
+    const row = [...rows.values()].find((item) => item.tenantId === queryTenantId && item.capability === capability && item.provider === provider);
+    return row ? [{ id: row.id, enabled: row.enabled }] : [];
+  },
   rentalPaymentIntent: {
     findFirst: async ({ where }) => paymentIntents.find((row) => matches(row, where)) ?? null
   },
@@ -142,6 +147,17 @@ const alipay = {
     credentials: { accessKeyId: "access-key", accessKeySecret: "secret" }
   }, user);
   notificationLogs.push({ tenantId, channel: "sms", provider: "aliyun_sms", status: "delivery_uncertain" });
+  await assert.rejects(
+    () => service.save("sms", "aliyun_sms", {
+      enabled: false,
+      isDefault: false,
+      settings: {},
+      credentials: {}
+    }, user),
+    /仍有未完成或待核对的通知/u
+  );
+  notificationLogs.length = 0;
+  notificationLogs.push({ tenantId, channel: "sms", provider: "sms_pending", status: "queued" });
   await assert.rejects(
     () => service.save("sms", "aliyun_sms", {
       enabled: false,
