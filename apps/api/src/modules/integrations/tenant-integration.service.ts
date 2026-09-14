@@ -27,6 +27,14 @@ export interface TenantIntegrationRuntimeConfig {
   credentials: Record<string, string>;
 }
 
+export interface TenantIntegrationRuntimeOptions {
+  /**
+   * 新的外部业务调用默认要求最近一次配置已经通过 live 连通性测试。
+   * 既有事实的查单、回执、上传完成和清理可显式关闭此要求，避免恢复链被测试状态阻断。
+   */
+  requireLiveTest?: boolean;
+}
+
 export interface TenantIntegrationTestConfig extends TenantIntegrationRuntimeConfig {
   tenantId: string;
   missingFields: string[];
@@ -102,7 +110,8 @@ export class TenantIntegrationService {
   async runtimeConfig(
     capability: TenantIntegrationCapability,
     tenantId = requireRequestTenantId(),
-    provider?: TenantIntegrationProvider
+    provider?: TenantIntegrationProvider,
+    options: TenantIntegrationRuntimeOptions = {}
   ): Promise<TenantIntegrationRuntimeConfig | undefined> {
     const row = await this.prisma.tenantIntegrationConfig.findFirst({
       where: { tenantId, capability, enabled: true, ...(provider ? { provider } : { isDefault: true }) },
@@ -121,6 +130,9 @@ export class TenantIntegrationService {
     } catch (error) {
       const message = error instanceof UnsafeOutboundUrlError ? error.message : "第三方平台地址无法安全使用";
       throw new ServiceUnavailableException(message);
+    }
+    if (options.requireLiveTest !== false && (row.lastTestStatus !== "passed" || row.lastTestMode !== "live")) {
+      throw new ServiceUnavailableException(`默认${capability}平台尚未通过真实连接测试，请先完成连接测试`);
     }
     return {
       id: row.id,
@@ -143,10 +155,11 @@ export class TenantIntegrationService {
     tx: Prisma.TransactionClient,
     tenantId: string,
     capability: TenantIntegrationCapability,
-    provider: TenantIntegrationProvider
+    provider: TenantIntegrationProvider,
+    options: TenantIntegrationRuntimeOptions = {}
   ): Promise<void> {
-    const rows = await tx.$queryRaw<Array<{ id: string; enabled: boolean | number | string }>>(Prisma.sql`
-      SELECT id, enabled
+    const rows = await tx.$queryRaw<Array<{ id: string; enabled: boolean | number | string; lastTestStatus: string; lastTestMode: string }>>(Prisma.sql`
+      SELECT id, enabled, lastTestStatus, lastTestMode
         FROM tenant_integration_configs
        WHERE tenantId = ${tenantId}
          AND capability = ${capability}
@@ -157,6 +170,9 @@ export class TenantIntegrationService {
     const enabled = row?.enabled === true || row?.enabled === 1 || row?.enabled === "1";
     if (!row || !enabled) {
       throw new ServiceUnavailableException("该第三方平台已停用或配置不存在，请稍后重试");
+    }
+    if (options.requireLiveTest !== false && (row.lastTestStatus !== "passed" || row.lastTestMode !== "live")) {
+      throw new ServiceUnavailableException("该第三方平台尚未通过真实连接测试，请先完成连接测试");
     }
   }
 

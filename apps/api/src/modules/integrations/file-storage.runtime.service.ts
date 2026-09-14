@@ -304,7 +304,7 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
 
     if (asset.storageProvider !== "local_mock") {
       try {
-        const config = await this.integrations.runtimeConfig("file", tenantId, asset.storageProvider as never);
+        const config = await this.integrations.runtimeConfig("file", tenantId, asset.storageProvider as never, { requireLiveTest: false });
         if (!config || !(await this.deleteObject(config, asset.storageKey, new Date()))) throw new ServiceUnavailableException("对象存储未确认删除文件");
       } catch {
         await this.prisma.fileAsset.updateMany({
@@ -366,7 +366,7 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
       let deleted = row.provider === "local_mock";
       try {
         if (!deleted) {
-          const config = await this.integrations.runtimeConfig("file", tenantId, row.provider as never);
+          const config = await this.integrations.runtimeConfig("file", tenantId, row.provider as never, { requireLiveTest: false });
           if (!config) throw new ServiceUnavailableException("文件平台已停用，无法清理过期对象");
           deleted = await this.deleteObject(config, row.storageKey, now);
           if (!deleted) throw new ServiceUnavailableException("对象存储未确认删除过期对象");
@@ -453,7 +453,7 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
       if (claimed.count !== 1) continue;
       try {
         if (row.storageProvider !== "local_mock") {
-          const config = await this.integrations.runtimeConfig("file", tenantId, row.storageProvider as never);
+          const config = await this.integrations.runtimeConfig("file", tenantId, row.storageProvider as never, { requireLiveTest: false });
           if (!config || !(await this.deleteObject(config, row.storageKey, new Date()))) throw new ServiceUnavailableException("对象存储未确认删除文件");
         }
         await this.prisma.fileAsset.updateMany({ where: { id: row.id, tenantId, status: "delete_in_progress" }, data: { status: "deleted" } });
@@ -511,7 +511,7 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
       throw new ConflictException("上传会话已过期，请重新上传");
     }
     if (session.provider !== "local_mock") {
-      const config = await this.integrations.runtimeConfig("file", tenantId, session.provider as never);
+      const config = await this.integrations.runtimeConfig("file", tenantId, session.provider as never, { requireLiveTest: false });
       if (!config) throw new ServiceUnavailableException("文件平台已停用，无法确认上传结果");
       const exists = await this.objectExists(config, session.storageKey, asset.mimeType, asset.sizeBytes, session.expiresAt);
       if (!exists) throw new ConflictException("对象存储中尚未找到上传文件");

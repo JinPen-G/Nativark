@@ -23,6 +23,7 @@ const notificationSchema = fs.readFileSync(path.join(repo, "apps", "api", "prism
 const authSource = fs.readFileSync(path.join(repo, "apps", "api", "src", "modules", "client", "client-auth.service.ts"), "utf8");
 const guardSource = fs.readFileSync(path.join(repo, "apps", "api", "src", "common", "api-auth.guard.ts"), "utf8");
 const openapiSource = fs.readFileSync(path.join(repo, "apps", "api", "src", "contracts", "openapi-document.ts"), "utf8");
+const integrationSource = fs.readFileSync(path.join(repo, "apps", "api", "src", "modules", "integrations", "tenant-integration.service.ts"), "utf8");
 
 assert.match(paymentSource, /decrypted\.mchid/);
 assert.match(paymentSource, /decrypted\.appid/);
@@ -82,5 +83,61 @@ assert.match(openapiSource, /notification-templates[\s\S]{0,220}system:integrati
 assert.doesNotMatch(openapiSource, /notification-templates[\s\S]{0,220}system:params:manage/u);
 assert.match(openapiSource, /backlogOperation\("get", "\/api\/files"[\s\S]{0,150}system:integration:manage/u);
 assert.doesNotMatch(openapiSource, /backlogOperation\("(?:get|post)", "\/api\/files"[\s\S]{0,150}system:files:manage/u);
+assert.match(integrationSource, /requireLiveTest\?: boolean/u);
+assert.match(integrationSource, /row\.lastTestStatus !== "passed"/u);
+assert.match(integrationSource, /row\.lastTestMode !== "live"/u);
+assert.match(integrationSource, /requireLiveTest !== false/u);
+assert.match(fileSource, /requireLiveTest: false/u);
+assert.match(paymentSource, /requireLiveTest: false/u);
+assert.match(smsSource, /requireLiveTest: false/u);
 
-console.log("integration security probes passed: SSRF, callback binding, payment race, upload verification, SMS cooldown and route permission");
+(async () => {
+  const { TenantIntegrationService } = require(path.join(repo, "apps", "api", "dist", "modules", "integrations", "tenant-integration.service.js"));
+  const row = {
+    id: "cfg_sms_1",
+    tenantId: "tenant_1",
+    capability: "sms",
+    provider: "aliyun_sms",
+    enabled: true,
+    isDefault: true,
+    settings: { region: "cn-hangzhou", signName: "演示", verificationTemplateCode: "SMS_001" },
+    credentialsEncrypted: "sealed",
+    secretFields: ["accessKeyId", "accessKeySecret"],
+    lastTestStatus: "not_tested",
+    lastTestMode: "none",
+    lastTestAt: null,
+    lastTestError: null,
+    createdAt: new Date(),
+    updatedAt: new Date()
+  };
+  const service = new TenantIntegrationService(
+    { tenantIntegrationConfig: { findFirst: async () => row } },
+    { decrypt: () => ({ accessKeyId: "access-key", accessKeySecret: "access-secret" }) },
+    { record: async () => undefined }
+  );
+  await assert.rejects(
+    service.runtimeConfig("sms", "tenant_1"),
+    /尚未通过真实连接测试/u,
+    "未通过 live 测试的启用配置不得进入新的短信发送链"
+  );
+  const recoveryConfig = await service.runtimeConfig("sms", "tenant_1", undefined, { requireLiveTest: false });
+  assert.equal(recoveryConfig?.provider, "aliyun_sms", "既有事实的恢复查询可以显式绕过 live 门禁");
+  row.lastTestStatus = "passed";
+  row.lastTestMode = "live";
+  const verifiedConfig = await service.runtimeConfig("sms", "tenant_1");
+  assert.equal(verifiedConfig?.provider, "aliyun_sms", "通过 live 测试后新短信发送链可使用配置");
+  await assert.rejects(
+    service.assertEnabledInTransaction(
+      { $queryRaw: async () => [{ id: "cfg_sms_1", enabled: true, lastTestStatus: "failed", lastTestMode: "live" }] },
+      "tenant_1",
+      "sms",
+      "aliyun_sms"
+    ),
+    /尚未通过真实连接测试/u,
+    "进行中事实落库前必须在配置行锁内再次确认 live 门禁"
+  );
+  console.log("integration security probes passed: SSRF, callback binding, payment race, upload verification, SMS cooldown, runtime gate and route permission");
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

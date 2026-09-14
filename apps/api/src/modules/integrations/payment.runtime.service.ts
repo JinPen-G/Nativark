@@ -489,7 +489,7 @@ export class PaymentRuntimeService {
     if (refund.status === "succeeded" && refund.fundedAt) return this.toRefundResponse(refund);
     if (refund.status === "failed" || refund.status === "closed") return this.toRefundResponse(refund);
     const intent = await this.requirePaymentIntent(tenantId, workspaceId, orderId, intentId);
-    const config = await this.integrations.runtimeConfig("payment", tenantId, intent.method as "alipay" | "wechat_pay");
+    const config = await this.integrations.runtimeConfig("payment", tenantId, intent.method as "alipay" | "wechat_pay", { requireLiveTest: false });
     if (!config) throw new ServiceUnavailableException("原支付平台未启用，无法查询退款");
     const confirmedTotal = await this.confirmedRefundTotal(tenantId, workspaceId, intentId, refund.id);
     let result: { status: string; response: unknown; failureReason?: string };
@@ -600,7 +600,7 @@ export class PaymentRuntimeService {
     const intent = await this.prisma.rentalPaymentIntent.findFirst({ where: { id: intentId, tenantId, workspaceId, orderId } });
     if (!intent) throw new NotFoundException("支付单不存在");
     if (["paid", "closed"].includes(intent.status)) return this.toResponse(intent);
-    const config = await this.integrations.runtimeConfig("payment", tenantId, intent.method as "alipay" | "wechat_pay");
+    const config = await this.integrations.runtimeConfig("payment", tenantId, intent.method as "alipay" | "wechat_pay", { requireLiveTest: false });
     if (!config) throw new ServiceUnavailableException("支付平台已停用，无法查询支付状态");
     const result = intent.method === "alipay"
       ? await this.queryAlipayIntent(config, intent.merchantOrderNo)
