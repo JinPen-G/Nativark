@@ -14,6 +14,7 @@
     "test:client-security": "npm run build -w @rental-os/shared && npm run build -w @rental-os/api && node tests/client-api-security.test.cjs",
     "test:client-integration-readiness": "npm run build -w @rental-os/shared && npm run build -w @rental-os/api && node tests/client-integration-readiness.test.cjs",
     "test:integrations-security": "npm run build -w @rental-os/shared && npm run build -w @rental-os/api && node tests/integrations-security.test.cjs",
+    "test:integrations-memory-scope": "npm run build -w @rental-os/shared && npm run build -w @rental-os/api && node tests/integrations-memory-scope.test.cjs",
     "test:integration-connectivity": "npm run build -w @rental-os/shared && npm run build -w @rental-os/api && node tests/tenant-integration-connectivity.test.cjs",
     "test:sms-notification": "node tests/tenant-sms-notification.test.cjs",
     "test:sms-rate-limit": "npm run build -w @rental-os/shared && npm run build -w @rental-os/api && node tests/sms-rate-limit.test.cjs",

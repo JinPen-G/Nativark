@@ -310,34 +310,33 @@ export class IntegrationsRepository {
     tenantId = requireRequestTenantId()
   ): Promise<TBoxDeviceSummary> {
     const id = input.id ?? `tbox_${cryptoRandomId()}`;
-    const row = await this.prisma.tBoxDevice.upsert({
-      where: { id },
-      update: {
-        cid: input.cid,
-        simNo: input.simNo,
-        model: input.model,
-        status: input.status ?? "unbound",
-        firmwareVersion: input.firmwareVersion,
-        appVersion: input.appVersion,
-        warrantyExpireAt: input.warrantyExpireAt ? new Date(input.warrantyExpireAt) : undefined,
-        supportsIButton: Boolean(input.supportsIButton),
-        iButtonCode: input.iButtonCode
-      },
-      create: {
-        id,
-        tenantId,
-        cid: input.cid,
-        simNo: input.simNo,
-        model: input.model,
-        status: input.status ?? "unbound",
-        firmwareVersion: input.firmwareVersion,
-        appVersion: input.appVersion,
-        warrantyExpireAt: input.warrantyExpireAt ? new Date(input.warrantyExpireAt) : undefined,
-        supportsIButton: Boolean(input.supportsIButton),
-        iButtonCode: input.iButtonCode,
-        telemetry: {}
+    if (input.id) {
+      const existing = await this.prisma.tBoxDevice.findFirst({ where: { id, tenantId } });
+      if (!existing) {
+        throw new NotFoundException(`TBox device ${id} was not found`);
       }
-    });
+    }
+    const data = {
+      cid: input.cid,
+      simNo: input.simNo,
+      model: input.model,
+      status: input.status ?? "unbound",
+      firmwareVersion: input.firmwareVersion,
+      appVersion: input.appVersion,
+      warrantyExpireAt: input.warrantyExpireAt ? new Date(input.warrantyExpireAt) : undefined,
+      supportsIButton: Boolean(input.supportsIButton),
+      iButtonCode: input.iButtonCode
+    };
+    const row = input.id
+      ? await this.prisma.tBoxDevice.update({ where: { id }, data })
+      : await this.prisma.tBoxDevice.create({
+          data: {
+            id,
+            tenantId,
+            ...data,
+            telemetry: {}
+          }
+        });
     return toTBoxDeviceSummary(row);
   }
 

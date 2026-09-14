@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "node:crypto";
 import type {
@@ -66,6 +66,15 @@ export class IntegrationsService {
   ];
   /** 内存 mock 也必须按当前租户隔离，不能把演示数组当成共享数据源。 */
   private readonly filesByTenant = new Map<string, FileAssetSummary[]>();
+  /**
+   * 内存 fallback 不能因为没有 Prisma 就退回进程级共享数组。
+   * 这些集合都承载租户可见的运行事实；每个租户首次访问时从只读演示模板复制一份。
+   */
+  private readonly notificationLogsByTenant = new Map<string, NotificationSendLogSummary[]>();
+  private readonly adapterLogsByTenant = new Map<string, AdapterLogSummary[]>();
+  private readonly jobsByTenant = new Map<string, AsyncJobSummary[]>();
+  private readonly printJobsByTenant = new Map<string, PrintJobSummary[]>();
+  private readonly tboxDevicesByTenant = new Map<string, TBoxDeviceSummary[]>();
 
   private readonly notificationTemplates = defaultNotificationTemplates();
   private readonly dataExchangeTemplates = defaultDataExchangeTemplates();
@@ -311,7 +320,7 @@ export class IntegrationsService {
     if (this.useMysqlDataSource()) {
       return this.integrationsRepository.listNotificationLogs(this.defaultTenantId);
     }
-    return [...this.notificationLogs];
+    return [...this.memoryNotificationLogsForTenant(this.defaultTenantId)];
   }
 
   async sendNotification(input: SendMockNotificationRequest) {
@@ -354,7 +363,7 @@ export class IntegrationsService {
     if (this.useMysqlDataSource()) {
       return this.integrationsRepository.listAdapterLogs(this.defaultTenantId);
     }
-    return [...this.adapterLogs];
+    return [...this.memoryAdapterLogsForTenant(this.defaultTenantId)];
   }
 
   async invokeMockAdapter(input: InvokeMockAdapterRequest) {
@@ -394,7 +403,7 @@ export class IntegrationsService {
       createdAt: new Date().toISOString(),
       ...input
     };
-    this.adapterLogs.unshift(row);
+    this.memoryAdapterLogsForTenant(this.defaultTenantId).unshift(row);
     return row;
   }
 
@@ -402,7 +411,7 @@ export class IntegrationsService {
     if (this.useMysqlDataSource()) {
       return this.integrationsRepository.listJobs(this.defaultTenantId);
     }
-    return [...this.jobs];
+    return [...this.memoryJobsForTenant(this.defaultTenantId)];
   }
 
   async createJob(input: CreateAsyncJobRequest) {
@@ -515,7 +524,7 @@ export class IntegrationsService {
   async runJob(id: string) {
     const existingJob = this.useMysqlDataSource()
       ? await this.integrationsRepository.getJob(id, this.defaultTenantId)
-      : this.jobs.find((item) => item.id === id);
+      : this.memoryJobsForTenant(this.defaultTenantId).find((item) => item.id === id);
 
     if (!existingJob) {
       throw new BadRequestException("任务不存在");
@@ -568,7 +577,7 @@ export class IntegrationsService {
     if (this.useMysqlDataSource()) {
       return this.integrationsRepository.listPrintJobs(this.defaultTenantId);
     }
-    return [...this.printJobs];
+    return [...this.memoryPrintJobsForTenant(this.defaultTenantId)];
   }
 
   async createPrintJob(input: CreatePrintJobRequest) {
@@ -629,7 +638,7 @@ export class IntegrationsService {
     if (this.useMysqlDataSource()) {
       return this.integrationsRepository.listTBoxDevices(this.defaultTenantId);
     }
-    return [...this.tboxDevices];
+    return [...this.memoryTBoxDevicesForTenant(this.defaultTenantId)];
   }
 
   async saveTBoxDevice(input: SaveTBoxDeviceRequest) {
@@ -738,6 +747,7 @@ export class IntegrationsService {
   }
 
   private createMemoryNotificationLog(input: SendMockNotificationRequest) {
+    const tenantId = this.defaultTenantId;
     const now = new Date().toISOString();
     const row: NotificationSendLogSummary = {
       id: `notify_${shortId()}`,
@@ -762,11 +772,12 @@ export class IntegrationsService {
         message: "MVP 阶段未调用真实短信、邮件或 APP 推送。"
       }
     };
-    this.notificationLogs.unshift(row);
+    this.memoryNotificationLogsForTenant(tenantId).unshift(row);
     return row;
   }
 
   private createMemoryJob(input: CreateAsyncJobRequest) {
+    const tenantId = this.defaultTenantId;
     const now = new Date().toISOString();
     const row: AsyncJobSummary = {
       id: `job_${shortId()}`,
@@ -782,7 +793,7 @@ export class IntegrationsService {
       createdAt: now,
       updatedAt: now
     };
-    this.jobs.unshift(row);
+    this.memoryJobsForTenant(tenantId).unshift(row);
     return row;
   }
 
@@ -791,6 +802,7 @@ export class IntegrationsService {
     fileAssetId: string,
     documentNo: string
   ) {
+    const tenantId = this.defaultTenantId;
     const now = new Date().toISOString();
     const row: PrintJobSummary = {
       id: `print_${shortId()}`,
@@ -811,15 +823,19 @@ export class IntegrationsService {
       createdAt: now,
       updatedAt: now
     };
-    this.printJobs.unshift(row);
+    this.memoryPrintJobsForTenant(tenantId).unshift(row);
     return row;
   }
 
   private saveMemoryTBoxDevice(input: SaveTBoxDeviceRequest) {
+    const devices = this.memoryTBoxDevicesForTenant(this.defaultTenantId);
     const now = new Date().toISOString();
     const existing = input.id
-      ? this.tboxDevices.find((item) => item.id === input.id)
-      : this.tboxDevices.find((item) => item.cid === input.cid);
+      ? devices.find((item) => item.id === input.id)
+      : devices.find((item) => item.cid === input.cid);
+    if (input.id && !existing) {
+      throw new NotFoundException(`TBox device ${input.id} was not found`);
+    }
     const row: TBoxDeviceSummary = {
       id: existing?.id ?? `tbox_${shortId()}`,
       cid: input.cid,
@@ -839,17 +855,17 @@ export class IntegrationsService {
       telemetry: existing?.telemetry,
       updatedAt: now
     };
-    const index = this.tboxDevices.findIndex((item) => item.id === row.id);
+    const index = devices.findIndex((item) => item.id === row.id);
     if (index >= 0) {
-      this.tboxDevices[index] = row;
+      devices[index] = row;
     } else {
-      this.tboxDevices.unshift(row);
+      devices.unshift(row);
     }
     return row;
   }
 
   private bindMemoryTBoxDevice(id: string, input: BindTBoxDeviceRequest) {
-    const device = this.tboxDevices.find((item) => item.id === id);
+    const device = this.memoryTBoxDevicesForTenant(this.defaultTenantId).find((item) => item.id === id);
     if (!device) {
       throw new BadRequestException("TBox 设备不存在");
     }
@@ -860,6 +876,62 @@ export class IntegrationsService {
     device.lastHeartbeatAt = input.plateNo ? new Date().toISOString() : device.lastHeartbeatAt;
     device.updatedAt = new Date().toISOString();
     return device;
+  }
+
+  private memoryNotificationLogsForTenant(tenantId: string) {
+    const existing = this.notificationLogsByTenant.get(tenantId);
+    if (existing) return existing;
+    const seeded = this.notificationLogs.map((item) => ({
+      ...item,
+      id: `${item.id}_${tenantId}`
+    }));
+    this.notificationLogsByTenant.set(tenantId, seeded);
+    return seeded;
+  }
+
+  private memoryAdapterLogsForTenant(tenantId: string) {
+    const existing = this.adapterLogsByTenant.get(tenantId);
+    if (existing) return existing;
+    const seeded = this.adapterLogs.map((item) => ({
+      ...item,
+      id: `${item.id}_${tenantId}`
+    }));
+    this.adapterLogsByTenant.set(tenantId, seeded);
+    return seeded;
+  }
+
+  private memoryJobsForTenant(tenantId: string) {
+    const existing = this.jobsByTenant.get(tenantId);
+    if (existing) return existing;
+    const seeded = this.jobs.map((item) => ({
+      ...item,
+      id: `${item.id}_${tenantId}`
+    }));
+    this.jobsByTenant.set(tenantId, seeded);
+    return seeded;
+  }
+
+  private memoryPrintJobsForTenant(tenantId: string) {
+    const existing = this.printJobsByTenant.get(tenantId);
+    if (existing) return existing;
+    const seeded = this.printJobs.map((item) => ({
+      ...item,
+      id: `${item.id}_${tenantId}`,
+      fileAssetId: item.fileAssetId ? `${item.fileAssetId}_${tenantId}` : item.fileAssetId
+    }));
+    this.printJobsByTenant.set(tenantId, seeded);
+    return seeded;
+  }
+
+  private memoryTBoxDevicesForTenant(tenantId: string) {
+    const existing = this.tboxDevicesByTenant.get(tenantId);
+    if (existing) return existing;
+    const seeded = this.tboxDevices.map((item) => ({
+      ...item,
+      id: `${item.id}_${tenantId}`
+    }));
+    this.tboxDevicesByTenant.set(tenantId, seeded);
+    return seeded;
   }
 
   private async recordJobRunLog(job: AsyncJobSummary) {
