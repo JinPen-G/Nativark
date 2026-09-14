@@ -572,13 +572,13 @@ export const RENTAL_CAPABILITY_MODULES: RentalCapabilityModuleDefinition[] = [
     code: "camping_kit_integrity", label: "露营套装完整性", kind: "category_required",
     extensionPoints: ["order_validation", "fulfillment"],
     applicableCategories: [RentalCategoryCode.Camping], dependsOn: ["bundle_inventory"], conflictsWith: [],
-    configSchema: []
+    configSchema: [], implementationVersion: "camp-kit-1.0"
   },
   {
     code: "camping_cleaning_turnaround", label: "露营清洁周转", kind: "category_required",
     extensionPoints: ["fulfillment"],
     applicableCategories: [RentalCategoryCode.Camping], dependsOn: ["return"], conflictsWith: [],
-    configSchema: []
+    configSchema: [], implementationVersion: "camp-clean-1.0"
   },
   {
     code: "inspection_care", label: "检查与养护", kind: "shared",

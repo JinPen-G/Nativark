@@ -1,6 +1,14 @@
 import { Injectable, Logger, type OnApplicationBootstrap } from "@nestjs/common";
 import { buildCameraCompatibilityHookModule } from "./capabilities/camera-compatibility";
 import {
+  buildCampingCleaningTurnaroundHookModule,
+  CAMPING_CLEANING_TURNAROUND_RULESET_VERSION
+} from "./capabilities/camping-cleaning-turnaround";
+import {
+  buildCampingKitIntegrityHookModule,
+  CAMPING_KIT_INTEGRITY_RULESET_VERSION
+} from "./capabilities/camping-kit-integrity";
+import {
   buildCameraKitHandoverHookModule,
   CAMERA_KIT_HANDOVER_LEGACY_VERSION
 } from "./capabilities/camera-kit-handover";
@@ -34,6 +42,10 @@ export class CapabilityHookRegistrar implements OnApplicationBootstrap {
     // 兼容版本必须与当前版本一起登记，不能让历史订单因新模块上线而被拒绝履约。
     this.runtime.register(buildCameraKitHandoverHookModule());
     this.runtime.register(buildCameraKitHandoverHookModule(CAMERA_KIT_HANDOVER_LEGACY_VERSION));
+    // CAMP-01A：露营套装清点与清洁周转。两项能力都只返回判定意见，
+    // 归还异常与养护工单仍由 Rental Core 的通用链落库，避免复制订单状态机。
+    this.runtime.register(buildCampingKitIntegrityHookModule());
+    this.runtime.register(buildCampingCleaningTurnaroundHookModule());
     // 发布自检：注册表当前声明的实现版本必须真的有实现。
     // 捕捉「升了注册表版本号却忘了发实现」——那会让该能力对新业务全面 fail-closed。
     this.runtime.assertCurrentVersionsRegistered();

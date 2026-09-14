@@ -164,7 +164,7 @@ function id(prefix: string) { return `${prefix}_${randomUUID().slice(0, 8)}`; }
 
 function workOrderTypeForReason(reason: string): RentalWorkOrderType {
   if (/清洁|清洗|clean/iu.test(reason)) return "cleaning";
-  if (/缺件|补货|耗材|restock/iu.test(reason)) return "restock";
+  if (/缺件|补货|耗材|restock|missing[_-]item|camping[_-]missing[_-]item/iu.test(reason)) return "restock";
   if (/校准|标定|calibr/iu.test(reason)) return "calibration";
   return "repair";
 }
@@ -2391,13 +2391,19 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     // "检查已记录、订单未推进"的中间态。
     await this.factStore.insertInspection(record, tx);
     if (template.stage === "return") {
+      const dispositionReason = input.exceptions?.length
+        ? input.exceptions
+          .flatMap((exception) => [exception.code, exception.description])
+          .filter((value): value is string => Boolean(value?.trim()))
+          .join("；") || "归还检查发现异常"
+        : undefined;
       await this.recordReturnDispositions(
         tenantId,
         order,
         record.id,
         input.returnBatchNo ?? record.id,
         releasedBeforeReturn,
-        input.exceptions?.length ? "blocked" : undefined,
+        dispositionReason,
         tx,
         input.operator || userName,
         returnedAllocationIdsBefore,
