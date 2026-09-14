@@ -11,7 +11,7 @@ if %errorlevel% equ 0 (
 
 if not %errorlevel% equ 0 (
   echo.
-  echo [rental-platform] 启动失败，错误码 %errorlevel%。
+  echo [rental-os] 启动失败，错误码 %errorlevel%。
   pause
 )
 endlocal
