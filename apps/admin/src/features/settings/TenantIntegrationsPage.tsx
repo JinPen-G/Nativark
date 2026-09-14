@@ -15,6 +15,7 @@ const CAPABILITY_LABELS: Record<TenantIntegrationCapability, string> = { sms: "�
 
 function ProviderCard({ definition, config }: { definition: TenantIntegrationProviderDefinition; config?: TenantIntegrationConfigSummary }) {
   const [form] = Form.useForm<SaveTenantIntegrationRequest>();
+  const enabled = Form.useWatch("enabled", form);
   const { message } = App.useApp();
   const queryClient = useQueryClient();
   const save = useMutation({
@@ -55,8 +56,12 @@ function ProviderCard({ definition, config }: { definition: TenantIntegrationPro
       <Typography.Paragraph type="secondary">{definition.description}</Typography.Paragraph>
       <Form form={form} layout="vertical" onFinish={(values) => save.mutate(values)}>
         <Space size="large" style={{ marginBottom: 12 }}>
-          <Form.Item name="enabled" label="启用此平台" valuePropName="checked" noStyle><Switch /></Form.Item>
-          <Form.Item name="isDefault" label="设为该能力默认平台" valuePropName="checked" noStyle><Switch /></Form.Item>
+          <Form.Item name="enabled" label="启用此平台" valuePropName="checked" noStyle>
+            <Switch onChange={(checked) => { if (!checked) form.setFieldValue("isDefault", false); }} />
+          </Form.Item>
+          <Form.Item name="isDefault" label="设为该能力默认平台" valuePropName="checked" noStyle>
+            <Switch disabled={!enabled} />
+          </Form.Item>
         </Space>
         <Row gutter={[12, 0]}>
           {definition.fields.map((field) => (
