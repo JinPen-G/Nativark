@@ -147,6 +147,17 @@ void (async () => {
   assert.equal("storageKey" in completed, false, "完成响应不得向调用方返回对象存储路径");
   const ownedUrl = await runtime.downloadUrl(tenantId, first.fileAssetId, { businessType: "rental_order", businessId: orderId, uploadScene: "order-contract" });
   assert.equal(ownedUrl.fileAssetId, first.fileAssetId);
+  const previousNodeEnv = process.env.NODE_ENV;
+  process.env.NODE_ENV = "production";
+  try {
+    await assert.rejects(
+      () => runtime.downloadUrl(tenantId, first.fileAssetId, { businessType: "rental_order", businessId: orderId, uploadScene: "order-contract" }),
+      /生产环境禁止访问未归档的模拟文件/u,
+      "生产环境不得为 local_mock 文件生成下载引用"
+    );
+  } finally {
+    process.env.NODE_ENV = previousNodeEnv;
+  }
   await assert.rejects(
     () => runtime.downloadUrl(tenantId, first.fileAssetId, { businessType: "customer", businessId: "other-customer", uploadScene: "client-qualification" }),
     /文件不存在或不属于当前业务对象/u

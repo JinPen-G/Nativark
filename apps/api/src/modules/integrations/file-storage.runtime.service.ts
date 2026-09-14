@@ -510,6 +510,9 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
       await this.failSession(tenantId, session.id, "上传会话已过期");
       throw new ConflictException("上传会话已过期，请重新上传");
     }
+    if (session.provider === "local_mock" && process.env.NODE_ENV === "production") {
+      throw new ServiceUnavailableException("生产环境禁止完成模拟文件上传，请先配置并验证文件存储平台");
+    }
     if (session.provider !== "local_mock") {
       const config = await this.integrations.runtimeConfig("file", tenantId, session.provider as never, { requireLiveTest: false });
       if (!config) throw new ServiceUnavailableException("文件平台已停用，无法确认上传结果");
@@ -543,6 +546,9 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     if (!asset) throw new NotFoundException("文件不存在或尚未完成上传");
     if (owner?.workspaceId) await this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? "", owner.workspaceId);
     if (asset.storageProvider === "local_mock") {
+      if (process.env.NODE_ENV === "production") {
+        throw new ServiceUnavailableException("生产环境禁止访问未归档的模拟文件，请先配置文件存储平台");
+      }
       const result = { fileAssetId, provider: asset.storageProvider, mode: "simulation" as const, downloadUrl: `/api/files/${fileAssetId}/download-url` };
       await this.operationLog?.record({ tenantId, action: "file.download-url.issue", targetType: "file", targetId: fileAssetId, detail: "生成受保护文件访问引用", metadata: { mode: result.mode } });
       return result;
