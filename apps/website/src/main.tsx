@@ -104,10 +104,7 @@ function Logo({ light = false }: { light?: boolean }) {
       href="#home"
       aria-label="Rental OS 首页"
     >
-      <img src="/favicon.svg" alt="" width="34" height="34" />
-      <span>
-        Rental <b>OS</b>
-      </span>
+      <img src={light ? "/brand/logo-horizontal-white.png" : "/brand/logo-horizontal.png"} alt="Rental OS" />
     </a>
   );
 }
@@ -536,9 +533,7 @@ function App() {
               </div>
               <div className="app-body">
                 <aside className="app-sidebar">
-                  <span className="mini-logo">
-                    R<span>OS</span>
-                  </span>
+                  <img className="mini-logo" src="/brand/logo-mark-gradient.png" alt="Rental OS" />
                   <div>
                     <Icon name="box" /> 运营概览
                   </div>

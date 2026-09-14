@@ -1,4 +1,4 @@
-import { ApartmentOutlined, LockOutlined, SafetyCertificateOutlined, UserOutlined } from "@ant-design/icons";
+import { LockOutlined, SafetyCertificateOutlined, UserOutlined } from "@ant-design/icons";
 import { Alert, App, Button, Card, Form, Input, Modal, Space, Typography } from "antd";
 import { isAxiosError } from "axios";
 import { useState } from "react";
@@ -53,7 +53,7 @@ export function LoginPage() {
         <div className="login-appearance"><AppearanceSwitcher iconOnly /></div>
         <main className="login-workspace">
           <Card className="login-panel">
-            <div className="login-brand"><span><ApartmentOutlined /></span><b>Rental OS</b></div>
+            <div className="login-brand"><img src="/brand/logo-horizontal.png" alt="Rental OS" /></div>
             <div className="login-panel-heading">
               <Typography.Title level={2}>登录运营台</Typography.Title>
               <Typography.Paragraph type="secondary">使用租户账号进入对应品类的租赁工作区。</Typography.Paragraph>

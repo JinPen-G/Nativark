@@ -1,6 +1,5 @@
 import {
   BellOutlined,
-  BoxPlotOutlined,
   HomeOutlined,
   LayoutOutlined,
   LogoutOutlined,
@@ -152,8 +151,14 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className={`sider-shell${collapsed && !inDrawer ? " is-collapsed" : ""}`}>
       <div className="sider-brand">
         <button className="app-brand" type="button" onClick={() => navigate(homePath)}>
-          <span className="app-brand-mark"><BoxPlotOutlined /></span>
-          {(!collapsed || inDrawer) && <span className="app-brand-copy"><b>Rental OS</b></span>}
+          <span className={`app-brand-mark${(!collapsed || inDrawer) ? " app-brand-mark-expanded" : ""}`}>
+            <img src="/brand/logo-mark-gradient.png" alt="" aria-hidden="true" />
+          </span>
+          {(!collapsed || inDrawer) && (
+            <span className="app-brand-copy">
+              <img src="/brand/logo-horizontal.png" alt="Rental OS" />
+            </span>
+          )}
         </button>
         {!inDrawer && (
           <Tooltip title={collapsed ? "展开导航" : "收起导航"} placement="right">
