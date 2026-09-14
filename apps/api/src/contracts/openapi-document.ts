@@ -307,8 +307,8 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     ["scanned", "processed", "paid", "closed", "refunded", "pending", "failed", "results"]
   ),
   ImportPaymentStatementRequest: objectOf(
-    { provider: stringSchema },
-    ["provider"]
+    { provider: stringSchema, file: { type: "string", format: "binary" } },
+    ["provider", "file"]
   ),
   ReviewPaymentStatementLineRequest: objectOf(
     { decision: stringSchema, reason: stringSchema },

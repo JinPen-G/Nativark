@@ -35,6 +35,7 @@ export class PaymentReconciliationController {
     @UploadedFile() file?: UploadedPaymentStatement
   ) {
     if (!file) throw new BadRequestException("请选择要导入的支付对账文件");
+    if (!provider?.trim()) throw new BadRequestException("请选择支付平台");
     return this.statements.importStatement(
       req.user.tenantId,
       this.core.resolveWorkspaceId(req.user.tenantId),

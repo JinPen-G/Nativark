@@ -35,6 +35,7 @@ class FakePrisma {
       tenantId: "tenant-a",
       workspaceId: "workspace-a",
       merchantRefundNo: "refund-1",
+      provider: "alipay",
       status: "succeeded",
       amount: 20,
       currency: "CNY",

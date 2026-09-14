@@ -203,7 +203,7 @@ export class PaymentReconciliationFileService {
         const localAmount = decimal(local.amount);
         if (Math.abs(localAmount - row.amount) > 0.005) codes.push("amount_mismatch");
         if (String(local.currency).toUpperCase() !== row.currency) codes.push("currency_mismatch");
-        if (row.kind === "payment" && local.provider !== normalizedProvider) codes.push("provider_mismatch");
+        if (local.provider !== normalizedProvider) codes.push("provider_mismatch");
         const localStatus = row.kind === "payment" ? normalizePaymentStatus(local.status) : normalizeRefundStatus(local.status);
         if (row.normalizedStatus !== "unknown" && localStatus !== row.normalizedStatus) codes.push("status_mismatch");
         const localExternalId = row.kind === "payment"
