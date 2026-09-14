@@ -1,4 +1,4 @@
-import { PrinterOutlined } from "@ant-design/icons";
+import { DownloadOutlined, PrinterOutlined } from "@ant-design/icons";
 import type {
   RentalCategoryTerminology,
   RentalFundingBalance,
@@ -164,7 +164,7 @@ function documentRows(type: OrderDocumentType, order: RentalOrder, inspections: 
   </>;
 }
 
-function printDocument(type: OrderDocumentType, order: RentalOrder, inspections: RentalInspectionRecord[], templates: RentalInspectionTemplate[], funding: RentalFundingBalance | undefined, money: (value: number | undefined) => string, terminology?: RentalCategoryTerminology) {
+function documentHtml(type: OrderDocumentType, order: RentalOrder, inspections: RentalInspectionRecord[], templates: RentalInspectionTemplate[], funding: RentalFundingBalance | undefined, money: (value: number | undefined) => string, terminology?: RentalCategoryTerminology) {
   const labels = publicTerminology(terminology);
   const title = DOCUMENT_TYPES.find((item) => item.value === type)?.label ?? "租赁凭证";
   const rows = type === "quote"
@@ -184,14 +184,32 @@ function printDocument(type: OrderDocumentType, order: RentalOrder, inspections:
     : type === "settlement"
       ? `<p>最终应收：<strong>${escapeHtml(money(order.finalPayableAmount ?? order.payableAmount))}</strong>　已收：${escapeHtml(funding ? money(funding.rental.collected) : "—")}　已退：${escapeHtml(funding ? money(funding.rental.refunded) : "—")}</p>`
       : "";
-  // 只打开空白页并写入本地已转义的快照；不能把任何业务字段拼进外部 URL。
+  // 只生成本地已转义的快照；不能把任何业务字段拼进外部 URL。
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}-${escapeHtml(order.orderNo)}</title><style>body{font-family:Arial,"Microsoft YaHei",sans-serif;color:#222;padding:32px;line-height:1.6}h1{font-size:22px;margin:0 0 8px}h2{font-size:15px;border-bottom:1px solid #ddd;padding-bottom:6px;margin-top:24px}.meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 24px;margin:18px 0}table{width:100%;border-collapse:collapse;margin-top:12px}th,td{border:1px solid #d9d9d9;padding:7px;text-align:left}th{background:#fafafa}.right{text-align:right}.muted{color:#666;font-size:12px}@media print{body{padding:0}}</style></head><body><h1>${escapeHtml(title)}</h1><div class="muted">${escapeHtml(order.orderNo)} · 生成时间 ${escapeHtml(new Date().toLocaleString())}</div><div class="meta"><div>客户：${escapeHtml(order.customerName)}</div><div>联系电话：${escapeHtml(order.contactPhone ?? "—")}</div><div>租赁时间：${escapeHtml(dateTime(order.startAt))} ～ ${escapeHtml(dateTime(order.effectiveEndAt ?? order.endAt))}</div><div>${escapeHtml(labels.pickup)}地点：${escapeHtml(order.fulfillmentLocationName)}</div><div>${escapeHtml(labels.return)}地点：${escapeHtml(order.returnLocationName ?? order.fulfillmentLocationName)}</div><div>状态：${escapeHtml(ORDER_STATUS_LABELS[order.status] ?? order.status)}</div></div><h2>明细</h2><table><thead><tr>${headers}</tr></thead><tbody>${rows || `<tr><td colspan="4">暂无记录</td></tr>`}</tbody></table>${summary}<p class="muted">本凭证依据订单历史快照生成；不构成法定发票或电子签章文件。</p></body></html>`;
+}
+
+function printDocument(type: OrderDocumentType, order: RentalOrder, inspections: RentalInspectionRecord[], templates: RentalInspectionTemplate[], funding: RentalFundingBalance | undefined, money: (value: number | undefined) => string, terminology?: RentalCategoryTerminology) {
+  const html = documentHtml(type, order, inspections, templates, funding, money, terminology);
   const popup = window.open("", "_blank");
   if (!popup) return false;
-  popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}-${escapeHtml(order.orderNo)}</title><style>body{font-family:Arial,"Microsoft YaHei",sans-serif;color:#222;padding:32px;line-height:1.6}h1{font-size:22px;margin:0 0 8px}h2{font-size:15px;border-bottom:1px solid #ddd;padding-bottom:6px;margin-top:24px}.meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 24px;margin:18px 0}table{width:100%;border-collapse:collapse;margin-top:12px}th,td{border:1px solid #d9d9d9;padding:7px;text-align:left}th{background:#fafafa}.right{text-align:right}.muted{color:#666;font-size:12px}@media print{body{padding:0}}</style></head><body><h1>${escapeHtml(title)}</h1><div class="muted">${escapeHtml(order.orderNo)} · 生成时间 ${escapeHtml(new Date().toLocaleString())}</div><div class="meta"><div>客户：${escapeHtml(order.customerName)}</div><div>联系电话：${escapeHtml(order.contactPhone ?? "—")}</div><div>租赁时间：${escapeHtml(dateTime(order.startAt))} ～ ${escapeHtml(dateTime(order.effectiveEndAt ?? order.endAt))}</div><div>${escapeHtml(labels.pickup)}地点：${escapeHtml(order.fulfillmentLocationName)}</div><div>${escapeHtml(labels.return)}地点：${escapeHtml(order.returnLocationName ?? order.fulfillmentLocationName)}</div><div>状态：${escapeHtml(ORDER_STATUS_LABELS[order.status] ?? order.status)}</div></div><h2>明细</h2><table><thead><tr>${headers}</tr></thead><tbody>${rows || `<tr><td colspan="4">暂无记录</td></tr>`}</tbody></table>${summary}<p class="muted">本凭证依据订单历史快照生成；不构成法定发票或电子签章文件。</p></body></html>`);
+  popup.document.write(html);
   popup.document.close();
   popup.focus();
   popup.print();
   return true;
+}
+
+function downloadDocument(type: OrderDocumentType, order: RentalOrder, inspections: RentalInspectionRecord[], templates: RentalInspectionTemplate[], funding: RentalFundingBalance | undefined, money: (value: number | undefined) => string, terminology?: RentalCategoryTerminology) {
+  const html = documentHtml(type, order, inspections, templates, funding, money, terminology);
+  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  const safeOrderNo = order.orderNo.replace(/[^\p{L}\p{N}._-]+/gu, "_");
+  const label = DOCUMENT_TYPES.find((item) => item.value === type)?.label ?? "租赁凭证";
+  anchor.href = url;
+  anchor.download = `${safeOrderNo}-${label}.html`;
+  anchor.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 export function OrderDocumentsPanel({ order, inspections, templates, funding, terminology, money }: {
@@ -209,16 +227,16 @@ export function OrderDocumentsPanel({ order, inspections, templates, funding, te
     if (!printDocument(type, order, inspections, templates, funding, money, terminology)) return;
   };
   return <>
-    <Card title="客户业务凭证" extra={<Typography.Text type="secondary">基于订单快照查看或浏览器打印</Typography.Text>}>
+    <Card title="客户业务凭证" extra={<Typography.Text type="secondary">基于订单快照查看、下载或浏览器打印；不构成法定票据</Typography.Text>}>
       <Space wrap>
         {DOCUMENT_TYPES.map((item) => <Button key={item.value} icon={<PrinterOutlined />} onClick={() => { setType(item.value); setOpen(true); }}>{item.label}</Button>)}
       </Space>
     </Card>
-    <Modal title={`${selected.label} · ${order.orderNo}`} open={open} width={900} onCancel={() => setOpen(false)} footer={<Space><Button onClick={() => setOpen(false)}>关闭</Button><Button type="primary" icon={<PrinterOutlined />} onClick={print}>打印</Button></Space>} destroyOnHidden>
+    <Modal title={`${selected.label} · ${order.orderNo}`} open={open} width={900} onCancel={() => setOpen(false)} footer={<Space><Button onClick={() => setOpen(false)}>关闭</Button><Button icon={<DownloadOutlined />} onClick={() => downloadDocument(type, order, inspections, templates, funding, money, terminology)}>下载 HTML</Button><Button type="primary" icon={<PrinterOutlined />} onClick={print}>打印</Button></Space>} destroyOnHidden>
       <Alert type="info" showIcon title={selected.description} style={{ marginBottom: 16 }} />
       <Descriptions size="small" column={{ xs: 1, md: 2 }} items={orderHeaderRows(order, terminology)} />
       <div style={{ marginTop: 16 }}>{documentRows(type, order, inspections, templates, funding, money, terminology)}</div>
-      <Typography.Paragraph type="secondary" style={{ marginTop: 16, marginBottom: 0 }}>本凭证依据订单历史快照生成，不包含内部风控、成本、权限或敏感证件信息；法定发票和电子签章另行处理。</Typography.Paragraph>
+      <Typography.Paragraph type="secondary" style={{ marginTop: 16, marginBottom: 0 }}>下载内容是客户可读 HTML 快照，不包含内部风控、成本、权限或敏感证件信息；法定发票、正式 PDF 和电子签章另行处理。</Typography.Paragraph>
     </Modal>
   </>;
 }
