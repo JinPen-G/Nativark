@@ -102,9 +102,9 @@ button, input, textarea, select { font: inherit; }
 }
 .app-brand-copy img {
   display: block;
-  width: 126px;
+  width: 150px;
   height: auto;
-  max-height: 32px;
+  max-height: 36px;
   object-fit: contain;
 }
 .app-brand-copy b {

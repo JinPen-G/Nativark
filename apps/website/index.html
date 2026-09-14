@@ -1,20 +1,318 @@
 <!doctype html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#1758e8" />
-    <meta
-      name="description"
-      content="Rental OS 是面向租赁企业的 SaaS 管理系统，连接订单、库存、计费与客户。了解行业适用功能，预约系统演示，咨询订阅方案。"
-    />
-    <meta name="robots" content="noindex, nofollow" />
-    <link rel="icon" type="image/x-icon" href="/brand/favicon.ico" />
-    <link rel="preload" as="image" href="/images/hero-camera.png" />
-    <title>Rental OS — 面向租赁企业的 SaaS 管理系统</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<meta name="theme-color" content="#ffffff" />
+<title>Rental OS｜新一代租赁业务管理平台</title>
+<style>
+:root{
+  --blue:#0b6ffb;
+  --blue2:#0a5cff;
+  --navy:#071b4d;
+  --muted:#6e7f9d;
+  --line:#e3ebf6;
+  --panel:#f8fbff;
+  --shadow:0 12px 38px rgba(25,88,169,.10);
+  --soft-shadow:0 8px 24px rgba(26,78,146,.08);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;overflow-x:hidden}
+body{margin:0;overflow-x:hidden;color:var(--navy);font-family:"PingFang SC","Microsoft YaHei","Noto Sans CJK SC",Arial,sans-serif;background:#fff;-webkit-font-smoothing:antialiased}
+a{color:inherit;text-decoration:none}
+img{display:block;max-width:100%}
+button{font:inherit}
+.container{width:min(1188px,92vw);margin:0 auto}
+
+/* Brand */
+.brand{display:flex;align-items:center;gap:8px;white-space:nowrap}
+.brand-logo{display:block;width:190px;height:auto;object-fit:contain}
+
+/* Header */
+.header{height:64px;background:transparent;border-bottom:0;position:absolute;inset:0 0 auto;width:100%;z-index:20}
+.header:before{content:"";position:absolute;inset:0;background:linear-gradient(90deg,rgba(255,255,255,.98) 0%,rgba(255,255,255,.98) 45%,rgba(255,255,255,.84) 56%,rgba(255,255,255,.22) 75%,rgba(255,255,255,0) 100%);pointer-events:none}
+.header .container{position:relative;z-index:1;height:100%;display:flex;align-items:center;justify-content:space-between}
+.header .brand-logo{transform:translateY(3px)}
+.nav{display:flex;align-items:center;gap:46px;margin-left:70px;font-size:14px;font-weight:650;color:#172b57}
+.nav a{transition:.2s}
+.nav a:hover{color:var(--blue)}
+.header-right{margin-left:auto}
+.btn{border:0;border-radius:24px;height:38px;padding:0 24px;display:inline-flex;align-items:center;justify-content:center;gap:7px;font-weight:700;font-size:13.5px;cursor:pointer;transition:.2s}
+.btn-primary{color:#fff;background:linear-gradient(135deg,#0a76ff,#065ce7);box-shadow:0 10px 18px rgba(11,111,251,.20)}
+.btn-primary:hover{transform:translateY(-1px);box-shadow:0 12px 24px rgba(11,111,251,.28)}
+.btn-outline{height:38px;background:#fff;color:#0968ef;border:1.5px solid #0a73ff;box-shadow:0 4px 10px rgba(18,96,203,.05)}
+
+/* Hero */
+.hero{position:relative;min-height:clamp(560px,43vw,660px);height:clamp(560px,43vw,660px);background:#eaf4ff url('assets/hero-background.png') 72% top / cover no-repeat;overflow:visible}
+.hero:before,.hero:after{display:none}
+.hero .container{position:relative;height:100%;min-height:100%;padding:64px 0 48px;display:flex;align-items:center}
+.hero-copy{position:relative;z-index:3;width:39%;min-width:350px}
+.eyebrow{font-size:16px;color:#3f5877;font-weight:550;margin:0 0 10px}
+.hero h1{font-size:56px;line-height:1.14;letter-spacing:-2px;margin:0;color:#07194b;font-weight:850}
+.hero h1 span{color:#0a6df7}
+.hero-desc{font-size:16px;line-height:1.8;color:#2f496b;margin:20px 0 24px;max-width:410px}
+.hero-actions{display:flex;gap:16px}
+.hero-actions .btn{min-width:146px}
+.hero-points{display:flex;gap:18px;flex-wrap:wrap;margin-top:18px;font-size:12.5px;color:#294566;font-weight:650}
+.hero-point{display:flex;align-items:center;gap:5px}
+.check{width:14px;height:14px;border-radius:50%;background:#0b72fb;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:9px;box-shadow:0 3px 8px rgba(11,114,251,.15)}
+.hero-visual{display:none}
+
+.metrics{position:absolute;z-index:6;left:50%;bottom:-40px;transform:translateX(-50%);width:min(1188px,92vw);height:80px;padding:0 20px;display:grid;grid-template-columns:repeat(4,1fr);align-items:center;background:rgba(255,255,255,.97);border:1px solid rgba(227,236,248,.9);border-radius:14px;box-shadow:0 14px 35px rgba(41,94,160,.10)}
+.metric{height:58px;display:flex;align-items:center;justify-content:center;gap:12px;position:relative}
+.metric:not(:last-child):after{content:"";position:absolute;right:0;width:1px;height:38px;background:#e5edf8}
+.metric img{width:42px;height:42px;object-fit:contain}
+.metric b{display:block;font-size:17px;line-height:1.2;color:#0a1f4c}
+.metric small{display:block;font-size:12.5px;color:#4b6482;margin-top:4px;white-space:nowrap}
+.metric em{font-style:normal;color:#075fdc;font-weight:800;font-size:13px}
+
+/* Generic sections */
+.section{position:relative}
+.section-title{text-align:center;margin:0;font-size:31px;line-height:1.2;letter-spacing:-.9px;color:#071a49;font-weight:850}
+.section-sub{text-align:center;color:#61738d;font-size:13px;margin-top:7px}
+
+/* Why */
+.why{padding:64px 0 16px}
+.feature-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:16px;margin-top:24px}
+.feature-card{height:180px;background:linear-gradient(180deg,#fbfdff,#f8fbff);border:1px solid #e5edf7;border-radius:9px;padding:16px 13px 12px;box-shadow:0 7px 18px rgba(41,82,135,.045);display:flex;flex-direction:column}
+.feature-icon{width:38px;height:38px;margin-bottom:12px;object-fit:contain;filter:saturate(1.03)}
+.feature-card h3{font-size:15px;line-height:1.35;margin:0 0 10px;color:#0b214d;font-weight:800}
+.feature-card p{font-size:12px;line-height:1.55;margin:0;color:#5b6f89}
+.round-arrow{margin-top:auto;width:20px;height:20px;border-radius:50%;border:1px solid #dbe8f8;background:#fff;color:#0b73ff;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:800;box-shadow:0 2px 8px rgba(25,86,160,.05)}
+
+/* Industry */
+.industry{padding:24px 0 22px}
+.section-head-row{display:flex;justify-content:space-between;align-items:end;margin-bottom:18px}
+.section-head-row .section-title{text-align:left;font-size:25px}
+.section-head-row .section-sub{text-align:left;margin-top:4px}
+.section-link{font-size:12px;font-weight:750;color:#0867eb;white-space:nowrap;margin-bottom:4px}
+.industry-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+.industry-card{border:1px solid #e5edf8;border-radius:9px;overflow:hidden;background:#fff;box-shadow:0 8px 22px rgba(23,75,136,.055)}
+.industry-img{height:112px;width:100%;object-fit:cover}
+.industry-body{padding:11px 13px 10px;position:relative;min-height:80px}
+.industry-body h3{font-size:15px;margin:0 0 6px;font-weight:800;color:#0c224d}
+.industry-body p{font-size:11.5px;line-height:1.55;color:#5d7088;margin:0 28px 0 0}
+.industry-body .round-arrow{position:absolute;right:8px;bottom:9px;margin:0}
+
+/* Capability */
+.capability{height:390px;min-height:390px;padding:0;overflow:hidden}
+.capability:after{content:"";position:absolute;width:210px;height:210px;border:36px solid rgba(100,169,246,.12);border-radius:50%;right:-70px;top:18px;z-index:0}
+.capability .container{position:relative;height:390px;min-height:0}
+.capability-copy{position:absolute;left:0;top:50%;z-index:2;width:37%;padding-top:0;transform:translateY(-50%)}
+.capability-copy h2,.multi-copy h2{font-size:27px;line-height:1.27;margin:0;color:#071a49;font-weight:850;letter-spacing:-.8px}
+.capability-copy p,.multi-copy p{font-size:14px;line-height:1.7;color:#536984;margin:16px 0 20px}
+.capability-visual{position:absolute;right:-2.5%;top:50%;width:62%;z-index:1;transform:translateY(-50%)}
+.capability-visual img{display:block;width:100%}
+
+/* Multi */
+.multi{height:340px;min-height:340px;padding:0;overflow:hidden}
+.multi .container{position:relative;height:340px;min-height:0}
+.multi-copy{position:absolute;left:0;top:50%;width:50%;padding-top:0;z-index:3;transform:translateY(-50%)}
+.multi-copy p{max-width:465px;margin-bottom:12px}
+.bullets{display:grid;gap:9px;font-size:12.5px;color:#304b6d}
+.bullet{display:flex;gap:8px;align-items:center}
+.bullet .check{width:16px;height:16px;font-size:10px}
+.bullet strong{color:#17305d}
+.multi-visual{position:absolute;z-index:1;right:-1%;top:50%;width:56%;transform:translateY(-50%)}
+.multi-visual img{display:block;width:100%}
+.multi:after{content:"";position:absolute;right:5%;top:30px;width:320px;height:190px;background:radial-gradient(ellipse,rgba(126,191,255,.22),transparent 65%);filter:blur(1px)}
+
+/* Testimonial */
+.testimonial{padding:16px 0 16px}
+.testimonial-card{height:112px;border:1px solid #e2ebf7;border-radius:10px;background:linear-gradient(180deg,#fff,#fbfdff);box-shadow:0 8px 22px rgba(35,87,151,.06);display:grid;grid-template-columns:160px 1fr 190px;overflow:hidden;align-items:stretch}
+.portrait-wrap{background:linear-gradient(145deg,#e7eef7,#f8fbfe);display:flex;align-items:end;justify-content:center;overflow:hidden}
+.portrait-wrap img{width:100%;height:100%;object-fit:cover;object-position:center 30%;border-radius:0}
+.quote{position:relative;padding:16px 24px 12px 40px;display:flex;flex-direction:column;justify-content:center}
+.quote:before{content:"“";position:absolute;left:15px;top:7px;font-size:45px;line-height:1;color:#b6d5fb;font-family:Georgia,serif;font-weight:800}
+.quote p{font-size:12px;line-height:1.6;color:#405a78;margin:0 0 7px}
+.quote small{font-size:10.5px;color:#64768d}
+.quote strong{font-size:11.5px;color:#132f5b;margin-right:8px}
+.kpis{display:grid;grid-template-columns:1fr 1fr;align-items:center;text-align:center;position:relative}
+.kpis:before{content:"";position:absolute;left:50%;top:28px;bottom:28px;width:1px;background:#dce9f8}
+.kpi b{font-size:30px;color:#0a70fb;display:block;line-height:1}
+.kpi span{font-size:12px;color:#506782;display:block;margin-top:6px}
+
+/* CTA */
+.cta{padding:8px 0 18px}
+.cta-card{height:98px;border-radius:10px;overflow:hidden;background-image:linear-gradient(90deg,rgba(0,89,221,.8),rgba(20,116,243,.22)),url('assets/cta-mountain.png');background-size:cover;background-position:center right;box-shadow:0 10px 28px rgba(0,90,208,.16);display:grid;grid-template-columns:1.2fr .8fr;align-items:center;padding:0 48px;color:white}
+.cta-card h2{font-size:28px;margin:0 0 3px;letter-spacing:-.5px}
+.cta-card p{font-size:13px;margin:0;color:#e5f2ff}
+.cta-action{display:flex;justify-content:center}
+.cta-action .btn{background:#fff;color:#0a67ee;min-width:150px;height:42px;box-shadow:0 8px 20px rgba(0,54,150,.18)}
+
+/* Footer */
+.footer{height:80px}
+.footer .container{height:100%;display:flex;align-items:center}
+.footer .brand-logo{width:210px}
+.footer-brand{width:210px}
+.footer-nav{display:flex;gap:28px;font-size:12px;color:#596e88;align-items:center}
+.copyright{font-size:10.5px;color:#6c7e95;margin-top:5px}
+.social{margin-left:auto;display:flex;align-items:center;gap:18px;color:#6e809c;transform:translateY(1px)}
+.social-icon{width:18px;height:18px;display:grid;place-items:center;font-size:10px;font-weight:800;border-radius:50%}
+.footer-slogan{margin-left:70px;font-size:12px;color:#60748e}
+
+/* responsive */
+@media (max-width: 900px){
+  .container{width:min(690px,91vw)}
+  .header{height:62px;position:relative;inset:auto;background:rgba(255,255,255,.96);border-bottom:1px solid rgba(225,235,248,.75)}
+  .header:before{display:none}
+  .header .brand-logo{width:158px;transform:translateY(2px)}
+  .nav{display:none}
+  .hero{min-height:auto;height:auto;padding-bottom:40px;background:
+    radial-gradient(circle at 50% 18%,rgba(113,185,255,.18),transparent 42%),
+    linear-gradient(155deg,#fff 0%,#f7fbff 44%,#e7f3ff 100%);}
+  .hero .container{height:auto;padding:38px 0 0;min-height:auto;display:flex;flex-direction:column}
+  .hero-copy{width:100%;min-width:0;text-align:center}
+  .hero h1{font-size:42px}
+  .hero-desc{margin:16px auto}
+  .hero-actions,.hero-points{justify-content:center}
+  .hero-visual{display:block;position:relative;width:100%;right:auto;top:auto;margin:-5px auto -25px;pointer-events:none}
+  .metrics{position:relative;left:auto;bottom:auto;transform:none;width:min(690px,91vw);height:auto;min-height:140px;margin:-6px auto 0;grid-template-columns:repeat(2,1fr);padding:10px 14px}
+  .metric:nth-child(2):after{display:none}
+  .metric{height:58px}
+  .why{padding-top:38px}
+  .feature-grid{grid-template-columns:repeat(3,1fr)}
+  .industry-grid{grid-template-columns:repeat(2,1fr)}
+  .capability{height:auto;min-height:auto;padding-top:12px;overflow:visible}
+  .multi{height:auto;min-height:auto;overflow:visible}
+  .capability .container,.multi .container{display:flex;flex-direction:column;height:auto;min-height:auto}
+  .capability-copy,.multi-copy{position:relative;left:auto;top:auto;width:100%;padding:18px 0;text-align:center;transform:none}
+  .capability-copy p,.multi-copy p{max-width:560px;margin-left:auto;margin-right:auto}
+  .capability-visual,.multi-visual{position:relative;width:100%;right:auto;top:auto;transform:none}
+  .bullets{width:max-content;max-width:100%;margin:0 auto;text-align:left}
+  .testimonial-card{grid-template-columns:110px 1fr;height:auto;min-height:125px}
+  .kpis{grid-column:1/-1;border-top:1px solid #e7eff8;height:75px}
+  .portrait-wrap img{width:100%;height:100%}
+  .cta-card{grid-template-columns:1fr auto;padding:0 30px}
+  .footer{height:auto;padding:18px 0}
+  .footer .container{flex-wrap:wrap;gap:14px}
+  .footer-brand{width:auto;margin-right:25px}
+  .footer .brand-logo{width:185px}
+  .footer-slogan{margin-left:auto}
+}
+@media (max-width: 560px){
+  .header .btn{height:36px;padding:0 17px;font-size:12px}
+  .hero h1{font-size:36px}.eyebrow{font-size:14px}.hero-desc{font-size:13px}
+  .hero-actions{flex-direction:column;align-items:center}.hero-actions .btn{width:180px}
+  .metrics{grid-template-columns:1fr}.metric:not(:last-child):after{right:auto;bottom:0;width:80%;height:1px;left:10%}.metric:nth-child(2):after{display:block}
+  .metric{justify-content:flex-start;padding-left:17%}
+  .section-title{font-size:25px}
+  .feature-grid{grid-template-columns:repeat(2,1fr)}
+  .industry-grid{grid-template-columns:1fr}
+  .section-head-row{align-items:flex-start}.section-head-row .section-title{font-size:23px}.section-link{margin-top:8px}
+  .testimonial-card{grid-template-columns:1fr}.portrait-wrap{height:108px}.portrait-wrap img{height:100%;width:100%}.quote{padding:20px 24px 16px 42px}
+  .cta-card{height:auto;min-height:135px;grid-template-columns:1fr;text-align:center;gap:15px;padding:24px;background-position:65% center}
+  .footer-nav{order:3;width:100%;flex-wrap:wrap}.social{margin-left:0}.footer-slogan{margin-left:auto}
+}
+</style>
+</head>
+<body>
+<header class="header">
+  <div class="container">
+    <a class="brand" href="#top" aria-label="Rental OS 首页">
+      <img class="brand-logo" src="assets/logo-primary-with-tagline.png" alt="Rental OS · Build a Rental World" />
+    </a>
+    <nav class="nav" aria-label="主导航">
+      <a href="#product">产品</a><a href="#solution">解决方案</a><a href="#industry">行业场景</a><a href="#about">关于我们</a>
+    </nav>
+    <div class="header-right"><a href="#demo" class="btn btn-primary">预约演示 <span>→</span></a></div>
+  </div>
+</header>
+
+<main id="top">
+<section class="hero">
+  <div class="container">
+    <div class="hero-copy">
+      <p class="eyebrow">新一代租赁业务管理平台</p>
+      <h1>让租赁增长，<br><span>更快发生。</span></h1>
+      <p class="hero-desc">Rental OS 是面向租赁企业的多品类一体化运营平台，帮助你打通资产、订单、定价、履约与财务管理，让复杂的租赁业务变得简单高效。</p>
+      <div class="hero-actions"><a class="btn btn-primary" href="#demo">预约演示 →</a><a class="btn btn-outline" href="#solution">查看方案</a></div>
+      <div class="hero-points">
+        <span class="hero-point"><i class="check">✓</i>快速上线</span>
+        <span class="hero-point"><i class="check">✓</i>专业实施</span>
+        <span class="hero-point"><i class="check">✓</i>持续迭代</span>
+        <span class="hero-point"><i class="check">✓</i>值得信赖</span>
+      </div>
+    </div>
+    <img class="hero-visual" src="assets/hero-laptop.png" alt="Rental OS 管理后台仪表盘笔记本展示" />
+  </div>
+  <div class="metrics" aria-label="关键价值指标">
+    <div class="metric"><img src="assets/metric-1.png" alt=""><span><b>提升运营效率</b><small>平均提升 <em>60%+</em></small></span></div>
+    <div class="metric"><img src="assets/metric-2.png" alt=""><span><b>降低履约成本</b><small>平均降低 <em>30%+</em></small></span></div>
+    <div class="metric"><img src="assets/metric-3.png" alt=""><span><b>支持多品类经营</b><small>一个平台，管理所有租赁业务</small></span></div>
+    <div class="metric"><img src="assets/metric-4.png" alt=""><span><b>已服务 500+ 租赁企业</b><small>覆盖全国，持续增长</small></span></div>
+  </div>
+</section>
+
+<section class="section why" id="product">
+  <div class="container">
+    <h2 class="section-title">为什么选择 Rental OS</h2>
+    <p class="section-sub">不只是一个系统，更是租赁企业的增长引擎</p>
+    <div class="feature-grid">
+      <article class="feature-card"><img class="feature-icon" src="assets/feature-1.png" alt=""><h3>多租户 / 多经营空间</h3><p>支持集团化、多品牌、多门店的灵活管理</p><span class="round-arrow">→</span></article>
+      <article class="feature-card"><img class="feature-icon" src="assets/feature-2.png" alt=""><h3>多品类统一平台</h3><p>一个系统管理多种租赁品类，打破数据孤岛</p><span class="round-arrow">→</span></article>
+      <article class="feature-card"><img class="feature-icon" src="assets/feature-3.png" alt=""><h3>资产、订单、定价、履约一体化</h3><p>从上架到归还，全链路数字化管理</p><span class="round-arrow">→</span></article>
+      <article class="feature-card"><img class="feature-icon" src="assets/feature-4.png" alt=""><h3>管理后台 + 移动端协同</h3><p>PC 管理后台 + 微信小程序，随时随地开展业务</p><span class="round-arrow">→</span></article>
+      <article class="feature-card"><img class="feature-icon" src="assets/feature-5.png" alt=""><h3>灵活规则配置</h3><p>支持多种计费规则、押金策略和业务流程</p><span class="round-arrow">→</span></article>
+      <article class="feature-card"><img class="feature-icon" src="assets/feature-6.png" alt=""><h3>数据驱动经营增长</h3><p>多维度经营分析报表，助力科学决策</p><span class="round-arrow">→</span></article>
+    </div>
+  </div>
+</section>
+
+<section class="section industry" id="industry">
+  <div class="container">
+    <div class="section-head-row"><div><h2 class="section-title">覆盖多种租赁行业场景</h2><p class="section-sub">无论你经营哪种租赁业务，Rental OS 都能提供专业的解决方案</p></div><a class="section-link" href="#">探索更多行业场景&nbsp; →</a></div>
+    <div class="industry-grid">
+      <article class="industry-card"><img class="industry-img" src="assets/industry-camera.png" alt="摄影器材租赁"><div class="industry-body"><h3>摄影器材租赁</h3><p>相机、镜头、灯光、航拍设备等专业器材的高效管理</p><span class="round-arrow">→</span></div></article>
+      <article class="industry-card"><img class="industry-img" src="assets/industry-camping.png" alt="露营装备租赁"><div class="industry-body"><h3>露营装备租赁</h3><p>帐篷、天幕、桌椅、户外电源等，让户外生活更简单</p><span class="round-arrow">→</span></div></article>
+      <article class="industry-card"><img class="industry-img" src="assets/industry-car.png" alt="车辆租赁"><div class="industry-body"><h3>车辆租赁</h3><p>自驾租车、商务用车、车队管理，灵活的车辆租赁解决方案</p><span class="round-arrow">→</span></div></article>
+      <article class="industry-card"><img class="industry-img" src="assets/industry-excavator.png" alt="工程设备租赁"><div class="industry-body"><h3>工程设备租赁</h3><p>工程机械、建筑设备、工具器械等重资产租赁的专业管理</p><span class="round-arrow">→</span></div></article>
+    </div>
+  </div>
+</section>
+
+<section class="section capability" id="solution">
+  <div class="container">
+    <div class="capability-copy"><h2>强大的产品能力<br>支撑你的租赁业务持续增长</h2><p>从资产管理到经营分析，Rental OS 提供覆盖租赁全流程的数字化能力，帮助企业提升效率、降低成本、创造更多收入。</p><a class="btn btn-primary" href="#demo">预约演示 →</a></div>
+    <div class="capability-visual"><img src="assets/capability-dashboard.png" alt="Rental OS 订单与资产管理能力展示"></div>
+  </div>
+</section>
+
+<section class="section multi">
+  <div class="container">
+    <div class="multi-copy"><h2>一个系统，多端协同<br>随时随地管理你的租赁业务</h2><p>Rental OS 提供专业的管理后台和微信小程序，打通线上线下业务，让团队、客户、资产高效连接。</p>
+      <div class="bullets">
+        <div class="bullet"><i class="check">✓</i><span><strong>PC 管理后台</strong> · 功能全面，适合团队协作</span></div>
+        <div class="bullet"><i class="check">✓</i><span><strong>微信小程序</strong> · 客户自助下单，提升体验</span></div>
+        <div class="bullet"><i class="check">✓</i><span><strong>数据实时同步</strong> · 多端数据一致，随时掌握业务动态</span></div>
+      </div>
+    </div>
+    <div class="multi-visual"><img src="assets/multi-device.png" alt="Rental OS 管理后台与微信小程序多端协同"></div>
+  </div>
+</section>
+
+<section class="section testimonial" id="about">
+  <div class="container">
+    <div class="testimonial-card">
+      <div class="portrait-wrap"><img src="assets/testimonial-portrait.png" alt="客户代表"></div>
+      <div class="quote"><p>Rental OS 帮助我们将整体运营效率提升了 60% 以上，从多门店管理到订单履约都变得更加高效、透明。现在我们可以把更多精力放在业务拓展上，过去一年营收实现了 3 倍增长。</p><small><strong>陈先生</strong> 某知名摄影器材租赁品牌&nbsp; 创始人</small></div>
+      <div class="kpis"><div class="kpi"><b>60%+</b><span>运营效率提升</span></div><div class="kpi"><b>3 <small>倍</small></b><span>年营收增长</span></div></div>
+    </div>
+  </div>
+</section>
+
+<section class="section cta" id="demo">
+  <div class="container"><div class="cta-card"><div><h2>开始搭建你的下一代租赁平台</h2><p>让专业的 Rental OS，助力你的租赁业务更快增长。</p></div><div class="cta-action"><a class="btn" href="mailto:demo@example.com">预约演示 →</a></div></div></div>
+</section>
+</main>
+
+<footer class="footer">
+  <div class="container">
+    <div class="footer-brand"><a class="brand" href="#top"><img class="brand-logo" src="assets/logo-primary-with-tagline.png" alt="Rental OS · Build a Rental World" /></a></div>
+    <div><nav class="footer-nav"><a href="#product">产品</a><a href="#solution">解决方案</a><a href="#industry">行业场景</a><a href="#about">关于我们</a><a href="#">帮助中心</a></nav><div class="copyright">© 2024 Rental OS. 保留所有权利.</div></div>
+    <div class="social" aria-label="社交媒体"><span class="social-icon">●</span><span class="social-icon">◎</span><span class="social-icon">▶</span></div>
+    <div class="footer-slogan">让好资产创造更大价值！</div>
+  </div>
+</footer>
+</body>
 </html>
