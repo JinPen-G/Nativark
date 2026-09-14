@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import {
   findTenantIntegrationProvider,
@@ -214,6 +214,9 @@ export class TenantIntegrationService {
 
     const secretFieldNames = definition.fields.filter((field) => field.secret && mergedSecrets[field.key]).map((field) => field.key);
     const row = await this.prisma.$transaction(async (tx) => {
+      if (existing?.enabled && !input.enabled) {
+        await this.assertCanDisableProvider(tx, tenantId, capability, provider);
+      }
       const saved = await tx.tenantIntegrationConfig.upsert({
         where: { tenantId_capability_provider: { tenantId, capability, provider } },
         create: {
@@ -286,6 +289,57 @@ export class TenantIntegrationService {
       metadata: { capability, provider, enabled: row.enabled, isDefault: row.isDefault, settings, secretFieldsChanged: Object.keys(credentials) }
     });
     return this.summary(row);
+  }
+
+  /**
+   * 停用 provider 不能把仍在处理中的外部事实变成无法恢复的孤儿：
+   * 支付要继续查单/补入账，短信要继续查回执，文件要继续下载或清理。
+   * 已完成的历史记录不阻塞切换；未完成记录必须先恢复、迁移或处理完。
+   */
+  private async assertCanDisableProvider(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    capability: TenantIntegrationCapability,
+    provider: TenantIntegrationProvider
+  ) {
+    if (capability === "payment") {
+      const [intent, refund] = await Promise.all([
+        tx.rentalPaymentIntent.findFirst({
+          where: { tenantId, provider, status: { in: ["pending", "verified_pending_funding", "funding_failed"] } },
+          select: { id: true }
+        }),
+        tx.rentalPaymentRefund.findFirst({
+          where: { tenantId, provider, status: { in: ["pending", "accepted", "funding_pending"] } },
+          select: { id: true }
+        })
+      ]);
+      if (intent || refund) throw new ConflictException("该支付平台仍有未完成的支付或退款事实，请先查单/恢复后再停用");
+      return;
+    }
+    if (capability === "sms") {
+      const pending = await tx.rentalNotificationLog.findFirst({
+        where: {
+          tenantId,
+          channel: "sms",
+          provider,
+          status: { in: ["queued", "sent", "delivery_pending", "delivery_uncertain"] }
+        },
+        select: { id: true }
+      });
+      if (pending) throw new ConflictException("该短信平台仍有未完成或待核对的通知，请先处理完再停用");
+      return;
+    }
+    const [asset, session] = await Promise.all([
+      tx.fileAsset.findFirst({
+        where: { tenantId, storageProvider: provider, status: { in: ["active", "pending_upload", "delete_pending", "delete_in_progress"] } },
+        select: { id: true }
+      }),
+      tx.fileUploadSession.findFirst({
+        where: { tenantId, provider, status: { in: ["pending_upload", "cleanup_in_progress"] } },
+        select: { id: true }
+      })
+    ]);
+    if (asset || session) throw new ConflictException("该文件平台仍有已存文件或待清理上传，请先完成迁移/清理后再停用");
   }
 
   /**
