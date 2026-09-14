@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException, OnApplicationBootstrap, OnModuleInit, Optional } from "@nestjs/common";
+import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException, OnApplicationBootstrap, OnModuleInit, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
@@ -927,8 +927,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       }, file.buffer, owner);
       nextImage.fileAssetId = asset.id;
     } else {
-      if (process.env.NODE_ENV === "production" && this.fileStorage) {
-        throw new ConflictException("生产环境必须先配置文件存储平台，不能使用本地图片存储");
+      if (process.env.NODE_ENV === "production") {
+        throw new ServiceUnavailableException("生产环境必须先配置文件存储平台，不能使用本地图片存储");
       }
       absolutePath = this.itemGroupImagePath(group, nextImage);
       await mkdir(dirname(absolutePath), { recursive: true });
@@ -957,6 +957,9 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const current = this.storedItemGroupImages(group);
     const target = current.find((image) => image.id === imageId);
     if (!target) throw new NotFoundException("产品型号图片不存在");
+    if (process.env.NODE_ENV === "production" && (!this.fileStorage || !target.fileAssetId)) {
+      throw new ServiceUnavailableException("生产环境不能操作本地图片，请先迁移到真实文件存储");
+    }
     const remaining = current.filter((image) => image.id !== imageId).map((image, index) => ({ ...image, isCover: index === 0 }));
     await this.persistItemGroupImages(group, remaining);
     if (target.fileAssetId && this.fileStorage) {
@@ -976,6 +979,9 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const group = this.group(this.state(tenantId), itemGroupId);
     const image = this.storedItemGroupImages(group).find((item) => item.id === imageId);
     if (!image) throw new NotFoundException("产品型号图片不存在");
+    if (process.env.NODE_ENV === "production" && (!this.fileStorage || !image.fileAssetId)) {
+      throw new ServiceUnavailableException("生产环境不能读取本地图片，请先迁移到真实文件存储");
+    }
     if (image.fileAssetId && this.fileStorage) {
       const download = await this.fileStorage.downloadUrl(tenantId, image.fileAssetId, {
         businessType: "item_group",

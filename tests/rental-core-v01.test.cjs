@@ -267,6 +267,28 @@ try {
   assert.equal("storageKey" in withImage.images[0], false, "服务器存储路径不得返回客户端");
   const storedImage = await service.readItemGroupImage(newTenant, constructionGroup.id, withImage.images[0].id);
   assert.deepEqual(storedImage.content, onePixelPng, "鉴权图片读取应返回刚写入的内容");
+  const previousNodeEnv = process.env.NODE_ENV;
+  process.env.NODE_ENV = "production";
+  try {
+    await assert.rejects(
+      () => service.addItemGroupImage(newTenant, constructionGroup.id, { originalname: "production.png", mimetype: "image/png", size: onePixelPng.length, buffer: onePixelPng }),
+      /生产环境必须先配置文件存储平台/u,
+      "生产环境缺少文件服务注入时不得退回本地上传"
+    );
+    await assert.rejects(
+      () => service.readItemGroupImage(newTenant, constructionGroup.id, withImage.images[0].id),
+      /生产环境不能读取本地图片/u,
+      "生产环境不得读取遗留的本地图片"
+    );
+    await assert.rejects(
+      () => service.removeItemGroupImage(newTenant, constructionGroup.id, withImage.images[0].id),
+      /生产环境不能操作本地图片/u,
+      "生产环境不得删除本地图片并伪装成已完成迁移"
+    );
+  } finally {
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousNodeEnv;
+  }
   const editedWithImage = await service.saveItemGroup(newTenant, {
     id: constructionGroup.id,
     code: constructionGroup.code,
