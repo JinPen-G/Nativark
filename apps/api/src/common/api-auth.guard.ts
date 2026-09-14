@@ -441,6 +441,9 @@ export function requiredPermissions(method: string, path: string) {
   }
   // DOC-PRINT-01：订单客户凭证只读订单历史快照；结算里的资金汇总由控制器
   // 再按 finance:view/reconcile 做字段级裁剪，不能因为下载凭证自动获得资金明细。
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/documents\/(quote|delivery|return|settlement)\/versions(?:\/[^/]+)?$/u)) {
+    return ["rental-os:order:view"];
+  }
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/documents\/(quote|delivery|return|settlement)$/u)) {
     return ["rental-os:order:view"];
   }

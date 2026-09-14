@@ -699,6 +699,20 @@ export class RentalCoreController {
     const includeFinancial = hasPermissionCode(req.user, "rental-os:finance:view") || hasPermissionCode(req.user, "rental-os:finance:reconcile");
     return this.documents.render(req.user.tenantId, id, type, { includeFinancial });
   }
+  @Get("orders/:id/documents/:type/versions")
+  async orderDocumentVersions(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Param("type") type: string) {
+    return this.documents.listSnapshots(req.user.tenantId, id, type);
+  }
+  @Get("orders/:id/documents/:type/versions/:snapshotId")
+  async orderDocumentVersion(
+    @Req() req: AuthenticatedRequest,
+    @Param("id") id: string,
+    @Param("type") type: string,
+    @Param("snapshotId") snapshotId: string
+  ) {
+    const includeFinancial = hasPermissionCode(req.user, "rental-os:finance:view") || hasPermissionCode(req.user, "rental-os:finance:reconcile");
+    return this.documents.readSnapshot(req.user.tenantId, id, type, snapshotId, { includeFinancial });
+  }
   @Get("orders/:id") order(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.service.getOrder(req.user.tenantId, id); }
   @Post("orders") async createOrder(@Req() req: AuthenticatedRequest, @Body() body: CreateRentalOrderDto) {
     const context = this.context(req.user.tenantId);

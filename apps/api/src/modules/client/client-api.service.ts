@@ -697,13 +697,23 @@ export class ClientApiService {
    * 当前空间由客户端会话和请求上下文决定；结算凭证只展示该会员订单的
    * 资金汇总，不把后台财务权限或内部费用裁定字段带给客户端。
    */
-  async orderDocument(context: ClientRequestContext, orderId: string, documentType: string) {
+  async orderDocument(context: ClientRequestContext, orderId: string, documentType: string, snapshotId?: string) {
     await this.assertClientOrder(context, orderId);
     const business = this.context(context.tenantId);
+    if (snapshotId) {
+      return this.documents.readSnapshot(context.tenantId, orderId, documentType, snapshotId, {
+        includeFinancial: documentType === "settlement"
+      });
+    }
     return this.documents.render(context.tenantId, orderId, documentType, {
       includeFinancial: documentType === "settlement",
       terminology: business.profile.terminology
     });
+  }
+
+  async orderDocumentVersions(context: ClientRequestContext, orderId: string, documentType: string) {
+    await this.assertClientOrder(context, orderId);
+    return this.documents.listSnapshots(context.tenantId, orderId, documentType);
   }
 
   async cancelOrder(context: ClientRequestContext, orderId: string, input: { reason: string }, requestContext?: ClientOrderRequestContext) {

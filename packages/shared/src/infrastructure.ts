@@ -351,6 +351,22 @@ export interface RentalDocumentRenderResult {
   contentHash: string;
 }
 
+/**
+ * DOC-PRINT-01：不可变凭证历史的目录项。
+ *
+ * 历史列表只返回版本定位和校验信息，不把 HTML 或快照正文混在列表响应里；
+ * 读取正文必须再按当前订单、空间和权限读取指定 snapshotId。
+ */
+export interface RentalDocumentSnapshotSummary {
+  snapshotId: string;
+  documentType: RentalDocumentType;
+  templateCode: `${RentalDocumentType}-v1`;
+  documentNo: string;
+  sourceOrderUpdatedAt: string;
+  snapshotAt: string;
+  contentHash: string;
+}
+
 export interface CreatePrintJobRequest {
   documentType: "pickup_sheet" | "return_sheet" | "rental_contract" | "invoice" | string;
   templateCode: string;

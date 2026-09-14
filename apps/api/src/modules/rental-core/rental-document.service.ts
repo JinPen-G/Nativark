@@ -1,6 +1,6 @@
-import { BadRequestException, Injectable, Optional } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
-import type { RentalCategoryTerminology, RentalDocumentRenderResult, RentalDocumentType } from "@rental-os/shared";
+import type { RentalCategoryTerminology, RentalDocumentRenderResult, RentalDocumentSnapshotSummary, RentalDocumentType } from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 import { RentalFundingService } from "./rental-funding.service";
 import { RentalCoreService } from "./rental-core.service";
@@ -29,10 +29,7 @@ export class RentalDocumentService {
     documentType: string,
     options: { includeFinancial: boolean; terminology?: RentalCategoryTerminology }
   ): Promise<RentalDocumentRenderResult> {
-    if (!DOCUMENT_TYPES.has(documentType as RentalDocumentType)) {
-      throw new BadRequestException("不支持的订单凭证类型");
-    }
-    const type = documentType as RentalDocumentType;
+    const type = this.assertDocumentType(documentType);
     const order = await this.core.getOrder(tenantId, orderId);
     const [inspections, templates] = await Promise.all([
       this.core.listInspections(tenantId, orderId),
@@ -98,6 +95,60 @@ export class RentalDocumentService {
     }
   }
 
+  /**
+   * 返回当前订单/空间下的不可变凭证历史目录。
+   *
+   * 先读取订单是有意的：它复用现有订单空间边界，避免仅凭 snapshotId
+   * 枚举或读取另一空间的历史。列表不返回正文，正文由 readSnapshot 单独读取。
+   */
+  async listSnapshots(
+    tenantId: string,
+    orderId: string,
+    documentType: string
+  ): Promise<RentalDocumentSnapshotSummary[]> {
+    const type = this.assertDocumentType(documentType);
+    await this.core.getOrder(tenantId, orderId);
+    if (!this.prisma) return [];
+    const workspaceId = this.core.resolveWorkspaceId(tenantId);
+    const rows = await this.prisma.rentalOrderDocumentSnapshot.findMany({
+      where: { tenantId, workspaceId, orderId, documentType: type },
+      orderBy: [{ snapshotAt: "desc" }, { id: "desc" }]
+    });
+    return rows.map((row) => this.toSummary(row));
+  }
+
+  /**
+   * 读取指定历史版本。无财务权限的调用方不能通过 snapshotId 取回曾经由财务
+   * 账号生成的含资金明细版本；这道检查必须放在服务端，不能交给页面裁剪。
+   */
+  async readSnapshot(
+    tenantId: string,
+    orderId: string,
+    documentType: string,
+    snapshotId: string,
+    options: { includeFinancial: boolean }
+  ): Promise<RentalDocumentRenderResult> {
+    const type = this.assertDocumentType(documentType);
+    await this.core.getOrder(tenantId, orderId);
+    if (!this.prisma) throw new NotFoundException("历史凭证不存在");
+    const workspaceId = this.core.resolveWorkspaceId(tenantId);
+    const row = await this.prisma.rentalOrderDocumentSnapshot.findFirst({
+      where: { id: snapshotId, tenantId, workspaceId, orderId, documentType: type }
+    });
+    if (!row) throw new NotFoundException("历史凭证不存在");
+    if (!options.includeFinancial && this.containsVisibleFinancial(row.snapshot)) {
+      throw new ForbiddenException("当前账号无权读取含资金明细的历史凭证");
+    }
+    return this.fromPersisted(row);
+  }
+
+  private assertDocumentType(documentType: string): RentalDocumentType {
+    if (!DOCUMENT_TYPES.has(documentType as RentalDocumentType)) {
+      throw new BadRequestException("不支持的订单凭证类型");
+    }
+    return documentType as RentalDocumentType;
+  }
+
   private fromPersisted(row: {
     id: string;
     documentType: string;
@@ -123,5 +174,31 @@ export class RentalDocumentService {
       html: row.html,
       contentHash: row.contentHash
     };
+  }
+
+  private toSummary(row: {
+    id: string;
+    documentType: string;
+    templateCode: string;
+    documentNo: string;
+    sourceOrderUpdatedAt: Date;
+    snapshotAt: Date;
+    contentHash: string;
+  }): RentalDocumentSnapshotSummary {
+    return {
+      snapshotId: row.id,
+      documentType: row.documentType as RentalDocumentType,
+      templateCode: row.templateCode as `${RentalDocumentType}-v1`,
+      documentNo: row.documentNo,
+      sourceOrderUpdatedAt: row.sourceOrderUpdatedAt.toISOString(),
+      snapshotAt: row.snapshotAt.toISOString(),
+      contentHash: row.contentHash
+    };
+  }
+
+  private containsVisibleFinancial(snapshot: unknown) {
+    if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return false;
+    const financial = (snapshot as { financial?: unknown }).financial;
+    return Boolean(financial && typeof financial === "object" && !Array.isArray(financial) && (financial as { visible?: unknown }).visible === true);
   }
 }

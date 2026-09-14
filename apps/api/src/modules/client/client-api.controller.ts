@@ -279,8 +279,13 @@ export class ClientApiController {
   }
 
   @Get("orders/:id/documents/:type")
-  orderDocument(@Req() req: ClientRequest, @Param("id") id: string, @Param("type") type: string) {
-    return this.api.orderDocument(currentClient(req), id, type);
+  orderDocument(@Req() req: ClientRequest, @Param("id") id: string, @Param("type") type: string, @Query("snapshotId") snapshotId?: string) {
+    return this.api.orderDocument(currentClient(req), id, type, snapshotId);
+  }
+
+  @Get("orders/:id/documents/:type/versions")
+  orderDocumentVersions(@Req() req: ClientRequest, @Param("id") id: string, @Param("type") type: string) {
+    return this.api.orderDocumentVersions(currentClient(req), id, type);
   }
 
   @Post("orders/:id/cancel")

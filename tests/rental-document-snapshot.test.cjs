@@ -38,6 +38,18 @@ const keyOf = (where) => [where.tenantId, where.workspaceId, where.orderId, wher
 const prisma = {
   rentalOrderDocumentSnapshot: {
     async findUnique({ where }) { return rows.get(keyOf(where.tenantId_workspaceId_orderId_documentType_contentHash)); },
+    async findMany({ where }) {
+      return [...rows.values()]
+        .filter((row) => row.tenantId === where.tenantId && row.workspaceId === where.workspaceId && row.orderId === where.orderId && row.documentType === where.documentType)
+        .sort((left, right) => right.snapshotAt.getTime() - left.snapshotAt.getTime());
+    },
+    async findFirst({ where }) {
+      return [...rows.values()].find((row) => row.id === where.id
+        && row.tenantId === where.tenantId
+        && row.workspaceId === where.workspaceId
+        && row.orderId === where.orderId
+        && row.documentType === where.documentType);
+    },
     async create({ data }) {
       const row = { id: `snapshot-${++creates}`, ...data };
       rows.set(keyOf(data), row);
@@ -77,7 +89,41 @@ void (async () => {
   assert.equal(otherWorkspace.snapshotId, "snapshot-3", "同租户不同经营空间不能复用另一空间的凭证快照");
   assert.equal(rows.size, 3);
 
-  console.log("DOC-PRINT-01 快照专项通过：同内容幂等复用、订单变化追加版本、旧凭证不被覆盖");
+  core.resolveWorkspaceId = () => "workspace-doc-1";
+  currentOrder = order({ finalPayableAmount: 120, payableAmount: 120, updatedAt: "2026-09-15T02:00:00.000Z" });
+  const history = await service.listSnapshots("tenant-doc", "order-doc-1", "quote");
+  assert.deepEqual(history.map((row) => row.snapshotId), ["snapshot-2", "snapshot-1"], "历史列表按快照时间倒序返回且不暴露正文");
+  const historical = await service.readSnapshot("tenant-doc", "order-doc-1", "quote", "snapshot-1", { includeFinancial: false });
+  assert.equal(historical.snapshotId, "snapshot-1", "可以按当前空间读取指定不可变历史版本");
+  await assert.rejects(
+    () => service.readSnapshot("tenant-doc", "order-doc-1", "quote", "snapshot-3", { includeFinancial: false }),
+    /历史凭证不存在/u,
+    "不能读取另一经营空间的历史凭证"
+  );
+
+  rows.set("tenant-doc|workspace-doc-1|order-doc-1|settlement|financial-hash", {
+    id: "snapshot-financial",
+    tenantId: "tenant-doc",
+    workspaceId: "workspace-doc-1",
+    orderId: "order-doc-1",
+    documentType: "settlement",
+    templateCode: "settlement-v1",
+    documentNo: "SET-DOC-001",
+    sourceOrderUpdatedAt: new Date("2026-09-15T02:00:00.000Z"),
+    snapshotAt: new Date("2026-09-15T02:01:00.000Z"),
+    contentHash: "financial-hash",
+    snapshot: { financial: { visible: true, finalPayableAmount: 120 } },
+    html: "<p>settlement</p>"
+  });
+  await assert.rejects(
+    () => service.readSnapshot("tenant-doc", "order-doc-1", "settlement", "snapshot-financial", { includeFinancial: false }),
+    /无权读取含资金明细/u,
+    "无财务权限不能用历史版本入口读取含资金明细的凭证"
+  );
+  const financial = await service.readSnapshot("tenant-doc", "order-doc-1", "settlement", "snapshot-financial", { includeFinancial: true });
+  assert.equal(financial.snapshotId, "snapshot-financial", "有财务权限可以读取含资金明细的历史凭证");
+
+  console.log("DOC-PRINT-01 快照专项通过：同内容幂等复用、订单变化追加版本、历史目录、指定版本读取和空间隔离");
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;
