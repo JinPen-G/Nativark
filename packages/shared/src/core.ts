@@ -5654,6 +5654,14 @@ export interface RentalInspectionRecord {
       operator: string;
       respondedAt: string;
     }>;
+    /** 客户申诉后的正式金额复核，只追加前后金额，不覆盖原裁定事实。 */
+    adjustmentHistory?: Array<{
+      fromAmount: number;
+      toAmount: number;
+      reason: string;
+      operator: string;
+      adjustedAt: string;
+    }>;
   }>;
   attachments: string[];
   operator: string;
@@ -5670,6 +5678,11 @@ export interface CorrectRentalInspectionUsageRequest {
 export interface ReviewRentalInspectionExceptionRequest {
   decision: "approved" | "rejected";
   approvedChargeAmount?: number;
+  reason: string;
+}
+
+export interface AdjustRentalInspectionExceptionRequest {
+  approvedChargeAmount: number;
   reason: string;
 }
 

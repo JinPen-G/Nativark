@@ -2294,6 +2294,10 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: "Record customer confirmation or dispute for an approved inspection exception charge", permissions: ["rental-os:order:fee-review"], requestSchema: "GenericObject", responseSchema: "GenericObject"
   },
   {
+    method: "post", path: "/api/rental/v1/orders/{id}/inspections/{inspectionId}/exceptions/{exceptionIndex}/re-review", tag: "RentalCore", operationId: "reReviewRentalOrderInspectionException",
+    summary: "Adjust a disputed inspection exception charge and require customer reconfirmation", permissions: ["rental-os:order:fee-review"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+  },
+  {
     method: "get", path: "/api/rental/v1/capabilities", tag: "RentalCore", operationId: "listWorkspaceCapabilities",
     summary: "List workspace capability instances with declared/implemented/enabled state",
     permissions: ["rental-core:capability:view", "rental-core:capability:manage"], responseSchema: "GenericObject"

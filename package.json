@@ -75,6 +75,7 @@
     "test:camera-evidence": "node tests/rental-camera-evidence.test.cjs",
     "test:inspection-usage-correction": "npm run build -w @rental-os/shared && node tests/rental-inspection-usage-correction.test.cjs",
     "test:inspection-customer-response": "node tests/rental-inspection-customer-response.test.cjs",
+    "test:inspection-exception-adjustment": "npm run build -w @rental-os/shared && node tests/rental-inspection-exception-adjustment.test.cjs",
     "test:rental-business": "npm run build -w @rental-os/shared && node tests/rental-business-v1.test.cjs",
     "test:tenant-ready-first-order": "node tests/tenant-ready-first-order.test.cjs",
     "test:rental-persistence": "npm run build -w @rental-os/shared && node tests/rental-state-persistence.test.cjs",

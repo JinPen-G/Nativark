@@ -1,5 +1,5 @@
 import { ArrowLeftOutlined, CheckCircleOutlined, DollarOutlined, MinusCircleOutlined, PlusOutlined, RetweetOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
-import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol, type ApplyRentalOrderChangeRequest, type CorrectRentalInspectionUsageRequest, type CreateRentalInspectionRequest, type PreviewRentalOrderChangeRequest, type RecordRentalInspectionExceptionCustomerResponseRequest, type RentalAllocation, type RentalFundingAction, type RentalFundingInstrument, type RentalInspectionTemplate, type RentalOrderExtension, type RentalOrderExtensionPreview, type RentalOrderFeeReview, type RentalOrderServiceOccurrence, type RentalReservation, type RentalServiceExecutionAction, type UpdateRentalServiceOccurrenceRequest, type RentalWorkOrder, type RentalStockDisposition } from "@rental-os/shared";
+import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol, type AdjustRentalInspectionExceptionRequest, type ApplyRentalOrderChangeRequest, type CorrectRentalInspectionUsageRequest, type CreateRentalInspectionRequest, type PreviewRentalOrderChangeRequest, type RecordRentalInspectionExceptionCustomerResponseRequest, type RentalAllocation, type RentalFundingAction, type RentalFundingInstrument, type RentalInspectionTemplate, type RentalOrderExtension, type RentalOrderExtensionPreview, type RentalOrderFeeReview, type RentalOrderServiceOccurrence, type RentalReservation, type RentalServiceExecutionAction, type UpdateRentalServiceOccurrenceRequest, type RentalWorkOrder, type RentalStockDisposition } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Button, Card, Checkbox, DatePicker, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
@@ -111,6 +111,7 @@ export function RentalOrderDetailPage() {
   const [fundingOperation, setFundingOperation] = useState<FundingOperation>();
   const [exceptionReview, setExceptionReview] = useState<{ inspectionId: string; exceptionIndex: number; description: string; suggested?: number }>();
   const [exceptionCustomerResponse, setExceptionCustomerResponse] = useState<{ inspectionId: string; exceptionIndex: number; description: string; status?: string }>();
+  const [exceptionAdjustment, setExceptionAdjustment] = useState<{ inspectionId: string; exceptionIndex: number; description: string; current: number; suggested?: number }>();
   const [usageCorrection, setUsageCorrection] = useState<{ inspectionId: string; fieldCode: string; stage: "pickup" | "return"; current: number; baseline?: number }>();
   const [feeReview, setFeeReview] = useState<RentalOrderFeeReview>();
   const [feeReviewForm] = Form.useForm<{ decision: "approved" | "rejected"; amount?: number; reason: string }>();
@@ -122,6 +123,7 @@ export function RentalOrderDetailPage() {
   const [fundingForm] = Form.useForm<{ amount?: number; reason: string; failureCode?: string }>();
   const [exceptionReviewForm] = Form.useForm<{ decision: "approved" | "rejected"; approvedChargeAmount?: number; reason: string }>();
   const [exceptionCustomerResponseForm] = Form.useForm<RecordRentalInspectionExceptionCustomerResponseRequest>();
+  const [exceptionAdjustmentForm] = Form.useForm<AdjustRentalInspectionExceptionRequest>();
   const [usageCorrectionForm] = Form.useForm<{ correctedCurrent: number; reason: string; evidenceAttachments?: string }>();
   const [extensionOpen, setExtensionOpen] = useState(false);
   const [extensionRefundReview, setExtensionRefundReview] = useState<RentalOrderExtension>();
@@ -325,7 +327,7 @@ export function RentalOrderDetailPage() {
     onError: (error: Error) => message.error(error.message || "部分取消失败，请刷新订单后重试")
   });
   const recordExceptionCustomerResponse = useMutation({
-    mutationFn: (values: RecordRentalInspectionExceptionCustomerResponseRequest) => rentalCoreApi.recordInspectionExceptionCustomerResponse(id, exceptionCustomerResponse!.inspectionId, exceptionCustomerResponse!.exceptionIndex, values),
+    mutationFn: (values: RecordRentalInspectionExceptionCustomerResponseRequest) => rentalCoreApi.recordInspectionExceptionCustomerResponse(id, exceptionCustomerResponse!.inspectionId, exceptionCustomerResponse!.exceptionIndex, values, crypto.randomUUID()),
     onSuccess: async () => {
       setExceptionCustomerResponse(undefined);
       exceptionCustomerResponseForm.resetFields();
@@ -333,6 +335,22 @@ export function RentalOrderDetailPage() {
       message.success("客户确认/申诉记录已保存");
     },
     onError: (error: Error) => message.error(error.message || "客户确认/申诉记录失败，请刷新后重试")
+  });
+  const adjustException = useMutation({
+    mutationFn: (values: AdjustRentalInspectionExceptionRequest) => rentalCoreApi.reReviewInspectionException(
+      id,
+      exceptionAdjustment!.inspectionId,
+      exceptionAdjustment!.exceptionIndex,
+      values,
+      crypto.randomUUID()
+    ),
+    onSuccess: async () => {
+      setExceptionAdjustment(undefined);
+      exceptionAdjustmentForm.resetFields();
+      await Promise.all([refresh(), queryClient.invalidateQueries({ queryKey: ["rental-core", "order", id, "inspections"] })]);
+      message.success("申诉金额已复核，等待客户重新确认");
+    },
+    onError: (error: Error) => message.error(error.message || "申诉金额复核失败，请刷新后重试")
   });
   const correctUsage = useMutation({
     mutationFn: (values: { correctedCurrent: number; reason: string; evidenceAttachments?: string }) => {
@@ -656,11 +674,16 @@ export function RentalOrderDetailPage() {
           { title: "审核", dataIndex: "reviewStatus", render: (value) => <Tag color={value === "approved" ? "green" : value === "rejected" ? "default" : "orange"}>{value === "approved" ? "已通过" : value === "rejected" ? "已驳回" : "待审核"}</Tag> },
           { title: "最终费用", dataIndex: "approvedChargeAmount", render: (value) => value === undefined ? "-" : money(Number(value)) },
           { title: "客户响应", render: (_, row) => row.customerResponseStatus === "pending" ? <Tag color="orange">待确认/申诉</Tag> : row.customerResponseStatus === "confirmed" ? <Tag color="green">已确认</Tag> : row.customerResponseStatus === "disputed" ? <Tag color="red">已申诉</Tag> : row.customerResponseStatus === "not_required" ? <Tag>无需确认</Tag> : "-" },
-          { title: "操作", render: (_, row) => <Space>
-            {canReviewFees && row.reviewStatus === "pending" && <Button type="link" onClick={() => { setExceptionReview({ inspectionId: row.inspectionId, exceptionIndex: row.exceptionIndex, description: row.description, suggested: row.suggestedChargeAmount }); exceptionReviewForm.setFieldsValue({ decision: "approved", approvedChargeAmount: row.suggestedChargeAmount }); }}>审核</Button>}
-            {canReviewFees && row.reviewStatus === "approved" && Number(row.approvedChargeAmount ?? 0) > 0 && ["pending", "disputed"].includes(row.customerResponseStatus ?? "") && <Button type="link" onClick={() => { setExceptionCustomerResponse({ inspectionId: row.inspectionId, exceptionIndex: row.exceptionIndex, description: row.description, status: row.customerResponseStatus }); exceptionCustomerResponseForm.setFieldsValue({ decision: "confirmed" }); }}>记录客户响应</Button>}
-            {!((canReviewFees && row.reviewStatus === "pending") || (canReviewFees && row.reviewStatus === "approved" && Number(row.approvedChargeAmount ?? 0) > 0 && ["pending", "disputed"].includes(row.customerResponseStatus ?? ""))) && "-"}
-          </Space> }
+          { title: "操作", render: (_, row) => {
+            const canReview = canReviewFees && row.reviewStatus === "pending";
+            const canRecordResponse = canReviewFees && row.reviewStatus === "approved" && Number(row.approvedChargeAmount ?? 0) > 0 && ["pending", "disputed"].includes(row.customerResponseStatus ?? "");
+            const canAdjust = canReviewFees && row.reviewStatus === "approved" && row.customerResponseStatus === "disputed" && Number(row.approvedChargeAmount ?? 0) > 0;
+            return <Space>
+            {canReview && <Button type="link" onClick={() => { setExceptionReview({ inspectionId: row.inspectionId, exceptionIndex: row.exceptionIndex, description: row.description, suggested: row.suggestedChargeAmount }); exceptionReviewForm.setFieldsValue({ decision: "approved", approvedChargeAmount: row.suggestedChargeAmount }); }}>审核</Button>}
+            {canRecordResponse && <Button type="link" onClick={() => { setExceptionCustomerResponse({ inspectionId: row.inspectionId, exceptionIndex: row.exceptionIndex, description: row.description, status: row.customerResponseStatus }); exceptionCustomerResponseForm.setFieldsValue({ decision: "confirmed" }); }}>记录客户响应</Button>}
+            {canAdjust && <Button type="link" onClick={() => { setExceptionAdjustment({ inspectionId: row.inspectionId, exceptionIndex: row.exceptionIndex, description: row.description, current: Number(row.approvedChargeAmount), suggested: row.suggestedChargeAmount }); exceptionAdjustmentForm.setFieldsValue({ approvedChargeAmount: Number(row.approvedChargeAmount), reason: undefined }); }}>复核金额</Button>}
+            {!(canReview || canRecordResponse || canAdjust) && "-"}
+          </Space>; } }
         ]} />
       </Space></Card>
       <Card title="待审费用与裁定历史" extra={<Tag color={pendingFeeReviews.length ? "orange" : "default"}>{pendingFeeReviews.length ? `${pendingFeeReviews.length} 项待裁定` : "无待办"}</Tag>}>
@@ -947,6 +970,23 @@ export function RentalOrderDetailPage() {
         </Form.Item>
         <Form.Item name="reason" label="响应记录" rules={[{ required: true, whitespace: true, message: "请记录客户确认或申诉的事实" }]}>
           <Input.TextArea rows={4} maxLength={1000} placeholder="记录确认方式、客户意见或申诉内容" />
+        </Form.Item>
+      </Form>
+    </Modal>
+    <Modal title="复核客户申诉费用" open={Boolean(exceptionAdjustment)} onCancel={() => { setExceptionAdjustment(undefined); exceptionAdjustmentForm.resetFields(); }} onOk={() => exceptionAdjustmentForm.submit()} confirmLoading={adjustException.isPending} destroyOnHidden>
+      <Alert
+        type="warning"
+        showIcon
+        title={exceptionAdjustment?.description}
+        description={`当前已审核费用：${exceptionAdjustment ? money(exceptionAdjustment.current) : "-"}；检查员建议费用：${exceptionAdjustment?.suggested === undefined ? "未填写" : money(exceptionAdjustment.suggested)}。复核后会保留原金额和申诉记录，并要求客户重新确认。`}
+        style={{ marginBottom: 16 }}
+      />
+      <Form form={exceptionAdjustmentForm} layout="vertical" onFinish={(values) => adjustException.mutate(values)}>
+        <Form.Item name="approvedChargeAmount" label="复核后最终费用" rules={[{ required: true, message: "请填写复核后的费用" }]}>
+          <InputNumber min={0} precision={2} prefix={symbol} style={{ width: "100%" }} />
+        </Form.Item>
+        <Form.Item name="reason" label="复核理由" rules={[{ required: true, whitespace: true, message: "请填写金额调整原因" }]}>
+          <Input.TextArea rows={4} maxLength={1000} placeholder="记录客户申诉依据、核减原因和复核结论" />
         </Form.Item>
       </Form>
     </Modal>

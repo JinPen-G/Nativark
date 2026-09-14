@@ -480,6 +480,7 @@ export function requiredPermissions(method: string, path: string) {
   // 检查异常的建议损失额同样是费用裁定，与上面两条同权限。
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/inspections\/[^/]+\/exceptions\/[^/]+\/review$/)) return ["rental-os:order:fee-review"];
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/inspections\/[^/]+\/exceptions\/[^/]+\/customer-response$/)) return ["rental-os:order:fee-review"];
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/inspections\/[^/]+\/exceptions\/[^/]+\/re-review$/)) return ["rental-os:order:fee-review"];
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/cancel$/)) return ["rental-os:order:cancel", "rental-os:order:operate"];
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/operation-lock$/)) return ["rental-os:order:operate", "rental-os:order:pickup", "rental-os:order:return"];
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/handover\/pickup$/)) return ["rental-os:order:operate", "rental-os:order:pickup"];

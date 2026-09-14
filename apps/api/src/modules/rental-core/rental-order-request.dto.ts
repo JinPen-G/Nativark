@@ -9,6 +9,7 @@ import {
   type RentalOperationLockRequest,
   type CreateRentalInspectionRequest,
   type CreateRentalOrderRequest,
+  type AdjustRentalInspectionExceptionRequest,
   type GrantRentalRewardRequest,
   type PartialReturnRentalOrderRequest,
   type ReviewRentalInspectionExceptionRequest,
@@ -241,6 +242,17 @@ export class ReviewRentalInspectionExceptionDto implements ReviewRentalInspectio
 
   @IsString()
   @IsNotEmpty()
+  reason!: string;
+}
+
+export class AdjustRentalInspectionExceptionDto implements AdjustRentalInspectionExceptionRequest {
+  @IsNumber()
+  @Min(0)
+  approvedChargeAmount!: number;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(1000)
   reason!: string;
 }
 

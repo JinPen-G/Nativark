@@ -3433,6 +3433,68 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     return { order, approvedChargeAmount: coveredAmount };
   }
 
+  /**
+   * 客户申诉后的正式金额复核（需求 4.6.12 / 4.6.13）。
+   *
+   * 原检查异常费用行不可编辑：先追加一条反向冲销，再追加新的损坏费用行。
+   * 这样订单最终应收会按差额变化，原金额、调整后金额和原因仍可从订单与检查记录
+   * 两处历史还原；实际补款或退款仍由资金链另行处理。
+   */
+  async adjustInspectionExceptionCharge(
+    tenantId: string,
+    orderId: string,
+    inspectionId: string,
+    exceptionIndex: number,
+    previousAmount: number,
+    suggestedAmount: number | undefined,
+    amount: number,
+    reason: string,
+    operator: string,
+    adjustmentSequence: number,
+    tx: RentalFactTx
+  ) {
+    const order = await this.lockedOrder(tenantId, orderId, tx);
+    if (order.status !== RentalCoreOrderStatus.Settling) throw new ConflictException("只有待结算订单可以复核异常费用");
+    if (!Number.isFinite(previousAmount) || previousAmount <= 0) throw new ConflictException("当前异常费用没有可复核的正数裁定");
+    if (!Number.isFinite(amount) || amount < 0) throw new BadRequestException("复核后的异常费用必须是非负数字");
+    if (!reason.trim()) throw new BadRequestException("金额复核必须填写原因");
+    if (Math.abs(amount - previousAmount) <= 0.005) throw new ConflictException("复核后的金额没有变化");
+    if (suggestedAmount !== undefined && Number.isFinite(suggestedAmount) && amount - suggestedAmount > 0.005) {
+      throw new BadRequestException(`复核金额不能超过检查员建议额 ${suggestedAmount}`);
+    }
+    const sourceCode = `damage:${order.id}:${inspectionId}:${exceptionIndex}`;
+    if (!order.chargeLines.some((line) => line.code === sourceCode || line.code.startsWith(`${sourceCode}:`))) {
+      throw new ConflictException("原异常费用行不存在，不能复核金额");
+    }
+    const existingDamage = order.chargeLines.filter((line) => line.type === "damage").reduce((sum, line) => sum + line.amount, 0);
+    const nextDamage = roundMoney(existingDamage - previousAmount + amount);
+    const limit = order.ruleSnapshot.damage.chargeLimit;
+    if (limit !== undefined && nextDamage > limit + 0.005) throw new ConflictException(`复核后的异常费用超过订单规则上限 ${limit}`);
+    const sequence = Number.isInteger(adjustmentSequence) && adjustmentSequence > 0 ? adjustmentSequence : 1;
+    const detail = `客户申诉后金额复核：${previousAmount} → ${amount}；复核人：${operator}；${reason.trim()}`;
+    this.applyChargeTo(order, {
+      code: `${sourceCode}:adjustment:${sequence}:reversal`,
+      name: "检查异常费用复核冲销",
+      type: "damage",
+      amount: -previousAmount,
+      sourceVersion: order.ruleVersion,
+      detail
+    });
+    if (amount > 0) {
+      this.applyChargeTo(order, {
+        code: `${sourceCode}:adjustment:${sequence}:replacement`,
+        name: "检查异常费用复核后金额",
+        type: "damage",
+        amount,
+        sourceVersion: order.ruleVersion,
+        detail
+      });
+    }
+    order.updatedAt = now();
+    await this.factStore.saveOrderAggregate(order, [], tx);
+    return { order, previousAmount, approvedChargeAmount: amount };
+  }
+
   async settleOrder(tenantId: string, orderId: string, tx: RentalFactTx, operator?: string) {
     const order = await this.lockedOrder(tenantId, orderId, tx);
     if (order.status !== RentalCoreOrderStatus.Settling) throw new ConflictException("只有已归还待结算的订单可以关闭");

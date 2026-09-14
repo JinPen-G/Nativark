@@ -43,22 +43,23 @@ const req = (method, path) => requiredPermissions(method, path);
 /** 守卫放行语义：账号权限与要求集合有交集即通过（hasAnyPermission 用 some）。 */
 const allows = (userPerms, required) => required.some((code) => userPerms.includes(code));
 
-// 三条裁定入口 + 一条资金入口，覆盖 §4.2 要求区分的两种财务动作。
+// 四条裁定入口 + 一条资金入口，覆盖 §4.2 要求区分的两种财务动作。
 const FEE_ROUTES = {
   "订单费用审核": ["POST", "/rental/v1/orders/order_1/fee-reviews/review_1/review"],
   "续租负差额退款审核": ["POST", "/rental/v1/orders/order_1/extensions/ext_1/refund-review"],
   "检查异常费用审核": ["POST", "/rental/v1/orders/order_1/inspections/ins_1/exceptions/0/review"],
-  "检查异常客户响应": ["POST", "/rental/v1/orders/order_1/inspections/ins_1/exceptions/0/customer-response"]
+  "检查异常客户响应": ["POST", "/rental/v1/orders/order_1/inspections/ins_1/exceptions/0/customer-response"],
+  "客户申诉金额复核": ["POST", "/rental/v1/orders/order_1/inspections/ins_1/exceptions/0/re-review"]
 };
 const FUNDING_WRITE = ["POST", "/rental/v1/orders/order_1/funding-events"];
 
-/* ---------- 三条裁定入口统一收到 fee-review，不再靠 settle ---------- */
+/* ---------- 四条裁定入口统一收到 fee-review，不再靠 settle ---------- */
 
 for (const [label, [method, path]] of Object.entries(FEE_ROUTES)) {
   const required = req(method, path);
   assert.deepEqual(required, [FEE_REVIEW], `${label} 必须只认 ${FEE_REVIEW}`);
 }
-ok("三条费用裁定入口都要求 order:fee-review——修复前它们都认 order:settle");
+ok("四条费用裁定入口都要求 order:fee-review——修复前它们都认 order:settle");
 
 /* ---------- 资金动作仍只认 settle ---------- */
 
