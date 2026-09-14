@@ -231,6 +231,7 @@ export class ClientApiService {
     });
     const integrationCatalog = await this.tenantIntegrations.catalog(context.tenantId);
     const smsConfigured = integrationCatalog.configs.some((item) => item.capability === "sms" && item.enabled && item.isDefault);
+    const smsReady = integrationCatalog.configs.some((item) => item.capability === "sms" && item.enabled && item.isDefault && item.lastTestStatus === "passed" && item.lastTestMode === "live");
     const payment = this.buildPaymentCapabilities(integrationCatalog.configs);
     return {
       apiVersion: CLIENT_API_VERSION,
@@ -247,7 +248,7 @@ export class ClientApiService {
       registration: {
         mode: registration?.registrationMode === "automatic" ? "automatic" : "manual",
         verificationMethods: ["sms", "email"],
-        providerMode: smsConfigured ? "provider" : process.env.NODE_ENV === "production" ? "provider_pending" : "development"
+        providerMode: smsReady ? "provider" : smsConfigured || process.env.NODE_ENV === "production" ? "provider_pending" : "development"
       },
       features: {
         profile: true,
@@ -262,10 +263,10 @@ export class ClientApiService {
     };
   }
 
-  private buildPaymentCapabilities(configs: Array<{ capability: string; provider: string; enabled: boolean }> = []): ClientPaymentCapabilitiesResponse {
+  private buildPaymentCapabilities(configs: Array<{ capability: string; provider: string; enabled: boolean; isDefault?: boolean; lastTestStatus?: string; lastTestMode?: string }> = []): ClientPaymentCapabilitiesResponse {
     const development = process.env.NODE_ENV !== "production";
     const providerMethods = configs
-      .filter((item) => item.capability === "payment" && item.enabled)
+      .filter((item) => item.capability === "payment" && item.enabled && item.isDefault && item.lastTestStatus === "passed" && item.lastTestMode === "live")
       .map((item) => item.provider)
       .filter((item): item is "alipay" | "wechat_pay" => item === "alipay" || item === "wechat_pay");
     if (providerMethods.length > 0) {
@@ -279,9 +280,10 @@ export class ClientApiService {
         instruments: ["rental"]
       };
     }
+    const providerPending = configs.some((item) => item.capability === "payment" && item.enabled && item.isDefault);
     return {
       apiVersion: CLIENT_API_VERSION,
-      mode: development ? "simulation_only" : "provider_pending",
+      mode: providerPending || !development ? "provider_pending" : "simulation_only",
       realPaymentEnabled: false,
       methods: development ? ["simulation"] : [],
       instruments: ["rental", "deposit", "preauthorization"]
