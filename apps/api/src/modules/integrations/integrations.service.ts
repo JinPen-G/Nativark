@@ -318,6 +318,9 @@ export class IntegrationsService {
     if (!input.channels?.length) {
       throw new BadRequestException("至少选择一个通知渠道");
     }
+    if (process.env.NODE_ENV === "production" && input.channels.some((channel) => String(channel).toUpperCase() === "SMS")) {
+      throw new ServiceUnavailableException("生产环境禁止通过模拟入口记录短信发送，请使用已验证的租户短信平台");
+    }
     validateRequired(input.businessType, "业务对象类型不能为空");
 
     const log = this.useMysqlDataSource()
@@ -358,6 +361,9 @@ export class IntegrationsService {
     validateRequired(input.provider, "适配器 provider 不能为空");
     validateRequired(input.capability, "适配能力不能为空");
     validateRequired(input.operation, "操作类型不能为空");
+    if (process.env.NODE_ENV === "production" && ["payment", "pre_auth", "sms", "file"].includes(input.capability)) {
+      throw new ServiceUnavailableException("生产环境禁止调用支付、短信或文件模拟适配器");
+    }
 
     return this.recordAdapterLog({
       provider: input.provider,

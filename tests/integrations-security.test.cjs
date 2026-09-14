@@ -99,6 +99,8 @@ assert.match(smsSource, /hasEnabledProvider/u);
 assert.match(notificationSource, /生产环境尚未配置默认短信平台/u);
 assert.match(notificationSource, /smsProviderConfigured/u);
 assert.match(integrationsServiceSource, /生产环境禁止创建模拟文件资产/u);
+assert.match(integrationsServiceSource, /生产环境禁止通过模拟入口记录短信发送/u);
+assert.match(integrationsServiceSource, /生产环境禁止调用支付、短信或文件模拟适配器/u);
 
 (async () => {
   const { TenantIntegrationService } = require(path.join(repo, "apps", "api", "dist", "modules", "integrations", "tenant-integration.service.js"));
@@ -187,6 +189,16 @@ assert.match(integrationsServiceSource, /生产环境禁止创建模拟文件资
     }),
     /生产环境禁止创建模拟文件资产/u,
     "生产环境不得通过旧元数据接口生成 local_mock 文件资产"
+  );
+  await assert.rejects(
+    mockIntegrationService.sendNotification({ channels: ["SMS"], businessType: "rental_order" }),
+    /生产环境禁止通过模拟入口记录短信发送/u,
+    "生产环境不得用通用模拟入口伪造短信发送"
+  );
+  await assert.rejects(
+    mockIntegrationService.invokeMockAdapter({ provider: "mock-payment-adapter", capability: "payment", operation: "create" }),
+    /生产环境禁止调用支付、短信或文件模拟适配器/u,
+    "生产环境不得调用支付模拟适配器"
   );
   console.log("integration security probes passed: SSRF, callback binding, payment race, upload verification, SMS cooldown, runtime gate and route permission");
 })().catch((error) => {
