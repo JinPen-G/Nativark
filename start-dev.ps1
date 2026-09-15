@@ -1,4 +1,5 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
+# Keep this script UTF-8-with-BOM so Windows PowerShell can parse the Chinese messages.
 param(
   [switch]$SkipDocker,
   [switch]$SkipDatabaseChecks
