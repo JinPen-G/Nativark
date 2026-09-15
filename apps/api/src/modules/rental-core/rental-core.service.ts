@@ -45,6 +45,10 @@ import {
   type RentalPricingGroup,
   type RentalOrder,
   type RentalOrderChange,
+  type RentalOrderChangePreview,
+  type RentalOrderExchangeInspectionSnapshot,
+  type RentalOrderExchangePriceBasis,
+  type RentalOrderExchangeDisposition,
   type RentalOrderServiceOccurrence,
   type RentalOrderFeeReview,
   type RentalOrderExtension,
@@ -2059,7 +2063,9 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (!items?.length) throw new BadRequestException("至少选择一个归还分配项");
     if (new Set(items.map((item) => item.allocationId)).size !== items.length) throw new BadRequestException("归还分配项不能重复");
     const requestedByAllocationId = new Map(items.map((item) => [item.allocationId, item.quantity]));
-    const pickedUp = order.allocations.filter((allocation) => allocation.status === "picked_up");
+    const pickedUp = order.allocations.filter((allocation) =>
+      allocation.status === "picked_up" || (allocation.status === "locked" && Boolean(allocation.metadata?.exchangeId))
+    );
     if (pickedUp.length && pickedUp.every((allocation) => (requestedByAllocationId.get(allocation.id) ?? 0) >= allocation.quantity)) {
       throw new ConflictException("最后一批必须通过整单归还或归还检查完成，以计算逾期和异常费用");
     }
@@ -2068,7 +2074,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     for (const item of items) {
       if (!Number.isInteger(item.quantity) || item.quantity <= 0) throw new BadRequestException("归还数量必须是正整数");
       const allocation = order.allocations.find((row) => row.id === item.allocationId);
-      if (!allocation || allocation.status !== "picked_up") throw new ConflictException("所选分配项已归还或不可归还");
+      const exchangeHolding = allocation?.status === "locked" && Boolean(allocation.metadata?.exchangeId);
+      if (!allocation || (allocation.status !== "picked_up" && !exchangeHolding)) throw new ConflictException("所选分配项已归还或不可归还");
       if (item.quantity > allocation.quantity) throw new BadRequestException("归还数量不能超过未归还数量");
       const actualItemGroupId = allocation.itemGroupId ?? (allocation.assetId ? assetById.get(allocation.assetId)?.itemGroupId : undefined);
       if (!actualItemGroupId) throw new ConflictException("历史套装分配缺少组成商品标识，请使用整单归还");
@@ -2667,6 +2674,285 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     return { order, change };
   }
 
+  /**
+   * ORDER-CHANGE-01E：取货后换货。
+   *
+   * 预览只提供金额与候选事实；这里在订单锁内重新验证状态、完整订单行、库存、
+   * 旧物处置与客户确认，再把旧资源释放、新资源锁定、服务释放、差额和追加变更
+   * 记录写进同一事务。正差额只追加订单变更费用，资金仍留到归还结算；负差额挂
+   * 退款审核，绝不直接伪造退款成功。
+   */
+  async applyPostPickupExchange(
+    tenantId: string,
+    orderId: string,
+    priced: RentalOrderChangePreview,
+    input: {
+      type: "post_pickup_exchange";
+      orderLineId?: string;
+      allocationId?: string;
+      replacementItemGroupId?: string;
+      replacementAssetId?: string;
+      replacementPricingGroupId?: string;
+      priceBasis?: RentalOrderExchangePriceBasis;
+      originalDisposition?: RentalOrderExchangeDisposition;
+      exchangeLocationId?: string;
+      inspectionSnapshot?: RentalOrderExchangeInspectionSnapshot;
+      cancelServiceOccurrenceIds?: string[];
+      reason: string;
+      customerConfirmed: boolean;
+      expectedUpdatedAt: string;
+    },
+    idempotencyKey: string,
+    operator: string,
+    tx: RentalFactTx
+  ): Promise<{ order: RentalOrder; change: RentalOrderChange }> {
+    if (!input.customerConfirmed) throw new ConflictException("必须先取得客户确认才能应用换货");
+    if (!input.reason?.trim()) throw new BadRequestException("换货原因不能为空");
+    if (!input.inspectionSnapshot?.customerConfirmed) throw new ConflictException("换货检查必须取得客户确认");
+    const state = await this.factContext(tenantId);
+    const order = await this.lockedOrder(tenantId, orderId, tx);
+    if (order.status !== RentalCoreOrderStatus.Renting) throw new ConflictException("只有租赁中的订单可以办理取货后换货");
+    if (order.updatedAt !== input.expectedUpdatedAt) throw new ConflictException("订单已发生变化，请重新试算换货费用");
+    if (!priced.exchange || priced.exchange.orderLineId !== input.orderLineId || priced.exchange.allocationId !== input.allocationId) {
+      throw new ConflictException("换货试算基准已失效，请重新试算");
+    }
+    const exchange = priced.exchange;
+    const line = order.lines.find((row) => row.id === input.orderLineId);
+    const allocation = order.allocations.find((row) => row.id === input.allocationId);
+    if (!line || !allocation || allocation.orderLineId !== line.id || allocation.status !== "picked_up") {
+      throw new ConflictException("所选商品已归还、已换过或不属于当前订单");
+    }
+    const activeQuantity = line.quantity - (line.cancelledQuantity ?? 0);
+    if (allocation.quantity !== activeQuantity) throw new ConflictException("本轮只能整行换货，不能拆换部分数量");
+    if (exchange.replacementItemGroupId !== input.replacementItemGroupId || exchange.replacementPricingGroupId !== (input.replacementPricingGroupId ?? exchange.replacementPricingGroupId)) throw new ConflictException("换货目标已变化，请重新试算");
+    const replacement = this.group(state, input.replacementItemGroupId!);
+    if (replacement.inventoryMode !== line.inventoryMode) throw new ConflictException("换货前后库存方式必须一致");
+    if (replacement.inventoryMode === RentalInventoryMode.Bundle || replacement.inventoryMode === RentalInventoryMode.Consumable) throw new ConflictException("套装和一次性耗材暂不支持取货后换货");
+    const locationId = input.exchangeLocationId ?? order.fulfillmentLocationId;
+    if (locationId !== order.fulfillmentLocationId) throw new ConflictException("首期换货必须在订单领取地点办理");
+    if (input.originalDisposition !== exchange.originalDisposition || input.priceBasis !== exchange.priceBasis) throw new ConflictException("换货价格或旧物处置选择已变化，请重新试算");
+
+    await this.factStore.lockInventoryTargets(tenantId, locationId, [{ itemGroupId: replacement.id, inventoryMode: replacement.inventoryMode }], tx);
+    const inventory = await this.loadInventorySnapshot(tenantId, tx);
+    const periodStart = order.startAt;
+    const periodEnd = order.effectiveEndAt ?? order.endAt;
+    const activeReservations = inventory.reservations.filter((row) => row.orderId !== order.id);
+    if (replacement.inventoryMode === RentalInventoryMode.Serialized) {
+      if (!input.replacementAssetId) throw new BadRequestException("序列化资产换货必须选择具体资产");
+      const asset = inventory.assets.find((row) => row.id === input.replacementAssetId);
+      if (!asset || asset.itemGroupId !== replacement.id || asset.locationId !== locationId) throw new ConflictException("换货目标资产不存在或不在领取地点");
+      if ([RentalAssetStatus.Maintenance, RentalAssetStatus.Disabled].includes(asset.status)) throw new ConflictException("换货目标资产当前不可用");
+      if (activeReservations.some((row) => (row.assetIds ?? []).includes(asset.id) && Date.parse(row.startAt) < Date.parse(periodEnd) && Date.parse(row.endAt) > Date.parse(periodStart))) {
+        throw new ConflictException("换货目标资产与其他订单的租期或缓冲时间冲突");
+      }
+      if (order.allocations.some((row) => row.assetId === asset.id && ACTIVE_ASSIGNMENTS.includes(row.status))) throw new ConflictException("换货目标资产已被当前订单占用");
+    } else {
+      const available = this.availableQuantity(state, inventory, replacement, locationId, periodStart, periodEnd, new Set());
+      if (available < allocation.quantity) throw new ConflictException(`${replacement.name} 当前可用库存不足`);
+    }
+
+    const oldReservations = order.reservations.filter((row) => row.orderLineId === line.id && !["released", "expired", "cancelled"].includes(row.status));
+    const reservedForLine = oldReservations.reduce((sum, row) => sum + row.quantity - row.releasedQuantity, 0);
+    if (reservedForLine < allocation.quantity) throw new ConflictException("原商品预占数量不足，不能安全换货");
+    for (const reservation of oldReservations) {
+      reservation.releasedQuantity = reservation.quantity;
+      reservation.status = RentalReservationStatus.Released;
+    }
+
+    const at = now();
+    const exchangeId = randomUUID();
+    const beforeSnapshot: Record<string, unknown> = {
+      updatedAt: order.updatedAt,
+      status: order.status,
+      finalPayableAmount: order.finalPayableAmount,
+      adjustmentAmount: order.adjustmentAmount,
+      depositAmount: order.depositAmount,
+      preAuthAmount: order.preAuthAmount,
+      line: structuredClone(line),
+      allocation: structuredClone(allocation),
+      reservations: structuredClone(oldReservations),
+      serviceSnapshots: structuredClone(order.serviceSnapshots ?? [])
+    };
+
+    const cancellationIds = [...new Set(input.cancelServiceOccurrenceIds ?? [])];
+    const cancelledServices: Array<{ occurrenceId: string; serviceName: string; quantity: number; refundAmount: number }> = [];
+    if (cancellationIds.length) {
+      const occurrences = [...(order.serviceSnapshots ?? [])];
+      for (const occurrenceId of cancellationIds) {
+        const index = occurrences.findIndex((row) => row.occurrenceId === occurrenceId);
+        if (index < 0) throw new ConflictException("要取消的服务发生项不属于当前订单");
+        const row = occurrences[index];
+        if ((row.executionStatus ?? "not_started") !== "not_started") throw new ConflictException(`服务「${row.serviceName}」已经开始，不能随换货取消`);
+        if (row.requiredByRule) throw new ConflictException(`服务「${row.serviceName}」属于业务规则要求，必须重新选择适用服务`);
+        const amounts = serviceCancellationAmounts(row, row.quantity);
+        if (row.requiresCapacity && row.reservationKey) {
+          if (!this.serviceCapacities) throw new ConflictException("服务容量组件未就绪，拒绝只写换货状态");
+          await this.serviceCapacities.releaseForOccurrence(tenantId, order.id, row.reservationKey, "post_pickup_exchange_service_cancel", at, tx);
+        }
+        occurrences[index] = { ...row, executionStatus: "cancelled", actualEndAt: at, failureReason: input.reason.trim(), executedBy: operator, refundAmount: amounts.refundAmount, refundStatus: amounts.refundAmount > 0 ? "included_in_order_change" : "none" };
+        cancelledServices.push({ occurrenceId, serviceName: row.serviceName, quantity: row.quantity, refundAmount: amounts.refundAmount });
+      }
+      order.serviceSnapshots = occurrences;
+    }
+
+    const oldGroup = this.group(state, line.itemGroupId);
+    const oldLocationId = input.exchangeLocationId ?? order.fulfillmentLocationId;
+    const oldAsset = allocation.assetId ? inventory.assets.find((asset) => asset.id === allocation.assetId) : undefined;
+    const assetChanges: AssetStatusChange[] = [];
+    const stockQuarantines: StockQuarantineChange[] = [];
+    if (oldAsset) {
+      assetChanges.push({
+        assetId: oldAsset.id,
+        status: input.originalDisposition === "off_shelf" ? RentalAssetStatus.Disabled : RentalAssetStatus.Available,
+        reason: input.originalDisposition === "off_shelf" ? "取货后换货旧资产下架" : "取货后换货旧资产返回仓库并释放",
+        operator
+      });
+    } else if (input.originalDisposition === "off_shelf") {
+      stockQuarantines.push({ itemGroupId: oldGroup.id, locationId: oldLocationId, quantity: allocation.quantity });
+    }
+    allocation.status = "returned";
+    allocation.metadata = {
+      source: allocation.metadata?.source ?? "manual",
+      protected: allocation.metadata?.protected ?? true,
+      assignedAt: allocation.metadata?.assignedAt ?? at,
+      ...allocation.metadata,
+      exchangeId,
+      exchangeDisposition: input.originalDisposition
+    };
+    const newReservation: RentalReservation = {
+      id: `reservation_${randomUUID().replace(/-/g, "")}`,
+      orderId: order.id,
+      orderLineId: line.id,
+      itemGroupId: replacement.id,
+      locationId,
+      quantity: allocation.quantity,
+      releasedQuantity: 0,
+      status: RentalReservationStatus.Fulfilled,
+      createdAt: at
+    };
+    order.reservations.push(newReservation);
+    const replacementAsset = input.replacementAssetId ? inventory.assets.find((asset) => asset.id === input.replacementAssetId) : undefined;
+    order.allocations.push({
+      id: `allocation_${randomUUID().replace(/-/g, "")}`,
+      orderId: order.id,
+      orderLineId: line.id,
+      itemGroupId: replacement.id,
+      assetId: replacementAsset?.id,
+      assetNo: replacementAsset?.assetNo,
+      quantity: allocation.quantity,
+      status: "locked",
+      metadata: { source: "manual", protected: true, assignedAt: at, lockedAt: at, itemGroupName: replacement.name, locationId, exchangeId, exchangeDisposition: input.originalDisposition }
+    });
+    if (replacementAsset) assetChanges.push({ assetId: replacementAsset.id, status: RentalAssetStatus.Rented, reason: "取货后换货立即锁定新资产", operator });
+    line.itemGroupId = replacement.id;
+    line.itemGroupCode = replacement.code;
+    line.itemGroupName = replacement.name;
+    line.inventoryMode = replacement.inventoryMode;
+    const effectiveReplacementPricingGroupId = input.replacementPricingGroupId ?? exchange.replacementPricingGroupId;
+    const effectiveReplacementPricingGroup = effectiveReplacementPricingGroupId
+      ? state.pricingGroups.find((group) => group.id === effectiveReplacementPricingGroupId)
+      : undefined;
+    line.pricingGroupId = effectiveReplacementPricingGroupId;
+    line.pricingGroupCode = effectiveReplacementPricingGroup?.code;
+    line.pricingGroupName = effectiveReplacementPricingGroup?.name;
+    line.pricingGroupMemberItemGroupIds = effectiveReplacementPricingGroup?.memberItemGroupIds;
+    const replacementAmount = roundMoney(exchange.replacementAmount);
+    if (!Number.isFinite(replacementAmount) || replacementAmount < 0) throw new ConflictException("换货试算缺少有效的新商品金额");
+    line.amount = replacementAmount;
+    line.unitPrice = roundMoney(replacementAmount / Math.max(1, line.quantity));
+
+    const differenceAmount = roundMoney(priced.differenceAmount);
+    const changeId = exchangeId;
+    if (differenceAmount > 0) {
+      this.applyChargeTo(order, {
+        code: `exchange:${changeId}`,
+        name: "换货差额（归还结算）",
+        type: "order_change",
+        amount: differenceAmount,
+        sourceVersion: exchange.replacementPriceVersion ?? exchange.originalPriceVersion ?? order.pricingPlanVersion,
+        detail: `${exchange.priceBasis === "original_order_price" ? "按原订单价格" : "按换货时新商品价格"}；归还时统一结算；${input.reason.trim()}`
+      });
+    } else if (differenceAmount < 0) {
+      this.raiseFeeReview(order, "early_return_refund", -differenceAmount, [
+        `取货后换货退款差额 ${-differenceAmount}`,
+        exchange.priceBasis === "original_order_price" ? "按原订单价格重算" : `按换货时价格版本 ${exchange.replacementPriceVersion ?? "unknown"} 重算`,
+        "归还结算前需人工审核退款"
+      ], changeId);
+    }
+    order.depositAmount = Math.max(0, roundMoney(order.depositAmount + priced.depositDelta));
+    order.preAuthAmount = Math.max(0, roundMoney(order.preAuthAmount + priced.preAuthDelta));
+    order.updatedAt = at;
+    const afterSnapshot: Record<string, unknown> = {
+      updatedAt: order.updatedAt,
+      status: order.status,
+      finalPayableAmount: order.finalPayableAmount,
+      adjustmentAmount: order.adjustmentAmount,
+      depositAmount: order.depositAmount,
+      preAuthAmount: order.preAuthAmount,
+      line: structuredClone(line),
+      allocations: structuredClone(order.allocations.filter((row) => row.orderLineId === line.id)),
+      reservations: structuredClone(order.reservations.filter((row) => row.orderLineId === line.id)),
+      serviceSnapshots: structuredClone(order.serviceSnapshots ?? [])
+    };
+    const change: RentalOrderChange = {
+      id: changeId,
+      tenantId,
+      workspaceId: this.resolveWorkspaceId(tenantId),
+      orderId: order.id,
+      sequence: (await this.factStore.listOrderChanges(tenantId, order.id, tx)).length + 1,
+      type: "post_pickup_exchange",
+      status: "applied",
+      request: input,
+      beforeSnapshot,
+      afterSnapshot,
+      diff: {
+        exchange: structuredClone(exchange),
+        differenceAmount,
+        additionalAmount: Math.max(0, differenceAmount),
+        refundAmount: Math.max(0, -differenceAmount),
+        depositDelta: priced.depositDelta,
+        preAuthDelta: priced.preAuthDelta,
+        cancelledServices
+      },
+      refundAmount: roundMoney(Math.max(0, -differenceAmount)),
+      additionalAmount: roundMoney(Math.max(0, differenceAmount)),
+      depositDelta: roundMoney(priced.depositDelta),
+      preAuthDelta: roundMoney(priced.preAuthDelta),
+      idempotencyKey,
+      requestedBy: operator,
+      appliedBy: operator,
+      requestedAt: at,
+      appliedAt: at,
+      createdAt: at
+    };
+    const receivedAt = at;
+    const bufferUntil = new Date(Date.parse(receivedAt) + Math.max(0, order.ruleSnapshot.fulfillment.returnBufferMinutes ?? 0) * 60_000).toISOString();
+    await this.factStore.upsertStockDisposition({
+      id: `disposition_${randomUUID().replace(/-/g, "")}`,
+      tenantId,
+      workspaceId: this.resolveWorkspaceId(tenantId),
+      orderId: order.id,
+      returnBatchKey: `exchange:${changeId}`,
+      dedupeKey: `exchange:${changeId}:old`,
+      itemGroupId: oldGroup.id,
+      locationId: oldLocationId,
+      assetId: oldAsset?.id,
+      quantity: allocation.quantity,
+      receivedAt,
+      bufferUntil,
+      status: input.originalDisposition === "off_shelf" ? "blocked" : "restored",
+      blockReason: input.originalDisposition === "off_shelf" ? "换货旧商品下架，不释放为可租库存" : undefined,
+      restoredQuantity: input.originalDisposition === "off_shelf" ? 0 : allocation.quantity,
+      restoredAt: input.originalDisposition === "off_shelf" ? undefined : receivedAt,
+      restoredBy: input.originalDisposition === "off_shelf" ? undefined : operator,
+      createdAt: at,
+      updatedAt: at
+    }, tx);
+    await this.factStore.saveOrderAggregate(order, assetChanges, tx, stockQuarantines);
+    await this.factStore.insertOrderChange(change, tx);
+    return { order, change };
+  }
+
   /** ORDER-CHANGE-01C/01D：在同一订单事务中取消服务发生项并释放它自己的容量预留。 */
   private async applyServiceCancellation(
     tenantId: string,
@@ -3249,7 +3535,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     order.status = RentalCoreOrderStatus.Settling;
     order.reservations.forEach((row) => { row.status = RentalReservationStatus.Released; row.releasedQuantity = row.quantity; });
     order.allocations.forEach((row) => {
-      if (row.status !== "picked_up") return;
+      if (row.status !== "picked_up" && !(row.status === "locked" && Boolean(row.metadata?.exchangeId))) return;
       row.status = "returned";
       if (row.assetId) assetChanges.push({ assetId: row.assetId, status: RentalAssetStatus.Available });
     });

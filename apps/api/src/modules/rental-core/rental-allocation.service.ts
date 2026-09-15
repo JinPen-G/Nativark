@@ -110,6 +110,37 @@ export class RentalAllocationService
     });
   }
 
+  /**
+   * ORDER-CHANGE-01E：取货后换货只读候选资产。
+   *
+   * 不复用 `manage`：那条路径故意只允许待领取订单，放宽它会让已租赁订单被
+   * 普通配货接口改写。这里单独复用同一套缓冲冲突判定，并排除当前订单自己的
+   * 占用，确认时仍由核心事务重新加锁复查。
+   */
+  async exchangeAssetCandidates(
+    tenantId: string,
+    order: RentalOrder,
+    itemGroupId: string,
+    locationId: string,
+    tx: RentalFactTx
+  ) {
+    if (locationId !== order.fulfillmentLocationId) return [];
+    const group = this.core.listItemGroups(tenantId).find((row) => row.id === itemGroupId);
+    if (!group || group.inventoryMode !== RentalInventoryMode.Serialized) return [];
+    const [assets, occupancy] = await Promise.all([
+      this.facts.listAssets(tenantId, tx),
+      this.occupancies(tenantId, tx)
+    ]);
+    return assets
+      .filter((asset) => asset.itemGroupId === itemGroupId && asset.locationId === locationId)
+      .map((asset) => {
+        const selectedByCurrent = order.allocations.some((row) => row.assetId === asset.id && ACTIVE_ASSIGNMENTS.includes(row.status));
+        const reason = selectedByCurrent ? "资产已被当前订单占用" : allocationConflict(order, asset, occupancy);
+        return { assetId: asset.id, assetNo: asset.assetNo, itemGroupId: asset.itemGroupId, available: !reason, reason };
+      })
+      .sort((left, right) => left.assetNo.localeCompare(right.assetNo));
+  }
+
   private async buildCandidates(
     tenantId: string,
     order: RentalOrder,

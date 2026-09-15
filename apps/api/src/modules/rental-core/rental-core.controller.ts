@@ -1,7 +1,14 @@
 import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, Optional, Param, Post, Put, Query, Req, Res, UploadedFile, UseInterceptors } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import { Prisma } from "@prisma/client";
-import { RentalCoreOrderStatus, type RentalOrderExtension } from "@rental-os/shared";
+import {
+  RentalCoreOrderStatus,
+  type RentalOrderChangePreview,
+  type RentalOrderExchangeInspectionSnapshot,
+  type RentalOrderExchangeDisposition,
+  type RentalOrderExchangePriceBasis,
+  type RentalOrderExtension
+} from "@rental-os/shared";
 import { createHash } from "node:crypto";
 import type {
   CreateRentalInspectionRequest,
@@ -391,6 +398,134 @@ export class RentalCoreController {
     const parsedLimit = limit === undefined ? undefined : Number.parseInt(limit, 10);
     if (limit !== undefined && (parsedLimit === undefined || !Number.isInteger(parsedLimit) || parsedLimit < 1)) throw new BadRequestException("流水条数必须是正整数");
     return this.service.listStockLedger(req.user.tenantId, { itemGroupId, locationId, batchNo, sourceDocumentNo, limit: parsedLimit });
+  }
+
+  /**
+   * ORDER-CHANGE-01E：取货后换货试算。
+   *
+   * 试算和应用都在订单锁内重读商品、价格版本、缓冲冲突和服务快照；返回给前端的
+   * 只有可解释的差额与候选事实，金额和资产不能由客户端回传决定。
+   */
+  private async pricePostPickupExchange(
+    tenantId: string,
+    orderId: string,
+    body: PreviewRentalOrderChangeDto,
+    tx?: Prisma.TransactionClient
+  ): Promise<{ order: RentalOrder; preview: RentalOrderChangePreview }> {
+    if (!tx) return this.prisma.$transaction((transaction) => this.pricePostPickupExchange(tenantId, orderId, body, transaction));
+    const order = await this.service.lockOrderForUpdate(tenantId, orderId, tx);
+    if (order.status !== RentalCoreOrderStatus.Renting) throw new ConflictException("只有租赁中的订单可以办理取货后换货");
+    const orderLineId = body.orderLineId?.trim();
+    const allocationId = body.allocationId?.trim();
+    const replacementItemGroupId = body.replacementItemGroupId?.trim();
+    if (!orderLineId || !allocationId || !replacementItemGroupId) throw new BadRequestException("换货必须选择订单行、已领取分配项和新商品");
+    const line = order.lines.find((row) => row.id === orderLineId);
+    const allocation = order.allocations.find((row) => row.id === allocationId);
+    if (!line || !allocation || allocation.orderLineId !== line.id || allocation.status !== "picked_up") {
+      throw new ConflictException("所选商品已归还、已换过或不属于当前订单");
+    }
+    const activeQuantity = line.quantity - (line.cancelledQuantity ?? 0);
+    if (allocation.quantity !== activeQuantity) throw new ConflictException("本轮只能整行换货，不能拆换部分数量");
+    if (["consumable", "bundle"].includes(line.inventoryMode)) throw new ConflictException("一次性耗材和套装暂不支持取货后换货");
+
+    const context = this.context(tenantId);
+    const replacementGroup = context.groups.find((row) => row.id === replacementItemGroupId);
+    if (!replacementGroup || replacementGroup.status !== "enabled") throw new ConflictException("换货目标商品不存在或已停用");
+    if (replacementGroup.inventoryMode !== line.inventoryMode) throw new ConflictException("换货前后库存方式必须一致");
+    const priceBasis: RentalOrderExchangePriceBasis = body.priceBasis ?? "original_order_price";
+    const originalDisposition: RentalOrderExchangeDisposition = body.originalDisposition ?? "return_to_warehouse";
+    const exchangeLocationId = body.exchangeLocationId?.trim() || order.fulfillmentLocationId;
+    if (exchangeLocationId !== order.fulfillmentLocationId) throw new ConflictException("首期换货必须在订单领取地点办理");
+    const replacementAssetId = body.replacementAssetId?.trim();
+    if (replacementGroup.inventoryMode === "serialized" && !replacementAssetId) throw new BadRequestException("序列化商品换货必须选择具体资产");
+    if (replacementGroup.inventoryMode !== "serialized" && replacementAssetId) throw new BadRequestException("数量库存换货不能提交序列化资产");
+    const candidates = replacementGroup.inventoryMode === "serialized"
+      ? await this.allocation.exchangeAssetCandidates(tenantId, order, replacementGroup.id, exchangeLocationId, tx)
+      : [];
+    const selectedCandidate = replacementAssetId ? candidates.find((row) => row.assetId === replacementAssetId) : undefined;
+    if (replacementAssetId && (!selectedCandidate || !selectedCandidate.available)) {
+      throw new ConflictException(selectedCandidate?.reason ?? "换货目标资产当前不可用或与租期缓冲冲突");
+    }
+
+    const cancelledServiceOccurrenceIds = [...new Set((body.cancelServiceOccurrenceIds ?? []).map((value) => value.trim()).filter(Boolean))];
+    const previousExtensions = await this.service.listOrderExtensions(tenantId, orderId, tx);
+    const quoted = await this.business.quotePostPickupExchange(tenantId, context, {
+      order,
+      previousExtensions,
+      orderLineId,
+      replacementItemGroupId,
+      replacementPricingGroupId: body.replacementPricingGroupId?.trim() || undefined,
+      priceBasis,
+      exchangeCancelledServiceOccurrenceIds: cancelledServiceOccurrenceIds,
+      appliedAt: new Date().toISOString(),
+      fulfillmentMode: order.fulfillmentMode,
+      locationIds: [order.fulfillmentLocationId, order.returnLocationId].filter((value): value is string => Boolean(value)),
+      customerType: order.customerType
+    });
+    const beforePayableAmount = order.finalPayableAmount;
+    const recalculatedPayableAmount = quoted.priced.pricingSnapshot?.recalculatedPayableAmount ?? beforePayableAmount;
+    const differenceAmount = roundMoney(recalculatedPayableAmount - beforePayableAmount);
+    const inspectionSnapshot: RentalOrderExchangeInspectionSnapshot = body.inspectionSnapshot ?? { customerConfirmed: false };
+    const cancelledServices = cancelledServiceOccurrenceIds.map((occurrenceId) => {
+      const occurrence = (order.serviceSnapshots ?? []).find((row) => row.occurrenceId === occurrenceId);
+      if (!occurrence) throw new ConflictException("要取消的服务发生项不属于当前订单");
+      return {
+        occurrenceId,
+        serviceName: occurrence.serviceName,
+        quantity: occurrence.quantity,
+        refundAmount: serviceCancellationAmounts(occurrence, occurrence.quantity).refundAmount
+      };
+    });
+    const pricingSnapshot = quoted.priced.pricingSnapshot
+      ? { ...quoted.priced.pricingSnapshot, previousPayableAmount: beforePayableAmount, recalculatedPayableAmount, differenceAmount }
+      : undefined;
+    const currentVersion = quoted.currentVersion && "version" in quoted.currentVersion ? String(quoted.currentVersion.version) : undefined;
+    const preview: RentalOrderChangePreview = {
+      orderId: order.id,
+      type: "post_pickup_exchange",
+      expectedUpdatedAt: order.updatedAt,
+      cancelledLineIds: [],
+      cancelledItems: [],
+      cancelledServices,
+      remainingLineIds: [line.id],
+      beforePayableAmount,
+      recalculatedPayableAmount,
+      differenceAmount,
+      additionalAmount: Math.max(0, differenceAmount),
+      refundAmount: Math.max(0, -differenceAmount),
+      depositDelta: quoted.priced.depositDelta,
+      preAuthDelta: quoted.priced.preAuthDelta,
+      currency: quoted.priced.currency,
+      pricingSnapshot,
+      resourceRelease: [{ lineId: line.id, itemGroupName: line.itemGroupName, quantity: allocation.quantity }],
+      serviceResourceRelease: cancelledServices.map((row) => ({ occurrenceId: row.occurrenceId, serviceName: row.serviceName, quantity: row.quantity })),
+      exchange: {
+        orderLineId,
+        allocationId,
+        originalItemGroupId: line.itemGroupId,
+        originalItemGroupName: line.itemGroupName,
+        replacementItemGroupId: replacementGroup.id,
+        replacementItemGroupName: replacementGroup.name,
+        replacementPricingGroupId: quoted.replacementPricingGroupId,
+        priceBasis,
+        originalDisposition,
+        originalAmount: quoted.originalAmount,
+        replacementAmount: quoted.replacementAmount,
+        differenceAmount,
+        originalPriceVersion: quoted.priced.priceVersion,
+        replacementPriceVersion: currentVersion ?? quoted.priced.priceVersion,
+        replacementAssetId,
+        replacementAssetNo: selectedCandidate?.assetNo,
+        cancelledServiceOccurrenceIds,
+        inspectionSnapshot
+      },
+      warnings: [
+        "换货差额不在确认时立即收款，统一在归还结算时处理",
+        ...(differenceAmount < 0 ? ["本次形成负差额，归还结算前需完成退款审核"] : []),
+        ...(originalDisposition === "off_shelf" ? ["原商品下架，不释放数量库存或序列化资产"] : ["原商品返回仓库并释放原占用"])
+      ]
+    };
+    return { order, preview };
   }
 
   private async priceLineCancellation(tenantId: string, orderId: string, body: PreviewRentalOrderChangeDto, tx?: Prisma.TransactionClient) {
@@ -1299,6 +1434,74 @@ export class RentalCoreController {
     return this.service.listOrderChanges(req.user.tenantId, id);
   }
 
+  @Post("orders/:id/changes/post-pickup-exchange/preview")
+  async previewPostPickupExchange(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: PreviewRentalOrderChangeDto) {
+    if (body.type !== "post_pickup_exchange") throw new BadRequestException("换货试算请求类型必须是 post_pickup_exchange");
+    const result = await this.pricePostPickupExchange(req.user.tenantId, id, body);
+    return result.preview;
+  }
+
+  @Post("orders/:id/changes/post-pickup-exchange")
+  async applyPostPickupExchange(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: ApplyRentalOrderChangeDto) {
+    if (body.type !== "post_pickup_exchange") throw new BadRequestException("换货应用请求类型必须是 post_pickup_exchange");
+    const tenantId = req.user.tenantId;
+    const normalized = {
+      ...body,
+      orderLineId: body.orderLineId?.trim(),
+      allocationId: body.allocationId?.trim(),
+      replacementItemGroupId: body.replacementItemGroupId?.trim(),
+      replacementAssetId: body.replacementAssetId?.trim(),
+      replacementPricingGroupId: body.replacementPricingGroupId?.trim(),
+      priceBasis: body.priceBasis ?? "original_order_price",
+      originalDisposition: body.originalDisposition ?? "return_to_warehouse",
+      exchangeLocationId: body.exchangeLocationId?.trim() || undefined,
+      cancelServiceOccurrenceIds: [...new Set((body.cancelServiceOccurrenceIds ?? []).map((value) => value.trim()).filter(Boolean))]
+    };
+    const exchangeInput = { ...normalized, type: "post_pickup_exchange" as const };
+    const requestFingerprint = JSON.stringify(exchangeInput);
+    const explicitKey = idempotencyKeyOf(req);
+    const fallbackKey = `order.change.post-pickup-exchange:${id}:${createHash("sha256").update(requestFingerprint).digest("hex")}`;
+    const result = await this.idempotent.execute({
+      tenantId,
+      action: "order.change.post-pickup-exchange",
+      key: explicitKey,
+      fallbackKey,
+      request: { orderId: id, ...exchangeInput },
+      orderId: id,
+      run: async (tx) => {
+        const priced = await this.pricePostPickupExchange(tenantId, id, exchangeInput, tx);
+        if (body.expectedUpdatedAt !== priced.order.updatedAt) throw new ConflictException("订单已发生变化，请重新试算后再提交");
+        const applied = await this.service.applyPostPickupExchange(
+          tenantId,
+          id,
+          priced.preview,
+          exchangeInput,
+          explicitKey ?? fallbackKey,
+          req.user.displayName,
+          tx
+        );
+        if (applied.change.additionalAmount > 0 && await this.usesCorporateCredit(tenantId, id, tx)) {
+          await this.corporateSettlement?.reserveOrderChangeCredit(
+            tenantId,
+            id,
+            applied.change.id,
+            applied.change.additionalAmount,
+            tx,
+            req.user.displayName
+          );
+        }
+        return applied;
+      },
+      replay: async () => {
+        const rows = await this.service.listOrderChanges(tenantId, id);
+        const existing = rows.find((row) => row.idempotencyKey === (explicitKey ?? fallbackKey));
+        return existing ? { order: await this.service.getOrder(tenantId, id), change: existing } : undefined;
+      }
+    });
+    await this.business.refreshFromDatabase();
+    return { order: await this.committed(tenantId, result.order), change: result.change };
+  }
+
   /** 取货前部分取消试算：不落库、不释放资源、不改变优惠券预算。数量库存可按数量拆分，序列化资产只能整行。 */
   @Post("orders/:id/changes/partial-cancel/preview")
   async previewPartialLineCancellation(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: PreviewRentalOrderChangeDto) {
@@ -2059,4 +2262,8 @@ export class RentalCoreController {
     });
     return this.committed(tenantId, result);
   }
+}
+
+function roundMoney(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
 }

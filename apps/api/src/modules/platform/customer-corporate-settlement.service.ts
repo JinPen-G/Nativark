@@ -290,6 +290,40 @@ export class CustomerCorporateSettlementService {
     return this.account(tenantId, customerId, tx);
   }
 
+  /** 取货后换货的正差额也必须先占用授信，否则归还结算时会出现账面应收大于已锁额度。 */
+  async reserveOrderChangeCredit(
+    tenantId: string,
+    orderId: string,
+    changeId: string,
+    amount: number,
+    tx: Prisma.TransactionClient,
+    operator?: string
+  ) {
+    if (!Number.isFinite(amount) || amount <= 0) return undefined;
+    const order = await this.order(tenantId, orderId, tx);
+    const customerId = this.corporatePayer(order);
+    if (!customerId) return undefined;
+    const credit = await this.lockCredit(tx, tenantId, customerId);
+    if (credit.status !== "active" || credit.billingCycle === "per_order") {
+      throw new ConflictException("企业授信当前不允许挂账换货差额");
+    }
+    const delta = this.decimal(amount);
+    await this.append(tx, {
+      tenantId,
+      customerId,
+      workspaceId: order.workspaceId,
+      orderId,
+      entryType: "reserve",
+      amount: delta,
+      reservedDelta: delta,
+      receivableDelta: ZERO,
+      idempotencyKey: `order.change.credit.reserve:${changeId}`,
+      reason: "取货后换货差额占用企业授信额度",
+      operator
+    });
+    return this.account(tenantId, customerId, tx);
+  }
+
   async assertReadyForPickup(tenantId: string, orderId: string, tx: Prisma.TransactionClient) {
     const order = await this.order(tenantId, orderId, tx);
     const customerId = this.corporatePayer(order);
@@ -441,6 +475,7 @@ export class CustomerCorporateSettlementService {
     operator?: string
   ) {
     if (!Number.isFinite(input.amount) || input.amount <= 0) throw new BadRequestException("回款金额必须大于 0");
+    if (input.currency && input.currency !== "CNY") throw new BadRequestException("企业授信首期只支持 CNY 回款");
     const result = await this.prisma.$transaction(async (tx) => {
       const credit = await this.lockCredit(tx, tenantId, customerId);
       const existing = await tx.customerCorporateCreditLedger.findUnique({

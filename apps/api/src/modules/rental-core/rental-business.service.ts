@@ -5708,9 +5708,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     tenantId: string,
     context: BusinessContext,
     args: {
-      order: Pick<RentalOrder, "id" | "startAt" | "endAt" | "effectiveEndAt" | "quoteId" | "depositAmount" | "preAuthAmount" | "serviceSnapshots">;
+      order: Pick<RentalOrder, "id" | "startAt" | "endAt" | "effectiveEndAt" | "quoteId" | "depositAmount" | "preAuthAmount" | "serviceSnapshots" | "lines">;
       previousExtensions?: RentalOrderExtension[];
-      lines: Array<Pick<RentalOrderLine, "itemGroupId" | "pricingGroupId" | "quantity"> & Partial<Pick<RentalOrderLine, "inventoryMode" | "amount">>>;
+      lines: Array<Pick<RentalOrderLine, "itemGroupId" | "pricingGroupId" | "quantity"> & Partial<Pick<RentalOrderLine, "id" | "inventoryMode" | "amount">>>;
       newEndAt: string;
       services?: RentalOrderExtensionRequest["services"];
       /** 申请时点：决定命中哪一版价格、日历与规则。 */
@@ -5720,12 +5720,25 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       locationIds: string[];
       customerType: "personal" | "corporate";
       /** ORDER-CHANGE-01A：取消整行时复用原订单价格快照，但不走续租准入。 */
-      mode?: "line_cancellation";
+      mode?: "line_cancellation" | "post_pickup_exchange";
+      /** ORDER-CHANGE-01E：换货只替换一条订单行的价格事实，优惠仍按原规则重算。 */
+      exchangeReplacement?: {
+        lineId: string;
+        targetId: string;
+        rate: RentalPricingRate;
+        dayRate?: RentalPricingRate;
+        planId: string;
+        planVersion: string;
+        calendars?: RentalCalendarYear[];
+      };
+      /** 换货时明确取消的、尚未开始的可选服务。 */
+      exchangeCancelledServiceOccurrenceIds?: string[];
     }
   ): Promise<RentalOrderExtensionPreview & { rateSnapshot: RentalPricingRate[]; ruleSnapshot: RentalRuleConfig }> {
     const state = this.state(tenantId, context);
     const from = args.order.effectiveEndAt ?? args.order.endAt;
-    const lineCancellation = args.mode === "line_cancellation";
+    const postPickupExchange = args.mode === "post_pickup_exchange";
+    const lineCancellation = args.mode === "line_cancellation" || postPickupExchange;
     if (!lineCancellation && new Date(args.newEndAt).getTime() <= new Date(from).getTime()) {
       throw new BadRequestException("新的归还时间必须晚于当前归还时间");
     }
@@ -5738,7 +5751,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     if (!lineCancellation && Date.parse(args.appliedAt) > Date.parse(from)) throw new ConflictException("订单已逾时，请先人工核价处理；不能通过原价全租期重算清除逾时费用");
     const previous = (args.previousExtensions ?? []).filter((row) => row.status === "effective").sort((a, b) => a.sequence - b.sequence);
     if (!lineCancellation && from !== args.order.endAt && !previous.length) throw new ConflictException("缺少已生效续租记录，不能确定已计金额");
-    if (lineCancellation && (args.order.serviceSnapshots?.length || originalQuote.serviceSnapshots?.length || originalQuote.serviceAmount > 0)) {
+    if (lineCancellation && !postPickupExchange && (args.order.serviceSnapshots?.length || originalQuote.serviceSnapshots?.length || originalQuote.serviceAmount > 0)) {
       throw new ConflictException("本轮部分取消暂不支持已包含增值服务的订单，请先人工处理服务释放与退款");
     }
     const savedContext = previous.at(-1)?.pricingSnapshot?.context ?? originalQuote.pricingContext;
@@ -5770,10 +5783,13 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     for (const line of args.lines) {
       const group = groups.get(line.itemGroupId);
       if (!group) throw new ConflictException("订单行的产品型号已不存在，无法续租");
+      const exchangeReplacement = postPickupExchange && args.exchangeReplacement?.lineId === line.id ? args.exchangeReplacement : undefined;
       const pricingGroup = line.pricingGroupId ? pricingGroups.get(line.pricingGroupId) : undefined;
-      const target = line.pricingGroupId ?? line.itemGroupId;
-      const originalLine = originalQuote.request.lines.find((row) => (row.pricingGroupId ?? row.itemGroupId) === target);
-      const rate = originalQuote.rateSnapshot.find((item) => pricingTargetId(item) === target && (!originalLine?.pricingUnit || item.unit === originalLine.pricingUnit));
+      const target = exchangeReplacement?.targetId ?? line.pricingGroupId ?? line.itemGroupId;
+      const originalLine = exchangeReplacement
+        ? originalQuote.request.lines.find((row) => row.itemGroupId === (args.order.lines.find((item) => item.id === line.id)?.itemGroupId ?? row.itemGroupId))
+        : originalQuote.request.lines.find((row) => (row.pricingGroupId ?? row.itemGroupId) === target);
+      const rate = exchangeReplacement?.rate ?? originalQuote.rateSnapshot.find((item) => pricingTargetId(item) === target && (!originalLine?.pricingUnit || item.unit === originalLine.pricingUnit));
       if (!rate) {
         throw new ConflictException(
           `${pricingGroup?.name ?? group.name} 缺少原订单费率快照，不能改用现价续租`
@@ -5819,9 +5835,11 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         legacyDayTypeMultipliers,
         usageQuantity: originalLine?.usageQuantity,
         hourToDay: rule.config.pricing,
-        dayRate: savedContext?.dayRates?.find(row => pricingTargetId(row) === target && row.unit === "day_24h"),
-        planId: originalQuote.priceVersionId ?? originalQuote.id,
-        planVersion: originalQuote.priceVersion ?? originalQuote.pricingPlanVersion,
+        dayRate: exchangeReplacement?.rate.unit === "day_24h"
+          ? exchangeReplacement.rate
+          : exchangeReplacement?.dayRate ?? savedContext?.dayRates?.find(row => pricingTargetId(row) === target && row.unit === "day_24h"),
+        planId: exchangeReplacement?.planId ?? originalQuote.priceVersionId ?? originalQuote.id,
+        planVersion: exchangeReplacement?.planVersion ?? originalQuote.priceVersion ?? originalQuote.pricingPlanVersion,
         frozenCalendarRows: savedContext ? undefined : originalQuote.calendarSnapshot
       };
       // 全租期统一进位、选阶梯、封顶，再与已计金额求差；不再把每次续租单独起算。
@@ -5829,7 +5847,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         ...shared,
         startAt: args.order.startAt,
         endAt: args.newEndAt,
-        calendars: fullCalendars,
+        calendars: exchangeReplacement?.calendars ?? fullCalendars,
         codePrefix: "rental",
         chargeType: "rental"
       });
@@ -5890,7 +5908,16 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const preAuthDeltaRaw = roundMoney(security.preauthorization.amount - args.order.preAuthAmount - previous.reduce((sum, row) => sum + row.preAuthDelta, 0));
     const depositDelta = lineCancellation ? depositDeltaRaw : Math.max(0, depositDeltaRaw);
     const preAuthDelta = lineCancellation ? preAuthDeltaRaw : Math.max(0, preAuthDeltaRaw);
-    const fullServiceAmount = roundMoney(originalQuote.serviceAmount + previous.reduce((sum, row) => sum + row.serviceAmount, 0) + serviceAmount);
+    const cancelledServiceAmount = postPickupExchange
+      ? roundMoney((args.exchangeCancelledServiceOccurrenceIds ?? []).reduce((sum, occurrenceId) => {
+          const row = (args.order.serviceSnapshots ?? []).find((item) => item.occurrenceId === occurrenceId);
+          if (!row) throw new ConflictException("换货要取消的服务发生项不属于当前订单");
+          if ((row.executionStatus ?? "not_started") !== "not_started") throw new ConflictException(`服务「${row.serviceName}」已经开始，不能随换货取消`);
+          if (row.requiredByRule) throw new ConflictException(`服务「${row.serviceName}」属于业务规则要求，必须重新选择适用服务`);
+          return sum + serviceCancellationAmounts(row, row.quantity).refundAmount;
+        }, 0))
+      : 0;
+    const fullServiceAmount = roundMoney(originalQuote.serviceAmount + previous.reduce((sum, row) => sum + row.serviceAmount, 0) + serviceAmount - cancelledServiceAmount);
     // 只复算原订单已采用的优惠，不引入后续新活动，不再次锁券/核销。
     const originalPlans = (originalQuote.discountEvaluations ?? []).filter((row) => row.applied).map((row) => {
       const snapshot = row.planSnapshot ?? state.discountPlans.find((plan) => plan.id === row.planId && plan.version === row.planVersion);
@@ -6048,6 +6075,112 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   }
 
   /**
+   * ORDER-CHANGE-01E：取货后换货的全租期重算。
+   *
+   * 只替换一条完整订单行，避免在第一版里把一条数量行拆成两个不同商品后，
+   * 还要重新分摊优惠、押金与服务容量。原价模式复用订单费率快照；现价模式
+   * 只替换目标行的当前空间价格版本，其余商品、原优惠、券和会员权益仍按原快照重算。
+   */
+  async quotePostPickupExchange(
+    tenantId: string,
+    context: BusinessContext,
+    args: {
+      order: Pick<RentalOrder, "id" | "startAt" | "endAt" | "effectiveEndAt" | "quoteId" | "depositAmount" | "preAuthAmount" | "serviceSnapshots" | "lines">;
+      previousExtensions?: RentalOrderExtension[];
+      orderLineId: string;
+      replacementItemGroupId: string;
+      replacementPricingGroupId?: string;
+      priceBasis: "original_order_price" | "replacement_current_price";
+      exchangeCancelledServiceOccurrenceIds?: string[];
+      appliedAt: string;
+      fulfillmentMode: RentalFulfillmentMode;
+      locationIds: string[];
+      customerType: "personal" | "corporate";
+    }
+  ) {
+    const originalQuote = this.getQuote(tenantId, context, args.order.quoteId);
+    const line = args.order.lines.find((row) => row.id === args.orderLineId);
+    if (!line) throw new ConflictException("换货订单行不存在");
+    if (line.inventoryMode === RentalInventoryMode.Consumable || line.inventoryMode === RentalInventoryMode.Bundle) {
+      throw new ConflictException("一次性耗材和套装本轮不能办理取货后换货，请先人工处理");
+    }
+    const replacementGroup = context.groups.find((group) => group.id === args.replacementItemGroupId);
+    if (!replacementGroup || replacementGroup.status !== "enabled") throw new ConflictException("换货目标商品不存在或已停用");
+    if (replacementGroup.inventoryMode !== line.inventoryMode) throw new ConflictException("换货前后库存方式必须一致");
+    if (args.replacementItemGroupId === line.itemGroupId) throw new BadRequestException("换货目标不能与原商品相同");
+    const replacementPricingGroup = args.replacementPricingGroupId
+      ? context.pricingGroups?.find((group) => group.id === args.replacementPricingGroupId)
+      : undefined;
+    if (args.replacementPricingGroupId && (!replacementPricingGroup || !replacementPricingGroup.memberItemGroupIds.includes(replacementGroup.id))) {
+      throw new BadRequestException("换货目标商品不属于所选定价分组");
+    }
+    const inheritedPricingGroup = line.pricingGroupId
+      ? context.pricingGroups?.find((group) => group.id === line.pricingGroupId && group.memberItemGroupIds.includes(replacementGroup.id))
+      : undefined;
+    if (line.pricingGroupId && !replacementPricingGroup && !inheritedPricingGroup) {
+      throw new BadRequestException("换货目标商品不属于原订单定价分组，请重新选择定价分组");
+    }
+    const originalTarget = line.pricingGroupId ?? line.itemGroupId;
+    const effectiveReplacementPricingGroup = replacementPricingGroup ?? inheritedPricingGroup;
+    const target = effectiveReplacementPricingGroup?.id ?? replacementGroup.id;
+    const originalRequestLine = originalQuote.request.lines.find((row) =>
+      row.itemGroupId === line.itemGroupId && (row.pricingGroupId ?? row.itemGroupId) === originalTarget
+    );
+    const originalRate = originalQuote.rateSnapshot.find((row) =>
+      pricingTargetId(row) === originalTarget && (!originalRequestLine?.pricingUnit || row.unit === originalRequestLine.pricingUnit)
+    );
+    if (!originalRate) throw new ConflictException("原订单缺少商品费率快照，无法安全换货");
+    const currentVersion = args.priceBasis === "replacement_current_price"
+      ? await this.resolveSpaceRates(tenantId, context, args.appliedAt)
+      : undefined;
+    const rate = args.priceBasis === "original_order_price"
+      ? originalRate
+      : currentVersion?.rates.find((row) => pricingTargetId(row) === target && row.unit === originalRate.unit);
+    if (!rate) throw new ConflictException(`${replacementGroup.name} 缺少当前价格版本中的 ${originalRate.unit} 价格`);
+    const lines = args.order.lines.map((row) => row.id === args.orderLineId
+      ? { ...row, itemGroupId: replacementGroup.id, pricingGroupId: effectiveReplacementPricingGroup?.id, id: row.id }
+      : { ...row, id: row.id });
+    const priced = await this.quoteOrderExtension(tenantId, context, {
+      order: args.order,
+      previousExtensions: args.previousExtensions,
+      lines,
+      newEndAt: args.order.effectiveEndAt ?? args.order.endAt,
+      services: undefined,
+      appliedAt: args.appliedAt,
+      settlementMode: "immediate",
+      fulfillmentMode: args.fulfillmentMode,
+      locationIds: args.locationIds,
+      customerType: args.customerType,
+      mode: "post_pickup_exchange",
+      exchangeCancelledServiceOccurrenceIds: args.exchangeCancelledServiceOccurrenceIds,
+      exchangeReplacement: {
+        lineId: args.orderLineId,
+        targetId: target,
+        rate,
+        dayRate: (currentVersion?.rates ?? originalQuote.rateSnapshot).find((row) => pricingTargetId(row) === target && row.unit === "day_24h"),
+        planId: currentVersion && "versionId" in currentVersion ? String(currentVersion.versionId) : (originalQuote.priceVersionId ?? originalQuote.id),
+        planVersion: currentVersion && "version" in currentVersion ? String(currentVersion.version) : (originalQuote.priceVersion ?? originalQuote.pricingPlanVersion),
+        calendars: currentVersion ? this.calendarsForDateRange(tenantId, context, args.order.startAt, args.order.effectiveEndAt ?? args.order.endAt) : undefined
+      }
+    });
+    const originalAmount = originalQuote.rentalLineAmounts?.[originalTarget]
+      ?? originalQuote.chargeLines.filter((row) => row.type === "rental" && row.code === `rental:${originalRate.pricingGroupCode ?? originalRate.itemGroupCode}`).reduce((sum, row) => sum + row.amount, 0);
+    const replacementAmount = priced.pricingSnapshot?.fullChargeLines
+      .filter((row) => row.type === "rental" && row.code === `rental:${effectiveReplacementPricingGroup?.code ?? replacementGroup.code}`)
+      .reduce((sum, row) => sum + row.amount, 0) ?? originalAmount;
+    return {
+      priced,
+      originalAmount: roundMoney(originalAmount),
+      replacementAmount: roundMoney(replacementAmount),
+      originalTarget,
+      target,
+      replacementGroup,
+      replacementPricingGroupId: effectiveReplacementPricingGroup?.id,
+      currentVersion
+    };
+  }
+
+  /**
    * ORDER-CHANGE-01A：取货前整行部分取消的试算。
    *
    * 取消不读取当前价格、不引入新优惠，直接复用原报价的价格/日历/规则/优惠快照，
@@ -6058,8 +6191,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     tenantId: string,
     context: BusinessContext,
     args: {
-      order: Pick<RentalOrder, "id" | "startAt" | "endAt" | "effectiveEndAt" | "quoteId" | "depositAmount" | "preAuthAmount" | "serviceSnapshots">;
-      lines: Array<Pick<RentalOrderLine, "itemGroupId" | "pricingGroupId" | "quantity"> & Partial<Pick<RentalOrderLine, "inventoryMode" | "amount">>>;
+      order: Pick<RentalOrder, "id" | "startAt" | "endAt" | "effectiveEndAt" | "quoteId" | "depositAmount" | "preAuthAmount" | "serviceSnapshots" | "lines">;
+      lines: Array<Pick<RentalOrderLine, "itemGroupId" | "pricingGroupId" | "quantity"> & Partial<Pick<RentalOrderLine, "id" | "inventoryMode" | "amount">>>;
       appliedAt: string;
       fulfillmentMode: RentalFulfillmentMode;
       locationIds: string[];

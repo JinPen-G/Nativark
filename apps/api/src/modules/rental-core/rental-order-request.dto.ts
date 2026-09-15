@@ -29,6 +29,7 @@ import {
   type RentalOrderExtensionRequest,
   type ApplyRentalOrderChangeRequest,
   type PreviewRentalOrderChangeRequest,
+  type RentalOrderExchangeInspectionSnapshot,
   type RentalPricingUnit,
   type RentalQuoteRequest,
   type RentalBookingIdentityInput,
@@ -957,9 +958,18 @@ export class RentalOrderChangeServiceItemInputDto {
   @IsInt() @Min(1) @Max(10000) quantity!: number;
 }
 
+/** ORDER-CHANGE-01E：换货检查快照只允许提交事实，不允许提交金额。 */
+export class RentalOrderExchangeInspectionSnapshotDto implements RentalOrderExchangeInspectionSnapshot {
+  @IsOptional() @IsString() @MaxLength(500) condition?: string;
+  @IsOptional() @IsObject() usage?: Record<string, unknown>;
+  @IsOptional() @IsArray() @IsObject({ each: true }) exceptions?: Array<{ code: string; description: string; chargeAmount?: number }>;
+  @IsOptional() @IsArray() @IsString({ each: true }) attachments?: string[];
+  @IsBoolean() customerConfirmed!: boolean;
+}
+
 export class PreviewRentalOrderChangeDto implements PreviewRentalOrderChangeRequest {
-  @IsIn(["partial_line_cancel", "service_cancel"])
-  type!: "partial_line_cancel" | "service_cancel";
+  @IsIn(["partial_line_cancel", "service_cancel", "post_pickup_exchange"])
+  type!: "partial_line_cancel" | "service_cancel" | "post_pickup_exchange";
 
   @IsOptional() @IsArray() @ArrayNotEmpty() @IsString({ each: true }) @MaxLength(191, { each: true }) lineIds?: string[];
   @IsOptional() @IsArray() @ArrayNotEmpty() @ValidateNested({ each: true }) @Type(() => RentalOrderChangeItemInputDto) items?: RentalOrderChangeItemInputDto[];
@@ -967,11 +977,24 @@ export class PreviewRentalOrderChangeDto implements PreviewRentalOrderChangeRequ
   @IsOptional() @IsArray() @ArrayNotEmpty() @IsString({ each: true }) @MaxLength(191, { each: true }) serviceOccurrenceIds?: string[];
   /** ORDER-CHANGE-01D：数量型服务部分取消；与 serviceOccurrenceIds 二选一。 */
   @IsOptional() @IsArray() @ArrayNotEmpty() @ValidateNested({ each: true }) @Type(() => RentalOrderChangeServiceItemInputDto) serviceItems?: RentalOrderChangeServiceItemInputDto[];
+  @IsOptional() @IsString() @IsNotEmpty() orderLineId?: string;
+  @IsOptional() @IsString() @IsNotEmpty() allocationId?: string;
+  @IsOptional() @IsString() @IsNotEmpty() replacementItemGroupId?: string;
+  @IsOptional() @IsString() @IsNotEmpty() replacementAssetId?: string;
+  @IsOptional() @IsString() @IsNotEmpty() replacementPricingGroupId?: string;
+  @IsOptional() @IsIn(["original_order_price", "replacement_current_price"])
+  priceBasis?: "original_order_price" | "replacement_current_price";
+  @IsOptional() @IsIn(["return_to_warehouse", "off_shelf"])
+  originalDisposition?: "return_to_warehouse" | "off_shelf";
+  @IsOptional() @IsString() @IsNotEmpty() exchangeLocationId?: string;
+  @IsOptional() @ValidateNested() @Type(() => RentalOrderExchangeInspectionSnapshotDto)
+  inspectionSnapshot?: RentalOrderExchangeInspectionSnapshotDto;
+  @IsOptional() @IsArray() @ArrayNotEmpty() @IsString({ each: true }) cancelServiceOccurrenceIds?: string[];
 }
 
 export class ApplyRentalOrderChangeDto implements ApplyRentalOrderChangeRequest {
-  @IsIn(["partial_line_cancel", "service_cancel"])
-  type!: "partial_line_cancel" | "service_cancel";
+  @IsIn(["partial_line_cancel", "service_cancel", "post_pickup_exchange"])
+  type!: "partial_line_cancel" | "service_cancel" | "post_pickup_exchange";
 
   @IsOptional() @IsArray() @ArrayNotEmpty() @IsString({ each: true }) @MaxLength(191, { each: true }) lineIds?: string[];
   @IsOptional() @IsArray() @ArrayNotEmpty() @ValidateNested({ each: true }) @Type(() => RentalOrderChangeItemInputDto) items?: RentalOrderChangeItemInputDto[];
@@ -979,6 +1002,19 @@ export class ApplyRentalOrderChangeDto implements ApplyRentalOrderChangeRequest 
   @IsOptional() @IsArray() @ArrayNotEmpty() @IsString({ each: true }) @MaxLength(191, { each: true }) serviceOccurrenceIds?: string[];
   /** ORDER-CHANGE-01D：取货前按数量取消尚未开始的数量型增值服务。 */
   @IsOptional() @IsArray() @ArrayNotEmpty() @ValidateNested({ each: true }) @Type(() => RentalOrderChangeServiceItemInputDto) serviceItems?: RentalOrderChangeServiceItemInputDto[];
+  @IsOptional() @IsString() @IsNotEmpty() orderLineId?: string;
+  @IsOptional() @IsString() @IsNotEmpty() allocationId?: string;
+  @IsOptional() @IsString() @IsNotEmpty() replacementItemGroupId?: string;
+  @IsOptional() @IsString() @IsNotEmpty() replacementAssetId?: string;
+  @IsOptional() @IsString() @IsNotEmpty() replacementPricingGroupId?: string;
+  @IsOptional() @IsIn(["original_order_price", "replacement_current_price"])
+  priceBasis?: "original_order_price" | "replacement_current_price";
+  @IsOptional() @IsIn(["return_to_warehouse", "off_shelf"])
+  originalDisposition?: "return_to_warehouse" | "off_shelf";
+  @IsOptional() @IsString() @IsNotEmpty() exchangeLocationId?: string;
+  @IsOptional() @ValidateNested() @Type(() => RentalOrderExchangeInspectionSnapshotDto)
+  inspectionSnapshot?: RentalOrderExchangeInspectionSnapshotDto;
+  @IsOptional() @IsArray() @ArrayNotEmpty() @IsString({ each: true }) cancelServiceOccurrenceIds?: string[];
 
   @IsString()
   @IsNotEmpty()
