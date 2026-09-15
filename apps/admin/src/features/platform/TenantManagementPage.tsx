@@ -1,7 +1,7 @@
-import { ApartmentOutlined, EditOutlined, PauseCircleOutlined, PlusOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
+import { ApartmentOutlined, EditOutlined, KeyOutlined, PauseCircleOutlined, PlusOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
 import type { BusinessWorkspace, CreateBusinessWorkspaceRequest, RentalCategoryCode, TenantBootstrapRequest, TenantSummary, UpdateBusinessWorkspaceRequest, UpdateTenantStatusRequest } from "@rental-os/shared";
 import { RENTAL_CURRENCY_CODES, RENTAL_CURRENCY_META, TenantStatus } from "@rental-os/shared";
-import { App, Button, Card, Descriptions, Drawer, Form, Input, Modal, Segmented, Select, Space, Table, Tag, Typography } from "antd";
+import { App, Button, Card, Descriptions, Drawer, Form, Input, Segmented, Select, Space, Table, Tag, Typography } from "antd";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import {
@@ -10,6 +10,7 @@ import {
   getTenantBootstrapPreview,
   listTenantWorkspaces,
   listTenants,
+  resetTenantAdminPassword,
   updateTenant,
   updateTenantWorkspace,
   updateTenantStatus
@@ -29,7 +30,7 @@ const statusMeta = {
 } as const;
 
 export function TenantManagementPage() {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const operator = useAuthStore((state) => state.user?.displayName ?? "SaaS 平台管理员");
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState<string>("all");
@@ -71,7 +72,7 @@ export function TenantManagementPage() {
     onSuccess: async (result) => {
       await refresh();
       closeEditor();
-      Modal.success({
+      modal.success({
         title: "SaaS 租户已初始化",
         width: 560,
         content: (
@@ -95,6 +96,14 @@ export function TenantManagementPage() {
     mutationFn: ({ id, payload }: { id: string; payload: UpdateTenantStatusRequest }) => updateTenantStatus(id, payload),
     onSuccess: async () => { await refresh(); closeEditor(); message.success("租户状态已更新，相关会话已按规则处理"); },
     onError: () => message.error("租户状态更新失败")
+  });
+  const resetTenantAdmin = useMutation({
+    mutationFn: resetTenantAdminPassword,
+    onSuccess: (result) => modal.success({
+      title: "租户管理员密码已重置",
+      content: <><Typography.Paragraph>{result.message}</Typography.Paragraph><Typography.Text code copyable>{result.temporaryPassword}</Typography.Text></>
+    }),
+    onError: () => message.error("租户管理员密码重置失败")
   });
   const createWorkspace = useMutation({
     mutationFn: (values: CreateBusinessWorkspaceRequest) => createTenantWorkspace(workspaceTenant!.tenantId, values),
@@ -125,6 +134,15 @@ export function TenantManagementPage() {
   function openStatus(tenant: TenantSummary) {
     form.setFieldsValue({ status: tenant.tenantStatus, reason: "" });
     setEditor({ type: "status", tenant });
+  }
+
+  function confirmResetAdmin(tenant: TenantSummary) {
+    modal.confirm({
+      title: `重置“${tenant.tenantName}”的租户管理员密码？`,
+      content: "系统会生成一次性临时密码，并使该管理员的既有登录会话失效。",
+      okText: "确认重置",
+      onOk: () => resetTenantAdmin.mutateAsync(tenant.tenantId)
+    });
   }
 
   function openWorkspaceManager(tenant: TenantSummary) {
@@ -200,7 +218,7 @@ export function TenantManagementPage() {
               { title: "订单", width: 90, dataIndex: "orderCount" },
               { title: "状态原因", dataIndex: "statusReason", render: (value) => value || "—" },
               { title: "创建时间", width: 170, dataIndex: "createdAt", render: (value) => value ? new Date(value).toLocaleString() : "—" },
-              { title: "操作", fixed: "right", width: 250, render: (_, row) => <Space size={0}><Button type="link" icon={<ApartmentOutlined />} onClick={() => openWorkspaceManager(row)}>经营空间</Button><Button type="link" icon={<EditOutlined />} onClick={() => openEdit(row)}>资料</Button><Button type="link" icon={<PauseCircleOutlined />} onClick={() => openStatus(row)}>状态</Button></Space> }
+              { title: "操作", fixed: "right", width: 340, render: (_, row) => <Space size={0} wrap><Button type="link" icon={<ApartmentOutlined />} onClick={() => openWorkspaceManager(row)}>经营空间</Button><Button type="link" icon={<KeyOutlined />} loading={resetTenantAdmin.isPending} onClick={() => confirmResetAdmin(row)}>重置管理员密码</Button><Button type="link" icon={<EditOutlined />} onClick={() => openEdit(row)}>资料</Button><Button type="link" icon={<PauseCircleOutlined />} onClick={() => openStatus(row)}>状态</Button></Space> }
             ]}
           />
         </Card>

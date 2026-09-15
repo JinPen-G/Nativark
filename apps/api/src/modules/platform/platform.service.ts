@@ -2274,6 +2274,23 @@ export class PlatformService {
     };
   }
 
+  async resetTenantAdminPassword(tenantId: string, currentUser?: SystemUserRow) {
+    this.assertSaasAdmin(currentUser);
+    if (this.useMysqlDataSource()) {
+      return this.platformRepository.resetTenantAdminPassword(tenantId);
+    }
+
+    const tenant = this.tenants.find((item) => item.tenantId === tenantId && item.tenantCode !== "platform");
+    if (!tenant) {
+      throw new NotFoundException("租户不存在");
+    }
+    const admin = this.users.find((user) => user.tenantId === tenantId && user.isPlatformAdmin);
+    if (!admin) {
+      throw new NotFoundException("租户管理员账号不存在");
+    }
+    return this.resetUserPassword(admin.id, tenantId, currentUser);
+  }
+
   listUsers(tenantId?: string, currentUser?: SystemUserRow) {
     if (this.useMysqlDataSource()) {
       return this.platformRepository.listUsers(tenantId, currentUser);

@@ -456,6 +456,15 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     },
     ["tenantId", "tenantCode", "tenantName", "tenantStatus", "enabledBusinessLines"]
   ),
+  ResetUserPasswordResult: objectOf(
+    {
+      userId: stringSchema,
+      account: stringSchema,
+      temporaryPassword: stringSchema,
+      message: stringSchema
+    },
+    ["userId", "account", "temporaryPassword", "message"]
+  ),
   OrganizationSummary: objectOf(
     {
       id: stringSchema,
@@ -1647,6 +1656,16 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     permissions: ["system:tenant:manage"],
     requestSchema: "UpdateTenantStatusRequest",
     responseSchema: "TenantSummary"
+  },
+  {
+    method: "post",
+    path: "/api/platform/tenants/{id}/admin/reset-password",
+    tag: "Platform",
+    operationId: "resetTenantAdminPassword",
+    summary: "Reset a tenant administrator password",
+    permissions: ["system:tenant:manage"],
+    responseSchema: "ResetUserPasswordResult",
+    parameters: [{ name: "id", in: "path", required: true, schema: stringSchema }]
   },
   {
     method: "get",

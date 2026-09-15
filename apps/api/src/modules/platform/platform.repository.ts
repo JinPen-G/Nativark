@@ -1207,6 +1207,16 @@ export class PlatformRepository {
     };
   }
 
+  async resetTenantAdminPassword(tenantId: string) {
+    const admin = await this.prisma.user.findFirst({
+      where: { tenantId, isPlatformAdmin: true },
+      orderBy: { createdAt: "asc" },
+      select: { id: true }
+    });
+    if (!admin) throw new NotFoundException("租户管理员账号不存在");
+    return this.resetUserPassword(admin.id, tenantId);
+  }
+
   async getSystemRules(tenantId = requireRequestTenantId()) {
     const row = await this.prisma.systemParameterSet.findFirst({
       where: {

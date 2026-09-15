@@ -95,6 +95,11 @@ export class PlatformController {
     return this.platformService.updateTenantStatus(id, body, req.user);
   }
 
+  @Post("tenants/:id/admin/reset-password")
+  resetTenantAdminPassword(@Param("id") id: string, @Req() req: RequestWithUser) {
+    return this.platformService.resetTenantAdminPassword(id, req.user);
+  }
+
   @Get("organizations")
   organizations(@Query("tenantId") tenantId?: string, @Req() req?: RequestWithUser) {
     return this.platformService.listOrganizations(tenantId, req?.user);

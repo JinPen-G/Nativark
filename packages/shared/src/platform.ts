@@ -268,6 +268,13 @@ export interface TenantSummary {
   updatedAt?: string;
 }
 
+export interface ResetUserPasswordResult {
+  userId: string;
+  account: string;
+  temporaryPassword: string;
+  message: string;
+}
+
 export interface UpdateTenantRequest {
   tenantName: string;
 }

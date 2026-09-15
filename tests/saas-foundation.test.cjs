@@ -191,6 +191,13 @@ function requestContext(method, url, accessToken) {
   assert.equal(bootstrapped.adminUser.isPlatformAdmin, true);
   assert.equal(bootstrapped.adminUser.mustChangePassword, true);
   assert.ok(bootstrapped.temporaryPassword);
+  const resetTenantAdmin = await platform.resetTenantAdminPassword(bootstrapped.tenant.tenantId, saas.user);
+  assert.equal(resetTenantAdmin.account, "owner");
+  assert.ok(resetTenantAdmin.temporaryPassword);
+  await assert.rejects(
+    platform.resetTenantAdminPassword(bootstrapped.tenant.tenantId, demo.user),
+    /SaaS/
+  );
   await assert.rejects(
     platform.bootstrapTenant(
       {
@@ -206,10 +213,16 @@ function requestContext(method, url, accessToken) {
     /经营品类不存在/
   );
 
+  const tenantAdminResetRoute = requestContext(
+    "POST",
+    `/api/platform/tenants/${bootstrapped.tenant.tenantId}/admin/reset-password`,
+    saas.accessToken
+  );
+  assert.equal(await guard.canActivate(tenantAdminResetRoute.context), true);
   const temporaryLogin = await auth.login({
     tenantCode: "camera_test",
     account: "owner",
-    password: bootstrapped.temporaryPassword
+    password: resetTenantAdmin.temporaryPassword
   });
   assert.equal(temporaryLogin.user.mustChangePassword, true);
   const blocked = requestContext("GET", "/api/rental/v1/profile", temporaryLogin.accessToken);
@@ -217,7 +230,7 @@ function requestContext(method, url, accessToken) {
 
   const changed = await auth.changePassword(
     `Bearer ${temporaryLogin.accessToken}`,
-    { currentPassword: bootstrapped.temporaryPassword, newPassword: "CameraOwner!2026" }
+    { currentPassword: resetTenantAdmin.temporaryPassword, newPassword: "CameraOwner!2026" }
   );
   assert.equal(changed.user.mustChangePassword, false);
   assert.equal(await auth.resolveAccessToken(`Bearer ${temporaryLogin.accessToken}`), undefined);

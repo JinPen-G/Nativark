@@ -18,6 +18,7 @@ import type {
   PlatformFilterPreset,
   PlatformFilterPresetQuery,
   PlatformNumberRule,
+  ResetUserPasswordResult,
   PrintJobSummary,
   SaveOrganizationRequest,
   SavePlatformDictionaryGroupRequest,
@@ -246,6 +247,11 @@ export async function updateTenant(id: string, payload: UpdateTenantRequest) {
 
 export async function updateTenantStatus(id: string, payload: UpdateTenantStatusRequest) {
   const response = await http.put<ApiResult<TenantSummary>>(`/platform/tenants/${id}/status`, payload);
+  return response.data.data;
+}
+
+export async function resetTenantAdminPassword(tenantId: string) {
+  const response = await http.post<ApiResult<ResetUserPasswordResult>>(`/platform/tenants/${tenantId}/admin/reset-password`);
   return response.data.data;
 }
 
