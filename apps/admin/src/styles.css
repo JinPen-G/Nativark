@@ -54,7 +54,8 @@ button, input, textarea, select { font: inherit; }
   justify-content: space-between;
   gap: 8px;
   height: 48px;
-  padding: 0 12px 0 16px;
+  /* 与下方经营空间容器保持同一条左内边距，Logo 不额外做位移。 */
+  padding: 0 12px;
 }
 .sider-collapse { color: var(--rental-color-text-description) !important; }
 /* 收起态只有 64px：logo 与折叠按钮并排会互相压住，改成上下两行居中。 */
