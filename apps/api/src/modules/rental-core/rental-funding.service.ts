@@ -144,7 +144,13 @@ export class RentalFundingService {
   }
 
   /** 领取前必须已经按订单快照足额收取押金、冻结预授权。 */
-  async assertReadyForPickup(tenantId: string, workspaceId: string, orderId: string, tx: Prisma.TransactionClient): Promise<void> {
+  async assertReadyForPickup(
+    tenantId: string,
+    workspaceId: string,
+    orderId: string,
+    tx: Prisma.TransactionClient,
+    options: { skipRentalPayment?: boolean } = {}
+  ): Promise<void> {
     const order = await this.lockedOrderScope(tx, tenantId, workspaceId, orderId);
     const ledgers = deriveFundingLedgers(await this.loadEvents(tx, tenantId, workspaceId, orderId));
     if (order.depositAmount > 0 && ledgers.deposit.balance < order.depositAmount) {
@@ -153,7 +159,7 @@ export class RentalFundingService {
     if (order.preAuthAmount > 0 && ledgers.preauthorization.balance < order.preAuthAmount) {
       throw new ConflictException(`领取前须足额冻结预授权 ¥${order.preAuthAmount.toFixed(2)}`);
     }
-    await this.assertPaid(tenantId, workspaceId, orderId, tx, order.payable);
+    if (!options.skipRentalPayment) await this.assertPaid(tenantId, workspaceId, orderId, tx, order.payable);
   }
 
   async assertPaid(tenantId: string, workspaceId: string, orderId: string, tx: Prisma.TransactionClient, payable?: number) {
@@ -162,9 +168,17 @@ export class RentalFundingService {
     if (balance.balance > 0.005) throw new ConflictException(`租金及费用尚需收款 ${balance.balance.toFixed(2)}，请先登记收款`);
   }
 
-  async assertReadyForConfirmation(tenantId: string, workspaceId: string, orderId: string, tx: Prisma.TransactionClient) {
+  async assertReadyForConfirmation(
+    tenantId: string,
+    workspaceId: string,
+    orderId: string,
+    tx: Prisma.TransactionClient,
+    options: { skipRentalPayment?: boolean } = {}
+  ) {
     const order = await this.lockedOrderScope(tx, tenantId, workspaceId, orderId);
-    if (["order", "confirmation"].includes(order.ruleSnapshot.payment?.timing ?? "pickup")) await this.assertPaid(tenantId, workspaceId, orderId, tx, order.payable);
+    if (!options.skipRentalPayment && ["order", "confirmation"].includes(order.ruleSnapshot.payment?.timing ?? "pickup")) {
+      await this.assertPaid(tenantId, workspaceId, orderId, tx, order.payable);
+    }
   }
 
   async assertExtensionPaid(tenantId: string, workspaceId: string, orderId: string, extensionId: string, tx: Prisma.TransactionClient) {
@@ -179,15 +193,23 @@ export class RentalFundingService {
   }
 
   /** 关闭前两条模拟资金账都必须已经走完事件链并归零。 */
-  async assertReadyToClose(tenantId: string, workspaceId: string, orderId: string, tx: Prisma.TransactionClient): Promise<void> {
+  async assertReadyToClose(
+    tenantId: string,
+    workspaceId: string,
+    orderId: string,
+    tx: Prisma.TransactionClient,
+    options: { skipRentalPayment?: boolean } = {}
+  ): Promise<void> {
     const order = await this.lockedOrderScope(tx, tenantId, workspaceId, orderId);
     const ledgers = deriveFundingLedgers(await this.loadEvents(tx, tenantId, workspaceId, orderId));
     if (order.depositAmount > 0 && ledgers.deposit.collected < order.depositAmount) throw new ConflictException("订单押金尚未足额收取，不能关闭");
     if (order.preAuthAmount > 0 && ledgers.preauthorization.frozen < order.preAuthAmount) throw new ConflictException("订单预授权尚未足额冻结，不能关闭");
     if (ledgers.deposit.balance > 0) throw new ConflictException("仍有押金余额，请先抵扣或退款");
     if (ledgers.preauthorization.balance > 0) throw new ConflictException("仍有预授权冻结额度，请先转扣或释放");
-    const balance = rentalPaymentBalance(order.payable, await this.loadEvents(tx, tenantId, workspaceId, orderId)).balance;
-    if (Math.abs(balance) > 0.005) throw new ConflictException(balance > 0 ? `尚有费用 ${balance.toFixed(2)} 未收取` : `尚有退款 ${(-balance).toFixed(2)} 未完成`);
+    if (!options.skipRentalPayment) {
+      const balance = rentalPaymentBalance(order.payable, await this.loadEvents(tx, tenantId, workspaceId, orderId)).balance;
+      if (Math.abs(balance) > 0.005) throw new ConflictException(balance > 0 ? `尚有费用 ${balance.toFixed(2)} 未收取` : `尚有退款 ${(-balance).toFixed(2)} 未完成`);
+    }
   }
 
   /**

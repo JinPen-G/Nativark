@@ -12,6 +12,7 @@ import {
   Min
 } from "class-validator";
 import type {
+  RecordCustomerCorporateCreditPaymentRequest,
   SaveCustomerContractRequest,
   SaveCustomerCreditRequest,
   SaveCustomerInvoiceProfileRequest
@@ -87,4 +88,15 @@ export class SaveCustomerCreditDto implements SaveCustomerCreditRequest {
   @IsOptional() @IsIn(["monthly", "semi_monthly", "per_order"]) billingCycle?: "monthly" | "semi_monthly" | "per_order";
   @IsOptional() @IsIn(["active", "suspended", "revoked"]) status?: "active" | "suspended" | "revoked";
   @IsString() @IsNotEmpty() @MaxLength(500) reason!: string;
+}
+
+export class RecordCustomerCorporateCreditPaymentDto implements RecordCustomerCorporateCreditPaymentRequest {
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0.01)
+  amount!: number;
+
+  @IsOptional() @IsIn(["CNY"]) currency?: string;
+  @IsString() @IsNotEmpty() @MaxLength(500) reason!: string;
+  @IsString() @IsNotEmpty() @MaxLength(191) idempotencyKey!: string;
 }

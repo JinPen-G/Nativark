@@ -1,4 +1,4 @@
-import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, Param, Post, Put, Query, Req, Res, UploadedFile, UseInterceptors } from "@nestjs/common";
+import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, Optional, Param, Post, Put, Query, Req, Res, UploadedFile, UseInterceptors } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import { Prisma } from "@prisma/client";
 import { RentalCoreOrderStatus, type RentalOrderExtension } from "@rental-os/shared";
@@ -79,6 +79,7 @@ import { RentalDocumentService } from "./rental-document.service";
 import { buildRentalWorkbenchTodos, canIncludeWorkbenchOrderTodos, canIncludeWorkbenchWorkOrders } from "./rental-workbench-todos";
 import { validateInspectionCustomerResponse } from "./rental-inspection-customer-response";
 import { serviceCancellationAmounts, type ServiceCancellationSelection } from "./rental-service-cancellation";
+import { CustomerCorporateSettlementService } from "../platform/customer-corporate-settlement.service";
 
 /** 读取标准 Idempotency-Key 请求头。大小写不敏感，超长键直接拒绝。 */
 /**
@@ -186,7 +187,8 @@ export class RentalCoreController {
     private readonly prisma: PrismaService,
     private readonly serviceCapacities: RentalServiceCapacityService,
     private readonly funding: RentalFundingService,
-    private readonly documents: RentalDocumentService
+    private readonly documents: RentalDocumentService,
+    @Optional() private readonly corporateSettlement?: CustomerCorporateSettlementService
   ) {}
 
   private context(tenantId: string): BusinessContext {
@@ -205,6 +207,11 @@ export class RentalCoreController {
   private async releaseCancelledOrderResources(tenantId: string, orderId: string, tx: Prisma.TransactionClient, reason: string) {
     await this.business.releaseCouponInTransaction(tenantId, orderId, tx);
     await this.serviceCapacities.releaseForOrder(tenantId, orderId, reason, new Date().toISOString(), tx);
+    await this.corporateSettlement?.releaseOrderCredit(tenantId, orderId, reason, tx);
+  }
+
+  private async usesCorporateCredit(tenantId: string, orderId: string, tx?: Prisma.TransactionClient) {
+    return this.corporateSettlement?.requiresCreditSettlement(tenantId, orderId, tx) ?? false;
   }
   private async emitOrderEvent(tenantId: string, eventCode: string, order: { id: string; orderNo: string; customerName: string; contactPhone?: string; customerId?: string }) {
     // 业务对象随事件传入，服务端据此生成空间级幂等键——同一订单同一事件重放不再二次发信。
@@ -1039,8 +1046,16 @@ export class RentalCoreController {
       request: { orderId: id },
       orderId: id,
       run: async (tx) => {
-        await this.funding.assertReadyForConfirmation(tenantId, this.service.resolveWorkspaceId(tenantId), id, tx);
+        const usesCredit = await this.usesCorporateCredit(tenantId, id, tx);
+        await this.funding.assertReadyForConfirmation(
+          tenantId,
+          this.service.resolveWorkspaceId(tenantId),
+          id,
+          tx,
+          { skipRentalPayment: usesCredit }
+        );
         const confirmed = await this.service.confirmOrder(tenantId, id, tx, req.user.displayName);
+        if (usesCredit) await this.corporateSettlement?.reserveOrderCredit(tenantId, id, tx, req.user.displayName);
         await this.serviceCapacities.confirmForOrder(tenantId, id, new Date().toISOString(), tx);
         await this.business.redeemCouponInTransaction(tenantId, id, tx);
         return confirmed;
@@ -1417,7 +1432,17 @@ export class RentalCoreController {
         await this.business.synchronizeExtensionCoupon(tenantId, result.extension, tx);
         // 企业月结无需补款、申请即生效，因此这里就要占住新增服务的容量。
         // 待补款的申请不占：占用与租期都等补款到账（需求 4.6.9）。
-        if (result.extension.status === "effective") await this.occupyExtensionServices(tenantId, id, result.extension, tx);
+        if (result.extension.status === "effective") {
+          await this.corporateSettlement?.reserveExtensionCredit(
+            tenantId,
+            id,
+            result.extension.id,
+            result.extension.payableAmount,
+            tx,
+            req.user.displayName
+          );
+          await this.occupyExtensionServices(tenantId, id, result.extension, tx);
+        }
         return result;
       },
       replay: async () => {
@@ -1592,7 +1617,17 @@ export class RentalCoreController {
       },
       orderId: id,
       run: async (tx) => {
-        if (stage === "pickup") await this.funding.assertReadyForPickup(tenantId, this.service.resolveWorkspaceId(tenantId), id, tx);
+        if (stage === "pickup") {
+          const usesCredit = await this.usesCorporateCredit(tenantId, id, tx);
+          if (usesCredit) await this.corporateSettlement?.assertReadyForPickup(tenantId, id, tx);
+          await this.funding.assertReadyForPickup(
+            tenantId,
+            this.service.resolveWorkspaceId(tenantId),
+            id,
+            tx,
+            { skipRentalPayment: usesCredit }
+          );
+        }
         const charges = stage === "return"
           ? await this.returnCharges(
               tenantId,
@@ -1680,7 +1715,17 @@ export class RentalCoreController {
       request: { orderId: id, stage },
       orderId: id,
       run: async (tx) => {
-        if (stage === "pickup") await this.funding.assertReadyForPickup(tenantId, this.service.resolveWorkspaceId(tenantId), id, tx);
+        if (stage === "pickup") {
+          const usesCredit = await this.usesCorporateCredit(tenantId, id, tx);
+          if (usesCredit) await this.corporateSettlement?.assertReadyForPickup(tenantId, id, tx);
+          await this.funding.assertReadyForPickup(
+            tenantId,
+            this.service.resolveWorkspaceId(tenantId),
+            id,
+            tx,
+            { skipRentalPayment: usesCredit }
+          );
+        }
         const charges = stage === "return" ? await this.returnCharges(tenantId, context, id, returnedAt, tx) : undefined;
         overdueAmount = charges?.overdue.amount ?? 0;
         const completed = await this.service.completeHandoverWithoutInspection(tenantId, id, stage, overdueAmount, tx, req.user.displayName, charges?.earlyReturn);
@@ -1734,8 +1779,16 @@ export class RentalCoreController {
           )
         );
         if (hasUnconfirmedException) throw new ConflictException("还有检查异常费用待客户确认或申诉处理，不能关闭订单");
-        await this.funding.assertReadyToClose(tenantId, this.service.resolveWorkspaceId(tenantId), id, tx);
+        const usesCredit = await this.usesCorporateCredit(tenantId, id, tx);
+        await this.funding.assertReadyToClose(
+          tenantId,
+          this.service.resolveWorkspaceId(tenantId),
+          id,
+          tx,
+          { skipRentalPayment: usesCredit }
+        );
         const settled = await this.service.settleOrder(tenantId, id, tx, req.user.displayName);
+        if (usesCredit) await this.corporateSettlement?.settleOrderCredit(tenantId, id, tx, req.user.displayName);
         await this.business.completeCustomerOrderEventInTransaction(tenantId, context, settled.customerId, tx);
         return settled;
       },

@@ -1167,12 +1167,7 @@ export interface CustomerCorporateContract {
   updatedAt: string;
 }
 
-/**
- * CUSTOMER-01C：企业授信与账期。
- *
- * 本阶段**只存事实**：额度不接进报价与订单确认链路。额度占用与释放需要与订单、
- * 支付、退款联动，属后续任务；在没有联动设计前先改金额链路会留下对不上的账。
- */
+/** CUSTOMER-01C / CORP-SETTLE-01A：企业授信与账期主档。 */
 export interface CustomerCorporateCredit {
   id: string;
   tenantId: string;
@@ -1735,6 +1730,55 @@ export interface AssignCustomerMembershipPlanRequest {
 
 export interface CustomerMembershipPlanVersionActionRequest {
   reason: string;
+}
+
+/**
+ * CORP-SETTLE-01A：企业授信当前账面摘要。
+ *
+ * `reservedAmount` 是已确认但尚未结算的订单占用，`receivableAmount` 是已结算、
+ * 尚未回款的企业应收；可用额度必须由服务端按「额度 - 两者」计算，客户端不能自行
+ * 传入或覆盖。
+ */
+export interface CustomerCorporateCreditAccountSummary {
+  tenantId: string;
+  customerId: string;
+  creditLimit: number;
+  reservedAmount: number;
+  receivableAmount: number;
+  availableAmount: number;
+  currency: string;
+  status: CustomerCorporateCredit["status"];
+  billingCycle: CustomerCorporateCredit["billingCycle"];
+  settlementTermDays: number;
+}
+
+/** CORP-SETTLE-01A：授信账务流水，追加式且不可编辑。 */
+export interface CustomerCorporateCreditLedgerEntry {
+  id: string;
+  tenantId: string;
+  customerId: string;
+  workspaceId?: string;
+  orderId?: string;
+  entryType: "reserve" | "release" | "settle" | "payment" | "adjust";
+  amount: number;
+  reservedDelta: number;
+  receivableDelta: number;
+  reservedAfter: number;
+  receivableAfter: number;
+  currency: string;
+  idempotencyKey: string;
+  reason: string;
+  operator?: string;
+  occurredAt: string;
+  createdAt: string;
+}
+
+/** CORP-SETTLE-01A：企业账期回款登记。 */
+export interface RecordCustomerCorporateCreditPaymentRequest {
+  amount: number;
+  currency?: string;
+  reason: string;
+  idempotencyKey: string;
 }
 
 export interface CustomerMembershipPlanAssignmentActionRequest {

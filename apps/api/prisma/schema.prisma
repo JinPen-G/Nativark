@@ -192,6 +192,7 @@ model Tenant {
   customerInvoiceProfiles           CustomerCorporateInvoiceProfile[]
   customerContracts                 CustomerCorporateContract[]
   customerCredits                   CustomerCorporateCredit[]
+  customerCreditLedgerEntries       CustomerCorporateCreditLedger[]
   membershipRegistrationSettings    CustomerMembershipRegistrationSettings[]
   membershipReviews                 CustomerMembershipReview[]
   membershipQualificationTypes      CustomerMembershipQualificationType[]
@@ -574,6 +575,7 @@ model CustomerProfile {
   invoiceProfiles                CustomerCorporateInvoiceProfile[]
   contracts                      CustomerCorporateContract[]
   credit                         CustomerCorporateCredit?
+  creditLedgerEntries            CustomerCorporateCreditLedger[]
   membershipReviews              CustomerMembershipReview[]
   clientAuthSessions             ClientAuthSession[]
   corporateMembershipsAsCompany  CustomerCorporateMembership[]      @relation("CorporateMembershipCompany")
@@ -829,12 +831,10 @@ model CustomerCorporateContract {
   @@map("customer_corporate_contracts")
 }
 
-/// CUSTOMER-01C：企业授信与账期（需求 4.8.4）。
+/// CUSTOMER-01C / CORP-SETTLE-01A：企业授信与账期主档。
 ///
-/// **只存事实，不参与定价**：本阶段刻意不把授信额度接进报价或订单确认链路
-/// （任务明确「不重写订单状态机和定价链」）。额度占用与释放需要与订单、支付、
-/// 退款联动，属于后续任务；这里先把额度、账期与状态存下来并可读，
-/// 避免管理端无处维护，也避免在没有联动设计的情况下先改动金额链路。
+/// 主档保存额度和审批事实；订单占用、结算转应收、回款与释放全部追加到
+/// CustomerCorporateCreditLedger，不在这张当前配置表上原地改金额。
 model CustomerCorporateCredit {
   id                 String          @id @default(uuid())
   tenantId           String
@@ -859,6 +859,40 @@ model CustomerCorporateCredit {
   /// 一家企业一条当前授信记录；额度调整走更新 + 状态历史，不新建行。
   @@unique([tenantId, customerId], map: "customer_credits_tenant_customer_key")
   @@map("customer_corporate_credits")
+}
+
+/// CORP-SETTLE-01A：企业授信追加式账务流水。
+///
+/// `reservedDelta` 与 `receivableDelta` 是账面变动，`reservedAfter` 与
+/// `receivableAfter` 是写入时的可回放快照。订单、空间均只存引用字符串：授信
+/// 账户属于租户，企业跨空间下单时仍共用同一额度，不把一笔企业额度拆成空间账户。
+model CustomerCorporateCreditLedger {
+  id               String          @id @default(uuid())
+  tenantId         String
+  tenant           Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId       String
+  customer         CustomerProfile @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
+  workspaceId      String?
+  orderId          String?
+  /// reserve / release / settle / payment / adjust
+  entryType        String          @db.VarChar(24)
+  amount           Decimal         @db.Decimal(12, 2)
+  reservedDelta    Decimal         @db.Decimal(12, 2)
+  receivableDelta  Decimal         @db.Decimal(12, 2)
+  reservedAfter    Decimal         @db.Decimal(12, 2)
+  receivableAfter  Decimal         @db.Decimal(12, 2)
+  currency         String          @default("CNY") @db.VarChar(8)
+  idempotencyKey   String          @db.VarChar(191)
+  reason           String          @db.VarChar(500)
+  operator         String?
+  occurredAt       DateTime        @default(now())
+  createdAt        DateTime        @default(now())
+
+  @@unique([tenantId, customerId, idempotencyKey], map: "customer_credit_ledger_idem_key")
+  @@index([tenantId, customerId, occurredAt], map: "customer_credit_ledger_account_time_idx")
+  @@index([tenantId, customerId, orderId], map: "customer_credit_ledger_order_idx")
+  @@index([tenantId, workspaceId, orderId], map: "customer_credit_ledger_scope_order_idx")
+  @@map("customer_corporate_credit_ledger")
 }
 
 /// CUSTOMER-01A：客户联系人（需求 4.8.4）。

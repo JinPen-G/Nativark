@@ -11,6 +11,7 @@ import {
   ChangeCustomerMembershipStatusDto
 } from "./customer-operations-request.dto";
 import {
+  RecordCustomerCorporateCreditPaymentDto,
   SaveCustomerContractDto,
   SaveCustomerCreditDto,
   SaveCustomerInvoiceProfileDto
@@ -281,10 +282,6 @@ export class PlatformController {
     return this.platformService.getCustomerCredit(customerId, req.user);
   }
 
-  /**
-   * 授信与账期**只存事实**：本阶段不接进报价与订单确认链路。
-   * 额度占用与释放需要与订单、支付、退款联动，属后续任务。
-   */
   @Put("customers/:customerId/credit")
   saveCustomerCredit(
     @Param("customerId") customerId: string,
@@ -292,6 +289,25 @@ export class PlatformController {
     @Req() req: RequestWithUser
   ) {
     return this.platformService.saveCustomerCredit(customerId, body, req.user);
+  }
+
+  @Get("customers/:customerId/credit/account")
+  customerCreditAccount(@Param("customerId") customerId: string, @Req() req: RequestWithUser) {
+    return this.platformService.getCustomerCreditAccount(customerId, req.user);
+  }
+
+  @Get("customers/:customerId/credit/ledger")
+  customerCreditLedger(@Param("customerId") customerId: string, @Req() req: RequestWithUser) {
+    return this.platformService.listCustomerCreditLedger(customerId, req.user);
+  }
+
+  @Post("customers/:customerId/credit/payments")
+  recordCustomerCreditPayment(
+    @Param("customerId") customerId: string,
+    @Body() body: RecordCustomerCorporateCreditPaymentDto,
+    @Req() req: RequestWithUser
+  ) {
+    return this.platformService.recordCustomerCreditPayment(customerId, body, req.user);
   }
 
   @Post("workspaces")

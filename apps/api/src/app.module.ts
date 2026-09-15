@@ -34,6 +34,7 @@ import { CustomerOperationsRepository } from "./modules/platform/customer-operat
 import { CustomerOperationsService } from "./modules/platform/customer-operations.service";
 import { CustomerMergeService } from "./modules/platform/customer-merge.service";
 import { CustomerCorporateService } from "./modules/platform/customer-corporate.service";
+import { CustomerCorporateSettlementService } from "./modules/platform/customer-corporate-settlement.service";
 import { MembershipController } from "./modules/platform/membership.controller";
 import { MembershipService } from "./modules/platform/membership.service";
 import { PlatformService } from "./modules/platform/platform.service";
@@ -105,6 +106,7 @@ import { ClientApiRateLimitService } from "./modules/client/client-api-rate-limi
     CustomerOperationsService,
     CustomerMergeService,
     CustomerCorporateService,
+    CustomerCorporateSettlementService,
     MembershipService,
     OperationLogService,
     RentalCoreService,

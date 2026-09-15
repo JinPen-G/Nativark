@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional, UnauthorizedException } from "@nestjs/common";
 import {
   CLIENT_API_VERSION,
   type ClientConfigResponse,
@@ -44,6 +44,7 @@ import { PaymentRuntimeService } from "../integrations/payment.runtime.service";
 import { FileStorageRuntimeService } from "../integrations/file-storage.runtime.service";
 import { ClientAuthService, type ClientRequestContext } from "./client-auth.service";
 import { RentalDocumentService } from "../rental-core/rental-document.service";
+import { CustomerCorporateSettlementService } from "../platform/customer-corporate-settlement.service";
 
 interface ClientOrderRequestContext {
   headers?: Record<string, unknown>;
@@ -72,7 +73,8 @@ export class ClientApiService {
     private readonly tenantIntegrations: TenantIntegrationService,
     private readonly payments: PaymentRuntimeService,
     private readonly files: FileStorageRuntimeService,
-    private readonly documents: RentalDocumentService
+    private readonly documents: RentalDocumentService,
+    @Optional() private readonly corporateSettlement?: CustomerCorporateSettlementService
   ) {}
 
   private context(tenantId: string): BusinessContext {
@@ -732,6 +734,7 @@ export class ClientApiService {
         const order = await this.core.cancelOrder(context.tenantId, orderId, input.reason, (locked) => this.business.calculateCancellationCharge(context.tenantId, business, this.business.getQuote(context.tenantId, business, locked.quoteId)), tx, `client:${context.customerId}`);
         await this.business.releaseCouponInTransaction(context.tenantId, orderId, tx);
         await this.serviceCapacities.releaseForOrder(context.tenantId, orderId, "client_order_cancelled", new Date().toISOString(), tx);
+        await this.corporateSettlement?.releaseOrderCredit(context.tenantId, orderId, "client_order_cancelled", tx, `client:${context.customerId}`);
         return order;
       },
       replay: async () => {
@@ -785,7 +788,17 @@ export class ClientApiService {
         const { priced } = await this.priceExtension(context, orderId, input);
         const result = await this.core.requestOrderExtension(context.tenantId, orderId, priced, { idempotencyKey: key, memo: input.memo, operator: `client:${context.customerId}` }, tx);
         await this.business.synchronizeExtensionCoupon(context.tenantId, result.extension, tx);
-        if (result.extension.status === "effective") await this.occupyExtensionServices(context, orderId, result.extension, tx);
+        if (result.extension.status === "effective") {
+          await this.corporateSettlement?.reserveExtensionCredit(
+            context.tenantId,
+            orderId,
+            result.extension.id,
+            result.extension.payableAmount,
+            tx,
+            `client:${context.customerId}`
+          );
+          await this.occupyExtensionServices(context, orderId, result.extension, tx);
+        }
         return result;
       },
       replay: async () => {

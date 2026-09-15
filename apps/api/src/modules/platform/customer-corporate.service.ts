@@ -231,8 +231,8 @@ export class CustomerCorporateService {
   }
 
   /**
-   * 保存授信与账期。**不参与任何金额判定**——见类注释。
-   * 额度与账期都必须非负；账期天数是整数天。
+   * 保存授信与账期主档。订单占用、结算和回款不在这里改金额，统一由
+   * CustomerCorporateSettlementService 追加账务流水；这样资料维护不会绕过账务链。
    */
   async saveCredit(
     tenantId: string,
@@ -248,6 +248,16 @@ export class CustomerCorporateService {
     }
     if (!Number.isInteger(input.settlementTermDays) || input.settlementTermDays < 0) {
       throw new BadRequestException("账期天数必须是非负整数");
+    }
+    // CORP-SETTLE-01A：不能把主档额度调到已占用+已应收以下，否则已有订单会
+    // 在不产生任何流水的情况下变成“超额度”负账。降额前必须先释放/回款或改为停用。
+    const ledger = await this.prisma.customerCorporateCreditLedger.aggregate({
+      where: { tenantId, customerId },
+      _sum: { reservedDelta: true, receivableDelta: true }
+    });
+    const exposure = new Prisma.Decimal(ledger._sum.reservedDelta ?? 0).plus(ledger._sum.receivableDelta ?? 0);
+    if (new Prisma.Decimal(input.creditLimit).plus("0.005").lt(exposure)) {
+      throw new ConflictException("新的授信额度不能低于当前已占用与应收合计，请先处理存量账务");
     }
     const data = {
       creditLimit: new Prisma.Decimal(input.creditLimit),

@@ -12,6 +12,7 @@ import {
   MergeCustomersRequest,
   SaveCustomerContractRequest,
   SaveCustomerCreditRequest,
+  RecordCustomerCorporateCreditPaymentRequest,
   SaveCustomerInvoiceProfileRequest,
   SaveSharedCustomerRequest,
   LinkCustomerToWorkspaceRequest,
@@ -60,6 +61,7 @@ import { SharedCustomerRepository } from "./shared-customer.repository";
 import { CustomerOperationsService } from "./customer-operations.service";
 import { CustomerMergeService } from "./customer-merge.service";
 import { CustomerCorporateService } from "./customer-corporate.service";
+import { CustomerCorporateSettlementService } from "./customer-corporate-settlement.service";
 import { WorkspaceCapabilityService } from "../rental-core/workspace-capability.service";
 import { RentalCoreService } from "../rental-core/rental-core.service";
 
@@ -105,7 +107,9 @@ export class PlatformService {
     // 同样追加在最后且 @Optional()，理由同上——位置参数构造的既有测试会错位。
     @Optional() private readonly customerCorporate?: CustomerCorporateService,
     // CUSTOMER-01D：重复识别、人工合并与注销前置检查。同样追加在最后且 @Optional()。
-    @Optional() private readonly customerMerge?: CustomerMergeService
+    @Optional() private readonly customerMerge?: CustomerMergeService,
+    // CORP-SETTLE-01A：企业授信账务流水。继续追加在最后，保持既有位置参数测试兼容。
+    @Optional() private readonly customerCorporateSettlement?: CustomerCorporateSettlementService
   ) {}
 
   private readonly logger = new Logger(PlatformService.name);
@@ -1739,6 +1743,13 @@ export class PlatformService {
     return this.customerCorporate;
   }
 
+  private requireCustomerCorporateSettlement() {
+    if (!this.customerCorporateSettlement) {
+      throw new ConflictException("企业授信账务服务未就绪");
+    }
+    return this.customerCorporateSettlement;
+  }
+
   listCustomerInvoiceProfiles(customerId: string, currentUser?: SystemUserRow) {
     this.requireWorkspaceDataSource();
     const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
@@ -2393,6 +2404,33 @@ export class PlatformService {
     return this.platformRepository.saveUserWithWorkspaceAccess(
       { ...input, tenantId: targetTenantId, isSaasAdmin: false },
       targetTenantId
+    );
+  }
+
+  getCustomerCreditAccount(customerId: string, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerCorporateSettlement().account(tenantId, customerId);
+  }
+
+  listCustomerCreditLedger(customerId: string, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerCorporateSettlement().listLedger(tenantId, customerId);
+  }
+
+  recordCustomerCreditPayment(
+    customerId: string,
+    input: RecordCustomerCorporateCreditPaymentRequest,
+    currentUser?: SystemUserRow
+  ) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerCorporateSettlement().recordPayment(
+      tenantId,
+      customerId,
+      input,
+      currentUser?.displayName
     );
   }
 
