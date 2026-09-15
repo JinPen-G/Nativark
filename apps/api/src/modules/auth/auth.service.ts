@@ -96,7 +96,12 @@ export class AuthService {
       targetId: loginResult.user.id,
       detail: "登录成功。"
     });
-    return this.issueSession(loginResult.user, loginResult.tenant);
+    return this.issueSession(
+      loginResult.user,
+      loginResult.tenant,
+      undefined,
+      loginResult.needsTenantOnboarding
+    );
   }
 
   /**
@@ -367,7 +372,8 @@ export class AuthService {
   private async issueSession(
     user: SystemUserRow,
     tenant: Awaited<ReturnType<PlatformService["findTenantByIdForAuth"]>>,
-    requestedWorkspaceId?: string | null
+    requestedWorkspaceId?: string | null,
+    needsTenantOnboarding = false
   ): Promise<LoginResponse> {
     const sessionId = randomUUID();
     const refreshToken = randomBytes(48).toString("base64url");
@@ -387,7 +393,14 @@ export class AuthService {
     });
     // 权限必须按解析出的空间重算：成员关系上的角色与数据范围优先于租户级默认值。
     const scoped = (await this.platformService.findWorkspaceScopedUser(user.id, workspaceId)) ?? user;
-    return this.buildLoginResponse(scoped, tenant, sessionId, workspaceId, refreshToken);
+    return this.buildLoginResponse(
+      scoped,
+      tenant,
+      sessionId,
+      workspaceId,
+      refreshToken,
+      needsTenantOnboarding
+    );
   }
 
   /**
@@ -399,7 +412,8 @@ export class AuthService {
     tenant: Awaited<ReturnType<PlatformService["findTenantByIdForAuth"]>>,
     sessionId: string,
     workspaceId: string | undefined,
-    refreshToken: string | undefined
+    refreshToken: string | undefined,
+    needsTenantOnboarding = false
   ): Promise<LoginResponse> {
     const now = Math.floor(Date.now() / 1000);
     const accessToken = this.signAccessToken({
@@ -430,6 +444,7 @@ export class AuthService {
         capabilities: capabilityView?.enabled ?? []
       },
       user: this.toAuthUser(user),
+      needsTenantOnboarding: Boolean(needsTenantOnboarding && workspaceId),
       // SPACE-02：登录返回可进入的空间与当前空间，供前端渲染切换器（前端属 SPACE-05）。
       workspaces,
       currentWorkspaceId: workspaceId

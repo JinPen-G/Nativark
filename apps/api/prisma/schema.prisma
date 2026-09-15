@@ -425,6 +425,7 @@ model User {
   isPlatformAdmin    Boolean           @default(false)
   isActive           Boolean           @default(true)
   mustChangePassword Boolean           @default(true)
+  needsTenantOnboarding Boolean        @default(false)
   tokenVersion       Int               @default(1)
   passwordChangedAt  DateTime?
   lastLoginAt        DateTime?
@@ -2317,7 +2318,7 @@ model RentalOrderDocumentSnapshot {
   workspaceId          String
   workspace             BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   orderId              String
-  order                RentalOrder   @relation(fields: [tenantId, workspaceId, orderId], references: [tenantId, workspaceId, id], onDelete: Cascade)
+  order                RentalOrder   @relation(fields: [tenantId, workspaceId, orderId], references: [tenantId, workspaceId, id], onDelete: Cascade, map: "rental_order_document_snapshots_tenant_ws_order_fkey")
   documentType         String        @db.VarChar(32)
   templateCode         String        @db.VarChar(64)
   documentNo           String        @db.VarChar(191)

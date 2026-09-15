@@ -197,7 +197,8 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       refreshToken: stringSchema,
       expiresIn: numberSchema,
       tenant: ref("TenantContext"),
-      user: ref("AuthUser")
+      user: ref("AuthUser"),
+      needsTenantOnboarding: booleanSchema
     },
     ["accessToken", "refreshToken", "expiresIn", "tenant", "user"]
   ),

@@ -60,9 +60,16 @@ export function LoginPage() {
             </div>
           <Form form={form} layout="vertical" requiredMark={false} onFinish={async (values) => {
               try {
-                await login(values.tenantCode, values.account, values.password);
+                const result = await login(values.tenantCode, values.account, values.password);
                 message.success("登录成功");
-                navigate(useAuthStore.getState().user?.isSaasAdmin ? "/platform/tenants" : "/workbench", { replace: true });
+                navigate(
+                  result.needsTenantOnboarding
+                    ? "/tenant/readiness"
+                    : result.user.isSaasAdmin
+                      ? "/platform/tenants"
+                      : "/workbench",
+                  { replace: true }
+                );
               }
               catch (error) {
                 let errorMessage = "登录失败，请检查租户、账号和密码";

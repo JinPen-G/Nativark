@@ -71,6 +71,7 @@ function requestContext(method, url, accessToken) {
   assert.equal(saas.user.isPlatformAdmin, false, "SaaS admin must not be a tenant admin");
   assert.equal(demo.user.isSaasAdmin, false);
   assert.equal(demo.user.isPlatformAdmin, true);
+  assert.equal(demo.needsTenantOnboarding, false, "既有租户管理员不应触发新租户开业引导");
   assert.equal(demo.tenant.categoryCode, "camera");
   assert.equal(demo.tenant.categoryName, "摄影设备");
   assert.equal(demo2.tenant.categoryCode, "camping");
@@ -225,6 +226,7 @@ function requestContext(method, url, accessToken) {
     password: resetTenantAdmin.temporaryPassword
   });
   assert.equal(temporaryLogin.user.mustChangePassword, true);
+  assert.equal(temporaryLogin.needsTenantOnboarding, true, "新租户管理员首次登录应要求进入开业配置");
   const blocked = requestContext("GET", "/api/rental/v1/profile", temporaryLogin.accessToken);
   await assert.rejects(guard.canActivate(blocked.context), /必须先修改密码/);
 
@@ -233,6 +235,7 @@ function requestContext(method, url, accessToken) {
     { currentPassword: resetTenantAdmin.temporaryPassword, newPassword: "CameraOwner!2026" }
   );
   assert.equal(changed.user.mustChangePassword, false);
+  assert.equal(changed.needsTenantOnboarding, false, "完成首次改密后的新会话不应再次标记首次开业引导");
   assert.equal(await auth.resolveAccessToken(`Bearer ${temporaryLogin.accessToken}`), undefined);
   assert.ok(await auth.resolveAccessToken(`Bearer ${changed.accessToken}`));
 

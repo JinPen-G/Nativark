@@ -197,6 +197,8 @@ export interface LoginResponse {
   expiresIn: number;
   tenant: TenantContext;
   user: AuthUser;
+  /** 新租户初始化管理员首次登录且已进入品类空间时，前端应打开开业配置。 */
+  needsTenantOnboarding?: boolean;
   /**
    * SPACE-02：该账号可进入的经营空间（成员关系启用且空间启用）。
    * 切换空间时 refreshToken 不变，因此切换响应里它为空串。

@@ -282,9 +282,11 @@ async function bootstrapTenant(platformToken, tenantCode, categoryCode) {
   // startApi 每次生成新的 AUTH_TOKEN_SECRET，重启后旧令牌一律 401，
   // 因此这里改密并回报口令，重启后的复验要用它重新登录。
   const first = await loginOk(tenantCode, "admin", temporaryPassword, "临时口令登录失败");
+  assert.equal(first.needsTenantOnboarding, true, "新租户管理员首次登录应返回开业配置引导标记");
   const newPassword = `Rdy!${randomBytes(4).toString("hex")}`;
   const changed = await request("POST", "/api/auth/change-password", { currentPassword: temporaryPassword, newPassword }, first.accessToken);
   if (changed.status !== 201) fail(`租户 ${tenantCode} 改密失败`, JSON.stringify(changed.body).slice(0, 300));
+  assert.equal(changed.body.data.needsTenantOnboarding, false, "首次改密后的会话不应继续返回一次性开业引导标记");
   const session = await loginOk(tenantCode, "admin", newPassword, "改密后登录失败");
   return { ...session, password: newPassword };
 }

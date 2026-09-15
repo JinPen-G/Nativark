@@ -70,6 +70,7 @@ interface StoredUser extends Omit<SaveSystemUserRequest, "tenantId"> {
   tenantId: string;
   password: string;
   mustChangePassword?: boolean;
+  needsTenantOnboarding?: boolean;
 }
 
 // 平台主体租户：平台级配置（登录安全基线等）的读写与审计范围，区别于业务租户和演示租户
@@ -1376,6 +1377,7 @@ export class PlatformService {
       isPlatformAdmin: true,
       isSaasAdmin: false,
       mustChangePassword: true,
+      needsTenantOnboarding: true,
       isActive: true
     };
     this.users.push(user);
@@ -2468,10 +2470,14 @@ export class PlatformService {
         item.isActive
     );
 
+    const needsTenantOnboarding = Boolean(
+      user?.needsTenantOnboarding && user.mustChangePassword && user.isPlatformAdmin && !user.isSaasAdmin
+    );
     return user
       ? {
           tenant,
-          user: this.toUserRow(user)
+          user: this.toUserRow(user),
+          needsTenantOnboarding
         }
       : undefined;
   }
@@ -2616,6 +2622,7 @@ export class PlatformService {
     if (!user || user.password !== currentPassword) throw new BadRequestException("当前密码不正确");
     user.password = nextPassword;
     user.mustChangePassword = false;
+    user.needsTenantOnboarding = false;
     await this.revokeUserSessions(userId);
   }
 

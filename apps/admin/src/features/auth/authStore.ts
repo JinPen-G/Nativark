@@ -1,4 +1,4 @@
-import type { AuthUser, BusinessWorkspace, RentalCapability, TenantContext } from "@rental-os/shared";
+import type { AuthUser, BusinessWorkspace, LoginResponse, RentalCapability, TenantContext } from "@rental-os/shared";
 import { create } from "zustand";
 import { api } from "@/api/rental";
 import { clearSessionQueryCache } from "@/app/queryClient";
@@ -40,7 +40,7 @@ interface AuthState {
   workspaces: BusinessWorkspace[];
   currentWorkspaceId?: string;
   bootstrap: () => Promise<void>;
-  login: (tenantCode: string, account: string, password: string) => Promise<void>;
+  login: (tenantCode: string, account: string, password: string) => Promise<LoginResponse>;
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   switchWorkspace: (workspaceId: string) => Promise<void>;
   logout: () => void;
@@ -98,6 +98,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       workspaces: result.workspaces ?? [],
       currentWorkspaceId: result.currentWorkspaceId
     });
+    return result;
   },
 
   /**

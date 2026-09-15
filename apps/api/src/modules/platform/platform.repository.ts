@@ -192,6 +192,10 @@ export class PlatformRepository {
       return undefined;
     }
 
+    const needsTenantOnboarding = Boolean(
+      user.needsTenantOnboarding && user.mustChangePassword && user.isPlatformAdmin && !user.isSaasAdmin
+    );
+
     await this.prisma.user.update({
       where: { id: user.id },
       data: { lastLoginAt: new Date() }
@@ -208,7 +212,8 @@ export class PlatformRepository {
         categoryName: tenant.rentalProfile?.category.name,
         capabilities: tenant.rentalProfile?.capabilities as TenantSummary["capabilities"]
       },
-      user: this.toUserRow(user)
+      user: this.toUserRow(user),
+      needsTenantOnboarding
     };
   }
 
@@ -280,6 +285,7 @@ export class PlatformRepository {
         data: {
           passwordHash: hashPassword(nextPassword),
           mustChangePassword: false,
+          needsTenantOnboarding: false,
           passwordChangedAt: new Date(),
           tokenVersion: { increment: 1 }
         }
@@ -1707,6 +1713,7 @@ export class PlatformRepository {
           isSaasAdmin: false,
           isPlatformAdmin: true,
           mustChangePassword: true,
+          needsTenantOnboarding: true,
           isActive: true
         }
       });

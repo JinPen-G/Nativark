@@ -22,6 +22,6 @@ CREATE TABLE `rental_order_document_snapshots` (
     FOREIGN KEY (`tenantId`) REFERENCES `Tenant` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `rental_order_document_snapshots_tenantId_workspaceId_fkey`
     FOREIGN KEY (`tenantId`, `workspaceId`) REFERENCES `business_workspaces` (`tenantId`, `id`) ON DELETE CASCADE ON UPDATE CASCADE,
-  CONSTRAINT `rental_order_document_snapshots_tenantId_workspaceId_orderId_fkey`
+  CONSTRAINT `rental_order_document_snapshots_tenant_ws_order_fkey`
     FOREIGN KEY (`tenantId`, `workspaceId`, `orderId`) REFERENCES `rental_orders` (`tenantId`, `workspaceId`, `id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
