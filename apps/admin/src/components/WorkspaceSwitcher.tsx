@@ -1,8 +1,21 @@
-import { AppstoreOutlined, CheckOutlined, DownOutlined } from "@ant-design/icons";
+import { AppstoreOutlined, CameraOutlined, CarOutlined, DownOutlined, FireOutlined, ToolOutlined } from "@ant-design/icons";
+import { RentalCategoryCode } from "@rental-os/shared";
 import { App, Dropdown, Spin } from "antd";
+import type { ReactNode } from "react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "@/features/auth/authStore";
+
+const categoryIcons: Partial<Record<RentalCategoryCode, ReactNode>> = {
+  [RentalCategoryCode.Camera]: <CameraOutlined />,
+  [RentalCategoryCode.Camping]: <FireOutlined />,
+  [RentalCategoryCode.Construction]: <ToolOutlined />,
+  [RentalCategoryCode.Vehicle]: <CarOutlined />
+};
+
+function workspaceIcon(categoryCode?: string) {
+  return (categoryCode && categoryIcons[categoryCode as RentalCategoryCode]) ?? <AppstoreOutlined />;
+}
 
 /**
  * SPACE-05：侧栏顶部的经营空间选择器。
@@ -28,7 +41,7 @@ export function WorkspaceSwitcher() {
 
   const current = workspaces.find((row) => row.id === currentWorkspaceId);
 
-  const box = (title: string, interactive: boolean) => (
+  const box = (title: string, interactive: boolean, categoryCode?: string) => (
     <button
       className={`workspace-select${interactive ? "" : " is-static"}`}
       type="button"
@@ -36,7 +49,7 @@ export function WorkspaceSwitcher() {
       title={title}
     >
       <span className="workspace-select-mark">
-        {switching ? <Spin size="small" /> : <AppstoreOutlined />}
+        {switching ? <Spin size="small" /> : workspaceIcon(categoryCode)}
       </span>
       <span className="workspace-select-name">{title}</span>
       {interactive && <DownOutlined className="workspace-select-arrow" />}
@@ -46,7 +59,7 @@ export function WorkspaceSwitcher() {
   // 平台账号不属于任何经营空间：如实说明，而不是留一块空白或假装选了什么。
   if (!workspaces.length) return box(isSaasAdmin ? "平台管理面" : "尚无经营空间", false);
   // 单空间没有可切换的目标，给一个只有当前项的菜单是噪音。
-  if (workspaces.length === 1) return box(current?.name ?? workspaces[0].name, false);
+  if (workspaces.length === 1) return box(current?.name ?? workspaces[0].name, false, current?.categoryCode ?? workspaces[0].categoryCode);
 
   const handleSwitch = async (workspaceId: string) => {
     if (workspaceId === currentWorkspaceId || switching) return;
@@ -75,7 +88,7 @@ export function WorkspaceSwitcher() {
         selectedKeys: currentWorkspaceId ? [currentWorkspaceId] : [],
         items: workspaces.map((row) => ({
           key: row.id,
-          icon: row.id === currentWorkspaceId ? <CheckOutlined /> : <AppstoreOutlined />,
+          icon: workspaceIcon(row.categoryCode),
           label: (
             <span className="workspace-option">
               {row.name}
@@ -86,7 +99,7 @@ export function WorkspaceSwitcher() {
         }))
       }}
     >
-      {box(current?.name ?? "未选择经营空间", true)}
+      {box(current?.name ?? "未选择经营空间", true, current?.categoryCode)}
     </Dropdown>
   );
 }
