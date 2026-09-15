@@ -1795,6 +1795,18 @@ export interface TenantRentalProfile {
   updatedAt: string;
 }
 
+/** 经营空间可启用的收款方式。线上方式还必须通过租户 Provider 配置与实时校验。 */
+export const RENTAL_PAYMENT_METHOD_CODES = [
+  "offline_cash",
+  "offline_transfer",
+  "alipay",
+  "wechat_pay"
+] as const;
+export type RentalPaymentMethod = (typeof RENTAL_PAYMENT_METHOD_CODES)[number];
+export const RENTAL_OFFLINE_PAYMENT_METHOD_CODES = ["offline_cash", "offline_transfer"] as const;
+export type RentalOfflinePaymentMethod = (typeof RENTAL_OFFLINE_PAYMENT_METHOD_CODES)[number];
+export const DEFAULT_RENTAL_PAYMENT_METHODS: RentalPaymentMethod[] = [...RENTAL_PAYMENT_METHOD_CODES];
+
 export interface TenantRentalBusinessSettings {
   tenantId: string;
   /** 经营空间资源排期；缺省不启用自动任务。 */
@@ -1831,6 +1843,8 @@ export interface TenantRentalBusinessSettings {
     timing: "order" | "confirmation" | "pickup" | "offline_terms";
     depositMode: "none" | "fixed" | "price_multiple" | "preauthorization";
     preauthorizationRequired: boolean;
+    /** 空间允许客户/运营选择的收款方式；支付宝/微信仍需另有已验证的租户 Provider。 */
+    enabledMethods: RentalPaymentMethod[];
   };
   overdue: {
     graceMinutes: number;
@@ -3283,6 +3297,8 @@ export interface RentalFundingEvent {
   balanceAfter: number;
   /** mock 或已验签的真实支付提供方；普通收款不能冒充预授权。 */
   provider: "mock" | "alipay" | "wechat_pay";
+  /** 线下人工收退款的实际方式；预授权转扣/释放等内部资金动作不填。 */
+  paymentMethod?: RentalOfflinePaymentMethod;
   /** 幂等键：同一 (order, instrument, action, idempotencyKey) 重复提交只落一条。 */
   idempotencyKey: string;
   reason: string;
@@ -3298,6 +3314,7 @@ export interface InitiateRentalFundingRequest {
   /** 首次金额由服务端从订单快照的押金/预授权字段取得，客户端不得提交。 */
   idempotencyKey: string;
   reason: string;
+  paymentMethod?: RentalOfflinePaymentMethod;
 }
 
 export interface RentalFundingAmountRequest {
@@ -3305,6 +3322,7 @@ export interface RentalFundingAmountRequest {
   amount: number;
   idempotencyKey: string;
   reason: string;
+  paymentMethod?: RentalOfflinePaymentMethod;
 }
 
 /** MKT-02D：将已批准的增值服务退款写入模拟资金流水并闭合该服务发生项。 */
@@ -3312,6 +3330,7 @@ export interface RefundRentalServiceRequest {
   amount: number;
   idempotencyKey: string;
   reason: string;
+  paymentMethod?: RentalOfflinePaymentMethod;
 }
 
 export interface RentalFundingReleaseRequest {
@@ -3324,6 +3343,7 @@ export interface RentalFundingFailureRequest {
   failureCode: string;
   idempotencyKey: string;
   reason: string;
+  paymentMethod?: RentalOfflinePaymentMethod;
 }
 
 export interface RentalFundingBalance {

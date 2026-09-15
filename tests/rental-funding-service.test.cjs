@@ -132,9 +132,10 @@ void (async () => {
   );
 
   const deposit = await funding.recordEvent(tenantId, workspace.id, orderId, {
-    instrument: "deposit", action: "initiate", idempotencyKey: `${tag}:deposit`, reason: "按订单快照收取"
+    instrument: "deposit", action: "initiate", idempotencyKey: `${tag}:deposit`, reason: "按订单快照收取", paymentMethod: "offline_transfer"
   }, "专项");
   assert.equal(deposit.amount, 500, "首次押金金额必须来自订单快照");
+  assert.equal(deposit.paymentMethod, "offline_transfer", "人工收款应记录实际线下收款方式");
   const replay = await funding.recordEvent(tenantId, workspace.id, orderId, {
     instrument: "deposit", action: "initiate", idempotencyKey: `${tag}:deposit`, reason: "重放"
   }, "专项");
@@ -184,6 +185,7 @@ void (async () => {
     instrument: "preauthorization", action: "release", idempotencyKey: `${tag}:release`, reason: "释放剩余额度"
   }, "专项");
   assert.equal(released.amount, beforeRelease.preauthorization.balance, "不传金额时释放服务端计算的全部余额");
+  assert.equal(released.paymentMethod, undefined, "预授权释放是内部资金动作，不应伪装成现金收款");
   assert.equal((await funding.listEvents(tenantId, workspace.id, orderId)).preauthorization.balance, 0);
   await funding.recordEvent(tenantId, workspace.id, orderId, {
     instrument: "deposit", action: "refund", amount: 500, idempotencyKey: `${tag}:refund`, reason: "退还全部押金"

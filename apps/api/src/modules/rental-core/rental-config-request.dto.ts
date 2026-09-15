@@ -1,4 +1,4 @@
-import { RENTAL_CURRENCY_CODES, RENTAL_DISCOUNT_TARGETS, RENTAL_DISCOUNT_TYPES, RENTAL_INSURANCE_PROVIDER_STATUSES, RENTAL_PRICING_UNIT_CODES, RENTAL_SERVICE_BILLING_UNITS, RENTAL_SERVICE_SELECTION_MODES, type RentalCurrency, type RentalDayType, type RentalDiscountTarget, type RentalInsuranceProviderStatus, type RentalPricingUnit, type RentalServiceMandatoryRule, type RentalServiceSelectionMode } from "@rental-os/shared";
+import { RENTAL_CURRENCY_CODES, RENTAL_DISCOUNT_TARGETS, RENTAL_DISCOUNT_TYPES, RENTAL_INSURANCE_PROVIDER_STATUSES, RENTAL_PAYMENT_METHOD_CODES, RENTAL_PRICING_UNIT_CODES, RENTAL_SERVICE_BILLING_UNITS, RENTAL_SERVICE_SELECTION_MODES, type RentalCurrency, type RentalDayType, type RentalDiscountTarget, type RentalInsuranceProviderStatus, type RentalPricingUnit, type RentalServiceMandatoryRule, type RentalServiceSelectionMode } from "@rental-os/shared";
 import type {
   ApplyOfficialCalendarSourceRequest,
   PublishRentalCalendarRequest,
@@ -217,6 +217,11 @@ export class BusinessSettingsPaymentInputDto {
 
   @IsBoolean()
   preauthorizationRequired!: boolean;
+
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsIn(RENTAL_PAYMENT_METHOD_CODES, { each: true })
+  enabledMethods!: (typeof RENTAL_PAYMENT_METHOD_CODES)[number][];
 }
 
 export class BusinessSettingsOverdueInputDto {

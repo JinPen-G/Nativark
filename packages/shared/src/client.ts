@@ -10,6 +10,8 @@ import type {
   CustomerMembershipBenefit,
   RentalBookingIdentityInput,
   RentalFulfillmentMode,
+  RentalOfflinePaymentMethod,
+  RentalPaymentMethod,
   RentalPricingUnit
 } from "./core";
 import type { CompleteFileUploadRequest, FileDownloadUrlSummary, FileUploadSessionSummary } from "./infrastructure";
@@ -319,7 +321,7 @@ export interface ClientPaymentCapabilitiesResponse {
   apiVersion: typeof CLIENT_API_VERSION;
   mode: "simulation_only" | "provider_pending" | "provider";
   realPaymentEnabled: boolean;
-  methods: Array<"simulation" | "alipay" | "wechat_pay">;
+  methods: Array<"simulation" | RentalPaymentMethod>;
   instruments: Array<"rental" | "deposit" | "preauthorization">;
 }
 
@@ -482,6 +484,7 @@ export interface ClientPaymentSimulationRequest {
   amount?: number;
   reason: string;
   failureCode?: string;
+  paymentMethod?: RentalOfflinePaymentMethod;
 }
 
 export interface ClientOrderView {

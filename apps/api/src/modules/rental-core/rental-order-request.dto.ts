@@ -809,6 +809,7 @@ export class SendRentalNotificationDto implements SendRentalNotificationRequest 
 /* ---------- RULE-01B：模拟资金事件（押金/预授权） ---------- */
 
 const FUNDING_INSTRUMENTS = ["deposit", "preauthorization", "rental"] as const;
+const OFFLINE_PAYMENT_METHODS = ["offline_cash", "offline_transfer"] as const;
 
 /** 发起押金收取 / 预授权冻结。发起后同订单同 instrument 不能再发起，追加请用 append。 */
 export class InitiateRentalFundingDto implements InitiateRentalFundingRequest {
@@ -822,6 +823,10 @@ export class InitiateRentalFundingDto implements InitiateRentalFundingRequest {
   @IsString()
   @IsNotEmpty()
   reason!: string;
+
+  @IsOptional()
+  @IsIn(OFFLINE_PAYMENT_METHODS)
+  paymentMethod?: (typeof OFFLINE_PAYMENT_METHODS)[number];
 }
 
 /** 追加、抵扣/转扣、退款：都带金额与幂等键。 */
@@ -840,6 +845,10 @@ export class RentalFundingAmountDto implements RentalFundingAmountRequest {
   @IsString()
   @IsNotEmpty()
   reason!: string;
+
+  @IsOptional()
+  @IsIn(OFFLINE_PAYMENT_METHODS)
+  paymentMethod?: (typeof OFFLINE_PAYMENT_METHODS)[number];
 }
 
 /** 释放预授权。金额可选：不传即释放当前全部剩余冻结额度，由服务端结算。 */
@@ -874,6 +883,10 @@ export class RentalFundingFailureDto implements RentalFundingFailureRequest {
   @IsString()
   @IsNotEmpty()
   reason!: string;
+
+  @IsOptional()
+  @IsIn(OFFLINE_PAYMENT_METHODS)
+  paymentMethod?: (typeof OFFLINE_PAYMENT_METHODS)[number];
 }
 
 export class RecordRentalInspectionExceptionCustomerResponseDto implements RecordRentalInspectionExceptionCustomerResponseRequest {
@@ -901,6 +914,10 @@ export class RefundRentalServiceDto implements RefundRentalServiceRequest {
   @IsNotEmpty()
   @MaxLength(1000)
   reason!: string;
+
+  @IsOptional()
+  @IsIn(OFFLINE_PAYMENT_METHODS)
+  paymentMethod?: (typeof OFFLINE_PAYMENT_METHODS)[number];
 }
 
 /**

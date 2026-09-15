@@ -372,6 +372,9 @@ export class ClientPaymentSimulationRequestDto implements ClientPaymentSimulatio
 
   @IsOptional() @IsString() @MaxLength(128)
   failureCode?: string;
+
+  @IsOptional() @IsIn(["offline_cash", "offline_transfer"])
+  paymentMethod?: ClientPaymentSimulationRequest["paymentMethod"];
 }
 
 export class ClientPaymentIntentRequestDto implements ClientPaymentIntentRequest {

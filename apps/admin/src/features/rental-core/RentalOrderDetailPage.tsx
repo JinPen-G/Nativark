@@ -1,9 +1,9 @@
 import { ArrowLeftOutlined, CheckCircleOutlined, DollarOutlined, MinusCircleOutlined, PlusOutlined, RetweetOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
-import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol, type AdjustRentalInspectionExceptionRequest, type ApplyRentalOrderChangeRequest, type CorrectRentalInspectionUsageRequest, type CreateRentalInspectionRequest, type PreviewRentalOrderChangeRequest, type RecordRentalInspectionExceptionCustomerResponseRequest, type RentalAllocation, type RentalFundingAction, type RentalFundingInstrument, type RentalInspectionTemplate, type RentalOrderExtension, type RentalOrderExtensionPreview, type RentalOrderFeeReview, type RentalOrderServiceOccurrence, type RentalReservation, type RentalServiceExecutionAction, type UpdateRentalServiceOccurrenceRequest, type RentalWorkOrder, type RentalStockDisposition } from "@rental-os/shared";
+import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol, type AdjustRentalInspectionExceptionRequest, type ApplyRentalOrderChangeRequest, type CorrectRentalInspectionUsageRequest, type CreateRentalInspectionRequest, type PreviewRentalOrderChangeRequest, type RecordRentalInspectionExceptionCustomerResponseRequest, type RentalAllocation, type RentalFundingAction, type RentalFundingInstrument, type RentalInspectionTemplate, type RentalOfflinePaymentMethod, type RentalOrderExtension, type RentalOrderExtensionPreview, type RentalOrderFeeReview, type RentalOrderServiceOccurrence, type RentalReservation, type RentalServiceExecutionAction, type UpdateRentalServiceOccurrenceRequest, type RentalWorkOrder, type RentalStockDisposition } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Button, Card, Checkbox, DatePicker, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { PageHeader } from "@/components/PageHeader";
@@ -59,6 +59,11 @@ const SERVICE_EXECUTION_STATUS_COLORS: Record<NonNullable<RentalOrderServiceOccu
   cancelled: "default",
   failed: "error",
   no_show: "warning"
+};
+
+const OFFLINE_PAYMENT_METHOD_LABELS: Record<RentalOfflinePaymentMethod, string> = {
+  offline_cash: "线下现金",
+  offline_transfer: "线下转账",
 };
 
 const SERVICE_EXECUTION_ORDER_STATUSES = [
@@ -120,7 +125,7 @@ export function RentalOrderDetailPage() {
   const [noShowForm] = Form.useForm<{ reason: string }>();
   const [substitutionForm] = Form.useForm<{ toItemGroupId: string }>();
   const [partialReturnForm] = Form.useForm<{ items: Array<{ allocationId: string; quantity: number }> }>();
-  const [fundingForm] = Form.useForm<{ amount?: number; reason: string; failureCode?: string }>();
+  const [fundingForm] = Form.useForm<{ amount?: number; reason: string; failureCode?: string; paymentMethod?: RentalOfflinePaymentMethod }>();
   const [exceptionReviewForm] = Form.useForm<{ decision: "approved" | "rejected"; approvedChargeAmount?: number; reason: string }>();
   const [exceptionCustomerResponseForm] = Form.useForm<RecordRentalInspectionExceptionCustomerResponseRequest>();
   const [exceptionAdjustmentForm] = Form.useForm<AdjustRentalInspectionExceptionRequest>();
@@ -137,11 +142,13 @@ export function RentalOrderDetailPage() {
   const [extensionPreview, setExtensionPreview] = useState<RentalOrderExtensionPreview>();
   const [extensionForm] = Form.useForm<{ newEndAt: Dayjs; memo?: string }>();
   const [serviceExecutionForm] = Form.useForm<{ executedQuantity?: number; result?: string; reason?: string; customerConfirmed?: boolean; refundAmount?: number; compensationAmount?: number; evidenceAttachments?: string }>();
-  const [serviceRefundForm] = Form.useForm<{ reason: string }>();
+  const [serviceRefundForm] = Form.useForm<{ reason: string; paymentMethod?: RentalOfflinePaymentMethod }>();
   const order = useQuery({ queryKey: ["rental-core", "order", id], queryFn: () => rentalCoreApi.order(id), enabled: Boolean(id) });
   const profile = useQuery({ queryKey: ["rental-core", "profile"], queryFn: rentalCoreApi.profile });
   const templates = useQuery({ queryKey: ["rental-core", "templates"], queryFn: () => rentalCoreApi.inspectionTemplates() });
   const groups = useQuery({ queryKey: ["rental-core", "groups"], queryFn: rentalCoreApi.itemGroups });
+  const businessSettings = useQuery({ queryKey: ["rental-core", "business-settings"], queryFn: rentalCoreApi.businessSettings });
+  const offlinePaymentMethods = useMemo<RentalOfflinePaymentMethod[]>(() => businessSettings.data?.payment.enabledMethods?.filter((method): method is RentalOfflinePaymentMethod => method === "offline_cash" || method === "offline_transfer") ?? ["offline_cash", "offline_transfer"], [businessSettings.data?.payment.enabledMethods]);
   const funding = useQuery({ queryKey: ["rental-core", "order", id, "funding"], queryFn: () => rentalCoreApi.fundingEvents(id), enabled: Boolean(id) && canViewFunding });
   const inspections = useQuery({ queryKey: ["rental-core", "order", id, "inspections"], queryFn: () => rentalCoreApi.inspections(id), enabled: Boolean(id) });
   const extensions = useQuery({ queryKey: ["rental-core", "order", id, "extensions"], queryFn: () => rentalCoreApi.orderExtensions(id), enabled: Boolean(id) });
@@ -156,6 +163,12 @@ export function RentalOrderDetailPage() {
     // 否则 Ant Design 会报 form instance 尚未连接到 Form。
     if (partialReturnOpen) partialReturnForm.setFieldsValue({ items: [{ allocationId: "", quantity: 1 }] });
   }, [partialReturnOpen, partialReturnForm]);
+  useEffect(() => {
+    if (fundingOperation) fundingForm.setFieldsValue({ paymentMethod: offlinePaymentMethods[0] ?? "offline_cash" });
+  }, [fundingOperation, fundingForm, offlinePaymentMethods]);
+  useEffect(() => {
+    if (serviceRefund) serviceRefundForm.setFieldsValue({ paymentMethod: offlinePaymentMethods[0] ?? "offline_cash" });
+  }, [serviceRefund, serviceRefundForm, offlinePaymentMethods]);
   const operationLock = useMutation({ mutationFn: (type: "acquire" | "release") => rentalCoreApi.operationLock(id, type, operationToken), onSuccess: async (result) => { setOperationToken(result.token); await refresh(); }, onError: (e: Error) => message.error(e.message) });
   const closeInspection = async () => {
     if (inspectionClosing || inspect.isPending) return;
@@ -214,13 +227,13 @@ export function RentalOrderDetailPage() {
   const partialReturn = useMutation({ mutationFn: (input: { items: Array<{ allocationId: string; quantity: number }> }) => rentalCoreApi.partialReturnOrder(id, { ...input, batchNo: crypto.randomUUID() }, operationToken), onSuccess: async () => { setPartialReturnOpen(false); setOperationToken(undefined); await refresh(); message.success("部分归还已完成，剩余项目继续在租"); }, onError: () => message.error("部分归还失败；最后一批请使用归还检查或整单归还") });
   const inspect = useMutation({ mutationFn: (values: Record<string, unknown> & { attachments?: string[]; exceptions?: CreateRentalInspectionRequest["exceptions"] }) => { const { attachments, exceptions, ...results } = values; return rentalCoreApi.createInspection(id, { templateId: inspection!.id, results, returnItems: inspectionReturnItems, returnBatchNo: inspectionReturnItems?.length ? crypto.randomUUID() : undefined, attachments, exceptions }, operationToken); }, onSuccess: async () => { const wasPartialReturn = Boolean(inspectionReturnItems?.length); inspectionForm.resetFields(); setInspection(undefined); setInspectionReturnItems(undefined); setOperationToken(undefined); await Promise.all([refresh(), queryClient.invalidateQueries({ queryKey: ["rental-core", "order", id, "inspections"] }), queryClient.invalidateQueries({ queryKey: ["rental-core", "work-orders", id] }), queryClient.invalidateQueries({ queryKey: ["rental-core", "stock-dispositions", id] })]); message.success(wasPartialReturn ? "本批归还检查已保存，剩余项目继续在租" : "检查记录已保存；异常建议须由结算人员审核后才计费"); }, onError: (error: Error) => message.error(error.message || "检查提交失败") });
   const fundingAction = useMutation({
-    mutationFn: async (values: { amount?: number; reason: string; failureCode?: string }) => {
+    mutationFn: async (values: { amount?: number; reason: string; failureCode?: string; paymentMethod?: RentalOfflinePaymentMethod }) => {
       const operation = fundingOperation!;
       const idempotencyKey = crypto.randomUUID();
-      if (operation.action === "initiate") return rentalCoreApi.initiateFunding(id, { instrument: operation.instrument, idempotencyKey, reason: values.reason });
+      if (operation.action === "initiate") return rentalCoreApi.initiateFunding(id, { instrument: operation.instrument, idempotencyKey, reason: values.reason, paymentMethod: values.paymentMethod });
       if (operation.action === "release") return rentalCoreApi.releaseFunding(id, { idempotencyKey, reason: values.reason });
-      if (operation.action === "fail") return rentalCoreApi.failFunding(id, { instrument: operation.instrument, failureCode: values.failureCode!, idempotencyKey, reason: values.reason });
-      const request = { instrument: operation.instrument, amount: Number(values.amount), idempotencyKey, reason: values.reason };
+      if (operation.action === "fail") return rentalCoreApi.failFunding(id, { instrument: operation.instrument, failureCode: values.failureCode!, idempotencyKey, reason: values.reason, paymentMethod: values.paymentMethod });
+      const request = { instrument: operation.instrument, amount: Number(values.amount), idempotencyKey, reason: values.reason, paymentMethod: values.paymentMethod };
       if (operation.action === "append") return rentalCoreApi.appendFunding(id, request);
       if (operation.action === "capture") return rentalCoreApi.captureFunding(id, request);
       return rentalCoreApi.refundFunding(id, request);
@@ -396,13 +409,14 @@ export function RentalOrderDetailPage() {
     onError: (error: Error) => message.error(error.message || "服务履约记录失败，请刷新后重试")
   });
   const refundService = useMutation({
-    mutationFn: (values: { reason: string }) => {
+    mutationFn: (values: { reason: string; paymentMethod?: RentalOfflinePaymentMethod }) => {
       const occurrence = serviceRefund;
       if (!occurrence?.occurrenceId || occurrence.refundAmount === undefined) throw new Error("服务退款事实不完整");
       return rentalCoreApi.refundServiceOccurrence(id, occurrence.occurrenceId, {
         amount: Number(occurrence.refundAmount),
         idempotencyKey: crypto.randomUUID(),
-        reason: values.reason
+        reason: values.reason,
+        paymentMethod: values.paymentMethod
       });
     },
     onSuccess: async () => {
@@ -771,6 +785,7 @@ export function RentalOrderDetailPage() {
           { title: "时间", dataIndex: "at", render: (value) => new Date(String(value)).toLocaleString() },
           { title: "对象", dataIndex: "instrument", render: (value) => FUNDING_INSTRUMENT_LABELS[value as RentalFundingInstrument] },
           { title: "动作", dataIndex: "action", render: (value) => FUNDING_ACTION_LABELS[value as RentalFundingAction] },
+          { title: "方式", dataIndex: "paymentMethod", render: (value) => OFFLINE_PAYMENT_METHOD_LABELS[value as RentalOfflinePaymentMethod] ?? "—" },
           { title: "金额", dataIndex: "amount", render: (value) => money(Number(value)) },
           { title: "事件后余额", dataIndex: "balanceAfter", render: (value) => money(Number(value)) },
           { title: "原因", dataIndex: "reason" },
@@ -944,6 +959,7 @@ export function RentalOrderDetailPage() {
       <Alert type="warning" showIcon title="本操作仅写入模拟资金流水，不会发起真实扣款或冻结。" style={{ marginBottom: 16 }} />
       <Form form={fundingForm} layout="vertical" onFinish={(values) => fundingAction.mutate(values)}>
         {fundingOperation && !["initiate", "release", "fail"].includes(fundingOperation.action) && <Form.Item name="amount" label="金额" rules={[{ required: true }]}><InputNumber min={0.01} precision={2} prefix={symbol} style={{ width: "100%" }} /></Form.Item>}
+        {fundingOperation && !["capture", "release"].includes(fundingOperation.action) && <Form.Item name="paymentMethod" label="收退款方式" rules={[{ required: true, message: "请选择收退款方式" }]}><Select options={offlinePaymentMethods.map((value) => ({ value, label: OFFLINE_PAYMENT_METHOD_LABELS[value] }))} /></Form.Item>}
         {fundingOperation?.action === "fail" && <Form.Item name="failureCode" label="失败原因码" rules={[{ required: true }]}><Input placeholder="例如 provider_timeout" /></Form.Item>}
         <Form.Item name="reason" label="操作原因" rules={[{ required: true }]}><Input.TextArea rows={3} /></Form.Item>
       </Form>
@@ -1064,6 +1080,9 @@ export function RentalOrderDetailPage() {
       />
       <Form form={serviceRefundForm} layout="vertical" onFinish={(values) => refundService.mutate(values)}>
         <Form.Item label="已批准金额"><InputNumber disabled value={serviceRefund?.refundAmount} precision={2} prefix={symbol} style={{ width: "100%" }} /></Form.Item>
+        <Form.Item name="paymentMethod" label="退款方式" rules={[{ required: true, message: "请选择退款方式" }]}>
+          <Select options={offlinePaymentMethods.map((value) => ({ value, label: OFFLINE_PAYMENT_METHOD_LABELS[value] }))} />
+        </Form.Item>
         <Form.Item name="reason" label="退款办理原因" rules={[{ required: true, whitespace: true, message: "请填写退款办理原因" }]}>
           <Input.TextArea rows={3} placeholder="例如：服务退款审核已通过，现办理模拟退款" />
         </Form.Item>

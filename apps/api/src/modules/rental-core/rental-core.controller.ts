@@ -2057,7 +2057,7 @@ export class RentalCoreController {
           tenantId,
           this.service.resolveWorkspaceId(tenantId),
           id,
-          { instrument: "rental", action: "refund", amount: body.amount, idempotencyKey: fundingIdempotencyKey, reason: body.reason },
+          { instrument: "rental", action: "refund", amount: body.amount, idempotencyKey: fundingIdempotencyKey, reason: body.reason, paymentMethod: this.service.resolveOfflinePaymentMethod(tenantId, body.paymentMethod) },
           req.user.displayName,
           tx
         );

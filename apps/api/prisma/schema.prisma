@@ -2356,6 +2356,8 @@ model RentalFundingEvent {
   /// 该 instrument 在本事件后的余额，落库便于对账，避免每次都重放全流水。
   balanceAfter   Decimal           @db.Decimal(12, 2)
   provider       String            @default("mock")
+    /// offline_cash / offline_transfer；预授权内部动作和 Provider 回调可以为空。
+  paymentMethod  String?           @db.VarChar(24)
   idempotencyKey String
   reason         String            @db.VarChar(500)
   operator       String?

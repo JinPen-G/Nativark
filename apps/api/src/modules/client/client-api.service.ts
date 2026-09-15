@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional, UnauthorizedException } from "@nestjs/common";
 import {
   CLIENT_API_VERSION,
+  DEFAULT_RENTAL_PAYMENT_METHODS,
   type ClientConfigResponse,
   type ClientContactRequest,
   type ClientContactView,
@@ -28,6 +29,7 @@ import {
   type CreateRentalOrderRequest,
   type CustomerMembershipPlanAssignment,
   type RentalOrder,
+  type RentalPaymentMethod,
   type RentalQuoteRequest
 } from "@rental-os/shared";
 import { Prisma } from "@prisma/client";
@@ -236,7 +238,7 @@ export class ClientApiService {
     const integrationCatalog = await this.tenantIntegrations.catalog(context.tenantId);
     const smsConfigured = integrationCatalog.configs.some((item) => item.capability === "sms" && item.enabled && item.isDefault);
     const smsReady = integrationCatalog.configs.some((item) => item.capability === "sms" && item.enabled && item.isDefault && item.lastTestStatus === "passed" && item.lastTestMode === "live");
-    const payment = this.buildPaymentCapabilities(integrationCatalog.configs);
+    const payment = this.buildPaymentCapabilities(integrationCatalog.configs, business.settings.payment.enabledMethods);
     return {
       apiVersion: CLIENT_API_VERSION,
       tenantCode: context.tenantCode,
@@ -267,10 +269,15 @@ export class ClientApiService {
     };
   }
 
-  private buildPaymentCapabilities(configs: Array<{ capability: string; provider: string; enabled: boolean; isDefault?: boolean; lastTestStatus?: string; lastTestMode?: string }> = []): ClientPaymentCapabilitiesResponse {
+  private buildPaymentCapabilities(
+    configs: Array<{ capability: string; provider: string; enabled: boolean; isDefault?: boolean; lastTestStatus?: string; lastTestMode?: string }> = [],
+    configuredMethods: RentalPaymentMethod[] = DEFAULT_RENTAL_PAYMENT_METHODS
+  ): ClientPaymentCapabilitiesResponse {
     const development = process.env.NODE_ENV !== "production";
+    const enabledMethods = [...new Set(configuredMethods?.length ? configuredMethods : DEFAULT_RENTAL_PAYMENT_METHODS)];
+    const offlineMethods = enabledMethods.filter((method): method is "offline_cash" | "offline_transfer" => method === "offline_cash" || method === "offline_transfer");
     const providerMethods = configs
-      .filter((item) => item.capability === "payment" && item.enabled && item.isDefault && item.lastTestStatus === "passed" && item.lastTestMode === "live")
+      .filter((item) => item.capability === "payment" && item.enabled && item.isDefault && item.lastTestStatus === "passed" && item.lastTestMode === "live" && enabledMethods.includes(item.provider as RentalPaymentMethod))
       .map((item) => item.provider)
       .filter((item): item is "alipay" | "wechat_pay" => item === "alipay" || item === "wechat_pay");
     if (providerMethods.length > 0) {
@@ -278,25 +285,26 @@ export class ClientApiService {
         apiVersion: CLIENT_API_VERSION,
         mode: "provider",
         realPaymentEnabled: true,
-        methods: [...new Set(providerMethods)],
+        methods: [...new Set([...offlineMethods, ...providerMethods])],
         // 首批支付宝/微信适配器只做普通租金收款；押金/预授权必须继续走独立资金能力，
         // 不能因为“已配置支付平台”就在客户端宣称三类资金都能真实处理。
         instruments: ["rental"]
       };
     }
-    const providerPending = configs.some((item) => item.capability === "payment" && item.enabled && item.isDefault);
+    const providerPending = configs.some((item) => item.capability === "payment" && item.enabled && item.isDefault && (item.provider === "alipay" || item.provider === "wechat_pay") && enabledMethods.includes(item.provider));
     return {
       apiVersion: CLIENT_API_VERSION,
       mode: providerPending || !development ? "provider_pending" : "simulation_only",
       realPaymentEnabled: false,
-      methods: development ? ["simulation"] : [],
+      methods: [...offlineMethods, ...(development ? ["simulation" as const] : [])],
       instruments: ["rental", "deposit", "preauthorization"]
     };
   }
 
   async paymentCapabilities(context: ClientRequestContext): Promise<ClientPaymentCapabilitiesResponse> {
+    const business = this.context(context.tenantId);
     const catalog = await this.tenantIntegrations.catalog(context.tenantId);
-    return this.buildPaymentCapabilities(catalog.configs);
+    return this.buildPaymentCapabilities(catalog.configs, business.settings.payment.enabledMethods);
   }
 
   async profile(context: ClientRequestContext): Promise<ClientProfileView> {
@@ -850,12 +858,18 @@ export class ClientApiService {
     await this.assertClientOrder(context, orderId);
     const key = idempotencyKeyOf(requestContext);
     if (!key) throw new BadRequestException("资金操作必须提供 Idempotency-Key");
-    return this.fundingService.recordEvent(context.tenantId, context.workspaceId, orderId, { ...input, idempotencyKey: key }, `client:${context.customerId}`);
+    const needsMethod = ["initiate", "append", "refund", "fail"].includes(input.action);
+    const paymentMethod = needsMethod ? this.core.resolveOfflinePaymentMethod(context.tenantId, input.paymentMethod) : undefined;
+    return this.fundingService.recordEvent(context.tenantId, context.workspaceId, orderId, { ...input, idempotencyKey: key, paymentMethod }, `client:${context.customerId}`);
   }
 
   async createPaymentIntent(context: ClientRequestContext, orderId: string, input: ClientPaymentIntentRequest) {
     this.requireActiveMembership(context);
     await this.assertClientOrder(context, orderId);
+    const enabledMethods = this.context(context.tenantId).settings.payment.enabledMethods;
+    if (!(enabledMethods?.length ? enabledMethods : DEFAULT_RENTAL_PAYMENT_METHODS).includes(input.method)) {
+      throw new ConflictException("该线上支付方式尚未在经营空间设置中启用");
+    }
     return this.payments.createPaymentIntent(context.tenantId, context.workspaceId, orderId, input);
   }
 

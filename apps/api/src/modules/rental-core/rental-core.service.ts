@@ -13,7 +13,10 @@ import {
   type CapabilityEquipmentGroup
 } from "./capability-equipment";
 import {
+  DEFAULT_RENTAL_PAYMENT_METHODS,
   RENTAL_CATEGORY_DEFINITIONS,
+  RENTAL_OFFLINE_PAYMENT_METHOD_CODES,
+  RENTAL_PAYMENT_METHOD_CODES,
   RentalAssetStatus,
   type RentalAttributeDefinition,
   RentalCategoryCode,
@@ -33,6 +36,8 @@ import {
   type RentalCapability,
   type RentalCategoryDefinition,
   type RentalCurrency,
+  type RentalOfflinePaymentMethod,
+  type RentalPaymentMethod,
   type RentalCouponTemplate,
   type RentalFulfillmentOperator,
   type RentalFulfillmentLocation,
@@ -205,7 +210,8 @@ function defaultBusinessSettings(
     payment: {
       timing: defaults.payment.timing,
       depositMode: supportsPreauthorization ? "preauthorization" : "fixed",
-      preauthorizationRequired: supportsPreauthorization
+      preauthorizationRequired: supportsPreauthorization,
+      enabledMethods: [...DEFAULT_RENTAL_PAYMENT_METHODS]
     },
     overdue: {
       ...defaults.overdue
@@ -582,13 +588,32 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       }
     };
   }
-  getBusinessSettings(tenantId: string) { return this.state(tenantId).businessSettings; }
+  getBusinessSettings(tenantId: string) {
+    const settings = this.state(tenantId).businessSettings;
+    // 兼容已经落库、但还没有 enabledMethods 的旧 JSON 设置；读路径先给出明确默认值，
+    // 下次保存时再把它持久化，避免存量空间突然变成“没有任何可用收款方式”。
+    if (settings.payment.enabledMethods?.length) return settings;
+    return { ...settings, payment: { ...settings.payment, enabledMethods: [...DEFAULT_RENTAL_PAYMENT_METHODS] } };
+  }
+
+  /** 运营后台登记资金事实前，统一校验实际采用的线下收款方式。 */
+  resolveOfflinePaymentMethod(tenantId: string, requested?: RentalOfflinePaymentMethod): RentalOfflinePaymentMethod {
+    const method = requested ?? "offline_cash";
+    if (!RENTAL_OFFLINE_PAYMENT_METHOD_CODES.includes(method)) throw new BadRequestException("不支持的线下收款方式");
+    const enabled = this.getBusinessSettings(tenantId).payment.enabledMethods;
+    if (!enabled.includes(method)) throw new ConflictException("该线下收款方式尚未在经营空间设置中启用");
+    return method;
+  }
 
   async saveBusinessSettings(tenantId: string, input: SaveTenantRentalBusinessSettingsRequest, operator: string) {
     const state = this.state(tenantId);
     const definition = this.category(state.profile.categoryCode);
     const pricingUnits = new Set(definition.businessModel.pricingUnits);
     const fulfillmentModes = new Set(definition.businessModel.fulfillmentModes);
+    const enabledPaymentMethods = input.payment.enabledMethods?.length ? input.payment.enabledMethods : DEFAULT_RENTAL_PAYMENT_METHODS;
+    if (!enabledPaymentMethods.length || enabledPaymentMethods.some((method) => !RENTAL_PAYMENT_METHOD_CODES.includes(method))) {
+      throw new BadRequestException("至少启用一种有效的收款方式");
+    }
     if (!input.pricing.enabledUnits.length || input.pricing.enabledUnits.some((unit) => !pricingUnits.has(unit))) {
       throw new BadRequestException("存在当前经营品类不支持的计价单位");
     }
@@ -640,6 +665,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (!input.notifications.editableChannels.length || input.notifications.enabledEvents.some((event) => !supportedNotificationEvents.has(event))) throw new BadRequestException("通知渠道不能为空，且只能启用已注册的系统事件");
     const nextSettings = {
       ...input,
+      payment: { ...input.payment, enabledMethods: [...new Set(enabledPaymentMethods)] as RentalPaymentMethod[] },
       tenantId,
       categoryCode: definition.code,
       configVersion: definition.version,

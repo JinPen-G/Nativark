@@ -5,7 +5,8 @@ import type {
   RentalFundingAction,
   RentalFundingBalance,
   RentalFundingEvent,
-  RentalFundingInstrument
+  RentalFundingInstrument,
+  RentalOfflinePaymentMethod
 } from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 import { aggregatePendingExtensionFunding, assertActionApplies, deriveFundingLedgers, nextBalanceAfter, rentalPaymentBalance } from "./rental-funding-events";
@@ -56,6 +57,9 @@ export class RentalFundingService {
       amount: Number(row.amount),
       balanceAfter: Number(row.balanceAfter),
       provider: row.provider as RentalFundingEvent["provider"],
+      // 预授权转扣/释放和第三方回调不是线下收退款，不应伪装成现金。
+      // 旧流水允许为空，读回时保持为空；只有外部人工收退款才会带 paymentMethod。
+      paymentMethod: row.paymentMethod ? (row.paymentMethod as RentalOfflinePaymentMethod) : undefined,
       idempotencyKey: row.idempotencyKey,
       reason: row.reason,
       operator: row.operator ?? undefined,
@@ -228,6 +232,7 @@ export class RentalFundingService {
       reason: string;
       failureCode?: string;
       provider?: RentalFundingEvent["provider"];
+      paymentMethod?: RentalOfflinePaymentMethod;
     },
     operator?: string,
     tx?: Prisma.TransactionClient
@@ -324,6 +329,8 @@ export class RentalFundingService {
           amount: new Prisma.Decimal(effectiveAmount),
           balanceAfter: new Prisma.Decimal(balanceAfter),
           provider: input.provider ?? "mock",
+          // 内部资金动作以及真实 Provider 回调不属于线下收退款，保持 NULL。
+          paymentMethod: input.paymentMethod ?? null,
           idempotencyKey: key,
           reason,
           operator: operator ?? null,

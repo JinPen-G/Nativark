@@ -5,7 +5,7 @@ import {
   SaveOutlined,
   TeamOutlined,
 } from "@ant-design/icons";
-import { RENTAL_CURRENCY_CODES, RENTAL_CURRENCY_META, RENTAL_PRICING_UNIT_LABELS, formatRentalMoney } from "@rental-os/shared";
+import { DEFAULT_RENTAL_PAYMENT_METHODS, RENTAL_CURRENCY_CODES, RENTAL_CURRENCY_META, RENTAL_PAYMENT_METHOD_CODES, RENTAL_PRICING_UNIT_LABELS, formatRentalMoney } from "@rental-os/shared";
 import type {
   GrantRentalRewardRequest,
   RentalCalendarDay,
@@ -59,6 +59,13 @@ type TabKey =
   | "calendar"
   | "membership"
   | "notifications";
+
+const PAYMENT_METHOD_LABELS: Record<(typeof RENTAL_PAYMENT_METHOD_CODES)[number], string> = {
+  offline_cash: "线下现金",
+  offline_transfer: "线下转账",
+  alipay: "支付宝",
+  wechat_pay: "微信支付",
+};
 type TemplateForm = Omit<
   SaveRentalNotificationTemplateRequest,
   "variableSchema"
@@ -358,6 +365,12 @@ export function RentalGovernancePage() {
     if (settings.data && category) {
       settingsForm.setFieldsValue({
         ...settings.data,
+        payment: {
+          ...settings.data.payment,
+          enabledMethods: settings.data.payment.enabledMethods?.length
+            ? settings.data.payment.enabledMethods
+            : [...DEFAULT_RENTAL_PAYMENT_METHODS],
+        },
         allocation: settings.data.allocation ?? {
           autoPreassign: false,
           preassignDays: 7,
@@ -1032,6 +1045,19 @@ export function RentalGovernancePage() {
                           </Form.Item>
                         </Col>
                       </Row>
+                      <Form.Item
+                        name={["payment", "enabledMethods"]}
+                        label="启用收款方式"
+                        tooltip="线下现金和线下转账可直接登记；支付宝、微信还必须在租户集成设置中完成账号配置、启用并通过实时校验后，客户端才会展示为可用。"
+                      >
+                        <Select
+                          mode="multiple"
+                          options={RENTAL_PAYMENT_METHOD_CODES.map((value) => ({
+                            value,
+                            label: PAYMENT_METHOD_LABELS[value],
+                          }))}
+                        />
+                      </Form.Item>
                       <Form.Item
                         name={["payment", "preauthorizationRequired"]}
                         label="必须预授权"
