@@ -44,6 +44,8 @@
     "db:seed": "node scripts/run-api-with-root-env.cjs prisma:seed",
     "db:comments": "node scripts/apply-column-comments.cjs",
     "db:comments:dry-run": "node scripts/apply-column-comments.cjs --dry-run",
+    "db:comments:repair": "node scripts/apply-column-comments.cjs --repair-fallbacks",
+    "db:comments:repair:dry-run": "node scripts/apply-column-comments.cjs --repair-fallbacks --dry-run",
     "db:seed:demo": "node scripts/seed-demo-tenant.cjs",
     "ops:mysql:setup": "powershell -ExecutionPolicy Bypass -File scripts/setup-local-mysql.ps1",
     "ops:preflight": "node scripts/ops/preflight.cjs",
