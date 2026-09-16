@@ -635,6 +635,9 @@ const tableFieldLabels = {
     benefits: "会员权益 JSON",
     disableReason: "版本停用原因"
   },
+  customer_qualification_revisions: {
+    applicableScope: "资质适用范围 JSON"
+  },
   rental_business_state_snapshots: {
     state: "业务状态快照 JSON"
   },
@@ -925,6 +928,7 @@ const knownIncorrectComments = {
   "rental_order_document_snapshots.snapshotAt": ["业务快照 JSON时间"],
   "customer_membership_plan_versions.eligibility": ["资格条件"],
   "customer_membership_plan_versions.benefits": ["权益"],
+  "customer_qualification_revisions.applicableScope": ["适用范围"],
   "rental_business_state_snapshots.state": ["状态"],
   "rental_core_state_snapshots.state": ["状态"],
   "rental_category_definitions.businessModel": ["业务型号"],
