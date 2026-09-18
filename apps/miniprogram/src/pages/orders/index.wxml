@@ -1,0 +1,42 @@
+<view class="screen screen--flat">
+  <nav-bar></nav-bar>
+
+  <view class="section">
+    <view class="title--page">我的订单</view>
+    <scroll-view wx:if="{{signedIn}}" class="tabs mt-8" scroll-x enhanced show-scrollbar="{{false}}">
+      <view class="tab {{filter === item.key ? 'tab--active' : ''}}" wx:for="{{filters}}" wx:key="key" data-key="{{item.key}}" bindtap="onFilterTap">{{item.label}}</view>
+    </scroll-view>
+  </view>
+
+  <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
+
+  <view wx:else class="section section--tight">
+    <view class="card order" wx:for="{{visible}}" wx:key="orderId">
+      <view class="row row--top">
+        <view class="order__thumb" data-id="{{item.orderId}}" bindtap="onOpen">
+          <image wx:if="{{item.imagePath}}" src="{{item.imagePath}}" mode="aspectFill"></image>
+          <view wx:else class="order__thumb-icon"><ui-icon name="{{item.icon}}" size="48" color="#8A94A6" stroke="1.5"></ui-icon></view>
+        </view>
+        <view class="grow" data-id="{{item.orderId}}" bindtap="onOpen">
+          <view class="row row--between row--top">
+            <view class="subtitle grow ellipsis">{{item.itemName}}</view>
+            <status-tag label="{{item.presentation.label}}" tone="{{item.presentation.tone}}" small="{{true}}"></status-tag>
+          </view>
+          <view wx:if="{{item.itemExtra}}" class="muted small mt-4">{{item.itemExtra}}</view>
+          <view class="muted small mt-4">订单号：{{item.orderNo}}</view>
+          <view class="muted small mt-4">{{item.period}}</view>
+          <view class="mt-8"><money-text amount="{{item.amount}}" currency="{{item.currency}}" size="normal"></money-text></view>
+        </view>
+      </view>
+      <view wx:if="{{item.presentation.sub.length}}" class="row gap-8 mt-12">
+        <status-tag wx:for="{{item.presentation.sub}}" wx:for-item="sub" wx:key="*this" label="{{sub}}" tone="warning" small="{{true}}"></status-tag>
+      </view>
+      <view class="order__actions mt-16">
+        <button class="btn btn--small" hover-class="btn-hover" data-id="{{item.orderId}}" bindtap="onOpen">查看详情</button>
+        <button wx:if="{{item.canReorder}}" class="btn btn--small btn--primary ml-12" hover-class="btn-hover" data-id="{{item.orderId}}" bindtap="onReorder">再次下单</button>
+      </view>
+    </view>
+    <view wx:if="{{loadingMore}}" class="muted small center mt-16">加载中…</view>
+    <view wx:elif="{{!hasMore && visible.length}}" class="muted small center mt-16">没有更多订单了</view>
+  </view>
+</view>

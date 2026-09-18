@@ -1,0 +1,107 @@
+<view class="screen">
+  <nav-bar></nav-bar>
+
+  <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
+
+  <block wx:else>
+    <view class="gallery">
+      <swiper wx:if="{{images.length}}" class="gallery__swiper" bindchange="onSwiperChange">
+        <swiper-item wx:for="{{images}}" wx:key="*this">
+          <image class="gallery__img" src="{{item}}" mode="aspectFit" bindtap="onPreview"></image>
+        </swiper-item>
+      </swiper>
+      <view wx:else class="gallery__placeholder">{{imageTotal ? '图片加载中' : '暂无图片'}}</view>
+      <view class="gallery__back" hover-class="btn-hover" bindtap="onBack"><ui-icon name="chevron-left" size="40" color="#1F2329" stroke="2.2"></ui-icon></view>
+      <view class="gallery__tools">
+        <view class="gallery__tool" hover-class="btn-hover" bindtap="onFavorite"><ui-icon name="heart" size="40" color="{{favorite ? '#FF4D3A' : '#1F2329'}}" filled="{{favorite}}" stroke="1.8"></ui-icon></view>
+        <button class="gallery__tool gallery__tool--share" open-type="share" hover-class="btn-hover"><ui-icon name="share" size="38" color="#1F2329" stroke="1.8"></ui-icon></button>
+      </view>
+      <view wx:if="{{images.length > 1}}" class="gallery__counter">{{imageIndex + 1}}/{{images.length}}</view>
+    </view>
+
+    <view class="section section--surface">
+      <view class="title">{{item.name}}</view>
+      <view class="mt-12">
+        <view wx:if="{{hasPrice}}" class="price price--large"><text class="price__symbol">{{priceSymbol}}</text><text class="price__number">{{priceNumber}}</text><text class="price__unit">{{priceUnit}}</text></view>
+        <view wx:else class="price--pending">参考价以租期报价为准</view>
+      </view>
+      <view class="muted small mt-8">押金以确认页报价为准 <text class="muted">|</text> {{inventoryLabel}}</view>
+      <view wx:if="{{tags.length}}" class="row row--wrap mt-16">
+        <view class="chip chip--soft mt-8" wx:for="{{tags}}" wx:key="*this">{{item}}</view>
+      </view>
+    </view>
+
+    <view wx:if="{{item.description}}" class="section section--surface">
+      <view class="section-title">商品简介</view>
+      <view class="body muted mt-12">{{item.description}}</view>
+    </view>
+
+    <view wx:if="{{specs.length}}" class="section section--surface">
+      <view class="row row--between" bindtap="onShowSpecs">
+        <view class="section-title">主要参数</view>
+        <ui-icon name="chevron-right" size="32" color="#B4BBC8"></ui-icon>
+      </view>
+      <view class="stats mt-16">
+        <view class="stats__item" wx:for="{{specs}}" wx:key="label">
+          <view class="stats__label ellipsis">{{item.label}}</view>
+          <view class="stats__value ellipsis">{{item.value}}</view>
+        </view>
+      </view>
+    </view>
+
+    <view wx:if="{{scenes.length}}" class="section section--surface">
+      <view class="section-title">适用场景</view>
+      <view class="row row--wrap mt-8">
+        <view class="chip mt-8" wx:for="{{scenes}}" wx:key="*this">{{item}}</view>
+      </view>
+    </view>
+
+    <view wx:if="{{components.length}}" class="section section--surface">
+      <view class="section-title">套装组成</view>
+      <view class="cell" wx:for="{{components}}" wx:key="name">
+        <view class="cell__body">
+          <view class="cell__title">{{item.name}} × {{item.quantity}}</view>
+          <view class="cell__desc">{{item.optional ? '可选组件' : '必含组件'}}</view>
+        </view>
+      </view>
+    </view>
+
+    <view wx:if="{{qualificationNotes.length}}" class="section section--surface">
+      <view class="notice notice--warning" wx:for="{{qualificationNotes}}" wx:key="*this">{{item}}</view>
+    </view>
+
+    <view wx:if="{{store}}" class="section section--surface">
+      <view class="section-title">服务门店</view>
+      <view class="row mt-16" hover-class="btn-hover" bindtap="onStoreTap">
+        <view class="store__icon"><ui-icon name="store" size="48" color="#1677FF" stroke="1.6"></ui-icon></view>
+        <view class="grow">
+          <view class="subtitle ellipsis">{{store.name}}</view>
+          <view class="muted small ellipsis mt-4">{{store.address || '地址以门店信息为准'}}</view>
+        </view>
+        <ui-icon name="chevron-right" size="32" color="#B4BBC8"></ui-icon>
+      </view>
+    </view>
+
+    <view class="bottom-bar">
+      <button class="btn btn--outline btn--cta grow" hover-class="btn-hover" bindtap="onContact"><ui-icon name="headset" size="34" color="#1677FF"></ui-icon><text class="ml-8">联系客服</text></button>
+      <button class="btn btn--primary btn--cta grow ml-16" hover-class="btn-hover" bindtap="onReserve">立即预约</button>
+    </view>
+
+    <sheet visible="{{showOptionSheet}}" title="选择租赁选项" bind:close="onCloseOptions">
+      <view class="option {{optionId === item.id ? 'option--selected' : ''}}" wx:for="{{options}}" wx:key="id" data-id="{{item.id}}" bindtap="onPickOption">
+        <view class="grow">
+          <view class="subtitle">{{item.name}}</view>
+          <view class="muted small">商户在该选项允许的型号范围内安排设备</view>
+        </view>
+        <view class="option__check"></view>
+      </view>
+    </sheet>
+
+    <sheet visible="{{showSpecSheet}}" title="全部参数" bind:close="onCloseSpecs">
+      <view class="kv" wx:for="{{allSpecs}}" wx:key="label">
+        <view class="kv__label">{{item.label}}</view>
+        <view class="kv__value">{{item.value}}</view>
+      </view>
+    </sheet>
+  </block>
+</view>

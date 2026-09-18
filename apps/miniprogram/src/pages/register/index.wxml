@@ -1,0 +1,70 @@
+<view class="screen screen--flat">
+  <nav-bar title="注册账号"></nav-bar>
+  <view class="section">
+    <view class="muted">一个账号可租用本商户全部服务；商户可能需要审核后才能开始租赁。</view>
+  </view>
+
+  <block wx:if="{{step === 'form'}}">
+    <view class="section section--tight">
+      <view class="card">
+        <view class="field">
+          <view class="field__label field__label--required">姓名</view>
+          <view class="field__control"><input class="field__input" maxlength="120" placeholder="真实姓名" placeholder-class="search__placeholder" value="{{name}}" data-field="name" bindinput="onInput" /></view>
+          <view wx:if="{{errors.name}}" class="field__error">{{errors.name}}</view>
+        </view>
+        <view class="field">
+          <view class="field__label field__label--required">手机号</view>
+          <view class="field__control"><input class="field__input" type="number" maxlength="20" placeholder="用于登录与接收验证码" placeholder-class="search__placeholder" value="{{phone}}" data-field="phone" bindinput="onInput" /></view>
+          <view wx:if="{{errors.phone}}" class="field__error">{{errors.phone}}</view>
+        </view>
+        <view class="field">
+          <view class="field__label">邮箱（可选）</view>
+          <view class="field__control"><input class="field__input" type="text" maxlength="191" placeholder="用于接收订单通知" placeholder-class="search__placeholder" value="{{email}}" data-field="email" bindinput="onInput" /></view>
+          <view wx:if="{{errors.email}}" class="field__error">{{errors.email}}</view>
+        </view>
+        <view class="field">
+          <view class="field__label field__label--required">设置密码</view>
+          <view class="field__control"><input class="field__input" password maxlength="128" placeholder="8-128 位，含字母和数字" placeholder-class="search__placeholder" value="{{password}}" data-field="password" bindinput="onInput" /></view>
+          <view wx:if="{{errors.password}}" class="field__error">{{errors.password}}</view>
+        </view>
+      </view>
+    </view>
+
+    <view class="section">
+      <view class="consent">
+        <checkbox-group bindchange="onAgreeChange">
+          <label class="row row--top">
+            <checkbox value="agree" checked="{{agreed}}" color="#1677FF"></checkbox>
+            <view class="grow">我已阅读并同意<text class="consent__link" catchtap="onOpenAgreement">《{{agreementName}}》</text>和<text class="consent__link" catchtap="onOpenPrivacy">《{{privacyName}}》</text></view>
+          </label>
+        </checkbox-group>
+      </view>
+      <view wx:if="{{formError}}" class="notice notice--danger mb-16">{{formError}}</view>
+      <button class="btn btn--primary btn--cta btn--block" hover-class="btn-hover" bindtap="onSendCode" disabled="{{submitting || retryAfter > 0}}">{{submitting ? '发送中…' : retryAfter > 0 ? retryAfter + ' 秒后可重发' : '获取短信验证码'}}</button>
+      <button class="btn btn--ghost btn--block mt-16" hover-class="btn-hover" bindtap="onLogin">已有账号？去登录</button>
+    </view>
+  </block>
+
+  <block wx:else>
+    <view class="section section--tight">
+      <view class="card">
+        <view class="body">验证码已发送至 <text class="strong">{{maskedDestination}}</text></view>
+        <view wx:if="{{deliveryMode === 'development'}}" class="notice notice--warning mt-16">开发环境未接入短信服务，本次验证码：{{developmentCode}}（生产环境不会显示）</view>
+        <view wx:elif="{{deliveryMode === 'provider_pending'}}" class="notice notice--warning mt-16">商户短信服务尚未验证，验证码可能无法送达，请联系商户。</view>
+        <view class="field mt-16">
+          <view class="field__label field__label--required">验证码</view>
+          <view class="field__control"><input class="field__input" type="number" maxlength="6" placeholder="6 位数字" placeholder-class="search__placeholder" value="{{code}}" data-field="code" bindinput="onInput" /></view>
+          <view wx:if="{{errors.code}}" class="field__error">{{errors.code}}</view>
+        </view>
+      </view>
+    </view>
+    <view class="section">
+      <view wx:if="{{formError}}" class="notice notice--danger mb-16">{{formError}}</view>
+      <button class="btn btn--primary btn--cta btn--block" hover-class="btn-hover" bindtap="onSubmit" disabled="{{submitting}}">{{submitting ? '提交中…' : '完成注册'}}</button>
+      <view class="btn-row mt-16">
+        <button class="btn" hover-class="btn-hover" bindtap="onBackToForm">修改信息</button>
+        <button class="btn" hover-class="btn-hover" bindtap="onSendCode" disabled="{{submitting || retryAfter > 0}}">{{retryAfter > 0 ? retryAfter + ' 秒后重发' : '重发验证码'}}</button>
+      </view>
+    </view>
+  </block>
+</view>

@@ -1,0 +1,59 @@
+<view class="screen">
+  <nav-bar title="付款"></nav-bar>
+  <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
+
+  <block wx:elif="{{order}}">
+    <view wx:if="{{fromCheckout}}" class="section">
+      <view class="notice notice--success">预约已提交，单号 {{order.orderNo}}。{{dueAmount > 0 ? '请完成付款，商户随后为你安排设备。' : '商户确认后将安排设备。'}}</view>
+    </view>
+
+    <view class="section section--tight">
+      <view class="card">
+        <view class="row row--between">
+          <view class="subtitle">{{purpose}}</view>
+          <status-tag label="{{order.status === 'draft' ? '待支付' : '订单进行中'}}" tone="{{order.status === 'draft' ? 'warning' : 'info'}}"></status-tag>
+        </view>
+        <view class="pay-amount mt-16"><money-text amount="{{dueAmount}}" currency="{{currency}}" size="large" tone="primary"></money-text></view>
+        <view class="kv mt-8"><view class="kv__label">订单号</view><view class="kv__value">{{order.orderNo}}</view></view>
+        <view class="kv"><view class="kv__label">设备</view><view class="kv__value">{{order.lines[0].itemGroupName}}{{order.lines.length > 1 ? ' 等 ' + order.lines.length + ' 种' : ''}}</view></view>
+        <view class="kv"><view class="kv__label">租赁应付</view><view class="kv__value"><money-text amount="{{funding.rental.payable}}" currency="{{currency}}" size="small"></money-text></view></view>
+        <view wx:if="{{funding.rental.pendingExtensionAmount > 0}}" class="kv"><view class="kv__label">待生效续租补款</view><view class="kv__value"><money-text amount="{{funding.rental.pendingExtensionAmount}}" currency="{{currency}}" size="small"></money-text></view></view>
+        <view class="kv"><view class="kv__label">已付</view><view class="kv__value"><money-text amount="{{collected}}" currency="{{currency}}" size="small"></money-text></view></view>
+      </view>
+    </view>
+
+    <view class="section section--tight">
+      <view class="card">
+        <view class="subtitle">押金与预授权（另行办理）</view>
+        <view class="kv mt-8"><view class="kv__label">应收押金 / 已收</view><view class="kv__value"><money-text amount="{{depositRequired}}" currency="{{currency}}" size="small"></money-text> / <money-text amount="{{depositCollected}}" currency="{{currency}}" size="small"></money-text></view></view>
+        <view class="kv"><view class="kv__label">应冻结预授权</view><view class="kv__value"><money-text amount="{{preAuthRequired}}" currency="{{currency}}" size="small"></money-text></view></view>
+        <view class="muted small mt-8">押金在领取前与商户线下办理；本次付款不包含押金。</view>
+      </view>
+    </view>
+
+    <view class="section section--tight">
+      <view class="card">
+        <view wx:if="{{phase === 'confirmed'}}" class="notice notice--success">{{phaseText || '付款已到账'}}</view>
+        <view wx:elif="{{phase === 'verifying' || phase === 'creating' || phase === 'paying'}}" class="notice notice--info">{{phaseText}}</view>
+        <view wx:elif="{{phase === 'unknown' || phase === 'capabilities-unknown'}}" class="notice notice--warning">{{phaseText}}</view>
+        <view wx:elif="{{phase === 'failed' || phase === 'unavailable'}}" class="notice notice--danger">{{phaseText}}</view>
+        <view wx:elif="{{phase === 'offline'}}" class="notice notice--neutral">商户当前支持的付款方式：{{offlineText}}。请按商户指引完成付款，到账后订单状态会更新；小程序显示的付款方式不代表已收款。</view>
+        <view wx:if="{{error}}" class="notice notice--danger mt-8">{{error}}</view>
+        <view wx:if="{{intent && intent.status === 'pending' && intentExpiresText}}" class="muted small mt-8">{{intentExpiresText}}（与订单付款截止不同）</view>
+
+        <block wx:if="{{dueAmount > 0 && phase !== 'confirmed'}}">
+          <button wx:if="{{jsapi && phase === 'idle' || jsapi && phase === 'failed'}}" class="btn btn--primary btn--cta btn--block mt-16" hover-class="btn-hover" bindtap="onPay">微信支付 {{dueText}}</button>
+          <button wx:if="{{phase === 'unknown' || phase === 'paying' || phase === 'capabilities-unknown'}}" class="btn btn--secondary btn--block mt-16" hover-class="btn-hover" bindtap="onRefresh">{{phase === 'capabilities-unknown' ? '重试' : '刷新结果'}}</button>
+          <button wx:if="{{intent && intent.status === 'pending' && phase === 'idle'}}" class="btn btn--ghost btn--block mt-8" hover-class="btn-hover" bindtap="onCloseIntent">关闭未支付的支付单</button>
+        </block>
+      </view>
+    </view>
+
+    <view class="section">
+      <view class="btn-row">
+        <button class="btn" hover-class="btn-hover" bindtap="onOrder">查看订单</button>
+        <button class="btn" hover-class="btn-hover" bindtap="onContact">联系商户</button>
+      </view>
+    </view>
+  </block>
+</view>

@@ -1,0 +1,50 @@
+<view class="screen screen--flat">
+  <nav-bar title="设置"></nav-bar>
+  <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
+
+  <block wx:elif="{{profile}}">
+    <view class="section">
+      <view class="card">
+        <view class="subtitle">个人资料</view>
+        <view class="field mt-8">
+          <view class="field__label field__label--required">姓名 / 称呼</view>
+          <view class="field__control"><input class="field__input" maxlength="120" value="{{name}}" data-field="name" bindinput="onInput" /></view>
+          <view wx:if="{{errors.name}}" class="field__error">{{errors.name}}</view>
+        </view>
+        <view class="field">
+          <view class="field__label">邮箱（可清空）</view>
+          <view class="field__control"><input class="field__input" maxlength="191" placeholder="用于接收订单通知" placeholder-class="search__placeholder" value="{{email}}" data-field="email" bindinput="onInput" /></view>
+          <view wx:if="{{errors.email}}" class="field__error">{{errors.email}}</view>
+        </view>
+        <view class="field">
+          <view class="field__label">手机号</view>
+          <view class="field__control muted">{{profile.phoneMasked}} · 已验证</view>
+          <view class="field__hint">本期不支持自助换绑，如需更换请<text class="link" catchtap="onContact">联系商户</text>。</view>
+        </view>
+        <view wx:if="{{profile.identityNoMasked}}" class="field">
+          <view class="field__label">证件号</view>
+          <view class="field__control muted">{{profile.identityNoMasked}}{{profile.identityVerified ? ' · 已核验' : ''}}</view>
+        </view>
+        <view wx:if="{{formError}}" class="notice notice--danger mt-8">{{formError}}</view>
+        <button class="btn btn--primary btn--block mt-16" hover-class="btn-hover" bindtap="onSave" disabled="{{saving}}">{{saving ? '保存中…' : '保存资料'}}</button>
+      </view>
+    </view>
+
+    <view class="section section--tight">
+      <view class="card">
+        <view class="row row--between">
+          <view class="subtitle">登录密码</view>
+          <view class="link tap-area" bindtap="onTogglePassword">{{showPassword ? '收起' : '修改密码'}}</view>
+        </view>
+        <block wx:if="{{showPassword}}">
+          <view class="field"><view class="field__label">当前密码</view><view class="field__control"><input class="field__input" password maxlength="128" value="{{currentPassword}}" data-field="currentPassword" bindinput="onInput" /></view></view>
+          <view class="field"><view class="field__label">新密码</view><view class="field__control"><input class="field__input" password maxlength="128" placeholder="8-128 位，含字母和数字" placeholder-class="search__placeholder" value="{{newPassword}}" data-field="newPassword" bindinput="onInput" /></view></view>
+          <view class="field"><view class="field__label">确认新密码</view><view class="field__control"><input class="field__input" password maxlength="128" value="{{newPasswordConfirm}}" data-field="newPasswordConfirm" bindinput="onInput" /></view></view>
+          <view wx:if="{{passwordError}}" class="notice notice--danger mt-8">{{passwordError}}</view>
+          <button class="btn btn--secondary btn--block mt-16" hover-class="btn-hover" bindtap="onChangePassword" disabled="{{passwordSaving}}">{{passwordSaving ? '提交中…' : '更新密码'}}</button>
+        </block>
+        <view wx:else class="muted small mt-8">忘记当前密码请联系商户重置。</view>
+      </view>
+    </view>
+  </block>
+</view>

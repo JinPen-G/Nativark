@@ -1,0 +1,5 @@
+.coupon { display: flex; align-items: center; background: #FFFFFF; border-radius: 20rpx; padding: 24rpx; box-shadow: 0 4rpx 16rpx rgba(31, 41, 55, 0.05); margin-bottom: 16rpx; }
+.coupon--muted { opacity: 0.6; }
+.coupon__value { width: 180rpx; display: flex; flex-direction: column; align-items: center; justify-content: center; border-right: 1rpx dashed #E5E9F0; padding-right: 16rpx; flex: 0 0 auto; }
+.coupon__number { color: #FF4D3A; font-size: 30rpx; font-weight: 700; }
+.coupon__threshold { color: #8A94A6; font-size: 22rpx; margin-top: 4rpx; }

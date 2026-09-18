@@ -1,0 +1,10 @@
+{
+  "enablePullDownRefresh": true,
+  "usingComponents": {
+    "nav-bar": "/components/nav-bar/index",
+    "state-view": "/components/state-view/index",
+    "money-text": "/components/money-text/index",
+    "status-tag": "/components/status-tag/index",
+    "sheet": "/components/sheet/index"
+  }
+}

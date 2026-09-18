@@ -1,0 +1,8 @@
+.profile { display: flex; align-items: center; padding: 16rpx 0; }
+.profile .avatar { width: 128rpx; height: 128rpx; background: #FFFFFF; box-shadow: 0 4rpx 16rpx rgba(31, 41, 55, 0.08); padding: 20rpx; }
+.member { display: flex; align-items: center; padding: 28rpx 32rpx; border-radius: 20rpx; background: linear-gradient(135deg, #223061 0%, #1A2447 60%, #131B38 100%); color: #FFFFFF; }
+.member__crown { width: 72rpx; height: 72rpx; border-radius: 50%; background: rgba(245, 193, 92, 0.16); display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+.member__title { font-size: 32rpx; font-weight: 700; margin-right: 12rpx; }
+.member__hint { font-size: 22rpx; opacity: 0.75; margin-top: 6rpx; }
+.member__cta { display: flex; align-items: center; height: 56rpx; padding: 0 20rpx; border-radius: 999rpx; background: #F5C15C; color: #1E2B4F; font-size: 24rpx; font-weight: 600; flex: 0 0 auto; margin-left: 16rpx; }
+.menu { padding-top: 4rpx; padding-bottom: 4rpx; }

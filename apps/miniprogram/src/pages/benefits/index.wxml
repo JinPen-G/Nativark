@@ -1,0 +1,44 @@
+<view class="screen screen--flat">
+  <nav-bar title="我的会员权益"></nav-bar>
+  <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
+
+  <block wx:else>
+    <view class="section">
+      <view class="member">
+        <view class="member__crown"><ui-icon name="crown" size="44" color="#F5C15C" stroke="1.6"></ui-icon></view>
+        <view class="grow ml-16">
+          <view class="row"><text class="member__title">{{hasPlan ? planName : '暂无会员方案'}}</text><status-tag label="{{membershipLabel}}" tone="{{membershipTone}}" small="{{true}}"></status-tag></view>
+          <view class="member__hint">{{hasPlan ? planPeriod + ' · ' + planSource : '商户授予方案后，权益会自动参与报价'}}</view>
+        </view>
+      </view>
+      <view class="muted small mt-12">会员方案在本商户所有服务共用，同一张卡的权益按范围分别适用；无需在不同服务重复加入。</view>
+    </view>
+
+    <view wx:if="{{benefits.length}}" class="section section--tight">
+      <view class="card">
+        <view class="subtitle">权益明细（当前服务：{{serviceName}}）</view>
+        <view class="cell" wx:for="{{benefits}}" wx:key="key">
+          <view class="cell__body">
+            <view class="row gap-8">
+              <text class="cell__title">{{item.title}}</text>
+              <status-tag label="{{item.applicableLabel}}" tone="{{item.applicableTone}}" small="{{true}}"></status-tag>
+            </view>
+            <view class="cell__desc">{{item.calculation}} · 适用范围：{{item.scope}}</view>
+            <view wx:if="{{item.reason}}" class="cell__desc warning-text">{{item.reason}}</view>
+          </view>
+        </view>
+        <view class="muted small mt-8">实际优惠以每次报价为准；同类金额减免取最大值，不叠加。</view>
+      </view>
+    </view>
+
+    <view wx:if="{{history.length}}" class="section section--tight">
+      <view class="card">
+        <view class="subtitle">授予记录</view>
+        <view class="cell" wx:for="{{history}}" wx:key="id">
+          <view class="cell__body"><view class="cell__title">{{item.planName}}</view><view class="cell__desc">{{item.period}}</view></view>
+          <view class="cell__extra">{{item.status}}</view>
+        </view>
+      </view>
+    </view>
+  </block>
+</view>

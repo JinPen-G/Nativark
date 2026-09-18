@@ -1,0 +1,212 @@
+<view class="screen">
+  <nav-bar title="确认订单"></nav-bar>
+
+  <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" secondaryText="{{view.secondaryText}}" bind:action="onViewAction" bind:secondary="onViewSecondary"></state-view>
+
+  <block wx:elif="{{cart}}">
+    <view wx:if="{{locked}}" class="section">
+      <view class="notice notice--warning">上一次提交的结果尚未确认。系统会用同一提交凭证向商户查询，不会重复下单；在结果明确前请不要修改租赁内容。</view>
+      <button class="btn btn--primary btn--block mt-16" hover-class="btn-hover" bindtap="onRecover" disabled="{{submitting}}">{{submitting ? '查询中…' : '查询提交结果'}}</button>
+    </view>
+
+    <view class="section">
+      <view class="card">
+        <view class="line" wx:for="{{lines}}" wx:key="key">
+          <view class="line__thumb">
+            <image wx:if="{{item.imagePath}}" src="{{item.imagePath}}" mode="aspectFill"></image>
+            <view wx:else class="thumb__placeholder">暂无图片</view>
+          </view>
+          <view class="grow">
+            <view class="subtitle clamp-2">{{item.name}}</view>
+            <view wx:if="{{item.priceText}}" class="price-text small strong mt-4">{{item.priceText}}</view>
+            <view class="muted small mt-4">{{item.option || '默认租赁选项'}}</view>
+          </view>
+          <view class="stepper">
+            <view class="stepper__btn {{locked ? 'stepper__btn--disabled' : ''}}" data-key="{{item.key}}" bindtap="onDecrease">−</view>
+            <view class="stepper__value">{{item.quantity}}</view>
+            <view class="stepper__btn {{locked ? 'stepper__btn--disabled' : ''}}" data-key="{{item.key}}" bindtap="onIncrease">＋</view>
+          </view>
+        </view>
+        <view class="row row--between mt-8">
+          <view class="muted small">商户在租赁选项允许的型号范围内安排设备</view>
+          <view class="link small" bindtap="onAddMore">继续添加</view>
+        </view>
+      </view>
+    </view>
+
+    <view class="section section--tight">
+      <view class="card">
+        <view class="row" hover-class="btn-hover" bindtap="onOpenPeriod">
+          <ui-icon name="calendar" size="34" color="#1F2329"></ui-icon>
+          <view class="grow ml-12">
+            <view class="row row--between">
+              <view class="subtitle">租赁时间</view>
+              <view class="row"><text wx:if="{{unitsText}}" class="muted small mr-8">{{unitsText}}</text><ui-icon name="chevron-right" size="30" color="#B4BBC8"></ui-icon></view>
+            </view>
+            <view wx:if="{{startText && endText}}" class="row mt-8">
+              <text class="body strong">{{startText}}</text>
+              <ui-icon name="arrow-right" size="26" color="#8A94A6"></ui-icon>
+              <text class="body strong">{{endText}}</text>
+            </view>
+            <view wx:else class="warning-text small mt-8">请选择领取与归还时间</view>
+          </view>
+        </view>
+        <view class="divider"></view>
+        <view class="row">
+          <ui-icon name="truck" size="34" color="#1F2329"></ui-icon>
+          <view class="grow ml-12">
+            <view class="subtitle">取还方式</view>
+            <view class="toggle mt-12">
+              <view class="toggle__item {{method === 'pickup' ? 'toggle__item--active' : ''}}" data-method="pickup" bindtap="onPickMethod"><ui-icon name="store" size="30" color="{{method === 'pickup' ? '#1677FF' : '#1F2329'}}"></ui-icon><text class="ml-8">门店自提</text></view>
+              <view class="toggle__item toggle__item--disabled" data-method="delivery" bindtap="onPickMethod"><ui-icon name="truck" size="30" color="#1F2329"></ui-icon><text class="ml-8">同城配送</text></view>
+            </view>
+          </view>
+        </view>
+        <view class="divider"></view>
+        <view class="row" hover-class="btn-hover" bindtap="onOpenStore">
+          <ui-icon name="pin" size="34" color="#1F2329"></ui-icon>
+          <view class="grow ml-12">
+            <view class="subtitle">自提门店</view>
+            <view wx:if="{{store}}" class="row mt-12">
+              <view class="store__icon"><ui-icon name="store" size="40" color="#1677FF" stroke="1.6"></ui-icon></view>
+              <view class="grow">
+                <view class="body strong ellipsis">{{store.name}}</view>
+                <view class="muted small ellipsis mt-4">{{store.address || '地址以门店信息为准'}}</view>
+              </view>
+              <ui-icon name="chevron-right" size="30" color="#B4BBC8"></ui-icon>
+            </view>
+            <view wx:else class="warning-text small mt-8">请选择自提门店</view>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <view class="section section--tight">
+      <view class="card">
+        <view class="row" hover-class="btn-hover" bindtap="onOpenCoupons">
+          <ui-icon name="ticket" size="34" color="#1F2329"></ui-icon>
+          <view class="grow ml-12 subtitle">优惠券</view>
+          <view class="muted small">{{couponText}}</view>
+          <ui-icon name="chevron-right" size="30" color="#B4BBC8"></ui-icon>
+        </view>
+        <block wx:if="{{services.length}}">
+          <view class="divider"></view>
+          <view class="row">
+            <ui-icon name="star" size="34" color="#1F2329"></ui-icon>
+            <view class="grow ml-12 subtitle">可选服务</view>
+          </view>
+          <view class="option {{item.selected ? 'option--selected' : ''}} mt-12" wx:for="{{services}}" wx:key="id" data-id="{{item.id}}" bindtap="onToggleService">
+            <view class="grow">
+              <view class="body strong">{{item.name}}</view>
+              <view wx:if="{{item.description}}" class="muted small clamp-2">{{item.description}}</view>
+            </view>
+            <view class="option__check"></view>
+          </view>
+        </block>
+        <view class="divider"></view>
+        <view class="row row--top">
+          <ui-icon name="shield" size="34" color="#1F2329"></ui-icon>
+          <view class="grow ml-12">
+            <view class="subtitle">押金说明</view>
+            <view class="notice notice--neutral mt-12">{{depositNote}}</view>
+          </view>
+        </view>
+        <view class="divider"></view>
+        <view class="row row--top">
+          <ui-icon name="edit" size="34" color="#1F2329"></ui-icon>
+          <view class="grow ml-12">
+            <view class="row row--between"><view class="subtitle">备注（选填）</view><view class="muted tiny">{{memo.length}}/100</view></view>
+            <view class="input-box mt-12"><input placeholder="如有特殊需求，请留言…" placeholder-class="search__placeholder" maxlength="100" value="{{memo}}" disabled="{{locked}}" bindinput="onMemoInput" bindblur="onMemoBlur" /></view>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <view class="section section--tight">
+      <view class="card">
+        <view class="row row--between">
+          <view class="subtitle">费用明细</view>
+          <view class="muted small">{{quoteLoading ? '计算中…' : unitsText}}</view>
+        </view>
+        <block wx:if="{{quote}}">
+          <view class="kv" wx:for="{{charges}}" wx:key="code"><view class="kv__label">{{item.label}}</view><view class="kv__value"><money-text amount="{{item.amount}}" currency="{{currency}}" size="small"></money-text></view></view>
+          <view class="kv"><view class="kv__label">押金（另行办理）</view><view class="kv__value"><money-text amount="{{deposit}}" currency="{{currency}}" size="small"></money-text></view></view>
+          <view wx:if="{{preAuth > 0}}" class="kv"><view class="kv__label">预授权额度</view><view class="kv__value"><money-text amount="{{preAuth}}" currency="{{currency}}" size="small"></money-text></view></view>
+          <view class="kv"><view class="kv__label strong">需支付</view><view class="kv__value"><money-text amount="{{payable}}" currency="{{currency}}" size="large" tone="primary"></money-text></view></view>
+          <view wx:if="{{benefits.length}}" class="mt-8">
+            <view class="benefit {{item.applied ? '' : 'benefit--skipped'}}" wx:for="{{benefits}}" wx:key="key"><text class="benefit__dot"></text><text>{{item.text}}</text></view>
+          </view>
+          <view class="notice {{quoteExpired ? 'notice--danger' : 'notice--neutral'}} mt-12">{{quoteExpiresText}}</view>
+        </block>
+        <view wx:elif="{{missing.length}}" class="muted mt-12">{{missing[0]}}，选择后显示费用明细</view>
+        <view wx:else class="muted mt-12">正在获取商户报价…</view>
+        <view class="muted small mt-12">{{paymentNote}}</view>
+        <view class="consent mt-8">
+          <checkbox-group bindchange="onAgreeChange">
+            <label class="row row--top">
+              <checkbox value="agree" checked="{{agreed}}" color="#1677FF"></checkbox>
+              <view class="grow">我已阅读并同意<text class="consent__link" catchtap="onOpenRules">《租赁规则》</text>{{ruleVersion ? '（版本 ' + ruleVersion + '）' : ''}}</view>
+            </label>
+          </checkbox-group>
+        </view>
+        <view wx:if="{{formError}}" class="notice notice--danger mt-8">{{formError}}</view>
+      </view>
+    </view>
+
+    <view class="bottom-bar">
+      <view class="bottom-bar__summary">
+        <view class="muted small">需支付</view>
+        <money-text amount="{{quote ? payable : null}}" currency="{{currency}}" size="large" tone="primary"></money-text>
+      </view>
+      <button wx:if="{{quoteExpired}}" class="btn btn--secondary btn--cta bottom-bar__action" hover-class="btn-hover" bindtap="onRequote">重新报价</button>
+      <button wx:else class="btn btn--primary btn--cta bottom-bar__action" hover-class="btn-hover" bindtap="onSubmit" disabled="{{submitting || paymentBlocked || locked || quoteLoading}}">{{submitting ? '提交中…' : '确认预约'}}</button>
+    </view>
+
+    <sheet visible="{{showPeriodSheet}}" title="选择租赁时间" footer="{{true}}" bind:close="onClosePeriod">
+      <view class="muted small mb-16">{{zoneNote}}</view>
+      <view class="field">
+        <view class="field__label field__label--required">领取时间</view>
+        <view class="row gap-16">
+          <picker class="grow" mode="date" start="{{minDate}}" value="{{startDate}}" data-field="startDate" bindchange="onDateChange"><view class="field__picker"><text>{{startDate || '选择日期'}}</text><ui-icon name="chevron-right" size="28" color="#B4BBC8"></ui-icon></view></picker>
+          <picker class="grow" mode="time" value="{{startTime}}" data-field="startTime" bindchange="onDateChange"><view class="field__picker"><text>{{startTime}}</text><ui-icon name="chevron-right" size="28" color="#B4BBC8"></ui-icon></view></picker>
+        </view>
+      </view>
+      <view class="field">
+        <view class="field__label field__label--required">归还时间</view>
+        <view class="row gap-16">
+          <picker class="grow" mode="date" start="{{startDate || minDate}}" value="{{endDate}}" data-field="endDate" bindchange="onDateChange"><view class="field__picker"><text>{{endDate || '选择日期'}}</text><ui-icon name="chevron-right" size="28" color="#B4BBC8"></ui-icon></view></picker>
+          <picker class="grow" mode="time" value="{{endTime}}" data-field="endTime" bindchange="onDateChange"><view class="field__picker"><text>{{endTime}}</text><ui-icon name="chevron-right" size="28" color="#B4BBC8"></ui-icon></view></picker>
+        </view>
+      </view>
+      <view class="muted small mt-8">天数/夜数、起租限制与营业日由商户系统在报价时核算。</view>
+      <view slot="footer"><button class="btn btn--primary btn--cta btn--block" hover-class="btn-hover" bindtap="onApplyPeriod">确定</button></view>
+    </sheet>
+
+    <sheet visible="{{showStoreSheet}}" title="选择自提门店" bind:close="onCloseStore">
+      <view class="option {{store && store.id === item.id ? 'option--selected' : ''}}" wx:for="{{locations}}" wx:key="id" data-id="{{item.id}}" bindtap="onPickStore">
+        <view class="grow">
+          <view class="subtitle">{{item.name}}</view>
+          <view class="muted small">{{item.address || '地址以门店信息为准'}}{{item.businessHours ? ' · ' + item.businessHours : ''}}</view>
+        </view>
+        <view class="option__check"></view>
+      </view>
+      <view wx:if="{{!locations.length}}" class="muted">商户暂无可自提的门店</view>
+    </sheet>
+
+    <sheet visible="{{showCouponSheet}}" title="选择优惠券" bind:close="onCloseCoupons">
+      <view class="option {{!cart.couponId ? 'option--selected' : ''}}" data-id="" bindtap="onPickCoupon">
+        <view class="grow"><view class="subtitle">不使用优惠券</view></view>
+        <view class="option__check"></view>
+      </view>
+      <view class="option {{cart.couponId === item.id ? 'option--selected' : ''}} {{item.usable ? '' : 'option--disabled'}}" wx:for="{{coupons}}" wx:key="id" data-id="{{item.id}}" bindtap="onPickCoupon">
+        <view class="grow">
+          <view class="subtitle">{{item.name}}</view>
+          <view class="muted small">{{item.summary}}{{item.reason ? ' · ' + item.reason : ''}}</view>
+        </view>
+        <view class="option__check"></view>
+      </view>
+      <view wx:if="{{!coupons.length}}" class="muted">你在当前服务没有可用的优惠券</view>
+      <view class="muted small mt-16">选择后由商户系统重新报价，实际优惠以报价为准。</view>
+    </sheet>
+  </block>
+</view>

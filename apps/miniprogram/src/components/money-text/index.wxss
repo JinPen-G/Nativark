@@ -1,0 +1,10 @@
+.money { display: inline-flex; align-items: baseline; font-weight: 700; color: #1F2329; white-space: nowrap; }
+.money--small { font-size: 26rpx; font-weight: 500; }
+.money--normal { font-size: 30rpx; }
+.money--large { font-size: 44rpx; }
+.money--price { color: #FF4D3A; }
+.money--primary { color: #1677FF; }
+.money--negative { color: #22A06B; }
+.money__prefix { font-weight: 400; font-size: 26rpx; color: #8A94A6; margin-right: 8rpx; }
+.money__symbol { font-size: 0.75em; margin-right: 2rpx; }
+.money__note { font-size: 22rpx; font-weight: 400; color: #E8890C; margin-left: 4rpx; }

@@ -1,0 +1,21 @@
+<view class="screen screen--flat">
+  <nav-bar title="我的收藏"></nav-bar>
+  <state-view wx:if="{{!rows.length}}" state="empty" title="还没有收藏" message="在设备详情点右上角的心形即可收藏；收藏保存在本机，不锁定库存。" actionText="去逛逛设备" bind:action="onBrowse"></state-view>
+  <view wx:else class="section">
+    <view class="card card--flat list">
+      <view class="item-row" wx:for="{{rows}}" wx:key="itemId">
+        <view class="item-row__thumb" data-id="{{item.itemId}}" bindtap="onOpen">
+          <image wx:if="{{item.imagePath}}" src="{{item.imagePath}}" mode="aspectFill"></image>
+          <view wx:else class="thumb__placeholder">{{item.imageSource && signedIn ? '加载中' : '暂无图片'}}</view>
+        </view>
+        <view class="item-row__body" data-id="{{item.itemId}}" bindtap="onOpen">
+          <view class="item-row__name clamp-2">{{item.name}}</view>
+          <view class="item-row__desc ellipsis">{{item.serviceName}}</view>
+          <view class="item-row__price"><text wx:if="{{item.priceText}}" class="price-text strong">{{item.priceText}}</text><text wx:else class="price--pending">进入详情查看报价</text></view>
+        </view>
+        <view class="tap-area" data-id="{{item.itemId}}" bindtap="onRemove"><ui-icon name="heart" size="40" color="#FF4D3A" filled="{{true}}"></ui-icon></view>
+      </view>
+    </view>
+    <view class="muted small center mt-16">收藏保存在本机，价格以进入详情后的最新报价为准</view>
+  </view>
+</view>

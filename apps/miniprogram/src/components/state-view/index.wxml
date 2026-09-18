@@ -1,0 +1,15 @@
+<view wx:if="{{state === 'loading'}}" class="state state--loading {{compact ? 'state--compact' : ''}}">
+  <view class="skeleton skeleton--line" style="width: 60%"></view>
+  <view class="skeleton skeleton--block"></view>
+  <view class="skeleton skeleton--line" style="width: 80%"></view>
+  <view class="skeleton skeleton--line" style="width: 40%"></view>
+</view>
+<view wx:elif="{{state === 'empty' || state === 'error' || state === 'blocked'}}" class="state {{compact ? 'state--compact' : ''}}">
+  <view class="state__icon {{state === 'error' ? 'state__icon--error' : state === 'blocked' ? 'state__icon--blocked' : ''}}">{{state === 'error' ? '!' : state === 'blocked' ? '–' : '·'}}</view>
+  <view class="state__title">{{title}}</view>
+  <view wx:if="{{message}}" class="state__message">{{message}}</view>
+  <view class="state__actions">
+    <button wx:if="{{actionText}}" class="btn btn--primary" hover-class="btn-hover" bindtap="onAction">{{actionText}}</button>
+    <button wx:if="{{secondaryText}}" class="btn" hover-class="btn-hover" bindtap="onSecondary">{{secondaryText}}</button>
+  </view>
+</view>

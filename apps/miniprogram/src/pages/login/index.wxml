@@ -1,0 +1,54 @@
+<view class="screen screen--flat login">
+  <nav-bar></nav-bar>
+  <view class="login__brand">
+    <image class="login__mark" src="/assets/logo-mark.png" mode="aspectFit"></image>
+    <view class="title">欢迎使用 Rental OS</view>
+    <view class="muted mt-8">一个账号租用本商户多种设备</view>
+  </view>
+
+  <view class="section stack">
+    <view wx:if="{{wechatNotice}}" class="notice notice--neutral">{{wechatNotice}}</view>
+
+    <button wx:if="{{wechatAvailable}}" class="btn btn--primary btn--cta btn--block" hover-class="btn-hover" open-type="getPhoneNumber" bindgetphonenumber="onPhoneNumber" disabled="{{submitting}}">微信手机号登录</button>
+
+    <button wx:if="{{wechatAvailable && !showPassword}}" class="btn btn--ghost btn--block" hover-class="btn-hover" bindtap="onTogglePassword">其他手机号登录</button>
+
+    <view wx:if="{{showPassword}}" class="card">
+      <view class="field">
+        <view class="field__label field__label--required">手机号</view>
+        <view class="field__control"><input class="field__input" type="number" maxlength="20" placeholder="登录手机号" placeholder-class="search__placeholder" value="{{loginIdentifier}}" bindinput="onIdentifierInput" /></view>
+        <view wx:if="{{errors.loginIdentifier}}" class="field__error">{{errors.loginIdentifier}}</view>
+      </view>
+      <view class="field">
+        <view class="field__label field__label--required">密码</view>
+        <view class="field__control"><input class="field__input" password maxlength="128" placeholder="账号密码" placeholder-class="search__placeholder" value="{{password}}" bindinput="onPasswordInput" /></view>
+        <view wx:if="{{errors.password}}" class="field__error">{{errors.password}}</view>
+      </view>
+      <button class="btn btn--primary btn--cta btn--block mt-16" hover-class="btn-hover" bindtap="onPasswordLogin" disabled="{{submitting}}">{{submitting ? '登录中…' : '登录'}}</button>
+      <view class="row row--between mt-16">
+        <view class="link tap-area" bindtap="onRegister">还没有账号？注册</view>
+        <view class="muted tap-area" bindtap="onContact">忘记密码请联系商户</view>
+      </view>
+    </view>
+
+    <view wx:if="{{formError}}" class="notice notice--danger">{{formError}}</view>
+
+    <view class="consent">
+      <checkbox-group bindchange="onAgreeChange">
+        <label class="row row--top">
+          <checkbox value="agree" checked="{{agreed}}" color="#1677FF"></checkbox>
+          <view class="grow">
+            我已阅读并同意
+            <text class="consent__link" catchtap="onOpenAgreement">《{{agreementName}}》</text>
+            和
+            <text class="consent__link" catchtap="onOpenPrivacy">《{{privacyName}}》</text>
+            <text wx:if="{{agreementVersion}}" class="small">（版本 {{agreementVersion}}）</text>
+            <text wx:if="{{!agreementsProvided}}" class="small warning-text">（商户尚未提供协议正文）</text>
+          </view>
+        </label>
+      </checkbox-group>
+    </view>
+
+    <button class="btn btn--ghost btn--block" hover-class="btn-hover" bindtap="onBrowse">先逛逛设备</button>
+  </view>
+</view>

@@ -1,0 +1,60 @@
+<view class="screen screen--flat">
+  <nav-bar></nav-bar>
+
+  <view class="section">
+    <view class="profile" hover-class="btn-hover" bindtap="onProfileTap">
+      <view class="avatar"><image src="/assets/logo-mark.png" mode="aspectFit"></image></view>
+      <view class="grow ml-16">
+        <block wx:if="{{signedIn}}">
+          <view class="title">{{phoneMasked}}</view>
+          <view class="muted mt-4">你好，{{displayName}}，欢迎回来！</view>
+        </block>
+        <block wx:else>
+          <view class="title">登录 / 注册</view>
+          <view class="muted mt-4">登录后管理订单、收藏与资料</view>
+        </block>
+      </view>
+      <ui-icon name="chevron-right" size="32" color="#B4BBC8"></ui-icon>
+    </view>
+    <view wx:if="{{reviewText}}" class="notice notice--warning mt-16">{{reviewText}}。审核期间可补充资料，暂不能提交租赁。</view>
+    <view wx:if="{{membershipStatus === 'suspended' || membershipStatus === 'restricted'}}" class="notice notice--danger mt-16">会员已受限，本商户所有服务暂停新租赁；历史订单仍可查看，如有疑问请联系商户。</view>
+  </view>
+
+  <view class="section section--tight">
+    <view class="member" hover-class="btn-hover" bindtap="onBenefits">
+      <view class="member__crown"><ui-icon name="crown" size="44" color="#F5C15C" stroke="1.6"></ui-icon></view>
+      <view class="grow ml-16">
+        <view class="row">
+          <text class="member__title">{{memberTitle}}</text>
+          <status-tag wx:if="{{signedIn && planName && membershipLabel}}" label="{{membershipLabel}}" tone="{{membershipTone}}" small="{{true}}"></status-tag>
+        </view>
+        <view class="member__hint">{{signedIn ? planHint : '登录后查看你的会员方案与权益'}}</view>
+      </view>
+      <view class="member__cta"><text>查看权益</text><ui-icon name="chevron-right" size="26" color="#1E2B4F" stroke="2.2"></ui-icon></view>
+    </view>
+  </view>
+
+  <view class="section section--tight">
+    <view class="card menu">
+      <view class="cell" hover-class="btn-hover" bindtap="onOrders"><view class="cell__icon"><ui-icon name="orders" size="40" color="#1F2329"></ui-icon></view><view class="cell__body"><view class="cell__title">我的订单</view></view><ui-icon name="chevron-right" size="30" color="#B4BBC8"></ui-icon></view>
+      <view class="cell" hover-class="btn-hover" bindtap="onFavorites"><view class="cell__icon"><ui-icon name="heart" size="40" color="#1F2329"></ui-icon></view><view class="cell__body"><view class="cell__title">我的收藏</view></view><text wx:if="{{favoriteCount}}" class="cell__extra">{{favoriteCount}}</text><ui-icon name="chevron-right" size="30" color="#B4BBC8"></ui-icon></view>
+      <view class="cell" hover-class="btn-hover" bindtap="onCoupons"><view class="cell__icon"><ui-icon name="ticket" size="40" color="#1F2329"></ui-icon></view><view class="cell__body"><view class="cell__title">优惠券</view></view><ui-icon name="chevron-right" size="30" color="#B4BBC8"></ui-icon></view>
+    </view>
+  </view>
+
+  <view class="section section--tight">
+    <view class="card menu">
+      <view class="cell" hover-class="btn-hover" bindtap="onQualifications"><view class="cell__icon"><ui-icon name="shield" size="40" color="#1F2329"></ui-icon></view><view class="cell__body"><view class="cell__title">实名认证</view></view><text wx:if="{{signedIn && qualificationSummary}}" class="cell__extra">{{qualificationSummary}}</text><ui-icon name="chevron-right" size="30" color="#B4BBC8"></ui-icon></view>
+      <view class="cell" hover-class="btn-hover" bindtap="onLocations"><view class="cell__icon"><ui-icon name="pin" size="40" color="#1F2329"></ui-icon></view><view class="cell__body"><view class="cell__title">常用服务点</view></view><ui-icon name="chevron-right" size="30" color="#B4BBC8"></ui-icon></view>
+      <view class="cell" hover-class="btn-hover" bindtap="onHelp"><view class="cell__icon"><ui-icon name="headset" size="40" color="#1F2329"></ui-icon></view><view class="cell__body"><view class="cell__title">帮助与客服</view></view><text wx:if="{{servicePhone}}" class="cell__extra">{{servicePhone}}</text><ui-icon name="chevron-right" size="30" color="#B4BBC8"></ui-icon></view>
+      <view class="cell" hover-class="btn-hover" bindtap="onSettings"><view class="cell__icon"><ui-icon name="gear" size="40" color="#1F2329"></ui-icon></view><view class="cell__body"><view class="cell__title">设置</view></view><ui-icon name="chevron-right" size="30" color="#B4BBC8"></ui-icon></view>
+    </view>
+  </view>
+
+  <state-view wx:if="{{signedIn && view.status === 'error'}}" state="error" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction" compact="{{true}}"></state-view>
+
+  <view wx:if="{{signedIn}}" class="section">
+    <button class="btn btn--block" hover-class="btn-hover" bindtap="onLogout">退出登录</button>
+    <view class="muted small center mt-16" bindtap="onCloseAccount">注销账号</view>
+  </view>
+</view>

@@ -1,0 +1,11 @@
+{
+  "enablePullDownRefresh": true,
+  "onReachBottomDistance": 120,
+  "usingComponents": {
+    "nav-bar": "/components/nav-bar/index",
+    "ui-icon": "/components/ui-icon/index",
+    "state-view": "/components/state-view/index",
+    "money-text": "/components/money-text/index",
+    "status-tag": "/components/status-tag/index"
+  }
+}

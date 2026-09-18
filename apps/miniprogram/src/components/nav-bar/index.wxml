@@ -1,0 +1,13 @@
+<view class="nav {{transparent ? 'nav--transparent' : ''}}">
+  <view class="nav__status" style="height: {{statusBarHeight}}px;"></view>
+  <view class="nav__brand" style="height: {{navBarHeight}}px; padding-right: {{capsuleReserve}}px;">
+    <image class="nav__logo" src="/assets/logo.png" mode="heightFix"></image>
+  </view>
+  <view wx:if="{{title}}" class="nav__title-row" style="height: {{titleRowHeight}}px;">
+    <view wx:if="{{back}}" class="nav__back" hover-class="btn-hover" bindtap="onBack">
+      <ui-icon name="chevron-left" size="44" color="#1F2329" stroke="2"></ui-icon>
+    </view>
+    <view class="nav__title">{{title}}</view>
+  </view>
+</view>
+<view class="nav__placeholder" style="height: {{totalHeight}}px;"></view>

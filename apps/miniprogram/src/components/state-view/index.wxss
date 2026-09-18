@@ -1,0 +1,10 @@
+.state { padding: 64rpx 32rpx; display: flex; flex-direction: column; align-items: center; text-align: center; }
+.state--compact { padding: 32rpx; }
+.state--loading { align-items: stretch; text-align: left; }
+.state__icon { width: 112rpx; height: 112rpx; border-radius: 50%; background: #EAF2FF; color: #1677FF; display: flex; align-items: center; justify-content: center; font-size: 48rpx; font-weight: 700; margin-bottom: 24rpx; }
+.state__icon--error { background: #FDECEC; color: #E5484D; }
+.state__icon--blocked { background: #FFF4E0; color: #E8890C; }
+.state__title { font-size: 30rpx; font-weight: 600; color: #1F2329; }
+.state__message { font-size: 26rpx; color: #8A94A6; margin-top: 12rpx; line-height: 1.6; }
+.state__actions { margin-top: 32rpx; display: flex; flex-direction: column; width: 100%; max-width: 480rpx; }
+.state__actions .btn + .btn { margin-top: 16rpx; }

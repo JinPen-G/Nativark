@@ -1,0 +1,59 @@
+<view class="screen screen--flat">
+  <nav-bar title="{{title}}"></nav-bar>
+
+  <block wx:if="{{kind === 'help'}}">
+    <view class="section">
+      <view class="card">
+        <view class="subtitle">联系客服</view>
+        <view class="body mt-8">{{servicePhone || '商户未提供客服电话'}}{{serviceHours ? ' · ' + serviceHours : ''}}</view>
+        <button wx:if="{{servicePhone}}" class="btn btn--primary btn--block mt-16" hover-class="btn-hover" bindtap="onContact"><ui-icon name="phone" size="30" color="#FFFFFF"></ui-icon><text class="ml-8">拨打客服电话</text></button>
+      </view>
+    </view>
+    <view class="section section--tight">
+      <view class="card">
+        <view class="subtitle">常见问题</view>
+        <view class="faq" wx:for="{{faq}}" wx:key="q">
+          <view class="faq__q">{{item.q}}</view>
+          <view class="faq__a">{{item.a}}</view>
+        </view>
+      </view>
+    </view>
+  </block>
+
+  <block wx:elif="{{kind === 'agreement' || kind === 'privacy'}}">
+    <view class="section">
+      <view class="card">
+        <view class="subtitle">{{docName}}</view>
+        <view wx:if="{{version}}" class="muted small mt-4">版本 {{version}}</view>
+        <view wx:if="{{provided && url}}" class="mt-16">
+          <view class="body">商户已提供本文档的正式版本。请在浏览器打开以下地址阅读完整内容：</view>
+          <view class="notice notice--neutral mt-16" style="word-break:break-all">{{url}}</view>
+          <button class="btn btn--secondary btn--block mt-16" hover-class="btn-hover" bindtap="onCopyUrl">复制链接</button>
+        </view>
+        <view wx:elif="{{provided}}" class="body mt-16">商户已登记本文档的版本，但尚未提供可在小程序内阅读的正文；请联系商户索取。</view>
+        <view wx:else class="notice notice--warning mt-16">商户尚未在小程序渠道配置中提供本文档。为避免以占位文本冒充商户协议，这里不显示任何默认条款；登录/下单前请向商户确认适用的协议版本。</view>
+      </view>
+    </view>
+  </block>
+
+  <view wx:else class="section">
+    <view class="card">
+      <view class="subtitle">租赁规则</view>
+      <view class="body mt-12">租赁规则（取消、逾期、损坏、押金）由商户按服务配置并带版本号；你在确认订单页看到的费用与规则说明来自服务端报价快照{{ruleVersion ? '（规则版本 ' + ruleVersion + '）' : ''}}，下单后随订单固化，不因商户后续修改而变化。</view>
+      <view class="body mt-12">规则要点以确认页与订单详情为准：取消前会显示取消费预估；逾期与损坏费用由商户按规则登记并在订单中展示，需要你响应时会有提示。</view>
+      <view class="muted small mt-12">如需完整规则文本，请联系商户。</view>
+    </view>
+  </view>
+
+  <view wx:if="{{kind !== 'help'}}" class="section section--tight">
+    <view class="card">
+      <view class="subtitle">联系商户</view>
+      <view class="body mt-8">{{servicePhone || '商户未提供客服电话'}}{{serviceHours ? ' · ' + serviceHours : ''}}</view>
+      <button wx:if="{{servicePhone}}" class="btn btn--primary btn--block mt-16" hover-class="btn-hover" bindtap="onContact">拨打电话</button>
+    </view>
+  </view>
+
+  <view class="section">
+    <button class="btn btn--block" hover-class="btn-hover" bindtap="onBack">返回</button>
+  </view>
+</view>

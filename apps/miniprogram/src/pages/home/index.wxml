@@ -1,0 +1,72 @@
+<view class="screen">
+  <nav-bar></nav-bar>
+
+  <view class="section">
+    <view class="search search--surface">
+      <ui-icon name="search" size="34" color="#8A94A6"></ui-icon>
+      <input class="search__input" type="text" confirm-type="search" placeholder="搜索你需要的设备、品牌或场景" placeholder-class="search__placeholder" maxlength="50" value="{{query}}" bindinput="onSearchInput" bindconfirm="onSearchConfirm" />
+    </view>
+  </view>
+
+  <state-view wx:if="{{merchantView.status !== 'ready'}}" state="{{merchantView.status}}" title="{{merchantView.title}}" message="{{merchantView.message}}" actionText="{{merchantView.actionText}}" secondaryText="{{merchantView.secondaryText}}" bind:action="onMerchantAction" bind:secondary="onMerchantSecondary"></state-view>
+
+  <block wx:else>
+    <view class="section">
+      <view class="banner" hover-class="btn-hover" bindtap="onBannerTap">
+        <view class="banner__glow banner__glow--1"></view>
+        <view class="banner__glow banner__glow--2"></view>
+        <view class="banner__body">
+          <view class="banner__title">去探索</view>
+          <view class="banner__title">更大的世界</view>
+          <view class="banner__subtitle">好装备，让每一次出发更简单</view>
+          <view class="banner__cta"><text>立即租赁</text><ui-icon name="arrow-right" size="28" color="#1677FF" stroke="2.2"></ui-icon></view>
+        </view>
+      </view>
+    </view>
+
+    <view class="section">
+      <view class="cats">
+        <view class="cats__item" wx:for="{{services}}" wx:key="code" data-code="{{item.code}}" hover-class="btn-hover" bindtap="onServiceTap">
+          <view class="cats__icon {{item.active ? 'cats__icon--active' : ''}}">
+            <ui-icon name="{{item.icon}}" size="44" color="{{item.active ? '#1677FF' : '#4B5563'}}" stroke="1.6"></ui-icon>
+          </view>
+          <view class="cats__label ellipsis">{{item.name}}</view>
+        </view>
+      </view>
+    </view>
+
+    <view class="section section--tight">
+      <view class="section-head">
+        <view class="section-title">热门推荐</view>
+        <view class="section-link" bindtap="onMore"><text>查看更多</text><ui-icon name="chevron-right" size="28" color="#8A94A6"></ui-icon></view>
+      </view>
+      <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction" compact="{{true}}"></state-view>
+      <view wx:else class="grid">
+        <view class="grid__item" wx:for="{{cards}}" wx:key="id" data-id="{{item.id}}" hover-class="btn-hover" bindtap="onItemTap">
+          <view class="thumb">
+            <image wx:if="{{item.imagePath}}" class="thumb__img" src="{{item.imagePath}}" mode="aspectFill" lazy-load></image>
+            <view wx:else class="thumb__placeholder">{{item.hasImage ? '加载中' : '暂无图片'}}</view>
+          </view>
+          <view class="grid__name clamp-2">{{item.name}}</view>
+          <view class="grid__price">
+            <view wx:if="{{item.hasPrice}}" class="price"><text class="price__symbol">{{item.priceSymbol}}</text><text class="price__number">{{item.priceNumber}}</text><text class="price__unit">{{item.priceUnit}}</text></view>
+            <view wx:else class="price--pending">选租期看价</view>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <view wx:if="{{store}}" class="section section--tight">
+      <view class="section-head"><view class="section-title">附近服务点</view></view>
+      <view class="card store" hover-class="btn-hover" bindtap="onStoreTap">
+        <view class="store__icon"><ui-icon name="store" size="52" color="#1677FF" stroke="1.6"></ui-icon></view>
+        <view class="grow">
+          <view class="subtitle ellipsis">{{store.name}}</view>
+          <view class="muted small ellipsis mt-4">{{store.address || '地址以门店信息为准'}}</view>
+          <view class="small mt-4 success-text">{{store.hours ? '营业时段 ' + store.hours : '营业时段以门店为准'}}</view>
+        </view>
+        <ui-icon name="chevron-right" size="32" color="#B4BBC8"></ui-icon>
+      </view>
+    </view>
+  </block>
+</view>

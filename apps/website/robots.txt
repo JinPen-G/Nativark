@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://xiao0ozz.github.io/rental-os-website/sitemap.xml

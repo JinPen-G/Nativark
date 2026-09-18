@@ -1,0 +1,24 @@
+<view class="screen screen--flat">
+  <nav-bar title="常用服务点"></nav-bar>
+  <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
+  <block wx:else>
+    <view class="section"><view class="muted small">{{serviceName}} · 门店信息由商户维护，营业时段以门店为准</view></view>
+    <view class="section section--tight">
+      <view class="card loc" wx:for="{{rows}}" wx:key="id">
+        <view class="row row--top">
+          <view class="loc__icon"><ui-icon name="store" size="48" color="#1677FF" stroke="1.6"></ui-icon></view>
+          <view class="grow">
+            <view class="subtitle">{{item.name}}</view>
+            <view class="muted small mt-4">{{item.address || '地址以门店信息为准'}}</view>
+            <view wx:if="{{item.businessHours}}" class="small mt-4 success-text">营业时段 {{item.businessHours}}</view>
+            <view wx:if="{{item.capabilityText}}" class="muted small mt-4">{{item.capabilityText}}</view>
+          </view>
+        </view>
+        <view class="row row--between mt-16">
+          <view class="muted small">{{item.contactPhone || '门店电话以商户客服为准'}}</view>
+          <button class="btn btn--small btn--outline" hover-class="btn-hover" data-phone="{{item.contactPhone}}" bindtap="onCall"><ui-icon name="phone" size="28" color="#1677FF"></ui-icon><text class="ml-8">拨打电话</text></button>
+        </view>
+      </view>
+    </view>
+  </block>
+</view>

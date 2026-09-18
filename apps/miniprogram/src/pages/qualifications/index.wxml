@@ -1,0 +1,88 @@
+<view class="screen screen--flat">
+  <nav-bar title="实名认证"></nav-bar>
+  <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
+
+  <block wx:else>
+    <view wx:if="{{membershipNote}}" class="section"><view class="notice notice--warning">{{membershipNote}} <text class="link" catchtap="onContact">联系商户</text></view></view>
+
+    <view class="section">
+      <view class="card">
+        <view class="subtitle">当前服务要求的证件</view>
+        <view wx:if="{{!rows.length}}" class="muted mt-8">当前服务不要求额外证件。</view>
+        <view class="cell" wx:for="{{rows}}" wx:key="code">
+          <view class="cell__icon"><ui-icon name="shield" size="40" color="{{item.latest && item.latest.status === 'approved' ? '#22A06B' : '#1F2329'}}"></ui-icon></view>
+          <view class="cell__body">
+            <view class="row gap-8">
+              <text class="cell__title">{{item.name}}</text>
+              <status-tag wx:if="{{item.required}}" label="下单必需" tone="info" small="{{true}}"></status-tag>
+            </view>
+            <view wx:if="{{item.latest}}" class="cell__desc">
+              <status-tag label="{{item.latest.statusLabel}}" tone="{{item.latest.tone}}" small="{{true}}"></status-tag>
+              <text> {{item.latest.expiresText}} · 提交于 {{item.latest.submittedText}}</text>
+              <view wx:if="{{item.latest.reason}}" class="danger-text">审核意见：{{item.latest.reason}}</view>
+              <view wx:if="{{item.latest.evidenceRef}}" class="link" data-ref="{{item.latest.evidenceRef}}" catchtap="onPreviewEvidence">查看已上传附件</view>
+            </view>
+            <view wx:else class="cell__desc">未提交</view>
+          </view>
+          <button class="btn btn--small {{item.latest ? '' : 'btn--primary'}}" hover-class="btn-hover" data-code="{{item.code}}" bindtap="onOpenForm">{{item.latest ? '重新提交' : '提交'}}</button>
+        </view>
+        <view class="muted small mt-8">同一证件在本商户所有服务共享；每次提交都会新增一条记录，旧审核不会覆盖新提交。{{zoneNote ? " " + zoneNote : ""}}</view>
+      </view>
+    </view>
+
+    <view wx:if="{{history.length}}" class="section section--tight">
+      <view class="card">
+        <view class="subtitle">提交记录</view>
+        <view class="cell" wx:for="{{history}}" wx:key="id">
+          <view class="cell__body">
+            <view class="cell__title">{{item.typeName}}</view>
+            <view class="cell__desc">{{item.statusLabel}} · {{item.submittedText}}{{item.reason ? ' · ' + item.reason : ''}}</view>
+          </view>
+        </view>
+      </view>
+    </view>
+  </block>
+
+  <sheet visible="{{showForm}}" title="提交 {{formTypeName}}" closable="{{!submitting}}" footer="{{true}}" bind:close="onCloseForm">
+    <view class="field">
+      <view class="field__label">证件号码（按类型要求）</view>
+      <view class="field__control"><input class="field__input" maxlength="128" placeholder="选填，仅保存脱敏后的号码" placeholder-class="search__placeholder" value="{{referenceNo}}" data-field="referenceNo" bindinput="onInput" /></view>
+    </view>
+    <view class="field">
+      <view class="field__label">签发日期</view>
+      <view class="row gap-16">
+        <picker class="grow" mode="date" value="{{issuedAt}}" data-field="issuedAt" bindchange="onDateChange"><view class="field__picker"><text>{{issuedAt || '选择日期'}}</text><ui-icon name="chevron-right" size="28" color="#B4BBC8"></ui-icon></view></picker>
+        <view wx:if="{{issuedAt}}" class="link tap-area" data-field="issuedAt" bindtap="onClearDate">清空</view>
+      </view>
+    </view>
+    <view class="field">
+      <view class="row row--between" style="min-height:88rpx"><view class="field__label">长期有效</view><switch checked="{{longTerm}}" color="#1677FF" bindchange="onLongTermChange"></switch></view>
+      <view wx:if="{{!longTerm}}" class="row gap-16">
+        <picker class="grow" mode="date" value="{{expiresAt}}" data-field="expiresAt" bindchange="onDateChange"><view class="field__picker"><text>{{expiresAt || '选择有效期至'}}</text><ui-icon name="chevron-right" size="28" color="#B4BBC8"></ui-icon></view></picker>
+        <view wx:if="{{expiresAt}}" class="link tap-area" data-field="expiresAt" bindtap="onClearDate">清空</view>
+      </view>
+      <view wx:if="{{errors.expiresAt}}" class="field__error">{{errors.expiresAt}}</view>
+    </view>
+    <view class="field">
+      <view class="field__label field__label--required">证件图片（JPEG/PNG，不超过 10MB）</view>
+      <view class="row gap-16 mt-8">
+        <view class="evidence" bindtap="onChooseImage">
+          <image wx:if="{{imagePath}}" class="evidence__img" src="{{imagePath}}" mode="aspectFit"></image>
+          <view wx:else class="evidence__placeholder">点击选择图片</view>
+        </view>
+        <view class="grow muted small">
+          <view wx:if="{{uploadStage === 'uploading'}}">上传中…</view>
+          <view wx:elif="{{uploadStage === 'uploaded'}}" class="success-text">已上传，等待提交审核</view>
+          <view wx:elif="{{uploadStage === 'failed'}}" class="danger-text">上传失败，可重新提交</view>
+          <view wx:else>请保证证件清晰可辨；图片只用于本商户审核。</view>
+        </view>
+      </view>
+      <view wx:if="{{errors.image}}" class="field__error">{{errors.image}}</view>
+    </view>
+    <view class="consent"><text>提交即声明资料真实、由本人提供；审核结果以商户为准，上传成功不等于审核通过。</text></view>
+    <view wx:if="{{formError}}" class="notice notice--danger mt-8">{{formError}}</view>
+    <view slot="footer">
+      <button class="btn btn--primary btn--cta btn--block" hover-class="btn-hover" bindtap="onSubmit" disabled="{{submitting}}">{{submitting ? '提交中…' : '上传并提交审核'}}</button>
+    </view>
+  </sheet>
+</view>

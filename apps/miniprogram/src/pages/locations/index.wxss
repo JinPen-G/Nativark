@@ -1,0 +1,2 @@
+.loc { margin-bottom: 16rpx; }
+.loc__icon { width: 96rpx; height: 96rpx; border-radius: 16rpx; background: #EAF2FF; display: flex; align-items: center; justify-content: center; margin-right: 20rpx; flex: 0 0 auto; }

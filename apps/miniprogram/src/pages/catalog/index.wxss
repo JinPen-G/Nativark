@@ -1,0 +1,2 @@
+.list { padding: 0 24rpx; }
+.tabs.section--tight { padding-bottom: 0; }

@@ -1,0 +1,65 @@
+<view class="screen">
+  <nav-bar title="申请续租"></nav-bar>
+  <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
+
+  <block wx:elif="{{order}}">
+    <view class="section">
+      <view class="card">
+        <view class="kv"><view class="kv__label">订单号</view><view class="kv__value">{{order.orderNo}}</view></view>
+        <view class="kv"><view class="kv__label">当前归还时间</view><view class="kv__value kv__value--strong">{{currentEndText}}</view></view>
+        <view class="kv"><view class="kv__label">已租设备</view><view class="kv__value">{{order.lines[0].itemGroupName}}{{order.lines.length > 1 ? ' 等 ' + order.lines.length + ' 种' : ''}}</view></view>
+        <view class="muted small mt-8">{{zoneNote}}</view>
+      </view>
+    </view>
+
+    <view wx:if="{{blockedReason}}" class="section section--tight"><view class="notice notice--warning">{{blockedReason}}</view></view>
+
+    <view wx:if="{{pending}}" class="section section--tight">
+      <view class="card">
+        <view class="notice notice--warning">{{pendingText}}</view>
+        <view class="btn-row mt-16">
+          <button class="btn btn--primary" hover-class="btn-hover" bindtap="onPay">去补款</button>
+          <button class="btn btn--secondary" hover-class="btn-hover" bindtap="onActivate" disabled="{{submitting}}">已补款，使续租生效</button>
+        </view>
+      </view>
+    </view>
+
+    <view wx:elif="{{!blockedReason}}" class="section section--tight">
+      <view class="card">
+        <view class="subtitle">新的归还时间</view>
+        <view class="row gap-16 mt-12">
+          <picker class="grow" mode="date" start="{{minDate}}" value="{{endDate}}" data-field="endDate" bindchange="onDateChange"><view class="field__picker"><text>{{endDate || '选择日期'}}</text><ui-icon name="chevron-right" size="28" color="#B4BBC8"></ui-icon></view></picker>
+          <picker class="grow" mode="time" value="{{endTime}}" data-field="endTime" bindchange="onDateChange"><view class="field__picker"><text>{{endTime}}</text><ui-icon name="chevron-right" size="28" color="#B4BBC8"></ui-icon></view></picker>
+        </view>
+        <button class="btn btn--secondary btn--block mt-16" hover-class="btn-hover" bindtap="onPreview" disabled="{{previewLoading}}">{{previewLoading ? '计算中…' : '预览费用差额'}}</button>
+        <view wx:if="{{previewError}}" class="notice notice--danger mt-16">{{previewError}}</view>
+        <button wx:if="{{unknownResult}}" class="btn btn--block mt-16" hover-class="btn-hover" bindtap="onReload">刷新本页</button>
+
+        <block wx:if="{{preview}}">
+          <view class="divider"></view>
+          <view class="kv"><view class="kv__label">延长至</view><view class="kv__value">{{endDate}} {{endTime}}</view></view>
+          <view class="kv"><view class="kv__label">新增租金</view><view class="kv__value"><money-text amount="{{preview.rentalAmount}}" currency="{{preview.currency}}" size="small"></money-text></view></view>
+          <view wx:if="{{preview.serviceAmount}}" class="kv"><view class="kv__label">新增服务费</view><view class="kv__value"><money-text amount="{{preview.serviceAmount}}" currency="{{preview.currency}}" size="small"></money-text></view></view>
+          <view class="kv"><view class="kv__label">租金差额</view><view class="kv__value kv__value--strong {{preview.payableAmount > 0 ? 'warning-text' : preview.payableAmount < 0 ? 'success-text' : ''}}">{{deltaText}}</view></view>
+          <view class="kv"><view class="kv__label">押金增量</view><view class="kv__value">{{depositDeltaText}}</view></view>
+          <view class="kv"><view class="kv__label">预授权增量</view><view class="kv__value">{{preAuthDeltaText}}</view></view>
+          <view class="notice notice--neutral mt-8">
+            <block wx:if="{{preview.payableAmount > 0}}">提交申请后需先补款，款项到账并经商户系统确认资源后续租才生效；未生效前仍按当前归还时间执行。</block>
+            <block wx:elif="{{preview.payableAmount < 0}}">差额为负：提交后进入商户审核，核减/退款以审核结果和资金记录为准，不会立即显示“已退款”。</block>
+            <block wx:else>无差额：提交后仍需商户系统确认资源可用，确认后生效。</block>
+            已发生的费用不变；原优惠与价格快照按商户规则复算。
+          </view>
+          <view class="notice notice--warning mt-8">预览不占用库存；提交时商户系统会重新核查新增时段的可用性。</view>
+        </block>
+      </view>
+    </view>
+
+    <view wx:if="{{preview && !pending && !blockedReason}}" class="bottom-bar">
+      <view class="bottom-bar__summary">
+        <view class="muted small">本次续租差额</view>
+        <view class="subtitle {{preview.payableAmount > 0 ? 'warning-text' : ''}}">{{deltaText}}</view>
+      </view>
+      <button class="btn btn--primary btn--cta bottom-bar__action" hover-class="btn-hover" bindtap="onApply" disabled="{{submitting}}">{{submitting ? '提交中…' : '提交续租申请'}}</button>
+    </view>
+  </block>
+</view>

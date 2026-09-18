@@ -1,0 +1,26 @@
+<view class="screen screen--flat">
+  <nav-bar title="优惠券"></nav-bar>
+  <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
+  <block wx:else>
+    <view class="section"><view class="muted small">当前服务：{{serviceName}} · 优惠券按服务空间发放，确认订单时选用</view></view>
+    <view class="section section--tight">
+      <view class="coupon {{item.usable ? '' : 'coupon--muted'}}" wx:for="{{usable}}" wx:key="id">
+        <view class="coupon__value"><text class="coupon__number">{{item.value}}</text><text class="coupon__threshold">{{item.threshold}}</text></view>
+        <view class="grow ml-24">
+          <view class="subtitle">{{item.name}}</view>
+          <view class="muted small mt-4">{{item.period}}</view>
+        </view>
+        <status-tag label="{{item.statusLabel}}" tone="success" small="{{true}}"></status-tag>
+      </view>
+      <view wx:if="{{others.length}}" class="muted small mt-16 mb-8">已使用 / 已过期</view>
+      <view class="coupon coupon--muted" wx:for="{{others}}" wx:key="id">
+        <view class="coupon__value"><text class="coupon__number">{{item.value}}</text><text class="coupon__threshold">{{item.threshold}}</text></view>
+        <view class="grow ml-24">
+          <view class="subtitle">{{item.name}}</view>
+          <view class="muted small mt-4">{{item.period}}</view>
+        </view>
+        <status-tag label="{{item.statusLabel}}" tone="neutral" small="{{true}}"></status-tag>
+      </view>
+    </view>
+  </block>
+</view>
