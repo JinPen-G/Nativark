@@ -39,9 +39,14 @@ import {
   type RentalStockOperationRequest,
   type SaveTenantRentalProfileRequest,
   type SendRentalNotificationRequest,
-  type SubstituteRentalBundleComponentRequest
+  type SubstituteRentalBundleComponentRequest,
+  RENTAL_ORDER_ASSIGNMENT_FILTERS,
+  RENTAL_ORDER_LIST_MAX_PAGE_SIZE,
+  RentalCoreOrderStatus,
+  type RentalOrderAssignmentFilter,
+  type RentalOrderListQuery
 } from "@rental-os/shared";
-import { Type } from "class-transformer";
+import { Transform, Type } from "class-transformer";
 import {
   ArrayNotEmpty,
   IsArray,
@@ -1088,4 +1093,37 @@ export class UpdateRentalServiceOccurrenceDto implements UpdateRentalServiceOccu
   @IsNumber()
   @Min(0)
   compensationAmount?: number;
+}
+
+/**
+ * ORDER-LIST-01：订单列表查询参数（`@Query()`）。
+ *
+ * 分页参数来自 query string，全是字符串，必须 `@Type(() => Number)` 再校验；
+ * 布尔同理——`@Type(() => Boolean)` 会把 `"false"` 转成 `true`，所以这里显式比对字面量。
+ * 每个成员都带装饰器：whitelist 会剥离没装饰器的字段，`validate-dto-coverage.cjs` 会挡。
+ */
+export class ListRentalOrdersQueryDto implements RentalOrderListQuery {
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(1_000_000)
+  page?: number;
+
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(RENTAL_ORDER_LIST_MAX_PAGE_SIZE)
+  pageSize?: number;
+
+  @IsOptional() @IsEnum(RentalCoreOrderStatus)
+  status?: RentalCoreOrderStatus;
+
+  @IsOptional() @IsString() @MaxLength(100)
+  keyword?: string;
+
+  @IsOptional() @IsISO8601()
+  from?: string;
+
+  @IsOptional() @IsISO8601()
+  to?: string;
+
+  @IsOptional() @IsIn(RENTAL_ORDER_ASSIGNMENT_FILTERS)
+  assignment?: RentalOrderAssignmentFilter;
+
+  @IsOptional() @Transform(({ value }) => value === true || value === "true" || value === "1") @IsBoolean()
+  pendingFeeOnly?: boolean;
 }

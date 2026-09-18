@@ -19,16 +19,17 @@ const OrderDetailPage = lazy(() => import("@/features/rental-core/RentalOrderDet
 const RentalCommercialPage = lazy(() => import("@/features/commercial/RentalCommercialPage").then((module) => ({ default: module.RentalCommercialPage })));
 const PricingGroupPage = lazy(() => import("@/features/commercial/PricingGroupPage").then((module) => ({ default: module.PricingGroupPage })));
 const CouponPage = lazy(() => import("@/features/commercial/CouponPage").then((module) => ({ default: module.CouponPage })));
+const QualificationTypesPage = lazy(() => import("@/features/membership/QualificationTypesPage").then((module) => ({ default: module.QualificationTypesPage })));
 const MembershipReviewPage = lazy(() => import("@/features/membership/MembershipReviewPage").then((module) => ({ default: module.MembershipReviewPage })));
 const PersonalMembershipPage = lazy(() => import("@/features/membership/PersonalMembershipPage").then((module) => ({ default: module.PersonalMembershipPage })));
 const CorporateMembershipPage = lazy(() => import("@/features/membership/CorporateMembershipPage").then((module) => ({ default: module.CorporateMembershipPage })));
 const MembershipPlanPage = lazy(() => import("@/features/membership/MembershipPlanPage").then((module) => ({ default: module.MembershipPlanPage })));
+const MembershipRewardsPage = lazy(() => import("@/features/membership/MembershipRewardsPage").then((module) => ({ default: module.MembershipRewardsPage })));
 const PlatformPage = lazy(() => import("@/features/platform/PlatformPage").then((module) => ({ default: module.PlatformPage })));
 const PlatformOperationsPage = lazy(() => import("@/features/platform/PlatformOperationsPage").then((module) => ({ default: module.PlatformOperationsPage })));
 const PlatformToolsPage = lazy(() => import("@/features/platform/PlatformToolsPage").then((module) => ({ default: module.PlatformToolsPage })));
 const OfficialCalendarSourcePage = lazy(() => import("@/features/platform/OfficialCalendarSourcePage").then((module) => ({ default: module.OfficialCalendarSourcePage })));
 const TenantManagementPage = lazy(() => import("@/features/platform/TenantManagementPage").then((module) => ({ default: module.TenantManagementPage })));
-const RentalCorePage = lazy(() => import("@/features/rental-core/RentalCorePage").then((module) => ({ default: module.RentalCorePage })));
 const TenantReadinessPage = lazy(() => import("@/features/settings/TenantReadinessPage").then((module) => ({ default: module.TenantReadinessPage })));
 const RentalSettingsPage = lazy(() => import("@/features/settings/RentalGovernancePage").then((module) => ({ default: module.RentalGovernancePage })));
 const CapabilityGovernancePage = lazy(() => import("@/features/rental-core/CapabilityGovernancePage").then((module) => ({ default: module.CapabilityGovernancePage })));
@@ -44,9 +45,10 @@ function PageLoader() {
 function RouteAccess({ route, children }: { route: AppRouteDefinition; children: ReactNode }) {
   const hasPermission = useAuthStore((state) => state.hasPermission);
   const hasCapability = useAuthStore((state) => state.hasCapability);
+  const hasTenantMembershipPermission = useAuthStore((state) => state.hasTenantMembershipPermission);
   const categoryCode = useAuthStore((state) => state.tenant?.categoryCode);
   const isSaasAdmin = useAuthStore((state) => Boolean(state.user?.isSaasAdmin));
-  if (!canAccessRoute(route, hasPermission, hasCapability, categoryCode, isSaasAdmin)) {
+  if (!canAccessRoute(route, hasPermission, hasCapability, categoryCode, isSaasAdmin, hasTenantMembershipPermission)) {
     return <Result status="403" title="无权访问" subTitle="当前账号权限或租户经营品类能力不支持此功能；前端菜单隐藏不能替代后端数据权限。" />;
   }
   return <>{children}</>;
@@ -62,8 +64,13 @@ function LegacyOrderRedirect() {
 }
 
 function DefaultRoute() {
-  const isSaasAdmin = useAuthStore((state) => Boolean(state.user?.isSaasAdmin));
-  return <Navigate to={isSaasAdmin ? APP_ROUTES.platformTenants.path : APP_ROUTES.workbench.path} replace />;
+  const user = useAuthStore((state) => state.user);
+  const tenant = useAuthStore((state) => state.tenant);
+  const hasPermission = useAuthStore((state) => state.hasPermission);
+  const hasCapability = useAuthStore((state) => state.hasCapability);
+  const hasTenantMembershipPermission = useAuthStore((state) => state.hasTenantMembershipPermission);
+  const target = Object.values(APP_ROUTES).find((route) => "menu" in route && route.menu && canAccessRoute(route, hasPermission, hasCapability, tenant?.categoryCode, Boolean(user?.isSaasAdmin), hasTenantMembershipPermission));
+  return target ? <Navigate to={target.path} replace /> : <Result status="403" title="暂无可访问页面" subTitle="请联系租户管理员授予业务或会员管理权限。" />;
 }
 
 function ProtectedRoutes() {
@@ -83,7 +90,6 @@ function ProtectedRoutes() {
             <Route path="/" element={<DefaultRoute />} />
             <Route path={APP_ROUTES.workbench.path} element={guard(APP_ROUTES.workbench, <WorkbenchPage />)} />
             <Route path={APP_ROUTES.operationReport.path} element={guard(APP_ROUTES.operationReport, <WorkspaceOperationReportPage />)} />
-            <Route path={APP_ROUTES.rentalCore.path} element={guard(APP_ROUTES.rentalCore, <RentalCorePage />)} />
             <Route path={APP_ROUTES.orderCreate.path} element={guard(APP_ROUTES.orderCreate, <OrderCreatePage />)} />
             <Route path={APP_ROUTES.orders.path} element={guard(APP_ROUTES.orders, <OrdersPage />)} />
             <Route path={APP_ROUTES.orderDetail.path} element={guard(APP_ROUTES.orderDetail, <OrderDetailPage />)} />
@@ -103,10 +109,12 @@ function ProtectedRoutes() {
             <Route path={APP_ROUTES.tenantRoles.path} element={guard(APP_ROUTES.tenantRoles, <TenantRolePermissionPage />)} />
             <Route path={APP_ROUTES.tenantIntegrations.path} element={guard(APP_ROUTES.tenantIntegrations, <TenantIntegrationsPage />)} />
             <Route path={APP_ROUTES.paymentReconciliation.path} element={guard(APP_ROUTES.paymentReconciliation, <PaymentReconciliationPage />)} />
+            <Route path={APP_ROUTES.qualificationTypes.path} element={guard(APP_ROUTES.qualificationTypes, <QualificationTypesPage />)} />
             <Route path={APP_ROUTES.membershipReviews.path} element={guard(APP_ROUTES.membershipReviews, <MembershipReviewPage />)} />
             <Route path={APP_ROUTES.personalMembers.path} element={guard(APP_ROUTES.personalMembers, <PersonalMembershipPage />)} />
             <Route path={APP_ROUTES.corporateMembers.path} element={guard(APP_ROUTES.corporateMembers, <CorporateMembershipPage />)} />
             <Route path={APP_ROUTES.membershipPlans.path} element={guard(APP_ROUTES.membershipPlans, <MembershipPlanPage />)} />
+            <Route path={APP_ROUTES.membershipRewards.path} element={guard(APP_ROUTES.membershipRewards, <MembershipRewardsPage />)} />
             <Route path="/platform" element={<Navigate to={APP_ROUTES.platformUsers.path} replace />} />
             <Route path={APP_ROUTES.platformTenants.path} element={guard(APP_ROUTES.platformTenants, <TenantManagementPage />)} />
             <Route path={APP_ROUTES.platformUsers.path} element={guard(APP_ROUTES.platformUsers, <PlatformPage />)} />

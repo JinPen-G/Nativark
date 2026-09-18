@@ -1,3 +1,4 @@
+/** 官方日历源 API：平台维护的法定节假日来源与版本（`/platform/official-calendars*`）。 */
 import type {
   OfficialCalendarSource,
   OfficialCalendarSourceVersion,

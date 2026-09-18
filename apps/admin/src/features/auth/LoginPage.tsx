@@ -4,7 +4,7 @@ import { isAxiosError } from "axios";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppearanceSwitcher } from "@/components/AppearanceSwitcher";
-import { api } from "@/api/rental";
+import { api } from "@/api/platform";
 import { useAuthStore } from "./authStore";
 
 type LoginValues = { tenantCode: string; account: string; password: string };

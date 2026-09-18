@@ -9,6 +9,7 @@ import {
 import { Prisma } from "@prisma/client";
 import {
   CLIENT_API_VERSION,
+  type ClientMiniProgramPaymentIntentRequest,
   type ClientPaymentIntentRequest,
   type ClientPaymentIntentResponse,
   type PaymentReconciliationSummary
@@ -203,6 +204,23 @@ export class PaymentRuntimeService {
       return "已验证微信支付连接（仅查询随机交易号，未创建或扣款）。";
     }
     throw new ServiceUnavailableException("未实现的支付平台适配器");
+  }
+
+  /**
+   * 当前 schema 没有 ClientWechatIdentity，也没有 JSAPI tradeType/prepayId 的持久化契约。
+   * 不从请求体、手机号或 Native code_url 推导 openid/支付参数；即使配置了微信 Native
+   * 也不能宣称支持小程序。可信绑定和支付迁移经单独批准前，在任何建单/幂等回放前拒绝。
+   */
+  async createMiniProgramPaymentIntent(
+    _tenantId: string,
+    _workspaceId: string,
+    _orderId: string,
+    input: ClientMiniProgramPaymentIntentRequest
+  ): Promise<ClientPaymentIntentResponse> {
+    if (input.instrument !== "rental") throw new BadRequestException("小程序支付仅支持租金及费用");
+    const key = input.idempotencyKey?.trim();
+    if (!key || key.length > 191) throw new BadRequestException("支付必须带有效幂等键");
+    throw new ServiceUnavailableException("小程序微信支付暂不可用：尚未接入可信 ClientWechatIdentity 和 JSAPI 支付持久化，不能使用 Native 支付参数");
   }
 
   async createPaymentIntent(

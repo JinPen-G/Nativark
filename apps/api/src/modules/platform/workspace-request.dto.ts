@@ -1,4 +1,4 @@
-import type { CreateBusinessWorkspaceRequest, LinkCustomerToWorkspaceRequest, SaveSharedCustomerRequest, SaveWorkspaceMemberRequest, UpdateBusinessWorkspaceRequest } from "@rental-os/shared";
+import type { CreateBusinessWorkspaceRequest, SaveSharedCustomerRequest, SaveWorkspaceMemberRequest, UpdateBusinessWorkspaceRequest } from "@rental-os/shared";
 import { BUSINESS_WORKSPACE_RUN_MODES } from "@rental-os/shared";
 import { IsBoolean, IsEmail, IsIn, IsNotEmpty, IsObject, IsOptional, IsString } from "class-validator";
 
@@ -24,10 +24,6 @@ export class SaveWorkspaceMemberDto implements SaveWorkspaceMemberRequest {
   @IsOptional() @IsString() @IsNotEmpty() roleId?: string;
   @IsOptional() @IsIn(DATA_SCOPES) dataScope?: SaveWorkspaceMemberRequest["dataScope"];
   @IsOptional() @IsBoolean() isActive?: boolean;
-}
-export class LinkCustomerToWorkspaceDto implements LinkCustomerToWorkspaceRequest {
-  @IsString() @IsNotEmpty() customerId!: string;
-  @IsOptional() @IsString() @IsNotEmpty() levelName?: string;
 }
 export class SaveSharedCustomerDto implements SaveSharedCustomerRequest {
   @IsIn(["personal", "corporate"]) customerType!: SaveSharedCustomerRequest["customerType"];

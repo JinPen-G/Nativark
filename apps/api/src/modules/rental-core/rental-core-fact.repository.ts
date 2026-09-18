@@ -16,6 +16,7 @@ import {
   type RentalInspectionRecord,
   type CorrectRentalInspectionUsageRequest,
   type RentalOrder,
+  type RentalOrderListQuery,
   type RentalOrderChange,
   type RentalOrderExtension,
   type RentalOrderLine,
@@ -141,6 +142,11 @@ export interface AssetStatusHistoryMetadata {
  */
 export interface RentalCoreFactStore {
   listOrders(tenantId: string): Promise<RentalOrder[]>;
+  /**
+   * ORDER-LIST-01：按筛选条件在数据库里分页查订单。`take` 缺省表示不分页（只筛选）。
+   * 租户与空间范围与 `listOrders` 完全一致。
+   */
+  queryOrders(tenantId: string, query: RentalOrderListQuery & { skip?: number; take?: number }): Promise<{ items: RentalOrder[]; total: number }>;
   /** 找出当前空间中仍处于待确认、且至少一条软预占已过期的订单候选。 */
   listExpiredDraftOrderIds(tenantId: string, expiredBefore: string, take?: number): Promise<string[]>;
   findOrder(tenantId: string, orderId: string, tx?: RentalFactTx): Promise<RentalOrder | undefined>;
@@ -393,6 +399,87 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       orderBy: { createdAt: "desc" }
     });
     return rows.map((row) => this.toDomainOrder(row));
+  }
+
+  /**
+   * ORDER-LIST-01：筛选 + 计数 + 分页全部在 MySQL 里做。
+   *
+   * 用一条参数化 SQL 取「命中的订单 id 页」与总数，再用 Prisma 按 id 取聚合：
+   * 关键词要查会员快照里的企业名、待审费用要查 JSON 数组、分配进度要按
+   * 预占与分配数量求和比较——这些 Prisma 的 where 表达不了（或在 MySQL 上语义不确定），
+   * 而在内存里过滤整张表正是这条改动要去掉的东西。
+   * 分配进度的判据必须与共享契约的 `rentalAllocationProgress` 逐字对应，改一处必须改另一处。
+   */
+  async queryOrders(tenantId: string, query: RentalOrderListQuery & { skip?: number; take?: number }): Promise<{ items: RentalOrder[]; total: number }> {
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
+    const conditions: Prisma.Sql[] = [Prisma.sql`o.\`tenantId\` = ${tenantId}`, Prisma.sql`o.\`workspaceId\` = ${workspaceId}`];
+    if (query.status) conditions.push(Prisma.sql`o.\`status\` = ${query.status}`);
+    const keyword = query.keyword?.trim();
+    if (keyword) {
+      const pattern = `%${keyword.replace(/[\\%_]/g, "\\$&")}%`;
+      conditions.push(Prisma.sql`(
+        o.\`orderNo\` LIKE ${pattern}
+        OR o.\`customerName\` LIKE ${pattern}
+        OR o.\`payerSubjectCustomerId\` LIKE ${pattern}
+        OR JSON_UNQUOTE(JSON_EXTRACT(o.\`membershipSnapshot\`, '$.corporateCustomerName')) LIKE ${pattern}
+      )`);
+    }
+    // 区间按**当前**归还时间：续租过的订单实际占用到 effectiveEndAt。
+    if (query.from) conditions.push(Prisma.sql`COALESCE(o.\`effectiveEndAt\`, o.\`endAt\`) > ${new Date(query.from)}`);
+    if (query.to) conditions.push(Prisma.sql`o.\`startAt\` < ${new Date(query.to)}`);
+    if (query.pendingFeeOnly) conditions.push(Prisma.sql`JSON_CONTAINS(o.\`feeReviews\`, '[{"status":"pending"}]') = 1`);
+
+    let joins = Prisma.empty;
+    if (query.assignment === "issue") {
+      conditions.push(Prisma.sql`JSON_EXTRACT(o.\`assignment\`, '$.issue') IS NOT NULL`);
+    } else if (query.assignment) {
+      // 派生表先按本租户/本空间收窄再聚合，否则 MySQL 会先对全平台的预占/分配做 GROUP BY 再来 JOIN。
+      // 预占表自带 tenantId + workspaceId；分配表没有，只能经订单表收窄。
+      const scopedOrderIds = Prisma.sql`SELECT \`id\` FROM \`rental_orders\`
+          WHERE \`tenantId\` = ${tenantId} AND \`workspaceId\` = ${workspaceId} AND \`status\` IN ('reserved', 'ready_for_pickup')`;
+      joins = Prisma.sql`
+        LEFT JOIN (
+          SELECT \`orderId\`, SUM(GREATEST(\`quantity\` - \`releasedQuantity\`, 0)) AS required_qty
+          FROM \`rental_reservations\`
+          WHERE \`tenantId\` = ${tenantId} AND \`workspaceId\` = ${workspaceId}
+            AND \`status\` NOT IN ('released', 'expired', 'cancelled')
+          GROUP BY \`orderId\`
+        ) r ON r.\`orderId\` = o.\`id\`
+        LEFT JOIN (
+          SELECT \`orderId\`,
+            SUM(\`quantity\`) AS assigned_qty,
+            SUM(CASE WHEN \`status\` <> 'pre_assigned' THEN \`quantity\` ELSE 0 END) AS locked_qty
+          FROM \`rental_allocations\`
+          WHERE \`orderId\` IN (${scopedOrderIds})
+            AND \`status\` IN ('pre_assigned', 'locked', 'allocated', 'picked_up')
+          GROUP BY \`orderId\`
+        ) a ON a.\`orderId\` = o.\`id\``;
+      conditions.push(Prisma.sql`o.\`status\` IN ('reserved', 'ready_for_pickup')`);
+      const required = Prisma.sql`COALESCE(r.required_qty, 0)`;
+      const assigned = Prisma.sql`COALESCE(a.assigned_qty, 0)`;
+      const locked = Prisma.sql`COALESCE(a.locked_qty, 0)`;
+      if (query.assignment === "pending") conditions.push(Prisma.sql`${assigned} = 0`);
+      else if (query.assignment === "partial") conditions.push(Prisma.sql`${assigned} > 0 AND ${assigned} < ${required}`);
+      else if (query.assignment === "unlocked") conditions.push(Prisma.sql`${assigned} > 0 AND ${assigned} >= ${required} AND ${locked} < ${required}`);
+      else if (query.assignment === "locked") conditions.push(Prisma.sql`${assigned} > 0 AND ${assigned} >= ${required} AND ${locked} >= ${required}`);
+    }
+
+    const where = Prisma.join(conditions, " AND ");
+    const paging = query.take !== undefined ? Prisma.sql`LIMIT ${query.take} OFFSET ${query.skip ?? 0}` : Prisma.empty;
+    const [countRows, idRows] = await Promise.all([
+      this.prisma.$queryRaw<Array<{ total: bigint | number }>>(Prisma.sql`SELECT COUNT(*) AS total FROM \`rental_orders\` o ${joins} WHERE ${where}`),
+      this.prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT o.\`id\` FROM \`rental_orders\` o ${joins} WHERE ${where} ORDER BY o.\`createdAt\` DESC, o.\`id\` DESC ${paging}`)
+    ]);
+    const total = Number(countRows[0]?.total ?? 0);
+    const ids = idRows.map((row) => row.id);
+    if (!ids.length) return { items: [], total };
+    const rows = await this.prisma.rentalOrder.findMany({
+      where: { id: { in: ids }, tenantId, workspaceId },
+      include: this.orderInclude
+    });
+    const position = new Map(ids.map((id, index) => [id, index]));
+    rows.sort((left, right) => (position.get(left.id) ?? 0) - (position.get(right.id) ?? 0));
+    return { items: rows.map((row) => this.toDomainOrder(row)), total };
   }
 
   async listExpiredDraftOrderIds(tenantId: string, expiredBefore: string, take = 50): Promise<string[]> {

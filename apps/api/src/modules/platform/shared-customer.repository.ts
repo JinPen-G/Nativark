@@ -1,9 +1,15 @@
 import { Injectable } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import {
+  Prisma,
+  type CustomerAccount as PrismaCustomerAccount,
+  type CustomerMembership as PrismaCustomerMembership,
+  type CustomerMembershipReview as PrismaCustomerMembershipReview,
+  type CustomerProfile as PrismaCustomerProfile
+} from "@prisma/client";
 import type {
   CustomerAccountStatus,
   CustomerMembershipStatus,
-  CustomerWorkspaceLink,
+  CustomerMembership,
   SaveSharedCustomerRequest,
   SharedCustomerProfile
 } from "@rental-os/shared";
@@ -11,15 +17,71 @@ import { PrismaService } from "../database/prisma.service";
 
 export type SharedCustomerTx = Prisma.TransactionClient;
 
+export interface CreateCustomerProfileInput {
+  tenantId: string;
+  customerType: "personal" | "corporate";
+  name: string;
+  phone: string;
+  email?: string;
+  identityVerified?: boolean;
+  /** 只接受调用方已脱敏的值；本层绝不落明文证件号。 */
+  identityNoMasked?: string | null;
+  qualifications?: Record<string, unknown>;
+  corporateName?: string;
+  corporateTaxNo?: string;
+}
+
+export type CustomerProfileUpdateData = Pick<
+  Prisma.CustomerProfileUncheckedUpdateInput,
+  "name" | "phone" | "phoneMasked" | "email" | "identityNoMasked" | "corporateName" | "corporateTaxNo"
+>;
+
+export type CustomerMembershipUpdateData = Pick<
+  Prisma.CustomerMembershipUncheckedUpdateInput,
+  "status" | "levelName" | "firstOrderAt" | "suspendedAt" | "restrictedAt" | "exitedAt" | "closedAt"
+>;
+
+export type CustomerAccountUpdateData = Pick<
+  Prisma.CustomerAccountUncheckedUpdateInput,
+  "status" | "suspendedAt" | "closedAt" | "lastReason" | "lastOperator" | "loginPhone" | "loginPhoneMasked" | "passwordHash" | "passwordUpdatedAt" | "mustChangePassword"
+>;
+
+export interface UpsertAccountCredentialsInput {
+  tenantId: string;
+  customerId: string;
+  loginPhone: string;
+  loginPhoneMasked: string;
+  passwordHash: string;
+  mustChangePassword: boolean;
+  /** 已有账号时是否同时重绑登录号并激活（客户端自助注册）；后台临时密码只改口令。 */
+  rebindLogin: boolean;
+  lastReason?: { create: string; update: string };
+  lastOperator?: string;
+}
+
+export interface CreateMembershipReviewInput {
+  tenantId: string;
+  customerId: string;
+  reviewType: "registration" | "qualification";
+  channel: "admin" | "app";
+  status?: "pending";
+  sourceWorkspaceId?: string;
+  qualificationType?: string;
+  requestKey?: string | null;
+  payload?: Prisma.InputJsonValue;
+}
+
+export type CustomerMembershipReviewUpdateData = Pick<
+  Prisma.CustomerMembershipReviewUncheckedUpdateInput,
+  "status" | "reason" | "reviewedBy" | "reviewedAt"
+>;
+
 /**
- * SPACE-04：共享客户主档的库侧唯一入口。
+ * 主档与会员均按租户共享；订单、资金和营销等历史业务事实仍留在原空间。
  *
- * 隔离口径与其他仓储不同，必须分清两层，否则会把「共享」做成「泄露」：
- * - **主档**按 `tenantId` 共享：同租户任一空间都能查到同一个客户，这是需求要的复用。
- * - **业务关系**按 `workspaceId` 隔离：客户在哪个空间有业务、等级多少，各空间独立。
- *
- * 因此主档查询只带 tenantId 条件（跨空间可见是**设计**，不是漏洞），
- * 而关系查询一律带 workspaceId。两者不能互相套用。
+ * 写入口约束：`customerProfile / customerAccount / customerMembership / customerMembershipReview`
+ * 四个模型的 create / update / upsert / delete 只允许出现在本文件，其余服务与仓储一律经由
+ * 下面的写方法（都接受可选 `tx`）。`scripts/validate-customer-write-ownership.cjs` 静态把关。
  */
 @Injectable()
 export class SharedCustomerRepository {
@@ -29,17 +91,18 @@ export class SharedCustomerRepository {
     return tx ?? this.prisma;
   }
 
-  private mask(phone: string) {
-    const trimmed = phone.trim();
-    if (trimmed.length <= 4) return trimmed;
+  /** 4 位及以下不再原样返回：原样返回等于把整段值存进“脱敏”列。 */
+  private mask(value: string) {
+    const trimmed = value.trim();
+    if (trimmed.length <= 4) return "****";
     return `${trimmed.slice(0, 3)}****${trimmed.slice(-4)}`;
   }
 
-  /** 按租户列出共享客户主档；关系详情只附带当前空间，绝不暴露其他空间。 */
-  async listByTenant(tenantId: string, workspaceId: string): Promise<SharedCustomerProfile[]> {
+  /** 主档与唯一会员均按租户共享，业务事实仍由业务仓储按空间查询。 */
+  async listByTenant(tenantId: string): Promise<SharedCustomerProfile[]> {
     const rows = await this.prisma.customerProfile.findMany({
       where: { tenantId },
-      include: { workspaceLinks: { where: { tenantId, workspaceId } } },
+      include: { membership: true },
       orderBy: { createdAt: "desc" }
     });
     return rows.map((row) => this.toDomain(row));
@@ -48,13 +111,12 @@ export class SharedCustomerRepository {
   async findById(
     tenantId: string,
     customerId: string,
-    workspaceId?: string,
     tx?: SharedCustomerTx
   ): Promise<SharedCustomerProfile | undefined> {
     const row = await this.db(tx).customerProfile.findFirst({
       where: { id: customerId, tenantId },
       include: {
-        workspaceLinks: workspaceId ? { where: { tenantId, workspaceId } } : false,
+        membership: true,
         // CUSTOMER-01E：详情才带联系人与经办人；列表不带，避免 N+1 且列表并不展示它们。
         contacts: { where: { status: "active" }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
         authorizedAgents: { orderBy: { validFrom: "desc" } },
@@ -66,131 +128,297 @@ export class SharedCustomerRepository {
     return row ? this.toDomain(row) : undefined;
   }
 
-  /** 按手机号查主档。用于「客户已在别的空间注册过」的复用判定。 */
-  async findByPhone(tenantId: string, phone: string, workspaceId?: string): Promise<SharedCustomerProfile | undefined> {
+  /** 按租户手机号复用同一主档与会员。 */
+  async findByPhone(tenantId: string, phone: string): Promise<SharedCustomerProfile | undefined> {
     const row = await this.prisma.customerProfile.findFirst({
       where: { tenantId, phone: phone.trim() },
-      include: { workspaceLinks: workspaceId ? { where: { tenantId, workspaceId } } : false }
+      include: { membership: true }
     });
     return row ? this.toDomain(row) : undefined;
   }
 
-  /**
-   * 创建共享客户主档，并在同一事务里把它接入指定经营空间。
-   *
-   * 两件事必须同事务：主档建好而关系没建，客户在当前空间"不存在"却又占用了
-   * 手机号唯一键，再次创建会撞 409 且无从修复。
-   */
-  async createWithLink(
+  /** 创建主档与唯一会员必须同事务，避免手机号已占用但会员缺失。 */
+  async createWithMembership(
     tenantId: string,
-    workspaceId: string,
     input: SaveSharedCustomerRequest,
     levelName: string
   ): Promise<SharedCustomerProfile> {
     const created = await this.prisma.$transaction(async (tx) => {
-      const profile = await tx.customerProfile.create({
-        data: {
-          tenantId,
-          customerType: input.customerType,
-          name: input.name.trim(),
-          phone: input.phone.trim(),
-          phoneMasked: this.mask(input.phone),
-          email: input.email?.trim() || null,
-          identityVerified: input.identityVerified ?? false,
-          // 只存掩码，绝不落明文证件号。
-          identityNoMasked: input.identityNo ? this.mask(input.identityNo) : null,
-          qualifications: (input.qualifications ?? {}) as Prisma.InputJsonValue,
-          corporateName: input.corporateName?.trim() || null,
-          corporateTaxNo: input.corporateTaxNo?.trim() || null
-        }
-      });
-      await tx.customerWorkspaceLink.create({
-        data: { tenantId, workspaceId, customerId: profile.id, levelName }
-      });
+      const profile = await this.createProfile({
+        tenantId,
+        customerType: input.customerType,
+        name: input.name,
+        phone: input.phone,
+        email: input.email,
+        identityVerified: input.identityVerified,
+        // 只存掩码，绝不落明文证件号。
+        identityNoMasked: input.identityNo ? this.mask(input.identityNo) : null,
+        qualifications: input.qualifications,
+        corporateName: input.corporateName,
+        corporateTaxNo: input.corporateTaxNo
+      }, tx);
+      await this.createMembership({ tenantId, customerId: profile.id, levelName }, tx);
       return profile.id;
     });
-    const profile = await this.findById(tenantId, created, workspaceId);
+    const profile = await this.findById(tenantId, created);
     if (!profile) throw new Error("共享客户创建后读取失败");
     return profile;
   }
 
-  /**
-   * 把已存在的共享客户接入某个经营空间。幂等：已接入则返回既有关系。
-   *
-   * 这是「同一客户无需重复注册即可在两个空间使用」的落点。
-   */
-  async linkToWorkspace(
-    tenantId: string,
-    workspaceId: string,
-    customerId: string,
-    levelName: string
-  ): Promise<CustomerWorkspaceLink> {
-    const existing = await this.prisma.customerWorkspaceLink.findFirst({
-      where: { tenantId, workspaceId, customerId }
+  // ---------------------------------------------------------------------------
+  // 四个客户模型的唯一写入口。方法只做单模型写入，不含业务判断；
+  // 流程级规则（注册、合并、状态机）留在各自的服务里。
+  // ---------------------------------------------------------------------------
+
+  async createProfile(input: CreateCustomerProfileInput, tx?: SharedCustomerTx): Promise<PrismaCustomerProfile> {
+    return this.db(tx).customerProfile.create({
+      data: {
+        tenantId: input.tenantId,
+        customerType: input.customerType,
+        name: input.name.trim(),
+        phone: input.phone.trim(),
+        phoneMasked: this.mask(input.phone),
+        email: input.email?.trim() || null,
+        identityVerified: input.identityVerified ?? false,
+        identityNoMasked: input.identityNoMasked ?? null,
+        qualifications: (input.qualifications ?? {}) as Prisma.InputJsonValue,
+        corporateName: input.corporateName?.trim() || null,
+        corporateTaxNo: input.corporateTaxNo?.trim() || null
+      }
     });
-    if (existing) return this.toLink(existing);
+  }
+
+  /** 主档不存在（或不属于该租户）时返回 undefined，由调用方决定 404 还是断言。 */
+  async updateProfile(
+    tenantId: string,
+    customerId: string,
+    data: CustomerProfileUpdateData,
+    tx?: SharedCustomerTx
+  ): Promise<PrismaCustomerProfile | undefined> {
     try {
-      const row = await this.prisma.customerWorkspaceLink.create({
-        data: { tenantId, workspaceId, customerId, levelName }
-      });
-      return this.toLink(row);
+      return await this.db(tx).customerProfile.update({ where: { id: customerId, tenantId }, data });
     } catch (error) {
-      // 两个请求可能同时越过上面的查询；唯一约束是最终裁决。撞键后读取
-      // 已提交关系，保持“接入客户”语义幂等，而不是向调用方暴露 500。
-      if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") throw error;
-      const winner = await this.prisma.customerWorkspaceLink.findFirst({
-        where: { tenantId, workspaceId, customerId }
-      });
-      if (!winner) throw error;
-      return this.toLink(winner);
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") return undefined;
+      throw error;
     }
   }
 
-  /** 列出**当前空间**的客户关系。与主档列表刻意分开，避免把跨空间可见误用到业务侧。 */
-  async listLinksByWorkspace(tenantId: string, workspaceId: string): Promise<CustomerWorkspaceLink[]> {
-    const rows = await this.prisma.customerWorkspaceLink.findMany({
-      where: { tenantId, workspaceId },
-      orderBy: { createdAt: "desc" }
+  /**
+   * 标记被合并方。以「尚未被合并」为写入条件：并发两路合并同一主档时，后到者更新 0 行，
+   * 由调用方转为可解释的 409，而不是双双写出映射。
+   */
+  async markMerged(tenantId: string, sourceCustomerId: string, targetCustomerId: string, tx?: SharedCustomerTx): Promise<number> {
+    const marked = await this.db(tx).customerProfile.updateMany({
+      where: { tenantId, id: sourceCustomerId, mergedIntoCustomerId: null },
+      data: { mergedIntoCustomerId: targetCustomerId, status: "merged" }
     });
-    return rows.map((row) => this.toLink(row));
+    return marked.count;
   }
 
-  async findLink(
+  async createMembership(
+    input: { tenantId: string; customerId: string; levelName?: string; status?: CustomerMembershipStatus },
+    tx?: SharedCustomerTx
+  ): Promise<PrismaCustomerMembership> {
+    return this.db(tx).customerMembership.create({
+      data: {
+        tenantId: input.tenantId,
+        customerId: input.customerId,
+        ...(input.levelName === undefined ? {} : { levelName: input.levelName }),
+        ...(input.status === undefined ? {} : { status: input.status })
+      }
+    });
+  }
+
+  /** 带 `expectedStatus` 时是乐观并发写：状态已被别人改过则更新 0 行。返回更新行数。 */
+  async updateMembership(
     tenantId: string,
-    workspaceId: string,
+    membershipId: string,
+    data: CustomerMembershipUpdateData,
+    expectedStatus?: CustomerMembershipStatus,
+    tx?: SharedCustomerTx
+  ): Promise<number> {
+    const updated = await this.db(tx).customerMembership.updateMany({
+      where: { tenantId, id: membershipId, ...(expectedStatus === undefined ? {} : { status: expectedStatus }) },
+      data
+    });
+    return updated.count;
+  }
+
+  async createAccount(
+    input: { tenantId: string; customerId: string; loginPhone: string; loginPhoneMasked: string; lastOperator?: string | null },
+    tx?: SharedCustomerTx
+  ): Promise<PrismaCustomerAccount> {
+    return this.db(tx).customerAccount.create({
+      data: {
+        tenantId: input.tenantId,
+        customerId: input.customerId,
+        loginPhone: input.loginPhone.trim(),
+        loginPhoneMasked: input.loginPhoneMasked,
+        status: "active",
+        lastOperator: input.lastOperator ?? null
+      }
+    });
+  }
+
+  /** 同 `updateMembership`；账号可按账号 id 或客户 id 定位。 */
+  async updateAccount(
+    tenantId: string,
+    target: { accountId: string } | { customerId: string },
+    data: CustomerAccountUpdateData,
+    expectedStatus?: CustomerAccountStatus,
+    tx?: SharedCustomerTx
+  ): Promise<number> {
+    const updated = await this.db(tx).customerAccount.updateMany({
+      where: {
+        tenantId,
+        ...("accountId" in target ? { id: target.accountId } : { customerId: target.customerId }),
+        ...(expectedStatus === undefined ? {} : { status: expectedStatus })
+      },
+      data
+    });
+    return updated.count;
+  }
+
+  /**
+   * 设置或重置登录口令。既有账号只改口令相关列（不解除暂停、不改登录号），
+   * 除非调用方明确要求 `rebindLogin`（客户端自助注册会把登录号绑回当前手机号并激活）。
+   */
+  async upsertAccountCredentials(input: UpsertAccountCredentialsInput, tx?: SharedCustomerTx): Promise<PrismaCustomerAccount> {
+    const now = new Date();
+    const operator = input.lastOperator === undefined ? {} : { lastOperator: input.lastOperator };
+    return this.db(tx).customerAccount.upsert({
+      where: { tenantId_customerId: { tenantId: input.tenantId, customerId: input.customerId } },
+      create: {
+        tenantId: input.tenantId,
+        customerId: input.customerId,
+        loginPhone: input.loginPhone,
+        loginPhoneMasked: input.loginPhoneMasked,
+        status: "active",
+        passwordHash: input.passwordHash,
+        passwordUpdatedAt: now,
+        mustChangePassword: input.mustChangePassword,
+        ...(input.lastReason ? { lastReason: input.lastReason.create } : {}),
+        ...operator
+      },
+      update: {
+        passwordHash: input.passwordHash,
+        passwordUpdatedAt: now,
+        mustChangePassword: input.mustChangePassword,
+        ...(input.rebindLogin ? { loginPhone: input.loginPhone, loginPhoneMasked: input.loginPhoneMasked, status: "active" } : {}),
+        ...(input.lastReason ? { lastReason: input.lastReason.update } : {}),
+        ...operator
+      }
+    });
+  }
+
+  /**
+   * MP-02A：微信手机号登录为客户开通**无口令**登录账号。已有账号原样返回（不改口令、不改登录号、
+   * 不解除暂停）；口令为空的账号只能通过微信/短信证明登录，密码登录会被拒绝。
+   */
+  async ensureLoginAccount(
+    input: { tenantId: string; customerId: string; loginPhone: string; loginPhoneMasked: string; lastReason: string; lastOperator: string },
+    tx?: SharedCustomerTx
+  ): Promise<PrismaCustomerAccount> {
+    return this.db(tx).customerAccount.upsert({
+      where: { tenantId_customerId: { tenantId: input.tenantId, customerId: input.customerId } },
+      create: {
+        tenantId: input.tenantId,
+        customerId: input.customerId,
+        loginPhone: input.loginPhone,
+        loginPhoneMasked: input.loginPhoneMasked,
+        status: "active",
+        passwordHash: null,
+        mustChangePassword: false,
+        lastReason: input.lastReason,
+        lastOperator: input.lastOperator
+      },
+      update: {}
+    });
+  }
+
+  async createReview(input: CreateMembershipReviewInput, tx?: SharedCustomerTx): Promise<PrismaCustomerMembershipReview> {
+    return this.db(tx).customerMembershipReview.create({
+      data: {
+        tenantId: input.tenantId,
+        customerId: input.customerId,
+        reviewType: input.reviewType,
+        channel: input.channel,
+        status: input.status ?? "pending",
+        sourceWorkspaceId: input.sourceWorkspaceId ?? null,
+        qualificationType: input.qualificationType ?? null,
+        requestKey: input.requestKey ?? null,
+        ...(input.payload === undefined ? {} : { payload: input.payload })
+      }
+    });
+  }
+
+  async updateReview(
+    tenantId: string,
+    reviewId: string,
+    data: CustomerMembershipReviewUpdateData,
+    tx?: SharedCustomerTx
+  ): Promise<PrismaCustomerMembershipReview> {
+    return this.db(tx).customerMembershipReview.update({ where: { id: reviewId, tenantId }, data });
+  }
+
+  /** 幂等创建租户会员；既有状态与等级绝不因切换空间或重试而恢复。 */
+  async ensureMembership(
+    tenantId: string,
+    customerId: string,
+    levelName: string
+  ): Promise<CustomerMembership> {
+    try {
+      const row = await this.prisma.customerMembership.upsert({
+        where: { tenantId_customerId: { tenantId, customerId } },
+        create: { tenantId, customerId, levelName },
+        update: {}
+      });
+      return this.toMembership(row);
+    } catch (error) {
+      if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") throw error;
+      const winner = await this.findMembership(tenantId, customerId);
+      if (!winner) throw error;
+      return winner;
+    }
+  }
+
+  async listMembershipsByTenant(tenantId: string): Promise<CustomerMembership[]> {
+    const rows = await this.prisma.customerMembership.findMany({
+      where: { tenantId },
+      orderBy: { createdAt: "desc" }
+    });
+    return rows.map((row) => this.toMembership(row));
+  }
+
+  async findMembership(
+    tenantId: string,
     customerId: string,
     tx?: SharedCustomerTx
-  ): Promise<CustomerWorkspaceLink | undefined> {
-    const row = await this.db(tx).customerWorkspaceLink.findFirst({
-      where: { tenantId, workspaceId, customerId }
+  ): Promise<CustomerMembership | undefined> {
+    const row = await this.db(tx).customerMembership.findUnique({
+      where: { tenantId_customerId: { tenantId, customerId } }
     });
-    return row ? this.toLink(row) : undefined;
+    return row ? this.toMembership(row) : undefined;
   }
 
   /**
    * 新业务门禁只取四个最小事实，避免订单高频路径加载联系人、经办人等详情数据。
    * `tx` 存在时必须与调用方取得的客户行锁使用同一连接，才能读到锁后的权威状态。
    */
-  async findBusinessGate(tenantId: string, workspaceId: string, customerId: string, tx?: SharedCustomerTx) {
+  async findBusinessGate(tenantId: string, _workspaceId: string, customerId: string, tx?: SharedCustomerTx) {
     const row = await this.db(tx).customerProfile.findFirst({
       where: { tenantId, id: customerId },
       select: {
         mergedIntoCustomerId: true,
         account: { select: { status: true } },
-        workspaceLinks: {
-          where: { tenantId, workspaceId },
-          select: { status: true },
-          take: 1
-        }
+        membership: { select: { status: true } }
       }
     });
     return row
       ? {
           mergedIntoCustomerId: row.mergedIntoCustomerId,
           account: row.account ? { status: row.account.status as CustomerAccountStatus } : null,
-          workspaceLinks: row.workspaceLinks.map((link) => ({
-            status: link.status as CustomerMembershipStatus
-          }))
+          membership: row.membership ? { status: row.membership.status as CustomerMembershipStatus } : null
         }
       : null;
   }
@@ -213,7 +441,7 @@ export class SharedCustomerRepository {
     mergedIntoCustomerId: string | null;
     createdAt: Date;
     updatedAt: Date;
-    workspaceLinks?: Array<Parameters<SharedCustomerRepository["toLinkPublic"]>[0]>;
+    membership?: Parameters<SharedCustomerRepository["toMembership"]>[0] | null;
     contacts?: Array<{
       id: string; kind: string; name: string; phoneMasked: string;
       relation: string | null; isPrimary: boolean; status: string; linkedCustomerId: string | null;
@@ -248,7 +476,7 @@ export class SharedCustomerRepository {
       mergedIntoCustomerId: row.mergedIntoCustomerId ?? undefined,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
-      workspaceLinks: row.workspaceLinks?.map((link) => this.toLink(link)),
+      membership: row.membership ? this.toMembership(row.membership) : undefined,
       // CUSTOMER-01E：仅详情查询带这两个关联；列表不带，故为 undefined。
       // 号码一律只给脱敏值——明文由服务层按解密权限单独决定并留访问审计。
       contacts: row.contacts?.map((contact) => ({
@@ -285,40 +513,31 @@ export class SharedCustomerRepository {
     };
   }
 
-  /** 仅用于给 toDomain 的入参推导类型，不在运行时调用。 */
-  private toLinkPublic(row: {
+  private toMembership(row: {
     id: string;
     tenantId: string;
-    workspaceId: string;
     customerId: string;
     levelName: string;
     status: string;
     firstOrderAt: Date | null;
+    suspendedAt: Date | null;
+    restrictedAt: Date | null;
+    exitedAt: Date | null;
+    closedAt: Date | null;
     createdAt: Date;
     updatedAt: Date;
-  }) {
-    return row;
-  }
-
-  private toLink(row: {
-    id: string;
-    tenantId: string;
-    workspaceId: string;
-    customerId: string;
-    levelName: string;
-    status: string;
-    firstOrderAt: Date | null;
-    createdAt: Date;
-    updatedAt: Date;
-  }): CustomerWorkspaceLink {
+  }): CustomerMembership {
     return {
       id: row.id,
       tenantId: row.tenantId,
-      workspaceId: row.workspaceId,
       customerId: row.customerId,
       levelName: row.levelName,
-      status: row.status as CustomerWorkspaceLink["status"],
+      status: row.status as CustomerMembership["status"],
       firstOrderAt: row.firstOrderAt?.toISOString(),
+      suspendedAt: row.suspendedAt?.toISOString(),
+      restrictedAt: row.restrictedAt?.toISOString(),
+      exitedAt: row.exitedAt?.toISOString(),
+      closedAt: row.closedAt?.toISOString(),
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString()
     };

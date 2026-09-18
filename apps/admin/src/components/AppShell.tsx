@@ -66,7 +66,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const logout = useAuthStore((state) => state.logout);
   const hasPermission = useAuthStore((state) => state.hasPermission);
   const hasCapability = useAuthStore((state) => state.hasCapability);
-  const homePath = user?.isSaasAdmin ? "/platform/tenants" : "/workbench";
+  const hasTenantMembershipPermission = useAuthStore((state) => state.hasTenantMembershipPermission);
+  const currentWorkspaceId = useAuthStore((state) => state.currentWorkspaceId);
   /**
    * UI-NAV-01：导航文案取自**当前经营空间**的品类档案。
    *
@@ -81,13 +82,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   const categoryProfile = useQuery({
     queryKey: ["rental-core", "profile"],
     queryFn: rentalCoreApi.profile,
-    enabled: Boolean(user && !user.isSaasAdmin)
+    enabled: Boolean(user && !user.isSaasAdmin && currentWorkspaceId && (hasPermission("rental-os:order:view") || hasPermission("rental-os:vehicle:view")))
   });
   const terminology = categoryProfile.data?.terminology;
   const sections = useMemo(() => buildNavigationSections(terminology).map((section) => ({
     ...section,
-    routes: section.routes.filter((route) => route.menu && canAccessRoute(route, hasPermission, hasCapability, tenant?.categoryCode, Boolean(user?.isSaasAdmin)))
-  })).filter((section) => section.routes.length > 0), [hasCapability, hasPermission, tenant?.categoryCode, terminology, user?.isSaasAdmin]);
+    routes: section.routes.filter((route) => route.menu && canAccessRoute(route, hasPermission, hasCapability, tenant?.categoryCode, Boolean(user?.isSaasAdmin), hasTenantMembershipPermission))
+  })).filter((section) => section.routes.length > 0), [hasCapability, hasPermission, hasTenantMembershipPermission, tenant?.categoryCode, terminology, user]);
+  const homePath = sections[0]?.routes[0]?.path ?? "/";
   /**
    * 展开态：一级是**不可点的分组标题**，二级直接铺开（`type: "group"`）。
    *

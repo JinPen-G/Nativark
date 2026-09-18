@@ -2,12 +2,12 @@ import { DeleteOutlined, EditOutlined, PlusOutlined, SearchOutlined } from "@ant
 import { RENTAL_PRICING_UNIT_LABELS, formatRentalMoney, rentalCurrencySymbol, type RentalPricingGroup, type SaveRentalPricingGroupRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { App, Button, Card, Drawer, Form, Input, InputNumber, Select, Space, Table, Tag, Typography } from "antd";
-import dayjs from "dayjs";
 import { useMemo, useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { resolveTenantNavigationLabels } from "@/app/navigation-terminology";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
+import { PRICE_VERSIONS_QUERY_KEY, usePriceVersions } from "./usePriceVersions";
 
 export function PricingGroupPage() {
   const { message } = App.useApp();
@@ -21,20 +21,14 @@ export function PricingGroupPage() {
   const pricingGroups = useQuery({ queryKey: ["rental-core", "pricing-groups"], queryFn: rentalCoreApi.pricingGroups });
   const settings = useQuery({ queryKey: ["rental-core", "business-settings"], queryFn: rentalCoreApi.businessSettings });
   const currency = settings.data?.pricing.currency;
-  const versions = useQuery({ queryKey: ["rental-core", "price-versions"], queryFn: () => rentalCoreApi.priceVersions(1, 100) });
-  const currentVersion = versions.data?.rows.find((row) => !dayjs(row.effectiveFrom).isAfter(dayjs()));
-  const currentVersionDetail = useQuery({
-    queryKey: ["rental-core", "price-version", currentVersion?.sequence],
-    queryFn: () => rentalCoreApi.priceVersion(currentVersion!.sequence),
-    enabled: Boolean(currentVersion)
-  });
+  const { currentVersionDetail } = usePriceVersions();
   const save = useMutation({
     mutationFn: rentalCoreApi.savePricingGroup,
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["rental-core", "pricing-groups"] });
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["rental-core", "pricing-plans"] }),
-        queryClient.invalidateQueries({ queryKey: ["rental-core", "price-versions"] })
+        queryClient.invalidateQueries({ queryKey: PRICE_VERSIONS_QUERY_KEY })
       ]);
       setOpen(false);
       setEditing(undefined);

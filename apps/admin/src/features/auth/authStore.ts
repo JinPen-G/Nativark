@@ -1,6 +1,6 @@
 import type { AuthUser, BusinessWorkspace, LoginResponse, RentalCapability, TenantContext } from "@rental-os/shared";
 import { create } from "zustand";
-import { api } from "@/api/rental";
+import { api } from "@/api/platform";
 import { clearSessionQueryCache } from "@/app/queryClient";
 
 const keys = {
@@ -45,6 +45,7 @@ interface AuthState {
   switchWorkspace: (workspaceId: string) => Promise<void>;
   logout: () => void;
   hasPermission: (permission?: string) => boolean;
+  hasTenantMembershipPermission: (permission?: string) => boolean;
   hasCapability: (capability?: RentalCapability) => boolean;
 }
 
@@ -158,6 +159,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       return permission.startsWith("system:tenant:") || permission.startsWith("system:calendar-source:");
     }
     return Boolean(user.isPlatformAdmin || user.permissions?.includes("*") || user.permissions?.includes(permission));
+  },
+  hasTenantMembershipPermission(permission) {
+    const user = get().user;
+    const access = user?.tenantMembership;
+    if (!access || user?.isSaasAdmin) return false;
+    if (access.isTenantAdmin) return true;
+    return access.dataScope === "all" && (!permission || access.permissions.includes("*") || access.permissions.includes(permission));
   },
   hasCapability(capability) {
     if (!capability) return true;

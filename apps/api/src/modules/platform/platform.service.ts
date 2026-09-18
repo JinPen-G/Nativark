@@ -15,7 +15,6 @@ import {
   RecordCustomerCorporateCreditPaymentRequest,
   SaveCustomerInvoiceProfileRequest,
   SaveSharedCustomerRequest,
-  LinkCustomerToWorkspaceRequest,
   UpdateBusinessWorkspaceRequest,
   GeneratePlatformNumberRequest,
   OrganizationSummary,
@@ -57,6 +56,7 @@ import {
   describeDataPermission
 } from "../../common/data-permission";
 import { PlatformRepository } from "./platform.repository";
+import { MembershipService } from "./membership.service";
 import { SharedCustomerRepository } from "./shared-customer.repository";
 import { CustomerOperationsService } from "./customer-operations.service";
 import { CustomerMergeService } from "./customer-merge.service";
@@ -110,7 +110,8 @@ export class PlatformService {
     // CUSTOMER-01D：重复识别、人工合并与注销前置检查。同样追加在最后且 @Optional()。
     @Optional() private readonly customerMerge?: CustomerMergeService,
     // CORP-SETTLE-01A：企业授信账务流水。继续追加在最后，保持既有位置参数测试兼容。
-    @Optional() private readonly customerCorporateSettlement?: CustomerCorporateSettlementService
+    @Optional() private readonly customerCorporateSettlement?: CustomerCorporateSettlementService,
+    @Optional() private readonly memberships?: MembershipService
   ) {}
 
   private readonly logger = new Logger(PlatformService.name);
@@ -246,6 +247,9 @@ export class PlatformService {
         { code: "rental-os:vehicle:status-action", name: "按钮-品类资产状态动作", description: "启停、维保、异常和状态处置" },
         { code: "rental-os:member:view", name: "会员查看" },
         { code: "rental-os:member:manage", name: "会员管理" },
+        // 证件类型是当前经营空间的业务配置，不是租户级会员资料维护：
+        // 空间配置人员不必顺带拿到改会员主档的权限，反之亦然。
+        { code: "rental-os:qualification-type:manage", name: "空间证件类型管理", description: "维护当前经营空间的资质证件类型" },
         { code: "rental-os:member:review", name: "会员注册审核", description: "处理个人会员注册审核，不含证件审核" },
         { code: "rental-os:member:qualification-review", name: "会员证件审核", description: "处理身份证件和品类资质审核" },
         { code: "rental-os:member:account-manage", name: "会员账号与密码管理", description: "开通账号、设置临时密码和管理账号状态" },
@@ -1552,25 +1556,10 @@ export class PlatformService {
 
   /* ---------- SPACE-04：租户共享客户主档 ---------- */
 
-  /**
-   * 列出本租户的共享客户主档。
-   *
-   * 跨空间可见是**设计**：需求要的正是「同一客户无需重复注册即可在两个空间使用」，
-   * 运营在露营空间必须能查到这个客户已在摄影空间注册过，否则只能重复建档。
-   * 业务侧的隔离由 `listWorkspaceCustomers` 承担，两个接口不可混用。
-   */
   listSharedCustomers(currentUser?: SystemUserRow) {
     this.requireWorkspaceDataSource();
     const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireSharedCustomers().listByTenant(tenantId, requireRequestWorkspaceId());
-  }
-
-  /** 列出**当前经营空间**已接入的客户关系。空间取自会话，不接受客户端传入。 */
-  listWorkspaceCustomers(currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    const workspaceId = requireRequestWorkspaceId();
-    return this.requireSharedCustomers().listLinksByWorkspace(tenantId, workspaceId);
+    return this.requireSharedCustomers().listByTenant(tenantId);
   }
 
   /**
@@ -1590,7 +1579,7 @@ export class PlatformService {
     const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
     return this.requireCustomerOperations().getCustomerDetail(
       tenantId,
-      requireRequestWorkspaceId(),
+      getRequestWorkspaceId(),
       customerId,
       currentUser
     );
@@ -1601,7 +1590,7 @@ export class PlatformService {
     const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
     return this.requireCustomerOperations().listCustomers(
       tenantId,
-      requireRequestWorkspaceId(),
+      getRequestWorkspaceId(),
       currentUser
     );
   }
@@ -1620,7 +1609,7 @@ export class PlatformService {
     this.requireWorkspaceDataSource();
     this.assertCustomerActionPermission(
       currentUser,
-      input.status === "closed" ? "rental-os:customer:close" : "rental-os:member:manage",
+      input.status === "closed" ? "rental-os:customer:close" : "rental-os:member:account-manage",
       input.status === "closed" ? "注销客户账号" : "变更客户账号状态"
     );
     const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
@@ -1647,15 +1636,14 @@ export class PlatformService {
           ? "rental-os:member:risk-action"
           : "rental-os:member:manage",
       input.status === "closed"
-        ? "注销空间会员关系"
+        ? "注销租户会员关系"
         : input.status === "risk_restricted"
           ? "限制客户风险状态"
-          : "变更空间会员状态"
+          : "变更租户会员状态"
     );
     const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
     return this.requireCustomerOperations().changeMembershipStatus(
       tenantId,
-      requireRequestWorkspaceId(),
       customerId,
       input,
       currentUser?.displayName
@@ -1665,11 +1653,7 @@ export class PlatformService {
   listCustomerStatusHistory(customerId: string, currentUser?: SystemUserRow) {
     this.requireWorkspaceDataSource();
     const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerOperations().listStatusHistory(
-      tenantId,
-      customerId,
-      requireRequestWorkspaceId()
-    );
+    return this.requireCustomerOperations().listStatusHistory(tenantId, customerId);
   }
 
   listCustomerSensitiveAccess(customerId: string, currentUser?: SystemUserRow) {
@@ -1715,11 +1699,7 @@ export class PlatformService {
   getCustomerMembershipClosability(customerId: string, currentUser?: SystemUserRow) {
     this.requireWorkspaceDataSource();
     const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerMerge().assertClosable(
-      tenantId,
-      customerId,
-      requireRequestWorkspaceId()
-    );
+    return this.requireCustomerMerge().assertClosable(tenantId, customerId);
   }
 
   getCustomerTransactability(customerId: string, currentUser?: SystemUserRow) {
@@ -1805,47 +1785,26 @@ export class PlatformService {
     );
   }
 
-  /**
-   * 在当前空间登记客户。
-   *
-   * 手机号已存在时**不报错也不改主档**，而是把既有客户接入当前空间——
-   * 这正是「共享」的语义。若改成 409，运营在第二个空间就只能换号建档，
-   * 等于把共享主档退化成按空间各存一份。
-   */
   async registerSharedCustomer(input: SaveSharedCustomerRequest, currentUser?: SystemUserRow) {
     this.requireWorkspaceDataSource();
+    if (!this.memberships) throw new ConflictException("会员服务未就绪");
     const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    const workspaceId = requireRequestWorkspaceId();
-    if (!input?.phone?.trim()) throw new BadRequestException("客户手机号不能为空");
-    if (!input?.name?.trim()) throw new BadRequestException("客户名称不能为空");
-    const levelName = "普通会员";
-    const customers = this.requireSharedCustomers();
-    const existing = await customers.findByPhone(tenantId, input.phone, workspaceId);
-    if (existing) {
-      await customers.linkToWorkspace(tenantId, workspaceId, existing.id, levelName);
-      const refreshed = await customers.findById(tenantId, existing.id, workspaceId);
-      return refreshed ?? existing;
-    }
-    return customers.createWithLink(tenantId, workspaceId, input, levelName);
-  }
-
-  /** 把已存在的共享客户接入当前空间。目标空间取自会话，客户必须属于同租户。 */
-  async linkCustomerToWorkspace(input: LinkCustomerToWorkspaceRequest, currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    const workspaceId = requireRequestWorkspaceId();
-    if (!input?.customerId?.trim()) throw new BadRequestException("客户不能为空");
-    // 必须按 tenantId 校验存在性：否则可以拿别租户的 customerId 建立关系，
-    // 虽然复合外键会在库层拒绝，但那会表现成 500 而不是明确的 404。
-    const customers = this.requireSharedCustomers();
-    const profile = await customers.findById(tenantId, input.customerId.trim(), workspaceId);
-    if (!profile) throw new NotFoundException("共享客户不存在");
-    return customers.linkToWorkspace(
-      tenantId,
-      workspaceId,
-      profile.id,
-      input.levelName?.trim() || "普通会员"
-    );
+    const customerId = input.customerType === "corporate"
+      ? (await this.memberships.saveCorporateMember(tenantId, {
+          name: input.name,
+          phone: input.phone,
+          email: input.email,
+          corporateName: input.corporateName?.trim() || input.name,
+          corporateTaxNo: input.corporateTaxNo
+        })).customerId
+      : (await this.memberships.registerPersonal(tenantId, {
+          name: input.name,
+          phone: input.phone,
+          email: input.email,
+          identityNo: input.identityNo,
+          channel: "admin"
+        }, currentUser?.displayName)).customerId;
+    return this.requireSharedCustomers().findById(tenantId, customerId);
   }
 
   async createBusinessWorkspace(input: CreateBusinessWorkspaceRequest, currentUser?: SystemUserRow) {
@@ -2545,9 +2504,9 @@ export class PlatformService {
     return this.platformRepository.resolveSessionWorkspaceId(userId, requested);
   }
 
-  async findWorkspaceScopedUser(userId: string, workspaceId?: string) {
-    if (!this.useMysqlDataSource()) return this.findUserById(userId);
-    return this.platformRepository.findWorkspaceScopedUser(userId, workspaceId);
+  async findWorkspaceScopedUser(userId: string, workspaceId?: string, tenantUser?: SystemUserRow) {
+    if (!this.useMysqlDataSource()) return tenantUser ?? this.findUserById(userId);
+    return this.platformRepository.findWorkspaceScopedUser(userId, workspaceId, tenantUser);
   }
 
   /**

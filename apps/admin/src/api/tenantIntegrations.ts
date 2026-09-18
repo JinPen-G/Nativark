@@ -1,3 +1,4 @@
+/** 租户集成配置 API：支付 / 文件存储等第三方能力的目录、保存与连通性测试（`/platform/integrations*`）。 */
 import type {
   ApiResult,
   SaveTenantIntegrationRequest,

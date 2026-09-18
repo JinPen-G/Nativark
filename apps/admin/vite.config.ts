@@ -16,7 +16,7 @@ export default defineConfig(({ mode }) => {
       }
     },
     server: {
-      port: Number(env.REACT_ADMIN_PORT ?? 5175),
+      port: Number(process.env.PORT ?? env.REACT_ADMIN_PORT ?? 5175),
       proxy: {
         "/api": {
           target: env.VITE_API_BASE_URL?.replace(/\/api$/, "") ?? "http://localhost:3000",

@@ -1,0 +1,195 @@
+import { formatRentalMoney } from "@rental-os/shared";
+import type { GrantRentalRewardRequest } from "@rental-os/shared";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Alert, App, Button, Card, Form, Input, Select, Space, Table, Tag } from "antd";
+import { rentalCoreApi } from "@/api/rentalCore";
+import { PageHeader } from "@/components/PageHeader";
+import { QueryState } from "@/components/QueryState";
+import { useAuthStore } from "@/features/auth/authStore";
+
+/**
+ * 会员激励：人工补发奖励流水、客户权益账户与奖励流水。
+ *
+ * 从「品类与业务规则」拆出：奖励规则（注册赠礼、邀请奖励的触发与额度）仍是租户经营设置，
+ * 留在治理页；这里是经营事实的查看与补偿入口。读写走空间级的 /rental/v1/rewards 与
+ * /rental/v1/benefit-accounts，服务端守卫认 price:manage / rules:manage / system:params:manage，
+ * 页面内判权与之同口径。
+ */
+export function MembershipRewardsPage() {
+  const { message, modal } = App.useApp();
+  const queryClient = useQueryClient();
+  const hasPermission = useAuthStore((state) => state.hasPermission);
+  const canManagePrice = hasPermission("rental-os:price:manage");
+  const canEditRules = hasPermission("rental-os:rules:manage");
+  const canManageParams = hasPermission("system:params:manage");
+  const canSeeRewards = canManagePrice || canEditRules || canManageParams;
+  const [rewardForm] = Form.useForm<GrantRentalRewardRequest>();
+  const rewards = useQuery({
+    queryKey: ["rental-core", "rewards"],
+    queryFn: () => rentalCoreApi.rewards(),
+    enabled: canSeeRewards,
+  });
+  const benefitAccounts = useQuery({
+    queryKey: ["rental-core", "benefit-accounts"],
+    queryFn: () => rentalCoreApi.benefitAccounts(),
+    enabled: canSeeRewards,
+  });
+  // 营销余额按空间结算币种显示；经营设置的读取只对价格/规则权限开放，
+  // 只有平台参数权限的账号拿不到币种时退回无币种格式，不发注定 403 的请求。
+  const settings = useQuery({
+    queryKey: ["rental-core", "business-settings"],
+    queryFn: rentalCoreApi.businessSettings,
+    enabled: canManagePrice || canEditRules,
+  });
+  const currency = settings.data?.pricing.currency;
+  const grantReward = useMutation({
+    mutationFn: rentalCoreApi.grantReward,
+    onSuccess: async () => {
+      rewardForm.resetFields();
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["rental-core", "rewards"] }),
+        queryClient.invalidateQueries({ queryKey: ["rental-core", "benefit-accounts"] }),
+        queryClient.invalidateQueries({ queryKey: ["rental-core", "customer-coupons"] }),
+      ]);
+      message.success("奖励流水已按幂等键生成");
+    },
+    onError: () =>
+      message.error("生成失败：规则未启用、触发条件不匹配或参数不完整"),
+  });
+  const reverseReward = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      rentalCoreApi.reverseReward(id, reason),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["rental-core", "rewards"] }),
+        queryClient.invalidateQueries({ queryKey: ["rental-core", "benefit-accounts"] }),
+        queryClient.invalidateQueries({ queryKey: ["rental-core", "customer-coupons"] }),
+      ]);
+      message.success("奖励已撤销并保留流水");
+    },
+  });
+
+  return (
+    <>
+      <PageHeader
+        title="会员激励"
+        description="人工补发奖励、客户权益账户与奖励流水；奖励触发规则在「品类与业务规则 → 会员奖励规则」配置。"
+      />
+      <Alert
+        type="info"
+        showIcon
+        title="注册、实名审核和首单完成会自动触发奖励判断"
+        description="下方人工入口只用于补偿与联调；自动事件使用客户事件幂等键。积分、营销余额和奖励券会进入 Rental Core 权益账户；营销余额不是支付机构资金账户。奖励触发规则在「品类与业务规则 → 会员奖励规则」维护。"
+        style={{ marginBottom: 16 }}
+      />
+      <QueryState loading={rewards.isLoading || benefitAccounts.isLoading} error={rewards.error || benefitAccounts.error}>
+        <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+          <Card title="人工补发奖励流水">
+            <Form
+              form={rewardForm}
+              layout="inline"
+              onFinish={(values) => grantReward.mutate(values)}
+            >
+              <Form.Item
+                name="customerId"
+                label="客户"
+                rules={[{ required: true }]}
+              >
+                <Input />
+              </Form.Item>
+              <Form.Item name="triggerType" label="触发">
+                <Select
+                  style={{ width: 180 }}
+                  options={[
+                    { value: "registration", label: "注册赠礼" },
+                    { value: "identity_verified", label: "实名通过" },
+                    { value: "first_order_completed", label: "首单完成" },
+                    { value: "referral", label: "直接邀请补发" },
+                  ]}
+                />
+              </Form.Item>
+              <Form.Item name="relatedCustomerId" label="关联客户">
+                <Input />
+              </Form.Item>
+              <Form.Item
+                name="idempotencyKey"
+                label="业务幂等键"
+                rules={[{ required: true }]}
+              >
+                <Input />
+              </Form.Item>
+              <Button
+                htmlType="submit"
+                type="primary"
+                loading={grantReward.isPending}
+              >
+                生成并入账
+              </Button>
+            </Form>
+          </Card>
+          <Card className="data-panel" title="客户权益账户">
+            <Table
+              rowKey="customerId"
+              dataSource={benefitAccounts.data ?? []}
+              locale={{ emptyText: "还没有客户获得过积分、营销余额或奖励券" }}
+              columns={[
+                { title: "客户", dataIndex: "customerId" },
+                { title: "积分", dataIndex: "pointsBalance", align: "right" },
+                { title: "营销余额", dataIndex: "marketingBalance", align: "right", render: (value) => formatRentalMoney(Number(value), currency) },
+                { title: "可用奖励券", dataIndex: "availableRewardCouponCount", align: "right" },
+                { title: "更新时间", dataIndex: "updatedAt" },
+              ]}
+            />
+          </Card>
+          <Card className="data-panel" title="奖励流水">
+            <Table
+              rowKey="id"
+              dataSource={rewards.data ?? []}
+              locale={{ emptyText: "还没有奖励流水：自动事件未触发，也没有人工补发" }}
+              columns={[
+                { title: "客户", dataIndex: "customerId" },
+                {
+                  title: "奖励",
+                  render: (_, row) => `${row.rewardType} ${row.amount}`,
+                },
+                { title: "触发", dataIndex: "triggerType" },
+                { title: "幂等键", dataIndex: "idempotencyKey" },
+                {
+                  title: "状态",
+                  dataIndex: "status",
+                  render: (value) => <Tag>{value}</Tag>,
+                },
+                { title: "原因", dataIndex: "reason" },
+                {
+                  title: "操作",
+                  render: (_, row) =>
+                    row.status === "granted" ? (
+                      <Button
+                        danger
+                        type="link"
+                        onClick={() =>
+                          modal.confirm({
+                            title: "撤销奖励",
+                            content: "撤销会保留原流水与撤销时间。",
+                            onOk: () =>
+                              reverseReward.mutate({
+                                id: row.id,
+                                reason: "运营人工撤销",
+                              }),
+                          })
+                        }
+                      >
+                        撤销
+                      </Button>
+                    ) : (
+                      "-"
+                    ),
+                },
+              ]}
+            />
+          </Card>
+        </Space>
+      </QueryState>
+    </>
+  );
+}

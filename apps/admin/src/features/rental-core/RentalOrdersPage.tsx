@@ -1,10 +1,10 @@
 import { PlusOutlined, SearchOutlined } from "@ant-design/icons";
-import type { RentalOrder } from "@rental-os/shared";
-import { formatRentalMoney, rentalAllocationProgress } from "@rental-os/shared";
-import { useQuery } from "@tanstack/react-query";
-import { Button, Card, Checkbox, DatePicker, Input, Row, Col, Segmented, Space, Table, Tag } from "antd";
+import type { RentalCoreOrderStatus, RentalOrder, RentalOrderAssignmentFilter, RentalOrderListQuery } from "@rental-os/shared";
+import { RENTAL_ORDER_LIST_DEFAULT_PAGE_SIZE, RENTAL_ORDER_LIST_MAX_PAGE_SIZE, formatRentalMoney, rentalAllocationProgress } from "@rental-os/shared";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { Button, Card, Checkbox, DatePicker, Input, Row, Col, Segmented, Select, Space, Table, Tag } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { PageHeader } from "@/components/PageHeader";
@@ -13,42 +13,71 @@ import { useAuthStore } from "@/features/auth/authStore";
 import { hasPendingFeeReview } from "./orderFeeReview";
 
 const statusLabels: Record<string, string> = { draft: "软预占", reserved: "已确认", pickup_overdue: "待确认爽约", ready_for_pickup: "待交付", renting: "租赁中", return_inspection: "归还检查", settling: "待结算", completed: "已关闭", cancelled: "已取消", no_show: "已爽约" };
+/** 分配进度分段的显示文案 → 服务端筛选值。判据在服务端 SQL 里，与 `rentalAllocationProgress` 对应。 */
+const assignmentFilterOptions: Array<{ label: string; value: RentalOrderAssignmentFilter | "all" }> = [
+  { label: "全部分配", value: "all" },
+  { label: "待分配", value: "pending" },
+  { label: "部分分配", value: "partial" },
+  { label: "待锁定", value: "unlocked" },
+  { label: "已锁定", value: "locked" },
+  { label: "分配异常", value: "issue" }
+];
+const pageSizeOptions = [10, 20, 50, 100, RENTAL_ORDER_LIST_MAX_PAGE_SIZE].map(String);
 
 export function RentalOrdersPage() {
   const navigate = useNavigate();
   const canOperate = useAuthStore((s) => s.hasPermission("rental-os:order:operate"));
   const canCreate = useAuthStore((s) => s.hasPermission("rental-os:order:create"));
-  const [assignmentFilter, setAssignmentFilter] = useState("全部分配");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(RENTAL_ORDER_LIST_DEFAULT_PAGE_SIZE);
+  const [assignment, setAssignment] = useState<RentalOrderAssignmentFilter | "all">("all");
+  const [keywordInput, setKeywordInput] = useState("");
   const [keyword, setKeyword] = useState("");
-  const [status, setStatus] = useState<string>("all");
+  const [status, setStatus] = useState<RentalCoreOrderStatus>();
   const [period, setPeriod] = useState<[Dayjs | null, Dayjs | null] | null>(null);
   // ORDER-CLOSE-02：待裁定费用会阻止关单，必须能在列表上直接筛出来，
   // 否则运营只能逐单点开才知道哪张单卡在费用审核上。
   const [pendingFeeOnly, setPendingFeeOnly] = useState(false);
-  const orders = useQuery({ queryKey: ["rental-core", "orders"], queryFn: rentalCoreApi.orders });
-  const profile = useQuery({ queryKey: ["rental-core", "profile"], queryFn: rentalCoreApi.profile });
-  const data = useMemo(() => (orders.data ?? []).filter((order) => {
-    const term = keyword.trim().toLowerCase();
-    const matchesKeyword = !term || [order.orderNo, order.customerName, order.membershipSnapshot?.corporateCustomerName, order.payerSubjectCustomerId].filter(Boolean).some((value) => String(value).toLowerCase().includes(term));
-    const matchesStatus = status === "all" || order.status === status;
+
+  // 筛选与分页全部交给服务端；页面不再拉整张表再在内存里过滤。
+  // 查询键包含全部条件，否则换了条件却命中上一次的缓存。
+  const query: RentalOrderListQuery = {
+    page,
+    pageSize,
+    status,
+    keyword: keyword || undefined,
     // 区间筛选按**当前**归还时间：续租过的订单实际占用到 effectiveEndAt，
-    // 读原 endAt 会让它在覆盖续租那几天的筛选里查不出来。
-    const matchesPeriod = !period?.[0] || !period?.[1] || (dayjs(order.startAt).isBefore(period[1]!.endOf("day")) && dayjs(order.effectiveEndAt ?? order.endAt).isAfter(period[0]!.startOf("day")));
-    const assignmentMatches = assignmentFilter === "全部分配" || assignmentFilter === "分配异常" ? assignmentFilter !== "分配异常" || Boolean(order.assignment?.issue) : ["reserved", "ready_for_pickup"].includes(order.status) && rentalAllocationProgress(order).label === assignmentFilter;
-    const matchesPendingFee = !pendingFeeOnly || hasPendingFeeReview(order);
-    return matchesKeyword && matchesStatus && matchesPeriod && assignmentMatches && matchesPendingFee;
-  }), [orders.data, keyword, period, status, assignmentFilter, pendingFeeOnly]);
-  const statusOptions = [{ label: "全部", value: "all" }, ...[...new Set((orders.data ?? []).map((item) => item.status))].map((value) => ({ label: statusLabels[value] ?? value, value }))];
+    // 读原 endAt 会让它在覆盖续租那几天的筛选里查不出来（判据在服务端）。
+    from: period?.[0] ? period[0].startOf("day").toISOString() : undefined,
+    to: period?.[1] ? period[1].endOf("day").toISOString() : undefined,
+    assignment: assignment === "all" ? undefined : assignment,
+    pendingFeeOnly: pendingFeeOnly || undefined
+  };
+  const orders = useQuery({ queryKey: ["rental-core", "orders", query], queryFn: () => rentalCoreApi.orderPage(query), placeholderData: keepPreviousData });
+  // 「待裁定」计数是当前空间的总数，不随列表筛选变化；只取 total，不取行。
+  const pendingFeeCount = useQuery({ queryKey: ["rental-core", "orders", { pendingFeeOnly: true, pageSize: 1 }], queryFn: () => rentalCoreApi.orderPage({ pendingFeeOnly: true, pageSize: 1 }) });
+  const profile = useQuery({ queryKey: ["rental-core", "profile"], queryFn: rentalCoreApi.profile });
+  const rows = orders.data?.items ?? [];
+  const total = orders.data?.total ?? 0;
+  /** 任何筛选条件变化都回到第一页，否则可能停在一个新条件下不存在的页码上。 */
+  const applyFilter = <T,>(setter: (value: T) => void) => (value: T) => { setter(value); setPage(1); };
+  const statusOptions = Object.entries(statusLabels).map(([value, label]) => ({ value, label }));
   return <>
     <PageHeader title="租赁订单" description="按个人使用人、企业主体、租期、履约与结算状态管理当前经营空间订单。" extra={canCreate && <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate("/rental/orders/new")}>新建订单</Button>} />
     <Card className="data-panel">
-      <Segmented style={{ marginBottom: 16 }} value={assignmentFilter} onChange={setAssignmentFilter} options={["全部分配", "待分配", "部分分配", "待锁定", "已锁定", "分配异常"]} />
+      <Segmented style={{ marginBottom: 16 }} value={assignment} onChange={applyFilter(setAssignment)} options={assignmentFilterOptions} />
       <Space style={{ marginBottom: 16 }}>
-        <Checkbox checked={pendingFeeOnly} onChange={(event) => setPendingFeeOnly(event.target.checked)}>只看有待审费用的订单</Checkbox>
-        <Tag color="orange">{(orders.data ?? []).filter((row) => hasPendingFeeReview(row)).length} 张待裁定</Tag>
+        <Checkbox checked={pendingFeeOnly} onChange={(event) => applyFilter(setPendingFeeOnly)(event.target.checked)}>只看有待审费用的订单</Checkbox>
+        <Tag color="orange">{pendingFeeCount.data?.total ?? 0} 张待裁定</Tag>
       </Space>
-      <Row gutter={[12, 12]} style={{ marginBottom: 16 }}><Col xs={24} xl={10}><Input allowClear prefix={<SearchOutlined />} placeholder="订单号、个人会员或企业名称" value={keyword} onChange={(event) => setKeyword(event.target.value)} /></Col><Col xs={24} md={12} xl={7}><DatePicker.RangePicker value={period} onChange={(value) => setPeriod(value)} style={{ width: "100%" }} /></Col><Col xs={24} md={12} xl={7}><Segmented block options={statusOptions} value={status} onChange={(value) => setStatus(String(value))} /></Col></Row>
-      <QueryState loading={orders.isLoading} error={orders.error}><Table<RentalOrder> rowKey="id" dataSource={data} scroll={{ x: 1260 }} columns={[
+      <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
+        <Col xs={24} xl={10}><Input.Search allowClear prefix={<SearchOutlined />} placeholder="订单号、个人会员或企业名称，回车搜索" value={keywordInput} onChange={(event) => { setKeywordInput(event.target.value); if (!event.target.value) applyFilter(setKeyword)(""); }} onSearch={(value) => applyFilter(setKeyword)(value.trim())} /></Col>
+        <Col xs={24} md={12} xl={7}><DatePicker.RangePicker value={period} onChange={applyFilter(setPeriod)} style={{ width: "100%" }} /></Col>
+        <Col xs={24} md={12} xl={7}><Select allowClear placeholder="全部状态" style={{ width: "100%" }} options={statusOptions} value={status} onChange={applyFilter(setStatus)} /></Col>
+      </Row>
+      <QueryState loading={orders.isLoading} error={orders.error}><Table<RentalOrder> rowKey="id" dataSource={rows} loading={orders.isFetching} scroll={{ x: 1260 }}
+        pagination={{ current: page, pageSize, total, showSizeChanger: true, pageSizeOptions, showTotal: (count) => `共 ${count} 单`, onChange: (nextPage, nextSize) => { if (nextSize !== pageSize) { setPageSize(nextSize); setPage(1); } else setPage(nextPage); } }}
+        columns={[
         { title: "订单", fixed: "left", width: 170, render: (_, row) => <Button type="link" onClick={() => navigate(`/rental/orders/${row.id}`)}>{row.orderNo}</Button> },
         { title: "使用人 / 主体", width: 210, render: (_, row) => <Space orientation="vertical" size={0}><b>{row.membershipSnapshot?.personalCustomerName ?? row.customerName}</b>{row.membershipSnapshot?.corporateCustomerName && <Tag color="blue">{row.membershipSnapshot.corporateCustomerName}{row.membershipSnapshot.enterpriseContractAndPayer ? " · 企业签约付款" : " · 企业权益"}</Tag>} {!row.membershipSnapshot && <span className="muted">旧客户记录</span>}</Space> },
         { title: profile.data?.terminology.itemLabel ?? "商品", width: 220, render: (_, row) => row.lines.map((line) => `${line.itemGroupName}×${line.quantity}`).join("、") },

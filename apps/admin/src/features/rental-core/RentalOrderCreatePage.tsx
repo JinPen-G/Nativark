@@ -43,7 +43,6 @@ import {
 import dayjs, { type Dayjs } from "dayjs";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { membershipApi } from "@/api/membership";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { PageHeader } from "@/components/PageHeader";
 
@@ -81,10 +80,11 @@ export function RentalOrderCreatePage() {
   const pricing = useQuery({ queryKey: ["rental-core", "pricing-plans"], queryFn: rentalCoreApi.pricingPlans });
   const discounts = useQuery({ queryKey: ["rental-core", "discount-plans"], queryFn: rentalCoreApi.discountPlans });
   const services = useQuery({ queryKey: ["rental-core", "value-added-services"], queryFn: rentalCoreApi.valueAddedServices });
-  const members = useQuery({ queryKey: ["membership", "personal"], queryFn: membershipApi.personal });
+  // 下单只读取会员最小摘要，不依赖租户会员维护权限。
+  const members = useQuery({ queryKey: ["rental-core", "booking-members"], queryFn: rentalCoreApi.bookingMembers });
   const bookingOptions = useQuery({
-    queryKey: ["membership", "booking-options", customerId],
-    queryFn: () => membershipApi.bookingOptions(customerId ?? ""),
+    queryKey: ["rental-core", "booking-options", customerId],
+    queryFn: () => rentalCoreApi.bookingOptions(customerId ?? ""),
     enabled: Boolean(customerId),
   });
   const coupons = useQuery({
@@ -138,7 +138,7 @@ export function RentalOrderCreatePage() {
   async function quoteOrder() {
     const values = await form.validateFields();
     if (!selectedMember) {
-      message.error("请选择当前经营空间的个人会员");
+      message.error("请选择租户内的有效个人会员");
       return;
     }
     createQuote.mutate({
@@ -231,7 +231,7 @@ export function RentalOrderCreatePage() {
                       placeholder="搜索姓名或手机号"
                       options={(members.data ?? []).filter((item) => item.membershipStatus === "active").map((item) => ({
                         value: item.customerId,
-                        label: `${item.name} · ${item.phoneMasked} · ${item.levelName}`,
+                        label: `${item.name} · ${item.phoneMasked}`,
                       }))}
                       onChange={() => form.setFieldValue("bookingIdentity", { bookingIdentity: "personal", enterpriseContractAndPayer: false })}
                     />
@@ -267,8 +267,9 @@ export function RentalOrderCreatePage() {
                       </Form.Item>
                     </Col>
                   </Row>}
+                  {(members.error || bookingOptions.error) && <Alert showIcon type="error" title="会员或企业身份加载失败" description={members.error?.message ?? bookingOptions.error?.message} style={{ marginBottom: 12 }} />}
                   {selectedMember
-                    ? <Alert showIcon type="info" title={`${selectedMember.name} · ${selectedMember.levelName}`} description={`已登记 ${selectedMember.qualifications.length} 项资质，服务端会按本次租用品复核。`} />
+                    ? <Alert showIcon type="info" title={`${selectedMember.name} · ${selectedMember.phoneMasked}`} description="租户统一会员。下单仅显示必要信息，会员状态、资质及本空间适用权益由服务端在报价时复核。" />
                     : <Alert showIcon type="info" title="先选择会员，再选择个人或企业预约身份" />}
                 </Card>
               </Col>

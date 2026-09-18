@@ -1,5 +1,11 @@
+/**
+ * 门市租赁核心业务 API（`/rental/v1/*`）：品类与能力、商品与资产、库存、定价与优惠、
+ * 日历与规则版本、订单全流程、验机、工单、通知与报表。均按当前会话的经营空间作用。
+ */
 import type {
   TenantReadinessStatus,
+  BookingMemberOption,
+  CustomerMembershipBookingOption,
   CreateRentalInspectionRequest,
   CorrectRentalInspectionUsageRequest,
   ManageRentalAllocationRequest,
@@ -9,8 +15,6 @@ import type {
   PartialReturnRentalOrderRequest,
   RentalAsset,
   RentalAssetStatusHistory,
-  RentalAvailabilityRequest,
-  RentalAvailabilityResult,
   RentalCategoryDefinition,
   RentalCalendarOverrideAudit,
   RentalCalendarPublishPreview,
@@ -39,6 +43,8 @@ import type {
   ReviewRentalOrderFeeReviewRequest,
   RentalItemGroup,
   RentalOrder,
+  RentalOrderListQuery,
+  RentalOrderPage,
   ApplyRentalOrderChangeRequest,
   RentalOrderChange,
   RentalOrderChangePreview,
@@ -109,7 +115,6 @@ import type {
   CreateRentalPriceAdjustmentRequest,
   SaveRentalDiscountPlanRequest,
   SaveRentalNotificationTemplateRequest,
-  SaveRentalPricingPlanRequest,
   SaveRentalRuleVersionRequest,
   SaveRentalValueAddedServiceRequest,
   SaveRentalServiceCapacityRequest,
@@ -121,9 +126,7 @@ import type {
   SaveRentalFulfillmentOperatorRequest,
   SaveRentalItemGroupRequest,
   SaveRentalPricingGroupRequest,
-  SaveRentalStockBalanceRequest,
   SaveTenantRentalBusinessSettingsRequest,
-  SaveTenantRentalProfileRequest,
   TenantRentalBusinessSettings,
   TenantRentalProfile,
   SubstituteRentalBundleComponentRequest
@@ -133,6 +136,8 @@ import { http, request, requestText } from "./http";
 
 export const rentalCoreApi = {
   categories: () => request<RentalCategoryDefinition[]>("/rental/v1/categories"),
+  bookingMembers: () => request<BookingMemberOption[]>("/rental/v1/booking-members"),
+  bookingOptions: (customerId: string) => request<CustomerMembershipBookingOption[]>(`/rental/v1/booking-members/${encodeURIComponent(customerId)}/booking-options`),
   /**
    * REPORT-01A：当前经营空间经营报表。
    *
@@ -164,7 +169,6 @@ export const rentalCoreApi = {
   profile: () => request<TenantRentalProfile>("/rental/v1/tenant-profile"),
   /** TENANT-READY-01：当前空间开业配置状态（服务端权威判定）。 */
   tenantReadiness: () => request<TenantReadinessStatus>("/rental/v1/tenant-readiness"),
-  saveProfile: (data: SaveTenantRentalProfileRequest) => request<TenantRentalProfile>("/rental/v1/tenant-profile", { method: "put", data }),
   businessSettings: () => request<TenantRentalBusinessSettings>("/rental/v1/business-settings"),
   saveBusinessSettings: (data: SaveTenantRentalBusinessSettingsRequest) => request<TenantRentalBusinessSettings>("/rental/v1/business-settings", { method: "put", data }),
   couponTemplates: () => request<RentalCouponTemplate[]>("/rental/v1/coupon-templates"),
@@ -178,7 +182,6 @@ export const rentalCoreApi = {
   createPriceAdjustment: (data: CreateRentalPriceAdjustmentRequest) => request<{ id: string; code: string; name: string; status: string; preview: RentalPriceAdjustmentPreviewRow[] }>("/rental/v1/pricing-adjustments", { method: "post", data }),
   confirmPriceAdjustment: (adjustmentId: string) => request<unknown>(`/rental/v1/pricing-adjustments/${adjustmentId}/confirm`, { method: "post" }),
   cancelPriceAdjustment: (adjustmentId: string, data: CancelRentalPriceAdjustmentRequest) => request<unknown>(`/rental/v1/pricing-adjustments/${adjustmentId}/cancel`, { method: "post", data }),
-  savePricingPlan: (data: SaveRentalPricingPlanRequest) => request<RentalPricingPlanV1>(data.id ? `/rental/v1/pricing-plans/${data.id}` : "/rental/v1/pricing-plans", { method: data.id ? "put" : "post", data }),
   discountPlans: () => request<RentalDiscountPlan[]>("/rental/v1/discount-plans"),
   saveDiscountPlan: (data: SaveRentalDiscountPlanRequest) => request<RentalDiscountPlan>(data.id ? `/rental/v1/discount-plans/${data.id}` : "/rental/v1/discount-plans", { method: data.id ? "put" : "post", data }),
   valueAddedServices: () => request<RentalValueAddedService[]>("/rental/v1/value-added-services"),
@@ -233,7 +236,6 @@ export const rentalCoreApi = {
   calendarPublishPreview: (year: number) =>
     request<RentalCalendarPublishPreview>(`/rental/v1/calendars/${year}/publish-preview`),
   ruleVersions: () => request<RentalRuleVersion[]>("/rental/v1/rule-versions"),
-  currentRule: (at?: string) => request<RentalRuleVersion>("/rental/v1/rule-versions/current", { params: { at } }),
   ruleVersionAudits: (version?: string) => request<RentalRuleVersionAudit[]>("/rental/v1/rule-versions/audits", { params: { version } }),
   /** 发布前影响预览（需求 4.6.1）。只读推演，不改状态、不动已锁定报价。 */
   ruleVersionPublishPreview: (version: string, effectiveFrom?: string) =>
@@ -261,7 +263,6 @@ export const rentalCoreApi = {
   retryDueNotifications: (limit = 20) => request<{ attempted: number; sent: number; failed: number; ids: string[] }>(`/rental/v1/notification-logs/retry-due?limit=${limit}`, { method: "post" }),
   sendNotification: (data: SendRentalNotificationRequest) => request<RentalNotificationSendLogV1>("/rental/v1/notifications/send", { method: "post", data }),
   createQuote: (data: RentalQuoteRequest) => request<RentalQuoteSnapshotV1>("/rental/v1/quotes", { method: "post", data }),
-  quote: (id: string) => request<RentalQuoteSnapshotV1>(`/rental/v1/quotes/${id}`),
   locations: () => request<RentalFulfillmentLocation[]>("/rental/v1/locations"),
   operators: () => request<RentalFulfillmentOperator[]>("/rental/v1/fulfillment-operators"),
   saveOperator: (data: SaveRentalFulfillmentOperatorRequest) => request<RentalFulfillmentOperator>(data.id ? `/rental/v1/fulfillment-operators/${data.id}` : "/rental/v1/fulfillment-operators", { method: data.id ? "put" : "post", data }),
@@ -285,7 +286,6 @@ export const rentalCoreApi = {
   assetStatusHistory: (assetId: string) => request<RentalAssetStatusHistory[]>(`/rental/v1/assets/${encodeURIComponent(assetId)}/status-history`),
   saveAsset: (data: SaveRentalAssetRequest) => request<RentalAsset>(data.id ? `/rental/v1/assets/${data.id}` : "/rental/v1/assets", { method: data.id ? "put" : "post", data }),
   stockBalances: () => request<RentalStockBalance[]>("/rental/v1/stock-balances"),
-  saveStockBalance: (data: SaveRentalStockBalanceRequest) => request<RentalStockBalance>("/rental/v1/stock-balances", { method: "put", data }),
   stockLedger: (params?: { itemGroupId?: string; locationId?: string; batchNo?: string; sourceDocumentNo?: string; limit?: number }) => request<RentalStockLedgerEntry[]>("/rental/v1/stock-ledger", { params }),
   applyStockOperation: (data: RentalStockOperationRequest) => request<RentalStockOperationResult>("/rental/v1/stock-operations", { method: "post", data }),
   stockDispositions: (orderId?: string) => request<RentalStockDisposition[]>("/rental/v1/stock-dispositions", { params: { orderId } }),
@@ -299,8 +299,13 @@ export const rentalCoreApi = {
   submitWorkOrder: (id: string, data: SubmitRentalWorkOrderRequest) => request<RentalWorkOrder>(`/rental/v1/work-orders/${id}/submit`, { method: "post", data }),
   reviewWorkOrder: (id: string, data: ReviewRentalWorkOrderRequest) => request<RentalWorkOrder>(`/rental/v1/work-orders/${id}/review`, { method: "post", data }),
   cancelWorkOrder: (id: string, data: CancelRentalWorkOrderRequest) => request<RentalWorkOrder>(`/rental/v1/work-orders/${id}/cancel`, { method: "post", data }),
-  availability: (data: RentalAvailabilityRequest) => request<RentalAvailabilityResult>("/rental/v1/availability", { method: "post", data }),
   orders: () => request<RentalOrder[]>("/rental/v1/orders"),
+  /**
+   * ORDER-LIST-01：服务端筛选 + 分页。始终带 `page`，服务端据此返回分页信封
+   * 而不是兼容用的纯数组；空间不传，取会话。
+   */
+  orderPage: (params: RentalOrderListQuery = {}) =>
+    request<RentalOrderPage>("/rental/v1/orders", { params: { ...params, page: params.page ?? 1 } }),
   order: (id: string) => request<RentalOrder>(`/rental/v1/orders/${id}`),
   fundingEvents: (id: string) => request<RentalFundingBalance>(`/rental/v1/orders/${id}/funding-events`),
   initiateFunding: (id: string, data: InitiateRentalFundingRequest) => request<RentalFundingEvent>(`/rental/v1/orders/${id}/funding-events/initiate`, { method: "post", data }),
@@ -311,11 +316,9 @@ export const rentalCoreApi = {
   failFunding: (id: string, data: RentalFundingFailureRequest) => request<RentalFundingEvent>(`/rental/v1/orders/${id}/funding-events/fail`, { method: "post", data }),
   createOrder: (data: CreateRentalOrderRequest) => request<RentalOrder>("/rental/v1/orders", { method: "post", data }),
   expirePendingOrder: (id: string) => request<RentalOrder>(`/rental/v1/orders/${id}/expire-pending`, { method: "post" }),
-  expirePendingOrders: (limit = 50) => request<{ scanned: number; expired: number; skipped: number; results: Array<{ orderId: string; status: "expired" | "skipped"; reason?: string }> }>(`/rental/v1/orders/expire-pending?limit=${limit}`, { method: "post" }),
   markPickupOverdue: (id: string) => request<RentalOrder>(`/rental/v1/orders/${id}/mark-pickup-overdue`, { method: "post" }),
   sendNoShowNotice: (id: string) => request<RentalOrder>(`/rental/v1/orders/${id}/no-show-notice`, { method: "post" }),
   confirmNoShow: (id: string, data: { reason: string }) => request<RentalOrder>(`/rental/v1/orders/${id}/confirm-no-show`, { method: "post", data }),
-  reconcilePickupOverdue: (limit = 50) => request<{ scanned: number; pickupOverdue: number; noShow: number; skipped: number; noticePending: number }>(`/rental/v1/orders/reconcile-pickup-overdue?limit=${limit}`, { method: "post" }),
   confirmOrder: (id: string) => request<RentalOrder>(`/rental/v1/orders/${id}/confirm`, { method: "post" }),
   allocateOrder: (id: string) => request<RentalOrder>(`/rental/v1/orders/${id}/allocate`, { method: "post" }),
   allocationCandidates: (id: string) => request<RentalAllocationCandidates>(`/rental/v1/orders/${id}/allocation-candidates`),

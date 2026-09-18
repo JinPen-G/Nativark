@@ -9,7 +9,10 @@ interface SchemaObject {
   minLength?: number;
   maxLength?: number;
   minimum?: number;
+  maximum?: number;
   items?: SchemaObject;
+  minItems?: number;
+  oneOf?: SchemaObject[];
   properties?: Record<string, SchemaObject>;
   required?: string[];
   additionalProperties?: boolean | SchemaObject;
@@ -37,6 +40,7 @@ export interface ContractOperation {
   parameters?: ParameterObject[];
   rawResponseContentType?: string;
   rateLimited?: boolean;
+  serviceUnavailableReason?: string;
 }
 
 const stringSchema: SchemaObject = { type: "string" };
@@ -145,6 +149,11 @@ function operation(config: ContractOperation) {
     };
   }
 
+  if (config.serviceUnavailableReason) {
+    // 未激活的客户端契约不能在文档中伪装成已经可成功创建真实支付。
+    item.responses = { "503": { description: config.serviceUnavailableReason, content: { "application/json": { schema: objectSchema } } } };
+  }
+
   if (config.rateLimited) {
     (item.responses as Record<string, unknown>)["429"] = {
       description: "Client request rate limit exceeded",
@@ -167,6 +176,23 @@ function buildPaths(operations: ContractOperation[]) {
 export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   OpenApiDocument: objectSchema,
   GenericObject: objectSchema,
+  CustomerMembershipBenefitScope: {
+    oneOf: [
+      { ...objectOf({ type: { type: "string", enum: ["tenant"] } }, ["type"]), additionalProperties: false },
+      { ...objectOf({ type: { type: "string", enum: ["workspaces"] }, workspaceIds: { type: "array", items: stringSchema, minItems: 1 } }, ["type", "workspaceIds"]), additionalProperties: false },
+      { ...objectOf({ type: { type: "string", enum: ["categories"] }, categoryCodes: { type: "array", items: { type: "string", enum: ["camera", "camping", "vehicle", "construction"] }, minItems: 1 } }, ["type", "categoryCodes"]), additionalProperties: false }
+    ]
+  },
+  CustomerMembershipBenefit: objectOf({
+    type: { type: "string", enum: ["rental_discount", "deposit_reduction", "preauth_reduction", "service_benefit", "priority_reservation", "quote_validity_extension"] },
+    calculation: { type: "string", enum: ["percentage", "amount", "quota", "priority"] },
+    value: numberSchema,
+    maximum: numberSchema,
+    applicableServiceIds: arrayOf(stringSchema),
+    stackable: booleanSchema,
+    conditions: objectSchema,
+    scope: ref("CustomerMembershipBenefitScope")
+  }, ["type", "calculation", "value"]),
   HealthStatus: objectOf(
     {
       service: stringSchema,
@@ -244,7 +270,8 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       isPlatformAdmin: booleanSchema,
       isSaasAdmin: booleanSchema,
       mustChangePassword: booleanSchema,
-      permissions: arrayOf(stringSchema)
+      permissions: arrayOf(stringSchema),
+      tenantMembership: objectOf({ permissions: arrayOf(stringSchema), dataScope: stringSchema, isTenantAdmin: booleanSchema }, ["permissions", "dataScope", "isTenantAdmin"])
     },
     ["id", "tenantId", "account", "displayName", "roleNames", "scope"]
   ),
@@ -874,7 +901,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       identifier: stringSchema,
       idempotencyKey: stringSchema
     },
-    ["tenantCode", "workspaceCode", "method", "identifier", "idempotencyKey"]
+    ["tenantCode", "method", "identifier", "idempotencyKey"]
   ),
   ClientRegistrationChallengeResponse: objectOf(
     {
@@ -922,7 +949,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       ),
       idempotencyKey: stringSchema
     },
-    ["tenantCode", "workspaceCode", "name", "phone", "password", "verificationToken", "consent", "idempotencyKey"]
+    ["tenantCode", "name", "phone", "password", "verificationToken", "consent", "idempotencyKey"]
   ),
   ClientPersonalMembershipRegistrationResponse: objectOf(
     {
@@ -960,7 +987,8 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
         },
         ["customerId", "customerType", "displayName", "loginIdentifierMasked"]
       ),
-      workspaces: arrayOf(ref("ClientWorkspaceSummary"))
+      workspaces: arrayOf(ref("ClientWorkspaceSummary")),
+      workspace: ref("ClientWorkspaceSummary")
     },
     ["apiVersion", "accessToken", "refreshToken", "expiresIn", "customer", "workspaces"]
   ),
@@ -1054,7 +1082,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       levelRank: numberSchema,
       isDefault: booleanSchema,
       isRecommended: booleanSchema,
-      benefits: arrayOf(objectSchema),
+      benefits: arrayOf(ref("CustomerMembershipBenefit")),
       effectiveFrom: { type: "string", format: "date-time" },
       effectiveTo: { type: "string", format: "date-time" }
     },
@@ -1075,7 +1103,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       status: stringSchema,
       effectiveFrom: { type: "string", format: "date-time" },
       effectiveTo: { type: "string", format: "date-time" },
-      benefits: arrayOf(objectSchema),
+      benefits: arrayOf(ref("CustomerMembershipBenefit")),
       reason: stringSchema,
       createdAt: { type: "string", format: "date-time" }
     },
@@ -1260,6 +1288,33 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     },
     ["id", "orderNo", "status", "customerName", "fulfillmentMode", "fulfillmentLocationName", "startAt", "endAt", "rentalAmount", "discountAmount", "couponAmount", "serviceAmount", "fulfillmentAmount", "depositAmount", "preAuthAmount", "payableAmount", "adjustmentAmount", "finalPayableAmount", "lines", "chargeLines", "createdAt", "updatedAt"]
   ),
+  MyOrderIndex: objectOf(
+    {
+      orderId: stringSchema, orderNo: stringSchema, tenantCode: stringSchema,
+      workspaceCode: stringSchema, workspaceName: stringSchema, categoryCode: stringSchema, status: stringSchema,
+      startAt: { type: "string", format: "date-time" }, endAt: { type: "string", format: "date-time" },
+      effectiveEndAt: { type: "string", format: "date-time" }, finalPayableAmount: numberSchema, currency: stringSchema,
+      createdAt: { type: "string", format: "date-time" }, updatedAt: { type: "string", format: "date-time" },
+      itemSummary: objectOf(
+        { firstItemGroupId: stringSchema, firstItemName: stringSchema, itemCount: { type: "integer", minimum: 0 }, totalQuantity: { type: "integer", minimum: 0 } },
+        ["firstItemGroupId", "firstItemName", "itemCount", "totalQuantity"],
+        false
+      )
+    },
+    ["orderId", "orderNo", "tenantCode", "workspaceCode", "workspaceName", "categoryCode", "status", "startAt", "endAt", "finalPayableAmount", "currency", "createdAt", "updatedAt"],
+    false
+  ),
+  ClientMyOrdersResponse: objectOf(
+    { apiVersion: stringSchema, items: arrayOf(ref("MyOrderIndex")), page: { type: "integer", minimum: 1, maximum: 1000000 }, pageSize: { type: "integer", minimum: 1, maximum: 50 }, total: { type: "integer", minimum: 0 } },
+    ["apiVersion", "items", "page", "pageSize", "total"], false
+  ),
+  ClientCancellationPreview: objectOf(
+    {
+      apiVersion: stringSchema, orderId: stringSchema, cancellationCharge: numberSchema, currency: stringSchema,
+      calculatedAt: { type: "string", format: "date-time" }, estimated: { type: "boolean", description: "Always true; cancellation rechecks state, time and settlement hooks. Not a refund quote." }
+    },
+    ["apiVersion", "orderId", "cancellationCharge", "currency", "calculatedAt", "estimated"], false
+  ),
   ClientOrderMutation: objectOf({ order: ref("ClientOrder"), replayed: booleanSchema }, ["order", "replayed"]),
   ClientOrderList: objectOf({ items: arrayOf(ref("ClientOrder")), page: numberSchema, pageSize: numberSchema, total: numberSchema }, ["items", "page", "pageSize", "total"]),
   ClientFulfillment: objectOf(
@@ -1316,6 +1371,14 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     },
     ["instrument", "method", "idempotencyKey"]
   ),
+  ClientMiniProgramPaymentIntentRequest: objectOf(
+    { instrument: { type: "string", enum: ["rental"] }, idempotencyKey: { type: "string", minLength: 1, maxLength: 191 } },
+    ["instrument", "idempotencyKey"], false
+  ),
+  ClientWechatJsapiParameters: objectOf(
+    { timeStamp: stringSchema, nonceStr: stringSchema, package: stringSchema, signType: { type: "string", enum: ["RSA"] }, paySign: stringSchema },
+    ["timeStamp", "nonceStr", "package", "signType", "paySign"], false
+  ),
   ClientPaymentIntentResponse: objectOf(
     {
       apiVersion: stringSchema,
@@ -1327,6 +1390,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       currency: stringSchema,
       status: stringSchema,
       checkoutUrl: stringSchema,
+      jsapi: ref("ClientWechatJsapiParameters"),
       expiresAt: { type: "string", format: "date-time" },
       paidAt: { type: "string", format: "date-time" },
       message: stringSchema
@@ -1367,7 +1431,7 @@ function clientOperation(
   path: string,
   operationId: string,
   summary: string,
-  options: { requestSchema?: string; responseSchema?: string | SchemaObject; authRequired?: boolean; parameters?: ParameterObject[]; rawResponseContentType?: string; rateLimited?: boolean } = {}
+  options: { requestSchema?: string; responseSchema?: string | SchemaObject; authRequired?: boolean; parameters?: ParameterObject[]; rawResponseContentType?: string; rateLimited?: boolean; serviceUnavailableReason?: string } = {}
 ): ContractOperation {
   return {
     method,
@@ -1381,7 +1445,8 @@ function clientOperation(
     responseSchema: options.responseSchema ?? "GenericObject",
     parameters: options.parameters,
     rawResponseContentType: options.rawResponseContentType,
-    rateLimited: options.rateLimited ?? true
+    rateLimited: options.rateLimited ?? true,
+    serviceUnavailableReason: options.serviceUnavailableReason
   };
 }
 
@@ -1451,21 +1516,15 @@ const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
   backlogOperation("get", "/api/platform/tenants/{id}/workspaces", "Platform", "listTenantBusinessWorkspaces", "List target tenant business workspaces", ["system:tenant:manage"]),
   backlogOperation("post", "/api/platform/tenants/{id}/workspaces", "Platform", "createTenantBusinessWorkspace", "Create target tenant business workspace", ["system:tenant:manage"]),
   backlogOperation("put", "/api/platform/tenants/{id}/workspaces/{workspaceId}", "Platform", "updateTenantBusinessWorkspace", "Update target tenant business workspace", ["system:tenant:manage"]),
-  // SPACE-04：租户共享客户主档与空间接入。
-  // customers 按租户共享（跨空间可见是设计），workspace-customers 按当前会话空间隔离。
   backlogOperation("get", "/api/platform/customers", "Platform", "listSharedCustomers", "List tenant shared customers", ["rental-os:member:view"]),
-  backlogOperation("post", "/api/platform/customers", "Platform", "registerSharedCustomer", "Register shared customer in current workspace", ["rental-os:member:manage"]),
-  backlogOperation("get", "/api/platform/workspace-customers", "Platform", "listWorkspaceCustomers", "List customers linked to current workspace", ["rental-os:member:view"]),
-  backlogOperation("post", "/api/platform/workspace-customers", "Platform", "linkCustomerToWorkspace", "Link existing shared customer to current workspace", ["rental-os:member:manage"]),
-  // CUSTOMER-01B：客户账号（租户级）与空间会员状态（空间级）是两条独立入口。
-  // 合并成一个会让「只停这个空间」与「停掉全部空间的登录」无法区分。
+  backlogOperation("post", "/api/platform/customers", "Platform", "registerSharedCustomer", "Register a tenant member using the shared review policy", ["rental-os:member:manage"]),
   backlogOperation("get", "/api/platform/customers/{customerId}", "Platform", "getCustomerDetail", "Get customer detail with masked sensitive fields", ["rental-os:member:view"]),
   backlogOperation("post", "/api/platform/customers/{customerId}/account", "Platform", "ensureCustomerAccount", "Open a login account for the customer (idempotent)", ["rental-os:member:manage"]),
   backlogOperation("put", "/api/platform/customers/{customerId}/account-status", "Platform", "changeCustomerAccountStatus", "Change customer account status; close requires customer:close, other states require member:manage", ["rental-os:member:manage", "rental-os:customer:close"]),
   backlogOperation("get", "/api/platform/customers/{customerId}/status-history", "Platform", "listCustomerStatusHistory", "List customer status timeline (account and workspace scope)", ["rental-os:member:view"]),
   backlogOperation("get", "/api/platform/customers/{customerId}/sensitive-access", "Platform", "listCustomerSensitiveAccess", "List sensitive data access audit for the customer", ["rental-os:customer:reveal-sensitive"]),
-  backlogOperation("put", "/api/platform/workspace-customers/{customerId}/status", "Platform", "changeCustomerMembershipStatus", "Change workspace membership status; close and risk restriction use separate permissions", ["rental-os:member:manage", "rental-os:member:risk-action", "rental-os:customer:close"]),
-  backlogOperation("get", "/api/platform/workspace-customers/{customerId}/transactability", "Platform", "getCustomerTransactability", "Check whether the customer may start new business in the current workspace", ["rental-os:member:view"]),
+  backlogOperation("put", "/api/platform/customers/{customerId}/membership-status", "Platform", "changeCustomerMembershipStatus", "Change workspace membership status; close and risk restriction use separate permissions", ["rental-os:member:manage", "rental-os:member:risk-action", "rental-os:customer:close"]),
+  backlogOperation("get", "/api/platform/customers/{customerId}/transactability", "Platform", "getCustomerTransactability", "Check whether the customer may start new business in the current workspace", ["rental-os:member:view"]),
   // CUSTOMER-01C：企业开票资料、合同、授信账期。按租户级客户身份维护，不按空间隔离——
   // 同一家企业在两个空间是同一家企业，开票与合同不该各存一份。
   backlogOperation("get", "/api/platform/customers/{customerId}/invoice-profiles", "Platform", "listCustomerInvoiceProfiles", "List corporate invoice profiles", ["rental-os:corporate:view"]),
@@ -1485,9 +1544,13 @@ const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
   backlogOperation("get", "/api/platform/customers/{customerId}/merge-preview", "Platform", "previewCustomerMerge", "Preview a manual customer merge (read-only conflict report)", ["rental-os:customer:merge"]),
   backlogOperation("post", "/api/platform/customers/merge", "Platform", "mergeCustomers", "Submit a manual customer merge (keeps original business references)", ["rental-os:customer:merge"]),
   backlogOperation("get", "/api/platform/customers/{customerId}/closability", "Platform", "getCustomerClosability", "Check whether the customer account may be closed", ["rental-os:customer:close"]),
-  backlogOperation("get", "/api/platform/workspace-customers/{customerId}/closability", "Platform", "getCustomerMembershipClosability", "Check whether the current-workspace membership may be closed", ["rental-os:customer:close"]),
-  // MEMBER-01：唯一新会员体系。空间一律由服务端会话解析，所有返回默认脱敏。
-  backlogOperation("get", "/api/membership/registration-settings", "Membership", "getMembershipRegistrationSettings", "Get current workspace registration review mode", ["rental-os:member:view"]),
+  backlogOperation("get", "/api/platform/customers/{customerId}/membership-closability", "Platform", "getCustomerMembershipClosability", "Check whether the current-workspace membership may be closed", ["rental-os:customer:close"]),
+  backlogOperation("get", "/api/membership/qualification-options", "Membership", "listMembershipQualificationOptions", "Read current workspace qualification choices for tenant member submissions", ["rental-os:member:view", "rental-os:member:manage"]),
+  backlogOperation("get", "/api/membership/personal-options", "Membership", "listPersonalMembershipOptions", "List active tenant members with minimal fields for employee selection", ["rental-os:member:view", "rental-os:corporate:employee-manage"]),
+  backlogOperation("get", "/api/membership/benefit-scope-options", "Membership", "membershipBenefitScopeOptions", "List tenant workspace and category identifiers for membership benefits", ["rental-os:member:view", "rental-os:member:plan:manage"]),
+  backlogOperation("get", "/api/rental/v1/booking-members", "RentalCore", "listBookingMembers", "List minimal tenant member summaries for authorized order creation", ["rental-os:order:create"]),
+  backlogOperation("get", "/api/rental/v1/booking-members/{customerId}/booking-options", "RentalCore", "listBookingMemberOptions", "List tenant corporate identities available in the current workspace booking", ["rental-os:order:create"]),
+  backlogOperation("get", "/api/membership/registration-settings", "Membership", "getMembershipRegistrationSettings", "Get tenant registration review mode", ["rental-os:member:view"]),
   backlogOperation("put", "/api/membership/registration-settings", "Membership", "saveMembershipRegistrationSettings", "Set current workspace registration review mode", ["rental-os:member:manage"]),
   backlogOperation("get", "/api/membership/personal", "Membership", "listPersonalMembershipMembers", "List personal members in current workspace", ["rental-os:member:view"]),
   backlogOperation("post", "/api/membership/personal", "Membership", "registerPersonalMembership", "Create or register a personal member in current workspace", ["rental-os:member:manage"]),
@@ -2178,8 +2241,20 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: "Check generic rental availability", permissions: ["rental-os:order:operate", "rental-os:vehicle:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
   },
   {
+    // ORDER-LIST-01：筛选与分页在服务端执行。不带 page/pageSize 返回纯数组（兼容旧调用方），
+    // 带任一分页参数返回 { items, page, pageSize, total } 信封。空间取自会话。
     method: "get", path: "/api/rental/v1/orders", tag: "RentalCore", operationId: "listRentalCoreOrders",
-    summary: "List Rental Core orders", permissions: ["rental-os:order:view", "rental-os:vehicle:view"], responseSchema: "GenericObject"
+    summary: "List Rental Core orders (server-side filters; paged envelope when page/pageSize given)", permissions: ["rental-os:order:view", "rental-os:vehicle:view"], responseSchema: "GenericObject",
+    parameters: [
+      queryParam("page", { type: "integer", minimum: 1, maximum: 1000000 }),
+      queryParam("pageSize", { type: "integer", minimum: 1, maximum: 200 }),
+      queryParam("status", { type: "string", enum: ["draft", "reserved", "pickup_overdue", "ready_for_pickup", "renting", "return_inspection", "settling", "completed", "cancelled", "no_show"] }),
+      queryParam("keyword", { type: "string", maxLength: 100 }),
+      queryParam("from", { type: "string", format: "date-time" }),
+      queryParam("to", { type: "string", format: "date-time" }),
+      queryParam("assignment", { type: "string", enum: ["pending", "partial", "unlocked", "locked", "issue"] }),
+      queryParam("pendingFeeOnly", { type: "boolean" })
+    ]
   },
   {
     method: "get", path: "/api/rental/v1/workbench/todos", tag: "RentalCore", operationId: "listRentalWorkbenchTodos",
@@ -2499,6 +2574,7 @@ function rentalBusinessOperations(): ContractOperation[] { return [
   clientOperation("get", "/api/client/v1/payment/capabilities", "getClientPaymentCapabilities", "Get client payment capability status without exposing a provider", { responseSchema: "ClientPaymentCapabilities" }),
   clientOperation("get", "/api/client/v1/profile", "getClientProfile", "Get the current customer profile and masked contact data", { responseSchema: "ClientProfile" }),
   clientOperation("patch", "/api/client/v1/profile", "updateClientProfile", "Update the editable part of the current customer profile", { requestSchema: "ClientProfileUpdateRequest", responseSchema: "ClientProfile" }),
+  clientOperation("put", "/api/client/v1/profile", "updateClientProfileViaPut", "PUT alias of the partial profile update for hosts without PATCH support (WeChat mini program)", { requestSchema: "ClientProfileUpdateRequest", responseSchema: "ClientProfile" }),
   clientOperation("get", "/api/client/v1/profile/contacts", "listClientContacts", "List the current customer contacts", { responseSchema: "ClientContacts" }),
   clientOperation("put", "/api/client/v1/profile/contacts", "saveClientContact", "Create or update a current customer contact", { requestSchema: "ClientContactRequest", responseSchema: "ClientContact" }),
   clientOperation("delete", "/api/client/v1/profile/contacts/{contactId}", "deleteClientContact", "Deactivate a current customer contact", { responseSchema: "ClientActionResult" }),
@@ -2523,11 +2599,13 @@ function rentalBusinessOperations(): ContractOperation[] { return [
   clientOperation("get", "/api/client/v1/coupons", "listClientCoupons", "List current customer coupons", { responseSchema: arrayOf(objectSchema) }),
   clientOperation("post", "/api/client/v1/coupons/{templateId}/claim", "claimClientCoupon", "Claim an available customer coupon", { responseSchema: objectSchema }),
   clientOperation("post", "/api/client/v1/orders", "createClientOrder", "Create a rental order from a client quote", { requestSchema: "ClientCreateOrderRequest", responseSchema: "ClientOrderMutation" }),
+  clientOperation("get", "/api/client/v1/my/orders", "listClientMyOrders", "Read-only paginated index of this personal customer's orders across the current tenant's workspaces; does not switch session or grant workspace access", { responseSchema: "ClientMyOrdersResponse", parameters: [queryParam("page", { type: "integer", minimum: 1, maximum: 1000000 }), queryParam("pageSize", { type: "integer", minimum: 1, maximum: 50 })] }),
   clientOperation("get", "/api/client/v1/orders", "listClientOrders", "List the current customer orders", { responseSchema: "ClientOrderList", parameters: [queryParam("page", numberSchema), queryParam("pageSize", numberSchema), queryParam("status")] }),
   clientOperation("get", "/api/client/v1/orders/{id}", "getClientOrder", "Get a customer order", { responseSchema: "ClientOrder" }),
   clientOperation("get", "/api/client/v1/orders/{id}/fulfillment", "getClientOrderFulfillment", "Get customer-visible fulfillment and allocation progress", { responseSchema: "ClientFulfillment" }),
   clientOperation("get", "/api/client/v1/orders/{id}/documents/{type}", "getClientOrderDocument", "Render a customer-readable order document snapshot for the current member", { responseSchema: "GenericObject" }),
   clientOperation("get", "/api/client/v1/orders/{id}/documents/{type}/versions", "listClientOrderDocumentVersions", "List immutable document versions for the current member order", { responseSchema: "GenericObject" }),
+  clientOperation("post", "/api/client/v1/orders/{id}/cancel/preview", "previewClientCancellation", "Preview the existing cancellation charge without cancelling or refunding; final cancellation rechecks state and time", { responseSchema: "ClientCancellationPreview" }),
   clientOperation("post", "/api/client/v1/orders/{id}/cancel", "cancelClientOrder", "Cancel a customer order", { requestSchema: "ClientCancelOrderRequest", responseSchema: "ClientOrderMutation" }),
   clientOperation("get", "/api/client/v1/orders/{id}/extensions", "listClientOrderExtensions", "List customer order extensions", { responseSchema: "ClientExtensionList" }),
   clientOperation("post", "/api/client/v1/orders/{id}/extensions/preview", "previewClientOrderExtension", "Preview a customer order extension", { requestSchema: "ClientOrderExtensionRequest", responseSchema: "ClientExtensionPreview" }),
@@ -2536,6 +2614,7 @@ function rentalBusinessOperations(): ContractOperation[] { return [
   clientOperation("get", "/api/client/v1/orders/{id}/funding", "getClientOrderFunding", "Get customer order funding status", { responseSchema: "ClientFunding" }),
   clientOperation("post", "/api/client/v1/orders/{id}/funding/simulate", "simulateClientOrderFunding", "Record a development-only simulated customer funding event", { requestSchema: "ClientPaymentSimulationRequest", responseSchema: objectSchema }),
   clientOperation("post", "/api/client/v1/orders/{id}/payment-intents", "createClientPaymentIntent", "Create a real Alipay or WeChat Pay rental payment intent", { requestSchema: "ClientPaymentIntentRequest", responseSchema: "ClientPaymentIntentResponse" }),
+  clientOperation("post", "/api/client/v1/orders/{id}/mini-program-payment-intents", "createClientMiniProgramPaymentIntent", "Reserved mini-program payment contract; currently unavailable, never falls back to Native QR payment", { requestSchema: "ClientMiniProgramPaymentIntentRequest", responseSchema: "ClientPaymentIntentResponse", serviceUnavailableReason: "Trusted ClientWechatIdentity and JSAPI payment persistence are not implemented. No payment is created." }),
   clientOperation("get", "/api/client/v1/orders/{id}/payment-intents/{intentId}", "getClientPaymentIntent", "Get the status of a client payment intent", { responseSchema: "ClientPaymentIntentResponse" }),
   clientOperation("post", "/api/client/v1/orders/{id}/payment-intents/{intentId}/refresh", "refreshClientPaymentIntent", "Query the payment provider and reconcile a client payment intent", { responseSchema: "ClientPaymentIntentResponse" }),
   clientOperation("post", "/api/client/v1/orders/{id}/payment-intents/{intentId}/close", "closeClientPaymentIntent", "Close an unpaid client payment intent", { responseSchema: "ClientPaymentIntentResponse" })

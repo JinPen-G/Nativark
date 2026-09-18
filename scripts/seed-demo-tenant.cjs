@@ -262,11 +262,6 @@ async function main() {
       }
       if (!corporate) throw new Error(`${workspace.code} 无法建立演示企业会员`);
       corporateByWorkspace[workspace.id] = corporate.customerId || corporate.id;
-      await prisma.customerWorkspaceLink.upsert({
-        where: { workspaceId_customerId: { workspaceId: workspace.id, customerId: corporateByWorkspace[workspace.id] } },
-        create: { tenantId: TENANT_ID, workspaceId: workspace.id, customerId: corporateByWorkspace[workspace.id], levelName: "企业会员", status: "active" },
-        update: { levelName: "企业会员", status: "active" }
-      });
       for (const employee of [
         { personalCustomerId: customerIds.primary, role: "admin", department: "运营管理", employeeNo: `DEMO-${workspace.code}-A01` },
         { personalCustomerId: customerIds.secondary, role: "employee", department: "业务部门", employeeNo: `DEMO-${workspace.code}-E01` }
@@ -430,10 +425,10 @@ async function main() {
         prisma.rentalBusinessCalendar.count({ where: { tenantId: TENANT_ID, workspaceId: workspace.id, year: DEMO_YEAR, status: "published" } }),
         prisma.rentalQuote.count({ where: { tenantId: TENANT_ID, workspaceId: workspace.id } }),
         prisma.rentalOrder.count({ where: { tenantId: TENANT_ID, workspaceId: workspace.id } }),
-        prisma.customerWorkspaceLink.count({ where: { tenantId: TENANT_ID, workspaceId: workspace.id, status: "active" } }),
-        prisma.customerCorporateMembership.count({ where: { tenantId: TENANT_ID, workspaceId: workspace.id, status: "active" } })
+        prisma.customerMembership.count({ where: { tenantId: TENANT_ID, status: "active" } }),
+        prisma.customerCorporateMembership.count({ where: { tenantId: TENANT_ID, status: "active" } })
       ]);
-      counts[workspace.code] = { groups, assets, stocks, plans, versions, discounts, services, publishedCalendars: calendars, quotes, orders, activeMembers: members, corporateEmployees: corporateLinks };
+      counts[workspace.code] = { groups, assets, stocks, plans, versions, discounts, services, publishedCalendars: calendars, quotes, orders, tenantActiveMembers: members, tenantCorporateEmployees: corporateLinks };
     }
     console.log(JSON.stringify({ tenant: TENANT_CODE, workspaces: summaries, verified: counts }, null, 2));
   } finally {

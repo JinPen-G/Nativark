@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Optional } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import type {
   CustomerAccount,
@@ -10,6 +10,7 @@ import type {
   CustomerStatusScope
 } from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
+import { SharedCustomerRepository } from "./shared-customer.repository";
 
 export type CustomerTx = Prisma.TransactionClient;
 
@@ -40,22 +41,30 @@ export interface CustomerSensitiveAccessInput {
 }
 
 /**
- * CUSTOMER-01B：客户账号、空间会员状态、状态历史与访问审计的持久化。
+ * CUSTOMER-01B：客户账号、租户会员状态、状态历史与访问审计的持久化。
  *
- * 与既有 `SharedCustomerRepository` 分工：那一层负责主档与空间关系的读写，
- * 本层负责 01A 新增的账号、状态历史、风险与访问审计。刻意不合并成一个巨型仓储——
+ * 与既有 `SharedCustomerRepository` 分工：那一层是主档、账号、会员与审核四个模型的**唯一写入口**，
+ * 本层负责 01A 新增的状态历史、风险与访问审计，并把账号 / 会员的状态变更与其历史
+ * 组合成同事务动作（写本身委托给 SharedCustomerRepository）。刻意不合并成一个巨型仓储——
  * 主档读写在几乎每个业务流程里都会用到，而状态变更与审计只在治理路径上用，
  * 混在一起会让「查客户」和「改客户状态」共享同一份依赖面。
  *
  * 两条不变量由本层保证：
  *   1. 状态变更与其历史记录**同事务**落库。历史留在一个被回滚的变更上
  *      （或反之）比没有历史更难排查。
- *   2. 所有查询都带 `tenantId`；空间级实体额外带 `workspaceId`。
- *      主档按租户共享是设计，业务关系按空间隔离是要求，两者不可互相套用。
+ *   2. 所有查询都带 `tenantId`；仅审计来源与历史空间事件保留 `workspaceId`。
  */
 @Injectable()
 export class CustomerOperationsRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly customers: SharedCustomerRepository;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    // 既有测试用 `new CustomerOperationsRepository(prisma)` 构造；缺失时按同一个 prisma 自建。
+    @Optional() customers?: SharedCustomerRepository
+  ) {
+    this.customers = customers ?? new SharedCustomerRepository(prisma);
+  }
 
   private db(tx?: CustomerTx) {
     return tx ?? this.prisma;
@@ -94,16 +103,13 @@ export class CustomerOperationsRepository {
     input: { customerId: string; loginPhone: string; loginPhoneMasked: string; operator?: string },
     tx?: CustomerTx
   ): Promise<CustomerAccount> {
-    const row = await this.db(tx).customerAccount.create({
-      data: {
-        tenantId,
-        customerId: input.customerId,
-        loginPhone: input.loginPhone.trim(),
-        loginPhoneMasked: input.loginPhoneMasked,
-        status: "active",
-        lastOperator: input.operator ?? null
-      }
-    });
+    const row = await this.customers.createAccount({
+      tenantId,
+      customerId: input.customerId,
+      loginPhone: input.loginPhone,
+      loginPhoneMasked: input.loginPhoneMasked,
+      lastOperator: input.operator ?? null
+    }, tx);
     return this.toAccount(row);
   }
 
@@ -128,25 +134,22 @@ export class CustomerOperationsRepository {
     tx?: CustomerTx
   ): Promise<number> {
     const client = this.db(tx);
-    const updated = await client.customerAccount.updateMany({
-      where: { tenantId, id: accountId, status: expectedStatus },
-      data: {
-        status: next.status,
-        suspendedAt: next.suspendedAt === undefined ? undefined : next.suspendedAt ? new Date(next.suspendedAt) : null,
-        closedAt: next.closedAt === undefined ? undefined : next.closedAt ? new Date(next.closedAt) : null,
-        lastReason: next.reason,
-        lastOperator: next.operator ?? null
-      }
-    });
-    if (updated.count === 0) return 0;
+    const count = await this.customers.updateAccount(tenantId, { accountId }, {
+      status: next.status,
+      suspendedAt: next.suspendedAt === undefined ? undefined : next.suspendedAt ? new Date(next.suspendedAt) : null,
+      closedAt: next.closedAt === undefined ? undefined : next.closedAt ? new Date(next.closedAt) : null,
+      lastReason: next.reason,
+      lastOperator: next.operator ?? null
+    }, expectedStatus, tx);
+    if (count === 0) return 0;
     await this.appendStatusHistory(tenantId, history, client);
-    return updated.count;
+    return count;
   }
 
-  /** 同上，但作用于空间会员关系。空间级变更绝不触碰账号行。 */
+  /** 同上，但作用于唯一租户会员；会员变更绝不触碰账号行。 */
   async updateMembershipStatus(
     tenantId: string,
-    linkId: string,
+    membershipId: string,
     next: {
       status: CustomerMembershipStatus;
       levelName?: string;
@@ -162,20 +165,17 @@ export class CustomerOperationsRepository {
     const client = this.db(tx);
     const stamp = (value?: string | null) =>
       value === undefined ? undefined : value ? new Date(value) : null;
-    const updated = await client.customerWorkspaceLink.updateMany({
-      where: { tenantId, id: linkId, status: expectedStatus },
-      data: {
-        status: next.status,
-        levelName: next.levelName,
-        suspendedAt: stamp(next.suspendedAt),
-        restrictedAt: stamp(next.restrictedAt),
-        exitedAt: stamp(next.exitedAt),
-        closedAt: stamp(next.closedAt)
-      }
-    });
-    if (updated.count === 0) return 0;
+    const count = await this.customers.updateMembership(tenantId, membershipId, {
+      status: next.status,
+      levelName: next.levelName,
+      suspendedAt: stamp(next.suspendedAt),
+      restrictedAt: stamp(next.restrictedAt),
+      exitedAt: stamp(next.exitedAt),
+      closedAt: stamp(next.closedAt)
+    }, expectedStatus, tx);
+    if (count === 0) return 0;
     await this.appendStatusHistory(tenantId, history, client);
-    return updated.count;
+    return count;
   }
 
   async appendStatusHistory(
@@ -188,7 +188,7 @@ export class CustomerOperationsRepository {
         tenantId,
         customerId: input.customerId,
         scope: input.scope,
-        workspaceId: input.workspaceId ?? null,
+        workspaceId: input.scope === "membership" ? null : input.workspaceId ?? null,
         action: input.action,
         fromStatus: input.fromStatus ?? null,
         toStatus: input.toStatus,
@@ -201,8 +201,8 @@ export class CustomerOperationsRepository {
   }
 
   /**
-   * 客户状态时间线。`workspaceId` 传入时只返回该空间事件 **加上** 账号级事件——
-   * 账号级变更同样影响这个空间能不能做业务，隐去它会让时间线出现无法解释的跳变。
+   * 客户状态时间线。空间筛选仍可读取历史 workspace 事件，同时始终包含全租户
+   * 的账号与会员事件，避免空间页面隐藏影响本空间业务的全局状态变化。
    */
   async listStatusHistory(
     tenantId: string,
@@ -213,7 +213,7 @@ export class CustomerOperationsRepository {
       where: {
         tenantId,
         customerId,
-        ...(workspaceId ? { OR: [{ workspaceId }, { scope: "account" }] } : {})
+        ...(workspaceId ? { OR: [{ workspaceId }, { scope: { in: ["account", "membership"] } }] } : {})
       },
       orderBy: [{ at: "asc" }, { createdAt: "asc" }]
     });

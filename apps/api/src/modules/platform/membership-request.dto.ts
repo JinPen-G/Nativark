@@ -2,7 +2,7 @@ import {
   CUSTOMER_MEMBERSHIP_PLAN_TARGET_TYPES,
   CUSTOMER_MEMBERSHIP_REGISTRATION_MODES,
   CUSTOMER_MEMBERSHIP_REVIEW_STATUSES,
-  CUSTOMER_QUALIFICATION_STATUSES,
+  type CustomerMembershipBenefit,
   type AssignCustomerMembershipPlanRequest,
   type CustomerMembershipPlanVersionActionRequest,
   type CustomerMembershipPlanAssignmentActionRequest,
@@ -17,8 +17,11 @@ import {
   type SubmitCustomerQualificationRequest,
   type UpdateCustomerMembershipRegistrationSettingsRequest
 } from "@rental-os/shared";
+import { Type } from "class-transformer";
 import {
   IsArray,
+  IsNumber,
+  ValidateNested,
   IsBoolean,
   IsDateString,
   IsIn,
@@ -142,6 +145,26 @@ export class SaveCustomerCorporateMembershipDto implements SaveCustomerCorporate
   reason?: string;
 }
 
+export class CustomerMembershipBenefitDto implements CustomerMembershipBenefit {
+  @IsIn(["rental_discount", "deposit_reduction", "preauth_reduction", "service_benefit", "priority_reservation", "quote_validity_extension"])
+  type!: CustomerMembershipBenefit["type"];
+  @IsIn(["percentage", "amount", "quota", "priority"])
+  calculation!: CustomerMembershipBenefit["calculation"];
+  @IsNumber({ allowNaN: false, allowInfinity: false }) @Min(0)
+  value!: number;
+  @IsOptional() @IsNumber({ allowNaN: false, allowInfinity: false }) @Min(0)
+  maximum?: number;
+  @IsOptional() @IsArray() @IsString({ each: true })
+  applicableServiceIds?: string[];
+  @IsOptional() @IsBoolean()
+  stackable?: boolean;
+  @IsOptional() @IsObject()
+  conditions?: Record<string, unknown>;
+  // 完整判别联合及空间归属由服务层验证，不能让 DTO 白名单静默丢弃非法 shape。
+  @IsOptional() @IsObject()
+  scope?: CustomerMembershipBenefit["scope"];
+}
+
 export class SaveCustomerMembershipPlanDto implements SaveCustomerMembershipPlanRequest {
   @IsOptional() @IsString()
   id?: string;
@@ -165,8 +188,8 @@ export class SaveCustomerMembershipPlanDto implements SaveCustomerMembershipPlan
   effectiveTo?: string;
   @IsOptional() @IsObject()
   eligibility?: Record<string, unknown>;
-  @IsArray()
-  benefits!: SaveCustomerMembershipPlanRequest["benefits"];
+  @IsArray() @ValidateNested({ each: true }) @Type(() => CustomerMembershipBenefitDto)
+  benefits!: CustomerMembershipBenefitDto[];
 }
 
 export class AssignCustomerMembershipPlanDto implements AssignCustomerMembershipPlanRequest {

@@ -13,27 +13,7 @@ import type {
 import { App, Button, Card, Col, Drawer, Form, Input, InputNumber, Row, Select, Space, Switch, Table, Tabs, Tag, Typography } from "antd";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import {
-  createAsyncJob,
-  createFileAsset,
-  createPrintJob,
-  deletePlatformFilterPreset,
-  generatePlatformNumber,
-  listAsyncJobs,
-  listFileAssets,
-  listNotificationLogs,
-  listNotificationTemplates,
-  listPlatformDictionaries,
-  listPlatformFilterPresets,
-  listPlatformNumberRules,
-  listPrintJobs,
-  runAsyncJob,
-  runDueAsyncJobs,
-  savePlatformDictionary,
-  savePlatformFilterPreset,
-  savePlatformNumberRule,
-  setPlatformFilterPresetDefault
-} from "@/api/operations";
+import { platformOpsApi } from "@/api/platformOps";
 import { PageHeader } from "@/components/PageHeader";
 import { useAuthStore } from "@/features/auth/authStore";
 
@@ -49,27 +29,27 @@ export function PlatformToolsPage() {
   const [editingPreset, setEditingPreset] = useState<PlatformFilterPreset>();
   const [form] = Form.useForm<Record<string, unknown>>();
 
-  const dictionaries = useQuery({ queryKey: ["platform-dictionaries"], queryFn: listPlatformDictionaries });
-  const numbers = useQuery({ queryKey: ["platform-number-rules"], queryFn: listPlatformNumberRules });
-  const presets = useQuery({ queryKey: ["platform-filter-presets"], queryFn: () => listPlatformFilterPresets({}) });
-  const files = useQuery({ queryKey: ["files", "platform-tools"], queryFn: listFileAssets });
-  const printJobs = useQuery({ queryKey: ["print-jobs"], queryFn: listPrintJobs });
-  const notifications = useQuery({ queryKey: ["notification-logs", "platform-tools"], queryFn: listNotificationLogs });
-  const templates = useQuery({ queryKey: ["notification-templates"], queryFn: listNotificationTemplates });
-  const jobs = useQuery({ queryKey: ["async-jobs", "platform-tools"], queryFn: listAsyncJobs });
+  const dictionaries = useQuery({ queryKey: ["platform-dictionaries"], queryFn: platformOpsApi.dictionaries });
+  const numbers = useQuery({ queryKey: ["platform-number-rules"], queryFn: platformOpsApi.numberRules });
+  const presets = useQuery({ queryKey: ["platform-filter-presets"], queryFn: () => platformOpsApi.filterPresets({}) });
+  const files = useQuery({ queryKey: ["files", "platform-tools"], queryFn: platformOpsApi.fileAssets });
+  const printJobs = useQuery({ queryKey: ["print-jobs"], queryFn: platformOpsApi.printJobs });
+  const notifications = useQuery({ queryKey: ["notification-logs", "platform-tools"], queryFn: platformOpsApi.notificationLogs });
+  const templates = useQuery({ queryKey: ["notification-templates"], queryFn: platformOpsApi.notificationTemplates });
+  const jobs = useQuery({ queryKey: ["async-jobs", "platform-tools"], queryFn: platformOpsApi.asyncJobs });
 
   const closeEditor = () => { setEditor(undefined); setEditingDictionary(undefined); setEditingNumber(undefined); setEditingPreset(undefined); form.resetFields(); };
-  const saveDictionary = useMutation({ mutationFn: (values: SavePlatformDictionaryGroupRequest) => savePlatformDictionary({ ...values, items: editingDictionary?.items ?? [], operator }), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["platform-dictionaries"] }); closeEditor(); message.success("数据字典已保存"); }, onError: () => message.error("字典保存失败") });
-  const saveNumber = useMutation({ mutationFn: (values: SavePlatformNumberRuleRequest) => savePlatformNumberRule({ ...values, operator }), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["platform-number-rules"] }); closeEditor(); message.success("编号规则已保存"); }, onError: () => message.error("编号规则保存失败") });
-  const generateNumber = useMutation({ mutationFn: (code: string) => generatePlatformNumber(code, operator), onSuccess: (result) => modal.success({ title: "编号生成成功", content: <Typography.Text code copyable>{result.generatedNo}</Typography.Text> }), onError: () => message.error("编号生成失败") });
-  const savePreset = useMutation({ mutationFn: (values: SavePlatformFilterPresetRequest & { filtersText?: string }) => savePlatformFilterPreset({ ...values, id: editingPreset?.id, filters: JSON.parse(values.filtersText || "{}"), operator }), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["platform-filter-presets"] }); closeEditor(); message.success("筛选预设已保存"); }, onError: () => message.error("筛选预设保存失败，请检查 JSON") });
-  const presetDefault = useMutation({ mutationFn: (id: string) => setPlatformFilterPresetDefault(id, operator), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["platform-filter-presets"] }); message.success("默认预设已更新"); }, onError: () => message.error("默认预设更新失败") });
-  const presetDelete = useMutation({ mutationFn: (id: string) => deletePlatformFilterPreset(id, operator), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["platform-filter-presets"] }); message.success("预设已删除"); }, onError: () => message.error("系统预设不能删除") });
-  const createFile = useMutation({ mutationFn: (values: CreateFileAssetRequest) => createFileAsset({ ...values, uploadedBy: operator }), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["files"] }); closeEditor(); message.success("文件资产记录已创建"); }, onError: () => message.error("文件资产创建失败") });
-  const createPrint = useMutation({ mutationFn: (values: CreatePrintJobRequest) => createPrintJob({ ...values, operator }), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["print-jobs"] }); closeEditor(); message.success("打印任务已创建"); }, onError: () => message.error("打印任务创建失败") });
-  const createJob = useMutation({ mutationFn: (values: CreateAsyncJobRequest) => createAsyncJob({ ...values, operator }), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["async-jobs"] }); closeEditor(); message.success("异步任务已创建"); }, onError: () => message.error("异步任务创建失败") });
-  const runJob = useMutation({ mutationFn: runAsyncJob, onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["async-jobs"] }); message.success("任务已执行"); }, onError: () => message.error("任务执行失败") });
-  const runDue = useMutation({ mutationFn: runDueAsyncJobs, onSuccess: async (result) => { await queryClient.invalidateQueries({ queryKey: ["async-jobs"] }); message.success(result.message); }, onError: () => message.error("到期任务执行失败") });
+  const saveDictionary = useMutation({ mutationFn: (values: SavePlatformDictionaryGroupRequest) => platformOpsApi.saveDictionary({ ...values, items: editingDictionary?.items ?? [], operator }), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["platform-dictionaries"] }); closeEditor(); message.success("数据字典已保存"); }, onError: () => message.error("字典保存失败") });
+  const saveNumber = useMutation({ mutationFn: (values: SavePlatformNumberRuleRequest) => platformOpsApi.saveNumberRule({ ...values, operator }), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["platform-number-rules"] }); closeEditor(); message.success("编号规则已保存"); }, onError: () => message.error("编号规则保存失败") });
+  const generateNumber = useMutation({ mutationFn: (code: string) => platformOpsApi.generateNumber(code, operator), onSuccess: (result) => modal.success({ title: "编号生成成功", content: <Typography.Text code copyable>{result.generatedNo}</Typography.Text> }), onError: () => message.error("编号生成失败") });
+  const savePreset = useMutation({ mutationFn: (values: SavePlatformFilterPresetRequest & { filtersText?: string }) => platformOpsApi.saveFilterPreset({ ...values, id: editingPreset?.id, filters: JSON.parse(values.filtersText || "{}"), operator }), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["platform-filter-presets"] }); closeEditor(); message.success("筛选预设已保存"); }, onError: () => message.error("筛选预设保存失败，请检查 JSON") });
+  const presetDefault = useMutation({ mutationFn: (id: string) => platformOpsApi.setFilterPresetDefault(id, operator), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["platform-filter-presets"] }); message.success("默认预设已更新"); }, onError: () => message.error("默认预设更新失败") });
+  const presetDelete = useMutation({ mutationFn: (id: string) => platformOpsApi.deleteFilterPreset(id, operator), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["platform-filter-presets"] }); message.success("预设已删除"); }, onError: () => message.error("系统预设不能删除") });
+  const createFile = useMutation({ mutationFn: (values: CreateFileAssetRequest) => platformOpsApi.createFileAsset({ ...values, uploadedBy: operator }), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["files"] }); closeEditor(); message.success("文件资产记录已创建"); }, onError: () => message.error("文件资产创建失败") });
+  const createPrint = useMutation({ mutationFn: (values: CreatePrintJobRequest) => platformOpsApi.createPrintJob({ ...values, operator }), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["print-jobs"] }); closeEditor(); message.success("打印任务已创建"); }, onError: () => message.error("打印任务创建失败") });
+  const createJob = useMutation({ mutationFn: (values: CreateAsyncJobRequest) => platformOpsApi.createAsyncJob({ ...values, operator }), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["async-jobs"] }); closeEditor(); message.success("异步任务已创建"); }, onError: () => message.error("异步任务创建失败") });
+  const runJob = useMutation({ mutationFn: platformOpsApi.runJob, onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["async-jobs"] }); message.success("任务已执行"); }, onError: () => message.error("任务执行失败") });
+  const runDue = useMutation({ mutationFn: platformOpsApi.runDueJobs, onSuccess: async (result) => { await queryClient.invalidateQueries({ queryKey: ["async-jobs"] }); message.success(result.message); }, onError: () => message.error("到期任务执行失败") });
 
   function editDictionary(record?: PlatformDictionaryGroup) { setEditingDictionary(record); form.setFieldsValue(record ? { ...record } : { code: "", name: "", module: "platform", description: "" }); setEditor("dictionary"); }
   function editNumber(record?: PlatformNumberRule) { setEditingNumber(record); form.setFieldsValue(record ? { ...record } : { code: "", name: "", module: "platform", prefix: "", datePattern: "yyyyMMdd", sequenceLength: 6, currentSequence: 0, resetCycle: "daily", enabled: true }); setEditor("number"); }

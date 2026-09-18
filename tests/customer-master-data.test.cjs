@@ -62,7 +62,7 @@ async function seedTenants() {
   for (const [id, code] of [[tenantAId, `cust-a-${suffix}`], [tenantBId, `cust-b-${suffix}`]]) {
     await prisma.tenant.create({ data: { id, code, name: `CUSTOMER-01A 测试租户 ${code}` } });
   }
-  // 租户 A 两个空间（不同品类），用于验证「主档共享、会员关系按空间隔离」。
+  // 租户 A 两个空间（不同品类），用于验证「主档与唯一会员均按租户共享」。
   const workspaces = [
     { id: `ws_a1_${suffix}`, tenantId: tenantAId, code: `a1-${suffix}`, categoryCode: "CAMERA" },
     { id: `ws_a2_${suffix}`, tenantId: tenantAId, code: `a2-${suffix}`, categoryCode: "CAMPING" },
@@ -78,6 +78,7 @@ async function seedTenants() {
 
 async function cleanup() {
   // 只删自己建的两个租户；级联会带走本测试创建的空间、主档与全部客户子表。
+  await prisma.customerMembershipReview.deleteMany({ where: { tenantId: { in: [tenantAId, tenantBId] } } });
   await prisma.tenant.deleteMany({ where: { id: { in: [tenantAId, tenantBId] } } });
 }
 
@@ -112,51 +113,47 @@ void (async () => {
   assert.notEqual(otherTenantSamePhone.id, personal.id, "两个租户的同号客户必须是两份独立主档");
   ok("租户级共享主档：同租户手机号唯一（库层拒绝重复），跨租户同号各自独立");
 
-  // ============ 2. 同租户跨空间共享主档 + 会员关系按空间隔离 ============
-  const linkA1 = await prisma.customerWorkspaceLink.create({
-    data: { tenantId: tenantAId, workspaceId: wsA1.id, customerId: personal.id, levelName: "黄金会员", status: "active" }
+  // ============ 2. 同租户共享唯一会员，状态和等级不再属于空间 ============
+  const membership = await prisma.customerMembership.create({
+    data: { tenantId: tenantAId, customerId: personal.id, levelName: "黄金会员", status: "active" }
   });
-  const linkA2 = await prisma.customerWorkspaceLink.create({
-    data: { tenantId: tenantAId, workspaceId: wsA2.id, customerId: personal.id, levelName: "普通会员", status: "suspended", suspendedAt: new Date() }
-  });
-  assert.equal(linkA1.customerId, linkA2.customerId, "同一份主档被两个空间共享");
-  assert.notEqual(linkA1.levelName, linkA2.levelName, "会员等级按空间隔离");
-  assert.equal(linkA1.status, "active");
-  assert.equal(linkA2.status, "suspended");
-  // 同一空间同一客户只能有一条会员关系。
+  const profileWithMembership = await prisma.customerProfile.findUnique({ where: { id: personal.id }, include: { membership: true } });
+  assert.equal(profileWithMembership.membership.id, membership.id, "Profile.membership 必须是单个会员，不是空间关系数组");
+  assert.equal("workspaceId" in membership, false, "会员实体不再持有空间归属");
   await rejectsWith(
-    prisma.customerWorkspaceLink.create({
-      data: { tenantId: tenantAId, workspaceId: wsA1.id, customerId: personal.id }
-    }),
+    prisma.customerMembership.create({ data: { tenantId: tenantAId, customerId: personal.id, levelName: "另一空间的等级" } }),
     ["P2002"],
-    "同空间同客户建第二条会员关系"
+    "同租户同客户不能以切换空间为由创建第二份会员"
   );
-  // 六态都必须能存下（需求 4.8.6）。逐个写入再读回，证明取值域没有被库层限制成两态。
   for (const status of ["pending_activation", "active", "suspended", "risk_restricted", "exited", "closed"]) {
-    await prisma.customerWorkspaceLink.update({ where: { id: linkA2.id }, data: { status } });
-    const read = await prisma.customerWorkspaceLink.findUnique({ where: { id: linkA2.id } });
-    assert.equal(read.status, status, `空间会员状态 ${status} 必须可存储`);
+    await prisma.customerMembership.update({ where: { tenantId_customerId: { tenantId: tenantAId, customerId: personal.id } }, data: { status } });
+    const read = await prisma.customerMembership.findUnique({ where: { tenantId_customerId: { tenantId: tenantAId, customerId: personal.id } } });
+    assert.equal(read.id, membership.id);
+    assert.equal(read.status, status, `租户会员状态 ${status} 必须可存储`);
+    assert.equal(read.levelName, "黄金会员");
   }
-  ok("跨空间共享主档：同一主档在两空间各有独立会员关系与等级，六态均可存储，同空间不得重复建关系");
+  await prisma.customerMembership.update({ where: { id: membership.id }, data: { status: "active" } });
+  const otherMembership = await prisma.customerMembership.create({ data: { tenantId: tenantBId, customerId: otherTenantSamePhone.id } });
+  assert.notEqual(otherMembership.id, membership.id, "不同租户同手机号的会员仍独立");
+  ok("租户唯一会员：单个 Profile.membership、六态与统一等级，同租户同客户重复建会员被库层拒绝");
 
-  // ============ 3. 禁止跨租户挂接（库层复合外键） ============
+  // ============ 3. 禁止跨租户会员关联，业务来源空间仍受复合外键保护 ============
   await rejectsWith(
-    prisma.customerWorkspaceLink.create({
-      // 客户属租户 A，空间属租户 B：复合外键必须拒绝。
-      data: { tenantId: tenantAId, workspaceId: wsB1.id, customerId: personal.id }
-    }),
+    prisma.customerMembership.create({ data: { tenantId: tenantAId, customerId: otherTenantSamePhone.id } }),
     ["P2003"],
-    "把 A 租户客户挂到 B 租户空间"
+    "把 B 租户客户冒充为 A 租户会员"
   );
   await rejectsWith(
-    prisma.customerWorkspaceLink.create({
-      // 声称属租户 B、却用 A 的客户 id：同样必须被拒。
-      data: { tenantId: tenantBId, workspaceId: wsB1.id, customerId: personal.id }
-    }),
+    prisma.customerMembership.create({ data: { tenantId: tenantBId, customerId: personal.id } }),
     ["P2003"],
-    "伪造 tenantId 把 A 的客户挂到 B 的空间"
+    "伪造 tenantId 把 A 客户挂到 B 租户"
   );
-  ok("跨租户隔离：客户与空间不同租户、以及伪造 tenantId 两种挂接都被库层拒绝");
+  await rejectsWith(
+    prisma.customerMembershipReview.create({ data: { tenantId: tenantAId, sourceWorkspaceId: wsB1.id, customerId: personal.id, reviewType: "registration", channel: "admin" } }),
+    ["P2003"],
+    "共享审核也不能引用外租户来源空间"
+  );
+  ok("跨租户隔离：会员双向伪造租户与跨租户审核来源都被库层拒绝");
 
   // ============ 4. 客户账号：与主档 1:1，登录标识租户内唯一 ============
   const account = await prisma.customerAccount.create({
@@ -185,20 +182,17 @@ void (async () => {
     ["P2002"],
     "两个客户用同一个登录手机号"
   );
-  // 账号状态与空间会员状态是**两套**字段：停账号不改会员关系，反之亦然。
+  // 账号与租户会员各有状态：任一状态变更不得改写另一行。
   await prisma.customerAccount.update({
     where: { id: account.id },
     data: { status: "suspended", suspendedAt: new Date(), lastReason: "风控停用", lastOperator: "tester" }
   });
-  const linksAfterAccountSuspend = await prisma.customerWorkspaceLink.findMany({
-    where: { tenantId: tenantAId, customerId: personal.id }, orderBy: { workspaceId: "asc" }
-  });
-  assert.equal(linksAfterAccountSuspend.length, 2, "停账号不得删除会员关系");
-  assert.ok(
-    linksAfterAccountSuspend.some((row) => row.status !== "suspended"),
-    "停用账号不得把空间会员状态一并改写——两者是独立字段，混同就无法表达「能登录但某空间被暂停」"
-  );
-  ok("客户账号：与主档 1:1、登录号租户内唯一，账号状态与空间会员状态互不改写");
+  const membershipAfterAccountSuspend = await prisma.customerMembership.findUnique({ where: { tenantId_customerId: { tenantId: tenantAId, customerId: personal.id } } });
+  assert.equal(membershipAfterAccountSuspend.id, membership.id, "停账号不得删除或另建会员");
+  assert.equal(membershipAfterAccountSuspend.status, "active", "停账号不得改写租户会员状态");
+  await prisma.customerMembership.update({ where: { id: membership.id }, data: { status: "risk_restricted" } });
+  assert.equal((await prisma.customerAccount.findUnique({ where: { id: account.id } })).status, "suspended", "会员状态变化也不得改写账号状态");
+  ok("客户账号：与主档 1:1、登录号租户内唯一，账号与租户会员状态互不改写");
 
   // ============ 5. 企业客户：资料结构分开，统一社会信用代码租户内唯一 ============
   const corporate = await prisma.customerProfile.create({
@@ -351,11 +345,11 @@ void (async () => {
   await rejectsWith(
     prisma.customerMergeMapping.create({
       data: {
-        tenantId: tenantAId, sourceCustomerId: mergeSource.id.replace(/.$/u, "x"),
+        tenantId: tenantAId, sourceCustomerId: secondCustomer.id,
         targetCustomerId: otherTenantSamePhone.id, reason: "跨租户合并", mergedAt: new Date()
       }
     }),
-    ["P2002", "P2003"],
+    ["P2003"],
     "跨租户合并（目标主档属另一租户）"
   );
   await rejectsWith(
@@ -370,7 +364,7 @@ void (async () => {
   );
   ok("合并映射：一份主档只能被合并一次，正反两个方向的跨租户合并都被库层拒绝");
 
-  // ============ 9. 状态历史与风险：同一时间线承载账号级与空间级 ============
+  // ============ 9. 账号与统一会员事件共享时间线，旧空间事件原样保留 ============
   const now = Date.now();
   await prisma.customerStatusHistoryEntry.createMany({
     data: [
@@ -391,15 +385,20 @@ void (async () => {
       }
     ]
   });
+  await prisma.customerStatusHistoryEntry.createMany({ data: [
+    { tenantId: tenantAId, customerId: personal.id, scope: "membership", action: "suspend", fromStatus: "active", toStatus: "suspended", reason: "租户会员暂停", operator: "op1", at: new Date(now) },
+    { tenantId: tenantAId, customerId: personal.id, scope: "membership", action: "release", fromStatus: "suspended", toStatus: "active", reason: "租户会员恢复", operator: "op1", at: new Date(now + 1000) }
+  ] });
   const timeline = await prisma.customerStatusHistoryEntry.findMany({
     where: { tenantId: tenantAId, customerId: personal.id }, orderBy: { at: "asc" }
   });
-  assert.equal(timeline.length, 3, "状态历史只追加，三条事件都必须在");
+  assert.equal(timeline.length, 5, "新会员事件只追加，不覆盖旧空间与账号事件");
   assert.deepEqual(
     timeline.map((row) => `${row.scope}:${row.action}`),
-    ["workspace:suspend", "account:suspend", "workspace:release"],
-    "同一时间线必须能按时间还原账号级与空间级事件"
+    ["workspace:suspend", "account:suspend", "workspace:release", "membership:suspend", "membership:release"],
+    "同一时间线必须还原旧空间事件与新租户统一会员事件"
   );
+  assert.ok(timeline.filter((row) => row.scope === "membership").every((row) => row.workspaceId === null), "统一会员事件不能绑单一空间");
   // 解除限制是**独立记录**，原限制记录仍在（需求 4.8.6 末段）。
   assert.ok(
     timeline.some((row) => row.action === "suspend" && row.scope === "workspace"),
@@ -439,13 +438,14 @@ void (async () => {
     where: { id: personal.id },
     include: {
       account: true, contacts: true, qualificationRefs: true,
-      statusHistory: true, riskRecords: true, workspaceLinks: true, mergeAsTarget: true
+      statusHistory: true, riskRecords: true, membership: true, mergeAsTarget: true
     }
   });
   assert.ok(reread, "重连后主档必须仍在库中");
   assert.equal(reread.account.status, "suspended", "账号状态必须从库中读回");
-  assert.equal(reread.workspaceLinks.length, 2, "两条空间会员关系必须仍在");
-  assert.equal(reread.statusHistory.length, 3, "状态历史必须仍在");
+  assert.equal(reread.membership.id, membership.id, "租户唯一会员必须仍在");
+  assert.equal(reread.membership.status, "risk_restricted", "会员状态与账号状态各自持久化");
+  assert.equal(reread.statusHistory.length, 5, "新旧状态历史必须仍在");
   assert.equal(reread.riskRecords.length, 2, "风险记录必须仍在");
   assert.equal(reread.qualificationRefs.length, 1, "资质引用必须仍在");
   assert.equal(reread.mergeAsTarget.length, 1, "作为保留主档的合并映射必须仍在");

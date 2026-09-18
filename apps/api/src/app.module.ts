@@ -31,6 +31,7 @@ import { PlatformController } from "./modules/platform/platform.controller";
 import { PlatformRepository } from "./modules/platform/platform.repository";
 import { SharedCustomerRepository } from "./modules/platform/shared-customer.repository";
 import { CustomerOperationsRepository } from "./modules/platform/customer-operations.repository";
+import { CustomerRegistrationService } from "./modules/platform/customer-registration.service";
 import { CustomerOperationsService } from "./modules/platform/customer-operations.service";
 import { CustomerMergeService } from "./modules/platform/customer-merge.service";
 import { CustomerCorporateService } from "./modules/platform/customer-corporate.service";
@@ -103,6 +104,7 @@ import { ClientApiRateLimitService } from "./modules/client/client-api-rate-limi
     PlatformRepository,
     SharedCustomerRepository,
     CustomerOperationsRepository,
+    CustomerRegistrationService,
     CustomerOperationsService,
     CustomerMergeService,
     CustomerCorporateService,

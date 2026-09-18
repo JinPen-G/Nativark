@@ -194,9 +194,9 @@ export class AuthService {
   }
 
   async getCurrentUser(authorization?: string): Promise<AuthUser> {
-    const user = await this.resolveAccessToken(authorization);
-    if (!user) throw new UnauthorizedException("会话已失效，请重新登录");
-    return this.toAuthUser(user);
+    const context = await this.resolveAccessContext(authorization, { allowInvalidWorkspace: true });
+    if (!context) throw new UnauthorizedException("会话已失效，请重新登录");
+    return this.toAuthUser(context.user, context.tenantUser);
   }
 
   async assertLegacyVehicleDomainWorkspace(tenantId: string, workspaceId?: string) {
@@ -206,10 +206,10 @@ export class AuthService {
   }
 
   async getSessionContext(authorization?: string) {
-    const context = await this.resolveAccessContext(authorization);
+    const context = await this.resolveAccessContext(authorization, { allowInvalidWorkspace: true });
     const user = context?.user;
     if (!user) throw new UnauthorizedException("会话已失效，请重新登录");
-    const workspaceId = context?.workspaceId;
+    const workspaceId = context.workspaceValid ? context.workspaceId : undefined;
     // SPACE-05：品类与能力按**当前经营空间**取。
     //
     // 原先固定取租户级档案，于是刷新页面后停留在非默认空间的会话会显示
@@ -235,7 +235,7 @@ export class AuthService {
         categoryName: scope.categoryName,
         capabilities: capabilityView?.enabled ?? []
       },
-      user: this.toAuthUser(user),
+      user: await this.toAuthUser(user, context.tenantUser),
       // 刷新页面后切换器仍需知道「在哪、能去哪」，因此这里必须带出空间列表。
       workspaces: await this.platformService.listUserWorkspaces(user.id),
       currentWorkspaceId: workspaceId,
@@ -313,7 +313,7 @@ export class AuthService {
   async resolveAccessContext(
     authorization?: string,
     options: { allowInvalidWorkspace?: boolean } = {}
-  ): Promise<{ user: SystemUserRow; workspaceId?: string; hasWorkspaces: boolean; workspaceValid: boolean } | undefined> {
+  ): Promise<{ user: SystemUserRow; tenantUser: SystemUserRow; workspaceId?: string; hasWorkspaces: boolean; workspaceValid: boolean } | undefined> {
     const token = authorization?.replace(/^Bearer\s+/i, "").trim();
     if (!token) return undefined;
     const payload = this.verifyAccessToken(token);
@@ -324,9 +324,10 @@ export class AuthService {
     // 同一个请求只读取一次空间成员关系，并同时用于权限身份与有效性判断。
     // 若分两次查询，授权恰好在两次查询之间恢复时，可能出现「租户级身份 +
     // workspaceValid=true」的瞬时组合，使该请求绕过空间角色权限。
-    const workspaceUser = await this.platformService.findWorkspaceScopedUser(payload.sub, workspaceId);
-    const user = workspaceUser
-      ?? (options.allowInvalidWorkspace ? await this.platformService.findUserById(payload.sub) : undefined);
+    const tenantUser = await this.platformService.findUserById(payload.sub);
+    if (!tenantUser?.isActive || tenantUser.tenantId !== payload.tid) return undefined;
+    const workspaceUser = await this.platformService.findWorkspaceScopedUser(payload.sub, workspaceId, tenantUser);
+    const user = workspaceUser ?? (options.allowInvalidWorkspace ? tenantUser : undefined);
     if (!user || user.tenantId !== payload.tid) return undefined;
     // hasWorkspaces 用于区分两种"没有当前空间"：
     //   - 该账号本来就有可进入空间却没选（必须 fail-closed，让它去选）
@@ -340,7 +341,7 @@ export class AuthService {
     // 撤销/停用后 fallback 到租户级身份时，workspaceId 不能再当有效范围使用——
     // 否则被撤销的账号拿着旧会话仍能读旧空间的经营数据。
     const workspaceValid = Boolean(workspaceId) && Boolean(workspaceUser);
-    return { user, workspaceId, hasWorkspaces, workspaceValid };
+    return { user, tenantUser, workspaceId, hasWorkspaces, workspaceValid };
   }
 
   /** SPACE-02：切换当前经营空间。校验成员资格与空间状态后重新签发访问令牌。 */
@@ -443,7 +444,7 @@ export class AuthService {
         categoryName: sessionScope.categoryName,
         capabilities: capabilityView?.enabled ?? []
       },
-      user: this.toAuthUser(user),
+      user: await this.toAuthUser(user),
       needsTenantOnboarding: Boolean(needsTenantOnboarding && workspaceId),
       // SPACE-02：登录返回可进入的空间与当前空间，供前端渲染切换器（前端属 SPACE-05）。
       workspaces,
@@ -451,7 +452,9 @@ export class AuthService {
     };
   }
 
-  private toAuthUser(user: SystemUserRow): AuthUser {
+  private async toAuthUser(user: SystemUserRow, baseUser?: SystemUserRow): Promise<AuthUser> {
+    const tenantUser = baseUser ?? await this.platformService.findUserById(user.id);
+    if (!tenantUser?.isActive || tenantUser.tenantId !== user.tenantId) throw new UnauthorizedException("账号或租户已停用");
     return {
       id: user.id,
       tenantId: user.tenantId,
@@ -466,7 +469,12 @@ export class AuthService {
       isPlatformAdmin: user.isPlatformAdmin,
       isSaasAdmin: user.isSaasAdmin,
       mustChangePassword: user.mustChangePassword,
-      permissions: user.permissions
+      permissions: user.permissions,
+      tenantMembership: {
+        permissions: tenantUser.isSaasAdmin ? [] : tenantUser.permissions,
+        dataScope: tenantUser.dataScope,
+        isTenantAdmin: !tenantUser.isSaasAdmin && tenantUser.isPlatformAdmin
+      }
     };
   }
 

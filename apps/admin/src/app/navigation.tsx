@@ -10,6 +10,7 @@ import {
   FileTextOutlined,
   FormOutlined,
   FundOutlined,
+  GiftOutlined,
   IdcardOutlined,
   SafetyCertificateOutlined,
   SettingOutlined,
@@ -31,6 +32,7 @@ export interface AppRouteDefinition {
   icon: ReactNode;
   /** 路由所属运行面；租户内全权限不能越过 SaaS/租户边界。 */
   audience: "tenant" | "saas";
+  scope?: "tenant-membership";
   capability?: RentalCapability;
   categories?: RentalCategoryCode[];
   menu?: boolean;
@@ -50,10 +52,6 @@ export const APP_ROUTES = {
   // REPORT-01A：当前经营空间经营报表。文案固定「经营报表」——指标定义不随品类变化，
   // 只有页面标题内的标的说法用品类术语，菜单名跟着品类变会让人以为指标也变了。
   operationReport: { path: "/reports/operations", label: "经营报表", permission: "rental-os:report:view", audience: "tenant", icon: <FundOutlined />, menu: true },
-  // 租赁工作台（Rental Core v0.1）暂不进菜单：它是早期的合并调试台，
-  // 建单、确认预占、执行配货、取消都已经由「新建订单」和订单详情页各自承载，
-  // 且详情页还多了部分归还。路由与页面保留，需要时把 menu 打开即可。
-  rentalCore: { path: "/rental/core", label: "租赁工作台", permission: "rental-os:order:view", audience: "tenant", icon: <ApartmentOutlined /> },
   // 新建订单不进菜单：它是「订单管理」页上的主操作（页面右上角按钮），
   // 菜单里再放一条等于把一个动作伪装成一个板块，也让「租赁交易」多出一层噪音。
   // 路由本身照常注册，权限仍由 permission 把关。
@@ -65,7 +63,7 @@ export const APP_ROUTES = {
   assets: { path: "/rental/assets", label: "资产与库存", permission: "rental-core:asset:view", legacyPermissions: ["rental-os:vehicle:view"], audience: "tenant", icon: <BoxPlotOutlined />, menu: true },
   workOrders: { path: "/rental/work-orders", label: "养护工单", permission: "rental-core:maintenance:view", audience: "tenant", icon: <ToolOutlined />, menu: true },
   locations: { path: "/rental/locations", label: "履约地点", permission: "rental-os:station:view", audience: "tenant", icon: <ShopOutlined />, menu: true },
-  pricing: { path: "/rental/pricing", label: "基础定价", permission: "rental-os:price:manage", audience: "tenant", icon: <FundOutlined />, menu: true },
+  pricing: { path: "/rental/pricing", label: "价格版本与调价", permission: "rental-os:price:manage", audience: "tenant", icon: <FundOutlined />, menu: true },
   discounts: { path: "/rental/discounts", label: "优惠方案", permission: "rental-os:price:manage", audience: "tenant", icon: <TagsOutlined />, menu: true },
   coupons: { path: "/rental/coupons", label: "优惠券", permission: "rental-os:price:manage", audience: "tenant", icon: <TagsOutlined />, menu: true },
   services: { path: "/rental/services", label: "增值服务", permission: "rental-os:price:manage", audience: "tenant", icon: <SafetyCertificateOutlined />, menu: true },
@@ -73,10 +71,19 @@ export const APP_ROUTES = {
   // CORE-EXT-02C：能力治理入口。刻意**不**给 capability 门禁——它是治理能力本身的页面，
   // 若也要求某个能力已启用，全新空间就会陷入「没有入口去启用第一个能力」的死锁。
   rentalCapabilities: { path: "/rental/capabilities", label: "经营空间能力", permission: "rental-core:capability:view", legacyPermissions: ["rental-core:capability:manage"], audience: "tenant", icon: <ControlOutlined />, menu: true },
-  membershipReviews: { path: "/membership/reviews", label: "会员审核", permission: "rental-os:member:view", legacyPermissions: ["rental-os:member:review", "rental-os:member:qualification-review"], audience: "tenant", icon: <SafetyCertificateOutlined />, menu: true },
-  personalMembers: { path: "/membership/personal", label: "个人会员", permission: "rental-os:member:view", audience: "tenant", icon: <IdcardOutlined />, menu: true },
-  corporateMembers: { path: "/membership/corporate", label: "企业会员", permission: "rental-os:corporate:view", legacyPermissions: ["rental-os:corporate:manage", "rental-os:corporate:employee-manage"], audience: "tenant", icon: <TeamOutlined />, menu: true },
-  membershipPlans: { path: "/membership/plans", label: "会员方案", permission: "rental-os:member:view", legacyPermissions: ["rental-os:member:plan:manage", "rental-os:member:plan:publish"], audience: "tenant", icon: <TagsOutlined />, menu: true },
+  membershipReviews: { scope: "tenant-membership", path: "/membership/reviews", label: "会员审核", permission: "rental-os:member:view", legacyPermissions: ["rental-os:member:review", "rental-os:member:qualification-review"], audience: "tenant", icon: <SafetyCertificateOutlined />, menu: true },
+  personalMembers: { scope: "tenant-membership", path: "/membership/personal", label: "个人会员", permission: "rental-os:member:view", audience: "tenant", icon: <IdcardOutlined />, menu: true },
+  corporateMembers: { scope: "tenant-membership", path: "/membership/corporate", label: "企业会员", permission: "rental-os:corporate:view", legacyPermissions: ["rental-os:corporate:manage", "rental-os:corporate:employee-manage"], audience: "tenant", icon: <TeamOutlined />, menu: true },
+  membershipPlans: { scope: "tenant-membership", path: "/membership/plans", label: "会员方案", permission: "rental-os:member:view", legacyPermissions: ["rental-os:member:plan:manage", "rental-os:member:plan:publish"], audience: "tenant", icon: <TagsOutlined />, menu: true },
+  // 会员激励（人工补发奖励、权益账户与奖励流水）从「品类与业务规则」拆出来单独成页。
+  // 它读写的是 /rental/v1/rewards 与 /rental/v1/benefit-accounts：这两条是**空间级**接口，
+  // 服务端守卫认的是 price:manage / rules:manage / system:params:manage，而不是租户级会员权限，
+  // 因此这里不能像其他会员页那样走 tenant-membership 作用域，否则菜单会对能用的人隐藏、
+  // 对不能用的人放行。
+  membershipRewards: { path: "/membership/rewards", label: "会员激励", permission: "rental-os:price:manage", legacyPermissions: ["rental-os:rules:manage", "system:params:manage"], audience: "tenant", icon: <GiftOutlined />, menu: true },
+  // 证件类型是当前经营空间的业务配置，与租户级会员资料维护是两种责任；
+  // 单独一个权限码，旧的会员管理权限只作过渡期兼容，新授权应使用新码。
+  qualificationTypes: { path: "/rental/qualification-types", label: "空间证件类型", permission: "rental-os:qualification-type:manage", legacyPermissions: ["rental-os:member:manage", "rental-os:member:view"], audience: "tenant", icon: <SafetyCertificateOutlined />, menu: true },
   tenantReadiness: { path: "/tenant/readiness", label: "开业配置", permission: "rental-os:order:view", legacyPermissions: ["rental-os:price:manage", "system:user:manage", "system:role:manage"], audience: "tenant", icon: <DashboardOutlined />, menu: true },
   tenantAccounts: { path: "/tenant/accounts", label: "运营账号", permission: "system:user:manage", audience: "tenant", icon: <TeamOutlined />, menu: true },
   tenantRoles: { path: "/tenant/roles", label: "角色权限", permission: "system:role:manage", audience: "tenant", icon: <SafetyCertificateOutlined />, menu: true },
@@ -95,8 +102,8 @@ export const APP_NAVIGATION: AppNavigationSection[] = [
   { key: "transactions", label: "租赁交易", icon: <ApartmentOutlined />, routes: [APP_ROUTES.orders] },
   { key: "inventory", label: "商品与资产", icon: <AppstoreOutlined />, routes: [APP_ROUTES.itemGroups, APP_ROUTES.assets, APP_ROUTES.workOrders, APP_ROUTES.locations] },
   { key: "commercial", label: "定价与营销", icon: <FundOutlined />, routes: [APP_ROUTES.pricingGroups, APP_ROUTES.pricing, APP_ROUTES.discounts, APP_ROUTES.coupons, APP_ROUTES.services] },
-  { key: "customers", label: "会员与客户", icon: <TeamOutlined />, routes: [APP_ROUTES.membershipReviews, APP_ROUTES.personalMembers, APP_ROUTES.corporateMembers, APP_ROUTES.membershipPlans] },
-  { key: "tenant-settings", label: "经营设置", icon: <SettingOutlined />, routes: [APP_ROUTES.tenantReadiness, APP_ROUTES.rentalSettings, APP_ROUTES.rentalCapabilities, APP_ROUTES.tenantAccounts, APP_ROUTES.tenantRoles, APP_ROUTES.tenantIntegrations, APP_ROUTES.paymentReconciliation] },
+  { key: "customers", label: "会员与客户", icon: <TeamOutlined />, routes: [APP_ROUTES.membershipReviews, APP_ROUTES.personalMembers, APP_ROUTES.corporateMembers, APP_ROUTES.membershipPlans, APP_ROUTES.membershipRewards] },
+  { key: "tenant-settings", label: "经营设置", icon: <SettingOutlined />, routes: [APP_ROUTES.tenantReadiness, APP_ROUTES.rentalSettings, APP_ROUTES.qualificationTypes, APP_ROUTES.rentalCapabilities, APP_ROUTES.tenantAccounts, APP_ROUTES.tenantRoles, APP_ROUTES.tenantIntegrations, APP_ROUTES.paymentReconciliation] },
   { key: "platform-management", label: "平台管理", icon: <SettingOutlined />, routes: [APP_ROUTES.platformTenants, APP_ROUTES.platformOfficialCalendars, APP_ROUTES.platformUsers, APP_ROUTES.platformSystem, APP_ROUTES.platformOperations, APP_ROUTES.platformTools] }
 ];
 
@@ -140,10 +147,12 @@ export function canAccessRoute(
   hasPermission: (permission?: string) => boolean,
   hasCapability: (capability?: RentalCapability) => boolean,
   categoryCode: RentalCategoryCode | undefined,
-  isSaasAdmin: boolean
+  isSaasAdmin: boolean,
+  hasTenantMembershipPermission: (permission?: string) => boolean = () => false
 ) {
   if ((route.audience === "saas") !== isSaasAdmin) return false;
   const supportsCategory = !route.categories || Boolean(categoryCode && route.categories.includes(categoryCode));
-  const supportsPermission = hasPermission(route.permission) || Boolean(route.legacyPermissions?.some((permission) => hasPermission(permission)));
+  const permissionCheck = route.scope === "tenant-membership" ? hasTenantMembershipPermission : hasPermission;
+  const supportsPermission = permissionCheck(route.permission) || Boolean(route.legacyPermissions?.some((permission) => permissionCheck(permission)));
   return supportsPermission && hasCapability(route.capability) && supportsCategory;
 }

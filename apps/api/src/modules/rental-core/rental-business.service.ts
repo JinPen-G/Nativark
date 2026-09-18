@@ -8,6 +8,7 @@ import { buildCapabilityEquipment } from "./capability-equipment";
 import {
   RentalCategoryCode,
   RentalInventoryMode,
+  membershipBenefitScopeMatches,
   type GrantRentalRewardRequest,
   type ImportRentalCalendarRequest,
   type RentalCalendarBusinessStatus,
@@ -718,7 +719,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     let membershipUnavailable = !this.memberships;
     if (this.memberships) {
       try {
-        membershipPlanCount = (await this.memberships.listPlans(tenantId, workspaceId)).length;
+        membershipPlanCount = (await this.memberships.listPlans(tenantId)).length;
       } catch {
         // 会员域读取异常时如实标注不可判定，而不是把「查不到」伪装成「没配置」。
         membershipUnavailable = true;
@@ -1190,6 +1191,19 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
    * 用它计费等于「没有发布过的价格也能收钱」，且事后无从复算按哪一版收的。
    * 内存数据源（非 MySQL）没有版本表，属另一条链路，见下方分支。
    */
+  /**
+   * 客户端目录“参考起价”用：返回覆盖 `at` 时点的空间价格版本费率；没有生效版本时返回空数组
+   * 而不是抛错——目录页缺价只是“选租期查看报价”，报价与下单仍由 resolveSpaceRates 严格拒绝。
+   */
+  async listSpaceRatesAt(tenantId: string, context: BusinessContext, at: string): Promise<RentalPricingRate[]> {
+    try {
+      return (await this.resolveSpaceRates(tenantId, context, at)).rates;
+    } catch (error) {
+      if (error instanceof ConflictException) return [];
+      throw error;
+    }
+  }
+
   private async resolveSpaceRates(
     tenantId: string,
     context: BusinessContext,
@@ -4672,10 +4686,11 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
             : bases;
           const base = roundMoney(Object.values(candidateBases).reduce((sum, value) => sum + value, 0));
           const hasUnsupportedConditions = Object.keys(entry.benefit.conditions ?? {}).length > 0;
-          const amount = hasUnsupportedConditions || entry.benefit.calculation === "priority"
+          const scopeMatched = membershipBenefitScopeMatches(entry.benefit.scope, this.workspaceOf(tenantId), context.category.code);
+          const amount = !scopeMatched || hasUnsupportedConditions || entry.benefit.calculation === "priority"
             ? 0
             : this.membershipBenefitAmount(entry.benefit, base);
-          return { entry, index, amount, hasUnsupportedConditions, base, bases: candidateBases };
+          return { entry, index, amount, hasUnsupportedConditions, scopeMatched, base, bases: candidateBases };
         })
         .sort((left, right) => right.amount - left.amount || left.index - right.index);
       const winner = candidates.find((candidate) => candidate.amount > 0 && !candidate.hasUnsupportedConditions);
@@ -4684,6 +4699,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         const allocations = selected ? allocateDiscount(candidate.amount, candidate.bases) : undefined;
         membershipBenefitEvaluations.push({
           source: candidate.entry.source,
+          scope: structuredClone(candidate.entry.benefit.scope ?? { type: "tenant" }),
+          scopeMatched: candidate.scopeMatched,
           planId: candidate.entry.assignment.planId,
           planVersionId: candidate.entry.assignment.planVersionId,
           planName: candidate.entry.assignment.snapshot.planName,
@@ -4696,7 +4713,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
           base: candidate.base,
           configuredMaximum: candidate.entry.benefit.maximum,
           allocations,
-          skippedReason: selected ? undefined : candidate.hasUnsupportedConditions
+          skippedReason: selected ? undefined : !candidate.scopeMatched
+            ? "该会员权益不适用于当前经营空间或品类"
+            : candidate.hasUnsupportedConditions
             ? "权益配置包含尚未支持的条件，未自动放行"
             : candidate.base <= 0 ? "当前没有可减免的费用基数" : "同类会员权益仅取本次优惠额最大的一个",
           detail: selected

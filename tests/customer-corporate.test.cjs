@@ -73,19 +73,19 @@ void (async () => {
   await seed();
 
   // 企业签约主体、企业付款主体（总部）、个人使用人、个人经办人候选，全在租户 A。
-  const corp = await customers.createWithLink(tenantA, wsA, {
+  const corp = await customers.createWithMembership(tenantA, {
     customerType: "corporate", name: "示例影视", phone: "13900001111", corporateName: "示例影视有限公司"
   }, "普通会员");
-  const hq = await customers.createWithLink(tenantA, wsA, {
+  const hq = await customers.createWithMembership(tenantA, {
     customerType: "corporate", name: "示例集团总部", phone: "13900002222", corporateName: "示例集团有限公司"
   }, "普通会员");
-  const driver = await customers.createWithLink(tenantA, wsA, {
+  const driver = await customers.createWithMembership(tenantA, {
     customerType: "personal", name: "司机小张", phone: "13700001111"
   }, "普通会员");
-  const personal = await customers.createWithLink(tenantA, wsA, {
+  const personal = await customers.createWithMembership(tenantA, {
     customerType: "personal", name: "个人客户", phone: "13700002222"
   }, "普通会员");
-  const otherTenantCorp = await customers.createWithLink(tenantB, wsB, {
+  const otherTenantCorp = await customers.createWithMembership(tenantB, {
     customerType: "corporate", name: "B 租户公司", phone: "13900003333"
   }, "普通会员");
 
@@ -337,7 +337,7 @@ void (async () => {
   ok("主体归属校验：经办人越权/过期/停用、合同越权/过期/未生效、开票资料越权、跨租户主体全部被拒");
 
   // ============ 8. 已合并主档不得作为订单主体 ============
-  const mergedAway = await customers.createWithLink(tenantA, wsA, {
+  const mergedAway = await customers.createWithMembership(tenantA, {
     customerType: "corporate", name: "被合并的公司", phone: "13900009999"
   }, "普通会员");
   await prisma.customerProfile.update({

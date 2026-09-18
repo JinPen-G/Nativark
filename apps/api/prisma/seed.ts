@@ -143,9 +143,9 @@ const permissions = [
   ["rental-core:catalog:manage", "通用商品目录管理", "Rental Core", PermissionKind.ACTION],
   ["rental-core:asset:view", "通用资产库存查看", "Rental Core", PermissionKind.ACTION],
   ["rental-core:asset:manage", "通用资产库存管理", "Rental Core", PermissionKind.ACTION],
-  ["rental-core:maintenance:view", "养护工单查看", "Rental Core", PermissionKind.ACTION],
-  ["rental-core:maintenance:manage", "养护工单处理", "Rental Core", PermissionKind.ACTION],
-  ["rental-core:maintenance:review", "养护工单验收", "Rental Core", PermissionKind.ACTION],
+  ["rental-core:maintenance:view", "养护工单查看", "Rental Core", PermissionKind.ACTION, "查看归还处置和养护工单"],
+  ["rental-core:maintenance:manage", "养护工单处理", "Rental Core", PermissionKind.ACTION, "创建、派工、开始和提交养护工单"],
+  ["rental-core:maintenance:review", "养护工单验收", "Rental Core", PermissionKind.ACTION, "审核养护结果并恢复库存可用状态"],
   // CORE-EXT-02A：能力治理与订单操作分权。门店营运不该能停用整个空间的业务能力，
   // 因此这两个权限**不**进 STORE_OPERATOR 模板；租户管理员靠 fixedAllPermissions 覆盖。
   ["rental-core:capability:view", "经营空间能力查看", "Rental Core", PermissionKind.ACTION],
@@ -155,68 +155,71 @@ const permissions = [
   ["rental-os:rules:manage", "业务规则配置", "租赁业务", PermissionKind.ACTION],
   // RULE-01A：需求 4.6.14 明确「权限分为规则编辑、规则发布……」。发布会改变对外生效的
   // 条款，与编辑草稿是两个责任；共用一个码等于任何能改草稿的人都能直接对客户生效。
-  ["rental-os:rules:publish", "业务规则发布", "租赁业务", PermissionKind.ACTION],
-  ["rental-os:order:view", "订单查看", "租赁业务", PermissionKind.ACTION],
-  ["rental-os:order:operate", "订单操作", "租赁业务", PermissionKind.ACTION],
-  ["rental-os:order:reassign", "资源解锁与改配", "租赁业务", PermissionKind.ACTION],
-  ["rental-os:order:settle", "订单结算", "租赁业务", PermissionKind.ACTION],
-  ["rental-os:member:account-manage", "会员账号与密码管理", "会员管理", PermissionKind.ACTION],
-  ["rental-os:member:review", "会员注册审核", "会员管理", PermissionKind.ACTION],
-  ["rental-os:member:qualification-review", "会员证件审核", "会员管理", PermissionKind.ACTION],
-  ["rental-os:member:plan:manage", "会员方案编辑", "会员管理", PermissionKind.ACTION],
-  ["rental-os:member:plan:publish", "会员方案发布", "会员管理", PermissionKind.ACTION],
-  ["rental-os:corporate:employee-manage", "企业员工管理", "企业会员", PermissionKind.ACTION],
+  ["rental-os:rules:publish", "业务规则发布", "租赁业务", PermissionKind.ACTION, "发布或安排规则版本生效、作废已发布或待生效版本"],
+  ["rental-os:order:view", "订单查看", "租赁业务", PermissionKind.ACTION, "查看租赁订单列表和详情"],
+  ["rental-os:order:operate", "订单操作", "租赁业务", PermissionKind.ACTION, "新建租赁订单、领取检查和归还检查"],
+  ["rental-os:order:reassign", "资源解锁与改配", "租赁业务", PermissionKind.ACTION, "解锁、释放及更换订单锁定资源，必须填写原因"],
+  ["rental-os:order:settle", "订单结算", "租赁业务", PermissionKind.ACTION, "确认费用、补缴、退款或月结入账"],
+  ["rental-os:member:account-manage", "会员账号与密码管理", "会员管理", PermissionKind.ACTION, "开通账号、设置临时密码和管理账号状态"],
+  ["rental-os:member:review", "会员注册审核", "会员管理", PermissionKind.ACTION, "处理个人会员注册审核，不含证件审核"],
+  ["rental-os:member:qualification-review", "会员证件审核", "会员管理", PermissionKind.ACTION, "处理身份证件和品类资质审核"],
+  ["rental-os:member:plan:manage", "会员方案编辑", "会员管理", PermissionKind.ACTION, "编辑个人和企业会员方案草稿、授予方案"],
+  ["rental-os:member:plan:publish", "会员方案发布", "会员管理", PermissionKind.ACTION, "发布会员方案版本"],
+  ["rental-os:corporate:employee-manage", "企业员工管理", "企业会员", PermissionKind.ACTION, "维护企业管理员和员工关系"],
   // ORDER-CLOSE-02：费用裁定与实际收退款分权。
-  ["rental-os:order:fee-review", "费用裁定", "租赁业务", PermissionKind.ACTION],
-  ["rental-os:order:create", "按钮-新建订单", "租赁业务", PermissionKind.BUTTON],
-  ["rental-os:order:pickup", "按钮-取车交付", "租赁业务", PermissionKind.BUTTON],
-  ["rental-os:order:return", "按钮-还车验车", "租赁业务", PermissionKind.BUTTON],
-  ["rental-os:order:extend", "按钮-延长用车", "租赁业务", PermissionKind.BUTTON],
-  ["rental-os:order:cancel", "按钮-取消/爽约", "租赁业务", PermissionKind.BUTTON],
-  ["rental-os:order:close", "按钮-关闭/拒绝履约", "租赁业务", PermissionKind.BUTTON],
-  ["rental-os:order:fee-manage", "按钮-费用处理", "租赁业务", PermissionKind.BUTTON],
+  ["rental-os:order:fee-review", "费用裁定", "租赁业务", PermissionKind.ACTION, "裁定逾期人工核价、提前归还退款、续租负差额与检查异常的金额；不含实际收退款"],
+  ["rental-os:order:create", "按钮-新建订单", "租赁业务", PermissionKind.BUTTON, "显示并执行新建租赁订单入口"],
+  ["rental-os:order:pickup", "按钮-领取交付", "租赁业务", PermissionKind.BUTTON, "执行领取交付和确认开始履约"],
+  ["rental-os:order:return", "按钮-归还验收", "租赁业务", PermissionKind.BUTTON, "执行归还验收和提交结算"],
+  ["rental-os:order:extend", "按钮-延长租期", "租赁业务", PermissionKind.BUTTON, "执行延长租期和逾期补办续租"],
+  ["rental-os:order:cancel", "按钮-取消/爽约", "租赁业务", PermissionKind.BUTTON, "执行取消订单和标记爽约"],
+  ["rental-os:order:close", "按钮-关闭/拒绝履约", "租赁业务", PermissionKind.BUTTON, "执行关闭订单和拒绝履约"],
+  ["rental-os:order:fee-manage", "按钮-费用处理", "租赁业务", PermissionKind.BUTTON, "登记订单费用、收款、退款和减免"],
   ["rental-os:dispatch:manage", "调度管理", "租赁业务", PermissionKind.ACTION],
   ["rental-os:price:manage", "价格规则", "租赁业务", PermissionKind.ACTION],
-  ["rental-os:calendar:edit", "营业日历编辑（草稿）", "租赁业务", PermissionKind.ACTION],
-  ["rental-os:calendar:publish", "营业日历发布", "租赁业务", PermissionKind.ACTION],
+  ["rental-os:calendar:edit", "营业日历编辑（草稿）", "租赁业务", PermissionKind.ACTION, "新建和修改营业日历草稿，不含发布"],
+  ["rental-os:calendar:publish", "营业日历发布", "租赁业务", PermissionKind.ACTION, "发布年度营业日历版本"],
   // 需求 4.5.8：客服或财务「查看历史版本及报价命中的日历依据，不得修改」。
   // 没有这个独立权限时，给客服开放历史就只能顺带授予编辑、发布或规则管理权，权限过大。
-  ["rental-os:calendar:view-history", "营业日历历史只读", "租赁业务", PermissionKind.ACTION],
+  ["rental-os:calendar:view-history", "营业日历历史只读", "租赁业务", PermissionKind.ACTION, "查看历史版本、发布差异、覆盖审计与报价命中的日历依据，不得修改"],
   ["rental-os:marketing:manage", "行销方案管理", "租赁业务", PermissionKind.ACTION],
-  ["rental-os:station:view", "站点查看", "租赁业务", PermissionKind.ACTION],
-  ["rental-os:station:manage", "站点管理", "租赁业务", PermissionKind.ACTION],
-  ["rental-os:vehicle-group:manage", "车型组管理", "租赁业务", PermissionKind.ACTION],
-  ["rental-os:vehicle:view", "车辆查看", "租赁业务", PermissionKind.ACTION],
-  ["rental-os:vehicle:manage", "车辆管理", "租赁业务", PermissionKind.ACTION],
-  ["rental-os:vehicle:status-action", "按钮-车辆状态动作", "租赁业务", PermissionKind.BUTTON],
+  ["rental-os:station:view", "履约地点查看", "租赁业务", PermissionKind.ACTION],
+  ["rental-os:station:manage", "履约地点管理", "租赁业务", PermissionKind.ACTION],
+  ["rental-os:vehicle-group:manage", "品类型号与分组管理", "租赁业务", PermissionKind.ACTION],
+  ["rental-os:vehicle:view", "品类资产查看", "租赁业务", PermissionKind.ACTION],
+  ["rental-os:vehicle:manage", "品类资产管理", "租赁业务", PermissionKind.ACTION],
+  ["rental-os:vehicle:status-action", "按钮-品类资产状态动作", "租赁业务", PermissionKind.BUTTON, "启停、维保、异常和状态处置"],
   ["rental-os:member:view", "会员查看", "租赁业务", PermissionKind.ACTION],
   ["rental-os:member:manage", "会员管理", "租赁业务", PermissionKind.ACTION],
-  ["rental-os:member:risk-action", "按钮-会员风控动作", "租赁业务", PermissionKind.BUTTON],
+  // 空间证件类型独立授权：守卫对 /membership/qualification-types 的写入只认这个码。
+  // 存量角色未补授前，管理端靠旧的 member:manage 兜底进入页面；实际写入仍需授予本码。
+  ["rental-os:qualification-type:manage", "空间证件类型管理", "租赁业务", PermissionKind.ACTION, "维护当前经营空间的资质证件类型"],
+  ["rental-os:member:risk-action", "按钮-会员风控动作", "租赁业务", PermissionKind.BUTTON, "暂停、拉黑和恢复会员"],
   // CUSTOMER-01B：敏感资料解密查看单独授权（需求 4.8.5 / 4.8.14）。
   // 与「会员查看」分开：日常查客户只该看到脱敏值，看明文是另一件需要单独追责的事。
-  ["rental-os:customer:reveal-sensitive", "客户敏感资料解密", "租赁业务", PermissionKind.ACTION],
+  ["rental-os:customer:reveal-sensitive", "客户敏感资料解密", "租赁业务", PermissionKind.ACTION, "查看客户证件号等明文，并可查阅敏感访问审计"],
   // CUSTOMER-01D：需求 4.8.14 要求客户合并与注销**分别授权**。
   // 两者都不可逆，且影响面不同：合并改变身份归属，注销终止业务资格。
-  ["rental-os:customer:merge", "客户合并", "租赁业务", PermissionKind.ACTION],
-  ["rental-os:customer:close", "客户注销", "租赁业务", PermissionKind.ACTION],
+  ["rental-os:customer:merge", "客户合并", "租赁业务", PermissionKind.ACTION, "人工合并重复客户主档，不可逆"],
+  ["rental-os:customer:close", "客户注销", "租赁业务", PermissionKind.ACTION, "注销客户账号或空间会员关系，不可逆"],
   ["rental-os:corporate:view", "企业客户查看", "租赁业务", PermissionKind.ACTION],
   ["rental-os:corporate:manage", "企业客户管理", "租赁业务", PermissionKind.ACTION],
-  ["rental-os:corporate:monthly-settle", "按钮-企业月结回款", "租赁业务", PermissionKind.BUTTON],
-  ["rental-os:finance:view", "财务查看", "租赁业务", PermissionKind.ACTION],
-  ["rental-os:finance:manage", "财务管理", "租赁业务", PermissionKind.ACTION],
-  ["rental-os:finance:adjust", "按钮-手工调账", "租赁业务", PermissionKind.BUTTON],
-  ["rental-os:finance:invoice", "按钮-发票/收据", "租赁业务", PermissionKind.BUTTON],
-  ["rental-os:finance:reconcile", "财务对账", "租赁业务", PermissionKind.ACTION],
+  ["rental-os:corporate:monthly-settle", "按钮-企业月结回款", "租赁业务", PermissionKind.BUTTON, "登记企业账单回款"],
+  ["rental-os:finance:view", "财务查看", "租赁业务", PermissionKind.ACTION, "查看资金流水、发票收据、调账和对账"],
+  ["rental-os:finance:manage", "财务管理", "租赁业务", PermissionKind.ACTION, "维护财务单据和处理资金状态"],
+  ["rental-os:finance:adjust", "按钮-手工调账", "租赁业务", PermissionKind.BUTTON, "提交、审核和入账手工调账"],
+  ["rental-os:finance:invoice", "按钮-发票/收据", "租赁业务", PermissionKind.BUTTON, "开具、发送和作废发票收据"],
+  ["rental-os:finance:reconcile", "财务对账", "租赁业务", PermissionKind.ACTION, "查看和处理资金、月结、调账异常"],
   ["rental-os:service:manage", "增值服务管理", "租赁业务", PermissionKind.ACTION],
   ["rental-os:report:view", "报表查看", "租赁业务", PermissionKind.ACTION],
   ["system:user:manage", "系统用户", "系统设置", PermissionKind.ACTION],
-  ["system:role:manage", "角色权限", "系统设置", PermissionKind.ACTION],
-  ["system:params:manage", "系统通用参数", "系统设置", PermissionKind.ACTION],
+  ["system:role:manage", "角色权限", "系统设置", PermissionKind.ACTION, "新增角色、编辑角色、配置权限"],
+  ["system:params:manage", "系统通用参数", "系统设置", PermissionKind.ACTION, "维护会员、运维、日历、推送和 AI 模型接入参数"],
   ["system:audit:view", "审计日志", "系统设置", PermissionKind.ACTION],
   ["system:dictionary:manage", "数据字典", "系统设置", PermissionKind.ACTION],
   ["system:number-rule:manage", "编号规则", "系统设置", PermissionKind.ACTION],
-  ["system:integration:manage", "外部接入与任务", "系统设置", PermissionKind.ACTION],
-  ["system:button:export", "按钮-导出", "系统设置", PermissionKind.BUTTON],
+  ["system:integration:manage", "外部接入与任务", "系统设置", PermissionKind.ACTION, "管理附件、通知、导入导出、打印、TBox 和外部 adapter mock 日志"],
+  ["system:button:export", "按钮-导出", "系统设置", PermissionKind.BUTTON, "平台列表和报表导出按钮"],
   ["system:tenant:manage", "租户配置", "系统设置", PermissionKind.ACTION],
   // 公共官方日历来源注册表（需求 4.5.8）。跨租户的公共基础数据，只授予 SaaS 平台管理员；
   // 它不含任何经营空间业务数据，因此与「不得借此查看空间业务数据」不冲突。
@@ -412,24 +415,11 @@ async function upsertOrganizations() {
 }
 
 async function upsertPermissions() {
-  const permissionNameOverrides: Record<string, string> = {
-    "rental-os:order:pickup": "按钮-领取交付",
-    "rental-os:order:return": "按钮-归还验收",
-    "rental-os:order:extend": "按钮-延长租期",
-    "rental-os:station:view": "履约地点查看",
-    "rental-os:station:manage": "履约地点管理",
-    "rental-os:vehicle-group:manage": "品类型号与分组管理",
-    "rental-os:vehicle:view": "品类资产查看",
-    "rental-os:vehicle:manage": "品类资产管理",
-    "rental-os:vehicle:status-action": "按钮-品类资产状态动作"
-  };
-  for (const [code, name, module, kind] of permissions) {
-    const normalizedName = permissionNameOverrides[code] ?? name;
-    const normalizedModule = module === "租赁业务" ? "租赁业务" : module;
+  for (const [code, name, module, kind, description] of permissions) {
     await prisma.permission.upsert({
       where: { code },
-      update: { name: normalizedName, module: normalizedModule, kind },
-      create: { code, name: normalizedName, module: normalizedModule, kind }
+      update: { name, description: description ?? null, module, kind },
+      create: { code, name, description: description ?? null, module, kind }
     });
   }
 }

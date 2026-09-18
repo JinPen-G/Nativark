@@ -4,17 +4,7 @@ import { RENTAL_CURRENCY_CODES, RENTAL_CURRENCY_META, TenantStatus } from "@rent
 import { App, Button, Card, Descriptions, Drawer, Form, Input, Segmented, Select, Space, Table, Tag, Typography } from "antd";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import {
-  bootstrapTenant,
-  createTenantWorkspace,
-  getTenantBootstrapPreview,
-  listTenantWorkspaces,
-  listTenants,
-  resetTenantAdminPassword,
-  updateTenant,
-  updateTenantWorkspace,
-  updateTenantStatus
-} from "@/api/operations";
+import { api } from "@/api/platform";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
@@ -40,12 +30,12 @@ export function TenantManagementPage() {
   const [form] = Form.useForm<Record<string, unknown>>();
   const [workspaceForm] = Form.useForm<CreateBusinessWorkspaceRequest & UpdateBusinessWorkspaceRequest>();
 
-  const tenants = useQuery({ queryKey: ["saas-tenants"], queryFn: listTenants });
+  const tenants = useQuery({ queryKey: ["saas-tenants"], queryFn: api.tenants });
   const categories = useQuery({ queryKey: ["rental-categories"], queryFn: rentalCoreApi.categories });
-  const preview = useQuery({ queryKey: ["tenant-bootstrap-preview"], queryFn: getTenantBootstrapPreview });
+  const preview = useQuery({ queryKey: ["tenant-bootstrap-preview"], queryFn: api.tenantBootstrapPreview });
   const workspaces = useQuery({
     queryKey: ["saas-tenant-workspaces", workspaceTenant?.tenantId],
-    queryFn: () => listTenantWorkspaces(workspaceTenant!.tenantId),
+    queryFn: () => api.tenantWorkspaces(workspaceTenant!.tenantId),
     enabled: Boolean(workspaceTenant)
   });
 
@@ -63,7 +53,7 @@ export function TenantManagementPage() {
   const createTenant = useMutation({
     // 空字符串的可选字段按未填写处理：服务端 @IsNotEmpty 会拒绝 ""，而
     // 「不预建首个门店」的空白租户正是本页必须支持的合法开业路径。
-    mutationFn: (values: TenantBootstrapRequest) => bootstrapTenant({
+    mutationFn: (values: TenantBootstrapRequest) => api.bootstrapTenant({
       ...values,
       storeName: values.storeName?.trim() || undefined,
       storeCode: values.storeCode?.trim() || undefined,
@@ -88,17 +78,17 @@ export function TenantManagementPage() {
     onError: () => message.error("租户初始化失败，数据库事务已回滚")
   });
   const saveTenant = useMutation({
-    mutationFn: ({ id, tenantName }: { id: string; tenantName: string }) => updateTenant(id, { tenantName }),
+    mutationFn: ({ id, tenantName }: { id: string; tenantName: string }) => api.updateTenant(id, { tenantName }),
     onSuccess: async () => { await refresh(); closeEditor(); message.success("租户资料已更新"); },
     onError: () => message.error("租户资料更新失败")
   });
   const changeStatus = useMutation({
-    mutationFn: ({ id, payload }: { id: string; payload: UpdateTenantStatusRequest }) => updateTenantStatus(id, payload),
+    mutationFn: ({ id, payload }: { id: string; payload: UpdateTenantStatusRequest }) => api.updateTenantStatus(id, payload),
     onSuccess: async () => { await refresh(); closeEditor(); message.success("租户状态已更新，相关会话已按规则处理"); },
     onError: () => message.error("租户状态更新失败")
   });
   const resetTenantAdmin = useMutation({
-    mutationFn: resetTenantAdminPassword,
+    mutationFn: api.resetTenantAdminPassword,
     onSuccess: (result) => modal.success({
       title: "租户管理员密码已重置",
       content: <><Typography.Paragraph>{result.message}</Typography.Paragraph><Typography.Text code copyable>{result.temporaryPassword}</Typography.Text></>
@@ -106,12 +96,12 @@ export function TenantManagementPage() {
     onError: () => message.error("租户管理员密码重置失败")
   });
   const createWorkspace = useMutation({
-    mutationFn: (values: CreateBusinessWorkspaceRequest) => createTenantWorkspace(workspaceTenant!.tenantId, values),
+    mutationFn: (values: CreateBusinessWorkspaceRequest) => api.createTenantWorkspace(workspaceTenant!.tenantId, values),
     onSuccess: async () => { await refreshWorkspaces(); closeWorkspaceEditor(); message.success("经营空间已创建，租户管理员已自动加入"); },
     onError: () => message.error("经营空间创建失败，请检查编码和品类")
   });
   const saveWorkspace = useMutation({
-    mutationFn: ({ id, values }: { id: string; values: UpdateBusinessWorkspaceRequest }) => updateTenantWorkspace(workspaceTenant!.tenantId, id, values),
+    mutationFn: ({ id, values }: { id: string; values: UpdateBusinessWorkspaceRequest }) => api.updateTenantWorkspace(workspaceTenant!.tenantId, id, values),
     onSuccess: async () => { await refreshWorkspaces(); closeWorkspaceEditor(); message.success("经营空间已更新"); },
     onError: () => message.error("经营空间更新失败")
   });

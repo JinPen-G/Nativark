@@ -97,6 +97,13 @@ export function isClientPublicRoute(method: string, path: string) {
   return false;
 }
 
+export function isTenantMembershipRoute(path: string) {
+  if (path === "/membership" || path.startsWith("/membership/")) {
+    return !path.startsWith("/membership/qualification-types");
+  }
+  return path === "/platform/customers" || path.startsWith("/platform/customers/");
+}
+
 function isPublicRoute(path: string) {
   return PUBLIC_ROUTES.has(path) || PUBLIC_ROUTE_PREFIXES.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
 }
@@ -170,30 +177,6 @@ export function requiredPermissions(method: string, path: string) {
   if (path.startsWith("/platform/organizations") || path.startsWith("/platform/users")) {
     return ["system:user:manage"];
   }
-  if (path.startsWith("/platform/workspace-customers")) {
-    // SPACE-04：共享客户主档按会员权限判定，与旧车辆域会员页面一致。
-    // 读写分开：查看不应要求管理权限，否则运营查客户就得给写权限。
-    if (/\/closability$/u.test(path)) {
-      return ["rental-os:customer:close"];
-    }
-    if (/\/status$/u.test(path)) {
-      // 目标状态在请求体中；具体动作由 PlatformService 按权限二次校验。
-      return [
-        "rental-os:member:manage",
-        "rental-os:member:risk-action",
-        "rental-os:customer:close"
-      ];
-    }
-    return method === "GET"
-      ? ["rental-os:member:view", "rental-os:member:manage"]
-      : ["rental-os:member:manage"];
-  }  // SPACE-01/02：经营空间主档与成员关系属于租户管理能力。
-  //
-  // 必须显式列出：本函数末尾兜底 `return []`，而 hasAnyPermission 对空数组
-  // 直接放行。漏列等于把「新建空间、改空间状态、增删空间成员」开放给任何
-  // 能登录的账号——普通运营账号可以把自己加进任一空间并附带租户管理员角色，
-  // 既跨空间读数据又提权。注意不能靠 `/platform/workspace-customers` 覆盖：
-  // 两者互不为前缀，必须分开判定，且这条要放在它之后避免被前缀吃掉。
   if (path.startsWith("/platform/workspaces")) {
     // 成员关系直接决定谁能进入哪个空间、以何角色进入，等价于授权操作，
     // 因此读也要求管理权限；空间列表本身按用户管理权限放行读。
@@ -229,15 +212,16 @@ export function requiredPermissions(method: string, path: string) {
     if (/\/(merge-preview|duplicates)$/u.test(path)) {
       return ["rental-os:customer:merge"];
     }
-    if (/\/closability$/u.test(path)) {
+    if (/\/(?:membership-)?closability$/u.test(path)) {
       return ["rental-os:customer:close"];
     }
-    // 账号注销走 account-status，其请求体里 status=closed 才是注销；Guard 按路径判权限、
-    // 看不到请求体，因此这条路由「会员管理」或「客户注销」之一即可进入，
-    // 真正的动作级权限与注销前置检查在服务层完成。
-    if (/\/account-status$/u.test(path)) {
-      return ["rental-os:member:manage", "rental-os:customer:close"];
+    if (/\/membership-status$/u.test(path)) {
+      return ["rental-os:member:manage", "rental-os:member:risk-action", "rental-os:customer:close"];
     }
+    if (/\/account-status$/u.test(path)) {
+      return ["rental-os:member:account-manage", "rental-os:customer:close"];
+    }
+    if (/\/account$/u.test(path)) return ["rental-os:member:account-manage"];
     return method === "GET"
       ? ["rental-os:member:view", "rental-os:member:manage"]
       : ["rental-os:member:manage"];
@@ -249,6 +233,13 @@ export function requiredPermissions(method: string, path: string) {
     return ["rental-os:report:view"];
   }
   if (path.startsWith("/membership")) {
+    if (path === "/membership/qualification-options" && method === "GET") return ["rental-os:member:view", "rental-os:member:manage"];
+    if (path === "/membership/benefit-scope-options" && method === "GET") {
+      return ["rental-os:member:view", "rental-os:member:manage", "rental-os:member:review", "rental-os:member:qualification-review", "rental-os:member:plan:manage", "rental-os:member:plan:publish", "rental-os:corporate:view", "rental-os:corporate:manage", "rental-os:corporate:employee-manage"];
+    }
+    if (path === "/membership/personal-options" && method === "GET") {
+      return ["rental-os:member:view", "rental-os:member:manage", "rental-os:corporate:employee-manage"];
+    }
     if (path === "/membership/registration-settings") {
       return method === "GET"
         ? ["rental-os:member:view", "rental-os:member:manage"]
@@ -260,7 +251,12 @@ export function requiredPermissions(method: string, path: string) {
         : ["rental-os:member:review", "rental-os:member:qualification-review"];
     }
     if (path.startsWith("/membership/qualification-types")) {
-      return method === "GET" ? ["rental-os:member:view", "rental-os:member:manage"] : ["rental-os:member:manage"];
+      // 证件类型是当前经营空间的业务配置（见 isTenantMembershipRoute 的排除），
+      // 与租户级会员资料维护是两种责任：写入只认专属的 qualification-type:manage，
+      // 读取兼容会员查看/管理权限，好让过渡期尚未补授新码的角色至少能看到清单。
+      return method === "GET"
+        ? ["rental-os:qualification-type:manage", "rental-os:member:view", "rental-os:member:manage"]
+        : ["rental-os:qualification-type:manage"];
     }
     if (/^\/membership\/personal\/[^/]+\/temporary-password$/u.test(path)) {
       return ["rental-os:member:account-manage"];
@@ -294,6 +290,9 @@ export function requiredPermissions(method: string, path: string) {
     return ["rental-os:member:view"];
   }
 
+  if (method === "GET" && (path === "/rental/v1/booking-members" || /^\/rental\/v1\/booking-members\/[^/]+\/booking-options$/u.test(path))) {
+    return ["rental-os:order:create"];
+  }
   if (path === "/rental/v1/categories") {
     return ["system:tenant:manage", "rental-os:order:view", "rental-os:vehicle:view"];
   }
@@ -617,13 +616,24 @@ export class ApiAuthGuard implements CanActivate {
 
     const authorization = request.headers.authorization;
     const token = Array.isArray(authorization) ? authorization[0] : authorization;
+    const tenantMembershipRoute = isTenantMembershipRoute(path);
     const accessContext = await this.authService.resolveAccessContext(token, {
-      // 当前空间刚被停用/撤销时，仍需允许用户进入切换入口；目标空间
-      // 会在 AuthService.switchWorkspace 内再次按成员关系校验。
-      allowInvalidWorkspace: path.startsWith("/auth/") || path.startsWith("/platform/")
+      allowInvalidWorkspace: tenantMembershipRoute || path.startsWith("/auth/") || path.startsWith("/platform/")
     });
-    const user = accessContext?.user;
+    const user = tenantMembershipRoute ? accessContext?.tenantUser : accessContext?.user;
     const workspaceId = accessContext?.workspaceId;
+    if (tenantMembershipRoute && user && !user.isSaasAdmin && !user.isPlatformAdmin && user.dataScope !== "all") {
+      throw new ForbiddenException("管理租户统一会员需要租户级全量数据范围和对应会员权限");
+    }
+    if (tenantMembershipRoute && (path === "/membership/qualification-options" || /^\/membership\/personal\/[^/]+\/(qualifications|benefits|booking-options)$/u.test(path)) && !accessContext?.workspaceValid) {
+      throw new ForbiddenException("该操作需要已授权且启用的经营空间上下文");
+    }
+    if (path.startsWith("/files") && user && !user.isSaasAdmin) {
+      const tenantUser = accessContext?.tenantUser;
+      if (!tenantUser || (!tenantUser.isPlatformAdmin && (tenantUser.dataScope !== "all" || !hasAnyPermission(tenantUser, ["system:integration:manage"])))) {
+        throw new ForbiddenException("共享文件访问需要租户级文件管理权限");
+      }
+    }
 
     // ACCESS-ACCEPT-01：撤销空间访问后，经营数据接口必须立即 fail-closed。
     // allowInvalidWorkspace 允许被撤销者进入切换入口与账号自助，但不能让他们
@@ -634,6 +644,7 @@ export class ApiAuthGuard implements CanActivate {
     // 经营数据边界。/platform 下的客户与会员接口则在这里明确返回 403。
     if (
       workspaceId &&
+      !tenantMembershipRoute &&
       accessContext.workspaceValid === false &&
       !path.startsWith("/auth/") &&
       (path.startsWith("/platform/workspace-customers") ||
@@ -737,6 +748,7 @@ export class ApiAuthGuard implements CanActivate {
     // 该账号需要管理员先把它加入某个空间，这正是成员关系存在的意义。
     if (
       !workspaceId &&
+      !tenantMembershipRoute &&
       !workspaceExemptPath &&
       (path.startsWith("/rental/") ||
         // SPACE-04：这两条按当前空间读写业务关系，缺空间同样必须 fail-closed。

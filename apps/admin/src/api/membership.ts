@@ -1,9 +1,11 @@
+/** 会员体系 API：个人/企业会员、会员方案、审核与权益（`/rental/v1/membership*`）。 */
 import type {
   AssignCustomerMembershipPlanRequest,
+  BookingMemberOption,
   CorporateMembershipMember,
   CustomerCorporateMembership,
   CustomerMembershipPlan,
-  CustomerMembershipBookingOption,
+  CustomerMembershipScopeOptions,
   CustomerMembershipQualificationType,
   CustomerMembershipRegistrationSettings,
   CustomerMembershipReview,
@@ -22,12 +24,14 @@ import type {
 } from "@rental-os/shared";
 import { request } from "./http";
 
-/** 新会员体系唯一的管理端 API。所有请求的经营空间均由会话确定。 */
+/** 租户统一会员管理接口。租户由会话确定；仅证件类型配置仍使用当前经营空间。 */
 export const membershipApi = {
   registrationSettings: () => request<CustomerMembershipRegistrationSettings>("/membership/registration-settings"),
   saveRegistrationSettings: (data: UpdateCustomerMembershipRegistrationSettingsRequest) =>
     request<CustomerMembershipRegistrationSettings>("/membership/registration-settings", { method: "put", data }),
   personal: () => request<PersonalMembershipMember[]>("/membership/personal"),
+  personalOptions: () => request<BookingMemberOption[]>("/membership/personal-options"),
+  benefitScopeOptions: () => request<CustomerMembershipScopeOptions>("/membership/benefit-scope-options"),
   registerPersonal: (data: RegisterPersonalMembershipRequest) => request<{ customerId: string }>("/membership/personal", { method: "post", data }),
   savePersonal: (customerId: string, data: SavePersonalMembershipRequest) =>
     request<unknown>(`/membership/personal/${customerId}`, { method: "put", data }),
@@ -40,6 +44,7 @@ export const membershipApi = {
   reviews: (params?: { status?: string; type?: string }) => request<CustomerMembershipReview[]>("/membership/reviews", { params }),
   review: (reviewId: string, data: ReviewCustomerMembershipRequest) =>
     request<CustomerMembershipReview>(`/membership/reviews/${reviewId}/decision`, { method: "post", data }),
+  qualificationOptions: () => request<CustomerMembershipQualificationType[]>("/membership/qualification-options"),
   qualificationTypes: () => request<CustomerMembershipQualificationType[]>("/membership/qualification-types"),
   saveQualificationType: (data: SaveCustomerMembershipQualificationTypeRequest) =>
     request<CustomerMembershipQualificationType>("/membership/qualification-types", { method: "put", data }),
@@ -61,7 +66,5 @@ export const membershipApi = {
   planAssignments: (customerId: string) =>
     request<import("@rental-os/shared").CustomerMembershipPlanAssignment[]>(`/membership/plans/assignments/${customerId}`),
   revokePlanAssignment: (assignmentId: string, reason: string) =>
-    request<unknown>(`/membership/plans/assignments/${assignmentId}/revoke`, { method: "post", data: { reason } }),
-  bookingOptions: (customerId: string) =>
-    request<CustomerMembershipBookingOption[]>(`/membership/personal/${customerId}/booking-options`)
+    request<unknown>(`/membership/plans/assignments/${assignmentId}/revoke`, { method: "post", data: { reason } })
 };

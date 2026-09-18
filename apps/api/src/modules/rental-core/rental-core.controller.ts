@@ -65,6 +65,7 @@ import {
   ApplyRentalStockOperationDto,
   SaveTenantRentalProfileDto,
   SubstituteRentalBundleComponentDto,
+  ListRentalOrdersQueryDto,
 } from "./rental-order-request.dto";
 import { effectiveExtensionRule } from "./rental-rule-defaults";
 import {
@@ -86,6 +87,7 @@ import { RentalDocumentService } from "./rental-document.service";
 import { buildRentalWorkbenchTodos, canIncludeWorkbenchOrderTodos, canIncludeWorkbenchWorkOrders } from "./rental-workbench-todos";
 import { validateInspectionCustomerResponse } from "./rental-inspection-customer-response";
 import { serviceCancellationAmounts, type ServiceCancellationSelection } from "./rental-service-cancellation";
+import { MembershipService } from "../platform/membership.service";
 import { CustomerCorporateSettlementService } from "../platform/customer-corporate-settlement.service";
 
 /** 读取标准 Idempotency-Key 请求头。大小写不敏感，超长键直接拒绝。 */
@@ -195,7 +197,8 @@ export class RentalCoreController {
     private readonly serviceCapacities: RentalServiceCapacityService,
     private readonly funding: RentalFundingService,
     private readonly documents: RentalDocumentService,
-    @Optional() private readonly corporateSettlement?: CustomerCorporateSettlementService
+    @Optional() private readonly corporateSettlement?: CustomerCorporateSettlementService,
+    @Optional() private readonly memberships?: MembershipService
   ) {}
 
   private context(tenantId: string): BusinessContext {
@@ -229,6 +232,18 @@ export class RentalCoreController {
     );
   }
   @Get("categories") categories() { return this.service.listCategories(); }
+
+  @Get("booking-members")
+  bookingMembers(@Req() req: AuthenticatedRequest) {
+    if (!this.memberships) throw new ConflictException("会员服务未就绪");
+    return this.memberships.listPersonalOptions(req.user.tenantId);
+  }
+
+  @Get("booking-members/:customerId/booking-options")
+  bookingOptions(@Req() req: AuthenticatedRequest, @Param("customerId") customerId: string) {
+    if (!this.memberships) throw new ConflictException("会员服务未就绪");
+    return this.memberships.listBookingOptions(req.user.tenantId, this.service.resolveWorkspaceId(req.user.tenantId), customerId);
+  }
   /**
    * REPORT-01A：当前经营空间的经营报表。
    *
@@ -830,7 +845,17 @@ export class RentalCoreController {
       : [];
     return buildRentalWorkbenchTodos(orders, workOrders, fundingByOrderId, extensionsByOrderId, notificationLogs);
   }
-  @Get("orders") orders(@Req() req: AuthenticatedRequest) { return this.service.listOrders(req.user.tenantId); }
+  /**
+   * ORDER-LIST-01：订单列表。筛选与分页在数据库里执行（见事实仓储 `queryOrders`）。
+   *
+   * 兼容：不带 `page`/`pageSize` 时仍返回纯数组（既有 E2E、seed 脚本与旧页面都按数组读），
+   * 带了任一分页参数才返回 `{ items, page, pageSize, total }` 信封。
+   * 空间不由客户端传入，与其他路由一样从会话解析。
+   */
+  @Get("orders") async orders(@Req() req: AuthenticatedRequest, @Query() query: ListRentalOrdersQueryDto) {
+    const result = await this.service.queryOrders(req.user.tenantId, query);
+    return query.page !== undefined || query.pageSize !== undefined ? result : result.items;
+  }
   /**
    * DOC-PRINT-01：订单详情页与 APP 统一读取同一份服务端客户凭证快照。
    * 资金聚合只有财务查看/对账权限时才加入；没有该权限仍可得到脱敏结算凭证，

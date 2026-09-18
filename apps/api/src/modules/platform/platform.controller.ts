@@ -17,7 +17,7 @@ import {
   SaveCustomerInvoiceProfileDto
 } from "./customer-corporate-request.dto";
 import { MergeCustomersDto } from "./customer-merge-request.dto";
-import { CreateBusinessWorkspaceDto, LinkCustomerToWorkspaceDto, SaveSharedCustomerDto, SaveWorkspaceMemberDto, UpdateBusinessWorkspaceDto } from "./workspace-request.dto";
+import { CreateBusinessWorkspaceDto, SaveSharedCustomerDto, SaveWorkspaceMemberDto, UpdateBusinessWorkspaceDto } from "./workspace-request.dto";
 import {
   GeneratePlatformNumberDto,
   OperatorInputDto,
@@ -132,19 +132,9 @@ export class PlatformController {
     return this.platformService.listSharedCustomers(req.user);
   }
 
-  @Get("workspace-customers")
-  workspaceCustomers(@Req() req: RequestWithUser) {
-    return this.platformService.listWorkspaceCustomers(req.user);
-  }
-
   @Post("customers")
   registerCustomer(@Body() body: SaveSharedCustomerDto, @Req() req: RequestWithUser) {
     return this.platformService.registerSharedCustomer(body, req.user);
-  }
-
-  @Post("workspace-customers")
-  linkCustomer(@Body() body: LinkCustomerToWorkspaceDto, @Req() req: RequestWithUser) {
-    return this.platformService.linkCustomerToWorkspace(body, req.user);
   }
 
   /**
@@ -178,8 +168,7 @@ export class PlatformController {
     return this.platformService.changeCustomerAccountStatus(customerId, body, req.user);
   }
 
-  /** CUSTOMER-01B：改**当前空间**的会员状态。只影响会话空间，不动账号与其他空间。 */
-  @Put("workspace-customers/:customerId/status")
+  @Put("customers/:customerId/membership-status")
   changeCustomerMembershipStatus(
     @Param("customerId") customerId: string,
     @Body() body: ChangeCustomerMembershipStatusDto,
@@ -236,14 +225,13 @@ export class PlatformController {
     return this.platformService.getCustomerClosability(customerId, req.user);
   }
 
-  /** 注销当前空间会员关系的前置检查，只检查当前会话空间的业务事实。 */
-  @Get("workspace-customers/:customerId/closability")
+  @Get("customers/:customerId/membership-closability")
   customerMembershipClosability(@Param("customerId") customerId: string, @Req() req: RequestWithUser) {
     return this.platformService.getCustomerMembershipClosability(customerId, req.user);
   }
 
   /** CUSTOMER-01B：该客户此刻能否在本空间开展新业务，以及被拒的具体原因。 */
-  @Get("workspace-customers/:customerId/transactability")
+  @Get("customers/:customerId/transactability")
   customerTransactability(@Param("customerId") customerId: string, @Req() req: RequestWithUser) {
     return this.platformService.getCustomerTransactability(customerId, req.user);
   }

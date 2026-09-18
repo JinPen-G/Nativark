@@ -649,12 +649,15 @@ const tableFieldLabels = {
     response: "幂等响应 JSON"
   },
   workspace_capability_audits: {
+    fromStatus: "变更前能力状态",
+    toStatus: "变更后能力状态",
     configSnapshot: "能力配置快照 JSON"
   },
   FileAsset: {
     uploadedBy: "上传人 ID"
   },
   FilterPreset: {
+    scopeKey: "筛选预设范围键（页面维度，如 rental-os.orders）",
     isSystem: "是否为系统预设"
   },
   Role: {
@@ -662,11 +665,13 @@ const tableFieldLabels = {
     buttonPermissions: "按钮权限 JSON"
   },
   client_registration_challenges: {
+    registrationResult: "注册结果状态（active 已激活 / pending_review 待审核）",
     codeHash: "验证码哈希",
     method: "注册验证方式",
     attempts: "已尝试次数"
   },
   customer_contacts: {
+    kind: "联系人用途（emergency 紧急 / corporate 企业 / other 其他）",
     relation: "联系人关系",
     linkedCustomerId: "关联会员主档 ID",
     isPrimary: "是否为主联系人"
@@ -706,9 +711,13 @@ const tableFieldLabels = {
     revealed: "是否揭示了敏感内容"
   },
   customer_status_history: {
+    fromStatus: "变更前客户状态",
+    toStatus: "变更后客户状态",
     approver: "审批人"
   },
   rental_asset_status_history: {
+    fromStatus: "变更前资产状态",
+    toStatus: "变更后资产状态",
     assetNo: "资产编号"
   },
   payment_reconciliation_batches: {
@@ -731,6 +740,7 @@ const tableFieldLabels = {
     substitutionGroup: "替代组"
   },
   rental_business_calendars: {
+    previousVersion: "上一版本号",
     overrideAudits: "日期覆盖审计记录 JSON",
     importPreservedOverrides: "导入时保留的日期覆盖 JSON"
   },
@@ -759,6 +769,9 @@ const tableFieldLabels = {
     thresholdAmount: "满额减免门槛金额"
   },
   rental_fulfillment_locations: {
+    operatorType: "运营方类型（self_operated 自营 / partner 合作方）",
+    operatorName: "运营方名称",
+    operatorId: "运营方 ID",
     capabilities: "履约地点能力 JSON",
     businessHours: "履约地点营业时段 JSON"
   },
@@ -809,6 +822,8 @@ const tableFieldLabels = {
     serviceSnapshots: "增值服务快照 JSON"
   },
   rental_order_lines: {
+    itemGroupCode: "商品型号编码（下单时快照）",
+    itemGroupName: "商品型号名称（下单时快照）",
     inventoryMode: "明细库存模式",
     pricingGroupMemberItemGroupIds: "定价分组成员商品型号 ID 列表 JSON"
   },
@@ -878,6 +893,7 @@ const tableFieldLabels = {
     referrerCustomerId: "推荐人会员 ID"
   },
   rental_reward_ledger_entries: {
+    amount: "奖励数值（points 积分 / balance 营销余额金额 / coupon 张数）",
     rewardType: "奖励类型",
     triggerType: "触发类型",
     relatedCustomerId: "关联会员 ID"
@@ -909,8 +925,33 @@ const tableFieldLabels = {
     initializedAt: "初始化时间"
   },
   workspace_capability_instances: {
+    enabledAt: "启用时间",
+    revision: "修订号（乐观并发版本，冲突返回 409）",
     pausedAt: "能力暂停时间"
-  }
+  },
+  Permission: {
+    kind: "权限类型（menu 菜单 / action 操作 / button 按钮）",
+  },
+  NotificationTemplate: {
+    category: "模板分类（如订单、合同）",
+  },
+  NotificationSendLog: {
+    sentAt: "模拟发送记录时间（未真实投递）",
+    status: "发送结果（mock_success 为模拟发送）",
+  },
+  customer_membership_reviews: {
+    channel: "提交渠道（admin 后台新增 / app 客户端注册）",
+  },
+  customer_corporate_invoice_profiles: {
+    title: "开票名称",
+  },
+  rental_rule_versions: {
+    previousVersion: "上一版本号",
+  },
+  rental_rule_version_audits: {
+    fromStatus: "变更前规则状态",
+    toStatus: "变更后规则状态",
+  },
 };
 
 // 首次生成时已经写入数据库的少量错误翻译。仅当现值精确匹配这些旧值时才允许修正，
@@ -956,7 +997,33 @@ const knownIncorrectComments = {
   "rental_orders.noShowAt": ["无显示时间"],
   "rental_orders.noShowReason": ["无显示原因"],
   "customer_corporate_profiles.unifiedSocialCreditCode": ["统一社会授信编码"],
-  "rental_orders.userSubjectCustomerId": ["用户主体客户 ID"]
+  "rental_orders.userSubjectCustomerId": ["用户主体客户 ID"],
+  "Permission.kind": ["记录类型"],
+  "FilterPreset.scopeKey": ["限流范围键"],
+  "NotificationTemplate.category": ["品类"],
+  "NotificationSendLog.sentAt": ["发送时间"],
+  "NotificationSendLog.status": ["状态"],
+  "client_registration_challenges.registrationResult": ["注册结果 JSON"],
+  "customer_contacts.kind": ["记录类型"],
+  "customer_membership_reviews.channel": ["通知渠道"],
+  "customer_corporate_invoice_profiles.title": ["标题"],
+  "workspace_capability_instances.enabledAt": ["是否启用时间"],
+  "workspace_capability_instances.revision": ["修订"],
+  "rental_fulfillment_locations.operatorType": ["操作人类型"],
+  "rental_fulfillment_locations.operatorName": ["操作人名称"],
+  "rental_fulfillment_locations.operatorId": ["履约操作员 ID"],
+  "rental_reward_ledger_entries.amount": ["金额"],
+  "rental_order_lines.itemGroupCode": ["商品分组编码"],
+  "rental_rule_versions.previousVersion": ["上一版本版本"],
+  "rental_business_calendars.previousVersion": ["上一版本版本"],
+  "customer_status_history.fromStatus": ["开始状态"],
+  "customer_status_history.toStatus": ["结束状态"],
+  "rental_asset_status_history.fromStatus": ["开始状态"],
+  "rental_asset_status_history.toStatus": ["结束状态"],
+  "rental_rule_version_audits.fromStatus": ["开始状态"],
+  "rental_rule_version_audits.toStatus": ["结束状态"],
+  "workspace_capability_audits.fromStatus": ["开始状态"],
+  "workspace_capability_audits.toStatus": ["结束状态"],
 };
 
 const tokenLabels = {

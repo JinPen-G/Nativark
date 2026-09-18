@@ -178,7 +178,7 @@ model Tenant {
   capabilityHookAudits              CapabilityHookAuditEntry[]
   rentalIdempotencyRecords          RentalOrderIdempotencyRecord[]
   customerProfiles                  CustomerProfile[]
-  customerWorkspaceLinks            CustomerWorkspaceLink[]
+  memberships                       CustomerMembership[]
   customerAccounts                  CustomerAccount[]
   customerCorporateProfiles         CustomerCorporateProfile[]
   customerContacts                  CustomerContact[]
@@ -193,7 +193,7 @@ model Tenant {
   customerContracts                 CustomerCorporateContract[]
   customerCredits                   CustomerCorporateCredit[]
   customerCreditLedgerEntries       CustomerCorporateCreditLedger[]
-  membershipRegistrationSettings    CustomerMembershipRegistrationSettings[]
+  membershipRegistrationSettings    CustomerMembershipRegistrationSettings?
   membershipReviews                 CustomerMembershipReview[]
   membershipQualificationTypes      CustomerMembershipQualificationType[]
   corporateMemberships              CustomerCorporateMembership[]
@@ -202,6 +202,11 @@ model Tenant {
   customerMembershipPlanAssignments CustomerMembershipPlanAssignment[]
   clientRegistrationChallenges      ClientRegistrationChallenge[]
   clientAuthSessions                ClientAuthSession[]
+  miniProgramChannels               MiniProgramChannel[]
+  miniProgramChannelWorkspaces       MiniProgramChannelWorkspace[]
+  clientWechatIdentities            ClientWechatIdentity[]
+  customerDeliveryAddresses         CustomerDeliveryAddress[]
+  clientOrderDeliverySnapshots      ClientOrderDeliverySnapshot[]
   rentalCoreStateSnapshot           RentalCoreStateSnapshot[]
   rentalBusinessStateSnapshot       RentalBusinessStateSnapshot[]
   businessWorkspaces                BusinessWorkspace[]
@@ -244,17 +249,13 @@ model BusinessWorkspace {
   members                           WorkspaceMember[]
   authSessions                      AuthSession[]
   operationLogs                     OperationLog[]
-  customerWorkspaceLinks            CustomerWorkspaceLink[]
-  membershipRegistrationSettings    CustomerMembershipRegistrationSettings?
   membershipReviews                 CustomerMembershipReview[]
   customerQualificationRevisions    CustomerQualificationRevision[]
   membershipQualificationTypes      CustomerMembershipQualificationType[]
-  corporateMemberships              CustomerCorporateMembership[]
-  customerMembershipPlans           CustomerMembershipPlan[]
-  customerMembershipPlanVersions    CustomerMembershipPlanVersion[]
-  customerMembershipPlanAssignments CustomerMembershipPlanAssignment[]
   clientRegistrationChallenges      ClientRegistrationChallenge[]
   clientAuthSessions                ClientAuthSession[]
+  miniProgramPublications           MiniProgramChannelWorkspace[]
+  clientOrderDeliverySnapshots      ClientOrderDeliverySnapshot[]
   coreStateSnapshot                 RentalCoreStateSnapshot?
   businessStateSnapshot             RentalBusinessStateSnapshot?
   // SPACE-03：经营事实的反向关系。字段仅供 Prisma 关系解析，不用于查询。
@@ -561,7 +562,7 @@ model CustomerProfile {
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
-  workspaceLinks                 CustomerWorkspaceLink[]
+  membership                     CustomerMembership?
   account                        CustomerAccount?
   corporateProfile               CustomerCorporateProfile?
   contacts                       CustomerContact[]
@@ -579,6 +580,9 @@ model CustomerProfile {
   creditLedgerEntries            CustomerCorporateCreditLedger[]
   membershipReviews              CustomerMembershipReview[]
   clientAuthSessions             ClientAuthSession[]
+  wechatIdentities               ClientWechatIdentity[]
+  deliveryAddresses              CustomerDeliveryAddress[]
+  deliverySnapshots              ClientOrderDeliverySnapshot[]
   corporateMembershipsAsCompany  CustomerCorporateMembership[]      @relation("CorporateMembershipCompany")
   corporateMembershipsAsPersonal CustomerCorporateMembership[]      @relation("CorporateMembershipPersonal")
   membershipPlanAssignments      CustomerMembershipPlanAssignment[]
@@ -595,47 +599,37 @@ model CustomerProfile {
   @@map("customer_profiles")
 }
 
-/// SPACE-04：客户在某个经营空间的业务关系。
-///
-/// 主档共享而业务关系按空间建立：客户在摄影空间下过单、在露营空间没下过，
-/// 这条关系记录「他在哪些空间有过业务」，供空间侧列表与资质校验使用，
-/// 不承载订单或权益数据本身（那些在各自的事实表里）。
-model CustomerWorkspaceLink {
-  id           String            @id @default(uuid())
+/// 租户统一会员关系：一个客户在租户内只有一份会员状态和等级。
+/// 会员资格不按经营空间重复注册；权益适用性由每条权益的 tenant/workspaces/categories scope 决定。
+model CustomerMembership {
+  id           String          @id @default(uuid())
   tenantId     String
-  tenant       Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  workspaceId  String
-  /// 复合外键：空间与关系必须同租户，杜绝跨租户挂接。
-  workspace    BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  tenant       Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   customerId   String
-  customer     CustomerProfile   @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
-  /// 该客户在本空间的会员等级：等级按空间隔离（需求第 41 行）。
-  levelName    String            @default("普通会员")
-  /// CUSTOMER-01A：需求 4.8.6 的六态之一
-  /// （pending_activation / active / suspended / risk_restricted / exited / closed）。
-  /// 只用 active/suspended 两态无法表达「为什么不能下单」，而那是客服每天要回答的问题。
-  status       String            @default("active")
+  customer     CustomerProfile @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
+  /// 租户级会员等级。
+  levelName    String          @default("普通会员")
+  /// pending_activation / active / suspended / risk_restricted / exited / closed。
+  status       String          @default("active")
   firstOrderAt DateTime?
-  /// 各限制态与终态的发生时间。解除限制时**不清空**原时间戳：
-  /// 需求 4.8.6 要求解除也形成独立记录，不得删除原限制事实。
+  /// 各限制态与终态的发生时间。解除限制不清空原时间戳，完整过程另追加状态历史。
   suspendedAt  DateTime?
   restrictedAt DateTime?
   exitedAt     DateTime?
   closedAt     DateTime?
-  createdAt    DateTime          @default(now())
-  updatedAt    DateTime          @updatedAt
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
 
-  @@unique([workspaceId, customerId], map: "customer_workspace_links_ws_customer_key")
-  @@index([tenantId, customerId], map: "customer_workspace_links_tenant_customer_idx")
-  @@index([tenantId, workspaceId, status], map: "customer_workspace_links_ws_status_idx")
-  @@map("customer_workspace_links")
+  @@unique([tenantId, customerId], map: "customer_memberships_tenant_customer_key")
+  @@index([tenantId, status], map: "customer_memberships_tenant_status_idx")
+  @@map("customer_memberships")
 }
 
 /// CUSTOMER-01A：客户账号（需求 4.8.1）。
 ///
 /// 与客户主档 1:1，但**必须是独立实体**：主档回答「客户是谁」，账号回答「客户如何登录」。
 /// 停用账号阻止登录全部经营空间，且不删除主档与历史业务事实；
-/// 而暂停某个空间的会员关系不影响登录与其他空间业务（需求 4.8.1 末段、4.8.6 末段）。
+/// 而暂停租户会员关系只限制业务资格，不改写登录账号状态。
 /// 两者共用一个状态字段是本任务明确要避免的建模错误。
 model CustomerAccount {
   id                 String          @id @default(uuid())
@@ -667,15 +661,141 @@ model CustomerAccount {
   @@map("customer_accounts")
 }
 
-/// CLIENT-01：客户端注册验证码挑战。原验证码只保存哈希；开发环境可返回一次性验证码，
-/// 生产环境由短信/邮件 provider 接管。
+/// MP-R1：租户绑定的微信小程序渠道配置。密钥只保存加密值。
+model MiniProgramChannel {
+  id              String                         @id @default(uuid())
+  tenantId        String
+  tenant          Tenant                         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  appId           String                         @db.VarChar(191)
+  appSecretEncrypted String?                     @db.Text
+  enabled         Boolean                        @default(false)
+  revision        Int                            @default(1)
+  lastTestStatus  String                         @default("not_tested") @db.VarChar(32)
+  lastTestAt      DateTime?
+  lastTestError   String?                        @db.VarChar(500)
+  brandName       String?
+  brandLogoUrl    String?                        @db.VarChar(512)
+  customerServicePhone String?                   @db.VarChar(32)
+  /// 客服时段与协议正文地址：小程序启动配置直接展示，不内置占位协议。
+  customerServiceHours String?                   @db.VarChar(64)
+  userAgreementVersion String?                   @db.VarChar(64)
+  userAgreementUrl String?                       @db.VarChar(512)
+  privacyPolicyVersion String?                   @db.VarChar(64)
+  privacyPolicyUrl String?                       @db.VarChar(512)
+  publishedWorkspaces MiniProgramChannelWorkspace[]
+  identities      ClientWechatIdentity[]
+  createdAt       DateTime                       @default(now())
+  updatedAt       DateTime                       @updatedAt
+
+  @@unique([tenantId, appId], map: "mini_program_channels_tenant_app_key")
+  @@unique([appId], map: "mini_program_channels_app_id_key")
+  @@index([tenantId, enabled], map: "mini_program_channels_tenant_enabled_idx")
+  @@map("mini_program_channels")
+}
+
+model MiniProgramChannelWorkspace {
+  id          String             @id @default(uuid())
+  tenantId    String
+  tenant     Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  channelId   String
+  channel     MiniProgramChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  workspaceId String
+  workspace   BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Restrict)
+  enabled     Boolean            @default(true)
+  createdAt   DateTime           @default(now())
+
+  @@unique([channelId, workspaceId], map: "mini_program_channel_workspace_key")
+  @@index([tenantId, workspaceId, enabled], map: "mini_program_channel_workspace_scope_idx")
+  @@map("mini_program_channel_workspaces")
+}
+
+model ClientWechatIdentity {
+  id          String           @id @default(uuid())
+  tenantId    String
+  tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  channelId   String
+  channel     MiniProgramChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  customerId  String
+  customer    CustomerProfile  @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
+  openId      String           @db.VarChar(191)
+  unionId     String?          @db.VarChar(191)
+  appId       String           @db.VarChar(191)
+  boundAt     DateTime         @default(now())
+  lastUsedAt  DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  sessions    ClientAuthSession[]
+
+  @@unique([tenantId, id], map: "client_wechat_identities_tenant_id_key")
+  @@unique([tenantId, channelId, openId], map: "client_wechat_identity_open_key")
+  @@unique([tenantId, channelId, customerId], map: "client_wechat_identity_customer_key")
+  @@index([tenantId, customerId], map: "client_wechat_identity_customer_idx")
+  @@map("client_wechat_identities")
+}
+
+/// MP-06：客户在租户内共享的配送地址簿。它不是联系人表：收件人/电话/地区/详细地址是配送事实，
+/// 删除为软删除，已提交订单只引用当时的快照（client_order_delivery_snapshots）。
+model CustomerDeliveryAddress {
+  id          String          @id @default(uuid())
+  tenantId    String
+  tenant      Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId  String
+  customer    CustomerProfile @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
+  recipient   String          @db.VarChar(120)
+  phone       String          @db.VarChar(32)
+  phoneMasked String          @db.VarChar(32)
+  countryCode String          @default("CN") @db.VarChar(8)
+  province    String          @db.VarChar(64)
+  city        String          @db.VarChar(64)
+  district    String?         @db.VarChar(64)
+  detail      String          @db.VarChar(255)
+  postalCode  String?         @db.VarChar(16)
+  latitude    Decimal?        @db.Decimal(10, 7)
+  longitude   Decimal?        @db.Decimal(10, 7)
+  /// 每客户最多一个有效默认地址；变更幂等。
+  isDefault   Boolean         @default(false)
+  /// active / deleted
+  status      String          @default("active") @db.VarChar(16)
+  /// 并发编辑校验版本。
+  revision    Int             @default(1)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([tenantId, customerId, status], map: "customer_delivery_addresses_owner_idx")
+  @@map("customer_delivery_addresses")
+}
+
+/// MP-06：报价/订单的配送地址快照。报价时固化（按 quoteId 唯一），订单创建后回填 orderId；
+/// 快照不可变，地址簿后续修改或删除不影响历史订单。
+model ClientOrderDeliverySnapshot {
+  id          String            @id @default(uuid())
+  tenantId    String
+  tenant      Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId String
+  workspace   BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Restrict)
+  customerId  String
+  customer    CustomerProfile   @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
+  quoteId     String            @unique(map: "client_order_delivery_snapshots_quote_key")
+  orderId     String?           @unique(map: "client_order_delivery_snapshots_order_key")
+  addressId   String?
+  /// 完整收件信息（含明文电话，供运营配送）；客户端视图另行脱敏。
+  snapshot    Json
+  createdAt   DateTime          @default(now())
+
+  @@index([tenantId, customerId], map: "client_order_delivery_snapshots_customer_idx")
+  @@map("client_order_delivery_snapshots")
+}
+/// CLIENT-01：客户端注册验证码挑战。原验证码只保存哈希；开发环境可返回一次性验证码，生产环境由短信/邮件 provider 接管。
 model ClientRegistrationChallenge {
   id                    String            @id @default(uuid())
   tenantId              String
   tenant                Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  workspaceId           String
-  workspace             BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  /// 注册来源空间仅供追溯；注册资格与验证码幂等性均属于租户。
+  sourceWorkspaceId     String?
+  sourceWorkspace       BusinessWorkspace? @relation(fields: [tenantId, sourceWorkspaceId], references: [tenantId, id], onDelete: Restrict)
   method                String            @db.VarChar(16)
+  /// registration / login / account_closure：验证码证明只能用于创建时声明的用途。
+  purpose               String            @default("registration") @db.VarChar(32)
   identifierHash        String            @db.Char(64)
   maskedDestination     String            @db.VarChar(64)
   codeHash              String            @db.Char(64)
@@ -693,8 +813,9 @@ model ClientRegistrationChallenge {
   createdAt             DateTime          @default(now())
   updatedAt             DateTime          @updatedAt
 
-  @@unique([tenantId, workspaceId, requestKey], map: "client_registration_challenges_scope_request_key")
-  @@index([tenantId, workspaceId, identifierHash, createdAt], map: "client_registration_challenges_lookup_idx")
+  @@unique([tenantId, requestKey], map: "client_registration_challenges_tenant_request_key")
+  @@index([tenantId, identifierHash, createdAt], map: "client_registration_challenges_lookup_idx")
+  @@index([tenantId, sourceWorkspaceId], map: "client_registration_challenges_source_workspace_idx")
   @@index([expiresAt, status], map: "client_registration_challenges_expiry_idx")
   @@map("client_registration_challenges")
 }
@@ -712,6 +833,8 @@ model ClientAuthSession {
   expiresAt        DateTime
   revokedAt        DateTime?
   lastUsedAt       DateTime?
+  wechatIdentityId String?
+  wechatIdentity   ClientWechatIdentity? @relation(fields: [tenantId, wechatIdentityId], references: [tenantId, id], onDelete: NoAction)
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
 
@@ -970,9 +1093,9 @@ model CustomerStatusHistoryEntry {
   tenant      Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   customerId  String
   customer    CustomerProfile @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
-  /// account | workspace
+  /// account | membership；历史 workspace 事件保持原值，不回写。
   scope       String
-  /// 空间级事件必填；账号级为空。不用两张表的代价是这一列可空，收益是时间线天然有序。
+  /// 旧空间级事件保留来源；新增租户会员或账号事件为空。
   workspaceId String?
   /// activate / suspend / restrict / release / exit / close / reopen / merge
   action      String
@@ -1059,19 +1182,16 @@ model CustomerQualificationRef {
   @@map("customer_qualification_refs")
 }
 
-/// MEMBER-01B：每个经营空间独立配置个人会员注册审核方式。
+/// 租户统一配置个人会员注册审核方式。
 model CustomerMembershipRegistrationSettings {
-  id               String            @id @default(uuid())
-  tenantId         String
-  tenant           Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  workspaceId      String            @unique
-  workspace        BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
-  /// automatic / manual。默认人工审核，避免新空间在未配置时意外放开注册。
-  registrationMode String            @default("manual")
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  id               String   @id @default(uuid())
+  tenantId         String   @unique(map: "customer_membership_registration_settings_tenantId_key")
+  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// automatic / manual。默认人工审核，迁移时有冲突也采用人工审核。
+  registrationMode String   @default("manual")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-  @@unique([tenantId, workspaceId], map: "customer_membership_registration_settings_scope_key")
   @@map("customer_membership_registration_settings")
 }
 
@@ -1080,8 +1200,9 @@ model CustomerMembershipReview {
   id                    String                         @id @default(uuid())
   tenantId              String
   tenant                Tenant                         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  workspaceId           String
-  workspace             BusinessWorkspace              @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  /// 来源空间不是会员归属，且不得因删除空间而丢失审核历史。
+  sourceWorkspaceId     String?
+  sourceWorkspace       BusinessWorkspace?             @relation(fields: [tenantId, sourceWorkspaceId], references: [tenantId, id], onDelete: Restrict)
   customerId            String
   customer              CustomerProfile                @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
   /// registration / qualification
@@ -1099,8 +1220,9 @@ model CustomerMembershipReview {
   createdAt             DateTime                       @default(now())
   updatedAt             DateTime                       @updatedAt
 
-  @@unique([tenantId, workspaceId, requestKey], map: "customer_membership_reviews_scope_request_key")
-  @@index([tenantId, workspaceId, status, reviewType], map: "customer_membership_reviews_scope_status_type_idx")
+  @@unique([tenantId, requestKey], map: "customer_membership_reviews_tenant_request_key")
+  @@index([tenantId, status, reviewType], map: "customer_membership_reviews_tenant_status_type_idx")
+  @@index([tenantId, sourceWorkspaceId], map: "customer_membership_reviews_source_workspace_idx")
   @@index([tenantId, customerId, createdAt], map: "customer_membership_reviews_customer_created_idx")
   @@map("customer_membership_reviews")
 }
@@ -1115,7 +1237,7 @@ model CustomerQualificationRevision {
   tenantId             String
   tenant               Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   workspaceId          String
-  workspace            BusinessWorkspace         @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  workspace            BusinessWorkspace         @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Restrict)
   customerId           String
   customer             CustomerProfile           @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
   qualificationType    String
@@ -1174,8 +1296,6 @@ model CustomerCorporateMembership {
   id                  String            @id @default(uuid())
   tenantId            String
   tenant              Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  workspaceId         String
-  workspace           BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   corporateCustomerId String
   corporateCustomer   CustomerProfile   @relation("CorporateMembershipCompany", fields: [tenantId, corporateCustomerId], references: [tenantId, id], onDelete: Cascade)
   personalCustomerId  String
@@ -1192,8 +1312,8 @@ model CustomerCorporateMembership {
   createdAt           DateTime          @default(now())
   updatedAt           DateTime          @updatedAt
 
-  @@unique([workspaceId, corporateCustomerId, personalCustomerId], map: "customer_corporate_memberships_workspace_company_person_key")
-  @@index([tenantId, workspaceId, personalCustomerId, status], map: "customer_corporate_memberships_person_scope_status_idx")
+  @@unique([tenantId, corporateCustomerId, personalCustomerId], map: "customer_corporate_memberships_tenant_company_person_key")
+  @@index([tenantId, personalCustomerId, status], map: "customer_corporate_memberships_person_scope_status_idx")
   @@map("customer_corporate_memberships")
 }
 
@@ -1202,8 +1322,6 @@ model CustomerMembershipPlan {
   id          String                             @id @default(uuid())
   tenantId    String
   tenant      Tenant                             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  workspaceId String
-  workspace   BusinessWorkspace                  @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   code        String
   name        String
   /// personal / corporate
@@ -1214,9 +1332,9 @@ model CustomerMembershipPlan {
   versions    CustomerMembershipPlanVersion[]
   assignments CustomerMembershipPlanAssignment[]
 
-  @@unique([workspaceId, code], map: "customer_membership_plans_workspace_code_key")
+  @@unique([tenantId, code], map: "customer_membership_plans_tenant_code_key")
   @@unique([tenantId, id], map: "customer_membership_plans_tenant_id_key")
-  @@index([tenantId, workspaceId, targetType, status], map: "customer_membership_plans_scope_type_status_idx")
+  @@index([tenantId, targetType, status], map: "customer_membership_plans_scope_type_status_idx")
   @@map("customer_membership_plans")
 }
 
@@ -1224,8 +1342,6 @@ model CustomerMembershipPlanVersion {
   id                    String                             @id @default(uuid())
   tenantId              String
   tenant                Tenant                             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  workspaceId           String
-  workspace             BusinessWorkspace                  @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   planId                String
   plan                  CustomerMembershipPlan             @relation(fields: [tenantId, planId], references: [tenantId, id], onDelete: Cascade)
   version               Int
@@ -1237,6 +1353,7 @@ model CustomerMembershipPlanVersion {
   effectiveFrom         DateTime?
   effectiveTo           DateTime?
   eligibility           Json
+  /// 每条权益独立声明 scope：tenant / workspaces / categories；旧权益迁移为原空间范围。
   benefits              Json
   createdBy             String?
   publishedBy           String?
@@ -1252,7 +1369,7 @@ model CustomerMembershipPlanVersion {
 
   @@unique([planId, version], map: "customer_membership_plan_versions_plan_version_key")
   @@unique([tenantId, id], map: "customer_membership_plan_versions_tenant_id_key")
-  @@index([tenantId, workspaceId, status, effectiveFrom], map: "customer_membership_plan_versions_scope_status_effective_idx")
+  @@index([tenantId, status, effectiveFrom], map: "customer_membership_plan_versions_scope_status_effective_idx")
   @@map("customer_membership_plan_versions")
 }
 
@@ -1261,8 +1378,6 @@ model CustomerMembershipPlanAssignment {
   id            String                        @id @default(uuid())
   tenantId      String
   tenant        Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  workspaceId   String
-  workspace     BusinessWorkspace             @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   customerId    String
   customer      CustomerProfile               @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
   planId        String
@@ -1283,7 +1398,7 @@ model CustomerMembershipPlanAssignment {
   createdAt     DateTime                      @default(now())
   updatedAt     DateTime                      @updatedAt
 
-  @@index([tenantId, workspaceId, customerId, status], map: "customer_membership_plan_assignments_scope_customer_status_idx")
+  @@index([tenantId, customerId, status], map: "customer_membership_plan_assignments_scope_customer_status_idx")
   @@map("customer_membership_plan_assignments")
 }
 

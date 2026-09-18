@@ -167,14 +167,16 @@ void (() => {
     /queryKey: \["rental-core", "profile"\]/u,
     "必须复用业务页面同一查询键，命中同一份缓存而不是多发一次请求"
   );
+  // 外壳后来又收紧了条件（须有当前空间且持有 order:view / vehicle:view），
+  // 这里只钉「SaaS 账号必被排除」这一条，不复述其余条件，免得每次收紧都要改断言。
   assert.match(
     shell,
-    /enabled: Boolean\(user && !user\.isSaasAdmin\)/u,
+    /enabled: Boolean\(user && !user\.isSaasAdmin\b/u,
     "SaaS 平台账号不属于任何经营空间，不得发起租户品类档案请求"
   );
   // 面包屑与菜单共用 sections，故只需断言 sections 由术语派生。
   assert.match(shell, /const sections = useMemo\(\(\) => buildNavigationSections/u, "菜单与面包屑必须同源");
-  assert.match(shell, /\[hasCapability, hasPermission, tenant\?\.categoryCode, terminology, user\?\.isSaasAdmin\]/u,
+  assert.match(shell, /useMemo\(\(\) => buildNavigationSections\(terminology\)[\s\S]*?\[[^\]]*\bterminology\b[^\]]*\]\);/u,
     "术语必须进入 useMemo 依赖，否则切换空间后导航不会重算");
   ok("接线：外壳按当前空间取档案，菜单与面包屑同源且随空间切换重算");
 

@@ -49,6 +49,10 @@ import {
   type RentalItemGroupImage,
   type RentalPricingGroup,
   type RentalOrder,
+  type RentalOrderListQuery,
+  type RentalOrderPage,
+  RENTAL_ORDER_LIST_DEFAULT_PAGE_SIZE,
+  RENTAL_ORDER_LIST_MAX_PAGE_SIZE,
   type RentalOrderChange,
   type RentalOrderChangePreview,
   type RentalOrderExchangeInspectionSnapshot,
@@ -1345,6 +1349,27 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   async listOrders(tenantId: string) {
     this.state(tenantId);
     return (await this.factStore.listOrders(tenantId)).map((order) => this.publicOrder(order));
+  }
+
+  /**
+   * ORDER-LIST-01：按筛选条件分页读取订单。`page`/`pageSize` 都缺省时不分页，
+   * 只按条件筛，供兼容旧的纯数组响应；分页大小夹在 1..MAX 之间。
+   */
+  async queryOrders(tenantId: string, query: RentalOrderListQuery): Promise<RentalOrderPage> {
+    this.state(tenantId);
+    const paged = query.page !== undefined || query.pageSize !== undefined;
+    const page = Math.max(1, Math.floor(query.page ?? 1));
+    const pageSize = Math.min(RENTAL_ORDER_LIST_MAX_PAGE_SIZE, Math.max(1, Math.floor(query.pageSize ?? RENTAL_ORDER_LIST_DEFAULT_PAGE_SIZE)));
+    const result = await this.factStore.queryOrders(tenantId, {
+      ...query,
+      ...(paged ? { skip: (page - 1) * pageSize, take: pageSize } : {})
+    });
+    return {
+      items: result.items.map((order) => this.publicOrder(order)),
+      page: paged ? page : 1,
+      pageSize: paged ? pageSize : Math.max(result.total, 1),
+      total: result.total
+    };
   }
 
   /**

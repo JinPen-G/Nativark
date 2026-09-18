@@ -10,7 +10,7 @@ require("ts-node").register({
 /**
  * SHARED-QUAL-01 专项：提交后的资格闸门必须重新读取当前会员事实。
  *
- * 这个专项只跑专用库，重点覆盖：已审核资格、有效期、当前空间关系、企业员工关系
+ * 这个专项只跑专用库，重点覆盖：已审核资格、有效期、租户统一会员、企业员工关系
  * 和 Rental Core 四个动作入口的源码接线。不跑全量 MySQL E2E。
  */
 const ROOT = path.resolve(__dirname, "..");
@@ -41,7 +41,8 @@ const planId = `plan_qual_${suffix}`;
 const planVersionId = `plan_version_qual_${suffix}`;
 
 const prisma = new PrismaClient();
-const memberships = new MembershipService(prisma);
+const { CustomerOperationsRepository } = require(path.join(ROOT, "apps/api/src/modules/platform/customer-operations.repository"));
+const memberships = new MembershipService(prisma, new CustomerOperationsRepository(prisma));
 const rule = { required: true, documentTypes: ["driver_license", "operator_certificate"], minimumValidityDays: 1 };
 
 const snapshot = (bookingIdentity = "personal") => ({
@@ -62,6 +63,12 @@ const actionWindow = (daysFromNow, daysToEnd) => {
 };
 
 async function cleanup() {
+  const where = { tenantId };
+  await prisma.customerMembershipPlanAssignment.deleteMany({ where });
+  await prisma.customerQualificationRef.deleteMany({ where });
+  await prisma.customerQualificationRevision.deleteMany({ where });
+  await prisma.customerMembershipReview.deleteMany({ where });
+  await prisma.fileAsset.deleteMany({ where });
   await prisma.tenant.deleteMany({ where: { id: tenantId } });
 }
 
@@ -80,25 +87,28 @@ async function seed() {
     ]
   });
   await prisma.customerMembershipPlan.create({
-    data: { id: planId, tenantId, workspaceId, code: `QUAL-PLAN-${suffix}`, name: "资格测试会员方案", targetType: "personal", status: "active" }
+    data: { id: planId, tenantId, code: `QUAL-PLAN-${suffix}`, name: "资格测试会员方案", targetType: "personal", status: "active" }
   });
   await prisma.customerMembershipPlanVersion.create({
     data: {
-      id: planVersionId, tenantId, workspaceId, planId, version: 1, status: "published", levelRank: 1,
-      eligibility: {}, benefits: [{ type: "rental_discount", calculation: "amount", value: 50 }], publishedAt: new Date()
+      id: planVersionId, tenantId, planId, version: 1, status: "published", levelRank: 1,
+      eligibility: {}, benefits: [{ type: "rental_discount", calculation: "amount", value: 50, scope: { type: "tenant" } }], publishedAt: new Date()
     }
   });
-  await prisma.customerWorkspaceLink.createMany({
+  await prisma.customerMembership.createMany({
     data: [
-      { tenantId, workspaceId, customerId: personalId, status: "active" },
-      { tenantId, workspaceId, customerId: corporateId, status: "active" }
+      { tenantId, customerId: personalId, status: "active" },
+      { tenantId, customerId: corporateId, status: "active" }
     ]
   });
   await prisma.customerCorporateMembership.create({
-    data: { tenantId, workspaceId, corporateCustomerId: corporateId, personalCustomerId: personalId, role: "employee", status: "active" }
+    data: { tenantId, corporateCustomerId: corporateId, personalCustomerId: personalId, role: "employee", status: "active" }
   });
-  await prisma.customerMembershipQualificationType.create({
-    data: { tenantId, workspaceId, code: "driver_license", name: "驾驶证", categoryCode: "CAMERA", requiredForBooking: true, status: "enabled" }
+  await prisma.customerMembershipQualificationType.createMany({
+    data: [
+      { tenantId, workspaceId, code: "driver_license", name: "驾驶证", categoryCode: "CAMERA", requiredForBooking: true, status: "enabled" },
+      { tenantId, workspaceId: otherWorkspaceId, code: "driver_license", name: "驾驶证", categoryCode: "CAMPING", requiredForBooking: true, status: "enabled" }
+    ]
   });
   await prisma.customerQualificationRef.create({
     data: { tenantId, customerId: personalId, qualificationType: "driver_license", status: "approved", verifiedAt: new Date(), expiresAt: new Date(Date.now() + 10 * 86_400_000) }
@@ -116,16 +126,21 @@ void (async () => {
       tenantId, workspaceId, personalSnapshot, rule, "pickup", actionWindow(1, 3)
     );
     assert.equal(allowed.ok, true);
-    console.log("  ✓ 领取按当前空间重新读取已审核资格，并允许有效证件通过");
+    const sharedIdentity = await memberships.resolveBookingIdentity(tenantId, otherWorkspaceId, personalId);
+    assert.deepEqual(sharedIdentity.qualifications, personal.qualifications, "另一空间直接复用同一会员的资格事实");
+    assert.equal((await memberships.assertBookingQualificationForAction(tenantId, otherWorkspaceId, personalSnapshot, rule, "pickup", actionWindow(1, 3))).ok, true);
+    await assert.rejects(() => memberships.resolveBookingIdentity(tenantId, `foreign_${suffix}`, personalId), /经营空间不存在或不属于本租户/u);
+    await assert.rejects(() => memberships.submitQualification(tenantId, otherWorkspaceId, personalId, { qualificationType: "operator_certificate" }, "admin"), /当前经营空间未启用该证件类型/u, "证件类型注册表仍由目标业务空间决定");
+    console.log("  PASS 两空间共享会员和有效证件，但业务空间与证件类型校验仍生效");
 
-    const listed = await memberships.listPersonalMembers(tenantId, workspaceId);
+    const listed = await memberships.listPersonalMembers(tenantId);
     assert.equal(listed.find((row) => row.customerId === personalId)?.qualifications[0]?.status, "approved");
-    const corporateListed = await memberships.listCorporateMembers(tenantId, workspaceId);
+    const corporateListed = await memberships.listCorporateMembers(tenantId);
     assert.equal(corporateListed.find((row) => row.customerId === corporateId)?.employeeCount, 1, "当前有效员工关系应计入企业员工数");
-    await prisma.customerCorporateMembership.updateMany({ where: { tenantId, workspaceId, corporateCustomerId: corporateId, personalCustomerId: personalId }, data: { effectiveTo: new Date(Date.now() - 60_000) } });
-    const expiredCorporate = await memberships.listCorporateMembers(tenantId, workspaceId);
+    await prisma.customerCorporateMembership.updateMany({ where: { tenantId, corporateCustomerId: corporateId, personalCustomerId: personalId }, data: { effectiveTo: new Date(Date.now() - 60_000) } });
+    const expiredCorporate = await memberships.listCorporateMembers(tenantId);
     assert.equal(expiredCorporate.find((row) => row.customerId === corporateId)?.employeeCount, 0, "已过期员工关系不得继续计入企业员工数");
-    await prisma.customerCorporateMembership.updateMany({ where: { tenantId, workspaceId, corporateCustomerId: corporateId, personalCustomerId: personalId }, data: { effectiveTo: null } });
+    await prisma.customerCorporateMembership.updateMany({ where: { tenantId, corporateCustomerId: corporateId, personalCustomerId: personalId }, data: { effectiveTo: null } });
     console.log("  ✓ 企业员工数量只统计当前有效关系");
     await prisma.customerQualificationRef.updateMany({ where: { tenantId, customerId: personalId }, data: { expiresAt: new Date(Date.now() - 60_000) } });
     const expiredRead = await memberships.resolveBookingIdentity(tenantId, workspaceId, personalId);
@@ -141,65 +156,72 @@ void (async () => {
     );
     console.log("  ✓ 证件提交拒绝早于签发日期的有效期");
 
-    await prisma.customerWorkspaceLink.update({ where: { workspaceId_customerId: { workspaceId, customerId: personalId } }, data: { status: "suspended" } });
+    await prisma.customerMembership.update({ where: { tenantId_customerId: { tenantId, customerId: personalId } }, data: { status: "suspended" } });
     await assert.rejects(
-      () => memberships.saveCorporateEmployee(tenantId, workspaceId, corporateId, { personalCustomerId: personalId, role: "employee" }),
-      /只有当前空间的有效个人会员才能加入企业/u
+      () => memberships.saveCorporateEmployee(tenantId, corporateId, { personalCustomerId: personalId, role: "employee" }),
+      /只有本租户的有效个人会员才能加入企业/u
     );
-    await prisma.customerWorkspaceLink.update({ where: { workspaceId_customerId: { workspaceId, customerId: personalId } }, data: { status: "active" } });
+    for (const targetWorkspace of [workspaceId, otherWorkspaceId]) {
+      await assert.rejects(() => memberships.resolveBookingIdentity(tenantId, targetWorkspace, personalId), /个人会员当前状态不允许新建订单/u, "共享暂停必须影响两空间预约身份");
+    }
+    await prisma.customerMembership.update({ where: { tenantId_customerId: { tenantId, customerId: personalId } }, data: { status: "active" } });
     await assert.rejects(
-      () => memberships.saveCorporateEmployee(tenantId, workspaceId, corporateId, { personalCustomerId: personalId, role: "employee", effectiveFrom: "2026-09-13T00:00:00.000Z", effectiveTo: "2026-09-12T00:00:00.000Z" }),
+      () => memberships.saveCorporateEmployee(tenantId, corporateId, { personalCustomerId: personalId, role: "employee", effectiveFrom: "2026-09-13T00:00:00.000Z", effectiveTo: "2026-09-12T00:00:00.000Z" }),
       /员工关系失效时间不能早于生效时间/u
     );
     console.log("  ✓ 暂停中的个人会员和倒置有效期不能建立企业员工关系");
 
     await assert.rejects(
-      () => memberships.assignPlan(tenantId, workspaceId, { customerId: personalId, planVersionId }, "资格测试管理员"),
+      () => memberships.assignPlan(tenantId, { customerId: personalId, planVersionId }, "资格测试管理员"),
       /人工授予或合同授予会员方案必须填写原因/u
     );
     await assert.rejects(
-      () => memberships.assignPlan(tenantId, workspaceId, { customerId: personalId, planVersionId, reason: "测试授予", effectiveFrom: "not-a-date" }, "资格测试管理员"),
+      () => memberships.assignPlan(tenantId, { customerId: personalId, planVersionId, reason: "测试授予", effectiveFrom: "not-a-date" }, "资格测试管理员"),
       /日期格式无效/u
     );
     await assert.rejects(
-      () => memberships.assignPlan(tenantId, workspaceId, { customerId: personalId, planVersionId, reason: "测试授予", effectiveFrom: "2026-09-14T00:00:00.000Z", effectiveTo: "2026-09-13T00:00:00.000Z" }, "资格测试管理员"),
+      () => memberships.assignPlan(tenantId, { customerId: personalId, planVersionId, reason: "测试授予", effectiveFrom: "2026-09-14T00:00:00.000Z", effectiveTo: "2026-09-13T00:00:00.000Z" }, "资格测试管理员"),
       /会员方案失效时间不能早于生效时间/u
     );
-    const assignment = await memberships.assignPlan(tenantId, workspaceId, {
+    const assignment = await memberships.assignPlan(tenantId, {
       customerId: personalId, planVersionId, source: "manual", reason: "首批会员测试授予",
       effectiveFrom: new Date(Date.now() - 60_000).toISOString(), effectiveTo: new Date(Date.now() + 86_400_000).toISOString()
     }, "资格测试管理员");
     assert.equal(assignment.snapshot.benefits[0].value, 50);
     const beforePlanUpdate = await memberships.resolveBenefits(tenantId, workspaceId, personalId);
     assert.equal(beforePlanUpdate.personal?.snapshot.benefits[0].value, 50);
+    const benefitsFromOther = await memberships.resolveBenefits(tenantId, otherWorkspaceId, personalId);
+    assert.equal(benefitsFromOther.personal.id, assignment.id, "另一空间直接使用同一份授予");
+    assert.deepEqual(benefitsFromOther.personal.snapshot, assignment.snapshot);
     await prisma.customerMembershipPlanVersion.update({ where: { id: planVersionId }, data: { benefits: [{ type: "rental_discount", calculation: "amount", value: 100 }] } });
     const afterPlanUpdate = await memberships.resolveBenefits(tenantId, workspaceId, personalId);
     assert.equal(afterPlanUpdate.personal?.snapshot.benefits[0].value, 50, "方案版本变更不得改写已授予会员的权益快照");
-    const disabledPlan = await memberships.disablePlanVersion(tenantId, workspaceId, planId, planVersionId, "方案下线测试", "资格测试管理员");
+    const disabledPlan = await memberships.disablePlanVersion(tenantId, planId, planVersionId, "方案下线测试", "资格测试管理员");
     assert.equal(disabledPlan.currentVersion?.status, "disabled");
     const afterDisable = await memberships.resolveBenefits(tenantId, workspaceId, personalId);
     assert.equal(afterDisable.personal?.snapshot.benefits[0].value, 50, "停用方案版本不得改写已授予会员的权益快照");
+    assert.deepEqual((await memberships.resolveBenefits(tenantId, otherWorkspaceId, personalId)).personal.snapshot, assignment.snapshot, "另一空间读回的历史授予快照同样不变");
     await assert.rejects(
-      () => memberships.assignPlan(tenantId, workspaceId, { customerId: personalId, planVersionId, source: "manual", reason: "停用版本不应再授予" }, "资格测试管理员"),
+      () => memberships.assignPlan(tenantId, { customerId: personalId, planVersionId, source: "manual", reason: "停用版本不应再授予" }, "资格测试管理员"),
       /可授予的已发布会员方案版本不存在/u
     );
-    const restoredPlan = await memberships.restorePlanVersion(tenantId, workspaceId, planId, planVersionId, "恢复历史版本测试", "资格测试管理员");
+    const restoredPlan = await memberships.restorePlanVersion(tenantId, planId, planVersionId, "恢复历史版本测试", "资格测试管理员");
     assert.equal(restoredPlan.currentVersion?.status, "draft");
     assert.equal(restoredPlan.currentVersion?.restoredFromVersionId, planVersionId);
-    const publishedRestored = await memberships.publishPlan(tenantId, workspaceId, planId, restoredPlan.currentVersion.id, "资格测试管理员");
-    const secondAssignment = await memberships.assignPlan(tenantId, workspaceId, {
+    const publishedRestored = await memberships.publishPlan(tenantId, planId, restoredPlan.currentVersion.id, "资格测试管理员");
+    const secondAssignment = await memberships.assignPlan(tenantId, {
       customerId: personalId, planVersionId: publishedRestored.currentVersion.id, source: "manual", reason: "重新授予测试"
     }, "资格测试管理员");
-    const assignmentHistory = await memberships.listPlanAssignments(tenantId, workspaceId, personalId);
+    const assignmentHistory = await memberships.listPlanAssignments(tenantId, personalId);
     assert.ok(assignmentHistory.some((row) => row.id === secondAssignment.id), "会员方案授予记录应可回看");
     await assert.rejects(
-      () => memberships.revokePlanAssignment(tenantId, workspaceId, secondAssignment.id, " ", "资格测试管理员"),
+      () => memberships.revokePlanAssignment(tenantId, secondAssignment.id, " ", "资格测试管理员"),
       /撤销会员方案必须填写原因/u
     );
-    const revokedAssignment = await memberships.revokePlanAssignment(tenantId, workspaceId, secondAssignment.id, "测试撤销", "资格测试管理员");
+    const revokedAssignment = await memberships.revokePlanAssignment(tenantId, secondAssignment.id, "测试撤销", "资格测试管理员");
     assert.equal(revokedAssignment.status, "revoked");
     assert.equal(revokedAssignment.revokeReason, "测试撤销");
-    assert.equal((await memberships.listPlanAssignments(tenantId, workspaceId, personalId)).find((row) => row.id === secondAssignment.id)?.status, "revoked");
+    assert.equal((await memberships.listPlanAssignments(tenantId, personalId)).find((row) => row.id === secondAssignment.id)?.status, "revoked");
     console.log("  ✓ 会员方案授予强制记录原因与有效期，停用不影响历史快照，恢复生成新草稿");
     console.log("  ✓ 会员方案授予记录可回看，撤销必须记录原因且保留审计状态");
 
@@ -207,7 +229,7 @@ void (async () => {
       qualificationType: "driver_license", issuedAt: "2026-01-01T00:00:00.000Z", expiresAt: "2099-01-01T00:00:00.000Z", evidenceRef: "evidence-first"
     }, "admin", "资格测试管理员");
     assert.equal(firstQualificationSubmission.review.qualificationSnapshot?.evidenceRef, "evidence-first");
-    const firstHistory = await memberships.listQualificationRevisions(tenantId, workspaceId, personalId, "driver_license");
+    const firstHistory = await memberships.listQualificationRevisions(tenantId, personalId, "driver_license");
     assert.equal(firstHistory.length, 1, "首次提交必须留下不可变资质快照");
     assert.equal(firstHistory[0].applicableScope.workspaceId, workspaceId);
     assert.equal(firstHistory[0].source, "admin");
@@ -257,26 +279,28 @@ void (async () => {
       () => memberships.submitQualification(tenantId, workspaceId, personalId, { qualificationType: "driver_license", evidenceRef: otherCustomerEvidenceId }, "app", "APP"),
       /资质附件不存在、尚未完成上传或不属于当前会员/u
     );
-    const secondQualificationSubmission = await memberships.submitQualification(tenantId, workspaceId, personalId, {
+    const secondQualificationSubmission = await memberships.submitQualification(tenantId, otherWorkspaceId, personalId, {
       qualificationType: "driver_license", issuedAt: "2026-02-01T00:00:00.000Z", expiresAt: "2098-01-01T00:00:00.000Z", evidenceRef: clientEvidenceId
     }, "app", "APP");
+    assert.equal(secondQualificationSubmission.review.sourceWorkspaceId, otherWorkspaceId, "附件跨空间复用，审核只记录提交来源");
+    assert.equal(secondQualificationSubmission.review.qualificationSnapshot.evidenceRef, clientEvidenceId);
     const approvedOldQualification = await memberships.review(
-      tenantId, workspaceId, firstQualificationSubmission.review.id, { status: "approved" }, "资格审核员", { registration: false, qualification: true }
+      tenantId, firstQualificationSubmission.review.id, { status: "approved" }, "资格审核员", { registration: false, qualification: true }
     );
     assert.equal(approvedOldQualification.status, "approved");
     const currentAfterOldReview = await prisma.customerQualificationRef.findFirst({ where: { tenantId, customerId: personalId, qualificationType: "driver_license" } });
     assert.equal(currentAfterOldReview.currentRevisionId, secondQualificationSubmission.review.qualificationSnapshot.id, "旧审核不得把当前证件指针切回旧版本");
     assert.equal(currentAfterOldReview.status, "pending", "新证件仍待审核时，旧证件通过不能提前放行当前资格");
-    const historyAfterResubmit = await memberships.listQualificationRevisions(tenantId, workspaceId, personalId, "driver_license");
+    const historyAfterResubmit = await memberships.listQualificationRevisions(tenantId, personalId, "driver_license");
     assert.equal(historyAfterResubmit.length, 2, "重新提交不得覆盖上一份资质历史");
     assert.equal(historyAfterResubmit.find((row) => row.id === firstQualificationSubmission.review.qualificationSnapshot.id)?.reviewStatus, "approved");
     assert.equal(historyAfterResubmit.find((row) => row.id === secondQualificationSubmission.review.qualificationSnapshot.id)?.reviewStatus, "pending");
     await assert.rejects(
-      () => memberships.review(tenantId, workspaceId, secondQualificationSubmission.review.id, { status: "rejected" }, "资格审核员", { registration: false, qualification: true }),
+      () => memberships.review(tenantId, secondQualificationSubmission.review.id, { status: "rejected" }, "资格审核员", { registration: false, qualification: true }),
       /拒绝、补件或取消审核必须填写原因/u
     );
     const rejectedQualification = await memberships.review(
-      tenantId, workspaceId, secondQualificationSubmission.review.id, { status: "rejected", reason: "证件照片无法辨识" }, "资格审核员", { registration: false, qualification: true }
+      tenantId, secondQualificationSubmission.review.id, { status: "rejected", reason: "证件照片无法辨识" }, "资格审核员", { registration: false, qualification: true }
     );
     assert.equal(rejectedQualification.status, "rejected");
     assert.equal(rejectedQualification.reason, "证件照片无法辨识");
@@ -284,29 +308,54 @@ void (async () => {
     assert.equal((await prisma.customerQualificationRef.findFirst({ where: { tenantId, customerId: personalId, qualificationType: "driver_license" } })).status, "rejected");
     console.log("  ✓ 非通过审核必须记录原因，历史快照可回看，旧审核不会覆盖新提交");
 
+    // 后续撤销/有效期用例从一份真实通过审核的当前版本起步，不伪造 ref 绕过版本一致性。
+    const approvedSubmission = await memberships.submitQualification(tenantId, otherWorkspaceId, personalId, {
+      qualificationType: "driver_license", issuedAt: "2026-01-01T00:00:00.000Z", expiresAt: "2099-01-01T00:00:00.000Z", evidenceRef: clientEvidenceId
+    }, "app", "APP");
+    await memberships.review(tenantId, approvedSubmission.review.id, { status: "approved" }, "资格审核员", { registration: false, qualification: true });
+    const approvedRevisionId = approvedSubmission.review.qualificationSnapshot.id;
+    const oldSnapshot = structuredClone(personalSnapshot);
+    for (const targetWorkspace of [workspaceId, otherWorkspaceId]) {
+      assert.equal((await memberships.assertBookingQualificationForAction(tenantId, targetWorkspace, personalSnapshot, rule, "pickup", actionWindow(1, 3))).ok, true, "另一品类来源的通用证件可以共享");
+    }
+    await prisma.customerMembershipQualificationType.updateMany({ where: { tenantId, workspaceId, code: "driver_license" }, data: { capabilityCode: "camera_only" } });
+    await assert.rejects(() => memberships.assertBookingQualificationForAction(tenantId, workspaceId, personalSnapshot, rule, "pickup", actionWindow(1, 3)), /资格校验未通过.*未找到已审核通过/u, "目标空间专属能力不匹配仍拒绝");
+    await prisma.customerMembershipQualificationType.updateMany({ where: { tenantId, workspaceId, code: "driver_license" }, data: { capabilityCode: null } });
     await prisma.customerQualificationRef.updateMany({ where: { tenantId, customerId: personalId }, data: { status: "revoked" } });
+    await prisma.customerQualificationRevision.update({ where: { id: approvedRevisionId }, data: { qualificationStatus: "revoked" } });
     await assert.rejects(
       () => memberships.assertBookingQualificationForAction(tenantId, workspaceId, personalSnapshot, rule, "pickup", actionWindow(1, 3)),
       /资格校验未通过.*未找到已审核通过/u
     );
     console.log("  ✓ 证件撤销后领取被阻断，不能沿用下单时的资格快照放行");
 
-    await prisma.customerQualificationRef.updateMany({ where: { tenantId, customerId: personalId }, data: { status: "approved", expiresAt: new Date(Date.now() + 2 * 86_400_000) } });
+    const tooSoon = new Date(Date.now() + 2 * 86_400_000);
+    await prisma.customerQualificationRef.updateMany({ where: { tenantId, customerId: personalId }, data: { status: "approved", expiresAt: tooSoon } });
+    await prisma.customerQualificationRevision.update({ where: { id: approvedRevisionId }, data: { qualificationStatus: "approved", expiresAt: tooSoon } });
     await assert.rejects(
       () => memberships.assertBookingQualificationForAction(tenantId, workspaceId, personalSnapshot, rule, "extension", actionWindow(1, 3)),
       /续租资格校验未通过.*有效期不足/u
     );
     console.log("  ✓ 续租结束时间超过证件有效期时被阻断");
 
-    await prisma.customerQualificationRef.updateMany({ where: { tenantId, customerId: personalId }, data: { expiresAt: new Date(Date.now() + 10 * 86_400_000) } });
+    const renewedExpiry = new Date(Date.now() + 10 * 86_400_000);
+    await prisma.customerQualificationRef.updateMany({ where: { tenantId, customerId: personalId }, data: { expiresAt: renewedExpiry } });
+    await prisma.customerQualificationRevision.update({ where: { id: approvedRevisionId }, data: { expiresAt: renewedExpiry } });
     const enterprise = await memberships.resolveBookingIdentity(tenantId, workspaceId, personalId, {
       bookingIdentity: "enterprise_employee", corporateCustomerId: corporateId, enterpriseContractAndPayer: true
     });
-    await prisma.customerCorporateMembership.updateMany({ where: { tenantId, workspaceId, corporateCustomerId: corporateId, personalCustomerId: personalId }, data: { status: "revoked" } });
-    await assert.rejects(
-      () => memberships.assertBookingQualificationForAction(tenantId, workspaceId, { ...snapshot("enterprise_employee"), qualifications: enterprise.qualifications }, rule, "pickup", actionWindow(1, 3)),
-      /不是当前企业的有效员工/u
-    );
+    const enterpriseOther = await memberships.resolveBookingIdentity(tenantId, otherWorkspaceId, personalId, {
+      bookingIdentity: "enterprise_employee", corporateCustomerId: corporateId, enterpriseContractAndPayer: true
+    });
+    assert.equal(enterpriseOther.corporateMembershipId, enterprise.corporateMembershipId, "员工关系在两空间是同一份授权事实");
+    await prisma.customerCorporateMembership.updateMany({ where: { tenantId, corporateCustomerId: corporateId, personalCustomerId: personalId }, data: { status: "revoked" } });
+    for (const targetWorkspace of [workspaceId, otherWorkspaceId]) {
+      await assert.rejects(
+        () => memberships.assertBookingQualificationForAction(tenantId, targetWorkspace, { ...snapshot("enterprise_employee"), qualifications: enterprise.qualifications }, rule, "pickup", actionWindow(1, 3)),
+        /不是当前企业的有效员工/u
+      );
+    }
+    assert.deepEqual(personalSnapshot, oldSnapshot, "当前授权或证件变更不得回写下单时的历史快照");
     console.log("  ✓ 企业员工关系撤销后领取被阻断，企业身份不能只靠订单快照继续使用");
 
     const pure = evaluateRentalQualification(
@@ -321,7 +370,7 @@ void (async () => {
     assert.match(coreSource, /evaluateRentalQualification\(/u);
     console.log("  ✓ 提交、领取（检查与免检查）和续租均接入共享资格判定");
 
-    console.log("SHARED-QUAL-01 资格闸门专项：5 项全部通过");
+    console.log("SHARED-QUAL-01 资格闸门专项全部通过");
   } finally {
     await cleanup();
     await prisma.$disconnect();

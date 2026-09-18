@@ -897,7 +897,7 @@ export const CUSTOMER_STATUS_ACTIONS = [
 export type CustomerStatusAction = (typeof CUSTOMER_STATUS_ACTIONS)[number];
 
 /** 状态历史的作用域：账号级（全租户）或空间级（仅目标空间）。 */
-export type CustomerStatusScope = "account" | "workspace";
+export type CustomerStatusScope = "account" | "membership" | "workspace";
 
 /**
  * CUSTOMER-01B：客户在某个经营空间**能否开展新业务**的判定结果。
@@ -1038,14 +1038,8 @@ export interface CustomerMergePreview {
     targetValue?: string;
     conflict: boolean;
   }>;
-  /**
-   * 双方的空间会员关系。合并**不合并权益**：各空间等级、积分、券分别保留，
-   * 因此这里只如实列出，供人工确认「合并后客户在哪些空间各是什么状态」。
-   */
-  sourceMemberships: Array<{ workspaceId: string; levelName: string; status: CustomerMembershipStatus }>;
-  targetMemberships: Array<{ workspaceId: string; levelName: string; status: CustomerMembershipStatus }>;
-  /** 两边都有会员关系的空间。这些空间需要人工决定保留哪一份等级。 */
-  overlappingWorkspaceIds: string[];
+  sourceMembership?: CustomerMembership;
+  targetMembership?: CustomerMembership;
   /** 被合并方将保留的历史引用数量（订单等），合并后仍指向原主档。 */
   preservedReferences: Array<{ kind: string; count: number }>;
   /** 阻止合并的原因；非空时不允许提交。 */
@@ -1263,8 +1257,7 @@ export interface SharedCustomerProfile {
   mergedIntoCustomerId?: string;
   createdAt: string;
   updatedAt: string;
-  /** 该客户已接入的经营空间关系。列表接口默认带出，便于判断"是否需要接入本空间"。 */
-  workspaceLinks?: CustomerWorkspaceLink[];
+  membership?: CustomerMembership;
   /**
    * CUSTOMER-01E：详情接口带出的联系人与授权经办人。
    *
@@ -1308,11 +1301,9 @@ export interface CustomerAuthorizedAgentSummary {
   status: string;
 }
 
-/** SPACE-04 / CUSTOMER-01A：客户在某个经营空间的业务关系。会员等级与状态按空间隔离。 */
-export interface CustomerWorkspaceLink {
+export interface CustomerMembership {
   id: string;
   tenantId: string;
-  workspaceId: string;
   customerId: string;
   levelName: string;
   status: CustomerMembershipStatus;
@@ -1338,18 +1329,7 @@ export interface SaveSharedCustomerRequest {
   corporateTaxNo?: string;
 }
 
-/**
- * 把已存在的共享客户接入当前经营空间。
- *
- * 刻意不接受 workspaceId：目标空间一律取自服务端会话，
- * 否则客户端可以把客户接入自己无权进入的空间。
- */
-export interface LinkCustomerToWorkspaceRequest {
-  customerId: string;
-  levelName?: string;
-}
-
-/** MEMBER-01：经营空间注册审核模式。 */
+/** 租户统一注册审核模式。 */
 export const CUSTOMER_MEMBERSHIP_REGISTRATION_MODES = ["automatic", "manual"] as const;
 export type CustomerMembershipRegistrationMode = (typeof CUSTOMER_MEMBERSHIP_REGISTRATION_MODES)[number];
 
@@ -1414,7 +1394,7 @@ export interface SaveCorporateMembershipRequest {
 export interface CustomerMembershipReview {
   id: string;
   tenantId: string;
-  workspaceId: string;
+  sourceWorkspaceId?: string;
   customerId: string;
   customerName?: string;
   reviewType: CustomerMembershipReviewType;
@@ -1580,8 +1560,25 @@ export type CustomerMembershipBenefitType =
   | "priority_reservation"
   | "quote_validity_extension";
 
+export type CustomerMembershipBenefitScope =
+  | { type: "tenant" }
+  | { type: "workspaces"; workspaceIds: string[] }
+  | { type: "categories"; categoryCodes: RentalCategoryCode[] };
+
+export function membershipBenefitScopeMatches(
+  scope: CustomerMembershipBenefitScope | undefined,
+  workspaceId: string,
+  categoryCode: RentalCategoryCode
+): boolean {
+  if (!scope || scope.type === "tenant") return true;
+  if (scope.type === "workspaces") return Array.isArray(scope.workspaceIds) && scope.workspaceIds.includes(workspaceId);
+  if (scope.type === "categories") return Array.isArray(scope.categoryCodes) && scope.categoryCodes.includes(categoryCode);
+  return false;
+}
+
 export interface CustomerMembershipBenefit {
   type: CustomerMembershipBenefitType;
+  scope?: CustomerMembershipBenefitScope;
   /** percentage / amount / quota / priority */
   calculation: "percentage" | "amount" | "quota" | "priority";
   value: number;
@@ -1593,6 +1590,8 @@ export interface CustomerMembershipBenefit {
 
 /** 报价实际消费的会员权益快照；方案后续调整不得改写这次取价与减免依据。 */
 export interface RentalMembershipBenefitEvaluation {
+  scope?: CustomerMembershipBenefitScope;
+  scopeMatched?: boolean;
   source: "personal" | "corporate";
   planId: string;
   planVersionId: string;
@@ -1640,9 +1639,21 @@ export interface CustomerMembershipPlanVersion {
   restoreReason?: string;
 }
 
+export interface CustomerMembershipScopeOptions {
+  workspaces: Array<{ id: string; code: string; name: string; categoryCode: RentalCategoryCode }>;
+  categories: Array<{ code: RentalCategoryCode; name: string }>;
+}
+
+export interface BookingMemberOption {
+  customerId: string;
+  name: string;
+  phoneMasked: string;
+  membershipStatus: CustomerMembershipStatus;
+}
+
 export interface CustomerMembershipPlan {
   id: string;
-  workspaceId: string;
+  tenantId: string;
   code: string;
   name: string;
   targetType: CustomerMembershipPlanTargetType;
@@ -5188,6 +5199,50 @@ export interface RentalOrder {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * ORDER-LIST-01：订单列表的分配进度筛选值，与 `rentalAllocationProgress().label`
+ * 及 `assignment.issue` 一一对应。放在契约里而不是页面里：服务端在 SQL 里
+ * 按同一判据筛，页面不再对整个列表做内存过滤。
+ */
+export const RENTAL_ORDER_ASSIGNMENT_FILTERS = ["pending", "partial", "unlocked", "locked", "issue"] as const;
+export type RentalOrderAssignmentFilter = (typeof RENTAL_ORDER_ASSIGNMENT_FILTERS)[number];
+
+export const RENTAL_ORDER_LIST_DEFAULT_PAGE_SIZE = 20;
+export const RENTAL_ORDER_LIST_MAX_PAGE_SIZE = 200;
+
+/**
+ * ORDER-LIST-01：`GET /rental/v1/orders` 的查询参数。
+ *
+ * 空间**不由客户端传入**，一律取会话（与报表同一条规矩）。
+ * 分页与筛选全部在数据库里执行；没有 `page`/`pageSize` 时服务端返回旧的纯数组
+ * （兼容既有调用方），给了任一分页参数才返回 `RentalOrderPage` 信封。
+ */
+export interface RentalOrderListQuery {
+  page?: number;
+  /** 缺省 `RENTAL_ORDER_LIST_DEFAULT_PAGE_SIZE`，上限 `RENTAL_ORDER_LIST_MAX_PAGE_SIZE`。 */
+  pageSize?: number;
+  status?: RentalCoreOrderStatus;
+  /** 订单号、客户名、企业主体名（会员快照）或付款主体客户 id 的模糊匹配。 */
+  keyword?: string;
+  /**
+   * 租期区间：订单的**当前**归还时间（`effectiveEndAt ?? endAt`）晚于 `from`
+   * 且起租时间早于 `to`。用当前归还时间是因为续租过的订单实际占用到那一天。
+   */
+  from?: string;
+  to?: string;
+  /** 分配进度。除 `issue` 外只对已确认/待交付订单有意义，服务端按该状态集合筛。 */
+  assignment?: RentalOrderAssignmentFilter;
+  /** 只看仍有待裁定费用审核的订单（ORDER-CLOSE-02：它们会阻止关单）。 */
+  pendingFeeOnly?: boolean;
+}
+
+export interface RentalOrderPage {
+  items: RentalOrder[];
+  page: number;
+  pageSize: number;
+  total: number;
 }
 
 /**

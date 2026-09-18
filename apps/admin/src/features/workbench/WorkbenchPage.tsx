@@ -1,10 +1,10 @@
 import { ArrowRightOutlined, ReloadOutlined } from "@ant-design/icons";
-import { RentalCoreOrderStatus, formatRentalMoney, type RentalAssetStatus, type RentalOrder, type RentalWorkbenchTodo, type RentalWorkbenchTodoType } from "@rental-os/shared";
+import { RentalCoreOrderStatus, formatRentalMoney, type RentalAssetStatus, type RentalWorkbenchTodo, type RentalWorkbenchTodoType, type RentalWorkspaceReportFilter } from "@rental-os/shared";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Alert, App, Button, Card, Progress, Segmented, Space, Statistic, Table, Tag, Typography } from "antd";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { rentalCoreApi, useSettlementCurrency } from "@/api/rentalCore";
+import { rentalCoreApi } from "@/api/rentalCore";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
@@ -21,6 +21,7 @@ const orderStatusLabels: Record<RentalCoreOrderStatus, string> = {
   [RentalCoreOrderStatus.Cancelled]: "已取消",
   [RentalCoreOrderStatus.NoShow]: "已爽约"
 };
+const activeStatuses: RentalCoreOrderStatus[] = [RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.PickupOverdue, RentalCoreOrderStatus.ReadyForPickup, RentalCoreOrderStatus.Renting, RentalCoreOrderStatus.ReturnInspection, RentalCoreOrderStatus.Settling];
 const assetStatusLabels: Record<RentalAssetStatus, string> = { available: "可用", reserved: "已预占", rented: "租赁中", inspection: "检查中", maintenance: "维护中", disabled: "已停用" };
 const todoTypeLabels: Record<RentalWorkbenchTodoType, string> = {
   pending_payment: "待支付超时",
@@ -48,9 +49,17 @@ function periodStart(period: string) {
   if (period === "今日") start.setHours(0, 0, 0, 0);
   else if (period === "本周") { start.setDate(start.getDate() - 6); start.setHours(0, 0, 0, 0); }
   else { start.setDate(1); start.setHours(0, 0, 0, 0); }
-  return start.getTime();
+  return start;
 }
 
+/**
+ * 运营概览。
+ *
+ * 指标不再由页面拉整张订单/资产/库存表自己累加，而是读服务端经营报表
+ * （`GET /rental/v1/reports/operations`）：同一口径只算一次，报表页、导出与这里
+ * 显示的是同一个数。页面自己只保留待办列表（有专用接口）。
+ * 报表的资产与库存口径是**读取瞬间的快照**，服务端随出参带回说明，本页必须显示。
+ */
 export function WorkbenchPage() {
   const [period, setPeriod] = useState("本月");
   const navigate = useNavigate();
@@ -60,12 +69,13 @@ export function WorkbenchPage() {
   const canViewAssets = hasPermission("rental-core:asset:view") || hasPermission("rental-os:vehicle:view");
   const canViewWorkOrders = hasPermission("rental-core:maintenance:view");
   const canReconcilePayments = hasPermission("rental-os:finance:reconcile");
-  const currency = useSettlementCurrency();
-  const money = (value: number) => formatRentalMoney(value, currency);
+  // 指标来自经营报表接口，它要求报表查看权限；订单/资产权限只决定是否展示各自的板块与入口。
+  const canViewReport = hasPermission("rental-os:report:view");
+  const showMetrics = canViewReport && (canViewOrders || canViewAssets);
   const profile = useQuery({ queryKey: ["rental-core", "profile"], queryFn: rentalCoreApi.profile, enabled: canViewOrders || canViewAssets });
-  const orders = useQuery({ queryKey: ["rental-core", "orders"], queryFn: rentalCoreApi.orders, enabled: canViewOrders });
-  const assets = useQuery({ queryKey: ["rental-core", "assets"], queryFn: rentalCoreApi.assets, enabled: canViewAssets });
-  const stocks = useQuery({ queryKey: ["rental-core", "stock-balances"], queryFn: rentalCoreApi.stockBalances, enabled: canViewAssets });
+  // 区间按订单起租时间归入（报表口径）。查询键与报表页同构，命中同一份缓存。
+  const filter: RentalWorkspaceReportFilter = { from: periodStart(period).toISOString() };
+  const report = useQuery({ queryKey: ["rental-core", "operation-report", filter], queryFn: () => rentalCoreApi.operationReport(filter), enabled: showMetrics });
   const todos = useQuery({ queryKey: ["rental-core", "workbench-todos"], queryFn: rentalCoreApi.workbenchTodos });
   const reconcilePayments = useMutation({
     mutationFn: () => rentalCoreApi.reconcilePayments(),
@@ -78,41 +88,41 @@ export function WorkbenchPage() {
     },
     onError: (error: Error) => message.error(error.message || "支付对账失败")
   });
-  const loading = profile.isLoading || orders.isLoading || assets.isLoading || stocks.isLoading || todos.isLoading;
-  const error = profile.error || orders.error || assets.error || stocks.error || todos.error;
-  const filteredOrders = useMemo(() => (orders.data ?? []).filter((order) => new Date(order.createdAt).getTime() >= periodStart(period)), [orders.data, period]);
-  const activeOrders = filteredOrders.filter((order) => [RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.PickupOverdue, RentalCoreOrderStatus.ReadyForPickup, RentalCoreOrderStatus.Renting, RentalCoreOrderStatus.ReturnInspection, RentalCoreOrderStatus.Settling].includes(order.status));
-  const completedOrders = filteredOrders.filter((order) => order.status === RentalCoreOrderStatus.Completed);
-  const periodRevenue = completedOrders.reduce((total, order) => total + order.finalPayableAmount, 0);
-  const availableUnits = (assets.data ?? []).filter((asset) => asset.status === "available").length + (stocks.data ?? []).reduce((total, stock) => total + stock.availableQuantity, 0);
-  const funnel = Object.values(RentalCoreOrderStatus).map((status) => {
-    const rows = filteredOrders.filter((order) => order.status === status);
-    return { status, name: orderStatusLabels[status], value: rows.length, amount: rows.reduce((total, order) => total + order.finalPayableAmount, 0) };
-  }).filter((row) => row.value > 0);
-  const assetDistribution = Object.entries((assets.data ?? []).reduce<Record<string, number>>((result, asset) => ({ ...result, [asset.status]: (result[asset.status] ?? 0) + 1 }), {}));
+  const loading = profile.isLoading || report.isLoading || todos.isLoading;
+  const error = profile.error || report.error || todos.error;
+  const data = report.data;
+  // 币种取报表自带的快照：金额是按这个币种算出来的，不再另读一次业务设置。
+  const money = (value: number) => formatRentalMoney(Number(value), data?.currency);
+  const orderCount = data?.orderCount ?? 0;
+  const statusRows = (data?.statusBreakdown ?? []).filter((row) => row.count > 0).map((row) => ({ ...row, name: orderStatusLabels[row.status] ?? row.status }));
+  const activeCount = statusRows.filter((row) => activeStatuses.includes(row.status)).reduce((sum, row) => sum + row.count, 0);
+  const completedCount = statusRows.find((row) => row.status === RentalCoreOrderStatus.Completed)?.count ?? 0;
+  const assets = data?.utilization.serializedAssets;
+  const stock = data?.utilization.quantityStock;
+  const availableAssets = assets?.statusBreakdown.find((row) => row.status === "available")?.count ?? 0;
+  const availableUnits = availableAssets + (stock?.availableTotal ?? 0);
   const canOpenTodo = (item: RentalWorkbenchTodo) => canViewOrders || (item.type === "work_order" && canViewWorkOrders);
 
   function refresh() {
     void Promise.all([
       (canViewOrders || canViewAssets) ? profile.refetch() : Promise.resolve(),
-      canViewOrders ? orders.refetch() : Promise.resolve(),
-      canViewAssets ? assets.refetch() : Promise.resolve(),
-      canViewAssets ? stocks.refetch() : Promise.resolve(),
+      showMetrics ? report.refetch() : Promise.resolve(),
       todos.refetch()
     ]);
   }
 
   return <>
-    <PageHeader title="运营概览" description={`${profile.data?.terminology.itemLabel ?? "租赁标的"}、订单与库存均来自当前 SaaS 租户的 Rental Core 数据。`} view={<Segmented value={period} onChange={(value) => setPeriod(String(value))} options={["今日", "本周", "本月"]} />} extra={<Space><Button shape="circle" aria-label="刷新经营概览" icon={<ReloadOutlined />} onClick={refresh} />{canReconcilePayments && <Button loading={reconcilePayments.isPending} onClick={() => reconcilePayments.mutate()}>核对支付与退款</Button>}</Space>} />
+    <PageHeader title="运营概览" description={`${profile.data?.terminology.itemLabel ?? "租赁标的"}、订单与库存指标来自当前经营空间的经营报表，与报表页、导出同一口径。`} view={<Segmented value={period} onChange={(value) => setPeriod(String(value))} options={["今日", "本周", "本月"]} />} extra={<Space><Button shape="circle" aria-label="刷新经营概览" icon={<ReloadOutlined />} onClick={refresh} />{canReconcilePayments && <Button loading={reconcilePayments.isPending} onClick={() => reconcilePayments.mutate()}>核对支付与退款</Button>}</Space>} />
     <QueryState loading={loading} error={error}>
-      {(canViewOrders || canViewAssets) ? <div className="metric-grid">
+      {showMetrics ? <div className="metric-grid">
         {canViewOrders && <>
-          <Card className="metric-card"><Statistic title="期间订单" value={filteredOrders.length} /><div className="metric-foot"><span>{period}</span><span>全部状态</span></div></Card>
-          <Card className="metric-card"><Statistic title="履约中" value={activeOrders.length} /><div className="metric-foot"><span>已预订至待归还</span><span className="metric-trend">实时</span></div></Card>
-          <Card className="metric-card"><Statistic title="已完成订单金额" value={periodRevenue} formatter={(value) => money(Number(value))} /><div className="metric-foot"><span>{completedOrders.length} 单</span><span>最终应付</span></div></Card>
+          <Card className="metric-card"><Statistic title="期间订单" value={orderCount} /><div className="metric-foot"><span>{period}起租</span><span>非草稿</span></div></Card>
+          <Card className="metric-card"><Statistic title="履约中" value={activeCount} /><div className="metric-foot"><span>已预订至待结算</span><span className="metric-trend">实时</span></div></Card>
+          <Card className="metric-card"><Statistic title="应收金额" value={data?.receivableTotal ?? 0} formatter={(value) => money(Number(value))} /><div className="metric-foot"><span>{completedCount} 单已关闭</span><span>调账后应收</span></div></Card>
+          <Card className="metric-card"><Statistic title="租赁收入" value={data?.rentalRevenue ?? 0} formatter={(value) => money(Number(value))} /><div className="metric-foot"><span>只含租金</span><span>不含服务与押金</span></div></Card>
         </>}
-        {canViewAssets && <Card className="metric-card"><Statistic title="可租库存" value={availableUnits} /><div className="metric-foot"><span>独立资产 + 数量库存</span><span className="metric-trend">可用</span></div></Card>}
-      </div> : <Alert type="info" showIcon title="当前账号仅可查看工作台待办" description="订单、库存和金额指标需要相应的数据查看权限。" style={{ marginBottom: 16 }} />}
+        {canViewAssets && <Card className="metric-card"><Statistic title="可租库存" value={availableUnits} /><div className="metric-foot"><span>独立资产 + 数量库存</span><span className="metric-trend">当前快照</span></div></Card>}
+      </div> : <Alert type="info" showIcon title="当前账号仅可查看工作台待办" description="订单、库存和金额指标需要报表查看权限及相应的数据查看权限。" style={{ marginBottom: 16 }} />}
       <Card
         className="workspace-panel"
         title={<span className="panel-title">运营待办 <span className="panel-count">{todos.data?.items.length ?? 0}</span></span>}
@@ -134,23 +144,24 @@ export function WorkbenchPage() {
         />
         {(todos.data?.items.length ?? 0) > 8 && <Typography.Text type="secondary">还有 {(todos.data?.items.length ?? 0) - 8} 项，请从订单或工单页面继续处理。</Typography.Text>}
       </Card>
-      <div className="workspace-grid">
-        {canViewOrders && <Card className="workspace-panel" title={<span className="panel-title">订单状态 <span className="panel-count">{filteredOrders.length}</span></span>} extra={<Button type="link" onClick={() => navigate("/rental/orders")}>查看订单 <ArrowRightOutlined /></Button>}>
-          <Table pagination={false} rowKey="status" dataSource={funnel} locale={{ emptyText: `${period}暂无订单` }} columns={[
+      {showMetrics && <div className="workspace-grid">
+        {canViewOrders && <Card className="workspace-panel" title={<span className="panel-title">订单状态 <span className="panel-count">{orderCount}</span></span>} extra={<Button type="link" onClick={() => navigate("/rental/orders")}>查看订单 <ArrowRightOutlined /></Button>}>
+          <Table pagination={false} rowKey="status" dataSource={statusRows} locale={{ emptyText: `${period}暂无订单` }} columns={[
             { title: "阶段", dataIndex: "name", render: (value) => <Typography.Text strong>{value}</Typography.Text> },
-            { title: "订单数", dataIndex: "value", align: "right" },
-            { title: "金额", dataIndex: "amount", align: "right", render: money },
-            { title: "占比", align: "right", render: (_: unknown, row: { value: number }) => <Progress percent={filteredOrders.length ? Math.round(row.value / filteredOrders.length * 100) : 0} size="small" style={{ minWidth: 112 }} /> }
+            { title: "订单数", dataIndex: "count", align: "right" },
+            { title: "占比", align: "right", render: (_: unknown, row: { count: number }) => <Progress percent={orderCount ? Math.round(row.count / orderCount * 100) : 0} size="small" style={{ minWidth: 112 }} /> }
           ]} />
         </Card>}
-        {canViewAssets && <Card className="workspace-panel" title="库存状态" extra={<Button type="link" onClick={() => navigate("/rental/assets")}>资产与库存 <ArrowRightOutlined /></Button>}>
+        {canViewAssets && <Card className="workspace-panel" title="库存状态（当前快照）" extra={<Button type="link" onClick={() => navigate("/rental/assets")}>资产与库存 <ArrowRightOutlined /></Button>}>
+          {/* 快照说明随报表出参下发，必须显示：少了它，运营会把快照当区间利用率用。 */}
+          {(data?.historicalCaliberGaps.length ?? 0) > 0 && <Alert type="warning" showIcon title="这一节是读取瞬间的快照，不是区间利用率" description={data!.historicalCaliberGaps.map((gap) => <div key={gap}>· {gap}</div>)} style={{ marginBottom: 12 }} />}
           <Space orientation="vertical" size={0} style={{ width: "100%" }}>
-            {assetDistribution.map(([status, value]) => <div className="status-row" key={status}><div><Typography.Text strong>{assetStatusLabels[status as RentalAssetStatus] ?? status}</Typography.Text><Typography.Text type="secondary">独立资产</Typography.Text></div><Tag color={status === "available" ? "green" : status === "maintenance" ? "orange" : "blue"}>{value} 项</Tag></div>)}
-            {(stocks.data ?? []).map((stock) => <div className="status-row" key={stock.id}><div><Typography.Text strong>{stock.itemGroupName}</Typography.Text><Typography.Text type="secondary">{stock.locationName} · 数量库存</Typography.Text></div><Tag color={stock.availableQuantity > 0 ? "green" : "orange"}>{stock.availableQuantity} / {stock.onHandQuantity}</Tag></div>)}
-            {!assetDistribution.length && !(stocks.data ?? []).length && <Typography.Text type="secondary">尚未建立资产或数量库存。</Typography.Text>}
+            {(assets?.statusBreakdown ?? []).map((row) => <div className="status-row" key={row.status}><div><Typography.Text strong>{assetStatusLabels[row.status] ?? row.status}</Typography.Text><Typography.Text type="secondary">独立资产</Typography.Text></div><Tag color={row.status === "available" ? "green" : row.status === "maintenance" ? "orange" : "blue"}>{row.count} 项</Tag></div>)}
+            {stock && stock.onHandTotal > 0 && <div className="status-row"><div><Typography.Text strong>数量库存</Typography.Text><Typography.Text type="secondary">可租 / 在库（已占用 {stock.reservedTotal}，维修 {stock.maintenanceTotal}）</Typography.Text></div><Tag color={stock.availableTotal > 0 ? "green" : "orange"}>{stock.availableTotal} / {stock.onHandTotal}</Tag></div>}
+            {!(assets?.statusBreakdown.length) && !(stock && stock.onHandTotal > 0) && <Typography.Text type="secondary">尚未建立资产或数量库存。</Typography.Text>}
           </Space>
         </Card>}
-      </div>
+      </div>}
     </QueryState>
   </>;
 }

@@ -36,15 +36,10 @@ function loadCanAccessRoute(mutate) {
   const start = navSource.indexOf("export function canAccessRoute");
   const end = navSource.indexOf("\n}", start);
   let fn = navSource.slice(start, end + 2).replace("export function canAccessRoute", "function canAccessRoute");
-  // 剥离参数与局部变量的 TS 类型注解
-  fn = fn
-    .replace(": AppRouteDefinition", "")
-    .replace(": (permission?: string) => boolean", "")
-    .replace(": (capability?: RentalCapability) => boolean", "")
-    .replace(": RentalCategoryCode | undefined", "")
-    .replace(": boolean", "");
   if (mutate) fn = mutate(fn);
-  return new Function(fn + "\nreturn canAccessRoute;")();
+  const ts = require("typescript");
+  const compiled = ts.transpileModule(fn, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
+  return new Function(compiled + "\nreturn canAccessRoute;")();
 }
 
 const saasRoute = { path: "/platform/tenants", audience: "saas", permission: "system:tenant:manage" };
@@ -77,10 +72,10 @@ assert.ok(
 // 入口按权限显示的门禁在两层：路由层 canAccessRoute（变异 3 已锁定）与业务页消费层。
 // 会员审核/账号管理/企业员工三个入口必须消费各自的操作权限码（任务书点名）。
 const membershipPage = fs.readFileSync(path.join(ROOT, "apps/admin/src/features/membership/PersonalMembershipPage.tsx"), "utf8");
-assert.match(membershipPage, /hasPermission\("rental-os:member:review"\)/, "会员审核入口必须消费 member:review 操作权限");
-assert.match(membershipPage, /hasPermission\("rental-os:member:account-manage"\)/, "账号管理入口必须消费 member:account-manage 操作权限");
+assert.match(membershipPage, /hasTenantMembershipPermission\("rental-os:member:review"\)/, "会员审核入口必须消费 member:review 操作权限");
+assert.match(membershipPage, /hasTenantMembershipPermission\("rental-os:member:account-manage"\)/, "账号管理入口必须消费 member:account-manage 操作权限");
 const corporatePage = fs.readFileSync(path.join(ROOT, "apps/admin/src/features/membership/CorporateMembershipPage.tsx"), "utf8");
-assert.match(corporatePage, /hasPermission\("rental-os:corporate:employee-manage"\)/, "企业员工入口必须消费 corporate:employee-manage 操作权限");
+assert.match(corporatePage, /hasTenantMembershipPermission\("rental-os:corporate:employee-manage"\)/, "企业员工入口必须消费 corporate:employee-manage 操作权限");
 ok("权限区分：操作可见性只来自 permission 判断，dataScope 不被当作操作门禁");
 
 /* ---------- 变异 1：漏 tenant/workspace ---------- */

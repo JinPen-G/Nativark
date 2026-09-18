@@ -1,3 +1,7 @@
+/**
+ * 统一 axios 实例与 `request<T>()`：挂鉴权头 / 租户头 / 会话中止信号，401 时轮换令牌并重试，
+ * 并把 `{ data, requestId }` 信封解开只返回业务数据。所有 api 文件都应经由这里发请求。
+ */
 import axios from "axios";
 import type { ApiResult, LoginResponse } from "@rental-os/shared";
 import type { InternalAxiosRequestConfig } from "axios";

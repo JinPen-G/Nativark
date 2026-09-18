@@ -25,6 +25,8 @@ import {
   ClientQualificationUploadCompleteRequestDto,
   ClientQualificationUploadSessionRequestDto,
   ClientMembershipLoginRequestDto,
+  ClientMiniProgramPaymentIntentRequestDto,
+  ClientMyOrdersQueryDto,
   ClientOrderExtensionRequestDto,
   ClientPaymentIntentRequestDto,
   ClientPaymentSimulationRequestDto,
@@ -127,6 +129,12 @@ export class ClientApiController {
 
   @Patch("profile")
   updateProfile(@Req() req: ClientRequest, @Body() body: ClientProfileUpdateRequestDto) {
+    return this.api.updateProfile(currentClient(req), body);
+  }
+
+  /** 微信小程序 wx.request 不支持 PATCH：同一部分更新语义的 PUT 别名，DTO 与处理器完全相同。 */
+  @Put("profile")
+  updateProfileViaPut(@Req() req: ClientRequest, @Body() body: ClientProfileUpdateRequestDto) {
     return this.api.updateProfile(currentClient(req), body);
   }
 
@@ -263,6 +271,11 @@ export class ClientApiController {
     return this.api.createOrder(currentClient(req), body, req);
   }
 
+  @Get("my/orders")
+  myOrders(@Req() req: ClientRequest, @Query() query: ClientMyOrdersQueryDto) {
+    return this.api.myOrders(currentClient(req), query);
+  }
+
   @Get("orders")
   listOrders(@Req() req: ClientRequest, @Query("page") page?: string, @Query("pageSize") pageSize?: string, @Query("status") status?: string) {
     return this.api.listOrders(currentClient(req), { page: page ? Number(page) : undefined, pageSize: pageSize ? Number(pageSize) : undefined, status });
@@ -286,6 +299,12 @@ export class ClientApiController {
   @Get("orders/:id/documents/:type/versions")
   orderDocumentVersions(@Req() req: ClientRequest, @Param("id") id: string, @Param("type") type: string) {
     return this.api.orderDocumentVersions(currentClient(req), id, type);
+  }
+
+  @Post("orders/:id/cancel/preview")
+  @HttpCode(200)
+  previewCancellation(@Req() req: ClientRequest, @Param("id") id: string) {
+    return this.api.previewCancellation(currentClient(req), id);
   }
 
   @Post("orders/:id/cancel")
@@ -329,6 +348,12 @@ export class ClientApiController {
   @HttpCode(201)
   createPaymentIntent(@Req() req: ClientRequest, @Param("id") id: string, @Body() body: ClientPaymentIntentRequestDto) {
     return this.api.createPaymentIntent(currentClient(req), id, body);
+  }
+
+  @Post("orders/:id/mini-program-payment-intents")
+  @HttpCode(201)
+  createMiniProgramPaymentIntent(@Req() req: ClientRequest, @Param("id") id: string, @Body() body: ClientMiniProgramPaymentIntentRequestDto) {
+    return this.api.createMiniProgramPaymentIntent(currentClient(req), id, body);
   }
 
   @Get("orders/:id/payment-intents/:intentId")

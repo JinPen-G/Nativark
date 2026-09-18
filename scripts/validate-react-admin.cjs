@@ -16,9 +16,9 @@ function forbidText(source, unexpected, label) {
 
 const router = read("apps/admin/src/app/AppRouter.tsx");
 const navigation = read("apps/admin/src/app/navigation.tsx");
-const api = read("apps/admin/src/api/rental.ts");
+const api = read("apps/admin/src/api/platform.ts");
 const httpSource = read("apps/admin/src/api/http.ts");
-const operations = read("apps/admin/src/api/operations.ts");
+const operations = read("apps/admin/src/api/platformOps.ts");
 const shell = read("apps/admin/src/components/AppShell.tsx");
 const appearanceSwitcher = read("apps/admin/src/components/AppearanceSwitcher.tsx");
 const pageHeader = read("apps/admin/src/components/PageHeader.tsx");
@@ -27,11 +27,12 @@ const styles = read("apps/admin/src/styles.css");
 const commercialPage = read("apps/admin/src/features/commercial/RentalCommercialPage.tsx");
 const pricingGroupPage = read("apps/admin/src/features/commercial/PricingGroupPage.tsx");
 const governancePage = read("apps/admin/src/features/settings/RentalGovernancePage.tsx");
+const governanceRulesTab = read("apps/admin/src/features/settings/governance/RulesTab.tsx");
+const governanceNotificationsTab = read("apps/admin/src/features/settings/governance/NotificationsTab.tsx");
 const locationPage = read("apps/admin/src/features/fulfillment/LocationPage.tsx");
 const platformPage = read("apps/admin/src/features/platform/PlatformPage.tsx");
 const tenantManagementPage = read("apps/admin/src/features/platform/TenantManagementPage.tsx");
 const platformOperationsPage = read("apps/admin/src/features/platform/PlatformOperationsPage.tsx");
-const rentalCorePage = read("apps/admin/src/features/rental-core/RentalCorePage.tsx");
 const rentalOrderDetailPage = read("apps/admin/src/features/rental-core/RentalOrderDetailPage.tsx");
 const catalogPage = read("apps/admin/src/features/catalog/CatalogPage.tsx");
 const assetWorkspacePage = read("apps/admin/src/features/catalog/AssetWorkspacePage.tsx");
@@ -43,12 +44,12 @@ const authStoreSource = read("apps/admin/src/features/auth/authStore.ts");
 const themeSource = read("apps/admin/src/app/theme.tsx");
 
 [
-  "/workbench", "/rental/core", "/rental/orders", "/rental/item-groups", "/rental/assets",
-  "/rental/locations", "/rental/pricing", "/rental/discounts", "/rental/coupons", "/rental/services", "/rental/settings", "/rental/capabilities", "/membership/reviews", "/membership/personal", "/membership/corporate", "/membership/plans",
+  "/workbench", "/rental/orders", "/rental/item-groups", "/rental/assets",
+  "/rental/locations", "/rental/pricing", "/rental/discounts", "/rental/coupons", "/rental/services", "/rental/settings", "/rental/capabilities", "/membership/reviews", "/membership/personal", "/membership/corporate", "/membership/plans", "/membership/rewards",
   "/platform/tenants", "/platform/users", "/platform/system", "/platform/operations", "/platform/tools"
 ].forEach((route) => requireText(navigation, `path: "${route}"`, "route registry coverage"));
 
-// `api/rental.ts` 收敛成只剩跨域的平台与会话接口：历史门市域的 67 个成员随退役页面
+// `api/platform.ts` 收敛成只剩跨域的平台与会话接口：历史门市域的 67 个成员随退役页面
 // 一起删除。这里只钉住仍在用的写接口——把已删的名字继续列在这里，就是让门禁替死代码站岗。
 [
   "saveOrganization", "saveUser", "saveRole", "saveSystemRuleSection"
@@ -60,14 +61,16 @@ forbidText(api, "/rental-os/", "retired legacy endpoints must not return to the 
 forbidText(operations, "/rental-os/", "retired legacy endpoints must not return to the operations API client");
 
 [
-  "categories", "profile", "businessSettings", "saveBusinessSettings", "couponTemplates", "saveCouponTemplate", "operators", "saveOperator", "locations", "saveLocation", "itemGroups", "assets", "stockBalances", "availability", "orders",
+  "categories", "profile", "businessSettings", "saveBusinessSettings", "couponTemplates", "saveCouponTemplate", "operators", "saveOperator", "locations", "saveLocation", "itemGroups", "assets", "stockBalances", "orders",
   "createOrder", "confirmOrder", "allocateOrder", "substituteBundleComponent", "partialReturnOrder", "cancelOrder", "inspectionTemplates", "createInspection", "pricingPlans", "discountPlans", "valueAddedServices", "calendar", "ruleVersions", "rewards", "notificationTemplates", "createQuote",
   // CORE-EXT-02C：能力治理的读写入口必须存在，否则页面只能变成静态展示。
   "capabilities", "saveCapability", "upgradeCapability", "capabilityAudits"
 ].forEach((method) => requireText(rentalCoreApi, `${method}:`, "Rental Core API coverage"));
-[
-  "Rental Core v0.1", "序列化资产", "数量库存", "套装", "确认预占", "执行配货"
-].forEach((label) => requireText(rentalCorePage, label, "Rental Core UI coverage"));
+// 早期的合并调试台 RentalCorePage 已删除：建单、预占、配货、取消都由「新建订单」与订单详情页承载。
+// 断言文件不存在，防止一个无菜单入口、只靠 order:view 把关的调试页被悄悄加回来。
+if (fs.existsSync(path.join(reactRoot, "features/rental-core/RentalCorePage.tsx"))) {
+  failures.push("retired debug console must stay deleted: features/rental-core/RentalCorePage.tsx");
+}
 // CORE-EXT-02C：能力页必须同时表达五种状态、三种种类、依赖、配置、版本与升级，
 // 并把「可访问」与「已达生产经营条件」分开显示。少任何一项，页面就退化成开关列表。
 [
@@ -108,7 +111,7 @@ forbidText(operations, "/rental-os/", "retired legacy endpoints must not return 
   'name={["preauthorization", "maxAmount"]}',
   "ruleSecurityGroups",
   '[["none", securityRuleLabels.none]]'
-].forEach((label) => requireText(governancePage, label, "independent deposit and preauthorization rule UI"));
+].forEach((label) => requireText(governanceRulesTab, label, "independent deposit and preauthorization rule UI"));
 [
   'name="initialRates"',
   'name={[field.name, "baseAmount"]}',
@@ -136,16 +139,20 @@ forbidText(operations, "/rental-os/", "retired legacy endpoints must not return 
 ].forEach((label) => requireText(commercialPage, label, "space-wide immutable price version UI"));
 forbidText(commercialPage, "commercial-switcher", "commercial pages must rely on independent sidebar routes instead of duplicate tabs");
 
-[
-  "bootstrapTenant", "savePlatformDictionary", "savePlatformNumberRule", "createFileAsset", "createPrintJob",
-  "createAsyncJob", "checkSecondConfirmation", "invokeMockAdapter", "setOrganizationStatus"
-].forEach((method) => requireText(operations, `function ${method}`, "advanced operation coverage"));
+// 平台 API 统一为 `request<T>()` 风格：会话/组织/账号/租户在 `platform.ts`（`api`），
+// 字典/编号/预设/任务/文件/通知/适配器在 `platformOps.ts`（`platformOpsApi`）。每个端点只包一次。
+["saveDictionary", "saveNumberRule", "createFileAsset", "createPrintJob", "createAsyncJob", "invokeMockAdapter"]
+  .forEach((method) => requireText(operations, `${method}:`, "advanced operation coverage"));
+["bootstrapTenant", "checkSecondConfirmation", "setOrganizationStatus"]
+  .forEach((method) => requireText(api, `${method}:`, "advanced operation coverage"));
 
-requireText(operations, "function listTenants", "tenant list API coverage");
-requireText(operations, "function updateTenantStatus", "tenant lifecycle API coverage");
-requireText(operations, 'import { http } from "./http";', "shared authenticated HTTP client");
-if (operations.includes("axios.create") || operations.includes("rental_os_access_token")) {
-  failures.push("authentication contract: operations API recreated the HTTP client or uses retired auth storage keys");
+requireText(api, "tenants:", "tenant list API coverage");
+requireText(api, "updateTenantStatus:", "tenant lifecycle API coverage");
+for (const [label, source] of [["platform", api], ["platformOps", operations]]) {
+  requireText(source, 'import { request } from "./http";', `shared authenticated HTTP client (${label})`);
+  if (source.includes("axios.create") || source.includes("rental_os_access_token")) {
+    failures.push(`authentication contract: ${label} API recreated the HTTP client or uses retired auth storage keys`);
+  }
 }
 if (!httpSource.includes('window.localStorage.getItem("rental_access_token")')) {
   failures.push("authentication contract: canonical HTTP client does not read the current React auth token");
@@ -161,10 +168,14 @@ if (sessionCacheClearCount < 4) {
 [
   [commercialPage, "rentalCoreApi.pricingPlans", "generic pricing UI"],
   [commercialPage, "rentalCoreApi.discountPlans", "generic discount UI"],
-  [governancePage, "rentalCoreApi.ruleVersions", "generic rule version UI"],
-  [governancePage, "rentalCoreApi.notificationTemplates", "tenant notification template UI"],
+  [governanceRulesTab, "rentalCoreApi.ruleVersions", "generic rule version UI"],
+  [governanceNotificationsTab, "rentalCoreApi.notificationTemplates", "tenant notification template UI"],
+  // 治理页拆成外壳 + 每页签一个文件后，页签清单与权限判定必须只来自同一份 TABS 配置，
+  // 否则「可进入的页签」和「实际渲染的页签」会再次各自漂移。
+  [governancePage, "const TABS", "governance tabs single source"],
+  [governancePage, "TABS.filter((definition) => definition.permitted(permissions))", "governance tabs derive permitted list from TABS"],
   [locationPage, "rentalCoreApi.saveLocation", "generic fulfillment location UI"],
-  [tenantManagementPage, "listTenants", "tenant list UI"],
+  [tenantManagementPage, "api.tenants", "tenant list UI"],
   [tenantManagementPage, "bootstrapTenant", "tenant bootstrap UI"],
   [tenantManagementPage, "updateTenantStatus", "tenant lifecycle UI"],
   [platformPage, "setOrganizationStatus", "organization status UI"],
@@ -173,7 +184,7 @@ if (sessionCacheClearCount < 4) {
 ].forEach(([source, expected, label]) => requireText(source, expected, label));
 
 [
-  "租赁工作台", "基础定价", "优惠方案", "优惠券", "增值服务", "品类与业务规则", "会员审核", "个人会员", "企业会员", "会员方案", "组织与权限", "平台工具与治理"
+  "价格版本与调价", "优惠方案", "优惠券", "增值服务", "品类与业务规则", "会员审核", "个人会员", "企业会员", "会员方案", "组织与权限", "平台工具与治理"
 ].forEach((label) => requireText(navigation, label, "navigation registry coverage"));
 requireText(navigation, "categories?: RentalCategoryCode[]", "category-specific route metadata");
 requireText(navigation, "route.categories.includes(categoryCode)", "category-specific route guard");
@@ -212,7 +223,7 @@ requireText(router, "APP_ROUTES", "router consumes unified route registry");
 requireText(router, "workspaceScopeKey", "workspace switch remount boundary");
 requireText(router, '<AppShell key={workspaceScopeKey}>', "workspace switch remounts active data pages");
 requireText(router, "categoryCode, isSaasAdmin", "direct route access enforces authenticated audience");
-requireText(tenantManagementPage, "listTenantWorkspaces", "SaaS target tenant workspace list UI");
+requireText(tenantManagementPage, "api.tenantWorkspaces", "SaaS target tenant workspace list UI");
 requireText(tenantManagementPage, "createTenantWorkspace", "SaaS target tenant workspace create UI");
 requireText(tenantManagementPage, "updateTenantWorkspace", "SaaS target tenant workspace update UI");
 forbidText(tenantManagementPage, "经营品类创建后固定；租户", "retired tenant-level single-category copy");

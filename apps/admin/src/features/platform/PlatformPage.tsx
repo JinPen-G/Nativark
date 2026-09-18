@@ -4,8 +4,7 @@ import { Alert, App, Button, Card, Col, Drawer, Form, Input, InputNumber, Modal,
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
-import { api } from "@/api/rental";
-import { setOrganizationStatus } from "@/api/operations";
+import { api } from "@/api/platform";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
@@ -46,7 +45,7 @@ export function PlatformPage() {
   ]);
 
   const saveOrganization = useMutation({ mutationFn: api.saveOrganization, onSuccess: async () => { await refreshPlatform(); closeEditor(); message.success("组织已保存"); }, onError: () => message.error("组织保存失败，请检查编码和层级") });
-  const toggleOrganization = useMutation({ mutationFn: ({ id, status }: { id: string; status: OrganizationSummary["status"] }) => setOrganizationStatus(id, status, operator), onSuccess: async () => { await refreshPlatform(); message.success("组织状态已更新"); }, onError: () => message.error("组织状态更新失败，请检查下级组织和关联账号") });
+  const toggleOrganization = useMutation({ mutationFn: ({ id, status }: { id: string; status: OrganizationSummary["status"] }) => api.setOrganizationStatus(id, status, operator), onSuccess: async () => { await refreshPlatform(); message.success("组织状态已更新"); }, onError: () => message.error("组织状态更新失败，请检查下级组织和关联账号") });
   const saveUser = useMutation({ mutationFn: api.saveUser, onSuccess: async () => { await refreshPlatform(); closeEditor(); message.success("账号已保存"); }, onError: () => message.error("账号保存失败，请检查账号唯一性、组织和角色") });
   const toggleUser = useMutation({ mutationFn: ({ id, isActive }: { id: string; isActive: boolean }) => api.setUserStatus(id, isActive), onSuccess: async () => { await refreshPlatform(); message.success("账号状态已更新"); }, onError: () => message.error("账号状态更新失败") });
   const resetPassword = useMutation({ mutationFn: api.resetUserPassword, onSuccess: (result) => Modal.success({ title: "密码已重置", content: <><Typography.Paragraph>{result.message}</Typography.Paragraph><Typography.Text code copyable>{result.temporaryPassword}</Typography.Text></> }), onError: () => message.error("密码重置失败") });

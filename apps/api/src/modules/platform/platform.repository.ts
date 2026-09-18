@@ -615,8 +615,8 @@ export class PlatformRepository {
    * roleId 一旦存在，就**取代**租户级角色参与权限计算；dataScope 同理。
    * 成员关系没配时沿用租户级默认值（升级兼容层的行为）。
    */
-  async findWorkspaceScopedUser(userId: string, workspaceId?: string): Promise<SystemUserRow | undefined> {
-    const base = await this.findUserById(userId);
+  async findWorkspaceScopedUser(userId: string, workspaceId?: string, tenantUser?: SystemUserRow): Promise<SystemUserRow | undefined> {
+    const base = tenantUser ?? await this.findUserById(userId);
     if (!base || !workspaceId) return base;
     const member = await this.prisma.workspaceMember.findFirst({
       where: {
@@ -2071,7 +2071,7 @@ export class PlatformRepository {
     ].filter((role, index, array) => array.findIndex((item) => item.id === role.id) === index);
     const activeRoles = roles.filter((role) => role.isActive);
     const isPlatformAdmin =
-      user.isPlatformAdmin || roles.some((role) => role.fixedAllPermissions);
+      user.isPlatformAdmin || activeRoles.some((role) => role.fixedAllPermissions);
     const permissions = isPlatformAdmin
       ? ["*"]
       : [
@@ -2289,25 +2289,14 @@ export class PlatformRepository {
     );
   }
 
+  /**
+   * 权限显示名只有一个来源：`PlatformService.permissionTree`（seed 由它写入 `permissions` 表）。
+   * 这里不再维护第二份名称/描述映射——存量行怎么写的就怎么返回，措辞要改只改树与 seed。
+   */
   private permissionDisplayOf(permission: { code: string; name: string; description: string | null }) {
-    const overrides: Record<string, { name: string; description?: string }> = {
-      "rental-os:order:view": { name: "订单查看", description: "查看租赁订单列表和详情" },
-      "rental-os:order:operate": { name: "订单操作", description: "新建租赁订单、领取检查和归还检查" },
-      "rental-os:order:create": { name: "按钮-新建订单", description: "显示并执行新建租赁订单入口" },
-      "rental-os:order:pickup": { name: "按钮-领取交付", description: "执行领取交付和确认开始履约" },
-      "rental-os:order:return": { name: "按钮-归还验收", description: "执行归还验收和提交结算" },
-      "rental-os:order:extend": { name: "按钮-延长租期", description: "执行延长租期和逾期补办续租" },
-      "rental-os:station:view": { name: "履约地点查看" },
-      "rental-os:station:manage": { name: "履约地点管理" },
-      "rental-os:vehicle-group:manage": { name: "品类型号与分组管理" },
-      "rental-os:vehicle:view": { name: "品类资产查看" },
-      "rental-os:vehicle:manage": { name: "品类资产管理" },
-      "rental-os:vehicle:status-action": { name: "按钮-品类资产状态动作", description: "启停、维保、异常和状态处置" }
-    };
-    const override = overrides[permission.code];
     return {
-      name: override?.name ?? permission.name,
-      description: override?.description ?? permission.description ?? undefined
+      name: permission.name,
+      description: permission.description ?? undefined
     };
   }
 

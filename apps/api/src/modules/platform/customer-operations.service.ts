@@ -22,7 +22,7 @@ export const CUSTOMER_REVEAL_PERMISSION = "rental-os:customer:reveal-sensitive";
 const stamp = () => new Date().toISOString();
 
 /**
- * 空间会员状态的合法迁移。
+ * 租户会员状态的合法迁移。
  *
  * 用显式表而不是「任意状态可改成任意状态」：需求给每个状态定义了业务含义，
  * 从「已注销」回到「正常」不是一次普通编辑，而是重新开户，必须走 reopen 并留痕。
@@ -62,18 +62,7 @@ function accountAction(to: CustomerAccountStatus): CustomerStatusAction {
   return "release";
 }
 
-/**
- * CUSTOMER-01B：客户服务端与隔离。
- *
- * 本层要守住的核心口径是**三个层次互不代替**：
- *   1. 主档（`tenantId`）：同租户任一空间都看得到同一个客户——这是需求要的复用；
- *   2. 账号（`tenantId`）：停用账号阻止登录**全部**空间，但不动任何会员关系；
- *   3. 空间会员（`tenantId + workspaceId`）：暂停只影响**目标空间**，不影响登录与其他空间。
- *
- * 把三者压成一个 status 是本任务明确要避免的建模错误，因此这里的每个入口
- * 都显式表明自己作用在哪一层，且空间级入口一律从会话取 `workspaceId`，
- * 不接受调用方传入——否则可以改到自己无权进入的空间。
- */
+/** 主档、账号与会员均按租户共享，但各自状态独立；业务事实继续按空间归属。 */
 @Injectable()
 export class CustomerOperationsService {
   constructor(
@@ -95,13 +84,12 @@ export class CustomerOperationsService {
     tenantId: string,
     customerId: string,
     acknowledged: boolean | undefined,
-    workspaceId?: string,
     tx?: CustomerTx
   ) {
     if (!this.closability) {
       throw new ConflictException("注销前置检查服务未就绪，已拒绝本次注销");
     }
-    const result = await this.closability.assertClosable(tenantId, customerId, workspaceId, tx);
+    const result = await this.closability.assertClosable(tenantId, customerId, tx);
     if (!result.closable) {
       throw new ConflictException(
         `注销前必须先处理：${result.blockers.map((row) => row.message).join("；")}`
@@ -136,12 +124,12 @@ export class CustomerOperationsService {
    */
   async getCustomerDetail(
     tenantId: string,
-    workspaceId: string,
+    workspaceId: string | undefined,
     customerId: string,
     user?: SystemUserRow,
     options: { action?: "detail" | "export"; reason?: string } = {}
   ): Promise<SharedCustomerProfile> {
-    const profile = await this.customers.findById(tenantId, customerId, workspaceId);
+    const profile = await this.customers.findById(tenantId, customerId);
     // 查不到即拒绝，且不区分「不存在」与「属于别的租户」——后者会变成一个
     // 探测他租户客户是否存在的信道。
     if (!profile) throw new NotFoundException("客户不存在");
@@ -168,13 +156,13 @@ export class CustomerOperationsService {
     };
   }
 
-  /** 列表同样脱敏并留痕。列表按租户共享（设计），但关系只带当前空间。 */
+  /** 列表同样脱敏并留痕。主档与会员均按租户共享。 */
   async listCustomers(
     tenantId: string,
-    workspaceId: string,
+    workspaceId: string | undefined,
     user?: SystemUserRow
   ): Promise<SharedCustomerProfile[]> {
-    const rows = await this.customers.listByTenant(tenantId, workspaceId);
+    const rows = await this.customers.listByTenant(tenantId);
     const revealed = this.canReveal(user);
     // 列表只记一条汇总审计：逐客户一条会让一次翻页产生上百行噪声，
     // 反而淹没真正需要追责的单客户明文查看。
@@ -268,7 +256,6 @@ export class CustomerOperationsService {
           tenantId,
           customerId,
           input.acknowledgedManualChecks,
-          undefined,
           tx
         );
       }
@@ -305,55 +292,46 @@ export class CustomerOperationsService {
     return updated;
   }
 
-  /**
-   * 改**空间会员**状态。只影响当前会话空间——`workspaceId` 由调用方从会话解析后传入，
-   * 不来自请求体。
-   *
-   * 刻意**不**联动账号状态：需求 4.8.6 明确「空间会员状态变化只影响该经营空间，
-   * 不自动停用租户级客户账号或其他空间会员关系」。
-   */
+  /** 改租户统一会员状态，影响全部空间的新业务；不联动账号登录状态。 */
   async changeMembershipStatus(
     tenantId: string,
-    workspaceId: string,
     customerId: string,
     input: ChangeCustomerMembershipStatusRequest,
     operator?: string
   ) {
     const reason = input.reason?.trim();
-    if (!reason) throw new BadRequestException("变更空间会员状态必须填写原因");
+    if (!reason) throw new BadRequestException("变更租户会员状态必须填写原因");
     if (!CUSTOMER_MEMBERSHIP_STATUSES.includes(input.status)) {
-      throw new BadRequestException(`未知的空间会员状态：${input.status}`);
+      throw new BadRequestException(`未知的租户会员状态：${input.status}`);
     }
     const at = stamp();
     const changed = await this.prisma.$transaction(async (tx) => {
       if (!(await this.operations.lockCustomerBusinessGate(tenantId, customerId, tx))) {
         throw new NotFoundException("客户不存在");
       }
-      const link = await this.customers.findLink(tenantId, workspaceId, customerId, tx);
-      if (!link) throw new NotFoundException("该客户尚未接入当前经营空间");
-      if (link.status === input.status) {
-        throw new ConflictException(`该客户在本空间已处于 ${input.status} 状态`);
+      const membership = await this.customers.findMembership(tenantId, customerId, tx);
+      if (!membership) throw new NotFoundException("该客户尚未开通租户会员");
+      if (membership.status === input.status) {
+        throw new ConflictException(`该客户在本租户已处于 ${input.status} 状态`);
       }
-      if (!MEMBERSHIP_TRANSITIONS[link.status].includes(input.status)) {
+      if (!MEMBERSHIP_TRANSITIONS[membership.status].includes(input.status)) {
         throw new ConflictException(
-          `空间会员状态不能从 ${link.status} 直接变为 ${input.status}` +
-            (link.status === "closed" ? "：已注销的会员关系需先重新激活" : "")
+          `租户会员状态不能从 ${membership.status} 直接变为 ${input.status}` +
+            (membership.status === "closed" ? "：已注销的会员关系需先重新激活" : "")
         );
       }
       if (input.status === "closed") {
-        // 传 workspaceId：注销的是**本空间**会员关系，只检查本空间的在途业务，
-        // 用全租户口径会让另一个空间的在途订单挡住本空间的正常注销。
+        // 注销统一会员必须在客户锁内检查全租户未完订单、资金与风险事实。
         await this.assertClosableForClose(
           tenantId,
           customerId,
           input.acknowledgedManualChecks,
-          workspaceId,
           tx
         );
       }
       return this.operations.updateMembershipStatus(
         tenantId,
-        link.id,
+        membership.id,
         {
           status: input.status,
           // 等级只允许在回到 active 时调整：暂停或注销时改等级会让历史等级失去解释。
@@ -363,13 +341,12 @@ export class CustomerOperationsService {
           exitedAt: input.status === "exited" ? at : undefined,
           closedAt: input.status === "closed" ? at : undefined
         },
-        link.status,
+        membership.status,
         {
           customerId,
-          scope: "workspace",
-          workspaceId,
-          action: membershipAction(link.status, input.status),
-          fromStatus: link.status,
+          scope: "membership",
+          action: membershipAction(membership.status, input.status),
+          fromStatus: membership.status,
           toStatus: input.status,
           reason,
           operator,
@@ -379,19 +356,18 @@ export class CustomerOperationsService {
       );
     });
     if (changed === 0) {
-      throw new ConflictException("空间会员状态已被其他人修改，请刷新后重试");
+      throw new ConflictException("租户会员状态已被其他人修改，请刷新后重试");
     }
-    const updated = await this.customers.findLink(tenantId, workspaceId, customerId);
-    if (!updated) throw new NotFoundException("空间会员关系读取失败");
+    const updated = await this.customers.findMembership(tenantId, customerId);
+    if (!updated) throw new NotFoundException("租户会员关系读取失败");
     return updated;
   }
 
   /**
-   * 该客户此刻能否在本空间开展**新业务**（需求验收「停用客户会阻止目标空间新业务」）。
+   * 该客户此刻能否在目标空间开展新业务；会员状态读取全租户唯一事实。
    *
-   * 判定顺序即优先级：主档已合并 → 账号不可用 → 未接入本空间 → 本空间会员不可用。
-   * 返回结构化结论而不是布尔：被拒时客服要能立刻知道该找谁处理，
-   * 「账号被风控停了」和「这个空间把他暂停了」是两个完全不同的工单。
+   * 判定顺序即优先级：主档已合并 → 账号不可用 → 未开通会员 → 租户会员不可用。
+   * 返回结构化结论区分账号与会员限制，不把两种独立状态混为一谈。
    *
    * 本方法**只读**、不写审计：它会被下单、报价等高频路径调用，
    * 每次判定都写一行会把审计表变成流量日志。真正的动作留痕在各自的业务审计里。
@@ -447,31 +423,31 @@ export class CustomerOperationsService {
         accountStatus: account.status
       };
     }
-    const link = gate.workspaceLinks[0];
-    if (!link) {
+    const membership = gate.membership;
+    if (!membership) {
       return {
         allowed: false,
         reasonCode: "membership_missing",
-        message: "该客户尚未接入本经营空间",
+        message: "该客户尚未开通租户会员",
         accountStatus: account?.status
       };
     }
-    if (link.status !== "active") {
+    if (membership.status !== "active") {
       return {
         allowed: false,
-        reasonCode: `membership_${link.status}`,
+        reasonCode: `membership_${membership.status}`,
         message:
-          link.status === "risk_restricted"
-            ? "该客户在本空间处于风险受限状态，需先完成复核"
-            : `该客户在本空间的会员关系为 ${link.status}，不可开展新业务`,
+          membership.status === "risk_restricted"
+            ? "该客户在本租户处于风险受限状态，需先完成复核"
+            : `该客户在本租户的会员关系为 ${membership.status}，不可开展新业务`,
         accountStatus: account?.status,
-        membershipStatus: link.status
+        membershipStatus: membership.status
       };
     }
-    return { allowed: true, accountStatus: account?.status, membershipStatus: link.status };
+    return { allowed: true, accountStatus: account?.status, membershipStatus: membership.status };
   }
 
-  /** 客户状态时间线：账号级与空间级同一条线（账号级变更同样影响本空间）。 */
+  /** 客户状态时间线：账号、会员全局事件与可选的历史空间事件。 */
   listStatusHistory(tenantId: string, customerId: string, workspaceId?: string) {
     return this.operations.listStatusHistory(tenantId, customerId, workspaceId);
   }

@@ -10,9 +10,8 @@ require("ts-node").register({
 /**
  * CUSTOMER-01B 专项：客户服务端与隔离。
  *
- * 直连专用真库、用**真实仓储**装配服务：本阶段的验收点是「账号停用影响全租户、
- * 空间暂停只影响目标空间」「跨租户拒绝」「脱敏与访问审计」，这些全部依赖真实的
- * tenantId/workspaceId 过滤与事务行为。用替身仓储只能证明我照自己的假设写了代码。
+ * 直连专用真库、用真实仓储装配服务：验证账号与会员状态各自独立、
+ * 统一会员暂停同时影响两空间，以及跨租户拒绝、脱敏与访问审计。
  */
 
 const ROOT = path.resolve(__dirname, "..");
@@ -91,44 +90,38 @@ void (async () => {
   await cleanup();
   await seed();
 
-  // 客户在租户 A 建档，并接入 A 的两个空间；租户 B 建一个同号客户用于跨租户断言。
-  const alice = await customers.createWithLink(tenantA, wsA1, {
+  // 租户 A 只建一份会员；租户 B 的同号客户仍是独立主档与会员。
+  const alice = await customers.createWithMembership(tenantA, {
     customerType: "personal", name: "Alice", phone: "13800008888",
     email: "alice@example.com", identityNo: "310101199001011234"
   }, "黄金会员");
-  await customers.linkToWorkspace(tenantA, wsA2, alice.id, "普通会员");
-  const bob = await customers.createWithLink(tenantB, wsB1, {
+  const ensured = await customers.ensureMembership(tenantA, alice.id, "普通会员");
+  assert.equal(ensured.id, alice.membership.id, "重复接入必须复用同一会员");
+  assert.equal(ensured.levelName, "黄金会员", "重复接入不得覆盖既有等级");
+  const bob = await customers.createWithMembership(tenantB, {
     customerType: "personal", name: "Bob", phone: "13800008888"
   }, "普通会员");
 
-  // ============ 1. 同租户跨空间共享主档，会员关系各自独立 ============
+  // ============ 1. 两空间共享主档、唯一会员、状态与等级 ============
   const fromA1 = await service.getCustomerDetail(tenantA, wsA1, alice.id, viewer);
   const fromA2 = await service.getCustomerDetail(tenantA, wsA2, alice.id, viewer);
-  assert.equal(fromA1.id, fromA2.id, "同租户两个空间必须看到同一份主档（这是共享，不是泄露）");
-  assert.equal(fromA1.workspaceLinks?.[0]?.levelName, "黄金会员");
-  assert.equal(fromA2.workspaceLinks?.[0]?.levelName, "普通会员", "会员等级按空间隔离");
-  assert.equal(fromA1.workspaceLinks?.length, 1, "详情只带当前空间关系，不得暴露其他空间");
-  // 列表同样只能带当前空间的关系。主档跨空间可见是设计，但「他在别的空间是什么等级」
-  // 不属于本空间该知道的信息——列表带全量关系就是跨空间泄露。
+  assert.equal(fromA1.id, fromA2.id);
+  assert.equal(fromA1.membership.id, ensured.id);
+  assert.deepEqual(fromA1.membership, fromA2.membership, "两空间详情必须返回同一份会员");
+  assert.equal(fromA1.membership.levelName, "黄金会员");
+  assert.equal("workspaceId" in fromA1.membership, false);
   const listedFromA1 = await service.listCustomers(tenantA, wsA1, viewer);
-  const aliceInA1 = listedFromA1.find((row) => row.id === alice.id);
-  assert.ok(aliceInA1, "列表必须能看到同租户的共享主档");
-  assert.equal(aliceInA1.workspaceLinks?.length, 1, "列表不得带出其他空间的会员关系");
-  assert.equal(aliceInA1.workspaceLinks?.[0]?.workspaceId, wsA1, "列表带出的关系必须是当前空间");
-  assert.equal(aliceInA1.workspaceLinks?.[0]?.levelName, "黄金会员");
   const listedFromA2 = await service.listCustomers(tenantA, wsA2, viewer);
-  assert.equal(
-    listedFromA2.find((row) => row.id === alice.id)?.workspaceLinks?.[0]?.levelName,
-    "普通会员",
-    "同一客户在另一空间的列表里必须显示该空间自己的等级"
-  );
-  // 跨租户不得出现在列表里。
-  assert.equal(
-    listedFromA1.some((row) => row.id === bob.id),
-    false,
-    "租户 A 的列表不得出现租户 B 的客户"
-  );
-  ok("跨空间共享主档：两空间看到同一主档、各自的等级与关系，且详情与列表都不暴露其他空间");
+  const aliceInA1 = listedFromA1.find((row) => row.id === alice.id);
+  const aliceInA2 = listedFromA2.find((row) => row.id === alice.id);
+  assert.ok(aliceInA1 && aliceInA2, "两空间列表均可见共享会员");
+  assert.deepEqual(aliceInA1.membership, aliceInA2.membership);
+  assert.equal(aliceInA2.membership.levelName, "黄金会员");
+  for (const rows of [listedFromA1, listedFromA2]) {
+    assert.equal(rows.some((row) => row.id === bob.id), false, "租户 A 列表不得出现租户 B 客户");
+  }
+  assert.equal(await prisma.customerMembership.count({ where: { tenantId: tenantA, customerId: alice.id } }), 1);
+  ok("两空间详情与列表共享唯一会员，跨租户同号客户仍独立");
 
   // ============ 2. 跨租户访问被拒绝 ============
   await rejects(
@@ -177,66 +170,61 @@ void (async () => {
   );
   ok("访问审计读取本身受控：无解密权限被拒，有权限可读");
 
-  // ============ 4. 账号停用影响全租户，空间暂停只影响目标空间 ============
-  // 这是本阶段最核心的一条区别，因此用**同一个客户、两个空间**逐一观察。
+  // ============ 4. 会员暂停影响两空间，但账号仍独立可用 ============
   const account = await service.ensureAccount(tenantA, alice.id, "运营小王");
   assert.equal(account.status, "active");
-  // 幂等：再开一次不新建。
   assert.equal((await service.ensureAccount(tenantA, alice.id)).id, account.id, "开通账号必须幂等");
+  for (const workspaceId of [wsA1, wsA2]) {
+    assert.equal((await service.assertTransactable(tenantA, workspaceId, alice.id)).allowed, true);
+  }
+  await service.changeMembershipStatus(tenantA, alice.id, { status: "suspended", reason: "逾期未还，统一暂停" }, "运营小王");
+  for (const workspaceId of [wsA1, wsA2]) {
+    const blocked = await service.assertTransactable(tenantA, workspaceId, alice.id);
+    assert.equal(blocked.allowed, false, "共享暂停必须阻止两个空间的新业务");
+    assert.equal(blocked.reasonCode, "membership_suspended");
+    assert.equal(blocked.accountStatus, "active", "会员暂停不得改写账号状态");
+    const detail = await service.getCustomerDetail(tenantA, workspaceId, alice.id, viewer);
+    assert.equal(detail.membership.status, "suspended", "两空间详情同步展示统一暂停");
+  }
+  assert.equal((await operations.findAccountByCustomer(tenantA, alice.id)).status, "active");
+  const retryMembership = await customers.ensureMembership(tenantA, alice.id, "白银会员");
+  assert.equal(retryMembership.status, "suspended", "切空间或重试接入不得解除暂停");
+  assert.equal(retryMembership.levelName, "黄金会员");
 
-  const before1 = await service.assertTransactable(tenantA, wsA1, alice.id);
-  const before2 = await service.assertTransactable(tenantA, wsA2, alice.id);
-  assert.equal(before1.allowed, true, "初始状态两个空间都可开展业务");
-  assert.equal(before2.allowed, true);
-
-  // 4a. **空间级**暂停 wsA2 → 只有 wsA2 被拦，wsA1 不受影响，账号仍可用。
-  await service.changeMembershipStatus(tenantA, wsA2, alice.id, { status: "suspended", reason: "该空间逾期未还" }, "运营小王");
-  const afterWsSuspend1 = await service.assertTransactable(tenantA, wsA1, alice.id);
-  const afterWsSuspend2 = await service.assertTransactable(tenantA, wsA2, alice.id);
-  assert.equal(afterWsSuspend1.allowed, true, "暂停一个空间不得影响另一个空间");
-  assert.equal(afterWsSuspend2.allowed, false, "被暂停的空间必须拦下新业务");
-  assert.equal(afterWsSuspend2.reasonCode, "membership_suspended", "拒绝原因必须指向空间会员而不是账号");
-  assert.equal(afterWsSuspend2.accountStatus, "active", "空间暂停不得改写账号状态");
-  assert.equal(
-    (await operations.findAccountByCustomer(tenantA, alice.id)).status,
-    "active",
-    "空间级变更绝不能触碰账号行"
-  );
-
-  // 4b. **账号级**停用 → 两个空间同时被拦，且原因指向账号。
   await service.changeAccountStatus(tenantA, alice.id, { status: "suspended", reason: "风控统一停用" }, "风控老李");
-  const afterAcctSuspend1 = await service.assertTransactable(tenantA, wsA1, alice.id);
-  const afterAcctSuspend2 = await service.assertTransactable(tenantA, wsA2, alice.id);
-  assert.equal(afterAcctSuspend1.allowed, false, "账号停用必须阻止全部空间");
-  assert.equal(afterAcctSuspend2.allowed, false);
-  assert.equal(afterAcctSuspend1.reasonCode, "account_suspended", "原因必须指向账号，客服才知道找谁处理");
-  // 账号停用不得改写会员关系：wsA1 仍是 active。
-  const linkA1 = await customers.findLink(tenantA, wsA1, alice.id);
-  assert.equal(linkA1.status, "active", "账号停用不得把会员关系一并改写（需求 4.8.1 末段）");
-
-  // 4c. 恢复账号 → wsA1 恢复可用，wsA2 仍因自己的暂停被拦。两层各自独立。
+  for (const workspaceId of [wsA1, wsA2]) {
+    assert.equal((await service.assertTransactable(tenantA, workspaceId, alice.id)).reasonCode, "account_suspended");
+  }
+  assert.equal((await customers.findMembership(tenantA, alice.id)).status, "suspended", "账号停用不改写既有会员状态");
   await service.changeAccountStatus(tenantA, alice.id, { status: "active", reason: "复核通过" }, "风控老李");
-  assert.equal((await service.assertTransactable(tenantA, wsA1, alice.id)).allowed, true, "账号恢复后未被暂停的空间应恢复");
-  const stillSuspended = await service.assertTransactable(tenantA, wsA2, alice.id);
-  assert.equal(stillSuspended.allowed, false, "账号恢复不得顺带解除空间级暂停");
-  assert.equal(stillSuspended.reasonCode, "membership_suspended");
-  ok("账号 vs 空间：空间暂停只拦目标空间且不动账号；账号停用拦全部空间且不动会员关系；两层恢复互不代替");
+  for (const workspaceId of [wsA1, wsA2]) {
+    assert.equal((await service.assertTransactable(tenantA, workspaceId, alice.id)).reasonCode, "membership_suspended", "恢复账号不能代替恢复会员");
+  }
+  await service.changeMembershipStatus(tenantA, alice.id, { status: "active", reason: "已归还，恢复租户会员" }, "运营小王");
+  for (const workspaceId of [wsA1, wsA2]) {
+    assert.equal((await service.assertTransactable(tenantA, workspaceId, alice.id)).allowed, true, "恢复统一会员后两空间一同恢复");
+  }
+  ok("统一会员暂停/恢复影响两空间，账号状态与会员状态彼此独立");
 
   // ============ 5. 状态迁移合法性与并发 ============
   // 已注销是终态：不得直接改回正常，必须显式 reopen。
-  await service.changeMembershipStatus(tenantA, wsA2, alice.id, { status: "closed", reason: "客户要求注销该空间会员", acknowledgedManualChecks: true }, "运营小王");
+  await service.changeMembershipStatus(tenantA, alice.id, { status: "closed", reason: "客户要求注销租户会员", acknowledgedManualChecks: true }, "运营小王");
   await rejects(
-    service.changeMembershipStatus(tenantA, wsA2, alice.id, { status: "active", reason: "直接改回正常" }),
+    service.changeMembershipStatus(tenantA, alice.id, { status: "active", reason: "直接改回正常" }),
     /不能从 closed 直接变为 active/u,
     "注销后直接改回正常"
   );
-  await service.changeMembershipStatus(tenantA, wsA2, alice.id, { status: "pending_activation", reason: "客户回归，重新开户" }, "运营小王");
-  assert.equal((await customers.findLink(tenantA, wsA2, alice.id)).status, "pending_activation");
+  await service.changeMembershipStatus(tenantA, alice.id, { status: "pending_activation", reason: "客户回归，重新开户" }, "运营小王");
+  assert.equal((await customers.findMembership(tenantA, alice.id)).status, "pending_activation");
+  for (const workspaceId of [wsA1, wsA2]) {
+    assert.equal((await service.assertTransactable(tenantA, workspaceId, alice.id)).reasonCode, "membership_pending_activation");
+  }
+  await service.changeMembershipStatus(tenantA, alice.id, { status: "active", reason: "重新激活通过" }, "运营小王");
   // 原因必填。
   await rejects(
-    service.changeMembershipStatus(tenantA, wsA1, alice.id, { status: "suspended", reason: "   " }),
+    service.changeMembershipStatus(tenantA, alice.id, { status: "suspended", reason: "   " }),
     /必须填写原因/u,
-    "空白原因变更空间会员状态"
+    "空白原因变更租户会员状态"
   );
   await rejects(
     service.changeAccountStatus(tenantA, alice.id, { status: "suspended", reason: "" }),
@@ -245,14 +233,14 @@ void (async () => {
   );
   // 同状态重复提交必须被拒（否则审计里会出现一串无变化的记录）。
   await rejects(
-    service.changeMembershipStatus(tenantA, wsA1, alice.id, { status: "active", reason: "重复提交" }),
+    service.changeMembershipStatus(tenantA, alice.id, { status: "active", reason: "重复提交" }),
     /已处于 active 状态/u,
     "把已是 active 的会员关系再改成 active"
   );
-  // 并发：两路同时暂停同一空间会员，只能一路成功。
+  // 并发：两路同时暂停同一租户会员，只能一路成功。
   const race = await Promise.allSettled([
-    service.changeMembershipStatus(tenantA, wsA1, alice.id, { status: "suspended", reason: "并发A" }),
-    service.changeMembershipStatus(tenantA, wsA1, alice.id, { status: "suspended", reason: "并发B" })
+    service.changeMembershipStatus(tenantA, alice.id, { status: "suspended", reason: "并发A" }),
+    service.changeMembershipStatus(tenantA, alice.id, { status: "suspended", reason: "并发B" })
   ]);
   const fulfilled = race.filter((r) => r.status === "fulfilled").length;
   assert.equal(fulfilled, 1, `并发变更只能一路成功，实际成功 ${fulfilled} 路`);
@@ -264,29 +252,31 @@ void (async () => {
   );
   ok("状态迁移与并发：终态需显式 reopen、原因必填、同状态重复被拒、并发只有一路成功");
 
-  // ============ 6. 状态历史：账号级与空间级同一条时间线，解除是独立记录 ============
+  // ============ 6. 两空间都可见账号与会员全局事件，旧空间事件仍隔离 ============
+  await operations.appendStatusHistory(tenantA, {
+    customerId: alice.id, scope: "workspace", workspaceId: wsA1, action: "suspend",
+    fromStatus: "active", toStatus: "suspended", reason: "历史 A1 空间事件", at: "2020-01-01T00:00:00.000Z"
+  });
   const timeline = await service.listStatusHistory(tenantA, alice.id, wsA2);
   const kinds = timeline.map((row) => `${row.scope}:${row.action}`);
-  // wsA2 视角应看到：本空间的 suspend/close/reopen + 账号级 suspend/release。
-  assert.ok(kinds.includes("workspace:suspend"), "本空间的暂停必须在时间线上");
-  assert.ok(kinds.includes("workspace:close"), "本空间的注销必须在时间线上");
-  assert.ok(kinds.includes("workspace:reopen"), "重新开户必须是独立记录");
-  assert.ok(kinds.includes("account:suspend"), "账号级停用同样影响本空间，必须出现在时间线上");
-  assert.ok(kinds.includes("account:release"), "账号恢复必须是独立记录");
-  // 解除不得删除或改写原限制事实。
-  assert.ok(
-    timeline.filter((row) => row.action === "suspend").length >= 2,
-    "解除后原暂停记录必须仍在（需求 4.8.6 末段）"
+  for (const kind of ["membership:suspend", "membership:release", "membership:close", "membership:reopen", "account:suspend", "account:release"]) {
+    assert.ok(kinds.includes(kind), `${kind} 必须出现在任一空间的时间线上`);
+  }
+  assert.ok(timeline.filter((row) => row.action === "suspend").length >= 2, "恢复不得删除原暂停事实");
+  assert.equal(timeline.some((row) => row.scope === "workspace" && row.workspaceId === wsA1), false, "历史 A1 事件不能混入 A2");
+  const fromA1Timeline = await service.listStatusHistory(tenantA, alice.id, wsA1);
+  assert.ok(fromA1Timeline.some((row) => row.scope === "workspace" && row.workspaceId === wsA1));
+  assert.deepEqual(
+    fromA1Timeline.filter((row) => row.scope === "membership").map((row) => row.id),
+    timeline.filter((row) => row.scope === "membership").map((row) => row.id),
+    "两空间读取同一批会员事件，不是各写一份"
   );
-  // 不属于本空间的事件不得出现：wsA1 的暂停不应进入 wsA2 的时间线。
-  const wsA1Events = timeline.filter((row) => row.scope === "workspace" && row.workspaceId !== wsA2);
-  assert.equal(wsA1Events.length, 0, "其他空间的事件不得混入本空间时间线");
-  // 每条都必须有原因与时间。
-  assert.ok(timeline.every((row) => row.reason && row.at), "每条状态历史都必须有原因与时间");
-  ok("状态历史：账号级与空间级同线可还原、解除为独立记录、其他空间事件不混入、原因与时间齐备");
+  assert.ok(timeline.filter((row) => row.scope === "membership").every((row) => row.workspaceId === undefined));
+  assert.ok(timeline.every((row) => row.reason && row.at));
+  ok("全局会员事件两空间共享、历史空间事件仍隔离、恢复与注销轨迹完整");
 
   // ============ 7. 已合并主档不得开展新业务，也不得开通账号 ============
-  const dup = await customers.createWithLink(tenantA, wsA1, {
+  const dup = await customers.createWithMembership(tenantA, {
     customerType: "personal", name: "Alice 重复档", phone: "13800007777"
   }, "普通会员");
   await prisma.customerProfile.update({ where: { id: dup.id }, data: { mergedIntoCustomerId: alice.id } });
@@ -300,23 +290,31 @@ void (async () => {
   );
   ok("已合并主档：不可开展新业务、不可开通账号，且原因明确指向合并");
 
-  // ============ 8. 未接入本空间的客户 ============
-  const onlyA1 = await customers.createWithLink(tenantA, wsA1, {
-    customerType: "personal", name: "只在 A1", phone: "13800006666"
+  // ============ 8. 无需逐空间接入，但尚未开通租户会员仍拒绝 ============
+  const shared = await customers.createWithMembership(tenantA, {
+    customerType: "personal", name: "A1 登记后直接在 A2 经营", phone: "13800006666"
   }, "普通会员");
-  const notLinked = await service.assertTransactable(tenantA, wsA2, onlyA1.id);
-  assert.equal(notLinked.allowed, false, "未接入本空间不得开展业务");
-  assert.equal(notLinked.reasonCode, "membership_missing", "原因必须是「未接入」而不是「被暂停」");
+  assert.equal((await service.assertTransactable(tenantA, wsA2, shared.id)).allowed, true, "无 A2 接入记录也可使用同一租户会员");
+  const raw = await prisma.customerProfile.create({ data: {
+    tenantId: tenantA, customerType: "personal", name: "只有主档", phone: "13800009999", phoneMasked: "138****9999", qualifications: {}
+  } });
+  for (const workspaceId of [wsA1, wsA2]) {
+    const missing = await service.assertTransactable(tenantA, workspaceId, raw.id);
+    assert.equal(missing.allowed, false);
+    assert.equal(missing.reasonCode, "membership_missing");
+  }
   await rejects(
-    service.changeMembershipStatus(tenantA, wsA2, onlyA1.id, { status: "suspended", reason: "改一个不存在的关系" }),
-    /尚未接入当前经营空间/u,
-    "改未接入空间的会员状态"
+    service.changeMembershipStatus(tenantA, raw.id, { status: "suspended", reason: "改一个不存在的会员" }),
+    /尚未开通租户会员/u,
+    "不能修改尚未开通的租户会员"
   );
-  ok("未接入本空间：判定为 membership_missing，且不能改一个不存在的会员关系");
+  await rejects(service.changeMembershipStatus(tenantB, alice.id, { status: "suspended", reason: "跨租户暂停" }), /客户不存在/u, "跨租户写入会员被拒");
+  assert.equal((await customers.findMembership(tenantB, bob.id)).status, "active", "A 租户暂停不得影响 B 的同号客户");
+  ok("同租户跨空间直接可用；缺失会员与跨租户写入仍拒绝");
 
   // ============ 8b. 账号状态迁移的合法性与并发 ============
   // 用独立客户做：账号注销是终态，做完这段这个客户就不能再参与其他断言。
-  const acctCase = await customers.createWithLink(tenantA, wsA1, {
+  const acctCase = await customers.createWithMembership(tenantA, {
     customerType: "personal", name: "账号用例", phone: "13800005555"
   }, "普通会员");
   await service.ensureAccount(tenantA, acctCase.id, "运营小王");

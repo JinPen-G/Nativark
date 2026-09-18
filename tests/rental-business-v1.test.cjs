@@ -526,6 +526,22 @@ assert.equal(membershipRentalBenefit?.appliedAmount, 25, "企业方案固定租�
 assert.equal(membershipBenefitQuote.discountAmount, noMembershipBenefitQuote.discountAmount + 25, "会员权益必须真正减少报价应付");
 assert.ok(membershipBenefitQuote.chargeLines.some((line) => line.code === "membership:rental_discount:corporate" && line.amount === -25), "会员减免必须有独立可解释费用行");
 ok2("会员权益：企业员工仅用企业方案，金额、来源与费用行均随报价固化");
+const scopedMembership = await business.memberships.resolveBookingIdentity();
+const quoteCategory = context().category.code;
+scopedMembership.corporatePlan.snapshot.benefits = [
+  { type: "rental_discount", calculation: "amount", value: 10, scope: { type: "tenant" } },
+  { type: "rental_discount", calculation: "amount", value: 80, scope: { type: "workspaces", workspaceIds: ["another-workspace"] } },
+  { type: "rental_discount", calculation: "amount", value: 20, scope: { type: "categories", categoryCodes: [quoteCategory] } },
+  { type: "rental_discount", calculation: "amount", value: 90, scope: { type: "categories", categoryCodes: [quoteCategory === "camera" ? "camping" : "camera"] } }
+];
+business.memberships.resolveBookingIdentity = async () => structuredClone(scopedMembership);
+const scopedQuote = await business.createQuote(tenantId, context(), { ...membershipProbeInput, bookingIdentity: { bookingIdentity: "enterprise_employee", corporateCustomerId: "corp_001" } });
+assert.equal(scopedQuote.discountAmount, noMembershipBenefitQuote.discountAmount + 20, "只在适用权益中取最大减免，不叠加，也不命中其他空间/品类");
+assert.equal(scopedQuote.membershipBenefitEvaluations.filter(row => row.scopeMatched === false).length, 2);
+assert.ok(scopedQuote.membershipBenefitEvaluations.filter(row => row.scopeMatched === false).every(row => row.appliedAmount === 0 && /不适用/.test(row.skippedReason)));
+scopedMembership.corporatePlan.snapshot.benefits[2].value = 99;
+assert.equal(scopedQuote.membershipBenefitEvaluations.find(row => row.appliedAmount > 0).configuredValue, 20, "修改当前方案不回写已生成报价快照");
+ok2("统一会员：报价按范围择优、说明未命中原因并冻结权益快照");
 // 这个专项只注入一次性会员解析 stub；后续历史报价测试没有客户主档，不能误走新会员门禁。
 business.memberships = undefined;
 

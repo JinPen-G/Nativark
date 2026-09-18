@@ -31,7 +31,7 @@ import {
   Typography
 } from "antd";
 import { useMemo, useState } from "react";
-import { api } from "@/api/rental";
+import { api } from "@/api/platform";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";

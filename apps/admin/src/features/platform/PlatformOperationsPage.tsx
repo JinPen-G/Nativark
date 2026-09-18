@@ -3,8 +3,8 @@ import type { InvokeMockAdapterRequest, SendMockNotificationRequest, SystemSecur
 import { App, Button, Card, Col, Descriptions, Drawer, Form, Input, InputNumber, Row, Select, Space, Switch, Table, Tabs, Tag, Typography } from "antd";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { api } from "@/api/rental";
-import { checkSecondConfirmation, invokeMockAdapter } from "@/api/operations";
+import { api } from "@/api/platform";
+import { platformOpsApi } from "@/api/platformOps";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
@@ -24,14 +24,14 @@ export function PlatformOperationsPage() {
   const [notificationForm] = Form.useForm<SendMockNotificationRequest>();
   const [adapterForm] = Form.useForm<AdapterFormValues>();
   const [confirmationForm] = Form.useForm<ConfirmationFormValues>();
-  const infra = useQuery({ queryKey: ["integrations"], queryFn: api.integrations });
+  const infra = useQuery({ queryKey: ["integrations"], queryFn: platformOpsApi.integrations });
   const security = useQuery({ queryKey: ["security-baseline"], queryFn: api.securityBaseline });
   useEffect(() => { if (security.data) securityForm.setFieldsValue(security.data); }, [security.data, securityForm]);
   const saveSecurity = useMutation({ mutationFn: (config: SystemSecurityBaselineConfig) => api.saveSecurityBaseline(config, operator), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["security-baseline"] }); message.success("安全基线已保存"); }, onError: () => message.error("安全基线保存失败") });
-  const sendNotification = useMutation({ mutationFn: api.sendNotification, onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["integrations"] }); setNotificationOpen(false); notificationForm.resetFields(); message.success("模拟通知已写入发送日志"); }, onError: () => message.error("模拟通知发送失败") });
-  const runJob = useMutation({ mutationFn: api.runJob, onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["integrations"] }); message.success("任务已执行并刷新状态"); }, onError: () => message.error("任务执行失败") });
-  const invokeAdapter = useMutation({ mutationFn: (values: AdapterFormValues) => invokeMockAdapter({ ...values, payload: values.payloadText ? JSON.parse(values.payloadText) as Record<string, unknown> : {}, operator }), onSuccess: async (result) => { setToolResult(result); await queryClient.invalidateQueries({ queryKey: ["integrations"] }); message.success("Mock 适配器调用完成"); }, onError: () => message.error("调用失败，请检查 JSON 与适配器参数") });
-  const checkConfirmation = useMutation({ mutationFn: (values: ConfirmationFormValues) => checkSecondConfirmation(values.action, values.confirmationCode), onSuccess: (result) => setToolResult(result), onError: () => message.error("二次确认检查失败") });
+  const sendNotification = useMutation({ mutationFn: platformOpsApi.sendNotification, onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["integrations"] }); setNotificationOpen(false); notificationForm.resetFields(); message.success("模拟通知已写入发送日志"); }, onError: () => message.error("模拟通知发送失败") });
+  const runJob = useMutation({ mutationFn: platformOpsApi.runJob, onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["integrations"] }); message.success("任务已执行并刷新状态"); }, onError: () => message.error("任务执行失败") });
+  const invokeAdapter = useMutation({ mutationFn: (values: AdapterFormValues) => platformOpsApi.invokeMockAdapter({ ...values, payload: values.payloadText ? JSON.parse(values.payloadText) as Record<string, unknown> : {}, operator }), onSuccess: async (result) => { setToolResult(result); await queryClient.invalidateQueries({ queryKey: ["integrations"] }); message.success("Mock 适配器调用完成"); }, onError: () => message.error("调用失败，请检查 JSON 与适配器参数") });
+  const checkConfirmation = useMutation({ mutationFn: (values: ConfirmationFormValues) => api.checkSecondConfirmation(values.action, values.confirmationCode), onSuccess: (result) => setToolResult(result), onError: () => message.error("二次确认检查失败") });
 
   function confirmRun(id: string, jobType: string) {
     modal.confirm({ title: `立即执行任务 ${jobType}？`, content: "该操作会写入异步任务执行结果。当前内置任务为 mock/本地能力，接入真实外部系统前需重新评估影响。", okText: "执行任务", onOk: () => runJob.mutateAsync(id) });

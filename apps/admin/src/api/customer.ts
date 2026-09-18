@@ -1,3 +1,4 @@
+/** 客户档案 API：客户账户、会员身份状态、合并与查询（`/rental/v1/customers*`）。 */
 import type {
   ChangeCustomerAccountStatusRequest,
   ChangeCustomerMembershipStatusRequest,
@@ -10,7 +11,7 @@ import type {
   CustomerMergePreview,
   CustomerSensitiveAccessAuditEntry,
   CustomerStatusHistoryEntry,
-  CustomerWorkspaceLink,
+  CustomerMembership,
   MergeCustomersRequest,
   SaveCustomerContractRequest,
   SaveCustomerCreditRequest,
@@ -23,16 +24,14 @@ import { request } from "./http";
  * CUSTOMER-01E：客户主档管理端接口。
  *
  * 两条口径在这一层就固定，不留给页面选择：
- *   1. **空间取自会话**。空间会员相关的读写都不带 workspaceId——服务端按当前会话空间
- *      判定。让页面传空间等于允许在自己无权进入的空间改会员状态。
+ *   1. **租户取自会话**。主档、账号与会员状态均在租户内统一，不传 tenantId 或 workspaceId。
+ *      经营空间只承载订单及空间业务配置，不再决定客户是否是会员。
  *   2. **脱敏由服务端完成**。这里不做任何反脱敏或本地拼接，页面拿到什么就显示什么；
  *      需要明文的场景由服务端按解密权限决定并留访问审计。
  */
 export const customerApi = {
   /** 租户级客户主档列表（跨空间可见是设计：同一客户不必在每个空间重复注册）。 */
   list: () => request<SharedCustomerProfile[]>("/platform/customers"),
-  /** 当前会话空间的会员关系列表。 */
-  workspaceList: () => request<SharedCustomerProfile[]>("/platform/workspace-customers"),
   detail: (customerId: string) => request<SharedCustomerProfile>(`/platform/customers/${customerId}`),
 
   ensureAccount: (customerId: string) =>
@@ -40,9 +39,9 @@ export const customerApi = {
   /** 账号级状态：停用会阻止该客户登录**全部**经营空间。 */
   changeAccountStatus: (customerId: string, data: ChangeCustomerAccountStatusRequest) =>
     request<CustomerAccount>(`/platform/customers/${customerId}/account-status`, { method: "put", data }),
-  /** 空间级会员状态：只影响当前会话空间，不动账号与其他空间。 */
+  /** 租户会员状态：暂停、退出或注销会影响租户内全部经营空间。 */
   changeMembershipStatus: (customerId: string, data: ChangeCustomerMembershipStatusRequest) =>
-    request<CustomerWorkspaceLink>(`/platform/workspace-customers/${customerId}/status`, { method: "put", data }),
+    request<CustomerMembership>(`/platform/customers/${customerId}/membership-status`, { method: "put", data }),
 
   statusHistory: (customerId: string) =>
     request<CustomerStatusHistoryEntry[]>(`/platform/customers/${customerId}/status-history`),
@@ -58,8 +57,8 @@ export const customerApi = {
     request<unknown>("/platform/customers/merge", { method: "post", data }),
   closability: (customerId: string) =>
     request<CustomerClosability>(`/platform/customers/${customerId}/closability`),
-  workspaceClosability: (customerId: string) =>
-    request<CustomerClosability>(`/platform/workspace-customers/${customerId}/closability`),
+  membershipClosability: (customerId: string) =>
+    request<CustomerClosability>(`/platform/customers/${customerId}/membership-closability`),
 
   invoiceProfiles: (customerId: string) =>
     request<CustomerCorporateInvoiceProfile[]>(`/platform/customers/${customerId}/invoice-profiles`),

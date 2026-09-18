@@ -8,6 +8,7 @@ import { useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
+import { usePriceVersions } from "./usePriceVersions";
 
 export type RentalCommercialSection = "pricing" | "discounts" | "services";
 
@@ -76,13 +77,16 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
     queryKey: ["rental-core", "pricing-groups"],
     queryFn: rentalCoreApi.pricingGroups,
   });
+  // 三个分区各自只取自己要展示的数据：别的分区打开时不发这些请求。
   const pricing = useQuery({
     queryKey: ["rental-core", "pricing-plans"],
     queryFn: rentalCoreApi.pricingPlans,
+    enabled: section === "pricing",
   });
   const discounts = useQuery({
     queryKey: ["rental-core", "discount-plans"],
     queryFn: rentalCoreApi.discountPlans,
+    enabled: section === "discounts",
   });
   const locations = useQuery({
     queryKey: ["rental-core", "locations"],
@@ -91,22 +95,18 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
   const services = useQuery({
     queryKey: ["rental-core", "value-added-services"],
     queryFn: rentalCoreApi.valueAddedServices,
+    enabled: section === "services",
   });
   const capacities = useQuery({
     queryKey: ["rental-core", "service-capacities", capacityService?.id],
     queryFn: () => rentalCoreApi.serviceCapacities(capacityService!.id),
     enabled: Boolean(capacityService?.id),
   });
-  const versions = useQuery({
-    queryKey: ["rental-core", "price-versions"],
-    queryFn: () => rentalCoreApi.priceVersions(1, 100),
+  // 价格版本与定价分组页共用同一个 hook（同一组查询键、同一个「当前版本」判据）。
+  // 版本明细只有价格页需要；版本抽屉在别的分区打开时只需要列表。
+  const { versions, currentVersion: currentPriceVersion, currentVersionDetail: currentPriceVersionDetail } = usePriceVersions({
     enabled: section === "pricing" || versionsOpen,
-  });
-  const currentPriceVersion = versions.data?.rows.find((row) => !dayjs(row.effectiveFrom).isAfter(dayjs()));
-  const currentPriceVersionDetail = useQuery({
-    queryKey: ["rental-core", "price-version", currentPriceVersion?.sequence],
-    queryFn: () => rentalCoreApi.priceVersion(currentPriceVersion!.sequence),
-    enabled: section === "pricing" && Boolean(currentPriceVersion),
+    detailEnabled: section === "pricing",
   });
   const versionDetail = useQuery({
     queryKey: ["rental-core", "price-version", versionSequence],
@@ -314,8 +314,8 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
     setCapacityEditor(record ?? ({} as RentalServiceCapacity));
   }
 
-  const sectionTitle = section === "pricing" ? "基础定价" : section === "discounts" ? "优惠方案" : "增值服务";
-  const sectionDescription = section === "pricing" ? "查看全部定价分组的当前基础价；已有价格只能通过调价计划变更。" : section === "discounts" ? "在基础价格之上配置自动优惠、客户范围、日期范围与优惠券叠加规则。" : "维护配送、保险、损坏免赔等可选服务，并对保障条款进行版本化。";
+  const sectionTitle = section === "pricing" ? "价格版本与调价" : section === "discounts" ? "优惠方案" : "增值服务";
+  const sectionDescription = section === "pricing" ? "查看当前经营空间整体价格版本与各定价分组的当前基础价；已有价格只能通过调价计划变更。" : section === "discounts" ? "在基础价格之上配置自动优惠、客户范围、日期范围与优惠券叠加规则。" : "维护配送、保险、损坏免赔等可选服务，并对保障条款进行版本化。";
   const enabledPlans = [...(pricing.data ?? [])].filter((plan) => plan.status === "enabled").sort((left, right) => new Date(right.effectiveFrom).getTime() - new Date(left.effectiveFrom).getTime());
   const currentPricingRows: Array<{ group: RentalPricingGroup; rate?: RentalPricingPlanV1["rates"][number] }> = (pricingGroups.data ?? []).flatMap((group): Array<{ group: RentalPricingGroup; rate?: RentalPricingPlanV1["rates"][number] }> => {
     const rates = currentPriceVersionDetail.data?.rates.filter((item) => (item.pricingGroupId ?? item.itemGroupId) === group.id) ?? [];
@@ -346,6 +346,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
       </div>
       {section === "pricing" && (
         <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+          <Alert type="info" showIcon title="新增型号价格请在「定价分组」内录入；本页只查看空间整体价格版本并创建调价计划。" />
           <Alert
             type="info"
             showIcon
@@ -389,7 +390,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
             />
           </QueryState>
           </Card>
-          {unpricedCount > 0 && <Alert type="warning" showIcon title={`有 ${unpricedCount} 个历史分组缺少基本价`} description="基础定价页不再负责初始化。请停用该历史分组，并在定价分组页按新流程重新建立并填写基本价。" />}
+          {unpricedCount > 0 && <Alert type="warning" showIcon title={`有 ${unpricedCount} 个历史分组缺少基本价`} description="本页不再负责初始化。请停用该历史分组，并在定价分组页按新流程重新建立并填写基本价。" />}
           <Card title="调价计划" className="data-panel" extra={<Button type="primary" ghost icon={<PlusOutlined />} disabled={unpricedCount > 0 || !currentPriceVersion} onClick={openAdjustment}>新增计划</Button>}>
             <Table rowKey="id" loading={adjustments.isLoading} dataSource={adjustments.data ?? []} columns={[
               { title: "计划", render: (_, row) => <><b>{row.name}</b><br/><Typography.Text type="secondary">{row.code}</Typography.Text></> },

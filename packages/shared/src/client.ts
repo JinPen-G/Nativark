@@ -36,12 +36,16 @@ export type ClientRegistrationChallengeStatus =
  * 客户端目标不能依赖后台当前会话；正式 API 通过公开的租户/空间编码解析目标，
  * 服务端随后校验租户、空间状态、品类和注册模式。响应和 token 不向客户端暴露内部 id。
  */
-export interface ClientWorkspaceTarget {
+export interface ClientTenantTarget {
   tenantCode: string;
+  workspaceCode?: string;
+}
+
+export interface ClientWorkspaceTarget extends ClientTenantTarget {
   workspaceCode: string;
 }
 
-export interface ClientRegistrationChallengeRequest extends ClientWorkspaceTarget {
+export interface ClientRegistrationChallengeRequest extends ClientTenantTarget {
   method: ClientVerificationMethod;
   identifier: string;
   /** 同一次点击/重试的业务幂等键，不能用手机号或验证码代替。 */
@@ -59,6 +63,8 @@ export interface ClientRegistrationChallengeResponse {
   /** 仅本地开发返回，生产环境永不返回验证码。 */
   developmentCode?: string;
   deliveryMode?: "development" | "provider" | "provider_pending";
+  /** 证明只能用于该用途（缺省即注册）。 */
+  purpose?: "registration" | "login" | "account_closure";
 }
 
 /** 验证码交换为一次性短期证明，不把原始验证码带进注册请求或日志。 */
@@ -83,7 +89,7 @@ export interface ClientAgreementConsent {
  * APP 注册请求。服务端依据 verificationToken、目标空间和注册策略创建/复用主档，
  * 客户端不能提交 tenantId、workspaceId、directApprove、reviewedBy 或最终会员状态。
  */
-export interface ClientPersonalMembershipRegistrationRequest extends ClientWorkspaceTarget {
+export interface ClientPersonalMembershipRegistrationRequest extends ClientTenantTarget {
   name: string;
   phone: string;
   email?: string;
@@ -142,6 +148,13 @@ export interface ClientMembershipSessionResponse {
     categoryCode: string;
     membershipStatus: string;
   }>;
+  /**
+   * 本次会话绑定的当前服务空间（服务端事实）。客户端切换/刷新时以此为准记录当前服务，
+   * 不能凭“请求时想切到哪”推断；旧客户端可忽略该字段。
+   */
+  workspace?: ClientWorkspaceSummary;
+  /** 本人是否已在本租户绑定微信身份（小程序内微信支付需要）。 */
+  wechatBound?: boolean;
 }
 
 export interface ClientMembershipReviewStatus {
@@ -332,6 +345,21 @@ export interface ClientPaymentIntentRequest {
   idempotencyKey: string;
 }
 
+/** 小程序不接受客户端提交 openid；微信身份必须由服务端可信绑定取得。 */
+export interface ClientMiniProgramPaymentIntentRequest {
+  instrument: "rental";
+  idempotencyKey: string;
+}
+
+/** 只能由真实 JSAPI 预支付结果及商户私钥生成，Native code_url 不是这些参数。 */
+export interface ClientWechatJsapiParameters {
+  timeStamp: string;
+  nonceStr: string;
+  package: string;
+  signType: "RSA";
+  paySign: string;
+}
+
 export interface ClientPaymentIntentResponse {
   apiVersion: typeof CLIENT_API_VERSION;
   intentId: string;
@@ -342,6 +370,8 @@ export interface ClientPaymentIntentResponse {
   currency: string;
   status: "pending" | "paid" | "failed" | "funding_failed" | "closed";
   checkoutUrl?: string;
+  /** 预留 JSAPI 契约；缺少可信微信身份/适配器时不得返回，更不能用 checkoutUrl 拼造。 */
+  jsapi?: ClientWechatJsapiParameters;
   expiresAt: string;
   paidAt?: string;
   message?: string;
@@ -366,6 +396,14 @@ export interface ClientConfigResponse {
     coupons: boolean;
     orderExtensions: boolean;
     notifications: boolean;
+    /** 当前服务空间是否启用配送类履约方式（本人地址簿随之开放）。 */
+    delivery: boolean;
+    /** 检查异常费用的本人确认/异议。 */
+    feeResponse: boolean;
+    /** 本人在线注销（仍受全租户前置检查）。 */
+    accountClosure: boolean;
+    /** 商户是否开通小程序渠道，可绑定微信身份用于小程序支付。 */
+    wechatBinding: boolean;
   };
   payment: ClientPaymentCapabilitiesResponse;
 }
@@ -380,6 +418,13 @@ export interface ClientBookingOption {
   reason?: string;
 }
 
+/** 参考起价：当前生效价格版本里该型号（或其所属定价分组）最低的基础单价；实际以租期报价为准。 */
+export interface ClientCatalogStartingPrice {
+  amount: number;
+  unit: RentalPricingUnit;
+  currency: string;
+}
+
 export interface ClientCatalogItem {
   id: string;
   code: string;
@@ -388,6 +433,20 @@ export interface ClientCatalogItem {
   inventoryMode: string;
   images?: Array<{ url: string; alt?: string }>;
   attributes?: Record<string, unknown>;
+  /** 无生效价格版本或该型号无费率时缺省；客户端不得以 0 元替代。 */
+  startingPrice?: ClientCatalogStartingPrice;
+}
+
+/** 客户可见的履约地点摘要：公开地址、营业时段与门店电话，不含经营主体结算信息。 */
+export interface ClientCatalogLocation {
+  id: string;
+  code: string;
+  name: string;
+  status: string;
+  address?: string;
+  businessHours?: string;
+  contactPhone?: string;
+  capabilities?: Array<"pickup" | "return" | "storage" | "delivery">;
 }
 
 export interface ClientCatalogPricingGroup {
@@ -416,8 +475,13 @@ export interface ClientCatalogResponse {
   items: ClientCatalogItem[];
   pricingGroups: ClientCatalogPricingGroup[];
   services: ClientCatalogService[];
-  locations: Array<{ id: string; code: string; name: string; status: string }>;
+  locations: ClientCatalogLocation[];
   discountPlans: Array<{ id: string; code: string; name: string; status: string }>;
+  /** 当前服务空间启用的履约方式；客户端只据此显示入口，服务端报价仍逐项校验。 */
+  fulfillment: {
+    enabledModes: RentalFulfillmentMode[];
+    allowDifferentReturnLocation: boolean;
+  };
 }
 
 export interface ClientQuoteLineRequest {
@@ -449,6 +513,8 @@ export interface ClientCreateQuoteRequest {
   customerCouponId?: string;
   lines: ClientQuoteLineRequest[];
   services?: ClientQuoteServiceRequest[];
+  /** 配送类履约方式必须选择本人地址簿中的地址；服务端在报价时固化快照。 */
+  deliveryAddressId?: string;
 }
 
 export interface ClientCreateOrderRequest {
@@ -487,6 +553,59 @@ export interface ClientPaymentSimulationRequest {
   paymentMethod?: RentalOfflinePaymentMethod;
 }
 
+/** 订单商品摘要：只取型号名称与件数，供列表卡片展示；不含资产编号或金额明细。 */
+export interface MyOrderItemSummary {
+  firstItemGroupId: string;
+  firstItemName: string;
+  /** 商品行数。 */
+  itemCount: number;
+  /** 全部行数量之和。 */
+  totalQuantity: number;
+}
+
+/** 只读跨空间索引：只含当前租户客户本人的订单，不授予目标空间的操作权限。 */
+export interface MyOrderIndex {
+  orderId: string;
+  orderNo: string;
+  tenantCode: string;
+  workspaceCode: string;
+  workspaceName: string;
+  categoryCode: string;
+  status: string;
+  startAt: string;
+  endAt: string;
+  effectiveEndAt?: string;
+  finalPayableAmount: number;
+  currency: string;
+  createdAt: string;
+  updatedAt: string;
+  /** 没有商品行的历史订单缺省。 */
+  itemSummary?: MyOrderItemSummary;
+}
+
+export interface ClientMyOrdersQuery {
+  page?: number;
+  pageSize?: number;
+}
+
+export interface ClientMyOrdersResponse {
+  apiVersion: typeof CLIENT_API_VERSION;
+  items: MyOrderIndex[];
+  page: number;
+  pageSize: number;
+  total: number;
+}
+
+/** 仅试算既有取消费；不是实际退款，也不承诺绕过取消时的状态/结算门禁。 */
+export interface ClientCancellationPreview {
+  apiVersion: typeof CLIENT_API_VERSION;
+  orderId: string;
+  cancellationCharge: number;
+  currency: string;
+  calculatedAt: string;
+  estimated: true;
+}
+
 export interface ClientOrderView {
   id: string;
   orderNo: string;
@@ -521,6 +640,8 @@ export interface ClientOrderView {
   }>;
   chargeLines: Array<{ type: string; name?: string; amount: number; quantity?: number; unitPrice?: number }>;
   allocations?: Array<{ id: string; orderLineId: string; quantity: number; status: string; assetNo?: string }>;
+  /** 配送订单的收货地址快照（脱敏）；自取订单缺省。 */
+  deliveryAddress?: ClientDeliveryAddressSnapshot;
   createdAt: string;
   updatedAt: string;
 }
@@ -557,4 +678,220 @@ export interface ClientFulfillmentView {
   endAt: string;
   effectiveEndAt?: string;
   allocations: NonNullable<ClientOrderView["allocations"]>;
+}
+
+/* ====================================================================
+ * MP-R1 渠道能力（MP-01/02A/02B/03/06/11）。
+ * 以下契约由服务端真实提供；小程序不再把它们当“拟新增”。
+ * ==================================================================== */
+
+export const CLIENT_LOGIN_METHODS = ["wechat_phone", "sms", "password"] as const;
+export type ClientLoginMethod = (typeof CLIENT_LOGIN_METHODS)[number];
+
+/** 公开启动配置的查询：包内只有商户公开编码与小程序 AppID，两者都不是密钥。 */
+export interface ClientChannelBootstrapQuery {
+  tenantCode: string;
+  appId?: string;
+}
+
+/**
+ * 渠道启动配置（需求 §12.1 ChannelBootstrap）。
+ * `source=channel`：来自商户在运营端发布的小程序渠道（品牌、协议、客服、已发布服务）；
+ * `source=workspace_directory`：商户尚未配置渠道时按启用空间回退，只有服务列表与租户名。
+ */
+export interface ClientChannelBootstrapResponse {
+  apiVersion: typeof CLIENT_API_VERSION;
+  tenantCode: string;
+  merchant: { name: string; logoUrl?: string; servicePhone?: string; serviceHours?: string };
+  services: Array<{ code: string; name: string; categoryCode: string; isDefault?: boolean; status: "open" | "paused" }>;
+  defaultServiceCode?: string;
+  agreements?: {
+    userAgreement: { name: string; version: string; url?: string };
+    privacyPolicy: { name: string; version: string; url?: string };
+  };
+  loginMethods: ClientLoginMethod[];
+  capabilities: {
+    publicCatalog: boolean;
+    wechatPay: boolean;
+    delivery: boolean;
+    feeResponse: boolean;
+    accountClosure: boolean;
+  };
+  source: "channel" | "workspace_directory";
+}
+
+/** 游客公开目录：只按商户公开编码与已发布服务读取，不携带任何私有数据。 */
+export interface ClientPublicCatalogQuery {
+  tenantCode: string;
+  service: string;
+}
+
+export const CLIENT_CHALLENGE_PURPOSES = ["registration", "login", "account_closure"] as const;
+export type ClientChallengePurpose = (typeof CLIENT_CHALLENGE_PURPOSES)[number];
+
+/**
+ * 用途化验证码挑战（MP-02B）：证明只能用于创建时声明的用途；注册证明不能登录，登录证明不能注销。
+ * `account_closure` 用途不接受客户端提交的手机号，只能由已登录会话对本人手机号发起。
+ */
+export interface ClientChallengeRequest extends ClientRegistrationChallengeRequest {
+  purpose: Exclude<ClientChallengePurpose, "account_closure">;
+}
+
+/** 短信验证码登录：证明须绑定 login 用途、本租户与该手机号；手机号必须已注册。 */
+export interface ClientSmsLoginRequest {
+  tenantCode: string;
+  loginIdentifier: string;
+  verificationToken: string;
+  workspaceCode?: string;
+  clientId?: string;
+}
+
+/**
+ * 微信手机号一键登录（MP-02A）。小程序只提交两个一次性凭证：wx.login 的 code 与手机号授权组件的 code；
+ * openid、unionid 与手机号均由服务端持商户 AppSecret 向微信换取，客户端不能自报。
+ */
+export interface ClientWechatPhoneLoginRequest {
+  tenantCode: string;
+  appId?: string;
+  loginCode: string;
+  phoneCode: string;
+  consent: ClientAgreementConsent;
+  workspaceCode?: string;
+  clientId?: string;
+}
+
+/** 已登录客户把当前微信身份绑定到本人（短信/密码登录后需要小程序支付时使用）。 */
+export interface ClientWechatBindRequest {
+  loginCode: string;
+  appId?: string;
+}
+
+export interface ClientWechatBindResponse {
+  apiVersion: typeof CLIENT_API_VERSION;
+  bound: boolean;
+  appId: string;
+  boundAt: string;
+}
+
+/** 小程序支付缺少可信微信身份时的稳定错误码（HTTP 409 响应体 `code`）。 */
+export const CLIENT_WECHAT_IDENTITY_REQUIRED = "wechat_identity_required" as const;
+
+/* ---------- MP-06：配送地址簿与订单交付快照 ---------- */
+
+export interface ClientDeliveryAddressRequest {
+  id?: string;
+  /** 编辑时携带版本，防止并发覆盖。 */
+  revision?: number;
+  recipient: string;
+  phone: string;
+  countryCode?: string;
+  province: string;
+  city: string;
+  district?: string;
+  detail: string;
+  postalCode?: string;
+  latitude?: number;
+  longitude?: number;
+  isDefault?: boolean;
+}
+
+export interface ClientDeliveryAddressView {
+  id: string;
+  revision: number;
+  recipient: string;
+  phoneMasked: string;
+  countryCode: string;
+  province: string;
+  city: string;
+  district?: string;
+  detail: string;
+  postalCode?: string;
+  latitude?: number;
+  longitude?: number;
+  isDefault: boolean;
+  updatedAt: string;
+}
+
+export interface ClientDeliveryAddressListResponse {
+  apiVersion: typeof CLIENT_API_VERSION;
+  items: ClientDeliveryAddressView[];
+}
+
+/** 订单/报价上的配送地址快照（客户视图脱敏）；修改地址簿不改变已提交订单的快照。 */
+export interface ClientDeliveryAddressSnapshot {
+  addressId?: string;
+  recipient: string;
+  phoneMasked: string;
+  countryCode: string;
+  province: string;
+  city: string;
+  district?: string;
+  detail: string;
+  postalCode?: string;
+  latitude?: number;
+  longitude?: number;
+  capturedAt: string;
+}
+
+/* ---------- MP-11：费用确认与异议 ---------- */
+
+export interface ClientFeeItemView {
+  inspectionId: string;
+  exceptionIndex: number;
+  stage: "pickup" | "return";
+  code: string;
+  description: string;
+  /** 已批准的最终金额（复核后为最新金额）。 */
+  amount: number;
+  currency: string;
+  reviewedAt?: string;
+  responseStatus: "pending" | "confirmed" | "disputed";
+  responseReason?: string;
+  respondedAt?: string;
+  adjustments: Array<{ fromAmount: number; toAmount: number; reason: string; adjustedAt: string }>;
+  history: Array<{ decision: "confirmed" | "disputed"; reason: string; respondedAt: string }>;
+  evidenceCount: number;
+}
+
+export interface ClientFeeItemsResponse {
+  apiVersion: typeof CLIENT_API_VERSION;
+  orderId: string;
+  items: ClientFeeItemView[];
+  pendingCount: number;
+}
+
+export interface ClientFeeResponseRequest {
+  decision: "confirmed" | "disputed";
+  reason: string;
+}
+
+export interface ClientFeeResponseResult {
+  apiVersion: typeof CLIENT_API_VERSION;
+  item: ClientFeeItemView;
+  replayed: boolean;
+}
+
+/* ---------- MP-02B：本人注销 ---------- */
+
+export interface ClientAccountClosurePreview {
+  apiVersion: typeof CLIENT_API_VERSION;
+  closable: boolean;
+  blockers: Array<{ code: string; message: string; count?: number }>;
+  manualConfirmations: Array<{ code: string; message: string }>;
+}
+
+export interface ClientAccountClosureRequest {
+  /** 必须与当前账号手机号一致，再次证明本人。 */
+  loginIdentifier: string;
+  /** account_closure 用途的验证码证明。 */
+  verificationToken: string;
+  /** 客户对系统无法自动核对项的显式确认；为 false 时拒绝。 */
+  acknowledgedManualChecks: boolean;
+  reason?: string;
+}
+
+export interface ClientAccountClosureResponse {
+  apiVersion: typeof CLIENT_API_VERSION;
+  closed: true;
+  closedAt: string;
 }

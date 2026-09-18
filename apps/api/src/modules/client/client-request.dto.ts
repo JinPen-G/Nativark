@@ -29,6 +29,8 @@ import {
   type ClientCreateOrderRequest,
   type ClientCreateQuoteRequest,
   type ClientMembershipLoginRequest,
+  type ClientMiniProgramPaymentIntentRequest,
+  type ClientMyOrdersQuery,
   type ClientProfileUpdateRequest,
   type ClientOrderExtensionRequest,
   type ClientPaymentSimulationRequest,
@@ -37,6 +39,7 @@ import {
   type ClientRefreshRequest,
   type ClientRegistrationChallengeRequest,
   type ClientSwitchWorkspaceRequest,
+  type ClientTenantTarget,
   type ClientWorkspaceTarget,
   type VerifyClientRegistrationChallengeRequest,
   type SubmitCustomerQualificationRequest,
@@ -58,8 +61,8 @@ export class ClientRegistrationChallengeRequestDto implements ClientRegistration
   @IsString() @IsNotEmpty() @MaxLength(64)
   tenantCode!: string;
 
-  @IsString() @IsNotEmpty() @MaxLength(64)
-  workspaceCode!: string;
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(64)
+  workspaceCode?: string;
 
   @IsIn(CLIENT_VERIFICATION_METHODS)
   method!: ClientRegistrationChallengeRequest["method"];
@@ -95,8 +98,8 @@ export class ClientPersonalMembershipRegistrationRequestDto implements ClientPer
   @IsString() @IsNotEmpty() @MaxLength(64)
   tenantCode!: string;
 
-  @IsString() @IsNotEmpty() @MaxLength(64)
-  workspaceCode!: string;
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(64)
+  workspaceCode?: string;
 
   @IsString() @IsNotEmpty() @MaxLength(120)
   name!: string;
@@ -375,6 +378,22 @@ export class ClientPaymentSimulationRequestDto implements ClientPaymentSimulatio
 
   @IsOptional() @IsIn(["offline_cash", "offline_transfer"])
   paymentMethod?: ClientPaymentSimulationRequest["paymentMethod"];
+}
+
+export class ClientMyOrdersQueryDto implements ClientMyOrdersQuery {
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(1_000_000)
+  page?: number;
+
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(50)
+  pageSize?: number;
+}
+
+export class ClientMiniProgramPaymentIntentRequestDto implements ClientMiniProgramPaymentIntentRequest {
+  @IsIn(["rental"])
+  instrument!: "rental";
+
+  @IsString() @IsNotEmpty() @MaxLength(191)
+  idempotencyKey!: string;
 }
 
 export class ClientPaymentIntentRequestDto implements ClientPaymentIntentRequest {

@@ -17,7 +17,8 @@ const secondTenantId = "tenant-file-test-2";
 const orderId = "order-file-test";
 const assets = new Map();
 const sessions = new Map();
-let assetSequence = 0;
+const workspaceId = "workspace-file-test";
+const otherWorkspaceId = "workspace-other";
 let forceCompletionRace = false;
 
 function assetRow(id, status = "pending_upload", assetTenantId = tenantId, assetOrderId = orderId) {
@@ -44,9 +45,9 @@ function assetRow(id, status = "pending_upload", assetTenantId = tenantId, asset
 }
 
 const prisma = {
-  rentalOrder: { findFirst: async ({ where }) => where.tenantId === tenantId && where.id === orderId ? { id: orderId } : null },
-  customerProfile: { findFirst: async ({ where }) => where.tenantId === tenantId && where.id === "customer-file-test" ? { id: where.id } : null },
-  customerWorkspaceLink: { findFirst: async ({ where }) => where.tenantId === tenantId && where.workspaceId === "workspace-file-test" && where.customerId === "customer-file-test" && where.status === "active" ? { id: "link-file-test" } : null },
+  rentalOrder: { findFirst: async ({ where }) => where.tenantId === tenantId && where.id === orderId && (!where.workspaceId || where.workspaceId === workspaceId) ? { id: orderId } : null },
+  rentalAsset: { findFirst: async ({ where }) => where.tenantId === tenantId && where.id === "inventory-file-test" && (!where.workspaceId || where.workspaceId === workspaceId) ? { id: where.id } : null },
+  customerProfile: { findFirst: async ({ where }) => where.tenantId === tenantId && ["customer-file-test", "other-customer"].includes(where.id) ? { id: where.id } : null },
   fileAsset: {
     create: async ({ data }) => {
       const row = { ...assetRow(data.id), ...data, createdAt: new Date(), updatedAt: new Date() };
@@ -193,46 +194,72 @@ void (async () => {
     }, { businessType: "customer", businessId: "other-customer", uploadScene: "client-qualification", workspaceId: "workspace-file-test" }),
     /幂等键已被其他业务对象使用/u
   );
-  await assert.rejects(
-    () => runtime.createUploadSession(tenantId, {
-      businessModule: "membership",
-      businessType: "customer",
-      businessId: "customer-file-test",
-      fileName: "license-other-space.jpg",
-      mimeType: "image/jpeg",
-      sizeBytes: 2048,
-      uploadScene: "client-qualification",
-      idempotencyKey: "upload-client-other-workspace-1",
-      metadata: { qualificationType: "driver_license" }
-    }, { businessType: "customer", businessId: "customer-file-test", uploadScene: "client-qualification", workspaceId: "workspace-other" }),
-    /业务对象不存在或不属于当前租户/u
-  );
-  await assert.rejects(
-    () => runtime.createUploadSession(tenantId, {
-      businessModule: "membership",
-      businessType: "customer",
-      businessId: "customer-file-test",
-      fileName: "license.jpg",
-      mimeType: "image/jpeg",
-      sizeBytes: 2048,
-      uploadScene: "client-qualification",
-      idempotencyKey: "upload-client-qualification-1",
-      metadata: { qualificationType: "driver_license" }
-    }, { businessType: "customer", businessId: "customer-file-test", uploadScene: "client-qualification", workspaceId: "workspace-other" }),
-    /业务对象不存在或不属于当前租户/u
-  );
+  const qualificationFromOther = await runtime.createUploadSession(tenantId, {
+    businessModule: "membership",
+    businessType: "customer",
+    businessId: "customer-file-test",
+    fileName: "license-other-space.jpg",
+    mimeType: "image/jpeg",
+    sizeBytes: 2048,
+    uploadScene: "client-qualification",
+    idempotencyKey: "upload-client-other-workspace-1",
+    metadata: { qualificationType: "driver_license" }
+  }, { businessType: "customer", businessId: "customer-file-test", uploadScene: "client-qualification", workspaceId: otherWorkspaceId });
+  assert.notEqual(qualificationFromOther.sessionId, qualificationSession.sessionId, "同租户会员可在另一空间上传新附件");
+  await runtime.completeUpload(tenantId, qualificationFromOther.sessionId, {}, { businessType: "customer", businessId: "customer-file-test", uploadScene: "client-qualification", workspaceId });
+  const sharedReplay = await runtime.createUploadSession(tenantId, {
+    businessModule: "membership",
+    businessType: "customer",
+    businessId: "customer-file-test",
+    fileName: "license.jpg",
+    mimeType: "image/jpeg",
+    sizeBytes: 2048,
+    uploadScene: "client-qualification",
+    idempotencyKey: "upload-client-qualification-1",
+    metadata: { qualificationType: "driver_license" }
+  }, { businessType: "customer", businessId: "customer-file-test", uploadScene: "client-qualification", workspaceId: otherWorkspaceId });
+  assert.equal(sharedReplay.sessionId, qualificationSession.sessionId, "跨空间幂等重放复用同一客户上传会话");
+  assert.equal(sharedReplay.fileAssetId, qualificationSession.fileAssetId);
   await assert.rejects(
     () => runtime.completeUpload(tenantId, qualificationSession.sessionId, {}, { businessType: "customer", businessId: "other-customer", uploadScene: "client-qualification", workspaceId: "workspace-file-test" }),
     /上传会话不存在或不属于当前业务对象/u
   );
-  await runtime.completeUpload(tenantId, qualificationSession.sessionId, {}, { businessType: "customer", businessId: "customer-file-test", uploadScene: "client-qualification", workspaceId: "workspace-file-test" });
+  await runtime.completeUpload(tenantId, qualificationSession.sessionId, {}, { businessType: "customer", businessId: "customer-file-test", uploadScene: "client-qualification", workspaceId: otherWorkspaceId });
   const qualificationUrl = await runtime.downloadUrl(tenantId, qualificationSession.fileAssetId, { businessType: "customer", businessId: "customer-file-test", uploadScene: "client-qualification", workspaceId: "workspace-file-test" });
   assert.equal(qualificationUrl.fileAssetId, qualificationSession.fileAssetId);
-  await assert.rejects(
-    () => runtime.downloadUrl(tenantId, qualificationSession.fileAssetId, { businessType: "customer", businessId: "customer-file-test", uploadScene: "client-qualification", workspaceId: "workspace-other" }),
-    /文件不存在或不属于当前业务对象|业务对象不存在或不属于当前租户/u
-  );
+  const otherWorkspaceUrl = await runtime.downloadUrl(tenantId, qualificationSession.fileAssetId, { businessType: "customer", businessId: "customer-file-test", uploadScene: "client-qualification", workspaceId: otherWorkspaceId });
+  assert.equal(otherWorkspaceUrl.fileAssetId, qualificationSession.fileAssetId, "客户附件跨空间下载成功");
+  for (const ownerWorkspace of [workspaceId, otherWorkspaceId]) {
+    await assert.rejects(
+      () => runtime.downloadUrl(tenantId, qualificationSession.fileAssetId, { businessType: "customer", businessId: "other-customer", uploadScene: "client-qualification", workspaceId: ownerWorkspace }),
+      /文件不存在或不属于当前业务对象/u,
+      "共享范围不能扩大到其他客户"
+    );
+    await assert.rejects(
+      () => runtime.downloadUrl(tenantId, qualificationSession.fileAssetId, { businessType: "customer", businessId: "customer-file-test", uploadScene: "another-scene", workspaceId: ownerWorkspace }),
+      /文件不存在或不属于当前业务对象/u
+    );
+  }
+  await assert.rejects(() => runtime.completeUpload(secondTenantId, qualificationSession.sessionId, {}), /上传会话不存在/u);
+  await assert.rejects(() => runtime.downloadUrl(secondTenantId, qualificationSession.fileAssetId), /文件不存在或尚未完成上传/u);
+  await assert.rejects(() => runtime.createUploadSession(secondTenantId, {
+    ...input, businessModule: "membership", businessType: "customer", businessId: "customer-file-test", idempotencyKey: "foreign-customer-upload"
+  }), /业务对象不存在或不属于当前租户/u);
   console.log("client file owner binding tests passed");
+
+  const orderOwner = { businessType: "rental_order", businessId: orderId, uploadScene: "order-contract", workspaceId };
+  const wrongOrderWorkspace = { ...orderOwner, workspaceId: otherWorkspaceId };
+  assert.equal((await runtime.createUploadSession(tenantId, input, orderOwner)).sessionId, first.sessionId);
+  for (const request of [input, { ...input, idempotencyKey: "wrong-space-new-order-upload" }]) {
+    await assert.rejects(() => runtime.createUploadSession(tenantId, request, wrongOrderWorkspace), /业务对象不存在或不属于当前租户/u, "订单附件创建和重放都必须按空间隔离");
+  }
+  await assert.rejects(() => runtime.completeUpload(tenantId, first.sessionId, {}, wrongOrderWorkspace), /业务对象不存在或不属于当前租户/u);
+  await assert.rejects(() => runtime.downloadUrl(tenantId, first.fileAssetId, wrongOrderWorkspace), /业务对象不存在或不属于当前租户/u);
+  const inventoryInput = { ...input, businessType: "rental_asset", businessId: "inventory-file-test", idempotencyKey: "inventory-photo" };
+  const inventoryOwner = { businessType: "rental_asset", businessId: "inventory-file-test", workspaceId };
+  const inventorySession = await runtime.createUploadSession(tenantId, inventoryInput, inventoryOwner);
+  await runtime.completeUpload(tenantId, inventorySession.sessionId, {}, inventoryOwner);
+  await assert.rejects(() => runtime.downloadUrl(tenantId, inventorySession.fileAssetId, { ...inventoryOwner, workspaceId: otherWorkspaceId }), /业务对象不存在或不属于当前租户/u, "会员共享不得放开库存附件的空间边界");
 
   const raceSession = await runtime.createUploadSession(tenantId, {
     ...input,

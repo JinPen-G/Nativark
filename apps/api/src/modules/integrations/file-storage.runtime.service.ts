@@ -20,7 +20,7 @@ export interface FileBusinessOwner {
   businessType: string;
   businessId: string;
   uploadScene?: string;
-  /** 客户端或空间内业务调用时必须带当前空间；租户级资料可省略。 */
+  /** 订单、型号等空间业务必须带当前空间；客户资料和资质按租户共享。 */
   workspaceId?: string;
 }
 
@@ -157,8 +157,8 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
       if (!this.matchesUploadRequest(existingAsset, input, mimeType)) {
         throw new ConflictException("幂等键已用于不同文件上传请求，请更换幂等键");
       }
-      // 幂等重放也必须重新验证经营空间归属。不能因为首次创建时通过过校验，
-      // 就让同一租户的另一个空间凭同一个幂等键拿到客户/订单文件会话。
+      // 幂等重放仍重新验证业务归属：客户资料在租户内共享，订单等事实按空间隔离。
+      // owner 的客户 ID / 上传场景匹配不能因重放而跳过。
       await this.assertBusinessReference(tenantId, existingAsset.businessType, existingAsset.businessId ?? "", owner?.workspaceId);
       if (existing.provider === "local_mock" && process.env.NODE_ENV === "production") {
         throw new ServiceUnavailableException("生产环境禁止重放模拟文件上传，请先配置并验证文件存储平台");
@@ -302,7 +302,7 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     if (!asset || (owner && !this.matchesOwner(asset, owner)) || !["active", "delete_pending", "deleted"].includes(asset.status)) {
       throw new NotFoundException("文件不存在或不属于当前业务对象");
     }
-    if (owner?.workspaceId) await this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? "", owner.workspaceId);
+    if (owner) await this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? "", owner.workspaceId);
     if (asset.status === "deleted") return { fileAssetId, status: "deleted" as const };
 
     if (asset.storageProvider !== "local_mock") {
@@ -506,7 +506,7 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     if (!session) throw new NotFoundException("上传会话不存在");
     const asset = await this.prisma.fileAsset.findFirst({ where: { id: session.fileAssetId, tenantId } });
     if (!asset || (owner && !this.matchesOwner(asset, owner))) throw new NotFoundException("上传会话不存在或不属于当前业务对象");
-    if (owner?.workspaceId) await this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? "", owner.workspaceId);
+    if (owner) await this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? "", owner.workspaceId);
     if (session.status === "completed") return this.assetSummary(asset);
     if (session.status !== "pending_upload") throw new ConflictException("上传会话已失效");
     if (session.expiresAt.getTime() <= Date.now()) {
@@ -547,7 +547,7 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     const asset = await this.prisma.fileAsset.findFirst({ where: { id: fileAssetId, tenantId, status: "active" } });
     if (asset && owner && !this.matchesOwner(asset, owner)) throw new NotFoundException("文件不存在或不属于当前业务对象");
     if (!asset) throw new NotFoundException("文件不存在或尚未完成上传");
-    if (owner?.workspaceId) await this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? "", owner.workspaceId);
+    if (owner) await this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? "", owner.workspaceId);
     if (asset.storageProvider === "local_mock") {
       if (process.env.NODE_ENV === "production") {
         throw new ServiceUnavailableException("生产环境禁止访问未归档的模拟文件，请先配置文件存储平台");
@@ -610,9 +610,9 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
         break;
       case "customer":
       case "customer_profile":
-        exists = workspaceId
-          ? Boolean(await this.prisma.customerWorkspaceLink.findFirst({ where: { tenantId, workspaceId, customerId: id, status: "active" }, select: { id: true } }))
-          : Boolean(await this.prisma.customerProfile.findFirst({ where: { id, tenantId }, select: { id: true } }));
+        // 客户和资质附件属于租户共享主档，不以来源空间或会员状态授权。
+        // 客户端的 owner 在入口固定为本人；操作员敏感资料权限仍由 guard 负责。
+        exists = Boolean(await this.prisma.customerProfile.findFirst({ where: { id, tenantId }, select: { id: true } }));
         break;
       case "customer_contract":
       case "corporate_contract":
@@ -626,9 +626,14 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
       case "credit":
         exists = Boolean(await this.prisma.customerCorporateCredit.findFirst({ where: { id, tenantId }, select: { id: true } }));
         break;
-      case "membership_review":
-        exists = Boolean(await this.prisma.customerMembershipReview.findFirst({ where: { id, tenantId, ...(workspaceId ? { workspaceId } : {}) }, select: { id: true } }));
+      case "membership_review": {
+        const review = await this.prisma.customerMembershipReview.findFirst({ where: { id, tenantId }, select: { customerId: true, sourceWorkspaceId: true } });
+        // 来源空间仅保留审计来源，不限制租户内共享审核资料；但来源与客户不能跨租户。
+        exists = Boolean(review
+          && await this.prisma.customerProfile.findFirst({ where: { id: review.customerId, tenantId }, select: { id: true } })
+          && (!review.sourceWorkspaceId || await this.prisma.businessWorkspace.findFirst({ where: { id: review.sourceWorkspaceId, tenantId }, select: { id: true } })));
         break;
+      }
       case "async_job":
         exists = Boolean(await this.prisma.asyncJob.findFirst({ where: { id, tenantId }, select: { id: true } }));
         break;

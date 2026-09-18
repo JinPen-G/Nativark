@@ -92,16 +92,16 @@ void (async () => {
   await cleanup();
   await seed();
 
-  const person = await customers.createWithLink(tenantA, wsA1, {
+  const person = await customers.createWithMembership(tenantA, {
     customerType: "personal", name: "李四", phone: "13900001111",
     email: "lisi@example.com", identityNo: "310101199203034567", identityVerified: true
   }, "黄金会员");
-  const corporate = await customers.createWithLink(tenantA, wsA1, {
+  const corporate = await customers.createWithMembership(tenantA, {
     customerType: "corporate", name: "某影视工作室", phone: "13900002222",
     corporateName: "上海某影视工作室有限公司", corporateTaxNo: "91310000MA1K35Q08X"
   }, "企业会员");
   // 只在 A2 空间注册的客户：用于验证「主档按租户共享、会员关系按空间隔离」。
-  const otherSpace = await customers.createWithLink(tenantA, wsA2, {
+  const otherSpace = await customers.createWithMembership(tenantA, {
     customerType: "personal", name: "王五", phone: "13900003333"
   }, "普通会员");
 
@@ -190,14 +190,14 @@ void (async () => {
   ok("访问审计：只读账号被拒，需「客户敏感资料解密」权限");
 
   // ============ 7. 状态时间线：账号级与空间级同一条线，解除不抹掉原限制 ============
-  await ops.changeMembershipStatus(tenantA, wsA1, person.id, { status: "risk_restricted", reason: "风控复核" }, "风控员");
-  await ops.changeMembershipStatus(tenantA, wsA1, person.id, { status: "active", reason: "复核通过" }, "风控员");
+  await ops.changeMembershipStatus(tenantA, person.id, { status: "risk_restricted", reason: "风控复核" }, "风控员");
+  await ops.changeMembershipStatus(tenantA, person.id, { status: "active", reason: "复核通过" }, "风控员");
   await ops.ensureAccount(tenantA, person.id, "客服");
   await ops.changeAccountStatus(tenantA, person.id, { status: "suspended", reason: "账号异常登录" }, "客服");
   const timeline = await ops.listStatusHistory(tenantA, person.id, wsA1);
   const marks = timeline.map((row) => `${row.scope}:${row.action}`);
-  assert.ok(marks.includes("workspace:restrict"), `时间线缺少空间级限制记录：${marks.join(",")}`);
-  assert.ok(marks.includes("workspace:release"), "时间线缺少解除记录");
+  assert.ok(marks.includes("membership:restrict"), `时间线缺少租户会员限制记录：${marks.join(",")}`);
+  assert.ok(marks.includes("membership:release"), "时间线缺少解除记录");
   assert.ok(marks.includes("account:suspend"), "账号级变更同样影响本空间，必须出现在同一条线上");
   assert.equal(
     timeline.filter((row) => row.action === "restrict").length,
@@ -206,13 +206,11 @@ void (async () => {
   );
   assert.ok(timeline.every((row) => row.reason), "每条状态变更都必须带原因（需求 4.8.6）");
   const a2Timeline = await ops.listStatusHistory(tenantA, person.id, wsA2);
-  assert.equal(
-    a2Timeline.some((row) => row.scope === "workspace"),
-    false,
-    "别的空间的会员事件不得出现在本空间时间线上"
-  );
+  // 租户统一会员（MEMBER-TENANT-01）：会员状态属租户，限制全部空间新业务，
+  // 因此会员级与账号级事件在任一空间的时间线上都可见，不再按空间过滤。
+  assert.ok(a2Timeline.some((row) => row.scope === "membership"), "租户会员事件对所有空间可见");
   assert.ok(a2Timeline.some((row) => row.scope === "account"), "账号级事件对所有空间可见");
-  ok("状态时间线：账号级与空间级同线、解除留痕不覆盖、跨空间会员事件不串台");
+  ok("状态时间线：账号级与租户会员级同线、解除留痕不覆盖、会员事件全空间可见");
 
   // ============ 8. 主档按租户共享，会员关系按空间隔离，跨租户不可见 ============
   const sharedList = await ops.listCustomers(tenantA, wsA1, viewer);
@@ -250,19 +248,26 @@ void (async () => {
     isSaasAdmin: false, isPlatformAdmin: false
   });
   const memberActor = actor(["rental-os:member:manage"]);
+  // 账号状态（停用/恢复）自 MEMBER-TENANT-01 起独立为 member:account-manage，与会员状态维护分权。
+  const accountActor = actor(["rental-os:member:account-manage"]);
   const closeActor = actor(["rental-os:customer:close"]);
   const riskActor = actor(["rental-os:member:risk-action"]);
   await rejects(
-    Promise.resolve().then(() => platform.changeCustomerAccountStatus(person.id, { status: "closed", reason: "越权注销" }, memberActor)),
+    Promise.resolve().then(() => platform.changeCustomerAccountStatus(person.id, { status: "closed", reason: "越权注销" }, accountActor)),
     /customer:close/u,
-    "会员管理员借账号状态接口注销客户"
+    "账号管理员借账号状态接口注销客户"
   );
   await rejects(
     Promise.resolve().then(() => platform.changeCustomerAccountStatus(person.id, { status: "suspended", reason: "越权停用" }, closeActor)),
-    /member:manage/u,
+    /account-manage/u,
     "只有注销权限的人借账号状态接口停用账号"
   );
-  await platform.changeCustomerAccountStatus(person.id, { status: "suspended", reason: "正常停用" }, memberActor);
+  await rejects(
+    Promise.resolve().then(() => platform.changeCustomerAccountStatus(person.id, { status: "suspended", reason: "越权停用" }, memberActor)),
+    /account-manage/u,
+    "会员管理权限不再隐含账号停用权限"
+  );
+  await platform.changeCustomerAccountStatus(person.id, { status: "suspended", reason: "正常停用" }, accountActor);
   await platform.changeCustomerAccountStatus(person.id, { status: "closed", reason: "正常注销" }, closeActor);
   await runWithRequestIdentity({ tenantId: tenantA, workspaceId: wsA1 }, async () => {
     await rejects(
@@ -292,11 +297,17 @@ void (async () => {
   const planPage = read("apps/admin/src/features/membership/MembershipPlanPage.tsx");
   const api = read("apps/admin/src/api/customer.ts");
 
-  assert.ok(nav.includes('membershipReviews: { path: "/membership/reviews"'), "会员审核必须注册新路由");
-  assert.ok(nav.includes('personalMembers: { path: "/membership/personal"'), "个人会员必须注册新路由");
-  assert.ok(nav.includes('corporateMembers: { path: "/membership/corporate"'), "企业会员必须注册新路由");
-  assert.ok(nav.includes('membershipPlans: { path: "/membership/plans"'), "会员方案必须注册新路由");
-  assert.ok(nav.includes("routes: [APP_ROUTES.membershipReviews, APP_ROUTES.personalMembers, APP_ROUTES.corporateMembers, APP_ROUTES.membershipPlans]"), "四个会员页面必须进入同一会员菜单");
+  // 路由条目可带 `scope: "tenant-membership"` 等前置字段，只钉 key 与 path 的对应，不钉字面顺序。
+  const routeEntry = (key, routePath) => new RegExp(`\\b${key}: \\{[^\\n]*path: "${routePath.replace(/\//g, "\\/")}"`, "u");
+  assert.match(nav, routeEntry("membershipReviews", "/membership/reviews"), "会员审核必须注册新路由");
+  assert.match(nav, routeEntry("personalMembers", "/membership/personal"), "个人会员必须注册新路由");
+  assert.match(nav, routeEntry("corporateMembers", "/membership/corporate"), "企业会员必须注册新路由");
+  assert.match(nav, routeEntry("membershipPlans", "/membership/plans"), "会员方案必须注册新路由");
+  assert.match(
+    nav,
+    /routes: \[APP_ROUTES\.membershipReviews, APP_ROUTES\.personalMembers, APP_ROUTES\.corporateMembers, APP_ROUTES\.membershipPlans(, APP_ROUTES\.[a-zA-Z]+)*\]/u,
+    "四个会员页面必须进入同一会员菜单（可在其后追加同菜单的其他会员页面）"
+  );
   assert.match(router, /APP_ROUTES\.membershipReviews\.path[\s\S]{0,120}MembershipReviewPage/u, "审核路由必须指向独立审核页");
   assert.match(router, /APP_ROUTES\.personalMembers\.path[\s\S]{0,120}PersonalMembershipPage/u, "个人会员路由必须指向个人会员页");
   assert.match(router, /APP_ROUTES\.corporateMembers\.path[\s\S]{0,120}CorporateMembershipPage/u, "企业会员路由必须指向企业会员页");
@@ -318,7 +329,7 @@ void (async () => {
   assert.ok(personalPage.includes("registrationMode") && personalPage.includes("directApprove"), "个人会员页必须支持自动通过/手动审核策略和后台直接通过");
   assert.ok(personalPage.includes("ensureAccount") && personalPage.includes("changeAccountStatus") && personalPage.includes("changeMembershipStatus"), "个人会员页必须分别管理账号状态和当前空间会员状态");
   assert.ok(personalPage.includes("manualConfirmations") && personalPage.includes("blockers"), "会员注销前置检查必须展示阻断项和人工核对项");
-  assert.ok(corporatePage.includes("corporateEmployees") && corporatePage.includes('role: "admin"'), "企业详情必须支持个人会员成为企业管理员或员工");
+  assert.ok(corporatePage.includes("corporateEmployees") && /(role|value): "admin"/u.test(corporatePage), "企业详情必须支持个人会员成为企业管理员或员工");
   assert.ok(planPage.includes("publishPlan") && planPage.includes("restorePlan"), "会员方案页必须保留版本发布与历史恢复入口");
   ok("页面契约：新会员四页面入口、权限、审核、账号/空间状态、企业员工和方案版本闭环齐备");
 
@@ -391,14 +402,15 @@ void (async () => {
   // ============ 13. 页面契约：新企业会员与账号入口 ============
   // 新会员页面不再依赖已退役的 CustomerMasterPage；企业主档、管理员/员工关系
   // 与企业方案授予都在独立企业会员页完成，且员工选择器只能选择当前空间的个人会员。
+  // 企业会员属租户共享事实（MEMBER-TENANT-01），页面门禁走租户级会员权限判定。
   assert.match(
     corporatePage,
-    /const canManage = hasPermission\("rental-os:corporate:manage"\)/u,
+    /const canManage = hasTenantMembershipPermission\("rental-os:corporate:manage"\)/u,
     "企业资料编辑必须按「企业客户管理」权限门禁"
   );
   assert.match(
     corporatePage,
-    /const canEmployeeManage = hasPermission\("rental-os:corporate:employee-manage"\)/u,
+    /const canEmployeeManage = hasTenantMembershipPermission\("rental-os:corporate:employee-manage"\)/u,
     "企业管理员与员工关系必须按独立权限门禁"
   );
   for (const method of ["corporate", "saveCorporate", "corporateEmployees", "saveCorporateEmployee", "assignPlan", "revokePlanAssignment"]) {
@@ -412,7 +424,7 @@ void (async () => {
     /changeMembershipStatus[\s\S]{0,300}acknowledgedManualChecks: values\.acknowledgedManualChecks/u,
     "注销空间会员关系也必须回传人工核对确认"
   );
-  assert.ok(api.includes("workspaceClosability"), "空间会员注销必须有按当前空间检查的预览接口");
+  assert.ok(api.includes("membershipClosability"), "租户会员注销必须有前置检查的预览接口");
   ok("页面契约：企业资料、个人员工关系、企业方案和会员状态均在新页面闭环");
 
   // ============ 14. 无账号客户：状态入口先禁用，开通后才可管理 ============
