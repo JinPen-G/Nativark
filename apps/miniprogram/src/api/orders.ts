@@ -1,5 +1,8 @@
 import type {
   ClientCancellationPreview,
+  ClientFeeItemsResponse,
+  ClientFeeResponseRequest,
+  ClientFeeResponseResult,
   ClientFulfillmentView,
   ClientMyOrdersResponse,
   ClientOrderExtensionRequest,
@@ -67,4 +70,15 @@ export async function applyExtension(orderId: string, input: ClientOrderExtensio
 /** 资金校验后的生效动作，不是付款入口；补款须先经收银台完成。 */
 export async function activatePaidExtension(orderId: string, extensionId: string, idempotencyKey: string): Promise<ExtensionResult> {
   return request<ExtensionResult>(`/orders/${encodeURIComponent(orderId)}/extensions/${encodeURIComponent(extensionId)}/pay`, { method: "POST", idempotencyKey });
+}
+
+/* ---------- MP-11：检查异常费用的本人确认与异议 ---------- */
+
+export async function fetchFeeItems(orderId: string): Promise<ClientFeeItemsResponse> {
+  return request<ClientFeeItemsResponse>(`/orders/${encodeURIComponent(orderId)}/fee-items`);
+}
+
+/** 追加式响应：确认或异议；同一决定按幂等键重放。 */
+export async function respondToFee(orderId: string, inspectionId: string, exceptionIndex: number, input: ClientFeeResponseRequest, idempotencyKey: string): Promise<ClientFeeResponseResult> {
+  return request<ClientFeeResponseResult>(`/orders/${encodeURIComponent(orderId)}/fee-items/${encodeURIComponent(inspectionId)}/${exceptionIndex}/response`, { method: "POST", data: input, idempotencyKey });
 }

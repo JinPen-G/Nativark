@@ -1,0 +1,96 @@
+<view class="screen">
+  <nav-bar title="注销账号"></nav-bar>
+  <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
+
+  <block wx:elif="{{!available}}">
+    <view class="section">
+      <view class="card">
+        <view class="subtitle">在线注销暂未开通</view>
+        <view class="muted mt-8">本商户尚未开通自助注销。注销需要核对你在所有服务的在途订单、押金与待退款，请联系商户办理。</view>
+        <button class="btn btn--primary btn--block mt-24" hover-class="btn-hover" bindtap="onContact">联系商户</button>
+      </view>
+    </view>
+  </block>
+
+  <block wx:else>
+    <block wx:if="{{step === 'preview'}}">
+      <view class="section">
+        <view class="card">
+          <view class="subtitle">注销前请确认</view>
+          <view class="muted mt-8">注销后 {{phoneMasked}} 将无法登录本商户小程序，会员资料与权益一并失效。批准注销不代表退款或押金/预授权已完成，资金动作仍由商户按记录办理。</view>
+        </view>
+      </view>
+
+      <view wx:if="{{blockers.length}}" class="section section--tight">
+        <view class="card">
+          <view class="subtitle">暂不能注销</view>
+          <view class="muted small mt-8">请先处理以下事项后再申请注销：</view>
+          <view class="notice notice--danger mt-8" wx:for="{{blockers}}" wx:key="code">
+            <view class="row row--between"><text>{{item.message}}</text><text wx:if="{{item.count}}" class="ml-12">{{item.count}}</text></view>
+          </view>
+          <view class="row gap-8 mt-16">
+            <button class="btn btn--small btn--secondary" hover-class="btn-hover" bindtap="onOpenOrders">查看我的订单</button>
+            <button class="btn btn--small btn--outline" hover-class="btn-hover" bindtap="onContact">联系商户</button>
+          </view>
+        </view>
+      </view>
+
+      <view wx:if="{{closable && manualConfirmations.length}}" class="section section--tight">
+        <view class="card">
+          <view class="subtitle">请逐项确认</view>
+          <checkbox-group bindchange="onToggleConfirm">
+            <label class="consent mt-12" wx:for="{{manualConfirmations}}" wx:key="code">
+              <checkbox value="{{item.code}}" color="#1677FF" />
+              <text class="ml-8">{{item.message}}</text>
+            </label>
+          </checkbox-group>
+        </view>
+      </view>
+
+      <view wx:if="{{closable}}" class="section section--tight">
+        <view class="card">
+          <view class="subtitle">注销原因（可选）</view>
+          <view class="input-box mt-8"><input placeholder="便于商户改进（可选）" maxlength="200" value="{{reason}}" bindinput="onReasonInput" /></view>
+        </view>
+      </view>
+
+      <view wx:if="{{formError}}" class="section section--tight"><view class="notice notice--danger">{{formError}}</view></view>
+
+      <view wx:if="{{closable}}" class="bottom-bar">
+        <button class="btn btn--danger btn--cta btn--block" hover-class="btn-hover" bindtap="onSendCode" disabled="{{submitting || !acknowledgedAll}}">{{submitting ? '发送中…' : '获取验证码并继续'}}</button>
+      </view>
+    </block>
+
+    <block wx:elif="{{step === 'code'}}">
+      <view class="section">
+        <view class="card">
+          <view class="subtitle">验证码确认</view>
+          <view class="muted mt-8">已向 {{maskedDestination}} 发送验证码。请输入本账号手机号与验证码以确认注销。</view>
+          <view wx:if="{{developmentCode}}" class="muted small mt-8">开发环境验证码：{{developmentCode}}</view>
+          <view class="field mt-16">
+            <view class="field__label">本账号手机号</view>
+            <view class="input-box"><input type="number" placeholder="请输入本账号手机号" value="{{phone}}" bindinput="onPhoneInput" /></view>
+            <view wx:if="{{errors.phone}}" class="field__error">{{errors.phone}}</view>
+          </view>
+          <view class="field mt-16">
+            <view class="field__label">验证码</view>
+            <view class="input-box"><input type="number" placeholder="6 位验证码" maxlength="6" value="{{code}}" bindinput="onCodeInput" /></view>
+            <view wx:if="{{errors.code}}" class="field__error">{{errors.code}}</view>
+          </view>
+          <view class="row mt-12">
+            <text wx:if="{{retryAfter > 0}}" class="muted small">{{retryAfter}}s 后可重新发送</text>
+            <text wx:else class="link small" bindtap="onSendCode">重新发送验证码</text>
+          </view>
+        </view>
+      </view>
+
+      <view wx:if="{{formError}}" class="section section--tight"><view class="notice notice--danger">{{formError}}</view></view>
+
+      <view class="bottom-bar">
+        <button class="btn" hover-class="btn-hover" bindtap="onBackToPreview" disabled="{{submitting}}">返回</button>
+        <view class="grow"></view>
+        <button class="btn btn--danger btn--cta ml-12" hover-class="btn-hover" bindtap="onSubmit" disabled="{{submitting}}">{{submitting ? '注销中…' : '确认注销'}}</button>
+      </view>
+    </block>
+  </block>
+</view>

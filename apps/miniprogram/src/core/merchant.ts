@@ -1,5 +1,5 @@
+import type { ClientChannelBootstrapResponse } from "@rental-os/shared";
 import { fetchBootstrap, listPublicServices } from "../api/merchant";
-import type { ChannelBootstrapContract } from "../contracts/planned";
 import { Emitter } from "./events";
 import { currentSession, lastServiceCode } from "./session";
 import { STORAGE_KEYS, readStorage, writeStorage } from "./storage";
@@ -24,9 +24,9 @@ export interface MerchantInfo {
   logoUrl?: string;
   servicePhone?: string;
   serviceHours?: string;
-  agreements?: ChannelBootstrapContract["agreements"];
+  agreements?: ClientChannelBootstrapResponse["agreements"];
   loginMethods: Array<"wechat_phone" | "sms" | "password">;
-  capabilities: NonNullable<ChannelBootstrapContract["capabilities"]>;
+  capabilities: ClientChannelBootstrapResponse["capabilities"];
   services: MerchantService[];
   defaultServiceCode?: string;
   /** 数据来自拟新增启动接口（true）还是现有公开接口回退（false）。 */
@@ -44,7 +44,16 @@ export function cachedMerchant(): MerchantInfo | undefined {
   return cached;
 }
 
-function fromBootstrap(contract: ChannelBootstrapContract): MerchantInfo {
+/** 回退投影下未知的能力一律按关闭处理，页面据此隐藏入口而不是伪装可用。 */
+const CLOSED_CAPABILITIES: ClientChannelBootstrapResponse["capabilities"] = {
+  publicCatalog: false,
+  wechatPay: false,
+  delivery: false,
+  feeResponse: false,
+  accountClosure: false
+};
+
+function fromBootstrap(contract: ClientChannelBootstrapResponse): MerchantInfo {
   const services: MerchantService[] = contract.services.map((row) => ({
     code: row.code,
     name: row.name,
@@ -58,8 +67,8 @@ function fromBootstrap(contract: ChannelBootstrapContract): MerchantInfo {
     servicePhone: contract.merchant.servicePhone,
     serviceHours: contract.merchant.serviceHours,
     agreements: contract.agreements,
-    loginMethods: contract.loginMethods?.length ? contract.loginMethods : ["password"],
-    capabilities: contract.capabilities ?? {},
+    loginMethods: contract.loginMethods.length ? contract.loginMethods : ["password"],
+    capabilities: contract.capabilities,
     services,
     defaultServiceCode: contract.defaultServiceCode ?? services.find((row) => row.isDefault)?.code ?? services[0]?.code,
     fromBootstrap: true,
@@ -81,7 +90,7 @@ export async function loadMerchant(force = false): Promise<MerchantInfo> {
       info = {
         name: fallback.tenantName,
         loginMethods: ["password"],
-        capabilities: {},
+        capabilities: CLOSED_CAPABILITIES,
         services,
         defaultServiceCode: services.find((row) => row.isDefault)?.code ?? services[0]?.code,
         fromBootstrap: false,

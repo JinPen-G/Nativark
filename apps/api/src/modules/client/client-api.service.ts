@@ -1,11 +1,17 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional, UnauthorizedException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
 import {
   CLIENT_API_VERSION,
   DEFAULT_RENTAL_PAYMENT_METHODS,
   RentalCoreOrderStatus,
   type ClientCancellationPreview,
   type ClientCatalogLocation,
+  type ClientCatalogResponse,
   type ClientCatalogStartingPrice,
+  type ClientChannelBootstrapResponse,
+  type ClientFeeItemView,
+  type ClientFeeItemsResponse,
+  type ClientFeeResponseRequest,
+  type ClientFeeResponseResult,
   type ClientMiniProgramPaymentIntentRequest,
   type ClientMyOrdersQuery,
   type ClientMyOrdersResponse,
@@ -56,6 +62,12 @@ import { FileStorageRuntimeService } from "../integrations/file-storage.runtime.
 import { ClientAuthService, type ClientRequestContext } from "./client-auth.service";
 import { RentalDocumentService } from "../rental-core/rental-document.service";
 import { CustomerCorporateSettlementService } from "../platform/customer-corporate-settlement.service";
+import { ClientDeliveryAddressService } from "./client-delivery-address.service";
+import { ClientWechatAuthService } from "./client-wechat-auth.service";
+import { validateInspectionCustomerResponse } from "../rental-core/rental-inspection-customer-response";
+import { runWithRequestIdentity } from "../../common/request-identity";
+
+const DELIVERY_MODES = new Set<string>(["delivery", "onsite_delivery"]);
 
 interface ClientOrderRequestContext {
   headers?: Record<string, unknown>;
@@ -85,7 +97,9 @@ export class ClientApiService {
     private readonly payments: PaymentRuntimeService,
     private readonly files: FileStorageRuntimeService,
     private readonly documents: RentalDocumentService,
-    @Optional() private readonly corporateSettlement?: CustomerCorporateSettlementService
+    @Optional() private readonly corporateSettlement?: CustomerCorporateSettlementService,
+    @Optional() private readonly addresses?: ClientDeliveryAddressService,
+    @Optional() private readonly wechat?: ClientWechatAuthService
   ) {}
 
   private context(tenantId: string): BusinessContext {
@@ -122,8 +136,9 @@ export class ClientApiService {
     return order;
   }
 
-  private orderView(order: RentalOrder): ClientOrderView {
+  private orderView(order: RentalOrder, deliveryAddress?: ClientOrderView["deliveryAddress"]): ClientOrderView {
     return {
+      deliveryAddress,
       id: order.id,
       orderNo: order.orderNo,
       status: String(order.status),
@@ -162,10 +177,120 @@ export class ClientApiService {
     };
   }
 
-  async catalog(context: ClientRequestContext) {
-    const business = this.context(context.tenantId);
+  async catalog(context: ClientRequestContext): Promise<ClientCatalogResponse> {
     const workspaces = await this.auth.listPublicWorkspaces(context.tenantCode);
     const workspace = workspaces.workspaces.find((row) => row.code === context.workspaceCode);
+    return this.buildCatalog(context.tenantId, context.tenantCode, {
+      workspaceCode: context.workspaceCode,
+      workspaceName: context.workspaceName,
+      categoryCode: context.categoryCode,
+      membershipStatus: context.membershipStatus,
+      isDefault: workspace?.isDefault
+    });
+  }
+
+  /**
+   * MP-03 公开游客目录：只按商户公开编码与**已发布到小程序渠道**的服务读取。
+   * 与登录目录同一投影（白名单字段），在服务端按该空间建立请求上下文；没有渠道发布则 404，
+   * 不因空间 active 就自动对游客开放。
+   */
+  async publicCatalog(tenantCode: string, serviceCode: string): Promise<ClientCatalogResponse> {
+    const tenant = await this.prisma.tenant.findFirst({ where: { code: tenantCode.trim(), status: "ACTIVE" }, select: { id: true, code: true } });
+    if (!tenant) throw new NotFoundException("商户不存在");
+    const workspace = await this.prisma.businessWorkspace.findFirst({
+      where: { tenantId: tenant.id, code: serviceCode.trim(), status: "ACTIVE", miniProgramPublications: { some: { tenantId: tenant.id, enabled: true, channel: { enabled: true } } } },
+      select: { id: true, code: true, name: true, categoryCode: true, isDefault: true }
+    });
+    if (!workspace) throw new NotFoundException("该服务尚未开放游客浏览");
+    return runWithRequestIdentity({ tenantId: tenant.id, workspaceId: workspace.id, isSaasAdmin: false }, () =>
+      this.buildCatalog(tenant.id, tenant.code, { workspaceCode: workspace.code, workspaceName: workspace.name, categoryCode: String(workspace.categoryCode), membershipStatus: "guest", isDefault: workspace.isDefault })
+    );
+  }
+
+  /** 游客读取已发布服务的商品图片：同一白名单与同一图片读取器，不暴露本地路径。 */
+  async readPublicCatalogItemImage(tenantCode: string, serviceCode: string, itemGroupId: string, imageId: string) {
+    const tenant = await this.prisma.tenant.findFirst({ where: { code: tenantCode.trim(), status: "ACTIVE" }, select: { id: true } });
+    if (!tenant) throw new NotFoundException("商户不存在");
+    const workspace = await this.prisma.businessWorkspace.findFirst({
+      where: { tenantId: tenant.id, code: serviceCode.trim(), status: "ACTIVE", miniProgramPublications: { some: { tenantId: tenant.id, enabled: true, channel: { enabled: true } } } },
+      select: { id: true }
+    });
+    if (!workspace) throw new NotFoundException("该服务尚未开放游客浏览");
+    return runWithRequestIdentity({ tenantId: tenant.id, workspaceId: workspace.id, isSaasAdmin: false }, async () => {
+      const business = this.context(tenant.id);
+      const item = business.groups.find((group) => group.id === itemGroupId && group.status === "enabled");
+      if (!item) throw new NotFoundException("商品不存在");
+      return this.core.readItemGroupImage(tenant.id, itemGroupId, imageId);
+    });
+  }
+
+  /**
+   * 渠道启动配置（MP-01）：商户已发布渠道时返回品牌/协议/客服/已发布服务与能力开关；
+   * 未配置渠道时按启用空间回退，只有服务列表与租户名，并标注来源，不用平台默认品牌冒充商户。
+   */
+  async channelBootstrap(tenantCode: string, appId?: string): Promise<ClientChannelBootstrapResponse> {
+    const tenant = await this.prisma.tenant.findFirst({ where: { code: tenantCode.trim(), status: "ACTIVE" }, select: { id: true, code: true, name: true } });
+    if (!tenant) throw new NotFoundException("商户不存在");
+    const channel = await this.prisma.miniProgramChannel.findFirst({
+      where: { tenantId: tenant.id, enabled: true, ...(appId?.trim() ? { appId: appId.trim() } : {}) },
+      include: { publishedWorkspaces: { where: { enabled: true }, include: { workspace: { select: { code: true, name: true, categoryCode: true, isDefault: true, status: true } } } } },
+      orderBy: { updatedAt: "desc" }
+    });
+    const workspaces = await this.prisma.businessWorkspace.findMany({ where: { tenantId: tenant.id, status: "ACTIVE" }, select: { code: true, name: true, categoryCode: true, isDefault: true }, orderBy: [{ isDefault: "desc" }, { code: "asc" }] });
+    const integrationCatalog = await this.tenantIntegrations.catalog(tenant.id);
+    const wechatPayReady = integrationCatalog.configs.some((item) => item.capability === "payment" && item.provider === "wechat_pay" && item.enabled && item.isDefault && item.lastTestStatus === "passed" && item.lastTestMode === "live");
+    const smsReady = integrationCatalog.configs.some((item) => item.capability === "sms" && item.enabled && item.isDefault) || process.env.NODE_ENV !== "production";
+    if (!channel) {
+      const services = workspaces.map((row) => ({ code: row.code, name: row.name, categoryCode: String(row.categoryCode), isDefault: row.isDefault, status: "open" as const }));
+      return {
+        apiVersion: CLIENT_API_VERSION,
+        tenantCode: tenant.code,
+        merchant: { name: tenant.name },
+        services,
+        defaultServiceCode: services.find((row) => row.isDefault)?.code ?? services[0]?.code,
+        loginMethods: smsReady ? ["sms", "password"] : ["password"],
+        capabilities: { publicCatalog: false, wechatPay: false, delivery: false, feeResponse: true, accountClosure: true },
+        source: "workspace_directory"
+      };
+    }
+    const published = channel.publishedWorkspaces.filter((row) => row.workspace.status === "ACTIVE").map((row) => row.workspace);
+    const services = published.map((row) => ({ code: row.code, name: row.name, categoryCode: String(row.categoryCode), isDefault: row.isDefault, status: "open" as const }));
+    const deliveryEnabled = published.length > 0 && await this.anyWorkspaceEnablesDelivery(tenant.id, published.map((row) => row.code));
+    return {
+      apiVersion: CLIENT_API_VERSION,
+      tenantCode: tenant.code,
+      merchant: { name: channel.brandName?.trim() || tenant.name, logoUrl: channel.brandLogoUrl ?? undefined, servicePhone: channel.customerServicePhone ?? undefined, serviceHours: channel.customerServiceHours ?? undefined },
+      services,
+      defaultServiceCode: services.find((row) => row.isDefault)?.code ?? services[0]?.code,
+      agreements: channel.userAgreementVersion && channel.privacyPolicyVersion
+        ? {
+            userAgreement: { name: "用户服务协议", version: channel.userAgreementVersion, url: channel.userAgreementUrl ?? undefined },
+            privacyPolicy: { name: "隐私政策", version: channel.privacyPolicyVersion, url: channel.privacyPolicyUrl ?? undefined }
+          }
+        : undefined,
+      loginMethods: [...(channel.appSecretEncrypted ? ["wechat_phone" as const] : []), ...(smsReady ? ["sms" as const] : []), "password"],
+      capabilities: { publicCatalog: services.length > 0, wechatPay: wechatPayReady && Boolean(channel.appSecretEncrypted), delivery: deliveryEnabled, feeResponse: true, accountClosure: true },
+      source: "channel"
+    };
+  }
+
+  private async anyWorkspaceEnablesDelivery(tenantId: string, workspaceCodes: string[]): Promise<boolean> {
+    const rows = await this.prisma.businessWorkspace.findMany({ where: { tenantId, code: { in: workspaceCodes } }, select: { id: true } });
+    for (const row of rows) {
+      try {
+        const enabled = runWithRequestIdentity({ tenantId, workspaceId: row.id, isSaasAdmin: false }, () => this.core.getBusinessSettings(tenantId).fulfillment.enabledModes);
+        if (enabled.some((mode) => DELIVERY_MODES.has(mode))) return true;
+      } catch {
+        // 空间未初始化经营配置：不视为支持配送。
+      }
+    }
+    return false;
+  }
+
+  private async buildCatalog(tenantId: string, tenantCode: string, summary: ClientWorkspaceSummary): Promise<ClientCatalogResponse> {
+    const business = this.context(tenantId);
+    const context = { tenantId, tenantCode, workspaceCode: summary.workspaceCode, workspaceName: summary.workspaceName, categoryCode: summary.categoryCode, membershipStatus: summary.membershipStatus };
+    const workspace = summary;
     // 参考起价：当前生效价格版本中，覆盖该型号（直接或经其定价分组）的最低基础单价。
     // 没有生效版本时不给价格，客户端显示“选租期查看报价”，不能以 0 元替代。
     const rates = await this.business.listSpaceRatesAt(context.tenantId, business, new Date().toISOString());
@@ -194,12 +319,16 @@ export class ClientApiService {
       } satisfies ClientWorkspaceSummary,
       categoryCode: business.profile.categoryCode,
       timeZone: business.settings.calendar.timeZone ?? "Asia/Shanghai",
-      items: business.groups.filter((item) => item.status === "enabled").map((item) => ({ id: item.id, code: item.code, name: item.name, description: item.description, inventoryMode: item.inventoryMode, images: item.images?.map((image) => ({ url: `/api/client/v1/catalog/items/${encodeURIComponent(item.id)}/images/${encodeURIComponent(image.id)}`, alt: image.fileName })), attributes: item.attributes, startingPrice: startingPriceOf(item.id) })),
+      items: business.groups.filter((item) => item.status === "enabled").map((item) => ({ id: item.id, code: item.code, name: item.name, description: item.description, inventoryMode: item.inventoryMode, images: item.images?.map((image) => ({ url: summary.membershipStatus === "guest" ? `/api/client/v1/public/catalog/items/${encodeURIComponent(item.id)}/images/${encodeURIComponent(image.id)}?tenantCode=${encodeURIComponent(tenantCode)}&service=${encodeURIComponent(summary.workspaceCode)}` : `/api/client/v1/catalog/items/${encodeURIComponent(item.id)}/images/${encodeURIComponent(image.id)}`, alt: image.fileName })), attributes: item.attributes, startingPrice: startingPriceOf(item.id) })),
       pricingGroups: enabledPricingGroups.map((group) => ({ id: group.id, code: group.code, name: group.name, memberItemGroupIds: group.memberItemGroupIds, enabled: group.status === "enabled" })),
       services: this.business.listServices(context.tenantId, business).filter((service) => service.status === "enabled").map((service) => ({ id: service.id, code: service.code, name: service.name, description: service.terms, pricingUnit: service.billingUnit, enabled: true })),
       // 地点只投影客户可见的公开信息：地址、营业时段、门店电话与取还能力；经营主体与结算方式不外露。
       locations: business.locations.filter((location) => location.status === "enabled").map((location): ClientCatalogLocation => ({ id: location.id, code: location.code, name: location.name, status: location.status, address: location.address || undefined, businessHours: location.businessHours || undefined, contactPhone: location.contactPhone || undefined, capabilities: location.capabilities })),
-      discountPlans: this.business.listDiscountPlans(context.tenantId, business).filter((plan) => plan.status === "enabled").map((plan) => ({ id: plan.id, code: plan.code, name: plan.name, status: plan.status }))
+      discountPlans: this.business.listDiscountPlans(context.tenantId, business).filter((plan) => plan.status === "enabled").map((plan) => ({ id: plan.id, code: plan.code, name: plan.name, status: plan.status })),
+      fulfillment: {
+        enabledModes: business.settings.fulfillment?.enabledModes ?? [],
+        allowDifferentReturnLocation: business.settings.fulfillment?.allowDifferentReturnLocation ?? false
+      }
     };
   }
 
@@ -296,7 +425,11 @@ export class ClientApiService {
         qualifications: true,
         coupons: true,
         orderExtensions: true,
-        notifications: true
+        notifications: true,
+        delivery: business.settings.fulfillment.enabledModes.some((mode) => DELIVERY_MODES.has(mode)),
+        feeResponse: true,
+        accountClosure: true,
+        wechatBinding: this.wechat ? await this.wechat.channelReady(context.tenantId) : false
       },
       payment
     };
@@ -653,13 +786,27 @@ export class ClientApiService {
 
   async createQuote(context: ClientRequestContext, input: ClientCreateQuoteRequest) {
     this.requireActiveMembership(context);
+    const { deliveryAddressId, ...rest } = input;
+    const business = this.context(context.tenantId);
+    // 配送类履约必须选本人地址；自取不接受地址（避免把地址当成“也送货”的暗示）。
+    const isDelivery = DELIVERY_MODES.has(input.fulfillmentMode);
+    if (isDelivery && !deliveryAddressId) throw new BadRequestException("配送订单必须选择收货地址");
+    if (!isDelivery && deliveryAddressId) throw new BadRequestException("自取订单不需要收货地址");
+    const address = deliveryAddressId ? await this.requireAddressService().requireOwnAddress(context, deliveryAddressId) : undefined;
     const request: RentalQuoteRequest = {
-      ...input,
+      ...rest,
       customerType: "personal",
       customerId: context.customerId,
       bookingIdentity: input.bookingIdentity ?? { bookingIdentity: "personal" }
     };
-    return this.business.createQuote(context.tenantId, this.context(context.tenantId), request);
+    const quote = await this.business.createQuote(context.tenantId, business, request);
+    if (address) await this.requireAddressService().snapshotForQuote(context, quote.id, address);
+    return quote;
+  }
+
+  private requireAddressService(): ClientDeliveryAddressService {
+    if (!this.addresses) throw new ServiceUnavailableException("配送地址服务未就绪");
+    return this.addresses;
   }
 
   async getQuote(context: ClientRequestContext, quoteId: string) {
@@ -700,10 +847,14 @@ export class ClientApiService {
       endAt: quote.request.endAt,
       lines
     };
+    if (DELIVERY_MODES.has(quote.request.fulfillmentMode) && this.addresses && !(await this.addresses.hasSnapshotForQuote(context.tenantId, input.quoteId))) {
+      throw new ConflictException("配送订单缺少收货地址快照，请重新报价并选择地址");
+    }
     const created = await this.orders.createOrder(context.tenantId, orderInput, `client:${context.customerId}`, business, idempotencyKeyOf(requestContext));
     const order = await this.assertClientOrder(context, created.order.id);
     await Promise.all([this.core.persist(context.tenantId), this.business.persist(context.tenantId)]);
-    return { order: this.orderView(order), replayed: created.replayed };
+    if (this.addresses) await this.addresses.attachOrder(context.tenantId, input.quoteId, order.id);
+    return { order: this.orderView(order, await this.addresses?.snapshotForOrder(context, order)), replayed: created.replayed };
   }
 
   async listOrders(context: ClientRequestContext, query: { page?: number; pageSize?: number; status?: string }) {
@@ -785,7 +936,99 @@ export class ClientApiService {
   }
 
   async getOrder(context: ClientRequestContext, orderId: string) {
-    return this.orderView(await this.assertClientOrder(context, orderId));
+    const order = await this.assertClientOrder(context, orderId);
+    return this.orderView(order, await this.addresses?.snapshotForOrder(context, order));
+  }
+
+  /* ---------- MP-11：检查异常费用的本人确认与异议 ---------- */
+
+  private feeItemsOf(orderId: string, currency: string, records: Awaited<ReturnType<RentalCoreService["listInspections"]>>): ClientFeeItemView[] {
+    const items: ClientFeeItemView[] = [];
+    for (const record of records) {
+      record.exceptions.forEach((exception, index) => {
+        // 只展示已批准且需要本人响应的费用：待审核建议额不能显示成应收，被拒绝的异常不显示。
+        if (exception.reviewStatus !== "approved" || !(Number(exception.approvedChargeAmount ?? 0) > 0)) return;
+        const status = exception.customerResponseStatus;
+        if (!status || status === "not_required") return;
+        items.push({
+          inspectionId: record.id,
+          exceptionIndex: index,
+          stage: record.stage,
+          code: exception.code,
+          description: exception.description,
+          amount: Number(exception.approvedChargeAmount),
+          currency,
+          reviewedAt: exception.reviewedAt,
+          responseStatus: status,
+          responseReason: exception.customerResponseReason,
+          respondedAt: exception.customerRespondedAt,
+          adjustments: (exception.adjustmentHistory ?? []).map((row) => ({ fromAmount: row.fromAmount, toAmount: row.toAmount, reason: row.reason, adjustedAt: row.adjustedAt })),
+          history: (exception.customerResponseHistory ?? []).map((row) => ({ decision: row.decision, reason: row.reason, respondedAt: row.respondedAt })),
+          evidenceCount: exception.evidenceAttachments?.length ?? 0
+        });
+      });
+    }
+    return items;
+  }
+
+  async feeItems(context: ClientRequestContext, orderId: string): Promise<ClientFeeItemsResponse> {
+    const order = await this.assertClientOrder(context, orderId);
+    const records = await this.core.listInspections(context.tenantId, orderId);
+    const items = this.feeItemsOf(orderId, order.currency ?? "CNY", records);
+    return { apiVersion: CLIENT_API_VERSION, orderId, items, pendingCount: items.filter((row) => row.responseStatus === "pending").length };
+  }
+
+  /**
+   * 本人确认/异议：复用运营端同一条追加式响应链（同一校验、同一幂等动作），
+   * 只是操作人是客户本人；不接受金额、裁定结果或改写旧响应。
+   */
+  async respondToFee(context: ClientRequestContext, orderId: string, inspectionId: string, exceptionIndex: number, input: ClientFeeResponseRequest, requestContext?: ClientOrderRequestContext): Promise<ClientFeeResponseResult> {
+    this.requireActiveMembership(context);
+    const order = await this.assertClientOrder(context, orderId);
+    if (!Number.isInteger(exceptionIndex) || exceptionIndex < 0) throw new BadRequestException("异常序号无效");
+    const reason = input.reason?.trim();
+    if (!reason) throw new BadRequestException(input.decision === "disputed" ? "提出异议必须填写原因" : "请填写确认说明");
+    const operator = `client:${context.customerId}`;
+    const outcome = await this.idempotent.executeWithReplayFlag({
+      tenantId: context.tenantId,
+      action: "order.inspection-exception.customer-response",
+      key: idempotencyKeyOf(requestContext),
+      fallbackKey: `client:inspection-exception.customer-response:${inspectionId}:${exceptionIndex}:${input.decision}`,
+      request: { orderId, inspectionId, exceptionIndex, decision: input.decision, reason },
+      orderId,
+      run: async (tx) => {
+        await this.assertClientOrder(context, orderId);
+        const row = await tx.rentalInspectionRecord.findFirst({ where: { id: inspectionId, tenantId: context.tenantId, workspaceId: context.workspaceId, orderId } });
+        if (!row) throw new NotFoundException("检查记录不存在");
+        const exceptions = structuredClone(row.exceptions as unknown as Array<Record<string, unknown>>);
+        const exception = exceptions[exceptionIndex];
+        if (!exception) throw new NotFoundException("检查异常不存在");
+        const error = validateInspectionCustomerResponse({
+          reviewStatus: exception.reviewStatus as "pending" | "approved" | "rejected",
+          approvedChargeAmount: Number(exception.approvedChargeAmount ?? 0),
+          currentStatus: exception.customerResponseStatus as "not_required" | "pending" | "confirmed" | "disputed" | undefined,
+          decision: input.decision
+        });
+        if (error) throw new ConflictException(error);
+        const respondedAt = new Date().toISOString();
+        const history = Array.isArray(exception.customerResponseHistory) ? (exception.customerResponseHistory as Array<Record<string, unknown>>) : [];
+        history.push({ decision: input.decision, reason, operator, respondedAt });
+        Object.assign(exception, { customerResponseStatus: input.decision, customerResponseReason: reason, customerRespondedBy: operator, customerRespondedAt: respondedAt, customerResponseHistory: history });
+        await tx.rentalInspectionRecord.update({ where: { id: inspectionId }, data: { exceptions: exceptions as Prisma.InputJsonValue } });
+        return { inspectionId, exceptionIndex };
+      },
+      replay: async () => {
+        await this.assertClientOrder(context, orderId);
+        const row = await this.prisma.rentalInspectionRecord.findFirst({ where: { id: inspectionId, tenantId: context.tenantId, workspaceId: context.workspaceId, orderId } });
+        const exception = (row?.exceptions as unknown as Array<Record<string, unknown>> | undefined)?.[exceptionIndex];
+        return exception && exception.customerResponseStatus === input.decision ? { inspectionId, exceptionIndex } : undefined;
+      }
+    });
+    await Promise.all([this.core.persist(context.tenantId), this.business.persist(context.tenantId)]);
+    const records = await this.core.listInspections(context.tenantId, orderId);
+    const item = this.feeItemsOf(orderId, order.currency ?? "CNY", records).find((row) => row.inspectionId === outcome.result.inspectionId && row.exceptionIndex === outcome.result.exceptionIndex);
+    if (!item) throw new NotFoundException("检查异常不存在");
+    return { apiVersion: CLIENT_API_VERSION, item, replayed: outcome.replayed };
   }
 
   async fulfillment(context: ClientRequestContext, orderId: string): Promise<ClientFulfillmentView> {
@@ -999,7 +1242,13 @@ export class ClientApiService {
   async createMiniProgramPaymentIntent(context: ClientRequestContext, orderId: string, input: ClientMiniProgramPaymentIntentRequest): Promise<ClientPaymentIntentResponse> {
     this.requireActiveMembership(context);
     await this.assertClientOrder(context, orderId);
-    return this.payments.createMiniProgramPaymentIntent(context.tenantId, context.workspaceId, orderId, input);
+    const enabledMethods = this.context(context.tenantId)?.settings?.payment?.enabledMethods;
+    if (!(enabledMethods?.length ? enabledMethods : DEFAULT_RENTAL_PAYMENT_METHODS).includes("wechat_pay")) {
+      throw new ConflictException("微信支付尚未在经营空间设置中启用");
+    }
+    // openid 只来自服务端可信绑定（微信手机号登录或绑定动作），绝不接受客户端自报。
+    const identity = this.wechat ? await this.wechat.identityForSession(context) : undefined;
+    return this.payments.createMiniProgramPaymentIntent(context.tenantId, context.workspaceId, orderId, input, identity);
   }
 
   async getPaymentIntent(context: ClientRequestContext, orderId: string, intentId: string): Promise<ClientPaymentIntentResponse> {

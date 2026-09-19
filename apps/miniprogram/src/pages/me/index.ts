@@ -4,9 +4,11 @@ import { fetchMembershipBenefits } from "../../api/profile";
 import { listFavorites } from "../../core/favorites";
 import { membershipLabel, reviewLabel } from "../../core/labels";
 import { cachedMerchant, loadMerchant } from "../../core/merchant";
+import { describeError } from "../../core/errors";
 import { errorState, handleCommonViewAction, loadingState, readyState, type ViewState } from "../../core/page";
-import { currentSession, sessionEvents } from "../../core/session";
-import { ROUTES, alertDialog, buildUrl, callPhone, confirmDialog, navigate, toast } from "../../core/ui";
+import { currentSession, isWechatBound, sessionEvents } from "../../core/session";
+import { ROUTES, buildUrl, callPhone, confirmDialog, navigate, toast } from "../../core/ui";
+import { bindWechatIdentity } from "../../core/wechat";
 
 /**
  * P12 我的（V2 设计稿）：头像/手机号 → 会员横幅 → 我的订单/我的收藏/优惠券 → 实名认证/常用服务点/帮助与客服/设置。
@@ -29,6 +31,8 @@ interface MeData {
   favoriteCount: number;
   /** 会员横幅标题：已登录显示方案名（无方案时显示会员状态），未登录显示入口文案。 */
   memberTitle: string;
+  wechatBound: boolean;
+  bindingWechat: boolean;
 }
 
 Page({
@@ -47,7 +51,9 @@ Page({
     reviewText: "",
     qualificationSummary: "",
     favoriteCount: 0,
-    memberTitle: "会员权益"
+    memberTitle: "会员权益",
+    wechatBound: false,
+    bindingWechat: false
   } as MeData,
   unsubscribe: undefined as (() => void) | undefined,
 
@@ -71,7 +77,7 @@ Page({
   refresh() {
     const session = currentSession();
     const displayName = session?.customer.displayName ?? "";
-    this.setData({ signedIn: Boolean(session), displayName, avatarInitial: displayName.trim().charAt(0) || "·", phoneMasked: session?.customer.loginIdentifierMasked ?? "", favoriteCount: listFavorites().length });
+    this.setData({ signedIn: Boolean(session), displayName, avatarInitial: displayName.trim().charAt(0) || "·", phoneMasked: session?.customer.loginIdentifierMasked ?? "", favoriteCount: listFavorites().length, wechatBound: isWechatBound() });
     this.syncMemberTitle();
     if (session) void this.loadStatus();
   },
@@ -164,6 +170,33 @@ Page({
     navigate(ROUTES.locations);
   },
 
+  onAddresses() {
+    if (!this.data.signedIn) {
+      this.onLogin();
+      return;
+    }
+    navigate(ROUTES.addresses);
+  },
+
+  /** MP-02A：提前绑定微信身份，供小程序内微信支付使用（不必等到付款时）。 */
+  async onBindWechat() {
+    if (!this.data.signedIn) {
+      this.onLogin();
+      return;
+    }
+    if (this.data.wechatBound || this.data.bindingWechat) return;
+    this.setData({ bindingWechat: true });
+    try {
+      await bindWechatIdentity();
+      this.setData({ wechatBound: true });
+      toast("已绑定微信，可用于小程序内微信支付", { icon: "success" });
+    } catch (error) {
+      toast(describeError(error).message, { duration: 3000 });
+    } finally {
+      this.setData({ bindingWechat: false });
+    }
+  },
+
   onHelp() {
     navigate(buildUrl(ROUTES.legal, { doc: "help" }));
   },
@@ -189,7 +222,11 @@ Page({
   },
 
   onCloseAccount() {
-    void alertDialog("注销账号", "在线注销尚未开通。注销前商户需要核对你在所有服务的在途订单、押金与待退款，请联系商户办理。");
+    if (!this.data.signedIn) {
+      this.onLogin();
+      return;
+    }
+    navigate(ROUTES.closure);
   },
 
   onViewAction() {

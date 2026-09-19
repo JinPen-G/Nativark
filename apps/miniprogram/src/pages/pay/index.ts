@@ -9,7 +9,8 @@ import { cachedMerchant } from "../../core/merchant";
 import { formatMoney } from "../../core/money";
 import { blockedState, errorState, handleCommonViewAction, loadingState, readyState, type ViewState } from "../../core/page";
 import { forgetIntent, jsapiEnabled, launchPayment, obtainIntent, offlineMethods, rememberedIntent, rentalDue, verifyPayment, verifyWithRetries } from "../../core/payment";
-import { ROUTES, buildUrl, callPhone, navigate, redirect, requireSignIn } from "../../core/ui";
+import { ROUTES, buildUrl, callPhone, confirmDialog, navigate, redirect, requireSignIn } from "../../core/ui";
+import { bindWechatIdentity, isWechatIdentityRequired } from "../../core/wechat";
 
 /**
  * P06 收银台与付款结果（需求 §8.2）。
@@ -175,6 +176,22 @@ Page({
       intent = await obtainIntent(this.orderId);
     } catch (error) {
       this.busy = false;
+      if (isWechatIdentityRequired(error)) {
+        // 缺可信微信身份：引导先绑定（也可提前在“我的”里绑定），绑定成功后重新发起付款。
+        const ok = await confirmDialog({ title: "绑定微信支付", content: "小程序内微信支付需要先绑定你的微信身份。绑定后即可继续付款。", confirmText: "绑定并继续" });
+        if (!ok) {
+          this.setData({ phase: "idle", phaseText: "", error: "未绑定微信，暂不能在小程序内微信支付；可改用线下付款或联系商户。" });
+          return;
+        }
+        try {
+          await bindWechatIdentity();
+        } catch (bindError) {
+          this.setData({ phase: "idle", phaseText: "", error: describeError(bindError).message });
+          return;
+        }
+        void this.onPay();
+        return;
+      }
       if (isApiError(error, "UNAVAILABLE")) {
         // 服务端明确：小程序内微信支付尚未开通。不再显示支付按钮，改为线下/联系商户出口。
         this.setData({ jsapi: false, phase: this.data.offline.length ? "offline" : "unavailable", phaseText: this.data.offline.length ? "" : describeError(error).message, error: this.data.offline.length ? describeError(error).message : "" });

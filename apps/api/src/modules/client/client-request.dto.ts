@@ -38,8 +38,15 @@ import {
   type ClientPersonalMembershipRegistrationRequest,
   type ClientRefreshRequest,
   type ClientRegistrationChallengeRequest,
+  type ClientAccountClosureRequest,
+  type ClientChallengeRequest,
+  type ClientDeliveryAddressRequest,
+  type ClientFeeResponseRequest,
+  type ClientSmsLoginRequest,
   type ClientSwitchWorkspaceRequest,
   type ClientTenantTarget,
+  type ClientWechatBindRequest,
+  type ClientWechatPhoneLoginRequest,
   type ClientWorkspaceTarget,
   type VerifyClientRegistrationChallengeRequest,
   type SubmitCustomerQualificationRequest,
@@ -273,6 +280,9 @@ export class ClientCreateQuoteRequestDto implements ClientCreateQuoteRequest {
 
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => ClientQuoteServiceInputDto)
   services?: ClientQuoteServiceInputDto[];
+
+  @IsOptional() @IsString() @MaxLength(191)
+  deliveryAddressId?: string;
 }
 
 export class ClientAvailabilityLineInputDto {
@@ -394,6 +404,138 @@ export class ClientMiniProgramPaymentIntentRequestDto implements ClientMiniProgr
 
   @IsString() @IsNotEmpty() @MaxLength(191)
   idempotencyKey!: string;
+}
+
+/** 用途化验证码挑战：purpose 只允许 registration / login；注销用途由服务端按会话发起，不接受客户端声明。 */
+export class ClientChallengeRequestDto implements ClientChallengeRequest {
+  @IsString() @IsNotEmpty() @MaxLength(64)
+  tenantCode!: string;
+
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(64)
+  workspaceCode?: string;
+
+  @IsIn(CLIENT_VERIFICATION_METHODS)
+  method!: ClientChallengeRequest["method"];
+
+  @IsString() @IsNotEmpty() @MaxLength(191)
+  identifier!: string;
+
+  @IsString() @IsNotEmpty() @MaxLength(191)
+  idempotencyKey!: string;
+
+  @IsIn(["registration", "login"])
+  purpose!: ClientChallengeRequest["purpose"];
+}
+
+export class ClientSmsLoginRequestDto implements ClientSmsLoginRequest {
+  @IsString() @IsNotEmpty() @MaxLength(64)
+  tenantCode!: string;
+
+  @IsString() @IsNotEmpty() @MaxLength(64)
+  loginIdentifier!: string;
+
+  @IsString() @IsNotEmpty() @MaxLength(191)
+  verificationToken!: string;
+
+  @IsOptional() @IsString() @MaxLength(64)
+  workspaceCode?: string;
+
+  @IsOptional() @IsString() @MaxLength(128)
+  clientId?: string;
+}
+
+export class ClientWechatPhoneLoginRequestDto implements ClientWechatPhoneLoginRequest {
+  @IsString() @IsNotEmpty() @MaxLength(64)
+  tenantCode!: string;
+
+  @IsOptional() @IsString() @MaxLength(64)
+  appId?: string;
+
+  @IsString() @IsNotEmpty() @MaxLength(191)
+  loginCode!: string;
+
+  @IsString() @IsNotEmpty() @MaxLength(191)
+  phoneCode!: string;
+
+  @ValidateNested() @Type(() => ClientAgreementConsentInputDto)
+  consent!: ClientAgreementConsent;
+
+  @IsOptional() @IsString() @MaxLength(64)
+  workspaceCode?: string;
+
+  @IsOptional() @IsString() @MaxLength(128)
+  clientId?: string;
+}
+
+export class ClientWechatBindRequestDto implements ClientWechatBindRequest {
+  @IsString() @IsNotEmpty() @MaxLength(191)
+  loginCode!: string;
+
+  @IsOptional() @IsString() @MaxLength(64)
+  appId?: string;
+}
+
+export class ClientDeliveryAddressRequestDto implements ClientDeliveryAddressRequest {
+  @IsOptional() @IsString() @MaxLength(191)
+  id?: string;
+
+  @IsOptional() @IsInt() @Min(1)
+  revision?: number;
+
+  @IsString() @IsNotEmpty() @MaxLength(120)
+  recipient!: string;
+
+  @IsString() @IsNotEmpty() @MaxLength(32)
+  phone!: string;
+
+  @IsOptional() @IsString() @MaxLength(8)
+  countryCode?: string;
+
+  @IsString() @IsNotEmpty() @MaxLength(64)
+  province!: string;
+
+  @IsString() @IsNotEmpty() @MaxLength(64)
+  city!: string;
+
+  @IsOptional() @IsString() @MaxLength(64)
+  district?: string;
+
+  @IsString() @IsNotEmpty() @MaxLength(255)
+  detail!: string;
+
+  @IsOptional() @IsString() @MaxLength(16)
+  postalCode?: string;
+
+  @IsOptional() @IsNumber() @Min(-90) @Max(90)
+  latitude?: number;
+
+  @IsOptional() @IsNumber() @Min(-180) @Max(180)
+  longitude?: number;
+
+  @IsOptional() @IsBoolean()
+  isDefault?: boolean;
+}
+
+export class ClientFeeResponseRequestDto implements ClientFeeResponseRequest {
+  @IsIn(["confirmed", "disputed"])
+  decision!: ClientFeeResponseRequest["decision"];
+
+  @IsString() @IsNotEmpty() @MaxLength(1000)
+  reason!: string;
+}
+
+export class ClientAccountClosureRequestDto implements ClientAccountClosureRequest {
+  @IsString() @IsNotEmpty() @MaxLength(64)
+  loginIdentifier!: string;
+
+  @IsString() @IsNotEmpty() @MaxLength(191)
+  verificationToken!: string;
+
+  @IsBoolean()
+  acknowledgedManualChecks!: boolean;
+
+  @IsOptional() @IsString() @MaxLength(500)
+  reason?: string;
 }
 
 export class ClientPaymentIntentRequestDto implements ClientPaymentIntentRequest {

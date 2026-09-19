@@ -1,8 +1,9 @@
-import type { ClientCatalogLocation, ClientCatalogResponse, ClientCreateQuoteRequest, RentalCustomerCoupon, RentalQuoteSnapshotV1 } from "@rental-os/shared";
+import type { ClientCatalogLocation, ClientCatalogResponse, ClientCreateQuoteRequest, ClientDeliveryAddressView, RentalCustomerCoupon, RentalFulfillmentMode, RentalQuoteSnapshotV1 } from "@rental-os/shared";
+import { listAddresses } from "../../api/addresses";
 import { createQuote, fetchCoupons, fetchQuote } from "../../api/catalog";
 import { createOrder } from "../../api/orders";
 import { fetchPaymentCapabilities } from "../../api/payments";
-import { CartLocked, abandonSubmission, beginSubmission, bindQuote, cartMissing, completeSubmission, getCart, markSubmissionUnknown, quoteIsCurrent, removeLine, setLineQuantity, updateCart, type CartState } from "../../core/cart";
+import { CartLocked, abandonSubmission, beginSubmission, bindQuote, cartMissing, completeSubmission, getCart, isDeliveryMode, markSubmissionUnknown, quoteIsCurrent, removeLine, setLineQuantity, updateCart, type CartState } from "../../core/cart";
 import { loadCatalog, primaryLocation } from "../../core/catalogStore";
 import { formatRemaining, remainingMs } from "../../core/clock";
 import { describeError } from "../../core/errors";
@@ -64,6 +65,10 @@ interface CheckoutData {
   unitsText: string;
   showPeriodSheet: boolean;
   method: "pickup" | "delivery";
+  deliveryAvailable: boolean;
+  addresses: ClientDeliveryAddressView[];
+  showAddressSheet: boolean;
+  addressLabel: string;
   locations: ClientCatalogLocation[];
   store?: ClientCatalogLocation;
   showStoreSheet: boolean;
@@ -111,6 +116,10 @@ Page({
     unitsText: "",
     showPeriodSheet: false,
     method: "pickup",
+    deliveryAvailable: false,
+    addresses: [],
+    showAddressSheet: false,
+    addressLabel: "",
     locations: [],
     showStoreSheet: false,
     coupons: [],
@@ -141,6 +150,7 @@ Page({
 
   catalog: undefined as ClientCatalogResponse | undefined,
   rawCoupons: [] as RentalCustomerCoupon[],
+  deliveryMode: "delivery" as RentalFulfillmentMode,
   ticker: undefined as number | undefined,
   requestVersion: 0,
 
@@ -232,11 +242,15 @@ Page({
 
   applyCatalog(catalog: ClientCatalogResponse, timeZone: string) {
     const locations = catalog.locations.filter((row) => row.status === "enabled" && (!row.capabilities || row.capabilities.includes("pickup")));
+    // 同城配送是否开通：以经营空间履约设置为准；取第一个配送类方式作为下单时的履约方式。
+    const deliveryModes = (catalog.fulfillment?.enabledModes ?? []).filter((mode) => isDeliveryMode(mode));
+    this.deliveryMode = deliveryModes[0] ?? "delivery";
     this.setData({
       timeZone,
       zoneNote: zoneLabel(timeZone),
       minDate: todayInZone(timeZone),
       locations,
+      deliveryAvailable: deliveryModes.length > 0,
       services: catalog.services.filter((row) => row.enabled).map((row) => ({ id: row.id, name: row.name, description: row.description ?? "", selected: false }))
     });
     // 默认门店：清单未选时预选第一家可领取门店（服务端仍会校验）。
@@ -278,7 +292,8 @@ Page({
       endTime: end.time || this.data.endTime,
       startText: cart.startAt ? `${formatBusinessDate(cart.startAt, this.data.timeZone)} ${formatBusinessTime(cart.startAt, this.data.timeZone)}` : "",
       endText: cart.endAt ? `${formatBusinessDate(cart.endAt, this.data.timeZone)} ${formatBusinessTime(cart.endAt, this.data.timeZone)}` : "",
-      method: "pickup",
+      method: isDeliveryMode(cart.fulfillmentMode) ? "delivery" : "pickup",
+      addressLabel: cart.deliveryAddressLabel ?? "",
       store,
       memo: cart.memo ?? "",
       services: this.data.services.map((row) => ({ ...row, selected: cart.services.some((item) => item.serviceId === row.id) })),
@@ -382,11 +397,51 @@ Page({
 
   /* ---------- 取还方式 / 门店 ---------- */
   onPickMethod(event: WechatMiniprogram.TouchEvent) {
-    const method = String(event.currentTarget.dataset.method ?? "pickup");
-    if (method === "delivery") {
+    if (this.data.locked) return;
+    const method = String(event.currentTarget.dataset.method ?? "pickup") === "delivery" ? "delivery" : "pickup";
+    if (method === "delivery" && !this.data.deliveryAvailable) {
       toast("同城配送尚未开通，当前请选择门店自提", { duration: 3000 });
       return;
     }
+    if (method === this.data.method) return;
+    const mode: RentalFulfillmentMode = method === "delivery" ? this.deliveryMode : "store_pickup_return";
+    this.mutate((draft) => {
+      draft.fulfillmentMode = mode;
+    });
+    void this.requestQuote();
+  },
+
+  /* ---------- 配送地址（MP-06） ---------- */
+  async onOpenAddress() {
+    if (this.data.locked) return;
+    this.setData({ showAddressSheet: true });
+    try {
+      const addresses = await listAddresses();
+      this.setData({ addresses });
+    } catch (error) {
+      toast(describeError(error).message, { duration: 3000 });
+    }
+  },
+
+  onCloseAddress() {
+    this.setData({ showAddressSheet: false });
+  },
+
+  onPickAddress(event: WechatMiniprogram.TouchEvent) {
+    const id = String(event.currentTarget.dataset.id ?? "");
+    const addr = this.data.addresses.find((row) => row.id === id);
+    if (!addr) return;
+    const label = `${addr.recipient} · ${addr.phoneMasked}｜${addr.province}${addr.city}${addr.district ?? ""}${addr.detail}`;
+    this.setData({ showAddressSheet: false });
+    this.mutate((draft) => {
+      draft.deliveryAddressId = addr.id;
+      draft.deliveryAddressLabel = label;
+    });
+    void this.requestQuote();
+  },
+
+  onManageAddresses() {
+    navigate(ROUTES.addresses);
   },
 
   onOpenStore() {
@@ -506,14 +561,17 @@ Page({
   /* ---------- 报价 ---------- */
   buildRequest(cart: CartState): ClientCreateQuoteRequest {
     const note = cart.memo?.trim() || undefined;
+    const delivery = isDeliveryMode(cart.fulfillmentMode);
     return {
-      fulfillmentMode: "store_pickup_return",
+      fulfillmentMode: cart.fulfillmentMode as RentalFulfillmentMode,
       fulfillmentLocationId: cart.locationId!,
       startAt: cart.startAt!,
       endAt: cart.endAt!,
       customerCouponId: cart.couponId || undefined,
       lines: cart.lines.map((line) => ({ itemGroupId: line.itemGroupId, pricingGroupId: line.pricingGroupId, quantity: line.quantity, note })),
-      services: cart.services.length ? cart.services.map((row) => ({ serviceId: row.serviceId, quantity: row.quantity })) : undefined
+      services: cart.services.length ? cart.services.map((row) => ({ serviceId: row.serviceId, quantity: row.quantity })) : undefined,
+      // 配送履约必须带本人地址簿地址；服务端在报价时固化收货快照。自取方式不传。
+      deliveryAddressId: delivery ? cart.deliveryAddressId : undefined
     };
   },
 

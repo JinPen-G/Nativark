@@ -100,8 +100,8 @@ const status = (req, statusCode, message = "error") => req.success({ statusCode,
 
 /* ---------------- 工程结构（AC-18） ---------------- */
 
-test("app.json 声明 18 个页面、4 个 Tab（带图标），每个页面与组件四件套齐全；组件按页面注册以保留按需注入", () => {
-  assert.equal(app.pages.length, 18);
+test("app.json 声明 20 个页面、4 个 Tab（带图标），每个页面与组件四件套齐全；组件按页面注册以保留按需注入", () => {
+  assert.equal(app.pages.length, 20);
   assert.equal(new Set(app.pages).size, app.pages.length);
   same(app.tabBar.list.map((row) => row.text), ["首页", "分类", "订单", "我的"]);
   for (const row of app.tabBar.list) {
@@ -733,21 +733,33 @@ test("面向客户的用词不暴露内部枚举，未知取值原样返回而�
 
 /* ---------------- 拟新增契约对账 ---------------- */
 
-test("拟新增契约表与服务端 OpenAPI 文档一致：登记项确实尚未提供，服务端补上后本用例提醒接线", () => {
+test("契约对账：无拟新增遗留项，已交付契约的路径确实出现在服务端 OpenAPI 文档中", () => {
   const openapi = fs.readFileSync(path.resolve(__dirname, "../apps/api/src/contracts/openapi-document.ts"), "utf8");
   const r = runtime();
-  const { PLANNED_CONTRACTS, contractMissing, plannedUnavailable } = r.load("contracts/planned");
+  const { PLANNED_CONTRACTS, DELIVERED_CONTRACTS, contractMissing, featureUnavailable } = r.load("contracts/planned");
   const { ApiError } = r.load("core/http");
-  for (const [key, contract] of Object.entries(PLANNED_CONTRACTS)) {
+
+  // 未接通契约的登记表必须为空：新增拟接契约先登记，接通后从此表移除。
+  assert.equal(Object.keys(PLANNED_CONTRACTS).length, 0, "PLANNED_CONTRACTS 应为空——仍有待接契约请补充对应静态断言");
+
+  // 每个已交付契约都要真的能在 OpenAPI 文档里找到对应路径，避免前端调用未存在的接口。
+  assert.ok(DELIVERED_CONTRACTS.length >= 8, "已交付契约数量异常偏少，可能被误删");
+  for (const contract of DELIVERED_CONTRACTS) {
     const literal = `/api/client/v1${contract.path}`;
-    assert.equal(openapi.includes(`"${literal}"`), false, `${key}（${contract.method} ${contract.path}）已出现在 OpenAPI 文档中：请从 PLANNED_CONTRACTS 移除并接通真实契约`);
+    assert.equal(openapi.includes(`"${literal}"`), true, `${contract.task}（${contract.method} ${contract.path}）未出现在 OpenAPI 文档中：契约与实现不一致`);
     assert.match(contract.task, /^MP-\d{2}[AB]?$/);
-    assert.ok(contract.userMessage.length > 4);
   }
+
+  // 功能级关闭（未开通/未启用）统一识别为 404/501/503 或 NOT_FOUND/UNAVAILABLE；业务冲突不算“未开通”。
   assert.equal(contractMissing(new ApiError("NOT_FOUND", "x", { status: 404 })), true);
   assert.equal(contractMissing(new ApiError("UNAVAILABLE", "x", { status: 503 })), true);
+  assert.equal(contractMissing(new ApiError("NOT_IMPLEMENTED", "x", { status: 501 })), true);
   assert.equal(contractMissing(new ApiError("CONFLICT", "x", { status: 409 })), false);
-  assert.equal(plannedUnavailable("wechatPhoneLogin").code, "UNAVAILABLE");
+
+  const unavailable = featureUnavailable("商户尚未开通该能力");
+  assert.equal(unavailable.code, "UNAVAILABLE");
+  assert.equal(unavailable.status, 501);
+  assert.ok(unavailable.message.length > 4);
 });
 
 test("受保护图片经 downloadFile 携带令牌加载，同地址只下载一次，失败返回空占位", async () => {

@@ -58,12 +58,23 @@
             <view class="subtitle">取还方式</view>
             <view class="toggle mt-12">
               <view class="toggle__item {{method === 'pickup' ? 'toggle__item--active' : ''}}" data-method="pickup" bindtap="onPickMethod"><ui-icon name="store" size="30" color="{{method === 'pickup' ? '#1677FF' : '#1F2329'}}"></ui-icon><text class="ml-8">门店自提</text></view>
-              <view class="toggle__item toggle__item--disabled" data-method="delivery" bindtap="onPickMethod"><ui-icon name="truck" size="30" color="#1F2329"></ui-icon><text class="ml-8">同城配送</text></view>
+              <view wx:if="{{deliveryAvailable}}" class="toggle__item {{method === 'delivery' ? 'toggle__item--active' : ''}}" data-method="delivery" bindtap="onPickMethod"><ui-icon name="truck" size="30" color="{{method === 'delivery' ? '#1677FF' : '#1F2329'}}"></ui-icon><text class="ml-8">同城配送</text></view>
             </view>
+            <view wx:if="{{!deliveryAvailable}}" class="muted small mt-8">本商户当前仅支持门店自提</view>
           </view>
         </view>
         <view class="divider"></view>
-        <view class="row" hover-class="btn-hover" bindtap="onOpenStore">
+        <view wx:if="{{method === 'delivery'}}" class="row" hover-class="btn-hover" bindtap="onOpenAddress">
+          <ui-icon name="box" size="34" color="#1F2329"></ui-icon>
+          <view class="grow ml-12">
+            <view class="subtitle">收货地址</view>
+            <view wx:if="{{addressLabel}}" class="body mt-8 ellipsis">{{addressLabel}}</view>
+            <view wx:else class="warning-text small mt-8">请选择收货地址</view>
+            <view wx:if="{{store}}" class="muted small mt-4">由 {{store.name}} 发货，商户确认后安排配送</view>
+          </view>
+          <ui-icon name="chevron-right" size="30" color="#B4BBC8"></ui-icon>
+        </view>
+        <view wx:else class="row" hover-class="btn-hover" bindtap="onOpenStore">
           <ui-icon name="pin" size="34" color="#1F2329"></ui-icon>
           <view class="grow ml-12">
             <view class="subtitle">自提门店</view>
@@ -191,6 +202,18 @@
         <view class="option__check"></view>
       </view>
       <view wx:if="{{!locations.length}}" class="muted">商户暂无可自提的门店</view>
+    </sheet>
+
+    <sheet visible="{{showAddressSheet}}" title="选择收货地址" bind:close="onCloseAddress">
+      <view class="option {{cart.deliveryAddressId === item.id ? 'option--selected' : ''}}" wx:for="{{addresses}}" wx:key="id" data-id="{{item.id}}" bindtap="onPickAddress">
+        <view class="grow">
+          <view class="subtitle">{{item.recipient}} · {{item.phoneMasked}}{{item.isDefault ? ' · 默认' : ''}}</view>
+          <view class="muted small">{{item.province}}{{item.city}}{{item.district}}{{item.detail}}</view>
+        </view>
+        <view class="option__check"></view>
+      </view>
+      <view wx:if="{{!addresses.length}}" class="muted">还没有收货地址，请先添加</view>
+      <view class="link tap-area mt-16" bindtap="onManageAddresses">管理 / 新增收货地址</view>
     </sheet>
 
     <sheet visible="{{showCouponSheet}}" title="选择优惠券" bind:close="onCloseCoupons">

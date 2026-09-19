@@ -1,7 +1,8 @@
 import type { ClientAgreementConsent } from "@rental-os/shared";
-import { adoptSession, loginWithPassword, loginWithWechatPhone } from "../../api/auth";
+import { adoptSession, createChallenge, loginWithPassword, loginWithSms, loginWithWechatPhone, verifyRegistrationChallenge } from "../../api/auth";
 import { describeError } from "../../core/errors";
 import { isApiError } from "../../core/http";
+import { newKey } from "../../core/keys";
 import { cachedMerchant, loadMerchant, preferredServiceCode, resolveServiceCode, type MerchantInfo } from "../../core/merchant";
 import { type FieldErrors } from "../../core/page";
 import { isSignedIn } from "../../core/session";
@@ -25,6 +26,12 @@ interface LoginData {
   wechatAvailable: boolean;
   wechatNotice: string;
   showPassword: boolean;
+  smsAvailable: boolean;
+  authMode: "password" | "sms";
+  smsCode: string;
+  smsMasked: string;
+  smsRetryAfter: number;
+  smsDevelopmentCode: string;
   loginIdentifier: string;
   password: string;
   agreed: boolean;
@@ -46,6 +53,12 @@ Page({
     wechatAvailable: true,
     wechatNotice: "",
     showPassword: false,
+    smsAvailable: false,
+    authMode: "password",
+    smsCode: "",
+    smsMasked: "",
+    smsRetryAfter: 0,
+    smsDevelopmentCode: "",
     loginIdentifier: "",
     password: "",
     agreed: false,
@@ -56,6 +69,13 @@ Page({
 
   redirectTo: ROUTES.home as string,
   loginCode: "" as string,
+  smsChallengeId: "" as string,
+  smsChallengeKey: "" as string,
+  smsCountdown: undefined as number | undefined,
+
+  onUnload() {
+    if (this.smsCountdown) clearInterval(this.smsCountdown);
+  },
 
   onLoad(options: Record<string, string | undefined>) {
     this.redirectTo = safeRoute(options.redirect, ROUTES.home);
@@ -81,8 +101,10 @@ Page({
       privacyName: agreements?.privacyPolicy.name ?? "隐私政策",
       privacyVersion: agreements?.privacyPolicy.version ?? "",
       wechatAvailable: info.loginMethods.includes("wechat_phone"),
+      smsAvailable: info.loginMethods.includes("sms"),
+      authMode: info.loginMethods.includes("password") ? this.data.authMode : info.loginMethods.includes("sms") ? "sms" : this.data.authMode,
       showPassword: !info.loginMethods.includes("wechat_phone") || this.data.showPassword,
-      wechatNotice: info.loginMethods.includes("wechat_phone") ? "" : "商户尚未开通微信手机号一键登录，请使用手机号密码登录。"
+      wechatNotice: info.loginMethods.includes("wechat_phone") ? "" : "商户尚未开通微信手机号一键登录，请使用其他方式登录。"
     });
   },
 
@@ -160,6 +182,82 @@ Page({
 
   onTogglePassword() {
     this.setData({ showPassword: !this.data.showPassword, formError: "" });
+  },
+
+  /* ---------- MP-02B 短信验证码登录 ---------- */
+  onSwitchAuthMode(event: WechatMiniprogram.TouchEvent) {
+    const mode = String(event.currentTarget.dataset.mode ?? "password") === "sms" ? "sms" : "password";
+    this.setData({ authMode: mode, formError: "", errors: {} });
+  },
+
+  onSmsCodeInput(event: WechatMiniprogram.Input) {
+    this.setData({ smsCode: String(event.detail.value ?? ""), "errors.smsCode": "" });
+  },
+
+  startSmsCountdown(seconds: number) {
+    if (this.smsCountdown) clearInterval(this.smsCountdown);
+    this.setData({ smsRetryAfter: seconds });
+    if (seconds <= 0) return;
+    this.smsCountdown = setInterval(() => {
+      const next = this.data.smsRetryAfter - 1;
+      this.setData({ smsRetryAfter: Math.max(0, next) });
+      if (next <= 0 && this.smsCountdown) clearInterval(this.smsCountdown);
+    }, 1000) as unknown as number;
+  },
+
+  async onSendSmsCode() {
+    if (this.data.submitting || this.data.smsRetryAfter > 0) return;
+    const identifier = this.data.loginIdentifier.trim().replace(/[\s-]/g, "");
+    if (!/^\+?[0-9]{6,20}$/.test(identifier)) {
+      this.setData({ errors: { loginIdentifier: "请输入正确的手机号" } });
+      return;
+    }
+    this.setData({ submitting: true, formError: "" });
+    try {
+      // 同一手机号重试复用同一幂等键；换号码才换键。login 用途要求该手机号已注册，未注册时服务端返回明确错误。
+      const fingerprint = `login-sms:${identifier}`;
+      if (!this.smsChallengeKey.startsWith(`${fingerprint}|`)) this.smsChallengeKey = `${fingerprint}|${newKey("challenge")}`;
+      const challenge = await createChallenge({ purpose: "login", method: "sms", identifier, idempotencyKey: this.smsChallengeKey.split("|")[1], serviceCode: preferredServiceCode() });
+      this.smsChallengeId = challenge.challengeId;
+      this.setData({ smsMasked: challenge.maskedDestination, smsDevelopmentCode: challenge.developmentCode ?? "", smsCode: "" });
+      this.startSmsCountdown(challenge.retryAfterSeconds ?? 60);
+    } catch (error) {
+      const presented = describeError(error);
+      if (presented.code === "RATE_LIMITED") this.startSmsCountdown((error as { retryAfterSeconds?: number }).retryAfterSeconds ?? 60);
+      this.setData({ formError: presented.message });
+    } finally {
+      this.setData({ submitting: false });
+    }
+  },
+
+  async onSmsLogin() {
+    if (this.data.submitting) return;
+    const identifier = this.data.loginIdentifier.trim().replace(/[\s-]/g, "");
+    const errors: FieldErrors = {};
+    if (!/^\+?[0-9]{6,20}$/.test(identifier)) errors.loginIdentifier = "请输入正确的手机号";
+    if (!this.smsChallengeId) errors.smsCode = "请先获取验证码";
+    else if (!/^\d{6}$/.test(this.data.smsCode.trim())) errors.smsCode = "请输入 6 位验证码";
+    if (Object.keys(errors).length) {
+      this.setData({ errors });
+      return;
+    }
+    if (!this.requireConsent()) return;
+    this.setData({ submitting: true, formError: "" });
+    try {
+      const verified = await verifyRegistrationChallenge(this.smsChallengeId, this.data.smsCode.trim());
+      // preferredServiceCode 只会返回商户当前已发布的服务，不会因过期服务导致拒登；验证令牌一次性，故不重试。
+      const session = await loginWithSms({ loginIdentifier: identifier, verificationToken: verified.verificationToken, serviceCode: preferredServiceCode() });
+      this.finish(session);
+    } catch (error) {
+      const presented = describeError(error);
+      if (presented.code === "BAD_REQUEST" || presented.code === "UNAUTHENTICATED") {
+        this.setData({ errors: { ...this.data.errors, smsCode: presented.message } });
+      } else {
+        this.setData({ formError: presented.message });
+      }
+    } finally {
+      this.setData({ submitting: false });
+    }
   },
 
   onIdentifierInput(event: WechatMiniprogram.Input) {

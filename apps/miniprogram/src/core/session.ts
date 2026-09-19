@@ -33,6 +33,8 @@ export interface SessionState {
   customer: SessionCustomer;
   services: SessionService[];
   serviceCode: string;
+  /** 本人是否已在本租户绑定微信身份（小程序内微信支付需要）。刷新响应未带该字段时沿用本人上一值。 */
+  wechatBound: boolean;
   savedAt: number;
 }
 
@@ -137,6 +139,7 @@ export function saveSession(response: ClientMembershipSessionResponse, serviceCo
     },
     services,
     serviceCode: resolvedService,
+    wechatBound: response.wechatBound ?? (previous && previous.customer.customerId === response.customer.customerId ? previous.wechatBound : false),
     savedAt: Date.now()
   };
   persist();
@@ -163,6 +166,19 @@ export function clearSession(reason: string): void {
   clearPrivateStorage();
   bumpContext(reason);
   if (had) sessionEvents.emit({ type: "signed-out", reason });
+}
+
+export function isWechatBound(): boolean {
+  return Boolean(currentSession()?.wechatBound);
+}
+
+/** 绑定微信成功后本地置位，供入口显示“已绑定”；下次会话刷新会以服务端事实为准。 */
+export function markWechatBound(): void {
+  restore();
+  if (!state || state.wechatBound) return;
+  state = { ...state, wechatBound: true };
+  persist();
+  sessionEvents.emit({ type: "refreshed" });
 }
 
 export function lastServiceCode(): string | undefined {

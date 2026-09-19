@@ -84,10 +84,34 @@
       </view>
     </view>
 
+    <view wx:if="{{feeAvailable && feeItems.length}}" class="section section--tight">
+      <view class="card">
+        <view class="row row--between">
+          <view class="subtitle">检查费用确认</view>
+          <status-tag wx:if="{{feePending}}" label="{{feePending}} 项待确认" tone="danger" small="{{true}}"></status-tag>
+        </view>
+        <view class="muted small mt-8">领取或归还检查产生的费用请逐项处理；提交异议后商户会复核，处理前不影响你已确认的部分。</view>
+        <view class="cell" wx:for="{{feeItems}}" wx:key="key">
+          <view class="cell__body">
+            <view class="cell__title">{{item.stage}} · {{item.description}}</view>
+            <view class="cell__desc">状态：{{item.statusLabel}}</view>
+            <view wx:if="{{item.note}}" class="muted small mt-4">{{item.note}}</view>
+            <view wx:if="{{item.actionable}}" class="row gap-8 mt-12">
+              <button class="btn btn--small btn--secondary" hover-class="btn-hover" data-inspection="{{item.inspectionId}}" data-index="{{item.exceptionIndex}}" data-mode="confirm" bindtap="onFeeAction">确认</button>
+              <button class="btn btn--small btn--outline" hover-class="btn-hover" data-inspection="{{item.inspectionId}}" data-index="{{item.exceptionIndex}}" data-mode="dispute" bindtap="onFeeAction">有异议</button>
+            </view>
+          </view>
+          <money-text amount="{{item.amount}}" currency="{{item.currency}}" size="small"></money-text>
+        </view>
+      </view>
+    </view>
+
     <view class="section section--tight">
       <view class="card">
         <view class="subtitle">规则与记录</view>
-        <view class="muted mt-8">下单时的取消、逾期与损坏规则版本已随订单固化；费用确认与异议在线处理尚未开通，如有异议请联系商户。</view>
+        <view class="muted mt-8">下单时的取消、逾期与损坏规则版本已随订单固化。</view>
+        <view wx:if="{{!feeAvailable}}" class="muted mt-8">检查费用的在线确认与异议本商户暂未开通，如对费用有疑问请联系商户。</view>
+        <view wx:elif="{{!feeItems.length}}" class="muted mt-8">目前没有需要你确认的检查费用。</view>
       </view>
     </view>
 
@@ -127,6 +151,25 @@
       <view class="notice notice--neutral mt-16">实物领取与归还由商户在现场登记，小程序不提供自助确认；部分归还会显示已还/未还数量。</view>
       <view slot="footer">
         <button class="btn btn--primary btn--block" hover-class="btn-hover" bindtap="onCall">拨打商户电话</button>
+      </view>
+    </sheet>
+
+    <sheet visible="{{showFee}}" title="{{feeMode === 'dispute' ? '对费用提出异议' : '确认费用'}}" closable="{{!feeSubmitting}}" footer="{{true}}" bind:close="onCloseFee">
+      <view class="kv"><view class="kv__label">费用项</view><view class="kv__value">{{feeTargetLabel}}</view></view>
+      <view class="kv"><view class="kv__label">金额</view><view class="kv__value"><money-text amount="{{feeTargetAmount}}" currency="{{currency}}"></money-text></view></view>
+      <block wx:if="{{feeMode === 'dispute'}}">
+        <view class="notice notice--neutral mt-8">提交异议后商户会复核，可能调整金额或补充凭证；处理完成前该费用不计入你的最终结算。</view>
+        <view wx:if="{{feePendingKey}}" class="notice notice--warning mt-8 mb-16">上一次提交的结果尚未明确，原因已锁定；再次提交会沿用同一凭证，不会重复处理。</view>
+        <view class="subtitle mt-24">异议原因</view>
+        <view class="chips mt-8">
+          <view class="chip {{feeReason === item ? 'chip--active' : ''}} {{feePendingKey ? 'chip--soft' : ''}}" wx:for="{{feeReasons}}" wx:key="*this" data-reason="{{item}}" bindtap="onPickFeeReason">{{item}}</view>
+        </view>
+        <view class="input-box mt-16"><input placeholder="补充说明（可选）" maxlength="200" value="{{feeReason}}" disabled="{{feePendingKey}}" bindinput="onFeeReasonInput" /></view>
+      </block>
+      <view wx:else class="notice notice--neutral mt-8">确认后该费用将计入你的结算，且不可再改为异议；如有疑问请先选择“有异议”。</view>
+      <view wx:if="{{feeError}}" class="notice notice--danger mt-16">{{feeError}}</view>
+      <view slot="footer">
+        <button class="btn {{feeMode === 'dispute' ? 'btn--danger' : 'btn--primary'}} btn--cta btn--block" hover-class="btn-hover" bindtap="onSubmitFee" disabled="{{feeSubmitting}}">{{feeSubmitting ? '提交中…' : feeMode === 'dispute' ? '提交异议' : '确认费用'}}</button>
       </view>
     </sheet>
   </block>

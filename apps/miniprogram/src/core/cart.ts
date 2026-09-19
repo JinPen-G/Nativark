@@ -52,6 +52,9 @@ export interface CartState {
   locationName?: string;
   returnLocationId?: string;
   returnLocationName?: string;
+  /** 配送履约方式下的本人地址簿地址（MP-06）；快照在报价时由服务端固化。 */
+  deliveryAddressId?: string;
+  deliveryAddressLabel?: string;
   couponId?: string;
   services: CartServiceSelection[];
   /** 备注（写入每个商品行的 note）。 */
@@ -59,6 +62,13 @@ export interface CartState {
   quote?: { id: string; revision: number; expiresAt: string };
   submission?: CartSubmission;
   updatedAt: number;
+}
+
+/** 需要送到本人地址的履约方式；其余为到店/取货点自取。 */
+export const DELIVERY_FULFILLMENT_MODES = ["delivery", "onsite_delivery"] as const;
+
+export function isDeliveryMode(mode: string | undefined): boolean {
+  return mode === "delivery" || mode === "onsite_delivery";
 }
 
 export type CartEvent = { type: "changed"; cart: CartState | undefined };
@@ -198,7 +208,9 @@ export function cartMissing(cart: CartState | undefined): string[] {
   if (!cart || cart.lines.length === 0) missing.push("还没有选择设备");
   if (!cart?.startAt || !cart?.endAt) missing.push("请选择领取与归还时间");
   else if (Date.parse(cart.endAt) <= Date.parse(cart.startAt)) missing.push("归还时间必须晚于领取时间");
-  if (!cart?.locationId) missing.push("请选择领取地点");
+  // 配送需要本人收货地址；自取需要领取门店。发货源门店（locationId）两种方式都需要，由页面按主门店预置。
+  if (isDeliveryMode(cart?.fulfillmentMode) && !cart?.deliveryAddressId) missing.push("请选择收货地址");
+  if (!cart?.locationId) missing.push(isDeliveryMode(cart?.fulfillmentMode) ? "请选择发货门店" : "请选择领取地点");
   return missing;
 }
 

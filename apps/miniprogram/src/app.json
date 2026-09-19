@@ -11,12 +11,14 @@
     "pages/extend/index",
     "pages/login/index",
     "pages/register/index",
+    "pages/closure/index",
     "pages/profile/index",
     "pages/qualifications/index",
     "pages/benefits/index",
     "pages/favorites/index",
     "pages/coupons/index",
     "pages/locations/index",
+    "pages/addresses/index",
     "pages/legal/index"
   ],
   "window": {

@@ -1,5 +1,6 @@
-import type { ClientFulfillmentView, ClientOrderView, RentalFundingBalance, RentalOrderExtension } from "@rental-os/shared";
-import { cancelOrder, fetchFulfillment, fetchFunding, fetchOrder, listExtensions, previewCancellation } from "../../api/orders";
+import type { ClientFeeItemView, ClientFulfillmentView, ClientOrderView, RentalFundingBalance, RentalOrderExtension } from "@rental-os/shared";
+import { cancelOrder, fetchFeeItems, fetchFulfillment, fetchFunding, fetchOrder, listExtensions, previewCancellation, respondToFee } from "../../api/orders";
+import { contractMissing } from "../../contracts/planned";
 import { serverNow } from "../../core/clock";
 import { describeError } from "../../core/errors";
 import { ensureServiceForOrder } from "../../core/flow";
@@ -53,9 +54,23 @@ interface OrderData {
   showGuide: boolean;
   servicePhone: string;
   pendingCancelKey: boolean;
+  /* MP-11 费用确认与异议 */
+  feeAvailable: boolean;
+  feePending: number;
+  feeItems: Array<{ key: string; inspectionId: string; exceptionIndex: number; stage: string; description: string; amount: number; currency: string; statusLabel: string; statusTone: string; actionable: boolean; note: string }>;
+  showFee: boolean;
+  feeMode: "confirm" | "dispute";
+  feeTargetLabel: string;
+  feeTargetAmount: number;
+  feeReason: string;
+  feeReasons: string[];
+  feeSubmitting: boolean;
+  feeError: string;
+  feePendingKey: boolean;
 }
 
 const CANCEL_REASONS = ["行程变更", "选错了设备或时间", "找到其他方案", "其他原因"];
+const DISPUTE_REASONS = ["设备原有问题，非我造成", "金额与现场沟通不一致", "未收到相应设备/服务", "其他原因"];
 
 Page({
   data: {
@@ -85,12 +100,26 @@ Page({
     cancelError: "",
     showGuide: false,
     servicePhone: "",
-    pendingCancelKey: false
+    pendingCancelKey: false,
+    feeAvailable: false,
+    feePending: 0,
+    feeItems: [],
+    showFee: false,
+    feeMode: "confirm",
+    feeTargetLabel: "",
+    feeTargetAmount: 0,
+    feeReason: "",
+    feeReasons: DISPUTE_REASONS,
+    feeSubmitting: false,
+    feeError: "",
+    feePendingKey: false
   } as OrderData,
 
   orderId: "" as string,
   serviceCode: "" as string,
   loadVersion: 0,
+  feeInspectionId: "" as string,
+  feeExceptionIndex: 0 as number,
 
   onLoad(options: Record<string, string | undefined>) {
     this.orderId = options.id ?? "";
@@ -119,15 +148,17 @@ Page({
           return;
         }
       }
-      const [order, funding, fulfillment, extensions] = await Promise.all([
+      const [order, funding, fulfillment, extensions, fees] = await Promise.all([
         fetchOrder(this.orderId),
         fetchFunding(this.orderId).catch(() => undefined),
         fetchFulfillment(this.orderId).catch(() => undefined),
         listExtensions(this.orderId).catch(() => [] as RentalOrderExtension[]),
+        // 费用确认/异议未开通时（商户未启用检查费用在线处理）服务端返回 404/501/503：如实标记不可用，不打断详情。
+        fetchFeeItems(this.orderId).then((r) => ({ available: true as const, items: r.items, pending: r.pendingCount })).catch((error) => contractMissing(error) ? { available: false as const } : { available: false as const }),
         ensureCurrentZone()
       ]);
       if (token !== this.loadVersion) return;
-      this.render(order, funding, fulfillment, extensions);
+      this.render(order, funding, fulfillment, extensions, fees);
     } catch (error) {
       if (token !== this.loadVersion || isApiError(error, "STALE_CONTEXT")) return;
       if (isApiError(error, "NOT_FOUND")) {
@@ -138,7 +169,7 @@ Page({
     }
   },
 
-  render(order: ClientOrderView, funding: RentalFundingBalance | undefined, fulfillment: ClientFulfillmentView | undefined, extensions: RentalOrderExtension[]) {
+  render(order: ClientOrderView, funding: RentalFundingBalance | undefined, fulfillment: ClientFulfillmentView | undefined, extensions: RentalOrderExtension[], fees: { available: boolean; items?: ClientFeeItemView[]; pending?: number }) {
     const knownZone = zoneOf(currentServiceCode());
     const timeZone = knownZone ?? "Asia/Shanghai";
     const currency = order.currency ?? "";
@@ -172,6 +203,28 @@ Page({
       .map((row, index) => ({ key: `${row.type}-${index}`, label: row.name || chargeLabel(row.type), amount: row.amount }));
     const balance = funding?.rental.balance ?? 0;
     const effectiveEnd = order.effectiveEndAt ?? order.endAt;
+    const feeItems = (fees.items ?? []).map((item) => {
+      const noteParts: string[] = [];
+      if (item.adjustments.length) {
+        const last = item.adjustments[item.adjustments.length - 1];
+        noteParts.push(`商户已把金额调整为 ${formatMoney(last.toAmount, item.currency || undefined)}`);
+      }
+      if (item.responseReason) noteParts.push(`你的说明：${item.responseReason}`);
+      if (item.evidenceCount) noteParts.push(`商户上传凭证 ${item.evidenceCount} 项`);
+      return {
+        key: `${item.inspectionId}-${item.exceptionIndex}`,
+        inspectionId: item.inspectionId,
+        exceptionIndex: item.exceptionIndex,
+        stage: item.stage === "pickup" ? "领取检查" : "归还检查",
+        description: item.description || chargeLabel(item.code),
+        amount: item.amount,
+        currency: item.currency,
+        statusLabel: item.responseStatus === "confirmed" ? "已确认" : item.responseStatus === "disputed" ? "已提异议" : "待确认",
+        statusTone: item.responseStatus === "confirmed" ? "success" : item.responseStatus === "disputed" ? "warning" : "danger",
+        actionable: item.responseStatus === "pending",
+        note: noteParts.join("；")
+      };
+    });
     this.setData({
       view: readyState(),
       order,
@@ -202,7 +255,10 @@ Page({
         status: row.status,
         tone: row.status === "effective" ? "success" : row.status === "pending_payment" ? "warning" : "neutral"
       })),
-      pendingCancelKey: false
+      pendingCancelKey: false,
+      feeAvailable: fees.available,
+      feeItems,
+      feePending: fees.pending ?? feeItems.filter((row) => row.actionable).length
     });
   },
 
@@ -294,6 +350,75 @@ Page({
 
   onCall() {
     callPhone(this.data.servicePhone);
+  },
+
+  /* ---------- MP-11 费用确认与异议 ---------- */
+  onFeeAction(event: WechatMiniprogram.TouchEvent) {
+    const inspectionId = String(event.currentTarget.dataset.inspection ?? "");
+    const exceptionIndex = Number(event.currentTarget.dataset.index ?? 0);
+    const mode = String(event.currentTarget.dataset.mode ?? "confirm") === "dispute" ? "dispute" : "confirm";
+    const item = this.data.feeItems.find((row) => row.inspectionId === inspectionId && row.exceptionIndex === exceptionIndex);
+    if (!item || !item.actionable) return;
+    this.feeInspectionId = inspectionId;
+    this.feeExceptionIndex = exceptionIndex;
+    // 上一次提交结果未知：锁定原决定与原因，再次确认沿用同一凭证，不重复处理。
+    const pending = pendingActionKey("order.fee-response", `${this.orderId}:${inspectionId}:${exceptionIndex}`);
+    let lockedMode: "confirm" | "dispute" = mode;
+    let lockedReason = "";
+    if (pending) {
+      const parts = pending.fingerprint.split("|");
+      lockedMode = parts[0] === "disputed" ? "dispute" : "confirm";
+      lockedReason = parts.slice(1).join("|");
+    }
+    this.setData({ showFee: true, feeMode: lockedMode, feeTargetLabel: item.description, feeTargetAmount: item.amount, feeReason: lockedMode === "dispute" ? lockedReason : "", feeError: "", feePendingKey: Boolean(pending) });
+  },
+
+  onCloseFee() {
+    if (this.data.feeSubmitting) return;
+    this.setData({ showFee: false });
+  },
+
+  onPickFeeReason(event: WechatMiniprogram.TouchEvent) {
+    if (this.data.feePendingKey) return;
+    this.setData({ feeReason: String(event.currentTarget.dataset.reason ?? "") });
+  },
+
+  onFeeReasonInput(event: WechatMiniprogram.Input) {
+    if (this.data.feePendingKey) return;
+    this.setData({ feeReason: String(event.detail.value ?? "").slice(0, 200) });
+  },
+
+  async onSubmitFee() {
+    if (this.data.feeSubmitting) return;
+    const decision: "confirmed" | "disputed" = this.data.feeMode === "dispute" ? "disputed" : "confirmed";
+    const reason = decision === "disputed" ? this.data.feeReason.trim() : this.data.feeReason.trim() || "确认无异议";
+    if (decision === "disputed" && !reason) {
+      this.setData({ feeError: "请选择或填写异议原因" });
+      return;
+    }
+    const id = `${this.orderId}:${this.feeInspectionId}:${this.feeExceptionIndex}`;
+    const pending = pendingActionKey("order.fee-response", id);
+    const key = pending?.key ?? actionKey("order.fee-response", id, `${decision}|${reason}`);
+    this.setData({ feeSubmitting: true, feeError: "" });
+    try {
+      const result = await respondToFee(this.orderId, this.feeInspectionId, this.feeExceptionIndex, { decision, reason }, key);
+      releaseActionKey("order.fee-response", id);
+      this.setData({ showFee: false, feePendingKey: false });
+      toast(result.replayed ? "该费用此前已处理" : decision === "disputed" ? "已提交异议，商户会尽快处理" : "已确认该费用", { duration: 2500 });
+      await this.load();
+    } catch (error) {
+      if (isApiError(error, "TIMEOUT") || isApiError(error, "NETWORK") || isApiError(error, "SERVER")) {
+        this.setData({ feeError: "提交结果未知：请刷新订单查看；如仍待处理，再次提交会沿用同一凭证与内容，不会重复处理。", feePendingKey: true });
+      } else if (isApiError(error, "CONFLICT")) {
+        releaseActionKey("order.fee-response", id);
+        this.setData({ feeError: `${describeError(error).message} 请刷新后重试。`, feePendingKey: false });
+      } else {
+        releaseActionKey("order.fee-response", id);
+        this.setData({ feeError: describeError(error).message, feePendingKey: false });
+      }
+    } finally {
+      this.setData({ feeSubmitting: false });
+    }
   },
 
   onViewAction() {

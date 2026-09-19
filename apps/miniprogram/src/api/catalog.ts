@@ -6,7 +6,8 @@ import type {
   RentalCustomerCoupon,
   RentalQuoteSnapshotV1
 } from "@rental-os/shared";
-import { PLANNED_CONTRACTS, contractMissing, plannedUnavailable } from "../contracts/planned";
+import { PUBLIC_CONFIG } from "../config/public";
+import { contractMissing, featureUnavailable } from "../contracts/planned";
 import { request } from "../core/http";
 
 /** 当前服务的目录（需登录；服务端按会话中的服务返回）。 */
@@ -14,12 +15,12 @@ export async function fetchCatalog(): Promise<ClientCatalogResponse> {
   return request<ClientCatalogResponse>("/catalog");
 }
 
-/** 游客公开目录（拟新增 MP-03）。未提供时抛 UNAVAILABLE，页面引导登录。 */
+/** 游客公开目录（MP-03）：只对已发布到小程序渠道的服务开放；未发布时抛 UNAVAILABLE，页面引导登录。 */
 export async function fetchPublicCatalog(serviceCode: string): Promise<ClientCatalogResponse> {
   try {
-    return await request<ClientCatalogResponse>(PLANNED_CONTRACTS.publicCatalog.path, { auth: "none", query: { service: serviceCode } });
+    return await request<ClientCatalogResponse>("/public/catalog", { auth: "none", query: { tenantCode: PUBLIC_CONFIG.tenantCode, service: serviceCode } });
   } catch (error) {
-    if (contractMissing(error)) throw plannedUnavailable("publicCatalog");
+    if (contractMissing(error)) throw featureUnavailable("商户尚未开放该服务的游客浏览，登录后即可查看设备");
     throw error;
   }
 }

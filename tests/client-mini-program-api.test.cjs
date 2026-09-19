@@ -243,9 +243,10 @@ test("mini-program payment fails closed even with Native configuration and never
   runtime.createPaymentIntent = fail;
   runtime.createWechatIntent = fail;
   const service = api({ core: { getOrder: async () => coreOrder() }, payments: runtime });
+  // openid 只来自服务端可信绑定；未绑定时用稳定错误码 409 引导先绑微信，绝不退回 Native 二维码，也不重放已存在的支付单。
   for (const key of ["first", "retry", "existing-native-key"]) {
     await assert.rejects(service.createMiniProgramPaymentIntent(context, "order-a", { instrument: "rental", idempotencyKey: key }),
-      (error) => status(503)(error) && /ClientWechatIdentity/u.test(error.message));
+      (error) => status(409)(error) && error.getResponse?.().code === "wechat_identity_required");
   }
   await assert.rejects(runtime.createMiniProgramPaymentIntent("t", "w", "o", { instrument: "deposit", idempotencyKey: "a" }), status(400));
   await assert.rejects(runtime.createMiniProgramPaymentIntent("t", "w", "o", { instrument: "rental", idempotencyKey: "  " }), status(400));
@@ -298,8 +299,9 @@ test("OpenAPI exposes minimal typed index and JSAPI contract, documents unavaila
     assert.deepEqual(paths[route][method]["x-requiredPermissions"], []);
   }
   const payment = paths["/api/client/v1/orders/{id}/mini-program-payment-intents"].post;
-  assert.ok(payment.responses["503"]);
-  assert.equal(payment.responses["200"], undefined);
+  // 微信 JSAPI 支付已接通：成功返回可重新签名的支付参数；缺可信身份时运行时用 409 wechat_identity_required 引导先绑微信（摘要注明）。
+  assert.equal(payment.responses["200"].content["application/json"].schema.properties.data.$ref, "#/components/schemas/ClientPaymentIntentResponse");
+  assert.match(payment.summary, /wechat_identity_required/u);
   const schemas = OPENAPI_DOCUMENT.components.schemas;
   assert.deepEqual(schemas.ClientWechatJsapiParameters.required, ["timeStamp", "nonceStr", "package", "signType", "paySign"]);
   assert.equal(schemas.ClientPaymentIntentResponse.properties.jsapi.$ref, "#/components/schemas/ClientWechatJsapiParameters");
@@ -318,7 +320,7 @@ test("catalog projects a starting price from the effective space rates and publi
   ];
   const business = {
     profile: { categoryCode: "camera", terminology: {} },
-    settings: { calendar: { timeZone: "Asia/Shanghai" }, pricing: { currency: "CNY" } },
+    settings: { calendar: { timeZone: "Asia/Shanghai" }, pricing: { currency: "CNY" }, fulfillment: { enabledModes: ["store_pickup_return", "delivery"], allowDifferentReturnLocation: true } },
     groups: [
       { id: "cam", code: "CAM", name: "相机", status: "enabled", inventoryMode: "serialized", images: [], attributes: {} },
       { id: "lens", code: "LENS", name: "镜头", status: "enabled", inventoryMode: "quantity", attributes: {} },
@@ -347,6 +349,7 @@ test("catalog projects a starting price from the effective space rates and publi
   assert.equal(byId.tripod.startingPrice, undefined, "停用定价分组不提供起价，也不以 0 元替代");
   assert.equal(byId.old, undefined);
   assert.deepEqual(catalog.locations, [{ id: "l1", code: "L1", name: "静安店", status: "enabled", address: "南京西路 1266 号", businessHours: "10:00-20:00", contactPhone: "021-000000", capabilities: ["pickup", "return"] }]);
+  assert.deepEqual(catalog.fulfillment, { enabledModes: ["store_pickup_return", "delivery"], allowDifferentReturnLocation: true }, "履约方式投影透传经营空间设置");
   for (const location of catalog.locations) for (const field of ["operatorId", "operatorType", "operatorName", "settlementMode"]) assert.equal(field in location, false);
   const noVersion = api({ context: () => business, auth: { listPublicWorkspaces: async () => ({ workspaces: [] }) }, business: { listSpaceRatesAt: async () => [], listServices: () => [], listDiscountPlans: () => [] } });
   assert.ok((await noVersion.catalog(context)).items.every((item) => item.startingPrice === undefined));

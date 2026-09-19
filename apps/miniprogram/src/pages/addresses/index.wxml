@@ -1,0 +1,74 @@
+<view class="screen">
+  <nav-bar title="收货地址"></nav-bar>
+  <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
+
+  <block wx:else>
+    <view wx:if="{{!items.length}}" class="section">
+      <view class="card center">
+        <view class="muted">还没有收货地址</view>
+        <view class="muted small mt-8">添加后可在下单时选择同城配送。</view>
+      </view>
+    </view>
+
+    <view class="section" wx:for="{{items}}" wx:key="id">
+      <view class="card">
+        <view class="row row--between">
+          <view class="title">{{item.recipient}} · {{item.phoneMasked}}</view>
+          <status-tag wx:if="{{item.isDefault}}" label="默认" tone="success" small="{{true}}"></status-tag>
+        </view>
+        <view class="muted mt-8">{{item.province}}{{item.city}}{{item.district}}{{item.detail}}</view>
+        <view class="row gap-8 mt-16">
+          <button wx:if="{{!item.isDefault}}" class="btn btn--small btn--secondary" hover-class="btn-hover" data-id="{{item.id}}" bindtap="onSetDefault">设为默认</button>
+          <button class="btn btn--small btn--outline" hover-class="btn-hover" data-id="{{item.id}}" bindtap="onEdit">编辑</button>
+          <button class="btn btn--small btn--ghost" hover-class="btn-hover" data-id="{{item.id}}" bindtap="onDelete">删除</button>
+        </view>
+      </view>
+    </view>
+
+    <view class="bottom-bar">
+      <button class="btn btn--primary btn--cta btn--block" hover-class="btn-hover" bindtap="onAdd">新增地址</button>
+    </view>
+
+    <sheet visible="{{showForm}}" title="{{editing ? '编辑地址' : '新增地址'}}" closable="{{!submitting}}" footer="{{true}}" bind:close="onCloseForm">
+      <view class="field">
+        <view class="field__label field__label--required">收货人</view>
+        <view class="field__control"><input class="field__input" maxlength="60" placeholder="收货人姓名" placeholder-class="search__placeholder" value="{{form.recipient}}" data-field="recipient" bindinput="onFormInput" /></view>
+        <view wx:if="{{errors.recipient}}" class="field__error">{{errors.recipient}}</view>
+      </view>
+      <view class="field">
+        <view class="field__label field__label--required">联系电话</view>
+        <view class="field__control"><input class="field__input" type="number" maxlength="20" placeholder="{{editing ? '请重新输入联系电话' : '联系电话'}}" placeholder-class="search__placeholder" value="{{form.phone}}" data-field="phone" bindinput="onFormInput" /></view>
+        <view wx:if="{{errors.phone}}" class="field__error">{{errors.phone}}</view>
+      </view>
+      <view class="row gap-8">
+        <view class="field grow">
+          <view class="field__label field__label--required">省份</view>
+          <view class="field__control"><input class="field__input" maxlength="40" placeholder="省/自治区" placeholder-class="search__placeholder" value="{{form.province}}" data-field="province" bindinput="onFormInput" /></view>
+          <view wx:if="{{errors.province}}" class="field__error">{{errors.province}}</view>
+        </view>
+        <view class="field grow">
+          <view class="field__label field__label--required">城市</view>
+          <view class="field__control"><input class="field__input" maxlength="40" placeholder="城市" placeholder-class="search__placeholder" value="{{form.city}}" data-field="city" bindinput="onFormInput" /></view>
+          <view wx:if="{{errors.city}}" class="field__error">{{errors.city}}</view>
+        </view>
+      </view>
+      <view class="field">
+        <view class="field__label">区/县</view>
+        <view class="field__control"><input class="field__input" maxlength="40" placeholder="区/县（可选）" placeholder-class="search__placeholder" value="{{form.district}}" data-field="district" bindinput="onFormInput" /></view>
+      </view>
+      <view class="field">
+        <view class="field__label field__label--required">详细地址</view>
+        <view class="field__control"><input class="field__input" maxlength="120" placeholder="街道、门牌号等" placeholder-class="search__placeholder" value="{{form.detail}}" data-field="detail" bindinput="onFormInput" /></view>
+        <view wx:if="{{errors.detail}}" class="field__error">{{errors.detail}}</view>
+      </view>
+      <view class="row row--between mt-8">
+        <view class="body">设为默认地址</view>
+        <switch checked="{{form.isDefault}}" color="#1677FF" bindchange="onDefaultToggle" />
+      </view>
+      <view wx:if="{{formError}}" class="notice notice--danger mt-16">{{formError}}</view>
+      <view slot="footer">
+        <button class="btn btn--primary btn--cta btn--block" hover-class="btn-hover" bindtap="onSubmitForm" disabled="{{submitting}}">{{submitting ? '保存中…' : '保存'}}</button>
+      </view>
+    </sheet>
+  </block>
+</view>

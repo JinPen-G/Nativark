@@ -16,12 +16,14 @@ export const ROUTES = {
   extend: "/pages/extend/index",
   login: "/pages/login/index",
   register: "/pages/register/index",
+  closure: "/pages/closure/index",
   profile: "/pages/profile/index",
   qualifications: "/pages/qualifications/index",
   benefits: "/pages/benefits/index",
   favorites: "/pages/favorites/index",
   coupons: "/pages/coupons/index",
   locations: "/pages/locations/index",
+  addresses: "/pages/addresses/index",
   legal: "/pages/legal/index"
 } as const;
 

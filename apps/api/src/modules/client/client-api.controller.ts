@@ -1,9 +1,11 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
   Get,
   HttpCode,
+  Optional,
   Param,
   Patch,
   Post,
@@ -11,14 +13,25 @@ import {
   Query,
   Req,
   Res,
+  ServiceUnavailableException,
   UnauthorizedException
 } from "@nestjs/common";
 import { ClientApiService } from "./client-api.service";
 import { ClientAuthService } from "./client-auth.service";
+import { ClientAccountClosureService } from "./client-account-closure.service";
+import { ClientDeliveryAddressService } from "./client-delivery-address.service";
+import { ClientWechatAuthService } from "./client-wechat-auth.service";
 import {
+  ClientAccountClosureRequestDto,
   ClientAvailabilityRequestDto,
   ClientCancelOrderRequestDto,
+  ClientChallengeRequestDto,
   ClientChangePasswordRequestDto,
+  ClientDeliveryAddressRequestDto,
+  ClientFeeResponseRequestDto,
+  ClientSmsLoginRequestDto,
+  ClientWechatBindRequestDto,
+  ClientWechatPhoneLoginRequestDto,
   ClientContactRequestDto,
   ClientCreateOrderRequestDto,
   ClientCreateQuoteRequestDto,
@@ -58,11 +71,100 @@ function currentClient(req: ClientRequest): ClientSessionContext {
 
 @Controller("client/v1")
 export class ClientApiController {
-  constructor(private readonly api: ClientApiService, private readonly auth: ClientAuthService) {}
+  constructor(
+    private readonly api: ClientApiService,
+    private readonly auth: ClientAuthService,
+    @Optional() private readonly wechat?: ClientWechatAuthService,
+    @Optional() private readonly addresses?: ClientDeliveryAddressService,
+    @Optional() private readonly closure?: ClientAccountClosureService
+  ) {}
+
+  private requireWechat() {
+    if (!this.wechat) throw new ServiceUnavailableException("微信登录服务未就绪");
+    return this.wechat;
+  }
+
+  private requireAddresses() {
+    if (!this.addresses) throw new ServiceUnavailableException("配送地址服务未就绪");
+    return this.addresses;
+  }
+
+  private requireClosure() {
+    if (!this.closure) throw new ServiceUnavailableException("注销服务未就绪");
+    return this.closure;
+  }
 
   @Get("tenants/:tenantCode/workspaces")
   listWorkspaces(@Param("tenantCode") tenantCode: string) {
     return this.auth.listPublicWorkspaces(tenantCode);
+  }
+
+  /** MP-01：公开的渠道启动配置（品牌、协议、客服、已发布服务、登录方式与能力开关）。 */
+  @Get("public/bootstrap")
+  bootstrap(@Query("tenantCode") tenantCode: string, @Query("appId") appId?: string) {
+    if (!tenantCode?.trim()) throw new BadRequestException("缺少商户编码");
+    return this.api.channelBootstrap(tenantCode, appId);
+  }
+
+  /** MP-03：游客公开目录，只对已发布到小程序渠道的服务开放。 */
+  @Get("public/catalog")
+  publicCatalog(@Query("tenantCode") tenantCode: string, @Query("service") service: string) {
+    if (!tenantCode?.trim() || !service?.trim()) throw new BadRequestException("缺少商户编码或服务编码");
+    return this.api.publicCatalog(tenantCode, service);
+  }
+
+  @Get("public/catalog/items/:itemGroupId/images/:imageId")
+  async publicCatalogImage(@Query("tenantCode") tenantCode: string, @Query("service") service: string, @Param("itemGroupId") itemGroupId: string, @Param("imageId") imageId: string, @Res() res: ClientBinaryResponse) {
+    if (!tenantCode?.trim() || !service?.trim()) throw new BadRequestException("缺少商户编码或服务编码");
+    const image = await this.api.readPublicCatalogItemImage(tenantCode, service, itemGroupId, imageId);
+    if ("redirectUrl" in image) {
+      res.redirect(302, image.redirectUrl!);
+      return;
+    }
+    res.setHeader("Content-Type", image.mimeType);
+    res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(image.fileName)}`);
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.send(image.content);
+  }
+
+  /** MP-02B：用途化验证码（registration / login）。 */
+  @Post("auth/challenges")
+  @HttpCode(201)
+  createPurposeChallenge(@Body() body: ClientChallengeRequestDto) {
+    return this.auth.createChallenge(body);
+  }
+
+  @Post("auth/sms-login")
+  smsLogin(@Body() body: ClientSmsLoginRequestDto) {
+    return this.auth.smsLogin(body);
+  }
+
+  /** MP-02A：微信手机号一键登录。 */
+  @Post("auth/wechat/phone-login")
+  wechatPhoneLogin(@Body() body: ClientWechatPhoneLoginRequestDto) {
+    return this.requireWechat().phoneLogin(body);
+  }
+
+  @Post("auth/wechat/bind")
+  bindWechat(@Req() req: ClientRequest, @Body() body: ClientWechatBindRequestDto) {
+    return this.requireWechat().bind(currentClient(req), body);
+  }
+
+  /** MP-02B：本人注销预检、短信核验与确认。 */
+  @Get("auth/closure/preview")
+  closurePreview(@Req() req: ClientRequest) {
+    return this.requireClosure().preview(currentClient(req));
+  }
+
+  @Post("auth/closure/challenge")
+  @HttpCode(201)
+  closureChallenge(@Req() req: ClientRequest) {
+    return this.auth.createClosureChallenge(currentClient(req));
+  }
+
+  @Post("auth/closure")
+  closeAccount(@Req() req: ClientRequest, @Body() body: ClientAccountClosureRequestDto) {
+    return this.requireClosure().close(currentClient(req), body);
   }
 
   @Post("auth/registration/challenges")
@@ -151,6 +253,22 @@ export class ClientApiController {
   @Delete("profile/contacts/:contactId")
   deleteContact(@Req() req: ClientRequest, @Param("contactId") contactId: string) {
     return this.api.deleteContact(currentClient(req), contactId);
+  }
+
+  /** MP-06：本人配送地址簿（不是联系人）。 */
+  @Get("profile/addresses")
+  listAddresses(@Req() req: ClientRequest) {
+    return this.requireAddresses().list(currentClient(req));
+  }
+
+  @Put("profile/addresses")
+  saveAddress(@Req() req: ClientRequest, @Body() body: ClientDeliveryAddressRequestDto) {
+    return this.requireAddresses().save(currentClient(req), body);
+  }
+
+  @Delete("profile/addresses/:addressId")
+  deleteAddress(@Req() req: ClientRequest, @Param("addressId") addressId: string) {
+    return this.requireAddresses().remove(currentClient(req), addressId);
   }
 
   @Get("membership/status")
@@ -299,6 +417,17 @@ export class ClientApiController {
   @Get("orders/:id/documents/:type/versions")
   orderDocumentVersions(@Req() req: ClientRequest, @Param("id") id: string, @Param("type") type: string) {
     return this.api.orderDocumentVersions(currentClient(req), id, type);
+  }
+
+  /** MP-11：需要本人响应的已批准费用，以及确认/异议。 */
+  @Get("orders/:id/fee-items")
+  feeItems(@Req() req: ClientRequest, @Param("id") id: string) {
+    return this.api.feeItems(currentClient(req), id);
+  }
+
+  @Post("orders/:id/fee-items/:inspectionId/:exceptionIndex/response")
+  respondToFee(@Req() req: ClientRequest, @Param("id") id: string, @Param("inspectionId") inspectionId: string, @Param("exceptionIndex") exceptionIndex: string, @Body() body: ClientFeeResponseRequestDto) {
+    return this.api.respondToFee(currentClient(req), id, inspectionId, Number(exceptionIndex), body, req);
   }
 
   @Post("orders/:id/cancel/preview")
