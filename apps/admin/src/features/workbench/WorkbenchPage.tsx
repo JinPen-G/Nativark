@@ -31,7 +31,8 @@ const todoTypeLabels: Record<RentalWorkbenchTodoType, string> = {
   fee_review: "待裁定费用",
   refund: "待办理退款",
   work_order: "养护工单",
-  notification_failure: "通知失败"
+  notification_failure: "通知失败",
+  cancelled_refund_due: "取消/爽约待退款"
 };
 const todoTypeColors: Record<RentalWorkbenchTodoType, string> = {
   pending_payment: "gold",
@@ -41,7 +42,8 @@ const todoTypeColors: Record<RentalWorkbenchTodoType, string> = {
   fee_review: "volcano",
   refund: "purple",
   work_order: "blue",
-  notification_failure: "red"
+  notification_failure: "red",
+  cancelled_refund_due: "magenta"
 };
 
 function periodStart(period: string) {

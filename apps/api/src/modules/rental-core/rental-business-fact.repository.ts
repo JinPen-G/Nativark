@@ -33,6 +33,10 @@ export interface RentalNotificationDeliveryPatch {
   sentAt?: string | null;
   nextAttemptAt?: string | null;
   lastAttemptAt?: string | null;
+  /** 记录一次投递结果时置 true：attempts +1 并释放租约。认领本身不递增。 */
+  countAttempt?: boolean;
+  /** 显式释放租约（查询回执等不消耗尝试次数的路径）。 */
+  releaseLease?: boolean;
 }
 
 export interface RentalReferralRecord {
@@ -108,9 +112,13 @@ export interface RentalBusinessFactStore {
     tx?: RentalBusinessFactTx
   ): Promise<void>;
   findNotificationDelivery(tenantId: string, id: string): Promise<RentalNotificationDeliveryRecord | undefined>;
+  /** 到期待投递：queued/failed、nextAttemptAt 已到且租约不存在或已过期。 */
   listDueNotificationDeliveries(tenantId: string, at: string, limit: number): Promise<RentalNotificationDeliveryRecord[]>;
+  /** 认领只写租约，不消耗 attempts；attempts 由 updateNotificationDelivery({ countAttempt: true }) 递增。 */
   claimNotificationDelivery(tenantId: string, id: string, at: string, leaseUntil: string, force: boolean): Promise<boolean>;
   updateNotificationDelivery(tenantId: string, id: string, patch: RentalNotificationDeliveryPatch): Promise<RentalNotificationSendLogV1 | undefined>;
+  /** 已受理（sent）且带服务商回执号、尚未取得最终回执的短信，供回执轮询。 */
+  listSentNotificationDeliveries(tenantId: string, workspaceId: string, take: number): Promise<RentalNotificationDeliveryRecord[]>;
 }
 
 function iso(value: Date): string {
@@ -802,13 +810,16 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
 
   async listDueNotificationDeliveries(tenantId: string, at: string, limit: number): Promise<RentalNotificationDeliveryRecord[]> {
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
+    const now = date(at);
     const rows = await this.prisma.rentalNotificationLog.findMany({
       where: {
         tenantId,
         workspaceId,
         channel: "sms",
         status: { in: ["queued", "failed"] },
-        nextAttemptAt: { lte: date(at) }
+        nextAttemptAt: { lte: now },
+        // 租约不存在或已过期才算到期：正在被别的实例投递的行不重复认领；崩溃留下的租约到期后自动回到队列。
+        OR: [{ leaseUntil: null }, { leaseUntil: { lte: now } }]
       },
       orderBy: [{ nextAttemptAt: "asc" }, { createdAt: "asc" }],
       take: Math.max(1, Math.min(limit, 100))
@@ -821,12 +832,30 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
     const current = await this.prisma.rentalNotificationLog.findFirst({ where: { id, tenantId, workspaceId } });
     if (!current || current.channel !== "sms" || !["queued", "failed", "delivery_failed"].includes(current.status)) return false;
     if (current.attempts >= current.maxAttempts) return false;
-    if (!force && current.nextAttemptAt && current.nextAttemptAt.getTime() > new Date(at).getTime()) return false;
+    const atMs = new Date(at).getTime();
+    if (!force && current.nextAttemptAt && current.nextAttemptAt.getTime() > atMs) return false;
+    // 认领只占租约，不递增 attempts：崩溃在租约期内的进程不会吃掉一次重试机会。
+    // 未到期的租约只有 force（人工重试）能覆盖。
+    if (!force && current.leaseUntil && current.leaseUntil.getTime() > atMs) return false;
     const result = await this.prisma.rentalNotificationLog.updateMany({
-      where: { id, tenantId, workspaceId, status: { in: ["queued", "failed", "delivery_failed"] }, attempts: current.attempts },
-      data: { attempts: { increment: 1 }, lastAttemptAt: date(at), nextAttemptAt: date(leaseUntil) }
+      where: {
+        id, tenantId, workspaceId,
+        status: { in: ["queued", "failed", "delivery_failed"] },
+        attempts: current.attempts,
+        leaseUntil: current.leaseUntil
+      },
+      data: { lastAttemptAt: date(at), leaseUntil: date(leaseUntil) }
     });
     return result.count === 1;
+  }
+
+  async listSentNotificationDeliveries(tenantId: string, workspaceId: string, take: number): Promise<RentalNotificationDeliveryRecord[]> {
+    const rows = await this.prisma.rentalNotificationLog.findMany({
+      where: { tenantId, workspaceId, channel: "sms", status: { in: ["sent", "delivery_pending"] }, providerMessageId: { not: null }, recipientEncrypted: { not: null } },
+      orderBy: [{ sentAt: "asc" }, { createdAt: "asc" }],
+      take: Math.max(1, Math.min(take, 200))
+    });
+    return rows.map((row) => this.notificationDelivery(row));
   }
 
   async updateNotificationDelivery(tenantId: string, id: string, patch: RentalNotificationDeliveryPatch): Promise<RentalNotificationSendLogV1 | undefined> {
@@ -840,7 +869,9 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
         ...(patch.errorMessage !== undefined ? { errorMessage: patch.errorMessage } : {}),
         ...(patch.sentAt !== undefined ? { sentAt: optionalDate(patch.sentAt) } : {}),
         ...(patch.nextAttemptAt !== undefined ? { nextAttemptAt: optionalDate(patch.nextAttemptAt) } : {}),
-        ...(patch.lastAttemptAt !== undefined ? { lastAttemptAt: optionalDate(patch.lastAttemptAt) } : {})
+        ...(patch.lastAttemptAt !== undefined ? { lastAttemptAt: optionalDate(patch.lastAttemptAt) } : {}),
+        ...(patch.countAttempt ? { attempts: { increment: 1 } } : {}),
+        ...(patch.countAttempt || patch.releaseLease ? { leaseUntil: null } : {})
       }
     });
     if (result.count !== 1) return undefined;

@@ -1,5 +1,19 @@
 import { Injectable, ServiceUnavailableException } from "@nestjs/common";
 import { createHash, createHmac, randomUUID } from "node:crypto";
+
+/**
+ * 由幂等键确定性派生 UUID（sha256 前 16 字节，按 v5 风格设置版本/变体位）。
+ * 阿里云 SendSms 只在签名参数 SignatureNonce 上做 15 分钟内的重放去重，
+ * 未签名的自定义请求头服务商不认；因此同一幂等键的重试必须产生同一个 nonce，
+ * 才能把「网络超时后重试」变成服务商侧幂等，而不是二次计费投递。
+ */
+export function deterministicNonce(idempotencyKey: string): string {
+  const bytes = createHash("sha256").update(`rental-os:sms-nonce:${idempotencyKey}`, "utf8").digest().subarray(0, 16);
+  bytes[6] = (bytes[6] & 0x0f) | 0x50;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
 import type { TenantIntegrationProvider } from "@rental-os/shared";
 import { assertOutboundUrl } from "../../common/outbound-url";
 import { PrismaService } from "../database/prisma.service";
@@ -459,7 +473,8 @@ export class TenantIntegrationRuntimeService {
       RegionId: text(config.settings.region, "地域"),
       SignName: text(config.settings.signName, "短信签名"),
       SignatureMethod: "HMAC-SHA1",
-      SignatureNonce: randomUUID(),
+      // 签名内的 nonce 由幂等键确定性派生：同一 idempotencyKey 的重试在服务商侧被去重。
+      SignatureNonce: deterministicNonce(idempotencyKey),
       SignatureVersion: "1.0",
       TemplateCode: templateCode,
       TemplateParam: JSON.stringify(variables),
@@ -478,7 +493,7 @@ export class TenantIntegrationRuntimeService {
     let response: Response;
     let body: JsonRecord;
     try {
-      response = await fetchWithTimeout(`https://dysmsapi.aliyuncs.com/?${query}`, { method: "GET", headers: { "x-acs-signature-nonce": idempotencyKey } }, ["dysmsapi.aliyuncs.com"]);
+      response = await fetchWithTimeout(`https://dysmsapi.aliyuncs.com/?${query}`, { method: "GET" }, ["dysmsapi.aliyuncs.com"]);
       body = await this.readJson(response);
     } catch (error) {
       if (error instanceof ServiceUnavailableException && !(error instanceof NotificationDeliveryUnknownError)) throw error;
@@ -541,6 +556,8 @@ export class TenantIntegrationRuntimeService {
           "X-TC-Timestamp": String(timestamp),
           "X-TC-RequestClient": "rental-os",
           Authorization: authorization,
+          // 腾讯云 TC3 签名没有客户端可控的请求 id/幂等参数（RequestId 由服务端生成），
+          // 这个头只用于自家日志关联，服务商不据此去重；超时重试仍可能重复投递。
           "X-Rental-Idempotency-Key": idempotencyKey
         },
         body: payload

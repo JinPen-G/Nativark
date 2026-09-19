@@ -218,6 +218,11 @@ export function RentalOrderDetailPage() {
     onSuccess: async () => { setNoShowOpen(false); noShowForm.resetFields(); await refresh(); message.success("订单已确认爽约，资源和优惠占用已释放"); },
     onError: (error: Error) => message.error(error.message || "确认爽约失败")
   });
+  const resumePickup = useMutation({
+    mutationFn: () => rentalCoreApi.resumePickup(id, { reason: "客户返回领取，恢复为待领取" }),
+    onSuccess: async () => { await refresh(); message.success("订单已恢复为待领取"); },
+    onError: (error: Error) => message.error(error.message || "恢复领取失败，请检查资产与库存是否仍可用")
+  });
   const handover = useMutation({ mutationFn: async (stage: "pickup" | "return") => { const token = operationToken ?? (await rentalCoreApi.operationLock(id, "acquire")).token; setOperationToken(token); return rentalCoreApi.handoverOrder(id, stage, token); }, onSuccess: async () => { setOperationToken(undefined); await refresh(); message.success("交接已完成"); }, onError: () => message.error("当前规则要求检查，或订单状态不允许直接交接") });
   const settle = useMutation({ mutationFn: () => rentalCoreApi.settleOrder(id), onSuccess: async () => { await refresh(); await queryClient.invalidateQueries({ queryKey: ["rental-core", "order", id, "funding"] }); message.success("订单已结算并关闭"); }, onError: () => message.error("结算失败，请先处理全部押金和预授权余额") });
   const substitute = useMutation({ mutationFn: (values: { toItemGroupId: string }) => rentalCoreApi.substituteBundleComponent(id, { ...substitution!, toItemGroupId: values.toItemGroupId }), onSuccess: async () => { setSubstitution(undefined); substitutionForm.resetFields(); await refresh(); message.success("套装组成已替换并重新预占"); }, onError: () => message.error("替换失败，请检查替代组、订单状态和候选库存") });
@@ -514,6 +519,7 @@ export function RentalOrderDetailPage() {
         {canOperate && pickupOverdueReady && <Button danger loading={markPickupOverdue.isPending} onClick={() => modal.confirm({ title: "进入待确认爽约？", content: "订单将标记为领取超时，但不会立即释放资源或收取爽约费用；请先通知客户，达到最终时限后再确认爽约。", okText: "确认进入", cancelText: "暂不处理", okButtonProps: { danger: true }, onOk: () => markPickupOverdue.mutateAsync() })}>领取超时</Button>}
         {canOperate && detail.status === RentalCoreOrderStatus.PickupOverdue && !detail.noShowNoticeAt && <Button loading={sendNoShowNotice.isPending} onClick={() => sendNoShowNotice.mutate()}>通知客户</Button>}
         {canOperate && noShowNoticeReady && <Button danger loading={confirmNoShow.isPending} onClick={() => { noShowForm.resetFields(); setNoShowOpen(true); }}>{noShowFinalReady ? "确认爽约" : "提前确认爽约"}</Button>}
+        {canOperate && detail.status === RentalCoreOrderStatus.PickupOverdue && <Button loading={resumePickup.isPending} onClick={() => modal.confirm({ title: "恢复为待领取？", content: "客户返回领取时，将订单从待确认爽约恢复为待领取；系统会复核资产与库存仍可交付，不改动金额或资金。", okText: "确认恢复", cancelText: "暂不处理", onOk: () => resumePickup.mutateAsync() })}>恢复领取</Button>}
         {((canPickup && detail.status === RentalCoreOrderStatus.ReadyForPickup) || (canReturn && detail.status === RentalCoreOrderStatus.Renting)) && <Button loading={operationLock.isPending} onClick={() => operationLock.mutate(operationToken ? "release" : "acquire")}>{operationToken ? "结束办理" : "开始 / 接手办理"}</Button>}
         {canPickup && detail.status === RentalCoreOrderStatus.ReadyForPickup && ((detail.ruleSnapshot?.fulfillment?.pickupInspectionRequired ?? true) ? <Button type="primary" icon={<SafetyCertificateOutlined />} onClick={() => beginInspection("pickup")}>{profile.data?.terminology.pickupLabel}检查</Button> : <Button type="primary" onClick={() => handover.mutate("pickup")}>直接完成{profile.data?.terminology.pickupLabel}</Button>)}
         {canReturn && detail.status === RentalCoreOrderStatus.Renting && ((detail.ruleSnapshot?.fulfillment?.returnInspectionRequired ?? true) ? <Button type="primary" icon={<CheckCircleOutlined />} onClick={() => beginInspection("return")}>{profile.data?.terminology.returnLabel}检查</Button> : <Button type="primary" onClick={() => handover.mutate("return")}>直接完成{profile.data?.terminology.returnLabel}</Button>)}
@@ -563,8 +569,8 @@ export function RentalOrderDetailPage() {
       {Boolean(changes.data?.length) && <Card title="订单变更记录" extra={<Tag color="blue">原订单与原报价快照保留</Tag>}>
         <Table rowKey="id" size="small" pagination={false} dataSource={changes.data ?? []} columns={[
           { title: "时间", dataIndex: "appliedAt", render: (value) => value ? dayjs(value).format("YYYY-MM-DD HH:mm") : "—" },
-          { title: "变更", render: () => "取货前整行部分取消" },
-          { title: "取消商品", render: (_, row) => ((row.request.lineIds ?? []).map((lineId) => detail.lines.find((line) => line.id === lineId)?.itemGroupName ?? lineId).join("、")) },
+          { title: "变更", render: (_, row) => row.type === "resume_pickup" ? "待确认爽约恢复领取" : row.type === "post_pickup_exchange" ? "取货后换货" : row.type === "service_cancel" ? "取货前取消服务" : "取货前整行部分取消" },
+          { title: "取消商品", render: (_, row) => (("lineIds" in row.request ? row.request.lineIds ?? [] : []).map((lineId) => detail.lines.find((line) => line.id === lineId)?.itemGroupName ?? lineId).join("、")) },
           { title: "退款差额", align: "right", render: (_, row) => money(row.refundAmount) },
           { title: "补款差额", align: "right", render: (_, row) => money(row.additionalAmount) },
           { title: "原因", render: (_, row) => row.request.reason }
@@ -1104,9 +1110,11 @@ export function RentalOrderDetailPage() {
         description={<Space orientation="vertical" size={0}>
           {(feeReview?.basis ?? []).map((row) => <span key={row}>{row}</span>)}
           <span>
-            {feeReview?.type === "early_return_refund" || feeReview?.type === "service_refund"
-              ? "批准后只核减应收并生成待退款；实际退款要到资金区由具备资金权限的人员办理。"
-              : "批准后按认定额计入应收；实际收款要到资金区单独登记。"}
+            {feeReview?.type === "refund_due"
+              ? "批准只表示退款/释放已获认可，本单不动账；押金、预授权与多收租金的实际退款/释放要到资金区由具备资金权限的人员办理。"
+              : feeReview?.type === "early_return_refund" || feeReview?.type === "service_refund"
+                ? "批准后只核减应收并生成待退款；实际退款要到资金区由具备资金权限的人员办理。"
+                : "批准后按认定额计入应收；实际收款要到资金区单独登记。"}
           </span>
         </Space>}
         style={{ marginBottom: 16 }}
@@ -1114,8 +1122,8 @@ export function RentalOrderDetailPage() {
       <Form form={feeReviewForm} layout="vertical" onFinish={(values) => decideFeeReview.mutate(values)}>
         <Form.Item name="decision" label="裁定结论" rules={[{ required: true }]}>
           <Select options={[
-            { value: "approved", label: feeReview?.type === "early_return_refund" || feeReview?.type === "service_refund" ? "批准退款（核减应收）" : "批准计费" },
-            { value: "rejected", label: feeReview?.type === "early_return_refund" || feeReview?.type === "service_refund" ? "驳回，不退款" : "驳回，不计费" }
+            { value: "approved", label: ["early_return_refund", "service_refund", "refund_due"].includes(feeReview?.type ?? "") ? "批准退款 / 释放" : "批准计费" },
+            { value: "rejected", label: ["early_return_refund", "service_refund", "refund_due"].includes(feeReview?.type ?? "") ? "驳回，不退款" : "驳回，不计费" }
           ]} />
         </Form.Item>
         <Form.Item noStyle shouldUpdate={(before, after) => before.decision !== after.decision}>

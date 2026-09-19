@@ -107,7 +107,8 @@ import { DEFAULT_BUSINESS_TIME_ZONE, isValidTimeZone, businessHoursError } from 
 import { roundMoney } from "./rental-money";
 import { bufferedRentalPeriod, peakReservedQuantity } from "./rental-occupancy";
 import { extensionPaymentRequired } from "./rental-extension-lifecycle";
-import { effectiveExtensionRule, inclusiveTaxAmount } from "./rental-rule-defaults";
+import { effectiveExtensionRule, effectiveNoShowRule, effectiveUnpaidHoldRule, inclusiveTaxAmount } from "./rental-rule-defaults";
+import { RentalFundingService } from "./rental-funding.service";
 import { RentalCoreConfigRepository, type RentalConfigStore, type RentalConfigTx } from "./rental-core-config.repository";
 import {
   RentalCoreFactRepository,
@@ -284,7 +285,10 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     @Optional() private readonly serviceCapacities?: RentalServiceCapacityService,
     // EXT-03/CAT-IMAGE-01：已配置租户对象存储时，型号图片通过统一文件生命周期服务
     // 上传、读取和删除；未注入仅保留内存/开发环境的本地图片兼容路径。
-    @Optional() private readonly fileStorage?: FileStorageRuntimeService
+    @Optional() private readonly fileStorage?: FileStorageRuntimeService,
+    // 取消/爽约后仍被订单持有的押金、预授权与多收租金，须在同一事务内读事件流推导；
+    // 可选仅为保留直接构造本服务的内存单测，生产 AppModule 必然注入。
+    @Optional() private readonly funding?: RentalFundingService
   ) {}
 
   /**
@@ -1402,13 +1406,24 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (order.status !== RentalCoreOrderStatus.Draft) {
       throw new ConflictException("只有待确认订单才能按待支付超时处理");
     }
-    const softReservations = order.reservations.filter((row) => row.status === RentalReservationStatus.Soft);
     const cutoff = Date.parse(expiredBefore);
-    if (!softReservations.length || !Number.isFinite(cutoff) || softReservations.some((row) => {
-      const expiresAt = row.expiresAt ? Date.parse(row.expiresAt) : Number.NaN;
-      return !Number.isFinite(expiresAt) || expiresAt >= cutoff;
-    })) {
-      throw new ConflictException("订单的待支付占用尚未全部到期");
+    if (!Number.isFinite(cutoff)) throw new ConflictException("订单的待支付占用尚未全部到期");
+    if (!order.reservations.length) {
+      // 无库存预占的草稿单（例如纯增值服务单）没有软预占可判到期，只能按
+      // createdAt + 待支付保留时长（`effectiveUnpaidHoldRule` 缺省 = 现行行为）判定。
+      const holdMs = effectiveUnpaidHoldRule(order.ruleSnapshot).unpaidHoldMinutes * 60_000;
+      const createdMs = Date.parse(order.createdAt);
+      if (!Number.isFinite(createdMs) || createdMs + holdMs > cutoff) {
+        throw new ConflictException("订单的待支付占用尚未全部到期");
+      }
+    } else {
+      const softReservations = order.reservations.filter((row) => row.status === RentalReservationStatus.Soft);
+      if (!softReservations.length || softReservations.some((row) => {
+        const expiresAt = row.expiresAt ? Date.parse(row.expiresAt) : Number.NaN;
+        return !Number.isFinite(expiresAt) || expiresAt >= cutoff;
+      })) {
+        throw new ConflictException("订单的待支付占用尚未全部到期");
+      }
     }
     return this.cancelOrder(tenantId, orderId, RENTAL_PENDING_PAYMENT_TIMEOUT_REASON, 0, tx, operator);
   }
@@ -1440,7 +1455,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     return rows
       .filter((order) => order.status === RentalCoreOrderStatus.PickupOverdue && order.pickupOverdueAt && order.noShowNoticeAt)
       .filter((order) => order.ruleSnapshot.cancellation.noShow?.enabled === true)
-      .filter((order) => Date.parse(order.pickupOverdueAt!) + (order.ruleSnapshot.cancellation.noShow?.finalizationMinutes ?? 60) * 60_000 <= cutoff)
+      .filter((order) => Date.parse(order.pickupOverdueAt!) + effectiveNoShowRule(order.ruleSnapshot).finalizationMinutes * 60_000 <= cutoff)
       .sort((a, b) => Date.parse(a.pickupOverdueAt!) - Date.parse(b.pickupOverdueAt!))
       .slice(0, Math.min(Math.max(1, take), 200))
       .map((order) => order.id);
@@ -1487,7 +1502,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (rule?.enabled !== true) throw new ConflictException("当前订单规则未启用爽约处理");
     if (!current.pickupOverdueAt || !current.noShowNoticeAt) throw new ConflictException("必须先记录客户通知，才能确认爽约");
     const atMs = Date.parse(at);
-    const finalAt = Date.parse(current.pickupOverdueAt) + (rule?.finalizationMinutes ?? 60) * 60_000;
+    const finalAt = Date.parse(current.pickupOverdueAt) + effectiveNoShowRule(current.ruleSnapshot).finalizationMinutes * 60_000;
     if (!Number.isFinite(atMs)) throw new BadRequestException("确认时间无效");
     if (!allowEarly && atMs < finalAt) throw new ConflictException("尚未到达爽约最终确认时限");
     if (!reason?.trim()) throw new BadRequestException("爽约原因不能为空");
@@ -1503,6 +1518,65 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     order.noShowReason = reason.trim();
     order.updatedAt = at;
     await this.factStore.saveOrderAggregate(order, [], tx);
+    return order;
+  }
+
+  /**
+   * RULE-CLOSE-01：把一张待确认爽约（PickupOverdue）订单恢复为待领取。
+   *
+   * 只允许 PickupOverdue → ReadyForPickup：客户在被判逾期后又来领取，是常见的补救动作。
+   * 恢复前用与领取同一把闸（`assertAllocatedPickupReady`）在订单行锁内复核资产与库存仍可用，
+   * 因为逾期期间原分配的资产可能已被改配、进厂维护或被后续订单占用；复核不过则事务回滚，
+   * 状态留在 PickupOverdue，不会恢复出一张交付不了的订单。恢复只清逾期与通知时间戳，
+   * 不动金额与资金，并向订单变更历史追加一条 `resume_pickup` 记录留痕。
+   */
+  async resumePickupOverdueOrder(
+    tenantId: string,
+    orderId: string,
+    tx?: RentalFactTx,
+    operator = "system",
+    customerConfirmed = true
+  ) {
+    this.state(tenantId);
+    const order = await this.lockedOrder(tenantId, orderId, tx);
+    if (order.status !== RentalCoreOrderStatus.PickupOverdue) {
+      throw new ConflictException("只有待确认爽约订单才能恢复领取");
+    }
+    if (!customerConfirmed) throw new ConflictException("恢复领取前必须确认客户仍要领取");
+    const expectedUpdatedAt = order.updatedAt;
+    // 领取同款复核：锁资产、按缓冲区间核数量库存与序列化资产可用性、校验能力装备。
+    await this.assertAllocatedPickupReady(tenantId, order, tx);
+    order.status = RentalCoreOrderStatus.ReadyForPickup;
+    order.pickupOverdueAt = undefined;
+    order.noShowNoticeAt = undefined;
+    const at = now();
+    order.updatedAt = at;
+    await this.factStore.saveOrderAggregate(order, [], tx);
+    const previousChanges = await this.factStore.listOrderChanges(tenantId, orderId, tx);
+    const change: RentalOrderChange = {
+      id: randomUUID(),
+      tenantId,
+      workspaceId: this.resolveWorkspaceId(tenantId),
+      orderId: order.id,
+      sequence: previousChanges.length + 1,
+      type: "resume_pickup",
+      status: "applied",
+      request: { type: "resume_pickup", reason: "待确认爽约订单恢复领取", customerConfirmed, expectedUpdatedAt },
+      beforeSnapshot: { status: RentalCoreOrderStatus.PickupOverdue, updatedAt: expectedUpdatedAt },
+      afterSnapshot: { status: order.status, updatedAt: order.updatedAt },
+      diff: { status: { from: RentalCoreOrderStatus.PickupOverdue, to: order.status } },
+      refundAmount: 0,
+      additionalAmount: 0,
+      depositDelta: 0,
+      preAuthDelta: 0,
+      idempotencyKey: `resume_pickup:${order.id}:${previousChanges.length + 1}`,
+      requestedBy: operator,
+      appliedBy: operator,
+      requestedAt: at,
+      appliedAt: at,
+      createdAt: at
+    };
+    await this.factStore.insertOrderChange(change, tx);
     return order;
   }
 
@@ -2223,6 +2297,32 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     }
     order.cancellationReason = reason.trim(); order.cancelledAt = now();
     order.status = RentalCoreOrderStatus.Cancelled; order.updatedAt = now();
+    // 取消后仍被订单持有的押金、预授权冻结与多收租金 → 挂一张 refund_due 审核单。
+    // 这张单不动账（reviewOrderFeeReview 对 refund_due 已是金额中性），只把"还有钱扣在
+    // 客户身上"变成运营侧可见、且阻止误结的待办；实际退款/释放仍由资金区按权限单独办理。
+    // 待收多收必须用取消核减**之后**的最终应付判定，因此把内存订单的 finalPayableAmount 传入。
+    if (this.funding && tx) {
+      const held = await this.funding.computeHeldFunds(
+        tenantId,
+        this.resolveWorkspaceId(tenantId),
+        orderId,
+        tx,
+        order.finalPayableAmount ?? order.payableAmount
+      );
+      const depositRefund = held.depositBalance > 0 ? roundMoney(held.depositBalance) : 0;
+      const preauthRefund = held.preauthBalance > 0 ? roundMoney(held.preauthBalance) : 0;
+      const overpaidRefund = held.rentalOverpaid < -0.005 ? roundMoney(-held.rentalOverpaid) : 0;
+      const total = roundMoney(depositRefund + preauthRefund + overpaidRefund);
+      if (total > 0) {
+        this.raiseFeeReview(order, "refund_due", total, [
+          `订单取消，仍持有押金/预授权/多收租金合计 ${total}`,
+          ...(depositRefund > 0 ? [`押金余额 ${depositRefund}`] : []),
+          ...(preauthRefund > 0 ? [`预授权冻结余额 ${preauthRefund}`] : []),
+          ...(overpaidRefund > 0 ? [`多收租金 ${overpaidRefund}`] : []),
+          "退款/释放已获认可后仍需在资金区按权限单独办理，本单不动账"
+        ], "cancel");
+      }
+    }
     // 订单取消后遗留的待补款续租不该继续可补款，也不该继续计入待收。
     await this.voidPendingExtensions(tenantId, orderId, tx);
     await this.factStore.saveOrderAggregate(order, assetChanges, tx);
@@ -2507,6 +2607,18 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     return true;
   }
 
+  /**
+   * 押金与预授权是订单上的独立标量字段（不是费用明细），任何增减都必须走这里：
+   * 统一 `roundMoney` 取整并在 0 处封底。此前四处各自裸写 `roundMoney(x + delta)`
+   * 或 `Math.max(0, roundMoney(...))`，其中部分取消那两处漏了封底——负 delta 叠加
+   * 出负押金就会被当成"倒欠客户"。收敛成一处后，续租的保证金增额逻辑（走资金侧
+   * 续租明细，不改这两个字段）保持不变。
+   */
+  private applySecurityDeltaTo(order: RentalOrder, delta: { deposit?: number; preAuth?: number }) {
+    if (delta.deposit !== undefined) order.depositAmount = Math.max(0, roundMoney(order.depositAmount + delta.deposit));
+    if (delta.preAuth !== undefined) order.preAuthAmount = Math.max(0, roundMoney(order.preAuthAmount + delta.preAuth));
+  }
+
   /** 订单的续租记录，按序号升序。订单详情与幂等重放都读它。 */
   async listOrderExtensions(tenantId: string, orderId: string, tx?: RentalFactTx) {
     this.state(tenantId);
@@ -2688,8 +2800,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       sourceVersion: priced.priceVersion ?? priced.ruleVersion,
       detail: input.reason.trim()
     });
-    order.depositAmount = roundMoney(order.depositAmount + depositDelta);
-    order.preAuthAmount = roundMoney(order.preAuthAmount + preAuthDelta);
+    this.applySecurityDeltaTo(order, { deposit: depositDelta, preAuth: preAuthDelta });
     order.updatedAt = at;
 
     const afterSnapshot: Record<string, unknown> = {
@@ -2930,8 +3041,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
         "归还结算前需人工审核退款"
       ], changeId);
     }
-    order.depositAmount = Math.max(0, roundMoney(order.depositAmount + priced.depositDelta));
-    order.preAuthAmount = Math.max(0, roundMoney(order.preAuthAmount + priced.preAuthDelta));
+    this.applySecurityDeltaTo(order, { deposit: priced.depositDelta, preAuth: priced.preAuthDelta });
     order.updatedAt = at;
     const afterSnapshot: Record<string, unknown> = {
       updatedAt: order.updatedAt,
@@ -3440,19 +3550,24 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     tx: RentalFactTx
   ) {
     const order = await this.lockedOrder(tenantId, orderId, tx);
-    if (order.status === RentalCoreOrderStatus.Completed || order.status === RentalCoreOrderStatus.Cancelled) {
-      throw new ConflictException("已关闭或已取消的订单不能再裁定费用审核");
-    }
     if (!input.reason.trim()) throw new BadRequestException("请填写审核原因");
     const review = (order.feeReviews ?? []).find((row) => row.id === reviewId);
     if (!review || review.status !== "pending") throw new ConflictException("该费用审核单不存在或已处理");
+    // `refund_due` 的宿主订单本就处于取消/爽约终态，且裁定金额中性（不落费用明细），
+    // 因此对它放开终态闸门；其余类型仍禁止在已关闭/已取消订单上裁定，避免给终态订单再加收入。
+    if (review.type !== "refund_due" && (order.status === RentalCoreOrderStatus.Completed || order.status === RentalCoreOrderStatus.Cancelled)) {
+      throw new ConflictException("已关闭或已取消的订单不能再裁定费用审核");
+    }
     const decidedAmount = input.amount === undefined ? review.suggestedAmount : roundMoney(input.amount);
     if (decidedAmount < 0) throw new BadRequestException("认定金额不能为负");
     if (decidedAmount > review.suggestedAmount) {
       throw new BadRequestException(`认定金额不能超过规则建议的 ${review.suggestedAmount}；需要多收请另立异常费用`);
     }
     const at = now();
-    if (input.decision === "approved" && decidedAmount > 0) {
+    // `refund_due` 是取消/爽约后遗留资金的退款审核：批准只表示"退款/释放已获认可"，
+    // 不动账（押金/预授权/多收租金的实际动作由资金区按权限单独办理）。因此它不进费用明细，
+    // 也不进入下面按 review.type 映射费用明细 type 的分支——那个联合类型里没有 refund_due。
+    if (input.decision === "approved" && decidedAmount > 0 && review.type !== "refund_due") {
       const isRefund = review.type === "early_return_refund" || review.type === "service_refund";
       this.applyChargeTo(order, {
         code: `${review.type}:${order.id}:${review.sourceId ?? "order"}`,
@@ -3520,17 +3635,6 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     order.updatedAt = at;
     await this.factStore.saveOrderAggregate(order, [], tx);
     return { order: this.publicOrder(order), occurrence: next };
-  }
-
-  private applyDamageTo(order: RentalOrder, amount: number, detail: string) {    if (amount <= 0) return;
-    this.applyChargeTo(order, {
-      code: `damage:${order.id}`,
-      name: "损坏费用",
-      type: "damage",
-      amount,
-      sourceVersion: order.ruleVersion,
-      detail
-    });
   }
 
   private async markPickedUp(

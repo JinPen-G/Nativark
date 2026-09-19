@@ -1,6 +1,8 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
+  HttpStatus,
   Injectable,
   NotFoundException,
   ServiceUnavailableException,
@@ -9,9 +11,11 @@ import {
 import { Prisma } from "@prisma/client";
 import {
   CLIENT_API_VERSION,
+  CLIENT_WECHAT_IDENTITY_REQUIRED,
   type ClientMiniProgramPaymentIntentRequest,
   type ClientPaymentIntentRequest,
   type ClientPaymentIntentResponse,
+  type ClientWechatJsapiParameters,
   type PaymentReconciliationSummary
 } from "@rental-os/shared";
 import {
@@ -20,13 +24,15 @@ import {
   createSign,
   createVerify,
   randomBytes,
-  randomUUID
+  randomUUID,
+  X509Certificate
 } from "node:crypto";
 import { PrismaService } from "../database/prisma.service";
 import { assertOutboundUrl } from "../../common/outbound-url";
 import { TenantIntegrationService, type TenantIntegrationRuntimeConfig } from "./tenant-integration.service";
 import { RentalFundingService } from "../rental-core/rental-funding.service";
 import { rentalPaymentBalance } from "../rental-core/rental-funding-events";
+import { roundMoney, toCents } from "./payment-money";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -65,7 +71,17 @@ interface ProviderRefundResult {
   confirmedTotal?: number;
 }
 
-const money = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
+/** 金额取整统一走 rental-money.ts 的 roundMoney（README §4.3）；本文件不再自带实现。 */
+const money = roundMoney;
+
+/** 支付单本地过期时长；同一个值同时传给第三方（time_expire），让两边过期一致。 */
+const PAYMENT_INTENT_TTL_MS = 15 * 60 * 1000;
+
+/** 退款在第三方查不到超过这个时长，说明申请从未落到平台，可以安全判失败并释放额度。 */
+const REFUND_NOT_FOUND_TERMINAL_MS = 24 * 60 * 60 * 1000;
+
+/** 回调候选配置缓存时长：回调是公开入口，不能每次请求都全表扫描并解密所有租户密钥。 */
+const CALLBACK_CONFIG_CACHE_MS = 30_000;
 
 function valueOf(value: unknown) {
   return Array.isArray(value) ? String(value[0] ?? "") : String(value ?? "");
@@ -99,6 +115,30 @@ function timestamp() {
 
 function alipayTimestamp() {
   return new Date().toISOString().slice(0, 19).replace("T", " ");
+}
+
+/**
+ * 支付宝 time_expire 要求 `yyyy-MM-dd HH:mm:ss` 且按北京时间解释，
+ * 不带时区；这里显式按 Asia/Shanghai 格式化，不依赖进程时区。
+ */
+export function alipayExpireTime(date: Date) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  }).formatToParts(date);
+  const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "00";
+  return `${get("year")}-${get("month")}-${get("day")} ${get("hour")}:${get("minute")}:${get("second")}`;
+}
+
+/** 微信 time_expire 要求 RFC3339 且带时区偏移；固定输出 +08:00，不用 `Z`（微信文档示例格式）。 */
+export function wechatExpireTime(date: Date) {
+  return `${alipayExpireTime(date).replace(" ", "T")}+08:00`;
 }
 
 function signRsa(privateKey: string, content: string) {
@@ -138,16 +178,79 @@ export class PaymentProviderUnknownError extends ServiceUnavailableException {
 }
 
 class PaymentProviderHttpError extends Error {
-  constructor(readonly status: number, message: string) {
+  constructor(readonly status: number, message: string, readonly code = "") {
     super(message);
     this.name = "PaymentProviderHttpError";
   }
 }
 
+/**
+ * 第三方**明确且不可逆**地拒绝了这次请求：重试同一请求不会得到不同结果。
+ * 只有这一类错误可以把退款单置为 failed 并释放退款额度。
+ *
+ * 与 PaymentProviderUnknownError 相对：后者是“不知道平台做了什么”，
+ * 前者是“平台明确说了不做”。业务级拒绝（如支付宝 ACQ.TRADE_HAS_CLOSE）
+ * 之前只是 plain Error，被 markRefundProviderCallPending 归为 pending，
+ * 于是永远占着额度、永远阻止停用平台。
+ */
+export class PaymentProviderDefinitiveError extends Error {
+  readonly providerResultDefinitive = true;
+
+  constructor(readonly providerCode: string, message: string) {
+    super(message);
+    this.name = "PaymentProviderDefinitiveError";
+  }
+}
+
+/**
+ * 支付宝 40004 是业务处理失败，但 sub_code 决定是否可重试：
+ * 余额不足、系统繁忙这类必须留 pending，等余额到账/查询确认；
+ * 交易已关闭、交易不存在、金额超限则再试一万次也一样，直接判定。
+ * 40006 是权限不足（ISV 权限/接口未签约），同样不会因重试而改变。
+ */
+const ALIPAY_RETRYABLE_SUB_CODES = new Set([
+  "ACQ.SELLER_BALANCE_NOT_ENOUGH",
+  "ACQ.SYSTEM_ERROR",
+  "ACQ.REFUND_CHARGE_ERROR",
+  "ACQ.NOT_ENOUGH_BALANCE"
+]);
+
+export function alipayFailure(result: JsonRecord, fallback: string): Error {
+  const code = valueOf(result.code);
+  const subCode = valueOf(result.sub_code).toUpperCase();
+  const message = valueOf(result.sub_msg || result.msg || fallback);
+  const definitive = code === "40006" || (code === "40004" && !ALIPAY_RETRYABLE_SUB_CODES.has(subCode));
+  return definitive
+    ? new PaymentProviderDefinitiveError(subCode || code, `${subCode || code}: ${message}`)
+    : new Error(`${subCode || code || "ALIPAY"}: ${message}`);
+}
+
 function isProviderCallUnknown(error: unknown) {
   if (error instanceof PaymentProviderUnknownError) return true;
+  if (error instanceof PaymentProviderDefinitiveError) return false;
   if (!(error instanceof PaymentProviderHttpError)) return false;
   return [408, 425, 429].includes(error.status) || error.status >= 500;
+}
+
+/**
+ * 退款调用异常 → 退款单去向。
+ * - definitive：平台明确拒绝 → failed（释放额度）。
+ * - 微信 HTTP 400/401/403/404：参数、鉴权或资源不存在，重试同一请求无意义 → failed；
+ *   例外是 403 NOT_ENOUGH（余额不足），充值后可重发 → pending。
+ * - 微信 HTTP 409（审计 L6）：FREQUENCY_LIMITED / 系统繁忙，**这笔退款可能已受理**，
+ *   必须留 pending 等查询确认，不能判失败——否则额度被释放后会重复退款。
+ * - 其余（网络、5xx、未知）→ pending。
+ */
+export function refundFailureDisposition(error: unknown): { definitive: boolean; providerCode?: string } {
+  if (error instanceof PaymentProviderDefinitiveError) return { definitive: true, providerCode: error.providerCode };
+  if (error instanceof PaymentProviderHttpError) {
+    // NOT_ENOUGH：商户可用余额不足，充值后同一笔退款可以再发起，不是不可逆拒绝。
+    if (error.code === "NOT_ENOUGH") return { definitive: false };
+    return [400, 401, 403, 404].includes(error.status) ? { definitive: true, providerCode: error.code || `HTTP_${error.status}` } : { definitive: false };
+  }
+  const message = error instanceof Error ? error.message : "";
+  const status = message.match(/HTTP (400|401|403|404)\b/u)?.[1];
+  return status ? { definitive: true, providerCode: `HTTP_${status}` } : { definitive: false };
 }
 
 async function fetchJson(url: string, init: RequestInit, timeoutMs = 10_000): Promise<JsonRecord> {
@@ -174,7 +277,7 @@ async function fetchJson(url: string, init: RequestInit, timeoutMs = 10_000): Pr
     } catch {
       body = { raw: raw.slice(0, 500) };
     }
-    if (!response.ok) throw new PaymentProviderHttpError(response.status, `HTTP ${response.status}: ${valueOf(body.message || body.msg || body.raw)}`);
+    if (!response.ok) throw new PaymentProviderHttpError(response.status, `HTTP ${response.status}: ${valueOf(body.message || body.msg || body.raw)}`, valueOf(body.code).toUpperCase());
     return body;
   } finally {
     clearTimeout(timer);
@@ -189,6 +292,30 @@ export class PaymentRuntimeService {
     private readonly funding: RentalFundingService
   ) {}
 
+  private readonly callbackConfigCache = new Map<string, { expiresAt: number; value: Promise<Array<TenantIntegrationRuntimeConfig & { tenantId: string }>> }>();
+
+  /**
+   * 回调候选配置按平台缓存 30 秒。回调是无鉴权公开入口，每次都全表扫描并解密所有租户
+   * 密钥会被伪造请求放大成 DB + 解密压力。30 秒内新启用/新通过测试的配置收不到回调，
+   * 由查单补偿兜底；停用的配置最多多被验签 30 秒，验签通过也只会推进它自己的支付单。
+   */
+  private callbackConfigs(provider: "alipay" | "wechat_pay") {
+    const now = Date.now();
+    const cached = this.callbackConfigCache.get(provider);
+    if (cached && cached.expiresAt > now) return cached.value;
+    const value = this.integrations.runtimeConfigsForCallback(provider).catch((error: unknown) => {
+      this.callbackConfigCache.delete(provider);
+      throw error;
+    });
+    this.callbackConfigCache.set(provider, { expiresAt: now + CALLBACK_CONFIG_CACHE_MS, value });
+    return value;
+  }
+
+  /** 测试与配置保存后可显式清空缓存。 */
+  clearCallbackConfigCache() {
+    this.callbackConfigCache.clear();
+  }
+
   /**
    * 只查询一个随机不存在的交易号验证商户签名与网关连通性。
    * 此方法不会创建支付单、扣款、关单或触发退款。
@@ -200,34 +327,65 @@ export class PaymentRuntimeService {
       return "已验证支付宝连接（仅查询随机交易号，未创建或扣款）。";
     }
     if (config.provider === "wechat_pay") {
+      // 先做纯本地校验：这些配置错误在真实回调到来前不会暴露，而回调验签失败时
+      // 已经没有人能看到错误。校验不发任何请求，只解析证书与密钥长度。
+      this.assertWechatCallbackMaterial(config);
       await this.queryWechatIntent(config, merchantOrderNo);
-      return "已验证微信支付连接（仅查询随机交易号，未创建或扣款）。";
+      return "已验证微信支付连接与平台证书（仅查询随机交易号，未创建或扣款）。";
     }
     throw new ServiceUnavailableException("未实现的支付平台适配器");
   }
 
   /**
-   * 当前 schema 没有 ClientWechatIdentity，也没有 JSAPI tradeType/prepayId 的持久化契约。
-   * 不从请求体、手机号或 Native code_url 推导 openid/支付参数；即使配置了微信 Native
-   * 也不能宣称支持小程序。可信绑定和支付迁移经单独批准前，在任何建单/幂等回放前拒绝。
+   * 微信回调验签依赖三样本地材料：平台证书能解析、其序列号与配置的
+   * platformCertificateSerial 一致（否则回调按 Wechatpay-Serial 永远匹配不到）、
+   * apiV3Key 恰好 32 字节（AES-256-GCM 解密要求）。任何一项错误都让回调静默失败。
+   */
+  assertWechatCallbackMaterial(config: TenantIntegrationRuntimeConfig) {
+    const key = Buffer.from(requiredText(config.credentials.apiV3Key, "API v3 密钥"), "utf8");
+    if (key.length !== 32) throw new ServiceUnavailableException(`API v3 密钥必须是 32 字节，当前 ${key.length} 字节`);
+    let certificate: X509Certificate;
+    try {
+      certificate = new X509Certificate(pem(config.credentials.wechatPlatformCertificate));
+    } catch {
+      throw new ServiceUnavailableException("微信支付平台证书无法解析，请粘贴完整的 PEM 证书（不是公钥或商户证书）");
+    }
+    const configuredSerial = certificateSerial(config.settings.platformCertificateSerial);
+    const actualSerial = certificateSerial(certificate.serialNumber);
+    if (configuredSerial !== actualSerial) {
+      throw new ServiceUnavailableException(`平台证书序列号不一致：配置为 ${configuredSerial}，证书实际为 ${actualSerial}`);
+    }
+    if (Date.parse(certificate.validTo) < Date.now()) throw new ServiceUnavailableException("微信支付平台证书已过期，请更新平台证书");
+  }
+
+  /**
+   * MP-07：小程序 JSAPI 支付。openid 只能来自服务端可信绑定（ClientWechatIdentity），
+   * 由调用方（ClientApiService）按会话解析后传入；缺少时用稳定错误码 409 引导先绑定微信，
+   * 绝不从请求体、手机号或 Native code_url 推导。JSAPI 参数由商户私钥即时签名，
+   * 支付单只保存 prepay_id（可重新签名），不保存一次性签名。
    */
   async createMiniProgramPaymentIntent(
-    _tenantId: string,
-    _workspaceId: string,
-    _orderId: string,
-    input: ClientMiniProgramPaymentIntentRequest
+    tenantId: string,
+    workspaceId: string,
+    orderId: string,
+    input: ClientMiniProgramPaymentIntentRequest,
+    identity?: { openId: string; appId: string }
   ): Promise<ClientPaymentIntentResponse> {
     if (input.instrument !== "rental") throw new BadRequestException("小程序支付仅支持租金及费用");
     const key = input.idempotencyKey?.trim();
     if (!key || key.length > 191) throw new BadRequestException("支付必须带有效幂等键");
-    throw new ServiceUnavailableException("小程序微信支付暂不可用：尚未接入可信 ClientWechatIdentity 和 JSAPI 支付持久化，不能使用 Native 支付参数");
+    if (!identity) {
+      throw new HttpException({ statusCode: HttpStatus.CONFLICT, code: CLIENT_WECHAT_IDENTITY_REQUIRED, message: "小程序支付需要先绑定微信身份：请用微信手机号登录，或在“我的”中绑定微信" }, HttpStatus.CONFLICT);
+    }
+    return this.createPaymentIntent(tenantId, workspaceId, orderId, { instrument: "rental", method: "wechat_pay", idempotencyKey: key }, { tradeType: "JSAPI", openId: identity.openId, appId: identity.appId });
   }
 
   async createPaymentIntent(
     tenantId: string,
     workspaceId: string,
     orderId: string,
-    input: ClientPaymentIntentRequest
+    input: ClientPaymentIntentRequest,
+    jsapi?: { tradeType: "JSAPI"; openId: string; appId: string }
   ): Promise<ClientPaymentIntentResponse> {
     if (input.instrument !== "rental") {
       throw new BadRequestException("支付宝和微信支付首期只支持租金及费用；押金、预授权仍须走对应资金能力");
@@ -244,14 +402,19 @@ export class PaymentRuntimeService {
     if (existing) {
       if (existing.idempotencyKey !== idempotencyKey) throw new ConflictException("支付幂等键摘要冲突，请更换幂等键");
       if (existing.method !== input.method) throw new ConflictException("支付幂等键已用于其他支付方式，请更换幂等键");
-      return this.toResponse(existing);
+      return this.toResponse(existing, jsapi ? await this.jsapiParameters(tenantId, existing, jsapi.openId) : undefined);
     }
 
     // 新建支付必须遵循租户当前明确选择的默认平台；查单、退款和关闭则
     // 继续按原支付单保存的平台恢复，不能因默认平台切换而丢失历史事实。
     const config = await this.integrations.runtimeConfig("payment", tenantId, input.method, { requireDefault: true });
     if (!config) throw new ServiceUnavailableException(`尚未启用${input.method === "alipay" ? "支付宝" : "微信支付"}`);
+    if (jsapi && requiredText(config.settings.appId, "应用 ID") !== jsapi.appId) {
+      // 支付配置里的应用 ID 与小程序 AppID 不一致：openid 属于另一个应用，微信会拒绝，且不能拿别的应用的 openid 下单。
+      throw new ServiceUnavailableException("微信支付配置的应用 ID 与小程序 AppID 不一致，请商户在第三方服务中核对");
+    }
     let prepared: { intent: Prisma.RentalPaymentIntentGetPayload<object>; orderNo: string; amount: number; replayed: boolean };
+    let expiredIntent: Prisma.RentalPaymentIntentGetPayload<object> | undefined;
     try {
       prepared = await this.prisma.$transaction(async (tx) => {
         // 同一订单的待支付单必须串行创建。仅靠“先查后写”会让两个不同幂等键
@@ -286,10 +449,22 @@ export class PaymentRuntimeService {
           where: { tenantId, workspaceId, orderId, instrument: input.instrument, status: { in: ["pending", "verified_pending_funding"] } },
           orderBy: { createdAt: "desc" }
         });
-        if (pending) throw new ConflictException("该订单已有待完成的支付，请先完成或关闭原支付");
+        if (pending) {
+          // 过期的 pending 支付单不该继续挡住新支付：客户扫码后放弃、15 分钟后再来，
+          // 应该直接拿到新单。平台侧已带 time_expire，本地只需在同一事务里关闭旧单；
+          // verified_pending_funding 说明钱已到、资金事件未落，绝不能当过期处理。
+          if (pending.status !== "pending" || pending.expiresAt.getTime() > Date.now()) {
+            throw new ConflictException("该订单已有待完成的支付，请先完成或关闭原支付");
+          }
+          await tx.rentalPaymentIntent.updateMany({
+            where: { id: pending.id, status: "pending" },
+            data: { status: "closed", failureReason: "expired" }
+          });
+          expiredIntent = pending;
+        }
 
         const merchantOrderNo = `RO${Date.now().toString(36).toUpperCase()}${randomUUID().replace(/-/gu, "").slice(0, 12).toUpperCase()}`;
-        const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+        const expiresAt = new Date(Date.now() + PAYMENT_INTENT_TTL_MS);
         const intent = await tx.rentalPaymentIntent.create({
           data: {
             tenantId,
@@ -315,7 +490,11 @@ export class PaymentRuntimeService {
       }
       throw error;
     }
-    if (prepared.replayed) return this.toResponse(prepared.intent);
+    if (prepared.replayed) return this.toResponse(prepared.intent, jsapi ? await this.jsapiParameters(tenantId, prepared.intent, jsapi.openId, config) : undefined);
+    if (expiredIntent) {
+      // 平台侧关单是尽力而为：本地已经关闭并让出位置，平台那边 time_expire 也会自行关闭。
+      await this.closeProviderIntentBestEffort(tenantId, config, expiredIntent);
+    }
     const intent = prepared.intent;
     const orderNo = prepared.orderNo;
     const amount = prepared.amount;
@@ -323,7 +502,9 @@ export class PaymentRuntimeService {
     try {
       const result = input.method === "alipay"
         ? await this.createAlipayIntent(config, intent, orderNo)
-        : await this.createWechatIntent(config, intent, orderNo);
+        : jsapi
+          ? await this.createWechatJsapiIntent(config, intent, orderNo, jsapi.openId)
+          : await this.createWechatIntent(config, intent, orderNo);
       const updated = await this.prisma.rentalPaymentIntent.update({
         where: { id: intent.id },
         data: { checkoutUrl: result.checkoutUrl, responseJson: result.responseJson as Prisma.InputJsonValue, failureReason: null }
@@ -332,9 +513,10 @@ export class PaymentRuntimeService {
         orderId,
         intentId: intent.id,
         merchantOrderNo: intent.merchantOrderNo,
-        amount
+        amount,
+        tradeType: jsapi ? "JSAPI" : input.method === "alipay" ? "PAGE" : "NATIVE"
       }, { responseCode: result.responseCode });
-      return this.toResponse(updated);
+      return this.toResponse(updated, jsapi ? await this.jsapiParameters(tenantId, updated, jsapi.openId, config) : undefined);
     } catch (error) {
       const message = error instanceof Error ? error.message : "支付平台调用失败";
       const unknown = isProviderCallUnknown(error);
@@ -420,6 +602,11 @@ export class PaymentRuntimeService {
       });
       if (!locked) throw new NotFoundException("支付单不存在");
       if (locked.status !== "paid" || !locked.externalTransactionId) throw new ConflictException("支付单尚未完成真实入账");
+      // 与 createPaymentIntent 相同：锁配置行并重新确认仍启用，让“停用平台”的检查
+      // 与本次退款单落库互斥。否则停用检查通过后这里仍能插入一笔 pending 退款，
+      // 形成一个已停用平台上永远无法查询/恢复的孤儿。退款是对既有事实的处理，
+      // 不要求平台仍是默认出口。
+      await this.integrations.assertEnabledInTransaction(tx, tenantId, "payment", locked.provider as "alipay" | "wechat_pay");
 
       // 外层幂等查询与本事务之间存在竞态；唯一键只负责兜底，不能把并发重试变成 500。
       const duplicate = await tx.rentalPaymentRefund.findFirst({
@@ -490,7 +677,7 @@ export class PaymentRuntimeService {
         workspaceId,
         orderId,
         prepared.refund.id,
-        error instanceof Error ? error.message : "第三方退款结果未知"
+        error
       );
     }
     await this.log(tenantId, config, "create_payment_refund", result.status === "failed" ? "failed" : "success", {
@@ -524,7 +711,7 @@ export class PaymentRuntimeService {
         workspaceId,
         orderId,
         refund.id,
-        error instanceof Error ? error.message : "第三方退款查询结果未知"
+        error
       );
     }
     await this.log(tenantId, config, "query_payment_refund", result.status === "failed" ? "failed" : "success", {
@@ -536,10 +723,29 @@ export class PaymentRuntimeService {
     return result.response;
   }
 
-  async getPaymentIntent(tenantId: string, workspaceId: string, orderId: string, intentId: string) {
+  async getPaymentIntent(tenantId: string, workspaceId: string, orderId: string, intentId: string, jsapiOpenId?: string) {
     const row = await this.prisma.rentalPaymentIntent.findFirst({ where: { id: intentId, tenantId, workspaceId, orderId } });
     if (!row) throw new NotFoundException("支付单不存在");
-    return this.toResponse(row);
+    return this.toResponse(row, jsapiOpenId ? await this.jsapiParameters(tenantId, row, jsapiOpenId) : undefined);
+  }
+
+  /**
+   * 为仍待支付的 JSAPI 支付单重新签名（prepay_id 两小时有效）。签名只在响应中出现，不落库；
+   * 支付单不是 JSAPI、已过期或 openid 与创建时不一致时不返回参数，客户端据此不弹收银台。
+   */
+  private async jsapiParameters(tenantId: string, row: PaymentIntentRow & { responseJson?: unknown }, openId: string, config?: TenantIntegrationRuntimeConfig): Promise<ClientWechatJsapiParameters | undefined> {
+    if (row.status !== "pending" || row.method !== "wechat_pay" || row.expiresAt.getTime() <= Date.now()) return undefined;
+    const response = (row.responseJson ?? {}) as JsonRecord;
+    const prepayId = valueOf(response.prepayId);
+    if (!prepayId || valueOf(response.tradeType) !== "JSAPI" || valueOf(response.openId) !== openId) return undefined;
+    const runtime = config ?? await this.integrations.runtimeConfig("payment", tenantId, "wechat_pay", { requireLiveTest: false });
+    if (!runtime) return undefined;
+    const appId = requiredText(runtime.settings.appId, "应用 ID");
+    const timeStamp = timestamp();
+    const nonceStr = nonce();
+    const pkg = `prepay_id=${prepayId}`;
+    const paySign = signRsa(valueOf(runtime.credentials.merchantPrivateKey), `${appId}\n${timeStamp}\n${nonceStr}\n${pkg}\n`);
+    return { timeStamp, nonceStr, package: pkg, signType: "RSA", paySign };
   }
 
   /**
@@ -618,7 +824,7 @@ export class PaymentRuntimeService {
    * 查询补偿不是收款依据的替代品，而是回调丢失时的主动恢复入口。
    * 只有提供方查询结果明确为成功，才会复用同一套金额校验和资金事件入账。
    */
-  async refreshPaymentIntent(tenantId: string, workspaceId: string, orderId: string, intentId: string) {
+  async refreshPaymentIntent(tenantId: string, workspaceId: string, orderId: string, intentId: string, jsapiOpenId?: string) {
     const intent = await this.prisma.rentalPaymentIntent.findFirst({ where: { id: intentId, tenantId, workspaceId, orderId } });
     if (!intent) throw new NotFoundException("支付单不存在");
     if (["paid", "closed"].includes(intent.status)) return this.toResponse(intent);
@@ -646,7 +852,7 @@ export class PaymentRuntimeService {
       });
     }
     await this.log(tenantId, config, "query_payment_intent", "success", { intentId, merchantOrderNo: intent.merchantOrderNo }, { state: result.state });
-    return this.getPaymentIntent(tenantId, workspaceId, orderId, intentId);
+    return this.getPaymentIntent(tenantId, workspaceId, orderId, intentId, jsapiOpenId);
   }
 
   async closePaymentIntent(tenantId: string, workspaceId: string, orderId: string, intentId: string) {
@@ -654,7 +860,10 @@ export class PaymentRuntimeService {
     if (!intent) throw new NotFoundException("支付单不存在");
     if (intent.status === "paid") throw new ConflictException("支付已入账，不能关闭支付单");
     if (intent.status === "closed") return this.toResponse(intent);
-    const config = await this.integrations.runtimeConfig("payment", tenantId, intent.method as "alipay" | "wechat_pay");
+    // 关单不会移动资金，只是终止一笔未付款的待支付单，与查单、退款查询同属“处理既有事实”。
+    // 保存配置会把 lastTestStatus 重置为 not_tested；如果这里仍要求 passed+live，
+    // 商户改一次配置之后所有客户都关不掉旧支付单，只能等 15 分钟过期。
+    const config = await this.integrations.runtimeConfig("payment", tenantId, intent.method as "alipay" | "wechat_pay", { requireLiveTest: false });
     if (!config) throw new ServiceUnavailableException("支付平台已停用，无法关闭支付单");
     if (intent.method === "alipay") await this.closeAlipayIntent(config, intent.merchantOrderNo);
     else await this.closeWechatIntent(config, intent.merchantOrderNo);
@@ -670,10 +879,75 @@ export class PaymentRuntimeService {
     return this.toResponse(updated);
   }
 
+  /**
+   * 平台侧关单的尽力而为版本：本地状态已经先行推进，这里失败只记日志。
+   * 支付宝 40004（交易不存在）与微信 404 都视为“无需关闭”，由 closeXxxIntent/fetchJson 内部处理。
+   */
+  private async closeProviderIntentBestEffort(tenantId: string, config: TenantIntegrationRuntimeConfig, intent: PaymentIntentRow) {
+    try {
+      if (intent.method === "alipay") await this.closeAlipayIntent(config, intent.merchantOrderNo);
+      else await this.closeWechatIntent(config, intent.merchantOrderNo);
+      await this.log(tenantId, config, "close_payment_intent", "success", { intentId: intent.id, merchantOrderNo: intent.merchantOrderNo, reason: "expired" });
+    } catch (error) {
+      await this.log(tenantId, config, "close_payment_intent", "failed", { intentId: intent.id, merchantOrderNo: intent.merchantOrderNo, reason: "expired" }, undefined, error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  /**
+   * 过期待支付单的收口任务（由调度器按空间调用）。
+   *
+   * 本地 expiresAt 与平台 time_expire 是同一个值，但两边时钟和回调都不可靠：
+   * 客户可能在最后一秒付款、平台回调可能丢失。所以每一笔都**先查平台**——
+   * 平台说已付，就走与回调/查单完全相同的 settleVerifiedPayment 入账，绝不因为
+   * 本地过期就把已收的钱标成关闭；平台说未付或查不到，才关闭（平台侧尽力关单）。
+   * 单笔失败只记录，不影响其余支付单。
+   */
+  async expireStalePaymentIntents(tenantId: string, workspaceId: string, take = 50) {
+    const limit = Math.max(1, Math.min(Number.isFinite(take) ? Math.floor(take) : 50, 200));
+    const stale = await this.prisma.rentalPaymentIntent.findMany({
+      where: { tenantId, workspaceId, status: "pending", expiresAt: { lt: new Date() } },
+      orderBy: { expiresAt: "asc" },
+      take: limit
+    });
+    const summary = { scanned: stale.length, closed: 0, paid: 0, errors: [] as Array<{ intentId: string; error: string }> };
+    for (const intent of stale) {
+      try {
+        const config = await this.integrations.runtimeConfig("payment", tenantId, intent.method as "alipay" | "wechat_pay", { requireLiveTest: false });
+        if (!config) throw new ServiceUnavailableException("支付平台已停用，无法确认过期支付单");
+        const result = intent.method === "alipay"
+          ? await this.queryAlipayIntent(config, intent.merchantOrderNo)
+          : await this.queryWechatIntent(config, intent.merchantOrderNo);
+        if (result.paid) {
+          this.assertPaidAmount(result.amount, Number(intent.amount));
+          await this.settleVerifiedPayment({
+            tenantId,
+            provider: intent.provider as "alipay" | "wechat_pay",
+            eventId: `query:${intent.merchantOrderNo}:${result.externalTransactionId || "paid"}`,
+            externalTransactionId: result.externalTransactionId,
+            intentId: intent.id,
+            amount: result.amount,
+            payloadHash: sha256(JSON.stringify({ source: "expire", merchantOrderNo: intent.merchantOrderNo, state: result.state }))
+          });
+          summary.paid += 1;
+          continue;
+        }
+        if (!result.closed) await this.closeProviderIntentBestEffort(tenantId, config, intent);
+        const updated = await this.prisma.rentalPaymentIntent.updateMany({
+          where: { id: intent.id, tenantId, status: "pending" },
+          data: { status: "closed", failureReason: "expired" }
+        });
+        if (updated.count === 1) summary.closed += 1;
+      } catch (error) {
+        summary.errors.push({ intentId: intent.id, error: (error instanceof Error ? error.message : String(error)).slice(0, 240) });
+      }
+    }
+    return summary;
+  }
+
   async handleAlipayCallback(body: unknown) {
     const values = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
     const appId = valueOf(values.app_id);
-    const candidates = (await this.integrations.runtimeConfigsForCallback("alipay"))
+    const candidates = (await this.callbackConfigs("alipay"))
       .filter((item) => valueOf(item.settings.appId) === appId);
     if (candidates.length === 0) throw new UnauthorizedException("支付宝回调商户不存在");
     const signature = valueOf(values.sign);
@@ -722,11 +996,12 @@ export class PaymentRuntimeService {
       throw new UnauthorizedException("微信支付回调缺少原始请求体");
     }
     const rawBody = input.rawBody;
-    const candidates = (await this.integrations.runtimeConfigsForCallback("wechat_pay"))
-      .filter((item) => certificateSerial(item.settings.platformCertificateSerial) === serial);
-    if (candidates.length === 0) throw new UnauthorizedException("微信支付回调平台证书序列号未配置或不匹配");
+    // 时间戳偏差是最便宜的检查，放在加载/解密任何租户配置之前，让重放和垃圾请求不触碰数据库。
     const signedAt = Number(timestampHeader);
     if (!Number.isFinite(signedAt) || Math.abs(Date.now() / 1000 - signedAt) > 300) throw new UnauthorizedException("微信支付回调已过期");
+    const candidates = (await this.callbackConfigs("wechat_pay"))
+      .filter((item) => certificateSerial(item.settings.platformCertificateSerial) === serial);
+    if (candidates.length === 0) throw new UnauthorizedException("微信支付回调平台证书序列号未配置或不匹配");
     const message = `${timestampHeader}\n${nonceHeader}\n${rawBody.toString("utf8")}\n`;
     let envelope: JsonRecord;
     try {
@@ -799,11 +1074,12 @@ export class PaymentRuntimeService {
       throw new UnauthorizedException("微信退款回调缺少原始请求体");
     }
     const rawBody = input.rawBody;
-    const candidates = (await this.integrations.runtimeConfigsForCallback("wechat_pay"))
-      .filter((item) => certificateSerial(item.settings.platformCertificateSerial) === serial);
-    if (candidates.length === 0) throw new UnauthorizedException("微信退款回调平台证书序列号未配置或不匹配");
+    // 时间戳偏差是最便宜的检查，放在加载/解密任何租户配置之前，让重放和垃圾请求不触碰数据库。
     const signedAt = Number(timestampHeader);
     if (!Number.isFinite(signedAt) || Math.abs(Date.now() / 1000 - signedAt) > 300) throw new UnauthorizedException("微信退款回调已过期");
+    const candidates = (await this.callbackConfigs("wechat_pay"))
+      .filter((item) => certificateSerial(item.settings.platformCertificateSerial) === serial);
+    if (candidates.length === 0) throw new UnauthorizedException("微信退款回调平台证书序列号未配置或不匹配");
     const message = `${timestampHeader}\n${nonceHeader}\n${rawBody.toString("utf8")}\n`;
     let envelope: JsonRecord;
     try {
@@ -903,7 +1179,7 @@ export class PaymentRuntimeService {
   async handleAlipayRefundCallback(body: unknown) {
     const values = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
     const appId = valueOf(values.app_id);
-    const candidates = (await this.integrations.runtimeConfigsForCallback("alipay"))
+    const candidates = (await this.callbackConfigs("alipay"))
       .filter((item) => valueOf(item.settings.appId) === appId);
     if (candidates.length === 0) throw new UnauthorizedException("支付宝退款回调商户不存在");
     const signature = valueOf(values.sign);
@@ -1019,7 +1295,7 @@ export class PaymentRuntimeService {
       body: new URLSearchParams({ ...params, sign: signRsa(valueOf(config.credentials.appPrivateKey), stableFormContent(params)) }).toString()
     });
     const result = (response.alipay_trade_refund_response ?? {}) as JsonRecord;
-    if (valueOf(result.code) !== "10000") throw new Error(valueOf(result.sub_msg || result.msg || "支付宝退款申请失败"));
+    if (valueOf(result.code) !== "10000") throw alipayFailure(result, "支付宝退款申请失败");
     const refundFee = Number(valueOf(result.refund_fee));
     const expectedTotal = money(confirmedTotal + Number(refund.amount));
     const succeeded = valueOf(result.fund_change) === "Y" && Number.isFinite(refundFee) && refundFee + 0.005 >= expectedTotal;
@@ -1054,7 +1330,15 @@ export class PaymentRuntimeService {
       body: new URLSearchParams({ ...params, sign: signRsa(valueOf(config.credentials.appPrivateKey), stableFormContent(params)) }).toString()
     });
     const result = (response.alipay_trade_fastpay_refund_query_response ?? {}) as JsonRecord;
-    if (valueOf(result.code) !== "10000") throw new Error(valueOf(result.sub_msg || result.msg || "支付宝退款查询失败"));
+    if (valueOf(result.code) !== "10000") throw alipayFailure(result, "支付宝退款查询失败");
+    // 查询成功但没有退款状态/金额 = 平台没有这笔退款申请。刚提交的申请可能还没同步，
+    // 但超过 24 小时仍查不到，说明申请从未到达平台，可以安全判失败并释放额度。
+    if (!valueOf(result.refund_status) && !valueOf(result.refund_amount) && !valueOf(result.refund_fee)) {
+      if (Date.now() - refund.createdAt.getTime() > REFUND_NOT_FOUND_TERMINAL_MS) {
+        throw new PaymentProviderDefinitiveError("REFUND_NOT_FOUND", "支付宝超过 24 小时仍查不到该退款申请，判定退款未受理");
+      }
+      return { status: "accepted", externalStatus: "NOT_FOUND", responseJson: { code: valueOf(result.code), refundStatus: "NOT_FOUND" } };
+    }
     const refundFee = Number(valueOf(result.refund_amount || result.refund_fee));
     const succeeded = valueOf(result.refund_status) === "REFUND_SUCCESS"
       && Number.isFinite(refundFee)
@@ -1078,8 +1362,8 @@ export class PaymentRuntimeService {
       out_refund_no: refund.merchantRefundNo,
       reason: refund.reason,
       amount: {
-        refund: Math.round(Number(refund.amount) * 100),
-        total: Math.round(Number(intent.amount) * 100),
+        refund: toCents(Number(refund.amount)),
+        total: toCents(Number(intent.amount)),
         currency: intent.currency
       },
       ...(String(config.settings.refundNotifyUrl ?? "").trim() ? { notify_url: String(config.settings.refundNotifyUrl).trim() } : {})
@@ -1102,7 +1386,20 @@ export class PaymentRuntimeService {
   }
 
   private async queryWechatRefund(config: TenantIntegrationRuntimeConfig, refund: PaymentRefundRow): Promise<ProviderRefundResult> {
-    const response = await this.wechatRequest(config, "GET", `/v3/refund/domestic/refunds/${encodeURIComponent(refund.merchantRefundNo)}`, "");
+    let response: JsonRecord;
+    try {
+      response = await this.wechatRequest(config, "GET", `/v3/refund/domestic/refunds/${encodeURIComponent(refund.merchantRefundNo)}`, "");
+    } catch (error) {
+      // 微信 404 RESOURCE_NOT_EXISTS：平台没有这笔退款。申请刚提交时可能短暂查不到，
+      // 超过 24 小时仍不存在则判定从未受理；24 小时内保持 pending 等下一次查询。
+      if (error instanceof PaymentProviderHttpError && error.status === 404) {
+        if (Date.now() - refund.createdAt.getTime() > REFUND_NOT_FOUND_TERMINAL_MS) {
+          throw new PaymentProviderDefinitiveError("REFUND_NOT_FOUND", "微信支付超过 24 小时仍查不到该退款申请，判定退款未受理");
+        }
+        throw new PaymentProviderUnknownError("微信支付暂未查到该退款申请，请稍后再查询");
+      }
+      throw error;
+    }
     const state = valueOf(response.status || "PROCESSING").toUpperCase();
     const refundedAmount = Number(((response.amount as JsonRecord | undefined)?.refund ?? Number.NaN)) / 100;
     const amountMatches = state !== "SUCCESS" || (Number.isFinite(refundedAmount) && refundedAmount + 0.005 >= Number(refund.amount));
@@ -1249,11 +1546,23 @@ export class PaymentRuntimeService {
     }
   }
 
-  private async markRefundProviderCallPending(tenantId: string, workspaceId: string, orderId: string, refundId: string, errorMessage: string) {
-    const definitive = /HTTP (400|401|403|404|409)/u.test(errorMessage);
+  private async markRefundProviderCallPending(tenantId: string, workspaceId: string, orderId: string, refundId: string, error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error ?? "第三方退款结果未知");
+    const disposition = refundFailureDisposition(error);
+    const current = await this.prisma.rentalPaymentRefund.findFirst({ where: { id: refundId, tenantId, workspaceId, orderId } });
+    if (!current) throw new NotFoundException("退款单不存在");
+    const responseJson = {
+      ...((current.responseJson && typeof current.responseJson === "object" && !Array.isArray(current.responseJson) ? current.responseJson : {}) as JsonRecord),
+      ...(disposition.providerCode ? { providerCode: disposition.providerCode, providerMessage: errorMessage.slice(0, 500) } : {})
+    };
     await this.prisma.rentalPaymentRefund.updateMany({
       where: { id: refundId, tenantId, workspaceId, orderId, status: { in: ["pending", "accepted"] } },
-      data: { status: definitive ? "failed" : "pending", failureReason: errorMessage.slice(0, 500) }
+      data: {
+        status: disposition.definitive ? "failed" : "pending",
+        externalStatus: disposition.definitive ? (disposition.providerCode ?? "REJECTED").slice(0, 40) : current.externalStatus,
+        failureReason: errorMessage.slice(0, 500),
+        ...(disposition.providerCode ? { responseJson: responseJson as Prisma.InputJsonValue } : {})
+      }
     });
     const updated = await this.prisma.rentalPaymentRefund.findFirst({ where: { id: refundId, tenantId, workspaceId, orderId } });
     if (!updated) throw new NotFoundException("退款单不存在");
@@ -1296,14 +1605,16 @@ export class PaymentRuntimeService {
       biz_content: JSON.stringify({
         out_trade_no: intent.merchantOrderNo,
         total_amount: Number(intent.amount).toFixed(2),
-        subject: `Rental OS ${orderNo}`
+        subject: `Rental OS ${orderNo}`,
+        // 平台侧与本地同一个过期时间：过期后支付宝自动关单，本地不再需要为“客户晚扫码”兜底。
+        time_expire: alipayExpireTime(intent.expiresAt)
       })
     };
     const content = stableFormContent(params);
     const body = new URLSearchParams({ ...params, sign: signRsa(valueOf(config.credentials.appPrivateKey), content) }).toString();
     const response = await fetchJson(requiredText(config.settings.gatewayUrl, "网关地址"), { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded;charset=utf-8" }, body });
     const result = (response.alipay_trade_precreate_response ?? {}) as JsonRecord;
-    if (valueOf(result.code) !== "10000") throw new Error(valueOf(result.sub_msg || result.msg || "支付宝下单失败"));
+    if (valueOf(result.code) !== "10000") throw alipayFailure(result, "支付宝下单失败");
     const checkoutUrl = valueOf(result.qr_code);
     if (!checkoutUrl) throw new PaymentProviderUnknownError("支付宝未返回可用二维码地址，请查询支付状态后再重试");
     return { checkoutUrl, responseCode: valueOf(result.code), responseJson: { code: valueOf(result.code), qrCode: checkoutUrl } };
@@ -1389,12 +1700,33 @@ export class PaymentRuntimeService {
       description: `Rental OS ${orderNo}`,
       out_trade_no: intent.merchantOrderNo,
       notify_url: requiredText(config.settings.notifyUrl, "支付通知地址"),
-      amount: { total: Math.round(Number(intent.amount) * 100), currency: "CNY" }
+      amount: { total: toCents(Number(intent.amount)), currency: "CNY" },
+      time_expire: wechatExpireTime(intent.expiresAt)
     });
     const response = await this.wechatRequest(config, "POST", path, requestBody);
     const checkoutUrl = valueOf(response.code_url);
     if (!checkoutUrl) throw new PaymentProviderUnknownError("微信支付未返回可用二维码地址，请查询支付状态后再重试");
     return { checkoutUrl, responseCode: "SUCCESS", responseJson: { codeUrl: checkoutUrl } };
+  }
+
+  /** JSAPI 下单：与 Native 同一验签链，只是 trade_type 不同且必须带付款人 openid；返回 prepay_id（不含签名）。 */
+  private async createWechatJsapiIntent(config: TenantIntegrationRuntimeConfig, intent: PaymentIntentRow, orderNo: string, openId: string) {
+    const path = "/v3/pay/transactions/jsapi";
+    const requestBody = JSON.stringify({
+      appid: requiredText(config.settings.appId, "应用 ID"),
+      mchid: requiredText(config.settings.mchid, "商户号"),
+      description: `Rental OS ${orderNo}`,
+      out_trade_no: intent.merchantOrderNo,
+      notify_url: requiredText(config.settings.notifyUrl, "支付通知地址"),
+      amount: { total: toCents(Number(intent.amount)), currency: "CNY" },
+      time_expire: wechatExpireTime(intent.expiresAt),
+      payer: { openid: openId }
+    });
+    const response = await this.wechatRequest(config, "POST", path, requestBody);
+    const prepayId = valueOf(response.prepay_id);
+    if (!prepayId) throw new PaymentProviderUnknownError("微信支付未返回预支付单，请查询支付状态后再重试");
+    // JSAPI 没有 checkoutUrl；responseJson 只保存 prepay_id、交易类型与付款人 openid（用于重新签名前核对）。
+    return { checkoutUrl: null as string | null, responseCode: "SUCCESS", responseJson: { prepayId, tradeType: "JSAPI", openId } };
   }
 
   private async wechatRequest(config: TenantIntegrationRuntimeConfig, method: "GET" | "POST", path: string, body: string) {
@@ -1507,8 +1839,9 @@ export class PaymentRuntimeService {
     if (!Number.isFinite(actual) || Math.abs(money(actual) - money(expected)) > 0.005) throw new ConflictException("支付回调金额与支付单不一致");
   }
 
-  private toResponse(row: PaymentIntentRow): ClientPaymentIntentResponse {
+  private toResponse(row: PaymentIntentRow, jsapi?: ClientWechatJsapiParameters): ClientPaymentIntentResponse {
     return {
+      ...(jsapi ? { jsapi } : {}),
       apiVersion: CLIENT_API_VERSION,
       intentId: row.id,
       provider: row.provider as ClientPaymentIntentResponse["provider"],

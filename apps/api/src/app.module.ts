@@ -42,6 +42,7 @@ import { PlatformService } from "./modules/platform/platform.service";
 import { RentalCoreController } from "./modules/rental-core/rental-core.controller";
 import { RentalCoreService } from "./modules/rental-core/rental-core.service";
 import { RentalAllocationService } from "./modules/rental-core/rental-allocation.service";
+import { RentalDueJobScheduler } from "./modules/rental-core/rental-due-job.scheduler";
 import { RentalBusinessController } from "./modules/rental-core/rental-business.controller";
 import { OfficialCalendarSourceController } from "./modules/rental-core/official-calendar-source.controller";
 import { OfficialCalendarSourceService } from "./modules/rental-core/official-calendar-source.service";
@@ -69,6 +70,12 @@ import { ClientApiController } from "./modules/client/client-api.controller";
 import { ClientApiService } from "./modules/client/client-api.service";
 import { ClientAuthService } from "./modules/client/client-auth.service";
 import { ClientApiRateLimitService } from "./modules/client/client-api-rate-limit.service";
+import { ClientAccountClosureService } from "./modules/client/client-account-closure.service";
+import { ClientDeliveryAddressService } from "./modules/client/client-delivery-address.service";
+import { ClientWechatAuthService } from "./modules/client/client-wechat-auth.service";
+import { WechatMiniProgramAdapter } from "./modules/client/wechat-mini-program.adapter";
+import { MiniProgramChannelController } from "./modules/client/mini-program-channel.controller";
+import { MiniProgramChannelService } from "./modules/client/mini-program-channel.service";
 
 @Module({
   imports: [
@@ -96,7 +103,8 @@ import { ClientApiRateLimitService } from "./modules/client/client-api-rate-limi
     PaymentReconciliationController,
     NotificationsController,
     JobsController,
-    ClientApiController
+    ClientApiController,
+    MiniProgramChannelController
   ],
   providers: [
     AuthService,
@@ -113,6 +121,7 @@ import { ClientApiRateLimitService } from "./modules/client/client-api-rate-limi
     OperationLogService,
     RentalCoreService,
     RentalAllocationService,
+    RentalDueJobScheduler,
     RentalBusinessService,
     OfficialCalendarSourceService,
     RentalStateRepository,
@@ -136,6 +145,11 @@ import { ClientApiRateLimitService } from "./modules/client/client-api-rate-limi
     ClientApiService,
     ClientAuthService,
     ClientApiRateLimitService,
+    ClientAccountClosureService,
+    ClientDeliveryAddressService,
+    ClientWechatAuthService,
+    WechatMiniProgramAdapter,
+    MiniProgramChannelService,
     IntegrationsService,
     IntegrationsRepository,
     TenantIntegrationService,

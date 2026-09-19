@@ -217,6 +217,43 @@ export class RentalFundingService {
   }
 
   /**
+   * 取消 / 确认爽约后仍被订单持有、需要退还或释放的模拟资金。
+   *
+   * 三项分别是：押金余额、预授权冻结余额，以及多收的租金（取消核减后 `rental.balance`
+   * 为负即多收）。`refund_due` 费用审核单据此挂出——这张单**不动账**，实际退款/释放仍由
+   * 资金区按权限单独办理，本方法只回答"还有多少钱扣在客户身上"。
+   *
+   * `payableOverride` 必须传取消核减**之后**的最终应付：核减把 `finalPayableAmount`
+   * 冲回 0，而库里此刻仍是核减前的旧值；直接读库会把已经不再应收的租金当成待收，
+   * 于是多收判不出来。核减发生在内存订单上、`saveOrderAggregate` 之前，因此由调用方传值。
+   */
+  async computeHeldFunds(
+    tenantId: string,
+    workspaceId: string,
+    orderId: string,
+    tx: Prisma.TransactionClient,
+    payableOverride?: number
+  ): Promise<{ depositBalance: number; preauthBalance: number; rentalOverpaid: number }> {
+    const events = await this.loadEvents(tx, tenantId, workspaceId, orderId);
+    const ledgers = deriveFundingLedgers(events);
+    let payable = payableOverride;
+    if (payable === undefined) {
+      const order = await tx.rentalOrder.findFirst({
+        where: { id: orderId, tenantId, workspaceId },
+        select: { finalPayableAmount: true }
+      });
+      payable = order ? Number(order.finalPayableAmount) : 0;
+    }
+    const rental = rentalPaymentBalance(payable, events);
+    return {
+      depositBalance: ledgers.deposit.balance,
+      preauthBalance: ledgers.preauthorization.balance,
+      // 负值表示多收：与 rentalPaymentBalance 的口径一致，由调用方按 < -0.005 判定。
+      rentalOverpaid: rental.balance
+    };
+  }
+
+  /**
    * 记录一次资金事件。amount 对 fail 以外的动作必须为正。failureCode 只在 fail 时有意义。
    * 幂等：命中既有同键事件时校验请求一致后回放；并发下靠唯一键兜底（P2002 → 回读回放）。
    */

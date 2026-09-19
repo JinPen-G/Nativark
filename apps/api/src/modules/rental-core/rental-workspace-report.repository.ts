@@ -12,6 +12,7 @@ import type {
 } from "@rental-os/shared";
 import { RENTAL_EXCEPTION_CHARGE_TYPES, RentalAssetStatus, RentalCoreOrderStatus } from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
+import { roundMoney, roundRatio } from "./rental-money";
 
 /** 一次分页读取的订单数。内存上限与总订单量解耦，不随经营空间变大而变大。 */
 const SCAN_PAGE_SIZE = 500;
@@ -60,17 +61,17 @@ export class RentalWorkspaceReportRepository {
 
   /** 金额列在库里是 Decimal；统一转 number 并保留两位，避免 0.30000000000000004 进页面。 */
   private money(value: Prisma.Decimal | null | undefined): number {
-    return Math.round(Number(value ?? 0) * 100) / 100;
+    return roundMoney(Number(value ?? 0));
   }
 
   private round2(value: number): number {
-    return Math.round(value * 100) / 100;
+    return roundMoney(value);
   }
 
   /** 比率一律在分母为 0 时返回 0：报表里出现 NaN 会让整页数字失去可信度。 */
   private ratio(numerator: number, denominator: number): number {
     if (!denominator) return 0;
-    return Math.round((numerator / denominator) * 10000) / 10000;
+    return roundRatio(numerator / denominator);
   }
 
   /**

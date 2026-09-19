@@ -3704,6 +3704,9 @@ model RentalNotificationLog {
   /// 真实短信投递的下一次重试时间；NULL 表示当前不可重试或已完成。
   nextAttemptAt        DateTime?
   lastAttemptAt        DateTime?
+  /// 投递租约到期时间：认领时写入且不消耗 attempts；进程崩溃后租约到期即可再次认领。
+  /// attempts 只在记录投递结果时递增，因此崩溃不会吃掉重试次数。
+  leaseUntil           DateTime?
   maxAttempts          Int                        @default(3)
   /// NOTICE-01A：触发本条通知的业务对象（如 order / <订单id>）。
   /// 手工发送没有业务对象，因此可空。

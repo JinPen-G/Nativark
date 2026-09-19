@@ -1192,6 +1192,27 @@ export class RentalCoreController {
     return this.committed(tenantId, order);
   }
 
+  @Post("orders/:id/resume-pickup")
+  async resumePickup(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: CancelRentalOrderDto) {
+    const tenantId = req.user.tenantId;
+    // 兜底键不纳入状态：恢复领取会把 PickupOverdue 改成 ReadyForPickup，
+    // 纳入状态会让无键重试算出不同键而重放失败；非法转移由 replay 只在目标状态回放来兜底。
+    const { result: order } = await this.idempotent.executeWithReplayFlag({
+      tenantId,
+      action: "order.resume_pickup",
+      key: idempotencyKeyOf(req),
+      fallbackKey: `order.resume_pickup:${id}`,
+      request: { orderId: id, reason: body.reason },
+      orderId: id,
+      run: (tx) => this.service.resumePickupOverdueOrder(tenantId, id, tx, req.user.displayName),
+      replay: async () => {
+        const latest = await this.service.getOrder(tenantId, id);
+        return latest.status === RentalCoreOrderStatus.ReadyForPickup ? latest : undefined;
+      }
+    });
+    return this.committed(tenantId, order);
+  }
+
   @Post("orders/:id/confirm") async confirm(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
     const tenantId = req.user.tenantId;
     const { result: order, replayed } = await this.idempotent.executeWithReplayFlag({
@@ -1367,7 +1388,9 @@ export class RentalCoreController {
             context,
             this.business.getQuote(req.user.tenantId, context, lockedOrder.quoteId),
             undefined,
-            Boolean(body.weatherException)
+            Boolean(body.weatherException),
+            // 取消费改按订单冻结的规则快照计算（订单无冻结费率，费率仍取报价）；缺失时计算侧回落报价并告警一次。
+            { ruleSnapshot: lockedOrder.ruleSnapshot }
           ),
           tx,
           req.user.displayName
@@ -1787,12 +1810,13 @@ export class RentalCoreController {
       : outstandingQuantitiesOf(locked);
     return {
       overdue: {
-        amount: this.business.calculateOverdueCharge(tenantId, context, quote, returnedAt, dueAt, quantityScope),
+        // 归还计费的规则与费率取订单冻结快照（§4.2），而非报价缓存；缺字段时计算侧回落报价并告警一次。
+        amount: this.business.calculateOverdueCharge(tenantId, context, quote, returnedAt, dueAt, quantityScope, { ruleSnapshot: locked.ruleSnapshot }),
         returnedAt,
         batchId
       },
       earlyReturn: includeEarlyReturn
-        ? this.business.calculateEarlyReturnRefund(tenantId, context, quote, dueAt, returnedAt, extensionRentalOf(locked), extensionPricing)
+        ? this.business.calculateEarlyReturnRefund(tenantId, context, quote, dueAt, returnedAt, extensionRentalOf(locked), extensionPricing, { ruleSnapshot: locked.ruleSnapshot })
         : undefined
     };
   }

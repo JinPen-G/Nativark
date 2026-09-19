@@ -144,6 +144,7 @@ npm run dev
 
 - API：`http://localhost:3000/api`（`API_PORT` 可改）
 - 管理端：`http://localhost:5175`（`REACT_ADMIN_PORT` 可改），`/api` 由 Vite 代理到 API
+- 反向代理之后部署时设 `TRUST_PROXY_HOPS=<可信跳数>`（Express `trust proxy`），否则客户端限流看到的来源地址永远是代理地址；不设或 0 表示直连、忽略 `X-Forwarded-For`
 
 `npm run dev` 会先构建 `packages/shared` 再并行起 API 与管理端。两端读 shared 的方式不同，值得知道：**API 依赖编译产物 `dist/`**，管理端的 Vite 把 `@rental-os/shared` 直接 alias 到 `src/index.ts`。所以改完契约，管理端热更新立刻看得到，API 却要重新构建 shared 才认——只在管理端验证过就以为改通了，是这里最容易踩的坑。测试脚本也读 `dist/`，因此每个 `test:*` 都先构建 shared。
 
@@ -215,6 +216,8 @@ npm run test:rule-version-chain-mutation
 | `npm run ops:release-gate` | 固定发布候选跑只读门禁；默认 dry-run，写清单必须显式 `--emit` |
 
 所有运维脚本的连接信息**只**来自 `DATABASE_URL`，目标库必须显式是专用库，共享/生产库名一律拒绝。
+
+**到期任务调度**：API 进程内置 `RentalDueJobScheduler`，默认每 60 秒（`RENTAL_DUE_JOB_INTERVAL_MS`，毫秒，最小 1000）遍历每个经营空间，依次执行待支付过期、领取逾期/爽约核对、通知重试、到期价格调整；`RENTAL_DUE_JOBS_DISABLED=1` 或 `NODE_ENV=test` 不启动。多实例部署不需要改表：每个 任务×租户×空间 用 MySQL 命名锁 `rental-os:due:<job>:<tenantId>:<workspaceId>`（`GET_LOCK(...,0)`，同一交互式事务内取锁与释放）互斥，拿不到锁即跳过本轮。单轮每空间每任务最多处理 50 单。手动接口（`orders/expire-pending`、`orders/reconcile-pickup-overdue`、`notification-logs/retry-due`、`pricing-plans/adjustments/run-due`）保留给运维补偿，与调度器共用幂等键。
 
 ## 8. 已知边界与技术债
 

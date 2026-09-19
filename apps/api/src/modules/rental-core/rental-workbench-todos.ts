@@ -18,7 +18,8 @@ const TODO_TYPES: RentalWorkbenchTodoType[] = [
   "fee_review",
   "refund",
   "work_order",
-  "notification_failure"
+  "notification_failure",
+  "cancelled_refund_due"
 ];
 
 /**
@@ -48,7 +49,7 @@ function iso(value: string | undefined, fallback: string) {
 }
 
 function priorityFor(type: RentalWorkbenchTodoType): RentalWorkbenchTodo["priority"] {
-  return ["fee_review", "refund", "no_show_confirmation"].includes(type) ? "high" : "normal";
+  return ["fee_review", "refund", "no_show_confirmation", "cancelled_refund_due"].includes(type) ? "high" : "normal";
 }
 
 function add(
@@ -125,7 +126,9 @@ export function buildRentalWorkbenchTodos(
       });
     }
 
-    for (const review of (order.feeReviews ?? []).filter((row) => row.status === "pending")) {
+    // refund_due 不进这条通用「待裁定费用」待办：它挂在已取消/已爽约的终态订单上，
+    // 不阻止结清，且语义是"退款/释放待办"而非"计费待裁定"，单列为 cancelled_refund_due。
+    for (const review of (order.feeReviews ?? []).filter((row) => row.status === "pending" && row.type !== "refund_due")) {
       add(items, {
         id: `fee_review:${order.id}:${review.id}`,
         type: "fee_review",
@@ -137,6 +140,25 @@ export function buildRentalWorkbenchTodos(
         amount: review.suggestedAmount,
         createdAt: review.createdAt
       });
+    }
+
+    // 取消/爽约后仍持有押金、预授权或多收租金：挂 cancelled_refund_due 待办，
+    // 提醒运营在资金区按权限办理退款/释放。宿主订单已是终态，裁定金额中性、不阻止结清。
+    if (order.status === "cancelled" || order.status === "no_show") {
+      const refundDue = (order.feeReviews ?? []).find((row) => row.status === "pending" && row.type === "refund_due");
+      if (refundDue) {
+        add(items, {
+          id: `cancelled_refund_due:${order.id}:${refundDue.id}`,
+          type: "cancelled_refund_due",
+          title: order.status === "no_show" ? "爽约后待退款/释放保证金" : "取消后待退款/释放保证金",
+          description: "订单已终结但仍持有押金、预授权冻结或多收租金；请在资金区按权限办理退款或释放。",
+          href: orderHref,
+          orderId: order.id,
+          orderNo: order.orderNo,
+          amount: refundDue.suggestedAmount,
+          createdAt: refundDue.createdAt
+        });
+      }
     }
 
     const extensions = extensionsByOrderId[order.id] ?? [];

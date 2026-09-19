@@ -36,6 +36,7 @@ import {
 import { PrismaService } from "../database/prisma.service";
 import { resolveScopeWorkspaceId } from "./workspace-scope";
 import { bufferedRentalPeriod } from "./rental-occupancy";
+import { effectiveUnpaidHoldRule } from "./rental-rule-defaults";
 import { getRequestWorkspaceId } from "../../common/request-identity";
 
 /** 参与可用量计算的预占。表上直接带 startAt/endAt，因此不必回连订单。 */
@@ -484,20 +485,43 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
 
   async listExpiredDraftOrderIds(tenantId: string, expiredBefore: string, take = 50): Promise<string[]> {
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
-    const rows = await this.prisma.rentalOrder.findMany({
+    const cutoff = new Date(expiredBefore);
+    const cap = Math.min(Math.max(1, take), 200);
+    // 1) 有软预占的草稿单：全部软预占都已过期。
+    const withSoftExpired = await this.prisma.rentalOrder.findMany({
       where: {
         tenantId,
         workspaceId,
         status: "DRAFT",
         reservations: {
-          some: { status: "SOFT", expiresAt: { lt: new Date(expiredBefore) } }
+          some: { status: "SOFT", expiresAt: { lt: cutoff } }
         }
       },
-      select: { id: true },
+      select: { id: true, createdAt: true },
       orderBy: { createdAt: "asc" },
-      take: Math.min(Math.max(1, take), 200)
+      take: cap
     });
-    return rows.map((row) => row.id);
+    // 2) 无任何预占的草稿单（例如纯增值服务单）：没有软预占可判到期，改按
+    //    createdAt + 待支付保留时长（读订单快照的 unpaidHoldMinutes，缺省 = 现行行为）判定。
+    //    保留时长是逐单快照值，无法在 SQL 里表达，因此先取候选再在内存过滤。
+    const withoutReservations = await this.prisma.rentalOrder.findMany({
+      where: { tenantId, workspaceId, status: "DRAFT", reservations: { none: {} } },
+      select: { id: true, createdAt: true, ruleSnapshot: true },
+      orderBy: { createdAt: "asc" },
+      take: cap
+    });
+    const cutoffMs = cutoff.getTime();
+    const holdExpired = withoutReservations.filter((row) => {
+      const minutes = effectiveUnpaidHoldRule(row.ruleSnapshot as unknown as RentalRuleConfig).unpaidHoldMinutes;
+      return row.createdAt.getTime() + minutes * 60_000 <= cutoffMs;
+    });
+    // 合并、去重，按 createdAt 升序，截到 cap。
+    const merged = new Map<string, Date>();
+    for (const row of [...withSoftExpired, ...holdExpired]) merged.set(row.id, row.createdAt);
+    return [...merged.entries()]
+      .sort(([, a], [, b]) => a.getTime() - b.getTime())
+      .slice(0, cap)
+      .map(([id]) => id);
   }
 
   async findOrder(tenantId: string, orderId: string, tx?: RentalFactTx): Promise<RentalOrder | undefined> {

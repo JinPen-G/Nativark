@@ -4,6 +4,7 @@
 
 | 版本 | 日期 | 编辑 | 变更 |
 | --- | --- | --- | --- |
+| v1.11 | 2026-09-19 | Claude | 验证码挑战补按身份与租户的配额：同一（租户, 手机号/邮箱）5 次/小时、10 次/天，租户每日短信挑战预算默认 2000（`CLIENT_SMS_DAILY_BUDGET_PER_TENANT`），超限 `429`；`purpose=login` 不再以 404/403 暴露手机号是否注册或已停用，统一返回 pending 响应且不发短信，验证时只回"验证码错误或已过期"；验证码落库改为以服务端密钥 HMAC 存储，升级时未完成的挑战直接失效需重新获取；来源地址取 Express `request.ip`，代理之后由 `TRUST_PROXY_HOPS` 决定是否采信 `X-Forwarded-For`。 |
 | v1.10 | 2026-09-19 | Claude | 为小程序 V2 设计稿补最小展示投影：`GET /catalog` 的每个商品新增可选 `startingPrice`（`{ amount, unit, currency }`，当前生效价格版本中该型号或其所属启用定价分组的最低基础单价；无生效版本或无费率时缺省，客户端不得以 0 元替代，实际金额仍以报价为准），地点新增可选 `address`、`businessHours`、`contactPhone`、`capabilities`（pickup/return/storage/delivery），不返回经营主体信息；`GET /my/orders` 每行新增可选 `itemSummary`（首个型号 id/名称、行数与件数之和），不含资产编号与金额明细。 |
 | v1.9 | 2026-09-19 | Claude | 补齐控制器已有但本文档未列出的三条接口：`GET /my/orders`（个人客户跨本租户各服务空间的本人订单只读索引，与当前空间 `GET /orders` 职责分开）、`POST /orders/{id}/cancel/preview`（取消费预览，不改变订单）、`POST /orders/{id}/mini-program-payment-intents`（小程序支付预留契约，当前固定返回 503）。 |
 | v1.8 | 2026-09-18 | Claude | 新增 `PUT /profile` 作为 PATCH 的等价别名（微信小程序宿主不支持 PATCH）；登录/刷新/切换空间的会话响应新增可选 `workspace` 字段，返回本次会话实际绑定的服务空间，客户端据此记录当前服务而不凭请求参数推断（旧客户端可忽略）。小程序客户端 `apps/miniprogram` 按需求重建，只消费本文档已列接口；渠道启动配置、微信手机号登录、短信登录、公开目录、地址簿、费用响应与注销仍为拟新增契约，未在 v1 提供。 |
@@ -35,9 +36,9 @@ Content-Type: application/json
 Idempotency-Key: <unique-key-for-mutating-action>
 ```
 
-客户端接口的限流由服务端执行，不由客户端自行计算：登录每个来源地址 10 次/10 分钟，注册验证码挑战 5 次/5 分钟，验证码校验 15 次/5 分钟，其他公开客户端请求 180 次/分钟；已登录会话另按会话限制 240 次/分钟。超限返回 `429`，客户端应等待后重试，不应通过更换幂等键绕过。
+客户端接口的限流由服务端执行，不由客户端自行计算：登录每个来源地址 10 次/10 分钟，注册验证码挑战 5 次/5 分钟，验证码校验 15 次/5 分钟，其他公开客户端请求 180 次/分钟；已登录会话另按会话限制 240 次/分钟。验证码挑战（`/auth/challenges`、`/auth/registration/challenges`）在来源地址之外还按目标身份计数：同一租户内同一手机号/邮箱 5 次/小时、10 次/天，且每个租户每日短信挑战预算默认 2000 条（环境变量 `CLIENT_SMS_DAILY_BUDGET_PER_TENANT`）；这些配额在调用短信服务商之前判定。超限返回 `429`，客户端应等待后重试，不应通过更换幂等键绕过。
 
-公开接口的计数只使用服务端看到的请求来源地址；登录后的计数使用租户、经营空间和客户端会话的不可逆组合。数据库唯一键和原子递增保证多 API 实例共享同一限流边界，限流桶定期清理。IP、手机号、令牌和密钥不会写入限流表。
+公开接口的计数只使用服务端看到的请求来源地址（Express `request.ip`；部署在反向代理之后须配置 `TRUST_PROXY_HOPS`，否则所有客户端共用代理地址的桶）；登录后的计数使用租户、经营空间和客户端会话的不可逆组合；按身份的配额使用租户与目标身份的不可逆哈希。数据库唯一键和原子递增保证多 API 实例共享同一限流边界，限流桶定期清理。IP、手机号、令牌和密钥不会写入限流表。
 
 注册请求的幂等键放在请求体 `idempotencyKey`，按目标租户绑定已验证身份与请求内容；换来源空间不得重复消费验证码证明、创建账号/会员或重置审核。订单创建、取消、续租和资金操作使用 `Idempotency-Key`，资金模拟接口必须提供该请求头；包括已有结果与并发重放在内，返回前仍要校验当前租户、服务空间及本人订单归属。
 
@@ -48,7 +49,7 @@ Idempotency-Key: <unique-key-for-mutating-action>
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | GET | `/tenants/{tenantCode}/workspaces` | 获取租户下可公开展示的服务空间，供可选初始空间或登录后服务切换使用，不代表逐空间入会。 |
-| POST | `/auth/registration/challenges` | 按目标租户为手机号或邮箱创建注册验证码挑战；`tenantCode` 必填、`workspaceCode` 可选。开发环境返回一次性 `developmentCode`；生产环境需接短信/邮件 provider。 |
+| POST | `/auth/registration/challenges` | 按目标租户为手机号或邮箱创建注册验证码挑战；`tenantCode` 必填、`workspaceCode` 可选。开发环境返回一次性 `developmentCode`；生产环境需接短信/邮件 provider。`purpose=login`（含 `/auth/challenges`）时无论手机号是否注册或账号是否停用都返回同样的 `pending_verification` 响应，不以 404/403 暴露账号存在性；不可登录的号码不发送短信，其 `challengeId` 校验时固定返回"验证码错误或已过期"。 |
 | POST | `/auth/registration/challenges/{challengeId}/verify` | 校验验证码并换取租户级短期一次性 `verificationToken`，不能跨租户使用或因切换来源空间重复消费。验证码本身不能直接用于注册。 |
 | POST | `/auth/register` | 以 `tenantCode` 为目标、可选 `workspaceCode` 记录来源，创建或复用租户内个人主档、账号及唯一租户会员；租户人工审核模式返回待激活，自动模式返回正常。 |
 | POST | `/auth/login` | 用租户内客户手机号和密码登录，可指定初始服务空间编码；服务端确定可信当前空间并返回 access/refresh token 及绑定的 `workspace`，不创建新的空间会员。 |

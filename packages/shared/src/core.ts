@@ -4925,8 +4925,13 @@ export interface RentalReservation {
  */
 export interface RentalOrderFeeReview {
   id: string;
-  /** 逾期、提前归还退款，以及增值服务未履约退款。 */
-  type: "overdue" | "early_return_refund" | "service_refund";
+  /**
+   * 逾期、提前归还退款、增值服务未履约退款，以及取消/爽约后遗留资金的退款审核。
+   *
+   * `refund_due`：订单取消或确认爽约时仍持有押金、预授权冻结或多收的租金。
+   * 这张单**不动账**——批准只表示退款/释放已获认可，实际资金动作仍由资金区按权限单独办理。
+   */
+  type: "overdue" | "early_return_refund" | "service_refund" | "refund_due";
   /** 服务退款审核对应的服务发生项；逾时审核时可记录归还批次，其他类型为空。 */
   sourceId?: string;
   /** 规则算出的建议金额，**正数**。退款类落账时取负。 */
@@ -4958,7 +4963,9 @@ export type RentalWorkbenchTodoType =
   | "refund"
   | "work_order"
   /** NOTICE-01：业务事件通知未成功写入模拟发送记录，需要运营处理。 */
-  | "notification_failure";
+  | "notification_failure"
+  /** 取消/爽约后仍持有押金、预授权或多收租金，待裁定 `refund_due` 审核后办理退款。 */
+  | "cancelled_refund_due";
 
 export interface RentalWorkbenchTodo {
   id: string;
@@ -5658,15 +5665,23 @@ export interface ApplyRentalOrderChangeRequest {
 }
 
 /** 订单变更只追加记录。原订单与原订单行仍保留，所有差异和金额从这里回放。 */
+/** 待确认爽约订单恢复为待领取时写入变更历史的请求快照；没有对外 DTO，只由服务端构造。 */
+export interface ResumePickupRentalOrderChangeRequest {
+  type: "resume_pickup";
+  reason: string;
+  customerConfirmed: boolean;
+  expectedUpdatedAt: string;
+}
+
 export interface RentalOrderChange {
   id: string;
   tenantId: string;
   workspaceId: string;
   orderId: string;
   sequence: number;
-  type: "partial_line_cancel" | "service_cancel" | "post_pickup_exchange";
+  type: "partial_line_cancel" | "service_cancel" | "post_pickup_exchange" | "resume_pickup";
   status: "applied" | "rejected";
-  request: ApplyRentalOrderChangeRequest;
+  request: ApplyRentalOrderChangeRequest | ResumePickupRentalOrderChangeRequest;
   beforeSnapshot: Record<string, unknown>;
   afterSnapshot: Record<string, unknown>;
   diff: Record<string, unknown>;

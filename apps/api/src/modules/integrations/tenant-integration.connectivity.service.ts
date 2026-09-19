@@ -1,4 +1,4 @@
-import { ConflictException, Injectable } from "@nestjs/common";
+import { ConflictException, Injectable, ServiceUnavailableException } from "@nestjs/common";
 import type {
   SystemUserRow,
   TenantIntegrationCapability,
@@ -13,6 +13,9 @@ import { TenantIntegrationService } from "./tenant-integration.service";
 const LIVE_TEST_COOLDOWN_MS = 30_000;
 
 function safeFailureMessage(error: unknown) {
+  // 本地材料校验（证书序列号、密钥长度等）抛出的是我们自己措辞的 ServiceUnavailableException，
+  // 不含第三方原始响应，可以原样展示；其余错误只保留 HTTP 状态码，避免回显第三方内容。
+  if (error instanceof ServiceUnavailableException && !/\bHTTP\s+\d{3}\b/iu.test(error.message)) return error.message;
   const raw = error instanceof Error ? error.message : String(error ?? "");
   const status = raw.match(/\bHTTP\s+\d{3}\b/iu)?.[0];
   return status

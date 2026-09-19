@@ -10,6 +10,7 @@ import type {
 } from "@rental-os/shared";
 import { createHash } from "node:crypto";
 import { PrismaService } from "../database/prisma.service";
+import { roundMoney } from "./payment-money";
 
 const MAX_STATEMENT_BYTES = 10 * 1024 * 1024;
 const MAX_STATEMENT_ROWS = 10_000;
@@ -89,7 +90,7 @@ function money(value: string | undefined, label: string) {
   if (!/^\d{1,10}(?:\.\d{1,2})?$/u.test(raw)) throw new BadRequestException(`${label}必须是最多两位小数的非负金额`);
   const amount = Number(raw);
   if (!Number.isFinite(amount) || amount <= 0) throw new BadRequestException(`${label}必须大于 0`);
-  return Math.round(amount * 100) / 100;
+  return roundMoney(amount);
 }
 
 function normalizePaymentStatus(value: string) {
@@ -113,7 +114,7 @@ function sha256(buffer: Buffer) {
 }
 
 function decimal(value: unknown) {
-  return Math.round(Number(value) * 100) / 100;
+  return roundMoney(Number(value));
 }
 
 function jsonArray(value: unknown): string[] {

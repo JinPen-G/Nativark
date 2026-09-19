@@ -193,8 +193,11 @@ export class TenantIntegrationService {
    * 这里返回完整配置但绝不经过 controller。
    */
   async runtimeConfigsForCallback(provider: TenantIntegrationProvider): Promise<Array<TenantIntegrationRuntimeConfig & { tenantId: string }>> {
+    // 与创建路径同一门槛：只有通过真实连接测试的配置才可能发起过支付，
+    // 因此也只有它们的回调值得验签。保存配置会重置测试状态，此后旧支付单的
+    // 回调将不再匹配，由查单补偿（requireLiveTest: false）恢复。
     const rows = await this.prisma.tenantIntegrationConfig.findMany({
-      where: { capability: "payment", provider, enabled: true },
+      where: { capability: "payment", provider, enabled: true, lastTestStatus: "passed", lastTestMode: "live" },
       orderBy: { updatedAt: "desc" }
     });
     const result: Array<TenantIntegrationRuntimeConfig & { tenantId: string }> = [];

@@ -275,6 +275,26 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     },
     ["id", "tenantId", "account", "displayName", "roleNames", "scope"]
   ),
+  MiniProgramChannelSummary: objectOf(
+    {
+      configured: booleanSchema, appId: stringSchema, secretConfigured: booleanSchema, enabled: booleanSchema, revision: numberSchema,
+      lastTestStatus: { type: "string", enum: ["not_tested", "passed", "failed"] }, lastTestAt: { type: "string", format: "date-time" }, lastTestError: stringSchema,
+      brandName: stringSchema, brandLogoUrl: stringSchema, customerServicePhone: stringSchema, customerServiceHours: stringSchema,
+      userAgreementVersion: stringSchema, userAgreementUrl: stringSchema, privacyPolicyVersion: stringSchema, privacyPolicyUrl: stringSchema,
+      publishedWorkspaceIds: arrayOf(stringSchema), identityCount: numberSchema, updatedAt: { type: "string", format: "date-time" }
+    },
+    ["configured", "secretConfigured", "enabled", "revision", "lastTestStatus", "publishedWorkspaceIds", "identityCount"],
+    false
+  ),
+  SaveMiniProgramChannelRequest: objectOf(
+    {
+      appId: stringSchema, appSecret: stringSchema, enabled: booleanSchema, brandName: stringSchema, brandLogoUrl: stringSchema,
+      customerServicePhone: stringSchema, customerServiceHours: stringSchema, userAgreementVersion: stringSchema, userAgreementUrl: stringSchema,
+      privacyPolicyVersion: stringSchema, privacyPolicyUrl: stringSchema, publishedWorkspaceIds: arrayOf(stringSchema)
+    },
+    ["appId", "enabled", "publishedWorkspaceIds"]
+  ),
+  MiniProgramChannelTestResult: objectOf({ ok: booleanSchema, message: stringSchema, testedAt: { type: "string", format: "date-time" } }, ["ok", "message", "testedAt"]),
   TenantIntegrationCatalogResponse: objectOf(
     { providers: arrayOf(objectSchema), configs: arrayOf(objectSchema) },
     ["providers", "configs"]
@@ -988,7 +1008,8 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
         ["customerId", "customerType", "displayName", "loginIdentifierMasked"]
       ),
       workspaces: arrayOf(ref("ClientWorkspaceSummary")),
-      workspace: ref("ClientWorkspaceSummary")
+      workspace: ref("ClientWorkspaceSummary"),
+      wechatBound: booleanSchema
     },
     ["apiVersion", "accessToken", "refreshToken", "expiresIn", "customer", "workspaces"]
   ),
@@ -1002,6 +1023,90 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     ["currentPassword", "newPassword"]
   ),
   ClientActionResult: objectOf({ success: booleanSchema }),
+  ClientChannelBootstrapResponse: objectOf(
+    {
+      apiVersion: stringSchema,
+      tenantCode: stringSchema,
+      merchant: objectOf({ name: stringSchema, logoUrl: stringSchema, servicePhone: stringSchema, serviceHours: stringSchema }, ["name"], false),
+      services: arrayOf(objectOf({ code: stringSchema, name: stringSchema, categoryCode: stringSchema, isDefault: booleanSchema, status: { type: "string", enum: ["open", "paused"] } }, ["code", "name", "categoryCode", "status"], false)),
+      defaultServiceCode: stringSchema,
+      agreements: objectOf({
+        userAgreement: objectOf({ name: stringSchema, version: stringSchema, url: stringSchema }, ["name", "version"], false),
+        privacyPolicy: objectOf({ name: stringSchema, version: stringSchema, url: stringSchema }, ["name", "version"], false)
+      }, ["userAgreement", "privacyPolicy"], false),
+      loginMethods: arrayOf({ type: "string", enum: ["wechat_phone", "sms", "password"] }),
+      capabilities: objectOf({ publicCatalog: booleanSchema, wechatPay: booleanSchema, delivery: booleanSchema, feeResponse: booleanSchema, accountClosure: booleanSchema }, ["publicCatalog", "wechatPay", "delivery", "feeResponse", "accountClosure"], false),
+      source: { type: "string", enum: ["channel", "workspace_directory"] }
+    },
+    ["apiVersion", "tenantCode", "merchant", "services", "loginMethods", "capabilities", "source"],
+    false
+  ),
+  ClientChallengeRequest: objectOf(
+    { tenantCode: stringSchema, workspaceCode: stringSchema, method: { type: "string", enum: ["sms", "email"] }, identifier: stringSchema, idempotencyKey: stringSchema, purpose: { type: "string", enum: ["registration", "login"] } },
+    ["tenantCode", "method", "identifier", "idempotencyKey", "purpose"]
+  ),
+  ClientSmsLoginRequest: objectOf(
+    { tenantCode: stringSchema, loginIdentifier: stringSchema, verificationToken: stringSchema, workspaceCode: stringSchema, clientId: stringSchema },
+    ["tenantCode", "loginIdentifier", "verificationToken"]
+  ),
+  ClientWechatPhoneLoginRequest: objectOf(
+    { tenantCode: stringSchema, appId: stringSchema, loginCode: stringSchema, phoneCode: stringSchema, consent: objectOf({ userAgreementVersion: stringSchema, privacyPolicyVersion: stringSchema, agreedAt: { type: "string", format: "date-time" } }, ["userAgreementVersion", "privacyPolicyVersion", "agreedAt"]), workspaceCode: stringSchema, clientId: stringSchema },
+    ["tenantCode", "loginCode", "phoneCode", "consent"]
+  ),
+  ClientWechatBindRequest: objectOf({ loginCode: stringSchema, appId: stringSchema }, ["loginCode"]),
+  ClientWechatBindResponse: objectOf({ apiVersion: stringSchema, bound: booleanSchema, appId: stringSchema, boundAt: { type: "string", format: "date-time" } }, ["apiVersion", "bound", "appId", "boundAt"], false),
+  ClientAccountClosurePreview: objectOf(
+    {
+      apiVersion: stringSchema, closable: booleanSchema,
+      blockers: arrayOf(objectOf({ code: stringSchema, message: stringSchema, count: numberSchema }, ["code", "message"])),
+      manualConfirmations: arrayOf(objectOf({ code: stringSchema, message: stringSchema }, ["code", "message"]))
+    },
+    ["apiVersion", "closable", "blockers", "manualConfirmations"], false
+  ),
+  ClientAccountClosureRequest: objectOf(
+    { loginIdentifier: stringSchema, verificationToken: stringSchema, acknowledgedManualChecks: booleanSchema, reason: stringSchema },
+    ["loginIdentifier", "verificationToken", "acknowledgedManualChecks"]
+  ),
+  ClientAccountClosureResponse: objectOf({ apiVersion: stringSchema, closed: booleanSchema, closedAt: { type: "string", format: "date-time" } }, ["apiVersion", "closed", "closedAt"], false),
+  ClientDeliveryAddressRequest: objectOf(
+    {
+      id: stringSchema, revision: numberSchema, recipient: stringSchema, phone: stringSchema, countryCode: stringSchema, province: stringSchema, city: stringSchema,
+      district: stringSchema, detail: stringSchema, postalCode: stringSchema, latitude: numberSchema, longitude: numberSchema, isDefault: booleanSchema
+    },
+    ["recipient", "phone", "province", "city", "detail"]
+  ),
+  ClientDeliveryAddress: objectOf(
+    {
+      id: stringSchema, revision: numberSchema, recipient: stringSchema, phoneMasked: stringSchema, countryCode: stringSchema, province: stringSchema, city: stringSchema,
+      district: stringSchema, detail: stringSchema, postalCode: stringSchema, latitude: numberSchema, longitude: numberSchema, isDefault: booleanSchema, updatedAt: { type: "string", format: "date-time" }
+    },
+    ["id", "revision", "recipient", "phoneMasked", "countryCode", "province", "city", "detail", "isDefault", "updatedAt"],
+    false
+  ),
+  ClientDeliveryAddressList: objectOf({ apiVersion: stringSchema, items: arrayOf(ref("ClientDeliveryAddress")) }, ["apiVersion", "items"], false),
+  ClientDeliveryAddressSnapshot: objectOf(
+    {
+      addressId: stringSchema, recipient: stringSchema, phoneMasked: stringSchema, countryCode: stringSchema, province: stringSchema, city: stringSchema, district: stringSchema,
+      detail: stringSchema, postalCode: stringSchema, latitude: numberSchema, longitude: numberSchema, capturedAt: { type: "string", format: "date-time" }
+    },
+    ["recipient", "phoneMasked", "countryCode", "province", "city", "detail", "capturedAt"],
+    false
+  ),
+  ClientFeeItem: objectOf(
+    {
+      inspectionId: stringSchema, exceptionIndex: numberSchema, stage: { type: "string", enum: ["pickup", "return"] }, code: stringSchema, description: stringSchema,
+      amount: numberSchema, currency: stringSchema, reviewedAt: { type: "string", format: "date-time" },
+      responseStatus: { type: "string", enum: ["pending", "confirmed", "disputed"] }, responseReason: stringSchema, respondedAt: { type: "string", format: "date-time" },
+      adjustments: arrayOf(objectOf({ fromAmount: numberSchema, toAmount: numberSchema, reason: stringSchema, adjustedAt: { type: "string", format: "date-time" } }, ["fromAmount", "toAmount", "reason", "adjustedAt"], false)),
+      history: arrayOf(objectOf({ decision: { type: "string", enum: ["confirmed", "disputed"] }, reason: stringSchema, respondedAt: { type: "string", format: "date-time" } }, ["decision", "reason", "respondedAt"], false)),
+      evidenceCount: numberSchema
+    },
+    ["inspectionId", "exceptionIndex", "stage", "code", "description", "amount", "currency", "responseStatus", "adjustments", "history", "evidenceCount"],
+    false
+  ),
+  ClientFeeItemsResponse: objectOf({ apiVersion: stringSchema, orderId: stringSchema, items: arrayOf(ref("ClientFeeItem")), pendingCount: numberSchema }, ["apiVersion", "orderId", "items", "pendingCount"], false),
+  ClientFeeResponseRequest: objectOf({ decision: { type: "string", enum: ["confirmed", "disputed"] }, reason: stringSchema }, ["decision", "reason"]),
+  ClientFeeResponseResult: objectOf({ apiVersion: stringSchema, item: ref("ClientFeeItem"), replayed: booleanSchema }, ["apiVersion", "item", "replayed"], false),
   ClientMembershipStatus: objectOf(
     {
       apiVersion: stringSchema,
@@ -1158,7 +1263,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       categoryCode: stringSchema,
       timeZone: stringSchema,
       registration: objectOf({ mode: stringSchema, verificationMethods: arrayOf(stringSchema), providerMode: stringSchema }, ["mode", "verificationMethods", "providerMode"]),
-      features: objectOf({ profile: booleanSchema, contacts: booleanSchema, membershipPlans: booleanSchema, qualifications: booleanSchema, coupons: booleanSchema, orderExtensions: booleanSchema, notifications: booleanSchema }, ["profile", "contacts", "membershipPlans", "qualifications", "coupons", "orderExtensions", "notifications"]),
+      features: objectOf({ profile: booleanSchema, contacts: booleanSchema, membershipPlans: booleanSchema, qualifications: booleanSchema, coupons: booleanSchema, orderExtensions: booleanSchema, notifications: booleanSchema, delivery: booleanSchema, feeResponse: booleanSchema, accountClosure: booleanSchema, wechatBinding: booleanSchema }, ["profile", "contacts", "membershipPlans", "qualifications", "coupons", "orderExtensions", "notifications", "delivery", "feeResponse", "accountClosure", "wechatBinding"]),
       payment: ref("ClientPaymentCapabilities")
     },
     ["apiVersion", "tenantCode", "workspace", "categoryCode", "timeZone", "registration", "features", "payment"]
@@ -1207,9 +1312,10 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       pricingGroups: arrayOf(objectSchema),
       services: arrayOf(objectSchema),
       locations: arrayOf(objectSchema),
-      discountPlans: arrayOf(objectSchema)
+      discountPlans: arrayOf(objectSchema),
+      fulfillment: objectOf({ enabledModes: arrayOf(stringSchema), allowDifferentReturnLocation: booleanSchema }, ["enabledModes", "allowDifferentReturnLocation"], false)
     },
-    ["apiVersion", "tenantCode", "workspace", "categoryCode", "timeZone", "items", "pricingGroups", "services", "locations", "discountPlans"]
+    ["apiVersion", "tenantCode", "workspace", "categoryCode", "timeZone", "items", "pricingGroups", "services", "locations", "discountPlans", "fulfillment"]
   ),
   ClientAvailabilityRequest: objectOf(
     {
@@ -1232,7 +1338,8 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       discountPlanId: stringSchema,
       customerCouponId: stringSchema,
       lines: arrayOf(objectSchema),
-      services: arrayOf(objectSchema)
+      services: arrayOf(objectSchema),
+      deliveryAddressId: stringSchema
     },
     ["fulfillmentMode", "fulfillmentLocationId", "startAt", "endAt", "lines"]
   ),
@@ -1283,6 +1390,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       lines: arrayOf(objectSchema),
       chargeLines: arrayOf(objectSchema),
       allocations: arrayOf(objectSchema),
+      deliveryAddress: ref("ClientDeliveryAddressSnapshot"),
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" }
     },
@@ -1506,6 +1614,10 @@ const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
   backlogOperation("get", "/api/notifications/logs", "Notifications", "listNotificationLogs", "List notification logs", ["system:notifications:manage"]),
   backlogOperation("post", "/api/notifications/send", "Notifications", "sendNotification", "Send notification", ["system:notifications:manage"]),
   backlogOperation("get", "/api/notifications/templates", "Notifications", "listNotificationTemplates", "List notification templates", ["system:notifications:manage"]),
+  // MP-01：租户微信小程序渠道（AppID/AppSecret、品牌、协议、发布空间）。AppSecret 只写不读。
+  backlogOperation("get", "/api/platform/mini-program-channel", "Platform", "getMiniProgramChannel", "Get the tenant mini-program channel configuration (secret never returned)", ["system:integration:manage"], true, undefined, "MiniProgramChannelSummary"),
+  backlogOperation("put", "/api/platform/mini-program-channel", "Platform", "saveMiniProgramChannel", "Save the tenant mini-program channel configuration", ["system:integration:manage"], true, "SaveMiniProgramChannelRequest", "MiniProgramChannelSummary"),
+  backlogOperation("post", "/api/platform/mini-program-channel/test", "Platform", "testMiniProgramChannel", "Verify the mini-program AppID/AppSecret by fetching an access token only", ["system:integration:manage"], true, undefined, "MiniProgramChannelTestResult"),
   // SPACE-01：经营空间主档与成员关系的最小管理面。
   // 刻意没有"切换当前空间"操作——会话空间上下文属 SPACE-02。
   backlogOperation("get", "/api/platform/workspaces", "Platform", "listBusinessWorkspaces", "List business workspaces", ["system:org:manage"]),
@@ -2306,6 +2418,10 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: "Finalize an eligible no-show and release its resources", permissions: ["rental-os:order:operate"], requestSchema: "GenericObject", responseSchema: "GenericObject"
   },
   {
+    method: "post", path: "/api/rental/v1/orders/{id}/resume-pickup", tag: "RentalCore", operationId: "resumePickupRentalCoreOrder",
+    summary: "Resume a pending no-show order back to ready-for-pickup", permissions: ["rental-os:order:operate"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+  },
+  {
     method: "post", path: "/api/rental/v1/orders/{id}/confirm", tag: "RentalCore", operationId: "confirmRentalCoreOrder",
     summary: "Confirm Rental Core reservation", permissions: ["rental-os:order:operate", "rental-os:vehicle:manage"], responseSchema: "GenericObject"
   },
@@ -2562,6 +2678,16 @@ function rentalBusinessOperations(): ContractOperation[] { return [
   // 但受独立客户 bearer token 保护；这里使用字段级 schema 供小程序/App 生成客户端。
   clientOperation("get", "/api/client/v1/tenants/{tenantCode}/workspaces", "listClientWorkspaces", "List active workspaces for client registration", { responseSchema: "ClientWorkspaceDirectory", authRequired: false }),
   clientOperation("post", "/api/client/v1/auth/registration/challenges", "createClientRegistrationChallenge", "Create a client registration verification challenge", { requestSchema: "ClientRegistrationChallengeRequest", responseSchema: "ClientRegistrationChallengeResponse", authRequired: false }),
+  clientOperation("get", "/api/client/v1/public/bootstrap", "getClientChannelBootstrap", "Public mini-program channel bootstrap: brand, agreements, service phone, published services, login methods and capability flags", { responseSchema: "ClientChannelBootstrapResponse", authRequired: false, parameters: [{ name: "tenantCode", in: "query", required: true, schema: stringSchema }, { name: "appId", in: "query", schema: stringSchema }] }),
+  clientOperation("get", "/api/client/v1/public/catalog", "getClientPublicCatalog", "Guest catalog for a service published to the mini-program channel (same whitelisted projection as the member catalog)", { responseSchema: "ClientCatalog", authRequired: false, parameters: [{ name: "tenantCode", in: "query", required: true, schema: stringSchema }, { name: "service", in: "query", required: true, schema: stringSchema }] }),
+  clientOperation("get", "/api/client/v1/public/catalog/items/{itemGroupId}/images/{imageId}", "getClientPublicCatalogItemImage", "Guest catalog image for a published service", { rawResponseContentType: "image/*", authRequired: false, parameters: [{ name: "tenantCode", in: "query", required: true, schema: stringSchema }, { name: "service", in: "query", required: true, schema: stringSchema }] }),
+  clientOperation("post", "/api/client/v1/auth/challenges", "createClientChallenge", "Create a purpose-bound verification challenge (registration or login)", { requestSchema: "ClientChallengeRequest", responseSchema: "ClientRegistrationChallengeResponse", authRequired: false }),
+  clientOperation("post", "/api/client/v1/auth/sms-login", "clientSmsLogin", "Login with a login-purpose SMS proof for an already registered phone", { requestSchema: "ClientSmsLoginRequest", responseSchema: "ClientMembershipSessionResponse", authRequired: false }),
+  clientOperation("post", "/api/client/v1/auth/wechat/phone-login", "clientWechatPhoneLogin", "WeChat mini-program phone-number login; openid and phone are resolved server-side with the merchant AppSecret", { requestSchema: "ClientWechatPhoneLoginRequest", responseSchema: "ClientMembershipSessionResponse", authRequired: false }),
+  clientOperation("post", "/api/client/v1/auth/wechat/bind", "bindClientWechatIdentity", "Bind the current WeChat identity to the logged-in customer for mini-program payment", { requestSchema: "ClientWechatBindRequest", responseSchema: "ClientWechatBindResponse" }),
+  clientOperation("get", "/api/client/v1/auth/closure/preview", "previewClientAccountClosure", "Tenant-wide closure preflight for the current customer", { responseSchema: "ClientAccountClosurePreview" }),
+  clientOperation("post", "/api/client/v1/auth/closure/challenge", "createClientClosureChallenge", "Send the closure verification code to the current account phone", { responseSchema: "ClientRegistrationChallengeResponse" }),
+  clientOperation("post", "/api/client/v1/auth/closure", "closeClientAccount", "Close the current membership and login account after preflight and SMS proof", { requestSchema: "ClientAccountClosureRequest", responseSchema: "ClientAccountClosureResponse" }),
   clientOperation("post", "/api/client/v1/auth/registration/challenges/{challengeId}/verify", "verifyClientRegistrationChallenge", "Verify a client registration challenge", { requestSchema: "VerifyClientRegistrationChallengeRequest", responseSchema: "VerifyClientRegistrationChallengeResponse", authRequired: false }),
   clientOperation("post", "/api/client/v1/auth/register", "registerClientPersonalMembership", "Register a personal client membership", { requestSchema: "ClientPersonalMembershipRegistrationRequest", responseSchema: "ClientPersonalMembershipRegistrationResponse", authRequired: false }),
   clientOperation("post", "/api/client/v1/auth/login", "clientLogin", "Login a customer client account", { requestSchema: "ClientMembershipLoginRequest", responseSchema: "ClientMembershipSessionResponse", authRequired: false }),
@@ -2577,6 +2703,9 @@ function rentalBusinessOperations(): ContractOperation[] { return [
   clientOperation("put", "/api/client/v1/profile", "updateClientProfileViaPut", "PUT alias of the partial profile update for hosts without PATCH support (WeChat mini program)", { requestSchema: "ClientProfileUpdateRequest", responseSchema: "ClientProfile" }),
   clientOperation("get", "/api/client/v1/profile/contacts", "listClientContacts", "List the current customer contacts", { responseSchema: "ClientContacts" }),
   clientOperation("put", "/api/client/v1/profile/contacts", "saveClientContact", "Create or update a current customer contact", { requestSchema: "ClientContactRequest", responseSchema: "ClientContact" }),
+  clientOperation("get", "/api/client/v1/profile/addresses", "listClientDeliveryAddresses", "List the current customer's delivery addresses", { responseSchema: "ClientDeliveryAddressList" }),
+  clientOperation("put", "/api/client/v1/profile/addresses", "saveClientDeliveryAddress", "Create or update one of the current customer's delivery addresses", { requestSchema: "ClientDeliveryAddressRequest", responseSchema: "ClientDeliveryAddress" }),
+  clientOperation("delete", "/api/client/v1/profile/addresses/{addressId}", "deleteClientDeliveryAddress", "Soft-delete one of the current customer's delivery addresses (order snapshots unaffected)", { responseSchema: "ClientActionResult" }),
   clientOperation("delete", "/api/client/v1/profile/contacts/{contactId}", "deleteClientContact", "Deactivate a current customer contact", { responseSchema: "ClientActionResult" }),
   clientOperation("get", "/api/client/v1/membership/status", "getClientMembershipStatus", "Get current customer membership and review status", { responseSchema: "ClientMembershipStatus" }),
   clientOperation("get", "/api/client/v1/notifications", "listClientNotifications", "List notifications for the current customer orders", { responseSchema: "ClientNotificationList", parameters: [queryParam("page", numberSchema), queryParam("pageSize", numberSchema)] }),
@@ -2605,6 +2734,8 @@ function rentalBusinessOperations(): ContractOperation[] { return [
   clientOperation("get", "/api/client/v1/orders/{id}/fulfillment", "getClientOrderFulfillment", "Get customer-visible fulfillment and allocation progress", { responseSchema: "ClientFulfillment" }),
   clientOperation("get", "/api/client/v1/orders/{id}/documents/{type}", "getClientOrderDocument", "Render a customer-readable order document snapshot for the current member", { responseSchema: "GenericObject" }),
   clientOperation("get", "/api/client/v1/orders/{id}/documents/{type}/versions", "listClientOrderDocumentVersions", "List immutable document versions for the current member order", { responseSchema: "GenericObject" }),
+  clientOperation("get", "/api/client/v1/orders/{id}/fee-items", "listClientFeeItems", "Approved inspection charges that need the customer's confirmation or dispute", { responseSchema: "ClientFeeItemsResponse" }),
+  clientOperation("post", "/api/client/v1/orders/{id}/fee-items/{inspectionId}/{exceptionIndex}/response", "respondClientFeeItem", "Record the customer's confirmation or dispute for an approved inspection charge (append-only)", { requestSchema: "ClientFeeResponseRequest", responseSchema: "ClientFeeResponseResult" }),
   clientOperation("post", "/api/client/v1/orders/{id}/cancel/preview", "previewClientCancellation", "Preview the existing cancellation charge without cancelling or refunding; final cancellation rechecks state and time", { responseSchema: "ClientCancellationPreview" }),
   clientOperation("post", "/api/client/v1/orders/{id}/cancel", "cancelClientOrder", "Cancel a customer order", { requestSchema: "ClientCancelOrderRequest", responseSchema: "ClientOrderMutation" }),
   clientOperation("get", "/api/client/v1/orders/{id}/extensions", "listClientOrderExtensions", "List customer order extensions", { responseSchema: "ClientExtensionList" }),
@@ -2614,7 +2745,7 @@ function rentalBusinessOperations(): ContractOperation[] { return [
   clientOperation("get", "/api/client/v1/orders/{id}/funding", "getClientOrderFunding", "Get customer order funding status", { responseSchema: "ClientFunding" }),
   clientOperation("post", "/api/client/v1/orders/{id}/funding/simulate", "simulateClientOrderFunding", "Record a development-only simulated customer funding event", { requestSchema: "ClientPaymentSimulationRequest", responseSchema: objectSchema }),
   clientOperation("post", "/api/client/v1/orders/{id}/payment-intents", "createClientPaymentIntent", "Create a real Alipay or WeChat Pay rental payment intent", { requestSchema: "ClientPaymentIntentRequest", responseSchema: "ClientPaymentIntentResponse" }),
-  clientOperation("post", "/api/client/v1/orders/{id}/mini-program-payment-intents", "createClientMiniProgramPaymentIntent", "Reserved mini-program payment contract; currently unavailable, never falls back to Native QR payment", { requestSchema: "ClientMiniProgramPaymentIntentRequest", responseSchema: "ClientPaymentIntentResponse", serviceUnavailableReason: "Trusted ClientWechatIdentity and JSAPI payment persistence are not implemented. No payment is created." }),
+  clientOperation("post", "/api/client/v1/orders/{id}/mini-program-payment-intents", "createClientMiniProgramPaymentIntent", "Create a WeChat JSAPI rental payment intent; the payer openid comes only from the server-side WeChat identity binding (409 wechat_identity_required when absent), never from the request body or Native QR parameters", { requestSchema: "ClientMiniProgramPaymentIntentRequest", responseSchema: "ClientPaymentIntentResponse" }),
   clientOperation("get", "/api/client/v1/orders/{id}/payment-intents/{intentId}", "getClientPaymentIntent", "Get the status of a client payment intent", { responseSchema: "ClientPaymentIntentResponse" }),
   clientOperation("post", "/api/client/v1/orders/{id}/payment-intents/{intentId}/refresh", "refreshClientPaymentIntent", "Query the payment provider and reconcile a client payment intent", { responseSchema: "ClientPaymentIntentResponse" }),
   clientOperation("post", "/api/client/v1/orders/{id}/payment-intents/{intentId}/close", "closeClientPaymentIntent", "Close an unpaid client payment intent", { responseSchema: "ClientPaymentIntentResponse" })

@@ -33,6 +33,7 @@ import { PrismaService } from "../database/prisma.service";
 import { hashOpaqueToken, hashPassword, verifyPassword } from "../../common/password";
 import { runWithRequestIdentity } from "../../common/request-identity";
 import { TenantIntegrationRuntimeService } from "../integrations/tenant-integration.runtime.service";
+import { ClientApiRateLimitService } from "./client-api-rate-limit.service";
 
 const ACCESS_TTL_SECONDS = 60 * 60;
 const REFRESH_TTL_SECONDS = 60 * 60 * 24 * 30;
@@ -108,7 +109,9 @@ export class ClientAuthService {
     // 既有测试用位置参数 `new ClientAuthService(prisma, integrations)` 构造；
     // 后两个依赖追加在最后且可选，缺失时按同一个 prisma 自建。
     @Optional() customers?: SharedCustomerRepository,
-    @Optional() registration?: CustomerRegistrationService
+    @Optional() registration?: CustomerRegistrationService,
+    /** 验证码按身份/租户配额；单测未装配时跳过配额（地址限流仍由守卫执行）。 */
+    @Optional() private readonly rateLimit?: ClientApiRateLimitService
   ) {
     this.customers = customers ?? new SharedCustomerRepository(prisma);
     this.registration = registration ?? new CustomerRegistrationService(prisma, this.customers);
@@ -118,6 +121,15 @@ export class ClientAuthService {
     const secret = process.env.AUTH_TOKEN_SECRET?.trim();
     if (!secret) throw new ServiceUnavailableException("客户端认证密钥未配置");
     return secret;
+  }
+
+  /**
+   * 验证码落库只存 HMAC-SHA256(AUTH_TOKEN_SECRET, challengeId:code)。
+   * 6 位数字空间太小，公开盐的 scrypt 拿到库快照后仍可秒级穷举；密钥化后没有密钥就无法离线验证。
+   * 切换时不做双算法兼容：挑战只活 10 分钟，旧行直接按"验证码错误或已过期"处理。
+   */
+  private challengeCodeHash(challengeId: string, code: string) {
+    return createHmac("sha256", `${this.secret()}:client-challenge`).update(`${challengeId}:${code}`).digest("hex");
   }
 
   private sign(payload: ClientTokenPayload) {
@@ -270,15 +282,22 @@ export class ClientAuthService {
     if (!identifier) throw new BadRequestException("手机号或邮箱不能为空");
     if (input.method === "sms" && !/^\+?[0-9]{6,20}$/u.test(identifier)) throw new BadRequestException("手机号格式无效");
     if (input.method === "email" && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/u.test(identifier)) throw new BadRequestException("邮箱格式无效");
+    // 防枚举：login 用途不再按"未注册/已停用"返回不同状态码。账号不可登录时照常返回
+    // pending 响应，但不发短信、也不落可验证的挑战行（状态 unverifiable，verify 只会回"验证码错误或已过期"）。
+    let deliverable = true;
     if (purpose === "login") {
       if (input.method !== "sms") throw new BadRequestException("短信验证码登录只支持手机号");
       const account = await this.prisma.customerAccount.findFirst({ where: { tenantId: tenant.id, loginPhone: identifier }, select: { status: true } });
-      if (!account) throw new NotFoundException("该手机号尚未注册，请先注册");
-      if (account.status !== "active") throw new ForbiddenException("该账号已停用，请联系商户");
+      deliverable = Boolean(account && account.status === "active");
     }
     const requestKey = input.idempotencyKey?.trim();
     if (!requestKey || requestKey.length > 191) throw new BadRequestException("验证码请求必须带有效幂等键");
     const identifierHash = hashOpaqueToken(`${tenant.id}:${input.method}:${identifier}`);
+    // 按身份与租户的配额在任何服务商调用之前执行；不可投递的登录挑战同样计入身份配额，
+    // 否则攻击者可用未注册号码无限探测而不消耗配额。
+    if (this.rateLimit) {
+      await this.rateLimit.assertChallengeAllowed({ tenantId: tenant.id, identifierHash, countsTowardSmsBudget: input.method === "sms" && deliverable });
+    }
     // 幂等、验证码身份和冷却均按租户统一；来源空间只用于审计和业务上下文。
     // 锁住租户行，防止两个空间的并发请求用不同 key 绕过同一目标的冷却。
     const reservation = await runWithRequestIdentity({ tenantId: tenant.id, workspaceId: workspace.id }, () => this.prisma.$transaction(async (tx) => {
@@ -295,13 +314,13 @@ export class ClientAuthService {
       if (existing && ["verified", "consumed"].includes(existing.status)) {
         throw new ConflictException("验证码挑战已验证或已使用，请继续注册或更换幂等键");
       }
-      if (existing && existing.expiresAt > now && existing.status === "pending_verification") {
+      if (existing && existing.expiresAt > now && ["pending_verification", "unverifiable"].includes(existing.status)) {
         return {
           kind: "response" as const,
           response: {
             apiVersion: CLIENT_API_VERSION,
             challengeId: existing.id,
-            status: existing.status as ClientRegistrationChallengeResponse["status"],
+            status: "pending_verification" as const,
             method: existing.method as ClientRegistrationChallengeResponse["method"],
             maskedDestination: existing.maskedDestination,
             expiresAt: existing.expiresAt.toISOString(),
@@ -327,7 +346,7 @@ export class ClientAuthService {
           response: {
             apiVersion: CLIENT_API_VERSION,
             challengeId: recent.id,
-            status: recent.status as ClientRegistrationChallengeResponse["status"],
+            status: (recent.status === "unverifiable" ? "pending_verification" : recent.status) as ClientRegistrationChallengeResponse["status"],
             method: recent.method as ClientRegistrationChallengeResponse["method"],
             maskedDestination: recent.maskedDestination,
             expiresAt: recent.expiresAt.toISOString(),
@@ -340,9 +359,13 @@ export class ClientAuthService {
       const id = existing?.id ?? randomBytes(16).toString("hex");
       const code = String(randomInt(100000, 1000000));
       const expiresAt = new Date(now.getTime() + CHALLENGE_TTL_SECONDS * 1000);
+      // 不可投递的挑战：codeHash 存随机值且状态为 unverifiable，任何验证码都无法命中，
+      // 但行仍参与冷却/幂等，让不可登录号码的响应与正常号码一致。
+      const status = deliverable ? "pending_verification" : "unverifiable";
+      const codeHash = deliverable ? this.challengeCodeHash(id, code) : randomBytes(32).toString("hex");
       const row = existing
-        ? await tx.clientRegistrationChallenge.update({ where: { id }, data: { sourceWorkspaceId: workspace.id, method: input.method, purpose, identifierHash, maskedDestination: input.method === "sms" ? maskPhone(identifier) : maskEmail(identifier), codeHash: hashOpaqueToken(`${id}:${code}`), status: "pending_verification", deliveryMode: "development", attempts: 0, createdAt: now, expiresAt, verifiedAt: null, verificationTokenHash: null, consumedAt: null, registrationId: null, registeredCustomerId: null, registrationResult: null } })
-        : await tx.clientRegistrationChallenge.create({ data: { id, tenantId: tenant.id, sourceWorkspaceId: workspace.id, method: input.method, purpose, identifierHash, maskedDestination: input.method === "sms" ? maskPhone(identifier) : maskEmail(identifier), codeHash: hashOpaqueToken(`${id}:${code}`), requestKey, status: "pending_verification", deliveryMode: "development", expiresAt } });
+        ? await tx.clientRegistrationChallenge.update({ where: { id }, data: { sourceWorkspaceId: workspace.id, method: input.method, purpose, identifierHash, maskedDestination: input.method === "sms" ? maskPhone(identifier) : maskEmail(identifier), codeHash, status, deliveryMode: "development", attempts: 0, createdAt: now, expiresAt, verifiedAt: null, verificationTokenHash: null, consumedAt: null, registrationId: null, registeredCustomerId: null, registrationResult: null } })
+        : await tx.clientRegistrationChallenge.create({ data: { id, tenantId: tenant.id, sourceWorkspaceId: workspace.id, method: input.method, purpose, identifierHash, maskedDestination: input.method === "sms" ? maskPhone(identifier) : maskEmail(identifier), codeHash, requestKey, status, deliveryMode: "development", expiresAt } });
       return { kind: "send" as const, row, code };
     }));
 
@@ -350,6 +373,22 @@ export class ClientAuthService {
     const { row, code } = reservation;
 
     let deliveryMode: ClientRegistrationChallengeResponse["deliveryMode"] = "development";
+    if (!deliverable) {
+      // 与可投递路径保持相同响应形状；已配置短信平台时 deliveryMode 同样回 provider，不暴露"未发送"。
+      const configured = input.method === "sms" ? await this.integrations.hasEnabledProvider(tenant.id).catch(() => false) : false;
+      deliveryMode = configured ? "provider" : "development";
+      return {
+        apiVersion: CLIENT_API_VERSION,
+        challengeId: row.id,
+        status: "pending_verification",
+        method: input.method,
+        maskedDestination: row.maskedDestination,
+        expiresAt: row.expiresAt.toISOString(),
+        retryAfterSeconds: 60,
+        deliveryMode,
+        purpose
+      };
+    }
     try {
       if (input.method === "sms") {
         const delivery = await runWithRequestIdentity({ tenantId: tenant.id, workspaceId: workspace.id }, () => this.integrations.sendVerificationSms(tenant.id, identifier, code, `client-registration:${row.id}`));
@@ -379,17 +418,24 @@ export class ClientAuthService {
 
   async verifyChallenge(input: VerifyClientRegistrationChallengeRequest): Promise<VerifyClientRegistrationChallengeResponse> {
     const row = await this.prisma.clientRegistrationChallenge.findUnique({ where: { id: input.challengeId } });
+    if (row?.status === "unverifiable") {
+      // 不可登录账号的占位挑战：与验证码错误同一路径、同一文案，避免用 verify 探测账号。
+      await this.prisma.clientRegistrationChallenge.updateMany({ where: { id: row.id, status: "unverifiable", attempts: { lt: MAX_CHALLENGE_ATTEMPTS } }, data: { attempts: { increment: 1 } } });
+      throw new ConflictException("验证码错误或已过期");
+    }
     if (!row || row.status !== "pending_verification") throw new ConflictException("验证码挑战不存在或已使用");
     if (row.expiresAt.getTime() <= Date.now()) {
       await this.prisma.clientRegistrationChallenge.updateMany({ where: { id: row.id, status: "pending_verification", codeHash: row.codeHash, expiresAt: { lte: new Date() } }, data: { status: "expired" } });
       throw new ConflictException("验证码已过期");
     }
     if (row.attempts >= MAX_CHALLENGE_ATTEMPTS) throw new ConflictException("验证码尝试次数过多，请重新获取");
-    if (!/^\d{6}$/u.test(input.code) || hashOpaqueToken(`${row.id}:${input.code}`) !== row.codeHash) {
+    const expectedHash = Buffer.from(this.challengeCodeHash(row.id, input.code));
+    const storedHash = Buffer.from(row.codeHash);
+    if (!/^\d{6}$/u.test(input.code) || expectedHash.length !== storedHash.length || !timingSafeEqual(expectedHash, storedHash)) {
       const attempts = row.attempts + 1;
       const updated = await this.prisma.clientRegistrationChallenge.updateMany({ where: { id: row.id, status: "pending_verification", codeHash: row.codeHash, attempts: row.attempts }, data: { attempts, status: attempts >= MAX_CHALLENGE_ATTEMPTS ? "expired" : "pending_verification" } });
       if (updated.count === 0) throw new ConflictException("验证码挑战已被处理，请重新获取");
-      throw new ConflictException("验证码错误");
+      throw new ConflictException("验证码错误或已过期");
     }
     const token = randomBytes(32).toString("base64url");
     const expiresAt = new Date(Date.now() + CHALLENGE_TTL_SECONDS * 1000);

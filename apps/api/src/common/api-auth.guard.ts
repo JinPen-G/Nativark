@@ -87,12 +87,20 @@ const CLIENT_PUBLIC_ROUTES = new Set([
   "/client/v1/auth/refresh",
   "/client/v1/auth/logout",
   "/client/v1/auth/register",
-  "/client/v1/auth/registration/challenges"
+  "/client/v1/auth/registration/challenges",
+  // MP-02A/02B：用途化验证码、短信登录与微信手机号登录都是登录前的公开入口（仍受限流）。
+  "/client/v1/auth/challenges",
+  "/client/v1/auth/sms-login",
+  "/client/v1/auth/wechat/phone-login",
+  // MP-01/03：渠道启动配置与游客目录只返回已发布的公开投影。
+  "/client/v1/public/bootstrap",
+  "/client/v1/public/catalog"
 ]);
 
 export function isClientPublicRoute(method: string, path: string) {
   if (CLIENT_PUBLIC_ROUTES.has(path)) return true;
   if (method === "GET" && /^\/client\/v1\/tenants\/[^/]+\/workspaces$/u.test(path)) return true;
+  if (method === "GET" && /^\/client\/v1\/public\/catalog\/items\/[^/]+\/images\/[^/]+$/u.test(path)) return true;
   if (method === "POST" && /^\/client\/v1\/auth\/registration\/challenges\/[^/]+\/verify$/u.test(path)) return true;
   return false;
 }
@@ -144,6 +152,10 @@ export function requiredPermissions(method: string, path: string) {
     return ["system:user:manage", "system:role:manage"];
   }
   if (path.startsWith("/platform/integrations")) {
+    return ["system:integration:manage"];
+  }
+  // MP-01：小程序渠道（AppID/AppSecret、品牌、协议、发布空间）与第三方服务同一权限。
+  if (path.startsWith("/platform/mini-program-channel")) {
     return ["system:integration:manage"];
   }
   // EXT-01D：真实支付退款与查单恢复是高风险资金动作，独立于费用裁定和模拟资金事件。
@@ -447,7 +459,7 @@ export function requiredPermissions(method: string, path: string) {
     return ["rental-os:order:view"];
   }
   // RULE-CLOSE-01：待支付超时只能由订单操作权限触发，不能因为静态路径被通用订单详情规则放行。
-  if (path === "/rental/v1/orders/expire-pending" || path === "/rental/v1/orders/reconcile-pickup-overdue" || path.match(/^\/rental\/v1\/orders\/[^/]+\/(?:expire-pending|mark-pickup-overdue|no-show-notice|confirm-no-show)$/u)) {
+  if (path === "/rental/v1/orders/expire-pending" || path === "/rental/v1/orders/reconcile-pickup-overdue" || path.match(/^\/rental\/v1\/orders\/[^/]+\/(?:expire-pending|mark-pickup-overdue|no-show-notice|confirm-no-show|resume-pickup)$/u)) {
     return ["rental-os:order:operate"];
   }
   if (path.match(/^\/rental\/v1\/orders\/[^/]+$/)) {

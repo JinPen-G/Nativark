@@ -319,6 +319,7 @@ export const rentalCoreApi = {
   markPickupOverdue: (id: string) => request<RentalOrder>(`/rental/v1/orders/${id}/mark-pickup-overdue`, { method: "post" }),
   sendNoShowNotice: (id: string) => request<RentalOrder>(`/rental/v1/orders/${id}/no-show-notice`, { method: "post" }),
   confirmNoShow: (id: string, data: { reason: string }) => request<RentalOrder>(`/rental/v1/orders/${id}/confirm-no-show`, { method: "post", data }),
+  resumePickup: (id: string, data: { reason: string }) => request<RentalOrder>(`/rental/v1/orders/${id}/resume-pickup`, { method: "post", data }),
   confirmOrder: (id: string) => request<RentalOrder>(`/rental/v1/orders/${id}/confirm`, { method: "post" }),
   allocateOrder: (id: string) => request<RentalOrder>(`/rental/v1/orders/${id}/allocate`, { method: "post" }),
   allocationCandidates: (id: string) => request<RentalAllocationCandidates>(`/rental/v1/orders/${id}/allocation-candidates`),

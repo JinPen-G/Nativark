@@ -1,4 +1,4 @@
-import type { RentalEarlyReturnRule, RentalExtensionRule, RentalRuleConfig, RentalTaxRule } from "@rental-os/shared";
+import type { RentalEarlyReturnRule, RentalExtensionRule, RentalNoShowRule, RentalRuleConfig, RentalTaxRule } from "@rental-os/shared";
 import { roundMoney } from "./rental-money";
 
 /**
@@ -37,6 +37,40 @@ export function effectiveEarlyReturnRule(config: RentalRuleConfig): RentalEarlyR
 /** 税规则的缺省：不计税。存量快照没有这一组，复算结果必须与新增字段之前一致。 */
 export function effectiveTaxRule(config: RentalRuleConfig): RentalTaxRule {
   return config.tax ?? { rate: 0, inclusive: true };
+}
+
+/**
+ * 爽约规则的缺省。
+ *
+ * `cancellation.noShow` 整组可缺省，缺省即**不启用**爽约处理；但即使启用了，早期快照里
+ * `finalizationMinutes` 也可能缺失——此前 `listNoShowCandidateIds` 与 `confirmNoShowOrder`
+ * 各写一遍 `?? 60`，这里收成一处。60 分钟必须等于新增缺省之前的行为，不得改动。
+ */
+export const DEFAULT_NO_SHOW_FINALIZATION_MINUTES = 60;
+
+export function effectiveNoShowRule(config: RentalRuleConfig): RentalNoShowRule {
+  const rule = config.cancellation?.noShow;
+  return {
+    enabled: rule?.enabled === true,
+    pickupGraceMinutes: rule?.pickupGraceMinutes ?? 0,
+    finalizationMinutes: rule?.finalizationMinutes ?? DEFAULT_NO_SHOW_FINALIZATION_MINUTES,
+    feeType: rule?.feeType ?? "none",
+    feeValue: rule?.feeValue ?? 0
+  };
+}
+
+/**
+ * 待支付保留时长（分钟）的缺省解析。
+ *
+ * `payment.unpaidHoldMinutes` 在契约里是必填，但快照里可能是 0/非法值（校验只在发布时做）。
+ * 草稿订单没有软预占（例如纯服务单）时，到期判定只能靠 `createdAt + 本值`；这里给出的
+ * 缺省 15 分钟等于报价侧种子规则的取值。
+ */
+export const DEFAULT_UNPAID_HOLD_MINUTES = 15;
+
+export function effectiveUnpaidHoldRule(config: RentalRuleConfig): { unpaidHoldMinutes: number } {
+  const minutes = Number(config.payment?.unpaidHoldMinutes);
+  return { unpaidHoldMinutes: Number.isFinite(minutes) && minutes >= 1 ? minutes : DEFAULT_UNPAID_HOLD_MINUTES };
 }
 
 /**

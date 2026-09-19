@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, HttpException, HttpStatus, Inject, Injectable, NotFoundException, OnApplicationBootstrap, OnModuleInit, Optional, ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException, ConflictException, HttpException, HttpStatus, Inject, Injectable, Logger, NotFoundException, OnApplicationBootstrap, OnModuleInit, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { CapabilityBlockedException, CapabilityHookRuntime } from "./capability-hook.runtime";
@@ -392,6 +392,37 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   private readonly bootstrapCategoryByWorkspace = new Map<string, RentalCategoryCode>();
   /** 运行期提交后刷新串行化，防止较旧数据库快照晚到并覆盖较新缓存。 */
   private refreshQueue: Promise<void> = Promise.resolve();
+  private readonly logger = new Logger(RentalBusinessService.name);
+  /** 归还/取消计费改从订单快照取规则与费率时，缺字段回落报价的一次性告警去重。 */
+  private readonly warnedMissingOrderSnapshot = new Set<string>();
+
+  /**
+   * 归还/取消计费的规则与费率**优先取订单快照**（§4.2：订单冻结版本才是复算权威口径），
+   * 缺字段时回落到报价快照并只告警一次。返回一个与原报价同构、但 ruleSnapshot/rateSnapshot
+   * 已按订单覆盖的对象，供各 calculate* 内部（含自身递归）沿用，无需逐处改引用。
+   */
+  private withOrderChargeSnapshot(
+    quote: RentalQuoteSnapshotV1,
+    orderSnapshot?: { ruleSnapshot?: RentalRuleConfig; rateSnapshot?: RentalPricingRate[] }
+  ): RentalQuoteSnapshotV1 {
+    if (!orderSnapshot) return quote;
+    // 规则快照来自订单（§4.2 冻结版本才是复算权威）；订单没有冻结费率，费率仍取报价。
+    // 订单规则块缺失（历史订单）时回落报价并只告警一次。orderSnapshot 未提供的字段本就沿用报价，不告警。
+    const ruleSnapshot = orderSnapshot.ruleSnapshot && Object.keys(orderSnapshot.ruleSnapshot).length
+      ? orderSnapshot.ruleSnapshot
+      : (orderSnapshot.ruleSnapshot === undefined ? quote.ruleSnapshot : this.warnFallback(quote, "ruleSnapshot", quote.ruleSnapshot));
+    const rateSnapshot = orderSnapshot.rateSnapshot?.length ? orderSnapshot.rateSnapshot : quote.rateSnapshot;
+    return { ...quote, ruleSnapshot, rateSnapshot };
+  }
+
+  private warnFallback<T>(quote: RentalQuoteSnapshotV1, field: string, fallback: T): T {
+    const key = `${quote.id}:${field}`;
+    if (!this.warnedMissingOrderSnapshot.has(key)) {
+      this.warnedMissingOrderSnapshot.add(key);
+      this.logger.warn(`订单快照缺少 ${field}，归还/取消计费回落到报价快照 quote=${quote.id}`);
+    }
+    return fallback;
+  }
 
   constructor(
     @Inject(RentalBusinessConfigRepository) private readonly configStore: RentalBusinessConfigStore,
@@ -3820,7 +3851,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         const updated = await this.factStore.updateNotificationDelivery(tenantId, id, {
           status: "failed",
           errorMessage: "短信发送频率已达到安全上限",
-          nextAttemptAt: rate.retryAt
+          nextAttemptAt: rate.retryAt,
+          releaseLease: true
         });
         const result = updated ?? { ...current.log, status: "failed" as const, errorMessage: "短信发送频率已达到安全上限", nextAttemptAt: rate.retryAt };
         this.applyNotificationLogToCache(tenantId, context, result);
@@ -3840,13 +3872,15 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       );
       if (!sent.configured || !sent.provider) throw new ServiceUnavailableException("短信平台尚未配置或未启用");
       providerAccepted = true;
+      // attempts 只在这里（记录结果）递增；认领只占租约。
       const updated = await this.factStore.updateNotificationDelivery(tenantId, id, {
         status: "sent",
         provider: sent.provider,
         providerMessageId: sent.externalRequestId ?? null,
         errorMessage: null,
         sentAt: now.toISOString(),
-        nextAttemptAt: null
+        nextAttemptAt: null,
+        countAttempt: true
       });
       if (!updated) throw new Error("短信服务商已受理，但投递记录不存在");
       const result = updated;
@@ -3867,7 +3901,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
             provider: sent?.provider ?? undefined,
             providerMessageId: sent?.externalRequestId ?? null,
             errorMessage: message,
-            nextAttemptAt: null
+            nextAttemptAt: null,
+            countAttempt: true
           });
         } catch {
           // 结果本身已经不确定，不能因为写状态再次失败而安排自动重试。
@@ -3886,11 +3921,14 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       const retryAt = retryable
         ? new Date(now.getTime() + Math.min(15 * 60 * 1000, 30 * 1000 * (2 ** Math.max(0, attempts - 1)))).toISOString()
         : null;
-      const message = (error instanceof Error ? error.message : String(error)).slice(0, 191);
+      // 达到上限：状态定为 failed 且 nextAttemptAt=null，并在原因里注明已耗尽，不再停留在 queued 静默卡住。
+      const reason = (error instanceof Error ? error.message : String(error));
+      const message = (retryable ? reason : `已达最大重试次数(${current.maxAttempts})，停止自动重试：${reason}`).slice(0, 191);
       const updated = await this.factStore.updateNotificationDelivery(tenantId, id, {
         status: "failed",
         errorMessage: message,
-        nextAttemptAt: retryAt
+        nextAttemptAt: retryAt,
+        countAttempt: true
       });
       const result = updated ?? { ...current.log, status: "failed" as const, errorMessage: message, attempts, nextAttemptAt: retryAt ?? undefined };
       this.applyNotificationLogToCache(tenantId, context, result);
@@ -3938,11 +3976,72 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const updated = await this.factStore.updateNotificationDelivery(tenantId, id, {
       status,
       errorMessage: queried.status === "failed" ? (queried.detail ?? queried.providerStatus).slice(0, 191) : null,
-      nextAttemptAt: null
+      nextAttemptAt: null,
+      releaseLease: true
     });
     if (!updated) throw new ConflictException("短信投递记录已被其他操作更新，请刷新后重试");
     this.applyNotificationLogToCache(tenantId, context, updated);
     return updated;
+  }
+
+  /**
+   * 回执轮询：把 sent/delivery_pending 且带服务商回执号的短信交给运行时查询，
+   * 落成 delivered / delivery_failed（无最终回执保持 delivery_pending）。
+   * 由调度器按空间调用；查询结果未知时记 delivery_uncertain，单条失败不中断其余行。
+   * 签名固定：pollNotificationReceipts(tenantId, workspaceId, take)。
+   */
+  async pollNotificationReceipts(tenantId: string, workspaceId: string, take = 50) {
+    const results: RentalNotificationSendLogV1[] = [];
+    const errors: Array<{ id: string; message: string }> = [];
+    if (!this.notificationRuntime || !this.secretBox) return { polled: 0, delivered: 0, deliveryFailed: 0, pending: 0, uncertain: 0, ids: [], errors };
+    const rows = await this.factStore.listSentNotificationDeliveries(tenantId, workspaceId, take);
+    const cache = this.states.get(workspaceId);
+    const remember = (log: RentalNotificationSendLogV1) => {
+      results.push(log);
+      if (!cache) return;
+      const index = cache.notificationLogs.findIndex((item) => item.id === log.id);
+      if (index >= 0) cache.notificationLogs[index] = log;
+    };
+    for (const row of rows) {
+      if (!row.log.providerMessageId || !row.recipientEncrypted) continue;
+      let queried: Awaited<ReturnType<TenantIntegrationRuntimeService["queryNotificationDelivery"]>>;
+      try {
+        const decrypted = this.secretBox.decrypt(row.recipientEncrypted);
+        queried = await this.notificationRuntime.queryNotificationDelivery(
+          tenantId,
+          decrypted.recipient,
+          row.log.providerMessageId,
+          row.log.sentAt,
+          row.log.provider === "aliyun_sms" || row.log.provider === "tencent_sms" ? row.log.provider : undefined
+        );
+      } catch (error) {
+        const message = (error instanceof Error ? error.message : String(error)).slice(0, 191);
+        if (error instanceof NotificationDeliveryUnknownError) {
+          const updated = await this.factStore.updateNotificationDelivery(tenantId, row.log.id, { status: "delivery_uncertain", errorMessage: message, nextAttemptAt: null, releaseLease: true });
+          if (updated) remember(updated);
+        } else {
+          errors.push({ id: row.log.id, message });
+        }
+        continue;
+      }
+      const status = queried.status === "delivered" ? "delivered" : queried.status === "failed" ? "delivery_failed" : "delivery_pending";
+      const updated = await this.factStore.updateNotificationDelivery(tenantId, row.log.id, {
+        status,
+        errorMessage: queried.status === "failed" ? (queried.detail ?? queried.providerStatus).slice(0, 191) : null,
+        nextAttemptAt: null,
+        releaseLease: true
+      });
+      if (updated) remember(updated);
+    }
+    return {
+      polled: rows.length,
+      delivered: results.filter((row) => row.status === "delivered").length,
+      deliveryFailed: results.filter((row) => row.status === "delivery_failed").length,
+      pending: results.filter((row) => row.status === "delivery_pending").length,
+      uncertain: results.filter((row) => row.status === "delivery_uncertain").length,
+      ids: results.map((row) => row.id),
+      errors
+    };
   }
 
   async retryNotification(tenantId: string, context: BusinessContext, id: string, rateReserved = false) {
@@ -5237,7 +5336,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return roundMoney(Math.max(0, Math.min(base, maximum === undefined ? amount : Math.min(amount, maximum))));
   }
 
-  calculateCancellationCharge(tenantId: string, context: BusinessContext, quote: RentalQuoteSnapshotV1, nowAt = stamp(), weatherException = false) {
+  calculateCancellationCharge(tenantId: string, context: BusinessContext, quote: RentalQuoteSnapshotV1, nowAt = stamp(), weatherException = false, orderSnapshot?: { ruleSnapshot?: RentalRuleConfig; rateSnapshot?: RentalPricingRate[] }) {
+    quote = this.withOrderChargeSnapshot(quote, orderSnapshot);
     const rule = quote.ruleSnapshot;
     if (!rule) throw new ConflictException("订单缺少租赁规则快照");
     if (weatherException) throw new ConflictException("天气免取消费须提供审批依据；当前不能仅凭天气标记自动免除费用");
@@ -5268,8 +5368,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     quote: RentalQuoteSnapshotV1,
     returnedAt: string,
     scheduledEndAt?: string,
-    quantityScope?: Record<string, number>
+    quantityScope?: Record<string, number>,
+    orderSnapshot?: { ruleSnapshot?: RentalRuleConfig; rateSnapshot?: RentalPricingRate[] }
   ) {
+    quote = this.withOrderChargeSnapshot(quote, orderSnapshot);
     const rule = quote.ruleSnapshot;
     if (!rule) throw new ConflictException("订单缺少租赁规则快照");
     const dueAt = scheduledEndAt ?? quote.request.endAt;
@@ -5401,8 +5503,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     scheduledEndAt: string,
     returnedAt: string,
     extensionRentalAmount = 0,
-    extensionPricing?: RentalOrderExtension["pricingSnapshot"]
+    extensionPricing?: RentalOrderExtension["pricingSnapshot"],
+    orderSnapshot?: { ruleSnapshot?: RentalRuleConfig; rateSnapshot?: RentalPricingRate[] }
   ): EarlyReturnRefund {
+    quote = this.withOrderChargeSnapshot(quote, orderSnapshot);
     const rule = effectiveEarlyReturnRule(quote.ruleSnapshot);
     const timeRates = quote.rateSnapshot.filter((rate) => rate.unit !== "usage" && rate.unit !== "package");
     // 不同计费单位（如日租和周租）不能由“第一条费率”代表整单。正常订单逐行退款；
