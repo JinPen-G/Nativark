@@ -203,39 +203,18 @@ export class BusinessSettingsFulfillmentInputDto {
   @ArrayNotEmpty()
   @IsIn(FULFILLMENT_MODES, { each: true })
   enabledModes!: (typeof FULFILLMENT_MODES)[number][];
-
-  @IsBoolean()
-  allowDifferentReturnLocation!: boolean;
 }
 
+/**
+ * 经营设置里的支付块只剩收款方式。付款时机、押金模式与预授权要求是规则版本
+ * （`RuleConfigPaymentInputDto`）的字段——它们随报价进快照，放在设置里的副本从不参与计算。
+ * 逾期规则同理，整块已并入 `RuleConfigOverdueInputDto`。
+ */
 export class BusinessSettingsPaymentInputDto {
-  @IsIn(PAYMENT_TIMINGS)
-  timing!: (typeof PAYMENT_TIMINGS)[number];
-
-  @IsIn(DEPOSIT_MODES)
-  depositMode!: (typeof DEPOSIT_MODES)[number];
-
-  @IsBoolean()
-  preauthorizationRequired!: boolean;
-
   @IsArray()
   @ArrayNotEmpty()
   @IsIn(RENTAL_PAYMENT_METHOD_CODES, { each: true })
   enabledMethods!: (typeof RENTAL_PAYMENT_METHOD_CODES)[number][];
-}
-
-export class BusinessSettingsOverdueInputDto {
-  @IsInt()
-  @Min(0)
-  graceMinutes!: number;
-
-  @IsIn(OVERDUE_FEE_MODES)
-  feeMode!: (typeof OVERDUE_FEE_MODES)[number];
-
-  @IsNumber()
-  @Min(0)
-  @Max(MAX_MULTIPLIER)
-  feeMultiplier!: number;
 }
 
 export class BusinessSettingsCalendarInputDto {
@@ -346,11 +325,6 @@ export class SaveTenantRentalBusinessSettingsDto implements SaveTenantRentalBusi
   @ValidateNested()
   @Type(() => BusinessSettingsPaymentInputDto)
   payment!: BusinessSettingsPaymentInputDto;
-
-  @IsObject()
-  @ValidateNested()
-  @Type(() => BusinessSettingsOverdueInputDto)
-  overdue!: BusinessSettingsOverdueInputDto;
 
   @IsObject()
   @ValidateNested()

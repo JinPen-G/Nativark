@@ -29,6 +29,7 @@ import { rentalCoreApi } from "@/api/rentalCore";
 import { QueryState } from "@/components/QueryState";
 import { CalendarMonthGrid } from "@/features/settings/CalendarMonthGrid";
 import { CalendarRangeModal } from "@/features/settings/CalendarRangeModal";
+import { calendarDayTypeLabels } from "./ruleOptionLabels";
 import type { GovernancePermissions } from "./shared";
 
 const currentYear = new Date().getFullYear();
@@ -425,7 +426,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
               {
                 title: "类型",
                 dataIndex: "dayType",
-                render: (value) => <Tag>{value}</Tag>,
+                render: (value) => <Tag>{calendarDayTypeLabels[value as string] ?? value}</Tag>,
               },
               { title: "名称", dataIndex: "name" },
               { title: "历史系数（兼容）", dataIndex: "pricingMultiplier" },
@@ -601,7 +602,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                 "statutory_holiday",
                 "makeup_workday",
                 "tenant_special",
-              ].map((value) => ({ value, label: value }))}
+              ].map((value) => ({ value, label: calendarDayTypeLabels[value] ?? value }))}
             />
           </Form.Item>
           <Form.Item name="name" label="名称">

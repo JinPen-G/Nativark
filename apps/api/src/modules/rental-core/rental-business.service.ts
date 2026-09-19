@@ -342,20 +342,30 @@ function calendarDiff(before: RentalCalendarDay[], after: RentalCalendarDay[]): 
   return { added: added.sort(), removed: removed.sort(), changed: changed.sort() };
 }
 
-function defaultRuleConfig(category: RentalCategoryDefinition, settings: TenantRentalBusinessSettings): RentalRuleConfig {
-  const defaults = category.businessModel.defaults.rules;
+/**
+ * 新空间的首版规则。付款时机、异地归还与逾期块直接取品类缺省——这些字段的事实源
+ * 就是规则版本，经营设置里不再保留副本。取值与早前「先写进设置再抄进规则」的结果
+ * 逐字段相同（README §4.2：缺省必须等于变更前的行为）。
+ */
+function defaultRuleConfig(category: RentalCategoryDefinition): RentalRuleConfig {
+  const model = category.businessModel;
+  const defaults = model.defaults.rules;
   return {
     payment: {
-      ...settings.payment,
+      timing: model.defaults.payment.timing,
+      // 与早前 defaultBusinessSettings 的口径一致：支持预授权的品类首版即「只冻结」，
+      // 否则固定押金。改这里会让新空间第一张报价的押金口径变化。
+      depositMode: model.supportsPreauthorization ? "preauthorization" : "fixed",
+      preauthorizationRequired: model.supportsPreauthorization,
       unpaidHoldMinutes: 15
     },
     fulfillment: {
       pickupInspectionRequired: true,
       returnInspectionRequired: true,
       evidenceRequired: defaults.evidenceRequired,
-      allowDifferentReturnLocation: settings.fulfillment.allowDifferentReturnLocation
+      allowDifferentReturnLocation: model.defaults.fulfillment.allowDifferentReturnLocation
     },
-    overdue: { ...settings.overdue },
+    overdue: { ...model.defaults.overdue },
     cancellation: {
       ...defaults.cancellation,
       noShow: { enabled: true, pickupGraceMinutes: 30, finalizationMinutes: 60, feeType: "percentage", feeValue: 100 }
@@ -3050,6 +3060,14 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return matchRuleVersionAt(this.state(tenantId, context).ruleVersions, at);
   }
 
+  /**
+   * 某时点生效的规则版本，**不抛错**：没有已发布规则返回 undefined。
+   * 给只读投影（客户端目录、开业就绪）用；报价与订单推进必须继续用 fail-closed 的 `currentRule`。
+   */
+  effectiveRuleAt(tenantId: string, context: BusinessContext, at = stamp()): RentalRuleVersion | undefined {
+    return this.effectiveRuleVersionAt(this.state(tenantId, context).ruleVersions, at);
+  }
+
   /** 草稿保存。已发布版本不可修改（需求 4.6.1），改它只能先恢复为新草稿。 */
   async saveRuleVersion(tenantId: string, context: BusinessContext, input: SaveRentalRuleVersionRequest, operator: string) {
     const state = this.state(tenantId, context);
@@ -4434,7 +4452,6 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       : undefined;
     if (new Set(input.lines.map((line) => line.pricingGroupId ?? line.itemGroupId)).size !== input.lines.length) throw new BadRequestException("同一定价分组在一次报价中只能出现一行");
     if (!context.settings.fulfillment.enabledModes.includes(input.fulfillmentMode)) throw new BadRequestException("当前租户未启用所选租赁履约方式");
-    if (input.returnLocationId && input.returnLocationId !== input.fulfillmentLocationId && !context.settings.fulfillment.allowDifferentReturnLocation) throw new BadRequestException("当前租户未启用异地归还");
     this.validateFulfillmentLocations(context, input);
     const plan = this.resolvePricingPlan(
       state.pricingPlans,
@@ -4458,6 +4475,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     // RULE-01A：按**租期开始时间**匹配规则版本（需求 4.6.1）。未来租期因此套用
     // 覆盖它开始时点的版本，而不是「现在生效」的那一版；匹配不到直接报错，不回落。
     const rule = this.currentRule(tenantId, context, input.startAt);
+    // 异地归还按**命中的规则版本**校验，而不是经营设置：规则随报价进快照，设置不进。
+    // 早前两处各读一份，运营改了规则、报价却按设置拦截，订单复算又按快照——三处口径不一。
+    if (input.returnLocationId && input.returnLocationId !== input.fulfillmentLocationId && !rule.config.fulfillment.allowDifferentReturnLocation) throw new BadRequestException("当前生效规则未启用异地归还");
     // 营业时区解析一次，策略（自然日/夜）与日历（日期类型）必须用同一个值，
     // 否则同一张报价里两处按不同日界切分，金额与说明会互相矛盾。
     const quoteTimeZone = context.settings.calendar.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE;
@@ -5173,7 +5193,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const services: RentalValueAddedService[] = context.category.businessModel.valueAddedServicePresets.slice(0, 4).map((name, index) => ({ id: `${idPrefix}_service_${index + 1}`, tenantId, categoryCode: context.profile.categoryCode, code: `SERVICE_${index + 1}`, name, serviceType: serviceType(name), billingUnit: name.includes("配送") || name.includes("运输") ? "per_order" : "per_day", price: 20 + index * 30, minimumQuantity: 1, maximumQuantity: 5, applicableFulfillmentModes: [], applicableLocationIds: [], customerScope: "all", selectionMode: "optional", coverageLimit: name.includes("保险") || name.includes("免赔") ? 5000 : undefined, deductible: name.includes("免赔") ? 200 : undefined, termsVersion: "1.0", terms: `${name}服务条款：以订单保存的本版本范围、限额及除外责任为准。`, applicableItemGroupIds: [], requiresCapacity: false, status: "enabled", version: "1.0", createdAt: timestamp, updatedAt: timestamp }));
     // effectiveFrom 与 publishedAt 同为初始化时刻：没有生效时点的版本不参与时点匹配，
     // 新建空间会立刻因「没有覆盖该时点的规则」报不出价。
-    const ruleVersions: RentalRuleVersion[] = [{ id: `${idPrefix}_rule_v1`, tenantId, categoryCode: context.profile.categoryCode, version: "1.0", status: "published", config: defaultRuleConfig(context.category, context.settings), changeReason: "品类初始化规则", createdBy: "system", createdAt: timestamp, publishedAt: timestamp, effectiveFrom: timestamp }];
+    const ruleVersions: RentalRuleVersion[] = [{ id: `${idPrefix}_rule_v1`, tenantId, categoryCode: context.profile.categoryCode, version: "1.0", status: "published", config: defaultRuleConfig(context.category), changeReason: "品类初始化规则", createdBy: "system", createdAt: timestamp, publishedAt: timestamp, effectiveFrom: timestamp }];
     const defaultVariables = { customerName: { label: "客户名称", required: true }, orderNo: { label: "订单号", required: true } };
     const notificationTemplates: RentalNotificationTemplateV1[] = context.settings.notifications.enabledEvents.slice(0, 12).map((eventCode, index) => {
       const memberEvent = eventCode === "member.registered";
@@ -5311,7 +5331,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       throw new BadRequestException("当前品类不支持预授权");
     }
     if (config.qualification.required && !context.category.businessModel.supportsQualificationReview) throw new BadRequestException("当前品类不支持资质审核");
-    if (config.fulfillment.allowDifferentReturnLocation && !context.settings.fulfillment.allowDifferentReturnLocation) throw new BadRequestException("租户履约设置未启用异地归还");
+    // 异地归还只由规则版本本身表达。早前这里还要求经营设置里同名布尔为真，但设置那份
+    // 从不进快照、也不参与报价校验（报价读的是 context.settings，规则读的是快照），两份
+    // 口径只会互相打架。空间「操作上能否跨点」由地点的 return 能力与 enabledModes 决定。
     if (config.payment.unpaidHoldMinutes < 1 || config.overdue.graceMinutes < 0 || config.overdue.feeMultiplier < 0 || config.cancellation.freeBeforeHours < 0) throw new BadRequestException("规则中的时长或费用参数无效");
     const noShow = config.cancellation.noShow;
     if (noShow && (noShow.pickupGraceMinutes < 0 || noShow.finalizationMinutes < 1 || noShow.feeValue < 0 || !Number.isFinite(noShow.pickupGraceMinutes) || !Number.isFinite(noShow.finalizationMinutes) || !Number.isFinite(noShow.feeValue))) {

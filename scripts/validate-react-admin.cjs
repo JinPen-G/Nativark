@@ -28,6 +28,7 @@ const commercialPage = read("apps/admin/src/features/commercial/RentalCommercial
 const pricingGroupPage = read("apps/admin/src/features/commercial/PricingGroupPage.tsx");
 const governancePage = read("apps/admin/src/features/settings/RentalGovernancePage.tsx");
 const governanceRulesTab = read("apps/admin/src/features/settings/governance/RulesTab.tsx");
+const governanceRuleSections = read("apps/admin/src/features/settings/governance/ruleSections.tsx");
 const governanceNotificationsTab = read("apps/admin/src/features/settings/governance/NotificationsTab.tsx");
 const locationPage = read("apps/admin/src/features/fulfillment/LocationPage.tsx");
 const platformPage = read("apps/admin/src/features/platform/PlatformPage.tsx");
@@ -104,14 +105,19 @@ if (fs.existsSync(path.join(reactRoot, "features/rental-core/RentalCorePage.tsx"
   requireText(source, "value={value as number}", `${label}: number input`);
   requireText(source, "checked={checked ?? Boolean(value)}", `${label}: boolean switch`);
 });
+// 押金/预授权两组独立字段的编辑 UI 抽到 governance/ruleSections.tsx 的 RULE_SECTIONS，
+// 供「业务规则」页签与后续「新建规则向导」共用；押金/预授权的展示派生仍在 RulesTab。
 [
   'name={["deposit", "mode"]}',
   'name={["deposit", "maxAmount"]}',
   'name={["preauthorization", "mode"]}',
   'name={["preauthorization", "maxAmount"]}',
-  "ruleSecurityGroups",
   '[["none", securityRuleLabels.none]]'
-].forEach((label) => requireText(governanceRulesTab, label, "independent deposit and preauthorization rule UI"));
+].forEach((label) => requireText(governanceRuleSections, label, "independent deposit and preauthorization rule UI"));
+requireText(governanceRulesTab, "ruleSecurityGroups", "independent deposit and preauthorization rule UI");
+// 分区清单必须导出以供向导复用，且 RulesTab 通过映射它来渲染各分区。
+requireText(governanceRuleSections, "export const RULE_SECTIONS", "rule sections exported for wizard reuse");
+requireText(governanceRulesTab, "RULE_SECTIONS.map", "rules tab renders sections from RULE_SECTIONS");
 [
   'name="initialRates"',
   'name={[field.name, "baseAmount"]}',

@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Alert, Card, Col, Form, InputNumber, Row, Select, Space, Switch } from "antd";
 import { rentalCoreApi } from "@/api/rentalCore";
+import { rewardTypeLabels } from "./ruleOptionLabels";
 import type { GovernancePermissions } from "./shared";
 
 /**
@@ -45,7 +46,7 @@ export function MembershipRewardRulesTab({ permissions }: { permissions: Governa
                 >
                   <Select
                     options={["points", "balance", "coupon"].map(
-                      (value) => ({ value, label: value }),
+                      (value) => ({ value, label: rewardTypeLabels[value] ?? value }),
                     )}
                   />
                 </Form.Item>
@@ -105,7 +106,7 @@ export function MembershipRewardRulesTab({ permissions }: { permissions: Governa
                 >
                   <Select
                     options={["points", "balance", "coupon"].map(
-                      (value) => ({ value, label: value }),
+                      (value) => ({ value, label: rewardTypeLabels[value] ?? value }),
                     )}
                   />
                 </Form.Item>

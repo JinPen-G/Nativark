@@ -23,7 +23,13 @@ import {
 } from "antd";
 import { useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
+import { notificationChannelLabels, notificationEventLabels } from "./ruleOptionLabels";
 import type { GovernancePermissions } from "./shared";
+
+/** 已知事件编码显示中文；未知编码兜底显示原始代码，并包成明显是「代码」的样式。 */
+function eventLabel(code: string) {
+  return notificationEventLabels[code] ?? <Typography.Text code>{code}</Typography.Text>;
+}
 
 type TemplateForm = Omit<
   SaveRentalNotificationTemplateRequest,
@@ -195,7 +201,7 @@ export function NotificationsTab({ permissions, settings }: { permissions: Gover
                     <b>{row.name}</b>
                     <br />
                     <span className="muted">
-                      {row.eventCode} · v{row.version}
+                      {eventLabel(row.eventCode)} · v{row.version}
                     </span>
                   </>
                 ),
@@ -203,7 +209,7 @@ export function NotificationsTab({ permissions, settings }: { permissions: Gover
               {
                 title: "渠道",
                 dataIndex: "channel",
-                render: (value) => <Tag>{value}</Tag>,
+                render: (value) => <Tag>{notificationChannelLabels[value] ?? value}</Tag>,
               },
               { title: "标题", dataIndex: "title" },
               {
@@ -236,10 +242,14 @@ export function NotificationsTab({ permissions, settings }: { permissions: Gover
             rowKey="id"
             dataSource={logs.data ?? []}
             columns={[
-              { title: "事件", dataIndex: "eventCode" },
+              { title: "事件", dataIndex: "eventCode", render: (value: string) => eventLabel(value) },
               {
                 title: "渠道/接收人",
-                render: (_, row) => `${row.channel} · ${row.recipient}`,
+                render: (_, row) => (
+                  <>
+                    {notificationChannelLabels[row.channel] ?? row.channel} · {row.recipient}
+                  </>
+                ),
               },
               { title: "模板版本", dataIndex: "templateVersion" },
               { title: "提供商", dataIndex: "provider" },
@@ -311,7 +321,7 @@ export function NotificationsTab({ permissions, settings }: { permissions: Gover
                 <Select
                   options={(
                     settings.notifications.enabledEvents ?? []
-                  ).map((value) => ({ value, label: value }))}
+                  ).map((value) => ({ value, label: eventLabel(value) }))}
                 />
               </Form.Item>
             </Col>
@@ -324,7 +334,7 @@ export function NotificationsTab({ permissions, settings }: { permissions: Gover
                 <Select
                   options={(
                     settings.notifications.editableChannels ?? []
-                  ).map((value) => ({ value, label: value }))}
+                  ).map((value) => ({ value, label: notificationChannelLabels[value] ?? value }))}
                 />
               </Form.Item>
             </Col>

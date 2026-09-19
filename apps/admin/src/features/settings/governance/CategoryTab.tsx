@@ -111,13 +111,6 @@ export function CategoryTab({ category }: { category: RentalCategoryDefinition }
                 )}
               />
             </Form.Item>
-            <Form.Item
-              name={["fulfillment", "allowDifferentReturnLocation"]}
-              label="允许异地归还"
-              valuePropName="checked"
-            >
-              <Switch />
-            </Form.Item>
             <Space wrap>
               {category.businessModel.locationTypes.map((value) => (
                 <Tag key={value}>{value}</Tag>
@@ -126,47 +119,9 @@ export function CategoryTab({ category }: { category: RentalCategoryDefinition }
           </Card>
         </Col>
         <Col xs={24} xl={12}>
-          <Card title="支付、押金和预授权">
-            <Row gutter={12}>
-              <Col span={12}>
-                <Form.Item
-                  name={["payment", "timing"]}
-                  label="支付时点"
-                >
-                  <Select
-                    options={[
-                      { value: "order", label: "下单" },
-                      { value: "confirmation", label: "确认" },
-                      { value: "pickup", label: "领取" },
-                      { value: "offline_terms", label: "线下账期" },
-                    ]}
-                  />
-                </Form.Item>
-              </Col>
-              <Col span={12}>
-                <Form.Item
-                  name={["payment", "depositMode"]}
-                  label="押金方式"
-                >
-                  <Select
-                    options={[
-                      { value: "none", label: "无" },
-                      { value: "fixed", label: "固定" },
-                      { value: "price_multiple", label: "价格倍数" },
-                      ...(category.businessModel
-                        .supportsPreauthorization
-                        ? [
-                            {
-                              value: "preauthorization",
-                              label: "预授权",
-                            },
-                          ]
-                        : []),
-                    ]}
-                  />
-                </Form.Item>
-              </Col>
-            </Row>
+          <Card title="收款方式">
+            {/* 支付时点、押金、预授权、异地归还与逾期计费都随报价进订单快照，事实源在「业务规则」页；
+                这里只保留不进快照的运行开关——空间实际开通哪些收款渠道。 */}
             <Form.Item
               name={["payment", "enabledMethods"]}
               label="启用收款方式"
@@ -180,55 +135,11 @@ export function CategoryTab({ category }: { category: RentalCategoryDefinition }
                 }))}
               />
             </Form.Item>
-            <Form.Item
-              name={["payment", "preauthorizationRequired"]}
-              label="必须预授权"
-              valuePropName="checked"
-            >
-              <Switch
-                disabled={
-                  !category.businessModel.supportsPreauthorization
-                }
-              />
-            </Form.Item>
-          </Card>
-        </Col>
-        <Col xs={24} xl={12}>
-          <Card title="逾期基础设置">
-            <Row gutter={12}>
-              <Col span={8}>
-                <Form.Item
-                  name={["overdue", "graceMinutes"]}
-                  label="宽限分钟"
-                >
-                  <InputNumber min={0} />
-                </Form.Item>
-              </Col>
-              <Col span={8}>
-                <Form.Item
-                  name={["overdue", "feeMode"]}
-                  label="收费方式"
-                >
-                  <Select
-                    options={[
-                      "none",
-                      "hourly",
-                      "next_period",
-                      "multiplier",
-                      "manual_review",
-                    ].map((value) => ({ value, label: value }))}
-                  />
-                </Form.Item>
-              </Col>
-              <Col span={8}>
-                <Form.Item
-                  name={["overdue", "feeMultiplier"]}
-                  label="费用系数"
-                >
-                  <InputNumber min={0} step={0.1} />
-                </Form.Item>
-              </Col>
-            </Row>
+            <Alert
+              type="info"
+              showIcon
+              title="支付时点、押金与预授权、异地归还、逾期计费在「业务规则」页配置，发布后随订单快照冻结。"
+            />
           </Card>
         </Col>
       </Row>

@@ -710,10 +710,14 @@ export interface RentalInspectionFieldDefinition {
   usageMetric?: boolean;
 }
 
+/**
+ * 品类给**首版规则**的缺省值。这些块只用于生成新空间的第一条规则版本
+ * （`RentalRuleConfig`），不再复制进经营设置——规则版本才是报价与订单快照的事实源。
+ */
 export interface RentalCategoryDefaults {
   fulfillment: { allowDifferentReturnLocation: boolean };
-  payment: { timing: TenantRentalBusinessSettings["payment"]["timing"] };
-  overdue: Pick<TenantRentalBusinessSettings["overdue"], "graceMinutes" | "feeMode" | "feeMultiplier">;
+  payment: { timing: RentalRuleConfig["payment"]["timing"] };
+  overdue: Pick<RentalRuleConfig["overdue"], "graceMinutes" | "feeMode" | "feeMultiplier">;
   rules: {
     evidenceRequired: boolean;
     cancellation: Pick<RentalRuleConfig["cancellation"], "freeBeforeHours" | "lateFeeType" | "lateFeeValue" | "weatherExceptionEnabled">;
@@ -1846,21 +1850,18 @@ export interface TenantRentalBusinessSettings {
      */
     holidayPricingEnabled: boolean;
   };
+  /**
+   * 履约能力开关。**只**保留运营层面的启用集合；「是否允许异地归还」、付款时机、
+   * 押金模式与逾期规则属于 `RentalRuleConfig`（规则版本），由报价与订单快照固化。
+   * 早前这里各存一份副本，报价却只读规则快照——设置里那份从未参与计算，只会让
+   * 运营改了设置却发现订单金额不变。存量 JSON 行里仍可能带旧键，读路径忽略即可。
+   */
   fulfillment: {
     enabledModes: RentalFulfillmentMode[];
-    allowDifferentReturnLocation: boolean;
   };
   payment: {
-    timing: "order" | "confirmation" | "pickup" | "offline_terms";
-    depositMode: "none" | "fixed" | "price_multiple" | "preauthorization";
-    preauthorizationRequired: boolean;
     /** 空间允许客户/运营选择的收款方式；支付宝/微信仍需另有已验证的租户 Provider。 */
     enabledMethods: RentalPaymentMethod[];
-  };
-  overdue: {
-    graceMinutes: number;
-    feeMode: "none" | "hourly" | "next_period" | "multiplier" | "manual_review";
-    feeMultiplier: number;
   };
   calendar: {
     weekendDays: number[];

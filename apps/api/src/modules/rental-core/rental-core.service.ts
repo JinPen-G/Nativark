@@ -195,8 +195,6 @@ function defaultBusinessSettings(
    */
   currency: RentalCurrency = "CNY"
 ): TenantRentalBusinessSettings {
-  const supportsPreauthorization = definition.businessModel.supportsPreauthorization;
-  const defaults = definition.businessModel.defaults;
   return {
     tenantId,
     categoryCode: definition.code,
@@ -208,18 +206,13 @@ function defaultBusinessSettings(
       taxIncluded: true,
       holidayPricingEnabled: definition.businessModel.supportsHolidayPricing
     },
+    // 付款时机、押金模式、异地归还与逾期规则不在这里：它们由首版规则版本
+    // （rental-business.service.ts 的 defaultRuleConfig）按品类缺省生成并进快照。
     fulfillment: {
-      enabledModes: [...definition.businessModel.fulfillmentModes],
-      allowDifferentReturnLocation: defaults.fulfillment.allowDifferentReturnLocation
+      enabledModes: [...definition.businessModel.fulfillmentModes]
     },
     payment: {
-      timing: defaults.payment.timing,
-      depositMode: supportsPreauthorization ? "preauthorization" : "fixed",
-      preauthorizationRequired: supportsPreauthorization,
       enabledMethods: [...DEFAULT_RENTAL_PAYMENT_METHODS]
-    },
-    overdue: {
-      ...defaults.overdue
     },
     calendar: {
       weekendDays: [0, 6],
@@ -649,15 +642,9 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (!input.fulfillment.enabledModes.length || input.fulfillment.enabledModes.some((mode) => !fulfillmentModes.has(mode))) {
       throw new BadRequestException("存在当前经营品类不支持的履约方式");
     }
-    if ((input.payment.preauthorizationRequired || input.payment.depositMode === "preauthorization") && !definition.businessModel.supportsPreauthorization) {
-      throw new BadRequestException("当前经营品类不支持预授权");
-    }
-    if (input.payment.preauthorizationRequired && input.payment.depositMode !== "preauthorization") throw new BadRequestException("必须预授权时，押金方式也必须选择预授权");
+    // 预授权与逾期参数的校验随字段一起移到规则版本（validateRule）；设置里不再有这些字段。
     if (input.pricing.holidayPricingEnabled && !definition.businessModel.supportsHolidayPricing) {
       throw new BadRequestException("当前经营品类不支持节假日差异定价");
-    }
-    if (!Number.isInteger(input.overdue.graceMinutes) || input.overdue.graceMinutes < 0 || input.overdue.feeMultiplier < 0) {
-      throw new BadRequestException("逾期宽限时间或费用系数无效");
     }
     if (input.calendar.weekendDays.some((day) => !Number.isInteger(day) || day < 0 || day > 6)) throw new BadRequestException("周末规则只能使用 0 到 6 的星期序号");
     const rewardAmounts = [input.membership.signupRewardAmount, input.membership.referrerRewardAmount, input.membership.inviteeRewardAmount];
