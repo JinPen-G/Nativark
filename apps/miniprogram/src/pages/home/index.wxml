@@ -16,9 +16,9 @@
         <view class="banner__glow banner__glow--1"></view>
         <view class="banner__glow banner__glow--2"></view>
         <view class="banner__body">
-          <view class="banner__title">去探索</view>
-          <view class="banner__title">更大的世界</view>
-          <view class="banner__subtitle">好装备，让每一次出发更简单</view>
+          <block wx:if="{{bannerTitle}}"><view class="banner__title">{{bannerTitle}}</view></block>
+          <block wx:else><view class="banner__title">去探索</view><view class="banner__title">更大的世界</view></block>
+          <view class="banner__subtitle">{{bannerSubtitle || '好装备，让每一次出发更简单'}}</view>
           <view class="banner__cta"><text>立即租赁</text><ui-icon name="arrow-right" size="28" color="#1677FF" stroke="2.2"></ui-icon></view>
         </view>
       </view>

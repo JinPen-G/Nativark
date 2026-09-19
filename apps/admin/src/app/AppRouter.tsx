@@ -36,6 +36,7 @@ const CapabilityGovernancePage = lazy(() => import("@/features/rental-core/Capab
 const TenantOperationsAccountPage = lazy(() => import("@/features/tenant-access/TenantAccessPages").then((module) => ({ default: module.TenantOperationsAccountPage })));
 const TenantRolePermissionPage = lazy(() => import("@/features/tenant-access/TenantAccessPages").then((module) => ({ default: module.TenantRolePermissionPage })));
 const TenantIntegrationsPage = lazy(() => import("@/features/settings/TenantIntegrationsPage").then((module) => ({ default: module.TenantIntegrationsPage })));
+const ClientChannelPage = lazy(() => import("@/features/channel/ClientChannelPage").then((module) => ({ default: module.ClientChannelPage })));
 const PaymentReconciliationPage = lazy(() => import("@/features/settings/PaymentReconciliationPage").then((module) => ({ default: module.PaymentReconciliationPage })));
 
 function PageLoader() {
@@ -108,6 +109,7 @@ function ProtectedRoutes() {
             <Route path={APP_ROUTES.tenantAccounts.path} element={guard(APP_ROUTES.tenantAccounts, <TenantOperationsAccountPage />)} />
             <Route path={APP_ROUTES.tenantRoles.path} element={guard(APP_ROUTES.tenantRoles, <TenantRolePermissionPage />)} />
             <Route path={APP_ROUTES.tenantIntegrations.path} element={guard(APP_ROUTES.tenantIntegrations, <TenantIntegrationsPage />)} />
+            <Route path={APP_ROUTES.clientChannel.path} element={guard(APP_ROUTES.clientChannel, <ClientChannelPage />)} />
             <Route path={APP_ROUTES.paymentReconciliation.path} element={guard(APP_ROUTES.paymentReconciliation, <PaymentReconciliationPage />)} />
             <Route path={APP_ROUTES.qualificationTypes.path} element={guard(APP_ROUTES.qualificationTypes, <QualificationTypesPage />)} />
             <Route path={APP_ROUTES.membershipReviews.path} element={guard(APP_ROUTES.membershipReviews, <MembershipReviewPage />)} />

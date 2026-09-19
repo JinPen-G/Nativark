@@ -1,4 +1,4 @@
-import type { ClientChannelBootstrapResponse, ClientConfigResponse } from "@rental-os/shared";
+import type { ClientChannelBootstrapResponse, ClientConfigResponse, ClientPublicDocumentKind, ClientPublicDocumentResponse } from "@rental-os/shared";
 import { PUBLIC_CONFIG } from "../config/public";
 import { contractMissing } from "../contracts/planned";
 import { request } from "../core/http";
@@ -23,7 +23,21 @@ export async function fetchBootstrap(): Promise<ClientChannelBootstrapResponse |
   try {
     return await request<ClientChannelBootstrapResponse>("/public/bootstrap", {
       auth: "none",
-      query: { tenantCode: PUBLIC_CONFIG.tenantCode, appId: PUBLIC_CONFIG.appId || undefined }
+      // 本包是微信小程序渠道；APP 端复用同一接口传 client=app。
+      query: { tenantCode: PUBLIC_CONFIG.tenantCode, client: "wechat_miniprogram", appId: PUBLIC_CONFIG.appId || undefined }
+    });
+  } catch (error) {
+    if (contractMissing(error)) return undefined;
+    throw error;
+  }
+}
+
+/** 公开文档正文（用户协议 / 隐私政策 / 帮助），游客可读；商户未提供时抛 UNAVAILABLE，页面显示“商户未提供”。 */
+export async function fetchPublicDocument(kind: ClientPublicDocumentKind): Promise<ClientPublicDocumentResponse | undefined> {
+  try {
+    return await request<ClientPublicDocumentResponse>(`/public/documents/${encodeURIComponent(kind)}`, {
+      auth: "none",
+      query: { tenantCode: PUBLIC_CONFIG.tenantCode }
     });
   } catch (error) {
     if (contractMissing(error)) return undefined;

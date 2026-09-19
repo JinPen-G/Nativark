@@ -243,17 +243,28 @@ Page({
     }
     if (!this.requireConsent()) return;
     this.setData({ submitting: true, formError: "" });
+    let stage: "verify" | "login" = "verify";
     try {
       const verified = await verifyRegistrationChallenge(this.smsChallengeId, this.data.smsCode.trim());
+      stage = "login";
+      // 验证码已换成一次性证明：无论登录成败都不能再用，同时换掉挑战幂等键，重新获取时才不会撞上“已验证”的旧挑战。
+      this.smsChallengeId = "";
+      this.smsChallengeKey = "";
       // preferredServiceCode 只会返回商户当前已发布的服务，不会因过期服务导致拒登；验证令牌一次性，故不重试。
       const session = await loginWithSms({ loginIdentifier: identifier, verificationToken: verified.verificationToken, serviceCode: preferredServiceCode() });
       this.finish(session);
     } catch (error) {
       const presented = describeError(error);
-      if (presented.code === "BAD_REQUEST" || presented.code === "UNAUTHENTICATED") {
-        this.setData({ errors: { ...this.data.errors, smsCode: presented.message } });
+      if (stage === "verify") {
+        // 验证码错误可重输；挑战已过期/已用尽（409/404）则必须重新获取（并换幂等键）。
+        if (presented.code === "CONFLICT" || presented.code === "NOT_FOUND") {
+          this.smsChallengeId = "";
+          this.smsChallengeKey = "";
+        }
+        this.setData({ errors: { ...this.data.errors, smsCode: presented.code === "CONFLICT" || presented.code === "NOT_FOUND" ? `${presented.message}，请重新获取验证码` : presented.message } });
       } else {
-        this.setData({ formError: presented.message });
+        // 证明已被消耗；登录被拒（如会员受限）后须重新获取验证码。
+        this.setData({ smsCode: "", formError: `${presented.message} 如需重试请重新获取验证码。` });
       }
     } finally {
       this.setData({ submitting: false });

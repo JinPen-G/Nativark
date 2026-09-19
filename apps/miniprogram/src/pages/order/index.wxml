@@ -111,6 +111,7 @@
         <view class="subtitle">规则与记录</view>
         <view class="muted mt-8">下单时的取消、逾期与损坏规则版本已随订单固化。</view>
         <view wx:if="{{!feeAvailable}}" class="muted mt-8">检查费用的在线确认与异议本商户暂未开通，如对费用有疑问请联系商户。</view>
+        <view wx:elif="{{feeLoadError}}" class="muted mt-8">检查费用暂时无法读取（{{feeLoadError}}），下拉刷新可重试。</view>
         <view wx:elif="{{!feeItems.length}}" class="muted mt-8">目前没有需要你确认的检查费用。</view>
       </view>
     </view>

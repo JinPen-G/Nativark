@@ -4,6 +4,8 @@
 
 | 版本 | 日期 | 编辑 | 变更 |
 | --- | --- | --- | --- |
+| v1.13 | 2026-09-19 | Claude | CLIENT-CHANNEL-01：启动配置改读**租户级客户端渠道配置**（品牌/客服/协议/帮助/横幅/发布服务，小程序与 APP 共用），`GET /public/bootstrap` 加 `client=wechat_miniprogram\|app` 参数并返回 `client`、`help`、`banner`、协议 `hasBody`；`wechat_phone` 登录与 `capabilities.wechatPay` 仅小程序且微信凭证就绪时为真。新增公开 `GET /public/documents/{kind}`（`user_agreement`/`privacy_policy`/`help` 正文与 FAQ，游客可读、客户端内渲染）。运营端 `/platform/mini-program-channel` 收窄为微信凭证；租户级配置走 `GET/PUT /platform/client-channel`（`system:integration:manage`）。代码与自动化验收通过，未提交、迁移未应用共享库。 |
+| v1.12 | 2026-09-19 | Claude | 落地小程序首期六项契约（代码与自动化验收，未提交、迁移未应用共享库）：公开启动配置 `GET /public/bootstrap`、公开游客目录 `GET /public/catalog` 与图片、用途化验证码 `POST /auth/challenges`、短信登录 `POST /auth/sms-login`、微信手机号登录 `POST /auth/wechat/phone-login` 与绑定 `POST /auth/wechat/bind`、本人注销三接口、地址簿三接口、检查费用投影与本人确认/异议、小程序 JSAPI 支付（`mini-program-payment-intents` 从预留 503 改为真实创建，缺可信微信身份返回 409 `wechat_identity_required`）；`/config.features` 增 `delivery/feeResponse/accountClosure/wechatBinding`，报价请求增 `deliveryAddressId`，订单视图增 `deliveryAddress` 快照，目录增 `fulfillment`。 |
 | v1.11 | 2026-09-19 | Claude | 验证码挑战补按身份与租户的配额：同一（租户, 手机号/邮箱）5 次/小时、10 次/天，租户每日短信挑战预算默认 2000（`CLIENT_SMS_DAILY_BUDGET_PER_TENANT`），超限 `429`；`purpose=login` 不再以 404/403 暴露手机号是否注册或已停用，统一返回 pending 响应且不发短信，验证时只回"验证码错误或已过期"；验证码落库改为以服务端密钥 HMAC 存储，升级时未完成的挑战直接失效需重新获取；来源地址取 Express `request.ip`，代理之后由 `TRUST_PROXY_HOPS` 决定是否采信 `X-Forwarded-For`。 |
 | v1.10 | 2026-09-19 | Claude | 为小程序 V2 设计稿补最小展示投影：`GET /catalog` 的每个商品新增可选 `startingPrice`（`{ amount, unit, currency }`，当前生效价格版本中该型号或其所属启用定价分组的最低基础单价；无生效版本或无费率时缺省，客户端不得以 0 元替代，实际金额仍以报价为准），地点新增可选 `address`、`businessHours`、`contactPhone`、`capabilities`（pickup/return/storage/delivery），不返回经营主体信息；`GET /my/orders` 每行新增可选 `itemSummary`（首个型号 id/名称、行数与件数之和），不含资产编号与金额明细。 |
 | v1.9 | 2026-09-19 | Claude | 补齐控制器已有但本文档未列出的三条接口：`GET /my/orders`（个人客户跨本租户各服务空间的本人订单只读索引，与当前空间 `GET /orders` 职责分开）、`POST /orders/{id}/cancel/preview`（取消费预览，不改变订单）、`POST /orders/{id}/mini-program-payment-intents`（小程序支付预留契约，当前固定返回 503）。 |
@@ -19,7 +21,7 @@
 
 ## 1. 使用范围
 
-客户端 API 供小程序、APP 或其他客户自助端使用。同租户一个小程序，登录一次切换服务空间不再入会；租户统一会员已完成代码/自动化与本机开发库迁移验收（见任务台账 MEMBER-TENANT-01）。微信小程序完整功能及首期页面见[《微信小程序需求说明》](微信小程序需求说明.md)，当前仅完成需求与排期，微信登录、JSAPI、游客目录和统一本人订单等新增渠道能力尚待对应MP任务实现，不能据此认定现有API已支持。客户端API与运营后台分开：
+客户端 API 供小程序、APP 或其他客户自助端使用。同租户一个小程序，登录一次切换服务空间不再入会；租户统一会员已完成代码/自动化与本机开发库迁移验收（见任务台账 MEMBER-TENANT-01）。微信小程序完整功能及首期页面见[《微信小程序需求说明》](微信小程序需求说明.md)；微信手机号/短信登录、注销、游客目录、地址簿、费用响应与小程序 JSAPI 支付已于 2026-09-19 在服务端实现并经自动化验收（真实 AppID/商户、真库迁移与宿主验收另计），运营后台的客户端渠道配置页仍待 `CLIENT-CHANNEL-01`。客户端API与运营后台分开：
 
 - 基础路径：`/api/client/v1`。
 - 客户端使用客户账号令牌，不使用运营账号令牌，也不携带运营角色、数据范围或权限矩阵。
@@ -58,6 +60,13 @@ Idempotency-Key: <unique-key-for-mutating-action>
 | POST | `/auth/switch-workspace` | 切换同租户可用服务空间；服务端复核空间归属、启用状态与客户状态后更新客户端 session，不再次注册或入会。 |
 | GET | `/auth/me` | 获取当前客户的租户会员状态、租户审核记录、资质状态及可用服务空间；来源空间不是会员身份范围。 |
 | POST | `/auth/change-password` | 修改当前客户账号密码。服务端只保存口令哈希。 |
+| POST | `/auth/challenges` | 用途化验证码挑战：`purpose` 为 `registration`（缺省）或 `login`；证明只能用于创建时声明的用途，注册证明不能登录。`account_closure` 用途不接受客户端提交手机号，只能经 `POST /auth/closure/challenge` 由登录态对本人手机号发起。校验仍走 `/auth/registration/challenges/{challengeId}/verify`。 |
+| POST | `/auth/sms-login` | 短信验证码登录：`verificationToken` 须为 `login` 用途、本租户、该手机号的一次性证明，手机号必须已注册；成功返回与密码登录相同的会话响应（含 `wechatBound`）。 |
+| POST | `/auth/wechat/phone-login` | 微信手机号一键登录：只提交 `wx.login` 的 `loginCode` 与手机号授权组件的 `phoneCode`，openid/unionid/手机号由服务端持商户 AppSecret 向微信换取；同手机号复用既有客户/账号/会员，openid 或手机号已绑定其他客户时拒绝改绑（409）；新客户按租户注册审核策略创建。需商户已配置并启用小程序渠道，否则 503。 |
+| POST | `/auth/wechat/bind` | 已登录客户把当前微信身份绑定到本人（短信/密码登录后需要小程序内微信支付时使用）；`loginCode` 一次性，凭证无效返回 400，不视为会话失效。绑定后当前会话立刻带微信身份。 |
+| GET | `/auth/closure/preview` | 本人注销预检：返回是否可注销、阻断项（在途订单、押金/预授权、待退款、欠款等）与需客户显式确认的人工核对项。 |
+| POST | `/auth/closure/challenge` | 向当前账号手机号发送 `account_closure` 用途验证码；不接受客户端指定号码。 |
+| POST | `/auth/closure` | 确认注销：`loginIdentifier` 须与当前账号手机号一致、`verificationToken` 为 `account_closure` 用途证明、`acknowledgedManualChecks` 必须为 true；服务端复跑可注销性检查后关闭租户会员与账号并撤销全部会话，写操作日志。历史订单/资金/审计依法保留。 |
 
 ## 3. 客户资料与客户端能力配置
 
@@ -71,8 +80,16 @@ Idempotency-Key: <unique-key-for-mutating-action>
 | GET | `/profile/contacts` | 获取当前客户的有效联系人。手机号只返回脱敏值。 |
 | PUT | `/profile/contacts` | 新增或更新当前客户自己的联系人；传 `id` 时更新，不传时新增。`isPrimary=true` 会取消同用途的其他主联系人。 |
 | DELETE | `/profile/contacts/{contactId}` | 软停用当前客户自己的联系人，不删除历史记录，也不能操作其他客户联系人。 |
+| GET | `/profile/addresses` | 本人配送地址簿（租户内共享，不是联系人）；手机号只返回脱敏值，每条带 `revision`。 |
+| PUT | `/profile/addresses` | 新增或更新本人地址：传 `id` + `revision` 时更新（版本不一致返回 409），`isDefault=true` 取消其他默认；上限 20 条；`phone` 必填。 |
+| DELETE | `/profile/addresses/{addressId}` | 软删除本人地址；已提交订单上的交付快照不受影响。 |
+| GET | `/public/bootstrap` | **公开**启动配置（`tenantCode` 必填，`appId` 可选）：商户展示名/Logo/客服电话与时段、已发布服务与默认服务、协议名称/版本/外链、登录方式、能力开关（`publicCatalog/wechatPay/delivery/feeResponse/accountClosure`）与 `source`（`channel` 或未配置渠道时的 `workspace_directory` 回退，只带租户名与启用空间）。 |
+| GET | `/public/catalog` | **公开**游客目录（`tenantCode`、`service` 必填）：只对已发布到渠道的服务开放，字段与 `/catalog` 一致但图片地址指向公开图片接口；未发布返回 404，客户端显示“登录后查看”。 |
+| GET | `/public/catalog/items/{itemGroupId}/images/{imageId}` | 公开商品图片（带 `tenantCode`、`service` 查询参数），同样只对已发布服务开放。 |
 
 `/profile` 不会返回密码、明文手机号、明文证件号、明文统一社会信用代码或后台账号资料。
+
+**CLIENT-CHANNEL-01（已实现，代码与自动化验收）：** `GET /public/bootstrap` 增加 `client` 参数（`wechat_miniprogram` 缺省、`app`），品牌/客服/协议/帮助/横幅/发布服务改读**租户级**客户端渠道配置（小程序与 APP 共用），响应含 `client`、`help`、`banner` 与协议 `hasBody`；`wechat_phone` 登录方式与 `capabilities.wechatPay` 只在小程序渠道且微信凭证就绪时为真。公开 `GET /public/documents/{kind}`（`user_agreement`、`privacy_policy`、`help`）返回名称、版本、正文、可选外链与帮助 FAQ，供客户端内直接渲染（游客可读）；商户未提供时 404。运营端读写走 `GET/PUT /platform/client-channel`。**未纳入（可裁剪的后续小切片）：** `/auth/me` 的“协议已更新需重新同意”提示，仅登录时按当时版本留痕，尚未做版本升级后的强制重新同意。
 
 ## 4. 会员、企业身份与资质
 
@@ -130,6 +147,8 @@ Idempotency-Key: <unique-key-for-mutating-action>
 | POST | `/orders/{id}/extensions/preview` | 按订单保存的价格与优惠快照预览延期补差，不改变订单。 |
 | POST | `/orders/{id}/extensions` | 提交延期/续租申请；服务端校验后续冲突、缓冲时间、价格、优惠、服务容量和结算方式。 |
 | POST | `/orders/{id}/extensions/{extensionId}/pay` | 在延期需要先补款时，完成已通过资金校验的延期生效动作。当前资金 provider 仍是开发模拟边界。 |
+| GET | `/orders/{id}/fee-items` | 本人订单的检查异常费用投影：阶段、说明、已批准金额、商户调整记录、本人响应状态/历史、凭证数量与待确认数；不返回运营裁定细节。 |
+| POST | `/orders/{id}/fee-items/{inspectionId}/{exceptionIndex}/response` | 本人对单项费用确认或提出异议（`decision=confirmed\|disputed`，异议须填原因），复用运营端同一条追加式响应链与幂等动作（`Idempotency-Key` 必填，重放返回 `replayed=true`）；不接受金额或裁定结果，已确认不能改为异议。 |
 
 客户只能在当前服务空间读取自己作为个人使用人或订单主体的订单；企业员工身份不等于企业全部订单访问权。企业关系、企业方案和付款主体由服务端从租户内当前有效关系解析并写入订单快照。订单创建及其他幂等回放在返回旧结果前仍须校验租户、当前空间、报价/订单本人归属，不能通过猜测幂等键读取非本人订单。
 
@@ -141,7 +160,7 @@ Idempotency-Key: <unique-key-for-mutating-action>
 | GET | `/orders/{id}/funding` | 读取订单资金事件和当前资金状态，用于展示租金、押金、预授权、退款或释放进度。 |
 | POST | `/orders/{id}/funding/simulate` | 仅开发环境记录模拟收款、押金、预授权、退款或释放事件，供内部经营演练。生产环境拒绝调用。 |
 | POST | `/orders/{id}/payment-intents` | 按当前租户启用的支付宝或微信支付创建租金/费用支付意图；返回二维码/收银入口、金额和支付单状态。押金与预授权仍走独立资金能力。请求必须带幂等键。 |
-| POST | `/orders/{id}/mini-program-payment-intents` | 微信小程序 JSAPI 支付的**预留契约**。当前服务端在校验 `instrument=rental` 与幂等键后固定返回 503，不会回落到 Native 二维码支付，也不会从手机号或 Native 参数推导 openid。待可信 `ClientWechatIdentity` 绑定与 JSAPI 支付持久化经 MP 任务实现后才可用；客户端应把 503 显示为“待接通”，不得模拟成功。 |
+| POST | `/orders/{id}/mini-program-payment-intents` | 微信小程序 JSAPI 支付：校验 `instrument=rental` 与幂等键后，payer openid 只取自服务端可信的 `ClientWechatIdentity`（微信手机号登录或 `/auth/wechat/bind` 绑定），缺失返回 409 且响应体 `code=wechat_identity_required`，客户端应引导先绑定微信，不会回落到 Native 二维码，也不从手机号或 Native 参数推导 openid；支付配置的应用 ID 与小程序 AppID 不一致返回 503。成功返回含 `jsapi` 五参数（由商户私钥即时签名，服务端只保存 prepay_id），`wx.requestPayment` 成功不等于已收款，仍以查单与资金事件为准。 |
 | GET | `/orders/{id}/payment-intents/{intentId}` | 查询当前客户自己的支付单状态；最终是否入账以服务端验签回调写入的资金事件为准。 |
 | POST | `/orders/{id}/payment-intents/{intentId}/refresh` | 在回调延迟或丢失时向提供方查询支付状态；只有查询到成功且金额一致才入账，不能由客户端直接确认收款。 |
 | POST | `/orders/{id}/payment-intents/{intentId}/close` | 关闭尚未支付的支付宝/微信支付单；已入账支付不能关闭。 |
@@ -161,7 +180,7 @@ Idempotency-Key: <unique-key-for-mutating-action>
 
 ## 9. 当前明确边界
 
-- 客户端 API v1 已覆盖注册、登录、空间切换、资料、联系人、会员方案/权益、企业预约身份、资质及其附件、目录、图片、可用性、报价、优惠券、下单、订单、订单凭证及历史版本、续租、履约、通知、资金状态和真实支付意图。空间可在经营设置中启用线下现金、线下转账、支付宝和微信；客户端的线下方式仅作为能力声明，运营端实际收退款必须通过带方式和幂等键的资金事件登记，不能把客户端显示或模拟响应当作真实到账。
+- 客户端 API v1 已覆盖注册、登录（密码/短信/微信手机号）、微信身份绑定、本人注销、空间切换、资料、联系人、配送地址簿、会员方案/权益、企业预约身份、资质及其附件、目录（登录态与已发布服务的公开游客目录）、图片、可用性、报价（含配送地址快照）、优惠券、下单、订单、检查费用确认/异议、订单凭证及历史版本、续租、履约、通知、资金状态、真实支付意图与小程序 JSAPI 支付。空间可在经营设置中启用线下现金、线下转账、支付宝和微信；客户端的线下方式仅作为能力声明，运营端实际收退款必须通过带方式和幂等键的资金事件登记，不能把客户端显示或模拟响应当作真实到账。
 - 短信注册验证码已按租户默认短信 provider 发送；文件服务已提供短时上传会话、完成确认和下载地址，并在资质业务上固定绑定当前会员和证件类型。没有配置 provider 时，开发环境才允许明确标记的模拟回退，生产环境直接失败。
 - 支付回调和支付查询补偿已提供支付宝异步通知、微信支付 API v3 通知及运营端主动查单；真实退款由运营端 `/api/rental/v1/orders/{orderId}/payment-intents/{intentId}/refunds` 执行，客户端不直接发起退款。退款只有第三方明确成功并完成内部资金事件后才算已退款；“支付意图已创建”“退款已受理”都不能当作已收款/已退款。真实商户沙箱和正式外部发布仍需单独验收。
 - 客户端可以提交 `evidenceRef`，但引用必须来自受保护文件服务产生的已完成资质附件；客户端不能直接读取本地上传目录，也不能引用其他会员或其他证件类型的文件。

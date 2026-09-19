@@ -56,6 +56,7 @@ interface OrderData {
   pendingCancelKey: boolean;
   /* MP-11 费用确认与异议 */
   feeAvailable: boolean;
+  feeLoadError: string;
   feePending: number;
   feeItems: Array<{ key: string; inspectionId: string; exceptionIndex: number; stage: string; description: string; amount: number; currency: string; statusLabel: string; statusTone: string; actionable: boolean; note: string }>;
   showFee: boolean;
@@ -102,6 +103,7 @@ Page({
     servicePhone: "",
     pendingCancelKey: false,
     feeAvailable: false,
+    feeLoadError: "",
     feePending: 0,
     feeItems: [],
     showFee: false,
@@ -153,8 +155,8 @@ Page({
         fetchFunding(this.orderId).catch(() => undefined),
         fetchFulfillment(this.orderId).catch(() => undefined),
         listExtensions(this.orderId).catch(() => [] as RentalOrderExtension[]),
-        // 费用确认/异议未开通时（商户未启用检查费用在线处理）服务端返回 404/501/503：如实标记不可用，不打断详情。
-        fetchFeeItems(this.orderId).then((r) => ({ available: true as const, items: r.items, pending: r.pendingCount })).catch((error) => contractMissing(error) ? { available: false as const } : { available: false as const }),
+        // 费用确认/异议未开通时服务端返回 404/501/503 → 如实标记“未开通”；其他错误（网络等）只标记“暂时读不到”，不冒充未开通。
+        fetchFeeItems(this.orderId).then((r) => ({ available: true, items: r.items, pending: r.pendingCount, loadError: "" })).catch((error) => contractMissing(error) ? { available: false, loadError: "" } : { available: true, loadError: describeError(error).message }),
         ensureCurrentZone()
       ]);
       if (token !== this.loadVersion) return;
@@ -169,7 +171,7 @@ Page({
     }
   },
 
-  render(order: ClientOrderView, funding: RentalFundingBalance | undefined, fulfillment: ClientFulfillmentView | undefined, extensions: RentalOrderExtension[], fees: { available: boolean; items?: ClientFeeItemView[]; pending?: number }) {
+  render(order: ClientOrderView, funding: RentalFundingBalance | undefined, fulfillment: ClientFulfillmentView | undefined, extensions: RentalOrderExtension[], fees: { available: boolean; items?: ClientFeeItemView[]; pending?: number; loadError: string }) {
     const knownZone = zoneOf(currentServiceCode());
     const timeZone = knownZone ?? "Asia/Shanghai";
     const currency = order.currency ?? "";
@@ -257,6 +259,7 @@ Page({
       })),
       pendingCancelKey: false,
       feeAvailable: fees.available,
+      feeLoadError: fees.loadError,
       feeItems,
       feePending: fees.pending ?? feeItems.filter((row) => row.actionable).length
     });

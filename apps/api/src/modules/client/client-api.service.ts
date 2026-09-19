@@ -8,6 +8,10 @@ import {
   type ClientCatalogResponse,
   type ClientCatalogStartingPrice,
   type ClientChannelBootstrapResponse,
+  type ClientChannelKind,
+  type ClientLoginMethod,
+  type ClientPublicDocumentKind,
+  type ClientPublicDocumentResponse,
   type ClientFeeItemView,
   type ClientFeeItemsResponse,
   type ClientFeeResponseRequest,
@@ -198,7 +202,7 @@ export class ClientApiService {
     const tenant = await this.prisma.tenant.findFirst({ where: { code: tenantCode.trim(), status: "ACTIVE" }, select: { id: true, code: true } });
     if (!tenant) throw new NotFoundException("商户不存在");
     const workspace = await this.prisma.businessWorkspace.findFirst({
-      where: { tenantId: tenant.id, code: serviceCode.trim(), status: "ACTIVE", miniProgramPublications: { some: { tenantId: tenant.id, enabled: true, channel: { enabled: true } } } },
+      where: { tenantId: tenant.id, code: serviceCode.trim(), status: "ACTIVE", clientChannelPublications: { some: { tenantId: tenant.id, enabled: true } } },
       select: { id: true, code: true, name: true, categoryCode: true, isDefault: true }
     });
     if (!workspace) throw new NotFoundException("该服务尚未开放游客浏览");
@@ -212,7 +216,7 @@ export class ClientApiService {
     const tenant = await this.prisma.tenant.findFirst({ where: { code: tenantCode.trim(), status: "ACTIVE" }, select: { id: true } });
     if (!tenant) throw new NotFoundException("商户不存在");
     const workspace = await this.prisma.businessWorkspace.findFirst({
-      where: { tenantId: tenant.id, code: serviceCode.trim(), status: "ACTIVE", miniProgramPublications: { some: { tenantId: tenant.id, enabled: true, channel: { enabled: true } } } },
+      where: { tenantId: tenant.id, code: serviceCode.trim(), status: "ACTIVE", clientChannelPublications: { some: { tenantId: tenant.id, enabled: true } } },
       select: { id: true }
     });
     if (!workspace) throw new NotFoundException("该服务尚未开放游客浏览");
@@ -225,53 +229,106 @@ export class ClientApiService {
   }
 
   /**
-   * 渠道启动配置（MP-01）：商户已发布渠道时返回品牌/协议/客服/已发布服务与能力开关；
-   * 未配置渠道时按启用空间回退，只有服务列表与租户名，并标注来源，不用平台默认品牌冒充商户。
+   * 渠道启动配置（MP-01 / CLIENT-CHANNEL-01）：品牌/协议/客服/帮助/横幅/已发布服务来自租户级
+   * ClientChannelProfile，小程序与 APP 读同一份；微信一键登录与小程序内微信支付只在
+   * `client=wechat_miniprogram` 且微信凭证就绪时开放。未配置渠道时按启用空间回退，只有服务列表与租户名。
    */
-  async channelBootstrap(tenantCode: string, appId?: string): Promise<ClientChannelBootstrapResponse> {
+  async channelBootstrap(tenantCode: string, client: ClientChannelKind = "wechat_miniprogram", appId?: string): Promise<ClientChannelBootstrapResponse> {
     const tenant = await this.prisma.tenant.findFirst({ where: { code: tenantCode.trim(), status: "ACTIVE" }, select: { id: true, code: true, name: true } });
     if (!tenant) throw new NotFoundException("商户不存在");
-    const channel = await this.prisma.miniProgramChannel.findFirst({
-      where: { tenantId: tenant.id, enabled: true, ...(appId?.trim() ? { appId: appId.trim() } : {}) },
-      include: { publishedWorkspaces: { where: { enabled: true }, include: { workspace: { select: { code: true, name: true, categoryCode: true, isDefault: true, status: true } } } } },
-      orderBy: { updatedAt: "desc" }
+    const profile = await this.prisma.clientChannelProfile.findUnique({
+      where: { tenantId: tenant.id },
+      include: { publishedWorkspaces: { where: { enabled: true }, include: { workspace: { select: { code: true, name: true, categoryCode: true, isDefault: true, status: true } } } } }
     });
-    const workspaces = await this.prisma.businessWorkspace.findMany({ where: { tenantId: tenant.id, status: "ACTIVE" }, select: { code: true, name: true, categoryCode: true, isDefault: true }, orderBy: [{ isDefault: "desc" }, { code: "asc" }] });
+    const isMiniProgram = client === "wechat_miniprogram";
+    const wechatChannel = isMiniProgram
+      ? await this.prisma.miniProgramChannel.findFirst({ where: { tenantId: tenant.id, enabled: true, ...(appId?.trim() ? { appId: appId.trim() } : {}) }, select: { appSecretEncrypted: true }, orderBy: { updatedAt: "desc" } })
+      : null;
+    const wechatReady = Boolean(wechatChannel?.appSecretEncrypted);
     const integrationCatalog = await this.tenantIntegrations.catalog(tenant.id);
     const wechatPayReady = integrationCatalog.configs.some((item) => item.capability === "payment" && item.provider === "wechat_pay" && item.enabled && item.isDefault && item.lastTestStatus === "passed" && item.lastTestMode === "live");
     const smsReady = integrationCatalog.configs.some((item) => item.capability === "sms" && item.enabled && item.isDefault) || process.env.NODE_ENV !== "production";
-    if (!channel) {
+
+    // 已发布服务来自租户级配置；未配置或无发布时回退到启用空间目录（不带品牌/协议）。
+    const publishedActive = (profile?.publishedWorkspaces ?? []).filter((row) => row.workspace.status === "ACTIVE");
+    const loginMethods: ClientLoginMethod[] = [
+      ...(isMiniProgram && wechatReady ? ["wechat_phone" as const] : []),
+      ...((profile?.smsLoginEnabled ?? true) && smsReady ? ["sms" as const] : []),
+      ...((profile?.passwordLoginEnabled ?? true) ? ["password" as const] : [])
+    ];
+    const safeLoginMethods = loginMethods.length ? loginMethods : ["password" as const];
+
+    if (!profile || publishedActive.length === 0) {
+      const workspaces = await this.prisma.businessWorkspace.findMany({ where: { tenantId: tenant.id, status: "ACTIVE" }, select: { code: true, name: true, categoryCode: true, isDefault: true }, orderBy: [{ isDefault: "desc" }, { code: "asc" }] });
       const services = workspaces.map((row) => ({ code: row.code, name: row.name, categoryCode: String(row.categoryCode), isDefault: row.isDefault, status: "open" as const }));
       return {
         apiVersion: CLIENT_API_VERSION,
         tenantCode: tenant.code,
-        merchant: { name: tenant.name },
+        client,
+        merchant: { name: profile?.brandName?.trim() || tenant.name, logoUrl: profile?.brandLogoUrl ?? undefined, servicePhone: profile?.customerServicePhone ?? undefined, serviceHours: profile?.customerServiceHours ?? undefined },
         services,
         defaultServiceCode: services.find((row) => row.isDefault)?.code ?? services[0]?.code,
-        loginMethods: smsReady ? ["sms", "password"] : ["password"],
+        help: { available: false, faqCount: 0 },
+        loginMethods: safeLoginMethods,
         capabilities: { publicCatalog: false, wechatPay: false, delivery: false, feeResponse: true, accountClosure: true },
         source: "workspace_directory"
       };
     }
-    const published = channel.publishedWorkspaces.filter((row) => row.workspace.status === "ACTIVE").map((row) => row.workspace);
+
+    const published = publishedActive.map((row) => row.workspace);
     const services = published.map((row) => ({ code: row.code, name: row.name, categoryCode: String(row.categoryCode), isDefault: row.isDefault, status: "open" as const }));
+    const defaultServiceCode = publishedActive.find((p) => p.workspaceId === profile.defaultWorkspaceId)?.workspace.code
+      ?? services.find((row) => row.isDefault)?.code ?? services[0]?.code;
     const deliveryEnabled = published.length > 0 && await this.anyWorkspaceEnablesDelivery(tenant.id, published.map((row) => row.code));
+    const agreements = profile.userAgreementVersion && profile.privacyPolicyVersion
+      ? {
+          userAgreement: { name: profile.userAgreementName?.trim() || "用户服务协议", version: profile.userAgreementVersion, url: profile.userAgreementUrl ?? undefined, hasBody: Boolean(profile.userAgreementBody?.trim()) },
+          privacyPolicy: { name: profile.privacyPolicyName?.trim() || "隐私政策", version: profile.privacyPolicyVersion, url: profile.privacyPolicyUrl ?? undefined, hasBody: Boolean(profile.privacyPolicyBody?.trim()) }
+        }
+      : undefined;
+    const faqCount = Array.isArray(profile.helpFaqJson) ? profile.helpFaqJson.length : 0;
     return {
       apiVersion: CLIENT_API_VERSION,
       tenantCode: tenant.code,
-      merchant: { name: channel.brandName?.trim() || tenant.name, logoUrl: channel.brandLogoUrl ?? undefined, servicePhone: channel.customerServicePhone ?? undefined, serviceHours: channel.customerServiceHours ?? undefined },
+      client,
+      merchant: { name: profile.brandName?.trim() || tenant.name, logoUrl: profile.brandLogoUrl ?? undefined, servicePhone: profile.customerServicePhone ?? undefined, serviceHours: profile.customerServiceHours ?? undefined },
       services,
-      defaultServiceCode: services.find((row) => row.isDefault)?.code ?? services[0]?.code,
-      agreements: channel.userAgreementVersion && channel.privacyPolicyVersion
-        ? {
-            userAgreement: { name: "用户服务协议", version: channel.userAgreementVersion, url: channel.userAgreementUrl ?? undefined },
-            privacyPolicy: { name: "隐私政策", version: channel.privacyPolicyVersion, url: channel.privacyPolicyUrl ?? undefined }
-          }
-        : undefined,
-      loginMethods: [...(channel.appSecretEncrypted ? ["wechat_phone" as const] : []), ...(smsReady ? ["sms" as const] : []), "password"],
-      capabilities: { publicCatalog: services.length > 0, wechatPay: wechatPayReady && Boolean(channel.appSecretEncrypted), delivery: deliveryEnabled, feeResponse: true, accountClosure: true },
+      defaultServiceCode,
+      agreements,
+      help: { available: Boolean(profile.helpIntro?.trim()) || faqCount > 0, faqCount },
+      banner: profile.bannerTitle?.trim() ? { title: profile.bannerTitle.trim(), subtitle: profile.bannerSubtitle?.trim() || undefined } : undefined,
+      loginMethods: safeLoginMethods,
+      capabilities: { publicCatalog: services.length > 0, wechatPay: isMiniProgram && wechatPayReady && wechatReady, delivery: deliveryEnabled, feeResponse: true, accountClosure: true },
       source: "channel"
     };
+  }
+
+  /** 公开文档：协议正文与帮助内容（游客可读），来自租户级客户端渠道配置。 */
+  async publicDocument(tenantCode: string, kind: ClientPublicDocumentKind): Promise<ClientPublicDocumentResponse> {
+    const tenant = await this.prisma.tenant.findFirst({ where: { code: tenantCode.trim(), status: "ACTIVE" }, select: { id: true, code: true } });
+    if (!tenant) throw new NotFoundException("商户不存在");
+    const profile = await this.prisma.clientChannelProfile.findUnique({ where: { tenantId: tenant.id } });
+    if (!profile) throw new NotFoundException("商户尚未配置客户端渠道");
+    const base = { apiVersion: CLIENT_API_VERSION, tenantCode: tenant.code, kind, updatedAt: profile.updatedAt.toISOString() } as const;
+    if (kind === "help") {
+      const faq = Array.isArray(profile.helpFaqJson)
+        ? (profile.helpFaqJson as unknown[]).flatMap((row) => {
+            if (!row || typeof row !== "object" || Array.isArray(row)) return [];
+            const question = typeof (row as Record<string, unknown>).question === "string" ? String((row as Record<string, unknown>).question) : "";
+            const answer = typeof (row as Record<string, unknown>).answer === "string" ? String((row as Record<string, unknown>).answer) : "";
+            return question && answer ? [{ question, answer }] : [];
+          })
+        : [];
+      if (!profile.helpIntro?.trim() && faq.length === 0) throw new NotFoundException("商户尚未提供帮助内容");
+      return { ...base, name: "帮助与客服", intro: profile.helpIntro ?? undefined, faq };
+    }
+    const isAgreement = kind === "user_agreement";
+    const name = isAgreement ? profile.userAgreementName : profile.privacyPolicyName;
+    const version = isAgreement ? profile.userAgreementVersion : profile.privacyPolicyVersion;
+    const url = isAgreement ? profile.userAgreementUrl : profile.privacyPolicyUrl;
+    const body = isAgreement ? profile.userAgreementBody : profile.privacyPolicyBody;
+    if (!version?.trim()) throw new NotFoundException("商户尚未提供该文档");
+    return { ...base, name: name?.trim() || (isAgreement ? "用户服务协议" : "隐私政策"), version: version.trim(), url: url?.trim() || undefined, body: body?.trim() || undefined };
   }
 
   private async anyWorkspaceEnablesDelivery(tenantId: string, workspaceCodes: string[]): Promise<boolean> {
@@ -327,7 +384,8 @@ export class ClientApiService {
       discountPlans: this.business.listDiscountPlans(context.tenantId, business).filter((plan) => plan.status === "enabled").map((plan) => ({ id: plan.id, code: plan.code, name: plan.name, status: plan.status })),
       fulfillment: {
         enabledModes: business.settings.fulfillment?.enabledModes ?? [],
-        allowDifferentReturnLocation: business.settings.fulfillment?.allowDifferentReturnLocation ?? false
+        // 异地归还是规则版本的字段（报价按同一规则校验），不是经营设置；没有生效规则时视为不允许。
+        allowDifferentReturnLocation: this.business.effectiveRuleAt(tenantId, business)?.config.fulfillment.allowDifferentReturnLocation ?? false
       }
     };
   }

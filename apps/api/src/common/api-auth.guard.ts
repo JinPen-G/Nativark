@@ -101,6 +101,8 @@ export function isClientPublicRoute(method: string, path: string) {
   if (CLIENT_PUBLIC_ROUTES.has(path)) return true;
   if (method === "GET" && /^\/client\/v1\/tenants\/[^/]+\/workspaces$/u.test(path)) return true;
   if (method === "GET" && /^\/client\/v1\/public\/catalog\/items\/[^/]+\/images\/[^/]+$/u.test(path)) return true;
+  // CLIENT-CHANNEL-01：协议/隐私/帮助正文游客可读。
+  if (method === "GET" && /^\/client\/v1\/public\/documents\/[^/]+$/u.test(path)) return true;
   if (method === "POST" && /^\/client\/v1\/auth\/registration\/challenges\/[^/]+\/verify$/u.test(path)) return true;
   return false;
 }
@@ -154,8 +156,12 @@ export function requiredPermissions(method: string, path: string) {
   if (path.startsWith("/platform/integrations")) {
     return ["system:integration:manage"];
   }
-  // MP-01：小程序渠道（AppID/AppSecret、品牌、协议、发布空间）与第三方服务同一权限。
+  // MP-01：小程序渠道凭证（AppID/AppSecret）与第三方服务同一权限。
   if (path.startsWith("/platform/mini-program-channel")) {
+    return ["system:integration:manage"];
+  }
+  // CLIENT-CHANNEL-01：租户级客户端渠道配置（品牌/客服/协议/帮助/发布服务），同一权限。
+  if (path.startsWith("/platform/client-channel")) {
     return ["system:integration:manage"];
   }
   // EXT-01D：真实支付退款与查单恢复是高风险资金动作，独立于费用裁定和模拟资金事件。

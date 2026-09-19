@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException, HttpException, Injectable, NotFoundException, Optional, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, HttpException, Injectable, NotFoundException, Optional, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { CLIENT_API_VERSION, type ClientMembershipSessionResponse, type ClientWechatBindRequest, type ClientWechatBindResponse, type ClientWechatPhoneLoginRequest } from "@rental-os/shared";
 import { OperationLogService } from "../../common/operation-log.service";
@@ -178,7 +178,14 @@ export class ClientWechatAuthService {
   async bind(context: ClientRequestContext, input: ClientWechatBindRequest): Promise<ClientWechatBindResponse> {
     if (context.customerType !== "personal") throw new ForbiddenException("企业账号不能绑定微信身份");
     const channel = await this.resolveChannel(context.tenantId, input.appId);
-    const session = await this.exchange(channel, input.loginCode);
+    let session: Awaited<ReturnType<ClientWechatAuthService["exchange"]>>;
+    try {
+      session = await this.exchange(channel, input.loginCode);
+    } catch (error) {
+      // 调用方已经登录：微信凭证无效不是会话失效，不能回 401（客户端会据此刷新会话、重放已消费的 code 并登出）。
+      if (error instanceof UnauthorizedException) throw new BadRequestException(error.message);
+      throw error;
+    }
     const identity = await this.prisma.$transaction(async (tx) => {
       const byOpenId = await tx.clientWechatIdentity.findFirst({ where: { tenantId: context.tenantId, channelId: channel.id, openId: session.openid } });
       if (byOpenId && byOpenId.customerId !== context.customerId) throw new ConflictException("该微信已绑定其他账号，请联系商户处理");

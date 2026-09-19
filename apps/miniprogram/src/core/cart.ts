@@ -65,8 +65,6 @@ export interface CartState {
 }
 
 /** 需要送到本人地址的履约方式；其余为到店/取货点自取。 */
-export const DELIVERY_FULFILLMENT_MODES = ["delivery", "onsite_delivery"] as const;
-
 export function isDeliveryMode(mode: string | undefined): boolean {
   return mode === "delivery" || mode === "onsite_delivery";
 }

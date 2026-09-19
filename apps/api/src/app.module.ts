@@ -76,6 +76,8 @@ import { ClientWechatAuthService } from "./modules/client/client-wechat-auth.ser
 import { WechatMiniProgramAdapter } from "./modules/client/wechat-mini-program.adapter";
 import { MiniProgramChannelController } from "./modules/client/mini-program-channel.controller";
 import { MiniProgramChannelService } from "./modules/client/mini-program-channel.service";
+import { ClientChannelProfileController } from "./modules/client/client-channel-profile.controller";
+import { ClientChannelProfileService } from "./modules/client/client-channel-profile.service";
 
 @Module({
   imports: [
@@ -104,7 +106,8 @@ import { MiniProgramChannelService } from "./modules/client/mini-program-channel
     NotificationsController,
     JobsController,
     ClientApiController,
-    MiniProgramChannelController
+    MiniProgramChannelController,
+    ClientChannelProfileController
   ],
   providers: [
     AuthService,
@@ -150,6 +153,7 @@ import { MiniProgramChannelService } from "./modules/client/mini-program-channel
     ClientWechatAuthService,
     WechatMiniProgramAdapter,
     MiniProgramChannelService,
+    ClientChannelProfileService,
     IntegrationsService,
     IntegrationsRepository,
     TenantIntegrationService,

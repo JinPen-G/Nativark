@@ -1,6 +1,6 @@
 import { bindWechat } from "../api/auth";
 import { contractMissing, featureUnavailable } from "../contracts/planned";
-import { ApiError } from "./http";
+import { ApiError, isApiError } from "./http";
 import { markWechatBound } from "./session";
 
 /** 与 shared 的 CLIENT_WECHAT_IDENTITY_REQUIRED 一致（本包只能 import type，故这里内联字面量）。 */
@@ -32,7 +32,9 @@ export async function bindWechatIdentity(): Promise<void> {
     if (!result.bound) throw new Error("绑定未成功，请重试");
     markWechatBound();
   } catch (error) {
-    if (contractMissing(error)) throw featureUnavailable("商户尚未开通微信支付，暂不需要绑定微信");
+    if (contractMissing(error)) throw featureUnavailable("商户尚未配置小程序渠道，暂不能在小程序内微信支付，请联系商户");
+    // 会话恰好在此刻刷新：一次性 code 不能重放，让用户再点一次即可（不是登录失效）。
+    if (isApiError(error, "AUTH_EXPIRED")) throw new Error("登录状态刚刷新，请再点一次绑定");
     throw error;
   }
 }

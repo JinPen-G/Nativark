@@ -25,11 +25,15 @@ export interface MerchantInfo {
   servicePhone?: string;
   serviceHours?: string;
   agreements?: ClientChannelBootstrapResponse["agreements"];
+  /** 帮助页是否有后台内容（帮助说明或 FAQ）。 */
+  help?: ClientChannelBootstrapResponse["help"];
+  /** 首页横幅文案；缺省时页面用品牌文案。 */
+  banner?: ClientChannelBootstrapResponse["banner"];
   loginMethods: Array<"wechat_phone" | "sms" | "password">;
   capabilities: ClientChannelBootstrapResponse["capabilities"];
   services: MerchantService[];
   defaultServiceCode?: string;
-  /** 数据来自拟新增启动接口（true）还是现有公开接口回退（false）。 */
+  /** 数据来自渠道启动接口（true）还是现有公开接口回退（false）。 */
   fromBootstrap: boolean;
   fetchedAt: number;
 }
@@ -67,6 +71,8 @@ function fromBootstrap(contract: ClientChannelBootstrapResponse): MerchantInfo {
     servicePhone: contract.merchant.servicePhone,
     serviceHours: contract.merchant.serviceHours,
     agreements: contract.agreements,
+    help: contract.help,
+    banner: contract.banner,
     loginMethods: contract.loginMethods.length ? contract.loginMethods : ["password"],
     capabilities: contract.capabilities,
     services,

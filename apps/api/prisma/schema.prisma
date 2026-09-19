@@ -203,7 +203,8 @@ model Tenant {
   clientRegistrationChallenges      ClientRegistrationChallenge[]
   clientAuthSessions                ClientAuthSession[]
   miniProgramChannels               MiniProgramChannel[]
-  miniProgramChannelWorkspaces       MiniProgramChannelWorkspace[]
+  clientChannelProfile              ClientChannelProfile?
+  clientChannelWorkspaces           ClientChannelWorkspace[]
   clientWechatIdentities            ClientWechatIdentity[]
   customerDeliveryAddresses         CustomerDeliveryAddress[]
   clientOrderDeliverySnapshots      ClientOrderDeliverySnapshot[]
@@ -254,7 +255,7 @@ model BusinessWorkspace {
   membershipQualificationTypes      CustomerMembershipQualificationType[]
   clientRegistrationChallenges      ClientRegistrationChallenge[]
   clientAuthSessions                ClientAuthSession[]
-  miniProgramPublications           MiniProgramChannelWorkspace[]
+  clientChannelPublications         ClientChannelWorkspace[]
   clientOrderDeliverySnapshots      ClientOrderDeliverySnapshot[]
   coreStateSnapshot                 RentalCoreStateSnapshot?
   businessStateSnapshot             RentalBusinessStateSnapshot?
@@ -661,7 +662,59 @@ model CustomerAccount {
   @@map("customer_accounts")
 }
 
-/// MP-R1：租户绑定的微信小程序渠道配置。密钥只保存加密值。
+/// CLIENT-CHANNEL-01：租户级客户端渠道配置。小程序与 APP 共用同一份品牌/客服/协议/帮助/发布服务；
+/// 渠道凭证（微信 AppID/密钥）另存 MiniProgramChannel。一租户一条。
+model ClientChannelProfile {
+  id                   String                   @id @default(uuid())
+  tenantId             String                   @unique(map: "client_channel_profiles_tenant_key")
+  tenant               Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  revision             Int                      @default(1)
+  brandName            String?                  @db.VarChar(191)
+  brandLogoUrl         String?                  @db.VarChar(512)
+  customerServicePhone String?                  @db.VarChar(32)
+  customerServiceHours String?                  @db.VarChar(64)
+  /// 协议：名称/版本/外链/正文。正文在客户端内直接渲染（简单富文本），不内置占位协议。
+  userAgreementName    String?                  @db.VarChar(64)
+  userAgreementVersion String?                  @db.VarChar(64)
+  userAgreementUrl     String?                  @db.VarChar(512)
+  userAgreementBody    String?                  @db.MediumText
+  privacyPolicyName    String?                  @db.VarChar(64)
+  privacyPolicyVersion String?                  @db.VarChar(64)
+  privacyPolicyUrl     String?                  @db.VarChar(512)
+  privacyPolicyBody    String?                  @db.MediumText
+  /// 帮助与客服页：说明与常见问题（JSON 数组 {question, answer}）。
+  helpIntro            String?                  @db.Text
+  helpFaqJson          Json?
+  bannerTitle          String?                  @db.VarChar(64)
+  bannerSubtitle       String?                  @db.VarChar(120)
+  smsLoginEnabled      Boolean                  @default(true)
+  passwordLoginEnabled Boolean                  @default(true)
+  defaultWorkspaceId   String?
+  publishedWorkspaces  ClientChannelWorkspace[]
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
+
+  @@map("client_channel_profiles")
+}
+
+/// 发布到客户端（小程序/APP）的服务空间；未发布的空间不因 active 自动上架，游客目录不可读。
+model ClientChannelWorkspace {
+  id          String               @id @default(uuid())
+  tenantId    String
+  tenant      Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  profileId   String
+  profile     ClientChannelProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  workspaceId String
+  workspace   BusinessWorkspace    @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Restrict)
+  enabled     Boolean              @default(true)
+  createdAt   DateTime             @default(now())
+
+  @@unique([tenantId, workspaceId], map: "client_channel_workspace_key")
+  @@index([tenantId, enabled], map: "client_channel_workspace_scope_idx")
+  @@map("client_channel_workspaces")
+}
+
+/// MP-R1：租户绑定的微信小程序渠道凭证。密钥只保存加密值；品牌/协议/发布服务在 ClientChannelProfile。
 model MiniProgramChannel {
   id              String                         @id @default(uuid())
   tenantId        String
@@ -673,16 +726,6 @@ model MiniProgramChannel {
   lastTestStatus  String                         @default("not_tested") @db.VarChar(32)
   lastTestAt      DateTime?
   lastTestError   String?                        @db.VarChar(500)
-  brandName       String?
-  brandLogoUrl    String?                        @db.VarChar(512)
-  customerServicePhone String?                   @db.VarChar(32)
-  /// 客服时段与协议正文地址：小程序启动配置直接展示，不内置占位协议。
-  customerServiceHours String?                   @db.VarChar(64)
-  userAgreementVersion String?                   @db.VarChar(64)
-  userAgreementUrl String?                       @db.VarChar(512)
-  privacyPolicyVersion String?                   @db.VarChar(64)
-  privacyPolicyUrl String?                       @db.VarChar(512)
-  publishedWorkspaces MiniProgramChannelWorkspace[]
   identities      ClientWechatIdentity[]
   createdAt       DateTime                       @default(now())
   updatedAt       DateTime                       @updatedAt
@@ -691,22 +734,6 @@ model MiniProgramChannel {
   @@unique([appId], map: "mini_program_channels_app_id_key")
   @@index([tenantId, enabled], map: "mini_program_channels_tenant_enabled_idx")
   @@map("mini_program_channels")
-}
-
-model MiniProgramChannelWorkspace {
-  id          String             @id @default(uuid())
-  tenantId    String
-  tenant     Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  channelId   String
-  channel     MiniProgramChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  workspaceId String
-  workspace   BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Restrict)
-  enabled     Boolean            @default(true)
-  createdAt   DateTime           @default(now())
-
-  @@unique([channelId, workspaceId], map: "mini_program_channel_workspace_key")
-  @@index([tenantId, workspaceId, enabled], map: "mini_program_channel_workspace_scope_idx")
-  @@map("mini_program_channel_workspaces")
 }
 
 model ClientWechatIdentity {

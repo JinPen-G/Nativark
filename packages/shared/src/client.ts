@@ -477,7 +477,11 @@ export interface ClientCatalogResponse {
   services: ClientCatalogService[];
   locations: ClientCatalogLocation[];
   discountPlans: Array<{ id: string; code: string; name: string; status: string }>;
-  /** 当前服务空间启用的履约方式；客户端只据此显示入口，服务端报价仍逐项校验。 */
+  /**
+   * 当前服务空间启用的履约方式；客户端只据此显示入口，服务端报价仍逐项校验。
+   * `allowDifferentReturnLocation` 取自**当前生效的规则版本**（报价按同一规则校验），
+   * 没有生效规则时为 false。
+   */
   fulfillment: {
     enabledModes: RentalFulfillmentMode[];
     allowDifferentReturnLocation: boolean;
@@ -688,27 +692,46 @@ export interface ClientFulfillmentView {
 export const CLIENT_LOGIN_METHODS = ["wechat_phone", "sms", "password"] as const;
 export type ClientLoginMethod = (typeof CLIENT_LOGIN_METHODS)[number];
 
-/** 公开启动配置的查询：包内只有商户公开编码与小程序 AppID，两者都不是密钥。 */
+/** 客户端渠道种类：微信小程序（缺省）与后续 APP。共用的品牌/协议/帮助来自租户级配置，渠道能力按种类叠加。 */
+export const CLIENT_CHANNEL_KINDS = ["wechat_miniprogram", "app"] as const;
+export type ClientChannelKind = (typeof CLIENT_CHANNEL_KINDS)[number];
+
+/** 公开启动配置的查询：包内只有商户公开编码、渠道种类与小程序 AppID，均不是密钥。 */
 export interface ClientChannelBootstrapQuery {
   tenantCode: string;
+  client?: ClientChannelKind;
   appId?: string;
 }
 
+export interface ClientChannelAgreementSummary {
+  name: string;
+  version: string;
+  url?: string;
+  /** 商户是否提供了可在客户端内直接阅读的正文（经 `GET /public/documents/{kind}` 读取）。 */
+  hasBody: boolean;
+}
+
 /**
- * 渠道启动配置（需求 §12.1 ChannelBootstrap）。
- * `source=channel`：来自商户在运营端发布的小程序渠道（品牌、协议、客服、已发布服务）；
- * `source=workspace_directory`：商户尚未配置渠道时按启用空间回退，只有服务列表与租户名。
+ * 渠道启动配置（需求 §12.1 ChannelBootstrap / §12.4）。
+ * `source=channel`：商户已在运营端配置客户端渠道（品牌、协议、客服、帮助、已发布服务）；
+ * `source=workspace_directory`：商户尚未配置时按启用空间回退，只有服务列表与租户名。
+ * 微信一键登录与小程序内微信支付只在 `client=wechat_miniprogram` 且微信凭证就绪时开放。
  */
 export interface ClientChannelBootstrapResponse {
   apiVersion: typeof CLIENT_API_VERSION;
   tenantCode: string;
+  client: ClientChannelKind;
   merchant: { name: string; logoUrl?: string; servicePhone?: string; serviceHours?: string };
   services: Array<{ code: string; name: string; categoryCode: string; isDefault?: boolean; status: "open" | "paused" }>;
   defaultServiceCode?: string;
   agreements?: {
-    userAgreement: { name: string; version: string; url?: string };
-    privacyPolicy: { name: string; version: string; url?: string };
+    userAgreement: ClientChannelAgreementSummary;
+    privacyPolicy: ClientChannelAgreementSummary;
   };
+  /** 帮助与客服页：商户是否提供了帮助正文/常见问题。 */
+  help: { available: boolean; faqCount: number };
+  /** 首页横幅文案；缺省时客户端用品牌文案。 */
+  banner?: { title: string; subtitle?: string };
   loginMethods: ClientLoginMethod[];
   capabilities: {
     publicCatalog: boolean;
@@ -718,6 +741,31 @@ export interface ClientChannelBootstrapResponse {
     accountClosure: boolean;
   };
   source: "channel" | "workspace_directory";
+}
+
+/** 公开文档：协议与帮助正文，由租户级客户端渠道配置提供，游客可读。 */
+export const CLIENT_PUBLIC_DOCUMENT_KINDS = ["user_agreement", "privacy_policy", "help"] as const;
+export type ClientPublicDocumentKind = (typeof CLIENT_PUBLIC_DOCUMENT_KINDS)[number];
+
+export interface ClientHelpFaqItem {
+  question: string;
+  answer: string;
+}
+
+export interface ClientPublicDocumentResponse {
+  apiVersion: typeof CLIENT_API_VERSION;
+  tenantCode: string;
+  kind: ClientPublicDocumentKind;
+  name: string;
+  /** 协议版本；帮助文档无版本。 */
+  version?: string;
+  url?: string;
+  /** 简单富文本/纯文本正文；商户未提供时为空，客户端如实显示“商户未提供”。 */
+  body?: string;
+  /** 仅 help：说明与常见问题。 */
+  intro?: string;
+  faq?: ClientHelpFaqItem[];
+  updatedAt?: string;
 }
 
 /** 游客公开目录：只按商户公开编码与已发布服务读取，不携带任何私有数据。 */

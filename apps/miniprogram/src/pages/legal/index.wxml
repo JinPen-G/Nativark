@@ -9,14 +9,20 @@
         <button wx:if="{{servicePhone}}" class="btn btn--primary btn--block mt-16" hover-class="btn-hover" bindtap="onContact"><ui-icon name="phone" size="30" color="#FFFFFF"></ui-icon><text class="ml-8">拨打客服电话</text></button>
       </view>
     </view>
-    <view class="section section--tight">
+    <view wx:if="{{helpIntro}}" class="section section--tight">
+      <view class="card"><view class="subtitle">帮助说明</view><view class="body mt-8">{{helpIntro}}</view></view>
+    </view>
+    <view wx:if="{{faq.length}}" class="section section--tight">
       <view class="card">
         <view class="subtitle">常见问题</view>
-        <view class="faq" wx:for="{{faq}}" wx:key="q">
-          <view class="faq__q">{{item.q}}</view>
-          <view class="faq__a">{{item.a}}</view>
+        <view class="faq" wx:for="{{faq}}" wx:key="question">
+          <view class="faq__q">{{item.question}}</view>
+          <view class="faq__a">{{item.answer}}</view>
         </view>
       </view>
+    </view>
+    <view wx:if="{{!loading && !helpIntro && !faq.length}}" class="section section--tight">
+      <view class="card"><view class="muted">商户暂未提供帮助内容，如有疑问请拨打客服电话。</view></view>
     </view>
   </block>
 
@@ -25,13 +31,14 @@
       <view class="card">
         <view class="subtitle">{{docName}}</view>
         <view wx:if="{{version}}" class="muted small mt-4">版本 {{version}}</view>
-        <view wx:if="{{provided && url}}" class="mt-16">
-          <view class="body">商户已提供本文档的正式版本。请在浏览器打开以下地址阅读完整内容：</view>
+        <view wx:if="{{loading}}" class="muted mt-16">正在加载…</view>
+        <view wx:elif="{{provided && body}}" class="body mt-16" style="white-space:pre-wrap">{{body}}</view>
+        <view wx:elif="{{provided && url}}" class="mt-16">
+          <view class="body">商户以外部链接提供本文档，请在浏览器打开以下地址阅读完整内容：</view>
           <view class="notice notice--neutral mt-16" style="word-break:break-all">{{url}}</view>
           <button class="btn btn--secondary btn--block mt-16" hover-class="btn-hover" bindtap="onCopyUrl">复制链接</button>
         </view>
-        <view wx:elif="{{provided}}" class="body mt-16">商户已登记本文档的版本，但尚未提供可在小程序内阅读的正文；请联系商户索取。</view>
-        <view wx:else class="notice notice--warning mt-16">商户尚未在小程序渠道配置中提供本文档。为避免以占位文本冒充商户协议，这里不显示任何默认条款；登录/下单前请向商户确认适用的协议版本。</view>
+        <view wx:else class="notice notice--warning mt-16">商户尚未提供本文档正文。为避免以占位文本冒充商户协议，这里不显示任何默认条款；登录/下单前请向商户确认适用的协议版本。</view>
       </view>
     </view>
   </block>

@@ -16,6 +16,7 @@ import {
   ServiceUnavailableException,
   UnauthorizedException
 } from "@nestjs/common";
+import { CLIENT_PUBLIC_DOCUMENT_KINDS, type ClientChannelKind, type ClientPublicDocumentKind } from "@rental-os/shared";
 import { ClientApiService } from "./client-api.service";
 import { ClientAuthService } from "./client-auth.service";
 import { ClientAccountClosureService } from "./client-account-closure.service";
@@ -99,11 +100,20 @@ export class ClientApiController {
     return this.auth.listPublicWorkspaces(tenantCode);
   }
 
-  /** MP-01：公开的渠道启动配置（品牌、协议、客服、已发布服务、登录方式与能力开关）。 */
+  /** MP-01 / CLIENT-CHANNEL-01：公开渠道启动配置（品牌、协议、客服、帮助、横幅、已发布服务、登录方式与能力开关）。小程序与 APP 按 client 叠加渠道能力。 */
   @Get("public/bootstrap")
-  bootstrap(@Query("tenantCode") tenantCode: string, @Query("appId") appId?: string) {
+  bootstrap(@Query("tenantCode") tenantCode: string, @Query("client") client?: string, @Query("appId") appId?: string) {
     if (!tenantCode?.trim()) throw new BadRequestException("缺少商户编码");
-    return this.api.channelBootstrap(tenantCode, appId);
+    const kind: ClientChannelKind = client === "app" ? "app" : "wechat_miniprogram";
+    return this.api.channelBootstrap(tenantCode, kind, appId);
+  }
+
+  /** CLIENT-CHANNEL-01：公开文档正文（用户协议 / 隐私政策 / 帮助），客户端内直接渲染。 */
+  @Get("public/documents/:kind")
+  publicDocument(@Query("tenantCode") tenantCode: string, @Param("kind") kind: string) {
+    if (!tenantCode?.trim()) throw new BadRequestException("缺少商户编码");
+    if (!CLIENT_PUBLIC_DOCUMENT_KINDS.includes(kind as ClientPublicDocumentKind)) throw new BadRequestException("未知文档类型");
+    return this.api.publicDocument(tenantCode, kind as ClientPublicDocumentKind);
   }
 
   /** MP-03：游客公开目录，只对已发布到小程序渠道的服务开放。 */

@@ -33,6 +33,8 @@ interface MeData {
   memberTitle: string;
   wechatBound: boolean;
   bindingWechat: boolean;
+  /** 商户已配置小程序渠道且微信支付可用时才显示绑定入口（渠道启动 capabilities.wechatPay）。 */
+  wechatPayAvailable: boolean;
 }
 
 Page({
@@ -53,7 +55,8 @@ Page({
     favoriteCount: 0,
     memberTitle: "会员权益",
     wechatBound: false,
-    bindingWechat: false
+    bindingWechat: false,
+    wechatPayAvailable: false
   } as MeData,
   unsubscribe: undefined as (() => void) | undefined,
 
@@ -62,8 +65,8 @@ Page({
       if (event.type !== "refreshed") this.refresh();
     });
     const merchant = cachedMerchant();
-    this.setData({ servicePhone: merchant?.servicePhone ?? "" });
-    loadMerchant(false).then((info) => this.setData({ servicePhone: info.servicePhone ?? "" })).catch(() => undefined);
+    this.setData({ servicePhone: merchant?.servicePhone ?? "", wechatPayAvailable: Boolean(merchant?.capabilities.wechatPay) });
+    loadMerchant(false).then((info) => this.setData({ servicePhone: info.servicePhone ?? "", wechatPayAvailable: Boolean(info.capabilities.wechatPay) })).catch(() => undefined);
   },
 
   onUnload() {

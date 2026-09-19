@@ -340,7 +340,7 @@ test("catalog projects a starting price from the effective space rates and publi
   const service = api({
     context: () => business,
     auth: { listPublicWorkspaces: async () => ({ workspaces: [{ code: "camera", isDefault: true }] }) },
-    business: { listSpaceRatesAt: async (tenantId, ctx, at) => { assert.equal(tenantId, context.tenantId); assert.equal(ctx, business); assert.ok(Date.parse(at)); return rates; }, listServices: () => [], listDiscountPlans: () => [] }
+    business: { listSpaceRatesAt: async (tenantId, ctx, at) => { assert.equal(tenantId, context.tenantId); assert.equal(ctx, business); assert.ok(Date.parse(at)); return rates; }, listServices: () => [], listDiscountPlans: () => [], effectiveRuleAt: () => ({ config: { fulfillment: { allowDifferentReturnLocation: true } } }) }
   });
   const catalog = await service.catalog(context);
   const byId = Object.fromEntries(catalog.items.map((item) => [item.id, item]));
@@ -351,6 +351,6 @@ test("catalog projects a starting price from the effective space rates and publi
   assert.deepEqual(catalog.locations, [{ id: "l1", code: "L1", name: "静安店", status: "enabled", address: "南京西路 1266 号", businessHours: "10:00-20:00", contactPhone: "021-000000", capabilities: ["pickup", "return"] }]);
   assert.deepEqual(catalog.fulfillment, { enabledModes: ["store_pickup_return", "delivery"], allowDifferentReturnLocation: true }, "履约方式投影透传经营空间设置");
   for (const location of catalog.locations) for (const field of ["operatorId", "operatorType", "operatorName", "settlementMode"]) assert.equal(field in location, false);
-  const noVersion = api({ context: () => business, auth: { listPublicWorkspaces: async () => ({ workspaces: [] }) }, business: { listSpaceRatesAt: async () => [], listServices: () => [], listDiscountPlans: () => [] } });
+  const noVersion = api({ context: () => business, auth: { listPublicWorkspaces: async () => ({ workspaces: [] }) }, business: { listSpaceRatesAt: async () => [], listServices: () => [], listDiscountPlans: () => [], effectiveRuleAt: () => undefined } });
   assert.ok((await noVersion.catalog(context)).items.every((item) => item.startingPrice === undefined));
 });

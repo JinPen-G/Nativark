@@ -55,9 +55,9 @@ export async function loginWithWechatPhone(input: { loginCode: string; phoneCode
   }
 }
 
-/** 已登录后绑定当前微信身份（用于小程序内微信支付）。 */
+/** 已登录后绑定当前微信身份（用于小程序内微信支付）。loginCode 一次性，会话刷新后不能重放，由调用方重新取 code。 */
 export async function bindWechat(loginCode: string): Promise<ClientWechatBindResponse> {
-  return request<ClientWechatBindResponse>("/auth/wechat/bind", { method: "POST", data: { loginCode, appId: PUBLIC_CONFIG.appId || undefined }, scope: "tenant" });
+  return request<ClientWechatBindResponse>("/auth/wechat/bind", { method: "POST", data: { loginCode, appId: PUBLIC_CONFIG.appId || undefined }, scope: "tenant", replayAfterRefresh: false });
 }
 
 /** 用途化验证码（registration / login）。 */

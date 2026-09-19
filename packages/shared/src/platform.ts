@@ -733,11 +733,87 @@ export interface TenantBootstrapResult {
   temporaryPassword?: string;
 }
 
-/* ---------- MP-01：租户的微信小程序渠道配置（运营端） ---------- */
+/* ---------- MP-01 / CLIENT-CHANNEL-01：客户端渠道配置（运营端） ---------- */
 
 /**
- * 一个租户一个小程序渠道：AppID 是公开信息，AppSecret 只写不读（服务端加密保存，只返回是否已配置）。
- * 已发布空间决定小程序公开展示的服务；未发布的空间不会因为 active 而自动上架。
+ * 租户级客户端渠道配置（小程序与 APP 共用一份）：品牌、客服、协议、帮助、首页横幅、
+ * 登录方式开关与发布到客户端的服务空间。渠道凭证（微信 AppID/密钥）单独保存在 MiniProgramChannelSummary。
+ */
+export interface ClientChannelAgreementConfig {
+  /** 展示名称，如“用户服务协议”。 */
+  name: string;
+  /** 版本号，登录/注册留痕使用；变更须显式保存。 */
+  version: string;
+  /** 可选外部链接（HTTPS）。 */
+  url?: string;
+  /** 正文（简单富文本/纯文本），客户端内直接渲染；保存时按长度限制。 */
+  body?: string;
+}
+
+export interface ClientChannelFaqItem {
+  question: string;
+  answer: string;
+}
+
+export interface ClientChannelReadiness {
+  ready: boolean;
+  /** 未完成项的可读说明，供开业配置与本页顶部提示。 */
+  missing: string[];
+}
+
+/** 可发布的经营空间（当前租户全部启用空间），供后台勾选。 */
+export interface ClientChannelWorkspaceOption {
+  id: string;
+  code: string;
+  name: string;
+  categoryCode: string;
+  status: string;
+}
+
+export interface ClientChannelProfileSummary {
+  configured: boolean;
+  revision: number;
+  brandName?: string;
+  brandLogoUrl?: string;
+  customerServicePhone?: string;
+  customerServiceHours?: string;
+  userAgreement?: ClientChannelAgreementConfig;
+  privacyPolicy?: ClientChannelAgreementConfig;
+  helpIntro?: string;
+  helpFaq: ClientChannelFaqItem[];
+  bannerTitle?: string;
+  bannerSubtitle?: string;
+  smsLoginEnabled: boolean;
+  passwordLoginEnabled: boolean;
+  publishedWorkspaceIds: string[];
+  defaultWorkspaceId?: string;
+  workspaces: ClientChannelWorkspaceOption[];
+  readiness: ClientChannelReadiness;
+  updatedAt?: string;
+}
+
+export interface SaveClientChannelProfileRequest {
+  /** 携带上次读到的修订号；不一致时拒绝保存，防止两人互相覆盖。首次保存可省略。 */
+  expectedRevision?: number;
+  brandName?: string;
+  brandLogoUrl?: string;
+  customerServicePhone?: string;
+  customerServiceHours?: string;
+  userAgreement?: ClientChannelAgreementConfig;
+  privacyPolicy?: ClientChannelAgreementConfig;
+  helpIntro?: string;
+  helpFaq?: ClientChannelFaqItem[];
+  bannerTitle?: string;
+  bannerSubtitle?: string;
+  smsLoginEnabled: boolean;
+  passwordLoginEnabled: boolean;
+  publishedWorkspaceIds: string[];
+  defaultWorkspaceId?: string;
+}
+
+/**
+ * 微信小程序渠道凭证：AppID 是公开信息，AppSecret 只写不读（服务端加密保存，只返回是否已配置）。
+ * 品牌/协议/发布服务已移到租户级 ClientChannelProfileSummary。
  */
 export interface MiniProgramChannelSummary {
   configured: boolean;
@@ -748,15 +824,6 @@ export interface MiniProgramChannelSummary {
   lastTestStatus: "not_tested" | "passed" | "failed";
   lastTestAt?: string;
   lastTestError?: string;
-  brandName?: string;
-  brandLogoUrl?: string;
-  customerServicePhone?: string;
-  customerServiceHours?: string;
-  userAgreementVersion?: string;
-  userAgreementUrl?: string;
-  privacyPolicyVersion?: string;
-  privacyPolicyUrl?: string;
-  publishedWorkspaceIds: string[];
   /** 已绑定微信身份的客户数；AppID 一旦有绑定就不能再改。 */
   identityCount: number;
   updatedAt?: string;
@@ -767,15 +834,6 @@ export interface SaveMiniProgramChannelRequest {
   /** 只在需要更换时提交；留空保留原密钥。 */
   appSecret?: string;
   enabled: boolean;
-  brandName?: string;
-  brandLogoUrl?: string;
-  customerServicePhone?: string;
-  customerServiceHours?: string;
-  userAgreementVersion?: string;
-  userAgreementUrl?: string;
-  privacyPolicyVersion?: string;
-  privacyPolicyUrl?: string;
-  publishedWorkspaceIds: string[];
 }
 
 export interface MiniProgramChannelTestResult {

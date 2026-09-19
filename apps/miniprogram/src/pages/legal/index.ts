@@ -1,11 +1,20 @@
+import type { ClientHelpFaqItem, ClientPublicDocumentKind } from "@rental-os/shared";
+import { fetchPublicDocument } from "../../api/merchant";
 import { cachedMerchant, loadMerchant, type MerchantInfo } from "../../core/merchant";
 import { ROUTES, back, callPhone } from "../../core/ui";
 
 /**
- * P18 协议 / 租赁规则 / 帮助与客服。协议名称与版本来自商户渠道配置；商户未提供正文时如实说明，
- * 不内置占位协议冒充商户文件。
+ * P18 协议 / 租赁规则 / 帮助与客服。协议名称、版本与正文来自商户在运营端配置的客户端渠道（CLIENT-CHANNEL-01）；
+ * 正文经 GET /public/documents/{kind} 读取并在小程序内直接渲染，商户未提供时如实说明，不内置占位协议。
+ * 帮助内容（说明 + 常见问题）同样来自后台，为空时只显示客服联系方式。
  */
 type DocKind = "agreement" | "privacy" | "rental-rules" | "help";
+
+const KIND_MAP: Record<"agreement" | "privacy" | "help", ClientPublicDocumentKind> = {
+  agreement: "user_agreement",
+  privacy: "privacy_policy",
+  help: "help"
+};
 
 interface LegalData {
   kind: DocKind;
@@ -13,42 +22,71 @@ interface LegalData {
   docName: string;
   version: string;
   provided: boolean;
+  body: string;
   url: string;
+  helpIntro: string;
+  faq: ClientHelpFaqItem[];
   servicePhone: string;
   serviceHours: string;
   ruleVersion: string;
+  loading: boolean;
 }
 
 const TITLES: Record<DocKind, string> = { agreement: "用户服务协议", privacy: "隐私政策", "rental-rules": "租赁规则", help: "帮助与客服" };
 
-const FAQ = [
-  { q: "如何预约设备？", a: "在设备详情点“立即预约”，选择租赁时间与自提门店，确认商户报价后提交；付款到账后商户开始备货。" },
-  { q: "押金怎么办理？", a: "本期押金在领取前与商户线下办理，归还并确认无损后原路退还；押金不计入小程序内的租赁款付款。" },
-  { q: "可以取消或续租吗？", a: "在订单详情中，允许时会显示“取消订单”和“申请续租”；取消前会先显示取消费预估，续租先预览差额再提交。" },
-  { q: "付款后订单没有变化？", a: "付款结果以商户系统入账为准，可在付款页点“刷新结果”；如仍未更新请联系商户，不要重复付款。" }
-];
-
 Page({
-  data: { kind: "agreement", title: "", docName: "", version: "", provided: false, url: "", servicePhone: "", serviceHours: "", ruleVersion: "", faq: FAQ } as LegalData & { faq: typeof FAQ },
+  data: {
+    kind: "agreement",
+    title: "",
+    docName: "",
+    version: "",
+    provided: false,
+    body: "",
+    url: "",
+    helpIntro: "",
+    faq: [] as ClientHelpFaqItem[],
+    servicePhone: "",
+    serviceHours: "",
+    ruleVersion: "",
+    loading: false
+  } as LegalData,
 
   onLoad(options: Record<string, string | undefined>) {
     const kind = (["agreement", "privacy", "rental-rules", "help"].includes(options.doc ?? "") ? options.doc : "agreement") as DocKind;
     this.setData({ kind, title: TITLES[kind], ruleVersion: options.version ?? "" });
     const cached = cachedMerchant();
-    if (cached) this.apply(cached);
-    loadMerchant(false).then((info) => this.apply(info)).catch(() => undefined);
+    if (cached) this.applyMerchant(cached);
+    loadMerchant(false).then((info) => this.applyMerchant(info)).catch(() => undefined);
+    if (kind === "agreement" || kind === "privacy" || kind === "help") void this.loadDocument(KIND_MAP[kind]);
   },
 
-  apply(info: MerchantInfo) {
+  applyMerchant(info: MerchantInfo) {
     const doc = this.data.kind === "agreement" ? info.agreements?.userAgreement : this.data.kind === "privacy" ? info.agreements?.privacyPolicy : undefined;
     this.setData({
       docName: doc?.name ?? TITLES[this.data.kind],
-      version: doc?.version ?? "",
-      provided: Boolean(doc),
-      url: doc?.url ?? "",
+      version: doc?.version ?? this.data.version,
       servicePhone: info.servicePhone ?? "",
       serviceHours: info.serviceHours ?? ""
     });
+  },
+
+  /** 从后台读取文档正文；未提供时 provided=false，页面如实提示。 */
+  async loadDocument(kind: ClientPublicDocumentKind) {
+    this.setData({ loading: true });
+    try {
+      const doc = await fetchPublicDocument(kind);
+      if (!doc) {
+        this.setData({ provided: false, loading: false });
+        return;
+      }
+      if (kind === "help") {
+        this.setData({ provided: true, helpIntro: doc.intro ?? "", faq: doc.faq ?? [], loading: false });
+      } else {
+        this.setData({ provided: true, docName: doc.name || this.data.docName, version: doc.version ?? this.data.version, body: doc.body ?? "", url: doc.url ?? "", loading: false });
+      }
+    } catch {
+      this.setData({ provided: false, loading: false });
+    }
   },
 
   onCopyUrl() {

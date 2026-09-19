@@ -68,6 +68,8 @@ interface CheckoutData {
   deliveryAvailable: boolean;
   addresses: ClientDeliveryAddressView[];
   showAddressSheet: boolean;
+  addressesLoading: boolean;
+  addressesError: string;
   addressLabel: string;
   locations: ClientCatalogLocation[];
   store?: ClientCatalogLocation;
@@ -119,6 +121,8 @@ Page({
     deliveryAvailable: false,
     addresses: [],
     showAddressSheet: false,
+    addressesLoading: false,
+    addressesError: "",
     addressLabel: "",
     locations: [],
     showStoreSheet: false,
@@ -151,6 +155,8 @@ Page({
   catalog: undefined as ClientCatalogResponse | undefined,
   rawCoupons: [] as RentalCustomerCoupon[],
   deliveryMode: "delivery" as RentalFulfillmentMode,
+  /** 当前服务所有已启用地点；按取送方式再筛出可领取（pickup）或可发货（delivery）的门店。 */
+  allLocations: [] as ClientCatalogLocation[],
   ticker: undefined as number | undefined,
   requestVersion: 0,
 
@@ -240,23 +246,36 @@ Page({
     }
   },
 
+  /** 服务端校验：自取要求门店有 pickup 能力，配送要求发货门店有 delivery 能力（归还地点另需 return，由服务端核）。 */
+  locationsFor(mode: string | undefined): ClientCatalogLocation[] {
+    const capability = isDeliveryMode(mode) ? "delivery" : "pickup";
+    return this.allLocations.filter((row) => !row.capabilities || row.capabilities.includes(capability));
+  },
+
   applyCatalog(catalog: ClientCatalogResponse, timeZone: string) {
-    const locations = catalog.locations.filter((row) => row.status === "enabled" && (!row.capabilities || row.capabilities.includes("pickup")));
-    // 同城配送是否开通：以经营空间履约设置为准；取第一个配送类方式作为下单时的履约方式。
+    this.allLocations = catalog.locations.filter((row) => row.status === "enabled");
+    // 同城配送是否开通：经营空间启用了配送类履约方式，且至少有一家可发货门店；否则如实只提供自提。
     const deliveryModes = (catalog.fulfillment?.enabledModes ?? []).filter((mode) => isDeliveryMode(mode));
     this.deliveryMode = deliveryModes[0] ?? "delivery";
+    const deliveryAvailable = deliveryModes.length > 0 && this.locationsFor("delivery").length > 0;
+    let cart = getCart();
+    // 清单里残留的配送选择在商户关闭配送后自动退回自提，避免报价被服务端拒绝而无从修改。
+    if (cart && isDeliveryMode(cart.fulfillmentMode) && !deliveryAvailable) {
+      this.mutate((draft) => { draft.fulfillmentMode = "store_pickup_return"; });
+      cart = getCart();
+    }
+    const locations = this.locationsFor(cart?.fulfillmentMode);
     this.setData({
       timeZone,
       zoneNote: zoneLabel(timeZone),
       minDate: todayInZone(timeZone),
       locations,
-      deliveryAvailable: deliveryModes.length > 0,
+      deliveryAvailable,
       services: catalog.services.filter((row) => row.enabled).map((row) => ({ id: row.id, name: row.name, description: row.description ?? "", selected: false }))
     });
-    // 默认门店：清单未选时预选第一家可领取门店（服务端仍会校验）。
-    const cart = getCart();
-    if (cart && !cart.locationId) {
-      const first = primaryLocation({ ...catalog, locations }) ?? locations[0];
+    // 默认门店：清单未选或所选门店不支持当前取送方式时，预选第一家合适的门店（服务端仍会校验）。
+    if (cart && (!cart.locationId || !locations.some((row) => row.id === cart!.locationId))) {
+      const first = (isDeliveryMode(cart.fulfillmentMode) ? undefined : primaryLocation({ ...catalog, locations })) ?? locations[0];
       if (first) this.mutate((draft) => { draft.locationId = first.id; draft.locationName = first.name; });
     }
   },
@@ -265,7 +284,8 @@ Page({
     if (!cart) return;
     const start = splitInstant(cart.startAt, this.data.timeZone);
     const end = splitInstant(cart.endAt, this.data.timeZone);
-    const store = this.data.locations.find((row) => row.id === cart.locationId);
+    const locations = this.locationsFor(cart.fulfillmentMode);
+    const store = locations.find((row) => row.id === cart.locationId);
     const lines: LineRow[] = cart.lines.map((line) => {
       const item = this.catalog?.items.find((row) => row.id === line.itemGroupId);
       const price = startingPriceParts(item?.startingPrice, pricingUnitLabel);
@@ -294,6 +314,7 @@ Page({
       endText: cart.endAt ? `${formatBusinessDate(cart.endAt, this.data.timeZone)} ${formatBusinessTime(cart.endAt, this.data.timeZone)}` : "",
       method: isDeliveryMode(cart.fulfillmentMode) ? "delivery" : "pickup",
       addressLabel: cart.deliveryAddressLabel ?? "",
+      locations,
       store,
       memo: cart.memo ?? "",
       services: this.data.services.map((row) => ({ ...row, selected: cart.services.some((item) => item.serviceId === row.id) })),
@@ -405,8 +426,17 @@ Page({
     }
     if (method === this.data.method) return;
     const mode: RentalFulfillmentMode = method === "delivery" ? this.deliveryMode : "store_pickup_return";
+    // 切换取送方式后门店按新能力重筛：原门店不支持则换成第一家合适的门店（可再手动改）。
+    const candidates = this.locationsFor(mode);
     this.mutate((draft) => {
       draft.fulfillmentMode = mode;
+      if (!candidates.some((row) => row.id === draft.locationId)) {
+        const first = candidates[0];
+        draft.locationId = first?.id;
+        draft.locationName = first?.name;
+        draft.returnLocationId = undefined;
+        draft.returnLocationName = undefined;
+      }
     });
     void this.requestQuote();
   },
@@ -414,12 +444,13 @@ Page({
   /* ---------- 配送地址（MP-06） ---------- */
   async onOpenAddress() {
     if (this.data.locked) return;
-    this.setData({ showAddressSheet: true });
+    this.setData({ showAddressSheet: true, addressesLoading: true, addressesError: "" });
     try {
       const addresses = await listAddresses();
-      this.setData({ addresses });
+      this.setData({ addresses, addressesLoading: false });
     } catch (error) {
-      toast(describeError(error).message, { duration: 3000 });
+      // 读取失败与“还没有地址”是两回事：分开显示，不诱导用户去新增。
+      this.setData({ addressesLoading: false, addressesError: describeError(error).message });
     }
   },
 
@@ -440,7 +471,9 @@ Page({
     void this.requestQuote();
   },
 
+  /** 去地址簿新增/管理；回来后重新打开地址面板即重新读取，不留旧列表。 */
   onManageAddresses() {
+    this.setData({ showAddressSheet: false });
     navigate(ROUTES.addresses);
   },
 

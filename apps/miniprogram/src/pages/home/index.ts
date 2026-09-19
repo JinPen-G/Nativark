@@ -22,6 +22,8 @@ interface HomeData {
   store?: { id: string; name: string; address: string; hours: string; phone: string };
   signedIn: boolean;
   serviceName: string;
+  bannerTitle: string;
+  bannerSubtitle: string;
 }
 
 const HOT_LIMIT = 6;
@@ -35,7 +37,9 @@ Page({
     merchantView: loadingState(),
     servicePhone: "",
     signedIn: false,
-    serviceName: ""
+    serviceName: "",
+    bannerTitle: "",
+    bannerSubtitle: ""
   } as HomeData,
 
   serviceCode: "" as string,
@@ -113,6 +117,9 @@ Page({
       servicePhone: info.servicePhone ?? "",
       services,
       serviceName: service?.name ?? "",
+      // 首页横幅：优先用商户后台配置文案，缺省用品牌/默认文案，不显示技术词。
+      bannerTitle: info.banner?.title || "",
+      bannerSubtitle: info.banner?.subtitle || "",
       merchantView: services.length ? readyState() : blockedState("商户暂未开放服务", "当前没有可租用的服务，请稍后再来或联系商户。", info.servicePhone ? "联系商户" : "", "contact")
     });
     if (!resolved) {

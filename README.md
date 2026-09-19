@@ -155,7 +155,7 @@ Windows 上跑 `prisma generate` 前必须先停掉 API 开发服务器，否则
 ```bash
 npm run build:miniprogram           # 本机联调构建：按 src/config/public.ts 的常量打包（默认 demo 租户 + http://localhost:3000），产物在 apps/miniprogram/dist
 npm run build:miniprogram:release   # 发布构建：apiOrigin 必须是 HTTPS 根地址，任何 http（含回环）一律拒绝
-npm run test:miniprogram            # 34 项静态/宿主替身测试：页面/Tab/组件结构、WXSS/WXML 语法拦截、数据绑定与组件属性 AST 核对、无密钥、构建模式、401 刷新、切换丢弃、清单幂等、支付单复用与 JSAPI 校验、时区、状态分组、拟新增契约对账
+npm run test:miniprogram            # 34 项静态/宿主替身测试：页面/Tab/组件结构、WXSS/WXML 语法拦截、数据绑定与组件属性 AST 核对、无密钥、构建模式、401 刷新、切换丢弃、清单幂等、支付单复用与 JSAPI 校验、时区、状态分组、已交付契约与 OpenAPI 对账
 ```
 
 **一个租户一个包。** 换租户只改 `apps/miniprogram/src/config/public.ts` 里的 `tenantCode`（第一版绑定演示租户 `demo`，与 `npm run db:seed:demo` 一致），正式发布再把 `apiOrigin` 改成 HTTPS 地址、填上该小程序的 `appId`，然后 `npm run build:miniprogram:release`。环境变量 `MINIPROGRAM_TENANT_CODE` / `MINIPROGRAM_API_ORIGIN` / `MINIPROGRAM_APP_ID` 只在显式设置时覆盖代码常量，供 CI 批量打包。页面不显示商户名称，商户身份完全由包决定；**AppSecret 只保存在服务端 `mini_program_channels`（加密列），绝不进小程序包。**
@@ -166,7 +166,7 @@ npm run test:miniprogram            # 34 项静态/宿主替身测试：页面/T
 
 用微信开发者工具导入 `apps/miniprogram`（工程根目录含 `project.config.json`，代码目录 `dist/`），没有正式 AppID 时选「测试号」，并在「详情 → 本地设置」勾选**不校验合法域名**；本机联调先 `npm run dev` 起 API 并执行过 `npm run db:seed:demo`。联调构建会在 `dist/config/public.json` 写入 `allowLocalApi: true`，只放宽回环地址；发布构建不会带该标记。
 
-当前小程序接通既有客户端 API（账号密码登录与注册、目录（含参考起价与门店公开信息）、报价、下单、统一本人订单（含商品摘要）、取消预览与取消、续租、资金状态、支付单、资料、会员、资质、优惠券）；微信手机号登录、短信登录、渠道启动配置、公开游客目录、配送地址簿、费用响应与在线注销登记在 `src/contracts/planned.ts`，服务端未提供时页面明确显示“尚未开通”并给替代入口，不伪造成功。收藏保存在本机、按客户分开。微信渠道与身份底座迁移为 `20260918010000_miniprogram_channel`。
+当前小程序已接通全部首期客户端 API：微信手机号一键登录、短信验证码登录、账号密码登录与注册、在线注销（预检 → 本人验证码 → 确认）、公开游客目录（未登录按已发布服务浏览，下单时才登录）、目录（含参考起价与门店公开信息）、报价、下单（自提/同城配送 + 收货地址簿，配送按经营空间履约设置与门店能力开放）、统一本人订单（含商品摘要）、取消预览与取消、续租、检查费用确认/异议、资金状态、小程序内微信 JSAPI 支付（缺微信身份时引导绑定，“我的”也可提前绑定）、资料、会员、资质、优惠券、收货地址。`src/contracts/planned.ts` 现只登记“已交付契约”供静态测试与 OpenAPI 对账；商户在功能级别未开通的能力（未配置渠道、未启用配送等）由服务端 404/501/503 驱动页面显示“商户未开通”，不伪造成功。收藏保存在本机、按客户分开。迁移：`20260918010000_miniprogram_channel`（渠道/身份底座）、`20260919020000_miniprogram_login_delivery`（验证码用途、渠道客服/协议字段、地址簿与交付快照；先在专用库演练再应用）。**运营后台尚无“客户端渠道配置”页**（商户品牌/客服/协议正文/帮助/发布服务，小程序与 APP 共用），见任务台账 `CLIENT-CHANNEL-01`。
 
 版本：Nest 10.4.15 / Prisma 5.22.0 / React 19.2.8 / antd 6.6.0 / Vite 8.2.1。根与 API 用 TypeScript 5.6，管理端固定在 7.0.2。仓库未声明 `engines`，开发按 `@types/node ^22` 对齐。
 

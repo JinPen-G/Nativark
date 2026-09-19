@@ -168,9 +168,14 @@ Page({
       if (presented.code === "BAD_REQUEST" || presented.code === "UNAUTHENTICATED") {
         this.setData({ errors: { ...this.data.errors, code: presented.message } });
       } else if (presented.code === "CONFLICT") {
-        // 期间新增了在途事项：回到预览重新核对。
-        this.setData({ formError: `${presented.message} 请返回重新核对可注销状态。`, step: "preview" });
+        // 409 可能是手机号不一致（证明未消耗，可改后再提交）、证明过期/已用，或期间新增了在途事项；
+        // 留在验证码步骤如实显示原因，同时后台重读可注销性，不把用户踢回预览。
+        const phoneMismatch = presented.message.includes("手机号");
+        this.setData(phoneMismatch ? { errors: { ...this.data.errors, phone: presented.message } } : { formError: `${presented.message} 如有新的在途事项请返回重新核对。` });
         void this.loadPreview();
+      } else if (presented.code === "AUTH_EXPIRED") {
+        // 提交那一刻登录状态刚刷新：证明仍有效，再点一次即可，不是登录失效。
+        this.setData({ formError: "登录状态已刷新，请再次点击“确认注销”。" });
       } else {
         this.setData({ formError: presented.message });
       }
