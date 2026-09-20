@@ -682,7 +682,15 @@ export const RENTAL_PRICING_UNIT_LABELS: Record<RentalPricingUnit, string> = {
   package: "整包"
 };
 export type RentalFulfillmentMode = "store_pickup_return" | "partner_pickup_return" | "warehouse_pickup_return" | "locker_pickup_return" | "delivery" | "onsite_delivery";
-export type RentalLocationType = "store" | "warehouse" | "station" | "locker" | "delivery_hub" | "project_site";
+/**
+ * Rental Core 履约地点类型的唯一取值来源。
+ *
+ * 品类定义、管理端选项和 API DTO 必须共用这一组值。此前 DTO 仍接受旧的
+ * pickup_point / delivery_point / parking，却拒绝品类定义真实使用的
+ * station / locker / delivery_hub，导致页面能选、保存必然 400。
+ */
+export const RENTAL_LOCATION_TYPES = ["store", "warehouse", "station", "locker", "delivery_hub", "project_site"] as const;
+export type RentalLocationType = (typeof RENTAL_LOCATION_TYPES)[number];
 export type RentalSettingModule = "pricing" | "discounts" | "coupons" | "value_added_services" | "rental_rules" | "business_calendar" | "membership_rewards" | "notification_templates";
 export type RentalAttributeScope = "item_group" | "asset" | "transaction";
 export type RentalAttributeValueType = "string" | "number" | "boolean" | "date" | "select";

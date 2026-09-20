@@ -13,7 +13,7 @@ import type {
   ReviewRentalWorkOrderRequest,
   SubmitRentalWorkOrderRequest
 } from "@rental-os/shared";
-import { RENTAL_PRICING_UNIT_CODES, RENTAL_WORK_ORDER_TYPES } from "@rental-os/shared";
+import { RENTAL_LOCATION_TYPES, RENTAL_PRICING_UNIT_CODES, RENTAL_WORK_ORDER_TYPES } from "@rental-os/shared";
 import { Type } from "class-transformer";
 import {
   IsArray,
@@ -52,7 +52,6 @@ const OPERATOR_TYPES = ["self_operated", "partner"] as const;
 const SETTLEMENT_MODES = ["self", "monthly", "per_order"] as const;
 const ENABLE_STATUSES = ["enabled", "disabled"] as const;
 const LOCATION_CAPABILITIES = ["pickup", "return", "storage", "delivery"] as const;
-const LOCATION_TYPES = ["store", "warehouse", "pickup_point", "delivery_point", "parking", "project_site"] as const;
 const INVENTORY_MODES = ["serialized", "quantity", "consumable", "bundle"] as const;
 
 export class SaveRentalFulfillmentOperatorDto implements SaveRentalFulfillmentOperatorRequest {
@@ -104,7 +103,7 @@ export class SaveRentalFulfillmentLocationDto implements SaveRentalFulfillmentLo
   @IsNotEmpty()
   name!: string;
 
-  @IsIn(LOCATION_TYPES)
+  @IsIn(RENTAL_LOCATION_TYPES)
   type!: RentalLocationType;
 
   @IsOptional()
