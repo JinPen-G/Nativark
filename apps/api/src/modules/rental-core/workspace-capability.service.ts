@@ -330,8 +330,9 @@ export class WorkspaceCapabilityService {
         )
       };
     });
-    // 生产就绪：该品类 requiredCapabilities 声明的能力全部处于 enabled。
-    // 只有 code 没有模块的必选能力同样算缺失——否则「已声明」会被当成「已具备」。
+    // 这里只判断“强制扩展模块”是否就绪。Rental Core 的库存、地点、定价、订单、
+    // 履约等基础条件由开业配置与各业务入口的事实门禁检查，不能要求运营再建一套
+    // capability 实例，否则基础经营会被尚未开发的品类增强模块反向卡死。
     const missingRequired = capabilities
       .filter(
         (view) =>

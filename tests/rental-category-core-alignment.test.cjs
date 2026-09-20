@@ -20,6 +20,10 @@ const {
 
 void (async () => {
   assert.equal(RENTAL_CATEGORY_DEFINITIONS.length, 4, "首批必须登记四个经营品类");
+  assert.ok(
+    RENTAL_CATEGORY_DEFINITIONS.every((category) => category.requiredCapabilities.length === 0),
+    "四品类基础营业不得被尚未启用的品类扩展模块阻断"
+  );
   assert.equal(
     RENTAL_CATEGORY_DEFINITIONS.find((category) => category.code === "vehicle").terminology.navigationLabels.pricingGroups,
     "车辆定价分组",

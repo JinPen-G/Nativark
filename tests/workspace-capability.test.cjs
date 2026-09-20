@@ -242,23 +242,19 @@ assert.equal(viewOf(fresh, "dispatch").applicable, false, "dispatch 不适用于
 // shared 能力即使品类没列，也算「声明」——它对全部品类开放。
 assert.equal(viewOf(fresh, "locker").declaredByCategory, true, "shared 能力视为已声明");
 
-assert.equal(fresh.productionReady, false, "一个能力都没启用时不得判定为生产就绪");
-assert.deepEqual(
-  [...fresh.missingRequired].sort(),
-  [...CAMERA_REQUIRED].sort(),
-  "缺失必选能力必须包含 camera 的全部首期必选能力，包括尚未实现的模块"
-);
+assert.equal(fresh.productionReady, true, "没有强制扩展模块时 capability 层不得阻断基础营业");
+assert.deepEqual(fresh.missingRequired, [], "基础 Core 能力不得作为待启用扩展项重复列出");
 assert.equal(
   viewOf(fresh, "bundle_inventory").requiredForCategory,
-  true,
-  "共享模块在摄影品类被声明为必选时，总览必须按当前品类显示为必选"
+  false,
+  "通用库存引擎由 Rental Core 内建，不得伪装为需运营启用的扩展模块"
 );
 assert.equal(
   viewOf(fresh, "delivery").requiredForCategory,
   false,
   "非必选的共享模块不得被当前品类误标为必选"
 );
-console.log("  ✓ 三层状态：声明/已实现/已启用互不等同，缺失必选能力可枚举");
+console.log("  ✓ 三层状态：声明/已实现/已启用互不等同，基础 Core 不进入扩展门禁");
 
 // ============ 3. 启用路径的 fail-closed 校验 ============
 const enable = (code, extra = {}) =>
@@ -428,32 +424,24 @@ await rejects(
 console.log("  ✓ 生命周期与并发：paused 不可用、过期 revision 409、升级四类前置全部 fail-closed");
 
 // ============ 8. 生产就绪判定 ============
-// 当前已实现的必选能力全部 enabled 后，尚未实现的首期能力仍必须阻止转正。
+// 当前四个首发品类没有强制扩展模块，扩展实例的生命周期不得影响基础营业。
 const readyStore = createStore({ categoryCode: "camera", declaredCodes: CAMERA_DECLARED });
 const readyService = new WorkspaceCapabilityService(readyStore);
-for (const code of IMPLEMENTED_REQUIRED) {
-  await readyService.save(TENANT, { code, status: "enabled", reason: "上线准备" }, "tester");
-}
 const ready = await readyService.overview(TENANT);
-assert.deepEqual([...ready.missingRequired].sort(), [...UNIMPLEMENTED_REQUIRED].sort(), "未实现的首期必选能力必须继续列为缺失");
-assert.equal(ready.productionReady, false, "首期必选能力尚未全部实现时不得判定为生产就绪");
+assert.deepEqual(ready.missingRequired, [], "未启用品类扩展不得进入基础营业缺项");
+assert.equal(ready.productionReady, true, "基础经营条件由业务事实门禁负责，不由可选扩展阻断");
 // 未实现的 delivery 仍是「已声明但未实现」，且不影响就绪判定（它不是 category_required）。
 assert.equal(ready.capabilities.find((row) => row.definition.code === "delivery").state, "declared_not_implemented");
-// 任一必选能力被暂停，就绪状态必须立刻回落——否则暂停就成了只改显示的空操作。
-const toPause = ready.capabilities.find((row) => row.definition.code === "pickup").instance;
+const pickup = await readyService.save(TENANT, { code: "pickup", status: "enabled", reason: "验证扩展生命周期" }, "tester");
 await readyService.save(
   TENANT,
-  { code: "pickup", status: "paused", reason: "设备检修", expectedRevision: toPause.revision },
+  { code: "pickup", status: "paused", reason: "设备检修", expectedRevision: pickup.revision },
   "tester"
 );
 const afterPause = await readyService.overview(TENANT);
-assert.deepEqual(
-  [...afterPause.missingRequired].sort(),
-  [...UNIMPLEMENTED_REQUIRED, "pickup"].sort(),
-  "暂停的必选能力必须在未实现缺项之外重新计入缺失"
-);
-assert.equal(afterPause.productionReady, false, "必选能力被暂停后不得仍判定为生产就绪");
-console.log("  ✓ 生产就绪：已实现能力齐备仍不掩盖未实现缺项，暂停项会追加进入缺失清单");
+assert.deepEqual(afterPause.missingRequired, [], "暂停可选扩展不得污染基础经营缺项");
+assert.equal(afterPause.productionReady, true, "暂停可选扩展后基础营业仍应可用");
+console.log("  ✓ 生产就绪：基础经营与可选扩展生命周期已解耦");
 
 // ============ 9. 已启用名单：Hook 运行时的执行依据 ============
 // CORE-EXT-02B 的 Hook 运行时按这份名单决定执行哪些能力，因此它必须只含 enabled。
@@ -554,23 +542,23 @@ console.log("  ✓ 审计只增不改、可按能力筛选、动作序列完整"
   const svc = new WorkspaceCapabilityService(store);
   const tx = { marker: "workspace-create-tx" };
 
-  // 初始化名单只含「已实现且可安全自动配置」的必选能力；总览则必须额外保留未实现缺项。
+  // 当前四品类没有强制扩展模块，新空间不应为了基础营业自动制造 capability 实例。
   const before = await svc.overview(TENANT);
   const targets = WorkspaceCapabilityService.requiredInitializationTargets("camera", CAMERA_DECLARED)
     .map((row) => row.code)
     .sort();
-  assert.deepEqual(targets, [...IMPLEMENTED_REQUIRED].sort(), "初始化名单必须等于已实现的品类必选能力");
-  assert.deepEqual([...before.missingRequired].sort(), [...CAMERA_REQUIRED].sort(), "总览必须列出全部首期必选能力");
+  assert.deepEqual(targets, [], "没有强制扩展时初始化名单必须为空");
+  assert.deepEqual(before.missingRequired, [], "基础 Core 能力不得列成扩展缺项");
 
   const result = await svc.initializeRequiredCapabilities(TENANT, "ws_camera", "camera", CAMERA_DECLARED, tx, {
     operator: "系统"
   });
-  assert.deepEqual([...result.enabled].sort(), [...IMPLEMENTED_REQUIRED].sort(), "必选且已实现的能力必须全部启用");
-  assert.equal(store.instances.size, IMPLEMENTED_REQUIRED.length, "只落必选能力，不多不少");
+  assert.deepEqual(result.enabled, [], "不得自动启用可选扩展");
+  assert.equal(store.instances.size, 0, "不得为内建 Core 能力重复落实例");
 
   const after = await svc.overview(TENANT);
-  assert.equal(after.productionReady, false, "尚有未实现的首期能力时初始化后仍不得生产就绪");
-  assert.deepEqual([...after.missingRequired].sort(), [...UNIMPLEMENTED_REQUIRED].sort(), "初始化后只应剩未实现的首期必选能力");
+  assert.equal(after.productionReady, true, "capability 层无强制扩展时应就绪");
+  assert.deepEqual(after.missingRequired, [], "初始化后不应凭空产生扩展缺项");
 
   // 可选能力一律不自动启用：那是经营决策，不是系统默认。
   for (const code of ["delivery", "locker"]) {
@@ -583,7 +571,7 @@ console.log("  ✓ 审计只增不改、可按能力筛选、动作序列完整"
     "自动启用的实例必须锁定真实实现版本"
   );
   // 审计动作必须是 system_initialize，而不是 enable——系统初始化与人的经营决策要能区分。
-  assert.equal(store.audits.length, IMPLEMENTED_REQUIRED.length);
+  assert.equal(store.audits.length, 0);
   assert.equal(
     store.audits.every((row) => row.action === "system_initialize" && row.toStatus === "enabled" && row.reason),
     true,
@@ -591,21 +579,12 @@ console.log("  ✓ 审计只增不改、可按能力筛选、动作序列完整"
   );
   assert.equal(store.audits.every((row) => row.operator === "系统"), true, "初始化审计必须记录操作人");
   assert.equal(store.audits.every((row) => row.configSnapshot), true, "初始化审计必须保存完整配置快照");
-  assert.equal(
-    store.instances.get("pickup").configVersion,
-    "v1",
-    "初始化的配置版本必须是明确的首版"
-  );
-
-  // 幂等：重复初始化不新增、不覆盖，且如实报告跳过原因。
-  const paused = store.instances.get("pickup");
-  store.instances.set("pickup", { ...paused, status: "paused" });
+  // 幂等：重复初始化仍不新增、不覆盖。
   const again = await svc.initializeRequiredCapabilities(TENANT, "ws_camera", "camera", CAMERA_DECLARED, tx);
   assert.deepEqual(again.enabled, [], "重复初始化不得新增实例");
-  assert.equal(again.skipped.length, IMPLEMENTED_REQUIRED.length, "全部目标都应报告为已存在");
-  assert.equal(store.audits.length, IMPLEMENTED_REQUIRED.length, "重复初始化不得追加审计");
-  assert.equal(store.instances.get("pickup").status, "paused", "不得覆盖运营后来的暂停决定");
-  console.log("  ✓ 必选能力初始化：只启用已实现子集、未实现缺项保留、记 system_initialize、幂等且不覆盖暂停");
+  assert.equal(again.skipped.length, 0, "空目标无需报告伪跳过项");
+  assert.equal(store.audits.length, 0, "重复初始化不得追加审计");
+  console.log("  ✓ 扩展初始化：无强制扩展时不落实例，重复执行保持幂等");
 }
 
 // ============ 12b. 初始化的两道过滤：未实现、必填配置无默认值（Review P1-3） ============
@@ -708,21 +687,13 @@ console.log("  ✓ 审计只增不改、可按能力筛选、动作序列完整"
     await svc.assertWorkspaceOperable(TENANT); // 不抛即通过
   }
 
-  // production 且缺必选能力：必须拒绝，且错误里要列出缺什么。
+  // production 的基础经营不再由可选扩展阻断；真实开业事实由业务门禁检查。
   const store = createStore({ categoryCode: "camera", declaredCodes: CAMERA_DECLARED, runMode: "production" });
   const svc = new WorkspaceCapabilityService(store);
-  await rejects(svc.assertWorkspaceOperable(TENANT), CONFLICT, /尚未达到生产经营条件/u);
-  await rejects(svc.assertWorkspaceOperable(TENANT), CONFLICT, /serialized_inventory/u);
-
-  // 自动初始化已实现的能力后，未实现的首期能力仍阻止正式经营。
+  await svc.assertWorkspaceOperable(TENANT);
   await svc.initializeRequiredCapabilities(TENANT, "ws_camera", "camera", CAMERA_DECLARED, {});
-  await rejects(svc.assertWorkspaceOperable(TENANT), CONFLICT, new RegExp(UNIMPLEMENTED_REQUIRED[0], "u"));
-
-  // 任一必选能力被暂停，正式空间立刻重新被拦——门禁读的是实时状态。
-  const enabled = store.instances.get("return");
-  store.instances.set("return", { ...enabled, status: "paused" });
-  await rejects(svc.assertWorkspaceOperable(TENANT), CONFLICT, /return/u);
-  console.log("  ✓ 经营门禁：demo/development 放行，production 对未启用与未实现的首期必选能力均 fail-closed");
+  await svc.assertWorkspaceOperable(TENANT);
+  console.log("  ✓ 经营门禁：四品类基础营业不再被可选扩展模块阻断");
 }
 
 console.log("\nCORE-EXT-02A capability 运行时用例全部通过");

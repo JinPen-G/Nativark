@@ -85,8 +85,9 @@ export type RentalCapability = (typeof RENTAL_CAPABILITY_CODES)[number];
 /**
  * capability 种类（CORE-EXT-02A）。
  *
- * - `category_required` 模块自身只适合作为品类必选；最终是否必选以各品类定义中的
- *   `requiredCapabilities` 为准。同一个 `shared` 能力可以对某品类必选、对另一品类可选。
+ * - `category_required` 只表示扩展模块具备成为品类必选项的资格；最终是否阻止空间进入
+ *   production 仍以品类定义中的 `requiredCapabilities` 为准。通用库存、领取、归还等
+ *   Rental Core 基础能力不放进该数组，也不要求运营逐项启用。
  * - `category_optional` 可选增强：启用与否都不影响该品类的生产就绪判定。
  * - `shared` 跨品类共享：多个品类都可引用的通用能力（物流、资质、IoT 等）。
  */
@@ -778,7 +779,11 @@ export interface RentalCategoryDefinition {
   description: string;
   supportedInventoryModes: RentalInventoryMode[];
   defaultCapabilities: RentalCapability[];
-  /** 该品类进入 production 必须启用的能力；共享能力也可以在某个品类中成为必选。 */
+  /**
+   * 该品类进入 production 前必须启用的扩展模块。
+   * Rental Core 的库存、地点、定价、订单与履约基础能力由业务配置/数据完整性门禁负责，
+   * 不在这里重复建实例；当前四个首发品类暂无强制扩展模块。
+   */
   requiredCapabilities: RentalCapability[];
   terminology: RentalCategoryTerminology;
   attributeSchema: Record<string, unknown>;
@@ -4222,7 +4227,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     description: "机身、镜头、灯光和拍摄套装租赁",
     supportedInventoryModes: [RentalInventoryMode.Serialized, RentalInventoryMode.Quantity, RentalInventoryMode.Bundle],
     defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery", "usage_reading", "camera_compatibility", "camera_kit_handover", "inspection_care"],
-    requiredCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "camera_compatibility", "camera_kit_handover", "usage_reading", "inspection_care"],
+    requiredCapabilities: [],
     terminology: { itemLabel: "器材", itemGroupLabel: "器材型号", assetLabel: "器材资产", fulfillmentLabel: "器材门店", pickupLabel: "取机", returnLabel: "还机", identifierLabel: "资产编号", usageMetricLabel: "快门次数", navigationLabels: { inventoryGroup: "摄影器材", itemGroups: "器材型号", pricingGroups: "器材定价分组", assets: "器材资产与库存", locations: "器材门店" } },
     attributeSchema: { brand: "string", model: "string", mount: "string", sensor: "string", serialNo: "string", shutterCount: "number" },
     businessModel: {
@@ -4291,7 +4296,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     description: "帐篷、桌椅、炊具和露营套装租赁",
     supportedInventoryModes: [RentalInventoryMode.Serialized, RentalInventoryMode.Quantity, RentalInventoryMode.Consumable, RentalInventoryMode.Bundle],
     defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery", "camping_kit_integrity", "camping_cleaning_turnaround"],
-    requiredCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "camping_kit_integrity", "camping_cleaning_turnaround"],
+    requiredCapabilities: [],
     terminology: { itemLabel: "装备", itemGroupLabel: "装备型号", assetLabel: "装备资产", fulfillmentLabel: "装备仓", pickupLabel: "领用", returnLabel: "归还", identifierLabel: "装备编号", navigationLabels: { inventoryGroup: "户外装备", itemGroups: "装备型号", pricingGroups: "装备定价分组", assets: "装备资产与库存", locations: "装备仓库" } },
     attributeSchema: { brand: "string", model: "string", people: "number", season: "string", material: "string", batchNo: "string" },
     businessModel: {
@@ -4337,7 +4342,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     description: "汽车、摩托车和其他载具租赁",
     supportedInventoryModes: [RentalInventoryMode.Serialized],
     defaultCapabilities: ["serialized_inventory", "pickup", "return", "dispatch", "usage_reading", "qualification", "iot", "inspection_care", "vehicle_relocation"],
-    requiredCapabilities: ["serialized_inventory", "pickup", "return", "dispatch", "usage_reading", "qualification", "inspection_care", "vehicle_relocation"],
+    requiredCapabilities: [],
     terminology: { itemLabel: "车辆", itemGroupLabel: "车辆型号", assetLabel: "车辆", fulfillmentLabel: "门店", pickupLabel: "取车", returnLabel: "还车", identifierLabel: "车辆编号", usageMetricLabel: "里程", assetCollectionLabel: "车队", navigationLabels: { inventoryGroup: "车辆型号与车队", itemGroups: "厂牌车型管理", pricingGroups: "车辆定价分组", assets: "车辆管理", locations: "门店管理" } },
     attributeSchema: { manufacturer: "string", brand: "string", model: "string", trim: "string", modelYear: "number", seats: "number", transmission: "string", energyType: "string", licensePlate: "string", vin: "string", color: "string", firstRegistrationDate: "date", mileage: "number" },
     businessModel: {
@@ -4401,7 +4406,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     description: "工程机械、工具和配套设备租赁",
     supportedInventoryModes: [RentalInventoryMode.Serialized, RentalInventoryMode.Quantity, RentalInventoryMode.Bundle],
     defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery", "dispatch", "usage_reading", "qualification", "iot", "inspection_care", "construction_transport"],
-    requiredCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "dispatch", "usage_reading", "qualification", "inspection_care", "construction_transport"],
+    requiredCapabilities: [],
     terminology: { itemLabel: "设备", itemGroupLabel: "设备型号", assetLabel: "设备资产", fulfillmentLabel: "设备仓", pickupLabel: "出库", returnLabel: "入库", identifierLabel: "设备编号", usageMetricLabel: "工时", navigationLabels: { inventoryGroup: "工程设备", itemGroups: "设备型号", pricingGroups: "设备定价分组", assets: "设备台账与库存", locations: "设备仓库" } },
     attributeSchema: { manufacturer: "string", brand: "string", model: "string", power: "string", ratedLoad: "number", factoryNo: "string", hourMeter: "number" },
     businessModel: {
