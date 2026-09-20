@@ -531,7 +531,7 @@ export class PlatformService {
           id: "push_order_confirmed",
           category: "订单",
           title: "订单已确认",
-          content: "尊敬的{用户}，您的订单{订单号}已经确认，请准时取车。",
+          content: "尊敬的{用户}，您的订单{订单号}已经确认，请按约定时间办理领取。",
           trigger: "订单支付成功",
           channels: ["APP", "SMS"],
           enabled: true

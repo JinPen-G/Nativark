@@ -3260,10 +3260,10 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     input: { idempotencyKey: string; memo?: string; operator: string },
     tx: RentalFactTx
   ): Promise<{ order: RentalOrder; extension: RentalOrderExtension }> {
-    this.state(tenantId);
+    const state = this.state(tenantId);
     const order = await this.lockedOrder(tenantId, orderId, tx);
     if (order.status !== RentalCoreOrderStatus.Renting && order.status !== RentalCoreOrderStatus.ReadyForPickup) {
-      throw new ConflictException("只有待取车或租用中的订单可以续租");
+      throw new ConflictException(`只有待${state.profile.terminology.pickupLabel}或租用中的订单可以续租`);
     }
     const from = order.effectiveEndAt ?? order.endAt;
     // 试算与受理之间订单可能已被另一次续租推进过，那金额基准就不成立了。

@@ -4338,7 +4338,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     supportedInventoryModes: [RentalInventoryMode.Serialized],
     defaultCapabilities: ["serialized_inventory", "pickup", "return", "dispatch", "usage_reading", "qualification", "iot", "inspection_care", "vehicle_relocation"],
     requiredCapabilities: ["serialized_inventory", "pickup", "return", "dispatch", "usage_reading", "qualification", "inspection_care", "vehicle_relocation"],
-    terminology: { itemLabel: "车辆", itemGroupLabel: "车辆型号", assetLabel: "车辆", fulfillmentLabel: "门店", pickupLabel: "取车", returnLabel: "还车", identifierLabel: "车辆编号", usageMetricLabel: "里程", assetCollectionLabel: "车队", navigationLabels: { inventoryGroup: "车辆型号与车队", itemGroups: "厂牌车型管理", pricingGroups: "车组管理", assets: "车辆管理", locations: "门店管理" } },
+    terminology: { itemLabel: "车辆", itemGroupLabel: "车辆型号", assetLabel: "车辆", fulfillmentLabel: "门店", pickupLabel: "取车", returnLabel: "还车", identifierLabel: "车辆编号", usageMetricLabel: "里程", assetCollectionLabel: "车队", navigationLabels: { inventoryGroup: "车辆型号与车队", itemGroups: "厂牌车型管理", pricingGroups: "车辆定价分组", assets: "车辆管理", locations: "门店管理" } },
     attributeSchema: { manufacturer: "string", brand: "string", model: "string", trim: "string", modelYear: "number", seats: "number", transmission: "string", energyType: "string", licensePlate: "string", vin: "string", color: "string", firstRegistrationDate: "date", mileage: "number" },
     businessModel: {
       pricingUnits: ["hour", "day_24h", "calendar_day", "week", "month", "usage", "package"],
@@ -4363,7 +4363,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
         { code: "energyLevel", label: "油量/电量", scope: "transaction", type: "number", unit: "%" }
       ],
       catalogPresentation: {
-        itemGroupDescription: "维护厂商发布的车辆型号主档，例如宝马 3 系 325Li、奔驰 C 级 C260L。舒适轿车组、城市 SUV 组属于车组管理，不在这里建立。",
+        itemGroupDescription: "维护厂商发布的车辆型号主档，例如宝马 3 系 325Li、奔驰 C 级 C260L。舒适轿车组、城市 SUV 组属于车辆定价分组，不在这里建立。",
         itemGroupCodeLabel: "型号编码",
         itemGroupNameLabel: "车型显示名称",
         itemGroupNamePlaceholder: "如：荣威 D7 标准版",

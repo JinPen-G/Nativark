@@ -52,7 +52,7 @@ void (() => {
   const expectedByCode = {
     camera: { groups: { inventory: "摄影器材" }, routes: { itemGroups: "器材型号", pricingGroups: "器材定价分组", assets: "器材资产与库存", locations: "器材门店" } },
     camping: { groups: { inventory: "户外装备" }, routes: { itemGroups: "装备型号", pricingGroups: "装备定价分组", assets: "装备资产与库存", locations: "装备仓库" } },
-    vehicle: { groups: { inventory: "车辆型号与车队" }, routes: { itemGroups: "厂牌车型管理", pricingGroups: "车组管理", assets: "车辆管理", locations: "门店管理" } },
+    vehicle: { groups: { inventory: "车辆型号与车队" }, routes: { itemGroups: "厂牌车型管理", pricingGroups: "车辆定价分组", assets: "车辆管理", locations: "门店管理" } },
     construction: { groups: { inventory: "工程设备" }, routes: { itemGroups: "设备型号", pricingGroups: "设备定价分组", assets: "设备台账与库存", locations: "设备仓库" } }
   };
   for (const [code, expected] of Object.entries(expectedByCode)) {
@@ -68,18 +68,18 @@ void (() => {
   }
   ok("四个品类：菜单、分组与履约地点文案均由各自术语解析，不再是固定「商品/资产」");
 
-  // ============ 2. 车辆空间必须区分 车辆型号 / 车组 / 车辆 / 车队 / 门店 ============
+  // ============ 2. 车辆空间必须区分 车辆型号 / 车辆定价分组 / 车辆 / 车队 / 门店 ============
   const vehicle = resolveTenantNavigationLabels(byCode("vehicle").terminology);
   assert.equal(vehicle.routes.itemGroups, "厂牌车型管理", "车辆空间的目录菜单应明确这是厂商车型主档");
-  assert.equal(vehicle.routes.pricingGroups, "车组管理", "车辆空间的定价分组菜单应为车组管理");
+  assert.equal(vehicle.routes.pricingGroups, "车辆定价分组", "车辆空间的定价分组菜单应与其他品类使用同一命名结构");
   assert.equal(vehicle.routes.assets, "车辆管理", "车辆空间的资产菜单应为车辆管理");
   assert.equal(vehicle.routes.locations, "门店管理", "车辆空间的履约地点应为门店管理");
   assert.equal(vehicle.groups.inventory, "车辆型号与车队", "车辆空间的导航分组应为车辆型号与车队");
   const vehicleText = JSON.stringify(vehicle);
-  for (const word of ["车辆型号", "车组", "车辆", "车队", "门店"]) {
+  for (const word of ["车辆型号", "车辆定价分组", "车辆", "车队", "门店"]) {
     assert.ok(vehicleText.includes(word), `车辆空间导航缺少「${word}」语义`);
   }
-  ok("车辆空间：车辆型号 / 车组 / 车辆 / 车队 / 门店 五种语义齐备");
+  ok("车辆空间：车辆型号 / 车辆定价分组 / 车辆 / 车队 / 门店 五种语义齐备");
 
   // ============ 3. 换术语立刻换文案，且不依赖品类编码 ============
   const camera = resolveTenantNavigationLabels(byCode("camera").terminology);
@@ -121,7 +121,7 @@ void (() => {
   const inventory = applied.find((section) => section.key === "inventory");
   assert.equal(inventory.label, "车辆型号与车队", "分组文案必须被套用");
   assert.equal(inventory.routes.find((r) => r.path === PATHS.itemGroups).label, "厂牌车型管理", "目录菜单文案必须被套用");
-  assert.equal(inventory.routes.find((r) => r.path === PATHS.pricingGroups).label, "车组管理", "定价分组菜单文案必须被套用");
+  assert.equal(inventory.routes.find((r) => r.path === PATHS.pricingGroups).label, "车辆定价分组", "定价分组菜单文案必须被套用");
   assert.equal(inventory.routes.find((r) => r.path === PATHS.assets).label, "车辆管理", "资产菜单文案必须被套用");
   assert.equal(inventory.routes.find((r) => r.path === PATHS.locations).label, "门店管理", "履约地点文案必须被套用");
   // 只覆盖 label：其余路由元数据必须原样透传，否则「换说法」会顺手改掉门禁。

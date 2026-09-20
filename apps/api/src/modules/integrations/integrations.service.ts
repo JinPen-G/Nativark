@@ -1069,7 +1069,7 @@ function defaultNotificationTemplates(): NotificationTemplateSummary[] {
       category: "订单",
       trigger: "订单预授权成功或企业月结创建成功",
       channels: ["APP", "SMS"],
-      content: "尊敬的{用户}，您的订单{订单号}已经确认，请准时取车。",
+      content: "尊敬的{用户}，您的订单{订单号}已经确认，请按约定时间办理领取。",
       enabled: true,
       updatedAt: now
     },
@@ -1089,7 +1089,7 @@ function defaultNotificationTemplates(): NotificationTemplateSummary[] {
       code: "contract_signature",
       name: "租赁合约签署",
       category: "合同",
-      trigger: "取车阶段生成租赁合约",
+      trigger: "领取阶段生成租赁合约",
       channels: ["APP"],
       content: "您的租赁合约已生成，请在 APP 内完成签署。",
       enabled: true,

@@ -1,4 +1,6 @@
 const assert = require("node:assert/strict");
+const { readFileSync } = require("node:fs");
+const { join } = require("node:path");
 require("reflect-metadata");
 
 require("ts-node").register({
@@ -18,6 +20,11 @@ const {
 
 void (async () => {
   assert.equal(RENTAL_CATEGORY_DEFINITIONS.length, 4, "首批必须登记四个经营品类");
+  assert.equal(
+    RENTAL_CATEGORY_DEFINITIONS.find((category) => category.code === "vehicle").terminology.navigationLabels.pricingGroups,
+    "车辆定价分组",
+    "车辆空间必须沿用 品类+定价分组 的统一模块命名"
+  );
   assert.ok(
     RENTAL_CATEGORY_DEFINITIONS.every((category) =>
       category.businessModel.locationTypes.every((type) => RENTAL_LOCATION_TYPES.includes(type))
@@ -48,6 +55,16 @@ void (async () => {
       (await validate(input)).some((error) => error.property === "type"),
       `旧地点类型 ${legacyType} 必须被拒绝`
     );
+  }
+
+  const genericUiFiles = [
+    "apps/admin/src/features/catalog/CatalogPage.tsx",
+    "apps/admin/src/features/catalog/AssetWorkspacePage.tsx",
+    "apps/admin/src/features/commercial/PricingGroupPage.tsx",
+    "apps/admin/src/features/fulfillment/LocationPage.tsx"
+  ].map((file) => readFileSync(join(__dirname, "..", file), "utf8")).join("\n");
+  for (const vehicleOnlyText of ["舒适轿车组", "车牌/VIN", "具体单车", "车行、摄影合作商"]) {
+    assert.ok(!genericUiFiles.includes(vehicleOnlyText), `通用页面不得写死车辆文案：${vehicleOnlyText}`);
   }
 
   console.log("Rental category core alignment checks passed.");

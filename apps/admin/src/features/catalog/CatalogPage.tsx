@@ -137,7 +137,7 @@ export function CatalogPage() {
       <Drawer title={editing ? `编辑${itemGroupLabel}` : `新增${itemGroupLabel}`} size={760} open={drawerOpen} destroyOnHidden onClose={() => setDrawerOpen(false)} extra={<Button type="primary" loading={save.isPending} onClick={() => form.submit()}>保存</Button>}>
         <Form<SaveRentalItemGroupRequest> form={form} layout="vertical" onFinish={(values) => save.mutate({ ...values, inventoryMode: presentation?.fixedInventoryMode ?? values.inventoryMode, unit: presentation?.fixedUnit ?? values.unit, id: editing?.id })}>
           <Card size="small" title={`${itemGroupLabel}照片`} style={{ marginBottom: 16 }}>
-            <Typography.Paragraph type="secondary">上传厂牌车型或产品型号的标准展示图，第一张作为列表封面；具体车辆的实车、车况和损伤照片仍在车辆管理中维护。</Typography.Paragraph>
+            <Typography.Paragraph type="secondary">上传{itemGroupLabel}的标准展示图，第一张作为列表封面；具体{profile.data?.terminology.assetLabel ?? "资产"}的实拍、状态和损伤照片在“{resolveTenantNavigationLabels(profile.data?.terminology).routes.assets ?? "资产管理"}”中维护。</Typography.Paragraph>
             {editing?.images?.length ? <Space size={[12, 12]} wrap style={{ marginBottom: 12 }}>{editing.images.map((image) => <div key={image.id} style={{ position: "relative" }}><ItemGroupPhoto groupId={editing.id} image={image} size={112} />{image.isCover && <Tag color="blue" style={{ position: "absolute", left: 6, top: 6 }}>封面</Tag>}<Button danger size="small" shape="circle" icon={<DeleteOutlined />} loading={removeImage.isPending} onClick={() => removeImage.mutate({ groupId: editing.id, imageId: image.id })} style={{ position: "absolute", right: 6, top: 6 }} /></div>)}</Space> : null}
             <Upload
               accept="image/jpeg,image/png,image/webp"
@@ -163,7 +163,7 @@ export function CatalogPage() {
             {presentation?.fixedInventoryMode ? <Form.Item name="inventoryMode" hidden><Input /></Form.Item> : <Col span={12}><Form.Item name="inventoryMode" label="库存方式" rules={[{ required: true }]}><Select disabled={Boolean(editing)} options={category?.supportedInventoryModes.map((value) => ({ value, label: inventoryLabels[value] ?? value }))} /></Form.Item></Col>}
             {presentation?.fixedUnit ? <Form.Item name="unit" hidden><Input /></Form.Item> : <Col span={12}><Form.Item name="unit" label="计量单位" rules={[{ required: true }]}><Input placeholder="台、套、顶、辆" /></Form.Item></Col>}
           </Row>
-          {presentation?.fixedInventoryMode && <Typography.Text type="secondary">该品类固定按“{inventoryLabels[presentation.fixedInventoryMode]} / {presentation.fixedUnit}”管理，具体单车在车辆管理中登记。</Typography.Text>}
+          {presentation?.fixedInventoryMode && <Typography.Text type="secondary">该品类固定按“{inventoryLabels[presentation.fixedInventoryMode]} / {presentation.fixedUnit}”管理，具体{profile.data?.terminology.assetLabel ?? "资产"}在“{resolveTenantNavigationLabels(profile.data?.terminology).routes.assets ?? "资产管理"}”中登记。</Typography.Text>}
           </Card>
           <Card size="small" title={`${category?.name ?? "品类"}厂商与型号规格`} style={{ marginBottom: 16 }}>
             <Row gutter={12}>{groupFields.map((field) => <Col span={12} key={field.code}><Form.Item name={["attributes", field.code]} label={field.label} extra={field.unique ? "当前经营空间内不可重复" : undefined} rules={[{ required: field.required }]} valuePropName={field.type === "boolean" ? "checked" : "value"}><AttributeInput field={field} /></Form.Item></Col>)}</Row>

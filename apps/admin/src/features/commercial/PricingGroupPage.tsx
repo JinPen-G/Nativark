@@ -42,6 +42,8 @@ export function PricingGroupPage() {
     [pricingGroups.data, keyword]
   );
   const routeLabel = resolveTenantNavigationLabels(profile.data?.terminology).routes.pricingGroups ?? "定价分组";
+  const itemLabel = profile.data?.terminology.itemLabel ?? "商品";
+  const itemGroupLabel = profile.data?.terminology.itemGroupLabel ?? "产品型号";
 
   function edit(record?: RentalPricingGroup) {
     if (!settings.data) {
@@ -70,10 +72,10 @@ export function PricingGroupPage() {
   return <>
     <PageHeader
       title={routeLabel}
-      description={`建立面向客户的${profile.data?.terminology.itemLabel ?? "商品"}价格档位，并选择可承接该档位的${profile.data?.terminology.itemGroupLabel ?? "产品型号"}。`}
+      description={`建立面向客户的${itemLabel}价格档位，并选择可承接该档位的${itemGroupLabel}。`}
       note={{
-        title: "定价分组不是产品型号",
-        description: "例如“舒适轿车组”可包含宝马 3 系、奔驰 C 级。一个型号可进入多个分组，但资产与库存只维护一份，报价后由系统选择实际承接型号。"
+        title: `定价分组不是${itemGroupLabel}`,
+        description: `一个定价分组可以包含多个${itemGroupLabel}；同一${itemGroupLabel}也可以加入多个定价分组。资产与库存始终只维护一份，报价后由系统选择实际承接型号。`
       }}
       extra={<Button type="primary" icon={<PlusOutlined />} disabled={settings.isLoading || settings.isError} onClick={() => edit()}>新增定价分组</Button>}
     />
@@ -96,7 +98,7 @@ export function PricingGroupPage() {
     <Drawer title={editing ? "编辑定价分组" : "新增定价分组"} size={640} open={open} destroyOnHidden onClose={() => setOpen(false)} extra={<Button type="primary" loading={save.isPending} onClick={() => form.submit()}>保存</Button>}>
       <Form<SaveRentalPricingGroupRequest> form={form} layout="vertical" onFinish={(values) => save.mutate({ ...values, id: editing?.id, defaultPricingUnit: editing ? values.defaultPricingUnit : values.initialRates?.[0]?.unit })}>
         <Form.Item name="code" label="分组编码" rules={[{ required: true }]}><Input disabled={Boolean(editing)} placeholder="COMFORT_SEDAN" /></Form.Item>
-        <Form.Item name="name" label="分组名称" rules={[{ required: true }]}><Input placeholder="舒适轿车组" /></Form.Item>
+        <Form.Item name="name" label="分组名称" rules={[{ required: true }]}><Input placeholder={`如：标准${itemLabel}分组`} /></Form.Item>
         <Form.Item name="memberItemGroupIds" label={`包含的${profile.data?.terminology.itemGroupLabel ?? "产品型号"}`} rules={[{ required: true, type: "array", min: 1 }]} extra="同一型号可以加入多个定价分组；库存不会因此复制。">
           <Select mode="multiple" showSearch={{ optionFilterProp: "label" }} optionRender={(option) => {
             const model = (models.data ?? []).find((item) => item.id === option.value);
