@@ -1,3 +1,4 @@
+<page-meta page-style="{{themeStyle}}"></page-meta>
 <view class="screen screen--flat login">
   <nav-bar></nav-bar>
   <view class="login__brand">

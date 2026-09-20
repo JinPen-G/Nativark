@@ -1,3 +1,4 @@
+<page-meta page-style="{{themeStyle}}"></page-meta>
 <view class="screen">
   <nav-bar></nav-bar>
 
@@ -56,9 +57,12 @@
       </view>
     </view>
 
-    <view wx:if="{{store}}" class="section section--tight">
-      <view class="section-head"><view class="section-title">附近服务点</view></view>
-      <view class="card store" hover-class="btn-hover" bindtap="onStoreTap">
+    <view wx:if="{{hasStores}}" class="section section--tight">
+      <view class="section-head">
+        <view class="section-title">附近服务点</view>
+        <view wx:if="{{!hasLocation}}" class="link small" hover-class="btn-hover" bindtap="onLocateNearby">{{locating ? '定位中…' : locationDenied ? '重新获取定位' : '获取附近门店'}}</view>
+      </view>
+      <view wx:if="{{store}}" class="card store" hover-class="btn-hover" bindtap="onStoreTap">
         <view class="store__icon"><ui-icon name="store" size="52" color="#1677FF" stroke="1.6"></ui-icon></view>
         <view class="grow">
           <view class="row row--between">
@@ -70,6 +74,7 @@
         </view>
         <ui-icon name="chevron-right" size="32" color="#B4BBC8"></ui-icon>
       </view>
+      <view wx:if="{{!hasLocation}}" class="muted small mt-8">{{locationDenied ? '未获得定位授权，以上为推荐门店；开启定位可看最近门店与距离。' : '以上为推荐门店，点上方“获取附近门店”按距离排序。'}}</view>
     </view>
   </block>
 </view>

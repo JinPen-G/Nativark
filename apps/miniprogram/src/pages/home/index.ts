@@ -1,6 +1,8 @@
+import type { ClientCatalogLocation, ClientCatalogResponse } from "@rental-os/shared";
 import { configProblem } from "../../config/public";
 import { cachedCatalog, hydrateImages, loadCatalog, nearestLocation, primaryLocation, searchItems, setPendingSearch, toItemCard, type ItemCard } from "../../core/catalogStore";
-import { cachedUserLocation, distanceMeters, formatDistance } from "../../core/geo";
+import { cachedUserLocation, distanceMeters, formatDistance, requestUserLocation, type GeoPoint } from "../../core/geo";
+import { themeStyle } from "../../core/theme";
 import { isApiError } from "../../core/http";
 import { categoryIcon } from "../../core/labels";
 import { cachedMerchant, findService, loadMerchant, merchantEvents, resolveServiceCode, type MerchantInfo } from "../../core/merchant";
@@ -20,11 +22,17 @@ interface HomeData {
   view: ViewState;
   merchantView: ViewState;
   servicePhone: string;
+  /** 附近服务点：仅在真实拿到用户定位后显示最近门店；未定位时展示提示+按钮。 */
   store?: { id: string; name: string; address: string; hours: string; phone: string; distanceText: string };
+  hasLocation: boolean;
+  locating: boolean;
+  locationDenied: boolean;
+  hasStores: boolean;
   signedIn: boolean;
   serviceName: string;
   bannerTitle: string;
   bannerSubtitle: string;
+  themeStyle: string;
 }
 
 const HOT_LIMIT = 6;
@@ -40,7 +48,12 @@ Page({
     signedIn: false,
     serviceName: "",
     bannerTitle: "",
-    bannerSubtitle: ""
+    bannerSubtitle: "",
+    themeStyle: "",
+    hasLocation: false,
+    locating: false,
+    locationDenied: false,
+    hasStores: false
   } as HomeData,
 
   serviceCode: "" as string,
@@ -48,6 +61,8 @@ Page({
   requestedServiceCode: "" as string,
   unsubscribe: [] as Array<() => void>,
   loadVersion: 0,
+  /** 当前服务的门店列表（附近服务点据此按定位算最近，或退回推荐门店）。 */
+  locations: [] as ClientCatalogLocation[],
 
   onLoad(options: Record<string, string | undefined>) {
     this.requestedServiceCode = String(options.service ?? "").slice(0, 64);
@@ -121,6 +136,7 @@ Page({
       // 首页横幅：优先用商户后台配置文案，缺省用品牌/默认文案，不显示技术词。
       bannerTitle: info.banner?.title || "",
       bannerSubtitle: info.banner?.subtitle || "",
+      themeStyle: themeStyle(info.themeColor),
       merchantView: services.length ? readyState() : blockedState("商户暂未开放服务", "当前没有可租用的服务，请稍后再来或联系商户。", info.servicePhone ? "联系商户" : "", "contact")
     });
     if (!resolved) {
@@ -145,16 +161,14 @@ Page({
       if (token !== this.loadVersion || version !== contextVersion()) return;
       const items = searchItems(catalog.items, "", "").slice(0, HOT_LIMIT);
       const cards = items.map(toItemCard);
-      // 已授权定位（用户在服务点页开过）时，首页“附近服务点”选最近的一家并显示距离；否则用默认门店，不在首页主动弹定位。
-      const here = cachedUserLocation();
-      const store = nearestLocation(catalog.locations, here) ?? primaryLocation(catalog);
-      const storeMeters = store && here && typeof store.latitude === "number" && typeof store.longitude === "number"
-        ? distanceMeters(here, { latitude: store.latitude, longitude: store.longitude }) : undefined;
+      // 附近服务点必须先有真实定位：留住门店列表，按当前是否已授权渲染门店或提示。
+      this.locations = catalog.locations;
       this.setData({
         cards,
-        store: store ? { id: store.id, name: store.name, address: store.address ?? "", hours: store.businessHours ?? "", phone: store.contactPhone ?? "", distanceText: formatDistance(storeMeters) } : undefined,
+        hasStores: catalog.locations.some((row) => row.status === "enabled"),
         view: cards.length ? readyState() : emptyState("当前服务暂无设备", "商户还没有在此服务上架设备。", "", "", "none")
       });
+      this.renderNearby(cachedUserLocation());
       hydrateImages(cards, (index, path) => {
         if (version !== contextVersion() || this.data.cards[index]?.id !== cards[index].id) return;
         this.setData({ [`cards[${index}].imagePath`]: path });
@@ -200,6 +214,36 @@ Page({
     } catch (error) {
       this.setData({ view: errorState(error) });
     }
+  },
+
+  /**
+   * 附近服务点：未定位时显示推荐门店（第一家可取门店）并保留"获取定位"按钮；
+   * 已定位时显示最近门店与距离。门店无坐标则仍显示推荐门店，只是不带距离。
+   */
+  renderNearby(here: GeoPoint | undefined) {
+    const list = this.locations.filter((row: ClientCatalogLocation) => row.status === "enabled");
+    if (!list.length) {
+      this.setData({ store: undefined, hasStores: false });
+      return;
+    }
+    const located = Boolean(here);
+    const store = (located ? nearestLocation(list, here) : undefined) ?? primaryLocation({ locations: list } as ClientCatalogResponse);
+    const meters = located && store && typeof store.latitude === "number" && typeof store.longitude === "number"
+      ? distanceMeters(here, { latitude: store.latitude, longitude: store.longitude }) : undefined;
+    this.setData({
+      hasStores: true,
+      hasLocation: located,
+      store: store ? { id: store.id, name: store.name, address: store.address ?? "", hours: store.businessHours ?? "", phone: store.contactPhone ?? "", distanceText: formatDistance(meters) } : undefined
+    });
+  },
+
+  /** 用户主动点"获取定位"才请求位置；拒绝后标记 denied（保留推荐门店，不再自动弹）。 */
+  async onLocateNearby() {
+    if (this.data.locating) return;
+    this.setData({ locating: true });
+    const here = await requestUserLocation();
+    this.setData({ locating: false, locationDenied: !here });
+    this.renderNearby(here);
   },
 
   onMore() {

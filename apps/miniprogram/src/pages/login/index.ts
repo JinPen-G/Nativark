@@ -6,6 +6,7 @@ import { newKey } from "../../core/keys";
 import { cachedMerchant, loadMerchant, preferredServiceCode, resolveServiceCode, type MerchantInfo } from "../../core/merchant";
 import { type FieldErrors } from "../../core/page";
 import { isSignedIn } from "../../core/session";
+import { themeStyle } from "../../core/theme";
 import { ROUTES, buildUrl, callPhone, navigate, redirect, safeRoute, toast } from "../../core/ui";
 
 /**
@@ -38,6 +39,7 @@ interface LoginData {
   submitting: boolean;
   errors: FieldErrors;
   formError: string;
+  themeStyle: string;
 }
 
 Page({
@@ -64,7 +66,8 @@ Page({
     agreed: false,
     submitting: false,
     errors: {},
-    formError: ""
+    formError: "",
+    themeStyle: ""
   } as LoginData,
 
   redirectTo: ROUTES.home as string,
@@ -104,7 +107,8 @@ Page({
       smsAvailable: info.loginMethods.includes("sms"),
       authMode: info.loginMethods.includes("password") ? this.data.authMode : info.loginMethods.includes("sms") ? "sms" : this.data.authMode,
       showPassword: !info.loginMethods.includes("wechat_phone") || this.data.showPassword,
-      wechatNotice: info.loginMethods.includes("wechat_phone") ? "" : "商户尚未开通微信手机号一键登录，请使用其他方式登录。"
+      wechatNotice: info.loginMethods.includes("wechat_phone") ? "" : "商户尚未开通微信手机号一键登录，请使用其他方式登录。",
+      themeStyle: themeStyle(info.themeColor)
     });
   },
 

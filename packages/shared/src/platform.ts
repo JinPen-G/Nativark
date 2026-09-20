@@ -783,6 +783,8 @@ export interface ClientChannelProfileSummary {
   helpFaq: ClientChannelFaqItem[];
   bannerTitle?: string;
   bannerSubtitle?: string;
+  /** 客户端主题色（#RRGGBB）；未设置时客户端用系统默认色。 */
+  themeColor?: string;
   smsLoginEnabled: boolean;
   passwordLoginEnabled: boolean;
   publishedWorkspaceIds: string[];
@@ -805,6 +807,8 @@ export interface SaveClientChannelProfileRequest {
   helpFaq?: ClientChannelFaqItem[];
   bannerTitle?: string;
   bannerSubtitle?: string;
+  /** 客户端主题色（#RRGGBB）；留空表示回退系统默认色。 */
+  themeColor?: string;
   smsLoginEnabled: boolean;
   passwordLoginEnabled: boolean;
   publishedWorkspaceIds: string[];

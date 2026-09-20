@@ -15,6 +15,7 @@ import { blockedState, errorState, handleCommonViewAction, loadingState, readySt
 import { jsapiEnabled, offlineMethods } from "../../core/payment";
 import { contextVersion, currentServiceCode, membershipStatus } from "../../core/session";
 import { formatBusinessDate, formatBusinessTime, splitInstant, todayInZone, zoneLabel, zonedToInstant } from "../../core/time";
+import { bindTheme } from "../../core/theme";
 import { ROUTES, buildUrl, navigate, redirect, requireSignIn, toast } from "../../core/ui";
 import { rememberZone, zoneOf } from "../../core/zones";
 
@@ -98,6 +99,7 @@ interface CheckoutData {
   locked: boolean;
   formError: string;
   ruleVersion: string;
+  themeStyle: string;
 }
 
 const DEFAULT_ZONE = "Asia/Shanghai";
@@ -149,7 +151,8 @@ Page({
     submitting: false,
     locked: false,
     formError: "",
-    ruleVersion: ""
+    ruleVersion: "",
+    themeStyle: ""
   } as CheckoutData,
 
   catalog: undefined as ClientCatalogResponse | undefined,
@@ -158,9 +161,11 @@ Page({
   /** 当前服务所有已启用地点；按取送方式再筛出可领取（pickup）或可发货（delivery）的门店。 */
   allLocations: [] as ClientCatalogLocation[],
   ticker: undefined as number | undefined,
+  themeOff: undefined as (() => void) | undefined,
   requestVersion: 0,
 
   onLoad() {
+    this.themeOff = bindTheme(this);
     if (!requireSignIn(ROUTES.checkout)) return;
   },
 
@@ -175,6 +180,7 @@ Page({
 
   onUnload() {
     this.stopTicker();
+    this.themeOff?.();
   },
 
   startTicker() {

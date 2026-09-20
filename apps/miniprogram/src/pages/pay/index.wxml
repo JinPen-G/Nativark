@@ -1,3 +1,4 @@
+<page-meta page-style="{{themeStyle}}"></page-meta>
 <view class="screen">
   <nav-bar title="付款"></nav-bar>
   <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>

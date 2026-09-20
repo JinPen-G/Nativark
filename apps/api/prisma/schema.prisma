@@ -693,6 +693,8 @@ model ClientChannelProfile {
   helpFaqJson          Json?
   bannerTitle          String?                  @db.VarChar(64)
   bannerSubtitle       String?                  @db.VarChar(120)
+  /// 客户端主题色（#RRGGBB）；客户端覆盖 --primary 系列，未设置则用系统默认蓝。
+  themeColor           String?                  @db.VarChar(16)
   smsLoginEnabled      Boolean                  @default(true)
   passwordLoginEnabled Boolean                  @default(true)
   defaultWorkspaceId   String?

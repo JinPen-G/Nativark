@@ -29,6 +29,8 @@ export interface MerchantInfo {
   help?: ClientChannelBootstrapResponse["help"];
   /** 首页横幅文案；缺省时页面用品牌文案。 */
   banner?: ClientChannelBootstrapResponse["banner"];
+  /** 客户端主题色（#RRGGBB）；未设置时页面用系统默认色。 */
+  themeColor?: string;
   loginMethods: Array<"wechat_phone" | "sms" | "password">;
   capabilities: ClientChannelBootstrapResponse["capabilities"];
   services: MerchantService[];
@@ -73,6 +75,7 @@ function fromBootstrap(contract: ClientChannelBootstrapResponse): MerchantInfo {
     agreements: contract.agreements,
     help: contract.help,
     banner: contract.banner,
+    themeColor: contract.themeColor,
     loginMethods: contract.loginMethods.length ? contract.loginMethods : ["password"],
     capabilities: contract.capabilities,
     services,

@@ -297,6 +297,7 @@ export class ClientApiService {
       agreements,
       help: { available: Boolean(profile.helpIntro?.trim()) || faqCount > 0, faqCount },
       banner: profile.bannerTitle?.trim() ? { title: profile.bannerTitle.trim(), subtitle: profile.bannerSubtitle?.trim() || undefined } : undefined,
+      themeColor: profile.themeColor ?? undefined,
       loginMethods: safeLoginMethods,
       capabilities: { publicCatalog: services.length > 0, wechatPay: isMiniProgram && wechatPayReady && wechatReady, delivery: deliveryEnabled, feeResponse: true, accountClosure: true },
       source: "channel"

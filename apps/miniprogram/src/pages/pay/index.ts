@@ -9,6 +9,7 @@ import { cachedMerchant } from "../../core/merchant";
 import { formatMoney } from "../../core/money";
 import { blockedState, errorState, handleCommonViewAction, loadingState, readyState, type ViewState } from "../../core/page";
 import { forgetIntent, jsapiEnabled, launchPayment, obtainIntent, offlineMethods, rememberedIntent, rentalDue, verifyPayment, verifyWithRetries } from "../../core/payment";
+import { bindTheme } from "../../core/theme";
 import { ROUTES, buildUrl, callPhone, confirmDialog, navigate, redirect, requireSignIn } from "../../core/ui";
 import { bindWechatIdentity, isWechatIdentityRequired } from "../../core/wechat";
 
@@ -44,6 +45,7 @@ interface PayData {
   attempts: number;
   fromCheckout: boolean;
   error: string;
+  themeStyle: string;
 }
 
 Page({
@@ -66,15 +68,18 @@ Page({
     servicePhone: "",
     attempts: 0,
     fromCheckout: false,
-    error: ""
+    error: "",
+    themeStyle: ""
   } as PayData,
 
   orderId: "" as string,
   ticker: undefined as number | undefined,
+  themeOff: undefined as (() => void) | undefined,
   busy: false,
 
   onLoad(options: Record<string, string | undefined>) {
     this.orderId = options.id ?? "";
+    this.themeOff = bindTheme(this);
     this.setData({ fromCheckout: options.from === "checkout", servicePhone: cachedMerchant()?.servicePhone ?? "" });
     if (!requireSignIn(buildUrl(ROUTES.pay, { id: this.orderId }))) return;
   },
@@ -90,6 +95,7 @@ Page({
 
   onUnload() {
     if (this.ticker) clearInterval(this.ticker);
+    this.themeOff?.();
   },
 
   tick() {

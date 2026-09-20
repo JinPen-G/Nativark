@@ -42,7 +42,7 @@ const publishedProfile = {
   brandName: "光影租赁", brandLogoUrl: "https://cdn.example.invalid/logo.png", customerServicePhone: "021-000", customerServiceHours: "9-18",
   userAgreementName: "用户服务协议", userAgreementVersion: "2026-09", userAgreementUrl: null, userAgreementBody: "协议正文",
   privacyPolicyName: "隐私政策", privacyPolicyVersion: "2026-09", privacyPolicyUrl: null, privacyPolicyBody: "隐私正文",
-  helpIntro: "帮助说明", helpFaqJson: [{ question: "怎么租", answer: "选设备下单" }], bannerTitle: "去露营", bannerSubtitle: "装备齐全",
+  helpIntro: "帮助说明", helpFaqJson: [{ question: "怎么租", answer: "选设备下单" }], bannerTitle: "去露营", bannerSubtitle: "装备齐全", themeColor: "#FF6600",
   smsLoginEnabled: true, passwordLoginEnabled: true, defaultWorkspaceId: "w-cam",
   updatedAt: new Date("2026-09-19T00:00:00Z"),
   publishedWorkspaces: [{ workspaceId: "w-cam", enabled: true, workspace: { code: "camera", name: "摄影器材", categoryCode: "camera", isDefault: true, status: "ACTIVE" } }]
@@ -57,6 +57,7 @@ test("bootstrap: 微信渠道就绪时小程序开放微信一键登录与微信
   assert.equal(mp.source, "channel");
   assert.equal(mp.merchant.name, "光影租赁");
   assert.deepEqual(mp.banner, { title: "去露营", subtitle: "装备齐全" });
+  assert.equal(mp.themeColor, "#FF6600", "启动配置带出租户主题色");
   assert.equal(mp.help.available, true);
   assert.equal(mp.help.faqCount, 1);
   assert.equal(mp.agreements.userAgreement.hasBody, true);
@@ -110,9 +111,9 @@ test("public documents: 协议返回正文，帮助返回 FAQ，未提供时 404
 });
 
 test("profile save: 就绪判定要求品牌/客服/两份协议正文/至少一个发布服务；发布服务必须属于本租户且启用", async () => {
-  const calls = { upserts: [], deletes: 0 };
+  const calls = { upserts: [], deletes: 0, written: null };
   const tx = {
-    clientChannelProfile: { update: async ({ data }) => ({ id: "p1", ...data }), create: async ({ data }) => ({ id: "p1", ...data }) },
+    clientChannelProfile: { update: async ({ data }) => { calls.written = data; return { id: "p1", ...data }; }, create: async ({ data }) => { calls.written = data; return { id: "p1", ...data }; } },
     clientChannelWorkspace: { deleteMany: async () => { calls.deletes += 1; }, upsert: async ({ create }) => { calls.upserts.push(create.workspaceId); } }
   };
   let stored = null;
@@ -139,6 +140,15 @@ test("profile save: 就绪判定要求品牌/客服/两份协议正文/至少一
   assert.equal(summary.readiness.ready, true);
   assert.deepEqual(summary.readiness.missing, []);
   assert.deepEqual(calls.upserts, ["w-cam"]);
+
+  // 主题色：#RGB 展开为大写 #RRGGBB 落库。
+  await svc.save({ smsLoginEnabled: true, passwordLoginEnabled: true, publishedWorkspaceIds: ["w-cam"], brandName: "光影", customerServicePhone: "021", themeColor: "#f60" }, user);
+  assert.equal(calls.written.themeColor, "#FF6600", "主题色 #RGB 归一化为大写 #RRGGBB");
+  // 留空 → null（回退系统色）。
+  await svc.save({ smsLoginEnabled: true, passwordLoginEnabled: true, publishedWorkspaceIds: ["w-cam"], brandName: "光影", customerServicePhone: "021" }, user);
+  assert.equal(calls.written.themeColor, null, "未设主题色落 null");
+  // 非法色拒绝。
+  await assert.rejects(svc.save({ smsLoginEnabled: true, passwordLoginEnabled: true, publishedWorkspaceIds: ["w-cam"], themeColor: "red" }, user), status(400));
 
   // 默认服务不在已发布集合内 → 拒绝。
   await assert.rejects(svc.save({ smsLoginEnabled: true, passwordLoginEnabled: true, publishedWorkspaceIds: ["w-cam"], defaultWorkspaceId: "w-nope" }, user), status(400));

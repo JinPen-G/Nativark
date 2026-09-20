@@ -739,6 +739,28 @@ test("面向客户的用词不暴露内部枚举，未知取值原样返回而�
   assert.equal(labels.categoryLabel(undefined), "");
 });
 
+test("主题色：#RGB 展开、覆盖主色三件套；系统色/非法/未设置回退空串（用系统默认）", () => {
+  const r = runtime();
+  const merchant = r.load("core/merchant");
+  const theme = r.load("core/theme");
+  // 直接传色：合法色返回覆盖串，含 --primary/--primary-dark/--primary-weak。
+  const style = theme.themeStyle("#FF6600");
+  assert.match(style, /--primary:\s*#FF6600/);
+  assert.match(style, /--primary-dark:\s*#[0-9A-F]{6}/);
+  assert.match(style, /--primary-weak:\s*rgba\(255, 102, 0, 0\.12\)/);
+  // #RGB 展开为 #RRGGBB。
+  assert.match(theme.themeStyle("#f60"), /--primary:\s*#FF6600/);
+  // 系统默认色不产生覆盖（省得无谓 setData）。
+  assert.equal(theme.themeStyle("#1677FF"), "");
+  // 非法值、空、未设置一律回退空串。
+  assert.equal(theme.themeStyle("red"), "");
+  assert.equal(theme.themeStyle(""), "");
+  assert.equal(theme.themeStyle(undefined), "");
+  // 无缓存商户时也回退空串，不抛错。
+  merchant.resetMerchantForTest?.();
+  assert.equal(theme.themeStyle(), "");
+});
+
 test("门店距离：Haversine 估算与降级；无坐标/无位置不显示距离，最近门店只选可领取且有坐标者", () => {
   const r = runtime();
   const geo = r.load("core/geo");

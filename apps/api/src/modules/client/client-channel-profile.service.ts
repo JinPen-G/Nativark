@@ -34,6 +34,17 @@ function text(value: unknown, max: number, label: string): string | null {
   return normalized;
 }
 
+/** 主题色归一化：空值透传 null（回退系统色）；#RGB 展开为 #RRGGBB 并统一大写；非法值拒绝。 */
+function normalizeThemeColor(value: string | undefined): string | null {
+  if (value === undefined || value === null) return null;
+  const raw = value.trim();
+  if (!raw) return null;
+  const m = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/u.exec(raw);
+  if (!m) throw new BadRequestException("主题色需为 #RRGGBB 十六进制颜色");
+  const hex = m[1].length === 3 ? m[1].split("").map((c) => c + c).join("") : m[1];
+  return `#${hex.toUpperCase()}`;
+}
+
 function normalizeFaq(items: SaveClientChannelProfileRequest["helpFaq"]): ClientChannelFaqItem[] {
   if (!items?.length) return [];
   const out: ClientChannelFaqItem[] = [];
@@ -118,6 +129,7 @@ export class ClientChannelProfileService {
       helpFaq: readFaq(row?.helpFaqJson ?? null),
       bannerTitle: row?.bannerTitle ?? undefined,
       bannerSubtitle: row?.bannerSubtitle ?? undefined,
+      themeColor: row?.themeColor ?? undefined,
       smsLoginEnabled: row?.smsLoginEnabled ?? true,
       passwordLoginEnabled: row?.passwordLoginEnabled ?? true,
       publishedWorkspaceIds,
@@ -194,6 +206,7 @@ export class ClientChannelProfileService {
       helpFaqJson: faq as unknown as Prisma.InputJsonValue,
       bannerTitle: text(input.bannerTitle, 64, "首页横幅标题"),
       bannerSubtitle: text(input.bannerSubtitle, 120, "首页横幅副标题"),
+      themeColor: normalizeThemeColor(input.themeColor),
       smsLoginEnabled: Boolean(input.smsLoginEnabled),
       passwordLoginEnabled: Boolean(input.passwordLoginEnabled),
       defaultWorkspaceId

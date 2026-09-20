@@ -735,6 +735,8 @@ export interface ClientChannelBootstrapResponse {
   help: { available: boolean; faqCount: number };
   /** 首页横幅文案；缺省时客户端用品牌文案。 */
   banner?: { title: string; subtitle?: string };
+  /** 客户端主题色（#RRGGBB）；客户端据此覆盖主色，未设置时用系统默认色。 */
+  themeColor?: string;
   loginMethods: ClientLoginMethod[];
   capabilities: {
     publicCatalog: boolean;

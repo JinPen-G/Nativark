@@ -297,7 +297,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       configured: booleanSchema, revision: numberSchema,
       brandName: stringSchema, brandLogoUrl: stringSchema, customerServicePhone: stringSchema, customerServiceHours: stringSchema,
       userAgreement: ref("ClientChannelAgreementConfig"), privacyPolicy: ref("ClientChannelAgreementConfig"),
-      helpIntro: stringSchema, helpFaq: arrayOf("ClientChannelFaqItem"), bannerTitle: stringSchema, bannerSubtitle: stringSchema,
+      helpIntro: stringSchema, helpFaq: arrayOf("ClientChannelFaqItem"), bannerTitle: stringSchema, bannerSubtitle: stringSchema, themeColor: stringSchema,
       smsLoginEnabled: booleanSchema, passwordLoginEnabled: booleanSchema,
       publishedWorkspaceIds: arrayOf(stringSchema), defaultWorkspaceId: stringSchema,
       workspaces: arrayOf("ClientChannelWorkspaceOption"),
@@ -311,7 +311,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     {
       expectedRevision: numberSchema, brandName: stringSchema, brandLogoUrl: stringSchema, customerServicePhone: stringSchema, customerServiceHours: stringSchema,
       userAgreement: ref("ClientChannelAgreementConfig"), privacyPolicy: ref("ClientChannelAgreementConfig"),
-      helpIntro: stringSchema, helpFaq: arrayOf("ClientChannelFaqItem"), bannerTitle: stringSchema, bannerSubtitle: stringSchema,
+      helpIntro: stringSchema, helpFaq: arrayOf("ClientChannelFaqItem"), bannerTitle: stringSchema, bannerSubtitle: stringSchema, themeColor: stringSchema,
       smsLoginEnabled: booleanSchema, passwordLoginEnabled: booleanSchema, publishedWorkspaceIds: arrayOf(stringSchema), defaultWorkspaceId: stringSchema
     },
     ["smsLoginEnabled", "passwordLoginEnabled", "publishedWorkspaceIds"]
@@ -1058,6 +1058,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       }, ["userAgreement", "privacyPolicy"], false),
       help: objectOf({ available: booleanSchema, faqCount: numberSchema }, ["available", "faqCount"], false),
       banner: objectOf({ title: stringSchema, subtitle: stringSchema }, ["title"], false),
+      themeColor: stringSchema,
       loginMethods: arrayOf({ type: "string", enum: ["wechat_phone", "sms", "password"] }),
       capabilities: objectOf({ publicCatalog: booleanSchema, wechatPay: booleanSchema, delivery: booleanSchema, feeResponse: booleanSchema, accountClosure: booleanSchema }, ["publicCatalog", "wechatPay", "delivery", "feeResponse", "accountClosure"], false),
       source: { type: "string", enum: ["channel", "workspace_directory"] }

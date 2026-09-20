@@ -12,6 +12,9 @@ function ProfileCard() {
   const [form] = Form.useForm<ProfileForm>();
   const { message } = App.useApp();
   const queryClient = useQueryClient();
+  // 原生取色器需要合法 #RRGGBB；表单里可能是 #RGB 或空，展示时归一化，不回写表单值。
+  const themeColorValue = Form.useWatch("themeColor", form);
+  const themeColorSwatch = /^#[0-9a-fA-F]{6}$/.test(themeColorValue ?? "") ? (themeColorValue as string) : /^#[0-9a-fA-F]{3}$/.test(themeColorValue ?? "") ? "#" + (themeColorValue as string).slice(1).split("").map((c) => c + c).join("") : "#1677FF";
   const profile = useQuery({ queryKey: ["client-channel-profile"], queryFn: clientChannelApi.getProfile });
 
   useEffect(() => {
@@ -29,6 +32,7 @@ function ProfileCard() {
       helpFaq: data.helpFaq ?? [],
       bannerTitle: data.bannerTitle,
       bannerSubtitle: data.bannerSubtitle,
+      themeColor: data.themeColor,
       smsLoginEnabled: data.smsLoginEnabled,
       passwordLoginEnabled: data.passwordLoginEnabled,
       publishedWorkspaceIds: data.publishedWorkspaceIds,
@@ -75,6 +79,11 @@ function ProfileCard() {
           <Row gutter={[16, 0]}>
             <Col xs={24} md={12}><Form.Item name="bannerTitle" label="横幅标题" extra="缺省使用品牌文案"><Input maxLength={64} /></Form.Item></Col>
             <Col xs={24} md={12}><Form.Item name="bannerSubtitle" label="横幅副标题"><Input maxLength={120} /></Form.Item></Col>
+            <Col xs={24} md={12}>
+              <Form.Item name="themeColor" label="主题色" tooltip="留空使用系统默认蓝 #1677FF；设置后小程序主按钮等主色跟随" extra="小程序内客户端主色；#RRGGBB，留空回退系统色" rules={[{ pattern: /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, message: "请输入 #RRGGBB 十六进制颜色" }]}>
+                <Input maxLength={7} allowClear placeholder="#1677FF" addonBefore={<input type="color" value={themeColorSwatch} onChange={(e) => form.setFieldValue("themeColor", e.target.value.toUpperCase())} style={{ width: 28, height: 22, border: "none", background: "transparent", padding: 0, cursor: "pointer" }} aria-label="选择主题色" />} />
+              </Form.Item>
+            </Col>
           </Row>
         </Card>
 

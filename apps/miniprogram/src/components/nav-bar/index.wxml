@@ -1,7 +1,7 @@
 <view class="nav {{transparent ? 'nav--transparent' : ''}}">
   <view class="nav__status" style="height: {{statusBarHeight}}px;"></view>
   <view class="nav__brand" style="height: {{navBarHeight}}px; padding-right: {{capsuleReserve}}px;">
-    <image class="nav__logo" src="/assets/logo.png" mode="heightFix"></image>
+    <image class="nav__logo" src="{{logo}}" mode="heightFix" binderror="onLogoError"></image>
   </view>
   <view wx:if="{{title}}" class="nav__title-row" style="height: {{titleRowHeight}}px;">
     <view wx:if="{{back}}" class="nav__back" hover-class="btn-hover" bindtap="onBack">

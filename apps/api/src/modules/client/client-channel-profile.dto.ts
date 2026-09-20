@@ -1,6 +1,6 @@
 import type { ClientChannelAgreementConfig, ClientChannelFaqItem, SaveClientChannelProfileRequest } from "@rental-os/shared";
 import { Type } from "class-transformer";
-import { ArrayMaxSize, IsArray, IsBoolean, IsInt, IsOptional, IsString, MaxLength, Min, ValidateNested } from "class-validator";
+import { ArrayMaxSize, IsArray, IsBoolean, IsInt, IsOptional, IsString, Matches, MaxLength, Min, ValidateNested } from "class-validator";
 
 /** 协议配置：名称/版本必填，外链与正文可选（正文长度在服务层再按 MediumText 上限保护）。 */
 export class ClientChannelAgreementConfigDto implements ClientChannelAgreementConfig {
@@ -62,6 +62,10 @@ export class SaveClientChannelProfileDto implements SaveClientChannelProfileRequ
 
   @IsOptional() @IsString() @MaxLength(120)
   bannerSubtitle?: string;
+
+  /** 主题色：#RGB 或 #RRGGBB；服务层再归一化为大写 #RRGGBB。留空表示回退系统默认色。 */
+  @IsOptional() @IsString() @Matches(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/u, { message: "主题色需为 #RRGGBB 十六进制颜色" })
+  themeColor?: string;
 
   @IsBoolean()
   smsLoginEnabled!: boolean;
