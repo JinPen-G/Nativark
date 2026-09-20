@@ -96,7 +96,7 @@ export function RentalOrderDetailPage() {
   // 审核按钮但看不到收退款按钮；只有资金权的人反之。两者都不给的账号只能查看。
   const WORK_ORDER_STATUS_LABELS: Record<string, { label: string; color: string }> = { pending: { label: "待处理", color: "default" }, in_progress: { label: "处理中", color: "processing" }, pending_review: { label: "待验收", color: "warning" }, completed: { label: "已完成", color: "success" }, rejected: { label: "验收驳回", color: "error" }, cancelled: { label: "已取消", color: "default" } };
   const canViewWorkOrders = hasPermission("rental-core:maintenance:view");
-  const canViewDispositions = canViewWorkOrders || hasPermission("rental-core:asset:view") || hasPermission("rental-core:asset:manage") || hasPermission("rental-os:vehicle:view");
+  const canViewDispositions = canViewWorkOrders || hasPermission("rental-core:asset:view") || hasPermission("rental-core:asset:manage");
   const canReviewFees = hasPermission("rental-os:order:fee-review");
   const canOperate = hasPermission("rental-os:order:operate");
   const canPickup = canOperate || hasPermission("rental-os:order:pickup");

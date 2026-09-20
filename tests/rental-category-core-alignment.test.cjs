@@ -85,6 +85,36 @@ void (async () => {
     assert.ok(!genericUiFiles.includes(vehicleOnlyText), `通用页面不得写死车辆文案：${vehicleOnlyText}`);
   }
 
+  const genericPermissionSources = [
+    "apps/admin/src/features/catalog/CatalogPage.tsx",
+    "apps/admin/src/features/catalog/AssetWorkspacePage.tsx",
+    "apps/api/src/common/api-auth.guard.ts",
+    "apps/api/src/contracts/openapi-document.ts"
+  ].map((file) => readFileSync(join(__dirname, "..", file), "utf8")).join("\n");
+  for (const legacyPermission of [
+    "rental-os:vehicle-group:manage",
+    "rental-os:vehicle:view",
+    "rental-os:vehicle:manage"
+  ]) {
+    assert.ok(
+      !genericPermissionSources.includes(legacyPermission),
+      `Rental Core 通用页面与 API 不得继续接受旧车辆权限：${legacyPermission}`
+    );
+  }
+
+  const permissionMigration = readFileSync(
+    join(__dirname, "..", "apps/api/prisma/migrations/20260920233000_migrate_vehicle_permissions_to_rental_core/migration.sql"),
+    "utf8"
+  );
+  for (const targetPermission of [
+    "rental-core:catalog:view",
+    "rental-core:catalog:manage",
+    "rental-core:asset:view",
+    "rental-core:asset:manage"
+  ]) {
+    assert.ok(permissionMigration.includes(targetPermission), `存量角色迁移必须补授 ${targetPermission}`);
+  }
+
   console.log("Rental category core alignment checks passed.");
 })().catch((error) => {
   console.error(error);

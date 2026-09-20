@@ -68,7 +68,7 @@ export function WorkbenchPage() {
   const { message } = App.useApp();
   const hasPermission = useAuthStore((state) => state.hasPermission);
   const canViewOrders = hasPermission("rental-os:order:view");
-  const canViewAssets = hasPermission("rental-core:asset:view") || hasPermission("rental-os:vehicle:view");
+  const canViewAssets = hasPermission("rental-core:asset:view");
   const canViewWorkOrders = hasPermission("rental-core:maintenance:view");
   const canReconcilePayments = hasPermission("rental-os:finance:reconcile");
   // 指标来自经营报表接口，它要求报表查看权限；订单/资产权限只决定是否展示各自的板块与入口。

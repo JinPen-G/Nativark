@@ -241,10 +241,6 @@ export class PlatformService {
         { code: "rental-os:marketing:manage", name: "行销方案管理" },
         { code: "rental-os:station:view", name: "履约地点查看" },
         { code: "rental-os:station:manage", name: "履约地点管理" },
-        { code: "rental-os:vehicle-group:manage", name: "品类型号与分组管理" },
-        { code: "rental-os:vehicle:view", name: "品类资产查看" },
-        { code: "rental-os:vehicle:manage", name: "品类资产管理" },
-        { code: "rental-os:vehicle:status-action", name: "按钮-品类资产状态动作", description: "启停、维保、异常和状态处置" },
         { code: "rental-os:member:view", name: "会员查看" },
         { code: "rental-os:member:manage", name: "会员管理" },
         // 证件类型是当前经营空间的业务配置，不是租户级会员资料维护：
@@ -321,9 +317,9 @@ export class PlatformService {
         // 才不会失能。只补这一个已有结算权的预设角色，不给其他角色授新权。
         "rental-os:order:fee-review",
         "rental-os:station:view",
-        "rental-os:vehicle:view",
         "rental-core:catalog:view",
         "rental-core:asset:view",
+        "rental-core:asset:manage",
         "rental-os:member:view",
         "rental-os:corporate:view",
         "rental-os:finance:view"
@@ -334,8 +330,7 @@ export class PlatformService {
         "rental-os:order:return",
         "rental-os:order:extend",
         "rental-os:order:cancel",
-        "rental-os:order:fee-manage",
-        "rental-os:vehicle:status-action"
+        "rental-os:order:fee-manage"
       ],
       dataScope: "store"
     },
@@ -393,7 +388,6 @@ export class PlatformService {
         "rental-os:order:view",
         "rental-os:order:operate",
         "rental-os:station:view",
-        "rental-os:vehicle:view",
         "rental-core:catalog:view",
         "rental-core:asset:view"
       ],
@@ -1263,7 +1257,7 @@ export class PlatformService {
           permissions: [
             "rental-os:order:view",
             "rental-os:order:operate",
-            "rental-os:vehicle:view"
+            "rental-core:asset:view"
           ]
         }
       ],
@@ -2886,7 +2880,6 @@ export class PlatformService {
         "rental-os:order:cancel",
         "rental-os:order:close",
         "rental-os:order:fee-manage",
-        "rental-os:vehicle:status-action",
         "rental-os:member:risk-action",
         "rental-os:corporate:monthly-settle",
         "rental-os:finance:adjust",

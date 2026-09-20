@@ -2213,7 +2213,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   // ===== 2026-06-25 DP-01 调度任务认领新增的契约操作 =====
   {
     method: "get", path: "/api/rental/v1/categories", tag: "RentalCore", operationId: "listRentalCategories",
-    summary: "List supported rental categories", permissions: ["rental-os:order:view", "rental-os:vehicle:view"], responseSchema: "GenericObject"
+    summary: "List supported rental categories", permissions: ["system:tenant:manage", "rental-os:order:view", "rental-core:catalog:view", "rental-core:asset:view"], responseSchema: "GenericObject"
   },
   {
     // REPORT-01A：当前经营空间的经营报表。空间取自会话，客户端不得传入。
@@ -2227,7 +2227,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   },
   {
     method: "get", path: "/api/rental/v1/tenant-profile", tag: "RentalCore", operationId: "getRentalTenantProfile",
-    summary: "Get tenant rental profile", permissions: ["rental-os:order:view", "rental-os:vehicle:view"], responseSchema: "GenericObject"
+    summary: "Get tenant rental profile", permissions: ["rental-os:order:view", "rental-core:catalog:view", "rental-core:asset:view"], responseSchema: "GenericObject"
   },
   {
     method: "get", path: "/api/rental/v1/tenant-readiness", tag: "RentalBusiness", operationId: "getTenantReadiness",
@@ -2235,7 +2235,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   },
   {
     method: "put", path: "/api/rental/v1/tenant-profile", tag: "RentalCore", operationId: "saveRentalTenantProfile",
-    summary: "Save tenant rental profile", permissions: ["rental-os:order:operate", "rental-os:vehicle:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+    summary: "Save tenant rental profile", permissions: ["rental-os:rules:manage", "rental-os:price:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
   },
   {
     method: "get", path: "/api/rental/v1/business-settings", tag: "RentalCore", operationId: "getRentalBusinessSettings",
@@ -2340,12 +2340,12 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   },
   {
     method: "get", path: "/api/rental/v1/stock-dispositions", tag: "RentalCore", operationId: "listRentalStockDispositions",
-    summary: "List return stock dispositions", permissions: ["rental-core:maintenance:view", "rental-core:asset:view", "rental-os:vehicle:view"], responseSchema: "GenericObject",
+    summary: "List return stock dispositions", permissions: ["rental-core:maintenance:view", "rental-core:asset:view", "rental-core:asset:manage"], responseSchema: "GenericObject",
     parameters: [queryParam("orderId")]
   },
   {
     method: "post", path: "/api/rental/v1/stock-dispositions/{dispositionId}/restore", tag: "RentalCore", operationId: "restoreRentalStockDisposition",
-    summary: "Restore a return stock disposition", permissions: ["rental-core:maintenance:manage", "rental-core:maintenance:review", "rental-core:asset:manage", "rental-os:vehicle:manage"] , responseSchema: "GenericObject"
+    summary: "Restore a return stock disposition", permissions: ["rental-core:maintenance:review", "rental-core:asset:manage"] , responseSchema: "GenericObject"
   },
   {
     method: "get", path: "/api/rental/v1/work-orders", tag: "RentalCore", operationId: "listRentalWorkOrders",
@@ -2386,13 +2386,13 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   },
   {
     method: "post", path: "/api/rental/v1/availability", tag: "RentalCore", operationId: "checkRentalAvailability",
-    summary: "Check generic rental availability", permissions: ["rental-os:order:operate", "rental-os:vehicle:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+    summary: "Check generic rental availability", permissions: ["rental-os:order:operate", "rental-os:order:create"], requestSchema: "GenericObject", responseSchema: "GenericObject"
   },
   {
     // ORDER-LIST-01：筛选与分页在服务端执行。不带 page/pageSize 返回纯数组（兼容旧调用方），
     // 带任一分页参数返回 { items, page, pageSize, total } 信封。空间取自会话。
     method: "get", path: "/api/rental/v1/orders", tag: "RentalCore", operationId: "listRentalCoreOrders",
-    summary: "List Rental Core orders (server-side filters; paged envelope when page/pageSize given)", permissions: ["rental-os:order:view", "rental-os:vehicle:view"], responseSchema: "GenericObject",
+    summary: "List Rental Core orders (server-side filters; paged envelope when page/pageSize given)", permissions: ["rental-os:order:view"], responseSchema: "GenericObject",
     parameters: [
       queryParam("page", { type: "integer", minimum: 1, maximum: 1000000 }),
       queryParam("pageSize", { type: "integer", minimum: 1, maximum: 200 }),
@@ -2410,7 +2410,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   },
   {
     method: "post", path: "/api/rental/v1/orders", tag: "RentalCore", operationId: "createRentalCoreOrder",
-    summary: "Create multi-line Rental Core order", permissions: ["rental-os:order:operate", "rental-os:vehicle:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+    summary: "Create multi-line Rental Core order", permissions: ["rental-os:order:operate", "rental-os:order:create"], requestSchema: "GenericObject", responseSchema: "GenericObject"
   },
   {
     method: "post", path: "/api/rental/v1/orders/expire-pending", tag: "RentalCore", operationId: "expirePendingRentalCoreOrders",
@@ -2422,7 +2422,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   },
   {
     method: "get", path: "/api/rental/v1/orders/{id}", tag: "RentalCore", operationId: "getRentalCoreOrder",
-    summary: "Get Rental Core order", permissions: ["rental-os:order:view", "rental-os:vehicle:view"], responseSchema: "GenericObject"
+    summary: "Get Rental Core order", permissions: ["rental-os:order:view"], responseSchema: "GenericObject"
   },
   {
     // DOC-PRINT-01：管理端与 APP 共用的客户可读凭证快照；不代表正式 PDF/法定票据。
@@ -2459,11 +2459,11 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/confirm", tag: "RentalCore", operationId: "confirmRentalCoreOrder",
-    summary: "Confirm Rental Core reservation", permissions: ["rental-os:order:operate", "rental-os:vehicle:manage"], responseSchema: "GenericObject"
+    summary: "Confirm Rental Core reservation", permissions: ["rental-os:order:operate"], responseSchema: "GenericObject"
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/allocate", tag: "RentalCore", operationId: "allocateRentalCoreOrder",
-    summary: "Allocate Rental Core inventory", permissions: ["rental-os:order:operate", "rental-os:vehicle:manage"], responseSchema: "GenericObject"
+    summary: "Allocate Rental Core inventory", permissions: ["rental-os:order:operate"], responseSchema: "GenericObject"
   },
   {
     method: "get", path: "/api/rental/v1/orders/{id}/allocation-candidates", tag: "RentalCore", operationId: "rentalAllocationCandidates",
@@ -2487,11 +2487,11 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/cancel", tag: "RentalCore", operationId: "cancelRentalCoreOrder",
-    summary: "Cancel Rental Core order", permissions: ["rental-os:order:operate", "rental-os:vehicle:manage"], responseSchema: "GenericObject"
+    summary: "Cancel Rental Core order", permissions: ["rental-os:order:operate"], responseSchema: "GenericObject"
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/handover/{stage}", tag: "RentalCore", operationId: "handoverRentalCoreOrder",
-    summary: "Complete pickup or return handover when inspection is not required", permissions: ["rental-os:order:operate", "rental-os:vehicle:manage"], responseSchema: "GenericObject"
+    summary: "Complete pickup or return handover when inspection is not required", permissions: ["rental-os:order:operate"], responseSchema: "GenericObject"
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/settle", tag: "RentalCore", operationId: "settleRentalCoreOrder",
@@ -2551,15 +2551,15 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   },
   {
     method: "get", path: "/api/rental/v1/inspection-templates", tag: "RentalCore", operationId: "listRentalInspectionTemplates",
-    summary: "List category inspection templates", permissions: ["rental-os:order:view", "rental-os:vehicle:view"], responseSchema: "GenericObject"
+    summary: "List category inspection templates", permissions: ["rental-os:order:view"], responseSchema: "GenericObject"
   },
   {
     method: "get", path: "/api/rental/v1/orders/{id}/inspections", tag: "RentalCore", operationId: "listRentalOrderInspections",
-    summary: "List Rental Core inspections", permissions: ["rental-os:order:view", "rental-os:vehicle:view"], responseSchema: "GenericObject"
+    summary: "List Rental Core inspections", permissions: ["rental-os:order:view"], responseSchema: "GenericObject"
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/inspections", tag: "RentalCore", operationId: "createRentalOrderInspection",
-    summary: "Complete pickup or return inspection", permissions: ["rental-os:order:operate", "rental-os:vehicle:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+    summary: "Complete pickup or return inspection", permissions: ["rental-os:order:operate"], requestSchema: "GenericObject", responseSchema: "GenericObject"
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/inspections/{inspectionId}/usage-correction", tag: "RentalCore", operationId: "correctRentalInspectionUsage",

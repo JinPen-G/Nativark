@@ -49,7 +49,7 @@ function AttributeInput({
 export function CatalogPage() {
   const { message } = App.useApp();
   const queryClient = useQueryClient();
-  const canManage = useAuthStore((state) => state.hasPermission("rental-core:catalog:manage") || state.hasPermission("rental-os:vehicle-group:manage"));
+  const canManage = useAuthStore((state) => state.hasPermission("rental-core:catalog:manage"));
   const [keyword, setKeyword] = useState("");
   const [editing, setEditing] = useState<RentalItemGroup>();
   const [drawerOpen, setDrawerOpen] = useState(false);

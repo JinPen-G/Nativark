@@ -1609,9 +1609,9 @@ export class PlatformRepository {
       // 拆权后要显式补上 fee-review，否则门店营运账号开出来就无法处理待审费用。
       "rental-os:order:fee-review",
       "rental-os:station:view",
-      "rental-os:vehicle:view",
       "rental-core:catalog:view",
       "rental-core:asset:view",
+      "rental-core:asset:manage",
       "rental-os:member:view",
       "rental-os:corporate:view",
       "rental-os:order:create",
@@ -2279,7 +2279,6 @@ export class PlatformRepository {
         "rental-os:order:cancel",
         "rental-os:order:close",
         "rental-os:order:fee-manage",
-        "rental-os:vehicle:status-action",
         "rental-os:member:risk-action",
         "rental-os:corporate:monthly-settle",
         "rental-os:finance:adjust",

@@ -46,8 +46,8 @@ function AttributeInput({
 export function AssetWorkspacePage() {
   const { message } = App.useApp();
   const queryClient = useQueryClient();
-  const canManage = useAuthStore((state) => state.hasPermission("rental-core:asset:manage") || state.hasPermission("rental-os:vehicle:manage"));
-  const canView = useAuthStore((state) => state.hasPermission("rental-core:asset:view") || state.hasPermission("rental-core:asset:manage") || state.hasPermission("rental-os:vehicle:view") || state.hasPermission("rental-os:vehicle:manage"));
+  const canManage = useAuthStore((state) => state.hasPermission("rental-core:asset:manage"));
+  const canView = useAuthStore((state) => state.hasPermission("rental-core:asset:view") || state.hasPermission("rental-core:asset:manage"));
   const [activeTab, setActiveTab] = useState<"assets" | "stock">("assets");
   const [keyword, setKeyword] = useState("");
   const [editing, setEditing] = useState<RentalAsset>();

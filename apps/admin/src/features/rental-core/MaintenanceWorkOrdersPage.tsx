@@ -53,7 +53,7 @@ export function MaintenanceWorkOrdersPage() {
   const canManage = useAuthStore((state) => state.hasPermission("rental-core:maintenance:manage"));
   const canReview = useAuthStore((state) => state.hasPermission("rental-core:maintenance:review"));
   const canViewOrders = useAuthStore((state) => state.hasPermission("rental-os:order:view"));
-  const canRestore = useAuthStore((state) => state.hasPermission("rental-core:maintenance:review") || state.hasPermission("rental-core:asset:manage") || state.hasPermission("rental-os:vehicle:manage"));
+  const canRestore = useAuthStore((state) => state.hasPermission("rental-core:maintenance:review") || state.hasPermission("rental-core:asset:manage"));
   const [dialog, setDialog] = useState<DialogKind>();
   const [activeWorkOrder, setActiveWorkOrder] = useState<RentalWorkOrder>();
   const [createForm] = Form.useForm<CreateRentalWorkOrderRequest>();

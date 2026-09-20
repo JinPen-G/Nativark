@@ -312,7 +312,7 @@ export function requiredPermissions(method: string, path: string) {
     return ["rental-os:order:create"];
   }
   if (path === "/rental/v1/categories") {
-    return ["system:tenant:manage", "rental-os:order:view", "rental-os:vehicle:view"];
+    return ["system:tenant:manage", "rental-os:order:view", "rental-core:catalog:view", "rental-core:asset:view"];
   }
   // REPORT-01A：当前经营空间的经营报表。与旧 `/reports` 同一权限口径
   // （报表查看），但数据只来自 Rental Core 规范化事实且严格按会话空间隔离。
@@ -321,7 +321,7 @@ export function requiredPermissions(method: string, path: string) {
     return ["rental-os:report:view"];
   }
   if (path === "/rental/v1/tenant-profile") {
-    return method === "GET" ? ["rental-os:order:view", "rental-os:vehicle:view"] : ["rental-os:rules:manage", "rental-os:price:manage"];
+    return method === "GET" ? ["rental-os:order:view", "rental-core:catalog:view", "rental-core:asset:view"] : ["rental-os:rules:manage", "rental-os:price:manage"];
   }
   if (path === "/rental/v1/business-settings") {
     return method === "GET" ? ["rental-os:rules:manage", "rental-os:price:manage", "rental-os:order:view", "rental-os:order:create"] : ["rental-os:rules:manage", "rental-os:price:manage"];
@@ -425,7 +425,7 @@ export function requiredPermissions(method: string, path: string) {
     return method === "GET" ? ["rental-os:station:view"] : ["rental-os:station:manage"];
   }
   if (path === "/rental/v1/item-groups" || path.startsWith("/rental/v1/item-groups/")) {
-    return method === "GET" ? ["rental-core:catalog:view", "rental-core:catalog:manage", "rental-os:vehicle-group:manage", "rental-os:vehicle:view", "rental-os:order:view", "rental-os:order:create"] : ["rental-core:catalog:manage", "rental-os:vehicle-group:manage"];
+    return method === "GET" ? ["rental-core:catalog:view", "rental-core:catalog:manage", "rental-os:order:view", "rental-os:order:create"] : ["rental-core:catalog:manage"];
   }
   if (path === "/rental/v1/work-order-assignees") return ["rental-core:maintenance:view"];
   if (path === "/rental/v1/work-orders" || path.startsWith("/rental/v1/work-orders/")) {
@@ -435,20 +435,20 @@ export function requiredPermissions(method: string, path: string) {
   }
   if (path === "/rental/v1/stock-dispositions" || path.startsWith("/rental/v1/stock-dispositions/")) {
     return method === "GET"
-      ? ["rental-core:maintenance:view", "rental-core:asset:view", "rental-core:asset:manage", "rental-os:vehicle:view"]
-      : ["rental-core:maintenance:review", "rental-core:asset:manage", "rental-os:vehicle:manage"];
+      ? ["rental-core:maintenance:view", "rental-core:asset:view", "rental-core:asset:manage"]
+      : ["rental-core:maintenance:review", "rental-core:asset:manage"];
   }
   if (path === "/rental/v1/stock-ledger") {
-    return method === "GET" ? ["rental-core:asset:view", "rental-core:asset:manage", "rental-os:vehicle:view"] : ["rental-core:asset:manage", "rental-os:vehicle:manage"];
+    return method === "GET" ? ["rental-core:asset:view", "rental-core:asset:manage"] : ["rental-core:asset:manage"];
   }
   if (path === "/rental/v1/stock-operations") {
-    return ["rental-core:asset:manage", "rental-os:vehicle:manage"];
+    return ["rental-core:asset:manage"];
   }
   if (path === "/rental/v1/assets" || path.startsWith("/rental/v1/assets/") || path === "/rental/v1/stock-balances" || path === "/rental/v1/stock-dispositions") {
-    return method === "GET" ? ["rental-core:asset:view", "rental-core:asset:manage", "rental-os:vehicle:view"] : ["rental-core:asset:manage", "rental-os:vehicle:manage"];
+    return method === "GET" ? ["rental-core:asset:view", "rental-core:asset:manage"] : ["rental-core:asset:manage"];
   }
   if (path === "/rental/v1/availability") {
-    return ["rental-os:order:operate", "rental-os:order:create", "rental-os:vehicle:view"];
+    return ["rental-os:order:operate", "rental-os:order:create"];
   }
   if (path.startsWith("/rental/v1/quotes")) {
     return method === "GET" ? ["rental-os:order:view"] : ["rental-os:order:operate", "rental-os:order:create"];
@@ -549,8 +549,8 @@ export function requiredPermissions(method: string, path: string) {
   }
   if (path.startsWith("/rental/v1")) {
     return method === "GET"
-      ? ["rental-os:order:view", "rental-os:vehicle:view"]
-      : ["rental-os:order:operate", "rental-os:vehicle:manage"];
+      ? ["rental-os:order:view"]
+      : ["rental-os:order:operate"];
   }
 
   return [UNMATCHED_ROUTE_PERMISSION];

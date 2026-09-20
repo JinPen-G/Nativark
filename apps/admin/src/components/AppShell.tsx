@@ -82,7 +82,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const categoryProfile = useQuery({
     queryKey: ["rental-core", "profile"],
     queryFn: rentalCoreApi.profile,
-    enabled: Boolean(user && !user.isSaasAdmin && currentWorkspaceId && (hasPermission("rental-os:order:view") || hasPermission("rental-os:vehicle:view")))
+    enabled: Boolean(user && !user.isSaasAdmin && currentWorkspaceId && (
+      hasPermission("rental-os:order:view") || hasPermission("rental-core:catalog:view") || hasPermission("rental-core:asset:view")
+    ))
   });
   const terminology = categoryProfile.data?.terminology;
   const sections = useMemo(() => buildNavigationSections(terminology).map((section) => ({
