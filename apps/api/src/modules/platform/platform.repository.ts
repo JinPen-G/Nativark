@@ -60,6 +60,19 @@ type RoleWithPermissions = Awaited<
   ReturnType<PlatformRepository["findRoleWithPermissions"]>
 >;
 
+const DEPRECATED_RENTAL_PERMISSION_CODES = new Set([
+  "rental-os:vehicle-group:manage",
+  "rental-os:vehicle:view",
+  "rental-os:vehicle:manage",
+  "rental-os:vehicle:status-action"
+]);
+const RENTAL_PERMISSION_REPLACEMENTS: Record<string, string[]> = {
+  "rental-os:vehicle-group:manage": ["rental-core:catalog:view", "rental-core:catalog:manage"],
+  "rental-os:vehicle:view": ["rental-core:catalog:view", "rental-core:asset:view", "rental-os:order:view"],
+  "rental-os:vehicle:manage": ["rental-core:asset:manage", "rental-os:order:operate"],
+  "rental-os:vehicle:status-action": ["rental-core:asset:manage"]
+};
+
 @Injectable()
 export class PlatformRepository {
   constructor(private readonly prisma: PrismaService) {}
@@ -827,6 +840,7 @@ export class PlatformRepository {
     const modules = new Map<string, PermissionModule>();
 
     for (const permission of permissions) {
+      if (DEPRECATED_RENTAL_PERMISSION_CODES.has(permission.code)) continue;
       const module = this.permissionModuleOf(permission.code, permission.module);
       const display = this.permissionDisplayOf(permission);
       if (!modules.has(module.code)) {
@@ -889,7 +903,7 @@ export class PlatformRepository {
     }
     const fixedAllPermissions =
       existing?.fixedAllPermissions ?? code === "TENANT_ADMIN";
-    const requestedPermissions = [...new Set(input.permissions ?? [])];
+    const requestedPermissions = this.normalizePermissionCodes(input.permissions ?? []);
     const requestedButtonPermissions = [
       ...new Set([
         ...(input.buttonPermissions ?? []),
@@ -960,7 +974,7 @@ export class PlatformRepository {
       return this.toRoleRow(role);
     }
 
-    const nextPermissions = [...new Set(permissions)];
+    const nextPermissions = this.normalizePermissionCodes(permissions);
     await this.replaceRolePermissions(id, nextPermissions);
     await this.prisma.role.update({
       where: { id },
@@ -2037,12 +2051,13 @@ export class PlatformRepository {
   }
 
   private toRoleRow(role: NonNullable<RoleWithPermissions>): SystemRoleRow {
-    const permissionCodes = role.permissions.map((item) => item.permission.code);
+    const permissionCodes = this.normalizePermissionCodes(role.permissions.map((item) => item.permission.code));
     const buttonPermissionCodes = role.permissions
       .filter((item) => item.permission.kind === PermissionKind.BUTTON)
       .map((item) => item.permission.code);
-    const savedButtonPermissions =
-      (role.buttonPermissions as string[] | null) ?? [];
+    const savedButtonPermissions = this.normalizePermissionCodes(
+      (role.buttonPermissions as string[] | null) ?? []
+    );
 
     return {
       id: role.id,
@@ -2062,6 +2077,10 @@ export class PlatformRepository {
         : [...new Set([...buttonPermissionCodes, ...savedButtonPermissions])],
       dataScope: this.toSharedDataScope(role.dataScope)
     };
+  }
+
+  private normalizePermissionCodes(codes: string[]) {
+    return [...new Set(codes.flatMap((code) => RENTAL_PERMISSION_REPLACEMENTS[code] ?? [code]))];
   }
 
   private toUserRow(user: Awaited<ReturnType<PlatformRepository["findUserWithRoles"]>>): SystemUserRow {

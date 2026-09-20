@@ -114,6 +114,18 @@ void (async () => {
   ]) {
     assert.ok(permissionMigration.includes(targetPermission), `存量角色迁移必须补授 ${targetPermission}`);
   }
+  const platformRepository = readFileSync(
+    join(__dirname, "..", "apps/api/src/modules/platform/platform.repository.ts"),
+    "utf8"
+  );
+  assert.ok(
+    platformRepository.includes("DEPRECATED_RENTAL_PERMISSION_CODES.has(permission.code)"),
+    "数据库权限树必须隐藏旧车辆权限"
+  );
+  assert.ok(
+    platformRepository.includes("normalizePermissionCodes"),
+    "角色保存与读回必须把旧车辆权限转换为 Rental Core 新权限"
+  );
 
   console.log("Rental category core alignment checks passed.");
 })().catch((error) => {
