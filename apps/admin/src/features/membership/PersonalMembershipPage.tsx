@@ -1,4 +1,5 @@
 import type { CustomerAccountStatus, CustomerMembershipPlanAssignment, CustomerMembershipStatus, CustomerQualificationRevision, PersonalMembershipMember, SubmitCustomerQualificationRequest } from "@rental-os/shared";
+import { CUSTOMER_GENDERS, CUSTOMER_GENDER_LABELS, CUSTOMER_SOURCE_CHANNELS, CUSTOMER_SOURCE_CHANNEL_LABELS } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Button, Card, Checkbox, Drawer, Form, Input, Radio, Select, Space, Table, Tag, Tooltip } from "antd";
 import { useState } from "react";
@@ -15,7 +16,7 @@ const qualificationStatus: Record<string, { text: string; color: string }> = { p
 const reviewStatusLabel: Record<string, string> = { pending: "待审核", approved: "已通过", rejected: "已拒绝", supplement_required: "待补件", cancelled: "已取消" };
 const statusMetaColor = (status: string) => ({ pending: "processing", approved: "success", rejected: "error", supplement_required: "warning", cancelled: "default" }[status] ?? "default");
 
-type PersonalForm = { name: string; phone?: string; email?: string; identityNo?: string; temporaryPassword?: string; directApprove?: boolean };
+type PersonalForm = { name: string; phone?: string; email?: string; identityNo?: string; gender?: string; birthday?: string; sourceChannel?: string; region?: string; temporaryPassword?: string; directApprove?: boolean };
 type StatusForm = {
   status: CustomerAccountStatus | CustomerMembershipStatus;
   reason: string;
@@ -51,8 +52,8 @@ export function PersonalMembershipPage() {
   const assignments = useQuery({ queryKey: ["membership-plan-assignments", selected?.customerId], queryFn: () => membershipApi.planAssignments(selected!.customerId), enabled: canGrant && Boolean(selected) && drawer === "grant" });
   const qualificationHistory = useQuery({ queryKey: ["membership-qualification-history", selected?.customerId], queryFn: () => membershipApi.qualificationHistory(selected!.customerId), enabled: canView && Boolean(selected) && drawer === "qualification" });
   const refresh = async () => queryClient.invalidateQueries({ predicate: (query) => String(query.queryKey[0] ?? "").startsWith("membership-") });
-  const create = useMutation({ mutationFn: (values: PersonalForm) => membershipApi.registerPersonal({ name: values.name, phone: values.phone!, email: values.email, identityNo: values.identityNo, temporaryPassword: canManageAccount ? values.temporaryPassword : undefined, channel: "admin", directApprove: canDirectApprove && values.directApprove ? true : undefined }), onSuccess: async () => { await refresh(); setDrawer(undefined); form.resetFields(); message.success("个人会员已创建"); } });
-  const edit = useMutation({ mutationFn: (values: PersonalForm) => membershipApi.savePersonal(selected!.customerId, { name: values.name, phone: values.phone, email: values.email, identityNo: values.identityNo }), onSuccess: async () => { await refresh(); setDrawer(undefined); message.success("会员资料已更新"); } });
+  const create = useMutation({ mutationFn: (values: PersonalForm) => membershipApi.registerPersonal({ name: values.name, phone: values.phone!, email: values.email, identityNo: values.identityNo, gender: values.gender, birthday: values.birthday, sourceChannel: values.sourceChannel, region: values.region, temporaryPassword: canManageAccount ? values.temporaryPassword : undefined, channel: "admin", directApprove: canDirectApprove && values.directApprove ? true : undefined }), onSuccess: async () => { await refresh(); setDrawer(undefined); form.resetFields(); message.success("个人会员已创建"); } });
+  const edit = useMutation({ mutationFn: (values: PersonalForm) => membershipApi.savePersonal(selected!.customerId, { name: values.name, phone: values.phone, email: values.email, identityNo: values.identityNo, gender: values.gender, birthday: values.birthday, sourceChannel: values.sourceChannel, region: values.region }), onSuccess: async () => { await refresh(); setDrawer(undefined); message.success("会员资料已更新"); } });
   const password = useMutation({ mutationFn: (values: PersonalForm) => membershipApi.setTemporaryPassword(selected!.customerId, { temporaryPassword: values.temporaryPassword! }), onSuccess: () => { setDrawer(undefined); form.resetFields(); message.success("已设置临时密码，会员首次登录后必须修改"); } });
   const submitQualification = useMutation({ mutationFn: (values: SubmitCustomerQualificationRequest) => membershipApi.submitQualification(selected!.customerId, values), onSuccess: async () => { await refresh(); setDrawer(undefined); qualificationForm.resetFields(); message.success("证件已提交，等待独立审核"); } });
   const saveMode = useMutation({ mutationFn: (registrationMode: "automatic" | "manual") => membershipApi.saveRegistrationSettings({ registrationMode }), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["membership-registration-settings"] }); message.success("注册审核方式已保存"); } });
@@ -85,7 +86,7 @@ export function PersonalMembershipPage() {
     onError: (error: Error) => message.error(error.message || "状态变更失败")
   });
   const openCreate = () => { form.resetFields(); setSelected(undefined); setDrawer("create"); };
-  const openEdit = (member: PersonalMembershipMember) => { form.resetFields(); form.setFieldsValue({ name: member.name, phone: "", email: member.email }); setSelected(member); setDrawer("edit"); };
+  const openEdit = (member: PersonalMembershipMember) => { form.resetFields(); form.setFieldsValue({ name: member.name, phone: "", email: member.email, gender: member.gender, birthday: member.birthday, sourceChannel: member.sourceChannel, region: member.region }); setSelected(member); setDrawer("edit"); };
   const openStatus = (member: PersonalMembershipMember, scope: "account" | "membership") => { setStatusTarget(member); setStatusScope(scope); statusForm.resetFields(); };
   if (!canView) return <Alert type="warning" showIcon title="无权查看租户统一会员" description="需要租户级会员查看或管理权限，且数据范围为全部。" />;
 
@@ -107,7 +108,7 @@ export function PersonalMembershipPage() {
     ]} /></Card>
     <Drawer title={drawer === "create" ? "新增个人会员" : drawer === "edit" ? "编辑个人会员" : drawer === "password" ? "设置临时密码" : drawer === "qualification" ? "提交品类证件" : drawer === "grant" ? "授予会员方案" : "证件类型配置"} size={520} open={Boolean(drawer)} onClose={() => setDrawer(undefined)} destroyOnHidden>
       {(drawer === "create" || drawer === "edit" || drawer === "password") && <Form layout="vertical" form={form} disabled={drawer === "password" ? !canManageAccount : !canManage} onFinish={(values) => drawer === "create" ? canManage && create.mutate(values) : drawer === "edit" ? canManage && edit.mutate(values) : canManageAccount && password.mutate(values)}>
-        {drawer !== "password" && <><Form.Item label="姓名" name="name" rules={[{ required: true }]}><Input /></Form.Item><Form.Item label="手机号" name="phone" rules={drawer === "create" ? [{ required: true }] : []}><Input placeholder={drawer === "edit" ? "留空则保持现有手机号" : undefined} /></Form.Item><Form.Item label="邮箱" name="email"><Input /></Form.Item><Form.Item label="证件号" name="identityNo"><Input placeholder="仅保存脱敏展示值" /></Form.Item></>}
+        {drawer !== "password" && <><Form.Item label="姓名" name="name" rules={[{ required: true }]}><Input /></Form.Item><Form.Item label="手机号" name="phone" rules={drawer === "create" ? [{ required: true }] : []}><Input placeholder={drawer === "edit" ? "留空则保持现有手机号" : undefined} /></Form.Item><Form.Item label="邮箱" name="email"><Input /></Form.Item><Form.Item label="性别" name="gender"><Select allowClear options={CUSTOMER_GENDERS.map((value) => ({ value, label: CUSTOMER_GENDER_LABELS[value] }))} /></Form.Item><Form.Item label="生日" name="birthday"><Input placeholder="YYYY-MM-DD" /></Form.Item><Form.Item label="来源渠道" name="sourceChannel"><Select allowClear options={CUSTOMER_SOURCE_CHANNELS.map((value) => ({ value, label: CUSTOMER_SOURCE_CHANNEL_LABELS[value] }))} /></Form.Item><Form.Item label="常驻城市" name="region"><Input placeholder="如 上海" /></Form.Item><Form.Item label="证件号" name="identityNo"><Input placeholder="仅保存脱敏展示值" /></Form.Item></>}
         {drawer === "create" && canManageAccount && <Form.Item label="临时密码（可选）" name="temporaryPassword" rules={[{ min: 8 }]}><Input.Password /></Form.Item>}
         {drawer === "create" && <Form.Item name="directApprove" valuePropName="checked"><Checkbox disabled={!canDirectApprove}>直接通过</Checkbox></Form.Item>}
         {drawer === "password" && <Form.Item label="新临时密码" name="temporaryPassword" rules={[{ required: true, min: 8 }]}><Input.Password /></Form.Item>}

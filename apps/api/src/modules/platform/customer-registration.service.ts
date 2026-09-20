@@ -21,6 +21,11 @@ export interface RegisterPersonalCustomerInput {
   email?: string;
   /** 调用方已脱敏；两条入口的脱敏格式历史上就不同，这里不统一。 */
   identityNoMasked?: string;
+  /** 基础画像主数据（全部选填）。birthday 传 ISO 日期串 YYYY-MM-DD。 */
+  gender?: string;
+  birthday?: string;
+  sourceChannel?: string;
+  region?: string;
   /** 自动注册：会员直接 active；否则 pending_activation 并挂一条注册审核。 */
   automatic: boolean;
   channel: "admin" | "app";
@@ -98,7 +103,9 @@ export class CustomerRegistrationService {
     const created = !customer;
     if (!customer) {
       customer = await this.customers.createProfile({
-        tenantId, customerType: "personal", name, phone, email, identityNoMasked: input.identityNoMasked ?? null
+        tenantId, customerType: "personal", name, phone, email, identityNoMasked: input.identityNoMasked ?? null,
+        gender: input.gender ?? null, birthday: input.birthday ?? null,
+        sourceChannel: input.sourceChannel ?? null, region: input.region ?? null
       }, tx);
     }
 

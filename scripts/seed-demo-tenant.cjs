@@ -202,15 +202,19 @@ async function main() {
       if (!fulfillmentMode) throw new Error(`${workspace.code} 没有可用于演示订单的履约方式`);
       await request("/membership/registration-settings", "PUT", token, { registrationMode: "automatic" });
       for (const person of [
-        { key: "primary", name: "演示会员张晨", phone: "85290000001", email: "demo.member1@example.test" },
-        { key: "secondary", name: "演示会员李宁", phone: "85290000002", email: "demo.member2@example.test" },
-        { key: "pending", name: "演示会员周敏", phone: "85290000003", email: "demo.member3@example.test" }
+        { key: "primary", name: "演示会员张晨", phone: "85290000001", email: "demo.member1@example.test", gender: "male", birthday: "1990-05-12", sourceChannel: "walk_in", region: "上海" },
+        { key: "secondary", name: "演示会员李宁", phone: "85290000002", email: "demo.member2@example.test", gender: "female", birthday: "1988-11-03", sourceChannel: "referral", region: "杭州" },
+        { key: "pending", name: "演示会员周敏", phone: "85290000003", email: "demo.member3@example.test", gender: "unknown", birthday: "1995-02-20", sourceChannel: "mini_program", region: "苏州" }
       ]) {
         const result = await request("/membership/personal", "POST", token, {
           name: person.name,
           phone: person.phone,
           email: person.email,
           identityNo: `D${person.phone.slice(-8)}`,
+          gender: person.gender,
+          birthday: person.birthday,
+          sourceChannel: person.sourceChannel,
+          region: person.region,
           channel: "admin",
           directApprove: true,
           temporaryPassword: demoMemberPassword,

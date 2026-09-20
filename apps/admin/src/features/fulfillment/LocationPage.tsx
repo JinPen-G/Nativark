@@ -36,7 +36,7 @@ export function LocationPage() {
     setEditing(record);
     form.setFieldsValue(record ? { ...record } : {
       code: "", name: "", type: category?.businessModel.locationTypes[0] ?? "store", operatorId: operators.data?.find((item) => item.status === "enabled")?.id,
-      capabilities: ["pickup", "return", "storage"], address: "", latitude: undefined, longitude: undefined, contactName: "", contactPhone: "", businessHours: "09:00-18:00", status: "enabled"
+      capabilities: ["pickup", "return", "storage"], address: "", province: "", city: "", district: "", timezone: "Asia/Shanghai", latitude: undefined, longitude: undefined, contactName: "", contactPhone: "", businessHours: "09:00-18:00", status: "enabled"
     });
     setDrawerOpen(true);
   }
@@ -89,6 +89,12 @@ export function LocationPage() {
           </Row>
           <Form.Item name="capabilities" label="履约能力" rules={[{ required: true }]}><Select mode="multiple" options={Object.entries(capabilityLabels).map(([value, label]) => ({ value, label }))} /></Form.Item>
           <Form.Item name="address" label="地址"><Input /></Form.Item>
+          <Row gutter={12}>
+            <Col span={8}><Form.Item name="province" label="省/直辖市"><Input placeholder="如 上海市" /></Form.Item></Col>
+            <Col span={8}><Form.Item name="city" label="城市"><Input placeholder="如 上海市" /></Form.Item></Col>
+            <Col span={8}><Form.Item name="district" label="区/县"><Input placeholder="如 徐汇区" /></Form.Item></Col>
+            <Col span={12}><Form.Item name="timezone" label="时区" tooltip="选填；默认 Asia/Shanghai"><Input placeholder="Asia/Shanghai" /></Form.Item></Col>
+          </Row>
           <Row gutter={12}>
             <Col span={12}><Form.Item name="latitude" label="纬度" tooltip="选填；填写后小程序可按客户位置排序门店并提供地图导航，经纬度需成对填写" rules={[{ type: "number", min: -90, max: 90, message: "纬度范围 -90~90" }]}><InputNumber style={{ width: "100%" }} step={0.000001} placeholder="如 31.2231" /></Form.Item></Col>
             <Col span={12}><Form.Item name="longitude" label="经度" rules={[{ type: "number", min: -180, max: 180, message: "经度范围 -180~180" }]}><InputNumber style={{ width: "100%" }} step={0.000001} placeholder="如 121.4737" /></Form.Item></Col>

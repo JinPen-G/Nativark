@@ -26,6 +26,11 @@ export interface CreateCustomerProfileInput {
   identityVerified?: boolean;
   /** 只接受调用方已脱敏的值；本层绝不落明文证件号。 */
   identityNoMasked?: string | null;
+  /** 基础画像主数据（全部选填）。birthday 传 ISO 日期串 YYYY-MM-DD 或 null。 */
+  gender?: string | null;
+  birthday?: string | null;
+  sourceChannel?: string | null;
+  region?: string | null;
   qualifications?: Record<string, unknown>;
   corporateName?: string;
   corporateTaxNo?: string;
@@ -33,7 +38,7 @@ export interface CreateCustomerProfileInput {
 
 export type CustomerProfileUpdateData = Pick<
   Prisma.CustomerProfileUncheckedUpdateInput,
-  "name" | "phone" | "phoneMasked" | "email" | "identityNoMasked" | "corporateName" | "corporateTaxNo"
+  "name" | "phone" | "phoneMasked" | "email" | "identityNoMasked" | "gender" | "birthday" | "sourceChannel" | "region" | "corporateName" | "corporateTaxNo"
 >;
 
 export type CustomerMembershipUpdateData = Pick<
@@ -181,6 +186,11 @@ export class SharedCustomerRepository {
         email: input.email?.trim() || null,
         identityVerified: input.identityVerified ?? false,
         identityNoMasked: input.identityNoMasked ?? null,
+        gender: input.gender ?? null,
+        // birthday 以 @db.Date 存储；只取日期部分，避免时区把日期挪到相邻一天。
+        birthday: input.birthday ? new Date(`${input.birthday}T00:00:00.000Z`) : null,
+        sourceChannel: input.sourceChannel ?? null,
+        region: input.region ?? null,
         qualifications: (input.qualifications ?? {}) as Prisma.InputJsonValue,
         corporateName: input.corporateName?.trim() || null,
         corporateTaxNo: input.corporateTaxNo?.trim() || null
@@ -433,6 +443,10 @@ export class SharedCustomerRepository {
     email: string | null;
     identityVerified: boolean;
     identityNoMasked: string | null;
+    gender: string | null;
+    birthday: Date | null;
+    sourceChannel: string | null;
+    region: string | null;
     qualifications: Prisma.JsonValue;
     corporateName: string | null;
     corporateTaxNo: string | null;
@@ -466,6 +480,11 @@ export class SharedCustomerRepository {
       email: row.email ?? undefined,
       identityVerified: row.identityVerified,
       identityNoMasked: row.identityNoMasked ?? undefined,
+      gender: row.gender ?? undefined,
+      // @db.Date 读回后只保留 YYYY-MM-DD，API 层统一用 ISO 日期串。
+      birthday: row.birthday ? row.birthday.toISOString().slice(0, 10) : undefined,
+      sourceChannel: row.sourceChannel ?? undefined,
+      region: row.region ?? undefined,
       qualifications: (row.qualifications ?? {}) as Record<string, unknown>,
       corporateName: row.corporateName ?? undefined,
       corporateTaxNo: row.corporateTaxNo ?? undefined,

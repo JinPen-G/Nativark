@@ -1,7 +1,9 @@
 import {
+  CUSTOMER_GENDERS,
   CUSTOMER_MEMBERSHIP_PLAN_TARGET_TYPES,
   CUSTOMER_MEMBERSHIP_REGISTRATION_MODES,
   CUSTOMER_MEMBERSHIP_REVIEW_STATUSES,
+  CUSTOMER_SOURCE_CHANNELS,
   type CustomerMembershipBenefit,
   type AssignCustomerMembershipPlanRequest,
   type CustomerMembershipPlanVersionActionRequest,
@@ -50,6 +52,14 @@ export class RegisterPersonalMembershipDto implements RegisterPersonalMembership
   email?: string;
   @IsOptional() @IsString() @MaxLength(80)
   identityNo?: string;
+  @IsOptional() @IsIn(CUSTOMER_GENDERS)
+  gender?: RegisterPersonalMembershipRequest["gender"];
+  @IsOptional() @IsDateString()
+  birthday?: string;
+  @IsOptional() @IsIn(CUSTOMER_SOURCE_CHANNELS)
+  sourceChannel?: RegisterPersonalMembershipRequest["sourceChannel"];
+  @IsOptional() @IsString() @MaxLength(64)
+  region?: string;
   @IsIn(["admin", "app"])
   channel!: "admin" | "app";
   @IsOptional() @IsString() @MinLength(8) @MaxLength(128)
@@ -69,6 +79,14 @@ export class SavePersonalMembershipDto implements SavePersonalMembershipRequest 
   email?: string;
   @IsOptional() @IsString() @MaxLength(80)
   identityNo?: string;
+  @IsOptional() @IsIn(CUSTOMER_GENDERS)
+  gender?: SavePersonalMembershipRequest["gender"];
+  @IsOptional() @IsDateString()
+  birthday?: string;
+  @IsOptional() @IsIn(CUSTOMER_SOURCE_CHANNELS)
+  sourceChannel?: SavePersonalMembershipRequest["sourceChannel"];
+  @IsOptional() @IsString() @MaxLength(64)
+  region?: string;
 }
 
 export class SaveCorporateMembershipDto implements SaveCorporateMembershipRequest {

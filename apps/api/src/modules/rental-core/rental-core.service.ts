@@ -4437,7 +4437,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const definition = this.category(categoryCode); const timestamp = now(); const locationId = `${idPrefix}_location_01`;
     const initialSetup = definition.businessModel.defaults.initialSetup;
     const operator: RentalFulfillmentOperator = { id: `${idPrefix}_operator_01`, tenantId, code: "SELF", name: initialSetup.operatorName, type: "self_operated", contactName: "运营负责人", contactPhone: "13800000000", settlementMode: "self", status: "enabled", createdAt: timestamp, updatedAt: timestamp };
-    const location: RentalFulfillmentLocation = { id: locationId, tenantId, code: "MAIN", name: initialSetup.locationName, type: initialSetup.locationType, operatorId: operator.id, operatorType: operator.type, operatorName: operator.name, capabilities: ["pickup", "return", "storage", "delivery"], address: "演示地址 1 号", contactName: "值班负责人", contactPhone: "13800000000", businessHours: "09:00-20:00", status: "enabled" };
+    const location: RentalFulfillmentLocation = { id: locationId, tenantId, code: "MAIN", name: initialSetup.locationName, type: initialSetup.locationType, operatorId: operator.id, operatorType: operator.type, operatorName: operator.name, capabilities: ["pickup", "return", "storage", "delivery"], address: "演示地址 1 号", province: "上海市", city: "上海市", district: "徐汇区", timezone: "Asia/Shanghai", contactName: "值班负责人", contactPhone: "13800000000", businessHours: "09:00-20:00", status: "enabled" };
     const samples = isSampleTenant
       ? buildRentalCategorySamples({ tenantId, idPrefix, categoryCode, location, timestamp })
       : { itemGroups: [], assets: [], stockBalances: [] };

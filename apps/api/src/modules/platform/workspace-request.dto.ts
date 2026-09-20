@@ -1,6 +1,6 @@
 import type { CreateBusinessWorkspaceRequest, SaveSharedCustomerRequest, SaveWorkspaceMemberRequest, UpdateBusinessWorkspaceRequest } from "@rental-os/shared";
-import { BUSINESS_WORKSPACE_RUN_MODES } from "@rental-os/shared";
-import { IsBoolean, IsEmail, IsIn, IsNotEmpty, IsObject, IsOptional, IsString } from "class-validator";
+import { BUSINESS_WORKSPACE_RUN_MODES, CUSTOMER_GENDERS, CUSTOMER_SOURCE_CHANNELS } from "@rental-os/shared";
+import { IsBoolean, IsDateString, IsEmail, IsIn, IsNotEmpty, IsObject, IsOptional, IsString, MaxLength } from "class-validator";
 
 const CATEGORIES = ["vehicle", "camera", "camping", "construction"] as const;
 const WORKSPACE_STATUSES = ["active", "frozen", "disabled"] as const;
@@ -32,6 +32,10 @@ export class SaveSharedCustomerDto implements SaveSharedCustomerRequest {
   @IsOptional() @IsEmail() email?: string;
   @IsOptional() @IsBoolean() identityVerified?: boolean;
   @IsOptional() @IsString() @IsNotEmpty() identityNo?: string;
+  @IsOptional() @IsIn(CUSTOMER_GENDERS) gender?: SaveSharedCustomerRequest["gender"];
+  @IsOptional() @IsDateString() birthday?: string;
+  @IsOptional() @IsIn(CUSTOMER_SOURCE_CHANNELS) sourceChannel?: SaveSharedCustomerRequest["sourceChannel"];
+  @IsOptional() @IsString() @MaxLength(64) region?: string;
   @IsOptional() @IsObject() qualifications?: Record<string, unknown>;
   @IsOptional() @IsString() @IsNotEmpty() corporateName?: string;
   @IsOptional() @IsString() @IsNotEmpty() corporateTaxNo?: string;

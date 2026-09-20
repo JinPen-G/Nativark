@@ -327,6 +327,10 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       parentLocationId: location.parentLocationId ?? null,
       capabilities: location.capabilities as unknown as Prisma.InputJsonValue,
       address: location.address ?? null,
+      province: location.province ?? null,
+      city: location.city ?? null,
+      district: location.district ?? null,
+      timezone: location.timezone ?? null,
       latitude: location.latitude ?? null,
       longitude: location.longitude ?? null,
       contactName: location.contactName ?? null,
@@ -569,6 +573,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
     id: string; tenantId: string; code: string; name: string; type: string;
     operatorId: string | null; operatorType: string | null; operatorName: string | null;
     parentLocationId: string | null; capabilities: Prisma.JsonValue; address: string | null;
+    province: string | null; city: string | null; district: string | null; timezone: string | null;
     latitude: Prisma.Decimal | null; longitude: Prisma.Decimal | null;
     contactName: string | null; contactPhone: string | null; businessHours: string | null; status: string;
   }): RentalFulfillmentLocation {
@@ -584,6 +589,10 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       parentLocationId: row.parentLocationId ?? undefined,
       capabilities: (row.capabilities ?? []) as RentalFulfillmentLocation["capabilities"],
       address: row.address ?? undefined,
+      province: row.province ?? undefined,
+      city: row.city ?? undefined,
+      district: row.district ?? undefined,
+      timezone: row.timezone ?? undefined,
       latitude: row.latitude === null ? undefined : Number(row.latitude),
       longitude: row.longitude === null ? undefined : Number(row.longitude),
       contactName: row.contactName ?? undefined,

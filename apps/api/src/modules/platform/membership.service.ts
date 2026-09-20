@@ -171,6 +171,10 @@ export class MembershipService {
       name: input.name,
       email: input.email,
       identityNoMasked: mask(input.identityNo),
+      gender: input.gender,
+      birthday: input.birthday,
+      sourceChannel: input.sourceChannel,
+      region: input.region,
       automatic,
       channel: input.channel,
       requestKey,
@@ -427,7 +431,10 @@ export class MembershipService {
       const link = row.membership!;
       return {
         customerId: row.id, name: row.name, phoneMasked: row.phoneMasked, email: row.email ?? undefined,
-        identityNoMasked: row.identityNoMasked ?? undefined, membershipStatus: link.status as PersonalMembershipMember["membershipStatus"],
+        identityNoMasked: row.identityNoMasked ?? undefined,
+        gender: row.gender ?? undefined, birthday: row.birthday ? row.birthday.toISOString().slice(0, 10) : undefined,
+        sourceChannel: row.sourceChannel ?? undefined, region: row.region ?? undefined,
+        membershipStatus: link.status as PersonalMembershipMember["membershipStatus"],
         levelName: link.levelName,
         account: row.account
           ? { provisioned: true, status: row.account.status as PersonalMembershipMember["account"]["status"], loginPhoneMasked: row.account.loginPhoneMasked, suspendedAt: row.account.suspendedAt?.toISOString(), closedAt: row.account.closedAt?.toISOString() }
@@ -450,13 +457,23 @@ export class MembershipService {
       }
       const updated = await this.customers.updateProfile(tenantId, customer.id, {
         name: input.name.trim(), phone, phoneMasked: mask(phone) ?? "****", email: input.email?.trim() || null,
-        ...(input.identityNo === undefined ? {} : { identityNoMasked: mask(input.identityNo) })
+        ...(input.identityNo === undefined ? {} : { identityNoMasked: mask(input.identityNo) }),
+        // 基础画像主数据：显式传入即写（含清空为 null）；未传字段不动。
+        ...(input.gender === undefined ? {} : { gender: input.gender || null }),
+        ...(input.birthday === undefined ? {} : { birthday: input.birthday ? new Date(`${input.birthday}T00:00:00.000Z`) : null }),
+        ...(input.sourceChannel === undefined ? {} : { sourceChannel: input.sourceChannel || null }),
+        ...(input.region === undefined ? {} : { region: input.region?.trim() || null })
       }, tx);
       if (!updated) throw new NotFoundException("客户不存在");
       await this.customers.updateAccount(tenantId, { customerId }, { loginPhone: phone, loginPhoneMasked: mask(phone) ?? "****" }, undefined, tx);
       return updated;
     });
-    return { customerId: row.id, name: row.name, phoneMasked: row.phoneMasked, email: row.email ?? undefined, identityNoMasked: row.identityNoMasked ?? undefined };
+    return {
+      customerId: row.id, name: row.name, phoneMasked: row.phoneMasked, email: row.email ?? undefined,
+      identityNoMasked: row.identityNoMasked ?? undefined,
+      gender: row.gender ?? undefined, birthday: row.birthday ? row.birthday.toISOString().slice(0, 10) : undefined,
+      sourceChannel: row.sourceChannel ?? undefined, region: row.region ?? undefined
+    };
   }
 
   async setTemporaryPassword(tenantId: string, customerId: string, temporaryPassword: string, operator?: string) {

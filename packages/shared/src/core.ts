@@ -1245,6 +1245,11 @@ export interface SharedCustomerProfile {
   email?: string;
   identityVerified: boolean;
   identityNoMasked?: string;
+  /** 基础画像主数据（选填）。birthday 统一为 ISO 日期串 YYYY-MM-DD。 */
+  gender?: string;
+  birthday?: string;
+  sourceChannel?: string;
+  region?: string;
   qualifications: Record<string, unknown>;
   corporateName?: string;
   corporateTaxNo?: string;
@@ -1328,10 +1333,57 @@ export interface SaveSharedCustomerRequest {
   email?: string;
   identityVerified?: boolean;
   identityNo?: string;
+  /** 基础画像主数据（选填）。birthday 为 ISO 日期串 YYYY-MM-DD。 */
+  gender?: string;
+  birthday?: string;
+  sourceChannel?: string;
+  region?: string;
   qualifications?: Record<string, unknown>;
   corporateName?: string;
   corporateTaxNo?: string;
 }
+
+/**
+ * 客户基础主数据的预置下拉项（全部选填）。管理端据此渲染快速选择，
+ * 服务端 DTO 用同一常量做 `@IsIn` 兜底，避免两处枚举漂移。取值仅作展示与检索，不参与业务判定。
+ */
+export const CUSTOMER_GENDERS = ["male", "female", "unknown"] as const;
+export type CustomerGender = (typeof CUSTOMER_GENDERS)[number];
+export const CUSTOMER_GENDER_LABELS: Record<CustomerGender, string> = {
+  male: "男",
+  female: "女",
+  unknown: "未知"
+};
+
+export const CUSTOMER_SOURCE_CHANNELS = ["walk_in", "mini_program", "referral", "online_ad", "other"] as const;
+export type CustomerSourceChannel = (typeof CUSTOMER_SOURCE_CHANNELS)[number];
+export const CUSTOMER_SOURCE_CHANNEL_LABELS: Record<CustomerSourceChannel, string> = {
+  walk_in: "到店",
+  mini_program: "小程序",
+  referral: "朋友推荐",
+  online_ad: "线上广告",
+  other: "其他"
+};
+
+export const CUSTOMER_CORPORATE_INDUSTRIES = ["media", "outdoor_tourism", "auto_service", "construction", "events", "other"] as const;
+export type CustomerCorporateIndustry = (typeof CUSTOMER_CORPORATE_INDUSTRIES)[number];
+export const CUSTOMER_CORPORATE_INDUSTRY_LABELS: Record<CustomerCorporateIndustry, string> = {
+  media: "影视传媒",
+  outdoor_tourism: "文旅户外",
+  auto_service: "汽车服务",
+  construction: "建筑工程",
+  events: "活动会展",
+  other: "其他"
+};
+
+export const CUSTOMER_CORPORATE_SCALES = ["1-10", "11-50", "51-200", "200+"] as const;
+export type CustomerCorporateScale = (typeof CUSTOMER_CORPORATE_SCALES)[number];
+export const CUSTOMER_CORPORATE_SCALE_LABELS: Record<CustomerCorporateScale, string> = {
+  "1-10": "1-10人",
+  "11-50": "11-50人",
+  "51-200": "51-200人",
+  "200+": "200人以上"
+};
 
 /** 租户统一注册审核模式。 */
 export const CUSTOMER_MEMBERSHIP_REGISTRATION_MODES = ["automatic", "manual"] as const;
@@ -1365,6 +1417,11 @@ export interface RegisterPersonalMembershipRequest {
   phone: string;
   email?: string;
   identityNo?: string;
+  /** 基础画像主数据（选填）。birthday 为 ISO 日期串 YYYY-MM-DD。 */
+  gender?: string;
+  birthday?: string;
+  sourceChannel?: string;
+  region?: string;
   /** admin / app。客户端不得伪造后台直通过标记。 */
   channel: "admin" | "app";
   /** 管理端仅能设置一次性临时密码；服务端只保存哈希。 */
@@ -1382,6 +1439,11 @@ export interface SavePersonalMembershipRequest {
   phone?: string;
   email?: string;
   identityNo?: string;
+  /** 基础画像主数据（选填）。birthday 为 ISO 日期串 YYYY-MM-DD。 */
+  gender?: string;
+  birthday?: string;
+  sourceChannel?: string;
+  region?: string;
 }
 
 /** 企业会员主档。企业管理员、员工均通过 CustomerCorporateMembership 另行关联个人会员。 */
@@ -1496,6 +1558,11 @@ export interface PersonalMembershipMember {
   phoneMasked: string;
   email?: string;
   identityNoMasked?: string;
+  /** 基础画像主数据（选填）。birthday 为 ISO 日期串 YYYY-MM-DD。 */
+  gender?: string;
+  birthday?: string;
+  sourceChannel?: string;
+  region?: string;
   membershipStatus: CustomerMembershipStatus;
   levelName: string;
   account: CustomerAccountSummary;
@@ -4159,8 +4226,8 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
       assetFields: [
         { code: "brand", label: "厂商", scope: "item_group", type: "string", required: true },
         { code: "model", label: "型号", scope: "item_group", type: "string", required: true },
-        { code: "mount", label: "卡口", scope: "item_group", type: "string" },
-        { code: "sensor", label: "传感器规格", scope: "item_group", type: "string" },
+        { code: "mount", label: "卡口", scope: "item_group", type: "select", options: ["RF", "EF", "E", "Z", "L", "M43", "A", "其他"] },
+        { code: "sensor", label: "传感器规格", scope: "item_group", type: "select", options: ["full_frame", "aps_c", "m43", "medium_format", "one_inch", "other"] },
         { code: "serialNo", label: "设备序列号", scope: "asset", type: "string", required: true, unique: true },
         { code: "shutterCount", label: "快门次数", scope: "transaction", type: "number", unit: "次" },
         { code: "conditionGrade", label: "成色等级", scope: "asset", type: "select", options: ["A", "B", "C"] },
@@ -4282,7 +4349,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
         { code: "energyType", label: "能源类型", scope: "item_group", type: "select", options: ["燃油", "纯电", "混动", "其他"] },
         { code: "licensePlate", label: "车牌号", scope: "asset", type: "string", required: true, unique: true },
         { code: "vin", label: "VIN（车辆识别代号）", scope: "asset", type: "string", required: true, unique: true },
-        { code: "color", label: "车身颜色", scope: "asset", type: "string" },
+        { code: "color", label: "车身颜色", scope: "asset", type: "select", options: ["黑", "白", "银", "灰", "红", "蓝", "其他"] },
         { code: "firstRegistrationDate", label: "首次登记日期", scope: "asset", type: "date" },
         { code: "mileage", label: "里程", scope: "transaction", type: "number", unit: "km" },
         { code: "energyLevel", label: "油量/电量", scope: "transaction", type: "number", unit: "%" }
@@ -4388,6 +4455,12 @@ export interface RentalFulfillmentLocation {
   parentLocationId?: string;
   capabilities: Array<"pickup" | "return" | "storage" | "delivery">;
   address?: string;
+  /** 行政区划主数据（选填）：便于按地区检索与展示，不参与业务判定。 */
+  province?: string;
+  city?: string;
+  district?: string;
+  /** 门店时区（选填），录入端默认 Asia/Shanghai。 */
+  timezone?: string;
   /** 门店坐标（WGS84/GCJ02 由录入端约定）；用于客户端按位置排序与地图导航。 */
   latitude?: number;
   longitude?: number;
@@ -4408,6 +4481,10 @@ export interface SaveRentalFulfillmentLocationRequest {
   parentLocationId?: string;
   capabilities: Array<"pickup" | "return" | "storage" | "delivery">;
   address?: string;
+  province?: string;
+  city?: string;
+  district?: string;
+  timezone?: string;
   latitude?: number;
   longitude?: number;
   contactName?: string;

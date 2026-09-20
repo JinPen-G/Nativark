@@ -550,6 +550,12 @@ model CustomerProfile {
   /// 基础实名认证：租户内共享，不按空间重复认证。
   identityVerified     Boolean  @default(false)
   identityNoMasked     String?
+  /// 基础画像主数据（全部选填）：性别、生日、来源渠道与常驻城市。
+  /// 只用于运营检索与展示，不参与任何业务判定；未录入即为空，无需回填。
+  gender               String?   @db.VarChar(16)
+  birthday             DateTime? @db.Date
+  sourceChannel        String?   @db.VarChar(32)
+  region               String?   @db.VarChar(64)
   /// 品类资质原始事实（如驾驶证、操作资格证），适用性由目标空间品类规则判断。
   qualifications       Json
   corporateName        String?
@@ -1984,6 +1990,12 @@ model RentalFulfillmentLocation {
   parentLocationId   String?
   capabilities       Json
   address            String?
+  /// 行政区划主数据（选填）：便于按地区检索与在客户端展示，不参与任何业务判定。
+  province           String?                    @db.VarChar(64)
+  city               String?                    @db.VarChar(64)
+  district           String?                    @db.VarChar(64)
+  /// 门店时区，默认由录入端填 Asia/Shanghai；选填，不影响既有报价与履约逻辑。
+  timezone           String?                    @db.VarChar(64)
   /// 门店坐标（客户端按位置排序与地图导航）；可空，未录入则客户端不显示距离。
   latitude           Decimal?                   @db.Decimal(10, 7)
   longitude          Decimal?                   @db.Decimal(10, 7)

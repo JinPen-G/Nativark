@@ -1802,6 +1802,10 @@ export class PlatformService {
           phone: input.phone,
           email: input.email,
           identityNo: input.identityNo,
+          gender: input.gender,
+          birthday: input.birthday,
+          sourceChannel: input.sourceChannel,
+          region: input.region,
           channel: "admin"
         }, currentUser?.displayName)).customerId;
     return this.requireSharedCustomers().findById(tenantId, customerId);

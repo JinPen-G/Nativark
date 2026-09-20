@@ -133,6 +133,26 @@ export class SaveRentalFulfillmentLocationDto implements SaveRentalFulfillmentLo
   address?: string;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  province?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  city?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  district?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  timezone?: string;
+
+  @IsOptional()
   @IsNumber()
   @Min(-90)
   @Max(90)
