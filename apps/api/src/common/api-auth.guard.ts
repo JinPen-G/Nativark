@@ -719,7 +719,8 @@ export class ApiAuthGuard implements CanActivate {
       // 同租户多个空间品类不同时，那会让 camping 空间按 camera 的能力集放行。
       const scope = await this.authService.getCategoryContext(user.tenantId, workspaceId);
       if (capability) {
-        // CORE-EXT-02C：能力门禁只认**实例**。
+        // CORE-EXT-02C：扩展能力门禁只认 enabled 实例；Rental Core 内建能力按当前
+        // 空间品类声明直接可用，不创建重复实例。两类判定统一由 isEnabled 封装。
         //
         // 早前判据是 `scope.capabilities?.includes(capability)`，即品类定义的
         // `defaultCapabilities` 数组——那等于「品类声明了这个 code」== 「该空间启用了它」，
@@ -731,7 +732,7 @@ export class ApiAuthGuard implements CanActivate {
         //   1. 没有会话空间 → 拒绝。绝不回退到租户默认空间：那会让一个本该被拒的
         //      无空间会话拿到某个空间的能力集（与 P0-01 的默认租户回退同型）。
         //   2. 没有注入能力服务 → 拒绝。装配被改坏时应当失败，而不是静默放行。
-        //   3. 实例不是 enabled → 拒绝。包含「从未启用」「已暂停」「已停用」三种。
+        //   3. 扩展实例不是 enabled，或当前品类未声明对应 Core 能力 → 拒绝。
         if (!workspaceId) {
           throw new ForbiddenException("当前会话没有经营空间，请先选择经营空间");
         }

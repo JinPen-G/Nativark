@@ -232,7 +232,19 @@ assert.equal(deliveryFresh.declaredByCategory, true, "delivery 由 camera 品类
 assert.equal(deliveryFresh.providedByCore, true);
 assert.equal(deliveryFresh.implemented, true);
 assert.equal(deliveryFresh.state, "enabled");
+assert.equal(deliveryFresh.instance, undefined, "Core 能力不得暴露升级前遗留的空间实例");
+assert.equal(deliveryFresh.upgradeAvailable, false, "Core 能力不得显示扩展模块升级入口");
 assert.equal(await service.isEnabled(TENANT, "delivery"), true, "品类声明的 Core 能力必须直接可用");
+store.instances.set("delivery", {
+  tenantId: TENANT, workspaceId: "ws_camera", code: "delivery", status: "paused",
+  implementationVersion: "legacy-0.9", configVersion: "v2", config: { maxDistanceKm: 10 },
+  revision: 2, createdAt: "", updatedAt: ""
+});
+const legacyCoreView = viewOf(await service.overview(TENANT), "delivery");
+assert.equal(legacyCoreView.state, "enabled", "遗留的暂停实例不得关闭 Core 内建配送");
+assert.equal(legacyCoreView.instance, undefined, "遗留 Core 实例只保留作历史，不得进入治理视图");
+assert.equal(legacyCoreView.upgradeAvailable, false, "遗留 Core 实例不得产生升级按钮");
+store.instances.delete("delivery");
 
 // 有模块但没有实例行 → 「未启用」。这条区分是整个门禁的基础。
 assert.equal(viewOf(fresh, "pickup").state, "enabled");

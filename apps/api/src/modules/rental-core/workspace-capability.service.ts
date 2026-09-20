@@ -328,7 +328,8 @@ export class WorkspaceCapabilityService {
         declaredByCategory: declared.has(definition.code) || definition.kind === "shared",
         implemented,
         applicable,
-        instance,
+        // Core 能力可能存在升级前遗留的实例行；它只作为历史事实保留，不再参与当前配置视图。
+        instance: providedByCore ? undefined : instance,
         state: providedByCore && declared.has(definition.code) && applicable
           ? "enabled"
           : instance
@@ -337,7 +338,8 @@ export class WorkspaceCapabilityService {
             ? "not_enabled"
             : "declared_not_implemented",
         upgradeAvailable: Boolean(
-          instance &&
+          !providedByCore &&
+            instance &&
             definition.implementationVersion !== undefined &&
             instance.implementationVersion !== definition.implementationVersion
         )
