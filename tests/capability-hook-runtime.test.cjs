@@ -239,9 +239,9 @@ void (async () => {
   console.log("  ✓ 配置快照：结构化关系被深克隆、深冻结，Hook 无法污染历史配置");
 }
 
-// ============ 6. 必选能力 fail-closed，可选能力降级放行 ============
+// ============ 6. 首发品类扩展均可选：故障降级并留痕 ============
 {
-  // serialized_inventory 是 category_required；delivery 是 shared（非必选）。
+  // Core 基础流程不通过 Hook 实例运行；即便旧快照残留实例，也不能被当成品类强制扩展。
   const runtime = new CapabilityHookRuntime(
     fakeCapabilities([instance("serialized_inventory"), instance("delivery")])
   );
@@ -266,38 +266,34 @@ void (async () => {
     }
   });
   const outcome = await runtime.run(baseRun({ point: "order_confirmation" }));
-  assert.equal(outcome.blocked, true, "必选能力故障必须 fail-closed 阻止");
-  assert.equal(outcome.blockReasons.length, 1, "只有必选能力的故障进入阻止原因");
-  assert.equal(outcome.blockReasons[0].capability, "serialized_inventory");
-  assert.match(outcome.blockReasons[0].message, /库存服务不可用/u, "阻止原因必须保留底层故障信息");
-  // 可选能力故障不得静默跳过：任务明确禁止把基础设施异常吞成「能力不存在」。
-  assert.equal(outcome.notices.length, 1, "可选能力故障必须留一条可审计提示");
-  assert.equal(outcome.notices[0].capability, "delivery");
-  assert.equal(outcome.notices[0].code, "capability_hook_failed");
+  assert.equal(outcome.blocked, false, "首发品类没有强制扩展时，扩展故障不得阻断基础营业");
+  assert.equal(outcome.blockReasons.length, 0);
+  assert.equal(outcome.notices.length, 2, "两个可选扩展故障都必须留可审计提示");
+  assert.ok(outcome.notices.every((row) => row.code === "capability_hook_failed"));
   const failed = outcome.executed.filter((row) => row.failed);
   assert.equal(failed.length, 2, "两个故障都必须出现在 executed 里并标记 failed");
   assert.deepEqual(
     failed.map((row) => row.decision).sort(),
-    ["block", "warn"],
-    "必选故障记为 block，可选故障记为 warn"
+    ["warn", "warn"],
+    "首发品类的扩展故障统一记为 warn"
   );
-console.log("  ✓ 故障处理：必选能力故障 fail-closed 阻止，可选能力故障降级但留痕");
+console.log("  ✓ 故障处理：首发品类可选扩展故障降级但完整留痕");
 }
 
-// ============ 6b. shared 能力可由具体品类声明为必选 ============
+// ============ 6b. 未来品类仍可声明强制扩展并 fail-closed ============
 {
-  // bundle_inventory 的模块类型是 shared/category_optional，但摄影品类把它列入 requiredCapabilities。
-  const runtime = new CapabilityHookRuntime(fakeCapabilities([instance("bundle_inventory")]));
+  // 未进入生产定义的未来品类按模块 kind 兜底，证明扩展门禁机制仍然存在。
+  const runtime = new CapabilityHookRuntime(fakeCapabilities([instance("serialized_inventory")]));
   runtime.register({
-    code: "bundle_inventory",
+    code: "serialized_inventory",
     implementationVersion: "core-1.0",
     order: 10,
     hooks: { order_confirmation: () => { throw new Error("套装库存故障"); } }
   });
-  const outcome = await runtime.run(baseRun({ point: "order_confirmation", categoryCode: "camera" }));
-  assert.equal(outcome.blocked, true, "被摄影品类列为必选的共享能力故障必须 fail-closed");
-  assert.equal(outcome.blockReasons[0]?.capability, "bundle_inventory");
-  console.log("  ✓ 品类级必选：共享能力在被当前品类列为 required 时故障同样 fail-closed");
+  const outcome = await runtime.run(baseRun({ point: "order_confirmation", categoryCode: "test_lab" }));
+  assert.equal(outcome.blocked, true, "未来品类的强制扩展故障必须 fail-closed");
+  assert.equal(outcome.blockReasons[0]?.capability, "serialized_inventory");
+  console.log("  ✓ 扩展门禁保留：未来品类声明强制扩展时故障仍会 fail-closed");
 }
 
 // ============ 7. 结果契约的运行期校验 ============

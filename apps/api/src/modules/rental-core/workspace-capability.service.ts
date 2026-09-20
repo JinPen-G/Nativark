@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import {
   RENTAL_CAPABILITY_MODULES,
   RENTAL_CATEGORY_DEFINITIONS,
+  RENTAL_CORE_CAPABILITY_CODES,
   type RentalCapability,
   type RentalCapabilityConfig,
   type RentalCategoryCode,
@@ -25,6 +26,7 @@ type CapabilityTx = Parameters<WorkspaceCapabilityRepository["initializeInstance
 const DEFINITIONS = new Map<string, RentalCapabilityDefinition>(
   RENTAL_CAPABILITY_MODULES.map((module) => [module.code, module])
 );
+const CORE_CAPABILITIES = new Set<RentalCapability>(RENTAL_CORE_CAPABILITY_CODES);
 
 const stamp = () => new Date().toISOString();
 
@@ -51,6 +53,13 @@ export class WorkspaceCapabilityService {
   /** 某能力在该空间是否**真正可用**。菜单与 API 门禁只能用这个判定（CORE-EXT-02C 消费）。 */
   async isEnabled(tenantId: string, code: RentalCapability, workspaceId?: string): Promise<boolean> {
     const scope = workspaceId ?? (await this.repository.currentWorkspaceId(tenantId));
+    if (CORE_CAPABILITIES.has(code)) {
+      const { categoryCode, declaredCodes } = await this.repository.workspaceScope(tenantId, scope);
+      const definition = DEFINITIONS.get(code);
+      const applicable =
+        definition?.applicableCategories === "all" || definition?.applicableCategories.includes(categoryCode);
+      return Boolean(applicable && declaredCodes.includes(code));
+    }
     const instance = await this.repository.findInstance(tenantId, scope, code);
     return instance?.status === "enabled";
   }
@@ -308,17 +317,21 @@ export class WorkspaceCapabilityService {
     );
     const capabilities: WorkspaceCapabilityView[] = RENTAL_CAPABILITY_MODULES.map((definition) => {
       const instance = instances.get(definition.code);
+      const providedByCore = CORE_CAPABILITIES.has(definition.code);
       const implemented = definition.implementationVersion !== undefined;
       const applicable =
         definition.applicableCategories === "all" || definition.applicableCategories.includes(categoryCode);
       return {
         definition,
+        providedByCore,
         requiredForCategory: required.has(definition.code),
         declaredByCategory: declared.has(definition.code) || definition.kind === "shared",
         implemented,
         applicable,
         instance,
-        state: instance
+        state: providedByCore && declared.has(definition.code) && applicable
+          ? "enabled"
+          : instance
           ? instance.status
           : implemented
             ? "not_enabled"
@@ -370,6 +383,9 @@ export class WorkspaceCapabilityService {
     if (!reason) throw new BadRequestException("变更能力状态必须填写原因");
     const definition = DEFINITIONS.get(input.code);
     if (!definition) throw new NotFoundException(`未注册的 capability：${input.code}`);
+    if (CORE_CAPABILITIES.has(input.code)) {
+      throw new ConflictException(`能力 ${input.code} 由 Rental Core 内建提供，请在对应业务规则中配置`);
+    }
     const workspaceId = await this.repository.currentWorkspaceId(tenantId);
     const { categoryCode } = await this.repository.workspaceScope(tenantId, workspaceId);
     const existing = await this.repository.findInstance(tenantId, workspaceId, input.code);
@@ -467,6 +483,9 @@ export class WorkspaceCapabilityService {
     if (!reason) throw new BadRequestException("升级能力必须填写原因");
     const definition = DEFINITIONS.get(code);
     if (!definition) throw new NotFoundException(`未注册的 capability：${code}`);
+    if (CORE_CAPABILITIES.has(code)) {
+      throw new ConflictException(`能力 ${code} 由 Rental Core 内建提供，不需要单独升级`);
+    }
     if (definition.implementationVersion === undefined) {
       throw new ConflictException(`能力 ${code} 尚无可执行模块，无法升级`);
     }

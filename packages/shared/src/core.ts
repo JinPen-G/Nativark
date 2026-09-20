@@ -83,6 +83,24 @@ export const RENTAL_CAPABILITY_CODES = [
 export type RentalCapability = (typeof RENTAL_CAPABILITY_CODES)[number];
 
 /**
+ * Rental Core 直接提供的跨品类基础能力。
+ *
+ * 这些能力随品类定义生效，不创建经营空间 capability 实例，也不由运营启停；对应规则
+ * 分别在库存、履约、业务规则和检查模板中配置。其余 code 才属于可独立启停、版本化的扩展模块。
+ */
+export const RENTAL_CORE_CAPABILITY_CODES = [
+  "serialized_inventory",
+  "quantity_inventory",
+  "bundle_inventory",
+  "pickup",
+  "return",
+  "delivery",
+  "usage_reading",
+  "qualification",
+  "inspection_care"
+] as const satisfies readonly RentalCapability[];
+
+/**
  * capability 种类（CORE-EXT-02A）。
  *
  * - `category_required` 只表示扩展模块具备成为品类必选项的资格；最终是否阻止空间进入
@@ -233,6 +251,8 @@ export interface WorkspaceCapabilityAuditEvent {
  */
 export interface WorkspaceCapabilityView {
   definition: RentalCapabilityDefinition;
+  /** true 表示由 Rental Core 内建提供，不需要经营空间另建实例或手工启用。 */
+  providedByCore: boolean;
   /** 是否属于当前空间品类的必选能力；该口径优先于模块的全局 kind。 */
   requiredForCategory: boolean;
   /** 该能力是否被当前空间的品类声明（品类 defaultCapabilities 或 shared 能力）。 */
@@ -511,9 +531,7 @@ export const RENTAL_CAPABILITY_MODULES: RentalCapabilityModuleDefinition[] = [
   { code: "bundle_inventory", label: "套装库存", kind: "category_optional", extensionPoints: ["order_validation", "fulfillment"], applicableCategories: "all", dependsOn: ["serialized_inventory"], conflictsWith: [], configSchema: [], implementationVersion: "core-1.0" },
   { code: "pickup", label: "领取", kind: "category_required", extensionPoints: ["fulfillment"], applicableCategories: "all", dependsOn: [], conflictsWith: [], configSchema: [], implementationVersion: "core-1.0" },
   { code: "return", label: "归还", kind: "category_required", extensionPoints: ["fulfillment"], applicableCategories: "all", dependsOn: [], conflictsWith: [], configSchema: [], implementationVersion: "core-1.0" },
-  // 以下能力**只登记了 code 与扩展点，尚无可执行模块**（缺 implementationVersion）。
-  // 它们在管理端显示为「已声明但未实现」，不得启用、不得开放菜单或 API。
-  // 各自的真实模块由 SHARED-*/CAM-*/VEH-* 等任务实现，实现时再补 implementationVersion。
+  // 手工配送属于通用履约链；第三方运力自动派单仍由后续 integration 扩展承接。
   {
     code: "delivery", label: "配送", kind: "shared",
     extensionPoints: ["menu", "api", "fulfillment", "integration"],
@@ -521,7 +539,8 @@ export const RENTAL_CAPABILITY_MODULES: RentalCapabilityModuleDefinition[] = [
     configSchema: [
       { key: "maxDistanceKm", label: "最大配送半径（公里）", type: "number", required: true, min: 0, max: 500 },
       { key: "requireSignature", label: "是否需要签收", type: "boolean", required: false }
-    ]
+    ],
+    implementationVersion: "core-1.0"
   },
   {
     code: "locker", label: "智能柜", kind: "shared",
@@ -549,13 +568,15 @@ export const RENTAL_CAPABILITY_MODULES: RentalCapabilityModuleDefinition[] = [
     // 写成 "all" 也让新增品类不必回头修改这条定义（CORE-EXT-03 的接入约束）。
     applicableCategories: "all",
     dependsOn: [], conflictsWith: [],
-    configSchema: [{ key: "metric", label: "读数指标", type: "enum", required: true, options: ["mileage", "hours", "shutter"] }]
+    configSchema: [{ key: "metric", label: "读数指标", type: "enum", required: true, options: ["mileage", "hours", "shutter"] }],
+    implementationVersion: "core-1.0"
   },
   {
     code: "qualification", label: "资质审核", kind: "shared",
     extensionPoints: ["menu", "api", "order_validation"],
     applicableCategories: "all", dependsOn: [], conflictsWith: [],
-    configSchema: [{ key: "minimumValidityDays", label: "证件最短剩余有效天数", type: "number", required: true, min: 0, max: 3650 }]
+    configSchema: [{ key: "minimumValidityDays", label: "证件最短剩余有效天数", type: "number", required: true, min: 0, max: 3650 }],
+    implementationVersion: "core-1.0"
   },
   {
     code: "iot", label: "IoT", kind: "shared",
@@ -587,16 +608,16 @@ export const RENTAL_CAPABILITY_MODULES: RentalCapabilityModuleDefinition[] = [
     code: "inspection_care", label: "检查与养护", kind: "shared",
     extensionPoints: ["fulfillment"],
     applicableCategories: [RentalCategoryCode.Camera, RentalCategoryCode.Vehicle, RentalCategoryCode.Construction],
-    dependsOn: ["return"], conflictsWith: [], configSchema: []
+    dependsOn: ["return"], conflictsWith: [], configSchema: [], implementationVersion: "core-1.0"
   },
   {
-    code: "vehicle_relocation", label: "车辆异地还车", kind: "category_required",
+    code: "vehicle_relocation", label: "车辆异地还车调度", kind: "category_optional",
     extensionPoints: ["order_validation", "fulfillment"],
     applicableCategories: [RentalCategoryCode.Vehicle], dependsOn: ["dispatch"], conflictsWith: [],
     configSchema: []
   },
   {
-    code: "construction_transport", label: "工程设备运输交付", kind: "category_required",
+    code: "construction_transport", label: "工程设备运输调度", kind: "category_optional",
     extensionPoints: ["order_validation", "fulfillment"],
     applicableCategories: [RentalCategoryCode.Construction], dependsOn: ["dispatch"], conflictsWith: [],
     configSchema: []
@@ -4341,7 +4362,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     name: "车辆载具",
     description: "汽车、摩托车和其他载具租赁",
     supportedInventoryModes: [RentalInventoryMode.Serialized],
-    defaultCapabilities: ["serialized_inventory", "pickup", "return", "dispatch", "usage_reading", "qualification", "iot", "inspection_care", "vehicle_relocation"],
+    defaultCapabilities: ["serialized_inventory", "pickup", "return", "delivery", "dispatch", "usage_reading", "qualification", "iot", "inspection_care", "vehicle_relocation"],
     requiredCapabilities: [],
     terminology: { itemLabel: "车辆", itemGroupLabel: "车辆型号", assetLabel: "车辆", fulfillmentLabel: "门店", pickupLabel: "取车", returnLabel: "还车", identifierLabel: "车辆编号", usageMetricLabel: "里程", assetCollectionLabel: "车队", navigationLabels: { inventoryGroup: "车辆型号与车队", itemGroups: "厂牌车型管理", pricingGroups: "车辆定价分组", assets: "车辆管理", locations: "门店管理" } },
     attributeSchema: { manufacturer: "string", brand: "string", model: "string", trim: "string", modelYear: "number", seats: "number", transmission: "string", energyType: "string", licensePlate: "string", vin: "string", color: "string", firstRegistrationDate: "date", mileage: "number" },

@@ -226,15 +226,16 @@ const fresh = await service.overview(TENANT);
 assert.equal(store.instances.size, 0, "读总览不得产生实例行");
 const viewOf = (overview, code) => overview.capabilities.find((row) => row.definition.code === code);
 
-// 品类声明了 delivery，但它没有可执行模块 → 只能是「已声明但未实现」，不是可用功能。
+// 配送由 Rental Core 内建提供，不需要空间另建 capability 实例。
 const deliveryFresh = viewOf(fresh, "delivery");
 assert.equal(deliveryFresh.declaredByCategory, true, "delivery 由 camera 品类声明");
-assert.equal(deliveryFresh.implemented, false, "delivery 尚无 implementationVersion");
-assert.equal(deliveryFresh.state, "declared_not_implemented");
-assert.equal(await service.isEnabled(TENANT, "delivery"), false, "未启用的能力 isEnabled 必须为 false");
+assert.equal(deliveryFresh.providedByCore, true);
+assert.equal(deliveryFresh.implemented, true);
+assert.equal(deliveryFresh.state, "enabled");
+assert.equal(await service.isEnabled(TENANT, "delivery"), true, "品类声明的 Core 能力必须直接可用");
 
 // 有模块但没有实例行 → 「未启用」。这条区分是整个门禁的基础。
-assert.equal(viewOf(fresh, "pickup").state, "not_enabled");
+assert.equal(viewOf(fresh, "pickup").state, "enabled");
 assert.equal(viewOf(fresh, "pickup").implemented, true);
 // 未被本品类声明、也不是 shared 的能力 → declaredByCategory 必须为 false。
 assert.equal(viewOf(fresh, "dispatch").declaredByCategory, false, "camera 未声明 dispatch");
@@ -262,7 +263,7 @@ const enable = (code, extra = {}) =>
 
 // 原因必填：生命周期变更是经营决策，事后要能解释。
 await rejects(
-  service.save(TENANT, { code: "pickup", status: "enabled", reason: "   " }, "tester"),
+  service.save(TENANT, { code: "camera_compatibility", status: "enabled", reason: "   " }, "tester"),
   BAD_REQUEST,
   /必须填写原因/u
 );
@@ -272,64 +273,47 @@ await rejects(
   NOT_FOUND,
   /未注册的 capability/u
 );
-// 只有 code、没有可执行模块的能力不得启用——否则菜单与 API 会对着不存在的模块放行。
-await rejects(enable("delivery"), CONFLICT, /已声明但尚无可执行模块/u);
+// Core 内建能力不允许重复创建空间实例。
+await rejects(enable("delivery"), CONFLICT, /Rental Core 内建/u);
 // 不适用于当前品类的能力不得启用（dispatch 只适用于 vehicle/construction）。
 await rejects(enable("dispatch"), CONFLICT, /不适用于当前经营品类/u);
-// 依赖未启用时不得启用：bundle_inventory 依赖 serialized_inventory。
-await rejects(enable("bundle_inventory"), CONFLICT, /依赖 serialized_inventory/u);
 assert.equal(store.instances.size, 0, "以上任一失败都不得写出实例行");
 assert.equal(store.audits.length, 0, "被拒的变更不得留下审计");
 
-// 依赖满足后同一次调用必须成功——证明上面的拒绝来自依赖判定，而不是别的原因。
-const serialized = await enable("serialized_inventory");
-assert.equal(serialized.status, "enabled");
-assert.equal(serialized.implementationVersion, "core-1.0", "启用时应锁定注册表当前实现版本");
-assert.equal(serialized.revision, 1, "首次写入 revision 从 1 起");
-assert.equal(serialized.configVersion, "v1");
-const bundle = await enable("bundle_inventory");
-assert.equal(bundle.status, "enabled", "依赖已启用后 bundle_inventory 必须可启用");
+const extension = await enable("camera_compatibility");
+assert.equal(extension.status, "enabled");
+assert.equal(extension.implementationVersion, "cam-1.0", "启用时应锁定扩展模块当前实现版本");
+assert.equal(extension.revision, 1, "首次写入 revision 从 1 起");
+assert.equal(extension.configVersion, "v1");
 assert.equal(await service.isEnabled(TENANT, "serialized_inventory"), true);
-console.log("  ✓ 启用 fail-closed：缺原因/未注册/未实现/不适用/缺依赖全部被拒且不落行");
+console.log("  ✓ 启用 fail-closed：Core 不重复落实例，未注册/不适用扩展均被拒");
 
 // ============ 4. 配置逐字段校验 ============
 // 已实现且 configSchema 为空的能力，任何配置键都是未知键 → 启用请求必须 400，且不落行。
 const beforeBadConfig = store.instances.size;
-await rejects(enable("pickup", { config: { anything: 1 } }), BAD_REQUEST, /不接受配置项 anything/u);
+await rejects(enable("camera_compatibility", { config: { anything: 1 } }), BAD_REQUEST, /不接受配置项 anything/u);
 assert.equal(store.instances.size, beforeBadConfig, "配置无效时不得产生实例行（即不得启用）");
 
-// 其余规则用 delivery/locker/usage_reading 验证：它们有真实 configSchema。
-// 用非 enabled 状态是为了绕过"未实现不得启用"，从而抵达配置校验分支本身。
+// 其余规则用可选扩展 locker 验证；Core 配置统一在业务规则页维护。
 const save = (code, config, status = "disabled") =>
   service.save(TENANT, { code, status, config, reason: "配置校验" }, "tester");
 
-await rejects(save("delivery", {}), BAD_REQUEST, /缺少必填配置项/u);
-await rejects(save("delivery", { maxDistanceKm: "远" }), BAD_REQUEST, /必须是数值/u);
-await rejects(save("delivery", { maxDistanceKm: -1 }), BAD_REQUEST, /不能小于 0/u);
-await rejects(save("delivery", { maxDistanceKm: 501 }), BAD_REQUEST, /不能大于 500/u);
-await rejects(
-  save("delivery", { maxDistanceKm: 10, requireSignature: "yes" }),
-  BAD_REQUEST,
-  /必须是布尔值/u
-);
+await rejects(save("locker", {}), BAD_REQUEST, /缺少必填配置项/u);
 await rejects(save("locker", { provider: 42 }), BAD_REQUEST, /必须是字符串/u);
-await rejects(save("usage_reading", { metric: "temperature" }), BAD_REQUEST, /只能是/u);
 
-// 合法配置必须通过，且数值被规范化为 number（"12" → 12），否则下游要各自再转一次。
-const delivered = await save("delivery", { maxDistanceKm: "12", requireSignature: true });
-assert.equal(delivered.config.maxDistanceKm, 12, "数值配置应规范化为 number");
-assert.equal(delivered.config.requireSignature, true);
-assert.equal(delivered.status, "disabled", "配置合法也不得把未实现的能力顺带启用");
-assert.equal(await service.isEnabled(TENANT, "delivery"), false);
-console.log("  ✓ 配置校验：未知键/缺必填/类型/上下界/枚举越界全部被拒，合法值被规范化");
+const configured = await save("locker", { provider: "demo-locker" });
+assert.equal(configured.config.provider, "demo-locker");
+assert.equal(configured.status, "disabled", "保存配置不得顺带启用扩展");
+assert.equal(await service.isEnabled(TENANT, "locker"), false);
+console.log("  ✓ 配置校验：未知键、缺必填与类型错误均被拒，合法扩展配置可保存");
 
 // ============ 5. 配置版本序号与审计动作 ============
 // 版本号必须按整数递增。字符串版本号在两位数后会被字典序排错（"v10" < "v9"）。
-let versioned = delivered;
+let versioned = configured;
 for (let round = 2; round <= 11; round += 1) {
   versioned = await service.save(
     TENANT,
-    { code: "delivery", status: "disabled", config: { maxDistanceKm: round }, reason: `第 ${round} 次改配置`, expectedRevision: versioned.revision },
+    { code: "locker", status: "disabled", config: { provider: `provider-${round}` }, reason: `第 ${round} 次改配置`, expectedRevision: versioned.revision },
     "tester"
   );
   assert.equal(versioned.configVersion, `v${round}`, `第 ${round} 次改配置应得到 v${round}`);
@@ -343,7 +327,7 @@ assert.equal(store.audits.at(-1).action, "configure", "只改配置应记为 con
 // 配置未变时不得凭空推进配置版本，否则版本号会失去"配置变过"的含义。
 const unchanged = await service.save(
   TENANT,
-  { code: "delivery", status: "disabled", config: { maxDistanceKm: 11 }, reason: "内容相同的重复提交", expectedRevision: versioned.revision },
+  { code: "locker", status: "disabled", config: { provider: "provider-11" }, reason: "内容相同的重复提交", expectedRevision: versioned.revision },
   "tester"
 );
 assert.equal(unchanged.configVersion, versioned.configVersion, "配置未变不得推进配置版本");
@@ -354,13 +338,13 @@ console.log("  ✓ 配置版本按整数递增（v11 > v9）、内容未变不�
 // paused / disabled 都**不是**可用状态：门禁只认 enabled。
 const paused = await service.save(
   TENANT,
-  { code: "bundle_inventory", status: "paused", reason: "临时停用套装", expectedRevision: bundle.revision },
+  { code: "camera_compatibility", status: "paused", reason: "临时停用兼容检查", expectedRevision: extension.revision },
   "tester"
 );
 assert.equal(paused.status, "paused");
 assert.ok(paused.pausedAt, "暂停必须记录时间");
 assert.ok(paused.enabledAt, "暂停不得清掉原启用时间");
-assert.equal(await service.isEnabled(TENANT, "bundle_inventory"), false, "paused 不得被判定为可用");
+assert.equal(await service.isEnabled(TENANT, "camera_compatibility"), false, "paused 不得被判定为可用");
 assert.equal(store.audits.at(-1).action, "pause");
 assert.equal(store.audits.at(-1).fromStatus, "enabled");
 assert.equal(store.audits.at(-1).toStatus, "paused");
@@ -370,14 +354,14 @@ assert.equal(store.audits.at(-1).operator, "tester", "审计必须记录操作�
 await rejects(
   service.save(
     TENANT,
-    { code: "bundle_inventory", status: "disabled", reason: "基于过期版本", expectedRevision: bundle.revision },
+    { code: "camera_compatibility", status: "disabled", reason: "基于过期版本", expectedRevision: extension.revision },
     "other"
   ),
   CONFLICT,
   /已被其他人修改/u
 );
 assert.equal(
-  (await service.overview(TENANT)).capabilities.find((row) => row.definition.code === "bundle_inventory").instance.status,
+  (await service.overview(TENANT)).capabilities.find((row) => row.definition.code === "camera_compatibility").instance.status,
   "paused",
   "落败的并发写入不得改变现状"
 );
@@ -387,7 +371,7 @@ assert.equal(
 const orphanStore = createStore({ categoryCode: "camera", declaredCodes: CAMERA_DECLARED });
 const orphanService = new WorkspaceCapabilityService(orphanStore);
 await rejects(
-  orphanService.save(TENANT, { code: "pickup", status: "enabled", reason: "基于不存在的行", expectedRevision: 7 }, "tester"),
+  orphanService.save(TENANT, { code: "camera_compatibility", status: "enabled", reason: "基于不存在的行", expectedRevision: 7 }, "tester"),
   CONFLICT,
   /当前版本 0/u
 );
@@ -395,7 +379,7 @@ assert.equal(orphanStore.instances.size, 0, "带过期版本号的首次写入�
 // expectedRevision: 0 表示「我确认它还不存在」，必须允许首次创建。
 const orphanCreated = await orphanService.save(
   TENANT,
-  { code: "pickup", status: "enabled", reason: "确认尚不存在", expectedRevision: 0 },
+  { code: "camera_compatibility", status: "enabled", reason: "确认尚不存在", expectedRevision: 0 },
   "tester"
 );
 assert.equal(orphanCreated.revision, 1, "expectedRevision=0 应允许首次创建");
@@ -413,11 +397,11 @@ await rejects(
 );
 await rejects(
   service.upgrade(TENANT, "quantity_inventory", { reason: "尚未启用" }, "tester"),
-  NOT_FOUND,
-  /尚未在本经营空间启用/u
+  CONFLICT,
+  /Rental Core 内建/u
 );
 await rejects(
-  service.upgrade(TENANT, "serialized_inventory", { reason: "已是最新" }, "tester"),
+  service.upgrade(TENANT, "camera_compatibility", { reason: "已是最新" }, "tester"),
   CONFLICT,
   /已是最新实现版本/u
 );
@@ -430,12 +414,11 @@ const readyService = new WorkspaceCapabilityService(readyStore);
 const ready = await readyService.overview(TENANT);
 assert.deepEqual(ready.missingRequired, [], "未启用品类扩展不得进入基础营业缺项");
 assert.equal(ready.productionReady, true, "基础经营条件由业务事实门禁负责，不由可选扩展阻断");
-// 未实现的 delivery 仍是「已声明但未实现」，且不影响就绪判定（它不是 category_required）。
-assert.equal(ready.capabilities.find((row) => row.definition.code === "delivery").state, "declared_not_implemented");
-const pickup = await readyService.save(TENANT, { code: "pickup", status: "enabled", reason: "验证扩展生命周期" }, "tester");
+assert.equal(ready.capabilities.find((row) => row.definition.code === "delivery").state, "enabled");
+const optional = await readyService.save(TENANT, { code: "camera_compatibility", status: "enabled", reason: "验证扩展生命周期" }, "tester");
 await readyService.save(
   TENANT,
-  { code: "pickup", status: "paused", reason: "设备检修", expectedRevision: pickup.revision },
+  { code: "camera_compatibility", status: "paused", reason: "规则检修", expectedRevision: optional.revision },
   "tester"
 );
 const afterPause = await readyService.overview(TENANT);
@@ -446,6 +429,7 @@ console.log("  ✓ 生产就绪：基础经营与可选扩展生命周期已解�
 // ============ 9. 已启用名单：Hook 运行时的执行依据 ============
 // CORE-EXT-02B 的 Hook 运行时按这份名单决定执行哪些能力，因此它必须只含 enabled。
 // 若退化为「有实例即返回」，暂停的能力仍会参与判定，暂停就成了只改显示的空操作。
+await enable("camera_kit_handover");
 const lifecycleStates = (await service.overview(TENANT)).capabilities
   .filter((row) => row.instance)
   .map((row) => `${row.definition.code}:${row.instance.status}`)
@@ -500,8 +484,8 @@ assert.deepEqual(
   ["bundle_inventory", "pickup", "return"],
   "逆序返回的实例必须被 snapshotEnabled 排成 code 升序（证明排序确实发生）"
 );
-// 快照里不得出现 paused / disabled 的能力（bundle_inventory 在上面已被暂停）。
-assert.ok(!snapCodes.includes("bundle_inventory"), "已暂停的能力不得进入快照");
+// 快照里不得出现 paused / disabled 的扩展能力。
+assert.ok(!snapCodes.includes("camera_compatibility"), "已暂停的能力不得进入快照");
 
 // 还原：状态一律 enabled，让在途订单不因能力停用而中断履约。
 const restored = WorkspaceCapabilityService.instancesFromSnapshot(TENANT, "ws_camera", snapshot);
@@ -525,9 +509,9 @@ console.log("  ✓ 能力快照：只含已启用、稳定排序、字段最小�
 
 // ============ 10. 审计可按能力筛选且只增不改 ============
 const allAudits = await service.listAudits(TENANT);
-const bundleAudits = await service.listAudits(TENANT, "bundle_inventory");
+const bundleAudits = await service.listAudits(TENANT, "camera_compatibility");
 assert.ok(allAudits.length >= bundleAudits.length && bundleAudits.length >= 2, "审计应可按能力筛选");
-assert.ok(bundleAudits.every((row) => row.code === "bundle_inventory"), "筛选结果不得混入其他能力");
+assert.ok(bundleAudits.every((row) => row.code === "camera_compatibility"), "筛选结果不得混入其他能力");
 assert.ok(bundleAudits.every((row) => row.reason && row.at), "每条审计都必须有原因与时间");
 assert.deepEqual(
   bundleAudits.map((row) => row.action),

@@ -12,6 +12,8 @@ const { plainToInstance } = require("class-transformer");
 const { validate } = require("class-validator");
 const {
   RENTAL_CATEGORY_DEFINITIONS,
+  RENTAL_CORE_CAPABILITY_CODES,
+  RENTAL_CAPABILITY_MODULES,
   RENTAL_LOCATION_TYPES
 } = require("@rental-os/shared");
 const {
@@ -23,6 +25,18 @@ void (async () => {
   assert.ok(
     RENTAL_CATEGORY_DEFINITIONS.every((category) => category.requiredCapabilities.length === 0),
     "四品类基础营业不得被尚未启用的品类扩展模块阻断"
+  );
+  const coreCodes = new Set(RENTAL_CORE_CAPABILITY_CODES);
+  assert.ok(
+    ["delivery", "usage_reading", "qualification", "inspection_care"].every((code) =>
+      coreCodes.has(code) && RENTAL_CAPABILITY_MODULES.find((module) => module.code === code)?.implementationVersion === "core-1.0"
+    ),
+    "配送、使用量、资质与检查养护必须明确由 Rental Core 提供"
+  );
+  assert.equal(
+    RENTAL_CAPABILITY_MODULES.find((module) => module.code === "vehicle_relocation")?.kind,
+    "category_optional",
+    "车辆异地归还调度不得成为车辆空间基础营业门槛"
   );
   assert.equal(
     RENTAL_CATEGORY_DEFINITIONS.find((category) => category.code === "vehicle").terminology.navigationLabels.pricingGroups,

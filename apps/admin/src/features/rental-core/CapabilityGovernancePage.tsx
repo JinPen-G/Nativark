@@ -234,7 +234,9 @@ export function CapabilityGovernancePage() {
               {
                 title: "当前品类定位",
                 render: (_, row) =>
-                  row.requiredForCategory ? (
+                  row.providedByCore ? (
+                    <Tag color="blue">Core 内建</Tag>
+                  ) : row.requiredForCategory ? (
                     <Tag color="red">品类必选</Tag>
                   ) : (
                     <Tag color={kindMeta[row.definition.kind].color}>{kindMeta[row.definition.kind].label}</Tag>
@@ -293,6 +295,8 @@ export function CapabilityGovernancePage() {
                       title={
                         !row.implemented
                           ? "该能力只登记了扩展点，尚无可执行模块，不能启用"
+                          : row.providedByCore
+                            ? "该能力由 Rental Core 内建提供，请到对应业务规则中配置"
                           : !row.applicable
                             ? "该能力不适用于当前经营品类"
                             : undefined
@@ -301,7 +305,7 @@ export function CapabilityGovernancePage() {
                       <Button
                         type="link"
                         icon={<SettingOutlined />}
-                        disabled={!canManage || !row.implemented || !row.applicable}
+                        disabled={!canManage || !row.implemented || !row.applicable || row.providedByCore}
                         onClick={() => openEditor(row)}
                       >
                         状态与配置
