@@ -53,6 +53,29 @@ function Test-AdminHealth([int]$port) {
   }
 }
 
+function Invoke-DatabaseMigrations {
+  $databaseUrl = Get-DotEnvValue "DATABASE_URL" ""
+  if ([string]::IsNullOrWhiteSpace($databaseUrl)) {
+    throw "未配置 DATABASE_URL，无法应用数据库迁移。"
+  }
+
+  $previousDatabaseUrl = [Environment]::GetEnvironmentVariable("DATABASE_URL", "Process")
+  $env:DATABASE_URL = $databaseUrl
+  Push-Location (Join-Path $root "apps/api")
+  try {
+    Write-Host "[rental-os] 应用待执行数据库迁移（prisma migrate deploy）..." -ForegroundColor Cyan
+    npx prisma migrate deploy
+    if ($LASTEXITCODE -ne 0) { throw "数据库迁移应用失败。" }
+  } finally {
+    Pop-Location
+    if ($null -eq $previousDatabaseUrl) {
+      Remove-Item Env:DATABASE_URL -ErrorAction SilentlyContinue
+    } else {
+      $env:DATABASE_URL = $previousDatabaseUrl
+    }
+  }
+}
+
 function Start-DevTerminal([string]$scriptName, [string]$title) {
   $command = "title $title && cd /d `"$root`" && npm run $scriptName"
   Start-Process -FilePath $env:ComSpec -ArgumentList @("/k", $command) -WorkingDirectory $root -WindowStyle Normal | Out-Null
@@ -115,13 +138,6 @@ $apiHealthy = Test-ApiHealth $apiPort
 $adminListening = Test-ListeningPort $adminPort
 $adminHealthy = Test-AdminHealth $adminPort
 
-if ($apiListening -and -not $apiHealthy) {
-  throw "端口 $apiPort 已被占用，但 $apiPort/api/health 未返回 status=ok；请先关闭占用端口的旧 API 进程，再重新运行启动脚本。"
-}
-if ($adminListening -and -not $adminHealthy) {
-  throw "端口 $adminPort 已被占用，但管理端页面不可访问；请先关闭占用端口的旧前端进程，再重新运行启动脚本。"
-}
-
 if (-not $SkipDatabaseChecks) {
   Write-Host "[rental-os] 生成 Prisma Client 并校验 schema..." -ForegroundColor Cyan
   if ($apiHealthy) {
@@ -132,6 +148,19 @@ if (-not $SkipDatabaseChecks) {
   }
   npm run db:validate
   if ($LASTEXITCODE -ne 0) { throw "Prisma schema 校验失败。" }
+  Invoke-DatabaseMigrations
+}
+
+$apiListening = Test-ListeningPort $apiPort
+$apiHealthy = Test-ApiHealth $apiPort
+$adminListening = Test-ListeningPort $adminPort
+$adminHealthy = Test-AdminHealth $adminPort
+
+if ($apiListening -and -not $apiHealthy) {
+  throw "端口 $apiPort 已被占用，但 $apiPort/api/health 未返回 status=ok；请先关闭占用端口的旧 API 进程，再重新运行启动脚本。"
+}
+if ($adminListening -and -not $adminHealthy) {
+  throw "端口 $adminPort 已被占用，但管理端页面不可访问；请先关闭占用端口的旧前端进程，再重新运行启动脚本。"
 }
 
 $needApi = -not $apiHealthy
