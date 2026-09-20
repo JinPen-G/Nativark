@@ -1984,6 +1984,9 @@ model RentalFulfillmentLocation {
   parentLocationId   String?
   capabilities       Json
   address            String?
+  /// 门店坐标（客户端按位置排序与地图导航）；可空，未录入则客户端不显示距离。
+  latitude           Decimal?                   @db.Decimal(10, 7)
+  longitude          Decimal?                   @db.Decimal(10, 7)
   contactName        String?
   contactPhone       String?
   businessHours      String?

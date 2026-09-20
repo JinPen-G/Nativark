@@ -44,5 +44,13 @@
   },
   "lazyCodeLoading": "requiredComponents",
   "style": "v2",
+  "permission": {
+    "scope.userLocation": {
+      "desc": "用于按你的位置推荐附近的取货门店并提供地图导航"
+    }
+  },
+  "requiredPrivateInfos": [
+    "getLocation"
+  ],
   "sitemapLocation": "sitemap.json"
 }

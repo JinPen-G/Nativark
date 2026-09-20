@@ -115,6 +115,14 @@ test("app.json 声明 20 个页面、4 个 Tab（带图标），每个页面与�
   assert.equal(app.usingComponents, undefined, "全局注册自定义组件会削弱 lazyCodeLoading 的按需注入");
   assert.equal(app.lazyCodeLoading, "requiredComponents");
   assert.equal(app.window.navigationStyle, "custom", "全部页面使用自定义导航栏（品牌 Logo 行）");
+  // requiredPrivateInfos 只能取微信接口白名单：openLocation 用内置地图、不属于此表，写进去开发者工具会拒绝编译。
+  const PRIVATE_INFO_WHITELIST = ["chooseAddress", "chooseLocation", "choosePoi", "getFuzzyLocation", "getLocation", "onLocationChange", "startLocationUpdate", "startLocationUpdateBackground"];
+  for (const info of app.requiredPrivateInfos ?? []) {
+    assert.ok(PRIVATE_INFO_WHITELIST.includes(info), `requiredPrivateInfos 含非法项 ${info}（openLocation 等不属于此表）`);
+  }
+  if ((app.requiredPrivateInfos ?? []).includes("getLocation")) {
+    assert.ok(app.permission && app.permission["scope.userLocation"] && app.permission["scope.userLocation"].desc, "声明 getLocation 必须同时配 permission.scope.userLocation.desc");
+  }
   const componentTags = ["nav-bar", "ui-icon", "state-view", "money-text", "status-tag", "sheet"];
   const registeredComponents = new Set();
   for (const route of app.pages) {
@@ -729,6 +737,32 @@ test("面向客户的用词不暴露内部枚举，未知取值原样返回而�
   assert.equal(labels.chargeLabel("early_return_refund"), "提前归还退款");
   assert.equal(labels.categoryLabel("unknown_code"), "unknown_code");
   assert.equal(labels.categoryLabel(undefined), "");
+});
+
+test("门店距离：Haversine 估算与降级；无坐标/无位置不显示距离，最近门店只选可领取且有坐标者", () => {
+  const r = runtime();
+  const geo = r.load("core/geo");
+  const here = { latitude: 31.2304, longitude: 121.4737 };
+  // 约 1.6km 外的一点，估算应在 1~3km 之间。
+  const near = geo.distanceMeters(here, { latitude: 31.2450, longitude: 121.4737 });
+  assert.ok(near > 1000 && near < 3000, `距离估算异常: ${near}`);
+  assert.equal(geo.distanceMeters(here, undefined), undefined, "缺一端坐标返回 undefined");
+  assert.equal(geo.distanceMeters(undefined, here), undefined);
+  assert.equal(geo.formatDistance(undefined), "", "无距离不显示");
+  assert.match(geo.formatDistance(320), /m$/);
+  assert.match(geo.formatDistance(3200), /km$/);
+
+  const catalogStore = r.load("core/catalogStore");
+  const locations = [
+    { id: "far", status: "enabled", capabilities: ["pickup"], latitude: 31.30, longitude: 121.50 },
+    { id: "near", status: "enabled", capabilities: ["pickup", "return"], latitude: 31.2310, longitude: 121.4740 },
+    { id: "returnOnly", status: "enabled", capabilities: ["return"], latitude: 31.2305, longitude: 121.4738 },
+    { id: "noCoord", status: "enabled", capabilities: ["pickup"] },
+    { id: "disabled", status: "disabled", capabilities: ["pickup"], latitude: 31.2306, longitude: 121.4739 }
+  ];
+  assert.equal(catalogStore.nearestLocation(locations, here).id, "near", "只在可领取且有坐标的门店里选最近的一家");
+  assert.equal(catalogStore.nearestLocation(locations, undefined), undefined, "无用户位置时不臆测最近门店");
+  assert.equal(catalogStore.nearestLocation([{ id: "x", status: "enabled", capabilities: ["pickup"] }], here), undefined, "门店无坐标时返回空，调用方退回默认门店");
 });
 
 /* ---------------- 拟新增契约对账 ---------------- */

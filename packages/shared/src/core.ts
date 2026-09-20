@@ -4388,6 +4388,9 @@ export interface RentalFulfillmentLocation {
   parentLocationId?: string;
   capabilities: Array<"pickup" | "return" | "storage" | "delivery">;
   address?: string;
+  /** 门店坐标（WGS84/GCJ02 由录入端约定）；用于客户端按位置排序与地图导航。 */
+  latitude?: number;
+  longitude?: number;
   contactName?: string;
   contactPhone?: string;
   businessHours?: string;
@@ -4405,6 +4408,8 @@ export interface SaveRentalFulfillmentLocationRequest {
   parentLocationId?: string;
   capabilities: Array<"pickup" | "return" | "storage" | "delivery">;
   address?: string;
+  latitude?: number;
+  longitude?: number;
   contactName?: string;
   contactPhone?: string;
   businessHours?: string;

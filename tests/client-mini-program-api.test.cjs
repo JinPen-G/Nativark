@@ -333,7 +333,7 @@ test("catalog projects a starting price from the effective space rates and publi
       { id: "pg-off", code: "OFF", name: "停用", status: "disabled", memberItemGroupIds: ["tripod"] }
     ],
     locations: [
-      { id: "l1", code: "L1", name: "静安店", status: "enabled", address: "南京西路 1266 号", businessHours: "10:00-20:00", contactPhone: "021-000000", capabilities: ["pickup", "return"], operatorId: "op", operatorType: "partner", operatorName: "内部合作方" },
+      { id: "l1", code: "L1", name: "静安店", status: "enabled", address: "南京西路 1266 号", latitude: 31.2231, longitude: 121.4737, businessHours: "10:00-20:00", contactPhone: "021-000000", capabilities: ["pickup", "return"], operatorId: "op", operatorType: "partner", operatorName: "内部合作方" },
       { id: "l2", code: "L2", name: "停用店", status: "disabled", capabilities: ["pickup"] }
     ]
   };
@@ -348,7 +348,7 @@ test("catalog projects a starting price from the effective space rates and publi
   assert.deepEqual(byId.lens.startingPrice, { amount: 80, unit: "day_24h", currency: "CNY" }, "负数费率不参与");
   assert.equal(byId.tripod.startingPrice, undefined, "停用定价分组不提供起价，也不以 0 元替代");
   assert.equal(byId.old, undefined);
-  assert.deepEqual(catalog.locations, [{ id: "l1", code: "L1", name: "静安店", status: "enabled", address: "南京西路 1266 号", businessHours: "10:00-20:00", contactPhone: "021-000000", capabilities: ["pickup", "return"] }]);
+  assert.deepEqual(catalog.locations, [{ id: "l1", code: "L1", name: "静安店", status: "enabled", address: "南京西路 1266 号", latitude: 31.2231, longitude: 121.4737, businessHours: "10:00-20:00", contactPhone: "021-000000", capabilities: ["pickup", "return"] }]);
   assert.deepEqual(catalog.fulfillment, { enabledModes: ["store_pickup_return", "delivery"], allowDifferentReturnLocation: true }, "履约方式投影透传经营空间设置");
   for (const location of catalog.locations) for (const field of ["operatorId", "operatorType", "operatorName", "settlementMode"]) assert.equal(field in location, false);
   const noVersion = api({ context: () => business, auth: { listPublicWorkspaces: async () => ({ workspaces: [] }) }, business: { listSpaceRatesAt: async () => [], listServices: () => [], listDiscountPlans: () => [], effectiveRuleAt: () => undefined } });

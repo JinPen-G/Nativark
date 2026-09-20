@@ -1,5 +1,6 @@
 import { configProblem } from "../../config/public";
-import { cachedCatalog, hydrateImages, loadCatalog, primaryLocation, searchItems, setPendingSearch, toItemCard, type ItemCard } from "../../core/catalogStore";
+import { cachedCatalog, hydrateImages, loadCatalog, nearestLocation, primaryLocation, searchItems, setPendingSearch, toItemCard, type ItemCard } from "../../core/catalogStore";
+import { cachedUserLocation, distanceMeters, formatDistance } from "../../core/geo";
 import { isApiError } from "../../core/http";
 import { categoryIcon } from "../../core/labels";
 import { cachedMerchant, findService, loadMerchant, merchantEvents, resolveServiceCode, type MerchantInfo } from "../../core/merchant";
@@ -19,7 +20,7 @@ interface HomeData {
   view: ViewState;
   merchantView: ViewState;
   servicePhone: string;
-  store?: { id: string; name: string; address: string; hours: string; phone: string };
+  store?: { id: string; name: string; address: string; hours: string; phone: string; distanceText: string };
   signedIn: boolean;
   serviceName: string;
   bannerTitle: string;
@@ -144,10 +145,14 @@ Page({
       if (token !== this.loadVersion || version !== contextVersion()) return;
       const items = searchItems(catalog.items, "", "").slice(0, HOT_LIMIT);
       const cards = items.map(toItemCard);
-      const store = primaryLocation(catalog);
+      // 已授权定位（用户在服务点页开过）时，首页“附近服务点”选最近的一家并显示距离；否则用默认门店，不在首页主动弹定位。
+      const here = cachedUserLocation();
+      const store = nearestLocation(catalog.locations, here) ?? primaryLocation(catalog);
+      const storeMeters = store && here && typeof store.latitude === "number" && typeof store.longitude === "number"
+        ? distanceMeters(here, { latitude: store.latitude, longitude: store.longitude }) : undefined;
       this.setData({
         cards,
-        store: store ? { id: store.id, name: store.name, address: store.address ?? "", hours: store.businessHours ?? "", phone: store.contactPhone ?? "" } : undefined,
+        store: store ? { id: store.id, name: store.name, address: store.address ?? "", hours: store.businessHours ?? "", phone: store.contactPhone ?? "", distanceText: formatDistance(storeMeters) } : undefined,
         view: cards.length ? readyState() : emptyState("当前服务暂无设备", "商户还没有在此服务上架设备。", "", "", "none")
       });
       hydrateImages(cards, (index, path) => {

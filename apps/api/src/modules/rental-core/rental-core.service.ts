@@ -176,6 +176,15 @@ function now() { return new Date().toISOString(); }
 export const RENTAL_PENDING_PAYMENT_TIMEOUT_REASON = "待支付超时自动取消";
 function id(prefix: string) { return `${prefix}_${randomUUID().slice(0, 8)}`; }
 
+/** 门店坐标：空值透传为 undefined；填了就必须成对（经纬度都在）且在合法范围，否则拒绝，不静默丢弃。 */
+function normalizeCoordinate(value: number | undefined, kind: "latitude" | "longitude"): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "number" || !Number.isFinite(value)) throw new BadRequestException("门店坐标必须是有效数字");
+  const limit = kind === "latitude" ? 90 : 180;
+  if (Math.abs(value) > limit) throw new BadRequestException(kind === "latitude" ? "纬度超出范围（-90~90）" : "经度超出范围（-180~180）");
+  return Math.round(value * 1e7) / 1e7;
+}
+
 function workOrderTypeForReason(reason: string): RentalWorkOrderType {
   if (/清洁|清洗|clean/iu.test(reason)) return "cleaning";
   if (/缺件|补货|耗材|restock|missing[_-]item|camping[_-]missing[_-]item/iu.test(reason)) return "restock";
@@ -778,6 +787,10 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     }
     if (!operator || operator.status !== "enabled") throw new BadRequestException("请选择已启用的经营主体");
     if (!input.capabilities?.length) throw new BadRequestException("履约地点至少需要一种能力");
+    // 坐标要么都不填，要么经纬度成对；只填一个无法定位，拒绝而不是静默丢弃。
+    if ((input.latitude === undefined || input.latitude === null) !== (input.longitude === undefined || input.longitude === null)) {
+      throw new BadRequestException("门店坐标需要同时填写经度和纬度");
+    }
     const duplicate = state.locations.find((row) => row.code === input.code.trim() && row.id !== input.id);
     if (duplicate) throw new ConflictException("履约地点编码已存在");
     if (input.id && input.parentLocationId === input.id) throw new BadRequestException("地点不能将自身设为上级");
@@ -796,6 +809,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       parentLocationId: input.parentLocationId,
       capabilities: [...new Set(input.capabilities)],
       address: input.address?.trim(),
+      latitude: normalizeCoordinate(input.latitude, "latitude"),
+      longitude: normalizeCoordinate(input.longitude, "longitude"),
       contactName: input.contactName?.trim(),
       contactPhone: input.contactPhone?.trim(),
       businessHours: input.businessHours?.trim(),

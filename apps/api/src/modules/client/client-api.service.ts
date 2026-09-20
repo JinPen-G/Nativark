@@ -380,7 +380,7 @@ export class ClientApiService {
       pricingGroups: enabledPricingGroups.map((group) => ({ id: group.id, code: group.code, name: group.name, memberItemGroupIds: group.memberItemGroupIds, enabled: group.status === "enabled" })),
       services: this.business.listServices(context.tenantId, business).filter((service) => service.status === "enabled").map((service) => ({ id: service.id, code: service.code, name: service.name, description: service.terms, pricingUnit: service.billingUnit, enabled: true })),
       // 地点只投影客户可见的公开信息：地址、营业时段、门店电话与取还能力；经营主体与结算方式不外露。
-      locations: business.locations.filter((location) => location.status === "enabled").map((location): ClientCatalogLocation => ({ id: location.id, code: location.code, name: location.name, status: location.status, address: location.address || undefined, businessHours: location.businessHours || undefined, contactPhone: location.contactPhone || undefined, capabilities: location.capabilities })),
+      locations: business.locations.filter((location) => location.status === "enabled").map((location): ClientCatalogLocation => ({ id: location.id, code: location.code, name: location.name, status: location.status, address: location.address || undefined, latitude: location.latitude, longitude: location.longitude, businessHours: location.businessHours || undefined, contactPhone: location.contactPhone || undefined, capabilities: location.capabilities })),
       discountPlans: this.business.listDiscountPlans(context.tenantId, business).filter((plan) => plan.status === "enabled").map((plan) => ({ id: plan.id, code: plan.code, name: plan.name, status: plan.status })),
       fulfillment: {
         enabledModes: business.settings.fulfillment?.enabledModes ?? [],

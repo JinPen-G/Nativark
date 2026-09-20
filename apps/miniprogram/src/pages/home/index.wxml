@@ -61,7 +61,10 @@
       <view class="card store" hover-class="btn-hover" bindtap="onStoreTap">
         <view class="store__icon"><ui-icon name="store" size="52" color="#1677FF" stroke="1.6"></ui-icon></view>
         <view class="grow">
-          <view class="subtitle ellipsis">{{store.name}}</view>
+          <view class="row row--between">
+            <view class="subtitle ellipsis">{{store.name}}</view>
+            <view wx:if="{{store.distanceText}}" class="small success-text">{{store.distanceText}}</view>
+          </view>
           <view class="muted small ellipsis mt-4">{{store.address || '地址以门店信息为准'}}</view>
           <view class="small mt-4 success-text">{{store.hours ? '营业时段 ' + store.hours : '营业时段以门店为准'}}</view>
         </view>

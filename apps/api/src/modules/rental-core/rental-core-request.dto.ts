@@ -24,6 +24,7 @@ import {
   IsOptional,
   IsString,
   Min,
+  Max,
   IsNumber,
   MaxLength,
   ValidateNested
@@ -130,6 +131,18 @@ export class SaveRentalFulfillmentLocationDto implements SaveRentalFulfillmentLo
   @IsOptional()
   @IsString()
   address?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(-90)
+  @Max(90)
+  latitude?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(-180)
+  @Max(180)
+  longitude?: number;
 
   @IsOptional()
   @IsString()

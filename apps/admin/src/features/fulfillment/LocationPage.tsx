@@ -1,7 +1,7 @@
 import { PlusOutlined, SearchOutlined } from "@ant-design/icons";
 import type { RentalFulfillmentLocation, RentalFulfillmentOperator, SaveRentalFulfillmentLocationRequest, SaveRentalFulfillmentOperatorRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { App, Button, Card, Col, Drawer, Form, Input, Row, Select, Space, Table, Tag } from "antd";
+import { App, Button, Card, Col, Drawer, Form, Input, InputNumber, Row, Select, Space, Table, Tag } from "antd";
 import { useMemo, useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { resolveTenantNavigationLabels } from "@/app/navigation-terminology";
@@ -36,7 +36,7 @@ export function LocationPage() {
     setEditing(record);
     form.setFieldsValue(record ? { ...record } : {
       code: "", name: "", type: category?.businessModel.locationTypes[0] ?? "store", operatorId: operators.data?.find((item) => item.status === "enabled")?.id,
-      capabilities: ["pickup", "return", "storage"], address: "", contactName: "", contactPhone: "", businessHours: "09:00-18:00", status: "enabled"
+      capabilities: ["pickup", "return", "storage"], address: "", latitude: undefined, longitude: undefined, contactName: "", contactPhone: "", businessHours: "09:00-18:00", status: "enabled"
     });
     setDrawerOpen(true);
   }
@@ -89,6 +89,10 @@ export function LocationPage() {
           </Row>
           <Form.Item name="capabilities" label="履约能力" rules={[{ required: true }]}><Select mode="multiple" options={Object.entries(capabilityLabels).map(([value, label]) => ({ value, label }))} /></Form.Item>
           <Form.Item name="address" label="地址"><Input /></Form.Item>
+          <Row gutter={12}>
+            <Col span={12}><Form.Item name="latitude" label="纬度" tooltip="选填；填写后小程序可按客户位置排序门店并提供地图导航，经纬度需成对填写" rules={[{ type: "number", min: -90, max: 90, message: "纬度范围 -90~90" }]}><InputNumber style={{ width: "100%" }} step={0.000001} placeholder="如 31.2231" /></Form.Item></Col>
+            <Col span={12}><Form.Item name="longitude" label="经度" rules={[{ type: "number", min: -180, max: 180, message: "经度范围 -180~180" }]}><InputNumber style={{ width: "100%" }} step={0.000001} placeholder="如 121.4737" /></Form.Item></Col>
+          </Row>
           <Row gutter={12}>
             <Col span={12}><Form.Item name="contactName" label="联系人"><Input /></Form.Item></Col>
             <Col span={12}><Form.Item name="contactPhone" label="联系电话"><Input /></Form.Item></Col>

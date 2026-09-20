@@ -1,5 +1,6 @@
 import type { ClientCatalogItem, ClientCatalogLocation, ClientCatalogPricingGroup, ClientCatalogResponse } from "@rental-os/shared";
 import { fetchCatalog, fetchPublicCatalog } from "../api/catalog";
+import { distanceMeters, type GeoPoint } from "./geo";
 import { resolveImage } from "./images";
 import { inventoryLabel, pricingUnitLabel } from "./labels";
 import { startingPriceParts } from "./money";
@@ -194,6 +195,21 @@ export function pricingOptionsFor(catalog: ClientCatalogResponse, itemId: string
 export function primaryLocation(catalog: ClientCatalogResponse | undefined): ClientCatalogLocation | undefined {
   const locations = catalog?.locations ?? [];
   return locations.find((row) => !row.capabilities || row.capabilities.includes("pickup")) ?? locations[0];
+}
+
+/** 离用户最近、且可领取的门店；无位置或无坐标门店时返回 undefined（调用方退回 primaryLocation）。 */
+export function nearestLocation(locations: ClientCatalogLocation[] | undefined, here: GeoPoint | undefined): ClientCatalogLocation | undefined {
+  if (!here || !locations?.length) return undefined;
+  let best: ClientCatalogLocation | undefined;
+  let bestMeters = Infinity;
+  for (const row of locations) {
+    if (row.status !== "enabled") continue;
+    if (row.capabilities && !row.capabilities.includes("pickup")) continue;
+    if (typeof row.latitude !== "number" || typeof row.longitude !== "number") continue;
+    const meters = distanceMeters(here, { latitude: row.latitude, longitude: row.longitude });
+    if (meters !== undefined && meters < bestMeters) { bestMeters = meters; best = row; }
+  }
+  return best;
 }
 
 /** 逐张解析受保护图片；apply 在每张图就绪时回调（调用方负责核对上下文版本）。 */
