@@ -703,7 +703,16 @@ export const RENTAL_PRICING_UNIT_LABELS: Record<RentalPricingUnit, string> = {
   usage: "使用量",
   package: "整包"
 };
-export type RentalFulfillmentMode = "store_pickup_return" | "partner_pickup_return" | "warehouse_pickup_return" | "locker_pickup_return" | "delivery" | "onsite_delivery";
+/** Rental Core 履约方式的唯一取值来源；品类定义、DTO 与页面不得各自复制。 */
+export const RENTAL_FULFILLMENT_MODES = [
+  "store_pickup_return",
+  "partner_pickup_return",
+  "warehouse_pickup_return",
+  "locker_pickup_return",
+  "delivery",
+  "onsite_delivery"
+] as const;
+export type RentalFulfillmentMode = (typeof RENTAL_FULFILLMENT_MODES)[number];
 /**
  * Rental Core 履约地点类型的唯一取值来源。
  *
@@ -4252,7 +4261,10 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     terminology: { itemLabel: "器材", itemGroupLabel: "器材型号", assetLabel: "器材资产", fulfillmentLabel: "器材门店", pickupLabel: "取机", returnLabel: "还机", identifierLabel: "资产编号", usageMetricLabel: "快门次数", navigationLabels: { inventoryGroup: "摄影器材", itemGroups: "器材型号", pricingGroups: "器材定价分组", assets: "器材资产与库存", locations: "器材门店" } },
     attributeSchema: { brand: "string", model: "string", mount: "string", sensor: "string", serialNo: "string", shutterCount: "number" },
     businessModel: {
-      pricingUnits: ["hour", "day_24h", "calendar_day", "week", "package", "usage"],
+      // 摄影器材的基础租金按时间计价。快门次数等读数用于交接、养护和后续
+      // 超量费用依据，不作为整件器材的基础租金单位；“整包”也不等于套装库存，
+      // 套装仍按所选时间单位定价。
+      pricingUnits: ["hour", "day_24h", "calendar_day", "week"],
       defaultPricingUnit: "day_24h",
       fulfillmentModes: ["store_pickup_return", "partner_pickup_return", "locker_pickup_return", "delivery"],
       locationTypes: ["store", "warehouse", "locker", "delivery_hub"],
@@ -4287,7 +4299,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
         { code: "assetPowerDrawW", label: "资产实际峰值功耗（覆盖商品组）", scope: "asset", type: "number", unit: "W" }
       ],
       supportsHolidayPricing: true,
-      supportsUsagePricing: true,
+      supportsUsagePricing: false,
       supportsPreauthorization: true,
       supportsQualificationReview: false,
       valueAddedServicePresets: ["损坏免赔", "设备保险", "上门配送", "备用电池", "技术支持"],
@@ -4309,7 +4321,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
         sampleAmountIncrement: 80
       }
     },
-    version: "0.3.0"
+    version: "0.4.0"
   },
   {
     code: RentalCategoryCode.Camping,
@@ -4321,7 +4333,9 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     terminology: { itemLabel: "装备", itemGroupLabel: "装备型号", assetLabel: "装备资产", fulfillmentLabel: "装备仓", pickupLabel: "领用", returnLabel: "归还", identifierLabel: "装备编号", navigationLabels: { inventoryGroup: "户外装备", itemGroups: "装备型号", pricingGroups: "装备定价分组", assets: "装备资产与库存", locations: "装备仓库" } },
     attributeSchema: { brand: "string", model: "string", people: "number", season: "string", material: "string", batchNo: "string" },
     businessModel: {
-      pricingUnits: ["calendar_day", "night", "week", "package"],
+      // 露营装备按占用日期或夜晚计价；套装是库存/商品形态，不是脱离租期的
+      // “整包一次价”，因此不在基础计价单位里暴露 package。
+      pricingUnits: ["calendar_day", "night", "week"],
       defaultPricingUnit: "calendar_day",
       fulfillmentModes: ["store_pickup_return", "partner_pickup_return", "warehouse_pickup_return", "delivery"],
       locationTypes: ["store", "warehouse", "delivery_hub"],
@@ -4355,7 +4369,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
         sampleAmountIncrement: 20
       }
     },
-    version: "0.3.0"
+    version: "0.4.0"
   },
   {
     code: RentalCategoryCode.Vehicle,
@@ -4367,7 +4381,8 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     terminology: { itemLabel: "车辆", itemGroupLabel: "车辆型号", assetLabel: "车辆", fulfillmentLabel: "门店", pickupLabel: "取车", returnLabel: "还车", identifierLabel: "车辆编号", usageMetricLabel: "里程", assetCollectionLabel: "车队", navigationLabels: { inventoryGroup: "车辆型号与车队", itemGroups: "厂牌车型管理", pricingGroups: "车辆定价分组", assets: "车辆管理", locations: "门店管理" } },
     attributeSchema: { manufacturer: "string", brand: "string", model: "string", trim: "string", modelYear: "number", seats: "number", transmission: "string", energyType: "string", licensePlate: "string", vin: "string", color: "string", firstRegistrationDate: "date", mileage: "number" },
     businessModel: {
-      pricingUnits: ["hour", "day_24h", "calendar_day", "week", "month", "usage", "package"],
+      // 车辆可按时间或里程等使用量计价；车组/车型组合不使用“整包一次价”。
+      pricingUnits: ["hour", "day_24h", "calendar_day", "week", "month", "usage"],
       defaultPricingUnit: "day_24h",
       fulfillmentModes: ["store_pickup_return", "partner_pickup_return", "delivery"],
       locationTypes: ["store", "station", "warehouse", "delivery_hub"],
@@ -4419,7 +4434,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
         sampleAmountIncrement: 100
       }
     },
-    version: "0.4.0"
+    version: "0.5.0"
   },
   {
     code: RentalCategoryCode.Construction,
@@ -4431,7 +4446,9 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     terminology: { itemLabel: "设备", itemGroupLabel: "设备型号", assetLabel: "设备资产", fulfillmentLabel: "设备仓", pickupLabel: "出库", returnLabel: "入库", identifierLabel: "设备编号", usageMetricLabel: "工时", navigationLabels: { inventoryGroup: "工程设备", itemGroups: "设备型号", pricingGroups: "设备定价分组", assets: "设备台账与库存", locations: "设备仓库" } },
     attributeSchema: { manufacturer: "string", brand: "string", model: "string", power: "string", ratedLoad: "number", factoryNo: "string", hourMeter: "number" },
     businessModel: {
-      pricingUnits: ["hour", "shift", "calendar_day", "week", "month", "usage", "package"],
+      // 工程设备支持小时、班次、长期和工时等使用量计价；附件、操作员和运输
+      // 组合应由增值服务/定价分组表达，不使用含义不清的“整包一次价”。
+      pricingUnits: ["hour", "shift", "calendar_day", "week", "month", "usage"],
       defaultPricingUnit: "shift",
       fulfillmentModes: ["warehouse_pickup_return", "delivery", "onsite_delivery", "partner_pickup_return"],
       locationTypes: ["warehouse", "delivery_hub", "project_site"],
@@ -4466,7 +4483,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
         sampleAmountIncrement: 180
       }
     },
-    version: "0.3.0"
+    version: "0.4.0"
   }
 ];
 

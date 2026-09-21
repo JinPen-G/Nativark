@@ -85,6 +85,27 @@ void (async () => {
     assert.ok(!genericUiFiles.includes(vehicleOnlyText), `通用页面不得写死车辆文案：${vehicleOnlyText}`);
   }
 
+  const categorySettingsUi = readFileSync(
+    join(__dirname, "..", "apps/admin/src/features/settings/governance/CategoryTab.tsx"),
+    "utf8"
+  );
+  assert.ok(
+    categorySettingsUi.includes("category.businessModel.pricingUnits.map"),
+    "经营设置的计价单位必须来自当前品类定义"
+  );
+  assert.ok(
+    categorySettingsUi.includes("category.businessModel.fulfillmentModes.map"),
+    "经营设置的履约方式必须来自当前品类定义"
+  );
+  assert.ok(
+    genericUiFiles.includes("category?.supportedInventoryModes.map"),
+    "商品型号的库存形态必须来自当前品类定义"
+  );
+  assert.ok(
+    genericUiFiles.includes("category?.businessModel.locationTypes.map"),
+    "履约地点类型必须来自当前品类定义"
+  );
+
   const genericPermissionSources = [
     "apps/admin/src/features/catalog/CatalogPage.tsx",
     "apps/admin/src/features/catalog/AssetWorkspacePage.tsx",

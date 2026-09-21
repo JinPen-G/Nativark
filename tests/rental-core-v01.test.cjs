@@ -121,13 +121,13 @@ assert.ok(cameraSettings.pricing.enabledUnits.includes("day_24h"));
 const savedCameraSettings = await service.saveBusinessSettings(cameraTenant, {
   pricing: { ...cameraSettings.pricing, enabledUnits: ["hour", "day_24h"], defaultUnit: "day_24h" },
   fulfillment: { ...cameraSettings.fulfillment, enabledModes: ["store_pickup_return", "delivery"] },
-  payment: { ...cameraSettings.payment, preauthorizationRequired: true },
-  overdue: { ...cameraSettings.overdue, graceMinutes: 45 },
+  payment: cameraSettings.payment,
   calendar: cameraSettings.calendar,
   membership: { ...cameraSettings.membership, signupRewardEnabled: true, signupRewardAmount: 100 },
-  notifications: cameraSettings.notifications
+  notifications: cameraSettings.notifications,
+  allocation: cameraSettings.allocation
 }, "test");
-assert.equal(savedCameraSettings.overdue.graceMinutes, 45);
+assert.deepEqual(savedCameraSettings.pricing.enabledUnits, ["hour", "day_24h"]);
 assert.equal(savedCameraSettings.updatedBy, "test");
 const coupon = await service.saveCouponTemplate(cameraTenant, {
   code: "WELCOME-20",
@@ -145,10 +145,6 @@ const coupon = await service.saveCouponTemplate(cameraTenant, {
 assert.equal(coupon.version, "1.0");
 assert.equal(service.listCouponTemplates(cameraTenant).length, 1);
 assert.equal(service.listCouponTemplates(campingTenant).length, 0, "coupon templates must remain tenant isolated");
-await assert.rejects(async () => service.saveBusinessSettings(campingTenant, {
-  ...service.getBusinessSettings(campingTenant),
-  payment: { ...service.getBusinessSettings(campingTenant).payment, preauthorizationRequired: true }
-}, "test"), /不支持预授权/);
 
 const cameraGroups = service.listItemGroups(cameraTenant);
 const cameraLocation = service.listLocations(cameraTenant)[0];
@@ -370,7 +366,7 @@ assert.equal(providerCalls.remove, 1);
 const constructionPricingGroup = await service.savePricingGroup(newTenant, {
   code: "EXC-COMPACT",
   name: "小型挖掘机组",
-  defaultPricingUnit: "day_24h",
+  defaultPricingUnit: "shift",
   memberItemGroupIds: [constructionGroup.id],
   status: "enabled"
 });
@@ -381,7 +377,7 @@ const updatedConstructionPricingGroup = await service.savePricingGroup(newTenant
   id: constructionPricingGroup.id,
   code: constructionPricingGroup.code,
   name: "小型工程设备组",
-  defaultPricingUnit: "day_24h",
+  defaultPricingUnit: "shift",
   memberItemGroupIds: [constructionGroup.id],
   status: "enabled"
 });

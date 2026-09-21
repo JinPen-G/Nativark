@@ -1,5 +1,6 @@
 import {
   RENTAL_CAPABILITY_CODES,
+  RENTAL_FULFILLMENT_MODES,
   RENTAL_PRICING_UNIT_CODES,
   RENTAL_STOCK_OPERATION_TYPES,
   RentalAssetStatus,
@@ -105,14 +106,6 @@ export class RentalOperationLockDto implements RentalOperationLockRequest {
  */
 
 const CUSTOMER_TYPES = ["personal", "corporate"] as const;
-const FULFILLMENT_MODES = [
-  "store_pickup_return",
-  "partner_pickup_return",
-  "warehouse_pickup_return",
-  "locker_pickup_return",
-  "delivery",
-  "onsite_delivery"
-] as const;
 const REWARD_TRIGGERS = ["registration", "identity_verified", "first_order_completed", "referral"] as const;
 const DISCOUNT_TYPES = ["fixed_amount", "percentage"] as const;
 const COUPON_TARGETS = ["rental", "fulfillment", "service"] as const;
@@ -409,7 +402,7 @@ export class CreateRentalOrderDto implements CreateRentalOrderRequest {
   @IsISO8601()
   qualificationValidTo?: string;
 
-  @IsIn(FULFILLMENT_MODES)
+  @IsIn(RENTAL_FULFILLMENT_MODES)
   fulfillmentMode!: RentalFulfillmentMode;
 
   @IsString()
@@ -525,7 +518,7 @@ export class RentalQuoteDto implements RentalQuoteRequest {
   @Type(() => RentalBookingIdentityInputDto)
   bookingIdentity?: RentalBookingIdentityInputDto;
 
-  @IsIn(FULFILLMENT_MODES)
+  @IsIn(RENTAL_FULFILLMENT_MODES)
   fulfillmentMode!: RentalFulfillmentMode;
 
   @IsString()

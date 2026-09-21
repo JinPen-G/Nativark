@@ -20,6 +20,7 @@ import {
 import { Type } from "class-transformer";
 import {
   CLIENT_VERIFICATION_METHODS,
+  RENTAL_FULFILLMENT_MODES,
   RENTAL_PRICING_UNIT_CODES,
   type ClientAgreementConsent,
   type ClientAvailabilityRequest,
@@ -53,8 +54,6 @@ import {
   type ClientQualificationUploadSessionRequest,
   type ClientQualificationUploadCompleteRequest
 } from "@rental-os/shared";
-
-const FULFILLMENT_MODES = ["store_pickup_return", "partner_pickup_return", "warehouse_pickup_return", "locker_pickup_return", "delivery", "onsite_delivery"] as const;
 
 export class ClientWorkspaceTargetDto implements ClientWorkspaceTarget {
   @IsString() @IsNotEmpty() @MaxLength(64)
@@ -251,7 +250,7 @@ export class ClientCreateQuoteRequestDto implements ClientCreateQuoteRequest {
   @IsOptional() @ValidateNested() @Type(() => ClientBookingIdentityInputDto)
   bookingIdentity?: ClientBookingIdentityInputDto;
 
-  @IsIn(FULFILLMENT_MODES)
+  @IsIn(RENTAL_FULFILLMENT_MODES)
   fulfillmentMode!: ClientCreateQuoteRequest["fulfillmentMode"];
 
   @IsString() @IsNotEmpty() @MaxLength(191)

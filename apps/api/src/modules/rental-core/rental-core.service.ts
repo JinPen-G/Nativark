@@ -248,6 +248,46 @@ function defaultBusinessSettings(
   };
 }
 
+/**
+ * 把旧空间保存的经营设置收敛到当前品类定义。
+ *
+ * 品类定义会随着基础模型修正而缩小允许范围；如果读取时原样返回旧 JSON，管理端
+ * 仍会显示已经不适用的计价/履约选项，而且报价上下文也可能继续使用它们。这里仅
+ * 过滤运行设置，不改历史订单、报价或价格版本快照；运营下次保存时自然持久化新值。
+ */
+function normalizeBusinessSettingsForCategory(
+  settings: TenantRentalBusinessSettings,
+  definition: RentalCategoryDefinition
+): TenantRentalBusinessSettings {
+  const supportedUnits = new Set(definition.businessModel.pricingUnits);
+  const configuredUnits = new Set((settings.pricing.enabledUnits ?? []).filter((unit) => supportedUnits.has(unit)));
+  const enabledUnits = definition.businessModel.pricingUnits.filter((unit) => configuredUnits.has(unit));
+  const safeUnits = enabledUnits.length ? enabledUnits : [definition.businessModel.defaultPricingUnit];
+  const defaultUnit = safeUnits.includes(settings.pricing.defaultUnit)
+    ? settings.pricing.defaultUnit
+    : definition.businessModel.defaultPricingUnit;
+
+  const supportedModes = new Set(definition.businessModel.fulfillmentModes);
+  const configuredModes = new Set((settings.fulfillment.enabledModes ?? []).filter((mode) => supportedModes.has(mode)));
+  const enabledModes = definition.businessModel.fulfillmentModes.filter((mode) => configuredModes.has(mode));
+  const safeModes = enabledModes.length ? enabledModes : [definition.businessModel.fulfillmentModes[0]];
+
+  return {
+    ...settings,
+    pricing: {
+      ...settings.pricing,
+      enabledUnits: safeUnits,
+      defaultUnit,
+      holidayPricingEnabled: definition.businessModel.supportsHolidayPricing && settings.pricing.holidayPricingEnabled
+    },
+    fulfillment: { ...settings.fulfillment, enabledModes: safeModes },
+    calendar: {
+      ...settings.calendar,
+      holidayPricingEnabled: definition.businessModel.supportsHolidayPricing && settings.calendar.holidayPricingEnabled
+    }
+  };
+}
+
 @Injectable()
 export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   /**
@@ -599,7 +639,11 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     };
   }
   getBusinessSettings(tenantId: string) {
-    const settings = this.state(tenantId).businessSettings;
+    const state = this.state(tenantId);
+    const settings = normalizeBusinessSettingsForCategory(
+      state.businessSettings,
+      this.category(state.profile.categoryCode)
+    );
     // 兼容已经落库、但还没有 enabledMethods 的旧 JSON 设置；读路径先给出明确默认值，
     // 下次保存时再把它持久化，避免存量空间突然变成“没有任何可用收款方式”。
     if (settings.payment.enabledMethods?.length) return settings;
@@ -828,6 +872,9 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   async savePricingGroup(tenantId: string, input: SaveRentalPricingGroupRequest, tx?: RentalConfigTx, deferCache = false) {
     const state = this.state(tenantId);
     if (!input.code?.trim() || !input.name?.trim()) throw new BadRequestException("定价分组编码和名称不能为空");
+    if (input.defaultPricingUnit && !this.getBusinessSettings(tenantId).pricing.enabledUnits.includes(input.defaultPricingUnit)) {
+      throw new BadRequestException("定价分组默认计价单位必须是当前品类已启用的计价单位");
+    }
     if (!input.memberItemGroupIds?.length) throw new BadRequestException("定价分组至少选择一个产品型号");
     if (new Set(input.memberItemGroupIds).size !== input.memberItemGroupIds.length) throw new BadRequestException("定价分组不能重复选择同一产品型号");
     const members = input.memberItemGroupIds.map((memberId) => this.group(state, memberId));

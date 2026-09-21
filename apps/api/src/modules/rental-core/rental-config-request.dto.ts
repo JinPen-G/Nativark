@@ -1,4 +1,4 @@
-import { RENTAL_CURRENCY_CODES, RENTAL_DISCOUNT_TARGETS, RENTAL_DISCOUNT_TYPES, RENTAL_INSURANCE_PROVIDER_STATUSES, RENTAL_PAYMENT_METHOD_CODES, RENTAL_PRICING_UNIT_CODES, RENTAL_SERVICE_BILLING_UNITS, RENTAL_SERVICE_SELECTION_MODES, type RentalCurrency, type RentalDayType, type RentalDiscountTarget, type RentalInsuranceProviderStatus, type RentalPricingUnit, type RentalServiceMandatoryRule, type RentalServiceSelectionMode } from "@rental-os/shared";
+import { RENTAL_CURRENCY_CODES, RENTAL_DISCOUNT_TARGETS, RENTAL_DISCOUNT_TYPES, RENTAL_FULFILLMENT_MODES, RENTAL_INSURANCE_PROVIDER_STATUSES, RENTAL_PAYMENT_METHOD_CODES, RENTAL_PRICING_UNIT_CODES, RENTAL_SERVICE_BILLING_UNITS, RENTAL_SERVICE_SELECTION_MODES, type RentalCurrency, type RentalDayType, type RentalDiscountTarget, type RentalInsuranceProviderStatus, type RentalPricingUnit, type RentalServiceMandatoryRule, type RentalServiceSelectionMode } from "@rental-os/shared";
 import type {
   ApplyOfficialCalendarSourceRequest,
   PublishRentalCalendarRequest,
@@ -72,14 +72,6 @@ import {
  * （比如把 1.5 输成 15）不会被任何下游拦住，只会变成一笔离谱的账。
  */
 
-const FULFILLMENT_MODES = [
-  "store_pickup_return",
-  "partner_pickup_return",
-  "warehouse_pickup_return",
-  "locker_pickup_return",
-  "delivery",
-  "onsite_delivery"
-] as const;
 const BUSINESS_STATUSES = ["open", "limited", "closed", "self_service"] as const;
 const DAY_TYPES = ["workday", "weekend", "statutory_holiday", "makeup_workday", "tenant_special"] as const;
 const PLAN_STATUSES = ["draft", "enabled", "disabled"] as const;
@@ -201,8 +193,8 @@ export class BusinessSettingsPricingInputDto {
 export class BusinessSettingsFulfillmentInputDto {
   @IsArray()
   @ArrayNotEmpty()
-  @IsIn(FULFILLMENT_MODES, { each: true })
-  enabledModes!: (typeof FULFILLMENT_MODES)[number][];
+  @IsIn(RENTAL_FULFILLMENT_MODES, { each: true })
+  enabledModes!: (typeof RENTAL_FULFILLMENT_MODES)[number][];
 }
 
 /**
@@ -358,8 +350,8 @@ export class RentalPricingTierInputDto {
 
 /** 履约费用档。费用配在价格计划上，随版本发布与快照，理由见共享契约的注释。 */
 export class RentalFulfillmentFeeInputDto {
-  @IsIn(FULFILLMENT_MODES)
-  mode!: (typeof FULFILLMENT_MODES)[number];
+  @IsIn(RENTAL_FULFILLMENT_MODES)
+  mode!: (typeof RENTAL_FULFILLMENT_MODES)[number];
 
   @IsNumber()
   @Min(0)
@@ -683,8 +675,8 @@ export class RentalServiceMandatoryRuleInputDto implements RentalServiceMandator
 
   @IsOptional()
   @IsArray()
-  @IsIn(FULFILLMENT_MODES, { each: true })
-  fulfillmentModes?: (typeof FULFILLMENT_MODES)[number][];
+  @IsIn(RENTAL_FULFILLMENT_MODES, { each: true })
+  fulfillmentModes?: (typeof RENTAL_FULFILLMENT_MODES)[number][];
 
   @IsOptional()
   @IsNumber()
@@ -749,8 +741,8 @@ export class SaveRentalValueAddedServiceDto implements SaveRentalValueAddedServi
 
   /** MKT-02A：适用履约方式与地点。空数组＝不限制。 */
   @IsArray()
-  @IsIn(FULFILLMENT_MODES, { each: true })
-  applicableFulfillmentModes!: (typeof FULFILLMENT_MODES)[number][];
+  @IsIn(RENTAL_FULFILLMENT_MODES, { each: true })
+  applicableFulfillmentModes!: (typeof RENTAL_FULFILLMENT_MODES)[number][];
 
   @IsArray()
   @IsString({ each: true })
