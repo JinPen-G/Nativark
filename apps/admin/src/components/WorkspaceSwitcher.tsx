@@ -89,12 +89,7 @@ export function WorkspaceSwitcher() {
         items: workspaces.map((row) => ({
           key: row.id,
           icon: workspaceIcon(row.categoryCode),
-          label: (
-            <span className="workspace-option">
-              {row.name}
-              <small>{row.categoryCode}</small>
-            </span>
-          ),
+          label: row.name,
           onClick: () => void handleSwitch(row.id)
         }))
       }}

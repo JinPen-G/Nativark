@@ -29,9 +29,14 @@ export function navMetrics(): NavMetrics {
   let capsuleLeft = windowWidth - 96;
   try {
     const capsule = wx.getMenuButtonBoundingClientRect();
-    if (capsule && capsule.height > 0) {
-      const gap = Math.max(0, capsule.top - statusBarHeight);
-      navBarHeight = capsule.height + gap * 2;
+    // 合理性校验：开发者工具游客态/无 AppID 时胶囊可能返回异常值（top 极大、越界），
+    // 直接用会把导航栏高度撑到几百 px、fixed 导航条盖住整屏吃掉所有点击。只接受可信读数，否则退默认 44。
+    const plausible = capsule && capsule.height >= 20 && capsule.height <= 60
+      && capsule.top >= statusBarHeight - 4 && capsule.top <= statusBarHeight + 80
+      && capsule.left > 0 && capsule.left <= windowWidth;
+    if (plausible) {
+      const gap = Math.min(20, Math.max(0, capsule.top - statusBarHeight));
+      navBarHeight = Math.min(80, capsule.height + gap * 2);
       capsuleLeft = capsule.left;
     }
   } catch {

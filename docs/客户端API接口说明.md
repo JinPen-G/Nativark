@@ -4,6 +4,7 @@
 
 | 版本 | 日期 | 编辑 | 变更 |
 | --- | --- | --- | --- |
+| v1.14 | 2026-09-20 | Codex | 同步当前 main：客户端渠道后台页、租户级配置、公开文档、微信/短信登录、地址簿、费用响应、JSAPI 支付、地点坐标及小程序展示投影均已进入代码主线；当前剩余任务改由《客户端共用开发任务》和《微信小程序开发任务》维护，重点是真库组合、真实 Provider 与宿主验收。 |
 | v1.13 | 2026-09-19 | Claude | CLIENT-CHANNEL-01：启动配置改读**租户级客户端渠道配置**（品牌/客服/协议/帮助/横幅/发布服务，小程序与 APP 共用），`GET /public/bootstrap` 加 `client=wechat_miniprogram\|app` 参数并返回 `client`、`help`、`banner`、协议 `hasBody`；`wechat_phone` 登录与 `capabilities.wechatPay` 仅小程序且微信凭证就绪时为真。新增公开 `GET /public/documents/{kind}`（`user_agreement`/`privacy_policy`/`help` 正文与 FAQ，游客可读、客户端内渲染）。运营端 `/platform/mini-program-channel` 收窄为微信凭证；租户级配置走 `GET/PUT /platform/client-channel`（`system:integration:manage`）。代码与自动化验收通过，未提交、迁移未应用共享库。 |
 | v1.12 | 2026-09-19 | Claude | 落地小程序首期六项契约（代码与自动化验收，未提交、迁移未应用共享库）：公开启动配置 `GET /public/bootstrap`、公开游客目录 `GET /public/catalog` 与图片、用途化验证码 `POST /auth/challenges`、短信登录 `POST /auth/sms-login`、微信手机号登录 `POST /auth/wechat/phone-login` 与绑定 `POST /auth/wechat/bind`、本人注销三接口、地址簿三接口、检查费用投影与本人确认/异议、小程序 JSAPI 支付（`mini-program-payment-intents` 从预留 503 改为真实创建，缺可信微信身份返回 409 `wechat_identity_required`）；`/config.features` 增 `delivery/feeResponse/accountClosure/wechatBinding`，报价请求增 `deliveryAddressId`，订单视图增 `deliveryAddress` 快照，目录增 `fulfillment`。 |
 | v1.11 | 2026-09-19 | Claude | 验证码挑战补按身份与租户的配额：同一（租户, 手机号/邮箱）5 次/小时、10 次/天，租户每日短信挑战预算默认 2000（`CLIENT_SMS_DAILY_BUDGET_PER_TENANT`），超限 `429`；`purpose=login` 不再以 404/403 暴露手机号是否注册或已停用，统一返回 pending 响应且不发短信，验证时只回"验证码错误或已过期"；验证码落库改为以服务端密钥 HMAC 存储，升级时未完成的挑战直接失效需重新获取；来源地址取 Express `request.ip`，代理之后由 `TRUST_PROXY_HOPS` 决定是否采信 `X-Forwarded-For`。 |
@@ -21,7 +22,7 @@
 
 ## 1. 使用范围
 
-客户端 API 供小程序、APP 或其他客户自助端使用。同租户一个小程序，登录一次切换服务空间不再入会；租户统一会员已完成代码/自动化与本机开发库迁移验收（见任务台账 MEMBER-TENANT-01）。微信小程序完整功能及首期页面见[《微信小程序需求说明》](微信小程序需求说明.md)；微信手机号/短信登录、注销、游客目录、地址簿、费用响应与小程序 JSAPI 支付已于 2026-09-19 在服务端实现并经自动化验收（真实 AppID/商户、真库迁移与宿主验收另计），运营后台的客户端渠道配置页仍待 `CLIENT-CHANNEL-01`。客户端API与运营后台分开：
+客户端 API 供小程序、预约网站、APP 或其他客户自助端使用。同租户一个小程序，登录一次切换服务空间不再入会；租户统一会员已经进入现行实现。微信小程序完整功能及首期页面见[《微信小程序需求说明》](微信小程序需求说明.md)；共用接口和真实 Provider 的未完成项见[《客户端共用开发任务》](开发任务/客户端共用开发任务.md)，微信宿主与页面任务见[《微信小程序开发任务》](开发任务/微信小程序开发任务.md)。微信手机号/短信登录、注销、游客目录、地址簿、费用响应、小程序 JSAPI 支付和运营后台客户端渠道配置已有代码；真实 AppID/商户、最新真库组合与宿主验收仍须单独完成。客户端 API 与运营后台分开：
 
 - 基础路径：`/api/client/v1`。
 - 客户端使用客户账号令牌，不使用运营账号令牌，也不携带运营角色、数据范围或权限矩阵。

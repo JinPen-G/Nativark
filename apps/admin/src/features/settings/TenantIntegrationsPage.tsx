@@ -5,15 +5,29 @@ import type {
   TenantIntegrationConfigSummary,
   TenantIntegrationProviderDefinition
 } from "@rental-os/shared";
-import { Alert, App, Button, Card, Col, Empty, Form, Input, Row, Space, Spin, Switch, Tag, Typography } from "antd";
-import { useEffect } from "react";
+import { Alert, App, Button, Card, Col, Empty, Form, Input, Row, Space, Spin, Switch, Tabs, Tag, Typography } from "antd";
+import type { FormInstance } from "antd";
+import { useCallback, useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { tenantIntegrationsApi } from "@/api/tenantIntegrations";
 import { PageHeader } from "@/components/PageHeader";
 
-const CAPABILITY_LABELS: Record<TenantIntegrationCapability, string> = { sms: "短信", payment: "支付", file: "文件存储" };
+const CAPABILITY_LABELS: Record<TenantIntegrationCapability, string> = { sms: "短信", payment: "支付", file: "云存储" };
+const CAPABILITY_TAB_LABELS: Record<TenantIntegrationCapability, string> = { sms: "短信配置", payment: "支付配置", file: "云存储配置" };
 
-function ProviderCard({ definition, config }: { definition: TenantIntegrationProviderDefinition; config?: TenantIntegrationConfigSummary }) {
+function ProviderCard({
+  definition,
+  config,
+  providerKey,
+  registerForm,
+  onDefaultChange
+}: {
+  definition: TenantIntegrationProviderDefinition;
+  config?: TenantIntegrationConfigSummary;
+  providerKey: string;
+  registerForm: (key: string, form?: FormInstance<SaveTenantIntegrationRequest>) => void;
+  onDefaultChange: (key: string, checked: boolean) => void;
+}) {
   const [form] = Form.useForm<SaveTenantIntegrationRequest>();
   const enabled = Form.useWatch("enabled", form);
   const liveVerified = config?.lastTestStatus === "passed" && config.lastTestMode === "live";
@@ -40,6 +54,11 @@ function ProviderCard({ definition, config }: { definition: TenantIntegrationPro
     form.setFieldsValue({ enabled: config?.enabled ?? false, isDefault: config?.isDefault ?? false, settings: config?.settings ?? {}, credentials: {} });
   }, [config, form]);
 
+  useEffect(() => {
+    registerForm(providerKey, form);
+    return () => registerForm(providerKey);
+  }, [form, providerKey, registerForm]);
+
   return (
     <Card
       size="small"
@@ -65,12 +84,31 @@ function ProviderCard({ definition, config }: { definition: TenantIntegrationPro
         />
       ) : null}
       <Form form={form} layout="vertical" onFinish={(values) => save.mutate(values)}>
-        <Space size="large" style={{ marginBottom: 12 }}>
-          <Form.Item name="enabled" label="启用此平台" valuePropName="checked" noStyle>
-            <Switch onChange={(checked) => { if (!checked) form.setFieldValue("isDefault", false); }} />
+        <Space size="large" align="start" style={{ marginBottom: 12 }}>
+          <Form.Item
+            name="enabled"
+            label="启用此平台"
+            tooltip="允许系统调用这个平台；保存后还需要通过“测试连接”才能真正用于业务。"
+            extra="关闭后保留配置，但业务不会调用。"
+            valuePropName="checked"
+            style={{ marginBottom: 0 }}
+          >
+            <Switch onChange={(checked) => {
+              if (!checked) {
+                form.setFieldValue("isDefault", false);
+                onDefaultChange(providerKey, false);
+              }
+            }} />
           </Form.Item>
-          <Form.Item name="isDefault" label="设为该能力默认平台" valuePropName="checked" noStyle>
-            <Switch disabled={!enabled} />
+          <Form.Item
+            name="isDefault"
+            label="设为该能力默认平台"
+            tooltip="同一种能力可以配置多个平台，但实际支付、短信或文件调用只使用默认平台。"
+            extra="同一能力只能有一个默认平台。"
+            valuePropName="checked"
+            style={{ marginBottom: 0 }}
+          >
+            <Switch disabled={!enabled} onChange={(checked) => onDefaultChange(providerKey, checked)} />
           </Form.Item>
         </Space>
         <Row gutter={[12, 0]}>
@@ -104,42 +142,67 @@ function ProviderCard({ definition, config }: { definition: TenantIntegrationPro
 
 export function TenantIntegrationsPage() {
   const catalog = useQuery({ queryKey: ["tenant-integrations"], queryFn: tenantIntegrationsApi.catalog });
+  const providerForms = useRef(new Map<string, FormInstance<SaveTenantIntegrationRequest>>());
+  const registerProviderForm = useCallback((key: string, form?: FormInstance<SaveTenantIntegrationRequest>) => {
+    if (form) providerForms.current.set(key, form);
+    else providerForms.current.delete(key);
+  }, []);
+  const handleDefaultChange = useCallback((key: string, checked: boolean) => {
+    if (!checked) return;
+    const capabilityPrefix = `${key.slice(0, key.indexOf(":"))}:`;
+    for (const [otherKey, otherForm] of providerForms.current) {
+      if (otherKey !== key && otherKey.startsWith(capabilityPrefix)) otherForm.setFieldValue("isDefault", false);
+    }
+  }, []);
   if (catalog.isLoading) return <div style={{ textAlign: "center", padding: 80 }}><Spin size="large" /></div>;
   if (catalog.error || !catalog.data) return <PageHeader title="第三方服务" description="暂时无法读取租户第三方服务配置，请刷新重试。" />;
   const configByProvider = new Map(catalog.data.configs.map((config) => [`${config.capability}:${config.provider}`, config]));
   return (
     <PageHeader
       title="第三方服务"
-      description="为当前租户选择并配置短信、支付和文件存储平台。配置按租户共享给各经营空间，业务模块只使用统一适配器。"
-      note={{ title: "密钥只在服务端加密保存", description: "页面不会回显 AccessKey、私钥、API 密钥等敏感值；停用平台不会删除配置，重新启用时可继续使用。“测试连接”只发起无副作用探针：支付查询随机交易号、短信查询模板、文件存储 HEAD 随机不存在对象，不会扣款、发短信或写入文件。" }}
+      description="为当前租户选择并配置支付、短信和云存储平台。配置按租户共享给各经营空间，业务模块只使用统一适配器。"
+      note={{ title: "密钥只在服务端加密保存", description: "页面不会回显 AccessKey、私钥、API 密钥等敏感值；停用平台不会删除配置，重新启用时可继续使用。“测试连接”只发起无副作用探针：支付查询随机交易号、短信查询模板、云存储 HEAD 随机不存在对象，不会扣款、发短信或写入文件。" }}
       view={<Space orientation="vertical" size={20} style={{ width: "100%" }}>
-        <Alert showIcon type="info" icon={<SettingOutlined />} title="一个能力可以配置多个平台" description="支付可以同时启用支付宝和微信支付；短信、文件存储也可以分别配置多个平台，并指定默认平台。保存某个平台时不会覆盖其他平台。" />
-        {(["payment", "sms", "file"] as TenantIntegrationCapability[]).map((capability) => {
-          const providers = catalog.data.providers.filter((item) => item.capability === capability);
-          const configs = catalog.data.configs.filter((item) => item.capability === capability);
-          const enabledWithoutDefault = configs.filter((item) => item.enabled && !item.isDefault);
-          return (
-            <Card key={capability} title={`${CAPABILITY_LABELS[capability]}平台`} size="small">
-              {enabledWithoutDefault.length > 0 ? (
-                <Alert
-                  showIcon
-                  type="warning"
-                  style={{ marginBottom: 16 }}
-                  title={`${enabledWithoutDefault.map((item) => catalog.data.providers.find((provider) => provider.provider === item.provider)?.name ?? item.provider).join("、")}已启用但未设为默认`}
-                  description="业务运行只会使用默认平台，请为该能力指定一个默认平台。"
-                />
-              ) : null}
-              <Row gutter={[20, 20]}>
-                {providers.map((definition) => (
-                  <Col xs={24} xl={12} key={definition.provider}>
-                    <ProviderCard definition={definition} config={configByProvider.get(`${definition.capability}:${definition.provider}`)} />
-                  </Col>
-                ))}
-              </Row>
-              {providers.length === 0 ? <Empty description="暂无可用平台" /> : null}
-            </Card>
-          );
-        })}
+        <Alert showIcon type="info" icon={<SettingOutlined />} title="一个能力可以配置多个平台" description="支付可以同时启用支付宝和微信支付；短信、云存储也可以分别配置多个平台，并指定默认平台。保存某个平台时不会覆盖其他平台。" />
+        <Tabs
+          tabBarGutter={32}
+          items={(["payment", "sms", "file"] as TenantIntegrationCapability[]).map((capability) => {
+            const providers = catalog.data.providers.filter((item) => item.capability === capability);
+            const configs = catalog.data.configs.filter((item) => item.capability === capability);
+            const enabledWithoutDefault = configs.filter((item) => item.enabled && !item.isDefault);
+            return {
+              key: capability,
+              label: CAPABILITY_TAB_LABELS[capability],
+              children: (
+                <>
+                  {enabledWithoutDefault.length > 0 ? (
+                    <Alert
+                      showIcon
+                      type="warning"
+                      style={{ marginBottom: 16 }}
+                      title={`${enabledWithoutDefault.map((item) => catalog.data.providers.find((provider) => provider.provider === item.provider)?.name ?? item.provider).join("、")}已启用但未设为默认`}
+                      description="业务运行只会使用默认平台，请为该能力指定一个默认平台。"
+                    />
+                  ) : null}
+                  <Row gutter={[20, 20]}>
+                    {providers.map((definition) => (
+                      <Col xs={24} xl={12} key={definition.provider}>
+                        <ProviderCard
+                          definition={definition}
+                          config={configByProvider.get(`${definition.capability}:${definition.provider}`)}
+                          providerKey={`${definition.capability}:${definition.provider}`}
+                          registerForm={registerProviderForm}
+                          onDefaultChange={handleDefaultChange}
+                        />
+                      </Col>
+                    ))}
+                  </Row>
+                  {providers.length === 0 ? <Empty description="暂无可用平台" /> : null}
+                </>
+              )
+            };
+          })}
+        />
       </Space>}
     />
   );

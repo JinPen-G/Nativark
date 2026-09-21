@@ -786,6 +786,61 @@ async function upsertSystemParameters() {
   }
 }
 
+/**
+ * demo 客户端渠道配置（CLIENT-CHANNEL-01）：把四个经营空间发布到客户端，
+ * 并填入示例品牌名、主题色与协议正文，让小程序/APP 游客态开箱即可浏览，
+ * 同时演示 logo（此处只给品牌名，Logo 图仍用系统默认）与主题色能力。
+ * 幂等：按 tenantId 唯一 upsert，可反复 seed。
+ */
+async function upsertDemoClientChannel() {
+  const tenantId = "tenant_001";
+  const rentalProfile = await prisma.tenantRentalProfile.findUnique({ where: { tenantId } });
+  if (!rentalProfile) return;
+  const profile = await prisma.clientChannelProfile.upsert({
+    where: { tenantId },
+    update: {
+      brandName: "光影租赁",
+      customerServicePhone: "021-88886666",
+      customerServiceHours: "工作日 9:00-18:00",
+      themeColor: "#1677FF",
+      userAgreementName: "用户服务协议",
+      userAgreementVersion: "2026-09",
+      userAgreementBody: "示例用户服务协议正文：本协议用于开发演示，正式经营前由商户提供适用版本。",
+      privacyPolicyName: "隐私政策",
+      privacyPolicyVersion: "2026-09",
+      privacyPolicyBody: "示例隐私政策正文：本政策用于开发演示，正式经营前由商户提供适用版本。",
+      helpIntro: "示例帮助说明：如有疑问请拨打客服电话。",
+      smsLoginEnabled: true,
+      passwordLoginEnabled: true,
+      defaultWorkspaceId: "ws_tenant_001"
+    },
+    create: {
+      tenantId,
+      brandName: "光影租赁",
+      customerServicePhone: "021-88886666",
+      customerServiceHours: "工作日 9:00-18:00",
+      themeColor: "#1677FF",
+      userAgreementName: "用户服务协议",
+      userAgreementVersion: "2026-09",
+      userAgreementBody: "示例用户服务协议正文：本协议用于开发演示，正式经营前由商户提供适用版本。",
+      privacyPolicyName: "隐私政策",
+      privacyPolicyVersion: "2026-09",
+      privacyPolicyBody: "示例隐私政策正文：本政策用于开发演示，正式经营前由商户提供适用版本。",
+      helpIntro: "示例帮助说明：如有疑问请拨打客服电话。",
+      smsLoginEnabled: true,
+      passwordLoginEnabled: true,
+      defaultWorkspaceId: "ws_tenant_001"
+    }
+  });
+  for (const workspace of demoWorkspaces) {
+    await prisma.clientChannelWorkspace.upsert({
+      where: { tenantId_workspaceId: { tenantId, workspaceId: workspace.id } },
+      update: { profileId: profile.id, enabled: true },
+      create: { tenantId, profileId: profile.id, workspaceId: workspace.id, enabled: true }
+    });
+  }
+}
+
 async function main() {
   // 先校验凭据再写库：缺少口令时必须在任何 upsert 之前失败，
   // 避免留下"租户/组织已建、管理员账号未建"的半成品库。
@@ -797,6 +852,7 @@ async function main() {
   await upsertPermissions();
   await upsertRolesAndUsers();
   await upsertSystemParameters();
+  await upsertDemoClientChannel();
 }
 
 main()

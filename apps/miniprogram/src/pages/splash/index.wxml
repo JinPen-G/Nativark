@@ -1,0 +1,11 @@
+<view class="splash">
+  <image class="splash__bg" src="/assets/splash/background.png" mode="aspectFill"></image>
+  <view class="splash__brand">
+    <image class="splash__logo" src="/assets/splash/logo.png" mode="widthFix"></image>
+  </view>
+  <image class="splash__wave" src="/assets/splash/wave.png" mode="widthFix"></image>
+  <view class="splash__foot">
+    <image class="splash__ring" src="/assets/splash/ring.png" mode="aspectFit"></image>
+    <view class="splash__hint">正在为你准备设备…</view>
+  </view>
+</view>

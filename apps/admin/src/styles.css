@@ -166,9 +166,6 @@ button, input, textarea, select { font: inherit; }
   text-overflow: ellipsis;
 }
 .workspace-select-arrow { flex: none; color: var(--rental-color-text-quaternary); font-size: 12px; }
-.workspace-option { display: inline-flex; flex-direction: column; line-height: 1.25; }
-.workspace-option small { opacity: .6; font-size: 12px; }
-
 /* 侧栏底色见 app/theme.tsx 的 SIDER_BG；变量落地前的那一帧回落到外壳底色。 */
 .app-sider {
   background: var(--app-sider-bg, var(--rental-color-bg-layout)) !important;

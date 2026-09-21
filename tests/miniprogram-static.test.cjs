@@ -100,8 +100,9 @@ const status = (req, statusCode, message = "error") => req.success({ statusCode,
 
 /* ---------------- 工程结构（AC-18） ---------------- */
 
-test("app.json 声明 20 个页面、4 个 Tab（带图标），每个页面与组件四件套齐全；组件按页面注册以保留按需注入", () => {
-  assert.equal(app.pages.length, 20);
+test("app.json 声明 21 个页面、4 个 Tab（带图标），每个页面与组件四件套齐全；组件按页面注册以保留按需注入", () => {
+  assert.equal(app.pages.length, 21);
+  assert.equal(app.pages[0], "pages/splash/index", "启动页必须是默认入口 pages[0]");
   assert.equal(new Set(app.pages).size, app.pages.length);
   same(app.tabBar.list.map((row) => row.text), ["首页", "分类", "订单", "我的"]);
   for (const row of app.tabBar.list) {
@@ -130,7 +131,8 @@ test("app.json 声明 20 个页面、4 个 Tab（带图标），每个页面与�
     assert.match(read(`${route}.ts`), /\bPage\(\{/);
     const pageJson = JSON.parse(read(`${route}.json`));
     const wxml = read(`${route}.wxml`);
-    assert.match(wxml, /<nav-bar\b/, `${route} 必须以 <nav-bar> 开头（自定义导航栏下否则内容顶到状态栏）`);
+    // 启动页是品牌全屏首屏，自身撑满安全区、不用共享导航栏，故豁免 nav-bar 要求。
+    if (route !== "pages/splash/index") assert.match(wxml, /<nav-bar\b/, `${route} 必须以 <nav-bar> 开头（自定义导航栏下否则内容顶到状态栏）`);
     const used = componentTags.filter((tag) => new RegExp(`<${tag}\\b`).test(wxml));
     const declared = Object.keys(pageJson.usingComponents ?? {});
     same([...used].sort(), [...declared].sort(), `${route} 使用的组件与 usingComponents 声明不一致`);
@@ -246,6 +248,15 @@ test("源码不含密钥、模拟资金入口、内部 ID 输入、演示数据�
   assert.doesNotMatch(source, /(?:demoProducts|mockProducts|sampleProducts|测试商品|演示商品|模拟支付成功)/);
   assert.doesNotMatch(source, /(?:console\.(?:log|debug|info))\s*\(/);
   assert.doesNotMatch(source, /import\s+\{[^}]*\}\s+from\s+["']@rental-os\/shared["']/, "只能 import type，不能引入运行时值");
+  // 模块不能 import 自己：自引用在编译期无错，运行时却因循环初始化拿到未定义导出，会静默拖垮全局（如 app.onLaunch → 全页面事件失效）。
+  for (const file of walk(src).filter((f) => f.endsWith(".ts"))) {
+    const self = file.replace(/\.ts$/, "");
+    const text = fs.readFileSync(file, "utf8");
+    for (const match of text.matchAll(/(?:import|export)[^;]*?from\s+["'](\.[^"']+)["']/g)) {
+      const resolved = path.resolve(path.dirname(file), match[1]).replace(/\.(ts|js)$/, "");
+      assert.notEqual(resolved, self, `${path.relative(root, file)} 从自身导入（${match[1]}），会造成运行时循环初始化`);
+    }
+  }
   // 分享参数只允许公开标识。
   for (const file of walk(src).filter((f) => f.endsWith(".ts"))) {
     const text = fs.readFileSync(file, "utf8");

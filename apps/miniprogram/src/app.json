@@ -1,5 +1,6 @@
 {
   "pages": [
+    "pages/splash/index",
     "pages/home/index",
     "pages/catalog/index",
     "pages/orders/index",

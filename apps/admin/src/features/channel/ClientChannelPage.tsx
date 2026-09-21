@@ -1,6 +1,6 @@
 import { CheckCircleOutlined, ExperimentOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
 import type { SaveClientChannelProfileRequest, SaveMiniProgramChannelRequest } from "@rental-os/shared";
-import { Alert, App, Button, Card, Checkbox, Col, Divider, Form, Input, Row, Space, Spin, Switch, Tag, Typography } from "antd";
+import { Alert, App, Button, Card, Checkbox, Col, Divider, Form, Input, Row, Space, Spin, Switch, Tabs, Tag, Typography } from "antd";
 import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { clientChannelApi } from "@/api/clientChannel";
@@ -209,10 +209,21 @@ export function ClientChannelPage() {
       title="客户端渠道"
       description="配置小程序与后续 APP 对客户展示的品牌、客服、协议、帮助与发布服务（租户级共用），以及微信小程序凭证。"
       note={{ title: "一份配置，多端共用", description: "品牌、客服、协议正文/版本、帮助与发布服务由小程序和 APP 共用；只有微信 AppID/AppSecret 是微信渠道专有。协议正文在客户端内直接渲染，请填写正文而不仅是外链。" }}
-      view={<Space orientation="vertical" size={20} style={{ width: "100%" }}>
-        <ProfileCard />
-        <WechatCredentialsCard />
-      </Space>}
+      view={<Tabs
+        tabBarGutter={32}
+        items={[
+          {
+            key: "common",
+            label: "通用客户端配置",
+            children: <ProfileCard />
+          },
+          {
+            key: "mini-program",
+            label: "微信小程序配置",
+            children: <WechatCredentialsCard />
+          }
+        ]}
+      />}
     />
   );
 }

@@ -1,4 +1,5 @@
-.nav { position: fixed; top: 0; left: 0; right: 0; z-index: 50; background: #FFFFFF; }
+/* 高度上限兜底：即便度量异常，固定导航条也不能盖住内容吃掉点击（max-height 远大于正常导航栏、又不至于覆盖全屏）。 */
+.nav { position: fixed; top: 0; left: 0; right: 0; z-index: 50; background: #FFFFFF; max-height: 320rpx; overflow: hidden; }
 .nav--transparent { background: transparent; }
 .nav__brand { display: flex; align-items: center; padding-left: 32rpx; }
 .nav__logo { height: 52rpx; width: 226rpx; }

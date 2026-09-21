@@ -51,10 +51,10 @@ function assertLocalDatabase() {
   }
 }
 
-async function request(pathname, method = "GET", token, body) {
+async function request(pathname, method = "GET", token, body, extraHeaders = {}) {
   const response = await fetch(`${API_BASE}${pathname}`, {
     method,
-    headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    headers: { "content-type": "application/json", ...extraHeaders, ...(token ? { authorization: `Bearer ${token}` } : {}) },
     ...(body === undefined ? {} : { body: JSON.stringify(body) })
   });
   let payload;
@@ -91,13 +91,25 @@ async function uploadItemGroupImage(token, itemGroupId, imagePath) {
 
 async function ensureItemGroupImages(token, workspaceCode, groups) {
   const imageByWorkspace = {
-    default: path.join(ROOT, "apps", "website", "public", "images", "hero-camera.png"),
-    camping: path.join(ROOT, "apps", "website", "public", "images", "camping.png"),
-    vehicle: path.join(ROOT, "apps", "website", "public", "images", "vehicle.png"),
-    construction: path.join(ROOT, "apps", "website", "public", "images", "construction.png")
+    default: [
+      path.join(ROOT, "apps", "website", "public", "images", "hero-camera.png"),
+      path.join(ROOT, "apps", "website", "assets", "industry-camera.png")
+    ],
+    camping: [
+      path.join(ROOT, "apps", "website", "public", "images", "camping.png"),
+      path.join(ROOT, "apps", "website", "assets", "industry-camping.png")
+    ],
+    vehicle: [
+      path.join(ROOT, "apps", "website", "public", "images", "vehicle.png"),
+      path.join(ROOT, "apps", "website", "assets", "industry-car.png")
+    ],
+    construction: [
+      path.join(ROOT, "apps", "website", "public", "images", "construction.png"),
+      path.join(ROOT, "apps", "website", "assets", "industry-excavator.png")
+    ]
   };
-  const imagePath = imageByWorkspace[workspaceCode];
-  if (!imagePath || !fs.existsSync(imagePath)) throw new Error(`${workspaceCode} 缺少演示图片资源`);
+  const imagePath = imageByWorkspace[workspaceCode]?.find((candidate) => fs.existsSync(candidate));
+  if (!imagePath) throw new Error(`${workspaceCode} 缺少演示图片资源`);
   for (const group of groups) {
     if (Array.isArray(group.images) && group.images.length > 0) continue;
     await uploadItemGroupImage(token, group.id, imagePath);
@@ -152,6 +164,93 @@ async function ensureQualification(token, customerId, qualificationType, referen
       status: "approved"
     });
   }
+}
+
+async function ensureMockFunding(token, order, keyPrefix) {
+  const payable = Number(order.payable ?? order.finalPayableAmount ?? order.payableAmount ?? 0);
+  if (payable > 0) {
+    await request(`/rental/v1/orders/${encodeURIComponent(order.id)}/funding-events/initiate`, "POST", token, {
+      instrument: "rental",
+      idempotencyKey: `${keyPrefix}:rental`,
+      reason: "演示数据：确认前模拟收取租金与费用"
+    });
+  }
+  if (Number(order.depositAmount ?? 0) > 0) {
+    await request(`/rental/v1/orders/${encodeURIComponent(order.id)}/funding-events/initiate`, "POST", token, {
+      instrument: "deposit",
+      idempotencyKey: `${keyPrefix}:deposit`,
+      reason: "演示数据：确认前模拟收取押金"
+    });
+  }
+  if (Number(order.preAuthAmount ?? 0) > 0) {
+    await request(`/rental/v1/orders/${encodeURIComponent(order.id)}/funding-events/initiate`, "POST", token, {
+      instrument: "preauthorization",
+      idempotencyKey: `${keyPrefix}:preauth`,
+      reason: "演示数据：确认前模拟冻结预授权"
+    });
+  }
+}
+
+async function ensureDemoOrder(token, input) {
+  const orders = await request("/rental/v1/orders", "GET", token);
+  const startMs = new Date(input.startAt).getTime();
+  const endMs = new Date(input.endAt).getTime();
+  const existing = orders.find((order) =>
+    order.customerId === input.customerId &&
+    new Date(order.startAt).getTime() === startMs &&
+    new Date(order.endAt).getTime() === endMs
+  );
+  if (existing) return existing;
+
+  const quoteBody = {
+    customerType: "personal",
+    customerId: input.customerId,
+    bookingIdentity: { bookingIdentity: "personal" },
+    fulfillmentMode: input.fulfillmentMode,
+    fulfillmentLocationId: input.locationId,
+    returnLocationId: input.locationId,
+    startAt: input.startAt,
+    endAt: input.endAt,
+    pricingPlanId: input.pricingPlanId,
+    lines: [{ pricingGroupId: input.pricingGroupId, quantity: 1 }],
+    services: []
+  };
+  const quote = await request("/rental/v1/quotes", "POST", token, quoteBody);
+  return request("/rental/v1/orders", "POST", token, {
+    quoteId: quote.id,
+    customerType: "personal",
+    customerId: input.customerId,
+    customerName: input.customerName,
+    contactPhone: input.contactPhone,
+    bookingIdentity: { bookingIdentity: "personal" },
+    fulfillmentMode: input.fulfillmentMode,
+    fulfillmentLocationId: input.locationId,
+    returnLocationId: input.locationId,
+    startAt: input.startAt,
+    endAt: input.endAt,
+    lines: [{ itemGroupId: input.pricingGroupId, pricingGroupId: input.pricingGroupId, quantity: 1 }],
+    operator: "demo-seed"
+  }, { "Idempotency-Key": `demo-order:${input.workspaceCode}:${input.scenario}` });
+}
+
+async function ensureDemoLifecycle(token, input, target) {
+  let order = await ensureDemoOrder(token, input);
+  if (target === "cancelled") {
+    if (order.status === "draft") {
+      order = await request(`/rental/v1/orders/${encodeURIComponent(order.id)}/cancel`, "POST", token, {
+        reason: "演示数据：客户临时取消预约"
+      });
+    }
+    return order;
+  }
+  if (order.status === "draft") {
+    await ensureMockFunding(token, order, `demo-order:${input.workspaceCode}:${input.scenario}`);
+    order = await request(`/rental/v1/orders/${encodeURIComponent(order.id)}/confirm`, "POST", token, {});
+  }
+  if (target === "ready_for_pickup" && order.status === "reserved") {
+    order = await request(`/rental/v1/orders/${encodeURIComponent(order.id)}/allocate`, "POST", token, {});
+  }
+  return order;
 }
 
 async function main() {
@@ -249,6 +348,7 @@ async function main() {
         });
       }
       await ensureQualification(token, customerIds.primary, qualification.code, `DEMO-${workspace.code.toUpperCase()}-001`, true);
+      await ensureQualification(token, customerIds.secondary, qualification.code, `DEMO-${workspace.code.toUpperCase()}-002`, true);
       if (workspace.code === "default") await ensureQualification(token, customerIds.pending, qualification.code, "DEMO-CAMERA-PENDING", false);
 
       let corporate = (await request("/membership/corporate", "GET", token)).find((item) => item.corporateName === "演示科技有限公司");
@@ -403,16 +503,57 @@ async function main() {
           operator: "demo-seed"
         });
       }
+      const scenarioBase = {
+        workspaceCode: workspace.code,
+        customerId: customerIds.secondary,
+        customerName: "演示会员李宁",
+        contactPhone: "85290000002",
+        fulfillmentMode,
+        locationId: locations[0].id,
+        pricingGroupId: groups[0].id,
+        pricingPlanId: pricingPlans.find((item) => item.status === "enabled")?.id
+      };
+      const draftOrder = await ensureDemoOrder(token, {
+        ...scenarioBase,
+        scenario: "draft",
+        startAt: "2026-10-01T10:00:00+08:00",
+        endAt: "2026-10-03T10:00:00+08:00"
+      });
+      const reservedOrder = await ensureDemoLifecycle(token, {
+        ...scenarioBase,
+        scenario: "reserved",
+        startAt: "2026-11-05T10:00:00+08:00",
+        endAt: "2026-11-07T10:00:00+08:00"
+      }, "reserved");
+      const readyOrder = await ensureDemoLifecycle(token, {
+        ...scenarioBase,
+        scenario: "ready",
+        startAt: "2026-12-10T10:00:00+08:00",
+        endAt: "2026-12-12T10:00:00+08:00"
+      }, "ready_for_pickup");
+      const cancelledOrder = await ensureDemoLifecycle(token, {
+        ...scenarioBase,
+        scenario: "cancelled",
+        startAt: "2026-09-25T10:00:00+08:00",
+        endAt: "2026-09-27T10:00:00+08:00"
+      }, "cancelled");
+      const itemGroupsAfterImages = await request("/rental/v1/item-groups", "GET", token);
       summaries.push({
         code: workspace.code,
-        itemGroups: itemGroups.length,
-        itemGroupsWithImages: itemGroups.filter((item) => Array.isArray(item.images) && item.images.length > 0).length,
+        itemGroups: itemGroupsAfterImages.length,
+        itemGroupsWithImages: itemGroupsAfterImages.filter((item) => Array.isArray(item.images) && item.images.length > 0).length,
         pricingGroups: groups.length,
         plans: pricingPlans.length,
         discounts: discountPlans.length,
         services: services.length,
         customerCoupon: Boolean(customerCoupon),
-        orderStatus: order?.status || "existing"
+        orderStatus: order?.status || "existing",
+        operationalOrders: {
+          draft: draftOrder.status === "draft" ? 1 : 0,
+          reserved: reservedOrder.status === "reserved" ? 1 : 0,
+          readyForPickup: readyOrder.status === "ready_for_pickup" ? 1 : 0,
+          cancelled: cancelledOrder.status === "cancelled" ? 1 : 0
+        }
       });
     }
 

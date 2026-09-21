@@ -107,6 +107,26 @@ function decodePng(file) {
 }
 
 /** 裁掉透明边并按面积平均缩放（预乘 alpha，避免透明边缘发黑）。 */
+/** 整幅按比例缩放到目标宽度（不裁剪，用于不透明背景等需保留满幅的图）。 */
+function scaleImage(image, targetWidth) {
+  const scale = targetWidth / image.width;
+  const outW = targetWidth, outH = Math.max(1, Math.round(image.height * scale));
+  const out = Buffer.alloc(outW * outH * 4);
+  for (let oy = 0; oy < outH; oy += 1) for (let ox = 0; ox < outW; ox += 1) {
+    const sx0 = ox / scale, sx1 = (ox + 1) / scale, sy0 = oy / scale, sy1 = (oy + 1) / scale;
+    let r = 0, g = 0, b = 0, a = 0, n = 0;
+    for (let sy = Math.floor(sy0); sy < Math.ceil(sy1); sy += 1) for (let sx = Math.floor(sx0); sx < Math.ceil(sx1); sx += 1) {
+      if (sx < 0 || sy < 0 || sx >= image.width || sy >= image.height) { n += 1; continue; }
+      const i = (sy * image.width + sx) * 4;
+      const alpha = image.data[i + 3] / 255;
+      r += image.data[i] * alpha; g += image.data[i + 1] * alpha; b += image.data[i + 2] * alpha; a += alpha; n += 1;
+    }
+    const o = (oy * outW + ox) * 4;
+    if (a > 0) { out[o] = Math.round(r / a); out[o + 1] = Math.round(g / a); out[o + 2] = Math.round(b / a); out[o + 3] = Math.round((a / n) * 255); }
+  }
+  return { width: outW, height: outH, data: out };
+}
+
 function cropAndScale(image, targetWidth, padding = 0) {
   let minX = image.width, minY = image.height, maxX = -1, maxY = -1;
   for (let y = 0; y < image.height; y += 1) for (let x = 0; x < image.width; x += 1) {
@@ -130,6 +150,44 @@ function cropAndScale(image, targetWidth, padding = 0) {
     if (a > 0) { out[o] = Math.round(r / a); out[o + 1] = Math.round(g / a); out[o + 2] = Math.round(b / a); out[o + 3] = Math.round((a / n) * 255); }
   }
   return { width: outW, height: outH, data: out };
+}
+
+/* ---------------- 竖版锁定图合成（启动页） ---------------- */
+function trimBBox(image) {
+  let minX = image.width, minY = image.height, maxX = -1, maxY = -1;
+  for (let y = 0; y < image.height; y += 1) for (let x = 0; x < image.width; x += 1) {
+    if (image.data[(y * image.width + x) * 4 + 3] > 8) { if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y; }
+  }
+  return { minX, minY, maxX, maxY };
+}
+function subImage(image, minX, minY, maxX, maxY) {
+  const w = maxX - minX + 1, h = maxY - minY + 1;
+  const data = Buffer.alloc(w * h * 4);
+  for (let y = 0; y < h; y += 1) image.data.copy(data, y * w * 4, ((minY + y) * image.width + minX) * 4, ((minY + y) * image.width + minX + w) * 4);
+  return { width: w, height: h, data };
+}
+/** 横版“主标识+标语”里，圆环符号在最左；切掉左侧符号块，只保留右侧“Rental OS + 标语”字标块。 */
+function wordmarkBlock(image) {
+  const bb = trimBBox(image);
+  const inked = (x) => { for (let y = bb.minY; y <= bb.maxY; y += 1) if (image.data[(y * image.width + x) * 4 + 3] > 8) return true; return false; };
+  let x = bb.minX;
+  while (x <= bb.maxX && inked(x)) x += 1;        // 跳过最左符号块
+  while (x <= bb.maxX && !inked(x)) x += 1;        // 跳过符号与字标之间的空隙
+  const textStart = Math.min(x, bb.maxX);
+  return subImage(image, textStart, bb.minY, bb.maxX, bb.maxY);
+}
+/** 竖直堆叠若干已缩放子图（顶对齐居中），透明底，返回合成图。 */
+function stackVertical(parts, gap) {
+  const width = Math.max(...parts.map((p) => p.width));
+  const height = parts.reduce((sum, p) => sum + p.height, 0) + gap * (parts.length - 1);
+  const out = Buffer.alloc(width * height * 4);
+  let oy = 0;
+  for (const part of parts) {
+    const ox = Math.round((width - part.width) / 2);
+    for (let y = 0; y < part.height; y += 1) part.data.copy(out, ((oy + y) * width + ox) * 4, y * part.width * 4, (y + 1) * part.width * 4);
+    oy += part.height + gap;
+  }
+  return { width, height, data: out };
 }
 
 /* ---------------- SDF 线性图标 ---------------- */
@@ -196,6 +254,26 @@ const logo = cropAndScale(decodePng(path.join(brand, "02_logo-horizontal_后台�
 fs.writeFileSync(path.join(assets, "logo.png"), encodePng(logo.width, logo.height, logo.data));
 const mark = cropAndScale(decodePng(path.join(brand, "04_logo-mark-gradient_折叠菜单与品牌符号.png")), 128, 6);
 fs.writeFileSync(path.join(assets, "logo-mark.png"), encodePng(mark.width, mark.height, mark.data));
+// 启动页竖版品牌锁定图：官方渐变圆环（04）在上，官方“Rental OS + Build a Rental World.”字标（从主标识图切出）在下。
+// 字标像素全部取自官方文件（不自行打字），只按设计稿改为竖排；圆环本身的环/点比例不改动。
+// 启动页：直接使用负责人放入「设计图/启动页素材」的官方图层，分层缩放后由 splash 页按设计稿合成
+// （背景 + 底部波浪 + 居中 Logo 锁定图 + 可旋转加载环），不自行拼字标。
+const splashSrc = path.join(root, "设计图", "启动页素材");
+const splashDir = path.join(assets, "splash");
+fs.mkdirSync(splashDir, { recursive: true });
+// 全部用官方成品图，整幅等比缩放（scaleImage，仅为压体积），不裁边、不改构图，保留设计师留白与比例。
+// 背景：941×1672 竖版白/浅蓝底（手机屏比例），整幅缩到 828px 宽。
+const splashBg = scaleImage(decodePng(path.join(splashSrc, "03_Background", "01_splash-background.png")), 828);
+fs.writeFileSync(path.join(splashDir, "background.png"), encodePng(splashBg.width, splashBg.height, splashBg.data));
+// 底部波浪装饰（透明底），整幅缩到 828px 宽，与背景同宽铺满底部。
+const splashWave = scaleImage(decodePng(path.join(splashSrc, "03_Background", "02_wave-decoration-transparent.png")), 828);
+fs.writeFileSync(path.join(splashDir, "wave.png"), encodePng(splashWave.width, splashWave.height, splashWave.data));
+// 居中 Logo 锁定图（含标语），整幅缩到 640px 宽——保留成品的内部留白，不裁边。
+const splashLogo = scaleImage(decodePng(path.join(splashSrc, "02_Logo", "01_logo-with-tagline.png")), 640);
+fs.writeFileSync(path.join(splashDir, "logo.png"), encodePng(splashLogo.width, splashLogo.height, splashLogo.data));
+// 加载环，整幅缩到 96px 宽，供 splash 页旋转。
+const splashRing = scaleImage(decodePng(path.join(splashSrc, "04_Loading", "01_loading-ring.png")), 96);
+fs.writeFileSync(path.join(splashDir, "ring.png"), encodePng(splashRing.width, splashRing.height, splashRing.data));
 const INACTIVE = "#8A94A6", ACTIVE = "#1677FF";
 for (const name of Object.keys(ICONS)) {
   const off = rasterIcon(name, INACTIVE);

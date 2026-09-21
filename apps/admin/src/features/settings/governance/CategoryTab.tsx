@@ -36,58 +36,82 @@ export function CategoryTab({ category }: { category: RentalCategoryDefinition }
       />
       <Row gutter={[16, 16]}>
         <Col xs={24} xl={12}>
-          <Card title="计价方式">
-            {/* 结算币种在租户开通时确定并跟随租户（需求 §948）：这里只展示。
-                允许在这里改会让同一空间的历史配置金额换一种含义，而配置里没有币种快照。 */}
-            <Form.Item
-              name={["pricing", "currency"]}
-              label="结算币种"
-              tooltip="订单、报价与本空间所有配置金额的币种。开通租户时设定，此处不可修改。"
-            >
-              <Select
-                disabled
-                options={RENTAL_CURRENCY_CODES.map((code) => ({
-                  value: code,
-                  label: `${code} · ${RENTAL_CURRENCY_META[code].label}`,
-                }))}
-              />
-            </Form.Item>
-            <Form.Item
-              name={["pricing", "enabledUnits"]}
-              label="启用计价单位"
-            >
-              <Select
-                mode="multiple"
-                options={category.businessModel.pricingUnits.map(
-                  (value) => ({
+          <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+            <Card title="计价方式">
+              {/* 结算币种在租户开通时确定并跟随租户（需求 §948）：这里只展示。
+                  允许在这里改会让同一空间的历史配置金额换一种含义，而配置里没有币种快照。 */}
+              <Form.Item
+                name={["pricing", "currency"]}
+                label="结算币种"
+                tooltip="订单、报价与本空间所有配置金额的币种。开通租户时设定，此处不可修改。"
+              >
+                <Select
+                  disabled
+                  options={RENTAL_CURRENCY_CODES.map((code) => ({
+                    value: code,
+                    label: `${code} · ${RENTAL_CURRENCY_META[code].label}`,
+                  }))}
+                />
+              </Form.Item>
+              <Form.Item
+                name={["pricing", "enabledUnits"]}
+                label="启用计价单位"
+              >
+                <Select
+                  mode="multiple"
+                  options={category.businessModel.pricingUnits.map(
+                    (value) => ({
+                      value,
+                      label: pricingUnitLabels[value] ?? value,
+                    }),
+                  )}
+                />
+              </Form.Item>
+              <Form.Item
+                name={["pricing", "defaultUnit"]}
+                label="默认单位"
+              >
+                <Select
+                  options={category.businessModel.pricingUnits.map(
+                    (value) => ({
+                      value,
+                      label: pricingUnitLabels[value] ?? value,
+                    }),
+                  )}
+                />
+              </Form.Item>
+              <Form.Item
+                name={["pricing", "holidayPricingEnabled"]}
+                label="启用旧版周末/节假日倍率"
+                tooltip="兼容开关，只作用于价格里的旧字段「周末系数」「节假日系数」。关闭后这两个系数不再参与计价，落回商品基础价；逐商品配置的日期类型价格、周期性计价时段与一次性日期时间覆盖不受影响，照常生效。"
+                valuePropName="checked"
+              >
+                <Switch />
+              </Form.Item>
+            </Card>
+            <Card title="收款方式">
+              {/* 支付时点、押金、预授权、异地归还与逾期计费都随报价进订单快照，事实源在「业务规则」页；
+                  这里只保留不进快照的运行开关——空间实际开通哪些收款渠道。 */}
+              <Form.Item
+                name={["payment", "enabledMethods"]}
+                label="启用收款方式"
+                tooltip="线下现金和线下转账可直接登记；支付宝、微信还必须在租户集成设置中完成账号配置、启用并通过实时校验后，客户端才会展示为可用。"
+              >
+                <Select
+                  mode="multiple"
+                  options={RENTAL_PAYMENT_METHOD_CODES.map((value) => ({
                     value,
-                    label: pricingUnitLabels[value] ?? value,
-                  }),
-                )}
+                    label: PAYMENT_METHOD_LABELS[value],
+                  }))}
+                />
+              </Form.Item>
+              <Alert
+                type="info"
+                showIcon
+                title="支付时点、押金与预授权、异地归还、逾期计费在「业务规则」页配置，发布后随订单快照冻结。"
               />
-            </Form.Item>
-            <Form.Item
-              name={["pricing", "defaultUnit"]}
-              label="默认单位"
-            >
-              <Select
-                options={category.businessModel.pricingUnits.map(
-                  (value) => ({
-                    value,
-                    label: pricingUnitLabels[value] ?? value,
-                  }),
-                )}
-              />
-            </Form.Item>
-            <Form.Item
-              name={["pricing", "holidayPricingEnabled"]}
-              label="启用旧版周末/节假日倍率"
-              tooltip="兼容开关，只作用于价格里的旧字段「周末系数」「节假日系数」。关闭后这两个系数不再参与计价，落回商品基础价；逐商品配置的日期类型价格、周期性计价时段与一次性日期时间覆盖不受影响，照常生效。"
-              valuePropName="checked"
-            >
-              <Switch />
-            </Form.Item>
-          </Card>
+            </Card>
+          </Space>
         </Col>
         <Col xs={24} xl={12}>
           <Card title="租赁与履约方式">
@@ -116,30 +140,6 @@ export function CategoryTab({ category }: { category: RentalCategoryDefinition }
                 <Tag key={value}>{value}</Tag>
               ))}
             </Space>
-          </Card>
-        </Col>
-        <Col xs={24} xl={12}>
-          <Card title="收款方式">
-            {/* 支付时点、押金、预授权、异地归还与逾期计费都随报价进订单快照，事实源在「业务规则」页；
-                这里只保留不进快照的运行开关——空间实际开通哪些收款渠道。 */}
-            <Form.Item
-              name={["payment", "enabledMethods"]}
-              label="启用收款方式"
-              tooltip="线下现金和线下转账可直接登记；支付宝、微信还必须在租户集成设置中完成账号配置、启用并通过实时校验后，客户端才会展示为可用。"
-            >
-              <Select
-                mode="multiple"
-                options={RENTAL_PAYMENT_METHOD_CODES.map((value) => ({
-                  value,
-                  label: PAYMENT_METHOD_LABELS[value],
-                }))}
-              />
-            </Form.Item>
-            <Alert
-              type="info"
-              showIcon
-              title="支付时点、押金与预授权、异地归还、逾期计费在「业务规则」页配置，发布后随订单快照冻结。"
-            />
           </Card>
         </Col>
       </Row>
