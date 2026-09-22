@@ -12,6 +12,14 @@
 
     <view class="section">
       <view class="card">
+        <view class="kv"><view class="kv__label">商户</view><view class="kv__value strong ellipsis">{{merchantName}}</view></view>
+        <view class="kv"><view class="kv__label">服务</view><view class="kv__value ellipsis">{{serviceName}}</view></view>
+        <view class="kv"><view class="kv__label">使用人</view><view class="kv__value ellipsis">{{userName}}{{userPhone ? ' · ' + userPhone : ''}}</view></view>
+      </view>
+    </view>
+
+    <view class="section section--tight">
+      <view class="card">
         <view class="line" wx:for="{{lines}}" wx:key="key">
           <view class="line__thumb">
             <image wx:if="{{item.imagePath}}" src="{{item.imagePath}}" mode="aspectFill"></image>
@@ -90,6 +98,19 @@
             <view wx:else class="warning-text small mt-8">{{method === 'delivery' ? '请选择发货门店' : '请选择自提门店'}}</view>
           </view>
         </view>
+        <block wx:if="{{method === 'pickup' && store}}">
+          <view class="divider"></view>
+          <view class="row" hover-class="btn-hover" bindtap="onOpenReturn">
+            <ui-icon name="pin" size="34" color="text"></ui-icon>
+            <view class="grow ml-12">
+              <view class="row row--between">
+                <view class="subtitle">归还门店</view>
+                <ui-icon name="chevron-right" size="30" color="muted"></ui-icon>
+              </view>
+              <view class="body mt-8 ellipsis">{{returnLabel}}</view>
+            </view>
+          </view>
+        </block>
       </view>
     </view>
 
@@ -157,7 +178,7 @@
           <checkbox-group bindchange="onAgreeChange">
             <label class="row row--top">
               <checkbox value="agree" checked="{{agreed}}" color="#1677FF"></checkbox>
-              <view class="grow">我已阅读并同意<text class="consent__link" catchtap="onOpenRules">《租赁规则》</text>{{ruleVersion ? '（版本 ' + ruleVersion + '）' : ''}}</view>
+              <view class="grow">我已阅读并同意<text class="consent__link" catchtap="onOpenRules">《租赁规则》</text>{{ruleVersion ? '（版本 ' + ruleVersion + '）' : ''}}，其中含取消、逾期与损坏赔付规则。</view>
             </label>
           </checkbox-group>
         </view>
@@ -203,6 +224,22 @@
         <view class="option__check"></view>
       </view>
       <view wx:if="{{!locations.length}}" class="muted">{{method === 'delivery' ? '商户暂无可发货的门店' : '商户暂无可自提的门店'}}</view>
+    </sheet>
+
+    <sheet visible="{{showReturnSheet}}" title="选择归还门店" bind:close="onCloseReturn">
+      <view class="option {{!cart.returnLocationId ? 'option--selected' : ''}}" data-id="" bindtap="onPickReturn">
+        <view class="grow"><view class="subtitle">与取货门店相同</view><view class="muted small">在取货门店归还</view></view>
+        <view class="option__check"></view>
+      </view>
+      <view class="option {{cart.returnLocationId === item.id ? 'option--selected' : ''}}" wx:for="{{returnLocations}}" wx:key="id" data-id="{{item.id}}" bindtap="onPickReturn">
+        <view class="grow">
+          <view class="subtitle">{{item.name}}</view>
+          <view class="muted small">{{item.address || '地址以门店信息为准'}}{{item.businessHours ? ' · ' + item.businessHours : ''}}</view>
+        </view>
+        <view class="option__check"></view>
+      </view>
+      <view wx:if="{{!returnLocations.length}}" class="muted">商户暂无支持异地归还的门店</view>
+      <view class="muted small mt-16">异地归还可能产生调拨或服务费用，最终以商户报价为准。</view>
     </sheet>
 
     <sheet visible="{{showAddressSheet}}" title="选择收货地址" bind:close="onCloseAddress">

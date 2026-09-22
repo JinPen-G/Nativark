@@ -727,3 +727,6 @@ html[data-theme="dark"] .detail-image-note { color: rgba(255,255,255,.5); }
 html[data-theme="dark"] .mobile-menu-button { color: var(--ink); }
 html[data-theme="dark"] .main-nav { background: var(--card); box-shadow: 0 12px 25px rgba(0,0,0,.35); }
 html[data-theme="dark"] .home-hero-multiple .hero-benefits { background: rgba(0,0,0,.78); }
+
+/* 真实租户模式：数据加载/失败时的轻量占位（避免用演示数据闪现）。 */
+.remote-gate { min-height: 60vh; display: flex; align-items: center; justify-content: center; color: var(--muted, #6b7a90); font-size: 15px; }

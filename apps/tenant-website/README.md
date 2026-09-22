@@ -1,8 +1,10 @@
 # Rental OS 租户消费者官网
 
-独立于 `apps/website`（Rental OS 平台官网）的租户前台。当前是可交互的视觉演示，尚未连接后台、支付或实时库存。
+独立于 `apps/website`（Rental OS 平台官网）的租户前台。**一套部署服务任意多个租户**：每个请求先识别当前租户，再由后端 bootstrap 返回的已发布品类数自动切换单/双/多三种首页形态。
 
 ## 本地预览
+
+### 演示形态（离线静态数据，看三种布局）
 
 在仓库根目录运行 `npm run dev:tenant-website`，浏览器打开：
 
@@ -10,7 +12,28 @@
 - 双品类：`http://127.0.0.1:4186/?tenant=double`
 - 多品类：`http://127.0.0.1:4186/?tenant=multiple`
 
-也可以运行 `npm run build:tenant-website` 做构建检查。
+### 真实租户（消费后端接口）
+
+先起后端 API（默认 `127.0.0.1:3000`），再用 `?tenantCode=` 指定租户：
+
+- `http://127.0.0.1:4186/?tenantCode=demo`（示例：4 个品类 → 多品类形态）
+- `http://127.0.0.1:4186/?tenantCode=demo2`（示例：1 个品类 → 单品类形态）
+
+Vite 已把 `/api` 代理到本地 API（可用 `VITE_API_TARGET` 覆盖目标）。
+
+也可以运行 `npm run build:tenant-website` 做构建检查，`npm run test:tenant-website-resolve` 校验多租户识别逻辑，`node apps/tenant-website/scripts/verify-remote-mapping.mjs demo demo2` 对着真实 API 校验数据映射。
+
+## 多租户识别（一个后端端口，多个租户）
+
+后端只有一个服务端口；「当前是哪个租户」在前端每次请求时解析（`src/data/resolveTenant.ts`），优先级：
+
+1. `?tenant=single|double|multiple` —— 参考演示，走本地静态数据。
+2. `?tenantCode=xxx` —— 显式指定真实租户（联调、预览、后台跳转）。
+3. **自定义域名 / 子域名** —— 生产每租户一个域名，如 `guangying.rentalos.com` → 租户 `guangying`（配 `VITE_BASE_DOMAIN=rentalos.com` 后只认其直接子域；`www/api/...` 等保留子域除外）。同一份代码不改一行即可服务新租户。
+4. `VITE_DEFAULT_TENANT` —— 单租户独立部署时用环境变量钉死租户。
+5. 都没有 → 回退演示 `multiple`。
+
+识别出租户编码后，`GET /api/client/v1/public/bootstrap?tenantCode=<code>&client=web` 返回品牌、主色、官网特有内容（web 渠道）与已发布服务列表；`services.length` 决定首页形态，`GET /public/catalog?service=<code>` 提供各品类商品。租户隔离由后端按 `tenantCode` 保证，前端不持有跨租户数据。
 
 ## 配置与未来对接
 
@@ -18,7 +41,10 @@
 - `src/theme.ts`：统一将主辅色映射到 CSS token。以后后台主题色配置可通过 `Tenant` 数据传入，无须改页面组件。
 - `src/i18n.ts`：统一维护中英文界面文案和演示数据的英文映射。顶部右侧按钮与页脚右下角选择器共享 `rental-os-tenant-language`，切换后会同步作用于所有路由；真实租户数据可通过 `*En` 字段提供英文名称、描述和规格。
 - `src/theme.ts` 与 `src/styles.css`：提供跟平台官网一致的深浅色模式。首次进入跟随系统偏好，用户切换后保存到 `rental-os-theme`；租户官网顶部右侧的太阳/月亮按钮会同步切换整站背景、卡片、文字、表单和页脚。
-- `src/data/siteRepository.ts`：页面唯一的数据访问入口。未来在这里替换为租户隔离的官网 API。当前演示预约仅写入浏览器 `localStorage`，不提交商家，也不锁库存。
+- `src/data/apiClient.ts`：租户客户端公开接口（`/api/client/v1` 的 `bootstrap`、`public/catalog`）的底层调用。
+- `src/data/remoteSite.ts`：把 bootstrap + 各服务 catalog 映射成官网的 `Tenant`/`Category`/`Product`；后端暂无的字段（二级分类、评分、押金、精确库存、证言）按诚实占位，由页面既有「以报价为准 / 预约时确认」文案兜底。
+- `src/data/resolveTenant.ts`：多租户识别（见上）。
+- `src/data/siteRepository.ts`：页面唯一的同步数据边界。演示模式读静态 catalog；真实模式由 `SiteProvider` 异步加载后经 `setActiveProducts` 注入。当前演示预约仅写入浏览器 `localStorage`，不提交商家，也不锁库存。
 - `src/types.ts`：`Tenant`、`Category`、`Product` 和演示订单的数据契约。
 
-生产接入时需由后端提供租户识别、上架商品、实时库存/冲突检查、正式计价、押金、配送门店和预约提交接口；当前页面上的费用均标明为估算。
+**已接入（免登录）**：租户识别、品牌/主色/官网内容（bootstrap `client=web`）、已发布品类导航与首页形态、商品列表与详情基础信息（public catalog）。**仍未接入**：登录/账号、实时库存与档期（`/availability`）、正式计价与押金（`/quotes`）、下单与我的订单（`/orders`）、支付、优惠券/会员——这些是需登录的下一切片；当前页面上的费用与库存均为占位，标明「以报价为准」。后端也尚无：商品评价、二级分类结构、营销区块 CMS。

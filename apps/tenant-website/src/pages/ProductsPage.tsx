@@ -6,7 +6,7 @@ import { ProductCard } from '../components/ProductCard';
 import { siteRepository } from '../data/siteRepository';
 
 export function ProductsPage() {
-  const { tenant, tenantKey, href, language, localizeProduct, t } = useSite();
+  const { tenant, tenantKey, isRemote, href, language, localizeProduct, t } = useSite();
   const { categoryId } = useParams();
   const [params, setParams] = useSearchParams();
   const category = tenant.categories.find(item => item.id === categoryId);
@@ -32,7 +32,9 @@ export function ProductsPage() {
   function updateParam(key: string, value: string) {
     const next = new URLSearchParams(params);
     if (value === 'all' || !value) next.delete(key); else next.set(key, value);
-    next.set('tenant', tenantKey);
+    // 保留当前租户识别参数：演示带 tenant，显式指定带 tenantCode；域名/环境变量识别的无需带。
+    const code = params.get('tenantCode');
+    if (isRemote && code) next.set('tenantCode', code); else if (!isRemote) next.set('tenant', tenantKey);
     setParams(next);
   }
   const categoryTitle = category ? `${category.name} ${language === 'en' ? 'rentals' : '租赁'}` : t('discoveryTitle');

@@ -104,12 +104,15 @@ export function RentalSteps() {
 
 export function Testimonials() {
   const { tenant, t, language } = useSite();
+  // 真实租户模式暂无评价数据（后端未提供评价接口）；无证言时整段隐藏，不展示空框。
+  if (tenant.testimonials.length === 0) return null;
   return <section className="section shell homepage-section testimonials-section"><SectionHeading title={t('testimonials')} subtitle={t('testimonialsSubtitle')} /><div className="reviews-grid">{tenant.testimonials.map(review => <blockquote key={review.name}><div className="review-stars" aria-label={language === 'en' ? '5-star demo review' : '5 星演示评价'}>{Array.from({ length: 5 }, (_, index) => <StarFilled key={index} />)}</div><p>“{review.text}”</p><footer><strong>{review.name}</strong><span>{review.context}</span></footer></blockquote>)}</div></section>;
 }
 
 export function HomeCTA() {
   const { href, tenant, t } = useSite();
-  return <section className="home-cta"><img src="/assets/cta-mountains.webp" alt="" loading="lazy" /><div className="shell home-cta-inner"><div><span className="eyebrow light">{tenant.slogan}</span><h2>{t('ctaTitle')}</h2><p>{t('ctaDescription')}</p></div><Link className="button button-white" to={href('/products')}>{t('startRenting')} <ArrowRightOutlined /></Link></div></section>;
+  // 真实租户模式优先用 web 渠道配置的 CTA 文案；缺省回退到通用文案。
+  return <section className="home-cta"><img src="/assets/cta-mountains.webp" alt="" loading="lazy" /><div className="shell home-cta-inner"><div><span className="eyebrow light">{tenant.slogan}</span><h2>{tenant.ctaTitle || t('ctaTitle')}</h2><p>{tenant.ctaDescription || t('ctaDescription')}</p></div><Link className="button button-white" to={href('/products')}>{t('startRenting')} <ArrowRightOutlined /></Link></div></section>;
 }
 
 export function CategoryQuickLinks({ category }: { category: Category }) {

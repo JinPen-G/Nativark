@@ -47,6 +47,7 @@
     "test:miniprogram": "npm run build -w @rental-os/miniprogram && node --test tests/miniprogram-static.test.cjs",
     "test:client-mini-program-api": "npm run build -w @rental-os/shared && npm run build -w @rental-os/api && node tests/client-mini-program-api.test.cjs",
     "test:client-channel": "npm run build -w @rental-os/shared && node --test tests/client-channel.test.cjs",
+    "test:tenant-website-resolve": "node --test tests/tenant-website-resolve.test.cjs",
     "lint": "npm run lint -w @rental-os/shared && npm run build -w @rental-os/shared && npm run lint -w @rental-os/api && npm run lint -w @rental-os/admin",
     "db:generate": "node scripts/run-api-with-root-env.cjs prisma:generate",
     "db:validate": "node scripts/run-api-with-root-env.cjs prisma:validate",

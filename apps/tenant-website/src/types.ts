@@ -65,6 +65,12 @@ export interface Tenant {
   categories: Category[];
   testimonials: Testimonial[];
   showPoweredBy?: boolean;
+  // 官网特有内容（真实租户模式下由 web 渠道配置提供；演示模式可省略）。
+  ctaTitle?: string;
+  ctaDescription?: string;
+  seoTitle?: string;
+  seoDescription?: string;
+  seoKeywords?: string;
 }
 
 export interface Product {

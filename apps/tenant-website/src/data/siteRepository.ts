@@ -3,12 +3,18 @@ import type { DemoOrder, DemoTenantKey, Product, Tenant } from '../types';
 
 const orderStorageKey = 'rental-os-tenant-website-demo-orders';
 
+// 当前生效的商品集：演示模式用静态 catalog；真实租户模式由 remoteSite 注入 API 数据。
+// 页面全部同步消费本边界，因此真实数据在 SiteProvider 异步加载完成后一次性注入。
+let activeProducts: Product[] = products;
+
 // The UI consumes this boundary. Replace these functions with tenant-scoped API calls later.
 export const siteRepository = {
   getTenant(key: DemoTenantKey): Tenant { return demoTenants[key]; },
+  setActiveProducts(next: Product[]): void { activeProducts = next; },
+  resetActiveProducts(): void { activeProducts = products; },
   getProducts(tenant: Tenant): Product[] {
     const enabled = new Set(tenant.categories.map(category => category.id));
-    return products.filter(product => enabled.has(product.categoryId));
+    return activeProducts.filter(product => enabled.has(product.categoryId));
   },
   getProduct(tenant: Tenant, id: string): Product | undefined {
     return this.getProducts(tenant).find(product => product.id === id);

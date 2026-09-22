@@ -1,13 +1,18 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
 import { siteRepository } from './data/siteRepository';
+import { loadRemoteSite } from './data/remoteSite';
+import { resolveSite } from './data/resolveTenant';
 import { applyColorMode, applyTenantTheme, getInitialTheme, THEME_STORAGE_KEY, type ThemeMode } from './theme';
 import { createTranslator, LANGUAGE_STORAGE_KEY, localizeProduct, localizeTenant, type Language } from './i18n';
 import type { CategoryMode, DemoTenantKey, Product, Tenant } from './types';
 
 interface SiteContextValue {
   tenant: Tenant;
+  /** 演示模式下的 demo key；真实租户模式为 undefined。 */
   tenantKey: DemoTenantKey;
+  /** 是否为真实租户模式（?tenantCode= 触发，消费后端接口）。 */
+  isRemote: boolean;
   mode: CategoryMode;
   href: (path: string) => string;
   language: Language;
@@ -33,15 +38,48 @@ export function SiteProvider({ children }: { children: ReactNode }) {
     }
   });
   const [theme, setTheme] = useState<ThemeMode>(getInitialTheme);
-  const tenantKey = useMemo<DemoTenantKey>(() => {
-    const key = new URLSearchParams(location.search).get('tenant');
-    return key === 'single' || key === 'double' || key === 'multiple' ? key : 'multiple';
-  }, [location.search]);
-  const sourceTenant = siteRepository.getTenant(tenantKey);
+
+  // 多租户识别：优先 ?tenant= 演示、其次 ?tenantCode=、再按域名/子域，最后环境变量。
+  // categoryMode 之后由 bootstrap.services.length 自动决定，无需按租户写死。
+  const resolution = useMemo(() => resolveSite(location.search, typeof window !== 'undefined' ? window.location.host : ''), [location.search]);
+  const remoteTenantCode = resolution.kind === 'remote' ? resolution.tenantCode : null;
+  const tenantKey = resolution.kind === 'demo' ? resolution.demoKey : 'multiple';
+
+  const [remote, setRemote] = useState<{ code: string; tenant: Tenant } | null>(null);
+  const [remoteError, setRemoteError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!remoteTenantCode) {
+      siteRepository.resetActiveProducts();
+      setRemote(null);
+      setRemoteError(null);
+      return;
+    }
+    let cancelled = false;
+    setRemote(null);
+    setRemoteError(null);
+    loadRemoteSite(remoteTenantCode)
+      .then(site => {
+        if (cancelled) return;
+        siteRepository.setActiveProducts(site.products);
+        setRemote({ code: remoteTenantCode, tenant: site.tenant });
+      })
+      .catch(() => { if (!cancelled) setRemoteError('无法加载该租户官网数据'); });
+    return () => { cancelled = true; };
+  }, [remoteTenantCode]);
+
+  const sourceTenant = remote?.tenant ?? siteRepository.getTenant(tenantKey);
   const tenant = useMemo(() => localizeTenant(sourceTenant, language), [sourceTenant, language]);
   const count = tenant.categories.length;
   const mode: CategoryMode = count === 1 ? 'single' : count === 2 ? 'double' : 'multiple';
-  const href = (path: string) => `${path}${path.includes('?') ? '&' : '?'}tenant=${tenantKey}`;
+  const isRemote = Boolean(remoteTenantCode);
+  // 链接参数：演示模式带 ?tenant=；真实模式仅当租户来自显式 ?tenantCode= 时才回带（域名/环境变量识别的无需带，保持干净 URL）。
+  const explicitCode = new URLSearchParams(location.search).get('tenantCode')?.trim() || null;
+  const href = (path: string) => {
+    const param = resolution.kind === 'demo' ? `tenant=${tenantKey}` : explicitCode ? `tenantCode=${encodeURIComponent(explicitCode)}` : null;
+    if (!param) return path;
+    return `${path}${path.includes('?') ? '&' : '?'}${param}`;
+  };
   const t = useMemo(() => createTranslator(language), [language]);
   const localize = useMemo(() => (product: Product) => localizeProduct(product, language), [language]);
 
@@ -76,7 +114,12 @@ export function SiteProvider({ children }: { children: ReactNode }) {
     setTheme(current => current === 'light' ? 'dark' : 'light');
   }
 
-  return <SiteContext.Provider value={{ tenant, tenantKey, mode, href, language, setLanguage, toggleLanguage, t, localizeProduct: localize, theme, setTheme, toggleTheme }}>{children}</SiteContext.Provider>;
+  // 真实租户模式下，数据就绪前先展示轻量占位，避免用演示数据闪一下。
+  if (remoteTenantCode && !remote) {
+    return <div className="remote-gate" role="status">{remoteError ? remoteError : '正在加载…'}</div>;
+  }
+
+  return <SiteContext.Provider value={{ tenant, tenantKey, isRemote, mode, href, language, setLanguage, toggleLanguage, t, localizeProduct: localize, theme, setTheme, toggleTheme }}>{children}</SiteContext.Provider>;
 }
 
 export function useSite() {

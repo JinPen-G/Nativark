@@ -13,7 +13,8 @@ import { chargeLabel, pricingUnitLabel } from "../../core/labels";
 import { formatMoney, startingPriceParts } from "../../core/money";
 import { blockedState, errorState, handleCommonViewAction, loadingState, readyState, type ViewState } from "../../core/page";
 import { jsapiEnabled, offlineMethods } from "../../core/payment";
-import { contextVersion, currentServiceCode, membershipStatus } from "../../core/session";
+import { contextVersion, currentServiceCode, currentSession, membershipStatus } from "../../core/session";
+import { cachedMerchant } from "../../core/merchant";
 import { formatBusinessDate, formatBusinessTime, splitInstant, todayInZone, zoneLabel, zonedToInstant } from "../../core/time";
 import { themeBehavior } from "../../core/theme-behavior";
 import { ROUTES, buildUrl, navigate, redirect, requireSignIn, toast } from "../../core/ui";
@@ -53,6 +54,11 @@ interface CheckoutData {
   view: ViewState;
   cart?: CartState;
   quote?: RentalQuoteSnapshotV1;
+  /** 头部信息（需求 §7.1）：商户 / 服务 / 使用人（本人姓名 + 脱敏手机号）。 */
+  merchantName: string;
+  serviceName: string;
+  userName: string;
+  userPhone: string;
   lines: LineRow[];
   timeZone: string;
   zoneNote: string;
@@ -75,6 +81,11 @@ interface CheckoutData {
   locations: ClientCatalogLocation[];
   store?: ClientCatalogLocation;
   showStoreSheet: boolean;
+  /** 异地归还（需求 §6.4 / MP-06）：可归还门店列表、当前归还门店与选择弹层；未选时归还＝取货门店。 */
+  returnLocations: ClientCatalogLocation[];
+  returnStore?: ClientCatalogLocation;
+  showReturnSheet: boolean;
+  returnLabel: string;
   coupons: CouponRow[];
   couponText: string;
   showCouponSheet: boolean;
@@ -107,6 +118,10 @@ Page({
   behaviors: [themeBehavior],
   data: {
     view: loadingState(),
+    merchantName: "",
+    serviceName: "",
+    userName: "",
+    userPhone: "",
     lines: [],
     timeZone: DEFAULT_ZONE,
     zoneNote: "",
@@ -128,6 +143,9 @@ Page({
     addressLabel: "",
     locations: [],
     showStoreSheet: false,
+    returnLocations: [],
+    showReturnSheet: false,
+    returnLabel: "与取货门店相同",
     coupons: [],
     couponText: "暂无可用优惠券",
     showCouponSheet: false,
@@ -209,6 +227,13 @@ Page({
       this.setData({ view: blockedState("服务不一致", `本次租赁属于“${cart.serviceName}”，请先在首页切换到该服务。`, "回首页", "none") });
       return;
     }
+    const session = currentSession();
+    this.setData({
+      merchantName: cachedMerchant()?.name ?? "",
+      serviceName: cart.serviceName,
+      userName: session?.customer.displayName ?? "",
+      userPhone: session?.customer.loginIdentifierMasked ?? ""
+    });
     const status = membershipStatus();
     if (status && status !== "active") {
       const reason = status === "pending_activation" ? "会员资料正在等待商户审核，审核通过后即可租赁；你可以先补充资料。" : "当前会员状态受限，暂不能提交新的租赁，请联系商户。";
@@ -255,6 +280,11 @@ Page({
     return this.allLocations.filter((row) => !row.capabilities || row.capabilities.includes(capability));
   },
 
+  /** 可作为归还地点的门店（具备 return 能力）；异地归还从这里选，未选则归还＝取货门店，由服务端按同点处理。 */
+  returnCapableLocations(): ClientCatalogLocation[] {
+    return this.allLocations.filter((row) => !row.capabilities || row.capabilities.includes("return"));
+  },
+
   applyCatalog(catalog: ClientCatalogResponse, timeZone: string) {
     this.allLocations = catalog.locations.filter((row) => row.status === "enabled");
     // 同城配送是否开通：经营空间启用了配送类履约方式，且至少有一家可发货门店；否则如实只提供自提。
@@ -273,6 +303,7 @@ Page({
       zoneNote: zoneLabel(timeZone),
       minDate: todayInZone(timeZone),
       locations,
+      returnLocations: this.returnCapableLocations(),
       deliveryAvailable,
       services: catalog.services.filter((row) => row.enabled).map((row) => ({ id: row.id, name: row.name, description: row.description ?? "", selected: false }))
     });
@@ -289,6 +320,7 @@ Page({
     const end = splitInstant(cart.endAt, this.data.timeZone);
     const locations = this.locationsFor(cart.fulfillmentMode);
     const store = locations.find((row) => row.id === cart.locationId);
+    const returnStore = cart.returnLocationId ? this.returnCapableLocations().find((row) => row.id === cart.returnLocationId) : undefined;
     const lines: LineRow[] = cart.lines.map((line) => {
       const item = this.catalog?.items.find((row) => row.id === line.itemGroupId);
       const price = startingPriceParts(item?.startingPrice, pricingUnitLabel);
@@ -319,6 +351,8 @@ Page({
       addressLabel: cart.deliveryAddressLabel ?? "",
       locations,
       store,
+      returnStore,
+      returnLabel: returnStore ? returnStore.name : "与取货门店相同",
       memo: cart.memo ?? "",
       services: this.data.services.map((row) => ({ ...row, selected: cart.services.some((item) => item.serviceId === row.id) })),
       couponText: cart.couponId ? this.data.coupons.find((row) => row.id === cart.couponId)?.name ?? "已选优惠券" : this.data.coupons.some((row) => row.usable) ? "有可用优惠券，点击选择" : "暂无可用优惠券"
@@ -494,11 +528,33 @@ Page({
     const store = this.data.locations.find((row) => row.id === id);
     if (!store) return;
     this.setData({ showStoreSheet: false });
+    // 归还门店是独立选择：换取货门店不清空异地归还（用户显式选过就保留），仅切换取送方式时才重置。
     this.mutate((draft) => {
       draft.locationId = store.id;
       draft.locationName = store.name;
-      draft.returnLocationId = undefined;
-      draft.returnLocationName = undefined;
+    });
+    void this.requestQuote();
+  },
+
+  /* ---------- 归还门店（异地归还，MP-06） ---------- */
+  onOpenReturn() {
+    if (this.data.locked) return;
+    this.setData({ showReturnSheet: true });
+  },
+
+  onCloseReturn() {
+    this.setData({ showReturnSheet: false });
+  },
+
+  /** data-id 为空表示“与取货门店相同”（清空异地归还）；否则设为所选归还门店并重报。 */
+  onPickReturn(event: WechatMiniprogram.TouchEvent) {
+    const id = String(event.currentTarget.dataset.id ?? "");
+    const store = id ? this.data.returnLocations.find((row) => row.id === id) : undefined;
+    if (id && !store) return;
+    this.setData({ showReturnSheet: false });
+    this.mutate((draft) => {
+      draft.returnLocationId = store?.id;
+      draft.returnLocationName = store?.name;
     });
     void this.requestQuote();
   },
@@ -606,6 +662,8 @@ Page({
       customerCouponId: cart.couponId || undefined,
       lines: cart.lines.map((line) => ({ itemGroupId: line.itemGroupId, pricingGroupId: line.pricingGroupId, quantity: line.quantity, note })),
       services: cart.services.length ? cart.services.map((row) => ({ serviceId: row.serviceId, quantity: row.quantity })) : undefined,
+      // 异地归还：自取方式下带上归还门店（服务端校验其 return 能力）；未选或配送方式不传，由服务端按同点/配送规则处理。
+      returnLocationId: !delivery ? cart.returnLocationId || undefined : undefined,
       // 配送履约必须带本人地址簿地址；服务端在报价时固化收货快照。自取方式不传。
       deliveryAddressId: delivery ? cart.deliveryAddressId : undefined
     };

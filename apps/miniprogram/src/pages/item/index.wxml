@@ -8,7 +8,7 @@
     <view class="gallery">
       <swiper wx:if="{{images.length}}" class="gallery__swiper" bindchange="onSwiperChange">
         <swiper-item wx:for="{{images}}" wx:key="*this">
-          <image class="gallery__img" src="{{item}}" mode="aspectFit" bindtap="onPreview"></image>
+          <image class="gallery__img" src="{{item}}" mode="aspectFill" bindtap="onPreview"></image>
         </swiper-item>
       </swiper>
       <view wx:else class="gallery__placeholder">{{imageTotal ? '图片加载中' : '暂无图片'}}</view>
