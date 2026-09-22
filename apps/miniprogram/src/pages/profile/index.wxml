@@ -1,4 +1,5 @@
-<view class="screen screen--flat">
+<page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
+<view class="screen screen--flat {{themeClass}}">
   <nav-bar title="设置"></nav-bar>
   <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
 
@@ -44,6 +45,18 @@
           <button class="btn btn--secondary btn--block mt-16" hover-class="btn-hover" bindtap="onChangePassword" disabled="{{passwordSaving}}">{{passwordSaving ? '提交中…' : '更新密码'}}</button>
         </block>
         <view wx:else class="muted small mt-8">忘记当前密码请联系商户重置。</view>
+      </view>
+    </view>
+
+    <view class="section section--tight">
+      <view class="card">
+        <view class="row row--between" style="min-height:88rpx">
+          <view>
+            <view class="subtitle">深色模式</view>
+            <view class="field__hint mt-4">{{themeModeHint}}</view>
+          </view>
+          <switch checked="{{darkMode}}" color="#1677FF" bindchange="onThemeModeChange"></switch>
+        </view>
       </view>
     </view>
   </block>

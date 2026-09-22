@@ -1,4 +1,5 @@
-<view class="screen">
+<page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
+<view class="screen {{themeClass}}">
   <nav-bar title="申请续租"></nav-bar>
   <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
 
@@ -28,8 +29,8 @@
       <view class="card">
         <view class="subtitle">新的归还时间</view>
         <view class="row gap-16 mt-12">
-          <picker class="grow" mode="date" start="{{minDate}}" value="{{endDate}}" data-field="endDate" bindchange="onDateChange"><view class="field__picker"><text>{{endDate || '选择日期'}}</text><ui-icon name="chevron-right" size="28" color="#B4BBC8"></ui-icon></view></picker>
-          <picker class="grow" mode="time" value="{{endTime}}" data-field="endTime" bindchange="onDateChange"><view class="field__picker"><text>{{endTime}}</text><ui-icon name="chevron-right" size="28" color="#B4BBC8"></ui-icon></view></picker>
+          <picker class="grow" mode="date" start="{{minDate}}" value="{{endDate}}" data-field="endDate" bindchange="onDateChange"><view class="field__picker"><text>{{endDate || '选择日期'}}</text><ui-icon name="chevron-right" size="28" color="muted"></ui-icon></view></picker>
+          <picker class="grow" mode="time" value="{{endTime}}" data-field="endTime" bindchange="onDateChange"><view class="field__picker"><text>{{endTime}}</text><ui-icon name="chevron-right" size="28" color="muted"></ui-icon></view></picker>
         </view>
         <button class="btn btn--secondary btn--block mt-16" hover-class="btn-hover" bindtap="onPreview" disabled="{{previewLoading}}">{{previewLoading ? '计算中…' : '预览费用差额'}}</button>
         <view wx:if="{{previewError}}" class="notice notice--danger mt-16">{{previewError}}</view>

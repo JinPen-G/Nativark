@@ -1,3 +1,4 @@
+import { themeBehavior } from "../../core/theme-behavior";
 import { favoriteEvents, listFavorites, removeFavorite, type FavoriteItem } from "../../core/favorites";
 import { resolveImage } from "../../core/images";
 import { isSignedIn } from "../../core/session";
@@ -9,6 +10,7 @@ interface FavoriteRow extends FavoriteItem {
 }
 
 Page({
+  behaviors: [themeBehavior],
   data: { rows: [] as FavoriteRow[], signedIn: false },
   unsubscribe: undefined as (() => void) | undefined,
 

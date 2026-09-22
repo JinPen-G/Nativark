@@ -1,3 +1,4 @@
+import { themeBehavior } from "../../core/theme-behavior";
 import type { RentalCustomerCoupon } from "@rental-os/shared";
 import { fetchCoupons } from "../../api/catalog";
 import { formatMoney } from "../../core/money";
@@ -18,6 +19,7 @@ interface CouponRow {
 }
 
 Page({
+  behaviors: [themeBehavior],
   data: { view: loadingState(), serviceName: "", usable: [] as CouponRow[], others: [] as CouponRow[] },
 
   onLoad() {

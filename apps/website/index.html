@@ -14,6 +14,16 @@
       href="https://xiao0ozz.github.io/rental-os-website/"
     />
     <link rel="icon" href="favicon.ico" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
+      rel="stylesheet"
+    />
+    <script
+      src="https://code.iconify.design/iconify-icon/3.0.0/iconify-icon.min.js"
+      defer
+    ></script>
     <meta property="og:type" content="website" />
     <meta property="og:title" content="Rental OS｜面向多行业的租赁解决方案" />
     <meta
@@ -37,14 +47,17 @@
     <title>Rental OS｜面向多行业的租赁解决方案</title>
     <script>
       (() => {
-        let p = "system";
+        let savedTheme = "";
         try {
-          p = localStorage.getItem("rental-os-theme") || p;
+          savedTheme = localStorage.getItem("rental-os-theme") || "";
         } catch (e) {}
-        let d = matchMedia("(prefers-color-scheme:dark)").matches;
-        document.documentElement.dataset.preference = p;
+        const systemTheme = matchMedia("(prefers-color-scheme:dark)").matches
+          ? "dark"
+          : "light";
         document.documentElement.dataset.theme =
-          p === "system" ? (d ? "dark" : "light") : p;
+          savedTheme === "dark" || savedTheme === "light"
+            ? savedTheme
+            : systemTheme;
       })();
     </script>
     <script type="application/ld+json">
@@ -60,27 +73,31 @@
     </script>
     <style>
       :root {
-        --blue: #0878f9;
-        --ink: #071a46;
-        --text: #536987;
-        --muted: #8494aa;
-        --line: #dfeaf7;
-        --soft: #f4f9ff;
-        --card: #fff;
-        --page: #fff;
-        --header: rgba(255, 255, 255, 0.94);
-        --shadow: 0 14px 34px rgba(28, 91, 168, 0.1);
+        --blue: #007aff;
+        --ink: #000000;
+        --text: rgba(0, 0, 0, 0.72);
+        --muted: rgba(0, 0, 0, 0.52);
+        --line: rgba(0, 0, 0, 0.12);
+        --icon: var(--ink);
+        --icon-strong: var(--ink);
+        --soft: #ffffff;
+        --card: #ffffff;
+        --page: #ffffff;
+        --header: rgba(255, 255, 255, 0.86);
+        --shadow: none;
       }
       html[data-theme="dark"] {
-        --ink: #f3f7ff;
-        --text: #b8c7dd;
-        --muted: #8da1bc;
-        --line: #223b5d;
-        --soft: #0b1e34;
-        --card: #10243d;
-        --page: #071526;
-        --header: rgba(7, 21, 38, 0.94);
-        --shadow: 0 14px 34px rgba(0, 0, 0, 0.27);
+        --ink: #ffffff;
+        --text: rgba(255, 255, 255, 0.78);
+        --muted: rgba(255, 255, 255, 0.58);
+        --line: rgba(255, 255, 255, 0.18);
+        --icon: var(--ink);
+        --icon-strong: var(--ink);
+        --soft: #000000;
+        --card: #000000;
+        --page: #000000;
+        --header: rgba(0, 0, 0, 0.86);
+        --shadow: none;
       }
       * {
         box-sizing: border-box;
@@ -93,9 +110,18 @@
         background: var(--page);
         color: var(--ink);
         font-family:
-          -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei",
-          "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Noto Sans SC",
-          Arial, sans-serif;
+          Inter,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Helvetica Neue",
+          Arial,
+          "PingFang SC",
+          "Hiragino Sans GB",
+          "Microsoft YaHei",
+          "Noto Sans CJK SC",
+          "Noto Sans SC",
+          "Segoe UI",
+          sans-serif;
         line-height: 1.6;
       }
       img {
@@ -106,27 +132,77 @@
         color: inherit;
         text-decoration: none;
       }
+      section[id] {
+        scroll-margin-top: 98px;
+      }
       button {
         font: inherit;
+      }
+      .ui-icon,
+      iconify-icon {
+        display: block;
+        width: 1em;
+        height: 1em;
+        flex: none;
+        color: var(--icon);
       }
       .shell {
         width: min(1180px, calc(100% - 48px));
         margin: auto;
       }
       .site-header {
-        height: 76px;
-        position: sticky;
+        height: 75px;
+        position: fixed;
         top: 0;
+        left: 0;
+        right: 0;
         z-index: 50;
-        background: var(--header);
-        backdrop-filter: blur(15px);
-        border-bottom: 1px solid var(--line);
+        background: transparent;
+      }
+      .site-header::before {
+        content: "";
+        position: absolute;
+        z-index: 0;
+        top: 8px;
+        right: max(8px, calc((100% - 1480px) / 2));
+        left: max(8px, calc((100% - 1480px) / 2));
+        height: 67px;
+        pointer-events: none;
+        border: 1px solid transparent;
+        border-radius: 18px;
+        background: transparent;
+        box-shadow: none;
+        backdrop-filter: blur(4px);
+        -webkit-backdrop-filter: blur(4px);
+        transition:
+          background-color 0.2s cubic-bezier(0.4, 0, 1, 1),
+          border-color 0.2s cubic-bezier(0.4, 0, 1, 1);
+      }
+      .site-header.is-scrolled::before {
+        background: rgba(255, 255, 255, 0.6);
+        backdrop-filter: blur(4px);
+        -webkit-backdrop-filter: blur(4px);
+        border-color: rgba(0, 0, 0, 0.16);
+        box-shadow: none;
+      }
+      html[data-theme="dark"] .site-header.is-scrolled::before {
+        background: rgba(25, 25, 25, 0.6);
+        border-color: #352f3d;
+        box-shadow: none;
       }
       .header-inner {
-        height: 100%;
+        height: 67px;
+        position: relative;
+        z-index: 1;
+        width: min(1480px, calc(100% - 16px));
+        padding: 8px 8px 8px 24px;
         display: grid;
-        grid-template-columns: 220px 1fr 220px;
+        grid-template-columns: 220px 1fr 260px;
         align-items: center;
+      }
+      .site-header.is-scrolled .header-inner {
+        height: 67px;
+        transform: none;
       }
       .brand img {
         width: 168px;
@@ -136,13 +212,18 @@
         justify-content: center;
         gap: 42px;
         font-size: 15px;
-        font-weight: 700;
+        font-weight: 400;
       }
-      .nav a {
-        height: 76px;
+      .nav a,
+      .nav .nav-placeholder {
+        height: 67px;
         display: grid;
         place-items: center;
         position: relative;
+      }
+      .site-header.is-scrolled .nav a,
+      .site-header.is-scrolled .nav .nav-placeholder {
+        height: 67px;
       }
       .nav .active {
         color: var(--blue);
@@ -164,14 +245,50 @@
         align-items: center;
         gap: 12px;
       }
-      .theme {
+      .language-switch {
         width: 38px;
         height: 38px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        padding: 0;
         border: 1px solid var(--line);
         border-radius: 50%;
         background: var(--card);
         color: var(--ink);
+        line-height: 1;
         cursor: pointer;
+      }
+      .language-switch .ui-icon {
+        width: 16px;
+        height: 16px;
+        color: currentColor;
+      }
+      .language-switch .language-code {
+        display: none;
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+      }
+      .theme {
+        width: 38px;
+        height: 38px;
+        display: grid;
+        place-items: center;
+        padding: 0;
+        border: 1px solid var(--line);
+        border-radius: 50%;
+        background: var(--card);
+        color: var(--ink);
+        line-height: 0;
+        cursor: pointer;
+      }
+      .theme .ui-icon {
+        display: block;
+        width: 18px;
+        height: 18px;
+        color: currentColor;
       }
       .btn {
         min-height: 44px;
@@ -181,69 +298,78 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        font-weight: 800;
-        transition: 0.2s;
+        font-weight: 600;
+        transition:
+          opacity 0.2s ease,
+          background-color 0.2s ease;
       }
       .primary {
-        background: linear-gradient(135deg, var(--blue), #00a2ff);
+        background: var(--blue);
         color: #fff;
-        box-shadow: 0 10px 24px rgba(8, 120, 249, 0.23);
+        box-shadow: none;
       }
       .secondary {
         background: var(--card);
       }
       .btn:hover {
-        transform: translateY(-2px);
+        transform: none;
+        opacity: 0.86;
       }
       .hero {
         position: relative;
-        min-height: 520px;
+        min-height: 596px;
         overflow: hidden;
-        background: #eef7ff;
+        background: #fff;
       }
-      .hero-media,
-      .hero-slide {
-        position: absolute;
-        inset: 0;
-        width: 100%;
-        height: 100%;
-      }
-      .hero-slide {
-        object-fit: cover;
-        object-position: left center;
-        opacity: 0;
-        transition: opacity 0.8s;
-      }
+  .hero-media {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    border: 0;
+    outline: 0;
+  }
+  .hero-media[hidden] {
+    display: none;
+  }
+  .hero-slide {
+    position: absolute;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    object-fit: cover;
+    object-position: left center;
+    opacity: 0;
+    transition: opacity 0.8s;
+    border: 0;
+    outline: 0;
+  }
       .hero-slide.active {
         opacity: 1;
       }
-      .hero:after {
+      html[data-theme="dark"] .hero {
+        background: #000;
+      }
+      html[data-theme="dark"] .hero::after {
         content: "";
         position: absolute;
         inset: 0;
-        background: linear-gradient(
-          90deg,
-          rgba(250, 253, 255, 0.99),
-          rgba(250, 253, 255, 0.95) 40%,
-          rgba(250, 253, 255, 0.42) 55%,
-          rgba(250, 253, 255, 0.04) 76%,
-          transparent
-        );
         z-index: 1;
-      }
-      html[data-theme="dark"] .hero:after {
+        pointer-events: none;
         background: linear-gradient(
           90deg,
-          rgba(7, 21, 38, 0.99),
-          rgba(7, 21, 38, 0.94) 40%,
-          rgba(7, 21, 38, 0.48) 58%,
-          rgba(7, 21, 38, 0.06) 80%
+          rgba(0, 0, 0, 0.72) 0%,
+          rgba(0, 0, 0, 0.62) 34%,
+          rgba(0, 0, 0, 0.42) 58%,
+          rgba(0, 0, 0, 0.25) 100%
         );
       }
       .hero-inner {
         position: relative;
         z-index: 2;
-        min-height: 520px;
+        min-height: 596px;
+        padding-top: 76px;
         display: flex;
         align-items: center;
       }
@@ -253,8 +379,8 @@
       }
       .eyebrow {
         font-size: 14px;
-        color: #7185a3;
-        font-weight: 700;
+        color: var(--blue);
+        font-weight: 600;
         margin-bottom: 12px;
       }
       .hero h1 {
@@ -262,7 +388,7 @@
         line-height: 1.18;
         letter-spacing: -1.5px;
         margin: 0 0 17px;
-        font-weight: 900;
+        font-weight: 800;
       }
       .hero h1 span {
         color: var(--blue);
@@ -283,24 +409,24 @@
         gap: 22px;
         flex-wrap: wrap;
         font-size: 14px;
-        font-weight: 700;
-        color: #425d7e;
+        font-weight: 500;
+        color: var(--text);
       }
       .proof {
         display: flex;
         align-items: center;
         gap: 7px;
       }
-      .proof img {
+      .proof .ui-icon {
         width: 18px;
         height: 18px;
-        object-fit: contain;
+        color: var(--icon-strong);
       }
       .section {
         padding: 54px 0;
       }
       .soft {
-        background: linear-gradient(180deg, var(--soft), var(--page));
+        background: var(--page);
       }
       .section-head {
         display: flex;
@@ -312,6 +438,8 @@
       .section-title {
         font-size: 31px;
         line-height: 1.25;
+        font-weight: 700;
+        letter-spacing: -0.02em;
         margin: 0;
       }
       .section-sub {
@@ -322,7 +450,7 @@
       .section-link {
         color: var(--blue);
         font-size: 14px;
-        font-weight: 800;
+        font-weight: 600;
       }
       .industry-grid {
         display: grid;
@@ -330,29 +458,48 @@
         gap: 16px;
       }
       .industry-card {
+        display: flex;
+        flex-direction: column;
         background: var(--card);
         border: 1px solid var(--line);
         border-radius: 14px;
         overflow: hidden;
-        box-shadow: var(--shadow);
+        box-shadow: none;
       }
       .industry-card > img {
+        display: block;
+        flex: none;
         width: 100%;
         height: 148px;
         object-fit: cover;
       }
       .industry-body {
-        padding: 17px 17px 19px;
+        --industry-title-row: 34px;
+        --industry-description-row: 50px;
+        display: grid;
+        grid-template-rows:
+          var(--industry-title-row) var(--industry-description-row)
+          minmax(0, 1fr);
+        row-gap: 6px;
+        flex: 1;
+        min-height: 0;
+        padding: 15px 17px 17px;
+      }
+      html[lang="en"] .industry-body {
+        --industry-title-row: 52px;
+        --industry-description-row: 70px;
       }
       .industry-body h3 {
         font-size: 20px;
-        margin: 0 0 5px;
+        line-height: 1.3;
+        font-weight: 500;
+        margin: 0;
       }
       .industry-body > p {
         font-size: 14px;
+        line-height: 1.6;
         color: var(--text);
-        margin: 0 0 14px;
-        min-height: 45px;
+        margin: 0;
       }
       .features {
         display: grid;
@@ -361,14 +508,16 @@
         color: var(--text);
       }
       .feature {
-        display: flex;
-        gap: 8px;
-        align-items: center;
+        display: grid;
+        grid-template-columns: 18px minmax(0, 1fr);
+        column-gap: 8px;
+        align-items: start;
       }
-      .feature img {
-        width: 17px;
-        height: 17px;
-        object-fit: contain;
+      .feature .ui-icon {
+        width: 16px;
+        height: 16px;
+        margin-top: 2px;
+        color: var(--icon);
       }
       .compact-grid {
         display: grid;
@@ -376,32 +525,37 @@
         gap: 12px;
       }
       .compact {
+        --compact-title-row: 34px;
         display: grid;
-        grid-template-columns: 38px minmax(0, 1fr);
-        grid-template-rows: auto 1fr;
+        grid-template-columns: 24px minmax(0, 1fr);
+        grid-template-rows: var(--compact-title-row) minmax(0, 1fr);
         column-gap: 10px;
         align-content: start;
         background: var(--card);
         border: 1px solid var(--line);
         border-radius: 12px;
-        padding: 17px 15px;
+        padding: 15px;
         min-height: 142px;
-        box-shadow: 0 9px 23px rgba(30, 85, 150, 0.06);
+        box-shadow: none;
       }
-      .compact img {
+      html[lang="en"] .compact {
+        --compact-title-row: 48px;
+      }
+      .compact .ui-icon {
         grid-column: 1;
         grid-row: 1;
-        align-self: center;
-        width: 34px;
-        height: 34px;
-        object-fit: contain;
+        align-self: start;
+        width: 24px;
+        height: 24px;
         margin: 0;
+        color: var(--icon-strong);
       }
       .compact h3 {
         grid-column: 2;
         grid-row: 1;
-        align-self: center;
+        align-self: start;
         font-size: 16px;
+        font-weight: 500;
         line-height: 1.35;
         margin: 0;
       }
@@ -411,14 +565,10 @@
         font-size: 13px;
         color: var(--text);
         line-height: 1.62;
-        margin: 9px 0 0;
+        margin: 4px 0 0;
       }
       .foundation .compact {
-        background: linear-gradient(
-          145deg,
-          var(--card),
-          color-mix(in srgb, var(--soft) 70%, var(--card))
-        );
+        background: var(--card);
       }
       .testimonials {
         display: grid;
@@ -450,7 +600,7 @@
       }
       .quote-name {
         font-size: 14px;
-        font-weight: 900;
+        font-weight: 600;
         margin: 0;
       }
       .quote-meta {
@@ -461,9 +611,12 @@
         padding: 0 0 42px;
       }
       .cta-inner {
+        position: relative;
+        isolation: isolate;
+        overflow: hidden;
         min-height: 116px;
         border-radius: 14px;
-        background: #076af0 url("assets/cta-mountain.png") center/cover
+        background: var(--blue) url("assets/cta-mountain.png") center/cover
           no-repeat;
         color: #fff;
         display: grid;
@@ -471,7 +624,19 @@
         align-items: center;
         gap: 26px;
         padding: 24px 40px;
-        box-shadow: 0 18px 35px rgba(0, 94, 220, 0.22);
+        box-shadow: none;
+      }
+      html[data-theme="dark"] .cta-inner::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        z-index: 0;
+        pointer-events: none;
+        background: rgba(0, 0, 0, 0.34);
+      }
+      .cta-inner > * {
+        position: relative;
+        z-index: 1;
       }
       .cta h2 {
         font-size: 28px;
@@ -481,11 +646,11 @@
       .cta p {
         font-size: 14px;
         margin: 0;
-        color: #e4efff;
+        color: rgba(255, 255, 255, 0.86);
       }
       .cta .btn {
         background: #fff;
-        color: #076af0;
+        color: var(--blue);
         border-color: #fff;
         min-width: 150px;
       }
@@ -526,18 +691,94 @@
         border: 1px solid var(--line);
         border-radius: 9px;
         background: var(--soft);
-        cursor: default;
+        color: var(--ink);
+        cursor: pointer;
       }
-      .social-button img {
+      .social-button .ui-icon {
         width: 19px;
         height: 19px;
-        opacity: 0.68;
+        color: var(--icon);
       }
-      html[data-theme="dark"] .social-button img {
-        filter: invert(1);
+      .social-button:hover {
+        background: var(--card);
+      }
+      .qr-modal[hidden] {
+        display: none;
+      }
+      .qr-modal {
+        position: fixed;
+        inset: 0;
+        z-index: 100;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+      .qr-modal-backdrop {
+        position: absolute;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.52);
+      }
+      .qr-dialog {
+        position: relative;
+        width: min(360px, 100%);
+        padding: 26px 24px 24px;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: var(--card);
+        color: var(--ink);
+        text-align: center;
+      }
+      .qr-close {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        width: 32px;
+        height: 32px;
+        display: grid;
+        place-items: center;
+        padding: 0;
+        border: 1px solid var(--line);
+        border-radius: 50%;
+        background: transparent;
+        color: var(--ink);
+        cursor: pointer;
+      }
+      .qr-close .ui-icon {
+        width: 16px;
+        height: 16px;
+        color: currentColor;
+      }
+      .qr-platform {
+        margin: 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .qr-dialog h2 {
+        margin: 3px 0 0;
+        font-size: 22px;
+        line-height: 1.3;
+        font-weight: 600;
+      }
+      .qr-dialog img {
+        width: 220px;
+        height: 220px;
+        margin: 18px auto 14px;
+        padding: 8px;
+        border: 1px solid var(--line);
+        background: #fff;
+        object-fit: contain;
+      }
+      .qr-hint {
+        margin: 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      body.qr-modal-open {
+        overflow: hidden;
       }
       .footer-col h3 {
         font-size: 14px;
+        font-weight: 500;
         margin: 0 0 9px;
       }
       .footer-col a {
@@ -565,27 +806,63 @@
       .legal-links {
         white-space: nowrap;
       }
-      .language-switch {
+      .language-picker {
+        position: relative;
+      }
+      .language-trigger {
+        min-height: 30px;
         display: inline-flex;
-        padding: 3px;
+        align-items: center;
+        gap: 7px;
+        padding: 0 9px 0 11px;
         border: 1px solid var(--line);
         border-radius: 8px;
         background: var(--soft);
-      }
-      .language-switch button {
-        min-height: 28px;
-        padding: 0 10px;
-        border: 0;
-        border-radius: 6px;
-        background: transparent;
-        color: var(--muted);
+        color: var(--text);
         font-size: 12px;
         cursor: pointer;
       }
-      .language-switch button.active {
+      .language-trigger .ui-icon {
+        width: 14px;
+        height: 14px;
+        color: currentColor;
+        transition: transform 0.2s ease;
+      }
+      .language-trigger[aria-expanded="true"] .ui-icon {
+        transform: rotate(180deg);
+      }
+      .language-menu {
+        position: absolute;
+        right: 0;
+        bottom: calc(100% + 8px);
+        z-index: 5;
+        min-width: 112px;
+        padding: 5px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
         background: var(--card);
-        color: var(--blue);
-        box-shadow: 0 2px 8px rgba(18, 72, 140, 0.12);
+        box-shadow: var(--shadow);
+      }
+      .language-menu[hidden] {
+        display: none;
+      }
+      .language-menu button {
+        display: block;
+        width: 100%;
+        min-height: 30px;
+        padding: 0 9px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--text);
+        font-size: 12px;
+        text-align: left;
+        cursor: pointer;
+      }
+      .language-menu button:hover,
+      .language-menu button[aria-selected="true"] {
+        background: var(--soft);
+        color: var(--ink);
       }
       .menu,
       .mobile-nav {
@@ -623,15 +900,40 @@
           width: min(100% - 30px, 620px);
         }
         .site-header {
-          height: 66px;
+          height: 64px;
+        }
+        .site-header::before {
+          top: 8px;
+          right: 8px;
+          left: 8px;
+          height: 56px;
+          border-radius: 18px;
+        }
+        .site-header.is-scrolled::before {
+          top: 8px;
+          right: 8px;
+          left: 8px;
+          height: 56px;
+          border-radius: 18px;
+        }
+        section[id] {
+          scroll-margin-top: 84px;
         }
         .header-inner {
+          width: min(100% - 16px, 620px);
+          height: 64px;
+          padding: 8px 8px 0 16px;
           grid-template-columns: 1fr auto;
+        }
+        .site-header.is-scrolled .header-inner {
+          height: 64px;
+          transform: none;
         }
         .brand img {
           width: 145px;
         }
         .nav,
+        .language-switch,
         .theme {
           display: none;
         }
@@ -648,7 +950,7 @@
         .mobile-nav.open {
           display: grid;
           position: fixed;
-          top: 66px;
+          top: 64px;
           left: 0;
           right: 0;
           z-index: 60;
@@ -657,23 +959,27 @@
           gap: 5px;
           border-bottom: 1px solid var(--line);
         }
-        .mobile-nav a {
+        .mobile-nav a,
+        .mobile-nav .nav-placeholder {
           padding: 10px 3px;
           font-weight: 800;
         }
-        .hero,
+        .hero {
+          min-height: 706px;
+        }
         .hero-inner {
-          min-height: 640px;
+          min-height: 706px;
+          padding-top: 64px;
         }
         .hero-slide {
           object-position: 67% center;
         }
-        .hero:after {
+        html[data-theme="dark"] .hero::after {
           background: linear-gradient(
             180deg,
-            rgba(250, 253, 255, 0.99),
-            rgba(250, 253, 255, 0.95) 57%,
-            rgba(250, 253, 255, 0.28)
+            rgba(0, 0, 0, 0.72) 0%,
+            rgba(0, 0, 0, 0.58) 58%,
+            rgba(0, 0, 0, 0.34) 100%
           );
         }
         .hero-inner {
@@ -704,7 +1010,14 @@
         .compact-grid {
           grid-template-columns: 1fr;
         }
+        .industry-body {
+          --industry-title-row: auto;
+          --industry-description-row: auto;
+          grid-template-rows: auto auto minmax(0, 1fr);
+        }
         .compact {
+          --compact-title-row: auto;
+          grid-template-rows: var(--compact-title-row) minmax(0, 1fr);
           min-height: auto;
         }
         .cta-inner {
@@ -742,43 +1055,66 @@
     </style>
   </head>
   <body>
-    <header class="site-header">
+    <header class="site-header" id="siteHeader">
       <div class="shell header-inner">
         <a class="brand" href="#top"
           ><img src="assets/logo-primary-with-tagline.png" alt="Rental OS"
         /></a>
         <nav class="nav">
-          <a href="#foundation">产品</a><a href="#solutions">解决方案</a
-          ><a href="#customers">客户案例</a><a href="#resources">资源中心</a
-          ><a href="#about">关于我们</a>
+          <a href="#solutions">行业方案</a><a href="#foundation">平台能力</a
+          ><a href="#customers">客户案例</a
+          ><span class="nav-placeholder">资源中心</span
+          ><span class="nav-placeholder">关于我们</span>
         </nav>
         <div class="header-actions">
-          <button class="theme" id="theme" aria-label="切换颜色模式">◐</button
+          <button
+            class="language-switch"
+            id="headerLanguageSwitch"
+            type="button"
+            aria-label="切换语言"
+            title="切换语言"
+          >
+            <iconify-icon
+              class="ui-icon"
+              icon="ant-design:global-outlined"
+              aria-hidden="true"
+            ></iconify-icon>
+            <span class="language-code" id="headerLanguageCode">中</span>
+          </button>
+          <button class="theme" id="theme" aria-label="切换颜色模式">
+            <iconify-icon
+              class="ui-icon"
+              icon="ant-design:sun-outlined"
+              aria-hidden="true"
+            ></iconify-icon></button
           ><a
             class="btn primary"
             href="mailto:hello@rentalos.cn?subject=预约 Rental OS 演示"
             >预约演示</a
-          ><button class="menu" id="menu" aria-label="打开导航">☰</button>
+          ><button class="menu" id="menu" aria-label="打开导航">
+            <iconify-icon
+              class="ui-icon"
+              icon="ant-design:menu-outlined"
+              aria-hidden="true"
+            ></iconify-icon>
+          </button>
         </div>
       </div>
       <nav class="mobile-nav" id="mobileNav">
-        <a href="#foundation">产品</a><a href="#solutions">解决方案</a
-        ><a href="#customers">客户案例</a><a href="#resources">资源中心</a
-        ><a href="#about">关于我们</a>
+        <a href="#solutions">行业方案</a><a href="#foundation">平台能力</a
+        ><a href="#customers">客户案例</a
+        ><span class="nav-placeholder">资源中心</span
+        ><span class="nav-placeholder">关于我们</span>
       </nav>
     </header>
     <main id="top">
       <section class="hero">
-        <div class="hero-media">
+        <div class="hero-media" aria-hidden="true">
           <img
             class="hero-slide active"
             src="assets/hero-solutions-neutral.png"
             alt=""
-          /><img
-            class="hero-slide"
-            src="assets/hero-background.png"
-            alt=""
-          /><img class="hero-slide" src="assets/hero-background2.png" alt="" />
+          />
         </div>
         <div class="shell hero-inner">
           <div class="hero-copy">
@@ -949,17 +1285,23 @@
             <article class="compact">
               <img src="assets/feature-1.png" alt="" />
               <h3>多门店经营</h3>
-              <p>支持多门店、多仓库统一管理，实时掌握库存与业务数据。</p>
+              <p>
+                支持多门店、多仓库统一管理，实时掌握库存与业务数据，提升协同效率。
+              </p>
             </article>
             <article class="compact">
               <img src="assets/feature-2.png" alt="" />
               <h3>预约与可租日历</h3>
-              <p>在线预约、可租日历、冲突提醒，提升预订效率。</p>
+              <p>
+                在线预约、可租日历、冲突提醒，提升预订效率，减少沟通成本。
+              </p>
             </article>
             <article class="compact">
               <img src="assets/feature-3.png" alt="" />
-              <h3>配送 / 自提 / 归还</h3>
-              <p>灵活配置交付方式、配送范围与履约费用。</p>
+              <h3>配送与归还</h3>
+              <p>
+                灵活配置交付方式、配送范围与履约费用，提升交付效率。
+              </p>
             </article>
             <article class="compact">
               <img src="assets/feature-4.png" alt="" />
@@ -993,17 +1335,17 @@
             <article class="compact">
               <img src="assets/feature-1.png" alt="" />
               <h3>多租户</h3>
-              <p>支持多品牌、多门店的集团化运营。</p>
+              <p>支持多品牌、多门店的集团化运营，统一管理业务。</p>
             </article>
             <article class="compact">
               <img src="assets/feature-2.png" alt="" />
               <h3>订单履约</h3>
-              <p>从下单、出库、配送到归还的完整管理。</p>
+              <p>从下单、出库、配送到归还的完整管理，全程可追踪。</p>
             </article>
             <article class="compact">
               <img src="assets/feature-3.png" alt="" />
               <h3>规则引擎</h3>
-              <p>灵活配置计费、押金、逾时与业务流程。</p>
+              <p>灵活配置计费、押金、逾时与业务流程，适配不同规则。</p>
             </article>
             <article class="compact">
               <img src="assets/feature-4.png" alt="" />
@@ -1102,18 +1444,30 @@
               <button
                 class="social-button"
                 type="button"
-                title="微信（即将开放）"
-                aria-label="微信（即将开放）"
+                data-social="wechat"
+                title="打开微信二维码"
+                aria-label="打开微信二维码"
+                aria-haspopup="dialog"
               >
-                <img src="assets/icon-wechat.svg" alt="" />
+                <iconify-icon
+                  class="ui-icon"
+                  icon="ant-design:wechat-outlined"
+                  aria-hidden="true"
+                ></iconify-icon>
               </button>
               <button
                 class="social-button"
                 type="button"
-                title="QQ（即将开放）"
-                aria-label="QQ（即将开放）"
+                data-social="qq"
+                title="打开 QQ 二维码"
+                aria-label="打开 QQ 二维码"
+                aria-haspopup="dialog"
               >
-                <img src="assets/icon-qq.svg" alt="" />
+                <iconify-icon
+                  class="ui-icon"
+                  icon="ant-design:qq-outlined"
+                  aria-hidden="true"
+                ></iconify-icon>
               </button>
             </div>
           </div>
@@ -1142,50 +1496,128 @@
           <span>© 2026 Rental OS. 保留所有权利。</span>
           <div class="footer-tools">
             <span class="legal-links">隐私政策　服务条款　网站地图</span>
-            <div class="language-switch" role="group" aria-label="Language">
-              <button type="button" data-language="zh" class="active">
-                简体中文
+            <div class="language-picker">
+              <button
+                class="language-trigger"
+                id="languageTrigger"
+                type="button"
+                aria-haspopup="listbox"
+                aria-expanded="false"
+                aria-label="选择语言"
+              >
+                <span id="languageCurrent">简体中文</span>
+                <iconify-icon
+                  class="ui-icon"
+                  icon="ant-design:down-outlined"
+                  aria-hidden="true"
+                ></iconify-icon>
               </button>
-              <button type="button" data-language="en">English</button>
+              <div
+                class="language-menu"
+                id="languageMenu"
+                role="listbox"
+                aria-label="语言选项"
+                hidden
+              >
+                <button
+                  type="button"
+                  role="option"
+                  data-language="zh"
+                  aria-selected="true"
+                >
+                  简体中文
+                </button>
+                <button
+                  type="button"
+                  role="option"
+                  data-language="en"
+                  aria-selected="false"
+                >
+                  English
+                </button>
+              </div>
             </div>
           </div>
         </div>
       </div>
     </footer>
+    <div class="qr-modal" id="qrModal" hidden>
+      <div class="qr-modal-backdrop" data-qr-close></div>
+      <div
+        class="qr-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="qrModalTitle"
+      >
+        <button class="qr-close" id="qrModalClose" type="button" aria-label="关闭二维码">
+          <iconify-icon
+            class="ui-icon"
+            icon="ant-design:close-outlined"
+            aria-hidden="true"
+          ></iconify-icon>
+        </button>
+        <p class="qr-platform" id="qrModalPlatform">微信</p>
+        <h2 id="qrModalTitle">微信二维码</h2>
+        <img id="qrModalImage" src="assets/qrcode-wechat.svg" alt="微信二维码" />
+        <p class="qr-hint" id="qrModalHint">使用微信扫描二维码</p>
+      </div>
+    </div>
     <script>
-      const slides = [...document.querySelectorAll(".hero-slide")];
-      let active = 0;
+      const heroSlides = [...document.querySelectorAll(".hero-slide")];
+      let heroActive = 0;
       if (
-        slides.length > 1 &&
+        heroSlides.length > 1 &&
         !matchMedia("(prefers-reduced-motion:reduce)").matches
-      )
+      ) {
         setInterval(() => {
-          slides[active].classList.remove("active");
-          active = (active + 1) % slides.length;
-          slides[active].classList.add("active");
+          heroSlides[heroActive].classList.remove("active");
+          heroActive = (heroActive + 1) % heroSlides.length;
+          heroSlides[heroActive].classList.add("active");
         }, 5600);
+      }
       const menu = document.getElementById("menu"),
         mobile = document.getElementById("mobileNav");
       menu.onclick = () => mobile.classList.toggle("open");
       mobile.onclick = () => mobile.classList.remove("open");
+      const iconMap = {
+        "feature-1.png": "ant-design:team-outlined",
+        "feature-2.png": "ant-design:box-plot-outlined",
+        "feature-3.png": "ant-design:file-text-outlined",
+        "feature-4.png": "ant-design:desktop-outlined",
+        "feature-5.png": "ant-design:setting-outlined",
+        "feature-6.png": "ant-design:bar-chart-outlined",
+      };
+      document.querySelectorAll('img[src^="assets/"]').forEach((image) => {
+        const file = image.getAttribute("src").split("/").pop();
+        const symbol = iconMap[file];
+        if (!symbol) return;
+        const icon = document.createElement("iconify-icon");
+        icon.setAttribute("class", "ui-icon");
+        icon.setAttribute("icon", symbol);
+        icon.setAttribute("aria-hidden", "true");
+        image.replaceWith(icon);
+      });
       const theme = document.getElementById("theme"),
-        key = "rental-os-theme",
-        icons = { system: "◐", light: "☀", dark: "◒" };
-      function apply(p) {
-        let d = matchMedia("(prefers-color-scheme:dark)").matches;
-        document.documentElement.dataset.preference = p;
-        document.documentElement.dataset.theme =
-          p === "system" ? (d ? "dark" : "light") : p;
-        theme.textContent = icons[p];
-        try {
-          localStorage.setItem(key, p);
-        } catch (e) {}
+        themeKey = "rental-os-theme",
+        icons = {
+          light: "ant-design:sun-outlined",
+          dark: "ant-design:moon-outlined",
+        };
+      let activeTheme =
+        document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+      function apply(p, persist = false) {
+        activeTheme = p;
+        document.documentElement.dataset.theme = p;
+        theme.querySelector("iconify-icon").setAttribute("icon", icons[p]);
+        if (persist) {
+          try {
+            localStorage.setItem(themeKey, p);
+          } catch (e) {}
+        }
       }
-      apply(document.documentElement.dataset.preference || "system");
+      apply(activeTheme);
       theme.onclick = () => {
-        let o = ["system", "light", "dark"],
-          p = document.documentElement.dataset.preference || "system";
-        apply(o[(o.indexOf(p) + 1) % 3]);
+        apply(activeTheme === "dark" ? "light" : "dark", true);
       };
 
       const translations = {
@@ -1194,6 +1626,8 @@
         客户案例: "Customers",
         资源中心: "Resources",
         关于我们: "About",
+        行业方案: "Industry solutions",
+        平台能力: "Platform capabilities",
         预约演示: "Book a Demo",
         "Rental OS – 行业解决方案": "Rental OS – Industry Solutions",
         面向: "Rental solutions for ",
@@ -1243,14 +1677,14 @@
           "Connect the full rental lifecycle and remove operational friction.",
         查看全部场景: "View all workflows",
         多门店经营: "Multi-location operations",
-        "支持多门店、多仓库统一管理，实时掌握库存与业务数据。":
-          "Manage branches and warehouses with one real-time view of inventory and operations.",
+        "支持多门店、多仓库统一管理，实时掌握库存与业务数据，提升协同效率。":
+          "Manage multiple locations and warehouses in one view, with clearer team coordination.",
         预约与可租日历: "Booking & availability",
-        "在线预约、可租日历、冲突提醒，提升预订效率。":
-          "Online booking, live availability and conflict alerts in one calendar.",
-        "配送 / 自提 / 归还": "Delivery, pickup & return",
-        "灵活配置交付方式、配送范围与履约费用。":
-          "Configure fulfillment methods, service areas and delivery fees.",
+        "在线预约、可租日历、冲突提醒，提升预订效率，减少沟通成本。":
+          "Online booking, live availability and conflict alerts—less back-and-forth.",
+        配送与归还: "Delivery & return",
+        "灵活配置交付方式、配送范围与履约费用，提升交付效率。":
+          "Configure delivery methods, service areas and fees to keep fulfillment moving.",
         会员营销与复购: "Membership & retention",
         "会员体系、优惠券与积分工具，提升客户复购。":
           "Use memberships, coupons and rewards to grow repeat business.",
@@ -1264,14 +1698,14 @@
         "灵活、稳定、可扩展，支撑多行业租赁业务快速发展":
           "Flexible, reliable and extensible capabilities for every rental category.",
         多租户: "Multi-tenant",
-        "支持多品牌、多门店的集团化运营。":
-          "Operate multiple brands and locations from one tenant-aware platform.",
+        "支持多品牌、多门店的集团化运营，统一管理业务。":
+          "Operate multiple brands and locations centrally, with one unified view.",
         订单履约: "Order fulfillment",
-        "从下单、出库、配送到归还的完整管理。":
-          "Manage the journey from booking and dispatch to delivery and return.",
+        "从下单、出库、配送到归还的完整管理，全程可追踪。":
+          "Manage the journey from booking to return, with every status traceable.",
         规则引擎: "Rules engine",
-        "灵活配置计费、押金、逾时与业务流程。":
-          "Configure pricing, deposits, overtime and operating workflows.",
+        "灵活配置计费、押金、逾时与业务流程，适配不同规则。":
+          "Configure pricing, deposits and overtime rules for different rental models.",
         优惠体系: "Promotion engine",
         "优惠券、满减、会员权益等营销工具。":
           "Run coupons, threshold discounts and member benefits.",
@@ -1322,6 +1756,90 @@
       };
 
       const languageKey = "rental-os-language";
+      const headerLanguageSwitch = document.getElementById(
+        "headerLanguageSwitch",
+      );
+      const headerLanguageCode = document.getElementById("headerLanguageCode");
+      const languagePicker = document.querySelector(".language-picker");
+      const languageTrigger = document.getElementById("languageTrigger");
+      const languageCurrent = document.getElementById("languageCurrent");
+      const languageMenu = document.getElementById("languageMenu");
+      const footerSocialButtons = document.querySelectorAll(
+        ".socials .social-button",
+      );
+      const qrModal = document.getElementById("qrModal");
+      const qrModalClose = document.getElementById("qrModalClose");
+      const qrModalPlatform = document.getElementById("qrModalPlatform");
+      const qrModalTitle = document.getElementById("qrModalTitle");
+      const qrModalImage = document.getElementById("qrModalImage");
+      const qrModalHint = document.getElementById("qrModalHint");
+      let activeQrPlatform = "wechat";
+      let activeLanguage = "zh";
+      const qrCopy = {
+        zh: {
+          wechat: {
+            platform: "微信",
+            title: "微信二维码",
+            hint: "使用微信扫描二维码",
+            alt: "微信二维码",
+          },
+          qq: {
+            platform: "QQ",
+            title: "QQ 二维码",
+            hint: "使用 QQ 扫描二维码",
+            alt: "QQ 二维码",
+          },
+        },
+        en: {
+          wechat: {
+            platform: "WeChat",
+            title: "WeChat QR code",
+            hint: "Scan this QR code with WeChat",
+            alt: "WeChat QR code",
+          },
+          qq: {
+            platform: "QQ",
+            title: "QQ QR code",
+            hint: "Scan this QR code with QQ",
+            alt: "QQ QR code",
+          },
+        },
+      };
+      function updateQrModalCopy() {
+        const copy = qrCopy[activeLanguage][activeQrPlatform];
+        qrModalPlatform.textContent = copy.platform;
+        qrModalTitle.textContent = copy.title;
+        qrModalHint.textContent = copy.hint;
+        qrModalImage.alt = copy.alt;
+        qrModalClose.setAttribute(
+          "aria-label",
+          activeLanguage === "en" ? "Close QR code" : "关闭二维码",
+        );
+      }
+      function openQrModal(platform) {
+        activeQrPlatform = platform === "qq" ? "qq" : "wechat";
+        qrModalImage.src = `assets/qrcode-${activeQrPlatform}.svg`;
+        updateQrModalCopy();
+        qrModal.hidden = false;
+        document.body.classList.add("qr-modal-open");
+        qrModalClose.focus();
+      }
+      function closeQrModal() {
+        qrModal.hidden = true;
+        document.body.classList.remove("qr-modal-open");
+      }
+      footerSocialButtons.forEach((button) => {
+        button.addEventListener("click", () => openQrModal(button.dataset.social));
+      });
+      qrModalClose.addEventListener("click", closeQrModal);
+      qrModal.addEventListener("click", (event) => {
+        if (event.target === qrModal || event.target.hasAttribute("data-qr-close")) {
+          closeQrModal();
+        }
+      });
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && !qrModal.hidden) closeQrModal();
+      });
       const translatableNodes = [];
       const walker = document.createTreeWalker(
         document.body,
@@ -1341,8 +1859,9 @@
         const zh = node.nodeValue.replace(/\s+/g, " ").trim();
         translatableNodes.push({ node, zh, en: translations[zh] });
       }
-      function setLanguage(language) {
-        const isEnglish = language === "en";
+      function setLanguage(language, persist = false) {
+        activeLanguage = language === "en" ? "en" : "zh";
+        const isEnglish = activeLanguage === "en";
         translatableNodes.forEach(({ node, zh, en }) => {
           node.nodeValue = isEnglish ? en : zh;
         });
@@ -1362,21 +1881,21 @@
           "aria-label",
           isEnglish ? "Social contacts" : "社交联系方式",
         );
-        const socialButtons = socialGroup.querySelectorAll("button");
-        socialButtons[0].setAttribute(
+        footerSocialButtons[0].setAttribute(
           "aria-label",
-          isEnglish ? "WeChat (coming soon)" : "微信（即将开放）",
+          isEnglish ? "Open WeChat QR code" : "打开微信二维码",
         );
-        socialButtons[0].title = isEnglish
-          ? "WeChat (coming soon)"
-          : "微信（即将开放）";
-        socialButtons[1].setAttribute(
+        footerSocialButtons[0].title = isEnglish
+          ? "Open WeChat QR code"
+          : "打开微信二维码";
+        footerSocialButtons[1].setAttribute(
           "aria-label",
-          isEnglish ? "QQ (coming soon)" : "QQ（即将开放）",
+          isEnglish ? "Open QQ QR code" : "打开 QQ 二维码",
         );
-        socialButtons[1].title = isEnglish
-          ? "QQ (coming soon)"
-          : "QQ（即将开放）";
+        footerSocialButtons[1].title = isEnglish
+          ? "Open QQ QR code"
+          : "打开 QQ 二维码";
+        updateQrModalCopy();
         document.querySelectorAll('a[href^="mailto:"]').forEach((link) => {
           const isExpert = link.closest(".cta");
           const subject = isEnglish
@@ -1404,47 +1923,92 @@
               ? altTranslations[image.dataset.zhAlt]
               : image.dataset.zhAlt;
         });
-        document.querySelectorAll("[data-language]").forEach((button) => {
-          button.classList.toggle(
-            "active",
-            button.dataset.language === language,
-          );
+        languageCurrent.textContent = isEnglish ? "English" : "简体中文";
+        headerLanguageCode.textContent = isEnglish ? "EN" : "中";
+        headerLanguageSwitch.setAttribute(
+          "aria-label",
+          isEnglish ? "Switch language" : "切换语言",
+        );
+        headerLanguageSwitch.title = isEnglish ? "Switch language" : "切换语言";
+        languageTrigger.setAttribute(
+          "aria-label",
+          isEnglish ? "Choose language" : "选择语言",
+        );
+        languageMenu.setAttribute(
+          "aria-label",
+          isEnglish ? "Language options" : "语言选项",
+        );
+        languageMenu.querySelectorAll("[data-language]").forEach((button) => {
           button.setAttribute(
-            "aria-pressed",
-            button.dataset.language === language,
+            "aria-selected",
+            String(button.dataset.language === language),
           );
         });
-        try {
-          localStorage.setItem(languageKey, language);
-        } catch (e) {}
+        if (persist) {
+          try {
+            localStorage.setItem(languageKey, activeLanguage);
+          } catch (e) {}
+        }
       }
-      document.querySelectorAll("[data-language]").forEach((button) => {
-        button.addEventListener("click", () =>
-          setLanguage(button.dataset.language),
-        );
+      languageMenu.querySelectorAll("[data-language]").forEach((button) => {
+        button.addEventListener("click", () => {
+          setLanguage(button.dataset.language, true);
+          languageMenu.hidden = true;
+          languageTrigger.setAttribute("aria-expanded", "false");
+        });
       });
-      let savedLanguage =
-        new URLSearchParams(location.search).get("lang") || "zh";
+      headerLanguageSwitch.addEventListener("click", () => {
+        setLanguage(activeLanguage === "en" ? "zh" : "en", true);
+      });
+      languageTrigger.addEventListener("click", () => {
+        const open = languageMenu.hidden;
+        languageMenu.hidden = !open;
+        languageTrigger.setAttribute("aria-expanded", String(open));
+      });
+      document.addEventListener("click", (event) => {
+        if (!languagePicker.contains(event.target)) {
+          languageMenu.hidden = true;
+          languageTrigger.setAttribute("aria-expanded", "false");
+        }
+      });
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          languageMenu.hidden = true;
+          languageTrigger.setAttribute("aria-expanded", "false");
+        }
+      });
+      const systemLanguage = () => {
+        const primaryLanguage = String(
+          navigator.languages?.[0] || navigator.language || "",
+        ).toLowerCase();
+        return primaryLanguage.startsWith("en")
+          ? "en"
+          : "zh";
+      };
+      let savedLanguage = new URLSearchParams(location.search).get("lang");
       try {
         savedLanguage =
-          new URLSearchParams(location.search).get("lang") ||
-          localStorage.getItem(languageKey) ||
-          "zh";
+          savedLanguage || localStorage.getItem(languageKey) || systemLanguage();
       } catch (e) {}
       setLanguage(savedLanguage === "en" ? "en" : "zh");
 
       const navSections = [
         { id: "solutions", nav: "#solutions" },
-        { id: "scenarios", nav: "#foundation" },
+        { id: "scenarios", nav: "#solutions" },
         { id: "foundation", nav: "#foundation" },
         { id: "customers", nav: "#customers" },
-        { id: "resources", nav: "#resources" },
-        { id: "about", nav: "#about" },
       ];
+      const siteHeader = document.getElementById("siteHeader");
       const navLinks = document.querySelectorAll(".nav a, .mobile-nav a");
       let scrollTicking = false;
       function updateActiveNavigation() {
-        const marker = window.scrollY + 170;
+        siteHeader.classList.toggle("is-scrolled", window.scrollY > 0);
+        const atBottom =
+          window.scrollY + window.innerHeight >=
+          document.documentElement.scrollHeight - 2;
+        const marker = atBottom
+          ? document.documentElement.scrollHeight
+          : window.scrollY + 120;
         let current = null;
         navSections.forEach((section) => {
           const element = document.getElementById(section.id);

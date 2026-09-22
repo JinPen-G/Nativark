@@ -5,7 +5,7 @@
   </view>
   <view wx:if="{{title}}" class="nav__title-row" style="height: {{titleRowHeight}}px;">
     <view wx:if="{{back}}" class="nav__back" hover-class="btn-hover" bindtap="onBack">
-      <ui-icon name="chevron-left" size="44" color="#1F2329" stroke="2"></ui-icon>
+      <ui-icon name="chevron-left" size="44" color="text" stroke="2"></ui-icon>
     </view>
     <view class="nav__title">{{title}}</view>
   </view>

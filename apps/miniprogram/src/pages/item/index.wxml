@@ -1,4 +1,5 @@
-<view class="screen">
+<page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
+<view class="screen {{themeClass}}">
   <nav-bar></nav-bar>
 
   <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
@@ -11,10 +12,10 @@
         </swiper-item>
       </swiper>
       <view wx:else class="gallery__placeholder">{{imageTotal ? '图片加载中' : '暂无图片'}}</view>
-      <view class="gallery__back" hover-class="btn-hover" bindtap="onBack"><ui-icon name="chevron-left" size="40" color="#1F2329" stroke="2.2"></ui-icon></view>
+      <view class="gallery__back" hover-class="btn-hover" bindtap="onBack"><ui-icon name="chevron-left" size="40" color="text" stroke="2.2"></ui-icon></view>
       <view class="gallery__tools">
-        <view class="gallery__tool" hover-class="btn-hover" bindtap="onFavorite"><ui-icon name="heart" size="40" color="{{favorite ? '#FF4D3A' : '#1F2329'}}" filled="{{favorite}}" stroke="1.8"></ui-icon></view>
-        <button class="gallery__tool gallery__tool--share" open-type="share" hover-class="btn-hover"><ui-icon name="share" size="38" color="#1F2329" stroke="1.8"></ui-icon></button>
+        <view class="gallery__tool" hover-class="btn-hover" bindtap="onFavorite"><ui-icon name="heart" size="40" color="{{favorite ? 'price' : 'text'}}" filled="{{favorite}}" stroke="1.8"></ui-icon></view>
+        <button class="gallery__tool gallery__tool--share" open-type="share" hover-class="btn-hover"><ui-icon name="share" size="38" color="text" stroke="1.8"></ui-icon></button>
       </view>
       <view wx:if="{{images.length > 1}}" class="gallery__counter">{{imageIndex + 1}}/{{images.length}}</view>
     </view>
@@ -39,7 +40,7 @@
     <view wx:if="{{specs.length}}" class="section section--surface">
       <view class="row row--between" bindtap="onShowSpecs">
         <view class="section-title">主要参数</view>
-        <ui-icon name="chevron-right" size="32" color="#B4BBC8"></ui-icon>
+        <ui-icon name="chevron-right" size="32" color="muted"></ui-icon>
       </view>
       <view class="stats mt-16">
         <view class="stats__item" wx:for="{{specs}}" wx:key="label">
@@ -73,17 +74,17 @@
     <view wx:if="{{store}}" class="section section--surface">
       <view class="section-title">服务门店</view>
       <view class="row mt-16" hover-class="btn-hover" bindtap="onStoreTap">
-        <view class="store__icon"><ui-icon name="store" size="48" color="#1677FF" stroke="1.6"></ui-icon></view>
+        <view class="store__icon"><ui-icon name="store" size="48" color="primary" stroke="1.6"></ui-icon></view>
         <view class="grow">
           <view class="subtitle ellipsis">{{store.name}}</view>
           <view class="muted small ellipsis mt-4">{{store.address || '地址以门店信息为准'}}</view>
         </view>
-        <ui-icon name="chevron-right" size="32" color="#B4BBC8"></ui-icon>
+        <ui-icon name="chevron-right" size="32" color="muted"></ui-icon>
       </view>
     </view>
 
     <view class="bottom-bar">
-      <button class="btn btn--outline btn--cta grow" hover-class="btn-hover" bindtap="onContact"><ui-icon name="headset" size="34" color="#1677FF"></ui-icon><text class="ml-8">联系客服</text></button>
+      <button class="btn btn--outline btn--cta grow" hover-class="btn-hover" bindtap="onContact"><ui-icon name="headset" size="34" color="primary"></ui-icon><text class="ml-8">联系客服</text></button>
       <button class="btn btn--primary btn--cta grow ml-16" hover-class="btn-hover" bindtap="onReserve">立即预约</button>
     </view>
 

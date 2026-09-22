@@ -38,6 +38,8 @@
     "dev": "npm run build -w @rental-os/shared && concurrently -n api,admin -c blue,green \"npm run dev -w @rental-os/api\" \"npm run dev -w @rental-os/admin\"",
     "dev:api": "npm run build -w @rental-os/shared && npm run dev -w @rental-os/api",
     "dev:admin": "npm run build -w @rental-os/shared && npm run dev -w @rental-os/admin",
+    "dev:tenant-website": "npm run dev -w @rental-os/tenant-website",
+    "build:tenant-website": "npm run build -w @rental-os/tenant-website",
     "build": "npm run build -w @rental-os/shared && npm run build -w @rental-os/api && npm run build -w @rental-os/admin",
     "build:admin": "npm run build -w @rental-os/shared && npm run build -w @rental-os/admin",
     "build:miniprogram": "npm run build -w @rental-os/miniprogram",

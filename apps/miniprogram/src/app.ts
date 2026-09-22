@@ -1,7 +1,14 @@
 import { configProblem } from "./config/public";
 import { clearImageCache } from "./core/images";
-import { loadMerchant } from "./core/merchant";
+import { loadMerchant, merchantEvents } from "./core/merchant";
 import { sessionEvents } from "./core/session";
+import { startThemeWatch, syncNativeTheme, themeEvents } from "./core/theme";
+
+function syncTabBarTheme(): void {
+  syncNativeTheme();
+  // 开发者工具和真机都可能在 App.onLaunch 后才创建原生 TabBar。
+  setTimeout(syncNativeTheme, 0);
+}
 
 /**
  * 应用入口。启动时只做两件事：拉商户公开信息（失败不阻塞，页面自己重试），
@@ -9,6 +16,10 @@ import { sessionEvents } from "./core/session";
  */
 App({
   onLaunch() {
+    startThemeWatch();
+    syncTabBarTheme();
+    themeEvents.on(syncTabBarTheme);
+    merchantEvents.on(syncTabBarTheme);
     if (!configProblem()) {
       loadMerchant().catch(() => {
         // 首页会显示重试入口。
@@ -19,6 +30,6 @@ App({
     });
   },
   onShow() {
-    // 切前台不做自动刷新；各页面 onShow 自行读取最新事实（需求 §4.3）。
+    syncTabBarTheme();
   }
 });

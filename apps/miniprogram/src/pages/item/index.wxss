@@ -1,17 +1,17 @@
-.gallery { position: relative; background: #FFFFFF; }
+.gallery { position: relative; background: var(--surface); }
 .gallery__swiper, .gallery__img { width: 100%; height: 640rpx; }
-.gallery__img { background: #F5F7FA; }
-.gallery__placeholder { width: 100%; height: 640rpx; background: #F5F7FA; display: flex; align-items: center; justify-content: center; color: #B4BBC8; }
+.gallery__img { background: var(--page); }
+.gallery__placeholder { width: 100%; height: 640rpx; background: var(--page); display: flex; align-items: center; justify-content: center; color: var(--muted); }
 .gallery__back { position: absolute; left: 24rpx; top: 24rpx; width: 72rpx; height: 72rpx; border-radius: 50%; background: rgba(255, 255, 255, 0.92); display: flex; align-items: center; justify-content: center; box-shadow: 0 4rpx 12rpx rgba(0, 0, 0, 0.08); }
 .gallery__tools { position: absolute; right: 24rpx; top: 24rpx; display: flex; }
 .gallery__tool { width: 72rpx; height: 72rpx; border-radius: 50%; background: rgba(255, 255, 255, 0.92); display: flex; align-items: center; justify-content: center; box-shadow: 0 4rpx 12rpx rgba(0, 0, 0, 0.08); margin-left: 16rpx; padding: 0; }
 .gallery__tool--share::after { border: none; }
 .gallery__counter { position: absolute; right: 24rpx; bottom: 24rpx; height: 40rpx; padding: 0 16rpx; border-radius: 20rpx; background: rgba(0, 0, 0, 0.45); color: #FFFFFF; font-size: 22rpx; display: flex; align-items: center; }
-.section--surface { background: #FFFFFF; margin-top: 16rpx; padding: 28rpx 32rpx; }
+.section--surface { background: var(--surface); margin-top: 16rpx; padding: 28rpx 32rpx; }
 .stats { display: flex; }
-.stats__item { flex: 1; min-width: 0; background: #F5F7FA; border-radius: 12rpx; padding: 16rpx; }
+.stats__item { flex: 1; min-width: 0; background: var(--page); border-radius: 12rpx; padding: 16rpx; }
 .stats__item + .stats__item { margin-left: 16rpx; }
-.stats__label { font-size: 22rpx; color: #8A94A6; }
+.stats__label { font-size: 22rpx; color: var(--secondary); }
 .stats__value { font-size: 28rpx; font-weight: 600; margin-top: 6rpx; }
-.store__icon { width: 96rpx; height: 96rpx; border-radius: 16rpx; background: #EAF2FF; display: flex; align-items: center; justify-content: center; margin-right: 20rpx; flex: 0 0 auto; }
+.store__icon { width: 96rpx; height: 96rpx; border-radius: 16rpx; background: var(--primary-weak); display: flex; align-items: center; justify-content: center; margin-right: 20rpx; flex: 0 0 auto; }
 .bottom-bar .btn { min-width: 0; }

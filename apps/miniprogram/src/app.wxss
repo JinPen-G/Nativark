@@ -3,6 +3,7 @@ page {
   --primary: #1677FF;
   --primary-weak: #EAF2FF;
   --primary-dark: #0F5FDB;
+  --on-primary: #FFFFFF;
   --page: #F5F7FA;
   --surface: #FFFFFF;
   --text: #1F2329;
@@ -19,6 +20,8 @@ page {
   --danger-weak: #FDECEC;
   --navy: #1E2B4F;
   --gold: #F5C15C;
+  --skeleton-start: #EEF1F5;
+  --skeleton-mid: #F7F8FA;
   --radius: 20rpx;
   --radius-sm: 12rpx;
   --radius-pill: 999rpx;
@@ -31,12 +34,68 @@ page {
   -webkit-font-smoothing: antialiased;
 }
 
+/* 深色模式：跟随系统。只翻转中性色（背景/卡片/文字/边框/阴影），品牌主色与状态色保持一致。
+ * 走 var(--token) 的元素自动跟随；图标由 ui-icon 按语义色板另行处理。租户主题色仍由 page-meta 覆盖 --primary。 */
+/* 深色令牌集中一处：系统深色（media）与用户强制深色（.theme-dark）共用同一组值。 */
+.theme-dark {
+  --primary-weak: rgba(59, 144, 255, 0.18);
+  --page: #14161A;
+  --surface: #1E2127;
+  --text: #E6E8EB;
+  --secondary: #9AA3B2;
+  --muted: #5A6373;
+  --border: #2A2E36;
+  --line: #333842;
+  --success-weak: #123024;
+  --warning-weak: #33280F;
+  --danger-weak: #3A1E1F;
+  --shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.35);
+  --skeleton-start: #2A2E36;
+  --skeleton-mid: #333842;
+}
+@media (prefers-color-scheme: dark) {
+  /* 跟随系统：未被用户强制为浅色时套用深色令牌。 */
+  page {
+    --primary-weak: rgba(59, 144, 255, 0.18);
+    --page: #14161A;
+    --surface: #1E2127;
+    --text: #E6E8EB;
+    --secondary: #9AA3B2;
+    --muted: #5A6373;
+    --border: #2A2E36;
+    --line: #333842;
+    --success-weak: #123024;
+    --warning-weak: #33280F;
+    --danger-weak: #3A1E1F;
+    --shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.35);
+    --skeleton-start: #2A2E36;
+    --skeleton-mid: #333842;
+  }
+}
+/* page-meta 的 root-class 用于覆盖系统深色：强制浅色时恢复浅色令牌。单独写 class 选择器，避免依赖 WXSS 对 :not 的支持。 */
+.theme-light {
+  --primary-weak: #EAF2FF;
+  --page: #F5F7FA;
+  --surface: #FFFFFF;
+  --text: #1F2329;
+  --secondary: #8A94A6;
+  --muted: #B4BBC8;
+  --border: #EEF1F5;
+  --line: #E5E9F0;
+  --success-weak: #E8F7EF;
+  --warning-weak: #FFF4E0;
+  --danger-weak: #FDECEC;
+  --shadow: 0 4rpx 16rpx rgba(31, 41, 55, 0.05);
+  --skeleton-start: #EEF1F5;
+  --skeleton-mid: #F7F8FA;
+}
+
 view, text, button, input, textarea, picker, scroll-view, image, navigator, swiper, switch {
   box-sizing: border-box;
 }
 
 /* 布局 */
-.screen { min-height: 100vh; padding-bottom: calc(180rpx + env(safe-area-inset-bottom)); }
+.screen { min-height: 100vh; padding-bottom: calc(180rpx + env(safe-area-inset-bottom)); background: var(--page); color: var(--text); }
 .screen--flat { padding-bottom: calc(40rpx + env(safe-area-inset-bottom)); }
 .section { padding: 16rpx 32rpx; }
 .section--tight { padding-top: 0; }
@@ -117,7 +176,7 @@ view, text, button, input, textarea, picker, scroll-view, image, navigator, swip
 /* 按钮 */
 .btn { display: flex; align-items: center; justify-content: center; height: 88rpx; padding: 0 32rpx; border-radius: var(--radius-pill); font-size: 30rpx; font-weight: 600; background: var(--surface); color: var(--text); border: 1rpx solid var(--line); line-height: 1; margin: 0; }
 .btn::after { border: none; }
-.btn--primary { background: var(--primary); color: #FFFFFF; border-color: var(--primary); }
+.btn--primary { background: var(--primary); color: var(--on-primary); border-color: var(--primary); }
 .btn--secondary { background: var(--primary-weak); color: var(--primary); border-color: var(--primary-weak); }
 .btn--outline { background: var(--surface); color: var(--primary); border-color: var(--primary); }
 .btn--danger { background: var(--surface); color: var(--danger); border-color: var(--danger); }
@@ -166,7 +225,7 @@ view, text, button, input, textarea, picker, scroll-view, image, navigator, swip
 .option--selected { border-color: var(--primary); background: var(--primary-weak); }
 .option--disabled { opacity: 0.5; }
 .option__check { width: 36rpx; height: 36rpx; border-radius: 50%; border: 2rpx solid var(--line); flex: 0 0 auto; margin-left: 16rpx; }
-.option--selected .option__check { border-color: var(--primary); background: var(--primary); box-shadow: inset 0 0 0 6rpx #FFFFFF; }
+.option--selected .option__check { border-color: var(--primary); background: var(--primary); box-shadow: inset 0 0 0 6rpx var(--on-primary); }
 
 /* 双选切换（取还方式） */
 .toggle { display: flex; }
@@ -178,7 +237,7 @@ view, text, button, input, textarea, picker, scroll-view, image, navigator, swip
 /* 芯片 / 标签页 */
 .chips { display: flex; flex-wrap: nowrap; overflow-x: auto; white-space: nowrap; }
 .chip { display: inline-flex; align-items: center; height: 60rpx; padding: 0 24rpx; border-radius: var(--radius-pill); background: var(--page); color: var(--text); font-size: 26rpx; margin-right: 16rpx; flex: 0 0 auto; }
-.chip--active { background: var(--primary); color: #FFFFFF; }
+.chip--active { background: var(--primary); color: var(--on-primary); }
 .chip--soft { background: var(--primary-weak); color: var(--primary); height: 48rpx; padding: 0 16rpx; font-size: 22rpx; margin-right: 12rpx; }
 .tabs { display: flex; overflow-x: auto; white-space: nowrap; }
 .tab { position: relative; display: inline-flex; align-items: center; justify-content: center; height: 80rpx; padding: 0 8rpx; margin-right: 40rpx; font-size: 28rpx; color: var(--secondary); flex: 0 0 auto; }
@@ -199,7 +258,7 @@ view, text, button, input, textarea, picker, scroll-view, image, navigator, swip
 .avatar image { width: 100%; height: 100%; }
 
 /* 骨架 */
-.skeleton { background: linear-gradient(90deg, #EEF1F5 25%, #F7F8FA 50%, #EEF1F5 75%); background-size: 400% 100%; animation: skeleton 1.4s ease infinite; border-radius: 8rpx; }
+.skeleton { background: linear-gradient(90deg, var(--skeleton-start) 25%, var(--skeleton-mid) 50%, var(--skeleton-start) 75%); background-size: 400% 100%; animation: skeleton 1.4s ease infinite; border-radius: 8rpx; }
 .skeleton--line { height: 28rpx; margin: 12rpx 0; }
 .skeleton--block { height: 200rpx; }
 @keyframes skeleton { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }

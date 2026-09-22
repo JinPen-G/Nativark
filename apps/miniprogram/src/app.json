@@ -44,6 +44,7 @@
     ]
   },
   "lazyCodeLoading": "requiredComponents",
+  "darkmode": true,
   "style": "v2",
   "permission": {
     "scope.userLocation": {

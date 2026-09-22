@@ -1,4 +1,5 @@
-<view class="screen screen--flat">
+<page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
+<view class="screen screen--flat {{themeClass}}">
   <nav-bar></nav-bar>
 
   <view class="section">
@@ -15,7 +16,7 @@
       <view class="row row--top">
         <view class="order__thumb" data-id="{{item.orderId}}" bindtap="onOpen">
           <image wx:if="{{item.imagePath}}" src="{{item.imagePath}}" mode="aspectFill"></image>
-          <view wx:else class="order__thumb-icon"><ui-icon name="{{item.icon}}" size="48" color="#8A94A6" stroke="1.5"></ui-icon></view>
+          <view wx:else class="order__thumb-icon"><ui-icon name="{{item.icon}}" size="48" color="secondary" stroke="1.5"></ui-icon></view>
         </view>
         <view class="grow" data-id="{{item.orderId}}" bindtap="onOpen">
           <view class="row row--between row--top">

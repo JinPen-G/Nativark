@@ -2,7 +2,7 @@ import type { ClientCatalogLocation, ClientCatalogResponse } from "@rental-os/sh
 import { configProblem } from "../../config/public";
 import { cachedCatalog, hydrateImages, loadCatalog, nearestLocation, primaryLocation, searchItems, setPendingSearch, toItemCard, type ItemCard } from "../../core/catalogStore";
 import { cachedUserLocation, distanceMeters, formatDistance, requestUserLocation, type GeoPoint } from "../../core/geo";
-import { themeStyle } from "../../core/theme";
+import { themeBehavior } from "../../core/theme-behavior";
 import { isApiError } from "../../core/http";
 import { categoryIcon } from "../../core/labels";
 import { cachedMerchant, findService, loadMerchant, merchantEvents, resolveServiceCode, type MerchantInfo } from "../../core/merchant";
@@ -32,12 +32,12 @@ interface HomeData {
   serviceName: string;
   bannerTitle: string;
   bannerSubtitle: string;
-  themeStyle: string;
 }
 
 const HOT_LIMIT = 6;
 
 Page({
+  behaviors: [themeBehavior],
   data: {
     query: "",
     services: [],
@@ -49,7 +49,6 @@ Page({
     serviceName: "",
     bannerTitle: "",
     bannerSubtitle: "",
-    themeStyle: "",
     hasLocation: false,
     locating: false,
     locationDenied: false,
@@ -136,7 +135,6 @@ Page({
       // 首页横幅：优先用商户后台配置文案，缺省用品牌/默认文案，不显示技术词。
       bannerTitle: info.banner?.title || "",
       bannerSubtitle: info.banner?.subtitle || "",
-      themeStyle: themeStyle(info.themeColor),
       merchantView: services.length ? readyState() : blockedState("商户暂未开放服务", "当前没有可租用的服务，请稍后再来或联系商户。", info.servicePhone ? "联系商户" : "", "contact")
     });
     if (!resolved) {

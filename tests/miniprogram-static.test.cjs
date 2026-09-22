@@ -115,6 +115,7 @@ test("app.json 声明 21 个页面、4 个 Tab（带图标），每个页面与�
   for (const asset of ["assets/logo.png", "assets/logo-mark.png"]) assert.ok(fs.existsSync(path.join(src, asset)), `品牌资源缺失：${asset}`);
   assert.equal(app.usingComponents, undefined, "全局注册自定义组件会削弱 lazyCodeLoading 的按需注入");
   assert.equal(app.lazyCodeLoading, "requiredComponents");
+  assert.equal(app.darkmode, true, "小程序必须声明深色模式支持");
   assert.equal(app.window.navigationStyle, "custom", "全部页面使用自定义导航栏（品牌 Logo 行）");
   // requiredPrivateInfos 只能取微信接口白名单：openLocation 用内置地图、不属于此表，写进去开发者工具会拒绝编译。
   const PRIVATE_INFO_WHITELIST = ["chooseAddress", "chooseLocation", "choosePoi", "getFuzzyLocation", "getLocation", "onLocationChange", "startLocationUpdate", "startLocationUpdateBackground"];
@@ -199,6 +200,11 @@ test("页面 WXML 里的每个数据绑定都对应页面 data 的已声明字�
       }
       ts.forEachChild(node, visit);
     })(sf);
+    // themeBehavior 通过 Behavior 注入页面级主题字段，字段不在页面自身 data/interface 中重复声明。
+    if (tsText.includes("themeBehavior")) {
+      dataKeys.add("themeStyle");
+      dataKeys.add("themeClass");
+    }
     const wxml = read(`${route}.wxml`);
     const loopVars = new Set(["item", "index"]);
     for (const match of wxml.matchAll(/wx:for-item="([^"]+)"/g)) loopVars.add(match[1]);

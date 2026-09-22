@@ -1,4 +1,5 @@
-<view class="screen screen--flat">
+<page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
+<view class="screen screen--flat {{themeClass}}">
   <nav-bar title="{{title}}"></nav-bar>
 
   <block wx:if="{{kind === 'help'}}">
@@ -6,7 +7,7 @@
       <view class="card">
         <view class="subtitle">联系客服</view>
         <view class="body mt-8">{{servicePhone || '商户未提供客服电话'}}{{serviceHours ? ' · ' + serviceHours : ''}}</view>
-        <button wx:if="{{servicePhone}}" class="btn btn--primary btn--block mt-16" hover-class="btn-hover" bindtap="onContact"><ui-icon name="phone" size="30" color="#FFFFFF"></ui-icon><text class="ml-8">拨打客服电话</text></button>
+        <button wx:if="{{servicePhone}}" class="btn btn--primary btn--block mt-16" hover-class="btn-hover" bindtap="onContact"><ui-icon name="phone" size="30" color="onPrimary"></ui-icon><text class="ml-8">拨打客服电话</text></button>
       </view>
     </view>
     <view wx:if="{{helpIntro}}" class="section section--tight">

@@ -1,3 +1,4 @@
+import { themeBehavior } from "../../core/theme-behavior";
 import { cachedCatalog, facetsOf, hydrateImages, loadCatalog, searchItems, takePendingSearch, toItemCard, type ItemCard } from "../../core/catalogStore";
 import { switchService } from "../../core/flow";
 import { isApiError } from "../../core/http";
@@ -21,6 +22,7 @@ interface CatalogData {
 }
 
 Page({
+  behaviors: [themeBehavior],
   data: { query: "", services: [], facets: [], activeFacet: "", cards: [], view: loadingState(), total: 0 } as CatalogData,
   serviceCode: "" as string,
   loadVersion: 0,

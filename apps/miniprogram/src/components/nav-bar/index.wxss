@@ -1,9 +1,9 @@
 /* 高度上限兜底：即便度量异常，固定导航条也不能盖住内容吃掉点击（max-height 远大于正常导航栏、又不至于覆盖全屏）。 */
-.nav { position: fixed; top: 0; left: 0; right: 0; z-index: 50; background: #FFFFFF; max-height: 320rpx; overflow: hidden; }
+.nav { position: fixed; top: 0; left: 0; right: 0; z-index: 50; background: var(--surface); max-height: 320rpx; overflow: hidden; }
 .nav--transparent { background: transparent; }
 .nav__brand { display: flex; align-items: center; padding-left: 32rpx; }
 .nav__logo { height: 52rpx; width: 226rpx; }
 .nav__title-row { position: relative; display: flex; align-items: center; justify-content: center; }
 .nav__back { position: absolute; left: 12rpx; top: 0; bottom: 0; width: 88rpx; display: flex; align-items: center; justify-content: center; }
-.nav__title { font-size: 34rpx; font-weight: 600; color: #1F2329; max-width: 60%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.nav__title { font-size: 34rpx; font-weight: 600; color: var(--text); max-width: 60%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .nav__placeholder { width: 100%; }

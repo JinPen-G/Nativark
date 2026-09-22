@@ -1,3 +1,4 @@
+import { themeBehavior } from "../../core/theme-behavior";
 import type { ClientCatalogItem, ClientCatalogPricingGroup, ClientCatalogResponse } from "@rental-os/shared";
 import { fetchQualificationTypes } from "../../api/profile";
 import { CartLocked, CartServiceMismatch, addLine } from "../../core/cart";
@@ -52,6 +53,7 @@ interface ItemData {
 }
 
 Page({
+  behaviors: [themeBehavior],
   data: {
     view: loadingState(),
     serviceName: "",

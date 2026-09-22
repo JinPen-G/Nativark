@@ -1,3 +1,4 @@
+import { themeBehavior } from "../../core/theme-behavior";
 import type { ClientCatalogLocation } from "@rental-os/shared";
 import { loadCatalog } from "../../core/catalogStore";
 import { cachedUserLocation, distanceMeters, formatDistance, openLocationOnMap, requestUserLocation, type GeoPoint } from "../../core/geo";
@@ -15,6 +16,7 @@ interface LocationRow extends ClientCatalogLocation {
 }
 
 Page({
+  behaviors: [themeBehavior],
   data: { view: loadingState(), rows: [] as LocationRow[], serviceName: "", servicePhone: "", locating: false, locationDenied: false, anyCoord: false },
   serviceCode: "" as string,
   raw: [] as ClientCatalogLocation[],

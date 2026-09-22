@@ -1,3 +1,4 @@
+import { themeBehavior } from "../../core/theme-behavior";
 import type { ClientProfileView } from "@rental-os/shared";
 import { changePassword } from "../../api/auth";
 import { fetchProfile, updateProfile } from "../../api/profile";
@@ -5,6 +6,7 @@ import { describeError } from "../../core/errors";
 import { type FieldErrors, errorState, handleCommonViewAction, loadingState, readyState, type ViewState } from "../../core/page";
 import { cachedMerchant } from "../../core/merchant";
 import { ROUTES, callPhone, requireSignIn, toast } from "../../core/ui";
+import { currentTheme, setThemePreference, themePreference } from "../../core/theme";
 
 /**
  * P13 个人资料与账号设置（需求 §5.3）：姓名、邮箱可改；手机号/证件脱敏只读；修改密码。
@@ -25,9 +27,12 @@ interface ProfileData {
   newPasswordConfirm: string;
   passwordSaving: boolean;
   passwordError: string;
+  darkMode: boolean;
+  themeModeHint: string;
 }
 
 Page({
+  behaviors: [themeBehavior],
   data: {
     view: loadingState(),
     name: "",
@@ -41,16 +46,35 @@ Page({
     newPassword: "",
     newPasswordConfirm: "",
     passwordSaving: false,
-    passwordError: ""
+    passwordError: "",
+    darkMode: currentTheme() === "dark",
+    themeModeHint: themePreference() === "system" ? "跟随系统" : currentTheme() === "dark" ? "已固定为深色模式" : "已固定为浅色模式"
   } as ProfileData,
 
   onLoad() {
+    this.syncThemePreference();
     this.setData({ servicePhone: cachedMerchant()?.servicePhone ?? "" });
     if (!requireSignIn(ROUTES.profile)) return;
   },
 
   onShow() {
+    this.syncThemePreference();
     void this.load();
+  },
+
+  syncThemePreference() {
+    const preference = themePreference();
+    const darkMode = currentTheme() === "dark";
+    this.setData({
+      darkMode,
+      themeModeHint: preference === "system" ? "跟随系统" : darkMode ? "已固定为深色模式" : "已固定为浅色模式"
+    });
+  },
+
+  onThemeModeChange(event: WechatMiniprogram.SwitchChange) {
+    const darkMode = Boolean(event.detail.value);
+    setThemePreference(darkMode ? "dark" : "light");
+    this.setData({ darkMode, themeModeHint: darkMode ? "已固定为深色模式" : "已固定为浅色模式" });
   },
 
   async load() {

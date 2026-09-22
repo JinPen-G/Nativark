@@ -1,5 +1,5 @@
-<page-meta page-style="{{themeStyle}}"></page-meta>
-<view class="screen screen--flat login">
+<page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
+<view class="screen screen--flat login {{themeClass}}">
   <nav-bar></nav-bar>
   <view class="login__brand">
     <image class="login__mark" src="/assets/logo-mark.png" mode="aspectFit"></image>

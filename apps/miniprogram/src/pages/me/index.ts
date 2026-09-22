@@ -1,3 +1,4 @@
+import { themeBehavior } from "../../core/theme-behavior";
 import type { ClientMembershipStatusResponse } from "@rental-os/shared";
 import { logout, membershipStatus as fetchStatus } from "../../api/auth";
 import { fetchMembershipBenefits } from "../../api/profile";
@@ -40,6 +41,7 @@ interface MeData {
 }
 
 Page({
+  behaviors: [themeBehavior],
   data: {
     view: readyState(),
     signedIn: false,

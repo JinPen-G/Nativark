@@ -1,5 +1,5 @@
 .profile { display: flex; align-items: center; padding: 16rpx 0; }
-.profile .avatar { width: 128rpx; height: 128rpx; background: #FFFFFF; box-shadow: 0 4rpx 16rpx rgba(31, 41, 55, 0.08); padding: 20rpx; }
+.profile .avatar { width: 128rpx; height: 128rpx; background: var(--surface); box-shadow: var(--shadow); padding: 20rpx; }
 .member { display: flex; align-items: center; padding: 28rpx 32rpx; border-radius: 20rpx; background: linear-gradient(135deg, #223061 0%, #1A2447 60%, #131B38 100%); color: #FFFFFF; }
 .member__crown { width: 72rpx; height: 72rpx; border-radius: 50%; background: rgba(245, 193, 92, 0.16); display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
 .member__title { font-size: 32rpx; font-weight: 700; margin-right: 12rpx; }

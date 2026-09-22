@@ -1,16 +1,17 @@
-<view class="screen screen--flat">
+<page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
+<view class="screen screen--flat {{themeClass}}">
   <nav-bar title="常用服务点"></nav-bar>
   <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
   <block wx:else>
     <view class="section"><view class="muted small">{{serviceName}} · 门店信息由商户维护，营业时段以门店为准</view></view>
     <view wx:if="{{anyCoord}}" class="section section--tight">
-      <button wx:if="{{!locationDenied}}" class="btn btn--outline btn--block" hover-class="btn-hover" bindtap="onLocate" loading="{{locating}}"><ui-icon name="pin" size="28" color="#1677FF"></ui-icon><text class="ml-8">按距离查看附近门店</text></button>
+      <button wx:if="{{!locationDenied}}" class="btn btn--outline btn--block" hover-class="btn-hover" bindtap="onLocate" loading="{{locating}}"><ui-icon name="pin" size="28" color="primary"></ui-icon><text class="ml-8">按距离查看附近门店</text></button>
       <view wx:else class="muted small center">未获得位置授权，按商户顺序展示；可在微信「设置 → 位置信息」开启后重试。</view>
     </view>
     <view class="section section--tight">
       <view class="card loc" wx:for="{{rows}}" wx:key="id">
         <view class="row row--top">
-          <view class="loc__icon"><ui-icon name="store" size="48" color="#1677FF" stroke="1.6"></ui-icon></view>
+          <view class="loc__icon"><ui-icon name="store" size="48" color="primary" stroke="1.6"></ui-icon></view>
           <view class="grow">
             <view class="row row--between">
               <view class="subtitle">{{item.name}}</view>
@@ -24,8 +25,8 @@
         <view class="row row--between mt-16">
           <view class="muted small">{{item.contactPhone || '门店电话以商户客服为准'}}</view>
           <view class="row gap-8">
-            <button wx:if="{{item.hasCoord}}" class="btn btn--small btn--secondary" hover-class="btn-hover" data-id="{{item.id}}" bindtap="onNavigate"><ui-icon name="compass" size="28" color="#1F2329"></ui-icon><text class="ml-8">导航</text></button>
-            <button class="btn btn--small btn--outline" hover-class="btn-hover" data-phone="{{item.contactPhone}}" bindtap="onCall"><ui-icon name="phone" size="28" color="#1677FF"></ui-icon><text class="ml-8">拨打电话</text></button>
+            <button wx:if="{{item.hasCoord}}" class="btn btn--small btn--secondary" hover-class="btn-hover" data-id="{{item.id}}" bindtap="onNavigate"><ui-icon name="compass" size="28" color="text"></ui-icon><text class="ml-8">导航</text></button>
+            <button class="btn btn--small btn--outline" hover-class="btn-hover" data-phone="{{item.contactPhone}}" bindtap="onCall"><ui-icon name="phone" size="28" color="primary"></ui-icon><text class="ml-8">拨打电话</text></button>
           </view>
         </view>
       </view>

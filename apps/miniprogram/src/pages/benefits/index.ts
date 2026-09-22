@@ -1,3 +1,4 @@
+import { themeBehavior } from "../../core/theme-behavior";
 import type { ClientMembershipAssignmentView, CustomerMembershipBenefit } from "@rental-os/shared";
 import { fetchMembershipAssignments, fetchMembershipBenefits } from "../../api/profile";
 import { categoryLabel, membershipLabel } from "../../core/labels";
@@ -48,6 +49,7 @@ const TYPE_LABELS: Record<string, string> = {
 const MONEY_TYPES = new Set(["rental_discount", "deposit_reduction", "preauth_reduction", "service_benefit"]);
 
 Page({
+  behaviors: [themeBehavior],
   data: { view: loadingState(), serviceName: "", membershipLabel: "", membershipTone: "neutral", planName: "", planPeriod: "", planSource: "", benefits: [], history: [], hasPlan: false } as BenefitsData,
 
   onLoad() {

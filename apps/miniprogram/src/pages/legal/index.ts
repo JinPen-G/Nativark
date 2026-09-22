@@ -1,3 +1,4 @@
+import { themeBehavior } from "../../core/theme-behavior";
 import type { ClientHelpFaqItem, ClientPublicDocumentKind } from "@rental-os/shared";
 import { fetchPublicDocument } from "../../api/merchant";
 import { cachedMerchant, loadMerchant, type MerchantInfo } from "../../core/merchant";
@@ -35,6 +36,7 @@ interface LegalData {
 const TITLES: Record<DocKind, string> = { agreement: "用户服务协议", privacy: "隐私政策", "rental-rules": "租赁规则", help: "帮助与客服" };
 
 Page({
+  behaviors: [themeBehavior],
   data: {
     kind: "agreement",
     title: "",

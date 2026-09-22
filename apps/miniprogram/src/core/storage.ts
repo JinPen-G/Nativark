@@ -11,11 +11,12 @@ export const STORAGE_KEYS = {
   lastService: `${PREFIX}last-service`,
   actionKeys: `${PREFIX}action-keys`,
   paymentIntents: `${PREFIX}payment-intents`,
-  favorites: `${PREFIX}favorites`
+  favorites: `${PREFIX}favorites`,
+  themeMode: `${PREFIX}theme-mode`
 } as const;
 
-/** 退出登录后仍可保留的键：商户公开信息、上次选择的服务与本机收藏不含私密数据（收藏按客户分开保存）。 */
-const KEEP_ON_SIGN_OUT = new Set<string>([STORAGE_KEYS.bootstrap, STORAGE_KEYS.lastService, STORAGE_KEYS.favorites]);
+/** 退出登录后仍可保留的键：商户公开信息、上次选择的服务、本机收藏与深浅色偏好不含私密数据（收藏按客户分开保存）。 */
+const KEEP_ON_SIGN_OUT = new Set<string>([STORAGE_KEYS.bootstrap, STORAGE_KEYS.lastService, STORAGE_KEYS.favorites, STORAGE_KEYS.themeMode]);
 
 export function readStorage<T>(key: string): T | undefined {
   try {

@@ -1,4 +1,5 @@
-<view class="screen screen--flat">
+<page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
+<view class="screen screen--flat {{themeClass}}">
   <nav-bar title="实名认证"></nav-bar>
   <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
 
@@ -10,7 +11,7 @@
         <view class="subtitle">当前服务要求的证件</view>
         <view wx:if="{{!rows.length}}" class="muted mt-8">当前服务不要求额外证件。</view>
         <view class="cell" wx:for="{{rows}}" wx:key="code">
-          <view class="cell__icon"><ui-icon name="shield" size="40" color="{{item.latest && item.latest.status === 'approved' ? '#22A06B' : '#1F2329'}}"></ui-icon></view>
+          <view class="cell__icon"><ui-icon name="shield" size="40" color="{{item.latest && item.latest.status === 'approved' ? 'success' : 'text'}}"></ui-icon></view>
           <view class="cell__body">
             <view class="row gap-8">
               <text class="cell__title">{{item.name}}</text>
@@ -51,14 +52,14 @@
     <view class="field">
       <view class="field__label">签发日期</view>
       <view class="row gap-16">
-        <picker class="grow" mode="date" value="{{issuedAt}}" data-field="issuedAt" bindchange="onDateChange"><view class="field__picker"><text>{{issuedAt || '选择日期'}}</text><ui-icon name="chevron-right" size="28" color="#B4BBC8"></ui-icon></view></picker>
+        <picker class="grow" mode="date" value="{{issuedAt}}" data-field="issuedAt" bindchange="onDateChange"><view class="field__picker"><text>{{issuedAt || '选择日期'}}</text><ui-icon name="chevron-right" size="28" color="muted"></ui-icon></view></picker>
         <view wx:if="{{issuedAt}}" class="link tap-area" data-field="issuedAt" bindtap="onClearDate">清空</view>
       </view>
     </view>
     <view class="field">
       <view class="row row--between" style="min-height:88rpx"><view class="field__label">长期有效</view><switch checked="{{longTerm}}" color="#1677FF" bindchange="onLongTermChange"></switch></view>
       <view wx:if="{{!longTerm}}" class="row gap-16">
-        <picker class="grow" mode="date" value="{{expiresAt}}" data-field="expiresAt" bindchange="onDateChange"><view class="field__picker"><text>{{expiresAt || '选择有效期至'}}</text><ui-icon name="chevron-right" size="28" color="#B4BBC8"></ui-icon></view></picker>
+        <picker class="grow" mode="date" value="{{expiresAt}}" data-field="expiresAt" bindchange="onDateChange"><view class="field__picker"><text>{{expiresAt || '选择有效期至'}}</text><ui-icon name="chevron-right" size="28" color="muted"></ui-icon></view></picker>
         <view wx:if="{{expiresAt}}" class="link tap-area" data-field="expiresAt" bindtap="onClearDate">清空</view>
       </view>
       <view wx:if="{{errors.expiresAt}}" class="field__error">{{errors.expiresAt}}</view>

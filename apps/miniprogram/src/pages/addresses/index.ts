@@ -1,3 +1,4 @@
+import { themeBehavior } from "../../core/theme-behavior";
 import type { ClientDeliveryAddressView } from "@rental-os/shared";
 import { deleteAddress, listAddresses, saveAddress } from "../../api/addresses";
 import { describeError } from "../../core/errors";
@@ -32,6 +33,7 @@ interface AddressData {
 const EMPTY_FORM: AddressForm = { recipient: "", phone: "", province: "", city: "", district: "", detail: "", isDefault: false };
 
 Page({
+  behaviors: [themeBehavior],
   data: {
     view: loadingState(),
     items: [],

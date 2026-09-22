@@ -1,3 +1,4 @@
+import { themeBehavior } from "../../core/theme-behavior";
 import type { ClientOrderView, RentalOrderExtension, RentalOrderExtensionPreview } from "@rental-os/shared";
 import { activatePaidExtension, applyExtension, fetchFunding, fetchOrder, listExtensions, previewExtension } from "../../api/orders";
 import { describeError } from "../../core/errors";
@@ -41,6 +42,7 @@ interface ExtendData {
 }
 
 Page({
+  behaviors: [themeBehavior],
   data: {
     view: loadingState(),
     timeZone: "Asia/Shanghai",

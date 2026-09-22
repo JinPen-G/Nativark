@@ -1,10 +1,10 @@
-<page-meta page-style="{{themeStyle}}"></page-meta>
-<view class="screen">
+<page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
+<view class="screen {{themeClass}}">
   <nav-bar></nav-bar>
 
   <view class="section">
     <view class="search search--surface">
-      <ui-icon name="search" size="34" color="#8A94A6"></ui-icon>
+      <ui-icon name="search" size="34" color="secondary"></ui-icon>
       <input class="search__input" type="text" confirm-type="search" placeholder="搜索你需要的设备、品牌或场景" placeholder-class="search__placeholder" maxlength="50" value="{{query}}" bindinput="onSearchInput" bindconfirm="onSearchConfirm" />
     </view>
   </view>
@@ -20,7 +20,7 @@
           <block wx:if="{{bannerTitle}}"><view class="banner__title">{{bannerTitle}}</view></block>
           <block wx:else><view class="banner__title">去探索</view><view class="banner__title">更大的世界</view></block>
           <view class="banner__subtitle">{{bannerSubtitle || '好装备，让每一次出发更简单'}}</view>
-          <view class="banner__cta"><text>立即租赁</text><ui-icon name="arrow-right" size="28" color="#1677FF" stroke="2.2"></ui-icon></view>
+          <view class="banner__cta"><text>立即租赁</text><ui-icon name="arrow-right" size="28" color="primary" stroke="2.2"></ui-icon></view>
         </view>
       </view>
     </view>
@@ -29,7 +29,7 @@
       <view class="cats">
         <view class="cats__item" wx:for="{{services}}" wx:key="code" data-code="{{item.code}}" hover-class="btn-hover" bindtap="onServiceTap">
           <view class="cats__icon {{item.active ? 'cats__icon--active' : ''}}">
-            <ui-icon name="{{item.icon}}" size="44" color="{{item.active ? '#1677FF' : '#4B5563'}}" stroke="1.6"></ui-icon>
+            <ui-icon name="{{item.icon}}" size="44" color="{{item.active ? 'primary' : 'secondary'}}" stroke="1.6"></ui-icon>
           </view>
           <view class="cats__label ellipsis">{{item.name}}</view>
         </view>
@@ -39,7 +39,7 @@
     <view class="section section--tight">
       <view class="section-head">
         <view class="section-title">热门推荐</view>
-        <view class="section-link" bindtap="onMore"><text>查看更多</text><ui-icon name="chevron-right" size="28" color="#8A94A6"></ui-icon></view>
+        <view class="section-link" bindtap="onMore"><text>查看更多</text><ui-icon name="chevron-right" size="28" color="secondary"></ui-icon></view>
       </view>
       <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction" compact="{{true}}"></state-view>
       <view wx:else class="grid">
@@ -63,7 +63,7 @@
         <view wx:if="{{!hasLocation}}" class="link small" hover-class="btn-hover" bindtap="onLocateNearby">{{locating ? '定位中…' : locationDenied ? '重新获取定位' : '获取附近门店'}}</view>
       </view>
       <view wx:if="{{store}}" class="card store" hover-class="btn-hover" bindtap="onStoreTap">
-        <view class="store__icon"><ui-icon name="store" size="52" color="#1677FF" stroke="1.6"></ui-icon></view>
+        <view class="store__icon"><ui-icon name="store" size="52" color="primary" stroke="1.6"></ui-icon></view>
         <view class="grow">
           <view class="row row--between">
             <view class="subtitle ellipsis">{{store.name}}</view>
@@ -72,7 +72,7 @@
           <view class="muted small ellipsis mt-4">{{store.address || '地址以门店信息为准'}}</view>
           <view class="small mt-4 success-text">{{store.hours ? '营业时段 ' + store.hours : '营业时段以门店为准'}}</view>
         </view>
-        <ui-icon name="chevron-right" size="32" color="#B4BBC8"></ui-icon>
+        <ui-icon name="chevron-right" size="32" color="muted"></ui-icon>
       </view>
       <view wx:if="{{!hasLocation}}" class="muted small mt-8">{{locationDenied ? '未获得定位授权，以上为推荐门店；开启定位可看最近门店与距离。' : '以上为推荐门店，点上方“获取附近门店”按距离排序。'}}</view>
     </view>

@@ -1,7 +1,9 @@
 /**
  * 线性图标组件：SVG 以 data URI 交给 <image>，不依赖字体或网络。
- * 图标在 24×24 视口内以描边路径描述，颜色与尺寸由属性决定。
+ * 图标在 24×24 视口内以描边路径描述，尺寸由属性决定；颜色支持语义名（随深/浅色）或直接 #RRGGBB。
  */
+import { merchantEvents } from "../../core/merchant";
+import { semanticColor, themeEvents } from "../../core/theme";
 const PATHS: Record<string, string> = {
   search: "M11 4a7 7 0 1 1 0 14a7 7 0 0 1 0-14zM20 20l-3.5-3.5",
   "chevron-right": "M9 6l6 6-6 6",
@@ -77,7 +79,8 @@ Component({
   options: { addGlobalClass: true },
   properties: {
     name: { type: String, value: "info" },
-    color: { type: String, value: "#1F2329" },
+    // 语义色名（text/muted/primary…，见 core/theme SEMANTIC_COLORS）按当前深浅色解析；也兼容直接传 #RRGGBB。
+    color: { type: String, value: "text" },
     /** rpx */
     size: { type: Number, value: 40 },
     filled: { type: Boolean, value: false },
@@ -86,7 +89,14 @@ Component({
   data: { src: "" },
   lifetimes: {
     attached() {
+      // 系统深/浅色切换时重渲染（语义色会解析出新 hex）；直接传 hex 的图标解析后不变，重渲染无副作用。
+      const offTheme = themeEvents.on(() => this.render());
+      const offMerchant = merchantEvents.on(() => this.render());
+      (this as unknown as { _themeOff?: () => void })._themeOff = () => { offTheme(); offMerchant(); };
       this.render();
+    },
+    detached() {
+      (this as unknown as { _themeOff?: () => void })._themeOff?.();
     }
   },
   observers: {
@@ -97,7 +107,7 @@ Component({
   methods: {
     render() {
       const { name, color, filled, stroke } = this.data as { name: string; color: string; filled: boolean; stroke: number };
-      this.setData({ src: iconSource(name, color, filled, stroke) });
+      this.setData({ src: iconSource(name, semanticColor(color), filled, stroke) });
     }
   }
 });

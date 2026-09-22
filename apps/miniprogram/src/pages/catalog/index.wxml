@@ -1,9 +1,10 @@
-<view class="screen screen--flat">
+<page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
+<view class="screen screen--flat {{themeClass}}">
   <nav-bar></nav-bar>
 
   <view class="section">
     <view class="search search--surface">
-      <ui-icon name="search" size="34" color="#8A94A6"></ui-icon>
+      <ui-icon name="search" size="34" color="secondary"></ui-icon>
       <input class="search__input" type="text" confirm-type="search" placeholder="搜索商品名称、品牌或型号" placeholder-class="search__placeholder" maxlength="50" value="{{query}}" bindinput="onSearchInput" />
       <view wx:if="{{query || activeFacet}}" class="search__clear" bindtap="onClear">清除</view>
     </view>
@@ -36,7 +37,7 @@
             <view wx:else class="price--pending">选租期查看报价</view>
           </view>
         </view>
-        <ui-icon name="chevron-right" size="32" color="#B4BBC8"></ui-icon>
+        <ui-icon name="chevron-right" size="32" color="muted"></ui-icon>
       </view>
     </view>
     <view class="muted small center mt-16">共 {{cards.length}} 件 · 参考价以租期报价为准</view>

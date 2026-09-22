@@ -1,3 +1,4 @@
+import { themeBehavior } from "../../core/theme-behavior";
 import type { ClientFeeItemView, ClientFulfillmentView, ClientOrderView, RentalFundingBalance, RentalOrderExtension } from "@rental-os/shared";
 import { cancelOrder, fetchFeeItems, fetchFulfillment, fetchFunding, fetchOrder, listExtensions, previewCancellation, respondToFee } from "../../api/orders";
 import { contractMissing } from "../../contracts/planned";
@@ -74,6 +75,7 @@ const CANCEL_REASONS = ["行程变更", "选错了设备或时间", "找到其�
 const DISPUTE_REASONS = ["设备原有问题，非我造成", "金额与现场沟通不一致", "未收到相应设备/服务", "其他原因"];
 
 Page({
+  behaviors: [themeBehavior],
   data: {
     view: loadingState(),
     extensions: [],

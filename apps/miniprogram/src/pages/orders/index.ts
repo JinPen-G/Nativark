@@ -1,3 +1,4 @@
+import { themeBehavior } from "../../core/theme-behavior";
 import type { MyOrderIndex } from "@rental-os/shared";
 import { fetchMyOrders, fetchOrder } from "../../api/orders";
 import { CartLocked, addLine, clearCart, getCart } from "../../core/cart";
@@ -52,6 +53,7 @@ interface OrdersData {
 const PAGE_SIZE = 20;
 
 Page({
+  behaviors: [themeBehavior],
   data: { view: loadingState(), filters: ORDER_FILTERS, filter: "all", rows: [], visible: [], page: 0, hasMore: false, loadingMore: false, signedIn: false } as OrdersData,
   unsubscribe: undefined as (() => void) | undefined,
   loadVersion: 0,

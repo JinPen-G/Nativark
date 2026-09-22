@@ -1,3 +1,4 @@
+import { themeBehavior } from "../../core/theme-behavior";
 import { closeAccount, closurePreview, closureChallenge, logout, verifyRegistrationChallenge } from "../../api/auth";
 import { contractMissing } from "../../contracts/planned";
 import { describeError } from "../../core/errors";
@@ -34,6 +35,7 @@ interface ClosureData {
 }
 
 Page({
+  behaviors: [themeBehavior],
   data: {
     view: loadingState(),
     step: "preview",

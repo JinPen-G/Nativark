@@ -1,5 +1,5 @@
-<page-meta page-style="{{themeStyle}}"></page-meta>
-<view class="screen">
+<page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
+<view class="screen {{themeClass}}">
   <nav-bar title="确认订单"></nav-bar>
 
   <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" secondaryText="{{view.secondaryText}}" bind:action="onViewAction" bind:secondary="onViewSecondary"></state-view>
@@ -38,15 +38,15 @@
     <view class="section section--tight">
       <view class="card">
         <view class="row" hover-class="btn-hover" bindtap="onOpenPeriod">
-          <ui-icon name="calendar" size="34" color="#1F2329"></ui-icon>
+          <ui-icon name="calendar" size="34" color="text"></ui-icon>
           <view class="grow ml-12">
             <view class="row row--between">
               <view class="subtitle">租赁时间</view>
-              <view class="row"><text wx:if="{{unitsText}}" class="muted small mr-8">{{unitsText}}</text><ui-icon name="chevron-right" size="30" color="#B4BBC8"></ui-icon></view>
+              <view class="row"><text wx:if="{{unitsText}}" class="muted small mr-8">{{unitsText}}</text><ui-icon name="chevron-right" size="30" color="muted"></ui-icon></view>
             </view>
             <view wx:if="{{startText && endText}}" class="row mt-8">
               <text class="body strong">{{startText}}</text>
-              <ui-icon name="arrow-right" size="26" color="#8A94A6"></ui-icon>
+              <ui-icon name="arrow-right" size="26" color="secondary"></ui-icon>
               <text class="body strong">{{endText}}</text>
             </view>
             <view wx:else class="warning-text small mt-8">请选择领取与归还时间</view>
@@ -54,38 +54,38 @@
         </view>
         <view class="divider"></view>
         <view class="row">
-          <ui-icon name="truck" size="34" color="#1F2329"></ui-icon>
+          <ui-icon name="truck" size="34" color="text"></ui-icon>
           <view class="grow ml-12">
             <view class="subtitle">取还方式</view>
             <view class="toggle mt-12">
-              <view class="toggle__item {{method === 'pickup' ? 'toggle__item--active' : ''}}" data-method="pickup" bindtap="onPickMethod"><ui-icon name="store" size="30" color="{{method === 'pickup' ? '#1677FF' : '#1F2329'}}"></ui-icon><text class="ml-8">门店自提</text></view>
-              <view wx:if="{{deliveryAvailable}}" class="toggle__item {{method === 'delivery' ? 'toggle__item--active' : ''}}" data-method="delivery" bindtap="onPickMethod"><ui-icon name="truck" size="30" color="{{method === 'delivery' ? '#1677FF' : '#1F2329'}}"></ui-icon><text class="ml-8">同城配送</text></view>
+              <view class="toggle__item {{method === 'pickup' ? 'toggle__item--active' : ''}}" data-method="pickup" bindtap="onPickMethod"><ui-icon name="store" size="30" color="{{method === 'pickup' ? 'primary' : 'text'}}"></ui-icon><text class="ml-8">门店自提</text></view>
+              <view wx:if="{{deliveryAvailable}}" class="toggle__item {{method === 'delivery' ? 'toggle__item--active' : ''}}" data-method="delivery" bindtap="onPickMethod"><ui-icon name="truck" size="30" color="{{method === 'delivery' ? 'primary' : 'text'}}"></ui-icon><text class="ml-8">同城配送</text></view>
             </view>
             <view wx:if="{{!deliveryAvailable}}" class="muted small mt-8">本商户当前仅支持门店自提</view>
           </view>
         </view>
         <view class="divider"></view>
         <view wx:if="{{method === 'delivery'}}" class="row" hover-class="btn-hover" bindtap="onOpenAddress">
-          <ui-icon name="box" size="34" color="#1F2329"></ui-icon>
+          <ui-icon name="box" size="34" color="text"></ui-icon>
           <view class="grow ml-12">
             <view class="subtitle">收货地址</view>
             <view wx:if="{{addressLabel}}" class="body mt-8 ellipsis">{{addressLabel}}</view>
             <view wx:else class="warning-text small mt-8">请选择收货地址</view>
           </view>
-          <ui-icon name="chevron-right" size="30" color="#B4BBC8"></ui-icon>
+          <ui-icon name="chevron-right" size="30" color="muted"></ui-icon>
         </view>
         <view wx:if="{{method === 'delivery'}}" class="divider"></view>
         <view class="row" hover-class="btn-hover" bindtap="onOpenStore">
-          <ui-icon name="pin" size="34" color="#1F2329"></ui-icon>
+          <ui-icon name="pin" size="34" color="text"></ui-icon>
           <view class="grow ml-12">
             <view class="subtitle">{{method === 'delivery' ? '发货门店' : '自提门店'}}</view>
             <view wx:if="{{store}}" class="row mt-12">
-              <view class="store__icon"><ui-icon name="store" size="40" color="#1677FF" stroke="1.6"></ui-icon></view>
+              <view class="store__icon"><ui-icon name="store" size="40" color="primary" stroke="1.6"></ui-icon></view>
               <view class="grow">
                 <view class="body strong ellipsis">{{store.name}}</view>
                 <view class="muted small ellipsis mt-4">{{method === 'delivery' ? '由该门店发货，商户确认后安排配送' : store.address || '地址以门店信息为准'}}</view>
               </view>
-              <ui-icon name="chevron-right" size="30" color="#B4BBC8"></ui-icon>
+              <ui-icon name="chevron-right" size="30" color="muted"></ui-icon>
             </view>
             <view wx:else class="warning-text small mt-8">{{method === 'delivery' ? '请选择发货门店' : '请选择自提门店'}}</view>
           </view>
@@ -96,15 +96,15 @@
     <view class="section section--tight">
       <view class="card">
         <view class="row" hover-class="btn-hover" bindtap="onOpenCoupons">
-          <ui-icon name="ticket" size="34" color="#1F2329"></ui-icon>
+          <ui-icon name="ticket" size="34" color="text"></ui-icon>
           <view class="grow ml-12 subtitle">优惠券</view>
           <view class="muted small">{{couponText}}</view>
-          <ui-icon name="chevron-right" size="30" color="#B4BBC8"></ui-icon>
+          <ui-icon name="chevron-right" size="30" color="muted"></ui-icon>
         </view>
         <block wx:if="{{services.length}}">
           <view class="divider"></view>
           <view class="row">
-            <ui-icon name="star" size="34" color="#1F2329"></ui-icon>
+            <ui-icon name="star" size="34" color="text"></ui-icon>
             <view class="grow ml-12 subtitle">可选服务</view>
           </view>
           <view class="option {{item.selected ? 'option--selected' : ''}} mt-12" wx:for="{{services}}" wx:key="id" data-id="{{item.id}}" bindtap="onToggleService">
@@ -117,7 +117,7 @@
         </block>
         <view class="divider"></view>
         <view class="row row--top">
-          <ui-icon name="shield" size="34" color="#1F2329"></ui-icon>
+          <ui-icon name="shield" size="34" color="text"></ui-icon>
           <view class="grow ml-12">
             <view class="subtitle">押金说明</view>
             <view class="notice notice--neutral mt-12">{{depositNote}}</view>
@@ -125,7 +125,7 @@
         </view>
         <view class="divider"></view>
         <view class="row row--top">
-          <ui-icon name="edit" size="34" color="#1F2329"></ui-icon>
+          <ui-icon name="edit" size="34" color="text"></ui-icon>
           <view class="grow ml-12">
             <view class="row row--between"><view class="subtitle">备注（选填）</view><view class="muted tiny">{{memo.length}}/100</view></view>
             <view class="input-box mt-12"><input placeholder="如有特殊需求，请留言…" placeholder-class="search__placeholder" maxlength="100" value="{{memo}}" disabled="{{locked}}" bindinput="onMemoInput" bindblur="onMemoBlur" /></view>
@@ -179,15 +179,15 @@
       <view class="field">
         <view class="field__label field__label--required">领取时间</view>
         <view class="row gap-16">
-          <picker class="grow" mode="date" start="{{minDate}}" value="{{startDate}}" data-field="startDate" bindchange="onDateChange"><view class="field__picker"><text>{{startDate || '选择日期'}}</text><ui-icon name="chevron-right" size="28" color="#B4BBC8"></ui-icon></view></picker>
-          <picker class="grow" mode="time" value="{{startTime}}" data-field="startTime" bindchange="onDateChange"><view class="field__picker"><text>{{startTime}}</text><ui-icon name="chevron-right" size="28" color="#B4BBC8"></ui-icon></view></picker>
+          <picker class="grow" mode="date" start="{{minDate}}" value="{{startDate}}" data-field="startDate" bindchange="onDateChange"><view class="field__picker"><text>{{startDate || '选择日期'}}</text><ui-icon name="chevron-right" size="28" color="muted"></ui-icon></view></picker>
+          <picker class="grow" mode="time" value="{{startTime}}" data-field="startTime" bindchange="onDateChange"><view class="field__picker"><text>{{startTime}}</text><ui-icon name="chevron-right" size="28" color="muted"></ui-icon></view></picker>
         </view>
       </view>
       <view class="field">
         <view class="field__label field__label--required">归还时间</view>
         <view class="row gap-16">
-          <picker class="grow" mode="date" start="{{startDate || minDate}}" value="{{endDate}}" data-field="endDate" bindchange="onDateChange"><view class="field__picker"><text>{{endDate || '选择日期'}}</text><ui-icon name="chevron-right" size="28" color="#B4BBC8"></ui-icon></view></picker>
-          <picker class="grow" mode="time" value="{{endTime}}" data-field="endTime" bindchange="onDateChange"><view class="field__picker"><text>{{endTime}}</text><ui-icon name="chevron-right" size="28" color="#B4BBC8"></ui-icon></view></picker>
+          <picker class="grow" mode="date" start="{{startDate || minDate}}" value="{{endDate}}" data-field="endDate" bindchange="onDateChange"><view class="field__picker"><text>{{endDate || '选择日期'}}</text><ui-icon name="chevron-right" size="28" color="muted"></ui-icon></view></picker>
+          <picker class="grow" mode="time" value="{{endTime}}" data-field="endTime" bindchange="onDateChange"><view class="field__picker"><text>{{endTime}}</text><ui-icon name="chevron-right" size="28" color="muted"></ui-icon></view></picker>
         </view>
       </view>
       <view class="muted small mt-8">天数/夜数、起租限制与营业日由商户系统在报价时核算。</view>

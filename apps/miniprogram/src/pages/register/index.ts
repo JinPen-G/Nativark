@@ -1,3 +1,4 @@
+import { themeBehavior } from "../../core/theme-behavior";
 import { adoptSession, createRegistrationChallenge, loginWithPassword, registerPersonal, verifyRegistrationChallenge } from "../../api/auth";
 import { describeError } from "../../core/errors";
 import { newKey } from "../../core/keys";
@@ -33,6 +34,7 @@ interface RegisterData {
 }
 
 Page({
+  behaviors: [themeBehavior],
   data: {
     step: "form",
     merchantName: "",

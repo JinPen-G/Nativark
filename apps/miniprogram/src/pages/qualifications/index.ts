@@ -1,3 +1,4 @@
+import { themeBehavior } from "../../core/theme-behavior";
 import type { CustomerMembershipQualificationType, CustomerQualificationRevision } from "@rental-os/shared";
 import { completeQualificationUpload, createQualificationUpload, fetchQualificationTypes, fetchQualifications, qualificationFileUrl, submitQualification } from "../../api/profile";
 import { describeError } from "../../core/errors";
@@ -60,6 +61,7 @@ interface QualificationData {
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
 Page({
+  behaviors: [themeBehavior],
   data: {
     view: loadingState(),
     rows: [],

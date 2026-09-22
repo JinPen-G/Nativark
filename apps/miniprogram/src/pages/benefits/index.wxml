@@ -1,11 +1,12 @@
-<view class="screen screen--flat">
+<page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
+<view class="screen screen--flat {{themeClass}}">
   <nav-bar title="我的会员权益"></nav-bar>
   <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
 
   <block wx:else>
     <view class="section">
       <view class="member">
-        <view class="member__crown"><ui-icon name="crown" size="44" color="#F5C15C" stroke="1.6"></ui-icon></view>
+        <view class="member__crown"><ui-icon name="crown" size="44" color="gold" stroke="1.6"></ui-icon></view>
         <view class="grow ml-16">
           <view class="row"><text class="member__title">{{hasPlan ? planName : '暂无会员方案'}}</text><status-tag label="{{membershipLabel}}" tone="{{membershipTone}}" small="{{true}}"></status-tag></view>
           <view class="member__hint">{{hasPlan ? planPeriod + ' · ' + planSource : '商户授予方案后，权益会自动参与报价'}}</view>

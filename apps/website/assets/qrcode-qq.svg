@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="QQ QR code placeholder">
+  <rect width="256" height="256" fill="#fff"/>
+  <g fill="#111">
+    <path d="M16 16h64v64H16zm12 12v40h40V28zM40 40h16v16H40zM176 16h64v64h-64zm12 12v40h40V28zm12 12h16v16h-16zM16 176h64v64H16zm12 12v40h40v-40zm12 12h16v16H40z" fill-rule="evenodd"/>
+    <path d="M96 16h24v8H96zm32 0h16v24h-16zm24 0h24v16h-24zm32 0h8v24h-8zm16 0h24v8h-24zM96 40h8v24h-8zm16 0h24v8h-24zm32 0h16v16h-16zm24 0h24v8h-24zm32 0h16v24h-16zM96 80h16v16H96zm24 0h8v24h-8zm16 0h24v8h-24zm32 0h16v24h-16zm24 0h24v16h-24zM96 104h24v16H96zm32 0h16v8h-16zm24 0h8v24h-8zm16 0h24v16h-24zm32 0h16v8h-16zm24 0h16v24h-16zM96 128h8v24H96zm16 0h16v8h-16zm24 0h24v16h-24zm32 0h16v8h-16zm24 0h8v24h-8zm16 0h24v16h-24zM96 160h16v16H96zm24 0h24v8h-24zm32 0h16v24h-16zm24 0h24v8h-24zm32 0h16v16h-16zM96 192h8v24H96zm16 0h24v16h-24zm32 0h16v8h-16zm24 0h8v24h-8zm16 0h24v16h-24zm32 0h16v8h-16zM96 224h16v16H96zm24 0h8v24h-8zm16 0h24v8h-24zm32 0h16v16h-16zm24 0h24v8h-24zm32 0h16v16h-16z"/>
+  </g>
+  <g fill="#fff">
+    <rect x="112" y="24" width="8" height="8"/>
+    <rect x="176" y="32" width="8" height="8"/>
+    <rect x="144" y="88" width="8" height="8"/>
+    <rect x="208" y="112" width="8" height="8"/>
+    <rect x="128" y="152" width="8" height="8"/>
+  </g>
+</svg>
