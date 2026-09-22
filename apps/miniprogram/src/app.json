@@ -24,18 +24,18 @@
   ],
   "window": {
     "navigationStyle": "custom",
-    "navigationBarBackgroundColor": "#FFFFFF",
-    "navigationBarTextStyle": "black",
+    "navigationBarBackgroundColor": "@navBg",
+    "navigationBarTextStyle": "@navText",
     "navigationBarTitleText": "Rental OS",
-    "backgroundColor": "#F5F7FA",
-    "backgroundTextStyle": "dark",
+    "backgroundColor": "@pageBg",
+    "backgroundTextStyle": "@bgText",
     "enablePullDownRefresh": false
   },
   "tabBar": {
-    "color": "#8A94A6",
-    "selectedColor": "#1677FF",
-    "backgroundColor": "#FFFFFF",
-    "borderStyle": "white",
+    "color": "@tabColor",
+    "selectedColor": "@tabSelectedColor",
+    "backgroundColor": "@tabBg",
+    "borderStyle": "@tabBorder",
     "list": [
       { "pagePath": "pages/home/index", "text": "首页", "iconPath": "assets/tab/home.png", "selectedIconPath": "assets/tab/home-active.png" },
       { "pagePath": "pages/catalog/index", "text": "分类", "iconPath": "assets/tab/grid.png", "selectedIconPath": "assets/tab/grid-active.png" },
@@ -45,6 +45,7 @@
   },
   "lazyCodeLoading": "requiredComponents",
   "darkmode": true,
+  "themeLocation": "theme.json",
   "style": "v2",
   "permission": {
     "scope.userLocation": {

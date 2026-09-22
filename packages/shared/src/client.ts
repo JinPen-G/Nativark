@@ -695,8 +695,8 @@ export interface ClientFulfillmentView {
 export const CLIENT_LOGIN_METHODS = ["wechat_phone", "sms", "password"] as const;
 export type ClientLoginMethod = (typeof CLIENT_LOGIN_METHODS)[number];
 
-/** 客户端渠道种类：微信小程序（缺省）与后续 APP。共用的品牌/协议/帮助来自租户级配置，渠道能力按种类叠加。 */
-export const CLIENT_CHANNEL_KINDS = ["wechat_miniprogram", "app"] as const;
+/** 客户端渠道种类：微信小程序（缺省）、APP 与 web 官网。共用的品牌/协议/帮助来自租户级配置，渠道能力按种类叠加；`web` 额外带官网特有配置。 */
+export const CLIENT_CHANNEL_KINDS = ["wechat_miniprogram", "app", "web"] as const;
 export type ClientChannelKind = (typeof CLIENT_CHANNEL_KINDS)[number];
 
 /** 公开启动配置的查询：包内只有商户公开编码、渠道种类与小程序 AppID，均不是密钥。 */
@@ -712,6 +712,37 @@ export interface ClientChannelAgreementSummary {
   url?: string;
   /** 商户是否提供了可在客户端内直接阅读的正文（经 `GET /public/documents/{kind}` 读取）。 */
   hasBody: boolean;
+}
+
+/**
+ * web 官网特有配置（WEBSITE-CHANNEL-01）。只在 `GET /public/bootstrap?client=web` 且商户已启用官网渠道时返回。
+ * 商户名、Logo、协议、客服、帮助、已发布服务与主色（themeColor）仍在 bootstrap 顶层通用字段，官网直接复用，不在此重复。
+ */
+export interface ClientWebsiteConfig {
+  /** 站点标语（header 品牌下、页脚展示）。 */
+  slogan?: string;
+  /** 首页 Hero 主标题；缺省时官网回退到商户名/标语。 */
+  heroTitle?: string;
+  /** 首页 Hero 副文案。 */
+  heroDescription?: string;
+  /** 首页 Hero 大图地址。 */
+  heroImageUrl?: string;
+  /** 辅助/强调色（#RRGGBB）；主色仍取通用 themeColor。 */
+  secondaryColor?: string;
+  /** 页脚品牌文案。 */
+  footerText?: string;
+  /** 页脚展示的联系地址。 */
+  contactAddress?: string;
+  /** 底部行动区标题。 */
+  ctaTitle?: string;
+  /** 底部行动区文案。 */
+  ctaDescription?: string;
+  /** SEO 标题 / 描述 / 关键词（关键词以英文逗号分隔）。 */
+  seoTitle?: string;
+  seoDescription?: string;
+  seoKeywords?: string;
+  /** 是否在页脚展示 “Powered by Rental OS”。 */
+  showPoweredBy: boolean;
 }
 
 /**
@@ -737,6 +768,8 @@ export interface ClientChannelBootstrapResponse {
   banner?: { title: string; subtitle?: string };
   /** 客户端主题色（#RRGGBB）；客户端据此覆盖主色，未设置时用系统默认色。 */
   themeColor?: string;
+  /** web 官网特有配置；仅在 `client=web` 且商户已启用官网渠道时返回，其余渠道恒为 undefined。 */
+  website?: ClientWebsiteConfig;
   loginMethods: ClientLoginMethod[];
   capabilities: {
     publicCatalog: boolean;

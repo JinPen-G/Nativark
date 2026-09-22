@@ -119,8 +119,20 @@ export function isDeliveryMode(mode: string | undefined): boolean {
 }
 
 /** 品类对应的线性图标名（ui-icon 组件）。 */
+const CATEGORY_IMAGE_PATHS: Record<string, string> = {
+  camera: "/assets/category/camera.png",
+  camping: "/assets/category/camping.png",
+  vehicle: "/assets/category/vehicle.png",
+  construction: "/assets/category/construction.png"
+};
+
+function normalizedCategoryCode(code?: string | null): string {
+  return String(code ?? "").trim().toLowerCase();
+}
+
 export function categoryIcon(code?: string | null): string {
-  switch (code) {
+  // Prisma 枚举经 API 返回时可能是大写（CAMERA/CAMPING/...），客户端统一按领域小写匹配。
+  switch (normalizedCategoryCode(code)) {
     case "camera":
       return "camera";
     case "camping":
@@ -132,4 +144,9 @@ export function categoryIcon(code?: string | null): string {
     default:
       return "grid";
   }
+}
+
+/** 品类对应的透明图片图标：首页分类入口使用，未知品类返回空字符串并保留线性图标回退。 */
+export function categoryImage(code?: string | null): string {
+  return CATEGORY_IMAGE_PATHS[normalizedCategoryCode(code)] ?? "";
 }

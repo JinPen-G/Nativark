@@ -1,9 +1,10 @@
 import { CheckCircleOutlined, ExperimentOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
-import type { SaveClientChannelProfileRequest, SaveMiniProgramChannelRequest } from "@rental-os/shared";
+import type { SaveClientChannelProfileRequest, SaveMiniProgramChannelRequest, SaveWebsiteChannelProfileRequest } from "@rental-os/shared";
 import { Alert, App, Button, Card, Checkbox, Col, Divider, Form, Input, Row, Space, Spin, Switch, Tabs, Tag, Typography } from "antd";
 import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { clientChannelApi } from "@/api/clientChannel";
+import { websiteChannelApi } from "@/api/websiteChannel";
 import { PageHeader } from "@/components/PageHeader";
 
 type ProfileForm = SaveClientChannelProfileRequest;
@@ -203,12 +204,124 @@ function WechatCredentialsCard() {
   );
 }
 
+function WebsiteProfileCard() {
+  const [form] = Form.useForm<SaveWebsiteChannelProfileRequest>();
+  const { message } = App.useApp();
+  const queryClient = useQueryClient();
+  // 原生取色器需要合法 #RRGGBB；表单里可能是 #RGB 或空，展示时归一化，不回写表单值。
+  const secondaryColorValue = Form.useWatch("secondaryColor", form);
+  const secondaryColorSwatch = /^#[0-9a-fA-F]{6}$/.test(secondaryColorValue ?? "")
+    ? (secondaryColorValue as string)
+    : /^#[0-9a-fA-F]{3}$/.test(secondaryColorValue ?? "")
+      ? "#" + (secondaryColorValue as string).slice(1).split("").map((c) => c + c).join("")
+      : "#0A5CFF";
+  const profile = useQuery({ queryKey: ["website-channel-profile"], queryFn: websiteChannelApi.getProfile });
+
+  useEffect(() => {
+    const data = profile.data;
+    if (!data) return;
+    form.setFieldsValue({
+      expectedRevision: data.revision,
+      enabled: data.enabled,
+      slogan: data.slogan,
+      heroTitle: data.heroTitle,
+      heroDescription: data.heroDescription,
+      heroImageUrl: data.heroImageUrl,
+      secondaryColor: data.secondaryColor,
+      footerText: data.footerText,
+      contactAddress: data.contactAddress,
+      ctaTitle: data.ctaTitle,
+      ctaDescription: data.ctaDescription,
+      seoTitle: data.seoTitle,
+      seoDescription: data.seoDescription,
+      seoKeywords: data.seoKeywords,
+      showPoweredBy: data.showPoweredBy
+    });
+  }, [profile.data, form]);
+
+  const save = useMutation({
+    mutationFn: (values: SaveWebsiteChannelProfileRequest) => websiteChannelApi.saveProfile({ ...values, expectedRevision: profile.data?.revision }),
+    onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["website-channel-profile"] }); message.success("官网渠道配置已保存"); },
+    onError: (error: any) => message.error(error?.response?.data?.message ?? "保存失败")
+  });
+
+  if (profile.isLoading) return <div style={{ textAlign: "center", padding: 60 }}><Spin size="large" /></div>;
+  if (profile.error || !profile.data) return <Alert showIcon type="error" title="无法读取官网渠道配置" description="请刷新重试。" />;
+
+  const data = profile.data;
+
+  return (
+    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+      <Alert
+        showIcon
+        type={data.readiness.ready ? "success" : "warning"}
+        title={data.readiness.ready ? "官网渠道已就绪" : "官网渠道未完成"}
+        description={data.readiness.ready
+          ? "官网将读取这份官网特有配置；商户名、Logo、协议、客服等通用项仍来自“通用客户端配置”。"
+          : <span>还需完成：{data.readiness.missing.join("、")}。未启用或缺 Hero 标题前，官网会回退到通用品牌文案。</span>} />
+      <Form form={form} layout="vertical" onFinish={(values) => save.mutate(values)}>
+        <Card size="small" title="官网开关">
+          <Space size="large">
+            <Form.Item name="enabled" label="启用官网渠道" valuePropName="checked" noStyle><Switch /></Form.Item>
+            <Typography.Text type="secondary">关闭后公开启动接口不返回官网配置，官网回退到通用品牌文案</Typography.Text>
+          </Space>
+          <div style={{ marginTop: 12 }}>
+            <Space size="large">
+              <Form.Item name="showPoweredBy" label="页脚显示 Powered by Rental OS" valuePropName="checked" noStyle><Switch /></Form.Item>
+              <Typography.Text type="secondary">是否在页脚展示 “Powered by Rental OS”</Typography.Text>
+            </Space>
+          </div>
+        </Card>
+
+        <Card size="small" title="首页 Hero 与品牌" style={{ marginTop: 16 }}>
+          <Row gutter={[16, 0]}>
+            <Col xs={24} md={12}><Form.Item name="slogan" label="站点标语" extra="展示在品牌名下方与页脚"><Input maxLength={120} placeholder="如：好物相伴，更好生活" /></Form.Item></Col>
+            <Col xs={24} md={12}>
+              <Form.Item name="secondaryColor" label="辅助色" tooltip="主色仍在“通用客户端配置”的主题色里；此处是官网强调/辅助色" extra="#RRGGBB，留空回退默认" rules={[{ pattern: /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, message: "请输入 #RRGGBB 十六进制颜色" }]}>
+                <Input maxLength={7} allowClear placeholder="#0A5CFF" addonBefore={<input type="color" value={secondaryColorSwatch} onChange={(e) => form.setFieldValue("secondaryColor", e.target.value.toUpperCase())} style={{ width: 28, height: 22, border: "none", background: "transparent", padding: 0, cursor: "pointer" }} aria-label="选择辅助色" />} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} md={12}><Form.Item name="heroTitle" label="Hero 主标题" extra="首页首屏大标题；缺省回退到商户名/标语"><Input maxLength={120} placeholder="如：面向多行业的租赁解决方案" /></Form.Item></Col>
+            <Col xs={24} md={12}><Form.Item name="heroImageUrl" label="Hero 大图地址" extra="HTTPS 图片地址"><Input maxLength={512} placeholder="https://..." /></Form.Item></Col>
+            <Col xs={24}><Form.Item name="heroDescription" label="Hero 副文案"><Input.TextArea rows={2} maxLength={400} showCount /></Form.Item></Col>
+          </Row>
+        </Card>
+
+        <Card size="small" title="底部行动区（CTA）" style={{ marginTop: 16 }}>
+          <Row gutter={[16, 0]}>
+            <Col xs={24} md={12}><Form.Item name="ctaTitle" label="CTA 标题"><Input maxLength={120} placeholder="如：现在就开始租赁吧" /></Form.Item></Col>
+            <Col xs={24} md={12}><Form.Item name="ctaDescription" label="CTA 文案"><Input maxLength={400} placeholder="如：海量好物 · 灵活租期" /></Form.Item></Col>
+          </Row>
+        </Card>
+
+        <Card size="small" title="页脚与联系" style={{ marginTop: 16 }}>
+          <Form.Item name="footerText" label="页脚文案"><Input.TextArea rows={2} maxLength={600} showCount placeholder="页脚品牌介绍文案" /></Form.Item>
+          <Form.Item name="contactAddress" label="联系地址" extra="展示在页脚"><Input maxLength={256} /></Form.Item>
+        </Card>
+
+        <Card size="small" title="SEO（可选）" style={{ marginTop: 16 }}>
+          <Row gutter={[16, 0]}>
+            <Col xs={24} md={12}><Form.Item name="seoTitle" label="SEO 标题"><Input maxLength={120} /></Form.Item></Col>
+            <Col xs={24} md={12}><Form.Item name="seoKeywords" label="SEO 关键词" extra="以英文逗号分隔"><Input maxLength={256} placeholder="相机,露营,租赁" /></Form.Item></Col>
+            <Col xs={24}><Form.Item name="seoDescription" label="SEO 描述"><Input.TextArea rows={2} maxLength={400} showCount /></Form.Item></Col>
+          </Row>
+        </Card>
+
+        <Space style={{ marginTop: 16 }}>
+          <Button type="primary" htmlType="submit" icon={<SaveOutlined />} loading={save.isPending}>保存配置</Button>
+          {data.updatedAt ? <Typography.Text type="secondary">上次更新：{data.updatedAt}</Typography.Text> : null}
+        </Space>
+      </Form>
+    </Space>
+  );
+}
+
 export function ClientChannelPage() {
   return (
     <PageHeader
       title="客户端渠道"
-      description="配置小程序与后续 APP 对客户展示的品牌、客服、协议、帮助与发布服务（租户级共用），以及微信小程序凭证。"
-      note={{ title: "一份配置，多端共用", description: "品牌、客服、协议正文/版本、帮助与发布服务由小程序和 APP 共用；只有微信 AppID/AppSecret 是微信渠道专有。协议正文在客户端内直接渲染，请填写正文而不仅是外链。" }}
+      description="配置小程序、APP 与 web 官网对客户展示的品牌、客服、协议、帮助与发布服务（租户级共用），以及微信小程序凭证与官网特有内容。"
+      note={{ title: "一份通用配置，多端共用", description: "品牌、客服、协议正文/版本、帮助与发布服务由小程序、APP 和官网共用；微信 AppID/AppSecret 是微信渠道专有；站点标语、Hero、辅助色、页脚与 SEO 是官网专有。协议正文在客户端内直接渲染，请填写正文而不仅是外链。" }}
       view={<Tabs
         tabBarGutter={32}
         items={[
@@ -221,6 +334,11 @@ export function ClientChannelPage() {
             key: "mini-program",
             label: "微信小程序配置",
             children: <WechatCredentialsCard />
+          },
+          {
+            key: "website",
+            label: "官网配置",
+            children: <WebsiteProfileCard />
           }
         ]}
       />}

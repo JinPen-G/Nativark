@@ -29,7 +29,8 @@
       <view class="cats">
         <view class="cats__item" wx:for="{{services}}" wx:key="code" data-code="{{item.code}}" hover-class="btn-hover" bindtap="onServiceTap">
           <view class="cats__icon {{item.active ? 'cats__icon--active' : ''}}">
-            <ui-icon name="{{item.icon}}" size="44" color="{{item.active ? 'primary' : 'secondary'}}" stroke="1.6"></ui-icon>
+            <image wx:if="{{item.iconPath}}" class="cats__image {{item.active ? 'cats__image--active' : ''}}" src="{{item.iconPath}}" mode="aspectFit"></image>
+            <ui-icon wx:else name="{{item.icon}}" size="44" color="{{item.active ? 'primary' : 'secondary'}}" stroke="1.6"></ui-icon>
           </view>
           <view class="cats__label ellipsis">{{item.name}}</view>
         </view>

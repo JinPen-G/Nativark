@@ -204,6 +204,7 @@ model Tenant {
   clientAuthSessions                ClientAuthSession[]
   miniProgramChannels               MiniProgramChannel[]
   clientChannelProfile              ClientChannelProfile?
+  websiteChannelProfile             WebsiteChannelProfile?
   clientChannelWorkspaces           ClientChannelWorkspace[]
   clientWechatIdentities            ClientWechatIdentity[]
   customerDeliveryAddresses         CustomerDeliveryAddress[]
@@ -720,6 +721,37 @@ model ClientChannelWorkspace {
   @@unique([tenantId, workspaceId], map: "client_channel_workspace_key")
   @@index([tenantId, enabled], map: "client_channel_workspace_scope_idx")
   @@map("client_channel_workspaces")
+}
+
+/// WEBSITE-CHANNEL-01：租户级「web 官网渠道」配置。只存官网特有设定项（标语、Hero、辅助色、页脚、
+/// 联系地址、底部 CTA、SEO、Powered by 开关与官网启用开关）；商户名/Logo/协议/客服/帮助/发布服务
+/// 继续复用通用的 ClientChannelProfile，不在此重复。一租户一条（tenantId 唯一），保存带 revision 乐观锁。
+model WebsiteChannelProfile {
+  id               String   @id @default(uuid())
+  tenantId         String   @unique(map: "website_channel_profiles_tenant_key")
+  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  revision         Int      @default(1)
+  /// 官网渠道是否对外启用；关闭时公开启动接口不返回官网配置。
+  enabled          Boolean  @default(false)
+  slogan           String?  @db.VarChar(120)
+  heroTitle        String?  @db.VarChar(120)
+  heroDescription  String?  @db.VarChar(400)
+  heroImageUrl     String?  @db.VarChar(512)
+  /// 辅助/强调色（#RRGGBB）；主色仍取通用配置的 themeColor。
+  secondaryColor   String?  @db.VarChar(16)
+  footerText       String?  @db.VarChar(600)
+  contactAddress   String?  @db.VarChar(256)
+  ctaTitle         String?  @db.VarChar(120)
+  ctaDescription   String?  @db.VarChar(400)
+  seoTitle         String?  @db.VarChar(120)
+  seoDescription   String?  @db.VarChar(400)
+  seoKeywords      String?  @db.VarChar(256)
+  /// 是否在页脚展示 “Powered by Rental OS”。
+  showPoweredBy    Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@map("website_channel_profiles")
 }
 
 /// MP-R1：租户绑定的微信小程序渠道凭证。密钥只保存加密值；品牌/协议/发布服务在 ClientChannelProfile。

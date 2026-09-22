@@ -316,6 +316,30 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     },
     ["smsLoginEnabled", "passwordLoginEnabled", "publishedWorkspaceIds"]
   ),
+  WebsiteChannelProfileSummary: objectOf(
+    {
+      configured: booleanSchema, revision: numberSchema, enabled: booleanSchema,
+      slogan: stringSchema, heroTitle: stringSchema, heroDescription: stringSchema, heroImageUrl: stringSchema,
+      secondaryColor: stringSchema, footerText: stringSchema, contactAddress: stringSchema,
+      ctaTitle: stringSchema, ctaDescription: stringSchema,
+      seoTitle: stringSchema, seoDescription: stringSchema, seoKeywords: stringSchema,
+      showPoweredBy: booleanSchema,
+      readiness: objectOf({ ready: booleanSchema, missing: arrayOf(stringSchema) }, ["ready", "missing"], false),
+      updatedAt: { type: "string", format: "date-time" }
+    },
+    ["configured", "revision", "enabled", "showPoweredBy", "readiness"],
+    false
+  ),
+  SaveWebsiteChannelProfileRequest: objectOf(
+    {
+      expectedRevision: numberSchema, enabled: booleanSchema,
+      slogan: stringSchema, heroTitle: stringSchema, heroDescription: stringSchema, heroImageUrl: stringSchema,
+      secondaryColor: stringSchema, footerText: stringSchema, contactAddress: stringSchema,
+      ctaTitle: stringSchema, ctaDescription: stringSchema,
+      seoTitle: stringSchema, seoDescription: stringSchema, seoKeywords: stringSchema, showPoweredBy: booleanSchema
+    },
+    ["enabled", "showPoweredBy"]
+  ),
   TenantIntegrationCatalogResponse: objectOf(
     { providers: arrayOf(objectSchema), configs: arrayOf(objectSchema) },
     ["providers", "configs"]
@@ -1048,7 +1072,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     {
       apiVersion: stringSchema,
       tenantCode: stringSchema,
-      client: { type: "string", enum: ["wechat_miniprogram", "app"] },
+      client: { type: "string", enum: ["wechat_miniprogram", "app", "web"] },
       merchant: objectOf({ name: stringSchema, logoUrl: stringSchema, servicePhone: stringSchema, serviceHours: stringSchema }, ["name"], false),
       services: arrayOf(objectOf({ code: stringSchema, name: stringSchema, categoryCode: stringSchema, isDefault: booleanSchema, status: { type: "string", enum: ["open", "paused"] } }, ["code", "name", "categoryCode", "status"], false)),
       defaultServiceCode: stringSchema,
@@ -1061,9 +1085,21 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       themeColor: stringSchema,
       loginMethods: arrayOf({ type: "string", enum: ["wechat_phone", "sms", "password"] }),
       capabilities: objectOf({ publicCatalog: booleanSchema, wechatPay: booleanSchema, delivery: booleanSchema, feeResponse: booleanSchema, accountClosure: booleanSchema }, ["publicCatalog", "wechatPay", "delivery", "feeResponse", "accountClosure"], false),
+      website: ref("ClientWebsiteConfig"),
       source: { type: "string", enum: ["channel", "workspace_directory"] }
     },
     ["apiVersion", "tenantCode", "client", "merchant", "services", "help", "loginMethods", "capabilities", "source"],
+    false
+  ),
+  ClientWebsiteConfig: objectOf(
+    {
+      slogan: stringSchema, heroTitle: stringSchema, heroDescription: stringSchema, heroImageUrl: stringSchema,
+      secondaryColor: stringSchema, footerText: stringSchema, contactAddress: stringSchema,
+      ctaTitle: stringSchema, ctaDescription: stringSchema,
+      seoTitle: stringSchema, seoDescription: stringSchema, seoKeywords: stringSchema,
+      showPoweredBy: booleanSchema
+    },
+    ["showPoweredBy"],
     false
   ),
   ClientPublicDocumentResponse: objectOf(
@@ -1654,6 +1690,9 @@ const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
   backlogOperation("post", "/api/platform/mini-program-channel/test", "Platform", "testMiniProgramChannel", "Verify the mini-program AppID/AppSecret by fetching an access token only", ["system:integration:manage"], true, undefined, "MiniProgramChannelTestResult"),
   backlogOperation("get", "/api/platform/client-channel", "Platform", "getClientChannelProfile", "Get the tenant-level client channel profile (brand, service, agreements, help, published services) shared by mini-program and app", ["system:integration:manage"], true, undefined, "ClientChannelProfileSummary"),
   backlogOperation("put", "/api/platform/client-channel", "Platform", "saveClientChannelProfile", "Save the tenant-level client channel profile with optimistic revision check", ["system:integration:manage"], true, "SaveClientChannelProfileRequest", "ClientChannelProfileSummary"),
+  // WEBSITE-CHANNEL-01：租户级 web 官网渠道配置（官网特有设定项：标语、Hero、辅助色、页脚、CTA、SEO）。
+  backlogOperation("get", "/api/platform/website-channel", "Platform", "getWebsiteChannelProfile", "Get the tenant-level website channel profile (website-only settings: slogan, hero, secondary color, footer, CTA, SEO)", ["system:integration:manage"], true, undefined, "WebsiteChannelProfileSummary"),
+  backlogOperation("put", "/api/platform/website-channel", "Platform", "saveWebsiteChannelProfile", "Save the tenant-level website channel profile with optimistic revision check", ["system:integration:manage"], true, "SaveWebsiteChannelProfileRequest", "WebsiteChannelProfileSummary"),
   // SPACE-01：经营空间主档与成员关系的最小管理面。
   // 刻意没有"切换当前空间"操作——会话空间上下文属 SPACE-02。
   backlogOperation("get", "/api/platform/workspaces", "Platform", "listBusinessWorkspaces", "List business workspaces", ["system:org:manage"]),
@@ -2714,7 +2753,7 @@ function rentalBusinessOperations(): ContractOperation[] { return [
   // 但受独立客户 bearer token 保护；这里使用字段级 schema 供小程序/App 生成客户端。
   clientOperation("get", "/api/client/v1/tenants/{tenantCode}/workspaces", "listClientWorkspaces", "List active workspaces for client registration", { responseSchema: "ClientWorkspaceDirectory", authRequired: false }),
   clientOperation("post", "/api/client/v1/auth/registration/challenges", "createClientRegistrationChallenge", "Create a client registration verification challenge", { requestSchema: "ClientRegistrationChallengeRequest", responseSchema: "ClientRegistrationChallengeResponse", authRequired: false }),
-  clientOperation("get", "/api/client/v1/public/bootstrap", "getClientChannelBootstrap", "Public client channel bootstrap: brand, agreements, service phone, help, banner, published services, login methods and capability flags; client=wechat_miniprogram|app overlays channel capabilities", { responseSchema: "ClientChannelBootstrapResponse", authRequired: false, parameters: [{ name: "tenantCode", in: "query", required: true, schema: stringSchema }, { name: "client", in: "query", schema: { type: "string", enum: ["wechat_miniprogram", "app"] } }, { name: "appId", in: "query", schema: stringSchema }] }),
+  clientOperation("get", "/api/client/v1/public/bootstrap", "getClientChannelBootstrap", "Public client channel bootstrap: brand, agreements, service phone, help, banner, published services, login methods and capability flags; client=wechat_miniprogram|app|web overlays channel capabilities, and client=web additionally returns the website-only config block", { responseSchema: "ClientChannelBootstrapResponse", authRequired: false, parameters: [{ name: "tenantCode", in: "query", required: true, schema: stringSchema }, { name: "client", in: "query", schema: { type: "string", enum: ["wechat_miniprogram", "app", "web"] } }, { name: "appId", in: "query", schema: stringSchema }] }),
   clientOperation("get", "/api/client/v1/public/documents/{kind}", "getClientPublicDocument", "Public document body (user agreement / privacy policy / help) from the tenant client channel profile; rendered in-client, guest-readable", { responseSchema: "ClientPublicDocumentResponse", authRequired: false, parameters: [{ name: "kind", in: "path", required: true, schema: { type: "string", enum: ["user_agreement", "privacy_policy", "help"] } }, { name: "tenantCode", in: "query", required: true, schema: stringSchema }] }),
   clientOperation("get", "/api/client/v1/public/catalog", "getClientPublicCatalog", "Guest catalog for a service published to the mini-program channel (same whitelisted projection as the member catalog)", { responseSchema: "ClientCatalog", authRequired: false, parameters: [{ name: "tenantCode", in: "query", required: true, schema: stringSchema }, { name: "service", in: "query", required: true, schema: stringSchema }] }),
   clientOperation("get", "/api/client/v1/public/catalog/items/{itemGroupId}/images/{imageId}", "getClientPublicCatalogItemImage", "Guest catalog image for a published service", { rawResponseContentType: "image/*", authRequired: false, parameters: [{ name: "tenantCode", in: "query", required: true, schema: stringSchema }, { name: "service", in: "query", required: true, schema: stringSchema }] }),

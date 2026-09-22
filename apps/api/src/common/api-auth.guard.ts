@@ -164,6 +164,10 @@ export function requiredPermissions(method: string, path: string) {
   if (path.startsWith("/platform/client-channel")) {
     return ["system:integration:manage"];
   }
+  // WEBSITE-CHANNEL-01：租户级 web 官网渠道配置（官网特有设定项），同一权限。
+  if (path.startsWith("/platform/website-channel")) {
+    return ["system:integration:manage"];
+  }
   // EXT-01D：真实支付退款与查单恢复是高风险资金动作，独立于费用裁定和模拟资金事件。
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/payment-intents(?:\/[^/]+\/refunds(?:\/[^/]+\/refresh)?)?$/u)) {
     return method === "GET"

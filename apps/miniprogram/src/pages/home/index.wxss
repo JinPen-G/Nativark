@@ -11,6 +11,8 @@
 .cats__item { width: 22%; display: flex; flex-direction: column; align-items: center; }
 .cats__icon { width: 112rpx; height: 112rpx; border-radius: 28rpx; background: var(--border); display: flex; align-items: center; justify-content: center; }
 .cats__icon--active { background: var(--primary-weak); }
+.cats__image { width: 96rpx; height: 96rpx; opacity: 1; }
+.cats__image--active { opacity: 1; }
 .cats__label { font-size: 24rpx; margin-top: 12rpx; max-width: 100%; }
 .section-link text { margin-right: 4rpx; }
 .store { display: flex; align-items: center; }

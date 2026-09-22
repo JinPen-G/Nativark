@@ -104,7 +104,7 @@ export class ClientApiController {
   @Get("public/bootstrap")
   bootstrap(@Query("tenantCode") tenantCode: string, @Query("client") client?: string, @Query("appId") appId?: string) {
     if (!tenantCode?.trim()) throw new BadRequestException("缺少商户编码");
-    const kind: ClientChannelKind = client === "app" ? "app" : "wechat_miniprogram";
+    const kind: ClientChannelKind = client === "app" ? "app" : client === "web" ? "web" : "wechat_miniprogram";
     return this.api.channelBootstrap(tenantCode, kind, appId);
   }
 

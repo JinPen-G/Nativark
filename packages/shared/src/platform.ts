@@ -816,6 +816,54 @@ export interface SaveClientChannelProfileRequest {
 }
 
 /**
+ * web 官网渠道配置（WEBSITE-CHANNEL-01，运营端读）。只含官网特有设定项；
+ * 商户名/Logo/协议/客服/帮助/发布服务仍在 ClientChannelProfileSummary。一租户一条。
+ */
+export interface WebsiteChannelProfileSummary {
+  configured: boolean;
+  revision: number;
+  /** 官网渠道是否对外启用；关闭时公开启动接口不返回官网配置。 */
+  enabled: boolean;
+  slogan?: string;
+  heroTitle?: string;
+  heroDescription?: string;
+  heroImageUrl?: string;
+  /** 辅助/强调色（#RRGGBB）；主色仍在通用配置的 themeColor。 */
+  secondaryColor?: string;
+  footerText?: string;
+  contactAddress?: string;
+  ctaTitle?: string;
+  ctaDescription?: string;
+  seoTitle?: string;
+  seoDescription?: string;
+  seoKeywords?: string;
+  showPoweredBy: boolean;
+  readiness: ClientChannelReadiness;
+  updatedAt?: string;
+}
+
+export interface SaveWebsiteChannelProfileRequest {
+  /** 携带上次读到的修订号；不一致时拒绝保存，防止两人互相覆盖。首次保存可省略。 */
+  expectedRevision?: number;
+  enabled: boolean;
+  slogan?: string;
+  heroTitle?: string;
+  heroDescription?: string;
+  /** Hero 大图地址（HTTPS，服务端做出站地址校验）。 */
+  heroImageUrl?: string;
+  /** 辅助/强调色（#RGB 或 #RRGGBB，留空回退默认）。 */
+  secondaryColor?: string;
+  footerText?: string;
+  contactAddress?: string;
+  ctaTitle?: string;
+  ctaDescription?: string;
+  seoTitle?: string;
+  seoDescription?: string;
+  seoKeywords?: string;
+  showPoweredBy: boolean;
+}
+
+/**
  * 微信小程序渠道凭证：AppID 是公开信息，AppSecret 只写不读（服务端加密保存，只返回是否已配置）。
  * 品牌/协议/发布服务已移到租户级 ClientChannelProfileSummary。
  */

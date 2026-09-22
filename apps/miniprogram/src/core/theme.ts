@@ -127,8 +127,19 @@ export function semanticColor(nameOrHex: string, mode: ThemeMode = currentTheme(
   return nameOrHex; // 兼容旧的直接 hex
 }
 
-/** 同步原生底部 TabBar；页面主题由 WXSS 控制，原生 TabBar 不会继承页面 CSS 变量。 */
+/**
+ * 同步原生底部 TabBar；页面主题由 WXSS 控制，原生 TabBar 不会继承页面 CSS 变量。
+ *
+ * 底栏中性色（背景/未选中/边框）优先交给 theme.json：darkmode 下微信按系统深浅自动切换，
+ * 冷启动首屏即正确、切换零延迟，且不依赖 JS 执行时机。因此“跟随系统 + 租户用系统默认主色”时
+ * 直接返回，让 theme.json 全权托底；只有两种情况需要 JS 用 setTabBarStyle 覆盖：
+ * 1) 租户自定义了主题色（theme.json 是静态的，注入不了动态选中色）；
+ * 2) 用户在设置里强制了浅/深（此时 theme.json 仍跟系统走，必须纠正）。
+ */
 export function syncNativeTheme(): void {
+  restorePreference();
+  const tenantPrimary = normalizeHex(cachedMerchant()?.themeColor);
+  if (preference === "system" && (!tenantPrimary || tenantPrimary === SYSTEM_PRIMARY)) return;
   const dark = currentTheme() === "dark";
   try {
     wx.setTabBarStyle({

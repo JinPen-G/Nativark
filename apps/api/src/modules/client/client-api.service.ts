@@ -8,6 +8,7 @@ import {
   type ClientCatalogResponse,
   type ClientCatalogStartingPrice,
   type ClientChannelBootstrapResponse,
+  type ClientWebsiteConfig,
   type ClientChannelKind,
   type ClientLoginMethod,
   type ClientPublicDocumentKind,
@@ -249,6 +250,9 @@ export class ClientApiService {
     const wechatPayReady = integrationCatalog.configs.some((item) => item.capability === "payment" && item.provider === "wechat_pay" && item.enabled && item.isDefault && item.lastTestStatus === "passed" && item.lastTestMode === "live");
     const smsReady = integrationCatalog.configs.some((item) => item.capability === "sms" && item.enabled && item.isDefault) || process.env.NODE_ENV !== "production";
 
+    // WEBSITE-CHANNEL-01：仅 web 渠道叠加官网特有配置；其余渠道恒为 undefined。
+    const website = client === "web" ? await this.websiteConfig(tenant.id) : undefined;
+
     // 已发布服务来自租户级配置；未配置或无发布时回退到启用空间目录（不带品牌/协议）。
     const publishedActive = (profile?.publishedWorkspaces ?? []).filter((row) => row.workspace.status === "ACTIVE");
     const loginMethods: ClientLoginMethod[] = [
@@ -271,6 +275,7 @@ export class ClientApiService {
         help: { available: false, faqCount: 0 },
         loginMethods: safeLoginMethods,
         capabilities: { publicCatalog: false, wechatPay: false, delivery: false, feeResponse: true, accountClosure: true },
+        website,
         source: "workspace_directory"
       };
     }
@@ -300,7 +305,29 @@ export class ClientApiService {
       themeColor: profile.themeColor ?? undefined,
       loginMethods: safeLoginMethods,
       capabilities: { publicCatalog: services.length > 0, wechatPay: isMiniProgram && wechatPayReady && wechatReady, delivery: deliveryEnabled, feeResponse: true, accountClosure: true },
+      website,
       source: "channel"
+    };
+  }
+
+  /** WEBSITE-CHANNEL-01：读取 web 官网渠道的公开配置；未配置或未启用时返回 undefined，官网回退到通用品牌文案。 */
+  private async websiteConfig(tenantId: string): Promise<ClientWebsiteConfig | undefined> {
+    const row = await this.prisma.websiteChannelProfile.findUnique({ where: { tenantId } });
+    if (!row || !row.enabled) return undefined;
+    return {
+      slogan: row.slogan ?? undefined,
+      heroTitle: row.heroTitle ?? undefined,
+      heroDescription: row.heroDescription ?? undefined,
+      heroImageUrl: row.heroImageUrl ?? undefined,
+      secondaryColor: row.secondaryColor ?? undefined,
+      footerText: row.footerText ?? undefined,
+      contactAddress: row.contactAddress ?? undefined,
+      ctaTitle: row.ctaTitle ?? undefined,
+      ctaDescription: row.ctaDescription ?? undefined,
+      seoTitle: row.seoTitle ?? undefined,
+      seoDescription: row.seoDescription ?? undefined,
+      seoKeywords: row.seoKeywords ?? undefined,
+      showPoweredBy: row.showPoweredBy
     };
   }
 

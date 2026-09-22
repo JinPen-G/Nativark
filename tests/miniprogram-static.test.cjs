@@ -116,6 +116,18 @@ test("app.json 声明 21 个页面、4 个 Tab（带图标），每个页面与�
   assert.equal(app.usingComponents, undefined, "全局注册自定义组件会削弱 lazyCodeLoading 的按需注入");
   assert.equal(app.lazyCodeLoading, "requiredComponents");
   assert.equal(app.darkmode, true, "小程序必须声明深色模式支持");
+  // 原生底栏/导航栏靠 theme.json 让微信按系统深浅自动切换（冷启动即正确、切换零延迟、不依赖 JS 时机）。
+  assert.equal(app.themeLocation, "theme.json", "darkmode 需配 themeLocation 指向 theme.json");
+  const theme = JSON.parse(read("theme.json"));
+  const THEME_KEYS = ["navBg", "navText", "pageBg", "bgText", "tabColor", "tabSelectedColor", "tabBg", "tabBorder"];
+  for (const variant of ["light", "dark"]) {
+    assert.ok(theme[variant], `theme.json 缺 ${variant} 变体`);
+    for (const key of THEME_KEYS) assert.ok(theme[variant][key], `theme.json ${variant} 缺变量 ${key}`);
+  }
+  // app.json 的原生底栏/导航栏颜色必须引用 @变量（否则不会随系统深浅切换）。
+  for (const value of [app.tabBar.color, app.tabBar.selectedColor, app.tabBar.backgroundColor, app.tabBar.borderStyle, app.window.navigationBarBackgroundColor, app.window.backgroundColor]) {
+    assert.match(value, /^@[a-zA-Z]+$/, `原生颜色应引用 theme.json 变量而非写死：${value}`);
+  }
   assert.equal(app.window.navigationStyle, "custom", "全部页面使用自定义导航栏（品牌 Logo 行）");
   // requiredPrivateInfos 只能取微信接口白名单：openLocation 用内置地图、不属于此表，写进去开发者工具会拒绝编译。
   const PRIVATE_INFO_WHITELIST = ["chooseAddress", "chooseLocation", "choosePoi", "getFuzzyLocation", "getLocation", "onLocationChange", "startLocationUpdate", "startLocationUpdateBackground"];
@@ -748,6 +760,12 @@ test("客户可理解的订单状态由订单+资金+续租事实组合，终态
 test("面向客户的用词不暴露内部枚举，未知取值原样返回而不是空白", () => {
   const labels = runtime().load("core/labels");
   assert.equal(labels.categoryLabel("camera"), "摄影器材");
+  assert.equal(labels.categoryIcon("CAMERA"), "camera");
+  assert.equal(labels.categoryIcon("CAMPING"), "tent");
+  assert.equal(labels.categoryIcon("CONSTRUCTION"), "crane");
+  assert.equal(labels.categoryIcon("VEHICLE"), "car");
+  assert.equal(labels.categoryImage("CAMERA"), "/assets/category/camera.png");
+  assert.equal(labels.categoryImage("CAMPING"), "/assets/category/camping.png");
   assert.equal(labels.fulfillmentLabel("store_pickup_return"), "门店自取");
   assert.equal(labels.inventoryLabel("consumable"), "一次性耗材（不需归还）");
   assert.equal(labels.membershipLabel("pending_activation"), "会员待审核");

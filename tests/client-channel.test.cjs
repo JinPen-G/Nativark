@@ -13,15 +13,17 @@ require("ts-node").register({ project: path.join(root, "apps/api/tsconfig.json")
 
 const { ClientApiService } = require("../apps/api/src/modules/client/client-api.service");
 const { ClientChannelProfileService } = require("../apps/api/src/modules/client/client-channel-profile.service");
+const { WebsiteChannelProfileService } = require("../apps/api/src/modules/client/website-channel-profile.service");
 const { OPENAPI_DOCUMENT } = require("../apps/api/src/contracts/openapi-document");
 
 const status = (value) => (error) => error?.getStatus?.() === value;
 
 /** 构造一个只实现本用例所需方法的 prisma 替身。 */
-function buildPrisma({ tenant, profile, wechatChannel, workspaces = [] }) {
+function buildPrisma({ tenant, profile, wechatChannel, workspaces = [], websiteProfile = null }) {
   return {
     tenant: { findFirst: async () => tenant },
     clientChannelProfile: { findUnique: async () => profile },
+    websiteChannelProfile: { findUnique: async () => websiteProfile },
     miniProgramChannel: { findFirst: async () => wechatChannel },
     businessWorkspace: { findMany: async () => workspaces }
   };
@@ -166,4 +168,88 @@ test("OpenAPI: 渠道配置与公开文档契约齐全，凭证 schema 不再含
   assert.equal(schemas.SaveMiniProgramChannelRequest.properties.brandName, undefined, "凭证请求不应再含 brandName");
   assert.ok(schemas.ClientChannelProfileSummary.properties.readiness, "缺 profile readiness");
   assert.ok(schemas.ClientPublicDocumentResponse.properties.body, "缺文档 body");
+});
+
+const websiteProfileRow = {
+  id: "web1", tenantId: "t1", revision: 2, enabled: true,
+  slogan: "好物相伴，更好生活", heroTitle: "面向多行业的租赁解决方案", heroDescription: "覆盖多元租赁场景", heroImageUrl: null,
+  secondaryColor: "#0A5CFF", footerText: "按需租用，让每一次体验都恰到好处。", contactAddress: "上海市 XX 路 1 号",
+  ctaTitle: "开始租赁吧", ctaDescription: "海量好物，灵活租期", seoTitle: "租赁官网", seoDescription: "多行业租赁", seoKeywords: "相机,露营,租赁",
+  showPoweredBy: false, updatedAt: new Date("2026-09-22T00:00:00Z")
+};
+
+test("bootstrap: web 官网渠道叠加官网特有配置；未启用或非 web 渠道不返回 website", async () => {
+  const base = { tenant, profile: publishedProfile, wechatChannel: null,
+    integrationConfigs: [{ capability: "sms", enabled: true, isDefault: true }], websiteProfile: websiteProfileRow };
+
+  const web = await bootstrapService(base).channelBootstrap("demo", "web");
+  assert.equal(web.client, "web");
+  assert.equal(web.source, "channel");
+  assert.equal(web.merchant.name, "光影租赁", "web 渠道复用通用品牌");
+  assert.equal(web.themeColor, "#FF6600", "主色仍取通用配置");
+  assert.ok(web.website, "web 渠道应返回官网特有配置");
+  assert.equal(web.website.heroTitle, "面向多行业的租赁解决方案");
+  assert.equal(web.website.secondaryColor, "#0A5CFF");
+  assert.equal(web.website.showPoweredBy, false);
+  assert.equal(web.loginMethods.includes("wechat_phone"), false, "web 不做微信一键登录");
+  assert.ok(web.loginMethods.includes("sms") && web.loginMethods.includes("password"));
+
+  // 非 web 渠道恒不返回 website。
+  const mp = await bootstrapService(base).channelBootstrap("demo", "wechat_miniprogram");
+  assert.equal(mp.website, undefined, "小程序渠道不带官网配置");
+
+  // 官网渠道未启用 → website 省略。
+  const disabled = await bootstrapService({ ...base, websiteProfile: { ...websiteProfileRow, enabled: false } }).channelBootstrap("demo", "web");
+  assert.equal(disabled.website, undefined, "未启用官网渠道时不返回 website");
+
+  // 未配置官网 → website 省略。
+  const none = await bootstrapService({ ...base, websiteProfile: null }).channelBootstrap("demo", "web");
+  assert.equal(none.website, undefined);
+});
+
+test("website profile save: 辅助色归一化、就绪判定要求启用+Hero 标题、revision 乐观锁", async () => {
+  const calls = { written: null };
+  let stored = null;
+  const prisma = {
+    websiteChannelProfile: {
+      findUnique: async () => stored,
+      update: async ({ data }) => { calls.written = data; return { id: "web1", tenantId: "t1", revision: 3, ...data, updatedAt: new Date() }; },
+      create: async ({ data }) => { calls.written = data; return { id: "web1", ...data, revision: 1, updatedAt: new Date() }; }
+    }
+  };
+  const svc = Object.assign(Object.create(WebsiteChannelProfileService.prototype), { prisma, operationLog: { record: async () => {} } });
+  const user = { tenantId: "t1", isSaasAdmin: false };
+
+  // 首次保存：启用 + Hero 标题 → ready；辅助色 #RGB 归一化为大写 #RRGGBB。
+  const summary = await svc.save({ enabled: true, showPoweredBy: true, heroTitle: "标题", secondaryColor: "#0af" }, user);
+  assert.equal(summary.readiness.ready, true);
+  assert.deepEqual(summary.readiness.missing, []);
+  assert.equal(calls.written.secondaryColor, "#00AAFF", "辅助色 #RGB 归一化为大写 #RRGGBB");
+  assert.equal(summary.enabled, true);
+
+  // 未启用 / 缺 Hero 标题 → 未就绪。
+  const draft = await svc.save({ enabled: false, showPoweredBy: true }, user);
+  assert.equal(draft.readiness.ready, false);
+  assert.ok(draft.readiness.missing.length >= 1);
+
+  // 非法辅助色拒绝。
+  await assert.rejects(svc.save({ enabled: true, showPoweredBy: true, secondaryColor: "blue" }, user), status(400));
+
+  // revision 不一致 → 冲突。
+  stored = { id: "web1", tenantId: "t1", revision: 5, enabled: true, showPoweredBy: true, updatedAt: new Date() };
+  await assert.rejects(svc.save({ enabled: true, showPoweredBy: true, expectedRevision: 2 }, user), status(409));
+});
+
+test("OpenAPI: web 官网渠道配置与 bootstrap website 契约齐全", () => {
+  const paths = OPENAPI_DOCUMENT.paths;
+  assert.ok(paths["/api/platform/website-channel"].get, "缺 GET /platform/website-channel");
+  assert.ok(paths["/api/platform/website-channel"].put, "缺 PUT /platform/website-channel");
+  assert.deepEqual(paths["/api/platform/website-channel"].get["x-requiredPermissions"], ["system:integration:manage"]);
+  const schemas = OPENAPI_DOCUMENT.components.schemas;
+  assert.ok(schemas.WebsiteChannelProfileSummary.properties.heroTitle, "缺 website summary heroTitle");
+  assert.ok(schemas.SaveWebsiteChannelProfileRequest.properties.secondaryColor, "缺 save website secondaryColor");
+  assert.ok(schemas.ClientWebsiteConfig.properties.showPoweredBy, "缺 ClientWebsiteConfig");
+  assert.ok(schemas.ClientChannelBootstrapResponse.properties.website, "bootstrap 响应应含 website");
+  const clientEnum = paths["/api/client/v1/public/bootstrap"].get.parameters.find((p) => p.name === "client").schema.enum;
+  assert.ok(clientEnum.includes("web"), "bootstrap client 参数应支持 web");
 });

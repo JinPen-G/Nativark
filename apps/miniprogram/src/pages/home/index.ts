@@ -4,7 +4,7 @@ import { cachedCatalog, hydrateImages, loadCatalog, nearestLocation, primaryLoca
 import { cachedUserLocation, distanceMeters, formatDistance, requestUserLocation, type GeoPoint } from "../../core/geo";
 import { themeBehavior } from "../../core/theme-behavior";
 import { isApiError } from "../../core/http";
-import { categoryIcon } from "../../core/labels";
+import { categoryIcon, categoryImage } from "../../core/labels";
 import { cachedMerchant, findService, loadMerchant, merchantEvents, resolveServiceCode, type MerchantInfo } from "../../core/merchant";
 import { blockedState, emptyState, errorState, handleCommonViewAction, loadingState, readyState, type ViewState } from "../../core/page";
 import { contextVersion, isSignedIn, sessionEvents } from "../../core/session";
@@ -17,7 +17,7 @@ import { ROUTES, buildUrl, callPhone, navigate } from "../../core/ui";
  */
 interface HomeData {
   query: string;
-  services: Array<{ code: string; name: string; icon: string; active: boolean; paused: boolean }>;
+  services: Array<{ code: string; name: string; icon: string; iconPath: string; active: boolean; paused: boolean }>;
   cards: ItemCard[];
   view: ViewState;
   merchantView: ViewState;
@@ -127,7 +127,7 @@ Page({
     }
     const resolved = resolveServiceCode(info);
     const service = findService(info, resolved);
-    const services = info.services.map((row) => ({ code: row.code, name: row.name, icon: categoryIcon(row.categoryCode), active: row.code === resolved, paused: row.status === "paused" }));
+    const services = info.services.map((row) => ({ code: row.code, name: row.name, icon: categoryIcon(row.categoryCode), iconPath: categoryImage(row.categoryCode), active: row.code === resolved, paused: row.status === "paused" }));
     this.setData({
       servicePhone: info.servicePhone ?? "",
       services,
