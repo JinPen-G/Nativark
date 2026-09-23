@@ -819,6 +819,13 @@ export interface SaveClientChannelProfileRequest {
  * web 官网渠道配置（WEBSITE-CHANNEL-01，运营端读）。只含官网特有设定项；
  * 商户名/Logo/协议/客服/帮助/发布服务仍在 ClientChannelProfileSummary。一租户一条。
  */
+export interface WebsiteCategoryImage {
+  /** 经营空间/服务编码（= 官网一级品类）。 */
+  code: string;
+  /** 品类入口图地址（HTTPS）。 */
+  imageUrl: string;
+}
+
 export interface WebsiteChannelProfileSummary {
   configured: boolean;
   revision: number;
@@ -840,6 +847,10 @@ export interface WebsiteChannelProfileSummary {
   showPoweredBy: boolean;
   /** 租户自定义官网域名（小写 host，不含协议/路径）；用于按 Host 反查租户。 */
   customDomain?: string;
+  /** 品类入口图（按服务编码）。 */
+  categoryImages: WebsiteCategoryImage[];
+  /** 可配置入口图的一级品类（当前租户已启用的经营空间）；供后台按品类填图。 */
+  categories: Array<{ code: string; name: string }>;
   readiness: ClientChannelReadiness;
   updatedAt?: string;
 }
@@ -865,6 +876,8 @@ export interface SaveWebsiteChannelProfileRequest {
   showPoweredBy: boolean;
   /** 自定义官网域名（如 www.brand.com）；留空表示不绑定。服务端归一化为小写 host。 */
   customDomain?: string;
+  /** 品类入口图（按服务编码）；空 imageUrl 视为清除该品类配置。 */
+  categoryImages?: WebsiteCategoryImage[];
 }
 
 /**

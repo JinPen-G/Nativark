@@ -175,6 +175,7 @@ const websiteProfileRow = {
   slogan: "好物相伴，更好生活", heroTitle: "面向多行业的租赁解决方案", heroDescription: "覆盖多元租赁场景", heroImageUrl: null,
   secondaryColor: "#0A5CFF", footerText: "按需租用，让每一次体验都恰到好处。", contactAddress: "上海市 XX 路 1 号",
   ctaTitle: "开始租赁吧", ctaDescription: "海量好物，灵活租期", seoTitle: "租赁官网", seoDescription: "多行业租赁", seoKeywords: "相机,露营,租赁",
+  categoryImagesJson: [{ code: "camera", imageUrl: "https://cdn.example.invalid/cam.webp" }],
   showPoweredBy: false, updatedAt: new Date("2026-09-22T00:00:00Z")
 };
 
@@ -191,6 +192,7 @@ test("bootstrap: web 官网渠道叠加官网特有配置；未启用或非 web 
   assert.equal(web.website.heroTitle, "面向多行业的租赁解决方案");
   assert.equal(web.website.secondaryColor, "#0A5CFF");
   assert.equal(web.website.showPoweredBy, false);
+  assert.deepEqual(web.website.categoryImages, [{ code: "camera", imageUrl: "https://cdn.example.invalid/cam.webp" }], "web 渠道带出品类入口图");
   assert.equal(web.loginMethods.includes("wechat_phone"), false, "web 不做微信一键登录");
   assert.ok(web.loginMethods.includes("sms") && web.loginMethods.includes("password"));
 
@@ -215,7 +217,8 @@ test("website profile save: 辅助色归一化、就绪判定要求启用+Hero �
       findUnique: async () => stored,
       update: async ({ data }) => { calls.written = data; return { id: "web1", tenantId: "t1", revision: 3, ...data, updatedAt: new Date() }; },
       create: async ({ data }) => { calls.written = data; return { id: "web1", ...data, revision: 1, updatedAt: new Date() }; }
-    }
+    },
+    businessWorkspace: { findMany: async () => [{ code: "camera", name: "摄影器材", isDefault: true }, { code: "camping", name: "露营装备", isDefault: false }] }
   };
   const svc = Object.assign(Object.create(WebsiteChannelProfileService.prototype), { prisma, operationLog: { record: async () => {} } });
   const user = { tenantId: "t1", isSaasAdmin: false };
@@ -226,6 +229,16 @@ test("website profile save: 辅助色归一化、就绪判定要求启用+Hero �
   assert.deepEqual(summary.readiness.missing, []);
   assert.equal(calls.written.secondaryColor, "#00AAFF", "辅助色 #RGB 归一化为大写 #RRGGBB");
   assert.equal(summary.enabled, true);
+  assert.deepEqual(summary.categories, [{ code: "camera", name: "摄影器材" }, { code: "camping", name: "露营装备" }], "返回可配置品类列表");
+
+  // 品类入口图：只接受本租户已启用品类，按 code 去重、丢弃空图。
+  await svc.save({ enabled: true, showPoweredBy: true, heroTitle: "标题", categoryImages: [
+    { code: "camera", imageUrl: "https://cdn.example.invalid/a.webp" },
+    { code: "camera", imageUrl: "https://cdn.example.invalid/dup.webp" },
+    { code: "camping", imageUrl: "" }
+  ] }, user);
+  assert.deepEqual(calls.written.categoryImagesJson, [{ code: "camera", imageUrl: "https://cdn.example.invalid/a.webp" }], "去重取首个、丢弃空图");
+  await assert.rejects(svc.save({ enabled: true, showPoweredBy: true, categoryImages: [{ code: "not-mine", imageUrl: "https://cdn.example.invalid/x.webp" }] }, user), status(400));
 
   // 未启用 / 缺 Hero 标题 → 未就绪。
   const draft = await svc.save({ enabled: false, showPoweredBy: true }, user);
@@ -263,7 +276,8 @@ test("website 自定义域名：归一化、按 Host 反查租户、全局唯一
       findUnique: async () => stored,
       update: async ({ data }) => { calls.written = data; return { id: "web1", tenantId: "t1", revision: 3, ...data, updatedAt: new Date() }; },
       create: async ({ data }) => { calls.written = data; return { id: "web1", ...data, revision: 1, updatedAt: new Date() }; }
-    }
+    },
+    businessWorkspace: { findMany: async () => [{ code: "camera", name: "摄影器材", isDefault: true }] }
   };
   const svc = Object.assign(Object.create(WebsiteChannelProfileService.prototype), { prisma, operationLog: { record: async () => {} } });
   const user = { tenantId: "t1", isSaasAdmin: false };
@@ -276,7 +290,7 @@ test("website 自定义域名：归一化、按 Host 反查租户、全局唯一
   await assert.rejects(svc.save({ enabled: true, showPoweredBy: true, customDomain: "not a domain" }, user), status(400));
 
   // 唯一冲突：Prisma P2002 → 409。
-  const conflictPrisma = { websiteChannelProfile: { findUnique: async () => null, create: async () => { const e = new Error("Unique constraint"); e.code = "P2002"; throw e; } } };
+  const conflictPrisma = { websiteChannelProfile: { findUnique: async () => null, create: async () => { const e = new Error("Unique constraint"); e.code = "P2002"; throw e; } }, businessWorkspace: { findMany: async () => [] } };
   const conflictSvc = Object.assign(Object.create(WebsiteChannelProfileService.prototype), { prisma: conflictPrisma, operationLog: { record: async () => {} } });
   await assert.rejects(conflictSvc.save({ enabled: true, showPoweredBy: true, customDomain: "taken.com" }, user), status(409));
 

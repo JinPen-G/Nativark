@@ -62,10 +62,11 @@ function toProduct(item: CatalogItem, categoryId: string, groupId: string): Prod
 }
 
 /** 一个已发布服务（+它的 catalog）→ 官网一级品类。二级分类由定价分组近似（后端暂无二级结构）。 */
-function toCategory(service: BootstrapResponse['services'][number], catalog: PublicCatalogResponse | null): Category {
+function toCategory(service: BootstrapResponse['services'][number], catalog: PublicCatalogResponse | null, configuredImage?: string): Category {
   const code = service.categoryCode;
   const items = catalog?.items ?? [];
-  const coverImage = items[0] ? firstImage(items[0]) : PLACEHOLDER_IMAGE;
+  // 品类入口图优先用租户在后台配置的图，缺省再回落到该品类首个商品图。
+  const coverImage = configuredImage || (items[0] ? firstImage(items[0]) : PLACEHOLDER_IMAGE);
   const children: SubCategory[] = (catalog?.pricingGroups ?? [])
     .filter(group => group.enabled !== false)
     .map(group => {
@@ -108,7 +109,8 @@ export async function loadRemoteSite(tenantCode: string): Promise<RemoteSite> {
     }
   }));
 
-  const categories = openServices.map((service, index) => toCategory(service, catalogs[index]));
+  const categoryImageByCode = new Map((bootstrap.website?.categoryImages ?? []).map(item => [item.code, item.imageUrl]));
+  const categories = openServices.map((service, index) => toCategory(service, catalogs[index], categoryImageByCode.get(service.code)));
   const products: Product[] = [];
   openServices.forEach((service, index) => {
     const catalog = catalogs[index];

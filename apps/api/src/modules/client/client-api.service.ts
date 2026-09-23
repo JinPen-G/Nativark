@@ -327,6 +327,14 @@ export class ClientApiService {
       seoTitle: row.seoTitle ?? undefined,
       seoDescription: row.seoDescription ?? undefined,
       seoKeywords: row.seoKeywords ?? undefined,
+      categoryImages: Array.isArray(row.categoryImagesJson)
+        ? (row.categoryImagesJson as unknown[]).flatMap((entry) => {
+            if (!entry || typeof entry !== "object") return [];
+            const code = typeof (entry as Record<string, unknown>).code === "string" ? String((entry as Record<string, unknown>).code) : "";
+            const imageUrl = typeof (entry as Record<string, unknown>).imageUrl === "string" ? String((entry as Record<string, unknown>).imageUrl) : "";
+            return code && imageUrl ? [{ code, imageUrl }] : [];
+          })
+        : undefined,
       showPoweredBy: row.showPoweredBy
     };
   }

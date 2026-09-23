@@ -324,6 +324,8 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       ctaTitle: stringSchema, ctaDescription: stringSchema,
       seoTitle: stringSchema, seoDescription: stringSchema, seoKeywords: stringSchema,
       showPoweredBy: booleanSchema, customDomain: stringSchema,
+      categoryImages: arrayOf(objectOf({ code: stringSchema, imageUrl: stringSchema }, ["code", "imageUrl"], false)),
+      categories: arrayOf(objectOf({ code: stringSchema, name: stringSchema }, ["code", "name"], false)),
       readiness: objectOf({ ready: booleanSchema, missing: arrayOf(stringSchema) }, ["ready", "missing"], false),
       updatedAt: { type: "string", format: "date-time" }
     },
@@ -336,7 +338,8 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       slogan: stringSchema, heroTitle: stringSchema, heroDescription: stringSchema, heroImageUrl: stringSchema,
       secondaryColor: stringSchema, footerText: stringSchema, contactAddress: stringSchema,
       ctaTitle: stringSchema, ctaDescription: stringSchema,
-      seoTitle: stringSchema, seoDescription: stringSchema, seoKeywords: stringSchema, showPoweredBy: booleanSchema, customDomain: stringSchema
+      seoTitle: stringSchema, seoDescription: stringSchema, seoKeywords: stringSchema, showPoweredBy: booleanSchema, customDomain: stringSchema,
+      categoryImages: arrayOf(objectOf({ code: stringSchema, imageUrl: stringSchema }, ["code", "imageUrl"], false))
     },
     ["enabled", "showPoweredBy"]
   ),
@@ -1097,6 +1100,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       secondaryColor: stringSchema, footerText: stringSchema, contactAddress: stringSchema,
       ctaTitle: stringSchema, ctaDescription: stringSchema,
       seoTitle: stringSchema, seoDescription: stringSchema, seoKeywords: stringSchema,
+      categoryImages: arrayOf(objectOf({ code: stringSchema, imageUrl: stringSchema }, ["code", "imageUrl"], false)),
       showPoweredBy: booleanSchema
     },
     ["showPoweredBy"],

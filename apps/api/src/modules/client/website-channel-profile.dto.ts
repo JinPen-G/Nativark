@@ -1,5 +1,14 @@
-import type { SaveWebsiteChannelProfileRequest } from "@rental-os/shared";
-import { IsBoolean, IsInt, IsOptional, IsString, Matches, MaxLength, Min } from "class-validator";
+import type { SaveWebsiteChannelProfileRequest, WebsiteCategoryImage } from "@rental-os/shared";
+import { Type } from "class-transformer";
+import { ArrayMaxSize, IsArray, IsBoolean, IsInt, IsOptional, IsString, Matches, MaxLength, Min, ValidateNested } from "class-validator";
+
+export class WebsiteCategoryImageDto implements WebsiteCategoryImage {
+  @IsString() @MaxLength(191)
+  code!: string;
+
+  @IsString() @MaxLength(512)
+  imageUrl!: string;
+}
 
 /**
  * 租户级 web 官网渠道配置（WEBSITE-CHANNEL-01）。只承载官网特有设定项；
@@ -56,4 +65,8 @@ export class SaveWebsiteChannelProfileDto implements SaveWebsiteChannelProfileRe
   /** 自定义官网域名（如 www.brand.com）；仅 host，服务层归一化为小写并校验格式。 */
   @IsOptional() @IsString() @MaxLength(191)
   customDomain?: string;
+
+  /** 品类入口图（按服务编码）；服务层校验地址并按 code 去重。 */
+  @IsOptional() @IsArray() @ArrayMaxSize(50) @ValidateNested({ each: true }) @Type(() => WebsiteCategoryImageDto)
+  categoryImages?: WebsiteCategoryImageDto[];
 }

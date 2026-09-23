@@ -1,8 +1,10 @@
 import { BadRequestException, ConflictException, Injectable, Optional } from "@nestjs/common";
+import type { Prisma } from "@prisma/client";
 import type {
   ClientChannelReadiness,
   SaveWebsiteChannelProfileRequest,
   SystemUserRow,
+  WebsiteCategoryImage,
   WebsiteChannelProfileSummary
 } from "@rental-os/shared";
 import { OperationLogService } from "../../common/operation-log.service";
@@ -54,6 +56,19 @@ export function normalizeCustomDomain(value: string | undefined): string | null 
   return raw;
 }
 
+/** 读取品类入口图 JSON：过滤非法项，只保留 { code, imageUrl } 字符串对。 */
+function readCategoryImages(value: unknown): WebsiteCategoryImage[] {
+  if (!Array.isArray(value)) return [];
+  const out: WebsiteCategoryImage[] = [];
+  for (const row of value) {
+    if (!row || typeof row !== "object") continue;
+    const code = typeof (row as Record<string, unknown>).code === "string" ? String((row as Record<string, unknown>).code) : "";
+    const imageUrl = typeof (row as Record<string, unknown>).imageUrl === "string" ? String((row as Record<string, unknown>).imageUrl) : "";
+    if (code && imageUrl) out.push({ code, imageUrl });
+  }
+  return out;
+}
+
 @Injectable()
 export class WebsiteChannelProfileService {
   constructor(
@@ -70,6 +85,16 @@ export class WebsiteChannelProfileService {
     return this.prisma.websiteChannelProfile.findUnique({ where: { tenantId } });
   }
 
+  /** 可配置入口图的一级品类 = 当前租户已启用的经营空间。 */
+  private async categoryOptions(tenantId: string): Promise<Array<{ code: string; name: string }>> {
+    const rows = await this.prisma.businessWorkspace.findMany({
+      where: { tenantId, status: "ACTIVE" },
+      select: { code: true, name: true },
+      orderBy: [{ isDefault: "desc" }, { code: "asc" }]
+    });
+    return rows.map((row) => ({ code: row.code, name: row.name }));
+  }
+
   private readiness(row: ProfileRow | null): ClientChannelReadiness {
     const missing: string[] = [];
     if (!row?.enabled) missing.push("启用官网渠道");
@@ -77,7 +102,7 @@ export class WebsiteChannelProfileService {
     return { ready: missing.length === 0, missing };
   }
 
-  private summary(row: ProfileRow | null): WebsiteChannelProfileSummary {
+  private summary(row: ProfileRow | null, categories: Array<{ code: string; name: string }>): WebsiteChannelProfileSummary {
     return {
       configured: Boolean(row),
       revision: row?.revision ?? 0,
@@ -96,6 +121,8 @@ export class WebsiteChannelProfileService {
       seoKeywords: row?.seoKeywords ?? undefined,
       showPoweredBy: row?.showPoweredBy ?? true,
       customDomain: row?.customDomain ?? undefined,
+      categoryImages: readCategoryImages(row?.categoryImagesJson),
+      categories,
       readiness: this.readiness(row),
       updatedAt: row?.updatedAt.toISOString()
     };
@@ -103,7 +130,8 @@ export class WebsiteChannelProfileService {
 
   async get(user?: SystemUserRow): Promise<WebsiteChannelProfileSummary> {
     const tenantId = this.tenantOf(user);
-    return this.summary(await this.load(tenantId));
+    const [row, categories] = await Promise.all([this.load(tenantId), this.categoryOptions(tenantId)]);
+    return this.summary(row, categories);
   }
 
   private async validatedUrl(value: string | null, label: string): Promise<string | null> {
@@ -124,6 +152,21 @@ export class WebsiteChannelProfileService {
     }
 
     const heroImageUrl = await this.validatedUrl(text(input.heroImageUrl, 512, "Hero 大图地址"), "Hero 大图地址");
+    const categories = await this.categoryOptions(tenantId);
+    const validCodes = new Set(categories.map((c) => c.code));
+    // 品类入口图：按 code 去重、丢弃空图与非本租户品类，逐一校验出站地址。
+    const categoryImages: WebsiteCategoryImage[] = [];
+    const seenCodes = new Set<string>();
+    for (const entry of input.categoryImages ?? []) {
+      const code = text(entry?.code, 191, "品类编码");
+      const imageUrl = text(entry?.imageUrl, 512, "品类入口图地址");
+      if (!code || !imageUrl || seenCodes.has(code)) continue;
+      if (!validCodes.has(code)) throw new BadRequestException("品类入口图只能配置本租户已启用的经营空间");
+      await this.validatedUrl(imageUrl, "品类入口图地址");
+      seenCodes.add(code);
+      categoryImages.push({ code, imageUrl });
+    }
+
     const data = {
       enabled: Boolean(input.enabled),
       slogan: text(input.slogan, 120, "站点标语"),
@@ -139,7 +182,8 @@ export class WebsiteChannelProfileService {
       seoDescription: text(input.seoDescription, 400, "SEO 描述"),
       seoKeywords: text(input.seoKeywords, 256, "SEO 关键词"),
       showPoweredBy: Boolean(input.showPoweredBy),
-      customDomain: normalizeCustomDomain(input.customDomain)
+      customDomain: normalizeCustomDomain(input.customDomain),
+      categoryImagesJson: categoryImages as unknown as Prisma.InputJsonValue
     };
 
     const row = await (async () => {
@@ -164,9 +208,9 @@ export class WebsiteChannelProfileService {
       targetType: "website_channel_profile",
       targetId: tenantId,
       detail: "保存官网渠道配置",
-      metadata: { enabled: data.enabled, hasHero: Boolean(data.heroTitle), hasHeroImage: Boolean(data.heroImageUrl) }
+      metadata: { enabled: data.enabled, hasHero: Boolean(data.heroTitle), hasHeroImage: Boolean(data.heroImageUrl), categoryImages: categoryImages.length }
     });
 
-    return this.summary(row);
+    return this.summary(row, categories);
   }
 }

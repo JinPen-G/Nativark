@@ -741,6 +741,8 @@ export interface ClientWebsiteConfig {
   seoTitle?: string;
   seoDescription?: string;
   seoKeywords?: string;
+  /** 品类入口图（按服务编码）；官网首页各品类卡片/场景图优先用它，缺省回落到商品图。 */
+  categoryImages?: Array<{ code: string; imageUrl: string }>;
   /** 是否在页脚展示 “Powered by Rental OS”。 */
   showPoweredBy: boolean;
 }

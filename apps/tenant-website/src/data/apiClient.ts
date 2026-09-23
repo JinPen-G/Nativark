@@ -39,6 +39,7 @@ export interface BootstrapWebsite {
   seoTitle?: string;
   seoDescription?: string;
   seoKeywords?: string;
+  categoryImages?: Array<{ code: string; imageUrl: string }>;
   showPoweredBy: boolean;
 }
 

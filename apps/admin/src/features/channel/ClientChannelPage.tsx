@@ -205,7 +205,7 @@ function WechatCredentialsCard() {
 }
 
 function WebsiteProfileCard() {
-  const [form] = Form.useForm<SaveWebsiteChannelProfileRequest>();
+  const [form] = Form.useForm<SaveWebsiteChannelProfileRequest & { categoryImageMap?: Record<string, string> }>();
   const { message } = App.useApp();
   const queryClient = useQueryClient();
   // 原生取色器需要合法 #RRGGBB；表单里可能是 #RGB 或空，展示时归一化，不回写表单值。
@@ -236,12 +236,19 @@ function WebsiteProfileCard() {
       seoDescription: data.seoDescription,
       seoKeywords: data.seoKeywords,
       showPoweredBy: data.showPoweredBy,
-      customDomain: data.customDomain
+      customDomain: data.customDomain,
+      categoryImageMap: Object.fromEntries((data.categoryImages ?? []).map((item) => [item.code, item.imageUrl]))
     });
   }, [profile.data, form]);
 
   const save = useMutation({
-    mutationFn: (values: SaveWebsiteChannelProfileRequest) => websiteChannelApi.saveProfile({ ...values, expectedRevision: profile.data?.revision }),
+    mutationFn: (values: SaveWebsiteChannelProfileRequest & { categoryImageMap?: Record<string, string> }) => {
+      const { categoryImageMap, ...rest } = values;
+      const categoryImages = Object.entries(categoryImageMap ?? {})
+        .map(([code, imageUrl]) => ({ code, imageUrl: (imageUrl ?? "").trim() }))
+        .filter((item) => item.imageUrl);
+      return websiteChannelApi.saveProfile({ ...rest, categoryImages, expectedRevision: profile.data?.revision });
+    },
     onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["website-channel-profile"] }); message.success("官网渠道配置已保存"); },
     onError: (error: any) => message.error(error?.response?.data?.message ?? "保存失败")
   });
@@ -300,7 +307,7 @@ function WebsiteProfileCard() {
               </Form.Item>
             </Col>
             <Col xs={24} md={12}><Form.Item name="heroTitle" label="Hero 主标题" extra="首页首屏大标题；缺省回退到商户名/标语"><Input maxLength={120} placeholder="如：面向多行业的租赁解决方案" /></Form.Item></Col>
-            <Col xs={24} md={12}><Form.Item name="heroImageUrl" label="Hero 大图地址" extra="HTTPS 图片地址"><Input maxLength={512} placeholder="https://..." /></Form.Item></Col>
+            <Col xs={24} md={12}><Form.Item name="heroImageUrl" label="Hero 大图地址" extra="HTTPS 图片地址；建议 2400×1000px（约 12:5 宽幅横图），≤ 1MB，JPG/WebP；主体居中，两侧留白以适配裁切。"><Input maxLength={512} placeholder="https://..." /></Form.Item></Col>
             <Col xs={24}><Form.Item name="heroDescription" label="Hero 副文案"><Input.TextArea rows={2} maxLength={400} showCount /></Form.Item></Col>
           </Row>
         </Card>
@@ -310,6 +317,13 @@ function WebsiteProfileCard() {
             <Col xs={24} md={12}><Form.Item name="ctaTitle" label="CTA 标题"><Input maxLength={120} placeholder="如：现在就开始租赁吧" /></Form.Item></Col>
             <Col xs={24} md={12}><Form.Item name="ctaDescription" label="CTA 文案"><Input maxLength={400} placeholder="如：海量好物 · 灵活租期" /></Form.Item></Col>
           </Row>
+        </Card>
+
+        <Card size="small" title="品类入口图" style={{ marginTop: 16 }}>
+          <Typography.Paragraph type="secondary">官网首页每个一级品类卡片/场景图的展示图。建议 800×600px（4:3），≤ 500KB，JPG/WebP；留空则自动使用该品类下第一个商品的图片。品类来自“通用客户端配置”里已启用的经营空间。</Typography.Paragraph>
+          {data.categories.length ? <Row gutter={[16, 0]}>{data.categories.map((cat) => (
+            <Col xs={24} md={12} key={cat.code}><Form.Item name={["categoryImageMap", cat.code]} label={`${cat.name}（${cat.code}）`} rules={[{ max: 512 }]}><Input allowClear placeholder="https://... 留空用商品图" /></Form.Item></Col>
+          ))}</Row> : <Alert type="info" showIcon title="暂无可配置品类" description="请先在经营设置中启用服务空间，并在“通用客户端配置”里发布到客户端。" />}
         </Card>
 
         <Card size="small" title="页脚与联系" style={{ marginTop: 16 }}>

@@ -750,6 +750,8 @@ model WebsiteChannelProfile {
   showPoweredBy    Boolean  @default(true)
   /// 租户自定义官网域名（如 www.brand.com，小写、不含协议/路径）。全局唯一，用于按 Host 反查租户。
   customDomain     String?  @unique(map: "website_channel_profiles_domain_key") @db.VarChar(191)
+  /// 品类入口图：JSON 数组 [{ code, imageUrl }]，code 为经营空间/服务编码；缺省时官网回落到该品类首个商品图。
+  categoryImagesJson Json?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
