@@ -7,7 +7,8 @@ import { ProductsPage } from './pages/ProductsPage';
 import { ProductDetailPage } from './pages/ProductDetailPage';
 import { BookingPage } from './pages/BookingPage';
 import { LoginPage } from './pages/LoginPage';
-import { AboutPage, GuidePage, HelpPage, OrderDetailPage, OrdersPage } from './pages/InfoPages';
+import { OrderDetailPage, OrdersPage } from './pages/OrderPages';
+import { AboutPage, GuidePage, HelpPage } from './pages/InfoPages';
 
 export function App() {
   return <BrowserRouter><SiteProvider><AuthProvider><SiteLayout><Routes>

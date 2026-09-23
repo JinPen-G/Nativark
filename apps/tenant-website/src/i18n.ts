@@ -58,6 +58,10 @@ const dictionary = {
     loginSms: '验证码登录', loginPassword: '密码登录', loginRegister: '注册', loginPhone: '手机号', loginPasswordField: '密码', loginPasswordPlaceholder: '请输入密码', loginPasswordRule: '至少 8 位密码',
     loginCode: '短信验证码', loginCodePlaceholder: '6 位验证码', loginSendCode: '获取验证码', loginDevCode: '开发环境验证码：{code}（正式环境将通过短信下发）', loginAgree: '我已阅读并同意用户服务协议与隐私政策', loginNeedAgree: '请先同意用户服务协议与隐私政策', loginNeedCode: '请先获取并填写验证码',
     loginFailed: '登录失败，请稍后重试', loginSubmit: '登录', loginRegisterSubmit: '注册并登录', loginFootNote: '登录即表示同意平台的服务条款；账号与数据按租户隔离。', loginRequired: '请先登录', loginCta: '登录', logoutCta: '退出登录',
+    loading: '加载中', loadFailed: '加载失败，请稍后重试', quoteFailed: '报价失败，请调整租期或稍后重试', orderFailed: '下单失败，请稍后重试',
+    checkAvailability: '查询可租', getQuote: '获取报价', availabilityOk: '所选时段可租', availabilityNo: '所选时段不可租，请调整日期或数量', discount: '优惠', deposit: '押金', preAuth: '预授权', payable: '应付合计', quoteServerNote: '以上金额由服务端按当前价格与库存计算，提交后仍以订单为准。', submitOrder: '提交订单',
+    myRentalsRemoteDesc: '这里是你在本商户的真实订单。', orderStatus: '状态：{status}', orderStatus_draft: '待确认', orderStatus_reserved: '已预订', orderStatus_pickup_overdue: '取件逾期', orderStatus_ready_for_pickup: '待取件', orderStatus_renting: '租赁中', orderStatus_return_inspection: '归还验收', orderStatus_settling: '待结算', orderStatus_completed: '已完成', orderStatus_cancelled: '已取消', orderStatus_no_show: '未到店',
+    payTitle: '在线支付', payAlipay: '支付宝支付', payWechat: '微信支付', payGo: '去支付', payUnavailable: '当前商户未开通在线支付，请按商户指引线下支付。', paymentCreated: '支付单已创建，请按提示完成支付。', paymentFailed: '发起支付失败，请稍后重试', paySettleNote: '“支付单已创建”不等于已收款，最终以商户到账为准。',
   },
   en: {
     home: 'Home', allProducts: 'All products', guide: 'Rental guide', about: 'About us', orders: 'My rentals',
@@ -112,6 +116,10 @@ const dictionary = {
     loginSms: 'Code sign-in', loginPassword: 'Password', loginRegister: 'Register', loginPhone: 'Mobile number', loginPasswordField: 'Password', loginPasswordPlaceholder: 'Enter your password', loginPasswordRule: 'At least 8 characters',
     loginCode: 'SMS code', loginCodePlaceholder: '6-digit code', loginSendCode: 'Get code', loginDevCode: 'Dev code: {code} (sent via SMS in production)', loginAgree: 'I have read and agree to the User Agreement and Privacy Policy', loginNeedAgree: 'Please agree to the User Agreement and Privacy Policy first', loginNeedCode: 'Please request and enter the code first',
     loginFailed: 'Sign-in failed, please try again', loginSubmit: 'Sign in', loginRegisterSubmit: 'Register & sign in', loginFootNote: 'By continuing you accept the platform terms; accounts and data are isolated per tenant.', loginRequired: 'Please sign in first', loginCta: 'Sign in', logoutCta: 'Sign out',
+    loading: 'Loading', loadFailed: 'Failed to load, please try again', quoteFailed: 'Quote failed — adjust the term or try again', orderFailed: 'Order failed, please try again',
+    checkAvailability: 'Check availability', getQuote: 'Get quote', availabilityOk: 'Available for the selected dates', availabilityNo: 'Unavailable for the selected dates — adjust dates or quantity', discount: 'Discount', deposit: 'Deposit', preAuth: 'Pre-authorization', payable: 'Total payable', quoteServerNote: 'Amounts are calculated by the server from current pricing and inventory; the order is the source of truth.', submitOrder: 'Submit order',
+    myRentalsRemoteDesc: 'Your real orders with this merchant.', orderStatus: 'Status: {status}', orderStatus_draft: 'Pending', orderStatus_reserved: 'Reserved', orderStatus_pickup_overdue: 'Pickup overdue', orderStatus_ready_for_pickup: 'Ready for pickup', orderStatus_renting: 'Renting', orderStatus_return_inspection: 'Return inspection', orderStatus_settling: 'Settling', orderStatus_completed: 'Completed', orderStatus_cancelled: 'Cancelled', orderStatus_no_show: 'No-show',
+    payTitle: 'Online payment', payAlipay: 'Pay with Alipay', payWechat: 'Pay with WeChat', payGo: 'Go to pay', payUnavailable: 'This merchant has no online payment enabled; please pay offline per their guidance.', paymentCreated: 'Payment created — follow the prompt to complete it.', paymentFailed: 'Failed to start payment, please try again', paySettleNote: '"Payment created" does not mean paid; the merchant\'s receipt is the source of truth.',
   },
 } as const;
 

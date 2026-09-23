@@ -116,6 +116,19 @@ export function configureAuthBridge(next: AuthBridge | null): void {
   bridge = next;
 }
 
+// 单飞刷新：并发 401 只发起一次 refresh，其余复用同一 Promise。
+// refresh token 是一次性轮换的，重复用同一个会被服务端判为失效并误登出。
+let refreshInFlight: Promise<ClientSession> | null = null;
+
+function ensureRefreshed(refreshToken: string): Promise<ClientSession> {
+  if (!refreshInFlight) {
+    refreshInFlight = authApi.refresh(refreshToken)
+      .then(next => { bridge?.setSession(next); return next; })
+      .finally(() => { refreshInFlight = null; });
+  }
+  return refreshInFlight;
+}
+
 async function authedFetch(path: string, init: RequestInit, retry = true): Promise<Response> {
   const session = bridge?.getSession() ?? null;
   const headers = new Headers(init.headers);
@@ -125,8 +138,7 @@ async function authedFetch(path: string, init: RequestInit, retry = true): Promi
   const response = await fetch(`${CLIENT_V1}${path}`, { ...init, headers });
   if (response.status === 401 && retry && session?.refreshToken) {
     try {
-      const refreshed = await authApi.refresh(session.refreshToken);
-      bridge?.setSession(refreshed);
+      await ensureRefreshed(session.refreshToken);
       return authedFetch(path, init, false);
     } catch {
       bridge?.setSession(null);
@@ -145,6 +157,8 @@ export const sessionApi = {
   switchWorkspace(workspaceCode: string) {
     return authedJson<ClientSession>('/auth/switch-workspace', { method: 'POST', body: JSON.stringify({ workspaceCode }) });
   },
+  /** 登录态目录：含履约地点、履约模式与型号（用于下单时取 locationId / fulfillmentMode）。 */
+  catalog() { return authedJson<Record<string, any>>('/catalog'); },
   availability(payload: unknown) { return authedJson<Record<string, unknown>>('/availability', { method: 'POST', body: JSON.stringify(payload) }); },
   createQuote(payload: unknown) { return authedJson<Record<string, unknown>>('/quotes', { method: 'POST', body: JSON.stringify(payload) }); },
   getQuote(id: string) { return authedJson<Record<string, unknown>>(`/quotes/${encodeURIComponent(id)}`); },
@@ -153,9 +167,10 @@ export const sessionApi = {
   },
   myOrders(params: { page?: number; pageSize?: number } = {}) {
     const q = new URLSearchParams(Object.entries(params).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)])).toString();
-    return authedJson<Record<string, unknown>>(`/my/orders${q ? `?${q}` : ''}`);
+    return authedJson<{ items: any[]; page: number; pageSize: number; total: number }>(`/my/orders${q ? `?${q}` : ''}`);
   },
-  order(id: string) { return authedJson<Record<string, unknown>>(`/orders/${encodeURIComponent(id)}`); },
+  order(id: string) { return authedJson<Record<string, any>>(`/orders/${encodeURIComponent(id)}`); },
+  paymentCapabilities() { return authedJson<{ methods?: string[]; [k: string]: unknown }>('/payment/capabilities'); },
   addresses() { return authedJson<Record<string, unknown>>('/profile/addresses'); },
   saveAddress(payload: unknown) { return authedJson<Record<string, unknown>>('/profile/addresses', { method: 'PUT', body: JSON.stringify(payload) }); },
   deleteAddress(id: string) { return authedJson<unknown>(`/profile/addresses/${encodeURIComponent(id)}`, { method: 'DELETE' }); },
@@ -164,7 +179,8 @@ export const sessionApi = {
     const q = new URLSearchParams(Object.entries(params).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)])).toString();
     return authedJson<Record<string, unknown>>(`/notifications${q ? `?${q}` : ''}`);
   },
-  createPaymentIntent(orderId: string, payload: unknown, idempotencyKey: string) {
-    return authedJson<Record<string, unknown>>(`/orders/${encodeURIComponent(orderId)}/payment-intents`, { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: JSON.stringify(payload) });
+  createPaymentIntent(orderId: string, payload: Record<string, unknown>, idempotencyKey: string) {
+    // idempotencyKey 是请求体必填字段（后端 DTO 从 body 读取）；同时带同名请求头，双保险。
+    return authedJson<Record<string, any>>(`/orders/${encodeURIComponent(orderId)}/payment-intents`, { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({ ...payload, idempotencyKey }) });
   },
 };
