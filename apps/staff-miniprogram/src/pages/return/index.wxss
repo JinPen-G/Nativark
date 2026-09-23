@@ -1,0 +1,6 @@
+.return-quantity { width: 100rpx; text-align: center; border: 1rpx solid var(--border); border-radius: 12rpx; color: var(--text); background: var(--page); }
+.screen { padding-bottom: calc(150rpx + env(safe-area-inset-bottom)); }
+.card { box-shadow: none; border: 1rpx solid var(--border); }
+.card > .subtitle { font-weight: 700; padding-bottom: 8rpx; }
+.form-row { min-height: 86rpx; }
+.form-row__label { width: 48%; font-size: 25rpx; }

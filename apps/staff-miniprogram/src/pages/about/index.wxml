@@ -1,0 +1,15 @@
+<page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
+<view class="screen screen--flat {{themeClass}}">
+  <nav-bar title="{{section === 'help' ? '帮助中心' : '关于我们'}}"></nav-bar>
+  <view class="section"><view class="card">
+    <view class="subtitle">Rental OS 员工端</view>
+    <view class="muted mt-12">用于处理当前租户授权经营空间内的订单、交接、库存和现场工单。</view>
+    <view class="kv mt-24"><text class="kv__label">版本</text><text class="kv__value">{{version}}</text></view>
+  </view></view>
+  <view class="section section--tight"><view class="card">
+    <view class="subtitle">常见问题</view>
+    <view class="muted mt-12">看不到订单或操作入口：请先确认当前经营空间、履约地点和账号权限。</view>
+    <view class="muted mt-12">交接或库存操作结果不明：先刷新对应订单或工单，确认服务端状态后再操作。</view>
+    <view class="muted mt-12">无法登录或需要重置密码：请联系租户管理员。</view>
+  </view></view>
+</view>

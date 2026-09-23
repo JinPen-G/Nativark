@@ -1,0 +1,43 @@
+<page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
+<view class="screen screen--flat {{themeClass}}">
+  <nav-bar title="选择工作范围"></nav-bar>
+  <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
+
+  <block wx:else>
+    <view class="section">
+      <view class="muted small mb-16">{{tenantName}} · 选择要进入的经营空间</view>
+      <view class="card">
+        <view class="option {{selectedId === item.id ? 'option--selected' : ''}} {{switching ? 'option--disabled' : ''}}" wx:for="{{workspaces}}" wx:key="id" data-id="{{item.id}}" bindtap="onPickWorkspace">
+          <view class="ws__icon"><ui-icon name="{{item.icon}}" size="40" color="primary" stroke="1.6"></ui-icon></view>
+          <view class="grow ml-16">
+            <view class="row"><text class="subtitle">{{item.name}}</text><text wx:if="{{item.runModeLabel}}" class="pill">{{item.runModeLabel}}</text></view>
+            <view class="muted small mt-4">{{item.code}}{{item.current ? ' · 当前空间' : ''}}</view>
+          </view>
+          <view class="option__check"></view>
+        </view>
+      </view>
+    </view>
+
+    <view wx:if="{{context}}" class="section section--tight">
+      <view class="muted small mb-16">选择{{context.terminology.fulfillmentLabel}}范围（只影响本机列表筛选）</view>
+      <view class="card">
+        <view class="option {{locationId === '' ? 'option--selected' : ''}}" data-id="" bindtap="onPickLocation">
+          <view class="grow"><view class="subtitle">我有权限的全部{{context.terminology.fulfillmentLabel}}</view></view>
+          <view class="option__check"></view>
+        </view>
+        <view class="option {{locationId === item.id ? 'option--selected' : ''}}" wx:for="{{context.locations}}" wx:key="id" data-id="{{item.id}}" bindtap="onPickLocation">
+          <view class="grow">
+            <view class="subtitle">{{item.name}}</view>
+            <view class="muted small mt-4">{{item.address || item.code}}</view>
+          </view>
+          <view class="option__check"></view>
+        </view>
+      </view>
+    </view>
+    <view wx:elif="{{switching}}" class="section section--tight"><view class="muted small center">正在切换经营空间…</view></view>
+
+    <view class="section">
+      <button class="btn btn--primary btn--cta btn--block" hover-class="btn-hover" bindtap="onEnter" disabled="{{!selectedId || switching || !context}}">进入工作台</button>
+    </view>
+  </block>
+</view>

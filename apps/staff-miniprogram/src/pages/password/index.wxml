@@ -1,0 +1,12 @@
+<page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
+<view class="screen screen--flat {{themeClass}}">
+  <nav-bar title="修改密码"></nav-bar>
+  <view class="section"><view class="card">
+    <view wx:if="{{forced}}" class="notice notice--warning mb-16">首次登录或管理员重置后，请先修改密码。</view>
+    <view class="field"><view class="field__label field__label--required">当前密码</view><view class="field__control"><input class="field__input" password placeholder="输入当前密码" value="{{currentPassword}}" data-field="currentPassword" bindinput="onInput" /></view></view>
+    <view class="field"><view class="field__label field__label--required">新密码</view><view class="field__control"><input class="field__input" password placeholder="至少 8 位，包含字母和数字" value="{{newPassword}}" data-field="newPassword" bindinput="onInput" /></view></view>
+    <view class="field"><view class="field__label field__label--required">确认新密码</view><view class="field__control"><input class="field__input" password placeholder="再次输入新密码" value="{{confirmPassword}}" data-field="confirmPassword" bindinput="onInput" /></view></view>
+    <view wx:if="{{error}}" class="notice notice--danger mt-16">{{error}}</view>
+    <button class="btn btn--primary btn--block mt-24" disabled="{{busy}}" bindtap="onSave">{{busy ? '保存中…' : '保存密码'}}</button>
+  </view></view>
+</view>

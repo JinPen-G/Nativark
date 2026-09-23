@@ -1,0 +1,10 @@
+.search__input { font-size: 28rpx; color: var(--text); min-height: 60rpx; }
+.orders-search-row { display: flex; align-items: center; gap: 12rpx; }
+.orders-search { flex: 1; min-width: 0; background: #F2F6FC; border: 0; }
+.orders-filter { width: 58rpx; height: 76rpx; display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+.order-card { border: 1rpx solid var(--border); box-shadow: none; }
+.order-card__body { align-items: center; }
+.order-card__thumb { width: 112rpx; height: 112rpx; background: #F5F8FD; }
+.order-card__no { font-size: 24rpx; color: var(--secondary); font-weight: 500; }
+.order-card__meta { font-size: 22rpx; }
+.theme-dark .orders-search { background: var(--surface); border: 1rpx solid var(--line); }

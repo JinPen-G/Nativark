@@ -1,0 +1,170 @@
+// 客户端会话与认证：调用 /api/client/v1/auth/* 与需要登录的接口。
+// 令牌按租户隔离存储（每个租户官网是独立品牌，会话不跨租户），并在 401 时用 refresh token 自动续期一次。
+
+import { API_BASE } from './apiClient';
+
+const CLIENT_V1 = `${API_BASE}/api/client/v1`;
+
+export interface ClientSession {
+  accessToken: string;
+  refreshToken: string;
+  expiresIn: number;
+  customer: { id?: string; name?: string; phone?: string; [k: string]: unknown };
+  workspaces: WorkspaceRef[];
+  workspace?: WorkspaceRef;
+  wechatBound?: boolean;
+}
+
+export interface WorkspaceRef {
+  workspaceCode: string;
+  workspaceName: string;
+  categoryCode: string;
+  membershipStatus?: string;
+  isDefault?: boolean;
+}
+
+const storeKey = (tenantCode: string) => `rental-os-tenant-session:${tenantCode}`;
+
+export function loadSession(tenantCode: string): ClientSession | null {
+  try {
+    const raw = window.localStorage.getItem(storeKey(tenantCode));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as ClientSession;
+    return parsed?.accessToken && parsed?.refreshToken ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveSession(tenantCode: string, session: ClientSession | null): void {
+  try {
+    if (session) window.localStorage.setItem(storeKey(tenantCode), JSON.stringify(session));
+    else window.localStorage.removeItem(storeKey(tenantCode));
+  } catch {
+    // 隐私模式等场景下 localStorage 不可用；仅内存态失效，不阻断使用。
+  }
+}
+
+export class AuthError extends Error {
+  constructor(public status: number, message: string, public code?: string) {
+    super(message);
+    this.name = 'AuthError';
+  }
+}
+
+async function parse(response: Response) {
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = Array.isArray(body?.message) ? body.message.join('；') : (body?.message || `请求失败（${response.status}）`);
+    throw new AuthError(response.status, message, body?.code);
+  }
+  return body?.data ?? body;
+}
+
+/** 不带鉴权的 POST（登录/注册/验证码等公开入口）。 */
+async function postPublic<T>(path: string, payload: unknown): Promise<T> {
+  const response = await fetch(`${CLIENT_V1}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return parse(response) as Promise<T>;
+}
+
+export const authApi = {
+  /** 发送用途化验证码（登录/注册）；开发环境返回 developmentCode 便于联调。 */
+  createChallenge(input: { tenantCode: string; identifier: string; purpose: 'login' | 'registration'; idempotencyKey: string }) {
+    return postPublic<{ challengeId: string; developmentCode?: string; maskedDestination: string; retryAfterSeconds?: number }>(
+      '/auth/challenges', { ...input, method: 'sms' },
+    );
+  },
+  verifyChallenge(challengeId: string, code: string) {
+    return postPublic<{ verificationToken: string }>(`/auth/registration/challenges/${encodeURIComponent(challengeId)}/verify`, { code });
+  },
+  smsLogin(input: { tenantCode: string; loginIdentifier: string; verificationToken: string }) {
+    return postPublic<ClientSession>('/auth/sms-login', input);
+  },
+  passwordLogin(input: { tenantCode: string; loginIdentifier: string; password: string }) {
+    return postPublic<ClientSession>('/auth/login', input);
+  },
+  register(input: {
+    tenantCode: string; name: string; phone: string; password: string; verificationToken: string;
+    idempotencyKey: string; consent: { userAgreementVersion: string; privacyPolicyVersion: string; agreedAt: string };
+  }) {
+    return postPublic<{ result: string; customerId: string; membershipStatus: string }>('/auth/register', input);
+  },
+  refresh(refreshToken: string) {
+    return postPublic<ClientSession>('/auth/refresh', { refreshToken });
+  },
+  logout(refreshToken: string) {
+    return postPublic<unknown>('/auth/logout', { refreshToken }).catch(() => undefined);
+  },
+};
+
+// ---- 登录态请求层 ----
+// AuthContext 注册当前会话读写器；authedFetch 注入 Bearer，401 时用 refreshToken 续期一次并重试，
+// 续期失败则清空会话（视为登出）并抛出，由页面引导重新登录。
+
+interface AuthBridge {
+  getSession: () => ClientSession | null;
+  setSession: (session: ClientSession | null) => void;
+}
+
+let bridge: AuthBridge | null = null;
+
+export function configureAuthBridge(next: AuthBridge | null): void {
+  bridge = next;
+}
+
+async function authedFetch(path: string, init: RequestInit, retry = true): Promise<Response> {
+  const session = bridge?.getSession() ?? null;
+  const headers = new Headers(init.headers);
+  headers.set('Accept', 'application/json');
+  if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+  if (session?.accessToken) headers.set('Authorization', `Bearer ${session.accessToken}`);
+  const response = await fetch(`${CLIENT_V1}${path}`, { ...init, headers });
+  if (response.status === 401 && retry && session?.refreshToken) {
+    try {
+      const refreshed = await authApi.refresh(session.refreshToken);
+      bridge?.setSession(refreshed);
+      return authedFetch(path, init, false);
+    } catch {
+      bridge?.setSession(null);
+    }
+  }
+  return response;
+}
+
+async function authedJson<T>(path: string, init: RequestInit = {}): Promise<T> {
+  return parse(await authedFetch(path, init)) as Promise<T>;
+}
+
+/** 需要登录的接口。金额、库存、可用性均以服务端为准；前端不自行拼算最终价。 */
+export const sessionApi = {
+  me() { return authedJson<Record<string, unknown>>('/auth/me'); },
+  switchWorkspace(workspaceCode: string) {
+    return authedJson<ClientSession>('/auth/switch-workspace', { method: 'POST', body: JSON.stringify({ workspaceCode }) });
+  },
+  availability(payload: unknown) { return authedJson<Record<string, unknown>>('/availability', { method: 'POST', body: JSON.stringify(payload) }); },
+  createQuote(payload: unknown) { return authedJson<Record<string, unknown>>('/quotes', { method: 'POST', body: JSON.stringify(payload) }); },
+  getQuote(id: string) { return authedJson<Record<string, unknown>>(`/quotes/${encodeURIComponent(id)}`); },
+  createOrder(payload: unknown, idempotencyKey: string) {
+    return authedJson<Record<string, unknown>>('/orders', { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: JSON.stringify(payload) });
+  },
+  myOrders(params: { page?: number; pageSize?: number } = {}) {
+    const q = new URLSearchParams(Object.entries(params).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)])).toString();
+    return authedJson<Record<string, unknown>>(`/my/orders${q ? `?${q}` : ''}`);
+  },
+  order(id: string) { return authedJson<Record<string, unknown>>(`/orders/${encodeURIComponent(id)}`); },
+  addresses() { return authedJson<Record<string, unknown>>('/profile/addresses'); },
+  saveAddress(payload: unknown) { return authedJson<Record<string, unknown>>('/profile/addresses', { method: 'PUT', body: JSON.stringify(payload) }); },
+  deleteAddress(id: string) { return authedJson<unknown>(`/profile/addresses/${encodeURIComponent(id)}`, { method: 'DELETE' }); },
+  coupons() { return authedJson<Record<string, unknown>>('/coupons'); },
+  notifications(params: { page?: number; pageSize?: number } = {}) {
+    const q = new URLSearchParams(Object.entries(params).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)])).toString();
+    return authedJson<Record<string, unknown>>(`/notifications${q ? `?${q}` : ''}`);
+  },
+  createPaymentIntent(orderId: string, payload: unknown, idempotencyKey: string) {
+    return authedJson<Record<string, unknown>>(`/orders/${encodeURIComponent(orderId)}/payment-intents`, { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: JSON.stringify(payload) });
+  },
+};

@@ -1,0 +1,55 @@
+<page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
+<view class="screen screen--flat {{themeClass}}">
+  <nav-bar minimal="{{true}}"></nav-bar>
+
+  <view class="section">
+    <view class="row" hover-class="btn-hover" bindtap="onProfile">
+      <view class="avatar-lg">{{initial}}</view>
+      <view class="grow ml-24">
+        <view class="row"><text class="title">{{displayName}}</text><text class="pill">{{roleLabel}}</text></view>
+        <view class="muted mt-4">{{account}} · {{tenantName}}</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="section section--tight">
+    <view class="card row">
+      <view class="quick__icon"><ui-icon name="store" size="40" color="primary" stroke="1.7"></ui-icon></view>
+      <view class="grow ml-16">
+        <view class="muted small">当前工作区</view>
+        <view class="subtitle mt-4">{{workspaceName || '未选择经营空间'}}</view>
+        <view class="muted small mt-4">{{locationLabel}}</view>
+      </view>
+      <button class="btn btn--small btn--secondary" hover-class="btn-hover" bindtap="onSwitchWorkspace">切换</button>
+    </view>
+  </view>
+
+  <view wx:if="{{cards.length}}" class="section section--tight">
+    <view class="row gap-16">
+      <view class="card me-card grow" wx:for="{{cards}}" wx:key="key" hover-class="btn-hover" data-key="{{item.key}}" bindtap="onCard">
+        <view class="quick__icon {{item.color ? 'quick__icon--' + item.color : ''}}"><ui-icon name="{{item.icon}}" size="40" color="{{item.color === 'green' ? 'success' : item.color === 'purple' ? 'purple' : 'primary'}}" stroke="1.7"></ui-icon></view>
+        <view class="me-card__title">{{item.label}}</view>
+        <view class="me-card__hint">{{item.hint}}</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="section section--tight">
+    <view class="card menu">
+      <view class="cell" hover-class="btn-hover" bindtap="onProfile"><view class="cell__icon"><ui-icon name="user" size="40" color="text"></ui-icon></view><view class="cell__body"><view class="cell__title">个人信息</view></view><ui-icon name="chevron-right" size="30" color="muted"></ui-icon></view>
+      <view class="cell" hover-class="btn-hover" bindtap="onPassword"><view class="cell__icon"><ui-icon name="lock" size="40" color="text"></ui-icon></view><view class="cell__body"><view class="cell__title">修改密码</view></view><ui-icon name="chevron-right" size="30" color="muted"></ui-icon></view>
+      <view class="cell" hover-class="btn-hover" bindtap="onHistory"><view class="cell__icon"><ui-icon name="history" size="40" color="text"></ui-icon></view><view class="cell__body"><view class="cell__title">操作记录</view></view><ui-icon name="chevron-right" size="30" color="muted"></ui-icon></view>
+    </view>
+  </view>
+
+  <view class="section section--tight">
+    <view class="card menu">
+      <view class="cell" hover-class="btn-hover" bindtap="onHelp"><view class="cell__icon"><ui-icon name="question" size="40" color="text"></ui-icon></view><view class="cell__body"><view class="cell__title">帮助中心</view></view><ui-icon name="chevron-right" size="30" color="muted"></ui-icon></view>
+      <view class="cell" hover-class="btn-hover" bindtap="onAbout"><view class="cell__icon"><ui-icon name="info" size="40" color="text"></ui-icon></view><view class="cell__body"><view class="cell__title">关于我们</view></view><ui-icon name="chevron-right" size="30" color="muted"></ui-icon></view>
+    </view>
+  </view>
+
+  <view class="section">
+    <button class="btn btn--block" hover-class="btn-hover" bindtap="onLogout">退出登录</button>
+  </view>
+</view>

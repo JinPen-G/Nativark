@@ -1,0 +1,4 @@
+.asset-thumb { width: 104rpx; height: 104rpx; border-radius: 16rpx; background: var(--page); display: flex; align-items: center; justify-content: center; margin-right: 20rpx; overflow: hidden; }
+.asset-thumb image { width: 100%; height: 100%; }
+.card { margin-bottom: 16rpx; }
+.link { color: var(--primary); font-size: 25rpx; }

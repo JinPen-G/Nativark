@@ -1,0 +1,23 @@
+<page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
+<view class="screen screen--flat {{themeClass}}">
+  <nav-bar title="{{assetLabel}}详情"></nav-bar>
+  <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
+  <block wx:else>
+    <view class="asset-photo">
+      <image wx:if="{{imagePath}}" src="{{imagePath}}" mode="aspectFit"></image>
+      <ui-icon wx:else name="box" size="112" color="muted" stroke="1.3"></ui-icon>
+    </view>
+    <view class="section asset-summary">
+      <view class="row row--between"><view class="title">{{title}}</view><status-tag label="{{status}}" tone="{{tone}}" small="{{true}}"></status-tag></view>
+      <view class="card asset-details">
+        <view class="kv" bindtap="onCopy"><text class="kv__label">{{assetLabel}}编号</text><text class="kv__value asset-copy">{{assetNo}} ⧉</text></view>
+        <view wx:if="{{serialNo}}" class="kv"><text class="kv__label">序列号</text><text class="kv__value">{{serialNo}}</text></view>
+        <view class="kv"><text class="kv__label">所在地点</text><text class="kv__value">{{location}}</text></view>
+        <view class="kv" wx:for="{{fields}}" wx:key="label"><text class="kv__label">{{item.label}}</text><text class="kv__value">{{item.value}}</text></view>
+      </view>
+    </view>
+    <view class="section section--tight"><view class="card"><view class="row row--between"><view class="subtitle">状态记录</view><view class="link" bindtap="onLedger">查看库存流水</view></view><view wx:if="{{!history.length}}" class="muted mt-12">暂无记录</view><view class="cell" wx:for="{{history}}" wx:key="id"><view class="cell__body"><view class="cell__title">{{item.action}}</view><view class="cell__desc">{{item.detail}} · {{item.date}}</view></view></view></view></view>
+    <view wx:if="{{orders.length}}" class="section section--tight"><view class="card"><view class="subtitle">关联订单</view><view class="cell" wx:for="{{orders}}" wx:key="id" data-id="{{item.id}}" bindtap="onOrder"><view class="cell__body"><view class="cell__title">{{item.no}}</view><view class="cell__desc">{{item.status}}</view></view><ui-icon name="chevron-right" size="28" color="muted"></ui-icon></view></view></view>
+    <view wx:if="{{canManage}}" class="bottom-bar"><button class="btn btn--primary btn--block" bindtap="onEdit">编辑{{assetLabel}}</button></view>
+  </block>
+</view>

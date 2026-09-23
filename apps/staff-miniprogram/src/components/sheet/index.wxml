@@ -1,0 +1,14 @@
+<view wx:if="{{visible}}" class="sheet-mask" catchtouchmove="noop" bindtap="onClose">
+  <view class="sheet" catchtap="noop">
+    <view class="sheet__header">
+      <view class="sheet__title">{{title}}</view>
+      <view wx:if="{{closable}}" class="sheet__close" hover-class="btn-hover" bindtap="onClose">关闭</view>
+    </view>
+    <scroll-view class="sheet__body" scroll-y enhanced show-scrollbar="{{false}}">
+      <slot></slot>
+    </scroll-view>
+    <view wx:if="{{footer}}" class="sheet__footer">
+      <slot name="footer"></slot>
+    </view>
+  </view>
+</view>

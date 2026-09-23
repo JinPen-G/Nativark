@@ -1,0 +1,6 @@
+/* 操作记录（本机时间线） */
+.hist-note { display: flex; align-items: flex-start; }
+.hist-dot--success { background: var(--success); }
+.hist-dot--warning { background: var(--warning); }
+.hist-dot--neutral { background: var(--muted); }
+.hist-dot--info { background: var(--primary); }

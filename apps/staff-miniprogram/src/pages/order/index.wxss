@@ -1,0 +1,13 @@
+.order-heading { padding-top: 22rpx; padding-bottom: 14rpx; }
+.order-heading .title { font-size: 32rpx; }
+.order-info-card { box-shadow: none; border: 1rpx solid var(--border); }
+.order-card-title { display: flex; align-items: center; }
+.order-period { color: var(--text); font-size: 26rpx; padding: 14rpx 0; }
+.order-line { display: flex; align-items: center; gap: 16rpx; padding: 20rpx 0; border-bottom: 1rpx solid var(--border); }
+.order-line__thumb { width: 96rpx; height: 96rpx; flex: 0 0 auto; border-radius: var(--radius-sm); background: #F1F6FD; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.order-line__thumb image { width: 100%; height: 100%; }
+.order-line__name { font-size: 26rpx; font-weight: 600; }
+.order-line__price { font-size: 24rpx; color: var(--secondary); }
+.order-total { border-top: 1rpx solid var(--border); margin-top: 10rpx; padding-top: 12rpx; font-weight: 700; }
+.order-total .kv__value { color: var(--primary); }
+.order-actions button + button { margin-top: 12rpx; }

@@ -1,0 +1,5 @@
+.customer-head { display: flex; align-items: center; padding-top: 28rpx; padding-bottom: 32rpx; }
+.customer-avatar { width: 112rpx; height: 112rpx; flex: 0 0 auto; background: #E7F0FF; }
+.customer-head .title { font-size: 34rpx; }
+.customer-card { box-shadow: none; border: 1rpx solid var(--border); }
+.customer-card .subtitle { font-weight: 700; }

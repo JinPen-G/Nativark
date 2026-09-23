@@ -1,0 +1,18 @@
+<view class="nav {{transparent ? 'nav--transparent' : ''}}">
+  <view class="nav__status" style="height: {{statusBarHeight}}px;"></view>
+  <view wx:if="{{title}}" class="nav__title-row" style="height: {{navBarHeight}}px; padding-left: {{capsuleReserve}}px; padding-right: {{capsuleReserve}}px;">
+    <view wx:if="{{back}}" class="nav__back" hover-class="btn-hover" bindtap="onBack">
+      <ui-icon name="chevron-left" size="44" color="text" stroke="2"></ui-icon>
+    </view>
+    <view class="nav__title">{{title}}</view>
+  </view>
+  <view wx:elif="{{minimal}}" class="nav__blank" style="height: {{navBarHeight}}px;"></view>
+  <view wx:else class="nav__brand" style="height: {{navBarHeight}}px; padding-right: {{capsuleReserve}}px;">
+    <image class="nav__logo" src="{{logo}}" mode="heightFix"></image>
+    <view wx:if="{{location}}" class="nav__location" hover-class="btn-hover" bindtap="onLocation">
+      <text class="nav__location-text">{{location}}</text>
+      <ui-icon name="chevron-down" size="24" color="secondary" stroke="2"></ui-icon>
+    </view>
+  </view>
+</view>
+<view class="nav__placeholder" style="height: {{totalHeight}}px;"></view>

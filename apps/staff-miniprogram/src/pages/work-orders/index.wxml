@@ -1,0 +1,7 @@
+<page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
+<view class="screen screen--flat {{themeClass}}">
+  <nav-bar title="工单处理"></nav-bar>
+  <view class="section"><view class="chips"><view class="chip {{tab === 'open' ? 'chip--active' : ''}}" data-tab="open" bindtap="onTab">待处理</view><view class="chip {{tab === 'completed' ? 'chip--active' : ''}}" data-tab="completed" bindtap="onTab">已完成</view><view class="chip {{tab === 'all' ? 'chip--active' : ''}}" data-tab="all" bindtap="onTab">全部</view></view></view>
+  <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
+  <view wx:else class="section section--tight"><view class="card" wx:for="{{rows}}" wx:key="id" data-id="{{item.id}}" bindtap="onOpen"><view class="row row--between"><text class="subtitle">{{item.type}}</text><status-tag label="{{item.status}}" tone="{{item.tone}}" small="{{true}}"></status-tag></view><view class="muted small mt-8">{{item.workNo}}</view><view class="mt-16">{{item.reason}}</view><view class="muted small mt-8">{{item.location}}</view></view></view>
+</view>

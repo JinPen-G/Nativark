@@ -12,6 +12,8 @@ interface SiteContextValue {
   tenant: Tenant;
   /** 演示模式下的 demo key；真实租户模式为 undefined。 */
   tenantKey: DemoTenantKey;
+  /** 真实租户编码（?tenantCode= / 子域名 / 自定义域名反查得到）；演示模式为 null。认证按它隔离会话。 */
+  tenantCode: string | null;
   /** 是否为真实租户模式（?tenantCode= 触发，消费后端接口）。 */
   isRemote: boolean;
   mode: CategoryMode;
@@ -137,7 +139,7 @@ export function SiteProvider({ children }: { children: ReactNode }) {
     return <div className="remote-gate" role="status">{remoteError ? remoteError : '正在加载…'}</div>;
   }
 
-  return <SiteContext.Provider value={{ tenant, tenantKey, isRemote, mode, href, language, setLanguage, toggleLanguage, t, localizeProduct: localize, theme, setTheme, toggleTheme }}>{children}</SiteContext.Provider>;
+  return <SiteContext.Provider value={{ tenant, tenantKey, tenantCode: remoteTenantCode, isRemote, mode, href, language, setLanguage, toggleLanguage, t, localizeProduct: localize, theme, setTheme, toggleTheme }}>{children}</SiteContext.Provider>;
 }
 
 export function useSite() {

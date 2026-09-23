@@ -1,0 +1,9 @@
+{
+  "desc": "只有公开的首页、分类与设备详情允许被微信索引；订单、资料等页面不索引。",
+  "rules": [
+    { "action": "allow", "page": "pages/home/index" },
+    { "action": "allow", "page": "pages/catalog/index" },
+    { "action": "allow", "page": "pages/item/index" },
+    { "action": "disallow", "page": "*" }
+  ]
+}

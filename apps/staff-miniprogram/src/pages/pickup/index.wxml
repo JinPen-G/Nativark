@@ -1,0 +1,10 @@
+<page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
+<view class="screen {{themeClass}}"><nav-bar title="办理领取"></nav-bar>
+  <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
+  <block wx:else>
+    <view class="section"><view class="card"><view class="title">#{{orderNo}}</view><view class="muted mt-8">{{customer}}</view><view class="subtitle mt-16">交付{{itemLabel}}</view><view class="cell" wx:for="{{lines}}" wx:key="id"><view class="cell__body"><view class="cell__title">{{item.name}}</view></view><text>×{{item.quantity}}</text></view></view></view>
+    <view class="section section--tight"><view class="card"><view class="subtitle">领取检查 · {{templateName}}</view><view wx:if="{{noTemplate}}" class="muted mt-12">当前品类无启用的领取检查模板，确认后直接交接。</view><view class="form-row" wx:for="{{fields}}" wx:key="code"><view class="form-row__label">{{item.label}}{{item.required ? ' *' : ''}}</view><view class="form-row__control"><switch wx:if="{{item.type === 'boolean'}}" checked="{{item.checked}}" data-index="{{index}}" bindchange="onFieldBool" color="#1677FF"/><picker wx:elif="{{item.type === 'select'}}" range="{{item.options}}" data-index="{{index}}" bindchange="onFieldSelect"><text class="form-row__value">{{item.value || '请选择'}}</text></picker><input wx:elif="{{item.type === 'number'}}" class="form-row__input" type="digit" placeholder="填写数值" value="{{item.value}}" data-index="{{index}}" bindinput="onFieldInput"/><input wx:elif="{{item.type === 'text'}}" class="form-row__input" placeholder="填写检查结果" value="{{item.value}}" data-index="{{index}}" bindinput="onFieldInput"/><text wx:else class="muted small">需在后台上传照片</text></view></view></view></view>
+    <view wx:if="{{error}}" class="section small" style="color:var(--danger)">{{error}}</view>
+    <view class="bottom-bar"><button class="btn btn--primary btn--block" loading="{{busy}}" disabled="{{busy}}" bindtap="onSubmit">确认交付</button></view>
+  </block>
+</view>

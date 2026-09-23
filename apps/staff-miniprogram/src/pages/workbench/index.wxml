@@ -1,0 +1,83 @@
+<page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
+<view class="screen screen--flat {{themeClass}}">
+  <nav-bar location="{{locationLabel}}" bind:location="onOpenLocation"></nav-bar>
+
+  <state-view wx:if="{{view.status === 'error' || view.status === 'blocked'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
+
+  <block wx:else>
+    <view class="section">
+      <view class="hero hero--workbench">
+        <view class="hero__copy">
+          <view class="hero__title">{{heroTitle || '工作台'}}</view>
+          <view class="hero__subtitle">{{heroSubtitle || '正在加载经营空间…'}}</view>
+        </view>
+        <view class="hero__art">
+          <image wx:if="{{heroImage}}" class="hero__photo" src="{{heroImage}}" mode="aspectFit"></image>
+          <ui-icon wx:else name="{{heroIcon}}" size="88" color="primary" stroke="1.4"></ui-icon>
+        </view>
+      </view>
+    </view>
+
+    <view class="section section--tight">
+      <view class="quick-panel">
+        <view class="quick-grid">
+          <view class="quick" wx:for="{{quick}}" wx:key="key" hover-class="btn-hover" data-key="{{item.key}}" bindtap="onQuick">
+            <view class="quick__icon {{item.color ? 'quick__icon--' + item.color : ''}}"><ui-icon name="{{item.icon}}" size="44" color="{{item.color === 'green' ? 'success' : item.color === 'orange' ? 'warning' : item.color === 'purple' ? 'purple' : 'primary'}}" stroke="1.7"></ui-icon></view>
+            <view class="quick__label">{{item.label}}</view>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <view class="section section--tight">
+      <view class="sec-head">
+        <view class="sec-head__title">今日待办<text wx:if="{{counts.total}}" class="badge ml-12">{{counts.total}}</text></view>
+        <view class="sec-head__more" hover-class="btn-hover" bindtap="onAllTodos">查看全部<ui-icon name="chevron-right" size="26" color="muted"></ui-icon></view>
+      </view>
+      <view wx:if="{{view.status === 'loading'}}" class="card"><view class="skeleton skeleton--block"></view></view>
+      <view wx:else class="tiles">
+        <view class="tile" hover-class="btn-hover" data-key="pickup" bindtap="onTile"><view class="tile__num">{{counts.pickup}}</view><view class="tile__label">待取货订单</view></view>
+        <view class="tile tile--green" hover-class="btn-hover" data-key="return" bindtap="onTile"><view class="tile__num">{{counts.return}}</view><view class="tile__label">待归还订单</view></view>
+        <view class="tile tile--orange" hover-class="btn-hover" data-key="workOrders" bindtap="onTile"><view class="tile__num">{{counts.workOrders}}</view><view class="tile__label">待处理工单</view></view>
+      </view>
+    </view>
+
+    <view class="section section--tight">
+      <view class="sec-head"><view class="sec-head__title">待处理事项</view></view>
+      <view class="todo-panel">
+        <block wx:if="{{todos.length}}">
+          <view class="todo" wx:for="{{todos}}" wx:key="type" hover-class="btn-hover" data-type="{{item.type}}" bindtap="onTodo">
+            <view class="todo__icon todo__icon--{{item.color}}"><ui-icon name="{{item.icon}}" size="30" color="{{item.color === 'muted' ? 'secondary' : item.color}}" stroke="1.8"></ui-icon></view>
+            <view class="todo__title">{{item.label}}</view>
+            <view class="badge {{item.color === 'muted' || item.color === 'info' ? 'badge--muted' : ''}}">{{item.count}}</view>
+          </view>
+        </block>
+        <view wx:elif="{{view.status === 'loading'}}" class="skeleton skeleton--line"></view>
+        <view wx:else class="muted small center">暂无待处理事项</view>
+      </view>
+    </view>
+
+    <view class="section section--tight">
+      <view class="sec-head"><view class="sec-head__title">常用功能</view></view>
+      <view class="quick-panel quick-panel--common">
+        <view class="quick-grid">
+          <view class="quick" wx:for="{{common}}" wx:key="key" hover-class="btn-hover" data-key="{{item.key}}" bindtap="onQuick">
+            <view class="quick__icon {{item.color ? 'quick__icon--' + item.color : ''}}"><ui-icon name="{{item.icon}}" size="44" color="{{item.color === 'green' ? 'success' : item.color === 'orange' ? 'warning' : item.color === 'purple' ? 'purple' : 'primary'}}" stroke="1.7"></ui-icon></view>
+            <view class="quick__label">{{item.label}}</view>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <sheet visible="{{showLocationSheet}}" title="选择{{context.terminology.fulfillmentLabel}}" bind:close="onCloseLocation">
+      <view class="option {{!context.currentLocationId ? 'option--selected' : ''}}" data-id="" bindtap="onPickLocation">
+        <view class="grow"><view class="subtitle">全部{{context.terminology.fulfillmentLabel}}</view></view>
+        <view class="option__check"></view>
+      </view>
+      <view class="option mt-12 {{context.currentLocationId === item.id ? 'option--selected' : ''}}" wx:for="{{context.locations}}" wx:key="id" data-id="{{item.id}}" bindtap="onPickLocation">
+        <view class="grow"><view class="subtitle">{{item.name}}</view><view class="muted small mt-4">{{item.address || item.code}}</view></view>
+        <view class="option__check"></view>
+      </view>
+    </sheet>
+  </block>
+</view>

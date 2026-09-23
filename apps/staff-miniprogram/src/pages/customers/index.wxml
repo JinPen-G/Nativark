@@ -1,0 +1,7 @@
+<page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
+<view class="screen screen--flat {{themeClass}}">
+  <nav-bar title="客户查询"></nav-bar>
+  <view class="section"><view wx:if="{{canCreate}}" class="row row--between mb-12"><text class="muted small">客户资料</text><view class="link" bindtap="onCreate">＋ 新增客户</view></view><view class="search search--surface"><ui-icon name="search" size="30" color="muted"></ui-icon><input class="search__input" placeholder="搜索姓名、手机号尾号或企业" value="{{keyword}}" bindinput="onKeyword" /><view wx:if="{{keyword}}" bindtap="onClear">清除</view></view></view>
+  <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
+  <view wx:else class="section section--tight"><view class="card"><view class="cell" wx:for="{{rows}}" wx:key="id" data-id="{{item.id}}" bindtap="onOpen"><view class="cell__body"><view class="cell__title">{{item.name}} <text class="muted small">{{item.type}}</text></view><view class="cell__desc">{{item.phone}} · {{item.status}}</view></view><ui-icon name="chevron-right" size="28" color="muted"></ui-icon></view></view></view>
+</view>

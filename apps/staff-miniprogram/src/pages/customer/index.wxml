@@ -1,0 +1,14 @@
+<page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
+<view class="screen screen--flat {{themeClass}}">
+  <nav-bar title="客户详情"></nav-bar>
+  <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
+  <block wx:else>
+    <view class="section customer-head">
+      <view class="avatar-lg customer-avatar">{{initial}}</view>
+      <view class="grow ml-16"><view class="row"><view class="title">{{name}}</view><view class="pill">{{status}}</view></view><view class="muted mt-4">{{phoneMasked}}</view><view class="muted small">{{type}}</view></view>
+    </view>
+    <view class="section section--tight"><view class="card customer-card"><view class="row row--between"><view class="subtitle">基本信息</view><view wx:if="{{canEdit}}" class="link" bindtap="onEdit">编辑</view></view><view class="kv mt-16"><text class="kv__label">姓名</text><text class="kv__value">{{name}}</text></view><view class="kv"><text class="kv__label">手机号</text><text class="kv__value">{{phoneMasked}}</text></view><view class="kv"><text class="kv__label">客户类型</text><text class="kv__value">{{type}}</text></view><view wx:if="{{corporateName}}" class="kv"><text class="kv__label">企业</text><text class="kv__value">{{corporateName}}</text></view><view wx:if="{{address}}" class="kv"><text class="kv__label">地区</text><text class="kv__value">{{address}}</text></view></view></view>
+    <view class="section section--tight"><view class="card customer-card"><view class="row row--between"><view class="subtitle">联系客户</view><view class="link" bindtap="onCall"><ui-icon name="phone" size="26" color="primary"></ui-icon><text class="ml-8">拨打电话</text></view></view></view></view>
+    <view class="section section--tight"><view class="card customer-card"><view class="subtitle">进行中的订单</view><view wx:if="{{!orders.length}}" class="muted mt-16">暂无可查看的订单</view><view class="cell" wx:for="{{orders}}" wx:key="id" data-id="{{item.id}}" bindtap="onOrder"><view class="cell__body"><view class="cell__title">#{{item.orderNo}}</view><view class="cell__desc">{{item.status}}</view></view><ui-icon name="chevron-right" size="28" color="muted"></ui-icon></view></view></view>
+  </block>
+</view>

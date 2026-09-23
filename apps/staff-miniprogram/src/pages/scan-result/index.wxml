@@ -1,0 +1,82 @@
+<page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
+<view class="screen {{themeClass}}">
+  <nav-bar title="扫码结果"></nav-bar>
+
+  <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
+
+  <block wx:elif="{{kind === 'unknown'}}">
+    <view class="section">
+      <view class="result-head">
+        <view class="result-head__icon result-head__icon--fail"><ui-icon name="close" size="56" color="danger" stroke="2.4"></ui-icon></view>
+        <view class="result-head__title">未识别</view>
+        <view class="result-head__hint">{{failReason}}</view>
+      </view>
+    </view>
+    <view class="section section--tight">
+      <view class="card">
+        <view class="kv"><text class="kv__label">扫到的内容</text><text class="kv__value result-code">{{code || '（空）'}}</text></view>
+        <view class="muted small mt-12">可能原因：该码不在当前经营空间范围内、对象已被停用，或码值格式不受支持。</view>
+      </view>
+    </view>
+    <view class="section section--tight">
+      <view class="btn-row">
+        <button class="btn btn--outline" hover-class="btn-hover" bindtap="onManual">手动输入</button>
+        <button class="btn btn--primary" hover-class="btn-hover" bindtap="onRescan" disabled="{{busy}}">重新扫码</button>
+      </view>
+    </view>
+  </block>
+
+  <block wx:else>
+    <view class="section">
+      <view class="result-head">
+        <view class="result-head__icon result-head__icon--ok"><ui-icon name="check" size="56" color="onPrimary" stroke="2.6"></ui-icon></view>
+        <view class="result-head__title">识别成功</view>
+        <view class="result-head__hint">已匹配到{{kindLabel}}信息</view>
+      </view>
+    </view>
+
+    <view class="section section--tight">
+      <view class="card result-card">
+        <view class="result-card__main">
+          <view class="result-card__thumb">
+            <image wx:if="{{imagePath}}" src="{{imagePath}}" mode="aspectFill"></image>
+            <ui-icon wx:else name="{{kind === 'order' ? 'orders' : kind === 'workOrder' ? 'tool' : fallbackIcon}}" size="56" color="muted" stroke="1.4"></ui-icon>
+          </view>
+          <view class="grow result-card__body">
+            <view class="result-card__title">{{title}}</view>
+            <view class="result-card__row" wx:for="{{rows}}" wx:key="label">
+              <text class="result-card__label">{{item.label}}</text>
+              <text class="result-card__value">{{item.value}}</text>
+            </view>
+          </view>
+        </view>
+        <view wx:if="{{cells.length}}" class="result-card__cells">
+          <view class="result-card__cell" wx:for="{{cells}}" wx:key="label">
+            <view class="result-card__cell-label">{{item.label}}</view>
+            <status-tag wx:if="{{item.tag}}" label="{{item.value}}" tone="{{item.tone}}" small="{{true}}"></status-tag>
+            <view wx:else class="result-card__cell-value ellipsis">{{item.value}}</view>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <view class="section section--tight" wx:if="{{actions.length}}">
+      <view class="card scan-actions">
+        <view class="cell" wx:for="{{actions}}" wx:key="key" hover-class="btn-hover" data-key="{{item.key}}" bindtap="onAction">
+          <view class="quick__icon action-icon {{item.color ? 'quick__icon--' + item.color : ''}}">
+            <ui-icon name="{{item.icon}}" size="36" color="{{item.color === 'green' ? 'success' : item.color === 'orange' ? 'warning' : item.color === 'purple' ? 'purple' : 'primary'}}" stroke="1.8"></ui-icon>
+          </view>
+          <view class="cell__body">
+            <view class="cell__title">{{item.title}}</view>
+            <view class="cell__desc">{{item.desc}}</view>
+          </view>
+          <ui-icon class="cell__chevron" name="chevron-right" size="30" color="muted"></ui-icon>
+        </view>
+      </view>
+    </view>
+
+    <view class="section section--tight">
+      <button class="btn btn--secondary btn--block btn--cta" hover-class="btn-hover" bindtap="onRescan" disabled="{{busy}}">继续扫码</button>
+    </view>
+  </block>
+</view>

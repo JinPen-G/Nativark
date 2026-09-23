@@ -2,7 +2,9 @@
 // 开发环境经 Vite 代理转发到本地 API（见 vite.config.ts）；生产可用 VITE_API_BASE 指向真实网关。
 // 只消费公开（免登录）接口：bootstrap 与 public/catalog；登录态接口留待后续切片。
 
-const API_BASE = (import.meta.env.VITE_API_BASE ?? '').replace(/\/$/, '');
+const API_BASE_RAW = (import.meta.env.VITE_API_BASE ?? '').replace(/\/$/, '');
+/** API 网关基址：开发留空走 Vite /api 代理；生产可用 VITE_API_BASE 指向真实网关。供认证层复用。 */
+export const API_BASE = API_BASE_RAW;
 const CLIENT_V1 = `${API_BASE}/api/client/v1`;
 
 export class ApiError extends Error {
@@ -47,6 +49,11 @@ export interface BootstrapResponse {
   defaultServiceCode?: string;
   themeColor?: string;
   website?: BootstrapWebsite;
+  agreements?: {
+    userAgreement?: { name: string; version: string; url?: string; hasBody: boolean };
+    privacyPolicy?: { name: string; version: string; url?: string; hasBody: boolean };
+  };
+  loginMethods?: Array<'wechat_phone' | 'sms' | 'password'>;
   capabilities: { publicCatalog: boolean; [key: string]: boolean };
   source: 'channel' | 'workspace_directory';
 }

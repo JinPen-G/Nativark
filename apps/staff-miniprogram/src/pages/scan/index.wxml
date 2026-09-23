@@ -1,0 +1,60 @@
+<page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
+<view class="screen screen--flat {{themeClass}}">
+  <nav-bar location="{{locationLabel}}" bind:location="onOpenLocation"></nav-bar>
+
+  <view class="section">
+    <view class="hero hero--soft">
+      <view class="hero__title">扫码操作</view>
+      <view class="hero__subtitle">扫描{{context.terminology.assetLabel || '物品'}}条码 / 二维码</view>
+      <view class="hero__subtitle scan-hero__line">快速完成出入库、绑定订单等操作</view>
+      <view class="hero__art scan-art"><ui-icon name="scan" size="96" color="primary" stroke="1.3"></ui-icon></view>
+    </view>
+  </view>
+
+  <view class="section section--tight">
+    <button class="scan-cta" hover-class="btn-hover" bindtap="onStartScan" disabled="{{scanning}}">
+      <ui-icon name="scan" size="48" color="onPrimary" stroke="2"></ui-icon>
+      <view class="ml-16">
+        <view class="scan-cta__title">{{scanning ? '正在打开摄像头…' : '开始扫码'}}</view>
+        <view class="scan-cta__hint">对准{{context.terminology.assetLabel || '物品'}}条码 / 二维码</view>
+      </view>
+    </button>
+    <view class="row gap-16 mt-16">
+      <view class="card scan-entry grow" hover-class="btn-hover" bindtap="onManual">
+        <view class="quick__icon"><ui-icon name="keyboard" size="44" color="primary" stroke="1.7"></ui-icon></view>
+        <view class="scan-entry__title">手动输入</view>
+        <view class="scan-entry__hint">输入{{context.terminology.identifierLabel || '编号'}}或 SN</view>
+      </view>
+      <view class="card scan-entry grow" hover-class="btn-hover" bindtap="onHistory">
+        <view class="quick__icon quick__icon--orange"><ui-icon name="history" size="44" color="warning" stroke="1.7"></ui-icon></view>
+        <view class="scan-entry__title">扫码记录</view>
+        <view class="scan-entry__hint">查看历史记录</view>
+      </view>
+    </view>
+  </view>
+
+  <view wx:if="{{recent.length}}" class="section section--tight">
+    <view class="sec-head"><view class="sec-head__title">最近扫码</view><view class="sec-head__more" bindtap="onHistory">全部<ui-icon name="chevron-right" size="26" color="muted"></ui-icon></view></view>
+    <view class="card">
+      <view class="cell" wx:for="{{recent}}" wx:key="code" hover-class="btn-hover" data-code="{{item.code}}" bindtap="onRecent">
+        <view class="cell__body">
+          <view class="cell__title">{{item.title}}</view>
+          <view class="cell__desc">{{item.subtitle}}</view>
+        </view>
+        <ui-icon name="chevron-right" size="30" color="muted"></ui-icon>
+      </view>
+    </view>
+  </view>
+
+  <view class="section section--tight">
+    <view class="card scan-tips">
+      <view class="row"><ui-icon name="info" size="30" color="primary"></ui-icon><text class="subtitle ml-8">扫码小贴士</text></view>
+      <view class="scan-tips__item" wx:for="{{tips}}" wx:key="*this">• {{item}}</view>
+    </view>
+  </view>
+
+  <sheet visible="{{showLocationSheet}}" title="选择{{context.terminology.fulfillmentLabel}}" bind:close="onCloseLocation">
+    <view class="option {{!context.currentLocationId ? 'option--selected' : ''}}" data-id="" bindtap="onPickLocation"><view class="grow"><view class="subtitle">全部{{context.terminology.fulfillmentLabel}}</view></view><view class="option__check"></view></view>
+    <view class="option mt-12 {{context.currentLocationId === item.id ? 'option--selected' : ''}}" wx:for="{{context.locations}}" wx:key="id" data-id="{{item.id}}" bindtap="onPickLocation"><view class="grow"><view class="subtitle">{{item.name}}</view></view><view class="option__check"></view></view>
+  </sheet>
+</view>

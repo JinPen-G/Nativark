@@ -1,0 +1,41 @@
+<page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
+<view class="screen screen--flat {{themeClass}}">
+  <nav-bar title="操作记录"></nav-bar>
+
+  <view class="section">
+    <view class="notice notice--info hist-note">
+      <ui-icon name="info" size="30" color="primary"></ui-icon>
+      <text class="ml-8 grow">{{note}}</text>
+    </view>
+  </view>
+
+  <state-view wx:if="{{!total}}" state="empty" title="暂无操作记录" message="扫码并执行出库、入库等操作后，记录会显示在这里" actionText="去扫码" bind:action="onGoScan"></state-view>
+
+  <block wx:else>
+    <view class="section section--tight">
+      <view class="sec-head">
+        <view class="sec-head__title">本机记录<text class="pill">{{total}}</text></view>
+        <view class="sec-head__more" hover-class="btn-hover" bindtap="onClear"><ui-icon name="close" size="24" color="muted"></ui-icon><text class="ml-8">清空本机记录</text></view>
+      </view>
+      <view class="card">
+        <view class="timeline">
+          <block wx:for="{{groups}}" wx:key="key" wx:for-item="group">
+            <view class="tl__month">{{group.label}}</view>
+            <view class="tl" wx:for="{{group.items}}" wx:key="code" hover-class="btn-hover" data-code="{{item.code}}" bindtap="onEntry">
+              <view class="tl__date">{{item.timeText}}</view>
+              <view class="tl__dot hist-dot--{{item.actionTone}}"></view>
+              <view class="tl__body">
+                <view class="tl__title">
+                  <ui-icon name="{{item.icon}}" size="28" color="secondary" stroke="1.6"></ui-icon>
+                  <text class="ml-8 ellipsis grow">{{item.title}}</text>
+                  <status-tag label="{{item.action}}" tone="{{item.actionTone}}" small="{{true}}"></status-tag>
+                </view>
+                <view class="tl__desc ellipsis">{{item.subtitle}}</view>
+              </view>
+            </view>
+          </block>
+        </view>
+      </view>
+    </view>
+  </block>
+</view>

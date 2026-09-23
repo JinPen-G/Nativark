@@ -1,0 +1,55 @@
+<page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
+<view class="screen screen--flat {{themeClass}}">
+  <nav-bar title="订单" back="{{false}}"></nav-bar>
+
+  <view class="seg">
+    <view class="seg__item {{tab === item.key ? 'seg__item--active' : ''}}" wx:for="{{tabs}}" wx:key="key" data-key="{{item.key}}" bindtap="onTab">{{item.label}}</view>
+  </view>
+
+  <view class="section section--tight">
+    <view wx:if="{{canCreate}}" class="row row--between mb-12"><text class="muted small">当前范围：{{locationLabel}}</text><view class="link" bindtap="onCreate">＋ 新建订单</view></view>
+    <view class="orders-search-row">
+      <view class="search search--surface orders-search">
+        <ui-icon name="search" size="32" color="muted"></ui-icon>
+        <input class="grow ml-12 search__input" placeholder="搜索订单号、客户姓名、{{context.terminology.itemLabel || '物品'}}名称" placeholder-class="search__placeholder" value="{{keyword}}" confirm-type="search" bindinput="onKeyword" bindconfirm="onSearch" />
+        <view wx:if="{{keyword}}" class="tap-area" bindtap="onClearKeyword"><ui-icon name="close" size="28" color="muted"></ui-icon></view>
+      </view>
+      <view class="orders-filter" hover-class="btn-hover" bindtap="onOpenLocation"><ui-icon name="filter" size="34" color="text"></ui-icon></view>
+    </view>
+  </view>
+
+  <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
+
+  <view wx:else class="section section--tight">
+    <view class="order-card" wx:for="{{cards}}" wx:key="id" hover-class="btn-hover" data-id="{{item.id}}" bindtap="onOrder">
+      <view class="order-card__head">
+        <text class="order-card__no">#{{item.orderNo}}</text>
+        <status-tag label="{{item.statusLabel}}" tone="{{item.statusTone}}" small="{{true}}"></status-tag>
+      </view>
+      <view class="order-card__body">
+        <view class="order-card__thumb">
+          <image wx:if="{{item.imagePath}}" src="{{item.imagePath}}" mode="aspectFill"></image>
+          <ui-icon wx:else name="box" size="48" color="muted" stroke="1.4"></ui-icon>
+        </view>
+        <view class="grow">
+          <view class="body strong">{{item.customerName}}<text class="muted small ml-12">{{item.phoneMasked}}</text></view>
+          <view class="order-card__meta">{{item.periodText}} · {{item.locationName}}</view>
+          <view class="order-card__items ellipsis">{{item.itemsSummary}}</view>
+          <view class="order-card__meta">共 {{item.totalQuantity}} 件</view>
+        </view>
+        <ui-icon name="chevron-right" size="28" color="muted"></ui-icon>
+      </view>
+    </view>
+  </view>
+
+  <sheet visible="{{showLocationSheet}}" title="选择{{context.terminology.fulfillmentLabel}}" bind:close="onCloseLocation">
+    <view class="option {{!context.currentLocationId ? 'option--selected' : ''}}" data-id="" bindtap="onPickLocation">
+      <view class="grow"><view class="subtitle">全部{{context.terminology.fulfillmentLabel}}</view></view>
+      <view class="option__check"></view>
+    </view>
+    <view class="option mt-12 {{context.currentLocationId === item.id ? 'option--selected' : ''}}" wx:for="{{context.locations}}" wx:key="id" data-id="{{item.id}}" bindtap="onPickLocation">
+      <view class="grow"><view class="subtitle">{{item.name}}</view><view class="muted small mt-4">{{item.address || item.code}}</view></view>
+      <view class="option__check"></view>
+    </view>
+  </sheet>
+</view>

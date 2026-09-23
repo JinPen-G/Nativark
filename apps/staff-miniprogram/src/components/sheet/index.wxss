@@ -1,0 +1,9 @@
+.sheet-mask { position: fixed; top: 0; right: 0; bottom: 0; left: 0; background: rgba(31, 35, 41, 0.45); z-index: 100; display: flex; align-items: flex-end; }
+.sheet { width: 100%; max-height: 85vh; background: var(--surface); border-radius: 28rpx 28rpx 0 0; display: flex; flex-direction: column; padding-bottom: env(safe-area-inset-bottom); animation: sheet-in 180ms ease-out; }
+@media (prefers-reduced-motion: reduce) { .sheet { animation: none; } }
+@keyframes sheet-in { from { transform: translateY(40rpx); opacity: 0.6; } to { transform: translateY(0); opacity: 1; } }
+.sheet__header { display: flex; align-items: center; justify-content: space-between; padding: 28rpx 32rpx 20rpx; }
+.sheet__title { font-size: 32rpx; font-weight: 700; }
+.sheet__close { min-height: 88rpx; min-width: 88rpx; display: flex; align-items: center; justify-content: flex-end; color: var(--secondary); font-size: 28rpx; margin: -24rpx -16rpx -24rpx 0; padding-right: 16rpx; }
+.sheet__body { flex: 1; min-height: 0; padding: 8rpx 32rpx 16rpx; max-height: 60vh; }
+.sheet__footer { padding: 16rpx 32rpx 8rpx; }

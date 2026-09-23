@@ -1,0 +1,23 @@
+<page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
+<view class="screen {{themeClass}}">
+  <nav-bar title="订单详情"></nav-bar>
+  <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
+  <block wx:else>
+    <view class="section order-heading">
+      <view class="row row--between"><view class="title">#{{orderNo}}</view><status-tag label="{{status}}" tone="{{tone}}" small="{{true}}"></status-tag></view>
+      <view class="link small mt-8" bindtap="onCopy">复制订单号</view>
+    </view>
+    <view class="section section--tight">
+      <view class="card order-info-card">
+        <view class="subtitle order-card-title"><ui-icon name="user" size="30" color="primary"></ui-icon><text class="ml-8">客户信息</text></view>
+        <view class="cell" bindtap="onCustomer"><view class="cell__body"><view class="cell__title">{{customer}}</view><view class="cell__desc">{{phone}}</view></view><ui-icon name="chevron-right" size="28" color="muted"></ui-icon></view>
+        <view class="link" bindtap="onCall"><ui-icon name="phone" size="26" color="primary"></ui-icon><text class="ml-8">联系客户</text></view>
+      </view>
+    </view>
+    <view class="section section--tight"><view class="card order-info-card"><view class="subtitle order-card-title"><ui-icon name="calendar" size="30" color="primary"></ui-icon><text class="ml-8">租赁时间</text></view><view class="order-period">{{period}}</view><view class="kv"><text class="kv__label">交付方式</text><text class="kv__value">{{mode}}</text></view><view class="kv"><text class="kv__label">领取地点</text><text class="kv__value">{{pickupLocation}}</text></view><view class="kv"><text class="kv__label">归还地点</text><text class="kv__value">{{returnLocation}}</text></view></view></view>
+    <view class="section section--tight"><view class="card order-info-card"><view class="row row--between"><view class="subtitle">{{itemLabel}}清单</view><view class="muted small">共 {{lines.length}} 项</view></view><view class="order-line" wx:for="{{lines}}" wx:key="id"><view class="order-line__thumb"><image wx:if="{{item.imagePath}}" src="{{item.imagePath}}" mode="aspectFit"></image><ui-icon wx:else name="box" size="44" color="muted"></ui-icon></view><view class="grow"><view class="order-line__name">{{item.name}}</view><view class="muted small">数量 ×{{item.quantity}}</view></view><view class="order-line__price">{{item.unitPrice}}</view></view><view wx:if="{{allocations.length}}" class="subtitle mt-16">已分配资源</view><view class="cell" wx:for="{{allocations}}" wx:key="id"><view class="cell__body"><view class="cell__title">{{item.name}}</view><view class="cell__desc">数量 {{item.quantity}} · {{item.status}}</view></view></view></view></view>
+    <view class="section section--tight"><view class="card order-info-card"><view class="subtitle">费用明细</view><view class="kv"><text class="kv__label">押金</text><text class="kv__value">{{deposit}}</text></view><view class="kv order-total"><text class="kv__label">实付金额</text><text class="kv__value">{{amount}}</text></view></view></view>
+    <view wx:if="{{error}}" class="section small" style="color:var(--danger)">{{error}}</view>
+    <view class="section section--tight order-actions"><button wx:if="{{canConfirm}}" class="btn btn--primary btn--block" loading="{{busy}}" disabled="{{busy}}" bindtap="onConfirm">确认订单</button><button wx:if="{{canAllocate}}" class="btn btn--primary btn--block" loading="{{busy}}" disabled="{{busy}}" bindtap="onAllocate">自动配货</button><button wx:if="{{canPickup}}" class="btn btn--primary btn--block" bindtap="onPickup">办理领取</button><button wx:if="{{canReturn}}" class="btn btn--primary btn--block" bindtap="onReturn">办理归还</button><button wx:if="{{canCancel}}" class="btn btn--ghost btn--block mt-12" disabled="{{busy}}" bindtap="onCancel">取消订单</button></view>
+  </block>
+</view>

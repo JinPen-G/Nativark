@@ -1,0 +1,72 @@
+<page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
+<view class="screen screen--flat {{themeClass}}">
+  <nav-bar title="手动输入"></nav-bar>
+
+  <view class="seg seg--even">
+    <view class="seg__item {{tab === 'manual' ? 'seg__item--active' : ''}}" data-key="manual" bindtap="onTab">手动输入</view>
+    <view class="seg__item {{tab === 'history' ? 'seg__item--active' : ''}}" data-key="history" bindtap="onTab">历史记录</view>
+  </view>
+
+  <!-- 手动输入 -->
+  <block wx:if="{{tab === 'manual'}}">
+    <view class="section">
+      <view class="input-box manual-input">
+        <input class="grow" placeholder="请输入{{context.terminology.identifierLabel || '编号'}}、SN 或订单号" placeholder-class="search__placeholder" value="{{keyword}}" confirm-type="search" bindinput="onKeyword" bindconfirm="onQuery" />
+        <view wx:if="{{keyword}}" class="tap-area" bindtap="onClearKeyword"><ui-icon name="close" size="28" color="muted"></ui-icon></view>
+        <view class="tap-area manual-input__scan" hover-class="btn-hover" bindtap="onScanFill"><ui-icon name="scan" size="40" color="primary" stroke="1.8"></ui-icon></view>
+      </view>
+      <button class="btn btn--primary btn--block btn--cta mt-16" hover-class="btn-hover" bindtap="onQuery">查询</button>
+    </view>
+
+    <view class="section section--tight">
+      <view class="sec-head">
+        <view class="sec-head__title">最近扫码记录</view>
+        <view wx:if="{{recent.length}}" class="sec-head__more" hover-class="btn-hover" bindtap="onClear"><ui-icon name="close" size="24" color="muted"></ui-icon><text class="ml-8">清空</text></view>
+      </view>
+      <view wx:if="{{recent.length}}" class="card">
+        <view class="cell" wx:for="{{recent}}" wx:key="code" hover-class="btn-hover" data-code="{{item.code}}" bindtap="onEntry">
+          <view class="hist-thumb">
+            <image wx:if="{{item.imagePath}}" src="{{item.imagePath}}" mode="aspectFill"></image>
+            <ui-icon wx:else name="{{item.icon}}" size="40" color="muted" stroke="1.5"></ui-icon>
+          </view>
+          <view class="cell__body">
+            <view class="cell__title ellipsis">{{item.title}}</view>
+            <view class="cell__desc ellipsis">{{item.subtitle}}</view>
+            <view class="cell__desc">{{item.timeText}}</view>
+          </view>
+          <status-tag label="{{item.action}}" tone="{{item.actionTone}}" small="{{true}}"></status-tag>
+          <ui-icon class="cell__chevron" name="chevron-right" size="30" color="muted"></ui-icon>
+        </view>
+      </view>
+      <view wx:else class="card"><view class="muted small center">暂无扫码记录</view></view>
+    </view>
+  </block>
+
+  <!-- 历史记录 -->
+  <block wx:else>
+    <state-view wx:if="{{!history.length}}" state="empty" title="暂无扫码记录" message="扫码或手动查询后，记录会显示在这里（仅保存在本机）" actionText="去扫码" bind:action="onGoScan"></state-view>
+    <block wx:else>
+      <view class="section">
+        <view class="sec-head">
+          <view class="sec-head__title">全部记录<text class="pill">{{history.length}}</text></view>
+          <view class="sec-head__more" hover-class="btn-hover" bindtap="onClear"><ui-icon name="close" size="24" color="muted"></ui-icon><text class="ml-8">清空</text></view>
+        </view>
+        <view class="card">
+          <view class="cell" wx:for="{{history}}" wx:key="code" hover-class="btn-hover" data-code="{{item.code}}" bindtap="onEntry">
+            <view class="hist-thumb">
+              <image wx:if="{{item.imagePath}}" src="{{item.imagePath}}" mode="aspectFill"></image>
+              <ui-icon wx:else name="{{item.icon}}" size="40" color="muted" stroke="1.5"></ui-icon>
+            </view>
+            <view class="cell__body">
+              <view class="cell__title ellipsis">{{item.title}}</view>
+              <view class="cell__desc ellipsis">{{item.subtitle}}</view>
+              <view class="cell__desc">{{item.timeText}}</view>
+            </view>
+            <status-tag label="{{item.action}}" tone="{{item.actionTone}}" small="{{true}}"></status-tag>
+            <ui-icon class="cell__chevron" name="chevron-right" size="30" color="muted"></ui-icon>
+          </view>
+        </view>
+      </view>
+    </block>
+  </block>
+</view>

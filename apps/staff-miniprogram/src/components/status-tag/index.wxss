@@ -1,0 +1,7 @@
+.tag { display: inline-flex; align-items: center; height: 44rpx; padding: 0 16rpx; border-radius: 8rpx; font-size: 24rpx; font-weight: 500; line-height: 1; white-space: nowrap; }
+.tag--small { height: 36rpx; padding: 0 12rpx; font-size: 22rpx; }
+.tag--neutral { background: var(--page); color: var(--secondary); }
+.tag--info { background: var(--primary-weak); color: var(--primary); }
+.tag--success { background: var(--success-weak); color: var(--success); }
+.tag--warning { background: var(--warning-weak); color: var(--warning); }
+.tag--danger { background: var(--danger-weak); color: var(--danger); }

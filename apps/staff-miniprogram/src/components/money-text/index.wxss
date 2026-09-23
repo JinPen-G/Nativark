@@ -1,0 +1,10 @@
+.money { display: inline-flex; align-items: baseline; font-weight: 700; color: var(--text); white-space: nowrap; }
+.money--small { font-size: 26rpx; font-weight: 500; }
+.money--normal { font-size: 30rpx; }
+.money--large { font-size: 44rpx; }
+.money--price { color: var(--price); }
+.money--primary { color: var(--primary); }
+.money--negative { color: var(--success); }
+.money__prefix { font-weight: 400; font-size: 26rpx; color: var(--secondary); margin-right: 8rpx; }
+.money__symbol { font-size: 0.75em; margin-right: 2rpx; }
+.money__note { font-size: 22rpx; font-weight: 400; color: var(--warning); margin-left: 4rpx; }

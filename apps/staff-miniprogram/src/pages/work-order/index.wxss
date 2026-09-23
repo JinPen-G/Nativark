@@ -1,0 +1,5 @@
+.field__textarea { min-height: 180rpx; }
+.card { box-shadow: none; border: 1rpx solid var(--border); }
+.steps { padding: 20rpx 0 16rpx; border-bottom: 1rpx solid var(--border); }
+.steps__label { font-size: 20rpx; }
+.kv__value { text-align: right; }

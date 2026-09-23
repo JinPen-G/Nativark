@@ -1,0 +1,37 @@
+<page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
+<view class="screen screen--flat login {{themeClass}}">
+  <nav-bar></nav-bar>
+
+  <view class="login__brand">
+    <image class="login__mark" src="/assets/logo-mark.png" mode="aspectFit"></image>
+    <view class="login__title">员工工作台</view>
+    <view class="login__subtitle">使用租户运营账号登录，权限与 Web 后台一致</view>
+  </view>
+
+  <view class="section">
+    <view class="card">
+      <view wx:if="{{configError}}" class="notice notice--danger mb-16">{{configError}}</view>
+      <view class="field">
+        <view class="field__label field__label--required">租户编码</view>
+        <view class="field__control"><input class="field__input" placeholder="由管理员提供，例如 demo" placeholder-class="search__placeholder" value="{{tenantCode}}" maxlength="64" data-field="tenantCode" bindinput="onInput" /></view>
+        <view wx:if="{{errors.tenantCode}}" class="field__error">{{errors.tenantCode}}</view>
+      </view>
+      <view class="field">
+        <view class="field__label field__label--required">账号</view>
+        <view class="field__control"><input class="field__input" placeholder="运营账号" placeholder-class="search__placeholder" value="{{account}}" maxlength="64" data-field="account" bindinput="onInput" /></view>
+        <view wx:if="{{errors.account}}" class="field__error">{{errors.account}}</view>
+      </view>
+      <view class="field">
+        <view class="field__label field__label--required">密码</view>
+        <view class="field__control row">
+          <input class="field__input grow" password="{{!showPassword}}" placeholder="登录密码" placeholder-class="search__placeholder" value="{{password}}" maxlength="128" data-field="password" bindinput="onInput" bindconfirm="onSubmit" />
+          <view class="tap-area ml-12" bindtap="onTogglePassword"><ui-icon name="eye" size="36" color="{{showPassword ? 'primary' : 'muted'}}"></ui-icon></view>
+        </view>
+        <view wx:if="{{errors.password}}" class="field__error">{{errors.password}}</view>
+      </view>
+      <view wx:if="{{formError}}" class="notice notice--danger mt-8">{{formError}}</view>
+      <button class="btn btn--primary btn--cta btn--block mt-24" hover-class="btn-hover" bindtap="onSubmit" disabled="{{submitting || configError}}">{{submitting ? '登录中…' : '登录'}}</button>
+      <view class="muted small center mt-16">忘记密码请联系租户管理员在后台重置</view>
+    </view>
+  </view>
+</view>

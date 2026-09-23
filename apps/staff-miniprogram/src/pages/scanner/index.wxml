@@ -1,0 +1,17 @@
+<page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
+<view class="scanner {{themeClass}}">
+  <camera class="scanner__camera" mode="scanCode" flash="{{torch ? 'on' : 'off'}}" bindscancode="onCameraScan" binderror="onCameraError"></camera>
+  <view class="scanner__shade"></view>
+  <view class="scanner__top" style="padding-top: {{statusBarHeight}}px;">
+    <view class="scanner__close" bindtap="onBack"><ui-icon name="close" size="40" color="onPrimary"></ui-icon></view>
+  </view>
+  <view class="scanner__guide">将条码 / 二维码放入框内<view>即可自动识别</view></view>
+  <view class="scanner__frame"><view class="scanner__corner scanner__corner--tl"></view><view class="scanner__corner scanner__corner--tr"></view><view class="scanner__corner scanner__corner--bl"></view><view class="scanner__corner scanner__corner--br"></view><view class="scanner__line"></view></view>
+  <view wx:if="{{cameraError}}" class="scanner__error">{{cameraError}}</view>
+  <view class="scanner__toolbar">
+    <view class="scanner__tool" bindtap="onSystemScan"><view class="scanner__tool-icon"><ui-icon name="camera" size="36" color="onPrimary"></ui-icon></view><text>系统扫码</text></view>
+    <view class="scanner__tool" bindtap="onToggleTorch"><view class="scanner__tool-icon"><ui-icon name="flash" size="36" color="onPrimary"></ui-icon></view><text>手电筒</text></view>
+    <view class="scanner__tool" bindtap="onManual"><view class="scanner__tool-icon"><ui-icon name="keyboard" size="36" color="onPrimary"></ui-icon></view><text>手动输入</text></view>
+  </view>
+  <view class="scanner__hint">支持订单码 / {{assetLabel}}码 / 工单码</view>
+</view>
