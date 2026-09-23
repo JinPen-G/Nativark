@@ -71,6 +71,10 @@ export interface Tenant {
   seoTitle?: string;
   seoDescription?: string;
   seoKeywords?: string;
+  /** 官网首页「为什么选择我们」卖点；缺省用通用文案。 */
+  advantages?: Array<{ icon?: string; title: string; description?: string }>;
+  /** 官网首页「租赁流程」步骤；缺省用通用文案。 */
+  steps?: Array<{ title: string; description?: string }>;
 }
 
 export interface Product {

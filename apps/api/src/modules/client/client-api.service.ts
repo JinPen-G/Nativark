@@ -86,6 +86,21 @@ function idempotencyKeyOf(req?: ClientOrderRequestContext) {
   return value.trim();
 }
 
+/** 读取官网内容块 JSON（卖点/步骤/评价）：仅保留含全部必填字段的对象，字符串字段透传；无有效项返回 undefined。 */
+function readWebsiteJsonList(value: unknown, required: string[]): Array<Record<string, string>> | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const out: Array<Record<string, string>> = [];
+  for (const row of value) {
+    if (!row || typeof row !== "object") continue;
+    const entry: Record<string, string> = {};
+    for (const [k, v] of Object.entries(row as Record<string, unknown>)) {
+      if (typeof v === "string" && v.trim()) entry[k] = v;
+    }
+    if (required.every((key) => entry[key])) out.push(entry);
+  }
+  return out.length ? out : undefined;
+}
+
 @Injectable()
 export class ClientApiService {
   constructor(
@@ -335,6 +350,9 @@ export class ClientApiService {
             return code && imageUrl ? [{ code, imageUrl }] : [];
           })
         : undefined,
+      advantages: readWebsiteJsonList(row.advantagesJson, ["title"]) as ClientWebsiteConfig["advantages"],
+      steps: readWebsiteJsonList(row.stepsJson, ["title"]) as ClientWebsiteConfig["steps"],
+      testimonials: readWebsiteJsonList(row.testimonialsJson, ["name", "text"]) as ClientWebsiteConfig["testimonials"],
       showPoweredBy: row.showPoweredBy
     };
   }

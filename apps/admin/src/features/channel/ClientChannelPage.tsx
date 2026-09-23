@@ -39,7 +39,7 @@ function ImageUrlUpload({ value, onChange, scene, hint, previewHeight = 64 }: { 
         </Upload>
         {value ? <Button type="text" danger onClick={() => onChange?.("")}>移除</Button> : null}
       </Space>
-      <Typography.Text type="secondary" style={{ display: "block", marginTop: 6, fontSize: 12 }}>{hint}</Typography.Text>
+      <Typography.Text type="secondary" className="text-meta" style={{ display: "block", marginTop: 6 }}>{hint}</Typography.Text>
     </div>
   );
 }
@@ -272,7 +272,10 @@ function WebsiteProfileCard() {
       seoKeywords: data.seoKeywords,
       showPoweredBy: data.showPoweredBy,
       customDomain: data.customDomain,
-      categoryImageMap: Object.fromEntries((data.categoryImages ?? []).map((item) => [item.code, item.imageUrl]))
+      categoryImageMap: Object.fromEntries((data.categoryImages ?? []).map((item) => [item.code, item.imageUrl])),
+      advantages: data.advantages ?? [],
+      steps: data.steps ?? [],
+      testimonials: data.testimonials ?? []
     });
   }, [profile.data, form]);
 
@@ -372,6 +375,44 @@ function WebsiteProfileCard() {
             <Col xs={24} md={12}><Form.Item name="seoKeywords" label="SEO 关键词" extra="以英文逗号分隔"><Input maxLength={256} placeholder="相机,露营,租赁" /></Form.Item></Col>
             <Col xs={24}><Form.Item name="seoDescription" label="SEO 描述"><Input.TextArea rows={2} maxLength={400} showCount /></Form.Item></Col>
           </Row>
+        </Card>
+
+        <Card size="small" title="为什么选择我们（卖点）" style={{ marginTop: 16 }}>
+          <Typography.Paragraph type="secondary">留空则使用通用文案。图标关键字可填 authentic / delivery / flexible / service / quality / support，其余用默认勾选图标。</Typography.Paragraph>
+          <Form.List name="advantages">{(fields, { add, remove }) => <Space orientation="vertical" size={8} style={{ width: "100%" }}>
+            {fields.map((field) => <Row key={field.key} gutter={[8, 0]} align="top">
+              <Col xs={24} md={5}><Form.Item {...field} key={`${field.key}-i`} name={[field.name, "icon"]} style={{ marginBottom: 8 }}><Input maxLength={32} placeholder="图标关键字" /></Form.Item></Col>
+              <Col xs={24} md={6}><Form.Item {...field} key={`${field.key}-t`} name={[field.name, "title"]} rules={[{ required: true, max: 40 }]} style={{ marginBottom: 8 }}><Input placeholder="标题" /></Form.Item></Col>
+              <Col xs={22} md={12}><Form.Item {...field} key={`${field.key}-d`} name={[field.name, "description"]} rules={[{ max: 120 }]} style={{ marginBottom: 8 }}><Input placeholder="描述" /></Form.Item></Col>
+              <Col xs={2} md={1}><Button type="text" danger onClick={() => remove(field.name)}>删</Button></Col>
+            </Row>)}
+            <Button type="dashed" icon={<PlusOutlined />} onClick={() => add({ title: "" })} disabled={fields.length >= 8}>新增卖点</Button>
+          </Space>}</Form.List>
+        </Card>
+
+        <Card size="small" title="租赁流程" style={{ marginTop: 16 }}>
+          <Typography.Paragraph type="secondary">留空则使用通用四步；填写后按顺序展示，序号自动生成。</Typography.Paragraph>
+          <Form.List name="steps">{(fields, { add, remove }) => <Space orientation="vertical" size={8} style={{ width: "100%" }}>
+            {fields.map((field) => <Row key={field.key} gutter={[8, 0]} align="top">
+              <Col xs={24} md={7}><Form.Item {...field} key={`${field.key}-t`} name={[field.name, "title"]} rules={[{ required: true, max: 40 }]} style={{ marginBottom: 8 }}><Input placeholder="步骤标题" /></Form.Item></Col>
+              <Col xs={22} md={16}><Form.Item {...field} key={`${field.key}-d`} name={[field.name, "description"]} rules={[{ max: 120 }]} style={{ marginBottom: 8 }}><Input placeholder="步骤说明" /></Form.Item></Col>
+              <Col xs={2} md={1}><Button type="text" danger onClick={() => remove(field.name)}>删</Button></Col>
+            </Row>)}
+            <Button type="dashed" icon={<PlusOutlined />} onClick={() => add({ title: "" })} disabled={fields.length >= 8}>新增步骤</Button>
+          </Space>}</Form.List>
+        </Card>
+
+        <Card size="small" title="用户评价 / 客户案例" style={{ marginTop: 16 }}>
+          <Typography.Paragraph type="secondary">留空则首页不展示评价区块。请如实使用已获授权的客户评价。</Typography.Paragraph>
+          <Form.List name="testimonials">{(fields, { add, remove }) => <Space orientation="vertical" size={8} style={{ width: "100%" }}>
+            {fields.map((field) => <Row key={field.key} gutter={[8, 0]} align="top">
+              <Col xs={24} md={5}><Form.Item {...field} key={`${field.key}-n`} name={[field.name, "name"]} rules={[{ required: true, max: 40 }]} style={{ marginBottom: 8 }}><Input placeholder="来源（如 陈女士）" /></Form.Item></Col>
+              <Col xs={24} md={5}><Form.Item {...field} key={`${field.key}-c`} name={[field.name, "context"]} rules={[{ max: 60 }]} style={{ marginBottom: 8 }}><Input placeholder="场景（如 周末摄影）" /></Form.Item></Col>
+              <Col xs={22} md={13}><Form.Item {...field} key={`${field.key}-x`} name={[field.name, "text"]} rules={[{ required: true, max: 300 }]} style={{ marginBottom: 8 }}><Input placeholder="评价内容" /></Form.Item></Col>
+              <Col xs={2} md={1}><Button type="text" danger onClick={() => remove(field.name)}>删</Button></Col>
+            </Row>)}
+            <Button type="dashed" icon={<PlusOutlined />} onClick={() => add({ name: "", text: "" })} disabled={fields.length >= 12}>新增评价</Button>
+          </Space>}</Form.List>
         </Card>
 
         <Space style={{ marginTop: 16 }}>

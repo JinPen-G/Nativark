@@ -177,6 +177,9 @@ const websiteProfileRow = {
   secondaryColor: "#0A5CFF", footerText: "按需租用，让每一次体验都恰到好处。", contactAddress: "上海市 XX 路 1 号",
   ctaTitle: "开始租赁吧", ctaDescription: "海量好物，灵活租期", seoTitle: "租赁官网", seoDescription: "多行业租赁", seoKeywords: "相机,露营,租赁",
   categoryImagesJson: [{ code: "camera", imageUrl: "https://cdn.example.invalid/cam.webp" }],
+  advantagesJson: [{ icon: "authentic", title: "正品保障", description: "严格甄选" }],
+  stepsJson: [{ title: "选商品", description: "浏览下单" }],
+  testimonialsJson: [{ name: "陈女士", context: "周末摄影", text: "取还方便" }],
   showPoweredBy: false, updatedAt: new Date("2026-09-22T00:00:00Z")
 };
 
@@ -194,6 +197,9 @@ test("bootstrap: web 官网渠道叠加官网特有配置；未启用或非 web 
   assert.equal(web.website.secondaryColor, "#0A5CFF");
   assert.equal(web.website.showPoweredBy, false);
   assert.deepEqual(web.website.categoryImages, [{ code: "camera", imageUrl: "https://cdn.example.invalid/cam.webp" }], "web 渠道带出品类入口图");
+  assert.deepEqual(web.website.advantages, [{ icon: "authentic", title: "正品保障", description: "严格甄选" }], "web 渠道带出卖点");
+  assert.deepEqual(web.website.steps, [{ title: "选商品", description: "浏览下单" }], "web 渠道带出流程");
+  assert.deepEqual(web.website.testimonials, [{ name: "陈女士", context: "周末摄影", text: "取还方便" }], "web 渠道带出评价");
   assert.equal(web.loginMethods.includes("wechat_phone"), false, "web 不做微信一键登录");
   assert.ok(web.loginMethods.includes("sms") && web.loginMethods.includes("password"));
 
@@ -239,6 +245,15 @@ test("website profile save: 辅助色归一化、就绪判定要求启用+Hero �
     { code: "camping", imageUrl: "" }
   ] }, user);
   assert.deepEqual(calls.written.categoryImagesJson, [{ code: "camera", imageUrl: "https://cdn.example.invalid/a.webp" }], "去重取首个、丢弃空图");
+  // 内容块：卖点/流程/评价裁剪空项与超限，缺必填项丢弃。
+  await svc.save({ enabled: true, showPoweredBy: true, heroTitle: "标题",
+    advantages: [{ icon: "authentic", title: "正品", description: "严选" }, { title: "" }],
+    steps: [{ title: "选货" }, { title: "", description: "x" }],
+    testimonials: [{ name: "陈", context: "周末", text: "很好" }, { name: "", text: "丢" }, { name: "李", text: "" }] }, user);
+  assert.deepEqual(calls.written.advantagesJson, [{ icon: "authentic", title: "正品", description: "严选" }], "卖点丢弃空标题项");
+  assert.deepEqual(calls.written.stepsJson, [{ title: "选货" }], "流程丢弃空标题项");
+  assert.deepEqual(calls.written.testimonialsJson, [{ name: "陈", context: "周末", text: "很好" }], "评价要求 name+text");
+  await assert.rejects(svc.save({ enabled: true, showPoweredBy: true, advantages: [{ title: "x".repeat(41) }] }, user), status(400));
   await assert.rejects(svc.save({ enabled: true, showPoweredBy: true, categoryImages: [{ code: "not-mine", imageUrl: "https://cdn.example.invalid/x.webp" }] }, user), status(400));
 
   // 未启用 / 缺 Hero 标题 → 未就绪。

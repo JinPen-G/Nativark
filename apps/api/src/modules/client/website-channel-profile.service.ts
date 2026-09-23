@@ -4,8 +4,11 @@ import type {
   ClientChannelReadiness,
   SaveWebsiteChannelProfileRequest,
   SystemUserRow,
+  WebsiteAdvantage,
   WebsiteCategoryImage,
-  WebsiteChannelProfileSummary
+  WebsiteChannelProfileSummary,
+  WebsiteStep,
+  WebsiteTestimonial
 } from "@rental-os/shared";
 import { OperationLogService } from "../../common/operation-log.service";
 import { assertOutboundUrl, UnsafeOutboundUrlError } from "../../common/outbound-url";
@@ -69,6 +72,89 @@ function readCategoryImages(value: unknown): WebsiteCategoryImage[] {
   return out;
 }
 
+const str = (row: Record<string, unknown>, key: string) => (typeof row[key] === "string" ? String(row[key]) : "");
+
+/** 读取内容块 JSON（卖点/步骤/评价）：容错解析，丢弃缺必填项。 */
+function readAdvantages(value: unknown): WebsiteAdvantage[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((row) => {
+    if (!row || typeof row !== "object") return [];
+    const title = str(row as Record<string, unknown>, "title").trim();
+    if (!title) return [];
+    const icon = str(row as Record<string, unknown>, "icon").trim();
+    const description = str(row as Record<string, unknown>, "description").trim();
+    return [{ ...(icon ? { icon } : {}), title, ...(description ? { description } : {}) }];
+  });
+}
+function readSteps(value: unknown): WebsiteStep[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((row) => {
+    if (!row || typeof row !== "object") return [];
+    const title = str(row as Record<string, unknown>, "title").trim();
+    if (!title) return [];
+    const description = str(row as Record<string, unknown>, "description").trim();
+    return [{ title, ...(description ? { description } : {}) }];
+  });
+}
+function readTestimonials(value: unknown): WebsiteTestimonial[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((row) => {
+    if (!row || typeof row !== "object") return [];
+    const name = str(row as Record<string, unknown>, "name").trim();
+    const text = str(row as Record<string, unknown>, "text").trim();
+    if (!name || !text) return [];
+    const context = str(row as Record<string, unknown>, "context").trim();
+    return [{ name, ...(context ? { context } : {}), text }];
+  });
+}
+
+/** 规范化内容块输入：裁剪长度、丢弃缺必填项、限制条数。 */
+function normalizeAdvantages(input: SaveWebsiteChannelProfileRequest["advantages"]): WebsiteAdvantage[] {
+  if (!input?.length) return [];
+  const out: WebsiteAdvantage[] = [];
+  for (const item of input) {
+    const title = (item?.title ?? "").trim();
+    if (!title) continue;
+    if (title.length > 40) throw new BadRequestException("卖点标题最多 40 字");
+    const description = (item?.description ?? "").trim();
+    if (description.length > 120) throw new BadRequestException("卖点描述最多 120 字");
+    const icon = (item?.icon ?? "").trim().slice(0, 32);
+    out.push({ ...(icon ? { icon } : {}), title, ...(description ? { description } : {}) });
+  }
+  if (out.length > 8) throw new BadRequestException("卖点最多 8 条");
+  return out;
+}
+function normalizeSteps(input: SaveWebsiteChannelProfileRequest["steps"]): WebsiteStep[] {
+  if (!input?.length) return [];
+  const out: WebsiteStep[] = [];
+  for (const item of input) {
+    const title = (item?.title ?? "").trim();
+    if (!title) continue;
+    if (title.length > 40) throw new BadRequestException("流程步骤标题最多 40 字");
+    const description = (item?.description ?? "").trim();
+    if (description.length > 120) throw new BadRequestException("流程步骤描述最多 120 字");
+    out.push({ title, ...(description ? { description } : {}) });
+  }
+  if (out.length > 8) throw new BadRequestException("流程步骤最多 8 条");
+  return out;
+}
+function normalizeTestimonials(input: SaveWebsiteChannelProfileRequest["testimonials"]): WebsiteTestimonial[] {
+  if (!input?.length) return [];
+  const out: WebsiteTestimonial[] = [];
+  for (const item of input) {
+    const name = (item?.name ?? "").trim();
+    const text = (item?.text ?? "").trim();
+    if (!name || !text) continue;
+    if (name.length > 40) throw new BadRequestException("评价来源最多 40 字");
+    if (text.length > 300) throw new BadRequestException("评价正文最多 300 字");
+    const context = (item?.context ?? "").trim();
+    if (context.length > 60) throw new BadRequestException("评价场景最多 60 字");
+    out.push({ name, ...(context ? { context } : {}), text });
+  }
+  if (out.length > 12) throw new BadRequestException("用户评价最多 12 条");
+  return out;
+}
+
 @Injectable()
 export class WebsiteChannelProfileService {
   constructor(
@@ -122,6 +208,9 @@ export class WebsiteChannelProfileService {
       showPoweredBy: row?.showPoweredBy ?? true,
       customDomain: row?.customDomain ?? undefined,
       categoryImages: readCategoryImages(row?.categoryImagesJson),
+      advantages: readAdvantages(row?.advantagesJson),
+      steps: readSteps(row?.stepsJson),
+      testimonials: readTestimonials(row?.testimonialsJson),
       categories,
       readiness: this.readiness(row),
       updatedAt: row?.updatedAt.toISOString()
@@ -186,7 +275,10 @@ export class WebsiteChannelProfileService {
       seoKeywords: text(input.seoKeywords, 256, "SEO 关键词"),
       showPoweredBy: Boolean(input.showPoweredBy),
       customDomain: normalizeCustomDomain(input.customDomain),
-      categoryImagesJson: categoryImages as unknown as Prisma.InputJsonValue
+      categoryImagesJson: categoryImages as unknown as Prisma.InputJsonValue,
+      advantagesJson: normalizeAdvantages(input.advantages) as unknown as Prisma.InputJsonValue,
+      stepsJson: normalizeSteps(input.steps) as unknown as Prisma.InputJsonValue,
+      testimonialsJson: normalizeTestimonials(input.testimonials) as unknown as Prisma.InputJsonValue
     };
 
     const row = await (async () => {

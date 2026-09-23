@@ -772,3 +772,8 @@ html[data-theme="dark"] .home-hero-multiple .hero-benefits { background: rgba(0,
 .order-lines { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
 .order-line { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 14px; }
 .order-line span { color: var(--ink, #1c2733); }
+
+/* 协议 / 隐私 / 帮助 文档页 */
+.doc-page { max-width: 760px; }
+.doc-intro { color: var(--muted, #6b7a90); }
+.doc-text p { margin: 0 0 10px; line-height: 1.8; color: var(--ink, #1c2733); }

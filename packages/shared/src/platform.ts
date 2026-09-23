@@ -228,6 +228,8 @@ export interface SessionContextResponse {
    */
   workspaces?: BusinessWorkspace[];
   currentWorkspaceId?: string;
+  /** STAFF-BE-01：员工会话的服务端地点授权；缺省视为全部地点，仅用于兼容旧成员。 */
+  locationScope?: { mode: "all" | "selected"; locationIds: string[] };
   /**
    * CORE-EXT-02C：本空间**缺失的首期必选能力**，与生产就绪标记配套。
    *
@@ -373,6 +375,8 @@ export interface SystemUserRow {
   isActive: boolean;
   permissions: string[];
   dataScope: SystemDataScope;
+  /** 员工小程序专用的履约地点范围；不改变 Web 后台原有空间可见口径。 */
+  locationScope?: { mode: "all" | "selected"; locationIds: string[] };
 }
 
 export interface SaveSystemUserRequest {
@@ -400,6 +404,7 @@ export interface SaveWorkspaceAccessRequest {
   workspaceId: string;
   roleId?: string;
   dataScope?: SystemDataScope;
+  locationScope?: { mode: "all" | "selected"; locationIds: string[] };
   isActive: boolean;
 }
 
@@ -826,6 +831,26 @@ export interface WebsiteCategoryImage {
   imageUrl: string;
 }
 
+/** 官网「为什么选择我们」卖点。icon 为可选图标键（authentic/delivery/flexible/service/quality/support…）。 */
+export interface WebsiteAdvantage {
+  icon?: string;
+  title: string;
+  description?: string;
+}
+
+/** 官网「租赁流程」步骤。 */
+export interface WebsiteStep {
+  title: string;
+  description?: string;
+}
+
+/** 官网「用户评价 / 客户案例」。 */
+export interface WebsiteTestimonial {
+  name: string;
+  context?: string;
+  text: string;
+}
+
 export interface WebsiteChannelProfileSummary {
   configured: boolean;
   revision: number;
@@ -849,6 +874,10 @@ export interface WebsiteChannelProfileSummary {
   customDomain?: string;
   /** 品类入口图（按服务编码）。 */
   categoryImages: WebsiteCategoryImage[];
+  /** 官网首页内容块（可编辑）；缺省时前端用通用文案 / 隐藏评价。 */
+  advantages: WebsiteAdvantage[];
+  steps: WebsiteStep[];
+  testimonials: WebsiteTestimonial[];
   /** 可配置入口图的一级品类（当前租户已启用的经营空间）；供后台按品类填图。 */
   categories: Array<{ code: string; name: string }>;
   readiness: ClientChannelReadiness;
@@ -878,6 +907,10 @@ export interface SaveWebsiteChannelProfileRequest {
   customDomain?: string;
   /** 品类入口图（按服务编码）；空 imageUrl 视为清除该品类配置。 */
   categoryImages?: WebsiteCategoryImage[];
+  /** 官网首页内容块（可编辑）；空数组表示清空、回落前端通用文案。 */
+  advantages?: WebsiteAdvantage[];
+  steps?: WebsiteStep[];
+  testimonials?: WebsiteTestimonial[];
 }
 
 /**

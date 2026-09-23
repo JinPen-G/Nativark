@@ -8,8 +8,9 @@ import { ProductDetailPage } from './pages/ProductDetailPage';
 import { BookingPage } from './pages/BookingPage';
 import { LoginPage } from './pages/LoginPage';
 import { AccountPage } from './pages/AccountPage';
+import { DocumentPage } from './pages/DocumentPage';
 import { OrderDetailPage, OrdersPage } from './pages/OrderPages';
-import { AboutPage, GuidePage, HelpPage } from './pages/InfoPages';
+import { AboutPage, GuidePage } from './pages/InfoPages';
 
 export function App() {
   return <BrowserRouter><SiteProvider><AuthProvider><SiteLayout><Routes>
@@ -24,7 +25,9 @@ export function App() {
     <Route path="/orders/:orderId" element={<OrderDetailPage />} />
     <Route path="/about" element={<AboutPage />} />
     <Route path="/guide" element={<GuidePage />} />
-    <Route path="/help" element={<HelpPage />} />
+    <Route path="/help" element={<DocumentPage kind="help" />} />
+    <Route path="/agreement" element={<DocumentPage kind="user_agreement" />} />
+    <Route path="/privacy" element={<DocumentPage kind="privacy_policy" />} />
     <Route path="*" element={<Navigate to="/" replace />} />
   </Routes></SiteLayout></AuthProvider></SiteProvider></BrowserRouter>;
 }

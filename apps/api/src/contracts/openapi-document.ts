@@ -176,6 +176,29 @@ function buildPaths(operations: ContractOperation[]) {
 export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   OpenApiDocument: objectSchema,
   GenericObject: objectSchema,
+  RentalOperationLockRequest: {
+    oneOf: [
+      { ...objectOf({ action: { type: "string", enum: ["acquire"] }, token: stringSchema, reason: stringSchema }, ["action"], false) },
+      { ...objectOf({ action: { type: "string", enum: ["release"] }, token: stringSchema, reason: stringSchema }, ["action"], false) },
+      { ...objectOf({ action: { type: "string", enum: ["force-release"] }, token: stringSchema, reason: { type: "string", minLength: 3, maxLength: 500 } }, ["action", "reason"], false) }
+    ]
+  },
+  CreateRentalOrderInternalNoteRequest: objectOf(
+    { content: { type: "string", minLength: 1, maxLength: 1000 } },
+    ["content"],
+    false
+  ),
+  RentalOrderInternalNote: objectOf(
+    {
+      id: stringSchema,
+      content: stringSchema,
+      operatorName: stringSchema,
+      operatorId: stringSchema,
+      createdAt: { type: "string", format: "date-time" }
+    },
+    ["id", "content", "operatorName", "createdAt"],
+    false
+  ),
   CustomerMembershipBenefitScope: {
     oneOf: [
       { ...objectOf({ type: { type: "string", enum: ["tenant"] } }, ["type"]), additionalProperties: false },
@@ -325,6 +348,9 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       seoTitle: stringSchema, seoDescription: stringSchema, seoKeywords: stringSchema,
       showPoweredBy: booleanSchema, customDomain: stringSchema,
       categoryImages: arrayOf(objectOf({ code: stringSchema, imageUrl: stringSchema }, ["code", "imageUrl"], false)),
+      advantages: arrayOf(objectOf({ icon: stringSchema, title: stringSchema, description: stringSchema }, ["title"], false)),
+      steps: arrayOf(objectOf({ title: stringSchema, description: stringSchema }, ["title"], false)),
+      testimonials: arrayOf(objectOf({ name: stringSchema, context: stringSchema, text: stringSchema }, ["name", "text"], false)),
       categories: arrayOf(objectOf({ code: stringSchema, name: stringSchema }, ["code", "name"], false)),
       readiness: objectOf({ ready: booleanSchema, missing: arrayOf(stringSchema) }, ["ready", "missing"], false),
       updatedAt: { type: "string", format: "date-time" }
@@ -339,7 +365,10 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       secondaryColor: stringSchema, footerText: stringSchema, contactAddress: stringSchema,
       ctaTitle: stringSchema, ctaDescription: stringSchema,
       seoTitle: stringSchema, seoDescription: stringSchema, seoKeywords: stringSchema, showPoweredBy: booleanSchema, customDomain: stringSchema,
-      categoryImages: arrayOf(objectOf({ code: stringSchema, imageUrl: stringSchema }, ["code", "imageUrl"], false))
+      categoryImages: arrayOf(objectOf({ code: stringSchema, imageUrl: stringSchema }, ["code", "imageUrl"], false)),
+      advantages: arrayOf(objectOf({ icon: stringSchema, title: stringSchema, description: stringSchema }, ["title"], false)),
+      steps: arrayOf(objectOf({ title: stringSchema, description: stringSchema }, ["title"], false)),
+      testimonials: arrayOf(objectOf({ name: stringSchema, context: stringSchema, text: stringSchema }, ["name", "text"], false))
     },
     ["enabled", "showPoweredBy"]
   ),
@@ -1101,6 +1130,9 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       ctaTitle: stringSchema, ctaDescription: stringSchema,
       seoTitle: stringSchema, seoDescription: stringSchema, seoKeywords: stringSchema,
       categoryImages: arrayOf(objectOf({ code: stringSchema, imageUrl: stringSchema }, ["code", "imageUrl"], false)),
+      advantages: arrayOf(objectOf({ icon: stringSchema, title: stringSchema, description: stringSchema }, ["title"], false)),
+      steps: arrayOf(objectOf({ title: stringSchema, description: stringSchema }, ["title"], false)),
+      testimonials: arrayOf(objectOf({ name: stringSchema, context: stringSchema, text: stringSchema }, ["name", "text"], false)),
       showPoweredBy: booleanSchema
     },
     ["showPoweredBy"],
@@ -1705,6 +1737,7 @@ const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
   backlogOperation("post", "/api/platform/workspaces", "Platform", "createBusinessWorkspace", "Create business workspace", ["system:org:manage"]),
   backlogOperation("put", "/api/platform/workspaces/{id}", "Platform", "updateBusinessWorkspace", "Update business workspace", ["system:org:manage"]),
   backlogOperation("get", "/api/platform/workspaces/{id}/members", "Platform", "listWorkspaceMembers", "List workspace members", ["system:org:manage"]),
+  backlogOperation("get", "/api/platform/workspaces/{id}/fulfillment-locations", "Platform", "listWorkspaceFulfillmentLocations", "List fulfillment locations assignable to a workspace staff member", ["system:org:manage"]),
   backlogOperation("put", "/api/platform/workspaces/{id}/members", "Platform", "saveWorkspaceMember", "Save workspace member", ["system:org:manage"]),
   backlogOperation("get", "/api/platform/tenants/{id}/workspaces", "Platform", "listTenantBusinessWorkspaces", "List target tenant business workspaces", ["system:tenant:manage"]),
   backlogOperation("post", "/api/platform/tenants/{id}/workspaces", "Platform", "createTenantBusinessWorkspace", "Create target tenant business workspace", ["system:tenant:manage"]),
@@ -1876,6 +1909,19 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     requestSchema: "SwitchWorkspaceRequest",
     responseSchema: "LoginResponse"
   },
+  backlogOperation("post", "/api/staff/v1/auth/login", "Auth", "staffLogin", "Login and issue a staff-audience access token", [], false, "LoginRequest", "LoginResponse"),
+  backlogOperation("post", "/api/staff/v1/auth/refresh", "Auth", "refreshStaffSession", "Rotate a staff-audience refresh token", [], false, "RefreshSessionRequest", "LoginResponse"),
+  backlogOperation("post", "/api/staff/v1/auth/logout", "Auth", "logoutStaffSession", "Revoke a staff-audience refresh session", [], false, "RefreshSessionRequest", "GenericObject"),
+  backlogOperation("get", "/api/staff/v1/auth/me", "Auth", "getCurrentStaffUser", "Get the authenticated staff account", [], true, undefined, "AuthUser"),
+  backlogOperation("get", "/api/staff/v1/auth/session-context", "Auth", "getStaffSessionContext", "Refresh staff identity, workspace, location scope and permissions", [], true, undefined, "SessionContextResponse"),
+  backlogOperation("post", "/api/staff/v1/auth/change-password", "Auth", "changeStaffPassword", "Change a staff password and revoke other sessions", [], true, "ChangePasswordRequest", "LoginResponse"),
+  backlogOperation("post", "/api/staff/v1/auth/switch-workspace", "Auth", "switchStaffWorkspace", "Switch the current staff workspace", [], true, "SwitchWorkspaceRequest", "LoginResponse"),
+  backlogOperation("post", "/api/staff/v1/uploads/sessions", "Files", "createStaffUploadSession", "Create a staff-scoped upload session bound to an order or work order", ["rental-os:order:pickup", "rental-os:order:return", "rental-os:order:offline-payment", "rental-core:maintenance:manage"], true, "CreateFileUploadSessionRequest", "FileUploadSessionSummary"),
+  backlogOperation("post", "/api/staff/v1/uploads/sessions/{id}/complete", "Files", "completeStaffUpload", "Complete a staff upload after verifying its actor, scope and business owner", ["rental-os:order:pickup", "rental-os:order:return", "rental-os:order:offline-payment", "rental-core:maintenance:manage"], true, "CompleteFileUploadRequest", "GenericObject"),
+  backlogOperation("get", "/api/staff/v1/uploads/{fileAssetId}/download-url", "Files", "getStaffFileDownloadUrl", "Create a staff-scoped short-lived file URL", ["rental-os:order:pickup", "rental-os:order:return", "rental-os:order:offline-payment", "rental-core:maintenance:manage"], true, undefined, "FileDownloadUrlSummary"),
+  backlogOperation("get", "/api/staff/v1/offline-payments", "RentalCore", "listStaffOfflinePaymentRegistrations", "List pending and confirmed offline payment registrations for an order", ["rental-os:order:view"], true, undefined, "GenericObject", [{ name: "orderId", in: "query", required: true, schema: stringSchema }]),
+  backlogOperation("post", "/api/staff/v1/offline-payments", "RentalCore", "registerStaffOfflinePayment", "Register an offline payment for independent confirmation", ["rental-os:order:offline-payment"], true, "GenericObject", "GenericObject"),
+  backlogOperation("post", "/api/staff/v1/offline-payments/{id}/confirm", "RentalCore", "confirmStaffOfflinePayment", "Confirm an offline payment and atomically write the funding event", ["rental-os:order:settle"], true, "GenericObject", "GenericObject"),
   {
     method: "get",
     path: "/api/platform/tenants",
@@ -2519,8 +2565,17 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: "Preassign or lock resources; unlock, release and reassign additionally require order:reassign", permissions: ["rental-os:order:operate"], requestSchema: "GenericObject", responseSchema: "GenericObject"
   },
   {
+    method: "get", path: "/api/rental/v1/orders/{id}/internal-notes", tag: "RentalCore", operationId: "listRentalOrderInternalNotes",
+    summary: "List operations-only internal notes for a rental order", permissions: ["rental-os:order:view"], responseSchema: arrayOf("RentalOrderInternalNote")
+  },
+  {
+    method: "post", path: "/api/rental/v1/orders/{id}/internal-notes", tag: "RentalCore", operationId: "createRentalOrderInternalNote",
+    summary: "Add an idempotent operations-only internal note to a rental order", permissions: ["rental-os:order:operate"], requestSchema: "CreateRentalOrderInternalNoteRequest", responseSchema: "RentalOrderInternalNote",
+    parameters: [{ name: "Idempotency-Key", in: "header", required: true, schema: { type: "string", minLength: 1, maxLength: 191 } }]
+  },
+  {
     method: "post", path: "/api/rental/v1/orders/{id}/operation-lock", tag: "RentalCore", operationId: "rentalOrderOperationLock",
-    summary: "Acquire or release a fenced handover operation lock", permissions: ["rental-os:order:operate", "rental-os:order:pickup", "rental-os:order:return"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+    summary: "Acquire or release a fenced handover operation lock; managers may force-release another employee's active lock with a reason", permissions: ["rental-os:order:operate", "rental-os:order:pickup", "rental-os:order:return", "rental-os:order:reassign"], requestSchema: "RentalOperationLockRequest", responseSchema: "GenericObject"
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/substitute-bundle-component", tag: "RentalCore", operationId: "substituteRentalBundleComponent",

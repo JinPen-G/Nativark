@@ -77,6 +77,7 @@ export function SiteFooter() {
       <div className="footer-brand"><img src={tenant.logo} alt={tenant.name} /><p>{tenant.footerText}</p></div>
       <div><h3>{t('footerExplore')}</h3><Link to={href('/products')}>{t('allProducts')}</Link><Link to={href('/guide')}>{t('guide')}</Link><Link to={href('/orders')}>{t('orders')}</Link></div>
       <div><h3>{t('about')}</h3><Link to={href('/about')}>{t('footerBrand')}</Link><Link to={href('/help')}>{t('footerHelp')}</Link><a href={`tel:${tenant.phone}`}>{t('contactSupport')}</a></div>
+      <div><h3>{t('footerLegal')}</h3><Link to={href('/agreement')}>{t('docUserAgreement')}</Link><Link to={href('/privacy')}>{t('docPrivacyPolicy')}</Link></div>
       <div className="footer-contact"><h3>{t('footerContact')}</h3><strong>{tenant.phone}</strong><p>{tenant.customerService}</p><p>{tenant.address}</p></div>
     </div>
     <div className="shell footer-bottom"><span>© {new Date().getFullYear()} {tenant.name}. {t('allRights')}</span><div className="footer-bottom-actions">{tenant.showPoweredBy && <span>Powered by Rental OS</span>}<LanguagePicker /></div></div>

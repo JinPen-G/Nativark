@@ -81,24 +81,33 @@ export function ProductSection({ mode }: { mode: CategoryMode }) {
 }
 
 export function ServiceBenefits({ mode }: { mode: CategoryMode }) {
-  const { t } = useSite();
-  const benefits = [
-    { icon: <SafetyCertificateOutlined />, title: t('authentic'), description: t('authenticDescription') },
-    { icon: <TruckOutlined />, title: t('delivery'), description: t('deliveryDescription') },
-    { icon: <CheckCircleOutlined />, title: t('flexible'), description: t('flexibleDescription') },
-    { icon: <CustomerServiceOutlined />, title: t('service'), description: t('serviceDescription') },
-  ];
+  const { tenant, t } = useSite();
+  const iconFor = (key?: string) => ({ authentic: <SafetyCertificateOutlined />, delivery: <TruckOutlined />, flexible: <CheckCircleOutlined />, service: <CustomerServiceOutlined />, quality: <SafetyCertificateOutlined />, support: <CustomerServiceOutlined /> } as Record<string, ReactNode>)[key ?? ''] ?? <CheckCircleOutlined />;
+  // 租户在后台配置了卖点则用其内容，否则回落通用文案。
+  const benefits = tenant.advantages?.length
+    ? tenant.advantages.map(item => ({ icon: iconFor(item.icon), title: item.title, description: item.description ?? '' }))
+    : [
+      { icon: <SafetyCertificateOutlined />, title: t('authentic'), description: t('authenticDescription') },
+      { icon: <TruckOutlined />, title: t('delivery'), description: t('deliveryDescription') },
+      { icon: <CheckCircleOutlined />, title: t('flexible'), description: t('flexibleDescription') },
+      { icon: <CustomerServiceOutlined />, title: t('service'), description: t('serviceDescription') },
+    ];
   return <section className={`section shell homepage-section benefit-section benefit-section-${mode}`}><SectionHeading title={t('whyChoose')} subtitle={mode === 'single' ? t('whyChooseSingle') : t('whyChooseGeneral')} /><div className="benefit-grid">{benefits.map(item => <div className="benefit-item" key={item.title}><span className="benefit-icon">{item.icon}</span><div><strong>{item.title}</strong><p>{item.description}</p></div></div>)}</div></section>;
 }
 
 export function RentalSteps() {
-  const { t } = useSite();
-  const steps = [
+  const { tenant, t } = useSite();
+  const defaults = [
     { icon: <ShoppingCartOutlined />, title: t('stepChoose'), description: t('stepChooseDescription') },
     { icon: <FileTextOutlined />, title: t('stepBook'), description: t('stepBookDescription') },
     { icon: <InboxOutlined />, title: t('stepReceive'), description: t('stepReceiveDescription') },
     { icon: <CheckCircleOutlined />, title: t('stepUse'), description: t('stepUseDescription') },
   ];
+  const stepIcons = [<ShoppingCartOutlined />, <FileTextOutlined />, <InboxOutlined />, <CheckCircleOutlined />];
+  // 租户配置了流程则用其内容（图标按顺序取默认组），否则回落通用四步。
+  const steps = tenant.steps?.length
+    ? tenant.steps.map((item, index) => ({ icon: stepIcons[index % stepIcons.length], title: item.title, description: item.description ?? '' }))
+    : defaults;
   return <section className="section shell homepage-section steps-section"><SectionHeading title={t('rentalProcess')} subtitle={t('rentalProcessSubtitle')} /><div className="steps-grid">{steps.map((step, index) => <div className="step-item" key={step.title}><span className="step-icon">{step.icon}</span><div><strong><b>{String(index + 1).padStart(2, '0')}</b> {step.title}</strong><p>{step.description}</p></div>{index < steps.length - 1 && <ArrowRightOutlined className="step-arrow" />}</div>)}</div></section>;
 }
 

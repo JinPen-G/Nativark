@@ -1,4 +1,4 @@
-import type { SaveWebsiteChannelProfileRequest, WebsiteCategoryImage } from "@rental-os/shared";
+import type { SaveWebsiteChannelProfileRequest, WebsiteAdvantage, WebsiteCategoryImage, WebsiteStep, WebsiteTestimonial } from "@rental-os/shared";
 import { Type } from "class-transformer";
 import { ArrayMaxSize, IsArray, IsBoolean, IsInt, IsOptional, IsString, Matches, MaxLength, Min, ValidateNested } from "class-validator";
 
@@ -8,6 +8,36 @@ export class WebsiteCategoryImageDto implements WebsiteCategoryImage {
 
   @IsString() @MaxLength(512)
   imageUrl!: string;
+}
+
+export class WebsiteAdvantageDto implements WebsiteAdvantage {
+  @IsOptional() @IsString() @MaxLength(32)
+  icon?: string;
+
+  @IsString() @MaxLength(40)
+  title!: string;
+
+  @IsOptional() @IsString() @MaxLength(120)
+  description?: string;
+}
+
+export class WebsiteStepDto implements WebsiteStep {
+  @IsString() @MaxLength(40)
+  title!: string;
+
+  @IsOptional() @IsString() @MaxLength(120)
+  description?: string;
+}
+
+export class WebsiteTestimonialDto implements WebsiteTestimonial {
+  @IsString() @MaxLength(40)
+  name!: string;
+
+  @IsOptional() @IsString() @MaxLength(60)
+  context?: string;
+
+  @IsString() @MaxLength(300)
+  text!: string;
 }
 
 /**
@@ -69,4 +99,14 @@ export class SaveWebsiteChannelProfileDto implements SaveWebsiteChannelProfileRe
   /** 品类入口图（按服务编码）；服务层校验地址并按 code 去重。 */
   @IsOptional() @IsArray() @ArrayMaxSize(50) @ValidateNested({ each: true }) @Type(() => WebsiteCategoryImageDto)
   categoryImages?: WebsiteCategoryImageDto[];
+
+  /** 官网首页内容块（可编辑）；服务层再裁剪长度与条数。 */
+  @IsOptional() @IsArray() @ArrayMaxSize(8) @ValidateNested({ each: true }) @Type(() => WebsiteAdvantageDto)
+  advantages?: WebsiteAdvantageDto[];
+
+  @IsOptional() @IsArray() @ArrayMaxSize(8) @ValidateNested({ each: true }) @Type(() => WebsiteStepDto)
+  steps?: WebsiteStepDto[];
+
+  @IsOptional() @IsArray() @ArrayMaxSize(12) @ValidateNested({ each: true }) @Type(() => WebsiteTestimonialDto)
+  testimonials?: WebsiteTestimonialDto[];
 }

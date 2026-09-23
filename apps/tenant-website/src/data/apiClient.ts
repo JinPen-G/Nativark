@@ -40,7 +40,20 @@ export interface BootstrapWebsite {
   seoDescription?: string;
   seoKeywords?: string;
   categoryImages?: Array<{ code: string; imageUrl: string }>;
+  advantages?: Array<{ icon?: string; title: string; description?: string }>;
+  steps?: Array<{ title: string; description?: string }>;
+  testimonials?: Array<{ name: string; context?: string; text: string }>;
   showPoweredBy: boolean;
+}
+
+export interface PublicDocumentResponse {
+  kind: 'user_agreement' | 'privacy_policy' | 'help';
+  name: string;
+  version?: string;
+  url?: string;
+  body?: string;
+  intro?: string;
+  faq?: Array<{ question: string; answer: string }>;
 }
 
 export interface BootstrapResponse {
@@ -92,6 +105,10 @@ export const clientApi = {
   },
   publicCatalog(tenantCode: string, service: string): Promise<PublicCatalogResponse> {
     return getJson<PublicCatalogResponse>('/public/catalog', { tenantCode, service });
+  },
+  /** 公开文档：用户协议 / 隐私政策 / 帮助（游客可读）。 */
+  publicDocument(tenantCode: string, kind: 'user_agreement' | 'privacy_policy' | 'help'): Promise<PublicDocumentResponse> {
+    return getJson<PublicDocumentResponse>(`/public/documents/${encodeURIComponent(kind)}`, { tenantCode });
   },
   /** 按访问域名反查租户：客户自定义域名在后台「官网配置」绑定；未绑定返回 null。 */
   resolveHost(host: string): Promise<{ tenantCode: string | null }> {

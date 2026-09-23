@@ -140,7 +140,7 @@ export function LoginPage() {
           </span>
         </label>}
         {devCode && <p className="login-dev-code"><CheckCircleOutlined /> {t('loginDevCode', { code: devCode })}</p>}
-        {mode === 'register' && <label className="login-agree"><input type="checkbox" checked={agree} onChange={e => setAgree(e.target.checked)} /><span>{t('loginAgree')}</span></label>}
+        {mode === 'register' && <label className="login-agree"><input type="checkbox" checked={agree} onChange={e => setAgree(e.target.checked)} /><span>{t('loginAgreePrefix')} <Link to={href('/agreement')}>{t('docUserAgreement')}</Link> {t('and')} <Link to={href('/privacy')}>{t('docPrivacyPolicy')}</Link></span></label>}
         {error && <p className="form-error" role="alert">{error}</p>}
         <button type="submit" className="button button-dark button-block" disabled={pending}>{mode === 'register' ? t('loginRegisterSubmit') : t('loginSubmit')} <ArrowRightOutlined /></button>
       </form>
