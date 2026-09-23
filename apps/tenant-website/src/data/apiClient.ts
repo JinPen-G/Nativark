@@ -85,4 +85,8 @@ export const clientApi = {
   publicCatalog(tenantCode: string, service: string): Promise<PublicCatalogResponse> {
     return getJson<PublicCatalogResponse>('/public/catalog', { tenantCode, service });
   },
+  /** 按访问域名反查租户：客户自定义域名在后台「官网配置」绑定；未绑定返回 null。 */
+  resolveHost(host: string): Promise<{ tenantCode: string | null }> {
+    return getJson<{ tenantCode: string | null }>('/public/site-resolve', { host });
+  },
 };

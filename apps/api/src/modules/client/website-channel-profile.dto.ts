@@ -52,4 +52,8 @@ export class SaveWebsiteChannelProfileDto implements SaveWebsiteChannelProfileRe
 
   @IsBoolean()
   showPoweredBy!: boolean;
+
+  /** 自定义官网域名（如 www.brand.com）；仅 host，服务层归一化为小写并校验格式。 */
+  @IsOptional() @IsString() @MaxLength(191)
+  customDomain?: string;
 }

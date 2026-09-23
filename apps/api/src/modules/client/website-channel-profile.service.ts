@@ -40,6 +40,20 @@ function normalizeColor(value: string | undefined): string | null {
   return `#${hex.toUpperCase()}`;
 }
 
+/** 自定义域名归一化：允许带 http(s):// 或路径的粘贴，取出小写 host；空值透传 null；非法域名拒绝。 */
+export function normalizeCustomDomain(value: string | undefined): string | null {
+  if (value === undefined || value === null) return null;
+  let raw = value.trim().toLowerCase();
+  if (!raw) return null;
+  raw = raw.replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/:\d+$/, "").replace(/\.$/, "");
+  if (!raw) return null;
+  // 合法主机名：点分标签，字母数字与连字符，至少两段，末段为字母。
+  if (raw.length > 191 || !/^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/.test(raw)) {
+    throw new BadRequestException("自定义域名格式无效（示例：www.brand.com，只填域名不含 http/路径）");
+  }
+  return raw;
+}
+
 @Injectable()
 export class WebsiteChannelProfileService {
   constructor(
@@ -81,6 +95,7 @@ export class WebsiteChannelProfileService {
       seoDescription: row?.seoDescription ?? undefined,
       seoKeywords: row?.seoKeywords ?? undefined,
       showPoweredBy: row?.showPoweredBy ?? true,
+      customDomain: row?.customDomain ?? undefined,
       readiness: this.readiness(row),
       updatedAt: row?.updatedAt.toISOString()
     };
@@ -123,12 +138,24 @@ export class WebsiteChannelProfileService {
       seoTitle: text(input.seoTitle, 120, "SEO 标题"),
       seoDescription: text(input.seoDescription, 400, "SEO 描述"),
       seoKeywords: text(input.seoKeywords, 256, "SEO 关键词"),
-      showPoweredBy: Boolean(input.showPoweredBy)
+      showPoweredBy: Boolean(input.showPoweredBy),
+      customDomain: normalizeCustomDomain(input.customDomain)
     };
 
-    const row = existing
-      ? await this.prisma.websiteChannelProfile.update({ where: { id: existing.id }, data: { ...data, revision: { increment: 1 } } })
-      : await this.prisma.websiteChannelProfile.create({ data: { tenantId, ...data } });
+    const row = await (async () => {
+      try {
+        return existing
+          ? await this.prisma.websiteChannelProfile.update({ where: { id: existing.id }, data: { ...data, revision: { increment: 1 } } })
+          : await this.prisma.websiteChannelProfile.create({ data: { tenantId, ...data } });
+      } catch (error) {
+        // 自定义域名全局唯一：被其他租户占用时 Prisma 抛 P2002。只有确实提交了域名时才归因于域名冲突，
+        // 否则（如极窄并发下同租户 tenantId 唯一冲突）用通用冲突提示。
+        if (error && typeof error === "object" && (error as { code?: string }).code === "P2002") {
+          throw new ConflictException(data.customDomain ? "该自定义域名已被其他租户绑定" : "配置已被其他人更新，请刷新后重试");
+        }
+        throw error;
+      }
+    })();
 
     await this.operationLog?.record({
       tenantId,

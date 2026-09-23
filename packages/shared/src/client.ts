@@ -746,6 +746,14 @@ export interface ClientWebsiteConfig {
 }
 
 /**
+ * 官网按 Host 反查租户（WEBSITE-CHANNEL-02）：`GET /public/site-resolve?host=`。
+ * 一套前端服务多租户时，客户自带域名经边缘回源后据此定位租户；未绑定返回 null，官网回退而不报错。
+ */
+export interface ClientWebsiteHostResolution {
+  tenantCode: string | null;
+}
+
+/**
  * 渠道启动配置（需求 §12.1 ChannelBootstrap / §12.4）。
  * `source=channel`：商户已在运营端配置客户端渠道（品牌、协议、客服、帮助、已发布服务）；
  * `source=workspace_directory`：商户尚未配置时按启用空间回退，只有服务列表与租户名。

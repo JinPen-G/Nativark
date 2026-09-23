@@ -323,7 +323,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       secondaryColor: stringSchema, footerText: stringSchema, contactAddress: stringSchema,
       ctaTitle: stringSchema, ctaDescription: stringSchema,
       seoTitle: stringSchema, seoDescription: stringSchema, seoKeywords: stringSchema,
-      showPoweredBy: booleanSchema,
+      showPoweredBy: booleanSchema, customDomain: stringSchema,
       readiness: objectOf({ ready: booleanSchema, missing: arrayOf(stringSchema) }, ["ready", "missing"], false),
       updatedAt: { type: "string", format: "date-time" }
     },
@@ -336,7 +336,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       slogan: stringSchema, heroTitle: stringSchema, heroDescription: stringSchema, heroImageUrl: stringSchema,
       secondaryColor: stringSchema, footerText: stringSchema, contactAddress: stringSchema,
       ctaTitle: stringSchema, ctaDescription: stringSchema,
-      seoTitle: stringSchema, seoDescription: stringSchema, seoKeywords: stringSchema, showPoweredBy: booleanSchema
+      seoTitle: stringSchema, seoDescription: stringSchema, seoKeywords: stringSchema, showPoweredBy: booleanSchema, customDomain: stringSchema
     },
     ["enabled", "showPoweredBy"]
   ),
@@ -1102,6 +1102,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     ["showPoweredBy"],
     false
   ),
+  ClientWebsiteHostResolution: objectOf({ tenantCode: { type: "string", nullable: true } }, ["tenantCode"], false),
   ClientPublicDocumentResponse: objectOf(
     {
       apiVersion: stringSchema, tenantCode: stringSchema, kind: { type: "string", enum: ["user_agreement", "privacy_policy", "help"] },
@@ -2754,6 +2755,7 @@ function rentalBusinessOperations(): ContractOperation[] { return [
   clientOperation("get", "/api/client/v1/tenants/{tenantCode}/workspaces", "listClientWorkspaces", "List active workspaces for client registration", { responseSchema: "ClientWorkspaceDirectory", authRequired: false }),
   clientOperation("post", "/api/client/v1/auth/registration/challenges", "createClientRegistrationChallenge", "Create a client registration verification challenge", { requestSchema: "ClientRegistrationChallengeRequest", responseSchema: "ClientRegistrationChallengeResponse", authRequired: false }),
   clientOperation("get", "/api/client/v1/public/bootstrap", "getClientChannelBootstrap", "Public client channel bootstrap: brand, agreements, service phone, help, banner, published services, login methods and capability flags; client=wechat_miniprogram|app|web overlays channel capabilities, and client=web additionally returns the website-only config block", { responseSchema: "ClientChannelBootstrapResponse", authRequired: false, parameters: [{ name: "tenantCode", in: "query", required: true, schema: stringSchema }, { name: "client", in: "query", schema: { type: "string", enum: ["wechat_miniprogram", "app", "web"] } }, { name: "appId", in: "query", schema: stringSchema }] }),
+  clientOperation("get", "/api/client/v1/public/site-resolve", "resolveClientWebsiteHost", "Public host-to-tenant resolution for the tenant website: returns the tenantCode bound to a custom domain (enabled website channel only), or null when unbound", { responseSchema: "ClientWebsiteHostResolution", authRequired: false, parameters: [{ name: "host", in: "query", required: true, schema: stringSchema }] }),
   clientOperation("get", "/api/client/v1/public/documents/{kind}", "getClientPublicDocument", "Public document body (user agreement / privacy policy / help) from the tenant client channel profile; rendered in-client, guest-readable", { responseSchema: "ClientPublicDocumentResponse", authRequired: false, parameters: [{ name: "kind", in: "path", required: true, schema: { type: "string", enum: ["user_agreement", "privacy_policy", "help"] } }, { name: "tenantCode", in: "query", required: true, schema: stringSchema }] }),
   clientOperation("get", "/api/client/v1/public/catalog", "getClientPublicCatalog", "Guest catalog for a service published to the mini-program channel (same whitelisted projection as the member catalog)", { responseSchema: "ClientCatalog", authRequired: false, parameters: [{ name: "tenantCode", in: "query", required: true, schema: stringSchema }, { name: "service", in: "query", required: true, schema: stringSchema }] }),
   clientOperation("get", "/api/client/v1/public/catalog/items/{itemGroupId}/images/{imageId}", "getClientPublicCatalogItemImage", "Guest catalog image for a published service", { rawResponseContentType: "image/*", authRequired: false, parameters: [{ name: "tenantCode", in: "query", required: true, schema: stringSchema }, { name: "service", in: "query", required: true, schema: stringSchema }] }),

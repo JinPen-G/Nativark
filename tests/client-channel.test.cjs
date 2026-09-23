@@ -253,3 +253,49 @@ test("OpenAPI: web 官网渠道配置与 bootstrap website 契约齐全", () => 
   const clientEnum = paths["/api/client/v1/public/bootstrap"].get.parameters.find((p) => p.name === "client").schema.enum;
   assert.ok(clientEnum.includes("web"), "bootstrap client 参数应支持 web");
 });
+
+test("website 自定义域名：归一化、按 Host 反查租户、全局唯一冲突 409", async () => {
+  // 归一化：粘贴带 http(s):// / 路径 / 端口 / 大写都收敛为纯小写 host；非法域名拒绝。
+  const calls = { written: null };
+  let stored = null;
+  const prisma = {
+    websiteChannelProfile: {
+      findUnique: async () => stored,
+      update: async ({ data }) => { calls.written = data; return { id: "web1", tenantId: "t1", revision: 3, ...data, updatedAt: new Date() }; },
+      create: async ({ data }) => { calls.written = data; return { id: "web1", ...data, revision: 1, updatedAt: new Date() }; }
+    }
+  };
+  const svc = Object.assign(Object.create(WebsiteChannelProfileService.prototype), { prisma, operationLog: { record: async () => {} } });
+  const user = { tenantId: "t1", isSaasAdmin: false };
+  await svc.save({ enabled: true, showPoweredBy: true, heroTitle: "标题", customDomain: "HTTPS://WWW.Brand.com/home" }, user);
+  assert.equal(calls.written.customDomain, "www.brand.com", "自定义域名归一化为小写纯 host");
+  await svc.save({ enabled: true, showPoweredBy: true, heroTitle: "标题", customDomain: "www.brand.com." }, user);
+  assert.equal(calls.written.customDomain, "www.brand.com", "去掉 FQDN 末尾点，避免 Host 带点匹配不上");
+  await svc.save({ enabled: true, showPoweredBy: true, heroTitle: "标题", customDomain: "" }, user);
+  assert.equal(calls.written.customDomain, null, "空域名落 null（不绑定）");
+  await assert.rejects(svc.save({ enabled: true, showPoweredBy: true, customDomain: "not a domain" }, user), status(400));
+
+  // 唯一冲突：Prisma P2002 → 409。
+  const conflictPrisma = { websiteChannelProfile: { findUnique: async () => null, create: async () => { const e = new Error("Unique constraint"); e.code = "P2002"; throw e; } } };
+  const conflictSvc = Object.assign(Object.create(WebsiteChannelProfileService.prototype), { prisma: conflictPrisma, operationLog: { record: async () => {} } });
+  await assert.rejects(conflictSvc.save({ enabled: true, showPoweredBy: true, customDomain: "taken.com" }, user), status(409));
+
+  // 按 Host 反查：启用且域名精确匹配 → tenantCode；未启用/未命中/非 ACTIVE → null。
+  const api = (row) => Object.assign(Object.create(ClientApiService.prototype), { prisma: { websiteChannelProfile: { findFirst: async ({ where }) => (where.customDomain === "www.brand.com" && where.enabled ? row : null) } } });
+  assert.deepEqual(await api({ tenant: { code: "demo", status: "ACTIVE" } }).resolveWebsiteHost("HTTPS://www.Brand.com:443/x"), { tenantCode: "demo" }, "带协议/端口/路径/大写的 Host 也能命中");
+  assert.deepEqual(await api({ tenant: { code: "demo", status: "SUSPENDED" } }).resolveWebsiteHost("www.brand.com"), { tenantCode: null }, "租户非 ACTIVE 不返回");
+  assert.deepEqual(await api(null).resolveWebsiteHost("other.com"), { tenantCode: null }, "未绑定返回 null");
+  assert.deepEqual(await api({ tenant: { code: "demo", status: "ACTIVE" } }).resolveWebsiteHost(""), { tenantCode: null }, "空 Host 返回 null");
+});
+
+test("OpenAPI + 鉴权：site-resolve 是公开客户端路由、契约齐全", () => {
+  const paths = OPENAPI_DOCUMENT.paths;
+  const op = paths["/api/client/v1/public/site-resolve"].get;
+  assert.ok(op, "缺 GET /public/site-resolve");
+  assert.ok(op.parameters.some((p) => p.name === "host" && p.required), "site-resolve 需要必填 host 参数");
+  assert.ok(OPENAPI_DOCUMENT.components.schemas.ClientWebsiteHostResolution.properties.tenantCode, "缺 ClientWebsiteHostResolution");
+  assert.ok(OPENAPI_DOCUMENT.components.schemas.WebsiteChannelProfileSummary.properties.customDomain, "缺 summary customDomain");
+  assert.ok(OPENAPI_DOCUMENT.components.schemas.SaveWebsiteChannelProfileRequest.properties.customDomain, "缺 save customDomain");
+  const { isClientPublicRoute } = require("../apps/api/src/common/api-auth.guard");
+  assert.equal(isClientPublicRoute("GET", "/client/v1/public/site-resolve"), true, "site-resolve 必须是公开路由（游客可访问）");
+});

@@ -94,7 +94,9 @@ const CLIENT_PUBLIC_ROUTES = new Set([
   "/client/v1/auth/wechat/phone-login",
   // MP-01/03：渠道启动配置与游客目录只返回已发布的公开投影。
   "/client/v1/public/bootstrap",
-  "/client/v1/public/catalog"
+  "/client/v1/public/catalog",
+  // WEBSITE-CHANNEL-02：官网按 Host 反查租户（只返回 tenantCode 或 null）。
+  "/client/v1/public/site-resolve"
 ]);
 
 export function isClientPublicRoute(method: string, path: string) {

@@ -838,6 +838,8 @@ export interface WebsiteChannelProfileSummary {
   seoDescription?: string;
   seoKeywords?: string;
   showPoweredBy: boolean;
+  /** 租户自定义官网域名（小写 host，不含协议/路径）；用于按 Host 反查租户。 */
+  customDomain?: string;
   readiness: ClientChannelReadiness;
   updatedAt?: string;
 }
@@ -861,6 +863,8 @@ export interface SaveWebsiteChannelProfileRequest {
   seoDescription?: string;
   seoKeywords?: string;
   showPoweredBy: boolean;
+  /** 自定义官网域名（如 www.brand.com）；留空表示不绑定。服务端归一化为小写 host。 */
+  customDomain?: string;
 }
 
 /**

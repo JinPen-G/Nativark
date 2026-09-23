@@ -331,6 +331,22 @@ export class ClientApiService {
     };
   }
 
+  /**
+   * WEBSITE-CHANNEL-02：按 Host 反查租户编码。一套前端服务多租户时，自定义域名（www.brand.com）
+   * 经边缘回源后由后端据此定位租户；只匹配已启用官网渠道且域名精确一致（小写）的租户。
+   * 命中返回 { tenantCode }；未绑定返回 { tenantCode: null }（客户端据此回退，而非报错）。
+   */
+  async resolveWebsiteHost(host: string): Promise<{ tenantCode: string | null }> {
+    const normalized = host.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/:\d+$/, "").replace(/\.$/, "");
+    if (!normalized) return { tenantCode: null };
+    const row = await this.prisma.websiteChannelProfile.findFirst({
+      where: { customDomain: normalized, enabled: true },
+      select: { tenant: { select: { code: true, status: true } } }
+    });
+    if (!row?.tenant || row.tenant.status !== "ACTIVE") return { tenantCode: null };
+    return { tenantCode: row.tenant.code };
+  }
+
   /** 公开文档：协议正文与帮助内容（游客可读），来自租户级客户端渠道配置。 */
   async publicDocument(tenantCode: string, kind: ClientPublicDocumentKind): Promise<ClientPublicDocumentResponse> {
     const tenant = await this.prisma.tenant.findFirst({ where: { code: tenantCode.trim(), status: "ACTIVE" }, select: { id: true, code: true } });

@@ -748,6 +748,8 @@ model WebsiteChannelProfile {
   seoKeywords      String?  @db.VarChar(256)
   /// 是否在页脚展示 “Powered by Rental OS”。
   showPoweredBy    Boolean  @default(true)
+  /// 租户自定义官网域名（如 www.brand.com，小写、不含协议/路径）。全局唯一，用于按 Host 反查租户。
+  customDomain     String?  @unique(map: "website_channel_profiles_domain_key") @db.VarChar(191)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 

@@ -29,11 +29,20 @@ Vite 已把 `/api` 代理到本地 API（可用 `VITE_API_TARGET` 覆盖目标�
 
 1. `?tenant=single|double|multiple` —— 参考演示，走本地静态数据。
 2. `?tenantCode=xxx` —— 显式指定真实租户（联调、预览、后台跳转）。
-3. **自定义域名 / 子域名** —— 生产每租户一个域名，如 `guangying.rentalos.com` → 租户 `guangying`（配 `VITE_BASE_DOMAIN=rentalos.com` 后只认其直接子域；`www/api/...` 等保留子域除外）。同一份代码不改一行即可服务新租户。
-4. `VITE_DEFAULT_TENANT` —— 单租户独立部署时用环境变量钉死租户。
-5. 都没有 → 回退演示 `multiple`。
+3. **平台子域名** —— 配 `VITE_BASE_DOMAIN=rentalos.com` 后，`guangying.rentalos.com` → 租户 `guangying`（`www/api/...` 等保留子域除外）。前端本地即可判定，无需请求。
+4. **客户自定义域名** —— 其余公网域名（如 `www.brand.com`）交给后端 `GET /api/client/v1/public/site-resolve?host=<host>` 反查：命中租户在后台「官网配置 → 官网域名」绑定的域名则返回 `tenantCode`，未绑定返回 `null`。
+5. `VITE_DEFAULT_TENANT` —— 单租户独立部署兜底（自定义域名反查不到时也回落到它）。
+6. 都没有 → 回退演示 `multiple`。
 
-识别出租户编码后，`GET /api/client/v1/public/bootstrap?tenantCode=<code>&client=web` 返回品牌、主色、官网特有内容（web 渠道）与已发布服务列表；`services.length` 决定首页形态，`GET /public/catalog?service=<code>` 提供各品类商品。租户隔离由后端按 `tenantCode` 保证，前端不持有跨租户数据。
+识别出租户编码后，`GET /public/bootstrap?tenantCode=<code>&client=web` 返回品牌、主色、官网特有内容（web 渠道）与已发布服务列表；`services.length` 决定首页形态，`GET /public/catalog?service=<code>` 提供各品类商品。租户隔离由后端按 `tenantCode` 保证，前端不持有跨租户数据。
+
+### 客户自带域名怎么落地
+
+一套前端 + 一个后端端口即可服务任意多个租户的自定义域名，分三层：
+
+1. **绑定（数据）**：租户在后台「客户端渠道 → 官网配置 → 官网域名」填写自己的域名（如 `www.brand.com`）。后端 `WebsiteChannelProfile.customDomain` 全局唯一，一个域名只能绑定一个租户。
+2. **解析（DNS）**：客户在自己的域名服务商为该域名加一条 `CNAME`，指向平台的官网接入地址（边缘/负载均衡）。
+3. **证书 + 回源（边缘）**：边缘按 SNI 为该域名签发 HTTPS 证书（Caddy on-demand TLS / 云 LB 托管证书 / ACME），并把请求回源到这同一套前端。前端读取访问域名 → `site-resolve` 反查租户 → 加载对应官网。新增租户域名不需要改代码、不需要重新部署。
 
 ## 配置与未来对接
 

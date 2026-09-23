@@ -7,7 +7,7 @@ const { pathToFileURL } = require('node:url');
 
 const modUrl = pathToFileURL(path.join(__dirname, '..', 'apps/tenant-website/src/data/resolveTenant.ts')).href;
 
-test('tenantCodeFromHost：子域名识别租户，保留字/IP/localhost/裸域返回 null', async () => {
+test('tenantCodeFromHost：只认配置的基础域名的直接子域，保留字/裸域/客户域名返回 null', async () => {
   const { tenantCodeFromHost } = await import(modUrl);
   assert.equal(tenantCodeFromHost('guangying.rentalos.com', 'rentalos.com'), 'guangying');
   assert.equal(tenantCodeFromHost('shanye.rentalos.com:443', 'rentalos.com'), 'shanye');
@@ -17,22 +17,27 @@ test('tenantCodeFromHost：子域名识别租户，保留字/IP/localhost/裸域
   assert.equal(tenantCodeFromHost('other.com', 'rentalos.com'), null, '非基础域名不认');
   assert.equal(tenantCodeFromHost('localhost', 'rentalos.com'), null);
   assert.equal(tenantCodeFromHost('127.0.0.1', 'rentalos.com'), null);
-  // 未配基础域名时按「至少三段」取最左一段。
-  assert.equal(tenantCodeFromHost('demo.example.com', undefined), 'demo');
-  assert.equal(tenantCodeFromHost('example.com', undefined), null);
+  // 未配基础域名时一律 null，把客户自定义域名交给后端反查，不再猜最左一段。
+  assert.equal(tenantCodeFromHost('demo.example.com', undefined), null);
+  assert.equal(tenantCodeFromHost('shop.brand.com', undefined), null);
 });
 
-test('resolveSite：?tenant= 演示优先，其次 ?tenantCode=，再域名，同一部署服务多租户', async () => {
+test('resolveSite：演示 > tenantCode > 子域名 > 自定义域名(交后端反查) > 兜底', async () => {
   const { resolveSite } = await import(modUrl);
+  const base = { baseDomain: 'rentalos.com', defaultTenant: undefined };
   // 1. 演示形态（三种）显式优先，走本地静态数据。
-  assert.deepEqual(resolveSite('?tenant=single', 'guangying.rentalos.com'), { kind: 'demo', demoKey: 'single' });
-  assert.deepEqual(resolveSite('?tenant=double', 'x.rentalos.com'), { kind: 'demo', demoKey: 'double' });
-  assert.deepEqual(resolveSite('?tenant=multiple', ''), { kind: 'demo', demoKey: 'multiple' });
+  assert.deepEqual(resolveSite('?tenant=single', 'guangying.rentalos.com', base), { kind: 'demo', demoKey: 'single' });
+  assert.deepEqual(resolveSite('?tenant=double', 'x.rentalos.com', base), { kind: 'demo', demoKey: 'double' });
   // 2. 显式 tenantCode 高于域名（联调/后台跳转）。
-  assert.deepEqual(resolveSite('?tenantCode=demo', 'other.rentalos.com'), { kind: 'remote', tenantCode: 'demo' });
-  // 3. 纯域名识别：同一份代码，不同子域 = 不同租户。
-  assert.deepEqual(resolveSite('', 'guangying.rentalos.com'), { kind: 'remote', tenantCode: 'guangying' });
-  assert.deepEqual(resolveSite('', 'shanye.rentalos.com'), { kind: 'remote', tenantCode: 'shanye' });
-  // 4. 无参数、无可识别域名 → 回退演示 multiple，保证空环境可打开。
-  assert.deepEqual(resolveSite('', 'localhost:4186'), { kind: 'demo', demoKey: 'multiple' });
+  assert.deepEqual(resolveSite('?tenantCode=demo', 'other.rentalos.com', base), { kind: 'remote', tenantCode: 'demo' });
+  // 3. 平台子域名：同一份代码，不同子域 = 不同租户。
+  assert.deepEqual(resolveSite('', 'guangying.rentalos.com', base), { kind: 'remote', tenantCode: 'guangying' });
+  // 4. 客户自定义域名：需后端按 Host 反查，fallback 为演示 multiple。
+  assert.deepEqual(resolveSite('', 'www.brand.com', base), { kind: 'host', host: 'www.brand.com', fallback: { kind: 'demo', demoKey: 'multiple' } });
+  // 5. 单租户部署：VITE_DEFAULT_TENANT 兜底（本地地址不反查，直接兜底到该租户）。
+  assert.deepEqual(resolveSite('', 'localhost:4186', { baseDomain: 'rentalos.com', defaultTenant: 'demo' }), { kind: 'remote', tenantCode: 'demo' });
+  // 6. 平台裸域名（无参数）→ 兜底演示 multiple，不当作自定义域名反查。
+  assert.deepEqual(resolveSite('', 'rentalos.com', base), { kind: 'demo', demoKey: 'multiple' });
+  // 7. 自定义域名但配了默认租户 → host 反查，fallback 为该默认租户。
+  assert.deepEqual(resolveSite('', 'shop.brand.com', { baseDomain: 'rentalos.com', defaultTenant: 'demo' }), { kind: 'host', host: 'shop.brand.com', fallback: { kind: 'remote', tenantCode: 'demo' } });
 });

@@ -108,6 +108,13 @@ export class ClientApiController {
     return this.api.channelBootstrap(tenantCode, kind, appId);
   }
 
+  /** WEBSITE-CHANNEL-02：公开按 Host 反查租户编码，供官网自定义域名映射到租户；未绑定返回 { tenantCode: null }。 */
+  @Get("public/site-resolve")
+  resolveSite(@Query("host") host: string) {
+    if (!host?.trim()) throw new BadRequestException("缺少站点域名");
+    return this.api.resolveWebsiteHost(host);
+  }
+
   /** CLIENT-CHANNEL-01：公开文档正文（用户协议 / 隐私政策 / 帮助），客户端内直接渲染。 */
   @Get("public/documents/:kind")
   publicDocument(@Query("tenantCode") tenantCode: string, @Param("kind") kind: string) {

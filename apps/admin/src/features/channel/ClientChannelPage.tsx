@@ -235,7 +235,8 @@ function WebsiteProfileCard() {
       seoTitle: data.seoTitle,
       seoDescription: data.seoDescription,
       seoKeywords: data.seoKeywords,
-      showPoweredBy: data.showPoweredBy
+      showPoweredBy: data.showPoweredBy,
+      customDomain: data.customDomain
     });
   }, [profile.data, form]);
 
@@ -271,6 +272,23 @@ function WebsiteProfileCard() {
               <Typography.Text type="secondary">是否在页脚展示 “Powered by Rental OS”</Typography.Text>
             </Space>
           </div>
+        </Card>
+
+        <Card size="small" title="官网域名" style={{ marginTop: 16 }}>
+          <Form.Item
+            name="customDomain"
+            label="自定义域名"
+            extra="只填域名，不含 http:// 与路径；一个域名只能绑定一个租户。保存后访问该域名即打开本租户官网。"
+            rules={[{ pattern: /^(?:https?:\/\/)?([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}\/?$/, message: "域名格式无效，示例：www.brand.com" }]}
+          >
+            <Input maxLength={191} allowClear placeholder="www.brand.com" />
+          </Form.Item>
+          <Alert
+            type="info"
+            showIcon
+            title="绑定后还需在域名服务商处添加解析"
+            description={<span>在你的域名 DNS 控制台为该域名添加一条 <Typography.Text code>CNAME</Typography.Text> 记录，指向平台提供的官网接入地址；解析生效并签发 HTTPS 证书后即可访问。不填域名时，官网仍可通过平台分配的地址访问。</span>}
+          />
         </Card>
 
         <Card size="small" title="首页 Hero 与品牌" style={{ marginTop: 16 }}>

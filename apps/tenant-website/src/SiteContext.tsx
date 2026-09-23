@@ -2,7 +2,8 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import { useLocation } from 'react-router-dom';
 import { siteRepository } from './data/siteRepository';
 import { loadRemoteSite } from './data/remoteSite';
-import { resolveSite } from './data/resolveTenant';
+import { resolveSite, type SiteResolution } from './data/resolveTenant';
+import { clientApi } from './data/apiClient';
 import { applyColorMode, applyTenantTheme, getInitialTheme, THEME_STORAGE_KEY, type ThemeMode } from './theme';
 import { createTranslator, LANGUAGE_STORAGE_KEY, localizeProduct, localizeTenant, type Language } from './i18n';
 import type { CategoryMode, DemoTenantKey, Product, Tenant } from './types';
@@ -39,11 +40,28 @@ export function SiteProvider({ children }: { children: ReactNode }) {
   });
   const [theme, setTheme] = useState<ThemeMode>(getInitialTheme);
 
-  // 多租户识别：优先 ?tenant= 演示、其次 ?tenantCode=、再按域名/子域，最后环境变量。
+  // 多租户识别：?tenant= 演示 > ?tenantCode= > 平台子域名 >（客户自定义域名，异步反查）> 环境变量兜底。
   // categoryMode 之后由 bootstrap.services.length 自动决定，无需按租户写死。
-  const resolution = useMemo(() => resolveSite(location.search, typeof window !== 'undefined' ? window.location.host : ''), [location.search]);
-  const remoteTenantCode = resolution.kind === 'remote' ? resolution.tenantCode : null;
-  const tenantKey = resolution.kind === 'demo' ? resolution.demoKey : 'multiple';
+  const host = typeof window !== 'undefined' ? window.location.host : '';
+  const resolution = useMemo(() => resolveSite(location.search, host), [location.search, host]);
+
+  // 自定义域名需向后端反查（异步）；其余识别是同步的。effective 是反查后的最终归属。
+  const [effective, setEffective] = useState<SiteResolution>(() => resolution.kind === 'host' ? resolution.fallback : resolution);
+  const [hostResolving, setHostResolving] = useState(resolution.kind === 'host');
+
+  useEffect(() => {
+    if (resolution.kind !== 'host') { setEffective(resolution); setHostResolving(false); return; }
+    let cancelled = false;
+    setHostResolving(true);
+    clientApi.resolveHost(resolution.host)
+      .then(result => { if (!cancelled) setEffective(result.tenantCode ? { kind: 'remote', tenantCode: result.tenantCode } : resolution.fallback); })
+      .catch(() => { if (!cancelled) setEffective(resolution.fallback); })
+      .finally(() => { if (!cancelled) setHostResolving(false); });
+    return () => { cancelled = true; };
+  }, [resolution]);
+
+  const remoteTenantCode = effective.kind === 'remote' ? effective.tenantCode : null;
+  const tenantKey = effective.kind === 'demo' ? effective.demoKey : 'multiple';
 
   const [remote, setRemote] = useState<{ code: string; tenant: Tenant } | null>(null);
   const [remoteError, setRemoteError] = useState<string | null>(null);
@@ -73,10 +91,10 @@ export function SiteProvider({ children }: { children: ReactNode }) {
   const count = tenant.categories.length;
   const mode: CategoryMode = count === 1 ? 'single' : count === 2 ? 'double' : 'multiple';
   const isRemote = Boolean(remoteTenantCode);
-  // 链接参数：演示模式带 ?tenant=；真实模式仅当租户来自显式 ?tenantCode= 时才回带（域名/环境变量识别的无需带，保持干净 URL）。
+  // 链接参数：演示模式带 ?tenant=；真实模式仅当租户来自显式 ?tenantCode= 时才回带（域名/子域/环境变量识别的无需带，保持干净 URL）。
   const explicitCode = new URLSearchParams(location.search).get('tenantCode')?.trim() || null;
   const href = (path: string) => {
-    const param = resolution.kind === 'demo' ? `tenant=${tenantKey}` : explicitCode ? `tenantCode=${encodeURIComponent(explicitCode)}` : null;
+    const param = effective.kind === 'demo' ? `tenant=${tenantKey}` : explicitCode ? `tenantCode=${encodeURIComponent(explicitCode)}` : null;
     if (!param) return path;
     return `${path}${path.includes('?') ? '&' : '?'}${param}`;
   };
@@ -115,7 +133,7 @@ export function SiteProvider({ children }: { children: ReactNode }) {
   }
 
   // 真实租户模式下，数据就绪前先展示轻量占位，避免用演示数据闪一下。
-  if (remoteTenantCode && !remote) {
+  if (hostResolving || (remoteTenantCode && !remote)) {
     return <div className="remote-gate" role="status">{remoteError ? remoteError : '正在加载…'}</div>;
   }
 
