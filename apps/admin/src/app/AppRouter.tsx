@@ -3,6 +3,7 @@ import { Result, Spin } from "antd";
 import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import { APP_ROUTES, canAccessRoute, type AppRouteDefinition } from "@/app/navigation";
 import { AppShell } from "@/components/AppShell";
+import { useLocale } from "./locale";
 import { RequireAuth } from "@/features/auth/RequireAuth";
 import { useAuthStore } from "@/features/auth/authStore";
 
@@ -44,13 +45,14 @@ function PageLoader() {
 }
 
 function RouteAccess({ route, children }: { route: AppRouteDefinition; children: ReactNode }) {
+  const { t } = useLocale();
   const hasPermission = useAuthStore((state) => state.hasPermission);
   const hasCapability = useAuthStore((state) => state.hasCapability);
   const hasTenantMembershipPermission = useAuthStore((state) => state.hasTenantMembershipPermission);
   const categoryCode = useAuthStore((state) => state.tenant?.categoryCode);
   const isSaasAdmin = useAuthStore((state) => Boolean(state.user?.isSaasAdmin));
   if (!canAccessRoute(route, hasPermission, hasCapability, categoryCode, isSaasAdmin, hasTenantMembershipPermission)) {
-    return <Result status="403" title="无权访问" subTitle="当前账号权限或租户经营品类能力不支持此功能；前端菜单隐藏不能替代后端数据权限。" />;
+    return <Result status="403" title={t("无权访问")} subTitle={t("当前账号权限或租户经营品类能力不支持此功能；前端菜单隐藏不能替代后端数据权限。")} />;
   }
   return <>{children}</>;
 }
@@ -65,13 +67,14 @@ function LegacyOrderRedirect() {
 }
 
 function DefaultRoute() {
+  const { t } = useLocale();
   const user = useAuthStore((state) => state.user);
   const tenant = useAuthStore((state) => state.tenant);
   const hasPermission = useAuthStore((state) => state.hasPermission);
   const hasCapability = useAuthStore((state) => state.hasCapability);
   const hasTenantMembershipPermission = useAuthStore((state) => state.hasTenantMembershipPermission);
   const target = Object.values(APP_ROUTES).find((route) => "menu" in route && route.menu && canAccessRoute(route, hasPermission, hasCapability, tenant?.categoryCode, Boolean(user?.isSaasAdmin), hasTenantMembershipPermission));
-  return target ? <Navigate to={target.path} replace /> : <Result status="403" title="暂无可访问页面" subTitle="请联系租户管理员授予业务或会员管理权限。" />;
+  return target ? <Navigate to={target.path} replace /> : <Result status="403" title={t("暂无可访问页面")} subTitle={t("请联系租户管理员授予业务或会员管理权限。")} />;
 }
 
 function ProtectedRoutes() {

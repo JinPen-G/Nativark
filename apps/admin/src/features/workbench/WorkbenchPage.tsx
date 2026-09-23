@@ -5,6 +5,7 @@ import { Alert, App, Button, Card, Progress, Segmented, Space, Statistic, Table,
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { rentalCoreApi } from "@/api/rentalCore";
+import { useLocale } from "@/app/locale";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
@@ -32,7 +33,8 @@ const todoTypeLabels: Record<RentalWorkbenchTodoType, string> = {
   refund: "待办理退款",
   work_order: "养护工单",
   notification_failure: "通知失败",
-  cancelled_refund_due: "取消/爽约待退款"
+  cancelled_refund_due: "取消/爽约待退款",
+  offline_payment_pending: "待线下收款确认"
 };
 const todoTypeColors: Record<RentalWorkbenchTodoType, string> = {
   pending_payment: "gold",
@@ -43,7 +45,8 @@ const todoTypeColors: Record<RentalWorkbenchTodoType, string> = {
   refund: "purple",
   work_order: "blue",
   notification_failure: "red",
-  cancelled_refund_due: "magenta"
+  cancelled_refund_due: "magenta",
+  offline_payment_pending: "cyan"
 };
 
 function periodStart(period: string) {
@@ -66,6 +69,7 @@ export function WorkbenchPage() {
   const [period, setPeriod] = useState("本月");
   const navigate = useNavigate();
   const { message } = App.useApp();
+  const { t } = useLocale();
   const hasPermission = useAuthStore((state) => state.hasPermission);
   const canViewOrders = hasPermission("rental-os:order:view");
   const canViewAssets = hasPermission("rental-core:asset:view");
@@ -96,7 +100,7 @@ export function WorkbenchPage() {
   // 币种取报表自带的快照：金额是按这个币种算出来的，不再另读一次业务设置。
   const money = (value: number) => formatRentalMoney(Number(value), data?.currency);
   const orderCount = data?.orderCount ?? 0;
-  const statusRows = (data?.statusBreakdown ?? []).filter((row) => row.count > 0).map((row) => ({ ...row, name: orderStatusLabels[row.status] ?? row.status }));
+  const statusRows = (data?.statusBreakdown ?? []).filter((row) => row.count > 0).map((row) => ({ ...row, name: t(orderStatusLabels[row.status] ?? row.status) }));
   const activeCount = statusRows.filter((row) => activeStatuses.includes(row.status)).reduce((sum, row) => sum + row.count, 0);
   const completedCount = statusRows.find((row) => row.status === RentalCoreOrderStatus.Completed)?.count ?? 0;
   const assets = data?.utilization.serializedAssets;
@@ -114,21 +118,21 @@ export function WorkbenchPage() {
   }
 
   return <>
-    <PageHeader title="运营概览" description={`${profile.data?.terminology.itemLabel ?? "租赁标的"}、订单与库存指标来自当前经营空间的经营报表，与报表页、导出同一口径。`} view={<Segmented value={period} onChange={(value) => setPeriod(String(value))} options={["今日", "本周", "本月"]} />} extra={<Space><Button shape="circle" aria-label="刷新经营概览" icon={<ReloadOutlined />} onClick={refresh} />{canReconcilePayments && <Button loading={reconcilePayments.isPending} onClick={() => reconcilePayments.mutate()}>核对支付与退款</Button>}</Space>} />
+    <PageHeader title="运营概览" description={`${profile.data?.terminology.itemLabel ?? "租赁标的"}、订单与库存指标来自当前经营空间的经营报表，与报表页、导出同一口径。`} view={<Segmented value={period} onChange={(value) => setPeriod(String(value))} options={["今日", "本周", "本月"].map((value) => ({ value, label: t(value) }))} />} extra={<Space><Button shape="circle" aria-label={t("刷新经营概览")} icon={<ReloadOutlined />} onClick={refresh} />{canReconcilePayments && <Button loading={reconcilePayments.isPending} onClick={() => reconcilePayments.mutate()}>{t("核对支付与退款")}</Button>}</Space>} />
     <QueryState loading={loading} error={error}>
       {showMetrics ? <div className="metric-grid">
         {canViewOrders && <>
-          <Card className="metric-card"><Statistic title="期间订单" value={orderCount} /><div className="metric-foot"><span>{period}起租</span><span>非草稿</span></div></Card>
-          <Card className="metric-card"><Statistic title="履约中" value={activeCount} /><div className="metric-foot"><span>已预订至待结算</span><span className="metric-trend">实时</span></div></Card>
-          <Card className="metric-card"><Statistic title="应收金额" value={data?.receivableTotal ?? 0} formatter={(value) => money(Number(value))} /><div className="metric-foot"><span>{completedCount} 单已关闭</span><span>调账后应收</span></div></Card>
-          <Card className="metric-card"><Statistic title="租赁收入" value={data?.rentalRevenue ?? 0} formatter={(value) => money(Number(value))} /><div className="metric-foot"><span>只含租金</span><span>不含服务与押金</span></div></Card>
+          <Card className="metric-card"><Statistic title={t("期间订单")} value={orderCount} /><div className="metric-foot"><span>{t(period)}{t("起租")}</span><span>{t("非草稿")}</span></div></Card>
+          <Card className="metric-card"><Statistic title={t("履约中")} value={activeCount} /><div className="metric-foot"><span>{t("已预订至待结算")}</span><span className="metric-trend">{t("实时")}</span></div></Card>
+          <Card className="metric-card"><Statistic title={t("应收金额")} value={data?.receivableTotal ?? 0} formatter={(value) => money(Number(value))} /><div className="metric-foot"><span>{completedCount} {t("单已关闭")}</span><span>{t("调账后应收")}</span></div></Card>
+          <Card className="metric-card"><Statistic title={t("租赁收入")} value={data?.rentalRevenue ?? 0} formatter={(value) => money(Number(value))} /><div className="metric-foot"><span>{t("只含租金")}</span><span>{t("不含服务与押金")}</span></div></Card>
         </>}
-        {canViewAssets && <Card className="metric-card"><Statistic title="可租库存" value={availableUnits} /><div className="metric-foot"><span>独立资产 + 数量库存</span><span className="metric-trend">当前快照</span></div></Card>}
-      </div> : <Alert type="info" showIcon title="当前账号仅可查看工作台待办" description="订单、库存和金额指标需要报表查看权限及相应的数据查看权限。" style={{ marginBottom: 16 }} />}
+        {canViewAssets && <Card className="metric-card"><Statistic title={t("可租库存")} value={availableUnits} /><div className="metric-foot"><span>{t("独立资产 + 数量库存")}</span><span className="metric-trend">{t("当前快照")}</span></div></Card>}
+      </div> : <Alert type="info" showIcon title={t("当前账号仅可查看工作台待办")} description={t("订单、库存和金额指标需要报表查看权限及相应的数据查看权限。")} style={{ marginBottom: 16 }} />}
       <Card
         className="workspace-panel"
-        title={<span className="panel-title">运营待办 <span className="panel-count">{todos.data?.items.length ?? 0}</span></span>}
-        extra={<Button type="link" onClick={() => todos.refetch()}>刷新待办</Button>}
+        title={<span className="panel-title">{t("运营待办")} <span className="panel-count">{todos.data?.items.length ?? 0}</span></span>}
+        extra={<Button type="link" onClick={() => todos.refetch()}>{t("刷新待办")}</Button>}
         style={{ marginBottom: 16 }}
       >
         <Table<RentalWorkbenchTodo>
@@ -136,31 +140,31 @@ export function WorkbenchPage() {
           rowKey="id"
           pagination={false}
           dataSource={(todos.data?.items ?? []).slice(0, 8)}
-          locale={{ emptyText: "当前空间没有需要处理的待办" }}
+          locale={{ emptyText: t("当前空间没有需要处理的待办") }}
           columns={[
-            { title: "事项", render: (_, item) => <Space size={8}><Tag color={todoTypeColors[item.type]}>{todoTypeLabels[item.type]}</Tag><Typography.Text strong>{item.title}</Typography.Text>{item.orderNo && <Typography.Text type="secondary">{item.orderNo}</Typography.Text>}</Space> },
-            { title: "说明", dataIndex: "description", ellipsis: true },
-            { title: "金额", dataIndex: "amount", align: "right", render: (value) => value === undefined ? "—" : money(Number(value)) },
-            { title: "操作", align: "right", render: (_, item) => canOpenTodo(item) ? <Button type="link" onClick={() => navigate(item.href)}>处理</Button> : <Typography.Text type="secondary">无详情权限</Typography.Text> }
+            { title: t("事项"), render: (_, item) => <Space size={8}><Tag color={todoTypeColors[item.type]}>{t(todoTypeLabels[item.type])}</Tag><Typography.Text strong>{item.title}</Typography.Text>{item.orderNo && <Typography.Text type="secondary">{item.orderNo}</Typography.Text>}</Space> },
+            { title: t("说明"), dataIndex: "description", ellipsis: true },
+            { title: t("金额"), dataIndex: "amount", align: "right", render: (value) => value === undefined ? "—" : money(Number(value)) },
+            { title: t("操作"), align: "right", render: (_, item) => canOpenTodo(item) ? <Button type="link" onClick={() => navigate(item.href)}>{t("处理")}</Button> : <Typography.Text type="secondary">{t("无详情权限")}</Typography.Text> }
           ]}
         />
-        {(todos.data?.items.length ?? 0) > 8 && <Typography.Text type="secondary">还有 {(todos.data?.items.length ?? 0) - 8} 项，请从订单或工单页面继续处理。</Typography.Text>}
+        {(todos.data?.items.length ?? 0) > 8 && <Typography.Text type="secondary">{t("还有")} {(todos.data?.items.length ?? 0) - 8}{t("项，请从订单或工单页面继续处理。")}</Typography.Text>}
       </Card>
       {showMetrics && <div className="workspace-grid">
-        {canViewOrders && <Card className="workspace-panel" title={<span className="panel-title">订单状态 <span className="panel-count">{orderCount}</span></span>} extra={<Button type="link" onClick={() => navigate("/rental/orders")}>查看订单 <ArrowRightOutlined /></Button>}>
-          <Table pagination={false} rowKey="status" dataSource={statusRows} locale={{ emptyText: `${period}暂无订单` }} columns={[
-            { title: "阶段", dataIndex: "name", render: (value) => <Typography.Text strong>{value}</Typography.Text> },
-            { title: "订单数", dataIndex: "count", align: "right" },
-            { title: "占比", align: "right", render: (_: unknown, row: { count: number }) => <Progress percent={orderCount ? Math.round(row.count / orderCount * 100) : 0} size="small" style={{ minWidth: 112 }} /> }
+        {canViewOrders && <Card className="workspace-panel" title={<span className="panel-title">{t("订单状态")} <span className="panel-count">{orderCount}</span></span>} extra={<Button type="link" onClick={() => navigate("/rental/orders")}>{t("查看订单")} <ArrowRightOutlined /></Button>}>
+          <Table pagination={false} rowKey="status" dataSource={statusRows} locale={{ emptyText: `${t(period)}${t("暂无订单")}` }} columns={[
+            { title: t("阶段"), dataIndex: "name", render: (value) => <Typography.Text strong>{value}</Typography.Text> },
+            { title: t("订单数"), dataIndex: "count", align: "right" },
+            { title: t("占比"), align: "right", render: (_: unknown, row: { count: number }) => <Progress percent={orderCount ? Math.round(row.count / orderCount * 100) : 0} size="small" style={{ minWidth: 112 }} /> }
           ]} />
         </Card>}
-        {canViewAssets && <Card className="workspace-panel" title="库存状态（当前快照）" extra={<Button type="link" onClick={() => navigate("/rental/assets")}>资产与库存 <ArrowRightOutlined /></Button>}>
+        {canViewAssets && <Card className="workspace-panel" title={t("库存状态（当前快照）")} extra={<Button type="link" onClick={() => navigate("/rental/assets")}>{t("资产与库存")} <ArrowRightOutlined /></Button>}>
           {/* 快照说明随报表出参下发，必须显示：少了它，运营会把快照当区间利用率用。 */}
-          {(data?.historicalCaliberGaps.length ?? 0) > 0 && <Alert type="warning" showIcon title="这一节是读取瞬间的快照，不是区间利用率" description={data!.historicalCaliberGaps.map((gap) => <div key={gap}>· {gap}</div>)} style={{ marginBottom: 12 }} />}
+          {(data?.historicalCaliberGaps.length ?? 0) > 0 && <Alert type="warning" showIcon title={t("这一节是读取瞬间的快照，不是区间利用率")} description={data!.historicalCaliberGaps.map((gap) => <div key={gap}>· {gap}</div>)} style={{ marginBottom: 12 }} />}
           <Space orientation="vertical" size={0} style={{ width: "100%" }}>
-            {(assets?.statusBreakdown ?? []).map((row) => <div className="status-row" key={row.status}><div><Typography.Text strong>{assetStatusLabels[row.status] ?? row.status}</Typography.Text><Typography.Text type="secondary">独立资产</Typography.Text></div><Tag color={row.status === "available" ? "green" : row.status === "maintenance" ? "orange" : "blue"}>{row.count} 项</Tag></div>)}
-            {stock && stock.onHandTotal > 0 && <div className="status-row"><div><Typography.Text strong>数量库存</Typography.Text><Typography.Text type="secondary">可租 / 在库（已占用 {stock.reservedTotal}，维修 {stock.maintenanceTotal}）</Typography.Text></div><Tag color={stock.availableTotal > 0 ? "green" : "orange"}>{stock.availableTotal} / {stock.onHandTotal}</Tag></div>}
-            {!(assets?.statusBreakdown.length) && !(stock && stock.onHandTotal > 0) && <Typography.Text type="secondary">尚未建立资产或数量库存。</Typography.Text>}
+            {(assets?.statusBreakdown ?? []).map((row) => <div className="status-row" key={row.status}><div><Typography.Text strong>{t(assetStatusLabels[row.status] ?? row.status)}</Typography.Text><Typography.Text type="secondary">{t("独立资产")}</Typography.Text></div><Tag color={row.status === "available" ? "green" : row.status === "maintenance" ? "orange" : "blue"}>{row.count} {t("项")}</Tag></div>)}
+            {stock && stock.onHandTotal > 0 && <div className="status-row"><div><Typography.Text strong>{t("数量库存")}</Typography.Text><Typography.Text type="secondary">{t("可租 / 在库（已占用")} {stock.reservedTotal}，{t("维修")} {stock.maintenanceTotal}）</Typography.Text></div><Tag color={stock.availableTotal > 0 ? "green" : "orange"}>{stock.availableTotal} / {stock.onHandTotal}</Tag></div>}
+            {!(assets?.statusBreakdown.length) && !(stock && stock.onHandTotal > 0) && <Typography.Text type="secondary">{t("尚未建立资产或数量库存。")}</Typography.Text>}
           </Space>
         </Card>}
       </div>}

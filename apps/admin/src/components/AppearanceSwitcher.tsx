@@ -2,6 +2,7 @@ import { CheckOutlined, CompressOutlined, MoonOutlined, SunOutlined } from "@ant
 import { Button, Dropdown, Tooltip } from "antd";
 import type { MenuProps } from "antd";
 import type { ReactNode } from "react";
+import { useLocale } from "@/app/locale";
 import { useAppearance, type AppearanceMode } from "@/app/theme";
 
 /**
@@ -27,6 +28,7 @@ const appearances: Array<{ value: AppearanceMode; label: string; description: st
  */
 export function AppearanceSwitcher({ iconOnly = false }: { iconOnly?: boolean }) {
   const { mode, setMode } = useAppearance();
+  const { t } = useLocale();
   const active = appearances.find((item) => item.value === mode) ?? appearances[0];
 
   if (SHOW_COMPACT) {
@@ -35,16 +37,16 @@ export function AppearanceSwitcher({ iconOnly = false }: { iconOnly?: boolean })
       items: appearances.map((item) => ({
         key: item.value,
         icon: item.icon,
-        label: <div className="appearance-option"><span>{item.label}</span><small>{item.description}</small></div>,
+        label: <div className="appearance-option"><span>{t(item.label)}</span><small>{t(item.description)}</small></div>,
         extra: item.value === mode ? <CheckOutlined /> : undefined
       })),
       onClick: ({ key }) => setMode(key as AppearanceMode)
     };
     return (
       <Dropdown menu={menu} trigger={["click"]} placement="topLeft">
-        <Tooltip title="切换外观主题" placement={iconOnly ? "right" : "top"}>
-          <Button type="text" className="sider-link" aria-label="切换外观主题" icon={active.icon}>
-            {iconOnly ? null : <span className="sider-link-label">{active.label}</span>}
+        <Tooltip title={t("切换外观主题")} placement={iconOnly ? "right" : "top"}>
+          <Button type="text" className="sider-link" aria-label={t("切换外观主题")} icon={active.icon}>
+            {iconOnly ? null : <span className="sider-link-label">{t(active.label)}</span>}
           </Button>
         </Tooltip>
       </Dropdown>
@@ -73,12 +75,12 @@ export function AppearanceSwitcher({ iconOnly = false }: { iconOnly?: boolean })
      * 显示的是「点下去会变成什么样」，与分段控件的语义保持一致。
      */
     return (
-      <Tooltip title="切换外观主题" placement="right">
+      <Tooltip title={t("切换外观主题")} placement="right">
         <span className="sider-link-switch">
           <button
             type="button"
             className="appearance-toggle-compact"
-            aria-label="切换外观主题"
+            aria-label={t("切换外观主题")}
             onClick={(event) => switchTo(isDark ? "default" : "dark", event.currentTarget)}
           >
             {isDark ? <SunOutlined /> : <MoonOutlined />}
@@ -91,12 +93,12 @@ export function AppearanceSwitcher({ iconOnly = false }: { iconOnly?: boolean })
   return (
     <div className="sider-link sider-link-static">
       {/* 两枚按钮是一组互斥的外观选项；滑块只是装饰，真值在按钮的 aria-pressed 上。 */}
-      <div className="appearance-toggle" role="group" aria-label="切换外观主题">
+      <div className="appearance-toggle" role="group" aria-label={t("切换外观主题")}>
         <span className="appearance-toggle-thumb" aria-hidden="true" />
         <button
           type="button"
           className="appearance-toggle-option"
-          aria-label="明亮主题"
+          aria-label={t("明亮主题")}
           aria-pressed={!isDark}
           onClick={(event) => switchTo("default", event.currentTarget)}
         >
@@ -105,7 +107,7 @@ export function AppearanceSwitcher({ iconOnly = false }: { iconOnly?: boolean })
         <button
           type="button"
           className="appearance-toggle-option"
-          aria-label="暗色主题"
+          aria-label={t("暗色主题")}
           aria-pressed={isDark}
           onClick={(event) => switchTo("dark", event.currentTarget)}
         >

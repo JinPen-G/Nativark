@@ -226,6 +226,55 @@ button, input, textarea, select { font: inherit; }
   padding: 8px;
   border-top: 1px solid var(--rental-color-border-secondary);
 }
+/* 语言与主题共用左下角的第一行；通知仍独占下一行，避免在窄侧栏里挤压文案。 */
+.sider-preferences {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.sider-preferences > .sider-link-static {
+  flex: 1;
+  min-width: 0;
+}
+.sider-preferences .sider-link-static { padding-inline: 0; }
+.language-toggle {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 999px;
+  background: var(--rental-color-fill-secondary);
+}
+.language-toggle button,
+.language-toggle-compact {
+  display: grid;
+  place-items: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 999px;
+  color: var(--rental-color-text-secondary);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color .15s ease, background-color .2s;
+}
+.language-toggle button:hover,
+.language-toggle-compact:hover { color: var(--rental-color-text-heading); }
+.language-toggle button[aria-pressed="true"] {
+  color: var(--rental-color-text);
+  background: var(--rental-color-bg-container);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .12);
+}
+.language-toggle-compact { background: var(--rental-color-fill-tertiary); }
+.language-toggle-compact:focus-visible,
+.language-toggle button:focus-visible { outline: 2px solid var(--rental-color-primary); outline-offset: 2px; }
+.is-collapsed .sider-preferences { justify-content: center; gap: 2px; }
+.is-collapsed .sider-preferences > .sider-link-static { flex: 0 0 auto; }
 /* 三行同构：图标 + 文案（+ 尾部控件），因此行样式只写一份。 */
 .sider-link {
   display: flex;

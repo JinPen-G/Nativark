@@ -12,10 +12,12 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { rentalCoreApi } from "@/api/rentalCore";
+import { useLocale } from "@/app/locale";
 import { buildNavigationSections, canAccessRoute } from "@/app/navigation";
 import { useAppearance } from "@/app/theme";
 import { useAuthStore } from "@/features/auth/authStore";
 import { AppearanceSwitcher } from "./AppearanceSwitcher";
+import { LanguageSwitcher } from "./LanguageSwitcher";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 
 const { Sider, Content } = Layout;
@@ -59,6 +61,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
   const { message } = App.useApp();
+  const { t } = useLocale();
   const { mode } = useAppearance();
   const isDesktop = useMinWidth("(min-width: 992px)");
   const tenant = useAuthStore((state) => state.tenant);
@@ -103,10 +106,10 @@ export function AppShell({ children }: { children: ReactNode }) {
    * 否则抽屉会拿到收起态的结构。
    */
   const buildMenuItems = (isCollapsed: boolean): MenuProps["items"] => sections.map((section) => {
-    const children = section.routes.map((route) => ({ key: route.path, icon: route.icon, label: route.label }));
+    const children = section.routes.map((route) => ({ key: route.path, icon: route.icon, label: t(route.label) }));
     return isCollapsed
-      ? { key: section.key, icon: section.icon, label: section.label, children }
-      : { type: "group" as const, key: section.key, label: section.label, children };
+      ? { key: section.key, icon: section.icon, label: t(section.label), children }
+      : { type: "group" as const, key: section.key, label: t(section.label), children };
   });
   const routes = useMemo(() => sections.flatMap((section) => section.routes), [sections]);
   const current = useMemo(() => {
@@ -120,18 +123,18 @@ export function AppShell({ children }: { children: ReactNode }) {
   // 新建订单与订单详情都不在菜单里，选中态归到「订单管理」，否则进这两个页面菜单会整体失焦。
   const selectedKey = location.pathname.startsWith("/rental/orders/") ? "/rental/orders" : location.pathname;
   const accountInitial = (user?.displayName ?? "运营用户").slice(0, 1).toUpperCase();
-  const accountCaption = user?.roleNames?.join(" · ") || user?.organizationName || tenant?.tenantCode || "运营账号";
+  const accountCaption = user?.roleNames?.join(" · ") || user?.organizationName || tenant?.tenantCode || t("运营账号");
   const breadcrumbMenuItems = useMemo(() => current.section?.routes.map((entry) => ({
     key: entry.path,
-    label: entry.label,
+    label: t(entry.label),
     icon: entry.icon,
     onClick: () => navigate(entry.path)
   })) ?? sections.map((section) => ({
     key: section.key,
-    label: section.label,
+    label: t(section.label),
     icon: section.icon,
     onClick: () => navigate(section.routes[0].path)
-  })), [current.section, navigate, sections]);
+  })), [current.section, navigate, sections, t]);
 
   // 路由变化即关抽屉：窄屏点完菜单还压着一层浮层，等于点了没反应。
   useEffect(() => { setDrawerOpen(false); }, [location.pathname]);
@@ -165,11 +168,11 @@ export function AppShell({ children }: { children: ReactNode }) {
           )}
         </button>
         {!inDrawer && (
-          <Tooltip title={collapsed ? "展开导航" : "收起导航"} placement="right">
+          <Tooltip title={collapsed ? t("展开导航") : t("收起导航")} placement="right">
             <Button
               type="text"
               className="sider-collapse"
-              aria-label={collapsed ? "展开导航" : "收起导航"}
+              aria-label={collapsed ? t("展开导航") : t("收起导航")}
               icon={<LayoutOutlined />}
               onClick={() => setCollapsed((value) => !value)}
             />
@@ -192,12 +195,15 @@ export function AppShell({ children }: { children: ReactNode }) {
       </div>
 
       <div className="sider-tools">
-        <AppearanceSwitcher iconOnly={collapsed && !inDrawer} />
-        <Tooltip title={collapsed && !inDrawer ? "通知" : NOTICE_HINT} placement={collapsed && !inDrawer ? "right" : "top"}>
+        <div className="sider-preferences">
+          <AppearanceSwitcher iconOnly={collapsed && !inDrawer} />
+          <LanguageSwitcher iconOnly={collapsed && !inDrawer} />
+        </div>
+        <Tooltip title={collapsed && !inDrawer ? t("通知") : t(NOTICE_HINT)} placement={collapsed && !inDrawer ? "right" : "top"}>
           {/* 占位入口：还没有数据源，因此点击如实说明「未接入」，而不是静默无反应。 */}
-          <button className="sider-link" type="button" aria-label="通知" onClick={() => message.info(NOTICE_HINT)}>
+          <button className="sider-link" type="button" aria-label={t("通知")} onClick={() => message.info(t(NOTICE_HINT))}>
             <BellOutlined />
-            {(!collapsed || inDrawer) && <span className="sider-link-label">通知</span>}
+            {(!collapsed || inDrawer) && <span className="sider-link-label">{t("通知")}</span>}
           </button>
         </Tooltip>
       </div>
@@ -207,14 +213,14 @@ export function AppShell({ children }: { children: ReactNode }) {
         <Dropdown
           trigger={["click"]}
           placement="topLeft"
-          menu={{ items: [{ key: "logout", icon: <LogoutOutlined />, label: "退出登录", onClick: () => { logout(); navigate("/login"); } }] }}
+          menu={{ items: [{ key: "logout", icon: <LogoutOutlined />, label: t("退出登录"), onClick: () => { logout(); navigate("/login"); } }] }}
         >
           <button className="account-card" type="button">
             <Avatar size={32} className="account-avatar">{accountInitial}</Avatar>
             {(!collapsed || inDrawer) && (
               <>
                 <span className="account-copy">
-                  <b>{user?.displayName ?? "运营用户"}</b>
+                  <b>{user?.displayName ?? t("运营用户")}</b>
                   <small>{accountCaption}</small>
                 </span>
                 <MoreOutlined className="account-more" />
@@ -246,7 +252,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <Button
               className="sider-drawer-trigger"
               type="text"
-              aria-label="打开导航"
+              aria-label={t("打开导航")}
               icon={<MenuOutlined />}
               onClick={() => setDrawerOpen(true)}
             />
@@ -270,8 +276,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             <div className="workspace-context">
               <Breadcrumb items={[
                 { title: <HomeOutlined className="breadcrumb-home" onClick={() => navigate(homePath)} /> },
-                { title: current.section?.label ?? "工作台", menu: { items: breadcrumbMenuItems } },
-                { title: current.route?.label ?? "租赁运营台" }
+                { title: current.section ? t(current.section.label) : t("工作台"), menu: { items: breadcrumbMenuItems } },
+                { title: current.route ? t(current.route.label) : t("租赁运营台") }
               ]} />
             </div>
           )}

@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "@/features/auth/authStore";
+import { useLocale } from "@/app/locale";
 
 const categoryIcons: Partial<Record<RentalCategoryCode, ReactNode>> = {
   [RentalCategoryCode.Camera]: <CameraOutlined />,
@@ -37,7 +38,10 @@ export function WorkspaceSwitcher() {
   const isSaasAdmin = useAuthStore((state) => Boolean(state.user?.isSaasAdmin));
   const [switching, setSwitching] = useState(false);
   const { message } = App.useApp();
+  const { t } = useLocale();
   const navigate = useNavigate();
+
+  const displayName = (name: string) => t(name);
 
   const current = workspaces.find((row) => row.id === currentWorkspaceId);
 
@@ -57,9 +61,9 @@ export function WorkspaceSwitcher() {
   );
 
   // 平台账号不属于任何经营空间：如实说明，而不是留一块空白或假装选了什么。
-  if (!workspaces.length) return box(isSaasAdmin ? "平台管理面" : "尚无经营空间", false);
+  if (!workspaces.length) return box(isSaasAdmin ? t("平台管理面") : t("尚无经营空间"), false);
   // 单空间没有可切换的目标，给一个只有当前项的菜单是噪音。
-  if (workspaces.length === 1) return box(current?.name ?? workspaces[0].name, false, current?.categoryCode ?? workspaces[0].categoryCode);
+  if (workspaces.length === 1) return box(displayName(current?.name ?? workspaces[0].name), false, current?.categoryCode ?? workspaces[0].categoryCode);
 
   const handleSwitch = async (workspaceId: string) => {
     if (workspaceId === currentWorkspaceId || switching) return;
@@ -69,11 +73,11 @@ export function WorkspaceSwitcher() {
       // 切换后回到工作台：当前路由可能是上一个空间品类才有的页面
       // （如车辆空间的调度台），留在原地会立刻撞 403。
       navigate("/workbench", { replace: true });
-      message.success("已切换经营空间");
+      message.success(t("已切换经营空间"));
     } catch (error) {
       // 服务端可能因成员关系被撤销或空间停用而拒绝；如实提示，不假装已切换。
       const detail = error instanceof Error ? error.message : "请稍后重试";
-      message.error(`切换经营空间失败：${detail}`);
+      message.error(`${t("切换经营空间失败")}：${detail}`);
     } finally {
       setSwitching(false);
     }
@@ -89,12 +93,12 @@ export function WorkspaceSwitcher() {
         items: workspaces.map((row) => ({
           key: row.id,
           icon: workspaceIcon(row.categoryCode),
-          label: row.name,
+          label: displayName(row.name),
           onClick: () => void handleSwitch(row.id)
         }))
       }}
     >
-      {box(current?.name ?? "未选择经营空间", true, current?.categoryCode)}
+      {box(displayName(current?.name ?? t("未选择经营空间")), true, current?.categoryCode)}
     </Dropdown>
   );
 }
