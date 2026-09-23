@@ -148,6 +148,8 @@ export class ClientChannelProfileService {
 
   private async validatedUrl(value: string | null, label: string): Promise<string | null> {
     if (!value) return null;
+    // 本站上传得到的品牌图是同源相对路径，不发起出站请求，跳过 SSRF 校验；外链仍逐一校验。
+    if (value.startsWith("/api/client/v1/public/website-assets/")) return value;
     try {
       await assertOutboundUrl(value, label, { allowQuery: true });
     } catch (error) {

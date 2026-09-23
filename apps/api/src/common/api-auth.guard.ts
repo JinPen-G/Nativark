@@ -103,6 +103,8 @@ export function isClientPublicRoute(method: string, path: string) {
   if (CLIENT_PUBLIC_ROUTES.has(path)) return true;
   if (method === "GET" && /^\/client\/v1\/tenants\/[^/]+\/workspaces$/u.test(path)) return true;
   if (method === "GET" && /^\/client\/v1\/public\/catalog\/items\/[^/]+\/images\/[^/]+$/u.test(path)) return true;
+  // WEBSITE-CHANNEL-04：官网品牌图片（Logo/Hero/品类入口图）游客可读。
+  if (method === "GET" && /^\/client\/v1\/public\/website-assets\/[^/]+\/[^/]+$/u.test(path)) return true;
   // CLIENT-CHANNEL-01：协议/隐私/帮助正文游客可读。
   if (method === "GET" && /^\/client\/v1\/public\/documents\/[^/]+$/u.test(path)) return true;
   if (method === "POST" && /^\/client\/v1\/auth\/registration\/challenges\/[^/]+\/verify$/u.test(path)) return true;

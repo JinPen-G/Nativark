@@ -1,13 +1,48 @@
-import { CheckCircleOutlined, ExperimentOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
+import { CheckCircleOutlined, ExperimentOutlined, PlusOutlined, SaveOutlined, UploadOutlined } from "@ant-design/icons";
 import type { SaveClientChannelProfileRequest, SaveMiniProgramChannelRequest, SaveWebsiteChannelProfileRequest } from "@rental-os/shared";
-import { Alert, App, Button, Card, Checkbox, Col, Divider, Form, Input, Row, Space, Spin, Switch, Tabs, Tag, Typography } from "antd";
-import { useEffect } from "react";
+import { Alert, App, Button, Card, Checkbox, Col, Divider, Form, Input, Row, Space, Spin, Switch, Tabs, Tag, Typography, Upload } from "antd";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { clientChannelApi } from "@/api/clientChannel";
 import { websiteChannelApi } from "@/api/websiteChannel";
+import { apiAssetOrigin } from "@/api/http";
 import { PageHeader } from "@/components/PageHeader";
 
 type ProfileForm = SaveClientChannelProfileRequest;
+
+const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
+
+/** Form.Item 兼容的图片上传：上传到官网资产接口，把返回的公开 URL 写回字段；也可移除。 */
+function ImageUrlUpload({ value, onChange, scene, hint, previewHeight = 64 }: { value?: string; onChange?: (url: string) => void; scene: "logo" | "hero" | "category"; hint: string; previewHeight?: number; }) {
+  const { message } = App.useApp();
+  const [uploading, setUploading] = useState(false);
+  const preview = value ? (value.startsWith("/") ? `${apiAssetOrigin}${value}` : value) : "";
+  return (
+    <div>
+      {preview ? <img src={preview} alt="" style={{ height: previewHeight, maxWidth: 240, objectFit: "contain", borderRadius: 8, border: "1px solid #eee", display: "block", marginBottom: 8, background: "#fafafa" }} /> : null}
+      <Space>
+        <Upload
+          accept="image/jpeg,image/png,image/webp"
+          showUploadList={false}
+          beforeUpload={(file) => {
+            if (!IMAGE_TYPES.includes(file.type)) { message.error("只支持 JPG、PNG 或 WebP 图片"); return Upload.LIST_IGNORE; }
+            if (file.size > 2 * 1024 * 1024) { message.error("单张图片不能超过 2MB"); return Upload.LIST_IGNORE; }
+            setUploading(true);
+            websiteChannelApi.uploadAsset(scene, file as File)
+              .then((result) => { onChange?.(result.url); message.success("图片已上传"); })
+              .catch((error: any) => message.error(error?.response?.data?.message ?? "上传失败"))
+              .finally(() => setUploading(false));
+            return false;
+          }}
+        >
+          <Button icon={<UploadOutlined />} loading={uploading}>{value ? "重新上传" : "上传图片"}</Button>
+        </Upload>
+        {value ? <Button type="text" danger onClick={() => onChange?.("")}>移除</Button> : null}
+      </Space>
+      <Typography.Text type="secondary" style={{ display: "block", marginTop: 6, fontSize: 12 }}>{hint}</Typography.Text>
+    </div>
+  );
+}
 
 function ProfileCard() {
   const [form] = Form.useForm<ProfileForm>();
@@ -70,7 +105,7 @@ function ProfileCard() {
         <Card size="small" title="品牌与客服">
           <Row gutter={[16, 0]}>
             <Col xs={24} md={12}><Form.Item name="brandName" label="商户展示名" extra="登录页标题、启动配置与分享使用；缺省用租户名"><Input maxLength={191} placeholder="如：光影摄影器材租赁" /></Form.Item></Col>
-            <Col xs={24} md={12}><Form.Item name="brandLogoUrl" label="商户 Logo 地址" extra="HTTPS 图片地址；小程序需将其域名加入 downloadFile 合法域名"><Input maxLength={512} placeholder="https://..." /></Form.Item></Col>
+            <Col xs={24} md={12}><Form.Item name="brandLogoUrl" label="商户 Logo" extra="登录页、启动配置与分享使用"><ImageUrlUpload scene="logo" previewHeight={48} hint="建议 240×80px 横版（透明背景 PNG 更佳），≤ 500KB，JPG/PNG/WebP。" /></Form.Item></Col>
             <Col xs={24} md={12}><Form.Item name="customerServicePhone" label="客服电话" extra="订单/付款页“联系商户”与拨号使用"><Input maxLength={32} placeholder="如：021-00000000" /></Form.Item></Col>
             <Col xs={24} md={12}><Form.Item name="customerServiceHours" label="客服时段" extra="展示文案，如“工作日 9:00-18:00”"><Input maxLength={64} /></Form.Item></Col>
           </Row>
@@ -307,7 +342,7 @@ function WebsiteProfileCard() {
               </Form.Item>
             </Col>
             <Col xs={24} md={12}><Form.Item name="heroTitle" label="Hero 主标题" extra="首页首屏大标题；缺省回退到商户名/标语"><Input maxLength={120} placeholder="如：面向多行业的租赁解决方案" /></Form.Item></Col>
-            <Col xs={24} md={12}><Form.Item name="heroImageUrl" label="Hero 大图地址" extra="HTTPS 图片地址；建议 2400×1000px（约 12:5 宽幅横图），≤ 1MB，JPG/WebP；主体居中，两侧留白以适配裁切。"><Input maxLength={512} placeholder="https://..." /></Form.Item></Col>
+            <Col xs={24} md={12}><Form.Item name="heroImageUrl" label="Hero 大图"><ImageUrlUpload scene="hero" previewHeight={72} hint="建议 2400×1000px（约 12:5 宽幅横图），≤ 1MB，JPG/WebP；主体居中、两侧留白以适配裁切。" /></Form.Item></Col>
             <Col xs={24}><Form.Item name="heroDescription" label="Hero 副文案"><Input.TextArea rows={2} maxLength={400} showCount /></Form.Item></Col>
           </Row>
         </Card>
@@ -322,7 +357,7 @@ function WebsiteProfileCard() {
         <Card size="small" title="品类入口图" style={{ marginTop: 16 }}>
           <Typography.Paragraph type="secondary">官网首页每个一级品类卡片/场景图的展示图。建议 800×600px（4:3），≤ 500KB，JPG/WebP；留空则自动使用该品类下第一个商品的图片。品类来自“通用客户端配置”里已启用的经营空间。</Typography.Paragraph>
           {data.categories.length ? <Row gutter={[16, 0]}>{data.categories.map((cat) => (
-            <Col xs={24} md={12} key={cat.code}><Form.Item name={["categoryImageMap", cat.code]} label={`${cat.name}（${cat.code}）`} rules={[{ max: 512 }]}><Input allowClear placeholder="https://... 留空用商品图" /></Form.Item></Col>
+            <Col xs={24} md={12} key={cat.code}><Form.Item name={["categoryImageMap", cat.code]} label={`${cat.name}（${cat.code}）`}><ImageUrlUpload scene="category" hint="建议 800×600px（4:3），≤ 500KB，JPG/WebP；留空用商品图。" /></Form.Item></Col>
           ))}</Row> : <Alert type="info" showIcon title="暂无可配置品类" description="请先在经营设置中启用服务空间，并在“通用客户端配置”里发布到客户端。" />}
         </Card>
 

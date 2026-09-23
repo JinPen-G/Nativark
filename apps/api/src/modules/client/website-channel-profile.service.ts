@@ -136,6 +136,9 @@ export class WebsiteChannelProfileService {
 
   private async validatedUrl(value: string | null, label: string): Promise<string | null> {
     if (!value) return null;
+    // 本站上传得到的图片是同源相对路径（/api/client/v1/public/website-assets/...），不发起出站请求，
+    // 无 SSRF 风险，跳过出站地址校验；外部绝对地址仍逐一校验。
+    if (value.startsWith("/api/client/v1/public/website-assets/")) return value;
     try {
       await assertOutboundUrl(value, label, { allowQuery: true });
     } catch (error) {

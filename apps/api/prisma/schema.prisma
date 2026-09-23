@@ -205,6 +205,7 @@ model Tenant {
   miniProgramChannels               MiniProgramChannel[]
   clientChannelProfile              ClientChannelProfile?
   websiteChannelProfile             WebsiteChannelProfile?
+  websiteAssets                     WebsiteAsset[]
   clientChannelWorkspaces           ClientChannelWorkspace[]
   clientWechatIdentities            ClientWechatIdentity[]
   customerDeliveryAddresses         CustomerDeliveryAddress[]
@@ -756,6 +757,23 @@ model WebsiteChannelProfile {
   updatedAt        DateTime @updatedAt
 
   @@map("website_channel_profiles")
+}
+
+/// WEBSITE-CHANNEL-04：租户官网品牌图片（Logo/Hero/品类入口图）。租户后台直接上传，字节存库、
+/// 由公开接口按 tenantCode+assetId 提供，写回各配置的图片 URL 字段。数量少、体积小，直接入库更简单可靠。
+model WebsiteAsset {
+  id         String   @id @default(uuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// 用途：logo / hero / category，仅用于区分与审计，不影响公开可读性。
+  scene      String   @db.VarChar(32)
+  mimeType   String   @db.VarChar(64)
+  sizeBytes  Int
+  data       Bytes    @db.LongBlob
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId], map: "website_assets_tenant_idx")
+  @@map("website_assets")
 }
 
 /// MP-R1：租户绑定的微信小程序渠道凭证。密钥只保存加密值；品牌/协议/发布服务在 ClientChannelProfile。

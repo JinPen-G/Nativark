@@ -19,6 +19,7 @@ import {
 import { CLIENT_PUBLIC_DOCUMENT_KINDS, type ClientChannelKind, type ClientPublicDocumentKind } from "@rental-os/shared";
 import { ClientApiService } from "./client-api.service";
 import { ClientAuthService } from "./client-auth.service";
+import { WebsiteAssetService } from "./website-asset.service";
 import { ClientAccountClosureService } from "./client-account-closure.service";
 import { ClientDeliveryAddressService } from "./client-delivery-address.service";
 import { ClientWechatAuthService } from "./client-wechat-auth.service";
@@ -75,6 +76,7 @@ export class ClientApiController {
   constructor(
     private readonly api: ClientApiService,
     private readonly auth: ClientAuthService,
+    private readonly websiteAssets: WebsiteAssetService,
     @Optional() private readonly wechat?: ClientWechatAuthService,
     @Optional() private readonly addresses?: ClientDeliveryAddressService,
     @Optional() private readonly closure?: ClientAccountClosureService
@@ -113,6 +115,15 @@ export class ClientApiController {
   resolveSite(@Query("host") host: string) {
     if (!host?.trim()) throw new BadRequestException("缺少站点域名");
     return this.api.resolveWebsiteHost(host);
+  }
+
+  /** WEBSITE-CHANNEL-04：公开官网品牌图片（Logo/Hero/品类入口图），按 tenantCode + assetId 提供。 */
+  @Get("public/website-assets/:tenantCode/:assetId")
+  async websiteAsset(@Param("tenantCode") tenantCode: string, @Param("assetId") assetId: string, @Res() res: ClientBinaryResponse) {
+    const image = await this.websiteAssets.read(tenantCode, assetId);
+    res.setHeader("Content-Type", image.mimeType);
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.send(image.content);
   }
 
   /** CLIENT-CHANNEL-01：公开文档正文（用户协议 / 隐私政策 / 帮助），客户端内直接渲染。 */

@@ -80,6 +80,7 @@ import { ClientChannelProfileController } from "./modules/client/client-channel-
 import { ClientChannelProfileService } from "./modules/client/client-channel-profile.service";
 import { WebsiteChannelProfileController } from "./modules/client/website-channel-profile.controller";
 import { WebsiteChannelProfileService } from "./modules/client/website-channel-profile.service";
+import { WebsiteAssetService } from "./modules/client/website-asset.service";
 
 @Module({
   imports: [
@@ -158,6 +159,7 @@ import { WebsiteChannelProfileService } from "./modules/client/website-channel-p
     MiniProgramChannelService,
     ClientChannelProfileService,
     WebsiteChannelProfileService,
+    WebsiteAssetService,
     IntegrationsService,
     IntegrationsRepository,
     TenantIntegrationService,

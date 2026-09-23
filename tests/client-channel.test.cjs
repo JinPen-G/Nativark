@@ -14,6 +14,7 @@ require("ts-node").register({ project: path.join(root, "apps/api/tsconfig.json")
 const { ClientApiService } = require("../apps/api/src/modules/client/client-api.service");
 const { ClientChannelProfileService } = require("../apps/api/src/modules/client/client-channel-profile.service");
 const { WebsiteChannelProfileService } = require("../apps/api/src/modules/client/website-channel-profile.service");
+const { WebsiteAssetService } = require("../apps/api/src/modules/client/website-asset.service");
 const { OPENAPI_DOCUMENT } = require("../apps/api/src/contracts/openapi-document");
 
 const status = (value) => (error) => error?.getStatus?.() === value;
@@ -312,4 +313,48 @@ test("OpenAPI + 鉴权：site-resolve 是公开客户端路由、契约齐全", 
   assert.ok(OPENAPI_DOCUMENT.components.schemas.SaveWebsiteChannelProfileRequest.properties.customDomain, "缺 save customDomain");
   const { isClientPublicRoute } = require("../apps/api/src/common/api-auth.guard");
   assert.equal(isClientPublicRoute("GET", "/client/v1/public/site-resolve"), true, "site-resolve 必须是公开路由（游客可访问）");
+});
+
+test("website assets: 上传校验图片类型/大小/魔数并回传公开 URL；公开读取按租户隔离", async () => {
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+  const created = [];
+  const prisma = {
+    tenant: { findFirst: async ({ where }) => (where.code ? { id: "t1" } : { code: "demo" }) },
+    websiteAsset: {
+      create: async ({ data }) => { created.push(data); return { id: "asset-1" }; },
+      findFirst: async ({ where }) => (where.id === "asset-1" && where.tenantId === "t1" ? { data: png, mimeType: "image/png" } : null)
+    }
+  };
+  const svc = Object.assign(Object.create(WebsiteAssetService.prototype), { prisma });
+  const user = { tenantId: "t1", isSaasAdmin: false };
+  const file = (mimetype, buffer) => ({ originalname: "x", mimetype, size: buffer.length, buffer });
+
+  // 合法 PNG → 入库并回传公开 URL（含 tenantCode 与 assetId）。
+  const up = await svc.upload(user, "hero", file("image/png", png));
+  assert.equal(up.url, "/api/client/v1/public/website-assets/demo/asset-1");
+  assert.equal(up.mimeType, "image/png");
+  assert.equal(created[0].scene, "hero");
+
+  // 非图片类型、超大、魔数不符都拒绝。
+  await assert.rejects(svc.upload(user, "hero", file("application/pdf", png)), status(400));
+  await assert.rejects(svc.upload(user, "hero", file("image/png", Buffer.alloc(3 * 1024 * 1024, 1))), (e) => e?.getStatus?.() === 413);
+  await assert.rejects(svc.upload(user, "hero", file("image/png", Buffer.from([1, 2, 3, 4, 5, 6, 7, 8]))), status(400));
+  // SaaS 平台账号不能上传租户图片。
+  await assert.rejects(svc.upload({ isSaasAdmin: true }, "hero", file("image/png", png)), status(400));
+
+  // 公开读取：命中返回内容；未知/跨租户 404（tenantId 过滤在 where 内）。
+  const read = await svc.read("demo", "asset-1");
+  assert.equal(read.mimeType, "image/png");
+  assert.ok(Buffer.isBuffer(read.content));
+  await assert.rejects(svc.read("demo", "nope"), status(404));
+});
+
+test("OpenAPI + 鉴权：website-assets 上传与公开读取契约齐全", () => {
+  const paths = OPENAPI_DOCUMENT.paths;
+  assert.ok(paths["/api/platform/website-channel/assets"].post, "缺 POST /platform/website-channel/assets");
+  assert.deepEqual(paths["/api/platform/website-channel/assets"].post["x-requiredPermissions"], ["system:integration:manage"]);
+  assert.ok(paths["/api/client/v1/public/website-assets/{tenantCode}/{assetId}"].get, "缺公开图片读取路由");
+  assert.ok(paths["/api/client/v1/public/catalog/items/{itemGroupId}/images/{imageId}"].get, "既有商品图路由不应丢失");
+  const { isClientPublicRoute } = require("../apps/api/src/common/api-auth.guard");
+  assert.equal(isClientPublicRoute("GET", "/client/v1/public/website-assets/demo/asset-1"), true, "官网图片必须游客可读");
 });

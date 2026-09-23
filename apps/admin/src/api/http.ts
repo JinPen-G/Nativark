@@ -11,6 +11,9 @@ const baseURL = import.meta.env.VITE_API_BASE_URL ?? "/api";
 
 export const http = axios.create({ baseURL, timeout: 12_000 });
 
+/** 图片等静态资源的同源前缀：baseURL 为绝对地址时取其 origin，相对时为空串（同源）。 */
+export const apiAssetOrigin = /^https?:\/\//.test(baseURL) ? new URL(baseURL).origin : "";
+
 let refreshPromise: Promise<LoginResponse | undefined> | undefined;
 
 function storeRefreshedSession(session: LoginResponse) {

@@ -15,5 +15,13 @@ export const websiteChannelApi = {
   async saveProfile(payload: SaveWebsiteChannelProfileRequest) {
     const response = await http.put<ApiResult<WebsiteChannelProfileSummary>>("/platform/website-channel", payload);
     return response.data.data;
+  },
+  /** 上传官网品牌图片（scene: logo|hero|category），返回可写入配置的公开 URL。 */
+  async uploadAsset(scene: "logo" | "hero" | "category", file: File) {
+    const form = new FormData();
+    form.append("scene", scene);
+    form.append("file", file);
+    const response = await http.post<ApiResult<{ assetId: string; url: string; mimeType: string }>>("/platform/website-channel/assets", form);
+    return response.data.data;
   }
 };
