@@ -7,6 +7,19 @@
 export const ADMIN_FONT_FAMILY =
   "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif";
 
+export const ADMIN_DEFAULT_PRIMARY_COLOR = "#1677FF";
+
+const HEX_COLOR_PATTERN = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/u;
+
+/** 只接受服务端约束的十六进制颜色，避免把租户输入直接写入 CSS。 */
+export function resolveAdminPrimaryColor(value?: string | null) {
+  const raw = value?.trim() ?? "";
+  if (!HEX_COLOR_PATTERN.test(raw)) return ADMIN_DEFAULT_PRIMARY_COLOR;
+  const hex = raw.slice(1);
+  const expanded = hex.length === 3 ? hex.split("").map((part) => part + part).join("") : hex;
+  return `#${expanded.toUpperCase()}`;
+}
+
 export const ADMIN_TYPOGRAPHY = {
   body: { size: 14, lineHeight: 22, weight: 400 },
   pageTitle: { size: 20, lineHeight: 28, weight: 600 },

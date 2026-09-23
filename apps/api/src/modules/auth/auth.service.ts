@@ -21,6 +21,7 @@ import type {
 } from "@rental-os/shared";
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { hashOpaqueToken } from "../../common/password";
+import { ClientChannelProfileService } from "../client/client-channel-profile.service";
 import { PlatformService } from "../platform/platform.service";
 import { WorkspaceCapabilityService } from "../rental-core/workspace-capability.service";
 
@@ -58,7 +59,9 @@ export class AuthService {
     private readonly configService: ConfigService,
     // CORE-EXT-02C：会话上下文里的能力集改为「已启用实例」。可选是为了让既有单测
     // 继续用两个参数构造本服务；缺失时返回空启用集（fail-closed），不回退到品类声明。
-    @Optional() private readonly capabilities?: WorkspaceCapabilityService
+    @Optional() private readonly capabilities?: WorkspaceCapabilityService,
+    // 主题色是展示配置，不应阻断登录；可选依赖也兼容无数据库的内存测试模式。
+    @Optional() private readonly clientChannelProfile?: ClientChannelProfileService
   ) {}
 
   async login(input: LoginRequest): Promise<LoginResponse> {
@@ -214,6 +217,7 @@ export class AuthService {
     //
     // 原先固定取租户级档案，于是刷新页面后停留在非默认空间的会话会显示
     // 另一个空间的品类与 capability——前端据此渲染菜单，等于换了空间却
+    const themeColor = await this.tenantThemeColor(tenant.tenantId);
     // 沿用旧品类的界面。这与 Guard 的判定口径也不一致。
     const scope = await this.getCategoryContext(user.tenantId, workspaceId);
     const tenant = await this.platformService.findTenantByIdForAuth(user.tenantId);
@@ -228,6 +232,7 @@ export class AuthService {
     return {
       tenant: {
         tenantId: tenant.tenantId,
+        themeColor,
         tenantCode: tenant.tenantCode,
         tenantName: tenant.tenantName,
         tenantStatus: tenant.tenantStatus,
@@ -425,6 +430,7 @@ export class AuthService {
       iat: now,
       exp: now + this.accessTtlSeconds
     });
+    const themeColor = await this.tenantThemeColor(tenant.tenantId);
     const workspaces = await this.platformService.listUserWorkspaces(user.id);
     const sessionScope = await this.getCategoryContext(user.tenantId, workspaceId);
     // 与 session-context 完全同口径：能力集是**已启用实例**，不是品类声明。
@@ -434,6 +440,7 @@ export class AuthService {
       accessToken,
       refreshToken: refreshToken ?? "",
       expiresIn: this.accessTtlSeconds,
+        themeColor,
       tenant: {
         tenantId: tenant.tenantId,
         tenantCode: tenant.tenantCode,
@@ -445,6 +452,16 @@ export class AuthService {
         capabilities: capabilityView?.enabled ?? []
       },
       user: await this.toAuthUser(user),
+  /** 展示配置读取失败时回退默认主题，不影响认证与业务接口。 */
+  private async tenantThemeColor(tenantId: string): Promise<string | undefined> {
+    if (!this.clientChannelProfile) return undefined;
+    try {
+      return await this.clientChannelProfile.getThemeColor(tenantId);
+    } catch (error) {
+      this.logger.warn(`读取租户 ${tenantId} 的管理后台主题色失败，回退默认色：${(error as Error).message}`);
+      return undefined;
+    }
+  }
       needsTenantOnboarding: Boolean(needsTenantOnboarding && workspaceId),
       // SPACE-02：登录返回可进入的空间与当前空间，供前端渲染切换器（前端属 SPACE-05）。
       workspaces,

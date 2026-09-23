@@ -7,15 +7,17 @@ import { AppRouter } from "./AppRouter";
 import { LocaleProvider, useLocale } from "./locale";
 import { queryClient } from "./queryClient";
 import { AppearanceProvider, createThemeConfig, useAppearance } from "./theme";
+import { useAuthStore } from "@/features/auth/authStore";
 
 function ThemedApp() {
   const { mode } = useAppearance();
   const { locale } = useLocale();
+  const tenantThemeColor = useAuthStore((state) => state.tenant?.themeColor);
   return (
     <ConfigProvider
       locale={locale === "en-US" ? enUS : zhCN}
       variant="outlined"
-      theme={createThemeConfig(mode)}
+      theme={createThemeConfig(mode, tenantThemeColor)}
     >
       <QueryClientProvider client={queryClient}>
         <AntdApp>

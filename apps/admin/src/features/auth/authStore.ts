@@ -43,6 +43,7 @@ interface AuthState {
   login: (tenantCode: string, account: string, password: string) => Promise<LoginResponse>;
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   switchWorkspace: (workspaceId: string) => Promise<void>;
+  setTenantThemeColor: (themeColor?: string) => void;
   logout: () => void;
   hasPermission: (permission?: string) => boolean;
   hasTenantMembershipPermission: (permission?: string) => boolean;
@@ -141,6 +142,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       workspaces: result.workspaces ?? [],
       currentWorkspaceId: result.currentWorkspaceId
     });
+  },
+  setTenantThemeColor(themeColor) {
+    const current = get().tenant;
+    if (!current) return;
+    const tenant = { ...current, themeColor: themeColor?.trim() || undefined };
+    window.localStorage.setItem(keys.tenant, JSON.stringify(tenant));
+    set({ tenant });
+    window.dispatchEvent(new CustomEvent("rental-session-updated"));
   },
   logout() {
     const refreshToken = window.localStorage.getItem(keys.refreshToken);

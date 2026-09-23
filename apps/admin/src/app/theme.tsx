@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { theme, type ThemeConfig } from "antd";
-import { ADMIN_FONT_FAMILY, ADMIN_TYPOGRAPHY, applyAdminTypographyTokens } from "@/app/designTokens";
+import { ADMIN_FONT_FAMILY, ADMIN_TYPOGRAPHY, applyAdminTypographyTokens, resolveAdminPrimaryColor } from "@/app/designTokens";
 
 export type AppearanceMode = "default" | "dark" | "compact";
 
@@ -182,8 +182,9 @@ export function useAppearance() {
   return context;
 }
 
-export function createThemeConfig(mode: AppearanceMode): ThemeConfig {
+export function createThemeConfig(mode: AppearanceMode, tenantThemeColor?: string | null): ThemeConfig {
   const light = mode !== "dark";
+  const primaryColor = resolveAdminPrimaryColor(tenantThemeColor);
   const algorithm = mode === "dark"
     ? theme.darkAlgorithm
     : mode === "compact"
@@ -201,8 +202,8 @@ export function createThemeConfig(mode: AppearanceMode): ThemeConfig {
      */
     cssVar: { key: "rental-os", prefix: "rental" },
     token: {
-      colorPrimary: "#1677ff",
-      colorInfo: "#1677ff",
+      colorPrimary: primaryColor,
+      colorInfo: primaryColor,
       colorSuccess: "#52c41a",
       colorWarning: "#faad14",
       colorError: "#ff4d4f",
@@ -253,7 +254,7 @@ export function createThemeConfig(mode: AppearanceMode): ThemeConfig {
       Tabs: { horizontalItemGutter: 24 },
       Progress: light ? {
         circleTextColor: "rgba(0, 0, 0, 0.88)",
-        defaultColor: "#1677ff",
+        defaultColor: primaryColor,
         remainingColor: "rgba(0, 0, 0, 0.06)"
       } : {}
     }

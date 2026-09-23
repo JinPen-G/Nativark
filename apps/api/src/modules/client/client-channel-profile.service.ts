@@ -146,6 +146,21 @@ export class ClientChannelProfileService {
     return this.summary(row, options);
   }
 
+  /**
+   * 登录/会话上下文使用的最小字段。
+   *
+   * 管理后台的主题色属于租户品牌事实，但不能让普通运营账号为了换肤去调用
+   * 需要 system:integration:manage 的完整客户端配置接口；这里只返回主题色，
+   * 不泄露协议、渠道凭证或其他客户端配置。
+   */
+  async getThemeColor(tenantId: string): Promise<string | undefined> {
+    const row = await this.prisma.clientChannelProfile.findUnique({
+      where: { tenantId },
+      select: { themeColor: true }
+    });
+    return row?.themeColor ?? undefined;
+  }
+
   private async validatedUrl(value: string | null, label: string): Promise<string | null> {
     if (!value) return null;
     // 本站上传得到的品牌图是同源相对路径，不发起出站请求，跳过 SSRF 校验；外链仍逐一校验。

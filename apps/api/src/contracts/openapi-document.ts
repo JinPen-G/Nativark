@@ -272,6 +272,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       tenantCode: stringSchema,
       tenantName: stringSchema,
       tenantStatus: stringSchema,
+      themeColor: stringSchema,
       categoryCode: stringSchema,
       categoryName: stringSchema,
       capabilities: arrayOf(stringSchema)

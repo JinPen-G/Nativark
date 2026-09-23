@@ -153,6 +153,8 @@ export interface TenantContext {
   tenantCode: string;
   tenantName: string;
   tenantStatus: TenantStatus;
+  /** 租户通用客户端配置的主题色；未设置时管理端与客户端各自回退默认色。 */
+  themeColor?: string;
   categoryCode?: RentalCategoryCode;
   categoryName?: string;
   capabilities?: RentalCapability[];
@@ -788,7 +790,7 @@ export interface ClientChannelProfileSummary {
   helpFaq: ClientChannelFaqItem[];
   bannerTitle?: string;
   bannerSubtitle?: string;
-  /** 客户端主题色（#RRGGBB）；未设置时客户端用系统默认色。 */
+  /** 客户端与管理后台主题色（#RRGGBB）；未设置时各端用系统默认色。 */
   themeColor?: string;
   smsLoginEnabled: boolean;
   passwordLoginEnabled: boolean;
@@ -812,7 +814,7 @@ export interface SaveClientChannelProfileRequest {
   helpFaq?: ClientChannelFaqItem[];
   bannerTitle?: string;
   bannerSubtitle?: string;
-  /** 客户端主题色（#RRGGBB）；留空表示回退系统默认色。 */
+  /** 客户端与管理后台主题色（#RRGGBB）；留空表示回退系统默认色。 */
   themeColor?: string;
   smsLoginEnabled: boolean;
   passwordLoginEnabled: boolean;

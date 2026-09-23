@@ -6,7 +6,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { clientChannelApi } from "@/api/clientChannel";
 import { websiteChannelApi } from "@/api/websiteChannel";
 import { apiAssetOrigin } from "@/api/http";
+import { ADMIN_DEFAULT_PRIMARY_COLOR } from "@/app/designTokens";
 import { PageHeader } from "@/components/PageHeader";
+import { useAuthStore } from "@/features/auth/authStore";
 
 type ProfileForm = SaveClientChannelProfileRequest;
 
@@ -48,10 +50,12 @@ function ProfileCard() {
   const [form] = Form.useForm<ProfileForm>();
   const { message } = App.useApp();
   const queryClient = useQueryClient();
+  const tenantId = useAuthStore((state) => state.tenant?.tenantId);
+  const setTenantThemeColor = useAuthStore((state) => state.setTenantThemeColor);
   // 原生取色器需要合法 #RRGGBB；表单里可能是 #RGB 或空，展示时归一化，不回写表单值。
   const themeColorValue = Form.useWatch("themeColor", form);
-  const themeColorSwatch = /^#[0-9a-fA-F]{6}$/.test(themeColorValue ?? "") ? (themeColorValue as string) : /^#[0-9a-fA-F]{3}$/.test(themeColorValue ?? "") ? "#" + (themeColorValue as string).slice(1).split("").map((c) => c + c).join("") : "#1677FF";
-  const profile = useQuery({ queryKey: ["client-channel-profile"], queryFn: clientChannelApi.getProfile });
+  const themeColorSwatch = /^#[0-9a-fA-F]{6}$/.test(themeColorValue ?? "") ? (themeColorValue as string) : /^#[0-9a-fA-F]{3}$/.test(themeColorValue ?? "") ? "#" + (themeColorValue as string).slice(1).split("").map((c) => c + c).join("") : ADMIN_DEFAULT_PRIMARY_COLOR;
+  const profile = useQuery({ queryKey: ["client-channel-profile", tenantId], queryFn: clientChannelApi.getProfile, enabled: Boolean(tenantId) });
 
   useEffect(() => {
     const data = profile.data;
@@ -82,7 +86,7 @@ function ProfileCard() {
       expectedRevision: profile.data?.revision,
       helpFaq: (values.helpFaq ?? []).filter((item) => item?.question?.trim() && item?.answer?.trim())
     }),
-    onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["client-channel-profile"] }); message.success("客户端渠道配置已保存"); },
+    onSuccess: async (data) => { setTenantThemeColor(data.themeColor); await queryClient.invalidateQueries({ queryKey: ["client-channel-profile", tenantId] }); message.success("客户端渠道配置已保存"); },
     onError: (error: any) => message.error(error?.response?.data?.message ?? "保存失败")
   });
 
@@ -116,7 +120,7 @@ function ProfileCard() {
             <Col xs={24} md={12}><Form.Item name="bannerTitle" label="横幅标题" extra="缺省使用品牌文案"><Input maxLength={64} /></Form.Item></Col>
             <Col xs={24} md={12}><Form.Item name="bannerSubtitle" label="横幅副标题"><Input maxLength={120} /></Form.Item></Col>
             <Col xs={24} md={12}>
-              <Form.Item name="themeColor" label="主题色" tooltip="留空使用系统默认蓝 #1677FF；设置后小程序主按钮等主色跟随" extra="小程序内客户端主色；#RRGGBB，留空回退系统色" rules={[{ pattern: /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, message: "请输入 #RRGGBB 十六进制颜色" }]}>
+              <Form.Item name="themeColor" label="主题色" tooltip="留空使用系统默认蓝 #1677FF；设置后客户端与管理后台主色跟随" extra="客户端与管理后台主色；#RRGGBB，留空回退系统色" rules={[{ pattern: /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, message: "请输入 #RRGGBB 十六进制颜色" }]}>
                 <Input maxLength={7} allowClear placeholder="#1677FF" addonBefore={<input type="color" value={themeColorSwatch} onChange={(e) => form.setFieldValue("themeColor", e.target.value.toUpperCase())} style={{ width: 28, height: 22, border: "none", background: "transparent", padding: 0, cursor: "pointer" }} aria-label="选择主题色" />} />
               </Form.Item>
             </Col>
