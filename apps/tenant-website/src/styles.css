@@ -730,3 +730,22 @@ html[data-theme="dark"] .home-hero-multiple .hero-benefits { background: rgba(0,
 
 /* 真实租户模式：数据加载/失败时的轻量占位（避免用演示数据闪现）。 */
 .remote-gate { min-height: 60vh; display: flex; align-items: center; justify-content: center; color: var(--muted, #6b7a90); font-size: 15px; }
+
+/* 账号入口与登录页 */
+.header-account { display: inline-flex; align-items: center; height: 36px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line, #e5e9f0); background: transparent; color: var(--ink, #1c2733); font-size: 13px; cursor: pointer; white-space: nowrap; }
+.header-account:hover { border-color: var(--brand, #007aff); color: var(--brand, #007aff); }
+.login-page { max-width: 480px; }
+.login-card { border: 1px solid var(--line, #e5e9f0); border-radius: 16px; padding: 24px; background: var(--card, #fff); box-shadow: 0 10px 30px rgba(16,36,64,.06); }
+.login-tabs { display: flex; gap: 8px; margin-bottom: 20px; }
+.login-tabs button { flex: 1; height: 38px; border-radius: 10px; border: 1px solid var(--line, #e5e9f0); background: transparent; color: var(--muted, #6b7a90); font-size: 14px; cursor: pointer; }
+.login-tabs button.active { border-color: var(--brand, #007aff); color: var(--brand, #007aff); font-weight: 600; }
+.login-form { display: flex; flex-direction: column; gap: 14px; }
+.login-form label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted, #6b7a90); }
+.login-form input[type="text"], .login-form input[type="password"], .login-form input:not([type="checkbox"]) { height: 42px; border-radius: 10px; border: 1px solid var(--line, #e5e9f0); padding: 0 12px; font-size: 15px; background: var(--card, #fff); color: var(--ink, #1c2733); }
+.login-code-row { display: flex; gap: 10px; }
+.login-code-row input { flex: 1; }
+.login-code-row .button { flex: 0 0 auto; white-space: nowrap; }
+.login-dev-code { font-size: 12px; color: var(--brand, #007aff); margin: 0; }
+.login-agree { flex-direction: row !important; align-items: center; gap: 8px; font-size: 12px; }
+.login-agree input { width: 16px; height: 16px; }
+.login-foot { font-size: 12px; color: var(--muted, #6b7a90); margin: 16px 0 0; text-align: center; }
