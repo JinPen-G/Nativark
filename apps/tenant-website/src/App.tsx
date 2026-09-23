@@ -7,6 +7,7 @@ import { ProductsPage } from './pages/ProductsPage';
 import { ProductDetailPage } from './pages/ProductDetailPage';
 import { BookingPage } from './pages/BookingPage';
 import { LoginPage } from './pages/LoginPage';
+import { AccountPage } from './pages/AccountPage';
 import { OrderDetailPage, OrdersPage } from './pages/OrderPages';
 import { AboutPage, GuidePage, HelpPage } from './pages/InfoPages';
 
@@ -18,6 +19,7 @@ export function App() {
     <Route path="/product/:productId" element={<ProductDetailPage />} />
     <Route path="/booking/:productId" element={<BookingPage />} />
     <Route path="/login" element={<LoginPage />} />
+    <Route path="/account" element={<AccountPage />} />
     <Route path="/orders" element={<OrdersPage />} />
     <Route path="/orders/:orderId" element={<OrderDetailPage />} />
     <Route path="/about" element={<AboutPage />} />

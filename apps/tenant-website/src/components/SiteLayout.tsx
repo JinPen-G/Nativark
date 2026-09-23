@@ -20,7 +20,7 @@ function LanguagePicker() {
 
 export function SiteHeader() {
   const { tenant, href, mode, isRemote, language, toggleLanguage, theme, toggleTheme, t } = useSite();
-  const { isAuthenticated, customerName, logout } = useAuth();
+  const { isAuthenticated, customerName } = useAuth();
   const [search, setSearch] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
@@ -62,7 +62,7 @@ export function SiteHeader() {
       <button className="theme-switcher-header" type="button" onClick={toggleTheme} aria-label={t('switchTheme')} title={t('switchTheme')}>{theme === 'dark' ? <MoonOutlined aria-hidden="true" /> : <SunOutlined aria-hidden="true" />}</button>
       <Link className="header-orders" to={href('/orders')} aria-label={t('orders')}><UserOutlined aria-hidden="true" /><span>{t('orders')}</span></Link>
       {isRemote && (isAuthenticated
-        ? <button className="header-account" type="button" onClick={() => { logout(); setMenuOpen(false); }} title={customerName || t('logoutCta')}>{customerName ? `${customerName} · ` : ''}{t('logoutCta')}</button>
+        ? <Link className="header-account" to={href('/account')} onClick={() => setMenuOpen(false)} title={t('accountTitle')}>{customerName || t('accountTitle')}</Link>
         : <Link className="header-account" to={href(`/login?redirect=${encodeURIComponent('/orders')}`)} onClick={() => setMenuOpen(false)}>{t('loginCta')}</Link>)}
       <Link className="button button-dark header-cta" to={href('/products')}>{t('rentNow')} <ArrowRightOutlined aria-hidden="true" /></Link>
       <button className="mobile-menu-button" type="button" onClick={() => setMenuOpen(!menuOpen)} aria-label={menuOpen ? t('closeMenu') : t('openMenu')} aria-expanded={menuOpen}>{menuOpen ? <CloseOutlined /> : <MenuOutlined />}</button>

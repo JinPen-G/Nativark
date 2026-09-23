@@ -749,3 +749,19 @@ html[data-theme="dark"] .home-hero-multiple .hero-benefits { background: rgba(0,
 .login-agree { flex-direction: row !important; align-items: center; gap: 8px; font-size: 12px; }
 .login-agree input { width: 16px; height: 16px; }
 .login-foot { font-size: 12px; color: var(--muted, #6b7a90); margin: 16px 0 0; text-align: center; }
+
+/* 账户中心 */
+.account-quicklinks { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 24px; }
+.account-section { border: 1px solid var(--line, #e5e9f0); border-radius: 16px; padding: 20px; margin-bottom: 20px; background: var(--card, #fff); }
+.account-section-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.account-section-head h2 { font-size: 17px; margin: 0; }
+.address-form { display: flex; flex-direction: column; gap: 12px; padding: 16px; border: 1px dashed var(--line, #e5e9f0); border-radius: 12px; margin-bottom: 16px; }
+.address-list, .coupon-list, .notice-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.address-list li { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid var(--line, #e5e9f0); border-radius: 12px; }
+.address-list li div { display: flex; flex-direction: column; gap: 4px; }
+.address-list li span { color: var(--muted, #6b7a90); font-size: 13px; }
+.addr-default-tag { font-style: normal; font-size: 11px; color: var(--brand, #007aff); border: 1px solid var(--brand, #007aff); border-radius: 6px; padding: 1px 6px; width: max-content; }
+.coupon-list li, .notice-list li { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border: 1px solid var(--line, #e5e9f0); border-radius: 12px; }
+.coupon-list li span, .notice-list li span { color: var(--muted, #6b7a90); font-size: 13px; }
+.coupon-list li small, .notice-list li small { color: var(--muted, #6b7a90); font-size: 12px; }
+.link-danger { border: 0; background: transparent; color: #d4380d; cursor: pointer; font-size: 16px; padding: 4px; }
