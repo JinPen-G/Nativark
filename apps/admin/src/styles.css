@@ -24,7 +24,15 @@ html[data-theme-switching] *::after {
    因此上面的过渡开关不会误伤揭示动画本身。 */
 ::view-transition-old(root) { animation: none; z-index: 1; mix-blend-mode: normal; }
 ::view-transition-new(root) { z-index: 2; mix-blend-mode: normal; }
-body { overflow: hidden; background: var(--rental-color-bg-layout); }
+body {
+  overflow: hidden;
+  color: var(--rental-color-text);
+  background: var(--rental-color-bg-layout);
+  font-family: var(--rental-typography-font-family);
+  font-size: var(--rental-typography-body-size);
+  font-weight: var(--rental-typography-body-weight);
+  line-height: var(--rental-typography-body-line-height);
+}
 button, input, textarea, select { font: inherit; }
 
 .app-frame-stage {
@@ -112,12 +120,17 @@ button, input, textarea, select { font: inherit; }
 .app-brand-copy b {
   overflow: hidden;
   color: var(--rental-color-text-heading);
-  font-size: 16px;
-  font-weight: 600;
+  font-size: var(--rental-typography-section-title-size);
+  font-weight: var(--rental-typography-section-title-weight);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-.appearance-option small { color: var(--rental-color-text-description); font-size: 12px; font-weight: 400; }
+.appearance-option small {
+  color: var(--rental-color-text-description);
+  font-size: var(--rental-typography-meta-size);
+  font-weight: var(--rental-typography-meta-weight);
+  line-height: var(--rental-typography-meta-line-height);
+}
 .appearance-option { display: grid; min-width: 192px; gap: 4px; padding-block: 4px; }
 
 
@@ -153,19 +166,20 @@ button, input, textarea, select { font: inherit; }
   border-radius: 6px;
   color: var(--rental-color-primary);
   background: var(--rental-color-primary-bg);
-  font-size: 13px;
+  font-size: var(--rental-typography-meta-size);
 }
 .workspace-select-name {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   color: var(--rental-color-text-heading);
-  font-size: 14px;
-  font-weight: 500;
+  font-size: var(--rental-typography-body-size);
+  font-weight: var(--rental-typography-body-weight);
+  line-height: var(--rental-typography-body-line-height);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-.workspace-select-arrow { flex: none; color: var(--rental-color-text-quaternary); font-size: 12px; }
+.workspace-select-arrow { flex: none; color: var(--rental-color-text-quaternary); font-size: var(--rental-typography-meta-size); }
 /* 侧栏底色见 app/theme.tsx 的 SIDER_BG；变量落地前的那一帧回落到外壳底色。 */
 .app-sider {
   background: var(--app-sider-bg, var(--rental-color-bg-layout)) !important;
@@ -196,8 +210,8 @@ button, input, textarea, select { font: inherit; }
 .sider-nav .ant-menu-item-group-title {
   padding: 14px 8px 6px;
   color: var(--rental-color-text-description);
-  font-size: 12px;
-  line-height: 1.4;
+  font-size: var(--rental-typography-meta-size);
+  line-height: var(--rental-typography-meta-line-height);
 }
 /* 分组之间画细线：二级全部常显时，只靠标题的字号差不足以断句。第一组不画。 */
 .sider-nav .ant-menu-item-group + .ant-menu-item-group {
@@ -213,7 +227,7 @@ button, input, textarea, select { font: inherit; }
    尺寸、圆角、间距全部保持本仓原样（标签文字继承菜单项的颜色，antd 未单独设色）。 */
 .sider-nav .ant-menu-item-selected {
   color: var(--rental-color-white) !important;
-  font-weight: 600;
+  font-weight: var(--rental-typography-section-title-weight);
   background: var(--rental-color-primary) !important;
   box-shadow: none;
 }
@@ -258,8 +272,8 @@ button, input, textarea, select { font: inherit; }
   border-radius: 999px;
   color: var(--rental-color-text-secondary);
   background: transparent;
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--rental-typography-meta-size);
+  font-weight: var(--rental-typography-section-title-weight);
   cursor: pointer;
   transition: color .15s ease, background-color .2s;
 }
@@ -298,7 +312,12 @@ button, input, textarea, select { font: inherit; }
 /* 主题行整行不可点（开关自己是点击目标），因此不给悬浮态与手型。 */
 .sider-link-static,
 .sider-link-static:hover { background: transparent; cursor: default; }
-.sider-link-label { flex: 1; min-width: 0; font-size: 14px; }
+.sider-link-label {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--rental-typography-body-size);
+  line-height: var(--rental-typography-body-line-height);
+}
 /* 收起态宽度只有 64px，放不下图标加文案，只留居中的图标或小开关。 */
 .is-collapsed .sider-link { justify-content: center; padding-inline: 0; }
 .sider-link-switch { display: grid; min-height: 36px; place-items: center; }
@@ -320,20 +339,22 @@ button, input, textarea, select { font: inherit; }
 }
 .account-card:hover { background: var(--rental-color-fill-tertiary); }
 .is-collapsed .account-card { justify-content: center; padding-inline: 6px; }
-.account-avatar { color: var(--rental-color-primary) !important; background: var(--rental-color-primary-bg) !important; font-weight: 600; }
-.account-copy { display: grid; flex: 1; min-width: 0; text-align: left; line-height: 1.35; }
+.account-avatar { color: var(--rental-color-primary) !important; background: var(--rental-color-primary-bg) !important; font-weight: var(--rental-typography-section-title-weight); }
+.account-copy { display: grid; flex: 1; min-width: 0; text-align: left; line-height: var(--rental-typography-body-line-height); }
 .account-copy b {
   overflow: hidden;
   color: var(--rental-color-text-heading);
-  font-size: 14px;
-  font-weight: 600;
+  font-size: var(--rental-typography-body-size);
+  font-weight: var(--rental-typography-section-title-weight);
+  line-height: var(--rental-typography-body-line-height);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 .account-copy small {
   overflow: hidden;
   color: var(--rental-color-text-description);
-  font-size: 12px;
+  font-size: var(--rental-typography-meta-size);
+  line-height: var(--rental-typography-meta-line-height);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
@@ -378,15 +399,16 @@ button, input, textarea, select { font: inherit; }
 .app-content { min-height: 0; padding: 24px; overflow: auto; background: transparent; }
 .content-canvas { width: 100%; }
 
-.page-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 36px; margin-bottom: 16px; }
-/* 标题行：图标 + 标题 + 紧跟的说明入口；右侧只放导出、新增这类动作。 */
+.page-toolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; min-height: 52px; margin-bottom: 16px; }
+/* 页面标题层级统一：标题行负责定位，副标题只负责说明，不再由各页面自行配字号。 */
+.page-heading { display: grid; flex: 1 1 auto; min-width: 0; gap: 2px; }
 .page-title-row { display: flex; align-items: center; gap: 2px; min-width: 0; }
 .page-title-icon {
   display: inline-flex;
   flex: none;
   margin-right: 8px;
   color: var(--rental-color-text-secondary);
-  font-size: 17px;
+  font-size: var(--rental-typography-panel-title-size);
 }
 .page-title-row .ant-btn { color: var(--rental-color-text-quaternary); }
 .page-title-row .ant-btn:hover { color: var(--rental-color-text-secondary); }
@@ -394,9 +416,43 @@ button, input, textarea, select { font: inherit; }
   margin: 0;
   overflow: hidden;
   color: var(--rental-color-text-heading);
-  font-size: 18px;
-  font-weight: 600;
-  line-height: 26px;
+  font-size: var(--rental-typography-page-title-size);
+  font-weight: var(--rental-typography-page-title-weight);
+  line-height: var(--rental-typography-page-title-line-height);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* 少量页面内仍使用 Typography.Title；按语义层级接入同一套 token，避免组件默认值
+   与 PageHeader、卡片标题各自漂移。登录/首次登录的 level=2 使用登录标题层级。 */
+h1.ant-typography {
+  font-size: var(--rental-typography-page-title-size);
+  font-weight: var(--rental-typography-page-title-weight);
+  line-height: var(--rental-typography-page-title-line-height);
+}
+h2.ant-typography {
+  font-size: var(--rental-typography-login-title-size);
+  font-weight: var(--rental-typography-login-title-weight);
+  line-height: var(--rental-typography-login-title-line-height);
+}
+h3.ant-typography,
+h4.ant-typography {
+  font-size: var(--rental-typography-section-title-size);
+  font-weight: var(--rental-typography-section-title-weight);
+  line-height: var(--rental-typography-section-title-line-height);
+}
+h5.ant-typography {
+  font-size: var(--rental-typography-panel-title-size);
+  font-weight: var(--rental-typography-panel-title-weight);
+  line-height: var(--rental-typography-panel-title-line-height);
+}
+.page-subtitle {
+  max-width: 960px;
+  margin: 0;
+  overflow: hidden;
+  color: var(--rental-color-text-description);
+  font-size: var(--rental-typography-page-subtitle-size);
+  font-weight: var(--rental-typography-page-subtitle-weight);
+  line-height: var(--rental-typography-page-subtitle-line-height);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
@@ -404,7 +460,12 @@ button, input, textarea, select { font: inherit; }
 .page-toolbar-view { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
 .page-toolbar-actions { flex: 0 0 auto; justify-content: flex-end; }
 /* 口径说明的浮层正文：限宽避免长句拉成一行，行高与页面正文一致。 */
-.page-note { max-width: 360px; color: var(--rental-color-text); font-size: 14px; line-height: 22px; }
+.page-note {
+  max-width: 360px;
+  color: var(--rental-color-text);
+  font-size: var(--rental-typography-body-size);
+  line-height: var(--rental-typography-body-line-height);
+}
 
 .data-panel,
 .workspace-panel,
@@ -414,7 +475,11 @@ button, input, textarea, select { font: inherit; }
   box-shadow: none;
 }
 /* 卡片标题统一 16/600：不按 workspace-panel、data-panel 再各写一份，同一个组件只有一种字号。 */
-.ant-card .ant-card-head-title { font-size: 16px; font-weight: 600; line-height: 24px; }
+.ant-card .ant-card-head-title {
+  font-size: var(--rental-typography-section-title-size);
+  font-weight: var(--rental-typography-section-title-weight);
+  line-height: var(--rental-typography-section-title-line-height);
+}
 .panel-title { display: flex; align-items: center; gap: 8px; }
 .panel-count {
   display: inline-grid;
@@ -425,8 +490,9 @@ button, input, textarea, select { font: inherit; }
   border-radius: var(--rental-border-radius-sm);
   color: var(--rental-color-text-secondary);
   background: var(--rental-color-fill-tertiary);
-  font-size: 12px;
-  font-weight: 400;
+  font-size: var(--rental-typography-meta-size);
+  font-weight: var(--rental-typography-meta-weight);
+  line-height: var(--rental-typography-meta-line-height);
 }
 .panel-toolbar,
 .table-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
@@ -441,8 +507,8 @@ button, input, textarea, select { font: inherit; }
   border-radius: var(--rental-border-radius-lg);
   color: var(--rental-color-text);
   background: var(--rental-color-info-bg);
-  font-size: 14px;
-  line-height: 22px;
+  font-size: var(--rental-typography-body-size);
+  line-height: var(--rental-typography-body-line-height);
 }
 .context-note .anticon { margin-top: 4px; color: var(--rental-color-info); }
 
@@ -450,19 +516,43 @@ button, input, textarea, select { font: inherit; }
 .metric-card { min-height: 110px; }
 .metric-card .ant-card-body { display: flex; flex-direction: column; justify-content: center; height: 100%; padding: 24px; }
 .metric-card .ant-statistic-title { margin-bottom: 8px; color: var(--rental-color-text-description); }
-.metric-card .ant-statistic-content { color: var(--rental-color-text-heading); font-size: 24px; font-weight: 600; line-height: 32px; }
-.metric-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; color: var(--rental-color-text-description); font-size: 12px; line-height: 20px; }
-.metric-trend { color: var(--rental-color-success); font-weight: 600; }
+.metric-card .ant-statistic-content {
+  color: var(--rental-color-text-heading);
+  font-size: var(--rental-typography-metric-size);
+  font-weight: var(--rental-typography-metric-weight);
+  line-height: var(--rental-typography-metric-line-height);
+}
+.metric-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  color: var(--rental-color-text-description);
+  font-size: var(--rental-typography-meta-size);
+  line-height: var(--rental-typography-meta-line-height);
+}
+.metric-trend { color: var(--rental-color-success); font-weight: var(--rental-typography-section-title-weight); }
 .workspace-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr); gap: 16px; }
 .status-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 64px; padding-block: 8px; border-bottom: 1px solid var(--rental-color-border-secondary); }
 .status-row:last-child { border-bottom: 0; }
 .status-row > div { display: grid; gap: 4px; }
 
-.section-title { color: var(--rental-color-text-heading); font-size: 16px; font-weight: 600; line-height: 24px; }
-.metric-value { color: var(--rental-color-text-heading); font-size: 24px; font-weight: 600; line-height: 32px; }
+.section-title {
+  color: var(--rental-color-text-heading);
+  font-size: var(--rental-typography-section-title-size);
+  font-weight: var(--rental-typography-section-title-weight);
+  line-height: var(--rental-typography-section-title-line-height);
+}
+.metric-value {
+  color: var(--rental-color-text-heading);
+  font-size: var(--rental-typography-metric-size);
+  font-weight: var(--rental-typography-metric-weight);
+  line-height: var(--rental-typography-metric-line-height);
+}
 .muted { color: var(--rental-color-text-description); }
 .ant-card { box-shadow: none; }
-.ant-statistic .ant-statistic-content { font-weight: 600; }
+.ant-statistic .ant-statistic-content { font-weight: var(--rental-typography-metric-weight); }
 .ant-btn {
   transform: translateZ(0);
   transition: color .2s, background-color .2s, border-color .2s, box-shadow .2s, transform .1s ease-out !important;
@@ -483,7 +573,7 @@ button, input, textarea, select { font: inherit; }
 .ant-segmented .ant-segmented-item-selected {
   color: var(--rental-color-text);
   background: var(--rental-color-bg-container);
-  font-weight: 600;
+  font-weight: var(--rental-typography-section-title-weight);
 }
 /* 外观切换：药丸容器 + 两枚图标按钮，选中项是一块平移过去的高亮滑块。
    结构与留白比例照搬 BoardUI 的分段切换，尺寸收敛到本仓的 36px 行高。
@@ -576,7 +666,12 @@ html[data-appearance="dark"] .appearance-toggle-thumb {
 .ant-tabs .ant-tabs-tab:active { transform: scale(.97); }
 /* 选中项自己不画底色：白块交给 ink-bar，否则两处高亮会同时出现。 */
 .ant-tabs .ant-tabs-tab-active { background: transparent; box-shadow: none; }
-.ant-tabs .ant-tabs-tab-active .ant-tabs-tab-btn { color: var(--rental-color-text) !important; font-weight: 600; }
+.ant-tabs .ant-tabs-tab-btn {
+  font-size: var(--rental-typography-body-size);
+  font-weight: var(--rental-typography-body-weight);
+  line-height: var(--rental-typography-body-line-height);
+}
+.ant-tabs .ant-tabs-tab-active .ant-tabs-tab-btn { color: var(--rental-color-text) !important; font-weight: var(--rental-typography-section-title-weight); }
 /* ink-bar 改造成会滑动的白色滑块，和 Segmented 的 thumb 是同一个交互：
    antd 本来就用内联 left/width 加 transition 驱动它，之前 display:none 把这段动画一起藏了，
    于是同样的胶囊控件在分段控件上会滑、在页签上是硬切换。
@@ -614,12 +709,63 @@ html[data-appearance="dark"] .appearance-toggle-thumb {
 .ant-table-wrapper .ant-table-container { border-radius: var(--rental-border-radius-lg); }
 /* 表格密度由 theme.tsx 的 Table token（cellPaddingBlock/Inline）统一给出，这里不重复写内边距；
    antd 没有表头字重的 token，所以只留这一条。 */
-.ant-table-wrapper .ant-table-thead > tr > th { font-size: 14px; font-weight: 600; }
+.ant-table-wrapper .ant-table-thead > tr > th {
+  font-size: var(--rental-typography-label-size);
+  font-weight: var(--rental-typography-section-title-weight);
+  line-height: var(--rental-typography-label-line-height);
+}
+.ant-table-wrapper .ant-table-tbody > tr > td {
+  font-size: var(--rental-typography-body-size);
+  line-height: var(--rental-typography-body-line-height);
+}
 .ant-table-wrapper .ant-table-cell { vertical-align: middle; }
 /* 行内操作交给 antd 原生的按钮样式，不再自绘胶囊描边——同一个 type="link" 在表格里
    长成描边胶囊、在别处是纯文字链接，是这套自绘规则带来的不一致。
    这里只压一下高度：全局按钮高度是 36，直接用会把每一行撑高。 */
 .ant-table-wrapper .ant-table-tbody .ant-btn { height: 28px; }
+.ant-form-item-label > label {
+  font-size: var(--rental-typography-label-size);
+  font-weight: var(--rental-typography-label-weight);
+  line-height: var(--rental-typography-label-line-height);
+}
+.ant-form-item-extra,
+.ant-form-item-explain,
+.ant-alert-description {
+  font-size: var(--rental-typography-meta-size);
+  line-height: var(--rental-typography-meta-line-height);
+}
+.ant-alert-message {
+  font-size: var(--rental-typography-panel-title-size);
+  font-weight: var(--rental-typography-panel-title-weight);
+  line-height: var(--rental-typography-panel-title-line-height);
+}
+.text-meta {
+  font-size: var(--rental-typography-meta-size);
+  font-weight: var(--rental-typography-meta-weight);
+  line-height: var(--rental-typography-meta-line-height);
+}
+.text-body {
+  font-size: var(--rental-typography-body-size);
+  font-weight: var(--rental-typography-body-weight);
+  line-height: var(--rental-typography-body-line-height);
+}
+.order-quote-total {
+  color: var(--rental-color-primary);
+  font-size: var(--rental-typography-metric-size);
+  font-weight: var(--rental-typography-metric-weight);
+  line-height: var(--rental-typography-metric-line-height);
+}
+.calendar-weekday,
+.calendar-day-number {
+  font-size: var(--rental-typography-meta-size);
+  line-height: var(--rental-typography-meta-line-height);
+}
+.calendar-day-tag { font-size: var(--rental-typography-meta-size); line-height: var(--rental-typography-meta-line-height); }
+.calendar-day-note,
+.calendar-help {
+  font-size: var(--rental-typography-meta-size);
+  line-height: var(--rental-typography-meta-line-height);
+}
 .page-metrics { margin-bottom: 16px; }
 .page-metrics .data-panel { height: 100%; min-height: 110px; }
 .page-metrics .data-panel .ant-card-body { display: flex; align-items: center; min-height: 108px; padding: 24px; }
@@ -656,7 +802,7 @@ html[data-appearance="dark"] .appearance-toggle-thumb {
   border-radius: 12px;
   background: var(--rental-color-primary-bg);
   color: var(--rental-color-primary);
-  font-size: 20px;
+  font-size: var(--rental-typography-page-title-size);
 }
 
 .password-change-panel .ant-alert { margin: 20px 0; }
@@ -679,16 +825,30 @@ html[data-appearance="dark"] .appearance-toggle-thumb {
 .login-brand img { width: 148px; height: auto; max-height: 48px; object-fit: contain; }
 .login-workspace { display: grid; min-height: 0; place-items: center; padding: 32px 24px; background: var(--rental-color-bg-layout); }
 .login-panel { width: min(520px, 100%); }
-.login-panel-heading h2 { margin: 0 0 4px !important; font-size: 24px !important; font-weight: 600 !important; line-height: 32px !important; }
+.login-panel-heading h2 {
+  margin: 0 0 4px !important;
+  font-size: var(--rental-typography-login-title-size) !important;
+  font-weight: var(--rental-typography-login-title-weight) !important;
+  line-height: var(--rental-typography-login-title-line-height) !important;
+}
 .login-panel-heading p { margin-bottom: 24px !important; }
 .login-panel .ant-alert { margin-bottom: 24px; }
 .login-demo-hints { margin: 20px 0 0 !important; }
-.login-demo-hints .ant-alert-description { font-size: 12px; line-height: 20px; }
+.login-demo-hints .ant-alert-description {
+  font-size: var(--rental-typography-meta-size);
+  line-height: var(--rental-typography-meta-line-height);
+}
 .login-demo-hints .ant-typography { margin-bottom: 8px; }
 .login-demo-accounts { display: flex; }
 .login-panel .ant-form-item { margin-bottom: 16px; }
 .login-panel .ant-btn-primary { margin-top: 8px; }
-.login-support { display: block; margin-top: 24px; font-size: 12px; line-height: 20px; text-align: center; }
+.login-support {
+  display: block;
+  margin-top: 24px;
+  font-size: var(--rental-typography-meta-size);
+  line-height: var(--rental-typography-meta-line-height);
+  text-align: center;
+}
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }

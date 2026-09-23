@@ -396,7 +396,7 @@ export function RentalOrderCreatePage() {
                     {quote.chargeLines.map((line) => <Row key={line.code} justify="space-between" wrap={false} gutter={12}>
                       <Col flex="auto">
                         <Typography.Text>{line.name}</Typography.Text>
-                        {line.detail && <div><Typography.Text type="secondary" style={{ fontSize: 12 }}>{line.detail}</Typography.Text></div>}
+                        {line.detail && <div><Typography.Text type="secondary" className="text-meta">{line.detail}</Typography.Text></div>}
                       </Col>
                       <Col><Typography.Text strong={line.amount > 0}>{money(line.amount)}</Typography.Text></Col>
                     </Row>)}
@@ -414,7 +414,7 @@ export function RentalOrderCreatePage() {
                   <Divider style={{ margin: "16px 0 12px" }} />
                   <Row justify="space-between" align="middle">
                     <Typography.Text>应付金额</Typography.Text>
-                    <Typography.Text strong style={{ fontSize: 26, color: "var(--ant-color-primary)" }}>{money(quote.payableAmount)}</Typography.Text>
+                    <Typography.Text strong className="order-quote-total">{money(quote.payableAmount)}</Typography.Text>
                   </Row>
                 </>}
                 <Button block size="large" type={quote ? "default" : "primary"} loading={createQuote.isPending} onClick={quoteOrder} style={{ marginTop: 16 }}>

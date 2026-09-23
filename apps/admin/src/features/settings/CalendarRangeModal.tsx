@@ -251,7 +251,7 @@ export function CalendarRangeModal({
           render: (_, row) => {
             const status = "conflict" in row ? row.current.businessStatus ?? (row.current.closed ? "closed" : "open") : row.current.businessStatus ?? (row.current.closed ? "closed" : "open");
             return (
-              <Typography.Text style={{ fontSize: 12 }}>
+              <Typography.Text className="text-meta">
                 {row.current.dayType} · {status}
               </Typography.Text>
             );
@@ -265,7 +265,7 @@ export function CalendarRangeModal({
                 <Tag color={row.restoredSource === "official_cn" ? "geekblue" : "default"}>
                   {row.restoredSource === "official_cn" ? "官方日历" : "每周模板"}
                 </Tag>
-                <Typography.Text style={{ fontSize: 12 }}>
+                <Typography.Text className="text-meta">
                   {row.restored.dayType} · {row.restored.name}
                 </Typography.Text>
               </Space>
@@ -290,7 +290,7 @@ export function CalendarRangeModal({
           if (!isOverrideRow(raw)) return null;
           const row = raw;
           return (
-            <Typography.Text style={{ fontSize: 12 }}>
+            <Typography.Text className="text-meta">
               {row.base.dayType} · {row.base.businessStatus ?? (row.base.closed ? "closed" : "open")}
               {row.base.hours?.windows?.length ? ` · ${row.base.hours.windows.map((w) => `${w.start}-${w.end}`).join("、")}` : ""}
             </Typography.Text>
@@ -303,7 +303,7 @@ export function CalendarRangeModal({
           if (!isOverrideRow(raw)) return null;
           const row = raw;
           return (
-            <Typography.Text style={{ fontSize: 12 }}>
+            <Typography.Text className="text-meta">
               {row.current.dayType} · {row.current.businessStatus ?? (row.current.closed ? "closed" : "open")}
               {row.current.hours?.windows?.length ? ` · ${row.current.hours.windows.map((w) => `${w.start}-${w.end}`).join("、")}` : ""}
             </Typography.Text>
@@ -316,7 +316,7 @@ export function CalendarRangeModal({
           if (!isOverrideRow(raw)) return null;
           const row = raw;
           return (
-            <Typography.Text style={{ fontSize: 12 }}>
+            <Typography.Text className="text-meta">
               {row.after.dayType} · {row.after.businessStatus ?? (row.after.closed ? "closed" : "open")}
               {row.after.hours?.windows?.length ? ` · ${row.after.hours.windows.map((w) => `${w.start}-${w.end}`).join("、")}` : ""}
               {row.after.pricingOverrideRef ? ` · 特殊价格引用 ${row.after.pricingOverrideRef}` : ""}

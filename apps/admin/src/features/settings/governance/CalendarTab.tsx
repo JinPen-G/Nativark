@@ -449,11 +449,11 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                 render: (_, row) =>
                   row.hours?.windows?.length ? (
                     <Space orientation="vertical" size={0}>
-                      <Typography.Text style={{ fontSize: 12 }}>
+                      <Typography.Text className="text-meta">
                         {row.hours.windows.map((w) => `${w.start}-${w.end}`).join("、")}
                       </Typography.Text>
                       {(row.hours.pickup?.length || row.hours.return?.length) && (
-                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                        <Typography.Text type="secondary" className="text-meta">
                           {row.hours.pickup?.length
                             ? `取 ${row.hours.pickup.map((w) => `${w.start}-${w.end}`).join("、")}`
                             : ""}
@@ -475,12 +475,12 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                 render: (_, row) =>
                   row.source === "tenant_override" ? (
                     <Space orientation="vertical" size={0}>
-                      <Typography.Text style={{ fontSize: 12 }}>
+                      <Typography.Text className="text-meta">
                         {row.overriddenFrom
                           ? `${row.overriddenFrom.name} · ${row.overriddenFrom.dayType} · ×${row.overriddenFrom.pricingMultiplier}`
                           : "每周模板"}
                       </Typography.Text>
-                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                      <Typography.Text type="secondary" className="text-meta">
                         {row.overrideReason ?? "未记录原因"}
                         {row.overrideBy ? ` · ${row.overrideBy}` : ""}
                       </Typography.Text>
@@ -796,7 +796,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                           {
                             title: "发布前 → 发布后",
                             render: (_, row) => (
-                              <Typography.Text style={{ fontSize: 12 }}>
+                              <Typography.Text className="text-meta">
                                 {row.before
                                   ? `${businessStatusLabels[row.before.businessStatus ?? (row.before.closed ? "closed" : "open")]} ×${row.before.pricingMultiplier}`
                                   : "（无）"}
@@ -818,11 +818,11 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                     title={`有 ${publishPreview.data.futureOrders.length} 张未来订单落在受影响日期上`}
                     description={
                       <Space orientation="vertical" size={0}>
-                        <Typography.Text style={{ fontSize: 12 }}>
+                        <Typography.Text className="text-meta">
                           发布不会改动这些订单，它们继续按各自的订单快照执行；如需调整请单独处理。
                         </Typography.Text>
                         {publishPreview.data.futureOrders.slice(0, 5).map((order) => (
-                          <Typography.Text key={order.orderId} type="secondary" style={{ fontSize: 12 }}>
+                          <Typography.Text key={order.orderId} type="secondary" className="text-meta">
                             {order.orderNo} · {order.status} · 重叠 {order.affectedDates.join("、")}
                           </Typography.Text>
                         ))}
@@ -895,8 +895,8 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                   title: "变更原因/发布人",
                   render: (_, row) => (
                     <Space orientation="vertical" size={0}>
-                      <Typography.Text style={{ fontSize: 12 }}>{row.changeReason ?? "—"}</Typography.Text>
-                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                      <Typography.Text className="text-meta">{row.changeReason ?? "—"}</Typography.Text>
+                      <Typography.Text type="secondary" className="text-meta">
                         {row.publishedBy ?? ""}
                         {row.voidReason ? `作废：${row.voidReason}` : ""}
                       </Typography.Text>
@@ -1018,7 +1018,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                     {
                       title: "前 → 后",
                       render: (_, row) => (
-                        <Typography.Text style={{ fontSize: 12 }}>
+                        <Typography.Text className="text-meta">
                           {row.before
                             ? `${row.before.dayType} ×${row.before.pricingMultiplier}`
                             : "（无）"}

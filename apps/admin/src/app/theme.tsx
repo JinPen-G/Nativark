@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { theme, type ThemeConfig } from "antd";
+import { ADMIN_FONT_FAMILY, ADMIN_TYPOGRAPHY, applyAdminTypographyTokens } from "@/app/designTokens";
 
 export type AppearanceMode = "default" | "dark" | "compact";
 
@@ -167,6 +168,11 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
   }, [mode]);
 
   const value = useMemo(() => ({ mode, setMode }), [mode, setMode]);
+
+  useLayoutEffect(() => {
+    applyAdminTypographyTokens(document.documentElement);
+  }, []);
+
   return <AppearanceContext.Provider value={value}>{children}</AppearanceContext.Provider>;
 }
 
@@ -202,8 +208,10 @@ export function createThemeConfig(mode: AppearanceMode): ThemeConfig {
       colorError: "#ff4d4f",
       ...(light ? { colorBgLayout: "#f5f8ff" } : {}),
       borderRadius: 6,
-      fontSize: 14,
-      fontWeightStrong: 600
+      fontFamily: ADMIN_FONT_FAMILY,
+      fontSize: ADMIN_TYPOGRAPHY.body.size,
+      lineHeight: ADMIN_TYPOGRAPHY.body.lineHeight / ADMIN_TYPOGRAPHY.body.size,
+      fontWeightStrong: ADMIN_TYPOGRAPHY.sectionTitle.weight
     },
     components: {
       Layout: {

@@ -142,7 +142,7 @@ export function CalendarMonthGrid({
     >
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6 }}>
         {WEEKDAY_LABELS.map((label) => (
-          <Typography.Text key={label} type="secondary" style={{ textAlign: "center", fontSize: 12 }}>
+          <Typography.Text key={label} type="secondary" className="calendar-weekday">
             周{label}
           </Typography.Text>
         ))}
@@ -165,7 +165,7 @@ export function CalendarMonthGrid({
             >
               <button type="button" style={cellStyle} onClick={() => onDayClick(day)}>
                 <Space size={4} style={{ justifyContent: "space-between", width: "100%" }}>
-                  <Typography.Text strong={day?.source === "tenant_override"} style={{ fontSize: 13 }}>
+                  <Typography.Text strong={day?.source === "tenant_override"} className="calendar-day-number">
                     {cell.dayNumber}
                   </Typography.Text>
                   <Space size={2}>
@@ -178,17 +178,17 @@ export function CalendarMonthGrid({
                   </Space>
                 </Space>
                 <Space size={2} wrap style={{ rowGap: 0 }}>
-                  <Tag color={dayTypeColors[day.dayType]} style={{ marginInlineEnd: 0, fontSize: 11 }}>
+                  <Tag color={dayTypeColors[day.dayType]} className="calendar-day-tag" style={{ marginInlineEnd: 0 }}>
                     {dayTypeLabels[day.dayType] ?? day.dayType}
                   </Tag>
-                  <Tag color={businessStatusColors[status]} style={{ marginInlineEnd: 0, fontSize: 11 }}>
+                  <Tag color={businessStatusColors[status]} className="calendar-day-tag" style={{ marginInlineEnd: 0 }}>
                     {businessStatusLabels[status] ?? status}
                   </Tag>
                 </Space>
-                <Typography.Text style={{ fontSize: 11 }} ellipsis>
+                <Typography.Text className="calendar-day-note" ellipsis>
                   {day.name}
                 </Typography.Text>
-                <Typography.Text type="secondary" style={{ fontSize: 11 }} ellipsis>
+                <Typography.Text type="secondary" className="calendar-day-note" ellipsis>
                   {day.hours?.windows?.length
                     ? day.hours.windows.map((w) => `${w.start}-${w.end}`).join("、")
                     : `×${day.pricingMultiplier}`}
@@ -197,10 +197,10 @@ export function CalendarMonthGrid({
             </Tooltip>
           ) : (
             <div key={cell.date} style={{ ...cellStyle, cursor: "default", color: "#bbb" }}>
-              <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+              <Typography.Text type="secondary" className="calendar-day-number">
                 {cell.dayNumber}
               </Typography.Text>
-              <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+              <Typography.Text type="secondary" className="calendar-day-note">
                 无数据
               </Typography.Text>
             </div>
@@ -208,7 +208,7 @@ export function CalendarMonthGrid({
           return body;
         })}
       </div>
-      <Typography.Paragraph type="secondary" style={{ marginTop: 12, marginBottom: 0, fontSize: 12 }}>
+      <Typography.Paragraph type="secondary" className="calendar-help" style={{ marginTop: 12, marginBottom: 0 }}>
         图例——日期类型：<Tag>工作日</Tag>
         <Tag color="orange">周末</Tag>
         <Tag color="red">法定节假日</Tag>

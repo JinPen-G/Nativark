@@ -138,7 +138,7 @@ export function OfficialCalendarSourcePage() {
                 title: "公告地址",
                 dataIndex: "url",
                 render: (value) => (
-                  <Typography.Text copyable style={{ fontSize: 12 }}>
+                  <Typography.Text copyable className="text-meta">
                     {value}
                   </Typography.Text>
                 )

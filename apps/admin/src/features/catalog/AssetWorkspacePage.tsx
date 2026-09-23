@@ -130,7 +130,7 @@ export function AssetWorkspacePage() {
                 );
                 if (!blocked.length) return "-";
                 return blocked.map((item) => (
-                  <div key={item.id} style={{ fontSize: 12 }}>
+                  <div key={item.id} className="text-meta">
                     <Tag color={item.status === "blocked" ? "red" : "orange"} style={{ marginInlineEnd: 4 }}>
                       {item.status === "blocked" ? "异常隔离" : "周转缓冲"}
                     </Tag>
