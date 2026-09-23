@@ -765,3 +765,10 @@ html[data-theme="dark"] .home-hero-multiple .hero-benefits { background: rgba(0,
 .coupon-list li span, .notice-list li span { color: var(--muted, #6b7a90); font-size: 13px; }
 .coupon-list li small, .notice-list li small { color: var(--muted, #6b7a90); font-size: 12px; }
 .link-danger { border: 0; background: transparent; color: #d4380d; cursor: pointer; font-size: 16px; padding: 4px; }
+
+/* 下单选择器与订单商品行 */
+.booking-field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted, #6b7a90); margin-bottom: 12px; }
+.booking-field select { height: 40px; border-radius: 10px; border: 1px solid var(--line, #e5e9f0); padding: 0 10px; font-size: 14px; background: var(--card, #fff); color: var(--ink, #1c2733); }
+.order-lines { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.order-line { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 14px; }
+.order-line span { color: var(--ink, #1c2733); }

@@ -104,9 +104,18 @@ export function SiteProvider({ children }: { children: ReactNode }) {
   const localize = useMemo(() => (product: Product) => localizeProduct(product, language), [language]);
 
   useEffect(() => {
-    document.title = `${tenant.name} · ${tenant.slogan}`;
+    document.title = tenant.seoTitle?.trim() || `${tenant.name} · ${tenant.slogan}`;
     document.documentElement.lang = language;
     applyTenantTheme(sourceTenant);
+    // SEO：官网渠道配置的描述/关键词写入 <meta>，缺省用品牌描述兜底。
+    const setMeta = (name: string, content: string) => {
+      if (!content) return;
+      let tag = document.head.querySelector<HTMLMetaElement>(`meta[name="${name}"]`);
+      if (!tag) { tag = document.createElement('meta'); tag.setAttribute('name', name); document.head.appendChild(tag); }
+      tag.setAttribute('content', content);
+    };
+    setMeta('description', tenant.seoDescription?.trim() || tenant.heroDescription?.replace(/\n/g, ' ').trim() || tenant.slogan);
+    if (tenant.seoKeywords?.trim()) setMeta('keywords', tenant.seoKeywords.trim());
   }, [language, sourceTenant, tenant]);
 
   useEffect(() => {
