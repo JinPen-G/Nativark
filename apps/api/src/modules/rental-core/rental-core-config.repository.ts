@@ -14,6 +14,7 @@ import type {
   TenantRentalBusinessSettings,
   TenantRentalProfile
 } from "@rental-os/shared";
+import { RENTAL_CATEGORY_WORKSPACE_NAMES } from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 import { getRequestWorkspaceId } from "../../common/request-identity";
 import { assertScopedWrite, resolveScopeWorkspaceId } from "./workspace-scope";
@@ -245,7 +246,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
         id: workspaceId,
         tenantId,
         code: "default",
-        name: "默认经营空间",
+        name: RENTAL_CATEGORY_WORKSPACE_NAMES[String(categoryCode).toLowerCase() as RentalCategoryCode] ?? "租赁空间",
         categoryCode,
         isDefault: true,
         defaultMarker: "default"

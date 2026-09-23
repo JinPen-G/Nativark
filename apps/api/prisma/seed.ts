@@ -12,6 +12,7 @@ import {
 } from "@prisma/client";
 import {
   RENTAL_CATEGORY_DEFINITIONS,
+  RENTAL_CATEGORY_WORKSPACE_NAMES,
   RentalCategoryCode as SharedRentalCategoryCode
 } from "@rental-os/shared";
 import { hashPassword } from "../src/common/password";
@@ -351,10 +352,10 @@ const rentalCategories = RENTAL_CATEGORY_DEFINITIONS.map((category) => ({
 }));
 
 const demoWorkspaces = [
-  { id: "ws_tenant_001", code: "default", name: "摄影设备经营空间", categoryCode: RentalCategoryCode.CAMERA, isDefault: true },
-  { id: "ws_tenant_001_camping", code: "camping", name: "露营装备经营空间", categoryCode: RentalCategoryCode.CAMPING, isDefault: false },
-  { id: "ws_tenant_001_vehicle", code: "vehicle", name: "车辆载具经营空间", categoryCode: RentalCategoryCode.VEHICLE, isDefault: false },
-  { id: "ws_tenant_001_construction", code: "construction", name: "工程设备经营空间", categoryCode: RentalCategoryCode.CONSTRUCTION, isDefault: false }
+  { id: "ws_tenant_001", code: "default", name: "摄影设备租赁", categoryCode: RentalCategoryCode.CAMERA, isDefault: true },
+  { id: "ws_tenant_001_camping", code: "camping", name: "露营装备租赁", categoryCode: RentalCategoryCode.CAMPING, isDefault: false },
+  { id: "ws_tenant_001_vehicle", code: "vehicle", name: "车辆载具租赁", categoryCode: RentalCategoryCode.VEHICLE, isDefault: false },
+  { id: "ws_tenant_001_construction", code: "construction", name: "工程设备租赁", categoryCode: RentalCategoryCode.CONSTRUCTION, isDefault: false }
 ] as const;
 
 async function upsertRentalCategoriesAndProfiles() {
@@ -547,7 +548,7 @@ async function upsertRolesAndUsers() {
     if (rentalProfile) {
       const workspaceSeeds = tenant.id === "tenant_001"
         ? demoWorkspaces
-        : [{ id: `ws_${tenant.id}`, code: "default", name: `${tenant.name} 默认经营空间`, categoryCode: rentalProfile.categoryCode, isDefault: true }] as const;
+        : [{ id: `ws_${tenant.id}`, code: "default", name: RENTAL_CATEGORY_WORKSPACE_NAMES[String(rentalProfile.categoryCode).toLowerCase() as SharedRentalCategoryCode], categoryCode: rentalProfile.categoryCode, isDefault: true }] as const;
       for (const workspace of workspaceSeeds) {
         await prisma.businessWorkspace.upsert({
           where: { id: workspace.id },
