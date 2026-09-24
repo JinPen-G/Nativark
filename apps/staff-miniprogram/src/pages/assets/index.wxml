@@ -1,7 +1,7 @@
 <page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
 <view class="screen screen--flat {{themeClass}}">
   <nav-bar title="{{context.terminology.collectionLabel || '库存查询'}}"></nav-bar>
-  <view class="section"><view class="search search--surface"><ui-icon name="search" size="30" color="muted"></ui-icon><input class="search__input" placeholder="搜索编号、序列号或型号" value="{{keyword}}" bindinput="onKeyword" /><view wx:if="{{keyword}}" class="search__clear" bindtap="onClearKeyword">清除</view></view></view>
+  <view class="section"><view class="search search--surface"><ui-icon name="search" size="30" color="muted"></ui-icon><input class="search__input" placeholder="搜索{{context.terminology.identifierLabel || '编号'}}、{{context.terminology.serialLabel || '序列号'}}或{{context.terminology.itemGroupLabel || '型号'}}" value="{{keyword}}" bindinput="onKeyword" /><view wx:if="{{keyword}}" class="search__clear" bindtap="onClearKeyword">清除</view></view></view>
   <view class="section section--tight"><view class="row row--between"><view class="muted" bindtap="onOpenLocation">{{locationLabel}} ▾</view><view class="row"><view wx:if="{{canManage}}" class="link" bindtap="onCreate">新增{{context.terminology.assetLabel || '物品'}}</view><view class="link ml-16" bindtap="onLedger">出入库记录</view></view></view></view>
   <view wx:if="{{itemGroupId}}" class="section section--tight"><view class="chip chip--soft" bindtap="onClearGroup">{{itemGroupName || '当前型号'}} ×</view></view>
   <scroll-view scroll-x class="section section--tight"><view class="chips"><view class="chip {{status === item.key ? 'chip--active' : ''}}" wx:for="{{chips}}" wx:key="key" data-key="{{item.key}}" bindtap="onChip">{{item.label}}</view></view></scroll-view>

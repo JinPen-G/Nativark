@@ -1,4 +1,4 @@
-import { cachedContext, categoryIcon, contextEvents, loadContext, type WorkspaceContext } from "../../core/context";
+import { cachedContext, categoryIcon, contextEvents, loadContext, terms, type WorkspaceContext } from "../../core/context";
 import { resolveImage } from "../../core/images";
 import { relativeDay } from "../../core/presenters";
 import { clearScanHistory, scanHistory, type ScanHistoryEntry } from "../../core/scan";
@@ -29,7 +29,14 @@ interface ScanManualData {
 }
 
 const DEFAULT_ZONE = "Asia/Shanghai";
+/** 历史动作角标色：取还动作随品类术语解析，其余保留固定词（含历史遗留的“出库/入库”）。 */
 const ACTION_TONE: Record<string, string> = { 出库: "info", 入库: "success", 绑定订单: "warning", 查看: "neutral" };
+function actionTone(action: string): string {
+  const t = terms();
+  if (action === t.pickupLabel) return "info";
+  if (action === t.returnLabel) return "success";
+  return ACTION_TONE[action] ?? "neutral";
+}
 
 Page({
   behaviors: [themeBehavior],
@@ -70,7 +77,7 @@ Page({
       timeText: relativeDay(new Date(entry.at).toISOString(), timeZone),
       icon: entry.kind === "order" ? "orders" : entry.kind === "workOrder" ? "tool" : icon,
       imagePath: entry.imageSource ? previous.get(entry.imageSource) ?? "" : "",
-      actionTone: ACTION_TONE[entry.action] ?? "neutral"
+      actionTone: actionTone(entry.action)
     }));
     this.setData({ history, recent: history.slice(0, 5) });
     history.forEach((row, index) => {
@@ -100,7 +107,7 @@ Page({
   onQuery() {
     const code = this.data.keyword.trim();
     if (!code) {
-      toast(`请输入${this.data.context?.terminology.identifierLabel ?? "编号"}、序列号或订单号`);
+      toast(`请输入${this.data.context?.terminology.identifierLabel ?? "编号"}、${this.data.context?.terminology.serialLabel ?? "序列号"}或订单号`);
       return;
     }
     navigate(buildUrl(ROUTES.scanResult, { code }));

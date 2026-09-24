@@ -16,7 +16,7 @@ interface ReturnAllocation { id: string; label: string; max: number; quantity: s
 
 Page({
   behaviors: [themeBehavior],
-  data: { view: loadingState() as ViewState, id: "", orderNo: "", customer: "", phone: "", period: "", itemLabel: "物品", returnLocation: "", allocations: [] as ReturnAllocation[], templateName: "", fields: [] as InspectionFieldRow[], noTemplate: false, busy: false, uploading: false, signatureWidth: 320, signatureHeight: 150, signatureDrawn: false, signatureFileAssetId: "", error: "" },
+  data: { view: loadingState() as ViewState, id: "", orderNo: "", customer: "", phone: "", period: "", itemLabel: "物品", pickupLabel: "领取", returnLabel: "归还", returnLocation: "", allocations: [] as ReturnAllocation[], templateName: "", fields: [] as InspectionFieldRow[], noTemplate: false, busy: false, uploading: false, signatureWidth: 320, signatureHeight: 150, signatureDrawn: false, signatureFileAssetId: "", error: "" },
   order: undefined as RentalOrder | undefined,
   template: undefined as RentalInspectionTemplate | undefined,
   signatureContext: undefined as WechatMiniprogram.CanvasContext | undefined,
@@ -34,7 +34,7 @@ Page({
       this.template = templates.find((row) => row.enabled && row.categoryCode === order.categoryCode);
       const allocations = order.allocations.filter((row) => row.status === "picked_up").map((row) => ({ id: row.id, label: row.assetNo || order.lines.find((line) => line.id === row.orderLineId)?.itemGroupName || row.itemGroupId || "资源", max: row.quantity, quantity: String(row.quantity), selected: true }));
       const timeZone = context.locations.find((row) => row.id === order.returnLocationId)?.timezone ?? "Asia/Shanghai";
-      this.setData({ view: readyState(), orderNo: order.orderNo, customer: order.customerName, phone: maskPhone(order.contactPhone), period: formatBusinessRange(order.startAt, order.effectiveEndAt ?? order.endAt, timeZone), itemLabel: terms().itemLabel, returnLocation: order.returnLocationName ?? order.fulfillmentLocationName, allocations, templateName: this.template?.name ?? "无需检查模板", fields: inspectionRows(this.template), noTemplate: !this.template, error: "" }, () => this.initSignatureCanvas());
+      this.setData({ view: readyState(), orderNo: order.orderNo, customer: order.customerName, phone: maskPhone(order.contactPhone), period: formatBusinessRange(order.startAt, order.effectiveEndAt ?? order.endAt, timeZone), itemLabel: terms().itemLabel, pickupLabel: terms().pickupLabel, returnLabel: terms().returnLabel, returnLocation: order.returnLocationName ?? order.fulfillmentLocationName, allocations, templateName: this.template?.name ?? "无需检查模板", fields: inspectionRows(this.template), noTemplate: !this.template, error: "" }, () => this.initSignatureCanvas());
     } catch (error) { this.setData({ view: errorState(error) }); }
   },
   onToggleAllocation(event: WechatMiniprogram.SwitchChange) { const index = Number(event.currentTarget.dataset.index); this.setData({ [`allocations[${index}].selected`]: Boolean(event.detail.value), error: "" }); },

@@ -45,7 +45,7 @@ Page({
       tips: [
         `支持扫描${assetLabel}条码、二维码、订单码与工单码`,
         "请保持光线充足，并将条码完整放入识别框",
-        `识别后查看${assetLabel}信息，可办理出库、入库或绑定订单`
+        `识别后查看${assetLabel}信息，可办理${context?.terminology.pickupLabel ?? "领取"}、${context?.terminology.returnLabel ?? "归还"}或绑定订单`
       ]
     });
   },

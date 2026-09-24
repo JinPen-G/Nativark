@@ -4,6 +4,7 @@ import { listItemGroups } from "../api/context";
 import { listOrders } from "../api/orders";
 import { listWorkOrders } from "../api/workOrders";
 import { currentSession, currentWorkspaceId } from "./session";
+import { terms } from "./context";
 import { STORAGE_KEYS, readStorage, writeStorage } from "./storage";
 
 /**
@@ -93,7 +94,7 @@ export async function resolveScan(code: string): Promise<ScanResult> {
     const assets = await listAssets().catch(() => []);
     const asset = assets.find((row) => normalize(row.assetNo) === key || (row.serialNo && normalize(row.serialNo) === key) || normalize(row.id) === key);
     if (!asset) return undefined;
-    return { kind: "asset", code: raw, id: asset.id, title: asset.itemGroupName, subtitle: asset.serialNo ? `${asset.assetNo} · SN ${asset.serialNo}` : asset.assetNo, status: asset.status, locationName: asset.locationName, asset };
+    return { kind: "asset", code: raw, id: asset.id, title: asset.itemGroupName, subtitle: asset.serialNo ? `${asset.assetNo} · ${terms().serialLabel} ${asset.serialNo}` : asset.assetNo, status: asset.status, locationName: asset.locationName, asset };
   };
   const tryItemGroup = async (): Promise<ScanResult | undefined> => {
     const groups = await listItemGroups().catch(() => []);

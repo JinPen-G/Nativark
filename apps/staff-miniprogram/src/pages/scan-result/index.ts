@@ -126,11 +126,11 @@ Page({
       const asset = result.asset;
       kindLabel = t.assetLabel;
       rows.push({ label: t.identifierLabel, value: asset.assetNo });
-      if (asset.serialNo) rows.push({ label: "序列号", value: asset.serialNo });
+      if (asset.serialNo) rows.push({ label: t.serialLabel, value: asset.serialNo });
       cells.push({ label: `${t.assetLabel}状态`, value: assetStatusLabel(asset.status), tone: assetStatusTone(asset.status), tag: true });
       cells.push({ label: `所在${t.fulfillmentLabel}`, value: asset.locationName || "—" });
-      if (can("rental-os:order:pickup")) actions.push({ key: "pickup", title: "出库", desc: `办理${t.assetLabel}出库`, icon: "box-out", color: "primary" });
-      if (can("rental-os:order:return")) actions.push({ key: "return", title: "入库", desc: `办理${t.assetLabel}归还入库`, icon: "box-in", color: "green" });
+      if (can("rental-os:order:pickup")) actions.push({ key: "pickup", title: t.pickupLabel, desc: `办理${t.assetLabel}${t.pickupLabel}`, icon: "box-out", color: "primary" });
+      if (can("rental-os:order:return")) actions.push({ key: "return", title: t.returnLabel, desc: `办理${t.assetLabel}${t.returnLabel}`, icon: "box-in", color: "green" });
       if (can("rental-os:order:pickup", "rental-os:order:allocate", "rental-os:order:write")) actions.push({ key: "bind", title: "绑定订单", desc: "关联到租赁订单", icon: "link", color: "purple" });
       actions.push({ key: "detail", title: "查看详情", desc: `查看${t.assetLabel}完整信息`, icon: "eye", color: "orange" });
       // 型号封面需从型号目录取；找不到用品类图标。
@@ -153,8 +153,8 @@ Page({
       rows.push({ label: t.itemLabel, value: names.length > 1 ? `${names[0]} 等 ${names.length} 种` : names[0] ?? "—" });
       cells.push({ label: "订单状态", value: orderStatusLabel(order.status), tone: orderStatusTone(order.status), tag: true });
       cells.push({ label: "订单号", value: order.orderNo });
-      if (PENDING_PICKUP.has(order.status) && can("rental-os:order:pickup")) actions.push({ key: "pickup", title: "出库登记", desc: `办理本单${t.pickupLabel}交付`, icon: "box-out", color: "primary" });
-      if (order.status === "renting" && can("rental-os:order:return")) actions.push({ key: "return", title: "归还验收", desc: `办理本单${t.returnLabel}入库`, icon: "box-in", color: "green" });
+      if (PENDING_PICKUP.has(order.status) && can("rental-os:order:pickup")) actions.push({ key: "pickup", title: `${t.pickupLabel}登记`, desc: `办理本单${t.pickupLabel}交付`, icon: "box-out", color: "primary" });
+      if (order.status === "renting" && can("rental-os:order:return")) actions.push({ key: "return", title: `${t.returnLabel}验收`, desc: `办理本单${t.returnLabel}`, icon: "box-in", color: "green" });
       actions.push({ key: "order", title: "查看订单详情", desc: "查看订单完整信息", icon: "orders", color: "orange" });
     } else if (result.kind === "itemGroup" && result.itemGroup) {
       const group = result.itemGroup;
@@ -235,16 +235,16 @@ Page({
       case "pickup":
       case "return": {
         if (result.kind === "order") {
-          this.remember(key === "pickup" ? "出库" : "入库");
+          this.remember(key === "pickup" ? t.pickupLabel : t.returnLabel);
           navigate(buildUrl(key === "pickup" ? ROUTES.pickup : ROUTES.return, { id: result.id }));
           return;
         }
         const order = await this.findOrderForAsset(result.id, key);
         if (!order) {
-          toast(key === "pickup" ? `该${t.assetLabel}没有待出库的订单` : `该${t.assetLabel}没有使用中的订单`, { duration: 3000 });
+          toast(key === "pickup" ? `该${t.assetLabel}没有待${t.pickupLabel}的订单` : `该${t.assetLabel}没有使用中的订单`, { duration: 3000 });
           return;
         }
-        this.remember(key === "pickup" ? "出库" : "入库");
+        this.remember(key === "pickup" ? t.pickupLabel : t.returnLabel);
         navigate(buildUrl(key === "pickup" ? ROUTES.pickup : ROUTES.return, { id: order.id }));
         return;
       }

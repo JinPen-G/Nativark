@@ -653,6 +653,13 @@ export interface RentalCategoryTerminology {
   pickupLabel: string;
   returnLabel: string;
   identifierLabel: string;
+  /**
+   * 序列号的行业称呼（摄影/工程=序列号、露营=批次号、车辆=车架号）。
+   *
+   * 与 `identifierLabel` 不同：`identifierLabel` 是资产编号（assetNo，平台内部编号）的叫法，
+   * `serialLabel` 是厂商序列号（serialNo）的叫法。可选字段，向后兼容；展示层未取到时回退“序列号”。
+   */
+  serialLabel?: string;
   usageMetricLabel?: string;
   /**
    * UI-NAV-01：这批资产作为一个整体时的行业称呼（车辆品类叫「车队」）。
@@ -1330,6 +1337,165 @@ export interface SharedCustomerProfile {
    * "没查到" 与 "没开通" 混为一谈。
    */
   accountSummary?: CustomerAccountSummary;
+}
+
+/** 客户资料页中的配送地址摘要。电话只返回脱敏值，订单地址快照不在此处改写。 */
+export interface CustomerProfileAddress {
+  id: string;
+  revision: number;
+  recipient: string;
+  phoneMasked: string;
+  countryCode: string;
+  province: string;
+  city: string;
+  district?: string;
+  detail: string;
+  postalCode?: string;
+  latitude?: number;
+  longitude?: number;
+  isDefault: boolean;
+  updatedAt: string;
+}
+
+/** 客户历史订单的轻量摘要；订单详情仍通过订单中心按权限查看。 */
+export interface CustomerProfileOrder {
+  id: string;
+  orderNo: string;
+  workspaceId: string;
+  workspaceName: string;
+  categoryCode: RentalCategoryCode;
+  status: string;
+  relation: Array<"customer" | "contract_subject" | "payer" | "user" | "booking_identity">;
+  startAt: string;
+  endAt: string;
+  effectiveEndAt?: string;
+  finalPayableAmount: number;
+  currency: string;
+  createdAt: string;
+}
+
+/** 积分、营销余额和奖励券按经营空间分别展示，避免把不同空间的余额误加总。 */
+export interface CustomerProfileBenefitAccount {
+  workspaceId: string;
+  workspaceName: string;
+  categoryCode: RentalCategoryCode;
+  pointsBalance: number;
+  marketingBalance: number;
+  availableRewardCouponCount: number;
+  updatedAt: string;
+}
+
+export interface CustomerProfileRewardEntry {
+  id: string;
+  workspaceId: string;
+  workspaceName: string;
+  rewardType: "points" | "balance" | "coupon" | string;
+  amount: number;
+  triggerType: string;
+  status: "granted" | "reversed" | string;
+  reason: string;
+  appliedAt?: string;
+  createdAt: string;
+  reversedAt?: string;
+}
+
+export interface CustomerProfileCouponEntry {
+  id: string;
+  workspaceId: string;
+  workspaceName: string;
+  templateName: string;
+  templateCode: string;
+  templateVersion: string;
+  discountType: string;
+  discountValue: number;
+  status: string;
+  grantReason: string;
+  effectiveFrom: string;
+  effectiveTo: string;
+  lockedOrderId?: string;
+  redeemedOrderId?: string;
+  lockedDiscountAmount?: number;
+  createdAt: string;
+}
+
+export interface CustomerProfileMembershipAssignment {
+  id: string;
+  planId: string;
+  planVersionId: string;
+  planName: string;
+  source: string;
+  status: string;
+  effectiveFrom: string;
+  effectiveTo?: string;
+  reason?: string;
+  revokedAt?: string;
+  revokeReason?: string;
+  snapshot: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface CustomerProfileCorporateRelation {
+  id: string;
+  corporateCustomerId: string;
+  corporateName: string;
+  personalCustomerId: string;
+  personalCustomerName: string;
+  role: string;
+  department?: string;
+  employeeNo?: string;
+  status: string;
+  effectiveFrom: string;
+  effectiveTo?: string;
+  reason?: string;
+}
+
+/**
+ * 个人/企业客户资料页的聚合读模型。
+ *
+ * 主档、账号和会员关系在租户内共享；订单、地址、积分、券和奖励保留空间字段，
+ * 前端必须按空间分组展示，不能为了“总览”把不同空间的资金/权益相加。
+ */
+export interface CustomerProfileOverview {
+  profile: SharedCustomerProfile;
+  addresses: CustomerProfileAddress[];
+  qualificationRevisions: CustomerQualificationRevision[];
+  statusHistory: CustomerStatusHistoryEntry[];
+  sensitiveAccess?: CustomerSensitiveAccessAuditEntry[];
+  corporateRelations: CustomerProfileCorporateRelation[];
+  membershipPlanAssignments: CustomerProfileMembershipAssignment[];
+  benefits: {
+    accounts: CustomerProfileBenefitAccount[];
+    rewards: CustomerProfileRewardEntry[];
+    coupons: CustomerProfileCouponEntry[];
+  };
+  orders: {
+    items: CustomerProfileOrder[];
+    page: number;
+    pageSize: number;
+    total: number;
+  };
+}
+
+export interface CustomerProfileOrderQuery {
+  page?: number;
+  pageSize?: number;
+}
+
+/** 管理端维护客户配送地址；编辑时省略 phone 表示保留原电话。 */
+export interface SaveCustomerProfileAddressRequest {
+  id?: string;
+  revision?: number;
+  recipient: string;
+  phone?: string;
+  countryCode?: string;
+  province: string;
+  city: string;
+  district?: string;
+  detail: string;
+  postalCode?: string;
+  latitude?: number;
+  longitude?: number;
+  isDefault?: boolean;
 }
 
 /** CUSTOMER-01E：联系人摘要。号码一律只给脱敏值。 */
@@ -4261,7 +4427,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     supportedInventoryModes: [RentalInventoryMode.Serialized, RentalInventoryMode.Quantity, RentalInventoryMode.Bundle],
     defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery", "usage_reading", "camera_compatibility", "camera_kit_handover", "inspection_care"],
     requiredCapabilities: [],
-    terminology: { itemLabel: "器材", itemGroupLabel: "器材型号", assetLabel: "器材资产", fulfillmentLabel: "器材门店", pickupLabel: "取机", returnLabel: "还机", identifierLabel: "资产编号", usageMetricLabel: "快门次数", navigationLabels: { inventoryGroup: "摄影器材", itemGroups: "器材型号", pricingGroups: "器材定价分组", assets: "器材资产与库存", locations: "器材门店" } },
+    terminology: { itemLabel: "器材", itemGroupLabel: "器材型号", assetLabel: "器材资产", fulfillmentLabel: "器材门店", pickupLabel: "取机", returnLabel: "还机", identifierLabel: "资产编号", serialLabel: "序列号", usageMetricLabel: "快门次数", navigationLabels: { inventoryGroup: "摄影器材", itemGroups: "器材型号", pricingGroups: "器材定价分组", assets: "器材资产与库存", locations: "器材门店" } },
     attributeSchema: { brand: "string", model: "string", mount: "string", sensor: "string", serialNo: "string", shutterCount: "number" },
     businessModel: {
       // 摄影器材的基础租金按时间计价。快门次数等读数用于交接、养护和后续
@@ -4333,7 +4499,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     supportedInventoryModes: [RentalInventoryMode.Serialized, RentalInventoryMode.Quantity, RentalInventoryMode.Consumable, RentalInventoryMode.Bundle],
     defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery", "camping_kit_integrity", "camping_cleaning_turnaround"],
     requiredCapabilities: [],
-    terminology: { itemLabel: "装备", itemGroupLabel: "装备型号", assetLabel: "装备资产", fulfillmentLabel: "装备仓", pickupLabel: "领用", returnLabel: "归还", identifierLabel: "装备编号", navigationLabels: { inventoryGroup: "户外装备", itemGroups: "装备型号", pricingGroups: "装备定价分组", assets: "装备资产与库存", locations: "装备仓库" } },
+    terminology: { itemLabel: "装备", itemGroupLabel: "装备型号", assetLabel: "装备资产", fulfillmentLabel: "装备仓", pickupLabel: "领用", returnLabel: "归还", identifierLabel: "装备编号", serialLabel: "批次号", navigationLabels: { inventoryGroup: "户外装备", itemGroups: "装备型号", pricingGroups: "装备定价分组", assets: "装备资产与库存", locations: "装备仓库" } },
     attributeSchema: { brand: "string", model: "string", people: "number", season: "string", material: "string", batchNo: "string" },
     businessModel: {
       // 露营装备按占用日期或夜晚计价；套装是库存/商品形态，不是脱离租期的
@@ -4381,7 +4547,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     supportedInventoryModes: [RentalInventoryMode.Serialized],
     defaultCapabilities: ["serialized_inventory", "pickup", "return", "delivery", "dispatch", "usage_reading", "qualification", "iot", "inspection_care", "vehicle_relocation"],
     requiredCapabilities: [],
-    terminology: { itemLabel: "车辆", itemGroupLabel: "车辆型号", assetLabel: "车辆", fulfillmentLabel: "门店", pickupLabel: "取车", returnLabel: "还车", identifierLabel: "车辆编号", usageMetricLabel: "里程", assetCollectionLabel: "车队", navigationLabels: { inventoryGroup: "车辆型号与车队", itemGroups: "厂牌车型管理", pricingGroups: "车辆定价分组", assets: "车辆管理", locations: "门店管理" } },
+    terminology: { itemLabel: "车辆", itemGroupLabel: "车辆型号", assetLabel: "车辆", fulfillmentLabel: "门店", pickupLabel: "取车", returnLabel: "还车", identifierLabel: "车辆编号", serialLabel: "车架号", usageMetricLabel: "里程", assetCollectionLabel: "车队", navigationLabels: { inventoryGroup: "车辆型号与车队", itemGroups: "厂牌车型管理", pricingGroups: "车辆定价分组", assets: "车辆管理", locations: "门店管理" } },
     attributeSchema: { manufacturer: "string", brand: "string", model: "string", trim: "string", modelYear: "number", seats: "number", transmission: "string", energyType: "string", licensePlate: "string", vin: "string", color: "string", firstRegistrationDate: "date", mileage: "number" },
     businessModel: {
       // 车辆可按时间或里程等使用量计价；车组/车型组合不使用“整包一次价”。
@@ -4446,7 +4612,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     supportedInventoryModes: [RentalInventoryMode.Serialized, RentalInventoryMode.Quantity, RentalInventoryMode.Bundle],
     defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery", "dispatch", "usage_reading", "qualification", "iot", "inspection_care", "construction_transport"],
     requiredCapabilities: [],
-    terminology: { itemLabel: "设备", itemGroupLabel: "设备型号", assetLabel: "设备资产", fulfillmentLabel: "设备仓", pickupLabel: "出库", returnLabel: "入库", identifierLabel: "设备编号", usageMetricLabel: "工时", navigationLabels: { inventoryGroup: "工程设备", itemGroups: "设备型号", pricingGroups: "设备定价分组", assets: "设备台账与库存", locations: "设备仓库" } },
+    terminology: { itemLabel: "设备", itemGroupLabel: "设备型号", assetLabel: "设备资产", fulfillmentLabel: "设备仓", pickupLabel: "出库", returnLabel: "入库", identifierLabel: "设备编号", serialLabel: "序列号", usageMetricLabel: "工时", navigationLabels: { inventoryGroup: "工程设备", itemGroups: "设备型号", pricingGroups: "设备定价分组", assets: "设备台账与库存", locations: "设备仓库" } },
     attributeSchema: { manufacturer: "string", brand: "string", model: "string", power: "string", ratedLoad: "number", factoryNo: "string", hourMeter: "number" },
     businessModel: {
       // 工程设备支持小时、班次、长期和工时等使用量计价；附件、操作员和运输

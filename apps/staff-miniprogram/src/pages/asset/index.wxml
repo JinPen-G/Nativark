@@ -11,7 +11,7 @@
       <view class="row row--between"><view class="title">{{title}}</view><status-tag label="{{status}}" tone="{{tone}}" small="{{true}}"></status-tag></view>
       <view class="card asset-details">
         <view class="kv" bindtap="onCopy"><text class="kv__label">{{assetLabel}}编号</text><text class="kv__value asset-copy">{{assetNo}} ⧉</text></view>
-        <view wx:if="{{serialNo}}" class="kv"><text class="kv__label">序列号</text><text class="kv__value">{{serialNo}}</text></view>
+        <view wx:if="{{serialNo}}" class="kv"><text class="kv__label">{{serialLabel}}</text><text class="kv__value">{{serialNo}}</text></view>
         <view class="kv"><text class="kv__label">所在地点</text><text class="kv__value">{{location}}</text></view>
         <view class="kv" wx:for="{{fields}}" wx:key="label"><text class="kv__label">{{item.label}}</text><text class="kv__value">{{item.value}}</text></view>
       </view>

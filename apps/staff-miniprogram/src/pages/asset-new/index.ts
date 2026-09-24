@@ -12,7 +12,7 @@ interface FieldRow { code: string; label: string; type: string; required: boolea
 
 Page({
   behaviors: [themeBehavior],
-  data: { view: loadingState() as ViewState, id: "", assetLabel: "物品", itemGroupId: "", itemGroupName: "", assetNo: "", serialNo: "", supportsSerialNo: false, requiresSerialNo: false, locationId: "", locationName: "", status: "available", groups: [] as Array<{ id: string; name: string }>, locations: [] as Array<{ id: string; name: string }>, fields: [] as FieldRow[], busy: false, error: "" },
+  data: { view: loadingState() as ViewState, id: "", assetLabel: "物品", serialLabel: "序列号", itemGroupId: "", itemGroupName: "", assetNo: "", serialNo: "", supportsSerialNo: false, requiresSerialNo: false, locationId: "", locationName: "", status: "available", groups: [] as Array<{ id: string; name: string }>, locations: [] as Array<{ id: string; name: string }>, fields: [] as FieldRow[], busy: false, error: "" },
   asset: undefined as RentalAsset | undefined,
   definitions: [] as RentalAttributeDefinition[],
   onLoad(query: Record<string, string>) { this.setData({ id: query.id ?? "" }); },
@@ -29,7 +29,7 @@ Page({
       const fields = this.definitions.map((field) => ({ code: field.code, label: field.label, type: field.type, required: Boolean(field.required), options: field.options ?? [], value: String(asset?.attributes[field.code] ?? ""), checked: Boolean(asset?.attributes[field.code]) }));
       const availableGroups = groups.filter((row) => row.status === "enabled" && row.inventoryMode === "serialized").map((row) => ({ id: row.id, name: row.name }));
       const locations = context.locations.map((row: RentalFulfillmentLocation) => ({ id: row.id, name: row.name }));
-      this.setData({ view: readyState(), assetLabel: terms().assetLabel, itemGroupId: asset?.itemGroupId ?? "", itemGroupName: asset?.itemGroupName ?? "", assetNo: asset?.assetNo ?? "", serialNo: asset?.serialNo ?? "", supportsSerialNo: context.assetFields.some((field) => field.scope === "asset" && field.code === "serialNo"), requiresSerialNo: context.assetFields.some((field) => field.scope === "asset" && field.code === "serialNo" && field.required), locationId: asset?.locationId ?? context.currentLocationId, locationName: asset?.locationName ?? locations.find((row) => row.id === context.currentLocationId)?.name ?? "", status: asset?.status ?? "available", groups: availableGroups, locations, fields });
+      this.setData({ view: readyState(), assetLabel: terms().assetLabel, serialLabel: terms().serialLabel, itemGroupId: asset?.itemGroupId ?? "", itemGroupName: asset?.itemGroupName ?? "", assetNo: asset?.assetNo ?? "", serialNo: asset?.serialNo ?? "", supportsSerialNo: context.assetFields.some((field) => field.scope === "asset" && field.code === "serialNo"), requiresSerialNo: context.assetFields.some((field) => field.scope === "asset" && field.code === "serialNo" && field.required), locationId: asset?.locationId ?? context.currentLocationId, locationName: asset?.locationName ?? locations.find((row) => row.id === context.currentLocationId)?.name ?? "", status: asset?.status ?? "available", groups: availableGroups, locations, fields });
     } catch (error) { this.setData({ view: errorState(error) }); }
   },
   onInput(event: WechatMiniprogram.Input) { const key = String(event.currentTarget.dataset.field); this.setData({ [key]: String(event.detail.value ?? ""), error: "" }); },
@@ -42,7 +42,7 @@ Page({
   async onSave() {
     if (this.data.busy) return;
     if (!this.data.itemGroupId || !this.data.assetNo.trim() || !this.data.locationId) { this.setData({ error: `请填写${this.data.assetLabel}型号、编号和所在地点` }); return; }
-    if (this.data.requiresSerialNo && !this.data.serialNo.trim()) { this.setData({ error: "请填写序列号" }); return; }
+    if (this.data.requiresSerialNo && !this.data.serialNo.trim()) { this.setData({ error: `请填写${this.data.serialLabel}` }); return; }
     const attributes: Record<string, unknown> = {};
     for (const field of this.data.fields) {
       const value = field.type === "boolean" ? field.checked : field.type === "number" && field.value.trim() ? Number(field.value) : field.value.trim();

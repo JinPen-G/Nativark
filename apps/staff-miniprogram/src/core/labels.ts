@@ -181,12 +181,10 @@ export function stockOperationTone(type: string): Tone {
   return STOCK_OPERATION[type]?.tone ?? "neutral";
 }
 
-/** 资产状态变化的来源（状态历史时间线）。 */
+/** 资产状态变化的来源（状态历史时间线）。领取/归还是订单取还事件，动作词随品类。 */
 const ASSET_HISTORY_SOURCE: Record<string, string> = {
   manual: "手工调整",
   allocation: "配货",
-  pickup: "出库交付",
-  return: "归还入库",
   disposition: "归还处置",
   work_order: "养护工单",
   stock_operation: "库存操作",
@@ -194,5 +192,7 @@ const ASSET_HISTORY_SOURCE: Record<string, string> = {
 };
 
 export function assetHistorySourceLabel(source: string): string {
+  if (source === "pickup") return `${terms().pickupLabel}交付`;
+  if (source === "return") return `${terms().returnLabel}入库`;
   return ASSET_HISTORY_SOURCE[source] ?? source;
 }

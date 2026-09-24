@@ -11,7 +11,7 @@
   <block wx:if="{{tab === 'manual'}}">
     <view class="section">
       <view class="input-box manual-input">
-        <input class="grow" placeholder="请输入{{context.terminology.identifierLabel || '编号'}}、SN 或订单号" placeholder-class="search__placeholder" value="{{keyword}}" confirm-type="search" bindinput="onKeyword" bindconfirm="onQuery" />
+        <input class="grow" placeholder="请输入{{context.terminology.identifierLabel || '编号'}}、{{context.terminology.serialLabel || '序列号'}}或订单号" placeholder-class="search__placeholder" value="{{keyword}}" confirm-type="search" bindinput="onKeyword" bindconfirm="onQuery" />
         <view wx:if="{{keyword}}" class="tap-area" bindtap="onClearKeyword"><ui-icon name="close" size="28" color="muted"></ui-icon></view>
         <view class="tap-area manual-input__scan" hover-class="btn-hover" bindtap="onScanFill"><ui-icon name="scan" size="40" color="primary" stroke="1.8"></ui-icon></view>
       </view>

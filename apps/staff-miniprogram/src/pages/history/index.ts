@@ -1,4 +1,4 @@
-import { cachedContext, categoryIcon, loadContext } from "../../core/context";
+import { cachedContext, categoryIcon, loadContext, terms } from "../../core/context";
 import { clearScanHistory, scanHistory, type ScanHistoryEntry } from "../../core/scan";
 import { isSignedIn } from "../../core/session";
 import { themeBehavior } from "../../core/theme-behavior";
@@ -25,15 +25,24 @@ interface HistoryData {
   groups: DayGroup[];
   total: number;
   note: string;
+  pickupLabel: string;
+  returnLabel: string;
 }
 
 const DEFAULT_ZONE = "Asia/Shanghai";
 const WEEKDAYS = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+/** 历史动作角标色：取还动作随品类术语解析，其余保留固定词（含历史遗留的“出库/入库”）。 */
 const ACTION_TONE: Record<string, string> = { 出库: "info", 入库: "success", 绑定订单: "warning", 查看: "neutral" };
+function actionTone(action: string): string {
+  const t = terms();
+  if (action === t.pickupLabel) return "info";
+  if (action === t.returnLabel) return "success";
+  return ACTION_TONE[action] ?? "neutral";
+}
 
 Page({
   behaviors: [themeBehavior],
-  data: { groups: [], total: 0, note: "服务端操作审计在 Web 后台查看；这里是本机最近 50 条扫码与操作记录。" } as HistoryData,
+  data: { groups: [], total: 0, note: "服务端操作审计在 Web 后台查看；这里是本机最近 50 条扫码与操作记录。", pickupLabel: "领取", returnLabel: "归还" } as HistoryData,
 
   onShow() {
     if (!isSignedIn()) {
@@ -65,11 +74,11 @@ Page({
         ...entry,
         timeText: formatBusinessTime(iso, timeZone),
         icon: entry.kind === "order" ? "orders" : entry.kind === "workOrder" ? "tool" : icon,
-        actionTone: ACTION_TONE[entry.action] ?? "neutral"
+        actionTone: actionTone(entry.action)
       });
       total += 1;
     }
-    this.setData({ groups, total });
+    this.setData({ groups, total, pickupLabel: terms().pickupLabel, returnLabel: terms().returnLabel });
   },
 
   onEntry(event: WechatMiniprogram.TouchEvent) {

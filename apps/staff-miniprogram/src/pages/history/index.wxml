@@ -9,7 +9,7 @@
     </view>
   </view>
 
-  <state-view wx:if="{{!total}}" state="empty" title="暂无操作记录" message="扫码并执行出库、入库等操作后，记录会显示在这里" actionText="去扫码" bind:action="onGoScan"></state-view>
+  <state-view wx:if="{{!total}}" state="empty" title="暂无操作记录" message="扫码并执行{{pickupLabel}}、{{returnLabel}}等操作后，记录会显示在这里" actionText="去扫码" bind:action="onGoScan"></state-view>
 
   <block wx:else>
     <view class="section section--tight">

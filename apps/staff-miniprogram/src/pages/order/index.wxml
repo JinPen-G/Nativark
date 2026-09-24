@@ -21,7 +21,7 @@
         <view wx:if="{{customerRegion}}" class="order-customer-detail"><ui-icon name="pin" size="28" color="muted"></ui-icon><text>{{customerRegion}}</text></view>
       </view>
     </view>
-    <view class="section section--tight"><view class="card order-info-card"><view class="subtitle order-card-title"><ui-icon name="calendar" size="30" color="primary"></ui-icon><text class="ml-8">租赁时间</text></view><view class="order-period">{{period}}</view><view class="kv"><text class="kv__label">交付方式</text><text class="kv__value">{{mode}}</text></view><view class="kv"><text class="kv__label">领取地点</text><text class="kv__value">{{pickupLocation}}</text></view><view class="kv"><text class="kv__label">归还地点</text><text class="kv__value">{{returnLocation}}</text></view></view></view>
+    <view class="section section--tight"><view class="card order-info-card"><view class="subtitle order-card-title"><ui-icon name="calendar" size="30" color="primary"></ui-icon><text class="ml-8">租赁时间</text></view><view class="order-period">{{period}}</view><view class="kv"><text class="kv__label">交付方式</text><text class="kv__value">{{mode}}</text></view><view class="kv"><text class="kv__label">{{pickupLabel}}地点</text><text class="kv__value">{{pickupLocation}}</text></view><view class="kv"><text class="kv__label">{{returnLabel}}地点</text><text class="kv__value">{{returnLocation}}</text></view></view></view>
     <view class="section section--tight">
       <view class="card order-info-card">
         <view class="order-card-heading order-card-heading--plain"><view class="subtitle">{{itemLabel}}清单</view><view class="muted small">共 {{totalQuantity}} 件</view></view>
@@ -30,7 +30,7 @@
           <view class="grow">
             <view class="order-line__header"><view class="order-line__name">{{item.name}}</view><text class="order-line__quantity">×{{item.quantity}}</text></view>
             <view class="order-line__resource" wx:for="{{item.resources}}" wx:for-item="resource" wx:key="id">
-              <text class="order-line__serial" wx:if="{{resource.assetNo}}">SN：{{resource.assetNo}}</text>
+              <text class="order-line__serial" wx:if="{{resource.assetNo}}">{{identifierLabel}}：{{resource.assetNo}}</text>
               <text class="order-line__serial" wx:else>已分配资源</text>
               <text class="muted tiny">×{{resource.quantity}} · {{resource.statusLabel}}</text>
             </view>
@@ -140,8 +140,8 @@
     <view wx:if="{{hasActions}}" class="section section--tight order-actions">
       <button wx:if="{{canConfirm}}" class="btn btn--primary btn--block" loading="{{busy}}" disabled="{{busy}}" bindtap="onConfirm">确认订单</button>
       <button wx:if="{{canAllocate}}" class="btn btn--primary btn--block" bindtap="onAllocate">配货与锁定</button>
-      <button wx:if="{{canPickup}}" class="btn btn--primary btn--block" bindtap="onPickup">办理领取</button>
-      <button wx:if="{{canReturn}}" class="btn btn--primary btn--block" bindtap="onReturn">办理归还</button>
+      <button wx:if="{{canPickup}}" class="btn btn--primary btn--block" bindtap="onPickup">办理{{pickupLabel}}</button>
+      <button wx:if="{{canReturn}}" class="btn btn--primary btn--block" bindtap="onReturn">办理{{returnLabel}}</button>
       <button wx:if="{{canCancel}}" class="btn btn--ghost btn--block mt-12" disabled="{{busy}}" bindtap="onCancel">取消订单</button>
     </view>
   </block>

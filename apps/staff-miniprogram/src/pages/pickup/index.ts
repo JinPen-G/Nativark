@@ -16,7 +16,7 @@ import { uploadStaffImage } from "../../api/uploads";
 
 Page({
   behaviors: [themeBehavior],
-  data: { view: loadingState() as ViewState, id: "", orderNo: "", customer: "", phone: "", period: "", location: "", itemLabel: "物品", lines: [] as Array<{ id: string; name: string; quantity: number; imagePath: string }>, templateName: "", fields: [] as InspectionFieldRow[], noTemplate: false, busy: false, uploading: false, signatureWidth: 320, signatureHeight: 150, signatureDrawn: false, signatureFileAssetId: "", error: "" },
+  data: { view: loadingState() as ViewState, id: "", orderNo: "", customer: "", phone: "", period: "", location: "", itemLabel: "物品", pickupLabel: "领取", lines: [] as Array<{ id: string; name: string; quantity: number; imagePath: string }>, templateName: "", fields: [] as InspectionFieldRow[], noTemplate: false, busy: false, uploading: false, signatureWidth: 320, signatureHeight: 150, signatureDrawn: false, signatureFileAssetId: "", error: "" },
   order: undefined as RentalOrder | undefined,
   template: undefined as RentalInspectionTemplate | undefined,
   signatureContext: undefined as WechatMiniprogram.CanvasContext | undefined,
@@ -33,7 +33,7 @@ Page({
       this.order = order;
       this.template = templates.find((row) => row.enabled && row.categoryCode === order.categoryCode);
       const timeZone = context.locations.find((row) => row.id === order.fulfillmentLocationId)?.timezone ?? "Asia/Shanghai";
-      this.setData({ view: readyState(), orderNo: order.orderNo, customer: order.customerName, phone: maskPhone(order.contactPhone), period: formatBusinessRange(order.startAt, order.effectiveEndAt ?? order.endAt, timeZone), location: order.fulfillmentLocationName, itemLabel: terms().itemLabel, lines: order.lines.map((row) => ({ id: row.id, name: row.itemGroupName, quantity: row.quantity - (row.cancelledQuantity ?? 0), imagePath: "" })), templateName: this.template?.name ?? "无需检查模板", fields: inspectionRows(this.template), noTemplate: !this.template, error: "" }, () => this.initSignatureCanvas());
+      this.setData({ view: readyState(), orderNo: order.orderNo, customer: order.customerName, phone: maskPhone(order.contactPhone), period: formatBusinessRange(order.startAt, order.effectiveEndAt ?? order.endAt, timeZone), location: order.fulfillmentLocationName, itemLabel: terms().itemLabel, pickupLabel: terms().pickupLabel, lines: order.lines.map((row) => ({ id: row.id, name: row.itemGroupName, quantity: row.quantity - (row.cancelledQuantity ?? 0), imagePath: "" })), templateName: this.template?.name ?? "无需检查模板", fields: inspectionRows(this.template), noTemplate: !this.template, error: "" }, () => this.initSignatureCanvas());
       order.lines.forEach((line, index) => { const source = itemGroupCover(groups.find((group) => group.id === line.itemGroupId)); if (source) void resolveImage(source).then((path) => { if (path && this.data.id === order.id && this.data.lines[index]?.id === line.id) this.setData({ [`lines[${index}].imagePath`]: path }); }); });
     } catch (error) { this.setData({ view: errorState(error) }); }
   },

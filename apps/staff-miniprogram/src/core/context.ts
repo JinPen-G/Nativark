@@ -14,6 +14,8 @@ import { STORAGE_KEYS, readStorage, writeStorage } from "./storage";
 export interface Terminology extends RentalCategoryTerminology {
   /** 资产集合的行业称呼（车队/库存）。 */
   collectionLabel: string;
+  /** 序列号的行业称呼（序列号/批次号/车架号）；缺省回退“序列号”。 */
+  serialLabel: string;
 }
 
 export interface WorkspaceContext {
@@ -42,6 +44,7 @@ const GENERIC_TERMS: Terminology = {
   pickupLabel: "领取",
   returnLabel: "归还",
   identifierLabel: "编号",
+  serialLabel: "序列号",
   collectionLabel: "库存"
 };
 
@@ -71,7 +74,7 @@ export function terms(): Terminology {
 function toTerminology(definition: RentalCategoryDefinition | undefined): Terminology {
   if (!definition) return GENERIC_TERMS;
   const t = definition.terminology;
-  return { ...t, collectionLabel: t.assetCollectionLabel ?? "库存" };
+  return { ...t, collectionLabel: t.assetCollectionLabel ?? "库存", serialLabel: t.serialLabel ?? "序列号" };
 }
 
 function readLocationChoice(workspaceId: string): string {
