@@ -172,8 +172,8 @@
         position: absolute;
         z-index: 0;
         top: 8px;
-        right: max(8px, calc((100% - 1480px) / 2));
-        left: max(8px, calc((100% - 1480px) / 2));
+        right: clamp(8px, 1.2vw, 20px);
+        left: clamp(8px, 1.2vw, 20px);
         height: 67px;
         pointer-events: none;
         border: 1px solid transparent;
@@ -202,8 +202,9 @@
         height: 67px;
         position: relative;
         z-index: 1;
-        width: min(1480px, calc(100% - 16px));
-        padding: 8px 8px 8px 24px;
+        width: 100%;
+        box-sizing: border-box;
+        padding: 8px clamp(16px, 2vw, 40px);
         display: grid;
         grid-template-columns: 220px 1fr 260px;
         align-items: center;

@@ -86,8 +86,8 @@ h1, h2, h3, p { margin-top: 0; }
   position: absolute;
   z-index: 0;
   top: 8px;
-  right: max(8px, calc((100% - 1480px) / 2));
-  left: max(8px, calc((100% - 1480px) / 2));
+  right: clamp(8px, 1.2vw, 20px);
+  left: clamp(8px, 1.2vw, 20px);
   height: 67px;
   pointer-events: none;
   border: 1px solid transparent;
@@ -105,7 +105,7 @@ h1, h2, h3, p { margin-top: 0; }
   border-color: rgba(0, 0, 0, 0.16);
   box-shadow: none;
 }
-.header-inner { height: 82px; position: relative; z-index: 1; display: flex; align-items: center; gap: 26px; }
+.header-inner { height: 82px; position: relative; z-index: 1; display: flex; align-items: center; gap: 26px; width: 100%; box-sizing: border-box; padding-inline: clamp(16px, 2vw, 40px); }
 .brand-lockup { width: 165px; flex: 0 0 165px; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
 .brand-logo { width: 150px; height: 32px; object-fit: contain; object-position: left center; }
 .brand-slogan { margin-left: 2px; color: var(--ink); font-size: 10px; font-weight: 400; letter-spacing: .1em; }
